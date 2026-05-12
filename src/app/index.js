@@ -1,56 +1,31 @@
 /* =========================================================
    Onion SPA - App Bootstrap
-   Archivo: src/app/index.js
+   Archivo: /src/app/index.js
 
    ONION SUPPORT · APP BOOTSTRAP
-   PRIVATE SPA · ROUTER SAFE · TOKEN ROUTES SAFE · EXTREME 14/10
+   PRIVATE SPA · ROUTER SAFE · TOKEN ROUTES SAFE · 10/10
 
    RESPONSABILIDADES:
-   - Arrancar la SPA de forma ordenada.
-   - Capturar URL inicial antes de Router/History/Auth.
-   - Preservar /activate-account?token=... durante el boot.
-   - Preservar /activate-account/<token> durante el boot.
-   - Preservar /reset-password/confirm?token=... durante el boot.
-   - Preservar /reset-password/confirm/<token> durante el boot.
-   - Preservar hash-router /#/activate-account?token=...
-   - Preservar hash-router /#/reset-password/confirm?token=...
-   - Configurar servicios, store, i18n, UI y router.
-   - Restaurar sesión sin romper rutas públicas técnicas.
+   - Bootstrap lógico de Onion SPA.
+   - Configurar Core, servicios, Store, I18n, UI y Router.
+   - Preservar rutas públicas técnicas con token durante el boot.
+   - Restaurar sesión sin romper activation/reset-password.
    - Render inicial robusto.
    - Evitar doble render si restore ya navegó.
-   - Loader boot controlado.
+   - Controlar loader mediante src/app/loader.js.
    - Emitir app:ready una sola vez.
-   - Evitar tormentas de eventos UI.
-   - Mantener SidebarUI/TopbarUI montados una sola vez.
-   - No rebinder SidebarUI/TopbarUI salvo petición explícita.
-   - Exponer Router/Auth/Store/Http/Toast/I18n/UI al Core.
-   - Resincronizar usuario/avatar después del montaje real de UI.
-   - Autoarrancar la SPA cuando el DOM esté listo.
+   - Montar SidebarUI/TopbarUI una sola vez.
+   - Sin autoarranque: /src/main.js es el único dueño del arranque físico.
+   - Sin CSS inline.
+   - Sin estilos inyectados.
+   - Sin montajes duplicados.
+   - Sin responsabilidades duplicadas con main.js ni loader.js.
 
-   FIX CRÍTICO:
-   - NO hacer bindRouter() antes de renderInitialRoute().
-   - Renderizar rutas públicas con token antes de restoreSession.
-   - No permitir que restore/auth/history limpien token antes de la vista.
-   - Si restoreSession navega post-login, NO ejecutar renderInitialRoute() otra vez.
-   - Detectar navegación real aunque restoreSession no devuelva flag explícito.
-   - bindRouter() ocurre después del primer render/navegación resuelta.
-   - AppCore.syncUserUI() se repite tras montar SidebarUI/TopbarUI.
-   - Core recibe bridges Router/Auth/Store/Http desde fase temprana.
-   - Router configured/bound no se marca true si realmente falla.
-   - UI ready no se marca true si initUISystems() falla.
-
-   FIX BOOT LOADER:
-   - Toma control del loader estático de index.html desde el inicio.
-   - Mantiene loader activo durante restore/render/finalize.
-   - Usa failsafe anti-loader infinito.
-   - Evita flash/parpadeo en refresh.
-   - No muestra shell inestable antes de app:ready.
-   - Usa forceHideLoader en errores/reboot.
-
-   REGLA DE ORO UI:
-   - SidebarUI.init() se ejecuta en initUISystems().
-   - SidebarUI.repair()/rebind()/bindEvents() NO se ejecutan en cada evento.
-   - Eventos de ruta/render/auth/lang/theme hacen sync visual ligero.
+   CONTRATO:
+   - /src/main.js importa App y llama App.boot().
+   - Este archivo exporta App, pero NO llama App.boot() automáticamente.
+   - /src/app/loader.js gobierna el loader real.
+   - /src/app/router.js gobierna configure/bind/render inicial.
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -150,81 +125,76 @@ import {
    CONSTANTS
 ========================================================= */
 
-const APP_BOOTSTRAP_VERSION =
-  "14.1.0";
+const APP_BOOTSTRAP_VERSION = "14.2.0";
 
-const BOOT_SOURCE =
-  "app:index";
+const BOOT_SOURCE = "app:index";
 
 const DEFAULT_SCOPE =
   APP_SCOPES?.boot ||
   APP_SCOPE ||
   "app:boot";
 
-const RUNTIME_KEYS =
-  Object.freeze({
-    initialUrl:
-      APP_RUNTIME_KEYS?.initialUrl ||
-      "__ONION_INITIAL_URL__",
+const RUNTIME_KEYS = Object.freeze({
+  initialUrl:
+    APP_RUNTIME_KEYS?.initialUrl ||
+    "__ONION_INITIAL_URL__",
 
-    bootContext:
-      APP_RUNTIME_KEYS?.bootContext ||
-      "__ONION_BOOT_CONTEXT__",
+  bootContext:
+    APP_RUNTIME_KEYS?.bootContext ||
+    "__ONION_BOOT_CONTEXT__",
 
-    appApi:
-      APP_RUNTIME_KEYS?.appApi ||
-      "__ONION_APP__",
-  });
+  appApi:
+    APP_RUNTIME_KEYS?.appApi ||
+    "__ONION_APP__",
+});
 
-const BOOT_EVENTS =
-  Object.freeze({
-    start:
-      APP_EVENTS?.bootStart ||
-      "app:boot:start",
+const BOOT_EVENTS = Object.freeze({
+  start:
+    APP_EVENTS?.bootStart ||
+    "app:boot:start",
 
-    state:
-      APP_EVENTS?.bootState ||
-      "app:boot:state",
+  state:
+    APP_EVENTS?.bootState ||
+    "app:boot:state",
 
-    ready:
-      APP_EVENTS?.bootReady ||
-      "app:boot:ready",
+  ready:
+    APP_EVENTS?.bootReady ||
+    "app:boot:ready",
 
-    error:
-      APP_EVENTS?.bootError ||
-      "app:boot:error",
+  error:
+    APP_EVENTS?.bootError ||
+    "app:boot:error",
 
-    loaderShow:
-      APP_EVENTS?.bootLoaderShow ||
-      "app:boot:loader:show",
+  loaderShow:
+    APP_EVENTS?.bootLoaderShow ||
+    "app:boot:loader:show",
 
-    loaderHide:
-      APP_EVENTS?.bootLoaderHide ||
-      "app:boot:loader:hide",
+  loaderHide:
+    APP_EVENTS?.bootLoaderHide ||
+    "app:boot:loader:hide",
 
-    loaderForceHide:
-      APP_EVENTS?.bootLoaderForceHide ||
-      "app:boot:loader:force-hide",
-  });
+  loaderForceHide:
+    APP_EVENTS?.bootLoaderForceHide ||
+    "app:boot:loader:force-hide",
+});
 
-const BOOT_PHASE_VALUE =
-  Object.freeze({
-    idle:
-      BOOT_PHASES?.IDLE ||
-      "idle",
+const BOOT_PHASE_VALUE = Object.freeze({
+  idle:
+    BOOT_PHASES?.IDLE ||
+    "idle",
 
-    booting:
-      BOOT_PHASES?.BOOTING ||
-      "booting",
+  booting:
+    BOOT_PHASES?.BOOTING ||
+    "booting",
 
-    ready:
-      BOOT_PHASES?.READY ||
-      "ready",
+  ready:
+    BOOT_PHASES?.READY ||
+    "ready",
 
-    error:
-      BOOT_PHASES?.ERROR ||
-      "error",
-  });
+  error:
+    BOOT_PHASES?.ERROR ||
+    "error",
+});
 
 const MIN_BOOT_LOADER_MS =
   Math.max(
@@ -253,131 +223,115 @@ const UI_SYNC_THROTTLE_MS =
     ) || 100
   );
 
-const UI_REASON_MAX_LENGTH =
-  180;
+const UI_REASON_MAX_LENGTH = 180;
 
-const FALLBACK_PROTECTED_PUBLIC_TOKEN_ROUTES =
-  Object.freeze([
-    Object.freeze({
-      key:
-        "activation",
+const FALLBACK_PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
+  Object.freeze({
+    key: "activation",
+    path: "/activate-account",
 
-      path:
-        "/activate-account",
+    windowKeys: Object.freeze([
+      "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+    ]),
 
-      windowKeys:
-        Object.freeze([
-          "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-        ]),
+    stateUrlKey:
+      APP_STATE_KEYS?.bootActivationInitialUrl ||
+      "bootActivationInitialUrl",
 
-      stateUrlKey:
-        APP_STATE_KEYS?.bootActivationInitialUrl ||
-        "bootActivationInitialUrl",
+    statePathKey:
+      APP_STATE_KEYS?.bootActivationInitialPath ||
+      "bootActivationInitialPath",
 
-      statePathKey:
-        APP_STATE_KEYS?.bootActivationInitialPath ||
-        "bootActivationInitialPath",
+    statePublicPathKey:
+      APP_STATE_KEYS?.bootActivationInitialPublicPath ||
+      "bootActivationInitialPublicPath",
 
-      statePublicPathKey:
-        APP_STATE_KEYS?.bootActivationInitialPublicPath ||
-        "bootActivationInitialPublicPath",
+    stateIsRouteKey:
+      APP_STATE_KEYS?.bootIsActivation ||
+      "bootIsActivation",
 
-      stateIsRouteKey:
-        APP_STATE_KEYS?.bootIsActivation ||
-        "bootIsActivation",
+    stateHasTokenKey:
+      APP_STATE_KEYS?.bootHasActivationToken ||
+      "bootHasActivationToken",
 
-      stateHasTokenKey:
-        APP_STATE_KEYS?.bootHasActivationToken ||
-        "bootHasActivationToken",
+    scrubbedStateKeys: Object.freeze([
+      "scrubbedActivationToken",
+      "activationTokenScrubbed",
+      "scrubbedActivateAccountToken",
+    ]),
 
-      scrubbedStateKeys:
-        Object.freeze([
-          "scrubbedActivationToken",
-          "activationTokenScrubbed",
-          "scrubbedActivateAccountToken",
-        ]),
+    scrubbedHistoryKeys: Object.freeze([
+      "scrubbedActivationToken",
+      "activationTokenScrubbed",
+      "scrubbedActivateAccountToken",
+      "scrubbedPublicTokenRoute",
+      "scrubbedTokenRoute",
+    ]),
 
-      scrubbedHistoryKeys:
-        Object.freeze([
-          "scrubbedActivationToken",
-          "activationTokenScrubbed",
-          "scrubbedActivateAccountToken",
-          "scrubbedPublicTokenRoute",
-          "scrubbedTokenRoute",
-        ]),
+    tokenParamNames: Object.freeze([
+      "token",
+      "activationToken",
+      "activateToken",
+      "code",
+      "t",
+    ]),
+  }),
 
-      tokenParamNames:
-        Object.freeze([
-          "token",
-          "activationToken",
-          "activateToken",
-          "code",
-          "t",
-        ]),
-    }),
+  Object.freeze({
+    key: "resetConfirm",
+    path: "/reset-password/confirm",
 
-    Object.freeze({
-      key:
-        "resetConfirm",
+    windowKeys: Object.freeze([
+      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+      "__ONION_RESET_CONFIRM_INITIAL_URL__",
+    ]),
 
-      path:
-        "/reset-password/confirm",
+    stateUrlKey:
+      APP_STATE_KEYS?.bootResetConfirmInitialUrl ||
+      "bootResetConfirmInitialUrl",
 
-      windowKeys:
-        Object.freeze([
-          "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-          "__ONION_RESET_CONFIRM_INITIAL_URL__",
-        ]),
+    statePathKey:
+      APP_STATE_KEYS?.bootResetConfirmInitialPath ||
+      "bootResetConfirmInitialPath",
 
-      stateUrlKey:
-        APP_STATE_KEYS?.bootResetConfirmInitialUrl ||
-        "bootResetConfirmInitialUrl",
+    statePublicPathKey:
+      APP_STATE_KEYS?.bootResetConfirmInitialPublicPath ||
+      "bootResetConfirmInitialPublicPath",
 
-      statePathKey:
-        APP_STATE_KEYS?.bootResetConfirmInitialPath ||
-        "bootResetConfirmInitialPath",
+    stateIsRouteKey:
+      APP_STATE_KEYS?.bootIsResetConfirm ||
+      "bootIsResetConfirm",
 
-      statePublicPathKey:
-        APP_STATE_KEYS?.bootResetConfirmInitialPublicPath ||
-        "bootResetConfirmInitialPublicPath",
+    stateHasTokenKey:
+      APP_STATE_KEYS?.bootHasResetToken ||
+      "bootHasResetToken",
 
-      stateIsRouteKey:
-        APP_STATE_KEYS?.bootIsResetConfirm ||
-        "bootIsResetConfirm",
+    scrubbedStateKeys: Object.freeze([
+      "scrubbedResetToken",
+      "resetTokenScrubbed",
+      "scrubbedResetConfirmToken",
+      "scrubbedPasswordResetToken",
+    ]),
 
-      stateHasTokenKey:
-        APP_STATE_KEYS?.bootHasResetToken ||
-        "bootHasResetToken",
+    scrubbedHistoryKeys: Object.freeze([
+      "scrubbedResetToken",
+      "resetTokenScrubbed",
+      "scrubbedResetConfirmToken",
+      "scrubbedPasswordResetToken",
+      "scrubbedPublicTokenRoute",
+      "scrubbedTokenRoute",
+    ]),
 
-      scrubbedStateKeys:
-        Object.freeze([
-          "scrubbedResetToken",
-          "resetTokenScrubbed",
-          "scrubbedResetConfirmToken",
-          "scrubbedPasswordResetToken",
-        ]),
-
-      scrubbedHistoryKeys:
-        Object.freeze([
-          "scrubbedResetToken",
-          "resetTokenScrubbed",
-          "scrubbedResetConfirmToken",
-          "scrubbedPasswordResetToken",
-          "scrubbedPublicTokenRoute",
-          "scrubbedTokenRoute",
-        ]),
-
-      tokenParamNames:
-        Object.freeze([
-          "token",
-          "resetToken",
-          "passwordResetToken",
-          "confirmToken",
-          "code",
-          "t",
-        ]),
-    }),
-  ]);
+    tokenParamNames: Object.freeze([
+      "token",
+      "resetToken",
+      "passwordResetToken",
+      "confirmToken",
+      "code",
+      "t",
+    ]),
+  }),
+]);
 
 const PUBLIC_TOKEN_ROUTES =
   Array.isArray(PROTECTED_PUBLIC_TOKEN_ROUTES) &&
@@ -454,19 +408,9 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
+  const text = String(value).trim();
 
   return text || fallback;
-}
-
-function safeNumber(value, fallback = 0) {
-  const number =
-    Number(value);
-
-  return Number.isFinite(number)
-    ? number
-    : fallback;
 }
 
 function nowEpochMs() {
@@ -550,8 +494,7 @@ function safeCreateCustomEvent(name = "", detail = {}) {
     return null;
   }
 
-  const eventName =
-    safeText(name, "");
+  const eventName = safeText(name, "");
 
   if (!eventName) {
     return null;
@@ -559,18 +502,14 @@ function safeCreateCustomEvent(name = "", detail = {}) {
 
   try {
     if (typeof CustomEvent === "function") {
-      return new CustomEvent(
-        eventName,
-        {
-          detail,
-        }
-      );
+      return new CustomEvent(eventName, {
+        detail,
+      });
     }
   } catch {}
 
   try {
-    const event =
-      document.createEvent("CustomEvent");
+    const event = document.createEvent("CustomEvent");
 
     event.initCustomEvent(
       eventName,
@@ -590,31 +529,11 @@ function safeCreateCustomEvent(name = "", detail = {}) {
 ========================================================= */
 
 function isHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "");
 
   return (
     raw.startsWith("#/") ||
     raw.startsWith("#!")
-  );
-}
-
-function normalizeHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return DEFAULT_ROUTE || "/";
-  }
-
-  if (raw.startsWith("#!")) {
-    return normalizeLocalFullPath(
-      raw.replace(/^#!\/?/, "/")
-    );
-  }
-
-  return normalizeLocalFullPath(
-    raw.replace(/^#\/?/, "/")
   );
 }
 
@@ -646,8 +565,7 @@ function normalizePathnameOnly(pathname = DEFAULT_ROUTE || "/") {
 }
 
 function normalizeSearch(search = "") {
-  const value =
-    safeText(search, "");
+  const value = safeText(search, "");
 
   if (!value) {
     return "";
@@ -659,8 +577,7 @@ function normalizeSearch(search = "") {
 }
 
 function normalizeHash(hash = "") {
-  const value =
-    safeText(hash, "");
+  const value = safeText(hash, "");
 
   if (!value) {
     return "";
@@ -672,8 +589,7 @@ function normalizeHash(hash = "") {
 }
 
 function splitFullPath(value = DEFAULT_ROUTE || "/") {
-  const raw =
-    safeText(value, DEFAULT_ROUTE || "/");
+  const raw = safeText(value, DEFAULT_ROUTE || "/");
 
   if (isHashRouterPath(raw)) {
     return splitFullPath(
@@ -681,35 +597,24 @@ function splitFullPath(value = DEFAULT_ROUTE || "/") {
     );
   }
 
-  let pathname =
-    raw;
+  let pathname = raw;
+  let search = "";
+  let hash = "";
 
-  let search =
-    "";
-
-  let hash =
-    "";
-
-  const hashIndex =
-    pathname.indexOf("#");
+  const hashIndex = pathname.indexOf("#");
 
   if (hashIndex >= 0) {
-    hash =
-      pathname.slice(hashIndex);
-
+    hash = pathname.slice(hashIndex);
     pathname =
       pathname.slice(0, hashIndex) ||
       DEFAULT_ROUTE ||
       "/";
   }
 
-  const searchIndex =
-    pathname.indexOf("?");
+  const searchIndex = pathname.indexOf("?");
 
   if (searchIndex >= 0) {
-    search =
-      pathname.slice(searchIndex);
-
+    search = pathname.slice(searchIndex);
     pathname =
       pathname.slice(0, searchIndex) ||
       DEFAULT_ROUTE ||
@@ -717,20 +622,32 @@ function splitFullPath(value = DEFAULT_ROUTE || "/") {
   }
 
   return {
-    pathname:
-      normalizePathnameOnly(pathname),
-
-    search:
-      normalizeSearch(search),
-
-    hash:
-      normalizeHash(hash),
+    pathname: normalizePathnameOnly(pathname),
+    search: normalizeSearch(search),
+    hash: normalizeHash(hash),
   };
 }
 
+function normalizeHashRouterPath(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) {
+    return DEFAULT_ROUTE || "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return normalizeLocalFullPath(
+      raw.replace(/^#!\/?/, "/")
+    );
+  }
+
+  return normalizeLocalFullPath(
+    raw.replace(/^#\/?/, "/")
+  );
+}
+
 function normalizeLocalFullPath(path = DEFAULT_ROUTE || "/") {
-  const raw =
-    safeText(path, DEFAULT_ROUTE || "/");
+  const raw = safeText(path, DEFAULT_ROUTE || "/");
 
   if (!raw) {
     return DEFAULT_ROUTE || "/";
@@ -744,8 +661,7 @@ function normalizeLocalFullPath(path = DEFAULT_ROUTE || "/") {
 
   try {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed =
-        new URL(raw, getBaseOrigin());
+      const parsed = new URL(raw, getBaseOrigin());
 
       if (
         parsed.hash &&
@@ -766,8 +682,7 @@ function normalizeLocalFullPath(path = DEFAULT_ROUTE || "/") {
     pathname,
     search,
     hash,
-  } =
-    splitFullPath(raw);
+  } = splitFullPath(raw);
 
   return `${pathname}${search}${hash}`;
 }
@@ -832,8 +747,7 @@ function getBrowserPublicPath() {
 }
 
 function pathFromUrlLike(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "");
 
   if (!raw) {
     return "";
@@ -846,8 +760,7 @@ function pathFromUrlLike(value = "") {
   }
 
   try {
-    const parsed =
-      new URL(raw, getBaseOrigin());
+    const parsed = new URL(raw, getBaseOrigin());
 
     if (
       parsed.hash &&
@@ -876,8 +789,7 @@ function pathFromUrlLike(value = "") {
 ========================================================= */
 
 function redactTokenInText(value = "") {
-  let output =
-    safeText(value, "");
+  let output = safeText(value, "");
 
   if (!output) {
     return "";
@@ -891,11 +803,10 @@ function redactTokenInText(value = "") {
           "\\$&"
         );
 
-      output =
-        output.replace(
-          new RegExp(`([?&#]${escapedName}=)([^&#\\s]+)`, "gi"),
-          "$1***"
-        );
+      output = output.replace(
+        new RegExp(`([?&#]${escapedName}=)([^&#\\s]+)`, "gi"),
+        "$1***"
+      );
     } catch {}
   }
 
@@ -905,29 +816,26 @@ function redactTokenInText(value = "") {
         safeText(config.path, "").replace(/\//g, "\\/");
 
       if (escapedPath) {
-        output =
-          output.replace(
-            new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
-            "$1/***"
-          );
+        output = output.replace(
+          new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
+          "$1/***"
+        );
       }
     } catch {}
   }
 
   try {
-    output =
-      output.replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      );
+    output = output.replace(
+      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+      "$1***"
+    );
   } catch {}
 
   try {
-    output =
-      output.replace(
-        /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
-        "$1$2***"
-      );
+    output = output.replace(
+      /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
+      "$1$2***"
+    );
   } catch {}
 
   return output;
@@ -979,14 +887,13 @@ function sanitizePayload(value, depth = 0) {
 
   if (isDomNodeLike(value)) {
     return {
-      node:
-        safeText(value.nodeName, "Node"),
-
-      id:
-        safeText(value.id, ""),
-
-      className:
-        safeText(value.className?.baseVal || value.className, ""),
+      node: safeText(value.nodeName, "Node"),
+      id: safeText(value.id, ""),
+      className: safeText(
+        value.className?.baseVal ||
+          value.className,
+        ""
+      ),
     };
   }
 
@@ -1000,22 +907,13 @@ function sanitizePayload(value, depth = 0) {
 
   if (value instanceof Error) {
     return {
-      name:
-        safeText(value.name, "Error"),
-
-      message:
-        redactTokenInText(value.message || ""),
-
-      code:
-        value.code || null,
-
-      status:
-        value.status || value.statusCode || null,
-
-      stack:
-        value.stack
-          ? redactTokenInText(value.stack)
-          : "",
+      name: safeText(value.name, "Error"),
+      message: redactTokenInText(value.message || ""),
+      code: value.code || null,
+      status: value.status || value.statusCode || null,
+      stack: value.stack
+        ? redactTokenInText(value.stack)
+        : "",
     };
   }
 
@@ -1031,8 +929,7 @@ function sanitizePayload(value, depth = 0) {
         continue;
       }
 
-      output[key] =
-        sanitizePayload(item, depth + 1);
+      output[key] = sanitizePayload(item, depth + 1);
     }
 
     return output;
@@ -1126,8 +1023,7 @@ function isTokenRouteScrubbed(config = null) {
     return false;
   }
 
-  const historyState =
-    getHistoryState();
+  const historyState = getHistoryState();
 
   const keys = [
     ...safeArray(config.scrubbedStateKeys),
@@ -1141,8 +1037,7 @@ function isTokenRouteScrubbed(config = null) {
           key === "scrubbedPublicTokenRoute" ||
           key === "scrubbedTokenRoute"
         ) {
-          const value =
-            safeText(historyState[key], "");
+          const value = safeText(historyState[key], "");
 
           if (
             !value ||
@@ -1167,11 +1062,8 @@ function matchesRouteConfig(config, pathOrUrl = "") {
     return false;
   }
 
-  const path =
-    pathFromUrlLike(pathOrUrl);
-
-  const clean =
-    stripSearchAndHash(path);
+  const path = pathFromUrlLike(pathOrUrl);
+  const clean = stripSearchAndHash(path);
 
   return (
     clean === config.path ||
@@ -1192,11 +1084,8 @@ function getPathToken(config = null, value = "") {
     return "";
   }
 
-  const path =
-    pathFromUrlLike(value);
-
-  const clean =
-    stripSearchAndHash(path);
+  const path = pathFromUrlLike(value);
+  const clean = stripSearchAndHash(path);
 
   if (!clean.startsWith(`${config.path}/`)) {
     return "";
@@ -1219,8 +1108,7 @@ function getPathToken(config = null, value = "") {
 
 function hasTokenInSearch(search = "", names = []) {
   try {
-    const params =
-      new URLSearchParams(search || "");
+    const params = new URLSearchParams(search || "");
 
     return safeArray(names).some((name) =>
       Boolean(
@@ -1240,8 +1128,7 @@ function hasRouteToken(config = null, value = "") {
     return false;
   }
 
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "");
 
   if (!raw) {
     return false;
@@ -1252,8 +1139,7 @@ function hasRouteToken(config = null, value = "") {
   }
 
   try {
-    const parsed =
-      new URL(raw, getBaseOrigin());
+    const parsed = new URL(raw, getBaseOrigin());
 
     if (
       hasTokenInSearch(
@@ -1275,8 +1161,7 @@ function hasRouteToken(config = null, value = "") {
         return true;
       }
 
-      const hashParts =
-        splitFullPath(hashPath);
+      const hashParts = splitFullPath(hashPath);
 
       if (
         hasTokenInSearch(
@@ -1306,15 +1191,13 @@ function hasRouteToken(config = null, value = "") {
 
     return false;
   } catch {
-    const normalized =
-      normalizeLocalFullPath(raw);
+    const normalized = normalizeLocalFullPath(raw);
 
     if (getPathToken(config, normalized)) {
       return true;
     }
 
-    const parts =
-      splitFullPath(normalized);
+    const parts = splitFullPath(normalized);
 
     if (
       hasTokenInSearch(
@@ -1364,8 +1247,7 @@ function setStoredInitialUrl(config = null, value = "") {
     return false;
   }
 
-  let wrote =
-    false;
+  let wrote = false;
 
   for (const key of safeArray(config.windowKeys)) {
     if (
@@ -1394,8 +1276,7 @@ function resolveProtectedInitialContext(href = "") {
     .filter(Boolean);
 
   for (const candidate of candidates) {
-    const config =
-      getRouteConfigFromValue(candidate);
+    const config = getRouteConfigFromValue(candidate);
 
     if (!config) {
       continue;
@@ -1409,120 +1290,60 @@ function resolveProtectedInitialContext(href = "") {
       continue;
     }
 
-    const path =
-      pathFromUrlLike(candidate);
+    const path = pathFromUrlLike(candidate);
 
     return {
       config,
-      key:
-        config.key || "",
-
-      url:
-        candidate,
-
+      key: config.key || "",
+      url: candidate,
       path,
-      publicPath:
-        path,
-
-      canonicalPath:
-        stripSearchAndHash(path),
-
-      hasToken:
-        true,
-
-      tokenInPath:
-        Boolean(getPathToken(config, candidate)),
+      publicPath: path,
+      canonicalPath: stripSearchAndHash(path),
+      hasToken: true,
+      tokenInPath: Boolean(getPathToken(config, candidate)),
     };
   }
 
   return {
-    config:
-      null,
-
-    key:
-      "",
-
-    url:
-      "",
-
-    path:
-      "",
-
-    publicPath:
-      "",
-
-    canonicalPath:
-      "",
-
-    hasToken:
-      false,
-
-    tokenInPath:
-      false,
+    config: null,
+    key: "",
+    url: "",
+    path: "",
+    publicPath: "",
+    canonicalPath: "",
+    hasToken: false,
+    tokenInPath: false,
   };
 }
 
 function captureInitialUrl() {
   if (!isBrowser()) {
     return {
-      initialUrl:
-        "",
+      initialUrl: "",
+      browserPublicPath: DEFAULT_ROUTE || "/",
 
-      browserPublicPath:
-        DEFAULT_ROUTE || "/",
+      protectedInitialUrl: "",
+      protectedInitialPath: "",
+      protectedInitialPublicPath: "",
+      isPublicTokenRoute: false,
+      hasPublicToken: false,
+      protectedRouteKey: "",
 
-      protectedInitialUrl:
-        "",
+      activationInitialUrl: "",
+      activationInitialPath: "",
+      activationInitialPublicPath: "",
+      isActivation: false,
+      hasActivationToken: false,
 
-      protectedInitialPath:
-        "",
-
-      protectedInitialPublicPath:
-        "",
-
-      isPublicTokenRoute:
-        false,
-
-      hasPublicToken:
-        false,
-
-      protectedRouteKey:
-        "",
-
-      activationInitialUrl:
-        "",
-
-      activationInitialPath:
-        "",
-
-      activationInitialPublicPath:
-        "",
-
-      isActivation:
-        false,
-
-      hasActivationToken:
-        false,
-
-      resetConfirmInitialUrl:
-        "",
-
-      resetConfirmInitialPath:
-        "",
-
-      resetConfirmInitialPublicPath:
-        "",
-
-      isResetConfirm:
-        false,
-
-      hasResetToken:
-        false,
+      resetConfirmInitialUrl: "",
+      resetConfirmInitialPath: "",
+      resetConfirmInitialPublicPath: "",
+      isResetConfirm: false,
+      hasResetToken: false,
     };
   }
 
-  const href =
-    getBrowserHref();
+  const href = getBrowserHref();
 
   if (href) {
     setInitialUrl(href);
@@ -1541,14 +1362,9 @@ function captureInitialUrl() {
     }
   }
 
-  const initialUrl =
-    safeText(getInitialUrl(), href);
-
-  const browserPublicPath =
-    getBrowserPublicPath();
-
-  const protectedContext =
-    resolveProtectedInitialContext(href);
+  const initialUrl = safeText(getInitialUrl(), href);
+  const browserPublicPath = getBrowserPublicPath();
+  const protectedContext = resolveProtectedInitialContext(href);
 
   const activationConfig =
     PUBLIC_TOKEN_ROUTES.find((config) =>
@@ -1693,9 +1509,42 @@ function captureInitialUrl() {
   return context;
 }
 
+function primeInitialUrlFromMainContext(mainContext = {}) {
+  const ctx = safeObject(mainContext);
+
+  const candidate =
+    safeText(
+      ctx.initialUrl ||
+        ctx.href ||
+        ctx.url ||
+        "",
+      ""
+    );
+
+  if (!candidate) {
+    return false;
+  }
+
+  setInitialUrl(candidate);
+
+  for (const config of PUBLIC_TOKEN_ROUTES) {
+    try {
+      if (
+        !isTokenRouteScrubbed(config) &&
+        matchesRouteConfig(config, candidate) &&
+        hasRouteToken(config, candidate) &&
+        getStoredInitialUrls(config).length === 0
+      ) {
+        setStoredInitialUrl(config, candidate);
+      }
+    } catch {}
+  }
+
+  return true;
+}
+
 function sanitizeBootContextForLog(context = {}) {
-  const ctx =
-    safeObject(context);
+  const ctx = safeObject(context);
 
   return {
     initialUrl:
@@ -1754,8 +1603,7 @@ function sanitizeBootContextForLog(context = {}) {
   };
 }
 
-let BOOT_URL_CONTEXT =
-  captureInitialUrl();
+let BOOT_URL_CONTEXT = captureInitialUrl();
 
 /* =========================================================
    APP SINGLETON
@@ -1765,146 +1613,80 @@ export const App = (() => {
   "use strict";
 
   const state = {
-    version:
-      APP_BOOTSTRAP_VERSION,
+    version: APP_BOOTSTRAP_VERSION,
 
-    booted:
-      false,
+    booted: false,
+    booting: false,
 
-    booting:
-      false,
+    servicesReady: false,
+    storeReady: false,
+    routerConfigured: false,
+    routerBound: false,
 
-    servicesReady:
-      false,
+    uiReady: false,
+    uiMounted: false,
 
-    storeReady:
-      false,
+    readyEmitted: false,
+    handlersBound: false,
+    appEventsBound: false,
+    uiRepairEventsBound: false,
 
-    routerConfigured:
-      false,
+    bootPromise: null,
+    restorePromise: null,
 
-    routerBound:
-      false,
+    bootCycleId: 0,
+    finalizedCycleId: 0,
 
-    uiReady:
-      false,
+    loaderVisible: false,
+    loaderShownAt: 0,
 
-    uiMounted:
-      false,
+    bootFailsafeTimer: null,
+    bootFailsafeStartedAt: 0,
+    bootFailsafeTimeoutMs: 0,
+    bootFailsafeArmId: 0,
 
-    readyEmitted:
-      false,
+    bootNavigationHandled: false,
+    initialRouteRendered: false,
 
-    handlersBound:
-      false,
+    lastBootStartedAt: 0,
+    lastBootReadyAt: 0,
+    lastBootErrorAt: 0,
 
-    appEventsBound:
-      false,
-
-    uiRepairEventsBound:
-      false,
-
-    bootPromise:
-      null,
-
-    restorePromise:
-      null,
-
-    bootCycleId:
-      0,
-
-    finalizedCycleId:
-      0,
-
-    loaderVisible:
-      false,
-
-    loaderShownAt:
-      0,
-
-    bootFailsafeTimer:
-      null,
-
-    bootFailsafeStartedAt:
-      0,
-
-    bootFailsafeTimeoutMs:
-      0,
-
-    bootFailsafeArmId:
-      0,
-
-    bootNavigationHandled:
-      false,
-
-    initialRouteRendered:
-      false,
-
-    lastBootStartedAt:
-      0,
-
-    lastBootReadyAt:
-      0,
-
-    lastBootErrorAt:
-      0,
+    lastBootOptions: null,
   };
 
-  let uiRepairRunning =
-    false;
+  let uiRepairRunning = false;
+  let uiRepairScheduled = false;
+  let uiRepairLastAt = 0;
+  let uiRepairLastKey = "";
 
-  let uiRepairScheduled =
-    false;
+  let uiSyncRunning = false;
+  let uiSyncLastAt = 0;
+  let uiSyncLastReason = "";
 
-  let uiRepairLastAt =
-    0;
-
-  let uiRepairLastKey =
-    "";
-
-  let uiSyncRunning =
-    false;
-
-  let uiSyncLastAt =
-    0;
-
-  let uiSyncLastReason =
-    "";
-
-  const boundWindowEvents =
-    [];
+  const boundWindowEvents = [];
 
   /* =======================================================
      SAFE LOG / EMIT
   ======================================================= */
 
   function safeEmit(name, payload = {}, options = {}) {
-    const eventName =
-      safeText(name, "");
+    const eventName = safeText(name, "");
 
     if (!eventName) {
       return false;
     }
 
-    const cleanPayload =
-      sanitizePayload({
-        source:
-          BOOT_SOURCE,
+    const cleanPayload = sanitizePayload({
+      source: BOOT_SOURCE,
+      version: APP_BOOTSTRAP_VERSION,
+      ...safeObject(payload),
+    });
 
-        version:
-          APP_BOOTSTRAP_VERSION,
+    const opts = safeObject(options);
 
-        ...safeObject(payload),
-      });
-
-    const opts =
-      safeObject(options);
-
-    let busAvailable =
-      false;
-
-    let busEmitted =
-      false;
+    let busAvailable = false;
+    let busEmitted = false;
 
     try {
       if (isFunction(AppCore?.events?.emit)) {
@@ -1924,11 +1706,10 @@ export const App = (() => {
       (!busAvailable && isBrowser())
     ) {
       try {
-        const event =
-          safeCreateCustomEvent(
-            eventName,
-            cleanPayload
-          );
+        const event = safeCreateCustomEvent(
+          eventName,
+          cleanPayload
+        );
 
         if (event) {
           window.dispatchEvent(event);
@@ -1958,8 +1739,7 @@ export const App = (() => {
     const safeArgs =
       args.map((item) => sanitizePayload(item));
 
-    let coreLogged =
-      false;
+    let coreLogged = false;
 
     try {
       if (isFunction(AppCore?.utils?.warn)) {
@@ -1983,8 +1763,7 @@ export const App = (() => {
     const safeArgs =
       args.map((item) => sanitizePayload(item));
 
-    let coreLogged =
-      false;
+    let coreLogged = false;
 
     try {
       if (isFunction(AppCore?.utils?.error)) {
@@ -2085,11 +1864,8 @@ export const App = (() => {
   }
 
   function getCurrentRouteSnapshot() {
-    let publicPath =
-      DEFAULT_ROUTE || "/";
-
-    let route =
-      DEFAULT_ROUTE || "/";
+    let publicPath = DEFAULT_ROUTE || "/";
+    let route = DEFAULT_ROUTE || "/";
 
     try {
       publicPath =
@@ -2140,8 +1916,7 @@ export const App = (() => {
       AppCore?.state?.authUser ||
       null;
 
-    const routeSnapshot =
-      getCurrentRouteSnapshot();
+    const routeSnapshot = getCurrentRouteSnapshot();
 
     return {
       user,
@@ -2198,8 +1973,7 @@ export const App = (() => {
   ======================================================= */
 
   function registerCoreModule(name = "", value = null, aliases = []) {
-    const cleanName =
-      safeText(name, "");
+    const cleanName = safeText(name, "");
 
     if (
       !cleanName ||
@@ -2219,8 +1993,7 @@ export const App = (() => {
       );
 
     for (const moduleName of names) {
-      let registered =
-        false;
+      let registered = false;
 
       try {
         if (isFunction(AppCore?.modules?.register)) {
@@ -2229,19 +2002,13 @@ export const App = (() => {
               moduleName,
               value,
               {
-                overwrite:
-                  true,
-
-                replace:
-                  true,
-
-                source:
-                  BOOT_SOURCE,
+                overwrite: true,
+                replace: true,
+                source: BOOT_SOURCE,
               }
             );
 
-          registered =
-            result !== false;
+          registered = result !== false;
         }
       } catch {
         registered = false;
@@ -2259,8 +2026,7 @@ export const App = (() => {
               value
             );
 
-          registered =
-            result !== false;
+          registered = result !== false;
         }
       } catch {
         registered = false;
@@ -2337,17 +2103,10 @@ export const App = (() => {
     try {
       if (isFunction(AppCore?.setState)) {
         AppCore.setState({
-          routerReady:
-            Boolean(Router),
-
-          authReady:
-            Boolean(Auth),
-
-          storeReady:
-            Boolean(Store),
-
-          httpReady:
-            Boolean(Http),
+          routerReady: Boolean(Router),
+          authReady: Boolean(Auth),
+          storeReady: Boolean(Store),
+          httpReady: Boolean(Http),
         });
       }
     } catch {}
@@ -2380,20 +2139,17 @@ export const App = (() => {
       return "recursive-event-blocked";
     }
 
-    text =
-      text.replace(/^(app:){2,}/, "app:");
+    text = text.replace(/^(app:){2,}/, "app:");
 
     if (text.length > UI_REASON_MAX_LENGTH) {
-      text =
-        text.slice(0, UI_REASON_MAX_LENGTH);
+      text = text.slice(0, UI_REASON_MAX_LENGTH);
     }
 
     return text;
   }
 
   function shouldSkipRepair(reason = "unknown", options = {}) {
-    const cleanReason =
-      normalizeRepairReason(reason);
+    const cleanReason = normalizeRepairReason(reason);
 
     if (cleanReason === "recursive-event-blocked") {
       return true;
@@ -2403,21 +2159,17 @@ export const App = (() => {
       return true;
     }
 
-    const current =
-      nowEpochMs();
+    const current = nowEpochMs();
+    const routeSnapshot = getCurrentRouteSnapshot();
 
-    const routeSnapshot =
-      getCurrentRouteSnapshot();
-
-    const key =
-      [
-        cleanReason,
-        routeSnapshot.route,
-        routeSnapshot.publicPath,
-        Boolean(options?.repairShell),
-        Boolean(options?.hardRepair),
-        Boolean(options?.rebind),
-      ].join("|");
+    const key = [
+      cleanReason,
+      routeSnapshot.route,
+      routeSnapshot.publicPath,
+      Boolean(options?.repairShell),
+      Boolean(options?.hardRepair),
+      Boolean(options?.rebind),
+    ].join("|");
 
     if (
       key === uiRepairLastKey &&
@@ -2426,18 +2178,14 @@ export const App = (() => {
       return true;
     }
 
-    uiRepairLastKey =
-      key;
-
-    uiRepairLastAt =
-      current;
+    uiRepairLastKey = key;
+    uiRepairLastAt = current;
 
     return false;
   }
 
   function shouldSkipUserSync(reason = "sync-user-ui") {
-    const cleanReason =
-      normalizeRepairReason(reason);
+    const cleanReason = normalizeRepairReason(reason);
 
     if (cleanReason === "recursive-event-blocked") {
       return true;
@@ -2447,8 +2195,7 @@ export const App = (() => {
       return true;
     }
 
-    const current =
-      nowEpochMs();
+    const current = nowEpochMs();
 
     if (
       uiSyncLastReason === cleanReason &&
@@ -2457,11 +2204,8 @@ export const App = (() => {
       return true;
     }
 
-    uiSyncLastReason =
-      cleanReason;
-
-    uiSyncLastAt =
-      current;
+    uiSyncLastReason = cleanReason;
+    uiSyncLastAt = current;
 
     return false;
   }
@@ -2475,8 +2219,7 @@ export const App = (() => {
       return false;
     }
 
-    const fn =
-      target[methodName];
+    const fn = target[methodName];
 
     try {
       fn.call(target, reason, context);
@@ -2513,14 +2256,9 @@ export const App = (() => {
     }
 
     return {
-      called:
-        called.length > 0,
-
-      methods:
-        called,
-
-      method:
-        called[0] || "",
+      called: called.length > 0,
+      methods: called,
+      method: called[0] || "",
     };
   }
 
@@ -2535,21 +2273,15 @@ export const App = (() => {
         )
       ) {
         return {
-          called:
-            true,
-
-          method:
-            methodName,
+          called: true,
+          method: methodName,
         };
       }
     }
 
     return {
-      called:
-        false,
-
-      method:
-        "",
+      called: false,
+      method: "",
     };
   }
 
@@ -2612,8 +2344,7 @@ export const App = (() => {
   }
 
   function callSyncUserUI(reason = "sync-user-ui", extraContext = {}) {
-    const cleanReason =
-      normalizeRepairReason(reason);
+    const cleanReason = normalizeRepairReason(reason);
 
     if (shouldSkipUserSync(cleanReason)) {
       return false;
@@ -2622,11 +2353,8 @@ export const App = (() => {
     uiSyncRunning = true;
 
     try {
-      const routeSnapshot =
-        getCurrentRouteSnapshot();
-
-      const snapshot =
-        getUserSnapshot();
+      const routeSnapshot = getCurrentRouteSnapshot();
+      const snapshot = getUserSnapshot();
 
       const context = {
         AppCore,
@@ -2638,25 +2366,18 @@ export const App = (() => {
         SidebarUI,
         TopbarUI,
 
-        reason:
-          cleanReason,
+        reason: cleanReason,
+        source: BOOT_SOURCE,
 
-        source:
-          BOOT_SOURCE,
-
-        route:
-          routeSnapshot.route,
-
-        publicPath:
-          routeSnapshot.publicPath,
+        route: routeSnapshot.route,
+        publicPath: routeSnapshot.publicPath,
 
         snapshot,
 
         ...safeObject(extraContext),
       };
 
-      let appUiSynced =
-        false;
+      let appUiSynced = false;
 
       try {
         appUiSynced =
@@ -2671,47 +2392,33 @@ export const App = (() => {
               SidebarUI,
               TopbarUI,
 
-              reason:
-                cleanReason,
+              reason: cleanReason,
+              payload: context,
 
-              payload:
-                context,
-
-              rebind:
-                false,
-
-              hardRepair:
-                false,
-
-              force:
-                true,
+              rebind: false,
+              hardRepair: false,
+              force: true,
             })
           );
       } catch (error) {
         safeWarn(
           "syncAppUserUI() falló.",
           {
-            reason:
-              cleanReason,
-
+            reason: cleanReason,
             error,
           }
         );
       }
 
-      let coreUserUiPayload =
-        null;
+      let coreUserUiPayload = null;
 
       try {
-        coreUserUiPayload =
-          AppCore?.syncUserUI?.();
+        coreUserUiPayload = AppCore?.syncUserUI?.();
       } catch (error) {
         safeWarn(
           "AppCore.syncUserUI() falló.",
           {
-            reason:
-              cleanReason,
-
+            reason: cleanReason,
             error,
           }
         );
@@ -2733,8 +2440,7 @@ export const App = (() => {
         APP_EVENTS?.userUiSync ||
           "app:user-ui:sync",
         {
-          reason:
-            cleanReason,
+          reason: cleanReason,
 
           appUiSynced,
 
@@ -2762,9 +2468,7 @@ export const App = (() => {
       safeWarn(
         "callSyncUserUI() falló.",
         {
-          reason:
-            cleanReason,
-
+          reason: cleanReason,
           error,
         }
       );
@@ -2830,19 +2534,15 @@ export const App = (() => {
   }
 
   function repairShell(reason = "unknown") {
-    const cleanReason =
-      normalizeRepairReason(reason);
-
-    const routeSnapshot =
-      getCurrentRouteSnapshot();
+    const cleanReason = normalizeRepairReason(reason);
+    const routeSnapshot = getCurrentRouteSnapshot();
 
     try {
       updateShellVisibilityByRoute?.(
         AppCore,
         Router,
         {
-          reason:
-            cleanReason,
+          reason: cleanReason,
         }
       );
     } catch {}
@@ -2850,7 +2550,8 @@ export const App = (() => {
     try {
       Router?.repairShell?.({
         route:
-          Router?.getRoute?.(routeSnapshot.route) || null,
+          Router?.getRoute?.(routeSnapshot.route) ||
+          null,
 
         canonicalPath:
           routeSnapshot.route,
@@ -2863,8 +2564,7 @@ export const App = (() => {
             ? cleanReason
             : `app:${cleanReason}`,
 
-        hideLoading:
-          false,
+        hideLoading: false,
       });
     } catch {}
 
@@ -2872,8 +2572,7 @@ export const App = (() => {
   }
 
   function repairUISystems(reason = "unknown", options = {}) {
-    const cleanReason =
-      normalizeRepairReason(reason);
+    const cleanReason = normalizeRepairReason(reason);
 
     const opts = {
       repairShell:
@@ -2920,20 +2619,13 @@ export const App = (() => {
         SidebarUI,
         TopbarUI,
 
-        reason:
-          cleanReason,
+        reason: cleanReason,
+        source: opts.source,
 
-        source:
-          opts.source,
+        route: routeSnapshot.route,
+        publicPath: routeSnapshot.publicPath,
 
-        route:
-          routeSnapshot.route,
-
-        publicPath:
-          routeSnapshot.publicPath,
-
-        snapshot:
-          getUserSnapshot(),
+        snapshot: getUserSnapshot(),
       };
 
       try {
@@ -2947,20 +2639,12 @@ export const App = (() => {
           SidebarUI,
           TopbarUI,
 
-          reason:
-            cleanReason,
+          reason: cleanReason,
+          payload: context,
 
-          payload:
-            context,
-
-          rebind:
-            opts.rebind,
-
-          hardRepair:
-            opts.hardRepair,
-
-          force:
-            true,
+          rebind: opts.rebind,
+          hardRepair: opts.hardRepair,
+          force: true,
         });
       } catch {}
 
@@ -2972,25 +2656,15 @@ export const App = (() => {
       }
 
       let sidebarResult = {
-        called:
-          false,
-
-        method:
-          "",
-
-        methods:
-          [],
+        called: false,
+        method: "",
+        methods: [],
       };
 
       let topbarResult = {
-        called:
-          false,
-
-        method:
-          "",
-
-        methods:
-          [],
+        called: false,
+        method: "",
+        methods: [],
       };
 
       if (opts.hardRepair) {
@@ -3039,20 +2713,13 @@ export const App = (() => {
           APP_EVENTS?.uiRepair ||
             "app:ui:repair",
           {
-            reason:
-              cleanReason,
+            reason: cleanReason,
 
-            route:
-              routeSnapshot.route,
+            route: routeSnapshot.route,
+            publicPath: routeSnapshot.publicPath,
 
-            publicPath:
-              routeSnapshot.publicPath,
-
-            hardRepair:
-              opts.hardRepair,
-
-            rebind:
-              opts.rebind,
+            hardRepair: opts.hardRepair,
+            rebind: opts.rebind,
 
             sidebarMethod:
               sidebarResult.method,
@@ -3082,20 +2749,11 @@ export const App = (() => {
             {
               ...opts,
 
-              repairShell:
-                false,
-
-              hardRepair:
-                false,
-
-              rebind:
-                false,
-
-              emit:
-                false,
-
-              afterPaint:
-                false,
+              repairShell: false,
+              hardRepair: false,
+              rebind: false,
+              emit: false,
+              afterPaint: false,
 
               source:
                 `${opts.source}:after-paint`,
@@ -3111,8 +2769,7 @@ export const App = (() => {
   }
 
   function scheduleUIRepair(reason = "event", options = {}) {
-    const cleanReason =
-      normalizeRepairReason(reason);
+    const cleanReason = normalizeRepairReason(reason);
 
     if (cleanReason === "recursive-event-blocked") {
       return false;
@@ -3148,8 +2805,7 @@ export const App = (() => {
   }
 
   function getEventPayload(eventOrPayload = {}) {
-    const raw =
-      eventOrPayload || {};
+    const raw = eventOrPayload || {};
 
     if (
       raw &&
@@ -3178,8 +2834,7 @@ export const App = (() => {
     }
 
     const getReason = (payload = {}, fallback = "event") => {
-      const data =
-        getEventPayload(payload);
+      const data = getEventPayload(payload);
 
       return normalizeRepairReason(
         data.reason ||
@@ -3205,8 +2860,7 @@ export const App = (() => {
       return false;
     };
 
-    const hasBus =
-      isFunction(AppCore?.events?.on);
+    const hasBus = isFunction(AppCore?.events?.on);
 
     if (hasBus) {
       bindBus(
@@ -3216,20 +2870,11 @@ export const App = (() => {
           scheduleUIRepair(
             getReason(payload, "router:rendered"),
             {
-              repairShell:
-                false,
-
-              hardRepair:
-                false,
-
-              rebind:
-                false,
-
-              afterPaint:
-                false,
-
-              source:
-                "router:rendered",
+              repairShell: false,
+              hardRepair: false,
+              rebind: false,
+              afterPaint: false,
+              source: "router:rendered",
             }
           );
         }
@@ -3242,20 +2887,11 @@ export const App = (() => {
           scheduleUIRepair(
             getReason(payload, "router:render:async-complete"),
             {
-              repairShell:
-                false,
-
-              hardRepair:
-                false,
-
-              rebind:
-                false,
-
-              afterPaint:
-                false,
-
-              source:
-                "router:render:async-complete",
+              repairShell: false,
+              hardRepair: false,
+              rebind: false,
+              afterPaint: false,
+              source: "router:render:async-complete",
             }
           );
         }
@@ -3268,20 +2904,11 @@ export const App = (() => {
           scheduleUIRepair(
             getReason(payload, "app:route:change"),
             {
-              repairShell:
-                false,
-
-              hardRepair:
-                false,
-
-              rebind:
-                false,
-
-              afterPaint:
-                false,
-
-              source:
-                "app:route:change",
+              repairShell: false,
+              hardRepair: false,
+              rebind: false,
+              afterPaint: false,
+              source: "app:route:change",
             }
           );
         }
@@ -3291,8 +2918,7 @@ export const App = (() => {
         APP_EVENTS?.uiRepairRequest ||
           "app:ui:repair-request",
         (payload) => {
-          const data =
-            getEventPayload(payload);
+          const data = getEventPayload(payload);
 
           scheduleUIRepair(
             getReason(payload, "app:ui:repair-request"),
@@ -3332,20 +2958,11 @@ export const App = (() => {
           scheduleUIRepair(
             getReason(payload, eventName),
             {
-              repairShell:
-                false,
-
-              hardRepair:
-                false,
-
-              rebind:
-                false,
-
-              afterPaint:
-                false,
-
-              source:
-                eventName,
+              repairShell: false,
+              hardRepair: false,
+              rebind: false,
+              afterPaint: false,
+              source: eventName,
             }
           );
         });
@@ -3355,8 +2972,7 @@ export const App = (() => {
         APP_EVENTS?.uiRepairRequest ||
           "app:ui:repair-request",
         (payload) => {
-          const data =
-            getEventPayload(payload);
+          const data = getEventPayload(payload);
 
           scheduleUIRepair(
             getReason(payload, "window:app:ui:repair-request"),
@@ -3387,20 +3003,11 @@ export const App = (() => {
           scheduleUIRepair(
             getReason(payload, "window:app:lang:change"),
             {
-              repairShell:
-                false,
-
-              hardRepair:
-                false,
-
-              rebind:
-                false,
-
-              afterPaint:
-                false,
-
-              source:
-                "window:app:lang:change",
+              repairShell: false,
+              hardRepair: false,
+              rebind: false,
+              afterPaint: false,
+              source: "window:app:lang:change",
             }
           );
         }
@@ -3412,20 +3019,11 @@ export const App = (() => {
           scheduleUIRepair(
             getReason(payload, "window:onion:theme:change"),
             {
-              repairShell:
-                false,
-
-              hardRepair:
-                false,
-
-              rebind:
-                false,
-
-              afterPaint:
-                false,
-
-              source:
-                "window:onion:theme:change",
+              repairShell: false,
+              hardRepair: false,
+              rebind: false,
+              afterPaint: false,
+              source: "window:onion:theme:change",
             }
           );
         }
@@ -3442,15 +3040,13 @@ export const App = (() => {
   ======================================================= */
 
   function refreshBootUrlContext() {
-    BOOT_URL_CONTEXT =
-      captureInitialUrl();
+    BOOT_URL_CONTEXT = captureInitialUrl();
 
     return BOOT_URL_CONTEXT;
   }
 
   function isPublicTokenBoot() {
-    const context =
-      refreshBootUrlContext();
+    const context = refreshBootUrlContext();
 
     return Boolean(
       context.isPublicTokenRoute &&
@@ -3459,8 +3055,7 @@ export const App = (() => {
   }
 
   function isActivationBoot() {
-    const context =
-      refreshBootUrlContext();
+    const context = refreshBootUrlContext();
 
     return Boolean(
       context.isActivation &&
@@ -3469,8 +3064,7 @@ export const App = (() => {
   }
 
   function isResetConfirmBoot() {
-    const context =
-      refreshBootUrlContext();
+    const context = refreshBootUrlContext();
 
     return Boolean(
       context.isResetConfirm &&
@@ -3479,8 +3073,7 @@ export const App = (() => {
   }
 
   function exposeBootUrlContextToCore() {
-    const context =
-      refreshBootUrlContext();
+    const context = refreshBootUrlContext();
 
     const payload = {
       [APP_STATE_KEYS?.bootInitialUrl || "bootInitialUrl"]:
@@ -3586,31 +3179,21 @@ export const App = (() => {
   }
 
   function emitBootState(phase = "unknown", extra = {}) {
-    const routeSnapshot =
-      getCurrentRouteSnapshot();
+    const routeSnapshot = getCurrentRouteSnapshot();
 
     safeEmit(
       BOOT_EVENTS.state,
       {
         phase,
 
-        booted:
-          state.booted,
+        booted: state.booted,
+        booting: state.booting,
 
-        booting:
-          state.booting,
+        cycleId: state.bootCycleId,
+        finalizedCycleId: state.finalizedCycleId,
 
-        cycleId:
-          state.bootCycleId,
-
-        finalizedCycleId:
-          state.finalizedCycleId,
-
-        route:
-          routeSnapshot.route,
-
-        publicPath:
-          routeSnapshot.publicPath,
+        route: routeSnapshot.route,
+        publicPath: routeSnapshot.publicPath,
 
         ...safeObject(extra),
       }
@@ -3620,9 +3203,7 @@ export const App = (() => {
   function markBooting(cycleId) {
     state.booting = true;
     state.booted = false;
-
-    state.lastBootStartedAt =
-      nowEpochMs();
+    state.lastBootStartedAt = nowEpochMs();
 
     try {
       markBootStart?.(
@@ -3630,56 +3211,31 @@ export const App = (() => {
         Store,
         {
           cycleId,
-          reason:
-            "app-index-boot-start",
+          reason: "app-index-boot-start",
         }
       );
     } catch {
       try {
         markAppBootState?.(AppCore, {
-          booting:
-            true,
-
-          booted:
-            false,
-
-          ready:
-            false,
-
-          loading:
-            true,
-
-          phase:
-            BOOT_PHASE_VALUE.booting,
-
+          booting: true,
+          booted: false,
+          ready: false,
+          loading: true,
+          phase: BOOT_PHASE_VALUE.booting,
           cycleId,
-
-          reason:
-            "app-index-boot-start",
+          reason: "app-index-boot-start",
         });
       } catch {}
 
       try {
         markStoreBootState?.(Store, {
-          booting:
-            true,
-
-          booted:
-            false,
-
-          ready:
-            false,
-
-          loading:
-            true,
-
-          phase:
-            BOOT_PHASE_VALUE.booting,
-
+          booting: true,
+          booted: false,
+          ready: false,
+          loading: true,
+          phase: BOOT_PHASE_VALUE.booting,
           cycleId,
-
-          reason:
-            "app-index-boot-start",
+          reason: "app-index-boot-start",
         });
       } catch {}
     }
@@ -3695,9 +3251,7 @@ export const App = (() => {
   function markBooted(cycleId) {
     state.booting = false;
     state.booted = true;
-
-    state.lastBootReadyAt =
-      nowEpochMs();
+    state.lastBootReadyAt = nowEpochMs();
 
     try {
       markBootReady?.(
@@ -3705,56 +3259,31 @@ export const App = (() => {
         Store,
         {
           cycleId,
-          reason:
-            "app-index-boot-ready",
+          reason: "app-index-boot-ready",
         }
       );
     } catch {
       try {
         markAppBootState?.(AppCore, {
-          booting:
-            false,
-
-          booted:
-            true,
-
-          ready:
-            true,
-
-          loading:
-            false,
-
-          phase:
-            BOOT_PHASE_VALUE.ready,
-
+          booting: false,
+          booted: true,
+          ready: true,
+          loading: false,
+          phase: BOOT_PHASE_VALUE.ready,
           cycleId,
-
-          reason:
-            "app-index-boot-ready",
+          reason: "app-index-boot-ready",
         });
       } catch {}
 
       try {
         markStoreBootState?.(Store, {
-          booting:
-            false,
-
-          booted:
-            true,
-
-          ready:
-            true,
-
-          loading:
-            false,
-
-          phase:
-            BOOT_PHASE_VALUE.ready,
-
+          booting: false,
+          booted: true,
+          ready: true,
+          loading: false,
+          phase: BOOT_PHASE_VALUE.ready,
           cycleId,
-
-          reason:
-            "app-index-boot-ready",
+          reason: "app-index-boot-ready",
         });
       } catch {}
     }
@@ -3770,9 +3299,7 @@ export const App = (() => {
   function markBootFailed(cycleId, error = null) {
     state.booting = false;
     state.booted = false;
-
-    state.lastBootErrorAt =
-      nowEpochMs();
+    state.lastBootErrorAt = nowEpochMs();
 
     try {
       markBootError?.(
@@ -3781,59 +3308,32 @@ export const App = (() => {
         error,
         {
           cycleId,
-          reason:
-            "app-index-boot-error",
+          reason: "app-index-boot-error",
         }
       );
     } catch {
       try {
         markAppBootState?.(AppCore, {
-          booting:
-            false,
-
-          booted:
-            false,
-
-          ready:
-            false,
-
-          loading:
-            false,
-
-          phase:
-            BOOT_PHASE_VALUE.error,
-
+          booting: false,
+          booted: false,
+          ready: false,
+          loading: false,
+          phase: BOOT_PHASE_VALUE.error,
           cycleId,
-
-          reason:
-            "app-index-boot-error",
-
+          reason: "app-index-boot-error",
           error,
         });
       } catch {}
 
       try {
         markStoreBootState?.(Store, {
-          booting:
-            false,
-
-          booted:
-            false,
-
-          ready:
-            false,
-
-          loading:
-            false,
-
-          phase:
-            BOOT_PHASE_VALUE.error,
-
+          booting: false,
+          booted: false,
+          ready: false,
+          loading: false,
+          phase: BOOT_PHASE_VALUE.error,
           cycleId,
-
-          reason:
-            "app-index-boot-error",
-
+          reason: "app-index-boot-error",
           error,
         });
       } catch {}
@@ -3843,7 +3343,6 @@ export const App = (() => {
       "error",
       {
         cycleId,
-
         message:
           safeText(error?.message || error, "Boot error."),
       }
@@ -3851,8 +3350,7 @@ export const App = (() => {
   }
 
   function setCoreBootFlag(key = "", value = false) {
-    const cleanKey =
-      safeText(key, "");
+    const cleanKey = safeText(key, "");
 
     if (!cleanKey) {
       return false;
@@ -3877,8 +3375,7 @@ export const App = (() => {
   }
 
   function markBootNavigationHandled(value = true) {
-    state.bootNavigationHandled =
-      Boolean(value);
+    state.bootNavigationHandled = Boolean(value);
 
     setCoreBootFlag(
       "bootNavigationHandled",
@@ -3887,8 +3384,7 @@ export const App = (() => {
   }
 
   function markInitialRouteRendered(value = true) {
-    state.initialRouteRendered =
-      Boolean(value);
+    state.initialRouteRendered = Boolean(value);
 
     setCoreBootFlag(
       "initialRouteRendered",
@@ -3897,8 +3393,7 @@ export const App = (() => {
   }
 
   function didRestoreHandleNavigation(restoreResult = null) {
-    const result =
-      safeObject(restoreResult);
+    const result = safeObject(restoreResult);
 
     return Boolean(
       state.bootNavigationHandled === true ||
@@ -3930,9 +3425,7 @@ export const App = (() => {
         showLoader(
           AppCore,
           {
-            booting:
-              true,
-
+            booting: true,
             reason,
           }
         );
@@ -3943,8 +3436,7 @@ export const App = (() => {
       armBootFailsafeLoader?.({
         AppCore,
         state,
-        hideLoader:
-          forceHideLoader,
+        hideLoader: forceHideLoader,
       });
     } catch {}
 
@@ -3952,7 +3444,6 @@ export const App = (() => {
       BOOT_EVENTS.loaderShow,
       {
         reason,
-
         loaderSnapshot:
           getBootLoaderSnapshot(),
       }
@@ -3973,17 +3464,13 @@ export const App = (() => {
         AppCore,
         {
           reason,
-
           state,
 
           minVisibleMs:
             MIN_BOOT_LOADER_MS,
 
-          finalize:
-            true,
-
-          allowDuringBoot:
-            true,
+          finalize: true,
+          allowDuringBoot: true,
         }
       );
     } catch {}
@@ -3992,7 +3479,6 @@ export const App = (() => {
       BOOT_EVENTS.loaderHide,
       {
         reason,
-
         loaderSnapshot:
           getBootLoaderSnapshot(),
       }
@@ -4009,14 +3495,9 @@ export const App = (() => {
         AppCore,
         {
           reason,
-
-          minVisibleMs:
-            0,
-
+          minVisibleMs: 0,
           state,
-
-          force:
-            true,
+          force: true,
         }
       );
     } catch {
@@ -4025,17 +3506,10 @@ export const App = (() => {
           AppCore,
           {
             reason,
-
             state,
-
-            minVisibleMs:
-              0,
-
-            force:
-              true,
-
-            allowDuringBoot:
-              true,
+            minVisibleMs: 0,
+            force: true,
+            allowDuringBoot: true,
           }
         );
       } catch {}
@@ -4045,7 +3519,6 @@ export const App = (() => {
       BOOT_EVENTS.loaderForceHide,
       {
         reason,
-
         loaderSnapshot:
           getBootLoaderSnapshot(),
       }
@@ -4096,7 +3569,10 @@ export const App = (() => {
         I18n,
 
         syncUserUI:
-          ({ reason = "app-events:sync-user-ui", payload = {} } = {}) => {
+          ({
+            reason = "app-events:sync-user-ui",
+            payload = {},
+          } = {}) => {
             return callSyncUserUI(
               reason,
               payload
@@ -4119,10 +3595,8 @@ export const App = (() => {
               AppCore,
               Router,
               hideLoader,
-              forceHideLoader:
-                false,
-              hideLoaderOnPostRender:
-                true,
+              forceHideLoader: false,
+              hideLoaderOnPostRender: true,
               ...safeObject(payload),
             });
           },
@@ -4215,8 +3689,7 @@ export const App = (() => {
         AppCore,
         I18n,
         Router,
-        reason:
-          "app-index:init-i18n",
+        reason: "app-index:init-i18n",
       });
     } catch {}
 
@@ -4231,8 +3704,7 @@ export const App = (() => {
 
     exposeRuntimeModulesToCore();
 
-    let configured =
-      false;
+    let configured = false;
 
     try {
       if (isFunction(configureRouter)) {
@@ -4245,8 +3717,7 @@ export const App = (() => {
             I18n,
           });
 
-        configured =
-          result !== false;
+        configured = result !== false;
       }
     } catch (error) {
       safeWarn(
@@ -4260,32 +3731,22 @@ export const App = (() => {
         if (isFunction(Router?.configure)) {
           const result =
             Router.configure({
-              core:
-                AppCore,
-
+              core: AppCore,
               AppCore,
 
-              auth:
-                Auth,
-
+              auth: Auth,
               Auth,
 
-              store:
-                Store,
-
+              store: Store,
               Store,
 
-              i18n:
-                I18n,
-
+              i18n: I18n,
               I18n,
 
-              app:
-                api,
+              app: api,
             });
 
-          configured =
-            result !== false;
+          configured = result !== false;
         }
       } catch (error) {
         safeWarn(
@@ -4297,8 +3758,7 @@ export const App = (() => {
 
     exposeRuntimeModulesToCore();
 
-    state.routerConfigured =
-      Boolean(configured);
+    state.routerConfigured = Boolean(configured);
 
     safeEmit(
       "app:router:configured",
@@ -4320,8 +3780,7 @@ export const App = (() => {
       return true;
     }
 
-    let bound =
-      false;
+    let bound = false;
 
     try {
       if (isFunction(bindRouter)) {
@@ -4334,8 +3793,7 @@ export const App = (() => {
             I18n,
           });
 
-        bound =
-          result !== false;
+        bound = result !== false;
       }
     } catch (error) {
       safeWarn(
@@ -4355,16 +3813,14 @@ export const App = (() => {
               I18n,
             });
 
-          bound =
-            result !== false;
+          bound = result !== false;
         }
       } catch {}
     }
 
     exposeRuntimeModulesToCore();
 
-    state.routerBound =
-      Boolean(bound);
+    state.routerBound = Boolean(bound);
 
     safeEmit(
       "app:router:bound",
@@ -4407,31 +3863,19 @@ export const App = (() => {
         UI_REPAIR_REASONS?.alreadyReady ||
           "init-ui-already-ready",
         {
-          repairShell:
-            false,
-
-          syncUser:
-            true,
-
-          hardRepair:
-            false,
-
-          rebind:
-            false,
-
-          afterPaint:
-            false,
-
-          source:
-            "init-ui-already-ready",
+          repairShell: false,
+          syncUser: true,
+          hardRepair: false,
+          rebind: false,
+          afterPaint: false,
+          source: "init-ui-already-ready",
         }
       );
 
       return true;
     }
 
-    let uiOk =
-      false;
+    let uiOk = false;
 
     try {
       const result =
@@ -4450,16 +3894,9 @@ export const App = (() => {
             "app:ui",
         });
 
-      /*
-        Importante:
-        - Muchos init() legacy no devuelven true explícito.
-        - Sólo tratamos como fallo si devuelve false o lanza excepción.
-      */
-      uiOk =
-        result !== false;
+      uiOk = result !== false;
     } catch (error) {
-      uiOk =
-        false;
+      uiOk = false;
 
       safeWarn(
         "initUISystems() falló.",
@@ -4467,11 +3904,8 @@ export const App = (() => {
       );
     }
 
-    state.uiReady =
-      Boolean(uiOk);
-
-    state.uiMounted =
-      Boolean(uiOk);
+    state.uiReady = Boolean(uiOk);
+    state.uiMounted = Boolean(uiOk);
 
     try {
       setCoreBootFlag("uiReady", Boolean(uiOk));
@@ -4493,23 +3927,12 @@ export const App = (() => {
       UI_REPAIR_REASONS?.init ||
         "init-ui",
       {
-        repairShell:
-          true,
-
-        syncUser:
-          true,
-
-        hardRepair:
-          false,
-
-        rebind:
-          false,
-
-        afterPaint:
-          true,
-
-        source:
-          "init-ui",
+        repairShell: true,
+        syncUser: true,
+        hardRepair: false,
+        rebind: false,
+        afterPaint: true,
+        source: "init-ui",
       }
     );
 
@@ -4519,8 +3942,7 @@ export const App = (() => {
   }
 
   async function renderInitialRouteSafe(payload = {}) {
-    const opts =
-      safeObject(payload);
+    const opts = safeObject(payload);
 
     if (isFunction(renderInitialRoute)) {
       try {
@@ -4572,8 +3994,7 @@ export const App = (() => {
       }
     }
 
-    const routeSnapshot =
-      getCurrentRouteSnapshot();
+    const routeSnapshot = getCurrentRouteSnapshot();
 
     try {
       return await Promise.resolve(
@@ -4583,27 +4004,18 @@ export const App = (() => {
             DEFAULT_ROUTE ||
             "/",
           {
-            force:
-              true,
-
-            replaceState:
-              true,
+            force: true,
+            replaceState: true,
 
             reason:
               opts.reason ||
               "app-index-render-fallback",
 
-            source:
-              BOOT_SOURCE,
+            source: BOOT_SOURCE,
 
-            preservePublicPath:
-              true,
-
-            preserveSearch:
-              true,
-
-            preserveHash:
-              true,
+            preservePublicPath: true,
+            preserveSearch: true,
+            preserveHash: true,
           }
         )
       );
@@ -4639,8 +4051,7 @@ export const App = (() => {
     const result =
       await renderInitialRouteSafe({
         reason,
-        source:
-          BOOT_SOURCE,
+        source: BOOT_SOURCE,
         cycleId,
       });
 
@@ -4650,23 +4061,12 @@ export const App = (() => {
       repairUISystems(
         `render-initial-route:${reason}`,
         {
-          repairShell:
-            false,
-
-          syncUser:
-            true,
-
-          hardRepair:
-            false,
-
-          rebind:
-            false,
-
-          afterPaint:
-            false,
-
-          source:
-            "render-initial-route",
+          repairShell: false,
+          syncUser: true,
+          hardRepair: false,
+          rebind: false,
+          afterPaint: false,
+          source: "render-initial-route",
         }
       );
     }
@@ -4689,14 +4089,9 @@ export const App = (() => {
       );
 
       return {
-        ok:
-          false,
-
-        skipped:
-          true,
-
-        reason:
-          "restore-session-unavailable",
+        ok: false,
+        skipped: true,
+        reason: "restore-session-unavailable",
       };
     }
 
@@ -4724,31 +4119,19 @@ export const App = (() => {
       });
 
     try {
-      const result =
-        await state.restorePromise;
+      const result = await state.restorePromise;
 
       if (!isStale(cycleId)) {
         repairUISystems(
           UI_REPAIR_REASONS?.restore ||
             "restore-session",
           {
-            repairShell:
-              false,
-
-            syncUser:
-              true,
-
-            hardRepair:
-              false,
-
-            rebind:
-              false,
-
-            afterPaint:
-              false,
-
-            source:
-              "restore-session",
+            repairShell: false,
+            syncUser: true,
+            hardRepair: false,
+            rebind: false,
+            afterPaint: false,
+            source: "restore-session",
           }
         );
       }
@@ -4766,23 +4149,12 @@ export const App = (() => {
             UI_REPAIR_REASONS?.restoreErrorNonBlocking ||
               "restore-session-error-non-blocking",
             {
-              repairShell:
-                false,
-
-              syncUser:
-                true,
-
-              hardRepair:
-                false,
-
-              rebind:
-                false,
-
-              afterPaint:
-                false,
-
-              source:
-                "restore-session-error",
+              repairShell: false,
+              syncUser: true,
+              hardRepair: false,
+              rebind: false,
+              afterPaint: false,
+              source: "restore-session-error",
             }
           );
         }
@@ -4801,11 +4173,8 @@ export const App = (() => {
   function startPublicTokenRestoreAfterInitialRender(cycleId) {
     void restoreSessionBlock({
       cycleId,
-      nonBlocking:
-        true,
-
-      skipPostRestoreNavigation:
-        true,
+      nonBlocking: true,
+      skipPostRestoreNavigation: true,
     })
       .then(() => {
         if (isStale(cycleId)) {
@@ -4815,23 +4184,12 @@ export const App = (() => {
         repairUISystems(
           "public-token-background-restore-complete",
           {
-            repairShell:
-              false,
-
-            syncUser:
-              true,
-
-            hardRepair:
-              false,
-
-            rebind:
-              false,
-
-            afterPaint:
-              false,
-
-            source:
-              "public-token-background-restore",
+            repairShell: false,
+            syncUser: true,
+            hardRepair: false,
+            rebind: false,
+            afterPaint: false,
+            source: "public-token-background-restore",
           }
         );
       })
@@ -4885,32 +4243,19 @@ export const App = (() => {
       return true;
     }
 
-    state.finalizedCycleId =
-      cycleId;
+    state.finalizedCycleId = cycleId;
 
     clearBootFailsafeTimer(state, AppCore);
 
     try {
       markStoreBootState(Store, {
-        ready:
-          true,
-
-        booted:
-          true,
-
-        booting:
-          false,
-
-        loading:
-          false,
-
-        phase:
-          BOOT_PHASE_VALUE.ready,
-
+        ready: true,
+        booted: true,
+        booting: false,
+        loading: false,
+        phase: BOOT_PHASE_VALUE.ready,
         cycleId,
-
-        reason:
-          "finalize-boot",
+        reason: "finalize-boot",
       });
     } catch {}
 
@@ -4922,23 +4267,12 @@ export const App = (() => {
       UI_REPAIR_REASONS?.finalize ||
         "finalize-boot",
       {
-        repairShell:
-          false,
-
-        syncUser:
-          true,
-
-        hardRepair:
-          false,
-
-        rebind:
-          false,
-
-        afterPaint:
-          false,
-
-        source:
-          "finalize-boot",
+        repairShell: false,
+        syncUser: true,
+        hardRepair: false,
+        rebind: false,
+        afterPaint: false,
+        source: "finalize-boot",
       }
     );
 
@@ -4946,26 +4280,13 @@ export const App = (() => {
       repairUISystems(
         "finalize-boot:after-paint-pre-hide",
         {
-          repairShell:
-            false,
-
-          syncUser:
-            false,
-
-          hardRepair:
-            false,
-
-          rebind:
-            false,
-
-          afterPaint:
-            false,
-
-          emit:
-            false,
-
-          source:
-            "finalize-boot:after-paint-pre-hide",
+          repairShell: false,
+          syncUser: false,
+          hardRepair: false,
+          rebind: false,
+          afterPaint: false,
+          emit: false,
+          source: "finalize-boot:after-paint-pre-hide",
         }
       );
     });
@@ -4989,26 +4310,13 @@ export const App = (() => {
       repairUISystems(
         "finalize-boot:post-loader-hide",
         {
-          repairShell:
-            false,
-
-          syncUser:
-            true,
-
-          hardRepair:
-            false,
-
-          rebind:
-            false,
-
-          afterPaint:
-            false,
-
-          emit:
-            false,
-
-          source:
-            "finalize-boot:post-loader-hide",
+          repairShell: false,
+          syncUser: true,
+          hardRepair: false,
+          rebind: false,
+          afterPaint: false,
+          emit: false,
+          source: "finalize-boot:post-loader-hide",
         }
       );
     });
@@ -5022,8 +4330,7 @@ export const App = (() => {
         BOOT_EVENTS.ready,
         {
           cycleId,
-          at:
-            safeIsoDate(),
+          at: safeIsoDate(),
         }
       );
 
@@ -5060,8 +4367,7 @@ export const App = (() => {
 
     await renderInitialRouteBlock({
       cycleId,
-      reason:
-        "public-token-first",
+      reason: "public-token-first",
     });
 
     bindRouterBlock("public-token-first");
@@ -5072,21 +4378,16 @@ export const App = (() => {
   }
 
   async function doPrivateOrNormalBoot(cycleId) {
-    const beforeRestore =
-      getCurrentRouteSnapshot();
+    const beforeRestore = getCurrentRouteSnapshot();
 
     const restoreResult =
       await restoreSessionBlock({
         cycleId,
-        nonBlocking:
-          false,
-
-        skipPostRestoreNavigation:
-          false,
+        nonBlocking: false,
+        skipPostRestoreNavigation: false,
       });
 
-    const afterRestore =
-      getCurrentRouteSnapshot();
+    const afterRestore = getCurrentRouteSnapshot();
 
     const routeChangedByRestore =
       beforeRestore.route !== afterRestore.route ||
@@ -5120,30 +4421,18 @@ export const App = (() => {
         UI_REPAIR_REASONS?.restoreNavigationHandled ||
           "restore-navigation-handled",
         {
-          repairShell:
-            false,
-
-          syncUser:
-            true,
-
-          hardRepair:
-            false,
-
-          rebind:
-            false,
-
-          afterPaint:
-            false,
-
-          source:
-            "restore-navigation-handled",
+          repairShell: false,
+          syncUser: true,
+          hardRepair: false,
+          rebind: false,
+          afterPaint: false,
+          source: "restore-navigation-handled",
         }
       );
     } else {
       await renderInitialRouteBlock({
         cycleId,
-        reason:
-          "after-restore",
+        reason: "after-restore",
       });
     }
 
@@ -5152,21 +4441,24 @@ export const App = (() => {
     return true;
   }
 
-  async function doBoot(cycleId) {
+  async function doBoot(cycleId, options = {}) {
     try {
       state.booting = true;
+      state.lastBootOptions = sanitizePayload(options);
 
       resetCycleRuntimeState();
       markBooting(cycleId);
 
-      const firstContext =
-        refreshBootUrlContext();
+      if (options?.bootContext) {
+        primeInitialUrlFromMainContext(options.bootContext);
+      }
+
+      const firstContext = refreshBootUrlContext();
 
       safeEmit(
         BOOT_EVENTS.start,
         {
           cycleId,
-
           bootUrlContext:
             sanitizeBootContextForLog(firstContext),
         }
@@ -5175,16 +4467,12 @@ export const App = (() => {
       showBootLoader("boot-start");
 
       refreshBootUrlContext();
-
       exposeRuntimeModulesToCore();
-
       bindGlobalHandlersBlock();
 
       await Promise.resolve(
         AppCore?.init?.({
-          source:
-            BOOT_SOURCE,
-
+          source: BOOT_SOURCE,
           cycleId,
         })
       );
@@ -5200,8 +4488,7 @@ export const App = (() => {
         DEFAULT_SCOPE
       );
 
-      const bootContext =
-        exposeBootUrlContextToCore();
+      const bootContext = exposeBootUrlContextToCore();
 
       exposeRuntimeModulesToCore();
 
@@ -5213,8 +4500,7 @@ export const App = (() => {
 
       configureRouterBlock();
 
-      const uiOk =
-        initUIBlock();
+      const uiOk = initUIBlock();
 
       if (!uiOk) {
         safeWarn(
@@ -5245,23 +4531,12 @@ export const App = (() => {
         UI_REPAIR_REASONS?.beforeFinalize ||
           "before-finalize",
         {
-          repairShell:
-            false,
-
-          syncUser:
-            true,
-
-          hardRepair:
-            false,
-
-          rebind:
-            false,
-
-          afterPaint:
-            false,
-
-          source:
-            "before-finalize",
+          repairShell: false,
+          syncUser: true,
+          hardRepair: false,
+          rebind: false,
+          afterPaint: false,
+          source: "before-finalize",
         }
       );
 
@@ -5289,10 +4564,16 @@ export const App = (() => {
           cycleId,
 
           message:
-            safeText(error?.message || error, "Boot error."),
+            safeText(
+              error?.message ||
+                error,
+              "Boot error."
+            ),
 
           bootUrlContext:
-            sanitizeBootContextForLog(refreshBootUrlContext()),
+            sanitizeBootContextForLog(
+              refreshBootUrlContext()
+            ),
         }
       );
 
@@ -5301,23 +4582,12 @@ export const App = (() => {
           UI_REPAIR_REASONS?.bootError ||
             "boot-error",
           {
-            repairShell:
-              false,
-
-            syncUser:
-              true,
-
-            hardRepair:
-              false,
-
-            rebind:
-              false,
-
-            afterPaint:
-              false,
-
-            source:
-              "boot-error",
+            repairShell: false,
+            syncUser: true,
+            hardRepair: false,
+            rebind: false,
+            afterPaint: false,
+            source: "boot-error",
           }
         );
       } catch {}
@@ -5334,8 +4604,7 @@ export const App = (() => {
           error,
           getViewContainer,
           setShellVisibility,
-          hideLoader:
-            forceHideLoader,
+          hideLoader: forceHideLoader,
         });
       } catch {}
 
@@ -5348,8 +4617,7 @@ export const App = (() => {
   ======================================================= */
 
   function boot(options = {}) {
-    const opts =
-      safeObject(options);
+    const opts = safeObject(options);
 
     if (
       state.booted &&
@@ -5359,23 +4627,12 @@ export const App = (() => {
         UI_REPAIR_REASONS?.bootAlreadyBooted ||
           "boot-already-booted",
         {
-          repairShell:
-            false,
-
-          syncUser:
-            true,
-
-          hardRepair:
-            false,
-
-          rebind:
-            false,
-
-          afterPaint:
-            false,
-
-          source:
-            "boot-already-booted",
+          repairShell: false,
+          syncUser: true,
+          hardRepair: false,
+          rebind: false,
+          afterPaint: false,
+          source: "boot-already-booted",
         }
       );
 
@@ -5389,14 +4646,14 @@ export const App = (() => {
       return state.bootPromise;
     }
 
-    const cycleId =
-      nextCycle();
+    const cycleId = nextCycle();
 
-    const promise =
-      doBoot(cycleId);
+    const promise = doBoot(
+      cycleId,
+      opts
+    );
 
-    state.bootPromise =
-      promise;
+    state.bootPromise = promise;
 
     void promise
       .finally(() => {
@@ -5410,8 +4667,7 @@ export const App = (() => {
   }
 
   async function reboot(options = {}) {
-    const opts =
-      safeObject(options);
+    const opts = safeObject(options);
 
     nextCycle();
 
@@ -5460,24 +4716,21 @@ export const App = (() => {
     forceHideBootLoader("reboot-reset");
 
     return boot({
-      force:
-        true,
-
+      force: true,
       reason:
         opts.reason ||
         "reboot",
+      bootContext:
+        opts.bootContext ||
+        null,
     });
   }
 
   function getState() {
-    const context =
-      refreshBootUrlContext();
+    const context = refreshBootUrlContext();
 
-    let routerSnapshot =
-      null;
-
-    let coreSnapshot =
-      null;
+    let routerSnapshot = null;
+    let coreSnapshot = null;
 
     try {
       routerSnapshot =
@@ -5496,8 +4749,7 @@ export const App = (() => {
     return sanitizePayload({
       ...state,
 
-      version:
-        APP_BOOTSTRAP_VERSION,
+      version: APP_BOOTSTRAP_VERSION,
 
       bootUrlContext:
         sanitizeBootContextForLog(context),
@@ -5551,35 +4803,22 @@ export const App = (() => {
   }
 
   const api = {
-    version:
-      APP_BOOTSTRAP_VERSION,
+    version: APP_BOOTSTRAP_VERSION,
 
     boot,
     reboot,
     getState,
 
-    repairUI:
-      repairUISystems,
-
+    repairUI: repairUISystems,
     repairShell,
+    syncUserUI: callSyncUserUI,
 
-    syncUserUI:
-      callSyncUserUI,
-
-    showLoader:
-      showBootLoader,
-
-    hideLoader:
-      hideBootLoader,
-
-    forceHideLoader:
-      forceHideBootLoader,
-
-    getLoaderSnapshot:
-      getBootLoaderSnapshot,
+    showLoader: showBootLoader,
+    hideLoader: hideBootLoader,
+    forceHideLoader: forceHideBootLoader,
+    getLoaderSnapshot: getBootLoaderSnapshot,
 
     exposeRuntimeModulesToCore,
-
     exposeRouterToCore,
 
     refreshBootUrlContext,
@@ -5599,44 +4838,6 @@ export const App = (() => {
 
   return api;
 })();
-
-/* =========================================================
-   AUTO BOOT
-========================================================= */
-
-function autoBootApp() {
-  try {
-    void App.boot().catch((error) => {
-      try {
-        console.error("[App] Auto boot failed.", sanitizePayload(error));
-      } catch {}
-    });
-  } catch (error) {
-    try {
-      console.error("[App] Auto boot crashed.", sanitizePayload(error));
-    } catch {}
-  }
-}
-
-try {
-  if (
-    isBrowser() &&
-    window.__ONION_DISABLE_AUTO_BOOT__ !== true
-  ) {
-    if (document.readyState === "loading") {
-      document.addEventListener(
-        "DOMContentLoaded",
-        autoBootApp,
-        {
-          once:
-            true,
-        }
-      );
-    } else {
-      autoBootApp();
-    }
-  }
-} catch {}
 
 /* =========================================================
    DEFAULT EXPORT

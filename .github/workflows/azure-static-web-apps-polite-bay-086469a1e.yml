@@ -74,7 +74,7 @@ jobs:
 
           echo "Deployment token detected."
 
-      - name: Validate Static Web App package
+      - name: Validate Onion SPA package
         shell: bash
         run: |
           set -euo pipefail
@@ -106,45 +106,81 @@ jobs:
             exit 1
           fi
 
+          if [ ! -f "$APP_ROOT/site.webmanifest" ]; then
+            echo "::error file=$APP_ROOT/site.webmanifest::No se encontró site.webmanifest."
+            exit 1
+          fi
+
+          if [ ! -f "$APP_ROOT/robots.txt" ]; then
+            echo "::error file=$APP_ROOT/robots.txt::No se encontró robots.txt."
+            exit 1
+          fi
+
           export APP_ROOT
 
           python3 - <<'PY'
           import json
           import os
           import pathlib
+          import re
           import sys
           import xml.etree.ElementTree as ET
 
           app_root = pathlib.Path(os.environ["APP_ROOT"])
+
           config_path = app_root / "staticwebapp.config.json"
           index_path = app_root / "index.html"
+          manifest_path = app_root / "site.webmanifest"
           robots_path = app_root / "robots.txt"
           sitemap_path = app_root / "sitemap.xml"
 
-          try:
-              config = json.loads(config_path.read_text(encoding="utf-8"))
-          except Exception as exc:
-              print(f"::error file={config_path}::staticwebapp.config.json no es JSON válido: {exc}")
+          def error(path, message):
+              print(f"::error file={path}::{message}")
               sys.exit(1)
+
+          def warning(path, message):
+              print(f"::warning file={path}::{message}")
+
+          def read_text(path):
+              return path.read_text(encoding="utf-8", errors="replace")
+
+          def load_json(path):
+              try:
+                  return json.loads(read_text(path))
+              except Exception as exc:
+                  error(path, f"No es JSON válido: {exc}")
+
+          config = load_json(config_path)
+          manifest = load_json(manifest_path)
+          index_text = read_text(index_path)
+          robots_text = read_text(robots_path)
+
+          # =====================================================
+          # staticwebapp.config.json
+          # =====================================================
 
           navigation = config.get("navigationFallback") or {}
           rewrite = navigation.get("rewrite")
 
           if rewrite != "/index.html":
-              print("::error file=staticwebapp.config.json::navigationFallback.rewrite debe ser /index.html para Onion SPA.")
-              sys.exit(1)
+              error(
+                  config_path,
+                  "navigationFallback.rewrite debe ser /index.html para Onion SPA."
+              )
 
           excludes = navigation.get("exclude") or []
 
           required_excludes = [
               "/api/*",
+              "/.auth/*",
               "/robots.txt",
               "/sitemap.xml",
               "/manifest.json",
               "/site.webmanifest",
+              "/sw.js",
               "/favicon.ico",
               "/src/*",
-              "/assets/*",
+              "/assets/*"
           ]
 
           missing_excludes = [
@@ -153,36 +189,278 @@ jobs:
           ]
 
           if missing_excludes:
-              print(
-                  "::warning file=staticwebapp.config.json::Faltan excludes recomendados en navigationFallback: "
+              warning(
+                  config_path,
+                  "Faltan excludes recomendados en navigationFallback: "
                   + ", ".join(missing_excludes)
               )
 
-          index_text = index_path.read_text(encoding="utf-8", errors="replace")
+          forbidden_excludes = [
+              "/favicon.svg"
+          ]
 
-          if "<!DOCTYPE html>" not in index_text[:100].upper():
-              print("::warning file=index.html::index.html debería empezar con <!DOCTYPE html>.")
+          present_forbidden_excludes = [
+              item for item in forbidden_excludes
+              if item in excludes
+          ]
+
+          if present_forbidden_excludes:
+              error(
+                  config_path,
+                  "No declares favicon.svg en navigationFallback.exclude porque no existe ni se usa."
+              )
+
+          routes = config.get("routes") or []
+          if not isinstance(routes, list):
+              error(config_path, "routes debe ser un array.")
+
+          sitemap_routes = [
+              route for route in routes
+              if route.get("route") == "/sitemap.xml"
+          ]
+
+          if not sitemap_routes:
+              error(
+                  config_path,
+                  "Debe existir una regla para /sitemap.xml."
+              )
+
+          if not any(route.get("statusCode") == 404 for route in sitemap_routes):
+              error(
+                  config_path,
+                  "/sitemap.xml debe responder 404 mientras Onion Support sea SPA privada."
+              )
+
+          static_config_routes = [
+              route for route in routes
+              if route.get("route") == "/staticwebapp.config.json"
+          ]
+
+          if not static_config_routes:
+              error(
+                  config_path,
+                  "Debe existir una regla que oculte /staticwebapp.config.json."
+              )
+
+          if not any(route.get("statusCode") == 404 for route in static_config_routes):
+              error(
+                  config_path,
+                  "/staticwebapp.config.json debe responder 404."
+              )
+
+          global_headers = config.get("globalHeaders") or {}
+          csp = global_headers.get("Content-Security-Policy", "")
+
+          if not csp:
+              error(config_path, "Falta Content-Security-Policy en globalHeaders.")
+
+          required_csp_parts = [
+              "default-src 'self'",
+              "base-uri 'self'",
+              "object-src 'none'",
+              "frame-ancestors 'none'",
+              "script-src 'self'",
+              "script-src-attr 'none'",
+              "manifest-src 'self'"
+          ]
+
+          missing_csp = [
+              part for part in required_csp_parts
+              if part not in csp
+          ]
+
+          if missing_csp:
+              error(
+                  config_path,
+                  "CSP incompleta. Faltan: " + ", ".join(missing_csp)
+              )
+
+          if "fonts.googleapis.com" in csp or "fonts.gstatic.com" in csp:
+              error(
+                  config_path,
+                  "La CSP no debe permitir Google Fonts. Onion usa fuentes locales/sistema."
+              )
+
+          mime_types = config.get("mimeTypes") or {}
+          required_mimes = {
+              ".html": "text/html",
+              ".css": "text/css",
+              ".js": "application/javascript",
+              ".mjs": "application/javascript",
+              ".json": "application/json",
+              ".webmanifest": "application/manifest+json",
+              ".png": "image/png",
+              ".ico": "image/x-icon"
+          }
+
+          for ext, expected in required_mimes.items():
+              actual = mime_types.get(ext)
+              if actual != expected:
+                  error(
+                      config_path,
+                      f"mimeTypes{ext} debe ser {expected}, valor actual: {actual!r}"
+                  )
+
+          # =====================================================
+          # index.html
+          # =====================================================
+
+          if "<!DOCTYPE html>" not in index_text[:120].upper():
+              warning(index_path, "index.html debería empezar con <!DOCTYPE html>.")
 
           if 'type="module"' not in index_text and "type='module'" not in index_text:
-              print("::warning file=index.html::No se detectó script type=module. Revisa que /src/main.js cargue como módulo.")
+              error(index_path, "No se detectó script type=module. /src/main.js debe cargar como módulo.")
 
-          if robots_path.exists():
-              robots_text = robots_path.read_text(encoding="utf-8", errors="replace")
-              if "Sitemap:" not in robots_text:
-                  print("::warning file=robots.txt::robots.txt no declara Sitemap.")
-          else:
-              print("::warning file=robots.txt::No se encontró robots.txt.")
+          if "/src/preboot/theme.js" not in index_text:
+              error(index_path, "No se detectó /src/preboot/theme.js antes del boot.")
+
+          if "/src/css/app.css" not in index_text:
+              error(index_path, "No se detectó /src/css/app.css como CSS entrypoint.")
+
+          if "/src/main.js" not in index_text:
+              error(index_path, "No se detectó /src/main.js como entrada principal.")
+
+          if "fonts.googleapis.com" in index_text or "fonts.gstatic.com" in index_text:
+              error(index_path, "index.html no debe referenciar Google Fonts.")
+
+          if "favicon.svg" in index_text:
+              error(index_path, "index.html no debe referenciar favicon.svg.")
+
+          if "favicon_support.png" in index_text:
+              error(index_path, "index.html no debe usar favicon_support.png como favicon del SPA.")
+
+          if 'rel="icon"' not in index_text and "rel='icon'" not in index_text:
+              error(index_path, "index.html debe declarar rel=icon.")
+
+          if "/src/media/img/favicon_black_circle.png" not in index_text:
+              error(index_path, "El favicon real del SPA debe ser /src/media/img/favicon_black_circle.png.")
+
+          favicon_ico_declared = re.search(
+              r'<link[^>]+rel=["\'](?:shortcut icon|icon)["\'][^>]+href=["\']/favicon\.ico',
+              index_text,
+              flags=re.IGNORECASE
+          )
+
+          if favicon_ico_declared:
+              error(index_path, "No declares /favicon.ico en index.html. Queda sólo como fallback físico pasivo.")
+
+          required_index_assets = [
+              "/src/media/img/favicon_black_circle.png",
+              "/src/media/img/favicon_white.png",
+              "/src/media/img/favicon_black.png"
+          ]
+
+          missing_assets = [
+              asset for asset in required_index_assets
+              if asset not in index_text
+          ]
+
+          if missing_assets:
+              error(
+                  index_path,
+                  "Faltan assets de icono/loader en index.html: " + ", ".join(missing_assets)
+              )
+
+          if "<style" in index_text.lower():
+              error(index_path, "index.html no debe contener <style> inline.")
+
+          inline_handler = re.search(
+              r"\s(onclick|onload|onerror|onchange|onsubmit)\s*=",
+              index_text,
+              flags=re.IGNORECASE
+          )
+
+          if inline_handler:
+              error(index_path, "index.html no debe contener handlers inline.")
+
+          # =====================================================
+          # site.webmanifest
+          # =====================================================
+
+          icons = manifest.get("icons") or []
+
+          if not icons:
+              error(manifest_path, "site.webmanifest debe declarar icons.")
+
+          icon_sources = [
+              str(icon.get("src", ""))
+              for icon in icons
+              if isinstance(icon, dict)
+          ]
+
+          if not any("/src/media/img/favicon_black_circle.png" in src for src in icon_sources):
+              error(
+                  manifest_path,
+                  "site.webmanifest debe usar /src/media/img/favicon_black_circle.png."
+              )
+
+          forbidden_manifest_refs = [
+              "/favicon.ico",
+              "favicon_support.png",
+              "favicon.svg"
+          ]
+
+          for forbidden in forbidden_manifest_refs:
+              if any(forbidden in src for src in icon_sources):
+                  error(
+                      manifest_path,
+                      f"site.webmanifest no debe referenciar {forbidden}."
+                  )
+
+          if manifest.get("start_url") != "/":
+              error(manifest_path, "site.webmanifest start_url debe ser /.")
+
+          if manifest.get("scope") != "/":
+              error(manifest_path, "site.webmanifest scope debe ser /.")
+
+          if manifest.get("display") != "standalone":
+              warning(manifest_path, "display debería ser standalone.")
+
+          # =====================================================
+          # robots.txt
+          # =====================================================
+
+          if "User-agent: *" not in robots_text:
+              error(robots_path, "robots.txt debe contener User-agent: *.")
+
+          if "Disallow: /" not in robots_text:
+              error(robots_path, "robots.txt debe bloquear todo el panel privado con Disallow: /.")
+
+          if "Allow: /" in robots_text:
+              error(robots_path, "robots.txt no debe contener Allow: / porque la SPA es privada.")
+
+          if "Sitemap:" in robots_text:
+              error(robots_path, "robots.txt no debe declarar Sitemap mientras /sitemap.xml responda 404.")
+
+          if "favicon.svg" in robots_text:
+              error(robots_path, "robots.txt no debe declarar favicon.svg.")
+
+          if "/src/media/img/favicon_black_circle.png" not in robots_text:
+              warning(robots_path, "robots.txt debería permitir favicon_black_circle.png.")
+
+          # =====================================================
+          # sitemap.xml
+          # =====================================================
 
           if sitemap_path.exists():
               try:
-                  ET.parse(sitemap_path)
+                  tree = ET.parse(sitemap_path)
+                  root = tree.getroot()
               except Exception as exc:
-                  print(f"::error file=sitemap.xml::sitemap.xml no es XML válido: {exc}")
-                  sys.exit(1)
-          else:
-              print("::warning file=sitemap.xml::No se encontró sitemap.xml.")
+                  error(sitemap_path, f"sitemap.xml no es XML válido: {exc}")
 
-          print("Static Web App package validated.")
+              namespace = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
+              urls = root.findall(f"{namespace}url")
+
+              if urls:
+                  error(
+                      sitemap_path,
+                      "sitemap.xml debe estar vacío de URLs mientras Onion Support sea SPA privada."
+                  )
+          else:
+              print("::notice file=sitemap.xml::No existe sitemap.xml físico. Correcto si /sitemap.xml responde 404 desde staticwebapp.config.json.")
+
+          print("Onion SPA package validated.")
           PY
 
       - name: Deploy to Azure Static Web Apps

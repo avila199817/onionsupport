@@ -28,6 +28,13 @@
    - Loader coherente con tema claro.
    - Modal/Drawer/Toast premium.
    - Search Command Palette con glass sólo sobre vista/contenido.
+
+   TOPBAR SEARCH CONTRACT:
+   - El search NO cambia de alto al abrir.
+   - El search NO baja al abrir.
+   - El search se centra desde topbar.css.
+   - El dropdown usa el mismo ancho visual del search.
+   - El glass afecta sólo a .main-content.
 ========================================================= */
 
 [data-theme="light"] {
@@ -519,18 +526,18 @@
   --topbar-button-border: rgba(23,32,51,.070);
 
   --topbar-search-bg:
-    linear-gradient(180deg, rgba(255,255,255,.880), rgba(248,250,252,.760)),
-    rgba(255,255,255,.76);
+    linear-gradient(180deg, rgba(255,255,255,.900), rgba(248,250,252,.790)),
+    rgba(255,255,255,.80);
 
   --topbar-search-bg-hover:
-    linear-gradient(180deg, rgba(255,255,255,.960), rgba(248,250,252,.860)),
-    rgba(255,255,255,.90);
+    linear-gradient(180deg, rgba(255,255,255,.970), rgba(248,250,252,.890)),
+    rgba(255,255,255,.92);
 
   --topbar-search-bg-focus: #ffffff;
-  --topbar-search-border: rgba(23,32,51,.080);
+  --topbar-search-border: rgba(23,32,51,.085);
 
   --topbar-search-result-bg: var(--dropdown-bg);
-  --topbar-search-result-border: var(--border-default);
+  --topbar-search-result-border: rgba(23,32,51,.105);
   --topbar-search-result-shadow:
     0 34px 82px rgba(15,23,42,.145),
     0 14px 30px rgba(15,23,42,.080),
@@ -539,8 +546,7 @@
 
   /* =========================================================
      TOPBAR SEARCH COMMAND PALETTE · LIGHT
-     El glass debe aplicarse sólo a vista/contenido.
-     Sidebar y topbar quedan nítidos.
+     Sólo tokens. No estructura.
   ========================================================= */
   --topbar-search-glass-bg:
     linear-gradient(
@@ -568,20 +574,33 @@
 
   --topbar-search-glass-blur: blur(18px) saturate(1.08);
 
-  --topbar-search-palette-width: min(720px, calc(100vw - 48px));
+  --topbar-search-command-width: min(860px, calc(100vw - 56px));
+
+  --topbar-search-command-offset-top:
+    calc(
+      var(--topbar-safe-top) +
+      ((var(--topbar-height) - var(--topbar-search-height)) / 2)
+    );
+
+  --topbar-search-palette-width: var(--topbar-search-command-width);
+
   --topbar-search-palette-max-height:
     min(
       430px,
-      calc(100dvh - var(--app-offset-topbar) - 40px)
+      calc(
+        100dvh -
+        var(--topbar-search-command-offset-top) -
+        var(--topbar-search-height) -
+        var(--topbar-search-results-gap-token) -
+        18px
+      )
     );
 
   --topbar-search-palette-radius: var(--radius-2xl);
   --topbar-search-palette-padding: 8px;
   --topbar-search-palette-scrollbar-size: 6px;
 
-  --topbar-search-command-width: min(620px, 52vw);
-  --topbar-search-command-offset-top: calc(var(--app-offset-topbar) + 10px);
-  --topbar-search-muted-opacity: .38;
+  --topbar-search-muted-opacity: .34;
 
 
   /* =========================================================
@@ -933,26 +952,47 @@
 
 @media (max-width: 980px) {
   [data-theme="light"] {
-    --topbar-search-palette-width: min(680px, calc(100vw - 28px));
+    --topbar-search-command-width: min(680px, calc(100vw - 28px));
+    --topbar-search-palette-width: var(--topbar-search-command-width);
   }
 }
 
 @media (max-width: 768px) {
   [data-theme="light"] {
     --topbar-search-command-width: calc(100vw - 24px);
-    --topbar-search-palette-width: calc(100vw - 24px);
+    --topbar-search-palette-width: var(--topbar-search-command-width);
+
+    --topbar-search-command-offset-top:
+      calc(
+        var(--topbar-safe-top) +
+        ((var(--topbar-height) - var(--topbar-search-height)) / 2)
+      );
+
     --topbar-search-palette-max-height:
       min(
         360px,
-        calc(100dvh - var(--app-offset-topbar) - 24px)
+        calc(
+          100dvh -
+          var(--topbar-search-command-offset-top) -
+          var(--topbar-search-height) -
+          var(--topbar-search-results-gap-token) -
+          18px
+        )
       );
+  }
+}
+
+@media (max-width: 640px) {
+  [data-theme="light"] {
+    --topbar-search-command-width: calc(100vw - 20px);
+    --topbar-search-palette-width: var(--topbar-search-command-width);
   }
 }
 
 @media (max-width: 420px) {
   [data-theme="light"] {
-    --topbar-search-command-width: calc(100vw - 20px);
-    --topbar-search-palette-width: calc(100vw - 20px);
+    --topbar-search-command-width: calc(100vw - 16px);
+    --topbar-search-palette-width: var(--topbar-search-command-width);
   }
 }
 
@@ -974,6 +1014,8 @@
     --input-border: rgba(7,17,31,.18);
     --input-border-hover: rgba(7,17,31,.26);
     --input-border-focus: rgba(111,89,217,.58);
+
+    --topbar-search-border: rgba(7,17,31,.18);
 
     --topbar-search-glass-bg:
       linear-gradient(
@@ -1004,6 +1046,7 @@
     --sidebar-bg: var(--surface-2);
 
     --topbar-search-glass-blur: none;
+
     --topbar-search-glass-bg:
       linear-gradient(
         180deg,

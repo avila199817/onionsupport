@@ -2,6 +2,9 @@
    Onion SPA - Store Notify
    Archivo: src/store/notify.js
 
+   ONION SUPPORT · STORE NOTIFY
+   PAYLOADS · GLOBAL / KEY / SELECTOR LISTENERS · FIREBREAK SAFE · 14/10
+
    Responsabilidades:
    - construir payloads consistentes del store
    - notificar listeners globales
@@ -13,14 +16,23 @@
    - soportar listeners corruptos sin romper el store
    - mantener payloads estables
    - proteger contra mutaciones cruzadas entre subscribers
+   - emitir diagnóstico store:notify sin filtrar secretos
+   - soportar Set/Map/Array parcial sin romper
+   - soportar path matching padre/hijo bidireccional
 
-   HARDENING PRO:
+   HARDENING EXTREMO:
    - payload clonado por subscriber
-   - errores aislados
+   - errores aislados sync/async
    - path matching robusto padre/hijo
    - selector diff seguro
    - snapshots defensivos
    - tolerancia a Maps/Sets corruptos
+   - cleanup opcional de listeners corruptos
+   - no muta payload base
+   - no comparte referencias entre subscribers
+   - no rompe si un selector falla
+   - no rompe si equalityFn falla
+   - no rompe si AppCore está parcial
    - cero throws accidentales durante notify
 ========================================================= */
 
@@ -31,13 +43,76 @@ import {
 } from "./helpers.js";
 
 /* =========================================================
+   VERSION
+========================================================= */
+
+export const STORE_NOTIFY_VERSION =
+  "14.0.0";
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const STORE_NOTIFY_EVENT =
+  "store:notify";
+
+const STORE_NOTIFY_ERROR_EVENT =
+  "store:notify:error";
+
+const STORE_NOTIFY_LISTENER_ERROR_EVENT =
+  "store:listener:error";
+
+const STORE_NOTIFY_SELECTOR_ERROR_EVENT =
+  "store:selector:error";
+
+const STORE_NOTIFY_KEY_ERROR_EVENT =
+  "store:key-listener:error";
+
+const DEFAULT_MAX_CHANGED_PATHS =
+  500;
+
+const MAX_SAFE_CLONE_DEPTH =
+  8;
+
+const MAX_SAFE_ARRAY_ITEMS =
+  2000;
+
+const MAX_SAFE_OBJECT_KEYS =
+  500;
+
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code/i;
+
+const TOKENISH_TEXT_RE =
+  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|tempToken|temp_token|code|t)=)[^&#\s]+/gi;
+
+const UNSAFE_PATH_KEYS =
+  new Set([
+    "__proto__",
+    "prototype",
+    "constructor",
+  ]);
+
+/* =========================================================
    BASICS
 ========================================================= */
 
-function safeText(
-  value,
-  fallback = ""
-) {
+function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function isAnyObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object"
+  );
+}
+
+function safeText(value, fallback = "") {
   if (
     value === null ||
     value === undefined
@@ -51,64 +126,142 @@ function safeText(
   return text || fallback;
 }
 
+function safeNumber(value, fallback = 0) {
+  const number =
+    Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : fallback;
+}
+
 function safeArray(value) {
   return Array.isArray(value)
     ? value
     : [];
 }
 
-function safeSet(value) {
-  return value instanceof Set
-    ? value
-    : new Set();
+function safeNow() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
 }
 
-function safeMap(value) {
-  return value instanceof Map
-    ? value
-    : new Map();
+function safeIsoDate(ms = safeNow()) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
+  }
 }
 
-function nowMs() {
-  return Date.now();
-}
-
-function safeError(
-  AppCore,
-  label = "Store notify error",
-  error = null
-) {
+function safeError(AppCore, label = "Store notify error", error = null, extra = {}) {
   try {
     AppCore?.utils?.error?.(
       label,
-      error
+      error,
+      extra
     );
 
-    return;
+    return true;
   } catch {}
 
   try {
     console.error(
       label,
-      error
+      error,
+      extra
     );
+
+    return true;
   } catch {}
+
+  return false;
 }
 
-function safeRun(
-  AppCore,
-  label,
-  fn
-) {
+function safeWarn(AppCore, label = "Store notify warning", payload = {}) {
+  try {
+    AppCore?.utils?.warn?.(
+      label,
+      payload
+    );
+
+    return true;
+  } catch {}
+
+  try {
+    console.warn(
+      label,
+      payload
+    );
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function safeEmit(AppCore, eventName, payload = {}) {
+  const name =
+    safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  try {
+    AppCore?.events?.emit?.(
+      name,
+      payload
+    );
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function safeRun(AppCore, label, fn, eventName = STORE_NOTIFY_ERROR_EVENT, extra = {}) {
   try {
     if (isFunction(fn)) {
-      return fn();
+      const result =
+        fn();
+
+      if (
+        result &&
+        typeof result === "object" &&
+        isFunction(result.catch)
+      ) {
+        result.catch((error) => {
+          reportSubscriberError(
+            AppCore,
+            label,
+            error,
+            {
+              ...extra,
+              async:
+                true,
+              eventName,
+            }
+          );
+        });
+      }
+
+      return result;
     }
   } catch (error) {
-    safeError(
+    reportSubscriberError(
       AppCore,
       label,
-      error
+      error,
+      {
+        ...extra,
+        async:
+          false,
+        eventName,
+      }
     );
   }
 
@@ -116,26 +269,313 @@ function safeRun(
 }
 
 /* =========================================================
+   ERROR / REDACTION
+========================================================= */
+
+function redactText(value = "") {
+  const text =
+    safeText(value, "");
+
+  if (!text) {
+    return "";
+  }
+
+  try {
+    return text.replace(
+      TOKENISH_TEXT_RE,
+      (match) => {
+        if (/^bearer\s+/i.test(match)) {
+          return "Bearer ***";
+        }
+
+        if (/^[?&#]/.test(match)) {
+          return match.replace(/=.+$/g, "=***");
+        }
+
+        return "***";
+      }
+    );
+  } catch {
+    return text;
+  }
+}
+
+function sanitizeError(error = null) {
+  if (!error) {
+    return null;
+  }
+
+  return {
+    name:
+      safeText(
+        error?.name,
+        "Error"
+      ),
+
+    message:
+      redactText(
+        safeText(
+          error?.message || error,
+          "Store notify error."
+        )
+      ),
+
+    code:
+      safeText(
+        error?.code ||
+          error?.statusCode ||
+          "",
+        ""
+      ),
+
+    status:
+      safeNumber(
+        error?.status,
+        0
+      ) || null,
+
+    stack:
+      error?.stack
+        ? "[stack]"
+        : null,
+  };
+}
+
+function sanitizeValue(value, depth = 0, keyHint = "") {
+  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) {
+    return value
+      ? "***"
+      : null;
+  }
+
+  if (depth > MAX_SAFE_CLONE_DEPTH) {
+    return "[depth-limit]";
+  }
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return redactText(value);
+  }
+
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "bigint") {
+    return String(value);
+  }
+
+  if (typeof value === "function") {
+    return "[function]";
+  }
+
+  if (value instanceof Error) {
+    return sanitizeError(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, MAX_SAFE_ARRAY_ITEMS)
+      .map((item) =>
+        sanitizeValue(
+          item,
+          depth + 1,
+          keyHint
+        )
+      );
+  }
+
+  if (isAnyObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value).slice(0, MAX_SAFE_OBJECT_KEYS)) {
+      output[key] =
+        sanitizeValue(
+          item,
+          depth + 1,
+          key
+        );
+    }
+
+    return output;
+  }
+
+  try {
+    return redactText(
+      String(value)
+    );
+  } catch {
+    return "[unserializable]";
+  }
+}
+
+function reportSubscriberError(AppCore, label, error, extra = {}) {
+  const payload = {
+    ok:
+      false,
+
+    label:
+      safeText(label, "Store notify error"),
+
+    error:
+      sanitizeError(error),
+
+    scope:
+      safeText(extra.scope, "store:notify"),
+
+    path:
+      safeText(extra.path, ""),
+
+    listenerType:
+      safeText(extra.listenerType, ""),
+
+    async:
+      Boolean(extra.async),
+
+    at:
+      safeIsoDate(),
+  };
+
+  safeError(
+    AppCore,
+    payload.label,
+    error,
+    payload
+  );
+
+  safeEmit(
+    AppCore,
+    extra.eventName || STORE_NOTIFY_ERROR_EVENT,
+    payload
+  );
+
+  return payload;
+}
+
+/* =========================================================
+   COLLECTION COERCION
+========================================================= */
+
+function toArrayFromSetLike(value) {
+  if (!value) {
+    return [];
+  }
+
+  if (value instanceof Set) {
+    return Array.from(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (
+    typeof value.length === "number" &&
+    typeof value !== "string"
+  ) {
+    try {
+      return Array.from(value);
+    } catch {}
+  }
+
+  return [];
+}
+
+function safeSet(value) {
+  if (value instanceof Set) {
+    return value;
+  }
+
+  try {
+    return new Set(
+      toArrayFromSetLike(value)
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function safeMap(value) {
+  if (value instanceof Map) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    try {
+      return new Map(value);
+    } catch {
+      return new Map();
+    }
+  }
+
+  if (isObject(value)) {
+    try {
+      return new Map(
+        Object.entries(value)
+      );
+    } catch {
+      return new Map();
+    }
+  }
+
+  return new Map();
+}
+
+/* =========================================================
    PATH HELPERS
 ========================================================= */
 
+function isUnsafePathKey(key = "") {
+  return UNSAFE_PATH_KEYS.has(
+    safeText(key, "")
+  );
+}
+
 function normalizePath(path = "") {
+  if (Array.isArray(path)) {
+    return path
+      .map((part) =>
+        safeText(part, "")
+      )
+      .filter(Boolean)
+      .filter((part) =>
+        !isUnsafePathKey(part)
+      )
+      .join(".");
+  }
+
   return safeText(path, "")
+    .replace(/\[(\w+)\]/g, ".$1")
     .split(".")
     .map((part) =>
       part.trim()
     )
     .filter(Boolean)
+    .filter((part) =>
+      !isUnsafePathKey(part)
+    )
     .join(".");
 }
 
-function uniquePaths(
-  changedPaths = []
-) {
+function uniquePaths(changedPaths = []) {
+  const limit =
+    DEFAULT_MAX_CHANGED_PATHS;
+
   const paths =
     safeArray(changedPaths)
+      .flat(Infinity)
       .map(normalizePath)
-      .filter(Boolean);
+      .filter(Boolean)
+      .slice(0, limit);
 
   return Array.from(
     new Set(paths)
@@ -154,10 +594,7 @@ function uniquePaths(
  * watched: session.user
  * changed: ui.theme            => no match
  */
-function pathMatches(
-  watchedPath = "",
-  changedPath = ""
-) {
+export function pathMatches(watchedPath = "", changedPath = "") {
   const watched =
     normalizePath(watchedPath);
 
@@ -175,55 +612,128 @@ function pathMatches(
   );
 }
 
-function anyPathMatches(
-  watchedPath = "",
-  changedPaths = []
-) {
-  return uniquePaths(changedPaths).some(
-    (changedPath) =>
-      pathMatches(
-        watchedPath,
-        changedPath
-      )
+function anyPathMatches(watchedPath = "", changedPaths = []) {
+  const path =
+    normalizePath(watchedPath);
+
+  if (!path) {
+    return false;
+  }
+
+  return uniquePaths(changedPaths).some((changedPath) =>
+    pathMatches(
+      path,
+      changedPath
+    )
   );
 }
 
+function getPathDepth(path = "") {
+  const clean =
+    normalizePath(path);
+
+  if (!clean) {
+    return 0;
+  }
+
+  return clean.split(".").length;
+}
+
 /* =========================================================
-   PAYLOAD SAFETY
+   CLONE / FREEZE
 ========================================================= */
 
-function clonePayload(payload = {}) {
+function safeClone(value, fallback = null) {
+  if (value === undefined) {
+    return fallback;
+  }
+
   try {
-    return deepClone(payload);
+    return deepClone(value);
+  } catch {}
+
+  try {
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
+    }
+  } catch {}
+
+  try {
+    return JSON.parse(
+      JSON.stringify(value)
+    );
   } catch {
-    return {
-      ...payload,
-      state:
-        deepClone(payload?.state),
-      previousState:
-        deepClone(payload?.previousState),
-      changedPaths:
-        uniquePaths(payload?.changedPaths),
-    };
+    return fallback;
+  }
+}
+
+function clonePayload(payload = {}) {
+  const source =
+    isObject(payload)
+      ? payload
+      : {};
+
+  try {
+    return deepClone(source);
+  } catch {}
+
+  return {
+    ...source,
+
+    state:
+      safeClone(
+        source.state,
+        null
+      ),
+
+    previousState:
+      safeClone(
+        source.previousState,
+        null
+      ),
+
+    changedPaths:
+      uniquePaths(
+        source.changedPaths
+      ),
+  };
+}
+
+function freezeShallow(value) {
+  try {
+    return Object.freeze(value);
+  } catch {
+    return value;
   }
 }
 
 function freezePayload(payload = {}) {
-  try {
-    Object.freeze(payload.changedPaths);
-  } catch {}
+  if (!payload || typeof payload !== "object") {
+    return payload;
+  }
 
   try {
-    Object.freeze(payload);
+    if (Array.isArray(payload.changedPaths)) {
+      Object.freeze(payload.changedPaths);
+    }
   } catch {}
 
-  return payload;
+  return freezeShallow(payload);
 }
 
 function buildSubscriberPayload(payload = {}, extra = {}) {
+  const base =
+    clonePayload(payload);
+
+  const ext =
+    safeClone(
+      extra,
+      {}
+    ) || {};
+
   return freezePayload({
-    ...clonePayload(payload),
-    ...deepClone(extra),
+    ...base,
+    ...ext,
   });
 }
 
@@ -231,30 +741,44 @@ function buildSubscriberPayload(payload = {}, extra = {}) {
    PAYLOAD
 ========================================================= */
 
-export function buildPayload(
-  snapshot,
-  changedPaths = [],
-  previousState = null
-) {
+export function buildPayload(snapshot, changedPaths = [], previousState = null) {
+  const timestamp =
+    safeNow();
+
   const nextState =
     isFunction(snapshot)
-      ? snapshot()
+      ? safeRun(
+          null,
+          "Store snapshot builder error",
+          () => snapshot()
+        )
       : snapshot;
 
   return freezePayload({
+    version:
+      STORE_NOTIFY_VERSION,
+
     state:
-      deepClone(nextState),
+      safeClone(
+        nextState,
+        {}
+      ),
 
     previousState:
       previousState
-        ? deepClone(previousState)
+        ? safeClone(
+            previousState,
+            null
+          )
         : null,
 
     changedPaths:
       uniquePaths(changedPaths),
 
-    timestamp:
-      nowMs(),
+    timestamp,
+
+    timestampIso:
+      safeIsoDate(timestamp),
   });
 }
 
@@ -262,10 +786,15 @@ export function buildPayload(
    GLOBAL LISTENERS
 ========================================================= */
 
+function shouldRemoveInvalidListeners(options = {}) {
+  return options?.cleanupInvalid === true;
+}
+
 export function notifyGlobalListeners({
   AppCore,
   listeners,
   payload,
+  options = {},
 } = {}) {
   const bucket =
     safeSet(listeners);
@@ -274,25 +803,43 @@ export function notifyGlobalListeners({
     return 0;
   }
 
-  let notified = 0;
+  let notified =
+    0;
 
-  Array.from(bucket).forEach((listener) => {
+  for (const listener of Array.from(bucket)) {
     if (!isFunction(listener)) {
-      return;
+      if (shouldRemoveInvalidListeners(options)) {
+        try {
+          bucket.delete(listener);
+        } catch {}
+      }
+
+      continue;
     }
 
     safeRun(
       AppCore,
-      "Store listener error",
+      "Store global listener error",
       () => {
         listener(
-          buildSubscriberPayload(payload)
+          buildSubscriberPayload(
+            payload,
+            {
+              listenerType:
+                "global",
+            }
+          )
         );
 
         notified += 1;
+      },
+      STORE_NOTIFY_LISTENER_ERROR_EVENT,
+      {
+        listenerType:
+          "global",
       }
     );
-  });
+  }
 
   return notified;
 }
@@ -301,11 +848,186 @@ export function notifyGlobalListeners({
    KEY LISTENERS
 ========================================================= */
 
+function resolvePathValue(get, path = "") {
+  if (!isFunction(get)) {
+    return undefined;
+  }
+
+  try {
+    return get(path);
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeKeyListenerEntry(entry, fallbackPath = "") {
+  if (isFunction(entry)) {
+    return {
+      listener:
+        entry,
+
+      once:
+        false,
+
+      path:
+        fallbackPath,
+    };
+  }
+
+  if (isObject(entry) && isFunction(entry.listener)) {
+    return {
+      ...entry,
+
+      path:
+        normalizePath(
+          entry.path ||
+            fallbackPath
+        ),
+
+      once:
+        entry.once === true,
+    };
+  }
+
+  return null;
+}
+
+function notifyKeyListenerEntry({
+  AppCore,
+  get,
+  payload,
+  path,
+  changedPaths,
+  entry,
+  bucket,
+} = {}) {
+  const normalizedEntry =
+    normalizeKeyListenerEntry(
+      entry,
+      path
+    );
+
+  if (!normalizedEntry) {
+    return false;
+  }
+
+  const listener =
+    normalizedEntry.listener;
+
+  if (!isFunction(listener)) {
+    return false;
+  }
+
+  const value =
+    safeClone(
+      resolvePathValue(
+        get,
+        path
+      ),
+      undefined
+    );
+
+  const previousValue =
+    payload?.previousState
+      ? getValueByPath(
+          payload.previousState,
+          path
+        )
+      : undefined;
+
+  safeRun(
+    AppCore,
+    `Store key listener error (${path})`,
+    () => {
+      listener(
+        buildSubscriberPayload(
+          payload,
+          {
+            listenerType:
+              "key",
+
+            path,
+
+            value:
+              safeClone(
+                value,
+                value
+              ),
+
+            previousValue:
+              safeClone(
+                previousValue,
+                previousValue
+              ),
+
+            matchedPaths:
+              changedPaths.filter((changedPath) =>
+                pathMatches(
+                  path,
+                  changedPath
+                )
+              ),
+          }
+        )
+      );
+    },
+    STORE_NOTIFY_KEY_ERROR_EVENT,
+    {
+      listenerType:
+        "key",
+      path,
+    }
+  );
+
+  if (normalizedEntry.once === true) {
+    try {
+      bucket?.delete?.(entry);
+    } catch {}
+  }
+
+  return true;
+}
+
+function getValueByPath(source = {}, path = "") {
+  const keys =
+    normalizePath(path)
+      .split(".")
+      .filter(Boolean);
+
+  if (!keys.length) {
+    return safeClone(
+      source,
+      source
+    );
+  }
+
+  let current =
+    source;
+
+  for (const key of keys) {
+    if (
+      current === null ||
+      current === undefined
+    ) {
+      return undefined;
+    }
+
+    current =
+      current[key];
+  }
+
+  return safeClone(
+    current,
+    current
+  );
+}
+
 export function notifyKeyListeners({
   AppCore,
   keyListeners,
   get,
   payload,
+  options = {},
 } = {}) {
   const map =
     safeMap(keyListeners);
@@ -324,57 +1046,56 @@ export function notifyKeyListeners({
     return 0;
   }
 
-  let notified = 0;
+  let notified =
+    0;
 
-  Array.from(map.entries()).forEach(
-    ([
-      watchedPath,
-      bucket,
-    ]) => {
-      const path =
-        normalizePath(watchedPath);
+  const entries =
+    Array.from(map.entries())
+      .sort(([pathA], [pathB]) =>
+        getPathDepth(pathA) - getPathDepth(pathB)
+      );
 
-      if (!path) {
-        return;
-      }
+  for (const [watchedPath, bucketRaw] of entries) {
+    const path =
+      normalizePath(watchedPath);
 
-      if (
-        !anyPathMatches(
-          path,
-          changedPaths
-        )
-      ) {
-        return;
-      }
-
-      safeSet(bucket).forEach((listener) => {
-        if (!isFunction(listener)) {
-          return;
-        }
-
-        safeRun(
-          AppCore,
-          `Store key listener error (${path})`,
-          () => {
-            listener(
-              buildSubscriberPayload(
-                payload,
-                {
-                  path,
-                  value:
-                    deepClone(
-                      get(path)
-                    ),
-                }
-              )
-            );
-
-            notified += 1;
-          }
-        );
-      });
+    if (!path) {
+      continue;
     }
-  );
+
+    if (
+      !anyPathMatches(
+        path,
+        changedPaths
+      )
+    ) {
+      continue;
+    }
+
+    const bucket =
+      safeSet(bucketRaw);
+
+    for (const entry of Array.from(bucket)) {
+      const ok =
+        notifyKeyListenerEntry({
+          AppCore,
+          get,
+          payload,
+          path,
+          changedPaths,
+          entry,
+          bucket,
+        });
+
+      if (ok) {
+        notified += 1;
+      } else if (shouldRemoveInvalidListeners(options)) {
+        try {
+          bucket.delete(entry);
+        } catch {}
+      }
+    }
+  }
 
   return notified;
 }
@@ -387,29 +1108,86 @@ function resolveSelectorState({
   shallowCloneRoot,
   state,
 }) {
-  if (isFunction(shallowCloneRoot)) {
-    return shallowCloneRoot(state);
-  }
+  try {
+    if (isFunction(shallowCloneRoot)) {
+      return shallowCloneRoot(state);
+    }
+  } catch {}
 
-  return {
-    ...(state || {}),
-  };
+  return safeClone(
+    state,
+    {}
+  ) || {};
 }
 
 function getSelectorEquality(entry = {}) {
-  if (
-    isFunction(entry.equalityFn)
-  ) {
+  if (isFunction(entry.equalityFn)) {
     return entry.equalityFn;
   }
 
-  if (
-    isFunction(entry.compare)
-  ) {
+  if (isFunction(entry.compare)) {
     return entry.compare;
   }
 
   return deepEqual;
+}
+
+function runSelector(entry, selectorState) {
+  try {
+    return {
+      ok:
+        true,
+
+      value:
+        entry.selector(selectorState),
+    };
+  } catch (error) {
+    return {
+      ok:
+        false,
+
+      error,
+    };
+  }
+}
+
+function runEquality(entry, nextValue, previousValue) {
+  const equalityFn =
+    getSelectorEquality(entry);
+
+  try {
+    return Boolean(
+      equalityFn(
+        nextValue,
+        previousValue
+      )
+    );
+  } catch {
+    try {
+      return deepEqual(
+        nextValue,
+        previousValue
+      );
+    } catch {
+      return false;
+    }
+  }
+}
+
+function getSelectorListener(entry = {}) {
+  if (isFunction(entry.listener)) {
+    return entry.listener;
+  }
+
+  if (isFunction(entry.callback)) {
+    return entry.callback;
+  }
+
+  if (isFunction(entry.handler)) {
+    return entry.handler;
+  }
+
+  return null;
 }
 
 export function notifySelectorListeners({
@@ -418,6 +1196,7 @@ export function notifySelectorListeners({
   shallowCloneRoot,
   state,
   payload,
+  options = {},
 } = {}) {
   const bucket =
     safeSet(selectorListeners);
@@ -426,70 +1205,146 @@ export function notifySelectorListeners({
     return 0;
   }
 
-  let notified = 0;
+  let notified =
+    0;
 
-  Array.from(bucket).forEach((entry) => {
+  const selectorState =
+    resolveSelectorState({
+      shallowCloneRoot,
+      state,
+    });
+
+  for (const entry of Array.from(bucket)) {
     if (
       !entry ||
-      !isFunction(entry.selector) ||
-      !isFunction(entry.listener)
+      !isFunction(entry.selector)
     ) {
-      return;
+      if (shouldRemoveInvalidListeners(options)) {
+        try {
+          bucket.delete(entry);
+        } catch {}
+      }
+
+      continue;
+    }
+
+    const listener =
+      getSelectorListener(entry);
+
+    if (!isFunction(listener)) {
+      if (shouldRemoveInvalidListeners(options)) {
+        try {
+          bucket.delete(entry);
+        } catch {}
+      }
+
+      continue;
+    }
+
+    const selectorResult =
+      runSelector(
+        entry,
+        selectorState
+      );
+
+    if (!selectorResult.ok) {
+      reportSubscriberError(
+        AppCore,
+        "Store selector execution error",
+        selectorResult.error,
+        {
+          listenerType:
+            "selector",
+          eventName:
+            STORE_NOTIFY_SELECTOR_ERROR_EVENT,
+        }
+      );
+
+      if (entry.removeOnError === true) {
+        try {
+          bucket.delete(entry);
+        } catch {}
+      }
+
+      continue;
+    }
+
+    const nextValue =
+      selectorResult.value;
+
+    const previousValue =
+      safeClone(
+        entry.lastValue,
+        entry.lastValue
+      );
+
+    const unchanged =
+      runEquality(
+        entry,
+        nextValue,
+        entry.lastValue
+      );
+
+    if (unchanged) {
+      continue;
+    }
+
+    try {
+      entry.lastValue =
+        safeClone(
+          nextValue,
+          nextValue
+        );
+    } catch {
+      entry.lastValue =
+        nextValue;
     }
 
     safeRun(
       AppCore,
       "Store selector listener error",
       () => {
-        const selectorState =
-          resolveSelectorState({
-            shallowCloneRoot,
-            state,
-          });
-
-        const nextValue =
-          entry.selector(
-            selectorState
-          );
-
-        const equalityFn =
-          getSelectorEquality(entry);
-
-        const unchanged =
-          equalityFn(
-            nextValue,
-            entry.lastValue
-          );
-
-        if (unchanged) {
-          return;
-        }
-
-        const previousValue =
-          deepClone(
-            entry.lastValue
-          );
-
-        entry.lastValue =
-          deepClone(
-            nextValue
-          );
-
-        entry.listener(
+        listener(
           buildSubscriberPayload(
             payload,
             {
+              listenerType:
+                "selector",
+
               value:
-                deepClone(nextValue),
+                safeClone(
+                  nextValue,
+                  nextValue
+                ),
+
               previousValue,
+
+              selectorName:
+                safeText(
+                  entry.name ||
+                    entry.selector?.name ||
+                    "",
+                  ""
+                ),
             }
           )
         );
 
         notified += 1;
+      },
+      STORE_NOTIFY_SELECTOR_ERROR_EVENT,
+      {
+        listenerType:
+          "selector",
       }
     );
-  });
+
+    if (entry.once === true) {
+      try {
+        bucket.delete(entry);
+      } catch {}
+    }
+  }
 
   return notified;
 }
@@ -502,23 +1357,43 @@ function normalizeFinalPayload({
   payload,
   snapshot,
 } = {}) {
+  const timestamp =
+    safeNumber(
+      payload?.timestamp,
+      safeNow()
+    );
+
   const state =
     payload?.state ??
     (
       isFunction(snapshot)
-        ? snapshot()
+        ? safeRun(
+            null,
+            "Store snapshot builder error",
+            () => snapshot()
+          )
         : null
     );
 
   return freezePayload({
-    ...deepClone(payload || {}),
+    version:
+      payload?.version ||
+      STORE_NOTIFY_VERSION,
+
+    ...clonePayload(payload || {}),
 
     state:
-      deepClone(state),
+      safeClone(
+        state,
+        {}
+      ),
 
     previousState:
       payload?.previousState
-        ? deepClone(payload.previousState)
+        ? safeClone(
+            payload.previousState,
+            null
+          )
         : null,
 
     changedPaths:
@@ -526,9 +1401,11 @@ function normalizeFinalPayload({
         payload?.changedPaths
       ),
 
-    timestamp:
-      payload?.timestamp ||
-      nowMs(),
+    timestamp,
+
+    timestampIso:
+      payload?.timestampIso ||
+      safeIsoDate(timestamp),
   });
 }
 
@@ -546,68 +1423,213 @@ export function notify({
   shallowCloneRoot,
   state,
   payload,
+  options = {},
 } = {}) {
+  const startedAt =
+    safeNow();
+
   const finalPayload =
     normalizeFinalPayload({
       payload,
       snapshot,
     });
 
-  const globalCount =
-    notifyGlobalListeners({
-      AppCore,
-      listeners,
-      payload:
-        finalPayload,
-    });
+  if (!finalPayload.changedPaths.length) {
+    return {
+      ok:
+        true,
 
-  const keyCount =
-    notifyKeyListeners({
-      AppCore,
-      keyListeners,
-      get,
-      payload:
-        finalPayload,
-    });
+      skipped:
+        true,
 
-  const selectorCount =
-    notifySelectorListeners({
-      AppCore,
-      selectorListeners,
-      shallowCloneRoot,
-      state,
-      payload:
-        finalPayload,
-    });
+      reason:
+        "no-changed-paths",
+
+      globalListeners:
+        0,
+
+      keyListeners:
+        0,
+
+      selectorListeners:
+        0,
+
+      changedPaths:
+        [],
+    };
+  }
+
+  let globalCount =
+    0;
+
+  let keyCount =
+    0;
+
+  let selectorCount =
+    0;
 
   try {
-    AppCore?.events?.emit?.(
-      "store:notify",
+    globalCount =
+      notifyGlobalListeners({
+        AppCore,
+        listeners,
+        payload:
+          finalPayload,
+        options,
+      });
+  } catch (error) {
+    reportSubscriberError(
+      AppCore,
+      "Store global notify phase error",
+      error,
       {
-        changedPaths:
-          finalPayload.changedPaths,
-        globalListeners:
-          globalCount,
-        keyListeners:
-          keyCount,
-        selectorListeners:
-          selectorCount,
-        timestamp:
-          finalPayload.timestamp,
+        listenerType:
+          "global",
+        eventName:
+          STORE_NOTIFY_ERROR_EVENT,
       }
     );
-  } catch {}
+  }
 
-  return {
-    ok: true,
+  try {
+    keyCount =
+      notifyKeyListeners({
+        AppCore,
+        keyListeners,
+        get,
+        payload:
+          finalPayload,
+        options,
+      });
+  } catch (error) {
+    reportSubscriberError(
+      AppCore,
+      "Store key notify phase error",
+      error,
+      {
+        listenerType:
+          "key",
+        eventName:
+          STORE_NOTIFY_ERROR_EVENT,
+      }
+    );
+  }
+
+  try {
+    selectorCount =
+      notifySelectorListeners({
+        AppCore,
+        selectorListeners,
+        shallowCloneRoot,
+        state,
+        payload:
+          finalPayload,
+        options,
+      });
+  } catch (error) {
+    reportSubscriberError(
+      AppCore,
+      "Store selector notify phase error",
+      error,
+      {
+        listenerType:
+          "selector",
+        eventName:
+          STORE_NOTIFY_ERROR_EVENT,
+      }
+    );
+  }
+
+  const result = {
+    ok:
+      true,
+
+    version:
+      STORE_NOTIFY_VERSION,
+
     globalListeners:
       globalCount,
+
     keyListeners:
       keyCount,
+
     selectorListeners:
       selectorCount,
+
+    totalListeners:
+      globalCount + keyCount + selectorCount,
+
     changedPaths:
       finalPayload.changedPaths,
+
+    timestamp:
+      finalPayload.timestamp,
+
+    durationMs:
+      Math.max(
+        0,
+        safeNow() - startedAt
+      ),
+  };
+
+  safeEmit(
+    AppCore,
+    STORE_NOTIFY_EVENT,
+    {
+      ...result,
+
+      /*
+        No emitimos state/previousState en el evento diagnóstico
+        para evitar payloads enormes y leaks indirectos.
+      */
+      state:
+        undefined,
+
+      previousState:
+        undefined,
+    }
+  );
+
+  return result;
+}
+
+/* =========================================================
+   DEBUG HELPERS
+========================================================= */
+
+export function buildNotifySnapshot({
+  listeners,
+  keyListeners,
+  selectorListeners,
+} = {}) {
+  const keyMap =
+    safeMap(keyListeners);
+
+  return {
+    version:
+      STORE_NOTIFY_VERSION,
+
+    globalListeners:
+      safeSet(listeners).size,
+
+    keyListenerPaths:
+      Array.from(
+        keyMap.keys()
+      ).map(normalizePath),
+
+    keyListenerCount:
+      Array.from(
+        keyMap.values()
+      ).reduce((total, bucket) =>
+        total + safeSet(bucket).size,
+        0
+      ),
+
+    selectorListeners:
+      safeSet(selectorListeners).size,
+
+    at:
+      safeIsoDate(),
   };
 }
 
@@ -616,11 +1638,17 @@ export function notify({
 ========================================================= */
 
 export default {
+  STORE_NOTIFY_VERSION,
+
   buildPayload,
+
+  pathMatches,
 
   notifyGlobalListeners,
   notifyKeyListeners,
   notifySelectorListeners,
 
   notify,
+
+  buildNotifySnapshot,
 };

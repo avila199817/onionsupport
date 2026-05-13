@@ -2,7 +2,7 @@
    Onion SPA - Auth / Session
    Archivo: src/features/auth/index.js
 
-   AUTH FACADE · SESSION ORCHESTRATOR · GOD MODE v12
+   AUTH FACADE · SESSION ORCHESTRATOR · GOD MODE v12.2
    ENTERPRISE HARDENED · NO DUPLICATE CANONICAL EVENTS
 
    RESPONSABILIDADES:
@@ -16,6 +16,7 @@
    - integrar activación de cuenta
    - integrar forgot-password / reset-password request
    - integrar confirmación de reset-password
+   - integrar validación de reset-password token
    - integrar 2FA/MFA sin marcar authenticated antes de sesión válida
    - preservar rutas públicas técnicas durante restore/clear
    - no romper /activate-account?token=...
@@ -151,6 +152,14 @@ import {
 import {
   guardAuthenticated,
   guardRole,
+  guardGuest,
+  guardAdmin,
+  guardSupport,
+  guardManager,
+  canAccessRoute,
+  syncAuthState,
+  buildGuardErrorPayload,
+  getAuthGuardsSnapshot,
 } from "./guards.js";
 
 /* =========================================================
@@ -158,7 +167,7 @@ import {
 ========================================================= */
 
 const AUTH_MODULE_VERSION =
-  "12.1.0";
+  "12.2.0";
 
 /* =========================================================
    CONSTANTS / FALLBACKS
@@ -899,23 +908,28 @@ const activateAccountExecutor =
     ActivationApi,
     "activateAccount",
     "activate",
+    "activation",
     "confirmActivation",
-    "accountActivation"
+    "accountActivation",
+    "createUserActivation"
   );
 
 const activateFirstUserExecutor =
   getModuleExport(
     ActivationApi,
     "activateFirstUser",
-    "firstUserActivation"
+    "firstUserActivation",
+    "activateInitialUser"
   );
 
 const validateActivationTokenExecutor =
   getModuleExport(
     ActivationApi,
     "validateActivationToken",
+    "validateActivateAccountToken",
     "validateActivateToken",
-    "validateAccountActivationToken"
+    "validateAccountActivationToken",
+    "activationValidate"
   );
 
 const getActivateAccountEndpoint =
@@ -942,6 +956,17 @@ const getActivateFirstUserEndpoint =
     AUTH_ENDPOINTS?.firstUserActivation ||
     null);
 
+const getValidateActivationTokenEndpoint =
+  getModuleExport(
+    ActivationApi,
+    "getValidateActivationTokenEndpoint",
+    "getValidateActivateAccountTokenEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.validateActivationToken ||
+    AUTH_ENDPOINTS?.activationValidate ||
+    null);
+
 const resolveActivationToken =
   getModuleExport(
     ActivationApi,
@@ -959,6 +984,14 @@ const normalizeActivationPayload =
   ((payload = {}) =>
     payload);
 
+const normalizeFirstUserActivationPayload =
+  getModuleExport(
+    ActivationApi,
+    "normalizeFirstUserActivationPayload"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
 const buildActivationRequestBody =
   getModuleExport(
     ActivationApi,
@@ -968,11 +1001,28 @@ const buildActivationRequestBody =
   ((payload = {}) =>
     payload);
 
+const buildActivateFirstUserBody =
+  getModuleExport(
+    ActivationApi,
+    "buildActivateFirstUserBody",
+    "buildFirstUserActivationBody"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
 const normalizeActivationResponse =
   getModuleExport(
     ActivationApi,
     "normalizeActivationResponse",
     "normalizeActivateAccountResponse"
+  ) ||
+  ((response = {}) =>
+    response);
+
+const normalizeFirstUserActivationResponse =
+  getModuleExport(
+    ActivationApi,
+    "normalizeFirstUserActivationResponse"
   ) ||
   ((response = {}) =>
     response);
@@ -995,6 +1045,13 @@ async function activate(payload = {}, options = {}) {
   );
 }
 
+async function activation(payload = {}, options = {}) {
+  return activateAccount(
+    payload,
+    options
+  );
+}
+
 async function confirmActivation(payload = {}, options = {}) {
   return activateAccount(
     payload,
@@ -1003,6 +1060,13 @@ async function confirmActivation(payload = {}, options = {}) {
 }
 
 async function accountActivation(payload = {}, options = {}) {
+  return activateAccount(
+    payload,
+    options
+  );
+}
+
+async function createUserActivation(payload = {}, options = {}) {
   return activateAccount(
     payload,
     options
@@ -1020,12 +1084,40 @@ async function activateFirstUser(payload = {}, options = {}) {
   );
 }
 
+async function firstUserActivation(payload = {}, options = {}) {
+  return activateFirstUser(
+    payload,
+    options
+  );
+}
+
+async function activateInitialUser(payload = {}, options = {}) {
+  return activateFirstUser(
+    payload,
+    options
+  );
+}
+
 async function validateActivationToken(payload = {}, options = {}) {
   const executor =
     validateActivationTokenExecutor ||
     missingHandler("validateActivationToken en ./activation.js");
 
   return executor(
+    payload,
+    options
+  );
+}
+
+async function validateActivateAccountToken(payload = {}, options = {}) {
+  return validateActivationToken(
+    payload,
+    options
+  );
+}
+
+async function activationValidate(payload = {}, options = {}) {
+  return validateActivationToken(
     payload,
     options
   );
@@ -1078,6 +1170,28 @@ const getTwoFactorLoginEndpoint =
     AUTH_ENDPOINTS?.mfaLogin ||
     null);
 
+const getTwoFactorRequestEndpoint =
+  getModuleExport(
+    TwoFactorApi,
+    "getTwoFactorRequestEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.twoFactorRequest ||
+    AUTH_ENDPOINTS?.request2FA ||
+    AUTH_ENDPOINTS?.requestMfa ||
+    null);
+
+const getTwoFactorResendEndpoint =
+  getModuleExport(
+    TwoFactorApi,
+    "getTwoFactorResendEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.twoFactorResend ||
+    AUTH_ENDPOINTS?.resend2FA ||
+    AUTH_ENDPOINTS?.resendMfa ||
+    null);
+
 const resolveTwoFactorTempToken =
   getModuleExport(
     TwoFactorApi,
@@ -1095,11 +1209,36 @@ const normalizeTwoFactorPayload =
   ((payload = {}) =>
     payload);
 
+const normalizeRequestTwoFactorPayload =
+  getModuleExport(
+    TwoFactorApi,
+    "normalizeRequestTwoFactorPayload"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
 const buildTwoFactorVerifyBody =
   getModuleExport(
     TwoFactorApi,
     "buildTwoFactorVerifyBody",
     "buildVerifyTwoFactorBody"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const buildTwoFactorRequestBody =
+  getModuleExport(
+    TwoFactorApi,
+    "buildTwoFactorRequestBody",
+    "buildRequestTwoFactorBody"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const buildResendTwoFactorBody =
+  getModuleExport(
+    TwoFactorApi,
+    "buildResendTwoFactorBody"
   ) ||
   ((payload = {}) =>
     payload);
@@ -1112,6 +1251,38 @@ const normalizeTwoFactorResponse =
   ) ||
   ((response = {}) =>
     response);
+
+const normalizeRequestTwoFactorResponse =
+  getModuleExport(
+    TwoFactorApi,
+    "normalizeRequestTwoFactorResponse"
+  ) ||
+  ((response = {}) =>
+    response);
+
+const normalizeResendTwoFactorResponse =
+  getModuleExport(
+    TwoFactorApi,
+    "normalizeResendTwoFactorResponse"
+  ) ||
+  ((response = {}) =>
+    response);
+
+const isTwoFactorRoute =
+  getModuleExport(
+    TwoFactorApi,
+    "isTwoFactorRoute"
+  ) ||
+  (() =>
+    false);
+
+const getTwoFactorRedirectPath =
+  getModuleExport(
+    TwoFactorApi,
+    "getTwoFactorRedirectPath"
+  ) ||
+  (() =>
+    DEFAULT_2FA_PATH);
 
 async function verifyTwoFactor(payload = {}, options = {}) {
   const executor =
@@ -1166,12 +1337,40 @@ async function mfaLogin(payload = {}, options = {}) {
   );
 }
 
+async function submitTwoFactorCode(payload = {}, options = {}) {
+  return verifyTwoFactor(
+    payload,
+    options
+  );
+}
+
 async function requestTwoFactorCode(payload = {}, options = {}) {
   const executor =
     requestTwoFactorCodeExecutor ||
     missingHandler("requestTwoFactorCode en ./2fa.js");
 
   return executor(
+    payload,
+    options
+  );
+}
+
+async function request2FA(payload = {}, options = {}) {
+  return requestTwoFactorCode(
+    payload,
+    options
+  );
+}
+
+async function requestMfa(payload = {}, options = {}) {
+  return requestTwoFactorCode(
+    payload,
+    options
+  );
+}
+
+async function sendTwoFactorCode(payload = {}, options = {}) {
+  return requestTwoFactorCode(
     payload,
     options
   );
@@ -1188,6 +1387,20 @@ async function resendTwoFactorCode(payload = {}, options = {}) {
   );
 }
 
+async function resend2FA(payload = {}, options = {}) {
+  return resendTwoFactorCode(
+    payload,
+    options
+  );
+}
+
+async function resendMfa(payload = {}, options = {}) {
+  return resendTwoFactorCode(
+    payload,
+    options
+  );
+}
+
 /* =========================================================
    PASSWORD RESET RESOLUTION
 ========================================================= */
@@ -1197,7 +1410,10 @@ const requestPasswordResetExecutor =
     PasswordResetApi,
     "requestPasswordReset",
     "forgotPassword",
-    "resetPasswordRequest"
+    "resetPasswordRequest",
+    "requestResetPassword",
+    "passwordResetRequest",
+    "recoverPassword"
   );
 
 const confirmResetPasswordExecutor =
@@ -1205,7 +1421,8 @@ const confirmResetPasswordExecutor =
     PasswordResetApi,
     "confirmResetPassword",
     "resetPasswordConfirm",
-    "confirmPasswordReset"
+    "confirmPasswordReset",
+    "passwordResetConfirm"
   );
 
 const validateResetPasswordTokenExecutor =
@@ -1214,13 +1431,15 @@ const validateResetPasswordTokenExecutor =
     "validateResetPasswordToken",
     "validateResetToken",
     "resetPasswordValidate",
-    "validatePasswordReset"
+    "validatePasswordReset",
+    "passwordResetValidate"
   );
 
 const getRequestPasswordResetEndpoint =
   getModuleExport(
     PasswordResetApi,
-    "getRequestPasswordResetEndpoint"
+    "getRequestPasswordResetEndpoint",
+    "getResetPasswordRequestEndpoint"
   ) ||
   (() =>
     AUTH_ENDPOINTS?.forgotPassword ||
@@ -1282,6 +1501,15 @@ const normalizeConfirmResetPasswordPayload =
   ((payload = {}) =>
     payload);
 
+const normalizeValidateResetTokenPayload =
+  getModuleExport(
+    PasswordResetApi,
+    "normalizeValidateResetTokenPayload",
+    "normalizeValidateResetPasswordTokenPayload"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
 const buildResetPasswordRequestBody =
   getModuleExport(
     PasswordResetApi,
@@ -1294,6 +1522,15 @@ const buildConfirmResetPasswordBody =
   getModuleExport(
     PasswordResetApi,
     "buildConfirmResetPasswordBody"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const buildValidateResetTokenBody =
+  getModuleExport(
+    PasswordResetApi,
+    "buildValidateResetTokenBody",
+    "buildValidateResetPasswordTokenBody"
   ) ||
   ((payload = {}) =>
     payload);
@@ -1314,6 +1551,15 @@ const normalizeConfirmResetPasswordResponse =
   ((response = {}) =>
     response);
 
+const normalizeValidateResetTokenResponse =
+  getModuleExport(
+    PasswordResetApi,
+    "normalizeValidateResetTokenResponse",
+    "normalizeValidateResetPasswordTokenResponse"
+  ) ||
+  ((response = {}) =>
+    response);
+
 async function requestPasswordResetPublic(payload = {}, options = {}) {
   const executor =
     requestPasswordResetExecutor ||
@@ -1325,11 +1571,40 @@ async function requestPasswordResetPublic(payload = {}, options = {}) {
   );
 }
 
-const resetPasswordRequestPublic =
-  requestPasswordResetPublic;
+async function resetPasswordRequestPublic(payload = {}, options = {}) {
+  return requestPasswordResetPublic(
+    payload,
+    options
+  );
+}
 
-const forgotPasswordPublic =
-  requestPasswordResetPublic;
+async function requestResetPassword(payload = {}, options = {}) {
+  return requestPasswordResetPublic(
+    payload,
+    options
+  );
+}
+
+async function passwordResetRequest(payload = {}, options = {}) {
+  return requestPasswordResetPublic(
+    payload,
+    options
+  );
+}
+
+async function forgotPasswordPublic(payload = {}, options = {}) {
+  return requestPasswordResetPublic(
+    payload,
+    options
+  );
+}
+
+async function recoverPassword(payload = {}, options = {}) {
+  return requestPasswordResetPublic(
+    payload,
+    options
+  );
+}
 
 async function confirmResetPassword(payload = {}, options = {}) {
   const executor =
@@ -1349,6 +1624,20 @@ async function resetPasswordConfirm(payload = {}, options = {}) {
   );
 }
 
+async function confirmPasswordReset(payload = {}, options = {}) {
+  return confirmResetPassword(
+    payload,
+    options
+  );
+}
+
+async function passwordResetConfirm(payload = {}, options = {}) {
+  return confirmResetPassword(
+    payload,
+    options
+  );
+}
+
 async function validateResetPasswordToken(payload = {}, options = {}) {
   const executor =
     validateResetPasswordTokenExecutor ||
@@ -1361,6 +1650,27 @@ async function validateResetPasswordToken(payload = {}, options = {}) {
 }
 
 async function validateResetToken(payload = {}, options = {}) {
+  return validateResetPasswordToken(
+    payload,
+    options
+  );
+}
+
+async function resetPasswordValidate(payload = {}, options = {}) {
+  return validateResetPasswordToken(
+    payload,
+    options
+  );
+}
+
+async function validatePasswordReset(payload = {}, options = {}) {
+  return validateResetPasswordToken(
+    payload,
+    options
+  );
+}
+
+async function passwordResetValidate(payload = {}, options = {}) {
   return validateResetPasswordToken(
     payload,
     options
@@ -4411,6 +4721,12 @@ export const Auth = (() => {
           session
         ),
 
+      guardsDebug:
+        safeCall(
+          getAuthGuardsSnapshot,
+          null
+        ),
+
       storage: {
         hasRefreshToken:
           hasRefreshToken(),
@@ -4520,17 +4836,32 @@ export const Auth = (() => {
     /* ACTIVATION */
     activateAccount,
     activate,
+    activation,
     confirmActivation,
     accountActivation,
+    createUserActivation,
+
     activateFirstUser,
+    firstUserActivation,
+    activateInitialUser,
+
     validateActivationToken,
+    validateActivateAccountToken,
+    activationValidate,
 
     getActivateAccountEndpoint,
     getActivateFirstUserEndpoint,
+    getValidateActivationTokenEndpoint,
+
     resolveActivationToken,
     normalizeActivationPayload,
+    normalizeFirstUserActivationPayload,
+
     buildActivationRequestBody,
+    buildActivateFirstUserBody,
+
     normalizeActivationResponse,
+    normalizeFirstUserActivationResponse,
 
     /* 2FA / MFA */
     verifyTwoFactor,
@@ -4540,15 +4871,36 @@ export const Auth = (() => {
     twoFactorVerify,
     verifyMfa,
     mfaLogin,
+    submitTwoFactorCode,
 
     requestTwoFactorCode,
+    request2FA,
+    requestMfa,
+    sendTwoFactorCode,
+
     resendTwoFactorCode,
+    resend2FA,
+    resendMfa,
 
     getTwoFactorLoginEndpoint,
+    getTwoFactorRequestEndpoint,
+    getTwoFactorResendEndpoint,
+
     resolveTwoFactorTempToken,
+
     normalizeTwoFactorPayload,
+    normalizeRequestTwoFactorPayload,
+
     buildTwoFactorVerifyBody,
+    buildTwoFactorRequestBody,
+    buildResendTwoFactorBody,
+
     normalizeTwoFactorResponse,
+    normalizeRequestTwoFactorResponse,
+    normalizeResendTwoFactorResponse,
+
+    isTwoFactorRoute,
+    getTwoFactorRedirectPath,
 
     /* PASSWORD RESET */
     requestPasswordReset:
@@ -4557,14 +4909,24 @@ export const Auth = (() => {
     resetPasswordRequest:
       resetPasswordRequestPublic,
 
+    requestResetPassword,
+    passwordResetRequest,
+
     forgotPassword:
       forgotPasswordPublic,
 
+    recoverPassword,
+
     confirmResetPassword,
     resetPasswordConfirm,
+    confirmPasswordReset,
+    passwordResetConfirm,
 
     validateResetPasswordToken,
     validateResetToken,
+    resetPasswordValidate,
+    validatePasswordReset,
+    passwordResetValidate,
 
     getRequestPasswordResetEndpoint,
     getConfirmResetPasswordEndpoint,
@@ -4575,12 +4937,15 @@ export const Auth = (() => {
 
     normalizeResetPasswordPayload,
     normalizeConfirmResetPasswordPayload,
+    normalizeValidateResetTokenPayload,
 
     buildResetPasswordRequestBody,
     buildConfirmResetPasswordBody,
+    buildValidateResetTokenBody,
 
     normalizeResetPasswordResponse,
     normalizeConfirmResetPasswordResponse,
+    normalizeValidateResetTokenResponse,
 
     /* SESSION */
     fetchMe:
@@ -4594,6 +4959,7 @@ export const Auth = (() => {
 
     /* STATE */
     isAuthenticated,
+    syncAuthState,
 
     isAuthRoute:
       helperIsAuthRoute,
@@ -4601,8 +4967,14 @@ export const Auth = (() => {
     /* ROLES */
     hasRole,
     requireRole,
+
     guardAuthenticated,
     guardRole,
+    guardGuest,
+    guardAdmin,
+    guardSupport,
+    guardManager,
+    canAccessRoute,
 
     getCurrentRole,
     getCurrentRoles,
@@ -4611,6 +4983,8 @@ export const Auth = (() => {
     isCurrentUserSupport,
     isCurrentUserManager,
     isCurrentUserClient,
+
+    buildGuardErrorPayload,
 
     /* SESSION HELPERS */
     getAuthHeader,

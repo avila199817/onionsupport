@@ -3,7 +3,7 @@
    Archivo: src/core/dom.js
 
    ONION SUPPORT · CORE DOM CACHE
-   SHELL CACHE · LATE UI NODES · SAFE VALIDATION · 13/10
+   SHELL CACHE · LATE UI NODES · SAFE VALIDATION · 14/10
 
    RESPONSABILIDADES:
    - centralizar cache de nodos shell SPA
@@ -14,6 +14,8 @@
    - soportar DOM montado tarde
    - soportar recache de nodos desconectados
    - exponer snapshots de diagnóstico
+   - mantener aliases estables para Router / Core / UI
+   - permitir diagnóstico tardío de SidebarUI / TopbarUI
 
    HARDENING EXTREMO:
    - cache idempotente
@@ -27,6 +29,7 @@
    - compatible con #sidebar-mount / #topbar-mount
    - compatible con #app-loader estático
    - compatible con #app-shell / #main-content / #view-container
+   - compatible con nodos UI montados tarde por SidebarUI/TopbarUI
 
    FIX BOOT / UI DINÁMICA:
    - sidebar/topbar NO son required durante Core.init()
@@ -50,17 +53,17 @@
    CONSTANTS
 ========================================================= */
 
-const DOM_VERSION =
-  "13.0.0";
+export const DOM_VERSION =
+  "14.0.0";
 
-const REQUIRED_KEYS =
+export const REQUIRED_KEYS =
   Object.freeze([
     "body",
     "mainContent",
     "viewContainer",
   ]);
 
-const RECOMMENDED_KEYS =
+export const RECOMMENDED_KEYS =
   Object.freeze([
     "html",
     "appShell",
@@ -70,26 +73,38 @@ const RECOMMENDED_KEYS =
     "topbarMount",
   ]);
 
-const DEFERRED_UI_KEYS =
+export const DEFERRED_UI_KEYS =
   Object.freeze([
     "sidebar",
     "topbar",
+
     "sidebarMenu",
     "sidebarRecents",
+    "sidebarFooter",
+
     "topbarTitle",
     "topbarViewContainer",
+    "topbarActions",
+
     "userToggle",
     "userDropdown",
     "logoutBtn",
+
     "sidebarAvatar",
+    "sidebarAvatarImage",
+    "sidebarAvatarFallback",
     "sidebarName",
+    "sidebarEmail",
+    "sidebarRole",
+
     "sidebarToggle",
     "sidebarMobileToggle",
+
     "searchInput",
     "searchResults",
   ]);
 
-const OPTIONAL_KEYS =
+export const OPTIONAL_KEYS =
   Object.freeze([
     "appRoot",
     "layout",
@@ -114,15 +129,17 @@ const OPTIONAL_KEYS =
     "tooltipRoot",
     "drawerRoot",
     "portalRoot",
+    "liveRegion",
   ]);
 
-const DOM_SELECTORS =
+export const DOM_SELECTORS =
   Object.freeze({
     skipLink: [
       ".app-skip-link",
       "[data-skip-link='true']",
       "[data-skip-link]",
       "a[href='#main-content']",
+      "a[href='#view-container']",
     ],
 
     themeColorMeta: [
@@ -253,6 +270,13 @@ const DOM_SELECTORS =
       ".sidebar-recents",
     ],
 
+    sidebarFooter: [
+      "#sidebar-footer",
+      "[data-sidebar-footer='true']",
+      "[data-sidebar-footer]",
+      ".sidebar-footer",
+    ],
+
     topbar: [
       "#app-topbar",
       "#topbar",
@@ -278,6 +302,13 @@ const DOM_SELECTORS =
       "[data-topbar-view-container='true']",
       "[data-topbar-view-container]",
       ".topbar-view-container",
+    ],
+
+    topbarActions: [
+      "#topbar-actions",
+      "[data-topbar-actions='true']",
+      "[data-topbar-actions]",
+      ".topbar-actions",
     ],
 
     tablehead: [
@@ -366,12 +397,46 @@ const DOM_SELECTORS =
       "[data-user-avatar]",
     ],
 
+    sidebarAvatarImage: [
+      "#sidebarAvatarImage",
+      "#sidebar-avatar-image",
+      "[data-sidebar-avatar-image='true']",
+      "[data-sidebar-avatar-image]",
+      "[data-user-avatar-image]",
+      "#sidebar-avatar img",
+      "[data-sidebar-avatar] img",
+    ],
+
+    sidebarAvatarFallback: [
+      "#sidebarAvatarFallback",
+      "#sidebar-avatar-fallback",
+      "[data-sidebar-avatar-fallback='true']",
+      "[data-sidebar-avatar-fallback]",
+      "[data-user-avatar-fallback]",
+    ],
+
     sidebarName: [
       "#sidebar-name",
       "#sidebarName",
       "[data-sidebar-name='true']",
       "[data-sidebar-name]",
       "[data-user-name]",
+    ],
+
+    sidebarEmail: [
+      "#sidebar-email",
+      "#sidebarEmail",
+      "[data-sidebar-email='true']",
+      "[data-sidebar-email]",
+      "[data-user-email]",
+    ],
+
+    sidebarRole: [
+      "#sidebar-role",
+      "#sidebarRole",
+      "[data-sidebar-role='true']",
+      "[data-sidebar-role]",
+      "[data-user-role]",
     ],
 
     toastRoot: [
@@ -411,9 +476,16 @@ const DOM_SELECTORS =
       "[data-portal-root]",
       ".portal-root",
     ],
+
+    liveRegion: [
+      "#app-live-region",
+      "[data-live-region]",
+      "[aria-live='polite']",
+      "[aria-live='assertive']",
+    ],
   });
 
-const DOM_EVENTS =
+export const DOM_EVENTS =
   Object.freeze({
     cached:
       "app:core:dom:cached",
@@ -446,6 +518,14 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
+function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
 function safeText(value, fallback = "") {
   if (
     value === null ||
@@ -464,6 +544,12 @@ function safeArray(value) {
   return Array.isArray(value)
     ? value
     : [];
+}
+
+function safeObject(value) {
+  return isObject(value)
+    ? value
+    : {};
 }
 
 function safeNumber(value, fallback = 0) {
@@ -487,6 +573,7 @@ function uniqueList(values = []) {
   return Array.from(
     new Set(
       safeArray(values)
+        .flat(Infinity)
         .map((value) =>
           safeText(value, "")
         )
@@ -506,10 +593,12 @@ function safeWarn(utils, ...args) {
   } catch {}
 
   try {
-    console.warn(
-      "[CoreDOM]",
-      ...args
-    );
+    if (utils?.debug !== false) {
+      console.warn(
+        "[CoreDOM]",
+        ...args
+      );
+    }
   } catch {}
 }
 
@@ -643,15 +732,20 @@ function firstMatch(values = []) {
 }
 
 function queryFirst(utils, selectors = [], root = null) {
-  return firstMatch(
-    safeArray(selectors).map((selector) =>
+  for (const selector of safeArray(selectors)) {
+    const node =
       safeQs(
         utils,
         selector,
         root
-      )
-    )
-  );
+      );
+
+    if (node) {
+      return node;
+    }
+  }
+
+  return null;
 }
 
 function queryAllCandidates(utils, selectors = [], root = null) {
@@ -690,6 +784,7 @@ function isNodeConnected(node) {
   try {
     if (
       node === document ||
+      node === window ||
       node === document.documentElement ||
       node === document.body
     ) {
@@ -775,6 +870,17 @@ function setAlias(dom, alias, sourceKey) {
   }
 }
 
+function setValueAlias(dom, alias, value) {
+  try {
+    dom[alias] =
+      value || null;
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /* =========================================================
    FACTORY
 ========================================================= */
@@ -844,6 +950,9 @@ export function createDomCache() {
     sidebarRecents:
       null,
 
+    sidebarFooter:
+      null,
+
     main:
       null,
 
@@ -869,6 +978,9 @@ export function createDomCache() {
       null,
 
     topbarViewContainer:
+      null,
+
+    topbarActions:
       null,
 
     tablehead:
@@ -907,7 +1019,19 @@ export function createDomCache() {
     sidebarAvatar:
       null,
 
+    sidebarAvatarImage:
+      null,
+
+    sidebarAvatarFallback:
+      null,
+
     sidebarName:
+      null,
+
+    sidebarEmail:
+      null,
+
+    sidebarRole:
       null,
 
     toastRoot:
@@ -926,6 +1050,9 @@ export function createDomCache() {
       null,
 
     portalRoot:
+      null,
+
+    liveRegion:
       null,
 
     validation: {
@@ -968,7 +1095,7 @@ function applyAliases(dom) {
   }
 
   if (!dom.appShell && dom.shell) {
-    safeSet(
+    setValueAlias(
       dom,
       "appShell",
       dom.shell
@@ -984,7 +1111,7 @@ function applyAliases(dom) {
   }
 
   if (!dom.loader && dom.appLoader) {
-    safeSet(
+    setValueAlias(
       dom,
       "loader",
       dom.appLoader
@@ -1000,7 +1127,7 @@ function applyAliases(dom) {
   }
 
   if (!dom.mainContent && dom.main) {
-    safeSet(
+    setValueAlias(
       dom,
       "mainContent",
       dom.main
@@ -1024,7 +1151,7 @@ function applyAliases(dom) {
   }
 
   if (!dom.viewContainer && dom.viewRoot) {
-    safeSet(
+    setValueAlias(
       dom,
       "viewContainer",
       dom.viewRoot
@@ -1032,7 +1159,7 @@ function applyAliases(dom) {
   }
 
   if (!dom.viewContainer && dom.routerView) {
-    safeSet(
+    setValueAlias(
       dom,
       "viewContainer",
       dom.routerView
@@ -1052,7 +1179,7 @@ function applyAliases(dom) {
           parent.classList?.contains?.("app-content")
         )
       ) {
-        safeSet(
+        setValueAlias(
           dom,
           "appContent",
           parent
@@ -1062,7 +1189,7 @@ function applyAliases(dom) {
   }
 
   if (!dom.layout && dom.appShell) {
-    safeSet(
+    setValueAlias(
       dom,
       "layout",
       dom.appShell
@@ -1078,7 +1205,7 @@ function applyAliases(dom) {
   }
 
   if (!dom.tablehead && dom.tableHead) {
-    safeSet(
+    setValueAlias(
       dom,
       "tablehead",
       dom.tableHead
@@ -1094,11 +1221,28 @@ function applyAliases(dom) {
   }
 
   if (!dom.tableheadContainer && dom.tableHeadContainer) {
-    safeSet(
+    setValueAlias(
       dom,
       "tableheadContainer",
       dom.tableHeadContainer
     );
+  }
+
+  if (!dom.sidebarAvatarImage && dom.sidebarAvatar) {
+    try {
+      const img =
+        dom.sidebarAvatar.matches?.("img")
+          ? dom.sidebarAvatar
+          : dom.sidebarAvatar.querySelector?.("img");
+
+      if (img) {
+        setValueAlias(
+          dom,
+          "sidebarAvatarImage",
+          img
+        );
+      }
+    } catch {}
   }
 
   return true;
@@ -1249,7 +1393,7 @@ function buildValidationWarnings({
         "error",
 
       message:
-        "Falta #view-container o equivalente. El Router no tendrá un destino claro para pintar vistas.",
+        "Falta #view-container o equivalente. El Router no tendrá destino claro para pintar vistas.",
     });
   }
 
@@ -1262,7 +1406,7 @@ function buildValidationWarnings({
         "error",
 
       message:
-        "Falta #main-content o equivalente. El layout principal puede quedar incompleto.",
+        "Falta #main-content o equivalente. El layout principal queda incompleto.",
     });
   }
 
@@ -1769,7 +1913,11 @@ export function refreshUserDomNodes({
       "userDropdown",
       "logoutBtn",
       "sidebarAvatar",
+      "sidebarAvatarImage",
+      "sidebarAvatarFallback",
       "sidebarName",
+      "sidebarEmail",
+      "sidebarRole",
     ],
     root,
     force,
@@ -1903,6 +2051,106 @@ export function clearDomCache(dom, events = null) {
 }
 
 /* =========================================================
+   CONVENIENCE GETTERS
+========================================================= */
+
+export function getHtml(dom = {}) {
+  return getDomNode(
+    dom,
+    "html",
+    isBrowser()
+      ? document.documentElement
+      : null
+  );
+}
+
+export function getBody(dom = {}) {
+  return getDomNode(
+    dom,
+    "body",
+    isBrowser()
+      ? document.body
+      : null
+  );
+}
+
+export function getAppShell(dom = {}) {
+  return getDomNode(
+    dom,
+    "appShell",
+    getDomNode(
+      dom,
+      "shell",
+      null
+    )
+  );
+}
+
+export function getMainContent(dom = {}) {
+  return getDomNode(
+    dom,
+    "mainContent",
+    getDomNode(
+      dom,
+      "main",
+      null
+    )
+  );
+}
+
+export function getViewContainer(dom = {}) {
+  return getDomNode(
+    dom,
+    "viewContainer",
+    getDomNode(
+      dom,
+      "viewRoot",
+      getDomNode(
+        dom,
+        "routerView",
+        null
+      )
+    )
+  );
+}
+
+export function getAppContent(dom = {}) {
+  return getDomNode(
+    dom,
+    "appContent",
+    null
+  );
+}
+
+export function getLoader(dom = {}) {
+  return getDomNode(
+    dom,
+    "loader",
+    getDomNode(
+      dom,
+      "appLoader",
+      null
+    )
+  );
+}
+
+export function getSidebarMount(dom = {}) {
+  return getDomNode(
+    dom,
+    "sidebarMount",
+    null
+  );
+}
+
+export function getTopbarMount(dom = {}) {
+  return getDomNode(
+    dom,
+    "topbarMount",
+    null
+  );
+}
+
+/* =========================================================
    SNAPSHOT
 ========================================================= */
 
@@ -1958,11 +2206,23 @@ function getElementSnapshot(el) {
       ).toLowerCase();
   } catch {}
 
+  let nodeName = "";
+
+  try {
+    nodeName =
+      safeText(
+        el.nodeName,
+        ""
+      );
+  } catch {}
+
   return {
     exists:
       true,
 
     tag,
+
+    nodeName,
 
     id:
       safeText(
@@ -2094,6 +2354,7 @@ function buildNodeSnapshots(dom = {}) {
       "sidebar",
       "sidebarMenu",
       "sidebarRecents",
+      "sidebarFooter",
       "main",
       "mainContent",
       "appContent",
@@ -2103,6 +2364,7 @@ function buildNodeSnapshots(dom = {}) {
       "topbar",
       "topbarTitle",
       "topbarViewContainer",
+      "topbarActions",
       "tablehead",
       "tableHead",
       "tableheadContainer",
@@ -2115,13 +2377,18 @@ function buildNodeSnapshots(dom = {}) {
       "sidebarToggle",
       "sidebarMobileToggle",
       "sidebarAvatar",
+      "sidebarAvatarImage",
+      "sidebarAvatarFallback",
       "sidebarName",
+      "sidebarEmail",
+      "sidebarRole",
       "toastRoot",
       "modalRoot",
       "overlayRoot",
       "tooltipRoot",
       "drawerRoot",
       "portalRoot",
+      "liveRegion",
     ]);
 
   const output = {};
@@ -2295,16 +2562,6 @@ export function getDomValidationSnapshot(dom = {}) {
    EXPORT
 ========================================================= */
 
-export {
-  DOM_VERSION,
-  DOM_EVENTS,
-  DOM_SELECTORS,
-  REQUIRED_KEYS,
-  RECOMMENDED_KEYS,
-  DEFERRED_UI_KEYS,
-  OPTIONAL_KEYS,
-};
-
 export default {
   DOM_VERSION,
   DOM_EVENTS,
@@ -2316,11 +2573,13 @@ export default {
 
   createDomCache,
   cacheDom,
+
   validateRequiredDom,
   validateRequiredDomDetailed,
 
   getDomNode,
   setDomNode,
+
   refreshDomNode,
   refreshDomNodes,
   refreshMountDomNodes,
@@ -2329,8 +2588,19 @@ export default {
   ensureFreshDom,
   clearDomCache,
 
+  getHtml,
+  getBody,
+  getAppShell,
+  getMainContent,
+  getViewContainer,
+  getAppContent,
+  getLoader,
+  getSidebarMount,
+  getTopbarMount,
+
   getDomSnapshot,
   getDomValidationSnapshot,
+
   findDomCandidates,
   findAllDomCandidates,
 };

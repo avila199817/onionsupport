@@ -3,7 +3,7 @@
    Archivo: src/services/http.helpers.js
 
    ONION SUPPORT · HTTP HELPERS
-   PURE HELPERS · RETRY SAFE · ERROR SAFE · TOKEN SAFE
+   PURE HELPERS · RETRY SAFE · ERROR SAFE · TOKEN SAFE · 14/10
 
    Responsabilidades:
    - Config base del servicio HTTP.
@@ -15,18 +15,23 @@
    - Utilidades de signal / abort / timeout.
    - Cálculo de Retry-After y delays.
    - Construcción de requestConfig por defecto.
+   - Normalización de headers desde Object, Headers o arrays.
+   - Soporte robusto para Core Request, Http Service y retry engine.
 
    HARDENING EXTREMO:
    - Sin dependencias externas.
    - Sin acceso obligatorio a window/document.
    - Sin exposición de tokens en logs/summaries/errors.
    - Compatibilidad con /api/auth y /auth.
+   - /api/auth/me NO es público.
    - Activation/reset tratados como públicos.
    - Retry solo seguro por defecto.
    - Retry unsafe solo si el caller lo pide.
    - Retry-After compatible con segundos y fecha HTTP.
    - AbortController browser-safe/server-safe.
    - Headers normalizados desde Object, Headers o arrays.
+   - Error.raw no enumerable.
+   - Snapshots y summaries redactados.
 ========================================================= */
 
 /* =========================================================
@@ -96,11 +101,57 @@ export const HTTP_CONFIG = Object.freeze({
 
   defaultContentType:
     "application/json",
+
+  requestIdHeader:
+    "X-Request-Id",
+
+  clientHeader:
+    "X-Onion-Client",
+
+  clientHeaderValue:
+    "onion-spa",
 });
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
+
+export const HTTP_HELPERS_VERSION =
+  "14.0.0";
+
+const DEFAULT_METHOD =
+  "GET";
+
+const DEFAULT_ERROR_MESSAGE =
+  "Error en la petición";
+
+const LOCAL_ORIGIN =
+  "http://localhost";
+
+const KNOWN_METHODS =
+  Object.freeze([
+    "GET",
+    "HEAD",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+  ]);
+
+const BODYLESS_METHODS =
+  Object.freeze([
+    "GET",
+    "HEAD",
+    "OPTIONS",
+  ]);
+
+const IDEMPOTENT_METHODS =
+  Object.freeze([
+    "GET",
+    "HEAD",
+    "OPTIONS",
+  ]);
 
 const SENSITIVE_QUERY_NAMES =
   Object.freeze([
@@ -123,6 +174,10 @@ const SENSITIVE_QUERY_NAMES =
     "two_factor_token",
     "mfaToken",
     "mfa_token",
+    "jwt",
+    "bearer",
+    "auth",
+    "authorization",
   ]);
 
 const SENSITIVE_HEADER_PARTS =
@@ -137,18 +192,35 @@ const SENSITIVE_HEADER_PARTS =
     "apikey",
     "api-key",
     "x-api-key",
+    "jwt",
+    "bearer",
+    "refresh",
+    "access",
+    "otp",
+    "mfa",
+    "2fa",
+    "csrf",
+    "xsrf",
   ]);
+
+const SENSITIVE_OBJECT_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
 
 const AUTH_ENDPOINT_MARKERS =
   Object.freeze([
     "/auth/login",
     "/auth/logout",
+    "/auth/logout-all",
     "/auth/me",
     "/auth/session",
     "/auth/refresh",
 
     "/auth/2fa",
     "/auth/2fa/login",
+    "/auth/mfa",
+    "/auth/mfa/login",
+    "/auth/otp",
+    "/auth/otp/login",
 
     "/auth/activate",
     "/auth/activate-account",
@@ -172,6 +244,35 @@ const PUBLIC_AUTH_ENDPOINT_MARKERS =
     "/auth/refresh",
 
     "/auth/2fa/login",
+    "/auth/mfa/login",
+    "/auth/otp/login",
+
+    "/auth/activate",
+    "/auth/activate-account",
+    "/auth/account/activate",
+    "/auth/activation",
+    "/auth/activate/first-user",
+
+    "/auth/reset-password",
+    "/auth/reset-password-request",
+    "/auth/reset-password-confirm",
+    "/auth/password-reset",
+    "/auth/forgot-password",
+    "/auth/recover-password",
+
+    "/auth/_health",
+  ]);
+
+const AUTH_CONTROL_SKIP_REFRESH_MARKERS =
+  Object.freeze([
+    "/auth/login",
+    "/auth/refresh",
+    "/auth/logout",
+    "/auth/logout-all",
+
+    "/auth/2fa/login",
+    "/auth/mfa/login",
+    "/auth/otp/login",
 
     "/auth/activate",
     "/auth/activate-account",
@@ -194,18 +295,29 @@ const TECHNICAL_PUBLIC_ROUTES =
     "/activate-account",
     "/reset-password",
     "/forgot-password",
+    "/recover-password",
+    "/password-reset",
     "/reset-password/confirm",
   ]);
 
-const IDEMPOTENT_METHODS =
+const DEFAULT_RETRYABLE_STATUSES =
   Object.freeze([
-    "GET",
-    "HEAD",
-    "OPTIONS",
+    408,
+    425,
+    429,
+    500,
+    502,
+    503,
+    504,
   ]);
 
-const DEFAULT_ERROR_MESSAGE =
-  "Error en la petición";
+const CORRUPT_TEXT_VALUES =
+  Object.freeze([
+    "undefined",
+    "null",
+    "nan",
+    "[object object]",
+  ]);
 
 /* =========================================================
    BASICS
@@ -215,7 +327,7 @@ export function isFn(value) {
   return typeof value === "function";
 }
 
-function isObject(value) {
+export function isObject(value) {
   return (
     value !== null &&
     typeof value === "object" &&
@@ -223,19 +335,26 @@ function isObject(value) {
   );
 }
 
-function safeObject(value, fallback = {}) {
+export function isAnyObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object"
+  );
+}
+
+export function safeObject(value, fallback = {}) {
   return isObject(value)
     ? value
     : fallback;
 }
 
-function safeArray(value) {
+export function safeArray(value) {
   return Array.isArray(value)
     ? value
     : [];
 }
 
-function safeText(value, fallback = "") {
+export function safeText(value, fallback = "") {
   if (
     value === null ||
     value === undefined
@@ -246,15 +365,27 @@ function safeText(value, fallback = "") {
   const text =
     String(value).trim();
 
-  return text || fallback;
+  if (!text) {
+    return fallback;
+  }
+
+  if (
+    CORRUPT_TEXT_VALUES.includes(
+      text.toLowerCase()
+    )
+  ) {
+    return fallback;
+  }
+
+  return text;
 }
 
-function safeLower(value = "", fallback = "") {
+export function safeLower(value = "", fallback = "") {
   return safeText(value, fallback)
     .toLowerCase();
 }
 
-function safeNumber(value, fallback = 0) {
+export function safeNumber(value, fallback = 0) {
   const number =
     Number(value);
 
@@ -263,7 +394,7 @@ function safeNumber(value, fallback = 0) {
     : fallback;
 }
 
-function safeBoolean(value, fallback = false) {
+export function safeBoolean(value, fallback = false) {
   if (value === true) return true;
   if (value === false) return false;
 
@@ -283,6 +414,7 @@ function safeBoolean(value, fallback = false) {
         "yes",
         "si",
         "sí",
+        "ok",
         "on",
         "enabled",
         "active",
@@ -308,7 +440,7 @@ function safeBoolean(value, fallback = false) {
   return Boolean(fallback);
 }
 
-function nowMs() {
+export function nowMs() {
   try {
     return Date.now();
   } catch {
@@ -316,7 +448,7 @@ function nowMs() {
   }
 }
 
-function isoNow(ms = nowMs()) {
+export function isoNow(ms = nowMs()) {
   try {
     return new Date(ms).toISOString();
   } catch {
@@ -324,7 +456,7 @@ function isoNow(ms = nowMs()) {
   }
 }
 
-function getBaseOrigin() {
+export function getBaseOrigin() {
   try {
     if (
       typeof window !== "undefined" &&
@@ -334,10 +466,10 @@ function getBaseOrigin() {
     }
   } catch {}
 
-  return "http://localhost";
+  return LOCAL_ORIGIN;
 }
 
-function escapeRegExp(value = "") {
+export function escapeRegExp(value = "") {
   return String(value).replace(
     /[.*+?^${}()|[\]\\]/g,
     "\\$&"
@@ -357,6 +489,29 @@ export function sleep(ms = 0) {
   });
 }
 
+export function normalizeMethod(method = DEFAULT_METHOD) {
+  const clean =
+    safeText(method, DEFAULT_METHOD)
+      .toUpperCase();
+
+  return KNOWN_METHODS.includes(clean)
+    ? clean
+    : DEFAULT_METHOD;
+}
+
+export function isKnownMethod(method = "") {
+  return KNOWN_METHODS.includes(
+    safeText(method, "")
+      .toUpperCase()
+  );
+}
+
+export function isBodylessMethod(method = DEFAULT_METHOD) {
+  return BODYLESS_METHODS.includes(
+    normalizeMethod(method)
+  );
+}
+
 /* =========================================================
    HEADERS
 ========================================================= */
@@ -372,13 +527,30 @@ export function headersToPlainObject(headers = {}) {
         const output = {};
 
         headers.forEach((value, key) => {
-          output[key] = value;
+          output[key] =
+            value;
         });
 
         return output;
       }
     } catch {}
   }
+
+  try {
+    if (
+      headers &&
+      isFn(headers.forEach)
+    ) {
+      const output = {};
+
+      headers.forEach((value, key) => {
+        output[key] =
+          value;
+      });
+
+      return output;
+    }
+  } catch {}
 
   if (Array.isArray(headers)) {
     const output = {};
@@ -388,8 +560,13 @@ export function headersToPlainObject(headers = {}) {
         Array.isArray(item) &&
         item.length >= 2
       ) {
-        output[safeText(item[0], "")] =
-          item[1];
+        const key =
+          safeText(item[0], "");
+
+        if (key) {
+          output[key] =
+            item[1];
+        }
       }
     }
 
@@ -405,7 +582,41 @@ export function headersToPlainObject(headers = {}) {
   return {};
 }
 
-function getHeaderValue(headers = {}, name = "") {
+export function normalizeHeaders(headers = {}) {
+  const source =
+    headersToPlainObject(headers);
+
+  const output = {};
+
+  for (const [key, value] of Object.entries(source)) {
+    const cleanKey =
+      safeText(key, "");
+
+    if (!cleanKey) {
+      continue;
+    }
+
+    if (
+      value === undefined ||
+      value === null ||
+      value === ""
+    ) {
+      continue;
+    }
+
+    const existingKey =
+      Object.keys(output).find((candidate) =>
+        safeLower(candidate, "") === safeLower(cleanKey, "")
+      );
+
+    output[existingKey || cleanKey] =
+      value;
+  }
+
+  return output;
+}
+
+export function getHeaderValue(headers = {}, name = "") {
   const target =
     safeLower(name, "");
 
@@ -434,6 +645,60 @@ function getHeaderValue(headers = {}, name = "") {
     : "";
 }
 
+export function hasHeader(headers = {}, name = "") {
+  return getHeaderValue(
+    headers,
+    name
+  ) !== "";
+}
+
+export function setHeader(headers = {}, name = "", value = "") {
+  const output =
+    normalizeHeaders(headers);
+
+  const cleanName =
+    safeText(name, "");
+
+  if (
+    !cleanName ||
+    value === undefined ||
+    value === null ||
+    value === ""
+  ) {
+    return output;
+  }
+
+  const existingKey =
+    Object.keys(output).find((candidate) =>
+      safeLower(candidate, "") === safeLower(cleanName, "")
+    );
+
+  output[existingKey || cleanName] =
+    value;
+
+  return output;
+}
+
+export function deleteHeader(headers = {}, name = "") {
+  const output =
+    normalizeHeaders(headers);
+
+  const target =
+    safeLower(name, "");
+
+  if (!target) {
+    return output;
+  }
+
+  for (const key of Object.keys(output)) {
+    if (safeLower(key, "") === target) {
+      delete output[key];
+    }
+  }
+
+  return output;
+}
+
 export function sanitizeHeaders(headers = {}) {
   const source =
     headersToPlainObject(headers);
@@ -452,7 +717,7 @@ export function sanitizeHeaders(headers = {}) {
     output[key] =
       sensitive && value
         ? "***"
-        : value;
+        : sanitizeData(value, 0, key);
   }
 
   return output;
@@ -551,7 +816,17 @@ function isDomNodeLike(value) {
   return false;
 }
 
-export function sanitizeData(value, depth = 0) {
+export function sanitizeData(value, depth = 0, keyHint = "") {
+  if (
+    SENSITIVE_OBJECT_KEY_RE.test(
+      safeText(keyHint, "")
+    )
+  ) {
+    return value
+      ? "***"
+      : null;
+  }
+
   if (depth > 6) {
     return "[MaxDepth]";
   }
@@ -569,6 +844,10 @@ export function sanitizeData(value, depth = 0) {
     return value;
   }
 
+  if (typeof value === "bigint") {
+    return String(value);
+  }
+
   if (typeof value === "function") {
     return "[Function]";
   }
@@ -582,7 +861,11 @@ export function sanitizeData(value, depth = 0) {
         safeText(value.id, ""),
 
       className:
-        safeText(value.className, ""),
+        safeText(
+          value.className?.baseVal ||
+            value.className,
+          ""
+        ),
     };
   }
 
@@ -599,6 +882,9 @@ export function sanitizeData(value, depth = 0) {
 
       status:
         value.status || value.statusCode || null,
+
+      stack:
+        value.stack ? "[stack]" : null,
     };
   }
 
@@ -606,17 +892,19 @@ export function sanitizeData(value, depth = 0) {
     return value
       .slice(0, 80)
       .map((item) =>
-        sanitizeData(item, depth + 1)
+        sanitizeData(
+          item,
+          depth + 1,
+          keyHint
+        )
       );
   }
 
-  if (isObject(value)) {
+  if (isAnyObject(value)) {
     const output = {};
 
-    for (const [key, item] of Object.entries(value)) {
-      if (
-        /token|secret|password|authorization|credential|cookie/i.test(key)
-      ) {
+    for (const [key, item] of Object.entries(value).slice(0, 100)) {
+      if (SENSITIVE_OBJECT_KEY_RE.test(key)) {
         output[key] =
           item ? "***" : item;
 
@@ -624,7 +912,11 @@ export function sanitizeData(value, depth = 0) {
       }
 
       output[key] =
-        sanitizeData(item, depth + 1);
+        sanitizeData(
+          item,
+          depth + 1,
+          key
+        );
     }
 
     return output;
@@ -637,7 +929,7 @@ export function sanitizeRequestConfig(requestConfig = {}) {
   const cfg =
     safeObject(requestConfig);
 
-  return {
+  const sanitized = {
     ...cfg,
 
     path:
@@ -649,20 +941,40 @@ export function sanitizeRequestConfig(requestConfig = {}) {
     headers:
       sanitizeHeaders(cfg.headers),
 
+    body:
+      sanitizeData(cfg.body),
+
+    query:
+      sanitizeData(cfg.query),
+
+    params:
+      sanitizeData(cfg.params),
+
     token:
       cfg.token ? "***" : null,
 
     accessToken:
       cfg.accessToken ? "***" : null,
 
+    access_token:
+      cfg.access_token ? "***" : null,
+
     refreshToken:
       cfg.refreshToken ? "***" : null,
+
+    refresh_token:
+      cfg.refresh_token ? "***" : null,
 
     signal:
       cfg.signal
         ? "[AbortSignal]"
         : null,
   };
+
+  delete sanitized.rawToken;
+  delete sanitized.authorization;
+
+  return sanitized;
 }
 
 /* =========================================================
@@ -686,7 +998,11 @@ export function normalizeEndpointPath(path = "") {
 
     return safeLower(
       parsed.pathname || raw
-    ).replace(/\/{2,}/g, "/");
+    )
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/")
+      .replace(/\/+$/g, "") ||
+      "/";
   } catch {}
 
   return safeLower(
@@ -694,10 +1010,14 @@ export function normalizeEndpointPath(path = "") {
       .split("?")[0]
       .split("#")[0] ||
       raw
-  ).replace(/\/{2,}/g, "/");
+  )
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/")
+    .replace(/\/+$/g, "") ||
+    "/";
 }
 
-function stripApiPrefix(path = "") {
+export function stripApiPrefix(path = "") {
   const normalized =
     normalizeEndpointPath(path);
 
@@ -712,7 +1032,7 @@ function stripApiPrefix(path = "") {
   return normalized;
 }
 
-function getComparableEndpointPaths(path = "") {
+export function getComparableEndpointPaths(path = "") {
   const normalized =
     normalizeEndpointPath(path);
 
@@ -727,7 +1047,7 @@ function getComparableEndpointPaths(path = "") {
   );
 }
 
-function endpointMatches(path = "", markers = []) {
+export function endpointMatches(path = "", markers = []) {
   const paths =
     getComparableEndpointPaths(path);
 
@@ -740,6 +1060,9 @@ function endpointMatches(path = "", markers = []) {
     }
 
     return paths.some((candidate) =>
+      candidate === cleanMarker ||
+      candidate.startsWith(`${cleanMarker}/`) ||
+      candidate.endsWith(cleanMarker) ||
       candidate.includes(cleanMarker)
     );
   });
@@ -752,10 +1075,40 @@ export function isAuthEndpoint(path = "") {
   );
 }
 
+export function isAuthMeEndpoint(path = "") {
+  const paths =
+    getComparableEndpointPaths(path);
+
+  return paths.some((candidate) =>
+    candidate === "/me" ||
+    candidate === "/auth/me" ||
+    candidate === "/api/auth/me" ||
+    candidate.endsWith("/auth/me")
+  );
+}
+
 export function isPublicAuthEndpoint(path = "") {
+  /*
+    /api/auth/me queda explícitamente privado.
+  */
+  if (isAuthMeEndpoint(path)) {
+    return false;
+  }
+
   return endpointMatches(
     path,
     PUBLIC_AUTH_ENDPOINT_MARKERS
+  );
+}
+
+export function isAuthRefreshControlEndpoint(path = "") {
+  if (isAuthMeEndpoint(path)) {
+    return false;
+  }
+
+  return endpointMatches(
+    path,
+    AUTH_CONTROL_SKIP_REFRESH_MARKERS
   );
 }
 
@@ -769,7 +1122,8 @@ export function isTechnicalPublicRoute(path = "") {
 
     return paths.some((candidate) =>
       candidate === clean ||
-      candidate.startsWith(`${clean}/`)
+      candidate.startsWith(`${clean}/`) ||
+      candidate.endsWith(clean)
     );
   });
 }
@@ -798,6 +1152,7 @@ export function shouldToggleGlobalLoader(requestConfig = {}) {
   if (cfg.noLoader === true) return false;
   if (cfg.silent === true) return false;
   if (cfg.background === true) return false;
+  if (cfg._noLoader === true) return false;
 
   return true;
 }
@@ -805,14 +1160,20 @@ export function shouldToggleGlobalLoader(requestConfig = {}) {
 export function shouldLogRequests(config, AppCore) {
   return Boolean(
     config?.logRequests &&
-      AppCore?.config?.debug
+      (
+        AppCore?.config?.debug ||
+        AppCore?.state?.debug
+      )
   );
 }
 
 export function shouldLogResponses(config, AppCore) {
   return Boolean(
     config?.logResponses &&
-      AppCore?.config?.debug
+      (
+        AppCore?.config?.debug ||
+        AppCore?.state?.debug
+      )
   );
 }
 
@@ -830,7 +1191,7 @@ function hasAbortController() {
   return typeof AbortController !== "undefined";
 }
 
-function hasAbortSignal(value) {
+export function hasAbortSignal(value) {
   return Boolean(
     value &&
       typeof value === "object" &&
@@ -844,11 +1205,12 @@ export function withSignal(controllerOrSignal) {
     return null;
   }
 
-  if (
-    hasAbortController() &&
-    controllerOrSignal instanceof AbortController
-  ) {
-    return controllerOrSignal.signal;
+  if (hasAbortController()) {
+    try {
+      if (controllerOrSignal instanceof AbortController) {
+        return controllerOrSignal.signal;
+      }
+    } catch {}
   }
 
   if (hasAbortSignal(controllerOrSignal)) {
@@ -860,6 +1222,167 @@ export function withSignal(controllerOrSignal) {
   }
 
   return null;
+}
+
+export function createAbortControllerSafe() {
+  try {
+    if (hasAbortController()) {
+      return new AbortController();
+    }
+  } catch {}
+
+  return null;
+}
+
+export function createTimeoutSignal(ms = 0) {
+  const timeoutMs =
+    safeNumber(ms, 0);
+
+  const controller =
+    createAbortControllerSafe();
+
+  if (!controller) {
+    return {
+      controller:
+        null,
+
+      signal:
+        null,
+
+      timeoutId:
+        null,
+
+      clear() {},
+    };
+  }
+
+  if (timeoutMs <= 0) {
+    return {
+      controller,
+
+      signal:
+        controller.signal,
+
+      timeoutId:
+        null,
+
+      clear() {},
+    };
+  }
+
+  let timeoutId =
+    null;
+
+  try {
+    timeoutId =
+      setTimeout(() => {
+        try {
+          controller.abort("timeout");
+        } catch {
+          try {
+            controller.abort();
+          } catch {}
+        }
+      }, timeoutMs);
+  } catch {}
+
+  return {
+    controller,
+
+    signal:
+      controller.signal,
+
+    timeoutId,
+
+    clear() {
+      if (timeoutId) {
+        try {
+          clearTimeout(timeoutId);
+        } catch {}
+      }
+    },
+  };
+}
+
+export function mergeSignals(signals = []) {
+  const validSignals =
+    safeArray(signals)
+      .map(withSignal)
+      .filter(Boolean);
+
+  if (!validSignals.length) {
+    return null;
+  }
+
+  if (validSignals.length === 1) {
+    return validSignals[0];
+  }
+
+  const controller =
+    createAbortControllerSafe();
+
+  if (!controller) {
+    return validSignals[0] || null;
+  }
+
+  const cleanups = [];
+
+  function teardown() {
+    for (const cleanup of cleanups.splice(0)) {
+      try {
+        cleanup();
+      } catch {}
+    }
+  }
+
+  function abortFrom(signal) {
+    if (controller.signal.aborted) {
+      return;
+    }
+
+    try {
+      controller.abort(
+        signal?.reason || "aborted"
+      );
+    } catch {
+      try {
+        controller.abort();
+      } catch {}
+    } finally {
+      teardown();
+    }
+  }
+
+  for (const signal of validSignals) {
+    if (signal.aborted) {
+      abortFrom(signal);
+      break;
+    }
+
+    const onAbort = () => {
+      abortFrom(signal);
+    };
+
+    try {
+      signal.addEventListener(
+        "abort",
+        onAbort,
+        {
+          once:
+            true,
+        }
+      );
+
+      cleanups.push(() => {
+        signal.removeEventListener(
+          "abort",
+          onAbort
+        );
+      });
+    } catch {}
+  }
+
+  return controller.signal;
 }
 
 export function isAbortError(error) {
@@ -913,6 +1436,32 @@ export function isIdempotentMethod(method = "GET") {
   );
 }
 
+export function isRetryableStatus(status = 0, options = {}) {
+  const numericStatus =
+    safeNumber(status, 0);
+
+  if (!numericStatus) {
+    return false;
+  }
+
+  if (
+    numericStatus === 409 &&
+    options.retryOnConflict === true
+  ) {
+    return true;
+  }
+
+  if (
+    numericStatus === 423 &&
+    options.retryOnLocked === true
+  ) {
+    return true;
+  }
+
+  return DEFAULT_RETRYABLE_STATUSES.includes(numericStatus) ||
+    (numericStatus >= 500 && numericStatus <= 599);
+}
+
 export function isRetryableError(error, options = {}) {
   if (!error) {
     return false;
@@ -937,32 +1486,13 @@ export function isRetryableError(error, options = {}) {
     return true;
   }
 
-  if (status === 408) return true;
-  if (status === 425) return true;
-  if (status === 429) return true;
-
-  if (
-    status === 409 &&
-    options.retryOnConflict === true
-  ) {
-    return true;
-  }
-
-  if (
-    status === 423 &&
-    options.retryOnLocked === true
-  ) {
-    return true;
-  }
-
-  if (status >= 500 && status <= 599) {
-    return true;
-  }
-
-  return false;
+  return isRetryableStatus(
+    status,
+    options
+  );
 }
 
-function matchesStatusRule(status, retryOnStatuses) {
+export function matchesStatusRule(status, retryOnStatuses) {
   if (!Array.isArray(retryOnStatuses)) {
     return null;
   }
@@ -1011,7 +1541,7 @@ function matchesStatusRule(status, retryOnStatuses) {
   });
 }
 
-function parseRetryAfterMs(value = "") {
+export function parseRetryAfterMs(value = "") {
   const raw =
     safeText(value, "");
 
@@ -1208,13 +1738,11 @@ export function shouldRetry(config, error, requestConfig = {}, attempt = 0) {
   }
 
   const method =
-    safeText(
-      req.method,
-      "GET"
-    ).toUpperCase();
+    normalizeMethod(req.method || "GET");
 
   const allowUnsafeRetry =
-    req.retryUnsafe === true;
+    req.retryUnsafe === true ||
+    req.retryUnsafeMethods === true;
 
   if (
     !isIdempotentMethod(method) &&
@@ -1263,9 +1791,12 @@ function extractErrorMessage(error, fallback = DEFAULT_ERROR_MESSAGE) {
 
   return (
     safeText(data?.message, "") ||
+    safeText(data?.mensaje, "") ||
     safeText(data?.error, "") ||
     safeText(data?.detail, "") ||
     safeText(data?.title, "") ||
+    safeText(data?.reason, "") ||
+    safeText(data?.description, "") ||
     safeText(error?.message, "") ||
     safeText(error?.statusText, "") ||
     safeText(error?.response?.statusText, "") ||
@@ -1312,7 +1843,7 @@ function defineRawError(target, raw) {
 }
 
 export function normalizeError(error, requestConfig = null) {
-  const cfg =
+  const sanitizedConfig =
     requestConfig
       ? sanitizeRequestConfig(requestConfig)
       : null;
@@ -1343,8 +1874,8 @@ export function normalizeError(error, requestConfig = null) {
       requestConfig:
         sanitizeRequestConfig(
           error.requestConfig ||
-          requestConfig ||
-          {}
+            requestConfig ||
+            {}
         ),
 
       at:
@@ -1373,12 +1904,11 @@ export function normalizeError(error, requestConfig = null) {
     );
 
   const method =
-    safeText(
+    normalizeMethod(
       error?.method ||
         requestConfig?.method ||
-        "",
-      ""
-    ).toUpperCase() || null;
+        DEFAULT_METHOD
+    );
 
   const url =
     redactHttpValue(
@@ -1431,7 +1961,7 @@ export function normalizeError(error, requestConfig = null) {
       null,
 
     requestConfig:
-      cfg,
+      sanitizedConfig,
 
     aborted:
       isAbortError(error),
@@ -1477,7 +2007,7 @@ export function buildRequestSummary(requestConfig = {}) {
       cfg.requestId || null,
 
     method:
-      safeText(cfg.method, "GET").toUpperCase(),
+      normalizeMethod(cfg.method || DEFAULT_METHOD),
 
     path:
       redactHttpValue(
@@ -1519,6 +2049,9 @@ export function buildRequestSummary(requestConfig = {}) {
     upload:
       cfg.upload === true,
 
+    download:
+      cfg.download === true,
+
     skipRetry:
       cfg._skipRetry === true,
 
@@ -1532,7 +2065,8 @@ function resolveDefaultTimeout(baseConfig = {}, AppCore = null) {
     safeNumber(
       AppCore?.config?.requestTimeout ??
         AppCore?.config?.httpTimeout ??
-        AppCore?.config?.timeout,
+        AppCore?.config?.timeout ??
+        AppCore?.config?.api?.timeout,
       NaN
     );
 
@@ -1546,6 +2080,18 @@ function resolveDefaultTimeout(baseConfig = {}, AppCore = null) {
   );
 }
 
+function resolveApiBase(config = {}, AppCore = null, options = {}) {
+  return (
+    safeText(options.apiBase, "") ||
+    safeText(config.apiBase, "") ||
+    safeText(config.baseUrl, "") ||
+    safeText(AppCore?.config?.apiBase, "") ||
+    safeText(AppCore?.config?.api?.baseUrl, "") ||
+    safeText(AppCore?.config?.api?.base, "") ||
+    ""
+  );
+}
+
 function shouldDefaultPublic(path = "", options = {}) {
   const opts =
     safeObject(options);
@@ -1553,8 +2099,32 @@ function shouldDefaultPublic(path = "", options = {}) {
   return Boolean(
     opts.public === true ||
       opts.auth === false ||
+      opts.skipAuth === true ||
       isPublicEndpoint(path)
   );
+}
+
+function normalizeRetryStatuses(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  return value
+    .map((item) => {
+      if (typeof item === "number") {
+        return item;
+      }
+
+      const text =
+        safeText(item, "");
+
+      return text || null;
+    })
+    .filter(Boolean);
 }
 
 export function buildDefaultRequestConfig(config, AppCore, method, path, options = {}) {
@@ -1567,10 +2137,11 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
     safeObject(options);
 
   const finalMethod =
-    safeText(
-      opts.method || method,
-      "GET"
-    ).toUpperCase();
+    normalizeMethod(
+      opts.method ||
+        method ||
+        DEFAULT_METHOD
+    );
 
   const finalPath =
     safeText(
@@ -1608,6 +2179,13 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
     url:
       "",
 
+    apiBase:
+      resolveApiBase(
+        cfg,
+        AppCore,
+        opts
+      ),
+
     body:
       null,
 
@@ -1618,6 +2196,9 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
       defaultAuth,
 
     public:
+      publicEndpoint,
+
+    skipAuth:
       publicEndpoint,
 
     timeout:
@@ -1632,11 +2213,17 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
     upload:
       false,
 
+    download:
+      false,
+
     responseType:
       cfg.defaultResponseType ||
       HTTP_CONFIG.defaultResponseType,
 
     query:
+      null,
+
+    params:
       null,
 
     credentials:
@@ -1656,6 +2243,9 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
       true,
 
     retryUnsafe:
+      false,
+
+    retryUnsafeMethods:
       false,
 
     retryStrategy:
@@ -1681,7 +2271,9 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
       ),
 
     retryOnStatuses:
-      cfg.retryOnStatuses || null,
+      normalizeRetryStatuses(
+        cfg.retryOnStatuses
+      ),
 
     retryOnConflict:
       cfg.retryOnConflict === true,
@@ -1737,28 +2329,35 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
   const mergedAuth =
     merged.auth === false ||
     merged.public === true ||
+    merged.skipAuth === true ||
     mergedPublic
       ? false
       : merged.auth ?? defaultAuth;
 
   const headers =
-    headersToPlainObject(
+    normalizeHeaders(
       merged.headers
     );
 
-  return {
+  const finalRequestConfig = {
     ...merged,
 
     method:
-      safeText(
-        merged.method || finalMethod,
-        finalMethod
-      ).toUpperCase(),
+      normalizeMethod(
+        merged.method || finalMethod
+      ),
 
     path:
       safeText(
         merged.path || finalPath,
         finalPath
+      ),
+
+    apiBase:
+      resolveApiBase(
+        cfg,
+        AppCore,
+        merged
       ),
 
     headers,
@@ -1795,6 +2394,9 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
     retryUnsafe:
       merged.retryUnsafe === true,
 
+    retryUnsafeMethods:
+      merged.retryUnsafeMethods === true,
+
     retryStrategy:
       safeText(
         merged.retryStrategy,
@@ -1821,9 +2423,12 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
       ),
 
     retryOnStatuses:
-      Array.isArray(merged.retryOnStatuses)
-        ? merged.retryOnStatuses
-        : cfg.retryOnStatuses || null,
+      normalizeRetryStatuses(
+        merged.retryOnStatuses
+      ) ||
+      normalizeRetryStatuses(
+        cfg.retryOnStatuses
+      ),
 
     retryOnConflict:
       safeBoolean(
@@ -1843,6 +2448,9 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
     public:
       mergedPublic,
 
+    skipAuth:
+      mergedPublic || mergedAuth === false,
+
     auth:
       mergedAuth,
 
@@ -1852,6 +2460,13 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
         useLoader:
           merged.useLoader ?? defaultUseLoader,
       }),
+
+    _startedAt:
+      safeNumber(
+        merged._startedAt ||
+          merged.startedAt,
+        0
+      ),
 
     _skipRetry:
       merged._skipRetry === true,
@@ -1870,4 +2485,152 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
     _authRefreshFailed:
       merged._authRefreshFailed === true,
   };
+
+  if (isBodylessMethod(finalRequestConfig.method)) {
+    delete finalRequestConfig.body;
+  }
+
+  return finalRequestConfig;
 }
+
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
+export function getHttpHelpersSnapshot() {
+  return {
+    version:
+      HTTP_HELPERS_VERSION,
+
+    defaultConfig:
+      {
+        retries:
+          HTTP_CONFIG.retries,
+
+        timeout:
+          HTTP_CONFIG.timeout,
+
+        autoRefreshOn401:
+          HTTP_CONFIG.autoRefreshOn401,
+
+        autoLogoutOn401:
+          HTTP_CONFIG.autoLogoutOn401,
+
+        defaultCredentials:
+          HTTP_CONFIG.defaultCredentials,
+
+        defaultResponseType:
+          HTTP_CONFIG.defaultResponseType,
+      },
+
+    endpointPolicy: {
+      authMePrivate:
+        true,
+
+      authMarkers:
+        AUTH_ENDPOINT_MARKERS.length,
+
+      publicAuthMarkers:
+        PUBLIC_AUTH_ENDPOINT_MARKERS.length,
+
+      skipRefreshMarkers:
+        AUTH_CONTROL_SKIP_REFRESH_MARKERS.length,
+
+      technicalPublicRoutes:
+        [...TECHNICAL_PUBLIC_ROUTES],
+    },
+
+    retry: {
+      idempotentMethods:
+        [...IDEMPOTENT_METHODS],
+
+      bodylessMethods:
+        [...BODYLESS_METHODS],
+
+      retryableStatuses:
+        [...DEFAULT_RETRYABLE_STATUSES],
+    },
+
+    at:
+      isoNow(),
+  };
+}
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default {
+  HTTP_HELPERS_VERSION,
+  HTTP_CONFIG,
+
+  isFn,
+  isObject,
+  isAnyObject,
+  safeObject,
+  safeArray,
+  safeText,
+  safeLower,
+  safeNumber,
+  safeBoolean,
+  nowMs,
+  isoNow,
+  getBaseOrigin,
+  escapeRegExp,
+  sleep,
+
+  normalizeMethod,
+  isKnownMethod,
+  isBodylessMethod,
+
+  headersToPlainObject,
+  normalizeHeaders,
+  getHeaderValue,
+  hasHeader,
+  setHeader,
+  deleteHeader,
+  sanitizeHeaders,
+
+  redactHttpValue,
+  sanitizeData,
+  sanitizeRequestConfig,
+
+  normalizeEndpointPath,
+  stripApiPrefix,
+  getComparableEndpointPaths,
+  endpointMatches,
+  isAuthEndpoint,
+  isAuthMeEndpoint,
+  isPublicAuthEndpoint,
+  isAuthRefreshControlEndpoint,
+  isTechnicalPublicRoute,
+  isTechnicalPublicSpaEndpoint,
+  isPublicEndpoint,
+
+  shouldToggleGlobalLoader,
+  shouldLogRequests,
+  shouldLogResponses,
+  shouldLogErrors,
+
+  hasAbortSignal,
+  withSignal,
+  createAbortControllerSafe,
+  createTimeoutSignal,
+  mergeSignals,
+  isAbortError,
+  isTimeoutError,
+
+  isIdempotentMethod,
+  isRetryableStatus,
+  isRetryableError,
+  matchesStatusRule,
+  parseRetryAfterMs,
+  buildRetryDelay,
+  shouldRetry,
+
+  normalizeError,
+  buildRequestSummary,
+  buildDefaultRequestConfig,
+
+  getHttpHelpersSnapshot,
+};

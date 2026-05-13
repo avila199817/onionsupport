@@ -21,6 +21,7 @@
    - set/upsert con overwrite explícito
    - unregister seguro con dispose opcional
    - dispose defensivo sync/async
+   - dispose methods case-sensitive
    - alias collision controlado
    - eventos consistentes
    - snapshots sin exponer instancias completas
@@ -32,7 +33,7 @@
 ========================================================= */
 
 const MODULES_VERSION =
-  "11.0.0";
+  "12.0.0";
 
 const MAX_RECENT_EVENTS =
   50;
@@ -310,6 +311,61 @@ function uniqueAliases(values = []) {
         .filter(Boolean)
     )
   );
+}
+
+function collectDisposeMethodValues(input, output = []) {
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      collectDisposeMethodValues(
+        item,
+        output
+      );
+    }
+
+    return output;
+  }
+
+  if (
+    input !== null &&
+    input !== undefined &&
+    input !== ""
+  ) {
+    output.push(input);
+  }
+
+  return output;
+}
+
+function uniqueDisposeMethods(values = []) {
+  const output =
+    [];
+
+  const seen =
+    new Set();
+
+  for (const value of collectDisposeMethodValues(values)) {
+    if (typeof value === "symbol") {
+      if (!seen.has(value)) {
+        seen.add(value);
+        output.push(value);
+      }
+
+      continue;
+    }
+
+    const method =
+      safeText(value, "");
+
+    if (
+      method &&
+      !seen.has(method)
+    ) {
+      seen.add(method);
+      output.push(method);
+    }
+  }
+
+  return output;
 }
 
 function normalizeTags(values = []) {
@@ -1059,16 +1115,23 @@ export function createModules({
           opts
         );
 
+      const nowMs =
+        safeNow();
+
       const meta = {
         ...previousMeta,
+
         aliases:
           acceptedAliases.length
             ? acceptedAliases
             : previousMeta?.aliases || [],
+
         updatedAtMs:
-          safeNow(),
+          nowMs,
+
         updatedAt:
-          safeIsoDate(),
+          safeIsoDate(nowMs),
+
         registerCount:
           safeNumber(previousMeta?.registerCount, 1),
       };
@@ -1412,7 +1475,7 @@ export function createModules({
         : {};
 
     const methods =
-      uniqueAliases([
+      uniqueDisposeMethods([
         opts.disposeMethod,
         opts.disposeMethods,
         DEFAULT_DISPOSE_METHODS,

@@ -3,16 +3,18 @@
    Archivo: src/core/storage.js
 
    ONION SUPPORT · CORE STORAGE
-   NAMESPACED STORAGE · LOCAL/SESSION/MEMORY · SAFE LEGACY CLEANUP · 13/10
+   NAMESPACED STORAGE · LOCAL/SESSION/MEMORY · SAFE LEGACY CLEANUP · 14/10
 
    RESPONSABILIDADES:
    - encapsular acceso localStorage/sessionStorage namespaced
    - leer / escribir valores serializados y raw
-   - borrar claves legacy de sesión
+   - borrar claves legacy de sesión/auth sin tocar preferencias
    - limpiar namespace completo app
    - fallback en memoria si Web Storage no está disponible
    - proteger contra valores corruptos
    - exponer snapshot de diagnóstico
+   - no hacer localStorage.clear()
+   - no hacer sessionStorage.clear()
 
    HARDENING EXTREMO:
    - guard browser robusto
@@ -23,10 +25,12 @@
    - aliases remove/delete/del
    - limpieza legacy ampliada pero segura
    - no borra claves namespaced actuales al limpiar legacy
+   - removeLegacySessionKeys NO borra theme/lang/appearance/preferencias
    - snapshots con redacción de tokens/secrets
    - cero throws accidentales
    - soporte local/session/memory
    - soporte getJson/setJson/getRaw/setRaw
+   - soporte all/session/sessionAlso/memory/memoryAlso
 ========================================================= */
 
 import { config } from "./config.js";
@@ -44,7 +48,7 @@ import {
 ========================================================= */
 
 const STORAGE_VERSION =
-  "13.0.1";
+  "14.0.0";
 
 const DEFAULT_PREFIX =
   "onion";
@@ -77,7 +81,10 @@ const SENSITIVE_KEY_RE =
   /(token|authorization|password|secret|session|otp|code|jwt|bearer|credential|cookie|csrf|xsrf|mfa|2fa)/i;
 
 const SESSIONISH_KEY_RE =
-  /(session|token|auth|user|role|login|otp|mfa|2fa|post_login|postLogin)/i;
+  /(session|token|auth|user|role|login|otp|mfa|2fa|post_login|postLogin|redirectAfterLogin|redirect_after_login)/i;
+
+const PREFERENCE_KEY_RE =
+  /(^|[:._-])(theme|themeMode|appearance|lang|language|locale|sidebarOpen|density|preferences|settings|ui)([:._-]|$)/i;
 
 const LEGACY_EXTRA_KEYS =
   Object.freeze([
@@ -273,11 +280,8 @@ function safeArray(value) {
 }
 
 function unique(values = []) {
-  const result =
-    [];
-
-  const seen =
-    new Set();
+  const result = [];
+  const seen = new Set();
 
   for (const value of safeArray(values).flat(Infinity)) {
     const clean =
@@ -900,14 +904,36 @@ function getConfiguredLegacyKeys() {
   return [];
 }
 
+function isPreferenceLikeKey(key = "") {
+  return PREFERENCE_KEY_RE.test(
+    safeText(key, "")
+  );
+}
+
 function getLegacyKeys() {
   return unique([
     ...getConfiguredLegacyKeys(),
     ...LEGACY_EXTRA_KEYS,
-  ]).filter((legacyKey) => (
-    legacyKey &&
-    !isCurrentNamespacedKey(legacyKey)
-  ));
+  ]).filter((legacyKey) => {
+    if (!legacyKey) {
+      return false;
+    }
+
+    if (isCurrentNamespacedKey(legacyKey)) {
+      return false;
+    }
+
+    /*
+      Limpieza legacy de sesión/auth:
+      no borra theme/lang/appearance/settings/preferencias aunque vengan
+      desde config.legacyStorageKeys.
+    */
+    if (isPreferenceLikeKey(legacyKey)) {
+      return false;
+    }
+
+    return true;
+  });
 }
 
 function shouldRemoveLegacyKey(key = "") {
@@ -919,6 +945,10 @@ function shouldRemoveLegacyKey(key = "") {
   }
 
   if (isCurrentNamespacedKey(clean)) {
+    return false;
+  }
+
+  if (isPreferenceLikeKey(clean)) {
     return false;
   }
 
@@ -971,7 +1001,8 @@ export function removeLegacySessionKeys(utils = null, events = null) {
 
       if (
         !key ||
-        isCurrentNamespacedKey(key)
+        isCurrentNamespacedKey(key) ||
+        isPreferenceLikeKey(key)
       ) {
         continue;
       }
@@ -1298,6 +1329,79 @@ export function createStorage(input = {}) {
     );
   }
 
+  function writeRawToRequestedTargets(name, raw, opts = {}) {
+    const namespacedKey =
+      key(name);
+
+    const requestedKind =
+      resolveKindFromOptions(opts);
+
+    const targets =
+      opts.all === true
+        ? [
+            "local",
+            "session",
+            "memory",
+          ]
+        : requestedKind === "session"
+          ? [
+              "session",
+              "memory",
+            ]
+          : requestedKind === "memory"
+            ? [
+                "memory",
+              ]
+            : opts.sessionAlso === true
+              ? [
+                  "local",
+                  "session",
+                  "memory",
+                ]
+              : [
+                  "local",
+                  "memory",
+                ];
+
+    let written =
+      false;
+
+    for (const target of unique(targets)) {
+      if (target === "memory") {
+        incrementWriteCounter("memory");
+
+        written =
+          writeRawToMemory(
+            namespacedKey,
+            raw
+          ) || written;
+
+        continue;
+      }
+
+      const ok =
+        writeRawToStorage(
+          target,
+          namespacedKey,
+          raw
+        );
+
+      if (ok) {
+        incrementWriteCounter(target);
+        written = true;
+      } else {
+        recordError(
+          lastStorageError,
+          "setRaw",
+          namespacedKey,
+          target
+        );
+      }
+    }
+
+    return written;
+  }
+
   function setRaw(name, value, options = {}) {
     const namespacedKey =
       key(name);
@@ -1338,38 +1442,10 @@ export function createStorage(input = {}) {
       );
     }
 
-    if (requestedKind !== "memory") {
-      const ok =
-        writeRawToStorage(
-          requestedKind,
-          namespacedKey,
-          raw
-        );
-
-      if (ok) {
-        incrementWriteCounter(requestedKind);
-
-        writeRawToMemory(
-          namespacedKey,
-          raw
-        );
-
-        return true;
-      }
-
-      recordError(
-        lastStorageError,
-        "setRaw",
-        namespacedKey,
-        requestedKind
-      );
-    }
-
-    incrementWriteCounter("memory");
-
-    return writeRawToMemory(
-      namespacedKey,
-      raw
+    return writeRawToRequestedTargets(
+      name,
+      raw,
+      opts
     );
   }
 
@@ -1600,10 +1676,19 @@ export function createStorage(input = {}) {
 
     const kindsToRead =
       requestedKind === "memory"
-        ? ["memory"]
+        ? [
+            "memory",
+          ]
         : opts.all === true
-          ? ["local", "session", "memory"]
-          : [requestedKind, "memory"];
+          ? [
+              "local",
+              "session",
+              "memory",
+            ]
+          : [
+              requestedKind,
+              "memory",
+            ];
 
     for (const kind of unique(kindsToRead)) {
       if (kind === "memory") {
@@ -1666,10 +1751,19 @@ export function createStorage(input = {}) {
 
     const kindsToClear =
       opts.all === true
-        ? ["local", "session", "memory"]
+        ? [
+            "local",
+            "session",
+            "memory",
+          ]
         : requestedKind === "memory"
-          ? ["memory"]
-          : [requestedKind, "memory"];
+          ? [
+              "memory",
+            ]
+          : [
+              requestedKind,
+              "memory",
+            ];
 
     let removed = 0;
 
@@ -1749,6 +1843,11 @@ export function createStorage(input = {}) {
         ? options
         : {};
 
+    /*
+      Por seguridad, clearAll limpia el namespace actual.
+      Las claves legacy de sesión/auth sólo se limpian si includeLegacy=true.
+      Así no se toca theme/lang/preferencias legacy accidentalmente.
+    */
     const includeLegacy =
       opts.includeLegacy === true;
 
@@ -1795,10 +1894,19 @@ export function createStorage(input = {}) {
 
     const kindsToRepair =
       opts.all === true
-        ? ["local", "session", "memory"]
+        ? [
+            "local",
+            "session",
+            "memory",
+          ]
         : requestedKind === "memory"
-          ? ["memory"]
-          : [requestedKind, "memory"];
+          ? [
+              "memory",
+            ]
+          : [
+              requestedKind,
+              "memory",
+            ];
 
     let repaired = 0;
 
@@ -1937,7 +2045,8 @@ export function createStorage(input = {}) {
 
     if (
       ok &&
-      opts.removeLegacy !== false
+      opts.removeLegacy !== false &&
+      !isPreferenceLikeKey(fromKey)
     ) {
       try {
         storage?.removeItem?.(fromKey);

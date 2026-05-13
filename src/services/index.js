@@ -58,6 +58,7 @@ import {
   buildRequestSummary,
   buildDefaultRequestConfig,
   withSignal,
+  sanitizeData,
 } from "./http.helpers.js";
 
 import {
@@ -68,21 +69,30 @@ import {
   runRequestInterceptors,
   runResponseInterceptors,
   runErrorInterceptors,
+  getInterceptorsSnapshot,
+  clearInterceptors,
+  resetInterceptorsRuntime,
 } from "./http.interceptors.js";
 
 import {
   incrementPendingRequests,
   decrementPendingRequests,
   createAbortController,
+  abortController as abortRuntimeController,
+  getHttpRuntimeSnapshot,
+  resetHttpRuntime,
 } from "./http.runtime.js";
 
 import {
   runAutoRefreshIfNeeded,
+  getHttpAuthSnapshot,
+  resetHttpAuthRuntime,
 } from "./http.auth.js";
 
 import {
   executeBaseRequest,
   executeWithRetry,
+  getHttpRequestEngineSnapshot,
 } from "./http.request.js";
 
 /* =========================================================
@@ -97,7 +107,7 @@ export const Http = (() => {
   ======================================================= */
 
   const SERVICE_VERSION =
-    "14.0.0";
+    "14.1.0";
 
   const SERVICE_NAME =
     "http";
@@ -142,6 +152,9 @@ export const Http = (() => {
 
       interceptorRegistered:
         "http:interceptor:registered",
+
+      interceptorsCleared:
+        "http:interceptors:cleared",
 
       requestStart:
         "http:request:start",
@@ -761,6 +774,51 @@ export const Http = (() => {
     return output;
   }
 
+  function isSensitiveObjectKey(key = "") {
+    const value =
+      safeLower(key, "");
+
+    if (!value) {
+      return false;
+    }
+
+    if (
+      /password|secret|authorization|credential|cookie|bearer|jwt|otp|mfa|2fa/i.test(value)
+    ) {
+      return true;
+    }
+
+    if (
+      /(^|[_:. -])(token|access_token|refresh_token|id_token|temp_token|temporary_token)($|[_:. -])/i.test(value)
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        "token",
+        "accesstoken",
+        "access_token",
+        "refreshtoken",
+        "refresh_token",
+        "idtoken",
+        "id_token",
+        "temptoken",
+        "temp_token",
+        "temporarytoken",
+        "temporary_token",
+        "sessionid",
+        "session_id",
+        "sessionuserid",
+        "session_user_id",
+      ].includes(value.replace(/[-:.]/g, "_"))
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
   function isDomNodeLike(value) {
     if (
       !value ||
@@ -787,11 +845,7 @@ export const Http = (() => {
   }
 
   function sanitizePayload(value, depth = 0, keyHint = "") {
-    if (
-      /token|secret|password|authorization|credential|cookie|session|jwt|bearer|refresh|access|otp|mfa|2fa|code/i.test(
-        safeText(keyHint, "")
-      )
-    ) {
+    if (isSensitiveObjectKey(keyHint)) {
       return value
         ? "***"
         : null;
@@ -874,17 +928,16 @@ export const Http = (() => {
       const output = {};
 
       for (const [key, item] of Object.entries(value).slice(0, 100)) {
-        if (
-          /token|secret|password|authorization|credential|cookie|session|jwt|bearer|refresh|access|otp|mfa|2fa|code/i.test(key)
-        ) {
-          output[key] =
-            item ? "***" : item;
-
-          continue;
-        }
-
         output[key] =
-          sanitizePayload(item, depth + 1, key);
+          isSensitiveObjectKey(key)
+            ? item
+              ? "***"
+              : item
+            : sanitizePayload(
+                item,
+                depth + 1,
+                key
+              );
       }
 
       return output;
@@ -1124,7 +1177,7 @@ export const Http = (() => {
       for (const key of RESPONSE_PREVIEW_KEYS) {
         if (Object.prototype.hasOwnProperty.call(response, key)) {
           preview[key] =
-            sanitizePayload(response[key]);
+            sanitizePayload(response[key], 0, key);
         }
       }
 
@@ -1181,7 +1234,7 @@ export const Http = (() => {
 
       return safeLower(
         parsed.pathname || raw
-      );
+      ).replace(/\/{2,}/g, "/");
     } catch {}
 
     return safeLower(
@@ -1189,29 +1242,49 @@ export const Http = (() => {
         .split("?")[0]
         .split("#")[0] ||
         raw
+    ).replace(/\/{2,}/g, "/");
+  }
+
+  function getComparableEndpointPaths(path = "") {
+    const normalized =
+      normalizeEndpointPath(path);
+
+    const withoutApi =
+      normalized.startsWith("/api/")
+        ? normalized.slice(4) || "/"
+        : normalized === "/api"
+          ? "/"
+          : normalized;
+
+    return Array.from(
+      new Set([
+        normalized,
+        withoutApi,
+      ].filter(Boolean))
     );
   }
 
   function endpointIncludes(path = "", markers = []) {
-    const normalized =
-      normalizeEndpointPath(path);
+    const candidates =
+      getComparableEndpointPaths(path);
 
-    if (!normalized) {
+    if (!candidates.length) {
       return false;
     }
 
     return safeArray(markers).some((marker) => {
       const cleanMarker =
-        safeLower(marker, "");
+        normalizeEndpointPath(marker);
 
-      return (
-        cleanMarker &&
-        (
-          normalized === cleanMarker ||
-          normalized.endsWith(cleanMarker) ||
-          normalized.includes(cleanMarker)
-        )
-      );
+      if (!cleanMarker) {
+        return false;
+      }
+
+      return candidates.some((candidate) => (
+        candidate === cleanMarker ||
+        candidate.endsWith(cleanMarker) ||
+        candidate.includes(cleanMarker)
+      ));
     });
   }
 
@@ -1230,23 +1303,21 @@ export const Http = (() => {
   }
 
   function isTechnicalPublicSpaEndpoint(path = "") {
-    const normalized =
-      normalizeEndpointPath(path);
+    const candidates =
+      getComparableEndpointPaths(path);
 
-    if (!normalized) {
+    if (!candidates.length) {
       return false;
     }
 
     return TECHNICAL_PUBLIC_SPA_PATHS.some((publicPath) => {
       const clean =
-        safeLower(publicPath, "");
+        normalizeEndpointPath(publicPath);
 
-      return (
-        normalized === clean ||
-        normalized.startsWith(`${clean}/`) ||
-        normalized.endsWith(clean) ||
-        normalized.includes(`/api${clean}`)
-      );
+      return candidates.some((candidate) => (
+        candidate === clean ||
+        candidate.startsWith(`${clean}/`)
+      ));
     });
   }
 
@@ -1278,14 +1349,15 @@ export const Http = (() => {
   }
 
   function isAuthMeEndpoint(path = "") {
-    const normalized =
-      normalizeEndpointPath(path);
+    const candidates =
+      getComparableEndpointPaths(path);
 
-    return (
-      normalized === "/me" ||
-      normalized.endsWith("/auth/me") ||
-      normalized.endsWith("/api/auth/me")
-    );
+    return candidates.some((candidate) => (
+      candidate === "/me" ||
+      candidate === "/auth/me" ||
+      candidate === "/api/auth/me" ||
+      candidate.endsWith("/auth/me")
+    ));
   }
 
   function isAuthEndpoint(path = "") {
@@ -1295,9 +1367,7 @@ export const Http = (() => {
     return (
       normalized.includes("/auth/") ||
       normalized.endsWith("/auth") ||
-      normalized === "/me" ||
-      normalized.endsWith("/auth/me") ||
-      normalized.endsWith("/api/auth/me")
+      isAuthMeEndpoint(path)
     );
   }
 
@@ -1368,7 +1438,8 @@ export const Http = (() => {
     }
 
     /*
-      /api/auth/me sí es privado. Se permite refresh si devuelve 401.
+      /api/auth/me sí es privado.
+      Nota: para refrescar también debe permitirlo http.auth.js.
     */
     if (isAuthMeEndpoint(path)) {
       return true;
@@ -1503,8 +1574,20 @@ export const Http = (() => {
     return ok;
   }
 
+  function bridgeLooksAttached() {
+    return Boolean(
+      AppCore?.Http === api ||
+        AppCore?.http === api ||
+        AppCore?.modules?.get?.("Http") === api ||
+        AppCore?.modules?.get?.("http") === api
+    );
+  }
+
   function attachToAppCore() {
-    if (state.bridgeAttached) {
+    if (
+      state.bridgeAttached &&
+      bridgeLooksAttached()
+    ) {
       return true;
     }
 
@@ -1585,11 +1668,12 @@ export const Http = (() => {
      INTERCEPTOR API
   ======================================================= */
 
-  function useRequest(fn) {
+  function useRequest(fn, options = {}) {
     const off =
       registerRequestInterceptor(
         interceptors,
-        fn
+        fn,
+        options
       );
 
     safeEmit(
@@ -1603,11 +1687,12 @@ export const Http = (() => {
     return off;
   }
 
-  function useResponse(fn) {
+  function useResponse(fn, options = {}) {
     const off =
       registerResponseInterceptor(
         interceptors,
-        fn
+        fn,
+        options
       );
 
     safeEmit(
@@ -1621,11 +1706,12 @@ export const Http = (() => {
     return off;
   }
 
-  function useError(fn) {
+  function useError(fn, options = {}) {
     const off =
       registerErrorInterceptor(
         interceptors,
-        fn
+        fn,
+        options
       );
 
     safeEmit(
@@ -1637,6 +1723,26 @@ export const Http = (() => {
     );
 
     return off;
+  }
+
+  function clearRegisteredInterceptors(type = "") {
+    const removed =
+      clearInterceptors(
+        interceptors,
+        type
+      );
+
+    safeEmit(
+      EVENTS.interceptorsCleared,
+      {
+        type:
+          safeText(type, "all"),
+
+        removed,
+      }
+    );
+
+    return removed;
   }
 
   /* =======================================================
@@ -2840,7 +2946,7 @@ export const Http = (() => {
       /*
         No se fuerza Content-Type aquí:
         - FormData debe dejar que el browser ponga boundary.
-        - request/core o http.request decidirán si es JSON.
+        - Core/request engine decidirán si es JSON.
       */
 
       return {
@@ -2961,6 +3067,9 @@ export const Http = (() => {
 
             useLoader:
               config.useLoader ?? null,
+
+            apiBase:
+              getCoreApiBase(),
           }),
       }
     );
@@ -3143,12 +3252,29 @@ export const Http = (() => {
           TECHNICAL_PUBLIC_SPA_PATHS,
       },
 
+      internals: {
+        interceptors:
+          getInterceptorsSnapshot?.(interceptors) || null,
+
+        runtime:
+          getHttpRuntimeSnapshot?.(state) || null,
+
+        authRuntime:
+          getHttpAuthSnapshot?.(state) || null,
+
+        requestEngine:
+          getHttpRequestEngineSnapshot?.() || null,
+      },
+
       at:
         isoNow(),
     });
   }
 
-  function resetRuntimeState() {
+  function resetRuntimeState(options = {}) {
+    const opts =
+      safeObject(options);
+
     state.pendingRequests =
       0;
 
@@ -3171,6 +3297,27 @@ export const Http = (() => {
       isoNow();
 
     try {
+      resetHttpRuntime?.(
+        AppCore,
+        state,
+        {
+          source:
+            "http.service:resetRuntimeState",
+        }
+      );
+    } catch {}
+
+    try {
+      resetHttpAuthRuntime?.(state);
+    } catch {}
+
+    if (opts.resetInterceptors === true) {
+      try {
+        resetInterceptorsRuntime?.(interceptors);
+      } catch {}
+    }
+
+    try {
       AppCore?.setLoading?.(false);
     } catch {}
 
@@ -3184,6 +3331,13 @@ export const Http = (() => {
 
   function abortController() {
     return createAbortController();
+  }
+
+  function abort(controller, reason = "http-abort") {
+    return abortRuntimeController(
+      controller,
+      reason
+    );
   }
 
   /* =======================================================
@@ -3227,10 +3381,21 @@ export const Http = (() => {
     useResponse,
     useError,
 
+    clearInterceptors:
+      clearRegisteredInterceptors,
+
+    resetInterceptorsRuntime() {
+      return resetInterceptorsRuntime(
+        interceptors
+      );
+    },
+
     createAbortController:
       abortController,
 
     abortController,
+
+    abort,
 
     withSignal,
 
@@ -3260,6 +3425,7 @@ export const Http = (() => {
     redactTokenInText,
     sanitizePayload,
     sanitizeErrorForEvent,
+    summarizeResponseForEvent,
 
     config,
     state,

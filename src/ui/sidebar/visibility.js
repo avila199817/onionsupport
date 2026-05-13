@@ -2,62 +2,49 @@
    Onion SPA - Sidebar Visibility
    Archivo: src/ui/sidebar/visibility.js
 
-   FINAL EXTREME SYSTEM · SIDEBAR ROLE VISIBILITY · 13/10
-   PATCH · CONSTANTS SINGLE SOURCE
-   PATCH · NORMAL ITEMS REPAIR
-   PATCH · ADMIN ITEMS RECOVERABLE
-   PATCH · NO STATE-AS-RULE BUG
-   PATCH · ACTIVE / INDICATOR INVALIDATION SAFE
+   ONION SUPPORT · SIDEBAR VISIBILITY · 15/10
+   ROLE SAFE · ADMIN RECOVERABLE · NORMAL ITEMS REPAIR
 
    RESPONSABILIDADES:
-   - aplicar visibilidad por rol dentro del sidebar
-   - mostrar / ocultar elementos admin
-   - soportar data-role="admin"
-   - soportar data-admin-only="true"
-   - soportar data-roles="admin,support"
-   - soportar data-sidebar-role / data-sidebar-roles
-   - soportar data-requires-role / data-requires-roles
-   - soportar data-required-role / data-required-roles
-   - soportar data-permission / data-permissions
-   - soportar data-sidebar-permission / data-sidebar-permissions
-   - sincronizar aria-hidden / hidden / inert / tabindex
-   - preservar/restaurar display original
-   - preservar/restaurar tabindex original
-   - preservar/restaurar tooltip custom/i18n
-   - asegurar el item dinámico de servidor si existe callback legacy
-   - sanear tooltips tras cambios de visibilidad
-   - limpiar item activo si quedó oculto
-   - evitar flash de items admin antes de aplicar permisos
-   - emitir evento estable de visibilidad aplicada
+   - Aplicar visibilidad por rol dentro del sidebar.
+   - Mostrar / ocultar elementos admin.
+   - Soportar data-role="admin".
+   - Soportar data-admin-only="true".
+   - Soportar data-roles="admin,support".
+   - Soportar data-sidebar-role / data-sidebar-roles.
+   - Soportar data-requires-role / data-requires-roles.
+   - Soportar data-required-role / data-required-roles.
+   - Soportar data-permission / data-permissions.
+   - Soportar data-sidebar-permission / data-sidebar-permissions.
+   - Sincronizar aria-hidden / hidden / inert / tabindex.
+   - Preservar/restaurar display original.
+   - Preservar/restaurar tabindex original.
+   - Preservar/restaurar tooltip custom/i18n.
+   - Asegurar el item dinámico de servidor si existe callback legacy.
+   - Sanear tooltips tras cambios de visibilidad.
+   - Limpiar item activo si quedó oculto.
+   - Evitar flash de items admin antes de aplicar permisos.
+   - Emitir evento estable de visibilidad aplicada.
 
-   HARDENING:
-   - no depende solo de role === admin
-   - soporta aliases admin/superadmin/owner/root/support/staff
-   - soporta flags isAdmin/admin/canManageUsers/canAccessUsers
-   - soporta permisos admin-like: users.manage / manage_users / admin:*
-   - inspecciona state/session/user/profile/raw/meta/claims/account
-   - no rompe si AppCore o sidebar no existen
-   - no deja elementos ocultos focusables
-   - no destruye permanentemente tooltips i18n
-   - evita estado visual fantasma tras login/logout/restore
-   - restaura correctamente items admin ocultos inicialmente por template
-   - repara items normales si quedaron ocultos por estado legacy
-   - NO usa data-admin-visible como regla de permisos
-   - NO usa data-role-visible como regla de permisos
-   - NO usa data-sidebar-visible como regla de permisos
-   - safeEmit usa AppCore.events si existe; window solo fallback
-
-   FIX CRÍTICO:
+   REGLAS CRÍTICAS:
    - Un usuario admin debe ver items normales + items admin.
-   - Un usuario no admin debe ver items normales y ocultar solo admin.
+   - Un usuario no admin debe ver items normales y ocultar sólo admin.
    - data-admin-visible/data-role-visible/data-sidebar-visible son estado,
      nunca criterio para decidir si un item requiere admin.
+   - visibility.js no toca open/collapsed del sidebar.
+   - visibility.js no toca dropdown.
+   - visibility.js no navega.
 ========================================================= */
 
 import {
   getElements,
   sanitizeFooterTooltipState,
 } from "./dom.js";
+
+import {
+  getUserRoles as getUserRolesFromUserModule,
+  isAdmin as isAdminFromUserModule,
+} from "./user.js";
 
 import {
   SIDEBAR_EVENTS,
@@ -67,6 +54,13 @@ import {
   SERVER_NAV_ID,
   SERVER_ROUTE,
 } from "./constants.js";
+
+/* =========================================================
+   VERSION
+========================================================= */
+
+export const SIDEBAR_VISIBILITY_VERSION =
+  "sidebar-visibility-v15-role-safe-admin-repair";
 
 /* =========================================================
    CONSTANTS
@@ -82,158 +76,184 @@ import {
 
   Esos son estado visual, no reglas de permisos.
 */
-const ACCESS_RULE_SELECTOR = [
-  "[data-role]",
-  "[data-roles]",
-  "[data-admin-only]",
-  "[data-sidebar-admin-only]",
-  "[data-requires-role]",
-  "[data-requires-roles]",
-  "[data-required-role]",
-  "[data-required-roles]",
-  "[data-sidebar-role]",
-  "[data-sidebar-roles]",
-  "[data-permission]",
-  "[data-permissions]",
-  "[data-sidebar-permission]",
-  "[data-sidebar-permissions]",
-  "[data-scope]",
-  "[data-scopes]",
-].join(",");
+const ACCESS_RULE_SELECTOR =
+  [
+    "[data-role]",
+    "[data-roles]",
+    "[data-admin-only]",
+    "[data-sidebar-admin-only]",
+    "[data-requires-role]",
+    "[data-requires-roles]",
+    "[data-required-role]",
+    "[data-required-roles]",
+    "[data-sidebar-role]",
+    "[data-sidebar-roles]",
+    "[data-permission]",
+    "[data-permissions]",
+    "[data-sidebar-permission]",
+    "[data-sidebar-permissions]",
+    "[data-scope]",
+    "[data-scopes]",
+  ].join(",");
 
-const MENU_REPAIR_SELECTOR = [
-  ".menu-item",
-  "[data-sidebar-nav='true']",
-  "[data-sidebar-item='true']",
-  "a[data-spa]",
-  "a[data-route]",
-  "a[data-href]",
-  "a[data-to]",
-].join(",");
+const MENU_REPAIR_SELECTOR =
+  [
+    ".menu-item",
+    "[data-sidebar-nav='true']",
+    "[data-sidebar-item='true']",
+    "a[data-spa]",
+    "a[data-route]",
+    "a[data-href]",
+    "a[data-to]",
+  ].join(",");
 
-const FOCUSABLE_SELECTOR = [
-  "a[href]",
-  "button",
-  "input",
-  "select",
-  "textarea",
-  "summary",
-  "details",
-  "audio[controls]",
-  "video[controls]",
-  "[tabindex]",
-  "[role='button']",
-  "[role='link']",
-  "[contenteditable='true']",
-].join(",");
+const FOCUSABLE_SELECTOR =
+  [
+    "a[href]",
+    "button",
+    "input",
+    "select",
+    "textarea",
+    "summary",
+    "details",
+    "audio[controls]",
+    "video[controls]",
+    "[tabindex]",
+    "[role='button']",
+    "[role='link']",
+    "[contenteditable='true']",
+  ].join(",");
 
-const DEFAULT_ADMIN_ROLE_KEYS = Object.freeze([
-  "admin",
-  "administrator",
-  "administrador",
-  "superadmin",
-  "super_admin",
-  "super-admin",
-  "super_administrador",
-  "super-administrador",
-  "owner",
-  "root",
-  "staff",
-  "support",
-]);
+const TOOLTIP_SELECTOR =
+  [
+    "[title]",
+    "[data-tooltip]",
+    "[data-i18n-data-tooltip]",
+    "[aria-describedby]",
+  ].join(",");
 
-const DEFAULT_ADMIN_PERMISSION_KEYS = Object.freeze([
-  "*",
+const DEFAULT_ADMIN_ROLE_KEYS =
+  Object.freeze([
+    "admin",
+    "administrator",
+    "administrador",
+    "superadmin",
+    "super_admin",
+    "super-admin",
+    "super_administrador",
+    "super-administrador",
+    "owner",
+    "root",
+    "staff",
+    "support",
+  ]);
 
-  "admin:*",
-  "admin.all",
-  "admin.full",
-  "admin.manage",
-  "admin:manage",
-  "admin.write",
-  "admin:write",
-  "admin.read",
-  "admin:read",
+const DEFAULT_ADMIN_PERMISSION_KEYS =
+  Object.freeze([
+    "*",
 
-  "users.manage",
-  "users:manage",
-  "users.write",
-  "users:write",
-  "users.admin",
-  "users:admin",
-  "users.access",
-  "users:access",
+    "admin:*",
+    "admin.all",
+    "admin.full",
+    "admin.manage",
+    "admin:manage",
+    "admin.write",
+    "admin:write",
+    "admin.read",
+    "admin:read",
 
-  "usuarios.manage",
-  "usuarios:manage",
-  "usuarios.write",
-  "usuarios:write",
-  "usuarios.admin",
-  "usuarios:admin",
-  "usuarios.access",
-  "usuarios:access",
+    "users.manage",
+    "users:manage",
+    "users.write",
+    "users:write",
+    "users.admin",
+    "users:admin",
+    "users.access",
+    "users:access",
 
-  "manage_users",
-  "can_manage_users",
-  "access_users",
-  "can_access_users",
+    "usuarios.manage",
+    "usuarios:manage",
+    "usuarios.write",
+    "usuarios:write",
+    "usuarios.admin",
+    "usuarios:admin",
+    "usuarios.access",
+    "usuarios:access",
 
-  "clients.manage",
-  "clients:manage",
-  "clients.write",
-  "clients:write",
-  "clients.admin",
-  "clients:admin",
+    "manage_users",
+    "can_manage_users",
+    "access_users",
+    "can_access_users",
 
-  "clientes.manage",
-  "clientes:manage",
-  "clientes.write",
-  "clientes:write",
-  "clientes.admin",
-  "clientes:admin",
+    "clients.manage",
+    "clients:manage",
+    "clients.write",
+    "clients:write",
+    "clients.admin",
+    "clients:admin",
 
-  "server.manage",
-  "server:manage",
-  "server.admin",
-  "server:admin",
-  "server.access",
-  "server:access",
+    "clientes.manage",
+    "clientes:manage",
+    "clientes.write",
+    "clientes:write",
+    "clientes.admin",
+    "clientes:admin",
 
-  "servidor.manage",
-  "servidor:manage",
-  "servidor.admin",
-  "servidor:admin",
-  "servidor.access",
-  "servidor:access",
-]);
+    "server.manage",
+    "server:manage",
+    "server.admin",
+    "server:admin",
+    "server.access",
+    "server:access",
 
-const DEFAULT_ADMIN_FLAG_KEYS = Object.freeze([
-  "isAdmin",
-  "admin",
-  "is_admin",
+    "servidor.manage",
+    "servidor:manage",
+    "servidor.admin",
+    "servidor:admin",
+    "servidor.access",
+    "servidor:access",
+  ]);
 
-  "isSuperAdmin",
-  "superAdmin",
-  "is_super_admin",
+const DEFAULT_ADMIN_FLAG_KEYS =
+  Object.freeze([
+    "isAdmin",
+    "admin",
+    "is_admin",
 
-  "canManageUsers",
-  "can_manage_users",
+    "isSuperAdmin",
+    "superAdmin",
+    "is_super_admin",
 
-  "canAccessUsers",
-  "can_access_users",
+    "canManageUsers",
+    "can_manage_users",
 
-  "canManageClients",
-  "can_manage_clients",
+    "canAccessUsers",
+    "can_access_users",
 
-  "canAccessServer",
-  "can_access_server",
+    "canManageClients",
+    "can_manage_clients",
 
-  "canManageServer",
-  "can_manage_server",
-]);
+    "canAccessServer",
+    "can_access_server",
 
-const ORIGINAL_NONE = "__none__";
-const ORIGINAL_EMPTY = "__empty__";
+    "canManageServer",
+    "can_manage_server",
+  ]);
+
+const ORIGINAL_NONE =
+  "__none__";
+
+const ORIGINAL_EMPTY =
+  "__empty__";
+
+const SOURCE =
+  "SidebarVisibility";
+
+const OWNER =
+  "visibility.js";
+
+const LOG_PREFIX =
+  "[SidebarVisibility]";
 
 const EVENT_ROLE_VISIBILITY_APPLIED =
   SIDEBAR_EVENTS?.roleVisibilityApplied ||
@@ -267,21 +287,36 @@ function isBrowser() {
 }
 
 function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return text || fallback;
 }
 
 function safeObject(value) {
-  return value &&
+  return (
+    value &&
     typeof value === "object" &&
     !Array.isArray(value)
+  )
     ? value
     : {};
+}
+
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 function isFn(value) {
@@ -290,9 +325,26 @@ function isFn(value) {
 
 function first(...values) {
   for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
+    if (
+      value === undefined ||
+      value === null
+    ) {
+      continue;
+    }
+
+    if (
+      typeof value === "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+    if (
+      Array.isArray(value) &&
+      value.length === 0
+    ) {
+      continue;
+    }
 
     if (
       value &&
@@ -310,23 +362,50 @@ function first(...values) {
 }
 
 function safeBoolean(value, fallback = false) {
-  if (typeof value === "boolean") return value;
+  if (typeof value === "boolean") {
+    return value;
+  }
 
   if (typeof value === "string") {
-    const key = value.trim().toLowerCase();
+    const key =
+      value
+        .trim()
+        .toLowerCase();
 
-    if (["true", "1", "yes", "si", "sí", "ok", "on"].includes(key)) {
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "si",
+        "sí",
+        "ok",
+        "on",
+      ].includes(key)
+    ) {
       return true;
     }
 
-    if (["false", "0", "no", "off"].includes(key)) {
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "off",
+      ].includes(key)
+    ) {
       return false;
     }
   }
 
   if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
+    if (value === 1) {
+      return true;
+    }
+
+    if (value === 0) {
+      return false;
+    }
   }
 
   return fallback;
@@ -343,26 +422,76 @@ function hasDatasetKey(element = null, key = "") {
   );
 }
 
+function nowTs() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+function safeIsoDate(ms = nowTs()) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
+  }
+}
+
 function safeWarn(AppCore, ...args) {
   try {
-    AppCore?.utils?.warn?.("[SidebarVisibility]", ...args);
+    AppCore?.utils?.warn?.(
+      LOG_PREFIX,
+      ...args
+    );
   } catch {}
 
   try {
-    console.warn("[SidebarVisibility]", ...args);
+    console.warn(
+      LOG_PREFIX,
+      ...args
+    );
   } catch {}
 }
 
 function safeEmit(AppCore, eventName = "", payload = {}) {
-  const name = safeText(eventName, "");
+  const name =
+    safeText(eventName, "");
 
   if (!name) {
     return false;
   }
 
+  const data =
+    safeObject(payload);
+
+  const finalPayload =
+    {
+      ...data,
+
+      source:
+        safeText(data.source, SOURCE),
+
+      owner:
+        OWNER,
+
+      version:
+        SIDEBAR_VISIBILITY_VERSION,
+
+      at:
+        safeText(data.at, safeIsoDate()),
+
+      ts:
+        data.ts || nowTs(),
+    };
+
   try {
     if (isFn(AppCore?.events?.emit)) {
-      AppCore.events.emit(name, payload);
+      AppCore.events.emit(
+        name,
+        finalPayload
+      );
+
       return true;
     }
   } catch (error) {
@@ -379,9 +508,13 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
       typeof CustomEvent !== "undefined"
     ) {
       window.dispatchEvent(
-        new CustomEvent(name, {
-          detail: payload,
-        })
+        new CustomEvent(
+          name,
+          {
+            detail:
+              finalPayload,
+          }
+        )
       );
 
       return true;
@@ -421,7 +554,10 @@ function flattenRoleValue(value, depth = 0) {
     return [];
   }
 
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return [];
   }
 
@@ -446,11 +582,15 @@ function flattenRoleValue(value, depth = 0) {
   }
 
   if (typeof value === "object") {
-    const entries = Object.entries(value);
+    const entries =
+      Object.entries(value);
 
-    const truthyKeys = entries
-      .filter(([, entryValue]) => safeBoolean(entryValue, false))
-      .map(([key]) => key);
+    const truthyKeys =
+      entries
+        .filter(([, entryValue]) =>
+          safeBoolean(entryValue, false)
+        )
+        .map(([key]) => key);
 
     return [
       value.role,
@@ -494,7 +634,7 @@ function normalizeRoles(value) {
 
 function toNormalizedSet(values = []) {
   return new Set(
-    values
+    safeArray(values)
       .flat(Infinity)
       .map(normalizeRole)
       .filter(Boolean)
@@ -505,39 +645,53 @@ function toNormalizedSet(values = []) {
    ADMIN REGISTRY
 ========================================================= */
 
-const ADMIN_ROLE_KEYS = toNormalizedSet([
-  ...DEFAULT_ADMIN_ROLE_KEYS,
-  ...(Array.isArray(SIDEBAR_ADMIN_ROLE_KEYS)
-    ? SIDEBAR_ADMIN_ROLE_KEYS
-    : []),
-]);
+const ADMIN_ROLE_KEYS =
+  toNormalizedSet([
+    ...DEFAULT_ADMIN_ROLE_KEYS,
+    ...(
+      Array.isArray(SIDEBAR_ADMIN_ROLE_KEYS)
+        ? SIDEBAR_ADMIN_ROLE_KEYS
+        : []
+    ),
+  ]);
 
-const ADMIN_PERMISSION_KEYS = toNormalizedSet([
-  ...DEFAULT_ADMIN_PERMISSION_KEYS,
-  ...(Array.isArray(SIDEBAR_ADMIN_PERMISSION_KEYS)
-    ? SIDEBAR_ADMIN_PERMISSION_KEYS
-    : []),
-]);
+const ADMIN_PERMISSION_KEYS =
+  toNormalizedSet([
+    ...DEFAULT_ADMIN_PERMISSION_KEYS,
+    ...(
+      Array.isArray(SIDEBAR_ADMIN_PERMISSION_KEYS)
+        ? SIDEBAR_ADMIN_PERMISSION_KEYS
+        : []
+    ),
+  ]);
 
-const ADMIN_FLAG_KEYS = Array.from(
-  new Set([
-    ...DEFAULT_ADMIN_FLAG_KEYS,
-    ...(Array.isArray(SIDEBAR_ADMIN_FLAG_KEYS)
-      ? SIDEBAR_ADMIN_FLAG_KEYS
-      : []),
-  ].filter(Boolean))
-);
+const ADMIN_FLAG_KEYS =
+  Array.from(
+    new Set(
+      [
+        ...DEFAULT_ADMIN_FLAG_KEYS,
+        ...(
+          Array.isArray(SIDEBAR_ADMIN_FLAG_KEYS)
+            ? SIDEBAR_ADMIN_FLAG_KEYS
+            : []
+        ),
+      ].filter(Boolean)
+    )
+  );
 
 /* =========================================================
    ROLE / PERMISSION RESOLUTION
 ========================================================= */
 
 function isAdminRole(value = "") {
-  return ADMIN_ROLE_KEYS.has(normalizeRole(value));
+  return ADMIN_ROLE_KEYS.has(
+    normalizeRole(value)
+  );
 }
 
 function isAdminPermission(value = "") {
-  const key = normalizePermission(value);
+  const key =
+    normalizePermission(value);
 
   if (!key) {
     return false;
@@ -559,8 +713,11 @@ function isAdminPermission(value = "") {
 }
 
 function expandRoleAliases(roles = []) {
-  const normalized = normalizeRoles(roles);
-  const result = new Set(normalized);
+  const normalized =
+    normalizeRoles(roles);
+
+  const result =
+    new Set(normalized);
 
   if (
     normalized.some(isAdminRole) ||
@@ -577,15 +734,20 @@ function expandRoleAliases(roles = []) {
     result.add("admin");
   }
 
-  return Array.from(result).filter(Boolean);
+  return Array.from(result)
+    .filter(Boolean);
 }
 
 function getModuleCandidate(AppCore = null, ...names) {
   try {
     if (isFn(AppCore?.modules?.get)) {
       for (const name of names) {
-        const mod = AppCore.modules.get(name);
-        if (mod) return mod;
+        const mod =
+          AppCore.modules.get(name);
+
+        if (mod) {
+          return mod;
+        }
       }
     }
   } catch {}
@@ -617,58 +779,77 @@ function getAuthCandidate(AppCore = null) {
 }
 
 function unwrapUserPayload(payload = null) {
-  const value = safeObject(payload);
+  const value =
+    safeObject(payload);
 
   if (!Object.keys(value).length) {
     return {};
   }
 
-  const candidate = first(
-    value.user,
-    value.currentUser,
-    value.profile,
-    value.account?.user,
-    value.session?.user,
-    value.data?.user,
-    value.data?.currentUser,
-    value.data?.profile,
-    value.payload?.user,
-    value.payload?.currentUser,
-    value.result?.user,
-    value.result?.currentUser,
-    value
-  );
+  const candidate =
+    first(
+      value.user,
+      value.usuario,
+      value.currentUser,
+      value.profile,
+      value.account?.user,
+      value.session?.user,
+      value.data?.user,
+      value.data?.usuario,
+      value.data?.currentUser,
+      value.data?.profile,
+      value.payload?.user,
+      value.payload?.usuario,
+      value.payload?.currentUser,
+      value.result?.user,
+      value.result?.currentUser,
+      value
+    );
 
   return safeObject(candidate);
 }
 
 function getCurrentUser(AppCore = null) {
-  const state = safeObject(AppCore?.state);
-  const auth = getAuthCandidate(AppCore);
+  const state =
+    safeObject(AppCore?.state);
 
-  let authUser = null;
+  const auth =
+    getAuthCandidate(AppCore);
+
+  let authUser =
+    null;
 
   try {
     if (isFn(auth?.getUser)) {
-      authUser = auth.getUser();
+      authUser =
+        auth.getUser();
     }
   } catch {}
 
   try {
-    if (!authUser && isFn(auth?.getCurrentUser)) {
-      authUser = auth.getCurrentUser();
+    if (
+      !authUser &&
+      isFn(auth?.getCurrentUser)
+    ) {
+      authUser =
+        auth.getCurrentUser();
     }
   } catch {}
 
   try {
-    if (!authUser && isFn(auth?.currentUser)) {
-      authUser = auth.currentUser();
+    if (
+      !authUser &&
+      isFn(auth?.currentUser)
+    ) {
+      authUser =
+        auth.currentUser();
     }
   } catch {}
 
   return unwrapUserPayload(
     first(
       state.user,
+      state.usuario,
       state.currentUser,
       state.sessionUser,
       state.authUser,
@@ -683,7 +864,8 @@ function getCurrentUser(AppCore = null) {
 }
 
 function getUserBranches(user = null) {
-  const current = safeObject(user);
+  const current =
+    safeObject(user);
 
   return [
     current,
@@ -705,123 +887,146 @@ function getUserBranches(user = null) {
     safeObject(current.account?.permissions),
     safeObject(current.meta?.permissions),
     safeObject(current.claims?.permissions),
-  ].filter((branch) => {
-    return branch && typeof branch === "object" && Object.keys(branch).length > 0;
-  });
+  ].filter((branch) =>
+    branch &&
+    typeof branch === "object" &&
+    Object.keys(branch).length > 0
+  );
 }
 
 function getRoleCandidatesFromAppCore(AppCore = null) {
-  const state = safeObject(AppCore?.state);
-  const session = safeObject(state.session);
-  const auth = getAuthCandidate(AppCore);
-  const user = getCurrentUser(AppCore);
-  const branches = getUserBranches(user);
+  const state =
+    safeObject(AppCore?.state);
 
-  const scalarCandidates = [
-    state.role,
-    state.rol,
-    state.userRole,
-    state.user_role,
-    state.type,
-    state.userType,
-    state.user_type,
-    state.perfil,
+  const session =
+    safeObject(state.session);
 
-    session.role,
-    session.rol,
-    session.userRole,
-    session.user_role,
-    session.type,
-    session.userType,
-    session.user_type,
-    session.perfil,
+  const auth =
+    getAuthCandidate(AppCore);
 
-    auth?.role,
-    auth?.rol,
-    auth?.userRole,
+  const user =
+    getCurrentUser(AppCore);
 
-    ...branches.flatMap((branch) => [
-      branch.role,
-      branch.rol,
-      branch.userRole,
-      branch.user_role,
-      branch.type,
-      branch.userType,
-      branch.user_type,
-      branch.perfil,
-      branch.scope,
-      branch.permission,
-      branch.authority,
-      branch["custom:role"],
-      branch["custom:roles"],
-      branch["custom:permissions"],
-      branch["https://onion/role"],
-      branch["https://onion/roles"],
-      branch["https://onion/permissions"],
-    ]),
-  ];
+  const branches =
+    getUserBranches(user);
 
-  const collectionCandidates = [
-    state.roles,
-    state.roleList,
-    state.role_list,
-    state.permissions,
-    state.scopes,
-    state.groups,
-    state.authorities,
+  const scalarCandidates =
+    [
+      state.role,
+      state.rol,
+      state.userRole,
+      state.user_role,
+      state.type,
+      state.userType,
+      state.user_type,
+      state.perfil,
 
-    session.roles,
-    session.roleList,
-    session.role_list,
-    session.permissions,
-    session.scopes,
-    session.groups,
-    session.authorities,
+      session.role,
+      session.rol,
+      session.userRole,
+      session.user_role,
+      session.type,
+      session.userType,
+      session.user_type,
+      session.perfil,
 
-    auth?.roles,
-    auth?.permissions,
-    auth?.scopes,
+      auth?.role,
+      auth?.rol,
+      auth?.userRole,
 
-    ...branches.flatMap((branch) => [
-      branch.roles,
-      branch.roleList,
-      branch.role_list,
-      branch.permissions,
-      branch.scopes,
-      branch.groups,
-      branch.authorities,
-      branch.items,
-      branch.list,
-    ]),
-  ];
+      ...branches.flatMap((branch) => [
+        branch.role,
+        branch.rol,
+        branch.userRole,
+        branch.user_role,
+        branch.type,
+        branch.userType,
+        branch.user_type,
+        branch.perfil,
+        branch.scope,
+        branch.permission,
+        branch.authority,
+        branch["custom:role"],
+        branch["custom:roles"],
+        branch["custom:permissions"],
+        branch["https://onion/role"],
+        branch["https://onion/roles"],
+        branch["https://onion/permissions"],
+      ]),
+    ];
+
+  const collectionCandidates =
+    [
+      state.roles,
+      state.roleList,
+      state.role_list,
+      state.permissions,
+      state.scopes,
+      state.groups,
+      state.authorities,
+
+      session.roles,
+      session.roleList,
+      session.role_list,
+      session.permissions,
+      session.scopes,
+      session.groups,
+      session.authorities,
+
+      auth?.roles,
+      auth?.permissions,
+      auth?.scopes,
+
+      ...branches.flatMap((branch) => [
+        branch.roles,
+        branch.roleList,
+        branch.role_list,
+        branch.permissions,
+        branch.scopes,
+        branch.groups,
+        branch.authorities,
+        branch.items,
+        branch.list,
+      ]),
+    ];
 
   try {
     if (isFn(auth?.getRole)) {
-      scalarCandidates.push(auth.getRole());
+      scalarCandidates.push(
+        auth.getRole()
+      );
     }
   } catch {}
 
   try {
     if (isFn(auth?.getCurrentRole)) {
-      scalarCandidates.push(auth.getCurrentRole());
+      scalarCandidates.push(
+        auth.getCurrentRole()
+      );
     }
   } catch {}
 
   try {
     if (isFn(auth?.getRoles)) {
-      collectionCandidates.push(auth.getRoles());
+      collectionCandidates.push(
+        auth.getRoles()
+      );
     }
   } catch {}
 
   try {
     if (isFn(auth?.getPermissions)) {
-      collectionCandidates.push(auth.getPermissions());
+      collectionCandidates.push(
+        auth.getPermissions()
+      );
     }
   } catch {}
 
   try {
     if (isFn(auth?.getScopes)) {
-      collectionCandidates.push(auth.getScopes());
+      collectionCandidates.push(
+        auth.getScopes()
+      );
     }
   } catch {}
 
@@ -832,44 +1037,63 @@ function getRoleCandidatesFromAppCore(AppCore = null) {
 }
 
 function hasAdminFlag(AppCore = null) {
-  const state = safeObject(AppCore?.state);
-  const session = safeObject(state.session);
-  const auth = getAuthCandidate(AppCore);
-  const user = getCurrentUser(AppCore);
-  const branches = getUserBranches(user);
+  const state =
+    safeObject(AppCore?.state);
 
-  const values = [
-    ...ADMIN_FLAG_KEYS.flatMap((key) => [
-      state?.[key],
-      session?.[key],
-      state.auth?.[key],
-      user?.[key],
-      auth?.[key],
-      auth?.state?.[key],
-    ]),
+  const session =
+    safeObject(state.session);
 
-    ...branches.flatMap((branch) => {
-      return ADMIN_FLAG_KEYS.map((key) => branch?.[key]);
-    }),
-  ];
+  const auth =
+    getAuthCandidate(AppCore);
+
+  const user =
+    getCurrentUser(AppCore);
+
+  const branches =
+    getUserBranches(user);
+
+  const values =
+    [
+      ...ADMIN_FLAG_KEYS.flatMap((key) => [
+        state?.[key],
+        session?.[key],
+        state.auth?.[key],
+        user?.[key],
+        auth?.[key],
+        auth?.state?.[key],
+      ]),
+
+      ...branches.flatMap((branch) =>
+        ADMIN_FLAG_KEYS.map((key) =>
+          branch?.[key]
+        )
+      ),
+    ];
 
   try {
     if (isFn(auth?.isAdmin)) {
-      values.push(auth.isAdmin());
+      values.push(
+        auth.isAdmin()
+      );
     }
   } catch {}
 
   try {
     if (isFn(auth?.isCurrentUserAdmin)) {
-      values.push(auth.isCurrentUserAdmin());
+      values.push(
+        auth.isCurrentUserAdmin()
+      );
     }
   } catch {}
 
-  return values.some((value) => safeBoolean(value, false));
+  return values.some((value) =>
+    safeBoolean(value, false)
+  );
 }
 
 function getUserRolesFallback(AppCore = null) {
-  const roles = getRoleCandidatesFromAppCore(AppCore);
+  const roles =
+    getRoleCandidatesFromAppCore(AppCore);
 
   if (hasAdminFlag(AppCore)) {
     roles.push("admin");
@@ -878,17 +1102,36 @@ function getUserRolesFallback(AppCore = null) {
   return expandRoleAliases(roles);
 }
 
+function getResolvedUserRoles(AppCore = null) {
+  try {
+    if (isFn(getUserRolesFromUserModule)) {
+      const roles =
+        getUserRolesFromUserModule(AppCore);
+
+      if (roles?.length) {
+        return expandRoleAliases(roles);
+      }
+    }
+  } catch {}
+
+  return getUserRolesFallback(AppCore);
+}
+
 function resolveAdminFlag(AppCore, isAdminFn, userRoles = []) {
-  let fromCallback = false;
+  let fromCallback =
+    false;
 
   if (isFn(isAdminFn)) {
     try {
-      fromCallback = Boolean(isAdminFn(AppCore));
+      fromCallback =
+        Boolean(isAdminFn(AppCore));
     } catch {
       try {
-        fromCallback = Boolean(isAdminFn());
+        fromCallback =
+          Boolean(isAdminFn());
       } catch {
-        fromCallback = false;
+        fromCallback =
+          false;
       }
     }
   }
@@ -897,22 +1140,41 @@ function resolveAdminFlag(AppCore, isAdminFn, userRoles = []) {
     return true;
   }
 
-  const auth = getAuthCandidate(AppCore);
+  try {
+    if (
+      isFn(isAdminFromUserModule) &&
+      isAdminFromUserModule(AppCore)
+    ) {
+      return true;
+    }
+  } catch {}
+
+  const auth =
+    getAuthCandidate(AppCore);
 
   try {
-    if (isFn(auth?.isCurrentUserAdmin) && auth.isCurrentUserAdmin()) {
+    if (
+      isFn(auth?.isCurrentUserAdmin) &&
+      auth.isCurrentUserAdmin()
+    ) {
       return true;
     }
   } catch {}
 
   try {
-    if (isFn(auth?.isAdmin) && auth.isAdmin()) {
+    if (
+      isFn(auth?.isAdmin) &&
+      auth.isAdmin()
+    ) {
       return true;
     }
   } catch {}
 
   try {
-    if (isFn(auth?.hasRole) && auth.hasRole("admin")) {
+    if (
+      isFn(auth?.hasRole) &&
+      auth.hasRole("admin")
+    ) {
       return true;
     }
   } catch {}
@@ -921,9 +1183,10 @@ function resolveAdminFlag(AppCore, isAdminFn, userRoles = []) {
     return true;
   }
 
-  return userRoles.some((role) => {
-    return isAdminRole(role) || isAdminPermission(role);
-  });
+  return safeArray(userRoles).some((role) =>
+    isAdminRole(role) ||
+    isAdminPermission(role)
+  );
 }
 
 /* =========================================================
@@ -936,7 +1199,8 @@ function getAttrValues(element = null, attrs = []) {
   }
 
   return attrs.flatMap((attrName) => {
-    const value = element.getAttribute(attrName);
+    const value =
+      element.getAttribute(attrName);
 
     return splitRoleList(value);
   });
@@ -972,11 +1236,22 @@ function isElementAdminOnly(element = null) {
     return false;
   }
 
-  const direct = element.getAttribute("data-admin-only");
-  const sidebar = element.getAttribute("data-sidebar-admin-only");
-  const value = first(direct, sidebar);
+  const direct =
+    element.getAttribute("data-admin-only");
 
-  if (value === null || value === undefined) {
+  const sidebar =
+    element.getAttribute("data-sidebar-admin-only");
+
+  const value =
+    first(
+      direct,
+      sidebar
+    );
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return false;
   }
 
@@ -991,27 +1266,34 @@ function getElementRequiredRolesRaw(element = null) {
     return [];
   }
 
-  const roles = [
-    ...getAttrValues(element, [
-      "data-role",
-      "data-roles",
-      "data-sidebar-role",
-      "data-sidebar-roles",
-      "data-requires-role",
-      "data-requires-roles",
-      "data-required-role",
-      "data-required-roles",
-    ]),
+  const roles =
+    [
+      ...getAttrValues(
+        element,
+        [
+          "data-role",
+          "data-roles",
+          "data-sidebar-role",
+          "data-sidebar-roles",
+          "data-requires-role",
+          "data-requires-roles",
+          "data-required-role",
+          "data-required-roles",
+        ]
+      ),
 
-    ...getAttrValues(element, [
-      "data-permission",
-      "data-permissions",
-      "data-sidebar-permission",
-      "data-sidebar-permissions",
-      "data-scope",
-      "data-scopes",
-    ]),
-  ];
+      ...getAttrValues(
+        element,
+        [
+          "data-permission",
+          "data-permissions",
+          "data-sidebar-permission",
+          "data-sidebar-permissions",
+          "data-scope",
+          "data-scopes",
+        ]
+      ),
+    ];
 
   if (isElementAdminOnly(element)) {
     roles.push("admin");
@@ -1035,9 +1317,10 @@ function elementRequiresAdmin(element = null) {
     return true;
   }
 
-  return getElementRequiredRolesRaw(element).some((role) => {
-    return isAdminRole(role) || isAdminPermission(role);
-  });
+  return getElementRequiredRolesRaw(element).some((role) =>
+    isAdminRole(role) ||
+    isAdminPermission(role)
+  );
 }
 
 function isElementAccessControlled(element = null) {
@@ -1065,9 +1348,18 @@ function shouldShowElementForRoles(
     return true;
   }
 
-  const requiredRoles = getElementRequiredRolesRaw(element);
+  const requiredRoles =
+    getElementRequiredRolesRaw(element);
 
   if (!requiredRoles.length) {
+    return true;
+  }
+
+  /*
+    Admin real ve todo lo controlado dentro del sidebar.
+    Esto evita que un admin pierda items con data-roles="support".
+  */
+  if (admin) {
     return true;
   }
 
@@ -1077,17 +1369,18 @@ function shouldShowElementForRoles(
     isElementAdminOnly(element);
 
   if (requiresAdmin) {
-    return (
-      Boolean(admin) ||
-      userRoles.some(isAdminRole) ||
-      userRoles.some(isAdminPermission)
+    return safeArray(userRoles).some((role) =>
+      isAdminRole(role) ||
+      isAdminPermission(role)
     );
   }
 
-  const userRoleSet = new Set(normalizeRoles(userRoles));
+  const userRoleSet =
+    new Set(normalizeRoles(userRoles));
 
   return requiredRoles.some((role) => {
-    const normalized = normalizeRole(role);
+    const normalized =
+      normalizeRole(role);
 
     return userRoleSet.has(normalized);
   });
@@ -1103,7 +1396,7 @@ function isInitiallyTemplateHiddenRoleElement(element = null) {
   }
 
   /*
-    Solo tratamos como bloqueo inicial anti-flash si el elemento
+    Sólo tratamos como bloqueo inicial anti-flash si el elemento
     tiene regla real de acceso. No por data-admin-visible suelto.
   */
   if (!isElementAccessControlled(element)) {
@@ -1121,39 +1414,48 @@ function isInitiallyTemplateHiddenRoleElement(element = null) {
 }
 
 function rememberOriginalDisplay(element = null) {
-  if (!element) return;
+  if (!element) {
+    return;
+  }
 
   if (hasDatasetKey(element, "sidebarOriginalDisplaySet")) {
     return;
   }
 
-  const currentDisplay = element.style.display || "";
+  const currentDisplay =
+    element.style.display || "";
 
   element.dataset.sidebarOriginalDisplay =
     currentDisplay || ORIGINAL_EMPTY;
 
-  element.dataset.sidebarOriginalDisplaySet = "true";
+  element.dataset.sidebarOriginalDisplaySet =
+    "true";
 }
 
 function rememberOriginalTabIndex(element = null) {
-  if (!element) return;
+  if (!element) {
+    return;
+  }
 
   if (hasDatasetKey(element, "sidebarOriginalTabindexSet")) {
     return;
   }
 
-  const tabIndex = element.getAttribute("tabindex");
+  const tabIndex =
+    element.getAttribute("tabindex");
 
   const shouldTreatMinusOneAsNoOriginal =
     tabIndex === "-1" &&
     isInitiallyTemplateHiddenRoleElement(element);
 
   element.dataset.sidebarOriginalTabindex =
-    tabIndex === null || shouldTreatMinusOneAsNoOriginal
+    tabIndex === null ||
+    shouldTreatMinusOneAsNoOriginal
       ? ORIGINAL_NONE
       : tabIndex;
 
-  element.dataset.sidebarOriginalTabindexSet = "true";
+  element.dataset.sidebarOriginalTabindexSet =
+    "true";
 }
 
 function rememberOriginalTooltipAttrs(
@@ -1162,7 +1464,9 @@ function rememberOriginalTooltipAttrs(
     force = false,
   } = {}
 ) {
-  if (!element) return;
+  if (!element) {
+    return;
+  }
 
   if (
     !force &&
@@ -1171,9 +1475,14 @@ function rememberOriginalTooltipAttrs(
     return;
   }
 
-  const title = element.getAttribute("title");
-  const tooltip = element.getAttribute("data-tooltip");
-  const i18nTooltip = element.getAttribute("data-i18n-data-tooltip");
+  const title =
+    element.getAttribute("title");
+
+  const tooltip =
+    element.getAttribute("data-tooltip");
+
+  const i18nTooltip =
+    element.getAttribute("data-i18n-data-tooltip");
 
   element.dataset.sidebarOriginalTitle =
     title === null
@@ -1190,11 +1499,14 @@ function rememberOriginalTooltipAttrs(
       ? ORIGINAL_NONE
       : i18nTooltip;
 
-  element.dataset.sidebarOriginalTooltipSet = "true";
+  element.dataset.sidebarOriginalTooltipSet =
+    "true";
 }
 
 function rememberOriginalState(element = null) {
-  if (!element) return;
+  if (!element) {
+    return;
+  }
 
   rememberOriginalDisplay(element);
   rememberOriginalTabIndex(element);
@@ -1202,29 +1514,46 @@ function rememberOriginalState(element = null) {
 }
 
 function restoreDisplay(element = null) {
-  if (!element) return;
-
-  const value = element.dataset.sidebarOriginalDisplay;
-
-  if (!value || value === ORIGINAL_EMPTY) {
-    element.style.display = "";
+  if (!element) {
     return;
   }
 
-  element.style.display = value;
+  const value =
+    element.dataset.sidebarOriginalDisplay;
+
+  if (
+    !value ||
+    value === ORIGINAL_EMPTY
+  ) {
+    element.style.display =
+      "";
+    return;
+  }
+
+  element.style.display =
+    value;
 }
 
 function restoreTabIndex(element = null) {
-  if (!element) return;
+  if (!element) {
+    return;
+  }
 
-  const value = element.dataset.sidebarOriginalTabindex;
+  const value =
+    element.dataset.sidebarOriginalTabindex;
 
-  if (!value || value === ORIGINAL_NONE) {
+  if (
+    !value ||
+    value === ORIGINAL_NONE
+  ) {
     element.removeAttribute("tabindex");
     return;
   }
 
-  element.setAttribute("tabindex", value);
+  element.setAttribute(
+    "tabindex",
+    value
+  );
 }
 
 function restoreAttributeFromDataset(
@@ -1232,7 +1561,11 @@ function restoreAttributeFromDataset(
   datasetKey = "",
   attrName = ""
 ) {
-  if (!element || !datasetKey || !attrName) {
+  if (
+    !element ||
+    !datasetKey ||
+    !attrName
+  ) {
     return;
   }
 
@@ -1240,18 +1573,27 @@ function restoreAttributeFromDataset(
     return;
   }
 
-  const value = element.dataset?.[datasetKey];
+  const value =
+    element.dataset?.[datasetKey];
 
-  if (!value || value === ORIGINAL_NONE) {
+  if (
+    !value ||
+    value === ORIGINAL_NONE
+  ) {
     element.removeAttribute(attrName);
     return;
   }
 
-  element.setAttribute(attrName, value);
+  element.setAttribute(
+    attrName,
+    value
+  );
 }
 
 function restoreTooltipAttrs(element = null) {
-  if (!element) return;
+  if (!element) {
+    return;
+  }
 
   restoreAttributeFromDataset(
     element,
@@ -1277,7 +1619,9 @@ function restoreTooltipAttrs(element = null) {
 }
 
 function removeTooltipAttrs(element = null) {
-  if (!element) return;
+  if (!element) {
+    return;
+  }
 
   try {
     element.removeAttribute("title");
@@ -1288,15 +1632,15 @@ function removeTooltipAttrs(element = null) {
 }
 
 function removeTooltipAttrsDeep(element = null) {
-  if (!element) return;
+  if (!element) {
+    return;
+  }
 
   removeTooltipAttrs(element);
 
   try {
     element
-      .querySelectorAll(
-        "[title], [data-tooltip], [data-i18n-data-tooltip], [aria-describedby]"
-      )
+      .querySelectorAll(TOOLTIP_SELECTOR)
       .forEach((node) => {
         removeTooltipAttrs(node);
       });
@@ -1308,49 +1652,70 @@ function removeTooltipAttrsDeep(element = null) {
 ========================================================= */
 
 function setInert(element = null, inert = false) {
-  if (!element) return;
+  if (!element) {
+    return;
+  }
 
   try {
-    element.inert = Boolean(inert);
+    element.inert =
+      Boolean(inert);
   } catch {}
 
   try {
     if (inert) {
-      element.setAttribute("inert", "");
+      element.setAttribute(
+        "inert",
+        ""
+      );
     } else {
-      element.removeAttribute("inert");
+      element.removeAttribute(
+        "inert"
+      );
     }
   } catch {}
 }
 
 function rememberChildTabIndex(element = null) {
-  if (!element) return;
+  if (!element) {
+    return;
+  }
 
   if (hasDatasetKey(element, "sidebarChildOriginalTabindexSet")) {
     return;
   }
 
-  const tabIndex = element.getAttribute("tabindex");
+  const tabIndex =
+    element.getAttribute("tabindex");
 
   element.dataset.sidebarChildOriginalTabindex =
     tabIndex === null
       ? ORIGINAL_NONE
       : tabIndex;
 
-  element.dataset.sidebarChildOriginalTabindexSet = "true";
+  element.dataset.sidebarChildOriginalTabindexSet =
+    "true";
 }
 
 function restoreChildTabIndex(element = null) {
-  if (!element) return;
+  if (!element) {
+    return;
+  }
 
-  const value = element.dataset.sidebarChildOriginalTabindex;
+  const value =
+    element.dataset.sidebarChildOriginalTabindex;
 
-  if (!value || value === ORIGINAL_NONE) {
+  if (
+    !value ||
+    value === ORIGINAL_NONE
+  ) {
     element.removeAttribute("tabindex");
     return;
   }
 
-  element.setAttribute("tabindex", value);
+  element.setAttribute(
+    "tabindex",
+    value
+  );
 }
 
 function getFocusableChildren(element = null) {
@@ -1361,27 +1726,40 @@ function getFocusableChildren(element = null) {
   try {
     return Array.from(
       element.querySelectorAll(FOCUSABLE_SELECTOR)
-    ).filter((child) => child !== element);
+    ).filter((child) =>
+      child !== element
+    );
   } catch {
     return [];
   }
 }
 
 function disableDescendantFocus(element = null) {
-  if (!element) return;
+  if (!element) {
+    return;
+  }
 
   getFocusableChildren(element).forEach((child) => {
     rememberChildTabIndex(child);
 
     try {
-      child.setAttribute("tabindex", "-1");
-      child.setAttribute("aria-hidden", "true");
+      child.setAttribute(
+        "tabindex",
+        "-1"
+      );
+
+      child.setAttribute(
+        "aria-hidden",
+        "true"
+      );
     } catch {}
   });
 }
 
 function restoreDescendantFocus(element = null) {
-  if (!element) return;
+  if (!element) {
+    return;
+  }
 
   getFocusableChildren(element).forEach((child) => {
     try {
@@ -1399,12 +1777,16 @@ function restoreDescendantFocus(element = null) {
 }
 
 function blurIfFocusInside(element = null) {
-  if (!isBrowser() || !element) {
+  if (
+    !isBrowser() ||
+    !element
+  ) {
     return false;
   }
 
   try {
-    const active = document.activeElement;
+    const active =
+      document.activeElement;
 
     if (
       active &&
@@ -1425,10 +1807,15 @@ function blurIfFocusInside(element = null) {
 ========================================================= */
 
 function setVisibilityDatasets(element = null, visible = true) {
-  if (!element) return;
+  if (!element) {
+    return;
+  }
 
-  const accessControlled = isElementAccessControlled(element);
-  const adminManaged = elementRequiresAdmin(element);
+  const accessControlled =
+    isElementAccessControlled(element);
+
+  const adminManaged =
+    elementRequiresAdmin(element);
 
   try {
     element.dataset.sidebarVisible =
@@ -1439,41 +1826,55 @@ function setVisibilityDatasets(element = null, visible = true) {
 
     /*
       CRÍTICO:
-      data-admin-visible solo se escribe para elementos realmente admin.
+      data-admin-visible sólo se escribe para elementos realmente admin.
       No se usa como regla.
     */
     if (adminManaged) {
       element.dataset.adminVisible =
         visible ? "true" : "false";
-    } else if (!accessControlled && hasDatasetKey(element, "adminVisible")) {
+    } else if (
+      !accessControlled &&
+      hasDatasetKey(element, "adminVisible")
+    ) {
       /*
         Reparación legacy:
-        si un item normal heredó data-admin-visible=false, lo saneamos.
+        si un item normal heredó data-admin-visible=false, se sanea.
       */
-      element.dataset.adminVisible = "true";
+      element.dataset.adminVisible =
+        "true";
     }
   } catch {}
 }
 
 function setElementVisible(element = null, visible = true) {
-  if (!element) return false;
+  if (!element) {
+    return false;
+  }
 
   rememberOriginalState(element);
 
   if (visible) {
     try {
-      element.hidden = false;
+      element.hidden =
+        false;
+
       element.removeAttribute("hidden");
       element.removeAttribute("aria-hidden");
 
-      setInert(element, false);
+      setInert(
+        element,
+        false
+      );
 
       restoreDisplay(element);
       restoreTabIndex(element);
       restoreTooltipAttrs(element);
       restoreDescendantFocus(element);
 
-      setVisibilityDatasets(element, true);
+      setVisibilityDatasets(
+        element,
+        true
+      );
 
       element.classList.remove(
         "is-hidden",
@@ -1485,21 +1886,42 @@ function setElementVisible(element = null, visible = true) {
     return true;
   }
 
-  rememberOriginalTooltipAttrs(element, {
-    force: true,
-  });
+  rememberOriginalTooltipAttrs(
+    element,
+    {
+      force:
+        true,
+    }
+  );
 
   blurIfFocusInside(element);
 
   try {
-    element.hidden = true;
-    element.setAttribute("hidden", "");
-    element.setAttribute("aria-hidden", "true");
+    element.hidden =
+      true;
 
-    setInert(element, true);
+    element.setAttribute(
+      "hidden",
+      ""
+    );
 
-    element.style.display = "none";
-    element.setAttribute("tabindex", "-1");
+    element.setAttribute(
+      "aria-hidden",
+      "true"
+    );
+
+    setInert(
+      element,
+      true
+    );
+
+    element.style.display =
+      "none";
+
+    element.setAttribute(
+      "tabindex",
+      "-1"
+    );
 
     element.classList.remove(
       "active",
@@ -1507,13 +1929,19 @@ function setElementVisible(element = null, visible = true) {
       "router-active"
     );
 
-    element.classList.add("is-role-hidden");
+    element.classList.add(
+      "is-role-hidden"
+    );
 
     if (elementRequiresAdmin(element)) {
-      element.classList.add("is-admin-hidden");
+      element.classList.add(
+        "is-admin-hidden"
+      );
     }
 
-    element.removeAttribute("aria-current");
+    element.removeAttribute(
+      "aria-current"
+    );
 
     try {
       delete element.dataset.active;
@@ -1522,7 +1950,10 @@ function setElementVisible(element = null, visible = true) {
     disableDescendantFocus(element);
     removeTooltipAttrsDeep(element);
 
-    setVisibilityDatasets(element, false);
+    setVisibilityDatasets(
+      element,
+      false
+    );
   } catch {}
 
   return true;
@@ -1533,7 +1964,8 @@ function isRoleElementVisible(element = null) {
     return false;
   }
 
-  const adminManaged = elementRequiresAdmin(element);
+  const adminManaged =
+    elementRequiresAdmin(element);
 
   const hardHidden =
     element.hidden === true ||
@@ -1549,8 +1981,8 @@ function isRoleElementVisible(element = null) {
 
   /*
     CRÍTICO:
-    data-admin-visible solo invalida visibilidad si el elemento realmente
-    requiere admin. En items normales no cuenta.
+    data-admin-visible sólo invalida si el elemento realmente requiere admin.
+    En items normales no cuenta.
   */
   if (
     adminManaged &&
@@ -1563,9 +1995,12 @@ function isRoleElementVisible(element = null) {
 }
 
 function clearHiddenActiveState(sidebar = null) {
-  if (!sidebar) return 0;
+  if (!sidebar) {
+    return 0;
+  }
 
-  let cleared = 0;
+  let cleared =
+    0;
 
   try {
     sidebar
@@ -1611,7 +2046,9 @@ function clearHiddenActiveState(sidebar = null) {
           "router-active"
         );
 
-        element.removeAttribute("aria-current");
+        element.removeAttribute(
+          "aria-current"
+        );
 
         try {
           delete element.dataset.active;
@@ -1655,15 +2092,22 @@ function getMenuRepairElements(sidebar = null) {
 function repairNormalSidebarItems(sidebar = null) {
   if (!sidebar) {
     return {
-      repairedCount: 0,
-      repairedItems: [],
+      repairedCount:
+        0,
+
+      repairedItems:
+        [],
     };
   }
 
-  let repairedCount = 0;
-  const repairedItems = [];
+  let repairedCount =
+    0;
 
-  const elements = getMenuRepairElements(sidebar);
+  const repairedItems =
+    [];
+
+  const elements =
+    getMenuRepairElements(sidebar);
 
   elements.forEach((element) => {
     if (isElementAccessControlled(element)) {
@@ -1683,16 +2127,23 @@ function repairNormalSidebarItems(sidebar = null) {
 
     /*
       Los items normales del menú deben estar visibles siempre.
-      Esto repara el caso exacto: admin ve solo Usuarios/Clientes/Servidor.
+      Esto repara el caso exacto: admin ve sólo Usuarios/Clientes/Servidor.
     */
-    setElementVisible(element, true);
+    setElementVisible(
+      element,
+      true
+    );
 
     try {
-      element.dataset.sidebarVisible = "true";
-      element.dataset.roleVisible = "true";
+      element.dataset.sidebarVisible =
+        "true";
+
+      element.dataset.roleVisible =
+        "true";
 
       if (hasDatasetKey(element, "adminVisible")) {
-        element.dataset.adminVisible = "true";
+        element.dataset.adminVisible =
+          "true";
       }
 
       element.classList.remove(
@@ -1705,18 +2156,20 @@ function repairNormalSidebarItems(sidebar = null) {
     if (wasBroken) {
       repairedCount += 1;
 
-      repairedItems.push({
-        id:
-          element.id || "",
+      repairedItems.push(
+        {
+          id:
+            element.id || "",
 
-        route:
-          element.getAttribute?.("data-route") ||
-          element.getAttribute?.("href") ||
-          "",
+          route:
+            element.getAttribute?.("data-route") ||
+            element.getAttribute?.("href") ||
+            "",
 
-        text:
-          safeText(element.textContent, ""),
-      });
+          text:
+            safeText(element.textContent, ""),
+        }
+      );
     }
   });
 
@@ -1769,33 +2222,48 @@ function normalizeServerItemIfPresent(sidebar = null) {
   }
 
   try {
+    const serverId =
+      safeText(SERVER_NAV_ID, "");
+
+    const serverRoute =
+      safeText(SERVER_ROUTE, "/servidor");
+
     const item =
-      sidebar.querySelector(`#${SERVER_NAV_ID}`) ||
-      sidebar.querySelector(`[data-route="${SERVER_ROUTE}"]`) ||
-      sidebar.querySelector(`[href="${SERVER_ROUTE}"]`);
+      (
+        serverId
+          ? sidebar.querySelector(`#${serverId}`)
+          : null
+      ) ||
+      sidebar.querySelector(`[data-route="${serverRoute}"]`) ||
+      sidebar.querySelector(`[href="${serverRoute}"]`);
 
     if (!item) {
       return false;
     }
 
     if (!item.dataset.adminOnly) {
-      item.dataset.adminOnly = "true";
+      item.dataset.adminOnly =
+        "true";
     }
 
     if (!item.dataset.role) {
-      item.dataset.role = "admin";
+      item.dataset.role =
+        "admin";
     }
 
     if (!item.dataset.requiresRole) {
-      item.dataset.requiresRole = "admin";
+      item.dataset.requiresRole =
+        "admin";
     }
 
     if (!item.dataset.sidebarAdminOnly) {
-      item.dataset.sidebarAdminOnly = "true";
+      item.dataset.sidebarAdminOnly =
+        "true";
     }
 
     if (!item.dataset.adminVisible) {
-      item.dataset.adminVisible = "false";
+      item.dataset.adminVisible =
+        "false";
     }
 
     return true;
@@ -1864,35 +2332,60 @@ function getElementSnapshot(element = null) {
 }
 
 export function getRoleVisibilitySnapshot(AppCore, isAdminFn) {
-  const { sidebar } = getElements(AppCore);
+  const {
+    sidebar,
+  } =
+    getElements(AppCore);
 
-  const userRoles = getUserRolesFallback(AppCore);
+  const userRoles =
+    getResolvedUserRoles(AppCore);
 
-  const admin = resolveAdminFlag(
-    AppCore,
-    isAdminFn,
-    userRoles
-  );
+  const admin =
+    resolveAdminFlag(
+      AppCore,
+      isAdminFn,
+      userRoles
+    );
 
-  const roleElements = getRoleManagedElements(sidebar);
-  const menuElements = getMenuRepairElements(sidebar);
+  const roleElements =
+    getRoleManagedElements(sidebar);
+
+  const menuElements =
+    getMenuRepairElements(sidebar);
 
   const visibleElements =
     roleElements.filter(isRoleElementVisible);
 
   const hiddenElements =
-    roleElements.filter((element) => !isRoleElementVisible(element));
+    roleElements.filter((element) =>
+      !isRoleElementVisible(element)
+    );
 
   return {
-    ok: Boolean(sidebar),
-    isAdmin: admin,
-    roles: userRoles,
+    version:
+      SIDEBAR_VISIBILITY_VERSION,
+
+    ok:
+      Boolean(sidebar),
+
+    isAdmin:
+      admin,
+
+    roles:
+      userRoles,
 
     counts: {
-      roleManagedTotal: roleElements.length,
-      roleManagedVisible: visibleElements.length,
-      roleManagedHidden: hiddenElements.length,
-      menuTotal: menuElements.length,
+      roleManagedTotal:
+        roleElements.length,
+
+      roleManagedVisible:
+        visibleElements.length,
+
+      roleManagedHidden:
+        hiddenElements.length,
+
+      menuTotal:
+        menuElements.length,
     },
 
     roleItems:
@@ -1912,36 +2405,63 @@ export function applyRoleVisibility(
   ensureServerNavItem,
   isAdminFn
 ) {
-  const userRoles = getUserRolesFallback(AppCore);
+  const userRoles =
+    getResolvedUserRoles(AppCore);
 
-  const admin = resolveAdminFlag(
-    AppCore,
-    isAdminFn,
-    userRoles
-  );
+  const admin =
+    resolveAdminFlag(
+      AppCore,
+      isAdminFn,
+      userRoles
+    );
 
-  const legacyEnsured = runLegacyServerNavEnsure({
-    AppCore,
-    ensureServerNavItem,
-    admin,
-    userRoles,
-  });
+  const legacyEnsured =
+    runLegacyServerNavEnsure(
+      {
+        AppCore,
+        ensureServerNavItem,
+        admin,
+        userRoles,
+      }
+    );
 
-  const { sidebar } = getElements(AppCore);
+  const {
+    sidebar,
+  } =
+    getElements(AppCore);
 
   if (!sidebar) {
-    const payload = {
-      ok: false,
-      reason: "sidebar-not-found",
-      isAdmin: admin,
-      roles: userRoles,
-      hiddenCount: 0,
-      visibleCount: 0,
-      totalCount: 0,
-      normalRepairedCount: 0,
-      legacyEnsured,
-      serverNormalized: false,
-    };
+    const payload =
+      {
+        ok:
+          false,
+
+        reason:
+          "sidebar-not-found",
+
+        isAdmin:
+          admin,
+
+        roles:
+          userRoles,
+
+        hiddenCount:
+          0,
+
+        visibleCount:
+          0,
+
+        totalCount:
+          0,
+
+        normalRepairedCount:
+          0,
+
+        legacyEnsured,
+
+        serverNormalized:
+          false,
+      };
 
     safeEmit(
       AppCore,
@@ -1963,7 +2483,7 @@ export function applyRoleVisibility(
 
   /*
     1. Primero se reparan los items normales.
-       Esto impide que un admin vea solo Usuarios/Clientes/Servidor.
+       Esto impide que un admin vea sólo Usuarios/Clientes/Servidor.
   */
   const normalRepair =
     repairNormalSidebarItems(sidebar);
@@ -1974,11 +2494,17 @@ export function applyRoleVisibility(
   const roleElements =
     getRoleManagedElements(sidebar);
 
-  let hiddenCount = 0;
-  let visibleCount = 0;
+  let hiddenCount =
+    0;
 
-  const hiddenItems = [];
-  const visibleItems = [];
+  let visibleCount =
+    0;
+
+  const hiddenItems =
+    [];
+
+  const visibleItems =
+    [];
 
   roleElements.forEach((element) => {
     const requiredRoles =
@@ -1996,26 +2522,27 @@ export function applyRoleVisibility(
       visible
     );
 
-    const itemPayload = {
-      id:
-        element.id || "",
+    const itemPayload =
+      {
+        id:
+          element.id || "",
 
-      route:
-        element.getAttribute?.("data-route") ||
-        element.getAttribute?.("href") ||
-        "",
+        route:
+          element.getAttribute?.("data-route") ||
+          element.getAttribute?.("href") ||
+          "",
 
-      text:
-        safeText(element.textContent, ""),
+        text:
+          safeText(element.textContent, ""),
 
-      requiredRoles,
+        requiredRoles,
 
-      adminManaged:
-        elementRequiresAdmin(element),
+        adminManaged:
+          elementRequiresAdmin(element),
 
-      accessControlled:
-        isElementAccessControlled(element),
-    };
+        accessControlled:
+          isElementAccessControlled(element),
+      };
 
     if (visible) {
       visibleCount += 1;
@@ -2039,28 +2566,36 @@ export function applyRoleVisibility(
     );
   }
 
-  const payload = {
-    ok: true,
-    isAdmin: admin,
-    roles: userRoles,
+  const payload =
+    {
+      ok:
+        true,
 
-    hiddenCount,
-    visibleCount,
-    totalCount: roleElements.length,
+      isAdmin:
+        admin,
 
-    normalRepairedCount:
-      normalRepair.repairedCount,
+      roles:
+        userRoles,
 
-    normalRepairedItems:
-      normalRepair.repairedItems,
+      hiddenCount,
+      visibleCount,
 
-    hiddenItems,
-    visibleItems,
+      totalCount:
+        roleElements.length,
 
-    clearedActiveCount,
-    legacyEnsured,
-    serverNormalized,
-  };
+      normalRepairedCount:
+        normalRepair.repairedCount,
+
+      normalRepairedItems:
+        normalRepair.repairedItems,
+
+      hiddenItems,
+      visibleItems,
+
+      clearedActiveCount,
+      legacyEnsured,
+      serverNormalized,
+    };
 
   safeEmit(
     AppCore,
@@ -2089,8 +2624,11 @@ export function applyRoleVisibility(
       AppCore,
       EVENT_ACTIVE_INVALIDATED,
       {
-        reason: "role-visibility",
+        reason:
+          "role-visibility",
+
         clearedActiveCount,
+
         normalRepairedCount:
           normalRepair.repairedCount,
       }
@@ -2100,7 +2638,8 @@ export function applyRoleVisibility(
       AppCore,
       EVENT_INDICATOR_REFRESH_REQUEST,
       {
-        reason: "role-visibility",
+        reason:
+          "role-visibility",
       }
     );
   }
@@ -2113,6 +2652,8 @@ export function applyRoleVisibility(
 ========================================================= */
 
 export default {
+  SIDEBAR_VISIBILITY_VERSION,
+
   applyRoleVisibility,
   getRoleVisibilitySnapshot,
 };

@@ -23,6 +23,7 @@
    - registry.hooks[type] mantiene funciones ejecutables
    - metadatos internos sin romper request.js
    - once funcional incluso si lo ejecuta otro módulo directamente
+   - runSeries/runParallel contabilizan errores capturados
 ========================================================= */
 
 /* =========================================================
@@ -30,7 +31,7 @@
 ========================================================= */
 
 const HOOKS_VERSION =
-  "11.0.0";
+  "12.0.0";
 
 const DEFAULT_HOOK_TYPES =
   Object.freeze([
@@ -66,6 +67,9 @@ const HOOK_EVENTS =
     add:
       "core:hook:add",
 
+    duplicate:
+      "core:hook:duplicate",
+
     remove:
       "core:hook:remove",
 
@@ -86,6 +90,12 @@ const HOOK_EVENTS =
 
     typeDefined:
       "core:hook:type-defined",
+
+    enabled:
+      "core:hook:enabled",
+
+    priority:
+      "core:hook:priority",
   });
 
 const MAX_RECENT_EVENTS =
@@ -265,8 +275,10 @@ function safeEmit(events, name, payload = {}) {
 function createNoopDisposer() {
   const noop = () => false;
 
-  noop.__hookNoop =
-    true;
+  try {
+    noop.__hookNoop =
+      true;
+  } catch {}
 
   return noop;
 }
@@ -377,6 +389,17 @@ function buildPublicHookEntry(entry = {}) {
 
     enabled:
       entry.enabled !== false,
+
+    timeoutMs:
+      safeNumber(entry.timeoutMs, 0),
+
+    tags:
+      safeArray(entry.tags),
+
+    meta:
+      entry.meta
+        ? safeClone(entry.meta, null)
+        : null,
 
     createdAt:
       entry.createdAt || "",
@@ -1002,15 +1025,18 @@ export function createHooks({
   function createHookRunner(entry) {
     const runner =
       async function onionHookRunner(payload, context = {}) {
-        return invokeHookEntry(
-          entry,
-          payload,
-          context,
-          {
-            invokedBy:
-              "direct",
-          }
-        );
+        const result =
+          await invokeHookEntry(
+            entry,
+            payload,
+            context,
+            {
+              invokedBy:
+                "direct",
+            }
+          );
+
+        return result.value;
       };
 
     try {
@@ -1028,20 +1054,22 @@ export function createHooks({
       );
     } catch {}
 
-    runner.__hookEntry =
-      entry;
+    try {
+      runner.__hookEntry =
+        entry;
 
-    runner.__hookType =
-      entry.type;
+      runner.__hookType =
+        entry.type;
 
-    runner.__hookKey =
-      entry.key;
+      runner.__hookKey =
+        entry.key;
 
-    runner.__hookOriginal =
-      entry.handler;
+      runner.__hookOriginal =
+        entry.handler;
 
-    runner.__isOnionHook =
-      true;
+      runner.__isOnionHook =
+        true;
+    } catch {}
 
     return runner;
   }
@@ -1051,11 +1079,27 @@ export function createHooks({
       !entry ||
       !isFunction(entry.handler)
     ) {
-      return undefined;
+      return {
+        ok:
+          true,
+        skipped:
+          true,
+        value:
+          undefined,
+      };
     }
 
     if (entry.enabled === false) {
-      return undefined;
+      return {
+        ok:
+          true,
+        skipped:
+          true,
+        disabled:
+          true,
+        value:
+          undefined,
+      };
     }
 
     const startedAt =
@@ -1090,10 +1134,21 @@ export function createHooks({
         apiRef,
 
       invokedBy:
-        options.invokedBy || context?.invokedBy || "hooks",
+        options.invokedBy ||
+        context?.invokedBy ||
+        "hooks",
     };
 
     let timeout =
+      null;
+
+    let ok =
+      true;
+
+    let value =
+      undefined;
+
+    let capturedError =
       null;
 
     try {
@@ -1111,16 +1166,20 @@ export function createHooks({
           )
         );
 
-      const result =
+      value =
         timeout
           ? await Promise.race([
               execution,
               timeout.promise,
             ])
           : await execution;
-
-      return result;
     } catch (error) {
+      ok =
+        false;
+
+      capturedError =
+        error;
+
       recordError(
         type,
         error,
@@ -1134,8 +1193,6 @@ export function createHooks({
       if (options.throwOnError === true) {
         throw error;
       }
-
-      return undefined;
     } finally {
       try {
         timeout?.clear?.();
@@ -1172,6 +1229,17 @@ export function createHooks({
         );
       }
     }
+
+    return {
+      ok,
+      failed:
+        !ok,
+      value,
+      error:
+        capturedError,
+      entry:
+        buildPublicHookEntry(entry),
+    };
   }
 
   function add(type, handler, options = {}) {
@@ -1250,6 +1318,23 @@ export function createHooks({
         name:
           existing.name,
       });
+
+      safeEmit(
+        events,
+        HOOK_EVENTS.duplicate,
+        {
+          type:
+            cleanType,
+
+          key,
+
+          name:
+            existing.name,
+
+          at:
+            safeIsoDate(),
+        }
+      );
 
       return () =>
         remove(
@@ -1464,7 +1549,7 @@ export function createHooks({
         return 0;
       }
 
-      const count =
+      const removed =
         normalizeHookList(cleanType).length;
 
       finalRegistry.hooks[cleanType] =
@@ -1482,7 +1567,8 @@ export function createHooks({
         type:
           cleanType,
 
-        count,
+        count:
+          removed,
       });
 
       safeEmit(
@@ -1492,14 +1578,15 @@ export function createHooks({
           type:
             cleanType,
 
-          count,
+          count:
+            removed,
 
           at:
             safeIsoDate(),
         }
       );
 
-      return count;
+      return removed;
     }
 
     let total =
@@ -1534,16 +1621,37 @@ export function createHooks({
     normalizeHookList(cleanType);
 
     if (matches.length) {
+      const payload = {
+        type:
+          cleanType,
+
+        enabled:
+          Boolean(value),
+
+        count:
+          matches.length,
+
+        keys:
+          matches.map((entry) =>
+            entry.key
+          ),
+
+        at:
+          safeIsoDate(),
+      };
+
       pushRecent({
         event:
           value ? "enable" : "disable",
 
-        type:
-          cleanType,
-
-        count:
-          matches.length,
+        ...payload,
       });
+
+      safeEmit(
+        events,
+        HOOK_EVENTS.enabled,
+        payload
+      );
     }
 
     return matches.length > 0;
@@ -1563,12 +1671,40 @@ export function createHooks({
         handlerOrKey
       );
 
+    const nextPriority =
+      safeNumber(priority, 0);
+
     for (const entry of matches) {
       entry.priority =
-        safeNumber(priority, 0);
+        nextPriority;
     }
 
     normalizeHookList(cleanType);
+
+    if (matches.length) {
+      safeEmit(
+        events,
+        HOOK_EVENTS.priority,
+        {
+          type:
+            cleanType,
+
+          priority:
+            nextPriority,
+
+          count:
+            matches.length,
+
+          keys:
+            matches.map((entry) =>
+              entry.key
+            ),
+
+          at:
+            safeIsoDate(),
+        }
+      );
+    }
 
     return matches.length > 0;
   }
@@ -1658,8 +1794,11 @@ export function createHooks({
       0;
 
     for (const entry of list) {
+      let result =
+        null;
+
       try {
-        const result =
+        result =
           await invokeHookEntry(
             entry,
             current,
@@ -1677,23 +1816,35 @@ export function createHooks({
                 opts.throwOnError === true,
             }
           );
-
-        executed += 1;
-
-        if (result !== undefined) {
-          current =
-            result;
-        }
       } catch (error) {
-        failed += 1;
+        result = {
+          ok:
+            false,
+          failed:
+            true,
+          error,
+        };
 
         if (opts.throwOnError === true) {
           throw error;
         }
+      }
+
+      executed += 1;
+
+      if (result?.failed) {
+        failed += 1;
 
         if (opts.stopOnError === true) {
           break;
         }
+
+        continue;
+      }
+
+      if (result?.value !== undefined) {
+        current =
+          result.value;
       }
     }
 
@@ -1777,25 +1928,62 @@ export function createHooks({
     );
 
     const settled =
-      await Promise.allSettled(
+      await Promise.all(
         list.map(async (entry) => {
-          return invokeHookEntry(
-            entry,
-            payload,
-            {
-              ...(isPlainObject(opts.context) ? opts.context : {}),
+          try {
+            const result =
+              await invokeHookEntry(
+                entry,
+                payload,
+                {
+                  ...(isPlainObject(opts.context) ? opts.context : {}),
 
-              mode:
-                "parallel",
-            },
-            {
-              invokedBy:
-                "runParallel",
+                  mode:
+                    "parallel",
+                },
+                {
+                  invokedBy:
+                    "runParallel",
 
-              throwOnError:
-                opts.throwOnError === true,
+                  throwOnError:
+                    opts.throwOnError === true,
+                }
+              );
+
+            return {
+              status:
+                result?.failed
+                  ? "rejected"
+                  : "fulfilled",
+
+              value:
+                result?.value,
+
+              reason:
+                result?.error,
+
+              hook:
+                buildPublicHookEntry(entry),
+            };
+          } catch (error) {
+            if (opts.throwOnError === true) {
+              throw error;
             }
-          );
+
+            return {
+              status:
+                "rejected",
+
+              value:
+                undefined,
+
+              reason:
+                error,
+
+              hook:
+                buildPublicHookEntry(entry),
+            };
+          }
         })
       );
 

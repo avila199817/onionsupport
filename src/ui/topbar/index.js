@@ -2,25 +2,25 @@
    Onion SPA - Topbar UI
    Archivo: src/ui/topbar/index.js
 
-   FINAL PRO SAAS PANEL · TOPBAR NO-STORM · NO REBIND DEFAULT · 10/10
-   TOKEN PRO SYSTEM ALIGNED · COMMAND PALETTE SAFE · VIEW GLASS SAFE
+   ONION SUPPORT · TOPBAR UI ORCHESTRATOR · 15/10
+   NO-STORM · NO REBIND DEFAULT · COMMAND PALETTE SAFE
 
    Responsabilidades:
-   - montar el HTML del topbar desde JS
-   - controlar la UI global del topbar
-   - sincronizar título de la vista actual
-   - gestionar toggle mobile de sidebar
-   - integrar buscador global del topbar
-   - debounce + abort de peticiones
-   - renderizar resultados agrupados vía topbar.search.js/topbar.events.js
-   - soportar navegación por teclado
-   - soportar click outside
-   - tolerar distintos formatos del backend search
-   - cleanup sólido anti duplicados
-   - integrarse de forma robusta con SidebarUI
-   - alinearse con layout controlado por CSS
-   - NO pisar offsets del shell con inline styles
-   - registrar API pública en AppCore.modules y window
+   - Montar el HTML del topbar desde JS.
+   - Controlar la UI global del topbar.
+   - Sincronizar título de la vista actual.
+   - Gestionar toggle mobile de sidebar.
+   - Integrar buscador global del topbar.
+   - Debounce + abort de peticiones.
+   - Renderizar resultados agrupados vía topbar.search.js/topbar.events.js.
+   - Soportar navegación por teclado.
+   - Soportar click outside.
+   - Tolerar distintos formatos del backend search.
+   - Cleanup sólido anti duplicados.
+   - Integrarse de forma robusta con SidebarUI.
+   - Alinearse con layout controlado por CSS.
+   - NO pisar offsets del shell con inline styles desde index.js.
+   - Registrar API pública en AppCore.modules y window.
 
    CONTRATO SEARCH:
    - index.js NO crea overlays.
@@ -30,16 +30,23 @@
    - topbar.css pinta el command palette y el glass sobre .main-content.
 
    FIX CRÍTICO EVENT STORM:
-   - init() repetido NO rebindea si ya está bound
-   - render() NO rebindea por defecto
-   - refresh() NO rebindea por defecto
-   - sync() es alias ligero de refresh()
-   - renderUser/refreshUser/updateUser/syncUser son ligeros
-   - queueRebind() por defecto hace refresh ligero, no cleanup+bind
-   - rebind() solo hace hard rebind con { force/hard/explicit: true }
-   - hardRebind() es la vía explícita para cleanup + bind
-   - AppCore.cleanup.run() solo se usa en unbind/hardRebind/destroy
-   - evita cleanup:disposed/firebreak en router/auth/lang/render
+   - init() repetido NO rebindea si ya está bound.
+   - render() NO rebindea por defecto.
+   - refresh() NO rebindea por defecto.
+   - sync() es alias ligero de refresh().
+   - renderUser/refreshUser/updateUser/syncUser son ligeros.
+   - queueRebind() por defecto hace refresh ligero, no cleanup+bind.
+   - rebind() sólo hace hard rebind con { force/hard/explicit: true }.
+   - hardRebind() es la vía explícita para cleanup + bind.
+   - AppCore.cleanup.run() sólo se usa en unbind/hardRebind/destroy.
+   - Evita cleanup:disposed/firebreak en router/auth/lang/render.
+
+   ARQUITECTURA:
+   - topbar.dom.js     = DOM/mount/cache.
+   - topbar.search.js  = estado visual search/results.
+   - topbar.sidebar.js = puente con SidebarUI.
+   - topbar.events.js  = listeners DOM/app/search.
+   - index.js          = orquestador público.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -84,6 +91,9 @@ import {
   bindTopbarAppEvents,
 } from "./topbar.events.js";
 
+export const TOPBAR_UI_VERSION =
+  "topbar-ui-v15-no-storm-orchestrator";
+
 export const TopbarUI = (() => {
   "use strict";
 
@@ -91,20 +101,34 @@ export const TopbarUI = (() => {
      CONSTANTS
   ========================================================= */
 
+  const SOURCE =
+    "TopbarUI";
+
+  const OWNER =
+    "index.js";
+
+  const LOG_PREFIX =
+    "[TopbarUI]";
+
   const SCOPE =
     TOPBAR_SCOPE;
 
   const SEARCH_SCOPE =
     TOPBAR_SEARCH_SCOPE;
 
-  const MODULE_NAME =
-    "TopbarUI";
+  const MODULE_NAMES =
+    Object.freeze([
+      "topbar",
+      "Topbar",
+      "topbarUI",
+      "TopbarUI",
+    ]);
 
-  const MODULE_ALIAS =
-    "Topbar";
-
-  const GLOBAL_NAME =
-    "OnionTopbarUI";
+  const GLOBAL_NAMES =
+    Object.freeze([
+      "TopbarUI",
+      "OnionTopbarUI",
+    ]);
 
   const BIND_DEDUP_WINDOW_MS =
     180;
@@ -114,6 +138,9 @@ export const TopbarUI = (() => {
 
   const RETRY_BIND_DELAY_MS =
     120;
+
+  const TITLE_DEFAULT =
+    "Onion Support";
 
   /* =========================================================
      LOCAL STATE
@@ -128,76 +155,77 @@ export const TopbarUI = (() => {
   let publicApiRegistered =
     false;
 
-  const runtime = {
-    searchController:
-      null,
+  const runtime =
+    {
+      searchController:
+        null,
 
-    searchDebounceTimer:
-      null,
+      searchDebounceTimer:
+        null,
 
-    activeIndex:
-      -1,
+      activeIndex:
+        -1,
 
-    currentItems:
-      [],
+      currentItems:
+        [],
 
-    currentQuery:
-      "",
+      currentQuery:
+        "",
 
-    cache:
-      new Map(),
+      cache:
+        new Map(),
 
-    openingSearchResult:
-      false,
+      openingSearchResult:
+        false,
 
-    isComposingSearch:
-      false,
+      isComposingSearch:
+        false,
 
-    bound:
-      false,
+      bound:
+        false,
 
-    binding:
-      false,
+      binding:
+        false,
 
-    rebinding:
-      false,
+      rebinding:
+        false,
 
-    rebindTimer:
-      null,
+      rebindTimer:
+        null,
 
-    retryTimer:
-      null,
+      retryTimer:
+        null,
 
-    mountedAt:
-      0,
+      mountedAt:
+        0,
 
-    lastTitle:
-      "",
+      lastTitle:
+        "",
 
-    lastPublicPath:
-      "",
+      lastPublicPath:
+        "",
 
-    lastBindAt:
-      0,
+      lastBindAt:
+        0,
 
-    lastBindReason:
-      "",
+      lastBindReason:
+        "",
 
-    bindGeneration:
-      0,
+      bindGeneration:
+        0,
 
-    softRefreshCount:
-      0,
+      softRefreshCount:
+        0,
 
-    hardRebindCount:
-      0,
+      hardRebindCount:
+        0,
 
-    cleanupCount:
-      0,
+      cleanupCount:
+        0,
 
-    lastError:
-      null,
-  };
+      lastError:
+        null,
+    };
 
   /* =========================================================
      SAFE HELPERS
@@ -208,6 +236,10 @@ export const TopbarUI = (() => {
       typeof window !== "undefined" &&
       typeof document !== "undefined"
     );
+  }
+
+  function hasWindow() {
+    return typeof window !== "undefined";
   }
 
   function isFunction(value) {
@@ -223,17 +255,44 @@ export const TopbarUI = (() => {
     }
 
     const text =
-      String(value).trim();
+      String(value)
+        .replace(/[\r\n\t]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
 
     return text || fallback;
   }
 
   function safeObject(value) {
-    return value &&
+    return (
+      value &&
       typeof value === "object" &&
       !Array.isArray(value)
+    )
       ? value
       : {};
+  }
+
+  function safeArray(value) {
+    return Array.isArray(value)
+      ? value
+      : [];
+  }
+
+  function nowMs() {
+    try {
+      return Date.now();
+    } catch {
+      return 0;
+    }
+  }
+
+  function safeIsoDate(ms = nowMs()) {
+    try {
+      return new Date(ms).toISOString();
+    } catch {
+      return "";
+    }
   }
 
   function normalizeOptions(value = {}, fallbackReason = "") {
@@ -244,14 +303,21 @@ export const TopbarUI = (() => {
     ) {
       return {
         ...value,
+
         reason:
-          safeText(value.reason, fallbackReason),
+          safeText(
+            value.reason,
+            fallbackReason
+          ),
       };
     }
 
     return {
       reason:
-        safeText(value, fallbackReason),
+        safeText(
+          value,
+          fallbackReason
+        ),
     };
   }
 
@@ -321,14 +387,6 @@ export const TopbarUI = (() => {
     return false;
   }
 
-  function nowMs() {
-    try {
-      return Date.now();
-    } catch {
-      return 0;
-    }
-  }
-
   function safeSetTimeout(callback, ms = 0) {
     if (!isFunction(callback)) {
       return null;
@@ -352,7 +410,10 @@ export const TopbarUI = (() => {
               error;
           }
         },
-        Math.max(0, Number(ms) || 0)
+        Math.max(
+          0,
+          Number(ms) || 0
+        )
       );
     } catch (error) {
       runtime.lastError =
@@ -375,7 +436,7 @@ export const TopbarUI = (() => {
     }
 
     try {
-      if (isBrowser()) {
+      if (hasWindow()) {
         window.clearTimeout(timer);
       }
     } catch {}
@@ -430,9 +491,7 @@ export const TopbarUI = (() => {
     }
 
     try {
-      AppCore?.cleanup?.run?.(
-        cleanScope
-      );
+      AppCore?.cleanup?.run?.(cleanScope);
 
       runtime.cleanupCount += 1;
 
@@ -459,7 +518,7 @@ export const TopbarUI = (() => {
 
     try {
       AppCore?.utils?.log?.(
-        "[TopbarUI]",
+        LOG_PREFIX,
         ...args
       );
 
@@ -468,7 +527,7 @@ export const TopbarUI = (() => {
 
     try {
       console.log(
-        "[TopbarUI]",
+        LOG_PREFIX,
         ...args
       );
     } catch {}
@@ -481,7 +540,7 @@ export const TopbarUI = (() => {
 
     try {
       AppCore?.utils?.warn?.(
-        "[TopbarUI]",
+        LOG_PREFIX,
         ...args
       );
 
@@ -490,7 +549,7 @@ export const TopbarUI = (() => {
 
     try {
       console.warn(
-        "[TopbarUI]",
+        LOG_PREFIX,
         ...args
       );
     } catch {}
@@ -504,12 +563,28 @@ export const TopbarUI = (() => {
       return false;
     }
 
-    const detail = {
-      source:
-        "TopbarUI",
+    const data =
+      safeObject(payload);
 
-      ...safeObject(payload),
-    };
+    const detail =
+      {
+        ...data,
+
+        source:
+          safeText(data.source, SOURCE),
+
+        owner:
+          OWNER,
+
+        version:
+          TOPBAR_UI_VERSION,
+
+        at:
+          safeText(data.at, safeIsoDate()),
+
+        ts:
+          data.ts || nowMs(),
+      };
 
     try {
       if (isFunction(AppCore?.events?.emit)) {
@@ -520,10 +595,16 @@ export const TopbarUI = (() => {
 
         return true;
       }
-    } catch {}
+    } catch (error) {
+      runtime.lastError =
+        error;
+    }
 
     try {
-      if (isBrowser()) {
+      if (
+        isBrowser() &&
+        typeof CustomEvent !== "undefined"
+      ) {
         window.dispatchEvent(
           new CustomEvent(
             name,
@@ -535,7 +616,10 @@ export const TopbarUI = (() => {
 
         return true;
       }
-    } catch {}
+    } catch (error) {
+      runtime.lastError =
+        error;
+    }
 
     return false;
   }
@@ -560,10 +644,7 @@ export const TopbarUI = (() => {
       runtime.mountedAt =
         nowMs();
 
-      prepareTopbarDom(
-        topbar
-      );
-
+      prepareTopbarDom(topbar);
       syncDomCache();
     }
 
@@ -576,9 +657,7 @@ export const TopbarUI = (() => {
         syncDomCache();
 
       if (dom?.topbar) {
-        prepareTopbarDom(
-          dom.topbar
-        );
+        prepareTopbarDom(dom.topbar);
 
         return dom.topbar;
       }
@@ -591,7 +670,10 @@ export const TopbarUI = (() => {
     const mounted =
       ensureMounted();
 
-    return mounted && isConnected(mounted)
+    return (
+      mounted &&
+      isConnected(mounted)
+    )
       ? mounted
       : null;
   }
@@ -601,36 +683,38 @@ export const TopbarUI = (() => {
   ========================================================= */
 
   function syncFixedTopbarOffsetSafe() {
-    return syncFixedTopbarOffset(
-      getDom
-    );
+    return syncFixedTopbarOffset(getDom);
   }
 
   function setMobileToggleStateSafe() {
-    return setMobileToggleState(
-      getDom
-    );
+    return setMobileToggleState(getDom);
   }
 
   function openSidebarMobileSafe() {
-    return openSidebarMobile({
-      AppCore,
-      getDom,
-    });
+    return openSidebarMobile(
+      {
+        AppCore,
+        getDom,
+      }
+    );
   }
 
   function closeSidebarMobileSafe() {
-    return closeSidebarMobile({
-      AppCore,
-      getDom,
-    });
+    return closeSidebarMobile(
+      {
+        AppCore,
+        getDom,
+      }
+    );
   }
 
   function toggleSidebarMobileSafe() {
-    return toggleSidebarMobile({
-      AppCore,
-      getDom,
-    });
+    return toggleSidebarMobile(
+      {
+        AppCore,
+        getDom,
+      }
+    );
   }
 
   function handleViewportResizeSafe() {
@@ -752,46 +836,80 @@ export const TopbarUI = (() => {
     const cleanCanonicalPath =
       stripQueryAndHash(canonicalPath);
 
-    const staticMap = {
-      "/":
-        "Onion Support",
+    const staticMap =
+      {
+        "/":
+          TITLE_DEFAULT,
 
-      "/home":
-        "Inicio",
+        "/home":
+          "Inicio",
 
-      "/dashboard":
-        "Inicio",
+        "/dashboard":
+          "Inicio",
 
-      "/incidencias":
-        "Incidencias",
+        "/inicio":
+          "Inicio",
 
-      "/tickets":
-        "Incidencias",
+        "/incidencias":
+          "Incidencias",
 
-      "/facturas":
-        "Facturas",
+        "/tickets":
+          "Incidencias",
 
-      "/usuarios":
-        "Usuarios",
+        "/facturas":
+          "Facturas",
 
-      "/clientes":
-        "Clientes",
+        "/usuarios":
+          "Usuarios",
 
-      "/cuenta":
-        "Cuenta",
+        "/users":
+          "Usuarios",
 
-      "/ajustes":
-        "Ajustes",
+        "/clientes":
+          "Clientes",
 
-      "/settings":
-        "Ajustes",
+        "/clients":
+          "Clientes",
 
-      "/login":
-        "Acceso",
+        "/cuenta":
+          "Cuenta",
 
-      "/servidor":
-        "Servidor",
-    };
+        "/account":
+          "Cuenta",
+
+        "/ajustes":
+          "Ajustes",
+
+        "/settings":
+          "Ajustes",
+
+        "/login":
+          "Acceso",
+
+        "/activate-account":
+          "Activar cuenta",
+
+        "/reset-password":
+          "Restablecer contraseña",
+
+        "/reset-password/confirm":
+          "Confirmar contraseña",
+
+        "/forgot-password":
+          "Recuperar contraseña",
+
+        "/recover-password":
+          "Recuperar contraseña",
+
+        "/password-reset":
+          "Recuperar contraseña",
+
+        "/servidor":
+          "Servidor",
+
+        "/server":
+          "Servidor",
+      };
 
     if (staticMap[cleanCanonicalPath]) {
       return staticMap[cleanCanonicalPath];
@@ -808,7 +926,7 @@ export const TopbarUI = (() => {
     }
 
     if (cleanCanonicalPath === "/") {
-      return "Onion Support";
+      return TITLE_DEFAULT;
     }
 
     const pretty =
@@ -834,7 +952,7 @@ export const TopbarUI = (() => {
         .filter(Boolean)
         .join(" · ");
 
-    return pretty || "Onion Support";
+    return pretty || TITLE_DEFAULT;
   }
 
   function syncTitle(path = "") {
@@ -967,10 +1085,12 @@ export const TopbarUI = (() => {
     }
 
     try {
-      searchInput.focus({
-        preventScroll:
-          opts.preventScroll !== false,
-      });
+      searchInput.focus(
+        {
+          preventScroll:
+            opts.preventScroll !== false,
+        }
+      );
 
       if (opts.select) {
         searchInput.select?.();
@@ -1000,27 +1120,29 @@ export const TopbarUI = (() => {
     }
 
     handlers =
-      createTopbarEventHandlers({
-        AppCore,
-        Router,
-        runtime,
-        getDom,
-        syncTitle,
+      createTopbarEventHandlers(
+        {
+          AppCore,
+          Router,
+          runtime,
+          getDom,
+          syncTitle,
 
-        setMobileToggleState:
-          setMobileToggleStateSafe,
+          setMobileToggleState:
+            setMobileToggleStateSafe,
 
-        syncFixedTopbarOffset:
-          syncFixedTopbarOffsetSafe,
+          syncFixedTopbarOffset:
+            syncFixedTopbarOffsetSafe,
 
-        closeSidebarMobile:
-          closeSidebarMobileSafe,
+          closeSidebarMobile:
+            closeSidebarMobileSafe,
 
-        toggleSidebarMobile:
-          toggleSidebarMobileSafe,
+          toggleSidebarMobile:
+            toggleSidebarMobileSafe,
 
-        syncDomCache,
-      });
+          syncDomCache,
+        }
+      );
 
     return handlers;
   }
@@ -1036,54 +1158,192 @@ export const TopbarUI = (() => {
      PUBLIC REGISTRATION
   ========================================================= */
 
-  function registerPublicApi() {
+  function getRegisteredModule(name = "") {
+    const cleanName =
+      safeText(name, "");
+
+    if (!cleanName) {
+      return null;
+    }
+
     try {
-      if (
-        !AppCore.modules ||
-        typeof AppCore.modules !== "object"
-      ) {
-        AppCore.modules = {};
+      const value =
+        AppCore?.modules?.get?.(cleanName);
+
+      if (value) {
+        return value;
       }
+    } catch {}
 
-      if (isFunction(AppCore.modules.register)) {
-        AppCore.modules.register(
-          MODULE_NAME,
-          api
-        );
+    try {
+      const value =
+        AppCore?.registry?.modules?.get?.(cleanName);
 
-        AppCore.modules.register(
-          MODULE_ALIAS,
-          api
-        );
-      } else {
-        AppCore.modules[MODULE_NAME] =
-          api;
-
-        AppCore.modules[MODULE_ALIAS] =
-          api;
+      if (value) {
+        return value;
       }
+    } catch {}
 
-      publicApiRegistered =
-        true;
+    try {
+      const value =
+        AppCore?.modules?.[cleanName];
+
+      if (value) {
+        return value;
+      }
+    } catch {}
+
+    return null;
+  }
+
+  function registerSingleModule(name = "") {
+    const cleanName =
+      safeText(name, "");
+
+    if (!cleanName) {
+      return false;
+    }
+
+    const current =
+      getRegisteredModule(cleanName);
+
+    if (current === api) {
+      return false;
+    }
+
+    let changed =
+      false;
+
+    try {
+      if (isFunction(AppCore?.modules?.register)) {
+        const result =
+          AppCore.modules.register(
+            cleanName,
+            api,
+            {
+              replace:
+                true,
+
+              overwrite:
+                true,
+
+              silentDuplicate:
+                true,
+
+              source:
+                SOURCE,
+            }
+          );
+
+        if (result !== false) {
+          changed =
+            true;
+        }
+      }
     } catch (error) {
       runtime.lastError =
         error;
+    }
+
+    if (!changed) {
+      try {
+        if (isFunction(AppCore?.modules?.set)) {
+          const result =
+            AppCore.modules.set(
+              cleanName,
+              api,
+              {
+                replace:
+                  true,
+
+                overwrite:
+                  true,
+
+                silentDuplicate:
+                  true,
+
+                source:
+                  SOURCE,
+              }
+            );
+
+          if (result !== false) {
+            changed =
+              true;
+          }
+        }
+      } catch (error) {
+        runtime.lastError =
+          error;
+      }
+    }
+
+    if (!changed) {
+      try {
+        if (
+          !AppCore.modules ||
+          typeof AppCore.modules !== "object"
+        ) {
+          AppCore.modules =
+            {};
+        }
+
+        AppCore.modules[cleanName] =
+          api;
+
+        changed =
+          true;
+      } catch (error) {
+        runtime.lastError =
+          error;
+      }
+    }
+
+    try {
+      AppCore?.registry?.modules?.set?.(
+        cleanName,
+        api
+      );
+
+      changed =
+        true;
+    } catch {}
+
+    return changed;
+  }
+
+  function registerPublicApi() {
+    let changed =
+      false;
+
+    for (const name of MODULE_NAMES) {
+      if (registerSingleModule(name)) {
+        changed =
+          true;
+      }
     }
 
     try {
       if (isBrowser()) {
-        window[GLOBAL_NAME] =
-          api;
+        for (const name of GLOBAL_NAMES) {
+          if (window[name] !== api) {
+            window[name] =
+              api;
 
-        window.TopbarUI =
-          api;
+            changed =
+              true;
+          }
+        }
       }
     } catch (error) {
       runtime.lastError =
         error;
     }
 
-    return true;
+    publicApiRegistered =
+      true;
+
+    return changed;
   }
 
   /* =========================================================
@@ -1160,9 +1420,7 @@ export const TopbarUI = (() => {
 
     syncDomCache();
 
-    prepareTopbarDom(
-      topbar
-    );
+    prepareTopbarDom(topbar);
 
     syncTitle(
       opts.path ||
@@ -1194,6 +1452,7 @@ export const TopbarUI = (() => {
         "bind omitido por dedupe.",
         {
           reason,
+
           sinceLastBindMs:
             current - runtime.lastBindAt,
         }
@@ -1227,11 +1486,14 @@ export const TopbarUI = (() => {
       runtime.bound &&
       opts.force !== true
     ) {
-      syncVisualState({
-        ...opts,
-        reason:
-          `bind-skip:${reason}`,
-      });
+      syncVisualState(
+        {
+          ...opts,
+
+          reason:
+            `bind-skip:${reason}`,
+        }
+      );
 
       return true;
     }
@@ -1240,11 +1502,14 @@ export const TopbarUI = (() => {
       opts.force !== true &&
       shouldSkipBind(reason)
     ) {
-      syncVisualState({
-        ...opts,
-        reason:
-          `bind-dedupe:${reason}`,
-      });
+      syncVisualState(
+        {
+          ...opts,
+
+          reason:
+            `bind-dedupe:${reason}`,
+        }
+      );
 
       return true;
     }
@@ -1284,76 +1549,88 @@ export const TopbarUI = (() => {
 
       syncDomCache();
 
-      prepareTopbarDom(
-        topbar
-      );
+      prepareTopbarDom(topbar);
 
       const boundHandlers =
         getHandlers();
 
       const domOk =
-        bindTopbarDomEvents({
-          AppCore,
-          scope:
-            SCOPE,
-          getDom,
-          handlers:
-            {
-              ...boundHandlers,
-              handleViewportResize:
-                handleViewportResizeSafe,
-            },
-        });
+        bindTopbarDomEvents(
+          {
+            AppCore,
+            scope:
+              SCOPE,
+            getDom,
+            handlers:
+              {
+                ...boundHandlers,
+
+                handleViewportResize:
+                  handleViewportResizeSafe,
+              },
+          }
+        );
 
       const searchOk =
-        bindSearchDomEvents({
-          AppCore,
-          scope:
-            SEARCH_SCOPE,
-          getDom,
-          handlers:
-            boundHandlers,
-        });
+        bindSearchDomEvents(
+          {
+            AppCore,
+            scope:
+              SEARCH_SCOPE,
+            getDom,
+            handlers:
+              boundHandlers,
+          }
+        );
 
       const appOk =
-        bindTopbarAppEvents({
-          AppCore,
-          scope:
-            SCOPE,
-          getDom,
-          handlers:
-            boundHandlers,
+        bindTopbarAppEvents(
+          {
+            AppCore,
+            scope:
+              SCOPE,
+            getDom,
+            handlers:
+              boundHandlers,
 
-          hideResults:
-            hideSearchResults,
+            hideResults:
+              hideSearchResults,
 
-          syncTitle,
+            syncTitle,
 
-          setMobileToggleState:
-            setMobileToggleStateSafe,
+            setMobileToggleState:
+              setMobileToggleStateSafe,
 
-          syncFixedTopbarOffset:
-            syncFixedTopbarOffsetSafe,
+            syncFixedTopbarOffset:
+              syncFixedTopbarOffsetSafe,
 
-          closeSidebarMobile:
-            closeSidebarMobileSafe,
+            closeSidebarMobile:
+              closeSidebarMobileSafe,
 
-          syncDomCache,
+            syncDomCache,
 
-          /*
-            Este callback puede ser llamado por eventos app/router/auth/lang.
-            Por defecto queda convertido en refresh ligero.
-          */
-          rebind:
-            queueRebind,
-        });
+            /*
+              Este callback puede ser llamado por eventos app/router/auth/lang.
+              Por defecto queda convertido en refresh ligero.
+            */
+            rebind:
+              queueRebind,
+          }
+        );
 
-      syncVisualState({
-        ...opts,
-        reason:
-          `bind:${reason}`,
-      });
+      syncVisualState(
+        {
+          ...opts,
 
+          reason:
+            `bind:${reason}`,
+        }
+      );
+
+      /*
+        Search puede ser opcional si el DOM no tiene buscador.
+        Topbar base queda bound con DOM + App events.
+      */
       runtime.bound =
         Boolean(domOk && appOk);
 
@@ -1427,19 +1704,24 @@ export const TopbarUI = (() => {
       ensureMounted();
 
     if (!topbar) {
-      retryBind({
-        reason:
-          `soft-refresh-missing-topbar:${opts.reason || ""}`,
-      });
+      retryBind(
+        {
+          reason:
+            `soft-refresh-missing-topbar:${opts.reason || ""}`,
+        }
+      );
 
       return false;
     }
 
-    return syncVisualState({
-      ...opts,
-      reason:
-        opts.reason || "soft-refresh",
-    });
+    return syncVisualState(
+      {
+        ...opts,
+
+        reason:
+          opts.reason || "soft-refresh",
+      }
+    );
   }
 
   function hardRebind(options = {}) {
@@ -1459,12 +1741,15 @@ export const TopbarUI = (() => {
     try {
       runtime.hardRebindCount += 1;
 
-      unbind({
-        clearCache:
-          opts.clearCache === true,
-        reason:
-          opts.reason || "hard-rebind",
-      });
+      unbind(
+        {
+          clearCache:
+            opts.clearCache === true,
+
+          reason:
+            opts.reason || "hard-rebind",
+        }
+      );
 
       resetHandlers();
 
@@ -1472,25 +1757,33 @@ export const TopbarUI = (() => {
         ensureMounted();
 
       if (!topbar) {
-        retryBind({
-          reason:
-            "hard-rebind-missing-topbar",
-        });
+        retryBind(
+          {
+            reason:
+              "hard-rebind-missing-topbar",
+          }
+        );
 
         return false;
       }
 
-      return bind({
-        ...opts,
-        reason:
-          opts.reason || "hard-rebind",
-        force:
-          true,
-        cleanupBeforeBind:
-          false,
-        resetSearch:
-          opts.resetSearch !== false,
-      });
+      return bind(
+        {
+          ...opts,
+
+          reason:
+            opts.reason || "hard-rebind",
+
+          force:
+            true,
+
+          cleanupBeforeBind:
+            false,
+
+          resetSearch:
+            opts.resetSearch !== false,
+        }
+      );
     } catch (error) {
       runtime.lastError =
         error;
@@ -1529,11 +1822,14 @@ export const TopbarUI = (() => {
       return hardRebind(opts);
     }
 
-    return softRefresh({
-      ...opts,
-      reason:
-        opts.reason || "rebind-soft",
-    });
+    return softRefresh(
+      {
+        ...opts,
+
+        reason:
+          opts.reason || "rebind-soft",
+      }
+    );
   }
 
   function queueRebind(delayOrOptions = SOFT_REBIND_DELAY_MS, maybeOptions = {}) {
@@ -1559,20 +1855,26 @@ export const TopbarUI = (() => {
             options.hard === true ||
             options.explicit === true
           ) {
-            hardRebind({
-              ...options,
-              reason:
-                options.reason || "queue-hard-rebind",
-            });
+            hardRebind(
+              {
+                ...options,
+
+                reason:
+                  options.reason || "queue-hard-rebind",
+              }
+            );
 
             return;
           }
 
-          softRefresh({
-            ...options,
-            reason:
-              options.reason || "queue-soft-refresh",
-          });
+          softRefresh(
+            {
+              ...options,
+
+              reason:
+                options.reason || "queue-soft-refresh",
+            }
+          );
         },
         delay
       );
@@ -1599,12 +1901,15 @@ export const TopbarUI = (() => {
           syncDomCache();
 
           const done =
-            bind({
-              reason:
-                opts.reason || "retry-bind",
-              force:
-                false,
-            });
+            bind(
+              {
+                reason:
+                  opts.reason || "retry-bind",
+
+                force:
+                  false,
+              }
+            );
 
           if (!done) {
             debugWarn(
@@ -1640,24 +1945,30 @@ export const TopbarUI = (() => {
         ensureMounted();
 
       if (!mounted) {
-        retryBind({
-          reason:
-            "init-already-missing-topbar",
-        });
+        retryBind(
+          {
+            reason:
+              "init-already-missing-topbar",
+          }
+        );
 
         return true;
       }
 
       if (!runtime.bound) {
-        bind({
-          reason:
-            "init-already-not-bound",
-        });
+        bind(
+          {
+            reason:
+              "init-already-not-bound",
+          }
+        );
       } else {
-        syncVisualState({
-          reason:
-            "init-already-bound",
-        });
+        syncVisualState(
+          {
+            reason:
+              "init-already-bound",
+          }
+        );
       }
 
       return true;
@@ -1670,31 +1981,52 @@ export const TopbarUI = (() => {
       ensureMounted();
 
     if (!mounted) {
-      retryBind({
-        reason:
-          "init-missing-topbar",
-      });
+      retryBind(
+        {
+          reason:
+            "init-missing-topbar",
+          }
+        );
 
       return true;
     }
 
     const done =
-      bind({
-        ...opts,
-        reason:
-          opts.reason || "init",
-      });
+      bind(
+        {
+          ...opts,
+
+          reason:
+            opts.reason || "init",
+        }
+      );
 
     if (!done) {
-      retryBind({
-        reason:
-          "init-bind-failed",
-      });
+      retryBind(
+        {
+          reason:
+            "init-bind-failed",
+        }
+      );
     }
 
     debugLog(
       "Inicializado correctamente.",
       getState()
+    );
+
+    safeEmit(
+      "topbar:ready",
+      {
+        initialized:
+          true,
+
+        bound:
+          Boolean(runtime.bound),
+
+        snapshot:
+          getState(),
+      }
     );
 
     return true;
@@ -1711,36 +2043,42 @@ export const TopbarUI = (() => {
       ensureMounted();
 
     if (!topbar) {
-      retryBind({
-        reason:
-          "render-missing-topbar",
-      });
+      retryBind(
+        {
+          reason:
+            "render-missing-topbar",
+        }
+      );
 
       return false;
     }
 
     syncDomCache();
 
-    prepareTopbarDom(
-      topbar
-    );
+    prepareTopbarDom(topbar);
 
-    syncVisualState({
-      ...opts,
-      reason:
-        opts.reason || "render",
-    });
+    syncVisualState(
+      {
+        ...opts,
+
+        reason:
+          opts.reason || "render",
+      }
+    );
 
     /*
       Cambio clave:
       render() NO rebindea por defecto.
     */
     if (opts.rebind === true) {
-      return rebind({
-        ...opts,
-        reason:
-          opts.reason || "render:explicit-rebind",
-      });
+      return rebind(
+        {
+          ...opts,
+
+          reason:
+            opts.reason || "render:explicit-rebind",
+        }
+      );
     }
 
     return true;
@@ -1754,22 +2092,28 @@ export const TopbarUI = (() => {
       );
 
     const ok =
-      softRefresh({
-        ...opts,
-        reason:
-          opts.reason || "refresh",
-      });
+      softRefresh(
+        {
+          ...opts,
+
+          reason:
+            opts.reason || "refresh",
+        }
+      );
 
     /*
       Cambio clave:
       refresh() NO rebindea salvo petición explícita.
     */
     if (opts.rebind === true) {
-      return rebind({
-        ...opts,
-        reason:
-          opts.reason || "refresh:explicit-rebind",
-      });
+      return rebind(
+        {
+          ...opts,
+
+          reason:
+            opts.reason || "refresh:explicit-rebind",
+        }
+      );
     }
 
     return ok;
@@ -1782,13 +2126,17 @@ export const TopbarUI = (() => {
         "sync"
       );
 
-    return refresh({
-      ...opts,
-      rebind:
-        false,
-      reason:
-        opts.reason || "sync",
-    });
+    return refresh(
+      {
+        ...opts,
+
+        rebind:
+          false,
+
+        reason:
+          opts.reason || "sync",
+      }
+    );
   }
 
   function renderUser(options = {}) {
@@ -1798,11 +2146,14 @@ export const TopbarUI = (() => {
         "render-user"
       );
 
-    return sync({
-      ...opts,
-      reason:
-        opts.reason || "render-user",
-    });
+    return sync(
+      {
+        ...opts,
+
+        reason:
+          opts.reason || "render-user",
+      }
+    );
   }
 
   function refreshUser(options = {}) {
@@ -1812,11 +2163,14 @@ export const TopbarUI = (() => {
         "refresh-user"
       );
 
-    return sync({
-      ...opts,
-      reason:
-        opts.reason || "refresh-user",
-    });
+    return sync(
+      {
+        ...opts,
+
+        reason:
+          opts.reason || "refresh-user",
+      }
+    );
   }
 
   function updateUser(options = {}) {
@@ -1826,11 +2180,14 @@ export const TopbarUI = (() => {
         "update-user"
       );
 
-    return sync({
-      ...opts,
-      reason:
-        opts.reason || "update-user",
-    });
+    return sync(
+      {
+        ...opts,
+
+        reason:
+          opts.reason || "update-user",
+      }
+    );
   }
 
   function syncUser(options = {}) {
@@ -1840,11 +2197,14 @@ export const TopbarUI = (() => {
         "sync-user"
       );
 
-    return sync({
-      ...opts,
-      reason:
-        opts.reason || "sync-user",
-    });
+    return sync(
+      {
+        ...opts,
+
+        reason:
+          opts.reason || "sync-user",
+      }
+    );
   }
 
   function destroy(options = {}) {
@@ -1854,12 +2214,15 @@ export const TopbarUI = (() => {
         "destroy"
       );
 
-    unbind({
-      clearCache:
-        opts.clearCache === true,
-      reason:
-        opts.reason || "destroy",
-    });
+    unbind(
+      {
+        clearCache:
+          opts.clearCache === true,
+
+        reason:
+          opts.reason || "destroy",
+      }
+    );
 
     resetHandlers();
 
@@ -1876,18 +2239,12 @@ export const TopbarUI = (() => {
       false;
 
     try {
-      if (
-        isBrowser() &&
-        window[GLOBAL_NAME] === api
-      ) {
-        delete window[GLOBAL_NAME];
-      }
-
-      if (
-        isBrowser() &&
-        window.TopbarUI === api
-      ) {
-        delete window.TopbarUI;
+      if (isBrowser()) {
+        for (const name of GLOBAL_NAMES) {
+          if (window[name] === api) {
+            delete window[name];
+          }
+        }
       }
     } catch (error) {
       runtime.lastError =
@@ -1914,6 +2271,9 @@ export const TopbarUI = (() => {
       getDom();
 
     return {
+      version:
+        TOPBAR_UI_VERSION,
+
       initialized:
         Boolean(initialized),
 
@@ -2022,6 +2382,13 @@ export const TopbarUI = (() => {
         viewContainer:
           Boolean(dom.viewContainer),
       },
+
+      modules: Object.fromEntries(
+        MODULE_NAMES.map((name) => [
+          name,
+          getRegisteredModule(name) === api,
+        ])
+      ),
     };
   }
 
@@ -2038,96 +2405,111 @@ export const TopbarUI = (() => {
      PUBLIC API
   ========================================================= */
 
-  const api = {
-    init,
-    render,
-    refresh,
-    sync,
+  const api =
+    {
+      version:
+        TOPBAR_UI_VERSION,
 
-    renderUser,
-    refreshUser,
-    updateUser,
-    syncUser,
+      init,
+      render,
+      refresh,
+      sync,
 
-    bind,
-    rebind,
-    hardRebind,
-    queueRebind,
-    destroy,
+      renderUser,
+      refreshUser,
+      updateUser,
+      syncUser,
 
-    mountTopbar:
-      mount,
+      bind,
+      rebind,
+      hardRebind,
+      queueRebind,
+      destroy,
 
-    unmountTopbar:
-      (options = {}) => {
-        const opts =
-          normalizeOptions(
-            options,
-            "unmount-topbar"
+      mountTopbar:
+        mount,
+
+      unmountTopbar:
+        (options = {}) => {
+          const opts =
+            normalizeOptions(
+              options,
+              "unmount-topbar"
+            );
+
+          unbind(
+            {
+              clearCache:
+                opts.clearCache === true,
+
+              reason:
+                opts.reason || "unmount-topbar",
+            }
           );
 
-        unbind({
-          clearCache:
-            opts.clearCache === true,
-          reason:
-            opts.reason || "unmount-topbar",
-        });
+          resetHandlers();
 
-        resetHandlers();
+          initialized =
+            false;
 
-        initialized =
-          false;
+          publicApiRegistered =
+            false;
 
-        publicApiRegistered =
-          false;
+          return unmountTopbar(AppCore);
+        },
 
-        return unmountTopbar(AppCore);
+      syncDomCache,
+      getDom,
+
+      syncTitle,
+      resolveRouteTitle,
+
+      openSidebarMobile:
+        openSidebarMobileSafe,
+
+      closeSidebarMobile:
+        closeSidebarMobileSafe,
+
+      toggleSidebarMobile:
+        toggleSidebarMobileSafe,
+
+      syncFixedTopbarOffset:
+        syncFixedTopbarOffsetSafe,
+
+      setMobileToggleState:
+        setMobileToggleStateSafe,
+
+      handleViewportResize:
+        handleViewportResizeSafe,
+
+      hideSearchResults,
+      clearSearch,
+      focusSearch,
+      clearSearchCache,
+
+      getState,
+      getSnapshot,
+
+      get runtime() {
+        return runtime;
       },
 
-    syncDomCache,
-    getDom,
+      get initialized() {
+        return initialized;
+      },
 
-    syncTitle,
-    resolveRouteTitle,
+      get bound() {
+        return runtime.bound;
+      },
 
-    openSidebarMobile:
-      openSidebarMobileSafe,
+      get binding() {
+        return runtime.binding;
+      },
 
-    closeSidebarMobile:
-      closeSidebarMobileSafe,
-
-    toggleSidebarMobile:
-      toggleSidebarMobileSafe,
-
-    syncFixedTopbarOffset:
-      syncFixedTopbarOffsetSafe,
-
-    setMobileToggleState:
-      setMobileToggleStateSafe,
-
-    handleViewportResize:
-      handleViewportResizeSafe,
-
-    hideSearchResults,
-    clearSearch,
-    focusSearch,
-    clearSearchCache,
-
-    getState,
-    getSnapshot,
-
-    get runtime() {
-      return runtime;
-    },
-
-    get initialized() {
-      return initialized;
-    },
-
-    get bound() {
-      return runtime.bound;
-    },
-  };
+      get rebinding() {
+        return runtime.rebinding;
+      },
+    };
 
   registerPublicApi();
 

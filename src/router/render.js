@@ -2,12 +2,13 @@
    Onion SPA - Router Render
    Archivo: src/router/render.js
 
-   FINAL EXTREME SYSTEM · RENDER HOST ISOLATED · RACE SAFE · EVENT SAFE · 14/10
+   FINAL EXTREME SYSTEM · RENDER HOST ISOLATED · RACE SAFE · EVENT SAFE · 15/10
    PATCH · ROUTE STATE COMMIT BEFORE SUCCESS VIEW RENDER
    PATCH · SIDEBAR ACTIVE ROUTE FIX
    PATCH · CANONICAL/PUBLIC PAYLOAD HARDENED
    PATCH · NO DOUBLE router:rendered WITH router/index.js
    PATCH · TOKEN REDACTION SAFE
+   PATCH · CSP CLEAN / NO INLINE CSS / NO INNERHTML
 
    RESPONSABILIDADES:
    - renderizar vistas internas del router
@@ -21,6 +22,7 @@
    - aislar cada render en un host propio para evitar carreras async
    - impedir que renders antiguos reparen shell o pinten errores tardíos
    - exponer contexto con renderId / signal / isStale / renderRoot
+   - crear fallbacks DOM-safe sin innerHTML ni style inline
 
    HARDENING EXTREMO:
    - guards browser / DOM total safe
@@ -100,6 +102,9 @@ import {
    CONSTANTS
 ========================================================= */
 
+export const ROUTER_RENDER_VERSION =
+  "15.0.0";
+
 const ACTIVATION_PATH =
   "/activate-account";
 
@@ -114,6 +119,9 @@ const RENDER_HOST_CLASS =
 
 const RENDER_FALLBACK_CLASS =
   "router-fallback-view";
+
+const RENDER_TRANSITION_CLASS =
+  "router-transition-view";
 
 const SHELL_REPAIR_EMIT_DEDUPE_MS =
   24;
@@ -155,16 +163,22 @@ const PROTECTED_PUBLIC_TOKEN_ROUTES =
     Object.freeze({
       key:
         "activation",
+
       path:
         ACTIVATION_PATH,
+
       stateScrubFlags:
         Object.freeze([
           "scrubbedActivationToken",
+          "activationTokenScrubbed",
+          "scrubbedActivateAccountToken",
         ]),
+
       windowKeys:
         Object.freeze([
           "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
         ]),
+
       tokenNames:
         ACTIVATION_TOKEN_PARAM_NAMES,
     }),
@@ -172,18 +186,25 @@ const PROTECTED_PUBLIC_TOKEN_ROUTES =
     Object.freeze({
       key:
         "resetConfirm",
+
       path:
         RESET_CONFIRM_PATH,
+
       stateScrubFlags:
         Object.freeze([
           "scrubbedResetToken",
+          "resetTokenScrubbed",
           "scrubbedResetPasswordToken",
+          "scrubbedResetConfirmToken",
+          "scrubbedPasswordResetToken",
         ]),
+
       windowKeys:
         Object.freeze([
           "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
           "__ONION_RESET_CONFIRM_INITIAL_URL__",
         ]),
+
       tokenNames:
         RESET_TOKEN_PARAM_NAMES,
     }),
@@ -414,6 +435,126 @@ function microtask(callback) {
   try {
     callback();
   } catch {}
+}
+
+/* =========================================================
+   DOM SAFE HELPERS
+========================================================= */
+
+function createElement(tagName = "div", {
+  id = "",
+  className = "",
+  text = "",
+  attrs = {},
+  dataset = {},
+} = {}) {
+  const element =
+    document.createElement(tagName);
+
+  if (id) {
+    element.id =
+      id;
+  }
+
+  if (className) {
+    element.className =
+      className;
+  }
+
+  if (
+    text !== null &&
+    text !== undefined &&
+    text !== ""
+  ) {
+    element.textContent =
+      String(text);
+  }
+
+  for (const [key, value] of Object.entries(safeObject(attrs))) {
+    setAttribute(
+      element,
+      key,
+      value
+    );
+  }
+
+  for (const [key, value] of Object.entries(safeObject(dataset))) {
+    setDataset(
+      element,
+      key,
+      value
+    );
+  }
+
+  return element;
+}
+
+function appendAll(parent, children = []) {
+  if (!parent) {
+    return parent;
+  }
+
+  for (const child of safeArray(children)) {
+    if (!child) {
+      continue;
+    }
+
+    try {
+      parent.appendChild(child);
+    } catch {}
+  }
+
+  return parent;
+}
+
+function emptyElement(element) {
+  if (!element) {
+    return false;
+  }
+
+  try {
+    element.replaceChildren();
+    return true;
+  } catch {}
+
+  try {
+    while (element.firstChild) {
+      element.removeChild(element.firstChild);
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setAttribute(el, key, value) {
+  if (
+    !el ||
+    !key
+  ) {
+    return false;
+  }
+
+  try {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ""
+    ) {
+      el.removeAttribute(key);
+      return true;
+    }
+
+    el.setAttribute(
+      key,
+      String(value)
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -1483,7 +1624,7 @@ function prepareRenderHost({
     view.replaceChildren(host);
   } catch {
     try {
-      view.innerHTML = "";
+      emptyElement(view);
       view.appendChild(host);
     } catch {}
   }
@@ -1492,8 +1633,10 @@ function prepareRenderHost({
     if (AppCore?.dom) {
       AppCore.dom.viewContainer =
         view;
+
       AppCore.dom.routerViewHost =
         host;
+
       AppCore.dom.viewHost =
         host;
     }
@@ -1533,12 +1676,25 @@ function adoptRenderedResult(target, result) {
   }
 
   if (typeof result === "string") {
-    try {
-      target.innerHTML =
-        result;
-    } catch {}
+    const wrapper =
+      createElement("div", {
+        className:
+          "router-rendered-text",
+      });
 
-    return target;
+    wrapper.textContent =
+      result;
+
+    try {
+      target.replaceChildren(wrapper);
+    } catch {
+      try {
+        emptyElement(target);
+        target.appendChild(wrapper);
+      } catch {}
+    }
+
+    return wrapper;
   }
 
   if (!isNode(result)) {
@@ -1559,7 +1715,7 @@ function adoptRenderedResult(target, result) {
     target.replaceChildren(result);
   } catch {
     try {
-      target.innerHTML = "";
+      emptyElement(target);
       target.appendChild(result);
     } catch {}
   }
@@ -2430,6 +2586,9 @@ function hideLoaderSafe(AppCore, reason = "router-render") {
     loader.dataset.loaderVisible =
       "false";
 
+    loader.dataset.loaderState =
+      "hidden";
+
     loader.hidden =
       true;
   } catch {}
@@ -2704,7 +2863,7 @@ function applyRenderShellRepair({
       Boolean(
         tableheadContainer &&
           safeText(
-            tableheadContainer.innerHTML,
+            tableheadContainer.textContent,
             ""
           )
       );
@@ -3616,7 +3775,7 @@ function createDeferredViewInstance({
 }
 
 /* =========================================================
-   INTERNAL VIEWS
+   DOM SAFE FALLBACK VIEWS
 ========================================================= */
 
 function getInternalViewTarget(AppCore, target = null) {
@@ -3625,6 +3784,157 @@ function getInternalViewTarget(AppCore, target = null) {
     getCurrentRenderHost(AppCore) ||
     getViewContainer(AppCore)
   );
+}
+
+function createPanelFallback({
+  AppCore,
+  kind = "generic",
+  eyebrow = "",
+  title = "",
+  message = "",
+  meta = [],
+  action = null,
+} = {}) {
+  const section =
+    createElement("section", {
+      className:
+        `content-wrapper ${RENDER_FALLBACK_CLASS} router-fallback-view--${kind}`,
+      dataset: {
+        routerFallback:
+          kind,
+      },
+    });
+
+  const card =
+    createElement("div", {
+      className:
+        "panel-block router-fallback-card",
+    });
+
+  const inner =
+    createElement("div", {
+      className:
+        "router-fallback-card__inner",
+    });
+
+  const header =
+    createElement("div", {
+      className:
+        "router-fallback-card__header",
+    });
+
+  const nodes =
+    [];
+
+  if (eyebrow) {
+    nodes.push(
+      createElement("p", {
+        className:
+          "router-fallback-card__eyebrow",
+        text:
+          eyebrow,
+      })
+    );
+  }
+
+  nodes.push(
+    createElement("h2", {
+      className:
+        "router-fallback-card__title",
+      text:
+        title || "Vista",
+    })
+  );
+
+  if (message) {
+    nodes.push(
+      createElement("p", {
+        className:
+          "router-fallback-card__message",
+        text:
+          message,
+      })
+    );
+  }
+
+  appendAll(
+    header,
+    nodes
+  );
+
+  const metaBox =
+    createElement("div", {
+      className:
+        "router-fallback-card__meta",
+    });
+
+  for (const item of safeArray(meta)) {
+    const row =
+      createElement("div", {
+        className:
+          "router-fallback-card__meta-row",
+      });
+
+    const label =
+      createElement("strong", {
+        text:
+          item?.label || "",
+      });
+
+    const value =
+      createElement("span", {
+        text:
+          item?.value || "—",
+      });
+
+    appendAll(
+      row,
+      [
+        label,
+        value,
+      ]
+    );
+
+    metaBox.appendChild(row);
+  }
+
+  appendAll(
+    inner,
+    [
+      header,
+      metaBox,
+    ]
+  );
+
+  if (action?.href && action?.text) {
+    const actions =
+      createElement("div", {
+        className:
+          "router-fallback-card__actions",
+      });
+
+    const link =
+      createElement("a", {
+        className:
+          "ui-btn ui-btn-primary router-fallback-card__action",
+        text:
+          action.text,
+        attrs: {
+          href:
+            action.href,
+          "data-spa":
+            "",
+        },
+      });
+
+    actions.appendChild(link);
+    inner.appendChild(actions);
+  }
+
+  card.appendChild(inner);
+  section.appendChild(card);
+
+  return section;
 }
 
 export function renderGenericView(AppCore, route, target = null) {
@@ -3649,23 +3959,47 @@ export function renderGenericView(AppCore, route, target = null) {
   const username =
     getCurrentResolvedUsername(AppCore);
 
-  view.innerHTML =
-    `
-<section class="content-wrapper ${RENDER_FALLBACK_CLASS}">
-  <div class="panel-block" style="padding:24px;">
-    <div style="display:grid;gap:14px;">
-      <h2 style="margin:0;">${escapeHtml(AppCore, route?.title || "Vista")}</h2>
-      <p style="margin:0;color:var(--text-dim);">
-        Vista conectada al router.
-      </p>
-      <div><strong>Canonical:</strong> ${escapeHtml(AppCore, canonical)}</div>
-      <div><strong>Public:</strong> ${escapeHtml(AppCore, redactTokenInText(publicPath))}</div>
-      <div><strong>User:</strong> ${escapeHtml(AppCore, username || "—")}</div>
-    </div>
-  </div>
-</section>`;
+  const node =
+    createPanelFallback({
+      AppCore,
+      kind:
+        "generic",
+      eyebrow:
+        "Router",
+      title:
+        route?.title || "Vista",
+      message:
+        "Vista conectada al router.",
+      meta: [
+        {
+          label:
+            "Canonical:",
+          value:
+            canonical,
+        },
+        {
+          label:
+            "Public:",
+          value:
+            redactTokenInText(publicPath),
+        },
+        {
+          label:
+            "User:",
+          value:
+            username || "—",
+        },
+      ],
+    });
 
-  return view;
+  try {
+    view.replaceChildren(node);
+  } catch {
+    emptyElement(view);
+    view.appendChild(node);
+  }
+
+  return node;
 }
 
 export function renderForbiddenView(AppCore, getRoute) {
@@ -3682,19 +4016,32 @@ export function renderForbiddenView(AppCore, getRoute) {
       getRoute
     );
 
-  view.innerHTML =
-    `
-<section class="content-wrapper ${RENDER_FALLBACK_CLASS}">
-  <div class="panel-block" style="padding:24px;">
-    <h2 style="margin:0 0 12px 0;">Acceso denegado</h2>
-    <p style="margin:0 0 14px 0;color:var(--text-dim);">
-      No tienes permisos para acceder.
-    </p>
-    <a href="${escapeHtml(AppCore, href)}" data-spa>Volver</a>
-  </div>
-</section>`;
+  const node =
+    createPanelFallback({
+      AppCore,
+      kind:
+        "forbidden",
+      eyebrow:
+        "403",
+      title:
+        "Acceso denegado",
+      message:
+        "No tienes permisos para acceder.",
+      action: {
+        href,
+        text:
+          "Volver",
+      },
+    });
 
-  return view;
+  try {
+    view.replaceChildren(node);
+  } catch {
+    emptyElement(view);
+    view.appendChild(node);
+  }
+
+  return node;
 }
 
 export function renderNotFoundView(AppCore, requestedPath, getRoute) {
@@ -3711,20 +4058,40 @@ export function renderNotFoundView(AppCore, requestedPath, getRoute) {
       getRoute
     );
 
-  view.innerHTML =
-    `
-<section class="content-wrapper ${RENDER_FALLBACK_CLASS}">
-  <div class="panel-block" style="padding:24px;">
-    <h2 style="margin:0 0 12px 0;">404</h2>
-    <p style="margin:0 0 14px 0;color:var(--text-dim);">
-      Ruta no encontrada:
-      ${escapeHtml(AppCore, redactTokenInText(requestedPath))}
-    </p>
-    <a href="${escapeHtml(AppCore, href)}" data-spa>Inicio</a>
-  </div>
-</section>`;
+  const node =
+    createPanelFallback({
+      AppCore,
+      kind:
+        "not-found",
+      eyebrow:
+        "404",
+      title:
+        "Ruta no encontrada",
+      message:
+        "No se ha podido resolver la ruta solicitada.",
+      meta: [
+        {
+          label:
+            "Ruta:",
+          value:
+            redactTokenInText(requestedPath || "—"),
+        },
+      ],
+      action: {
+        href,
+        text:
+          "Inicio",
+      },
+    });
 
-  return view;
+  try {
+    view.replaceChildren(node);
+  } catch {
+    emptyElement(view);
+    view.appendChild(node);
+  }
+
+  return node;
 }
 
 export function renderRuntimeErrorView(AppCore, error, getRoute) {
@@ -3741,19 +4108,32 @@ export function renderRuntimeErrorView(AppCore, error, getRoute) {
       getRoute
     );
 
-  view.innerHTML =
-    `
-<section class="content-wrapper ${RENDER_FALLBACK_CLASS}">
-  <div class="panel-block" style="padding:24px;">
-    <h2 style="margin:0 0 12px 0;">Error de navegación</h2>
-    <p style="margin:0 0 14px 0;color:var(--text-dim);">
-      ${escapeHtml(AppCore, redactTokenInText(error?.message || "Error inesperado"))}
-    </p>
-    <a href="${escapeHtml(AppCore, href)}" data-spa>Recuperar</a>
-  </div>
-</section>`;
+  const node =
+    createPanelFallback({
+      AppCore,
+      kind:
+        "runtime-error",
+      eyebrow:
+        "Router error",
+      title:
+        "Error de navegación",
+      message:
+        redactTokenInText(error?.message || "Error inesperado"),
+      action: {
+        href,
+        text:
+          "Recuperar",
+      },
+    });
 
-  return view;
+  try {
+    view.replaceChildren(node);
+  } catch {
+    emptyElement(view);
+    view.appendChild(node);
+  }
+
+  return node;
 }
 
 /* =========================================================
@@ -3804,47 +4184,122 @@ function renderRouteTransitionView(
     return view;
   }
 
+  const section =
+    createElement("section", {
+      className:
+        `content-wrapper ${RENDER_TRANSITION_CLASS}`,
+      attrs: {
+        "aria-live":
+          "polite",
+      },
+      dataset: {
+        routerTransition:
+          "true",
+      },
+    });
+
+  const card =
+    createElement("div", {
+      className:
+        "panel-block router-transition-card",
+    });
+
+  const inner =
+    createElement("div", {
+      className:
+        "router-transition-card__inner",
+    });
+
+  const icon =
+    createElement("div", {
+      className:
+        "router-transition-card__icon",
+      attrs: {
+        "aria-hidden":
+          "true",
+      },
+    });
+
+  const content =
+    createElement("div", {
+      className:
+        "router-transition-card__content",
+    });
+
   const title =
-    route?.title ||
-    route?.label ||
-    "Cargando vista";
+    createElement("h2", {
+      className:
+        "router-transition-card__title",
+      text:
+        route?.title ||
+        route?.label ||
+        "Cargando vista",
+    });
 
-  view.innerHTML =
-    `
-<section class="content-wrapper">
-  <div class="panel-block" style="padding:24px;">
-    <div style="display:grid;gap:14px;">
-      <div
-        aria-hidden="true"
-        style="
-          width:42px;
-          height:42px;
-          border-radius:16px;
-          background:var(--surface-2, rgba(148,163,184,.14));
-          box-shadow:inset 0 0 0 1px var(--border-soft, rgba(148,163,184,.2));
-        "
-      ></div>
+  const message =
+    createElement("p", {
+      className:
+        "router-transition-card__message",
+      text:
+        "Preparando contenido...",
+    });
 
-      <div style="display:grid;gap:8px;">
-        <h2 style="margin:0;font-size:18px;">
-          ${escapeHtml(AppCore, title)}
-        </h2>
+  const skeleton =
+    createElement("div", {
+      className:
+        "router-transition-card__skeleton",
+      attrs: {
+        "aria-hidden":
+          "true",
+      },
+    });
 
-        <p style="margin:0;color:var(--text-dim);font-size:13px;">
-          Preparando contenido...
-        </p>
-      </div>
+  appendAll(
+    skeleton,
+    [
+      createElement("span", {
+        className:
+          "router-transition-card__skeleton-line",
+      }),
+      createElement("span", {
+        className:
+          "router-transition-card__skeleton-line router-transition-card__skeleton-line--medium",
+      }),
+      createElement("span", {
+        className:
+          "router-transition-card__skeleton-line router-transition-card__skeleton-line--short",
+      }),
+    ]
+  );
 
-      <div style="display:grid;gap:8px;max-width:520px;">
-        <div style="height:10px;border-radius:999px;background:var(--surface-2, rgba(148,163,184,.16));"></div>
-        <div style="height:10px;width:76%;border-radius:999px;background:var(--surface-2, rgba(148,163,184,.12));"></div>
-        <div style="height:10px;width:54%;border-radius:999px;background:var(--surface-2, rgba(148,163,184,.10));"></div>
-      </div>
-    </div>
-  </div>
-</section>`;
+  appendAll(
+    content,
+    [
+      title,
+      message,
+      skeleton,
+    ]
+  );
 
-  return view;
+  appendAll(
+    inner,
+    [
+      icon,
+      content,
+    ]
+  );
+
+  card.appendChild(inner);
+  section.appendChild(card);
+
+  try {
+    view.replaceChildren(section);
+  } catch {
+    emptyElement(view);
+    view.appendChild(section);
+  }
+
+  return section;
 }
 
 function handleAsyncRouteRenderFailure({
@@ -3967,12 +4422,6 @@ export async function renderRouteSuccess({
       requestedUsername,
     });
 
-  /*
-    FIX CRÍTICO:
-    Commit real ANTES de pintar vista.
-    Esto corrige sidebar/topbar activos en ruta anterior.
-    No emitimos router:rendered aquí porque src/router/index.js ya emite el evento final.
-  */
   const lifecycleState =
     commitRouteStateOnly(
       AppCore,
@@ -4774,13 +5223,12 @@ export async function renderLoginRedirect(args = {}) {
       false,
   });
 
-  const renderId =
-    ++successRenderSequence;
+  const {
+    renderId,
+    signal,
+  } =
+    beginSuccessRender();
 
-  /*
-    No emitimos router:rendered aquí.
-    router/index.js emite el evento final del flujo guard:not-authenticated.
-  */
   safeEmit(
     args.AppCore,
     "router:render:login-state-committed",
@@ -4844,6 +5292,7 @@ export async function renderLoginRedirect(args = {}) {
         args.canonicalPath ||
         null,
       renderId,
+      signal,
       viewContainer:
         view,
       renderRoot:
@@ -5004,6 +5453,9 @@ export function getRenderSnapshot(AppCore) {
     getBrowserPublicPath(AppCore);
 
   return redactPayload({
+    version:
+      ROUTER_RENDER_VERSION,
+
     browserPublicPath,
 
     browserCanonicalPath:
@@ -5035,14 +5487,21 @@ export function getRenderSnapshot(AppCore) {
 
     activationTokenScrubbed:
       isBrowser()
-        ? Boolean(window.history?.state?.scrubbedActivationToken)
+        ? Boolean(
+            window.history?.state?.scrubbedActivationToken ||
+              window.history?.state?.activationTokenScrubbed ||
+              window.history?.state?.scrubbedActivateAccountToken
+          )
         : false,
 
     resetTokenScrubbed:
       isBrowser()
         ? Boolean(
             window.history?.state?.scrubbedResetToken ||
-              window.history?.state?.scrubbedResetPasswordToken
+              window.history?.state?.resetTokenScrubbed ||
+              window.history?.state?.scrubbedResetPasswordToken ||
+              window.history?.state?.scrubbedResetConfirmToken ||
+              window.history?.state?.scrubbedPasswordResetToken
           )
         : false,
 
@@ -5171,6 +5630,8 @@ export function getRenderSnapshot(AppCore) {
 ========================================================= */
 
 export default {
+  ROUTER_RENDER_VERSION,
+
   getViewContainer,
 
   buildRenderPayload,

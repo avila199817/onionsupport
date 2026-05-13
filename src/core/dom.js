@@ -2,6 +2,9 @@
    Onion SPA - Core DOM
    Archivo: src/core/dom.js
 
+   ONION SUPPORT · CORE DOM CACHE
+   SHELL CACHE · LATE UI NODES · SAFE VALIDATION · 13/10
+
    RESPONSABILIDADES:
    - centralizar cache de nodos shell SPA
    - validar nodos mínimos del layout
@@ -48,7 +51,7 @@
 ========================================================= */
 
 const DOM_VERSION =
-  "11.0.0";
+  "13.0.0";
 
 const REQUIRED_KEYS =
   Object.freeze([
@@ -57,13 +60,6 @@ const REQUIRED_KEYS =
     "viewContainer",
   ]);
 
-/*
-  Recomendados reales del shell estático.
-
-  Importante:
-  sidebar/topbar NO van aquí porque en Onion SPA los montan
-  SidebarUI/TopbarUI durante initUISystems().
-*/
 const RECOMMENDED_KEYS =
   Object.freeze([
     "html",
@@ -74,10 +70,6 @@ const RECOMMENDED_KEYS =
     "topbarMount",
   ]);
 
-/*
-  Nodos UI montados tarde.
-  No deben generar warning en Core.init().
-*/
 const DEFERRED_UI_KEYS =
   Object.freeze([
     "sidebar",
@@ -91,6 +83,10 @@ const DEFERRED_UI_KEYS =
     "logoutBtn",
     "sidebarAvatar",
     "sidebarName",
+    "sidebarToggle",
+    "sidebarMobileToggle",
+    "searchInput",
+    "searchResults",
   ]);
 
 const OPTIONAL_KEYS =
@@ -111,12 +107,6 @@ const OPTIONAL_KEYS =
     "tableHead",
     "tableheadContainer",
     "tableHeadContainer",
-
-    "searchInput",
-    "searchResults",
-
-    "sidebarToggle",
-    "sidebarMobileToggle",
 
     "toastRoot",
     "modalRoot",
@@ -452,13 +442,6 @@ function isBrowser() {
   );
 }
 
-function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object"
-  );
-}
-
 function isFunction(value) {
   return typeof value === "function";
 }
@@ -504,7 +487,9 @@ function uniqueList(values = []) {
   return Array.from(
     new Set(
       safeArray(values)
-        .map((value) => safeText(value, ""))
+        .map((value) =>
+          safeText(value, "")
+        )
         .filter(Boolean)
     )
   );
@@ -629,6 +614,10 @@ function safeQsa(utils, selector, root = null) {
       if (Array.isArray(found)) {
         return found;
       }
+
+      if (found && typeof found.length === "number") {
+        return Array.from(found);
+      }
     }
   } catch {}
 
@@ -654,19 +643,15 @@ function firstMatch(values = []) {
 }
 
 function queryFirst(utils, selectors = [], root = null) {
-  const list =
-    safeArray(selectors);
-
-  const values =
-    list.map((selector) =>
+  return firstMatch(
+    safeArray(selectors).map((selector) =>
       safeQs(
         utils,
         selector,
         root
       )
-    );
-
-  return firstMatch(values);
+    )
+  );
 }
 
 function queryAllCandidates(utils, selectors = [], root = null) {
@@ -681,7 +666,10 @@ function queryAllCandidates(utils, selectors = [], root = null) {
       );
 
     for (const node of nodes) {
-      if (!output.includes(node)) {
+      if (
+        node &&
+        !output.includes(node)
+      ) {
         output.push(node);
       }
     }
@@ -725,11 +713,10 @@ function shouldReuseNode(node, force = false) {
     return false;
   }
 
-  if (!node) {
-    return false;
-  }
-
-  return isNodeConnected(node);
+  return Boolean(
+    node &&
+      isNodeConnected(node)
+  );
 }
 
 function resolveNode({
@@ -941,26 +928,25 @@ export function createDomCache() {
     portalRoot:
       null,
 
-    validation:
-      {
-        ok:
-          false,
+    validation: {
+      ok:
+        false,
 
-        missing:
-          [],
+      missing:
+        [],
 
-        recommendedMissing:
-          [],
+      recommendedMissing:
+        [],
 
-        deferredMissing:
-          [],
+      deferredMissing:
+        [],
 
-        optionalMissing:
-          [],
+      optionalMissing:
+        [],
 
-        warnings:
-          [],
-      },
+      warnings:
+        [],
+    },
   };
 }
 
@@ -1045,6 +1031,14 @@ function applyAliases(dom) {
     );
   }
 
+  if (!dom.viewContainer && dom.routerView) {
+    safeSet(
+      dom,
+      "viewContainer",
+      dom.routerView
+    );
+  }
+
   if (!dom.appContent && dom.viewContainer) {
     try {
       const parent =
@@ -1054,7 +1048,8 @@ function applyAliases(dom) {
         parent &&
         (
           parent.id === "app-content" ||
-          parent.hasAttribute?.("data-app-content")
+          parent.hasAttribute?.("data-app-content") ||
+          parent.classList?.contains?.("app-content")
         )
       ) {
         safeSet(
@@ -1216,7 +1211,9 @@ function buildNodeList({
 function missingKeys(dom, keys = []) {
   return safeArray(keys)
     .filter((key) => !dom?.[key])
-    .map((key) => safeText(key, ""))
+    .map((key) =>
+      safeText(key, "")
+    )
     .filter(Boolean);
 }
 
@@ -1292,6 +1289,19 @@ function buildValidationWarnings({
 
       message:
         "No se encontró #app-shell. El shell puede funcionar, pero shell.js tendrá menos control visual.",
+    });
+  }
+
+  if (recommendedMissing.includes("appContent")) {
+    warnings.push({
+      code:
+        "APP_CONTENT_MISSING",
+
+      level:
+        "warning",
+
+      message:
+        "No se encontró #app-content. El Router puede pintar en #view-container, pero el shell queda menos estructurado.",
     });
   }
 
@@ -1512,6 +1522,7 @@ export function validateRequiredDom({
   warnDeferred = false,
   emit = true,
   log = true,
+  logRecommended = false,
 } = {}) {
   const validation =
     buildValidation({
@@ -1542,8 +1553,13 @@ export function validateRequiredDom({
     );
   }
 
+  /*
+    Por defecto NO gritamos recommended missing durante Core.init().
+    Son útiles en snapshot/diagnóstico, pero no deben ensuciar boot.
+  */
   if (
     log &&
+    logRecommended &&
     validation.recommendedMissing.length > 0
   ) {
     safeWarn(
@@ -1582,11 +1598,23 @@ export function validateRequiredDom({
 
   /*
     Compatibilidad legacy:
-    AppCore.safeValidateRequiredDom() espera que esta función
-    no lance y puede ignorar el retorno. La versión histórica
-    devolvía un array de missing.
+    AppCore.safeValidateRequiredDom() puede esperar array de missing.
   */
   return validation.missing;
+}
+
+export function validateRequiredDomDetailed(options = {}) {
+  const validation =
+    buildValidation(options);
+
+  try {
+    if (options?.dom) {
+      options.dom.validation =
+        validation;
+    }
+  } catch {}
+
+  return validation;
 }
 
 /* =========================================================
@@ -1920,15 +1948,21 @@ function getElementSnapshot(el) {
       );
   } catch {}
 
+  let tag = "";
+
+  try {
+    tag =
+      safeText(
+        el.tagName,
+        ""
+      ).toLowerCase();
+  } catch {}
+
   return {
     exists:
       true,
 
-    tag:
-      safeText(
-        el.tagName,
-        ""
-      ).toLowerCase(),
+    tag,
 
     id:
       safeText(
@@ -2283,6 +2317,7 @@ export default {
   createDomCache,
   cacheDom,
   validateRequiredDom,
+  validateRequiredDomDetailed,
 
   getDomNode,
   setDomNode,

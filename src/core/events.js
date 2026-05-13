@@ -2,10 +2,11 @@
    Onion SPA - Core Events
    Archivo: src/core/events.js
 
-   FINAL PRO SYSTEM · EVENT BUS / FIREBREAK SAFE · 12/10
+   ONION SUPPORT · CORE EVENTS
+   FINAL PRO SYSTEM · EVENT BUS / FIREBREAK SAFE · 14/10
 
    Responsabilidades:
-   - centralizar el event bus del core
+   - centralizar el event bus del Core
    - emitir eventos CustomEvent sobre document/window/custom target
    - registrar listeners persistentes o once
    - desacoplar módulos a través de eventos
@@ -41,7 +42,7 @@ import {
 ========================================================= */
 
 const EVENTS_VERSION =
-  "12.0.0";
+  "14.0.0";
 
 const DEFAULT_TARGET =
   "document";
@@ -385,7 +386,7 @@ function wantsOnce(options = false) {
 
   return Boolean(
     isObject(normalized) &&
-    normalized.once
+    normalized.once === true
   );
 }
 
@@ -443,9 +444,9 @@ function wantsWindowMirror(options = false, defaultValue = false) {
 function isEventTargetLike(target) {
   return Boolean(
     target &&
-    isFunction(target.addEventListener) &&
-    isFunction(target.removeEventListener) &&
-    isFunction(target.dispatchEvent)
+      isFunction(target.addEventListener) &&
+      isFunction(target.removeEventListener) &&
+      isFunction(target.dispatchEvent)
   );
 }
 
@@ -497,35 +498,37 @@ function resolveTarget(target = DEFAULT_TARGET) {
 
 function createCustomEvent(name, detail = {}) {
   try {
-    return new CustomEvent(name, {
-      detail,
-      bubbles:
-        false,
-      cancelable:
-        false,
-      composed:
-        false,
-    });
-  } catch {
-    try {
-      if (!localIsBrowser()) {
-        return null;
-      }
+    if (typeof CustomEvent === "function") {
+      return new CustomEvent(name, {
+        detail,
+        bubbles:
+          false,
+        cancelable:
+          false,
+        composed:
+          false,
+      });
+    }
+  } catch {}
 
-      const event =
-        document.createEvent("CustomEvent");
-
-      event.initCustomEvent(
-        name,
-        false,
-        false,
-        detail
-      );
-
-      return event;
-    } catch {
+  try {
+    if (!localIsBrowser()) {
       return null;
     }
+
+    const event =
+      document.createEvent("CustomEvent");
+
+    event.initCustomEvent(
+      name,
+      false,
+      false,
+      detail
+    );
+
+    return event;
+  } catch {
+    return null;
   }
 }
 
@@ -979,7 +982,7 @@ export function createEvents({
       return true;
     }
 
-    const now =
+    const current =
       safeNow();
 
     const last =
@@ -988,13 +991,13 @@ export function createEvents({
         0
       );
 
-    if (now - last < NOISY_RECENT_SAMPLE_MS) {
+    if (current - last < NOISY_RECENT_SAMPLE_MS) {
       return false;
     }
 
     recentSampleMap.set(
       eventName,
-      now
+      current
     );
 
     return true;
@@ -1133,19 +1136,19 @@ export function createEvents({
       )
     );
 
-    const now =
+    const current =
       safeNow();
 
     if (
       isSilentDropEvent(name) &&
-      now - lastDropWarningAt < DROP_WARNING_INTERVAL_MS * 4
+      current - lastDropWarningAt < DROP_WARNING_INTERVAL_MS * 4
     ) {
       return;
     }
 
-    if (now - lastDropWarningAt > DROP_WARNING_INTERVAL_MS) {
+    if (current - lastDropWarningAt > DROP_WARNING_INTERVAL_MS) {
       lastDropWarningAt =
-        now;
+        current;
 
       safeWarn(
         `Evento bloqueado por firebreak: ${name}`,
@@ -1161,7 +1164,7 @@ export function createEvents({
   }
 
   function resetRateWindowIfNeeded() {
-    const now =
+    const current =
       safeNow();
 
     const windowMs =
@@ -1173,12 +1176,12 @@ export function createEvents({
         )
       );
 
-    if (now - rateWindowStartedAt <= windowMs) {
+    if (current - rateWindowStartedAt <= windowMs) {
       return;
     }
 
     rateWindowStartedAt =
-      now;
+      current;
 
     normalEmitsInWindow =
       0;
@@ -1462,7 +1465,6 @@ export function createEvents({
         normalizeEventName(name),
 
       detail,
-
       payload:
         detail,
 
@@ -1657,6 +1659,7 @@ export function createEvents({
     payload = {},
     domTarget = null,
     source = "dom-dispatch",
+    wildcard = true,
   } = {}) {
     if (
       !localIsBrowser() ||
@@ -1679,11 +1682,13 @@ export function createEvents({
       const result =
         domTarget.dispatchEvent(event);
 
-      emitWildcardMemory(
-        eventName,
-        payload,
-        event
-      );
+      if (wildcard) {
+        emitWildcardMemory(
+          eventName,
+          payload,
+          event
+        );
+      }
 
       return Boolean(result);
     } catch (error) {
@@ -1751,6 +1756,8 @@ export function createEvents({
             domTarget,
             source:
               "dom-dispatch",
+            wildcard:
+              true,
           });
 
         if (
@@ -1764,6 +1771,8 @@ export function createEvents({
               getWindowTarget(),
             source:
               "window-mirror",
+            wildcard:
+              false,
           });
         }
       } else {
@@ -1808,6 +1817,31 @@ export function createEvents({
           "memory-handler",
       });
     };
+  }
+
+  function registerRecord(record) {
+    if (!record?.key) {
+      return false;
+    }
+
+    activeListeners.set(
+      record.key,
+      record
+    );
+
+    return true;
+  }
+
+  function removeActiveRecord(record) {
+    if (!record?.key) {
+      return false;
+    }
+
+    activeListeners.delete(
+      record.key
+    );
+
+    return true;
   }
 
   function on(name, handler, options = false) {
@@ -1983,37 +2017,39 @@ export function createEvents({
       };
     }
 
-    activeListeners.set(
+    registerRecord({
       key,
-      {
-        key,
 
-        name:
-          eventName,
+      name:
+        eventName,
 
+      handler,
+      originalHandler:
         handler,
-        wrappedHandler,
 
-        options:
-          finalOptions,
+      wrappedHandler,
 
-        once:
-          false,
+      options:
+        finalOptions,
 
-        target:
-          getTargetKey(targetRef),
+      once:
+        false,
 
-        targetName:
-          typeof targetRef === "string"
-            ? targetRef
-            : "custom",
+      target:
+        getTargetKey(targetRef),
 
-        off,
+      targetRef,
 
-        createdAt:
-          safeIsoDate(),
-      }
-    );
+      targetName:
+        typeof targetRef === "string"
+          ? targetRef
+          : "custom",
+
+      off,
+
+      createdAt:
+        safeIsoDate(),
+    });
 
     pushRecentEvent(
       "on",
@@ -2024,6 +2060,32 @@ export function createEvents({
     );
 
     return off;
+  }
+
+  function findActiveRecordsByOriginalHandler(name, handler) {
+    const eventName =
+      normalizeEventName(name);
+
+    const matches = [];
+
+    for (const record of activeListeners.values()) {
+      if (
+        eventName &&
+        record.name !== eventName
+      ) {
+        continue;
+      }
+
+      if (
+        record.handler === handler ||
+        record.originalHandler === handler ||
+        record.wrappedHandler === handler
+      ) {
+        matches.push(record);
+      }
+    }
+
+    return matches;
   }
 
   function off(name, handler, options = false) {
@@ -2071,6 +2133,33 @@ export function createEvents({
       return record.off();
     }
 
+    const matchingRecords =
+      findActiveRecordsByOriginalHandler(
+        eventName,
+        handler
+      );
+
+    if (matchingRecords.length) {
+      let removed =
+        false;
+
+      for (const item of matchingRecords) {
+        try {
+          removed =
+            Boolean(item.off?.()) ||
+            removed;
+        } catch (error) {
+          recordError(
+            "off:matched",
+            error,
+            eventName
+          );
+        }
+      }
+
+      return removed;
+    }
+
     const domTarget =
       resolveTarget(targetRef);
 
@@ -2091,7 +2180,10 @@ export function createEvents({
 
         if (set) {
           for (const item of Array.from(set)) {
-            if (item?.handler === handler) {
+            if (
+              item?.handler === handler ||
+              item?.wrappedHandler === handler
+            ) {
               set.delete(item);
             }
           }
@@ -2136,6 +2228,9 @@ export function createEvents({
 
     let called =
       false;
+
+    const cleanOptions =
+      withoutOnce(options);
 
     const wrappedOnce = (...args) => {
       if (called) {
@@ -2195,13 +2290,55 @@ export function createEvents({
       on(
         eventName,
         wrappedOnce,
-        withoutOnce(options)
+        cleanOptions
       );
+
+    const finalOptions =
+      normalizeDomOptions(cleanOptions);
+
+    const optionsTarget =
+      getOptionsTarget(cleanOptions);
+
+    const targetRef =
+      eventName === WILDCARD_EVENT
+        ? "memory"
+        : optionsTarget || target;
+
+    const wrappedKey =
+      makeListenerKey({
+        name:
+          eventName,
+
+        handler:
+          wrappedOnce,
+
+        options:
+          finalOptions,
+
+        targetRef,
+      });
+
+    const record =
+      activeListeners.get(wrappedKey);
+
+    if (record) {
+      record.once =
+        true;
+
+      record.originalHandler =
+        handler;
+
+      record.wrappedHandler =
+        wrappedOnce;
+    }
 
     pushRecentEvent(
       "once",
       eventName,
-      {}
+      {
+        key:
+          wrappedKey,
+      }
     );
 
     return dispose;
@@ -2517,9 +2654,11 @@ export function createEvents({
 
 export {
   EVENTS_VERSION,
+  WILDCARD_EVENT,
 };
 
 export default {
   EVENTS_VERSION,
+  WILDCARD_EVENT,
   createEvents,
 };

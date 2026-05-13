@@ -1,9 +1,9 @@
 /* =========================================================
    Onion SPA - App Warmup
-   Archivo: src/app/warmup.js
+   Archivo: /src/app/warmup.js
 
    ONION SUPPORT · APP WARMUP DIAGNOSTICS
-   RESTORE TRACE · ROUTER/SHELL/LOADER SNAPSHOT · EXTREME 13/10
+   RESTORE TRACE · ROUTER/SHELL/LOADER SNAPSHOT · 10/10
 
    RESPONSABILIDADES:
    - Ejecutar diagnóstico inicial seguro.
@@ -13,15 +13,16 @@
    - No tocar sesión/token/storage salvo lectura segura.
    - No exponer tokens en logs/eventos/snapshots.
    - Resolver dependencias desde argumentos, AppCore o registry.
-   - Emitir snapshot enterprise útil para depuración.
+   - Emitir snapshot útil para depuración.
    - Exponer API debug opcional.
 
-   HARDENING EXTREMO:
+   HARDENING:
    - Compatible con warmup(AppCore) y warmup({ AppCore, ... }).
    - Logs consistentes y redacted.
    - Safe emit sin duplicar AppCore.events + window.
    - Snapshot de app/auth/router/store/i18n/ui/shell/loader/history.
    - Detección de rutas públicas técnicas con token.
+   - Soporte /@usuario/activate-account y /@usuario/reset-password/confirm.
    - No exige Router.render si existe navigate/go/push/rerender.
    - No avisa I18N_MISSING si hay state.lang/document.lang/i18nInitialized.
    - Warnings sólo para problemas accionables reales.
@@ -33,368 +34,280 @@
    CONSTANTS
 ========================================================= */
 
-const WARMUP_LABEL =
-  "[AppWarmup]";
+export const WARMUP_VERSION = "14.0.0";
 
-const DEFAULT_LANG =
-  "es";
+const WARMUP_LABEL = "[AppWarmup]";
 
-const DEFAULT_THEME =
-  "dark";
+const DEFAULT_LANG = "es";
+const DEFAULT_THEME = "dark";
+const DEFAULT_ROUTE = "/";
 
-const DEFAULT_ROUTE =
-  "/";
+const WARMUP_WARNING_DEDUPE_MS = 1200;
+const WARMUP_LOG_DEDUPE_MS = 800;
+const MAX_RECENT_SNAPSHOTS = 6;
 
-const WARMUP_VERSION =
-  "13.0.0";
+const TOKEN_PARAM_NAMES = Object.freeze([
+  "token",
+  "activationToken",
+  "activateToken",
+  "resetToken",
+  "passwordResetToken",
+  "confirmToken",
+  "code",
+  "t",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "tempToken",
+  "temp_token",
+  "temporaryToken",
+  "temporary_token",
+  "twoFactorToken",
+  "two_factor_token",
+  "mfaToken",
+  "mfa_token",
+]);
 
-const WARMUP_WARNING_DEDUPE_MS =
-  1200;
+const KNOWN_TOKEN_STORAGE_KEYS = Object.freeze([
+  "token",
+  "accessToken",
+  "access_token",
+  "authToken",
+  "refreshToken",
+  "refresh_token",
+  "sessionToken",
+  "tempToken",
 
-const WARMUP_LOG_DEDUPE_MS =
-  800;
+  "onion:token",
+  "onion:accessToken",
+  "onion:refreshToken",
+  "onion:session",
+  "onion:auth",
+  "onion:auth:token",
 
-const MAX_RECENT_SNAPSHOTS =
-  6;
+  "onion.auth",
+  "onion.session",
 
-const TOKEN_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "resetToken",
-    "passwordResetToken",
-    "confirmToken",
-    "code",
-    "t",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
-  ]);
+  "auth",
+  "session",
+]);
 
-const KNOWN_TOKEN_STORAGE_KEYS =
-  Object.freeze([
-    "token",
-    "accessToken",
-    "access_token",
-    "authToken",
-    "refreshToken",
-    "refresh_token",
-    "sessionToken",
-    "tempToken",
-
-    "onion:token",
-    "onion:accessToken",
-    "onion:refreshToken",
-    "onion:session",
-    "onion:auth",
-    "onion:auth:token",
-
-    "onion.auth",
-    "onion.session",
-
-    "auth",
-    "session",
-  ]);
-
-const PROTECTED_PUBLIC_TOKEN_ROUTES =
-  Object.freeze([
-    Object.freeze({
-      key:
-        "activation",
-
-      path:
-        "/activate-account",
-
-      windowKeys:
-        Object.freeze([
-          "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-        ]),
-
-      scrubbedFlags:
-        Object.freeze([
-          "scrubbedActivationToken",
-          "activationTokenScrubbed",
-          "scrubbedActivateAccountToken",
-        ]),
-
-      tokenParamNames:
-        Object.freeze([
-          "token",
-          "activationToken",
-          "activateToken",
-          "code",
-          "t",
-        ]),
-    }),
-
-    Object.freeze({
-      key:
-        "resetConfirm",
-
-      path:
-        "/reset-password/confirm",
-
-      windowKeys:
-        Object.freeze([
-          "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-          "__ONION_RESET_CONFIRM_INITIAL_URL__",
-        ]),
-
-      scrubbedFlags:
-        Object.freeze([
-          "scrubbedResetToken",
-          "scrubbedResetPasswordToken",
-          "resetTokenScrubbed",
-          "scrubbedResetConfirmToken",
-          "scrubbedPasswordResetToken",
-        ]),
-
-      tokenParamNames:
-        Object.freeze([
-          "token",
-          "resetToken",
-          "passwordResetToken",
-          "confirmToken",
-          "code",
-          "t",
-        ]),
-    }),
-  ]);
-
-const AUTH_LIKE_PATHS =
-  Object.freeze([
-    "/login",
-    "/signin",
-    "/sign-in",
-    "/register",
-    "/signup",
-    "/sign-up",
-
-    "/forgot-password",
-    "/recover-password",
-    "/password-reset",
-    "/reset-password",
-    "/reset-password/confirm",
-
-    "/activate-account",
-  ]);
-
-const AUTH_LIKE_PREFIXES =
-  Object.freeze([
-    "/activate-account/",
-    "/reset-password/confirm/",
-  ]);
-
-const DOM_IDS =
+const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
   Object.freeze({
-    app:
-      "app",
+    key: "activation",
+    path: "/activate-account",
 
-    root:
-      "app-root",
+    windowKeys: Object.freeze([
+      "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+    ]),
 
-    shell:
-      "app-shell",
+    scrubbedFlags: Object.freeze([
+      "scrubbedActivationToken",
+      "activationTokenScrubbed",
+      "scrubbedActivateAccountToken",
+      "scrubbedPublicTokenRoute",
+      "scrubbedTokenRoute",
+    ]),
 
-    main:
-      "main-content",
+    tokenParamNames: Object.freeze([
+      "token",
+      "activationToken",
+      "activateToken",
+      "code",
+      "t",
+    ]),
+  }),
 
-    appContent:
-      "app-content",
-
-    loader:
-      "app-loader",
-
-    viewContainer:
-      "view-container",
-
-    sidebarMount:
-      "sidebar-mount",
-
-    topbarMount:
-      "topbar-mount",
-
-    sidebar:
-      "app-sidebar",
-
-    topbar:
-      "app-topbar",
-
-    tablehead:
-      "table-head",
-
-    tableheadContainer:
-      "tablehead-container",
-  });
-
-const DOM_SELECTORS =
   Object.freeze({
-    app:
-      Object.freeze([
-        "#app",
-        "[data-app]",
-        "[data-app-root]",
-      ]),
+    key: "resetConfirm",
+    path: "/reset-password/confirm",
 
-    root:
-      Object.freeze([
-        "#app-root",
-        "#root",
-        "[data-root]",
-        "[data-app-root]",
-      ]),
+    windowKeys: Object.freeze([
+      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+      "__ONION_RESET_CONFIRM_INITIAL_URL__",
+    ]),
 
-    shell:
-      Object.freeze([
-        "#app-shell",
-        ".app-shell",
-        "[data-shell]",
-        "[data-app-shell]",
-        "[data-app-shell='true']",
-      ]),
+    scrubbedFlags: Object.freeze([
+      "scrubbedResetToken",
+      "scrubbedResetPasswordToken",
+      "resetTokenScrubbed",
+      "scrubbedResetConfirmToken",
+      "scrubbedPasswordResetToken",
+      "scrubbedPublicTokenRoute",
+      "scrubbedTokenRoute",
+    ]),
 
-    main:
-      Object.freeze([
-        "#main-content",
-        "main.main-content",
-        ".main-content",
-        "[data-main-content]",
-      ]),
+    tokenParamNames: Object.freeze([
+      "token",
+      "resetToken",
+      "passwordResetToken",
+      "confirmToken",
+      "code",
+      "t",
+    ]),
+  }),
+]);
 
-    appContent:
-      Object.freeze([
-        "#app-content",
-        ".app-content",
-        "[data-app-content]",
-      ]),
+const AUTH_LIKE_PATHS = Object.freeze([
+  "/login",
+  "/signin",
+  "/sign-in",
+  "/register",
+  "/signup",
+  "/sign-up",
 
-    loader:
-      Object.freeze([
-        "#app-loader",
-        "#boot-loader",
-        ".app-loader",
-        "[data-loader]",
-        "[data-app-loader]",
-        "[data-app-loader='true']",
-      ]),
+  "/forgot-password",
+  "/recover-password",
+  "/password-reset",
+  "/reset-password",
+  "/reset-password/confirm",
 
-    viewContainer:
-      Object.freeze([
-        "#view-container",
-        "#app-view",
-        "#router-view",
-        "[data-view-container]",
-        "[data-router-view]",
-        "[data-view-root]",
-      ]),
+  "/activate-account",
+]);
 
-    sidebarMount:
-      Object.freeze([
-        "#sidebar-mount",
-        "[data-sidebar-mount]",
-        "[data-sidebar-mount='true']",
-      ]),
+const AUTH_LIKE_PREFIXES = Object.freeze([
+  "/activate-account/",
+  "/reset-password/confirm/",
+]);
 
-    topbarMount:
-      Object.freeze([
-        "#topbar-mount",
-        "[data-topbar-mount]",
-        "[data-topbar-mount='true']",
-      ]),
+const PUBLIC_USERNAME_RE = /^@[A-Za-z0-9._-]{1,80}$/;
 
-    sidebar:
-      Object.freeze([
-        "#app-sidebar",
-        "#sidebar",
-        ".sidebar",
-        "[data-sidebar]",
-        "[data-sidebar-root]",
-      ]),
+const DOM_IDS = Object.freeze({
+  app: "app",
+  root: "app-root",
+  shell: "app-shell",
+  main: "main-content",
+  appContent: "app-content",
+  loader: "app-loader",
+  viewContainer: "view-container",
+  sidebarMount: "sidebar-mount",
+  topbarMount: "topbar-mount",
+  sidebar: "app-sidebar",
+  topbar: "app-topbar",
+  tablehead: "table-head",
+  tableheadContainer: "tablehead-container",
+});
 
-    topbar:
-      Object.freeze([
-        "#app-topbar",
-        "#topbar",
-        ".topbar",
-        "[data-topbar]",
-        "[data-topbar-root]",
-      ]),
+const DOM_SELECTORS = Object.freeze({
+  app: Object.freeze([
+    "#app",
+    "[data-app]",
+    "[data-app-root]",
+  ]),
 
-    tablehead:
-      Object.freeze([
-        "#table-head",
-        ".table-head",
-        "[data-tablehead]",
-      ]),
+  root: Object.freeze([
+    "#app-root",
+    "#root",
+    "[data-root]",
+    "[data-app-root]",
+  ]),
 
-    tableheadContainer:
-      Object.freeze([
-        "#tablehead-container",
-        ".tablehead-container",
-        "[data-tablehead-container]",
-      ]),
-  });
+  shell: Object.freeze([
+    "#app-shell",
+    ".app-shell",
+    "[data-shell]",
+    "[data-app-shell]",
+    "[data-app-shell='true']",
+  ]),
 
-const WARMUP_EVENTS =
-  Object.freeze({
-    warmup:
-      "app:warmup",
+  main: Object.freeze([
+    "#main-content",
+    "main.main-content",
+    ".main-content",
+    "[data-main-content]",
+  ]),
 
-    warning:
-      "app:warmup:warning",
+  appContent: Object.freeze([
+    "#app-content",
+    ".app-content",
+    "[data-app-content]",
+  ]),
 
-    ready:
-      "app:warmup:ready",
+  loader: Object.freeze([
+    "#app-loader",
+    "#boot-loader",
+    ".app-loader",
+    "[data-loader]",
+    "[data-app-loader]",
+    "[data-app-loader='true']",
+  ]),
 
-    summary:
-      "app:warmup:summary",
+  viewContainer: Object.freeze([
+    "#view-container",
+    "#app-view",
+    "#router-view",
+    "[data-view-container]",
+    "[data-router-view]",
+    "[data-view-root]",
+  ]),
 
-    debugReady:
-      "app:warmup:debug-ready",
-  });
+  sidebarMount: Object.freeze([
+    "#sidebar-mount",
+    "[data-sidebar-mount]",
+    "[data-sidebar-mount='true']",
+  ]),
+
+  topbarMount: Object.freeze([
+    "#topbar-mount",
+    "[data-topbar-mount]",
+    "[data-topbar-mount='true']",
+  ]),
+
+  sidebar: Object.freeze([
+    "#app-sidebar",
+    "#sidebar",
+    ".sidebar",
+    "[data-sidebar]",
+    "[data-sidebar-root]",
+  ]),
+
+  topbar: Object.freeze([
+    "#app-topbar",
+    "#topbar",
+    ".topbar",
+    "[data-topbar]",
+    "[data-topbar-root]",
+  ]),
+
+  tablehead: Object.freeze([
+    "#table-head",
+    ".table-head",
+    "[data-tablehead]",
+  ]),
+
+  tableheadContainer: Object.freeze([
+    "#tablehead-container",
+    ".tablehead-container",
+    "[data-tablehead-container]",
+  ]),
+});
+
+const WARMUP_EVENTS = Object.freeze({
+  warmup: "app:warmup",
+  warning: "app:warmup:warning",
+  ready: "app:warmup:ready",
+  summary: "app:warmup:summary",
+  debugReady: "app:warmup:debug-ready",
+});
 
 /* =========================================================
    MODULE STATE
 ========================================================= */
 
-let lastWarningKey =
-  "";
+let lastWarningKey = "";
+let lastWarningAt = 0;
 
-let lastWarningAt =
-  0;
+let lastLogKey = "";
+let lastLogAt = 0;
 
-let lastLogKey =
-  "";
+let lastSnapshot = null;
+let lastSummary = null;
 
-let lastLogAt =
-  0;
+let warmupCount = 0;
+let lastWarmupAt = 0;
+let lastWarmupDurationMs = 0;
 
-let lastSnapshot =
-  null;
-
-let lastSummary =
-  null;
-
-let warmupCount =
-  0;
-
-let lastWarmupAt =
-  0;
-
-let lastWarmupDurationMs =
-  0;
-
-const recentSnapshots =
-  [];
+const recentSnapshots = [];
 
 /* =========================================================
    BASICS
@@ -426,9 +339,7 @@ function isObjectLike(value) {
 }
 
 function ensureObject(value) {
-  return isObject(value)
-    ? value
-    : {};
+  return isObject(value) ? value : {};
 }
 
 function isFunction(value) {
@@ -443,62 +354,21 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
+  const text = String(value).trim();
 
   return text || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
-  const number =
-    Number(value);
+  const number = Number(value);
 
   return Number.isFinite(number)
     ? number
     : fallback;
 }
 
-function safeBoolean(value, fallback = false) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-
-  if (typeof value === "string") {
-    const key =
-      value.trim().toLowerCase();
-
-    if (
-      [
-        "true",
-        "1",
-        "yes",
-        "si",
-        "sí",
-        "ok",
-        "on",
-      ].includes(key)
-    ) {
-      return true;
-    }
-
-    if (
-      [
-        "false",
-        "0",
-        "no",
-        "off",
-      ].includes(key)
-    ) {
-      return false;
-    }
-  }
-
-  return fallback;
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 function safeIsoDate(ms = Date.now()) {
@@ -507,12 +377,6 @@ function safeIsoDate(ms = Date.now()) {
   } catch {
     return "";
   }
-}
-
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
 }
 
 function safeCall(fn, fallback = null) {
@@ -576,12 +440,9 @@ function safeDefineValue(target, key, value) {
       key,
       {
         value,
-        configurable:
-          true,
-        enumerable:
-          false,
-        writable:
-          true,
+        configurable: true,
+        enumerable: false,
+        writable: true,
       }
     );
 
@@ -589,9 +450,7 @@ function safeDefineValue(target, key, value) {
   } catch {}
 
   try {
-    target[key] =
-      value;
-
+    target[key] = value;
     return true;
   } catch {}
 
@@ -619,8 +478,7 @@ function normalizeDeps(first = {}, second = {}) {
 
   return {
     ...ensureObject(second),
-    AppCore:
-      first,
+    AppCore: first,
   };
 }
 
@@ -629,8 +487,7 @@ function normalizeDeps(first = {}, second = {}) {
 ========================================================= */
 
 function getModuleFromRegistry(AppCore, names = []) {
-  const modules =
-    AppCore?.modules;
+  const modules = AppCore?.modules;
 
   if (!modules) {
     return null;
@@ -672,11 +529,8 @@ function getModuleFromRegistry(AppCore, names = []) {
 }
 
 function resolveRuntimeDeps(first = {}, second = {}) {
-  const deps =
-    normalizeDeps(first, second);
-
-  const AppCore =
-    deps.AppCore || null;
+  const deps = normalizeDeps(first, second);
+  const AppCore = deps.AppCore || null;
 
   const Router =
     deps.Router ||
@@ -780,196 +634,11 @@ function resolveRuntimeDeps(first = {}, second = {}) {
 }
 
 /* =========================================================
-   LOG / EMIT
-========================================================= */
-
-function getLogger(AppCore, level = "log") {
-  try {
-    const utils =
-      ensureObject(AppCore?.utils);
-
-    if (isFunction(utils?.[level])) {
-      return utils[level].bind(utils);
-    }
-
-    if (isFunction(utils?.log)) {
-      return utils.log.bind(utils);
-    }
-  } catch {}
-
-  try {
-    if (isFunction(console?.[level])) {
-      return console[level].bind(console);
-    }
-
-    if (isFunction(console?.log)) {
-      return console.log.bind(console);
-    }
-  } catch {}
-
-  return null;
-}
-
-function safeLog(AppCore, ...args) {
-  try {
-    const log =
-      getLogger(AppCore, "log");
-
-    log?.(
-      WARMUP_LABEL,
-      ...args
-    );
-  } catch {}
-}
-
-function safeInfo(AppCore, ...args) {
-  try {
-    const info =
-      getLogger(AppCore, "info");
-
-    info?.(
-      WARMUP_LABEL,
-      ...args
-    );
-  } catch {}
-}
-
-function safeWarn(AppCore, ...args) {
-  try {
-    const warn =
-      getLogger(AppCore, "warn");
-
-    warn?.(
-      WARMUP_LABEL,
-      ...args
-    );
-  } catch {}
-}
-
-function safeEmit(AppCore, eventName, payload = {}, options = {}) {
-  const name =
-    safeText(eventName, "");
-
-  if (!name) {
-    return false;
-  }
-
-  const opts =
-    ensureObject(options);
-
-  let busAvailable =
-    false;
-
-  let busEmitted =
-    false;
-
-  try {
-    if (isFunction(AppCore?.events?.emit)) {
-      busAvailable =
-        true;
-
-      AppCore.events.emit(
-        name,
-        payload
-      );
-
-      busEmitted =
-        true;
-    }
-  } catch {}
-
-  /*
-    Anti event-storm:
-    si existe AppCore.events, no duplicamos por window.
-    window sólo fallback o si se fuerza explícitamente.
-  */
-  if (
-    opts.window === true ||
-    (!busAvailable && isBrowser())
-  ) {
-    try {
-      window.dispatchEvent(
-        new CustomEvent(
-          name,
-          {
-            detail:
-              payload,
-          }
-        )
-      );
-
-      return true;
-    } catch {}
-  }
-
-  return busEmitted;
-}
-
-function shouldLogSnapshot(snapshot = {}) {
-  const key =
-    [
-      snapshot.reason,
-      snapshot.health?.status,
-      snapshot.warningCount,
-      snapshot.app?.route,
-      snapshot.app?.publicPath,
-      snapshot.auth?.authenticated ? "auth" : "anon",
-      snapshot.router?.present ? "router" : "no-router",
-    ].join("|");
-
-  const now =
-    epochMs();
-
-  if (
-    key === lastLogKey &&
-    now - lastLogAt < WARMUP_LOG_DEDUPE_MS
-  ) {
-    return false;
-  }
-
-  lastLogKey =
-    key;
-
-  lastLogAt =
-    now;
-
-  return true;
-}
-
-function shouldEmitWarning(warning = {}) {
-  const key =
-    [
-      warning.code,
-      warning.severity,
-      warning.message,
-    ].join("|");
-
-  const now =
-    epochMs();
-
-  if (
-    key === lastWarningKey &&
-    now - lastWarningAt < WARMUP_WARNING_DEDUPE_MS
-  ) {
-    return false;
-  }
-
-  lastWarningKey =
-    key;
-
-  lastWarningAt =
-    now;
-
-  return true;
-}
-
-/* =========================================================
-   REDACTION
+   REDACTION / SANITIZE
 ========================================================= */
 
 function redactTokenInText(value = "") {
-  let output =
-    safeText(value, "");
+  let output = safeText(value, "");
 
   if (!output) {
     return "";
@@ -1020,7 +689,40 @@ function redactTokenInText(value = "") {
       );
   } catch {}
 
+  try {
+    output =
+      output.replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
+      );
+  } catch {}
+
   return output;
+}
+
+function isDomNodeLike(value) {
+  if (
+    !value ||
+    typeof value !== "object"
+  ) {
+    return false;
+  }
+
+  try {
+    return Boolean(
+      typeof Node !== "undefined" &&
+        value instanceof Node
+    );
+  } catch {}
+
+  try {
+    return Boolean(
+      value.nodeType &&
+        value.nodeName
+    );
+  } catch {}
+
+  return false;
 }
 
 function sanitizeSnapshotValue(value, depth = 0) {
@@ -1041,14 +743,28 @@ function sanitizeSnapshotValue(value, depth = 0) {
     return value;
   }
 
+  if (typeof value === "function") {
+    return "[Function]";
+  }
+
+  if (isDomNodeLike(value)) {
+    return {
+      node:
+        safeText(value.nodeName, "Node"),
+
+      id:
+        safeText(value.id, ""),
+
+      className:
+        safeText(value.className?.baseVal || value.className, ""),
+    };
+  }
+
   if (Array.isArray(value)) {
     return value
       .slice(0, 80)
       .map((item) =>
-        sanitizeSnapshotValue(
-          item,
-          depth + 1
-        )
+        sanitizeSnapshotValue(item, depth + 1)
       );
   }
 
@@ -1066,6 +782,30 @@ function sanitizeSnapshotValue(value, depth = 0) {
         redactTokenInText(
           safeText(value.stack, "")
         ),
+
+      code:
+        value.code || null,
+
+      status:
+        value.status || value.statusCode || null,
+    };
+  }
+
+  if (value instanceof Map) {
+    return {
+      type:
+        "Map",
+      size:
+        value.size,
+    };
+  }
+
+  if (value instanceof Set) {
+    return {
+      type:
+        "Set",
+      size:
+        value.size,
     };
   }
 
@@ -1073,15 +813,14 @@ function sanitizeSnapshotValue(value, depth = 0) {
     const output = {};
 
     for (const [key, item] of Object.entries(value)) {
-      const cleanKey =
-        safeText(key, "");
+      const cleanKey = safeText(key, "");
 
       if (!cleanKey) {
         continue;
       }
 
       if (
-        /token|secret|password|authorization|credential|cookie/i.test(cleanKey)
+        /token|secret|password|authorization|credential|cookie|jwt|bearer/i.test(cleanKey)
       ) {
         if (
           typeof item === "boolean" ||
@@ -1089,11 +828,9 @@ function sanitizeSnapshotValue(value, depth = 0) {
           item === undefined ||
           item === ""
         ) {
-          output[cleanKey] =
-            item;
+          output[cleanKey] = item;
         } else {
-          output[cleanKey] =
-            "***";
+          output[cleanKey] = "***";
         }
 
         continue;
@@ -1110,6 +847,212 @@ function sanitizeSnapshotValue(value, depth = 0) {
   }
 
   return String(value);
+}
+
+/* =========================================================
+   LOG / EMIT
+========================================================= */
+
+function getLogger(AppCore, level = "log") {
+  try {
+    const utils = ensureObject(AppCore?.utils);
+
+    if (isFunction(utils?.[level])) {
+      return utils[level].bind(utils);
+    }
+
+    if (isFunction(utils?.log)) {
+      return utils.log.bind(utils);
+    }
+  } catch {}
+
+  try {
+    if (isFunction(console?.[level])) {
+      return console[level].bind(console);
+    }
+
+    if (isFunction(console?.log)) {
+      return console.log.bind(console);
+    }
+  } catch {}
+
+  return null;
+}
+
+function safeLog(AppCore, ...args) {
+  try {
+    const log = getLogger(AppCore, "log");
+
+    log?.(
+      WARMUP_LABEL,
+      ...args.map((item) =>
+        sanitizeSnapshotValue(item)
+      )
+    );
+  } catch {}
+}
+
+function safeInfo(AppCore, ...args) {
+  try {
+    const info = getLogger(AppCore, "info");
+
+    info?.(
+      WARMUP_LABEL,
+      ...args.map((item) =>
+        sanitizeSnapshotValue(item)
+      )
+    );
+  } catch {}
+}
+
+function safeWarn(AppCore, ...args) {
+  try {
+    const warn = getLogger(AppCore, "warn");
+
+    warn?.(
+      WARMUP_LABEL,
+      ...args.map((item) =>
+        sanitizeSnapshotValue(item)
+      )
+    );
+  } catch {}
+}
+
+function safeCreateCustomEvent(name, detail = {}) {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    if (typeof CustomEvent === "function") {
+      return new CustomEvent(
+        name,
+        {
+          detail,
+        }
+      );
+    }
+  } catch {}
+
+  try {
+    const event =
+      document.createEvent("CustomEvent");
+
+    event.initCustomEvent(
+      name,
+      false,
+      false,
+      detail
+    );
+
+    return event;
+  } catch {
+    return null;
+  }
+}
+
+function safeEmit(AppCore, eventName, payload = {}, options = {}) {
+  const name = safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  const opts = ensureObject(options);
+
+  const cleanPayload =
+    sanitizeSnapshotValue(payload);
+
+  let busAvailable = false;
+  let busEmitted = false;
+
+  try {
+    if (isFunction(AppCore?.events?.emit)) {
+      busAvailable = true;
+
+      AppCore.events.emit(
+        name,
+        cleanPayload
+      );
+
+      busEmitted = true;
+    }
+  } catch {}
+
+  /*
+    Anti event-storm:
+    si existe AppCore.events, no duplicamos por window.
+    window sólo fallback o si se fuerza explícitamente.
+  */
+  if (
+    opts.window === true ||
+    (!busAvailable && isBrowser())
+  ) {
+    try {
+      const event =
+        safeCreateCustomEvent(
+          name,
+          cleanPayload
+        );
+
+      if (event) {
+        window.dispatchEvent(event);
+        return true;
+      }
+    } catch {}
+  }
+
+  return busEmitted;
+}
+
+function shouldLogSnapshot(snapshot = {}) {
+  const key =
+    [
+      snapshot.reason,
+      snapshot.health?.status,
+      snapshot.warningCount,
+      snapshot.app?.route,
+      snapshot.app?.publicPath,
+      snapshot.auth?.authenticated ? "auth" : "anon",
+      snapshot.router?.present ? "router" : "no-router",
+    ].join("|");
+
+  const now = epochMs();
+
+  if (
+    key === lastLogKey &&
+    now - lastLogAt < WARMUP_LOG_DEDUPE_MS
+  ) {
+    return false;
+  }
+
+  lastLogKey = key;
+  lastLogAt = now;
+
+  return true;
+}
+
+function shouldEmitWarning(warning = {}) {
+  const key =
+    [
+      warning.code,
+      warning.severity,
+      warning.message,
+    ].join("|");
+
+  const now = epochMs();
+
+  if (
+    key === lastWarningKey &&
+    now - lastWarningAt < WARMUP_WARNING_DEDUPE_MS
+  ) {
+    return false;
+  }
+
+  lastWarningKey = key;
+  lastWarningAt = now;
+
+  return true;
 }
 
 /* =========================================================
@@ -1134,26 +1077,43 @@ function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
       .replace(/\/{2,}/g, "/");
 
   if (!value) {
-    value =
-      DEFAULT_ROUTE;
+    value = DEFAULT_ROUTE;
   }
 
   if (!value.startsWith("/")) {
-    value =
-      `/${value}`;
+    value = `/${value}`;
+  }
+
+  const segments = [];
+
+  for (const segment of value.split("/").filter(Boolean)) {
+    if (segment === ".") {
+      continue;
+    }
+
+    if (segment === "..") {
+      segments.pop();
+      continue;
+    }
+
+    segments.push(segment);
+  }
+
+  value = `/${segments.join("/")}`;
+
+  if (!value) {
+    value = DEFAULT_ROUTE;
   }
 
   if (value.length > 1) {
-    value =
-      value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
+    value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
   }
 
   return value;
 }
 
 function normalizeSearch(search = "") {
-  const value =
-    safeText(search, "");
+  const value = safeText(search, "");
 
   if (!value) {
     return "";
@@ -1165,8 +1125,7 @@ function normalizeSearch(search = "") {
 }
 
 function normalizeHash(hash = "") {
-  const value =
-    safeText(hash, "");
+  const value = safeText(hash, "");
 
   if (!value) {
     return "";
@@ -1178,8 +1137,7 @@ function normalizeHash(hash = "") {
 }
 
 function isHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "");
 
   return (
     raw.startsWith("#/") ||
@@ -1188,8 +1146,7 @@ function isHashRouterPath(value = "") {
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "");
 
   if (!raw) {
     return DEFAULT_ROUTE;
@@ -1203,8 +1160,7 @@ function normalizeHashRouterPath(value = "") {
 }
 
 function splitFullPath(value = DEFAULT_ROUTE) {
-  const raw =
-    safeText(value, DEFAULT_ROUTE);
+  const raw = safeText(value, DEFAULT_ROUTE);
 
   if (isHashRouterPath(raw)) {
     return splitFullPath(
@@ -1212,35 +1168,22 @@ function splitFullPath(value = DEFAULT_ROUTE) {
     );
   }
 
-  let pathname =
-    raw;
+  let pathname = raw;
+  let search = "";
+  let hash = "";
 
-  let search =
-    "";
-
-  let hash =
-    "";
-
-  const hashIndex =
-    pathname.indexOf("#");
+  const hashIndex = pathname.indexOf("#");
 
   if (hashIndex >= 0) {
-    hash =
-      pathname.slice(hashIndex);
-
-    pathname =
-      pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
   }
 
-  const searchIndex =
-    pathname.indexOf("?");
+  const searchIndex = pathname.indexOf("?");
 
   if (searchIndex >= 0) {
-    search =
-      pathname.slice(searchIndex);
-
-    pathname =
-      pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
   }
 
   return {
@@ -1256,8 +1199,7 @@ function splitFullPath(value = DEFAULT_ROUTE) {
 }
 
 function normalizeLocalFullPath(path = DEFAULT_ROUTE) {
-  const raw =
-    safeText(path, DEFAULT_ROUTE);
+  const raw = safeText(path, DEFAULT_ROUTE);
 
   if (!raw) {
     return DEFAULT_ROUTE;
@@ -1277,6 +1219,10 @@ function normalizeLocalFullPath(path = DEFAULT_ROUTE) {
           getBaseOrigin()
         );
 
+      if (parsed.origin !== getBaseOrigin()) {
+        return DEFAULT_ROUTE;
+      }
+
       if (
         parsed.hash &&
         isHashRouterPath(parsed.hash)
@@ -1290,14 +1236,15 @@ function normalizeLocalFullPath(path = DEFAULT_ROUTE) {
         `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`
       );
     }
-  } catch {}
+  } catch {
+    return DEFAULT_ROUTE;
+  }
 
   const {
     pathname,
     search,
     hash,
-  } =
-    splitFullPath(raw);
+  } = splitFullPath(raw);
 
   return `${pathname}${search}${hash}`;
 }
@@ -1311,6 +1258,36 @@ function stripSearchAndHash(path = DEFAULT_ROUTE) {
       .split("?")[0]
       .split("#")[0] ||
     DEFAULT_ROUTE
+  );
+}
+
+function stripUsernamePrefixFromCleanPath(pathname = DEFAULT_ROUTE) {
+  const clean =
+    normalizePathnameOnly(pathname || DEFAULT_ROUTE);
+
+  const segments =
+    clean
+      .split("/")
+      .filter(Boolean);
+
+  if (
+    segments.length &&
+    PUBLIC_USERNAME_RE.test(segments[0])
+  ) {
+    const rest =
+      segments.slice(1).join("/");
+
+    return rest
+      ? normalizePathnameOnly(`/${rest}`)
+      : DEFAULT_ROUTE;
+  }
+
+  return clean;
+}
+
+function getCanonicalCleanPath(path = DEFAULT_ROUTE) {
+  return stripUsernamePrefixFromCleanPath(
+    stripSearchAndHash(path)
   );
 }
 
@@ -1347,8 +1324,7 @@ function getBrowserPublicPath() {
 }
 
 function pathFromUrlLike(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "");
 
   if (!raw) {
     return "";
@@ -1366,6 +1342,10 @@ function pathFromUrlLike(value = "") {
         raw,
         getBaseOrigin()
       );
+
+    if (parsed.origin !== getBaseOrigin()) {
+      return DEFAULT_ROUTE;
+    }
 
     if (
       parsed.hash &&
@@ -1390,7 +1370,7 @@ function pathFromUrlLike(value = "") {
 
 function isAuthLikePath(path = DEFAULT_ROUTE) {
   const clean =
-    stripSearchAndHash(path);
+    getCanonicalCleanPath(path);
 
   if (AUTH_LIKE_PATHS.includes(clean)) {
     return true;
@@ -1436,7 +1416,7 @@ function getPathToken(config = null, value = "") {
   }
 
   const clean =
-    stripSearchAndHash(path);
+    getCanonicalCleanPath(path);
 
   if (!clean.startsWith(`${config.path}/`)) {
     return "";
@@ -1462,8 +1442,7 @@ function hasRouteToken(config = null, value = "") {
     return false;
   }
 
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "");
 
   if (!raw) {
     return false;
@@ -1479,6 +1458,10 @@ function hasRouteToken(config = null, value = "") {
         raw,
         getBaseOrigin()
       );
+
+    if (parsed.origin !== getBaseOrigin()) {
+      return false;
+    }
 
     if (
       hasTokenInSearch(
@@ -1602,7 +1585,7 @@ function matchesProtectedTokenRoute(config = null, value = "") {
     pathFromUrlLike(value);
 
   const clean =
-    stripSearchAndHash(path);
+    getCanonicalCleanPath(path);
 
   return (
     clean === config.path ||
@@ -1611,8 +1594,7 @@ function matchesProtectedTokenRoute(config = null, value = "") {
 }
 
 function getProtectedTokenRouteSnapshot() {
-  const candidates =
-    [];
+  const candidates = [];
 
   if (isBrowser()) {
     try {
@@ -1719,32 +1701,15 @@ function getProtectedTokenRouteSnapshot() {
 function getLocationSnapshot() {
   if (!isBrowser()) {
     return {
-      href:
-        "",
-
-      origin:
-        "",
-
-      pathname:
-        "",
-
-      search:
-        "",
-
-      hash:
-        "",
-
-      publicPath:
-        DEFAULT_ROUTE,
-
-      normalizedPublicPath:
-        DEFAULT_ROUTE,
-
-      hashRouterPath:
-        "",
-
-      authLike:
-        false,
+      href: "",
+      origin: "",
+      pathname: "",
+      search: "",
+      hash: "",
+      publicPath: DEFAULT_ROUTE,
+      normalizedPublicPath: DEFAULT_ROUTE,
+      hashRouterPath: "",
+      authLike: false,
     };
   }
 
@@ -1799,32 +1764,15 @@ function getLocationSnapshot() {
     };
   } catch {
     return {
-      href:
-        "",
-
-      origin:
-        "",
-
-      pathname:
-        "",
-
-      search:
-        "",
-
-      hash:
-        "",
-
-      publicPath:
-        DEFAULT_ROUTE,
-
-      normalizedPublicPath:
-        DEFAULT_ROUTE,
-
-      hashRouterPath:
-        "",
-
-      authLike:
-        false,
+      href: "",
+      origin: "",
+      pathname: "",
+      search: "",
+      hash: "",
+      publicPath: DEFAULT_ROUTE,
+      normalizedPublicPath: DEFAULT_ROUTE,
+      hashRouterPath: "",
+      authLike: false,
     };
   }
 }
@@ -1832,41 +1780,18 @@ function getLocationSnapshot() {
 function getDocumentSnapshot() {
   if (!isBrowser()) {
     return {
-      readyState:
-        "server",
-
-      title:
-        "",
-
-      lang:
-        null,
-
-      visibilityState:
-        null,
-
-      hidden:
-        null,
-
-      theme:
-        null,
-
-      appState:
-        null,
-
-      appLoading:
-        null,
-
-      routeMode:
-        null,
-
-      shell:
-        null,
-
-      chrome:
-        null,
-
-      className:
-        "",
+      readyState: "server",
+      title: "",
+      lang: null,
+      visibilityState: null,
+      hidden: null,
+      theme: null,
+      appState: null,
+      appLoading: null,
+      routeMode: null,
+      shell: null,
+      chrome: null,
+      className: "",
     };
   }
 
@@ -1897,11 +1822,23 @@ function getDocumentSnapshot() {
       theme:
         html?.dataset?.theme || null,
 
+      themeMode:
+        html?.dataset?.themeMode || null,
+
+      systemTheme:
+        html?.dataset?.systemTheme || null,
+
       appState:
         html?.dataset?.appState || null,
 
       appLoading:
         html?.dataset?.appLoading || null,
+
+      appReady:
+        html?.dataset?.appReady || null,
+
+      bootPhase:
+        html?.dataset?.bootPhase || null,
 
       routeMode:
         html?.dataset?.routeMode || null,
@@ -1917,41 +1854,18 @@ function getDocumentSnapshot() {
     };
   } catch {
     return {
-      readyState:
-        "",
-
-      title:
-        "",
-
-      lang:
-        null,
-
-      visibilityState:
-        null,
-
-      hidden:
-        null,
-
-      theme:
-        null,
-
-      appState:
-        null,
-
-      appLoading:
-        null,
-
-      routeMode:
-        null,
-
-      shell:
-        null,
-
-      chrome:
-        null,
-
-      className:
-        "",
+      readyState: "",
+      title: "",
+      lang: null,
+      visibilityState: null,
+      hidden: null,
+      theme: null,
+      appState: null,
+      appLoading: null,
+      routeMode: null,
+      shell: null,
+      chrome: null,
+      className: "",
     };
   }
 }
@@ -1959,17 +1873,10 @@ function getDocumentSnapshot() {
 function getNavigatorSnapshot() {
   if (!isBrowser()) {
     return {
-      online:
-        null,
-
-      language:
-        null,
-
-      languages:
-        [],
-
-      userAgent:
-        "",
+      online: null,
+      language: null,
+      languages: [],
+      userAgent: "",
     };
   }
 
@@ -1991,17 +1898,10 @@ function getNavigatorSnapshot() {
     };
   } catch {
     return {
-      online:
-        null,
-
-      language:
-        null,
-
-      languages:
-        [],
-
-      userAgent:
-        "",
+      online: null,
+      language: null,
+      languages: [],
+      userAgent: "",
     };
   }
 }
@@ -2009,11 +1909,8 @@ function getNavigatorSnapshot() {
 function getHistorySnapshot() {
   if (!isBrowser()) {
     return {
-      length:
-        0,
-
-      state:
-        null,
+      length: 0,
+      state: null,
     };
   }
 
@@ -2032,44 +1929,43 @@ function getHistorySnapshot() {
         sanitizeSnapshotValue(state),
 
       hasScrubbedActivationToken:
-        Boolean(state.scrubbedActivationToken),
+        Boolean(
+          state.scrubbedActivationToken ||
+            state.activationTokenScrubbed ||
+            state.scrubbedActivateAccountToken
+        ),
 
       hasScrubbedResetToken:
         Boolean(
           state.scrubbedResetToken ||
-            state.scrubbedResetPasswordToken
+            state.scrubbedResetPasswordToken ||
+            state.resetTokenScrubbed ||
+            state.scrubbedResetConfirmToken ||
+            state.scrubbedPasswordResetToken
         ),
+
+      scrubbedPublicTokenRoute:
+        state.scrubbedPublicTokenRoute || null,
+
+      scrubbedTokenRoute:
+        state.scrubbedTokenRoute || null,
     };
   } catch {
     return {
-      length:
-        0,
-
-      state:
-        null,
+      length: 0,
+      state: null,
     };
   }
 }
 
 function getPerformanceSnapshot() {
   const output = {
-    supported:
-      false,
-
-    now:
-      0,
-
-    navigationType:
-      "",
-
-    domContentLoadedMs:
-      0,
-
-    loadEventMs:
-      0,
-
-    memory:
-      null,
+    supported: false,
+    now: 0,
+    navigationType: "",
+    domContentLoadedMs: 0,
+    loadEventMs: 0,
+    memory: null,
   };
 
   try {
@@ -2080,19 +1976,15 @@ function getPerformanceSnapshot() {
       return output;
     }
 
-    output.supported =
-      true;
-
-    output.now =
-      Math.round(nowMs());
+    output.supported = true;
+    output.now = Math.round(nowMs());
 
     try {
       const nav =
         performance.getEntriesByType?.("navigation")?.[0] || null;
 
       if (nav) {
-        output.navigationType =
-          nav.type || "";
+        output.navigationType = nav.type || "";
 
         output.domContentLoadedMs =
           Math.round(
@@ -2199,32 +2091,20 @@ function getStorageTokenHints() {
   const sessionStorageRef =
     getStorage("sessionStorage");
 
-  const foundKeys =
-    [];
+  const foundKeys = [];
 
-  let localHasToken =
-    false;
-
-  let sessionHasToken =
-    false;
+  let localHasToken = false;
+  let sessionHasToken = false;
 
   for (const key of KNOWN_TOKEN_STORAGE_KEYS) {
     if (hasStorageKey(localStorageRef, key)) {
-      localHasToken =
-        true;
-
-      foundKeys.push(
-        `localStorage:${key}`
-      );
+      localHasToken = true;
+      foundKeys.push(`localStorage:${key}`);
     }
 
     if (hasStorageKey(sessionStorageRef, key)) {
-      sessionHasToken =
-        true;
-
-      foundKeys.push(
-        `sessionStorage:${key}`
-      );
+      sessionHasToken = true;
+      foundKeys.push(`sessionStorage:${key}`);
     }
   }
 
@@ -2242,7 +2122,7 @@ function getStorageTokenHints() {
       getStorageLength(sessionStorageRef),
 
     keys:
-      foundKeys,
+      foundKeys.map(redactTokenInText),
   };
 }
 
@@ -2381,6 +2261,9 @@ function getDomElementSnapshot(id = "", selectors = []) {
         shell:
           element.dataset?.shell || null,
 
+        shellState:
+          element.dataset?.shellState || null,
+
         chrome:
           element.dataset?.chrome || null,
 
@@ -2446,8 +2329,7 @@ function getDomElementSnapshot(id = "", selectors = []) {
 }
 
 function getShellSnapshot(AppCore) {
-  const dom =
-    ensureObject(AppCore?.dom);
+  const dom = ensureObject(AppCore?.dom);
 
   const body =
     isBrowser()
@@ -2690,8 +2572,7 @@ function getShellSnapshot(AppCore) {
 ========================================================= */
 
 function getUserSnapshot(AppCore, Auth = null) {
-  const state =
-    ensureObject(AppCore?.state);
+  const state = ensureObject(AppCore?.state);
 
   const authUser =
     safeCall(
@@ -2724,6 +2605,7 @@ function getUserSnapshot(AppCore, Auth = null) {
 
     username:
       user?.username ||
+      user?.userName ||
       user?.email ||
       user?.name ||
       user?.displayName ||
@@ -2780,8 +2662,7 @@ function getAuthIsAuthenticated(Auth = null) {
 }
 
 function getAuthSnapshot(AppCore, Auth = null) {
-  const state =
-    ensureObject(AppCore?.state);
+  const state = ensureObject(AppCore?.state);
 
   return {
     present:
@@ -2875,11 +2756,9 @@ function getRouterCurrentPublicPath(Router = null) {
 }
 
 function getRouterSnapshot(AppCore, Router = null) {
-  const state =
-    ensureObject(AppCore?.state);
+  const state = ensureObject(AppCore?.state);
 
-  let routerSnapshot =
-    null;
+  let routerSnapshot = null;
 
   try {
     routerSnapshot =
@@ -2889,23 +2768,12 @@ function getRouterSnapshot(AppCore, Router = null) {
       null;
   } catch {}
 
-  const hasRender =
-    isFunction(Router?.render);
-
-  const hasNavigate =
-    isFunction(Router?.navigate);
-
-  const hasGo =
-    isFunction(Router?.go);
-
-  const hasPush =
-    isFunction(Router?.push);
-
-  const hasBind =
-    isFunction(Router?.bind);
-
-  const hasBack =
-    isFunction(Router?.back);
+  const hasRender = isFunction(Router?.render);
+  const hasNavigate = isFunction(Router?.navigate);
+  const hasGo = isFunction(Router?.go);
+  const hasPush = isFunction(Router?.push);
+  const hasBind = isFunction(Router?.bind);
+  const hasBack = isFunction(Router?.back);
 
   const hasRerender =
     Boolean(
@@ -2920,8 +2788,7 @@ function getRouterSnapshot(AppCore, Router = null) {
         isFunction(Router?.resolveRoute)
     );
 
-  const present =
-    Boolean(Router);
+  const present = Boolean(Router);
 
   const canRenderOrNavigate =
     Boolean(
@@ -3007,8 +2874,7 @@ function getRouterSnapshot(AppCore, Router = null) {
 }
 
 function getStoreSnapshot(Store = null) {
-  let state =
-    {};
+  let state = {};
 
   try {
     state =
@@ -3027,6 +2893,9 @@ function getStoreSnapshot(Store = null) {
 
     hasSetState:
       isFunction(Store?.setState),
+
+    hasPatchState:
+      isFunction(Store?.patchState),
 
     hasActions:
       Boolean(Store?.actions),
@@ -3061,8 +2930,7 @@ function getStoreSnapshot(Store = null) {
 }
 
 function getUiModuleSnapshot(moduleRef = null) {
-  let snapshot =
-    null;
+  let snapshot = null;
 
   try {
     snapshot =
@@ -3150,8 +3018,7 @@ function getI18nAvailable(I18n = null) {
 }
 
 function getI18nLang(AppCore, I18n = null) {
-  const state =
-    ensureObject(AppCore?.state);
+  const state = ensureObject(AppCore?.state);
 
   const documentLang =
     isBrowser()
@@ -3181,8 +3048,7 @@ function getI18nLang(AppCore, I18n = null) {
 }
 
 function getI18nSnapshot(AppCore, I18n = null) {
-  const state =
-    ensureObject(AppCore?.state);
+  const state = ensureObject(AppCore?.state);
 
   const documentLang =
     isBrowser()
@@ -3228,6 +3094,7 @@ function getI18nSnapshot(AppCore, I18n = null) {
       ),
 
     lang,
+
     stateLang:
       state.lang || DEFAULT_LANG,
 
@@ -3259,11 +3126,8 @@ function getI18nSnapshot(AppCore, I18n = null) {
 ========================================================= */
 
 function getAppStateSnapshot(AppCore) {
-  const state =
-    ensureObject(AppCore?.state);
-
-  const config =
-    ensureObject(AppCore?.config);
+  const state = ensureObject(AppCore?.state);
+  const config = ensureObject(AppCore?.config);
 
   return {
     apiBase:
@@ -3378,8 +3242,7 @@ function getAppStateSnapshot(AppCore) {
 ========================================================= */
 
 function buildWarmupWarnings(snapshot = {}) {
-  const warnings =
-    [];
+  const warnings = [];
 
   if (!snapshot.app?.apiBase) {
     warnings.push({
@@ -3413,25 +3276,22 @@ function buildWarmupWarnings(snapshot = {}) {
   if (
     snapshot.auth?.authenticated &&
     !snapshot.auth?.hasStateToken &&
-    !snapshot.auth?.hasAuthHeader
+    !snapshot.auth?.hasAuthHeader &&
+    !snapshot.storage?.localStorage &&
+    !snapshot.storage?.sessionStorage
   ) {
     warnings.push({
       code:
-        "AUTH_WITHOUT_VISIBLE_TOKEN",
+        "AUTH_WITHOUT_VISIBLE_TOKEN_HINT",
 
       severity:
-        "medium",
+        "low",
 
       message:
-        "Sesión autenticada sin token/header visible en runtime.",
+        "Sesión autenticada sin token/header/storage visible. Si la sesión usa cookie HttpOnly, este aviso es esperado.",
     });
   }
 
-  /*
-    No exigimos Router.render estrictamente.
-    En esta SPA puede existir navegación/render por Router.navigate,
-    Router.go, Router.push, render inicial modular o snapshot listo.
-  */
   if (
     !snapshot.router?.present &&
     !snapshot.router?.stateRoute &&
@@ -3557,8 +3417,7 @@ function computeWarmupHealth(snapshot = {}) {
   const warnings =
     safeArray(snapshot.warnings);
 
-  let score =
-    100;
+  let score = 100;
 
   for (const warning of warnings) {
     const severity =
@@ -3627,8 +3486,7 @@ export function createWarmupSnapshot(first = {}, second = {}) {
     reason = "warmup",
   } = deps;
 
-  const startedAt =
-    Date.now();
+  const startedAt = Date.now();
 
   const rawSnapshot = {
     version:
@@ -3729,8 +3587,7 @@ export function createWarmupSnapshot(first = {}, second = {}) {
 ========================================================= */
 
 export function getWarmupSummary(snapshot = {}) {
-  const data =
-    ensureObject(snapshot);
+  const data = ensureObject(snapshot);
 
   return {
     ok:
@@ -3867,11 +3724,8 @@ export function getWarmupSummary(snapshot = {}) {
 }
 
 function rememberSnapshot(snapshot = {}) {
-  lastSnapshot =
-    snapshot;
-
-  lastSummary =
-    getWarmupSummary(snapshot);
+  lastSnapshot = snapshot;
+  lastSummary = getWarmupSummary(snapshot);
 
   recentSnapshots.unshift({
     at:
@@ -3907,15 +3761,21 @@ export function getWarmupRuntimeSnapshot() {
 
     lastWarmupDurationMs,
 
-    lastWarningKey,
+    lastWarningKey:
+      redactTokenInText(lastWarningKey),
+
     lastWarningAt,
+
     lastWarningAtIso:
       lastWarningAt
         ? safeIsoDate(lastWarningAt)
         : "",
 
-    lastLogKey,
+    lastLogKey:
+      redactTokenInText(lastLogKey),
+
     lastLogAt,
+
     lastLogAtIso:
       lastLogAt
         ? safeIsoDate(lastLogAt)
@@ -3929,32 +3789,18 @@ export function getWarmupRuntimeSnapshot() {
 }
 
 export function resetWarmupRuntimeState() {
-  lastWarningKey =
-    "";
+  lastWarningKey = "";
+  lastWarningAt = 0;
 
-  lastWarningAt =
-    0;
+  lastLogKey = "";
+  lastLogAt = 0;
 
-  lastLogKey =
-    "";
+  lastSnapshot = null;
+  lastSummary = null;
 
-  lastLogAt =
-    0;
-
-  lastSnapshot =
-    null;
-
-  lastSummary =
-    null;
-
-  warmupCount =
-    0;
-
-  lastWarmupAt =
-    0;
-
-  lastWarmupDurationMs =
-    0;
+  warmupCount = 0;
+  lastWarmupAt = 0;
+  lastWarmupDurationMs = 0;
 
   recentSnapshots.splice(0);
 
@@ -4008,8 +3854,7 @@ export function exposeWarmupDebugApi(first = {}, second = {}) {
 
   try {
     if (isBrowser()) {
-      window.__ONION_WARMUP__ =
-        api;
+      window.__ONION_WARMUP__ = api;
     }
   } catch {}
 
@@ -4069,23 +3914,7 @@ export async function warmup(first = {}, second = {}) {
     reason = "warmup",
   } = deps;
 
-  const startedAt =
-    Date.now();
-
-  if (!AppCore) {
-    const fallbackSnapshot =
-      createWarmupSnapshot({
-        ...deps,
-        reason,
-      });
-
-    fallbackSnapshot.durationMs =
-      Date.now() - startedAt;
-
-    rememberSnapshot(fallbackSnapshot);
-
-    return fallbackSnapshot;
-  }
+  const startedAt = Date.now();
 
   const snapshot =
     createWarmupSnapshot({
@@ -4103,7 +3932,10 @@ export async function warmup(first = {}, second = {}) {
   rememberSnapshot(snapshot);
 
   try {
-    if (exposeDebug !== false) {
+    if (
+      AppCore &&
+      exposeDebug !== false
+    ) {
       exposeWarmupDebugApi({
         ...deps,
         AppCore,
@@ -4111,6 +3943,7 @@ export async function warmup(first = {}, second = {}) {
     }
 
     if (
+      AppCore &&
       log &&
       shouldLogSnapshot(snapshot)
     ) {
@@ -4144,6 +3977,7 @@ export async function warmup(first = {}, second = {}) {
         shouldEmitWarning(warning);
 
       if (
+        AppCore &&
         log &&
         shouldEmit
       ) {
@@ -4157,6 +3991,7 @@ export async function warmup(first = {}, second = {}) {
       }
 
       if (
+        AppCore &&
         emit &&
         shouldEmit
       ) {
@@ -4174,7 +4009,10 @@ export async function warmup(first = {}, second = {}) {
       }
     }
 
-    if (emit) {
+    if (
+      AppCore &&
+      emit
+    ) {
       safeEmit(
         AppCore,
         WARMUP_EVENTS.warmup,

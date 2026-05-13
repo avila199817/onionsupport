@@ -2,7 +2,8 @@
    Onion SPA - Router Shell
    Archivo: src/router/shell.js
 
-   FINAL EXTREME SYSTEM · SHELL / ACTIVE MENU / CHROME STATE · 12/10
+   FINAL EXTREME SYSTEM · SHELL / ACTIVE MENU / CHROME STATE · 13/10
+   CSP CLEAN · NO INLINE CSS · NO INNERHTML · EVENT SAFE
 
    RESPONSABILIDADES:
    - resolver elementos visuales del shell
@@ -42,6 +43,9 @@ import {
 /* =========================================================
    CONSTANTS
 ========================================================= */
+
+export const ROUTER_SHELL_VERSION =
+  "13.0.0";
 
 const SHELL_SOURCE =
   "router.shell";
@@ -86,6 +90,7 @@ const ROUTE_AUTH_CLASSES =
     "login-no-scroll",
     "route-auth",
     "route-shell-hidden",
+    "route-chrome-hidden",
     "shell-hidden",
   ]);
 
@@ -93,6 +98,7 @@ const ROUTE_APP_CLASSES =
   Object.freeze([
     "route-app",
     "route-shell-visible",
+    "route-chrome-visible",
     "shell-visible",
   ]);
 
@@ -163,6 +169,20 @@ const PROTECTED_CLEAR_ROOT_SELECTOR =
     "[data-app-loader]",
     "[data-sidebar-root]",
     "[data-topbar-root]",
+  ].join(",");
+
+const PROTECTED_CLEAR_ANCESTOR_SELECTOR =
+  [
+    "#sidebar-mount",
+    "#topbar-mount",
+    "#app-loader",
+    "#app-sidebar",
+    "#app-topbar",
+    ".sidebar",
+    ".topbar",
+    "[data-sidebar-root]",
+    "[data-topbar-root]",
+    "[data-app-loader]",
   ].join(",");
 
 const TABLEHEAD_SELECTORS =
@@ -333,14 +353,16 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
 
   try {
     if (isFn(AppCore?.events?.emit)) {
-      busAvailable = true;
+      busAvailable =
+        true;
 
       AppCore.events.emit(
         name,
         payload
       );
 
-      busEmitted = true;
+      busEmitted =
+        true;
     }
   } catch (error) {
     safeWarn(
@@ -350,10 +372,6 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
     );
   }
 
-  /*
-    Anti storm:
-    si existe bus interno, NO duplicamos por window salvo force explícito.
-  */
   if (
     opts.window === true ||
     (!busAvailable && isBrowser())
@@ -366,7 +384,7 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
 
     return Boolean(
       busEmitted ||
-      windowOk
+        windowOk
     );
   }
 
@@ -452,7 +470,8 @@ function getBodyElement(AppCore = null) {
       body &&
       AppCore?.dom
     ) {
-      AppCore.dom.body = body;
+      AppCore.dom.body =
+        body;
     }
 
     return body;
@@ -470,7 +489,14 @@ function queryOne(selector = "") {
   }
 
   try {
-    if (selector.startsWith("#")) {
+    if (
+      selector.startsWith("#") &&
+      !selector.includes(",") &&
+      !selector.includes(" ") &&
+      !selector.includes("[") &&
+      !selector.includes(".") &&
+      !selector.includes(":")
+    ) {
       return document.getElementById(
         selector.slice(1)
       );
@@ -492,7 +518,7 @@ function isConnectedNode(node) {
   try {
     return Boolean(
       node.isConnected ||
-      document.contains(node)
+        document.contains(node)
     );
   } catch {
     return false;
@@ -533,7 +559,8 @@ function resolveDomElement(AppCore, keys = [], selectors = []) {
           AppCore?.dom &&
           keyList[0]
         ) {
-          AppCore.dom[keyList[0]] = found;
+          AppCore.dom[keyList[0]] =
+            found;
         }
       } catch {}
 
@@ -553,7 +580,8 @@ function safeToggleHidden(element, hidden) {
     Boolean(hidden);
 
   try {
-    element.hidden = next;
+    element.hidden =
+      next;
   } catch {}
 
   try {
@@ -717,7 +745,10 @@ function safeReplaceChildren(element) {
   } catch {}
 
   try {
-    element.innerHTML = "";
+    while (element.firstChild) {
+      element.removeChild(element.firstChild);
+    }
+
     return true;
   } catch {}
 
@@ -735,7 +766,8 @@ function normalizePathnameOnly(pathname = "/") {
       .replace(/\/{2,}/g, "/");
 
   if (!value.startsWith("/")) {
-    value = `/${value}`;
+    value =
+      `/${value}`;
   }
 
   if (value.length > 1) {
@@ -869,20 +901,32 @@ function routeRequestsAuthScreen(route = null) {
 export function getShellElements(AppCore) {
   if (!isBrowser()) {
     return {
-      html: null,
-      body: null,
+      html:
+        null,
+      body:
+        null,
 
-      shell: null,
-      main: null,
-      appContent: null,
-      viewContainer: null,
+      shell:
+        null,
+      main:
+        null,
+      appContent:
+        null,
+      viewContainer:
+        null,
 
-      sidebar: null,
-      topbar: null,
-      tablehead: null,
-      tableheadContainer: null,
-      mobileToggle: null,
-      loader: null,
+      sidebar:
+        null,
+      topbar:
+        null,
+      tablehead:
+        null,
+      tableheadContainer:
+        null,
+      mobileToggle:
+        null,
+      loader:
+        null,
     };
   }
 
@@ -1044,29 +1088,56 @@ export function getShellElements(AppCore) {
 
   try {
     if (AppCore?.dom) {
-      AppCore.dom.html = html;
-      AppCore.dom.body = body;
+      AppCore.dom.html =
+        html;
 
-      AppCore.dom.shell = shell;
-      AppCore.dom.appShell = shell;
-      AppCore.dom.layout = shell;
+      AppCore.dom.body =
+        body;
 
-      AppCore.dom.main = main;
-      AppCore.dom.mainContent = main;
+      AppCore.dom.shell =
+        shell;
 
-      AppCore.dom.appContent = appContent;
-      AppCore.dom.viewContainer = viewContainer;
+      AppCore.dom.appShell =
+        shell;
 
-      AppCore.dom.sidebar = sidebar;
-      AppCore.dom.topbar = topbar;
+      AppCore.dom.layout =
+        shell;
 
-      AppCore.dom.tablehead = tablehead;
-      AppCore.dom.tableHead = tablehead;
-      AppCore.dom.tableheadContainer = tableheadContainer;
-      AppCore.dom.tableHeadContainer = tableheadContainer;
+      AppCore.dom.main =
+        main;
 
-      AppCore.dom.sidebarMobileToggle = mobileToggle;
-      AppCore.dom.loader = loader;
+      AppCore.dom.mainContent =
+        main;
+
+      AppCore.dom.appContent =
+        appContent;
+
+      AppCore.dom.viewContainer =
+        viewContainer;
+
+      AppCore.dom.sidebar =
+        sidebar;
+
+      AppCore.dom.topbar =
+        topbar;
+
+      AppCore.dom.tablehead =
+        tablehead;
+
+      AppCore.dom.tableHead =
+        tablehead;
+
+      AppCore.dom.tableheadContainer =
+        tableheadContainer;
+
+      AppCore.dom.tableHeadContainer =
+        tableheadContainer;
+
+      AppCore.dom.sidebarMobileToggle =
+        mobileToggle;
+
+      AppCore.dom.loader =
+        loader;
     }
   } catch {}
 
@@ -1106,18 +1177,7 @@ function isProtectedClearNode(node) {
   try {
     if (
       node.closest?.(
-        [
-          "#sidebar-mount",
-          "#topbar-mount",
-          "#app-loader",
-          "#app-sidebar",
-          "#app-topbar",
-          ".sidebar",
-          ".topbar",
-          "[data-sidebar-root]",
-          "[data-topbar-root]",
-          "[data-app-loader]",
-        ].join(",")
+        PROTECTED_CLEAR_ANCESTOR_SELECTOR
       )
     ) {
       return true;
@@ -1140,10 +1200,6 @@ function clearNodeIfSafe(node) {
 }
 
 export function clearDynamicContainers(AppCore) {
-  /*
-    Compatibilidad con Core, pero no confiamos solo en él.
-    Si existe y falla, seguimos con limpieza local segura.
-  */
   try {
     if (isFn(AppCore?.clearDynamicContainers)) {
       AppCore.clearDynamicContainers({
@@ -1181,21 +1237,25 @@ export function clearDynamicContainers(AppCore) {
 
     if (tableheadContainer) {
       safeReplaceChildren(tableheadContainer);
-      cleared = true;
+      cleared =
+        true;
     }
 
     if (tablehead) {
       safeToggleHidden(tablehead, true);
       safeSetBusy(tablehead, false);
       safeDataset(tablehead, "tableheadState", "empty");
-      cleared = true;
+
+      cleared =
+        true;
     }
 
     document
       .querySelectorAll(DYNAMIC_SELECTOR)
       .forEach((node) => {
         if (clearNodeIfSafe(node)) {
-          cleared = true;
+          cleared =
+            true;
         }
       });
 
@@ -1503,7 +1563,8 @@ export function setActiveMenu(
       );
 
     if (active) {
-      activeCount += 1;
+      activeCount +=
+        1;
     }
 
     toggleActiveElement(
@@ -1697,10 +1758,15 @@ function hasContent(element) {
   }
 
   try {
+    if (element.childElementCount > 0) {
+      return true;
+    }
+  } catch {}
+
+  try {
     return Boolean(
       safeText(
-        element.textContent ||
-          element.innerHTML,
+        element.textContent,
         ""
       )
     );
@@ -1746,6 +1812,18 @@ function applyRootClasses({
 
     safeClassToggle(
       element,
+      "route-chrome-hidden",
+      hideShell
+    );
+
+    safeClassToggle(
+      element,
+      "route-chrome-visible",
+      !hideShell
+    );
+
+    safeClassToggle(
+      element,
       "route-app",
       !hideShell
     );
@@ -1778,9 +1856,33 @@ function applyRootClasses({
     } else {
       safeClassRemove(
         body,
+        ...ROUTE_AUTH_CLASSES,
         "login-no-scroll"
       );
+
+      safeClassAdd(
+        body,
+        ...ROUTE_APP_CLASSES
+      );
     }
+  }
+
+  if (html && !hideShell) {
+    safeClassRemove(
+      html,
+      "route-auth",
+      "route-shell-hidden",
+      "route-chrome-hidden",
+      "shell-hidden"
+    );
+
+    safeClassAdd(
+      html,
+      "route-app",
+      "route-shell-visible",
+      "route-chrome-visible",
+      "shell-visible"
+    );
   }
 }
 
@@ -1828,6 +1930,12 @@ function applyRootDatasets({
       element,
       "currentCanonicalPath",
       canonicalPath || routePath || ""
+    );
+
+    safeDataset(
+      element,
+      "appLoading",
+      "false"
     );
   }
 }
@@ -1891,10 +1999,6 @@ function exposeCoreLayout({
   appContent,
   viewContainer,
 }) {
-  /*
-    No ocultamos estos nodos: el view-container suele vivir dentro.
-    Ocultar #app-shell causa pantallas partidas y offsets incorrectos.
-  */
   for (const element of [
     shell,
     main,
@@ -2020,6 +2124,12 @@ export function setShellMode(
     canonicalPath || routePath || ""
   );
 
+  safeDataset(
+    shell,
+    "chrome",
+    hideShell ? "hidden" : "visible"
+  );
+
   if (hideShell) {
     hideLoader(
       AppCore,
@@ -2105,6 +2215,9 @@ export function getShellSnapshot(AppCore) {
     getShellElements(AppCore);
 
   return {
+    version:
+      ROUTER_SHELL_VERSION,
+
     source:
       SHELL_SOURCE,
 
@@ -2235,6 +2348,8 @@ export function getShellSnapshot(AppCore) {
 ========================================================= */
 
 export default {
+  ROUTER_SHELL_VERSION,
+
   getShellElements,
 
   clearDynamicContainers,

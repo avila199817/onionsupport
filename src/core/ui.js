@@ -2,6 +2,9 @@
    Onion SPA - Core UI
    Archivo: src/core/ui.js
 
+   ONION SUPPORT · CORE UI
+   GLOBAL UI HELPERS · USER VISUAL SYNC · AVATAR SAFE · 14/10
+
    RESPONSABILIDADES:
    - helpers UI globales del core
    - sincronizar título documento
@@ -50,7 +53,7 @@ import {
 ========================================================= */
 
 const UI_VERSION =
-  "12.0.0";
+  "14.0.0";
 
 const DEFAULT_USER_NAME =
   "Usuario";
@@ -345,13 +348,103 @@ function safeEmit(events, eventName, payload = {}) {
   try {
     events?.emit?.(
       name,
-      payload
+      sanitizeEventPayload(payload)
     );
 
     return true;
   } catch {}
 
   return false;
+}
+
+function sanitizeEventPayload(value, depth = 0, keyHint = "") {
+  if (depth > 4) {
+    return "[depth-limit]";
+  }
+
+  if (
+    /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|avatarUrl|avatar_url|signedUrl|sas/i.test(
+      safeText(keyHint, "")
+    )
+  ) {
+    return value ? "***" : null;
+  }
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return safeRedact(value);
+  }
+
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "bigint") {
+    return String(value);
+  }
+
+  if (typeof value === "function") {
+    return "[function]";
+  }
+
+  if (value instanceof Error) {
+    return {
+      name:
+        value.name || "Error",
+
+      message:
+        safeRedact(
+          value.message || "Error"
+        ),
+
+      stack:
+        value.stack
+          ? "[stack]"
+          : null,
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 80)
+      .map((item) =>
+        sanitizeEventPayload(
+          item,
+          depth + 1,
+          keyHint
+        )
+      );
+  }
+
+  if (isPlainObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value).slice(0, 120)) {
+      output[key] =
+        sanitizeEventPayload(
+          item,
+          depth + 1,
+          key
+        );
+    }
+
+    return output;
+  }
+
+  try {
+    return safeRedact(String(value));
+  } catch {
+    return "[unserializable]";
+  }
 }
 
 function safeSetText(el, value = "") {
@@ -660,7 +753,7 @@ function isImageElement(el) {
 function removeNativeTooltip(el) {
   /*
     Regla del proyecto:
-    - quitar title nativo
+    - eliminar title nativo
     - no tocar data-tooltip custom
   */
   safeRemoveAttr(
@@ -818,6 +911,42 @@ function safeTranslate(key, params = {}, fallback = "") {
 }
 
 /* =========================================================
+   ARG NORMALIZATION
+========================================================= */
+
+function normalizeTitleArgs(input = {}, maybeExtra = {}) {
+  if (typeof input === "string") {
+    return {
+      ...safeObject(maybeExtra),
+      title:
+        input,
+    };
+  }
+
+  return safeObject(input);
+}
+
+function normalizeSyncArgs(input = {}) {
+  if (
+    input &&
+    typeof input === "object" &&
+    (
+      "state" in input ||
+      "dom" in input ||
+      "events" in input ||
+      "recache" in input
+    )
+  ) {
+    return input;
+  }
+
+  return {
+    state:
+      input,
+  };
+}
+
+/* =========================================================
    DOCUMENT TITLE
 ========================================================= */
 
@@ -825,21 +954,32 @@ function normalizeTitle(value = "", fallback = config.appName || DEFAULT_TITLE) 
   return safeText(
     value,
     fallback
-  ).replace(/\s+/g, " ").slice(0, 160);
+  )
+    .replace(/\s+/g, " ")
+    .slice(0, 160);
 }
 
-export function setDocumentTitle({
-  dom,
-  events,
-  title = config.appName,
-  titleKey = "",
-  titleParams = {},
-  suffix = "",
-  updateTopbar = true,
-  topbarTitle = "",
-  topbarTitleKey = "",
-  topbarTitleParams = {},
-} = {}) {
+export function setDocumentTitle(input = {}, maybeExtra = {}) {
+  const args =
+    normalizeTitleArgs(
+      input,
+      maybeExtra
+    );
+
+  const {
+    dom,
+    events,
+    title = config.appName,
+    titleKey = "",
+    titleParams = {},
+    suffix = "",
+    updateTopbar = true,
+    topbarTitle = "",
+    topbarTitleKey = "",
+    topbarTitleParams = {},
+  } =
+    args;
+
   const baseTitle =
     normalizeTitle(
       title,
@@ -1054,6 +1194,7 @@ export function clearDynamicContainers({
   ) {
     const tablehead =
       dom?.tablehead ||
+      dom?.tableHead ||
       resolveDynamicContainer(
         dom,
         "tablehead"
@@ -1509,12 +1650,23 @@ function emitAvatarEvent(events, eventName, payload = {}) {
     events,
     eventName,
     {
-      ...payload,
+      mode:
+        payload.mode || null,
 
-      avatarUrl:
-        payload.avatarUrl
-          ? safeRedact(payload.avatarUrl)
-          : null,
+      reason:
+        payload.reason || null,
+
+      displayName:
+        payload.displayName || null,
+
+      username:
+        payload.username || null,
+
+      authenticated:
+        Boolean(payload.authenticated),
+
+      hasAvatarUrl:
+        Boolean(payload.hasAvatarUrl),
 
       at:
         safeNowIso(),
@@ -1669,6 +1821,8 @@ function renderAvatarFallback(
         displayName,
         username,
         authenticated,
+        hasAvatarUrl:
+          false,
       }
     );
   }
@@ -1685,7 +1839,6 @@ function applyAvatarImageVisible({
   username,
   authenticated,
   events,
-  avatarUrl,
   renderToken,
 } = {}) {
   if (
@@ -1768,10 +1921,11 @@ function applyAvatarImageVisible({
       mode:
         "image",
 
-      avatarUrl,
       displayName,
       username,
       authenticated,
+      hasAvatarUrl:
+        true,
     }
   );
 
@@ -1944,8 +2098,6 @@ function renderAvatarImage(
           username,
           authenticated,
           events,
-          avatarUrl:
-            safeUrl,
           renderToken,
         });
       };
@@ -1965,12 +2117,11 @@ function renderAvatarImage(
           events,
           AVATAR_ERROR_EVENT,
           {
-            avatarUrl:
-              safeUrl,
-
             displayName,
             username,
             authenticated,
+            hasAvatarUrl:
+              true,
           }
         );
 
@@ -2032,8 +2183,6 @@ function renderAvatarImage(
           username,
           authenticated,
           events,
-          avatarUrl:
-            safeUrl,
           renderToken,
         });
       }
@@ -2409,7 +2558,7 @@ function syncLogoutButton(dom, data) {
   return true;
 }
 
-function recacheUserNodes(dom, events = null) {
+export function recacheUserNodes(dom, events = null) {
   if (!dom) {
     return {};
   }
@@ -2434,6 +2583,7 @@ function recacheUserNodes(dom, events = null) {
     {
       nodes:
         result,
+
       at:
         safeNowIso(),
     }
@@ -2442,12 +2592,18 @@ function recacheUserNodes(dom, events = null) {
   return result;
 }
 
-export function syncUserUI({
-  state,
-  dom,
-  events,
-  recache = true,
-} = {}) {
+export function syncUserUI(input = {}) {
+  const args =
+    normalizeSyncArgs(input);
+
+  const {
+    state,
+    dom,
+    events,
+    recache = true,
+  } =
+    args;
+
   if (recache !== false) {
     recacheUserNodes(
       dom,
@@ -2525,11 +2681,6 @@ export function syncUserUI({
 
     hasAvatarUrl:
       Boolean(data.avatarUrl),
-
-    avatarUrl:
-      data.avatarUrl
-        ? safeRedact(data.avatarUrl)
-        : null,
 
     synced,
 
@@ -2617,20 +2768,19 @@ function getElementState(el) {
         ""
       ).slice(0, 80),
 
-    dataset:
-      {
-        avatarMode:
-          el.dataset?.avatarMode || "",
+    dataset: {
+      avatarMode:
+        el.dataset?.avatarMode || "",
 
-        avatarState:
-          el.dataset?.avatarState || "",
+      avatarState:
+        el.dataset?.avatarState || "",
 
-        authenticated:
-          el.dataset?.authenticated || "",
+      authenticated:
+        el.dataset?.authenticated || "",
 
-        username:
-          el.dataset?.username || "",
-      },
+      username:
+        el.dataset?.username || "",
+    },
   };
 }
 
@@ -2787,14 +2937,24 @@ export function getUiSnapshot({
 }
 
 /* =========================================================
-   EXPORT
+   EXPORTS
 ========================================================= */
+
+export {
+  UI_VERSION,
+  USER_UI_EVENT,
+  TITLE_EVENT,
+  DYNAMIC_CLEARED_EVENT,
+};
 
 export default {
   UI_VERSION,
 
   setDocumentTitle,
   clearDynamicContainers,
+
+  recacheUserNodes,
   syncUserUI,
+
   getUiSnapshot,
 };

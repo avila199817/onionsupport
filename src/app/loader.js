@@ -1,66 +1,32 @@
 /* =========================================================
    Onion SPA - App Loader
-   Archivo: src/app/loader.js
+   Archivo: /src/app/loader.js
 
    ONION SUPPORT · APP LOADER CONTROLLER
-   BOOT SAFE · CSP CLEAN · RACE SAFE · EXTREME 13/10
+   BOOT SAFE · CSP CLEAN · RACE SAFE · 10/10
 
    RESPONSABILIDADES:
-   - Resolver el loader global de la app.
    - Tomar control del loader estático de index.html.
    - Mostrar / ocultar loader de forma robusta.
-   - Crear loader fallback si index.html no lo trae.
-   - No usar innerHTML.
-   - No inyectar CSS inline ni style tags.
-   - No depender de body[data-theme] para decidir logos.
-   - Limpiar estados html/body/shell/main/view.
+   - Crear fallback loader sólo si index.html no lo trae.
+   - Controlar estados de carga/fatal/ready relacionados con loader.
    - Aplicar failsafe anti-loader infinito.
-   - Limpiar timer de failsafe.
    - Evitar flicker visual.
-   - Endurecer DOM access browser/server.
-   - Redactar tokens en logs/eventos/snapshots.
-   - Exponer snapshot útil para debug.
-   - No interferir con chrome/sidebar/topbar: eso lo gobierna shell.js.
+   - Redactar tokens en eventos/snapshots/logs.
+   - Exponer diagnóstico útil.
+   - No montar Sidebar/Topbar.
+   - No configurar Router/Auth/Core.
+   - No decidir rutas.
+   - No usar innerHTML.
+   - No inyectar CSS.
+   - No crear <style>.
+   - No aplicar estilos inline; sólo limpiar restos inline legacy si existieran.
 
-   CONTRATO CON INDEX / THEME / CSS:
-   - index.html deja #app-loader visible desde refresh.
+   CONTRATO:
+   - index.html trae #app-loader.
    - preboot/theme.js resuelve html[data-theme].
-   - loader.css controla:
-     · .is-visible
-     · .is-entering
-     · .is-leaving
-     · .is-hidden
-     · .has-hidden
-     · [data-loader-visible]
-     · [data-loader-state]
-   - Este módulo controla estado; CSS controla presentación.
-
-   LIMPIEZA FINAL ESPERADA:
-   - html/body sin app-booting.
-   - html/body sin app-loading.
-   - html/body con app-ready salvo estado fatal.
-   - html/body data-app-loading="false".
-   - html data-app-state="ready" o "fatal".
-   - body data-shell-state="ready" o "fatal".
-   - #app-loader.is-hidden.has-hidden.
-   - #app-loader data-loader-visible="false".
-   - #app-loader data-loader-state="hidden".
-   - #app-shell data-shell="ready" o "fatal".
-   - #app-shell data-shell-interactive="true".
-   - #app-shell aria-hidden="false".
-   - #main-content aria-busy="false".
-   - #view-container aria-busy="false".
-
-   HARDENING 13/10:
-   - Timer de hide serializado por sequence.
-   - Failsafe serializado por armId.
-   - forceHideLoader limpia siempre timers y failsafe.
-   - prepareBootLoader actualiza lastShowAt para minVisible real.
-   - hideLoader no oculta durante boot salvo force/failsafe/finalize.
-   - No se duplican eventos bus/window salvo aliases legacy explícitos.
-   - Eventos y snapshots no filtran tokens.
-   - Payload sanitizer no intenta clonar nodos DOM.
-   - Fallback loader CSP-clean sin innerHTML ni style tag.
+   - loader.css controla presentación visual.
+   - Este módulo sólo controla estado/clases/atributos.
 ========================================================= */
 
 import {
@@ -74,7 +40,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-const LOADER_VERSION = "13.1.0";
+const LOADER_VERSION = "14.0.0";
 
 const LOADER_ID = "app-loader";
 
@@ -119,30 +85,30 @@ const DEFAULT_LOADER_LOGO_BLACK_URL =
     "/src/media/img/favicon_black.png"
   );
 
+const HTML_LOADING_CLASSES = Object.freeze([
+  "app-loading",
+  "app-booting",
+]);
+
 const BODY_LOADING_CLASSES = Object.freeze([
   "loading",
   "app-loading",
   "app-booting",
 ]);
 
-const HTML_LOADING_CLASSES = Object.freeze([
-  "app-loading",
-  "app-booting",
+const HTML_READY_CLASSES = Object.freeze([
+  "app-ready",
 ]);
 
 const BODY_READY_CLASSES = Object.freeze([
   "app-ready",
 ]);
 
-const HTML_READY_CLASSES = Object.freeze([
-  "app-ready",
-]);
-
-const BODY_FATAL_CLASSES = Object.freeze([
+const HTML_FATAL_CLASSES = Object.freeze([
   "app-fatal",
 ]);
 
-const HTML_FATAL_CLASSES = Object.freeze([
+const BODY_FATAL_CLASSES = Object.freeze([
   "app-fatal",
 ]);
 
@@ -169,7 +135,6 @@ const LOADER_DOM_STATES = Object.freeze({
   leaving: "leaving",
   hidden: "hidden",
   fatal: "fatal",
-  removed: "removed",
 });
 
 const EVENT_NAMES = Object.freeze({
@@ -203,9 +168,6 @@ const EVENT_NAMES = Object.freeze({
   failsafeStale:
     "app:loader:failsafe:stale",
 
-  state:
-    "app:loader:state",
-
   debugApi:
     "app:loader:debug-api",
 });
@@ -224,7 +186,6 @@ const LEGACY_EVENT_ALIASES = Object.freeze({
   forceHide:
     Object.freeze([
       "app:loader:force-hide",
-      "app:loader:hide",
     ]),
 });
 
@@ -261,12 +222,14 @@ let transitionTimer = null;
 let bootFailsafeTimer = null;
 
 let sequence = 0;
-
 let failsafeArmSequence = 0;
+
 let lastFailsafeWarnKey = "";
 let lastFailsafeWarnAt = 0;
 
 let lastLoaderError = null;
+
+let debugApiInstalled = false;
 
 const logoErrorBound = new WeakSet();
 
@@ -297,18 +260,16 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
+  const text = String(value).trim();
 
   return text || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
-  const n =
-    Number(value);
+  const number = Number(value);
 
-  return Number.isFinite(n)
-    ? n
+  return Number.isFinite(number)
+    ? number
     : fallback;
 }
 
@@ -403,15 +364,21 @@ function requestPaint() {
   });
 }
 
-function safeCreateCustomEvent(name, detail = {}) {
+function safeCreateCustomEvent(name = "", detail = {}) {
   if (!isBrowser()) {
+    return null;
+  }
+
+  const eventName = safeText(name, "");
+
+  if (!eventName) {
     return null;
   }
 
   try {
     if (typeof CustomEvent === "function") {
       return new CustomEvent(
-        name,
+        eventName,
         {
           detail,
         }
@@ -420,11 +387,10 @@ function safeCreateCustomEvent(name, detail = {}) {
   } catch {}
 
   try {
-    const event =
-      document.createEvent("CustomEvent");
+    const event = document.createEvent("CustomEvent");
 
     event.initCustomEvent(
-      name,
+      eventName,
       false,
       false,
       detail
@@ -436,6 +402,10 @@ function safeCreateCustomEvent(name, detail = {}) {
   }
 }
 
+/* =========================================================
+   CORE SAFE OPS
+========================================================= */
+
 function safeGetState(AppCore) {
   try {
     return safeObject(AppCore?.state);
@@ -445,25 +415,18 @@ function safeGetState(AppCore) {
 }
 
 function safeSetCoreState(AppCore, patch = {}, options = {}) {
-  const cleanPatch =
-    safeObject(patch);
-
-  const opts =
-    safeObject(options);
+  const cleanPatch = safeObject(patch);
+  const opts = safeObject(options);
 
   try {
     if (isFunction(AppCore?.setState)) {
       AppCore.setState(
         cleanPatch,
         {
-          source:
-            "app:loader",
-          emit:
-            opts.emit === true,
-          emitState:
-            opts.emitState === true,
-          silent:
-            opts.silent !== false,
+          source: "app:loader",
+          emit: opts.emit === true,
+          emitState: opts.emitState === true,
+          silent: opts.silent !== false,
         }
       );
 
@@ -489,8 +452,7 @@ function safeSetCoreState(AppCore, patch = {}, options = {}) {
 }
 
 function safeSetLoading(AppCore, value = false) {
-  const next =
-    Boolean(value);
+  const next = Boolean(value);
 
   try {
     if (isFunction(AppCore?.setLoading)) {
@@ -502,28 +464,29 @@ function safeSetLoading(AppCore, value = false) {
   return safeSetCoreState(
     AppCore,
     {
-      loading:
-        next,
+      loading: next,
     }
   );
 }
 
 function safeSetBooting(AppCore, value = false) {
-  const next =
-    Boolean(value);
+  const next = Boolean(value);
 
   return safeSetCoreState(
     AppCore,
     {
-      booting:
-        next,
+      booting: next,
     }
   );
 }
 
-function safeSetDomRef(AppCore, key, value) {
+function safeSetDomRef(AppCore, key = "", value = null) {
+  if (!key) {
+    return false;
+  }
+
   try {
-    if (AppCore?.dom && key) {
+    if (AppCore?.dom) {
       AppCore.dom[key] = value;
       return true;
     }
@@ -533,12 +496,11 @@ function safeSetDomRef(AppCore, key, value) {
 }
 
 /* =========================================================
-   TOKEN REDACTION / SAFE EVENTS
+   REDACTION / SANITIZE
 ========================================================= */
 
 function redactSensitiveText(value = "") {
-  let output =
-    safeText(value, "");
+  let output = safeText(value, "");
 
   if (!output) {
     return "";
@@ -549,36 +511,31 @@ function redactSensitiveText(value = "") {
       const escaped =
         String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-      output =
-        output.replace(
-          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
-          "$1***"
-        );
+      output = output.replace(
+        new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
+        "$1***"
+      );
     }
 
-    output =
-      output.replace(
-        /(\/activate-account\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
+    output = output.replace(
+      /(\/activate-account\/)([^/?#\s]+)/gi,
+      "$1***"
+    );
 
-    output =
-      output.replace(
-        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
+    output = output.replace(
+      /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+      "$1***"
+    );
 
-    output =
-      output.replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      );
+    output = output.replace(
+      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+      "$1***"
+    );
 
-    output =
-      output.replace(
-        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-        "***"
-      );
+    output = output.replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
   } catch {}
 
   return output;
@@ -630,12 +587,13 @@ function sanitizePayload(value, depth = 0) {
 
   if (isDomNodeLike(value)) {
     return {
-      node:
-        safeText(value.nodeName, "Node"),
-      id:
-        safeText(value.id, ""),
-      className:
-        safeText(value.className?.baseVal || value.className, ""),
+      node: safeText(value.nodeName, "Node"),
+      id: safeText(value.id, ""),
+      className: safeText(
+        value.className?.baseVal ||
+          value.className,
+        ""
+      ),
     };
   }
 
@@ -649,32 +607,24 @@ function sanitizePayload(value, depth = 0) {
 
   if (value instanceof Error) {
     return {
-      name:
-        safeText(value.name, "Error"),
-      message:
-        redactSensitiveText(value.message || ""),
-      code:
-        value.code || null,
-      status:
-        value.status || null,
+      name: safeText(value.name, "Error"),
+      message: redactSensitiveText(value.message || ""),
+      code: value.code || null,
+      status: value.status || value.statusCode || null,
     };
   }
 
   if (value instanceof Map) {
     return {
-      type:
-        "Map",
-      size:
-        value.size,
+      type: "Map",
+      size: value.size,
     };
   }
 
   if (value instanceof Set) {
     return {
-      type:
-        "Set",
-      size:
-        value.size,
+      type: "Set",
+      size: value.size,
     };
   }
 
@@ -685,9 +635,7 @@ function sanitizePayload(value, depth = 0) {
     const output = {};
 
     for (const [key, item] of Object.entries(value)) {
-      if (
-        /token|secret|password|authorization|credential/i.test(key)
-      ) {
+      if (/token|secret|password|authorization|credential/i.test(key)) {
         output[key] = "***";
         continue;
       }
@@ -712,12 +660,9 @@ function normalizeLoaderError(error = null) {
 
   if (typeof error === "string") {
     return {
-      name:
-        "LoaderError",
-      message:
-        redactSensitiveText(error),
-      code:
-        "LOADER_ERROR",
+      name: "LoaderError",
+      message: redactSensitiveText(error),
+      code: "LOADER_ERROR",
     };
   }
 
@@ -752,14 +697,9 @@ function safeWarn(AppCore, ...args) {
 
 function recordLoaderError(AppCore, source = "loader", error = null) {
   lastLoaderError = {
-    source:
-      safeText(source, "loader"),
-
-    error:
-      normalizeLoaderError(error),
-
-    at:
-      safeIsoDate(),
+    source: safeText(source, "loader"),
+    error: normalizeLoaderError(error),
+    at: safeIsoDate(),
   };
 
   safeWarn(
@@ -771,19 +711,15 @@ function recordLoaderError(AppCore, source = "loader", error = null) {
   return lastLoaderError;
 }
 
-function safeEmit(AppCore, eventName, payload = {}, options = {}) {
-  const name =
-    safeText(eventName, "");
+function safeEmit(AppCore, eventName = "", payload = {}, options = {}) {
+  const name = safeText(eventName, "");
 
   if (!name) {
     return false;
   }
 
-  const opts =
-    safeObject(options);
-
-  const cleanPayload =
-    sanitizePayload(payload);
+  const opts = safeObject(options);
+  const cleanPayload = sanitizePayload(payload);
 
   let busAvailable = false;
   let busEmitted = false;
@@ -801,10 +737,6 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
     }
   } catch {}
 
-  /*
-    No duplicar bus + window.
-    Window sólo fallback o mirror explícito.
-  */
   if (
     opts.window === true ||
     (!busAvailable && isBrowser())
@@ -826,12 +758,10 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   return busEmitted;
 }
 
-function emitLoaderEvent(AppCore, eventName, payload = {}, aliases = []) {
+function emitLoaderEvent(AppCore, eventName = "", payload = {}, aliases = []) {
   const finalPayload = {
-    version:
-      LOADER_VERSION,
-    at:
-      safeIsoDate(),
+    version: LOADER_VERSION,
+    at: safeIsoDate(),
     ...safeObject(payload),
   };
 
@@ -847,10 +777,6 @@ function emitLoaderEvent(AppCore, eventName, payload = {}, aliases = []) {
     emitted = true;
   }
 
-  /*
-    Aliases legacy explícitos.
-    Son otros event names, no duplicado bus/window.
-  */
   for (const alias of safeArray(aliases)) {
     if (
       alias &&
@@ -873,7 +799,10 @@ function emitLoaderEvent(AppCore, eventName, payload = {}, aliases = []) {
 ========================================================= */
 
 function getById(id = "") {
-  if (!isBrowser() || !id) {
+  if (
+    !isBrowser() ||
+    !id
+  ) {
     return null;
   }
 
@@ -885,7 +814,10 @@ function getById(id = "") {
 }
 
 function query(selector = "") {
-  if (!isBrowser() || !selector) {
+  if (
+    !isBrowser() ||
+    !selector
+  ) {
     return null;
   }
 
@@ -908,7 +840,10 @@ function documentContains(element) {
 }
 
 function setAttr(element, name, value) {
-  if (!element || !name) {
+  if (
+    !element ||
+    !name
+  ) {
     return false;
   }
 
@@ -932,7 +867,10 @@ function setAttr(element, name, value) {
 }
 
 function setDataset(element, key, value) {
-  if (!element || !key) {
+  if (
+    !element ||
+    !key
+  ) {
     return false;
   }
 
@@ -944,29 +882,7 @@ function setDataset(element, key, value) {
     ) {
       delete element.dataset[key];
     } else {
-      element.dataset[key] =
-        String(value);
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function toggleClasses(element, classNames = [], enabled = false) {
-  if (!element) {
-    return false;
-  }
-
-  try {
-    for (const className of safeArray(classNames)) {
-      if (className) {
-        element.classList.toggle(
-          className,
-          Boolean(enabled)
-        );
-      }
+      element.dataset[key] = String(value);
     }
 
     return true;
@@ -1013,16 +929,42 @@ function removeClasses(element, classNames = []) {
   }
 }
 
-function clearLegacyInlineLoaderStyles(loader) {
+function toggleClasses(element, classNames = [], enabled = false) {
+  if (!element) {
+    return false;
+  }
+
+  try {
+    for (const className of safeArray(classNames)) {
+      if (className) {
+        element.classList.toggle(
+          className,
+          Boolean(enabled)
+        );
+      }
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearLegacyInlineLoaderOverrides(loader) {
   if (!loader) {
     return false;
   }
 
   try {
+    /*
+      No aplicamos estilos inline.
+      Sólo limpiamos restos legacy si algún código viejo los dejó.
+    */
     loader.style.display = "";
     loader.style.opacity = "";
     loader.style.visibility = "";
     loader.style.pointerEvents = "";
+
     return true;
   } catch {
     return false;
@@ -1036,8 +978,7 @@ function createElement(tagName = "div", {
   attrs = {},
   dataset = {},
 } = {}) {
-  const element =
-    document.createElement(tagName);
+  const element = document.createElement(tagName);
 
   if (id) {
     element.id = id;
@@ -1189,8 +1130,7 @@ function getSystemTheme() {
 }
 
 function resolveThemeValue(theme = "") {
-  const normalized =
-    normalizeTheme(theme);
+  const normalized = normalizeTheme(theme);
 
   if (normalized === "system") {
     return getSystemTheme();
@@ -1207,10 +1147,6 @@ function resolveThemeValue(theme = "") {
 }
 
 function getCurrentTheme(AppCore) {
-  /*
-    Preferimos html[data-theme], porque preboot/theme.js debe resolverlo
-    antes del bootstrap. No usamos body[data-theme] como fuente principal.
-  */
   try {
     const htmlTheme =
       resolveThemeValue(
@@ -1223,12 +1159,13 @@ function getCurrentTheme(AppCore) {
   } catch {}
 
   try {
-    const boot =
-      getBootThemeSnapshot();
+    const boot = getBootThemeSnapshot();
 
     const bootTheme =
       resolveThemeValue(
-        boot.theme || boot.mode || boot.resolvedTheme
+        boot.theme ||
+          boot.mode ||
+          boot.resolvedTheme
       );
 
     if (bootTheme) {
@@ -1267,11 +1204,8 @@ function getDefaultLoaderLogoUrl(AppCore) {
 
 function getDefaultLoaderLogoPair() {
   return {
-    white:
-      DEFAULT_LOADER_LOGO_WHITE_URL,
-
-    black:
-      DEFAULT_LOADER_LOGO_BLACK_URL,
+    white: DEFAULT_LOADER_LOGO_WHITE_URL,
+    black: DEFAULT_LOADER_LOGO_BLACK_URL,
   };
 }
 
@@ -1280,8 +1214,7 @@ function getDefaultLoaderLogoPair() {
 ========================================================= */
 
 function getLoaderConfig(AppCore) {
-  const cfg =
-    safeObject(AppCore?.config);
+  const cfg = safeObject(AppCore?.config);
 
   const defaultLogoUrl =
     getDefaultLoaderLogoUrl(AppCore);
@@ -1429,30 +1362,21 @@ function setDocumentLoadingState(enabled = false, {
     return false;
   }
 
-  const html =
-    document.documentElement;
-
-  const body =
-    document.body;
+  const html = document.documentElement;
+  const body = document.body;
 
   if (!html) {
     return false;
   }
 
-  const loading =
-    Boolean(enabled);
-
-  const isBooting =
-    Boolean(booting && loading);
-
-  const isFatal =
-    Boolean(fatal || isFatalDocumentState());
+  const loading = Boolean(enabled);
+  const isBooting = Boolean(booting && loading);
+  const isFatal = Boolean(fatal || isFatalDocumentState());
 
   try {
-    toggleClasses(
+    removeClasses(
       html,
-      HTML_LOADING_CLASSES,
-      false
+      HTML_LOADING_CLASSES
     );
 
     if (isFatal) {
@@ -1523,10 +1447,9 @@ function setDocumentLoadingState(enabled = false, {
   }
 
   try {
-    toggleClasses(
+    removeClasses(
       body,
-      BODY_LOADING_CLASSES,
-      false
+      BODY_LOADING_CLASSES
     );
 
     if (isFatal) {
@@ -1580,7 +1503,10 @@ function setDocumentLoadingState(enabled = false, {
 
     if (isBooting) {
       body.dataset.routeMode = "boot";
-    } else if (!loading && body.dataset.routeMode === "boot") {
+    } else if (
+      !loading &&
+      body.dataset.routeMode === "boot"
+    ) {
       body.dataset.routeMode =
         isFatal ? "fatal" : "ready";
     }
@@ -1597,23 +1523,13 @@ function setShellLoadingState(enabled = false, {
     return false;
   }
 
-  const loading =
-    Boolean(enabled);
+  const loading = Boolean(enabled);
+  const isBooting = Boolean(booting && loading);
+  const isFatal = Boolean(fatal || isFatalDocumentState());
 
-  const isBooting =
-    Boolean(booting && loading);
-
-  const isFatal =
-    Boolean(fatal || isFatalDocumentState());
-
-  const shell =
-    getShellElement();
-
-  const main =
-    getMainElement();
-
-  const view =
-    getViewElement();
+  const shell = getShellElement();
+  const main = getMainElement();
+  const view = getViewElement();
 
   const shellState =
     loading
@@ -1626,10 +1542,6 @@ function setShellLoadingState(enabled = false, {
 
   try {
     if (shell) {
-      /*
-        Loader nunca destruye app-shell.
-        La visibilidad de chrome la controla shell.js.
-      */
       shell.hidden = false;
 
       shell.dataset.shell = shellState;
@@ -1637,7 +1549,10 @@ function setShellLoadingState(enabled = false, {
       shell.dataset.shellInteractive =
         loading ? "false" : "true";
 
-      if (shell.dataset.routeMode === "boot" && !loading) {
+      if (
+        shell.dataset.routeMode === "boot" &&
+        !loading
+      ) {
         shell.dataset.routeMode =
           isFatal ? "fatal" : "ready";
       }
@@ -1670,7 +1585,10 @@ function setShellLoadingState(enabled = false, {
         "false"
       );
 
-      if (main.dataset.routeMode === "boot" && !loading) {
+      if (
+        main.dataset.routeMode === "boot" &&
+        !loading
+      ) {
         main.dataset.routeMode =
           isFatal ? "fatal" : "ready";
       }
@@ -1726,8 +1644,8 @@ function setAppLoadingState(enabled = false, {
 ========================================================= */
 
 function createLoaderImage({
-  className,
-  src,
+  className = "",
+  src = "",
   fetchPriority = "auto",
   dataset = {},
 } = {}) {
@@ -1776,7 +1694,10 @@ function isElementDisplayed(element) {
 }
 
 function bindFallbackLogoErrorHandlers(loader) {
-  if (!isBrowser() || !loader) {
+  if (
+    !isBrowser() ||
+    !loader
+  ) {
     return false;
   }
 
@@ -1816,15 +1737,17 @@ function bindFallbackLogoErrorHandlers(loader) {
               "true"
             );
 
-            if (wasVisible && fallback) {
+            if (
+              wasVisible &&
+              fallback
+            ) {
               loader.classList.add("has-logo-error");
               loader.dataset.logoError = "true";
             }
           } catch {}
         },
         {
-          once:
-            true,
+          once: true,
         }
       );
     }
@@ -1842,8 +1765,7 @@ function syncExistingLoaderAssets(AppCore, loader) {
     return false;
   }
 
-  const cfg =
-    getLoaderConfig(AppCore);
+  const cfg = getLoaderConfig(AppCore);
 
   try {
     setDataset(
@@ -1882,7 +1804,10 @@ function syncExistingLoaderAssets(AppCore, loader) {
         ".app-loader__logo--light,[data-loader-logo-light='true']"
       );
 
-    if (darkLogo && !safeText(darkLogo.getAttribute("src"), "")) {
+    if (
+      darkLogo &&
+      !safeText(darkLogo.getAttribute("src"), "")
+    ) {
       setAttr(
         darkLogo,
         "src",
@@ -1890,7 +1815,10 @@ function syncExistingLoaderAssets(AppCore, loader) {
       );
     }
 
-    if (lightLogo && !safeText(lightLogo.getAttribute("src"), "")) {
+    if (
+      lightLogo &&
+      !safeText(lightLogo.getAttribute("src"), "")
+    ) {
       setAttr(
         lightLogo,
         "src",
@@ -1954,8 +1882,7 @@ function createFallbackLoader(AppCore) {
     return null;
   }
 
-  const cfg =
-    getLoaderConfig(AppCore);
+  const cfg = getLoaderConfig(AppCore);
 
   if (!cfg.createIfMissing) {
     return null;
@@ -1964,75 +1891,55 @@ function createFallbackLoader(AppCore) {
   try {
     const loader =
       createElement("div", {
-        id:
-          LOADER_ID,
-
-        className:
-          "app-loader is-visible",
+        id: LOADER_ID,
+        className: "app-loader is-visible",
 
         attrs: {
-          role:
-            "status",
-          "aria-live":
-            "polite",
-          "aria-busy":
-            "true",
-          "aria-hidden":
-            "false",
+          role: "status",
+          "aria-live": "polite",
+          "aria-busy": "true",
+          "aria-hidden": "false",
         },
 
         dataset: {
-          appLoader:
-            "true",
-          loaderGenerated:
-            "true",
-          loaderVisible:
-            "true",
-          loaderState:
-            LOADER_DOM_STATES.booting,
+          appLoader: "true",
+          loaderGenerated: "true",
+          loaderVisible: "true",
+          loaderState: LOADER_DOM_STATES.booting,
         },
       });
 
     const backdrop =
       createElement("div", {
-        className:
-          "app-loader__backdrop",
+        className: "app-loader__backdrop",
 
         attrs: {
-          "aria-hidden":
-            "true",
+          "aria-hidden": "true",
         },
 
         dataset: {
-          loaderBackdrop:
-            "true",
+          loaderBackdrop: "true",
         },
       });
 
     const card =
       createElement("div", {
-        className:
-          "app-loader__card",
-
+        className: "app-loader__card",
         dataset: {
-          loaderCard:
-            "true",
+          loaderCard: "true",
         },
       });
 
     const brand =
       createElement("div", {
-        className:
-          "app-loader__brand",
+        className: "app-loader__brand",
 
         attrs: {
-          "aria-hidden":
-            "true",
+          "aria-hidden": "true",
         },
 
         dataset: {
-          loaderBrand:
-            "true",
+          loaderBrand: "true",
         },
       });
 
@@ -2040,13 +1947,10 @@ function createFallbackLoader(AppCore) {
       createLoaderImage({
         className:
           "app-loader__logo app-loader__logo--dark",
-        src:
-          cfg.logoWhiteUrl,
-        fetchPriority:
-          "high",
+        src: cfg.logoWhiteUrl,
+        fetchPriority: "high",
         dataset: {
-          loaderLogoDark:
-            "true",
+          loaderLogoDark: "true",
         },
       });
 
@@ -2054,29 +1958,24 @@ function createFallbackLoader(AppCore) {
       createLoaderImage({
         className:
           "app-loader__logo app-loader__logo--light",
-        src:
-          cfg.logoBlackUrl,
-        fetchPriority:
-          "low",
+        src: cfg.logoBlackUrl,
+        fetchPriority: "low",
         dataset: {
-          loaderLogoLight:
-            "true",
+          loaderLogoLight: "true",
         },
       });
 
     const fallbackLogo =
       createElement("div", {
-        className:
-          "app-loader__logo-fallback",
+        className: "app-loader__logo-fallback",
         text:
-          cfg.appName.slice(0, 1).toUpperCase() || "O",
+          cfg.appName.slice(0, 1).toUpperCase() ||
+          "O",
         attrs: {
-          "aria-hidden":
-            "true",
+          "aria-hidden": "true",
         },
         dataset: {
-          loaderLogoFallback:
-            "true",
+          loaderLogoFallback: "true",
         },
       });
 
@@ -2086,31 +1985,24 @@ function createFallbackLoader(AppCore) {
 
     const copy =
       createElement("div", {
-        className:
-          "app-loader__copy",
+        className: "app-loader__copy",
       });
 
     const title =
       createElement("strong", {
-        className:
-          "app-loader__title",
-        text:
-          cfg.appName,
+        className: "app-loader__title",
+        text: cfg.appName,
         dataset: {
-          loaderTitle:
-            "true",
+          loaderTitle: "true",
         },
       });
 
     const text =
       createElement("span", {
-        className:
-          "app-loader__text",
-        text:
-          cfg.text,
+        className: "app-loader__text",
+        text: cfg.text,
         dataset: {
-          loaderText:
-            "true",
+          loaderText: "true",
         },
       });
 
@@ -2120,13 +2012,10 @@ function createFallbackLoader(AppCore) {
     if (cfg.subtext) {
       copy.appendChild(
         createElement("small", {
-          className:
-            "app-loader__subtext",
-          text:
-            cfg.subtext,
+          className: "app-loader__subtext",
+          text: cfg.subtext,
           dataset: {
-            loaderSubtext:
-              "true",
+            loaderSubtext: "true",
           },
         })
       );
@@ -2134,18 +2023,15 @@ function createFallbackLoader(AppCore) {
 
     const bar =
       createElement("div", {
-        className:
-          "app-loader__bar",
+        className: "app-loader__bar",
         attrs: {
-          "aria-hidden":
-            "true",
+          "aria-hidden": "true",
         },
       });
 
     const fill =
       createElement("span", {
-        className:
-          "app-loader__bar-fill",
+        className: "app-loader__bar-fill",
       });
 
     bar.appendChild(fill);
@@ -2181,10 +2067,8 @@ function createFallbackLoader(AppCore) {
       AppCore,
       EVENT_NAMES.fallbackCreated,
       {
-        hasLoader:
-          true,
-        generated:
-          true,
+        hasLoader: true,
+        generated: true,
       }
     );
 
@@ -2201,7 +2085,7 @@ function createFallbackLoader(AppCore) {
 }
 
 /* =========================================================
-   ELEMENT
+   ELEMENT RESOLUTION
 ========================================================= */
 
 export function getLoaderElement(AppCore) {
@@ -2219,31 +2103,31 @@ export function getLoaderElement(AppCore) {
   } catch {}
 
   try {
-    const el =
+    const element =
       getById(LOADER_ID) ||
       query(LOADER_SELECTOR) ||
       null;
 
-    if (el) {
+    if (element) {
       safeSetDomRef(
         AppCore,
         "loader",
-        el
+        element
       );
 
       safeSetDomRef(
         AppCore,
         "appLoader",
-        el
+        element
       );
 
       syncExistingLoaderAssets(
         AppCore,
-        el
+        element
       );
     }
 
-    return el;
+    return element;
   } catch {
     return null;
   }
@@ -2322,7 +2206,10 @@ function isLoaderActuallyVisible(loader) {
   }
 }
 
-function restoreLoaderInlineStyles(AppCore, loaderState = LOADER_DOM_STATES.visible) {
+export function restoreLoaderInlineStyles(
+  AppCore,
+  loaderState = LOADER_DOM_STATES.visible
+) {
   const loader =
     ensureLoaderElement(AppCore);
 
@@ -2374,13 +2261,13 @@ function restoreLoaderInlineStyles(AppCore, loaderState = LOADER_DOM_STATES.visi
       ]
     );
 
-    clearLegacyInlineLoaderStyles(loader);
+    clearLegacyInlineLoaderOverrides(loader);
 
     return true;
   } catch (error) {
     recordLoaderError(
       AppCore,
-      "restore-loader-inline-styles",
+      "restore-loader-state",
       error
     );
 
@@ -2434,7 +2321,7 @@ function markLoaderVisible(loader, loaderState = LOADER_DOM_STATES.visible) {
       LOADER_VISIBLE_CLASSES
     );
 
-    clearLegacyInlineLoaderStyles(loader);
+    clearLegacyInlineLoaderOverrides(loader);
 
     return true;
   } catch {
@@ -2489,7 +2376,7 @@ function markLoaderLeaving(loader) {
       ]
     );
 
-    clearLegacyInlineLoaderStyles(loader);
+    clearLegacyInlineLoaderOverrides(loader);
 
     return true;
   } catch {
@@ -2543,7 +2430,7 @@ function markLoaderHidden(loader, loaderState = LOADER_DOM_STATES.hidden) {
       LOADER_HIDDEN_CLASSES
     );
 
-    clearLegacyInlineLoaderStyles(loader);
+    clearLegacyInlineLoaderOverrides(loader);
 
     return true;
   } catch {
@@ -2551,20 +2438,21 @@ function markLoaderHidden(loader, loaderState = LOADER_DOM_STATES.hidden) {
   }
 }
 
-function setLoaderVisible(loader, visible = true, AppCore = null, sequenceId = sequence) {
+function setLoaderVisible(
+  loader,
+  visible = true,
+  AppCore = null,
+  sequenceId = sequence
+) {
   if (!loader) {
     return false;
   }
 
-  const show =
-    Boolean(visible);
-
-  if (show) {
+  if (Boolean(visible)) {
     return markLoaderVisible(loader);
   }
 
-  const cfg =
-    getLoaderConfig(AppCore);
+  const cfg = getLoaderConfig(AppCore);
 
   markLoaderLeaving(loader);
 
@@ -2645,8 +2533,7 @@ function isBootActive(AppCore, state = null) {
 }
 
 function shouldAllowHideDuringBoot(options = {}) {
-  const opts =
-    safeObject(options);
+  const opts = safeObject(options);
 
   const reason =
     safeText(opts.reason, "").toLowerCase();
@@ -2671,27 +2558,19 @@ function shouldAllowHideDuringBoot(options = {}) {
 ========================================================= */
 
 export function showLoader(AppCore, options = {}) {
-  const opts =
-    safeObject(options);
+  const opts = safeObject(options);
 
   if (!isBrowser()) {
-    safeSetLoading(
-      AppCore,
-      true
-    );
+    safeSetLoading(AppCore, true);
 
     if (opts.booting === true) {
-      safeSetBooting(
-        AppCore,
-        true
-      );
+      safeSetBooting(AppCore, true);
     }
 
     return true;
   }
 
-  const id =
-    nextSequence();
+  const id = nextSequence();
 
   clearLoaderTimers();
 
@@ -2703,16 +2582,13 @@ export function showLoader(AppCore, options = {}) {
       ? LOADER_DOM_STATES.booting
       : LOADER_DOM_STATES.visible;
 
-  lastShowAt =
-    now();
+  lastShowAt = now();
 
   setAppLoadingState(
     true,
     {
-      booting:
-        opts.booting === true,
-      fatal:
-        false,
+      booting: opts.booting === true,
+      fatal: false,
     }
   );
 
@@ -2728,26 +2604,18 @@ export function showLoader(AppCore, options = {}) {
     );
   }
 
-  safeSetLoading(
-    AppCore,
-    true
-  );
+  safeSetLoading(AppCore, true);
 
   if (opts.booting === true) {
-    safeSetBooting(
-      AppCore,
-      true
-    );
+    safeSetBooting(AppCore, true);
   }
 
   safeSetCoreState(
     AppCore,
     {
-      loaderVisible:
-        true,
+      loaderVisible: true,
       loaderState,
-      loaderShownAt:
-        epochNow(),
+      loaderShownAt: epochNow(),
     }
   );
 
@@ -2755,14 +2623,10 @@ export function showLoader(AppCore, options = {}) {
     AppCore,
     EVENT_NAMES.show,
     {
-      sequence:
-        id,
-      hasLoader:
-        Boolean(loader),
-      booting:
-        Boolean(opts.booting),
-      reason:
-        safeText(opts.reason, ""),
+      sequence: id,
+      hasLoader: Boolean(loader),
+      booting: Boolean(opts.booting),
+      reason: safeText(opts.reason, ""),
     },
     LEGACY_EVENT_ALIASES.show
   );
@@ -2771,25 +2635,16 @@ export function showLoader(AppCore, options = {}) {
 }
 
 export function forceHideLoader(AppCore, options = {}) {
-  const opts =
-    safeObject(options);
+  const opts = safeObject(options);
 
   if (!isBrowser()) {
-    safeSetLoading(
-      AppCore,
-      false
-    );
-
-    safeSetBooting(
-      AppCore,
-      false
-    );
+    safeSetLoading(AppCore, false);
+    safeSetBooting(AppCore, false);
 
     return true;
   }
 
-  const id =
-    nextSequence();
+  const id = nextSequence();
 
   clearLoaderTimers();
   clearBootFailsafeTimer(opts.state || null, AppCore);
@@ -2805,10 +2660,8 @@ export function forceHideLoader(AppCore, options = {}) {
   setAppLoadingState(
     false,
     {
-      booting:
-        false,
-      fatal:
-        Boolean(opts.fatal),
+      booting: false,
+      fatal: Boolean(opts.fatal),
     }
   );
 
@@ -2819,25 +2672,15 @@ export function forceHideLoader(AppCore, options = {}) {
     );
   }
 
-  safeSetLoading(
-    AppCore,
-    false
-  );
-
-  safeSetBooting(
-    AppCore,
-    false
-  );
+  safeSetLoading(AppCore, false);
+  safeSetBooting(AppCore, false);
 
   safeSetCoreState(
     AppCore,
     {
-      loaderVisible:
-        false,
-      loaderState:
-        finalLoaderState,
-      loaderHiddenAt:
-        epochNow(),
+      loaderVisible: false,
+      loaderState: finalLoaderState,
+      loaderHiddenAt: epochNow(),
     }
   );
 
@@ -2845,16 +2688,11 @@ export function forceHideLoader(AppCore, options = {}) {
     AppCore,
     EVENT_NAMES.forceHide,
     {
-      sequence:
-        id,
-      forced:
-        true,
-      hasLoader:
-        Boolean(loader),
-      fatal:
-        Boolean(opts.fatal),
-      reason:
-        safeText(opts.reason, ""),
+      sequence: id,
+      forced: true,
+      hasLoader: Boolean(loader),
+      fatal: Boolean(opts.fatal),
+      reason: safeText(opts.reason, ""),
     },
     LEGACY_EVENT_ALIASES.forceHide
   );
@@ -2863,19 +2701,11 @@ export function forceHideLoader(AppCore, options = {}) {
 }
 
 export function hideLoader(AppCore, options = {}) {
-  const opts =
-    safeObject(options);
+  const opts = safeObject(options);
 
   if (!isBrowser()) {
-    safeSetLoading(
-      AppCore,
-      false
-    );
-
-    safeSetBooting(
-      AppCore,
-      false
-    );
+    safeSetLoading(AppCore, false);
+    safeSetBooting(AppCore, false);
 
     return true;
   }
@@ -2896,19 +2726,15 @@ export function hideLoader(AppCore, options = {}) {
       {
         reason:
           safeText(opts.reason, "boot-active"),
-        bootActive:
-          true,
+        bootActive: true,
       }
     );
 
     return false;
   }
 
-  const cfg =
-    getLoaderConfig(AppCore);
-
-  const id =
-    nextSequence();
+  const cfg = getLoaderConfig(AppCore);
+  const id = nextSequence();
 
   clearLoaderTimers();
 
@@ -2961,48 +2787,36 @@ export function hideLoader(AppCore, options = {}) {
     setAppLoadingState(
       false,
       {
-        booting:
-          false,
-        fatal:
-          Boolean(opts.fatal),
+        booting: false,
+        fatal: Boolean(opts.fatal),
       }
     );
 
     if (loader) {
-      setLoaderVisible(
-        loader,
-        false,
-        AppCore,
-        id
-      );
-
       if (Boolean(opts.fatal)) {
         markLoaderHidden(
           loader,
           finalLoaderState
         );
+      } else {
+        setLoaderVisible(
+          loader,
+          false,
+          AppCore,
+          id
+        );
       }
     }
 
-    safeSetLoading(
-      AppCore,
-      false
-    );
-
-    safeSetBooting(
-      AppCore,
-      false
-    );
+    safeSetLoading(AppCore, false);
+    safeSetBooting(AppCore, false);
 
     safeSetCoreState(
       AppCore,
       {
-        loaderVisible:
-          false,
-        loaderState:
-          finalLoaderState,
-        loaderHiddenAt:
-          epochNow(),
+        loaderVisible: false,
+        loaderState: finalLoaderState,
+        loaderHiddenAt: epochNow(),
       }
     );
 
@@ -3010,17 +2824,12 @@ export function hideLoader(AppCore, options = {}) {
       AppCore,
       EVENT_NAMES.hide,
       {
-        sequence:
-          id,
-        forced:
-          false,
-        hasLoader:
-          Boolean(loader),
+        sequence: id,
+        forced: false,
+        hasLoader: Boolean(loader),
         remaining,
-        fatal:
-          Boolean(opts.fatal),
-        reason:
-          safeText(opts.reason, ""),
+        fatal: Boolean(opts.fatal),
+        reason: safeText(opts.reason, ""),
       },
       LEGACY_EVENT_ALIASES.hide
     );
@@ -3054,16 +2863,13 @@ export function takeOverStaticLoader(AppCore) {
   const loader =
     ensureLoaderElement(AppCore);
 
-  lastShowAt =
-    now();
+  lastShowAt = now();
 
   setAppLoadingState(
     true,
     {
-      booting:
-        true,
-      fatal:
-        false,
+      booting: true,
+      fatal: false,
     }
   );
 
@@ -3079,25 +2885,15 @@ export function takeOverStaticLoader(AppCore) {
     );
   }
 
-  safeSetLoading(
-    AppCore,
-    true
-  );
-
-  safeSetBooting(
-    AppCore,
-    true
-  );
+  safeSetLoading(AppCore, true);
+  safeSetBooting(AppCore, true);
 
   safeSetCoreState(
     AppCore,
     {
-      loaderVisible:
-        true,
-      loaderState:
-        LOADER_DOM_STATES.booting,
-      loaderShownAt:
-        epochNow(),
+      loaderVisible: true,
+      loaderState: LOADER_DOM_STATES.booting,
+      loaderShownAt: epochNow(),
     }
   );
 
@@ -3105,8 +2901,7 @@ export function takeOverStaticLoader(AppCore) {
     AppCore,
     EVENT_NAMES.takeover,
     {
-      hasLoader:
-        Boolean(loader),
+      hasLoader: Boolean(loader),
     }
   );
 
@@ -3156,14 +2951,10 @@ export function clearBootFailsafeTimer(state = null, AppCore = null) {
   safeSetCoreState(
     AppCore,
     {
-      bootFailsafeStartedAt:
-        0,
-      bootFailsafeTimeoutMs:
-        0,
-      bootFailsafeArmId:
-        0,
-      bootFailsafeTimer:
-        null,
+      bootFailsafeStartedAt: 0,
+      bootFailsafeTimeoutMs: 0,
+      bootFailsafeArmId: 0,
+      bootFailsafeArmed: false,
     }
   );
 
@@ -3182,8 +2973,7 @@ function shouldWarnFailsafe({
       redactSensitiveText(publicPath),
     ].join("|");
 
-  const current =
-    epochNow();
+  const current = epochNow();
 
   if (
     key === lastFailsafeWarnKey &&
@@ -3230,12 +3020,10 @@ export function armBootFailsafeLoader({
   safeSetCoreState(
     AppCore,
     {
-      bootFailsafeStartedAt:
-        startedAt,
-      bootFailsafeTimeoutMs:
-        timeout,
-      bootFailsafeArmId:
-        armId,
+      bootFailsafeStartedAt: startedAt,
+      bootFailsafeTimeoutMs: timeout,
+      bootFailsafeArmId: armId,
+      bootFailsafeArmed: true,
     }
   );
 
@@ -3253,19 +3041,15 @@ export function armBootFailsafeLoader({
               {
                 timeout,
                 armId,
-                reason:
-                  "arm-id-stale",
+                reason: "arm-id-stale",
               }
             );
 
             return;
           }
 
-          const coreState =
-            safeGetState(AppCore);
-
-          const loader =
-            getLoaderElement(AppCore);
+          const coreState = safeGetState(AppCore);
+          const loader = getLoaderElement(AppCore);
 
           const loaderVisible =
             isLoaderActuallyVisible(loader);
@@ -3301,16 +3085,12 @@ export function armBootFailsafeLoader({
 
           const payload = {
             timeout,
-            booting:
-              stillBooting,
-            loading:
-              stillLoading,
+            booting: stillBooting,
+            loading: stillLoading,
             loaderVisible,
             finalized,
-            route:
-              redactSensitiveText(route),
-            publicPath:
-              redactSensitiveText(publicPath),
+            route: redactSensitiveText(route),
+            publicPath: redactSensitiveText(publicPath),
             armId,
           };
 
@@ -3324,8 +3104,7 @@ export function armBootFailsafeLoader({
               EVENT_NAMES.failsafeStale,
               {
                 ...payload,
-                reason:
-                  "already-idle",
+                reason: "already-idle",
               }
             );
 
@@ -3341,13 +3120,10 @@ export function armBootFailsafeLoader({
             hideFn(
               AppCore,
               {
-                reason:
-                  "failsafe-stale-after-ready",
+                reason: "failsafe-stale-after-ready",
                 state,
-                force:
-                  true,
-                failsafe:
-                  true,
+                force: true,
+                failsafe: true,
               }
             );
 
@@ -3364,8 +3140,7 @@ export function armBootFailsafeLoader({
 
           if (
             shouldWarnFailsafe({
-              phase:
-                "boot",
+              phase: "boot",
               route,
               publicPath,
             })
@@ -3380,13 +3155,10 @@ export function armBootFailsafeLoader({
           hideFn(
             AppCore,
             {
-              reason:
-                "failsafe",
+              reason: "failsafe",
               state,
-              force:
-                true,
-              failsafe:
-                true,
+              force: true,
+              failsafe: true,
             }
           );
 
@@ -3408,25 +3180,13 @@ export function armBootFailsafeLoader({
       timeout
     );
 
-  bootFailsafeTimer =
-    timer;
+  bootFailsafeTimer = timer;
 
   if (state) {
     try {
       state.bootFailsafeTimer = timer;
     } catch {}
   }
-
-  safeSetCoreState(
-    AppCore,
-    {
-      /*
-        En navegador es number. Se guarda sólo para diagnóstico.
-      */
-      bootFailsafeTimer:
-        timer,
-    }
-  );
 
   emitLoaderEvent(
     AppCore,
@@ -3441,7 +3201,7 @@ export function armBootFailsafeLoader({
 }
 
 /* =========================================================
-   DEBUG
+   DEBUG / SNAPSHOT
 ========================================================= */
 
 function getClassList(element) {
@@ -3453,7 +3213,10 @@ function getClassList(element) {
 }
 
 function getComputedSnapshot(element) {
-  if (!isBrowser() || !element) {
+  if (
+    !isBrowser() ||
+    !element
+  ) {
     return {};
   }
 
@@ -3462,18 +3225,12 @@ function getComputedSnapshot(element) {
       window.getComputedStyle(element);
 
     return {
-      display:
-        safeText(style.display, ""),
-      opacity:
-        safeText(style.opacity, ""),
-      visibility:
-        safeText(style.visibility, ""),
-      pointerEvents:
-        safeText(style.pointerEvents, ""),
-      position:
-        safeText(style.position, ""),
-      zIndex:
-        safeText(style.zIndex, ""),
+      display: safeText(style.display, ""),
+      opacity: safeText(style.opacity, ""),
+      visibility: safeText(style.visibility, ""),
+      pointerEvents: safeText(style.pointerEvents, ""),
+      position: safeText(style.position, ""),
+      zIndex: safeText(style.zIndex, ""),
     };
   } catch {
     return {};
@@ -3483,58 +3240,55 @@ function getComputedSnapshot(element) {
 function getElementSnapshot(element) {
   if (!element) {
     return {
-      exists:
-        false,
+      exists: false,
     };
   }
 
   return {
-    exists:
-      true,
+    exists: true,
 
     id:
       safeText(element.id, ""),
 
     tag:
-      safeText(element.tagName?.toLowerCase?.(), ""),
+      safeText(
+        element.tagName?.toLowerCase?.(),
+        ""
+      ),
 
     hidden:
       Boolean(element.hidden),
 
     ariaHidden:
-      safeText(element.getAttribute?.("aria-hidden"), ""),
+      safeText(
+        element.getAttribute?.("aria-hidden"),
+        ""
+      ),
 
     ariaBusy:
-      safeText(element.getAttribute?.("aria-busy"), ""),
+      safeText(
+        element.getAttribute?.("aria-busy"),
+        ""
+      ),
 
     dataset:
       sanitizePayload({
-        loaderVisible:
-          element.dataset?.loaderVisible,
-        loaderState:
-          element.dataset?.loaderState,
-        shell:
-          element.dataset?.shell,
-        shellState:
-          element.dataset?.shellState,
-        shellInteractive:
-          element.dataset?.shellInteractive,
-        routeMode:
-          element.dataset?.routeMode,
+        loaderVisible: element.dataset?.loaderVisible,
+        loaderState: element.dataset?.loaderState,
+        shell: element.dataset?.shell,
+        shellState: element.dataset?.shellState,
+        shellInteractive: element.dataset?.shellInteractive,
+        routeMode: element.dataset?.routeMode,
       }),
 
     classList:
       getClassList(element),
 
     inlineStyle: {
-      display:
-        safeText(element.style?.display, ""),
-      opacity:
-        safeText(element.style?.opacity, ""),
-      visibility:
-        safeText(element.style?.visibility, ""),
-      pointerEvents:
-        safeText(element.style?.pointerEvents, ""),
+      display: safeText(element.style?.display, ""),
+      opacity: safeText(element.style?.opacity, ""),
+      visibility: safeText(element.style?.visibility, ""),
+      pointerEvents: safeText(element.style?.pointerEvents, ""),
     },
 
     computedStyle:
@@ -3565,9 +3319,8 @@ export function getLoaderSnapshot(AppCore, state = null) {
   let bodyTheme = "";
   let htmlAppState = "";
   let bodyAppLoading = "";
-
-  let bodyClasses = [];
   let htmlClasses = [];
+  let bodyClasses = [];
 
   try {
     if (isBrowser()) {
@@ -3605,9 +3358,7 @@ export function getLoaderSnapshot(AppCore, state = null) {
         );
 
       bodyClasses =
-        getClassList(
-          document.body
-        );
+        getClassList(document.body);
     }
   } catch {}
 
@@ -3622,26 +3373,25 @@ export function getLoaderSnapshot(AppCore, state = null) {
     "/";
 
   return {
-    version:
-      LOADER_VERSION,
+    version: LOADER_VERSION,
 
-    exists:
-      Boolean(loader),
+    exists: Boolean(loader),
+    id: safeText(loader?.id, ""),
+    generated: Boolean(loader?.dataset?.loaderGenerated),
 
-    id:
-      safeText(loader?.id, ""),
-
-    generated:
-      Boolean(loader?.dataset?.loaderGenerated),
-
-    hidden:
-      Boolean(loader?.hidden),
+    hidden: Boolean(loader?.hidden),
 
     ariaHidden:
-      safeText(loader?.getAttribute?.("aria-hidden"), ""),
+      safeText(
+        loader?.getAttribute?.("aria-hidden"),
+        ""
+      ),
 
     ariaBusy:
-      safeText(loader?.getAttribute?.("aria-busy"), ""),
+      safeText(
+        loader?.getAttribute?.("aria-busy"),
+        ""
+      ),
 
     visible:
       isLoaderActuallyVisible(loader),
@@ -3656,14 +3406,10 @@ export function getLoaderSnapshot(AppCore, state = null) {
       getClassList(loader),
 
     inlineStyle: {
-      display:
-        safeText(loader?.style?.display, ""),
-      opacity:
-        safeText(loader?.style?.opacity, ""),
-      visibility:
-        safeText(loader?.style?.visibility, ""),
-      pointerEvents:
-        safeText(loader?.style?.pointerEvents, ""),
+      display: safeText(loader?.style?.display, ""),
+      opacity: safeText(loader?.style?.opacity, ""),
+      visibility: safeText(loader?.style?.visibility, ""),
+      pointerEvents: safeText(loader?.style?.pointerEvents, ""),
     },
 
     computedStyle:
@@ -3720,14 +3466,14 @@ export function getLoaderSnapshot(AppCore, state = null) {
     bootTheme:
       sanitizePayload(bootTheme),
 
-    bodyClasses,
     htmlClasses,
+    bodyClasses,
 
     hasFailsafeTimer:
       Boolean(
         bootFailsafeTimer ||
           state?.bootFailsafeTimer ||
-          coreState.bootFailsafeTimer
+          coreState.bootFailsafeArmed
       ),
 
     failsafeTimeoutMs:
@@ -3804,17 +3550,19 @@ export function getLoaderSnapshot(AppCore, state = null) {
 }
 
 function installLoaderDebugApi(AppCore = null) {
+  if (debugApiInstalled) {
+    return getInstalledDebugApi(AppCore);
+  }
+
   const api = {
-    version:
-      LOADER_VERSION,
+    version: LOADER_VERSION,
 
     show:
       (options = {}) =>
         showLoader(
           AppCore,
           {
-            reason:
-              "debug-api",
+            reason: "debug-api",
             ...safeObject(options),
           }
         ),
@@ -3824,12 +3572,9 @@ function installLoaderDebugApi(AppCore = null) {
         hideLoader(
           AppCore,
           {
-            reason:
-              "debug-api",
-            force:
-              true,
-            allowDuringBoot:
-              true,
+            reason: "debug-api",
+            force: true,
+            allowDuringBoot: true,
             ...safeObject(options),
           }
         ),
@@ -3839,8 +3584,7 @@ function installLoaderDebugApi(AppCore = null) {
         forceHideLoader(
           AppCore,
           {
-            reason:
-              "debug-api",
+            reason: "debug-api",
             ...safeObject(options),
           }
         ),
@@ -3874,38 +3618,46 @@ function installLoaderDebugApi(AppCore = null) {
         AppCore,
         "Loader",
         {
-          value:
-            api,
-          configurable:
-            true,
-          enumerable:
-            false,
-          writable:
-            true,
+          value: api,
+          configurable: true,
+          enumerable: false,
+          writable: true,
         }
       );
     }
   } catch {}
 
+  debugApiInstalled = true;
+
   emitLoaderEvent(
     AppCore,
     EVENT_NAMES.debugApi,
     {
-      installed:
-        true,
+      installed: true,
     }
   );
 
   return api;
 }
 
-/* =========================================================
-   LEGACY COMPAT
-========================================================= */
+function getInstalledDebugApi(AppCore = null) {
+  try {
+    if (
+      isBrowser() &&
+      window.__ONION_APP_LOADER__
+    ) {
+      return window.__ONION_APP_LOADER__;
+    }
+  } catch {}
 
-export {
-  restoreLoaderInlineStyles,
-};
+  try {
+    if (AppCore?.Loader) {
+      return AppCore.Loader;
+    }
+  } catch {}
+
+  return null;
+}
 
 /* =========================================================
    DEFAULT EXPORT
@@ -3919,10 +3671,11 @@ export default {
   takeOverStaticLoader,
   prepareBootLoader,
 
-  forceHideLoader,
-  restoreLoaderInlineStyles,
   showLoader,
   hideLoader,
+  forceHideLoader,
+
+  restoreLoaderInlineStyles,
 
   clearBootFailsafeTimer,
   armBootFailsafeLoader,

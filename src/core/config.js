@@ -3,9 +3,9 @@
    Archivo: src/core/config.js
 
    ONION SUPPORT · CORE CONFIG
-   GLOBAL CONTRACT · ROUTES · API · AUTH · STORAGE · 13/10
+   GLOBAL CONTRACT · ROUTES · API · AUTH · STORAGE · 14/10
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - centralizar configuración global del núcleo
    - exponer rutas base canónicas del SPA
    - exponer aliases legacy sin contaminar rutas canónicas
@@ -28,6 +28,10 @@
    - soporte Azure Static Web Apps / history fallback
    - soporte rutas técnicas con token en query, path y hash-router
    - compatibilidad con request.js, auth restore, router y app bootstrap
+   - API production hard-lock:
+       · frontend SPA: https://www.onionsupport.com
+       · backend API:  https://api.onionit.net
+       · nunca usar https://www.onionsupport.com/api
 ========================================================= */
 
 /* =========================================================
@@ -35,7 +39,22 @@
 ========================================================= */
 
 const CONFIG_VERSION =
-  "13.0.0";
+  "14.0.0";
+
+/* =========================================================
+   API BASE CONTRACT
+========================================================= */
+
+const CANONICAL_PRODUCTION_API_BASE =
+  "https://api.onionit.net";
+
+const FORBIDDEN_FRONTEND_API_ORIGINS =
+  Object.freeze([
+    "https://onionsupport.com",
+    "https://www.onionsupport.com",
+    "http://onionsupport.com",
+    "http://www.onionsupport.com",
+  ]);
 
 /* =========================================================
    HELPERS
@@ -261,21 +280,6 @@ function stripSearchAndHash(path = "/") {
   );
 }
 
-function normalizeBaseUrl(value = "") {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return "";
-  }
-
-  if (raw === "/") {
-    return "";
-  }
-
-  return raw.replace(/\/+$/g, "");
-}
-
 function normalizeStoragePrefix(value = "onion") {
   return safeText(value, "onion")
     .replace(/[^a-zA-Z0-9:_-]/g, "")
@@ -348,6 +352,19 @@ function getGlobalObject() {
   } catch {}
 
   return {};
+}
+
+function getBaseOrigin() {
+  try {
+    if (
+      typeof window !== "undefined" &&
+      window.location?.origin
+    ) {
+      return window.location.origin;
+    }
+  } catch {}
+
+  return "http://localhost";
 }
 
 function getImportMetaEnv() {
@@ -505,6 +522,98 @@ function normalizeApiPathList(list = []) {
     });
 }
 
+function isProductionEnv(env = "") {
+  const clean =
+    safeText(env, "")
+      .toLowerCase();
+
+  return (
+    clean === "production" ||
+    clean === "prod"
+  );
+}
+
+function normalizeBaseUrl(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw || raw === "/") {
+    return "";
+  }
+
+  return raw.replace(/\/+$/g, "");
+}
+
+function getOriginFromUrlLike(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
+      return new URL(raw).origin;
+    }
+
+    return new URL(raw, getBaseOrigin()).origin;
+  } catch {
+    return "";
+  }
+}
+
+function isForbiddenFrontendApiBase(value = "") {
+  const origin =
+    getOriginFromUrlLike(value);
+
+  if (!origin) {
+    return false;
+  }
+
+  return FORBIDDEN_FRONTEND_API_ORIGINS.includes(origin);
+}
+
+function normalizeApiBaseUrl(value = "", {
+  env = "production",
+  fallback = "",
+} = {}) {
+  const production =
+    isProductionEnv(env);
+
+  const raw =
+    normalizeBaseUrl(value);
+
+  /*
+    Producción:
+    - si no hay apiBase, NO se usa same-origin
+    - si viene onionsupport.com, se corrige a api.onionit.net
+    - si viene /api, se corrige a api.onionit.net
+  */
+  if (production) {
+    if (
+      !raw ||
+      raw === "/api" ||
+      raw === "api" ||
+      isForbiddenFrontendApiBase(raw)
+    ) {
+      return CANONICAL_PRODUCTION_API_BASE;
+    }
+  }
+
+  if (!raw) {
+    return normalizeBaseUrl(fallback);
+  }
+
+  if (isForbiddenFrontendApiBase(raw)) {
+    return production
+      ? CANONICAL_PRODUCTION_API_BASE
+      : normalizeBaseUrl(fallback);
+  }
+
+  return raw;
+}
+
 function pickRuntimeOverrides(runtime = {}) {
   if (!isObject(runtime)) {
     return {};
@@ -635,20 +744,32 @@ const DEBUG =
     false
   );
 
+const RAW_API_BASE =
+  getEnvValue(
+    [
+      "ONION_API_BASE",
+      "VITE_ONION_API_BASE",
+      "API_BASE",
+      "API_URL",
+      "ONION_API_URL",
+      "VITE_ONION_API_URL",
+    ],
+    runtimeConfig.apiBase ||
+      runtimeConfig.api?.base ||
+      runtimeConfig.api?.baseUrl ||
+      ""
+  );
+
 const API_BASE =
-  normalizeBaseUrl(
-    getEnvValue(
-      [
-        "ONION_API_BASE",
-        "VITE_ONION_API_BASE",
-        "API_BASE",
-        "API_URL",
-      ],
-      runtimeConfig.apiBase ||
-        runtimeConfig.api?.base ||
-        runtimeConfig.api?.baseUrl ||
-        ""
-    )
+  normalizeApiBaseUrl(
+    RAW_API_BASE,
+    {
+      env: APP_ENV,
+      fallback:
+        isProductionEnv(APP_ENV)
+          ? CANONICAL_PRODUCTION_API_BASE
+          : "",
+    }
   );
 
 const STORAGE_PREFIX =
@@ -686,43 +807,22 @@ const routes = {
   incidencias:
     "/incidencias",
 
-  tickets:
-    "/incidencias",
-
   facturas:
-    "/facturas",
-
-  invoices:
     "/facturas",
 
   usuarios:
     "/usuarios",
 
-  users:
-    "/usuarios",
-
   clientes:
-    "/clientes",
-
-  clients:
     "/clientes",
 
   cuenta:
     "/cuenta",
 
-  account:
-    "/cuenta",
-
   ajustes:
     "/ajustes",
 
-  settings:
-    "/ajustes",
-
   servidor:
-    "/servidor",
-
-  server:
     "/servidor",
 
   activateAccount:
@@ -730,6 +830,9 @@ const routes = {
 
   resetPassword:
     "/reset-password",
+
+  resetPasswordConfirm:
+    "/reset-password/confirm",
 
   forgotPassword:
     "/forgot-password",
@@ -739,9 +842,6 @@ const routes = {
 
   passwordReset:
     "/password-reset",
-
-  resetPasswordConfirm:
-    "/reset-password/confirm",
 };
 
 const routeAliases = {
@@ -810,10 +910,10 @@ const publicRoutes = normalizePathList([
   routes.login,
   routes.activateAccount,
   routes.resetPassword,
+  routes.resetPasswordConfirm,
   routes.forgotPassword,
   routes.recoverPassword,
   routes.passwordReset,
-  routes.resetPasswordConfirm,
   routes.forbidden,
   routes.notFound,
 ]);
@@ -822,10 +922,10 @@ const authLikeRoutes = normalizePathList([
   routes.login,
   routes.activateAccount,
   routes.resetPassword,
+  routes.resetPasswordConfirm,
   routes.forgotPassword,
   routes.recoverPassword,
   routes.passwordReset,
-  routes.resetPasswordConfirm,
 ]);
 
 const protectedPublicTokenRoutes = [
@@ -883,6 +983,8 @@ const protectedPublicTokenRoutes = [
         "token",
         "activationToken",
         "activateToken",
+        "activation_token",
+        "activate_token",
         "code",
         "t",
       ],
@@ -947,7 +1049,10 @@ const protectedPublicTokenRoutes = [
         "token",
         "resetToken",
         "passwordResetToken",
+        "reset_token",
+        "password_reset_token",
         "confirmToken",
+        "confirm_token",
         "code",
         "t",
       ],
@@ -1085,11 +1190,15 @@ const publicApiPaths = normalizeApiPathList([
 
   "/api/auth/reset-password-request",
   "/api/auth/reset-password-confirm",
+  "/api/auth/reset-password/validate",
 
-  "/api/auth/activate",
+  "/api/auth/activate-account",
   "/api/auth/activate/first-user",
+  "/api/auth/activate/validate",
 
   "/api/auth/2fa/login",
+  "/api/auth/2fa/request",
+  "/api/auth/2fa/resend",
 
   "/api/auth/_health",
   "/api/_health",
@@ -1100,8 +1209,19 @@ const privateApiPaths = normalizePathList([
   "/api/auth/me",
   "/auth/me",
   "/me",
+
   "/api/auth/logout",
   "/api/auth/logout-all",
+
+  "/api/auth/2fa/setup",
+  "/api/auth/2fa/verify",
+  "/api/auth/2fa/confirm",
+  "/api/auth/2fa/disable",
+
+  "/api/auth/change-password",
+  "/api/auth/activate/admin",
+  "/api/auth/deactivate/admin",
+  "/api/auth/deactivate/self",
 ]);
 
 const auth = {
@@ -1160,17 +1280,50 @@ const auth = {
     resetPasswordRequest:
       "/api/auth/reset-password-request",
 
+    requestPasswordReset:
+      "/api/auth/reset-password-request",
+
+    forgotPassword:
+      "/api/auth/reset-password-request",
+
     resetPasswordConfirm:
       "/api/auth/reset-password-confirm",
 
+    confirmPasswordReset:
+      "/api/auth/reset-password-confirm",
+
+    validateResetToken:
+      "/api/auth/reset-password/validate",
+
     activate:
-      "/api/auth/activate",
+      "/api/auth/activate-account",
+
+    activateAccount:
+      "/api/auth/activate-account",
+
+    activation:
+      "/api/auth/activate-account",
 
     activateFirstUser:
       "/api/auth/activate/first-user",
 
+    validateActivationToken:
+      "/api/auth/activate/validate",
+
     twoFactorLogin:
       "/api/auth/2fa/login",
+
+    login2fa:
+      "/api/auth/2fa/login",
+
+    mfaLogin:
+      "/api/auth/2fa/login",
+
+    twoFactorRequest:
+      "/api/auth/2fa/request",
+
+    twoFactorResend:
+      "/api/auth/2fa/resend",
 
     health:
       "/api/auth/_health",
@@ -1201,6 +1354,9 @@ const auth = {
     superadmin:
       "admin",
 
+    super_admin:
+      "admin",
+
     owner:
       "admin",
 
@@ -1208,19 +1364,34 @@ const auth = {
       "admin",
 
     agent:
-      "agent",
+      "support",
+
+    agente:
+      "support",
 
     tecnico:
-      "agent",
+      "support",
 
     técnica:
-      "agent",
+      "support",
+
+    technician:
+      "support",
 
     support:
-      "agent",
+      "support",
 
     soporte:
-      "agent",
+      "support",
+
+    manager:
+      "manager",
+
+    gestor:
+      "manager",
+
+    lead:
+      "manager",
 
     user:
       "user",
@@ -1232,6 +1403,9 @@ const auth = {
       "client",
 
     cliente:
+      "client",
+
+    customer:
       "client",
   },
 
@@ -1258,7 +1432,7 @@ const auth = {
       true,
 
     allowTechnicalAuthenticatedWithoutUser:
-      true,
+      false,
 
     clearGhostUserWithoutToken:
       true,
@@ -1277,6 +1451,12 @@ const api = {
 
   sameOrigin:
     !API_BASE,
+
+  canonicalProductionBase:
+    CANONICAL_PRODUCTION_API_BASE,
+
+  forbiddenFrontendOrigins:
+    FORBIDDEN_FRONTEND_API_ORIGINS,
 
   timeout:
     safeNumber(
@@ -1665,6 +1845,12 @@ const security = {
   allowHashRouterTokenRoutes:
     true,
 
+  canonicalProductionApiBase:
+    CANONICAL_PRODUCTION_API_BASE,
+
+  forbiddenFrontendApiOrigins:
+    FORBIDDEN_FRONTEND_API_ORIGINS,
+
   unsafeHrefProtocols:
     [
       "javascript:",
@@ -1677,9 +1863,14 @@ const security = {
       "token",
       "activationToken",
       "activateToken",
+      "activation_token",
+      "activate_token",
       "resetToken",
       "passwordResetToken",
+      "reset_token",
+      "password_reset_token",
       "confirmToken",
+      "confirm_token",
       "code",
       "t",
       "access_token",
@@ -1809,6 +2000,9 @@ const featureFlags = {
 
   enableRuntimeConfig:
     true,
+
+  forceCanonicalProductionApiBase:
+    true,
 };
 
 const diagnostics = {
@@ -1893,6 +2087,12 @@ const baseConfig = {
   storagePrefix:
     STORAGE_PREFIX,
 
+  canonicalProductionApiBase:
+    CANONICAL_PRODUCTION_API_BASE,
+
+  forbiddenFrontendApiOrigins:
+    FORBIDDEN_FRONTEND_API_ORIGINS,
+
   routes,
   routeAliases,
   publicRoutes,
@@ -1958,12 +2158,27 @@ function normalizeFinalConfig(source = {}) {
       DEBUG
     );
 
+  output.canonicalProductionApiBase =
+    CANONICAL_PRODUCTION_API_BASE;
+
+  output.forbiddenFrontendApiOrigins =
+    FORBIDDEN_FRONTEND_API_ORIGINS;
+
   output.apiBase =
-    normalizeBaseUrl(
+    normalizeApiBaseUrl(
       output.apiBase ||
         output.api?.base ||
         output.api?.baseUrl ||
-        API_BASE
+        API_BASE,
+      {
+        env:
+          output.env,
+
+        fallback:
+          isProductionEnv(output.env)
+            ? CANONICAL_PRODUCTION_API_BASE
+            : API_BASE,
+      }
     );
 
   output.storagePrefix =
@@ -2102,6 +2317,12 @@ function normalizeFinalConfig(source = {}) {
     output.api.sameOrigin =
       !output.apiBase;
 
+    output.api.canonicalProductionBase =
+      CANONICAL_PRODUCTION_API_BASE;
+
+    output.api.forbiddenFrontendOrigins =
+      FORBIDDEN_FRONTEND_API_ORIGINS;
+
     output.api.timeout =
       safeNumber(
         output.api.timeout,
@@ -2218,6 +2439,14 @@ function normalizeFinalConfig(source = {}) {
       );
   }
 
+  if (output.security) {
+    output.security.canonicalProductionApiBase =
+      CANONICAL_PRODUCTION_API_BASE;
+
+    output.security.forbiddenFrontendApiOrigins =
+      FORBIDDEN_FRONTEND_API_ORIGINS;
+  }
+
   return output;
 }
 
@@ -2241,6 +2470,14 @@ export function getConfig() {
 
 export function getApiBase() {
   return config.apiBase;
+}
+
+export function getCanonicalProductionApiBase() {
+  return CANONICAL_PRODUCTION_API_BASE;
+}
+
+export function isForbiddenFrontendApiOrigin(value = "") {
+  return isForbiddenFrontendApiBase(value);
 }
 
 export function getRoute(key = "home", fallback = "/") {
@@ -2280,19 +2517,6 @@ export function getNamespacedStorageKey(key = "") {
     );
 
   return `${config.storagePrefix}:${cleanKey}`;
-}
-
-function getBaseOrigin() {
-  try {
-    if (
-      typeof window !== "undefined" &&
-      window.location?.origin
-    ) {
-      return window.location.origin;
-    }
-  } catch {}
-
-  return "http://localhost";
 }
 
 function getApiBasePath() {
@@ -2356,6 +2580,21 @@ export function isPublicApiPath(path = "") {
 
   const withoutApiBase =
     stripApiBasePrefix(cleanPath);
+
+  /*
+    Blindaje explícito:
+    /me nunca público.
+  */
+  if (
+    cleanPath === "/api/auth/me" ||
+    cleanPath === "/auth/me" ||
+    cleanPath === "/me" ||
+    withoutApiBase === "/api/auth/me" ||
+    withoutApiBase === "/auth/me" ||
+    withoutApiBase === "/me"
+  ) {
+    return false;
+  }
 
   return config.auth.publicApiPaths.some((publicPath) => {
     const current =
@@ -2465,6 +2704,15 @@ export function getConfigSnapshot() {
 
     apiBase:
       config.apiBase,
+
+    canonicalProductionApiBase:
+      config.canonicalProductionApiBase,
+
+    forbiddenFrontendApiOrigins:
+      config.forbiddenFrontendApiOrigins,
+
+    apiSameOrigin:
+      config.api?.sameOrigin,
 
     requestTimeout:
       config.requestTimeout,

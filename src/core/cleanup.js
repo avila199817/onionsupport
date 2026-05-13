@@ -2,8 +2,11 @@
    Onion SPA - Core Cleanup
    Archivo: src/core/cleanup.js
 
+   ONION SUPPORT · CORE CLEANUP
+   SCOPED DISPOSERS · DOM/BUS/TIMERS/OBSERVERS · 14/10
+
    Responsabilidades:
-   - gestionar scopes de cleanup del core
+   - gestionar scopes de cleanup del Core
    - registrar listeners DOM por scope
    - registrar listeners de event bus por scope
    - registrar cleaners/disposers manuales por scope
@@ -36,10 +39,13 @@
 ========================================================= */
 
 const CLEANUP_VERSION =
-  "12.0.0";
+  "14.0.0";
 
 const DEFAULT_SCOPE =
   "global";
+
+const DEFAULT_MANUAL_LABEL =
+  "manual";
 
 const CLEANUP_EVENTS =
   Object.freeze({
@@ -60,6 +66,9 @@ const CLEANUP_EVENTS =
 
     recordAdded:
       "cleanup:record:added",
+
+    recordSkipped:
+      "cleanup:record:skipped",
   });
 
 const SPECIAL_DOM_TARGETS =
@@ -71,6 +80,12 @@ const SPECIAL_DOM_TARGETS =
     "documentelement",
     "document-element",
   ]);
+
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code/i;
+
+const TOKENISH_TEXT_RE =
+  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)[^&#\s]+/i;
 
 /* =========================================================
    BASICS
@@ -109,6 +124,13 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
+function safeLower(value, fallback = "") {
+  return safeText(
+    value,
+    fallback
+  ).toLowerCase();
+}
+
 function safeArray(value) {
   return Array.isArray(value)
     ? value
@@ -140,6 +162,112 @@ function safeNumber(value, fallback = 0) {
     : fallback;
 }
 
+function redactText(value = "") {
+  const text =
+    safeText(value, "");
+
+  if (!text) {
+    return "";
+  }
+
+  try {
+    return text
+      .replace(
+        /(bearer\s+)([a-z0-9._~+/=-]+)/gi,
+        "$1***"
+      )
+      .replace(
+        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)([^&#\s]+)/gi,
+        "$1***"
+      )
+      .replace(
+        /([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)/gi,
+        "***"
+      );
+  } catch {
+    return TOKENISH_TEXT_RE.test(text)
+      ? "***"
+      : text;
+  }
+}
+
+function sanitizeForSnapshot(value, depth = 0, keyHint = "") {
+  if (depth > 4) {
+    return "[MaxDepth]";
+  }
+
+  if (SENSITIVE_KEY_RE.test(keyHint)) {
+    return value ? "***" : value;
+  }
+
+  if (typeof value === "string") {
+    return redactText(value);
+  }
+
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "bigint") {
+    return String(value);
+  }
+
+  if (typeof value === "function") {
+    return "[Function]";
+  }
+
+  if (value instanceof Error) {
+    return {
+      name:
+        value.name || "Error",
+
+      message:
+        redactText(value.message || ""),
+
+      stack:
+        value.stack ? "[stack]" : "",
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 50)
+      .map((item) =>
+        sanitizeForSnapshot(
+          item,
+          depth + 1,
+          keyHint
+        )
+      );
+  }
+
+  if (isPlainObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value).slice(0, 80)) {
+      output[key] =
+        sanitizeForSnapshot(
+          item,
+          depth + 1,
+          key
+        );
+    }
+
+    return output;
+  }
+
+  try {
+    return redactText(String(value));
+  } catch {
+    return "[Unserializable]";
+  }
+}
+
 function safeWarn(utils, ...args) {
   let done =
     false;
@@ -148,7 +276,9 @@ function safeWarn(utils, ...args) {
     if (isFunction(utils?.warn)) {
       utils.warn(
         "[Cleanup]",
-        ...args
+        ...args.map((item) =>
+          sanitizeForSnapshot(item)
+        )
       );
 
       done =
@@ -166,7 +296,9 @@ function safeWarn(utils, ...args) {
   try {
     console.warn(
       "[Cleanup]",
-      ...args
+      ...args.map((item) =>
+        sanitizeForSnapshot(item)
+      )
     );
   } catch {}
 }
@@ -175,7 +307,9 @@ function safeLog(utils, ...args) {
   try {
     utils?.log?.(
       "[Cleanup]",
-      ...args
+      ...args.map((item) =>
+        sanitizeForSnapshot(item)
+      )
     );
   } catch {}
 }
@@ -192,7 +326,7 @@ function safeEmit(events, name, payload = {}) {
     if (isFunction(events?.emit)) {
       events.emit(
         eventName,
-        payload
+        sanitizeForSnapshot(payload)
       );
 
       return true;
@@ -262,36 +396,35 @@ function getHtml() {
 function isEventTargetLike(target) {
   return Boolean(
     target &&
-    isFunction(target.addEventListener) &&
-    isFunction(target.removeEventListener)
+      isFunction(target.addEventListener) &&
+      isFunction(target.removeEventListener)
   );
 }
 
 function isAbortControllerLike(value) {
   return Boolean(
     value &&
-    isFunction(value.abort) &&
-    value.signal
+      isFunction(value.abort) &&
+      value.signal
   );
 }
 
 function isObserverLike(value) {
   return Boolean(
     value &&
-    isFunction(value.disconnect)
+      isFunction(value.disconnect)
   );
 }
 
 function isSpecialDomTargetName(value = "") {
   return SPECIAL_DOM_TARGETS.includes(
-    safeText(value, "").toLowerCase()
+    safeLower(value)
   );
 }
 
 function resolveSpecialTarget(value) {
   const key =
-    safeText(value, "")
-      .toLowerCase();
+    safeLower(value);
 
   if (key === "window") {
     return getWindow();
@@ -344,9 +477,12 @@ let nextTargetId =
 let nextHandlerId =
   1;
 
+let nextResourceId =
+  1;
+
 function getTargetId(target) {
   if (typeof target === "string") {
-    return `target:${safeText(target, "string").toLowerCase()}`;
+    return `target:${safeLower(target, "string")}`;
   }
 
   if (
@@ -390,6 +526,15 @@ function getHandlerId(handler) {
   } catch {
     return "handler:unknown";
   }
+}
+
+function createResourceId(type = "resource") {
+  const id =
+    `${safeText(type, "resource")}:${nextResourceId}`;
+
+  nextResourceId += 1;
+
+  return id;
 }
 
 /* =========================================================
@@ -439,6 +584,7 @@ function normalizeBusOptions(options = false) {
 
   const {
     once,
+    target,
     ...rest
   } = options;
 
@@ -463,7 +609,7 @@ function normalizeOptionsForKey(options = false) {
       options.target
         ? (
             typeof options.target === "string"
-              ? `target:${safeText(options.target, "custom").toLowerCase()}`
+              ? `target:${safeLower(options.target, "custom")}`
               : getTargetId(options.target)
           )
         : "target:default";
@@ -498,18 +644,18 @@ function makeBusKey(eventName, handler, options = false) {
   ].join("::");
 }
 
-function makeManualKey(disposer, label = "manual") {
+function makeManualKey(disposer, label = DEFAULT_MANUAL_LABEL) {
   return [
     "manual",
     getHandlerId(disposer),
-    safeText(label, "manual"),
+    safeText(label, DEFAULT_MANUAL_LABEL),
   ].join("::");
 }
 
 function makeResourceKey(type = "resource", id = "", label = "") {
   return [
     safeText(type, "resource"),
-    safeText(id, ""),
+    safeText(id, createResourceId(type)),
     safeText(label, ""),
   ].join("::");
 }
@@ -568,6 +714,9 @@ function createScopeRecord(name = DEFAULT_SCOPE) {
       0,
 
     addedCount:
+      0,
+
+    skippedCount:
       0,
 
     manualDisposeCount:
@@ -657,6 +806,12 @@ function normalizeScopeRecord(scope, name = DEFAULT_SCOPE) {
         scope.records.size
       );
 
+    scope.skippedCount =
+      safeNumber(
+        scope.skippedCount,
+        0
+      );
+
     scope.manualDisposeCount =
       safeNumber(
         scope.manualDisposeCount,
@@ -671,47 +826,51 @@ function normalizeScopeRecord(scope, name = DEFAULT_SCOPE) {
       createScopeRecord(name);
 
     for (const disposer of Array.from(scope)) {
-      if (isFunction(disposer)) {
-        const key =
-          makeManualKey(
-            disposer,
-            "legacy-set"
-          );
+      if (!isFunction(disposer)) {
+        continue;
+      }
 
-        const wrapped =
-          () => {
-            try {
-              disposer();
-              return true;
-            } catch {
-              return false;
-            }
-          };
-
-        record.keys.add(key);
-
-        record.records.set(
-          key,
-          {
-            key,
-            type:
-              "manual",
-            label:
-              "legacy-set",
-            disposer:
-              wrapped,
-            dispose:
-              disposer,
-            createdAt:
-              safeIsoDate(),
-            createdAtMs:
-              safeNow(),
-          }
+      const key =
+        makeManualKey(
+          disposer,
+          "legacy-set"
         );
 
-        record.cleaners.push(wrapped);
-        record.disposers.push(wrapped);
-      }
+      const wrapped =
+        () => {
+          try {
+            disposer();
+            return true;
+          } catch {
+            return false;
+          }
+        };
+
+      record.keys.add(key);
+
+      record.records.set(
+        key,
+        {
+          key,
+          type:
+            "manual",
+          label:
+            "legacy-set",
+          disposer:
+            wrapped,
+          dispose:
+            disposer,
+          createdAt:
+            safeIsoDate(),
+          createdAtMs:
+            safeNow(),
+          disposed:
+            false,
+        }
+      );
+
+      record.cleaners.push(wrapped);
+      record.disposers.push(wrapped);
     }
 
     record.addedCount =
@@ -727,46 +886,125 @@ function normalizeScopeRecord(scope, name = DEFAULT_SCOPE) {
    ARG NORMALIZATION
 ========================================================= */
 
-function normalizeAddArgs(scopeName, disposer, label) {
-  let finalDisposer =
-    disposer;
-
-  let finalLabel =
-    label;
-
+function normalizeScopeName(value = DEFAULT_SCOPE) {
   if (
-    typeof disposer === "string" &&
-    isFunction(label)
+    value === null ||
+    value === undefined ||
+    value === ""
   ) {
-    finalDisposer =
-      label;
+    return DEFAULT_SCOPE;
+  }
 
-    finalLabel =
-      disposer;
+  if (typeof value === "string") {
+    return safeText(
+      value,
+      DEFAULT_SCOPE
+    );
+  }
+
+  return DEFAULT_SCOPE;
+}
+
+function normalizeAddArgs(args = []) {
+  const first =
+    args[0];
+
+  const second =
+    args[1];
+
+  const third =
+    args[2];
+
+  if (isFunction(first)) {
+    return {
+      scopeName:
+        DEFAULT_SCOPE,
+
+      disposer:
+        first,
+
+      label:
+        safeText(second, DEFAULT_MANUAL_LABEL),
+    };
   }
 
   if (
-    isPlainObject(disposer) &&
-    isFunction(disposer.disposer)
+    typeof first === "string" &&
+    isFunction(second)
   ) {
-    finalDisposer =
-      disposer.disposer;
+    return {
+      scopeName:
+        DEFAULT_SCOPE,
 
-    finalLabel =
-      disposer.label ||
-      label ||
-      "manual";
+      disposer:
+        second,
+
+      label:
+        safeText(first, DEFAULT_MANUAL_LABEL),
+    };
+  }
+
+  if (
+    typeof first === "string" &&
+    typeof second === "string" &&
+    isFunction(third)
+  ) {
+    return {
+      scopeName:
+        first,
+
+      disposer:
+        third,
+
+      label:
+        second,
+    };
+  }
+
+  if (
+    typeof first === "string" &&
+    isFunction(third)
+  ) {
+    return {
+      scopeName:
+        first,
+
+      disposer:
+        third,
+
+      label:
+        safeText(second, DEFAULT_MANUAL_LABEL),
+    };
+  }
+
+  if (
+    isPlainObject(second) &&
+    isFunction(second.disposer)
+  ) {
+    return {
+      scopeName:
+        normalizeScopeName(first),
+
+      disposer:
+        second.disposer,
+
+      label:
+        safeText(
+          second.label || third,
+          DEFAULT_MANUAL_LABEL
+        ),
+    };
   }
 
   return {
     scopeName:
-      safeText(scopeName, DEFAULT_SCOPE),
+      normalizeScopeName(first),
 
     disposer:
-      finalDisposer,
+      second,
 
     label:
-      safeText(finalLabel, "manual"),
+      safeText(third, DEFAULT_MANUAL_LABEL),
   };
 }
 
@@ -806,19 +1044,29 @@ function normalizeTimerArgs(fnOrDelay, delayOrFn, label = "") {
    FACTORY
 ========================================================= */
 
-export function createCleanup({
-  registry,
-  events,
-  utils,
-} = {}) {
-  const finalRegistry =
-    isObject(registry)
-      ? registry
+export function createCleanup(input = {}) {
+  const deps =
+    isPlainObject(input)
+      ? input
+      : {
+          registry:
+            input,
+        };
+
+  const registry =
+    isObject(deps.registry)
+      ? deps.registry
       : {};
 
-  finalRegistry.scopes =
+  const events =
+    deps.events || null;
+
+  const utils =
+    deps.utils || null;
+
+  registry.scopes =
     ensureMap(
-      finalRegistry.scopes
+      registry.scopes
     );
 
   function reportError({
@@ -834,21 +1082,23 @@ export function createCleanup({
         scope?.name || "",
 
       key:
-        key || "",
+        redactText(key || ""),
 
       type:
         safeText(type, "cleanup"),
 
       label:
-        safeText(label, ""),
+        redactText(label || ""),
 
       source:
         safeText(source, "cleanup"),
 
       message:
-        safeText(
-          error?.message || error,
-          "Cleanup error."
+        redactText(
+          safeText(
+            error?.message || error,
+            "Cleanup error."
+          )
         ),
 
       name:
@@ -878,10 +1128,10 @@ export function createCleanup({
 
   function ensureScope(name = DEFAULT_SCOPE) {
     const scopeName =
-      safeText(name, DEFAULT_SCOPE);
+      normalizeScopeName(name);
 
     const existing =
-      finalRegistry.scopes.get(scopeName);
+      registry.scopes.get(scopeName);
 
     const normalized =
       normalizeScopeRecord(
@@ -890,7 +1140,7 @@ export function createCleanup({
       );
 
     if (existing !== normalized) {
-      finalRegistry.scopes.set(
+      registry.scopes.set(
         scopeName,
         normalized
       );
@@ -900,8 +1150,8 @@ export function createCleanup({
   }
 
   function hasScope(name = DEFAULT_SCOPE) {
-    return finalRegistry.scopes.has(
-      safeText(name, DEFAULT_SCOPE)
+    return registry.scopes.has(
+      normalizeScopeName(name)
     );
   }
 
@@ -1046,13 +1296,14 @@ export function createCleanup({
           scope:
             scope?.name || "",
 
-          key,
+          key:
+            redactText(key),
 
           type:
             record.type || "manual",
 
           label:
-            record.label || "",
+            redactText(record.label || ""),
 
           reason:
             record.disposedReason,
@@ -1117,6 +1368,31 @@ export function createCleanup({
       const existing =
         scope.records.get(key);
 
+      scope.skippedCount =
+        safeNumber(
+          scope.skippedCount,
+          0
+        ) + 1;
+
+      safeEmit(
+        events,
+        CLEANUP_EVENTS.recordSkipped,
+        {
+          scope:
+            scope.name,
+          key:
+            redactText(key),
+          type:
+            existing?.type || recordInput.type || "unknown",
+          label:
+            redactText(existing?.label || recordInput.label || ""),
+          reason:
+            "duplicate",
+          at:
+            safeIsoDate(),
+        }
+      );
+
       return isFunction(existing?.disposer)
         ? existing.disposer
         : createNoopDisposer();
@@ -1158,6 +1434,9 @@ export function createCleanup({
         scope?.name || "";
     } catch {}
 
+    const createdAtMs =
+      safeNow();
+
     const record = {
       key,
 
@@ -1174,10 +1453,9 @@ export function createCleanup({
         safeText(recordInput.targetType, ""),
 
       createdAt:
-        safeIsoDate(),
+        safeIsoDate(createdAtMs),
 
-      createdAtMs:
-        safeNow(),
+      createdAtMs,
 
       disposed:
         false,
@@ -1232,16 +1510,17 @@ export function createCleanup({
         scope:
           scope.name,
 
-        key,
+        key:
+          redactText(key),
 
         type:
           record.type,
 
         label:
-          record.label,
+          redactText(record.label),
 
         eventName:
-          record.eventName,
+          redactText(record.eventName),
 
         targetType:
           record.targetType,
@@ -1358,7 +1637,7 @@ export function createCleanup({
     let publicDisposer =
       null;
 
-    const wrappedHandler = function cleanupDomHandler(event) {
+    const wrappedHandler = function cleanupDomHandler(eventObject) {
       if (once) {
         try {
           publicDisposer?.();
@@ -1376,7 +1655,7 @@ export function createCleanup({
         thisArg:
           this,
         args:
-          [event],
+          [eventObject],
       });
     };
 
@@ -1474,7 +1753,7 @@ export function createCleanup({
     let publicDisposer =
       null;
 
-    const wrappedHandler = function cleanupBusHandler(event) {
+    const wrappedHandler = function cleanupBusHandler(eventObject) {
       if (once) {
         try {
           publicDisposer?.();
@@ -1492,7 +1771,7 @@ export function createCleanup({
         thisArg:
           this,
         args:
-          [event],
+          [eventObject],
       });
     };
 
@@ -1563,25 +1842,23 @@ export function createCleanup({
     return publicDisposer;
   }
 
-  function add(scopeName = DEFAULT_SCOPE, disposer, label = "manual") {
-    const args =
-      normalizeAddArgs(
-        scopeName,
-        disposer,
-        label
-      );
+  function add(...args) {
+    const normalized =
+      normalizeAddArgs(args);
 
     const scope =
-      ensureScope(args.scopeName);
+      ensureScope(
+        normalized.scopeName
+      );
 
-    if (!isFunction(args.disposer)) {
+    if (!isFunction(normalized.disposer)) {
       return createNoopDisposer();
     }
 
     const key =
       makeManualKey(
-        args.disposer,
-        args.label
+        normalized.disposer,
+        normalized.label
       );
 
     if (scope.keys.has(key)) {
@@ -1601,18 +1878,46 @@ export function createCleanup({
           "manual",
 
         label:
-          args.label,
+          normalized.label,
 
         targetType:
           "manual",
 
         dispose:
-          args.disposer,
+          normalized.disposer,
       }
     );
   }
 
   function on(scopeName = DEFAULT_SCOPE, target, eventName, handler, options = false) {
+    /*
+      Principal:
+        cleanup.on(scope, target, event, handler, options)
+
+      Legacy útil:
+        cleanup.on(target, event, handler, options) => scope global
+    */
+
+    if (
+      (
+        isEventTargetLike(scopeName) ||
+        (
+          typeof scopeName === "string" &&
+          isSpecialDomTargetName(scopeName)
+        )
+      ) &&
+      typeof target === "string" &&
+      isFunction(eventName)
+    ) {
+      return registerDomListener(
+        DEFAULT_SCOPE,
+        scopeName,
+        target,
+        eventName,
+        handler || false
+      );
+    }
+
     return registerDomListener(
       scopeName,
       target,
@@ -1635,7 +1940,22 @@ export function createCleanup({
 
       Bus:
         cleanup.event(scope, "app:ready", handler, options)
+
+      Legacy bus:
+        cleanup.event("app:ready", handler, options)
     */
+
+    if (
+      typeof scopeName === "string" &&
+      isFunction(targetOrName)
+    ) {
+      return registerBusListener(
+        DEFAULT_SCOPE,
+        scopeName,
+        targetOrName,
+        eventNameOrHandler || false
+      );
+    }
 
     const looksLikeDomSignature =
       (
@@ -1667,6 +1987,18 @@ export function createCleanup({
   }
 
   function bus(scopeName = DEFAULT_SCOPE, eventName, handler, options = false) {
+    if (
+      typeof scopeName === "string" &&
+      isFunction(eventName)
+    ) {
+      return registerBusListener(
+        DEFAULT_SCOPE,
+        scopeName,
+        eventName,
+        handler || false
+      );
+    }
+
     return registerBusListener(
       scopeName,
       eventName,
@@ -1696,6 +2028,18 @@ export function createCleanup({
   }
 
   function timeout(scopeName = DEFAULT_SCOPE, fnOrDelay, delayOrFn = 0, label = "timeout") {
+    if (
+      isFunction(scopeName) ||
+      typeof scopeName === "number"
+    ) {
+      return timeout(
+        DEFAULT_SCOPE,
+        scopeName,
+        fnOrDelay,
+        delayOrFn || "timeout"
+      );
+    }
+
     const args =
       normalizeTimerArgs(
         fnOrDelay,
@@ -1742,7 +2086,7 @@ export function createCleanup({
     key =
       makeResourceKey(
         "timeout",
-        String(timerId),
+        createResourceId("timeout"),
         args.label
       );
 
@@ -1768,6 +2112,18 @@ export function createCleanup({
   }
 
   function interval(scopeName = DEFAULT_SCOPE, fnOrDelay, delayOrFn = 0, label = "interval") {
+    if (
+      isFunction(scopeName) ||
+      typeof scopeName === "number"
+    ) {
+      return interval(
+        DEFAULT_SCOPE,
+        scopeName,
+        fnOrDelay,
+        delayOrFn || "interval"
+      );
+    }
+
     const args =
       normalizeTimerArgs(
         fnOrDelay,
@@ -1782,16 +2138,18 @@ export function createCleanup({
     const scope =
       ensureScope(scopeName);
 
+    const key =
+      makeResourceKey(
+        "interval",
+        createResourceId("interval"),
+        args.label
+      );
+
     const timerId =
       setInterval(() => {
         callHandlerSafely({
           scope,
-          key:
-            makeResourceKey(
-              "interval",
-              String(timerId),
-              args.label
-            ),
+          key,
           type:
             "interval",
           label:
@@ -1804,13 +2162,6 @@ export function createCleanup({
             [],
         });
       }, args.delay);
-
-    const key =
-      makeResourceKey(
-        "interval",
-        String(timerId),
-        args.label
-      );
 
     return pushRecord(
       scope,
@@ -1834,6 +2185,14 @@ export function createCleanup({
   }
 
   function raf(scopeName = DEFAULT_SCOPE, fn, label = "raf") {
+    if (isFunction(scopeName)) {
+      return raf(
+        DEFAULT_SCOPE,
+        scopeName,
+        fn || "raf"
+      );
+    }
+
     const win =
       getWindow();
 
@@ -1887,7 +2246,7 @@ export function createCleanup({
     key =
       makeResourceKey(
         "raf",
-        String(frameId),
+        createResourceId("raf"),
         label
       );
 
@@ -1914,6 +2273,15 @@ export function createCleanup({
   }
 
   function idle(scopeName = DEFAULT_SCOPE, fn, options = {}, label = "idle") {
+    if (isFunction(scopeName)) {
+      return idle(
+        DEFAULT_SCOPE,
+        scopeName,
+        fn || {},
+        options || "idle"
+      );
+    }
+
     const win =
       getWindow();
 
@@ -1967,7 +2335,7 @@ export function createCleanup({
     key =
       makeResourceKey(
         "idle",
-        String(idleId),
+        createResourceId("idle"),
         label
       );
 
@@ -1994,6 +2362,14 @@ export function createCleanup({
   }
 
   function observer(scopeName = DEFAULT_SCOPE, observerRef, label = "observer") {
+    if (isObserverLike(scopeName)) {
+      return observer(
+        DEFAULT_SCOPE,
+        scopeName,
+        observerRef || "observer"
+      );
+    }
+
     const scope =
       ensureScope(scopeName);
 
@@ -2038,6 +2414,15 @@ export function createCleanup({
   }
 
   function abortController(scopeName = DEFAULT_SCOPE, controller, label = "abort-controller", reason = "cleanup") {
+    if (isAbortControllerLike(scopeName)) {
+      return abortController(
+        DEFAULT_SCOPE,
+        scopeName,
+        controller || "abort-controller",
+        label || "cleanup"
+      );
+    }
+
     const scope =
       ensureScope(scopeName);
 
@@ -2088,11 +2473,36 @@ export function createCleanup({
   }
 
   function off(scopeName = DEFAULT_SCOPE, keyOrDisposer = "") {
+    if (isFunction(scopeName)) {
+      try {
+        const result =
+          scopeName();
+
+        return result !== false;
+      } catch (error) {
+        reportError({
+          scope:
+            null,
+          key:
+            "",
+          type:
+            "manual",
+          label:
+            "direct-disposer",
+          error,
+          source:
+            "off:function",
+        });
+
+        return false;
+      }
+    }
+
     const scopeNameFinal =
-      safeText(scopeName, DEFAULT_SCOPE);
+      normalizeScopeName(scopeName);
 
     const scope =
-      finalRegistry.scopes.get(scopeNameFinal);
+      registry.scopes.get(scopeNameFinal);
 
     if (!scope) {
       return false;
@@ -2141,10 +2551,10 @@ export function createCleanup({
 
   function run(scopeName = DEFAULT_SCOPE, options = {}) {
     const cleanScopeName =
-      safeText(scopeName, DEFAULT_SCOPE);
+      normalizeScopeName(scopeName);
 
     const scope =
-      finalRegistry.scopes.get(cleanScopeName);
+      registry.scopes.get(cleanScopeName);
 
     const opts =
       isPlainObject(options)
@@ -2327,11 +2737,11 @@ export function createCleanup({
     );
 
     if (opts.deleteScope !== false) {
-      finalRegistry.scopes.delete(
+      registry.scopes.delete(
         cleanScopeName
       );
     } else {
-      finalRegistry.scopes.set(
+      registry.scopes.set(
         cleanScopeName,
         scope
       );
@@ -2361,7 +2771,7 @@ export function createCleanup({
   function runAll(options = {}) {
     const names =
       Array.from(
-        finalRegistry.scopes.keys()
+        registry.scopes.keys()
       );
 
     const results =
@@ -2424,10 +2834,10 @@ export function createCleanup({
 
   function getScopeSnapshot(scopeName = DEFAULT_SCOPE) {
     const cleanScopeName =
-      safeText(scopeName, DEFAULT_SCOPE);
+      normalizeScopeName(scopeName);
 
     const scope =
-      finalRegistry.scopes.get(cleanScopeName);
+      registry.scopes.get(cleanScopeName);
 
     if (!scope) {
       return {
@@ -2514,6 +2924,12 @@ export function createCleanup({
           0
         ),
 
+      skippedCount:
+        safeNumber(
+          scope.skippedCount,
+          0
+        ),
+
       manualDisposeCount:
         safeNumber(
           scope.manualDisposeCount,
@@ -2523,16 +2939,16 @@ export function createCleanup({
       records:
         records.map((record) => ({
           key:
-            record.key,
+            redactText(record.key),
 
           type:
             record.type,
 
           label:
-            record.label,
+            redactText(record.label),
 
           eventName:
-            record.eventName,
+            redactText(record.eventName),
 
           targetType:
             record.targetType,
@@ -2552,7 +2968,7 @@ export function createCleanup({
   function getSnapshot() {
     const names =
       Array.from(
-        finalRegistry.scopes.keys()
+        registry.scopes.keys()
       );
 
     const scopes =
@@ -2608,7 +3024,7 @@ export function createCleanup({
 
     if (cleanScope) {
       const scope =
-        finalRegistry.scopes.get(cleanScope);
+        registry.scopes.get(cleanScope);
 
       if (!scope) {
         return 0;
@@ -2624,7 +3040,7 @@ export function createCleanup({
     let total =
       0;
 
-    for (const scope of finalRegistry.scopes.values()) {
+    for (const scope of registry.scopes.values()) {
       total +=
         safeArray(scope.listeners).length +
         safeArray(scope.cleaners).length +
@@ -2641,14 +3057,9 @@ export function createCleanup({
     events:
       CLEANUP_EVENTS,
 
-    /*
-      Compat:
-      - scope() devuelve string usable como scope id.
-      - ensureScope()/getScope() devuelven objeto completo.
-    */
     scope(name = DEFAULT_SCOPE) {
       const scopeName =
-        safeText(name, DEFAULT_SCOPE);
+        normalizeScopeName(name);
 
       ensureScope(scopeName);
 
@@ -2697,6 +3108,9 @@ export function createCleanup({
     getScopeSnapshot,
     getSnapshot,
     getDebugSnapshot:
+      getSnapshot,
+
+    snapshot:
       getSnapshot,
   };
 

@@ -1,12 +1,10 @@
 {
   "trailingSlash": "never",
-
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": [
       "/api/*",
       "/.auth/*",
-
       "/robots.txt",
       "/sitemap.xml",
       "/BingSiteAuth.xml",
@@ -15,7 +13,6 @@
       "/sw.js",
       "/favicon.ico",
       "/apple-touch-icon.png",
-
       "/assets/*",
       "/media/*",
       "/fonts/*",
@@ -23,13 +20,10 @@
       "/js/*",
       "/img/*",
       "/src/*",
-
       "/.well-known/*",
-
       "/*.{js,mjs,css,png,jpg,jpeg,gif,svg,webp,avif,bmp,ico,json,txt,xml,webmanifest,map,woff,woff2,ttf,eot,otf,pdf,mp4,webm,wasm}"
     ]
   },
-
   "routes": [
     {
       "route": "/staticwebapp.config.json",
@@ -39,7 +33,14 @@
         "X-Robots-Tag": "noindex, nofollow"
       }
     },
-
+    {
+      "route": "/sitemap.xml",
+      "statusCode": 404,
+      "headers": {
+        "Cache-Control": "no-store",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
     {
       "route": "/",
       "rewrite": "/index.html",
@@ -50,7 +51,6 @@
         "X-Robots-Tag": "noindex, nofollow"
       }
     },
-
     {
       "route": "/index.html",
       "headers": {
@@ -60,7 +60,6 @@
         "X-Robots-Tag": "noindex, nofollow"
       }
     },
-
     {
       "route": "/*.html",
       "headers": {
@@ -70,7 +69,6 @@
         "X-Robots-Tag": "noindex, nofollow"
       }
     },
-
     {
       "route": "/es",
       "statusCode": 404,
@@ -87,7 +85,6 @@
         "X-Robots-Tag": "noindex, nofollow"
       }
     },
-
     {
       "route": "/login*",
       "rewrite": "/index.html",
@@ -178,9 +175,8 @@
         "X-Robots-Tag": "noindex, nofollow"
       }
     },
-
     {
-      "route": "/tickets*",
+      "route": "/incidencias*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -190,7 +186,7 @@
       }
     },
     {
-      "route": "/incidencias*",
+      "route": "/tickets*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -220,16 +216,6 @@
       }
     },
     {
-      "route": "/users*",
-      "rewrite": "/index.html",
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Pragma": "no-cache",
-        "Expires": "0",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
       "route": "/usuarios*",
       "rewrite": "/index.html",
       "headers": {
@@ -240,7 +226,7 @@
       }
     },
     {
-      "route": "/clients*",
+      "route": "/users*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -260,7 +246,27 @@
       }
     },
     {
+      "route": "/clients*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
       "route": "/hardware*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/cuenta*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -280,7 +286,37 @@
       }
     },
     {
+      "route": "/ajustes*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
       "route": "/settings*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/servidor*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/server*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -299,51 +335,55 @@
         "X-Robots-Tag": "noindex, nofollow"
       }
     },
-
     {
       "route": "/src/*",
       "headers": {
-        "Cache-Control": "no-cache, must-revalidate"
+        "Cache-Control": "no-cache, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow"
       }
     },
     {
       "route": "/css/*",
       "headers": {
-        "Cache-Control": "no-cache, must-revalidate"
+        "Cache-Control": "no-cache, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow"
       }
     },
     {
       "route": "/js/*",
       "headers": {
-        "Cache-Control": "no-cache, must-revalidate"
+        "Cache-Control": "no-cache, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow"
       }
     },
-
     {
       "route": "/assets/*",
       "headers": {
-        "Cache-Control": "public, max-age=31536000, immutable"
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "X-Robots-Tag": "noindex, nofollow"
       }
     },
     {
       "route": "/media/*",
       "headers": {
-        "Cache-Control": "public, max-age=31536000, immutable"
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "X-Robots-Tag": "noindex, nofollow"
       }
     },
     {
       "route": "/fonts/*",
       "headers": {
-        "Cache-Control": "public, max-age=31536000, immutable"
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "X-Robots-Tag": "noindex, nofollow"
       }
     },
     {
       "route": "/img/*",
       "headers": {
-        "Cache-Control": "public, max-age=31536000, immutable"
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "X-Robots-Tag": "noindex, nofollow"
       }
     },
-
     {
       "route": "/favicon.ico",
       "headers": {
@@ -389,14 +429,6 @@
       }
     },
     {
-      "route": "/sitemap.xml",
-      "statusCode": 404,
-      "headers": {
-        "Cache-Control": "no-store",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
       "route": "/BingSiteAuth.xml",
       "headers": {
         "Cache-Control": "public, max-age=3600",
@@ -404,7 +436,6 @@
       }
     }
   ],
-
   "globalHeaders": {
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
     "X-Content-Type-Options": "nosniff",
@@ -416,9 +447,8 @@
     "Permissions-Policy": "accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), fullscreen=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()",
     "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
     "Cross-Origin-Resource-Policy": "same-origin",
-    "Content-Security-Policy": "upgrade-insecure-requests; default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; script-src-elem 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'self' blob: https://*.blob.core.windows.net; manifest-src 'self';"
+    "Content-Security-Policy": "upgrade-insecure-requests; default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; script-src-elem 'self'; script-src-attr 'none'; style-src 'self'; style-src-elem 'self'; style-src-attr 'none'; font-src 'self' data:; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'self' blob: https://*.blob.core.windows.net; manifest-src 'self';"
   },
-
   "mimeTypes": {
     ".html": "text/html",
     ".css": "text/css",
@@ -427,11 +457,9 @@
     ".json": "application/json",
     ".map": "application/json",
     ".wasm": "application/wasm",
-
     ".xml": "application/xml",
     ".txt": "text/plain",
     ".webmanifest": "application/manifest+json",
-
     ".svg": "image/svg+xml",
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -442,13 +470,11 @@
     ".bmp": "image/bmp",
     ".ico": "image/x-icon",
     ".cur": "image/x-icon",
-
     ".woff": "font/woff",
     ".woff2": "font/woff2",
     ".ttf": "font/ttf",
     ".otf": "font/otf",
     ".eot": "application/vnd.ms-fontobject",
-
     ".pdf": "application/pdf",
     ".mp4": "video/mp4",
     ".webm": "video/webm",

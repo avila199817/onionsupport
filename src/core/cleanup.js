@@ -36,7 +36,7 @@
 ========================================================= */
 
 const CLEANUP_VERSION =
-  "11.0.0";
+  "12.0.0";
 
 const DEFAULT_SCOPE =
   "global";
@@ -61,6 +61,16 @@ const CLEANUP_EVENTS =
     recordAdded:
       "cleanup:record:added",
   });
+
+const SPECIAL_DOM_TARGETS =
+  Object.freeze([
+    "window",
+    "document",
+    "body",
+    "html",
+    "documentelement",
+    "document-element",
+  ]);
 
 /* =========================================================
    BASICS
@@ -130,17 +140,6 @@ function safeNumber(value, fallback = 0) {
     : fallback;
 }
 
-function safeBool(value, fallback = false) {
-  if (value === true) return true;
-  if (value === false) return false;
-  if (value === "true") return true;
-  if (value === "false") return false;
-  if (value === 1) return true;
-  if (value === 0) return false;
-
-  return Boolean(fallback);
-}
-
 function safeWarn(utils, ...args) {
   let done =
     false;
@@ -190,12 +189,14 @@ function safeEmit(events, name, payload = {}) {
   }
 
   try {
-    events?.emit?.(
-      eventName,
-      payload
-    );
+    if (isFunction(events?.emit)) {
+      events.emit(
+        eventName,
+        payload
+      );
 
-    return true;
+      return true;
+    }
   } catch {}
 
   return false;
@@ -258,14 +259,6 @@ function getHtml() {
   return null;
 }
 
-function getDefaultEventTarget() {
-  return (
-    getWindow() ||
-    getDocument() ||
-    null
-  );
-}
-
 function isEventTargetLike(target) {
   return Boolean(
     target &&
@@ -286,6 +279,12 @@ function isObserverLike(value) {
   return Boolean(
     value &&
     isFunction(value.disconnect)
+  );
+}
+
+function isSpecialDomTargetName(value = "") {
+  return SPECIAL_DOM_TARGETS.includes(
+    safeText(value, "").toLowerCase()
   );
 }
 
@@ -725,7 +724,7 @@ function normalizeScopeRecord(scope, name = DEFAULT_SCOPE) {
 }
 
 /* =========================================================
-   SIGNATURE HELPERS
+   ARG NORMALIZATION
 ========================================================= */
 
 function normalizeAddArgs(scopeName, disposer, label) {
@@ -791,6 +790,7 @@ function normalizeTimerArgs(fnOrDelay, delayOrFn, label = "") {
 
   return {
     fn,
+
     delay:
       Math.max(
         0,
@@ -1630,25 +1630,28 @@ export function createCleanup({
         cleanup.event(scope, window, "resize", handler, options)
         cleanup.event(scope, "window", "resize", handler, options)
         cleanup.event(scope, "document", "click", handler, options)
+        cleanup.event(scope, "body", "click", handler, options)
+        cleanup.event(scope, "html", "click", handler, options)
 
       Bus:
         cleanup.event(scope, "app:ready", handler, options)
     */
 
-    const specialTarget =
-      typeof targetOrName === "string" &&
-      typeof eventNameOrHandler === "string" &&
-      isFunction(handlerOrOptions)
-        ? resolveSpecialTarget(targetOrName)
-        : null;
+    const looksLikeDomSignature =
+      (
+        isEventTargetLike(targetOrName) ||
+        (
+          typeof targetOrName === "string" &&
+          isSpecialDomTargetName(targetOrName) &&
+          typeof eventNameOrHandler === "string" &&
+          isFunction(handlerOrOptions)
+        )
+      );
 
-    if (
-      isEventTargetLike(targetOrName) ||
-      specialTarget
-    ) {
+    if (looksLikeDomSignature) {
       return registerDomListener(
         scopeName,
-        specialTarget || targetOrName,
+        targetOrName,
         eventNameOrHandler,
         handlerOrOptions,
         maybeOptions || false
@@ -1675,7 +1678,7 @@ export function createCleanup({
   function windowEvent(scopeName = DEFAULT_SCOPE, eventName, handler, options = false) {
     return registerDomListener(
       scopeName,
-      getWindow(),
+      "window",
       eventName,
       handler,
       options
@@ -1685,7 +1688,7 @@ export function createCleanup({
   function documentEvent(scopeName = DEFAULT_SCOPE, eventName, handler, options = false) {
     return registerDomListener(
       scopeName,
-      getDocument(),
+      "document",
       eventName,
       handler,
       options
@@ -2640,8 +2643,8 @@ export function createCleanup({
 
     /*
       Compat:
-      scope() devuelve string como API legacy.
-      ensureScope()/getScope() devuelven el objeto completo.
+      - scope() devuelve string usable como scope id.
+      - ensureScope()/getScope() devuelven objeto completo.
     */
     scope(name = DEFAULT_SCOPE) {
       const scopeName =

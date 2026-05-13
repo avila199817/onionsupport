@@ -3,7 +3,7 @@
    Archivo: src/services/index.js
 
    ONION SUPPORT · HTTP SERVICE
-   CORE API CLIENT BRIDGE · AUTH SAFE · RETRY SAFE · LOADER SAFE
+   CORE API CLIENT BRIDGE · AUTH SAFE · RETRY SAFE · LOADER SAFE · 14/10
 
    Responsabilidades:
    - Servicio HTTP público de la SPA.
@@ -20,18 +20,29 @@
    - Soportar AbortController/signal.
    - Adjuntar bridge estable a AppCore.Http/AppCore.http y módulos.
    - Exponer snapshot de diagnóstico sin tokens reales.
+   - Soportar firmas:
+       Http.request(path, options)
+       Http.request(method, path, options)
+       Http.get(path, options)
+       Http.post(path, body, options)
+       Http.delete(path, options)
+       Http.delete(path, body, options)
 
    HARDENING EXTREMO:
    - init idempotente real
    - interceptores base registrados una sola vez
    - refresh lock para evitar refresh paralelo
-   - loader con pendingRequests balanceado
+   - loader con pendingRequests balanceado por request real
    - eventos consistentes y redactados
    - cero tokens crudos en logs/eventos/snapshots
    - compatible con AppCore congelado mediante accessors/modules
    - sin doble refresh
    - sin doble logout
    - sin lógicas duplicadas
+   - no refresca en login/refresh/logout/activation/reset/2FA público
+   - /api/auth/me sigue siendo endpoint privado y puede usar Authorization
+   - evita auto-logout si el error no pertenece a request privado autenticado
+   - evita leak de respuesta completa en eventos
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -86,7 +97,7 @@ export const Http = (() => {
   ======================================================= */
 
   const SERVICE_VERSION =
-    "12.0.0";
+    "14.0.0";
 
   const SERVICE_NAME =
     "http";
@@ -94,13 +105,43 @@ export const Http = (() => {
   const LOG_PREFIX =
     "[Http]";
 
+  const DEFAULT_METHOD =
+    "GET";
+
+  const DEFAULT_REQUEST_TIMEOUT_MS =
+    0;
+
+  const KNOWN_METHODS =
+    Object.freeze([
+      "GET",
+      "HEAD",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS",
+    ]);
+
+  const BODYLESS_METHODS =
+    Object.freeze([
+      "GET",
+      "HEAD",
+      "OPTIONS",
+    ]);
+
   const EVENTS =
     Object.freeze({
       ready:
         "http:ready",
 
+      initSkipped:
+        "http:init:skipped",
+
       bridgeAttached:
         "http:bridge:attached",
+
+      interceptorRegistered:
+        "http:interceptor:registered",
 
       requestStart:
         "http:request:start",
@@ -123,17 +164,35 @@ export const Http = (() => {
       refreshError:
         "http:auth-refresh:error",
 
+      refreshSkipped:
+        "http:auth-refresh:skipped",
+
+      replayStart:
+        "http:request:replay:start",
+
+      replaySuccess:
+        "http:request:replay:success",
+
+      replayError:
+        "http:request:replay:error",
+
       autoLogoutStart:
         "http:auto-logout:start",
 
       autoLogoutSuccess:
         "http:auto-logout:success",
 
+      autoLogoutSkipped:
+        "http:auto-logout:skipped",
+
       autoLogoutError:
         "http:auto-logout:error",
 
       runtimeReset:
         "http:runtime:reset",
+
+      configUpdated:
+        "http:config:updated",
     });
 
   const SENSITIVE_QUERY_NAMES =
@@ -157,38 +216,25 @@ export const Http = (() => {
       "two_factor_token",
       "mfaToken",
       "mfa_token",
+      "jwt",
+      "bearer",
+      "auth",
+      "authorization",
     ]);
 
-  const AUTH_ENDPOINT_MARKERS =
-    Object.freeze([
-      "/auth/login",
-      "/auth/logout",
-      "/auth/refresh",
-      "/auth/me",
-      "/auth/session",
-
-      "/auth/activate",
-      "/auth/activate-account",
-      "/auth/account/activate",
-      "/auth/activation",
-      "/auth/activate/first-user",
-
-      "/auth/reset-password",
-      "/auth/reset-password-request",
-      "/auth/reset-password-confirm",
-      "/auth/password-reset",
-      "/auth/forgot-password",
-      "/auth/recover-password",
-
-      "/auth/2fa/login",
-      "/auth/_health",
-    ]);
-
+  /*
+    Endpoints auth públicos o técnicos donde NO debe entrar
+    refresh automático ni auto-logout.
+  */
   const PUBLIC_AUTH_ENDPOINT_MARKERS =
     Object.freeze([
       "/auth/login",
       "/auth/refresh",
 
+      "/auth/2fa/login",
+      "/auth/mfa/login",
+      "/auth/otp/login",
+
       "/auth/activate",
       "/auth/activate-account",
       "/auth/account/activate",
@@ -202,7 +248,37 @@ export const Http = (() => {
       "/auth/forgot-password",
       "/auth/recover-password",
 
+      "/auth/_health",
+    ]);
+
+  /*
+    Endpoints auth privados o de control donde refrescar puede producir bucles.
+    /auth/me NO está aquí: sigue siendo privado y debe recibir Authorization.
+  */
+  const AUTH_CONTROL_SKIP_REFRESH_MARKERS =
+    Object.freeze([
+      "/auth/login",
+      "/auth/refresh",
+      "/auth/logout",
+      "/auth/logout-all",
+
       "/auth/2fa/login",
+      "/auth/mfa/login",
+      "/auth/otp/login",
+
+      "/auth/activate",
+      "/auth/activate-account",
+      "/auth/account/activate",
+      "/auth/activation",
+      "/auth/activate/first-user",
+
+      "/auth/reset-password",
+      "/auth/reset-password-request",
+      "/auth/reset-password-confirm",
+      "/auth/password-reset",
+      "/auth/forgot-password",
+      "/auth/recover-password",
+
       "/auth/_health",
     ]);
 
@@ -211,11 +287,29 @@ export const Http = (() => {
       "/activate-account",
       "/reset-password",
       "/forgot-password",
+      "/recover-password",
+      "/password-reset",
       "/reset-password/confirm",
     ]);
 
-  const DEFAULT_REQUEST_TIMEOUT_MS =
-    0;
+  const RESPONSE_PREVIEW_KEYS =
+    Object.freeze([
+      "ok",
+      "success",
+      "authenticated",
+      "requires2FA",
+      "require2FA",
+      "twoFactorRequired",
+      "status",
+      "code",
+      "message",
+      "error",
+      "count",
+      "total",
+      "page",
+      "limit",
+      "hasMore",
+    ]);
 
   /* =======================================================
      RUNTIME
@@ -270,6 +364,9 @@ export const Http = (() => {
     errorCount:
       0,
 
+    abortCount:
+      0,
+
     refreshAttemptCount:
       0,
 
@@ -279,10 +376,25 @@ export const Http = (() => {
     refreshFailureCount:
       0,
 
+    refreshSkippedCount:
+      0,
+
     refreshInFlight:
       false,
 
+    replayCount:
+      0,
+
+    replaySuccessCount:
+      0,
+
+    replayFailureCount:
+      0,
+
     autoLogoutCount:
+      0,
+
+    autoLogoutSkippedCount:
       0,
 
     autoLogoutInFlight:
@@ -309,7 +421,16 @@ export const Http = (() => {
     lastRefreshErrorAt:
       "",
 
+    lastReplayAt:
+      "",
+
+    lastReplayErrorAt:
+      "",
+
     lastAutoLogoutAt:
+      "",
+
+    lastRuntimeResetAt:
       "",
   };
 
@@ -340,6 +461,13 @@ export const Http = (() => {
       value !== null &&
       typeof value === "object" &&
       !Array.isArray(value)
+    );
+  }
+
+  function isAnyObject(value) {
+    return (
+      value !== null &&
+      typeof value === "object"
     );
   }
 
@@ -383,6 +511,50 @@ export const Http = (() => {
       : fallback;
   }
 
+  function safeBool(value, fallback = false) {
+    if (value === true) return true;
+    if (value === false) return false;
+
+    if (typeof value === "number") {
+      if (value === 1) return true;
+      if (value === 0) return false;
+    }
+
+    if (typeof value === "string") {
+      const clean =
+        value.trim().toLowerCase();
+
+      if (
+        [
+          "true",
+          "1",
+          "yes",
+          "si",
+          "sí",
+          "ok",
+          "on",
+          "enabled",
+        ].includes(clean)
+      ) {
+        return true;
+      }
+
+      if (
+        [
+          "false",
+          "0",
+          "no",
+          "off",
+          "disabled",
+        ].includes(clean)
+      ) {
+        return false;
+      }
+    }
+
+    return Boolean(fallback);
+  }
+
   function nowMs() {
     try {
       return Date.now();
@@ -397,6 +569,28 @@ export const Http = (() => {
     } catch {
       return "";
     }
+  }
+
+  function normalizeMethod(method = DEFAULT_METHOD) {
+    const clean =
+      safeText(method, DEFAULT_METHOD)
+        .toUpperCase();
+
+    return KNOWN_METHODS.includes(clean)
+      ? clean
+      : DEFAULT_METHOD;
+  }
+
+  function isKnownMethod(value = "") {
+    return KNOWN_METHODS.includes(
+      safeText(value, "").toUpperCase()
+    );
+  }
+
+  function isBodylessMethod(method = DEFAULT_METHOD) {
+    return BODYLESS_METHODS.includes(
+      normalizeMethod(method)
+    );
   }
 
   function nextRequestId() {
@@ -414,6 +608,17 @@ export const Http = (() => {
     }
 
     return "http://localhost";
+  }
+
+  function getCoreApiBase() {
+    return (
+      safeText(AppCore?.config?.apiBase, "") ||
+      safeText(AppCore?.config?.api?.baseUrl, "") ||
+      safeText(AppCore?.config?.api?.base, "") ||
+      safeText(config.apiBase, "") ||
+      safeText(config.baseUrl, "") ||
+      ""
+    );
   }
 
   function safeEmit(eventName = "", payload = {}) {
@@ -581,7 +786,17 @@ export const Http = (() => {
     return false;
   }
 
-  function sanitizePayload(value, depth = 0) {
+  function sanitizePayload(value, depth = 0, keyHint = "") {
+    if (
+      /token|secret|password|authorization|credential|cookie|session|jwt|bearer|refresh|access|otp|mfa|2fa|code/i.test(
+        safeText(keyHint, "")
+      )
+    ) {
+      return value
+        ? "***"
+        : null;
+    }
+
     if (depth > 6) {
       return "[MaxDepth]";
     }
@@ -599,6 +814,10 @@ export const Http = (() => {
       return value;
     }
 
+    if (typeof value === "bigint") {
+      return String(value);
+    }
+
     if (typeof value === "function") {
       return "[Function]";
     }
@@ -612,7 +831,11 @@ export const Http = (() => {
           safeText(value.id, ""),
 
         className:
-          safeText(value.className, ""),
+          safeText(
+            value.className?.baseVal ||
+              value.className,
+            ""
+          ),
       };
     }
 
@@ -629,6 +852,9 @@ export const Http = (() => {
 
         status:
           value.status || value.statusCode || null,
+
+        stack:
+          value.stack ? "[stack]" : null,
       };
     }
 
@@ -636,16 +862,20 @@ export const Http = (() => {
       return value
         .slice(0, 80)
         .map((item) =>
-          sanitizePayload(item, depth + 1)
+          sanitizePayload(
+            item,
+            depth + 1,
+            keyHint
+          )
         );
     }
 
-    if (isObject(value)) {
+    if (isAnyObject(value)) {
       const output = {};
 
-      for (const [key, item] of Object.entries(value)) {
+      for (const [key, item] of Object.entries(value).slice(0, 100)) {
         if (
-          /token|secret|password|authorization|credential/i.test(key)
+          /token|secret|password|authorization|credential|cookie|session|jwt|bearer|refresh|access|otp|mfa|2fa|code/i.test(key)
         ) {
           output[key] =
             item ? "***" : item;
@@ -654,7 +884,7 @@ export const Http = (() => {
         }
 
         output[key] =
-          sanitizePayload(item, depth + 1);
+          sanitizePayload(item, depth + 1, key);
       }
 
       return output;
@@ -734,6 +964,9 @@ export const Http = (() => {
       requestId:
         safeText(source.requestId, ""),
 
+      retryable:
+        source.retryable === true,
+
       at:
         isoNow(),
     };
@@ -778,6 +1011,15 @@ export const Http = (() => {
       timeout:
         cfg.timeout ?? null,
 
+      upload:
+        cfg.upload === true,
+
+      raw:
+        cfg.raw === true,
+
+      responseType:
+        safeText(cfg.responseType, ""),
+
       skipAuthRefresh:
         cfg._skipAuthRefresh === true,
 
@@ -789,6 +1031,132 @@ export const Http = (() => {
 
       authRefreshFailed:
         cfg._authRefreshFailed === true,
+    };
+  }
+
+  function summarizeResponseForEvent(response = null) {
+    if (
+      response === null ||
+      response === undefined
+    ) {
+      return null;
+    }
+
+    if (
+      typeof Response !== "undefined" &&
+      response instanceof Response
+    ) {
+      return {
+        type:
+          "Response",
+
+        ok:
+          response.ok,
+
+        status:
+          response.status,
+
+        statusText:
+          response.statusText || "",
+
+        url:
+          redactTokenInText(response.url || ""),
+      };
+    }
+
+    if (Array.isArray(response)) {
+      return {
+        type:
+          "array",
+
+        length:
+          response.length,
+      };
+    }
+
+    if (typeof response === "string") {
+      return {
+        type:
+          "string",
+
+        length:
+          response.length,
+
+        preview:
+          redactTokenInText(
+            response.slice(0, 160)
+          ),
+      };
+    }
+
+    if (
+      typeof Blob !== "undefined" &&
+      response instanceof Blob
+    ) {
+      return {
+        type:
+          "Blob",
+
+        size:
+          response.size,
+
+        mime:
+          response.type || "",
+      };
+    }
+
+    if (
+      typeof ArrayBuffer !== "undefined" &&
+      response instanceof ArrayBuffer
+    ) {
+      return {
+        type:
+          "ArrayBuffer",
+
+        byteLength:
+          response.byteLength,
+      };
+    }
+
+    if (isObject(response)) {
+      const preview = {};
+
+      for (const key of RESPONSE_PREVIEW_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(response, key)) {
+          preview[key] =
+            sanitizePayload(response[key]);
+        }
+      }
+
+      if (Array.isArray(response.items)) {
+        preview.itemsCount =
+          response.items.length;
+      }
+
+      if (Array.isArray(response.data)) {
+        preview.dataCount =
+          response.data.length;
+      }
+
+      if (Array.isArray(response.results)) {
+        preview.resultsCount =
+          response.results.length;
+      }
+
+      return {
+        type:
+          "object",
+
+        keys:
+          Object.keys(response).slice(0, 30),
+
+        ...preview,
+      };
+    }
+
+    return {
+      type:
+        typeof response,
     };
   }
 
@@ -838,22 +1206,26 @@ export const Http = (() => {
 
       return (
         cleanMarker &&
-        normalized.includes(cleanMarker)
+        (
+          normalized === cleanMarker ||
+          normalized.endsWith(cleanMarker) ||
+          normalized.includes(cleanMarker)
+        )
       );
     });
-  }
-
-  function isAuthEndpoint(path = "") {
-    return endpointIncludes(
-      path,
-      AUTH_ENDPOINT_MARKERS
-    );
   }
 
   function isPublicAuthEndpoint(path = "") {
     return endpointIncludes(
       path,
       PUBLIC_AUTH_ENDPOINT_MARKERS
+    );
+  }
+
+  function isAuthRefreshControlEndpoint(path = "") {
+    return endpointIncludes(
+      path,
+      AUTH_CONTROL_SKIP_REFRESH_MARKERS
     );
   }
 
@@ -871,15 +1243,61 @@ export const Http = (() => {
 
       return (
         normalized === clean ||
-        normalized.startsWith(`${clean}/`)
+        normalized.startsWith(`${clean}/`) ||
+        normalized.endsWith(clean) ||
+        normalized.includes(`/api${clean}`)
       );
     });
   }
 
   function isPublicEndpoint(path = "") {
-    return (
+    if (
       isPublicAuthEndpoint(path) ||
       isTechnicalPublicSpaEndpoint(path)
+    ) {
+      return true;
+    }
+
+    try {
+      if (isFunction(AppCore?.utils?.isPublicApiPath)) {
+        return Boolean(
+          AppCore.utils.isPublicApiPath(path)
+        );
+      }
+    } catch {}
+
+    try {
+      if (isFunction(AppCore?.isPublicApiPath)) {
+        return Boolean(
+          AppCore.isPublicApiPath(path)
+        );
+      }
+    } catch {}
+
+    return false;
+  }
+
+  function isAuthMeEndpoint(path = "") {
+    const normalized =
+      normalizeEndpointPath(path);
+
+    return (
+      normalized === "/me" ||
+      normalized.endsWith("/auth/me") ||
+      normalized.endsWith("/api/auth/me")
+    );
+  }
+
+  function isAuthEndpoint(path = "") {
+    const normalized =
+      normalizeEndpointPath(path);
+
+    return (
+      normalized.includes("/auth/") ||
+      normalized.endsWith("/auth") ||
+      normalized === "/me" ||
+      normalized.endsWith("/auth/me") ||
+      normalized.endsWith("/api/auth/me")
     );
   }
 
@@ -894,7 +1312,8 @@ export const Http = (() => {
 
     const publicByFlag =
       cfg.public === true ||
-      cfg.auth === false;
+      cfg.auth === false ||
+      cfg.skipAuth === true;
 
     const publicByPath =
       isPublicEndpoint(path);
@@ -915,6 +1334,9 @@ export const Http = (() => {
       public:
         true,
 
+      skipAuth:
+        true,
+
       _skipAuthRefresh:
         true,
     };
@@ -924,20 +1346,32 @@ export const Http = (() => {
     const cfg =
       safeObject(requestConfig);
 
+    const path =
+      cfg.path ||
+      cfg.url ||
+      "";
+
     if (cfg.auth === false) {
       return false;
     }
 
-    if (cfg.public === true) {
+    if (cfg.public === true || cfg.skipAuth === true) {
       return false;
     }
 
-    if (isAuthEndpoint(cfg.path || cfg.url || "")) {
+    if (isPublicEndpoint(path)) {
       return false;
     }
 
-    if (isTechnicalPublicSpaEndpoint(cfg.path || cfg.url || "")) {
+    if (isAuthRefreshControlEndpoint(path)) {
       return false;
+    }
+
+    /*
+      /api/auth/me sí es privado. Se permite refresh si devuelve 401.
+    */
+    if (isAuthMeEndpoint(path)) {
+      return true;
     }
 
     return true;
@@ -1122,6 +1556,7 @@ export const Http = (() => {
           "http",
           "HTTP",
           "httpService",
+          "HttpService",
           SERVICE_NAME,
         ]
       )
@@ -1151,24 +1586,57 @@ export const Http = (() => {
   ======================================================= */
 
   function useRequest(fn) {
-    return registerRequestInterceptor(
-      interceptors,
-      fn
+    const off =
+      registerRequestInterceptor(
+        interceptors,
+        fn
+      );
+
+    safeEmit(
+      EVENTS.interceptorRegistered,
+      {
+        type:
+          "request",
+      }
     );
+
+    return off;
   }
 
   function useResponse(fn) {
-    return registerResponseInterceptor(
-      interceptors,
-      fn
+    const off =
+      registerResponseInterceptor(
+        interceptors,
+        fn
+      );
+
+    safeEmit(
+      EVENTS.interceptorRegistered,
+      {
+        type:
+          "response",
+      }
     );
+
+    return off;
   }
 
   function useError(fn) {
-    return registerErrorInterceptor(
-      interceptors,
-      fn
+    const off =
+      registerErrorInterceptor(
+        interceptors,
+        fn
+      );
+
+    safeEmit(
+      EVENTS.interceptorRegistered,
+      {
+        type:
+          "error",
+      }
     );
+
+    return off;
   }
 
   /* =======================================================
@@ -1180,20 +1648,40 @@ export const Http = (() => {
       return false;
     }
 
-    try {
-      incrementPendingRequests(
-        AppCore,
-        state,
-        {
-          source:
-            "http.service:start",
+    let pending =
+      0;
 
-          requestId,
-        }
-      );
+    try {
+      pending =
+        incrementPendingRequests(
+          AppCore,
+          state,
+          {
+            source:
+              "http.service:start",
+
+            requestId,
+          }
+        );
     } catch {
-      state.pendingRequests += 1;
+      state.pendingRequests =
+        Math.max(
+          0,
+          safeNumber(state.pendingRequests, 0) + 1
+        );
+
+      pending =
+        state.pendingRequests;
     }
+
+    state.pendingRequests =
+      Math.max(
+        0,
+        safeNumber(
+          pending,
+          state.pendingRequests
+        )
+      );
 
     if (state.pendingRequests <= 1) {
       try {
@@ -1204,8 +1692,8 @@ export const Http = (() => {
     return true;
   }
 
-  function stopLoaderIfNeeded(loaderEnabled = false, requestId = "") {
-    if (!loaderEnabled) {
+  function stopLoaderIfNeeded(loaderStarted = false, requestId = "") {
+    if (!loaderStarted) {
       return state.pendingRequests;
     }
 
@@ -1235,7 +1723,16 @@ export const Http = (() => {
         state.pendingRequests;
     }
 
-    if (pending <= 0) {
+    state.pendingRequests =
+      Math.max(
+        0,
+        safeNumber(
+          pending,
+          state.pendingRequests
+        )
+      );
+
+    if (state.pendingRequests <= 0) {
       state.pendingRequests =
         0;
 
@@ -1248,21 +1745,96 @@ export const Http = (() => {
   }
 
   /* =======================================================
+     REQUEST ARGUMENTS
+  ======================================================= */
+
+  function normalizeRequestArgs(arg1 = DEFAULT_METHOD, arg2 = "", arg3 = {}) {
+    /*
+      Http.request("GET", "/api/x", options)
+    */
+    if (
+      typeof arg1 === "string" &&
+      isKnownMethod(arg1) &&
+      typeof arg2 === "string"
+    ) {
+      return {
+        method:
+          normalizeMethod(arg1),
+
+        path:
+          arg2,
+
+        options:
+          safeObject(arg3),
+      };
+    }
+
+    /*
+      Http.request("/api/x", options)
+    */
+    return {
+      method:
+        normalizeMethod(
+          safeObject(arg2).method ||
+            DEFAULT_METHOD
+        ),
+
+      path:
+        arg1,
+
+      options:
+        safeObject(arg2),
+    };
+  }
+
+  function normalizeDeleteArgs(path = "", bodyOrOptions = {}, maybeOptions = undefined) {
+    if (maybeOptions !== undefined) {
+      return {
+        path,
+        options: {
+          ...safeObject(maybeOptions),
+          body:
+            bodyOrOptions,
+        },
+      };
+    }
+
+    return {
+      path,
+      options:
+        safeObject(bodyOrOptions),
+    };
+  }
+
+  /* =======================================================
      REQUEST CONFIG
   ======================================================= */
+
+  function normalizeTimeout(value) {
+    const timeout =
+      safeNumber(value, DEFAULT_REQUEST_TIMEOUT_MS);
+
+    return timeout > 0
+      ? timeout
+      : DEFAULT_REQUEST_TIMEOUT_MS;
+  }
 
   function buildServiceRequestConfig(method = "GET", path = "", options = {}) {
     const opts =
       safeObject(options);
 
     const requestId =
-      opts.requestId ||
-      nextRequestId();
+      safeText(
+        opts.requestId,
+        ""
+      ) || nextRequestId();
 
     const timeout =
-      opts.timeout ??
-      config.timeout ??
-      DEFAULT_REQUEST_TIMEOUT_MS;
+      normalizeTimeout(
+        opts.timeout ??
+          config.timeout ??
+          DEFAULT_REQUEST_TIMEOUT_MS
+      );
 
     const base =
       buildDefaultRequestConfig(
@@ -1284,20 +1856,38 @@ export const Http = (() => {
         }
       );
 
-    return normalizePublicRequestConfig({
-      ...base,
+    const finalConfig =
+      normalizePublicRequestConfig({
+        ...safeObject(base),
 
-      requestId,
+        ...opts,
 
-      method:
-        safeText(base?.method || method, "GET")
-          .toUpperCase(),
+        requestId,
 
-      path:
-        base?.path || path,
+        method:
+          normalizeMethod(
+            base?.method ||
+              opts.method ||
+              method
+          ),
 
-      timeout,
-    });
+        path:
+          base?.path ||
+          opts.path ||
+          path,
+
+        timeout,
+
+        apiBase:
+          base?.apiBase ||
+          opts.apiBase ||
+          getCoreApiBase(),
+
+        _preparedBy:
+          "http.service",
+      });
+
+    return finalConfig;
   }
 
   async function prepareRequestConfig(method = "GET", path = "", options = {}) {
@@ -1320,18 +1910,33 @@ export const Http = (() => {
       );
 
     requestConfig.requestId =
-      requestConfig.requestId ||
-      options?.requestId ||
+      safeText(
+        requestConfig.requestId,
+        ""
+      ) ||
+      safeText(
+        options?.requestId,
+        ""
+      ) ||
       nextRequestId();
 
     requestConfig.method =
-      safeText(
-        requestConfig.method || method,
-        "GET"
-      ).toUpperCase();
+      normalizeMethod(
+        requestConfig.method ||
+          method
+      );
 
     requestConfig.path =
-      requestConfig.path || path;
+      requestConfig.path ||
+      path;
+
+    requestConfig.apiBase =
+      requestConfig.apiBase ||
+      getCoreApiBase();
+
+    if (isBodylessMethod(requestConfig.method)) {
+      delete requestConfig.body;
+    }
 
     return requestConfig;
   }
@@ -1437,6 +2042,9 @@ export const Http = (() => {
 
         _authRefreshFailed:
           true,
+
+        _authRefreshSucceeded:
+          false,
       };
 
       safeEmit(
@@ -1495,12 +2103,47 @@ export const Http = (() => {
           false,
       });
 
+    state.replayCount += 1;
+    state.lastReplayAt =
+      isoNow();
+
+    safeEmit(
+      EVENTS.replayStart,
+      {
+        requestId,
+
+        method:
+          replayConfig.method,
+
+        path:
+          redactTokenInText(replayConfig.path),
+      }
+    );
+
     try {
       const response =
         await executeBaseRequest(
           AppCore,
           replayConfig
         );
+
+      state.replaySuccessCount += 1;
+
+      safeEmit(
+        EVENTS.replaySuccess,
+        {
+          requestId,
+
+          method:
+            replayConfig.method,
+
+          path:
+            redactTokenInText(replayConfig.path),
+
+          response:
+            summarizeResponseForEvent(response),
+        }
+      );
 
       return {
         ok:
@@ -1517,6 +2160,26 @@ export const Http = (() => {
           replayError,
           replayConfig
         );
+
+      state.replayFailureCount += 1;
+      state.lastReplayErrorAt =
+        isoNow();
+
+      safeEmit(
+        EVENTS.replayError,
+        {
+          requestId,
+
+          method:
+            replayConfig.method,
+
+          path:
+            redactTokenInText(replayConfig.path),
+
+          error:
+            sanitizeErrorForEvent(normalizedReplayError),
+        }
+      );
 
       return {
         ok:
@@ -1538,6 +2201,28 @@ export const Http = (() => {
   async function runAutoLogoutOnce(error = null, requestConfig = {}) {
     if (logoutPromise) {
       return logoutPromise;
+    }
+
+    if (!shouldAutoLogout(error, requestConfig)) {
+      state.autoLogoutSkippedCount += 1;
+
+      safeEmit(
+        EVENTS.autoLogoutSkipped,
+        {
+          requestId:
+            requestConfig?.requestId || "",
+
+          path:
+            redactTokenInText(
+              requestConfig?.path || ""
+            ),
+
+          error:
+            sanitizeErrorForEvent(error),
+        }
+      );
+
+      return false;
     }
 
     state.autoLogoutInFlight =
@@ -1627,8 +2312,20 @@ export const Http = (() => {
      CORE REQUEST
   ======================================================= */
 
-  async function request(method = "GET", path = "", options = {}) {
+  async function request(...args) {
     init();
+
+    const normalizedArgs =
+      normalizeRequestArgs(...args);
+
+    const method =
+      normalizedArgs.method;
+
+    const path =
+      normalizedArgs.path;
+
+    const options =
+      normalizedArgs.options;
 
     const startedAt =
       nowMs();
@@ -1641,6 +2338,9 @@ export const Http = (() => {
       null;
 
     let loaderEnabled =
+      false;
+
+    let loaderStarted =
       false;
 
     try {
@@ -1676,10 +2376,11 @@ export const Http = (() => {
         );
       }
 
-      startLoaderIfNeeded(
-        loaderEnabled,
-        requestConfig.requestId
-      );
+      loaderStarted =
+        startLoaderIfNeeded(
+          loaderEnabled,
+          requestConfig.requestId
+        );
 
       safeEmit(
         EVENTS.requestStart,
@@ -1714,6 +2415,29 @@ export const Http = (() => {
             requestConfig
           )
         ) {
+          if (
+            safeNumber(normalizedInitialError?.status, 0) === 401
+          ) {
+            state.refreshSkippedCount += 1;
+
+            safeEmit(
+              EVENTS.refreshSkipped,
+              {
+                requestId:
+                  requestConfig.requestId,
+
+                path:
+                  redactTokenInText(requestConfig.path),
+
+                reason:
+                  "not-eligible",
+
+                error:
+                  sanitizeErrorForEvent(normalizedInitialError),
+              }
+            );
+          }
+
           throw normalizedInitialError;
         }
 
@@ -1763,7 +2487,7 @@ export const Http = (() => {
             nowMs() - startedAt,
 
           response:
-            interceptedResponse,
+            summarizeResponseForEvent(interceptedResponse),
         }
       );
 
@@ -1789,7 +2513,7 @@ export const Http = (() => {
               nowMs() - startedAt,
 
             response:
-              interceptedResponse,
+              summarizeResponseForEvent(interceptedResponse),
           }
         );
       }
@@ -1837,6 +2561,10 @@ export const Http = (() => {
       state.errorCount += 1;
       state.lastErrorAt =
         isoNow();
+
+      if (finalError?.aborted) {
+        state.abortCount += 1;
+      }
 
       state.lastError =
         sanitizeErrorForEvent(
@@ -1891,7 +2619,7 @@ export const Http = (() => {
       throw finalError;
     } finally {
       stopLoaderIfNeeded(
-        loaderEnabled,
+        loaderStarted,
         requestConfig?.requestId || ""
       );
 
@@ -1939,6 +2667,14 @@ export const Http = (() => {
     );
   }
 
+  function optionsMethod(path, options = {}) {
+    return request(
+      "OPTIONS",
+      path,
+      options
+    );
+  }
+
   function post(path, body = null, options = {}) {
     return request(
       "POST",
@@ -1972,11 +2708,18 @@ export const Http = (() => {
     );
   }
 
-  function del(path, options = {}) {
+  function del(path, bodyOrOptions = {}, maybeOptions = undefined) {
+    const normalized =
+      normalizeDeleteArgs(
+        path,
+        bodyOrOptions,
+        maybeOptions
+      );
+
     return request(
       "DELETE",
-      path,
-      options
+      normalized.path,
+      normalized.options
     );
   }
 
@@ -1999,7 +2742,39 @@ export const Http = (() => {
     );
   }
 
+  function download(path, options = {}) {
+    return request(
+      options?.method || "GET",
+      path,
+      {
+        ...safeObject(options),
+
+        responseType:
+          options.responseType ||
+          "blob",
+
+        download:
+          true,
+      }
+    );
+  }
+
   function raw(method = "GET", path = "", options = {}) {
+    if (
+      typeof method === "string" &&
+      !isKnownMethod(method)
+    ) {
+      return request(
+        "GET",
+        method,
+        {
+          ...safeObject(path),
+          raw:
+            true,
+        }
+      );
+    }
+
     return request(
       method,
       path,
@@ -2044,6 +2819,16 @@ export const Http = (() => {
           cfg.requestId || nextRequestId();
       }
 
+      if (!headers["X-Onion-Client"]) {
+        headers["X-Onion-Client"] =
+          "onion-spa";
+      }
+
+      if (!headers["X-Client-Version"]) {
+        headers["X-Client-Version"] =
+          SERVICE_VERSION;
+      }
+
       if (
         cfg.acceptJson !== false &&
         !headers.Accept
@@ -2051,6 +2836,12 @@ export const Http = (() => {
         headers.Accept =
           "application/json";
       }
+
+      /*
+        No se fuerza Content-Type aquí:
+        - FormData debe dejar que el browser ponga boundary.
+        - request/core o http.request decidirán si es JSON.
+      */
 
       return {
         ...cfg,
@@ -2070,17 +2861,41 @@ export const Http = (() => {
   }
 
   /* =======================================================
-     INIT
+     INIT / CONFIG
   ======================================================= */
 
   function init() {
     if (state.initialized) {
       attachToAppCore();
+
+      safeEmit(
+        EVENTS.initSkipped,
+        {
+          reason:
+            "already-initialized",
+
+          version:
+            SERVICE_VERSION,
+        }
+      );
+
       return api;
     }
 
     if (state.initializing) {
       attachToAppCore();
+
+      safeEmit(
+        EVENTS.initSkipped,
+        {
+          reason:
+            "initializing",
+
+          version:
+            SERVICE_VERSION,
+        }
+      );
+
       return api;
     }
 
@@ -2115,6 +2930,50 @@ export const Http = (() => {
     }
   }
 
+  function configure(patchConfig = {}) {
+    const patch =
+      safeObject(patchConfig);
+
+    Object.assign(
+      config,
+      patch
+    );
+
+    safeEmit(
+      EVENTS.configUpdated,
+      {
+        config:
+          sanitizePayload({
+            autoRefreshOn401:
+              config.autoRefreshOn401 !== false,
+
+            autoLogoutOn401:
+              config.autoLogoutOn401 !== false,
+
+            timeout:
+              config.timeout ?? null,
+
+            retries:
+              config.retries ?? null,
+
+            retry:
+              config.retry ?? null,
+
+            useLoader:
+              config.useLoader ?? null,
+          }),
+      }
+    );
+
+    return getConfig();
+  }
+
+  function getConfig() {
+    return sanitizePayload({
+      ...config,
+    });
+  }
+
   /* =======================================================
      SNAPSHOT / DEBUG
   ======================================================= */
@@ -2142,6 +3001,8 @@ export const Http = (() => {
       pendingRequests:
         state.pendingRequests,
 
+      requestSeq,
+
       requestCount:
         state.requestCount,
 
@@ -2150,6 +3011,9 @@ export const Http = (() => {
 
       errorCount:
         state.errorCount,
+
+      abortCount:
+        state.abortCount,
 
       refreshAttemptCount:
         state.refreshAttemptCount,
@@ -2160,11 +3024,26 @@ export const Http = (() => {
       refreshFailureCount:
         state.refreshFailureCount,
 
+      refreshSkippedCount:
+        state.refreshSkippedCount,
+
       refreshInFlight:
         state.refreshInFlight,
 
+      replayCount:
+        state.replayCount,
+
+      replaySuccessCount:
+        state.replaySuccessCount,
+
+      replayFailureCount:
+        state.replayFailureCount,
+
       autoLogoutCount:
         state.autoLogoutCount,
+
+      autoLogoutSkippedCount:
+        state.autoLogoutSkippedCount,
 
       autoLogoutInFlight:
         state.autoLogoutInFlight,
@@ -2187,8 +3066,17 @@ export const Http = (() => {
       lastRefreshErrorAt:
         state.lastRefreshErrorAt,
 
+      lastReplayAt:
+        state.lastReplayAt,
+
+      lastReplayErrorAt:
+        state.lastReplayErrorAt,
+
       lastAutoLogoutAt:
         state.lastAutoLogoutAt,
+
+      lastRuntimeResetAt:
+        state.lastRuntimeResetAt,
 
       lastError:
         state.lastError,
@@ -2211,6 +3099,9 @@ export const Http = (() => {
 
         useLoader:
           config.useLoader ?? null,
+
+        apiBase:
+          getCoreApiBase(),
       },
 
       bridges: {
@@ -2238,6 +3129,20 @@ export const Http = (() => {
           Boolean(AppCore?.state?.hasToken),
       },
 
+      endpointPolicy: {
+        authMePrivate:
+          true,
+
+        publicAuthMarkers:
+          PUBLIC_AUTH_ENDPOINT_MARKERS.length,
+
+        skipRefreshMarkers:
+          AUTH_CONTROL_SKIP_REFRESH_MARKERS.length,
+
+        technicalPublicSpaPaths:
+          TECHNICAL_PUBLIC_SPA_PATHS,
+      },
+
       at:
         isoNow(),
     });
@@ -2262,6 +3167,9 @@ export const Http = (() => {
     logoutPromise =
       null;
 
+    state.lastRuntimeResetAt =
+      isoNow();
+
     try {
       AppCore?.setLoading?.(false);
     } catch {}
@@ -2274,6 +3182,10 @@ export const Http = (() => {
     return true;
   }
 
+  function abortController() {
+    return createAbortController();
+  }
+
   /* =======================================================
      PUBLIC API
   ======================================================= */
@@ -2283,12 +3195,21 @@ export const Http = (() => {
     version:
       SERVICE_VERSION,
 
+    SERVICE_NAME,
+
     init,
+
+    configure,
+    getConfig,
 
     request,
 
     get,
     head,
+
+    options:
+      optionsMethod,
+
     post,
     put,
     patch,
@@ -2299,13 +3220,18 @@ export const Http = (() => {
     del,
 
     upload,
+    download,
     raw,
 
     useRequest,
     useResponse,
     useError,
 
-    createAbortController,
+    createAbortController:
+      abortController,
+
+    abortController,
+
     withSignal,
 
     attachToAppCore,
@@ -2321,15 +3247,24 @@ export const Http = (() => {
     resetRuntimeState,
 
     isAuthEndpoint,
+    isAuthMeEndpoint,
     isPublicAuthEndpoint,
+    isAuthRefreshControlEndpoint,
     isTechnicalPublicSpaEndpoint,
     isPublicEndpoint,
+    isPrivateAuthenticatedRequest,
 
     normalizeEndpointPath,
     normalizePublicRequestConfig,
 
+    redactTokenInText,
+    sanitizePayload,
+    sanitizeErrorForEvent,
+
     config,
     state,
+    events:
+      EVENTS,
   };
 
   return api;

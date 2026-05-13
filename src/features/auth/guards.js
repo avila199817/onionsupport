@@ -2,6 +2,8 @@
    Onion SPA - Auth Guards
    Archivo: src/features/auth/guards.js
 
+   AUTH GUARDS · STRICT SESSION GATE · GOD MODE v11
+
    RESPONSABILIDADES:
    - exponer helpers auth de estado
    - validar acceso por rol
@@ -27,6 +29,7 @@
    - soporte rutas públicas técnicas con tokens
    - snapshot diagnóstico seguro
    - compatibilidad legacy con nombres antiguos
+   - sin dependencia circular con login.js
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -45,16 +48,12 @@ import {
   AUTH_CONSTANTS,
 } from "./constants.js";
 
-import {
-  buildLoginRedirectPath,
-} from "./login.js";
-
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
 const GUARDS_VERSION =
-  "10.2.0";
+  "11.0.0-god-mode";
 
 const LOGIN_PATH =
   "/login";
@@ -80,6 +79,18 @@ const PUBLIC_TECHNICAL_PATHS =
     "/forgot-password",
     "/recover-password",
     "/password-reset",
+    "/2fa",
+    "/otp",
+    "/mfa",
+  ]);
+
+const LOGIN_LIKE_PATHS =
+  Object.freeze([
+    "/login",
+    "/signin",
+    "/sign-in",
+    "/auth",
+    "/auth/login",
   ]);
 
 const TOKEN_FALSE_VALUES =
@@ -123,8 +134,10 @@ const SUPPORT_ROLE_KEYS =
     "operator",
     "operador",
     "technician",
+    "technical",
     "tecnico",
     "técnico",
+    "staff",
   ]);
 
 const MANAGER_ROLE_KEYS =
@@ -204,10 +217,13 @@ const ROLE_ALIASES =
     technician:
       "support",
 
+    technical:
+      "support",
+
     tecnico:
       "support",
 
-    "técnico":
+    staff:
       "support",
 
     gestor:
@@ -447,7 +463,7 @@ function redactSafe(value = "") {
   } catch {
     return safeText(value, "")
       .replace(
-        /([?&](?:token|activationToken|activateToken|resetToken|passwordResetToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
+        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
         "$1***"
       )
       .replace(
@@ -543,6 +559,7 @@ function sanitizeGuardPayload(payload = {}, depth = 0) {
       lower.includes("token") ||
       lower.includes("authorization") ||
       lower.includes("password") ||
+      lower.includes("secret") ||
       lower === "code" ||
       lower === "otp" ||
       lower === "totp" ||
@@ -851,6 +868,23 @@ function isPublicTechnicalPath(path = "") {
   });
 }
 
+function isLoginLikePath(path = "") {
+  const clean =
+    normalizeCanonicalPathSafe(path)
+      .toLowerCase();
+
+  return LOGIN_LIKE_PATHS.some((candidate) => {
+    const normalized =
+      normalizeCanonicalPathSafe(candidate)
+        .toLowerCase();
+
+    return (
+      clean === normalized ||
+      clean.startsWith(`${normalized}/`)
+    );
+  });
+}
+
 function hasEncodedOpenRedirectRisk(path = "") {
   const raw =
     safeText(path, "");
@@ -968,31 +1002,9 @@ function buildLoginRedirect(currentPath = "/", redirectTo = LOGIN_PATH) {
       safeCurrent
     );
 
-  if (
-    currentCanonical === LOGIN_PATH ||
-    currentCanonical === "/signin" ||
-    currentCanonical === "/sign-in" ||
-    currentCanonical === "/auth" ||
-    currentCanonical === "/auth/login"
-  ) {
+  if (isLoginLikePath(currentCanonical)) {
     safeCurrent =
       DEFAULT_HOME_PATH;
-  }
-
-  if (loginPath === LOGIN_PATH) {
-    try {
-      const built =
-        buildLoginRedirectPath(
-          safeCurrent
-        );
-
-      if (
-        built &&
-        isSafeInternalPath(built)
-      ) {
-        return built;
-      }
-    } catch {}
   }
 
   try {
@@ -1014,7 +1026,12 @@ function buildLoginRedirect(currentPath = "/", redirectTo = LOGIN_PATH) {
       ? finalPath
       : LOGIN_PATH;
   } catch {
-    return `${loginPath}?redirect=${encodeURIComponent(safeCurrent)}`;
+    const finalPath =
+      `${loginPath}?redirect=${encodeURIComponent(safeCurrent)}`;
+
+    return isSafeInternalPath(finalPath)
+      ? finalPath
+      : LOGIN_PATH;
   }
 }
 
@@ -1192,7 +1209,7 @@ function getCurrentToken() {
   );
 }
 
-function getCurrentUser() {
+export function getCurrentUser() {
   const state =
     getState();
 
@@ -1964,11 +1981,11 @@ export function requireRole(...roles) {
   );
 }
 
+/*
+  No exige user/authenticated para permitir llamadas /me durante restore si
+  algún consumidor legacy usa este helper desde guards.
+*/
 export function getAuthHeader() {
-  if (!isAuthenticated()) {
-    return {};
-  }
-
   const token =
     normalizeTokenValue(
       getCurrentToken()
@@ -1978,6 +1995,12 @@ export function getAuthHeader() {
     return {};
   }
 
+  const headerName =
+    safeText(
+      AppCore?.config?.auth?.tokenHeader,
+      "Authorization"
+    );
+
   const prefix =
     safeText(
       AppCore?.config?.auth?.bearerPrefix,
@@ -1985,7 +2008,7 @@ export function getAuthHeader() {
     );
 
   return {
-    Authorization:
+    [headerName]:
       `${prefix} ${token}`,
   };
 }
@@ -2481,9 +2504,15 @@ export function canAccessRoute({
       path || getCurrentPath()
     );
 
+  const currentPublicPath =
+    getCurrentPublicPathSafe();
+
   if (
     allowPublicTechnicalRoutes &&
-    isPublicTechnicalPath(currentPath)
+    (
+      isPublicTechnicalPath(currentPath) ||
+      isPublicTechnicalPath(currentPublicPath)
+    )
   ) {
     return true;
   }
@@ -2564,6 +2593,9 @@ export function getAuthGuardsSnapshot() {
   const currentRoles =
     getCurrentRoles();
 
+  const router =
+    getRouter();
+
   return {
     version:
       GUARDS_VERSION,
@@ -2608,14 +2640,14 @@ export function getAuthGuardsSnapshot() {
       isPublicTechnicalPath(currentPublicPath),
 
     hasRouter:
-      Boolean(getRouter()),
+      Boolean(router),
 
     routerCapabilities: {
       navigate:
-        Boolean(isFunction(getRouter()?.navigate)),
+        Boolean(isFunction(router?.navigate)),
 
       go:
-        Boolean(isFunction(getRouter()?.go)),
+        Boolean(isFunction(router?.go)),
     },
 
     state: {
@@ -2637,6 +2669,9 @@ export function getAuthGuardsSnapshot() {
       hasToken:
         Boolean(getState().hasToken),
     },
+
+    at:
+      safeIsoDate(),
   };
 }
 
@@ -2648,6 +2683,7 @@ export default {
   syncAuthState,
 
   isAuthenticated,
+  getCurrentUser,
 
   getCurrentRole,
   getCurrentRoles,
@@ -2670,7 +2706,36 @@ export default {
 
   canAccessRoute,
 
+  /*
+    Aliases legacy/ergonómicos.
+  */
+  requireAuth:
+    guardAuthenticated,
+
+  ensureAuthenticated:
+    guardAuthenticated,
+
+  requireGuest:
+    guardGuest,
+
+  requireAdmin:
+    guardAdmin,
+
+  requireSupport:
+    guardSupport,
+
+  requireManager:
+    guardManager,
+
+  can:
+    hasRole,
+
+  canAccess:
+    canAccessRoute,
+
   buildGuardErrorPayload,
 
   getAuthGuardsSnapshot,
+  getDebugSnapshot:
+    getAuthGuardsSnapshot,
 };

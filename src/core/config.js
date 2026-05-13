@@ -2,17 +2,21 @@
    Onion SPA - Core Config
    Archivo: src/core/config.js
 
+   ONION SUPPORT · CORE CONFIG
+   GLOBAL CONTRACT · ROUTES · API · AUTH · STORAGE · 13/10
+
    Responsabilidades:
    - centralizar configuración global del núcleo
-   - exponer rutas base
+   - exponer rutas base canónicas del SPA
+   - exponer aliases legacy sin contaminar rutas canónicas
    - exponer rutas públicas técnicas
-   - exponer claves de storage
+   - exponer claves de storage lógicas
    - exponer flags de auth, UI, router, loader y request
    - permitir overrides runtime seguros
    - evitar mutaciones accidentales
 
    HARDENING EXTREMO:
-   - Object.freeze profundo
+   - Object.freeze profundo con protección de ciclos
    - valores normalizados
    - compatibilidad con config legacy
    - rutas públicas/token centralizadas
@@ -31,7 +35,7 @@
 ========================================================= */
 
 const CONFIG_VERSION =
-  "11.0.0";
+  "13.0.0";
 
 /* =========================================================
    HELPERS
@@ -49,11 +53,7 @@ function isArray(value) {
   return Array.isArray(value);
 }
 
-function isFunction(value) {
-  return typeof value === "function";
-}
-
-function deepFreeze(value) {
+function deepFreeze(value, seen = new WeakSet()) {
   if (
     !value ||
     typeof value !== "object" ||
@@ -63,6 +63,12 @@ function deepFreeze(value) {
   }
 
   try {
+    if (seen.has(value)) {
+      return value;
+    }
+
+    seen.add(value);
+
     for (const key of Object.getOwnPropertyNames(value)) {
       const child =
         value[key];
@@ -72,7 +78,10 @@ function deepFreeze(value) {
         typeof child === "object" &&
         !Object.isFrozen(child)
       ) {
-        deepFreeze(child);
+        deepFreeze(
+          child,
+          seen
+        );
       }
     }
 
@@ -180,8 +189,42 @@ function uniqueArray(values = []) {
 }
 
 function normalizePath(path = "/") {
+  const raw =
+    safeText(path, "/");
+
+  let pathname =
+    raw;
+
+  let search =
+    "";
+
+  let hash =
+    "";
+
+  const hashIndex =
+    pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash =
+      pathname.slice(hashIndex);
+
+    pathname =
+      pathname.slice(0, hashIndex) || "/";
+  }
+
+  const searchIndex =
+    pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search =
+      pathname.slice(searchIndex);
+
+    pathname =
+      pathname.slice(0, searchIndex) || "/";
+  }
+
   let value =
-    safeText(path, "/")
+    safeText(pathname, "/")
       .replace(/\\/g, "/")
       .replace(/\/{2,}/g, "/");
 
@@ -203,14 +246,19 @@ function normalizePath(path = "/") {
       "/";
   }
 
-  return value;
+  return `${value}${search}${hash}`;
 }
 
 function stripSearchAndHash(path = "/") {
-  return normalizePath(path)
-    .split("?")[0]
-    .split("#")[0] ||
-    "/";
+  const normalized =
+    normalizePath(path);
+
+  return (
+    normalized
+      .split("?")[0]
+      .split("#")[0] ||
+    "/"
+  );
 }
 
 function normalizeBaseUrl(value = "") {
@@ -218,6 +266,10 @@ function normalizeBaseUrl(value = "") {
     safeText(value, "");
 
   if (!raw) {
+    return "";
+  }
+
+  if (raw === "/") {
     return "";
   }
 
@@ -232,12 +284,41 @@ function normalizeStoragePrefix(value = "onion") {
 }
 
 function normalizeLang(value = "es") {
-  const lang =
+  const raw =
     safeText(value, "es")
-      .toLowerCase();
+      .toLowerCase()
+      .replace(/_/g, "-");
 
-  return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(lang)
-    ? lang
+  const first =
+    raw.split("-")[0] || raw;
+
+  if (
+    first === "spa" ||
+    first === "spanish" ||
+    first === "castellano" ||
+    first === "español"
+  ) {
+    return "es";
+  }
+
+  if (
+    first === "eng" ||
+    first === "english"
+  ) {
+    return "en";
+  }
+
+  if (
+    first === "cat" ||
+    first === "catalan" ||
+    first === "català" ||
+    first === "catalán"
+  ) {
+    return "ca";
+  }
+
+  return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(raw)
+    ? raw
     : "es";
 }
 
@@ -429,50 +510,49 @@ function pickRuntimeOverrides(runtime = {}) {
     return {};
   }
 
-  const allowedKeys =
-    [
-      "appName",
-      "name",
-      "version",
-      "env",
-      "environment",
-      "debug",
+  const allowedKeys = [
+    "appName",
+    "name",
+    "version",
+    "env",
+    "environment",
+    "debug",
 
-      "apiBase",
-      "requestTimeout",
-      "requestRetries",
-      "requestRetryDelayMs",
-      "requestRetryMaxDelayMs",
-      "requestRetryMethods",
+    "apiBase",
+    "requestTimeout",
+    "requestRetries",
+    "requestRetryDelayMs",
+    "requestRetryMaxDelayMs",
+    "requestRetryMethods",
 
-      "defaultLang",
-      "fallbackLang",
-      "defaultTheme",
-      "storagePrefix",
+    "defaultLang",
+    "fallbackLang",
+    "defaultTheme",
+    "storagePrefix",
 
-      "routes",
-      "publicRoutes",
-      "authLikeRoutes",
-      "protectedPublicTokenRoutes",
+    "routes",
+    "routeAliases",
+    "publicRoutes",
+    "authLikeRoutes",
+    "protectedPublicTokenRoutes",
 
-      "storageKeys",
-      "legacyStorageKeys",
+    "storageKeys",
+    "legacyStorageKeys",
 
-      "api",
-      "auth",
-      "ui",
-      "i18n",
-      "router",
-      "loader",
-      "events",
-      "featureFlags",
-      "diagnostics",
-      "resources",
-      "security",
-    ];
+    "api",
+    "auth",
+    "ui",
+    "i18n",
+    "router",
+    "loader",
+    "events",
+    "featureFlags",
+    "diagnostics",
+    "resources",
+    "security",
+  ];
 
-  const output =
-    {};
+  const output = {};
 
   for (const key of allowedKeys) {
     if (runtime[key] !== undefined) {
@@ -550,9 +630,9 @@ const DEBUG =
         "VITE_ONION_DEBUG",
         "APP_DEBUG",
       ],
-      runtimeConfig.debug ?? true
+      runtimeConfig.debug ?? false
     ),
-    true
+    false
   );
 
 const API_BASE =
@@ -567,7 +647,7 @@ const API_BASE =
       runtimeConfig.apiBase ||
         runtimeConfig.api?.base ||
         runtimeConfig.api?.baseUrl ||
-        "https://api.onionit.net"
+        ""
     )
   );
 
@@ -584,7 +664,7 @@ const STORAGE_PREFIX =
   );
 
 /* =========================================================
-   ROUTES
+   ROUTES · CANONICAL SPA PATHS
 ========================================================= */
 
 const routes = {
@@ -603,35 +683,47 @@ const routes = {
   notFound:
     "/404",
 
-  account:
-    "/account",
-
-  settings:
-    "/settings",
+  incidencias:
+    "/incidencias",
 
   tickets:
-    "/tickets",
-
-  incidencias:
-    "/tickets",
-
-  invoices:
-    "/facturas",
+    "/incidencias",
 
   facturas:
     "/facturas",
 
-  users:
-    "/users",
+  invoices:
+    "/facturas",
 
   usuarios:
-    "/users",
+    "/usuarios",
 
-  clients:
-    "/clients",
+  users:
+    "/usuarios",
 
   clientes:
-    "/clients",
+    "/clientes",
+
+  clients:
+    "/clientes",
+
+  cuenta:
+    "/cuenta",
+
+  account:
+    "/cuenta",
+
+  ajustes:
+    "/ajustes",
+
+  settings:
+    "/ajustes",
+
+  servidor:
+    "/servidor",
+
+  server:
+    "/servidor",
 
   activateAccount:
     "/activate-account",
@@ -642,8 +734,76 @@ const routes = {
   forgotPassword:
     "/forgot-password",
 
+  recoverPassword:
+    "/recover-password",
+
+  passwordReset:
+    "/password-reset",
+
   resetPasswordConfirm:
     "/reset-password/confirm",
+};
+
+const routeAliases = {
+  "/home":
+    routes.home,
+
+  "/dashboard":
+    routes.home,
+
+  "/tickets":
+    routes.incidencias,
+
+  "/ticket":
+    routes.incidencias,
+
+  "/incidents":
+    routes.incidencias,
+
+  "/incident":
+    routes.incidencias,
+
+  "/invoices":
+    routes.facturas,
+
+  "/invoice":
+    routes.facturas,
+
+  "/billing":
+    routes.facturas,
+
+  "/users":
+    routes.usuarios,
+
+  "/user":
+    routes.usuarios,
+
+  "/clients":
+    routes.clientes,
+
+  "/client":
+    routes.clientes,
+
+  "/customers":
+    routes.clientes,
+
+  "/customer":
+    routes.clientes,
+
+  "/account":
+    routes.cuenta,
+
+  "/profile":
+    routes.cuenta,
+
+  "/settings":
+    routes.ajustes,
+
+  "/config":
+    routes.ajustes,
+
+  "/server":
+    routes.servidor,
 };
 
 const publicRoutes = normalizePathList([
@@ -651,6 +811,8 @@ const publicRoutes = normalizePathList([
   routes.activateAccount,
   routes.resetPassword,
   routes.forgotPassword,
+  routes.recoverPassword,
+  routes.passwordReset,
   routes.resetPasswordConfirm,
   routes.forbidden,
   routes.notFound,
@@ -661,6 +823,8 @@ const authLikeRoutes = normalizePathList([
   routes.activateAccount,
   routes.resetPassword,
   routes.forgotPassword,
+  routes.recoverPassword,
+  routes.passwordReset,
   routes.resetPasswordConfirm,
 ]);
 
@@ -681,6 +845,37 @@ const protectedPublicTokenRoutes = [
     windowKeys:
       [
         "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+      ],
+
+    stateUrlKey:
+      "bootActivationInitialUrl",
+
+    statePathKey:
+      "bootActivationInitialPath",
+
+    statePublicPathKey:
+      "bootActivationInitialPublicPath",
+
+    stateIsRouteKey:
+      "bootIsActivation",
+
+    stateHasTokenKey:
+      "bootHasActivationToken",
+
+    scrubbedStateKeys:
+      [
+        "scrubbedActivationToken",
+        "activationTokenScrubbed",
+        "scrubbedActivateAccountToken",
+      ],
+
+    scrubbedHistoryKeys:
+      [
+        "scrubbedActivationToken",
+        "activationTokenScrubbed",
+        "scrubbedActivateAccountToken",
+        "scrubbedPublicTokenRoute",
+        "scrubbedTokenRoute",
       ],
 
     tokenParamNames:
@@ -712,6 +907,41 @@ const protectedPublicTokenRoutes = [
         "__ONION_RESET_CONFIRM_INITIAL_URL__",
       ],
 
+    stateUrlKey:
+      "bootResetConfirmInitialUrl",
+
+    statePathKey:
+      "bootResetConfirmInitialPath",
+
+    statePublicPathKey:
+      "bootResetConfirmInitialPublicPath",
+
+    stateIsRouteKey:
+      "bootIsResetConfirm",
+
+    stateHasTokenKey:
+      "bootHasResetToken",
+
+    scrubbedStateKeys:
+      [
+        "scrubbedResetToken",
+        "resetTokenScrubbed",
+        "scrubbedResetConfirmToken",
+        "scrubbedPasswordResetToken",
+        "scrubbedResetPasswordToken",
+      ],
+
+    scrubbedHistoryKeys:
+      [
+        "scrubbedResetToken",
+        "resetTokenScrubbed",
+        "scrubbedResetConfirmToken",
+        "scrubbedPasswordResetToken",
+        "scrubbedResetPasswordToken",
+        "scrubbedPublicTokenRoute",
+        "scrubbedTokenRoute",
+      ],
+
     tokenParamNames:
       [
         "token",
@@ -730,12 +960,15 @@ const protectedPublicTokenRoutes = [
 
 /*
   Estas claves son nombres lógicos.
-  storage.js se encarga de namespacing real:
+  storage.js debe aplicar el namespace real:
   `${storagePrefix}:${key}`.
 */
 const storageKeys = {
   token:
     "token",
+
+  accessToken:
+    "accessToken",
 
   refreshToken:
     "refreshToken",
@@ -868,6 +1101,7 @@ const privateApiPaths = normalizePathList([
   "/auth/me",
   "/me",
   "/api/auth/logout",
+  "/api/auth/logout-all",
 ]);
 
 const auth = {
@@ -879,6 +1113,9 @@ const auth = {
 
   tokenStorageKey:
     storageKeys.token,
+
+  accessTokenStorageKey:
+    storageKeys.accessToken,
 
   refreshTokenStorageKey:
     storageKeys.refreshToken,
@@ -910,6 +1147,9 @@ const auth = {
 
     logout:
       "/api/auth/logout",
+
+    logoutAll:
+      "/api/auth/logout-all",
 
     me:
       "/api/auth/me",
@@ -952,10 +1192,34 @@ const auth = {
     admin:
       "admin",
 
+    administrator:
+      "admin",
+
+    administrador:
+      "admin",
+
+    superadmin:
+      "admin",
+
+    owner:
+      "admin",
+
+    root:
+      "admin",
+
     agent:
       "agent",
 
     tecnico:
+      "agent",
+
+    técnica:
+      "agent",
+
+    support:
+      "agent",
+
+    soporte:
       "agent",
 
     user:
@@ -1010,6 +1274,9 @@ const api = {
 
   baseUrl:
     API_BASE,
+
+  sameOrigin:
+    !API_BASE,
 
   timeout:
     safeNumber(
@@ -1091,6 +1358,9 @@ const resources = {
     update:
       "/api/tickets/:id",
 
+    comments:
+      "/api/tickets/:id/comments",
+
     attachments:
       "/api/tickets/:id/attachments",
 
@@ -1145,23 +1415,31 @@ const resources = {
 
   clients: {
     base:
-      "/api/clients",
+      "/api/clientes",
 
     alias:
-      "/api/clientes",
+      "/api/clients",
   },
 
   clientes: {
     base:
-      "/api/clients",
+      "/api/clientes",
 
     alias:
-      "/api/clientes",
+      "/api/clients",
   },
 
   hardware: {
     base:
       "/api/hardware",
+  },
+
+  search: {
+    base:
+      "/api/search",
+
+    global:
+      "/api/search",
   },
 };
 
@@ -1300,6 +1578,10 @@ const router = {
 
   safeExternalLinks:
     true,
+
+  routes,
+
+  routeAliases,
 
   events: {
     beforeRender:
@@ -1612,6 +1894,7 @@ const baseConfig = {
     STORAGE_PREFIX,
 
   routes,
+  routeAliases,
   publicRoutes,
   authLikeRoutes,
   protectedPublicTokenRoutes,
@@ -1715,6 +1998,22 @@ function normalizeFinalConfig(source = {}) {
         "dark"
     );
 
+  output.routes =
+    Object.fromEntries(
+      Object.entries(output.routes || {}).map(([key, value]) => [
+        key,
+        normalizePath(value),
+      ])
+    );
+
+  output.routeAliases =
+    Object.fromEntries(
+      Object.entries(output.routeAliases || {}).map(([key, value]) => [
+        normalizePath(key),
+        stripSearchAndHash(value),
+      ])
+    );
+
   output.publicRoutes =
     normalizePathList(
       output.publicRoutes || []
@@ -1759,6 +2058,16 @@ function normalizeFinalConfig(source = {}) {
             uniqueArray(
               item.tokenParamNames || []
             ),
+
+          scrubbedStateKeys:
+            uniqueArray(
+              item.scrubbedStateKeys || []
+            ),
+
+          scrubbedHistoryKeys:
+            uniqueArray(
+              item.scrubbedHistoryKeys || []
+            ),
         };
       })
       .filter(Boolean);
@@ -1789,6 +2098,9 @@ function normalizeFinalConfig(source = {}) {
 
     output.api.baseUrl =
       output.apiBase;
+
+    output.api.sameOrigin =
+      !output.apiBase;
 
     output.api.timeout =
       safeNumber(
@@ -1920,7 +2232,7 @@ export const config =
   );
 
 /* =========================================================
-   HELPERS
+   PUBLIC HELPERS
 ========================================================= */
 
 export function getConfig() {
@@ -1940,6 +2252,13 @@ export function getRoute(key = "home", fallback = "/") {
       fallback ||
       "/"
   );
+}
+
+export function getRouteAlias(path = "") {
+  const cleanPath =
+    stripSearchAndHash(path);
+
+  return config.routeAliases?.[cleanPath] || "";
 }
 
 export function getStorageKey(key = "", fallback = "") {
@@ -2176,6 +2495,9 @@ export function getConfigSnapshot() {
 
     routes:
       config.routes,
+
+    routeAliases:
+      config.routeAliases,
 
     publicRoutes:
       config.publicRoutes,

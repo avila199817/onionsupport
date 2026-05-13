@@ -1,14 +1,13 @@
 /* =========================================================
    Onion SPA - App Constants
-   Archivo: src/app/constants.js
+   Archivo: /src/app/constants.js
 
    ONION SUPPORT · APP CONSTANTS
-   EXTREME PRO SYSTEM · BOOT CONTRACT · ROUTER/AUTH SAFE
-   FINAL EXTREME 13/10
+   BOOT CONTRACT · ROUTER/AUTH SAFE · ZERO SIDE EFFECTS · 10/10
 
    RESPONSABILIDADES:
    - Centralizar constantes del bootstrap de la app.
-   - Definir scope global de cleanup.
+   - Definir scopes globales de cleanup.
    - Definir timeouts de boot / restore / render / loader.
    - Centralizar claves internas del runtime.
    - Centralizar eventos públicos internos.
@@ -28,7 +27,6 @@
      · src/app/errors.js
      · src/app/warmup.js
      · src/app/boot-state.js
-   - Exponer helpers seguros y snapshots de diagnóstico.
 
    REGLAS:
    - Sin dependencias externas.
@@ -44,8 +42,7 @@
    VERSION
 ========================================================= */
 
-export const APP_CONSTANTS_VERSION =
-  "13.0.0";
+export const APP_CONSTANTS_VERSION = "14.0.0";
 
 /* =========================================================
    FREEZE
@@ -69,8 +66,7 @@ function deepFreeze(value, seen = new WeakSet()) {
 
     for (const key of Object.getOwnPropertyNames(value)) {
       try {
-        const child =
-          value[key];
+        const child = value[key];
 
         if (
           child &&
@@ -165,6 +161,16 @@ function findByKey(collection, key = "") {
   );
 }
 
+/* =========================================================
+   PATH HELPERS · NO DOM
+========================================================= */
+
+const FALLBACK_ORIGIN =
+  "http://localhost";
+
+const PUBLIC_USERNAME_RE =
+  /^@[A-Za-z0-9._-]{1,80}$/;
+
 function normalizeSlashPath(path = "/") {
   let value =
     safeText(path, "/")
@@ -179,27 +185,63 @@ function normalizeSlashPath(path = "/") {
     value = `/${value}`;
   }
 
+  const segments = [];
+
+  for (const segment of value.split("/").filter(Boolean)) {
+    if (segment === ".") {
+      continue;
+    }
+
+    if (segment === "..") {
+      segments.pop();
+      continue;
+    }
+
+    segments.push(segment);
+  }
+
+  value =
+    `/${segments.join("/")}`;
+
+  if (!value) {
+    value = "/";
+  }
+
   if (
     value.length > 1 &&
     value.endsWith("/")
   ) {
-    value = value.replace(/\/+$/g, "") || "/";
+    value =
+      value.replace(/\/+$/g, "") || "/";
   }
 
   return value;
 }
 
-function stripSearchAndHash(path = "/") {
+function normalizeSearch(search = "") {
   const raw =
-    safeText(path, "/");
+    safeText(search, "");
 
-  const noHash =
-    raw.split("#")[0] || "/";
+  if (!raw) {
+    return "";
+  }
 
-  const noSearch =
-    noHash.split("?")[0] || "/";
+  return raw.startsWith("?")
+    ? raw
+    : `?${raw.replace(/^\?+/, "")}`;
+}
 
-  return normalizeSlashPath(noSearch);
+function normalizeHash(hash = "") {
+  const raw =
+    safeText(hash, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  return raw.startsWith("#")
+    ? raw
+    : `#${raw.replace(/^#+/, "")}`;
 }
 
 function isHashRouterPath(value = "") {
@@ -221,25 +263,150 @@ function normalizeHashRouterPath(value = "") {
   }
 
   if (raw.startsWith("#!")) {
-    return normalizeSlashPath(
+    return normalizeLocalFullPath(
       raw.replace(/^#!\/?/, "/")
     );
   }
 
-  return normalizeSlashPath(
+  return normalizeLocalFullPath(
     raw.replace(/^#\/?/, "/")
   );
 }
 
-function normalizeRouteLikePath(path = "/") {
+function splitFullPath(path = "/") {
   const raw =
     safeText(path, "/");
+
+  if (isHashRouterPath(raw)) {
+    return splitFullPath(
+      normalizeHashRouterPath(raw)
+    );
+  }
+
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex =
+    pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash =
+      pathname.slice(hashIndex);
+
+    pathname =
+      pathname.slice(0, hashIndex) || "/";
+  }
+
+  const searchIndex =
+    pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search =
+      pathname.slice(searchIndex);
+
+    pathname =
+      pathname.slice(0, searchIndex) || "/";
+  }
+
+  return {
+    pathname:
+      normalizeSlashPath(pathname),
+
+    search:
+      normalizeSearch(search),
+
+    hash:
+      normalizeHash(hash),
+  };
+}
+
+function normalizeLocalFullPath(path = "/") {
+  const raw =
+    safeText(path, "/");
+
+  if (!raw) {
+    return "/";
+  }
 
   if (isHashRouterPath(raw)) {
     return normalizeHashRouterPath(raw);
   }
 
-  return stripSearchAndHash(raw);
+  try {
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
+      const parsed =
+        new URL(
+          raw,
+          FALLBACK_ORIGIN
+        );
+
+      if (
+        parsed.hash &&
+        isHashRouterPath(parsed.hash)
+      ) {
+        return normalizeHashRouterPath(parsed.hash);
+      }
+
+      return normalizeLocalFullPath(
+        `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
+      );
+    }
+  } catch {}
+
+  const {
+    pathname,
+    search,
+    hash,
+  } =
+    splitFullPath(raw);
+
+  return `${pathname}${search}${hash}`;
+}
+
+function stripSearchAndHash(path = "/") {
+  const normalized =
+    normalizeLocalFullPath(path || "/");
+
+  return (
+    normalized
+      .split("?")[0]
+      .split("#")[0] ||
+    "/"
+  );
+}
+
+function stripUsernamePrefixFromPathname(pathname = "/") {
+  const clean =
+    normalizeSlashPath(pathname || "/");
+
+  const segments =
+    clean
+      .split("/")
+      .filter(Boolean);
+
+  if (
+    segments.length > 0 &&
+    PUBLIC_USERNAME_RE.test(segments[0])
+  ) {
+    const rest =
+      segments.slice(1).join("/");
+
+    return rest
+      ? normalizeSlashPath(`/${rest}`)
+      : "/";
+  }
+
+  return clean;
+}
+
+function normalizeRouteLikePath(path = "/") {
+  const normalized =
+    normalizeLocalFullPath(path || "/");
+
+  return stripUsernamePrefixFromPathname(
+    stripSearchAndHash(normalized)
+  );
 }
 
 function clonePublicTokenRoute(config = {}) {
@@ -325,35 +492,16 @@ export const APP_SCOPES =
    BOOT / TIMEOUTS
 ========================================================= */
 
-export const BOOT_FAILSAFE_LOADER_MS =
-  12000;
-
-export const BOOT_MIN_LOADER_VISIBLE_MS =
-  500;
-
-export const BOOT_HIDE_TRANSITION_MS =
-  220;
-
-export const BOOT_RENDER_TIMEOUT_MS =
-  10000;
-
-export const BOOT_RESTORE_TIMEOUT_MS =
-  12000;
-
-export const BOOT_READY_EVENT_DELAY_MS =
-  0;
-
-export const BOOT_MAIN_TIMEOUT_MS =
-  45000;
-
-export const BOOT_SESSION_READY_DEDUPE_MS =
-  160;
-
-export const BOOT_UI_REPAIR_THROTTLE_MS =
-  140;
-
-export const BOOT_UI_SYNC_THROTTLE_MS =
-  100;
+export const BOOT_FAILSAFE_LOADER_MS = 12000;
+export const BOOT_MIN_LOADER_VISIBLE_MS = 500;
+export const BOOT_HIDE_TRANSITION_MS = 220;
+export const BOOT_RENDER_TIMEOUT_MS = 10000;
+export const BOOT_RESTORE_TIMEOUT_MS = 12000;
+export const BOOT_READY_EVENT_DELAY_MS = 0;
+export const BOOT_MAIN_TIMEOUT_MS = 45000;
+export const BOOT_SESSION_READY_DEDUPE_MS = 160;
+export const BOOT_UI_REPAIR_THROTTLE_MS = 140;
+export const BOOT_UI_SYNC_THROTTLE_MS = 100;
 
 export const BOOT_CONSTANTS =
   freeze({
@@ -457,14 +605,47 @@ export const BOOT_PHASES =
     IDLE:
       "idle",
 
+    PREPARING:
+      "preparing",
+
     BOOTING:
       "booting",
+
+    SERVICES:
+      "services",
+
+    STORE:
+      "store",
+
+    I18N:
+      "i18n",
+
+    UI:
+      "ui",
+
+    RESTORING:
+      "restoring",
+
+    RENDERING:
+      "rendering",
+
+    BINDING:
+      "binding",
+
+    FINALIZING:
+      "finalizing",
 
     READY:
       "ready",
 
     ERROR:
       "error",
+
+    FATAL:
+      "fatal",
+
+    REBOOTING:
+      "rebooting",
   });
 
 export const BOOT_FLAGS =
@@ -480,6 +661,15 @@ export const BOOT_FLAGS =
 
     appReady:
       "appReady",
+
+    appBooting:
+      "appBooting",
+
+    appFatal:
+      "appFatal",
+
+    fatal:
+      "fatal",
 
     loading:
       "loading",
@@ -576,13 +766,25 @@ export const APP_RUNTIME_KEYS =
       "__ONION_DEBUG__",
 
     loader:
-      "__ONION_LOADER__",
+      "__ONION_APP_LOADER__",
+
+    shell:
+      "__ONION_APP_SHELL__",
 
     warmup:
       "__ONION_WARMUP__",
 
     errors:
       "__ONION_APP_ERRORS__",
+
+    appEvents:
+      "__ONION_APP_EVENTS__",
+
+    bootState:
+      "__ONION_BOOT_STATE__",
+
+    themeApi:
+      "__ONION_THEME__",
 
     setTheme:
       "__ONION_SET_THEME__",
@@ -592,6 +794,9 @@ export const APP_RUNTIME_KEYS =
 
     clearTheme:
       "__ONION_CLEAR_THEME__",
+
+    reapplyTheme:
+      "__ONION_REAPPLY_THEME__",
   });
 
 export const APP_STATE_KEYS =
@@ -644,11 +849,20 @@ export const APP_STATE_KEYS =
     bootResetConfirmInitialUrl:
       "bootResetConfirmInitialUrl",
 
+    bootResetPasswordConfirmInitialUrl:
+      "bootResetPasswordConfirmInitialUrl",
+
     bootResetConfirmInitialPath:
       "bootResetConfirmInitialPath",
 
+    bootResetPasswordConfirmInitialPath:
+      "bootResetPasswordConfirmInitialPath",
+
     bootResetConfirmInitialPublicPath:
       "bootResetConfirmInitialPublicPath",
+
+    bootResetPasswordConfirmInitialPublicPath:
+      "bootResetPasswordConfirmInitialPublicPath",
 
     bootIsResetConfirm:
       "bootIsResetConfirm",
@@ -927,6 +1141,7 @@ export const PROTECTED_PUBLIC_TOKEN_ROUTES =
           "resetTokenScrubbed",
           "scrubbedResetConfirmToken",
           "scrubbedPasswordResetToken",
+          "scrubbedResetPasswordToken",
         ]),
 
       scrubbedHistoryKeys:
@@ -935,6 +1150,7 @@ export const PROTECTED_PUBLIC_TOKEN_ROUTES =
           "resetTokenScrubbed",
           "scrubbedResetConfirmToken",
           "scrubbedPasswordResetToken",
+          "scrubbedResetPasswordToken",
           "scrubbedPublicTokenRoute",
           "scrubbedTokenRoute",
         ]),
@@ -985,6 +1201,9 @@ export const APP_EVENTS =
 
     bootError:
       "app:boot:error",
+
+    bootFatal:
+      "app:boot:fatal",
 
     bootLoaderShow:
       "app:boot:loader:show",
@@ -1427,6 +1646,12 @@ export const APP_MODULES =
 
     errors:
       "Errors",
+
+    bootState:
+      "BootState",
+
+    appEvents:
+      "AppEvents",
   });
 
 /* =========================================================
@@ -2111,6 +2336,14 @@ export function redactSensitiveText(value = "") {
       output.replace(
         /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
         "$1$2***"
+      );
+  } catch {}
+
+  try {
+    output =
+      output.replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
       );
   } catch {}
 

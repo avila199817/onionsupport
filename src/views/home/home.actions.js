@@ -3,32 +3,32 @@
    Archivo: src/views/home/home.actions.js
 
    ONION SUPPORT · HOME ACTIONS
-   FINAL PRO SYSTEM · API FIRST · STORE FALLBACK · 10/10
+   FINAL PRO SYSTEM · API FIRST · STORE FALLBACK · MODULAR BACKEND · 11/10
 
-   RESPONSABILIDADES:
-   - centralizar acciones operativas del módulo Home
-   - resolver dashboard desde store + backend
-   - resolver detalle de widget/bloque desde store + backend
-   - normalizar dashboard/widgets/colecciones heterogéneas
-   - copiar IDs de widgets/bloques con clipboard robusto
-   - exportar widgets/colecciones a CSV
-   - ejecutar navegación SPA con fallback seguro
-   - ejecutar quick actions desacopladas de la vista
-   - desacoplar homeView.js de lógica operativa
-   - mantener compatibilidad con AppCore, Router y eventos globales
+   Responsabilidades:
+   - Centralizar acciones operativas del módulo Home.
+   - Resolver dashboard desde store + backend.
+   - Resolver detalle de widget/bloque desde store + backend.
+   - Normalizar dashboard/widgets/colecciones heterogéneas.
+   - Copiar IDs de widgets/bloques con clipboard robusto.
+   - Exportar widgets/colecciones a CSV.
+   - Ejecutar navegación SPA con fallback seguro.
+   - Ejecutar quick actions desacopladas de la vista.
+   - Desacoplar homeView.js de lógica operativa.
+   - Mantener compatibilidad con AppCore, Router y eventos globales.
+   - Alineado con backend modular sin /api/dashboard/*.
 
-   HARDENING EXTREMO:
-   - tolerancia a envelopes backend profundos
-   - fallback store -> backend -> payload local
-   - eventos saneados sin tokens/secretos
-   - clipboard con fallback legacy sin CSS inline
-   - CSV con BOM UTF-8 y escape correcto
-   - navegación SPA con Router/AppCore/history/location
-   - browser guards para clipboard/download
-   - no CSS inline
-   - no Object.assign(style)
-   - no throws accidentales en acciones públicas
-   - default export completo
+   Hardening:
+   - Tolerancia a envelopes backend profundos.
+   - Fallback store -> backend -> payload local.
+   - Eventos saneados sin tokens/secretos.
+   - Clipboard con fallback legacy sin CSS inline.
+   - CSV con BOM UTF-8 y escape correcto.
+   - Navegación SPA con Router/AppCore/history/location.
+   - Browser guards para clipboard/download.
+   - No CSS inline.
+   - No Object.assign(style).
+   - No throws accidentales en acciones públicas.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -39,15 +39,31 @@ import {
 } from "./home.api.js";
 
 import {
+  replaceHomeStore,
+  upsertHomeWidgetStore,
   getHomeDashboardStore,
   getHomeWidgetByIdStore,
-  getHomeSortedCollectionStore,
+  getHomeWidgetsStore,
+  getHomeTicketsStore,
+  getHomeInvoicesStore,
+  getHomeUsersStore,
+  getHomeClientsStore,
+  getHomeActivityStore,
 } from "./home.store.js";
 
 import {
-  safeText,
-  safeArray,
-  safeObject,
+  normalizeHomeDashboard,
+  normalizeHomeWidget,
+  normalizeHomeWidgets,
+  normalizeHomeTickets,
+  normalizeHomeInvoices,
+  normalizeHomeUsers,
+  normalizeHomeClients,
+  normalizeHomeActivityList,
+  getHomeWidgetId,
+} from "./home.model.js";
+
+import {
   showToast,
 } from "./home.utils.js";
 
@@ -55,7 +71,7 @@ import {
    VERSION / CONSTANTS
 ========================================================= */
 
-const HOME_ACTIONS_VERSION = "11.0.0-extreme";
+export const HOME_ACTIONS_VERSION = "11.0.0";
 
 const SOURCE = "views:home:home.actions";
 
@@ -101,6 +117,7 @@ const ROUTE_ALIASES = Object.freeze({
 const DASHBOARD_OBJECT_KEYS = Object.freeze([
   "dashboard",
   "home",
+  "panel",
   "data",
   "result",
   "payload",
@@ -191,22 +208,73 @@ const SENSITIVE_EVENT_KEYS = Object.freeze([
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function isFn(value) {
   return typeof value === "function";
+}
+
+function safeObject(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return text || fallback;
+}
+
+function safeNumber(value, fallback = 0) {
+  if (value === null || value === undefined || value === "") {
+    return fallback;
+  }
+
+  if (typeof value === "string") {
+    let normalized = value
+      .trim()
+      .replace(/[€$£¥%]/g, "")
+      .replace(/[^\d.,+\-\s]/g, "")
+      .replace(/\s/g, "");
+
+    const hasComma = normalized.includes(",");
+    const hasDot = normalized.includes(".");
+
+    if (hasComma && hasDot) {
+      const lastComma = normalized.lastIndexOf(",");
+      const lastDot = normalized.lastIndexOf(".");
+
+      normalized =
+        lastComma > lastDot
+          ? normalized.replace(/\./g, "").replace(/,/g, ".")
+          : normalized.replace(/,/g, "");
+    } else if (hasComma) {
+      normalized = normalized.replace(/,/g, ".");
+    }
+
+    const parsed = Number(normalized);
+
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  const number = Number(value);
+
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function first(...values) {
@@ -231,50 +299,6 @@ function first(...values) {
   }
 
   return null;
-}
-
-function safeNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") {
-    return fallback;
-  }
-
-  if (typeof value === "string") {
-    let normalized = value
-      .trim()
-      .replace(/€/g, "")
-      .replace(/\$/g, "")
-      .replace(/£/g, "")
-      .replace(/%/g, "")
-      .replace(/[^\d.,+\-\s]/g, "")
-      .replace(/\s/g, "");
-
-    const hasComma = normalized.includes(",");
-    const hasDot = normalized.includes(".");
-
-    if (hasComma && hasDot) {
-      const lastComma = normalized.lastIndexOf(",");
-      const lastDot = normalized.lastIndexOf(".");
-
-      normalized =
-        lastComma > lastDot
-          ? normalized.replace(/\./g, "").replace(/,/g, ".")
-          : normalized.replace(/,/g, "");
-    } else if (hasComma) {
-      normalized = normalized.replace(/,/g, ".");
-    }
-
-    const parsed = Number(normalized);
-
-    return Number.isFinite(parsed)
-      ? parsed
-      : fallback;
-  }
-
-  const number = Number(value);
-
-  return Number.isFinite(number)
-    ? number
-    : fallback;
 }
 
 function normalizeKey(value = "") {
@@ -449,6 +473,7 @@ function safeEmit(eventName = "", payload = {}, options = {}) {
 
   const cleanPayload = sanitizeEventPayload({
     source: SOURCE,
+    version: HOME_ACTIONS_VERSION,
     ...safeObject(payload),
   });
 
@@ -465,10 +490,7 @@ function safeEmit(eventName = "", payload = {}, options = {}) {
     }
   } catch {}
 
-  if (
-    opts.window === true ||
-    (!busAvailable && isBrowser())
-  ) {
+  if (opts.window === true || (!busAvailable && isBrowser())) {
     try {
       window.dispatchEvent(
         new CustomEvent(name, {
@@ -501,7 +523,9 @@ function normalizeToastArgs(messageOrPayload = "", type = "info", options = {}) 
         ),
         ""
       ),
+
       type: safeText(payload.type || type, "info"),
+
       options: {
         ...safeObject(options),
         ...payload,
@@ -559,7 +583,7 @@ function notify(messageOrPayload = "", type = "info", options = {}) {
 }
 
 /* =========================================================
-   ENVELOPE / COLLECTION HELPERS
+   ENVELOPE HELPERS
 ========================================================= */
 
 function unwrapEnvelope(value = null, keys = [], depth = 0) {
@@ -611,16 +635,12 @@ function collectObjects(value = null, keys = [], depth = 0, seen = new Set()) {
     const candidate = value[key];
 
     if (isObject(candidate)) {
-      output.push(
-        ...collectObjects(candidate, keys, depth + 1, seen)
-      );
+      output.push(...collectObjects(candidate, keys, depth + 1, seen));
     }
   }
 
   if (isObject(value.response?.data)) {
-    output.push(
-      ...collectObjects(value.response.data, keys, depth + 1, seen)
-    );
+    output.push(...collectObjects(value.response.data, keys, depth + 1, seen));
   }
 
   return output;
@@ -631,10 +651,7 @@ function pickObjectByKeys(payload = null, keys = [], predicate = null) {
     return null;
   }
 
-  if (
-    isObject(payload) &&
-    (!predicate || predicate(payload))
-  ) {
+  if (isObject(payload) && (!predicate || predicate(payload))) {
     return payload;
   }
 
@@ -650,10 +667,7 @@ function pickObjectByKeys(payload = null, keys = [], predicate = null) {
     for (const key of keys) {
       const candidate = object[key];
 
-      if (
-        isObject(candidate) &&
-        (!predicate || predicate(candidate))
-      ) {
+      if (isObject(candidate) && (!predicate || predicate(candidate))) {
         return candidate;
       }
     }
@@ -709,10 +723,7 @@ function unwrapCollectionPayload(value = null, depth = 0) {
     object.data
   );
 
-  if (
-    isObject(nested) ||
-    Array.isArray(nested)
-  ) {
+  if (isObject(nested) || Array.isArray(nested)) {
     return unwrapCollectionPayload(nested, depth + 1);
   }
 
@@ -724,9 +735,7 @@ function normalizeCollection(value = null) {
     return value;
   }
 
-  const object = safeObject(
-    unwrapCollectionPayload(value)
-  );
+  const object = safeObject(unwrapCollectionPayload(value));
 
   for (const key of COLLECTION_KEYS) {
     if (Array.isArray(object[key])) {
@@ -787,6 +796,7 @@ function isLikelyDashboard(value) {
       Array.isArray(value.usuarios) ||
       Array.isArray(value.clients) ||
       Array.isArray(value.clientes) ||
+      isObject(value.modules) ||
       isObject(value.summary) ||
       isObject(value.stats) ||
       isObject(value.metrics) ||
@@ -840,6 +850,7 @@ function getWidgetId(item = {}) {
 
   return safeText(
     first(
+      getHomeWidgetId(raw),
       raw.widgetId,
       raw.widget_id,
       raw.id,
@@ -1002,26 +1013,28 @@ function getWidgetItems(item = {}) {
 
 function normalizeWidgetDetail(detail = {}) {
   const raw = safeObject(detail);
+  const normalized = normalizeHomeWidget(raw);
 
-  const widgetId = getWidgetId(raw);
+  const widgetId = getWidgetId(normalized);
 
   return {
-    ...raw,
+    ...normalized,
 
     widgetId,
-    id: raw.id || widgetId || null,
-    key: raw.key || widgetId || null,
+    id: normalized.id || widgetId || null,
+    key: normalized.key || widgetId || null,
 
-    title: getWidgetTitle(raw),
-    description: getWidgetDescription(raw),
-    type: getWidgetType(raw),
-    value: getWidgetValue(raw),
-    trend: getWidgetTrend(raw),
-    status: getWidgetStatus(raw),
-    route: getWidgetRoute(raw),
-    createdAt: getWidgetCreatedAt(raw),
-    updatedAt: getWidgetUpdatedAt(raw),
-    items: getWidgetItems(raw),
+    title: getWidgetTitle(normalized),
+    description: getWidgetDescription(normalized),
+    type: getWidgetType(normalized),
+    value: getWidgetValue(normalized),
+    trend: getWidgetTrend(normalized),
+    status: getWidgetStatus(normalized),
+    route: getWidgetRoute(normalized),
+    href: first(normalized.href, getWidgetRoute(normalized), ""),
+    createdAt: getWidgetCreatedAt(normalized),
+    updatedAt: getWidgetUpdatedAt(normalized),
+    items: getWidgetItems(normalized),
   };
 }
 
@@ -1029,87 +1042,98 @@ function normalizeWidgetDetail(detail = {}) {
    DASHBOARD NORMALIZATION
 ========================================================= */
 
-function getDashboardSummary(dashboard = {}) {
-  const raw = safeObject(dashboard);
-
-  return safeObject(
-    first(
-      raw.summary,
-      raw.stats,
-      raw.metrics,
-      raw.totals,
-      raw.counts,
-      {}
-    )
-  );
-}
-
-function getDashboardWidgets(dashboard = {}) {
-  const raw = safeObject(dashboard);
-
-  return normalizeCollection(
-    first(
-      raw.widgets,
-      raw.cards,
-      raw.kpis,
-      raw.blocks,
-      raw.items,
-      []
-    )
-  )
-    .map((item) => safeObject(item))
-    .filter((item) => isLikelyWidget(item))
-    .map((item) => normalizeWidgetDetail(item));
-}
-
-function getDashboardRecent(dashboard = {}) {
-  const raw = safeObject(dashboard);
-
-  return normalizeCollection(
-    first(
-      raw.recent,
-      raw.recentActivity,
-      raw.activity,
-      raw.activities,
-      raw.timeline,
-      []
-    )
-  ).map((item) => safeObject(item));
-}
-
 function normalizeDashboardSnapshot(snapshot = {}) {
   const raw = safeObject(snapshot);
 
-  const summary = getDashboardSummary(raw);
-  const widgets = getDashboardWidgets(raw);
-  const recent = getDashboardRecent(raw);
+  try {
+    return normalizeHomeDashboard(raw);
+  } catch {
+    const summary = safeObject(
+      first(
+        raw.summary,
+        raw.stats,
+        raw.metrics,
+        raw.totals,
+        raw.counts,
+        {}
+      )
+    );
 
-  return {
-    ...raw,
+    const widgets = normalizeHomeWidgets(
+      normalizeCollection(
+        first(
+          raw.widgets,
+          raw.cards,
+          raw.kpis,
+          raw.blocks,
+          raw.items,
+          []
+        )
+      )
+    );
 
-    summary,
-    stats: safeObject(raw.stats, summary),
-    metrics: safeObject(raw.metrics, summary),
-    totals: safeObject(raw.totals, summary),
-    counts: safeObject(raw.counts, summary),
+    const tickets = normalizeHomeTickets(
+      first(raw.tickets, raw.incidencias, [])
+    );
 
-    widgets,
-    cards: widgets,
-    kpis: widgets,
+    const invoices = normalizeHomeInvoices(
+      first(raw.invoices, raw.facturas, [])
+    );
 
-    recent,
-    recentActivity: recent,
-    activity: recent,
+    const users = normalizeHomeUsers(
+      first(raw.users, raw.usuarios, [])
+    );
 
-    updatedAt: first(
-      raw.updatedAt,
-      raw.updated_at,
-      raw.lastUpdate,
-      raw.generatedAt,
-      raw.createdAt,
-      nowIso()
-    ),
-  };
+    const clients = normalizeHomeClients(
+      first(raw.clients, raw.clientes, raw.customers, [])
+    );
+
+    const activity = normalizeHomeActivityList(
+      first(raw.recent, raw.recentActivity, raw.activity, raw.activities, raw.timeline, [])
+    );
+
+    return {
+      ...raw,
+
+      summary,
+      stats: summary,
+      metrics: summary,
+      totals: summary,
+      counts: summary,
+
+      widgets,
+      cards: widgets,
+      kpis: widgets,
+      blocks: widgets,
+
+      tickets,
+      incidencias: tickets,
+
+      invoices,
+      facturas: invoices,
+
+      users,
+      usuarios: users,
+
+      clients,
+      clientes: clients,
+      customers: clients,
+
+      recent: activity,
+      recentActivity: activity,
+      activity,
+      activities: activity,
+
+      updatedAt: first(
+        raw.updatedAt,
+        raw.updated_at,
+        raw.lastUpdate,
+        raw.generatedAt,
+        raw.createdAt,
+        nowIso()
+      ),
+    };
+  }
 }
 
 /* =========================================================
@@ -1136,6 +1160,7 @@ export async function getHomeDashboardAction({
   preferFresh = true,
   silent = false,
   payload = null,
+  syncStore = true,
 } = {}) {
   const fallbackStoreSnapshot = getHomeDashboardFromStoreAction();
 
@@ -1143,7 +1168,18 @@ export async function getHomeDashboardAction({
     const pickedPayload = pickDashboard(payload);
 
     if (pickedPayload) {
-      return normalizeDashboardSnapshot(pickedPayload);
+      const normalizedPayload = normalizeDashboardSnapshot(pickedPayload);
+
+      if (syncStore) {
+        try {
+          replaceHomeStore(normalizedPayload, {
+            preserveExisting: true,
+            reason: "home:actions:payload-dashboard",
+          });
+        } catch {}
+      }
+
+      return normalizedPayload;
     }
   }
 
@@ -1157,7 +1193,7 @@ export async function getHomeDashboardAction({
     });
 
     const response = await getHomeDashboardRequest?.();
-    const snapshot = pickDashboard(response);
+    const snapshot = pickDashboard(response) || response;
 
     if (!snapshot) {
       if (fallbackStoreSnapshot) {
@@ -1172,6 +1208,15 @@ export async function getHomeDashboardAction({
     }
 
     const normalized = normalizeDashboardSnapshot(snapshot);
+
+    if (syncStore) {
+      try {
+        replaceHomeStore(normalized, {
+          preserveExisting: true,
+          reason: "home:actions:fresh-dashboard",
+        });
+      } catch {}
+    }
 
     safeEmit("home:dashboard:success", {
       source: "backend",
@@ -1194,10 +1239,7 @@ export async function getHomeDashboardAction({
     });
 
     if (!silent) {
-      notify(
-        "No se pudo cargar el dashboard de inicio.",
-        "error"
-      );
+      notify("No se pudo cargar el dashboard de inicio.", "error");
     }
 
     return null;
@@ -1206,10 +1248,12 @@ export async function getHomeDashboardAction({
 
 export async function refreshHomeDashboardAction({
   silent = true,
+  syncStore = true,
 } = {}) {
   return getHomeDashboardAction({
     preferFresh: true,
     silent,
+    syncStore,
   });
 }
 
@@ -1250,6 +1294,7 @@ export async function getHomeWidgetDetailAction({
   preferFresh = true,
   silent = false,
   payload = null,
+  syncStore = true,
 } = {}) {
   const id = normalizeWidgetId(widgetId);
 
@@ -1265,7 +1310,17 @@ export async function getHomeWidgetDetailAction({
     const pickedPayload = pickWidget(payload);
 
     if (pickedPayload) {
-      return normalizeWidgetDetail(pickedPayload);
+      const normalizedPayload = normalizeWidgetDetail(pickedPayload);
+
+      if (syncStore) {
+        try {
+          upsertHomeWidgetStore(normalizedPayload, {
+            reason: "home:actions:payload-widget",
+          });
+        } catch {}
+      }
+
+      return normalizedPayload;
     }
   }
 
@@ -1284,7 +1339,7 @@ export async function getHomeWidgetDetailAction({
     });
 
     const response = await getHomeWidgetByIdRequest?.(id);
-    const detail = pickWidget(response);
+    const detail = pickWidget(response) || response;
 
     if (!detail) {
       if (fallbackStoreDetail) {
@@ -1300,6 +1355,14 @@ export async function getHomeWidgetDetailAction({
     }
 
     const normalized = normalizeWidgetDetail(detail);
+
+    if (syncStore) {
+      try {
+        upsertHomeWidgetStore(normalized, {
+          reason: "home:actions:fresh-widget",
+        });
+      } catch {}
+    }
 
     safeEmit("home:widget:detail:success", {
       widgetId: id,
@@ -1325,10 +1388,7 @@ export async function getHomeWidgetDetailAction({
     });
 
     if (!silent) {
-      notify(
-        "No se pudo cargar el detalle del bloque.",
-        "error"
-      );
+      notify("No se pudo cargar el detalle del bloque.", "error");
     }
 
     return null;
@@ -1340,6 +1400,7 @@ export async function openHomeWidgetAction({
   preferFresh = true,
   silent = false,
   payload = null,
+  navigate = false,
 } = {}) {
   const id = normalizeWidgetId(widgetId || getWidgetId(payload || {}));
 
@@ -1370,6 +1431,20 @@ export async function openHomeWidgetAction({
     widgetId: id || detail.widgetId,
     detail,
   });
+
+  if (navigate) {
+    const route = first(detail.route, detail.href, "");
+
+    if (route) {
+      await navigateFromHomeAction({
+        route,
+        silent,
+        payload: {
+          widgetId: id || detail.widgetId,
+        },
+      });
+    }
+  }
 
   return detail;
 }
@@ -1403,11 +1478,6 @@ async function writeClipboardText(text = "") {
     }
   } catch {}
 
-  /*
-    Fallback legacy sin style inline.
-    Requiere que el sistema global tenga .sr-only o clase equivalente.
-    Si no existe, sigue funcionando: textarea queda en DOM sólo durante copy.
-  */
   let textarea = null;
 
   try {
@@ -1496,10 +1566,9 @@ function normalizeFilename(value = "", fallback = CSV_FILENAME) {
 }
 
 function escapeCsvCell(value = "") {
-  const text =
-    value === null || value === undefined
-      ? ""
-      : String(value);
+  const text = value === null || value === undefined
+    ? ""
+    : String(value);
 
   return `"${text.replace(/"/g, '""')}"`;
 }
@@ -1636,13 +1705,35 @@ function downloadTextFile({
   }
 }
 
-function resolveExportItems(items = null) {
+function resolveExportItems(items = null, mode = "widgets") {
   if (Array.isArray(items)) {
     return items;
   }
 
+  const key = normalizeKey(mode);
+
   try {
-    return safeArray(getHomeSortedCollectionStore?.());
+    if (["ticket", "tickets", "incidencia", "incidencias"].includes(key)) {
+      return safeArray(getHomeTicketsStore?.());
+    }
+
+    if (["invoice", "invoices", "factura", "facturas", "billing"].includes(key)) {
+      return safeArray(getHomeInvoicesStore?.());
+    }
+
+    if (["user", "users", "usuario", "usuarios"].includes(key)) {
+      return safeArray(getHomeUsersStore?.());
+    }
+
+    if (["client", "clients", "cliente", "clientes", "customer", "customers"].includes(key)) {
+      return safeArray(getHomeClientsStore?.());
+    }
+
+    if (["activity", "activities", "recent", "timeline"].includes(key)) {
+      return safeArray(getHomeActivityStore?.());
+    }
+
+    return safeArray(getHomeWidgetsStore?.());
   } catch {
     return [];
   }
@@ -1655,7 +1746,9 @@ export function exportHomeCsvAction({
   mode = "widgets",
   silent = false,
 } = {}) {
-  const list = resolveExportItems(items)
+  const normalizedMode = normalizeKey(mode);
+
+  const list = resolveExportItems(items, normalizedMode)
     .map((item) => safeObject(item))
     .filter((item) => Object.keys(item).length);
 
@@ -1669,12 +1762,11 @@ export function exportHomeCsvAction({
 
   try {
     const finalFilename = normalizeFilename(filename, CSV_FILENAME);
-    const normalizedMode = normalizeKey(mode);
 
     const csvBody =
-      normalizedMode === "generic" || normalizedMode === "collection"
-        ? buildGenericCsvRows(list, columns)
-        : buildWidgetCsvRows(list);
+      normalizedMode === "widgets" || normalizedMode === "widget"
+        ? buildWidgetCsvRows(list)
+        : buildGenericCsvRows(list, columns);
 
     const csv = `\uFEFF${csvBody}`;
 
@@ -1718,10 +1810,7 @@ export function exportHomeCsvAction({
 ========================================================= */
 
 function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
+  if (isBrowser() && window.location?.origin) {
     return window.location.origin;
   }
 
@@ -1773,16 +1862,11 @@ function normalizeSpaRoute(route = "") {
     try {
       const url = new URL(raw, getBaseOrigin());
 
-      if (
-        isBrowser() &&
-        url.origin !== window.location.origin
-      ) {
+      if (isBrowser() && url.origin !== window.location.origin) {
         return raw;
       }
 
-      return normalizeSpaRoute(
-        `${url.pathname}${url.search || ""}${url.hash || ""}`
-      );
+      return normalizeSpaRoute(`${url.pathname}${url.search || ""}${url.hash || ""}`);
     } catch {
       return "";
     }
@@ -1855,10 +1939,7 @@ async function navigateSpa(targetRoute = "/", options = {}) {
           return true;
         }
 
-        if (
-          isFn(router?.replace) &&
-          opts.replaceState === true
-        ) {
+        if (isFn(router?.replace) && opts.replaceState === true) {
           await router.replace(route, opts);
           return true;
         }
@@ -1891,10 +1972,9 @@ async function navigateSpa(targetRoute = "/", options = {}) {
 
   try {
     if (!isExternal && route.startsWith("/")) {
-      const method =
-        opts.replaceState === true
-          ? "replaceState"
-          : "pushState";
+      const method = opts.replaceState === true
+        ? "replaceState"
+        : "pushState";
 
       window.history[method]?.(
         {
@@ -1965,10 +2045,7 @@ export async function navigateFromHomeAction({
     });
 
     if (!silent) {
-      notify(
-        "No se pudo navegar desde Home.",
-        "error"
-      );
+      notify("No se pudo navegar desde Home.", "error");
     }
 
     return false;
@@ -2012,10 +2089,12 @@ export async function runHomeQuickAction({
       });
     }
 
-    if (
-      actionName === "refresh" ||
-      actionName === "reload"
-    ) {
+    if (["refresh", "reload", "actualizar"].includes(actionName)) {
+      await refreshHomeDashboardAction({
+        silent,
+        syncStore: true,
+      });
+
       safeEmit("home:reload", {
         payload: data,
       });
@@ -2027,7 +2106,8 @@ export async function runHomeQuickAction({
       actionName === "create" ||
       actionName === "new" ||
       actionName === "create_ticket" ||
-      actionName === "create_incidencia"
+      actionName === "create_incidencia" ||
+      actionName === "nueva_incidencia"
     ) {
       return createFromHomeAction({
         silent,
@@ -2044,10 +2124,7 @@ export async function runHomeQuickAction({
     });
 
     if (!silent) {
-      notify(
-        "No se pudo ejecutar la acción rápida.",
-        "error"
-      );
+      notify("No se pudo ejecutar la acción rápida.", "error");
     }
 
     return false;
@@ -2073,10 +2150,6 @@ export async function createFromHomeAction({
       payload: data,
     });
 
-    /*
-      Primero evento para modal inline de Home/Incidencias.
-      Si hay listeners, la vista puede abrir modal sin navegar.
-    */
     safeEmit("incidencias:create-modal:open", {
       draft: data,
       source: SOURCE,
@@ -2098,10 +2171,7 @@ export async function createFromHomeAction({
     });
 
     if (!silent) {
-      notify(
-        "No se pudo abrir el flujo de creación.",
-        "error"
-      );
+      notify("No se pudo abrir el flujo de creación.", "error");
     }
 
     return false;
@@ -2124,9 +2194,20 @@ export function getHomeActionsSnapshot() {
     hasDashboardRequest: isFn(getHomeDashboardRequest),
     hasWidgetRequest: isFn(getHomeWidgetByIdRequest),
 
+    hasReplaceStore: isFn(replaceHomeStore),
+    hasWidgetUpsertStore: isFn(upsertHomeWidgetStore),
+
     hasDashboardStore: isFn(getHomeDashboardStore),
     hasWidgetStore: isFn(getHomeWidgetByIdStore),
-    hasSortedCollectionStore: isFn(getHomeSortedCollectionStore),
+
+    hasCollections: {
+      widgets: isFn(getHomeWidgetsStore),
+      tickets: isFn(getHomeTicketsStore),
+      invoices: isFn(getHomeInvoicesStore),
+      users: isFn(getHomeUsersStore),
+      clients: isFn(getHomeClientsStore),
+      activity: isFn(getHomeActivityStore),
+    },
 
     browser: isBrowser(),
 
@@ -2157,10 +2238,10 @@ export {
 };
 
 /* =========================================================
-   DEFAULT EXPORT
+   PUBLIC API
 ========================================================= */
 
-export default {
+export const HomeActions = Object.freeze({
   version: HOME_ACTIONS_VERSION,
 
   getHomeDashboardFromStoreAction,
@@ -2197,4 +2278,10 @@ export default {
 
   getHomeActionsSnapshot,
   getDebugSnapshot: getHomeActionsSnapshot,
-};
+});
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default HomeActions;

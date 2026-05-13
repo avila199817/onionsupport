@@ -2,6 +2,9 @@
    Onion SPA - Auth Logout
    Archivo: src/features/auth/logout.js
 
+   AUTH LOGOUT · EXTREME PRO SYSTEM · GOD MODE v11
+   LOCAL CLEAR GUARANTEED · REMOTE BEST-EFFORT · NO GHOST AUTH
+
    RESPONSABILIDADES:
    - cerrar sesión local y remota
    - invalidar refresh/session context si backend existe
@@ -30,6 +33,7 @@
    - fallback fetch compatible con apiBase
    - remote logout acepta 401/403/404 como sesión ya inválida
    - no hace localStorage.clear()
+   - no hace sessionStorage.clear()
    - no toca theme/lang/rutas públicas técnicas/initial URLs
 ========================================================= */
 
@@ -65,7 +69,7 @@ import {
 ========================================================= */
 
 export const AUTH_LOGOUT_VERSION =
-  "10.2.0";
+  "11.0.0-god-mode";
 
 let logoutPromise =
   null;
@@ -85,6 +89,9 @@ const DEFAULT_LOGOUT_TIMEOUT_MS =
 
 const LOGOUT_SOURCE =
   "auth.logout";
+
+const NO_TRANSPORT =
+  Symbol("NO_TRANSPORT");
 
 const ACCEPTED_REMOTE_LOGOUT_STATUSES =
   new Set([
@@ -108,10 +115,27 @@ const KNOWN_AUTH_STORAGE_KEYS =
     "onion_mfa_token",
     "onion_session_id",
     "onion_session_user_id",
+    "onion_user",
     "onion_user_id",
     "onion_user_name",
     "onion_user_slug",
     "onion_role",
+
+    "onion.token",
+    "onion.accessToken",
+    "onion.access_token",
+    "onion.refreshToken",
+    "onion.refresh_token",
+    "onion.tempToken",
+    "onion.temp_token",
+    "onion.session",
+    "onion.sessionData",
+    "onion.sessionId",
+    "onion.session_id",
+    "onion.sessionUserId",
+    "onion.session_user_id",
+    "onion.user",
+    "onion.role",
 
     "onion:token",
     "onion:user",
@@ -127,6 +151,8 @@ const KNOWN_AUTH_STORAGE_KEYS =
     "onion:two_factor_token",
     "onion:mfaToken",
     "onion:mfa_token",
+    "onion:session",
+    "onion:sessionData",
     "onion:sessionId",
     "onion:session_id",
     "onion:sessionUserId",
@@ -158,6 +184,7 @@ const KNOWN_AUTH_STORAGE_KEYS =
 
     "token",
     "session",
+    "sessionData",
     "user",
     "role",
     "rol",
@@ -179,6 +206,8 @@ const KNOWN_AUTH_STORAGE_KEYS =
     "auth.refresh_token",
     "auth.tempToken",
     "auth.temp_token",
+    "auth.session",
+    "auth.sessionData",
     "auth.sessionId",
     "auth.session_id",
     "auth.sessionUserId",
@@ -216,10 +245,10 @@ function isPlainObject(value) {
   );
 }
 
-function safeObject(value) {
+function safeObject(value, fallback = {}) {
   return isPlainObject(value)
     ? value
-    : {};
+    : fallback;
 }
 
 function safeArray(value) {
@@ -399,7 +428,7 @@ function redactSafe(value = "") {
   } catch {
     return safeText(value, "")
       .replace(
-        /([?&](?:token|activationToken|activateToken|resetToken|passwordResetToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
+        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
         "$1***"
       )
       .replace(
@@ -470,7 +499,7 @@ function sanitizeSnapshot(snapshot = {}) {
     safeObject(snapshot);
 
   const session =
-    safeObject(source.session);
+    safeObject(source.session || source.sessionData);
 
   const user =
     source.user ||
@@ -496,6 +525,12 @@ function sanitizeSnapshot(snapshot = {}) {
       Boolean(token),
 
     token:
+      null,
+
+    accessToken:
+      null,
+
+    refreshToken:
       null,
 
     user:
@@ -815,12 +850,22 @@ function resolveRedirect(target = "") {
   const raw =
     safeText(target, "");
 
-  const candidate =
-    normalizePathSafe(raw || fallback);
+  let candidate =
+    raw || fallback;
 
-  return isSafeRelativePathSafe(candidate)
-    ? candidate
-    : fallback;
+  try {
+    candidate =
+      normalizePathSafe(candidate);
+  } catch {
+    candidate =
+      fallback;
+  }
+
+  if (!isSafeRelativePathSafe(candidate)) {
+    return fallback;
+  }
+
+  return candidate;
 }
 
 function getRouter() {
@@ -1158,13 +1203,31 @@ function buildLogoutBody() {
         ""
       ),
 
+    refresh_token:
+      safeText(
+        getStoredRefreshToken(),
+        ""
+      ),
+
     sessionId:
       safeText(
         getStoredSessionId(),
         ""
       ),
 
+    session_id:
+      safeText(
+        getStoredSessionId(),
+        ""
+      ),
+
     userId:
+      safeText(
+        getStoredSessionUserId(),
+        ""
+      ),
+
+    user_id:
       safeText(
         getStoredSessionUserId(),
         ""
@@ -1179,8 +1242,10 @@ function getCurrentToken() {
   return safeText(
     state.token ||
       state.accessToken ||
+      state.access_token ||
       state.session?.token ||
       state.session?.accessToken ||
+      state.session?.access_token ||
       "",
     ""
   );
@@ -1260,7 +1325,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_LOGOUT_TI
     );
 
   const timer =
-    controller
+    controller && ms > 0
       ? setTimeout(() => {
           try {
             controller.abort(
@@ -1297,10 +1362,12 @@ function getHttpService() {
   );
 }
 
-function normalizeRemoteLogoutResult(result = null) {
+function normalizeRemoteLogoutResult(result = null, options = {}) {
+  const opts =
+    safeObject(options);
+
   if (
-    result === null ||
-    result === undefined
+    result === NO_TRANSPORT
   ) {
     return {
       ok:
@@ -1309,6 +1376,28 @@ function normalizeRemoteLogoutResult(result = null) {
         true,
       status:
         0,
+      transport:
+        "none",
+    };
+  }
+
+  /*
+    Si un transporte ejecutó sin lanzar y devolvió null/undefined,
+    normalmente es 204 parseado como body vacío. Lo aceptamos.
+  */
+  if (
+    result === null ||
+    result === undefined
+  ) {
+    return {
+      ok:
+        opts.nullOk !== false,
+      skipped:
+        false,
+      status:
+        204,
+      transport:
+        opts.transport || "unknown",
     };
   }
 
@@ -1331,6 +1420,7 @@ function normalizeRemoteLogoutResult(result = null) {
         : null;
 
   const acceptedStatus =
+    status > 0 &&
     ACCEPTED_REMOTE_LOGOUT_STATUSES.has(status);
 
   const ok =
@@ -1345,6 +1435,8 @@ function normalizeRemoteLogoutResult(result = null) {
     skipped:
       false,
     status,
+    transport:
+      opts.transport || "",
     raw:
       result,
   };
@@ -1352,88 +1444,138 @@ function normalizeRemoteLogoutResult(result = null) {
 
 async function callApiClientRequest(apiClient, endpoint, body, requestOptions) {
   if (!apiClient) {
-    return null;
+    return {
+      handled:
+        false,
+      value:
+        NO_TRANSPORT,
+    };
   }
 
   if (isFunction(apiClient.post)) {
-    return apiClient.post(
-      endpoint,
-      body,
-      requestOptions
-    );
+    return {
+      handled:
+        true,
+      value:
+        await apiClient.post(
+          endpoint,
+          body,
+          requestOptions
+        ),
+    };
   }
 
   if (isFunction(apiClient.request)) {
     try {
-      return await apiClient.request(
-        endpoint,
-        {
-          ...requestOptions,
-          method:
-            "POST",
-          body,
-        }
-      );
+      return {
+        handled:
+          true,
+        value:
+          await apiClient.request(
+            endpoint,
+            {
+              ...requestOptions,
+              method:
+                "POST",
+              body,
+            }
+          ),
+      };
     } catch (firstError) {
       try {
-        return await apiClient.request(
-          "POST",
-          endpoint,
-          {
-            ...requestOptions,
-            body,
-          }
-        );
+        return {
+          handled:
+            true,
+          value:
+            await apiClient.request(
+              "POST",
+              endpoint,
+              {
+                ...requestOptions,
+                body,
+              }
+            ),
+        };
       } catch {
         throw firstError;
       }
     }
   }
 
-  return null;
+  return {
+    handled:
+      false,
+    value:
+      NO_TRANSPORT,
+  };
 }
 
 async function callHttpRequest(http, endpoint, body, requestOptions) {
   if (!http) {
-    return null;
+    return {
+      handled:
+        false,
+      value:
+        NO_TRANSPORT,
+    };
   }
 
   if (isFunction(http.post)) {
-    return http.post(
-      endpoint,
-      body,
-      requestOptions
-    );
+    return {
+      handled:
+        true,
+      value:
+        await http.post(
+          endpoint,
+          body,
+          requestOptions
+        ),
+    };
   }
 
   if (isFunction(http.request)) {
     try {
-      return await http.request(
-        endpoint,
-        {
-          ...requestOptions,
-          method:
-            "POST",
-          body,
-        }
-      );
+      return {
+        handled:
+          true,
+        value:
+          await http.request(
+            endpoint,
+            {
+              ...requestOptions,
+              method:
+                "POST",
+              body,
+            }
+          ),
+      };
     } catch (firstError) {
       try {
-        return await http.request(
-          "POST",
-          endpoint,
-          {
-            ...requestOptions,
-            body,
-          }
-        );
+        return {
+          handled:
+            true,
+          value:
+            await http.request(
+              "POST",
+              endpoint,
+              {
+                ...requestOptions,
+                body,
+              }
+            ),
+        };
       } catch {
         throw firstError;
       }
     }
   }
 
-  return null;
+  return {
+    handled:
+      false,
+      value:
+        NO_TRANSPORT,
+  };
 }
 
 async function requestRemoteLogout(options = {}) {
@@ -1485,7 +1627,7 @@ async function requestRemoteLogout(options = {}) {
     AppCore?.services?.api ||
     null;
 
-  const fromApiClient =
+  const apiClientResult =
     await callApiClientRequest(
       apiClient,
       endpoint,
@@ -1493,16 +1635,22 @@ async function requestRemoteLogout(options = {}) {
       requestOptions
     );
 
-  if (fromApiClient !== null) {
+  if (apiClientResult.handled) {
     return normalizeRemoteLogoutResult(
-      fromApiClient
+      apiClientResult.value,
+      {
+        transport:
+          "apiClient",
+        nullOk:
+          true,
+      }
     );
   }
 
   const http =
     getHttpService();
 
-  const fromHttp =
+  const httpResult =
     await callHttpRequest(
       http,
       endpoint,
@@ -1510,9 +1658,15 @@ async function requestRemoteLogout(options = {}) {
       requestOptions
     );
 
-  if (fromHttp !== null) {
+  if (httpResult.handled) {
     return normalizeRemoteLogoutResult(
-      fromHttp
+      httpResult.value,
+      {
+        transport:
+          "http",
+        nullOk:
+          true,
+      }
     );
   }
 
@@ -1529,7 +1683,13 @@ async function requestRemoteLogout(options = {}) {
       );
 
     return normalizeRemoteLogoutResult(
-      result
+      result,
+      {
+        transport:
+          "AppCore.request",
+        nullOk:
+          true,
+        }
     );
   }
 
@@ -1563,26 +1723,44 @@ async function requestRemoteLogout(options = {}) {
             "POST",
           headers,
           credentials:
-            "same-origin",
+            AppCore?.config?.api?.withCredentials
+              ? "include"
+              : "omit",
+          cache:
+            "no-store",
           body:
             JSON.stringify(body),
         },
         timeout
       );
 
-    return normalizeRemoteLogoutResult({
-      ok:
-        response?.ok === true ||
-        ACCEPTED_REMOTE_LOGOUT_STATUSES.has(
-          response?.status
-        ),
+    return normalizeRemoteLogoutResult(
+      {
+        ok:
+          response?.ok === true ||
+          ACCEPTED_REMOTE_LOGOUT_STATUSES.has(
+            response?.status
+          ),
 
-      status:
-        response?.status || 0,
-    });
+        status:
+          response?.status || 0,
+      },
+      {
+        transport:
+          "fetch",
+        nullOk:
+          false,
+      }
+    );
   }
 
-  return normalizeRemoteLogoutResult(null);
+  return normalizeRemoteLogoutResult(
+    NO_TRANSPORT,
+    {
+      transport:
+        "none",
+    }
+  );
 }
 
 /* =========================================================
@@ -1609,12 +1787,23 @@ function buildStorageClearCandidates() {
   const configuredKeys =
     [
       AppCore?.config?.storageKeys?.token,
+      AppCore?.config?.storageKeys?.accessToken,
+      AppCore?.config?.storageKeys?.access_token,
       AppCore?.config?.storageKeys?.user,
       AppCore?.config?.storageKeys?.refreshToken,
+      AppCore?.config?.storageKeys?.refresh_token,
       AppCore?.config?.storageKeys?.tempToken,
+      AppCore?.config?.storageKeys?.temp_token,
+      AppCore?.config?.storageKeys?.session,
+      AppCore?.config?.storageKeys?.sessionData,
       AppCore?.config?.storageKeys?.sessionId,
       AppCore?.config?.storageKeys?.sessionUserId,
       AppCore?.config?.storageKeys?.role,
+      AppCore?.config?.auth?.tokenStorageKey,
+      AppCore?.config?.auth?.refreshTokenStorageKey,
+      AppCore?.config?.auth?.tempTokenStorageKey,
+      AppCore?.config?.auth?.sessionIdStorageKey,
+      AppCore?.config?.auth?.sessionUserIdStorageKey,
     ];
 
   const baseKeys =
@@ -1716,7 +1905,13 @@ function clearAppCoreStorage() {
   for (const key of keys) {
     try {
       if (isFunction(storage.remove)) {
-        storage.remove(key);
+        storage.remove(
+          key,
+          {
+            all:
+              true,
+          }
+        );
         changed = true;
         continue;
       }
@@ -1769,22 +1964,42 @@ function clearInFlightRequests() {
 
   try {
     cleared +=
-      AppCore?.apiClient?.clearInFlight?.() || 0;
+      AppCore?.apiClient?.clearInFlight?.({
+        abort:
+          true,
+        reason:
+          "logout",
+      }) || 0;
   } catch {}
 
   try {
     cleared +=
-      AppCore?.request?.clearInFlight?.() || 0;
+      AppCore?.request?.clearInFlight?.({
+        abort:
+          true,
+        reason:
+          "logout",
+      }) || 0;
   } catch {}
 
   try {
     cleared +=
-      AppCore?.http?.clearInFlight?.() || 0;
+      AppCore?.http?.clearInFlight?.({
+        abort:
+          true,
+        reason:
+          "logout",
+      }) || 0;
   } catch {}
 
   try {
     cleared +=
-      AppCore?.Http?.clearInFlight?.() || 0;
+      AppCore?.Http?.clearInFlight?.({
+        abort:
+          true,
+        reason:
+          "logout",
+      }) || 0;
   } catch {}
 
   return cleared;
@@ -1806,6 +2021,15 @@ function getClearAuthStatePatch(reason = "logout") {
       null,
 
     accessToken:
+      null,
+
+    access_token:
+      null,
+
+    refreshToken:
+      null,
+
+    refresh_token:
       null,
 
     user:
@@ -1844,6 +2068,9 @@ function getClearAuthStatePatch(reason = "logout") {
     session:
       null,
 
+    sessionData:
+      null,
+
     sessionId:
       null,
 
@@ -1862,11 +2089,20 @@ function getClearAuthStatePatch(reason = "logout") {
     twoFactorPending:
       false,
 
+    twoFactorUser:
+      null,
+
     tempToken:
+      null,
+
+    temp_token:
       null,
 
     lastAuthSource:
       reason,
+
+    lastLogoutAt:
+      safeIsoDate(),
   };
 }
 
@@ -2008,10 +2244,12 @@ function clearLocalSessionGuaranteed(options = {}) {
       silent:
         true,
       reason,
+      source:
+        LOGOUT_SOURCE,
 
       /*
-        clearSessionLocal ya protege rutas técnicas públicas.
-        Aquí no forzamos preserveRoute salvo que venga explícito.
+        No tocamos initial URLs. Sólo preservamos ruta si el caller lo pidió
+        explícitamente; el logout normal navega a /login.
       */
       preserveRoute:
         opts.preserveRoute === true,
@@ -2030,6 +2268,8 @@ function clearLocalSessionGuaranteed(options = {}) {
       clearSessionLocal({
         silent:
           true,
+        source:
+          `${LOGOUT_SOURCE}:fallback`,
       });
     } catch {}
   }
@@ -2116,6 +2356,7 @@ function buildSafeSessionSnapshot(extra = {}) {
       token:
         state.token ||
         state.accessToken ||
+        state.access_token ||
         null,
 
       accessToken:
@@ -2234,6 +2475,10 @@ async function executeLogout(options = {}) {
               Boolean(remoteResult?.ok),
             status:
               remoteResult?.status || null,
+            skipped:
+              Boolean(remoteResult?.skipped),
+            transport:
+              remoteResult?.transport || "",
             source:
               LOGOUT_SOURCE,
           }
@@ -2315,7 +2560,9 @@ async function executeLogout(options = {}) {
         remoteStatus:
           remoteResult?.status || null,
         remoteSkipped:
-          !shouldRemote,
+          !shouldRemote || Boolean(remoteResult?.skipped),
+        remoteTransport:
+          remoteResult?.transport || "",
         before,
         after,
         redirectTo:
@@ -2335,7 +2582,7 @@ async function executeLogout(options = {}) {
           Boolean(before?.authenticated),
         remoteOk,
         remoteSkipped:
-          !shouldRemote,
+          !shouldRemote || Boolean(remoteResult?.skipped),
         redirectTo:
           finalRedirect,
         source:
@@ -2455,7 +2702,10 @@ async function executeLogout(options = {}) {
       remoteResult?.status || null,
 
     remoteSkipped:
-      !shouldRemote,
+      !shouldRemote || Boolean(remoteResult?.skipped),
+
+    remoteTransport:
+      remoteResult?.transport || "",
 
     error:
       sanitizeError(remoteError),
@@ -2638,9 +2888,10 @@ export function getLogoutSnapshot() {
     hasToken:
       Boolean(
         state.token ||
-        state.accessToken ||
-        state.session?.token ||
-        state.session?.accessToken
+          state.accessToken ||
+          state.access_token ||
+          state.session?.token ||
+          state.session?.accessToken
       ),
 
     hasRefreshToken:

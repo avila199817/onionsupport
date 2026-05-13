@@ -2,9 +2,9 @@
    Onion SPA - Home State
    Archivo: src/views/home/home.state.js
 
-   HOME STATE · SINGLE SOURCE · STORE READY · NO CSS · 10/10
+   HOME STATE · SINGLE SOURCE · MODULAR BACKEND READY · FINAL 11/10
 
-   RESPONSABILIDADES:
+   Responsabilidades:
    - Mantener estado runtime del Home.
    - Exponer setters seguros consumidos por home.api.js y HomeView.js.
    - Preservar dashboard/summary/widgets/collections sin empobrecer datos.
@@ -12,12 +12,16 @@
    - Sincronizar eventos de cambio con AppCore.events o window fallback.
    - Evitar tormentas de eventos mediante firma comparable.
    - Mantener shape estable para home.store.js, home.api.js y home.template.js.
-   - Cero CSS, cero DOM obligatorio, cero dependencias circulares.
+   - Alinear Home con backend modular sin /api/dashboard/*.
+   - Cero CSS.
+   - Cero DOM obligatorio.
+   - Cero dependencia con HomeApi/HomeView/HomeTemplate.
 
-   REGLA CRÍTICA:
+   Regla crítica:
    - No pisar arrays existentes con arrays vacíos salvo replace explícito.
    - No pisar summary/dashboard real con objeto vacío salvo replace explícito.
    - Setters individuales son tolerantes a payload parcial.
+   - syncHomeStateFromDashboard aplica batch único, no cascada de setters.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -26,86 +30,50 @@ import { AppCore } from "../../core/index.js";
    CONSTANTS
 ========================================================= */
 
-export const HOME_STATE_VERSION =
-  "10.0.0";
+export const HOME_STATE_VERSION = "11.0.0";
 
-export const HOME_STATE_SCOPE =
-  "view:home:state";
+export const HOME_STATE_SCOPE = "view:home:state";
 
-export const HOME_STATE_EVENTS =
-  Object.freeze({
-    change:
-      "home:state:change",
+export const HOME_STATE_EVENTS = Object.freeze({
+  change: "home:state:change",
+  patch: "home:state:patch",
+  reset: "home:state:reset",
 
-    patch:
-      "home:state:patch",
+  loading: "home:state:loading",
+  refreshing: "home:state:refreshing",
+  loaded: "home:state:loaded",
+  hydrated: "home:state:hydrated",
 
-    reset:
-      "home:state:reset",
+  error: "home:state:error",
 
-    loading:
-      "home:state:loading",
+  dashboard: "home:state:dashboard",
+  summary: "home:state:summary",
+  widgets: "home:state:widgets",
+  tickets: "home:state:tickets",
+  invoices: "home:state:invoices",
+  users: "home:state:users",
+  clients: "home:state:clients",
+  recent: "home:state:recent",
+  health: "home:state:health",
+});
 
-    refreshing:
-      "home:state:refreshing",
+const DEFAULT_PAGE = 1;
+const DEFAULT_PAGE_SIZE = 5;
+const MAX_RECENT_MUTATIONS = 60;
 
-    loaded:
-      "home:state:loaded",
-
-    hydrated:
-      "home:state:hydrated",
-
-    error:
-      "home:state:error",
-
-    dashboard:
-      "home:state:dashboard",
-
-    summary:
-      "home:state:summary",
-
-    widgets:
-      "home:state:widgets",
-
-    recent:
-      "home:state:recent",
-
-    health:
-      "home:state:health",
-  });
-
-const DEFAULT_PAGE =
-  1;
-
-const DEFAULT_PAGE_SIZE =
-  5;
-
-const MAX_RECENT_MUTATIONS =
-  60;
-
-let lastStateSignature =
-  "";
-
-let lastEmitAt =
-  0;
+let lastStateSignature = "";
+let lastEmitAt = 0;
 
 /* =========================================================
    SAFE HELPERS
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function isFunction(value) {
@@ -113,41 +81,61 @@ function isFunction(value) {
 }
 
 function safeObject(value, fallback = {}) {
-  return isObject(value)
-    ? value
-    : fallback;
+  return isObject(value) ? value : fallback;
 }
 
 function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return Array.isArray(value) ? value : [];
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+  if (value === null || value === undefined) {
     return fallback;
   }
 
-  const text =
-    String(value)
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
-  const number =
-    Number(value);
+  if (value === null || value === undefined || value === "") {
+    return fallback;
+  }
 
-  return Number.isFinite(number)
-    ? number
-    : fallback;
+  if (typeof value === "string") {
+    let normalized = value
+      .trim()
+      .replace(/[€$£¥%]/g, "")
+      .replace(/[^\d.,+\-\s]/g, "")
+      .replace(/\s/g, "");
+
+    const hasComma = normalized.includes(",");
+    const hasDot = normalized.includes(".");
+
+    if (hasComma && hasDot) {
+      const lastComma = normalized.lastIndexOf(",");
+      const lastDot = normalized.lastIndexOf(".");
+
+      normalized =
+        lastComma > lastDot
+          ? normalized.replace(/\./g, "").replace(/,/g, ".")
+          : normalized.replace(/,/g, "");
+    } else if (hasComma) {
+      normalized = normalized.replace(/,/g, ".");
+    }
+
+    const parsed = Number(normalized);
+
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  const number = Number(value);
+
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function safeBoolean(value, fallback = false) {
@@ -161,31 +149,13 @@ function safeBoolean(value, fallback = false) {
   }
 
   if (typeof value === "string") {
-    const key =
-      value.trim().toLowerCase();
+    const key = value.trim().toLowerCase();
 
-    if (
-      [
-        "true",
-        "1",
-        "yes",
-        "si",
-        "sí",
-        "on",
-        "ok",
-      ].includes(key)
-    ) {
+    if (["true", "1", "yes", "si", "sí", "on", "ok"].includes(key)) {
       return true;
     }
 
-    if (
-      [
-        "false",
-        "0",
-        "no",
-        "off",
-      ].includes(key)
-    ) {
+    if (["false", "0", "no", "off"].includes(key)) {
       return false;
     }
   }
@@ -194,43 +164,44 @@ function safeBoolean(value, fallback = false) {
 }
 
 function hasOwnKeys(value = {}) {
-  return Boolean(
-    isObject(value) &&
-      Object.keys(value).length > 0
-  );
+  return Boolean(isObject(value) && Object.keys(value).length > 0);
+}
+
+function isMeaningfulValue(value) {
+  if (value === undefined || value === null) {
+    return false;
+  }
+
+  if (typeof value === "string" && value.trim() === "") {
+    return false;
+  }
+
+  if (Array.isArray(value) && value.length === 0) {
+    return false;
+  }
+
+  if (isObject(value) && Object.keys(value).length === 0) {
+    return false;
+  }
+
+  return true;
 }
 
 function first(...values) {
   for (const value of values) {
-    if (
-      value === undefined ||
-      value === null
-    ) {
-      continue;
+    if (isMeaningfulValue(value)) {
+      return value;
     }
+  }
 
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
+  return null;
+}
+
+function firstArray(...values) {
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      return value;
     }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-
-    if (
-      isObject(value) &&
-      Object.keys(value).length === 0
-    ) {
-      continue;
-    }
-
-    return value;
   }
 
   return null;
@@ -260,9 +231,7 @@ function safeClone(value, fallback = null) {
   } catch {}
 
   try {
-    return JSON.parse(
-      JSON.stringify(value)
-    );
+    return JSON.parse(JSON.stringify(value));
   } catch {}
 
   return fallback;
@@ -275,70 +244,139 @@ function normalizeError(error = null) {
 
   if (typeof error === "string") {
     return {
-      name:
-        "HomeStateError",
-
-      message:
-        safeText(error, "Error Home."),
-
-      code:
-        "HOME_STATE_ERROR",
+      name: "HomeStateError",
+      message: safeText(error, "Error Home."),
+      code: "HOME_STATE_ERROR",
     };
   }
 
-  const object =
-    safeObject(error);
+  const object = safeObject(error);
 
   return {
-    name:
-      safeText(
-        object.name,
-        "HomeStateError"
-      ),
+    name: safeText(object.name, "HomeStateError"),
 
-    message:
-      safeText(
-        first(
-          object.message,
-          object.detail,
-          object.error,
-          object.statusText,
-          "Error Home."
-        ),
+    message: safeText(
+      first(
+        object.message,
+        object.detail,
+        object.error,
+        object.statusText,
         "Error Home."
       ),
+      "Error Home."
+    ),
 
-    code:
-      safeText(
-        first(
-          object.code,
-          object.status,
-          object.statusCode,
-          object.errorCode,
-          "HOME_STATE_ERROR"
-        ),
+    code: safeText(
+      first(
+        object.code,
+        object.status,
+        object.statusCode,
+        object.errorCode,
         "HOME_STATE_ERROR"
       ),
+      "HOME_STATE_ERROR"
+    ),
   };
 }
+
+/* =========================================================
+   INITIAL STATE
+========================================================= */
+
+export function createInitialHomeState() {
+  return {
+    version: HOME_STATE_VERSION,
+
+    hydrated: false,
+    loaded: false,
+    loading: false,
+    refreshing: false,
+
+    creating: false,
+
+    openingTicketId: "",
+    selectedTicketId: "",
+    navigatingAction: "",
+
+    error: "",
+    lastError: null,
+
+    page: DEFAULT_PAGE,
+    pageSize: DEFAULT_PAGE_SIZE,
+
+    remoteCount: 0,
+    totalCount: 0,
+
+    ticketsRemoteCount: 0,
+    invoicesRemoteCount: 0,
+    usersRemoteCount: 0,
+    clientsRemoteCount: 0,
+    activityRemoteCount: 0,
+
+    requestId: "",
+
+    lastSyncAt: "",
+    lastUpdatedAt: "",
+
+    dashboard: {},
+
+    summary: {},
+    stats: {},
+    metrics: {},
+    totals: {},
+    counts: {},
+
+    widgets: [],
+    cards: [],
+    kpis: [],
+    blocks: [],
+
+    tickets: [],
+    incidencias: [],
+
+    invoices: [],
+    facturas: [],
+
+    users: [],
+    usuarios: [],
+
+    clients: [],
+    clientes: [],
+    customers: [],
+
+    activity: [],
+    activities: [],
+    recent: [],
+    recentActivity: [],
+
+    health: null,
+
+    meta: {},
+
+    modules: {},
+
+    partial: false,
+    errors: [],
+
+    recentMutations: [],
+  };
+}
+
+export const homeState = createInitialHomeState();
 
 /* =========================================================
    EVENTS
 ========================================================= */
 
 function safeWindowDispatch(eventName = "", payload = {}) {
-  if (
-    !isBrowser() ||
-    !eventName
-  ) {
+  if (!isBrowser() || !eventName) {
     return false;
   }
 
   try {
     window.dispatchEvent(
       new CustomEvent(eventName, {
-        detail:
-          payload,
+        detail: payload,
       })
     );
 
@@ -349,674 +387,543 @@ function safeWindowDispatch(eventName = "", payload = {}) {
 }
 
 function emitHomeStateEvent(eventName = "", payload = {}, options = {}) {
-  const name =
-    safeText(eventName, "");
+  const name = safeText(eventName, "");
 
   if (!name) {
     return false;
   }
 
-  const opts =
-    safeObject(options);
+  const opts = safeObject(options);
 
   const detail = {
-    source:
-      HOME_STATE_SCOPE,
-
-    version:
-      HOME_STATE_VERSION,
-
-    at:
-      nowIso(),
-
+    source: HOME_STATE_SCOPE,
+    version: HOME_STATE_VERSION,
+    at: nowIso(),
     ...safeObject(payload),
   };
 
-  let busAvailable =
-    false;
-
-  let busEmitted =
-    false;
+  let busAvailable = false;
+  let busEmitted = false;
 
   try {
     if (isFunction(AppCore?.events?.emit)) {
-      busAvailable =
-        true;
-
-      AppCore.events.emit(
-        name,
-        detail
-      );
-
-      busEmitted =
-        true;
+      busAvailable = true;
+      AppCore.events.emit(name, detail);
+      busEmitted = true;
     }
   } catch {}
 
-  if (
-    opts.window === true ||
-    (!busAvailable && isBrowser())
-  ) {
-    return (
-      safeWindowDispatch(
-        name,
-        detail
-      ) ||
-      busEmitted
-    );
+  if (opts.window === true || (!busAvailable && isBrowser())) {
+    return safeWindowDispatch(name, detail) || busEmitted;
   }
 
   return busEmitted;
 }
 
 /* =========================================================
-   INITIAL STATE
-========================================================= */
-
-export function createInitialHomeState() {
-  return {
-    version:
-      HOME_STATE_VERSION,
-
-    hydrated:
-      false,
-
-    loaded:
-      false,
-
-    loading:
-      false,
-
-    refreshing:
-      false,
-
-    creating:
-      false,
-
-    openingTicketId:
-      "",
-
-    selectedTicketId:
-      "",
-
-    navigatingAction:
-      "",
-
-    error:
-      "",
-
-    lastError:
-      null,
-
-    page:
-      DEFAULT_PAGE,
-
-    pageSize:
-      DEFAULT_PAGE_SIZE,
-
-    remoteCount:
-      0,
-
-    totalCount:
-      0,
-
-    ticketsRemoteCount:
-      0,
-
-    invoicesRemoteCount:
-      0,
-
-    usersRemoteCount:
-      0,
-
-    clientsRemoteCount:
-      0,
-
-    activityRemoteCount:
-      0,
-
-    requestId:
-      "",
-
-    lastSyncAt:
-      "",
-
-    lastUpdatedAt:
-      "",
-
-    dashboard:
-      {},
-
-    summary:
-      {},
-
-    stats:
-      {},
-
-    metrics:
-      {},
-
-    totals:
-      {},
-
-    counts:
-      {},
-
-    widgets:
-      [],
-
-    cards:
-      [],
-
-    kpis:
-      [],
-
-    tickets:
-      [],
-
-    incidencias:
-      [],
-
-    invoices:
-      [],
-
-    facturas:
-      [],
-
-    users:
-      [],
-
-    usuarios:
-      [],
-
-    clients:
-      [],
-
-    clientes:
-      [],
-
-    customers:
-      [],
-
-    activity:
-      [],
-
-    activities:
-      [],
-
-    recent:
-      [],
-
-    recentActivity:
-      [],
-
-    health:
-      null,
-
-    meta:
-      {},
-
-    recentMutations:
-      [],
-  };
-}
-
-export const homeState =
-  createInitialHomeState();
-
-/* =========================================================
-   NORMALIZATION
+   SUMMARY / ALIASES
 ========================================================= */
 
 function normalizeSummaryAliases(summary = {}) {
-  const raw =
-    safeObject(summary);
+  const raw = safeObject(summary);
 
-  const ticketsCount =
-    Math.max(
-      0,
-      safeNumber(
-        first(
-          raw.totalTickets,
-          raw.ticketsTotal,
-          raw.incidenciasTotal,
-          raw.totalIncidencias,
-          raw.ticketsCount,
-          raw.incidenciasCount,
-          homeState.ticketsRemoteCount,
-          safeArray(homeState.tickets).length
-        ),
-        0
-      )
-    );
+  const ticketsCount = Math.max(
+    0,
+    safeNumber(
+      first(
+        raw.totalTickets,
+        raw.ticketsTotal,
+        raw.incidenciasTotal,
+        raw.totalIncidencias,
+        raw.ticketsCount,
+        raw.incidenciasCount,
+        homeState.ticketsRemoteCount,
+        safeArray(homeState.tickets).length
+      ),
+      0
+    )
+  );
 
-  const invoicesCount =
-    Math.max(
-      0,
-      safeNumber(
-        first(
-          raw.totalInvoices,
-          raw.invoicesTotal,
-          raw.facturasTotal,
-          raw.totalFacturas,
-          raw.invoicesCount,
-          raw.facturasCount,
-          homeState.invoicesRemoteCount,
-          safeArray(homeState.invoices).length
-        ),
+  const openTickets = Math.max(
+    0,
+    safeNumber(
+      first(
+        raw.openTickets,
+        raw.pendingTickets,
+        raw.openIncidencias,
+        raw.pendingIncidencias,
+        raw.incidenciasAbiertas,
         0
-      )
-    );
+      ),
+      0
+    )
+  );
 
-  const usersCount =
-    Math.max(
-      0,
-      safeNumber(
-        first(
-          raw.usersCount,
-          raw.usuariosCount,
-          raw.totalUsers,
-          raw.totalUsuarios,
-          raw.activeUsers,
-          raw.usuariosActivos,
-          homeState.usersRemoteCount,
-          safeArray(homeState.users).length
-        ),
+  const closedTickets = Math.max(
+    0,
+    safeNumber(
+      first(
+        raw.closedTickets,
+        raw.resolvedTickets,
+        raw.closedIncidencias,
+        raw.resolvedIncidencias,
+        raw.incidenciasCerradas,
         0
-      )
-    );
+      ),
+      0
+    )
+  );
 
-  const clientsCount =
-    Math.max(
-      0,
-      safeNumber(
-        first(
-          raw.clientsCount,
-          raw.clientesCount,
-          raw.customersCount,
-          raw.totalClients,
-          raw.totalClientes,
-          raw.totalCustomers,
-          raw.activeClients,
-          raw.clientesActivos,
-          homeState.clientsRemoteCount,
-          safeArray(homeState.clients).length
-        ),
+  const urgentTickets = Math.max(
+    0,
+    safeNumber(
+      first(
+        raw.urgentTickets,
+        raw.urgentIncidencias,
+        raw.highPriorityTickets,
+        raw.incidenciasUrgentes,
         0
-      )
-    );
+      ),
+      0
+    )
+  );
 
-  const pendingInvoices =
-    Math.max(
-      0,
-      safeNumber(
-        first(
-          raw.pendingInvoices,
-          raw.pendingFacturas,
-          raw.facturasPendientes,
-          raw.invoicesPending,
-          raw.facturasVencidas,
-          raw.overdueInvoices,
-          0
-        ),
-        0
-      )
-    );
+  const invoicesCount = Math.max(
+    0,
+    safeNumber(
+      first(
+        raw.totalInvoices,
+        raw.invoicesTotal,
+        raw.facturasTotal,
+        raw.totalFacturas,
+        raw.invoicesCount,
+        raw.facturasCount,
+        homeState.invoicesRemoteCount,
+        safeArray(homeState.invoices).length
+      ),
+      0
+    )
+  );
 
-  const invoiceAmount =
-    Math.max(
-      0,
-      safeNumber(
-        first(
-          raw.invoiceAmount,
-          raw.billingTotal,
-          raw.totalBilling,
-          raw.totalFacturado,
-          raw.importeFacturas,
-          raw.facturacionVisible,
-          raw.facturacionTotal,
-          0
-        ),
+  const pendingInvoices = Math.max(
+    0,
+    safeNumber(
+      first(
+        raw.pendingInvoices,
+        raw.pendingFacturas,
+        raw.facturasPendientes,
+        raw.invoicesPending,
+        raw.facturasVencidas,
+        raw.overdueInvoices,
         0
-      )
-    );
+      ),
+      0
+    )
+  );
+
+  const invoiceAmount = Math.max(
+    0,
+    safeNumber(
+      first(
+        raw.invoiceAmount,
+        raw.billingTotal,
+        raw.totalBilling,
+        raw.totalFacturado,
+        raw.importeFacturas,
+        raw.facturacionVisible,
+        raw.facturacionTotal,
+        0
+      ),
+      0
+    )
+  );
+
+  const usersCount = Math.max(
+    0,
+    safeNumber(
+      first(
+        raw.usersCount,
+        raw.usuariosCount,
+        raw.totalUsers,
+        raw.totalUsuarios,
+        raw.activeUsers,
+        raw.usuariosActivos,
+        homeState.usersRemoteCount,
+        safeArray(homeState.users).length
+      ),
+      0
+    )
+  );
+
+  const clientsCount = Math.max(
+    0,
+    safeNumber(
+      first(
+        raw.clientsCount,
+        raw.clientesCount,
+        raw.customersCount,
+        raw.totalClients,
+        raw.totalClientes,
+        raw.totalCustomers,
+        raw.activeClients,
+        raw.clientesActivos,
+        homeState.clientsRemoteCount,
+        safeArray(homeState.clients).length
+      ),
+      0
+    )
+  );
+
+  const attachmentsCount = Math.max(
+    0,
+    safeNumber(
+      first(
+        raw.attachmentsCount,
+        raw.filesCount,
+        raw.adjuntosCount,
+        0
+      ),
+      0
+    )
+  );
+
+  const visibleTicketsCount = Math.max(
+    0,
+    safeNumber(
+      first(
+        raw.visibleTickets,
+        raw.visibleTicketsCount,
+        raw.visibleIncidenciasCount,
+        safeArray(homeState.tickets).length
+      ),
+      0
+    )
+  );
+
+  const visibleInvoicesCount = Math.max(
+    0,
+    safeNumber(
+      first(
+        raw.visibleInvoices,
+        raw.visibleInvoicesCount,
+        raw.visibleFacturasCount,
+        safeArray(homeState.invoices).length
+      ),
+      0
+    )
+  );
+
+  const visibleUsersCount = Math.max(
+    0,
+    safeNumber(
+      first(
+        raw.visibleUsers,
+        raw.visibleUsersCount,
+        raw.visibleUsuariosCount,
+        safeArray(homeState.users).length
+      ),
+      0
+    )
+  );
+
+  const visibleClientsCount = Math.max(
+    0,
+    safeNumber(
+      first(
+        raw.visibleClients,
+        raw.visibleClientsCount,
+        raw.visibleClientesCount,
+        raw.visibleCustomersCount,
+        safeArray(homeState.clients).length
+      ),
+      0
+    )
+  );
+
+  const activeUsersRaw = Math.max(
+    0,
+    safeNumber(first(raw.activeUsers, raw.usuariosActivos, 0), 0)
+  );
+
+  const activeClientsRaw = Math.max(
+    0,
+    safeNumber(first(raw.activeClients, raw.clientesActivos, 0), 0)
+  );
 
   return {
     ...raw,
 
-    totalTickets:
-      ticketsCount,
-    ticketsTotal:
-      ticketsCount,
-    incidenciasTotal:
-      ticketsCount,
-    totalIncidencias:
-      ticketsCount,
+    totalTickets: ticketsCount,
+    ticketsTotal: ticketsCount,
+    incidenciasTotal: ticketsCount,
+    totalIncidencias: ticketsCount,
     ticketsCount,
-    incidenciasCount:
-      ticketsCount,
+    incidenciasCount: ticketsCount,
 
-    totalInvoices:
-      invoicesCount,
-    invoicesTotal:
-      invoicesCount,
-    facturasTotal:
-      invoicesCount,
-    totalFacturas:
-      invoicesCount,
+    openTickets,
+    pendingTickets: openTickets,
+    openIncidencias: openTickets,
+    pendingIncidencias: openTickets,
+    incidenciasAbiertas: openTickets,
+
+    closedTickets,
+    resolvedTickets: closedTickets,
+    closedIncidencias: closedTickets,
+    resolvedIncidencias: closedTickets,
+    incidenciasCerradas: closedTickets,
+
+    urgentTickets,
+    urgentIncidencias: urgentTickets,
+    highPriorityTickets: urgentTickets,
+
+    totalInvoices: invoicesCount,
+    invoicesTotal: invoicesCount,
+    facturasTotal: invoicesCount,
+    totalFacturas: invoicesCount,
     invoicesCount,
-    facturasCount:
-      invoicesCount,
+    facturasCount: invoicesCount,
 
     pendingInvoices,
-    pendingFacturas:
-      pendingInvoices,
-    facturasPendientes:
-      pendingInvoices,
-    invoicesPending:
-      pendingInvoices,
+    pendingFacturas: pendingInvoices,
+    facturasPendientes: pendingInvoices,
+    invoicesPending: pendingInvoices,
 
     invoiceAmount,
-    billingTotal:
-      invoiceAmount,
-    totalBilling:
-      invoiceAmount,
-    totalFacturado:
-      invoiceAmount,
-    importeFacturas:
-      invoiceAmount,
-    facturacionVisible:
-      invoiceAmount,
-    facturacionTotal:
-      invoiceAmount,
+    billingTotal: invoiceAmount,
+    totalBilling: invoiceAmount,
+    totalFacturado: invoiceAmount,
+    importeFacturas: invoiceAmount,
+    facturacionVisible: invoiceAmount,
+    facturacionTotal: invoiceAmount,
 
     usersCount,
-    usuariosCount:
-      usersCount,
-    totalUsers:
-      usersCount,
-    totalUsuarios:
-      usersCount,
-    activeUsers:
-      Math.max(
-        usersCount,
-        safeNumber(first(raw.activeUsers, raw.usuariosActivos, 0), 0)
-      ),
-    usuariosActivos:
-      Math.max(
-        usersCount,
-        safeNumber(first(raw.activeUsers, raw.usuariosActivos, 0), 0)
-      ),
+    usuariosCount: usersCount,
+    totalUsers: usersCount,
+    totalUsuarios: usersCount,
+
+    activeUsers: activeUsersRaw || usersCount,
+    usuariosActivos: activeUsersRaw || usersCount,
 
     clientsCount,
-    clientesCount:
-      clientsCount,
-    customersCount:
-      clientsCount,
-    totalClients:
-      clientsCount,
-    totalClientes:
-      clientsCount,
-    totalCustomers:
-      clientsCount,
-    activeClients:
-      Math.max(
-        clientsCount,
-        safeNumber(first(raw.activeClients, raw.clientesActivos, 0), 0)
-      ),
-    clientesActivos:
-      Math.max(
-        clientsCount,
-        safeNumber(first(raw.activeClients, raw.clientesActivos, 0), 0)
-      ),
+    clientesCount: clientsCount,
+    customersCount: clientsCount,
+    totalClients: clientsCount,
+    totalClientes: clientsCount,
+    totalCustomers: clientsCount,
+
+    activeClients: activeClientsRaw || clientsCount,
+    clientesActivos: activeClientsRaw || clientsCount,
+
+    visibleTickets: visibleTicketsCount,
+    visibleTicketsCount,
+    visibleIncidenciasCount: visibleTicketsCount,
+
+    visibleInvoices: visibleInvoicesCount,
+    visibleInvoicesCount,
+    visibleFacturasCount: visibleInvoicesCount,
+
+    visibleUsers: visibleUsersCount,
+    visibleUsersCount,
+    visibleUsuariosCount: visibleUsersCount,
+
+    visibleClients: visibleClientsCount,
+    visibleClientsCount,
+    visibleClientesCount: visibleClientsCount,
+    visibleCustomersCount: visibleClientsCount,
+
+    attachmentsCount,
+    filesCount: attachmentsCount,
+    adjuntosCount: attachmentsCount,
   };
 }
 
 function syncAliasesFromCollections() {
-  homeState.incidencias =
-    safeArray(homeState.tickets);
+  homeState.incidencias = safeArray(homeState.tickets);
 
-  homeState.facturas =
-    safeArray(homeState.invoices);
+  homeState.facturas = safeArray(homeState.invoices);
 
-  homeState.usuarios =
-    safeArray(homeState.users);
+  homeState.usuarios = safeArray(homeState.users);
 
-  homeState.clientes =
-    safeArray(homeState.clients);
+  homeState.clientes = safeArray(homeState.clients);
+  homeState.customers = safeArray(homeState.clients);
 
-  homeState.customers =
-    safeArray(homeState.clients);
+  homeState.activities = safeArray(homeState.activity);
+  homeState.recent = safeArray(homeState.activity);
+  homeState.recentActivity = safeArray(homeState.activity);
 
-  homeState.activities =
-    safeArray(homeState.activity);
-
-  homeState.recent =
-    safeArray(homeState.activity);
-
-  homeState.recentActivity =
-    safeArray(homeState.activity);
-
-  homeState.cards =
-    safeArray(homeState.widgets);
-
-  homeState.kpis =
-    safeArray(homeState.widgets);
+  homeState.cards = safeArray(homeState.widgets);
+  homeState.kpis = safeArray(homeState.widgets);
+  homeState.blocks = safeArray(homeState.widgets);
 }
 
 function syncAliasesFromSummary() {
-  homeState.summary =
-    normalizeSummaryAliases(homeState.summary);
+  homeState.summary = normalizeSummaryAliases(homeState.summary);
 
-  homeState.stats =
-    homeState.summary;
-
-  homeState.metrics =
-    homeState.summary;
-
-  homeState.totals =
-    homeState.summary;
-
-  homeState.counts =
-    homeState.summary;
+  homeState.stats = homeState.summary;
+  homeState.metrics = homeState.summary;
+  homeState.totals = homeState.summary;
+  homeState.counts = homeState.summary;
 }
 
 function syncDashboardAliases() {
-  const dashboard =
-    safeObject(homeState.dashboard);
+  const dashboard = safeObject(homeState.dashboard);
 
   homeState.dashboard = {
     ...dashboard,
 
-    summary:
-      homeState.summary,
+    ok: dashboard.ok !== false,
+    success: dashboard.success !== false,
 
-    stats:
-      homeState.summary,
+    summary: homeState.summary,
+    stats: homeState.summary,
+    metrics: homeState.summary,
+    totals: homeState.summary,
+    counts: homeState.summary,
 
-    metrics:
-      homeState.summary,
+    widgets: homeState.widgets,
+    cards: homeState.widgets,
+    kpis: homeState.widgets,
+    blocks: homeState.widgets,
 
-    totals:
-      homeState.summary,
+    tickets: homeState.tickets,
+    incidencias: homeState.tickets,
 
-    counts:
-      homeState.summary,
+    invoices: homeState.invoices,
+    facturas: homeState.invoices,
 
-    widgets:
-      homeState.widgets,
+    users: homeState.users,
+    usuarios: homeState.users,
 
-    cards:
-      homeState.widgets,
+    clients: homeState.clients,
+    clientes: homeState.clients,
+    customers: homeState.clients,
 
-    kpis:
-      homeState.widgets,
+    activity: homeState.activity,
+    activities: homeState.activity,
+    recent: homeState.activity,
+    recentActivity: homeState.activity,
 
-    tickets:
-      homeState.tickets,
+    meta: {
+      ...safeObject(dashboard.meta),
+      ...safeObject(homeState.meta),
 
-    incidencias:
-      homeState.tickets,
+      widgetsCount: homeState.widgets.length,
 
-    invoices:
-      homeState.invoices,
+      ticketsCount: homeState.summary.totalTickets,
+      incidenciasCount: homeState.summary.totalTickets,
+      visibleTicketsCount: homeState.tickets.length,
+      visibleIncidenciasCount: homeState.tickets.length,
 
-    facturas:
-      homeState.invoices,
+      invoicesCount: homeState.summary.totalInvoices,
+      facturasCount: homeState.summary.totalInvoices,
+      visibleInvoicesCount: homeState.invoices.length,
+      visibleFacturasCount: homeState.invoices.length,
 
-    users:
-      homeState.users,
+      usersCount: homeState.summary.usersCount,
+      usuariosCount: homeState.summary.usuariosCount,
+      visibleUsersCount: homeState.users.length,
+      visibleUsuariosCount: homeState.users.length,
 
-    usuarios:
-      homeState.users,
+      clientsCount: homeState.summary.clientsCount,
+      clientesCount: homeState.summary.clientesCount,
+      customersCount: homeState.summary.customersCount,
+      visibleClientsCount: homeState.clients.length,
+      visibleClientesCount: homeState.clients.length,
+      visibleCustomersCount: homeState.clients.length,
 
-    clients:
-      homeState.clients,
-
-    clientes:
-      homeState.clients,
-
-    customers:
-      homeState.clients,
-
-    activity:
-      homeState.activity,
-
-    activities:
-      homeState.activity,
-
-    recent:
-      homeState.activity,
-
-    recentActivity:
-      homeState.activity,
+      activityCount: homeState.activity.length,
+      recentCount: homeState.activity.length,
+      visibleActivityCount: homeState.activity.length,
+    },
   };
 }
 
 export function normalizeHomeState() {
-  homeState.page =
-    Math.max(
-      1,
-      safeNumber(homeState.page, DEFAULT_PAGE)
-    );
+  homeState.version = HOME_STATE_VERSION;
 
-  homeState.pageSize =
-    Math.max(
-      1,
-      safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE)
-    );
+  homeState.page = Math.max(1, safeNumber(homeState.page, DEFAULT_PAGE));
+  homeState.pageSize = Math.max(1, safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE));
 
-  homeState.loading =
-    Boolean(homeState.loading);
+  homeState.loading = Boolean(homeState.loading);
+  homeState.refreshing = Boolean(homeState.refreshing);
+  homeState.hydrated = Boolean(homeState.hydrated);
+  homeState.loaded = Boolean(homeState.loaded);
+  homeState.creating = Boolean(homeState.creating);
 
-  homeState.refreshing =
-    Boolean(homeState.refreshing);
+  homeState.openingTicketId = safeText(homeState.openingTicketId, "");
+  homeState.selectedTicketId = safeText(homeState.selectedTicketId, "");
+  homeState.navigatingAction = safeText(homeState.navigatingAction, "");
 
-  homeState.hydrated =
-    Boolean(homeState.hydrated);
+  homeState.error = safeText(homeState.error, "");
+  homeState.lastError = homeState.lastError ? normalizeError(homeState.lastError) : null;
 
-  homeState.loaded =
-    Boolean(homeState.loaded);
+  homeState.requestId = safeText(homeState.requestId, "");
 
-  homeState.creating =
-    Boolean(homeState.creating);
+  homeState.lastSyncAt = safeText(first(homeState.lastSyncAt, homeState.lastUpdatedAt, ""), "");
+  homeState.lastUpdatedAt = safeText(first(homeState.lastUpdatedAt, homeState.lastSyncAt, ""), "");
 
-  homeState.openingTicketId =
-    safeText(homeState.openingTicketId, "");
+  homeState.dashboard = safeObject(homeState.dashboard);
+  homeState.summary = safeObject(homeState.summary);
 
-  homeState.selectedTicketId =
-    safeText(homeState.selectedTicketId, "");
+  homeState.widgets = safeArray(homeState.widgets);
 
-  homeState.navigatingAction =
-    safeText(homeState.navigatingAction, "");
+  homeState.tickets = safeArray(homeState.tickets);
+  homeState.invoices = safeArray(homeState.invoices);
+  homeState.users = safeArray(homeState.users);
+  homeState.clients = safeArray(homeState.clients);
+  homeState.activity = safeArray(homeState.activity);
 
-  homeState.error =
-    safeText(homeState.error, "");
+  homeState.ticketsRemoteCount = Math.max(
+    homeState.tickets.length,
+    safeNumber(homeState.ticketsRemoteCount, homeState.tickets.length)
+  );
 
-  homeState.requestId =
-    safeText(homeState.requestId, "");
+  homeState.invoicesRemoteCount = Math.max(
+    homeState.invoices.length,
+    safeNumber(homeState.invoicesRemoteCount, homeState.invoices.length)
+  );
 
-  homeState.lastSyncAt =
-    first(homeState.lastSyncAt, homeState.lastUpdatedAt, "");
+  homeState.usersRemoteCount = Math.max(
+    homeState.users.length,
+    safeNumber(homeState.usersRemoteCount, homeState.users.length)
+  );
 
-  homeState.lastUpdatedAt =
-    first(homeState.lastUpdatedAt, homeState.lastSyncAt, "");
+  homeState.clientsRemoteCount = Math.max(
+    homeState.clients.length,
+    safeNumber(homeState.clientsRemoteCount, homeState.clients.length)
+  );
 
-  homeState.dashboard =
-    safeObject(homeState.dashboard);
+  homeState.activityRemoteCount = Math.max(
+    homeState.activity.length,
+    safeNumber(homeState.activityRemoteCount, homeState.activity.length)
+  );
 
-  homeState.summary =
-    safeObject(homeState.summary);
+  homeState.remoteCount = Math.max(
+    safeNumber(homeState.remoteCount, 0),
+    homeState.ticketsRemoteCount
+  );
 
-  homeState.widgets =
-    safeArray(homeState.widgets);
+  homeState.totalCount = Math.max(
+    homeState.remoteCount,
+    homeState.ticketsRemoteCount,
+    safeNumber(homeState.totalCount, 0)
+  );
 
-  homeState.tickets =
-    safeArray(homeState.tickets);
+  homeState.health =
+    homeState.health === null
+      ? null
+      : safeObject(homeState.health, homeState.health);
 
-  homeState.invoices =
-    safeArray(homeState.invoices);
+  homeState.meta = safeObject(homeState.meta);
+  homeState.modules = safeObject(homeState.modules);
 
-  homeState.users =
-    safeArray(homeState.users);
+  homeState.partial = Boolean(homeState.partial);
+  homeState.errors = safeArray(homeState.errors);
 
-  homeState.clients =
-    safeArray(homeState.clients);
-
-  homeState.activity =
-    safeArray(homeState.activity);
-
-  homeState.remoteCount =
-    Math.max(
-      0,
-      safeNumber(
-        homeState.remoteCount,
-        homeState.tickets.length
-      )
-    );
-
-  homeState.totalCount =
-    Math.max(
-      homeState.remoteCount,
-      safeNumber(homeState.totalCount, 0)
-    );
-
-  homeState.ticketsRemoteCount =
-    Math.max(
-      homeState.tickets.length,
-      safeNumber(homeState.ticketsRemoteCount, homeState.tickets.length)
-    );
-
-  homeState.invoicesRemoteCount =
-    Math.max(
-      homeState.invoices.length,
-      safeNumber(homeState.invoicesRemoteCount, homeState.invoices.length)
-    );
-
-  homeState.usersRemoteCount =
-    Math.max(
-      homeState.users.length,
-      safeNumber(homeState.usersRemoteCount, homeState.users.length)
-    );
-
-  homeState.clientsRemoteCount =
-    Math.max(
-      homeState.clients.length,
-      safeNumber(homeState.clientsRemoteCount, homeState.clients.length)
-    );
-
-  homeState.activityRemoteCount =
-    Math.max(
-      homeState.activity.length,
-      safeNumber(homeState.activityRemoteCount, homeState.activity.length)
-    );
-
-  homeState.meta =
-    safeObject(homeState.meta);
-
-  homeState.recentMutations =
-    safeArray(homeState.recentMutations)
-      .slice(0, MAX_RECENT_MUTATIONS);
+  homeState.recentMutations = safeArray(homeState.recentMutations).slice(
+    0,
+    MAX_RECENT_MUTATIONS
+  );
 
   syncAliasesFromCollections();
   syncAliasesFromSummary();
@@ -1031,74 +938,50 @@ export function normalizeHomeState() {
 
 function getStateSignature() {
   const data = {
-    hydrated:
-      Boolean(homeState.hydrated),
+    hydrated: Boolean(homeState.hydrated),
+    loaded: Boolean(homeState.loaded),
+    loading: Boolean(homeState.loading),
+    refreshing: Boolean(homeState.refreshing),
+    creating: Boolean(homeState.creating),
 
-    loaded:
-      Boolean(homeState.loaded),
+    openingTicketId: safeText(homeState.openingTicketId, ""),
+    selectedTicketId: safeText(homeState.selectedTicketId, ""),
+    navigatingAction: safeText(homeState.navigatingAction, ""),
 
-    loading:
-      Boolean(homeState.loading),
+    error: safeText(homeState.error, ""),
 
-    refreshing:
-      Boolean(homeState.refreshing),
+    page: safeNumber(homeState.page, DEFAULT_PAGE),
+    pageSize: safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE),
 
-    creating:
-      Boolean(homeState.creating),
+    requestId: safeText(homeState.requestId, ""),
+    lastSyncAt: safeText(homeState.lastSyncAt, ""),
 
-    openingTicketId:
-      safeText(homeState.openingTicketId, ""),
+    widgets: safeArray(homeState.widgets).length,
+    tickets: safeArray(homeState.tickets).length,
+    invoices: safeArray(homeState.invoices).length,
+    users: safeArray(homeState.users).length,
+    clients: safeArray(homeState.clients).length,
+    activity: safeArray(homeState.activity).length,
 
-    selectedTicketId:
-      safeText(homeState.selectedTicketId, ""),
+    ticketsRemoteCount: safeNumber(homeState.ticketsRemoteCount, 0),
+    invoicesRemoteCount: safeNumber(homeState.invoicesRemoteCount, 0),
+    usersRemoteCount: safeNumber(homeState.usersRemoteCount, 0),
+    clientsRemoteCount: safeNumber(homeState.clientsRemoteCount, 0),
+    activityRemoteCount: safeNumber(homeState.activityRemoteCount, 0),
 
-    navigatingAction:
-      safeText(homeState.navigatingAction, ""),
+    summary: {
+      totalTickets: safeNumber(homeState.summary?.totalTickets, 0),
+      openTickets: safeNumber(homeState.summary?.openTickets, 0),
+      urgentTickets: safeNumber(homeState.summary?.urgentTickets, 0),
+      totalInvoices: safeNumber(homeState.summary?.totalInvoices, 0),
+      pendingInvoices: safeNumber(homeState.summary?.pendingInvoices, 0),
+      invoiceAmount: safeNumber(homeState.summary?.invoiceAmount, 0),
+      usersCount: safeNumber(homeState.summary?.usersCount, 0),
+      clientsCount: safeNumber(homeState.summary?.clientsCount, 0),
+    },
 
-    error:
-      safeText(homeState.error, ""),
-
-    page:
-      safeNumber(homeState.page, DEFAULT_PAGE),
-
-    pageSize:
-      safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE),
-
-    requestId:
-      safeText(homeState.requestId, ""),
-
-    lastSyncAt:
-      safeText(homeState.lastSyncAt, ""),
-
-    widgets:
-      safeArray(homeState.widgets).length,
-
-    tickets:
-      safeArray(homeState.tickets).length,
-
-    invoices:
-      safeArray(homeState.invoices).length,
-
-    users:
-      safeArray(homeState.users).length,
-
-    clients:
-      safeArray(homeState.clients).length,
-
-    activity:
-      safeArray(homeState.activity).length,
-
-    ticketsRemoteCount:
-      safeNumber(homeState.ticketsRemoteCount, 0),
-
-    invoicesRemoteCount:
-      safeNumber(homeState.invoicesRemoteCount, 0),
-
-    usersRemoteCount:
-      safeNumber(homeState.usersRemoteCount, 0),
-
-    clientsRemoteCount:
-      safeNumber(homeState.clientsRemoteCount, 0),
+    partial: Boolean(homeState.partial),
+    errors: safeArray(homeState.errors).length,
   };
 
   try {
@@ -1110,23 +993,15 @@ function getStateSignature() {
 
 function recordMutation(type = "patch", patch = {}) {
   const item = {
-    type:
-      safeText(type, "patch"),
-
-    keys:
-      Object.keys(
-        safeObject(patch)
-      ),
-
-    at:
-      nowIso(),
+    type: safeText(type, "patch"),
+    keys: Object.keys(safeObject(patch)),
+    at: nowIso(),
   };
 
   homeState.recentMutations.unshift(item);
 
   if (homeState.recentMutations.length > MAX_RECENT_MUTATIONS) {
-    homeState.recentMutations =
-      homeState.recentMutations.slice(0, MAX_RECENT_MUTATIONS);
+    homeState.recentMutations = homeState.recentMutations.slice(0, MAX_RECENT_MUTATIONS);
   }
 
   return item;
@@ -1135,60 +1010,31 @@ function recordMutation(type = "patch", patch = {}) {
 function emitStateChanged(type = "patch", patch = {}, options = {}) {
   normalizeHomeState();
 
-  const signature =
-    getStateSignature();
-
-  const changed =
-    signature !== lastStateSignature;
+  const signature = getStateSignature();
+  const changed = signature !== lastStateSignature;
 
   const force =
     safeBoolean(options?.forceEmit, false) ||
     safeBoolean(options?.emitUnchanged, false);
 
-  lastStateSignature =
-    signature;
-
-  const at =
-    nowMs();
-
-  lastEmitAt =
-    at;
+  lastStateSignature = signature;
+  lastEmitAt = nowMs();
 
   const payload = {
-    type:
-      safeText(type, "patch"),
-
+    type: safeText(type, "patch"),
     changed,
-
-    patch:
-      safeClone(patch, {}),
-
-    state:
-      getHomeStateSnapshot(),
-
-    at:
-      nowIso(),
+    patch: safeClone(patch, {}),
+    state: getHomeStateSnapshot(),
+    at: nowIso(),
   };
 
-  if (
-    changed ||
-    force
-  ) {
-    emitHomeStateEvent(
-      HOME_STATE_EVENTS.change,
-      payload
-    );
+  if (changed || force) {
+    emitHomeStateEvent(HOME_STATE_EVENTS.change, payload);
 
     if (HOME_STATE_EVENTS[type]) {
-      emitHomeStateEvent(
-        HOME_STATE_EVENTS[type],
-        payload
-      );
+      emitHomeStateEvent(HOME_STATE_EVENTS[type], payload);
     } else if (type !== "change") {
-      emitHomeStateEvent(
-        HOME_STATE_EVENTS.patch,
-        payload
-      );
+      emitHomeStateEvent(HOME_STATE_EVENTS.patch, payload);
     }
   }
 
@@ -1196,48 +1042,366 @@ function emitStateChanged(type = "patch", patch = {}, options = {}) {
 }
 
 /* =========================================================
-   PATCH / SETTERS
+   INTERNAL APPLY HELPERS
+========================================================= */
+
+function shouldPreserveExistingArray(key = "", value = [], options = {}) {
+  if (options?.replace === true) {
+    return false;
+  }
+
+  return Array.isArray(value) &&
+    value.length === 0 &&
+    Array.isArray(homeState[key]) &&
+    homeState[key].length > 0;
+}
+
+function shouldPreserveExistingObject(key = "", value = {}, options = {}) {
+  if (options?.replace === true) {
+    return false;
+  }
+
+  return isObject(value) &&
+    !hasOwnKeys(value) &&
+    isObject(homeState[key]) &&
+    hasOwnKeys(homeState[key]);
+}
+
+function assignIfUseful(key = "", value, options = {}) {
+  if (!key) {
+    return false;
+  }
+
+  if (Array.isArray(value) && shouldPreserveExistingArray(key, value, options)) {
+    return false;
+  }
+
+  if (isObject(value) && shouldPreserveExistingObject(key, value, options)) {
+    return false;
+  }
+
+  if (value === undefined) {
+    return false;
+  }
+
+  homeState[key] = value;
+  return true;
+}
+
+function getRemoteCountFromDashboard(raw = {}, kind = "") {
+  const object = safeObject(raw);
+  const summary = safeObject(first(object.summary, object.stats, object.metrics, object.totals, object.counts, {}));
+
+  if (kind === "tickets") {
+    return first(
+      object.ticketsTotal,
+      object.incidenciasTotal,
+      object.totalTickets,
+      object.totalIncidencias,
+      object.ticketsCount,
+      object.incidenciasCount,
+      summary.totalTickets,
+      summary.ticketsTotal,
+      summary.incidenciasTotal,
+      summary.totalIncidencias,
+      summary.ticketsCount,
+      summary.incidenciasCount,
+      object.meta?.ticketsCount,
+      object.meta?.incidenciasCount,
+      object.meta?.totalTickets,
+      object.meta?.totalIncidencias,
+      0
+    );
+  }
+
+  if (kind === "invoices") {
+    return first(
+      object.invoicesTotal,
+      object.facturasTotal,
+      object.totalInvoices,
+      object.totalFacturas,
+      object.invoicesCount,
+      object.facturasCount,
+      summary.totalInvoices,
+      summary.invoicesTotal,
+      summary.facturasTotal,
+      summary.totalFacturas,
+      summary.invoicesCount,
+      summary.facturasCount,
+      object.meta?.invoicesCount,
+      object.meta?.facturasCount,
+      object.meta?.totalInvoices,
+      object.meta?.totalFacturas,
+      0
+    );
+  }
+
+  if (kind === "users") {
+    return first(
+      object.usersTotal,
+      object.usuariosTotal,
+      object.totalUsers,
+      object.totalUsuarios,
+      object.usersCount,
+      object.usuariosCount,
+      summary.usersCount,
+      summary.usuariosCount,
+      summary.totalUsers,
+      summary.totalUsuarios,
+      object.meta?.usersCount,
+      object.meta?.usuariosCount,
+      object.meta?.totalUsers,
+      object.meta?.totalUsuarios,
+      0
+    );
+  }
+
+  if (kind === "clients") {
+    return first(
+      object.clientsTotal,
+      object.clientesTotal,
+      object.customersTotal,
+      object.totalClients,
+      object.totalClientes,
+      object.totalCustomers,
+      object.clientsCount,
+      object.clientesCount,
+      object.customersCount,
+      summary.clientsCount,
+      summary.clientesCount,
+      summary.customersCount,
+      summary.totalClients,
+      summary.totalClientes,
+      summary.totalCustomers,
+      object.meta?.clientsCount,
+      object.meta?.clientesCount,
+      object.meta?.customersCount,
+      0
+    );
+  }
+
+  if (kind === "activity") {
+    return first(
+      object.activityCount,
+      object.recentCount,
+      object.visibleActivityCount,
+      object.meta?.activityCount,
+      object.meta?.recentCount,
+      0
+    );
+  }
+
+  return 0;
+}
+
+function applyDashboardToState(dashboard = {}, options = {}) {
+  const raw = safeObject(dashboard);
+  const replace = options?.replace === true;
+
+  if (!hasOwnKeys(raw) && !replace) {
+    return {};
+  }
+
+  const patch = {};
+
+  const nextDashboard = replace
+    ? raw
+    : {
+        ...safeObject(homeState.dashboard),
+        ...raw,
+      };
+
+  assignIfUseful("dashboard", nextDashboard, { replace });
+  patch.dashboard = homeState.dashboard;
+
+  const summary = safeObject(
+    first(
+      raw.summary,
+      raw.stats,
+      raw.metrics,
+      raw.totals,
+      raw.counts,
+      {}
+    )
+  );
+
+  if (hasOwnKeys(summary) || replace) {
+    const nextSummary = normalizeSummaryAliases(
+      replace
+        ? summary
+        : {
+            ...safeObject(homeState.summary),
+            ...summary,
+          }
+    );
+
+    assignIfUseful("summary", nextSummary, { replace });
+    patch.summary = homeState.summary;
+  }
+
+  const widgets = firstArray(raw.widgets, raw.cards, raw.kpis, raw.blocks);
+
+  if (widgets) {
+    assignIfUseful("widgets", widgets, { replace });
+    patch.widgets = homeState.widgets;
+  }
+
+  const tickets = firstArray(raw.tickets, raw.incidencias);
+
+  if (tickets) {
+    assignIfUseful("tickets", tickets, { replace });
+    homeState.ticketsRemoteCount = Math.max(
+      safeArray(homeState.tickets).length,
+      safeNumber(getRemoteCountFromDashboard(raw, "tickets"), homeState.ticketsRemoteCount)
+    );
+    homeState.remoteCount = Math.max(homeState.remoteCount, homeState.ticketsRemoteCount);
+    patch.tickets = homeState.tickets;
+    patch.ticketsRemoteCount = homeState.ticketsRemoteCount;
+  }
+
+  const invoices = firstArray(raw.invoices, raw.facturas);
+
+  if (invoices) {
+    assignIfUseful("invoices", invoices, { replace });
+    homeState.invoicesRemoteCount = Math.max(
+      safeArray(homeState.invoices).length,
+      safeNumber(getRemoteCountFromDashboard(raw, "invoices"), homeState.invoicesRemoteCount)
+    );
+    patch.invoices = homeState.invoices;
+    patch.invoicesRemoteCount = homeState.invoicesRemoteCount;
+  }
+
+  const users = firstArray(raw.users, raw.usuarios);
+
+  if (users) {
+    assignIfUseful("users", users, { replace });
+    homeState.usersRemoteCount = Math.max(
+      safeArray(homeState.users).length,
+      safeNumber(getRemoteCountFromDashboard(raw, "users"), homeState.usersRemoteCount)
+    );
+    patch.users = homeState.users;
+    patch.usersRemoteCount = homeState.usersRemoteCount;
+  }
+
+  const clients = firstArray(raw.clients, raw.clientes, raw.customers);
+
+  if (clients) {
+    assignIfUseful("clients", clients, { replace });
+    homeState.clientsRemoteCount = Math.max(
+      safeArray(homeState.clients).length,
+      safeNumber(getRemoteCountFromDashboard(raw, "clients"), homeState.clientsRemoteCount)
+    );
+    patch.clients = homeState.clients;
+    patch.clientsRemoteCount = homeState.clientsRemoteCount;
+  }
+
+  const activity = firstArray(raw.activity, raw.activities, raw.recent, raw.recentActivity);
+
+  if (activity) {
+    assignIfUseful("activity", activity, { replace });
+    homeState.activityRemoteCount = Math.max(
+      safeArray(homeState.activity).length,
+      safeNumber(getRemoteCountFromDashboard(raw, "activity"), homeState.activityRemoteCount)
+    );
+    patch.activity = homeState.activity;
+    patch.activityRemoteCount = homeState.activityRemoteCount;
+  }
+
+  const meta = safeObject(first(raw.meta, {}));
+
+  if (hasOwnKeys(meta) || replace) {
+    homeState.meta = replace
+      ? meta
+      : {
+          ...safeObject(homeState.meta),
+          ...meta,
+        };
+
+    patch.meta = homeState.meta;
+  }
+
+  if (hasOwnKeys(raw.modules) || replace) {
+    homeState.modules = replace
+      ? safeObject(raw.modules)
+      : {
+          ...safeObject(homeState.modules),
+          ...safeObject(raw.modules),
+        };
+
+    patch.modules = homeState.modules;
+  }
+
+  if (Array.isArray(raw.errors) || replace) {
+    homeState.errors = safeArray(raw.errors);
+    patch.errors = homeState.errors;
+  }
+
+  if ("partial" in raw || replace) {
+    homeState.partial = Boolean(raw.partial);
+    patch.partial = homeState.partial;
+  }
+
+  homeState.requestId = safeText(
+    first(
+      options?.requestId,
+      raw.requestId,
+      raw.meta?.requestId,
+      homeState.requestId,
+      ""
+    ),
+    ""
+  );
+
+  patch.requestId = homeState.requestId;
+
+  homeState.lastSyncAt = safeText(
+    first(
+      options?.lastSyncAt,
+      raw.lastSyncAt,
+      raw.updatedAt,
+      raw.generatedAt,
+      raw.meta?.updatedAt,
+      nowIso()
+    ),
+    nowIso()
+  );
+
+  homeState.lastUpdatedAt = homeState.lastSyncAt;
+
+  patch.lastSyncAt = homeState.lastSyncAt;
+  patch.lastUpdatedAt = homeState.lastUpdatedAt;
+
+  homeState.loaded = true;
+  homeState.hydrated = true;
+  homeState.loading = false;
+  homeState.refreshing = false;
+  homeState.error = "";
+  homeState.lastError = null;
+
+  patch.loaded = true;
+  patch.hydrated = true;
+  patch.loading = false;
+  patch.refreshing = false;
+  patch.error = "";
+  patch.lastError = null;
+
+  return patch;
+}
+
+/* =========================================================
+   PATCH / REPLACE / RESET
 ========================================================= */
 
 export function patchHomeState(patch = {}, options = {}) {
-  const data =
-    safeObject(patch);
-
-  const opts =
-    safeObject(options);
-
-  const replace =
-    opts.replace === true;
+  const data = safeObject(patch);
+  const opts = safeObject(options);
+  const replace = opts.replace === true;
 
   for (const [key, value] of Object.entries(data)) {
-    if (
-      Array.isArray(value) &&
-      value.length === 0 &&
-      !replace &&
-      Array.isArray(homeState[key]) &&
-      homeState[key].length > 0
-    ) {
-      continue;
-    }
-
-    if (
-      isObject(value) &&
-      !hasOwnKeys(value) &&
-      !replace &&
-      isObject(homeState[key]) &&
-      hasOwnKeys(homeState[key])
-    ) {
-      continue;
-    }
-
-    homeState[key] =
-      value;
+    assignIfUseful(key, value, { replace });
   }
 
-  recordMutation(
-    safeText(opts.type, "patch"),
-    data
-  );
+  recordMutation(safeText(opts.type, "patch"), data);
 
   return emitStateChanged(
     safeText(opts.type, "patch"),
@@ -1247,35 +1411,21 @@ export function patchHomeState(patch = {}, options = {}) {
 }
 
 export function replaceHomeState(nextState = {}, options = {}) {
-  const currentInitial =
-    createInitialHomeState();
+  const initial = createInitialHomeState();
 
   Object.keys(homeState).forEach((key) => {
     delete homeState[key];
   });
 
-  Object.assign(
-    homeState,
-    currentInitial,
-    safeObject(nextState)
-  );
+  Object.assign(homeState, initial, safeObject(nextState));
 
-  recordMutation(
-    "replace",
-    nextState
-  );
+  recordMutation("replace", nextState);
 
-  return emitStateChanged(
-    "patch",
-    nextState,
-    {
-      ...safeObject(options),
-      replace:
-        true,
-      forceEmit:
-        options?.forceEmit !== false,
-    }
-  );
+  return emitStateChanged("patch", nextState, {
+    ...safeObject(options),
+    replace: true,
+    forceEmit: options?.forceEmit !== false,
+  });
 }
 
 export function resetHomeState(options = {}) {
@@ -1283,183 +1433,103 @@ export function resetHomeState(options = {}) {
     delete homeState[key];
   });
 
-  Object.assign(
-    homeState,
-    createInitialHomeState()
-  );
+  Object.assign(homeState, createInitialHomeState());
 
-  lastStateSignature =
-    "";
+  lastStateSignature = "";
 
-  recordMutation(
-    "reset",
-    {}
-  );
+  recordMutation("reset", {});
 
   emitHomeStateEvent(
     HOME_STATE_EVENTS.reset,
     {
-      state:
-        getHomeStateSnapshot(),
+      state: getHomeStateSnapshot(),
     },
     {
-      window:
-        false,
+      window: false,
     }
   );
 
-  return emitStateChanged(
-    "reset",
-    {},
-    {
-      ...safeObject(options),
-      forceEmit:
-        true,
-    }
-  );
+  return emitStateChanged("reset", {}, {
+    ...safeObject(options),
+    forceEmit: true,
+  });
 }
 
-export function setLoading(value = false) {
-  homeState.loading =
-    safeBoolean(value, false);
+/* =========================================================
+   SETTERS
+========================================================= */
 
-  if (homeState.loading) {
-    homeState.refreshing =
-      false;
-  }
+export function setLoading(value = false) {
+  const loading = safeBoolean(value, false);
 
   return patchHomeState(
     {
-      loading:
-        homeState.loading,
-
-      refreshing:
-        homeState.refreshing,
+      loading,
+      refreshing: loading ? false : homeState.refreshing,
     },
     {
-      type:
-        "loading",
-      emitUnchanged:
-        true,
+      type: "loading",
+      emitUnchanged: true,
     }
   );
 }
 
 export function setRefreshing(value = false) {
-  homeState.refreshing =
-    safeBoolean(value, false);
-
-  if (homeState.refreshing) {
-    homeState.loading =
-      false;
-  }
+  const refreshing = safeBoolean(value, false);
 
   return patchHomeState(
     {
-      refreshing:
-        homeState.refreshing,
-
-      loading:
-        homeState.loading,
+      refreshing,
+      loading: refreshing ? false : homeState.loading,
     },
     {
-      type:
-        "refreshing",
-      emitUnchanged:
-        true,
+      type: "refreshing",
+      emitUnchanged: true,
     }
   );
 }
 
 export function setLoaded(value = true) {
-  homeState.loaded =
-    safeBoolean(value, true);
-
-  if (homeState.loaded) {
-    homeState.loading =
-      false;
-
-    homeState.refreshing =
-      false;
-  }
+  const loaded = safeBoolean(value, true);
 
   return patchHomeState(
     {
-      loaded:
-        homeState.loaded,
-
-      loading:
-        homeState.loading,
-
-      refreshing:
-        homeState.refreshing,
+      loaded,
+      loading: loaded ? false : homeState.loading,
+      refreshing: loaded ? false : homeState.refreshing,
     },
     {
-      type:
-        "loaded",
-      emitUnchanged:
-        true,
+      type: "loaded",
+      emitUnchanged: true,
     }
   );
 }
 
 export function setHydrated(value = true) {
-  homeState.hydrated =
-    safeBoolean(value, true);
-
   return patchHomeState(
     {
-      hydrated:
-        homeState.hydrated,
+      hydrated: safeBoolean(value, true),
     },
     {
-      type:
-        "hydrated",
-      emitUnchanged:
-        true,
+      type: "hydrated",
+      emitUnchanged: true,
     }
   );
 }
 
 export function setError(error = null) {
-  const normalized =
-    normalizeError(error);
-
-  homeState.lastError =
-    normalized;
-
-  homeState.error =
-    normalized
-      ? normalized.message
-      : "";
-
-  if (normalized) {
-    homeState.loading =
-      false;
-
-    homeState.refreshing =
-      false;
-  }
+  const normalized = normalizeError(error);
 
   return patchHomeState(
     {
-      error:
-        homeState.error,
-
-      lastError:
-        homeState.lastError,
-
-      loading:
-        homeState.loading,
-
-      refreshing:
-        homeState.refreshing,
+      error: normalized ? normalized.message : "",
+      lastError: normalized,
+      loading: normalized ? false : homeState.loading,
+      refreshing: normalized ? false : homeState.refreshing,
     },
     {
-      type:
-        "error",
-      emitUnchanged:
-        true,
+      type: "error",
+      emitUnchanged: true,
     }
   );
 }
@@ -1469,729 +1539,329 @@ export function clearHomeError() {
 }
 
 export function setDashboard(dashboard = {}, options = {}) {
-  const incoming =
-    safeObject(dashboard);
+  const patch = applyDashboardToState(dashboard, options);
 
-  if (
-    !hasOwnKeys(incoming) &&
-    options?.replace !== true &&
-    hasOwnKeys(homeState.dashboard)
-  ) {
-    return emitStateChanged(
-      "dashboard",
-      {},
-      {
-        emitUnchanged:
-          true,
-      }
-    );
+  if (!hasOwnKeys(patch)) {
+    return emitStateChanged("dashboard", {}, {
+      emitUnchanged: true,
+    });
   }
 
-  homeState.dashboard =
-    options?.replace === true
-      ? incoming
-      : {
-          ...safeObject(homeState.dashboard),
-          ...incoming,
-        };
+  recordMutation("dashboard", patch);
 
-  const summary =
-    first(
-      incoming.summary,
-      incoming.stats,
-      incoming.metrics,
-      incoming.totals,
-      incoming.counts,
-      null
-    );
-
-  if (hasOwnKeys(summary)) {
-    homeState.summary = {
-      ...safeObject(homeState.summary),
-      ...safeObject(summary),
-    };
-  }
-
-  const widgets =
-    first(
-      incoming.widgets,
-      incoming.cards,
-      incoming.kpis,
-      null
-    );
-
-  if (
-    Array.isArray(widgets) &&
-    (
-      widgets.length ||
-      options?.replace === true ||
-      !homeState.widgets.length
-    )
-  ) {
-    homeState.widgets =
-      widgets;
-  }
-
-  const tickets =
-    first(
-      incoming.tickets,
-      incoming.incidencias,
-      null
-    );
-
-  if (
-    Array.isArray(tickets) &&
-    (
-      tickets.length ||
-      options?.replace === true ||
-      !homeState.tickets.length
-    )
-  ) {
-    homeState.tickets =
-      tickets;
-  }
-
-  const invoices =
-    first(
-      incoming.invoices,
-      incoming.facturas,
-      null
-    );
-
-  if (
-    Array.isArray(invoices) &&
-    (
-      invoices.length ||
-      options?.replace === true ||
-      !homeState.invoices.length
-    )
-  ) {
-    homeState.invoices =
-      invoices;
-  }
-
-  const users =
-    first(
-      incoming.users,
-      incoming.usuarios,
-      null
-    );
-
-  if (
-    Array.isArray(users) &&
-    (
-      users.length ||
-      options?.replace === true ||
-      !homeState.users.length
-    )
-  ) {
-    homeState.users =
-      users;
-  }
-
-  const clients =
-    first(
-      incoming.clients,
-      incoming.clientes,
-      incoming.customers,
-      null
-    );
-
-  if (
-    Array.isArray(clients) &&
-    (
-      clients.length ||
-      options?.replace === true ||
-      !homeState.clients.length
-    )
-  ) {
-    homeState.clients =
-      clients;
-  }
-
-  const activity =
-    first(
-      incoming.activity,
-      incoming.activities,
-      incoming.recent,
-      incoming.recentActivity,
-      null
-    );
-
-  if (
-    Array.isArray(activity) &&
-    (
-      activity.length ||
-      options?.replace === true ||
-      !homeState.activity.length
-    )
-  ) {
-    homeState.activity =
-      activity;
-  }
-
-  homeState.lastUpdatedAt =
-    safeText(
-      first(
-        incoming.updatedAt,
-        incoming.generatedAt,
-        incoming.lastSyncAt,
-        homeState.lastUpdatedAt,
-        nowIso()
-      ),
-      nowIso()
-    );
-
-  return patchHomeState(
-    {
-      dashboard:
-        homeState.dashboard,
-    },
-    {
-      type:
-        "dashboard",
-      replace:
-        options?.replace === true,
-      emitUnchanged:
-        true,
-    }
-  );
+  return emitStateChanged("dashboard", patch, {
+    replace: options?.replace === true,
+    emitUnchanged: true,
+  });
 }
 
 export function setSummary(summary = {}, options = {}) {
-  const incoming =
-    safeObject(summary);
+  const incoming = safeObject(summary);
 
-  if (
-    !hasOwnKeys(incoming) &&
-    options?.replace !== true &&
-    hasOwnKeys(homeState.summary)
-  ) {
-    return emitStateChanged(
-      "summary",
-      {},
-      {
-        emitUnchanged:
-          true,
-        forceEmit:
-          false,
-      }
-    );
+  if (!hasOwnKeys(incoming) && options?.replace !== true && hasOwnKeys(homeState.summary)) {
+    return emitStateChanged("summary", {}, {
+      emitUnchanged: true,
+      forceEmit: false,
+    });
   }
 
-  homeState.summary =
-    normalizeSummaryAliases(
-      options?.replace === true
-        ? incoming
-        : {
-            ...safeObject(homeState.summary),
-            ...incoming,
-          }
-    );
+  const nextSummary = normalizeSummaryAliases(
+    options?.replace === true
+      ? incoming
+      : {
+          ...safeObject(homeState.summary),
+          ...incoming,
+        }
+  );
 
   return patchHomeState(
     {
-      summary:
-        homeState.summary,
+      summary: nextSummary,
     },
     {
-      type:
-        "summary",
-      replace:
-        options?.replace === true,
-      emitUnchanged:
-        true,
+      type: "summary",
+      replace: options?.replace === true,
+      emitUnchanged: true,
     }
   );
 }
 
 export function setWidgets(widgets = [], options = {}) {
-  const items =
-    safeArray(widgets);
+  const items = safeArray(widgets);
 
-  if (
-    !items.length &&
-    options?.replace !== true &&
-    homeState.widgets.length
-  ) {
-    return emitStateChanged(
-      "widgets",
-      {},
-      {
-        emitUnchanged:
-          true,
-        forceEmit:
-          false,
-      }
-    );
+  if (!items.length && options?.replace !== true && homeState.widgets.length) {
+    return emitStateChanged("widgets", {}, {
+      emitUnchanged: true,
+      forceEmit: false,
+    });
   }
-
-  homeState.widgets =
-    items;
 
   return patchHomeState(
     {
-      widgets:
-        homeState.widgets,
+      widgets: items,
     },
     {
-      type:
-        "widgets",
-      replace:
-        options?.replace === true,
-      emitUnchanged:
-        true,
+      type: "widgets",
+      replace: options?.replace === true,
+      emitUnchanged: true,
     }
   );
 }
 
 export function setTickets(tickets = [], options = {}) {
-  const items =
-    safeArray(tickets);
+  const items = safeArray(tickets);
 
-  if (
-    !items.length &&
-    options?.replace !== true &&
-    homeState.tickets.length
-  ) {
-    return emitStateChanged(
-      "patch",
-      {},
-      {
-        emitUnchanged:
-          true,
-        forceEmit:
-          false,
-      }
-    );
+  if (!items.length && options?.replace !== true && homeState.tickets.length) {
+    return emitStateChanged("tickets", {}, {
+      emitUnchanged: true,
+      forceEmit: false,
+    });
   }
 
-  homeState.tickets =
-    items;
-
-  homeState.ticketsRemoteCount =
-    Math.max(
-      items.length,
-      safeNumber(
-        options?.remoteCount,
-        homeState.ticketsRemoteCount
-      )
-    );
-
-  homeState.remoteCount =
-    Math.max(
-      homeState.remoteCount,
-      homeState.ticketsRemoteCount
-    );
+  const remoteCount = Math.max(
+    items.length,
+    safeNumber(options?.remoteCount, homeState.ticketsRemoteCount)
+  );
 
   return patchHomeState(
     {
-      tickets:
-        homeState.tickets,
-
-      ticketsRemoteCount:
-        homeState.ticketsRemoteCount,
-
-      remoteCount:
-        homeState.remoteCount,
+      tickets: items,
+      ticketsRemoteCount: remoteCount,
+      remoteCount: Math.max(homeState.remoteCount, remoteCount),
     },
     {
-      type:
-        "patch",
-      replace:
-        options?.replace === true,
+      type: "tickets",
+      replace: options?.replace === true,
+      emitUnchanged: true,
     }
   );
 }
 
 export function setInvoices(invoices = [], options = {}) {
-  const items =
-    safeArray(invoices);
+  const items = safeArray(invoices);
 
-  if (
-    !items.length &&
-    options?.replace !== true &&
-    homeState.invoices.length
-  ) {
-    return emitStateChanged(
-      "patch",
-      {},
-      {
-        emitUnchanged:
-          true,
-          forceEmit:
-            false,
-      }
-    );
+  if (!items.length && options?.replace !== true && homeState.invoices.length) {
+    return emitStateChanged("invoices", {}, {
+      emitUnchanged: true,
+      forceEmit: false,
+    });
   }
 
-  homeState.invoices =
-    items;
-
-  homeState.invoicesRemoteCount =
-    Math.max(
-      items.length,
-      safeNumber(
-        options?.remoteCount,
-        homeState.invoicesRemoteCount
-      )
-    );
+  const remoteCount = Math.max(
+    items.length,
+    safeNumber(options?.remoteCount, homeState.invoicesRemoteCount)
+  );
 
   return patchHomeState(
     {
-      invoices:
-        homeState.invoices,
-
-      invoicesRemoteCount:
-        homeState.invoicesRemoteCount,
+      invoices: items,
+      invoicesRemoteCount: remoteCount,
     },
     {
-      type:
-        "patch",
-      replace:
-        options?.replace === true,
+      type: "invoices",
+      replace: options?.replace === true,
+      emitUnchanged: true,
     }
   );
 }
 
 export function setUsers(users = [], options = {}) {
-  const items =
-    safeArray(users);
+  const items = safeArray(users);
 
-  if (
-    !items.length &&
-    options?.replace !== true &&
-    homeState.users.length
-  ) {
-    return emitStateChanged(
-      "patch",
-      {},
-      {
-        emitUnchanged:
-          true,
-          forceEmit:
-            false,
-      }
-    );
+  if (!items.length && options?.replace !== true && homeState.users.length) {
+    return emitStateChanged("users", {}, {
+      emitUnchanged: true,
+      forceEmit: false,
+    });
   }
 
-  homeState.users =
-    items;
-
-  homeState.usersRemoteCount =
-    Math.max(
-      items.length,
-      safeNumber(
-        options?.remoteCount,
-        homeState.usersRemoteCount
-      )
-    );
+  const remoteCount = Math.max(
+    items.length,
+    safeNumber(options?.remoteCount, homeState.usersRemoteCount)
+  );
 
   return patchHomeState(
     {
-      users:
-        homeState.users,
-
-      usersRemoteCount:
-        homeState.usersRemoteCount,
+      users: items,
+      usersRemoteCount: remoteCount,
     },
     {
-      type:
-        "patch",
-      replace:
-        options?.replace === true,
+      type: "users",
+      replace: options?.replace === true,
+      emitUnchanged: true,
     }
   );
 }
 
 export function setClients(clients = [], options = {}) {
-  const items =
-    safeArray(clients);
+  const items = safeArray(clients);
 
-  if (
-    !items.length &&
-    options?.replace !== true &&
-    homeState.clients.length
-  ) {
-    return emitStateChanged(
-      "patch",
-      {},
-      {
-        emitUnchanged:
-          true,
-          forceEmit:
-            false,
-      }
-    );
+  if (!items.length && options?.replace !== true && homeState.clients.length) {
+    return emitStateChanged("clients", {}, {
+      emitUnchanged: true,
+      forceEmit: false,
+    });
   }
 
-  homeState.clients =
-    items;
-
-  homeState.clientsRemoteCount =
-    Math.max(
-      items.length,
-      safeNumber(
-        options?.remoteCount,
-        homeState.clientsRemoteCount
-      )
-    );
+  const remoteCount = Math.max(
+    items.length,
+    safeNumber(options?.remoteCount, homeState.clientsRemoteCount)
+  );
 
   return patchHomeState(
     {
-      clients:
-        homeState.clients,
-
-      clientsRemoteCount:
-        homeState.clientsRemoteCount,
+      clients: items,
+      clientsRemoteCount: remoteCount,
     },
     {
-      type:
-        "patch",
-      replace:
-        options?.replace === true,
+      type: "clients",
+      replace: options?.replace === true,
+      emitUnchanged: true,
     }
   );
 }
 
 export function setRecent(recent = [], options = {}) {
-  const items =
-    safeArray(recent);
+  const items = safeArray(recent);
 
-  if (
-    !items.length &&
-    options?.replace !== true &&
-    homeState.activity.length
-  ) {
-    return emitStateChanged(
-      "recent",
-      {},
-      {
-        emitUnchanged:
-          true,
-          forceEmit:
-            false,
-      }
-    );
+  if (!items.length && options?.replace !== true && homeState.activity.length) {
+    return emitStateChanged("recent", {}, {
+      emitUnchanged: true,
+      forceEmit: false,
+    });
   }
 
-  homeState.activity =
-    items;
-
-  homeState.activityRemoteCount =
-    Math.max(
-      items.length,
-      safeNumber(
-        options?.remoteCount,
-        homeState.activityRemoteCount
-      )
-    );
+  const remoteCount = Math.max(
+    items.length,
+    safeNumber(options?.remoteCount, homeState.activityRemoteCount)
+  );
 
   return patchHomeState(
     {
-      activity:
-        homeState.activity,
-
-      activityRemoteCount:
-        homeState.activityRemoteCount,
+      activity: items,
+      activityRemoteCount: remoteCount,
     },
     {
-      type:
-        "recent",
-      replace:
-        options?.replace === true,
-      emitUnchanged:
-        true,
+      type: "recent",
+      replace: options?.replace === true,
+      emitUnchanged: true,
     }
   );
 }
 
 export function setLastSyncAt(value = null) {
-  const next =
-    value instanceof Date
-      ? value.toISOString()
-      : safeText(value, "");
+  const next = value instanceof Date
+    ? value.toISOString()
+    : safeText(value, "");
 
-  homeState.lastSyncAt =
-    next || nowIso();
-
-  homeState.lastUpdatedAt =
-    homeState.lastSyncAt;
+  const finalValue = next || nowIso();
 
   return patchHomeState(
     {
-      lastSyncAt:
-        homeState.lastSyncAt,
-
-      lastUpdatedAt:
-        homeState.lastUpdatedAt,
+      lastSyncAt: finalValue,
+      lastUpdatedAt: finalValue,
     },
     {
-      type:
-        "patch",
-      emitUnchanged:
-        true,
+      type: "patch",
+      emitUnchanged: true,
     }
   );
 }
 
 export function setRequestId(value = "") {
-  homeState.requestId =
-    safeText(value, "");
-
   return patchHomeState(
     {
-      requestId:
-        homeState.requestId,
+      requestId: safeText(value, ""),
     },
     {
-      type:
-        "patch",
-      emitUnchanged:
-        true,
+      type: "patch",
+      emitUnchanged: true,
     }
   );
 }
 
 export function setHealth(value = null) {
-  homeState.health =
-    value === null
-      ? null
-      : safeObject(value, value);
-
   return patchHomeState(
     {
-      health:
-        homeState.health,
+      health: value === null ? null : safeObject(value, value),
     },
     {
-      type:
-        "health",
-      emitUnchanged:
-        true,
+      type: "health",
+      emitUnchanged: true,
     }
   );
 }
 
 export function setPage(page = DEFAULT_PAGE) {
-  homeState.page =
-    Math.max(
-      1,
-      safeNumber(page, DEFAULT_PAGE)
-    );
-
   return patchHomeState(
     {
-      page:
-        homeState.page,
+      page: Math.max(1, safeNumber(page, DEFAULT_PAGE)),
     },
     {
-      type:
-        "patch",
+      type: "patch",
     }
   );
 }
 
 export function setPageSize(pageSize = DEFAULT_PAGE_SIZE) {
-  homeState.pageSize =
-    Math.max(
-      1,
-      safeNumber(pageSize, DEFAULT_PAGE_SIZE)
-    );
-
-  homeState.page =
-    DEFAULT_PAGE;
-
   return patchHomeState(
     {
-      page:
-        homeState.page,
-
-      pageSize:
-        homeState.pageSize,
+      page: DEFAULT_PAGE,
+      pageSize: Math.max(1, safeNumber(pageSize, DEFAULT_PAGE_SIZE)),
     },
     {
-      type:
-        "patch",
+      type: "patch",
     }
   );
 }
 
 export function setOpeningTicketId(ticketId = "") {
-  homeState.openingTicketId =
-    safeText(ticketId, "");
-
-  homeState.selectedTicketId =
-    homeState.openingTicketId ||
-    homeState.selectedTicketId;
+  const next = safeText(ticketId, "");
 
   return patchHomeState(
     {
-      openingTicketId:
-        homeState.openingTicketId,
-
-      selectedTicketId:
-        homeState.selectedTicketId,
+      openingTicketId: next,
+      selectedTicketId: next || homeState.selectedTicketId,
     },
     {
-      type:
-        "patch",
-      emitUnchanged:
-        true,
+      type: "patch",
+      emitUnchanged: true,
     }
   );
 }
 
 export function setSelectedTicketId(ticketId = "") {
-  homeState.selectedTicketId =
-    safeText(ticketId, "");
-
   return patchHomeState(
     {
-      selectedTicketId:
-        homeState.selectedTicketId,
+      selectedTicketId: safeText(ticketId, ""),
     },
     {
-      type:
-        "patch",
-      emitUnchanged:
-        true,
+      type: "patch",
+      emitUnchanged: true,
     }
   );
 }
 
 export function setCreating(value = false) {
-  homeState.creating =
-    safeBoolean(value, false);
-
   return patchHomeState(
     {
-      creating:
-        homeState.creating,
+      creating: safeBoolean(value, false),
     },
     {
-      type:
-        "patch",
-      emitUnchanged:
-        true,
+      type: "patch",
+      emitUnchanged: true,
     }
   );
 }
 
 export function setNavigatingAction(value = "") {
-  homeState.navigatingAction =
-    safeText(value, "");
-
   return patchHomeState(
     {
-      navigatingAction:
-        homeState.navigatingAction,
+      navigatingAction: safeText(value, ""),
     },
     {
-      type:
-        "patch",
-      emitUnchanged:
-        true,
+      type: "patch",
+      emitUnchanged: true,
     }
   );
 }
@@ -2201,196 +1871,31 @@ export function setNavigatingAction(value = "") {
 ========================================================= */
 
 export function syncHomeStateFromDashboard(dashboard = {}, options = {}) {
-  const raw =
-    safeObject(dashboard);
+  const raw = safeObject(dashboard);
 
   if (!hasOwnKeys(raw)) {
     return patchHomeState(
       {},
       {
-        type:
-          "dashboard",
-        emitUnchanged:
-          true,
+        type: "dashboard",
+        emitUnchanged: true,
       }
     );
   }
 
-  setDashboard(
-    raw,
-    {
-      replace:
-        options?.replace === true,
-    }
-  );
+  const patch = applyDashboardToState(raw, options);
 
-  setSummary(
-    first(
-      raw.summary,
-      raw.stats,
-      raw.metrics,
-      raw.totals,
-      raw.counts,
-      {}
-    ),
-    {
-      replace:
-        options?.replace === true,
-    }
-  );
-
-  setWidgets(
-    first(
-      raw.widgets,
-      raw.cards,
-      raw.kpis,
-      []
-    ),
-    {
-      replace:
-        options?.replace === true,
-    }
-  );
-
-  setTickets(
-    first(
-      raw.tickets,
-      raw.incidencias,
-      []
-    ),
-    {
-      replace:
-        options?.replace === true,
-      remoteCount:
-        first(
-          raw.ticketsTotal,
-          raw.incidenciasTotal,
-          raw.totalTickets,
-          raw.totalIncidencias,
-          raw.summary?.totalTickets,
-          raw.summary?.incidenciasTotal,
-          0
-        ),
-    }
-  );
-
-  setInvoices(
-    first(
-      raw.invoices,
-      raw.facturas,
-      []
-    ),
-    {
-      replace:
-        options?.replace === true,
-      remoteCount:
-        first(
-          raw.invoicesTotal,
-          raw.facturasTotal,
-          raw.totalInvoices,
-          raw.totalFacturas,
-          raw.summary?.totalInvoices,
-          raw.summary?.facturasTotal,
-          0
-        ),
-    }
-  );
-
-  setUsers(
-    first(
-      raw.users,
-      raw.usuarios,
-      []
-    ),
-    {
-      replace:
-        options?.replace === true,
-      remoteCount:
-        first(
-          raw.usersTotal,
-          raw.usuariosTotal,
-          raw.totalUsers,
-          raw.totalUsuarios,
-          raw.summary?.usersCount,
-          raw.summary?.usuariosCount,
-          0
-        ),
-    }
-  );
-
-  setClients(
-    first(
-      raw.clients,
-      raw.clientes,
-      raw.customers,
-      []
-    ),
-    {
-      replace:
-        options?.replace === true,
-      remoteCount:
-        first(
-          raw.clientsTotal,
-          raw.clientesTotal,
-          raw.customersTotal,
-          raw.totalClients,
-          raw.totalClientes,
-          raw.totalCustomers,
-          raw.summary?.clientsCount,
-          raw.summary?.clientesCount,
-          0
-        ),
-    }
-  );
-
-  setRecent(
-    first(
-      raw.activity,
-      raw.activities,
-      raw.recent,
-      raw.recentActivity,
-      []
-    ),
-    {
-      replace:
-        options?.replace === true,
-    }
-  );
-
-  setRequestId(
-    first(
-      options?.requestId,
-      raw.requestId,
-      raw.meta?.requestId,
-      homeState.requestId,
-      ""
-    )
-  );
-
-  setLastSyncAt(
-    first(
-      options?.lastSyncAt,
-      raw.lastSyncAt,
-      raw.updatedAt,
-      raw.generatedAt,
-      raw.meta?.updatedAt,
-      nowIso()
-    )
-  );
-
-  setLoaded(true);
-  setHydrated(true);
-  clearHomeError();
+  recordMutation("dashboard:sync", patch);
 
   return emitStateChanged(
     "dashboard",
     {
-      dashboard:
-        raw,
+      dashboard: raw,
+      ...patch,
     },
     {
-      forceEmit:
-        true,
+      forceEmit: true,
+      replace: options?.replace === true,
     }
   );
 }
@@ -2409,169 +1914,89 @@ export function getHomeStateSnapshot() {
 
   return safeClone(
     {
-      version:
-        homeState.version,
+      version: homeState.version,
 
-      hydrated:
-        homeState.hydrated,
+      hydrated: homeState.hydrated,
+      loaded: homeState.loaded,
+      loading: homeState.loading,
+      refreshing: homeState.refreshing,
 
-      loaded:
-        homeState.loaded,
+      creating: homeState.creating,
 
-      loading:
-        homeState.loading,
+      openingTicketId: homeState.openingTicketId,
+      selectedTicketId: homeState.selectedTicketId,
+      navigatingAction: homeState.navigatingAction,
 
-      refreshing:
-        homeState.refreshing,
+      error: homeState.error,
+      lastError: homeState.lastError,
 
-      creating:
-        homeState.creating,
+      page: homeState.page,
+      pageSize: homeState.pageSize,
 
-      openingTicketId:
-        homeState.openingTicketId,
+      remoteCount: homeState.remoteCount,
+      totalCount: homeState.totalCount,
 
-      selectedTicketId:
-        homeState.selectedTicketId,
+      ticketsRemoteCount: homeState.ticketsRemoteCount,
+      invoicesRemoteCount: homeState.invoicesRemoteCount,
+      usersRemoteCount: homeState.usersRemoteCount,
+      clientsRemoteCount: homeState.clientsRemoteCount,
+      activityRemoteCount: homeState.activityRemoteCount,
 
-      navigatingAction:
-        homeState.navigatingAction,
+      requestId: homeState.requestId,
 
-      error:
-        homeState.error,
+      lastSyncAt: homeState.lastSyncAt,
+      lastUpdatedAt: homeState.lastUpdatedAt,
 
-      lastError:
-        homeState.lastError,
+      dashboard: homeState.dashboard,
 
-      page:
-        homeState.page,
+      summary: homeState.summary,
+      stats: homeState.stats,
+      metrics: homeState.metrics,
+      totals: homeState.totals,
+      counts: homeState.counts,
 
-      pageSize:
-        homeState.pageSize,
+      widgets: homeState.widgets,
+      cards: homeState.cards,
+      kpis: homeState.kpis,
+      blocks: homeState.blocks,
 
-      remoteCount:
-        homeState.remoteCount,
+      tickets: homeState.tickets,
+      incidencias: homeState.incidencias,
 
-      totalCount:
-        homeState.totalCount,
+      invoices: homeState.invoices,
+      facturas: homeState.facturas,
 
-      ticketsRemoteCount:
-        homeState.ticketsRemoteCount,
+      users: homeState.users,
+      usuarios: homeState.usuarios,
 
-      invoicesRemoteCount:
-        homeState.invoicesRemoteCount,
+      clients: homeState.clients,
+      clientes: homeState.clientes,
+      customers: homeState.customers,
 
-      usersRemoteCount:
-        homeState.usersRemoteCount,
+      activity: homeState.activity,
+      activities: homeState.activities,
+      recent: homeState.recent,
+      recentActivity: homeState.recentActivity,
 
-      clientsRemoteCount:
-        homeState.clientsRemoteCount,
+      health: homeState.health,
 
-      activityRemoteCount:
-        homeState.activityRemoteCount,
+      meta: homeState.meta,
 
-      requestId:
-        homeState.requestId,
+      modules: homeState.modules,
 
-      lastSyncAt:
-        homeState.lastSyncAt,
-
-      lastUpdatedAt:
-        homeState.lastUpdatedAt,
-
-      dashboard:
-        homeState.dashboard,
-
-      summary:
-        homeState.summary,
-
-      stats:
-        homeState.stats,
-
-      metrics:
-        homeState.metrics,
-
-      totals:
-        homeState.totals,
-
-      counts:
-        homeState.counts,
-
-      widgets:
-        homeState.widgets,
-
-      cards:
-        homeState.cards,
-
-      kpis:
-        homeState.kpis,
-
-      tickets:
-        homeState.tickets,
-
-      incidencias:
-        homeState.incidencias,
-
-      invoices:
-        homeState.invoices,
-
-      facturas:
-        homeState.facturas,
-
-      users:
-        homeState.users,
-
-      usuarios:
-        homeState.usuarios,
-
-      clients:
-        homeState.clients,
-
-      clientes:
-        homeState.clientes,
-
-      customers:
-        homeState.customers,
-
-      activity:
-        homeState.activity,
-
-      activities:
-        homeState.activities,
-
-      recent:
-        homeState.recent,
-
-      recentActivity:
-        homeState.recentActivity,
-
-      health:
-        homeState.health,
-
-      meta:
-        homeState.meta,
+      partial: homeState.partial,
+      errors: homeState.errors,
 
       countsInfo: {
-        widgets:
-          homeState.widgets.length,
-
-        tickets:
-          homeState.tickets.length,
-
-        invoices:
-          homeState.invoices.length,
-
-        users:
-          homeState.users.length,
-
-        clients:
-          homeState.clients.length,
-
-        activity:
-          homeState.activity.length,
+        widgets: homeState.widgets.length,
+        tickets: homeState.tickets.length,
+        invoices: homeState.invoices.length,
+        users: homeState.users.length,
+        clients: homeState.clients.length,
+        activity: homeState.activity.length,
       },
 
-      recentMutations:
-        homeState.recentMutations,
+      recentMutations: homeState.recentMutations,
     },
     {}
   );
@@ -2645,68 +2070,45 @@ export function getHomeStateDebugSnapshot() {
   normalizeHomeState();
 
   return {
-    version:
-      HOME_STATE_VERSION,
+    version: HOME_STATE_VERSION,
+    scope: HOME_STATE_SCOPE,
 
-    scope:
-      HOME_STATE_SCOPE,
-
-    signature:
-      getStateSignature(),
-
+    signature: getStateSignature(),
     lastStateSignature,
 
     lastEmitAt,
+    lastEmitAtIso: lastEmitAt ? new Date(lastEmitAt).toISOString() : "",
 
-    lastEmitAtIso:
-      lastEmitAt
-        ? new Date(lastEmitAt).toISOString()
-        : "",
+    hasAppCore: Boolean(AppCore),
+    hasEventBus: Boolean(AppCore?.events?.emit),
 
-    hasAppCore:
-      Boolean(AppCore),
-
-    hasEventBus:
-      Boolean(AppCore?.events?.emit),
-
-    state:
-      getHomeStateSnapshot(),
+    state: getHomeStateSnapshot(),
   };
 }
 
 export function exposeHomeStateDebugApi() {
   const api = {
-    version:
-      HOME_STATE_VERSION,
+    version: HOME_STATE_VERSION,
 
-    state:
-      homeState,
+    state: homeState,
 
-    getState:
-      getHomeState,
+    getState: getHomeState,
+    getSnapshot: getHomeStateSnapshot,
+    getDebugSnapshot: getHomeStateDebugSnapshot,
 
-    getSnapshot:
-      getHomeStateSnapshot,
+    patch: patchHomeState,
+    replace: replaceHomeState,
+    reset: resetHomeState,
 
-    getDebugSnapshot:
-      getHomeStateDebugSnapshot,
-
-    patch:
-      patchHomeState,
-
-    replace:
-      replaceHomeState,
-
-    reset:
-      resetHomeState,
+    syncFromDashboard: syncHomeStateFromDashboard,
 
     setLoading,
     setRefreshing,
     setLoaded,
     setHydrated,
+
     setError,
-    clearError:
-      clearHomeError,
+    clearError: clearHomeError,
 
     setDashboard,
     setSummary,
@@ -2716,36 +2118,31 @@ export function exposeHomeStateDebugApi() {
     setUsers,
     setClients,
     setRecent,
+
     setRequestId,
     setLastSyncAt,
     setHealth,
   };
 
   try {
-    if (AppCore) {
-      if (!AppCore.modules && Object.isExtensible(AppCore)) {
-        AppCore.modules = {};
-      }
+    if (AppCore?.modules && isFunction(AppCore.modules.register)) {
+      AppCore.modules.register("HomeState", api, {
+        aliases: ["homeState", "HomeState"],
+        source: HOME_STATE_SCOPE,
+      });
+    } else if (AppCore?.modules && typeof AppCore.modules === "object") {
+      AppCore.modules.HomeState = api;
+      AppCore.modules.homeState = api;
+    }
 
-      if (AppCore.modules && typeof AppCore.modules === "object") {
-        AppCore.modules.HomeState =
-          api;
-
-        AppCore.modules.homeState =
-          api;
-      }
-
-      if (Object.isExtensible(AppCore)) {
-        AppCore.HomeState =
-          api;
-      }
+    if (AppCore && Object.isExtensible(AppCore)) {
+      AppCore.HomeState = api;
     }
   } catch {}
 
   try {
     if (isBrowser()) {
-      window.OnionHomeState =
-        api;
+      window.OnionHomeState = api;
     }
   } catch {}
 
@@ -2766,114 +2163,72 @@ try {
    PUBLIC API
 ========================================================= */
 
-export const HomeState =
-  Object.freeze({
-    version:
-      HOME_STATE_VERSION,
+export const HomeState = Object.freeze({
+  version: HOME_STATE_VERSION,
 
-    events:
-      HOME_STATE_EVENTS,
+  events: HOME_STATE_EVENTS,
 
-    state:
-      homeState,
+  state: homeState,
 
-    createInitialState:
-      createInitialHomeState,
+  createInitialState: createInitialHomeState,
 
-    normalize:
-      normalizeHomeState,
+  normalize: normalizeHomeState,
 
-    patch:
-      patchHomeState,
+  patch: patchHomeState,
+  replace: replaceHomeState,
+  reset: resetHomeState,
 
-    replace:
-      replaceHomeState,
+  syncFromDashboard: syncHomeStateFromDashboard,
 
-    reset:
-      resetHomeState,
+  setLoading,
+  setRefreshing,
+  setLoaded,
+  setHydrated,
 
-    syncFromDashboard:
-      syncHomeStateFromDashboard,
+  setError,
+  clearError: clearHomeError,
 
-    setLoading,
-    setRefreshing,
-    setLoaded,
-    setHydrated,
+  setDashboard,
+  setSummary,
+  setWidgets,
+  setTickets,
+  setInvoices,
+  setUsers,
+  setClients,
+  setRecent,
 
-    setError,
-    clearError:
-      clearHomeError,
+  setLastSyncAt,
+  setRequestId,
+  setHealth,
 
-    setDashboard,
-    setSummary,
-    setWidgets,
-    setTickets,
-    setInvoices,
-    setUsers,
-    setClients,
-    setRecent,
+  setPage,
+  setPageSize,
 
-    setLastSyncAt,
-    setRequestId,
-    setHealth,
+  setOpeningTicketId,
+  setSelectedTicketId,
+  setCreating,
+  setNavigatingAction,
 
-    setPage,
-    setPageSize,
-    setOpeningTicketId,
-    setSelectedTicketId,
-    setCreating,
-    setNavigatingAction,
+  getState: getHomeState,
+  getSnapshot: getHomeStateSnapshot,
+  getDebugSnapshot: getHomeStateDebugSnapshot,
 
-    getState:
-      getHomeState,
+  getDashboard: getHomeDashboard,
+  getSummary: getHomeSummary,
+  getWidgets: getHomeWidgets,
+  getTickets: getHomeTickets,
+  getInvoices: getHomeInvoices,
+  getUsers: getHomeUsers,
+  getClients: getHomeClients,
+  getActivity: getHomeActivity,
 
-    getSnapshot:
-      getHomeStateSnapshot,
+  isLoading: isHomeLoading,
+  isRefreshing: isHomeRefreshing,
+  isLoaded: isHomeLoaded,
+  isHydrated: isHomeHydrated,
+  hasError: hasHomeError,
 
-    getDebugSnapshot:
-      getHomeStateDebugSnapshot,
-
-    getDashboard:
-      getHomeDashboard,
-
-    getSummary:
-      getHomeSummary,
-
-    getWidgets:
-      getHomeWidgets,
-
-    getTickets:
-      getHomeTickets,
-
-    getInvoices:
-      getHomeInvoices,
-
-    getUsers:
-      getHomeUsers,
-
-    getClients:
-      getHomeClients,
-
-    getActivity:
-      getHomeActivity,
-
-    isLoading:
-      isHomeLoading,
-
-    isRefreshing:
-      isHomeRefreshing,
-
-    isLoaded:
-      isHomeLoaded,
-
-    isHydrated:
-      isHomeHydrated,
-
-    hasError:
-      hasHomeError,
-
-    exposeDebugApi:
-      exposeHomeStateDebugApi,
-  });
+  exposeDebugApi: exposeHomeStateDebugApi,
+});
 
 export default HomeState;

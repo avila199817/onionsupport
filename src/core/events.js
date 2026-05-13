@@ -2,7 +2,7 @@
    Onion SPA - Core Events
    Archivo: src/core/events.js
 
-   FINAL PRO SYSTEM · EVENT BUS / FIREBREAK SAFE · 11/10
+   FINAL PRO SYSTEM · EVENT BUS / FIREBREAK SAFE · 12/10
 
    Responsabilidades:
    - centralizar el event bus del core
@@ -40,6 +40,9 @@ import {
    CONSTANTS
 ========================================================= */
 
+const EVENTS_VERSION =
+  "12.0.0";
+
 const DEFAULT_TARGET =
   "document";
 
@@ -48,9 +51,6 @@ const WILDCARD_EVENT =
 
 const MAX_RECENT_EVENTS =
   96;
-
-const EVENTS_VERSION =
-  "11.0.0";
 
 const MAX_SYNC_EMIT_DEPTH =
   12;
@@ -69,6 +69,9 @@ const MAX_LOW_PRIORITY_EMITS_PER_WINDOW =
 
 const MAX_LOW_PRIORITY_EMITS_PER_EVENT_PER_WINDOW =
   360;
+
+const MAX_CRITICAL_EMITS_PER_WINDOW =
+  2500;
 
 const MAX_CRITICAL_EMITS_PER_EVENT_PER_WINDOW =
   720;
@@ -184,7 +187,7 @@ const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code/i;
 
 const TOKENISH_TEXT_RE =
-  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|resetToken|access_token|refresh_token|id_token|code|t)=)[^&#\s]+/i;
+  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)[^&#\s]+/i;
 
 /* =========================================================
    BASICS
@@ -510,9 +513,7 @@ function createCustomEvent(name, detail = {}) {
       }
 
       const event =
-        document.createEvent(
-          "CustomEvent"
-        );
+        document.createEvent("CustomEvent");
 
       event.initCustomEvent(
         name,
@@ -868,6 +869,7 @@ export function createEvents({
   maxLowPriorityEmitsPerWindow = MAX_LOW_PRIORITY_EMITS_PER_WINDOW,
   maxLowPriorityEmitsPerEventPerWindow = MAX_LOW_PRIORITY_EMITS_PER_EVENT_PER_WINDOW,
 
+  maxCriticalEmitsPerWindow = MAX_CRITICAL_EMITS_PER_WINDOW,
   maxCriticalEmitsPerEventPerWindow = MAX_CRITICAL_EMITS_PER_EVENT_PER_WINDOW,
 
   maxAbsoluteEmitsPerWindow = MAX_ABSOLUTE_EMITS_PER_WINDOW,
@@ -1272,6 +1274,25 @@ export function createEvents({
       criticalEmitsInWindow += 1;
 
       if (
+        criticalEmitsInWindow >
+        safeNumber(
+          maxCriticalEmitsPerWindow,
+          MAX_CRITICAL_EMITS_PER_WINDOW
+        )
+      ) {
+        recordDrop(
+          name,
+          "max-critical-total-rate",
+          {
+            criticalEmitsInWindow,
+            maxCriticalEmitsPerWindow,
+          }
+        );
+
+        return false;
+      }
+
+      if (
         currentEventCount >
         safeNumber(
           maxCriticalEmitsPerEventPerWindow,
@@ -1441,6 +1462,7 @@ export function createEvents({
         normalizeEventName(name),
 
       detail,
+
       payload:
         detail,
 
@@ -1618,8 +1640,10 @@ export function createEvents({
           record.handler,
 
         eventName,
+
         payload:
           detail,
+
         event:
           eventLike,
       });
@@ -1825,9 +1849,12 @@ export function createEvents({
       makeListenerKey({
         name:
           eventName,
+
         handler,
+
         options:
           finalOptions,
+
         targetRef,
       });
 
@@ -1924,6 +1951,7 @@ export function createEvents({
         key,
         name:
           eventName,
+
         handler,
         wrappedHandler,
       };
@@ -1959,21 +1987,29 @@ export function createEvents({
       key,
       {
         key,
+
         name:
           eventName,
+
         handler,
         wrappedHandler,
+
         options:
           finalOptions,
+
         once:
           false,
+
         target:
           getTargetKey(targetRef),
+
         targetName:
           typeof targetRef === "string"
             ? targetRef
             : "custom",
+
         off,
+
         createdAt:
           safeIsoDate(),
       }
@@ -2144,9 +2180,12 @@ export function createEvents({
 
       callHandlerSafely({
         handler,
+
         event:
           args[0],
+
         eventName,
+
         source:
           "once-handler",
       });
@@ -2206,7 +2245,7 @@ export function createEvents({
 
     pushRecentEvent(
       "clear",
-      eventName || "*",
+      eventName || WILDCARD_EVENT,
       {
         count,
       }
@@ -2324,6 +2363,7 @@ export function createEvents({
         maxLowPriorityEmitsPerWindow,
         maxLowPriorityEmitsPerEventPerWindow,
 
+        maxCriticalEmitsPerWindow,
         maxCriticalEmitsPerEventPerWindow,
 
         maxAbsoluteEmitsPerWindow,
@@ -2451,6 +2491,9 @@ export function createEvents({
   }
 
   return {
+    version:
+      EVENTS_VERSION,
+
     emit,
 
     on,
@@ -2472,6 +2515,11 @@ export function createEvents({
   };
 }
 
+export {
+  EVENTS_VERSION,
+};
+
 export default {
+  EVENTS_VERSION,
   createEvents,
 };

@@ -2,47 +2,42 @@
    Onion SPA - Sidebar Constants
    Archivo: src/ui/sidebar/constants.js
 
-   FINAL EXTREME SYSTEM · SIDEBAR CONSTANTS · 11/10
-   PATCH · REAL SHELL FIREBREAK READY
-   PATCH · ROUTE ALIASES ES/CA/EN CANONICAL
-   PATCH · NO ROUTER SHELL LOOP EVENTS
-   PATCH · DOM IDS SINGLE SOURCE OF TRUTH
-   PATCH · DROPDOWN / INDICATOR / EVENTS READY
-   PATCH · LEGACY SAFE WITHOUT CSS
+   ONION SUPPORT · SIDEBAR CONSTANTS · 15/10
+   SINGLE SOURCE OF TRUTH · SHELL SAFE · ROUTER SAFE · TOKEN SAFE
 
-   RESPONSABILIDADES:
-   - centralizar constantes del módulo sidebar
-   - ids del DOM
-   - rutas internas del sidebar
-   - aliases legacy/controlados de rutas
-   - acciones semánticas del sidebar
-   - selectores DOM estables
-   - breakpoint mobile
-   - timings visuales
-   - claves de storage
-   - scope de cleanup / eventos
-   - eventos públicos del sidebar
-   - clases visuales compartidas
-   - flags de rol/admin/permisos
-   - orden canónico del menú
-   - compatibilidad con template.js / dom.js / state.js / events.js
-   - compatibilidad con visibility.js / user.js / actions.js
+   Responsabilidades:
+   - centralizar constantes puras del módulo SidebarUI
+   - definir ids DOM canónicos y aliases legacy
+   - definir rutas canónicas y aliases ES/CA/EN
+   - definir orden y metadata del menú
+   - definir acciones semánticas del sidebar
+   - definir data-attrs y selectors estables
+   - definir storage keys lógicas y legacy
+   - definir clases visuales compartidas
+   - definir eventos públicos del sidebar
+   - definir eventos externos observados
+   - definir flags de permisos/roles/admin/support
+   - definir i18n keys
+   - servir como contrato común para:
+     · template.js
+     · dom.js
+     · state.js
+     · events.js
+     · dropdown.js
+     · user.js
+     · visibility.js
+     · actions.js
+     · index.js
+
+   Reglas:
    - cero imports
    - cero CSS
-   - solo constantes puras
-
-   HARDENING EXTREMO:
-   - ids únicos y estables
-   - rutas canónicas sin query/hash
-   - aliases ES/CA/EN centralizados
-   - storage key versionada / namespaced
-   - compatibilidad legacy con sidebar-collapsed/sidebarOpen
-   - desktop toggle alineado con DOM real: toggleSidebar
-   - sidebarToggle queda solo como legacy selector
-   - eventos ampliados sin romper builds anteriores
-   - no incluye eventos router:shell:* en observed para evitar loops
-   - permisos admin-like centralizados
-   - preparado para isRealShellHidden / isLegacyShellHidden
+   - cero estilos inline
+   - cero acceso a window/document
+   - cero mutaciones runtime
+   - cero eventos router:shell:* observados para evitar loops
+   - /api/auth/me NO se trata aquí como público
+   - sidebar/topbar deben quedar nítidos durante search glass
 ========================================================= */
 
 /* =========================================================
@@ -52,7 +47,8 @@
 export const SIDEBAR_MODULE_NAME = "SidebarUI";
 export const SIDEBAR_MODULE_KEY = "sidebar";
 export const SIDEBAR_COMPONENT_NAME = "sidebar";
-export const SIDEBAR_CONSTANTS_VERSION = "sidebar-constants-v7-firebreak-extreme";
+export const SIDEBAR_CONSTANTS_VERSION =
+  "sidebar-constants-v15-extreme-shell-safe";
 
 /* =========================================================
    SCOPE
@@ -70,6 +66,9 @@ export const SIDEBAR_DROPDOWN_SCOPE = `${SCOPE}:dropdown`;
 export const SIDEBAR_VISIBILITY_SCOPE = `${SCOPE}:visibility`;
 export const SIDEBAR_ACTIONS_SCOPE = `${SCOPE}:actions`;
 export const SIDEBAR_TEMPLATE_SCOPE = `${SCOPE}:template`;
+export const SIDEBAR_USER_SCOPE = `${SCOPE}:user`;
+export const SIDEBAR_INDICATOR_SCOPE = `${SCOPE}:indicator`;
+export const SIDEBAR_REPAIR_SCOPE = `${SCOPE}:repair`;
 
 /* =========================================================
    RESPONSIVE
@@ -77,6 +76,9 @@ export const SIDEBAR_TEMPLATE_SCOPE = `${SCOPE}:template`;
 
 export const MOBILE_BREAKPOINT = 900;
 export const SIDEBAR_MOBILE_BREAKPOINT = MOBILE_BREAKPOINT;
+
+export const SIDEBAR_NARROW_BREAKPOINT = 640;
+export const SIDEBAR_COMPACT_BREAKPOINT = 420;
 
 /* =========================================================
    TIMINGS
@@ -94,6 +96,7 @@ export const SIDEBAR_HOVER_FLUSH_MS = 96;
 
 export const SIDEBAR_BIND_DEDUP_WINDOW_MS = 250;
 export const SIDEBAR_REPAIR_DEDUP_WINDOW_MS = 180;
+export const SIDEBAR_REFRESH_DEDUP_WINDOW_MS = 180;
 
 export const SIDEBAR_INDICATOR_DEFAULT_DELAY_MS = 40;
 export const SIDEBAR_INDICATOR_RECALC_DELAY_MS = 32;
@@ -102,18 +105,31 @@ export const SIDEBAR_INDICATOR_SETTLED_DELAY_MS =
 
 export const SIDEBAR_DROPDOWN_CLOSE_DELAY_MS = 0;
 export const SIDEBAR_DROPDOWN_FOCUS_DELAY_MS = 24;
+export const SIDEBAR_DROPDOWN_OUTSIDE_POINTER_DELAY_MS = 16;
 
 export const SIDEBAR_RESIZE_DEBOUNCE_MS = 120;
 export const SIDEBAR_ROUTER_SETTLED_DELAY_MS = 140;
+export const SIDEBAR_AUTH_SETTLED_DELAY_MS = 90;
+export const SIDEBAR_LANG_SETTLED_DELAY_MS = 60;
+export const SIDEBAR_THEME_SETTLED_DELAY_MS = 60;
 
 /* =========================================================
    DOM IDS
 ========================================================= */
 
 export const SIDEBAR_ROOT_ID = "sidebar";
+export const SIDEBAR_ROOT_LEGACY_ID = "app-sidebar";
+
+export const SIDEBAR_MOUNT_ID = "sidebar-mount";
+
+export const SIDEBAR_NAV_ID = "sidebar-nav";
 export const SIDEBAR_MENU_ID = "sidebar-menu";
 export const SIDEBAR_RECENTS_ID = "sidebar-recents";
-export const SIDEBAR_MOUNT_ID = "sidebar-mount";
+export const SIDEBAR_FOOTER_ID = "sidebar-footer";
+export const SIDEBAR_INDICATOR_ID = "sidebar-active-indicator";
+
+export const SIDEBAR_SCROLL_ID = "sidebar-scroll";
+export const SIDEBAR_CONTENT_ID = "sidebar-content";
 
 /*
   DOM actual:
@@ -129,6 +145,7 @@ export const SIDEBAR_MOBILE_TOGGLE_LEGACY_ID = "sidebarMobileToggle";
 export const SIDEBAR_LOGO_ID = "homeLink";
 export const SIDEBAR_LOGO_LEGACY_ID = "sidebarLogo";
 
+export const USER_SECTION_ID = "sidebar-user";
 export const USER_TOGGLE_ID = "userToggle";
 export const USER_TOGGLE_LEGACY_ID = "sidebarUserToggle";
 
@@ -163,7 +180,19 @@ export const CLIENTES_ROUTE = "/clientes";
 export const CUENTA_ROUTE = "/cuenta";
 export const AJUSTES_ROUTE = "/ajustes";
 export const SERVER_ROUTE = "/servidor";
+
 export const LOGIN_ROUTE = "/login";
+export const LOGOUT_ROUTE = "/logout";
+
+export const ACTIVATE_ACCOUNT_ROUTE = "/activate-account";
+export const RESET_PASSWORD_ROUTE = "/reset-password";
+export const RESET_PASSWORD_CONFIRM_ROUTE = "/reset-password/confirm";
+export const FORGOT_PASSWORD_ROUTE = "/forgot-password";
+export const RECOVER_PASSWORD_ROUTE = "/recover-password";
+export const PASSWORD_RESET_ROUTE = "/password-reset";
+
+export const NOT_FOUND_ROUTE = "/404";
+export const FORBIDDEN_ROUTE = "/403";
 
 export const SIDEBAR_ROUTE_KEYS = Object.freeze({
   home: "home",
@@ -190,6 +219,17 @@ export const SIDEBAR_ROUTE_KEYS = Object.freeze({
   servidor: "servidor",
 
   login: "login",
+  logout: "logout",
+
+  activateAccount: "activateAccount",
+  resetPassword: "resetPassword",
+  resetPasswordConfirm: "resetPasswordConfirm",
+  forgotPassword: "forgotPassword",
+  recoverPassword: "recoverPassword",
+  passwordReset: "passwordReset",
+
+  notFound: "notFound",
+  forbidden: "forbidden",
 });
 
 export const SIDEBAR_ROUTES = Object.freeze({
@@ -217,6 +257,17 @@ export const SIDEBAR_ROUTES = Object.freeze({
   servidor: SERVER_ROUTE,
 
   login: LOGIN_ROUTE,
+  logout: LOGOUT_ROUTE,
+
+  activateAccount: ACTIVATE_ACCOUNT_ROUTE,
+  resetPassword: RESET_PASSWORD_ROUTE,
+  resetPasswordConfirm: RESET_PASSWORD_CONFIRM_ROUTE,
+  forgotPassword: FORGOT_PASSWORD_ROUTE,
+  recoverPassword: RECOVER_PASSWORD_ROUTE,
+  passwordReset: PASSWORD_RESET_ROUTE,
+
+  notFound: NOT_FOUND_ROUTE,
+  forbidden: FORBIDDEN_ROUTE,
 });
 
 export const SIDEBAR_ROUTE_ALIASES = Object.freeze({
@@ -261,6 +312,7 @@ export const SIDEBAR_ROUTE_ALIASES = Object.freeze({
   "/customer": CLIENTES_ROUTE,
   "/cliente": CLIENTES_ROUTE,
   "/clientes": CLIENTES_ROUTE,
+  "/clients-list": CLIENTES_ROUTE,
 
   "/account": CUENTA_ROUTE,
   "/profile": CUENTA_ROUTE,
@@ -279,7 +331,63 @@ export const SIDEBAR_ROUTE_ALIASES = Object.freeze({
 
   "/server": SERVER_ROUTE,
   "/servidor": SERVER_ROUTE,
+  "/system": SERVER_ROUTE,
+  "/sistema": SERVER_ROUTE,
 });
+
+export const SIDEBAR_PUBLIC_ROUTES = Object.freeze([
+  LOGIN_ROUTE,
+  ACTIVATE_ACCOUNT_ROUTE,
+  RESET_PASSWORD_ROUTE,
+  RESET_PASSWORD_CONFIRM_ROUTE,
+  FORGOT_PASSWORD_ROUTE,
+  RECOVER_PASSWORD_ROUTE,
+  PASSWORD_RESET_ROUTE,
+  NOT_FOUND_ROUTE,
+  FORBIDDEN_ROUTE,
+]);
+
+export const SIDEBAR_TECHNICAL_PUBLIC_ROUTES = Object.freeze([
+  ACTIVATE_ACCOUNT_ROUTE,
+  RESET_PASSWORD_CONFIRM_ROUTE,
+]);
+
+export const SIDEBAR_AUTH_ROUTES = Object.freeze([
+  LOGIN_ROUTE,
+  ACTIVATE_ACCOUNT_ROUTE,
+  RESET_PASSWORD_ROUTE,
+  RESET_PASSWORD_CONFIRM_ROUTE,
+  FORGOT_PASSWORD_ROUTE,
+  RECOVER_PASSWORD_ROUTE,
+  PASSWORD_RESET_ROUTE,
+]);
+
+export const SIDEBAR_SHELL_HIDDEN_ROUTES = Object.freeze([
+  LOGIN_ROUTE,
+  ACTIVATE_ACCOUNT_ROUTE,
+  RESET_PASSWORD_ROUTE,
+  RESET_PASSWORD_CONFIRM_ROUTE,
+  FORGOT_PASSWORD_ROUTE,
+  RECOVER_PASSWORD_ROUTE,
+  PASSWORD_RESET_ROUTE,
+]);
+
+export const SIDEBAR_PRIVATE_ROUTES = Object.freeze([
+  HOME_ROUTE,
+  INCIDENCIAS_ROUTE,
+  FACTURAS_ROUTE,
+  USUARIOS_ROUTE,
+  CLIENTES_ROUTE,
+  CUENTA_ROUTE,
+  AJUSTES_ROUTE,
+  SERVER_ROUTE,
+]);
+
+export const SIDEBAR_ADMIN_ROUTES = Object.freeze([
+  USUARIOS_ROUTE,
+  CLIENTES_ROUTE,
+  SERVER_ROUTE,
+]);
 
 /* =========================================================
    MENU
@@ -346,6 +454,7 @@ export const SIDEBAR_NAV_ITEMS = Object.freeze([
     icon: "users",
     adminOnly: true,
     requiredRole: "admin",
+    requiredRoles: Object.freeze(["admin"]),
     order: 40,
   }),
 
@@ -357,6 +466,7 @@ export const SIDEBAR_NAV_ITEMS = Object.freeze([
     icon: "clients",
     adminOnly: true,
     requiredRole: "admin",
+    requiredRoles: Object.freeze(["admin"]),
     order: 50,
   }),
 
@@ -388,6 +498,7 @@ export const SIDEBAR_NAV_ITEMS = Object.freeze([
     icon: "server",
     adminOnly: true,
     requiredRole: "admin",
+    requiredRoles: Object.freeze(["admin"]),
     order: 80,
   }),
 ]);
@@ -399,11 +510,23 @@ export const SIDEBAR_NAV_ITEMS = Object.freeze([
 export const SIDEBAR_ACTION_NAVIGATE = "navigate";
 
 export const SIDEBAR_ACTION_TOGGLE = "toggle-sidebar";
-export const SIDEBAR_ACTION_TOGGLE_MOBILE = "mobile-sidebar-toggle";
-export const SIDEBAR_ACTION_TOGGLE_USER = "toggle-user-dropdown";
+export const SIDEBAR_ACTION_OPEN = "open-sidebar";
+export const SIDEBAR_ACTION_CLOSE = "close-sidebar";
+export const SIDEBAR_ACTION_COLLAPSE = "collapse-sidebar";
+export const SIDEBAR_ACTION_EXPAND = "expand-sidebar";
 
+export const SIDEBAR_ACTION_TOGGLE_MOBILE = "mobile-sidebar-toggle";
+export const SIDEBAR_ACTION_OPEN_MOBILE = "open-mobile-sidebar";
+export const SIDEBAR_ACTION_CLOSE_MOBILE = "close-mobile-sidebar";
+
+export const SIDEBAR_ACTION_TOGGLE_USER = "toggle-user-dropdown";
 export const SIDEBAR_ACTION_OPEN_USER_MENU = "open-user-menu";
 export const SIDEBAR_ACTION_CLOSE_USER_MENU = "close-user-menu";
+
+export const SIDEBAR_ACTION_REFRESH = "refresh-sidebar";
+export const SIDEBAR_ACTION_REPAIR = "repair-sidebar";
+export const SIDEBAR_ACTION_SYNC_USER = "sync-user";
+export const SIDEBAR_ACTION_SYNC_ACTIVE = "sync-active";
 
 export const SIDEBAR_ACTION_ADD_ACCOUNT = "add-account";
 export const SIDEBAR_ACTION_CHANGE_PLAN = "change-plan";
@@ -419,8 +542,23 @@ export const SIDEBAR_ACTIONS = Object.freeze({
   toggleSidebar: SIDEBAR_ACTION_TOGGLE,
   sidebarToggle: SIDEBAR_ACTION_TOGGLE,
 
+  open: SIDEBAR_ACTION_OPEN,
+  openSidebar: SIDEBAR_ACTION_OPEN,
+
+  close: SIDEBAR_ACTION_CLOSE,
+  closeSidebar: SIDEBAR_ACTION_CLOSE,
+
+  collapse: SIDEBAR_ACTION_COLLAPSE,
+  collapseSidebar: SIDEBAR_ACTION_COLLAPSE,
+
+  expand: SIDEBAR_ACTION_EXPAND,
+  expandSidebar: SIDEBAR_ACTION_EXPAND,
+
   toggleMobile: SIDEBAR_ACTION_TOGGLE_MOBILE,
   mobileSidebarToggle: SIDEBAR_ACTION_TOGGLE_MOBILE,
+
+  openMobile: SIDEBAR_ACTION_OPEN_MOBILE,
+  closeMobile: SIDEBAR_ACTION_CLOSE_MOBILE,
 
   toggleUser: SIDEBAR_ACTION_TOGGLE_USER,
   toggleUserDropdown: SIDEBAR_ACTION_TOGGLE_USER,
@@ -428,6 +566,11 @@ export const SIDEBAR_ACTIONS = Object.freeze({
 
   openUserMenu: SIDEBAR_ACTION_OPEN_USER_MENU,
   closeUserMenu: SIDEBAR_ACTION_CLOSE_USER_MENU,
+
+  refresh: SIDEBAR_ACTION_REFRESH,
+  repair: SIDEBAR_ACTION_REPAIR,
+  syncUser: SIDEBAR_ACTION_SYNC_USER,
+  syncActive: SIDEBAR_ACTION_SYNC_ACTIVE,
 
   addAccount: SIDEBAR_ACTION_ADD_ACCOUNT,
   changePlan: SIDEBAR_ACTION_CHANGE_PLAN,
@@ -438,21 +581,35 @@ export const SIDEBAR_ACTIONS = Object.freeze({
 });
 
 export const SIDEBAR_ACTION_ALIASES = Object.freeze({
-  "navigate": SIDEBAR_ACTION_NAVIGATE,
-  "go": SIDEBAR_ACTION_NAVIGATE,
-  "route": SIDEBAR_ACTION_NAVIGATE,
-  "nav": SIDEBAR_ACTION_NAVIGATE,
+  navigate: SIDEBAR_ACTION_NAVIGATE,
+  go: SIDEBAR_ACTION_NAVIGATE,
+  route: SIDEBAR_ACTION_NAVIGATE,
+  nav: SIDEBAR_ACTION_NAVIGATE,
 
-  "toggle": SIDEBAR_ACTION_TOGGLE,
-  "collapse": SIDEBAR_ACTION_TOGGLE,
+  toggle: SIDEBAR_ACTION_TOGGLE,
+  collapse: SIDEBAR_ACTION_TOGGLE,
   "toggle-collapse": SIDEBAR_ACTION_TOGGLE,
   "sidebar-toggle": SIDEBAR_ACTION_TOGGLE,
   "toggle-sidebar": SIDEBAR_ACTION_TOGGLE,
+
+  open: SIDEBAR_ACTION_OPEN,
+  "open-sidebar": SIDEBAR_ACTION_OPEN,
+
+  close: SIDEBAR_ACTION_CLOSE,
+  "close-sidebar": SIDEBAR_ACTION_CLOSE,
+
+  "collapse-sidebar": SIDEBAR_ACTION_COLLAPSE,
+  "expand-sidebar": SIDEBAR_ACTION_EXPAND,
 
   "mobile-toggle": SIDEBAR_ACTION_TOGGLE_MOBILE,
   "toggle-mobile": SIDEBAR_ACTION_TOGGLE_MOBILE,
   "mobile-sidebar-toggle": SIDEBAR_ACTION_TOGGLE_MOBILE,
   "toggle-mobile-sidebar": SIDEBAR_ACTION_TOGGLE_MOBILE,
+
+  "open-mobile": SIDEBAR_ACTION_OPEN_MOBILE,
+  "open-mobile-sidebar": SIDEBAR_ACTION_OPEN_MOBILE,
+  "close-mobile": SIDEBAR_ACTION_CLOSE_MOBILE,
+  "close-mobile-sidebar": SIDEBAR_ACTION_CLOSE_MOBILE,
 
   "user-menu": SIDEBAR_ACTION_TOGGLE_USER,
   "user-dropdown": SIDEBAR_ACTION_TOGGLE_USER,
@@ -462,14 +619,21 @@ export const SIDEBAR_ACTION_ALIASES = Object.freeze({
   "open-user-menu": SIDEBAR_ACTION_OPEN_USER_MENU,
   "close-user-menu": SIDEBAR_ACTION_CLOSE_USER_MENU,
 
-  "profile": SIDEBAR_ACTION_PROFILE,
-  "account": SIDEBAR_ACTION_PROFILE,
-  "settings": SIDEBAR_ACTION_SETTINGS,
-  "help": SIDEBAR_ACTION_HELP,
+  refresh: SIDEBAR_ACTION_REFRESH,
+  "refresh-sidebar": SIDEBAR_ACTION_REFRESH,
+  repair: SIDEBAR_ACTION_REPAIR,
+  "repair-sidebar": SIDEBAR_ACTION_REPAIR,
+  "sync-user": SIDEBAR_ACTION_SYNC_USER,
+  "sync-active": SIDEBAR_ACTION_SYNC_ACTIVE,
 
-  "signout": SIDEBAR_ACTION_LOGOUT,
+  profile: SIDEBAR_ACTION_PROFILE,
+  account: SIDEBAR_ACTION_PROFILE,
+  settings: SIDEBAR_ACTION_SETTINGS,
+  help: SIDEBAR_ACTION_HELP,
+
+  signout: SIDEBAR_ACTION_LOGOUT,
   "sign-out": SIDEBAR_ACTION_LOGOUT,
-  "logout": SIDEBAR_ACTION_LOGOUT,
+  logout: SIDEBAR_ACTION_LOGOUT,
   "log-out": SIDEBAR_ACTION_LOGOUT,
   "cerrar-sesion": SIDEBAR_ACTION_LOGOUT,
 });
@@ -486,13 +650,15 @@ export const SIDEBAR_DATA_ATTRS = Object.freeze({
 
   mount: "data-sidebar-mount",
 
+  nav: "data-sidebar-nav",
+  navId: "data-sidebar-nav-id",
   menu: "data-sidebar-menu",
+  menuItem: "data-sidebar-menu-item",
   recents: "data-sidebar-recents",
   recent: "data-sidebar-recent",
 
   item: "data-sidebar-item",
   itemKey: "data-sidebar-item-key",
-  nav: "data-sidebar-nav",
   navKey: "data-nav-key",
   routeKey: "data-route-key",
   menuKey: "data-menu-key",
@@ -506,6 +672,10 @@ export const SIDEBAR_DATA_ATTRS = Object.freeze({
   publicPath: "data-public-path",
   canonicalPath: "data-canonical-path",
   spa: "data-spa",
+
+  active: "data-active",
+  current: "data-current",
+  selected: "data-selected",
 
   role: "data-role",
   roles: "data-roles",
@@ -525,6 +695,7 @@ export const SIDEBAR_DATA_ATTRS = Object.freeze({
   roleVisible: "data-role-visible",
   adminVisible: "data-admin-visible",
 
+  userSection: "data-sidebar-user-section",
   userToggle: "data-user-toggle",
   sidebarUserToggle: "data-sidebar-user-toggle",
   userDropdown: "data-user-dropdown",
@@ -536,12 +707,21 @@ export const SIDEBAR_DATA_ATTRS = Object.freeze({
   dropdownMenu: "data-dropdown-menu",
   dropdownToggle: "data-dropdown-toggle",
   dropdownTarget: "data-dropdown-target",
+  dropdownState: "data-dropdown-state",
 
   avatarRoot: "data-avatar-root",
+  avatarImage: "data-avatar-image",
+  avatarFallback: "data-avatar-fallback",
+  avatarState: "data-avatar-state",
+  avatarMode: "data-avatar-mode",
+
   sidebarAvatar: "data-sidebar-avatar",
   userAvatar: "data-user-avatar",
   sidebarName: "data-sidebar-name",
   userName: "data-user-name",
+
+  indicator: "data-sidebar-indicator",
+  indicatorTarget: "data-sidebar-indicator-target",
 
   tooltip: "data-tooltip",
   i18n: "data-i18n",
@@ -557,6 +737,7 @@ export const SIDEBAR_DATA_ATTRS = Object.freeze({
 export const SIDEBAR_SELECTORS = Object.freeze({
   root: [
     `#${SIDEBAR_ROOT_ID}`,
+    `#${SIDEBAR_ROOT_LEGACY_ID}`,
     "aside.sidebar",
     ".sidebar[data-sidebar-root='true']",
     ".sidebar[data-sidebar-root]",
@@ -568,6 +749,28 @@ export const SIDEBAR_SELECTORS = Object.freeze({
   mount: [
     `#${SIDEBAR_MOUNT_ID}`,
     "[data-sidebar-mount]",
+  ].join(", "),
+
+  scroll: [
+    `#${SIDEBAR_SCROLL_ID}`,
+    ".sidebar-scroll",
+    ".sidebar__scroll",
+    "[data-sidebar-scroll]",
+  ].join(", "),
+
+  content: [
+    `#${SIDEBAR_CONTENT_ID}`,
+    ".sidebar-content",
+    ".sidebar__content",
+    "[data-sidebar-content]",
+  ].join(", "),
+
+  nav: [
+    `#${SIDEBAR_NAV_ID}`,
+    "nav.sidebar-nav",
+    ".sidebar-nav",
+    "[data-sidebar-nav-id]",
+    "[data-sidebar-nav-root]",
   ].join(", "),
 
   menu: [
@@ -582,6 +785,20 @@ export const SIDEBAR_SELECTORS = Object.freeze({
     ".sidebar-recents",
     "[data-sidebar-recents]",
     "[data-sidebar-recent]",
+  ].join(", "),
+
+  footer: [
+    `#${SIDEBAR_FOOTER_ID}`,
+    ".sidebar-footer",
+    ".sidebar__footer",
+    "[data-sidebar-footer]",
+  ].join(", "),
+
+  indicator: [
+    `#${SIDEBAR_INDICATOR_ID}`,
+    ".sidebar-active-indicator",
+    ".sidebar-indicator",
+    "[data-sidebar-indicator]",
   ].join(", "),
 
   logo: [
@@ -609,6 +826,14 @@ export const SIDEBAR_SELECTORS = Object.freeze({
     "[data-sidebar-mobile-toggle]",
     `[data-sidebar-action="${SIDEBAR_ACTION_TOGGLE_MOBILE}"]`,
     `[data-action="${SIDEBAR_ACTION_TOGGLE_MOBILE}"]`,
+  ].join(", "),
+
+  userSection: [
+    `#${USER_SECTION_ID}`,
+    ".sidebar-user",
+    ".sidebar__user",
+    ".sidebar-footer-user",
+    "[data-sidebar-user-section]",
   ].join(", "),
 
   userToggle: [
@@ -684,11 +909,13 @@ export const SIDEBAR_SELECTORS = Object.freeze({
     ".sidebar-user-avatar",
     "[data-sidebar-avatar]",
     "[data-user-avatar]",
+    "[data-avatar-root]",
   ].join(", "),
 
   avatarImage: [
     `#${SIDEBAR_AVATAR_IMAGE_ID}`,
     ".avatar-image",
+    "img[data-avatar-image]",
     "[data-avatar-image]",
   ].join(", "),
 
@@ -738,6 +965,8 @@ export const SIDEBAR_SELECTORS = Object.freeze({
     "a[data-href]",
     "a[data-to]",
     ".menu-item[data-route]",
+    ".sidebar-menu__item[data-route]",
+    ".sidebar-nav__item[data-route]",
   ].join(", "),
 
   spaLinks: "a[data-spa]",
@@ -839,6 +1068,7 @@ export const SIDEBAR_STORAGE_KEYS = Object.freeze({
 
   lastActiveRoute: `${SIDEBAR_STORAGE_NAMESPACE}.lastActiveRoute`,
   lastActivePublicPath: `${SIDEBAR_STORAGE_NAMESPACE}.lastActivePublicPath`,
+  lastResolvedUsername: `${SIDEBAR_STORAGE_NAMESPACE}.lastResolvedUsername`,
 });
 
 /* =========================================================
@@ -854,11 +1084,15 @@ export const SIDEBAR_CLASSES = Object.freeze({
   collapsed: "collapsed",
   isCollapsed: "is-collapsed",
 
+  expanded: "expanded",
+  isExpanded: "is-expanded",
+
   open: "open",
   isOpen: "is-open",
   mobileOpen: "mobile-open",
 
   hidden: "is-hidden",
+  visuallyHidden: "is-visually-hidden",
 
   active: "active",
   isActive: "is-active",
@@ -873,6 +1107,7 @@ export const SIDEBAR_CLASSES = Object.freeze({
 
   roleHidden: "is-role-hidden",
   adminHidden: "is-admin-hidden",
+  permissionHidden: "is-permission-hidden",
 
   transitioning: "is-transitioning",
   bodyTransitioning: "sidebar-transitioning",
@@ -881,6 +1116,10 @@ export const SIDEBAR_CLASSES = Object.freeze({
   bodyVisualSyncing: "sidebar-visual-syncing",
 
   tooltipsActive: "sidebar-tooltips-active",
+
+  avatarHasImage: "has-image",
+  avatarHasFallback: "has-fallback",
+  avatarLoading: "is-loading",
 });
 
 /* =========================================================
@@ -894,18 +1133,26 @@ export const SIDEBAR_DATASET_VALUES = Object.freeze({
   open: "open",
   closed: "closed",
   hidden: "hidden",
+  visible: "visible",
 
   desktop: "desktop",
   mobile: "mobile",
 
   admin: "admin",
   user: "user",
+  support: "support",
+  manager: "manager",
+  client: "client",
 
   page: "page",
 
   ready: "ready",
   pending: "pending",
   error: "error",
+
+  image: "image",
+  fallback: "fallback",
+  loading: "loading",
 });
 
 /* =========================================================
@@ -929,6 +1176,7 @@ export const SIDEBAR_SHELL_DATA_VALUES = Object.freeze({
   auth: "auth",
   app: "app",
   shell: "shell",
+  boot: "boot",
 });
 
 /* =========================================================
@@ -939,16 +1187,24 @@ export const SIDEBAR_EVENTS = Object.freeze({
   ready: "sidebar:ready",
   destroyed: "sidebar:destroyed",
 
+  mounted: "sidebar:mounted",
+  unmounted: "sidebar:unmounted",
+
   repaired: "sidebar:repaired",
+  repairRequested: "sidebar:repair:requested",
   repairDeduped: "sidebar:repair:deduped",
   refreshed: "sidebar:refreshed",
+  refreshDeduped: "sidebar:refresh:deduped",
 
   domMounted: "sidebar:dom:mounted",
   domRevealed: "sidebar:dom:revealed",
+  domCached: "sidebar:dom:cached",
+  domInvalid: "sidebar:dom:invalid",
 
   eventsBound: "sidebar:events:bound",
   eventsBindSkipped: "sidebar:events:bind-skipped",
   eventsBindIgnored: "sidebar:events:bind-ignored",
+  eventsUnbound: "sidebar:events:unbound",
 
   domEventsBound: "sidebar:dom-events:bound",
   coreEventsBound: "sidebar:core-events:bound",
@@ -961,6 +1217,7 @@ export const SIDEBAR_EVENTS = Object.freeze({
   stateRepaired: "sidebar:state:repaired",
 
   uiOpenSet: "sidebar:ui:open:set",
+  uiCollapsedSet: "sidebar:ui:collapsed:set",
 
   activeItemSynced: "sidebar:active:item:synced",
   activeItemOverridden: "sidebar:active:item:overridden",
@@ -980,8 +1237,10 @@ export const SIDEBAR_EVENTS = Object.freeze({
   transitionFinish: "sidebar:transition:finish",
 
   userRendered: "sidebar:user:rendered",
+  userCleared: "sidebar:user:cleared",
   userAvatarLoaded: "sidebar:user:avatar:loaded",
   userAvatarError: "sidebar:user:avatar:error",
+  userAvatarFallback: "sidebar:user:avatar:fallback",
 
   roleVisibilityApplied: "sidebar:role-visibility:applied",
   visibilityApplied: "sidebar:visibility:applied",
@@ -1034,6 +1293,7 @@ export const SIDEBAR_OBSERVED_APP_EVENTS = Object.freeze([
   "app:auth:ready",
 
   "app:route:change",
+  "app:public-path:change",
   "app:ui:repair-request",
 
   "app:lang:change",
@@ -1095,8 +1355,37 @@ export const SIDEBAR_ADMIN_ROLE_KEYS = Object.freeze([
   "super-administrador",
   "owner",
   "root",
-  "staff",
+]);
+
+export const SIDEBAR_SUPPORT_ROLE_KEYS = Object.freeze([
   "support",
+  "soporte",
+  "agent",
+  "agente",
+  "tecnico",
+  "técnico",
+  "tecnica",
+  "técnica",
+  "helpdesk",
+  "operator",
+  "operador",
+]);
+
+export const SIDEBAR_MANAGER_ROLE_KEYS = Object.freeze([
+  "manager",
+  "gestor",
+  "gerente",
+  "lead",
+  "team_lead",
+  "team-lead",
+]);
+
+export const SIDEBAR_CLIENT_ROLE_KEYS = Object.freeze([
+  "client",
+  "cliente",
+  "customer",
+  "usuario",
+  "user",
 ]);
 
 export const SIDEBAR_ADMIN_PERMISSION_KEYS = Object.freeze([
@@ -1160,26 +1449,21 @@ export const SIDEBAR_ADMIN_PERMISSION_KEYS = Object.freeze([
   "servidor:admin",
   "servidor.access",
   "servidor:access",
+]);
 
+export const SIDEBAR_SUPPORT_PERMISSION_KEYS = Object.freeze([
+  "tickets.read",
+  "tickets:read",
   "tickets.manage",
   "tickets:manage",
-  "tickets.admin",
-  "tickets:admin",
-
+  "incidencias.read",
+  "incidencias:read",
   "incidencias.manage",
   "incidencias:manage",
-  "incidencias.admin",
-  "incidencias:admin",
-
-  "facturas.manage",
-  "facturas:manage",
-  "facturas.admin",
-  "facturas:admin",
-
-  "invoices.manage",
-  "invoices:manage",
-  "invoices.admin",
-  "invoices:admin",
+  "support.access",
+  "support:access",
+  "soporte.access",
+  "soporte:access",
 ]);
 
 export const SIDEBAR_ADMIN_FLAG_KEYS = Object.freeze([
@@ -1202,6 +1486,27 @@ export const SIDEBAR_ADMIN_FLAG_KEYS = Object.freeze([
 
   "canAccessServer",
   "can_access_server",
+]);
+
+export const SIDEBAR_SUPPORT_FLAG_KEYS = Object.freeze([
+  "isSupport",
+  "support",
+  "is_support",
+
+  "isAgent",
+  "agent",
+  "is_agent",
+
+  "isTechnician",
+  "technician",
+  "tecnico",
+  "técnico",
+
+  "canManageTickets",
+  "can_manage_tickets",
+
+  "canAccessTickets",
+  "can_access_tickets",
 ]);
 
 /* =========================================================
@@ -1275,9 +1580,14 @@ export default {
   SIDEBAR_VISIBILITY_SCOPE,
   SIDEBAR_ACTIONS_SCOPE,
   SIDEBAR_TEMPLATE_SCOPE,
+  SIDEBAR_USER_SCOPE,
+  SIDEBAR_INDICATOR_SCOPE,
+  SIDEBAR_REPAIR_SCOPE,
 
   MOBILE_BREAKPOINT,
   SIDEBAR_MOBILE_BREAKPOINT,
+  SIDEBAR_NARROW_BREAKPOINT,
+  SIDEBAR_COMPACT_BREAKPOINT,
 
   SIDEBAR_TRANSITION_MS,
   SIDEBAR_VISUAL_SYNC_DELAY_MS,
@@ -1287,18 +1597,29 @@ export default {
   SIDEBAR_HOVER_FLUSH_MS,
   SIDEBAR_BIND_DEDUP_WINDOW_MS,
   SIDEBAR_REPAIR_DEDUP_WINDOW_MS,
+  SIDEBAR_REFRESH_DEDUP_WINDOW_MS,
   SIDEBAR_INDICATOR_DEFAULT_DELAY_MS,
   SIDEBAR_INDICATOR_RECALC_DELAY_MS,
   SIDEBAR_INDICATOR_SETTLED_DELAY_MS,
   SIDEBAR_DROPDOWN_CLOSE_DELAY_MS,
   SIDEBAR_DROPDOWN_FOCUS_DELAY_MS,
+  SIDEBAR_DROPDOWN_OUTSIDE_POINTER_DELAY_MS,
   SIDEBAR_RESIZE_DEBOUNCE_MS,
   SIDEBAR_ROUTER_SETTLED_DELAY_MS,
+  SIDEBAR_AUTH_SETTLED_DELAY_MS,
+  SIDEBAR_LANG_SETTLED_DELAY_MS,
+  SIDEBAR_THEME_SETTLED_DELAY_MS,
 
   SIDEBAR_ROOT_ID,
+  SIDEBAR_ROOT_LEGACY_ID,
+  SIDEBAR_MOUNT_ID,
+  SIDEBAR_NAV_ID,
   SIDEBAR_MENU_ID,
   SIDEBAR_RECENTS_ID,
-  SIDEBAR_MOUNT_ID,
+  SIDEBAR_FOOTER_ID,
+  SIDEBAR_INDICATOR_ID,
+  SIDEBAR_SCROLL_ID,
+  SIDEBAR_CONTENT_ID,
 
   SIDEBAR_TOGGLE_ID,
   SIDEBAR_TOGGLE_LEGACY_ID,
@@ -1308,6 +1629,7 @@ export default {
   SIDEBAR_LOGO_ID,
   SIDEBAR_LOGO_LEGACY_ID,
 
+  USER_SECTION_ID,
   USER_TOGGLE_ID,
   USER_TOGGLE_LEGACY_ID,
   USER_DROPDOWN_ID,
@@ -1337,10 +1659,25 @@ export default {
   AJUSTES_ROUTE,
   SERVER_ROUTE,
   LOGIN_ROUTE,
+  LOGOUT_ROUTE,
+  ACTIVATE_ACCOUNT_ROUTE,
+  RESET_PASSWORD_ROUTE,
+  RESET_PASSWORD_CONFIRM_ROUTE,
+  FORGOT_PASSWORD_ROUTE,
+  RECOVER_PASSWORD_ROUTE,
+  PASSWORD_RESET_ROUTE,
+  NOT_FOUND_ROUTE,
+  FORBIDDEN_ROUTE,
 
   SIDEBAR_ROUTE_KEYS,
   SIDEBAR_ROUTES,
   SIDEBAR_ROUTE_ALIASES,
+  SIDEBAR_PUBLIC_ROUTES,
+  SIDEBAR_TECHNICAL_PUBLIC_ROUTES,
+  SIDEBAR_AUTH_ROUTES,
+  SIDEBAR_SHELL_HIDDEN_ROUTES,
+  SIDEBAR_PRIVATE_ROUTES,
+  SIDEBAR_ADMIN_ROUTES,
 
   SIDEBAR_MENU_KEYS,
   SIDEBAR_MENU_ORDER,
@@ -1348,10 +1685,20 @@ export default {
 
   SIDEBAR_ACTION_NAVIGATE,
   SIDEBAR_ACTION_TOGGLE,
+  SIDEBAR_ACTION_OPEN,
+  SIDEBAR_ACTION_CLOSE,
+  SIDEBAR_ACTION_COLLAPSE,
+  SIDEBAR_ACTION_EXPAND,
   SIDEBAR_ACTION_TOGGLE_MOBILE,
+  SIDEBAR_ACTION_OPEN_MOBILE,
+  SIDEBAR_ACTION_CLOSE_MOBILE,
   SIDEBAR_ACTION_TOGGLE_USER,
   SIDEBAR_ACTION_OPEN_USER_MENU,
   SIDEBAR_ACTION_CLOSE_USER_MENU,
+  SIDEBAR_ACTION_REFRESH,
+  SIDEBAR_ACTION_REPAIR,
+  SIDEBAR_ACTION_SYNC_USER,
+  SIDEBAR_ACTION_SYNC_ACTIVE,
   SIDEBAR_ACTION_ADD_ACCOUNT,
   SIDEBAR_ACTION_CHANGE_PLAN,
   SIDEBAR_ACTION_PROFILE,
@@ -1384,8 +1731,13 @@ export default {
   SIDEBAR_BLOCKED_ROUTER_EVENTS,
 
   SIDEBAR_ADMIN_ROLE_KEYS,
+  SIDEBAR_SUPPORT_ROLE_KEYS,
+  SIDEBAR_MANAGER_ROLE_KEYS,
+  SIDEBAR_CLIENT_ROLE_KEYS,
   SIDEBAR_ADMIN_PERMISSION_KEYS,
+  SIDEBAR_SUPPORT_PERMISSION_KEYS,
   SIDEBAR_ADMIN_FLAG_KEYS,
+  SIDEBAR_SUPPORT_FLAG_KEYS,
 
   SIDEBAR_HANDLED_FLAG,
   SIDEBAR_EVENTS_HANDLED_FLAG,

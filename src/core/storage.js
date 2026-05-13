@@ -2,6 +2,9 @@
    Onion SPA - Core Storage
    Archivo: src/core/storage.js
 
+   ONION SUPPORT · CORE STORAGE
+   NAMESPACED STORAGE · LOCAL/SESSION/MEMORY · SAFE LEGACY CLEANUP · 13/10
+
    RESPONSABILIDADES:
    - encapsular acceso localStorage/sessionStorage namespaced
    - leer / escribir valores serializados y raw
@@ -41,7 +44,7 @@ import {
 ========================================================= */
 
 const STORAGE_VERSION =
-  "11.0.0";
+  "13.0.0";
 
 const DEFAULT_PREFIX =
   "onion";
@@ -66,8 +69,6 @@ const CORRUPTED_RAW_VALUES =
     "null",
     "nan",
     "[object Object]",
-    "{}",
-    "[]",
     "\"\"",
     "''",
   ]);
@@ -76,7 +77,7 @@ const SENSITIVE_KEY_RE =
   /(token|authorization|password|secret|session|otp|code|jwt|bearer|credential|cookie|csrf|xsrf|mfa|2fa)/i;
 
 const SESSIONISH_KEY_RE =
-  /(session|token|auth|user|role|login|otp|mfa|2fa|post_login)/i;
+  /(session|token|auth|user|role|login|otp|mfa|2fa|post_login|postLogin)/i;
 
 const LEGACY_EXTRA_KEYS =
   Object.freeze([
@@ -112,13 +113,40 @@ const LEGACY_EXTRA_KEYS =
     "refresh_token",
     "tempToken",
     "temp_token",
+    "temporaryToken",
+    "temporary_token",
     "user",
     "role",
+    "session",
+    "auth",
     "sessionId",
+    "session_id",
     "sessionUserId",
+    "session_user_id",
     "postLoginTarget",
     "post_login_target",
   ]);
+
+const STORAGE_EVENTS =
+  Object.freeze({
+    ready:
+      "app:core:storage:ready",
+
+    unavailable:
+      "app:core:storage:unavailable",
+
+    error:
+      "app:core:storage:error",
+
+    repaired:
+      "app:core:storage:repaired",
+
+    cleared:
+      "app:core:storage:cleared",
+
+    legacyCleared:
+      "app:core:storage:legacy-cleared",
+  });
 
 /* =========================================================
    MODULE MEMORY FALLBACK
@@ -127,14 +155,13 @@ const LEGACY_EXTRA_KEYS =
 const memoryStorage =
   new Map();
 
-const storageAvailabilityCache =
-  {
-    local:
-      null,
+const storageAvailabilityCache = {
+  local:
+    null,
 
-    session:
-      null,
-  };
+  session:
+    null,
+};
 
 let lastStorageError =
   null;
@@ -158,7 +185,10 @@ function safeText(value, fallback = "") {
 }
 
 function safeLower(value, fallback = "") {
-  return safeText(value, fallback).toLowerCase();
+  return safeText(
+    value,
+    fallback
+  ).toLowerCase();
 }
 
 function isObject(value) {
@@ -197,8 +227,11 @@ function safeArray(value) {
 }
 
 function unique(values = []) {
-  const result = [];
-  const seen = new Set();
+  const result =
+    [];
+
+  const seen =
+    new Set();
 
   for (const value of safeArray(values)) {
     const clean =
@@ -214,6 +247,28 @@ function unique(values = []) {
   }
 
   return result;
+}
+
+function safeEmit(events, eventName, payload = {}) {
+  const name =
+    safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  try {
+    if (isFunction(events?.emit)) {
+      events.emit(
+        name,
+        payload
+      );
+
+      return true;
+    }
+  } catch {}
+
+  return false;
 }
 
 function safeWarn(utils, ...args) {
@@ -309,7 +364,10 @@ function shouldRemoveOnSet(value) {
 
 function normalizeKind(kind = DEFAULT_KIND) {
   const clean =
-    safeLower(kind, DEFAULT_KIND);
+    safeLower(
+      kind,
+      DEFAULT_KIND
+    );
 
   return VALID_KINDS.includes(clean)
     ? clean
@@ -330,7 +388,7 @@ function getPrefixRaw() {
       DEFAULT_PREFIX
     )
       .replace(/:+$/g, "")
-      .replace(/^\:+/g, "");
+      .replace(/^:+/g, "");
 
   return prefix || DEFAULT_PREFIX;
 }
@@ -378,7 +436,7 @@ function getNamespacedKey(key = "") {
   return `${getPrefix()}${cleanKey}`;
 }
 
-function getRawLocalStorageKey(key = "") {
+function getRawStorageKey(key = "") {
   return safeText(key, "");
 }
 
@@ -620,7 +678,7 @@ function removeFromMemory(namespacedKey) {
 }
 
 /* =========================================================
-   SNAPSHOT / SANITIZE
+   PARSE / SNAPSHOT
 ========================================================= */
 
 function sanitizeSnapshotValue(key = "", value = "") {
@@ -646,7 +704,10 @@ function sanitizeError(error = null) {
 
   return {
     name:
-      safeText(error?.name, "StorageError"),
+      safeText(
+        error?.name,
+        "StorageError"
+      ),
 
     message:
       safeText(
@@ -657,7 +718,7 @@ function sanitizeError(error = null) {
   };
 }
 
-function parseStoredRaw(raw, fallback = null) {
+function parseStoredJson(raw, fallback = null) {
   if (
     raw === null ||
     raw === undefined ||
@@ -712,7 +773,7 @@ function getStorageLength(storage) {
   }
 }
 
-function collectStorageKeys(storage, predicate) {
+function collectStorageKeys(storage, predicate = () => true) {
   const output = [];
 
   if (!storage) {
@@ -775,14 +836,18 @@ function getConfiguredLegacyKeys() {
 
   if (Array.isArray(legacy)) {
     return legacy
-      .map((item) => safeText(item, ""))
+      .map((item) =>
+        safeText(item, "")
+      )
       .filter(Boolean);
   }
 
   if (isObject(legacy)) {
     return Object.values(legacy)
       .flat()
-      .map((item) => safeText(item, ""))
+      .map((item) =>
+        safeText(item, "")
+      )
       .filter(Boolean);
   }
 
@@ -790,11 +855,6 @@ function getConfiguredLegacyKeys() {
 }
 
 function getLegacyKeys() {
-  /*
-    Importante:
-    Estas claves son legacy NO namespaced.
-    No se añaden onion:token / onion:user porque esas son claves actuales.
-  */
   return unique([
     ...getConfiguredLegacyKeys(),
     ...LEGACY_EXTRA_KEYS,
@@ -829,7 +889,7 @@ function shouldRemoveLegacyKey(key = "") {
   );
 }
 
-export function removeLegacySessionKeys(utils) {
+export function removeLegacySessionKeys(utils = null, events = null) {
   const keys =
     getLegacyKeys();
 
@@ -848,7 +908,7 @@ export function removeLegacySessionKeys(utils) {
 
     for (const legacyKey of keys) {
       const key =
-        getRawLocalStorageKey(legacyKey);
+        getRawStorageKey(legacyKey);
 
       if (
         !key ||
@@ -881,6 +941,16 @@ export function removeLegacySessionKeys(utils) {
     }
   }
 
+  safeEmit(
+    events,
+    STORAGE_EVENTS.legacyCleared,
+    {
+      removed,
+      at:
+        safeIsoDate(),
+    }
+  );
+
   return removed;
 }
 
@@ -888,7 +958,21 @@ export function removeLegacySessionKeys(utils) {
    STORAGE FACTORY
 ========================================================= */
 
-export function createStorage(utils) {
+export function createStorage(input = {}) {
+  const deps =
+    isObject(input)
+      ? input
+      : {
+          utils:
+            input,
+        };
+
+  const utils =
+    deps.utils || input || null;
+
+  const events =
+    deps.events || null;
+
   const stats = {
     get:
       0,
@@ -976,7 +1060,26 @@ export function createStorage(utils) {
       `Storage error en ${operation}: ${key}`,
       {
         kind,
-        error,
+        error:
+          sanitizeError(error),
+      }
+    );
+
+    safeEmit(
+      events,
+      STORAGE_EVENTS.error,
+      {
+        operation,
+        key:
+          sanitizeSnapshotValue(
+            key,
+            key
+          ),
+        kind,
+        error:
+          sanitizeError(error),
+        at:
+          safeIsoDate(),
       }
     );
   }
@@ -1030,11 +1133,21 @@ export function createStorage(utils) {
     const namespacedKey =
       key(name);
 
+    const opts =
+      isObject(options)
+        ? options
+        : {};
+
     const requestedKind =
-      resolveKindFromOptions(options);
+      resolveKindFromOptions(opts);
 
     stats.get += 1;
-    touch("getRaw", namespacedKey, requestedKind);
+
+    touch(
+      "getRaw",
+      namespacedKey,
+      requestedKind
+    );
 
     if (requestedKind === "memory") {
       incrementReadCounter("memory");
@@ -1063,13 +1176,9 @@ export function createStorage(utils) {
       return raw;
     }
 
-    /*
-      Si se pidió local y no existe, permitimos fallback a session
-      sólo cuando options.fallbackSession !== false.
-    */
     if (
       requestedKind === "local" &&
-      options?.fallbackSession !== false
+      opts.fallbackSession !== false
     ) {
       const sessionRaw =
         readRawFromStorage(
@@ -1120,7 +1229,7 @@ export function createStorage(utils) {
         options
       );
 
-    return parseStoredRaw(
+    return parseStoredJson(
       raw,
       fallback
     );
@@ -1130,16 +1239,26 @@ export function createStorage(utils) {
     const namespacedKey =
       key(name);
 
+    const opts =
+      isObject(options)
+        ? options
+        : {};
+
     const requestedKind =
-      resolveKindFromOptions(options);
+      resolveKindFromOptions(opts);
 
     stats.set += 1;
-    touch("setRaw", namespacedKey, requestedKind);
+
+    touch(
+      "setRaw",
+      namespacedKey,
+      requestedKind
+    );
 
     if (shouldRemoveOnSet(value)) {
       return remove(
         name,
-        options
+        opts
       );
     }
 
@@ -1152,7 +1271,7 @@ export function createStorage(utils) {
     ) {
       return remove(
         name,
-        options
+        opts
       );
     }
 
@@ -1195,25 +1314,28 @@ export function createStorage(utils) {
     const namespacedKey =
       key(name);
 
-    stats.set += 1;
+    const opts =
+      isObject(options)
+        ? options
+        : {};
+
     touch(
       "set",
       namespacedKey,
-      resolveKindFromOptions(options)
+      resolveKindFromOptions(opts)
     );
 
     if (shouldRemoveOnSet(value)) {
       return remove(
         name,
-        options
+        opts
       );
     }
 
     const raw =
-      safeJsonStringify(
-        value,
-        ""
-      );
+      typeof value === "string"
+        ? safeJsonStringify(value, "")
+        : safeJsonStringify(value, "");
 
     if (
       !raw ||
@@ -1225,7 +1347,7 @@ export function createStorage(utils) {
     return setRaw(
       name,
       raw,
-      options
+      opts
     );
   }
 
@@ -1241,15 +1363,25 @@ export function createStorage(utils) {
     const namespacedKey =
       key(name);
 
+    const opts =
+      isObject(options)
+        ? options
+        : {};
+
     const requestedKind =
-      resolveKindFromOptions(options);
+      resolveKindFromOptions(opts);
 
     stats.remove += 1;
-    touch("remove", namespacedKey, requestedKind);
+
+    touch(
+      "remove",
+      namespacedKey,
+      requestedKind
+    );
 
     if (
       requestedKind === "local" ||
-      options?.all === true
+      opts.all === true
     ) {
       removeFromStorage(
         "local",
@@ -1259,8 +1391,8 @@ export function createStorage(utils) {
 
     if (
       requestedKind === "session" ||
-      options?.all === true ||
-      options?.sessionAlso === true
+      opts.all === true ||
+      opts.sessionAlso === true
     ) {
       removeFromStorage(
         "session",
@@ -1270,8 +1402,8 @@ export function createStorage(utils) {
 
     if (
       requestedKind === "memory" ||
-      options?.all === true ||
-      options?.memoryAlso !== false
+      opts.all === true ||
+      opts.memoryAlso !== false
     ) {
       removeFromMemory(
         namespacedKey
@@ -1285,11 +1417,21 @@ export function createStorage(utils) {
     const namespacedKey =
       key(name);
 
+    const opts =
+      isObject(options)
+        ? options
+        : {};
+
     const requestedKind =
-      resolveKindFromOptions(options);
+      resolveKindFromOptions(opts);
 
     stats.has += 1;
-    touch("has", namespacedKey, requestedKind);
+
+    touch(
+      "has",
+      namespacedKey,
+      requestedKind
+    );
 
     if (requestedKind === "memory") {
       return memoryStorage.has(
@@ -1345,7 +1487,12 @@ export function createStorage(utils) {
         : getPrefix();
 
     stats.keys += 1;
-    touch("keys", prefix, requestedKind);
+
+    touch(
+      "keys",
+      prefix,
+      requestedKind
+    );
 
     const output = [];
 
@@ -1400,7 +1547,8 @@ export function createStorage(utils) {
           if (currentKey.startsWith(prefix)) {
             pushKey(
               currentKey,
-              () => memoryStorage.get(currentKey)
+              () =>
+                memoryStorage.get(currentKey)
             );
           }
         }
@@ -1421,7 +1569,8 @@ export function createStorage(utils) {
       for (const currentKey of backendKeys) {
         pushKey(
           currentKey,
-          () => storage.getItem(currentKey)
+          () =>
+            storage.getItem(currentKey)
         );
       }
     }
@@ -1461,7 +1610,12 @@ export function createStorage(utils) {
     let removed = 0;
 
     stats.clear += 1;
-    touch("clearNamespace", prefix, requestedKind);
+
+    touch(
+      "clearNamespace",
+      prefix,
+      requestedKind
+    );
 
     for (const kind of unique(kindsToClear)) {
       if (kind === "memory") {
@@ -1500,7 +1654,7 @@ export function createStorage(utils) {
       }
     }
 
-    return {
+    const result = {
       ok:
         true,
 
@@ -1511,6 +1665,18 @@ export function createStorage(utils) {
       kind:
         requestedKind,
     };
+
+    safeEmit(
+      events,
+      STORAGE_EVENTS.cleared,
+      {
+        ...result,
+        at:
+          safeIsoDate(),
+      }
+    );
+
+    return result;
   }
 
   function clearAll(options = {}) {
@@ -1537,7 +1703,8 @@ export function createStorage(utils) {
 
     if (includeLegacy) {
       removed += removeLegacySessionKeys(
-        utils
+        utils,
+        events
       );
     }
 
@@ -1572,7 +1739,12 @@ export function createStorage(utils) {
     let repaired = 0;
 
     stats.repair += 1;
-    touch("repairCorrupted", prefix, requestedKind);
+
+    touch(
+      "repairCorrupted",
+      prefix,
+      requestedKind
+    );
 
     for (const kind of unique(kindsToRepair)) {
       if (kind === "memory") {
@@ -1619,7 +1791,7 @@ export function createStorage(utils) {
       }
     }
 
-    return {
+    const result = {
       ok:
         true,
 
@@ -1630,6 +1802,18 @@ export function createStorage(utils) {
       kind:
         requestedKind,
     };
+
+    safeEmit(
+      events,
+      STORAGE_EVENTS.repaired,
+      {
+        ...result,
+        at:
+          safeIsoDate(),
+      }
+    );
+
+    return result;
   }
 
   function migrateLegacyKey(legacyKey = "", currentKey = "", options = {}) {
@@ -1638,6 +1822,11 @@ export function createStorage(utils) {
 
     const toKey =
       safeText(currentKey, "");
+
+    const opts =
+      isObject(options)
+        ? options
+        : {};
 
     if (
       !fromKey ||
@@ -1648,7 +1837,7 @@ export function createStorage(utils) {
     }
 
     const requestedKind =
-      resolveKindFromOptions(options);
+      resolveKindFromOptions(opts);
 
     const storage =
       getStorageObject(requestedKind);
@@ -1679,10 +1868,13 @@ export function createStorage(utils) {
       setRaw(
         toKey,
         raw,
-        options
+        opts
       );
 
-    if (ok && options?.removeLegacy !== false) {
+    if (
+      ok &&
+      opts.removeLegacy !== false
+    ) {
       try {
         storage?.removeItem?.(fromKey);
       } catch {}
@@ -1743,6 +1935,9 @@ export function createStorage(utils) {
           lastStorageError
         ),
 
+      events:
+        STORAGE_EVENTS,
+
       at:
         safeIsoDate(),
     };
@@ -1757,8 +1952,57 @@ export function createStorage(utils) {
 
       prefix:
         getPrefix(),
+
+      local:
+        testStorageAvailability("local"),
+
+      session:
+        testStorageAvailability("session"),
     }
   );
+
+  safeEmit(
+    events,
+    STORAGE_EVENTS.ready,
+    {
+      version:
+        STORAGE_VERSION,
+
+      prefix:
+        getPrefix(),
+
+      localStorageAvailable:
+        testStorageAvailability("local"),
+
+      sessionStorageAvailable:
+        testStorageAvailability("session"),
+
+      at:
+        safeIsoDate(),
+    }
+  );
+
+  if (
+    !testStorageAvailability("local") &&
+    !testStorageAvailability("session")
+  ) {
+    safeEmit(
+      events,
+      STORAGE_EVENTS.unavailable,
+      {
+        memoryFallback:
+          true,
+
+        error:
+          sanitizeError(
+            lastStorageError
+          ),
+
+        at:
+          safeIsoDate(),
+      }
+    );
+  }
 
   return {
     version:
@@ -1770,7 +2014,14 @@ export function createStorage(utils) {
     prefixRaw:
       getPrefixRaw(),
 
-    key,
+(
+      events,
+      STORAGE_EVENTS.unavailable,
+      {
+        memoryFallback:
+          true,
+
+        error    key,
     getNamespacedKey:
       key,
     normalizeKey:
@@ -1797,7 +2048,8 @@ export function createStorage(utils) {
 
     clearAll,
     clear:
-      clearAll,
+      clearAll    key,
+    getNamespacedKey,
 
     clearNamespace,
 
@@ -1807,7 +2059,8 @@ export function createStorage(utils) {
 
     removeLegacySessionKeys() {
       return removeLegacySessionKeys(
-        utils
+        utils,
+        events
       );
     },
 
@@ -1822,7 +2075,15 @@ export function createStorage(utils) {
   };
 }
 
+export {
+  STORAGE_VERSION,
+  STORAGE_EVENTS,
+};
+
 export default {
+  STORAGE_VERSION,
+  STORAGE_EVENTS,
+
   createStorage,
   removeLegacySessionKeys,
 };

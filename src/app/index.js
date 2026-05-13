@@ -21,11 +21,13 @@
    - Sin montajes duplicados.
    - Sin responsabilidades duplicadas con main.js ni loader.js.
 
-   CONTRATO:
-   - /src/main.js importa App y llama App.boot().
-   - Este archivo exporta App, pero NO llama App.boot() automáticamente.
-   - /src/app/loader.js gobierna el loader real.
-   - /src/app/router.js gobierna configure/bind/render inicial.
+   FIX 14.3:
+   - Registro idempotente de módulos bridge.
+   - No registrar aliases como módulos independientes.
+   - Evitar app:module:duplicate durante boot.
+   - Evitar llamadas repetidas ruidosas a modules.register().
+   - Mantener AppCore.Router/AppCore.router como propiedades directas.
+   - Registrar en Core una sola vez por nombre canónico con aliases.
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -125,8 +127,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-const APP_BOOTSTRAP_VERSION = "14.2.0";
-
+const APP_BOOTSTRAP_VERSION = "14.3.0";
 const BOOT_SOURCE = "app:index";
 
 const DEFAULT_SCOPE =
@@ -1612,6 +1613,9 @@ let BOOT_URL_CONTEXT = captureInitialUrl();
 export const App = (() => {
   "use strict";
 
+  const bridgeRegistryCache = new Map();
+  const bridgeConflictWarnings = new Set();
+
   const state = {
     version: APP_BOOTSTRAP_VERSION,
 
@@ -1630,6 +1634,9 @@ export const App = (() => {
     handlersBound: false,
     appEventsBound: false,
     uiRepairEventsBound: false,
+
+    runtimeModulesExposed: false,
+    runtimeModulesExposeCount: 0,
 
     bootPromise: null,
     restorePromise: null,
@@ -1969,8 +1976,115 @@ export const App = (() => {
   }
 
   /* =======================================================
-     CORE MODULE BRIDGES
+     CORE MODULE BRIDGES · IDEMPOTENT
   ======================================================= */
+
+  function getRegisteredCoreModule(name = "") {
+    const cleanName = safeText(name, "");
+
+    if (!cleanName) {
+      return null;
+    }
+
+    try {
+      if (isFunction(AppCore?.modules?.get)) {
+        const value = AppCore.modules.get(cleanName);
+
+        if (value) {
+          return value;
+        }
+      }
+    } catch {}
+
+    try {
+      if (AppCore?.registry?.modules?.get) {
+        const value = AppCore.registry.modules.get(cleanName);
+
+        if (value) {
+          return value;
+        }
+      }
+    } catch {}
+
+    try {
+      if (
+        AppCore?.modules &&
+        typeof AppCore.modules === "object" &&
+        AppCore.modules[cleanName]
+      ) {
+        return AppCore.modules[cleanName];
+      }
+    } catch {}
+
+    return null;
+  }
+
+  function warnBridgeConflictOnce(name = "", aliases = []) {
+    const cleanName = safeText(name, "");
+
+    if (!cleanName) {
+      return;
+    }
+
+    const key = [
+      cleanName,
+      ...safeArray(aliases)
+        .map((alias) => safeText(alias, ""))
+        .filter(Boolean),
+    ].join("|");
+
+    if (bridgeConflictWarnings.has(key)) {
+      return;
+    }
+
+    bridgeConflictWarnings.add(key);
+
+    safeWarn(
+      "Bridge module ya existe con otra instancia. Se conserva registry actual para evitar app:module:duplicate.",
+      {
+        name: cleanName,
+        aliases,
+      }
+    );
+  }
+
+  function registryHasSameModule(name = "", value = null, aliases = []) {
+    const names = [
+      name,
+      ...safeArray(aliases),
+    ]
+      .map((item) => safeText(item, ""))
+      .filter(Boolean);
+
+    for (const candidate of names) {
+      const registered = getRegisteredCoreModule(candidate);
+
+      if (registered && Object.is(registered, value)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function registryHasConflictingModule(name = "", value = null, aliases = []) {
+    const names = [
+      name,
+      ...safeArray(aliases),
+    ]
+      .map((item) => safeText(item, ""))
+      .filter(Boolean);
+
+    for (const candidate of names) {
+      const registered = getRegisteredCoreModule(candidate);
+
+      if (registered && !Object.is(registered, value)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
 
   function registerCoreModule(name = "", value = null, aliases = []) {
     const cleanName = safeText(name, "");
@@ -1982,28 +2096,98 @@ export const App = (() => {
       return false;
     }
 
-    const names =
+    const cleanAliases =
       Array.from(
-        new Set([
-          cleanName,
-          ...safeArray(aliases)
+        new Set(
+          safeArray(aliases)
             .map((item) => safeText(item, ""))
-            .filter(Boolean),
-        ])
+            .filter(Boolean)
+            .filter((item) => item !== cleanName)
+        )
       );
 
-    for (const moduleName of names) {
-      let registered = false;
+    const cacheEntry =
+      bridgeRegistryCache.get(cleanName);
 
+    const sameCache =
+      cacheEntry &&
+      Object.is(cacheEntry.value, value) &&
+      JSON.stringify(cacheEntry.aliases || []) === JSON.stringify(cleanAliases);
+
+    if (
+      sameCache &&
+      registryHasSameModule(cleanName, value, cleanAliases)
+    ) {
+      return true;
+    }
+
+    if (registryHasConflictingModule(cleanName, value, cleanAliases)) {
+      warnBridgeConflictOnce(cleanName, cleanAliases);
+
+      bridgeRegistryCache.set(cleanName, {
+        value,
+        aliases: cleanAliases,
+        skippedBecauseConflict: true,
+        at: safeIsoDate(),
+      });
+
+      return false;
+    }
+
+    if (registryHasSameModule(cleanName, value, cleanAliases)) {
+      bridgeRegistryCache.set(cleanName, {
+        value,
+        aliases: cleanAliases,
+        alreadyRegistered: true,
+        at: safeIsoDate(),
+      });
+
+      return true;
+    }
+
+    let registered = false;
+
+    try {
+      if (isFunction(AppCore?.modules?.register)) {
+        const result =
+          AppCore.modules.register(
+            cleanName,
+            value,
+            {
+              aliases: cleanAliases,
+              overwrite: false,
+              replace: false,
+              idempotent: true,
+              source: BOOT_SOURCE,
+            }
+          );
+
+        registered = result !== false;
+      }
+    } catch (error) {
+      registered = false;
+
+      safeWarn(
+        "modules.register() falló.",
+        {
+          name: cleanName,
+          aliases: cleanAliases,
+          error,
+        }
+      );
+    }
+
+    if (!registered) {
       try {
-        if (isFunction(AppCore?.modules?.register)) {
+        if (
+          isFunction(AppCore?.modules?.set) &&
+          !getRegisteredCoreModule(cleanName)
+        ) {
           const result =
-            AppCore.modules.register(
-              moduleName,
+            AppCore.modules.set(
+              cleanName,
               value,
               {
-                overwrite: true,
-                replace: true,
                 source: BOOT_SOURCE,
               }
             );
@@ -2013,49 +2197,52 @@ export const App = (() => {
       } catch {
         registered = false;
       }
+    }
 
-      if (registered) {
-        continue;
-      }
-
-      try {
-        if (isFunction(AppCore?.modules?.set)) {
-          const result =
-            AppCore.modules.set(
-              moduleName,
-              value
-            );
-
-          registered = result !== false;
-        }
-      } catch {
-        registered = false;
-      }
-
-      if (registered) {
-        continue;
-      }
-
+    if (!registered) {
       try {
         if (
           AppCore?.modules &&
           typeof AppCore.modules === "object" &&
-          Object.isExtensible(AppCore.modules)
+          Object.isExtensible(AppCore.modules) &&
+          !AppCore.modules[cleanName]
         ) {
-          AppCore.modules[moduleName] = value;
+          AppCore.modules[cleanName] = value;
           registered = true;
         }
-      } catch {}
-
-      try {
-        AppCore?.registry?.modules?.set?.(
-          moduleName,
-          value
-        );
-      } catch {}
+      } catch {
+        registered = false;
+      }
     }
 
-    return true;
+    if (!registered) {
+      try {
+        if (
+          AppCore?.registry?.modules?.set &&
+          !AppCore.registry.modules.get?.(cleanName)
+        ) {
+          AppCore.registry.modules.set(
+            cleanName,
+            value
+          );
+
+          registered = true;
+        }
+      } catch {
+        registered = false;
+      }
+    }
+
+    if (registered) {
+      bridgeRegistryCache.set(cleanName, {
+        value,
+        aliases: cleanAliases,
+        registered: true,
+        at: safeIsoDate(),
+      });
+    }
+
+    return registered;
   }
 
   function exposeRuntimeModulesToCore() {
@@ -2087,7 +2274,9 @@ export const App = (() => {
 
     for (const [key, value] of assignments) {
       try {
-        AppCore[key] = value;
+        if (value) {
+          AppCore[key] = value;
+        }
       } catch {}
     }
 
@@ -2095,19 +2284,31 @@ export const App = (() => {
     registerCoreModule("Auth", Auth, ["auth"]);
     registerCoreModule("Store", Store, ["store"]);
     registerCoreModule("Http", Http, ["http"]);
-    registerCoreModule("Toast", Toast, ["toast"]);
+    registerCoreModule("Toast", Toast, ["toast", "toastModule"]);
     registerCoreModule("I18n", I18n, ["i18n"]);
     registerCoreModule("SidebarUI", SidebarUI, ["sidebar", "sidebarUI"]);
     registerCoreModule("TopbarUI", TopbarUI, ["topbar", "topbarUI"]);
 
+    state.runtimeModulesExposed = true;
+    state.runtimeModulesExposeCount += 1;
+
     try {
       if (isFunction(AppCore?.setState)) {
-        AppCore.setState({
-          routerReady: Boolean(Router),
-          authReady: Boolean(Auth),
-          storeReady: Boolean(Store),
-          httpReady: Boolean(Http),
-        });
+        AppCore.setState(
+          {
+            routerReady: Boolean(Router),
+            authReady: Boolean(Auth),
+            storeReady: Boolean(Store),
+            httpReady: Boolean(Http),
+            runtimeModulesExposed: true,
+          },
+          {
+            emit: false,
+            emitState: false,
+            silent: true,
+            source: BOOT_SOURCE,
+          }
+        );
       }
     } catch {}
 
@@ -3135,7 +3336,15 @@ export const App = (() => {
     };
 
     try {
-      AppCore?.setState?.(payload);
+      AppCore?.setState?.(
+        payload,
+        {
+          emit: false,
+          emitState: false,
+          silent: true,
+          source: BOOT_SOURCE,
+        }
+      );
     } catch {}
 
     try {
@@ -3366,9 +3575,17 @@ export const App = (() => {
     } catch {}
 
     try {
-      AppCore?.setState?.({
-        [cleanKey]: value,
-      });
+      AppCore?.setState?.(
+        {
+          [cleanKey]: value,
+        },
+        {
+          emit: false,
+          emitState: false,
+          silent: true,
+          source: BOOT_SOURCE,
+        }
+      );
     } catch {}
 
     return true;
@@ -3755,8 +3972,6 @@ export const App = (() => {
         );
       }
     }
-
-    exposeRuntimeModulesToCore();
 
     state.routerConfigured = Boolean(configured);
 
@@ -4688,6 +4903,12 @@ export const App = (() => {
     state.restorePromise = null;
     state.bootPromise = null;
 
+    state.runtimeModulesExposed = false;
+    state.runtimeModulesExposeCount = 0;
+
+    bridgeRegistryCache.clear();
+    bridgeConflictWarnings.clear();
+
     resetCycleRuntimeState();
 
     try {
@@ -4789,6 +5010,17 @@ export const App = (() => {
 
       routerSnapshot,
       coreSnapshot,
+
+      bridgeRegistry: {
+        registered:
+          Array.from(bridgeRegistryCache.keys()),
+
+        conflicts:
+          Array.from(bridgeConflictWarnings),
+
+        exposeCount:
+          state.runtimeModulesExposeCount,
+      },
 
       uiFirebreak: {
         uiRepairRunning,

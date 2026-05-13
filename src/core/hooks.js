@@ -2,6 +2,9 @@
    Onion SPA - Core Hooks
    Archivo: src/core/hooks.js
 
+   ONION SUPPORT · CORE HOOKS
+   HOOK REGISTRY · SERIES/PARALLEL · PRIORITY · ONCE SAFE · 13/10
+
    Responsabilidades:
    - registrar hooks internos del core
    - validar tipos de hook soportados
@@ -31,7 +34,7 @@
 ========================================================= */
 
 const HOOKS_VERSION =
-  "12.0.0";
+  "13.0.0";
 
 const DEFAULT_HOOK_TYPES =
   Object.freeze([
@@ -107,6 +110,26 @@ const DEFAULT_TIMEOUT_MS =
 const HOOK_NAME_CONTROL_RE =
   /[\u0000-\u001f\u007f]/g;
 
+const RESERVED_OPTION_KEYS =
+  Object.freeze([
+    "key",
+    "name",
+    "priority",
+    "once",
+    "enabled",
+    "timeout",
+    "timeoutMs",
+    "tags",
+    "meta",
+    "strict",
+    "allowDynamicType",
+    "throwOnError",
+    "stopOnError",
+    "context",
+    "mode",
+    "settled",
+  ]);
+
 /* =========================================================
    BASICS
 ========================================================= */
@@ -159,17 +182,6 @@ function safeArray(value) {
   return Array.isArray(value)
     ? value
     : [];
-}
-
-function safeBool(value, fallback = false) {
-  if (value === true) return true;
-  if (value === false) return false;
-  if (value === "true") return true;
-  if (value === "false") return false;
-  if (value === 1) return true;
-  if (value === 0) return false;
-
-  return Boolean(fallback);
 }
 
 function safeNow() {
@@ -370,6 +382,38 @@ function isHookRunner(value) {
   );
 }
 
+function pickCustomMeta(options = {}) {
+  const opts =
+    isPlainObject(options)
+      ? options
+      : {};
+
+  if (isPlainObject(opts.meta)) {
+    return safeClone(
+      opts.meta,
+      {}
+    );
+  }
+
+  const custom = {};
+
+  for (const [key, value] of Object.entries(opts)) {
+    if (RESERVED_OPTION_KEYS.includes(key)) {
+      continue;
+    }
+
+    custom[key] =
+      safeClone(
+        value,
+        value
+      );
+  }
+
+  return Object.keys(custom).length
+    ? custom
+    : null;
+}
+
 function buildPublicHookEntry(entry = {}) {
   return {
     type:
@@ -464,9 +508,7 @@ function normalizeHookOptions(options = {}) {
         .filter(Boolean),
 
     meta:
-      isPlainObject(opts.meta)
-        ? safeClone(opts.meta, {})
-        : null,
+      pickCustomMeta(opts),
   };
 }
 
@@ -1414,11 +1456,22 @@ export function createHooks({
       }
     );
 
-    return () =>
-      remove(
+    let disposed =
+      false;
+
+    return () => {
+      if (disposed) {
+        return false;
+      }
+
+      disposed =
+        true;
+
+      return remove(
         cleanType,
         entry.key
       );
+    };
   }
 
   function once(type, handler, options = {}) {
@@ -1682,27 +1735,36 @@ export function createHooks({
     normalizeHookList(cleanType);
 
     if (matches.length) {
+      const payload = {
+        type:
+          cleanType,
+
+        priority:
+          nextPriority,
+
+        count:
+          matches.length,
+
+        keys:
+          matches.map((entry) =>
+            entry.key
+          ),
+
+        at:
+          safeIsoDate(),
+      };
+
+      pushRecent({
+        event:
+          "priority",
+
+        ...payload,
+      });
+
       safeEmit(
         events,
         HOOK_EVENTS.priority,
-        {
-          type:
-            cleanType,
-
-          priority:
-            nextPriority,
-
-          count:
-            matches.length,
-
-          keys:
-            matches.map((entry) =>
-              entry.key
-            ),
-
-          at:
-            safeIsoDate(),
-        }
+        payload
       );
     }
 
@@ -1960,7 +2022,7 @@ export function createHooks({
                 result?.value,
 
               reason:
-                result?.error,
+                result?.error || null,
 
               hook:
                 buildPublicHookEntry(entry),

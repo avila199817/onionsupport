@@ -3,7 +3,7 @@
    Archivo: src/features/auth/constants.js
 
    AUTH CONTRACT · ENTERPRISE HARDENED · NO APPCORE DEP
-   FINAL EXTREME SYSTEM · 10/10
+   FINAL EXTREME SYSTEM · 11/10
 
    RESPONSABILIDADES:
    - centralizar endpoints auth
@@ -22,9 +22,12 @@
    - endpoints agrupados por intención
    - endpoint candidates para fallback robusto
    - rutas SPA técnicas públicas normalizadas
+   - soporte hash-router #/ruta y #!/ruta
+   - soporte tokens por query/path
    - token param names centralizados
    - límites numéricos normalizados
    - helpers tolerantes y sin throws accidentales
+   - /api/auth/me, /auth/me y /me SIEMPRE privados
    - snapshot debug seguro
    - sin dependencia circular con AppCore
 ========================================================= */
@@ -34,7 +37,7 @@
 ========================================================= */
 
 export const AUTH_CONSTANTS_VERSION =
-  "10.2.0";
+  "11.0.0";
 
 /* =========================================================
    BASE HELPERS
@@ -45,6 +48,16 @@ function isPlainObject(value) {
     value !== null &&
     typeof value === "object" &&
     !Array.isArray(value)
+  );
+}
+
+function isObjectLike(value) {
+  return (
+    value !== null &&
+    (
+      typeof value === "object" ||
+      typeof value === "function"
+    )
   );
 }
 
@@ -103,6 +116,8 @@ export function safeBool(value, fallback = false) {
       "sí",
       "ok",
       "on",
+      "enabled",
+      "active",
     ].includes(text)
   ) {
     return true;
@@ -114,6 +129,8 @@ export function safeBool(value, fallback = false) {
       "0",
       "no",
       "off",
+      "disabled",
+      "inactive",
     ].includes(text)
   ) {
     return false;
@@ -137,14 +154,18 @@ export function clampNumber(
 }
 
 function hasOwn(obj, key) {
-  return Boolean(
-    obj &&
-      typeof obj === "object" &&
-      Object.prototype.hasOwnProperty.call(
-        obj,
-        key
-      )
-  );
+  try {
+    return Boolean(
+      obj &&
+        typeof obj === "object" &&
+        Object.prototype.hasOwnProperty.call(
+          obj,
+          key
+        )
+    );
+  } catch {
+    return false;
+  }
 }
 
 function normalizeKey(key = "") {
@@ -152,9 +173,14 @@ function normalizeKey(key = "") {
 }
 
 function unique(values = []) {
+  const input =
+    Array.isArray(values)
+      ? values
+      : [values];
+
   return Array.from(
     new Set(
-      (Array.isArray(values) ? values : [values])
+      input
         .flat(Infinity)
         .map((value) =>
           safeText(value, "")
@@ -166,22 +192,13 @@ function unique(values = []) {
 
 function deepFreeze(value) {
   if (
-    !value ||
-    typeof value !== "object" ||
+    !isObjectLike(value) ||
     Object.isFrozen(value)
   ) {
     return value;
   }
 
   try {
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        deepFreeze(item);
-      }
-
-      return Object.freeze(value);
-    }
-
     for (const key of Object.getOwnPropertyNames(value)) {
       deepFreeze(value[key]);
     }
@@ -196,11 +213,179 @@ function deepFreeze(value) {
    PATH NORMALIZATION
 ========================================================= */
 
-export function normalizeEndpointPath(path = "") {
+function getBaseOrigin() {
+  return "http://localhost";
+}
+
+function isAbsoluteUrl(value = "") {
+  return /^[a-z][a-z\d+.-]*:\/\//i.test(
+    safeText(value, "")
+  );
+}
+
+function isHashRouterPath(value = "") {
   const raw =
+    safeText(value, "");
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/") || "/";
+  }
+
+  return raw.replace(/^#\/?/, "/") || "/";
+}
+
+function normalizePathnameOnly(pathname = "/") {
+  let value =
+    safeText(pathname, "/")
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+  if (!value) {
+    value = "/";
+  }
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  const segments =
+    value.split("/");
+
+  const normalizedSegments =
+    [];
+
+  for (const segment of segments) {
+    if (
+      !segment ||
+      segment === "."
+    ) {
+      continue;
+    }
+
+    if (segment === "..") {
+      normalizedSegments.pop();
+      continue;
+    }
+
+    normalizedSegments.push(segment);
+  }
+
+  value =
+    `/${normalizedSegments.join("/")}` || "/";
+
+  if (
+    value.length > 1 &&
+    value.endsWith("/")
+  ) {
+    value =
+      value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
+}
+
+function splitSearchAndHash(path = "") {
+  let raw =
     safeText(path, "");
 
   if (!raw) {
+    return {
+      pathname:
+        "",
+      search:
+        "",
+      hash:
+        "",
+    };
+  }
+
+  if (isHashRouterPath(raw)) {
+    raw =
+      normalizeHashRouterPath(raw);
+  }
+
+  let pathname =
+    raw;
+
+  let search =
+    "";
+
+  let hash =
+    "";
+
+  const hashIndex =
+    pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash =
+      pathname.slice(hashIndex);
+
+    pathname =
+      pathname.slice(0, hashIndex) || "/";
+  }
+
+  const searchIndex =
+    pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search =
+      pathname.slice(searchIndex);
+
+    pathname =
+      pathname.slice(0, searchIndex) || "/";
+  }
+
+  return {
+    pathname,
+    search,
+    hash,
+  };
+}
+
+export function pathFromUrlLike(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  if (isHashRouterPath(raw)) {
+    return normalizeHashRouterPath(raw);
+  }
+
+  try {
+    if (isAbsoluteUrl(raw)) {
+      const parsed =
+        new URL(
+          raw,
+          getBaseOrigin()
+        );
+
+      if (
+        parsed.hash &&
+        isHashRouterPath(parsed.hash)
+      ) {
+        return normalizeHashRouterPath(parsed.hash);
+      }
+
+      return `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`;
+    }
+  } catch {
     return "";
   }
 
@@ -208,57 +393,53 @@ export function normalizeEndpointPath(path = "") {
     const parsed =
       new URL(
         raw,
-        "http://localhost"
+        getBaseOrigin()
       );
 
-    const pathname =
-      safeText(
-        parsed.pathname,
-        ""
-      )
-        .replace(/\\/g, "/")
-        .replace(/\/{2,}/g, "/");
-
-    if (!pathname) {
-      return "";
+    if (
+      parsed.hash &&
+      isHashRouterPath(parsed.hash)
+    ) {
+      return normalizeHashRouterPath(parsed.hash);
     }
 
-    const normalized =
-      pathname.startsWith("/")
-        ? pathname
-        : `/${pathname}`;
-
-    return (
-      normalized.replace(/\/+$/g, "") ||
-      "/"
-    );
+    return `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`;
   } catch {
-    const clean =
-      raw
-        .split("?")[0]
-        .split("#")[0]
-        .trim()
-        .replace(/\\/g, "/")
-        .replace(/\/{2,}/g, "/");
-
-    if (!clean) {
-      return "";
-    }
-
-    const withSlash =
-      clean.startsWith("/")
-        ? clean
-        : `/${clean}`;
-
-    return (
-      withSlash.replace(/\/+$/g, "") ||
-      "/"
-    );
+    return raw;
   }
+}
+
+export function normalizeEndpointPath(path = "") {
+  const raw =
+    pathFromUrlLike(path);
+
+  if (!raw) {
+    return "";
+  }
+
+  const {
+    pathname,
+  } =
+    splitSearchAndHash(raw);
+
+  const normalized =
+    normalizePathnameOnly(pathname);
+
+  return normalized === "/"
+    ? "/"
+    : normalized.replace(/\/+$/g, "") || "/";
 }
 
 export function normalizeRoutePath(path = "") {
   return normalizeEndpointPath(path);
+}
+
+function normalizeEndpointList(list = []) {
+  return unique(list)
+    .map((item) =>
+      normalizeEndpointPath(item)
+    )
+    .filter(Boolean);
 }
 
 /* =========================================================
@@ -273,6 +454,12 @@ export const LOGOUT_ENDPOINT =
 
 export const ME_ENDPOINT =
   "/api/auth/me";
+
+export const ME_LEGACY_ENDPOINT =
+  "/me";
+
+export const ME_AUTH_LEGACY_ENDPOINT =
+  "/auth/me";
 
 export const REFRESH_ENDPOINT =
   "/api/auth/refresh";
@@ -420,8 +607,10 @@ export const AUTH_TOKEN_PARAM_NAMES =
       "token",
       "resetToken",
       "passwordResetToken",
+      "confirmToken",
       "reset_token",
       "password_reset_token",
+      "confirm_token",
       "code",
       "t",
     ],
@@ -632,6 +821,8 @@ export const AUTH_ENDPOINT_CANDIDATES =
     me:
       unique([
         ME_ENDPOINT,
+        ME_AUTH_LEGACY_ENDPOINT,
+        ME_LEGACY_ENDPOINT,
       ]),
 
     refresh:
@@ -693,10 +884,27 @@ export const AUTH_ENDPOINT_CANDIDATES =
    ENDPOINT GROUPS
 ========================================================= */
 
+const PRIVATE_ME_ENDPOINTS =
+  normalizeEndpointList([
+    ME_ENDPOINT,
+    ME_AUTH_LEGACY_ENDPOINT,
+    ME_LEGACY_ENDPOINT,
+  ]);
+
+function removePrivateMeEndpoints(list = []) {
+  const privateSet =
+    new Set(PRIVATE_ME_ENDPOINTS);
+
+  return normalizeEndpointList(list)
+    .filter((endpoint) =>
+      !privateSet.has(endpoint)
+    );
+}
+
 export const AUTH_ENDPOINT_GROUPS =
   deepFreeze({
     public:
-      unique([
+      removePrivateMeEndpoints([
         AUTH_ENDPOINTS.login,
         AUTH_ENDPOINTS.refresh,
         AUTH_ENDPOINTS.twoFactorLogin,
@@ -712,13 +920,14 @@ export const AUTH_ENDPOINT_GROUPS =
       ]),
 
     private:
-      unique([
+      normalizeEndpointList([
         AUTH_ENDPOINTS.logout,
         AUTH_ENDPOINTS.me,
+        ...AUTH_ENDPOINT_CANDIDATES.me,
       ]),
 
     session:
-      unique([
+      normalizeEndpointList([
         AUTH_ENDPOINTS.login,
         AUTH_ENDPOINTS.logout,
         AUTH_ENDPOINTS.me,
@@ -726,23 +935,33 @@ export const AUTH_ENDPOINT_GROUPS =
       ]),
 
     activation:
-      unique([
+      normalizeEndpointList([
         ...AUTH_ENDPOINT_CANDIDATES.activateAccount,
         ...AUTH_ENDPOINT_CANDIDATES.activateFirstUser,
       ]),
 
     passwordReset:
-      unique([
+      normalizeEndpointList([
         ...AUTH_ENDPOINT_CANDIDATES.requestPasswordReset,
         ...AUTH_ENDPOINT_CANDIDATES.confirmPasswordReset,
         ...AUTH_ENDPOINT_CANDIDATES.validateResetToken,
       ]),
 
     twoFactor:
-      unique([
+      normalizeEndpointList([
         ...AUTH_ENDPOINT_CANDIDATES.twoFactorLogin,
       ]),
   });
+
+export const AUTH_PUBLIC_API_PATHS =
+  deepFreeze([
+    ...AUTH_ENDPOINT_GROUPS.public,
+  ]);
+
+export const AUTH_PRIVATE_API_PATHS =
+  deepFreeze([
+    ...AUTH_ENDPOINT_GROUPS.private,
+  ]);
 
 /* =========================================================
    STORAGE KEYS
@@ -1016,16 +1235,23 @@ export const AUTH_FAILURE_CODES =
     "ACCOUNT_TEMPORARILY_LOCKED",
     "ACCOUNT_DISABLED",
     "USER_DISABLED",
+    "USER_NOT_AVAILABLE",
+    "USER_NOT_FOUND",
     "UNAUTHORIZED",
     "FORBIDDEN",
     "TOKEN_INVALID",
     "INVALID_TOKEN",
     "TOKEN_EXPIRED",
     "SESSION_EXPIRED",
+    "SESSION_REVOKED",
+    "SESSION_NOT_FOUND",
     "INVALID_LOGIN_SESSION",
     "LOGIN_FAILED",
     "AUTH_FAILED",
     "AUTH_RESTORE_FAILED",
+    "BAD_CREDENTIALS",
+    "CREDENTIALS_INVALID",
+    "TOKEN_VERSION_MISMATCH",
     "REFRESH_CONTEXT_MISSING",
     "REFRESH_INVALID_SESSION",
     "REFRESH_EMPTY_RESPONSE",
@@ -1621,7 +1847,26 @@ export function isEndpointInGroup(path = "", group = []) {
   });
 }
 
+export function isMeEndpoint(path = "") {
+  const normalized =
+    normalizeEndpointPath(path);
+
+  if (!normalized) {
+    return false;
+  }
+
+  return PRIVATE_ME_ENDPOINTS.includes(normalized);
+}
+
 export function isPublicAuthEndpoint(path = "") {
+  /*
+    Candado crítico:
+    /api/auth/me, /auth/me y /me nunca son públicos.
+  */
+  if (isMeEndpoint(path)) {
+    return false;
+  }
+
   return isEndpointInGroup(
     path,
     AUTH_ENDPOINT_GROUPS.public
@@ -1629,9 +1874,12 @@ export function isPublicAuthEndpoint(path = "") {
 }
 
 export function isPrivateAuthEndpoint(path = "") {
-  return isEndpointInGroup(
-    path,
-    AUTH_ENDPOINT_GROUPS.private
+  return (
+    isMeEndpoint(path) ||
+    isEndpointInGroup(
+      path,
+      AUTH_ENDPOINT_GROUPS.private
+    )
   );
 }
 
@@ -1719,6 +1967,185 @@ export function getTechnicalRouteAlias(key = "", fallback = "") {
 }
 
 /* =========================================================
+   TOKEN MATCH HELPERS
+========================================================= */
+
+export function hasTokenParam(search = "", type = "generic") {
+  const raw =
+    safeText(search, "");
+
+  if (!raw) {
+    return false;
+  }
+
+  const names =
+    getAuthTokenParamNames(type);
+
+  try {
+    const params =
+      new URLSearchParams(
+        raw.startsWith("?")
+          ? raw
+          : `?${raw}`
+      );
+
+    return names.some((name) =>
+      Boolean(
+        safeText(
+          params.get(name),
+          ""
+        )
+      )
+    );
+  } catch {
+    return names.some((name) => {
+      const escaped =
+        String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+      try {
+        return new RegExp(`(?:^|[?&#])${escaped}=([^&#\\s]+)`, "i")
+          .test(raw);
+      } catch {
+        return false;
+      }
+    });
+  }
+}
+
+export function hasTokenInUrl(value = "", type = "generic") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return false;
+  }
+
+  const path =
+    pathFromUrlLike(raw) ||
+    raw;
+
+  const {
+    search,
+    hash,
+  } =
+    splitSearchAndHash(path);
+
+  if (
+    search &&
+    hasTokenParam(search, type)
+  ) {
+    return true;
+  }
+
+  if (
+    hash &&
+    hash.includes("?")
+  ) {
+    const query =
+      hash
+        .split("?")
+        .slice(1)
+        .join("?");
+
+    if (
+      query &&
+      hasTokenParam(query, type)
+    ) {
+      return true;
+    }
+  }
+
+  try {
+    const parsed =
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
+
+    if (
+      parsed.search &&
+      hasTokenParam(parsed.search, type)
+    ) {
+      return true;
+    }
+
+    if (
+      parsed.hash &&
+      isHashRouterPath(parsed.hash)
+    ) {
+      const hashPath =
+        normalizeHashRouterPath(parsed.hash);
+
+      const hashParts =
+        splitSearchAndHash(hashPath);
+
+      if (
+        hashParts.search &&
+        hasTokenParam(hashParts.search, type)
+      ) {
+        return true;
+      }
+    }
+
+    if (
+      parsed.hash &&
+      parsed.hash.includes("?")
+    ) {
+      const hashQuery =
+        parsed.hash
+          .split("?")
+          .slice(1)
+          .join("?");
+
+      if (
+        hashQuery &&
+        hasTokenParam(hashQuery, type)
+      ) {
+        return true;
+      }
+    }
+  } catch {}
+
+  return false;
+}
+
+export function hasActivationToken(value = "") {
+  const path =
+    pathFromUrlLike(value) ||
+    value;
+
+  const normalized =
+    normalizeRoutePath(path);
+
+  if (normalized.startsWith("/activate-account/")) {
+    return true;
+  }
+
+  return hasTokenInUrl(
+    value,
+    "activation"
+  );
+}
+
+export function hasResetToken(value = "") {
+  const path =
+    pathFromUrlLike(value) ||
+    value;
+
+  const normalized =
+    normalizeRoutePath(path);
+
+  if (normalized.startsWith("/reset-password/confirm/")) {
+    return true;
+  }
+
+  return hasTokenInUrl(
+    value,
+    "reset"
+  );
+}
+
+/* =========================================================
    SNAPSHOT
 ========================================================= */
 
@@ -1735,6 +2162,12 @@ export function getAuthConstantsSnapshot() {
 
     endpointGroups:
       AUTH_ENDPOINT_GROUPS,
+
+    publicApiPaths:
+      AUTH_PUBLIC_API_PATHS,
+
+    privateApiPaths:
+      AUTH_PRIVATE_API_PATHS,
 
     storageKeys:
       AUTH_STORAGE_KEYS,
@@ -1775,6 +2208,8 @@ export default deepFreeze({
   LOGIN_ENDPOINT,
   LOGOUT_ENDPOINT,
   ME_ENDPOINT,
+  ME_LEGACY_ENDPOINT,
+  ME_AUTH_LEGACY_ENDPOINT,
   REFRESH_ENDPOINT,
   TWO_FACTOR_LOGIN_ENDPOINT,
   HEALTH_ENDPOINT,
@@ -1790,6 +2225,8 @@ export default deepFreeze({
   AUTH_ENDPOINTS,
   AUTH_ENDPOINT_CANDIDATES,
   AUTH_ENDPOINT_GROUPS,
+  AUTH_PUBLIC_API_PATHS,
+  AUTH_PRIVATE_API_PATHS,
 
   AUTH_STORAGE_KEYS,
   AUTH_LEGACY_STORAGE_KEYS,
@@ -1809,6 +2246,7 @@ export default deepFreeze({
   safeBool,
   clampNumber,
 
+  pathFromUrlLike,
   normalizeEndpointPath,
   normalizeRoutePath,
 
@@ -1874,6 +2312,7 @@ export default deepFreeze({
 
   isAuthEndpoint,
   isEndpointInGroup,
+  isMeEndpoint,
   isPublicAuthEndpoint,
   isPrivateAuthEndpoint,
   isPasswordResetEndpoint,
@@ -1887,6 +2326,11 @@ export default deepFreeze({
   getAuthTokenParamNames,
   getAllAuthTokenParamNames,
   getTechnicalRouteAlias,
+
+  hasTokenParam,
+  hasTokenInUrl,
+  hasActivationToken,
+  hasResetToken,
 
   getAuthConstantsSnapshot,
 });

@@ -2,6 +2,9 @@
    Onion SPA - Core Helpers
    Archivo: src/core/helpers.js
 
+   ONION SUPPORT · CORE HELPERS
+   PATHS · USER · URL · REQUEST · TOKEN SAFE · 13/10
+
    RESPONSABILIDADES:
    - utilidades base del core
    - normalización de paths, usernames y usuarios
@@ -17,11 +20,13 @@
    - paths robustos con query/hash
    - canonical consistente SIN query/hash
    - public path consistente CON query/hash
+   - public path conserva /@usuario
    - soporte hash-router real: #/ruta y #!/ruta
    - helpers seguros ante inputs raros
    - preserve contexto público/canónico
    - API base robusta sin doble /api
    - detección public API compatible con /api prefix
+   - /me nunca es API pública
    - normalización de usuario backend heterogéneo
    - avatar robusto desde payload /me
    - AbortController server/browser safe
@@ -37,7 +42,7 @@ import { config } from "./config.js";
 ========================================================= */
 
 const HELPERS_VERSION =
-  "11.0.0";
+  "13.0.0";
 
 const DEFAULT_ROUTE =
   "/";
@@ -116,6 +121,12 @@ const TECHNICAL_TOKEN_PATHS =
     "/auth/reset",
   ]);
 
+const TOKEN_COLLAPSE_PATHS =
+  Object.freeze([
+    "/activate-account",
+    "/reset-password/confirm",
+  ]);
+
 const DEFAULT_PUBLIC_API_PATHS =
   Object.freeze([
     "/auth/login",
@@ -142,9 +153,23 @@ const DEFAULT_PUBLIC_API_PATHS =
     "/api/auth/reset",
     "/api/auth/reset-password",
     "/api/auth/password/reset",
+    "/api/auth/reset-password-request",
+    "/api/auth/reset-password-confirm",
+    "/api/auth/activate/first-user",
+    "/api/auth/2fa/login",
+    "/api/auth/_health",
+    "/api/_health",
     "/api/activate-account",
     "/api/reset-password",
     "/api/reset-password/confirm",
+    "/health",
+  ]);
+
+const PRIVATE_API_PATHS =
+  Object.freeze([
+    "/api/auth/me",
+    "/auth/me",
+    "/me",
   ]);
 
 const JWT_RE =
@@ -152,9 +177,6 @@ const JWT_RE =
 
 const BEARER_RE =
   /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi;
-
-const TOKENISH_TEXT_RE =
-  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)[^&#\s]+/i;
 
 /* =========================================================
    BASE
@@ -400,7 +422,8 @@ export function getStoragePrefix() {
     DEFAULT_STORAGE_PREFIX
   )
     .replace(/:+$/g, "")
-    .replace(/^:+/g, "") || DEFAULT_STORAGE_PREFIX;
+    .replace(/^:+/g, "") ||
+    DEFAULT_STORAGE_PREFIX;
 }
 
 export function buildStorageKey(key = "") {
@@ -608,6 +631,9 @@ export function cloneError(error = null) {
       timeout:
         Boolean(error.timeout),
 
+      aborted:
+        Boolean(error.aborted),
+
       data:
         safeClone(error.data, null),
 
@@ -697,20 +723,6 @@ export function redactTokenInText(value = "") {
       JWT_RE,
       "***"
     );
-  } catch {}
-
-  try {
-    if (TOKENISH_TEXT_RE.test(output)) {
-      output = output
-        .replace(
-          /(bearer\s+)([a-z0-9._~+/=-]+)/gi,
-          "$1***"
-        )
-        .replace(
-          /([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)/gi,
-          "***"
-        );
-    }
   } catch {}
 
   return output;
@@ -905,9 +917,15 @@ export function slugify(value = "") {
 }
 
 export function normalizeApiBase(base = "") {
-  return String(base || "")
-    .trim()
-    .replace(/\/+$/, "");
+  const raw =
+    String(base || "")
+      .trim();
+
+  if (!raw || raw === "/") {
+    return "";
+  }
+
+  return raw.replace(/\/+$/, "");
 }
 
 function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
@@ -1050,6 +1068,22 @@ export function stripUsernamePrefix(path = DEFAULT_ROUTE) {
   );
 }
 
+function collapseTechnicalTokenPath(pathOnly = DEFAULT_ROUTE) {
+  const clean =
+    normalizePathnameOnly(pathOnly);
+
+  for (const base of TOKEN_COLLAPSE_PATHS) {
+    if (
+      clean === base ||
+      clean.startsWith(`${base}/`)
+    ) {
+      return base;
+    }
+  }
+
+  return clean;
+}
+
 export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
   const normalized =
     normalizePath(path);
@@ -1060,20 +1094,24 @@ export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
   const pathOnly =
     stripSearchAndHash(noSlug);
 
-  return normalizePathnameOnly(
+  return collapseTechnicalTokenPath(
     pathOnly || DEFAULT_ROUTE
   );
 }
 
 export function normalizePublicPath(path = DEFAULT_ROUTE) {
-  return stripUsernamePrefix(
-    normalizePath(path)
-  );
+  /*
+    Public path = URL visible real.
+    Debe conservar /@usuario, query y hash.
+  */
+  return normalizePath(path);
 }
 
 export function buildPublicPath(path = DEFAULT_ROUTE, username = "") {
   const publicPath =
-    normalizePublicPath(path);
+    stripUsernamePrefix(
+      normalizePath(path)
+    );
 
   const cleanUsername =
     sanitizeUsername(username);
@@ -1154,7 +1192,7 @@ export function joinUrl(base = "", path = "") {
     rawPath.replace(/^\/+/, "");
 
   if (!cleanPath) {
-    return cleanBase;
+    return cleanBase || "/";
   }
 
   if (!cleanBase) {
@@ -1397,9 +1435,31 @@ function getConfiguredPublicApiPaths() {
   ]);
 }
 
+function isExplicitPrivateApiPath(path = "") {
+  const normalized =
+    normalizeCanonicalPath(path);
+
+  const withoutApiBase =
+    stripApiBasePrefix(normalized);
+
+  return PRIVATE_API_PATHS.some((privatePath) => {
+    const current =
+      normalizeCanonicalPath(privatePath);
+
+    return (
+      normalized === current ||
+      withoutApiBase === current
+    );
+  });
+}
+
 export function isPublicApiPath(path = "") {
   const normalized =
     normalizeCanonicalPath(path);
+
+  if (isExplicitPrivateApiPath(normalized)) {
+    return false;
+  }
 
   const withoutApiBase =
     stripApiBasePrefix(normalized);
@@ -1431,7 +1491,12 @@ export function isPublicApiPath(path = "") {
 
 function normalizeRole(value = "") {
   return safeText(value, "")
-    .toLowerCase();
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_:.]/g, "")
+    .trim();
 }
 
 function unwrapUserPayload(payload = null) {
@@ -1448,18 +1513,47 @@ function unwrapUserPayload(payload = null) {
       hasOwn(payload, "ok") ||
       hasOwn(payload, "success") ||
       hasOwn(payload, "data") ||
-      hasOwn(payload, "token")
+      hasOwn(payload, "token") ||
+      hasOwn(payload, "accessToken")
     )
   ) {
     return payload.user;
+  }
+
+  if (isPlainObject(payload.usuario)) {
+    return payload.usuario;
+  }
+
+  if (isPlainObject(payload.me)) {
+    return payload.me;
+  }
+
+  if (isPlainObject(payload.account)) {
+    return payload.account;
+  }
+
+  if (isPlainObject(payload.profile)) {
+    return payload.profile;
   }
 
   if (isPlainObject(payload.data?.user)) {
     return payload.data.user;
   }
 
+  if (isPlainObject(payload.data?.usuario)) {
+    return payload.data.usuario;
+  }
+
   if (isPlainObject(payload.data?.me)) {
     return payload.data.me;
+  }
+
+  if (isPlainObject(payload.payload?.user)) {
+    return payload.payload.user;
+  }
+
+  if (isPlainObject(payload.payload?.me)) {
+    return payload.payload.me;
   }
 
   if (isPlainObject(payload.currentUser)) {
@@ -1561,41 +1655,51 @@ function resolveAvatarCandidate(user = {}) {
 
   return firstNonEmpty(
     user.avatarUrl,
+    user.avatarURL,
     user.avatar_url,
     user.avatar,
     user.photo,
     user.photoUrl,
+    user.photoURL,
     user.photo_url,
     user.image,
     user.imageUrl,
+    user.imageURL,
     user.image_url,
     user.profileImage,
     user.profile_image,
     user.picture,
     user.pictureUrl,
+    user.pictureURL,
     user.picture_url,
     user.thumbnail,
     user.thumbnailUrl,
     user.thumbnail_url,
 
     profile.avatarUrl,
+    profile.avatarURL,
     profile.avatar_url,
     profile.avatar,
     profile.photo,
     profile.photoUrl,
+    profile.photoURL,
     profile.photo_url,
     profile.image,
     profile.imageUrl,
+    profile.imageURL,
     profile.image_url,
     profile.picture,
     profile.pictureUrl,
+    profile.pictureURL,
     profile.picture_url,
 
     meta.avatarUrl,
+    meta.avatarURL,
     meta.avatar_url,
     meta.avatar,
     meta.picture,
     meta.pictureUrl,
+    meta.pictureURL,
     meta.picture_url,
 
     settings.avatarUrl,
@@ -1603,29 +1707,37 @@ function resolveAvatarCandidate(user = {}) {
     settings.avatar,
 
     raw.avatarUrl,
+    raw.avatarURL,
     raw.avatar_url,
     raw.avatar,
     raw.photo,
     raw.photoUrl,
+    raw.photoURL,
     raw.photo_url,
     raw.image,
     raw.imageUrl,
+    raw.imageURL,
     raw.image_url,
     raw.picture,
     raw.pictureUrl,
+    raw.pictureURL,
     raw.picture_url,
 
     rawProfile.avatarUrl,
+    rawProfile.avatarURL,
     rawProfile.avatar_url,
     rawProfile.avatar,
     rawProfile.photo,
     rawProfile.photoUrl,
+    rawProfile.photoURL,
     rawProfile.photo_url,
     rawProfile.image,
     rawProfile.imageUrl,
+    rawProfile.imageURL,
     rawProfile.image_url,
     rawProfile.picture,
     rawProfile.pictureUrl,
+    rawProfile.pictureURL,
     rawProfile.picture_url
   );
 }
@@ -1657,6 +1769,7 @@ export function normalizeUser(user = null) {
     source.user_id ??
     source.uuid ??
     source._id ??
+    source.uid ??
     profile.id ??
     profile.userId ??
     profile.user_id ??
@@ -1744,6 +1857,8 @@ export function normalizeUser(user = null) {
         source.type,
         source.user_type,
         source.userType,
+        source.perfil,
+        source.profileType,
         profile.role,
         profile.rol,
         raw.role,
@@ -2384,6 +2499,10 @@ export function getHelpersSnapshot() {
       config?.defaultTheme || "dark",
   };
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   HELPERS_VERSION,

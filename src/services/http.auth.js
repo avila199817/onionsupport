@@ -8,9 +8,10 @@
    Responsabilidades:
    - Resolver auto refresh ante respuestas 401 privadas.
    - Evitar refresh duplicados concurrentes.
-   - Excluir endpoints auth del auto refresh.
+   - Excluir endpoints auth de control del auto refresh.
    - Excluir endpoints públicos técnicos del auto refresh.
    - Excluir requests public/auth:false.
+   - Mantener /api/auth/me como endpoint privado.
    - No hacer logout aquí.
    - Devolver true/false limpio al HTTP Service.
    - Mantener stats de refresh para diagnóstico.
@@ -30,15 +31,16 @@
    - No refrescar timeouts.
    - No refrescar si status !== 401.
    - No refrescar si ya se intentó refresh.
-   - No refrescar endpoints auth.
+   - No refrescar login/refresh/logout/activation/reset/2FA/health.
+   - /api/auth/me, /auth/me y /me NO son públicos.
    - No refrescar endpoints públicos técnicos.
    - No refrescar requests public/auth:false.
    - Serializar refresh concurrente.
    - Rate-limit opcional.
    - Soporte Auth.refreshSession / refresh / refreshToken / restoreSession.
    - Soporte refresh que devuelve boolean, token_only o payload completo.
-   - Aplica payload de sesión si el refresh devuelve token/user.
-   - Valida que exista access token usable tras refresh antes de replay.
+   - Aplica payload de sesión si el refresh devuelve token/user/session.
+   - Valida access token usable tras refresh antes de replay.
    - Eventos sin tokens reales.
    - Stats consistentes.
    - Fallback si state no existe.
@@ -47,10 +49,6 @@
 
 import {
   isFn,
-  isAuthEndpoint,
-  isPublicAuthEndpoint,
-  isTechnicalPublicRoute,
-  isPublicEndpoint,
   redactHttpValue,
   sanitizeData,
 } from "./http.helpers.js";
@@ -60,7 +58,7 @@ import {
 ========================================================= */
 
 export const HTTP_AUTH_VERSION =
-  "14.0.0";
+  "14.1.0";
 
 const LOG_PREFIX =
   "[HTTP Auth]";
@@ -126,6 +124,75 @@ const REFRESH_METHOD_CANDIDATES =
     "restoreSession",
   ]);
 
+const AUTH_ME_ENDPOINTS =
+  Object.freeze([
+    "/me",
+    "/auth/me",
+    "/api/auth/me",
+  ]);
+
+const AUTH_REFRESH_CONTROL_MARKERS =
+  Object.freeze([
+    "/auth/login",
+    "/auth/refresh",
+    "/auth/logout",
+    "/auth/logout-all",
+
+    "/auth/2fa/login",
+    "/auth/mfa/login",
+    "/auth/otp/login",
+
+    "/auth/activate",
+    "/auth/activate-account",
+    "/auth/account/activate",
+    "/auth/activation",
+    "/auth/activate/first-user",
+
+    "/auth/reset-password",
+    "/auth/reset-password-request",
+    "/auth/reset-password-confirm",
+    "/auth/password-reset",
+    "/auth/forgot-password",
+    "/auth/recover-password",
+
+    "/auth/_health",
+  ]);
+
+const PUBLIC_AUTH_ENDPOINT_MARKERS =
+  Object.freeze([
+    "/auth/login",
+    "/auth/refresh",
+
+    "/auth/2fa/login",
+    "/auth/mfa/login",
+    "/auth/otp/login",
+
+    "/auth/activate",
+    "/auth/activate-account",
+    "/auth/account/activate",
+    "/auth/activation",
+    "/auth/activate/first-user",
+
+    "/auth/reset-password",
+    "/auth/reset-password-request",
+    "/auth/reset-password-confirm",
+    "/auth/password-reset",
+    "/auth/forgot-password",
+    "/auth/recover-password",
+
+    "/auth/_health",
+  ]);
+
+const TECHNICAL_PUBLIC_ROUTES =
+  Object.freeze([
+    "/activate-account",
+    "/reset-password",
+    "/forgot-password",
+    "/recover-password",
+    "/password-reset",
+    "/reset-password/confirm",
+  ]);
+
 /* =========================================================
    MODULE FALLBACK STATE
 ========================================================= */
@@ -154,6 +221,12 @@ function safeObject(value, fallback = {}) {
   return isObject(value)
     ? value
     : fallback;
+}
+
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 function safeText(value, fallback = "") {
@@ -262,6 +335,198 @@ function safeRedact(value = "") {
   } catch {
     return safeText(value, "");
   }
+}
+
+/* =========================================================
+   ENDPOINT POLICY
+========================================================= */
+
+function getBaseOrigin() {
+  try {
+    if (
+      typeof window !== "undefined" &&
+      window.location?.origin
+    ) {
+      return window.location.origin;
+    }
+  } catch {}
+
+  return "http://localhost";
+}
+
+export function normalizeEndpointPath(path = "") {
+  const raw =
+    safeText(path, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    const parsed =
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
+
+    return safeLower(
+      parsed.pathname || raw
+    ).replace(/\/{2,}/g, "/");
+  } catch {}
+
+  return safeLower(
+    raw
+      .split("?")[0]
+      .split("#")[0] ||
+      raw
+  ).replace(/\/{2,}/g, "/");
+}
+
+function stripApiPrefix(path = "") {
+  const normalized =
+    normalizeEndpointPath(path);
+
+  if (normalized === "/api") {
+    return "/";
+  }
+
+  if (normalized.startsWith("/api/")) {
+    return normalized.slice(4) || "/";
+  }
+
+  return normalized;
+}
+
+function getComparableEndpointPaths(path = "") {
+  const normalized =
+    normalizeEndpointPath(path);
+
+  const withoutApi =
+    stripApiPrefix(normalized);
+
+  return Array.from(
+    new Set([
+      normalized,
+      withoutApi,
+    ].filter(Boolean))
+  );
+}
+
+function endpointMatches(path = "", markers = []) {
+  const candidates =
+    getComparableEndpointPaths(path);
+
+  if (!candidates.length) {
+    return false;
+  }
+
+  return safeArray(markers).some((marker) => {
+    const cleanMarker =
+      normalizeEndpointPath(marker);
+
+    if (!cleanMarker) {
+      return false;
+    }
+
+    return candidates.some((candidate) => (
+      candidate === cleanMarker ||
+      candidate.endsWith(cleanMarker) ||
+      candidate.includes(cleanMarker)
+    ));
+  });
+}
+
+export function isAuthMeEndpoint(path = "") {
+  const candidates =
+    getComparableEndpointPaths(path);
+
+  return candidates.some((candidate) =>
+    AUTH_ME_ENDPOINTS.includes(candidate) ||
+    candidate.endsWith("/auth/me")
+  );
+}
+
+export function isPublicAuthEndpoint(path = "") {
+  if (isAuthMeEndpoint(path)) {
+    return false;
+  }
+
+  return endpointMatches(
+    path,
+    PUBLIC_AUTH_ENDPOINT_MARKERS
+  );
+}
+
+export function isAuthRefreshControlEndpoint(path = "") {
+  if (isAuthMeEndpoint(path)) {
+    return false;
+  }
+
+  return endpointMatches(
+    path,
+    AUTH_REFRESH_CONTROL_MARKERS
+  );
+}
+
+export function isTechnicalPublicRoute(path = "") {
+  const candidates =
+    getComparableEndpointPaths(path);
+
+  if (!candidates.length) {
+    return false;
+  }
+
+  return TECHNICAL_PUBLIC_ROUTES.some((route) => {
+    const clean =
+      normalizeEndpointPath(route);
+
+    return candidates.some((candidate) => (
+      candidate === clean ||
+      candidate.startsWith(`${clean}/`)
+    ));
+  });
+}
+
+export function isPublicEndpoint(path = "", AppCore = null) {
+  if (isAuthMeEndpoint(path)) {
+    return false;
+  }
+
+  if (
+    isPublicAuthEndpoint(path) ||
+    isTechnicalPublicRoute(path)
+  ) {
+    return true;
+  }
+
+  try {
+    if (isFn(AppCore?.utils?.isPublicApiPath)) {
+      return Boolean(
+        AppCore.utils.isPublicApiPath(path)
+      );
+    }
+  } catch {}
+
+  try {
+    if (isFn(AppCore?.isPublicApiPath)) {
+      return Boolean(
+        AppCore.isPublicApiPath(path)
+      );
+    }
+  } catch {}
+
+  return false;
+}
+
+export function isAuthEndpoint(path = "") {
+  const normalized =
+    normalizeEndpointPath(path);
+
+  return (
+    normalized.includes("/auth/") ||
+    normalized.endsWith("/auth") ||
+    isAuthMeEndpoint(path)
+  );
 }
 
 /* =========================================================
@@ -1252,6 +1517,76 @@ function isRefreshResultPositive(result) {
    APPLY SESSION
 ========================================================= */
 
+async function callApplySessionFlexible({
+  Auth,
+  AppCore,
+  sessionPayload,
+  options,
+}) {
+  let applied =
+    false;
+
+  try {
+    if (isFn(Auth?.applySession)) {
+      const applyResult =
+        await Auth.applySession(
+          sessionPayload,
+          options
+        );
+
+      applied =
+        applyResult !== false;
+    }
+  } catch {}
+
+  if (!applied) {
+    try {
+      if (isFn(Auth?.applySession)) {
+        const applyResult =
+          await Auth.applySession({
+            ...sessionPayload,
+            ...options,
+          });
+
+        applied =
+          applyResult !== false;
+      }
+    } catch {}
+  }
+
+  if (!applied) {
+    try {
+      if (isFn(AppCore?.applySession)) {
+        const applyResult =
+          AppCore.applySession(
+            sessionPayload,
+            options
+          );
+
+        applied =
+          applyResult !== false;
+      }
+    } catch {}
+  }
+
+  if (!applied) {
+    try {
+      if (isFn(AppCore?.applySession)) {
+        const applyResult =
+          AppCore.applySession({
+            ...sessionPayload,
+            ...options,
+          });
+
+        applied =
+          applyResult !== false;
+      }
+    } catch {}
+  }
+
+  return applied;
+}
+
 async function applyRefreshPayloadIfNeeded({
   AppCore,
   Auth,
@@ -1278,84 +1613,50 @@ async function applyRefreshPayloadIfNeeded({
   let applied =
     false;
 
-  try {
-    if (isFn(Auth?.applySession)) {
-      const applyResult =
-        await Auth.applySession({
-          token:
-            payload.token || undefined,
+  const sessionPayload = {
+    token:
+      payload.token || undefined,
 
-          accessToken:
-            payload.token || undefined,
+    accessToken:
+      payload.token || undefined,
 
-          refreshToken:
-            payload.refreshToken || undefined,
+    refreshToken:
+      payload.refreshToken || undefined,
 
-          sessionId:
-            payload.sessionId || undefined,
+    sessionId:
+      payload.sessionId || undefined,
 
-          sessionUserId:
-            payload.sessionUserId || undefined,
+    sessionUserId:
+      payload.sessionUserId || undefined,
 
-          user:
-            payload.user || undefined,
+    user:
+      payload.user || undefined,
+  };
 
-          source:
-            "http.auth",
+  const options = {
+    source:
+      "http.auth",
 
-          reason:
-            DEFAULT_REFRESH_REASON,
+    reason:
+      DEFAULT_REFRESH_REASON,
 
-          preserveExistingUser:
-            !payload.user,
-        });
+    preserveExistingUser:
+      !payload.user,
 
-      applied =
-        applyResult !== false;
-    }
-  } catch {}
+    skipNavigation:
+      true,
 
-  if (!applied) {
-    try {
-      if (isFn(AppCore?.applySession)) {
-        const applyResult =
-          AppCore.applySession(
-            {
-              token:
-                payload.token || undefined,
+    skipPostRestoreNavigation:
+      true,
+  };
 
-              accessToken:
-                payload.token || undefined,
-
-              refreshToken:
-                payload.refreshToken || undefined,
-
-              sessionId:
-                payload.sessionId || undefined,
-
-              sessionUserId:
-                payload.sessionUserId || undefined,
-
-              user:
-                payload.user || undefined,
-            },
-            {
-              source:
-                "http.auth",
-
-              reason:
-                DEFAULT_REFRESH_REASON,
-
-              preserveExistingUser:
-                !payload.user,
-            }
-          );
-
-        applied =
-          applyResult !== false;
-      }
-    } catch {}
-  }
+  applied =
+    await callApplySessionFlexible({
+      Auth,
+      AppCore,
+      sessionPayload,
+      options,
+    });
 
   if (!applied && payload.token) {
     try {
@@ -1658,26 +1959,29 @@ function shouldSkipRefresh({
     "";
 
   /*
-    Regla del servicio:
-    El auto-refresh NO corre dentro de endpoints auth.
-    Auth.restore/Auth.login ya gestionan /me y /refresh en su propia capa.
+    /api/auth/me, /auth/me y /me son PRIVADOS:
+    - no son públicos
+    - no se bloquean como endpoint auth de control
+    - pueden disparar refresh si devuelven 401
   */
-  if (isAuthEndpoint(path)) {
-    return markSkipped(
-      root,
-      AppCore,
-      context,
-      "auth-endpoint"
-    );
-  }
+  if (!isAuthMeEndpoint(path)) {
+    if (isAuthRefreshControlEndpoint(path)) {
+      return markSkipped(
+        root,
+        AppCore,
+        context,
+        "auth-control-endpoint"
+      );
+    }
 
-  if (isPublicAuthEndpoint(path)) {
-    return markSkipped(
-      root,
-      AppCore,
-      context,
-      "public-auth-endpoint"
-    );
+    if (isPublicAuthEndpoint(path)) {
+      return markSkipped(
+        root,
+        AppCore,
+        context,
+        "public-auth-endpoint"
+      );
+    }
   }
 
   if (isTechnicalPublicRoute(path)) {
@@ -1689,7 +1993,7 @@ function shouldSkipRefresh({
     );
   }
 
-  if (isPublicEndpoint(path)) {
+  if (isPublicEndpoint(path, AppCore)) {
     return markSkipped(
       root,
       AppCore,
@@ -1952,8 +2256,9 @@ export async function runAutoRefreshIfNeeded({
 
     /*
       Para que el HTTP Service pueda reintentar la request original,
-      la condición mínima es access token usable. No exigimos user usable aquí
-      porque algunos refresh devuelven token_only y Auth.restore se encarga de /me.
+      la condición mínima es access token usable.
+      No exigimos user usable aquí porque algunos refresh devuelven token_only
+      y Auth.restore/Auth.me pueden completar usuario después.
     */
     const ok =
       Boolean(
@@ -2055,6 +2360,23 @@ export function getHttpAuthSnapshot(state) {
     refreshInFlight:
       Boolean(root.refreshPromise),
 
+    endpointPolicy: {
+      authMePrivate:
+        true,
+
+      authMeEndpoints:
+        AUTH_ME_ENDPOINTS,
+
+      publicAuthMarkers:
+        PUBLIC_AUTH_ENDPOINT_MARKERS.length,
+
+      authRefreshControlMarkers:
+        AUTH_REFRESH_CONTROL_MARKERS.length,
+
+      technicalPublicRoutes:
+        TECHNICAL_PUBLIC_ROUTES,
+    },
+
     refreshStats: {
       ...root.refreshStats,
 
@@ -2118,4 +2440,12 @@ export default {
 
   getHttpAuthSnapshot,
   resetHttpAuthRuntime,
+
+  normalizeEndpointPath,
+  isAuthEndpoint,
+  isAuthMeEndpoint,
+  isPublicAuthEndpoint,
+  isAuthRefreshControlEndpoint,
+  isTechnicalPublicRoute,
+  isPublicEndpoint,
 };

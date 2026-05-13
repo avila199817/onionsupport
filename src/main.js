@@ -16,7 +16,7 @@
    - Evitar doble arranque.
    - Capturar errores fatales del arranque físico.
    - Exponer diagnóstico mínimo en window.OnionApp.main.
-   - No montar UI.
+   - No montar UI de negocio.
    - No configurar Router/Auth/Store.
    - No controlar el loader real salvo fallback fatal de emergencia.
    - No contener CSS.
@@ -31,13 +31,19 @@
      antes del import dinámico.
    - src/app/loader.js gobierna el loader real.
    - src/app/index.js gobierna bootstrap, restore, router, UI y finalize.
+
+   FIX DIAGNÓSTICO:
+   - serializeMainError() evita que consola muestre error: {}.
+   - window.__ONION_FATAL_ERROR__ conserva error serializado y rawError.
+   - window.__ONION_LAST_WINDOW_ERROR__ conserva errores globales.
+   - window.__ONION_LAST_REJECTION__ conserva unhandled rejections.
 ========================================================= */
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-const MAIN_VERSION = "14.0.0";
+const MAIN_VERSION = "14.1.0";
 
 const MAIN_SOURCE = "main";
 
@@ -71,6 +77,8 @@ const TOKEN_ROUTE_CONFIGS = Object.freeze([
       "token",
       "activationToken",
       "activateToken",
+      "activation_token",
+      "activate_token",
       "code",
       "t",
     ]),
@@ -87,7 +95,10 @@ const TOKEN_ROUTE_CONFIGS = Object.freeze([
       "token",
       "resetToken",
       "passwordResetToken",
+      "reset_token",
+      "password_reset_token",
       "confirmToken",
+      "confirm_token",
       "code",
       "t",
     ]),
@@ -98,9 +109,14 @@ const SENSITIVE_PARAM_NAMES = Object.freeze([
   "token",
   "activationToken",
   "activateToken",
+  "activation_token",
+  "activate_token",
   "resetToken",
+  "reset_token",
   "passwordResetToken",
+  "password_reset_token",
   "confirmToken",
+  "confirm_token",
   "code",
   "t",
   "access_token",
@@ -838,12 +854,37 @@ function getMatchedTokenRouteContext(href = "") {
 }
 
 /* =========================================================
-   ERROR / PAYLOAD SANITIZE
+   ERROR SERIALIZATION / PAYLOAD SANITIZE
 ========================================================= */
 
-function sanitizeError(error = null) {
+function serializeMainError(error = null, depth = 0) {
+  if (depth > 4) {
+    return {
+      name:
+        "DepthLimitError",
+
+      message:
+        "Error depth limit reached.",
+
+      stack:
+        "",
+    };
+  }
+
   if (!error) {
-    return null;
+    return {
+      name:
+        "UnknownError",
+
+      message:
+        "Error desconocido",
+
+      stack:
+        "",
+
+      rawType:
+        typeof error,
+    };
   }
 
   const candidate =
@@ -851,39 +892,169 @@ function sanitizeError(error = null) {
     error?.error ||
     error;
 
-  return {
+  if (candidate instanceof Error) {
+    return {
+      name:
+        safeText(candidate.name, "Error"),
+
+      message:
+        redactSensitiveText(
+          safeText(candidate.message, "")
+        ),
+
+      stack:
+        redactSensitiveText(
+          safeText(candidate.stack, "")
+        ),
+
+      code:
+        candidate.code || null,
+
+      status:
+        candidate.status ||
+        candidate.statusCode ||
+        candidate.response?.status ||
+        candidate.data?.status ||
+        null,
+
+      timeout:
+        Boolean(candidate.timeout),
+
+      aborted:
+        Boolean(candidate.aborted),
+
+      cause:
+        candidate.cause
+          ? serializeMainError(candidate.cause, depth + 1)
+          : null,
+    };
+  }
+
+  if (typeof candidate === "string") {
+    return {
+      name:
+        "ThrownString",
+
+      message:
+        redactSensitiveText(candidate),
+
+      stack:
+        "",
+
+      rawType:
+        "string",
+    };
+  }
+
+  if (typeof candidate !== "object") {
+    return {
+      name:
+        "ThrownValue",
+
+      message:
+        redactSensitiveText(String(candidate)),
+
+      stack:
+        "",
+
+      rawType:
+        typeof candidate,
+    };
+  }
+
+  const output = {
     name:
-      safeText(
-        candidate?.name,
-        "Error"
-      ),
+      safeText(candidate.name, "ObjectError"),
 
     message:
       redactSensitiveText(
         safeText(
-          candidate?.message ||
-            candidate?.reason ||
-            candidate,
-          "Error"
+          candidate.message ||
+            candidate.reason ||
+            candidate.statusText,
+          ""
         )
       ),
 
-    code:
-      safeText(
-        candidate?.code ||
-          candidate?.statusCode ||
-          "",
-        ""
+    stack:
+      redactSensitiveText(
+        safeText(candidate.stack, "")
       ),
+
+    code:
+      candidate.code ||
+      candidate.errorCode ||
+      candidate.error_code ||
+      null,
 
     status:
-      safeNumber(
-        candidate?.status,
-        0
-      ),
+      candidate.status ||
+      candidate.statusCode ||
+      candidate.status_code ||
+      candidate.response?.status ||
+      candidate.data?.status ||
+      null,
 
     timeout:
-      Boolean(candidate?.timeout),
+      Boolean(candidate.timeout),
+
+    aborted:
+      Boolean(candidate.aborted),
+
+    keys:
+      [],
+  };
+
+  try {
+    output.keys =
+      Object.keys(candidate).slice(0, 80);
+  } catch {
+    output.keys =
+      [];
+  }
+
+  try {
+    output.data =
+      candidate.data
+        ? sanitizePayload(candidate.data)
+        : null;
+  } catch {
+    output.data =
+      null;
+  }
+
+  try {
+    output.response =
+      candidate.response
+        ? sanitizePayload(candidate.response)
+        : null;
+  } catch {
+    output.response =
+      null;
+  }
+
+  try {
+    output.raw =
+      JSON.parse(
+        JSON.stringify(
+          sanitizePayload(candidate)
+        )
+      );
+  } catch {
+    output.raw =
+      redactSensitiveText(String(candidate));
+  }
+
+  return output;
+}
+
+function sanitizeError(error = null) {
+  if (!error) {
+    return null;
+  }
+
+  return {
+    ...serializeMainError(error),
 
     at:
       nowIso(),
@@ -940,6 +1111,10 @@ function sanitizeBootContext(context = {}) {
 
 function sanitizePayload(payload = {}) {
   if (!isObject(payload)) {
+    if (payload instanceof Error) {
+      return sanitizeError(payload);
+    }
+
     if (typeof payload === "string") {
       return redactSensitiveText(payload);
     }
@@ -970,6 +1145,7 @@ function sanitizePayload(payload = {}) {
         "redirectTo",
         "filename",
         "message",
+        "stack",
       ].includes(key) &&
       typeof value === "string"
     ) {
@@ -1117,7 +1293,7 @@ function safeError(...args) {
   } catch {
     coreLogged =
       false;
-    }
+  }
 
   if (coreLogged) {
     return;
@@ -2000,10 +2176,6 @@ function captureInitialUrl(reason = "main") {
     false
   );
 
-  /*
-    Compartido con src/app/index.js/helpers.js.
-    No sustituye el contexto rico de App, sólo aporta captura temprana.
-  */
   writeRuntimeValue(
     APP_BOOT_CONTEXT_KEY,
     {
@@ -2129,10 +2301,6 @@ function bindReady(callback) {
     }
   };
 
-  /*
-    No dependemos de AppCore.ready aquí porque AppCore se carga dinámicamente.
-    El único contrato físico del main es DOM ready.
-  */
   void waitForDomReady()
     .then(runOnce)
     .catch((error) => {
@@ -2327,13 +2495,6 @@ function emergencyHideLoader() {
     addClass(loader, "has-hidden");
     addClass(loader, "loader-hidden");
 
-    try {
-      loader.style.display = "";
-      loader.style.opacity = "";
-      loader.style.visibility = "";
-      loader.style.pointerEvents = "";
-    } catch {}
-
     return true;
   } catch {
     return false;
@@ -2497,10 +2658,14 @@ function createDetailsButton(error) {
 }
 
 function buildFatalBootNode(error = null) {
+  const serialized =
+    serializeMainError(error);
+
   const message =
     redactSensitiveText(
       safeText(
-        error?.message,
+        serialized.message ||
+          error?.message,
         DEFAULT_FATAL_MESSAGE
       )
     );
@@ -2590,7 +2755,7 @@ function buildFatalBootNode(error = null) {
       className:
         "boot-error-card__hint",
       text:
-        "Recarga la página. Si el problema persiste, revisa la consola del navegador.",
+        "Recarga la página. Si el problema persiste, revisa window.__ONION_FATAL_ERROR__ en la consola.",
     });
 
   header.appendChild(eyebrow);
@@ -2625,8 +2790,8 @@ function buildFatalBootNode(error = null) {
     createElement("span", {
       text:
         safeText(
-          error?.code ||
-            error?.name,
+          serialized.code ||
+            serialized.name,
           "MAIN_BOOT_ERROR"
         ),
     })
@@ -2746,6 +2911,9 @@ async function handleFatalError(error = null, reason = "fatal") {
   const normalizedError =
     normalizeBootError(error);
 
+  const serializedError =
+    serializeMainError(normalizedError);
+
   state.failed =
     true;
 
@@ -2758,14 +2926,37 @@ async function handleFatalError(error = null, reason = "fatal") {
   state.lastError =
     normalizedError;
 
+  try {
+    if (isBrowser()) {
+      window.__ONION_FATAL_ERROR__ = {
+        reason,
+        error:
+          serializedError,
+        rawError:
+          normalizedError,
+        bootContext:
+          sanitizeBootContext(state.lastBootContext || {}),
+        at:
+          nowIso(),
+      };
+    }
+  } catch {}
+
   safeError(
     "Fallo fatal en main.",
     {
       reason,
       error:
-        normalizedError,
+        serializedError,
     }
   );
+
+  try {
+    console.error(
+      "[Main] Error original:",
+      normalizedError
+    );
+  } catch {}
 
   safeEmit(
     MAIN_EVENTS.bootError,
@@ -2826,10 +3017,6 @@ function bindGlobalSafetyNet() {
     window.addEventListener(
       "error",
       (event) => {
-        if (state.settled) {
-          return;
-        }
-
         if (isResourceErrorEvent(event)) {
           safeEmit(
             MAIN_EVENTS.globalError,
@@ -2855,6 +3042,25 @@ function bindGlobalSafetyNet() {
           event?.message ||
           null;
 
+        try {
+          window.__ONION_LAST_WINDOW_ERROR__ = {
+            message:
+              event?.message || "Global error",
+            filename:
+              redactSensitiveText(event?.filename || ""),
+            lineno:
+              event?.lineno || 0,
+            colno:
+              event?.colno || 0,
+            error:
+              serializeMainError(error),
+            rawError:
+              error,
+            at:
+              nowIso(),
+          };
+        } catch {}
+
         safeEmit(
           MAIN_EVENTS.globalError,
           {
@@ -2869,6 +3075,13 @@ function bindGlobalSafetyNet() {
             error,
           }
         );
+
+        if (!state.settled) {
+          void handleFatalError(
+            error,
+            "window.error"
+          );
+        }
       },
       true
     );
@@ -2878,12 +3091,19 @@ function bindGlobalSafetyNet() {
     window.addEventListener(
       "unhandledrejection",
       (event) => {
-        if (state.settled) {
-          return;
-        }
-
         const reason =
           event?.reason || null;
+
+        try {
+          window.__ONION_LAST_REJECTION__ = {
+            reason:
+              serializeMainError(reason),
+            rawReason:
+              reason,
+            at:
+              nowIso(),
+          };
+        } catch {}
 
         safeEmit(
           MAIN_EVENTS.unhandledRejection,
@@ -2899,15 +3119,12 @@ function bindGlobalSafetyNet() {
           }
         );
 
-        /*
-          Durante el arranque físico, una rejection sin capturar suele dejar
-          la SPA en estado indefinido. La convertimos en fatal sólo antes
-          de finalizar main.
-        */
-        void handleFatalError(
-          reason,
-          "unhandledrejection"
-        );
+        if (!state.settled) {
+          void handleFatalError(
+            reason,
+            "unhandledrejection"
+          );
+        }
       }
     );
   } catch {}
@@ -2941,13 +3158,15 @@ function appStateLooksFailed(appState = null) {
     snapshot.failed === true ||
       snapshot.fatal === true ||
       snapshot.appFatal === true ||
-      snapshot.booted === false &&
+      (
+        snapshot.booted === false &&
         (
           snapshot.lastBootErrorAt ||
           snapshot.lastBootError ||
           snapshot.bootPhase === "error" ||
           snapshot.bootPhase === "fatal"
         )
+      )
   );
 }
 
@@ -3172,11 +3391,6 @@ function start(options = {}) {
         void boot(opts)
           .then(resolve)
           .catch((error) => {
-            /*
-              handleFatalError() ya renderiza el estado fatal.
-              Rechazamos para callers explícitos, pero el autoarranque
-              captura abajo para evitar ruido extra.
-            */
             reject(error);
           });
       });
@@ -3337,6 +3551,11 @@ function getMainSnapshot() {
 
     lastError:
       sanitizeError(state.lastError),
+
+    fatalGlobal:
+      isBrowser()
+        ? window.__ONION_FATAL_ERROR__ || null
+        : null,
 
     appState,
   });

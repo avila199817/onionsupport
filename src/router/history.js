@@ -2,7 +2,8 @@
    Onion SPA - Router History
    Archivo: src/router/history.js
 
-   FINAL EXTREME SYSTEM · HISTORY / URL STATE · 10/10
+   FINAL EXTREME SYSTEM · HISTORY / URL STATE · 11/10
+   PUBLIC PATH SAFE · TOKEN ROUTES SAFE · SCRUB OFFICIAL SAFE
 
    RESPONSABILIDADES:
    - centralizar pushState / replaceState
@@ -36,6 +37,7 @@
    - canonicalPath real vía normalizeCanonicalPath()
    - timestamps/navId estables
    - eventos router:history:* para debug sin tokens reales
+   - firma anti doble escritura coherente
 ========================================================= */
 
 import {
@@ -61,8 +63,11 @@ import {
    CONSTANTS
 ========================================================= */
 
+export const ROUTER_HISTORY_VERSION =
+  "11.0.0";
+
 const HISTORY_STATE_VERSION =
-  4;
+  5;
 
 const DEFAULT_ROUTE =
   "/";
@@ -150,8 +155,115 @@ const HISTORY_EVENTS =
       "router:history:back",
   });
 
+const WRITE_DEDUPE_MS =
+  24;
+
 /* =========================================================
-   NORMALIZED PROTECTED ROUTES
+   BASICS
+========================================================= */
+
+function canUseHistory() {
+  return (
+    isBrowser() &&
+    typeof window !== "undefined" &&
+    typeof window.history !== "undefined" &&
+    typeof window.history.pushState === "function" &&
+    typeof window.history.replaceState === "function"
+  );
+}
+
+function nowTs() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+function nowIso(ms = nowTs()) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
+  }
+}
+
+function safeText(value, fallback = "") {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text =
+    String(value).trim();
+
+  return text || fallback;
+}
+
+function safeObject(value) {
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
+function unique(values = []) {
+  return [
+    ...new Set(
+      safeArray(values)
+        .map((value) =>
+          safeText(value, "")
+        )
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function getBaseOrigin() {
+  if (
+    isBrowser() &&
+    window.location?.origin
+  ) {
+    return window.location.origin;
+  }
+
+  return "http://localhost";
+}
+
+/* =========================================================
+   INTERNAL COUNTERS
+========================================================= */
+
+let historySeq =
+  0;
+
+let lastWriteSignature =
+  "";
+
+let lastWriteAt =
+  0;
+
+function nextHistoryId() {
+  historySeq += 1;
+
+  return `hist_${nowTs()}_${historySeq}`;
+}
+
+/* =========================================================
+   PROTECTED ROUTES
 ========================================================= */
 
 function normalizeProtectedRouteConfig(config = {}) {
@@ -236,6 +348,10 @@ function normalizeProtectedRouteConfig(config = {}) {
       isReset
         ? "scrubbedResetPasswordToken"
         : "scrubbedActivateAccountToken",
+
+      isReset
+        ? "scrubbedResetConfirmToken"
+        : "scrubbedActivateAccountToken",
     ]
       .map((value) =>
         safeText(value, "")
@@ -245,9 +361,12 @@ function normalizeProtectedRouteConfig(config = {}) {
   return Object.freeze({
     key,
     kind,
+
     canonicalPath:
-      path,
-    path,
+      normalizePathnameOnly(path),
+
+    path:
+      normalizePathnameOnly(path),
 
     tokenNames:
       Object.freeze([
@@ -309,110 +428,6 @@ const SENSITIVE_PARAM_NAMES =
       )
       .filter(Boolean)
   );
-
-/* =========================================================
-   INTERNAL COUNTERS
-========================================================= */
-
-let historySeq =
-  0;
-
-let lastWriteSignature =
-  "";
-
-let lastWriteAt =
-  0;
-
-/* =========================================================
-   BASICS
-========================================================= */
-
-function canUseHistory() {
-  return (
-    isBrowser() &&
-    typeof window !== "undefined" &&
-    typeof window.history !== "undefined" &&
-    typeof window.history.pushState === "function" &&
-    typeof window.history.replaceState === "function"
-  );
-}
-
-function nowTs() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
-}
-
-function nowIso(ms = nowTs()) {
-  try {
-    return new Date(ms).toISOString();
-  } catch {
-    return "";
-  }
-}
-
-function nextHistoryId() {
-  historySeq += 1;
-
-  return `hist_${nowTs()}_${historySeq}`;
-}
-
-function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value).trim();
-
-  return text || fallback;
-}
-
-function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-    ? value
-    : {};
-}
-
-function isFunction(value) {
-  return typeof value === "function";
-}
-
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
-}
-
-function unique(values = []) {
-  return [
-    ...new Set(
-      safeArray(values)
-        .map((value) =>
-          safeText(value, "")
-        )
-        .filter(Boolean)
-    ),
-  ];
-}
-
-function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
-    return window.location.origin;
-  }
-
-  return "http://localhost";
-}
 
 /* =========================================================
    TOKEN REDACTION / SANITIZE
@@ -497,12 +512,15 @@ function sanitizeForDebug(value, seen = new WeakSet()) {
     return {
       name:
         safeText(value.name, "Error"),
+
       message:
         redactTokenInText(
           safeText(value.message, "")
         ),
+
       code:
         value.code || null,
+
       status:
         value.status || value.statusCode || null,
     };
@@ -582,11 +600,6 @@ function safeEmit(AppCore, eventName = "", payload = {}, options = {}) {
     }
   } catch {}
 
-  /*
-    Anti storm:
-    - si hay bus interno, NO duplicamos window
-    - window solo como fallback real o forzado explícito
-  */
   if (
     opts.window === true ||
     (!busAvailable && isBrowser())
@@ -610,7 +623,9 @@ function safeWarn(AppCore, ...args) {
   try {
     AppCore?.utils?.warn?.(
       "[RouterHistory]",
-      ...args
+      ...args.map((item) =>
+        sanitizeForDebug(item)
+      )
     );
   } catch {}
 
@@ -618,94 +633,12 @@ function safeWarn(AppCore, ...args) {
     if (AppCore?.config?.debug) {
       console.warn(
         "[RouterHistory]",
-        ...args
+        ...args.map((item) =>
+          sanitizeForDebug(item)
+        )
       );
     }
   } catch {}
-}
-
-function safeHistoryCall(AppCore, method, state, url, meta = {}) {
-  if (!canUseHistory()) {
-    return false;
-  }
-
-  if (
-    method !== "pushState" &&
-    method !== "replaceState"
-  ) {
-    return false;
-  }
-
-  const cleanUrl =
-    safeText(url, DEFAULT_ROUTE) ||
-    DEFAULT_ROUTE;
-
-  try {
-    window.history[method](
-      state,
-      "",
-      cleanUrl
-    );
-
-    const signature =
-      [
-        method,
-        cleanUrl,
-        state?.canonicalPath,
-        state?.publicPath,
-        state?.requestedPath,
-        state?.username,
-      ].join("|");
-
-    lastWriteSignature =
-      signature;
-
-    lastWriteAt =
-      nowTs();
-
-    safeEmit(
-      AppCore,
-      HISTORY_EVENTS.write,
-      {
-        method,
-        url:
-          cleanUrl,
-        state,
-        meta,
-        at:
-          nowIso(lastWriteAt),
-      }
-    );
-
-    return true;
-  } catch (error) {
-    safeWarn(
-      AppCore,
-      `History API ${method} falló.`,
-      {
-        url:
-          cleanUrl,
-        error,
-      }
-    );
-
-    safeEmit(
-      AppCore,
-      HISTORY_EVENTS.error,
-      {
-        method,
-        url:
-          cleanUrl,
-        error,
-        message:
-          error?.message ||
-          String(error),
-        meta,
-      }
-    );
-
-    return false;
-  }
 }
 
 /* =========================================================
@@ -947,10 +880,6 @@ function normalizePublicPath(AppCore, path = DEFAULT_ROUTE) {
   const local =
     normalizePublicPathLocal(raw);
 
-  /*
-    No delegamos si hay query/hash.
-    Algunos normalizadores internos pueden comerse tokens.
-  */
   if (
     raw.includes("?") ||
     raw.includes("#")
@@ -1891,7 +1820,7 @@ function removeSensitiveSearchParams(search = "") {
   }
 }
 
-function removeProtectedPathTokenFromPathname(AppCore, pathname = DEFAULT_ROUTE) {
+function removeProtectedPathTokenFromPathname(pathname = DEFAULT_ROUTE) {
   const clean =
     normalizePathnameOnly(pathname);
 
@@ -1908,11 +1837,6 @@ function removeProtectedPathTokenFromPathname(AppCore, pathname = DEFAULT_ROUTE)
     /^@[A-Za-z0-9._-]{1,80}$/.test(
       segments[0] || ""
     );
-
-  const prefix =
-    hasUsername
-      ? [segments[0]]
-      : [];
 
   const rest =
     hasUsername
@@ -1935,7 +1859,9 @@ function removeProtectedPathTokenFromPathname(AppCore, pathname = DEFAULT_ROUTE)
     }
 
     if (rest.length <= baseSegments.length) {
-      return clean;
+      return normalizePathnameOnly(
+        `/${baseSegments.join("/")}`
+      );
     }
 
     const nextRest =
@@ -1944,11 +1870,12 @@ function removeProtectedPathTokenFromPathname(AppCore, pathname = DEFAULT_ROUTE)
         ...rest.slice(baseSegments.length + 1),
       ];
 
+    /*
+      Rutas auth técnicas:
+      tras scrub oficial no conservamos /@usuario.
+    */
     return normalizePathnameOnly(
-      `/${[
-        ...prefix,
-        ...nextRest,
-      ].join("/")}`
+      `/${nextRest.join("/")}`
     );
   }
 
@@ -1969,7 +1896,6 @@ export function buildScrubbedProtectedUrl(AppCore, url = "") {
 
   const pathname =
     removeProtectedPathTokenFromPathname(
-      AppCore,
       parts.pathname || DEFAULT_ROUTE
     );
 
@@ -1981,11 +1907,6 @@ export function buildScrubbedProtectedUrl(AppCore, url = "") {
   let hash =
     parts.hash;
 
-  /*
-    Si el hash contiene query técnica tipo:
-      #section?token=...
-    limpiamos query sensible y preservamos hash no técnico.
-  */
   if (
     hash &&
     hash.includes("?") &&
@@ -2074,6 +1995,7 @@ export function scrubProtectedTokenFromHistory({
       AppCore,
       pathname:
         scrubbedUrl,
+
       extras: {
         ...safeObject(extraState),
         ...flagPayload,
@@ -2123,6 +2045,14 @@ export function scrubProtectedTokenFromHistory({
         reason,
         scrubbed:
           true,
+        writeSignature:
+          createWriteSignature({
+            method:
+              replace ? "replaceState" : "pushState",
+            url:
+              scrubbedUrl,
+            state,
+          }),
       }
     );
 
@@ -2274,7 +2204,7 @@ function getResolvedHistoryContext(
 }
 
 /* =========================================================
-   STATE COMPARISON
+   STATE / WRITE SIGNATURES
 ========================================================= */
 
 function normalizeStateForCompare(state = null) {
@@ -2366,6 +2296,104 @@ function isSameHistoryState(currentState = null, nextState = null) {
   );
 }
 
+function createWriteSignature({
+  method = "",
+  url = "",
+  state = {},
+} = {}) {
+  return [
+    safeText(method, ""),
+    safeText(url, ""),
+    safeText(state?.canonicalPath, ""),
+    safeText(state?.rawCanonicalPath, ""),
+    safeText(state?.publicPath || state?.path, ""),
+    safeText(state?.requestedPath, ""),
+    safeText(state?.username, ""),
+    safeText(state?.mode, ""),
+    safeText(state?.redirectedFrom, ""),
+  ].join("|");
+}
+
+function safeHistoryCall(AppCore, method, state, url, meta = {}) {
+  if (!canUseHistory()) {
+    return false;
+  }
+
+  if (
+    method !== "pushState" &&
+    method !== "replaceState"
+  ) {
+    return false;
+  }
+
+  const cleanUrl =
+    safeText(url, DEFAULT_ROUTE) ||
+    DEFAULT_ROUTE;
+
+  try {
+    window.history[method](
+      state,
+      "",
+      cleanUrl
+    );
+
+    lastWriteSignature =
+      meta.writeSignature ||
+      createWriteSignature({
+        method,
+        url:
+          cleanUrl,
+        state,
+      });
+
+    lastWriteAt =
+      nowTs();
+
+    safeEmit(
+      AppCore,
+      HISTORY_EVENTS.write,
+      {
+        method,
+        url:
+          cleanUrl,
+        state,
+        meta,
+        at:
+          nowIso(lastWriteAt),
+      }
+    );
+
+    return true;
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      `History API ${method} falló.`,
+      {
+        url:
+          cleanUrl,
+        error,
+      }
+    );
+
+    safeEmit(
+      AppCore,
+      HISTORY_EVENTS.error,
+      {
+        method,
+        url:
+          cleanUrl,
+        error,
+        message:
+          error?.message ||
+          String(error),
+        meta,
+      }
+    );
+
+    return false;
+  }
+}
+
 /* =========================================================
    BUILDERS
 ========================================================= */
@@ -2396,6 +2424,11 @@ export function createHistoryState({
     base =
       {};
   }
+
+  const id =
+    cleanExtras.id ||
+    base.id ||
+    nextHistoryId();
 
   const publicPath =
     cleanExtras.publicPath ||
@@ -2441,17 +2474,12 @@ export function createHistoryState({
     version:
       HISTORY_STATE_VERSION,
 
-    id:
-      cleanExtras.id ||
-      base.id ||
-      nextHistoryId(),
+    id,
 
     navId:
       cleanExtras.navId ||
       base.navId ||
-      cleanExtras.id ||
-      base.id ||
-      nextHistoryId(),
+      id,
 
     ts:
       cleanExtras.ts ||
@@ -2615,6 +2643,15 @@ export function pushState({
         "push",
     });
 
+  const writeSignature =
+    createWriteSignature({
+      method:
+        "pushState",
+      url:
+        publicPath,
+      state,
+    });
+
   const currentState =
     getCurrentHistoryState();
 
@@ -2650,6 +2687,7 @@ export function pushState({
       pathname,
       options:
         opts,
+      writeSignature,
     }
   );
 }
@@ -2695,6 +2733,15 @@ export function replaceState({
         "replace",
     });
 
+  const writeSignature =
+    createWriteSignature({
+      method:
+        "replaceState",
+      url:
+        publicPath,
+      state,
+    });
+
   const currentState =
     getCurrentHistoryState();
 
@@ -2730,6 +2777,7 @@ export function replaceState({
       pathname,
       options:
         opts,
+      writeSignature,
     }
   );
 }
@@ -2776,52 +2824,77 @@ export function updateHistory({
     getRoute,
   };
 
-  const {
-    publicPath:
-      nextUrl,
-
-    canonicalPath,
-    rawCanonicalPath,
-    requestedPath,
-    username,
-  } =
+  const resolved =
     getResolvedHistoryContext(
       AppCore,
       pathname,
       finalOptions
     );
 
+  const method =
+    finalOptions.replaceState === true
+      ? "replaceState"
+      : "pushState";
+
+  const nextState =
+    createHistoryState({
+      AppCore,
+      pathname:
+        resolved.publicPath,
+
+      extras: {
+        mode:
+          method === "replaceState"
+            ? "replace"
+            : "push",
+
+        canonicalPath:
+          resolved.canonicalPath,
+
+        rawCanonicalPath:
+          resolved.rawCanonicalPath,
+
+        publicPath:
+          resolved.publicPath,
+
+        requestedPath:
+          resolved.requestedPath,
+
+        username:
+          resolved.username,
+
+        redirectedFrom:
+          finalOptions.redirectedFrom ||
+          null,
+
+        source:
+          finalOptions.source ||
+          null,
+      },
+    });
+
+  const nextSignature =
+    createWriteSignature({
+      method,
+      url:
+        resolved.publicPath,
+      state:
+        nextState,
+    });
+
   const currentUrl =
     getComparableCurrentUrl(AppCore);
 
   const sameCurrentUrl =
     sameUrl(
-      nextUrl,
+      resolved.publicPath,
       currentUrl
     );
 
-  const nextSignature =
-    [
-      nextUrl,
-      canonicalPath,
-      rawCanonicalPath,
-      requestedPath,
-      username,
-      finalOptions.replaceState === true
-        ? "replace"
-        : "push",
-    ].join("|");
-
   const sameAsLastWrite =
     nextSignature === lastWriteSignature &&
-    nowTs() - lastWriteAt < 24;
+    nowTs() - lastWriteAt < WRITE_DEDUPE_MS;
 
-  /*
-    Anti doble escritura:
-    - force render NO implica force history.
-    - query/hash forman parte de publicPath.
-    - misma URL sin replaceState ni forceHistory no escribe.
-  */
   if (
     (
       sameCurrentUrl ||
@@ -2840,12 +2913,17 @@ export function updateHistory({
           sameAsLastWrite
             ? "same-last-write"
             : "same-url",
-        nextUrl,
+        nextUrl:
+          resolved.publicPath,
         currentUrl,
-        canonicalPath,
-        rawCanonicalPath,
-        requestedPath,
-        username,
+        canonicalPath:
+          resolved.canonicalPath,
+        rawCanonicalPath:
+          resolved.rawCanonicalPath,
+        requestedPath:
+          resolved.requestedPath,
+        username:
+          resolved.username,
       }
     );
 
@@ -2855,12 +2933,20 @@ export function updateHistory({
   const writeOptions = {
     ...finalOptions,
 
-    canonicalPath,
-    rawCanonicalPath,
-    requestedPath,
-    username,
+    canonicalPath:
+      resolved.canonicalPath,
+
+    rawCanonicalPath:
+      resolved.rawCanonicalPath,
+
+    requestedPath:
+      resolved.requestedPath,
+
+    username:
+      resolved.username,
+
     resolvedUsername:
-      username,
+      resolved.username,
   };
 
   if (
@@ -2870,7 +2956,7 @@ export function updateHistory({
     return replaceState({
       AppCore,
       pathname:
-        nextUrl,
+        resolved.publicPath,
       options:
         writeOptions,
     });
@@ -2879,7 +2965,7 @@ export function updateHistory({
   return pushState({
     AppCore,
     pathname:
-      nextUrl,
+      resolved.publicPath,
     options:
       writeOptions,
   });
@@ -3024,6 +3110,15 @@ export function ensureInitialHistoryState({
         },
       });
 
+    const writeSignature =
+      createWriteSignature({
+        method:
+          "replaceState",
+        url:
+          currentUrl,
+        state,
+      });
+
     const ok =
       safeHistoryCall(
         AppCore,
@@ -3033,6 +3128,7 @@ export function ensureInitialHistoryState({
         {
           reason:
             "ensure-initial-history-state",
+          writeSignature,
         }
       );
 
@@ -3150,6 +3246,9 @@ export function getHistorySnapshot(AppCore) {
       : null;
 
   return sanitizeForDebug({
+    version:
+      ROUTER_HISTORY_VERSION,
+
     canUseHistory:
       canUseHistory(),
 
@@ -3229,6 +3328,8 @@ export function getHistorySnapshot(AppCore) {
 ========================================================= */
 
 export default {
+  ROUTER_HISTORY_VERSION,
+
   createHistoryState,
 
   pushState,

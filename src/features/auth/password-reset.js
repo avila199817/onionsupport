@@ -2,6 +2,8 @@
    Onion SPA - Password Reset
    Archivo: src/features/auth/password-reset.js
 
+   AUTH PASSWORD RESET · FINAL EXTREME PRO SYSTEM · GOD MODE v11
+
    RESPONSABILIDADES:
    - resolver identificador de recuperación
    - normalizar payload de reset-password-request
@@ -21,6 +23,7 @@
    - timeout real en fetch
    - redirects anti open-redirect
    - token/password/identifier con límites
+   - tokens/passwords NO se truncan silenciosamente
    - respuestas nested: data / payload / result / body / response.data
    - status textual robusto: status/statusText/state
    - rate-limit: 429 / Retry-After / retryAfter / cooldownSeconds
@@ -62,7 +65,7 @@ import {
 ========================================================= */
 
 export const PASSWORD_RESET_MODULE_VERSION =
-  "password-reset.10.2.0.extreme";
+  "password-reset.11.0.0-god-mode";
 
 /* =========================================================
    CONSTANTS
@@ -82,6 +85,9 @@ const DEFAULT_LOGIN_REDIRECT =
 
 const LOCAL_ORIGIN =
   "http://localhost";
+
+const DEFAULT_TIMEOUT_MS =
+  15000;
 
 const SUCCESS_STATUS_TEXTS =
   Object.freeze([
@@ -170,6 +176,36 @@ const TOKEN_FIELD_NAMES =
     "password_reset_token",
   ]);
 
+const REQUEST_METHOD_OPTIONS =
+  Object.freeze({
+    method:
+      "POST",
+
+    auth:
+      false,
+
+    public:
+      true,
+
+    skipAuth:
+      true,
+
+    silent:
+      true,
+
+    storeError:
+      false,
+
+    dedupe:
+      false,
+
+    _skipAuthRefresh:
+      true,
+
+    skipAuthRefresh:
+      true,
+  });
+
 /* =========================================================
    RUNTIME STATE
 ========================================================= */
@@ -224,7 +260,11 @@ function isBrowser() {
 }
 
 function nowMs() {
-  return Date.now();
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
 }
 
 function isoNow() {
@@ -358,7 +398,7 @@ function redactSafe(value = "") {
   } catch {
     return safeText(value, "")
       .replace(
-        /([?&](?:token|activationToken|activateToken|resetToken|passwordResetToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
+        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
         "$1***"
       )
       .replace(
@@ -563,7 +603,8 @@ function getRequestTimeout() {
   return clampNumber(
     AUTH_CONSTANTS?.requestTimeout ??
       AppCore?.config?.requestTimeout ??
-      15000,
+      AppCore?.config?.api?.timeout ??
+      DEFAULT_TIMEOUT_MS,
     1000,
     120000
   );
@@ -1008,17 +1049,23 @@ function normalizeUsername(value = "") {
 }
 
 function normalizeIdentifier(value = "") {
-  const identifier =
+  const raw =
     safeText(value)
       .normalize("NFKC")
-      .replace(/\s+/g, " ")
-      .slice(0, getResetIdentifierMaxLength());
+      .replace(/\s+/g, " ");
 
-  if (isCorruptedTextValue(identifier)) {
+  if (isCorruptedTextValue(raw)) {
     return "";
   }
 
-  return identifier;
+  /*
+    No truncamos silenciosamente. Conservamos max+1 para que
+    validateRequestPayload pueda detectar exceso.
+  */
+  return raw.slice(
+    0,
+    getResetIdentifierMaxLength() + 1
+  );
 }
 
 function normalizeResetToken(value = "") {
@@ -1032,8 +1079,19 @@ function normalizeResetToken(value = "") {
 }
 
 function normalizePasswordValue(value = "") {
-  return String(value ?? "")
-    .slice(0, getResetPasswordMaxLength());
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return "";
+  }
+
+  /*
+    No trim y no truncate:
+    una contraseña demasiado larga debe fallar validación,
+    no mutarse silenciosamente antes de enviarla.
+  */
+  return String(value);
 }
 
 export function resolveResetPasswordIdentifier(payload = {}) {
@@ -2393,6 +2451,9 @@ async function fetchJsonWithTimeout(
         credentials:
           "omit",
 
+        cache:
+          "no-store",
+
         body:
           JSON.stringify(body),
 
@@ -2463,6 +2524,44 @@ async function fetchJsonWithTimeout(
    TRANSPORTS
 ========================================================= */
 
+function buildRequestOptions(options = {}) {
+  return {
+    ...REQUEST_METHOD_OPTIONS,
+
+    timeout:
+      getRequestTimeout(),
+
+    timeoutMs:
+      getRequestTimeout(),
+
+    useLoader:
+      options.useLoader !== false,
+
+    ...safeObject(options),
+
+    auth:
+      false,
+
+    public:
+      true,
+
+    skipAuth:
+      true,
+
+    silent:
+      true,
+
+    storeError:
+      false,
+
+    _skipAuthRefresh:
+      true,
+
+    skipAuthRefresh:
+      true,
+  };
+}
+
 async function requestWithApiClient(endpoint, body, options = {}) {
   const apiClient =
     AppCore?.apiClient || null;
@@ -2471,50 +2570,51 @@ async function requestWithApiClient(endpoint, body, options = {}) {
     return null;
   }
 
+  const requestOptions =
+    buildRequestOptions(options);
+
   if (isFunction(apiClient.post)) {
     return apiClient.post(
       endpoint,
       body,
-      {
-        auth:
-          false,
-        public:
-          true,
-        timeout:
-          getRequestTimeout(),
-        silent:
-          true,
-        storeError:
-          false,
-        _skipAuthRefresh:
-          true,
-        ...options,
-      }
+      requestOptions
     );
   }
 
   if (isFunction(apiClient.request)) {
-    return apiClient.request(
-      endpoint,
-      {
-        method:
-          "POST",
-        body,
-        auth:
-          false,
-        public:
-          true,
-        timeout:
-          getRequestTimeout(),
-        silent:
-          true,
-        storeError:
-          false,
-        _skipAuthRefresh:
-          true,
-        ...options,
+    try {
+      return await apiClient.request(
+        endpoint,
+        {
+          ...requestOptions,
+          method:
+            "POST",
+          body,
+        }
+      );
+    } catch (error) {
+      /*
+        Compat legacy controlada:
+        sólo reintenta firma method/path si el primer intento parece
+        un error de firma, no un error HTTP normal.
+      */
+      if (
+        error?.status ||
+        error?.response?.status ||
+        error?.data?.status
+      ) {
+        throw error;
       }
-    );
+
+      return apiClient.request(
+        "POST",
+        endpoint,
+        {
+          ...requestOptions,
+          body,
+        }
+      );
+    }
   }
 
   return null;
@@ -2525,27 +2625,37 @@ async function requestWithAppCoreRequest(endpoint, body, options = {}) {
     return null;
   }
 
-  return AppCore.request(
-    endpoint,
-    {
-      method:
-        "POST",
-      body,
-      auth:
-        false,
-      public:
-        true,
-      timeout:
-        getRequestTimeout(),
-      silent:
-        true,
-      storeError:
-        false,
-      _skipAuthRefresh:
-        true,
-      ...options,
+  const requestOptions =
+    buildRequestOptions(options);
+
+  try {
+    return await AppCore.request(
+      endpoint,
+      {
+        ...requestOptions,
+        method:
+          "POST",
+        body,
+      }
+    );
+  } catch (error) {
+    if (
+      error?.status ||
+      error?.response?.status ||
+      error?.data?.status
+    ) {
+      throw error;
     }
-  );
+
+    return AppCore.request(
+      "POST",
+      endpoint,
+      {
+        ...requestOptions,
+        body,
+      }
+    );
+  }
 }
 
 async function requestWithHttpService(endpoint, body, options = {}) {
@@ -2560,57 +2670,46 @@ async function requestWithHttpService(endpoint, body, options = {}) {
     return null;
   }
 
+  const requestOptions =
+    buildRequestOptions(options);
+
   if (isFunction(http.post)) {
     return http.post(
       endpoint,
       body,
-      {
-        auth:
-          false,
-        public:
-          true,
-        useLoader:
-          options.useLoader !== false,
-        timeout:
-          getRequestTimeout(),
-        silent:
-          true,
-        storeError:
-          false,
-        _skipAuthRefresh:
-          true,
-        ...options,
-      }
+      requestOptions
     );
   }
 
-  /*
-    Http.request del servicio Onion suele ser:
-      request(method, path, options)
-  */
   if (isFunction(http.request)) {
-    return http.request(
-      "POST",
-      endpoint,
-      {
-        body,
-        auth:
-          false,
-        public:
-          true,
-        useLoader:
-          options.useLoader !== false,
-        timeout:
-          getRequestTimeout(),
-        silent:
-          true,
-        storeError:
-          false,
-        _skipAuthRefresh:
-          true,
-        ...options,
+    try {
+      return await http.request(
+        "POST",
+        endpoint,
+        {
+          ...requestOptions,
+          body,
+        }
+      );
+    } catch (error) {
+      if (
+        error?.status ||
+        error?.response?.status ||
+        error?.data?.status
+      ) {
+        throw error;
       }
-    );
+
+      return http.request(
+        endpoint,
+        {
+          ...requestOptions,
+          method:
+            "POST",
+          body,
+        }
+      );
+    }
   }
 
   return null;
@@ -2750,11 +2849,13 @@ function setCooldown(seconds = 0) {
   return finalSeconds;
 }
 
-function clearCooldown() {
+export function clearPasswordResetCooldown() {
   runtime.cooldownUntil =
     0;
 
   writeCooldownToStorage(0);
+
+  return true;
 }
 
 function buildCooldownResponse(message = getRateLimitMessage()) {
@@ -2856,6 +2957,13 @@ function validateConfirmPayload(normalized = {}) {
   }
 
   if (
+    normalized.confirmPassword.length >
+    getResetPasswordMaxLength()
+  ) {
+    return "La confirmación de contraseña es demasiado larga.";
+  }
+
+  if (
     normalized.password !==
     normalized.confirmPassword
   ) {
@@ -2909,7 +3017,7 @@ function rememberResult(type = "unknown", result = {}) {
   }
 
   if (result?.ok) {
-    clearCooldown();
+    clearPasswordResetCooldown();
   }
 }
 
@@ -3605,6 +3713,8 @@ const PasswordReset =
       getConfirmPasswordResetEndpoint,
       getValidateResetPasswordTokenEndpoint,
       getValidateResetTokenEndpoint,
+
+      clearPasswordResetCooldown,
 
       getPasswordResetSnapshot,
       getPasswordResetDebugPayload,

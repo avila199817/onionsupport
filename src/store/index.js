@@ -1,27 +1,34 @@
 /* =========================================================
-   Onion SPA - Reactive Store (FULL PRO SAAS PANEL)
+   Onion SPA - Reactive Store
    Archivo: src/store/index.js
 
+   ONION SUPPORT · STORE SINGLETON
+   REACTIVE STATE · APPCORE SYNC · BATCH SAFE · EXTREME 10/10
+
    Responsabilidades:
-   - estado global reactivo
-   - subscripciones globales y por clave
+   - estado global reactivo de la SPA
+   - subscripciones globales, por clave y por selector
    - acciones centralizadas
-   - sync fino con AppCore
    - selectores seguros
+   - sync fino con AppCore
    - actualización inmutable por slices
    - helpers de colecciones
    - prevención de notificaciones inútiles
    - init idempotente
-   - batch updates robustos
-   - diagnóstico runtime
+   - batch updates robustos con rollback sync/async
+   - diagnóstico runtime seguro
+   - destroy limpio sin listeners huérfanos
 
    HARDENING:
-   - no expone mutaciones accidentales por get(path)
-   - patch no depende de mergeDeep mutante/inmutable
+   - get(path) devuelve clones para evitar mutaciones accidentales
+   - getRaw(path) queda explícitamente como acceso interno/raw
+   - patch no depende de si mergeDeep es mutante o inmutable
    - eventos seguros aunque AppCore esté parcial
    - rollback de batch si withBatch síncrono/async falla
-   - destroy limpia listeners y batch
+   - destroy limpia listeners, core listeners y batch
    - init idempotente sin duplicar core listeners
+   - notificaciones sólo si hay cambios reales
+   - snapshots/eventos sin token leakage accidental
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -62,24 +69,117 @@ import {
   unbindCoreEvents,
 } from "./core-sync.js";
 
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const STORE_VERSION =
+  "14.0.0";
+
+const STORE_SCOPE =
+  "store";
+
+const ROOT_CHANGED_PATHS =
+  Object.freeze([
+    "app",
+    "session",
+    "ui",
+    "entities",
+    "flags",
+    "meta",
+  ]);
+
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code/i;
+
+const STORE_EVENTS =
+  Object.freeze({
+    init:
+      "store:init",
+
+    initSkip:
+      "store:init:skip",
+
+    initError:
+      "store:init:error",
+
+    destroy:
+      "store:destroy",
+
+    change:
+      "store:change",
+
+    notifyError:
+      "store:notify:error",
+
+    hydrateError:
+      "store:hydrate:error",
+
+    coreBindError:
+      "store:core-bind:error",
+
+    coreUnbindError:
+      "store:core-unbind:error",
+
+    batchStart:
+      "store:batch:start",
+
+    batchEnd:
+      "store:batch:end",
+
+    batchFlush:
+      "store:batch:flush",
+
+    batchRollback:
+      "store:batch:rollback",
+
+    batchError:
+      "store:batch:error",
+
+    error:
+      "store:error",
+  });
+
+/* =========================================================
+   STORE SINGLETON
+========================================================= */
+
 export const Store = (() => {
   "use strict";
 
-  let initialized = false;
-  let mutationSeq = 0;
+  let initialized =
+    false;
 
-  /* =========================================================
+  let initializing =
+    false;
+
+  let destroyed =
+    false;
+
+  let mutationSeq =
+    0;
+
+  let initStartedAt =
+    0;
+
+  let initCompletedAt =
+    0;
+
+  let lastError =
+    null;
+
+  /* =======================================================
      ESTADO INTERNO
-  ========================================================= */
+  ======================================================= */
 
   const state =
     buildInitialState(
       AppCore
     );
 
-  /* =========================================================
+  /* =======================================================
      LISTENERS
-  ========================================================= */
+  ======================================================= */
 
   const listeners =
     new Set();
@@ -93,18 +193,43 @@ export const Store = (() => {
   const coreUnsubscribers =
     [];
 
-  let batchDepth = 0;
-  let batchPreviousState = null;
+  /* =======================================================
+     BATCH STATE
+  ======================================================= */
+
+  let batchDepth =
+    0;
+
+  let batchId =
+    0;
+
+  let batchPreviousState =
+    null;
+
+  let batchStartedAt =
+    0;
 
   const batchChangedPaths =
     new Set();
 
-  /* =========================================================
+  /* =======================================================
      SAFE HELPERS
-  ========================================================= */
+  ======================================================= */
 
   function nowMs() {
-    return Date.now();
+    try {
+      return Date.now();
+    } catch {
+      return 0;
+    }
+  }
+
+  function nowIso(ms = nowMs()) {
+    try {
+      return new Date(ms).toISOString();
+    } catch {
+      return "";
+    }
   }
 
   function safeText(value, fallback = "") {
@@ -121,25 +246,346 @@ export const Store = (() => {
     return text || fallback;
   }
 
+  function safeNumber(value, fallback = 0) {
+    const number =
+      Number(value);
+
+    return Number.isFinite(number)
+      ? number
+      : fallback;
+  }
+
+  function safeBool(value, fallback = false) {
+    if (value === true) return true;
+    if (value === false) return false;
+    if (value === 1) return true;
+    if (value === 0) return false;
+
+    if (typeof value === "string") {
+      const clean =
+        value.trim().toLowerCase();
+
+      if (
+        [
+          "true",
+          "1",
+          "yes",
+          "si",
+          "sí",
+          "on",
+          "enabled",
+        ].includes(clean)
+      ) {
+        return true;
+      }
+
+      if (
+        [
+          "false",
+          "0",
+          "no",
+          "off",
+          "disabled",
+        ].includes(clean)
+      ) {
+        return false;
+      }
+    }
+
+    return Boolean(fallback);
+  }
+
   function safeArray(value) {
     return Array.isArray(value)
       ? value
       : [];
   }
 
-  function safeObject(value) {
-    return value &&
+  function safeObject(value, fallback = {}) {
+    return (
+      value !== null &&
       typeof value === "object" &&
       !Array.isArray(value)
+    )
       ? value
-      : {};
+      : fallback;
+  }
+
+  function hasOwn(object, key) {
+    try {
+      return Object.prototype.hasOwnProperty.call(
+        object,
+        key
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function safeClone(value, fallback = null) {
+    if (value === undefined) {
+      return fallback;
+    }
+
+    if (value === null) {
+      return null;
+    }
+
+    try {
+      return deepClone(value);
+    } catch {}
+
+    try {
+      if (typeof structuredClone === "function") {
+        return structuredClone(value);
+      }
+    } catch {}
+
+    try {
+      return JSON.parse(
+        JSON.stringify(value)
+      );
+    } catch {
+      return fallback;
+    }
+  }
+
+  function safeEqual(a, b) {
+    try {
+      return deepEqual(
+        a,
+        b
+      );
+    } catch {}
+
+    try {
+      return JSON.stringify(a) === JSON.stringify(b);
+    } catch {
+      return Object.is(a, b);
+    }
+  }
+
+  function safeRedactText(value = "") {
+    let text =
+      safeText(value, "");
+
+    if (!text) {
+      return "";
+    }
+
+    try {
+      text =
+        AppCore?.utils?.redactTokenInText?.(text) ||
+        text;
+    } catch {}
+
+    try {
+      text =
+        text
+          .replace(
+            /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+            "$1***"
+          )
+          .replace(
+            /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+            "***"
+          )
+          .replace(
+            /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)([^&#\s]+)/gi,
+            "$1***"
+          );
+    } catch {}
+
+    return text;
+  }
+
+  function sanitizeForEvent(value, depth = 0, keyHint = "") {
+    if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) {
+      return value
+        ? "***"
+        : null;
+    }
+
+    if (depth > 5) {
+      return "[depth-limit]";
+    }
+
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      return value;
+    }
+
+    if (typeof value === "string") {
+      return safeRedactText(value);
+    }
+
+    if (
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      return value;
+    }
+
+    if (typeof value === "bigint") {
+      return String(value);
+    }
+
+    if (typeof value === "function") {
+      return "[function]";
+    }
+
+    if (value instanceof Error) {
+      return {
+        name:
+          value.name || "Error",
+
+        message:
+          safeRedactText(
+            value.message || "Error"
+          ),
+
+        code:
+          value.code || null,
+
+        status:
+          value.status ||
+          value.statusCode ||
+          null,
+
+        stack:
+          value.stack
+            ? "[stack]"
+            : null,
+      };
+    }
+
+    if (Array.isArray(value)) {
+      return value
+        .slice(0, 100)
+        .map((item) =>
+          sanitizeForEvent(
+            item,
+            depth + 1,
+            keyHint
+          )
+        );
+    }
+
+    if (
+      value &&
+      typeof value === "object"
+    ) {
+      const output = {};
+
+      for (const [key, item] of Object.entries(value).slice(0, 120)) {
+        output[key] =
+          SENSITIVE_KEY_RE.test(key)
+            ? item
+              ? "***"
+              : null
+            : sanitizeForEvent(
+                item,
+                depth + 1,
+                key
+              );
+      }
+
+      return output;
+    }
+
+    try {
+      return safeRedactText(
+        String(value)
+      );
+    } catch {
+      return "[unserializable]";
+    }
+  }
+
+  function normalizeError(error = null) {
+    if (!error) {
+      return null;
+    }
+
+    const payload = {
+      name:
+        safeText(
+          error?.name,
+          "StoreError"
+        ),
+
+      message:
+        safeRedactText(
+          safeText(
+            error?.message || error,
+            "Store error."
+          )
+        ),
+
+      code:
+        safeText(
+          error?.code ||
+            error?.statusCode ||
+            "",
+          ""
+        ),
+
+      status:
+        safeNumber(
+          error?.status,
+          0
+        ),
+
+      at:
+        nowIso(),
+    };
+
+    return payload;
+  }
+
+  function recordError(error, source = "store") {
+    const payload =
+      normalizeError(error);
+
+    lastError = {
+      ...payload,
+      source:
+        safeText(source, STORE_SCOPE),
+    };
+
+    safeEmit(
+      STORE_EVENTS.error,
+      lastError
+    );
+
+    return lastError;
   }
 
   function safeEmit(eventName, payload = {}) {
+    const name =
+      safeText(eventName, "");
+
+    if (!name) {
+      return false;
+    }
+
+    const safePayload =
+      sanitizeForEvent({
+        source:
+          STORE_SCOPE,
+
+        version:
+          STORE_VERSION,
+
+        ...safeObject(payload),
+      });
+
     try {
       AppCore?.events?.emit?.(
-        eventName,
-        payload
+        name,
+        safePayload
       );
 
       return true;
@@ -151,32 +597,83 @@ export const Store = (() => {
   function safeLog(...args) {
     try {
       AppCore?.utils?.log?.(
-        ...args
+        "[Store]",
+        ...args.map((item) =>
+          sanitizeForEvent(item)
+        )
       );
     } catch {}
   }
 
   function safeWarn(...args) {
-    try {
-      AppCore?.utils?.warn?.(
-        ...args
-      );
-    } catch {}
+    let logged =
+      false;
 
     try {
-      console.warn(...args);
+      if (isFunction(AppCore?.utils?.warn)) {
+        AppCore.utils.warn(
+          "[Store]",
+          ...args.map((item) =>
+            sanitizeForEvent(item)
+          )
+        );
+
+        logged =
+          true;
+      }
+    } catch {
+      logged =
+        false;
+    }
+
+    if (logged) {
+      return;
+    }
+
+    try {
+      if (AppCore?.config?.debug || AppCore?.state?.debug) {
+        console.warn(
+          "[Store]",
+          ...args.map((item) =>
+            sanitizeForEvent(item)
+          )
+        );
+      }
     } catch {}
   }
 
   function safeError(...args) {
-    try {
-      AppCore?.utils?.error?.(
-        ...args
-      );
-    } catch {}
+    let logged =
+      false;
 
     try {
-      console.error(...args);
+      if (isFunction(AppCore?.utils?.error)) {
+        AppCore.utils.error(
+          "[Store]",
+          ...args.map((item) =>
+            sanitizeForEvent(item)
+          )
+        );
+
+        logged =
+          true;
+      }
+    } catch {
+      logged =
+        false;
+    }
+
+    if (logged) {
+      return;
+    }
+
+    try {
+      console.error(
+        "[Store]",
+        ...args.map((item) =>
+          sanitizeForEvent(item)
+        )
+      );
     } catch {}
   }
 
@@ -190,7 +687,7 @@ export const Store = (() => {
 
     if (!clean) {
       throw new Error(
-        `${method}(path) requiere path`
+        `${method}(path) requiere path.`
       );
     }
 
@@ -204,7 +701,7 @@ export const Store = (() => {
       Array.isArray(value)
     ) {
       throw new Error(
-        `${method}(partialState) requiere un objeto`
+        `${method}(partialState) requiere un objeto.`
       );
     }
 
@@ -219,13 +716,27 @@ export const Store = (() => {
       return value;
     }
 
-    return deepClone(value);
+    return safeClone(
+      value,
+      value
+    );
   }
 
   function getRootReadClone() {
-    return shallowCloneRoot(
-      state
+    return safeClone(
+      state,
+      shallowCloneRoot(state)
     );
+  }
+
+  function getRootShallowClone() {
+    try {
+      return shallowCloneRoot(state);
+    } catch {
+      return {
+        ...state,
+      };
+    }
   }
 
   function incrementMutationSeq() {
@@ -234,12 +745,16 @@ export const Store = (() => {
   }
 
   function replaceRoot(nextState = {}) {
+    const cleanNext =
+      safeObject(nextState);
+
     Object.keys(state).forEach((key) => {
       delete state[key];
     });
 
-    Object.keys(nextState).forEach((key) => {
-      state[key] = nextState[key];
+    Object.keys(cleanNext).forEach((key) => {
+      state[key] =
+        cleanNext[key];
     });
 
     return state;
@@ -247,46 +762,289 @@ export const Store = (() => {
 
   function restoreRoot(previousState = {}) {
     replaceRoot(
-      deepClone(previousState)
+      safeClone(
+        previousState,
+        {}
+      )
     );
 
     return state;
   }
 
-  function buildPatchChangedPaths(partialState = {}) {
-    const paths =
-      collectChangedPaths(
-        partialState
+  function normalizeChangedPaths(paths = []) {
+    return Array.from(
+      new Set(
+        safeArray(paths)
+          .flat(Infinity)
+          .map((path) =>
+            safeText(path, "")
+          )
+          .filter(Boolean)
+      )
+    );
+  }
+
+  function pathMayContainSensitiveData(path = "") {
+    return SENSITIVE_KEY_RE.test(
+      safeText(path, "")
+    );
+  }
+
+  function sanitizeChangedPaths(paths = []) {
+    return normalizeChangedPaths(paths)
+      .map((path) =>
+        pathMayContainSensitiveData(path)
+          ? "[sensitive]"
+          : path
       );
+  }
+
+  function buildPatchChangedPaths(partialState = {}, previousState = null, nextState = null) {
+    let paths = [];
+
+    try {
+      paths =
+        collectChangedPaths(
+          partialState
+        );
+    } catch {
+      paths =
+        [];
+    }
 
     if (
       Array.isArray(paths) &&
       paths.length
     ) {
-      return paths
-        .map((path) =>
-          safeText(path, "")
-        )
-        .filter(Boolean);
+      return normalizeChangedPaths(paths);
     }
 
-    return Object.keys(
-      safeObject(partialState)
+    if (
+      previousState &&
+      nextState &&
+      typeof previousState === "object" &&
+      typeof nextState === "object"
+    ) {
+      const keys =
+        Array.from(
+          new Set([
+            ...Object.keys(previousState),
+            ...Object.keys(nextState),
+          ])
+        );
+
+      return normalizeChangedPaths(
+        keys.filter((key) =>
+          !safeEqual(
+            previousState[key],
+            nextState[key]
+          )
+        )
+      );
+    }
+
+    return normalizeChangedPaths(
+      Object.keys(
+        safeObject(partialState)
+      )
     );
   }
 
-  /* =========================================================
-     READ API
-  ========================================================= */
+  function getTopLevelChangedPaths(previousState = {}, nextState = {}) {
+    const keys =
+      Array.from(
+        new Set([
+          ...Object.keys(
+            safeObject(previousState)
+          ),
+          ...Object.keys(
+            safeObject(nextState)
+          ),
+        ])
+      );
 
-  function snapshot() {
-    return deepClone(state);
+    return normalizeChangedPaths(
+      keys.filter((key) =>
+        !safeEqual(
+          previousState?.[key],
+          nextState?.[key]
+        )
+      )
+    );
   }
 
-  function get(
-    path = null,
-    fallback = undefined
-  ) {
+  function touchStoreMeta() {
+    try {
+      touchMeta(state);
+    } catch {
+      try {
+        state.meta =
+          safeObject(state.meta);
+
+        state.meta.updatedAt =
+          nowIso();
+
+        state.meta.version =
+          state.meta.version || STORE_VERSION;
+      } catch {}
+    }
+  }
+
+  function getCoreSnapshot() {
+    try {
+      return AppCore?.getSnapshot?.() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /* =======================================================
+     READ API
+  ======================================================= */
+
+  function snapshot() {
+    return safeClone(
+      state,
+      {}
+    );
+  }
+
+  function getSnapshot(options = {}) {
+    const opts =
+      safeObject(options);
+
+    const includeState =
+      opts.includeState === true;
+
+    const includeCore =
+      opts.includeCore === true;
+
+    return {
+      version:
+        STORE_VERSION,
+
+      initialized:
+        Boolean(initialized),
+
+      initializing:
+        Boolean(initializing),
+
+      destroyed:
+        Boolean(destroyed),
+
+      mutationSeq,
+
+      listeners:
+        listeners.size,
+
+      keyListeners:
+        keyListeners.size,
+
+      selectorListeners:
+        selectorListeners.size,
+
+      coreUnsubscribers:
+        coreUnsubscribers.length,
+
+      batch: {
+        depth:
+          batchDepth,
+
+        id:
+          batchId,
+
+        startedAt:
+          batchStartedAt
+            ? nowIso(batchStartedAt)
+            : "",
+
+        changedPaths:
+          sanitizeChangedPaths(
+            Array.from(batchChangedPaths)
+          ),
+
+        hasPreviousState:
+          Boolean(batchPreviousState),
+      },
+
+      app: {
+        route:
+          state.app?.route || null,
+
+        publicPath:
+          safeRedactText(
+            state.app?.publicPath || ""
+          ) || null,
+      },
+
+      session: {
+        authenticated:
+          Boolean(state.session?.authenticated),
+
+        hasToken:
+          Boolean(state.session?.hasToken),
+
+        role:
+          state.session?.role || null,
+
+        username:
+          state.session?.username || null,
+      },
+
+      ui: {
+        theme:
+          state.ui?.theme || null,
+
+        themeMode:
+          state.ui?.themeMode || null,
+
+        lang:
+          state.ui?.lang || null,
+      },
+
+      meta: {
+        createdAt:
+          state.meta?.createdAt || null,
+
+        updatedAt:
+          state.meta?.updatedAt || null,
+      },
+
+      init: {
+        startedAt:
+          initStartedAt
+            ? nowIso(initStartedAt)
+            : "",
+
+        completedAt:
+          initCompletedAt
+            ? nowIso(initCompletedAt)
+            : "",
+
+        durationMs:
+          initStartedAt && initCompletedAt
+            ? initCompletedAt - initStartedAt
+            : 0,
+      },
+
+      lastError,
+
+      state:
+        includeState
+          ? sanitizeForEvent(snapshot())
+          : null,
+
+      core:
+        includeCore
+          ? getCoreSnapshot()
+          : null,
+
+      at:
+        nowIso(),
+    };
+  }
+
+  function get(path = null, fallback = undefined) {
     if (!path) {
       return getRootReadClone();
     }
@@ -297,21 +1055,14 @@ export const Store = (() => {
         path
       );
 
-    if (
-      value === undefined
-    ) {
+    if (value === undefined) {
       return fallback;
     }
 
-    return cloneForRead(
-      value
-    );
+    return cloneForRead(value);
   }
 
-  function getRaw(
-    path = null,
-    fallback = undefined
-  ) {
+  function getRaw(path = null, fallback = undefined) {
     if (!path) {
       return state;
     }
@@ -327,15 +1078,10 @@ export const Store = (() => {
       : value;
   }
 
-  function select(
-    selector,
-    fallback = undefined
-  ) {
-    if (
-      !isFunction(selector)
-    ) {
+  function select(selector, fallback = undefined) {
+    if (!isFunction(selector)) {
       throw new Error(
-        "Store.select(selector) requiere una función"
+        "Store.select(selector) requiere una función."
       );
     }
 
@@ -347,10 +1093,15 @@ export const Store = (() => {
 
       return result === undefined
         ? fallback
-        : result;
+        : cloneForRead(result);
     } catch (error) {
+      recordError(
+        error,
+        "select"
+      );
+
       safeError(
-        "Store select error",
+        "Store select error.",
         error
       );
 
@@ -358,20 +1109,13 @@ export const Store = (() => {
     }
   }
 
-  /* =========================================================
+  /* =======================================================
      INTERNAL NOTIFY
-  ========================================================= */
+  ======================================================= */
 
-  function emitChange(
-    changedPaths = [],
-    previousState = {}
-  ) {
+  function emitChange(changedPaths = [], previousState = {}) {
     const cleanChangedPaths =
-      safeArray(changedPaths)
-        .map((path) =>
-          safeText(path, "")
-        )
-        .filter(Boolean);
+      normalizeChangedPaths(changedPaths);
 
     if (!cleanChangedPaths.length) {
       return false;
@@ -383,6 +1127,13 @@ export const Store = (() => {
     const startedAt =
       nowMs();
 
+    const payload =
+      buildPayload(
+        snapshot,
+        cleanChangedPaths,
+        previousState
+      );
+
     try {
       notify({
         AppCore,
@@ -393,25 +1144,26 @@ export const Store = (() => {
         snapshot,
         shallowCloneRoot,
         state,
-        payload:
-          buildPayload(
-            snapshot,
-            cleanChangedPaths,
-            previousState
-          ),
+        payload,
       });
     } catch (error) {
+      recordError(
+        error,
+        "notify"
+      );
+
       safeError(
-        "Store notify error",
+        "Store notify error.",
         error
       );
 
       safeEmit(
-        "store:notify:error",
+        STORE_EVENTS.notifyError,
         {
           seq,
           changedPaths:
-            cleanChangedPaths,
+            sanitizeChangedPaths(cleanChangedPaths),
+
           message:
             error?.message ||
             String(error),
@@ -420,13 +1172,16 @@ export const Store = (() => {
     }
 
     safeEmit(
-      "store:change",
+      STORE_EVENTS.change,
       {
         seq,
+
         changedPaths:
-          [...cleanChangedPaths],
+          sanitizeChangedPaths(cleanChangedPaths),
+
         changedCount:
           cleanChangedPaths.length,
+
         durationMs:
           nowMs() - startedAt,
       }
@@ -442,6 +1197,11 @@ export const Store = (() => {
     ) {
       batchPreviousState =
         snapshot();
+
+      batchStartedAt =
+        nowMs();
+
+      batchId += 1;
     }
 
     batchDepth += 1;
@@ -449,23 +1209,10 @@ export const Store = (() => {
     return batchDepth;
   }
 
-  function queueBatchPaths(
-    changedPaths = []
-  ) {
-    if (
-      !Array.isArray(changedPaths)
-    ) {
-      return;
+  function queueBatchPaths(changedPaths = []) {
+    for (const path of normalizeChangedPaths(changedPaths)) {
+      batchChangedPaths.add(path);
     }
-
-    changedPaths.forEach((path) => {
-      const clean =
-        safeText(path, "");
-
-      if (!clean) return;
-
-      batchChangedPaths.add(clean);
-    });
   }
 
   function flushBatchIfReady() {
@@ -478,14 +1225,25 @@ export const Store = (() => {
     }
 
     const changedPaths =
-      Array.from(
-        batchChangedPaths
+      normalizeChangedPaths(
+        Array.from(batchChangedPaths)
       );
 
     const previousState =
       batchPreviousState;
 
-    batchPreviousState = null;
+    const currentBatchId =
+      batchId;
+
+    const currentStartedAt =
+      batchStartedAt;
+
+    batchPreviousState =
+      null;
+
+    batchStartedAt =
+      0;
+
     batchChangedPaths.clear();
 
     if (!changedPaths.length) {
@@ -500,11 +1258,21 @@ export const Store = (() => {
 
     if (flushed) {
       safeEmit(
-        "store:batch:flush",
+        STORE_EVENTS.batchFlush,
         {
+          batchId:
+            currentBatchId,
+
           changedCount:
             changedPaths.length,
-          changedPaths,
+
+          changedPaths:
+            sanitizeChangedPaths(changedPaths),
+
+          durationMs:
+            currentStartedAt
+              ? nowMs() - currentStartedAt
+              : 0,
         }
       );
     }
@@ -512,37 +1280,46 @@ export const Store = (() => {
     return flushed;
   }
 
-  function emitOrQueueChange(
-    changedPaths = [],
-    previousState = {}
-  ) {
+  function emitOrQueueChange(changedPaths = [], previousState = {}) {
+    const cleanChangedPaths =
+      normalizeChangedPaths(changedPaths);
+
+    if (!cleanChangedPaths.length) {
+      return false;
+    }
+
     if (batchDepth > 0) {
       queueBatchPaths(
-        changedPaths
+        cleanChangedPaths
       );
+
       return true;
     }
 
     return emitChange(
-      changedPaths,
+      cleanChangedPaths,
       previousState
     );
   }
 
   function clearBatchState() {
-    batchDepth = 0;
-    batchPreviousState = null;
+    batchDepth =
+      0;
+
+    batchPreviousState =
+      null;
+
+    batchStartedAt =
+      0;
+
     batchChangedPaths.clear();
   }
 
-  /* =========================================================
+  /* =======================================================
      WRITE API
-  ========================================================= */
+  ======================================================= */
 
-  function set(
-    path,
-    value
-  ) {
+  function set(path, value) {
     const cleanPath =
       assertPath(
         path,
@@ -553,14 +1330,12 @@ export const Store = (() => {
       getRaw(cleanPath);
 
     if (
-      deepEqual(
+      safeEqual(
         currentValue,
         value
       )
     ) {
-      return cloneForRead(
-        currentValue
-      );
+      return cloneForRead(currentValue);
     }
 
     const previousState =
@@ -571,10 +1346,10 @@ export const Store = (() => {
     setByPath(
       state,
       cleanPath,
-      deepClone(value)
+      safeClone(value)
     );
 
-    touchMeta(state);
+    touchStoreMeta();
 
     emitOrQueueChange(
       [cleanPath],
@@ -584,9 +1359,7 @@ export const Store = (() => {
     return get(cleanPath);
   }
 
-  function patch(
-    partialState = {}
-  ) {
+  function patch(partialState = {}) {
     assertPlainObject(
       partialState,
       "Store.patch"
@@ -606,7 +1379,7 @@ export const Store = (() => {
     /*
       Importante:
       mergeDeep puede estar implementado como mutante o como inmutable.
-      Por eso fusionamos sobre un clon, nunca sobre state directamente.
+      Siempre se fusiona sobre un clon.
     */
     const base =
       snapshot();
@@ -614,11 +1387,11 @@ export const Store = (() => {
     const nextState =
       mergeDeep(
         base,
-        deepClone(partialState)
+        safeClone(partialState, {})
       );
 
     if (
-      deepEqual(
+      safeEqual(
         state,
         nextState
       )
@@ -630,21 +1403,24 @@ export const Store = (() => {
       nextState
     );
 
-    touchMeta(state);
+    touchStoreMeta();
+
+    const changedPaths =
+      buildPatchChangedPaths(
+        partialState,
+        previousState,
+        nextState
+      );
 
     emitOrQueueChange(
-      buildPatchChangedPaths(
-        partialState
-      ),
+      changedPaths,
       previousState
     );
 
     return getRootReadClone();
   }
 
-  function replace(
-    nextState = {}
-  ) {
+  function replace(nextState = {}) {
     assertPlainObject(
       nextState,
       "Store.replace"
@@ -656,10 +1432,13 @@ export const Store = (() => {
         : snapshot();
 
     const cleanNext =
-      deepClone(nextState);
+      safeClone(
+        nextState,
+        {}
+      );
 
     if (
-      deepEqual(
+      safeEqual(
         state,
         cleanNext
       )
@@ -667,40 +1446,38 @@ export const Store = (() => {
       return getRootReadClone();
     }
 
-    replaceRoot(cleanNext);
+    replaceRoot(
+      cleanNext
+    );
 
-    touchMeta(state);
+    touchStoreMeta();
+
+    const changedPaths =
+      getTopLevelChangedPaths(
+        previousState,
+        cleanNext
+      );
 
     emitOrQueueChange(
-      [
-        "app",
-        "session",
-        "ui",
-        "entities",
-        "flags",
-        "meta",
-      ],
+      changedPaths.length
+        ? changedPaths
+        : ROOT_CHANGED_PATHS,
       previousState
     );
 
     return getRootReadClone();
   }
 
-  function update(
-    path,
-    updater
-  ) {
+  function update(path, updater) {
     const cleanPath =
       assertPath(
         path,
         "Store.update"
       );
 
-    if (
-      !isFunction(updater)
-    ) {
+    if (!isFunction(updater)) {
       throw new Error(
-        "Store.update(path, updater) requiere una función"
+        "Store.update(path, updater) requiere una función."
       );
     }
 
@@ -709,7 +1486,8 @@ export const Store = (() => {
 
     const nextValue =
       updater(
-        deepClone(
+        safeClone(
+          currentValue,
           currentValue
         )
       );
@@ -720,9 +1498,7 @@ export const Store = (() => {
     );
   }
 
-  function remove(
-    path
-  ) {
+  function remove(path) {
     const cleanPath =
       assertPath(
         path,
@@ -732,9 +1508,7 @@ export const Store = (() => {
     const currentValue =
       getRaw(cleanPath);
 
-    if (
-      currentValue === undefined
-    ) {
+    if (currentValue === undefined) {
       return false;
     }
 
@@ -748,7 +1522,7 @@ export const Store = (() => {
       cleanPath
     );
 
-    touchMeta(state);
+    touchStoreMeta();
 
     emitOrQueueChange(
       [cleanPath],
@@ -771,34 +1545,28 @@ export const Store = (() => {
 
     replaceRoot(next);
 
-    touchMeta(state);
+    touchStoreMeta();
 
     emitOrQueueChange(
-      [
-        "app",
-        "session",
-        "ui",
-        "entities",
-        "flags",
-        "meta",
-      ],
+      ROOT_CHANGED_PATHS,
       previousState
     );
 
     return getRootReadClone();
   }
 
-  /* =========================================================
+  /* =======================================================
      BATCH API
-  ========================================================= */
+  ======================================================= */
 
   function beginBatch() {
     const depth =
       startBatchIfNeeded();
 
     safeEmit(
-      "store:batch:start",
+      STORE_EVENTS.batchStart,
       {
+        batchId,
         depth,
       }
     );
@@ -814,9 +1582,11 @@ export const Store = (() => {
     batchDepth -= 1;
 
     safeEmit(
-      "store:batch:end",
+      STORE_EVENTS.batchEnd,
       {
-        depth: batchDepth,
+        batchId,
+        depth:
+          batchDepth,
       }
     );
 
@@ -828,9 +1598,13 @@ export const Store = (() => {
   }
 
   function rollbackBatch(error = null) {
-    if (
-      batchPreviousState
-    ) {
+    const hadBatch =
+      Boolean(batchPreviousState);
+
+    const currentBatchId =
+      batchId;
+
+    if (batchPreviousState) {
       restoreRoot(
         batchPreviousState
       );
@@ -838,13 +1612,24 @@ export const Store = (() => {
 
     clearBatchState();
 
+    const payload = {
+      batchId:
+        currentBatchId,
+
+      restored:
+        hadBatch,
+
+      message:
+        error?.message ||
+        String(error || ""),
+
+      at:
+        nowIso(),
+    };
+
     safeEmit(
-      "store:batch:rollback",
-      {
-        message:
-          error?.message ||
-          String(error || ""),
-      }
+      STORE_EVENTS.batchRollback,
+      payload
     );
 
     return true;
@@ -853,25 +1638,47 @@ export const Store = (() => {
   function withBatch(fn, options = {}) {
     if (!isFunction(fn)) {
       throw new Error(
-        "Store.withBatch(fn) requiere una función"
+        "Store.withBatch(fn) requiere una función."
       );
     }
 
+    const opts =
+      safeObject(options);
+
     const rollbackOnError =
-      options.rollbackOnError === true;
+      opts.rollbackOnError === true;
 
     beginBatch();
 
     let result;
 
     try {
-      result = fn(api);
+      result =
+        fn(api);
     } catch (error) {
+      recordError(
+        error,
+        "withBatch:sync"
+      );
+
       if (rollbackOnError) {
         rollbackBatch(error);
       } else {
         endBatch();
       }
+
+      safeEmit(
+        STORE_EVENTS.batchError,
+        {
+          batchId,
+          phase:
+            "sync",
+          rollback:
+            Boolean(rollbackOnError),
+          error:
+            normalizeError(error),
+        }
+      );
 
       throw error;
     }
@@ -883,31 +1690,48 @@ export const Store = (() => {
       return result
         .then((value) => {
           endBatch();
+
           return value;
         })
         .catch((error) => {
+          recordError(
+            error,
+            "withBatch:async"
+          );
+
           if (rollbackOnError) {
             rollbackBatch(error);
           } else {
             endBatch();
           }
 
+          safeEmit(
+            STORE_EVENTS.batchError,
+            {
+              batchId,
+              phase:
+                "async",
+              rollback:
+                Boolean(rollbackOnError),
+              error:
+                normalizeError(error),
+            }
+          );
+
           throw error;
         });
     }
 
     endBatch();
+
     return result;
   }
 
-  /* =========================================================
+  /* =======================================================
      COLLECTION HELPERS
-  ========================================================= */
+  ======================================================= */
 
-  function push(
-    path,
-    item
-  ) {
+  function push(path, item) {
     return update(
       path,
       (current = []) => {
@@ -918,17 +1742,13 @@ export const Store = (() => {
 
         return [
           ...list,
-          deepClone(item),
+          safeClone(item),
         ];
       }
     );
   }
 
-  function upsertById(
-    path,
-    item,
-    idKey = "id"
-  ) {
+  function upsertById(path, item, idKey = "id") {
     const cleanIdKey =
       safeText(idKey, "id");
 
@@ -941,7 +1761,10 @@ export const Store = (() => {
             : [];
 
         const nextItem =
-          deepClone(item);
+          safeClone(
+            item,
+            item
+          );
 
         const nextId =
           nextItem?.[cleanIdKey];
@@ -958,9 +1781,8 @@ export const Store = (() => {
         }
 
         const index =
-          list.findIndex(
-            (entry) =>
-              entry?.[cleanIdKey] === nextId
+          list.findIndex((entry) =>
+            entry?.[cleanIdKey] === nextId
           );
 
         if (index < 0) {
@@ -973,8 +1795,8 @@ export const Store = (() => {
         return list.map((entry, entryIndex) =>
           entryIndex === index
             ? {
-                ...entry,
-                ...nextItem,
+                ...safeObject(entry),
+                ...safeObject(nextItem),
               }
             : entry
         );
@@ -982,11 +1804,7 @@ export const Store = (() => {
     );
   }
 
-  function removeById(
-    path,
-    id,
-    idKey = "id"
-  ) {
+  function removeById(path, id, idKey = "id") {
     const cleanIdKey =
       safeText(idKey, "id");
 
@@ -998,9 +1816,8 @@ export const Store = (() => {
             ? current
             : [];
 
-        return list.filter(
-          (entry) =>
-            entry?.[cleanIdKey] !== id
+        return list.filter((entry) =>
+          entry?.[cleanIdKey] !== id
         );
       }
     );
@@ -1013,9 +1830,9 @@ export const Store = (() => {
     );
   }
 
-  /* =========================================================
+  /* =======================================================
      ACTIONS / SELECTORS
-  ========================================================= */
+  ======================================================= */
 
   const actions =
     createActions({
@@ -1032,24 +1849,18 @@ export const Store = (() => {
       state,
     });
 
-  /* =========================================================
+  /* =======================================================
      SUBSCRIPTIONS
-  ========================================================= */
+  ======================================================= */
 
-  function subscribe(
-    listener
-  ) {
+  function subscribe(listener) {
     return createSubscription(
       listeners,
       listener
     );
   }
 
-  function subscribeKey(
-    path,
-    listener,
-    options = {}
-  ) {
+  function subscribeKey(path, listener, options = {}) {
     const cleanPath =
       assertPath(
         path,
@@ -1059,7 +1870,8 @@ export const Store = (() => {
     return createKeySubscription({
       AppCore,
       keyListeners,
-      path: cleanPath,
+      path:
+        cleanPath,
       listener,
       get,
       snapshot,
@@ -1067,11 +1879,7 @@ export const Store = (() => {
     });
   }
 
-  function subscribeSelector(
-    selector,
-    listener,
-    options = {}
-  ) {
+  function subscribeSelector(selector, listener, options = {}) {
     return createSelectorSubscription({
       AppCore,
       selectorListeners,
@@ -1084,43 +1892,85 @@ export const Store = (() => {
     });
   }
 
-  /* =========================================================
-     LIFECYCLE
-  ========================================================= */
+  /* =======================================================
+     CORE SYNC
+  ======================================================= */
 
-  function init(options = {}) {
-    if (initialized) {
-      safeWarn(
-        "Store ya estaba inicializado."
+  function clearCoreUnsubscribers() {
+    try {
+      unbindCoreEvents({
+        AppCore,
+        coreUnsubscribers,
+      });
+
+      return true;
+    } catch (error) {
+      recordError(
+        error,
+        "core-unbind"
       );
 
-      return api;
-    }
+      safeError(
+        "Store unbindCoreEvents error.",
+        error
+      );
 
-    const startedAt =
-      nowMs();
+      safeEmit(
+        STORE_EVENTS.coreUnbindError,
+        {
+          message:
+            error?.message ||
+            String(error),
+        }
+      );
 
-    const shouldHydrate =
-      options.hydrate !== false;
-
-    if (shouldHydrate) {
       try {
-        actions.hydrateFromCore();
-      } catch (error) {
-        safeError(
-          "Store hydrateFromCore error",
-          error
-        );
+        while (coreUnsubscribers.length) {
+          const dispose =
+            coreUnsubscribers.pop();
 
-        safeEmit(
-          "store:hydrate:error",
-          {
-            message:
-              error?.message ||
-              String(error),
-          }
-        );
-      }
+          try {
+            dispose?.();
+          } catch {}
+        }
+      } catch {}
+
+      return false;
+    }
+  }
+
+  function hydrateFromCoreSafe() {
+    try {
+      actions?.hydrateFromCore?.();
+
+      return true;
+    } catch (error) {
+      recordError(
+        error,
+        "hydrate"
+      );
+
+      safeError(
+        "Store hydrateFromCore error.",
+        error
+      );
+
+      safeEmit(
+        STORE_EVENTS.hydrateError,
+        {
+          message:
+            error?.message ||
+            String(error),
+        }
+      );
+
+      return false;
+    }
+  }
+
+  function bindCoreEventsSafe() {
+    if (coreUnsubscribers.length > 0) {
+      return true;
     }
 
     try {
@@ -1131,69 +1981,176 @@ export const Store = (() => {
         actions,
         patch,
       });
+
+      return true;
     } catch (error) {
+      recordError(
+        error,
+        "core-bind"
+      );
+
       safeError(
-        "Store bindCoreEvents error",
+        "Store bindCoreEvents error.",
         error
       );
 
       safeEmit(
-        "store:core-bind:error",
+        STORE_EVENTS.coreBindError,
         {
           message:
             error?.message ||
             String(error),
         }
       );
+
+      return false;
+    }
+  }
+
+  /* =======================================================
+     LIFECYCLE
+  ======================================================= */
+
+  function init(options = {}) {
+    const opts =
+      safeObject(options);
+
+    if (initialized && opts.force !== true) {
+      safeEmit(
+        STORE_EVENTS.initSkip,
+        {
+          initialized:
+            true,
+
+          reason:
+            "already-initialized",
+        }
+      );
+
+      return api;
     }
 
-    initialized = true;
+    if (initializing && opts.force !== true) {
+      safeEmit(
+        STORE_EVENTS.initSkip,
+        {
+          initializing:
+            true,
 
-    safeEmit(
-      "store:init",
-      {
-        initialized: true,
-        durationMs:
-          nowMs() - startedAt,
+          reason:
+            "init-in-flight",
+        }
+      );
+
+      return api;
+    }
+
+    initializing =
+      true;
+
+    destroyed =
+      false;
+
+    initStartedAt =
+      nowMs();
+
+    try {
+      if (opts.force === true) {
+        clearCoreUnsubscribers();
       }
-    );
 
-    safeLog(
-      "Store inicializado correctamente.",
-      {
-        route:
-          state.app?.route,
-        publicPath:
-          state.app?.publicPath,
-        authenticated:
-          state.session?.authenticated,
-        theme:
-          state.ui?.theme,
-        lang:
-          state.ui?.lang,
+      const shouldHydrate =
+        opts.hydrate !== false;
+
+      if (shouldHydrate) {
+        hydrateFromCoreSafe();
       }
-    );
 
-    return api;
+      bindCoreEventsSafe();
+
+      initialized =
+        true;
+
+      initCompletedAt =
+        nowMs();
+
+      safeEmit(
+        STORE_EVENTS.init,
+        {
+          initialized:
+            true,
+
+          force:
+            opts.force === true,
+
+          hydrate:
+            shouldHydrate,
+
+          durationMs:
+            initCompletedAt - initStartedAt,
+
+          diagnostics:
+            getDiagnostics(),
+        }
+      );
+
+      safeLog(
+        "Store inicializado correctamente.",
+        {
+          route:
+            state.app?.route,
+          publicPath:
+            safeRedactText(
+              state.app?.publicPath || ""
+            ),
+          authenticated:
+            state.session?.authenticated,
+          theme:
+            state.ui?.theme,
+          lang:
+            state.ui?.lang,
+        }
+      );
+
+      return api;
+    } catch (error) {
+      initialized =
+        false;
+
+      recordError(
+        error,
+        "init"
+      );
+
+      safeEmit(
+        STORE_EVENTS.initError,
+        {
+          message:
+            error?.message ||
+            String(error),
+          durationMs:
+            nowMs() - initStartedAt,
+        }
+      );
+
+      throw error;
+    } finally {
+      initializing =
+        false;
+    }
   }
 
   function destroy(options = {}) {
-    const {
-      clearState = false,
-      silent = false,
-    } = options;
+    const opts =
+      safeObject(options);
 
-    try {
-      unbindCoreEvents({
-        AppCore,
-        coreUnsubscribers,
-      });
-    } catch (error) {
-      safeError(
-        "Store unbindCoreEvents error",
-        error
-      );
-    }
+    const clearState =
+      opts.clearState === true;
+
+    const silent =
+      opts.silent === true;
+
+    clearCoreUnsubscribers();
 
     listeners.clear();
     keyListeners.clear();
@@ -1208,16 +2165,28 @@ export const Store = (() => {
         )
       );
 
-      touchMeta(state);
+      touchStoreMeta();
     }
 
-    initialized = false;
+    initialized =
+      false;
+
+    initializing =
+      false;
+
+    destroyed =
+      true;
 
     if (!silent) {
       safeEmit(
-        "store:destroy",
+        STORE_EVENTS.destroy,
         {
-          initialized: false,
+          initialized:
+            false,
+
+          destroyed:
+            true,
+
           clearState:
             Boolean(clearState),
         }
@@ -1227,9 +2196,27 @@ export const Store = (() => {
     return true;
   }
 
+  function isInitialized() {
+    return Boolean(initialized);
+  }
+
+  function isInitializing() {
+    return Boolean(initializing);
+  }
+
   function getDiagnostics() {
     return {
-      initialized,
+      version:
+        STORE_VERSION,
+
+      initialized:
+        Boolean(initialized),
+
+      initializing:
+        Boolean(initializing),
+
+      destroyed:
+        Boolean(destroyed),
 
       mutationSeq,
 
@@ -1247,12 +2234,14 @@ export const Store = (() => {
 
       batchDepth,
 
+      batchId,
+
       batchedPaths:
         batchChangedPaths.size,
 
       batchedChangedPaths:
-        Array.from(
-          batchChangedPaths
+        sanitizeChangedPaths(
+          Array.from(batchChangedPaths)
         ),
 
       hasBatchPreviousState:
@@ -1265,43 +2254,76 @@ export const Store = (() => {
         state.app?.route || null,
 
       publicPath:
-        state.app?.publicPath || null,
+        safeRedactText(
+          state.app?.publicPath || ""
+        ) || null,
 
       authenticated:
         Boolean(
           state.session?.authenticated
         ),
 
+      hasToken:
+        Boolean(
+          state.session?.hasToken
+        ),
+
+      role:
+        state.session?.role || null,
+
+      username:
+        state.session?.username || null,
+
       theme:
         state.ui?.theme || null,
 
+      themeMode:
+        state.ui?.themeMode || null,
+
       lang:
         state.ui?.lang || null,
+
+      lastError,
+
+      at:
+        nowIso(),
     };
   }
 
-  function isInitialized() {
-    return Boolean(initialized);
-  }
-
-  /* =========================================================
+  /* =======================================================
      PUBLIC API
-  ========================================================= */
+  ======================================================= */
 
   const api = {
+    version:
+      STORE_VERSION,
+
+    events:
+      STORE_EVENTS,
+
     state,
 
     init,
     destroy,
+
     isInitialized,
+    isInitializing,
 
     get,
     getRaw,
+
     set,
     patch,
     replace,
     update,
     remove,
+
+    delete:
+      remove,
+
+    del:
+      remove,
+
     reset,
 
     beginBatch,
@@ -1310,6 +2332,10 @@ export const Store = (() => {
     rollbackBatch,
 
     snapshot,
+    getSnapshot,
+    getDebugSnapshot:
+      getSnapshot,
+
     select,
 
     push,
@@ -1318,7 +2344,11 @@ export const Store = (() => {
     clearCollection,
 
     subscribe,
+
     subscribeKey,
+    subscribePath:
+      subscribeKey,
+
     subscribeSelector,
 
     getDiagnostics,
@@ -1326,6 +2356,19 @@ export const Store = (() => {
     selectors,
     actions,
   };
+
+  try {
+    if (
+      typeof window !== "undefined" &&
+      window
+    ) {
+      window.__ONION_STORE__ =
+        api;
+
+      window.Store =
+        window.Store || api;
+    }
+  } catch {}
 
   return api;
 })();

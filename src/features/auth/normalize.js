@@ -2,7 +2,7 @@
    Onion SPA - Auth Normalize
    Archivo: src/features/auth/normalize.js
 
-   AUTH NORMALIZER · FINAL EXTREME PRO SYSTEM · 10/10
+   AUTH NORMALIZER · FINAL EXTREME PRO SYSTEM · 11/10
 
    RESPONSABILIDADES:
    - normalizar usuarios heterogéneos del backend
@@ -27,6 +27,7 @@
    - permisos como array, string u objeto boolean-map
    - 2FA exige tempToken/challengeToken usable salvo override explícito
    - snapshots sin tokens reales
+   - raw user saneado sin secretos
 ========================================================= */
 
 import {
@@ -42,172 +43,255 @@ import {
    CONSTANTS
 ========================================================= */
 
-const AUTH_NORMALIZE_VERSION = "10.2.0";
+const AUTH_NORMALIZE_VERSION =
+  "11.0.0";
 
-const DEFAULT_TOKEN_MAX_LENGTH = 8192;
-const DEFAULT_SESSION_VALUE_MAX_LENGTH = 200;
+const DEFAULT_TOKEN_MAX_LENGTH =
+  8192;
 
-const ADMIN_ROLE_KEYS = new Set([
-  "admin",
-  "administrator",
-  "administrador",
-  "superadmin",
-  "super_admin",
-  "super_administrador",
-  "owner",
-  "root",
-]);
+const DEFAULT_SESSION_VALUE_MAX_LENGTH =
+  200;
 
-const SUPPORT_ROLE_KEYS = new Set([
-  "support",
-  "soporte",
-  "agent",
-  "agente",
-  "helpdesk",
-  "operator",
-  "operador",
-  "tecnico",
-  "técnico",
-  "technician",
-  "technical",
-  "staff",
-]);
+const DEFAULT_RAW_SANITIZE_DEPTH =
+  5;
 
-const MANAGER_ROLE_KEYS = new Set([
-  "manager",
-  "gestor",
-  "gerente",
-  "lead",
-  "team_lead",
-  "supervisor",
-]);
+const DEFAULT_RAW_SANITIZE_KEYS =
+  160;
 
-const CLIENT_ROLE_KEYS = new Set([
-  "client",
-  "cliente",
-  "customer",
-  "usuario",
-  "user",
-]);
+const ADMIN_ROLE_KEYS =
+  new Set([
+    "admin",
+    "administrator",
+    "administrador",
+    "superadmin",
+    "super_admin",
+    "super_administrador",
+    "owner",
+    "root",
+  ]);
 
-const AUTH_FAILURE_CODES = new Set([
-  "INVALID_CREDENTIALS",
-  "MISSING_CREDENTIALS",
-  "ACCOUNT_TEMPORARILY_LOCKED",
-  "ACCOUNT_DISABLED",
-  "USER_DISABLED",
-  "UNAUTHORIZED",
-  "FORBIDDEN",
-  "TOKEN_INVALID",
-  "INVALID_TOKEN",
-  "TOKEN_EXPIRED",
-  "SESSION_EXPIRED",
-  "INVALID_LOGIN_SESSION",
-  "LOGIN_FAILED",
-  "AUTH_FAILED",
-  "AUTH_RESTORE_FAILED",
-  "REFRESH_CONTEXT_MISSING",
-  "REFRESH_INVALID_SESSION",
-  "REFRESH_EMPTY_RESPONSE",
-  "REFRESH_USER_WITHOUT_TOKEN",
-  "REFRESH_UNUSABLE_RESPONSE",
-  "ME_INVALID_SESSION",
-  "ME_USER_MISSING",
-]);
+const SUPPORT_ROLE_KEYS =
+  new Set([
+    "support",
+    "soporte",
+    "agent",
+    "agente",
+    "helpdesk",
+    "operator",
+    "operador",
+    "tecnico",
+    "técnico",
+    "technician",
+    "technical",
+    "staff",
+  ]);
 
-const AUTH_FAILURE_STATUS_KEYS = new Set([
-  "error",
-  "failed",
-  "failure",
-  "invalid",
-  "unauthorized",
-  "forbidden",
-  "expired",
-  "session_expired",
-  "token_expired",
-  "invalid_token",
-  "auth_failed",
-  "login_failed",
-  "not_authenticated",
-  "disabled",
-  "blocked",
-  "locked",
-]);
+const MANAGER_ROLE_KEYS =
+  new Set([
+    "manager",
+    "gestor",
+    "gerente",
+    "lead",
+    "team_lead",
+    "supervisor",
+    "responsable",
+  ]);
 
-const AUTH_SUCCESS_STATUS_KEYS = new Set([
-  "ok",
-  "success",
-  "successful",
-  "authenticated",
-  "active",
-  "valid",
-  "token_only",
-  "user_only",
-  "2fa_required",
-  "mfa_required",
-  "totp_required",
-  "two_factor_required",
-]);
+const CLIENT_ROLE_KEYS =
+  new Set([
+    "client",
+    "cliente",
+    "customer",
+    "usuario",
+    "user",
+  ]);
 
-const TOKEN_KEYS = Object.freeze([
-  "token",
-  "accessToken",
-  "access_token",
-  "authToken",
-  "auth_token",
-  "jwt",
-  "idToken",
-  "id_token",
-]);
+const AUTH_FAILURE_CODES =
+  new Set([
+    "INVALID_CREDENTIALS",
+    "MISSING_CREDENTIALS",
+    "ACCOUNT_TEMPORARILY_LOCKED",
+    "ACCOUNT_DISABLED",
+    "USER_DISABLED",
+    "USER_NOT_AVAILABLE",
+    "USER_NOT_FOUND",
+    "UNAUTHORIZED",
+    "FORBIDDEN",
+    "TOKEN_INVALID",
+    "INVALID_TOKEN",
+    "TOKEN_EXPIRED",
+    "SESSION_EXPIRED",
+    "SESSION_REVOKED",
+    "SESSION_NOT_FOUND",
+    "INVALID_LOGIN_SESSION",
+    "LOGIN_FAILED",
+    "AUTH_FAILED",
+    "AUTH_RESTORE_FAILED",
+    "REFRESH_CONTEXT_MISSING",
+    "REFRESH_INVALID_SESSION",
+    "REFRESH_EMPTY_RESPONSE",
+    "REFRESH_USER_WITHOUT_TOKEN",
+    "REFRESH_UNUSABLE_RESPONSE",
+    "ME_INVALID_SESSION",
+    "ME_USER_MISSING",
+    "MISSING_2FA_TEMP_TOKEN",
+    "BAD_CREDENTIALS",
+    "CREDENTIALS_INVALID",
+    "TOKEN_VERSION_MISMATCH",
+  ]);
 
-const REFRESH_TOKEN_KEYS = Object.freeze([
-  "refreshToken",
-  "refresh_token",
-]);
+const AUTH_FAILURE_STATUS_KEYS =
+  new Set([
+    "error",
+    "failed",
+    "failure",
+    "invalid",
+    "unauthorized",
+    "forbidden",
+    "expired",
+    "session_expired",
+    "token_expired",
+    "invalid_token",
+    "auth_failed",
+    "login_failed",
+    "not_authenticated",
+    "disabled",
+    "blocked",
+    "locked",
+    "revoked",
+  ]);
 
-const TEMP_TOKEN_KEYS = Object.freeze([
-  "tempToken",
-  "temp_token",
-  "temporaryToken",
-  "temporary_token",
-  "challengeToken",
-  "challenge_token",
-  "twoFactorToken",
-  "two_factor_token",
-  "mfaToken",
-  "mfa_token",
-]);
+const AUTH_SUCCESS_STATUS_KEYS =
+  new Set([
+    "ok",
+    "success",
+    "successful",
+    "authenticated",
+    "active",
+    "valid",
+    "token_only",
+    "user_only",
+    "2fa_required",
+    "mfa_required",
+    "totp_required",
+    "two_factor_required",
+  ]);
 
-const TOKEN_FALSE_VALUES = new Set([
-  "",
-  "null",
-  "undefined",
-  "false",
-  "none",
-  "nan",
-  "{}",
-  "[]",
-  "[object object]",
-]);
+const TWO_FACTOR_STATUS_KEYS =
+  new Set([
+    "2fa_required",
+    "mfa_required",
+    "totp_required",
+    "two_factor_required",
+    "verification_required",
+    "challenge_required",
+  ]);
 
-const USER_IDENTITY_KEYS = Object.freeze([
-  "id",
-  "userId",
-  "user_id",
-  "_id",
-  "uuid",
-  "uid",
-  "sub",
-  "username",
-  "userName",
-  "user_name",
-  "email",
-  "mail",
-  "phone",
-  "telefono",
-  "mobile",
-  "cellphone",
-]);
+const TOKEN_KEYS =
+  Object.freeze([
+    "token",
+    "accessToken",
+    "access_token",
+    "authToken",
+    "auth_token",
+    "jwt",
+    "idToken",
+    "id_token",
+    "bearer",
+  ]);
+
+const REFRESH_TOKEN_KEYS =
+  Object.freeze([
+    "refreshToken",
+    "refresh_token",
+  ]);
+
+const TEMP_TOKEN_KEYS =
+  Object.freeze([
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "challengeToken",
+    "challenge_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
+  ]);
+
+const TOKEN_FALSE_VALUES =
+  new Set([
+    "",
+    "null",
+    "undefined",
+    "false",
+    "none",
+    "nan",
+    "{}",
+    "[]",
+    "[object object]",
+    "\"\"",
+    "''",
+  ]);
+
+const USER_IDENTITY_KEYS =
+  Object.freeze([
+    "id",
+    "userId",
+    "user_id",
+    "_id",
+    "uuid",
+    "uid",
+    "sub",
+    "username",
+    "userName",
+    "user_name",
+    "email",
+    "mail",
+    "phone",
+    "telefono",
+    "mobile",
+    "cellphone",
+  ]);
+
+const AUTH_ENVELOPE_KEYS =
+  Object.freeze([
+    "ok",
+    "success",
+    "status",
+    "statusCode",
+    "status_code",
+    "error",
+    "errorCode",
+    "error_code",
+    "data",
+    "payload",
+    "result",
+    "body",
+    "response",
+    "session",
+    "sessionData",
+    "auth",
+    "authData",
+  ]);
+
+const NESTED_OBJECT_KEYS =
+  Object.freeze([
+    "data",
+    "payload",
+    "result",
+    "body",
+    "response",
+    "auth",
+    "authData",
+    "session",
+    "sessionData",
+    "meta",
+  ]);
+
+const SENSITIVE_RAW_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
 
 /* =========================================================
    BASIC HELPERS
@@ -222,7 +306,8 @@ function safeLower(value = "") {
 }
 
 function safeNumber(value, fallback = 0) {
-  const number = Number(value);
+  const number =
+    Number(value);
 
   return Number.isFinite(number)
     ? number
@@ -240,7 +325,8 @@ function normalizeBoolean(value, fallback = false) {
   }
 
   if (typeof value === "string") {
-    const key = value.trim().toLowerCase();
+    const key =
+      value.trim().toLowerCase();
 
     if (
       [
@@ -251,6 +337,8 @@ function normalizeBoolean(value, fallback = false) {
         "si",
         "sí",
         "ok",
+        "enabled",
+        "active",
       ].includes(key)
     ) {
       return true;
@@ -262,6 +350,8 @@ function normalizeBoolean(value, fallback = false) {
         "false",
         "no",
         "off",
+        "disabled",
+        "inactive",
       ].includes(key)
     ) {
       return false;
@@ -312,7 +402,9 @@ function safeClone(value, fallback = null) {
   } catch {}
 
   try {
-    return JSON.parse(JSON.stringify(value));
+    return JSON.parse(
+      JSON.stringify(value)
+    );
   } catch {
     return fallback;
   }
@@ -389,7 +481,10 @@ function hasOwn(obj, key) {
   return Boolean(
     obj &&
       typeof obj === "object" &&
-      Object.prototype.hasOwnProperty.call(obj, key)
+      Object.prototype.hasOwnProperty.call(
+        obj,
+        key
+      )
   );
 }
 
@@ -397,7 +492,9 @@ function unique(values = []) {
   return Array.from(
     new Set(
       values
-        .map((item) => normalizeString(item))
+        .map((item) =>
+          normalizeString(item)
+        )
         .filter(Boolean)
     )
   );
@@ -411,7 +508,8 @@ function safeSessionValue(
   value = "",
   maxLength = DEFAULT_SESSION_VALUE_MAX_LENGTH
 ) {
-  const text = normalizeString(value);
+  const text =
+    normalizeString(value);
 
   if (!text) {
     return "";
@@ -419,7 +517,10 @@ function safeSessionValue(
 
   return text.slice(
     0,
-    safeNumber(maxLength, DEFAULT_SESSION_VALUE_MAX_LENGTH)
+    safeNumber(
+      maxLength,
+      DEFAULT_SESSION_VALUE_MAX_LENGTH
+    )
   );
 }
 
@@ -439,6 +540,83 @@ function getSessionValueMaxLength() {
       DEFAULT_SESSION_VALUE_MAX_LENGTH
     ) || DEFAULT_SESSION_VALUE_MAX_LENGTH
   );
+}
+
+/* =========================================================
+   RAW SANITIZER
+========================================================= */
+
+function sanitizeRawObject(value, depth = 0, seen = new WeakSet()) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return value;
+  }
+
+  if (depth > DEFAULT_RAW_SANITIZE_DEPTH) {
+    return "[depth-limit]";
+  }
+
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "bigint") {
+    return String(value);
+  }
+
+  if (typeof value === "function") {
+    return "[function]";
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, DEFAULT_RAW_SANITIZE_KEYS)
+      .map((item) =>
+        sanitizeRawObject(
+          item,
+          depth + 1,
+          seen
+        )
+      );
+  }
+
+  if (!isObject(value)) {
+    return value;
+  }
+
+  try {
+    if (seen.has(value)) {
+      return "[circular]";
+    }
+
+    seen.add(value);
+  } catch {}
+
+  const output = {};
+
+  for (const [key, item] of Object.entries(value).slice(0, DEFAULT_RAW_SANITIZE_KEYS)) {
+    if (SENSITIVE_RAW_KEY_RE.test(key)) {
+      output[key] =
+        item ? "***" : item;
+
+      continue;
+    }
+
+    output[key] =
+      sanitizeRawObject(
+        item,
+        depth + 1,
+        seen
+      );
+  }
+
+  return output;
 }
 
 /* =========================================================
@@ -462,13 +640,15 @@ function pickTokenFromObject(value = null) {
       continue;
     }
 
-    const candidate = value[key];
+    const candidate =
+      value[key];
 
     if (
       typeof candidate === "string" ||
       typeof candidate === "number"
     ) {
-      const text = normalizeString(candidate);
+      const text =
+        normalizeString(candidate);
 
       if (text) {
         return text;
@@ -490,10 +670,12 @@ function normalizeTokenLike(
     return null;
   }
 
-  let tokenValue = value;
+  let tokenValue =
+    value;
 
   if (isObject(tokenValue)) {
-    tokenValue = pickTokenFromObject(tokenValue);
+    tokenValue =
+      pickTokenFromObject(tokenValue);
   }
 
   if (
@@ -503,26 +685,31 @@ function normalizeTokenLike(
     return null;
   }
 
-  let normalized = String(tokenValue).trim();
+  let normalized =
+    String(tokenValue).trim();
 
   if (!normalized) {
     return null;
   }
 
   if (/^bearer\s+/i.test(normalized)) {
-    normalized = normalized.replace(/^bearer\s+/i, "").trim();
+    normalized =
+      normalized.replace(/^bearer\s+/i, "")
+        .trim();
   }
 
-  const lower = normalized.toLowerCase();
+  const lower =
+    normalized.toLowerCase();
 
   if (TOKEN_FALSE_VALUES.has(lower)) {
     return null;
   }
 
-  const limit = safeNumber(
-    maxLength,
-    DEFAULT_TOKEN_MAX_LENGTH
-  );
+  const limit =
+    safeNumber(
+      maxLength,
+      DEFAULT_TOKEN_MAX_LENGTH
+    );
 
   /*
     Regla dura:
@@ -540,7 +727,8 @@ function normalizeTokenLike(
 }
 
 function redactToken(value = "") {
-  const text = normalizeString(value);
+  const text =
+    normalizeString(value);
 
   if (!text) {
     return "";
@@ -649,8 +837,11 @@ function isClientRole(value = "") {
 }
 
 export function expandRoleAliases(roles = []) {
-  const normalized = normalizeRoleList(roles);
-  const result = new Set(normalized);
+  const normalized =
+    normalizeRoleList(roles);
+
+  const result =
+    new Set(normalized);
 
   if (normalized.some(isAdminRole)) {
     for (const role of ADMIN_ROLE_KEYS) {
@@ -684,11 +875,14 @@ export function expandRoleAliases(roles = []) {
     result.add("client");
   }
 
-  return unique(Array.from(result));
+  return unique(
+    Array.from(result)
+  );
 }
 
 function normalizeCanonicalRole(value = "user") {
-  const roles = expandRoleAliases(value);
+  const roles =
+    expandRoleAliases(value);
 
   if (roles.some(isAdminRole)) {
     return "admin";
@@ -714,7 +908,8 @@ function normalizePermissionList(value) {
 }
 
 function normalizeTheme(value = "") {
-  const theme = safeLower(value);
+  const theme =
+    safeLower(value);
 
   if (theme === "light") {
     return "light";
@@ -732,13 +927,15 @@ function normalizeTheme(value = "") {
 ========================================================= */
 
 function isSafeAvatarUrl(url = "") {
-  const value = normalizeString(url);
+  const value =
+    normalizeString(url);
 
   if (!value) {
     return false;
   }
 
-  const lower = value.toLowerCase();
+  const lower =
+    value.toLowerCase();
 
   if (
     lower.startsWith("javascript:") ||
@@ -753,9 +950,10 @@ function isSafeAvatarUrl(url = "") {
 }
 
 function getNestedRawUser(rawUser = {}) {
-  const user = isObject(rawUser)
-    ? rawUser
-    : {};
+  const user =
+    isObject(rawUser)
+      ? rawUser
+      : {};
 
   return isObject(user.raw)
     ? user.raw
@@ -767,130 +965,179 @@ function normalizeAvatarUrl(rawUser = null) {
     return null;
   }
 
-  const raw = getNestedRawUser(rawUser);
+  const raw =
+    getNestedRawUser(rawUser);
 
-  const profile = safeObject(rawUser.profile);
-  const settings = safeObject(rawUser.settings);
-  const preferences = safeObject(rawUser.preferences);
+  const profile =
+    safeObject(rawUser.profile);
 
-  const rawProfile = safeObject(raw.profile);
-  const rawSettings = safeObject(raw.settings);
-  const rawPreferences = safeObject(raw.preferences);
+  const settings =
+    safeObject(rawUser.settings);
 
-  const hasAvatar = pickFirst(
-    rawUser.hasAvatar,
-    rawUser.has_avatar,
-    rawUser.avatarEnabled,
-    rawUser.avatar_enabled,
+  const preferences =
+    safeObject(rawUser.preferences);
 
-    profile.hasAvatar,
-    profile.has_avatar,
-    profile.avatarEnabled,
-    profile.avatar_enabled,
+  const meta =
+    safeObject(rawUser.meta);
 
-    settings.hasAvatar,
-    settings.avatarEnabled,
+  const rawProfile =
+    safeObject(raw.profile);
 
-    preferences.hasAvatar,
-    preferences.avatarEnabled,
+  const rawSettings =
+    safeObject(raw.settings);
 
-    raw.hasAvatar,
-    raw.has_avatar,
-    raw.avatarEnabled,
-    raw.avatar_enabled,
+  const rawPreferences =
+    safeObject(raw.preferences);
 
-    rawProfile.hasAvatar,
-    rawProfile.has_avatar,
-    rawProfile.avatarEnabled,
-    rawProfile.avatar_enabled,
+  const rawMeta =
+    safeObject(raw.meta);
 
-    rawSettings.hasAvatar,
-    rawSettings.avatarEnabled,
+  const hasAvatar =
+    pickFirst(
+      rawUser.hasAvatar,
+      rawUser.has_avatar,
+      rawUser.avatarEnabled,
+      rawUser.avatar_enabled,
 
-    rawPreferences.hasAvatar,
-    rawPreferences.avatarEnabled
-  );
+      profile.hasAvatar,
+      profile.has_avatar,
+      profile.avatarEnabled,
+      profile.avatar_enabled,
 
-  const rawAvatar = pickFirst(
-    rawUser.avatar,
-    rawUser.avatarUrl,
-    rawUser.avatar_url,
-    rawUser.photo,
-    rawUser.photoUrl,
-    rawUser.photo_url,
-    rawUser.image,
-    rawUser.imageUrl,
-    rawUser.image_url,
-    rawUser.profileImage,
-    rawUser.profile_image,
-    rawUser.picture,
-    rawUser.pictureUrl,
-    rawUser.picture_url,
+      settings.hasAvatar,
+      settings.avatarEnabled,
 
-    profile.avatar,
-    profile.avatarUrl,
-    profile.avatar_url,
-    profile.photo,
-    profile.photoUrl,
-    profile.photo_url,
-    profile.image,
-    profile.imageUrl,
-    profile.image_url,
-    profile.profileImage,
-    profile.profile_image,
-    profile.picture,
-    profile.pictureUrl,
-    profile.picture_url,
+      preferences.hasAvatar,
+      preferences.avatarEnabled,
 
-    settings.avatar,
-    settings.avatarUrl,
-    settings.avatar_url,
-    settings.photoUrl,
-    settings.photo_url,
+      meta.hasAvatar,
+      meta.avatarEnabled,
 
-    preferences.avatar,
-    preferences.avatarUrl,
-    preferences.avatar_url,
-    preferences.photoUrl,
-    preferences.photo_url,
+      raw.hasAvatar,
+      raw.has_avatar,
+      raw.avatarEnabled,
+      raw.avatar_enabled,
 
-    raw.avatar,
-    raw.avatarUrl,
-    raw.avatar_url,
-    raw.photo,
-    raw.photoUrl,
-    raw.photo_url,
-    raw.image,
-    raw.imageUrl,
-    raw.image_url,
-    raw.profileImage,
-    raw.profile_image,
-    raw.picture,
-    raw.pictureUrl,
-    raw.picture_url,
+      rawProfile.hasAvatar,
+      rawProfile.has_avatar,
+      rawProfile.avatarEnabled,
+      rawProfile.avatar_enabled,
 
-    rawProfile.avatar,
-    rawProfile.avatarUrl,
-    rawProfile.avatar_url,
-    rawProfile.photo,
-    rawProfile.photoUrl,
-    rawProfile.photo_url,
-    rawProfile.profileImage,
-    rawProfile.profile_image,
-    rawProfile.picture,
-    rawProfile.pictureUrl,
-    rawProfile.picture_url,
+      rawSettings.hasAvatar,
+      rawSettings.avatarEnabled,
 
-    rawSettings.avatar,
-    rawSettings.avatarUrl,
-    rawSettings.avatar_url,
+      rawPreferences.hasAvatar,
+      rawPreferences.avatarEnabled,
 
-    rawPreferences.avatar,
-    rawPreferences.avatarUrl,
-    rawPreferences.avatar_url
-  );
+      rawMeta.hasAvatar,
+      rawMeta.avatarEnabled
+    );
 
-  const avatar = normalizeString(rawAvatar);
+  const rawAvatar =
+    pickFirst(
+      rawUser.avatar,
+      rawUser.avatarUrl,
+      rawUser.avatar_url,
+      rawUser.photo,
+      rawUser.photoUrl,
+      rawUser.photo_url,
+      rawUser.image,
+      rawUser.imageUrl,
+      rawUser.image_url,
+      rawUser.profileImage,
+      rawUser.profile_image,
+      rawUser.picture,
+      rawUser.pictureUrl,
+      rawUser.picture_url,
+      rawUser.thumbnail,
+      rawUser.thumbnailUrl,
+      rawUser.thumbnail_url,
+
+      profile.avatar,
+      profile.avatarUrl,
+      profile.avatar_url,
+      profile.photo,
+      profile.photoUrl,
+      profile.photo_url,
+      profile.image,
+      profile.imageUrl,
+      profile.image_url,
+      profile.profileImage,
+      profile.profile_image,
+      profile.picture,
+      profile.pictureUrl,
+      profile.picture_url,
+      profile.thumbnail,
+      profile.thumbnailUrl,
+      profile.thumbnail_url,
+
+      settings.avatar,
+      settings.avatarUrl,
+      settings.avatar_url,
+      settings.photoUrl,
+      settings.photo_url,
+
+      preferences.avatar,
+      preferences.avatarUrl,
+      preferences.avatar_url,
+      preferences.photoUrl,
+      preferences.photo_url,
+
+      meta.avatar,
+      meta.avatarUrl,
+      meta.avatar_url,
+      meta.picture,
+      meta.pictureUrl,
+      meta.picture_url,
+
+      raw.avatar,
+      raw.avatarUrl,
+      raw.avatar_url,
+      raw.photo,
+      raw.photoUrl,
+      raw.photo_url,
+      raw.image,
+      raw.imageUrl,
+      raw.image_url,
+      raw.profileImage,
+      raw.profile_image,
+      raw.picture,
+      raw.pictureUrl,
+      raw.picture_url,
+      raw.thumbnail,
+      raw.thumbnailUrl,
+      raw.thumbnail_url,
+
+      rawProfile.avatar,
+      rawProfile.avatarUrl,
+      rawProfile.avatar_url,
+      rawProfile.photo,
+      rawProfile.photoUrl,
+      rawProfile.photo_url,
+      rawProfile.profileImage,
+      rawProfile.profile_image,
+      rawProfile.picture,
+      rawProfile.pictureUrl,
+      rawProfile.picture_url,
+
+      rawSettings.avatar,
+      rawSettings.avatarUrl,
+      rawSettings.avatar_url,
+
+      rawPreferences.avatar,
+      rawPreferences.avatarUrl,
+      rawPreferences.avatar_url,
+
+      rawMeta.avatar,
+      rawMeta.avatarUrl,
+      rawMeta.avatar_url,
+      rawMeta.picture,
+      rawMeta.pictureUrl,
+      rawMeta.picture_url
+    );
+
+  const avatar =
+    normalizeString(rawAvatar);
 
   if (!avatar) {
     return null;
@@ -921,7 +1168,9 @@ function hasUsableUserIdentity(user = {}) {
   }
 
   return USER_IDENTITY_KEYS.some((key) =>
-    Boolean(normalizeString(user[key]))
+    Boolean(
+      normalizeString(user[key])
+    )
   );
 }
 
@@ -930,11 +1179,20 @@ function hasNestedUserIdentity(user = {}) {
     return false;
   }
 
-  const raw = getNestedRawUser(user);
-  const profile = safeObject(user.profile);
-  const account = safeObject(user.account);
-  const rawProfile = safeObject(raw.profile);
-  const rawAccount = safeObject(raw.account);
+  const raw =
+    getNestedRawUser(user);
+
+  const profile =
+    safeObject(user.profile);
+
+  const account =
+    safeObject(user.account);
+
+  const rawProfile =
+    safeObject(raw.profile);
+
+  const rawAccount =
+    safeObject(raw.account);
 
   return Boolean(
     hasUsableUserIdentity(user) ||
@@ -964,24 +1222,10 @@ function isAuthEnvelope(value = {}) {
   }
 
   return Boolean(
-    hasOwn(value, "ok") ||
-      hasOwn(value, "success") ||
-      hasOwn(value, "status") ||
-      hasOwn(value, "statusCode") ||
-      hasOwn(value, "status_code") ||
-      hasOwn(value, "error") ||
-      hasOwn(value, "errorCode") ||
-      hasOwn(value, "error_code") ||
-      hasTokenLikeKeys(value) ||
-      hasOwn(value, "data") ||
-      hasOwn(value, "payload") ||
-      hasOwn(value, "result") ||
-      hasOwn(value, "body") ||
-      hasOwn(value, "response") ||
-      hasOwn(value, "session") ||
-      hasOwn(value, "sessionData") ||
-      hasOwn(value, "auth") ||
-      hasOwn(value, "authData")
+    AUTH_ENVELOPE_KEYS.some((key) =>
+      hasOwn(value, key)
+    ) ||
+      hasTokenLikeKeys(value)
   );
 }
 
@@ -1015,55 +1259,75 @@ function looksLikeUser(value = null) {
 ========================================================= */
 
 function getNestedAuthNodes(payload = {}) {
-  const root = safeObject(payload);
+  const root =
+    safeObject(payload);
 
-  const data = safeObject(root.data);
-  const payloadNode = safeObject(root.payload);
-  const result = safeObject(root.result);
-  const body = safeObject(root.body);
-  const response = safeObject(root.response);
-  const responseData = safeObject(response.data);
-  const meta = safeObject(root.meta);
+  const data =
+    safeObject(root.data);
 
-  const session = pickFirstObject(
-    root.session,
-    root.sessionData,
-    data.session,
-    data.sessionData,
-    payloadNode.session,
-    payloadNode.sessionData,
-    result.session,
-    result.sessionData,
-    body.session,
-    body.sessionData,
-    responseData.session,
-    responseData.sessionData,
-    meta.session
-  ) || {};
+  const payloadNode =
+    safeObject(root.payload);
 
-  const auth = pickFirstObject(
-    root.auth,
-    root.authData,
-    data.auth,
-    data.authData,
-    payloadNode.auth,
-    payloadNode.authData,
-    result.auth,
-    result.authData,
-    body.auth,
-    body.authData,
-    responseData.auth,
-    responseData.authData,
-    meta.auth
-  ) || {};
+  const result =
+    safeObject(root.result);
 
-  const sessionData = safeObject(session.data);
-  const authData = safeObject(auth.data);
+  const body =
+    safeObject(root.body);
+
+  const response =
+    safeObject(root.response);
+
+  const responseData =
+    safeObject(response.data);
+
+  const meta =
+    safeObject(root.meta);
+
+  const session =
+    pickFirstObject(
+      root.session,
+      root.sessionData,
+      data.session,
+      data.sessionData,
+      payloadNode.session,
+      payloadNode.sessionData,
+      result.session,
+      result.sessionData,
+      body.session,
+      body.sessionData,
+      responseData.session,
+      responseData.sessionData,
+      meta.session
+    ) || {};
+
+  const auth =
+    pickFirstObject(
+      root.auth,
+      root.authData,
+      data.auth,
+      data.authData,
+      payloadNode.auth,
+      payloadNode.authData,
+      result.auth,
+      result.authData,
+      body.auth,
+      body.authData,
+      responseData.auth,
+      responseData.authData,
+      meta.auth
+    ) || {};
+
+  const sessionData =
+    safeObject(session.data);
+
+  const authData =
+    safeObject(auth.data);
 
   return {
     root,
     data,
-    payload: payloadNode,
+    payload:
+      payloadNode,
     result,
     body,
     response,
@@ -1092,226 +1356,164 @@ function unwrapAuthPayload(payload = null, depth = 0) {
     return payload;
   }
 
-  const candidate = pickFirstObject(
-    payload.data,
-    payload.payload,
-    payload.result,
-    payload.body,
-    payload.response?.data,
-    payload.response
-  );
+  const candidate =
+    pickFirstObject(
+      payload.data,
+      payload.payload,
+      payload.result,
+      payload.body,
+      payload.response?.data,
+      payload.response
+    );
 
   if (
     candidate &&
     candidate !== payload
   ) {
-    return unwrapAuthPayload(candidate, depth + 1);
+    return unwrapAuthPayload(
+      candidate,
+      depth + 1
+    );
   }
 
   return payload;
 }
 
+function collectAuthObjects(payload = null) {
+  const output =
+    [];
+
+  const seen =
+    new WeakSet();
+
+  const queue =
+    [payload];
+
+  let guard =
+    0;
+
+  while (
+    queue.length &&
+    guard < 100
+  ) {
+    guard += 1;
+
+    const current =
+      queue.shift();
+
+    if (!isObject(current)) {
+      continue;
+    }
+
+    try {
+      if (seen.has(current)) {
+        continue;
+      }
+
+      seen.add(current);
+    } catch {}
+
+    output.push(current);
+
+    for (const key of NESTED_OBJECT_KEYS) {
+      const nested =
+        current[key];
+
+      if (isObject(nested)) {
+        queue.push(nested);
+      }
+    }
+
+    if (isObject(current.response?.data)) {
+      queue.push(current.response.data);
+    }
+
+    if (isObject(current.auth?.data)) {
+      queue.push(current.auth.data);
+    }
+
+    if (isObject(current.session?.data)) {
+      queue.push(current.session.data);
+    }
+  }
+
+  return output;
+}
+
+function pickValueFromObjects(objects = [], keys = []) {
+  for (const object of objects) {
+    for (const key of keys) {
+      if (
+        object &&
+        object[key] !== null &&
+        object[key] !== undefined &&
+        object[key] !== ""
+      ) {
+        return object[key];
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function pickTextFromObjects(objects = [], keys = []) {
+  return normalizeString(
+    pickValueFromObjects(
+      objects,
+      keys
+    ) || ""
+  );
+}
+
 function getStatusValue(payload = null) {
-  const {
-    root,
-    data,
-    payload: payloadNode,
-    result,
-    body,
-    response,
-    responseData,
-    session,
-    auth,
-    sessionData,
-    authData,
-  } = getNestedAuthNodes(payload);
+  const objects =
+    collectAuthObjects(payload);
 
-  return pickFirst(
-    root.status,
-    root.statusCode,
-    root.status_code,
-
-    data.status,
-    data.statusCode,
-    data.status_code,
-
-    payloadNode.status,
-    payloadNode.statusCode,
-    payloadNode.status_code,
-
-    result.status,
-    result.statusCode,
-    result.status_code,
-
-    body.status,
-    body.statusCode,
-    body.status_code,
-
-    response.status,
-    response.statusCode,
-    response.status_code,
-
-    responseData.status,
-    responseData.statusCode,
-    responseData.status_code,
-
-    session.status,
-    session.statusCode,
-    session.status_code,
-
-    auth.status,
-    auth.statusCode,
-    auth.status_code,
-
-    sessionData.status,
-    sessionData.statusCode,
-    sessionData.status_code,
-
-    authData.status,
-    authData.statusCode,
-    authData.status_code
+  return pickValueFromObjects(
+    objects,
+    [
+      "status",
+      "statusCode",
+      "status_code",
+      "state",
+      "estado",
+    ]
   );
 }
 
 function getErrorCode(payload = null) {
-  const {
-    root,
-    data,
-    payload: payloadNode,
-    result,
-    body,
-    responseData,
-    session,
-    auth,
-    sessionData,
-    authData,
-  } = getNestedAuthNodes(payload);
+  const objects =
+    collectAuthObjects(payload);
 
-  return pickFirstText(
-    root.code,
-    root.errorCode,
-    root.error_code,
-    root.error,
-
-    data.code,
-    data.errorCode,
-    data.error_code,
-    data.error,
-
-    payloadNode.code,
-    payloadNode.errorCode,
-    payloadNode.error_code,
-    payloadNode.error,
-
-    result.code,
-    result.errorCode,
-    result.error_code,
-    result.error,
-
-    body.code,
-    body.errorCode,
-    body.error_code,
-    body.error,
-
-    responseData.code,
-    responseData.errorCode,
-    responseData.error_code,
-    responseData.error,
-
-    session.code,
-    session.errorCode,
-    session.error_code,
-    session.error,
-
-    auth.code,
-    auth.errorCode,
-    auth.error_code,
-    auth.error,
-
-    sessionData.code,
-    sessionData.errorCode,
-    sessionData.error_code,
-    sessionData.error,
-
-    authData.code,
-    authData.errorCode,
-    authData.error_code,
-    authData.error
+  return pickTextFromObjects(
+    objects,
+    [
+      "code",
+      "errorCode",
+      "error_code",
+      "error",
+    ]
   );
 }
 
 function getResponseMessage(payload = null) {
-  const {
-    root,
-    data,
-    payload: payloadNode,
-    result,
-    body,
-    responseData,
-    session,
-    auth,
-    sessionData,
-    authData,
-  } = getNestedAuthNodes(payload);
+  const objects =
+    collectAuthObjects(payload);
 
-  return pickFirstText(
-    root.message,
-    root.mensaje,
-    root.errorMessage,
-    root.error_message,
-    root.detail,
-    root.description,
-
-    data.message,
-    data.mensaje,
-    data.errorMessage,
-    data.error_message,
-    data.detail,
-    data.description,
-
-    payloadNode.message,
-    payloadNode.mensaje,
-    payloadNode.errorMessage,
-    payloadNode.error_message,
-    payloadNode.detail,
-    payloadNode.description,
-
-    result.message,
-    result.mensaje,
-    result.errorMessage,
-    result.error_message,
-    result.detail,
-    result.description,
-
-    body.message,
-    body.mensaje,
-    body.errorMessage,
-    body.error_message,
-    body.detail,
-    body.description,
-
-    responseData.message,
-    responseData.mensaje,
-    responseData.errorMessage,
-    responseData.error_message,
-    responseData.detail,
-    responseData.description,
-
-    session.message,
-    session.mensaje,
-    session.detail,
-
-    auth.message,
-    auth.mensaje,
-    auth.detail,
-
-    sessionData.message,
-    sessionData.mensaje,
-    sessionData.detail,
-
-    authData.message,
-    authData.mensaje,
-    authData.detail
+  return pickTextFromObjects(
+    objects,
+    [
+      "message",
+      "mensaje",
+      "errorMessage",
+      "error_message",
+      "detail",
+      "description",
+      "title",
+      "reason",
+      "msg",
+    ]
   );
 }
 
@@ -1323,18 +1525,14 @@ function isExplicitAuthFailure(payload = null) {
     return false;
   }
 
-  const {
-    root,
-    data,
-    payload: payloadNode,
-    result,
-    body,
-    response,
-    responseData,
-  } = getNestedAuthNodes(payload);
+  const objects =
+    collectAuthObjects(payload);
 
-  const statusValue = getStatusValue(payload);
-  const statusNumber = Number(statusValue || 0);
+  const statusValue =
+    getStatusValue(payload);
+
+  const statusNumber =
+    Number(statusValue || 0);
 
   if (
     Number.isFinite(statusNumber) &&
@@ -1343,7 +1541,8 @@ function isExplicitAuthFailure(payload = null) {
     return true;
   }
 
-  const statusText = normalizeRoleKey(statusValue || "");
+  const statusText =
+    normalizeRoleKey(statusValue || "");
 
   if (
     statusText &&
@@ -1352,7 +1551,8 @@ function isExplicitAuthFailure(payload = null) {
     return true;
   }
 
-  const code = getErrorCode(payload).toUpperCase();
+  const code =
+    getErrorCode(payload).toUpperCase();
 
   if (
     code &&
@@ -1362,28 +1562,14 @@ function isExplicitAuthFailure(payload = null) {
   }
 
   if (
-    root.ok === false ||
-    root.success === false ||
-    data.ok === false ||
-    data.success === false ||
-    payloadNode.ok === false ||
-    payloadNode.success === false ||
-    result.ok === false ||
-    result.success === false ||
-    body.ok === false ||
-    body.success === false ||
-    response.ok === false ||
-    response.success === false ||
-    responseData.ok === false ||
-    responseData.success === false
+    objects.some((object) =>
+      object?.ok === false ||
+      object?.success === false
+    )
   ) {
     return true;
   }
 
-  /*
-    Estados positivos textuales no fuerzan éxito, pero sí evitan
-    falsos negativos por status strings legítimos.
-  */
   if (
     statusText &&
     AUTH_SUCCESS_STATUS_KEYS.has(statusText)
@@ -1402,18 +1588,29 @@ function createAuthNormalizeError(
     response = null,
   } = {}
 ) {
-  const error = new Error(message);
+  const error =
+    new Error(message);
 
-  error.name = "AuthNormalizeError";
-  error.status = status;
-  error.code = code;
+  error.name =
+    "AuthNormalizeError";
+
+  error.status =
+    status;
+
+  error.code =
+    code;
+
   error.data = {
     code,
     message,
     status,
   };
-  error.response = response;
-  error.raw = response;
+
+  error.response =
+    response;
+
+  error.raw =
+    response;
 
   return error;
 }
@@ -1423,20 +1620,41 @@ function createAuthNormalizeError(
 ========================================================= */
 
 function collectRoleCandidates(rawUser = {}) {
-  const user = safeObject(rawUser);
-  const raw = getNestedRawUser(user);
+  const user =
+    safeObject(rawUser);
 
-  const profile = safeObject(user.profile);
-  const permissionsNode = safeObject(user.permissions);
-  const meta = safeObject(user.meta);
-  const claims = safeObject(user.claims);
-  const account = safeObject(user.account);
+  const raw =
+    getNestedRawUser(user);
 
-  const rawProfile = safeObject(raw.profile);
-  const rawPermissions = safeObject(raw.permissions);
-  const rawMeta = safeObject(raw.meta);
-  const rawClaims = safeObject(raw.claims);
-  const rawAccount = safeObject(raw.account);
+  const profile =
+    safeObject(user.profile);
+
+  const permissionsNode =
+    safeObject(user.permissions);
+
+  const meta =
+    safeObject(user.meta);
+
+  const claims =
+    safeObject(user.claims);
+
+  const account =
+    safeObject(user.account);
+
+  const rawProfile =
+    safeObject(raw.profile);
+
+  const rawPermissions =
+    safeObject(raw.permissions);
+
+  const rawMeta =
+    safeObject(raw.meta);
+
+  const rawClaims =
+    safeObject(raw.claims);
+
+  const rawAccount =
+    safeObject(raw.account);
 
   const roleCandidates = [
     user.role,
@@ -1558,7 +1776,9 @@ function collectRoleCandidates(rawUser = {}) {
 
   const roles = [
     ...roleCandidates,
-    ...roleArrays.flatMap((value) => toArray(value)),
+    ...roleArrays.flatMap((value) =>
+      toArray(value)
+    ),
   ];
 
   const adminFlag = [
@@ -1639,7 +1859,12 @@ function collectRoleCandidates(rawUser = {}) {
     rawClaims.superAdmin,
     rawClaims.canManageUsers,
     rawClaims.canAccessUsers,
-  ].some((value) => normalizeBoolean(value, false));
+  ].some((value) =>
+    normalizeBoolean(
+      value,
+      false
+    )
+  );
 
   if (adminFlag) {
     roles.push("admin");
@@ -1649,18 +1874,35 @@ function collectRoleCandidates(rawUser = {}) {
 }
 
 function collectPermissions(rawUser = {}) {
-  const user = safeObject(rawUser);
-  const raw = getNestedRawUser(user);
+  const user =
+    safeObject(rawUser);
 
-  const profile = safeObject(user.profile);
-  const meta = safeObject(user.meta);
-  const claims = safeObject(user.claims);
-  const permissionsNode = safeObject(user.permissions);
+  const raw =
+    getNestedRawUser(user);
 
-  const rawProfile = safeObject(raw.profile);
-  const rawMeta = safeObject(raw.meta);
-  const rawClaims = safeObject(raw.claims);
-  const rawPermissions = safeObject(raw.permissions);
+  const profile =
+    safeObject(user.profile);
+
+  const meta =
+    safeObject(user.meta);
+
+  const claims =
+    safeObject(user.claims);
+
+  const permissionsNode =
+    safeObject(user.permissions);
+
+  const rawProfile =
+    safeObject(raw.profile);
+
+  const rawMeta =
+    safeObject(raw.meta);
+
+  const rawClaims =
+    safeObject(raw.claims);
+
+  const rawPermissions =
+    safeObject(raw.permissions);
 
   return unique([
     ...normalizePermissionList(user.permissions),
@@ -1712,7 +1954,7 @@ export function normalizeUser(rawUser = null) {
 
   /*
     Protección:
-    No normalizamos un envelope auth completo como usuario.
+    No normalizamos un envelope auth completo como usuario:
       { ok:true, token:"...", data:{...} }
   */
   if (
@@ -1730,382 +1972,458 @@ export function normalizeUser(rawUser = null) {
     return null;
   }
 
-  const raw = getNestedRawUser(rawUser);
+  const raw =
+    getNestedRawUser(rawUser);
 
-  const profile = safeObject(rawUser.profile);
-  const account = safeObject(rawUser.account);
-  const preferences = safeObject(rawUser.preferences);
-  const settings = safeObject(rawUser.settings);
-  const meta = safeObject(rawUser.meta);
-  const claims = safeObject(rawUser.claims);
+  const profile =
+    safeObject(rawUser.profile);
 
-  const rawProfile = safeObject(raw.profile);
-  const rawAccount = safeObject(raw.account);
-  const rawPreferences = safeObject(raw.preferences);
-  const rawSettings = safeObject(raw.settings);
-  const rawMeta = safeObject(raw.meta);
-  const rawClaims = safeObject(raw.claims);
+  const account =
+    safeObject(rawUser.account);
 
-  const email = normalizeEmail(
+  const preferences =
+    safeObject(rawUser.preferences);
+
+  const settings =
+    safeObject(rawUser.settings);
+
+  const meta =
+    safeObject(rawUser.meta);
+
+  const claims =
+    safeObject(rawUser.claims);
+
+  const rawProfile =
+    safeObject(raw.profile);
+
+  const rawAccount =
+    safeObject(raw.account);
+
+  const rawPreferences =
+    safeObject(raw.preferences);
+
+  const rawSettings =
+    safeObject(raw.settings);
+
+  const rawMeta =
+    safeObject(raw.meta);
+
+  const rawClaims =
+    safeObject(raw.claims);
+
+  const email =
+    normalizeEmail(
+      pickFirst(
+        rawUser.email,
+        rawUser.mail,
+        profile.email,
+        profile.mail,
+        account.email,
+        account.mail,
+        raw.email,
+        raw.mail,
+        rawProfile.email,
+        rawProfile.mail,
+        rawAccount.email,
+        rawAccount.mail,
+        ""
+      )
+    );
+
+  const phone =
     pickFirst(
-      rawUser.email,
-      rawUser.mail,
-      profile.email,
-      profile.mail,
-      account.email,
-      account.mail,
-      raw.email,
-      raw.mail,
-      rawProfile.email,
-      rawProfile.mail,
-      rawAccount.email,
-      rawAccount.mail,
-      ""
-    )
-  );
+      rawUser.phone,
+      rawUser.telefono,
+      rawUser.mobile,
+      rawUser.cellphone,
 
-  const phone = pickFirst(
-    rawUser.phone,
-    rawUser.telefono,
-    rawUser.mobile,
-    rawUser.cellphone,
+      profile.phone,
+      profile.telefono,
+      profile.mobile,
+      profile.cellphone,
 
-    profile.phone,
-    profile.telefono,
-    profile.mobile,
-    profile.cellphone,
+      account.phone,
+      account.telefono,
+      account.mobile,
+      account.cellphone,
 
-    account.phone,
-    account.telefono,
-    account.mobile,
-    account.cellphone,
+      raw.phone,
+      raw.telefono,
+      raw.mobile,
+      raw.cellphone,
 
-    raw.phone,
-    raw.telefono,
-    raw.mobile,
-    raw.cellphone,
+      rawProfile.phone,
+      rawProfile.telefono,
+      rawProfile.mobile,
+      rawProfile.cellphone,
 
-    rawProfile.phone,
-    rawProfile.telefono,
-    rawProfile.mobile,
-    rawProfile.cellphone,
+      rawAccount.phone,
+      rawAccount.telefono,
+      rawAccount.mobile,
+      rawAccount.cellphone
+    );
 
-    rawAccount.phone,
-    rawAccount.telefono,
-    rawAccount.mobile,
-    rawAccount.cellphone
-  );
-
-  const id = pickFirst(
-    rawUser.id,
-    rawUser.userId,
-    rawUser.user_id,
-    rawUser.uuid,
-    rawUser.uid,
-    rawUser.sub,
-    rawUser._id,
-
-    profile.id,
-    profile.userId,
-    profile.user_id,
-    profile.uid,
-    profile.sub,
-
-    account.id,
-    account.userId,
-    account.user_id,
-    account.uid,
-    account.sub,
-
-    raw.id,
-    raw.userId,
-    raw.user_id,
-    raw.uuid,
-    raw.uid,
-    raw.sub,
-    raw._id,
-
-    rawProfile.id,
-    rawProfile.userId,
-    rawProfile.user_id,
-    rawProfile.uid,
-    rawProfile.sub,
-
-    rawAccount.id,
-    rawAccount.userId,
-    rawAccount.user_id,
-    rawAccount.uid,
-    rawAccount.sub
-  );
-
-  const userId = pickFirst(
-    rawUser.userId,
-    rawUser.user_id,
-    rawUser.id,
-    rawUser.uuid,
-    rawUser.uid,
-    rawUser.sub,
-    rawUser._id,
-
-    profile.userId,
-    profile.user_id,
-    profile.id,
-    profile.uid,
-    profile.sub,
-
-    account.userId,
-    account.user_id,
-    account.id,
-    account.uid,
-    account.sub,
-
-    raw.userId,
-    raw.user_id,
-    raw.id,
-    raw.uuid,
-    raw.uid,
-    raw.sub,
-    raw._id,
-
-    rawProfile.userId,
-    rawProfile.user_id,
-    rawProfile.id,
-    rawProfile.uid,
-    rawProfile.sub,
-
-    rawAccount.userId,
-    rawAccount.user_id,
-    rawAccount.id,
-    rawAccount.uid,
-    rawAccount.sub
-  );
-
-  const rawUsername = pickFirst(
-    rawUser.username,
-    rawUser.userName,
-    rawUser.user_name,
-    rawUser.nick,
-    rawUser.alias,
-    rawUser.login,
-    rawUser.slug,
-
-    profile.username,
-    profile.userName,
-    profile.user_name,
-    profile.nick,
-    profile.alias,
-    profile.login,
-    profile.slug,
-
-    account.username,
-    account.userName,
-    account.user_name,
-    account.login,
-    account.slug,
-
-    raw.username,
-    raw.userName,
-    raw.user_name,
-    raw.nick,
-    raw.alias,
-    raw.login,
-    raw.slug,
-
-    rawProfile.username,
-    rawProfile.userName,
-    rawProfile.user_name,
-    rawProfile.login,
-    rawProfile.slug,
-
-    rawAccount.username,
-    rawAccount.userName,
-    rawAccount.user_name,
-    rawAccount.login,
-    rawAccount.slug,
-
-    email,
-    phone,
-    id,
-    userId
-  );
-
-  const username = sanitizeUsername(
-    normalizeString(rawUsername)
-  );
-
-  const displayName = normalizeString(
+  const id =
     pickFirst(
-      rawUser.name,
-      rawUser.nombre,
-      rawUser.full_name,
-      rawUser.fullName,
-      rawUser.display_name,
-      rawUser.displayName,
+      rawUser.id,
+      rawUser.userId,
+      rawUser.user_id,
+      rawUser.uuid,
+      rawUser.uid,
+      rawUser.sub,
+      rawUser._id,
 
-      profile.name,
-      profile.nombre,
-      profile.fullName,
-      profile.full_name,
-      profile.displayName,
-      profile.display_name,
+      profile.id,
+      profile.userId,
+      profile.user_id,
+      profile.uid,
+      profile.sub,
 
-      account.name,
-      account.nombre,
-      account.fullName,
-      account.full_name,
-      account.displayName,
-      account.display_name,
+      account.id,
+      account.userId,
+      account.user_id,
+      account.uid,
+      account.sub,
 
-      raw.name,
-      raw.nombre,
-      raw.full_name,
-      raw.fullName,
-      raw.display_name,
-      raw.displayName,
+      raw.id,
+      raw.userId,
+      raw.user_id,
+      raw.uuid,
+      raw.uid,
+      raw.sub,
+      raw._id,
 
-      rawProfile.name,
-      rawProfile.nombre,
-      rawProfile.fullName,
-      rawProfile.full_name,
-      rawProfile.displayName,
-      rawProfile.display_name,
+      rawProfile.id,
+      rawProfile.userId,
+      rawProfile.user_id,
+      rawProfile.uid,
+      rawProfile.sub,
 
-      rawAccount.name,
-      rawAccount.nombre,
-      rawAccount.fullName,
-      rawAccount.full_name,
-      rawAccount.displayName,
-      rawAccount.display_name,
+      rawAccount.id,
+      rawAccount.userId,
+      rawAccount.user_id,
+      rawAccount.uid,
+      rawAccount.sub
+    );
 
-      username,
+  const userId =
+    pickFirst(
+      rawUser.userId,
+      rawUser.user_id,
+      rawUser.id,
+      rawUser.uuid,
+      rawUser.uid,
+      rawUser.sub,
+      rawUser._id,
+
+      profile.userId,
+      profile.user_id,
+      profile.id,
+      profile.uid,
+      profile.sub,
+
+      account.userId,
+      account.user_id,
+      account.id,
+      account.uid,
+      account.sub,
+
+      raw.userId,
+      raw.user_id,
+      raw.id,
+      raw.uuid,
+      raw.uid,
+      raw.sub,
+      raw._id,
+
+      rawProfile.userId,
+      rawProfile.user_id,
+      rawProfile.id,
+      rawProfile.uid,
+      rawProfile.sub,
+
+      rawAccount.userId,
+      rawAccount.user_id,
+      rawAccount.id,
+      rawAccount.uid,
+      rawAccount.sub
+    );
+
+  const rawUsername =
+    pickFirst(
+      rawUser.username,
+      rawUser.userName,
+      rawUser.user_name,
+      rawUser.nick,
+      rawUser.alias,
+      rawUser.login,
+      rawUser.slug,
+
+      profile.username,
+      profile.userName,
+      profile.user_name,
+      profile.nick,
+      profile.alias,
+      profile.login,
+      profile.slug,
+
+      account.username,
+      account.userName,
+      account.user_name,
+      account.login,
+      account.slug,
+
+      raw.username,
+      raw.userName,
+      raw.user_name,
+      raw.nick,
+      raw.alias,
+      raw.login,
+      raw.slug,
+
+      rawProfile.username,
+      rawProfile.userName,
+      rawProfile.user_name,
+      rawProfile.login,
+      rawProfile.slug,
+
+      rawAccount.username,
+      rawAccount.userName,
+      rawAccount.user_name,
+      rawAccount.login,
+      rawAccount.slug,
+
       email,
       phone,
       id,
-      userId,
-      "Usuario"
-    )
-  );
+      userId
+    );
 
-  const roles = collectRoleCandidates(rawUser);
-  const role = normalizeCanonicalRole(roles);
-  const permissions = collectPermissions(rawUser);
+  const username =
+    sanitizeUsername(
+      normalizeString(rawUsername)
+    );
 
-  const slug = normalizeString(
-    pickFirst(
-      rawUser.slug,
-      profile.slug,
-      account.slug,
-      raw.slug,
-      rawProfile.slug,
-      rawAccount.slug,
-      slugify(
-        username ||
-          displayName ||
-          email ||
-          String(userId || id || "usuario")
+  const displayName =
+    normalizeString(
+      pickFirst(
+        rawUser.name,
+        rawUser.nombre,
+        rawUser.full_name,
+        rawUser.fullName,
+        rawUser.display_name,
+        rawUser.displayName,
+
+        profile.name,
+        profile.nombre,
+        profile.fullName,
+        profile.full_name,
+        profile.displayName,
+        profile.display_name,
+
+        account.name,
+        account.nombre,
+        account.fullName,
+        account.full_name,
+        account.displayName,
+        account.display_name,
+
+        raw.name,
+        raw.nombre,
+        raw.full_name,
+        raw.fullName,
+        raw.display_name,
+        raw.displayName,
+
+        rawProfile.name,
+        rawProfile.nombre,
+        rawProfile.fullName,
+        rawProfile.full_name,
+        rawProfile.displayName,
+        rawProfile.display_name,
+
+        rawAccount.name,
+        rawAccount.nombre,
+        rawAccount.fullName,
+        rawAccount.full_name,
+        rawAccount.displayName,
+        rawAccount.display_name,
+
+        username,
+        email,
+        phone,
+        id,
+        userId,
+        "Usuario"
       )
-    )
-  );
+    );
 
-  const avatar = normalizeAvatarUrl(rawUser);
+  const roles =
+    collectRoleCandidates(rawUser);
 
-  const normalizedTheme = normalizeTheme(
+  const role =
+    normalizeCanonicalRole(roles);
+
+  const permissions =
+    collectPermissions(rawUser);
+
+  const slug =
+    normalizeString(
+      pickFirst(
+        rawUser.slug,
+        profile.slug,
+        account.slug,
+        raw.slug,
+        rawProfile.slug,
+        rawAccount.slug,
+        slugify(
+          username ||
+            displayName ||
+            email ||
+            String(userId || id || "usuario")
+        )
+      )
+    );
+
+  const avatar =
+    normalizeAvatarUrl(rawUser);
+
+  const normalizedTheme =
+    normalizeTheme(
+      pickFirst(
+        rawUser.theme,
+        preferences.theme,
+        settings.theme,
+        profile.theme,
+        account.theme,
+        meta.theme,
+        claims.theme,
+
+        raw.theme,
+        rawPreferences.theme,
+        rawSettings.theme,
+        rawProfile.theme,
+        rawAccount.theme,
+        rawMeta.theme,
+        rawClaims.theme
+      )
+    );
+
+  const explicitDarkModeValue =
     pickFirst(
-      rawUser.theme,
-      preferences.theme,
-      settings.theme,
-      profile.theme,
-      account.theme,
-      meta.theme,
-      claims.theme,
+      hasOwn(rawUser, "darkMode") ? rawUser.darkMode : undefined,
+      hasOwn(rawUser, "dark_mode") ? rawUser.dark_mode : undefined,
 
-      raw.theme,
-      rawPreferences.theme,
-      rawSettings.theme,
-      rawProfile.theme,
-      rawAccount.theme,
-      rawMeta.theme,
-      rawClaims.theme
-    )
-  );
+      hasOwn(preferences, "darkMode") ? preferences.darkMode : undefined,
+      hasOwn(preferences, "dark_mode") ? preferences.dark_mode : undefined,
 
-  const explicitDarkModeValue = pickFirst(
-    hasOwn(rawUser, "darkMode") ? rawUser.darkMode : undefined,
-    hasOwn(rawUser, "dark_mode") ? rawUser.dark_mode : undefined,
+      hasOwn(settings, "darkMode") ? settings.darkMode : undefined,
+      hasOwn(settings, "dark_mode") ? settings.dark_mode : undefined,
 
-    hasOwn(preferences, "darkMode") ? preferences.darkMode : undefined,
-    hasOwn(preferences, "dark_mode") ? preferences.dark_mode : undefined,
+      hasOwn(profile, "darkMode") ? profile.darkMode : undefined,
+      hasOwn(profile, "dark_mode") ? profile.dark_mode : undefined,
 
-    hasOwn(settings, "darkMode") ? settings.darkMode : undefined,
-    hasOwn(settings, "dark_mode") ? settings.dark_mode : undefined,
+      hasOwn(account, "darkMode") ? account.darkMode : undefined,
+      hasOwn(account, "dark_mode") ? account.dark_mode : undefined,
 
-    hasOwn(profile, "darkMode") ? profile.darkMode : undefined,
-    hasOwn(profile, "dark_mode") ? profile.dark_mode : undefined,
+      hasOwn(raw, "darkMode") ? raw.darkMode : undefined,
+      hasOwn(raw, "dark_mode") ? raw.dark_mode : undefined,
 
-    hasOwn(account, "darkMode") ? account.darkMode : undefined,
-    hasOwn(account, "dark_mode") ? account.dark_mode : undefined,
+      hasOwn(rawPreferences, "darkMode") ? rawPreferences.darkMode : undefined,
+      hasOwn(rawPreferences, "dark_mode") ? rawPreferences.dark_mode : undefined,
 
-    hasOwn(raw, "darkMode") ? raw.darkMode : undefined,
-    hasOwn(raw, "dark_mode") ? raw.dark_mode : undefined,
+      hasOwn(rawSettings, "darkMode") ? rawSettings.darkMode : undefined,
+      hasOwn(rawSettings, "dark_mode") ? rawSettings.dark_mode : undefined,
 
-    hasOwn(rawPreferences, "darkMode") ? rawPreferences.darkMode : undefined,
-    hasOwn(rawPreferences, "dark_mode") ? rawPreferences.dark_mode : undefined,
+      hasOwn(rawProfile, "darkMode") ? rawProfile.darkMode : undefined,
+      hasOwn(rawProfile, "dark_mode") ? rawProfile.dark_mode : undefined,
 
-    hasOwn(rawSettings, "darkMode") ? rawSettings.darkMode : undefined,
-    hasOwn(rawSettings, "dark_mode") ? rawSettings.dark_mode : undefined,
+      hasOwn(rawAccount, "darkMode") ? rawAccount.darkMode : undefined,
+      hasOwn(rawAccount, "dark_mode") ? rawAccount.dark_mode : undefined
+    );
 
-    hasOwn(rawProfile, "darkMode") ? rawProfile.darkMode : undefined,
-    hasOwn(rawProfile, "dark_mode") ? rawProfile.dark_mode : undefined,
+  const hasExplicitDarkMode =
+    hasExplicitValue(explicitDarkModeValue);
 
-    hasOwn(rawAccount, "darkMode") ? rawAccount.darkMode : undefined,
-    hasOwn(rawAccount, "dark_mode") ? rawAccount.dark_mode : undefined
-  );
+  const darkMode =
+    hasExplicitDarkMode
+      ? normalizeBoolean(
+          explicitDarkModeValue,
+          false
+        )
+      : null;
 
-  const hasExplicitDarkMode = hasExplicitValue(explicitDarkModeValue);
+  const clienteId =
+    pickFirst(
+      rawUser.clienteId,
+      rawUser.clientId,
+      rawUser.cliente_id,
+      rawUser.customerId,
+      rawUser.customer_id,
 
-  const darkMode = hasExplicitDarkMode
-    ? normalizeBoolean(explicitDarkModeValue, false)
-    : null;
+      profile.clienteId,
+      profile.clientId,
+      profile.cliente_id,
+      profile.customerId,
+      profile.customer_id,
 
-  const clienteId = pickFirst(
-    rawUser.clienteId,
-    rawUser.clientId,
-    rawUser.cliente_id,
-    rawUser.customerId,
-    rawUser.customer_id,
+      account.clienteId,
+      account.clientId,
+      account.cliente_id,
+      account.customerId,
+      account.customer_id,
 
-    profile.clienteId,
-    profile.clientId,
-    profile.cliente_id,
-    profile.customerId,
-    profile.customer_id,
+      raw.clienteId,
+      raw.clientId,
+      raw.cliente_id,
+      raw.customerId,
+      raw.customer_id,
 
-    account.clienteId,
-    account.clientId,
-    account.cliente_id,
-    account.customerId,
-    account.customer_id,
+      rawProfile.clienteId,
+      rawProfile.clientId,
+      rawProfile.cliente_id,
+      rawProfile.customerId,
+      rawProfile.customer_id,
 
-    raw.clienteId,
-    raw.clientId,
-    raw.cliente_id,
-    raw.customerId,
-    raw.customer_id,
+      rawAccount.clienteId,
+      rawAccount.clientId,
+      rawAccount.cliente_id,
+      rawAccount.customerId,
+      rawAccount.customer_id
+    );
 
-    rawProfile.clienteId,
-    rawProfile.clientId,
-    rawProfile.cliente_id,
-    rawProfile.customerId,
-    rawProfile.customer_id,
+  const status =
+    normalizeRoleKey(
+      pickFirst(
+        rawUser.status,
+        rawUser.estado,
+        rawUser.state,
+        rawUser.accountStatus,
+        profile.status,
+        profile.estado,
+        account.status,
+        account.estado,
+        raw.status,
+        raw.estado,
+        rawProfile.status,
+        rawProfile.estado,
+        rawAccount.status,
+        rawAccount.estado,
+        ""
+      )
+    );
 
-    rawAccount.clienteId,
-    rawAccount.clientId,
-    rawAccount.cliente_id,
-    rawAccount.customerId,
-    rawAccount.customer_id
-  );
+  const statusDisabled =
+    [
+      "disabled",
+      "inactive",
+      "deleted",
+      "blocked",
+      "suspended",
+      "banned",
+    ].includes(status);
 
-  const active = normalizeBoolean(
+  const explicitActiveValue =
     pickFirst(
       rawUser.active,
       rawUser.is_active,
@@ -2134,162 +2452,231 @@ export function normalizeUser(rawUser = null) {
       rawAccount.active,
       rawAccount.isActive,
       rawAccount.enabled
-    ),
-    true
-  );
+    );
 
-  const emailVerified = normalizeBoolean(
-    pickFirst(
-      rawUser.emailVerified,
-      rawUser.email_verified,
+  const active =
+    statusDisabled
+      ? false
+      : normalizeBoolean(
+          explicitActiveValue,
+          true
+        );
 
-      profile.emailVerified,
-      profile.email_verified,
+  const emailVerified =
+    normalizeBoolean(
+      pickFirst(
+        rawUser.emailVerified,
+        rawUser.email_verified,
 
-      account.emailVerified,
-      account.email_verified,
+        profile.emailVerified,
+        profile.email_verified,
 
-      raw.emailVerified,
-      raw.email_verified,
+        account.emailVerified,
+        account.email_verified,
 
-      rawProfile.emailVerified,
-      rawProfile.email_verified,
+        raw.emailVerified,
+        raw.email_verified,
 
-      rawAccount.emailVerified,
-      rawAccount.email_verified
-    ),
-    false
-  );
+        rawProfile.emailVerified,
+        rawProfile.email_verified,
 
-  const twofaEnabled = normalizeBoolean(
-    pickFirst(
-      rawUser.twofa_enabled,
-      rawUser.twofaEnabled,
-      rawUser.twoFactorEnabled,
-      rawUser.mfaEnabled,
-      rawUser.mfa_enabled,
+        rawAccount.emailVerified,
+        rawAccount.email_verified
+      ),
+      false
+    );
 
-      profile.twofa_enabled,
-      profile.twofaEnabled,
-      profile.twoFactorEnabled,
-      profile.mfaEnabled,
-      profile.mfa_enabled,
+  const twofaEnabled =
+    normalizeBoolean(
+      pickFirst(
+        rawUser.twofa_enabled,
+        rawUser.twofaEnabled,
+        rawUser.twoFactorEnabled,
+        rawUser.mfaEnabled,
+        rawUser.mfa_enabled,
 
-      account.twofa_enabled,
-      account.twofaEnabled,
-      account.twoFactorEnabled,
-      account.mfaEnabled,
-      account.mfa_enabled,
+        profile.twofa_enabled,
+        profile.twofaEnabled,
+        profile.twoFactorEnabled,
+        profile.mfaEnabled,
+        profile.mfa_enabled,
 
-      raw.twofa_enabled,
-      raw.twofaEnabled,
-      raw.twoFactorEnabled,
-      raw.mfaEnabled,
-      raw.mfa_enabled,
+        account.twofa_enabled,
+        account.twofaEnabled,
+        account.twoFactorEnabled,
+        account.mfaEnabled,
+        account.mfa_enabled,
 
-      rawProfile.twofa_enabled,
-      rawProfile.twofaEnabled,
-      rawProfile.twoFactorEnabled,
-      rawProfile.mfaEnabled,
-      rawProfile.mfa_enabled,
+        raw.twofa_enabled,
+        raw.twofaEnabled,
+        raw.twoFactorEnabled,
+        raw.mfaEnabled,
+        raw.mfa_enabled,
 
-      rawAccount.twofa_enabled,
-      rawAccount.twofaEnabled,
-      rawAccount.twoFactorEnabled,
-      rawAccount.mfaEnabled,
-      rawAccount.mfa_enabled
-    ),
-    false
-  );
+        rawProfile.twofa_enabled,
+        rawProfile.twofaEnabled,
+        rawProfile.twoFactorEnabled,
+        rawProfile.mfaEnabled,
+        rawProfile.mfa_enabled,
+
+        rawAccount.twofa_enabled,
+        rawAccount.twofaEnabled,
+        rawAccount.twoFactorEnabled,
+        rawAccount.mfaEnabled,
+        rawAccount.mfa_enabled
+      ),
+      false
+    );
+
+  const cleanProfile =
+    sanitizeRawObject(profile, 0);
+
+  const cleanAccount =
+    sanitizeRawObject(account, 0);
+
+  const cleanMeta =
+    sanitizeRawObject(meta, 0);
+
+  const cleanClaims =
+    sanitizeRawObject(claims, 0);
 
   return {
-    id: id || null,
-    userId: userId || id || null,
+    id:
+      id || null,
+
+    userId:
+      userId || id || null,
 
     username,
     slug,
 
-    name: displayName || "Usuario",
-    displayName: displayName || "Usuario",
+    name:
+      displayName || "Usuario",
 
-    email: email || "",
-    phone: phone || null,
+    displayName:
+      displayName || "Usuario",
+
+    email:
+      email || "",
+
+    phone:
+      phone || null,
 
     role,
-    rol: role,
+    rol:
+      role,
+
     roles,
 
     permissions,
 
-    isAdmin: roles.some(isAdminRole),
-    admin: roles.some(isAdminRole),
+    isAdmin:
+      roles.some(isAdminRole),
 
-    isSupport: roles.some(isSupportRole),
-    isManager: roles.some(isManagerRole),
-    isClient: roles.some(isClientRole),
+    admin:
+      roles.some(isAdminRole),
 
-    clienteId: clienteId || null,
-    clientId: clienteId || null,
-    customerId: clienteId || null,
+    isSupport:
+      roles.some(isSupportRole),
 
-    privacyMode: normalizeBoolean(
-      pickFirst(
-        rawUser.privacyMode,
-        rawUser.privacy_mode,
-        profile.privacyMode,
-        profile.privacy_mode,
-        account.privacyMode,
-        account.privacy_mode,
-        raw.privacyMode,
-        raw.privacy_mode,
-        rawProfile.privacyMode,
-        rawProfile.privacy_mode,
-        rawAccount.privacyMode,
-        rawAccount.privacy_mode
+    isManager:
+      roles.some(isManagerRole),
+
+    isClient:
+      roles.some(isClientRole),
+
+    clienteId:
+      clienteId || null,
+
+    clientId:
+      clienteId || null,
+
+    customerId:
+      clienteId || null,
+
+    privacyMode:
+      normalizeBoolean(
+        pickFirst(
+          rawUser.privacyMode,
+          rawUser.privacy_mode,
+          profile.privacyMode,
+          profile.privacy_mode,
+          account.privacyMode,
+          account.privacy_mode,
+          raw.privacyMode,
+          raw.privacy_mode,
+          rawProfile.privacyMode,
+          rawProfile.privacy_mode,
+          rawAccount.privacyMode,
+          rawAccount.privacy_mode
+        ),
+        false
       ),
-      false
-    ),
 
-    hasAvatar: Boolean(avatar),
+    hasAvatar:
+      Boolean(avatar),
+
     avatar,
-    avatarUrl: avatar,
-    photoUrl: avatar,
+    avatarUrl:
+      avatar,
 
-    avatarUpdatedAt: pickFirst(
-      rawUser.avatarUpdatedAt,
-      rawUser.avatar_updated_at,
-      profile.avatarUpdatedAt,
-      profile.avatar_updated_at,
-      account.avatarUpdatedAt,
-      account.avatar_updated_at,
-      raw.avatarUpdatedAt,
-      raw.avatar_updated_at,
-      rawProfile.avatarUpdatedAt,
-      rawProfile.avatar_updated_at,
-      rawAccount.avatarUpdatedAt,
-      rawAccount.avatar_updated_at
-    ) || null,
+    photoUrl:
+      avatar,
+
+    picture:
+      avatar,
+
+    avatarUpdatedAt:
+      pickFirst(
+        rawUser.avatarUpdatedAt,
+        rawUser.avatar_updated_at,
+        profile.avatarUpdatedAt,
+        profile.avatar_updated_at,
+        account.avatarUpdatedAt,
+        account.avatar_updated_at,
+        raw.avatarUpdatedAt,
+        raw.avatar_updated_at,
+        rawProfile.avatarUpdatedAt,
+        rawProfile.avatar_updated_at,
+        rawAccount.avatarUpdatedAt,
+        rawAccount.avatar_updated_at
+      ) || null,
 
     active,
+
+    status:
+      status || null,
 
     /*
       null = backend no lo especificó.
       No usar false por defecto.
     */
     darkMode,
-    theme: normalizedTheme || null,
+
+    theme:
+      normalizedTheme || null,
 
     emailVerified,
 
-    twofa_enabled: twofaEnabled,
+    twofa_enabled:
+      twofaEnabled,
+
     twofaEnabled,
 
-    profile: safeClone(profile, {}),
-    account: safeClone(account, {}),
-    meta: safeClone(meta, {}),
-    claims: safeClone(claims, {}),
+    profile:
+      cleanProfile || {},
 
-    raw: safeClone(rawUser, null),
+    account:
+      cleanAccount || {},
+
+    meta:
+      cleanMeta || {},
+
+    claims:
+      cleanClaims || {},
+
+    raw:
+      sanitizeRawObject(rawUser, 0),
   };
 }
 
@@ -2302,187 +2689,174 @@ export function normalizeSessionPayload(payload = null) {
     return null;
   }
 
-  const nodes = getNestedAuthNodes(payload);
+  const objects =
+    collectAuthObjects(payload);
 
-  const sessionNode = pickFirstObject(
-    nodes.session,
-    nodes.data?.session,
-    nodes.data?.sessionData,
-    nodes.payload?.session,
-    nodes.payload?.sessionData,
-    nodes.result?.session,
-    nodes.result?.sessionData,
-    nodes.body?.session,
-    nodes.body?.sessionData,
-    nodes.meta?.session,
-    nodes.root.session,
-    nodes.root.sessionData
-  ) || {};
+  const sessionNode =
+    pickFirstObject(
+      ...objects.map((item) => item.session),
+      ...objects.map((item) => item.sessionData),
+      ...objects.map((item) => item.authSession),
+      ...objects.map((item) => item.auth_session)
+    ) || {};
 
-  const max = getSessionValueMaxLength();
+  const max =
+    getSessionValueMaxLength();
 
-  const sessionId = safeSessionValue(
+  const sessionId =
+    safeSessionValue(
+      pickFirst(
+        sessionNode.sessionId,
+        sessionNode.session_id,
+        sessionNode.sid,
+        sessionNode.id,
+
+        pickValueFromObjects(
+          objects,
+          [
+            "sessionId",
+            "session_id",
+            "sid",
+          ]
+        )
+      ) || "",
+      max
+    );
+
+  const userCandidate =
+    extractUser(payload);
+
+  const userId =
+    safeSessionValue(
+      pickFirst(
+        sessionNode.sessionUserId,
+        sessionNode.session_user_id,
+        sessionNode.userId,
+        sessionNode.user_id,
+        sessionNode.uid,
+        sessionNode.sub,
+
+        pickValueFromObjects(
+          objects,
+          [
+            "sessionUserId",
+            "session_user_id",
+            "userId",
+            "user_id",
+            "uid",
+            "sub",
+          ]
+        ),
+
+        userCandidate?.userId,
+        userCandidate?.id,
+        userCandidate?.email
+      ) || "",
+      max
+    );
+
+  const expiresAt =
     pickFirst(
-      sessionNode.sessionId,
-      sessionNode.session_id,
-      sessionNode.sid,
-      sessionNode.id,
+      sessionNode.expiresAt,
+      sessionNode.expires_at,
+      sessionNode.refreshExpiresAt,
+      sessionNode.refresh_expires_at,
+      sessionNode.exp,
 
-      nodes.root.sessionId,
-      nodes.root.session_id,
-      nodes.root.sid,
+      pickValueFromObjects(
+        objects,
+        [
+          "expiresAt",
+          "expires_at",
+          "refreshExpiresAt",
+          "refresh_expires_at",
+          "exp",
+          "expiration",
+          "expires",
+        ]
+      )
+    ) || null;
 
-      nodes.data?.sessionId,
-      nodes.data?.session_id,
-      nodes.data?.sid,
-
-      nodes.payload?.sessionId,
-      nodes.payload?.session_id,
-      nodes.payload?.sid,
-
-      nodes.result?.sessionId,
-      nodes.result?.session_id,
-      nodes.result?.sid,
-
-      nodes.body?.sessionId,
-      nodes.body?.session_id,
-      nodes.body?.sid,
-
-      nodes.meta?.sessionId,
-      nodes.meta?.session_id,
-      nodes.meta?.sid
-    ) || "",
-    max
-  );
-
-  const userId = safeSessionValue(
-    pickFirst(
-      sessionNode.sessionUserId,
-      sessionNode.session_user_id,
-      sessionNode.userId,
-      sessionNode.user_id,
-      sessionNode.uid,
-      sessionNode.sub,
-
-      nodes.root.sessionUserId,
-      nodes.root.session_user_id,
-      nodes.root.userId,
-      nodes.root.user_id,
-      nodes.root.user?.userId,
-      nodes.root.user?.user_id,
-      nodes.root.user?.id,
-      nodes.root.user?.email,
-
-      nodes.data?.sessionUserId,
-      nodes.data?.session_user_id,
-      nodes.data?.userId,
-      nodes.data?.user_id,
-      nodes.data?.user?.userId,
-      nodes.data?.user?.user_id,
-      nodes.data?.user?.id,
-      nodes.data?.user?.email,
-
-      nodes.payload?.sessionUserId,
-      nodes.payload?.session_user_id,
-      nodes.payload?.userId,
-      nodes.payload?.user_id,
-      nodes.payload?.user?.userId,
-      nodes.payload?.user?.user_id,
-      nodes.payload?.user?.id,
-      nodes.payload?.user?.email,
-
-      nodes.result?.sessionUserId,
-      nodes.result?.session_user_id,
-      nodes.result?.userId,
-      nodes.result?.user_id,
-      nodes.result?.user?.userId,
-      nodes.result?.user?.user_id,
-      nodes.result?.user?.id,
-      nodes.result?.user?.email,
-
-      nodes.body?.sessionUserId,
-      nodes.body?.session_user_id,
-      nodes.body?.userId,
-      nodes.body?.user_id,
-      nodes.body?.user?.userId,
-      nodes.body?.user?.user_id,
-      nodes.body?.user?.id,
-      nodes.body?.user?.email,
-
-      nodes.meta?.sessionUserId,
-      nodes.meta?.session_user_id,
-      nodes.meta?.userId,
-      nodes.meta?.user_id
-    ) || "",
-    max
-  );
-
-  const hasSessionData = Boolean(
-    sessionId ||
-      userId ||
-      sessionNode.expiresAt ||
-      sessionNode.expires_at ||
-      nodes.root.expiresAt ||
-      nodes.root.expires_at ||
-      nodes.root.exp
-  );
+  const hasSessionData =
+    Boolean(
+      sessionId ||
+        userId ||
+        expiresAt
+    );
 
   if (!hasSessionData) {
     return null;
   }
 
   return {
-    sessionId: sessionId || null,
-    userId: userId || null,
+    id:
+      sessionId || null,
 
-    expiresAt: pickFirst(
-      sessionNode.expiresAt,
-      sessionNode.expires_at,
-      sessionNode.exp,
+    sessionId:
+      sessionId || null,
 
-      nodes.root.expiresAt,
-      nodes.root.expires_at,
-      nodes.root.exp,
+    session_id:
+      sessionId || null,
 
-      nodes.data?.expiresAt,
-      nodes.data?.expires_at,
-      nodes.data?.exp,
+    userId:
+      userId || null,
 
-      nodes.payload?.expiresAt,
-      nodes.payload?.expires_at,
-      nodes.payload?.exp,
+    user_id:
+      userId || null,
 
-      nodes.result?.expiresAt,
-      nodes.result?.expires_at,
-      nodes.result?.exp
-    ) || null,
+    sessionUserId:
+      userId || null,
 
-    createdAt: pickFirst(
-      sessionNode.createdAt,
-      sessionNode.created_at,
-      nodes.root.createdAt,
-      nodes.root.created_at,
-      nodes.data?.createdAt,
-      nodes.data?.created_at
-    ) || null,
+    session_user_id:
+      userId || null,
 
-    lastActiveAt: pickFirst(
-      sessionNode.lastActiveAt,
-      sessionNode.last_active_at,
-      nodes.root.lastActiveAt,
-      nodes.root.last_active_at,
-      nodes.data?.lastActiveAt,
-      nodes.data?.last_active_at
-    ) || null,
+    expiresAt,
 
-    lastRefreshAt: pickFirst(
-      sessionNode.lastRefreshAt,
-      sessionNode.last_refresh_at,
-      nodes.root.lastRefreshAt,
-      nodes.root.last_refresh_at,
-      nodes.data?.lastRefreshAt,
-      nodes.data?.last_refresh_at
-    ) || null,
+    refreshExpiresAt:
+      pickFirst(
+        sessionNode.refreshExpiresAt,
+        sessionNode.refresh_expires_at,
+        expiresAt
+      ) || null,
+
+    createdAt:
+      pickFirst(
+        sessionNode.createdAt,
+        sessionNode.created_at,
+        pickValueFromObjects(
+          objects,
+          [
+            "createdAt",
+            "created_at",
+          ]
+        )
+      ) || null,
+
+    lastActiveAt:
+      pickFirst(
+        sessionNode.lastActiveAt,
+        sessionNode.last_active_at,
+        pickValueFromObjects(
+          objects,
+          [
+            "lastActiveAt",
+            "last_active_at",
+          ]
+        )
+      ) || null,
+
+    lastRefreshAt:
+      pickFirst(
+        sessionNode.lastRefreshAt,
+        sessionNode.last_refresh_at,
+        pickValueFromObjects(
+          objects,
+          [
+            "lastRefreshAt",
+            "last_refresh_at",
+          ]
+        )
+      ) || null,
   };
 }
 
@@ -2495,103 +2869,13 @@ export function extractToken(payload = null) {
     return null;
   }
 
-  const {
-    root,
-    data,
-    payload: payloadNode,
-    result,
-    body,
-    responseData,
-    session,
-    auth,
-    sessionData,
-    authData,
-    meta,
-  } = getNestedAuthNodes(payload);
+  const objects =
+    collectAuthObjects(payload);
 
   return normalizeTokenLike(
-    pickFirst(
-      root.token,
-      root.access_token,
-      root.accessToken,
-      root.auth_token,
-      root.authToken,
-      root.jwt,
-      root.id_token,
-      root.idToken,
-
-      data.token,
-      data.access_token,
-      data.accessToken,
-      data.auth_token,
-      data.authToken,
-      data.jwt,
-      data.id_token,
-      data.idToken,
-
-      payloadNode.token,
-      payloadNode.access_token,
-      payloadNode.accessToken,
-      payloadNode.auth_token,
-      payloadNode.authToken,
-      payloadNode.jwt,
-      payloadNode.id_token,
-      payloadNode.idToken,
-
-      result.token,
-      result.access_token,
-      result.accessToken,
-      result.auth_token,
-      result.authToken,
-      result.jwt,
-      result.id_token,
-      result.idToken,
-
-      body.token,
-      body.access_token,
-      body.accessToken,
-      body.auth_token,
-      body.authToken,
-      body.jwt,
-      body.id_token,
-      body.idToken,
-
-      responseData.token,
-      responseData.access_token,
-      responseData.accessToken,
-      responseData.auth_token,
-      responseData.authToken,
-      responseData.jwt,
-      responseData.id_token,
-      responseData.idToken,
-
-      session.token,
-      session.access_token,
-      session.accessToken,
-      session.auth_token,
-      session.authToken,
-      session.jwt,
-
-      auth.token,
-      auth.access_token,
-      auth.accessToken,
-      auth.auth_token,
-      auth.authToken,
-      auth.jwt,
-
-      sessionData.token,
-      sessionData.access_token,
-      sessionData.accessToken,
-      sessionData.jwt,
-
-      authData.token,
-      authData.access_token,
-      authData.accessToken,
-      authData.jwt,
-
-      meta.token,
-      meta.accessToken,
-      meta.access_token
+    pickValueFromObjects(
+      objects,
+      TOKEN_KEYS
     ),
     getTokenMaxLength()
   );
@@ -2602,54 +2886,13 @@ export function extractRefreshToken(payload = null) {
     return null;
   }
 
-  const {
-    root,
-    data,
-    payload: payloadNode,
-    result,
-    body,
-    responseData,
-    session,
-    auth,
-    sessionData,
-    authData,
-    meta,
-  } = getNestedAuthNodes(payload);
+  const objects =
+    collectAuthObjects(payload);
 
   return normalizeTokenLike(
-    pickFirst(
-      root.refresh_token,
-      root.refreshToken,
-
-      data.refresh_token,
-      data.refreshToken,
-
-      payloadNode.refresh_token,
-      payloadNode.refreshToken,
-
-      result.refresh_token,
-      result.refreshToken,
-
-      body.refresh_token,
-      body.refreshToken,
-
-      responseData.refresh_token,
-      responseData.refreshToken,
-
-      session.refresh_token,
-      session.refreshToken,
-
-      auth.refresh_token,
-      auth.refreshToken,
-
-      sessionData.refresh_token,
-      sessionData.refreshToken,
-
-      authData.refresh_token,
-      authData.refreshToken,
-
-      meta.refreshToken,
-      meta.refresh_token
+    pickValueFromObjects(
+      objects,
+      REFRESH_TOKEN_KEYS
     ),
     getTokenMaxLength()
   );
@@ -2660,120 +2903,13 @@ export function extractTempToken(payload = null) {
     return null;
   }
 
-  const {
-    root,
-    data,
-    payload: payloadNode,
-    result,
-    body,
-    responseData,
-    session,
-    auth,
-    sessionData,
-    authData,
-    meta,
-  } = getNestedAuthNodes(payload);
+  const objects =
+    collectAuthObjects(payload);
 
   return normalizeTokenLike(
-    pickFirst(
-      root.tempToken,
-      root.temp_token,
-      root.temporaryToken,
-      root.temporary_token,
-      root.challengeToken,
-      root.challenge_token,
-      root.twoFactorToken,
-      root.two_factor_token,
-      root.mfaToken,
-      root.mfa_token,
-
-      data.tempToken,
-      data.temp_token,
-      data.temporaryToken,
-      data.temporary_token,
-      data.challengeToken,
-      data.challenge_token,
-      data.twoFactorToken,
-      data.two_factor_token,
-      data.mfaToken,
-      data.mfa_token,
-
-      payloadNode.tempToken,
-      payloadNode.temp_token,
-      payloadNode.temporaryToken,
-      payloadNode.temporary_token,
-      payloadNode.challengeToken,
-      payloadNode.challenge_token,
-      payloadNode.twoFactorToken,
-      payloadNode.two_factor_token,
-      payloadNode.mfaToken,
-      payloadNode.mfa_token,
-
-      result.tempToken,
-      result.temp_token,
-      result.temporaryToken,
-      result.temporary_token,
-      result.challengeToken,
-      result.challenge_token,
-      result.twoFactorToken,
-      result.two_factor_token,
-      result.mfaToken,
-      result.mfa_token,
-
-      body.tempToken,
-      body.temp_token,
-      body.temporaryToken,
-      body.temporary_token,
-      body.challengeToken,
-      body.challenge_token,
-      body.twoFactorToken,
-      body.two_factor_token,
-      body.mfaToken,
-      body.mfa_token,
-
-      responseData.tempToken,
-      responseData.temp_token,
-      responseData.temporaryToken,
-      responseData.temporary_token,
-      responseData.challengeToken,
-      responseData.challenge_token,
-      responseData.twoFactorToken,
-      responseData.two_factor_token,
-      responseData.mfaToken,
-      responseData.mfa_token,
-
-      session.tempToken,
-      session.temp_token,
-      session.temporaryToken,
-      session.temporary_token,
-      session.challengeToken,
-      session.challenge_token,
-
-      auth.tempToken,
-      auth.temp_token,
-      auth.temporaryToken,
-      auth.temporary_token,
-      auth.challengeToken,
-      auth.challenge_token,
-
-      sessionData.tempToken,
-      sessionData.temp_token,
-      sessionData.temporaryToken,
-      sessionData.temporary_token,
-      sessionData.challengeToken,
-      sessionData.challenge_token,
-
-      authData.tempToken,
-      authData.temp_token,
-      authData.temporaryToken,
-      authData.temporary_token,
-      authData.challengeToken,
-      authData.challenge_token,
-
-      meta.tempToken,
-      meta.temp_token,
-      meta.challengeToken,
-      meta.challenge_token
+    pickValueFromObjects(
+      objects,
+      TEMP_TOKEN_KEYS
     ),
     getTokenMaxLength()
   );
@@ -2788,130 +2924,41 @@ export function extractRequires2FA(payload = null) {
     return false;
   }
 
-  const {
-    root,
-    data,
-    payload: payloadNode,
-    result,
-    body,
-    responseData,
-    session,
-    auth,
-    sessionData,
-    authData,
-    meta,
-  } = getNestedAuthNodes(payload);
+  const objects =
+    collectAuthObjects(payload);
 
-  const status = safeLower(
-    getStatusValue(payload) || ""
-  );
+  const status =
+    normalizeRoleKey(
+      getStatusValue(payload) || ""
+    );
 
-  if (
-    status === "2fa_required" ||
-    status === "mfa_required" ||
-    status === "totp_required" ||
-    status === "two_factor_required"
-  ) {
+  if (TWO_FACTOR_STATUS_KEYS.has(status)) {
     return true;
   }
 
-  return Boolean(
-    normalizeBoolean(
-      pickFirst(
-        root.requires2FA,
-        root.requires_2fa,
-        root.require2FA,
-        root.require_2fa,
-        root.requiresTwoFactor,
-        root.twoFactorRequired,
-        root.requiresMfa,
-        root.requires_mfa,
-        root.mfaRequired,
-        root.mfa_required,
+  const boolKeys = [
+    "requires2FA",
+    "requires_2fa",
+    "require2FA",
+    "require_2fa",
+    "requiresTwoFactor",
+    "twoFactorRequired",
+    "requiresMfa",
+    "requires_mfa",
+    "mfaRequired",
+    "mfa_required",
+    "totpRequired",
+    "totp_required",
+    "challengeRequired",
+    "challenge_required",
+  ];
 
-        data.requires2FA,
-        data.requires_2fa,
-        data.require2FA,
-        data.require_2fa,
-        data.requiresTwoFactor,
-        data.twoFactorRequired,
-        data.requiresMfa,
-        data.requires_mfa,
-        data.mfaRequired,
-        data.mfa_required,
-
-        payloadNode.requires2FA,
-        payloadNode.requires_2fa,
-        payloadNode.require2FA,
-        payloadNode.require_2fa,
-        payloadNode.requiresMfa,
-        payloadNode.requires_mfa,
-        payloadNode.twoFactorRequired,
-        payloadNode.mfaRequired,
-
-        result.requires2FA,
-        result.requires_2fa,
-        result.require2FA,
-        result.require_2fa,
-        result.requiresMfa,
-        result.requires_mfa,
-        result.twoFactorRequired,
-        result.mfaRequired,
-
-        body.requires2FA,
-        body.requires_2fa,
-        body.require2FA,
-        body.require_2fa,
-        body.requiresMfa,
-        body.requires_mfa,
-        body.twoFactorRequired,
-        body.mfaRequired,
-
-        responseData.requires2FA,
-        responseData.requires_2fa,
-        responseData.require2FA,
-        responseData.require_2fa,
-        responseData.requiresMfa,
-        responseData.requires_mfa,
-        responseData.twoFactorRequired,
-        responseData.mfaRequired,
-
-        session.requires2FA,
-        session.requires_2fa,
-        session.requiresMfa,
-        session.requires_mfa,
-        session.twoFactorRequired,
-        session.mfaRequired,
-
-        auth.requires2FA,
-        auth.requires_2fa,
-        auth.requiresMfa,
-        auth.requires_mfa,
-        auth.twoFactorRequired,
-        auth.mfaRequired,
-
-        sessionData.requires2FA,
-        sessionData.requires_2fa,
-        sessionData.requiresMfa,
-        sessionData.requires_mfa,
-        sessionData.twoFactorRequired,
-        sessionData.mfaRequired,
-
-        authData.requires2FA,
-        authData.requires_2fa,
-        authData.requiresMfa,
-        authData.requires_mfa,
-        authData.twoFactorRequired,
-        authData.mfaRequired,
-
-        meta.requires2FA,
-        meta.requires_2fa,
-        meta.requiresMfa,
-        meta.requires_mfa,
-        meta.twoFactorRequired,
-        meta.mfaRequired
-      ),
-      false
+  return objects.some((object) =>
+    boolKeys.some((key) =>
+      normalizeBoolean(
+        object?.[key],
+        false
+      )
     )
   );
 }
@@ -2925,110 +2972,24 @@ export function extractUser(payload = null) {
     return null;
   }
 
-  const {
-    root,
-    data,
-    payload: payloadNode,
-    result,
-    body,
-    responseData,
-    session,
-    auth,
-    sessionData,
-    authData,
-    meta,
-  } = getNestedAuthNodes(payload);
+  const objects =
+    collectAuthObjects(payload);
 
-  const direct = pickFirstObject(
-    root.user,
-    root.usuario,
-    root.me,
-    root.profile,
-    root.account,
-    root.currentUser,
-    root.current_user,
+  for (const object of objects) {
+    const direct =
+      pickFirstObject(
+        object.user,
+        object.usuario,
+        object.me,
+        object.profile,
+        object.account,
+        object.currentUser,
+        object.current_user
+      );
 
-    data.user,
-    data.usuario,
-    data.me,
-    data.profile,
-    data.account,
-    data.currentUser,
-    data.current_user,
-
-    payloadNode.user,
-    payloadNode.usuario,
-    payloadNode.me,
-    payloadNode.profile,
-    payloadNode.account,
-    payloadNode.currentUser,
-    payloadNode.current_user,
-
-    result.user,
-    result.usuario,
-    result.me,
-    result.profile,
-    result.account,
-    result.currentUser,
-    result.current_user,
-
-    body.user,
-    body.usuario,
-    body.me,
-    body.profile,
-    body.account,
-    body.currentUser,
-    body.current_user,
-
-    responseData.user,
-    responseData.usuario,
-    responseData.me,
-    responseData.profile,
-    responseData.account,
-    responseData.currentUser,
-    responseData.current_user,
-
-    session.user,
-    session.usuario,
-    session.me,
-    session.profile,
-    session.account,
-    session.currentUser,
-    session.current_user,
-
-    auth.user,
-    auth.usuario,
-    auth.me,
-    auth.profile,
-    auth.account,
-    auth.currentUser,
-    auth.current_user,
-
-    sessionData.user,
-    sessionData.usuario,
-    sessionData.me,
-    sessionData.profile,
-    sessionData.account,
-    sessionData.currentUser,
-    sessionData.current_user,
-
-    authData.user,
-    authData.usuario,
-    authData.me,
-    authData.profile,
-    authData.account,
-    authData.currentUser,
-    authData.current_user,
-
-    meta.user,
-    meta.usuario,
-    meta.me,
-    meta.profile,
-    meta.account
-  );
-
-  if (looksLikeUser(direct)) {
-    return normalizeUser(direct);
+    if (looksLikeUser(direct)) {
+      return normalizeUser(direct);
+    }
   }
 
   /*
@@ -3045,7 +3006,8 @@ export function extractUser(payload = null) {
     return normalizeUser(payload);
   }
 
-  const unwrapped = unwrapAuthPayload(payload);
+  const unwrapped =
+    unwrapAuthPayload(payload);
 
   if (
     unwrapped &&
@@ -3062,9 +3024,10 @@ export function extractUser(payload = null) {
 ========================================================= */
 
 export function validateAuthResponse(response = null, options = {}) {
-  const opts = isObject(options)
-    ? options
-    : {};
+  const opts =
+    isObject(options)
+      ? options
+      : {};
 
   if (isExplicitAuthFailure(response)) {
     const message =
@@ -3074,22 +3037,66 @@ export function validateAuthResponse(response = null, options = {}) {
     throw createAuthNormalizeError(
       message,
       {
-        status: Number(getStatusValue(response)) || 401,
-        code: getErrorCode(response) || "INVALID_CREDENTIALS",
+        status:
+          Number(getStatusValue(response)) || 401,
+
+        code:
+          getErrorCode(response) ||
+          "INVALID_CREDENTIALS",
+
         response,
       }
     );
   }
 
-  const token = extractToken(response);
-  const user = extractUser(response);
-  const refreshToken = extractRefreshToken(response);
-  const requires2FA = extractRequires2FA(response);
-  const tempToken = extractTempToken(response);
-  const sessionData = normalizeSessionPayload(response);
+  const token =
+    extractToken(response);
 
-  const hasToken = Boolean(normalizeString(token));
-  const hasUser = hasUsableUserIdentity(user);
+  const user =
+    extractUser(response);
+
+  const refreshToken =
+    extractRefreshToken(response);
+
+  const requires2FA =
+    extractRequires2FA(response);
+
+  const tempToken =
+    extractTempToken(response);
+
+  const sessionData =
+    normalizeSessionPayload(response);
+
+  const hasToken =
+    Boolean(
+      normalizeString(token)
+    );
+
+  const hasUser =
+    hasUsableUserIdentity(user);
+
+  const mode =
+    normalizeRoleKey(
+      opts.mode ||
+        opts.flow ||
+        opts.type ||
+        "generic"
+    );
+
+  const requireAuthenticated =
+    opts.requireAuthenticated === true ||
+    mode === "login" ||
+    mode === "authenticate";
+
+  const requireToken =
+    opts.requireToken === true ||
+    mode === "login" ||
+    mode === "refresh";
+
+  const requireUser =
+    opts.requireUser === true ||
+    mode === "login" ||
+    mode === "me";
 
   if (requires2FA) {
     if (
@@ -3099,89 +3106,198 @@ export function validateAuthResponse(response = null, options = {}) {
       throw createAuthNormalizeError(
         "Se requiere 2FA pero no se recibió token temporal.",
         {
-          status: 401,
-          code: "MISSING_2FA_TEMP_TOKEN",
+          status:
+            401,
+
+          code:
+            "MISSING_2FA_TEMP_TOKEN",
+
           response,
         }
       );
     }
 
     return {
-      ok: true,
-      success: true,
-      authenticated: false,
-      status: "2fa_required",
+      ok:
+        true,
 
-      token: null,
-      user: null,
-      refreshToken: null,
-      sessionData: null,
+      success:
+        true,
 
-      tempToken: tempToken || null,
-      requires2FA: true,
+      authenticated:
+        false,
+
+      status:
+        "2fa_required",
+
+      token:
+        null,
+
+      accessToken:
+        null,
+
+      user:
+        null,
+
+      refreshToken:
+        null,
+
+      session:
+        null,
+
+      sessionData:
+        null,
+
+      tempToken:
+        tempToken || null,
+
+      requires2FA:
+        true,
 
       response,
     };
   }
 
-  if (hasToken && hasUser) {
+  if (
+    hasToken &&
+    hasUser
+  ) {
     return {
-      ok: true,
-      success: true,
-      authenticated: true,
-      status: "authenticated",
+      ok:
+        true,
 
-      token: token || null,
-      user: user || null,
-      refreshToken: refreshToken || null,
-      sessionData: sessionData || null,
+      success:
+        true,
 
-      tempToken: null,
-      requires2FA: false,
+      authenticated:
+        true,
+
+      status:
+        "authenticated",
+
+      token:
+        token || null,
+
+      accessToken:
+        token || null,
+
+      user:
+        user || null,
+
+      refreshToken:
+        refreshToken || null,
+
+      session:
+        sessionData || null,
+
+      sessionData:
+        sessionData || null,
+
+      tempToken:
+        null,
+
+      requires2FA:
+        false,
 
       response,
     };
   }
 
   /*
-    Compatibilidad para refresh/me:
-    - token_only puede ser útil para refresh y luego /me.
-    - user_only puede ser útil para /me con token ya existente.
-    - nunca se marca authenticated.
+    Compatibilidad controlada:
+    - refresh puede devolver token_only.
+    - /me puede devolver user_only.
+    - ninguno de los dos marca authenticated.
   */
-  if (hasToken && !hasUser) {
+  if (
+    hasToken &&
+    !hasUser &&
+    !requireAuthenticated &&
+    !requireUser
+  ) {
     return {
-      ok: true,
-      success: true,
-      authenticated: false,
-      status: "token_only",
+      ok:
+        true,
 
-      token: token || null,
-      user: null,
-      refreshToken: refreshToken || null,
-      sessionData: sessionData || null,
+      success:
+        true,
 
-      tempToken: null,
-      requires2FA: false,
+      authenticated:
+        false,
+
+      status:
+        "token_only",
+
+      token:
+        token || null,
+
+      accessToken:
+        token || null,
+
+      user:
+        null,
+
+      refreshToken:
+        refreshToken || null,
+
+      session:
+        sessionData || null,
+
+      sessionData:
+        sessionData || null,
+
+      tempToken:
+        null,
+
+      requires2FA:
+        false,
 
       response,
     };
   }
 
-  if (!hasToken && hasUser) {
+  if (
+    !hasToken &&
+    hasUser &&
+    !requireAuthenticated &&
+    !requireToken
+  ) {
     return {
-      ok: true,
-      success: true,
-      authenticated: false,
-      status: "user_only",
+      ok:
+        true,
 
-      token: null,
-      user: user || null,
-      refreshToken: refreshToken || null,
-      sessionData: sessionData || null,
+      success:
+        true,
 
-      tempToken: null,
-      requires2FA: false,
+      authenticated:
+        false,
+
+      status:
+        "user_only",
+
+      token:
+        null,
+
+      accessToken:
+        null,
+
+      user:
+        user || null,
+
+      refreshToken:
+        refreshToken || null,
+
+      session:
+        sessionData || null,
+
+      sessionData:
+        sessionData || null,
+
+      tempToken:
+        null,
+
+      requires2FA:
+        false,
 
       response,
     };
@@ -3190,8 +3306,18 @@ export function validateAuthResponse(response = null, options = {}) {
   throw createAuthNormalizeError(
     "La respuesta del API no contiene una sesión válida.",
     {
-      status: 401,
-      code: "INVALID_LOGIN_SESSION",
+      status:
+        401,
+
+      code:
+        requireAuthenticated
+          ? "INVALID_LOGIN_SESSION"
+          : requireToken
+            ? "TOKEN_MISSING"
+            : requireUser
+              ? "USER_MISSING"
+              : "INVALID_AUTH_RESPONSE",
+
       response,
     }
   );
@@ -3203,26 +3329,40 @@ export function validateAuthResponse(response = null, options = {}) {
 
 export function normalizeAuthResponse(response = null, options = {}) {
   try {
-    const validated = validateAuthResponse(
-      response,
-      options
-    );
+    const validated =
+      validateAuthResponse(
+        response,
+        options
+      );
 
     return {
       ...validated,
 
-      error: null,
-      valid: true,
-      explicitFailure: false,
+      error:
+        null,
 
-      code: getErrorCode(response) || "",
-      message: getResponseMessage(response) || "",
+      valid:
+        true,
+
+      explicitFailure:
+        false,
+
+      code:
+        getErrorCode(response) || "",
+
+      message:
+        getResponseMessage(response) || "",
     };
   } catch (error) {
     return {
-      ok: false,
-      success: false,
-      authenticated: false,
+      ok:
+        false,
+
+      success:
+        false,
+
+      authenticated:
+        false,
 
       status:
         error?.data?.status ||
@@ -3240,15 +3380,35 @@ export function normalizeAuthResponse(response = null, options = {}) {
         getResponseMessage(response) ||
         "La respuesta del API no contiene una sesión válida.",
 
-      token: null,
-      user: null,
-      refreshToken: null,
-      sessionData: null,
-      tempToken: null,
-      requires2FA: false,
+      token:
+        null,
 
-      valid: false,
-      explicitFailure: isExplicitAuthFailure(response),
+      accessToken:
+        null,
+
+      user:
+        null,
+
+      refreshToken:
+        null,
+
+      session:
+        null,
+
+      sessionData:
+        null,
+
+      tempToken:
+        null,
+
+      requires2FA:
+        false,
+
+      valid:
+        false,
+
+      explicitFailure:
+        isExplicitAuthFailure(response),
 
       error,
       response,
@@ -3261,70 +3421,128 @@ export function normalizeAuthResponse(response = null, options = {}) {
 ========================================================= */
 
 export function getAuthNormalizeSnapshot(response = null) {
-  const token = extractToken(response);
-  const refreshToken = extractRefreshToken(response);
-  const tempToken = extractTempToken(response);
-  const user = extractUser(response);
+  const token =
+    extractToken(response);
 
-  const normalized = normalizeAuthResponse(
-    response,
-    {
-      allow2FAWithoutTempToken: true,
-    }
-  );
+  const refreshToken =
+    extractRefreshToken(response);
+
+  const tempToken =
+    extractTempToken(response);
+
+  const user =
+    extractUser(response);
+
+  const normalized =
+    normalizeAuthResponse(
+      response,
+      {
+        allow2FAWithoutTempToken:
+          true,
+      }
+    );
 
   return {
-    version: AUTH_NORMALIZE_VERSION,
+    version:
+      AUTH_NORMALIZE_VERSION,
 
-    explicitFailure: isExplicitAuthFailure(response),
+    explicitFailure:
+      isExplicitAuthFailure(response),
 
-    status: getStatusValue(response) || null,
-    normalizedStatus: normalized.status || null,
+    status:
+      getStatusValue(response) || null,
 
-    code: getErrorCode(response) || null,
-    message: getResponseMessage(response) || null,
+    normalizedStatus:
+      normalized.status || null,
 
-    valid: Boolean(normalized.valid),
-    authenticated: Boolean(normalized.authenticated),
+    code:
+      getErrorCode(response) || null,
 
-    hasToken: Boolean(token),
-    tokenPreview: token
-      ? redactToken(token)
-      : null,
+    message:
+      getResponseMessage(response) || null,
 
-    hasRefreshToken: Boolean(refreshToken),
-    refreshTokenPreview: refreshToken
-      ? redactToken(refreshToken)
-      : null,
+    valid:
+      Boolean(normalized.valid),
 
-    hasTempToken: Boolean(tempToken),
-    tempTokenPreview: tempToken
-      ? redactToken(tempToken)
-      : null,
+    authenticated:
+      Boolean(normalized.authenticated),
 
-    requires2FA: extractRequires2FA(response),
+    hasToken:
+      Boolean(token),
 
-    hasUser: Boolean(user),
+    tokenPreview:
+      token
+        ? redactToken(token)
+        : null,
 
-    user: user
-      ? {
-          id: user.id || null,
-          userId: user.userId || null,
-          username: user.username || null,
-          email: user.email || null,
-          role: user.role || null,
-          roles: user.roles || [],
-          isAdmin: Boolean(user.isAdmin),
-          isSupport: Boolean(user.isSupport),
-          isManager: Boolean(user.isManager),
-          isClient: Boolean(user.isClient),
-          hasAvatar: Boolean(user.hasAvatar),
-          theme: user.theme || null,
-          darkMode: user.darkMode,
-        }
-      : null,
+    hasRefreshToken:
+      Boolean(refreshToken),
 
-    sessionData: normalizeSessionPayload(response),
+    refreshTokenPreview:
+      refreshToken
+        ? redactToken(refreshToken)
+        : null,
+
+    hasTempToken:
+      Boolean(tempToken),
+
+    tempTokenPreview:
+      tempToken
+        ? redactToken(tempToken)
+        : null,
+
+    requires2FA:
+      extractRequires2FA(response),
+
+    hasUser:
+      Boolean(user),
+
+    user:
+      user
+        ? {
+            id:
+              user.id || null,
+
+            userId:
+              user.userId || null,
+
+            username:
+              user.username || null,
+
+            email:
+              user.email || null,
+
+            role:
+              user.role || null,
+
+            roles:
+              user.roles || [],
+
+            isAdmin:
+              Boolean(user.isAdmin),
+
+            isSupport:
+              Boolean(user.isSupport),
+
+            isManager:
+              Boolean(user.isManager),
+
+            isClient:
+              Boolean(user.isClient),
+
+            hasAvatar:
+              Boolean(user.hasAvatar),
+
+            theme:
+              user.theme || null,
+
+            darkMode:
+              user.darkMode,
+          }
+        : null,
+
+    sessionData:
+      normalizeSessionPayload(response),
   };
 }
 
@@ -3333,6 +3551,8 @@ export function getAuthNormalizeSnapshot(response = null) {
 ========================================================= */
 
 export default {
+  AUTH_NORMALIZE_VERSION,
+
   normalizeUser,
   normalizeSessionPayload,
 

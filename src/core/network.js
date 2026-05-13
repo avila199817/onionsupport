@@ -16,12 +16,14 @@
    - cleanup scope estable
    - fallback si cleanup no existe
    - soporte navigator.connection
+   - soporte connection.onchange legacy
    - eventos online/offline/visibility/focus/pageshow/pagehide
    - estado online inicial sincronizado
    - contexto activo actualizable sin rebinder innecesario
    - handlers no capturan estado obsoleto tras reboot
    - setState opcional si se inyecta
    - mutación directa segura si no hay setState
+   - no convierte unknown en offline por accidente
    - eventos con rate mínimo para señales ruidosas
    - cero throws accidentales
 ========================================================= */
@@ -33,7 +35,7 @@ import { isBrowser } from "./helpers.js";
 ========================================================= */
 
 const NETWORK_VERSION =
-  "11.0.0";
+  "12.0.0";
 
 const NETWORK_SCOPE =
   "core:network";
@@ -164,13 +166,6 @@ function safeNumber(value, fallback = 0) {
     : fallback;
 }
 
-function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object"
-  );
-}
-
 function isFunction(value) {
   return typeof value === "function";
 }
@@ -183,10 +178,25 @@ function safeIsoDate(ms = Date.now()) {
   }
 }
 
+function safeNow() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
 function safeEmit(events, name, payload = {}) {
+  const eventName =
+    safeText(name, "");
+
+  if (!eventName) {
+    return false;
+  }
+
   try {
     events?.emit?.(
-      name,
+      eventName,
       payload
     );
 
@@ -276,6 +286,10 @@ function safeError(utils, events, error, source = "network") {
 
   return payload;
 }
+
+/* =========================================================
+   BROWSER SIGNALS
+========================================================= */
 
 function getNavigatorOnline() {
   if (!isBrowser()) {
@@ -410,17 +424,17 @@ function connectionFingerprint(connection = null) {
 }
 
 function getBrowserNetworkSnapshot() {
+  const online =
+    getNavigatorOnline();
+
   return {
     browser:
       isBrowser(),
 
-    online:
-      getNavigatorOnline(),
+    online,
 
     status:
-      onlineToStatus(
-        getNavigatorOnline()
-      ),
+      onlineToStatus(online),
 
     visibilityState:
       getVisibilityState(),
@@ -435,6 +449,10 @@ function getBrowserNetworkSnapshot() {
       safeIsoDate(),
   };
 }
+
+/* =========================================================
+   ACTIVE CONTEXT
+========================================================= */
 
 function updateActiveContext({
   state,
@@ -484,13 +502,26 @@ function getActiveContext() {
   return activeContext;
 }
 
+export function refreshNetworkContext(context = {}) {
+  updateActiveContext(context);
+
+  return getNetworkSnapshot({
+    state:
+      activeContext.state,
+  });
+}
+
+/* =========================================================
+   STATE PATCH
+========================================================= */
+
 function buildStatePatch({
   online,
   reason = "sync",
   changed = false,
 } = {}) {
   const atMs =
-    Date.now();
+    safeNow();
 
   const status =
     onlineToStatus(online);
@@ -498,22 +529,7 @@ function buildStatePatch({
   const connection =
     getConnectionSnapshot();
 
-  return {
-    online,
-
-    offline:
-      online === null
-        ? null
-        : !online,
-
-    networkOnline:
-      online,
-
-    networkOffline:
-      online === null
-        ? null
-        : !online,
-
+  const patch = {
     networkStatus:
       status,
 
@@ -545,6 +561,39 @@ function buildStatePatch({
         ? atMs
         : undefined,
   };
+
+  /*
+    Importante:
+    No pasar booleans null por setState del Core si online es desconocido,
+    porque algunos normalizadores booleanos podrían convertir null -> false.
+  */
+  if (online === true || online === false) {
+    patch.online =
+      online;
+
+    patch.offline =
+      !online;
+
+    patch.networkOnline =
+      online;
+
+    patch.networkOffline =
+      !online;
+  } else {
+    patch.online =
+      null;
+
+    patch.offline =
+      null;
+
+    patch.networkOnline =
+      null;
+
+    patch.networkOffline =
+      null;
+  }
+
+  return patch;
 }
 
 function removeUndefinedKeys(object = {}) {
@@ -561,6 +610,15 @@ function removeUndefinedKeys(object = {}) {
   return output;
 }
 
+function patchHasUnknownOnline(patch = {}) {
+  return (
+    patch.online === null ||
+    patch.offline === null ||
+    patch.networkOnline === null ||
+    patch.networkOffline === null
+  );
+}
+
 function writeNetworkState(state, patch = {}, setState = null) {
   if (!state || typeof state !== "object") {
     return false;
@@ -569,9 +627,20 @@ function writeNetworkState(state, patch = {}, setState = null) {
   const cleanPatch =
     removeUndefinedKeys(patch);
 
-  if (isFunction(setState)) {
+  /*
+    Si online es unknown, evitamos setState para no convertir null en false.
+    El módulo network ya emite sus eventos propios.
+  */
+  if (
+    isFunction(setState) &&
+    !patchHasUnknownOnline(cleanPatch)
+  ) {
     try {
-      setState(cleanPatch);
+      setState(cleanPatch, {
+        source:
+          "core:network",
+      });
+
       return true;
     } catch {}
   }
@@ -729,14 +798,18 @@ function shouldThrottlePassiveSync(reason = "", force = false) {
     return false;
   }
 
-  const now =
-    Date.now();
+  const current =
+    safeNow();
 
   return (
     lastSyncAt > 0 &&
-    now - lastSyncAt < MIN_PASSIVE_SYNC_INTERVAL_MS
+    current - lastSyncAt < MIN_PASSIVE_SYNC_INTERVAL_MS
   );
 }
+
+/* =========================================================
+   MANUAL DISPOSERS
+========================================================= */
 
 function addManualDisposer(disposer) {
   if (isFunction(disposer)) {
@@ -751,6 +824,20 @@ function removeManualDisposer(disposer) {
     manualDisposers.delete(disposer);
   } catch {}
 }
+
+function clearManualDisposers() {
+  for (const dispose of Array.from(manualDisposers)) {
+    try {
+      dispose();
+    } catch {}
+  }
+
+  manualDisposers.clear();
+}
+
+/* =========================================================
+   BIND HELPERS
+========================================================= */
 
 function bindDomEvent({
   cleanup,
@@ -833,14 +920,70 @@ function bindDomEvent({
   return () => false;
 }
 
-function clearManualDisposers() {
-  for (const dispose of Array.from(manualDisposers)) {
-    try {
-      dispose();
-    } catch {}
+function bindConnectionChange({
+  cleanup,
+  scope,
+  connection,
+  handler,
+} = {}) {
+  if (!connection || !isFunction(handler)) {
+    return () => false;
   }
 
-  manualDisposers.clear();
+  if (isFunction(connection.addEventListener)) {
+    return bindDomEvent({
+      cleanup,
+      scope,
+      target:
+        connection,
+      eventName:
+        "change",
+      handler,
+    });
+  }
+
+  /*
+    Fallback legacy.
+  */
+  try {
+    const previous =
+      connection.onchange;
+
+    connection.onchange =
+      function networkConnectionOnChange(event) {
+        try {
+          if (isFunction(previous)) {
+            previous.call(
+              this,
+              event
+            );
+          }
+        } catch {}
+
+        handler(event);
+      };
+
+    const off = () => {
+      try {
+        if (connection.onchange === handler) {
+          connection.onchange =
+            previous || null;
+        }
+
+        removeManualDisposer(off);
+
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    addManualDisposer(off);
+
+    return off;
+  } catch {}
+
+  return () => false;
 }
 
 /* =========================================================
@@ -918,7 +1061,7 @@ export function syncNetworkState({
     safeText(reason, "sync");
 
   lastSyncAt =
-    Date.now();
+    safeNow();
 
   if (changed) {
     lastChangeAt =
@@ -1345,17 +1488,11 @@ export function bindNetworkEvents({
     const connection =
       getConnection();
 
-    if (
-      connection &&
-      isFunction(connection.addEventListener)
-    ) {
-      bindDomEvent({
+    if (connection) {
+      bindConnectionChange({
         cleanup,
         scope,
-        target:
-          connection,
-        eventName:
-          "change",
+        connection,
         handler:
           handleConnectionChange,
       });
@@ -1608,6 +1745,7 @@ export default {
 
   bindNetworkEvents,
   unbindNetworkEvents,
+  refreshNetworkContext,
   syncNetworkState,
   getNetworkSnapshot,
 };

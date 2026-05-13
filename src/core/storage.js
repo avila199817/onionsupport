@@ -44,7 +44,7 @@ import {
 ========================================================= */
 
 const STORAGE_VERSION =
-  "13.0.0";
+  "13.0.1";
 
 const DEFAULT_PREFIX =
   "onion";
@@ -85,6 +85,9 @@ const LEGACY_EXTRA_KEYS =
     "onion_access_token",
     "onion_refresh_token",
     "onion_temp_token",
+    "onion_temporary_token",
+    "onion_two_factor_token",
+    "onion_mfa_token",
     "onion_user",
     "onion_user_id",
     "onion_user_slug",
@@ -92,19 +95,50 @@ const LEGACY_EXTRA_KEYS =
     "onion_role",
     "onion_session_id",
     "onion_session_user_id",
-    "onion_theme",
-    "onion_lang",
     "onion_post_login_target",
 
     "onion.token",
     "onion.accessToken",
     "onion.refreshToken",
     "onion.tempToken",
+    "onion.temporaryToken",
+    "onion.twoFactorToken",
+    "onion.mfaToken",
     "onion.user",
     "onion.role",
     "onion.sessionId",
     "onion.sessionUserId",
     "onion.postLoginTarget",
+
+    "onion:token",
+    "onion:accessToken",
+    "onion:access_token",
+    "onion:refreshToken",
+    "onion:refresh_token",
+    "onion:tempToken",
+    "onion:temp_token",
+    "onion:temporaryToken",
+    "onion:temporary_token",
+    "onion:twoFactorToken",
+    "onion:two_factor_token",
+    "onion:mfaToken",
+    "onion:mfa_token",
+    "onion:user",
+    "onion:userId",
+    "onion:user_id",
+    "onion:userName",
+    "onion:user_name",
+    "onion:userSlug",
+    "onion:user_slug",
+    "onion:role",
+    "onion:session",
+    "onion:sessionData",
+    "onion:sessionId",
+    "onion:session_id",
+    "onion:sessionUserId",
+    "onion:session_user_id",
+    "onion:postLoginTarget",
+    "onion:post_login_target",
 
     "token",
     "accessToken",
@@ -115,9 +149,19 @@ const LEGACY_EXTRA_KEYS =
     "temp_token",
     "temporaryToken",
     "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
     "user",
+    "currentUser",
+    "sessionUser",
+    "authUser",
     "role",
+    "rol",
+    "roles",
     "session",
+    "sessionData",
     "auth",
     "sessionId",
     "session_id",
@@ -125,6 +169,8 @@ const LEGACY_EXTRA_KEYS =
     "session_user_id",
     "postLoginTarget",
     "post_login_target",
+    "redirectAfterLogin",
+    "redirect_after_login",
   ]);
 
 const STORAGE_EVENTS =
@@ -233,7 +279,7 @@ function unique(values = []) {
   const seen =
     new Set();
 
-  for (const value of safeArray(values)) {
+  for (const value of safeArray(values).flat(Infinity)) {
     const clean =
       safeText(value, "");
 
@@ -890,10 +936,11 @@ function shouldRemoveLegacyKey(key = "") {
 }
 
 export function removeLegacySessionKeys(utils = null, events = null) {
-  const keys =
+  const explicitKeys =
     getLegacyKeys();
 
-  let removed = 0;
+  let removed =
+    0;
 
   for (const kind of [
     "local",
@@ -905,6 +952,18 @@ export function removeLegacySessionKeys(utils = null, events = null) {
     if (!storage) {
       continue;
     }
+
+    const scannedKeys =
+      collectStorageKeys(
+        storage,
+        shouldRemoveLegacyKey
+      );
+
+    const keys =
+      unique([
+        ...explicitKeys,
+        ...scannedKeys,
+      ]);
 
     for (const legacyKey of keys) {
       const key =
@@ -1070,14 +1129,18 @@ export function createStorage(input = {}) {
       STORAGE_EVENTS.error,
       {
         operation,
+
         key:
           sanitizeSnapshotValue(
             key,
             key
           ),
+
         kind,
+
         error:
           sanitizeError(error),
+
         at:
           safeIsoDate(),
       }
@@ -1333,9 +1396,10 @@ export function createStorage(input = {}) {
     }
 
     const raw =
-      typeof value === "string"
-        ? safeJsonStringify(value, "")
-        : safeJsonStringify(value, "");
+      safeJsonStringify(
+        value,
+        ""
+      );
 
     if (
       !raw ||
@@ -1686,7 +1750,7 @@ export function createStorage(input = {}) {
         : {};
 
     const includeLegacy =
-      opts.includeLegacy !== false;
+      opts.includeLegacy === true;
 
     const result =
       clearNamespace(
@@ -2014,14 +2078,7 @@ export function createStorage(input = {}) {
     prefixRaw:
       getPrefixRaw(),
 
-(
-      events,
-      STORAGE_EVENTS.unavailable,
-      {
-        memoryFallback:
-          true,
-
-        error    key,
+    key,
     getNamespacedKey:
       key,
     normalizeKey:
@@ -2048,8 +2105,7 @@ export function createStorage(input = {}) {
 
     clearAll,
     clear:
-      clearAll    key,
-    getNamespacedKey,
+      clearAll,
 
     clearNamespace,
 
@@ -2074,6 +2130,10 @@ export function createStorage(input = {}) {
       getSnapshot,
   };
 }
+
+/* =========================================================
+   EXPORTS
+========================================================= */
 
 export {
   STORAGE_VERSION,

@@ -2,6 +2,8 @@
    Onion SPA - Core Request
    Archivo: src/core/request.js
 
+   CORE REQUEST · API CLIENT · ENTERPRISE HARDENED · 13/10
+
    RESPONSABILIDADES:
    - parsear respuestas HTTP
    - construir errores normalizados
@@ -9,6 +11,12 @@
    - ejecutar fetch con retry real
    - exponer request base y apiClient
    - no duplicar setError / eventos en retries
+   - soportar firmas:
+       request(path, options)
+       request(method, path, options)
+       apiClient.post(path, body, options)
+       apiClient.request(path, options)
+       apiClient.request(method, path, options)
 
    HARDENING EXTREMO:
    - single emit final
@@ -29,7 +37,7 @@
    - compat con hooks.runSeries y registry.hooks
    - compat con registry.hooks como arrays, funciones o entradas { handler }
    - /api/auth/me recibe Authorization si config lo marca como privado
-   - no ReferenceError si fetch/FormData/Blob/Headers no existen
+   - no ReferenceError si fetch/FormData/Blob/Headers/ReadableStream no existen
 ========================================================= */
 
 import { config } from "./config.js";
@@ -56,8 +64,8 @@ import {
    CONSTANTS
 ========================================================= */
 
-const REQUEST_VERSION =
-  "12.0.0";
+export const REQUEST_VERSION =
+  "13.0.0";
 
 const DEFAULT_METHOD =
   "GET";
@@ -111,6 +119,17 @@ const DEFAULT_RETRYABLE_METHODS =
     "OPTIONS",
   ]);
 
+const KNOWN_METHODS =
+  Object.freeze([
+    "GET",
+    "HEAD",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+  ]);
+
 const JSON_CONTENT_TYPES =
   Object.freeze([
     "application/json",
@@ -125,7 +144,6 @@ const TEXT_CONTENT_TYPES =
     "application/csv",
     "application/javascript",
     "application/x-javascript",
-    "application/problem+json",
   ]);
 
 const BINARY_CONTENT_TYPES =
@@ -402,6 +420,12 @@ function normalizeMethod(method = DEFAULT_METHOD) {
   ).toUpperCase();
 }
 
+function isKnownMethod(value = "") {
+  return KNOWN_METHODS.includes(
+    normalizeMethod(value)
+  );
+}
+
 function isBodyAllowed(method = DEFAULT_METHOD) {
   return !BODYLESS_METHODS.includes(
     normalizeMethod(method)
@@ -432,9 +456,130 @@ function getConfiguredRetries() {
   );
 }
 
+function getStateToken(state = {}) {
+  return safeText(
+    state?.token ||
+      state?.accessToken ||
+      state?.access_token ||
+      state?.session?.token ||
+      state?.session?.accessToken ||
+      state?.session?.access_token ||
+      "",
+    ""
+  );
+}
+
+/* =========================================================
+   REQUEST ARGUMENT NORMALIZATION
+========================================================= */
+
+function normalizeRequestArguments(arg1, arg2 = {}, arg3 = undefined) {
+  /*
+    Firma soportada:
+      request(method, path, options)
+  */
+  if (
+    typeof arg1 === "string" &&
+    isKnownMethod(arg1) &&
+    typeof arg2 === "string"
+  ) {
+    return {
+      path:
+        arg2,
+
+      options: {
+        ...safeObject(arg3),
+        method:
+          normalizeMethod(arg1),
+      },
+    };
+  }
+
+  /*
+    Firma estándar:
+      request(path, options)
+  */
+  return {
+    path:
+      arg1,
+
+    options:
+      safeObject(arg2),
+  };
+}
+
 /* =========================================================
    HEADERS
 ========================================================= */
+
+function headersToPlainObject(headers = {}) {
+  const output = {};
+
+  if (!headers) {
+    return output;
+  }
+
+  try {
+    if (
+      typeof Headers !== "undefined" &&
+      headers instanceof Headers
+    ) {
+      headers.forEach((value, key) => {
+        output[key] =
+          value;
+      });
+
+      return output;
+    }
+  } catch {}
+
+  try {
+    if (isFunction(headers.forEach)) {
+      headers.forEach((value, key) => {
+        output[key] =
+          value;
+      });
+
+      return output;
+    }
+  } catch {}
+
+  if (Array.isArray(headers)) {
+    for (const entry of headers) {
+      if (
+        Array.isArray(entry) &&
+        entry.length >= 2
+      ) {
+        output[entry[0]] =
+          entry[1];
+      }
+    }
+
+    return output;
+  }
+
+  if (isObject(headers)) {
+    return {
+      ...headers,
+    };
+  }
+
+  return output;
+}
+
+function normalizePlainHeaders(headers = {}) {
+  const source =
+    headersToPlainObject(headers);
+
+  try {
+    const normalized =
+      normalizeHeaders(source);
+
+    return headersToPlainObject(normalized);
+  } catch {
+    return source;
+  }
+}
 
 function getHeader(headers, name) {
   const target =
@@ -445,7 +590,7 @@ function getHeader(headers, name) {
   }
 
   const source =
-    safeObject(headers);
+    headersToPlainObject(headers);
 
   const key =
     Object.keys(source).find((item) =>
@@ -514,7 +659,7 @@ function deleteHeader(headers, name) {
 function sanitizeHeadersForLog(headers = {}) {
   const output = {};
 
-  for (const [key, value] of Object.entries(headers || {})) {
+  for (const [key, value] of Object.entries(headersToPlainObject(headers))) {
     const lower =
       safeText(key).toLowerCase();
 
@@ -640,7 +785,9 @@ export async function parseResponseBody(response, responseType = DEFAULT_RESPONS
     }
 
     if (finalType === "blob") {
-      return await response.blob();
+      return isFunction(response.blob)
+        ? await response.blob()
+        : await response.arrayBuffer();
     }
 
     if (
@@ -654,7 +801,9 @@ export async function parseResponseBody(response, responseType = DEFAULT_RESPONS
       finalType === "formData" ||
       finalType === "formdata"
     ) {
-      return await response.formData();
+      return isFunction(response.formData)
+        ? await response.formData()
+        : null;
     }
 
     if (finalType === "text") {
@@ -697,7 +846,8 @@ export async function parseResponseBody(response, responseType = DEFAULT_RESPONS
     }
 
     if (
-      contentType.includes("multipart/form-data")
+      contentType.includes("multipart/form-data") &&
+      isFunction(response.formData)
     ) {
       return await response.formData();
     }
@@ -750,6 +900,7 @@ function extractDataMessage(data = null) {
 
   return (
     safeText(data.message, "") ||
+    safeText(data.mensaje, "") ||
     safeText(data.error, "") ||
     safeText(data.detail, "") ||
     safeText(data.title, "") ||
@@ -976,8 +1127,7 @@ export function buildRequestError({
     timeout === true;
 
   /*
-    Punto crítico:
-    timeout y abort manual se separan.
+    Timeout y abort manual quedan separados.
     Si timeout=true, aborted=false para permitir retry.
   */
   error.aborted =
@@ -1601,7 +1751,7 @@ function serializeBody({
 }
 
 /* =========================================================
-   FETCH INIT
+   ABORT / FETCH INIT
 ========================================================= */
 
 function createAbortControllerSafe() {
@@ -1612,6 +1762,124 @@ function createAbortControllerSafe() {
   } catch {}
 
   return null;
+}
+
+function createTimeoutSafe(timeoutMs = 0) {
+  try {
+    if (isFunction(createAbortTimeout)) {
+      return createAbortTimeout(timeoutMs);
+    }
+  } catch {}
+
+  const controller =
+    createAbortControllerSafe();
+
+  if (
+    !controller ||
+    !timeoutMs ||
+    timeoutMs <= 0
+  ) {
+    return {
+      controller,
+      signal:
+        controller?.signal || null,
+      timeoutId:
+        null,
+      clear() {},
+    };
+  }
+
+  let timeoutId =
+    null;
+
+  try {
+    timeoutId =
+      setTimeout(() => {
+        try {
+          controller.abort("timeout");
+        } catch {
+          try {
+            controller.abort();
+          } catch {}
+        }
+      }, timeoutMs);
+  } catch {}
+
+  return {
+    controller,
+    signal:
+      controller.signal,
+    timeoutId,
+    clear() {
+      if (timeoutId) {
+        try {
+          clearTimeout(timeoutId);
+        } catch {}
+      }
+    },
+  };
+}
+
+function mergeSignalsSafe(signals = []) {
+  const cleanSignals =
+    safeArray(signals)
+      .filter(Boolean);
+
+  if (!cleanSignals.length) {
+    return null;
+  }
+
+  try {
+    if (isFunction(mergeAbortSignals)) {
+      return mergeAbortSignals(cleanSignals);
+    }
+  } catch {}
+
+  if (cleanSignals.length === 1) {
+    return cleanSignals[0];
+  }
+
+  const controller =
+    createAbortControllerSafe();
+
+  if (!controller) {
+    return cleanSignals[0] || null;
+  }
+
+  for (const signal of cleanSignals) {
+    if (signal?.aborted) {
+      try {
+        controller.abort(signal.reason || "aborted");
+      } catch {
+        try {
+          controller.abort();
+        } catch {}
+      }
+
+      return controller.signal;
+    }
+
+    try {
+      signal.addEventListener(
+        "abort",
+        () => {
+          try {
+            controller.abort(signal.reason || "aborted");
+          } catch {
+            try {
+              controller.abort();
+            } catch {}
+          }
+        },
+        {
+          once:
+            true,
+        }
+      );
+    } catch {}
+  }
+
+  return controller.signal;
 }
 
 function buildFetchInit({
@@ -1785,7 +2053,8 @@ export function createRequest({
   function resolveAuthDefault(path = "", opts = {}) {
     if (
       opts.public === true ||
-      opts.skipAuth === true
+      opts.skipAuth === true ||
+      opts.auth === false
     ) {
       return false;
     }
@@ -1940,7 +2209,8 @@ export function createRequest({
 
     if (
       merged.public === true ||
-      merged.skipAuth === true
+      merged.skipAuth === true ||
+      merged.auth === false
     ) {
       merged.auth =
         false;
@@ -2041,7 +2311,18 @@ export function createRequest({
     } catch {}
   }
 
-  async function request(path, options = {}) {
+  async function request(...args) {
+    const normalizedArgs =
+      normalizeRequestArguments(
+        ...args
+      );
+
+    const path =
+      normalizedArgs.path;
+
+    const options =
+      normalizedArgs.options;
+
     const startedAt =
       Date.now();
 
@@ -2089,7 +2370,7 @@ export function createRequest({
       safeRedact(url);
 
     const finalHeaders =
-      normalizeHeaders({
+      normalizePlainHeaders({
         Accept:
           "application/json",
         ...safeObject(
@@ -2100,14 +2381,17 @@ export function createRequest({
         ),
       });
 
+    const token =
+      getStateToken(state);
+
     if (
       requestConfig.auth &&
-      hasValidToken(state?.token)
+      hasValidToken(token)
     ) {
       setHeader(
         finalHeaders,
         config?.auth?.tokenHeader || "Authorization",
-        `${config?.auth?.bearerPrefix || "Bearer"} ${state.token}`
+        `${config?.auth?.bearerPrefix || "Bearer"} ${token}`
       );
     }
 
@@ -2230,7 +2514,7 @@ export function createRequest({
                   attempt + 1;
 
                 const timeout =
-                  createAbortTimeout(
+                  createTimeoutSafe(
                     requestConfig.timeout
                   );
 
@@ -2240,7 +2524,7 @@ export function createRequest({
                   null;
 
                 const signal =
-                  mergeAbortSignals([
+                  mergeSignalsSafe([
                     timeoutSignal,
                     requestConfig.signal,
                     requestAbortController?.signal,
@@ -2799,6 +3083,14 @@ export function createRequest({
 ========================================================= */
 
 export function createApiClient(request) {
+  function requestWithOverload(arg1, arg2 = {}, arg3 = undefined) {
+    return request(
+      arg1,
+      arg2,
+      arg3
+    );
+  }
+
   function withMethod(method, path, bodyOrOptions = null, maybeOptions = {}) {
     const finalMethod =
       normalizeMethod(method);
@@ -2817,6 +3109,23 @@ export function createApiClient(request) {
         finalMethod,
       body:
         bodyOrOptions,
+    });
+  }
+
+  function deleteWithOptionalBody(path, bodyOrOptions = {}, maybeOptions = undefined) {
+    if (maybeOptions !== undefined) {
+      return withMethod(
+        "DELETE",
+        path,
+        bodyOrOptions,
+        maybeOptions
+      );
+    }
+
+    return request(path, {
+      ...safeObject(bodyOrOptions),
+      method:
+        "DELETE",
     });
   }
 
@@ -2872,21 +3181,19 @@ export function createApiClient(request) {
       );
     },
 
-    delete(path, options = {}) {
-      return withMethod(
-        "DELETE",
+    delete(path, bodyOrOptions = {}, maybeOptions = undefined) {
+      return deleteWithOptionalBody(
         path,
-        null,
-        options
+        bodyOrOptions,
+        maybeOptions
       );
     },
 
-    del(path, options = {}) {
-      return withMethod(
-        "DELETE",
+    del(path, bodyOrOptions = {}, maybeOptions = undefined) {
+      return deleteWithOptionalBody(
         path,
-        null,
-        options
+        bodyOrOptions,
+        maybeOptions
       );
     },
 
@@ -2918,7 +3225,8 @@ export function createApiClient(request) {
       });
     },
 
-    request,
+    request:
+      requestWithOverload,
 
     getSnapshot(options = {}) {
       return request.getSnapshot?.(options) || null;

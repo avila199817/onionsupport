@@ -8,12 +8,15 @@
    RESPONSABILIDADES:
    - punto de entrada público del módulo auth
    - composición de login / logout / restore / refresh / me / guards
+   - composición de activation / 2FA / password-reset
    - exponer helpers auth para toda la SPA
    - serializar restore / refresh / me / login
    - mantener compatibilidad con backend heterogéneo
    - exponer aliases públicos estables para auth flows
+   - integrar activación de cuenta
    - integrar forgot-password / reset-password request
    - integrar confirmación de reset-password
+   - integrar 2FA/MFA sin marcar authenticated antes de sesión válida
    - preservar rutas públicas técnicas durante restore/clear
    - no romper /activate-account?token=...
    - no romper /activate-account/<token>
@@ -57,6 +60,7 @@
    - login preserva flujo 2FA sin marcar authenticated
    - login fuerza sync final silencioso sobre AppCore tras éxito
    - afterPaint sólo repara UI
+   - activation / 2FA / password reset aislados y sin refresh automático
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -129,6 +133,8 @@ import {
   getLoginSnapshot,
 } from "./login.js";
 
+import * as ActivationApi from "./activation.js";
+import * as TwoFactorApi from "./2fa.js";
 import * as PasswordResetApi from "./password-reset.js";
 
 import {
@@ -152,7 +158,7 @@ import {
 ========================================================= */
 
 const AUTH_MODULE_VERSION =
-  "12.0.0";
+  "12.1.0";
 
 /* =========================================================
    CONSTANTS / FALLBACKS
@@ -850,6 +856,515 @@ function createRuntimeErrorSnapshot(type, error) {
     at:
       isoNow(),
   };
+}
+
+/* =========================================================
+   MODULE EXPORT RESOLUTION
+========================================================= */
+
+function getModuleExport(moduleApi, ...names) {
+  for (const name of names) {
+    const direct =
+      moduleApi?.[name];
+
+    if (typeof direct === "function") {
+      return direct;
+    }
+
+    const fromDefault =
+      moduleApi?.default?.[name];
+
+    if (typeof fromDefault === "function") {
+      return fromDefault;
+    }
+  }
+
+  return null;
+}
+
+function missingHandler(label = "handler") {
+  return async function missingHandlerExecutor() {
+    throw new Error(
+      `Auth: falta implementar ${label}.`
+    );
+  };
+}
+
+/* =========================================================
+   ACTIVATION RESOLUTION
+========================================================= */
+
+const activateAccountExecutor =
+  getModuleExport(
+    ActivationApi,
+    "activateAccount",
+    "activate",
+    "confirmActivation",
+    "accountActivation"
+  );
+
+const activateFirstUserExecutor =
+  getModuleExport(
+    ActivationApi,
+    "activateFirstUser",
+    "firstUserActivation"
+  );
+
+const validateActivationTokenExecutor =
+  getModuleExport(
+    ActivationApi,
+    "validateActivationToken",
+    "validateActivateToken",
+    "validateAccountActivationToken"
+  );
+
+const getActivateAccountEndpoint =
+  getModuleExport(
+    ActivationApi,
+    "getActivateAccountEndpoint",
+    "getActivationEndpoint",
+    "getAccountActivationEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.activateAccount ||
+    AUTH_ENDPOINTS?.activation ||
+    AUTH_ENDPOINTS?.activate ||
+    null);
+
+const getActivateFirstUserEndpoint =
+  getModuleExport(
+    ActivationApi,
+    "getActivateFirstUserEndpoint",
+    "getFirstUserActivationEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.activateFirstUser ||
+    AUTH_ENDPOINTS?.firstUserActivation ||
+    null);
+
+const resolveActivationToken =
+  getModuleExport(
+    ActivationApi,
+    "resolveActivationToken",
+    "extractActivationToken"
+  ) ||
+  (() => "");
+
+const normalizeActivationPayload =
+  getModuleExport(
+    ActivationApi,
+    "normalizeActivationPayload",
+    "normalizeActivateAccountPayload"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const buildActivationRequestBody =
+  getModuleExport(
+    ActivationApi,
+    "buildActivationRequestBody",
+    "buildActivateAccountBody"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const normalizeActivationResponse =
+  getModuleExport(
+    ActivationApi,
+    "normalizeActivationResponse",
+    "normalizeActivateAccountResponse"
+  ) ||
+  ((response = {}) =>
+    response);
+
+async function activateAccount(payload = {}, options = {}) {
+  const executor =
+    activateAccountExecutor ||
+    missingHandler("activateAccount en ./activation.js");
+
+  return executor(
+    payload,
+    options
+  );
+}
+
+async function activate(payload = {}, options = {}) {
+  return activateAccount(
+    payload,
+    options
+  );
+}
+
+async function confirmActivation(payload = {}, options = {}) {
+  return activateAccount(
+    payload,
+    options
+  );
+}
+
+async function accountActivation(payload = {}, options = {}) {
+  return activateAccount(
+    payload,
+    options
+  );
+}
+
+async function activateFirstUser(payload = {}, options = {}) {
+  const executor =
+    activateFirstUserExecutor ||
+    missingHandler("activateFirstUser en ./activation.js");
+
+  return executor(
+    payload,
+    options
+  );
+}
+
+async function validateActivationToken(payload = {}, options = {}) {
+  const executor =
+    validateActivationTokenExecutor ||
+    missingHandler("validateActivationToken en ./activation.js");
+
+  return executor(
+    payload,
+    options
+  );
+}
+
+/* =========================================================
+   2FA RESOLUTION
+========================================================= */
+
+const verifyTwoFactorExecutor =
+  getModuleExport(
+    TwoFactorApi,
+    "verifyTwoFactor",
+    "verify2FA",
+    "login2fa",
+    "twoFactorLogin",
+    "twoFactorVerify",
+    "verifyMfa",
+    "mfaLogin",
+    "submitTwoFactorCode"
+  );
+
+const requestTwoFactorCodeExecutor =
+  getModuleExport(
+    TwoFactorApi,
+    "requestTwoFactorCode",
+    "request2FA",
+    "requestMfa",
+    "sendTwoFactorCode"
+  );
+
+const resendTwoFactorCodeExecutor =
+  getModuleExport(
+    TwoFactorApi,
+    "resendTwoFactorCode",
+    "resend2FA",
+    "resendMfa"
+  );
+
+const getTwoFactorLoginEndpoint =
+  getModuleExport(
+    TwoFactorApi,
+    "getTwoFactorLoginEndpoint",
+    "getTwoFactorVerifyEndpoint",
+    "getMfaVerifyEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.twoFactorLogin ||
+    AUTH_ENDPOINTS?.login2fa ||
+    AUTH_ENDPOINTS?.mfaLogin ||
+    null);
+
+const resolveTwoFactorTempToken =
+  getModuleExport(
+    TwoFactorApi,
+    "resolveTwoFactorTempToken"
+  ) ||
+  (() =>
+    getStoredTempToken() || "");
+
+const normalizeTwoFactorPayload =
+  getModuleExport(
+    TwoFactorApi,
+    "normalizeTwoFactorPayload",
+    "normalizeVerifyTwoFactorPayload"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const buildTwoFactorVerifyBody =
+  getModuleExport(
+    TwoFactorApi,
+    "buildTwoFactorVerifyBody",
+    "buildVerifyTwoFactorBody"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const normalizeTwoFactorResponse =
+  getModuleExport(
+    TwoFactorApi,
+    "normalizeTwoFactorResponse",
+    "normalizeVerifyTwoFactorResponse"
+  ) ||
+  ((response = {}) =>
+    response);
+
+async function verifyTwoFactor(payload = {}, options = {}) {
+  const executor =
+    verifyTwoFactorExecutor ||
+    missingHandler("verifyTwoFactor en ./2fa.js");
+
+  return executor(
+    payload,
+    options
+  );
+}
+
+async function verify2FA(payload = {}, options = {}) {
+  return verifyTwoFactor(
+    payload,
+    options
+  );
+}
+
+async function login2fa(payload = {}, options = {}) {
+  return verifyTwoFactor(
+    payload,
+    options
+  );
+}
+
+async function twoFactorLogin(payload = {}, options = {}) {
+  return verifyTwoFactor(
+    payload,
+    options
+  );
+}
+
+async function twoFactorVerify(payload = {}, options = {}) {
+  return verifyTwoFactor(
+    payload,
+    options
+  );
+}
+
+async function verifyMfa(payload = {}, options = {}) {
+  return verifyTwoFactor(
+    payload,
+    options
+  );
+}
+
+async function mfaLogin(payload = {}, options = {}) {
+  return verifyTwoFactor(
+    payload,
+    options
+  );
+}
+
+async function requestTwoFactorCode(payload = {}, options = {}) {
+  const executor =
+    requestTwoFactorCodeExecutor ||
+    missingHandler("requestTwoFactorCode en ./2fa.js");
+
+  return executor(
+    payload,
+    options
+  );
+}
+
+async function resendTwoFactorCode(payload = {}, options = {}) {
+  const executor =
+    resendTwoFactorCodeExecutor ||
+    missingHandler("resendTwoFactorCode en ./2fa.js");
+
+  return executor(
+    payload,
+    options
+  );
+}
+
+/* =========================================================
+   PASSWORD RESET RESOLUTION
+========================================================= */
+
+const requestPasswordResetExecutor =
+  getModuleExport(
+    PasswordResetApi,
+    "requestPasswordReset",
+    "forgotPassword",
+    "resetPasswordRequest"
+  );
+
+const confirmResetPasswordExecutor =
+  getModuleExport(
+    PasswordResetApi,
+    "confirmResetPassword",
+    "resetPasswordConfirm",
+    "confirmPasswordReset"
+  );
+
+const validateResetPasswordTokenExecutor =
+  getModuleExport(
+    PasswordResetApi,
+    "validateResetPasswordToken",
+    "validateResetToken",
+    "resetPasswordValidate",
+    "validatePasswordReset"
+  );
+
+const getRequestPasswordResetEndpoint =
+  getModuleExport(
+    PasswordResetApi,
+    "getRequestPasswordResetEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.forgotPassword ||
+    AUTH_ENDPOINTS?.resetPasswordRequest ||
+    AUTH_ENDPOINTS?.requestPasswordReset ||
+    null);
+
+const getConfirmResetPasswordEndpoint =
+  getModuleExport(
+    PasswordResetApi,
+    "getConfirmResetPasswordEndpoint",
+    "getConfirmPasswordResetEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.confirmResetPassword ||
+    AUTH_ENDPOINTS?.confirmPasswordReset ||
+    AUTH_ENDPOINTS?.resetPasswordConfirm ||
+    null);
+
+const getValidateResetTokenEndpoint =
+  getModuleExport(
+    PasswordResetApi,
+    "getValidateResetTokenEndpoint",
+    "getValidateResetPasswordTokenEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.validateResetToken ||
+    AUTH_ENDPOINTS?.resetPasswordValidate ||
+    null);
+
+const resolveResetPasswordIdentifier =
+  getModuleExport(
+    PasswordResetApi,
+    "resolveResetPasswordIdentifier"
+  ) ||
+  ((value) =>
+    String(value || "").trim());
+
+const resolveResetPasswordToken =
+  getModuleExport(
+    PasswordResetApi,
+    "resolveResetPasswordToken"
+  ) ||
+  (() => "");
+
+const normalizeResetPasswordPayload =
+  getModuleExport(
+    PasswordResetApi,
+    "normalizeResetPasswordPayload"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const normalizeConfirmResetPasswordPayload =
+  getModuleExport(
+    PasswordResetApi,
+    "normalizeConfirmResetPasswordPayload"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const buildResetPasswordRequestBody =
+  getModuleExport(
+    PasswordResetApi,
+    "buildResetPasswordRequestBody"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const buildConfirmResetPasswordBody =
+  getModuleExport(
+    PasswordResetApi,
+    "buildConfirmResetPasswordBody"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const normalizeResetPasswordResponse =
+  getModuleExport(
+    PasswordResetApi,
+    "normalizeResetPasswordResponse"
+  ) ||
+  ((response = {}) =>
+    response);
+
+const normalizeConfirmResetPasswordResponse =
+  getModuleExport(
+    PasswordResetApi,
+    "normalizeConfirmResetPasswordResponse"
+  ) ||
+  ((response = {}) =>
+    response);
+
+async function requestPasswordResetPublic(payload = {}, options = {}) {
+  const executor =
+    requestPasswordResetExecutor ||
+    missingHandler("requestPasswordReset en ./password-reset.js");
+
+  return executor(
+    payload,
+    options
+  );
+}
+
+const resetPasswordRequestPublic =
+  requestPasswordResetPublic;
+
+const forgotPasswordPublic =
+  requestPasswordResetPublic;
+
+async function confirmResetPassword(payload = {}, options = {}) {
+  const executor =
+    confirmResetPasswordExecutor ||
+    missingHandler("confirmResetPassword en ./password-reset.js");
+
+  return executor(
+    payload,
+    options
+  );
+}
+
+async function resetPasswordConfirm(payload = {}, options = {}) {
+  return confirmResetPassword(
+    payload,
+    options
+  );
+}
+
+async function validateResetPasswordToken(payload = {}, options = {}) {
+  const executor =
+    validateResetPasswordTokenExecutor ||
+    missingHandler("validateResetPasswordToken en ./password-reset.js");
+
+  return executor(
+    payload,
+    options
+  );
+}
+
+async function validateResetToken(payload = {}, options = {}) {
+  return validateResetPasswordToken(
+    payload,
+    options
+  );
 }
 
 /* =========================================================
@@ -2038,121 +2553,6 @@ function createLoginErrorFromResult(
 }
 
 /* =========================================================
-   PASSWORD RESET RESOLUTION
-========================================================= */
-
-function getPasswordResetExport(...names) {
-  for (const name of names) {
-    const direct =
-      PasswordResetApi?.[name];
-
-    if (typeof direct === "function") {
-      return direct;
-    }
-
-    const fromDefault =
-      PasswordResetApi?.default?.[name];
-
-    if (typeof fromDefault === "function") {
-      return fromDefault;
-    }
-  }
-
-  return null;
-}
-
-function missingPasswordResetHandler(name = "password-reset") {
-  return async function missingPasswordResetHandlerExecutor() {
-    throw new Error(
-      `Auth: falta implementar ${name} en ./password-reset.js`
-    );
-  };
-}
-
-const requestPasswordResetExecutor =
-  getPasswordResetExport(
-    "requestPasswordReset",
-    "forgotPassword",
-    "resetPasswordRequest"
-  );
-
-const confirmResetPasswordExecutor =
-  getPasswordResetExport(
-    "confirmResetPassword",
-    "resetPasswordConfirm",
-    "confirmPasswordReset"
-  );
-
-const getRequestPasswordResetEndpoint =
-  getPasswordResetExport(
-    "getRequestPasswordResetEndpoint"
-  ) ||
-  (() =>
-    AUTH_ENDPOINTS?.forgotPassword ||
-    AUTH_ENDPOINTS?.resetPasswordRequest ||
-    AUTH_ENDPOINTS?.requestPasswordReset ||
-    null);
-
-const resolveResetPasswordIdentifier =
-  getPasswordResetExport(
-    "resolveResetPasswordIdentifier"
-  ) ||
-  ((value) =>
-    String(value || "").trim());
-
-const normalizeResetPasswordPayload =
-  getPasswordResetExport(
-    "normalizeResetPasswordPayload"
-  ) ||
-  ((payload = {}) =>
-    payload);
-
-const buildResetPasswordRequestBody =
-  getPasswordResetExport(
-    "buildResetPasswordRequestBody"
-  ) ||
-  ((payload = {}) =>
-    payload);
-
-const normalizeResetPasswordResponse =
-  getPasswordResetExport(
-    "normalizeResetPasswordResponse"
-  ) ||
-  ((response = {}) =>
-    response);
-
-async function requestPasswordResetPublic(payload = {}, options = {}) {
-  const executor =
-    requestPasswordResetExecutor ||
-    missingPasswordResetHandler("requestPasswordReset");
-
-  return executor(
-    payload,
-    options
-  );
-}
-
-const resetPasswordRequestPublic =
-  requestPasswordResetPublic;
-
-const forgotPasswordPublic =
-  requestPasswordResetPublic;
-
-async function confirmResetPassword(payload = {}, options = {}) {
-  const executor =
-    confirmResetPasswordExecutor ||
-    missingPasswordResetHandler("confirmResetPassword");
-
-  return executor(
-    payload,
-    options
-  );
-}
-
-const resetPasswordConfirm =
-  confirmResetPassword;
-
-/* =========================================================
    INTERNAL SESSION STATE
 ========================================================= */
 
@@ -2434,12 +2834,6 @@ function applyAcceptedLoginSession(normalized = {}) {
     preserveExistingUser:
       false,
 
-    /*
-      Silencioso:
-      - refuerza estado/caches
-      - NO reemite eventos canónicos
-      - evita duplicidades con coreLogin()
-    */
     silent:
       true,
 
@@ -2838,10 +3232,6 @@ function markTwoFactorPending(sessionState, normalized = {}) {
     AppCore?.syncUserUI?.();
   } catch {}
 
-  /*
-    No emitimos auth:login:2fa-required aquí.
-    coreLogin ya lo emite. Evitamos duplicidad canónica.
-  */
   emit(
     "app:ui:repair-request",
     {
@@ -2916,13 +3306,6 @@ function emitAcceptedLoginEvents({
         "login-success",
     });
 
-  /*
-    Evento público único de éxito de login.
-    No duplicamos:
-    - auth:session:applied
-    - app:user:change
-    - app:auth:ready
-  */
   emit(
     "auth:login:success",
     payload
@@ -2968,11 +3351,6 @@ function schedulePostLoginRepair({
           "auth-login-after-paint",
       });
 
-    /*
-      Reparación visual únicamente.
-      No reemitir auth:login:success.
-      No reemitir eventos de sesión.
-    */
     emit(
       "app:ui:repair-request",
       {
@@ -3122,9 +3500,6 @@ async function runRuntimeMetric(sessionState, type, executor, args = []) {
     true
   );
 
-  /*
-    Namespace runtime para no duplicar eventos canónicos de restore.js.
-  */
   emit(
     `auth:runtime:${type}:start`,
     {
@@ -3549,10 +3924,6 @@ export const Auth = (() => {
     session.loginPromise =
       (async () => {
         try {
-          /*
-            Limpieza silenciosa previa:
-            evita usuario/avatar/dashboard cacheado, sin emitir rejected.
-          */
           clearAuthState(
             "login_attempt_start",
             {
@@ -3570,10 +3941,6 @@ export const Auth = (() => {
                 {
                   ...safeObject(options),
 
-                  /*
-                    Evento público auth:login:success:
-                    sólo lo emite esta fachada.
-                  */
                   emitLoginSuccessEvent:
                     false,
                 }
@@ -3790,11 +4157,6 @@ export const Auth = (() => {
             }
           );
 
-          /*
-            No emitimos auth:login:error aquí.
-            coreLogin ya emite auth:login:error.
-            Evitamos duplicidad canónica.
-          */
           emit(
             "auth:runtime:login:error",
             {
@@ -3931,6 +4293,37 @@ export const Auth = (() => {
         null;
     }
 
+    const activationSnapshot =
+      safeCall(
+        getModuleExport(
+          ActivationApi,
+          "getActivationSnapshot",
+          "getActivationDebugSnapshot",
+          "getAccountActivationSnapshot"
+        ),
+        null
+      );
+
+    const twoFactorSnapshot =
+      safeCall(
+        getModuleExport(
+          TwoFactorApi,
+          "getTwoFactorSnapshot",
+          "getTwoFactorDebugSnapshot"
+        ),
+        null
+      );
+
+    const passwordResetSnapshot =
+      safeCall(
+        getModuleExport(
+          PasswordResetApi,
+          "getPasswordResetSnapshot",
+          "getPasswordResetDebugSnapshot"
+        ),
+        null
+      );
+
     return {
       version:
         AUTH_MODULE_VERSION,
@@ -4057,12 +4450,46 @@ export const Auth = (() => {
             : null,
       },
 
+      activation: {
+        hasActivateAccount:
+          isFunction(activateAccountExecutor),
+
+        hasActivateFirstUser:
+          isFunction(activateFirstUserExecutor),
+
+        hasValidateActivationToken:
+          isFunction(validateActivationTokenExecutor),
+
+        snapshot:
+          activationSnapshot || null,
+      },
+
+      twoFactor: {
+        hasVerifyTwoFactor:
+          isFunction(verifyTwoFactorExecutor),
+
+        hasRequestTwoFactorCode:
+          isFunction(requestTwoFactorCodeExecutor),
+
+        hasResendTwoFactorCode:
+          isFunction(resendTwoFactorCodeExecutor),
+
+        snapshot:
+          twoFactorSnapshot || null,
+      },
+
       passwordReset: {
         hasRequestPasswordReset:
           isFunction(requestPasswordResetExecutor),
 
         hasConfirmResetPassword:
           isFunction(confirmResetPasswordExecutor),
+
+        hasValidateResetPasswordToken:
+          isFunction(validateResetPasswordTokenExecutor),
+
+        snapshot:
+          passwordResetSnapshot || null,
       },
     };
   }
@@ -4090,6 +4517,39 @@ export const Auth = (() => {
     handleLoginFormSubmit:
       handleLoginFormSubmitPublic,
 
+    /* ACTIVATION */
+    activateAccount,
+    activate,
+    confirmActivation,
+    accountActivation,
+    activateFirstUser,
+    validateActivationToken,
+
+    getActivateAccountEndpoint,
+    getActivateFirstUserEndpoint,
+    resolveActivationToken,
+    normalizeActivationPayload,
+    buildActivationRequestBody,
+    normalizeActivationResponse,
+
+    /* 2FA / MFA */
+    verifyTwoFactor,
+    verify2FA,
+    login2fa,
+    twoFactorLogin,
+    twoFactorVerify,
+    verifyMfa,
+    mfaLogin,
+
+    requestTwoFactorCode,
+    resendTwoFactorCode,
+
+    getTwoFactorLoginEndpoint,
+    resolveTwoFactorTempToken,
+    normalizeTwoFactorPayload,
+    buildTwoFactorVerifyBody,
+    normalizeTwoFactorResponse,
+
     /* PASSWORD RESET */
     requestPasswordReset:
       requestPasswordResetPublic,
@@ -4103,11 +4563,24 @@ export const Auth = (() => {
     confirmResetPassword,
     resetPasswordConfirm,
 
+    validateResetPasswordToken,
+    validateResetToken,
+
     getRequestPasswordResetEndpoint,
+    getConfirmResetPasswordEndpoint,
+    getValidateResetTokenEndpoint,
+
     resolveResetPasswordIdentifier,
+    resolveResetPasswordToken,
+
     normalizeResetPasswordPayload,
+    normalizeConfirmResetPasswordPayload,
+
     buildResetPasswordRequestBody,
+    buildConfirmResetPasswordBody,
+
     normalizeResetPasswordResponse,
+    normalizeConfirmResetPasswordResponse,
 
     /* SESSION */
     fetchMe:

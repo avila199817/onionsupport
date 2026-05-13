@@ -3,7 +3,7 @@
    Archivo: src/services/http.interceptors.js
 
    ONION SUPPORT · HTTP INTERCEPTORS
-   FIFO STABLE · PRIORITY SAFE · FAIL OPEN · TIMEOUT SAFE
+   FIFO STABLE · PRIORITY SAFE · FAIL OPEN · TIMEOUT SAFE · 14/10
 
    Responsabilidades:
    - Registrar interceptores request / response / error.
@@ -15,10 +15,12 @@
    - Exponer snapshot debug.
    - Soportar funciones legacy.
    - Soportar entradas { handler }.
+   - Soportar idempotencia por id.
+   - Mantener runtime stats por interceptor.
 
    HARDENING EXTREMO:
-   - Register idempotente opcional por id.
-   - Disposer seguro.
+   - Register idempotente por id.
+   - Disposer seguro e idempotente.
    - Buckets autocurables.
    - Errores aislados si failOpen !== false.
    - Timeout por interceptor.
@@ -26,6 +28,15 @@
    - Snapshot estable durante ejecución.
    - Runtime stats por interceptor.
    - Sin mutar la cadena mientras se ejecuta.
+   - Sin exposición de tokens en errores/snapshots.
+   - Compatible con Http index actual:
+       createInterceptorsState()
+       useRequest()
+       useResponse()
+       useError()
+       runRequestInterceptors()
+       runResponseInterceptors()
+       runErrorInterceptors()
 ========================================================= */
 
 import {
@@ -36,8 +47,8 @@ import {
    CONSTANTS
 ========================================================= */
 
-const INTERCEPTORS_VERSION =
-  "11.0.0";
+export const INTERCEPTORS_VERSION =
+  "14.0.0";
 
 const INTERCEPTOR_TYPES =
   Object.freeze([
@@ -48,6 +59,15 @@ const INTERCEPTOR_TYPES =
 
 const DEFAULT_TIMEOUT_MS =
   0;
+
+const MAX_RECENT =
+  80;
+
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
+
+const TOKENISH_TEXT_RE =
+  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)[^&#\s]+/gi;
 
 let interceptorSeq =
   0;
@@ -64,10 +84,23 @@ function isObject(value) {
   );
 }
 
+function isAnyObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object"
+  );
+}
+
 function safeObject(value, fallback = {}) {
   return isObject(value)
     ? value
     : fallback;
+}
+
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 function safeText(value, fallback = "") {
@@ -128,10 +161,139 @@ function isValidType(type = "") {
   );
 }
 
+function normalizeType(type = "request") {
+  const clean =
+    safeText(type, "request");
+
+  return isValidType(clean)
+    ? clean
+    : "request";
+}
+
 function nextInterceptorId(type = "interceptor") {
   interceptorSeq += 1;
 
-  return `${type}_${interceptorSeq}`;
+  return `${normalizeType(type)}_${interceptorSeq}`;
+}
+
+function nextOrder() {
+  interceptorSeq += 1;
+
+  return interceptorSeq;
+}
+
+/* =========================================================
+   REDACTION / SNAPSHOT SAFETY
+========================================================= */
+
+function redactText(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    return raw.replace(
+      TOKENISH_TEXT_RE,
+      (match) => {
+        if (/^bearer\s+/i.test(match)) {
+          return "Bearer ***";
+        }
+
+        if (/^[?&#]/.test(match)) {
+          return match.replace(
+            /=.+$/g,
+            "=***"
+          );
+        }
+
+        return "***";
+      }
+    );
+  } catch {
+    return raw;
+  }
+}
+
+function sanitizeValue(value, depth = 0, keyHint = "") {
+  if (
+    SENSITIVE_KEY_RE.test(
+      safeText(keyHint, "")
+    )
+  ) {
+    return value
+      ? "***"
+      : null;
+  }
+
+  if (depth > 4) {
+    return "[depth-limit]";
+  }
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return redactText(value);
+  }
+
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "bigint") {
+    return String(value);
+  }
+
+  if (typeof value === "function") {
+    return "[function]";
+  }
+
+  if (value instanceof Error) {
+    return sanitizeError(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 40)
+      .map((item) =>
+        sanitizeValue(
+          item,
+          depth + 1,
+          keyHint
+        )
+      );
+  }
+
+  if (isAnyObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value).slice(0, 60)) {
+      output[key] =
+        SENSITIVE_KEY_RE.test(key)
+          ? item
+            ? "***"
+            : null
+          : sanitizeValue(
+              item,
+              depth + 1,
+              key
+            );
+    }
+
+    return output;
+  }
+
+  return redactText(String(value));
 }
 
 function sanitizeError(error = null) {
@@ -144,16 +306,24 @@ function sanitizeError(error = null) {
       safeText(error?.name, "Error"),
 
     message:
-      safeText(
-        error?.message || error,
-        "Interceptor error."
+      redactText(
+        safeText(
+          error?.message || error,
+          "Interceptor error."
+        )
       ),
 
     code:
       error?.code || null,
 
+    status:
+      error?.status || error?.statusCode || null,
+
     timeout:
       error?.timeout === true,
+
+    aborted:
+      error?.aborted === true,
 
     at:
       isoNow(),
@@ -178,6 +348,9 @@ function createMeta() {
     replaced:
       0,
 
+    duplicates:
+      0,
+
     ejected:
       0,
 
@@ -196,6 +369,9 @@ function createMeta() {
     skipped:
       0,
 
+    onceRemoved:
+      0,
+
     lastRunAt:
       "",
 
@@ -204,6 +380,9 @@ function createMeta() {
 
     lastError:
       null,
+
+    recent:
+      [],
   };
 }
 
@@ -249,8 +428,14 @@ function ensureState(interceptors) {
 
   for (const [key, value] of Object.entries(defaults)) {
     if (!(key in state.meta)) {
-      state.meta[key] = value;
+      state.meta[key] =
+        value;
     }
+  }
+
+  if (!Array.isArray(state.meta.recent)) {
+    state.meta.recent =
+      [];
   }
 
   return state;
@@ -274,6 +459,26 @@ function ensureBucket(interceptors, type) {
   }
 
   return state[cleanType];
+}
+
+function pushRecent(interceptors, event = {}) {
+  const state =
+    ensureState(interceptors);
+
+  const recent =
+    state.meta.recent;
+
+  recent.unshift({
+    ...sanitizeValue(event),
+    at:
+      isoNow(),
+  });
+
+  if (recent.length > MAX_RECENT) {
+    recent.splice(MAX_RECENT);
+  }
+
+  return recent.length;
 }
 
 function touchRun(interceptors, type = "") {
@@ -329,10 +534,20 @@ function recordError(interceptors, type, entry, error, timedOut = false) {
       Boolean(timedOut),
   };
 
+  pushRecent(
+    state,
+    {
+      event:
+        "error",
+
+      ...state.meta.lastError,
+    }
+  );
+
   return state.meta.lastError;
 }
 
-function recordSkipped(interceptors) {
+function recordSkipped(interceptors, type = "") {
   const state =
     ensureState(interceptors);
 
@@ -341,6 +556,16 @@ function recordSkipped(interceptors) {
       state.meta.skipped,
       0
     ) + 1;
+
+  pushRecent(
+    state,
+    {
+      event:
+        "skipped",
+
+      type,
+    }
+  );
 
   return true;
 }
@@ -351,9 +576,7 @@ function recordSkipped(interceptors) {
 
 function normalizeEntry(candidate, index = 0, type = "request") {
   const cleanType =
-    isValidType(type)
-      ? type
-      : "request";
+    normalizeType(type);
 
   if (isFn(candidate)) {
     return {
@@ -406,6 +629,12 @@ function normalizeEntry(candidate, index = 0, type = "request") {
       lastError:
         null,
 
+      tags:
+        [],
+
+      meta:
+        null,
+
       ref:
         candidate,
     };
@@ -440,12 +669,15 @@ function normalizeEntry(candidate, index = 0, type = "request") {
 
       timeoutMs:
         toNonNegativeInt(
-          candidate.timeoutMs,
+          candidate.timeoutMs ??
+            candidate.timeout,
           DEFAULT_TIMEOUT_MS
         ),
 
       failOpen:
-        candidate.failOpen !== false,
+        candidate.failClosed === true
+          ? false
+          : candidate.failOpen !== false,
 
       once:
         candidate.once === true,
@@ -492,6 +724,14 @@ function normalizeEntry(candidate, index = 0, type = "request") {
       lastError:
         candidate.lastError || null,
 
+      tags:
+        safeArray(candidate.tags),
+
+      meta:
+        isObject(candidate.meta)
+          ? sanitizeValue(candidate.meta)
+          : null,
+
       ref:
         candidate.ref || candidate,
     };
@@ -500,7 +740,7 @@ function normalizeEntry(candidate, index = 0, type = "request") {
   return null;
 }
 
-function normalizeRegistrationInput(handlerOrEntry, options = {}, type = "request") {
+function normalizeRegistrationInput(handlerOrEntry, options = {}) {
   if (isFn(handlerOrEntry)) {
     return {
       handler:
@@ -603,7 +843,7 @@ function persistEntryRuntime(bucket, entry, patch = {}) {
 }
 
 /* =========================================================
-   REMOVE
+   REMOVE / ENABLE
 ========================================================= */
 
 function removeInterceptor(bucket, ref) {
@@ -746,8 +986,7 @@ function registerInterceptor(interceptors, type, handlerOrEntry, options = {}) {
   const normalizedInput =
     normalizeRegistrationInput(
       handlerOrEntry,
-      options,
-      cleanType
+      options
     );
 
   const fn =
@@ -772,10 +1011,8 @@ function registerInterceptor(interceptors, type, handlerOrEntry, options = {}) {
     );
 
   const id =
-    safeText(
-      opts.id,
-      nextInterceptorId(cleanType)
-    );
+    safeText(opts.id, "") ||
+    nextInterceptorId(cleanType);
 
   const existingIndex =
     bucket.findIndex((entry) =>
@@ -787,36 +1024,30 @@ function registerInterceptor(interceptors, type, handlerOrEntry, options = {}) {
     opts.replace !== true &&
     opts.overwrite !== true
   ) {
-    const existing =
-      bucket[existingIndex];
+    state.meta.duplicates =
+      toNonNegativeInt(
+        state.meta.duplicates,
+        0
+      ) + 1;
 
-    let disposed =
-      false;
+    pushRecent(
+      state,
+      {
+        event:
+          "duplicate",
 
-    return () => {
-      if (disposed) {
-        return false;
+        type:
+          cleanType,
+
+        id,
       }
+    );
 
-      disposed =
-        true;
-
-      const removed =
-        removeInterceptor(
-          bucket,
-          existing?.id || id
-        );
-
-      if (removed) {
-        state.meta.ejected =
-          toNonNegativeInt(
-            state.meta.ejected,
-            0
-          ) + 1;
-      }
-
-      return removed;
-    };
+    /*
+      Idempotencia segura:
+      no elimina el interceptor original desde el disposer de un registro duplicado.
+    */
+    return noopDisposer;
   }
 
   if (
@@ -839,7 +1070,7 @@ function registerInterceptor(interceptors, type, handlerOrEntry, options = {}) {
   }
 
   const order =
-    ++interceptorSeq;
+    nextOrder();
 
   const entry = {
     id,
@@ -861,12 +1092,15 @@ function registerInterceptor(interceptors, type, handlerOrEntry, options = {}) {
 
     timeoutMs:
       toNonNegativeInt(
-        opts.timeoutMs,
+        opts.timeoutMs ??
+          opts.timeout,
         DEFAULT_TIMEOUT_MS
       ),
 
     failOpen:
-      opts.failOpen !== false,
+      opts.failClosed === true
+        ? false
+        : opts.failOpen !== false,
 
     once:
       opts.once === true,
@@ -897,6 +1131,14 @@ function registerInterceptor(interceptors, type, handlerOrEntry, options = {}) {
     lastError:
       null,
 
+    tags:
+      safeArray(opts.tags),
+
+    meta:
+      isObject(opts.meta)
+        ? sanitizeValue(opts.meta)
+        : null,
+
     ref:
       fn,
   };
@@ -908,6 +1150,29 @@ function registerInterceptor(interceptors, type, handlerOrEntry, options = {}) {
       state.meta.registered,
       0
     ) + 1;
+
+  pushRecent(
+    state,
+    {
+      event:
+        existingIndex >= 0 ? "replaced" : "registered",
+
+      type:
+        cleanType,
+
+      id:
+        entry.id,
+
+      name:
+        entry.name,
+
+      priority:
+        entry.priority,
+
+      once:
+        entry.once,
+    }
+  );
 
   let disposed =
     false;
@@ -932,6 +1197,20 @@ function registerInterceptor(interceptors, type, handlerOrEntry, options = {}) {
           state.meta.ejected,
           0
         ) + 1;
+
+      pushRecent(
+        state,
+        {
+          event:
+            "ejected",
+
+          type:
+            cleanType,
+
+          id:
+            entry.id,
+        }
+      );
     }
 
     return removed;
@@ -991,6 +1270,20 @@ export function ejectInterceptor(interceptors, type, ref) {
         state.meta.ejected,
         0
       ) + 1;
+
+    pushRecent(
+      state,
+      {
+        event:
+          "ejected",
+
+        type:
+          normalizeType(type),
+
+        ref:
+          safeText(ref, "[handler]"),
+      }
+    );
   }
 
   return removed;
@@ -1096,14 +1389,62 @@ function removeOnceIfNeeded(state, type, entry) {
   }
 
   try {
-    return ejectInterceptor(
-      state,
-      type,
-      entry.id
-    );
+    const removed =
+      ejectInterceptor(
+        state,
+        type,
+        entry.id
+      );
+
+    if (removed) {
+      state.meta.onceRemoved =
+        toNonNegativeInt(
+          state.meta.onceRemoved,
+          0
+        ) + 1;
+    }
+
+    return removed;
   } catch {
     return false;
   }
+}
+
+function buildContext(type, entry, extra = {}) {
+  return {
+    type,
+
+    interceptor: {
+      id:
+        entry.id,
+
+      name:
+        entry.name,
+
+      priority:
+        entry.priority,
+
+      once:
+        entry.once,
+
+      timeoutMs:
+        entry.timeoutMs,
+
+      failOpen:
+        entry.failOpen,
+
+      order:
+        entry.order,
+
+      tags:
+        entry.tags || [],
+
+      meta:
+        entry.meta || null,
+    },
+
+    ...extra,
+  };
 }
 
 /* =========================================================
@@ -1130,7 +1471,11 @@ export async function runRequestInterceptors(interceptors, requestConfig) {
     );
 
   if (!snapshot.length) {
-    recordSkipped(state);
+    recordSkipped(
+      state,
+      "request"
+    );
+
     return nextConfig;
   }
 
@@ -1149,13 +1494,10 @@ export async function runRequestInterceptors(interceptors, requestConfig) {
           Promise.resolve(
             entry.handler(
               nextConfig,
-              {
-                type:
-                  "request",
-
-                interceptor:
-                  entry,
-              }
+              buildContext(
+                "request",
+                entry
+              )
             )
           ),
           entry.timeoutMs,
@@ -1230,7 +1572,11 @@ export async function runResponseInterceptors(interceptors, response, requestCon
     );
 
   if (!snapshot.length) {
-    recordSkipped(state);
+    recordSkipped(
+      state,
+      "response"
+    );
+
     return nextResponse;
   }
 
@@ -1250,13 +1596,10 @@ export async function runResponseInterceptors(interceptors, response, requestCon
             entry.handler(
               nextResponse,
               requestConfig,
-              {
-                type:
-                  "response",
-
-                interceptor:
-                  entry,
-              }
+              buildContext(
+                "response",
+                entry
+              )
             )
           ),
           entry.timeoutMs,
@@ -1328,7 +1671,11 @@ export async function runErrorInterceptors(interceptors, error, requestConfig) {
     );
 
   if (!snapshot.length) {
-    recordSkipped(state);
+    recordSkipped(
+      state,
+      "error"
+    );
+
     return nextError;
   }
 
@@ -1348,13 +1695,10 @@ export async function runErrorInterceptors(interceptors, error, requestConfig) {
             entry.handler(
               nextError,
               requestConfig,
-              {
-                type:
-                  "error",
-
-                interceptor:
-                  entry,
-              }
+              buildContext(
+                "error",
+                entry
+              )
             )
           ),
           entry.timeoutMs,
@@ -1441,6 +1785,19 @@ export function clearInterceptors(interceptors, type = "") {
         0
       ) + count;
 
+    pushRecent(
+      state,
+      {
+        event:
+          "cleared",
+
+        type:
+          cleanType,
+
+        count,
+      }
+    );
+
     return count;
   }
 
@@ -1512,6 +1869,9 @@ export function resetInterceptorsRuntime(interceptors) {
   state.meta.lastError =
     null;
 
+  state.meta.recent =
+    [];
+
   return true;
 }
 
@@ -1575,7 +1935,15 @@ function serializeBucket(state, type) {
         normalized?.lastDurationMs || 0,
 
       lastError:
-        normalized?.lastError || null,
+        normalized?.lastError
+          ? sanitizeError(normalized.lastError)
+          : null,
+
+      tags:
+        normalized?.tags || [],
+
+      meta:
+        normalized?.meta || null,
     };
   });
 }
@@ -1639,7 +2007,22 @@ export function getInterceptorsSnapshot(interceptors) {
 
     meta: {
       ...state.meta,
+
+      lastError:
+        state.meta.lastError
+          ? sanitizeError(state.meta.lastError)
+          : null,
+
+      recent:
+        safeArray(state.meta.recent)
+          .slice(0, MAX_RECENT)
+          .map((item) =>
+            sanitizeValue(item)
+          ),
     },
+
+    at:
+      isoNow(),
   };
 }
 
@@ -1648,6 +2031,8 @@ export function getInterceptorsSnapshot(interceptors) {
 ========================================================= */
 
 export default {
+  INTERCEPTORS_VERSION,
+
   createInterceptorsState,
 
   useRequest,

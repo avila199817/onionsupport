@@ -2,15 +2,20 @@
    Onion SPA - Home Index
    Archivo: src/views/home/index.js
 
-   HOME INDEX · ROUTE SAFE · USERNAME PUBLIC PATH PATCH · 10/10
+   HOME INDEX · ROUTE SAFE · USERNAME PUBLIC PATH PATCH · FINAL 12/10
 
-   FIX CRÍTICO:
-   - /@usuario/ debe considerarse HOME
-   - canonicalPath "/" debe ganar sobre publicPath "/@usuario/"
-   - no bloquear HomeView.init si Router ya resolvió routeKey/viewKey home
-   - evita quedarse en placeholder "Preparando contenido..."
-   - wrapper limpio hacia homeView.js
+   Fix crítico:
+   - /@usuario/ debe considerarse HOME.
+   - canonicalPath "/" debe ganar sobre publicPath "/@usuario/".
+   - routeKey/viewKey/name home debe permitir Home aunque publicPath sea username.
+   - No bloquear HomeView.init si Router ya resolvió Home.
+   - Evita quedarse en placeholder "Preparando contenido...".
+   - Wrapper limpio hacia homeView.js.
+   - Sin CSS inline.
+   - Sin DOM mutation innecesaria.
 ========================================================= */
+
+import { AppCore } from "../../core/index.js";
 
 import HomeViewDefault, {
   HomeView as HomeViewNamed,
@@ -20,6 +25,8 @@ import HomeViewDefault, {
    CONSTANTS
 ========================================================= */
 
+export const HOME_INDEX_VERSION = "12.0.0";
+
 const SOURCE = "views:home:index";
 const HOME_PATH = "/";
 
@@ -28,23 +35,75 @@ const HomeView =
   HomeViewDefault ||
   null;
 
+const HOME_VIEW_KEYS = new Set([
+  "home",
+  "homeview",
+  "dashboard",
+  "inicio",
+]);
+
+const KNOWN_ROOT_ROUTE_SEGMENTS = new Set([
+  "login",
+  "logout",
+  "2fa",
+  "otp",
+  "mfa",
+
+  "home",
+  "dashboard",
+  "inicio",
+
+  "incidencias",
+  "tickets",
+  "ticket",
+  "incidents",
+  "incident",
+  "issues",
+  "issue",
+
+  "facturas",
+  "invoices",
+  "invoice",
+  "bills",
+  "bill",
+  "billing",
+
+  "usuarios",
+  "users",
+  "user",
+  "members",
+  "member",
+
+  "clientes",
+  "clients",
+  "client",
+  "customers",
+  "customer",
+
+  "cuenta",
+  "account",
+  "profile",
+
+  "ajustes",
+  "settings",
+
+  "activate-account",
+  "reset-password",
+  "forgot-password",
+  "recover-password",
+  "password-reset",
+]);
+
 /* =========================================================
    SAFE HELPERS
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function isFunction(value) {
@@ -52,10 +111,7 @@ function isFunction(value) {
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+  if (value === null || value === undefined) {
     return fallback;
   }
 
@@ -68,44 +124,28 @@ function safeText(value, fallback = "") {
 }
 
 function safeObject(value, fallback = {}) {
-  return isObject(value)
-    ? value
-    : fallback;
+  return isObject(value) ? value : fallback;
 }
 
 function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return Array.isArray(value) ? value : [];
 }
 
 function first(...values) {
   for (const value of values) {
-    if (
-      value === null ||
-      value === undefined
-    ) {
+    if (value === null || value === undefined) {
       continue;
     }
 
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
+    if (typeof value === "string" && value.trim() === "") {
       continue;
     }
 
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
+    if (Array.isArray(value) && value.length === 0) {
       continue;
     }
 
-    if (
-      isObject(value) &&
-      Object.keys(value).length === 0
-    ) {
+    if (isObject(value) && Object.keys(value).length === 0) {
       continue;
     }
 
@@ -135,28 +175,41 @@ function normalizeKey(value = "") {
    LOG
 ========================================================= */
 
+function isDebugEnabled() {
+  try {
+    return Boolean(
+      AppCore?.config?.debug ||
+        AppCore?.state?.debug ||
+        (isBrowser() && window.__ONION_DEBUG_HOME__)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function safeWarn(...args) {
   try {
-    console.warn(
-      "[HomeIndex]",
-      ...args
-    );
+    AppCore?.utils?.warn?.("[HomeIndex]", ...args);
+    return;
+  } catch {}
+
+  try {
+    console.warn("[HomeIndex]", ...args);
   } catch {}
 }
 
 function safeLog(...args) {
-  try {
-    const debug =
-      isBrowser()
-        ? Boolean(window.__ONION_DEBUG_HOME__)
-        : false;
+  if (!isDebugEnabled()) {
+    return;
+  }
 
-    if (debug) {
-      console.log(
-        "[HomeIndex]",
-        ...args
-      );
-    }
+  try {
+    AppCore?.utils?.log?.("[HomeIndex]", ...args);
+    return;
+  } catch {}
+
+  try {
+    console.log("[HomeIndex]", ...args);
   } catch {}
 }
 
@@ -166,10 +219,7 @@ function safeLog(...args) {
 
 function getBaseOrigin() {
   try {
-    if (
-      isBrowser() &&
-      window.location?.origin
-    ) {
+    if (isBrowser() && window.location?.origin) {
       return window.location.origin;
     }
   } catch {}
@@ -197,6 +247,30 @@ function normalizePathnameOnly(pathname = HOME_PATH) {
   return value;
 }
 
+function normalizeSearch(search = "") {
+  const value = safeText(search, "");
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value = safeText(hash, "");
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
+}
+
 function splitPath(value = HOME_PATH) {
   const raw = safeText(value, HOME_PATH);
 
@@ -220,18 +294,15 @@ function splitPath(value = HOME_PATH) {
 
   return {
     pathname: normalizePathnameOnly(pathname),
-    search,
-    hash,
+    search: normalizeSearch(search),
+    hash: normalizeHash(hash),
   };
 }
 
 function isHashRouterPath(value = "") {
   const raw = safeText(value, "");
 
-  return (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  );
+  return raw.startsWith("#/") || raw.startsWith("#!");
 }
 
 function normalizeHashRouterPath(value = "") {
@@ -256,25 +327,15 @@ function normalizeFullPath(path = HOME_PATH) {
   }
 
   if (isHashRouterPath(raw)) {
-    return normalizeFullPath(
-      normalizeHashRouterPath(raw)
-    );
+    return normalizeFullPath(normalizeHashRouterPath(raw));
   }
 
   try {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed = new URL(
-        raw,
-        getBaseOrigin()
-      );
+      const parsed = new URL(raw, getBaseOrigin());
 
-      if (
-        parsed.hash &&
-        isHashRouterPath(parsed.hash)
-      ) {
-        return normalizeFullPath(
-          normalizeHashRouterPath(parsed.hash)
-        );
+      if (parsed.hash && isHashRouterPath(parsed.hash)) {
+        return normalizeFullPath(normalizeHashRouterPath(parsed.hash));
       }
 
       return normalizeFullPath(
@@ -283,60 +344,187 @@ function normalizeFullPath(path = HOME_PATH) {
     }
   } catch {}
 
-  const {
-    pathname,
-    search,
-    hash,
-  } = splitPath(raw);
+  const { pathname, search, hash } = splitPath(raw);
 
   return `${pathname}${search || ""}${hash || ""}`;
 }
 
 function stripSearchAndHash(path = HOME_PATH) {
-  return (
-    normalizeFullPath(path)
-      .split("?")[0]
-      .split("#")[0] ||
-    HOME_PATH
+  return normalizeFullPath(path).split("?")[0].split("#")[0] || HOME_PATH;
+}
+
+function normalizeUsernameSegment(value = "") {
+  return safeText(value, "")
+    .replace(/^@+/, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9._-]/g, "")
+    .trim();
+}
+
+function getCurrentUser() {
+  return safeObject(
+    first(
+      AppCore?.state?.user,
+      AppCore?.state?.currentUser,
+      AppCore?.state?.profile,
+      AppCore?.state?.session?.user,
+      AppCore?.session?.user,
+      AppCore?.Auth?.user,
+      AppCore?.auth?.user,
+      {}
+    )
   );
 }
 
-function isUsernameSegment(segment = "") {
-  return /^@[A-Za-z0-9._-]{1,80}$/.test(
-    safeText(segment, "")
-  );
-}
+function getKnownUsernameCandidates() {
+  const state = safeObject(AppCore?.state);
+  const user = getCurrentUser();
 
-function stripUsernamePrefix(path = HOME_PATH) {
-  const cleanPath = stripSearchAndHash(path);
-  const segments = cleanPath
-    .split("/")
+  return [
+    state.currentResolvedUsername,
+    state.resolvedUsername,
+    state.username,
+    state.userName,
+    state.user_name,
+    state.publicUsername,
+    state.slug,
+
+    user.username,
+    user.userName,
+    user.user_name,
+    user.slug,
+    user.alias,
+    user.login,
+    user.email,
+
+    user.raw?.username,
+    user.raw?.userName,
+    user.raw?.user_name,
+    user.raw?.slug,
+    user.raw?.alias,
+    user.raw?.login,
+    user.raw?.email,
+
+    isBrowser() ? window.__ONION_USERNAME__ : "",
+    isBrowser() ? window.__ONION_PUBLIC_USERNAME__ : "",
+    isBrowser() ? window.__ONION_RESOLVED_USERNAME__ : "",
+  ]
+    .map(normalizeUsernameSegment)
     .filter(Boolean);
+}
 
-  if (
-    segments.length > 0 &&
-    isUsernameSegment(segments[0])
-  ) {
-    const rest = segments
-      .slice(1)
-      .join("/");
+function getRawAppRouteValue() {
+  try {
+    return safeText(
+      first(
+        AppCore?.state?.route,
+        AppCore?.state?.canonicalPath,
+        AppCore?.state?.currentPath,
+        ""
+      ),
+      ""
+    );
+  } catch {
+    return "";
+  }
+}
 
-    return rest
-      ? normalizePathnameOnly(`/${rest}`)
-      : HOME_PATH;
+function isRawAppRouteHome() {
+  const raw = getRawAppRouteValue();
+
+  if (!raw) {
+    return false;
   }
 
-  return normalizePathnameOnly(cleanPath);
+  return stripSearchAndHash(raw) === HOME_PATH;
 }
 
-function canonicalizeHomePath(path = HOME_PATH) {
+function isUsernameSegment(segment = "", options = {}) {
+  const raw = safeText(segment, "");
+  const opts = safeObject(options);
+
+  if (!raw) {
+    return false;
+  }
+
+  if (/^@[A-Za-z0-9._-]{1,80}$/.test(raw)) {
+    return true;
+  }
+
+  const clean = normalizeUsernameSegment(raw);
+
+  if (!clean) {
+    return false;
+  }
+
+  if (KNOWN_ROOT_ROUTE_SEGMENTS.has(clean)) {
+    return false;
+  }
+
+  const knownUsernames = getKnownUsernameCandidates();
+
+  if (knownUsernames.some((candidate) => candidate === clean)) {
+    return true;
+  }
+
+  if (opts.allowUnknownSlug === true && /^[a-z0-9._-]{3,80}$/i.test(clean)) {
+    return true;
+  }
+
+  return false;
+}
+
+function stripUsernamePrefix(path = HOME_PATH, options = {}) {
+  const opts = safeObject(options);
+  const full = normalizeFullPath(path || HOME_PATH);
+  const { pathname, search, hash } = splitPath(full);
+
+  const segments = pathname.split("/").filter(Boolean);
+
+  if (!segments.length) {
+    return `${HOME_PATH}${search}${hash}`;
+  }
+
+  const shouldStrip = isUsernameSegment(segments[0], {
+    allowUnknownSlug: opts.allowUnknownSlug === true,
+  });
+
+  if (!shouldStrip) {
+    return `${pathname}${search}${hash}`;
+  }
+
+  const rest = segments.slice(1).join("/");
+  const cleanPathname = rest ? normalizePathnameOnly(`/${rest}`) : HOME_PATH;
+
+  return `${cleanPathname}${search}${hash}`;
+}
+
+function canonicalizeHomePath(path = HOME_PATH, options = {}) {
   return stripUsernamePrefix(
-    normalizeFullPath(path || HOME_PATH)
+    normalizeFullPath(path || HOME_PATH),
+    options
   );
 }
 
-function isHomePath(path = "") {
-  return canonicalizeHomePath(path || HOME_PATH) === HOME_PATH;
+function isHomePath(path = "", options = {}) {
+  return stripSearchAndHash(
+    canonicalizeHomePath(path || HOME_PATH, options)
+  ) === HOME_PATH;
+}
+
+function isSinglePublicUsernameRoot(path = "", options = {}) {
+  const clean = stripSearchAndHash(normalizeFullPath(path || HOME_PATH));
+  const segments = clean.split("/").filter(Boolean);
+
+  if (segments.length !== 1) {
+    return false;
+  }
+
+  return isUsernameSegment(segments[0], {
+    allowUnknownSlug: options.allowUnknownSlug === true,
+  });
 }
 
 function getBrowserPath() {
@@ -345,26 +533,117 @@ function getBrowserPath() {
   }
 
   try {
-    const pathname =
-      window.location.pathname || HOME_PATH;
+    const pathname = window.location.pathname || HOME_PATH;
+    const search = window.location.search || "";
+    const hash = window.location.hash || "";
 
-    const search =
-      window.location.search || "";
-
-    const hash =
-      window.location.hash || "";
-
-    if (
-      hash &&
-      isHashRouterPath(hash)
-    ) {
-      return normalizeFullPath(
-        normalizeHashRouterPath(hash)
-      );
+    if (hash && isHashRouterPath(hash)) {
+      return normalizeFullPath(normalizeHashRouterPath(hash));
     }
 
-    return normalizeFullPath(
-      `${pathname}${search}${hash}`
+    return normalizeFullPath(`${pathname}${search}${hash}`);
+  } catch {
+    return "";
+  }
+}
+
+/* =========================================================
+   ROUTER / APPCORE SIGNALS
+========================================================= */
+
+function getRouterCandidate() {
+  try {
+    if (isFunction(AppCore?.modules?.get)) {
+      return (
+        AppCore.modules.get("router") ||
+        AppCore.modules.get("Router") ||
+        null
+      );
+    }
+  } catch {}
+
+  try {
+    return (
+      AppCore?.router ||
+      AppCore?.Router ||
+      AppCore?.modules?.router ||
+      AppCore?.modules?.Router ||
+      (isBrowser() ? window.Router : null) ||
+      (isBrowser() ? window.OnionRouter : null) ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function getAppCanonicalPath() {
+  const router = getRouterCandidate();
+
+  try {
+    return safeText(
+      first(
+        router?.getCurrentCanonicalPath?.(),
+        AppCore?.state?.route,
+        AppCore?.state?.canonicalPath,
+        AppCore?.state?.currentPath,
+        ""
+      ),
+      ""
+    );
+  } catch {
+    return safeText(
+      first(
+        AppCore?.state?.route,
+        AppCore?.state?.canonicalPath,
+        AppCore?.state?.currentPath,
+        ""
+      ),
+      ""
+    );
+  }
+}
+
+function getAppPublicPath() {
+  const router = getRouterCandidate();
+
+  try {
+    return safeText(
+      first(
+        router?.getCurrentPublicPath?.(),
+        router?.getCurrentPath?.(),
+        AppCore?.state?.publicPath,
+        AppCore?.state?.routePublicPath,
+        ""
+      ),
+      ""
+    );
+  } catch {
+    return safeText(
+      first(
+        AppCore?.state?.publicPath,
+        AppCore?.state?.routePublicPath,
+        ""
+      ),
+      ""
+    );
+  }
+}
+
+function getAppViewKey() {
+  try {
+    return safeText(
+      first(
+        AppCore?.state?.viewKey,
+        AppCore?.state?.routeKey,
+        AppCore?.state?.routeName,
+        AppCore?.state?.currentView,
+        AppCore?.state?.currentRoute?.viewKey,
+        AppCore?.state?.currentRoute?.routeKey,
+        AppCore?.state?.routeMeta?.viewKey,
+        ""
+      ),
+      ""
     );
   } catch {
     return "";
@@ -375,34 +654,32 @@ function getBrowserPath() {
    SIGNALS
 ========================================================= */
 
-function pushPathSignal(
-  signals,
-  label,
-  value,
-  strength = "explicit"
-) {
+function pushPathSignal(signals, label, value, strength = "explicit", options = {}) {
   const raw = safeText(value, "");
 
   if (!raw) {
     return;
   }
 
+  const opts = safeObject(options);
+  const canonical = canonicalizeHomePath(raw, {
+    allowUnknownSlug: opts.allowUnknownSlug === true,
+  });
+
   signals.push({
     type: "path",
     label,
     value: raw,
-    canonical: canonicalizeHomePath(raw),
-    isHome: isHomePath(raw),
+    canonical,
+    clean: stripSearchAndHash(canonical),
+    isHome: stripSearchAndHash(canonical) === HOME_PATH,
+    isPublicPath: label.endsWith(".publicPath") || label === "AppCore.state.publicPath",
+    isBrowser: strength === "browser",
     strength,
   });
 }
 
-function pushViewSignal(
-  signals,
-  label,
-  value,
-  strength = "explicit"
-) {
+function pushViewSignal(signals, label, value, strength = "explicit") {
   const raw = safeText(value, "");
 
   if (!raw) {
@@ -415,30 +692,37 @@ function pushViewSignal(
     type: "view",
     label,
     value: key,
-    isHome:
-      key === "home" ||
-      key === "homeview" ||
-      key === "dashboard",
+    isHome: HOME_VIEW_KEYS.has(key),
     strength,
   });
 }
 
-function collectObjectSignals(
-  signals,
-  value,
-  label = "arg",
-  strength = "explicit"
-) {
+function collectObjectSignals(signals, value, label = "arg", strength = "explicit", depth = 0, seen = null) {
+  if (depth > 5) {
+    return;
+  }
+
   const object = safeObject(value, null);
 
   if (!object) {
     return;
   }
 
+  const weak = seen || new WeakSet();
+
+  try {
+    if (weak.has(object)) {
+      return;
+    }
+
+    weak.add(object);
+  } catch {}
+
   pushViewSignal(signals, `${label}.viewKey`, object.viewKey, strength);
   pushViewSignal(signals, `${label}.viewName`, object.viewName, strength);
   pushViewSignal(signals, `${label}.name`, object.name, strength);
   pushViewSignal(signals, `${label}.routeKey`, object.routeKey, strength);
+  pushViewSignal(signals, `${label}.key`, object.key, strength);
 
   pushPathSignal(signals, `${label}.path`, object.path, strength);
   pushPathSignal(signals, `${label}.href`, object.href, strength);
@@ -454,6 +738,7 @@ function collectObjectSignals(
     pushViewSignal(signals, `${label}.route.viewName`, route.viewName, strength);
     pushViewSignal(signals, `${label}.route.name`, route.name, strength);
     pushViewSignal(signals, `${label}.route.routeKey`, route.routeKey, strength);
+    pushViewSignal(signals, `${label}.route.key`, route.key, strength);
 
     pushPathSignal(signals, `${label}.route.path`, route.path, strength);
     pushPathSignal(signals, `${label}.route.href`, route.href, strength);
@@ -462,82 +747,129 @@ function collectObjectSignals(
     pushPathSignal(signals, `${label}.route.publicPath`, route.publicPath, strength);
   }
 
-  collectObjectSignals(
-    signals,
-    object.options,
-    `${label}.options`,
-    strength
-  );
-
-  collectObjectSignals(
-    signals,
-    object.payload,
-    `${label}.payload`,
-    strength
-  );
-
-  collectObjectSignals(
-    signals,
-    object.detail,
-    `${label}.detail`,
-    strength
-  );
+  collectObjectSignals(signals, object.options, `${label}.options`, strength, depth + 1, weak);
+  collectObjectSignals(signals, object.payload, `${label}.payload`, strength, depth + 1, weak);
+  collectObjectSignals(signals, object.detail, `${label}.detail`, strength, depth + 1, weak);
 }
 
 function collectSignals(args = []) {
   const signals = [];
 
   safeArray(args).forEach((arg, index) => {
-    collectObjectSignals(
-      signals,
-      arg,
-      `args[${index}]`,
-      "explicit"
-    );
+    collectObjectSignals(signals, arg, `args[${index}]`, "explicit");
   });
+
+  const appViewKey = getAppViewKey();
+
+  if (appViewKey) {
+    pushViewSignal(signals, "AppCore.state.viewKey", appViewKey, "ambient");
+  }
+
+  const appCanonical = getAppCanonicalPath();
+
+  if (appCanonical) {
+    pushPathSignal(signals, "AppCore.state.canonicalPath", appCanonical, "ambient", {
+      allowUnknownSlug: false,
+    });
+  }
+
+  const appPublic = getAppPublicPath();
+
+  if (appPublic) {
+    pushPathSignal(signals, "AppCore.state.publicPath", appPublic, "ambient", {
+      allowUnknownSlug: isRawAppRouteHome(),
+    });
+  }
 
   const browserPath = getBrowserPath();
 
   if (browserPath) {
-    pushPathSignal(
-      signals,
-      "window.location",
-      browserPath,
-      "browser"
-    );
+    pushPathSignal(signals, "window.location", browserPath, "browser", {
+      allowUnknownSlug: isRawAppRouteHome(),
+    });
   }
 
   return signals;
 }
 
 function hasPositiveHomeSignal(signals = []) {
+  return signals.some((signal) => signal.isHome === true);
+}
+
+function hasExplicitHomeSignal(signals = []) {
   return signals.some(
-    (signal) => signal.isHome === true
+    (signal) =>
+      signal.strength === "explicit" &&
+      signal.isHome === true
   );
 }
 
-function getBrowserBlockingSignal(signals = []) {
-  return signals.find(
+function hasAmbientHomeSignal(signals = []) {
+  return signals.some(
     (signal) =>
-      signal.strength === "browser" &&
-      signal.type === "path" &&
-      signal.isHome === false
-  ) || null;
+      signal.strength === "ambient" &&
+      signal.isHome === true
+  );
+}
+
+function isIgnorableUsernameRootSignal(signal = {}, signals = []) {
+  if (!signal || signal.isHome !== false) {
+    return false;
+  }
+
+  if (!isSinglePublicUsernameRoot(signal.value || "", {
+    allowUnknownSlug: isRawAppRouteHome(),
+  })) {
+    return false;
+  }
+
+  return hasPositiveHomeSignal(signals);
+}
+
+function isIgnorablePublicPathSignal(signal = {}, signals = []) {
+  if (!signal || signal.isHome !== false) {
+    return false;
+  }
+
+  if (!signal.isPublicPath) {
+    return false;
+  }
+
+  return hasExplicitHomeSignal(signals) || hasAmbientHomeSignal(signals);
+}
+
+function getBrowserBlockingSignal(signals = []) {
+  return (
+    signals.find((signal) => {
+      return (
+        signal.strength === "browser" &&
+        signal.type === "path" &&
+        signal.isHome === false &&
+        !isIgnorableUsernameRootSignal(signal, signals) &&
+        !isIgnorablePublicPathSignal(signal, signals)
+      );
+    }) || null
+  );
 }
 
 function getExplicitBlockingSignal(signals = []) {
-  return signals.find(
-    (signal) =>
-      signal.strength === "explicit" &&
-      signal.type === "path" &&
-      signal.isHome === false &&
-      signal.label !== "args[0].publicPath" &&
-      !signal.label.endsWith(".publicPath")
-  ) || null;
+  return (
+    signals.find((signal) => {
+      return (
+        signal.strength === "explicit" &&
+        signal.type === "path" &&
+        signal.isHome === false &&
+        !isIgnorableUsernameRootSignal(signal, signals) &&
+        !isIgnorablePublicPathSignal(signal, signals) &&
+        !signal.isPublicPath
+      );
+    }) || null
+  );
 }
 
 function getHomeRouteDebug(args = []) {
   const signals = collectSignals(args);
+
   const browserBlock = getBrowserBlockingSignal(signals);
   const explicitBlock = getExplicitBlockingSignal(signals);
 
@@ -546,20 +878,38 @@ function getHomeRouteDebug(args = []) {
       !explicitBlock &&
       (
         hasPositiveHomeSignal(signals) ||
-        isHomePath(getBrowserPath() || HOME_PATH)
+        isHomePath(getBrowserPath() || HOME_PATH, {
+          allowUnknownSlug: isRawAppRouteHome(),
+        })
       )
   );
 
   return {
     source: SOURCE,
+    version: HOME_INDEX_VERSION,
     allowed,
+
     browserPath: getBrowserPath(),
-    browserCanonicalPath: canonicalizeHomePath(getBrowserPath() || HOME_PATH),
+    browserCanonicalPath: canonicalizeHomePath(getBrowserPath() || HOME_PATH, {
+      allowUnknownSlug: isRawAppRouteHome(),
+    }),
+
+    appCanonicalPath: getAppCanonicalPath(),
+    appPublicPath: getAppPublicPath(),
+    appViewKey: getAppViewKey(),
+
     signals,
     browserBlock,
     explicitBlock,
+
     hasPositiveHomeSignal: hasPositiveHomeSignal(signals),
+    hasExplicitHomeSignal: hasExplicitHomeSignal(signals),
+    hasAmbientHomeSignal: hasAmbientHomeSignal(signals),
   };
+}
+
+function canRenderHomeNow(...args) {
+  return getHomeRouteDebug(args).allowed;
 }
 
 function shouldAllowHome(method = "unknown", args = []) {
@@ -570,10 +920,7 @@ function shouldAllowHome(method = "unknown", args = []) {
     return true;
   }
 
-  safeWarn(
-    `HomeView.${method} bloqueado: la ruta actual no es Home.`,
-    debug
-  );
+  safeWarn(`HomeView.${method} bloqueado: la ruta activa no es Home.`, debug);
 
   return false;
 }
@@ -634,12 +981,14 @@ function scheduleRender(...args) {
 }
 
 async function reload(options = {}) {
+  const opts = safeObject(options);
+
   if (isFunction(HomeView?.reload)) {
-    return HomeView.reload(options);
+    return HomeView.reload(opts);
   }
 
   if (isFunction(HomeView?.refresh)) {
-    return HomeView.refresh(options);
+    return HomeView.refresh(opts);
   }
 
   return init({
@@ -648,8 +997,8 @@ async function reload(options = {}) {
       viewKey: "home",
     },
     canonicalPath: HOME_PATH,
-    publicPath: HOME_PATH,
-    options,
+    publicPath: getAppPublicPath() || HOME_PATH,
+    options: opts,
   });
 }
 
@@ -700,6 +1049,7 @@ function getSnapshot() {
 
   return {
     source: SOURCE,
+    version: HOME_INDEX_VERSION,
     homeViewAvailable: Boolean(HomeView),
     routeGuard: getHomeRouteDebug([]),
   };
@@ -725,6 +1075,42 @@ function getTickets() {
   return getItems();
 }
 
+function getInvoices() {
+  if (isFunction(HomeView?.getInvoices)) {
+    return HomeView.getInvoices();
+  }
+
+  if (isFunction(HomeView?.getFacturas)) {
+    return HomeView.getFacturas();
+  }
+
+  return [];
+}
+
+function getUsers() {
+  if (isFunction(HomeView?.getUsers)) {
+    return HomeView.getUsers();
+  }
+
+  if (isFunction(HomeView?.getUsuarios)) {
+    return HomeView.getUsuarios();
+  }
+
+  return [];
+}
+
+function getClients() {
+  if (isFunction(HomeView?.getClients)) {
+    return HomeView.getClients();
+  }
+
+  if (isFunction(HomeView?.getClientes)) {
+    return HomeView.getClientes();
+  }
+
+  return [];
+}
+
 function openTicket(payload = {}) {
   if (isFunction(HomeView?.openTicketFromExternalRequest)) {
     return HomeView.openTicketFromExternalRequest(payload);
@@ -737,9 +1123,29 @@ function openTicket(payload = {}) {
   return null;
 }
 
+function openIncidencia(payload = {}) {
+  if (isFunction(HomeView?.openIncidencia)) {
+    return HomeView.openIncidencia(payload);
+  }
+
+  return openTicket(payload);
+}
+
 function createIncidencia(draft = {}) {
   if (isFunction(HomeView?.createIncidencia)) {
     return HomeView.createIncidencia(draft);
+  }
+
+  return false;
+}
+
+function navigateTo(route = "", options = {}) {
+  if (isFunction(HomeView?.navigateTo)) {
+    return HomeView.navigateTo(route, options);
+  }
+
+  if (isFunction(HomeView?.navigate)) {
+    return HomeView.navigate(route, options);
   }
 
   return false;
@@ -751,6 +1157,7 @@ function createIncidencia(draft = {}) {
 
 const api = {
   source: SOURCE,
+  version: HOME_INDEX_VERSION,
 
   init,
   mount,
@@ -768,16 +1175,25 @@ const api = {
 
   getState,
   getSnapshot,
+  getDebugSnapshot: getSnapshot,
+
   getItems,
   getTickets,
+  getInvoices,
+  getFacturas: getInvoices,
+  getUsers,
+  getUsuarios: getUsers,
+  getClients,
+  getClientes: getClients,
 
   openTicket,
-  openIncidencia: openTicket,
+  openIncidencia,
   createIncidencia,
 
-  canRenderHomeNow: (...args) =>
-    shouldAllowHome("canRenderHomeNow", args),
+  navigateTo,
+  navigate: navigateTo,
 
+  canRenderHomeNow,
   getHomeRouteDebug,
 
   get view() {
@@ -826,10 +1242,17 @@ export {
   getSnapshot,
   getItems,
   getTickets,
+  getInvoices,
+  getUsers,
+  getClients,
 
   openTicket,
+  openIncidencia,
   createIncidencia,
 
+  navigateTo,
+
+  canRenderHomeNow,
   getHomeRouteDebug,
 };
 

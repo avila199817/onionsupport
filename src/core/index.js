@@ -2,6 +2,9 @@
    Onion SPA - Core
    Archivo: src/core/index.js
 
+   ONION SUPPORT · CORE SINGLETON
+   GLOBAL CONFIG · STATE · EVENTS · STORAGE · REQUEST · MODULES · 13/10
+
    QUÉ CENTRALIZA:
    - configuración global
    - estado global robusto
@@ -27,9 +30,11 @@
    - auth alineada con state.computeAuthenticated()
    - fallback si factories parciales fallan
    - no ReferenceError server-side
-   - API congelada estable con bridges Router/Auth vía accessors
+   - API estable con bridges Router/Auth/Store/Http vía accessors
    - snapshots públicos sin token crudo
    - no duplicar eventos base de state/session
+   - applySession compatible con payloads heterogéneos
+   - clearSession bloquea auth fantasma
 ========================================================= */
 
 import { config } from "./config.js";
@@ -118,10 +123,13 @@ export const AppCore = (() => {
   ======================================================= */
 
   const CORE_VERSION =
-    "11.1.0";
+    "13.0.0";
+
+  const CORE_SOURCE =
+    "core";
 
   const DEFAULT_APP_NAME =
-    "Onion SPA";
+    "Onion Support";
 
   const DEFAULT_STORAGE_PREFIX =
     "onion";
@@ -132,107 +140,212 @@ export const AppCore = (() => {
   const DEFAULT_THEME =
     "dark";
 
-  const EVENTS = Object.freeze({
-    coreInitStart:
-      "app:core:init:start",
+  const EVENTS =
+    Object.freeze({
+      coreInitStart:
+        "app:core:init:start",
 
-    coreReady:
-      "app:core:ready",
+      coreReady:
+        "app:core:ready",
 
-    coreInitError:
-      "app:core:init:error",
+      coreInitError:
+        "app:core:init:error",
 
-    coreReboot:
-      "app:core:reboot",
+      coreReboot:
+        "app:core:reboot",
 
-    stateChange:
-      "app:state:change",
+      stateChange:
+        "app:state:change",
 
-    authChange:
-      "app:auth:change",
+      authChange:
+        "app:auth:change",
 
-    userChange:
-      "app:user:change",
+      userChange:
+        "app:user:change",
 
-    routeChange:
-      "app:route:change",
+      routeChange:
+        "app:route:change",
 
-    publicPathChange:
-      "app:public-path:change",
+      publicPathChange:
+        "app:public-path:change",
 
-    sessionApplied:
-      "app:session:applied",
+      sessionApplied:
+        "app:session:applied",
 
-    sessionCleared:
-      "app:session:cleared",
+      sessionCleared:
+        "app:session:cleared",
 
-    moduleRegistered:
-      "app:module:registered",
+      moduleRegistered:
+        "app:module:registered",
 
-    moduleReplaced:
-      "app:module:replaced",
+      moduleReplaced:
+        "app:module:replaced",
 
-    toastBridgeReady:
-      "app:toast:bridge-ready",
-  });
+      toastBridgeReady:
+        "app:toast:bridge-ready",
+    });
 
-  const SENSITIVE_STATE_KEYS = Object.freeze([
-    "token",
-    "accessToken",
-    "access_token",
-    "refreshToken",
-    "refresh_token",
-    "idToken",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "mfaToken",
-    "mfa_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "password",
-    "otp",
-    "code",
-  ]);
+  const SENSITIVE_STATE_KEYS =
+    Object.freeze([
+      "token",
+      "accessToken",
+      "access_token",
+      "refreshToken",
+      "refresh_token",
+      "idToken",
+      "id_token",
+      "tempToken",
+      "temp_token",
+      "temporaryToken",
+      "temporary_token",
+      "mfaToken",
+      "mfa_token",
+      "twoFactorToken",
+      "two_factor_token",
+      "password",
+      "otp",
+      "code",
+      "authorization",
+      "jwt",
+      "bearer",
+    ]);
 
-  const BRIDGE_MODULE_ALIASES = Object.freeze({
-    Router:
-      Object.freeze(["Router", "router"]),
+  const SENSITIVE_PARAM_NAMES =
+    Object.freeze([
+      "token",
+      "activationToken",
+      "activateToken",
+      "resetToken",
+      "passwordResetToken",
+      "confirmToken",
+      "code",
+      "t",
+      "access_token",
+      "refresh_token",
+      "id_token",
+      "tempToken",
+      "temp_token",
+      "temporaryToken",
+      "temporary_token",
+      "twoFactorToken",
+      "two_factor_token",
+      "mfaToken",
+      "mfa_token",
+    ]);
 
-    router:
-      Object.freeze(["router", "Router"]),
+  const TOKEN_STATE_KEYS =
+    Object.freeze([
+      "token",
+      "accessToken",
+      "access_token",
+      "jwt",
+      "bearer",
+      "idToken",
+      "id_token",
+    ]);
 
-    Auth:
-      Object.freeze(["Auth", "auth"]),
+  const USER_STATE_KEYS =
+    Object.freeze([
+      "user",
+      "currentUser",
+      "sessionUser",
+      "authUser",
+      "account",
+      "profile",
+      "usuario",
+      "me",
+    ]);
 
-    auth:
-      Object.freeze(["auth", "Auth"]),
+  const USER_ID_KEYS =
+    Object.freeze([
+      "id",
+      "userId",
+      "user_id",
+      "_id",
+      "uid",
+      "sub",
+      "username",
+      "userName",
+      "user_name",
+      "email",
+      "mail",
+      "phone",
+      "telefono",
+      "mobile",
+    ]);
 
-    Store:
-      Object.freeze(["Store", "store"]),
+  const BRIDGE_MODULE_ALIASES =
+    Object.freeze({
+      Router:
+        Object.freeze([
+          "Router",
+          "router",
+        ]),
 
-    store:
-      Object.freeze(["store", "Store"]),
+      router:
+        Object.freeze([
+          "router",
+          "Router",
+        ]),
 
-    Http:
-      Object.freeze(["Http", "http"]),
+      Auth:
+        Object.freeze([
+          "Auth",
+          "auth",
+        ]),
 
-    http:
-      Object.freeze(["http", "Http"]),
-  });
+      auth:
+        Object.freeze([
+          "auth",
+          "Auth",
+        ]),
+
+      Store:
+        Object.freeze([
+          "Store",
+          "store",
+        ]),
+
+      store:
+        Object.freeze([
+          "store",
+          "Store",
+        ]),
+
+      Http:
+        Object.freeze([
+          "Http",
+          "http",
+        ]),
+
+      http:
+        Object.freeze([
+          "http",
+          "Http",
+        ]),
+    });
 
   /* =======================================================
      RUNTIME FLAGS
   ======================================================= */
 
-  let initPromise = null;
-  let initialized = false;
-  let initCycle = 0;
-  let networkEventsBound = false;
-  let showToastBridge = null;
-  let readyCallbacksFlushed = false;
+  let initPromise =
+    null;
+
+  let initialized =
+    false;
+
+  let initCycle =
+    0;
+
+  let networkEventsBound =
+    false;
+
+  let showToastBridge =
+    null;
+
+  let readyCallbacksFlushed =
+    false;
 
   /* =======================================================
      BASIC SAFE HELPERS
@@ -285,7 +398,10 @@ export const AppCore = (() => {
   }
 
   function safeLower(value, fallback = "") {
-    return safeText(value, fallback).toLowerCase();
+    return safeText(
+      value,
+      fallback
+    ).toLowerCase();
   }
 
   function safeBool(value, fallback = false) {
@@ -299,7 +415,9 @@ export const AppCore = (() => {
 
     if (typeof value === "string") {
       const clean =
-        value.trim().toLowerCase();
+        value
+          .trim()
+          .toLowerCase();
 
       if (
         [
@@ -397,9 +515,9 @@ export const AppCore = (() => {
     try {
       return Boolean(
         config?.debug ||
-        config?.dev ||
-        config?.environment === "development" ||
-        config?.env === "development"
+          config?.dev ||
+          config?.environment === "development" ||
+          config?.env === "development"
       );
     } catch {
       return false;
@@ -457,8 +575,15 @@ export const AppCore = (() => {
   }
 
   /* =======================================================
-     SANITIZE / SNAPSHOTS
+     TOKEN / ERROR SANITIZE
   ======================================================= */
+
+  function escapeRegExp(value = "") {
+    return String(value).replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
+  }
 
   function redactTokenInText(value = "") {
     const raw =
@@ -472,30 +597,40 @@ export const AppCore = (() => {
       raw;
 
     try {
-      output = output.replace(
-        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|tempToken|temp_token|code|t)=)([^&#\s]+)/gi,
-        "$1***"
-      );
+      for (const name of SENSITIVE_PARAM_NAMES) {
+        const escaped =
+          escapeRegExp(name);
 
-      output = output.replace(
-        /(\/activate-account\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
+        output =
+          output.replace(
+            new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
+            "$1***"
+          );
+      }
 
-      output = output.replace(
-        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
+      output =
+        output.replace(
+          /(\/activate-account\/)([^/?#\s]+)/gi,
+          "$1***"
+        );
 
-      output = output.replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      );
+      output =
+        output.replace(
+          /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+          "$1***"
+        );
 
-      output = output.replace(
-        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-        "***"
-      );
+      output =
+        output.replace(
+          /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+          "$1***"
+        );
+
+      output =
+        output.replace(
+          /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+          "***"
+        );
     } catch {}
 
     return output;
@@ -556,7 +691,8 @@ export const AppCore = (() => {
     let clean = {};
 
     try {
-      clean = safeClone(source, {}) || {};
+      clean =
+        safeClone(source, {}) || {};
     } catch {
       clean = {
         ...source,
@@ -600,68 +736,6 @@ export const AppCore = (() => {
     }
 
     return clean;
-  }
-
-  function selectStateMarkers(root = {}) {
-    return {
-      authenticated:
-        Boolean(root.authenticated),
-
-      hasToken:
-        Boolean(root.hasToken),
-
-      user:
-        root.user || null,
-
-      username:
-        root.username || null,
-
-      role:
-        root.role || null,
-
-      currentResolvedUsername:
-        root.currentResolvedUsername || null,
-
-      route:
-        root.route || "/",
-
-      publicPath:
-        root.publicPath || "/",
-
-      lang:
-        root.lang || DEFAULT_LANG,
-
-      theme:
-        root.theme || DEFAULT_THEME,
-    };
-  }
-
-  function sameMarkerValue(a, b) {
-    if (a === b) {
-      return true;
-    }
-
-    if (
-      isAnyObject(a) ||
-      isAnyObject(b)
-    ) {
-      try {
-        return JSON.stringify(a) === JSON.stringify(b);
-      } catch {
-        return false;
-      }
-    }
-
-    return false;
-  }
-
-  function markerChanged(before = {}, after = {}, keys = []) {
-    return safeArray(keys).some((key) =>
-      !sameMarkerValue(
-        before[key],
-        after[key]
-      )
-    );
   }
 
   function getSnapshotFrom(ref, options = {}) {
@@ -751,7 +825,8 @@ export const AppCore = (() => {
         return () => {};
       }
 
-      let disposed = false;
+      let disposed =
+        false;
 
       const dispose =
         on(
@@ -761,7 +836,9 @@ export const AppCore = (() => {
               return;
             }
 
-            disposed = true;
+            disposed =
+              true;
+
             dispose();
 
             try {
@@ -831,8 +908,10 @@ export const AppCore = (() => {
       const eventLike = {
         type:
           key,
+
         detail:
           payload,
+
         payload,
       };
 
@@ -887,10 +966,12 @@ export const AppCore = (() => {
         return listeners.get(key)?.size || 0;
       }
 
-      let total = 0;
+      let total =
+        0;
 
       for (const set of listeners.values()) {
-        total += set.size;
+        total +=
+          set.size;
       }
 
       return total;
@@ -906,8 +987,10 @@ export const AppCore = (() => {
       return {
         fallback:
           true,
+
         names:
           names(),
+
         listenerCount:
           listenerCount(),
       };
@@ -1260,26 +1343,47 @@ export const AppCore = (() => {
       const scope =
         ensureScope(scopeName).name;
 
-      let target = null;
-      let eventName = "";
-      let handler = null;
-      let options = false;
+      let target =
+        null;
+
+      let eventName =
+        "";
+
+      let handler =
+        null;
+
+      let options =
+        false;
 
       if (
         targetOrName &&
         isFunction(targetOrName.addEventListener)
       ) {
-        target = targetOrName;
-        eventName = safeText(eventNameOrHandler, "");
-        handler = handlerOrOptions;
-        options = maybeOptions || false;
+        target =
+          targetOrName;
+
+        eventName =
+          safeText(eventNameOrHandler, "");
+
+        handler =
+          handlerOrOptions;
+
+        options =
+          maybeOptions || false;
       } else {
-        target = isBrowser()
-          ? window
-          : null;
-        eventName = safeText(targetOrName, "");
-        handler = eventNameOrHandler;
-        options = handlerOrOptions || false;
+        target =
+          isBrowser()
+            ? window
+            : null;
+
+        eventName =
+          safeText(targetOrName, "");
+
+        handler =
+          eventNameOrHandler;
+
+        options =
+          handlerOrOptions || false;
       }
 
       if (
@@ -1407,8 +1511,10 @@ export const AppCore = (() => {
       return {
         fallback:
           true,
+
         scopeCount:
           registry.scopes.size,
+
         scopes:
           Array.from(registry.scopes.entries()).map(([name, disposers]) => ({
             name,
@@ -1421,22 +1527,31 @@ export const AppCore = (() => {
     return {
       scope:
         ensureScope,
+
       ensureScope,
       add,
+
       on:
         event,
+
       event,
       timeout,
+
       timer:
         timeout,
+
       interval,
       run,
       clear,
+
       dispose:
         run,
+
       getSnapshot,
+
       getDebugSnapshot:
         getSnapshot,
+
       snapshot:
         getSnapshot,
     };
@@ -1533,7 +1648,8 @@ export const AppCore = (() => {
         normalizeKey(name);
 
       const raw =
-        value === null || value === undefined
+        value === null ||
+        value === undefined
           ? ""
           : String(value);
 
@@ -1663,7 +1779,9 @@ export const AppCore = (() => {
       return {
         fallback:
           true,
+
         prefix,
+
         memoryKeys:
           keys().map((key) =>
             redactTokenInText(key)
@@ -1673,25 +1791,37 @@ export const AppCore = (() => {
 
     return {
       prefix,
+
       key:
         normalizeKey,
+
       normalizeKey,
+
       getRaw,
       setRaw,
+
       get,
       set,
+
       getJson,
       setJson,
+
       remove,
+
       del:
         remove,
+
       delete:
         remove,
+
       has,
       keys,
+
       getSnapshot,
+
       getDebugSnapshot:
         getSnapshot,
+
       snapshot:
         getSnapshot,
     };
@@ -1772,6 +1902,8 @@ export const AppCore = (() => {
             key,
           replaced:
             exists,
+          source:
+            CORE_SOURCE,
         }
       );
 
@@ -1808,8 +1940,10 @@ export const AppCore = (() => {
       return {
         fallback:
           true,
+
         count:
           registry.modules.size,
+
         modules:
           list(),
       };
@@ -1821,12 +1955,16 @@ export const AppCore = (() => {
       register,
       set,
       remove,
+
       delete:
         remove,
+
       list,
       getSnapshot,
+
       getDebugSnapshot:
         getSnapshot,
+
       snapshot:
         getSnapshot,
     };
@@ -1842,7 +1980,8 @@ export const AppCore = (() => {
       }
 
       if (!Array.isArray(registry.hooks[key])) {
-        registry.hooks[key] = [];
+        registry.hooks[key] =
+          [];
       }
 
       return registry.hooks[key];
@@ -1921,12 +2060,14 @@ export const AppCore = (() => {
         safeText(name, "");
 
       if (key) {
-        registry.hooks[key] = [];
+        registry.hooks[key] =
+          [];
         return true;
       }
 
       Object.keys(registry.hooks).forEach((hookName) => {
-        registry.hooks[hookName] = [];
+        registry.hooks[hookName] =
+          [];
       });
 
       return true;
@@ -1945,16 +2086,21 @@ export const AppCore = (() => {
 
     return {
       add,
+
       on:
         add,
+
       use:
         add,
+
       run,
       get,
       clear,
       getSnapshot,
+
       getDebugSnapshot:
         getSnapshot,
+
       snapshot:
         getSnapshot,
     };
@@ -1997,14 +2143,102 @@ export const AppCore = (() => {
   }
 
   function hasTokenValue(token) {
+    const text =
+      safeText(token, "");
+
+    if (!text) {
+      return false;
+    }
+
+    const lower =
+      text.toLowerCase();
+
+    if (
+      [
+        "null",
+        "undefined",
+        "false",
+        "true",
+        "nan",
+        "none",
+        "[object object]",
+      ].includes(lower)
+    ) {
+      return false;
+    }
+
+    if (/[\s\r\n\t]/.test(text)) {
+      return false;
+    }
+
     try {
       return Boolean(
-        hasValidToken(token)
+        hasValidToken(text)
       );
     } catch {}
 
-    return Boolean(
-      safeText(token, "")
+    return true;
+  }
+
+  function getNestedObject(value = {}) {
+    return isObject(value)
+      ? value
+      : {};
+  }
+
+  function firstToken(...values) {
+    for (const value of values) {
+      if (hasTokenValue(value)) {
+        return String(value).trim();
+      }
+    }
+
+    return null;
+  }
+
+  function hasUsableUser(user = null) {
+    if (
+      !user ||
+      typeof user !== "object" ||
+      Array.isArray(user)
+    ) {
+      return false;
+    }
+
+    return USER_ID_KEYS.some((key) =>
+      Boolean(
+        safeText(user?.[key], "")
+      )
+    );
+  }
+
+  function firstUser(...values) {
+    for (const value of values) {
+      if (hasUsableUser(value)) {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  function getStateToken(root = ensureState()) {
+    const session =
+      getNestedObject(root.session);
+
+    return firstToken(
+      ...TOKEN_STATE_KEYS.map((key) => root[key]),
+      ...TOKEN_STATE_KEYS.map((key) => session[key])
+    );
+  }
+
+  function getStateUser(root = ensureState()) {
+    const session =
+      getNestedObject(root.session);
+
+    return firstUser(
+      ...USER_STATE_KEYS.map((key) => root[key]),
+      ...USER_STATE_KEYS.map((key) => session[key])
     );
   }
 
@@ -2013,6 +2247,11 @@ export const AppCore = (() => {
       explicitRole ||
         user?.role ||
         user?.rol ||
+        user?.userRole ||
+        user?.user_role ||
+        user?.type ||
+        user?.userType ||
+        user?.user_type ||
         user?.profile?.role ||
         user?.profile?.rol ||
         user?.raw?.role ||
@@ -2028,11 +2267,13 @@ export const AppCore = (() => {
         getUserUsername(user) ||
           user?.username ||
           user?.userName ||
+          user?.user_name ||
           user?.nick ||
           user?.alias ||
           user?.slug ||
           user?.login ||
           user?.email ||
+          user?.mail ||
           user?.name ||
           "",
         ""
@@ -2057,11 +2298,13 @@ export const AppCore = (() => {
         getUserUsername(root.user) ||
           root.user?.username ||
           root.user?.userName ||
+          root.user?.user_name ||
           root.user?.nick ||
           root.user?.alias ||
           root.user?.login ||
           root.user?.slug ||
           root.user?.email ||
+          root.user?.mail ||
           ""
       ) || null;
 
@@ -2080,33 +2323,76 @@ export const AppCore = (() => {
       return false;
     }
 
+    const token =
+      getStateToken(root);
+
+    const user =
+      getStateUser(root);
+
+    if (
+      !hasTokenValue(token) ||
+      !hasUsableUser(user)
+    ) {
+      return false;
+    }
+
     try {
       return Boolean(
         computeAuthenticated(
-          root.user,
-          root.token
+          user,
+          token
         )
       );
     } catch {}
 
-    return Boolean(
-      hasTokenValue(root.token) &&
-      root.user
-    );
+    return true;
   }
 
   function syncDerivedAuthState(options = {}) {
     const root =
       ensureState();
 
+    const token =
+      getStateToken(root);
+
+    const user =
+      getStateUser(root);
+
     const tokenValid =
-      hasTokenValue(root.token);
+      hasTokenValue(token);
+
+    const userValid =
+      hasUsableUser(user);
 
     const authenticated =
       computeAuthValue(
-        root,
+        {
+          ...root,
+          token,
+          user,
+        },
         options
       );
+
+    root.token =
+      tokenValid
+        ? token
+        : null;
+
+    root.accessToken =
+      tokenValid
+        ? token
+        : null;
+
+    root.access_token =
+      tokenValid
+        ? token
+        : null;
+
+    root.user =
+      userValid
+        ? user
+        : null;
 
     root.authenticated =
       authenticated;
@@ -2137,11 +2423,88 @@ export const AppCore = (() => {
     root.resolvedUsername =
       root.currentResolvedUsername || null;
 
+    if (!authenticated) {
+      root.role =
+        null;
+
+      root.username =
+        null;
+
+      root.currentResolvedUsername =
+        null;
+
+      root.resolvedUsername =
+        null;
+    }
+
     return root;
   }
 
+  function selectStateMarkers(root = {}) {
+    return {
+      authenticated:
+        Boolean(root.authenticated),
+
+      hasToken:
+        Boolean(root.hasToken),
+
+      user:
+        root.user || null,
+
+      username:
+        root.username || null,
+
+      role:
+        root.role || null,
+
+      currentResolvedUsername:
+        root.currentResolvedUsername || null,
+
+      route:
+        root.route || "/",
+
+      publicPath:
+        root.publicPath || "/",
+
+      lang:
+        root.lang || DEFAULT_LANG,
+
+      theme:
+        root.theme || DEFAULT_THEME,
+    };
+  }
+
+  function sameMarkerValue(a, b) {
+    if (a === b) {
+      return true;
+    }
+
+    if (
+      isAnyObject(a) ||
+      isAnyObject(b)
+    ) {
+      try {
+        return JSON.stringify(a) === JSON.stringify(b);
+      } catch {
+        return false;
+      }
+    }
+
+    return false;
+  }
+
+  function markerChanged(before = {}, after = {}, keys = []) {
+    return safeArray(keys).some((key) =>
+      !sameMarkerValue(
+        before[key],
+        after[key]
+      )
+    );
+  }
+
   function clonePublicState({ safe = false } = {}) {
-    let snapshot = null;
+    let snapshot =
+      null;
 
     try {
       snapshot =
@@ -2184,11 +2547,6 @@ export const AppCore = (() => {
         ensureObject(patch)
       );
 
-    /*
-      Importante:
-      state.js ya emite app:state:change cuando setStateBase funciona.
-      Aquí solo se emite stateChange si el caller marca fallback/manual.
-    */
     if (
       opts.emitState === true &&
       changedKeys.length > 0
@@ -2197,10 +2555,13 @@ export const AppCore = (() => {
         EVENTS.stateChange,
         {
           changedKeys,
+
           state:
             sanitizeStateForSnapshot(after),
+
           previous:
             sanitizeStateForSnapshot(before),
+
           source:
             safeText(opts.source, "core:setState"),
         }
@@ -2220,14 +2581,19 @@ export const AppCore = (() => {
         {
           authenticated:
             Boolean(after.authenticated),
+
           hasToken:
             Boolean(after.hasToken),
+
           role:
             after.role || null,
+
           username:
             after.username || null,
+
           previousAuthenticated:
             Boolean(before.authenticated),
+
           source:
             safeText(opts.source, "core:setState"),
         }
@@ -2248,16 +2614,21 @@ export const AppCore = (() => {
         {
           authenticated:
             Boolean(after.authenticated),
+
           user:
             after.authenticated
               ? after.user || null
               : null,
+
           username:
             after.username || null,
+
           currentResolvedUsername:
             after.currentResolvedUsername || null,
+
           role:
             after.role || null,
+
           source:
             safeText(opts.source, "core:setState"),
         }
@@ -2275,10 +2646,13 @@ export const AppCore = (() => {
         {
           route:
             after.route || "/",
+
           previousRoute:
             before.route || "/",
+
           publicPath:
             after.publicPath || "/",
+
           source:
             safeText(opts.source, "core:setState"),
         }
@@ -2296,10 +2670,13 @@ export const AppCore = (() => {
         {
           publicPath:
             after.publicPath || "/",
+
           previousPublicPath:
             before.publicPath || "/",
+
           route:
             after.route || "/",
+
           source:
             safeText(opts.source, "core:setState"),
         }
@@ -2436,19 +2813,11 @@ export const AppCore = (() => {
       {
         ...opts,
 
-        /*
-          Solo emitimos app:state:change manual si setStateBase falló.
-          Si setStateBase funcionó, state.js ya emitió el evento.
-        */
         emitState:
           baseSucceeded
             ? opts.emitState === true
             : opts.emitState !== false,
 
-        /*
-          Por defecto no emitimos derivados desde setState para no duplicar
-          los eventos propios de session.js/setUser/setToken/setRoute.
-        */
         emitDerived:
           opts.emitDerived === true ||
           (!baseSucceeded && opts.emitDerived !== false),
@@ -2526,6 +2895,8 @@ export const AppCore = (() => {
   }
 
   function getAuthHeader() {
+    syncDerivedAuthState();
+
     const token =
       safeText(state.token, "");
 
@@ -2624,8 +2995,12 @@ export const AppCore = (() => {
       {
         ready:
           true,
+
         at:
           safeIsoDate(),
+
+        source:
+          CORE_SOURCE,
       }
     );
 
@@ -2654,6 +3029,157 @@ export const AppCore = (() => {
   }
 
   /* =======================================================
+     SESSION PAYLOAD EXTRACTION
+  ======================================================= */
+
+  function extractSessionPayload(payload = {}) {
+    const source =
+      ensureObject(payload);
+
+    const data =
+      ensureObject(source.data);
+
+    const payloadData =
+      ensureObject(source.payload);
+
+    const session =
+      ensureObject(source.session);
+
+    const dataSession =
+      ensureObject(data.session);
+
+    const payloadSession =
+      ensureObject(payloadData.session);
+
+    const auth =
+      ensureObject(source.auth);
+
+    const dataAuth =
+      ensureObject(data.auth);
+
+    const user =
+      firstUser(
+        source.user,
+        source.usuario,
+        source.me,
+        source.account,
+        source.profile,
+        source.currentUser,
+        source.sessionUser,
+        source.authUser,
+
+        session.user,
+        session.usuario,
+        session.me,
+        session.account,
+        session.profile,
+
+        data.user,
+        data.usuario,
+        data.me,
+        data.account,
+        data.profile,
+        data.currentUser,
+        data.sessionUser,
+        data.authUser,
+
+        dataSession.user,
+        dataSession.usuario,
+        dataSession.me,
+        dataSession.account,
+        dataSession.profile,
+
+        payloadData.user,
+        payloadData.usuario,
+        payloadData.me,
+        payloadData.account,
+        payloadData.profile,
+        payloadData.currentUser,
+        payloadData.sessionUser,
+        payloadData.authUser,
+
+        payloadSession.user,
+        payloadSession.usuario,
+        payloadSession.me,
+        payloadSession.account,
+        payloadSession.profile,
+
+        auth.user,
+        auth.usuario,
+        auth.me,
+        dataAuth.user,
+        dataAuth.usuario,
+        dataAuth.me
+      );
+
+    const token =
+      firstToken(
+        source.token,
+        source.accessToken,
+        source.access_token,
+        source.jwt,
+        source.bearer,
+
+        session.token,
+        session.accessToken,
+        session.access_token,
+        session.jwt,
+        session.bearer,
+
+        data.token,
+        data.accessToken,
+        data.access_token,
+        data.jwt,
+        data.bearer,
+
+        dataSession.token,
+        dataSession.accessToken,
+        dataSession.access_token,
+        dataSession.jwt,
+        dataSession.bearer,
+
+        payloadData.token,
+        payloadData.accessToken,
+        payloadData.access_token,
+        payloadData.jwt,
+        payloadData.bearer,
+
+        payloadSession.token,
+        payloadSession.accessToken,
+        payloadSession.access_token,
+        payloadSession.jwt,
+        payloadSession.bearer,
+
+        auth.token,
+        auth.accessToken,
+        auth.access_token,
+        dataAuth.token,
+        dataAuth.accessToken,
+        dataAuth.access_token
+      );
+
+    return {
+      user:
+        user || null,
+
+      token:
+        token || null,
+
+      route:
+        source.route ||
+        data.route ||
+        payloadData.route ||
+        null,
+
+      publicPath:
+        source.publicPath ||
+        data.publicPath ||
+        payloadData.publicPath ||
+        null,
+    };
+  }
+
+  /* =======================================================
      SESSION API
   ======================================================= */
 
@@ -2676,6 +3202,9 @@ export const AppCore = (() => {
       setState(
         {
           route:
+            cleanRoute,
+
+          canonicalPath:
             cleanRoute,
         },
         {
@@ -2735,7 +3264,8 @@ export const AppCore = (() => {
   }
 
   function setUser(user = null, options = {}) {
-    let result = null;
+    let result =
+      null;
 
     try {
       result =
@@ -2785,7 +3315,8 @@ export const AppCore = (() => {
   }
 
   function setToken(token = null, options = {}) {
-    let result = null;
+    let result =
+      null;
 
     try {
       result =
@@ -2799,16 +3330,27 @@ export const AppCore = (() => {
             ensureObject(options),
         });
     } catch (error) {
+      const cleanToken =
+        hasTokenValue(token)
+          ? String(token).trim()
+          : null;
+
       setState(
         {
           token:
-            token || null,
+            cleanToken,
+
+          accessToken:
+            cleanToken,
+
+          access_token:
+            cleanToken,
         },
         {
           source:
             "core:setToken:fallback",
           forceUnauthenticated:
-            !token,
+            !cleanToken,
           emitDerived:
             true,
         }
@@ -2838,18 +3380,30 @@ export const AppCore = (() => {
     const opts =
       ensureObject(options);
 
+    const extracted =
+      extractSessionPayload(payload);
+
     const token =
-      safeOwn(payload, "token")
-        ? payload.token
-        : undefined;
+      safeOwn(payload, "token") ||
+      safeOwn(payload, "accessToken") ||
+      safeOwn(payload, "access_token")
+        ? extracted.token
+        : extracted.token;
 
     const user =
-      safeOwn(payload, "user")
-        ? payload.user
-        : undefined;
+      safeOwn(payload, "user") ||
+      safeOwn(payload, "usuario") ||
+      safeOwn(payload, "me") ||
+      safeOwn(payload, "account") ||
+      safeOwn(payload, "profile")
+        ? extracted.user
+        : extracted.user;
 
-    let result = null;
-    let baseSucceeded = false;
+    let result =
+      null;
+
+    let baseSucceeded =
+      false;
 
     try {
       result =
@@ -2883,10 +3437,10 @@ export const AppCore = (() => {
           user,
 
           route:
-            payload.route,
+            extracted.route,
 
           publicPath:
-            payload.publicPath,
+            extracted.publicPath,
         });
 
       baseSucceeded =
@@ -2912,6 +3466,26 @@ export const AppCore = (() => {
         );
       }
 
+      if (extracted.route) {
+        setRoute(
+          extracted.route,
+          {
+            source:
+              "core:applySession:fallback-route",
+          }
+        );
+      }
+
+      if (extracted.publicPath) {
+        setPublicPath(
+          extracted.publicPath,
+          {
+            source:
+              "core:applySession:fallback-public-path",
+          }
+        );
+      }
+
       safeWarn(
         "applySessionBase falló; aplicado fallback.",
         error
@@ -2931,10 +3505,6 @@ export const AppCore = (() => {
         token === null,
     });
 
-    /*
-      applySessionBase ya emite app:session:applied.
-      Emitimos aquí solo si entró fallback.
-    */
     if (
       !baseSucceeded &&
       opts.emit !== false
@@ -2967,8 +3537,11 @@ export const AppCore = (() => {
     const opts =
       ensureObject(options);
 
-    let result = null;
-    let baseSucceeded = false;
+    let result =
+      null;
+
+    let baseSucceeded =
+      false;
 
     try {
       result =
@@ -2991,7 +3564,40 @@ export const AppCore = (() => {
           token:
             null,
 
+          accessToken:
+            null,
+
+          access_token:
+            null,
+
+          refreshToken:
+            null,
+
+          refresh_token:
+            null,
+
+          idToken:
+            null,
+
+          id_token:
+            null,
+
+          tempToken:
+            null,
+
+          temp_token:
+            null,
+
           user:
+            null,
+
+          currentUser:
+            null,
+
+          sessionUser:
+            null,
+
+          authUser:
             null,
 
           authenticated:
@@ -3027,7 +3633,8 @@ export const AppCore = (() => {
         error
       );
 
-      result = true;
+      result =
+        true;
     }
 
     syncDerivedAuthState({
@@ -3035,10 +3642,6 @@ export const AppCore = (() => {
         true,
     });
 
-    /*
-      clearSessionBase ya emite app:session:cleared.
-      Emitimos aquí solo si entró fallback.
-    */
     if (
       !baseSucceeded &&
       opts.emit !== false
@@ -3048,6 +3651,7 @@ export const AppCore = (() => {
         {
           silent:
             Boolean(opts.silent),
+
           source:
             safeText(opts.source, "core:clearSession:fallback"),
         }
@@ -3129,6 +3733,8 @@ export const AppCore = (() => {
         {
           lang:
             cleanLang,
+          source:
+            "core:setLang:fallback",
         }
       );
 
@@ -3244,19 +3850,24 @@ export const AppCore = (() => {
       const contentType =
         response.headers?.get?.("content-type") || "";
 
-      let body = null;
+      let body =
+        null;
 
       if (contentType.includes("application/json")) {
         try {
-          body = await response.json();
+          body =
+            await response.json();
         } catch {
-          body = null;
+          body =
+            null;
         }
       } else {
         try {
-          body = await response.text();
+          body =
+            await response.text();
         } catch {
-          body = "";
+          body =
+            "";
         }
       }
 
@@ -3430,25 +4041,30 @@ export const AppCore = (() => {
     }
 
     if (!isDocumentReady()) {
-      let disposed = false;
+      let disposed =
+        false;
 
-      const handler = () => {
-        if (disposed) {
-          return;
-        }
+      const handler =
+        () => {
+          if (disposed) {
+            return;
+          }
 
-        disposed = true;
-        readyCallbacksFlushed = true;
+          disposed =
+            true;
 
-        try {
-          fn();
-        } catch (error) {
-          safeError(
-            "ready() callback error:",
-            error
-          );
-        }
-      };
+          readyCallbacksFlushed =
+            true;
+
+          try {
+            fn();
+          } catch (error) {
+            safeError(
+              "ready() callback error:",
+              error
+            );
+          }
+        };
 
       try {
         document.addEventListener(
@@ -3461,7 +4077,8 @@ export const AppCore = (() => {
         );
 
         return () => {
-          disposed = true;
+          disposed =
+            true;
 
           try {
             document.removeEventListener(
@@ -3476,7 +4093,9 @@ export const AppCore = (() => {
     }
 
     try {
-      readyCallbacksFlushed = true;
+      readyCallbacksFlushed =
+        true;
+
       fn();
     } catch (error) {
       safeError(
@@ -3742,6 +4361,9 @@ export const AppCore = (() => {
               safe:
                 true,
             }),
+
+          source:
+            CORE_SOURCE,
         }
       );
 
@@ -3816,6 +4438,9 @@ export const AppCore = (() => {
               safe:
                 true,
             }),
+
+          source:
+            CORE_SOURCE,
         }
       );
 
@@ -3858,6 +4483,9 @@ export const AppCore = (() => {
 
           error:
             sanitizeErrorForSnapshot(error),
+
+          source:
+            CORE_SOURCE,
         }
       );
 
@@ -3932,6 +4560,9 @@ export const AppCore = (() => {
       {
         at:
           safeIsoDate(),
+
+        source:
+          CORE_SOURCE,
       }
     );
 
@@ -3965,6 +4596,8 @@ export const AppCore = (() => {
               true,
             overwrite:
               true,
+            source:
+              CORE_SOURCE,
           }
         );
       } catch {
@@ -4377,6 +5010,16 @@ export const AppCore = (() => {
         },
       },
     });
+  } catch {}
+
+  try {
+    if (isBrowser()) {
+      window.__ONION_CORE__ =
+        api;
+
+      window.AppCore =
+        window.AppCore || api;
+    }
   } catch {}
 
   try {

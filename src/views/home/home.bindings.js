@@ -3,30 +3,30 @@
    Archivo: src/views/home/home.bindings.js
 
    ONION SUPPORT · HOME BINDINGS
-   FINAL PRO SYSTEM · DELEGATED DOM · CLEAN REBIND · 10/10
+   FINAL PRO SYSTEM · DELEGATED DOM · CLEAN REBIND · MODULAR HOME · 11/10
 
-   RESPONSABILIDADES:
-   - bind DOM robusto y seguro para Home
-   - refresh / retry dashboard
-   - export CSV
-   - open widget / bloque
-   - copy widget id
-   - quick actions / navegación
-   - create shortcuts
-   - rebind limpio tras rerender
-   - cleanup sólido por scope
-   - tolerar AppCore.cleanup parcial o ausente
-   - evitar doble click handlers
-   - soportar botones dinámicos
-   - delegación premium
-   - browser guards
-   - bloqueo de targets hidden / inert / disabled
-   - soporte data-action y data-home-action
-   - soporte botones directos + delegados
-   - busy state durante acciones async
-   - rutas internas seguras
-   - sin CSS inline
-   - sin Object.assign(style)
+   Responsabilidades:
+   - Bind DOM robusto y seguro para Home.
+   - Refresh / retry dashboard.
+   - Export CSV.
+   - Open widget / bloque.
+   - Copy widget id.
+   - Quick actions / navegación.
+   - Create shortcuts.
+   - Rebind limpio tras rerender.
+   - Cleanup sólido por scope.
+   - Tolerar AppCore.cleanup parcial o ausente.
+   - Evitar doble click handlers.
+   - Soportar botones dinámicos.
+   - Delegación premium.
+   - Browser guards.
+   - Bloqueo de targets hidden / inert / disabled.
+   - Soporte data-action y data-home-action.
+   - Soporte botones directos + delegados.
+   - Busy state durante acciones async.
+   - Rutas internas seguras.
+   - Sin CSS inline.
+   - Sin Object.assign(style).
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -35,7 +35,7 @@ import { AppCore } from "../../core/index.js";
    CONSTANTS
 ========================================================= */
 
-const HOME_BINDINGS_VERSION = "11.0.0-extreme";
+export const HOME_BINDINGS_VERSION = "11.0.0";
 
 const SOURCE = "views:home:home.bindings";
 const DEFAULT_SCOPE = "view:home";
@@ -103,12 +103,14 @@ const KEYBOARD_SELECTOR = [
   "[tabindex][data-home-action]",
   "[tabindex][data-quick-action]",
   "[tabindex][data-route]",
+  "[tabindex][data-href]",
 ].join(",");
 
 const REFRESH_ACTIONS = new Set([
   "refresh",
   "reload",
   "retry",
+  "actualizar",
   "refresh_home",
   "reload_home",
   "retry_home",
@@ -204,20 +206,18 @@ const SENSITIVE_KEYS = Object.freeze([
 ]);
 
 /* =========================================================
-   LOCAL CLEANUP FALLBACK
+   LOCAL RUNTIME
 ========================================================= */
 
 const localCleanups = new Map();
+const busyElements = new WeakMap();
 
 /* =========================================================
    BASIC HELPERS
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 function isFn(value) {
@@ -225,19 +225,12 @@ function isFn(value) {
 }
 
 function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function isElement(value) {
   try {
-    return (
-      typeof Element !== "undefined" &&
-      value instanceof Element
-    );
+    return typeof Element !== "undefined" && value instanceof Element;
   } catch {
     return Boolean(
       value &&
@@ -248,10 +241,7 @@ function isElement(value) {
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+  if (value === null || value === undefined) {
     return fallback;
   }
 
@@ -261,15 +251,11 @@ function safeText(value, fallback = "") {
 }
 
 function safeObject(value, fallback = {}) {
-  return isObject(value)
-    ? value
-    : fallback;
+  return isObject(value) ? value : fallback;
 }
 
 function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return Array.isArray(value) ? value : [];
 }
 
 function first(...values) {
@@ -443,6 +429,7 @@ function safeEmit(eventName = "", payload = {}, options = {}) {
 
   const cleanPayload = sanitizeEventPayload({
     source: SOURCE,
+    version: HOME_BINDINGS_VERSION,
     ...safeObject(payload),
   });
 
@@ -459,10 +446,7 @@ function safeEmit(eventName = "", payload = {}, options = {}) {
     }
   } catch {}
 
-  if (
-    opts.window === true ||
-    (!busAvailable && isBrowser())
-  ) {
+  if (opts.window === true || (!busAvailable && isBrowser())) {
     try {
       window.dispatchEvent(
         new CustomEvent(name, {
@@ -552,20 +536,10 @@ function prepareScope(scope = DEFAULT_SCOPE) {
   return scopeName;
 }
 
-function bindOn(
-  scope,
-  target,
-  eventName,
-  handler,
-  options = undefined
-) {
+function bindOn(scope, target, eventName, handler, options = undefined) {
   const scopeName = resolveScopeName(scope);
 
-  if (
-    !target ||
-    !eventName ||
-    !isFn(handler)
-  ) {
+  if (!target || !eventName || !isFn(handler)) {
     return () => {};
   }
 
@@ -589,19 +563,11 @@ function bindOn(
   } catch {}
 
   try {
-    target.addEventListener(
-      eventName,
-      handler,
-      options
-    );
+    target.addEventListener(eventName, handler, options);
 
     const cleanup = () => {
       try {
-        target.removeEventListener(
-          eventName,
-          handler,
-          options
-        );
+        target.removeEventListener(eventName, handler, options);
       } catch {}
     };
 
@@ -622,20 +588,14 @@ function getContainer(explicitContainer = null) {
     return null;
   }
 
-  if (
-    explicitContainer &&
-    isElement(explicitContainer)
-  ) {
+  if (explicitContainer && isElement(explicitContainer)) {
     return explicitContainer;
   }
 
   try {
     const fromCore = AppCore?.dom?.viewContainer;
 
-    if (
-      fromCore &&
-      document.contains(fromCore)
-    ) {
+    if (fromCore && document.contains(fromCore)) {
       return fromCore;
     }
   } catch {}
@@ -687,10 +647,7 @@ function closestFromEvent(event, selector, root = null) {
     return null;
   }
 
-  if (
-    root &&
-    !contains(root, element)
-  ) {
+  if (root && !contains(root, element)) {
     return null;
   }
 
@@ -716,11 +673,7 @@ function getById(id = "") {
 }
 
 function getAnyActionElement(event, root = null) {
-  return closestFromEvent(
-    event,
-    ACTION_SELECTOR,
-    root
-  );
+  return closestFromEvent(event, ACTION_SELECTOR, root);
 }
 
 function getDatasetValue(element = null, ...names) {
@@ -854,6 +807,17 @@ function getFilenameFromElement(element = null) {
   );
 }
 
+function getExportModeFromElement(element = null) {
+  return normalizeKey(
+    first(
+      getDatasetValue(element, "exportMode"),
+      getDatasetValue(element, "mode"),
+      getDatasetValue(element, "collection"),
+      "widgets"
+    )
+  );
+}
+
 function getPayloadFromDataset(element = null) {
   const raw = safeText(
     first(
@@ -937,11 +901,27 @@ function setElementBusy(element = null, busy = false) {
 
   const value = Boolean(busy);
 
+  if (value && !busyElements.has(element)) {
+    busyElements.set(element, {
+      disabled:
+        "disabled" in element
+          ? Boolean(element.disabled)
+          : null,
+      ariaBusy: element.getAttribute?.("aria-busy"),
+      ariaDisabled: element.getAttribute?.("aria-disabled"),
+    });
+  }
+
+  const previous = busyElements.get(element) || {};
+
   try {
-    element.setAttribute(
-      "aria-busy",
-      value ? "true" : "false"
-    );
+    if (value) {
+      element.setAttribute("aria-busy", "true");
+    } else if (previous.ariaBusy === null || previous.ariaBusy === undefined) {
+      element.removeAttribute("aria-busy");
+    } else {
+      element.setAttribute("aria-busy", previous.ariaBusy);
+    }
   } catch {}
 
   try {
@@ -959,14 +939,24 @@ function setElementBusy(element = null, busy = false) {
         element.tagName === "SELECT"
       )
     ) {
-      element.disabled = value;
+      element.disabled = value ? true : Boolean(previous.disabled);
     }
   } catch {}
+
+  if (!value) {
+    try {
+      busyElements.delete(element);
+    } catch {}
+  }
 }
 
 async function withBusy(element, fn) {
   if (!isFn(fn)) {
     return null;
+  }
+
+  if (element?.getAttribute?.("aria-busy") === "true") {
+    return false;
   }
 
   setElementBusy(element, true);
@@ -1035,17 +1025,11 @@ function normalizePathnameOnly(pathname = DEFAULT_HOME_ROUTE) {
 function normalizeInternalRoute(route = "") {
   const value = safeText(route, "");
 
-  if (
-    isUnsafeRoute(value) ||
-    isExternalRoute(value)
-  ) {
+  if (isUnsafeRoute(value) || isExternalRoute(value)) {
     return "";
   }
 
-  if (
-    value.startsWith("?") ||
-    value.startsWith("#")
-  ) {
+  if (value.startsWith("?") || value.startsWith("#")) {
     return value;
   }
 
@@ -1148,6 +1132,14 @@ async function safeNavigate({
       return true;
     }
 
+    if (isFn(router?.go)) {
+      await router.go(target, {
+        source: SOURCE,
+      });
+
+      return true;
+    }
+
     if (isFn(AppCore?.navigate)) {
       await AppCore.navigate(target, {
         source: SOURCE,
@@ -1225,6 +1217,7 @@ async function handleExport({
   }
 
   const filename = getFilenameFromElement(element);
+  const mode = getExportModeFromElement(element);
 
   return withBusy(
     element,
@@ -1232,6 +1225,7 @@ async function handleExport({
       try {
         await exportHomeCsvAction({
           filename: filename || undefined,
+          mode: mode || "widgets",
         });
 
         return true;
@@ -1290,6 +1284,7 @@ async function handleOpenWidget({
         await openHomeWidgetAction({
           widgetId,
           payload,
+          navigate: Boolean(route),
         });
 
         return true;
@@ -1527,6 +1522,7 @@ function bindDirectButton({
     async (event) => {
       if (shouldIgnoreEventTarget(element)) {
         event.preventDefault();
+        event.stopPropagation();
         return;
       }
 
@@ -1572,17 +1568,11 @@ function resolveActionKind(element = null) {
     return "navigate";
   }
 
-  if (
-    !action &&
-    getWidgetId(element)
-  ) {
+  if (!action && getWidgetId(element)) {
     return "open-widget";
   }
 
-  if (
-    !action &&
-    normalizeInternalRoute(getRouteFromElement(element))
-  ) {
+  if (!action && normalizeInternalRoute(getRouteFromElement(element))) {
     return "navigate";
   }
 
@@ -1727,10 +1717,7 @@ function bindKeyboardActivation({
     root,
     "keydown",
     (event) => {
-      if (
-        event.key !== "Enter" &&
-        event.key !== " "
-      ) {
+      if (event.key !== "Enter" && event.key !== " ") {
         return;
       }
 
@@ -1744,6 +1731,7 @@ function bindKeyboardActivation({
 
       if (
         !actionElement ||
+        !contains(root, actionElement) ||
         shouldIgnoreEventTarget(actionElement)
       ) {
         return;
@@ -1946,8 +1934,7 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
 
     browser: isBrowser(),
 
-    localCleanupCount:
-      localCleanups.get(scopeName)?.length || 0,
+    localCleanupCount: localCleanups.get(scopeName)?.length || 0,
 
     hasAppCoreCleanup: Boolean(AppCore?.cleanup),
     hasCleanupOn: isFn(AppCore?.cleanup?.on),
@@ -1967,11 +1954,20 @@ export function getHomeBindingsSnapshot(scope = DEFAULT_SCOPE) {
 }
 
 /* =========================================================
+   PUBLIC API
+========================================================= */
+
+export const HomeBindings = Object.freeze({
+  version: HOME_BINDINGS_VERSION,
+
+  bindHomeEvents,
+
+  getHomeBindingsSnapshot,
+  getDebugSnapshot: getHomeBindingsSnapshot,
+});
+
+/* =========================================================
    DEFAULT EXPORT
 ========================================================= */
 
-export default {
-  bindHomeEvents,
-  getHomeBindingsSnapshot,
-  getDebugSnapshot: getHomeBindingsSnapshot,
-};
+export default HomeBindings;

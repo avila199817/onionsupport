@@ -23,8 +23,8 @@
    - preserve currentResolvedUsername
    - route/publicPath sync sin degradar contexto
    - canonical sin query/hash
-   - publicPath con query/hash
-   - auth alineada con state.computeAuthenticated()
+   - publicPath con query/hash y /@usuario preservado
+   - auth alineada con state.computeAuthenticated(), pero estricta contra token-only auth
    - una sola mutación lógica cuando setState está disponible
    - no dobles setState innecesarios
    - compatible con preboot theme system/light/dark
@@ -35,7 +35,6 @@ import { config } from "./config.js";
 
 import {
   normalizePath,
-  normalizePublicPath,
   normalizeCanonicalPath,
   normalizeUser,
   hasValidToken,
@@ -66,7 +65,7 @@ import {
 ========================================================= */
 
 const SESSION_VERSION =
-  "11.0.0";
+  "12.0.0";
 
 const DEFAULT_ROUTE =
   "/";
@@ -79,6 +78,12 @@ const DEFAULT_THEME =
 
 const DEFAULT_THEME_MODE =
   "system";
+
+const ACTIVATION_PATH =
+  "/activate-account";
+
+const RESET_CONFIRM_PATH =
+  "/reset-password/confirm";
 
 const VALID_THEMES =
   Object.freeze([
@@ -197,6 +202,24 @@ const AUTH_STORAGE_KEYS =
     "postLoginTarget",
   ]);
 
+const USER_ID_KEYS =
+  Object.freeze([
+    "id",
+    "userId",
+    "user_id",
+    "_id",
+    "uid",
+    "sub",
+    "username",
+    "userName",
+    "user_name",
+    "email",
+    "mail",
+    "phone",
+    "telefono",
+    "mobile",
+  ]);
+
 const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code/i;
 
@@ -306,9 +329,17 @@ function localSafeArray(value) {
   }
 }
 
-function safeNowIso() {
+function safeNow() {
   try {
-    return new Date().toISOString();
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+function safeNowIso(ms = safeNow()) {
+  try {
+    return new Date(ms).toISOString();
   } catch {
     return "";
   }
@@ -330,9 +361,16 @@ function hasOwn(obj, key) {
 }
 
 function safeEmit(events, name, payload = {}) {
+  const eventName =
+    localSafeText(name, "");
+
+  if (!eventName) {
+    return false;
+  }
+
   try {
     events?.emit?.(
-      name,
+      eventName,
       payload
     );
 
@@ -803,38 +841,344 @@ function createUserSnapshot(user = null) {
    PATH HELPERS
 ========================================================= */
 
-function safeCanonicalPath(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
-  try {
-    return normalizeCanonicalPath(
-      value || fallback || DEFAULT_ROUTE
-    );
-  } catch {
-    return fallback || DEFAULT_ROUTE;
+function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
+  let value =
+    String(pathname || DEFAULT_ROUTE)
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+  if (!value) {
+    value =
+      DEFAULT_ROUTE;
   }
+
+  if (!value.startsWith("/")) {
+    value =
+      `/${value}`;
+  }
+
+  const segments =
+    value
+      .split("/")
+      .filter(Boolean);
+
+  const normalizedSegments =
+    [];
+
+  for (const segment of segments) {
+    if (segment === ".") {
+      continue;
+    }
+
+    if (segment === "..") {
+      normalizedSegments.pop();
+      continue;
+    }
+
+    normalizedSegments.push(segment);
+  }
+
+  value =
+    `/${normalizedSegments.join("/")}`;
+
+  if (!value) {
+    value =
+      DEFAULT_ROUTE;
+  }
+
+  if (
+    value.length > 1 &&
+    value.endsWith("/")
+  ) {
+    value =
+      value.replace(/\/+$/g, "") ||
+      DEFAULT_ROUTE;
+  }
+
+  return value;
 }
 
-function safePublicPath(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
+function normalizeSearch(search = "") {
+  const raw =
+    localSafeText(search, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  return raw.startsWith("?")
+    ? raw
+    : `?${raw.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const raw =
+    localSafeText(hash, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  return raw.startsWith("#")
+    ? raw
+    : `#${raw.replace(/^#+/, "")}`;
+}
+
+function isHashRouterPath(value = "") {
+  const raw =
+    localSafeText(value, "");
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw =
+    localSafeText(value, "");
+
+  if (!raw) {
+    return DEFAULT_ROUTE;
+  }
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/") ||
+      DEFAULT_ROUTE;
+  }
+
+  return raw.replace(/^#\/?/, "/") ||
+    DEFAULT_ROUTE;
+}
+
+function splitFullPath(value = DEFAULT_ROUTE) {
+  const raw =
+    localSafeText(value, DEFAULT_ROUTE) ||
+    DEFAULT_ROUTE;
+
+  if (isHashRouterPath(raw)) {
+    return splitFullPath(
+      normalizeHashRouterPath(raw)
+    );
+  }
+
+  let pathname =
+    raw;
+
+  let search =
+    "";
+
+  let hash =
+    "";
+
+  const hashIndex =
+    pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash =
+      pathname.slice(hashIndex);
+
+    pathname =
+      pathname.slice(0, hashIndex) ||
+      DEFAULT_ROUTE;
+  }
+
+  const searchIndex =
+    pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search =
+      pathname.slice(searchIndex);
+
+    pathname =
+      pathname.slice(0, searchIndex) ||
+      DEFAULT_ROUTE;
+  }
+
+  return {
+    pathname:
+      normalizePathnameOnly(pathname),
+    search:
+      normalizeSearch(search),
+    hash:
+      normalizeHash(hash),
+  };
+}
+
+function getBaseOrigin() {
+  if (
+    isBrowser() &&
+    window.location?.origin
+  ) {
+    return window.location.origin;
+  }
+
+  return "http://localhost";
+}
+
+function normalizePublicPathLocal(value = DEFAULT_ROUTE) {
+  const raw =
+    localSafeText(value, DEFAULT_ROUTE) ||
+    DEFAULT_ROUTE;
+
+  if (isHashRouterPath(raw)) {
+    return normalizePublicPathLocal(
+      normalizeHashRouterPath(raw)
+    );
+  }
+
   try {
-    if (typeof normalizePublicPath === "function") {
-      return normalizePublicPath(
-        value || fallback || DEFAULT_ROUTE
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
+      const parsed =
+        new URL(
+          raw,
+          getBaseOrigin()
+        );
+
+      if (
+        parsed.hash &&
+        isHashRouterPath(parsed.hash)
+      ) {
+        return normalizePublicPathLocal(
+          normalizeHashRouterPath(parsed.hash)
+        );
+      }
+
+      return normalizePublicPathLocal(
+        `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`
       );
     }
   } catch {}
 
   try {
-    return normalizePath(
-      value || fallback || DEFAULT_ROUTE
+    const delegated =
+      normalizePath(raw);
+
+    if (
+      delegated &&
+      !raw.includes("@") &&
+      !raw.includes("?") &&
+      !raw.includes("#")
+    ) {
+      const parts =
+        splitFullPath(delegated);
+
+      return `${parts.pathname}${parts.search}${parts.hash}`;
+    }
+  } catch {}
+
+  const {
+    pathname,
+    search,
+    hash,
+  } =
+    splitFullPath(raw);
+
+  return `${pathname}${search}${hash}`;
+}
+
+function stripPublicUsernamePrefix(path = DEFAULT_ROUTE) {
+  const parts =
+    splitFullPath(
+      normalizePublicPathLocal(path)
     );
-  } catch {
-    return fallback || DEFAULT_ROUTE;
+
+  const segments =
+    parts.pathname
+      .split("/")
+      .filter(Boolean);
+
+  if (
+    segments.length > 0 &&
+    /^@[A-Za-z0-9._-]{1,80}$/.test(segments[0])
+  ) {
+    const rest =
+      segments.slice(1).join("/");
+
+    const cleanPathname =
+      rest
+        ? normalizePathnameOnly(`/${rest}`)
+        : DEFAULT_ROUTE;
+
+    return `${cleanPathname}${parts.search}${parts.hash}`;
   }
+
+  return `${parts.pathname}${parts.search}${parts.hash}`;
+}
+
+function stripSearchAndHash(path = DEFAULT_ROUTE) {
+  const parts =
+    splitFullPath(path);
+
+  return normalizePathnameOnly(
+    parts.pathname || DEFAULT_ROUTE
+  );
+}
+
+function collapseTechnicalCanonicalPath(pathname = DEFAULT_ROUTE) {
+  const clean =
+    normalizePathnameOnly(pathname);
+
+  if (
+    clean === ACTIVATION_PATH ||
+    clean.startsWith(`${ACTIVATION_PATH}/`)
+  ) {
+    return ACTIVATION_PATH;
+  }
+
+  if (
+    clean === RESET_CONFIRM_PATH ||
+    clean.startsWith(`${RESET_CONFIRM_PATH}/`)
+  ) {
+    return RESET_CONFIRM_PATH;
+  }
+
+  return clean;
+}
+
+function safeCanonicalPath(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
+  const source =
+    value || fallback || DEFAULT_ROUTE;
+
+  try {
+    const noUsername =
+      stripPublicUsernamePrefix(source);
+
+    const external =
+      normalizeCanonicalPath(
+        noUsername || DEFAULT_ROUTE
+      );
+
+    return collapseTechnicalCanonicalPath(
+      stripSearchAndHash(
+        external || noUsername || DEFAULT_ROUTE
+      )
+    );
+  } catch {}
+
+  return collapseTechnicalCanonicalPath(
+    stripSearchAndHash(
+      stripPublicUsernamePrefix(
+        source
+      )
+    )
+  );
+}
+
+function safePublicPath(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
+  const source =
+    value || fallback || DEFAULT_ROUTE;
+
+  return normalizePublicPathLocal(source);
 }
 
 function extractUsernameFromPublicPath(publicPath = DEFAULT_ROUTE) {
+  const clean =
+    normalizePublicPathLocal(publicPath);
+
   const match =
-    String(publicPath || "")
-      .match(/^\/@([^/]+)(?:\/|$)/i);
+    clean.match(/^\/@([^/]+)(?:\/|$)/i);
 
   return safeSanitizeUsername(
     match?.[1] || ""
@@ -866,45 +1210,80 @@ function hasUsableUser(user = null) {
     return false;
   }
 
-  return Boolean(
-    localSafeText(user.id, "") ||
-      localSafeText(user.userId, "") ||
-      localSafeText(user.username, "") ||
-      localSafeText(user.email, "") ||
-      localSafeText(user.name, "") ||
-      localSafeText(user.displayName, "")
-  );
-}
-
-function computeAuthSafe(user = null, token = null) {
-  try {
-    return Boolean(
-      computeAuthenticated(
-        user,
-        token
-      )
-    );
-  } catch {}
-
-  if (!safeHasValidToken(token)) {
-    return false;
-  }
-
   if (
-    user &&
-    isObject(user) &&
-    (
-      user.active === false ||
-      user.disabled === true ||
-      user.deleted === true ||
-      user.status === "disabled" ||
-      user.status === "inactive"
-    )
+    user.active === false ||
+    user.disabled === true ||
+    user.isDisabled === true ||
+    user.deleted === true ||
+    user.isDeleted === true ||
+    user.blocked === true ||
+    user.isBlocked === true
   ) {
     return false;
   }
 
-  return true;
+  const status =
+    localSafeLower(
+      user.status ||
+        user.estado ||
+        user.state ||
+        user.accountStatus ||
+        "",
+      ""
+    );
+
+  if (
+    [
+      "disabled",
+      "inactive",
+      "deleted",
+      "blocked",
+      "suspended",
+      "banned",
+    ].includes(status)
+  ) {
+    return false;
+  }
+
+  return USER_ID_KEYS.some((key) =>
+    Boolean(
+      localSafeText(user?.[key], "")
+    )
+  );
+}
+
+function computeAuthSafe(user = null, token = null) {
+  const validToken =
+    safeHasValidToken(token);
+
+  const usableUser =
+    hasUsableUser(user);
+
+  if (
+    !validToken ||
+    !usableUser
+  ) {
+    return false;
+  }
+
+  try {
+    const computed =
+      computeAuthenticated(
+        user,
+        token
+      );
+
+    return Boolean(
+      computed &&
+        validToken &&
+        usableUser
+    );
+  } catch {}
+
+  return Boolean(
+    validToken &&
+      usableUser
+  );
 }
 
 function resolveResolvedUsername({
@@ -1419,27 +1798,33 @@ function resolveStoredTheme(storage) {
       ? bootTheme.theme
       : "";
 
+  const storedThemeModeRaw =
+    safeStorageGet(
+      storage,
+      getStorageKey("themeMode"),
+      ""
+    ) ||
+    safeStorageGet(
+      storage,
+      getStorageKey("appearance"),
+      ""
+    );
+
   const storedThemeMode =
-    normalizeThemeMode(
-      safeStorageGet(
-        storage,
-        getStorageKey("themeMode"),
-        ""
-      ) ||
-      safeStorageGet(
-        storage,
-        getStorageKey("appearance"),
-        ""
-      )
+    storedThemeModeRaw
+      ? normalizeThemeMode(storedThemeModeRaw)
+      : "";
+
+  const storedThemeRaw =
+    safeStorageGet(
+      storage,
+      getStorageKey("theme"),
+      bootResolvedTheme || config.defaultTheme || DEFAULT_THEME
     );
 
   const storedTheme =
     normalizeTheme(
-      safeStorageGet(
-        storage,
-        getStorageKey("theme"),
-        bootResolvedTheme || config.defaultTheme || DEFAULT_THEME
-      )
+      storedThemeRaw
     );
 
   const finalMode =
@@ -1462,6 +1847,43 @@ function resolveStoredTheme(storage) {
     themeMode:
       normalizeThemeMode(finalMode),
   };
+}
+
+export function syncThemeMetaColor({
+  dom,
+  theme = config.defaultTheme,
+} = {}) {
+  const finalTheme =
+    normalizeTheme(theme);
+
+  const color =
+    getThemeColor(finalTheme);
+
+  const candidates =
+    [
+      dom?.themeColorMeta,
+      dom?.metaThemeColor,
+      isBrowser()
+        ? document.querySelector?.("meta[name='theme-color']")
+        : null,
+    ].filter(Boolean);
+
+  let synced =
+    false;
+
+  for (const meta of candidates) {
+    try {
+      meta.setAttribute(
+        "content",
+        color
+      );
+
+      synced =
+        true;
+    } catch {}
+  }
+
+  return synced;
 }
 
 function applyThemeDom({
@@ -1735,14 +2157,20 @@ function syncRouteFields({
       DEFAULT_ROUTE
     );
 
+  const nextStatePreview = {
+    ...state,
+
+    route:
+      nextCanonical,
+
+    publicPath:
+      nextPublicPath,
+  };
+
   const authPatch =
-    buildAuthPatch({
-      ...state,
-      route:
-        nextCanonical,
-      publicPath:
-        nextPublicPath,
-    });
+    buildAuthPatch(
+      nextStatePreview
+    );
 
   const patch = {
     route:
@@ -1791,6 +2219,7 @@ export function setRoute({
   setState,
   events,
   route = DEFAULT_ROUTE,
+  options = {},
 } = {}) {
   const previousRoute =
     safeCanonicalPath(
@@ -1819,7 +2248,8 @@ export function setRoute({
   if (
     !safeSetState(
       setState,
-      patch
+      patch,
+      localSafeObject(options)
     ) &&
     state
   ) {
@@ -1844,6 +2274,9 @@ export function setRoute({
         safeRedact(
           state?.publicPath || normalized
         ),
+
+      changedAt:
+        safeNowIso(),
     }
   );
 
@@ -1856,6 +2289,7 @@ export function setPublicPath({
   setState,
   events,
   path = DEFAULT_ROUTE,
+  options = {},
 } = {}) {
   const previousPublicPath =
     safePublicPath(
@@ -1884,7 +2318,8 @@ export function setPublicPath({
   if (
     !safeSetState(
       setState,
-      patch
+      patch,
+      localSafeObject(options)
     ) &&
     state
   ) {
@@ -1916,6 +2351,9 @@ export function setPublicPath({
         safeCanonicalPath(
           state?.route || DEFAULT_ROUTE
         ),
+
+      changedAt:
+        safeNowIso(),
     }
   );
 
@@ -1933,6 +2371,7 @@ export function setUser({
   setState,
   syncUserUI,
   user = null,
+  options = {},
 } = {}) {
   const normalizedUser =
     user
@@ -1973,20 +2412,40 @@ export function setUser({
     return normalizedUser;
   }
 
+  const nextPreview = {
+    ...localSafeObject(state),
+
+    user:
+      normalizedUser,
+  };
+
+  const authPatch =
+    buildAuthPatch(nextPreview);
+
   const patch = {
     user:
       normalizedUser,
+
+    ...authPatch,
   };
 
   if (
     !safeSetState(
       setState,
-      patch
+      patch,
+      {
+        ...localSafeObject(options),
+
+        forceUnauthenticated:
+          !patch.authenticated,
+      }
     ) &&
     state
   ) {
-    state.user =
-      normalizedUser;
+    Object.assign(
+      state,
+      patch
+    );
 
     syncAuthState(state);
   }
@@ -2045,6 +2504,9 @@ export function setUser({
         safeRedact(
           safeGetUserAvatarUrl(normalizedUser) || ""
         ),
+
+      changedAt:
+        safeNowIso(),
     }
   );
 
@@ -2066,6 +2528,7 @@ export function setToken({
   events,
   setState,
   token = null,
+  options = {},
 } = {}) {
   const normalized =
     safeHasValidToken(token)
@@ -2112,9 +2575,27 @@ export function setToken({
     return normalized;
   }
 
+  const nextPreview = {
+    ...localSafeObject(state),
+
+    token:
+      normalized,
+  };
+
+  const authPatch =
+    buildAuthPatch(
+      nextPreview,
+      {
+        forceUnauthenticated:
+          !normalized,
+      }
+    );
+
   const patch = {
     token:
       normalized,
+
+    ...authPatch,
   };
 
   if (
@@ -2122,14 +2603,18 @@ export function setToken({
       setState,
       patch,
       {
+        ...localSafeObject(options),
+
         forceUnauthenticated:
-          !normalized,
+          !patch.authenticated,
       }
     ) &&
     state
   ) {
-    state.token =
-      normalized;
+    Object.assign(
+      state,
+      patch
+    );
 
     syncAuthState(
       state,
@@ -2181,6 +2666,9 @@ export function setToken({
 
       currentResolvedUsername:
         state?.currentResolvedUsername || null,
+
+      changedAt:
+        safeNowIso(),
     }
   );
 
@@ -2194,6 +2682,49 @@ export function setToken({
   );
 
   return normalized;
+}
+
+/* =========================================================
+   AUX SESSION STORAGE
+========================================================= */
+
+function persistAuxSessionValue(storage, keyName, value) {
+  const key =
+    getStorageKey(keyName);
+
+  if (value === undefined) {
+    return false;
+  }
+
+  if (
+    value === null ||
+    value === ""
+  ) {
+    return safeStorageRemove(
+      storage,
+      key,
+      {
+        all:
+          true,
+      }
+    );
+  }
+
+  if (
+    keyName.toLowerCase().includes("token")
+  ) {
+    return safeStorageSetRaw(
+      storage,
+      key,
+      String(value)
+    );
+  }
+
+  return safeStorageSet(
+    storage,
+    key,
+    value
+  );
 }
 
 /* =========================================================
@@ -2230,11 +2761,22 @@ export function applySession({
   setUser,
   setToken,
   setState,
+
   token = undefined,
   user = undefined,
+
+  refreshToken = undefined,
+  tempToken = undefined,
+  sessionId = undefined,
+  sessionUserId = undefined,
+
   route = undefined,
   publicPath = undefined,
+  options = {},
 } = {}) {
+  const opts =
+    localSafeObject(options);
+
   const previousAuth =
     createAuthSnapshot(state);
 
@@ -2255,6 +2797,55 @@ export function applySession({
         : null
       : state?.user ?? null;
 
+  const nextPublicPath =
+    publicPath !== undefined
+      ? safePublicPath(
+          publicPath,
+          state?.publicPath ||
+            state?.route ||
+            DEFAULT_ROUTE
+        )
+      : state?.publicPath || DEFAULT_ROUTE;
+
+  const nextRoute =
+    route !== undefined
+      ? safeCanonicalPath(
+          route,
+          state?.route || DEFAULT_ROUTE
+        )
+      : safeCanonicalPath(
+          nextPublicPath ||
+            state?.route ||
+            DEFAULT_ROUTE
+        );
+
+  const nextPreview = {
+    ...localSafeObject(state),
+
+    token:
+      nextToken,
+
+    user:
+      nextUser,
+
+    route:
+      nextRoute,
+
+    publicPath:
+      nextPublicPath,
+  };
+
+  const authPatch =
+    buildAuthPatch(
+      nextPreview,
+      {
+        forceUnauthenticated:
+          token === null ||
+          !nextToken ||
+          !hasUsableUser(nextUser),
+      }
+    );
+
   if (hasDirectMutation && state) {
     const basePatch = {};
 
@@ -2270,29 +2861,30 @@ export function applySession({
 
     if (route !== undefined) {
       basePatch.route =
-        safeCanonicalPath(
-          route,
-          state.route || DEFAULT_ROUTE
-        );
+        nextRoute;
     }
 
     if (publicPath !== undefined) {
       basePatch.publicPath =
-        safePublicPath(
-          publicPath,
-          state.publicPath ||
-            state.route ||
-            DEFAULT_ROUTE
-        );
+        nextPublicPath;
     }
+
+    Object.assign(
+      basePatch,
+      authPatch
+    );
 
     safeSetState(
       setState,
       basePatch,
       {
+        ...opts,
+
+        source:
+          opts.source || "core-session:applySession",
+
         forceUnauthenticated:
-          token === null ||
-          nextToken === null,
+          !authPatch.authenticated,
       }
     );
 
@@ -2306,7 +2898,11 @@ export function applySession({
       } else {
         safeStorageRemove(
           storage,
-          getStorageKey("token")
+          getStorageKey("token"),
+          {
+            all:
+              true,
+          }
         );
       }
     }
@@ -2321,7 +2917,11 @@ export function applySession({
       } else {
         safeStorageRemove(
           storage,
-          getStorageKey("user")
+          getStorageKey("user"),
+          {
+            all:
+              true,
+          }
         );
       }
     }
@@ -2348,14 +2948,6 @@ export function applySession({
       );
     }
 
-    syncAuthState(
-      state,
-      {
-        forceUnauthenticated:
-          token === null,
-      }
-    );
-
     if (
       route !== undefined ||
       publicPath !== undefined
@@ -2363,20 +2955,54 @@ export function applySession({
       syncRouteFields({
         state,
         setState,
-        route,
-        publicPath,
+        route:
+          nextRoute,
+        publicPath:
+          nextPublicPath,
       });
+    }
+
+    if (state) {
+      Object.assign(
+        state,
+        authPatch
+      );
     }
   }
 
-  syncAuthState(
-    state,
-    {
-      forceUnauthenticated:
-        token === null ||
-        nextToken === null,
-    }
+  persistAuxSessionValue(
+    storage,
+    "refreshToken",
+    refreshToken
   );
+
+  persistAuxSessionValue(
+    storage,
+    "tempToken",
+    tempToken
+  );
+
+  persistAuxSessionValue(
+    storage,
+    "sessionId",
+    sessionId
+  );
+
+  persistAuxSessionValue(
+    storage,
+    "sessionUserId",
+    sessionUserId
+  );
+
+  if (state) {
+    syncAuthState(
+      state,
+      {
+        forceUnauthenticated:
+          !authPatch.authenticated,
+      }
+    );
+  }
 
   emitAuthChangeIfNeeded(
     events,
@@ -2473,6 +3099,9 @@ export function clearSession({
       setState,
       patch,
       {
+        source:
+          opts.source || "core-session:clearSession",
+
         forceUnauthenticated:
           true,
       }
@@ -2558,41 +3187,26 @@ export function clearSession({
    PREFS LOAD
 ========================================================= */
 
-export function syncThemeMetaColor({
-  dom,
-  theme = config.defaultTheme,
-} = {}) {
-  const finalTheme =
-    normalizeTheme(theme);
+function resolveStoredSidebarOpen(storage) {
+  const stored =
+    safeStorageGet(
+      storage,
+      getStorageKey("sidebarOpen"),
+      null
+    );
 
-  const color =
-    getThemeColor(finalTheme);
-
-  const candidates =
-    [
-      dom?.themeColorMeta,
-      dom?.metaThemeColor,
-      isBrowser()
-        ? document.querySelector?.("meta[name='theme-color']")
-        : null,
-    ].filter(Boolean);
-
-  let synced =
-    false;
-
-  for (const meta of candidates) {
-    try {
-      meta.setAttribute(
-        "content",
-        color
-      );
-
-      synced =
-        true;
-    } catch {}
+  if (
+    stored === null ||
+    stored === undefined ||
+    stored === ""
+  ) {
+    return true;
   }
 
-  return synced;
+  return localSafeBool(
+    stored,
+    true
+  );
 }
 
 export function loadPreferences({
@@ -2624,12 +3238,8 @@ export function loadPreferences({
   const lang =
     normalizeLang(savedLang);
 
-  /*
-    Regla UX:
-    por defecto abierto. Evita residuos legacy tipo sidebar-collapsed.
-  */
   const sidebarOpen =
-    true;
+    resolveStoredSidebarOpen(storage);
 
   if (state) {
     state.theme =
@@ -2754,6 +3364,11 @@ export function loadSession({
         )
       : null;
 
+  const usableSavedUser =
+    hasUsableUser(savedUser)
+      ? savedUser
+      : null;
+
   if (state) {
     state.token =
       savedToken;
@@ -2761,11 +3376,12 @@ export function loadSession({
     /*
       Punto crítico:
       si no hay token válido, no hidratamos usuario antiguo.
-      Esto evita avatar fantasma/topbar con usuario viejo.
+      Si hay token pero el usuario no es usable, hasToken queda true
+      pero authenticated queda false hasta que /me restaure usuario real.
     */
     state.user =
       savedToken
-        ? savedUser
+        ? usableSavedUser
         : null;
   }
 
@@ -2773,13 +3389,14 @@ export function loadSession({
     state,
     {
       forceUnauthenticated:
-        !savedToken,
+        !savedToken ||
+        !usableSavedUser,
     }
   );
 
   const userTheme =
-    savedToken
-      ? resolveThemeFromUser(savedUser)
+    savedToken && usableSavedUser
+      ? resolveThemeFromUser(usableSavedUser)
       : null;
 
   if (
@@ -2866,6 +3483,10 @@ export function setTheme({
 
       themeMode:
         finalMode,
+    },
+    {
+      source:
+        "core-session:setTheme",
     }
   );
 
@@ -2946,6 +3567,10 @@ export function setLang({
     {
       lang:
         normalized,
+    },
+    {
+      source:
+        "core-session:setLang",
     }
   );
 
@@ -2991,6 +3616,10 @@ export function setSidebarOpen({
     {
       sidebarOpen:
         next,
+    },
+    {
+      source:
+        "core-session:setSidebarOpen",
     }
   );
 
@@ -2998,12 +3627,6 @@ export function setSidebarOpen({
     storage,
     getStorageKey("sidebarOpen"),
     next
-  );
-
-  safeStorageSet(
-    storage,
-    "sidebar-collapsed",
-    !next
   );
 
   toggleClass(
@@ -3081,7 +3704,17 @@ export function setLoading({
     {
       loading:
         next,
+    },
+    {
+      source:
+        "core-session:setLoading",
     }
+  );
+
+  toggleClass(
+    dom?.html,
+    "app-loading",
+    next
   );
 
   toggleClass(
@@ -3094,6 +3727,12 @@ export function setLoading({
     dom?.body,
     "app-loading",
     next
+  );
+
+  setDataset(
+    dom?.html,
+    "appLoading",
+    next ? "true" : "false"
   );
 
   setDataset(
@@ -3173,6 +3812,10 @@ export function setError({
 
       hasError:
         Boolean(normalized),
+    },
+    {
+      source:
+        "core-session:setError",
     }
   );
 

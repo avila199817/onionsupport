@@ -32,6 +32,7 @@ env:
   API_LOCATION: ""
   OUTPUT_LOCATION: ""
   PRODUCTION_BRANCH: "main"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   AZURE_STATIC_WEB_APPS_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
 
 jobs:
@@ -158,11 +159,18 @@ jobs:
 
           def get_attr(tag, attr):
               match = re.search(
-                  rf'\b{re.escape(attr)}\s*=\s*["\']([^"\']+)["\']',
+                  rf'\b{re.escape(attr)}\s*=\s*["\']([^"\']*)["\']',
                   tag,
                   flags=re.IGNORECASE
               )
               return match.group(1).strip() if match else ""
+
+          def has_attr(tag, attr):
+              return re.search(
+                  rf'\b{re.escape(attr)}(?:\s*=\s*["\'][^"\']*["\'])?',
+                  tag,
+                  flags=re.IGNORECASE
+              ) is not None
 
           def normalize_url_path(value):
               value = str(value or "").strip()
@@ -174,6 +182,22 @@ jobs:
                   return True
               physical = app_root / clean.lstrip("/")
               return physical.exists()
+
+          def find_tag_with_asset(html, tag_name, attr_name, asset_path):
+              pattern = rf"<{re.escape(tag_name)}\b[^>]*>"
+              for match in re.finditer(pattern, html, flags=re.IGNORECASE):
+                  tag = match.group(0)
+                  attr_value = normalize_url_path(get_attr(tag, attr_name))
+                  if attr_value == asset_path:
+                      return match.start(), tag
+              return -1, ""
+
+          def has_id(html, dom_id):
+              return re.search(
+                  rf'\bid\s*=\s*["\']{re.escape(dom_id)}["\']',
+                  html,
+                  flags=re.IGNORECASE
+              ) is not None
 
           config = load_json(config_path)
           manifest = load_json(manifest_path)
@@ -190,10 +214,7 @@ jobs:
           rewrite = navigation.get("rewrite")
 
           if rewrite != "/index.html":
-              error(
-                  config_path,
-                  "navigationFallback.rewrite debe ser /index.html para Onion SPA."
-              )
+              error(config_path, "navigationFallback.rewrite debe ser /index.html para Onion SPA.")
 
           excludes = navigation.get("exclude") or []
 
@@ -213,23 +234,16 @@ jobs:
               "/assets/*"
           ]
 
-          missing_excludes = [
-              item for item in required_excludes
-              if item not in excludes
-          ]
+          missing_excludes = [item for item in required_excludes if item not in excludes]
 
           if missing_excludes:
               warning(
                   config_path,
-                  "Faltan excludes recomendados en navigationFallback: "
-                  + ", ".join(missing_excludes)
+                  "Faltan excludes recomendados en navigationFallback: " + ", ".join(missing_excludes)
               )
 
           if "/favicon.svg" in excludes:
-              error(
-                  config_path,
-                  "No declares /favicon.svg en navigationFallback.exclude porque no existe ni se usa."
-              )
+              error(config_path, "No declares /favicon.svg en navigationFallback.exclude porque no existe ni se usa.")
 
           routes = config.get("routes") or []
 
@@ -245,10 +259,7 @@ jobs:
               error(config_path, "Debe existir una regla para /sitemap.xml.")
 
           if not any(route.get("statusCode") == 404 for route in sitemap_routes):
-              error(
-                  config_path,
-                  "/sitemap.xml debe responder 404 mientras Onion Support sea SPA privada."
-              )
+              error(config_path, "/sitemap.xml debe responder 404 mientras Onion Support sea SPA privada.")
 
           static_config_routes = [
               route for route in routes
@@ -256,10 +267,7 @@ jobs:
           ]
 
           if not static_config_routes:
-              error(
-                  config_path,
-                  "Debe existir una regla que oculte /staticwebapp.config.json."
-              )
+              error(config_path, "Debe existir una regla que oculte /staticwebapp.config.json.")
 
           if not any(route.get("statusCode") == 404 for route in static_config_routes):
               error(config_path, "/staticwebapp.config.json debe responder 404.")
@@ -285,28 +293,16 @@ jobs:
               "manifest-src 'self'"
           ]
 
-          missing_csp = [
-              part for part in required_csp_parts
-              if part not in csp
-          ]
+          missing_csp = [part for part in required_csp_parts if part not in csp]
 
           if missing_csp:
-              error(
-                  config_path,
-                  "CSP incompleta. Faltan: " + ", ".join(missing_csp)
-              )
+              error(config_path, "CSP incompleta. Faltan: " + ", ".join(missing_csp))
 
           if "'unsafe-inline'" in csp:
-              error(
-                  config_path,
-                  "La CSP no debe permitir 'unsafe-inline'. Onion SPA no usa CSS/JS inline."
-              )
+              error(config_path, "La CSP no debe permitir 'unsafe-inline'. Onion SPA no usa CSS/JS inline.")
 
           if "fonts.googleapis.com" in csp or "fonts.gstatic.com" in csp:
-              error(
-                  config_path,
-                  "La CSP no debe permitir Google Fonts. Onion usa fuentes locales/sistema."
-              )
+              error(config_path, "La CSP no debe permitir Google Fonts. Onion usa fuentes locales/sistema.")
 
           mime_types = config.get("mimeTypes") or {}
 
@@ -327,10 +323,7 @@ jobs:
           for ext, expected in required_mimes.items():
               actual = mime_types.get(ext)
               if actual != expected:
-                  error(
-                      config_path,
-                      f"mimeTypes{ext} debe ser {expected}, valor actual: {actual!r}"
-                  )
+                  error(config_path, f"mimeTypes{ext} debe ser {expected}, valor actual: {actual!r}")
 
           # =====================================================
           # index.html
@@ -339,47 +332,70 @@ jobs:
           if not index_text.lstrip().lower().startswith("<!doctype html>"):
               warning(index_path, "index.html debería empezar con <!DOCTYPE html>.")
 
-          html_open_match = re.search(
-              r"<html\b[^>]*>",
-              index_without_comments,
-              flags=re.IGNORECASE
-          )
+          html_open_match = re.search(r"<html\b[^>]*>", index_without_comments, flags=re.IGNORECASE)
 
           if not html_open_match:
               error(index_path, "No se detectó etiqueta <html>.")
 
           html_open = html_open_match.group(0)
 
-          if 'lang="es"' not in html_open and "lang='es'" not in html_open:
+          if get_attr(html_open, "lang").lower() != "es":
               error(index_path, "El shell SPA debe declarar html lang=\"es\".")
 
-          if 'data-app="onion"' not in html_open and "data-app='onion'" not in html_open:
+          if get_attr(html_open, "data-app").lower() != "onion":
               error(index_path, "El shell SPA debe declarar data-app=\"onion\".")
 
-          if '<base href="/"' not in index_without_comments.lower() and "<base href='/'" not in index_without_comments.lower():
+          base_match = re.search(r"<base\b[^>]*>", index_without_comments, flags=re.IGNORECASE)
+
+          if not base_match or get_attr(base_match.group(0), "href") != "/":
               error(index_path, "index.html debe declarar <base href=\"/\">.")
 
-          theme_pos = index_without_comments.find("/src/preboot/theme.js")
-          css_pos = index_without_comments.find("/src/css/app.css")
-          main_pos = index_without_comments.find("/src/main.js")
+          theme_pos, theme_tag = find_tag_with_asset(
+              index_without_comments,
+              "script",
+              "src",
+              "/src/preboot/theme.js"
+          )
+
+          css_pos, css_tag = find_tag_with_asset(
+              index_without_comments,
+              "link",
+              "href",
+              "/src/css/app.css"
+          )
+
+          main_pos, main_tag = find_tag_with_asset(
+              index_without_comments,
+              "script",
+              "src",
+              "/src/main.js"
+          )
 
           if theme_pos < 0:
-              error(index_path, "No se detectó /src/preboot/theme.js antes del boot.")
+              error(index_path, "No se detectó <script src=\"/src/preboot/theme.js\">.")
 
           if css_pos < 0:
-              error(index_path, "No se detectó /src/css/app.css como CSS entrypoint.")
+              error(index_path, "No se detectó <link rel=\"stylesheet\" href=\"/src/css/app.css\">.")
 
           if main_pos < 0:
-              error(index_path, "No se detectó /src/main.js como entrada principal.")
+              error(index_path, "No se detectó <script type=\"module\" src=\"/src/main.js\">.")
+
+          if has_attr(theme_tag, "async") or has_attr(theme_tag, "defer") or get_attr(theme_tag, "type"):
+              error(index_path, "/src/preboot/theme.js debe cargar síncrono antes del CSS, sin async, sin defer y sin type=module.")
+
+          css_rel_tokens = set(get_attr(css_tag, "rel").lower().split())
+
+          if "stylesheet" not in css_rel_tokens:
+              error(index_path, "/src/css/app.css debe cargarse con rel=\"stylesheet\".")
+
+          if get_attr(main_tag, "type").lower() != "module":
+              error(index_path, "/src/main.js debe cargarse con type=\"module\".")
 
           if not (theme_pos < css_pos < main_pos):
               error(
                   index_path,
-                  "Orden inválido. Debe cargar /src/preboot/theme.js antes de /src/css/app.css y /src/main.js después."
+                  "Orden inválido. Debe ser: /src/preboot/theme.js antes de /src/css/app.css y /src/main.js después del CSS."
               )
-
-          if 'type="module"' not in index_without_comments and "type='module'" not in index_without_comments:
-              error(index_path, "No se detectó script type=module. /src/main.js debe cargar como módulo.")
 
           if "fonts.googleapis.com" in index_without_comments or "fonts.gstatic.com" in index_without_comments:
               error(index_path, "index.html no debe referenciar Google Fonts.")
@@ -408,11 +424,7 @@ jobs:
           if any("favicon.svg" in ref for ref in html_asset_refs):
               error(index_path, "index.html no debe referenciar favicon.svg en href/src.")
 
-          link_tags = re.findall(
-              r"<link\b[^>]*>",
-              index_without_comments,
-              flags=re.IGNORECASE
-          )
+          link_tags = re.findall(r"<link\b[^>]*>", index_without_comments, flags=re.IGNORECASE)
 
           standard_icon_links = []
           all_icon_links = []
@@ -423,34 +435,25 @@ jobs:
               href_path = normalize_url_path(href_value)
 
               rel_tokens = set(rel_value.split())
-              is_icon_link = "icon" in rel_tokens or "apple-touch-icon" in rel_value
+              is_icon_link = "icon" in rel_tokens or "apple-touch-icon" in rel_tokens
 
               if is_icon_link:
                   all_icon_links.append((tag, rel_value, href_value, href_path))
 
-              if "icon" in rel_tokens and "apple-touch-icon" not in rel_value:
+              if "icon" in rel_tokens and "apple-touch-icon" not in rel_tokens:
                   standard_icon_links.append((tag, rel_value, href_value, href_path))
 
               if is_icon_link and href_path == "/favicon.ico":
-                  error(
-                      index_path,
-                      "No declares /favicon.ico en index.html. Queda sólo como fallback físico pasivo."
-                  )
+                  error(index_path, "No declares /favicon.ico en index.html. Queda sólo como fallback físico pasivo.")
 
               if is_icon_link and "favicon_support.png" in href_value:
-                  error(
-                      index_path,
-                      "index.html no debe usar favicon_support.png como favicon del SPA."
-                  )
+                  error(index_path, "index.html no debe usar favicon_support.png como favicon del SPA.")
 
           if not standard_icon_links:
               error(index_path, "index.html debe declarar al menos un rel=icon estándar.")
 
           if not any("/src/media/img/favicon_black_circle.png" in href for _, _, href, _ in all_icon_links):
-              error(
-                  index_path,
-                  "El favicon real del SPA debe ser /src/media/img/favicon_black_circle.png en un link rel=icon/apple-touch-icon."
-              )
+              error(index_path, "El favicon real del SPA debe ser /src/media/img/favicon_black_circle.png en un link rel=icon/apple-touch-icon.")
 
           required_index_assets = [
               "/src/media/img/favicon_black_circle.png",
@@ -463,43 +466,35 @@ jobs:
 
           missing_assets = [
               asset for asset in required_index_assets
-              if not any(asset in ref for ref in html_asset_refs)
+              if not any(normalize_url_path(ref) == asset for ref in html_asset_refs)
           ]
 
           if missing_assets:
-              error(
-                  index_path,
-                  "Faltan assets obligatorios en href/src de index.html: "
-                  + ", ".join(missing_assets)
-              )
+              error(index_path, "Faltan assets obligatorios en href/src de index.html: " + ", ".join(missing_assets))
 
           for asset in required_index_assets:
               if not asset_exists(asset):
                   error(index_path, f"El asset obligatorio no existe físicamente: {asset}")
 
-          required_dom_nodes = [
-              'id="app-loader"',
-              'id="app-shell"',
-              'id="sidebar-mount"',
-              'id="topbar-mount"',
-              'id="main-content"',
-              'id="table-head"',
-              'id="tablehead-container"',
-              'id="app-content"',
-              'id="view-container"'
+          required_dom_ids = [
+              "app-loader",
+              "app-shell",
+              "sidebar-mount",
+              "topbar-mount",
+              "main-content",
+              "table-head",
+              "tablehead-container",
+              "app-content",
+              "view-container"
           ]
 
           missing_dom_nodes = [
-              node for node in required_dom_nodes
-              if node not in index_without_comments
+              dom_id for dom_id in required_dom_ids
+              if not has_id(index_without_comments, dom_id)
           ]
 
           if missing_dom_nodes:
-              error(
-                  index_path,
-                  "Faltan nodos canónicos del shell SPA: "
-                  + ", ".join(missing_dom_nodes)
-              )
+              error(index_path, "Faltan nodos canónicos del shell SPA: " + ", ".join(missing_dom_nodes))
 
           # =====================================================
           # site.webmanifest
@@ -520,10 +515,7 @@ jobs:
           ]
 
           if not any("/src/media/img/favicon_black_circle.png" in src for src in icon_sources):
-              error(
-                  manifest_path,
-                  "site.webmanifest debe usar /src/media/img/favicon_black_circle.png."
-              )
+              error(manifest_path, "site.webmanifest debe usar /src/media/img/favicon_black_circle.png.")
 
           forbidden_manifest_refs = [
               "/favicon.ico",
@@ -533,10 +525,7 @@ jobs:
 
           for forbidden in forbidden_manifest_refs:
               if any(forbidden in src for src in icon_sources):
-                  error(
-                      manifest_path,
-                      f"site.webmanifest no debe referenciar {forbidden}."
-                  )
+                  error(manifest_path, f"site.webmanifest no debe referenciar {forbidden}.")
 
           for src in icon_sources:
               if src.startswith("/") and not asset_exists(src):
@@ -568,31 +557,19 @@ jobs:
 
               robots_lines.append(line)
 
-          robots_lines_lower = [
-              line.lower()
-              for line in robots_lines
-          ]
+          robots_lines_lower = [line.lower() for line in robots_lines]
 
           if not any(line == "user-agent: *" for line in robots_lines_lower):
               error(robots_path, "robots.txt debe contener User-agent: *.")
 
           if not any(line == "disallow: /" for line in robots_lines_lower):
-              error(
-                  robots_path,
-                  "robots.txt debe bloquear todo el panel privado con Disallow: /."
-              )
+              error(robots_path, "robots.txt debe bloquear todo el panel privado con Disallow: /.")
 
           if any(line == "allow: /" for line in robots_lines_lower):
-              error(
-                  robots_path,
-                  "robots.txt no debe contener Allow: / porque la SPA es privada."
-              )
+              error(robots_path, "robots.txt no debe contener Allow: / porque la SPA es privada.")
 
           if any(line.startswith("sitemap:") for line in robots_lines_lower):
-              error(
-                  robots_path,
-                  "robots.txt no debe declarar Sitemap mientras /sitemap.xml responda 404."
-              )
+              error(robots_path, "robots.txt no debe declarar Sitemap mientras /sitemap.xml responda 404.")
 
           if any("favicon.svg" in line for line in robots_lines_lower):
               error(robots_path, "robots.txt no debe declarar favicon.svg.")
@@ -615,10 +592,7 @@ jobs:
               urls = root.findall(f"{namespace}url")
 
               if urls:
-                  error(
-                      sitemap_path,
-                      "sitemap.xml debe estar vacío de URLs mientras Onion Support sea SPA privada."
-                  )
+                  error(sitemap_path, "sitemap.xml debe estar vacío de URLs mientras Onion Support sea SPA privada.")
           else:
               notice(
                   sitemap_path,

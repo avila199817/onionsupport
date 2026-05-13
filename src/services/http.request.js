@@ -3,7 +3,7 @@
    Archivo: src/services/http.request.js
 
    ONION SUPPORT · HTTP REQUEST ENGINE
-   BASE EXECUTION · RETRY ENGINE · ABORT SAFE · TOKEN SAFE
+   BASE EXECUTION · RETRY ENGINE · ABORT SAFE · TOKEN SAFE · 14/10
 
    Responsabilidades:
    - Ejecutar requests base contra AppCore.apiClient / AppCore.request.
@@ -30,6 +30,9 @@
    - Retry-After vía helper.
    - No retry si _skipRetry.
    - No retry si signal abortada.
+   - Timeout distinguido de abort manual.
+   - Fallback fetch con expectedStatuses.
+   - No doble /api si apiBase ya trae /api.
    - No exponer headers/body sensibles en eventos.
 ========================================================= */
 
@@ -42,6 +45,7 @@ import {
   redactHttpValue,
   headersToPlainObject,
   sanitizeHeaders,
+  sanitizeData,
 } from "./http.helpers.js";
 
 import {
@@ -49,11 +53,88 @@ import {
 } from "./http.runtime.js";
 
 /* =========================================================
+   VERSION
+========================================================= */
+
+export const HTTP_REQUEST_ENGINE_VERSION =
+  "14.0.0";
+
+/* =========================================================
    MODULE STATE
 ========================================================= */
 
 let requestSeq =
   0;
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const DEFAULT_METHOD =
+  "GET";
+
+const DEFAULT_RESPONSE_TYPE =
+  "auto";
+
+const BODYLESS_METHODS =
+  Object.freeze([
+    "GET",
+    "HEAD",
+    "OPTIONS",
+  ]);
+
+const JSON_CONTENT_TYPES =
+  Object.freeze([
+    "application/json",
+    "+json",
+  ]);
+
+const TEXT_CONTENT_TYPES =
+  Object.freeze([
+    "text/",
+    "application/xml",
+    "application/xhtml+xml",
+    "application/csv",
+    "application/javascript",
+    "application/x-javascript",
+  ]);
+
+const BINARY_CONTENT_TYPES =
+  Object.freeze([
+    "application/octet-stream",
+    "application/pdf",
+    "application/zip",
+    "image/",
+    "audio/",
+    "video/",
+  ]);
+
+const REQUEST_EVENTS =
+  Object.freeze({
+    attempt:
+      "http:request:attempt",
+
+    attemptSuccess:
+      "http:request:attempt:success",
+
+    attemptError:
+      "http:request:attempt:error",
+
+    retry:
+      "http:retry",
+
+    retryStop:
+      "http:retry:stop",
+
+    retryAborted:
+      "http:retry:aborted",
+
+    retryBudgetTimeout:
+      "http:retry:budget-timeout",
+
+    engineError:
+      "http:request:engine:error",
+  });
 
 /* =========================================================
    BASICS
@@ -137,6 +218,11 @@ function safeRedact(value = "") {
   }
 }
 
+function safeUpper(value = "", fallback = DEFAULT_METHOD) {
+  return safeText(value, fallback)
+    .toUpperCase();
+}
+
 function getBaseOrigin() {
   if (
     isBrowser() &&
@@ -176,7 +262,37 @@ function normalizePath(path = "") {
   output =
     output.replace(/\/{2,}/g, "/");
 
+  if (
+    output.length > 1 &&
+    output.endsWith("/")
+  ) {
+    output =
+      output.replace(/\/+$/g, "") ||
+      "/";
+  }
+
   return output;
+}
+
+function getUrlPathname(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    if (isAbsoluteUrl(raw)) {
+      return normalizePath(
+        new URL(raw, getBaseOrigin()).pathname || ""
+      );
+    }
+
+    return normalizePath(raw);
+  } catch {
+    return normalizePath(raw);
+  }
 }
 
 function joinUrl(base = "", path = "") {
@@ -191,14 +307,47 @@ function joinUrl(base = "", path = "") {
     return cleanPath;
   }
 
+  const normalizedPath =
+    normalizePath(cleanPath);
+
   const cleanBase =
-    safeText(base, "");
+    safeText(base, "")
+      .replace(/\/+$/g, "");
 
   if (!cleanBase) {
-    return normalizePath(cleanPath);
+    return normalizedPath;
   }
 
-  return `${cleanBase.replace(/\/+$/g, "")}/${cleanPath.replace(/^\/+/g, "")}`;
+  const basePath =
+    getUrlPathname(cleanBase);
+
+  /*
+    Evita doble /api:
+      apiBase = https://api.onionit.net/api
+      path    = /api/auth/login
+      => https://api.onionit.net/api/auth/login
+  */
+  if (
+    basePath &&
+    basePath !== "/" &&
+    (
+      normalizedPath === basePath ||
+      normalizedPath.startsWith(`${basePath}/`)
+    )
+  ) {
+    try {
+      if (isAbsoluteUrl(cleanBase)) {
+        const parsed =
+          new URL(cleanBase, getBaseOrigin());
+
+        return `${parsed.origin}${normalizedPath}`;
+      }
+    } catch {}
+
+    return normalizedPath;
+  }
+
+  return `${cleanBase}/${normalizedPath.replace(/^\/+/g, "")}`;
 }
 
 /* =========================================================
@@ -230,40 +379,88 @@ function isSignalAborted(signal) {
   }
 }
 
+function createAbortErrorObject(message = "Request aborted", reason = null) {
+  if (reason instanceof Error) {
+    try {
+      reason.aborted =
+        true;
+    } catch {}
+
+    return reason;
+  }
+
+  const finalMessage =
+    safeText(
+      reason?.message || reason,
+      message
+    );
+
+  try {
+    if (typeof DOMException !== "undefined") {
+      const error =
+        new DOMException(
+          finalMessage,
+          "AbortError"
+        );
+
+      try {
+        error.aborted =
+          true;
+      } catch {}
+
+      return error;
+    }
+  } catch {}
+
+  const error =
+    new Error(finalMessage);
+
+  error.name =
+    "AbortError";
+
+  error.code =
+    "ABORT_ERR";
+
+  error.aborted =
+    true;
+
+  return error;
+}
+
 function buildAbortError(signal, requestConfig = {}, message = "Request aborted") {
   const reason =
     getSignalReason(signal);
 
-  if (reason instanceof Error) {
-    return buildEngineError(
-      reason,
-      requestConfig,
-      {
-        aborted:
-          true,
-      }
-    );
-  }
-
-  return normalizeError(
+  return buildEngineError(
+    createAbortErrorObject(
+      message,
+      reason
+    ),
+    requestConfig,
     {
-      name:
-        "AbortError",
-
-      message:
-        safeText(
-          reason?.message || reason,
-          message
-        ),
-
-      code:
-        "ABORT_ERR",
-
       aborted:
         true,
-    },
-    requestConfig
+
+      timeout:
+        false,
+    }
   );
+}
+
+function createTimeoutErrorObject(message = "Request timeout") {
+  const error =
+    new Error(message);
+
+  error.name =
+    "TimeoutError";
+
+  error.code =
+    "REQUEST_TIMEOUT";
+
+  error.timeout =
+    true;
+
+  return error;
 }
 
 function abortSignalAny(signals = []) {
@@ -285,7 +482,18 @@ function abortSignalAny(signals = []) {
   const controller =
     new AbortController();
 
-  const abort = (signal) => {
+  const cleanups =
+    [];
+
+  function cleanup() {
+    for (const dispose of cleanups.splice(0)) {
+      try {
+        dispose();
+      } catch {}
+    }
+  }
+
+  function abortFrom(signal) {
     if (controller.signal.aborted) {
       return;
     }
@@ -293,33 +501,42 @@ function abortSignalAny(signals = []) {
     try {
       controller.abort(
         getSignalReason(signal) ||
-          new DOMException(
-            "Request aborted",
-            "AbortError"
-          )
+          createAbortErrorObject()
       );
     } catch {
       try {
         controller.abort();
       } catch {}
+    } finally {
+      cleanup();
     }
-  };
+  }
 
   for (const signal of validSignals) {
     if (signal.aborted) {
-      abort(signal);
+      abortFrom(signal);
       break;
     }
+
+    const handler =
+      () => abortFrom(signal);
 
     try {
       signal.addEventListener(
         "abort",
-        () => abort(signal),
+        handler,
         {
           once:
             true,
         }
       );
+
+      cleanups.push(() => {
+        signal.removeEventListener(
+          "abort",
+          handler
+        );
+      });
     } catch {}
   }
 
@@ -338,6 +555,9 @@ function createTimeoutSignal(timeoutMs = 0) {
       signal:
         null,
 
+      controller:
+        null,
+
       clear:
         () => {},
     };
@@ -354,7 +574,7 @@ function createTimeoutSignal(timeoutMs = 0) {
       setTimeout(() => {
         try {
           controller.abort(
-            new Error("Request timeout")
+            createTimeoutErrorObject()
           );
         } catch {
           try {
@@ -368,6 +588,8 @@ function createTimeoutSignal(timeoutMs = 0) {
     signal:
       controller.signal,
 
+    controller,
+
     clear:
       () => {
         try {
@@ -375,6 +597,9 @@ function createTimeoutSignal(timeoutMs = 0) {
             clearTimeout(timer);
           }
         } catch {}
+
+        timer =
+          null;
       },
   };
 }
@@ -394,7 +619,12 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
   try {
     AppCore?.events?.emit?.(
       name,
-      payload
+      sanitizeData({
+        version:
+          HTTP_REQUEST_ENGINE_VERSION,
+
+        ...safeObject(payload),
+      })
     );
 
     return true;
@@ -404,10 +634,15 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
 }
 
 function safeWarn(AppCore, ...args) {
+  const safeArgs =
+    args.map((item) =>
+      sanitizeData(item)
+    );
+
   try {
     AppCore?.utils?.warn?.(
       "[HTTP Request]",
-      ...args
+      ...safeArgs
     );
 
     return;
@@ -416,7 +651,7 @@ function safeWarn(AppCore, ...args) {
   try {
     console.warn(
       "[HTTP Request]",
-      ...args
+      ...safeArgs
     );
   } catch {}
 }
@@ -426,7 +661,7 @@ function sanitizeErrorForEvent(error = null) {
     return null;
   }
 
-  return {
+  return sanitizeData({
     name:
       safeText(error.name, "Error"),
 
@@ -448,10 +683,14 @@ function sanitizeErrorForEvent(error = null) {
     url:
       safeRedact(error.url || ""),
 
+    path:
+      safeRedact(error.path || ""),
+
     redactedUrl:
       safeRedact(
         error.redactedUrl ||
           error.url ||
+          error.path ||
           ""
       ),
 
@@ -469,6 +708,9 @@ function sanitizeErrorForEvent(error = null) {
 
     attempt:
       error.attempt || null,
+
+    attemptIndex:
+      error.attemptIndex ?? null,
 
     elapsedMs:
       error.elapsedMs || null,
@@ -498,7 +740,7 @@ function sanitizeErrorForEvent(error = null) {
               error.requestConfig.public === true,
           }
         : null,
-  };
+  });
 }
 
 function buildAttemptPayload({
@@ -508,14 +750,21 @@ function buildAttemptPayload({
   startedAt,
   extra = {},
 } = {}) {
-  return {
+  return sanitizeData({
     requestId,
 
     path:
-      safeRedact(requestConfig?.path || requestConfig?.url || ""),
+      safeRedact(
+        requestConfig?.path ||
+          requestConfig?.url ||
+          ""
+      ),
 
     method:
-      requestConfig?.method || "GET",
+      safeUpper(
+        requestConfig?.method,
+        DEFAULT_METHOD
+      ),
 
     attempt:
       attempt + 1,
@@ -530,7 +779,7 @@ function buildAttemptPayload({
       isoNow(),
 
     ...safeObject(extra),
-  };
+  });
 }
 
 /* =========================================================
@@ -544,20 +793,33 @@ function buildEngineError(error, requestConfig = {}, patch = {}) {
       requestConfig
     );
 
+  const timeout =
+    patch.timeout ??
+    normalized.timeout ??
+    isTimeoutError(error) ??
+    false;
+
+  const aborted =
+    patch.aborted ??
+    (
+      timeout
+        ? false
+        : (
+            normalized.aborted ??
+            isAbortError(error)
+          )
+    );
+
   return {
     ...normalized,
 
     ...safeObject(patch),
 
     aborted:
-      patch.aborted ??
-      normalized.aborted ??
-      isAbortError(normalized),
+      Boolean(aborted),
 
     timeout:
-      patch.timeout ??
-      normalized.timeout ??
-      isTimeoutError(normalized),
+      Boolean(timeout),
   };
 }
 
@@ -644,6 +906,9 @@ function buildRetryBudgetError({
 
     timeout:
       true,
+
+    aborted:
+      false,
   };
 }
 
@@ -660,7 +925,10 @@ function appendQuery(url = "", query = null) {
     null;
 
   try {
-    if (query instanceof URLSearchParams) {
+    if (
+      typeof URLSearchParams !== "undefined" &&
+      query instanceof URLSearchParams
+    ) {
       params =
         query;
     } else if (typeof query === "string") {
@@ -677,18 +945,43 @@ function appendQuery(url = "", query = null) {
       for (const [key, value] of Object.entries(query)) {
         if (
           value === null ||
-          value === undefined
+          value === undefined ||
+          value === ""
         ) {
           continue;
         }
 
         if (Array.isArray(value)) {
           for (const item of value) {
-            params.append(
-              key,
-              String(item)
-            );
+            if (
+              item !== null &&
+              item !== undefined &&
+              item !== ""
+            ) {
+              params.append(
+                key,
+                String(item)
+              );
+            }
           }
+
+          continue;
+        }
+
+        if (value instanceof Date) {
+          params.set(
+            key,
+            value.toISOString()
+          );
+
+          continue;
+        }
+
+        if (typeof value === "object") {
+          params.set(
+            key,
+            JSON.stringify(value)
+          );
 
           continue;
         }
@@ -722,8 +1015,18 @@ function resolveRequestUrl(AppCore, requestConfig = {}) {
     safeText(cfg.url, "");
 
   if (explicitUrl) {
+    if (isAbsoluteUrl(explicitUrl)) {
+      return appendQuery(
+        explicitUrl,
+        cfg.query
+      );
+    }
+
     return appendQuery(
-      explicitUrl,
+      joinUrl(
+        safeText(AppCore?.config?.apiBase || "", ""),
+        explicitUrl
+      ),
       cfg.query
     );
   }
@@ -741,6 +1044,15 @@ function resolveRequestUrl(AppCore, requestConfig = {}) {
       cfg.query
     );
   }
+
+  try {
+    if (isFunction(AppCore?.utils?.buildUrl)) {
+      return appendQuery(
+        AppCore.utils.buildUrl(path),
+        cfg.query
+      );
+    }
+  } catch {}
 
   let base =
     "";
@@ -760,14 +1072,8 @@ function resolveRequestUrl(AppCore, requestConfig = {}) {
       "";
   }
 
-  const built =
-    AppCore?.utils?.buildUrl &&
-    isFunction(AppCore.utils.buildUrl)
-      ? AppCore.utils.buildUrl(path)
-      : joinUrl(base, path);
-
   return appendQuery(
-    built,
+    joinUrl(base, path),
     cfg.query
   );
 }
@@ -820,6 +1126,17 @@ function isUrlSearchParamsLike(value) {
   }
 }
 
+function isReadableStreamLike(value) {
+  try {
+    return (
+      typeof ReadableStream !== "undefined" &&
+      value instanceof ReadableStream
+    );
+  } catch {
+    return false;
+  }
+}
+
 function hasHeader(headers = {}, name = "") {
   const target =
     safeText(name, "").toLowerCase();
@@ -836,6 +1153,23 @@ function hasHeader(headers = {}, name = "") {
   );
 }
 
+function deleteHeader(headers = {}, name = "") {
+  const target =
+    safeText(name, "").toLowerCase();
+
+  if (!target) {
+    return headers;
+  }
+
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === target) {
+      delete headers[key];
+    }
+  }
+
+  return headers;
+}
+
 function prepareFallbackBodyAndHeaders(requestConfig = {}) {
   const cfg =
     safeObject(requestConfig);
@@ -843,16 +1177,10 @@ function prepareFallbackBodyAndHeaders(requestConfig = {}) {
   const headers =
     headersToPlainObject(cfg.headers || {});
 
-  const body =
-    cfg.body;
-
   const method =
-    safeText(cfg.method, "GET").toUpperCase();
+    safeUpper(cfg.method, DEFAULT_METHOD);
 
-  if (
-    method === "GET" ||
-    method === "HEAD"
-  ) {
+  if (BODYLESS_METHODS.includes(method)) {
     return {
       body:
         undefined,
@@ -860,6 +1188,15 @@ function prepareFallbackBodyAndHeaders(requestConfig = {}) {
       headers,
     };
   }
+
+  const body =
+    cfg.body !== undefined
+      ? cfg.body
+      : cfg.data !== undefined
+        ? cfg.data
+        : cfg.payload !== undefined
+          ? cfg.payload
+          : undefined;
 
   if (
     body === undefined ||
@@ -873,13 +1210,36 @@ function prepareFallbackBodyAndHeaders(requestConfig = {}) {
     };
   }
 
+  if (isFormDataLike(body)) {
+    deleteHeader(
+      headers,
+      "Content-Type"
+    );
+
+    return {
+      body,
+      headers,
+    };
+  }
+
+  if (isUrlSearchParamsLike(body)) {
+    if (!hasHeader(headers, "Content-Type")) {
+      headers["Content-Type"] =
+        "application/x-www-form-urlencoded;charset=UTF-8";
+    }
+
+    return {
+      body,
+      headers,
+    };
+  }
+
   if (
     cfg.rawBody === true ||
     cfg.upload === true ||
-    isFormDataLike(body) ||
     isBlobLike(body) ||
     isArrayBufferLike(body) ||
-    isUrlSearchParamsLike(body) ||
+    isReadableStreamLike(body) ||
     typeof body === "string"
   ) {
     return {
@@ -893,35 +1253,93 @@ function prepareFallbackBodyAndHeaders(requestConfig = {}) {
       "application/json";
   }
 
-  return {
-    body:
-      JSON.stringify(body),
+  try {
+    return {
+      body:
+        JSON.stringify(body),
 
-    headers,
-  };
+      headers,
+    };
+  } catch {
+    return {
+      body:
+        undefined,
+
+      headers,
+    };
+  }
+}
+
+function responseHasBody(response) {
+  if (!response) {
+    return false;
+  }
+
+  if (
+    response.status === 204 ||
+    response.status === 205 ||
+    response.status === 304
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function contentTypeIncludes(contentType = "", fragments = []) {
+  const value =
+    safeText(contentType, "")
+      .toLowerCase();
+
+  return fragments.some((fragment) =>
+    value.includes(fragment)
+  );
 }
 
 async function parseFallbackResponse(response, requestConfig = {}) {
+  const cfg =
+    safeObject(requestConfig);
+
   const responseType =
     safeText(
-      requestConfig.responseType,
-      "auto"
+      cfg.responseType,
+      DEFAULT_RESPONSE_TYPE
     ).toLowerCase();
 
-  if (requestConfig.raw === true) {
+  if (
+    responseType === "response" ||
+    responseType === "raw" ||
+    cfg.raw === true
+  ) {
     return response;
   }
 
-  if (responseType === "raw") {
-    return response;
+  if (
+    responseType === "void" ||
+    responseType === "none" ||
+    responseType === "empty" ||
+    !responseHasBody(response)
+  ) {
+    return null;
   }
 
   if (responseType === "blob") {
-    return response.blob();
+    return isFunction(response.blob)
+      ? response.blob()
+      : response.arrayBuffer();
   }
 
-  if (responseType === "arraybuffer") {
+  if (
+    responseType === "arraybuffer" ||
+    responseType === "arrayBuffer"
+  ) {
     return response.arrayBuffer();
+  }
+
+  if (responseType === "formdata") {
+    return isFunction(response.formData)
+      ? response.formData()
+      : null;
   }
 
   if (responseType === "text") {
@@ -936,18 +1354,52 @@ async function parseFallbackResponse(response, requestConfig = {}) {
 
   if (
     responseType === "json" ||
-    contentType.includes("application/json") ||
-    contentType.includes("+json")
+    contentTypeIncludes(
+      contentType,
+      JSON_CONTENT_TYPES
+    )
   ) {
+    const text =
+      await response.text();
+
+    if (!safeText(text, "")) {
+      return null;
+    }
+
     try {
-      return await response.json();
+      return JSON.parse(text);
     } catch {
       return null;
     }
   }
 
+  if (
+    contentType.includes("multipart/form-data") &&
+    isFunction(response.formData)
+  ) {
+    return response.formData();
+  }
+
+  if (
+    contentTypeIncludes(
+      contentType,
+      BINARY_CONTENT_TYPES
+    )
+  ) {
+    return response.arrayBuffer();
+  }
+
+  if (
+    contentTypeIncludes(
+      contentType,
+      TEXT_CONTENT_TYPES
+    )
+  ) {
+    return response.text();
+  }
+
   try {
-    return await response.text();
+    return response.text();
   } catch {
     return null;
   }
@@ -958,11 +1410,61 @@ function responseHeadersToObject(response) {
 
   try {
     response?.headers?.forEach?.((value, key) => {
-      output[key] = value;
+      output[key] =
+        value;
     });
   } catch {}
 
   return output;
+}
+
+function extractErrorMessageFromData(data = null, fallback = "") {
+  if (!data) {
+    return fallback;
+  }
+
+  if (typeof data === "string") {
+    return data || fallback;
+  }
+
+  if (!isObject(data)) {
+    return safeText(data, fallback);
+  }
+
+  const errors =
+    Array.isArray(data.errors)
+      ? data.errors
+      : [];
+
+  return (
+    safeText(data.message, "") ||
+    safeText(data.mensaje, "") ||
+    safeText(data.error, "") ||
+    safeText(data.detail, "") ||
+    safeText(data.title, "") ||
+    safeText(data.reason, "") ||
+    safeText(data.description, "") ||
+    safeText(data.msg, "") ||
+    safeText(errors?.[0]?.message, "") ||
+    safeText(errors?.[0]?.detail, "") ||
+    safeText(errors?.[0], "") ||
+    fallback
+  );
+}
+
+function isExpectedStatus(status, expectedStatuses = []) {
+  if (!Array.isArray(expectedStatuses)) {
+    return false;
+  }
+
+  const numeric =
+    safeNumber(status, 0);
+
+  return expectedStatuses
+    .map((item) =>
+      safeNumber(item, -1)
+    )
+    .includes(numeric);
 }
 
 function buildFallbackFetchError({
@@ -977,11 +1479,11 @@ function buildFallbackFetchError({
         "HttpFetchError",
 
       message:
-        data?.message ||
-        data?.error ||
-        data?.detail ||
-        response?.statusText ||
-        `HTTP ${response?.status || 0}`,
+        extractErrorMessageFromData(
+          data,
+          response?.statusText ||
+            `HTTP ${response?.status || 0}`
+        ),
 
       status:
         response?.status || 0,
@@ -998,7 +1500,7 @@ function buildFallbackFetchError({
         safeRedact(url),
 
       method:
-        requestConfig?.method || "GET",
+        requestConfig?.method || DEFAULT_METHOD,
 
       requestId:
         requestConfig?.requestId || null,
@@ -1017,10 +1519,14 @@ function buildCoreRequestOptions(requestConfig = {}) {
 
   return {
     method:
-      cfg.method || "GET",
+      safeUpper(cfg.method, DEFAULT_METHOD),
 
     body:
-      cfg.body ?? null,
+      cfg.body !== undefined
+        ? cfg.body
+        : cfg.data !== undefined
+          ? cfg.data
+          : null,
 
     headers:
       cfg.headers ?? {},
@@ -1045,10 +1551,13 @@ function buildCoreRequestOptions(requestConfig = {}) {
       cfg.upload === true,
 
     responseType:
-      cfg.responseType || "auto",
+      cfg.responseType || DEFAULT_RESPONSE_TYPE,
 
     query:
       cfg.query ?? null,
+
+    params:
+      cfg.params ?? null,
 
     credentials:
       cfg.credentials,
@@ -1089,6 +1598,13 @@ function buildCoreRequestOptions(requestConfig = {}) {
   };
 }
 
+function getRequestTarget(requestConfig = {}) {
+  return (
+    safeText(requestConfig.path, "") ||
+    safeText(requestConfig.url, "")
+  );
+}
+
 async function executeViaApiClient(AppCore, requestConfig = {}) {
   const apiClient =
     AppCore?.apiClient;
@@ -1109,10 +1625,22 @@ async function executeViaApiClient(AppCore, requestConfig = {}) {
   const cfg =
     safeObject(requestConfig);
 
+  const target =
+    getRequestTarget(cfg);
+
+  const options =
+    buildCoreRequestOptions(cfg);
+
+  /*
+    El apiClient del Core soporta:
+      apiClient.request(path, options)
+      apiClient.request(method, path, options)
+    Usamos firma path/options para máxima compatibilidad.
+  */
   const result =
     await apiClient.request(
-      cfg.path,
-      buildCoreRequestOptions(cfg)
+      target,
+      options
     );
 
   return {
@@ -1121,7 +1649,7 @@ async function executeViaApiClient(AppCore, requestConfig = {}) {
 
     value:
       result,
-    };
+  };
 }
 
 async function executeViaCoreRequest(AppCore, requestConfig = {}) {
@@ -1138,9 +1666,12 @@ async function executeViaCoreRequest(AppCore, requestConfig = {}) {
   const cfg =
     safeObject(requestConfig);
 
+  const target =
+    getRequestTarget(cfg);
+
   const result =
     await AppCore.request(
-      cfg.path,
+      target,
       buildCoreRequestOptions(cfg)
     );
 
@@ -1190,25 +1721,58 @@ async function executeViaFetch(AppCore, requestConfig = {}) {
     prepareFallbackBodyAndHeaders(cfg);
 
   try {
+    const init = {
+      method:
+        safeUpper(cfg.method, DEFAULT_METHOD),
+
+      headers:
+        prepared.headers,
+    };
+
+    if (prepared.body !== undefined) {
+      init.body =
+        prepared.body;
+    }
+
+    if (cfg.credentials !== undefined) {
+      init.credentials =
+        cfg.credentials;
+    }
+
+    if (signal) {
+      init.signal =
+        signal;
+    }
+
+    if (cfg.cache !== undefined) {
+      init.cache =
+        cfg.cache;
+    }
+
+    if (cfg.mode !== undefined) {
+      init.mode =
+        cfg.mode;
+    }
+
+    if (cfg.redirect !== undefined) {
+      init.redirect =
+        cfg.redirect;
+    }
+
+    if (cfg.referrerPolicy !== undefined) {
+      init.referrerPolicy =
+        cfg.referrerPolicy;
+    }
+
+    if (cfg.keepalive !== undefined) {
+      init.keepalive =
+        cfg.keepalive;
+    }
+
     const response =
       await fetch(
         url,
-        {
-          method:
-            cfg.method || "GET",
-
-          headers:
-            prepared.headers,
-
-          body:
-            prepared.body,
-
-          credentials:
-            cfg.credentials,
-
-          signal:
-            signal || undefined,
-        }
+        init
       );
 
     const data =
@@ -1217,7 +1781,16 @@ async function executeViaFetch(AppCore, requestConfig = {}) {
         cfg
       );
 
-    if (!response.ok) {
+    const expected =
+      isExpectedStatus(
+        response.status,
+        cfg.expectedStatuses
+      );
+
+    if (
+      !response.ok &&
+      !expected
+    ) {
       throw buildFallbackFetchError({
         response,
         data,
@@ -1235,16 +1808,39 @@ async function executeViaFetch(AppCore, requestConfig = {}) {
         data,
     };
   } catch (error) {
-    if (
-      timeout.signal?.aborted &&
-      !isAbortError(error)
-    ) {
+    const timeoutAborted =
+      Boolean(timeout.signal?.aborted);
+
+    const manualAborted =
+      Boolean(
+        cfg.signal?.aborted &&
+          !timeoutAborted
+      );
+
+    if (timeoutAborted) {
       throw buildEngineError(
         error,
         cfg,
         {
           timeout:
             true,
+
+          aborted:
+            false,
+        }
+      );
+    }
+
+    if (manualAborted || isAbortError(error)) {
+      throw buildEngineError(
+        error,
+        cfg,
+        {
+          aborted:
+            true,
+
+          timeout:
+            false,
         }
       );
     }
@@ -1275,11 +1871,8 @@ export async function executeBaseRequest(AppCore, requestConfig = {}) {
     );
   }
 
-  let apiClientResult =
-    null;
-
   try {
-    apiClientResult =
+    const apiClientResult =
       await executeViaApiClient(
         AppCore,
         cfg
@@ -1295,11 +1888,8 @@ export async function executeBaseRequest(AppCore, requestConfig = {}) {
     );
   }
 
-  let coreRequestResult =
-    null;
-
   try {
-    coreRequestResult =
+    const coreRequestResult =
       await executeViaCoreRequest(
         AppCore,
         cfg
@@ -1354,22 +1944,22 @@ function isRetryBudgetExceeded(startedAt, maxElapsedMs = 0) {
    RETRY DELAY
 ========================================================= */
 
-async function waitForRetry(AppCore, waitMs = 0, signal = null) {
+async function waitForRetry(AppCore, waitMs = 0, signal = null, requestConfig = {}) {
   const ms =
     Math.max(
       0,
       safeNumber(waitMs, 0)
     );
 
-  if (ms <= 0) {
-    if (isSignalAborted(signal)) {
-      throw buildAbortError(
-        signal,
-        {},
-        "Request aborted before retry"
-      );
-    }
+  if (isSignalAborted(signal)) {
+    throw buildAbortError(
+      signal,
+      requestConfig,
+      "Request aborted before retry delay"
+    );
+  }
 
+  if (ms <= 0) {
     return true;
   }
 
@@ -1377,22 +1967,20 @@ async function waitForRetry(AppCore, waitMs = 0, signal = null) {
     return delay(
       AppCore,
       ms,
-      signal
+      signal,
+      {
+        source:
+          "http.request:retry-delay",
+
+        requestId:
+          requestConfig?.requestId || null,
+      }
     );
   }
 
   return new Promise((resolve, reject) => {
-    if (isSignalAborted(signal)) {
-      reject(
-        buildAbortError(
-          signal,
-          {},
-          "Request aborted before retry delay"
-        )
-      );
-
-      return;
-    }
+    let settled =
+      false;
 
     let timer =
       null;
@@ -1410,15 +1998,25 @@ async function waitForRetry(AppCore, waitMs = 0, signal = null) {
           onAbort
         );
       } catch {}
+
+      timer =
+        null;
     };
 
     const onAbort = () => {
+      if (settled) {
+        return;
+      }
+
+      settled =
+        true;
+
       cleanup();
 
       reject(
         buildAbortError(
           signal,
-          {},
+          requestConfig,
           "Request aborted during retry delay"
         )
       );
@@ -1427,6 +2025,13 @@ async function waitForRetry(AppCore, waitMs = 0, signal = null) {
     try {
       timer =
         setTimeout(() => {
+          if (settled) {
+            return;
+          }
+
+          settled =
+            true;
+
           cleanup();
           resolve(true);
         }, ms);
@@ -1440,6 +2045,9 @@ async function waitForRetry(AppCore, waitMs = 0, signal = null) {
         }
       );
     } catch (error) {
+      settled =
+        true;
+
       cleanup();
       reject(error);
     }
@@ -1464,6 +2072,12 @@ export async function executeWithRetry({
 
   cfg.requestId =
     requestId;
+
+  cfg.method =
+    safeUpper(
+      cfg.method,
+      DEFAULT_METHOD
+    );
 
   const startedAt =
     safeNumber(
@@ -1536,7 +2150,7 @@ export async function executeWithRetry({
 
       safeEmit(
         AppCore,
-        "http:retry:budget-timeout",
+        REQUEST_EVENTS.retryBudgetTimeout,
         buildAttemptPayload({
           requestId,
           requestConfig:
@@ -1561,7 +2175,7 @@ export async function executeWithRetry({
 
     safeEmit(
       AppCore,
-      "http:request:attempt",
+      REQUEST_EVENTS.attempt,
       buildAttemptPayload({
         requestId,
         requestConfig:
@@ -1580,7 +2194,7 @@ export async function executeWithRetry({
 
       safeEmit(
         AppCore,
-        "http:request:attempt:success",
+        REQUEST_EVENTS.attemptSuccess,
         buildAttemptPayload({
           requestId,
           requestConfig:
@@ -1615,6 +2229,27 @@ export async function executeWithRetry({
           true;
       }
 
+      if (isTimeoutError(lastError)) {
+        lastError.timeout =
+          true;
+      }
+
+      safeEmit(
+        AppCore,
+        REQUEST_EVENTS.attemptError,
+        buildAttemptPayload({
+          requestId,
+          requestConfig:
+            cfg,
+          attempt,
+          startedAt,
+          extra: {
+            error:
+              sanitizeErrorForEvent(lastError),
+          },
+        })
+      );
+
       /* ===================================================
          RETRY DECISION
       =================================================== */
@@ -1630,7 +2265,7 @@ export async function executeWithRetry({
       if (!canRetry) {
         safeEmit(
           AppCore,
-          "http:retry:stop",
+          REQUEST_EVENTS.retryStop,
           buildAttemptPayload({
             requestId,
             requestConfig:
@@ -1695,6 +2330,24 @@ export async function executeWithRetry({
               startedAt,
             });
 
+          safeEmit(
+            AppCore,
+            REQUEST_EVENTS.retryBudgetTimeout,
+            buildAttemptPayload({
+              requestId,
+              requestConfig:
+                cfg,
+              attempt,
+              startedAt,
+              extra: {
+                maxElapsedMs,
+
+                error:
+                  sanitizeErrorForEvent(lastError),
+              },
+            })
+          );
+
           break;
         }
 
@@ -1707,7 +2360,7 @@ export async function executeWithRetry({
 
       safeEmit(
         AppCore,
-        "http:retry",
+        REQUEST_EVENTS.retry,
         buildAttemptPayload({
           requestId,
           requestConfig:
@@ -1734,7 +2387,7 @@ export async function executeWithRetry({
             cfg.path,
 
           redactedPath:
-            safeRedact(cfg.path || ""),
+            safeRedact(cfg.path || cfg.url || ""),
 
           method:
             cfg.method,
@@ -1768,7 +2421,8 @@ export async function executeWithRetry({
         await waitForRetry(
           AppCore,
           waitMs,
-          cfg.signal
+          cfg.signal,
+          cfg
         );
       } catch (delayError) {
         lastError =
@@ -1789,12 +2443,15 @@ export async function executeWithRetry({
 
               aborted:
                 true,
+
+              timeout:
+                false,
             }
           );
 
         safeEmit(
           AppCore,
-          "http:retry:aborted",
+          REQUEST_EVENTS.retryAborted,
           buildAttemptPayload({
             requestId,
             requestConfig:
@@ -1869,6 +2526,11 @@ export async function executeWithRetry({
       true;
   }
 
+  if (isTimeoutError(lastError)) {
+    lastError.timeout =
+      true;
+  }
+
   lastError.requestId =
     requestId;
 
@@ -1880,9 +2542,26 @@ export async function executeWithRetry({
       cfg.path || cfg.url || ""
     );
 
+  lastError.requestConfig =
+    lastError.requestConfig || {
+      requestId,
+      method:
+        cfg.method || DEFAULT_METHOD,
+      path:
+        cfg.path || "",
+      url:
+        cfg.url || "",
+      headers:
+        sanitizeHeaders(cfg.headers || {}),
+      auth:
+        cfg.auth !== false,
+      public:
+        cfg.public === true,
+    };
+
   safeEmit(
     AppCore,
-    "http:request:engine:error",
+    REQUEST_EVENTS.engineError,
     {
       requestId,
 
@@ -1890,7 +2569,7 @@ export async function executeWithRetry({
         safeRedact(cfg.path || cfg.url || ""),
 
       method:
-        cfg.method || "GET",
+        cfg.method || DEFAULT_METHOD,
 
       elapsedMs:
         lastError.elapsedMs,
@@ -1909,6 +2588,9 @@ export async function executeWithRetry({
 
 export function getHttpRequestEngineSnapshot() {
   return {
+    version:
+      HTTP_REQUEST_ENGINE_VERSION,
+
     requestSeq,
   };
 }
@@ -1918,7 +2600,10 @@ export function getHttpRequestEngineSnapshot() {
 ========================================================= */
 
 export default {
+  HTTP_REQUEST_ENGINE_VERSION,
+
   executeBaseRequest,
   executeWithRetry,
+
   getHttpRequestEngineSnapshot,
 };

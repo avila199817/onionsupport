@@ -1,14 +1,15 @@
 /* =========================================================
    Onion SPA - App Errors
-   Archivo: src/app/errors.js
+   Archivo: /src/app/errors.js
 
    ONION SUPPORT · APP ERRORS
-   BOOT ERROR UX · GLOBAL ERROR GUARD · TELEMETRY · RECOVERY · EXTREME 13/10
+   BOOT ERROR UX · GLOBAL ERROR GUARD · TELEMETRY · RECOVERY · 10/10
 
    RESPONSABILIDADES:
    - Renderizar pantalla de error de boot.
    - Bindear window.error.
    - Bindear unhandledrejection.
+   - Diferenciar errores runtime, promise rejection y resource load.
    - Notificar errores críticos con Toast.
    - Emitir telemetría interna.
    - Evitar loops recursivos de error.
@@ -25,18 +26,6 @@
    - Sin throws accidentales.
    - safeEmit usa bus interno o window, no ambos.
    - Boot error debe funcionar aunque falten Router/Auth/Toast/AppCore.
-
-   HARDENING 13/10:
-   - DOM seguro por createElement/textContent.
-   - Estado app-fatal coherente en html/body/shell/main/view.
-   - Limpieza de loader incluso si loader.js no responde.
-   - hideLoader se invoca con force/allowDuringBoot/fatal.
-   - Recovery actions blindadas.
-   - Global handlers idempotentes.
-   - Resource errors diferenciados.
-   - Rejection/object/error/string normalization.
-   - Snapshot/logs sin tokens.
-   - Debug API pública segura.
 ========================================================= */
 
 import {
@@ -49,8 +38,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-const APP_ERRORS_VERSION =
-  "13.0.0";
+export const APP_ERRORS_VERSION = "14.0.0";
 
 const DEFAULT_ERROR_SCOPE =
   APP_SCOPES?.errors ||
@@ -58,25 +46,8 @@ const DEFAULT_ERROR_SCOPE =
   APP_SCOPE ||
   "app:errors";
 
-const ERROR_THROTTLE_MS =
-  2500;
-
-const MAX_RECENT_ERRORS =
-  12;
-
-const BOOT_ERROR_RENDER_EVENT =
-  "app:boot:error:render";
-
-const APP_ERROR_EVENT =
-  APP_EVENTS?.error ||
-  "app:error";
-
-const APP_ERROR_TELEMETRY_EVENT =
-  APP_EVENTS?.errorTelemetry ||
-  "app:error:telemetry";
-
-const APP_ERROR_RECOVER_EVENT =
-  "app:error:recover";
+const ERROR_THROTTLE_MS = 2500;
+const MAX_RECENT_ERRORS = 16;
 
 const FALLBACK_ERROR_MESSAGE =
   "Se produjo un error inesperado.";
@@ -84,199 +55,170 @@ const FALLBACK_ERROR_MESSAGE =
 const FALLBACK_BOOT_ERROR_MESSAGE =
   "No se pudo iniciar la aplicación correctamente.";
 
-const LOGIN_PATH =
-  "/login";
+const LOGIN_PATH = "/login";
 
-const DOM_IDS =
-  Object.freeze({
-    appLoader:
-      "app-loader",
-
-    appShell:
-      "app-shell",
-
-    mainContent:
-      "main-content",
-
-    appContent:
-      "app-content",
-
-    viewContainer:
-      "view-container",
-  });
+const DOM_IDS = Object.freeze({
+  appLoader: "app-loader",
+  appShell: "app-shell",
+  mainContent: "main-content",
+  appContent: "app-content",
+  viewContainer: "view-container",
+});
 
 const VIEW_CONTAINER_SELECTOR =
   "#view-container,[data-view-root],[data-router-view],[data-view-container='true'],.view-container";
 
-const ERROR_ACTIONS =
-  Object.freeze({
-    retry:
-      "retry",
+const ERROR_ACTIONS = Object.freeze({
+  retry: "retry",
+  reboot: "reboot",
+  resetSession: "reset-session",
+  goLogin: "go-login",
+});
 
-    reboot:
-      "reboot",
+const TOKEN_PARAM_NAMES = Object.freeze([
+  "token",
+  "activationToken",
+  "activateToken",
+  "resetToken",
+  "passwordResetToken",
+  "confirmToken",
+  "code",
+  "t",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "tempToken",
+  "temp_token",
+  "temporaryToken",
+  "temporary_token",
+  "twoFactorToken",
+  "two_factor_token",
+  "mfaToken",
+  "mfa_token",
+]);
 
-    resetSession:
-      "reset-session",
+const ERROR_EVENTS = Object.freeze({
+  bootError:
+    APP_EVENTS?.bootError ||
+    "app:boot:error",
 
-    goLogin:
-      "go-login",
-  });
+  appError:
+    APP_EVENTS?.error ||
+    "app:error",
 
-const TOKEN_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "resetToken",
-    "passwordResetToken",
-    "confirmToken",
-    "code",
-    "t",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
-  ]);
+  telemetry:
+    APP_EVENTS?.errorTelemetry ||
+    "app:error:telemetry",
 
-const ERROR_EVENTS =
-  Object.freeze({
-    bootError:
-      APP_EVENTS?.bootError ||
-      "app:boot:error",
+  recover:
+    "app:error:recover",
 
-    appError:
-      APP_ERROR_EVENT,
+  render:
+    "app:boot:error:render",
 
-    telemetry:
-      APP_ERROR_TELEMETRY_EVENT,
+  handlersBound:
+    "app:errors:handlers:bound",
 
-    recover:
-      APP_ERROR_RECOVER_EVENT,
+  handlersUnbound:
+    "app:errors:handlers:unbound",
 
-    render:
-      BOOT_ERROR_RENDER_EVENT,
+  debugApi:
+    "app:errors:debug-api",
+});
 
-    handlersBound:
-      "app:errors:handlers:bound",
+const FATAL_CLASSES = Object.freeze([
+  "app-fatal",
+]);
 
-    handlersUnbound:
-      "app:errors:handlers:unbound",
+const LOADING_CLASSES = Object.freeze([
+  "loading",
+  "app-loading",
+  "app-booting",
+  "is-loading",
+  "is-booting",
+]);
 
-    debugApi:
-      "app:errors:debug-api",
-  });
+const READY_CLASSES = Object.freeze([
+  "app-ready",
+]);
 
-const FATAL_CLASSES =
-  Object.freeze([
-    "app-fatal",
-  ]);
+const LOADER_VISIBLE_CLASSES = Object.freeze([
+  "is-visible",
+  "is-entering",
+  "is-leaving",
+  "loader-visible",
+]);
 
-const LOADING_CLASSES =
-  Object.freeze([
-    "loading",
-    "app-loading",
-    "app-booting",
-    "is-loading",
-    "is-booting",
-  ]);
+const LOADER_HIDDEN_CLASSES = Object.freeze([
+  "is-hidden",
+  "has-hidden",
+  "loader-hidden",
+]);
 
-const READY_CLASSES =
-  Object.freeze([
-    "app-ready",
-  ]);
+const AUTH_STORAGE_KEYS = Object.freeze([
+  "token",
+  "accessToken",
+  "access_token",
+  "refreshToken",
+  "refresh_token",
+  "idToken",
+  "id_token",
+  "tempToken",
+  "temp_token",
+  "session",
+  "sessionId",
+  "session_id",
+  "user",
+  "auth",
 
-const LOADER_VISIBLE_CLASSES =
-  Object.freeze([
-    "is-visible",
-    "is-entering",
-    "is-leaving",
-    "loader-visible",
-  ]);
+  "onion:token",
+  "onion:accessToken",
+  "onion:refreshToken",
+  "onion:session",
+  "onion:user",
+  "onion:auth",
 
-const LOADER_HIDDEN_CLASSES =
-  Object.freeze([
-    "is-hidden",
-    "has-hidden",
-    "loader-hidden",
-  ]);
+  "onion.auth",
+  "onion.session",
+  "onion.user",
 
-const AUTH_STORAGE_KEYS =
-  Object.freeze([
-    "token",
-    "accessToken",
-    "access_token",
-    "refreshToken",
-    "refresh_token",
-    "idToken",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "session",
-    "sessionId",
-    "session_id",
-    "user",
-    "auth",
-    "onion:token",
-    "onion:accessToken",
-    "onion:refreshToken",
-    "onion:session",
-    "onion:user",
-    "onion:auth",
-    "onion.auth",
-    "onion.session",
-  ]);
+  "onion_token",
+  "onion_accessToken",
+  "onion_refreshToken",
+  "onion_session",
+  "onion_user",
+  "onion_auth",
+]);
+
+const IGNORED_ERROR_PATTERNS = Object.freeze([
+  /ResizeObserver loop limit exceeded/i,
+  /ResizeObserver loop completed with undelivered notifications/i,
+]);
 
 /* =========================================================
    INTERNAL STATE
 ========================================================= */
 
-let handlersBound =
-  false;
+let handlersBound = false;
+let bindingInFlight = false;
+let boundScope = "";
+let debugApiInstalled = false;
 
-let bindingInFlight =
-  false;
-
-let boundScope =
-  "";
-
-const boundListeners =
-  [];
-
-const boundDisposers =
-  [];
+const boundListeners = [];
+const boundDisposers = [];
 
 const errorState = {
-  lastToastKey:
-    "",
+  lastToastKey: "",
+  lastToastAt: 0,
 
-  lastToastAt:
-    0,
+  lastRenderKey: "",
+  lastRenderAt: 0,
 
-  lastRenderKey:
-    "",
+  handling: false,
+  rendering: false,
 
-  lastRenderAt:
-    0,
-
-  handling:
-    false,
-
-  rendering:
-    false,
-
-  total:
-    0,
-
-  recent:
-    [],
+  total: 0,
+  recent: [],
 };
 
 /* =========================================================
@@ -306,8 +248,7 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
+  const text = String(value).trim();
 
   return text || fallback;
 }
@@ -317,6 +258,16 @@ function isObject(value) {
     value !== null &&
     typeof value === "object" &&
     !Array.isArray(value)
+  );
+}
+
+function isObjectLike(value) {
+  return (
+    value !== null &&
+    (
+      typeof value === "object" ||
+      typeof value === "function"
+    )
   );
 }
 
@@ -337,8 +288,7 @@ function safeArray(value) {
 }
 
 function safeNumber(value, fallback = 0) {
-  const number =
-    Number(value);
+  const number = Number(value);
 
   return Number.isFinite(number)
     ? number
@@ -366,10 +316,10 @@ function safeInvoke(fn, thisArg = null, args = []) {
   return undefined;
 }
 
-function isExtensibleObject(value) {
+function isExtensibleTarget(value) {
   try {
     return (
-      isObject(value) &&
+      isObjectLike(value) &&
       Object.isExtensible(value)
     );
   } catch {}
@@ -379,7 +329,7 @@ function isExtensibleObject(value) {
 
 function safeDefineValue(target, key, value) {
   if (
-    !isExtensibleObject(target) ||
+    !isExtensibleTarget(target) ||
     !key
   ) {
     return false;
@@ -391,15 +341,17 @@ function safeDefineValue(target, key, value) {
       key,
       {
         value,
-        configurable:
-          true,
-        enumerable:
-          false,
-        writable:
-          true,
+        configurable: true,
+        enumerable: false,
+        writable: true,
       }
     );
 
+    return true;
+  } catch {}
+
+  try {
+    target[key] = value;
     return true;
   } catch {}
 
@@ -411,13 +363,11 @@ function safeDefineValue(target, key, value) {
 ========================================================= */
 
 function escapeRegExp(value = "") {
-  return String(value)
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function redactTokenInText(value = "") {
-  let output =
-    safeText(value, "");
+export function redactTokenInText(value = "") {
+  let output = safeText(value, "");
 
   if (!output) {
     return "";
@@ -425,57 +375,48 @@ function redactTokenInText(value = "") {
 
   for (const name of TOKEN_PARAM_NAMES) {
     try {
-      const escaped =
-        escapeRegExp(name);
+      const escaped = escapeRegExp(name);
 
-      output =
-        output.replace(
-          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
-          "$1***"
-        );
+      output = output.replace(
+        new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
+        "$1***"
+      );
     } catch {}
   }
 
   try {
-    output =
-      output.replace(
-        /(\/activate-account\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
+    output = output.replace(
+      /(\/activate-account\/)([^/?#\s]+)/gi,
+      "$1***"
+    );
   } catch {}
 
   try {
-    output =
-      output.replace(
-        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
+    output = output.replace(
+      /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+      "$1***"
+    );
   } catch {}
 
   try {
-    output =
-      output.replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      );
+    output = output.replace(
+      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+      "$1***"
+    );
   } catch {}
 
   try {
-    output =
-      output.replace(
-        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-        "***"
-      );
+    output = output.replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
   } catch {}
 
   return output;
 }
 
 function isDomNodeLike(value) {
-  if (
-    !value ||
-    typeof value !== "object"
-  ) {
+  if (!value || typeof value !== "object") {
     return false;
   }
 
@@ -497,7 +438,7 @@ function isDomNodeLike(value) {
 }
 
 function sanitizeValue(value, depth = 0) {
-  if (depth > 5) {
+  if (depth > 6) {
     return "[MaxDepth]";
   }
 
@@ -546,36 +487,29 @@ function sanitizeValue(value, depth = 0) {
         value.code || null,
 
       status:
-        value.status || null,
+        value.status || value.statusCode || null,
     };
   }
 
   if (Array.isArray(value)) {
     return value
-      .slice(0, 50)
+      .slice(0, 80)
       .map((item) =>
-        sanitizeValue(
-          item,
-          depth + 1
-        )
+        sanitizeValue(item, depth + 1)
       );
   }
 
   if (value instanceof Map) {
     return {
-      type:
-        "Map",
-      size:
-        value.size,
+      type: "Map",
+      size: value.size,
     };
   }
 
   if (value instanceof Set) {
     return {
-      type:
-        "Set",
-      size:
-        value.size,
+      type: "Set",
+      size: value.size,
     };
   }
 
@@ -584,9 +518,19 @@ function sanitizeValue(value, depth = 0) {
 
     for (const [key, item] of Object.entries(value)) {
       if (
-        /token|secret|password|authorization|credential/i.test(key)
+        /token|secret|password|authorization|credential|jwt|bearer|otp|code/i.test(key)
       ) {
-        output[key] = "***";
+        if (
+          item === null ||
+          item === undefined ||
+          item === "" ||
+          typeof item === "boolean"
+        ) {
+          output[key] = item;
+        } else {
+          output[key] = "***";
+        }
+
         continue;
       }
 
@@ -624,22 +568,15 @@ function safeWarn(AppCore, ...args) {
       sanitizeValue(arg)
     );
 
-  let emittedByCore =
-    false;
+  let emittedByCore = false;
 
   try {
     if (isFunction(AppCore?.utils?.warn)) {
-      AppCore.utils.warn(
-        "[AppErrors]",
-        ...cleanArgs
-      );
-
-      emittedByCore =
-        true;
+      AppCore.utils.warn("[AppErrors]", ...cleanArgs);
+      emittedByCore = true;
     }
   } catch {
-    emittedByCore =
-      false;
+    emittedByCore = false;
   }
 
   if (emittedByCore) {
@@ -647,10 +584,7 @@ function safeWarn(AppCore, ...args) {
   }
 
   try {
-    console.warn(
-      "[AppErrors]",
-      ...cleanArgs
-    );
+    console.warn("[AppErrors]", ...cleanArgs);
   } catch {}
 }
 
@@ -660,22 +594,15 @@ function safeError(AppCore, ...args) {
       sanitizeValue(arg)
     );
 
-  let emittedByCore =
-    false;
+  let emittedByCore = false;
 
   try {
     if (isFunction(AppCore?.utils?.error)) {
-      AppCore.utils.error(
-        "[AppErrors]",
-        ...cleanArgs
-      );
-
-      emittedByCore =
-        true;
+      AppCore.utils.error("[AppErrors]", ...cleanArgs);
+      emittedByCore = true;
     }
   } catch {
-    emittedByCore =
-      false;
+    emittedByCore = false;
   }
 
   if (emittedByCore) {
@@ -683,11 +610,40 @@ function safeError(AppCore, ...args) {
   }
 
   try {
-    console.error(
-      "[AppErrors]",
-      ...cleanArgs
-    );
+    console.error("[AppErrors]", ...cleanArgs);
   } catch {}
+}
+
+function safeCreateCustomEvent(name, detail = {}) {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    if (typeof CustomEvent === "function") {
+      return new CustomEvent(
+        name,
+        {
+          detail,
+        }
+      );
+    }
+  } catch {}
+
+  try {
+    const event = document.createEvent("CustomEvent");
+
+    event.initCustomEvent(
+      name,
+      false,
+      false,
+      detail
+    );
+
+    return event;
+  } catch {
+    return null;
+  }
 }
 
 function safeWindowDispatch(eventName, payload = {}) {
@@ -699,16 +655,17 @@ function safeWindowDispatch(eventName, payload = {}) {
   }
 
   try {
-    window.dispatchEvent(
-      new CustomEvent(
+    const event =
+      safeCreateCustomEvent(
         eventName,
-        {
-          detail:
-            sanitizeValue(payload),
-        }
-      )
-    );
+        sanitizeValue(payload)
+      );
 
+    if (!event) {
+      return false;
+    }
+
+    window.dispatchEvent(event);
     return true;
   } catch {}
 
@@ -716,8 +673,7 @@ function safeWindowDispatch(eventName, payload = {}) {
 }
 
 function safeEmit(AppCore, eventName, payload = {}, options = {}) {
-  const cleanEventName =
-    safeText(eventName, "");
+  const cleanEventName = safeText(eventName, "");
 
   if (!cleanEventName) {
     return false;
@@ -729,24 +685,19 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   const opts =
     ensureObject(options);
 
-  let busAvailable =
-    false;
-
-  let busEmitted =
-    false;
+  let busAvailable = false;
+  let busEmitted = false;
 
   try {
     if (isFunction(AppCore?.events?.emit)) {
-      busAvailable =
-        true;
+      busAvailable = true;
 
       AppCore.events.emit(
         cleanEventName,
         cleanPayload
       );
 
-      busEmitted =
-        true;
+      busEmitted = true;
     }
   } catch {}
 
@@ -772,14 +723,9 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
 
 function safeSetError(AppCore, snapshot = null) {
   const payload = {
-    hasError:
-      Boolean(snapshot),
-
-    error:
-      snapshot,
-
-    lastError:
-      snapshot,
+    hasError: Boolean(snapshot),
+    error: snapshot,
+    lastError: snapshot,
   };
 
   try {
@@ -790,12 +736,10 @@ function safeSetError(AppCore, snapshot = null) {
     AppCore?.setState?.(
       payload,
       {
-        source:
-          "app:errors",
-        emit:
-          false,
-        emitState:
-          false,
+        source: "app:errors",
+        emit: false,
+        emitState: false,
+        silent: true,
       }
     );
   } catch {}
@@ -804,12 +748,10 @@ function safeSetError(AppCore, snapshot = null) {
     AppCore?.patchState?.(
       payload,
       {
-        source:
-          "app:errors",
-        emit:
-          false,
-        emitState:
-          false,
+        source: "app:errors",
+        emit: false,
+        emitState: false,
+        silent: true,
       }
     );
   } catch {}
@@ -947,6 +889,7 @@ function getErrorUrl(error = null) {
   const url =
     safeText(candidate?.filename, "") ||
     safeText(candidate?.url, "") ||
+    safeText(candidate?.href, "") ||
     safeText(candidate?.target?.src, "") ||
     safeText(candidate?.target?.href, "") ||
     "";
@@ -1054,8 +997,7 @@ export function createErrorSnapshot({
   boot = false,
   handled = false,
 } = {}) {
-  const atMs =
-    now();
+  const atMs = now();
 
   const rawMessage =
     getRawErrorMessage(
@@ -1076,9 +1018,8 @@ export function createErrorSnapshot({
   const stack =
     getErrorStack(error);
 
-  return {
-    version:
-      APP_ERRORS_VERSION,
+  return sanitizeValue({
+    version: APP_ERRORS_VERSION,
 
     source:
       safeText(source, "runtime"),
@@ -1122,7 +1063,7 @@ export function createErrorSnapshot({
       safeIsoDate(atMs),
 
     atMs,
-  };
+  });
 }
 
 function pushRecentError(snapshot = {}) {
@@ -1130,9 +1071,7 @@ function pushRecentError(snapshot = {}) {
 
   errorState.recent.unshift({
     ...snapshot,
-
-    index:
-      errorState.total,
+    index: errorState.total,
   });
 
   if (errorState.recent.length > MAX_RECENT_ERRORS) {
@@ -1172,11 +1111,8 @@ function shouldThrottleToast(snapshot = {}) {
     return true;
   }
 
-  errorState.lastToastKey =
-    key;
-
-  errorState.lastToastAt =
-    time;
+  errorState.lastToastKey = key;
+  errorState.lastToastAt = time;
 
   return false;
 }
@@ -1195,11 +1131,8 @@ function shouldThrottleRender(snapshot = {}) {
     return true;
   }
 
-  errorState.lastRenderKey =
-    key;
-
-  errorState.lastRenderAt =
-    time;
+  errorState.lastRenderKey = key;
+  errorState.lastRenderAt = time;
 
   return false;
 }
@@ -1287,47 +1220,6 @@ function query(selector = "") {
   } catch {}
 
   return null;
-}
-
-function createElement(tagName = "div", {
-  id = "",
-  className = "",
-  text = "",
-  attrs = {},
-  dataset = {},
-} = {}) {
-  const element =
-    document.createElement(tagName);
-
-  if (id) {
-    element.id = id;
-  }
-
-  if (className) {
-    element.className = className;
-  }
-
-  if (text) {
-    element.textContent = text;
-  }
-
-  for (const [key, value] of Object.entries(ensureObject(attrs))) {
-    setAttribute(
-      element,
-      key,
-      value
-    );
-  }
-
-  for (const [key, value] of Object.entries(ensureObject(dataset))) {
-    setDataset(
-      element,
-      key,
-      value
-    );
-  }
-
-  return element;
 }
 
 function setAttribute(element, name, value) {
@@ -1437,6 +1329,47 @@ function emptyElement(element) {
   return false;
 }
 
+function createElement(tagName = "div", {
+  id = "",
+  className = "",
+  text = "",
+  attrs = {},
+  dataset = {},
+} = {}) {
+  const element =
+    document.createElement(tagName);
+
+  if (id) {
+    element.id = id;
+  }
+
+  if (className) {
+    element.className = className;
+  }
+
+  if (text) {
+    element.textContent = text;
+  }
+
+  for (const [key, value] of Object.entries(ensureObject(attrs))) {
+    setAttribute(
+      element,
+      key,
+      value
+    );
+  }
+
+  for (const [key, value] of Object.entries(ensureObject(dataset))) {
+    setDataset(
+      element,
+      key,
+      value
+    );
+  }
+
+  return element;
+}
+
 function appendAll(parent, children = []) {
   if (!parent) {
     return parent;
@@ -1509,7 +1442,12 @@ function safeRebootApp(AppCore) {
 
     if (isFunction(app?.reboot)) {
       void Promise.resolve(
-        app.reboot()
+        app.reboot({
+          reason:
+            "boot-error-recovery",
+          force:
+            true,
+        })
       );
 
       return true;
@@ -1534,8 +1472,7 @@ function clearBrowserAuthStorage() {
     return false;
   }
 
-  let changed =
-    false;
+  let changed = false;
 
   for (const storage of [
     window.localStorage,
@@ -1557,19 +1494,15 @@ function clearBrowserAuthStorage() {
 }
 
 function clearAuthSession(Auth, AppCore) {
-  let cleared =
-    false;
+  let cleared = false;
 
   try {
     Auth?.clearSessionLocal?.({
-      silent:
-        true,
-      reason:
-        "boot-error-recovery",
+      silent: true,
+      reason: "boot-error-recovery",
     });
 
-    cleared =
-      true;
+    cleared = true;
   } catch (error) {
     safeWarn(
       AppCore,
@@ -1580,64 +1513,58 @@ function clearAuthSession(Auth, AppCore) {
 
   try {
     Auth?.clear?.({
-      silent:
-        true,
-      reason:
-        "boot-error-recovery",
+      silent: true,
+      reason: "boot-error-recovery",
     });
 
-    cleared =
-      true;
+    cleared = true;
   } catch {}
 
   try {
     Auth?.logout?.({
-      silent:
-        true,
-      localOnly:
-        true,
-      reason:
-        "boot-error-recovery",
+      silent: true,
+      localOnly: true,
+      reason: "boot-error-recovery",
     });
 
-    cleared =
-      true;
+    cleared = true;
   } catch {}
 
   try {
     AppCore?.clearSession?.({
-      silent:
-        true,
-      reason:
-        "boot-error-recovery",
+      silent: true,
+      reason: "boot-error-recovery",
     });
 
-    cleared =
-      true;
+    cleared = true;
   } catch {}
+
+  const unauthPatch = {
+    authenticated: false,
+    hasToken: false,
+
+    user: null,
+    currentUser: null,
+    sessionUser: null,
+    authUser: null,
+
+    token: null,
+    accessToken: null,
+    access_token: null,
+    refreshToken: null,
+    refresh_token: null,
+
+    role: null,
+    rol: null,
+
+    username: null,
+    currentResolvedUsername: null,
+    resolvedUsername: null,
+  };
 
   try {
     AppCore?.setState?.(
-      {
-        authenticated:
-          false,
-        hasToken:
-          false,
-        user:
-          null,
-        token:
-          null,
-        accessToken:
-          null,
-        role:
-          null,
-        username:
-          null,
-        currentResolvedUsername:
-          null,
-        resolvedUsername:
-          null,
-      },
+      unauthPatch,
       {
         source:
           "app:errors:clear-session",
@@ -1645,11 +1572,30 @@ function clearAuthSession(Auth, AppCore) {
           true,
         emit:
           false,
+        silent:
+          true,
       }
     );
 
-    cleared =
-      true;
+    cleared = true;
+  } catch {}
+
+  try {
+    AppCore?.patchState?.(
+      unauthPatch,
+      {
+        source:
+          "app:errors:clear-session",
+        forceUnauthenticated:
+          true,
+        emit:
+          false,
+        silent:
+          true,
+      }
+    );
+
+    cleared = true;
   } catch {}
 
   try {
@@ -1657,18 +1603,12 @@ function clearAuthSession(Auth, AppCore) {
       AppCore?.state &&
       typeof AppCore.state === "object"
     ) {
-      AppCore.state.authenticated = false;
-      AppCore.state.hasToken = false;
-      AppCore.state.user = null;
-      AppCore.state.token = null;
-      AppCore.state.accessToken = null;
-      AppCore.state.role = null;
-      AppCore.state.username = null;
-      AppCore.state.currentResolvedUsername = null;
-      AppCore.state.resolvedUsername = null;
+      Object.assign(
+        AppCore.state,
+        unauthPatch
+      );
 
-      cleared =
-        true;
+      cleared = true;
     }
   } catch {}
 
@@ -1701,18 +1641,12 @@ function safeHideLoader(hideLoader, AppCore, reason = "boot-error") {
       AppCore,
       {
         reason,
-        minVisibleMs:
-          0,
-        fatal:
-          true,
-        force:
-          true,
-        forceHide:
-          true,
-        allowDuringBoot:
-          true,
-        state:
-          null,
+        minVisibleMs: 0,
+        fatal: true,
+        force: true,
+        forceHide: true,
+        allowDuringBoot: true,
+        state: null,
       }
     );
 
@@ -1737,8 +1671,7 @@ function safeHideLoader(hideLoader, AppCore, reason = "boot-error") {
       return false;
     }
 
-    loader.hidden =
-      true;
+    loader.hidden = true;
 
     setAttribute(
       loader,
@@ -1774,6 +1707,9 @@ function safeHideLoader(hideLoader, AppCore, reason = "boot-error") {
       LOADER_HIDDEN_CLASSES
     );
 
+    /*
+      Limpieza de posibles estilos legacy sin inyectar nuevos estilos.
+    */
     try {
       loader.style.display = "";
       loader.style.opacity = "";
@@ -1834,6 +1770,17 @@ function resolveViewContainer(AppCore, getViewContainer) {
     if (isFunction(getViewContainer)) {
       const container =
         getViewContainer(AppCore);
+
+      if (container) {
+        return container;
+      }
+    }
+  } catch {}
+
+  try {
+    if (isFunction(getViewContainer)) {
+      const container =
+        getViewContainer();
 
       if (container) {
         return container;
@@ -1905,6 +1852,18 @@ function markFatalDomState(AppCore, snapshot = {}) {
 
       setDataset(
         root,
+        "appReady",
+        "false"
+      );
+
+      setDataset(
+        root,
+        "appBooting",
+        "false"
+      );
+
+      setDataset(
+        root,
         "appState",
         "fatal"
       );
@@ -1932,6 +1891,12 @@ function markFatalDomState(AppCore, snapshot = {}) {
         "shell",
         "visible"
       );
+
+      setDataset(
+        root,
+        "bootError",
+        "true"
+      );
     }
 
     if (body) {
@@ -1948,8 +1913,7 @@ function markFatalDomState(AppCore, snapshot = {}) {
         continue;
       }
 
-      element.hidden =
-        false;
+      element.hidden = false;
 
       setAttribute(
         element,
@@ -1988,27 +1952,44 @@ function markFatalDomState(AppCore, snapshot = {}) {
       );
     }
 
+    const fatalPatch = {
+      loading: false,
+      booting: false,
+      loaderVisible: false,
+
+      ready: false,
+      appReady: false,
+      booted: false,
+
+      appFatal: true,
+      fatal: true,
+      fatalAt: snapshot.at || safeIsoDate(),
+    };
+
     try {
       AppCore?.setState?.(
-        {
-          loading:
-            false,
-          booting:
-            false,
-          loaderVisible:
-            false,
-          appFatal:
-            true,
-          fatal:
-            true,
-          fatalAt:
-            snapshot.at || safeIsoDate(),
-        },
+        fatalPatch,
         {
           source:
             "app:errors:fatal-dom",
           emit:
             false,
+          silent:
+            true,
+        }
+      );
+    } catch {}
+
+    try {
+      AppCore?.patchState?.(
+        fatalPatch,
+        {
+          source:
+            "app:errors:fatal-dom",
+          emit:
+            false,
+          silent:
+            true,
         }
       );
     } catch {}
@@ -2018,12 +1999,10 @@ function markFatalDomState(AppCore, snapshot = {}) {
         AppCore?.state &&
         typeof AppCore.state === "object"
       ) {
-        AppCore.state.loading = false;
-        AppCore.state.booting = false;
-        AppCore.state.loaderVisible = false;
-        AppCore.state.appFatal = true;
-        AppCore.state.fatal = true;
-        AppCore.state.fatalAt = snapshot.at || safeIsoDate();
+        Object.assign(
+          AppCore.state,
+          fatalPatch
+        );
       }
     } catch {}
 
@@ -2034,7 +2013,7 @@ function markFatalDomState(AppCore, snapshot = {}) {
 }
 
 /* =========================================================
-   ERROR SCREEN MARKUP - DOM SAFE
+   ERROR SCREEN MARKUP
 ========================================================= */
 
 function createBootErrorMetaRow(label = "", value = "") {
@@ -2087,9 +2066,23 @@ function createBootErrorButton({
 }
 
 function createBootErrorDetails(snapshot = {}) {
+  const raw =
+    safeText(snapshot.rawMessage, "");
+
+  const stack =
+    safeText(snapshot.stack, "");
+
   if (
-    !snapshot.rawMessage ||
-    snapshot.rawMessage === snapshot.message
+    !raw &&
+    !stack
+  ) {
+    return null;
+  }
+
+  if (
+    raw &&
+    raw === snapshot.message &&
+    !stack
   ) {
     return null;
   }
@@ -2107,10 +2100,21 @@ function createBootErrorDetails(snapshot = {}) {
     });
 
   const pre =
-    createElement("pre");
+    createElement("pre", {
+      className:
+        "boot-error-card__pre",
+    });
 
   pre.textContent =
-    snapshot.rawMessage || "";
+    [
+      raw ? `Mensaje: ${raw}` : "",
+      snapshot.url ? `URL: ${snapshot.url}` : "",
+      snapshot.line ? `Línea: ${snapshot.line}` : "",
+      snapshot.column ? `Columna: ${snapshot.column}` : "",
+      stack ? `Stack:\n${stack}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
 
   appendAll(
     details,
@@ -2316,7 +2320,7 @@ function buildBootErrorNode(snapshot = {}) {
 }
 
 /* =========================================================
-   UI ERROR SCREEN
+   BOOT ERROR RENDER
 ========================================================= */
 
 export function renderBootError({
@@ -2355,6 +2359,8 @@ export function renderBootError({
     ERROR_EVENTS.render,
     snapshot
   );
+
+  exposeDebugApi(AppCore);
 
   const container =
     resolveViewContainer(
@@ -2415,8 +2421,7 @@ export function renderBootError({
     return true;
   }
 
-  errorState.rendering =
-    true;
+  errorState.rendering = true;
 
   try {
     safeClearViewContainer(
@@ -2435,15 +2440,21 @@ export function renderBootError({
 
     container.appendChild(root);
 
-    container.removeAttribute("aria-busy");
+    setAttribute(
+      container,
+      "aria-busy",
+      "false"
+    );
 
-    container.setAttribute(
+    setAttribute(
+      container,
       "aria-hidden",
       "false"
     );
 
-    container.setAttribute(
-      "data-view-state",
+    setDataset(
+      container,
+      "viewState",
       "boot-error"
     );
 
@@ -2577,8 +2588,7 @@ export function renderBootError({
 
     return false;
   } finally {
-    errorState.rendering =
-      false;
+    errorState.rendering = false;
   }
 }
 
@@ -2628,7 +2638,6 @@ function normalizeResourceError(event = null) {
       `No se pudo cargar el recurso ${tagName}${url ? `: ${url}` : "."}`,
 
     url,
-
     target,
   };
 }
@@ -2644,10 +2653,13 @@ function isIgnorableRuntimeError(error = null) {
     return false;
   }
 
-  return Boolean(
-    /ResizeObserver loop limit exceeded/i.test(message) ||
-      /ResizeObserver loop completed with undelivered notifications/i.test(message)
-  );
+  return IGNORED_ERROR_PATTERNS.some((pattern) => {
+    try {
+      return pattern.test(message);
+    } catch {
+      return false;
+    }
+  });
 }
 
 export function reportAppError({
@@ -2684,8 +2696,7 @@ function processRuntimeError({
     return null;
   }
 
-  errorState.handling =
-    true;
+  errorState.handling = true;
 
   try {
     const snapshot =
@@ -2749,8 +2760,7 @@ function processRuntimeError({
 
     return snapshot;
   } finally {
-    errorState.handling =
-      false;
+    errorState.handling = false;
   }
 }
 
@@ -2803,10 +2813,10 @@ function bindWithCleanup({
   options,
 }) {
   /*
-    Preferimos listener directo en window:
-    - reduce dependencia del cleanup registry;
-    - evita perder el guard si AppCore está parcial;
-    - permite unbind propio.
+    Listener directo primero:
+    - funciona aunque AppCore esté parcial;
+    - permite capturar resource errors con capture=true;
+    - unbind propio y explícito.
   */
   if (
     bindWindowEvent(
@@ -2880,8 +2890,7 @@ export function bindGlobalErrorHandlers({
     return false;
   }
 
-  bindingInFlight =
-    true;
+  bindingInFlight = true;
 
   const finalScope =
     safeText(
@@ -3049,8 +3058,7 @@ export function bindGlobalErrorHandlers({
 
     return false;
   } finally {
-    bindingInFlight =
-      false;
+    bindingInFlight = false;
   }
 }
 
@@ -3071,14 +3079,9 @@ export function unbindGlobalErrorHandlers(AppCore = null) {
     } catch {}
   }
 
-  handlersBound =
-    false;
-
-  bindingInFlight =
-    false;
-
-  boundScope =
-    "";
+  handlersBound = false;
+  bindingInFlight = false;
+  boundScope = "";
 
   safeEmit(
     AppCore,
@@ -3132,6 +3135,17 @@ function exposeDebugApi(AppCore = null) {
           error,
           ...ensureObject(options),
         }),
+
+    bind:
+      (options = {}) =>
+        bindGlobalErrorHandlers({
+          AppCore,
+          ...ensureObject(options),
+        }),
+
+    unbind:
+      () =>
+        unbindGlobalErrorHandlers(AppCore),
   };
 
   try {
@@ -3146,27 +3160,31 @@ function exposeDebugApi(AppCore = null) {
     );
   } catch {}
 
-  safeEmit(
-    AppCore,
-    ERROR_EVENTS.debugApi,
-    {
-      version:
-        APP_ERRORS_VERSION,
+  if (!debugApiInstalled) {
+    debugApiInstalled = true;
 
-      installed:
-        true,
-    }
-  );
+    safeEmit(
+      AppCore,
+      ERROR_EVENTS.debugApi,
+      {
+        version:
+          APP_ERRORS_VERSION,
+
+        installed:
+          true,
+      }
+    );
+  }
 
   return true;
 }
 
 /* =========================================================
-   DEBUG
+   SNAPSHOT / RESET
 ========================================================= */
 
 export function getErrorStateSnapshot() {
-  return {
+  return sanitizeValue({
     version:
       APP_ERRORS_VERSION,
 
@@ -3256,33 +3274,21 @@ export function getErrorStateSnapshot() {
         at:
           item.at,
       })),
-  };
+  });
 }
 
 export function resetErrorState() {
-  errorState.lastToastKey =
-    "";
+  errorState.lastToastKey = "";
+  errorState.lastToastAt = 0;
 
-  errorState.lastToastAt =
-    0;
+  errorState.lastRenderKey = "";
+  errorState.lastRenderAt = 0;
 
-  errorState.lastRenderKey =
-    "";
+  errorState.handling = false;
+  errorState.rendering = false;
 
-  errorState.lastRenderAt =
-    0;
-
-  errorState.handling =
-    false;
-
-  errorState.rendering =
-    false;
-
-  errorState.total =
-    0;
-
-  errorState.recent =
-    [];
+  errorState.total = 0;
+  errorState.recent = [];
 
   return getErrorStateSnapshot();
 }
@@ -3305,4 +3311,6 @@ export default {
 
   getErrorStateSnapshot,
   resetErrorState,
+
+  redactTokenInText,
 };

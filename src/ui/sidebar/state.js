@@ -2,15 +2,15 @@
    Onion SPA - Sidebar State
    Archivo: src/ui/sidebar/state.js
 
-   FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · APPLE INDICATOR · 11/10
-   ROUTE SAFE · INDICATOR RACE SAFE · NO STALE ACTIVE ITEM
-   TOKEN DRIVEN · CSS VAR OWNER · ZERO DUPLICATE DISPATCH
+   ONION SUPPORT · SIDEBAR STATE · 15/10
+   DESKTOP/MOBILE STABLE · APPLE INDICATOR · ROUTE SAFE
 
    Responsabilidades:
    - Resolver estado visual del sidebar.
    - Separar estado desktop y mobile.
-   - Persistir solo estado desktop colapsado.
-   - No mezclar sidebarOpen mobile con desktop.
+   - Persistir sólo estado desktop colapsado.
+   - No usar sidebarOpen legacy como fuente real.
+   - No mezclar apertura desktop con apertura mobile.
    - Sincronizar clases / aria / data attrs.
    - Mantener tooltips coherentes.
    - No auto-colapsar al navegar.
@@ -33,10 +33,10 @@
      - default: cerrado
    - Navegación:
      - no abre/cierra sidebar
-     - solo resincroniza activo e indicador
+     - sólo resincroniza activo e indicador
    - Eventos:
      - AppCore.events si existe
-     - window solo fallback
+     - window sólo fallback
      - nunca doble dispatch
 ========================================================= */
 
@@ -47,151 +47,220 @@ import {
 
 import {
   getElements,
-  isShellHidden,
+  isShellHidden as isDomShellHidden,
+  isRealShellHidden as isDomRealShellHidden,
   sanitizeFooterTooltipState,
 } from "./dom.js";
+
+/* =========================================================
+   VERSION
+========================================================= */
+
+export const SIDEBAR_STATE_VERSION =
+  "sidebar-state-v15-desktop-mobile-indicator-safe";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-const SOURCE = "SidebarState";
+const SOURCE =
+  "SidebarState";
 
-const LEGACY_SIDEBAR_OPEN_STORAGE_KEY = "sidebarOpen";
+const OWNER =
+  "state.js";
 
-const SIDEBAR_TRANSITION_MS = 380;
-const INDICATOR_RECALC_DELAY_MS = 32;
-const INDICATOR_SETTLED_DELAY_MS = SIDEBAR_TRANSITION_MS + 36;
+const LEGACY_SIDEBAR_OPEN_STORAGE_KEY =
+  "sidebarOpen";
 
-const ROUTE_CURRENT_VALUE = "page";
+const SIDEBAR_TRANSITION_MS =
+  380;
 
-const STATE_EMIT_MIN_INTERVAL_MS = 24;
-const ACTIVE_EMIT_MIN_INTERVAL_MS = 24;
+const INDICATOR_RECALC_DELAY_MS =
+  32;
 
-const DATA_TRUE = "true";
-const DATA_FALSE = "false";
+const INDICATOR_SETTLED_DELAY_MS =
+  SIDEBAR_TRANSITION_MS + 36;
 
-const TRANSITION_PROPS = new Set([
-  "inline-size",
-  "width",
-  "max-inline-size",
-  "transform",
-  "margin-inline-start",
-]);
+const ROUTE_CURRENT_VALUE =
+  "page";
 
-const MENU_ITEM_SELECTOR = [
-  ".menu-item",
-  "a[data-spa]",
-  "a[data-route]",
-  "a[data-href]",
-  "a[data-to]",
-  "[data-sidebar-nav='true']",
-].join(",");
+const STATE_EMIT_MIN_INTERVAL_MS =
+  24;
 
-const ACTIVE_ITEM_SELECTOR = [
-  ".menu-item[aria-current='page']",
-  ".menu-item[data-active='true']",
-  ".menu-item.active",
-  ".menu-item.is-active",
-  "[data-sidebar-nav='true'][aria-current='page']",
-  "[data-sidebar-nav='true'][data-active='true']",
-  "[data-sidebar-nav='true'].active",
-  "[data-sidebar-nav='true'].is-active",
-].join(",");
+const ACTIVE_EMIT_MIN_INTERVAL_MS =
+  24;
 
-const HIDDEN_ANCESTOR_SELECTOR = [
-  "[hidden]",
-  "[inert]",
-  "[aria-hidden='true']",
-  "[data-role-visible='false']",
-  "[data-admin-visible='false']",
-  "[data-sidebar-visible='false']",
-].join(",");
+const INDICATOR_EMIT_MIN_INTERVAL_MS =
+  24;
+
+const DATA_TRUE =
+  "true";
+
+const DATA_FALSE =
+  "false";
+
+const MODE_DESKTOP =
+  "desktop";
+
+const MODE_MOBILE =
+  "mobile";
+
+const MODE_HIDDEN =
+  "hidden";
+
+const TRANSITION_PROPS =
+  new Set([
+    "inline-size",
+    "width",
+    "max-inline-size",
+    "transform",
+    "margin-inline-start",
+  ]);
+
+const MENU_ITEM_SELECTOR =
+  [
+    ".menu-item",
+    "a[data-spa]",
+    "a[data-route]",
+    "a[data-href]",
+    "a[data-to]",
+    "[data-sidebar-nav='true']",
+  ].join(",");
+
+const ACTIVE_ITEM_SELECTOR =
+  [
+    ".menu-item[aria-current='page']",
+    ".menu-item[data-active='true']",
+    ".menu-item.active",
+    ".menu-item.is-active",
+    "[data-sidebar-nav='true'][aria-current='page']",
+    "[data-sidebar-nav='true'][data-active='true']",
+    "[data-sidebar-nav='true'].active",
+    "[data-sidebar-nav='true'].is-active",
+  ].join(",");
+
+const HIDDEN_ANCESTOR_SELECTOR =
+  [
+    "[hidden]",
+    "[inert]",
+    "[aria-hidden='true']",
+    "[data-role-visible='false']",
+    "[data-admin-visible='false']",
+    "[data-sidebar-visible='false']",
+  ].join(",");
 
 /*
   La clave izquierda puede venir de href/data-route.
   La derecha debe ser la ruta canónica interna.
 */
-const ROUTE_ALIASES = Object.freeze({
-  "/home": "/",
-  "/dashboard": "/",
-  "/inicio": "/",
-  "/inici": "/",
+const ROUTE_ALIASES =
+  Object.freeze({
+    "/home": "/",
+    "/dashboard": "/",
+    "/inicio": "/",
+    "/inici": "/",
 
-  "/tickets": "/incidencias",
-  "/ticket": "/incidencias",
-  "/incidents": "/incidencias",
-  "/incident": "/incidencias",
-  "/incidencia": "/incidencias",
-  "/incidencies": "/incidencias",
-  "/incidencia-client": "/incidencias",
+    "/tickets": "/incidencias",
+    "/ticket": "/incidencias",
+    "/incidents": "/incidencias",
+    "/incident": "/incidencias",
+    "/incidencia": "/incidencias",
+    "/incidencies": "/incidencias",
+    "/incidencia-client": "/incidencias",
 
-  "/invoices": "/facturas",
-  "/invoice": "/facturas",
-  "/billing": "/facturas",
-  "/factura": "/facturas",
-  "/factures": "/facturas",
-  "/facturacio": "/facturas",
-  "/facturación": "/facturas",
-  "/facturacion": "/facturas",
+    "/invoices": "/facturas",
+    "/invoice": "/facturas",
+    "/billing": "/facturas",
+    "/factura": "/facturas",
+    "/factures": "/facturas",
+    "/facturacio": "/facturas",
+    "/facturación": "/facturas",
+    "/facturacion": "/facturas",
 
-  "/users": "/usuarios",
-  "/user": "/usuarios",
-  "/usuario": "/usuarios",
-  "/usuaris": "/usuarios",
-  "/usuari": "/usuarios",
+    "/users": "/usuarios",
+    "/user": "/usuarios",
+    "/usuario": "/usuarios",
+    "/usuaris": "/usuarios",
+    "/usuari": "/usuarios",
 
-  "/clients": "/clientes",
-  "/client": "/clientes",
-  "/customers": "/clientes",
-  "/customer": "/clientes",
-  "/cliente": "/clientes",
+    "/clients": "/clientes",
+    "/client": "/clientes",
+    "/customers": "/clientes",
+    "/customer": "/clientes",
+    "/cliente": "/clientes",
 
-  "/account": "/cuenta",
-  "/profile": "/cuenta",
-  "/perfil": "/cuenta",
-  "/compte": "/cuenta",
+    "/account": "/cuenta",
+    "/profile": "/cuenta",
+    "/perfil": "/cuenta",
+    "/compte": "/cuenta",
 
-  "/settings": "/ajustes",
-  "/config": "/ajustes",
-  "/configuration": "/ajustes",
-  "/configuracion": "/ajustes",
-  "/configuración": "/ajustes",
-  "/configuracio": "/ajustes",
-  "/configuració": "/ajustes",
+    "/settings": "/ajustes",
+    "/config": "/ajustes",
+    "/configuration": "/ajustes",
+    "/configuracion": "/ajustes",
+    "/configuración": "/ajustes",
+    "/configuracio": "/ajustes",
+    "/configuració": "/ajustes",
 
-  "/server": "/servidor",
-  "/servidor": "/servidor",
-});
+    "/server": "/servidor",
+    "/servidor": "/servidor",
+  });
 
 /* =========================================================
    RUNTIME
 ========================================================= */
 
-let sidebarTransitionTimer = null;
-let sidebarTransitionEndCleanup = null;
+let sidebarTransitionTimer =
+  null;
 
-let indicatorRafA = 0;
-let indicatorRafB = 0;
-let indicatorTimer = null;
-let indicatorGeneration = 0;
+let sidebarTransitionEndCleanup =
+  null;
 
-let lastStateSignature = "";
-let lastStateEmitAt = 0;
+let indicatorRafA =
+  0;
 
-let lastActiveSignature = "";
-let lastActiveEmitAt = 0;
+let indicatorRafB =
+  0;
 
-let lastIndicatorSignature = "";
-let lastIndicatorReason = "";
-let lastTransitionReason = "";
+let indicatorTimer =
+  null;
+
+let indicatorGeneration =
+  0;
+
+let lastStateSignature =
+  "";
+
+let lastStateEmitAt =
+  0;
+
+let lastActiveSignature =
+  "";
+
+let lastActiveEmitAt =
+  0;
+
+let lastIndicatorSignature =
+  "";
+
+let lastIndicatorEmitAt =
+  0;
+
+let lastIndicatorReason =
+  "";
+
+let lastTransitionReason =
+  "";
 
 /* =========================================================
    BASE HELPERS
 ========================================================= */
 
 function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
 }
 
 function hasWindow() {
@@ -210,19 +279,37 @@ function nowTs() {
   }
 }
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
+function safeIsoDate(ms = nowTs()) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
+  }
+}
 
-  const text = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function safeText(value, fallback = "") {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text =
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return text || fallback;
 }
 
 function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
+  return (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  )
     ? value
     : {};
 }
@@ -232,82 +319,191 @@ function isFunction(value) {
 }
 
 function safeBoolean(value, fallback = null) {
-  if (typeof value === "boolean") return value;
+  if (typeof value === "boolean") {
+    return value;
+  }
 
   if (typeof value === "string") {
-    const key = value.trim().toLowerCase();
+    const key =
+      value
+        .trim()
+        .toLowerCase();
 
-    if (["true", "1", "yes", "si", "sí", "ok", "on"].includes(key)) {
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "si",
+        "sí",
+        "ok",
+        "on",
+        "open",
+        "opened",
+        "expanded",
+      ].includes(key)
+    ) {
       return true;
     }
 
-    if (["false", "0", "no", "off"].includes(key)) {
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "off",
+        "closed",
+        "close",
+        "collapsed",
+      ].includes(key)
+    ) {
       return false;
     }
   }
 
   if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
+    if (value === 1) {
+      return true;
+    }
+
+    if (value === 0) {
+      return false;
+    }
   }
 
   return fallback;
 }
 
 function safeNumber(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+  const number =
+    Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : fallback;
 }
 
 function clampNumber(value, min = 0, max = Number.POSITIVE_INFINITY) {
-  const n = safeNumber(value, min);
-  return Math.min(Math.max(n, min), max);
+  const number =
+    safeNumber(value, min);
+
+  return Math.min(
+    Math.max(number, min),
+    max
+  );
 }
 
 function uniqueArray(values = []) {
-  return Array.from(new Set(values.filter(Boolean)));
+  return Array.from(
+    new Set(
+      values.filter(Boolean)
+    )
+  );
 }
 
 function ensureStateBag(AppCore) {
-  if (!AppCore || typeof AppCore !== "object") return null;
-
-  if (!AppCore.state || typeof AppCore.state !== "object") {
-    AppCore.state = {};
+  if (
+    !AppCore ||
+    typeof AppCore !== "object"
+  ) {
+    return null;
   }
 
-  return AppCore.state;
+  try {
+    if (
+      !AppCore.state ||
+      typeof AppCore.state !== "object"
+    ) {
+      AppCore.state =
+        {};
+    }
+
+    return AppCore.state;
+  } catch {
+    return null;
+  }
 }
 
 function safeWarn(AppCore, ...args) {
   try {
-    AppCore?.utils?.warn?.("[SidebarState]", ...args);
+    AppCore?.utils?.warn?.(
+      "[SidebarState]",
+      ...args
+    );
   } catch {}
 
   try {
-    console.warn("[SidebarState]", ...args);
+    console.warn(
+      "[SidebarState]",
+      ...args
+    );
   } catch {}
 }
 
+function buildEventPayload(payload = {}) {
+  return {
+    ...safeObject(payload),
+
+    source:
+      SOURCE,
+
+    owner:
+      OWNER,
+
+    version:
+      SIDEBAR_STATE_VERSION,
+
+    ts:
+      safeObject(payload).ts || nowTs(),
+
+    at:
+      safeObject(payload).at || safeIsoDate(),
+  };
+}
+
 function safeEmit(AppCore, eventName = "", payload = {}) {
-  const name = safeText(eventName, "");
-  if (!name) return false;
+  const name =
+    safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  const finalPayload =
+    buildEventPayload(payload);
 
   try {
     if (isFunction(AppCore?.events?.emit)) {
-      AppCore.events.emit(name, payload);
+      AppCore.events.emit(
+        name,
+        finalPayload
+      );
+
       return true;
     }
   } catch (error) {
-    safeWarn(AppCore, `AppCore.events.emit("${name}") falló.`, error);
+    safeWarn(
+      AppCore,
+      `AppCore.events.emit("${name}") falló.`,
+      error
+    );
   }
 
   try {
-    if (isBrowser()) {
+    if (
+      isBrowser() &&
+      typeof CustomEvent !== "undefined"
+    ) {
       window.dispatchEvent(
-        new CustomEvent(name, {
-          detail: payload,
-        })
+        new CustomEvent(
+          name,
+          {
+            detail:
+              finalPayload,
+          }
+        )
       );
+
       return true;
     }
   } catch {}
@@ -316,7 +512,9 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
 }
 
 function getHtmlElement() {
-  if (!hasDocument()) return null;
+  if (!hasDocument()) {
+    return null;
+  }
 
   try {
     return document.documentElement || null;
@@ -326,7 +524,9 @@ function getHtmlElement() {
 }
 
 function getBodyElement() {
-  if (!hasDocument()) return null;
+  if (!hasDocument()) {
+    return null;
+  }
 
   try {
     return document.body || null;
@@ -336,17 +536,27 @@ function getBodyElement() {
 }
 
 function isElement(value) {
-  if (!value) return false;
+  if (!value) {
+    return false;
+  }
 
   try {
-    return typeof Element !== "undefined" && value instanceof Element;
+    return (
+      typeof Element !== "undefined" &&
+      value instanceof Element
+    );
   } catch {
-    return Boolean(value && isFunction(value.getBoundingClientRect));
+    return Boolean(
+      value &&
+        isFunction(value.getBoundingClientRect)
+    );
   }
 }
 
 function isConnectedElement(value) {
-  if (!isElement(value)) return false;
+  if (!isElement(value)) {
+    return false;
+  }
 
   try {
     return value.isConnected !== false;
@@ -360,7 +570,9 @@ function isConnectedElement(value) {
 ========================================================= */
 
 function hasClass(element, className = "") {
-  if (!element || !className) return false;
+  if (!element || !className) {
+    return false;
+  }
 
   try {
     return element.classList.contains(className);
@@ -370,10 +582,15 @@ function hasClass(element, className = "") {
 }
 
 function addClass(element, ...classes) {
-  if (!element) return false;
+  if (!element) {
+    return false;
+  }
 
   try {
-    element.classList.add(...classes.filter(Boolean));
+    element.classList.add(
+      ...classes.filter(Boolean)
+    );
+
     return true;
   } catch {
     return false;
@@ -381,10 +598,15 @@ function addClass(element, ...classes) {
 }
 
 function removeClass(element, ...classes) {
-  if (!element) return false;
+  if (!element) {
+    return false;
+  }
 
   try {
-    element.classList.remove(...classes.filter(Boolean));
+    element.classList.remove(
+      ...classes.filter(Boolean)
+    );
+
     return true;
   } catch {
     return false;
@@ -392,10 +614,16 @@ function removeClass(element, ...classes) {
 }
 
 function toggleClass(element, className = "", enabled = false) {
-  if (!element || !className) return false;
+  if (!element || !className) {
+    return false;
+  }
 
   try {
-    element.classList.toggle(className, Boolean(enabled));
+    element.classList.toggle(
+      className,
+      Boolean(enabled)
+    );
+
     return true;
   } catch {
     return false;
@@ -403,20 +631,32 @@ function toggleClass(element, className = "", enabled = false) {
 }
 
 function toggleClasses(element, classMap = {}) {
-  if (!element) return false;
+  if (!element) {
+    return false;
+  }
 
   for (const [className, enabled] of Object.entries(safeObject(classMap))) {
-    toggleClass(element, className, enabled);
+    toggleClass(
+      element,
+      className,
+      enabled
+    );
   }
 
   return true;
 }
 
 function setAttr(element, name = "", value = "") {
-  if (!element || !name) return false;
+  if (!element || !name) {
+    return false;
+  }
 
   try {
-    element.setAttribute(name, String(value));
+    element.setAttribute(
+      name,
+      String(value)
+    );
+
     return true;
   } catch {
     return false;
@@ -424,7 +664,9 @@ function setAttr(element, name = "", value = "") {
 }
 
 function removeAttr(element, name = "") {
-  if (!element || !name) return false;
+  if (!element || !name) {
+    return false;
+  }
 
   try {
     element.removeAttribute(name);
@@ -435,15 +677,23 @@ function removeAttr(element, name = "") {
 }
 
 function setDataset(element, key = "", value = "") {
-  if (!element || !key) return false;
+  if (!element || !key) {
+    return false;
+  }
 
   try {
-    if (value === null || value === undefined || value === "") {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ""
+    ) {
       delete element.dataset[key];
       return true;
     }
 
-    element.dataset[key] = String(value);
+    element.dataset[key] =
+      String(value);
+
     return true;
   } catch {
     return false;
@@ -451,10 +701,16 @@ function setDataset(element, key = "", value = "") {
 }
 
 function setStyleVar(element, name = "", value = "") {
-  if (!element || !name) return false;
+  if (!element || !name) {
+    return false;
+  }
 
   try {
-    element.style.setProperty(name, String(value));
+    element.style.setProperty(
+      name,
+      String(value)
+    );
+
     return true;
   } catch {
     return false;
@@ -462,7 +718,9 @@ function setStyleVar(element, name = "", value = "") {
 }
 
 function removeStyleVar(element, name = "") {
-  if (!element || !name) return false;
+  if (!element || !name) {
+    return false;
+  }
 
   try {
     element.style.removeProperty(name);
@@ -473,15 +731,39 @@ function removeStyleVar(element, name = "") {
 }
 
 function setHiddenState(element, hidden = false) {
-  if (!element) return false;
-
-  try {
-    element.hidden = Boolean(hidden);
-    setAttr(element, "aria-hidden", hidden ? "true" : "false");
-    return true;
-  } catch {
+  if (!element) {
     return false;
   }
+
+  const shouldHide =
+    Boolean(hidden);
+
+  try {
+    element.hidden =
+      shouldHide;
+  } catch {}
+
+  try {
+    if (shouldHide) {
+      element.setAttribute(
+        "hidden",
+        ""
+      );
+    } else {
+      element.removeAttribute(
+        "hidden"
+      );
+    }
+  } catch {}
+
+  try {
+    element.setAttribute(
+      "aria-hidden",
+      shouldHide ? "true" : "false"
+    );
+  } catch {}
+
+  return true;
 }
 
 /* =========================================================
@@ -489,7 +771,9 @@ function setHiddenState(element, hidden = false) {
 ========================================================= */
 
 function safeRequestAnimationFrame(callback) {
-  if (!isFunction(callback)) return 0;
+  if (!isFunction(callback)) {
+    return 0;
+  }
 
   if (!isBrowser()) {
     try {
@@ -519,7 +803,9 @@ function safeRequestAnimationFrame(callback) {
 }
 
 function safeCancelAnimationFrame(id = 0) {
-  if (!id || !isBrowser()) return false;
+  if (!id || !isBrowser()) {
+    return false;
+  }
 
   try {
     window.cancelAnimationFrame(id);
@@ -530,9 +816,16 @@ function safeCancelAnimationFrame(id = 0) {
 }
 
 function safeSetTimeout(callback, ms = 0) {
-  if (!isFunction(callback)) return null;
+  if (!isFunction(callback)) {
+    return null;
+  }
 
-  const delay = clampNumber(ms, 0, 60000);
+  const delay =
+    clampNumber(
+      ms,
+      0,
+      60000
+    );
 
   try {
     if (hasWindow()) {
@@ -552,7 +845,9 @@ function safeSetTimeout(callback, ms = 0) {
 }
 
 function safeClearTimeout(timer) {
-  if (!timer) return false;
+  if (!timer) {
+    return false;
+  }
 
   try {
     if (hasWindow()) {
@@ -565,7 +860,9 @@ function safeClearTimeout(timer) {
 }
 
 function afterNextPaint(callback) {
-  if (!isFunction(callback)) return;
+  if (!isFunction(callback)) {
+    return;
+  }
 
   safeRequestAnimationFrame(() => {
     safeRequestAnimationFrame(callback);
@@ -578,7 +875,8 @@ function afterNextPaint(callback) {
 
 function getStorage(AppCore = null) {
   try {
-    const storage = AppCore?.storage;
+    const storage =
+      AppCore?.storage;
 
     if (
       storage &&
@@ -598,41 +896,74 @@ function getStorage(AppCore = null) {
   return null;
 }
 
-function readFromAppStorage(AppCore, key = "") {
-  const cleanKey = safeText(key, "");
-  if (!cleanKey) return null;
+function readStorageBoolean(storage, key = "") {
+  const cleanKey =
+    safeText(key, "");
+
+  if (!storage || !cleanKey) {
+    return null;
+  }
 
   try {
-    const storage = getStorage(AppCore);
+    if (isFunction(storage.get)) {
+      const parsed =
+        safeBoolean(
+          storage.get(cleanKey),
+          null
+        );
 
-    if (isFunction(storage?.get)) {
-      const parsed = safeBoolean(storage.get(cleanKey), null);
-      if (typeof parsed === "boolean") return parsed;
+      if (typeof parsed === "boolean") {
+        return parsed;
+      }
     }
+  } catch {}
 
-    if (isFunction(storage?.getItem)) {
-      const parsed = safeBoolean(storage.getItem(cleanKey), null);
-      if (typeof parsed === "boolean") return parsed;
+  try {
+    if (isFunction(storage.getItem)) {
+      const parsed =
+        safeBoolean(
+          storage.getItem(cleanKey),
+          null
+        );
+
+      if (typeof parsed === "boolean") {
+        return parsed;
+      }
     }
   } catch {}
 
   return null;
 }
 
-function writeToAppStorage(AppCore, key = "", value = false) {
-  const cleanKey = safeText(key, "");
-  if (!cleanKey) return false;
+function writeStorageBoolean(storage, key = "", value = false) {
+  const cleanKey =
+    safeText(key, "");
+
+  if (!storage || !cleanKey) {
+    return false;
+  }
+
+  const serialized =
+    String(Boolean(value));
 
   try {
-    const storage = getStorage(AppCore);
+    if (isFunction(storage.set)) {
+      storage.set(
+        cleanKey,
+        serialized
+      );
 
-    if (isFunction(storage?.set)) {
-      storage.set(cleanKey, String(Boolean(value)));
       return true;
     }
+  } catch {}
 
-    if (isFunction(storage?.setItem)) {
-      storage.setItem(cleanKey, String(Boolean(value)));
+  try {
+    if (isFunction(storage.setItem)) {
+      storage.setItem(
+        cleanKey,
+        serialized
+      );
+
       return true;
     }
   } catch {}
@@ -640,24 +971,64 @@ function writeToAppStorage(AppCore, key = "", value = false) {
   return false;
 }
 
+function readFromAppStorage(AppCore, key = "") {
+  return readStorageBoolean(
+    getStorage(AppCore),
+    key
+  );
+}
+
+function writeToAppStorage(AppCore, key = "", value = false) {
+  return writeStorageBoolean(
+    getStorage(AppCore),
+    key,
+    value
+  );
+}
+
 function readFromLocalStorage(key = "") {
-  const cleanKey = safeText(key, "");
-  if (!cleanKey || !isBrowser()) return null;
+  const cleanKey =
+    safeText(key, "");
+
+  if (
+    !cleanKey ||
+    !isBrowser()
+  ) {
+    return null;
+  }
 
   try {
-    const parsed = safeBoolean(window.localStorage?.getItem?.(cleanKey), null);
-    if (typeof parsed === "boolean") return parsed;
+    const parsed =
+      safeBoolean(
+        window.localStorage?.getItem?.(cleanKey),
+        null
+      );
+
+    if (typeof parsed === "boolean") {
+      return parsed;
+    }
   } catch {}
 
   return null;
 }
 
 function writeToLocalStorage(key = "", value = false) {
-  const cleanKey = safeText(key, "");
-  if (!cleanKey || !isBrowser()) return false;
+  const cleanKey =
+    safeText(key, "");
+
+  if (
+    !cleanKey ||
+    !isBrowser()
+  ) {
+    return false;
+  }
 
   try {
-    window.localStorage?.setItem?.(cleanKey, String(Boolean(value)));
+    window.localStorage?.setItem?.(
+      cleanKey,
+      String(Boolean(value))
+    );
+
     return true;
   } catch {
     return false;
@@ -665,41 +1036,97 @@ function writeToLocalStorage(key = "", value = false) {
 }
 
 function readSavedSidebarCollapsed(AppCore = null) {
-  const fromAppStorage = readFromAppStorage(AppCore, DESKTOP_COLLAPSED_STORAGE_KEY);
-  if (typeof fromAppStorage === "boolean") return fromAppStorage;
+  const fromAppStorage =
+    readFromAppStorage(
+      AppCore,
+      DESKTOP_COLLAPSED_STORAGE_KEY
+    );
 
-  const fromLocalStorage = readFromLocalStorage(DESKTOP_COLLAPSED_STORAGE_KEY);
-  if (typeof fromLocalStorage === "boolean") return fromLocalStorage;
+  if (typeof fromAppStorage === "boolean") {
+    return fromAppStorage;
+  }
+
+  const fromLocalStorage =
+    readFromLocalStorage(
+      DESKTOP_COLLAPSED_STORAGE_KEY
+    );
+
+  if (typeof fromLocalStorage === "boolean") {
+    return fromLocalStorage;
+  }
 
   /*
     Legacy:
     sidebarOpen=true  => desktop abierto
     sidebarOpen=false => desktop colapsado
   */
-  const legacyFromAppStorage = readFromAppStorage(AppCore, LEGACY_SIDEBAR_OPEN_STORAGE_KEY);
-  if (typeof legacyFromAppStorage === "boolean") return !legacyFromAppStorage;
+  const legacyFromAppStorage =
+    readFromAppStorage(
+      AppCore,
+      LEGACY_SIDEBAR_OPEN_STORAGE_KEY
+    );
 
-  const legacyFromLocalStorage = readFromLocalStorage(LEGACY_SIDEBAR_OPEN_STORAGE_KEY);
-  if (typeof legacyFromLocalStorage === "boolean") return !legacyFromLocalStorage;
+  if (typeof legacyFromAppStorage === "boolean") {
+    return !legacyFromAppStorage;
+  }
+
+  const legacyFromLocalStorage =
+    readFromLocalStorage(
+      LEGACY_SIDEBAR_OPEN_STORAGE_KEY
+    );
+
+  if (typeof legacyFromLocalStorage === "boolean") {
+    return !legacyFromLocalStorage;
+  }
 
   return null;
 }
 
 export function getSavedSidebarCollapsed(AppCore = null) {
-  const saved = readSavedSidebarCollapsed(AppCore);
-  return typeof saved === "boolean" ? saved : false;
+  const saved =
+    readSavedSidebarCollapsed(AppCore);
+
+  return typeof saved === "boolean"
+    ? saved
+    : false;
 }
 
 export function saveSidebarCollapsed(value, AppCore = null) {
-  const collapsed = Boolean(value);
+  const collapsed =
+    Boolean(value);
 
-  const appOk = writeToAppStorage(AppCore, DESKTOP_COLLAPSED_STORAGE_KEY, collapsed);
-  const localOk = writeToLocalStorage(DESKTOP_COLLAPSED_STORAGE_KEY, collapsed);
+  const appOk =
+    writeToAppStorage(
+      AppCore,
+      DESKTOP_COLLAPSED_STORAGE_KEY,
+      collapsed
+    );
 
-  writeToAppStorage(AppCore, LEGACY_SIDEBAR_OPEN_STORAGE_KEY, !collapsed);
-  writeToLocalStorage(LEGACY_SIDEBAR_OPEN_STORAGE_KEY, !collapsed);
+  const localOk =
+    writeToLocalStorage(
+      DESKTOP_COLLAPSED_STORAGE_KEY,
+      collapsed
+    );
 
-  return Boolean(appOk || localOk);
+  /*
+    Compat legacy:
+    sidebarOpen representa abierto; collapsed representa lo contrario.
+  */
+  writeToAppStorage(
+    AppCore,
+    LEGACY_SIDEBAR_OPEN_STORAGE_KEY,
+    !collapsed
+  );
+
+  writeToLocalStorage(
+    LEGACY_SIDEBAR_OPEN_STORAGE_KEY,
+    !collapsed
+  );
+
+  return Boolean(
+    appOk ||
+      localOk
+  );
 }
 
 /* =========================================================
@@ -707,12 +1134,24 @@ export function saveSidebarCollapsed(value, AppCore = null) {
 ========================================================= */
 
 export function isMobileViewport(breakpoint = MOBILE_BREAKPOINT) {
-  if (!isBrowser()) return false;
+  if (!isBrowser()) {
+    return false;
+  }
+
+  const px =
+    safeNumber(
+      breakpoint,
+      MOBILE_BREAKPOINT
+    );
 
   try {
     return window.matchMedia(
-      `(max-width: ${safeNumber(breakpoint, MOBILE_BREAKPOINT)}px)`
+      `(max-width: ${px}px)`
     ).matches;
+  } catch {}
+
+  try {
+    return window.innerWidth <= px;
   } catch {
     return false;
   }
@@ -723,21 +1162,31 @@ export function isMobileViewport(breakpoint = MOBILE_BREAKPOINT) {
 ========================================================= */
 
 export function isRealShellHidden(AppCore) {
-  if (!isBrowser()) return false;
+  if (!isBrowser()) {
+    return false;
+  }
+
+  /*
+    Fuente canónica:
+    dom.js sabe distinguir shell real de sidebar.hidden stale.
+  */
+  try {
+    return Boolean(
+      isDomRealShellHidden(AppCore)
+    );
+  } catch {}
 
   const {
     body,
     appShell,
     shell,
     layout,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
-  const html = getHtmlElement();
+  const html =
+    getHtmlElement();
 
-  /*
-    No usamos sidebar.hidden como fuente real.
-    sidebar.hidden puede quedar stale después de login/auth/router repair.
-  */
   return Boolean(
     AppCore?.state?.shellVisible === false ||
       AppCore?.state?.routeShellHidden === true ||
@@ -769,7 +1218,9 @@ export function isRealShellHidden(AppCore) {
 
 function isDomShellHiddenOnly(AppCore) {
   try {
-    return Boolean(isShellHidden(AppCore));
+    return Boolean(
+      isDomShellHidden(AppCore)
+    );
   } catch {
     return false;
   }
@@ -780,47 +1231,169 @@ function isDomShellHiddenOnly(AppCore) {
 ========================================================= */
 
 function setModeMemory(AppCore, mode = "") {
-  const state = ensureStateBag(AppCore);
-  if (!state) return false;
+  const state =
+    ensureStateBag(AppCore);
 
-  const cleanMode = safeText(mode, "");
-  if (!cleanMode) return false;
+  if (!state) {
+    return false;
+  }
 
-  state.sidebarMode = cleanMode;
-  state.sidebarLastMode = cleanMode;
+  const cleanMode =
+    safeText(mode, "");
+
+  if (!cleanMode) {
+    return false;
+  }
+
+  state.sidebarMode =
+    cleanMode;
+
+  state.sidebarLastMode =
+    cleanMode;
+
+  return true;
+}
+
+function setDerivedMemory(AppCore, {
+  open = false,
+  mobile = false,
+  collapsed = false,
+  hidden = false,
+} = {}) {
+  const state =
+    ensureStateBag(AppCore);
+
+  if (!state) {
+    return false;
+  }
+
+  /*
+    Compat visible:
+    sidebarOpen refleja el estado visible del viewport actual.
+    Nunca se usa como fuente real desktop/mobile.
+  */
+  state.sidebarOpen =
+    Boolean(open);
+
+  state.sidebarCollapsed =
+    Boolean(collapsed);
+
+  state.sidebarHidden =
+    Boolean(hidden);
+
+  state.sidebarViewport =
+    mobile ? MODE_MOBILE : MODE_DESKTOP;
 
   return true;
 }
 
 function setDesktopMemory(AppCore, open) {
-  const state = ensureStateBag(AppCore);
-  if (!state) return false;
+  const state =
+    ensureStateBag(AppCore);
 
-  state.sidebarDesktopOpen = Boolean(open);
-  state.sidebarOpen = Boolean(open);
+  if (!state) {
+    return false;
+  }
 
-  setModeMemory(AppCore, "desktop");
+  const nextOpen =
+    Boolean(open);
+
+  state.sidebarDesktopOpen =
+    nextOpen;
+
+  setModeMemory(
+    AppCore,
+    MODE_DESKTOP
+  );
+
+  setDerivedMemory(
+    AppCore,
+    {
+      open:
+        nextOpen,
+
+      mobile:
+        false,
+
+      collapsed:
+        !nextOpen,
+
+      hidden:
+        false,
+    }
+  );
 
   return true;
 }
 
 function setMobileMemory(AppCore, open) {
-  const state = ensureStateBag(AppCore);
-  if (!state) return false;
+  const state =
+    ensureStateBag(AppCore);
 
-  state.sidebarMobileOpen = Boolean(open);
-  state.sidebarOpen = Boolean(open);
+  if (!state) {
+    return false;
+  }
 
-  setModeMemory(AppCore, "mobile");
+  const nextOpen =
+    Boolean(open);
+
+  state.sidebarMobileOpen =
+    nextOpen;
+
+  setModeMemory(
+    AppCore,
+    MODE_MOBILE
+  );
+
+  setDerivedMemory(
+    AppCore,
+    {
+      open:
+        nextOpen,
+
+      mobile:
+        true,
+
+      collapsed:
+        false,
+
+      hidden:
+        false,
+    }
+  );
 
   return true;
 }
 
-function syncSharedState(AppCore, open) {
-  const state = ensureStateBag(AppCore);
-  if (!state) return false;
+function setHiddenMemory(AppCore) {
+  const state =
+    ensureStateBag(AppCore);
 
-  state.sidebarOpen = Boolean(open);
+  if (!state) {
+    return false;
+  }
+
+  setModeMemory(
+    AppCore,
+    MODE_HIDDEN
+  );
+
+  setDerivedMemory(
+    AppCore,
+    {
+      open:
+        false,
+
+      mobile:
+        isMobileViewport(),
+
+      collapsed:
+        false,
+
+      hidden:
+        true,
+    }
+  );
 
   return true;
 }
@@ -829,17 +1402,43 @@ function syncSharedState(AppCore, open) {
    DOM FALLBACK STATE
 ========================================================= */
 
-function resolveDomSidebarOpenState(AppCore) {
+function resolveDomSidebarOpenState(AppCore, {
+  allowDesktopDom = true,
+  allowMobileDom = false,
+} = {}) {
   const {
     sidebar,
     body,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
-  if (!sidebar && !body) return null;
+  if (!sidebar && !body) {
+    return null;
+  }
 
-  const mobile = isMobileViewport();
+  const mobile =
+    isMobileViewport();
+
+  const sidebarMode =
+    safeText(
+      sidebar?.dataset?.mode ||
+        body?.dataset?.sidebarMode ||
+        "",
+      ""
+    );
 
   if (mobile) {
+    /*
+      Mobile no debe heredar dataset open=true de desktop.
+      Sólo aceptamos DOM mobile si el DOM declara explícitamente modo mobile.
+    */
+    if (
+      !allowMobileDom ||
+      sidebarMode !== MODE_MOBILE
+    ) {
+      return null;
+    }
+
     if (
       hasClass(sidebar, "open") ||
       hasClass(sidebar, "is-open") ||
@@ -852,6 +1451,10 @@ function resolveDomSidebarOpenState(AppCore) {
     return false;
   }
 
+  if (!allowDesktopDom) {
+    return null;
+  }
+
   if (
     hasClass(sidebar, "collapsed") ||
     hasClass(sidebar, "is-collapsed") ||
@@ -862,66 +1465,112 @@ function resolveDomSidebarOpenState(AppCore) {
     return false;
   }
 
-  return sidebar ? true : null;
+  return sidebar
+    ? true
+    : null;
 }
 
 function getDesktopDesiredOpenState(AppCore) {
-  const state = ensureStateBag(AppCore);
+  const state =
+    ensureStateBag(AppCore);
 
   if (typeof state?.sidebarDesktopOpen === "boolean") {
     return state.sidebarDesktopOpen;
   }
 
-  const savedCollapsed = readSavedSidebarCollapsed(AppCore);
+  const savedCollapsed =
+    readSavedSidebarCollapsed(AppCore);
 
   if (typeof savedCollapsed === "boolean") {
-    const open = !savedCollapsed;
-    setDesktopMemory(AppCore, open);
-    syncSharedState(AppCore, open);
+    const open =
+      !savedCollapsed;
+
+    setDesktopMemory(
+      AppCore,
+      open
+    );
+
     return open;
   }
 
-  const fromDom = resolveDomSidebarOpenState(AppCore);
+  const fromDom =
+    resolveDomSidebarOpenState(
+      AppCore,
+      {
+        allowDesktopDom:
+          true,
+
+        allowMobileDom:
+          false,
+      }
+    );
 
   if (typeof fromDom === "boolean") {
-    setDesktopMemory(AppCore, fromDom);
-    syncSharedState(AppCore, fromDom);
+    setDesktopMemory(
+      AppCore,
+      fromDom
+    );
+
     return fromDom;
   }
 
-  setDesktopMemory(AppCore, true);
-  syncSharedState(AppCore, true);
+  setDesktopMemory(
+    AppCore,
+    true
+  );
 
   return true;
 }
 
 function getMobileDesiredOpenState(AppCore) {
-  const state = ensureStateBag(AppCore);
+  const state =
+    ensureStateBag(AppCore);
 
   if (typeof state?.sidebarMobileOpen === "boolean") {
     return state.sidebarMobileOpen;
   }
 
   /*
-    Solo aceptamos sidebarOpen legacy si el último modo fue mobile.
-    Evita heredar desktopOpen=true al entrar en viewport mobile.
+    Sólo aceptamos sidebarOpen legacy si el último modo real fue mobile.
+    Evita que desktopOpen=true abra el sidebar mobile al cambiar de viewport.
   */
   if (
-    state?.sidebarLastMode === "mobile" &&
+    state?.sidebarLastMode === MODE_MOBILE &&
     typeof state?.sidebarOpen === "boolean"
   ) {
-    setMobileMemory(AppCore, state.sidebarOpen);
+    setMobileMemory(
+      AppCore,
+      state.sidebarOpen
+    );
+
     return state.sidebarOpen;
   }
 
-  const fromDom = resolveDomSidebarOpenState(AppCore);
+  const fromDom =
+    resolveDomSidebarOpenState(
+      AppCore,
+      {
+        allowDesktopDom:
+          false,
+
+        allowMobileDom:
+          true,
+      }
+    );
 
   if (typeof fromDom === "boolean") {
-    setMobileMemory(AppCore, fromDom);
+    setMobileMemory(
+      AppCore,
+      fromDom
+    );
+
     return fromDom;
   }
 
-  setMobileMemory(AppCore, false);
+  setMobileMemory(
+    AppCore,
+    false
+  );
 
   return false;
 }
@@ -933,7 +1582,10 @@ export function getDesiredSidebarOpenState(AppCore) {
 }
 
 export function isSidebarCollapsedDesktop(AppCore) {
-  if (isMobileViewport()) return false;
+  if (isMobileViewport()) {
+    return false;
+  }
+
   return !getDesktopDesiredOpenState(AppCore);
 }
 
@@ -942,12 +1594,17 @@ export function isSidebarCollapsedDesktop(AppCore) {
 ========================================================= */
 
 function stripPublicUsernamePrefix(pathname = "/") {
-  const value = safeText(pathname, "/").replace(/^\/@[^/]+(?=\/|$)/i, "");
+  const value =
+    safeText(pathname, "/")
+      .replace(/^\/@[^/]+(?=\/|$)/i, "");
+
   return value || "/";
 }
 
 function isUnsafeRouteValue(value = "") {
-  const raw = safeText(value, "").toLowerCase();
+  const raw =
+    safeText(value, "")
+      .toLowerCase();
 
   return Boolean(
     raw.startsWith("javascript:") ||
@@ -960,17 +1617,29 @@ function isUnsafeRouteValue(value = "") {
 }
 
 function isHashOnlyRouteValue(value = "") {
-  const raw = safeText(value, "");
-  return raw === "#" || /^#[A-Za-z0-9_-]+$/.test(raw);
+  const raw =
+    safeText(value, "");
+
+  return Boolean(
+    raw === "#" ||
+      /^#[A-Za-z0-9_-]+$/.test(raw)
+  );
 }
 
 function isExternalHttpUrl(value = "") {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
-  if (!/^https?:\/\//i.test(raw)) return false;
+  if (!/^https?:\/\//i.test(raw)) {
+    return false;
+  }
 
   try {
-    const origin = isBrowser() ? window.location.origin : "http://localhost";
+    const origin =
+      isBrowser()
+        ? window.location.origin
+        : "http://localhost";
+
     return new URL(raw, origin).origin !== origin;
   } catch {
     return true;
@@ -978,14 +1647,18 @@ function isExternalHttpUrl(value = "") {
 }
 
 function applyRouteAlias(pathname = "/") {
-  const clean = safeText(pathname, "/") || "/";
+  const clean =
+    safeText(pathname, "/") || "/";
 
   if (ROUTE_ALIASES[clean]) {
     return ROUTE_ALIASES[clean];
   }
 
   for (const [from, to] of Object.entries(ROUTE_ALIASES)) {
-    if (from !== "/" && clean.startsWith(`${from}/`)) {
+    if (
+      from !== "/" &&
+      clean.startsWith(`${from}/`)
+    ) {
       return `${to}${clean.slice(from.length)}`;
     }
   }
@@ -994,9 +1667,14 @@ function applyRouteAlias(pathname = "/") {
 }
 
 function normalizePathLike(path = "/") {
-  let value = safeText(path, "/").replace(/\\/g, "/").trim();
+  let value =
+    safeText(path, "/")
+      .replace(/\\/g, "/")
+      .trim();
 
-  if (!value) return "/";
+  if (!value) {
+    return "/";
+  }
 
   if (
     isUnsafeRouteValue(value) ||
@@ -1007,69 +1685,120 @@ function normalizePathLike(path = "/") {
   }
 
   try {
-    const url = new URL(
-      value,
-      isBrowser() ? window.location.origin : "http://localhost"
-    );
+    const url =
+      new URL(
+        value,
+        isBrowser()
+          ? window.location.origin
+          : "http://localhost"
+      );
 
     if (
       isBrowser() &&
       url.origin !== window.location.origin &&
-      (url.protocol === "http:" || url.protocol === "https:")
+      (
+        url.protocol === "http:" ||
+        url.protocol === "https:"
+      )
     ) {
       return "";
     }
 
-    if (url.hash && (url.hash.startsWith("#/") || url.hash.startsWith("#!"))) {
-      value = url.hash
-        .replace(/^#!\/?/, "/")
-        .replace(/^#\/?/, "/");
+    if (
+      url.hash &&
+      (
+        url.hash.startsWith("#/") ||
+        url.hash.startsWith("#!")
+      )
+    ) {
+      value =
+        url.hash
+          .replace(/^#!\/?/, "/")
+          .replace(/^#\/?/, "/");
     } else {
-      value = `${url.pathname || "/"}${url.search || ""}`;
+      value =
+        `${url.pathname || "/"}${url.search || ""}`;
     }
   } catch {
-    if (value.startsWith("#/") || value.startsWith("#!")) {
-      value = value
-        .replace(/^#!\/?/, "/")
-        .replace(/^#\/?/, "/");
+    if (
+      value.startsWith("#/") ||
+      value.startsWith("#!")
+    ) {
+      value =
+        value
+          .replace(/^#!\/?/, "/")
+          .replace(/^#\/?/, "/");
     } else {
-      value = value.split("#")[0] || "/";
+      value =
+        value.split("#")[0] || "/";
     }
   }
 
   if (!value.startsWith("/")) {
-    value = `/${value}`;
+    value =
+      `/${value}`;
   }
 
-  value = value.replace(/\/{2,}/g, "/");
+  value =
+    value.replace(/\/{2,}/g, "/");
 
-  const queryIndex = value.indexOf("?");
-  const rawPathname = queryIndex >= 0 ? value.slice(0, queryIndex) : value;
-  const query = queryIndex >= 0 ? value.slice(queryIndex + 1) : "";
+  const queryIndex =
+    value.indexOf("?");
 
-  let pathname = stripPublicUsernamePrefix(rawPathname || "/");
+  const rawPathname =
+    queryIndex >= 0
+      ? value.slice(0, queryIndex)
+      : value;
 
-  if (pathname.length > 1 && pathname.endsWith("/")) {
-    pathname = pathname.replace(/\/+$/g, "") || "/";
+  const query =
+    queryIndex >= 0
+      ? value.slice(queryIndex + 1)
+      : "";
+
+  let pathname =
+    stripPublicUsernamePrefix(
+      rawPathname || "/"
+    );
+
+  if (
+    pathname.length > 1 &&
+    pathname.endsWith("/")
+  ) {
+    pathname =
+      pathname.replace(/\/+$/g, "") || "/";
   }
 
-  pathname = applyRouteAlias(pathname);
+  pathname =
+    applyRouteAlias(pathname);
 
-  return query ? `${pathname}?${query}` : pathname;
+  return query
+    ? `${pathname}?${query}`
+    : pathname;
 }
 
 function stripQuery(path = "/") {
-  const normalized = normalizePathLike(path);
+  const normalized =
+    normalizePathLike(path);
+
   return normalized.split("?")[0] || "/";
 }
 
 function getBrowserPublicPath() {
-  if (!isBrowser()) return "/";
+  if (!isBrowser()) {
+    return "/";
+  }
 
   try {
-    const hash = safeText(window.location.hash, "");
+    const hash =
+      safeText(
+        window.location.hash,
+        ""
+      );
 
-    if (hash.startsWith("#/") || hash.startsWith("#!")) {
+    if (
+      hash.startsWith("#/") ||
+      hash.startsWith("#!")
+    ) {
       return normalizePathLike(
         hash
           .replace(/^#!\/?/, "/")
@@ -1086,10 +1815,17 @@ function getBrowserPublicPath() {
 }
 
 function getExplicitPathCandidates(options = {}) {
-  const opts = safeObject(options);
-  const payload = safeObject(opts.payload);
-  const detail = safeObject(opts.detail);
-  const route = safeObject(opts.route);
+  const opts =
+    safeObject(options);
+
+  const payload =
+    safeObject(opts.payload);
+
+  const detail =
+    safeObject(opts.detail);
+
+  const route =
+    safeObject(opts.route);
 
   return [
     opts.currentPath,
@@ -1122,13 +1858,21 @@ function getExplicitPathCandidates(options = {}) {
     payload.url,
     payload.route,
   ]
-    .map((value) => normalizePathLike(value || ""))
+    .map((value) =>
+      normalizePathLike(value || "")
+    )
     .filter(Boolean);
 }
 
 function shouldPreferExplicitRoute(options = {}) {
-  const opts = safeObject(options);
-  const reason = safeText(opts.reason, "").toLowerCase();
+  const opts =
+    safeObject(options);
+
+  const reason =
+    safeText(
+      opts.reason,
+      ""
+    ).toLowerCase();
 
   return Boolean(
     opts.preferExplicitRoute === true ||
@@ -1136,6 +1880,7 @@ function shouldPreferExplicitRoute(options = {}) {
       opts.activeItem ||
       reason.includes("navigation") ||
       reason.includes("navigate") ||
+      reason.includes("router") ||
       reason.includes("sidebar-ui:active-route") ||
       reason.includes("sync-active-route") ||
       reason.includes("open-activity") ||
@@ -1145,9 +1890,13 @@ function shouldPreferExplicitRoute(options = {}) {
 }
 
 function pushUniquePath(list, value) {
-  const normalized = normalizePathLike(value || "");
+  const normalized =
+    normalizePathLike(value || "");
 
-  if (normalized && !list.includes(normalized)) {
+  if (
+    normalized &&
+    !list.includes(normalized)
+  ) {
     list.push(normalized);
   }
 
@@ -1155,11 +1904,17 @@ function pushUniquePath(list, value) {
 }
 
 function getCurrentPublicPathCandidates(AppCore, options = {}) {
-  const opts = safeObject(options);
-  const candidates = [];
+  const opts =
+    safeObject(options);
 
-  const explicit = getExplicitPathCandidates(opts);
-  const browserPath = getBrowserPublicPath();
+  const candidates =
+    [];
+
+  const explicit =
+    getExplicitPathCandidates(opts);
+
+  const browserPath =
+    getBrowserPublicPath();
 
   /*
     Orden crítico:
@@ -1168,51 +1923,98 @@ function getCurrentPublicPathCandidates(AppCore, options = {}) {
     - AppCore.state al final porque puede venir stale
   */
   if (shouldPreferExplicitRoute(opts)) {
-    explicit.forEach((value) => pushUniquePath(candidates, value));
-    pushUniquePath(candidates, browserPath);
+    explicit.forEach((value) =>
+      pushUniquePath(candidates, value)
+    );
+
+    pushUniquePath(
+      candidates,
+      browserPath
+    );
   } else {
-    pushUniquePath(candidates, browserPath);
-    explicit.forEach((value) => pushUniquePath(candidates, value));
+    pushUniquePath(
+      candidates,
+      browserPath
+    );
+
+    explicit.forEach((value) =>
+      pushUniquePath(candidates, value)
+    );
   }
 
-  pushUniquePath(candidates, AppCore?.state?.publicPath);
-  pushUniquePath(candidates, AppCore?.state?.route);
-  pushUniquePath(candidates, AppCore?.state?.canonicalPath);
-  pushUniquePath(candidates, AppCore?.state?.lastRoute);
+  pushUniquePath(
+    candidates,
+    AppCore?.state?.publicPath
+  );
+
+  pushUniquePath(
+    candidates,
+    AppCore?.state?.route
+  );
+
+  pushUniquePath(
+    candidates,
+    AppCore?.state?.canonicalPath
+  );
+
+  pushUniquePath(
+    candidates,
+    AppCore?.state?.lastRoute
+  );
 
   try {
-    pushUniquePath(candidates, AppCore?.router?.getCurrentPublicPath?.());
+    pushUniquePath(
+      candidates,
+      AppCore?.router?.getCurrentPublicPath?.()
+    );
   } catch {}
 
   try {
-    pushUniquePath(candidates, AppCore?.router?.getCurrentCanonicalPath?.());
+    pushUniquePath(
+      candidates,
+      AppCore?.router?.getCurrentCanonicalPath?.()
+    );
   } catch {}
 
   try {
-    pushUniquePath(candidates, AppCore?.router?.getCurrentPath?.());
+    pushUniquePath(
+      candidates,
+      AppCore?.router?.getCurrentPath?.()
+    );
   } catch {}
 
-  return uniqueArray(candidates).length ? uniqueArray(candidates) : ["/"];
+  const unique =
+    uniqueArray(candidates);
+
+  return unique.length
+    ? unique
+    : ["/"];
 }
 
 function getCurrentPublicPath(AppCore, options = {}) {
-  return getCurrentPublicPathCandidates(AppCore, options)[0] || "/";
+  return getCurrentPublicPathCandidates(
+    AppCore,
+    options
+  )[0] || "/";
 }
 
 function getMenuItemRoute(item = null) {
-  if (!item) return "";
+  if (!item) {
+    return "";
+  }
 
-  const raw = safeText(
-    item.dataset?.route ||
-      item.dataset?.href ||
-      item.dataset?.to ||
-      item.getAttribute?.("data-route") ||
-      item.getAttribute?.("data-href") ||
-      item.getAttribute?.("data-to") ||
-      item.getAttribute?.("href") ||
-      "",
-    ""
-  );
+  const raw =
+    safeText(
+      item.dataset?.route ||
+        item.dataset?.href ||
+        item.dataset?.to ||
+        item.getAttribute?.("data-route") ||
+        item.getAttribute?.("data-href") ||
+        item.getAttribute?.("data-to") ||
+        item.getAttribute?.("href") ||
+        "",
+      ""
+    );
 
   if (
     !raw ||
@@ -1227,14 +2029,28 @@ function getMenuItemRoute(item = null) {
 }
 
 function isElementVisible(element = null) {
-  if (!element || !isBrowser()) return false;
+  if (
+    !element ||
+    !isBrowser()
+  ) {
+    return false;
+  }
 
   try {
-    if (!isConnectedElement(element)) return false;
-    if (element.hidden) return false;
-    if (element.closest?.(HIDDEN_ANCESTOR_SELECTOR)) return false;
+    if (!isConnectedElement(element)) {
+      return false;
+    }
 
-    const style = window.getComputedStyle(element);
+    if (element.hidden) {
+      return false;
+    }
+
+    if (element.closest?.(HIDDEN_ANCESTOR_SELECTOR)) {
+      return false;
+    }
+
+    const style =
+      window.getComputedStyle(element);
 
     if (
       style.display === "none" ||
@@ -1244,32 +2060,51 @@ function isElementVisible(element = null) {
       return false;
     }
 
-    const rect = element.getBoundingClientRect();
+    const rect =
+      element.getBoundingClientRect();
 
-    return rect.width > 0 && rect.height > 0;
+    return (
+      rect.width > 0 &&
+      rect.height > 0
+    );
   } catch {
     return true;
   }
 }
 
 function getMenuItems(sidebarMenu = null) {
-  if (!sidebarMenu) return [];
+  if (!sidebarMenu) {
+    return [];
+  }
 
   try {
-    return Array.from(sidebarMenu.querySelectorAll(MENU_ITEM_SELECTOR))
-      .filter((item, index, array) => item && array.indexOf(item) === index);
+    return Array.from(
+      sidebarMenu.querySelectorAll(MENU_ITEM_SELECTOR)
+    ).filter((item, index, array) =>
+      item &&
+      array.indexOf(item) === index
+    );
   } catch {
     return [];
   }
 }
 
 function clearActiveItemClasses(sidebarMenu = null) {
-  const items = getMenuItems(sidebarMenu);
+  const items =
+    getMenuItems(sidebarMenu);
 
   for (const item of items) {
     try {
-      item.classList.remove("active", "is-active", "router-active");
-      item.removeAttribute("aria-current");
+      item.classList.remove(
+        "active",
+        "is-active",
+        "router-active"
+      );
+
+      item.removeAttribute(
+        "aria-current"
+      );
+
       delete item.dataset.active;
       delete item.dataset.matchedRoute;
       delete item.dataset.matchedCurrent;
@@ -1281,12 +2116,25 @@ function clearActiveItemClasses(sidebarMenu = null) {
 }
 
 function setActiveItemClasses(item = null) {
-  if (!item) return false;
+  if (!item) {
+    return false;
+  }
 
   try {
-    item.classList.add("active", "is-active", "router-active");
-    item.setAttribute("aria-current", ROUTE_CURRENT_VALUE);
-    item.dataset.active = DATA_TRUE;
+    item.classList.add(
+      "active",
+      "is-active",
+      "router-active"
+    );
+
+    item.setAttribute(
+      "aria-current",
+      ROUTE_CURRENT_VALUE
+    );
+
+    item.dataset.active =
+      DATA_TRUE;
+
     return true;
   } catch {
     return false;
@@ -1294,22 +2142,41 @@ function setActiveItemClasses(item = null) {
 }
 
 function scoreRouteMatch(routePath = "/", currentPath = "/") {
-  const route = normalizePathLike(routePath);
-  const current = normalizePathLike(currentPath);
+  const route =
+    normalizePathLike(routePath);
 
-  if (!route || !current) return -1;
+  const current =
+    normalizePathLike(currentPath);
 
-  const routeClean = stripQuery(route);
-  const currentClean = stripQuery(current);
+  if (!route || !current) {
+    return -1;
+  }
 
-  if (route === current) return 10000;
-  if (routeClean === currentClean) return 9000;
+  const routeClean =
+    stripQuery(route);
 
-  if (routeClean !== "/" && currentClean.startsWith(`${routeClean}/`)) {
+  const currentClean =
+    stripQuery(current);
+
+  if (route === current) {
+    return 10000;
+  }
+
+  if (routeClean === currentClean) {
+    return 9000;
+  }
+
+  if (
+    routeClean !== "/" &&
+    currentClean.startsWith(`${routeClean}/`)
+  ) {
     return 5000 + routeClean.length;
   }
 
-  if (routeClean === "/" && currentClean === "/") {
+  if (
+    routeClean === "/" &&
+    currentClean === "/"
+  ) {
     return 1000;
   }
 
@@ -1317,48 +2184,91 @@ function scoreRouteMatch(routePath = "/", currentPath = "/") {
 }
 
 function findBestMenuItemForSinglePath(sidebarMenu = null, current = "/") {
-  const items = getMenuItems(sidebarMenu);
+  const items =
+    getMenuItems(sidebarMenu);
 
-  let best = null;
-  let bestScore = -1;
-  let bestRoute = "";
+  let best =
+    null;
+
+  let bestScore =
+    -1;
+
+  let bestRoute =
+    "";
 
   for (const item of items) {
-    if (!isElementVisible(item)) continue;
+    if (!isElementVisible(item)) {
+      continue;
+    }
 
-    const route = getMenuItemRoute(item);
-    if (!route) continue;
+    const route =
+      getMenuItemRoute(item);
 
-    const routePath = normalizePathLike(route);
-    if (!routePath) continue;
+    if (!route) {
+      continue;
+    }
 
-    const score = scoreRouteMatch(routePath, current);
+    const routePath =
+      normalizePathLike(route);
+
+    if (!routePath) {
+      continue;
+    }
+
+    const score =
+      scoreRouteMatch(
+        routePath,
+        current
+      );
 
     if (score > bestScore) {
-      best = item;
-      bestScore = score;
-      bestRoute = routePath;
+      best =
+        item;
+
+      bestScore =
+        score;
+
+      bestRoute =
+        routePath;
     }
   }
 
-  if (!best || bestScore < 0) return null;
+  if (
+    !best ||
+    bestScore < 0
+  ) {
+    return null;
+  }
 
   try {
-    best.dataset.matchedRoute = bestRoute;
-    best.dataset.matchedCurrent = normalizePathLike(current);
+    best.dataset.matchedRoute =
+      bestRoute;
+
+    best.dataset.matchedCurrent =
+      normalizePathLike(current);
   } catch {}
 
   return best;
 }
 
 function findBestMenuItemForCurrentPath(AppCore, sidebarMenu = null, options = {}) {
-  if (!sidebarMenu) return null;
+  if (!sidebarMenu) {
+    return null;
+  }
 
-  const paths = getCurrentPublicPathCandidates(AppCore, options)
-    .map((path) => normalizePathLike(path || ""))
-    .filter(Boolean);
+  const paths =
+    getCurrentPublicPathCandidates(
+      AppCore,
+      options
+    )
+      .map((path) =>
+        normalizePathLike(path || "")
+      )
+      .filter(Boolean);
 
-  if (!paths.length) return null;
+  if (!paths.length) {
+    return null;
+  }
 
   /*
     No elegimos el match global más largo.
@@ -1366,11 +2276,16 @@ function findBestMenuItemForCurrentPath(AppCore, sidebarMenu = null, options = {
     Así /facturas visible gana a AppCore stale /incidencias.
   */
   for (let index = 0; index < paths.length; index += 1) {
-    const best = findBestMenuItemForSinglePath(sidebarMenu, paths[index]);
+    const best =
+      findBestMenuItemForSinglePath(
+        sidebarMenu,
+        paths[index]
+      );
 
     if (best) {
       try {
-        best.dataset.matchCandidateIndex = String(index);
+        best.dataset.matchCandidateIndex =
+          String(index);
       } catch {}
 
       return best;
@@ -1385,7 +2300,8 @@ function findBestMenuItemForCurrentPath(AppCore, sidebarMenu = null, options = {
 ========================================================= */
 
 function buildStateSignature(payload = {}) {
-  const data = safeObject(payload);
+  const data =
+    safeObject(payload);
 
   return [
     data.open,
@@ -1393,34 +2309,55 @@ function buildStateSignature(payload = {}) {
     data.hidden,
     data.collapsed,
     data.realShellHidden,
+    data.domShellHidden,
     data.transitioning,
-  ].map((value) => String(value)).join("|");
+  ]
+    .map((value) =>
+      String(value)
+    )
+    .join("|");
 }
 
 function emitStateSynced(AppCore, payload = {}, options = {}) {
-  const opts = safeObject(options);
-  const signature = buildStateSignature(payload);
-  const ts = nowTs();
+  const opts =
+    safeObject(options);
+
+  const signature =
+    buildStateSignature(payload);
+
+  const ts =
+    nowTs();
 
   const repeated =
     signature === lastStateSignature &&
     ts - lastStateEmitAt < STATE_EMIT_MIN_INTERVAL_MS;
 
-  if (repeated && opts.force !== true) return false;
+  if (
+    repeated &&
+    opts.force !== true
+  ) {
+    return false;
+  }
 
-  lastStateSignature = signature;
-  lastStateEmitAt = ts;
+  lastStateSignature =
+    signature;
 
-  return safeEmit(AppCore, "sidebar:state:synced", {
-    ...payload,
-    source: SOURCE,
-    owner: "state.js",
-    ts,
-  });
+  lastStateEmitAt =
+    ts;
+
+  return safeEmit(
+    AppCore,
+    "sidebar:state:synced",
+    {
+      ...safeObject(payload),
+      ts,
+    }
+  );
 }
 
 function buildActiveSignature(payload = {}) {
-  const data = safeObject(payload);
+  const data =
+    safeObject(payload);
 
   return [
     data.matched,
@@ -1428,28 +2365,86 @@ function buildActiveSignature(payload = {}) {
     data.matchedRoute,
     data.matchedCurrent,
     data.matchCandidateIndex,
-  ].map((value) => String(value)).join("|");
+  ]
+    .map((value) =>
+      String(value)
+    )
+    .join("|");
 }
 
 function emitActiveSynced(AppCore, payload = {}, options = {}) {
-  const opts = safeObject(options);
-  const signature = buildActiveSignature(payload);
-  const ts = nowTs();
+  const opts =
+    safeObject(options);
+
+  const signature =
+    buildActiveSignature(payload);
+
+  const ts =
+    nowTs();
 
   const repeated =
     signature === lastActiveSignature &&
     ts - lastActiveEmitAt < ACTIVE_EMIT_MIN_INTERVAL_MS;
 
-  if (repeated && opts.force !== true) return false;
+  if (
+    repeated &&
+    opts.force !== true
+  ) {
+    return false;
+  }
 
-  lastActiveSignature = signature;
-  lastActiveEmitAt = ts;
+  lastActiveSignature =
+    signature;
 
-  return safeEmit(AppCore, "sidebar:active:item:synced", {
-    ...payload,
-    source: SOURCE,
-    ts,
-  });
+  lastActiveEmitAt =
+    ts;
+
+  return safeEmit(
+    AppCore,
+    "sidebar:active:item:synced",
+    {
+      ...safeObject(payload),
+      ts,
+    }
+  );
+}
+
+function emitIndicatorSynced(AppCore, payload = {}, options = {}) {
+  const opts =
+    safeObject(options);
+
+  const signature =
+    safeText(
+      payload.signature,
+      ""
+    );
+
+  const ts =
+    nowTs();
+
+  const repeated =
+    signature &&
+    signature === lastIndicatorSignature &&
+    ts - lastIndicatorEmitAt < INDICATOR_EMIT_MIN_INTERVAL_MS;
+
+  if (
+    repeated &&
+    opts.force !== true
+  ) {
+    return false;
+  }
+
+  lastIndicatorEmitAt =
+    ts;
+
+  return safeEmit(
+    AppCore,
+    "sidebar:indicator:synced",
+    {
+      ...safeObject(payload),
+      ts,
+    }
+  );
 }
 
 /* =========================================================
@@ -1459,14 +2454,25 @@ function emitActiveSynced(AppCore, payload = {}, options = {}) {
 export function syncActiveMenuItem(AppCore, options = {}) {
   const {
     sidebarMenu,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
-  if (!sidebarMenu) return null;
+  if (!sidebarMenu) {
+    return null;
+  }
 
-  const opts = safeObject(options);
-  const mutate = opts.mutate !== false;
+  const opts =
+    safeObject(options);
 
-  const best = findBestMenuItemForCurrentPath(AppCore, sidebarMenu, opts);
+  const mutate =
+    opts.mutate !== false;
+
+  const best =
+    findBestMenuItemForCurrentPath(
+      AppCore,
+      sidebarMenu,
+      opts
+    );
 
   if (mutate) {
     clearActiveItemClasses(sidebarMenu);
@@ -1476,40 +2482,95 @@ export function syncActiveMenuItem(AppCore, options = {}) {
     }
   }
 
-  const payload = {
-    reason: safeText(opts.reason, "sync-active-item"),
-    matched: Boolean(best),
-    route: getMenuItemRoute(best),
-    matchedRoute: best?.dataset?.matchedRoute || "",
-    matchedCurrent: best?.dataset?.matchedCurrent || "",
-    matchCandidateIndex: best?.dataset?.matchCandidateIndex || "",
-    currentPublicPath: getCurrentPublicPath(AppCore, opts),
-    candidates: getCurrentPublicPathCandidates(AppCore, opts),
-  };
+  const payload =
+    {
+      reason:
+        safeText(
+          opts.reason,
+          "sync-active-item"
+        ),
 
-  emitActiveSynced(AppCore, payload, {
-    force: opts.forceEmit === true,
-  });
+      matched:
+        Boolean(best),
+
+      route:
+        getMenuItemRoute(best),
+
+      matchedRoute:
+        best?.dataset?.matchedRoute || "",
+
+      matchedCurrent:
+        best?.dataset?.matchedCurrent || "",
+
+      matchCandidateIndex:
+        best?.dataset?.matchCandidateIndex || "",
+
+      currentPublicPath:
+        getCurrentPublicPath(
+          AppCore,
+          opts
+        ),
+
+      candidates:
+        getCurrentPublicPathCandidates(
+          AppCore,
+          opts
+        ),
+    };
+
+  emitActiveSynced(
+    AppCore,
+    payload,
+    {
+      force:
+        opts.forceEmit === true,
+    }
+  );
 
   return best;
 }
 
 function resolveActiveMenuItem(AppCore, sidebarMenu = null, options = {}) {
-  if (!sidebarMenu) return null;
+  if (!sidebarMenu) {
+    return null;
+  }
 
-  const synced = syncActiveMenuItem(AppCore, {
-    ...safeObject(options),
-    mutate: true,
-    reason: safeText(options?.reason, "resolve-active-menu-item"),
-  });
+  const synced =
+    syncActiveMenuItem(
+      AppCore,
+      {
+        ...safeObject(options),
 
-  if (synced && isElementVisible(synced)) {
+        mutate:
+          true,
+
+        reason:
+          safeText(
+            options?.reason,
+            "resolve-active-menu-item"
+          ),
+      }
+    );
+
+  if (
+    synced &&
+    isElementVisible(synced)
+  ) {
     return synced;
   }
 
   try {
-    const candidate = sidebarMenu.querySelector(ACTIVE_ITEM_SELECTOR);
-    return candidate && isElementVisible(candidate) ? candidate : null;
+    const candidate =
+      sidebarMenu.querySelector(
+        ACTIVE_ITEM_SELECTOR
+      );
+
+    return (
+      candidate &&
+      isElementVisible(candidate)
+    )
+      ? candidate
+      : null;
   } catch {
     return null;
   }
@@ -1524,17 +2585,20 @@ function clearIndicatorSchedule() {
 
   if (indicatorRafA) {
     safeCancelAnimationFrame(indicatorRafA);
-    indicatorRafA = 0;
+    indicatorRafA =
+      0;
   }
 
   if (indicatorRafB) {
     safeCancelAnimationFrame(indicatorRafB);
-    indicatorRafB = 0;
+    indicatorRafB =
+      0;
   }
 
   if (indicatorTimer) {
     safeClearTimeout(indicatorTimer);
-    indicatorTimer = null;
+    indicatorTimer =
+      null;
   }
 }
 
@@ -1563,9 +2627,11 @@ function isSidebarTransitioning(AppCore) {
     sidebar,
     sidebarMenu,
     body,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
-  const html = getHtmlElement();
+  const html =
+    getHtmlElement();
 
   return Boolean(
     sidebarTransitionTimer ||
@@ -1584,20 +2650,41 @@ function disableActiveMenuIndicator(AppCore, reason = "disabled") {
 
   const {
     sidebarMenu,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
-  if (!sidebarMenu) return false;
+  if (!sidebarMenu) {
+    return false;
+  }
 
-  setDataset(sidebarMenu, "indicatorReady", DATA_FALSE);
-  setDataset(sidebarMenu, "indicatorReason", reason);
-  setStyleVar(sidebarMenu, "--sidebar-indicator-opacity", "0");
+  setDataset(
+    sidebarMenu,
+    "indicatorReady",
+    DATA_FALSE
+  );
 
-  lastIndicatorReason = reason;
+  setDataset(
+    sidebarMenu,
+    "indicatorReason",
+    reason
+  );
 
-  safeEmit(AppCore, "sidebar:indicator:disabled", {
-    source: SOURCE,
-    reason,
-  });
+  setStyleVar(
+    sidebarMenu,
+    "--sidebar-indicator-opacity",
+    "0"
+  );
+
+  lastIndicatorReason =
+    reason;
+
+  safeEmit(
+    AppCore,
+    "sidebar:indicator:disabled",
+    {
+      reason,
+    }
+  );
 
   return true;
 }
@@ -1607,41 +2694,98 @@ function clearActiveMenuIndicator(AppCore, reason = "clear") {
 
   const {
     sidebarMenu,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
-  if (!sidebarMenu) return false;
+  if (!sidebarMenu) {
+    return false;
+  }
 
-  setDataset(sidebarMenu, "indicatorReady", DATA_FALSE);
-  setDataset(sidebarMenu, "indicatorReason", reason);
-  setDataset(sidebarMenu, "indicatorRoute", "");
-  setDataset(sidebarMenu, "indicatorCurrent", "");
+  setDataset(
+    sidebarMenu,
+    "indicatorReady",
+    DATA_FALSE
+  );
 
-  removeStyleVar(sidebarMenu, "--sidebar-indicator-x");
-  removeStyleVar(sidebarMenu, "--sidebar-indicator-y");
-  removeStyleVar(sidebarMenu, "--sidebar-indicator-w");
-  removeStyleVar(sidebarMenu, "--sidebar-indicator-h");
-  setStyleVar(sidebarMenu, "--sidebar-indicator-opacity", "0");
+  setDataset(
+    sidebarMenu,
+    "indicatorReason",
+    reason
+  );
 
-  lastIndicatorSignature = "";
-  lastIndicatorReason = reason;
+  setDataset(
+    sidebarMenu,
+    "indicatorRoute",
+    ""
+  );
 
-  safeEmit(AppCore, "sidebar:indicator:cleared", {
-    source: SOURCE,
-    reason,
-  });
+  setDataset(
+    sidebarMenu,
+    "indicatorCurrent",
+    ""
+  );
+
+  removeStyleVar(
+    sidebarMenu,
+    "--sidebar-indicator-x"
+  );
+
+  removeStyleVar(
+    sidebarMenu,
+    "--sidebar-indicator-y"
+  );
+
+  removeStyleVar(
+    sidebarMenu,
+    "--sidebar-indicator-w"
+  );
+
+  removeStyleVar(
+    sidebarMenu,
+    "--sidebar-indicator-h"
+  );
+
+  setStyleVar(
+    sidebarMenu,
+    "--sidebar-indicator-opacity",
+    "0"
+  );
+
+  lastIndicatorSignature =
+    "";
+
+  lastIndicatorReason =
+    reason;
+
+  safeEmit(
+    AppCore,
+    "sidebar:indicator:cleared",
+    {
+      reason,
+    }
+  );
 
   return true;
 }
 
 export function syncActiveMenuIndicator(AppCore, options = {}) {
-  const opts = safeObject(options);
-  const reason = safeText(opts.reason, "sync");
-  const reveal = opts.reveal !== false;
+  const opts =
+    safeObject(options);
+
+  const reason =
+    safeText(
+      opts.reason,
+      "sync"
+    );
+
+  const reveal =
+    opts.reveal !== false;
 
   const {
     sidebar,
     sidebarMenu,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
   if (
     !isBrowser() ||
@@ -1649,30 +2793,54 @@ export function syncActiveMenuIndicator(AppCore, options = {}) {
     !sidebarMenu ||
     isRealShellHidden(AppCore)
   ) {
-    return clearActiveMenuIndicator(AppCore, `${reason}:unavailable`);
+    return clearActiveMenuIndicator(
+      AppCore,
+      `${reason}:unavailable`
+    );
   }
 
-  if (isSidebarTransitioning(AppCore) && opts.force !== true) {
-    return disableActiveMenuIndicator(AppCore, `${reason}:transitioning`);
+  if (
+    isSidebarTransitioning(AppCore) &&
+    opts.force !== true
+  ) {
+    return disableActiveMenuIndicator(
+      AppCore,
+      `${reason}:transitioning`
+    );
   }
 
-  let activeItem = opts.activeItem || null;
+  let activeItem =
+    opts.activeItem || null;
 
   if (
     !activeItem ||
     !isConnectedElement(activeItem) ||
     !isElementVisible(activeItem)
   ) {
-    activeItem = resolveActiveMenuItem(AppCore, sidebarMenu, opts);
+    activeItem =
+      resolveActiveMenuItem(
+        AppCore,
+        sidebarMenu,
+        opts
+      );
   }
 
-  if (!activeItem || !isElementVisible(activeItem)) {
-    return disableActiveMenuIndicator(AppCore, `${reason}:no-active-item`);
+  if (
+    !activeItem ||
+    !isElementVisible(activeItem)
+  ) {
+    return disableActiveMenuIndicator(
+      AppCore,
+      `${reason}:no-active-item`
+    );
   }
 
   try {
-    const menuRect = sidebarMenu.getBoundingClientRect();
-    const itemRect = activeItem.getBoundingClientRect();
+    const menuRect =
+      sidebarMenu.getBoundingClientRect();
+
+    const itemRect =
+      activeItem.getBoundingClientRect();
 
     if (
       !menuRect ||
@@ -1681,135 +2849,254 @@ export function syncActiveMenuIndicator(AppCore, options = {}) {
       itemRect.width <= 0 ||
       itemRect.height <= 0
     ) {
-      return disableActiveMenuIndicator(AppCore, `${reason}:bad-rect`);
+      return disableActiveMenuIndicator(
+        AppCore,
+        `${reason}:bad-rect`
+      );
     }
 
-    const menuWidth = clampNumber(menuRect.width, 0, 10000);
+    const menuWidth =
+      clampNumber(
+        menuRect.width,
+        0,
+        10000
+      );
 
-    const x = clampNumber(
-      itemRect.left - menuRect.left,
-      0,
-      Math.max(menuWidth, itemRect.width)
-    );
+    const x =
+      clampNumber(
+        itemRect.left - menuRect.left,
+        0,
+        Math.max(menuWidth, itemRect.width)
+      );
 
-    const y = clampNumber(
-      itemRect.top - menuRect.top,
-      0,
-      100000
-    );
+    const y =
+      clampNumber(
+        itemRect.top - menuRect.top,
+        0,
+        100000
+      );
 
-    const width = clampNumber(
-      itemRect.width,
-      1,
-      Math.max(menuWidth, itemRect.width)
-    );
+    const width =
+      clampNumber(
+        itemRect.width,
+        1,
+        Math.max(menuWidth, itemRect.width)
+      );
 
-    const height = clampNumber(
-      itemRect.height,
-      1,
-      1000
-    );
+    const height =
+      clampNumber(
+        itemRect.height,
+        1,
+        1000
+      );
 
-    const route = normalizePathLike(
-      activeItem.dataset?.matchedRoute ||
-        getMenuItemRoute(activeItem) ||
-        ""
-    );
+    const route =
+      normalizePathLike(
+        activeItem.dataset?.matchedRoute ||
+          getMenuItemRoute(activeItem) ||
+          ""
+      );
 
-    const current = normalizePathLike(
-      activeItem.dataset?.matchedCurrent ||
-        getCurrentPublicPath(AppCore, opts)
-    );
+    const current =
+      normalizePathLike(
+        activeItem.dataset?.matchedCurrent ||
+          getCurrentPublicPath(AppCore, opts)
+      );
 
-    const signature = buildIndicatorSignature({
-      route,
-      current,
-      x,
-      y,
-      width,
-      height,
-      reveal,
-    });
+    const signature =
+      buildIndicatorSignature({
+        route,
+        current,
+        x,
+        y,
+        width,
+        height,
+        reveal,
+      });
 
     if (
       signature === lastIndicatorSignature &&
-      reason === lastIndicatorReason
+      reason === lastIndicatorReason &&
+      opts.force !== true
     ) {
       return true;
     }
 
-    setStyleVar(sidebarMenu, "--sidebar-indicator-x", `${Math.round(x)}px`);
-    setStyleVar(sidebarMenu, "--sidebar-indicator-y", `${Math.round(y)}px`);
-    setStyleVar(sidebarMenu, "--sidebar-indicator-w", `${Math.round(width)}px`);
-    setStyleVar(sidebarMenu, "--sidebar-indicator-h", `${Math.round(height)}px`);
-    setStyleVar(sidebarMenu, "--sidebar-indicator-opacity", reveal ? "1" : "0");
+    setStyleVar(
+      sidebarMenu,
+      "--sidebar-indicator-x",
+      `${Math.round(x)}px`
+    );
 
-    setDataset(sidebarMenu, "indicatorReady", DATA_TRUE);
-    setDataset(sidebarMenu, "indicatorRoute", route);
-    setDataset(sidebarMenu, "indicatorCurrent", current);
-    setDataset(sidebarMenu, "indicatorReason", reason);
+    setStyleVar(
+      sidebarMenu,
+      "--sidebar-indicator-y",
+      `${Math.round(y)}px`
+    );
 
-    lastIndicatorSignature = signature;
-    lastIndicatorReason = reason;
+    setStyleVar(
+      sidebarMenu,
+      "--sidebar-indicator-w",
+      `${Math.round(width)}px`
+    );
 
-    safeEmit(AppCore, "sidebar:indicator:synced", {
-      source: SOURCE,
-      reason,
-      route,
-      current,
-      x: Math.round(x),
-      y: Math.round(y),
-      width: Math.round(width),
-      height: Math.round(height),
-      reveal: Boolean(reveal),
-    });
+    setStyleVar(
+      sidebarMenu,
+      "--sidebar-indicator-h",
+      `${Math.round(height)}px`
+    );
+
+    setStyleVar(
+      sidebarMenu,
+      "--sidebar-indicator-opacity",
+      reveal ? "1" : "0"
+    );
+
+    setDataset(
+      sidebarMenu,
+      "indicatorReady",
+      DATA_TRUE
+    );
+
+    setDataset(
+      sidebarMenu,
+      "indicatorRoute",
+      route
+    );
+
+    setDataset(
+      sidebarMenu,
+      "indicatorCurrent",
+      current
+    );
+
+    setDataset(
+      sidebarMenu,
+      "indicatorReason",
+      reason
+    );
+
+    lastIndicatorSignature =
+      signature;
+
+    lastIndicatorReason =
+      reason;
+
+    emitIndicatorSynced(
+      AppCore,
+      {
+        reason,
+        route,
+        current,
+        x:
+          Math.round(x),
+        y:
+          Math.round(y),
+        width:
+          Math.round(width),
+        height:
+          Math.round(height),
+        reveal:
+          Boolean(reveal),
+        signature,
+      },
+      {
+        force:
+          opts.force === true,
+      }
+    );
 
     return true;
   } catch (error) {
-    safeWarn(AppCore, "No se pudo sincronizar indicador activo.", error);
-    return disableActiveMenuIndicator(AppCore, `${reason}:error`);
+    safeWarn(
+      AppCore,
+      "No se pudo sincronizar indicador activo.",
+      error
+    );
+
+    return disableActiveMenuIndicator(
+      AppCore,
+      `${reason}:error`
+    );
   }
 }
 
 export function scheduleActiveMenuIndicator(AppCore, options = {}) {
-  const opts = safeObject(options);
+  const opts =
+    safeObject(options);
 
-  const reason = safeText(opts.reason, "scheduled");
-  const delay = clampNumber(opts.delayMs, 0, 5000);
-  const reveal = opts.reveal !== false;
-  const force = opts.force === true;
+  const reason =
+    safeText(
+      opts.reason,
+      "scheduled"
+    );
 
-  const generation = indicatorGeneration + 1;
+  const delay =
+    clampNumber(
+      opts.delayMs,
+      0,
+      5000
+    );
+
+  const reveal =
+    opts.reveal !== false;
+
+  const force =
+    opts.force === true;
+
+  const generation =
+    indicatorGeneration + 1;
 
   clearIndicatorSchedule();
-  indicatorGeneration = generation;
 
-  const run = () => {
-    if (generation !== indicatorGeneration) return;
+  indicatorGeneration =
+    generation;
 
-    indicatorRafA = safeRequestAnimationFrame(() => {
-      indicatorRafA = 0;
-      if (generation !== indicatorGeneration) return;
+  const run =
+    () => {
+      if (generation !== indicatorGeneration) {
+        return;
+      }
 
-      indicatorRafB = safeRequestAnimationFrame(() => {
-        indicatorRafB = 0;
-        if (generation !== indicatorGeneration) return;
+      indicatorRafA =
+        safeRequestAnimationFrame(() => {
+          indicatorRafA =
+            0;
 
-        syncActiveMenuIndicator(AppCore, {
-          ...opts,
-          reason,
-          reveal,
-          force,
+          if (generation !== indicatorGeneration) {
+            return;
+          }
+
+          indicatorRafB =
+            safeRequestAnimationFrame(() => {
+              indicatorRafB =
+                0;
+
+              if (generation !== indicatorGeneration) {
+                return;
+              }
+
+              syncActiveMenuIndicator(
+                AppCore,
+                {
+                  ...opts,
+                  reason,
+                  reveal,
+                  force,
+                }
+              );
+            });
         });
-      });
-    });
-  };
+    };
 
   if (delay > 0) {
-    indicatorTimer = safeSetTimeout(() => {
-      indicatorTimer = null;
-      run();
-    }, delay);
+    indicatorTimer =
+      safeSetTimeout(() => {
+        indicatorTimer =
+          null;
+
+        run();
+      }, delay);
 
     return true;
   }
@@ -1828,13 +3115,15 @@ function cleanupSidebarTransitionListener() {
     sidebarTransitionEndCleanup?.();
   } catch {}
 
-  sidebarTransitionEndCleanup = null;
+  sidebarTransitionEndCleanup =
+    null;
 }
 
 function clearSidebarTransitionTimer() {
   if (sidebarTransitionTimer) {
     safeClearTimeout(sidebarTransitionTimer);
-    sidebarTransitionTimer = null;
+    sidebarTransitionTimer =
+      null;
   }
 }
 
@@ -1843,32 +3132,67 @@ function setSidebarTransitioning(AppCore, enabled = false, reason = "") {
     sidebar,
     sidebarMenu,
     body,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
-  const html = getHtmlElement();
+  const html =
+    getHtmlElement();
 
-  toggleClasses(sidebar, {
-    "is-transitioning": enabled,
-  });
+  toggleClasses(
+    sidebar,
+    {
+      "is-transitioning":
+        enabled,
+    }
+  );
 
-  toggleClasses(sidebarMenu, {
-    "is-transitioning": enabled,
-  });
+  toggleClasses(
+    sidebarMenu,
+    {
+      "is-transitioning":
+        enabled,
+    }
+  );
 
-  toggleClasses(body, {
-    "sidebar-transitioning": enabled,
-  });
+  toggleClasses(
+    body,
+    {
+      "sidebar-transitioning":
+        enabled,
+    }
+  );
 
-  toggleClasses(html, {
-    "sidebar-transitioning": enabled,
-  });
+  toggleClasses(
+    html,
+    {
+      "sidebar-transitioning":
+        enabled,
+    }
+  );
 
-  setDataset(sidebar, "transitioning", enabled ? DATA_TRUE : "");
-  setDataset(sidebarMenu, "transitioning", enabled ? DATA_TRUE : "");
-  setDataset(body, "sidebarTransitioning", enabled ? DATA_TRUE : "");
+  setDataset(
+    sidebar,
+    "transitioning",
+    enabled ? DATA_TRUE : ""
+  );
+
+  setDataset(
+    sidebarMenu,
+    "transitioning",
+    enabled ? DATA_TRUE : ""
+  );
+
+  setDataset(
+    body,
+    "sidebarTransitioning",
+    enabled ? DATA_TRUE : ""
+  );
 
   if (enabled) {
-    disableActiveMenuIndicator(AppCore, `${reason || "transition"}:start`);
+    disableActiveMenuIndicator(
+      AppCore,
+      `${reason || "transition"}:start`
+    );
   }
 
   return true;
@@ -1876,89 +3200,168 @@ function setSidebarTransitioning(AppCore, enabled = false, reason = "") {
 
 function finishSidebarTransition(AppCore, reason = "finish") {
   clearSidebarTransitionTimer();
+
   cleanupSidebarTransitionListener();
 
-  setSidebarTransitioning(AppCore, false, reason);
+  setSidebarTransitioning(
+    AppCore,
+    false,
+    reason
+  );
 
-  const activeItem = syncActiveMenuItem(AppCore, {
-    reason: `${reason}:active-final`,
-    mutate: true,
-    forceRoute: true,
-    forceEmit: true,
-  });
+  const activeItem =
+    syncActiveMenuItem(
+      AppCore,
+      {
+        reason:
+          `${reason}:active-final`,
 
-  scheduleActiveMenuIndicator(AppCore, {
-    reason: `${reason}:indicator-final`,
-    delayMs: INDICATOR_RECALC_DELAY_MS,
-    reveal: true,
-    force: true,
-    activeItem,
-  });
+        mutate:
+          true,
 
-  safeEmit(AppCore, "sidebar:transition:finish", {
-    source: SOURCE,
-    reason,
-  });
+        forceRoute:
+          true,
+
+        forceEmit:
+          true,
+      }
+    );
+
+  scheduleActiveMenuIndicator(
+    AppCore,
+    {
+      reason:
+        `${reason}:indicator-final`,
+
+      delayMs:
+        INDICATOR_RECALC_DELAY_MS,
+
+      reveal:
+        true,
+
+      force:
+        true,
+
+      activeItem,
+    }
+  );
+
+  safeEmit(
+    AppCore,
+    "sidebar:transition:finish",
+    {
+      reason,
+    }
+  );
 
   return true;
 }
 
 function beginSidebarTransition(AppCore, reason = "state-change", durationMs = SIDEBAR_TRANSITION_MS) {
-  if (!isBrowser()) return false;
+  if (!isBrowser()) {
+    return false;
+  }
 
   const {
     sidebar,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
-  if (!sidebar) return false;
+  if (!sidebar) {
+    return false;
+  }
 
-  lastTransitionReason = reason;
+  lastTransitionReason =
+    reason;
 
   clearIndicatorSchedule();
   clearSidebarTransitionTimer();
   cleanupSidebarTransitionListener();
 
-  setSidebarTransitioning(AppCore, true, reason);
-
-  const finish = () => {
-    finishSidebarTransition(AppCore, reason);
-  };
-
-  const onTransitionEnd = (event) => {
-    const propertyName = safeText(event?.propertyName, "");
-
-    if (
-      event?.target !== sidebar ||
-      !TRANSITION_PROPS.has(propertyName)
-    ) {
-      return;
-    }
-
-    finish();
-  };
-
-  try {
-    sidebar.addEventListener("transitionend", onTransitionEnd);
-
-    sidebarTransitionEndCleanup = () => {
-      try {
-        sidebar.removeEventListener("transitionend", onTransitionEnd);
-      } catch {}
-    };
-  } catch {
-    sidebarTransitionEndCleanup = null;
-  }
-
-  sidebarTransitionTimer = safeSetTimeout(
-    finish,
-    clampNumber(durationMs, 80, 2000)
+  setSidebarTransitioning(
+    AppCore,
+    true,
+    reason
   );
 
-  safeEmit(AppCore, "sidebar:transition:start", {
-    source: SOURCE,
-    reason,
-    durationMs: clampNumber(durationMs, 80, 2000),
-  });
+  let finished =
+    false;
+
+  const finish =
+    () => {
+      if (finished) {
+        return;
+      }
+
+      finished =
+        true;
+
+      finishSidebarTransition(
+        AppCore,
+        reason
+      );
+    };
+
+  const onTransitionEnd =
+    (event) => {
+      const propertyName =
+        safeText(
+          event?.propertyName,
+          ""
+        );
+
+      if (
+        event?.target !== sidebar ||
+        !TRANSITION_PROPS.has(propertyName)
+      ) {
+        return;
+      }
+
+      finish();
+    };
+
+  try {
+    sidebar.addEventListener(
+      "transitionend",
+      onTransitionEnd
+    );
+
+    sidebarTransitionEndCleanup =
+      () => {
+        try {
+          sidebar.removeEventListener(
+            "transitionend",
+            onTransitionEnd
+          );
+        } catch {}
+      };
+  } catch {
+    sidebarTransitionEndCleanup =
+      null;
+  }
+
+  const duration =
+    clampNumber(
+      durationMs,
+      80,
+      2000
+    );
+
+  sidebarTransitionTimer =
+    safeSetTimeout(
+      finish,
+      duration
+    );
+
+  safeEmit(
+    AppCore,
+    "sidebar:transition:start",
+    {
+      reason,
+      durationMs:
+        duration,
+    }
+  );
 
   return true;
 }
@@ -1971,16 +3374,20 @@ export function syncTooltipMode(AppCore, isOpen = null) {
   const {
     sidebar,
     body,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
-  if (!sidebar || !body) return false;
+  if (!sidebar || !body) {
+    return false;
+  }
 
   const open =
     typeof isOpen === "boolean"
       ? isOpen
       : getDesiredSidebarOpenState(AppCore);
 
-  const mobile = isMobileViewport();
+  const mobile =
+    isMobileViewport();
 
   const enabled =
     !mobile &&
@@ -1988,11 +3395,29 @@ export function syncTooltipMode(AppCore, isOpen = null) {
     !isRealShellHidden(AppCore) &&
     !isSidebarTransitioning(AppCore);
 
-  toggleClass(sidebar, "sidebar-tooltips-active", enabled);
-  toggleClass(body, "sidebar-tooltips-active", enabled);
+  toggleClass(
+    sidebar,
+    "sidebar-tooltips-active",
+    enabled
+  );
 
-  setDataset(sidebar, "tooltipMode", enabled ? "compact" : "off");
-  setDataset(body, "sidebarTooltipMode", enabled ? "compact" : "off");
+  toggleClass(
+    body,
+    "sidebar-tooltips-active",
+    enabled
+  );
+
+  setDataset(
+    sidebar,
+    "tooltipMode",
+    enabled ? "compact" : "off"
+  );
+
+  setDataset(
+    body,
+    "sidebarTooltipMode",
+    enabled ? "compact" : "off"
+  );
 
   try {
     sanitizeFooterTooltipState(AppCore);
@@ -2006,65 +3431,157 @@ export function updateToggleLabel(AppCore, isOpen = null) {
     toggleBtn,
     mobileToggleBtn,
     sidebar,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
   const open =
     typeof isOpen === "boolean"
       ? isOpen
       : getDesiredSidebarOpenState(AppCore);
 
-  const mobile = isMobileViewport();
-  const collapsed = !mobile && !open;
+  const mobile =
+    isMobileViewport();
 
-  const desktopText = open
-    ? "Contraer barra lateral"
-    : "Expandir barra lateral";
+  const collapsed =
+    !mobile &&
+    !open;
 
-  const mobileText = open
-    ? "Cerrar navegación"
-    : "Abrir navegación";
+  const desktopText =
+    open
+      ? "Contraer barra lateral"
+      : "Expandir barra lateral";
+
+  const mobileText =
+    open
+      ? "Cerrar navegación"
+      : "Abrir navegación";
 
   if (toggleBtn) {
-    setAttr(toggleBtn, "aria-label", desktopText);
-    setAttr(toggleBtn, "aria-expanded", String(open));
-    setAttr(toggleBtn, "type", "button");
+    setAttr(
+      toggleBtn,
+      "aria-label",
+      desktopText
+    );
 
-    setDataset(toggleBtn, "state", open ? "open" : "closed");
-    setDataset(toggleBtn, "tooltip", desktopText);
+    setAttr(
+      toggleBtn,
+      "aria-expanded",
+      String(open)
+    );
+
+    setAttr(
+      toggleBtn,
+      "type",
+      "button"
+    );
+
+    setDataset(
+      toggleBtn,
+      "state",
+      open ? "open" : "closed"
+    );
+
+    setDataset(
+      toggleBtn,
+      "tooltip",
+      desktopText
+    );
+
     setDataset(
       toggleBtn,
       "i18nDataTooltip",
-      open ? "sidebar.toggle.collapse" : "sidebar.toggle.expand"
+      open
+        ? "sidebar.toggle.collapse"
+        : "sidebar.toggle.expand"
     );
 
-    toggleClass(toggleBtn, "is-active", open);
-    removeAttr(toggleBtn, "title");
+    toggleClass(
+      toggleBtn,
+      "is-active",
+      open
+    );
+
+    removeAttr(
+      toggleBtn,
+      "title"
+    );
   }
 
   if (mobileToggleBtn) {
-    setAttr(mobileToggleBtn, "aria-label", mobileText);
-    setAttr(mobileToggleBtn, "aria-expanded", String(open));
-    setAttr(mobileToggleBtn, "type", "button");
+    setAttr(
+      mobileToggleBtn,
+      "aria-label",
+      mobileText
+    );
 
-    setDataset(mobileToggleBtn, "state", open ? "open" : "closed");
-    setDataset(mobileToggleBtn, "tooltip", mobileText);
+    setAttr(
+      mobileToggleBtn,
+      "aria-expanded",
+      String(open)
+    );
+
+    setAttr(
+      mobileToggleBtn,
+      "type",
+      "button"
+    );
+
+    setDataset(
+      mobileToggleBtn,
+      "state",
+      open ? "open" : "closed"
+    );
+
+    setDataset(
+      mobileToggleBtn,
+      "tooltip",
+      mobileText
+    );
+
     setDataset(
       mobileToggleBtn,
       "i18nDataTooltip",
-      open ? "sidebar.toggle.close" : "sidebar.toggle.open"
+      open
+        ? "sidebar.toggle.close"
+        : "sidebar.toggle.open"
     );
 
-    toggleClass(mobileToggleBtn, "is-active", open);
-    removeAttr(mobileToggleBtn, "title");
+    toggleClass(
+      mobileToggleBtn,
+      "is-active",
+      open
+    );
+
+    removeAttr(
+      mobileToggleBtn,
+      "title"
+    );
   }
 
   if (sidebar) {
-    setDataset(sidebar, "open", open ? DATA_TRUE : DATA_FALSE);
-    setDataset(sidebar, "collapsed", collapsed ? DATA_TRUE : DATA_FALSE);
-    setDataset(sidebar, "viewport", mobile ? "mobile" : "desktop");
+    setDataset(
+      sidebar,
+      "open",
+      open ? DATA_TRUE : DATA_FALSE
+    );
+
+    setDataset(
+      sidebar,
+      "collapsed",
+      collapsed ? DATA_TRUE : DATA_FALSE
+    );
+
+    setDataset(
+      sidebar,
+      "viewport",
+      mobile ? MODE_MOBILE : MODE_DESKTOP
+    );
   }
 
-  syncTooltipMode(AppCore, open);
+  syncTooltipMode(
+    AppCore,
+    open
+  );
 
   return true;
 }
@@ -2078,15 +3595,28 @@ function syncHiddenShellState(AppCore, closeDropdown) {
     sidebar,
     sidebarMenu,
     body,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
-  if (!sidebar) return false;
+  if (!sidebar) {
+    return false;
+  }
 
   clearSidebarTransitionTimer();
   cleanupSidebarTransitionListener();
 
-  setSidebarTransitioning(AppCore, false, "hidden-shell");
-  clearActiveMenuIndicator(AppCore, "hidden-shell");
+  setHiddenMemory(AppCore);
+
+  setSidebarTransitioning(
+    AppCore,
+    false,
+    "hidden-shell"
+  );
+
+  clearActiveMenuIndicator(
+    AppCore,
+    "hidden-shell"
+  );
 
   try {
     closeDropdown?.();
@@ -2118,39 +3648,91 @@ function syncHiddenShellState(AppCore, closeDropdown) {
     "sidebar-visual-syncing"
   );
 
-  setHiddenState(sidebar, true);
+  setHiddenState(
+    sidebar,
+    true
+  );
 
-  setDataset(sidebar, "open", DATA_FALSE);
-  setDataset(sidebar, "collapsed", DATA_FALSE);
-  setDataset(sidebar, "mode", "hidden");
-  setDataset(sidebar, "viewport", "");
-  setDataset(sidebar, "transitioning", "");
+  setDataset(
+    sidebar,
+    "open",
+    DATA_FALSE
+  );
 
-  setDataset(sidebarMenu, "transitioning", "");
+  setDataset(
+    sidebar,
+    "collapsed",
+    DATA_FALSE
+  );
 
-  setDataset(body, "sidebarMode", "hidden");
-  setDataset(body, "sidebarTransitioning", "");
+  setDataset(
+    sidebar,
+    "mode",
+    MODE_HIDDEN
+  );
 
-  updateToggleLabel(AppCore, false);
+  setDataset(
+    sidebar,
+    "viewport",
+    ""
+  );
 
-  setDataset(sidebar, "mode", "hidden");
-  setDataset(sidebar, "collapsed", DATA_FALSE);
-  setDataset(sidebar, "viewport", "");
-  setDataset(body, "sidebarMode", "hidden");
+  setDataset(
+    sidebar,
+    "transitioning",
+    ""
+  );
+
+  setDataset(
+    sidebarMenu,
+    "transitioning",
+    ""
+  );
+
+  setDataset(
+    body,
+    "sidebarMode",
+    MODE_HIDDEN
+  );
+
+  setDataset(
+    body,
+    "sidebarTransitioning",
+    ""
+  );
+
+  updateToggleLabel(
+    AppCore,
+    false
+  );
 
   emitStateSynced(
     AppCore,
     {
-      open: false,
-      mobile: isMobileViewport(),
-      hidden: true,
-      realShellHidden: true,
-      domShellHidden: isDomShellHiddenOnly(AppCore),
-      collapsed: false,
-      transitioning: false,
+      open:
+        false,
+
+      mobile:
+        isMobileViewport(),
+
+      hidden:
+        true,
+
+      realShellHidden:
+        true,
+
+      domShellHidden:
+        isDomShellHiddenOnly(AppCore),
+
+      collapsed:
+        false,
+
+      transitioning:
+        false,
     },
     {
-      force: true,
+      force:
+        true,
     }
   );
 
@@ -2163,88 +3745,182 @@ function syncVisibleSidebarBase(AppCore, {
   mobile,
   open,
 } = {}) {
-  if (!sidebar) return false;
-
-  const collapsed = !mobile && !open;
-
-  setHiddenState(sidebar, false);
-
-  if (mobile) {
-    setMobileMemory(AppCore, open);
-
-    toggleClasses(sidebar, {
-      open,
-      "is-open": open,
-      collapsed: false,
-      "is-collapsed": false,
-    });
-
-    toggleClasses(body, {
-      "sidebar-open": open,
-      "sidebar-collapsed": false,
-    });
-
-    setDataset(sidebar, "mode", "mobile");
-    setDataset(body, "sidebarMode", "mobile");
-  } else {
-    setDesktopMemory(AppCore, open);
-    syncSharedState(AppCore, open);
-
-    toggleClasses(sidebar, {
-      open: false,
-      "is-open": false,
-      collapsed,
-      "is-collapsed": collapsed,
-    });
-
-    toggleClasses(body, {
-      "sidebar-open": false,
-      "sidebar-collapsed": collapsed,
-    });
-
-    setDataset(sidebar, "mode", "desktop");
-    setDataset(body, "sidebarMode", "desktop");
+  if (!sidebar) {
+    return false;
   }
 
-  setDataset(sidebar, "open", open ? DATA_TRUE : DATA_FALSE);
-  setDataset(sidebar, "collapsed", collapsed ? DATA_TRUE : DATA_FALSE);
-  setDataset(sidebar, "viewport", mobile ? "mobile" : "desktop");
+  const collapsed =
+    !mobile &&
+    !open;
 
-  updateToggleLabel(AppCore, open);
+  setHiddenState(
+    sidebar,
+    false
+  );
+
+  if (mobile) {
+    setMobileMemory(
+      AppCore,
+      open
+    );
+
+    toggleClasses(
+      sidebar,
+      {
+        open,
+        "is-open":
+          open,
+        collapsed:
+          false,
+        "is-collapsed":
+          false,
+      }
+    );
+
+    toggleClasses(
+      body,
+      {
+        "sidebar-open":
+          open,
+        "sidebar-collapsed":
+          false,
+      }
+    );
+
+    setDataset(
+      sidebar,
+      "mode",
+      MODE_MOBILE
+    );
+
+    setDataset(
+      body,
+      "sidebarMode",
+      MODE_MOBILE
+    );
+  } else {
+    setDesktopMemory(
+      AppCore,
+      open
+    );
+
+    toggleClasses(
+      sidebar,
+      {
+        open:
+          false,
+        "is-open":
+          false,
+        collapsed,
+        "is-collapsed":
+          collapsed,
+      }
+    );
+
+    toggleClasses(
+      body,
+      {
+        "sidebar-open":
+          false,
+        "sidebar-collapsed":
+          collapsed,
+      }
+    );
+
+    setDataset(
+      sidebar,
+      "mode",
+      MODE_DESKTOP
+    );
+
+    setDataset(
+      body,
+      "sidebarMode",
+      MODE_DESKTOP
+    );
+  }
+
+  setDataset(
+    sidebar,
+    "open",
+    open ? DATA_TRUE : DATA_FALSE
+  );
+
+  setDataset(
+    sidebar,
+    "collapsed",
+    collapsed ? DATA_TRUE : DATA_FALSE
+  );
+
+  setDataset(
+    sidebar,
+    "viewport",
+    mobile ? MODE_MOBILE : MODE_DESKTOP
+  );
+
+  updateToggleLabel(
+    AppCore,
+    open
+  );
 
   return true;
 }
 
 function syncSidebarStateInternal(AppCore, closeDropdown, options = {}) {
-  const opts = safeObject(options);
+  const opts =
+    safeObject(options);
 
   const {
     sidebar,
     body,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
-  if (!sidebar) return false;
-
-  if (isRealShellHidden(AppCore)) {
-    return syncHiddenShellState(AppCore, closeDropdown);
+  if (!sidebar) {
+    return false;
   }
 
-  const mobile = isMobileViewport();
-  const open = getDesiredSidebarOpenState(AppCore);
-  const collapsed = !open && !mobile;
+  if (isRealShellHidden(AppCore)) {
+    return syncHiddenShellState(
+      AppCore,
+      closeDropdown
+    );
+  }
 
-  const synced = syncVisibleSidebarBase(AppCore, {
-    sidebar,
-    body,
-    mobile,
-    open,
-  });
+  const mobile =
+    isMobileViewport();
 
-  const activeItem = syncActiveMenuItem(AppCore, {
-    ...opts,
-    reason: opts.reason || "sync-sidebar-state",
-    mutate: true,
-  });
+  const open =
+    getDesiredSidebarOpenState(AppCore);
+
+  const collapsed =
+    !open &&
+    !mobile;
+
+  const synced =
+    syncVisibleSidebarBase(
+      AppCore,
+      {
+        sidebar,
+        body,
+        mobile,
+        open,
+      }
+    );
+
+  const activeItem =
+    syncActiveMenuItem(
+      AppCore,
+      {
+        ...opts,
+
+        reason:
+          opts.reason || "sync-sidebar-state",
+
+        mutate:
+          true,
+      }
+    );
 
   if (isSidebarTransitioning(AppCore)) {
     disableActiveMenuIndicator(
@@ -2252,14 +3928,26 @@ function syncSidebarStateInternal(AppCore, closeDropdown, options = {}) {
       `${opts.reason || "sync-sidebar-state"}:transitioning`
     );
   } else {
-    scheduleActiveMenuIndicator(AppCore, {
-      ...opts,
-      reason: opts.reason || "sync-sidebar-state",
-      delayMs: opts.indicatorDelayMs ?? INDICATOR_RECALC_DELAY_MS,
-      reveal: true,
-      force: opts.forceIndicator === true,
-      activeItem,
-    });
+    scheduleActiveMenuIndicator(
+      AppCore,
+      {
+        ...opts,
+
+        reason:
+          opts.reason || "sync-sidebar-state",
+
+        delayMs:
+          opts.indicatorDelayMs ?? INDICATOR_RECALC_DELAY_MS,
+
+        reveal:
+          true,
+
+        force:
+          opts.forceIndicator === true,
+
+        activeItem,
+      }
+    );
   }
 
   emitStateSynced(
@@ -2267,14 +3955,22 @@ function syncSidebarStateInternal(AppCore, closeDropdown, options = {}) {
     {
       open,
       mobile,
-      hidden: false,
-      realShellHidden: false,
-      domShellHidden: isDomShellHiddenOnly(AppCore),
+      hidden:
+        false,
+
+      realShellHidden:
+        false,
+
+      domShellHidden:
+        isDomShellHiddenOnly(AppCore),
+
       collapsed,
-      transitioning: isSidebarTransitioning(AppCore),
+      transitioning:
+        isSidebarTransitioning(AppCore),
     },
     {
-      force: opts.forceEmit === true,
+      force:
+        opts.forceEmit === true,
     }
   );
 
@@ -2282,9 +3978,14 @@ function syncSidebarStateInternal(AppCore, closeDropdown, options = {}) {
 }
 
 export function syncSidebarState(AppCore, closeDropdown) {
-  return syncSidebarStateInternal(AppCore, closeDropdown, {
-    reason: "sync-sidebar-state",
-  });
+  return syncSidebarStateInternal(
+    AppCore,
+    closeDropdown,
+    {
+      reason:
+        "sync-sidebar-state",
+    }
+  );
 }
 
 /* =========================================================
@@ -2292,93 +3993,171 @@ export function syncSidebarState(AppCore, closeDropdown) {
 ========================================================= */
 
 export function setSidebarOpen(AppCore, open, closeDropdown) {
-  const nextOpen = Boolean(open);
-  const mobile = isMobileViewport();
-  const previousOpen = getDesiredSidebarOpenState(AppCore);
-  const changed = previousOpen !== nextOpen;
-  const collapsed = !nextOpen && !mobile;
+  const nextOpen =
+    Boolean(open);
+
+  const mobile =
+    isMobileViewport();
+
+  const previousOpen =
+    getDesiredSidebarOpenState(AppCore);
+
+  const changed =
+    previousOpen !== nextOpen;
+
+  const collapsed =
+    !nextOpen &&
+    !mobile;
 
   if (isRealShellHidden(AppCore)) {
-    syncHiddenShellState(AppCore, closeDropdown);
+    syncHiddenShellState(
+      AppCore,
+      closeDropdown
+    );
 
-    safeEmit(AppCore, "sidebar:state:change:blocked", {
-      source: SOURCE,
-      reason: "shell-hidden",
-      requestedOpen: nextOpen,
-      previousOpen,
-      mobile,
-    });
+    safeEmit(
+      AppCore,
+      "sidebar:state:change:blocked",
+      {
+        reason:
+          "shell-hidden",
+
+        requestedOpen:
+          nextOpen,
+
+        previousOpen,
+        mobile,
+      }
+    );
 
     return false;
   }
 
   if (!changed) {
-    const synced = syncSidebarStateInternal(AppCore, closeDropdown, {
-      reason: "set-sidebar-open:no-change",
-      forceIndicator: true,
-      forceEmit: true,
-    });
+    const synced =
+      syncSidebarStateInternal(
+        AppCore,
+        closeDropdown,
+        {
+          reason:
+            "set-sidebar-open:no-change",
 
-    safeEmit(AppCore, "sidebar:state:unchanged", {
-      source: SOURCE,
-      open: nextOpen,
-      previousOpen,
-      changed: false,
-      mobile,
-      collapsed,
-    });
+          forceIndicator:
+            true,
+
+          forceEmit:
+            true,
+        }
+      );
+
+    safeEmit(
+      AppCore,
+      "sidebar:state:unchanged",
+      {
+        open:
+          nextOpen,
+
+        previousOpen,
+        changed:
+          false,
+
+        mobile,
+        collapsed,
+      }
+    );
 
     return synced;
   }
 
-  safeEmit(AppCore, "sidebar:state:change:start", {
-    source: SOURCE,
-    open: nextOpen,
-    previousOpen,
-    changed,
-    mobile,
-    collapsed,
-  });
+  safeEmit(
+    AppCore,
+    "sidebar:state:change:start",
+    {
+      open:
+        nextOpen,
+
+      previousOpen,
+      changed,
+      mobile,
+      collapsed,
+    }
+  );
 
   beginSidebarTransition(
     AppCore,
-    mobile ? "mobile-open-change" : "desktop-collapse-change",
+    mobile
+      ? "mobile-open-change"
+      : "desktop-collapse-change",
     SIDEBAR_TRANSITION_MS
   );
 
   if (mobile) {
-    setMobileMemory(AppCore, nextOpen);
+    setMobileMemory(
+      AppCore,
+      nextOpen
+    );
   } else {
-    setDesktopMemory(AppCore, nextOpen);
-    syncSharedState(AppCore, nextOpen);
-    saveSidebarCollapsed(!nextOpen, AppCore);
+    setDesktopMemory(
+      AppCore,
+      nextOpen
+    );
+
+    saveSidebarCollapsed(
+      !nextOpen,
+      AppCore
+    );
   }
 
-  const synced = syncSidebarStateInternal(AppCore, closeDropdown, {
-    reason: "set-sidebar-open",
-    forceEmit: true,
-  });
+  const synced =
+    syncSidebarStateInternal(
+      AppCore,
+      closeDropdown,
+      {
+        reason:
+          "set-sidebar-open",
+
+        forceEmit:
+          true,
+      }
+    );
 
   afterNextPaint(() => {
-    scheduleActiveMenuIndicator(AppCore, {
-      reason: "set-sidebar-open:settled",
-      delayMs: INDICATOR_SETTLED_DELAY_MS,
-      reveal: true,
-      force: true,
-    });
+    scheduleActiveMenuIndicator(
+      AppCore,
+      {
+        reason:
+          "set-sidebar-open:settled",
+
+        delayMs:
+          INDICATOR_SETTLED_DELAY_MS,
+
+        reveal:
+          true,
+
+        force:
+          true,
+      }
+    );
   });
 
-  safeEmit(AppCore, "sidebar:state:change", {
-    source: SOURCE,
-    owner: "state.js",
-    transitionManaged: true,
-    open: nextOpen,
-    previousOpen,
-    changed,
-    mobile,
-    collapsed,
-    transitioning: true,
-  });
+  safeEmit(
+    AppCore,
+    "sidebar:state:change",
+    {
+      transitionManaged:
+        true,
+
+      open:
+        nextOpen,
+
+      previousOpen,
+      changed,
+      mobile,
+      collapsed,
+      transitioning:
+        true,
+    }
+  );
 
   return synced;
 }
@@ -2388,13 +4167,19 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
 ========================================================= */
 
 export function repairSidebarState(AppCore, closeDropdown) {
-  const state = ensureStateBag(AppCore);
-  if (!state) return false;
+  const state =
+    ensureStateBag(AppCore);
 
-  const mobile = isMobileViewport();
+  if (!state) {
+    return false;
+  }
+
+  const mobile =
+    isMobileViewport();
 
   if (typeof state.sidebarDesktopOpen !== "boolean") {
-    const savedCollapsed = readSavedSidebarCollapsed(AppCore);
+    const savedCollapsed =
+      readSavedSidebarCollapsed(AppCore);
 
     state.sidebarDesktopOpen =
       typeof savedCollapsed === "boolean"
@@ -2403,37 +4188,121 @@ export function repairSidebarState(AppCore, closeDropdown) {
   }
 
   if (typeof state.sidebarMobileOpen !== "boolean") {
-    state.sidebarMobileOpen = false;
+    state.sidebarMobileOpen =
+      false;
+  }
+
+  if (isRealShellHidden(AppCore)) {
+    return syncHiddenShellState(
+      AppCore,
+      closeDropdown
+    );
   }
 
   if (mobile) {
-    state.sidebarOpen = Boolean(state.sidebarMobileOpen);
-    state.sidebarMode = "mobile";
-    state.sidebarLastMode = "mobile";
+    setMobileMemory(
+      AppCore,
+      Boolean(state.sidebarMobileOpen)
+    );
   } else {
-    state.sidebarOpen = Boolean(state.sidebarDesktopOpen);
-    state.sidebarMode = "desktop";
-    state.sidebarLastMode = "desktop";
+    setDesktopMemory(
+      AppCore,
+      Boolean(state.sidebarDesktopOpen)
+    );
   }
 
-  const synced = syncSidebarStateInternal(AppCore, closeDropdown, {
-    reason: "repair-sidebar-state",
-    forceEmit: true,
-    forceIndicator: true,
-    indicatorDelayMs: isSidebarTransitioning(AppCore)
-      ? INDICATOR_SETTLED_DELAY_MS
-      : INDICATOR_RECALC_DELAY_MS,
-  });
+  const synced =
+    syncSidebarStateInternal(
+      AppCore,
+      closeDropdown,
+      {
+        reason:
+          "repair-sidebar-state",
 
-  safeEmit(AppCore, "sidebar:state:repaired", {
-    source: SOURCE,
-    mobile,
-    open: Boolean(state.sidebarOpen),
-    desktopOpen: Boolean(state.sidebarDesktopOpen),
-    mobileOpen: Boolean(state.sidebarMobileOpen),
-  });
+        forceEmit:
+          true,
+
+        forceIndicator:
+          true,
+
+        indicatorDelayMs:
+          isSidebarTransitioning(AppCore)
+            ? INDICATOR_SETTLED_DELAY_MS
+            : INDICATOR_RECALC_DELAY_MS,
+      }
+    );
+
+  safeEmit(
+    AppCore,
+    "sidebar:state:repaired",
+    {
+      mobile,
+
+      open:
+        Boolean(state.sidebarOpen),
+
+      desktopOpen:
+        Boolean(state.sidebarDesktopOpen),
+
+      mobileOpen:
+        Boolean(state.sidebarMobileOpen),
+
+      mode:
+        state.sidebarMode || "",
+    }
+  );
 
   return synced;
+}
+
+/* =========================================================
+   RUNTIME CLEANUP
+========================================================= */
+
+export function resetSidebarStateRuntime(AppCore = null, reason = "reset-runtime") {
+  clearIndicatorSchedule();
+  clearSidebarTransitionTimer();
+  cleanupSidebarTransitionListener();
+
+  setSidebarTransitioning(
+    AppCore,
+    false,
+    reason
+  );
+
+  lastStateSignature =
+    "";
+
+  lastStateEmitAt =
+    0;
+
+  lastActiveSignature =
+    "";
+
+  lastActiveEmitAt =
+    0;
+
+  lastIndicatorSignature =
+    "";
+
+  lastIndicatorEmitAt =
+    0;
+
+  lastIndicatorReason =
+    "";
+
+  lastTransitionReason =
+    "";
+
+  safeEmit(
+    AppCore,
+    "sidebar:state:runtime-reset",
+    {
+      reason,
+    }
+  );
+
+  return true;
 }
 
 /* =========================================================
@@ -2448,100 +4317,220 @@ export function getSidebarStateSnapshot(AppCore) {
     appShell,
     shell,
     layout,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
-  const mobile = isMobileViewport();
-  const open = getDesiredSidebarOpenState(AppCore);
-  const collapsed = !open && !mobile;
+  const mobile =
+    isMobileViewport();
 
-  const activeItem = sidebarMenu
-    ? resolveActiveMenuItem(AppCore, sidebarMenu, {
-        reason: "snapshot",
-      })
-    : null;
+  const open =
+    getDesiredSidebarOpenState(AppCore);
+
+  const collapsed =
+    !open &&
+    !mobile;
+
+  const activeItem =
+    sidebarMenu
+      ? resolveActiveMenuItem(
+          AppCore,
+          sidebarMenu,
+          {
+            reason:
+              "snapshot",
+          }
+        )
+      : null;
 
   return {
+    version:
+      SIDEBAR_STATE_VERSION,
+
     mobile,
     open,
     collapsed,
-    transitioning: isSidebarTransitioning(AppCore),
+
+    transitioning:
+      isSidebarTransitioning(AppCore),
+
     lastTransitionReason,
 
-    shellHidden: isDomShellHiddenOnly(AppCore),
-    realShellHidden: isRealShellHidden(AppCore),
+    shellHidden:
+      isDomShellHiddenOnly(AppCore),
+
+    realShellHidden:
+      isRealShellHidden(AppCore),
 
     state: {
-      sidebarOpen: AppCore?.state?.sidebarOpen ?? null,
-      sidebarDesktopOpen: AppCore?.state?.sidebarDesktopOpen ?? null,
-      sidebarMobileOpen: AppCore?.state?.sidebarMobileOpen ?? null,
-      sidebarMode: AppCore?.state?.sidebarMode ?? null,
-      sidebarLastMode: AppCore?.state?.sidebarLastMode ?? null,
-      shellVisible: AppCore?.state?.shellVisible ?? null,
-      route: AppCore?.state?.route ?? null,
-      publicPath: AppCore?.state?.publicPath ?? null,
-      canonicalPath: AppCore?.state?.canonicalPath ?? null,
-      lastRoute: AppCore?.state?.lastRoute ?? null,
+      sidebarOpen:
+        AppCore?.state?.sidebarOpen ?? null,
+
+      sidebarDesktopOpen:
+        AppCore?.state?.sidebarDesktopOpen ?? null,
+
+      sidebarMobileOpen:
+        AppCore?.state?.sidebarMobileOpen ?? null,
+
+      sidebarCollapsed:
+        AppCore?.state?.sidebarCollapsed ?? null,
+
+      sidebarHidden:
+        AppCore?.state?.sidebarHidden ?? null,
+
+      sidebarViewport:
+        AppCore?.state?.sidebarViewport ?? null,
+
+      sidebarMode:
+        AppCore?.state?.sidebarMode ?? null,
+
+      sidebarLastMode:
+        AppCore?.state?.sidebarLastMode ?? null,
+
+      shellVisible:
+        AppCore?.state?.shellVisible ?? null,
+
+      route:
+        AppCore?.state?.route ?? null,
+
+      publicPath:
+        AppCore?.state?.publicPath ?? null,
+
+      canonicalPath:
+        AppCore?.state?.canonicalPath ?? null,
+
+      lastRoute:
+        AppCore?.state?.lastRoute ?? null,
     },
 
     storage: {
-      savedCollapsed: readSavedSidebarCollapsed(AppCore),
-      collapsedKey: DESKTOP_COLLAPSED_STORAGE_KEY,
-      legacyOpenKey: LEGACY_SIDEBAR_OPEN_STORAGE_KEY,
+      savedCollapsed:
+        readSavedSidebarCollapsed(AppCore),
+
+      collapsedKey:
+        DESKTOP_COLLAPSED_STORAGE_KEY,
+
+      legacyOpenKey:
+        LEGACY_SIDEBAR_OPEN_STORAGE_KEY,
     },
 
     dom: {
-      hasSidebar: Boolean(sidebar),
-      hasSidebarMenu: Boolean(sidebarMenu),
+      hasSidebar:
+        Boolean(sidebar),
 
-      sidebarHidden: Boolean(sidebar?.hidden),
-      sidebarAriaHidden: sidebar?.getAttribute?.("aria-hidden") || null,
+      hasSidebarMenu:
+        Boolean(sidebarMenu),
 
-      sidebarClasses: sidebar?.className || "",
-      sidebarMenuClasses: sidebarMenu?.className || "",
-      bodyClasses: body?.className || "",
+      sidebarHidden:
+        Boolean(sidebar?.hidden),
 
-      appShellHidden: Boolean(appShell?.hidden),
-      shellHidden: Boolean(shell?.hidden),
-      layoutHidden: Boolean(layout?.hidden),
+      sidebarAriaHidden:
+        sidebar?.getAttribute?.("aria-hidden") || null,
 
-      sidebarOpenDataset: sidebar?.dataset?.open || null,
-      sidebarCollapsedDataset: sidebar?.dataset?.collapsed || null,
-      sidebarMode: sidebar?.dataset?.mode || null,
-      sidebarViewport: sidebar?.dataset?.viewport || null,
-      sidebarTransitioning: sidebar?.dataset?.transitioning || null,
-      sidebarMenuTransitioning: sidebarMenu?.dataset?.transitioning || null,
-      bodySidebarMode: body?.dataset?.sidebarMode || null,
+      sidebarClasses:
+        sidebar?.className || "",
+
+      sidebarMenuClasses:
+        sidebarMenu?.className || "",
+
+      bodyClasses:
+        body?.className || "",
+
+      appShellHidden:
+        Boolean(appShell?.hidden),
+
+      shellHidden:
+        Boolean(shell?.hidden),
+
+      layoutHidden:
+        Boolean(layout?.hidden),
+
+      sidebarOpenDataset:
+        sidebar?.dataset?.open || null,
+
+      sidebarCollapsedDataset:
+        sidebar?.dataset?.collapsed || null,
+
+      sidebarMode:
+        sidebar?.dataset?.mode || null,
+
+      sidebarViewport:
+        sidebar?.dataset?.viewport || null,
+
+      sidebarTransitioning:
+        sidebar?.dataset?.transitioning || null,
+
+      sidebarMenuTransitioning:
+        sidebarMenu?.dataset?.transitioning || null,
+
+      bodySidebarMode:
+        body?.dataset?.sidebarMode || null,
     },
 
     route: {
-      currentPublicPath: getCurrentPublicPath(AppCore),
-      browserPublicPath: getBrowserPublicPath(),
-      candidates: getCurrentPublicPathCandidates(AppCore),
+      currentPublicPath:
+        getCurrentPublicPath(AppCore),
 
-      activeRoute: getMenuItemRoute(activeItem),
-      activeMatchedRoute: activeItem?.dataset?.matchedRoute || "",
-      activeMatchedCurrent: activeItem?.dataset?.matchedCurrent || "",
-      activeCandidateIndex: activeItem?.dataset?.matchCandidateIndex || "",
+      browserPublicPath:
+        getBrowserPublicPath(),
+
+      candidates:
+        getCurrentPublicPathCandidates(AppCore),
+
+      activeRoute:
+        getMenuItemRoute(activeItem),
+
+      activeMatchedRoute:
+        activeItem?.dataset?.matchedRoute || "",
+
+      activeMatchedCurrent:
+        activeItem?.dataset?.matchedCurrent || "",
+
+      activeCandidateIndex:
+        activeItem?.dataset?.matchCandidateIndex || "",
     },
 
     indicator: {
-      ready: sidebarMenu?.dataset?.indicatorReady || null,
-      reason: sidebarMenu?.dataset?.indicatorReason || null,
-      route: sidebarMenu?.dataset?.indicatorRoute || null,
-      current: sidebarMenu?.dataset?.indicatorCurrent || null,
+      ready:
+        sidebarMenu?.dataset?.indicatorReady || null,
 
-      activeRoute: getMenuItemRoute(activeItem),
-      currentPublicPath: getCurrentPublicPath(AppCore),
+      reason:
+        sidebarMenu?.dataset?.indicatorReason || null,
 
-      lastSignature: lastIndicatorSignature,
-      lastReason: lastIndicatorReason,
-      generation: indicatorGeneration,
+      route:
+        sidebarMenu?.dataset?.indicatorRoute || null,
 
-      x: sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
-      y: sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-y") || "",
-      width: sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-w") || "",
-      height: sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-h") || "",
-      opacity: sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-opacity") || "",
+      current:
+        sidebarMenu?.dataset?.indicatorCurrent || null,
+
+      activeRoute:
+        getMenuItemRoute(activeItem),
+
+      currentPublicPath:
+        getCurrentPublicPath(AppCore),
+
+      lastSignature:
+        lastIndicatorSignature,
+
+      lastReason:
+        lastIndicatorReason,
+
+      generation:
+        indicatorGeneration,
+
+      x:
+        sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
+
+      y:
+        sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-y") || "",
+
+      width:
+        sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-w") || "",
+
+      height:
+        sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-h") || "",
+
+      opacity:
+        sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-opacity") || "",
     },
   };
 }
@@ -2551,6 +4540,8 @@ export function getSidebarStateSnapshot(AppCore) {
 ========================================================= */
 
 export default {
+  SIDEBAR_STATE_VERSION,
+
   isMobileViewport,
   isRealShellHidden,
 
@@ -2570,6 +4561,7 @@ export default {
   syncSidebarState,
   setSidebarOpen,
   repairSidebarState,
+  resetSidebarStateRuntime,
 
   getSidebarStateSnapshot,
 };

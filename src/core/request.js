@@ -2,7 +2,7 @@
    Onion SPA - Core Request
    Archivo: src/core/request.js
 
-   CORE REQUEST · API CLIENT · ENTERPRISE HARDENED · 13/10
+   CORE REQUEST · API CLIENT · ENTERPRISE HARDENED · 14/10
 
    RESPONSABILIDADES:
    - parsear respuestas HTTP
@@ -65,7 +65,7 @@ import {
 ========================================================= */
 
 export const REQUEST_VERSION =
-  "13.0.0";
+  "14.0.0";
 
 const DEFAULT_METHOD =
   "GET";
@@ -133,6 +133,7 @@ const KNOWN_METHODS =
 const JSON_CONTENT_TYPES =
   Object.freeze([
     "application/json",
+    "application/problem+json",
     "+json",
   ]);
 
@@ -475,7 +476,7 @@ function getStateToken(state = {}) {
 
 function normalizeRequestArguments(arg1, arg2 = {}, arg3 = undefined) {
   /*
-    Firma soportada:
+    Firma:
       request(method, path, options)
   */
   if (
@@ -496,7 +497,7 @@ function normalizeRequestArguments(arg1, arg2 = {}, arg3 = undefined) {
   }
 
   /*
-    Firma estándar:
+    Firma:
       request(path, options)
   */
   return {
@@ -1661,6 +1662,11 @@ function serializeBody({
   headers,
 } = {}) {
   if (!isBodyAllowed(method)) {
+    deleteHeader(
+      headers,
+      "Content-Type"
+    );
+
     return undefined;
   }
 

@@ -1,22 +1,22 @@
 /* =========================================================
    Onion SPA - App Boot State
-   Archivo: src/app/boot-state.js
+   Archivo: /src/app/boot-state.js
 
    ONION SUPPORT · APP BOOT STATE
-   BOOT FLAGS · LOADER FLAGS · STORE SYNC · DOCUMENT SYNC · EXTREME 14/10
+   BOOT FLAGS · LOADER FLAGS · STORE SYNC · DOCUMENT SYNC · 10/10
 
    RESPONSABILIDADES:
    - Sincronizar estado de boot de AppCore.
    - Sincronizar estado de boot del Store.
    - Centralizar flags ready / booted / booting / loading / appReady.
-   - Endurecer transiciones boot / reboot / error.
+   - Endurecer transiciones boot / reboot / error / fatal.
    - Evitar estados fantasma.
    - Sincronizar clases/datasets de html/body.
    - Emitir eventos de boot consistentes sin duplicar bus + window.
    - Exponer snapshots de diagnóstico seguros.
    - Mantener compatibilidad con loader.js, shell.js e index.js.
 
-   HARDENING 14/10:
+   HARDENING:
    - Tolerancia total a módulos parciales.
    - Idempotencia fuerte por firma comparable.
    - Compatible con AppCore.setState / patchState / mutación directa.
@@ -28,209 +28,132 @@
    - No duplica AppCore.events + window.
    - No emite eventos Store si Store no existe.
    - Evita app-ready en estado fatal/error.
+   - Sin CSS inline.
+   - Sin estilos inyectados.
 ========================================================= */
 
 /* =========================================================
    VERSION
 ========================================================= */
 
-export const BOOT_STATE_VERSION =
-  "14.0.0";
+export const BOOT_STATE_VERSION = "15.0.0";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-export const BOOT_PHASES =
-  Object.freeze({
-    IDLE:
-      "idle",
+export const BOOT_PHASES = Object.freeze({
+  IDLE: "idle",
 
-    PREPARING:
-      "preparing",
+  PREPARING: "preparing",
+  BOOTING: "booting",
+  SERVICES: "services",
+  STORE: "store",
+  I18N: "i18n",
+  UI: "ui",
+  RESTORING: "restoring",
+  RENDERING: "rendering",
+  BINDING: "binding",
+  FINALIZING: "finalizing",
 
-    BOOTING:
-      "booting",
+  READY: "ready",
 
-    SERVICES:
-      "services",
+  ERROR: "error",
+  FATAL: "fatal",
 
-    STORE:
-      "store",
+  REBOOTING: "rebooting",
+});
 
-    I18N:
-      "i18n",
+export const BOOT_EVENTS = Object.freeze({
+  APP_STATE: "app:boot:state",
+  APP_START: "app:boot:start",
+  APP_READY: "app:boot:ready",
+  APP_ERROR: "app:boot:error",
+  APP_FATAL: "app:boot:fatal",
 
-    UI:
-      "ui",
+  STORE_STATE: "store:boot:state",
+  STORE_START: "store:boot:start",
+  STORE_READY: "store:boot:ready",
+  STORE_ERROR: "store:boot:error",
 
-    RESTORING:
-      "restoring",
+  BOOT_STATE: "boot:state",
+  BOOT_START: "boot:start",
+  BOOT_READY: "boot:ready",
+  BOOT_ERROR: "boot:error",
+  BOOT_FATAL: "boot:fatal",
 
-    RENDERING:
-      "rendering",
+  REBOOT: "boot:reboot",
 
-    BINDING:
-      "binding",
+  DOCUMENT_STATE: "app:boot:document-state",
+  DEBUG_READY: "app:boot-state:debug-ready",
+});
 
-    FINALIZING:
-      "finalizing",
+const BOOTING_PHASES = Object.freeze([
+  BOOT_PHASES.PREPARING,
+  BOOT_PHASES.BOOTING,
+  BOOT_PHASES.SERVICES,
+  BOOT_PHASES.STORE,
+  BOOT_PHASES.I18N,
+  BOOT_PHASES.UI,
+  BOOT_PHASES.RESTORING,
+  BOOT_PHASES.RENDERING,
+  BOOT_PHASES.BINDING,
+  BOOT_PHASES.FINALIZING,
+  BOOT_PHASES.REBOOTING,
+]);
 
-    READY:
-      "ready",
+const TERMINAL_PHASES = Object.freeze([
+  BOOT_PHASES.READY,
+  BOOT_PHASES.ERROR,
+  BOOT_PHASES.FATAL,
+]);
 
-    ERROR:
-      "error",
+const ERROR_PHASES = Object.freeze([
+  BOOT_PHASES.ERROR,
+  BOOT_PHASES.FATAL,
+]);
 
-    FATAL:
-      "fatal",
+const SENSITIVE_QUERY_PARAM_NAMES = Object.freeze([
+  "token",
+  "activationToken",
+  "activateToken",
+  "resetToken",
+  "passwordResetToken",
+  "confirmToken",
+  "code",
+  "t",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "tempToken",
+  "temp_token",
+  "temporaryToken",
+  "temporary_token",
+  "twoFactorToken",
+  "two_factor_token",
+  "mfaToken",
+  "mfa_token",
+]);
 
-    REBOOTING:
-      "rebooting",
-  });
+const DOCUMENT_STATE_CLASSES = Object.freeze([
+  "app-booting",
+  "app-loading",
+  "app-ready",
+  "app-error",
+  "app-fatal",
+  "is-booting",
+  "is-loading",
+  "loading",
+]);
 
-export const BOOT_EVENTS =
-  Object.freeze({
-    APP_STATE:
-      "app:boot:state",
+const APP_SIGNATURES = new WeakMap();
+const STORE_SIGNATURES = new WeakMap();
+const DOCUMENT_SIGNATURES = new WeakMap();
 
-    APP_START:
-      "app:boot:start",
-
-    APP_READY:
-      "app:boot:ready",
-
-    APP_ERROR:
-      "app:boot:error",
-
-    APP_FATAL:
-      "app:boot:fatal",
-
-    STORE_STATE:
-      "store:boot:state",
-
-    STORE_START:
-      "store:boot:start",
-
-    STORE_READY:
-      "store:boot:ready",
-
-    STORE_ERROR:
-      "store:boot:error",
-
-    BOOT_STATE:
-      "boot:state",
-
-    BOOT_START:
-      "boot:start",
-
-    BOOT_READY:
-      "boot:ready",
-
-    BOOT_ERROR:
-      "boot:error",
-
-    BOOT_FATAL:
-      "boot:fatal",
-
-    REBOOT:
-      "boot:reboot",
-
-    DOCUMENT_STATE:
-      "app:boot:document-state",
-  });
-
-const BOOTING_PHASES =
-  Object.freeze([
-    BOOT_PHASES.PREPARING,
-    BOOT_PHASES.BOOTING,
-    BOOT_PHASES.SERVICES,
-    BOOT_PHASES.STORE,
-    BOOT_PHASES.I18N,
-    BOOT_PHASES.UI,
-    BOOT_PHASES.RESTORING,
-    BOOT_PHASES.RENDERING,
-    BOOT_PHASES.BINDING,
-    BOOT_PHASES.FINALIZING,
-    BOOT_PHASES.REBOOTING,
-  ]);
-
-const TERMINAL_PHASES =
-  Object.freeze([
-    BOOT_PHASES.READY,
-    BOOT_PHASES.ERROR,
-    BOOT_PHASES.FATAL,
-  ]);
-
-const SENSITIVE_QUERY_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "resetToken",
-    "passwordResetToken",
-    "confirmToken",
-    "code",
-    "t",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
-  ]);
-
-const DOCUMENT_BOOT_CLASSES =
-  Object.freeze([
-    "app-booting",
-    "app-loading",
-    "app-ready",
-    "app-error",
-    "app-fatal",
-    "is-booting",
-    "is-loading",
-    "loading",
-  ]);
-
-const DOCUMENT_READY_CLASSES =
-  Object.freeze([
-    "app-ready",
-  ]);
-
-const DOCUMENT_LOADING_CLASSES =
-  Object.freeze([
-    "app-booting",
-    "app-loading",
-  ]);
-
-const DOCUMENT_ERROR_CLASSES =
-  Object.freeze([
-    "app-error",
-    "app-fatal",
-  ]);
-
-const APP_SIGNATURES =
-  new WeakMap();
-
-const STORE_SIGNATURES =
-  new WeakMap();
-
-const DOCUMENT_SIGNATURES =
-  new WeakMap();
-
-let fallbackAppSignature =
-  "";
-
-let fallbackStoreSignature =
-  "";
-
-let fallbackDocumentSignature =
-  "";
+let fallbackAppSignature = "";
+let fallbackStoreSignature = "";
+let fallbackDocumentSignature = "";
+let debugBridgeReady = false;
 
 /* =========================================================
    BASICS
@@ -312,8 +235,7 @@ function safeBool(value, fallback = false) {
   }
 
   if (typeof value === "string") {
-    const key =
-      value.trim().toLowerCase();
+    const key = value.trim().toLowerCase();
 
     if (
       [
@@ -352,15 +274,13 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
+  const text = String(value).trim();
 
   return text || fallback;
 }
 
 function safeInteger(value, fallback = 0) {
-  const number =
-    Number(value);
+  const number = Number(value);
 
   if (!Number.isFinite(number)) {
     return fallback;
@@ -381,8 +301,7 @@ function nowPayload() {
   let iso = "";
 
   try {
-    iso =
-      new Date(ms).toISOString();
+    iso = new Date(ms).toISOString();
   } catch {
     iso = "";
   }
@@ -456,12 +375,9 @@ function safeDefineValue(target, key, value) {
       key,
       {
         value,
-        configurable:
-          true,
-        enumerable:
-          false,
-        writable:
-          true,
+        configurable: true,
+        enumerable: false,
+        writable: true,
       }
     );
 
@@ -469,9 +385,7 @@ function safeDefineValue(target, key, value) {
   } catch {}
 
   try {
-    target[key] =
-      value;
-
+    target[key] = value;
     return true;
   } catch {}
 
@@ -521,12 +435,11 @@ function hasUsableTarget(target) {
 }
 
 /* =========================================================
-   REDACTION
+   REDACTION / SANITIZE
 ========================================================= */
 
 function redactSensitiveText(value = "") {
-  let output =
-    safeText(value, "");
+  let output = safeText(value, "");
 
   if (!output) {
     return "";
@@ -537,301 +450,57 @@ function redactSensitiveText(value = "") {
       const escaped =
         String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-      output =
-        output.replace(
-          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
-          "$1***"
-        );
+      output = output.replace(
+        new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
+        "$1***"
+      );
     }
 
-    output =
-      output.replace(
-        /(\/activate-account\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
+    output = output.replace(
+      /(\/activate-account\/)([^/?#\s]+)/gi,
+      "$1***"
+    );
 
-    output =
-      output.replace(
-        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
+    output = output.replace(
+      /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+      "$1***"
+    );
 
-    output =
-      output.replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      );
+    output = output.replace(
+      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+      "$1***"
+    );
 
-    output =
-      output.replace(
-        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-        "***"
-      );
+    output = output.replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
   } catch {}
 
   return output;
 }
 
-function sanitizeErrorForSnapshot(error = null) {
-  if (!error) {
-    return null;
-  }
-
-  const normalized =
-    normalizeError(error);
-
-  if (!normalized) {
-    return null;
-  }
-
-  return {
-    ...normalized,
-
-    message:
-      redactSensitiveText(
-        normalized.message
-      ),
-
-    code:
-      redactSensitiveText(
-        normalized.code
-      ),
-
-    url:
-      redactSensitiveText(
-        normalized.url
-      ),
-
-    stack:
-      normalized.stack
-        ? redactSensitiveText(normalized.stack)
-        : "",
-  };
-}
-
-function sanitizePayload(value, depth = 0) {
-  if (depth > 5) {
-    return "[MaxDepth]";
-  }
-
-  if (typeof value === "string") {
-    return redactSensitiveText(value);
-  }
-
-  if (
-    value === null ||
-    value === undefined ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
-  if (typeof value === "function") {
-    return "[Function]";
-  }
-
-  if (value instanceof Error) {
-    return sanitizeErrorForSnapshot(value);
-  }
-
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, 50)
-      .map((item) =>
-        sanitizePayload(
-          item,
-          depth + 1
-        )
-      );
-  }
-
-  if (value instanceof Map) {
-    return {
-      type:
-        "Map",
-      size:
-        value.size,
-    };
-  }
-
-  if (value instanceof Set) {
-    return {
-      type:
-        "Set",
-      size:
-        value.size,
-    };
-  }
-
-  if (isObject(value)) {
-    const output = {};
-
-    for (const [key, item] of Object.entries(value)) {
-      if (
-        /token|secret|password|authorization|bearer/i.test(key)
-      ) {
-        output[key] =
-          "***";
-
-        continue;
-      }
-
-      output[key] =
-        sanitizePayload(
-          item,
-          depth + 1
-        );
-    }
-
-    return output;
-  }
-
-  return value;
-}
-
-/* =========================================================
-   EVENTS
-========================================================= */
-
-function safeWindowDispatch(eventName, detail = {}) {
-  if (
-    !isBrowser() ||
-    !eventName
-  ) {
+function isDomNodeLike(value) {
+  if (!value || typeof value !== "object") {
     return false;
   }
 
   try {
-    window.dispatchEvent(
-      new CustomEvent(
-        eventName,
-        {
-          detail:
-            sanitizePayload(detail),
-        }
-      )
+    return Boolean(
+      typeof Node !== "undefined" &&
+        value instanceof Node
     );
+  } catch {}
 
-    return true;
+  try {
+    return Boolean(
+      value.nodeType &&
+        value.nodeName
+    );
   } catch {}
 
   return false;
 }
-
-function emitCoreEvent(AppCore, eventName, detail = {}, options = {}) {
-  const name =
-    safeText(eventName, "");
-
-  if (!name) {
-    return false;
-  }
-
-  const opts =
-    ensureObject(options);
-
-  const payload =
-    sanitizePayload(detail);
-
-  let busAvailable =
-    false;
-
-  let busEmitted =
-    false;
-
-  try {
-    if (isFunction(AppCore?.events?.emit)) {
-      busAvailable =
-        true;
-
-      AppCore.events.emit(
-        name,
-        payload
-      );
-
-      busEmitted =
-        true;
-    }
-  } catch {}
-
-  /*
-    Evita duplicar AppCore.events + window.
-    window queda como fallback real o emisión forzada.
-  */
-  if (
-    opts.window === true ||
-    (!busAvailable && isBrowser())
-  ) {
-    return (
-      safeWindowDispatch(
-        name,
-        payload
-      ) ||
-      busEmitted
-    );
-  }
-
-  return busEmitted;
-}
-
-function emitStoreEvent(Store, eventName, detail = {}, options = {}) {
-  if (!hasUsableTarget(Store)) {
-    return false;
-  }
-
-  const name =
-    safeText(eventName, "");
-
-  if (!name) {
-    return false;
-  }
-
-  const opts =
-    ensureObject(options);
-
-  const payload =
-    sanitizePayload(detail);
-
-  let busAvailable =
-    false;
-
-  let busEmitted =
-    false;
-
-  try {
-    if (isFunction(Store?.events?.emit)) {
-      busAvailable =
-        true;
-
-      Store.events.emit(
-        name,
-        payload
-      );
-
-      busEmitted =
-        true;
-    }
-  } catch {}
-
-  if (
-    opts.window === true ||
-    (!busAvailable && isBrowser())
-  ) {
-    return (
-      safeWindowDispatch(
-        name,
-        payload
-      ) ||
-      busEmitted
-    );
-  }
-
-  return busEmitted;
-}
-
-/* =========================================================
-   ERROR / SIGNATURE
-========================================================= */
 
 function normalizeError(error) {
   if (!error) {
@@ -840,20 +509,11 @@ function normalizeError(error) {
 
   if (typeof error === "string") {
     return {
-      name:
-        "BootError",
-
-      message:
-        redactSensitiveText(error),
-
-      code:
-        "BOOT_ERROR",
-
-      url:
-        "",
-
-      stack:
-        "",
+      name: "BootError",
+      message: redactSensitiveText(error),
+      code: "BOOT_ERROR",
+      url: "",
+      stack: "",
     };
   }
 
@@ -926,6 +586,294 @@ function normalizeError(error) {
   };
 }
 
+function sanitizeErrorForSnapshot(error = null) {
+  if (!error) {
+    return null;
+  }
+
+  const normalized = normalizeError(error);
+
+  if (!normalized) {
+    return null;
+  }
+
+  return {
+    ...normalized,
+
+    message:
+      redactSensitiveText(
+        normalized.message
+      ),
+
+    code:
+      redactSensitiveText(
+        normalized.code
+      ),
+
+    url:
+      redactSensitiveText(
+        normalized.url
+      ),
+
+    stack:
+      normalized.stack
+        ? redactSensitiveText(normalized.stack)
+        : "",
+  };
+}
+
+function sanitizePayload(value, depth = 0) {
+  if (depth > 6) {
+    return "[MaxDepth]";
+  }
+
+  if (typeof value === "string") {
+    return redactSensitiveText(value);
+  }
+
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "function") {
+    return "[Function]";
+  }
+
+  if (isDomNodeLike(value)) {
+    return {
+      node:
+        safeText(value.nodeName, "Node"),
+
+      id:
+        safeText(value.id, ""),
+
+      className:
+        safeText(value.className?.baseVal || value.className, ""),
+    };
+  }
+
+  if (value instanceof Error) {
+    return sanitizeErrorForSnapshot(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 80)
+      .map((item) =>
+        sanitizePayload(item, depth + 1)
+      );
+  }
+
+  if (value instanceof Map) {
+    return {
+      type: "Map",
+      size: value.size,
+    };
+  }
+
+  if (value instanceof Set) {
+    return {
+      type: "Set",
+      size: value.size,
+    };
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      if (
+        /token|secret|password|authorization|bearer|credential|jwt|otp|code/i.test(key)
+      ) {
+        if (
+          item === null ||
+          item === undefined ||
+          item === "" ||
+          typeof item === "boolean"
+        ) {
+          output[key] = item;
+        } else {
+          output[key] = "***";
+        }
+
+        continue;
+      }
+
+      output[key] =
+        sanitizePayload(
+          item,
+          depth + 1
+        );
+    }
+
+    return output;
+  }
+
+  return String(value);
+}
+
+/* =========================================================
+   EVENTS
+========================================================= */
+
+function safeCreateCustomEvent(name, detail = {}) {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    if (typeof CustomEvent === "function") {
+      return new CustomEvent(
+        name,
+        {
+          detail,
+        }
+      );
+    }
+  } catch {}
+
+  try {
+    const event = document.createEvent("CustomEvent");
+
+    event.initCustomEvent(
+      name,
+      false,
+      false,
+      detail
+    );
+
+    return event;
+  } catch {
+    return null;
+  }
+}
+
+function safeWindowDispatch(eventName, detail = {}) {
+  if (
+    !isBrowser() ||
+    !eventName
+  ) {
+    return false;
+  }
+
+  try {
+    const event =
+      safeCreateCustomEvent(
+        eventName,
+        sanitizePayload(detail)
+      );
+
+    if (!event) {
+      return false;
+    }
+
+    window.dispatchEvent(event);
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function emitCoreEvent(AppCore, eventName, detail = {}, options = {}) {
+  const name = safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  const opts = ensureObject(options);
+  const payload = sanitizePayload(detail);
+
+  let busAvailable = false;
+  let busEmitted = false;
+
+  try {
+    if (isFunction(AppCore?.events?.emit)) {
+      busAvailable = true;
+
+      AppCore.events.emit(
+        name,
+        payload
+      );
+
+      busEmitted = true;
+    }
+  } catch {}
+
+  /*
+    No duplicar bus + window.
+  */
+  if (
+    opts.window === true ||
+    (!busAvailable && isBrowser())
+  ) {
+    return (
+      safeWindowDispatch(
+        name,
+        payload
+      ) ||
+      busEmitted
+    );
+  }
+
+  return busEmitted;
+}
+
+function emitStoreEvent(Store, eventName, detail = {}, options = {}) {
+  if (!hasUsableTarget(Store)) {
+    return false;
+  }
+
+  const name = safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  const opts = ensureObject(options);
+  const payload = sanitizePayload(detail);
+
+  let busAvailable = false;
+  let busEmitted = false;
+
+  try {
+    if (isFunction(Store?.events?.emit)) {
+      busAvailable = true;
+
+      Store.events.emit(
+        name,
+        payload
+      );
+
+      busEmitted = true;
+    }
+  } catch {}
+
+  if (
+    opts.window === true ||
+    (!busAvailable && isBrowser())
+  ) {
+    return (
+      safeWindowDispatch(
+        name,
+        payload
+      ) ||
+      busEmitted
+    );
+  }
+
+  return busEmitted;
+}
+
+/* =========================================================
+   SIGNATURE
+========================================================= */
+
 function getSignatureStore(map, key, fallback) {
   try {
     if (isWeakMapKey(key)) {
@@ -949,21 +897,16 @@ function setSignatureStore(map, key, value, type = "app") {
   } catch {}
 
   if (type === "store") {
-    fallbackStoreSignature =
-      value;
-
+    fallbackStoreSignature = value;
     return;
   }
 
   if (type === "document") {
-    fallbackDocumentSignature =
-      value;
-
-      return;
+    fallbackDocumentSignature = value;
+    return;
   }
 
-  fallbackAppSignature =
-    value;
+  fallbackAppSignature = value;
 }
 
 function getComparableSignature(payload = {}) {
@@ -985,6 +928,9 @@ function getComparableSignature(payload = {}) {
 
     appBooting:
       Boolean(payload.appBooting),
+
+    appFatal:
+      Boolean(payload.appFatal || payload.fatal),
 
     bootPhase:
       safeText(payload.bootPhase, ""),
@@ -1010,24 +956,33 @@ function getComparableSignature(payload = {}) {
 }
 
 function getDocumentComparableSignature(payload = {}) {
+  const names =
+    getDocumentStateNames(payload);
+
   const data = {
     booting:
-      Boolean(payload.booting),
+      Boolean(names.booting),
 
     loading:
-      Boolean(payload.loading),
+      Boolean(names.loading),
 
     ready:
-      Boolean(payload.ready),
+      Boolean(names.ready),
 
     error:
-      Boolean(payload.lastBootError),
+      Boolean(names.error),
 
     fatal:
-      Boolean(payload.fatal),
+      Boolean(names.fatal),
 
     phase:
-      safeText(payload.bootPhase, ""),
+      safeText(names.phase, ""),
+
+    appState:
+      safeText(names.appState, ""),
+
+    shellState:
+      safeText(names.shellState, ""),
   };
 
   try {
@@ -1038,289 +993,65 @@ function getDocumentComparableSignature(payload = {}) {
 }
 
 /* =========================================================
-   PREVIOUS STATE
-========================================================= */
-
-function getPreviousAppBootState(AppCore) {
-  const state =
-    ensureObject(AppCore?.state);
-
-  return {
-    booted:
-      Boolean(state.booted),
-
-    booting:
-      Boolean(state.booting),
-
-    ready:
-      Boolean(state.ready || state.appReady),
-
-    loading:
-      Boolean(state.loading),
-
-    appReady:
-      Boolean(state.appReady || state.ready),
-
-    appBooting:
-      Boolean(state.appBooting || state.booting),
-
-    bootPhase:
-      normalizeBootPhase(
-        state.bootPhase
-      ) || BOOT_PHASES.IDLE,
-
-    bootCycleId:
-      safeInteger(
-        state.bootCycleId,
-        0
-      ),
-
-    lastBootReason:
-      safeText(
-        state.lastBootReason,
-        ""
-      ),
-
-    lastBootError:
-      state.lastBootError || null,
-
-    bootStartedAt:
-      safeText(
-        state.bootStartedAt,
-        ""
-      ),
-
-    bootReadyAt:
-      safeText(
-        state.bootReadyAt,
-        ""
-      ),
-
-    bootErrorAt:
-      safeText(
-        state.bootErrorAt,
-        ""
-      ),
-
-    bootFatalAt:
-      safeText(
-        state.bootFatalAt,
-        ""
-      ),
-  };
-}
-
-function getPreviousStoreBootState(Store) {
-  if (!hasUsableTarget(Store)) {
-    return {
-      ready:
-        false,
-
-      booted:
-        false,
-
-      booting:
-        false,
-
-      loading:
-        false,
-
-      bootPhase:
-        BOOT_PHASES.IDLE,
-
-      bootCycleId:
-        0,
-
-      lastBootReason:
-        "",
-
-      lastBootError:
-        null,
-
-      bootStartedAt:
-        "",
-
-      bootReadyAt:
-        "",
-
-      bootErrorAt:
-        "",
-
-      bootFatalAt:
-        "",
-    };
-  }
-
-  const stateFromGetter =
-    ensureObject(
-      safeMethod(Store, "getState")
-    );
-
-  const directState =
-    ensureObject(Store?.state);
-
-  const state = {
-    ...directState,
-    ...stateFromGetter,
-  };
-
-  return {
-    ready:
-      Boolean(state.ready),
-
-    booted:
-      Boolean(state.booted),
-
-    booting:
-      Boolean(state.booting),
-
-    loading:
-      Boolean(state.loading),
-
-    bootPhase:
-      normalizeBootPhase(
-        state.bootPhase
-      ) || BOOT_PHASES.IDLE,
-
-    bootCycleId:
-      safeInteger(
-        state.bootCycleId,
-        0
-      ),
-
-    lastBootReason:
-      safeText(
-        state.lastBootReason,
-        ""
-      ),
-
-    lastBootError:
-      state.lastBootError || null,
-
-    bootStartedAt:
-      safeText(
-        state.bootStartedAt,
-        ""
-      ),
-
-    bootReadyAt:
-      safeText(
-        state.bootReadyAt,
-        ""
-      ),
-
-    bootErrorAt:
-      safeText(
-        state.bootErrorAt,
-        ""
-      ),
-
-    bootFatalAt:
-      safeText(
-        state.bootFatalAt,
-        ""
-      ),
-  };
-}
-
-/* =========================================================
-   NORMALIZERS
+   PHASE NORMALIZATION
 ========================================================= */
 
 export function normalizeBootPhase(value = "") {
-  const phase =
-    safeText(value, "").toLowerCase();
+  const phase = safeText(value, "").toLowerCase();
 
   if (!phase) {
     return "";
   }
 
   const aliases = {
-    start:
-      BOOT_PHASES.BOOTING,
+    start: BOOT_PHASES.BOOTING,
+    starting: BOOT_PHASES.BOOTING,
 
-    starting:
-      BOOT_PHASES.BOOTING,
+    init: BOOT_PHASES.PREPARING,
+    initializing: BOOT_PHASES.PREPARING,
 
-    init:
-      BOOT_PHASES.PREPARING,
+    service: BOOT_PHASES.SERVICES,
+    services: BOOT_PHASES.SERVICES,
 
-    initializing:
-      BOOT_PHASES.PREPARING,
+    store: BOOT_PHASES.STORE,
 
-    service:
-      BOOT_PHASES.SERVICES,
+    lang: BOOT_PHASES.I18N,
+    i18n: BOOT_PHASES.I18N,
 
-    services:
-      BOOT_PHASES.SERVICES,
+    ui: BOOT_PHASES.UI,
 
-    store:
-      BOOT_PHASES.STORE,
+    restore: BOOT_PHASES.RESTORING,
+    restoring: BOOT_PHASES.RESTORING,
 
-    i18n:
-      BOOT_PHASES.I18N,
+    render: BOOT_PHASES.RENDERING,
+    rendering: BOOT_PHASES.RENDERING,
 
-    ui:
-      BOOT_PHASES.UI,
+    bind: BOOT_PHASES.BINDING,
+    binding: BOOT_PHASES.BINDING,
 
-    restore:
-      BOOT_PHASES.RESTORING,
+    finalize: BOOT_PHASES.FINALIZING,
+    finalizing: BOOT_PHASES.FINALIZING,
 
-    restoring:
-      BOOT_PHASES.RESTORING,
+    complete: BOOT_PHASES.READY,
+    completed: BOOT_PHASES.READY,
+    done: BOOT_PHASES.READY,
+    success: BOOT_PHASES.READY,
 
-    render:
-      BOOT_PHASES.RENDERING,
+    failure: BOOT_PHASES.ERROR,
+    failed: BOOT_PHASES.ERROR,
+    error: BOOT_PHASES.ERROR,
 
-    rendering:
-      BOOT_PHASES.RENDERING,
+    fatal: BOOT_PHASES.FATAL,
 
-    bind:
-      BOOT_PHASES.BINDING,
-
-    binding:
-      BOOT_PHASES.BINDING,
-
-    finalize:
-      BOOT_PHASES.FINALIZING,
-
-    finalizing:
-      BOOT_PHASES.FINALIZING,
-
-    complete:
-      BOOT_PHASES.READY,
-
-    completed:
-      BOOT_PHASES.READY,
-
-    done:
-      BOOT_PHASES.READY,
-
-    success:
-      BOOT_PHASES.READY,
-
-    failure:
-      BOOT_PHASES.ERROR,
-
-    failed:
-      BOOT_PHASES.ERROR,
-
-    fatal:
-      BOOT_PHASES.FATAL,
-
-    reboot:
-      BOOT_PHASES.REBOOTING,
-
-    rebooting:
-      BOOT_PHASES.REBOOTING,
+    reboot: BOOT_PHASES.REBOOTING,
+    rebooting: BOOT_PHASES.REBOOTING,
   };
 
   if (aliases[phase]) {
     return aliases[phase];
   }
 
-  const values =
-    Object.values(BOOT_PHASES);
+  const values = Object.values(BOOT_PHASES);
 
   if (values.includes(phase)) {
     return phase;
@@ -1340,12 +1071,8 @@ function isReadyPhase(phase = "") {
 }
 
 function isErrorPhase(phase = "") {
-  const clean =
-    normalizeBootPhase(phase);
-
-  return (
-    clean === BOOT_PHASES.ERROR ||
-    clean === BOOT_PHASES.FATAL
+  return ERROR_PHASES.includes(
+    normalizeBootPhase(phase)
   );
 }
 
@@ -1403,6 +1130,149 @@ function normalizeCycleId(input = {}, previous = {}) {
   );
 }
 
+function normalizeReason(input = {}, phase = BOOT_PHASES.IDLE) {
+  return safeText(
+    input.reason ||
+      input.source ||
+      input.action ||
+      input.lastBootReason,
+    phase || BOOT_PHASES.IDLE
+  );
+}
+
+/* =========================================================
+   PREVIOUS STATE
+========================================================= */
+
+function getPreviousAppBootState(AppCore) {
+  const state = ensureObject(AppCore?.state);
+
+  return {
+    booted:
+      Boolean(state.booted),
+
+    booting:
+      Boolean(state.booting),
+
+    ready:
+      Boolean(state.ready || state.appReady),
+
+    loading:
+      Boolean(state.loading),
+
+    appReady:
+      Boolean(state.appReady || state.ready),
+
+    appBooting:
+      Boolean(state.appBooting || state.booting),
+
+    appFatal:
+      Boolean(state.appFatal || state.fatal),
+
+    bootPhase:
+      normalizeBootPhase(state.bootPhase) || BOOT_PHASES.IDLE,
+
+    bootCycleId:
+      safeInteger(state.bootCycleId, 0),
+
+    lastBootReason:
+      safeText(state.lastBootReason, ""),
+
+    lastBootError:
+      state.lastBootError || null,
+
+    bootStartedAt:
+      safeText(state.bootStartedAt, ""),
+
+    bootReadyAt:
+      safeText(state.bootReadyAt, ""),
+
+    bootErrorAt:
+      safeText(state.bootErrorAt, ""),
+
+    bootFatalAt:
+      safeText(state.bootFatalAt, ""),
+  };
+}
+
+function getPreviousStoreBootState(Store) {
+  if (!hasUsableTarget(Store)) {
+    return {
+      ready: false,
+      booted: false,
+      booting: false,
+      loading: false,
+      fatal: false,
+      bootPhase: BOOT_PHASES.IDLE,
+      bootCycleId: 0,
+      lastBootReason: "",
+      lastBootError: null,
+      bootStartedAt: "",
+      bootReadyAt: "",
+      bootErrorAt: "",
+      bootFatalAt: "",
+    };
+  }
+
+  const stateFromGetter =
+    ensureObject(
+      safeMethod(Store, "getState")
+    );
+
+  const directState =
+    ensureObject(Store?.state);
+
+  const state = {
+    ...directState,
+    ...stateFromGetter,
+  };
+
+  return {
+    ready:
+      Boolean(state.ready),
+
+    booted:
+      Boolean(state.booted),
+
+    booting:
+      Boolean(state.booting),
+
+    loading:
+      Boolean(state.loading),
+
+    fatal:
+      Boolean(state.fatal),
+
+    bootPhase:
+      normalizeBootPhase(state.bootPhase) || BOOT_PHASES.IDLE,
+
+    bootCycleId:
+      safeInteger(state.bootCycleId, 0),
+
+    lastBootReason:
+      safeText(state.lastBootReason, ""),
+
+    lastBootError:
+      state.lastBootError || null,
+
+    bootStartedAt:
+      safeText(state.bootStartedAt, ""),
+
+    bootReadyAt:
+      safeText(state.bootReadyAt, ""),
+
+    bootErrorAt:
+      safeText(state.bootErrorAt, ""),
+
+    bootFatalAt:
+      safeText(state.bootFatalAt, ""),
+  };
+}
+
+/* =========================================================
+   PAYLOAD NORMALIZATION
+========================================================= */
+
 function buildCommonBootTiming({
   phase,
   previous = {},
@@ -1412,80 +1282,43 @@ function buildCommonBootTiming({
   const cleanPhase =
     normalizeBootPhase(phase) || BOOT_PHASES.IDLE;
 
-  const previousStartedAt =
-    safeText(
-      previous.bootStartedAt,
-      ""
-    );
-
-  const previousReadyAt =
-    safeText(
-      previous.bootReadyAt,
-      ""
-    );
-
-  const previousErrorAt =
-    safeText(
-      previous.bootErrorAt,
-      ""
-    );
-
-  const previousFatalAt =
-    safeText(
-      previous.bootFatalAt,
-      ""
-    );
-
   return {
     bootStartedAt:
-      safeText(
-        input.bootStartedAt,
-        ""
-      ) ||
+      safeText(input.bootStartedAt, "") ||
       (
         isBootingPhase(cleanPhase)
-          ? clock.iso
-          : previousStartedAt
+          ? safeText(previous.bootStartedAt, "") || clock.iso
+          : safeText(previous.bootStartedAt, "")
       ),
 
     bootReadyAt:
-      safeText(
-        input.bootReadyAt,
-        ""
-      ) ||
+      safeText(input.bootReadyAt, "") ||
       (
         cleanPhase === BOOT_PHASES.READY
           ? clock.iso
-          : previousReadyAt
+          : safeText(previous.bootReadyAt, "")
       ),
 
     bootErrorAt:
-      safeText(
-        input.bootErrorAt,
-        ""
-      ) ||
+      safeText(input.bootErrorAt, "") ||
       (
         cleanPhase === BOOT_PHASES.ERROR
           ? clock.iso
-          : previousErrorAt
+          : safeText(previous.bootErrorAt, "")
       ),
 
     bootFatalAt:
-      safeText(
-        input.bootFatalAt,
-        ""
-      ) ||
+      safeText(input.bootFatalAt, "") ||
       (
         cleanPhase === BOOT_PHASES.FATAL
           ? clock.iso
-          : previousFatalAt
+          : safeText(previous.bootFatalAt, "")
       ),
   };
 }
 
 function normalizeAppBootPayload(options = {}, previous = {}) {
-  const input =
-    ensureObject(options);
+  const input = ensureObject(options);
 
   const requestedPhase =
     normalizeBootPhase(
@@ -1534,59 +1367,31 @@ function normalizeAppBootPayload(options = {}, previous = {}) {
       booting,
       ready,
       loading,
-      error:
-        hasError ? input.error || true : null,
-      fatal:
-        hasFatal,
+      error: hasError ? input.error || true : null,
+      fatal: hasFatal,
     });
 
   if (hasFatal || phase === BOOT_PHASES.FATAL) {
-    booted =
-      false;
-
-    ready =
-      false;
-
-    booting =
-      false;
-
-    loading =
-      false;
-
-    phase =
-      BOOT_PHASES.FATAL;
+    booted = false;
+    ready = false;
+    booting = false;
+    loading = false;
+    phase = BOOT_PHASES.FATAL;
   } else if (hasError || phase === BOOT_PHASES.ERROR) {
-    booted =
-      false;
-
-    ready =
-      false;
-
-    booting =
-      false;
-
-    loading =
-      false;
-
-    phase =
-      BOOT_PHASES.ERROR;
+    booted = false;
+    ready = false;
+    booting = false;
+    loading = false;
+    phase = BOOT_PHASES.ERROR;
   } else if (
     isBootingPhase(phase) ||
     booting ||
     loading
   ) {
-    booted =
-      false;
-
-    ready =
-      false;
-
-    booting =
-      true;
-
-    loading =
-      true;
-
+    booted = false;
+    ready = false;
+    booting = true;
+    loading = true;
     phase =
       phase && isBootingPhase(phase)
         ? phase
@@ -1596,35 +1401,17 @@ function normalizeAppBootPayload(options = {}, previous = {}) {
     booted ||
     ready
   ) {
-    booted =
-      true;
-
-    ready =
-      true;
-
-    booting =
-      false;
-
-    loading =
-      false;
-
-    phase =
-      BOOT_PHASES.READY;
+    booted = true;
+    ready = true;
+    booting = false;
+    loading = false;
+    phase = BOOT_PHASES.READY;
   } else {
-    booted =
-      false;
-
-    ready =
-      false;
-
-    booting =
-      false;
-
-    loading =
-      false;
-
-    phase =
-      BOOT_PHASES.IDLE;
+    booted = false;
+    ready = false;
+    booting = false;
+    loading = false;
+    phase = BOOT_PHASES.IDLE;
   }
 
   const cycleId =
@@ -1634,16 +1421,12 @@ function normalizeAppBootPayload(options = {}, previous = {}) {
     );
 
   const reason =
-    safeText(
-      input.reason ||
-        input.source ||
-        input.action ||
-        input.lastBootReason,
+    normalizeReason(
+      input,
       phase
     );
 
-  const clock =
-    nowPayload();
+  const clock = nowPayload();
 
   const timing =
     buildCommonBootTiming({
@@ -1666,43 +1449,27 @@ function normalizeAppBootPayload(options = {}, previous = {}) {
     ready,
     loading,
 
-    appReady:
-      ready,
+    appReady: ready,
+    appBooting: booting,
 
-    appBooting:
-      booting,
+    appFatal: phase === BOOT_PHASES.FATAL,
+    fatal: phase === BOOT_PHASES.FATAL,
 
-    appFatal:
-      phase === BOOT_PHASES.FATAL,
+    bootPhase: phase,
+    bootCycleId: cycleId,
 
-    fatal:
-      phase === BOOT_PHASES.FATAL,
-
-    bootPhase:
-      phase,
-
-    bootCycleId:
-      cycleId,
-
-    bootUpdatedAt:
-      clock.iso,
-
-    bootUpdatedAtMs:
-      clock.ms,
+    bootUpdatedAt: clock.iso,
+    bootUpdatedAtMs: clock.ms,
 
     ...timing,
 
-    lastBootReason:
-      reason,
-
-    lastBootError:
-      error,
+    lastBootReason: reason,
+    lastBootError: error,
   };
 }
 
 function normalizeStoreBootPayload(options = {}, previous = {}) {
-  const input =
-    ensureObject(options);
+  const input = ensureObject(options);
 
   const requestedPhase =
     normalizeBootPhase(
@@ -1751,97 +1518,51 @@ function normalizeStoreBootPayload(options = {}, previous = {}) {
       booting,
       ready,
       loading,
-      error:
-        hasError ? input.error || true : null,
-      fatal:
-        hasFatal,
+      error: hasError ? input.error || true : null,
+      fatal: hasFatal,
     });
 
   if (hasFatal || phase === BOOT_PHASES.FATAL) {
-    ready =
-      false;
-
-    booted =
-      false;
-
-    booting =
-      false;
-
-    loading =
-      false;
-
-    phase =
-      BOOT_PHASES.FATAL;
+    ready = false;
+    booted = false;
+    booting = false;
+    loading = false;
+    phase = BOOT_PHASES.FATAL;
   } else if (hasError || phase === BOOT_PHASES.ERROR) {
-    ready =
-      false;
-
-    booted =
-      false;
-
-    booting =
-      false;
-
-    loading =
-      false;
-
-    phase =
-      BOOT_PHASES.ERROR;
+    ready = false;
+    booted = false;
+    booting = false;
+    loading = false;
+    phase = BOOT_PHASES.ERROR;
   } else if (
     isReadyPhase(phase) ||
     ready ||
     booted
   ) {
-    ready =
-      true;
-
-    booted =
-      true;
-
-    booting =
-      false;
-
-    loading =
-      false;
-
-    phase =
-      BOOT_PHASES.READY;
+    ready = true;
+    booted = true;
+    booting = false;
+    loading = false;
+    phase = BOOT_PHASES.READY;
   } else if (
     isBootingPhase(phase) ||
     booting ||
     loading
   ) {
-    ready =
-      false;
-
-    booted =
-      false;
-
-    booting =
-      true;
-
-    loading =
-      true;
-
+    ready = false;
+    booted = false;
+    booting = true;
+    loading = true;
     phase =
       phase && isBootingPhase(phase)
         ? phase
         : BOOT_PHASES.BOOTING;
   } else {
-    ready =
-      false;
-
-    booted =
-      false;
-
-    booting =
-      false;
-
-    loading =
-      false;
-
-    phase =
-      BOOT_PHASES.IDLE;
+    ready = false;
+    booted = false;
+    booting = false;
+    loading = false;
+    phase = BOOT_PHASES.IDLE;
   }
 
   const cycleId =
@@ -1851,16 +1572,12 @@ function normalizeStoreBootPayload(options = {}, previous = {}) {
     );
 
   const reason =
-    safeText(
-      input.reason ||
-        input.source ||
-        input.action ||
-        input.lastBootReason,
+    normalizeReason(
+      input,
       phase
     );
 
-  const clock =
-    nowPayload();
+  const clock = nowPayload();
 
   const timing =
     buildCommonBootTiming({
@@ -1883,28 +1600,18 @@ function normalizeStoreBootPayload(options = {}, previous = {}) {
     booting,
     loading,
 
-    fatal:
-      phase === BOOT_PHASES.FATAL,
+    fatal: phase === BOOT_PHASES.FATAL,
 
-    bootPhase:
-      phase,
+    bootPhase: phase,
+    bootCycleId: cycleId,
 
-    bootCycleId:
-      cycleId,
-
-    bootUpdatedAt:
-      clock.iso,
-
-    bootUpdatedAtMs:
-      clock.ms,
+    bootUpdatedAt: clock.iso,
+    bootUpdatedAtMs: clock.ms,
 
     ...timing,
 
-    lastBootReason:
-      reason,
-
-    lastBootError:
-      error,
+    lastBootReason: reason,
+    lastBootError: error,
   };
 }
 
@@ -1930,9 +1637,7 @@ function setDataset(el, key, value) {
       return true;
     }
 
-    el.dataset[key] =
-      String(value);
-
+    el.dataset[key] = String(value);
     return true;
   } catch {}
 
@@ -1976,29 +1681,46 @@ function removeClasses(root, classNames = []) {
 }
 
 function getDocumentStateNames(payload = {}, options = {}) {
+  const opts = ensureObject(options);
+
   const phase =
     normalizeBootPhase(payload.bootPhase) ||
     BOOT_PHASES.IDLE;
 
-  const booting =
-    isBootingPhase(phase) ||
-    Boolean(payload.booting);
-
-  const ready =
-    phase === BOOT_PHASES.READY ||
-    Boolean(payload.ready);
-
-  const error =
-    phase === BOOT_PHASES.ERROR ||
-    Boolean(payload.lastBootError);
-
   const fatal =
     phase === BOOT_PHASES.FATAL ||
     Boolean(payload.fatal) ||
-    Boolean(error && options?.fatal === true);
+    Boolean(payload.appFatal) ||
+    Boolean(opts.fatal === true);
+
+  const error =
+    fatal ||
+    phase === BOOT_PHASES.ERROR ||
+    Boolean(payload.lastBootError);
+
+  const booting =
+    !error &&
+    (
+      isBootingPhase(phase) ||
+      Boolean(payload.booting)
+    );
+
+  const ready =
+    !error &&
+    !booting &&
+    (
+      phase === BOOT_PHASES.READY ||
+      Boolean(payload.ready) ||
+      Boolean(payload.appReady) ||
+      Boolean(payload.booted)
+    );
 
   const loading =
-    Boolean(payload.loading || booting);
+    !error &&
+    (
+      Boolean(payload.loading) ||
+      booting
+    );
 
   const appState =
     booting
@@ -2039,25 +1761,22 @@ export function syncDocumentBootState(payload = {}, options = {}) {
     return false;
   }
 
-  const opts =
-    ensureObject(options);
-
+  const opts = ensureObject(options);
   const names =
     getDocumentStateNames(
       payload,
       opts
     );
 
-  const roots =
-    [
-      document.documentElement,
-      document.body,
-    ].filter(Boolean);
+  const roots = [
+    document.documentElement,
+    document.body,
+  ].filter(Boolean);
 
   for (const root of roots) {
     removeClasses(
       root,
-      DOCUMENT_BOOT_CLASSES
+      DOCUMENT_STATE_CLASSES
     );
 
     toggleClass(
@@ -2171,32 +1890,17 @@ function maybeEmitDocumentState(AppCore, payload = {}, options = {}) {
       AppCore,
       BOOT_EVENTS.DOCUMENT_STATE,
       {
-        version:
-          BOOT_STATE_VERSION,
+        version: BOOT_STATE_VERSION,
 
-        phase:
-          names.phase,
+        phase: names.phase,
+        booting: names.booting,
+        loading: names.loading,
+        ready: names.ready,
+        error: names.error,
+        fatal: names.fatal,
 
-        booting:
-          names.booting,
-
-        loading:
-          names.loading,
-
-        ready:
-          names.ready,
-
-        error:
-          names.error,
-
-        fatal:
-          names.fatal,
-
-        appState:
-          names.appState,
-
-        shellState:
-          names.shellState,
+        appState: names.appState,
+        shellState: names.shellState,
 
         changed,
       }
@@ -2207,7 +1911,7 @@ function maybeEmitDocumentState(AppCore, payload = {}, options = {}) {
 }
 
 /* =========================================================
-   APPLY
+   APPLY APP / STORE
 ========================================================= */
 
 function callCoreStateMethod(AppCore, methodName, payload, options = {}) {
@@ -2222,14 +1926,10 @@ function callCoreStateMethod(AppCore, methodName, payload, options = {}) {
     AppCore[methodName](
       payload,
       {
-        source:
-          "app:boot-state",
-        emit:
-          false,
-        emitState:
-          false,
-        silent:
-          true,
+        source: "app:boot-state",
+        emit: false,
+        emitState: false,
+        silent: true,
         ...ensureObject(options?.stateOptions),
       }
     );
@@ -2253,8 +1953,8 @@ function applyAppBootPayload(AppCore, payload, options = {}) {
     );
 
   /*
-    Mutación directa primero: index.js/loader.js/shell.js suelen leer
-    AppCore.state justo después de marcar estado.
+    Mutación directa primero:
+    loader.js / shell.js / index.js leen AppCore.state inmediatamente.
   */
   safeAssign(
     state,
@@ -2287,10 +1987,8 @@ function applyAppBootPayload(AppCore, payload, options = {}) {
       AppCore.setLoading(
         Boolean(payload.loading),
         {
-          source:
-            "app:boot-state",
-          silent:
-            true,
+          source: "app:boot-state",
+          silent: true,
         }
       );
     }
@@ -2328,12 +2026,9 @@ function callStoreStateMethod(Store, methodName, payload, options = {}) {
     Store[methodName](
       payload,
       {
-        source:
-          "app:boot-state",
-        emit:
-          false,
-        silent:
-          true,
+        source: "app:boot-state",
+        emit: false,
+        silent: true,
         ...ensureObject(options?.stateOptions),
       }
     );
@@ -2487,18 +2182,12 @@ function applyStoreBootPayload(Store, payload, options = {}) {
    EVENT PAYLOADS
 ========================================================= */
 
-function buildAppEventPayload(payload = {}, previous = {}, changed = false) {
+function buildEventPayload(payload = {}, previous = {}, changed = false) {
   return {
-    version:
-      BOOT_STATE_VERSION,
-
+    version: BOOT_STATE_VERSION,
     ...payload,
-
-    changed:
-      Boolean(changed),
-
-    previous:
-      sanitizePayload(previous),
+    changed: Boolean(changed),
+    previous: sanitizePayload(previous),
   };
 }
 
@@ -2587,10 +2276,7 @@ function emitStoreBootEvents(Store, eventPayload, options = {}) {
     );
   }
 
-  if (
-    eventPayload.bootPhase === BOOT_PHASES.ERROR ||
-    eventPayload.bootPhase === BOOT_PHASES.FATAL
-  ) {
+  if (isErrorPhase(eventPayload.bootPhase)) {
     emitStoreEvent(
       Store,
       BOOT_EVENTS.STORE_ERROR,
@@ -2642,7 +2328,7 @@ export function markAppBootState(AppCore, options = {}) {
   );
 
   const eventPayload =
-    buildAppEventPayload(
+    buildEventPayload(
       payload,
       previous,
       changed
@@ -2698,7 +2384,7 @@ export function markStoreBootState(Store, options = {}) {
   );
 
   const eventPayload =
-    buildAppEventPayload(
+    buildEventPayload(
       payload,
       previous,
       changed
@@ -2768,8 +2454,7 @@ function emitCombinedBootEvents(AppCore, snapshot, phase = BOOT_PHASES.IDLE) {
 }
 
 export function markBootStart(AppCore, Store, options = {}) {
-  const input =
-    ensureObject(options);
+  const input = ensureObject(options);
 
   const phase =
     normalizeBootPhase(
@@ -2786,20 +2471,12 @@ export function markBootStart(AppCore, Store, options = {}) {
   const payload = {
     ...input,
 
-    booted:
-      false,
+    booted: false,
+    booting: true,
+    ready: false,
+    loading: true,
 
-    booting:
-      true,
-
-    ready:
-      false,
-
-    loading:
-      true,
-
-    phase:
-      finalPhase,
+    phase: finalPhase,
 
     reason:
       safeText(
@@ -2837,32 +2514,20 @@ export function markBootStart(AppCore, Store, options = {}) {
 }
 
 export function markBootReady(AppCore, Store, options = {}) {
-  const input =
-    ensureObject(options);
+  const input = ensureObject(options);
 
   const payload = {
     ...input,
 
-    booted:
-      true,
+    booted: true,
+    booting: false,
+    ready: true,
+    loading: false,
 
-    booting:
-      false,
+    phase: BOOT_PHASES.READY,
 
-    ready:
-      true,
-
-    loading:
-      false,
-
-    phase:
-      BOOT_PHASES.READY,
-
-    fatal:
-      false,
-
-    error:
-      null,
+    fatal: false,
+    error: null,
 
     reason:
       safeText(
@@ -2900,8 +2565,7 @@ export function markBootReady(AppCore, Store, options = {}) {
 }
 
 export function markBootError(AppCore, Store, error = null, options = {}) {
-  const input =
-    ensureObject(options);
+  const input = ensureObject(options);
 
   const fatal =
     input.fatal === true;
@@ -2914,22 +2578,14 @@ export function markBootError(AppCore, Store, error = null, options = {}) {
   const payload = {
     ...input,
 
-    booted:
-      false,
-
-    booting:
-      false,
-
-    ready:
-      false,
-
-    loading:
-      false,
+    booted: false,
+    booting: false,
+    ready: false,
+    loading: false,
 
     phase,
 
     error,
-
     fatal,
 
     reason:
@@ -2974,8 +2630,7 @@ export function markBootFatal(AppCore, Store, error = null, options = {}) {
     error,
     {
       ...ensureObject(options),
-      fatal:
-        true,
+      fatal: true,
       reason:
         safeText(
           options?.reason,
@@ -2986,39 +2641,30 @@ export function markBootFatal(AppCore, Store, error = null, options = {}) {
 }
 
 export function markRebootState(AppCore, Store, options = {}) {
-  const input =
-    ensureObject(options);
+  const input = ensureObject(options);
+
+  const rebooting =
+    input.booting === true ||
+    input.loading === true;
 
   const phase =
-    input.booting === true
+    rebooting
       ? BOOT_PHASES.REBOOTING
       : BOOT_PHASES.IDLE;
 
   const payload = {
     ...input,
 
-    booted:
-      false,
-
-    booting:
-      input.booting === true,
-
-    ready:
-      false,
-
-    loading:
-      input.booting === true,
+    booted: false,
+    booting: rebooting,
+    ready: false,
+    loading: rebooting,
 
     phase,
 
-    lastBootError:
-      null,
-
-    error:
-      null,
-
-    fatal:
-      false,
+    lastBootError: null,
+    error: null,
+    fatal: false,
 
     reason:
       safeText(
@@ -3066,8 +2712,7 @@ export function markRebootState(AppCore, Store, options = {}) {
 ========================================================= */
 
 export function isAppBooting(AppCore) {
-  const state =
-    ensureObject(AppCore?.state);
+  const state = ensureObject(AppCore?.state);
 
   return Boolean(
     state.booting ||
@@ -3077,8 +2722,7 @@ export function isAppBooting(AppCore) {
 }
 
 export function isAppReady(AppCore) {
-  const state =
-    ensureObject(AppCore?.state);
+  const state = ensureObject(AppCore?.state);
 
   return Boolean(
     (
@@ -3089,13 +2733,14 @@ export function isAppReady(AppCore) {
     ) &&
       !state.lastBootError &&
       state.bootPhase !== BOOT_PHASES.ERROR &&
-      state.bootPhase !== BOOT_PHASES.FATAL
+      state.bootPhase !== BOOT_PHASES.FATAL &&
+      !state.appFatal &&
+      !state.fatal
   );
 }
 
 export function isAppLoading(AppCore) {
-  const state =
-    ensureObject(AppCore?.state);
+  const state = ensureObject(AppCore?.state);
 
   return Boolean(
     state.loading ||
@@ -3106,8 +2751,7 @@ export function isAppLoading(AppCore) {
 }
 
 export function hasBootError(AppCore) {
-  const state =
-    ensureObject(AppCore?.state);
+  const state = ensureObject(AppCore?.state);
 
   return Boolean(
     state.lastBootError ||
@@ -3119,14 +2763,9 @@ export function hasBootError(AppCore) {
 }
 
 export function resetBootStateSignatures() {
-  fallbackAppSignature =
-    "";
-
-  fallbackStoreSignature =
-    "";
-
-  fallbackDocumentSignature =
-    "";
+  fallbackAppSignature = "";
+  fallbackStoreSignature = "";
+  fallbackDocumentSignature = "";
 
   return true;
 }
@@ -3136,12 +2775,10 @@ export function resetBootStateSignatures() {
 ========================================================= */
 
 export function getAppBootStateSnapshot(AppCore) {
-  const state =
-    ensureObject(AppCore?.state);
+  const state = ensureObject(AppCore?.state);
 
-  return {
-    version:
-      BOOT_STATE_VERSION,
+  return sanitizePayload({
+    version: BOOT_STATE_VERSION,
 
     hasCore:
       Boolean(AppCore),
@@ -3180,9 +2817,7 @@ export function getAppBootStateSnapshot(AppCore) {
       Boolean(state.appFatal || state.fatal),
 
     phase:
-      normalizeBootPhase(
-        state.bootPhase
-      ) || BOOT_PHASES.IDLE,
+      normalizeBootPhase(state.bootPhase) || BOOT_PHASES.IDLE,
 
     isBootingPhase:
       isBootingPhase(state.bootPhase),
@@ -3191,61 +2826,35 @@ export function getAppBootStateSnapshot(AppCore) {
       isTerminalPhase(state.bootPhase),
 
     cycleId:
-      safeInteger(
-        state.bootCycleId,
-        0
-      ),
+      safeInteger(state.bootCycleId, 0),
 
     updatedAt:
-      safeText(
-        state.bootUpdatedAt,
-        ""
-      ),
+      safeText(state.bootUpdatedAt, ""),
 
     updatedAtMs:
-      safeInteger(
-        state.bootUpdatedAtMs,
-        0
-      ),
+      safeInteger(state.bootUpdatedAtMs, 0),
 
     startedAt:
-      safeText(
-        state.bootStartedAt,
-        ""
-      ),
+      safeText(state.bootStartedAt, ""),
 
     readyAt:
-      safeText(
-        state.bootReadyAt,
-        ""
-      ),
+      safeText(state.bootReadyAt, ""),
 
     errorAt:
-      safeText(
-        state.bootErrorAt,
-        ""
-      ),
+      safeText(state.bootErrorAt, ""),
 
     fatalAt:
-      safeText(
-        state.bootFatalAt,
-        ""
-      ),
+      safeText(state.bootFatalAt, ""),
 
     reason:
-      safeText(
-        state.lastBootReason,
-        ""
-      ),
+      safeText(state.lastBootReason, ""),
 
     hasError:
       Boolean(state.lastBootError),
 
     error:
-      sanitizeErrorForSnapshot(
-        state.lastBootError
-      ),
-  };
+      sanitizeErrorForSnapshot(state.lastBootError),
+  });
 }
 
 export function getStoreBootStateSnapshot(Store) {
@@ -3264,9 +2873,8 @@ export function getStoreBootStateSnapshot(Store) {
     ...getterState,
   };
 
-  return {
-    version:
-      BOOT_STATE_VERSION,
+  return sanitizePayload({
+    version: BOOT_STATE_VERSION,
 
     hasStore:
       Boolean(Store),
@@ -3302,9 +2910,7 @@ export function getStoreBootStateSnapshot(Store) {
       Boolean(state.fatal),
 
     phase:
-      normalizeBootPhase(
-        state.bootPhase
-      ) || BOOT_PHASES.IDLE,
+      normalizeBootPhase(state.bootPhase) || BOOT_PHASES.IDLE,
 
     isBootingPhase:
       isBootingPhase(state.bootPhase),
@@ -3313,71 +2919,42 @@ export function getStoreBootStateSnapshot(Store) {
       isTerminalPhase(state.bootPhase),
 
     cycleId:
-      safeInteger(
-        state.bootCycleId,
-        0
-      ),
+      safeInteger(state.bootCycleId, 0),
 
     updatedAt:
-      safeText(
-        state.bootUpdatedAt,
-        ""
-      ),
+      safeText(state.bootUpdatedAt, ""),
 
     updatedAtMs:
-      safeInteger(
-        state.bootUpdatedAtMs,
-        0
-      ),
+      safeInteger(state.bootUpdatedAtMs, 0),
 
     startedAt:
-      safeText(
-        state.bootStartedAt,
-        ""
-      ),
+      safeText(state.bootStartedAt, ""),
 
     readyAt:
-      safeText(
-        state.bootReadyAt,
-        ""
-      ),
+      safeText(state.bootReadyAt, ""),
 
     errorAt:
-      safeText(
-        state.bootErrorAt,
-        ""
-      ),
+      safeText(state.bootErrorAt, ""),
 
     fatalAt:
-      safeText(
-        state.bootFatalAt,
-        ""
-      ),
+      safeText(state.bootFatalAt, ""),
 
     reason:
-      safeText(
-        state.lastBootReason,
-        ""
-      ),
+      safeText(state.lastBootReason, ""),
 
     hasError:
       Boolean(state.lastBootError),
 
     error:
-      sanitizeErrorForSnapshot(
-        state.lastBootError
-      ),
-  };
+      sanitizeErrorForSnapshot(state.lastBootError),
+  });
 }
 
 export function getDocumentBootStateSnapshot() {
   if (!isBrowser()) {
     return {
-      version:
-        BOOT_STATE_VERSION,
-
-      hasDocument:
-        false,
+      version: BOOT_STATE_VERSION,
+      hasDocument: false,
     };
   }
 
@@ -3390,14 +2967,12 @@ export function getDocumentBootStateSnapshot() {
   const read = (el) => {
     if (!el) {
       return {
-        exists:
-          false,
+        exists: false,
       };
     }
 
     return {
-      exists:
-        true,
+      exists: true,
 
       appLoading:
         safeText(el.dataset?.appLoading, ""),
@@ -3428,19 +3003,17 @@ export function getDocumentBootStateSnapshot() {
     };
   };
 
-  return {
-    version:
-      BOOT_STATE_VERSION,
+  return sanitizePayload({
+    version: BOOT_STATE_VERSION,
 
-    hasDocument:
-      true,
+    hasDocument: true,
 
     html:
       read(html),
 
     body:
       read(body),
-  };
+  });
 }
 
 export function getBootStateSnapshot(AppCore, Store) {
@@ -3471,15 +3044,12 @@ export function getBootStateSnapshot(AppCore, Store) {
             ? BOOT_PHASES.READY
             : BOOT_PHASES.IDLE;
 
-  return {
-    version:
-      BOOT_STATE_VERSION,
+  return sanitizePayload({
+    version: BOOT_STATE_VERSION,
 
     app,
     store,
-
-    document:
-      documentState,
+    document: documentState,
 
     computed: {
       ready:
@@ -3539,7 +3109,7 @@ export function getBootStateSnapshot(AppCore, Store) {
           safeInteger(store.cycleId, 0)
         ),
     },
-  };
+  });
 }
 
 /* =========================================================
@@ -3560,8 +3130,7 @@ function defineBootApiOnCore(AppCore, api) {
 
 export function exposeBootStateDebugApi(AppCore = null, Store = null) {
   const api = {
-    version:
-      BOOT_STATE_VERSION,
+    version: BOOT_STATE_VERSION,
 
     BOOT_PHASES,
     BOOT_EVENTS,
@@ -3664,8 +3233,7 @@ export function exposeBootStateDebugApi(AppCore = null, Store = null) {
 
   try {
     if (isBrowser()) {
-      window.__ONION_BOOT_STATE__ =
-        api;
+      window.__ONION_BOOT_STATE__ = api;
     }
   } catch {}
 
@@ -3675,6 +3243,19 @@ export function exposeBootStateDebugApi(AppCore = null, Store = null) {
       api
     );
   } catch {}
+
+  if (!debugBridgeReady) {
+    debugBridgeReady = true;
+
+    emitCoreEvent(
+      AppCore,
+      BOOT_EVENTS.DEBUG_READY,
+      {
+        version: BOOT_STATE_VERSION,
+        at: nowPayload().iso,
+      }
+    );
+  }
 
   return api;
 }

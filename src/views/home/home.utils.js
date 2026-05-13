@@ -3,32 +3,35 @@
    Archivo: src/views/home/home.utils.js
 
    ONION SUPPORT · HOME UTILS
-   EXTREME MODE · FINAL PRO · 11/10
+   EXTREME MODE · FINAL PRO · MODULAR HOME · 12/10
 
-   RESPONSABILIDADES:
-   - helpers puros reutilizables del módulo Home
-   - sanitización robusta
-   - fechas seguras
-   - números / dinero / porcentajes
-   - texto / slug / normalización
-   - colecciones / dedupe / ordenación
-   - clipboard / descarga CSV
-   - toast bridge tolerante
-   - event bridge tolerante
-   - helpers DOM seguros
-   - helpers async/timing
-   - cero dependencias frágiles
-   - compatibilidad total con template / actions / api / view
+   Responsabilidades:
+   - Helpers puros reutilizables del módulo Home.
+   - Sanitización robusta.
+   - Fechas seguras.
+   - Números / dinero / porcentajes.
+   - Texto / slug / normalización.
+   - Colecciones / dedupe / ordenación.
+   - Clipboard / descarga CSV.
+   - Toast bridge tolerante.
+   - Event bridge tolerante.
+   - Helpers DOM seguros.
+   - Helpers async/timing.
+   - Cero dependencias frágiles.
+   - Compatibilidad total con template / actions / api / view.
 
-   HARDENING:
-   - tolera AppCore incompleto
-   - tolera Toast global / módulo registrado / ui.toast / AppCore.toast
-   - soporta fechas futuras en relative date
-   - evita fallos con objetos en first()
-   - parseo numérico compatible es-ES / importes
-   - CSV seguro
-   - redacción de tokens en logs/eventos
-   - CSP clean: sin HTML/eventos inline
+   Hardening:
+   - Tolera AppCore incompleto.
+   - Tolera Toast global / módulo registrado / ui.toast / AppCore.toast.
+   - Soporta fechas futuras en relative date.
+   - Evita fallos con objetos en first().
+   - Parseo numérico compatible es-ES / importes.
+   - CSV seguro.
+   - Redacción de tokens en logs/eventos.
+   - CSP clean.
+   - Sin HTML/eventos inline.
+   - Sin CSS inline.
+   - Sin Object.assign(style).
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -37,7 +40,9 @@ import { AppCore } from "../../core/index.js";
    CONSTANTS
 ========================================================= */
 
-export const HOME_UTILS_VERSION = "11.0.0-extreme";
+export const HOME_UTILS_VERSION = "12.0.0";
+
+export const HOME_UTILS_SOURCE = "views:home:utils";
 
 export const DEFAULT_LOCALE = "es-ES";
 export const DEFAULT_CURRENCY = "EUR";
@@ -47,14 +52,6 @@ export const DEFAULT_EMPTY_TEXT = "—";
 
 export const CSV_MIME_TYPE = "text/csv;charset=utf-8;";
 export const TEXT_MIME_TYPE = "text/plain;charset=utf-8;";
-
-const TOKEN_REDACTION_PATTERNS = Object.freeze([
-  /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|tempToken|temp_token|code|t)=)([^&#\s]+)/gi,
-  /(\/activate-account\/)([^/?#\s]+)/gi,
-  /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-  /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-  /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-]);
 
 const COLLECTION_ITEM_KEYS = Object.freeze([
   "items",
@@ -75,16 +72,20 @@ const DIRECT_COLLECTION_KEYS = Object.freeze([
   "incidents",
   "issues",
   "supportTickets",
+
   "facturas",
   "invoices",
   "bills",
   "billing",
+
   "users",
   "usuarios",
   "members",
+
   "clients",
   "clientes",
   "customers",
+
   "activity",
   "activities",
   "recent",
@@ -103,10 +104,7 @@ const DATE_FORMATTER_CACHE = new Map();
 ========================================================= */
 
 export function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 export function isDocumentReady() {
@@ -144,18 +142,11 @@ export function noop() {}
 ========================================================= */
 
 export function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
+  return Boolean(value !== null && typeof value === "object" && !Array.isArray(value));
 }
 
 export function isAnyObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object"
-  );
+  return Boolean(value !== null && typeof value === "object");
 }
 
 export function isFunction(value) {
@@ -163,17 +154,11 @@ export function isFunction(value) {
 }
 
 export function isNil(value) {
-  return (
-    value === null ||
-    value === undefined
-  );
+  return value === null || value === undefined;
 }
 
 export function isEmptyString(value) {
-  return (
-    typeof value === "string" &&
-    value.trim() === ""
-  );
+  return typeof value === "string" && value.trim() === "";
 }
 
 export function hasOwn(object, key) {
@@ -185,10 +170,7 @@ export function hasOwn(object, key) {
 }
 
 export function hasOwnKeys(value = {}) {
-  return Boolean(
-    isObject(value) &&
-      Object.keys(value).length > 0
-  );
+  return Boolean(isObject(value) && Object.keys(value).length > 0);
 }
 
 export function safeString(value, fallback = "") {
@@ -219,9 +201,7 @@ export function safeArray(value, fallback = []) {
     return value;
   }
 
-  return Array.isArray(fallback)
-    ? fallback
-    : [];
+  return Array.isArray(fallback) ? fallback : [];
 }
 
 export function safeObject(value, fallback = {}) {
@@ -229,9 +209,7 @@ export function safeObject(value, fallback = {}) {
     return value;
   }
 
-  return isObject(fallback)
-    ? fallback
-    : {};
+  return isObject(fallback) ? fallback : {};
 }
 
 export function safeNumber(value, fallback = 0) {
@@ -240,18 +218,13 @@ export function safeNumber(value, fallback = 0) {
   }
 
   if (typeof value === "number") {
-    return Number.isFinite(value)
-      ? value
-      : fallback;
+    return Number.isFinite(value) ? value : fallback;
   }
 
   if (typeof value === "string") {
     let normalized = value
       .trim()
-      .replace(/€/g, "")
-      .replace(/\$/g, "")
-      .replace(/£/g, "")
-      .replace(/%/g, "")
+      .replace(/[€$£¥%]/g, "")
       .replace(/[^\d.,+\-\s]/g, "")
       .replace(/\s/g, "");
 
@@ -276,24 +249,18 @@ export function safeNumber(value, fallback = 0) {
 
     const number = Number(normalized);
 
-    return Number.isFinite(number)
-      ? number
-      : fallback;
+    return Number.isFinite(number) ? number : fallback;
   }
 
   const number = Number(value);
 
-  return Number.isFinite(number)
-    ? number
-    : fallback;
+  return Number.isFinite(number) ? number : fallback;
 }
 
 export function safeInteger(value, fallback = 0) {
   const number = safeNumber(value, NaN);
 
-  return Number.isFinite(number)
-    ? Math.trunc(number)
-    : fallback;
+  return Number.isFinite(number) ? Math.trunc(number) : fallback;
 }
 
 export function safeBoolean(value, fallback = false) {
@@ -383,10 +350,7 @@ export function first(...values) {
 export function clamp(value, min = 0, max = 100) {
   const number = safeNumber(value, min);
 
-  return Math.min(
-    Math.max(number, min),
-    max
-  );
+  return Math.min(Math.max(number, min), max);
 }
 
 export function round(value = 0, digits = 0) {
@@ -423,11 +387,7 @@ export function getPath(object = {}, path = "") {
 }
 
 export function firstPath(object = {}, paths = []) {
-  return first(
-    ...safeArray(paths).map((path) =>
-      getPath(object, path)
-    )
-  );
+  return first(...safeArray(paths).map((path) => getPath(object, path)));
 }
 
 export function pick(object = {}, keys = []) {
@@ -524,17 +484,32 @@ export function redactTokenInText(value = "") {
     return "";
   }
 
-  TOKEN_REDACTION_PATTERNS.forEach((pattern) => {
-    try {
-      if (pattern.source.includes("Bearer") || pattern.source.includes("activate-account") || pattern.source.includes("reset-password")) {
-        output = output.replace(pattern, "$1***");
-      } else if (pattern.source.includes("?")) {
-        output = output.replace(pattern, "$1***");
-      } else {
-        output = output.replace(pattern, "***");
-      }
-    } catch {}
-  });
+  try {
+    output = output.replace(
+      /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|tempToken|temp_token|code|t)=)([^&#\s]+)/gi,
+      "$1***"
+    );
+
+    output = output.replace(
+      /(\/activate-account\/)([^/?#\s]+)/gi,
+      "$1***"
+    );
+
+    output = output.replace(
+      /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+      "$1***"
+    );
+
+    output = output.replace(
+      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+      "$1***"
+    );
+
+    output = output.replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
+  } catch {}
 
   return output;
 }
@@ -695,9 +670,7 @@ export function getInitials(value = "", fallback = "ON") {
     return fallback;
   }
 
-  const parts = text
-    .split(/\s+/)
-    .filter(Boolean);
+  const parts = text.split(/\s+/).filter(Boolean);
 
   if (parts.length === 1) {
     return parts[0].slice(0, 2).toUpperCase() || fallback;
@@ -765,6 +738,7 @@ export function getMoneyFormatter(
 ) {
   const code = safeText(currency, DEFAULT_CURRENCY).toUpperCase();
   const cleanLocale = safeText(locale, DEFAULT_LOCALE);
+
   const opts = {
     style: "currency",
     currency: code,
@@ -815,18 +789,19 @@ export function percent(value, digits = 0) {
 
 export function formatPercent(value, locale = DEFAULT_LOCALE, options = {}) {
   const number = safeNumber(value, 0);
+  const opts = safeObject(options);
 
   try {
     return new Intl.NumberFormat(
       safeText(locale, DEFAULT_LOCALE),
       {
         style: "percent",
-        maximumFractionDigits: clamp(options.maximumFractionDigits ?? 0, 0, 6),
-        ...safeObject(options),
+        maximumFractionDigits: clamp(opts.maximumFractionDigits ?? 0, 0, 6),
+        ...opts,
       }
     ).format(number);
   } catch {
-    return percent(number * 100, options.maximumFractionDigits ?? 0);
+    return percent(number * 100, opts.maximumFractionDigits ?? 0);
   }
 }
 
@@ -909,9 +884,7 @@ export function toDate(value) {
 
   const date = new Date(timestamp);
 
-  return Number.isNaN(date.getTime())
-    ? null
-    : date;
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 export function toMs(value) {
@@ -920,6 +893,7 @@ export function toMs(value) {
 
 export function getDateFormatter(locale = DEFAULT_LOCALE, withTime = true, options = {}) {
   const cleanLocale = safeText(locale, DEFAULT_LOCALE);
+
   const opts = withTime
     ? {
         day: "2-digit",
@@ -1008,9 +982,7 @@ export function formatRelativeDate(
   const future = diff > 0;
 
   if (abs < minute) {
-    return future
-      ? "En un momento"
-      : "Hace un momento";
+    return future ? "En un momento" : "Hace un momento";
   }
 
   if (abs < hour) {
@@ -1083,17 +1055,11 @@ export function unwrapCollectionPayload(value, depth = 0) {
     return {};
   }
 
-  if (
-    COLLECTION_ITEM_KEYS.some((key) =>
-      Array.isArray(object[key])
-    )
-  ) {
+  if (COLLECTION_ITEM_KEYS.some((key) => Array.isArray(object[key]))) {
     return object;
   }
 
-  const directArray = first(
-    ...DIRECT_COLLECTION_KEYS.map((key) => object[key])
-  );
+  const directArray = first(...DIRECT_COLLECTION_KEYS.map((key) => object[key]));
 
   if (Array.isArray(directArray)) {
     return {
@@ -1130,27 +1096,19 @@ export function normalizeCollection(value, fallback = []) {
     return value;
   }
 
-  const object = safeObject(
-    unwrapCollectionPayload(value),
-    null
-  );
+  const object = safeObject(unwrapCollectionPayload(value), null);
 
   if (!object) {
     return safeArray(fallback);
   }
 
   return safeArray(
-    first(
-      ...COLLECTION_ITEM_KEYS.map((key) => object[key]),
-      fallback
-    )
+    first(...COLLECTION_ITEM_KEYS.map((key) => object[key]), fallback)
   );
 }
 
 export function getRemoteCountFromCollection(value, fallback = 0) {
-  const object = safeObject(
-    unwrapCollectionPayload(value)
-  );
+  const object = safeObject(unwrapCollectionPayload(value));
 
   return Math.max(
     safeNumber(fallback, 0),
@@ -1251,30 +1209,28 @@ export function uniqueBy(items = [], key = "id", options = {}) {
   const output = [];
 
   rows.forEach((item, index) => {
-    const row = item;
-
     const rawId = isFunction(key)
-      ? key(row, index)
-      : getPath(row, key) ?? row?.[key];
+      ? key(item, index)
+      : getPath(item, key) ?? item?.[key];
 
     const id = safeText(rawId, "");
 
     if (!id) {
       if (keepWithoutKey) {
-        output.push(row);
+        output.push(item);
       }
 
       return;
     }
 
-    const normalized = normalizeText(id);
+    const normalized = normalizeKey(id);
 
     if (seen.has(normalized)) {
       return;
     }
 
     seen.add(normalized);
-    output.push(row);
+    output.push(item);
   });
 
   return output;
@@ -1317,10 +1273,7 @@ export function uniqueById(items = []) {
 export function paginate(items = [], page = 1, pageSize = 10, totalOverride = null) {
   const list = safeArray(items);
 
-  const size = Math.max(
-    1,
-    safeInteger(pageSize, 10)
-  );
+  const size = Math.max(1, safeInteger(pageSize, 10));
 
   const visibleTotal = list.length;
 
@@ -1396,18 +1349,11 @@ export function isExternalRoute(route = "") {
 export function normalizeInternalRoute(route = "") {
   const value = safeText(route, "");
 
-  if (
-    isUnsafeRoute(value) ||
-    isExternalRoute(value)
-  ) {
+  if (isUnsafeRoute(value) || isExternalRoute(value)) {
     return "";
   }
 
-  if (value.startsWith("/")) {
-    return value;
-  }
-
-  if (value.startsWith("?") || value.startsWith("#")) {
+  if (value.startsWith("/") || value.startsWith("?") || value.startsWith("#")) {
     return value;
   }
 
@@ -1419,15 +1365,11 @@ export function normalizeInternalRoute(route = "") {
 ========================================================= */
 
 export function getDocument() {
-  return isBrowser()
-    ? document
-    : null;
+  return isBrowser() ? document : null;
 }
 
 export function getWindow() {
-  return isBrowser()
-    ? window
-    : null;
+  return isBrowser() ? window : null;
 }
 
 export function qs(selector = "", root = null) {
@@ -1486,10 +1428,7 @@ export function byId(id = "") {
 
 export function isElement(value) {
   try {
-    return (
-      typeof Element !== "undefined" &&
-      value instanceof Element
-    );
+    return typeof Element !== "undefined" && value instanceof Element;
   } catch {
     return Boolean(
       value &&
@@ -1525,22 +1464,22 @@ export async function copyTextToClipboard(value = "") {
     }
   } catch {}
 
+  let textarea = null;
+
   try {
-    const textarea = document.createElement("textarea");
+    textarea = document.createElement("textarea");
 
     textarea.value = text;
     textarea.setAttribute("readonly", "true");
     textarea.setAttribute("aria-hidden", "true");
-    textarea.style.position = "fixed";
-    textarea.style.left = "-9999px";
-    textarea.style.top = "0";
-    textarea.style.opacity = "0";
-    textarea.style.pointerEvents = "none";
+    textarea.setAttribute("tabindex", "-1");
+    textarea.className = "sr-only home-clipboard-fallback";
 
     document.body.appendChild(textarea);
 
     textarea.focus();
     textarea.select();
+    textarea.setSelectionRange?.(0, textarea.value.length);
 
     const ok = document.execCommand("copy");
 
@@ -1548,6 +1487,10 @@ export async function copyTextToClipboard(value = "") {
 
     return Boolean(ok);
   } catch {
+    try {
+      textarea?.remove?.();
+    } catch {}
+
     return false;
   }
 }
@@ -1591,6 +1534,9 @@ export function downloadTextFile({
     anchor.href = url;
     anchor.download = normalizeFilename(filename, "download.txt");
     anchor.rel = "noopener";
+    anchor.className = "sr-only home-download-link";
+    anchor.setAttribute("aria-hidden", "true");
+    anchor.setAttribute("tabindex", "-1");
 
     document.body.appendChild(anchor);
     anchor.click();
@@ -1619,9 +1565,7 @@ export function downloadTextFile({
 ========================================================= */
 
 export function escapeCsvCell(value = "") {
-  const text = isNil(value)
-    ? ""
-    : String(value);
+  const text = isNil(value) ? "" : String(value);
 
   return `"${text.replace(/"/g, '""')}"`;
 }
@@ -1650,16 +1594,12 @@ export function buildCsvFromObjects(items = [], columns = []) {
 
     return buildCsv([
       keys,
-      ...rows.map((item) =>
-        keys.map((key) => item?.[key] ?? "")
-      ),
+      ...rows.map((item) => keys.map((key) => item?.[key] ?? "")),
     ]);
   }
 
   return buildCsv([
-    cols.map((column) =>
-      safeText(column.label || column.key || column, "")
-    ),
+    cols.map((column) => safeText(column.label || column.key || column, "")),
     ...rows.map((item) =>
       cols.map((column) => {
         if (typeof column === "string") {
@@ -1684,6 +1624,7 @@ export function downloadCsv({
   content = "",
 } = {}) {
   const finalFilename = normalizeFilename(filename, "export.csv");
+
   const name = finalFilename.toLowerCase().endsWith(".csv")
     ? finalFilename
     : `${finalFilename}.csv`;
@@ -1699,7 +1640,7 @@ export function downloadCsv({
 
   return downloadTextFile({
     filename: name,
-    content: csv,
+    content: `\uFEFF${csv}`,
     mimeType: CSV_MIME_TYPE,
   });
 }
@@ -1715,7 +1656,12 @@ export function safeEmit(eventName = "", payload = {}, options = {}) {
     return false;
   }
 
-  const cleanPayload = sanitizePayload(payload);
+  const cleanPayload = sanitizePayload({
+    source: HOME_UTILS_SOURCE,
+    version: HOME_UTILS_VERSION,
+    ...safeObject(payload),
+  });
+
   const opts = safeObject(options);
 
   let emitted = false;
@@ -1727,10 +1673,7 @@ export function safeEmit(eventName = "", payload = {}, options = {}) {
     }
   } catch {}
 
-  if (
-    opts.window === true ||
-    (!emitted && isBrowser())
-  ) {
+  if (opts.window === true || (!emitted && isBrowser())) {
     try {
       window.dispatchEvent(
         new CustomEvent(name, {
@@ -2039,10 +1982,7 @@ export function sleep(ms = 0) {
 export function nextFrame() {
   return new Promise((resolve) => {
     try {
-      if (
-        isBrowser() &&
-        isFunction(window.requestAnimationFrame)
-      ) {
+      if (isBrowser() && isFunction(window.requestAnimationFrame)) {
         window.requestAnimationFrame(() => resolve());
         return;
       }
@@ -2177,11 +2117,7 @@ export function throttle(fn, wait = 120) {
   return throttled;
 }
 
-export async function withTimeout(
-  promise,
-  ms = 8000,
-  label = "TIMEOUT"
-) {
+export async function withTimeout(promise, ms = 8000, label = "TIMEOUT") {
   const timeoutMs = Math.max(0, safeNumber(ms, 8000));
 
   let timer = null;
@@ -2211,11 +2147,34 @@ export async function withTimeout(
 }
 
 /* =========================================================
+   DEBUG
+========================================================= */
+
+export function getHomeUtilsSnapshot() {
+  return {
+    version: HOME_UTILS_VERSION,
+    source: HOME_UTILS_SOURCE,
+    browser: isBrowser(),
+    documentReady: isDocumentReady(),
+    hasAppCore: Boolean(AppCore),
+    hasEventBus: isFunction(AppCore?.events?.emit),
+    hasToastCandidates: getToastCandidates().length,
+    formatterCache: {
+      number: NUMBER_FORMATTER_CACHE.size,
+      money: MONEY_FORMATTER_CACHE.size,
+      date: DATE_FORMATTER_CACHE.size,
+    },
+    at: nowIso(),
+  };
+}
+
+/* =========================================================
    DEFAULT EXPORT
 ========================================================= */
 
 export default {
   HOME_UTILS_VERSION,
+  HOME_UTILS_SOURCE,
 
   DEFAULT_LOCALE,
   DEFAULT_CURRENCY,
@@ -2338,4 +2297,7 @@ export default {
   debounce,
   throttle,
   withTimeout,
+
+  getHomeUtilsSnapshot,
+  getDebugSnapshot: getHomeUtilsSnapshot,
 };

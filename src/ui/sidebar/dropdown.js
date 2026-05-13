@@ -2,8 +2,8 @@
    Onion SPA - Sidebar Dropdown
    Archivo: src/ui/sidebar/dropdown.js
 
-   FINAL EXTREME SYSTEM · USER DROPDOWN · A11Y SAFE · 11/10
-   DATA-STATE CONTRACT · ZERO DOUBLE DISPATCH · RERENDER SAFE
+   ONION SUPPORT · SIDEBAR DROPDOWN · 15/10
+   USER MENU · A11Y SAFE · RERENDER SAFE · DATA CONTRACT
 
    Responsabilidades:
    - Gestionar apertura / cierre del dropdown de usuario.
@@ -19,7 +19,14 @@
    - role="menu" / role="menuitem" coherente.
    - data-state coherente: open / closed.
    - Compat CSS legacy: open / active / is-open / is-visible / show / visible / expanded.
-   - safeEmit usa AppCore.events si existe; window solo fallback.
+   - safeEmit usa AppCore.events si existe; window sólo fallback.
+
+   FRONTERAS:
+   - dropdown.js es dueño del estado visual del menú de usuario.
+   - state.js es dueño de open/collapsed/indicator del sidebar.
+   - actions.js decide intención de abrir sidebar antes de abrir dropdown.
+   - events.js decide cuándo llamar open/close/toggle.
+   - dom.js resuelve nodos y shell real.
 ========================================================= */
 
 import {
@@ -28,68 +35,114 @@ import {
   focusFirstInteractive,
   sanitizeFooterTooltipState,
   isShellHidden,
+  isRealShellHidden as isDomRealShellHidden,
 } from "./dom.js";
 
 import {
   USER_DROPDOWN_ID,
+  USER_TOGGLE_ID,
+  USER_DROPDOWN_LEGACY_ID,
+  USER_TOGGLE_LEGACY_ID,
   SIDEBAR_EVENTS,
 } from "./constants.js";
+
+/* =========================================================
+   VERSION
+========================================================= */
+
+export const SIDEBAR_DROPDOWN_VERSION =
+  "sidebar-dropdown-v15-a11y-rerender-safe";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-const SOURCE = "SidebarDropdown";
+const SOURCE =
+  "SidebarDropdown";
+
+const OWNER =
+  "dropdown.js";
 
 const DROPDOWN_ID_FALLBACK =
   USER_DROPDOWN_ID ||
+  USER_DROPDOWN_LEGACY_ID ||
   "userDropdown";
 
 const USER_TOGGLE_ID_FALLBACK =
+  USER_TOGGLE_ID ||
+  USER_TOGGLE_LEGACY_ID ||
   "sidebarUserToggle";
 
-const OPEN_CLASSNAMES = Object.freeze([
-  "open",
-  "active",
-  "is-open",
-  "is-visible",
-  "show",
-  "visible",
-  "expanded",
-]);
+const DATA_TRUE =
+  "true";
 
-const TOGGLE_OPEN_CLASSNAMES = Object.freeze([
-  "active",
-  "is-active",
-  "is-open",
-  "is-expanded",
-]);
+const DATA_FALSE =
+  "false";
 
-const CONTAINER_OPEN_CLASSNAMES = Object.freeze([
-  "user-dropdown-open",
-  "has-user-dropdown-open",
-  "is-user-menu-open",
-]);
+const STATE_OPEN =
+  "open";
 
-const INLINE_LOCK_PROPERTIES = Object.freeze([
-  "display",
-  "visibility",
-  "opacity",
-  "pointer-events",
-]);
+const STATE_CLOSED =
+  "closed";
 
-const INTERACTIVE_ITEM_SELECTOR = [
-  "a[href]",
-  "button",
-  "input",
-  "select",
-  "textarea",
-  "[role='menuitem']",
-  "[role='button']",
-  "[tabindex]:not([tabindex='-1'])",
-  "[data-dropdown-item]",
-  ".dropdown-item",
-].join(",");
+const OPEN_CLASSNAMES =
+  Object.freeze([
+    "open",
+    "active",
+    "is-open",
+    "is-visible",
+    "show",
+    "visible",
+    "expanded",
+  ]);
+
+const TOGGLE_OPEN_CLASSNAMES =
+  Object.freeze([
+    "active",
+    "is-active",
+    "is-open",
+    "is-expanded",
+  ]);
+
+const CONTAINER_OPEN_CLASSNAMES =
+  Object.freeze([
+    "user-dropdown-open",
+    "has-user-dropdown-open",
+    "is-user-menu-open",
+  ]);
+
+const INLINE_LOCK_PROPERTIES =
+  Object.freeze([
+    "display",
+    "visibility",
+    "opacity",
+    "pointer-events",
+  ]);
+
+const INTERACTIVE_ITEM_SELECTOR =
+  [
+    "a[href]",
+    "button",
+    "input",
+    "select",
+    "textarea",
+    "[role='menuitem']",
+    "[role='button']",
+    "[tabindex]:not([tabindex='-1'])",
+    "[data-dropdown-item]",
+    ".dropdown-item",
+  ].join(",");
+
+const TOOLTIP_SELECTOR =
+  [
+    "[title]",
+    "[data-tooltip]",
+    "[data-i18n-data-tooltip]",
+    "[aria-describedby]",
+  ].join(",");
+
+const FOOTER_SELECTOR =
+  ".sidebar-footer,[data-sidebar-footer='true'],[data-sidebar-footer]";
 
 const EVENT_DROPDOWN_CHANGE =
   "sidebar:dropdown:change";
@@ -117,28 +170,43 @@ const EVENT_DROPDOWN_TOGGLE =
 ========================================================= */
 
 function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
 }
 
 function hasDocument() {
   return typeof document !== "undefined";
 }
 
+function hasWindow() {
+  return typeof window !== "undefined";
+}
+
 function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return fallback;
   }
 
-  const text = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const text =
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return text || fallback;
 }
 
 function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
+  return (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  )
     ? value
     : {};
 }
@@ -153,65 +221,158 @@ function safeBoolean(value, fallback = false) {
   }
 
   if (typeof value === "string") {
-    const key = value.trim().toLowerCase();
+    const key =
+      value
+        .trim()
+        .toLowerCase();
 
-    if (["true", "1", "yes", "si", "sí", "ok", "on"].includes(key)) {
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "si",
+        "sí",
+        "ok",
+        "on",
+        "open",
+        "opened",
+      ].includes(key)
+    ) {
       return true;
     }
 
-    if (["false", "0", "no", "off"].includes(key)) {
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "off",
+        "closed",
+        "close",
+      ].includes(key)
+    ) {
       return false;
     }
   }
 
   if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
+    if (value === 1) {
+      return true;
+    }
+
+    if (value === 0) {
+      return false;
+    }
   }
 
   return fallback;
 }
 
 function normalizeOpen(value) {
-  return safeBoolean(value, Boolean(value));
+  return safeBoolean(
+    value,
+    Boolean(value)
+  );
+}
+
+function nowTs() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+function safeIsoDate(ms = nowTs()) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
+  }
 }
 
 function safeWarn(AppCore, ...args) {
   try {
-    AppCore?.utils?.warn?.("[SidebarDropdown]", ...args);
+    AppCore?.utils?.warn?.(
+      "[SidebarDropdown]",
+      ...args
+    );
   } catch {}
 
   try {
-    console.warn("[SidebarDropdown]", ...args);
+    console.warn(
+      "[SidebarDropdown]",
+      ...args
+    );
   } catch {}
 }
 
 /*
   No emitimos por AppCore.events Y window a la vez.
-  Si el bus existe, usamos bus. Window solo fallback.
+  Si el bus existe, usamos bus. Window sólo fallback.
 */
 function safeEmit(AppCore, eventName = "", payload = {}) {
-  const name = safeText(eventName, "");
+  const name =
+    safeText(eventName, "");
 
   if (!name) {
     return false;
   }
 
+  const data =
+    safeObject(payload);
+
+  const finalPayload =
+    {
+      ...data,
+
+      source:
+        safeText(data.source, SOURCE),
+
+      owner:
+        OWNER,
+
+      version:
+        SIDEBAR_DROPDOWN_VERSION,
+
+      at:
+        safeText(data.at, safeIsoDate()),
+
+      ts:
+        data.ts || nowTs(),
+    };
+
   try {
     if (isFunction(AppCore?.events?.emit)) {
-      AppCore.events.emit(name, payload);
+      AppCore.events.emit(
+        name,
+        finalPayload
+      );
+
       return true;
     }
   } catch (error) {
-    safeWarn(AppCore, `AppCore.events.emit("${name}") falló.`, error);
+    safeWarn(
+      AppCore,
+      `AppCore.events.emit("${name}") falló.`,
+      error
+    );
   }
 
   try {
-    if (isBrowser() && typeof CustomEvent !== "undefined") {
+    if (
+      isBrowser() &&
+      typeof CustomEvent !== "undefined"
+    ) {
       window.dispatchEvent(
-        new CustomEvent(name, {
-          detail: payload,
-        })
+        new CustomEvent(
+          name,
+          {
+            detail:
+              finalPayload,
+          }
+        )
       );
 
       return true;
@@ -265,7 +426,11 @@ function setAttr(element, name = "", value = "") {
   }
 
   try {
-    element.setAttribute(name, String(value));
+    element.setAttribute(
+      name,
+      String(value)
+    );
+
     return true;
   } catch {
     return false;
@@ -291,12 +456,18 @@ function setDataset(element, key = "", value = "") {
   }
 
   try {
-    if (value === null || value === undefined || value === "") {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ""
+    ) {
       delete element.dataset[key];
       return true;
     }
 
-    element.dataset[key] = String(value);
+    element.dataset[key] =
+      String(value);
+
     return true;
   } catch {
     return false;
@@ -309,7 +480,11 @@ function toggleAttr(element, name = "", enabled = false) {
   }
 
   try {
-    element.toggleAttribute(name, Boolean(enabled));
+    element.toggleAttribute(
+      name,
+      Boolean(enabled)
+    );
+
     return true;
   } catch {
     return enabled
@@ -323,13 +498,19 @@ function setHidden(element, hidden = false) {
     return false;
   }
 
-  const shouldHide = Boolean(hidden);
+  const shouldHide =
+    Boolean(hidden);
 
   try {
-    element.hidden = shouldHide;
+    element.hidden =
+      shouldHide;
   } catch {}
 
-  toggleAttr(element, "hidden", shouldHide);
+  toggleAttr(
+    element,
+    "hidden",
+    shouldHide
+  );
 
   return true;
 }
@@ -340,7 +521,11 @@ function toggleClass(element, className = "", enabled = false) {
   }
 
   try {
-    element.classList.toggle(className, Boolean(enabled));
+    element.classList.toggle(
+      className,
+      Boolean(enabled)
+    );
+
     return true;
   } catch {
     return false;
@@ -353,7 +538,11 @@ function toggleClasses(element, classNames = [], enabled = false) {
   }
 
   for (const className of classNames) {
-    toggleClass(element, className, enabled);
+    toggleClass(
+      element,
+      className,
+      enabled
+    );
   }
 
   return true;
@@ -378,7 +567,10 @@ function cleanupLegacyInlineLocks(element = null) {
   }
 
   for (const property of INLINE_LOCK_PROPERTIES) {
-    removeInlineProperty(element, property);
+    removeInlineProperty(
+      element,
+      property
+    );
   }
 
   return true;
@@ -406,9 +598,7 @@ function removeTooltipAttributesDeep(element = null) {
 
   try {
     element
-      .querySelectorAll(
-        "[title], [data-tooltip], [data-i18n-data-tooltip], [aria-describedby]"
-      )
+      .querySelectorAll(TOOLTIP_SELECTOR)
       .forEach((node) => {
         removeTooltipAttributes(node);
       });
@@ -422,31 +612,43 @@ function ensureElementId(element = null, fallback = "") {
     return "";
   }
 
-  const existingId = safeText(element.id, "");
+  const existingId =
+    safeText(element.id, "");
 
   if (existingId) {
     return existingId;
   }
 
-  const nextId = safeText(fallback, "");
+  const nextId =
+    safeText(fallback, "");
 
   if (!nextId) {
     return "";
   }
 
   try {
-    element.id = nextId;
+    element.id =
+      nextId;
   } catch {}
 
-  return safeText(element.id, nextId);
+  return safeText(
+    element.id,
+    nextId
+  );
 }
 
 function ensureDropdownId(userDropdown = null) {
-  return ensureElementId(userDropdown, DROPDOWN_ID_FALLBACK);
+  return ensureElementId(
+    userDropdown,
+    DROPDOWN_ID_FALLBACK
+  );
 }
 
 function ensureToggleId(userToggle = null) {
-  return ensureElementId(userToggle, USER_TOGGLE_ID_FALLBACK);
+  return ensureElementId(
+    userToggle,
+    USER_TOGGLE_ID_FALLBACK
+  );
 }
 
 function getHtmlElement() {
@@ -512,9 +714,9 @@ function hasClass(element = null, className = "") {
 function getSidebarFooter(userToggle = null, userDropdown = null, sidebar = null) {
   try {
     return (
-      userToggle?.closest?.(".sidebar-footer,[data-sidebar-footer]") ||
-      userDropdown?.closest?.(".sidebar-footer,[data-sidebar-footer]") ||
-      sidebar?.querySelector?.(".sidebar-footer,[data-sidebar-footer]") ||
+      userToggle?.closest?.(FOOTER_SELECTOR) ||
+      userDropdown?.closest?.(FOOTER_SELECTOR) ||
+      sidebar?.querySelector?.(FOOTER_SELECTOR) ||
       null
     );
   } catch {
@@ -523,19 +725,32 @@ function getSidebarFooter(userToggle = null, userDropdown = null, sidebar = null
 }
 
 function getComputedSnapshot(element = null) {
-  if (!element || !isBrowser()) {
+  if (
+    !element ||
+    !isBrowser()
+  ) {
     return {};
   }
 
   try {
-    const style = window.getComputedStyle(element);
+    const style =
+      window.getComputedStyle(element);
 
     return {
-      display: style.display,
-      visibility: style.visibility,
-      opacity: style.opacity,
-      pointerEvents: style.pointerEvents,
-      zIndex: style.zIndex,
+      display:
+        style.display,
+
+      visibility:
+        style.visibility,
+
+      opacity:
+        style.opacity,
+
+      pointerEvents:
+        style.pointerEvents,
+
+      zIndex:
+        style.zIndex,
     };
   } catch {
     return {};
@@ -551,14 +766,22 @@ function isRealShellHidden(AppCore) {
     return false;
   }
 
+  try {
+    return Boolean(
+      isDomRealShellHidden(AppCore)
+    );
+  } catch {}
+
   const {
     body,
     appShell,
     shell,
     layout,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
-  const html = getHtmlElement();
+  const html =
+    getHtmlElement();
 
   /*
     No usamos sidebar.hidden como fuente fuerte.
@@ -600,10 +823,11 @@ function isDropdownShellBlocked(AppCore) {
 
   /*
     Fallback defensivo:
-    Si dom.js dice hidden solo por sidebar.hidden stale, NO bloqueamos.
+    Si dom.js dice hidden sólo por sidebar.hidden stale, NO bloqueamos.
   */
   try {
-    const domHidden = Boolean(isShellHidden(AppCore));
+    const domHidden =
+      Boolean(isShellHidden(AppCore));
 
     if (!domHidden) {
       return false;
@@ -615,9 +839,11 @@ function isDropdownShellBlocked(AppCore) {
       appShell,
       shell,
       layout,
-    } = getElements(AppCore);
+    } =
+      getElements(AppCore);
 
-    const html = getHtmlElement();
+    const html =
+      getHtmlElement();
 
     const realHiddenSignals =
       body?.classList?.contains?.("route-shell-hidden") ||
@@ -659,20 +885,34 @@ function repairStaleSidebarHidden(AppCore) {
 
   const {
     sidebar,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
-  if (!sidebar || sidebar.hidden !== true) {
+  if (
+    !sidebar ||
+    sidebar.hidden !== true
+  ) {
     return false;
   }
 
   /*
     Reparación mínima:
     No tocamos open/collapsed. Eso es propiedad de state.js.
-    Solo desbloqueamos un hidden stale que impediría abrir el menú.
+    Sólo desbloqueamos un hidden stale que impediría abrir el menú.
   */
   try {
-    sidebar.hidden = false;
-    sidebar.setAttribute("aria-hidden", "false");
+    sidebar.hidden =
+      false;
+
+    sidebar.removeAttribute(
+      "hidden"
+    );
+
+    sidebar.setAttribute(
+      "aria-hidden",
+      "false"
+    );
+
     return true;
   } catch {
     return false;
@@ -692,28 +932,36 @@ function hasExplicitLocalDropdownState(localState) {
 }
 
 function ensureLocalState(localState) {
-  if (!localState || typeof localState !== "object") {
+  if (
+    !localState ||
+    typeof localState !== "object"
+  ) {
     return {
-      dropdownOpen: false,
+      dropdownOpen:
+        false,
     };
   }
 
   if (typeof localState.dropdownOpen !== "boolean") {
-    localState.dropdownOpen = false;
+    localState.dropdownOpen =
+      false;
   }
 
   return localState;
 }
 
 function getDropdownOpen(localState) {
-  return Boolean(ensureLocalState(localState).dropdownOpen);
+  return Boolean(
+    ensureLocalState(localState).dropdownOpen
+  );
 }
 
 function resolveDropdownOpenFromDom(AppCore) {
   const {
     userToggle,
     userDropdown,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
   if (!userDropdown) {
     return false;
@@ -722,17 +970,19 @@ function resolveDropdownOpenFromDom(AppCore) {
   if (
     userDropdown.hidden === true ||
     userDropdown.getAttribute?.("aria-hidden") === "true" ||
-    userDropdown.dataset?.state === "closed" ||
-    userDropdown.dataset?.open === "false"
+    userDropdown.dataset?.state === STATE_CLOSED ||
+    userDropdown.dataset?.open === DATA_FALSE
   ) {
     return false;
   }
 
   if (
-    userDropdown.dataset?.state === "open" ||
-    userDropdown.dataset?.open === "true" ||
+    userDropdown.dataset?.state === STATE_OPEN ||
+    userDropdown.dataset?.open === DATA_TRUE ||
     userToggle?.getAttribute?.("aria-expanded") === "true" ||
-    OPEN_CLASSNAMES.some((className) => hasClass(userDropdown, className))
+    OPEN_CLASSNAMES.some((className) =>
+      hasClass(userDropdown, className)
+    )
   ) {
     return true;
   }
@@ -749,18 +999,29 @@ function closeFocusedNodeBeforeHide(userDropdown = null, userToggle = null, opti
     return false;
   }
 
-  const opts = safeObject(options);
-  const active = getActiveElement();
+  const opts =
+    safeObject(options);
+
+  const active =
+    getActiveElement();
 
   const hadFocusInside =
-    elementContains(userDropdown, active);
+    elementContains(
+      userDropdown,
+      active
+    );
 
-  let blurred = false;
+  let blurred =
+    false;
 
   try {
-    blurred = Boolean(blurIfInside(userDropdown));
+    blurred =
+      Boolean(
+        blurIfInside(userDropdown)
+      );
   } catch {
-    blurred = false;
+    blurred =
+      false;
   }
 
   if (
@@ -771,9 +1032,12 @@ function closeFocusedNodeBeforeHide(userDropdown = null, userToggle = null, opti
     !userToggle.hidden
   ) {
     try {
-      userToggle.focus?.({
-        preventScroll: true,
-      });
+      userToggle.focus?.(
+        {
+          preventScroll:
+            true,
+        }
+      );
     } catch {}
   }
 
@@ -785,10 +1049,14 @@ function removeInert(userDropdown = null) {
     return false;
   }
 
-  removeAttr(userDropdown, "inert");
+  removeAttr(
+    userDropdown,
+    "inert"
+  );
 
   try {
-    userDropdown.inert = false;
+    userDropdown.inert =
+      false;
   } catch {}
 
   return true;
@@ -807,18 +1075,29 @@ function syncDropdownItemsA11y(userDropdown = null) {
     userDropdown
       .querySelectorAll(INTERACTIVE_ITEM_SELECTOR)
       .forEach((item) => {
-        if (!item) return;
+        if (!item) {
+          return;
+        }
 
         const isDivider =
           hasClass(item, "dropdown-divider") ||
           item.getAttribute?.("role") === "separator";
 
         if (isDivider) {
-          setAttr(item, "role", "separator");
+          setAttr(
+            item,
+            "role",
+            "separator"
+          );
+
           return;
         }
 
-        const tag = safeText(item.tagName, "").toLowerCase();
+        const tag =
+          safeText(
+            item.tagName,
+            ""
+          ).toLowerCase();
 
         if (
           tag === "button" ||
@@ -827,12 +1106,23 @@ function syncDropdownItemsA11y(userDropdown = null) {
           item.dataset?.dropdownItem !== undefined
         ) {
           if (!item.getAttribute?.("role")) {
-            setAttr(item, "role", "menuitem");
+            setAttr(
+              item,
+              "role",
+              "menuitem"
+            );
           }
         }
 
-        if (tag === "button" && !item.getAttribute?.("type")) {
-          setAttr(item, "type", "button");
+        if (
+          tag === "button" &&
+          !item.getAttribute?.("type")
+        ) {
+          setAttr(
+            item,
+            "type",
+            "button"
+          );
         }
       });
 
@@ -847,55 +1137,138 @@ function syncDropdownItemsA11y(userDropdown = null) {
 ========================================================= */
 
 export function syncDropdownA11y(AppCore, open = false) {
-  const isOpen = normalizeOpen(open);
+  const isOpen =
+    normalizeOpen(open);
 
   const {
     sidebar,
     userToggle,
     userDropdown,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
-  const dropdownId = ensureDropdownId(userDropdown);
-  const toggleId = ensureToggleId(userToggle);
+  const dropdownId =
+    ensureDropdownId(userDropdown);
+
+  const toggleId =
+    ensureToggleId(userToggle);
 
   if (userToggle) {
-    setAttr(userToggle, "aria-haspopup", "menu");
-    setAttr(userToggle, "aria-expanded", String(isOpen));
-    setAttr(userToggle, "type", "button");
+    setAttr(
+      userToggle,
+      "aria-haspopup",
+      "menu"
+    );
+
+    setAttr(
+      userToggle,
+      "aria-expanded",
+      String(isOpen)
+    );
+
+    setAttr(
+      userToggle,
+      "type",
+      "button"
+    );
 
     if (dropdownId) {
-      setAttr(userToggle, "aria-controls", dropdownId);
+      setAttr(
+        userToggle,
+        "aria-controls",
+        dropdownId
+      );
     }
 
-    setAttr(userToggle, "data-state", isOpen ? "open" : "closed");
-    setAttr(userToggle, "data-dropdown-open", String(isOpen));
+    setAttr(
+      userToggle,
+      "data-state",
+      isOpen ? STATE_OPEN : STATE_CLOSED
+    );
 
-    setDataset(userToggle, "state", isOpen ? "open" : "closed");
-    setDataset(userToggle, "dropdownOpen", String(isOpen));
+    setAttr(
+      userToggle,
+      "data-dropdown-open",
+      String(isOpen)
+    );
+
+    setDataset(
+      userToggle,
+      "state",
+      isOpen ? STATE_OPEN : STATE_CLOSED
+    );
+
+    setDataset(
+      userToggle,
+      "dropdownOpen",
+      String(isOpen)
+    );
 
     removeTooltipAttributes(userToggle);
   }
 
   if (userDropdown) {
-    setAttr(userDropdown, "role", "menu");
-    setAttr(userDropdown, "aria-hidden", String(!isOpen));
-    setAttr(userDropdown, "data-state", isOpen ? "open" : "closed");
-    setAttr(userDropdown, "data-open", String(isOpen));
+    setAttr(
+      userDropdown,
+      "role",
+      "menu"
+    );
+
+    setAttr(
+      userDropdown,
+      "aria-hidden",
+      String(!isOpen)
+    );
+
+    setAttr(
+      userDropdown,
+      "data-state",
+      isOpen ? STATE_OPEN : STATE_CLOSED
+    );
+
+    setAttr(
+      userDropdown,
+      "data-open",
+      String(isOpen)
+    );
 
     if (toggleId) {
-      setAttr(userDropdown, "aria-labelledby", toggleId);
+      setAttr(
+        userDropdown,
+        "aria-labelledby",
+        toggleId
+      );
     }
 
-    setDataset(userDropdown, "state", isOpen ? "open" : "closed");
-    setDataset(userDropdown, "open", String(isOpen));
+    setDataset(
+      userDropdown,
+      "state",
+      isOpen ? STATE_OPEN : STATE_CLOSED
+    );
+
+    setDataset(
+      userDropdown,
+      "open",
+      String(isOpen)
+    );
 
     syncDropdownItemsA11y(userDropdown);
+
     removeTooltipAttributes(userDropdown);
   }
 
   if (sidebar) {
-    setAttr(sidebar, "data-user-dropdown-open", String(isOpen));
-    setDataset(sidebar, "userDropdownOpen", String(isOpen));
+    setAttr(
+      sidebar,
+      "data-user-dropdown-open",
+      String(isOpen)
+    );
+
+    setDataset(
+      sidebar,
+      "userDropdownOpen",
+      String(isOpen)
+    );
   }
 
   try {
@@ -903,9 +1276,14 @@ export function syncDropdownA11y(AppCore, open = false) {
   } catch {}
 
   return {
-    open: isOpen,
-    hasToggle: Boolean(userToggle),
-    hasDropdown: Boolean(userDropdown),
+    open:
+      isOpen,
+
+    hasToggle:
+      Boolean(userToggle),
+
+    hasDropdown:
+      Boolean(userDropdown),
   };
 }
 
@@ -914,37 +1292,83 @@ export function syncDropdownA11y(AppCore, open = false) {
 ========================================================= */
 
 function syncDropdownContainers(AppCore, open = false) {
-  const isOpen = normalizeOpen(open);
+  const isOpen =
+    normalizeOpen(open);
 
   const {
     sidebar,
     userToggle,
     userDropdown,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
-  const footer = getSidebarFooter(userToggle, userDropdown, sidebar);
+  const footer =
+    getSidebarFooter(
+      userToggle,
+      userDropdown,
+      sidebar
+    );
 
-  toggleClasses(sidebar, CONTAINER_OPEN_CLASSNAMES, isOpen);
-  toggleClasses(footer, CONTAINER_OPEN_CLASSNAMES, isOpen);
+  toggleClasses(
+    sidebar,
+    CONTAINER_OPEN_CLASSNAMES,
+    isOpen
+  );
+
+  toggleClasses(
+    footer,
+    CONTAINER_OPEN_CLASSNAMES,
+    isOpen
+  );
 
   if (sidebar) {
-    setAttr(sidebar, "data-user-dropdown-open", String(isOpen));
-    setDataset(sidebar, "userDropdownOpen", String(isOpen));
+    setAttr(
+      sidebar,
+      "data-user-dropdown-open",
+      String(isOpen)
+    );
+
+    setDataset(
+      sidebar,
+      "userDropdownOpen",
+      String(isOpen)
+    );
   }
 
   if (footer) {
-    setAttr(footer, "data-user-dropdown-open", String(isOpen));
-    setAttr(footer, "data-state", isOpen ? "open" : "closed");
+    setAttr(
+      footer,
+      "data-user-dropdown-open",
+      String(isOpen)
+    );
 
-    setDataset(footer, "userDropdownOpen", String(isOpen));
-    setDataset(footer, "state", isOpen ? "open" : "closed");
+    setAttr(
+      footer,
+      "data-state",
+      isOpen ? STATE_OPEN : STATE_CLOSED
+    );
+
+    setDataset(
+      footer,
+      "userDropdownOpen",
+      String(isOpen)
+    );
+
+    setDataset(
+      footer,
+      "state",
+      isOpen ? STATE_OPEN : STATE_CLOSED
+    );
 
     removeTooltipAttributesDeep(footer);
   }
 
   return {
-    hasSidebar: Boolean(sidebar),
-    hasFooter: Boolean(footer),
+    hasSidebar:
+      Boolean(sidebar),
+
+    hasFooter:
+      Boolean(footer),
   };
 }
 
@@ -953,33 +1377,60 @@ function syncDropdownContainers(AppCore, open = false) {
 ========================================================= */
 
 function syncDropdownDom(AppCore, localState, open = false, options = {}) {
-  const state = ensureLocalState(localState);
-  const opts = safeObject(options);
-  const requestedOpen = normalizeOpen(open);
+  const state =
+    ensureLocalState(localState);
+
+  const opts =
+    safeObject(options);
+
+  const requestedOpen =
+    normalizeOpen(open);
 
   const {
     userToggle,
     userDropdown,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
   const actualOpen =
     requestedOpen &&
     Boolean(userDropdown) &&
     !isDropdownShellBlocked(AppCore);
 
-  state.dropdownOpen = actualOpen;
+  state.dropdownOpen =
+    actualOpen;
 
   if (!userDropdown) {
-    const a11y = syncDropdownA11y(AppCore, false);
-    const containers = syncDropdownContainers(AppCore, false);
+    const a11y =
+      syncDropdownA11y(
+        AppCore,
+        false
+      );
+
+    const containers =
+      syncDropdownContainers(
+        AppCore,
+        false
+      );
 
     return {
-      open: false,
+      open:
+        false,
+
       requestedOpen,
-      hasDropdown: false,
-      hasToggle: Boolean(userToggle),
-      hasSidebar: containers.hasSidebar,
-      hasFooter: containers.hasFooter,
+
+      hasDropdown:
+        false,
+
+      hasToggle:
+        Boolean(userToggle),
+
+      hasSidebar:
+        containers.hasSidebar,
+
+      hasFooter:
+        containers.hasFooter,
+
       a11y,
       state,
     };
@@ -992,65 +1443,186 @@ function syncDropdownDom(AppCore, localState, open = false, options = {}) {
     removeInert(userDropdown);
     cleanupLegacyInlineLocks(userDropdown);
 
-    setHidden(userDropdown, false);
+    /*
+      Orden de apertura:
+      1. Quitar hidden.
+      2. aria-hidden=false.
+      3. Clases/dataset.
+    */
+    setHidden(
+      userDropdown,
+      false
+    );
 
-    toggleClasses(userDropdown, OPEN_CLASSNAMES, true);
+    setAttr(
+      userDropdown,
+      "aria-hidden",
+      "false"
+    );
 
-    setAttr(userDropdown, "aria-hidden", "false");
-    setAttr(userDropdown, "data-state", "open");
-    setAttr(userDropdown, "data-open", "true");
+    toggleClasses(
+      userDropdown,
+      OPEN_CLASSNAMES,
+      true
+    );
 
-    setDataset(userDropdown, "state", "open");
-    setDataset(userDropdown, "open", "true");
+    setAttr(
+      userDropdown,
+      "data-state",
+      STATE_OPEN
+    );
+
+    setAttr(
+      userDropdown,
+      "data-open",
+      DATA_TRUE
+    );
+
+    setDataset(
+      userDropdown,
+      "state",
+      STATE_OPEN
+    );
+
+    setDataset(
+      userDropdown,
+      "open",
+      DATA_TRUE
+    );
   } else {
+    /*
+      Orden de cierre:
+      1. Sacar foco de dentro.
+      2. Quitar clases visibles.
+      3. aria-hidden=true.
+      4. hidden=true.
+    */
     closeFocusedNodeBeforeHide(
       userDropdown,
       userToggle,
       {
-        restoreFocus: opts.restoreFocus === true,
+        restoreFocus:
+          opts.restoreFocus === true,
       }
     );
 
     removeInert(userDropdown);
     cleanupLegacyInlineLocks(userDropdown);
 
-    toggleClasses(userDropdown, OPEN_CLASSNAMES, false);
+    toggleClasses(
+      userDropdown,
+      OPEN_CLASSNAMES,
+      false
+    );
 
-    setAttr(userDropdown, "aria-hidden", "true");
-    setAttr(userDropdown, "data-state", "closed");
-    setAttr(userDropdown, "data-open", "false");
+    setAttr(
+      userDropdown,
+      "aria-hidden",
+      "true"
+    );
 
-    setDataset(userDropdown, "state", "closed");
-    setDataset(userDropdown, "open", "false");
+    setAttr(
+      userDropdown,
+      "data-state",
+      STATE_CLOSED
+    );
 
-    setHidden(userDropdown, true);
+    setAttr(
+      userDropdown,
+      "data-open",
+      DATA_FALSE
+    );
+
+    setDataset(
+      userDropdown,
+      "state",
+      STATE_CLOSED
+    );
+
+    setDataset(
+      userDropdown,
+      "open",
+      DATA_FALSE
+    );
+
+    setHidden(
+      userDropdown,
+      true
+    );
   }
 
   removeTooltipAttributesDeep(userDropdown);
 
   if (userToggle) {
-    toggleClasses(userToggle, TOGGLE_OPEN_CLASSNAMES, actualOpen);
+    toggleClasses(
+      userToggle,
+      TOGGLE_OPEN_CLASSNAMES,
+      actualOpen
+    );
 
-    setAttr(userToggle, "aria-expanded", String(actualOpen));
-    setAttr(userToggle, "data-state", actualOpen ? "open" : "closed");
-    setAttr(userToggle, "data-dropdown-open", String(actualOpen));
+    setAttr(
+      userToggle,
+      "aria-expanded",
+      String(actualOpen)
+    );
 
-    setDataset(userToggle, "state", actualOpen ? "open" : "closed");
-    setDataset(userToggle, "dropdownOpen", String(actualOpen));
+    setAttr(
+      userToggle,
+      "data-state",
+      actualOpen ? STATE_OPEN : STATE_CLOSED
+    );
+
+    setAttr(
+      userToggle,
+      "data-dropdown-open",
+      String(actualOpen)
+    );
+
+    setDataset(
+      userToggle,
+      "state",
+      actualOpen ? STATE_OPEN : STATE_CLOSED
+    );
+
+    setDataset(
+      userToggle,
+      "dropdownOpen",
+      String(actualOpen)
+    );
 
     removeTooltipAttributes(userToggle);
   }
 
-  const a11y = syncDropdownA11y(AppCore, actualOpen);
-  const containers = syncDropdownContainers(AppCore, actualOpen);
+  const a11y =
+    syncDropdownA11y(
+      AppCore,
+      actualOpen
+    );
+
+  const containers =
+    syncDropdownContainers(
+      AppCore,
+      actualOpen
+    );
 
   return {
-    open: actualOpen,
+    open:
+      actualOpen,
+
     requestedOpen,
-    hasDropdown: true,
-    hasToggle: Boolean(userToggle),
-    hasSidebar: containers.hasSidebar,
-    hasFooter: containers.hasFooter,
+
+    hasDropdown:
+      true,
+
+    hasToggle:
+      Boolean(userToggle),
+
+    hasSidebar:
+      containers.hasSidebar,
+
+    hasFooter:
+      containers.hasFooter,
+
     a11y,
     state,
   };
@@ -1067,22 +1639,41 @@ function emitDropdownLifecycle(AppCore, {
   result = {},
   reason = "",
 } = {}) {
-  const payload = {
-    source: SOURCE,
+  const payload =
+    {
+      open:
+        Boolean(open),
 
-    open: Boolean(open),
-    previousOpen: Boolean(previousOpen),
-    changed: Boolean(changed),
-    reason: safeText(reason, ""),
+      previousOpen:
+        Boolean(previousOpen),
 
-    requestedOpen: Boolean(result.requestedOpen),
-    hasDropdown: Boolean(result.hasDropdown),
-    hasToggle: Boolean(result.hasToggle),
-    hasSidebar: Boolean(result.hasSidebar),
-    hasFooter: Boolean(result.hasFooter),
-  };
+      changed:
+        Boolean(changed),
 
-  safeEmit(AppCore, EVENT_DROPDOWN_CHANGE, payload);
+      reason:
+        safeText(reason, ""),
+
+      requestedOpen:
+        Boolean(result.requestedOpen),
+
+      hasDropdown:
+        Boolean(result.hasDropdown),
+
+      hasToggle:
+        Boolean(result.hasToggle),
+
+      hasSidebar:
+        Boolean(result.hasSidebar),
+
+      hasFooter:
+        Boolean(result.hasFooter),
+    };
+
+  safeEmit(
+    AppCore,
+    EVENT_DROPDOWN_CHANGE,
+    payload
+  );
 
   if (changed) {
     safeEmit(
@@ -1100,29 +1691,47 @@ function emitDropdownLifecycle(AppCore, {
 ========================================================= */
 
 export function setDropdownOpen(AppCore, localState, value, options = {}) {
-  const state = ensureLocalState(localState);
-  const opts = safeObject(options);
+  const state =
+    ensureLocalState(localState);
 
-  const requestedOpen = normalizeOpen(value);
-  const previousOpen = Boolean(state.dropdownOpen);
+  const opts =
+    safeObject(options);
 
-  const result = syncDropdownDom(
-    AppCore,
-    state,
-    requestedOpen,
-    {
-      restoreFocus: opts.restoreFocus === true,
-    }
-  );
+  const requestedOpen =
+    normalizeOpen(value);
 
-  const nextOpen = Boolean(result.open);
-  const changed = previousOpen !== nextOpen;
+  const previousOpen =
+    Boolean(state.dropdownOpen);
 
-  state.dropdownOpen = nextOpen;
+  const result =
+    syncDropdownDom(
+      AppCore,
+      state,
+      requestedOpen,
+      {
+        restoreFocus:
+          opts.restoreFocus === true,
+      }
+    );
 
-  if (nextOpen && opts.focusFirst === true) {
+  const nextOpen =
+    Boolean(result.open);
+
+  const changed =
+    previousOpen !== nextOpen;
+
+  state.dropdownOpen =
+    nextOpen;
+
+  if (
+    nextOpen &&
+    opts.focusFirst === true
+  ) {
     afterPaint(() => {
-      const { userDropdown } = getElements(AppCore);
+      const {
+        userDropdown,
+      } =
+        getElements(AppCore);
 
       if (
         userDropdown &&
@@ -1134,14 +1743,24 @@ export function setDropdownOpen(AppCore, localState, value, options = {}) {
     });
   }
 
-  if (changed || opts.forceEmit === true) {
-    emitDropdownLifecycle(AppCore, {
-      open: nextOpen,
-      previousOpen,
-      changed,
-      result,
-      reason: opts.reason || "set-dropdown-open",
-    });
+  if (
+    changed ||
+    opts.forceEmit === true
+  ) {
+    emitDropdownLifecycle(
+      AppCore,
+      {
+        open:
+          nextOpen,
+
+        previousOpen,
+        changed,
+        result,
+
+        reason:
+          opts.reason || "set-dropdown-open",
+      }
+    );
   }
 
   return nextOpen;
@@ -1157,35 +1776,60 @@ export function openDropdown(
   ensureSidebarOpenForUserMenu,
   options = {}
 ) {
-  const state = ensureLocalState(localState);
-  const opts = safeObject(options);
+  const state =
+    ensureLocalState(localState);
+
+  const opts =
+    safeObject(options);
 
   if (isDropdownShellBlocked(AppCore)) {
-    setDropdownOpen(AppCore, state, false, {
-      reason: "shell-blocked",
-      forceEmit: false,
-    });
+    setDropdownOpen(
+      AppCore,
+      state,
+      false,
+      {
+        reason:
+          "shell-blocked",
 
-    safeEmit(AppCore, EVENT_DROPDOWN_BLOCKED, {
-      source: SOURCE,
-      reason: "shell-hidden",
-      snapshot: getDropdownSnapshot(AppCore, state),
-    });
+        forceEmit:
+          false,
+      }
+    );
+
+    safeEmit(
+      AppCore,
+      EVENT_DROPDOWN_BLOCKED,
+      {
+        reason:
+          "shell-hidden",
+
+        snapshot:
+          getDropdownSnapshot(AppCore, state),
+      }
+    );
 
     return false;
   }
 
   repairStaleSidebarHidden(AppCore);
 
-  let sidebarWasForcedOpen = false;
+  let sidebarWasForcedOpen =
+    false;
 
   if (isFunction(ensureSidebarOpenForUserMenu)) {
     try {
-      sidebarWasForcedOpen = Boolean(
-        ensureSidebarOpenForUserMenu()
-      );
+      sidebarWasForcedOpen =
+        Boolean(
+          ensureSidebarOpenForUserMenu(
+            {
+              reason:
+                opts.reason || "open-dropdown",
+            }
+          )
+        );
     } catch {
-      sidebarWasForcedOpen = false;
+      sidebarWasForcedOpen =
+        false;
     }
   }
 
@@ -1209,8 +1853,11 @@ export function openDropdown(
 }
 
 export function closeDropdown(AppCore, localState, options = {}) {
-  const state = ensureLocalState(localState);
-  const opts = safeObject(options);
+  const state =
+    ensureLocalState(localState);
+
+  const opts =
+    safeObject(options);
 
   if (
     opts.force !== true &&
@@ -1221,7 +1868,8 @@ export function closeDropdown(AppCore, localState, options = {}) {
       state,
       false,
       {
-        restoreFocus: opts.restoreFocus === true,
+        restoreFocus:
+          opts.restoreFocus === true,
       }
     );
 
@@ -1252,54 +1900,92 @@ export function toggleDropdown(
   ensureSidebarOpenForUserMenu,
   options = {}
 ) {
-  const state = ensureLocalState(localState);
-  const opts = safeObject(options);
+  const state =
+    ensureLocalState(localState);
+
+  const opts =
+    safeObject(options);
 
   if (isDropdownShellBlocked(AppCore)) {
-    closeDropdown(AppCore, state, {
-      force: true,
-      reason: "shell-blocked",
-    });
+    closeDropdown(
+      AppCore,
+      state,
+      {
+        force:
+          true,
 
-    safeEmit(AppCore, EVENT_DROPDOWN_BLOCKED, {
-      source: SOURCE,
-      reason: "shell-hidden",
-      snapshot: getDropdownSnapshot(AppCore, state),
-    });
+        reason:
+          "shell-blocked",
+      }
+    );
+
+    safeEmit(
+      AppCore,
+      EVENT_DROPDOWN_BLOCKED,
+      {
+        reason:
+          "shell-hidden",
+
+        snapshot:
+          getDropdownSnapshot(AppCore, state),
+      }
+    );
 
     return false;
   }
 
   repairStaleSidebarHidden(AppCore);
 
-  const currentlyOpen = getDropdownOpen(state);
+  const currentlyOpen =
+    getDropdownOpen(state);
 
-  safeEmit(AppCore, EVENT_DROPDOWN_TOGGLE, {
-    source: SOURCE,
-    open: !currentlyOpen,
-    previousOpen: currentlyOpen,
-  });
+  safeEmit(
+    AppCore,
+    EVENT_DROPDOWN_TOGGLE,
+    {
+      open:
+        !currentlyOpen,
+
+      previousOpen:
+        currentlyOpen,
+    }
+  );
 
   if (currentlyOpen) {
-    return closeDropdown(AppCore, state, {
-      reason:
-        opts.reason ||
-        "toggle-dropdown:close",
+    return closeDropdown(
+      AppCore,
+      state,
+      {
+        reason:
+          opts.reason ||
+          "toggle-dropdown:close",
 
-      restoreFocus:
-        opts.restoreFocus === true,
-    });
+        restoreFocus:
+          opts.restoreFocus === true,
+
+        forceEmit:
+          opts.forceEmit === true,
+      }
+    );
   }
 
-  let sidebarWasForcedOpen = false;
+  let sidebarWasForcedOpen =
+    false;
 
   if (isFunction(ensureSidebarOpenForUserMenu)) {
     try {
-      sidebarWasForcedOpen = Boolean(
-        ensureSidebarOpenForUserMenu()
-      );
+      sidebarWasForcedOpen =
+        Boolean(
+          ensureSidebarOpenForUserMenu(
+            {
+              reason:
+                opts.reason || "toggle-dropdown:open",
+            }
+          )
+        );
     } catch {
-      sidebarWasForcedOpen = false;
+      sidebarWasForcedOpen =
+        false;
     }
   }
 
@@ -1337,29 +2023,40 @@ export function repairDropdown(AppCore, localState = {}, options = {}) {
     safeObject(options);
 
   if (!hadExplicitState) {
-    state.dropdownOpen = resolveDropdownOpenFromDom(AppCore);
+    state.dropdownOpen =
+      resolveDropdownOpenFromDom(AppCore);
   }
 
   if (isDropdownShellBlocked(AppCore)) {
-    state.dropdownOpen = false;
+    state.dropdownOpen =
+      false;
   }
 
-  const result = syncDropdownDom(
-    AppCore,
-    state,
-    Boolean(state.dropdownOpen),
-    {
-      restoreFocus: false,
-    }
-  );
+  const result =
+    syncDropdownDom(
+      AppCore,
+      state,
+      Boolean(state.dropdownOpen),
+      {
+        restoreFocus:
+          false,
+      }
+    );
 
   if (opts.emit !== false) {
-    safeEmit(AppCore, EVENT_DROPDOWN_REPAIRED, {
-      source: SOURCE,
-      open: Boolean(state.dropdownOpen),
-      result,
-      snapshot: getDropdownSnapshot(AppCore, state),
-    });
+    safeEmit(
+      AppCore,
+      EVENT_DROPDOWN_REPAIRED,
+      {
+        open:
+          Boolean(state.dropdownOpen),
+
+        result,
+
+        snapshot:
+          getDropdownSnapshot(AppCore, state),
+      }
+    );
   }
 
   return result;
@@ -1374,28 +2071,39 @@ export function getDropdownSnapshot(AppCore, localState = {}) {
     sidebar,
     userToggle,
     userDropdown,
-  } = getElements(AppCore);
+  } =
+    getElements(AppCore);
 
   const footer =
-    getSidebarFooter(userToggle, userDropdown, sidebar);
+    getSidebarFooter(
+      userToggle,
+      userDropdown,
+      sidebar
+    );
 
   const activeElement =
     getActiveElement();
 
   return {
+    version:
+      SIDEBAR_DROPDOWN_VERSION,
+
     open:
       getDropdownOpen(localState),
 
     domOpen:
       resolveDropdownOpenFromDom(AppCore),
 
-    shellHidden: (() => {
-      try {
-        return Boolean(isShellHidden(AppCore));
-      } catch {
-        return false;
-      }
-    })(),
+    shellHidden:
+      (() => {
+        try {
+          return Boolean(
+            isShellHidden(AppCore)
+          );
+        } catch {
+          return false;
+        }
+      })(),
 
     realShellHidden:
       isRealShellHidden(AppCore),
@@ -1416,10 +2124,16 @@ export function getDropdownSnapshot(AppCore, localState = {}) {
       Boolean(footer),
 
     activeInsideDropdown:
-      elementContains(userDropdown, activeElement),
+      elementContains(
+        userDropdown,
+        activeElement
+      ),
 
     activeInsideToggle:
-      elementContains(userToggle, activeElement),
+      elementContains(
+        userToggle,
+        activeElement
+      ),
 
     activeElement: {
       tag:
@@ -1564,6 +2278,8 @@ export function getDropdownSnapshot(AppCore, localState = {}) {
 ========================================================= */
 
 export default {
+  SIDEBAR_DROPDOWN_VERSION,
+
   syncDropdownA11y,
   setDropdownOpen,
 

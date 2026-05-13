@@ -2,6 +2,9 @@
    Onion SPA - Core Modules
    Archivo: src/core/modules.js
 
+   ONION SUPPORT · CORE MODULES
+   MODULE REGISTRY · ALIASES · DISPOSE SAFE · 13/10
+
    Responsabilidades:
    - registrar módulos en el core
    - consultar módulos registrados
@@ -33,10 +36,10 @@
 ========================================================= */
 
 const MODULES_VERSION =
-  "12.0.0";
+  "13.0.0";
 
 const MAX_RECENT_EVENTS =
-  50;
+  60;
 
 const DEFAULT_DISPOSE_METHODS =
   Object.freeze([
@@ -86,6 +89,19 @@ const MODULE_EVENTS =
 
 const MODULE_NAME_CONTROL_RE =
   /[\u0000-\u001f\u007f]/g;
+
+const RESERVED_META_KEYS =
+  Object.freeze([
+    "name",
+    "moduleName",
+    "key",
+    "id",
+    "instance",
+    "module",
+    "value",
+    "ref",
+    "options",
+  ]);
 
 /* =========================================================
    BASICS
@@ -376,6 +392,55 @@ function normalizeTags(values = []) {
         .filter(Boolean)
     )
   );
+}
+
+function pickCustomMeta(options = {}) {
+  const opts =
+    isPlainObject(options)
+      ? options
+      : {};
+
+  if (isPlainObject(opts.meta)) {
+    return safeClone(
+      opts.meta,
+      {}
+    );
+  }
+
+  const custom = {};
+
+  for (const [key, value] of Object.entries(opts)) {
+    if (
+      RESERVED_META_KEYS.includes(key) ||
+      key === "aliases" ||
+      key === "alias" ||
+      key === "overwrite" ||
+      key === "replace" ||
+      key === "strict" ||
+      key === "dispose" ||
+      key === "disposePrevious" ||
+      key === "disposeMethod" ||
+      key === "disposeMethods" ||
+      key === "overwriteAliases" ||
+      key === "source" ||
+      key === "label" ||
+      key === "version" ||
+      key === "description" ||
+      key === "tags"
+    ) {
+      continue;
+    }
+
+    custom[key] =
+      safeClone(
+        value,
+        value
+      );
+  }
+
+  return Object.keys(custom).length
+    ? custom
+    : null;
 }
 
 function getInstanceValue(instance, key, fallback = undefined) {
@@ -691,7 +756,18 @@ export function createModules({
     );
 
     if (isStrict(options)) {
-      throw new Error(payload.message);
+      const error =
+        new Error(payload.message);
+
+      try {
+        error.code =
+          extra?.code || "MODULES_ERROR";
+
+        error.details =
+          payload;
+      } catch {}
+
+      throw error;
     }
 
     safeWarn(
@@ -883,10 +959,7 @@ export function createModules({
         Boolean(opts.overwritten),
 
       custom:
-        safeClone(
-          opts.meta,
-          null
-        ),
+        pickCustomMeta(opts),
     };
   }
 
@@ -909,6 +982,16 @@ export function createModules({
     }
 
     return removed;
+  }
+
+  function wouldAliasCollideWithModuleName(aliasName = "", targetName = "") {
+    const existingModuleName =
+      finalRegistry.moduleNameIndex.get(aliasName);
+
+    return Boolean(
+      existingModuleName &&
+      existingModuleName !== targetName
+    );
   }
 
   function setAliases(name, aliases = [], options = {}) {
@@ -934,10 +1017,19 @@ export function createModules({
       const currentTarget =
         finalRegistry.moduleAliases.get(aliasName);
 
+      const aliasHitsOtherModuleName =
+        wouldAliasCollideWithModuleName(
+          aliasName,
+          cleanName
+        );
+
       const hasConflict =
         Boolean(
-          currentTarget &&
-          currentTarget !== cleanName
+          (
+            currentTarget &&
+            currentTarget !== cleanName
+          ) ||
+          aliasHitsOtherModuleName
         );
 
       if (
@@ -951,10 +1043,17 @@ export function createModules({
             aliasName,
 
           target:
-            currentTarget,
+            currentTarget ||
+            finalRegistry.moduleNameIndex.get(aliasName) ||
+            "",
 
           attemptedTarget:
             cleanName,
+
+          reason:
+            aliasHitsOtherModuleName
+              ? "module-name-collision"
+              : "alias-target-collision",
 
           at:
             safeIsoDate(),
@@ -1048,6 +1147,9 @@ export function createModules({
       return fail(
         "modules.register(name, instance) requiere un nombre.",
         {
+          code:
+            "MODULE_NAME_REQUIRED",
+
           name:
             args.name,
         },
@@ -1062,6 +1164,9 @@ export function createModules({
       return fail(
         "modules.register(name, instance) requiere una instancia.",
         {
+          code:
+            "MODULE_INSTANCE_REQUIRED",
+
           name:
             cleanName,
         },
@@ -1075,14 +1180,14 @@ export function createModules({
     const exists =
       finalRegistry.modules.has(resolvedExisting);
 
-    const existingName =
+    const targetName =
       exists
         ? resolvedExisting
         : cleanName;
 
     const previous =
       exists
-        ? finalRegistry.modules.get(existingName)
+        ? finalRegistry.modules.get(targetName)
         : null;
 
     const sameInstance =
@@ -1098,11 +1203,12 @@ export function createModules({
       sameInstance
     ) {
       const previousMeta =
-        getExistingMeta(existingName);
+        getExistingMeta(targetName);
 
       const mergedAliases =
         uniqueAliases([
           previousMeta?.aliases || [],
+          targetName,
           cleanName,
           opts.alias,
           opts.aliases,
@@ -1110,7 +1216,7 @@ export function createModules({
 
       const acceptedAliases =
         setAliases(
-          existingName,
+          targetName,
           mergedAliases,
           opts
         );
@@ -1137,17 +1243,20 @@ export function createModules({
       };
 
       finalRegistry.moduleMeta.set(
-        existingName,
+        targetName,
         meta
       );
 
       state.duplicateCount += 1;
       state.lastDuplicate =
-        existingName;
+        targetName;
 
       const payload = {
         name:
-          existingName,
+          targetName,
+
+        requestedName:
+          cleanName,
 
         aliases:
           meta.aliases || [],
@@ -1182,14 +1291,14 @@ export function createModules({
     ) {
       state.duplicateCount += 1;
       state.lastDuplicate =
-        existingName;
+        targetName;
 
       const meta =
-        getExistingMeta(existingName);
+        getExistingMeta(targetName);
 
       const payload = {
         name:
-          existingName,
+          targetName,
 
         requestedName:
           cleanName,
@@ -1227,7 +1336,7 @@ export function createModules({
         previous,
         {
           name:
-            existingName,
+            targetName,
 
           reason:
             "overwrite",
@@ -1240,23 +1349,23 @@ export function createModules({
     }
 
     finalRegistry.modules.set(
-      existingName,
+      targetName,
       instance
     );
 
     finalRegistry.moduleNameIndex.set(
-      normalizeLookupKey(existingName),
-      existingName
+      normalizeLookupKey(targetName),
+      targetName
     );
 
-    removeAliasesFor(existingName);
+    removeAliasesFor(targetName);
 
     const previousMeta =
-      getExistingMeta(existingName);
+      getExistingMeta(targetName);
 
     const meta =
       buildMeta(
-        existingName,
+        targetName,
         instance,
         {
           ...opts,
@@ -1268,29 +1377,32 @@ export function createModules({
 
     meta.aliases =
       setAliases(
-        existingName,
+        targetName,
         meta.aliases,
         opts
       );
 
     finalRegistry.moduleMeta.set(
-      existingName,
+      targetName,
       meta
     );
 
     state.registerCount += 1;
     state.lastRegistered =
-      existingName;
+      targetName;
 
     if (exists) {
       state.overwriteCount += 1;
       state.lastOverwritten =
-        existingName;
+        targetName;
     }
 
     const payload = {
       name:
-        existingName,
+        targetName,
+
+      requestedName:
+        cleanName,
 
       aliases:
         meta.aliases,
@@ -1375,6 +1487,9 @@ export function createModules({
       return fail(
         "No se pueden añadir aliases a un módulo inexistente.",
         {
+          code:
+            "MODULE_ALIAS_TARGET_MISSING",
+
           name:
             nameOrAlias,
         },
@@ -1389,9 +1504,7 @@ export function createModules({
       getExistingMeta(resolved) ||
       buildMeta(
         resolved,
-        instance,
-        {},
-        null
+        instance
       );
 
     const merged =
@@ -2289,6 +2402,9 @@ export function createModules({
     alias,
 
     get,
+
+    resolve:
+      resolveName,
 
     require(nameOrAlias = "") {
       const instance =

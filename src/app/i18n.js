@@ -1,9 +1,9 @@
 /* =========================================================
    Onion SPA - App I18n
-   Archivo: src/app/i18n.js
+   Archivo: /src/app/i18n.js
 
    ONION SUPPORT · APP I18N CONTROLLER
-   LANG SYNC · ROUTER RERENDER SAFE · NO DOUBLE RENDER · EXTREME 13/10
+   LANG SYNC · ROUTER RERENDER SAFE · NO DOUBLE RENDER · 10/10
 
    RESPONSABILIDADES:
    - Inicializar i18n de la aplicación.
@@ -16,19 +16,21 @@
    - Endurecer fallback multilenguaje.
    - Exponer snapshots de diagnóstico.
 
-   HARDENING EXTREMO:
+   HARDENING:
    - Idempotencia total.
    - Tolerancia si I18n parcial.
    - Compatibilidad con firmas legacy y modernas.
    - Rerender serializado.
-   - Rerender con fallback Router.rerenderCurrentRoute / Router.render / Router.navigate.
-   - No destruye publicPath contextualizado.
+   - Router.render(canonicalPath, options) para no contaminar matching.
+   - publicPath siempre via options para preservar /@usuario/ruta.
    - No toca history salvo necesidad explícita del Router.
-   - Evita doble rerender con src/app/events.js usando payload.rerender=false.
+   - Evita doble rerender con src/app/events.js.
    - Safe emit sin duplicar AppCore.events + window.
    - Logs seguros.
    - Browser/server safe.
    - Cero throws accidentales.
+   - Sin CSS inline.
+   - Sin estilos inyectados.
 
    API COMPATIBLE:
    - initI18n({ AppCore, I18n, Router })
@@ -61,6 +63,10 @@ import {
    CONSTANTS
 ========================================================= */
 
+const I18N_VERSION = "14.0.0";
+
+const I18N_SOURCE = "app:i18n";
+
 const DEFAULT_SCOPE =
   APP_SCOPES?.i18n ||
   APP_SCOPE ||
@@ -80,217 +86,169 @@ const LANG_STORAGE_KEY =
   UI_CONSTANTS?.langStorageKey ||
   "lang";
 
-const LANG_STORAGE_KEYS =
-  Object.freeze([
-    LANG_STORAGE_KEY,
-    "onion:lang",
-    "onion.lang",
-    "onion_language",
-    "language",
-  ]);
+const LANG_STORAGE_KEYS = Object.freeze([
+  LANG_STORAGE_KEY,
+  "onion:lang",
+  "onion.lang",
+  "onion_language",
+  "language",
+]);
 
-const KNOWN_LANGS =
-  Object.freeze([
-    "es",
-    "en",
-    "ca",
-  ]);
+const KNOWN_LANGS = Object.freeze([
+  "es",
+  "en",
+  "ca",
+]);
 
-const LANG_ALIASES =
-  Object.freeze({
-    es:
-      "es",
-    spa:
-      "es",
-    spanish:
-      "es",
-    castellano:
-      "es",
-    español:
-      "es",
+const LANG_ALIASES = Object.freeze({
+  es: "es",
+  spa: "es",
+  spanish: "es",
+  castellano: "es",
+  español: "es",
 
-    en:
-      "en",
-    eng:
-      "en",
-    english:
-      "en",
+  en: "en",
+  eng: "en",
+  english: "en",
 
-    ca:
-      "ca",
-    cat:
-      "ca",
-    catalan:
-      "ca",
-    català:
-      "ca",
-    catalán:
-      "ca",
-  });
+  ca: "ca",
+  cat: "ca",
+  catalan: "ca",
+  català: "ca",
+  catalán: "ca",
+});
 
-const I18N_EVENTS =
-  Object.freeze({
-    langChange:
-      APP_EVENTS?.langChange ||
-      "app:lang:change",
+const I18N_EVENTS = Object.freeze({
+  langChange:
+    APP_EVENTS?.langChange ||
+    "app:lang:change",
 
-    i18nReady:
-      "app:i18n:ready",
+  i18nReady:
+    "app:i18n:ready",
 
-    i18nSync:
-      "app:i18n:sync",
+  i18nSync:
+    "app:i18n:sync",
 
-    i18nError:
-      "app:i18n:error",
+  i18nError:
+    "app:i18n:error",
 
-    i18nBridgeReady:
-      "app:i18n:bridge:ready",
+  i18nBridgeReady:
+    "app:i18n:bridge:ready",
 
-    i18nRerenderStart:
-      "app:i18n:rerender:start",
+  i18nDebugReady:
+    "app:i18n:debug:ready",
 
-    i18nRerenderDone:
-      "app:i18n:rerender:done",
+  i18nRerenderStart:
+    "app:i18n:rerender:start",
 
-    i18nRerenderError:
-      "app:i18n:rerender:error",
-  });
+  i18nRerenderDone:
+    "app:i18n:rerender:done",
 
-const INIT_METHODS =
-  Object.freeze([
-    "boot",
-    "init",
-    "initialize",
-    "start",
-  ]);
+  i18nRerenderError:
+    "app:i18n:rerender:error",
+});
 
-const SET_LANG_METHODS =
-  Object.freeze([
-    "setLang",
-    "setLanguage",
-    "changeLang",
-    "changeLanguage",
-    "use",
-  ]);
+const INIT_METHODS = Object.freeze([
+  "boot",
+  "init",
+  "initialize",
+  "start",
+]);
 
-const GET_LANG_METHODS =
-  Object.freeze([
-    "getLang",
-    "getLanguage",
-    "getCurrentLang",
-    "current",
-  ]);
+const SET_LANG_METHODS = Object.freeze([
+  "setLang",
+  "setLanguage",
+  "changeLang",
+  "changeLanguage",
+  "use",
+]);
 
-const GET_AVAILABLE_METHODS =
-  Object.freeze([
-    "getAvailable",
-    "getAvailableLangs",
-    "getLanguages",
-    "getLocales",
-  ]);
+const GET_LANG_METHODS = Object.freeze([
+  "getLang",
+  "getLanguage",
+  "getCurrentLang",
+  "current",
+]);
 
-const TRANSLATE_METHODS =
-  Object.freeze([
-    "t",
-    "translate",
-    "get",
-  ]);
+const GET_AVAILABLE_METHODS = Object.freeze([
+  "getAvailable",
+  "getAvailableLangs",
+  "getLanguages",
+  "getLocales",
+]);
 
-const ROUTER_RERENDER_METHODS =
-  Object.freeze([
-    "rerenderCurrentRoute",
-    "renderCurrentRoute",
-  ]);
+const TRANSLATE_METHODS = Object.freeze([
+  "t",
+  "translate",
+  "get",
+]);
 
-const PUBLIC_PATH_KEYS =
-  Object.freeze([
-    "publicPath",
-    "currentPublicPath",
-    "lastPublicPath",
-  ]);
+const ROUTER_RERENDER_METHODS = Object.freeze([
+  "rerenderCurrentRoute",
+  "renderCurrentRoute",
+]);
 
-const CANONICAL_PATH_KEYS =
-  Object.freeze([
-    "route",
-    "canonicalPath",
-    "currentPath",
-    "currentCanonicalPath",
-  ]);
+const PUBLIC_PATH_KEYS = Object.freeze([
+  "publicPath",
+  "currentPublicPath",
+  "lastPublicPath",
+]);
 
-const DICTIONARY_KEYS =
-  Object.freeze([
-    "dictionaries",
-    "dictionary",
-    "messages",
-    "locales",
-    "translations",
-    "resources",
-  ]);
+const CANONICAL_PATH_KEYS = Object.freeze([
+  "route",
+  "canonicalPath",
+  "currentPath",
+  "currentCanonicalPath",
+]);
+
+const DICTIONARY_KEYS = Object.freeze([
+  "dictionaries",
+  "dictionary",
+  "messages",
+  "locales",
+  "translations",
+  "resources",
+]);
+
+const SENSITIVE_OBJECT_KEY_RE =
+  /token|secret|password|authorization|credential|jwt|bearer|otp|code/i;
 
 /* =========================================================
    MODULE STATE
 ========================================================= */
 
-let initialized =
-  false;
+let initialized = false;
+let boundCore = null;
 
-let boundCore =
-  null;
+let currentAppCoreRef = null;
+let currentI18nRef = null;
+let currentRouterRef = null;
 
-let currentAppCoreRef =
-  null;
+let rerenderPromise = null;
+let rerenderQueued = false;
 
-let currentI18nRef =
-  null;
-
-let currentRouterRef =
-  null;
-
-let rerenderPromise =
-  null;
-
-let rerenderQueued =
-  false;
-
-let changeSequence =
-  0;
+let changeSequence = 0;
+let debugBridgeReady = false;
 
 const i18nState = {
-  initialized:
-    false,
+  initialized: false,
 
-  lastLang:
-    "",
+  lastLang: "",
+  lastRequestedLang: "",
+  lastReason: "",
 
-  lastRequestedLang:
-    "",
+  lastSyncAt: 0,
+  lastRerenderAt: 0,
 
-  lastReason:
-    "",
+  rerendering: false,
+  rerenderCount: 0,
 
-  lastSyncAt:
-    0,
+  syncCount: 0,
+  changeCount: 0,
 
-  lastRerenderAt:
-    0,
+  bridgeReady: false,
 
-  rerendering:
-    false,
-
-  rerenderCount:
-    0,
-
-  syncCount:
-    0,
-
-  changeCount:
-    0,
-
-  bridgeReady:
-    false,
-
-  errors:
-    [],
+  errors: [],
 };
 
 /* =========================================================
@@ -372,22 +330,17 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
+  const text = String(value).trim();
 
   return text || fallback;
 }
 
 function unique(values = []) {
-  const seen =
-    new Set();
-
-  const result =
-    [];
+  const seen = new Set();
+  const result = [];
 
   for (const value of safeArray(values)) {
-    const text =
-      safeText(value, "");
+    const text = safeText(value, "");
 
     if (
       text &&
@@ -480,12 +433,9 @@ function defineValue(target, key, value) {
       key,
       {
         value,
-        enumerable:
-          false,
-        configurable:
-          true,
-        writable:
-          true,
+        enumerable: false,
+        configurable: true,
+        writable: true,
       }
     );
 
@@ -493,13 +443,194 @@ function defineValue(target, key, value) {
   } catch {}
 
   try {
-    target[key] =
-      value;
-
+    target[key] = value;
     return true;
   } catch {}
 
   return false;
+}
+
+/* =========================================================
+   REDACTION / SANITIZE
+========================================================= */
+
+function redactText(value = "") {
+  const text = safeText(value, "");
+
+  if (!text) {
+    return "";
+  }
+
+  try {
+    return redactTokenInText(text);
+  } catch {
+    return text
+      .replace(
+        /([?&#](token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
+        "$1***"
+      )
+      .replace(
+        /(\/activate-account\/)([^/?#\s]+)/gi,
+        "$1***"
+      )
+      .replace(
+        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      )
+      .replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
+  }
+}
+
+function isDomNodeLike(value) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  try {
+    return Boolean(
+      typeof Node !== "undefined" &&
+        value instanceof Node
+    );
+  } catch {}
+
+  try {
+    return Boolean(
+      value.nodeType &&
+        value.nodeName
+    );
+  } catch {}
+
+  return false;
+}
+
+function normalizeError(error, fallback = "Error i18n.") {
+  if (!error) {
+    return {
+      name: "I18nError",
+      message: fallback,
+      code: "I18N_ERROR",
+    };
+  }
+
+  if (typeof error === "string") {
+    return {
+      name: "I18nError",
+      message: redactText(error),
+      code: "I18N_ERROR",
+    };
+  }
+
+  return {
+    name:
+      safeText(
+        error?.name,
+        "I18nError"
+      ),
+
+    message:
+      redactText(
+        safeText(
+          error?.message || error,
+          fallback
+        )
+      ),
+
+    code:
+      redactText(
+        safeText(
+          error?.code ||
+            error?.status ||
+            error?.statusCode,
+          "I18N_ERROR"
+        )
+      ),
+  };
+}
+
+function sanitizePayload(value, depth = 0) {
+  if (depth > 6) {
+    return "[MaxDepth]";
+  }
+
+  if (typeof value === "string") {
+    return redactText(value);
+  }
+
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "function") {
+    return "[Function]";
+  }
+
+  if (isDomNodeLike(value)) {
+    return {
+      node:
+        safeText(value.nodeName, "Node"),
+
+      id:
+        safeText(value.id, ""),
+
+      className:
+        safeText(
+          value.className?.baseVal ||
+            value.className,
+          ""
+        ),
+    };
+  }
+
+  if (value instanceof Error) {
+    return normalizeError(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 80)
+      .map((item) =>
+        sanitizePayload(item, depth + 1)
+      );
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      if (SENSITIVE_OBJECT_KEY_RE.test(key)) {
+        if (
+          item === null ||
+          item === undefined ||
+          item === "" ||
+          typeof item === "boolean"
+        ) {
+          output[key] = item;
+        } else {
+          output[key] = "***";
+        }
+
+        continue;
+      }
+
+      output[key] =
+        sanitizePayload(
+          item,
+          depth + 1
+        );
+    }
+
+    return output;
+  }
+
+  return String(value);
 }
 
 /* =========================================================
@@ -526,16 +657,14 @@ function looksLikeDepsObject(value) {
 }
 
 function getModuleFromRegistry(AppCore, names = []) {
-  const modules =
-    AppCore?.modules;
+  const modules = AppCore?.modules;
 
   if (!modules) {
     return null;
   }
 
   for (const name of safeArray(names)) {
-    const key =
-      safeText(name, "");
+    const key = safeText(name, "");
 
     if (!key) {
       continue;
@@ -581,23 +710,15 @@ function normalizeDeps(first = {}, second = null, extra = {}) {
   if (typeof second === "string") {
     return {
       ...ensureObject(extra),
-
-      AppCore:
-        first || null,
-
-      lang:
-        second,
+      AppCore: first || null,
+      lang: second,
     };
   }
 
   return {
     ...ensureObject(extra),
-
-    AppCore:
-      first || null,
-
-    I18n:
-      second || null,
+    AppCore: first || null,
+    I18n: second || null,
   };
 }
 
@@ -658,18 +779,15 @@ function rememberRuntimeDeps({
   Router,
 } = {}) {
   if (AppCore) {
-    currentAppCoreRef =
-      AppCore;
+    currentAppCoreRef = AppCore;
   }
 
   if (I18n) {
-    currentI18nRef =
-      I18n;
+    currentI18nRef = I18n;
   }
 
   if (Router) {
-    currentRouterRef =
-      Router;
+    currentRouterRef = Router;
   }
 }
 
@@ -678,10 +796,15 @@ function rememberRuntimeDeps({
 ========================================================= */
 
 function safeLog(AppCore, ...args) {
+  const safeArgs =
+    args.map((item) =>
+      sanitizePayload(item)
+    );
+
   try {
     AppCore?.utils?.log?.(
       "[AppI18n]",
-      ...args
+      ...safeArgs
     );
 
     return;
@@ -690,28 +813,30 @@ function safeLog(AppCore, ...args) {
   try {
     console.log(
       "[AppI18n]",
-      ...args
+      ...safeArgs
     );
   } catch {}
 }
 
 function safeWarn(AppCore, ...args) {
-  let coreLogged =
-    false;
+  const safeArgs =
+    args.map((item) =>
+      sanitizePayload(item)
+    );
+
+  let coreLogged = false;
 
   try {
     if (isFunction(AppCore?.utils?.warn)) {
       AppCore.utils.warn(
         "[AppI18n]",
-        ...args
+        ...safeArgs
       );
 
-      coreLogged =
-        true;
+      coreLogged = true;
     }
   } catch {
-    coreLogged =
-      false;
+    coreLogged = false;
   }
 
   if (coreLogged) {
@@ -721,28 +846,30 @@ function safeWarn(AppCore, ...args) {
   try {
     console.warn(
       "[AppI18n]",
-      ...args
+      ...safeArgs
     );
   } catch {}
 }
 
 function safeError(AppCore, ...args) {
-  let coreLogged =
-    false;
+  const safeArgs =
+    args.map((item) =>
+      sanitizePayload(item)
+    );
+
+  let coreLogged = false;
 
   try {
     if (isFunction(AppCore?.utils?.error)) {
       AppCore.utils.error(
         "[AppI18n]",
-        ...args
+        ...safeArgs
       );
 
-      coreLogged =
-        true;
+      coreLogged = true;
     }
   } catch {
-    coreLogged =
-      false;
+    coreLogged = false;
   }
 
   if (coreLogged) {
@@ -752,9 +879,41 @@ function safeError(AppCore, ...args) {
   try {
     console.error(
       "[AppI18n]",
-      ...args
+      ...safeArgs
     );
   } catch {}
+}
+
+function safeCreateCustomEvent(name, detail = {}) {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    if (typeof CustomEvent === "function") {
+      return new CustomEvent(
+        name,
+        {
+          detail,
+        }
+      );
+    }
+  } catch {}
+
+  try {
+    const event = document.createEvent("CustomEvent");
+
+    event.initCustomEvent(
+      name,
+      false,
+      false,
+      detail
+    );
+
+    return event;
+  } catch {
+    return null;
+  }
 }
 
 function safeWindowDispatch(eventName, payload = {}) {
@@ -766,15 +925,17 @@ function safeWindowDispatch(eventName, payload = {}) {
   }
 
   try {
-    window.dispatchEvent(
-      new CustomEvent(
+    const event =
+      safeCreateCustomEvent(
         eventName,
-        {
-          detail:
-            payload,
-        }
-      )
-    );
+        payload
+      );
+
+    if (!event) {
+      return false;
+    }
+
+    window.dispatchEvent(event);
 
     return true;
   } catch {}
@@ -783,34 +944,34 @@ function safeWindowDispatch(eventName, payload = {}) {
 }
 
 function safeEmit(AppCore, eventName, payload = {}, options = {}) {
-  const name =
-    safeText(eventName, "");
+  const name = safeText(eventName, "");
 
   if (!name) {
     return false;
   }
 
-  const opts =
-    ensureObject(options);
+  const opts = ensureObject(options);
 
-  let busAvailable =
-    false;
+  const cleanPayload =
+    sanitizePayload({
+      source: I18N_SOURCE,
+      version: I18N_VERSION,
+      ...ensureObject(payload),
+    });
 
-  let busEmitted =
-    false;
+  let busAvailable = false;
+  let busEmitted = false;
 
   try {
     if (isFunction(AppCore?.events?.emit)) {
-      busAvailable =
-        true;
+      busAvailable = true;
 
       AppCore.events.emit(
         name,
-        payload
+        cleanPayload
       );
 
-      busEmitted =
-        true;
+      busEmitted = true;
     }
   } catch {}
 
@@ -825,59 +986,13 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
     return (
       safeWindowDispatch(
         name,
-        payload
+        cleanPayload
       ) ||
       busEmitted
     );
   }
 
   return busEmitted;
-}
-
-function normalizeError(error, fallback = "Error i18n.") {
-  if (!error) {
-    return {
-      name:
-        "I18nError",
-      message:
-        fallback,
-      code:
-        "I18N_ERROR",
-    };
-  }
-
-  if (typeof error === "string") {
-    return {
-      name:
-        "I18nError",
-      message:
-        error,
-      code:
-        "I18N_ERROR",
-    };
-  }
-
-  return {
-    name:
-      safeText(
-        error?.name,
-        "I18nError"
-      ),
-
-    message:
-      safeText(
-        error?.message || error,
-        fallback
-      ),
-
-    code:
-      safeText(
-        error?.code ||
-          error?.status ||
-          error?.statusCode,
-        "I18N_ERROR"
-      ),
-  };
 }
 
 function pushError(AppCore, error, source = "i18n") {
@@ -889,9 +1004,11 @@ function pushError(AppCore, error, source = "i18n") {
       normalizeError(error),
 
     message:
-      safeText(
-        error?.message || error,
-        "Error i18n."
+      redactText(
+        safeText(
+          error?.message || error,
+          "Error i18n."
+        )
       ),
 
     at:
@@ -1018,8 +1135,7 @@ function writeStoredLang(lang = "") {
     return false;
   }
 
-  let written =
-    false;
+  let written = false;
 
   for (const key of LANG_STORAGE_KEYS) {
     try {
@@ -1028,8 +1144,7 @@ function writeStoredLang(lang = "") {
         cleanLang
       );
 
-      written =
-        true;
+      written = true;
     } catch {}
   }
 
@@ -1070,8 +1185,7 @@ function setDocumentLang(lang = FALLBACK_LANG) {
       cleanLang
     );
 
-    document.documentElement.lang =
-      cleanLang;
+    document.documentElement.lang = cleanLang;
 
     return true;
   } catch {}
@@ -1249,8 +1363,7 @@ function setI18nLang(I18n, lang = FALLBACK_LANG, options = {}) {
   const cleanLang =
     safeLang(lang, FALLBACK_LANG);
 
-  let ok =
-    false;
+  let ok = false;
 
   for (const methodName of SET_LANG_METHODS) {
     try {
@@ -1271,9 +1384,7 @@ function setI18nLang(I18n, lang = FALLBACK_LANG, options = {}) {
         result.catch(() => {});
       }
 
-      ok =
-        true;
-
+      ok = true;
       break;
     } catch {}
   }
@@ -1283,11 +1394,8 @@ function setI18nLang(I18n, lang = FALLBACK_LANG, options = {}) {
       I18n &&
       typeof I18n === "object"
     ) {
-      I18n.lang =
-        cleanLang;
-
-      ok =
-        true;
+      I18n.lang = cleanLang;
+      ok = true;
     }
   } catch {}
 
@@ -1298,8 +1406,7 @@ async function setI18nLangAsync(I18n, lang = FALLBACK_LANG, options = {}) {
   const cleanLang =
     safeLang(lang, FALLBACK_LANG);
 
-  let ok =
-    false;
+  let ok = false;
 
   for (const methodName of SET_LANG_METHODS) {
     try {
@@ -1320,9 +1427,7 @@ async function setI18nLangAsync(I18n, lang = FALLBACK_LANG, options = {}) {
         await result;
       }
 
-      ok =
-        true;
-
+      ok = true;
       break;
     } catch {}
   }
@@ -1332,11 +1437,8 @@ async function setI18nLangAsync(I18n, lang = FALLBACK_LANG, options = {}) {
       I18n &&
       typeof I18n === "object"
     ) {
-      I18n.lang =
-        cleanLang;
-
-      ok =
-        true;
+      I18n.lang = cleanLang;
+      ok = true;
     }
   } catch {}
 
@@ -1357,8 +1459,7 @@ function getNestedValue(source = {}, path = "") {
       .split(".")
       .filter(Boolean);
 
-  let current =
-    source;
+  let current = source;
 
   for (const part of parts) {
     if (
@@ -1369,8 +1470,7 @@ function getNestedValue(source = {}, path = "") {
     }
 
     try {
-      current =
-        current[part];
+      current = current[part];
     } catch {
       return undefined;
     }
@@ -1389,8 +1489,7 @@ function getDictionaryForLang(I18n, lang = "") {
 
   for (const key of DICTIONARY_KEYS) {
     try {
-      const collection =
-        I18n?.[key];
+      const collection = I18n?.[key];
 
       if (
         collection &&
@@ -1411,11 +1510,8 @@ function getDictionaryForLang(I18n, lang = "") {
 }
 
 function interpolateText(value = "", params = {}) {
-  let output =
-    String(value ?? "");
-
-  const data =
-    ensureObject(params);
+  let output = String(value ?? "");
+  const data = ensureObject(params);
 
   for (const [key, item] of Object.entries(data)) {
     const safeKey =
@@ -1428,17 +1524,15 @@ function interpolateText(value = "", params = {}) {
         : String(item);
 
     try {
-      output =
-        output.replace(
-          new RegExp(`\\{\\{\\s*${safeKey}\\s*\\}\\}`, "g"),
-          replacement
-        );
+      output = output.replace(
+        new RegExp(`\\{\\{\\s*${safeKey}\\s*\\}\\}`, "g"),
+        replacement
+      );
 
-      output =
-        output.replace(
-          new RegExp(`\\{\\s*${safeKey}\\s*\\}`, "g"),
-          replacement
-        );
+      output = output.replace(
+        new RegExp(`\\{\\s*${safeKey}\\s*\\}`, "g"),
+        replacement
+      );
     } catch {}
   }
 
@@ -1501,8 +1595,7 @@ function isUsableTranslation(result, key = "", fallback = "") {
     return false;
   }
 
-  const text =
-    String(result).trim();
+  const text = String(result).trim();
 
   if (!text) {
     return false;
@@ -1546,7 +1639,7 @@ function translateWithI18n(I18n, key = "", fallback = "", params = {}) {
       }
 
       /*
-        Firma principal del core i18n actual:
+        Firma principal:
         I18n.t(key, params, fallback)
       */
       const result =
@@ -1606,9 +1699,7 @@ function translateWithI18n(I18n, key = "", fallback = "", params = {}) {
       }
 
       const result =
-        I18n[methodName](
-          cleanKey
-        );
+        I18n[methodName](cleanKey);
 
       if (
         isUsableTranslation(
@@ -1646,16 +1737,13 @@ function translateWithI18n(I18n, key = "", fallback = "", params = {}) {
    APP STATE / MODULE REGISTRY
 ========================================================= */
 
-function safeSetState(AppCore, payload = {}) {
-  const cleanPayload =
-    ensureObject(payload);
+function safeSetState(AppCore, payload = {}, options = {}) {
+  const cleanPayload = ensureObject(payload);
+  const opts = ensureObject(options);
 
-  try {
-    AppCore?.setState?.(
-      cleanPayload
-    );
-  } catch {}
-
+  /*
+    Directo primero para evitar emisiones accidentales.
+  */
   try {
     if (
       AppCore?.state &&
@@ -1668,6 +1756,22 @@ function safeSetState(AppCore, payload = {}) {
     }
   } catch {}
 
+  try {
+    AppCore?.setState?.(
+      cleanPayload,
+      {
+        source: I18N_SOURCE,
+        emit: opts.emit === true,
+        emitState: opts.emitState === true,
+        silent: opts.silent !== false,
+      }
+    );
+  } catch {
+    try {
+      AppCore?.setState?.(cleanPayload);
+    } catch {}
+  }
+
   return cleanPayload;
 }
 
@@ -1679,7 +1783,7 @@ function safePatchRouteState(AppCore, {
     safeText(publicPath, "/") || "/";
 
   const cleanCanonicalPath =
-    safeText(canonicalPath, "/") || "/";
+    safeText(canonicalPath, cleanPublicPath || "/") || "/";
 
   const patch = {
     publicPath:
@@ -1693,8 +1797,8 @@ function safePatchRouteState(AppCore, {
   };
 
   /*
-    No usamos setRoute/setPublicPath aquí para no emitir
-    app:route:change durante rerender de idioma.
+    No usamos setRoute/setPublicPath aquí para no emitir app:route:change
+    durante rerender de idioma.
   */
   try {
     if (
@@ -1710,13 +1814,24 @@ function safePatchRouteState(AppCore, {
 
   try {
     AppCore?.patchState?.(
-      patch
+      patch,
+      {
+        source: I18N_SOURCE,
+        emit: false,
+        silent: true,
+      }
     );
   } catch {}
 
   try {
     AppCore?.setState?.(
-      patch
+      patch,
+      {
+        source: I18N_SOURCE,
+        emit: false,
+        emitState: false,
+        silent: true,
+      }
     );
   } catch {}
 
@@ -1731,8 +1846,7 @@ function registerI18nModule(AppCore, I18n) {
     return false;
   }
 
-  let registered =
-    false;
+  let registered = false;
 
   try {
     registerModule(
@@ -1741,8 +1855,7 @@ function registerI18nModule(AppCore, I18n) {
       I18n
     );
 
-    registered =
-      true;
+    registered = true;
   } catch {}
 
   try {
@@ -1752,50 +1865,45 @@ function registerI18nModule(AppCore, I18n) {
       I18n
     );
 
-    registered =
-      true;
+    registered = true;
   } catch {}
 
   try {
-    const modules =
-      AppCore.modules;
+    const modules = AppCore.modules;
 
     if (modules) {
       if (isFunction(modules.register)) {
         modules.register(
           "i18n",
-          I18n
+          I18n,
+          {
+            overwrite: true,
+            replace: true,
+            source: I18N_SOURCE,
+          }
         );
 
         modules.register(
           "I18n",
-          I18n
+          I18n,
+          {
+            overwrite: true,
+            replace: true,
+            source: I18N_SOURCE,
+          }
         );
 
-        registered =
-          true;
+        registered = true;
       } else if (isFunction(modules.set)) {
-        modules.set(
-          "i18n",
-          I18n
-        );
+        modules.set("i18n", I18n);
+        modules.set("I18n", I18n);
 
-        modules.set(
-          "I18n",
-          I18n
-        );
-
-        registered =
-          true;
+        registered = true;
       } else if (isExtensibleObject(modules)) {
-        modules.i18n =
-          I18n;
+        modules.i18n = I18n;
+        modules.I18n = I18n;
 
-        modules.I18n =
-          I18n;
-
-        registered =
-          true;
+        registered = true;
       }
     }
   } catch {}
@@ -1806,26 +1914,32 @@ function registerI18nModule(AppCore, I18n) {
       isExtensibleObject(AppCore)
     ) {
       AppCore.modules = {
-        i18n:
-          I18n,
+        i18n: I18n,
         I18n,
       };
 
-      registered =
-        true;
+      registered = true;
     }
   } catch {}
 
   try {
     if (isExtensibleObject(AppCore)) {
-      AppCore.I18n =
-        I18n;
+      AppCore.I18n = I18n;
+      AppCore.i18n = I18n;
 
-      AppCore.i18n =
-        I18n;
+      registered = true;
+    }
+  } catch {}
 
-      registered =
-        true;
+  try {
+    if (
+      AppCore?.registry?.modules &&
+      isFunction(AppCore.registry.modules.set)
+    ) {
+      AppCore.registry.modules.set("i18n", I18n);
+      AppCore.registry.modules.set("I18n", I18n);
+
+      registered = true;
     }
   } catch {}
 
@@ -1846,8 +1960,7 @@ function resolveInitialLang(AppCore, I18n, preferred = "") {
   ];
 
   for (const candidate of candidates) {
-    const lang =
-      safeLang(candidate, "");
+    const lang = safeLang(candidate, "");
 
     if (
       lang &&
@@ -1880,14 +1993,12 @@ function bindCoreToI18n(AppCore, I18n) {
     return true;
   }
 
-  let ok =
-    false;
+  let ok = false;
 
   try {
     if (isFunction(I18n?.bindCore)) {
       I18n.bindCore(AppCore);
-      ok =
-        true;
+      ok = true;
     }
   } catch (error) {
     pushError(
@@ -1906,13 +2017,11 @@ function bindCoreToI18n(AppCore, I18n) {
   try {
     if (isFunction(I18n?.configure)) {
       I18n.configure({
-        core:
-          AppCore,
+        core: AppCore,
         AppCore,
       });
 
-      ok =
-        true;
+      ok = true;
     }
   } catch (error) {
     pushError(
@@ -1922,8 +2031,7 @@ function bindCoreToI18n(AppCore, I18n) {
     );
   }
 
-  boundCore =
-    AppCore;
+  boundCore = AppCore;
 
   return ok;
 }
@@ -1962,8 +2070,7 @@ function attachAppCoreBridge(AppCore, I18n, Router) {
     );
   };
 
-  let attached =
-    false;
+  let attached = false;
 
   attached =
     defineValue(
@@ -1994,25 +2101,16 @@ function attachAppCoreBridge(AppCore, I18n, Router) {
     ) || attached;
 
   try {
-    AppCore.changeLanguage =
-      changeLanguageBridge;
+    AppCore.changeLanguage = changeLanguageBridge;
+    AppCore.setLanguage = changeLanguageBridge;
+    AppCore.getLanguage = getLanguageBridge;
+    AppCore.t = tBridge;
 
-    AppCore.setLanguage =
-      changeLanguageBridge;
-
-    AppCore.getLanguage =
-      getLanguageBridge;
-
-    AppCore.t =
-      tBridge;
-
-    attached =
-      true;
+    attached = true;
   } catch {}
 
   if (attached) {
-    i18nState.bridgeReady =
-      true;
+    i18nState.bridgeReady = true;
 
     safeEmit(
       AppCore,
@@ -2027,9 +2125,6 @@ function attachAppCoreBridge(AppCore, I18n, Router) {
 
         at:
           safeIsoDate(),
-
-        source:
-          "app:i18n",
       }
     );
   }
@@ -2037,13 +2132,107 @@ function attachAppCoreBridge(AppCore, I18n, Router) {
   return attached;
 }
 
+function exposeDebugBridge(AppCore, I18n, Router) {
+  if (
+    debugBridgeReady &&
+    isBrowser() &&
+    window.__ONION_APP_I18N__
+  ) {
+    return true;
+  }
+
+  const api = {
+    version:
+      I18N_VERSION,
+
+    get:
+      () =>
+        getI18nSnapshot({
+          AppCore,
+          I18n,
+          Router,
+        }),
+
+    snapshot:
+      () =>
+        getI18nSnapshot({
+          AppCore,
+          I18n,
+          Router,
+        }),
+
+    change:
+      (lang, options = {}) =>
+        changeLanguage({
+          AppCore,
+          I18n,
+          Router,
+          ...ensureObject(options),
+          lang,
+        }),
+
+    t:
+      (key, fallback = "", params = {}) =>
+        translateWithI18n(
+          I18n,
+          key,
+          fallback,
+          params
+        ),
+
+    rerender:
+      (options = {}) =>
+        rerenderCurrentRoute({
+          AppCore,
+          I18n,
+          Router,
+          ...ensureObject(options),
+        }),
+
+    reset:
+      resetI18nRuntimeState,
+  };
+
+  try {
+    if (isBrowser()) {
+      window.__ONION_APP_I18N__ = api;
+    }
+  } catch {}
+
+  try {
+    if (isExtensibleObject(AppCore)) {
+      Object.defineProperty(
+        AppCore,
+        "I18nDebug",
+        {
+          value: api,
+          configurable: true,
+          enumerable: false,
+          writable: true,
+        }
+      );
+    }
+  } catch {}
+
+  debugBridgeReady = true;
+
+  safeEmit(
+    AppCore,
+    I18N_EVENTS.i18nDebugReady,
+    {
+      at: safeIsoDate(),
+    }
+  );
+
+  return true;
+}
+
 function bootI18nModule(AppCore, I18n, lang = FALLBACK_LANG) {
   if (!I18n) {
     return false;
   }
 
-  let booted =
-    false;
+  let booted = false;
 
   for (const methodName of INIT_METHODS) {
     try {
@@ -2054,15 +2243,11 @@ function bootI18nModule(AppCore, I18n, lang = FALLBACK_LANG) {
       const result =
         I18n[methodName]({
           AppCore,
-          core:
-            AppCore,
+          core: AppCore,
           lang,
-          fallbackLang:
-            FALLBACK_LANG,
-          defaultLang:
-            DEFAULT_LANG,
-          source:
-            "app:i18n",
+          fallbackLang: FALLBACK_LANG,
+          defaultLang: DEFAULT_LANG,
+          source: I18N_SOURCE,
         });
 
       if (
@@ -2078,9 +2263,7 @@ function bootI18nModule(AppCore, I18n, lang = FALLBACK_LANG) {
         });
       }
 
-      booted =
-        true;
-
+      booted = true;
       break;
     } catch (error) {
       pushError(
@@ -2138,17 +2321,15 @@ export function syncLangState(first = {}, second = null) {
   safeSetState(
     AppCore,
     {
-      lang:
-        finalLang,
-
-      fallbackLang:
-        FALLBACK_LANG,
-
-      defaultLang:
-        DEFAULT_LANG,
-
-      availableLangs:
-        available,
+      lang: finalLang,
+      fallbackLang: FALLBACK_LANG,
+      defaultLang: DEFAULT_LANG,
+      availableLangs: available,
+    },
+    {
+      emit: false,
+      emitState: false,
+      silent: true,
     }
   );
 
@@ -2158,12 +2339,9 @@ export function syncLangState(first = {}, second = null) {
     I18n,
     finalLang,
     {
-      silent:
-        true,
-
+      silent: true,
       reason,
-      source:
-        "app:i18n:sync",
+      source: "app:i18n:sync",
     }
   );
 
@@ -2171,31 +2349,19 @@ export function syncLangState(first = {}, second = null) {
     writeStoredLang(finalLang);
   }
 
-  i18nState.lastLang =
-    finalLang;
-
+  i18nState.lastLang = finalLang;
   i18nState.lastReason =
     safeText(
       reason,
       "sync-lang-state"
     );
-
-  i18nState.lastSyncAt =
-    safeNow();
-
-  i18nState.syncCount +=
-    1;
+  i18nState.lastSyncAt = safeNow();
+  i18nState.syncCount += 1;
 
   const payload = {
-    lang:
-      finalLang,
-
-    fallbackLang:
-      FALLBACK_LANG,
-
-    defaultLang:
-      DEFAULT_LANG,
-
+    lang: finalLang,
+    fallbackLang: FALLBACK_LANG,
+    defaultLang: DEFAULT_LANG,
     available,
 
     reason:
@@ -2203,9 +2369,6 @@ export function syncLangState(first = {}, second = null) {
 
     at:
       safeIsoDate(i18nState.lastSyncAt),
-
-    source:
-      "app:i18n",
   };
 
   if (emit) {
@@ -2260,13 +2423,17 @@ export function initI18n(first = {}, second = null) {
         AppCore,
         I18n,
         Router,
-        lang:
-          preferredLang,
-        reason:
-          "init-i18n:already-initialized",
+        lang: preferredLang,
+        reason: "init-i18n:already-initialized",
       });
 
     attachAppCoreBridge(
+      AppCore,
+      I18n,
+      Router
+    );
+
+    exposeDebugBridge(
       AppCore,
       I18n,
       Router
@@ -2302,14 +2469,9 @@ export function initI18n(first = {}, second = null) {
     I18n,
     initialLang,
     {
-      silent:
-        true,
-
-      reason:
-        "init-i18n",
-
-      source:
-        "app:i18n:init",
+      silent: true,
+      reason: "init-i18n",
+      source: "app:i18n:init",
     }
   );
 
@@ -2318,10 +2480,8 @@ export function initI18n(first = {}, second = null) {
       AppCore,
       I18n,
       Router,
-      lang:
-        initialLang,
-      reason:
-        "init-i18n",
+      lang: initialLang,
+      reason: "init-i18n",
     });
 
   attachAppCoreBridge(
@@ -2330,47 +2490,39 @@ export function initI18n(first = {}, second = null) {
     Router
   );
 
-  initialized =
-    true;
+  exposeDebugBridge(
+    AppCore,
+    I18n,
+    Router
+  );
 
-  i18nState.initialized =
-    true;
+  initialized = true;
+  i18nState.initialized = true;
 
   if (state) {
     try {
-      state.i18nInitialized =
-        true;
+      state.i18nInitialized = true;
     } catch {}
   }
 
   safeSetState(
     AppCore,
     {
-      i18nInitialized:
-        true,
+      i18nInitialized: true,
+    },
+    {
+      emit: false,
+      silent: true,
     }
   );
 
   const payload = {
     lang,
-
-    fallbackLang:
-      FALLBACK_LANG,
-
-    defaultLang:
-      DEFAULT_LANG,
-
-    available:
-      getAvailableLangs(I18n),
-
-    scope:
-      DEFAULT_SCOPE,
-
-    at:
-      safeIsoDate(),
-
-    source:
-      "app:i18n",
+    fallbackLang: FALLBACK_LANG,
+    defaultLang: DEFAULT_LANG,
+    available: getAvailableLangs(I18n),
+    scope: DEFAULT_SCOPE,
+    at: safeIsoDate(),
   };
 
   safeEmit(
@@ -2416,8 +2568,7 @@ export async function changeLanguage(first = {}, second = null) {
     Router,
   });
 
-  const sequence =
-    ++changeSequence;
+  const sequence = ++changeSequence;
 
   const requestedLang =
     safeLang(
@@ -2447,16 +2598,14 @@ export async function changeLanguage(first = {}, second = null) {
   i18nState.lastRequestedLang =
     requestedLang || finalLang;
 
-  i18nState.changeCount +=
-    1;
+  i18nState.changeCount += 1;
 
   await setI18nLangAsync(
     I18n,
     finalLang,
     {
       reason,
-      source:
-        "app:i18n:change",
+      source: "app:i18n:change",
       sequence,
     }
   );
@@ -2465,32 +2614,20 @@ export async function changeLanguage(first = {}, second = null) {
     AppCore,
     I18n,
     Router,
-    lang:
-      finalLang,
+    lang: finalLang,
     reason,
     persist,
-    emit:
-      false,
+    emit: false,
   });
 
   const payload = {
-    lang:
-      finalLang,
+    lang: finalLang,
+    requestedLang: requestedLang || finalLang,
+    previousLang: currentLang,
 
-    requestedLang:
-      requestedLang || finalLang,
-
-    previousLang:
-      currentLang,
-
-    fallbackLang:
-      FALLBACK_LANG,
-
-    defaultLang:
-      DEFAULT_LANG,
-
-    available:
-      getAvailableLangs(I18n),
+    fallbackLang: FALLBACK_LANG,
+    defaultLang: DEFAULT_LANG,
+    available: getAvailableLangs(I18n),
 
     reason:
       safeText(
@@ -2499,24 +2636,19 @@ export async function changeLanguage(first = {}, second = null) {
       ),
 
     /*
-      CLAVE:
-      src/app/events.js escucha app:lang:change y rerenderiza
-      si payload.rerender !== false.
-      Aquí el rerender lo gestiona AppI18n, por tanto bloqueamos doble render.
+      Clave anti doble render:
+      src/app/events.js sólo rerenderiza si se pide explícitamente
+      con rerenderByEvents/appEventsRerender/forceEventsRerender.
+      Aun así dejamos flags defensivos.
     */
-    rerender:
-      false,
-
-    rerenderHandledBy:
-      "app:i18n",
+    rerender: false,
+    rerenderByEvents: false,
+    appEventsRerender: false,
+    forceEventsRerender: false,
+    rerenderHandledBy: "app:i18n",
 
     sequence,
-
-    at:
-      safeIsoDate(),
-
-    source:
-      "app:i18n",
+    at: safeIsoDate(),
   };
 
   if (emit) {
@@ -2534,8 +2666,7 @@ export async function changeLanguage(first = {}, second = null) {
       I18n,
       applyPostRenderLoaderPolicy,
       syncUserUI,
-      reason:
-        `${reason}:rerender`,
+      reason: `${reason}:rerender`,
       sequence,
     });
   }
@@ -2594,8 +2725,7 @@ function getPathFromStateByKeys(state = {}, keys = []) {
 }
 
 function resolveCurrentPaths(AppCore, Router) {
-  const state =
-    ensureObject(AppCore?.state);
+  const state = ensureObject(AppCore?.state);
 
   const routerPublic =
     safeText(
@@ -2665,11 +2795,8 @@ function resolveCurrentPaths(AppCore, Router) {
     rawPublicPath ||
     "/";
 
-  let publicPath =
-    rawPublicPath;
-
-  let canonicalPath =
-    rawCanonicalPath;
+  let publicPath = rawPublicPath;
+  let canonicalPath = rawCanonicalPath;
 
   try {
     publicPath =
@@ -2695,7 +2822,7 @@ function resolveCurrentPaths(AppCore, Router) {
       canonicalPath || "/",
 
     renderPath:
-      publicPath || canonicalPath || "/",
+      canonicalPath || publicPath || "/",
   };
 }
 
@@ -2728,27 +2855,22 @@ async function runRouterRender({
       await Promise.resolve(
         Router[methodName]({
           reason,
-          force:
-            true,
-          source:
-            "app:i18n",
+          force: true,
+          source: I18N_SOURCE,
           sequence,
-          preservePublicPath:
-            true,
-          preserveSearch:
-            true,
-          preserveHash:
-            true,
-          i18nRerender:
-            true,
+          preservePublicPath: true,
+          preserveSearch: true,
+          preserveHash: true,
+          i18nRerender: true,
+          canonicalPath: cleanCanonicalPath,
+          publicPath: cleanPublicPath || cleanCanonicalPath,
+          requestedPath: cleanPublicPath || cleanCanonicalPath,
         })
       );
 
       return {
-        ok:
-          true,
-        method:
-          methodName,
+        ok: true,
+        method: methodName,
       };
     } catch (error) {
       safeWarn(
@@ -2761,57 +2883,41 @@ async function runRouterRender({
 
   try {
     if (isFunction(Router?.render)) {
+      /*
+        CRÍTICO:
+        Primer argumento canónico.
+        publicPath queda en options para preservar /@usuario/...
+      */
       await Promise.resolve(
         Router.render(
-          cleanPublicPath || cleanCanonicalPath,
+          cleanCanonicalPath,
           {
-            skipHistory:
-              true,
+            skipHistory: true,
+            replaceState: false,
 
-            replaceState:
-              false,
-
-            force:
-              true,
-
-            forceRender:
-              true,
+            force: true,
+            forceRender: true,
 
             reason,
-            source:
-              "app:i18n",
+            source: I18N_SOURCE,
 
-            canonicalPath:
-              cleanCanonicalPath,
+            canonicalPath: cleanCanonicalPath,
+            publicPath: cleanPublicPath || cleanCanonicalPath,
+            requestedPath: cleanPublicPath || cleanCanonicalPath,
 
-            publicPath:
-              cleanPublicPath || cleanCanonicalPath,
+            preservePublicPath: true,
+            preserveSearch: true,
+            preserveHash: true,
 
-            requestedPath:
-              cleanPublicPath || cleanCanonicalPath,
-
-            preservePublicPath:
-              true,
-
-            preserveSearch:
-              true,
-
-            preserveHash:
-              true,
-
-            i18nRerender:
-              true,
-
+            i18nRerender: true,
             sequence,
           }
         )
       );
 
       return {
-        ok:
-          true,
-        method:
-          "render",
+        ok: true,
+        method: "render",
       };
     }
   } catch (error) {
@@ -2828,38 +2934,29 @@ async function runRouterRender({
         Router.navigate(
           cleanPublicPath || cleanCanonicalPath,
           {
-            replaceState:
-              true,
-
-            force:
-              true,
+            replaceState: true,
+            force: true,
 
             reason,
-            source:
-              "app:i18n",
+            source: I18N_SOURCE,
 
-            preservePublicPath:
-              true,
+            preservePublicPath: true,
+            preserveSearch: true,
+            preserveHash: true,
 
-            preserveSearch:
-              true,
+            canonicalPath: cleanCanonicalPath,
+            publicPath: cleanPublicPath || cleanCanonicalPath,
+            requestedPath: cleanPublicPath || cleanCanonicalPath,
 
-            preserveHash:
-              true,
-
-            i18nRerender:
-              true,
-
+            i18nRerender: true,
             sequence,
           }
         )
       );
 
       return {
-        ok:
-          true,
-        method:
-          "navigate",
+        ok: true,
+        method: "navigate",
       };
     }
   } catch (error) {
@@ -2871,10 +2968,8 @@ async function runRouterRender({
   }
 
   return {
-    ok:
-      false,
-    method:
-      "",
+    ok: false,
+    method: "",
   };
 }
 
@@ -2903,10 +2998,10 @@ function syncAfterRender({
       AppCore,
       Router,
       reason,
-      path:
-        canonicalPath || publicPath || "/",
-      hideLoaderOnPostRender:
-        false,
+      path: canonicalPath || publicPath || "/",
+      publicPath: publicPath || canonicalPath || "/",
+      canonicalPath: canonicalPath || publicPath || "/",
+      hideLoaderOnPostRender: false,
     });
   } catch {}
 
@@ -2918,12 +3013,9 @@ function syncAfterRender({
         reason,
         publicPath,
         canonicalPath,
-        rebind:
-          false,
-        hardRepair:
-          false,
-        force:
-          true,
+        rebind: false,
+        hardRepair: false,
+        force: true,
       });
 
       return true;
@@ -2948,9 +3040,7 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
   rememberRuntimeDeps(deps);
 
   if (rerenderPromise) {
-    rerenderQueued =
-      true;
-
+    rerenderQueued = true;
     return rerenderPromise;
   }
 
@@ -2964,11 +3054,9 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
         syncUserUI,
         reason = "i18n-rerender",
         sequence = changeSequence,
-      } =
-        deps;
+      } = deps;
 
-      i18nState.rerendering =
-        true;
+      i18nState.rerendering = true;
 
       const paths =
         resolveCurrentPaths(
@@ -2981,21 +3069,19 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
           AppCore,
           I18n,
           Router,
-          reason:
-            `${reason}:pre-render`,
-          emit:
-            false,
+          reason: `${reason}:pre-render`,
+          emit: false,
         });
 
       const startPayload = {
         publicPath:
-          redactTokenInText(paths.publicPath),
+          redactText(paths.publicPath),
 
         canonicalPath:
-          redactTokenInText(paths.canonicalPath),
+          redactText(paths.canonicalPath),
 
         renderPath:
-          redactTokenInText(paths.renderPath),
+          redactText(paths.renderPath),
 
         lang,
 
@@ -3006,12 +3092,7 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
           ),
 
         sequence,
-
-        at:
-          safeIsoDate(),
-
-        source:
-          "app:i18n",
+        at: safeIsoDate(),
       };
 
       safeEmit(
@@ -3031,45 +3112,30 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
           await runRouterRender({
             AppCore,
             Router,
-            publicPath:
-              paths.publicPath,
-            canonicalPath:
-              paths.canonicalPath,
-            reason:
-              startPayload.reason,
+            publicPath: paths.publicPath,
+            canonicalPath: paths.canonicalPath,
+            reason: startPayload.reason,
             sequence,
           });
 
         syncAfterRender({
           AppCore,
           Router,
-          publicPath:
-            paths.publicPath,
-          canonicalPath:
-            paths.canonicalPath,
+          publicPath: paths.publicPath,
+          canonicalPath: paths.canonicalPath,
           applyPostRenderLoaderPolicy,
           syncUserUI,
-          reason:
-            startPayload.reason,
+          reason: startPayload.reason,
         });
 
-        i18nState.rerenderCount +=
-          1;
-
-        i18nState.lastRerenderAt =
-          safeNow();
+        i18nState.rerenderCount += 1;
+        i18nState.lastRerenderAt = safeNow();
 
         const donePayload = {
           ...startPayload,
-
-          ok:
-            Boolean(renderResult.ok),
-
-          method:
-            renderResult.method || "",
-
-          at:
-            safeIsoDate(),
+          ok: Boolean(renderResult.ok),
+          method: renderResult.method || "",
+          at: safeIsoDate(),
         };
 
         safeEmit(
@@ -3091,7 +3157,6 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
           I18N_EVENTS.i18nRerenderError,
           {
             ...startPayload,
-
             message:
               safeText(
                 error?.message || error,
@@ -3108,21 +3173,16 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
 
         return false;
       } finally {
-        i18nState.rerendering =
-          false;
-
-        rerenderPromise =
-          null;
+        i18nState.rerendering = false;
+        rerenderPromise = null;
 
         if (rerenderQueued) {
-          rerenderQueued =
-            false;
+          rerenderQueued = false;
 
           safeSetTimeout(() => {
             rerenderCurrentRoute({
               ...deps,
-              reason:
-                "i18n-rerender:queued",
+              reason: "i18n-rerender:queued",
             });
           }, 0);
         }
@@ -3137,17 +3197,10 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
 ========================================================= */
 
 export function t(first = {}, second = "", third = {}, fourth = {}) {
-  let I18n =
-    currentI18nRef;
-
-  let key =
-    "";
-
-  let fallback =
-    "";
-
-  let params =
-    {};
+  let I18n = currentI18nRef;
+  let key = "";
+  let fallback = "";
+  let params = {};
 
   if (
     isObject(first) &&
@@ -3241,7 +3294,10 @@ export function getI18nSnapshot(first = {}, second = null) {
   const storedLang =
     readStoredLang();
 
-  return {
+  return sanitizePayload({
+    version:
+      I18N_VERSION,
+
     initialized:
       Boolean(
         initialized ||
@@ -3260,6 +3316,9 @@ export function getI18nSnapshot(first = {}, second = null) {
 
     bridgeReady:
       Boolean(i18nState.bridgeReady),
+
+    debugBridgeReady:
+      Boolean(debugBridgeReady),
 
     lang:
       safeLang(
@@ -3336,69 +3395,35 @@ export function getI18nSnapshot(first = {}, second = null) {
 
     errors:
       i18nState.errors,
-  };
+  });
 }
 
 export function resetI18nRuntimeState() {
-  initialized =
-    false;
+  initialized = false;
+  boundCore = null;
 
-  boundCore =
-    null;
+  currentAppCoreRef = null;
+  currentI18nRef = null;
+  currentRouterRef = null;
 
-  currentAppCoreRef =
-    null;
+  rerenderPromise = null;
+  rerenderQueued = false;
 
-  currentI18nRef =
-    null;
+  changeSequence = 0;
+  debugBridgeReady = false;
 
-  currentRouterRef =
-    null;
-
-  rerenderPromise =
-    null;
-
-  rerenderQueued =
-    false;
-
-  changeSequence =
-    0;
-
-  i18nState.initialized =
-    false;
-
-  i18nState.lastLang =
-    "";
-
-  i18nState.lastRequestedLang =
-    "";
-
-  i18nState.lastReason =
-    "";
-
-  i18nState.lastSyncAt =
-    0;
-
-  i18nState.lastRerenderAt =
-    0;
-
-  i18nState.rerendering =
-    false;
-
-  i18nState.rerenderCount =
-    0;
-
-  i18nState.syncCount =
-    0;
-
-  i18nState.changeCount =
-    0;
-
-  i18nState.bridgeReady =
-    false;
-
-  i18nState.errors =
-    [];
+  i18nState.initialized = false;
+  i18nState.lastLang = "";
+  i18nState.lastRequestedLang = "";
+  i18nState.lastReason = "";
+  i18nState.lastSyncAt = 0;
+  i18nState.lastRerenderAt = 0;
+  i18nState.rerendering = false;
+  i18nState.rerenderCount = 0;
+  i18nState.syncCount = 0;
+  i18nState.changeCount = 0;
+  i18nState.bridgeReady = false;
+  i18nState.errors = [];
 
   return getI18nSnapshot();
 }
@@ -3408,6 +3433,8 @@ export function resetI18nRuntimeState() {
 ========================================================= */
 
 export default {
+  I18N_VERSION,
+
   syncLangState,
   initI18n,
 

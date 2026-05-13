@@ -2,7 +2,13 @@
    Onion SPA - Router Guards
    Archivo: src/router/guards.js
 
-   FINAL EXTREME SYSTEM · ROUTER GUARDS · AUTH / ROLES / REDIRECTS · 10/10
+   FINAL EXTREME SYSTEM · ROUTER GUARDS · AUTH / ROLES / REDIRECTS · 11/10
+   PUBLIC TECHNICAL ROUTES SAFE
+   GHOST AUTH BLOCKED
+   ROLE ALIASES HARDENED
+   REDIRECTS SAFE
+   USERNAME PUBLIC PATH SAFE
+   HASH ROUTER TOKEN ROUTES SAFE
 
    RESPONSABILIDADES:
    - resolver acceso a rutas
@@ -53,7 +59,7 @@ import {
 ========================================================= */
 
 export const GUARDS_VERSION =
-  "10.0.0";
+  "11.0.0";
 
 const LOGIN_PATH =
   "/login";
@@ -104,6 +110,7 @@ const ADMIN_ROLE_KEYS =
     "superadmin",
     "super_admin",
     "super_administrador",
+    "super-administrador",
 
     "owner",
     "root",
@@ -223,6 +230,9 @@ export const GUARD_REASONS =
 
     loginTransition:
       "login-transition-active",
+
+    ghostAuth:
+      "ghost-auth-blocked",
   });
 
 /* =========================================================
@@ -398,6 +408,33 @@ function normalizePathnameOnly(pathname = "/") {
 
   if (!value.startsWith("/")) {
     value = `/${value}`;
+  }
+
+  const segments =
+    value
+      .split("/")
+      .filter(Boolean);
+
+  const output = [];
+
+  for (const segment of segments) {
+    if (segment === ".") {
+      continue;
+    }
+
+    if (segment === "..") {
+      output.pop();
+      continue;
+    }
+
+    output.push(segment);
+  }
+
+  value =
+    `/${output.join("/")}`;
+
+  if (!value) {
+    value = "/";
   }
 
   if (value.length > 1) {
@@ -583,14 +620,14 @@ function stripPublicUsernamePrefix(path = "/") {
 }
 
 function normalizePublicPath(path = "/") {
-  const stripped =
+  const normalized =
     normalizeFullPath(path || "/");
 
-  if (!stripped.startsWith("/")) {
-    return `/${stripped}`;
+  if (!normalized.startsWith("/")) {
+    return `/${normalized}`;
   }
 
-  return stripped;
+  return normalized;
 }
 
 function safeCanonicalPath(AppCore = null, path = "/") {
@@ -627,7 +664,7 @@ function isSafeRelativePath(path = "") {
   if (!raw.startsWith("/")) return false;
   if (raw.startsWith("//")) return false;
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return false;
-  if (/[\r\n\t]/.test(raw)) return false;
+  if (/[\r\n\t\\]/.test(raw)) return false;
 
   return true;
 }
@@ -902,6 +939,17 @@ function expandRoleAliases(roles = []) {
     result.add("manager");
   }
 
+  for (const role of normalized) {
+    const group =
+      ROLE_GROUPS[role];
+
+    if (group instanceof Set) {
+      for (const item of group) {
+        result.add(item);
+      }
+    }
+  }
+
   return unique(
     Array.from(result)
   );
@@ -922,7 +970,6 @@ function getRoutePath(route) {
     first(
       route?.path,
       route?.canonicalPath,
-      route?.name,
       "/"
     )
   );
@@ -1266,9 +1313,35 @@ function getCurrentToken(AppCore = null, Auth = null) {
 }
 
 function hasUsableToken(token = "") {
-  return Boolean(
-    safeText(token, "")
-  );
+  const text =
+    safeText(token, "");
+
+  if (!text) {
+    return false;
+  }
+
+  const lower =
+    text.toLowerCase();
+
+  if (
+    [
+      "null",
+      "undefined",
+      "false",
+      "true",
+      "nan",
+      "none",
+      "[object object]",
+    ].includes(lower)
+  ) {
+    return false;
+  }
+
+  if (/[\s\r\n\t]/.test(text)) {
+    return false;
+  }
+
+  return true;
 }
 
 function hasUsableUser(user = null) {
@@ -1300,16 +1373,24 @@ function getUserRoleCandidates(AppCore = null, Auth = null) {
   const rawUser =
     safeObject(user?.raw);
 
+  const profile =
+    safeObject(user?.profile);
+
+  const rawProfile =
+    safeObject(rawUser?.profile);
+
   const roleCandidates = [
     state.role,
     state.rol,
     state.userRole,
     state.type,
+    state.perfil,
 
     session.role,
     session.rol,
     session.userRole,
     session.type,
+    session.perfil,
 
     user.role,
     user.rol,
@@ -1319,7 +1400,12 @@ function getUserRoleCandidates(AppCore = null, Auth = null) {
     user.userType,
     user.user_type,
     user.perfil,
-    user.profile,
+
+    profile.role,
+    profile.rol,
+    profile.userRole,
+    profile.type,
+    profile.perfil,
 
     rawUser.role,
     rawUser.rol,
@@ -1329,7 +1415,12 @@ function getUserRoleCandidates(AppCore = null, Auth = null) {
     rawUser.userType,
     rawUser.user_type,
     rawUser.perfil,
-    rawUser.profile,
+
+    rawProfile.role,
+    rawProfile.rol,
+    rawProfile.userRole,
+    rawProfile.type,
+    rawProfile.perfil,
 
     Auth?.role,
     Auth?.rol,
@@ -1373,6 +1464,12 @@ function getUserRoleCandidates(AppCore = null, Auth = null) {
     user.groups,
     user.authorities,
 
+    profile.roles,
+    profile.permissions,
+    profile.scopes,
+    profile.groups,
+    profile.authorities,
+
     rawUser.roles,
     rawUser.roleList,
     rawUser.role_list,
@@ -1380,6 +1477,12 @@ function getUserRoleCandidates(AppCore = null, Auth = null) {
     rawUser.scopes,
     rawUser.groups,
     rawUser.authorities,
+
+    rawProfile.roles,
+    rawProfile.permissions,
+    rawProfile.scopes,
+    rawProfile.groups,
+    rawProfile.authorities,
 
     Auth?.roles,
     Auth?.permissions,
@@ -1417,12 +1520,26 @@ function getUserRoleCandidates(AppCore = null, Auth = null) {
     user.canManageUsers,
     user.canAccessUsers,
 
+    profile.isAdmin,
+    profile.admin,
+    profile.isSuperAdmin,
+    profile.superAdmin,
+    profile.canManageUsers,
+    profile.canAccessUsers,
+
     rawUser.isAdmin,
     rawUser.admin,
     rawUser.isSuperAdmin,
     rawUser.superAdmin,
     rawUser.canManageUsers,
     rawUser.canAccessUsers,
+
+    rawProfile.isAdmin,
+    rawProfile.admin,
+    rawProfile.isSuperAdmin,
+    rawProfile.superAdmin,
+    rawProfile.canManageUsers,
+    rawProfile.canAccessUsers,
   ].some((value) =>
     safeBoolean(value, false)
   );
@@ -1488,27 +1605,36 @@ function isAuthenticated(AppCore = null, Auth = null) {
   const user =
     getCurrentUser(AppCore, Auth);
 
-  const strictAuthenticated =
+  /*
+    Regla anti-auth fantasma:
+    - token sin user NO autentica.
+    - user sin token NO autentica.
+  */
+  return Boolean(
+    hasUsableToken(token) &&
+      hasUsableUser(user)
+  );
+}
+
+function hasGhostAuth(AppCore = null, Auth = null) {
+  const token =
+    getCurrentToken(AppCore, Auth);
+
+  const user =
+    getCurrentUser(AppCore, Auth);
+
+  const appSaysAuth =
     Boolean(
-      hasUsableToken(token) &&
-        hasUsableUser(user)
+      AppCore?.state?.authenticated ||
+        getAuthApiAuthenticated(Auth)
     );
 
-  if (!strictAuthenticated) {
-    return false;
-  }
-
-  /*
-    Auth.isAuthenticated() puede existir y fallar por timing.
-    Si devuelve false explícito pero el estado estricto token+user es válido,
-    se respeta el estado estricto para evitar falsos negativos post-restore.
-  */
-  const apiAuthenticated =
-    getAuthApiAuthenticated(Auth);
-
   return Boolean(
-    strictAuthenticated ||
-      apiAuthenticated
+    appSaysAuth &&
+      (
+        !hasUsableToken(token) ||
+        !hasUsableUser(user)
+      )
   );
 }
 
@@ -1692,6 +1818,12 @@ function buildDecisionDetails({
     logged:
       isAuthenticated(AppCore, Auth),
 
+    authApiAuthenticated:
+      getAuthApiAuthenticated(Auth),
+
+    ghostAuth:
+      hasGhostAuth(AppCore, Auth),
+
     hasToken:
       hasUsableToken(token),
 
@@ -1766,7 +1898,7 @@ export function shouldAllowRoute({
 
   /*
     Prioridad absoluta:
-    rutas públicas técnicas pasan siempre, incluso con sesión.
+    rutas públicas técnicas pasan siempre, incluso con sesión previa.
   */
   if (
     isPublicTechnicalRoute(
@@ -1799,6 +1931,12 @@ export function shouldAllowRoute({
 
   const logged =
     isAuthenticated(
+      AppCore,
+      Auth
+    );
+
+  const ghostAuth =
+    hasGhostAuth(
       AppCore,
       Auth
     );
@@ -1899,6 +2037,7 @@ export function shouldAllowRoute({
 
   /*
     Auth obligatoria.
+    Si hay ghost auth, se trata como no autenticado.
   */
   if (
     requiresAuth &&
@@ -1906,7 +2045,9 @@ export function shouldAllowRoute({
   ) {
     return buildDenyResult({
       reason:
-        GUARD_REASONS.notAuthenticated,
+        ghostAuth
+          ? GUARD_REASONS.ghostAuth
+          : GUARD_REASONS.notAuthenticated,
 
       route,
 
@@ -1930,6 +2071,7 @@ export function shouldAllowRoute({
           extra: {
             requiresAuth,
             allowedRoles,
+            ghostAuth,
           },
         }),
     });
@@ -1944,7 +2086,9 @@ export function shouldAllowRoute({
   ) {
     return buildDenyResult({
       reason:
-        GUARD_REASONS.notAuthenticated,
+        ghostAuth
+          ? GUARD_REASONS.ghostAuth
+          : GUARD_REASONS.notAuthenticated,
 
       route,
 
@@ -1969,6 +2113,7 @@ export function shouldAllowRoute({
             requiresAuth:
               true,
             allowedRoles,
+            ghostAuth,
           },
         }),
     });
@@ -2043,6 +2188,7 @@ export function shouldAllowRoute({
           reason:
             GUARD_REASONS.allow,
           logged,
+          ghostAuth,
           currentRole,
           userRoles,
           guestOnly,
@@ -2142,6 +2288,12 @@ export function getGuardsSnapshot({
     auth: {
       logged:
         isAuthenticated(
+          AppCore,
+          Auth
+        ),
+
+      ghostAuth:
+        hasGhostAuth(
           AppCore,
           Auth
         ),

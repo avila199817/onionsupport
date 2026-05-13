@@ -3,7 +3,7 @@
    Archivo: src/core/helpers.js
 
    ONION SUPPORT · CORE HELPERS
-   PATHS · USER · URL · REQUEST · TOKEN SAFE · 13/10
+   PATHS · USER · URL · REQUEST · TOKEN SAFE · 14/10
 
    RESPONSABILIDADES:
    - utilidades base del core
@@ -14,6 +14,9 @@
    - soporte robusto de avatar backend /me
    - redacción segura de tokens para logs/snapshots
    - soporte hash-router y hashbang
+   - construir URLs API sin doble /api
+   - impedir que /api/auth/me sea tratado como público
+   - reforzar backend canónico api.onionit.net en producción
 
    HARDENING EXTREMO:
    - sanitize estricto de username
@@ -41,8 +44,8 @@ import { config } from "./config.js";
    CONSTANTS
 ========================================================= */
 
-const HELPERS_VERSION =
-  "13.0.0";
+export const HELPERS_VERSION =
+  "14.0.0";
 
 const DEFAULT_ROUTE =
   "/";
@@ -52,6 +55,17 @@ const LOCAL_ORIGIN =
 
 const DEFAULT_STORAGE_PREFIX =
   "onion";
+
+const CANONICAL_PRODUCTION_API_BASE =
+  "https://api.onionit.net";
+
+const FORBIDDEN_FRONTEND_API_ORIGINS =
+  Object.freeze([
+    "https://onionsupport.com",
+    "https://www.onionsupport.com",
+    "http://onionsupport.com",
+    "http://www.onionsupport.com",
+  ]);
 
 const SAFE_USERNAME_MAX =
   64;
@@ -90,9 +104,14 @@ const TOKEN_PARAM_NAMES =
     "token",
     "activationToken",
     "activateToken",
+    "activation_token",
+    "activate_token",
     "resetToken",
     "passwordResetToken",
+    "reset_token",
+    "password_reset_token",
     "confirmToken",
+    "confirm_token",
     "tempToken",
     "temp_token",
     "temporaryToken",
@@ -136,9 +155,15 @@ const DEFAULT_PUBLIC_API_PATHS =
     "/auth/otp/request",
     "/auth/otp/verify",
     "/auth/activate",
+    "/auth/activate-account",
+    "/auth/activate/first-user",
     "/auth/reset",
     "/auth/reset-password",
     "/auth/password/reset",
+    "/auth/reset-password-request",
+    "/auth/reset-password-confirm",
+    "/auth/2fa/login",
+
     "/activate-account",
     "/reset-password",
     "/reset-password/confirm",
@@ -150,13 +175,17 @@ const DEFAULT_PUBLIC_API_PATHS =
     "/api/auth/otp/request",
     "/api/auth/otp/verify",
     "/api/auth/activate",
+    "/api/auth/activate-account",
+    "/api/auth/activate/first-user",
     "/api/auth/reset",
     "/api/auth/reset-password",
     "/api/auth/password/reset",
     "/api/auth/reset-password-request",
     "/api/auth/reset-password-confirm",
-    "/api/auth/activate/first-user",
+    "/api/auth/reset-password/validate",
     "/api/auth/2fa/login",
+    "/api/auth/2fa/request",
+    "/api/auth/2fa/resend",
     "/api/auth/_health",
     "/api/_health",
     "/api/activate-account",
@@ -1133,6 +1162,79 @@ export function buildPublicPath(path = DEFAULT_ROUTE, username = "") {
    URL / REQUEST
 ========================================================= */
 
+function getOriginFromUrlLike(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    if (isAbsoluteUrl(raw)) {
+      return new URL(raw).origin;
+    }
+
+    return new URL(raw, getBaseOrigin()).origin;
+  } catch {
+    return "";
+  }
+}
+
+function isForbiddenFrontendApiBase(value = "") {
+  const origin =
+    getOriginFromUrlLike(value);
+
+  if (!origin) {
+    return false;
+  }
+
+  return FORBIDDEN_FRONTEND_API_ORIGINS.includes(origin);
+}
+
+function isProductionEnv() {
+  const env =
+    safeLower(
+      config?.env ||
+        config?.environment ||
+        "",
+      ""
+    );
+
+  return (
+    env === "production" ||
+    env === "prod"
+  );
+}
+
+export function getSafeApiBase() {
+  const apiBase =
+    normalizeApiBase(
+      config?.apiBase ||
+        config?.api?.base ||
+        config?.api?.baseUrl ||
+        ""
+    );
+
+  if (
+    isProductionEnv() &&
+    (
+      !apiBase ||
+      apiBase === "/api" ||
+      apiBase === "api" ||
+      isForbiddenFrontendApiBase(apiBase)
+    )
+  ) {
+    return CANONICAL_PRODUCTION_API_BASE;
+  }
+
+  if (isForbiddenFrontendApiBase(apiBase)) {
+    return CANONICAL_PRODUCTION_API_BASE;
+  }
+
+  return apiBase;
+}
+
 function getBasePathFromUrlLike(base = "") {
   const cleanBase =
     normalizeApiBase(base);
@@ -1318,9 +1420,7 @@ export function buildUrl(path = "", query = null) {
     String(path || "").trim();
 
   const apiBase =
-    normalizeApiBase(
-      config?.apiBase || ""
-    );
+    getSafeApiBase();
 
   const baseUrl =
     isAbsoluteUrl(rawPath)
@@ -1375,9 +1475,7 @@ export function hasValidToken(token = null) {
 
 function getApiBasePath() {
   const apiBase =
-    normalizeApiBase(
-      config?.apiBase || ""
-    );
+    getSafeApiBase();
 
   if (!apiBase) {
     return "";
@@ -1457,12 +1555,20 @@ export function isPublicApiPath(path = "") {
   const normalized =
     normalizeCanonicalPath(path);
 
+  /*
+    Blindaje explícito:
+    /me nunca público. request.js debe inyectar Authorization.
+  */
   if (isExplicitPrivateApiPath(normalized)) {
     return false;
   }
 
   const withoutApiBase =
     stripApiBasePrefix(normalized);
+
+  if (isExplicitPrivateApiPath(withoutApiBase)) {
+    return false;
+  }
 
   const list =
     getConfiguredPublicApiPaths();
@@ -1578,6 +1684,7 @@ function normalizeActive(user = {}) {
         user.estado ||
         user.state ||
         user.accountStatus ||
+        user.account_status ||
         "",
       ""
     ).toLowerCase();
@@ -1590,6 +1697,13 @@ function normalizeActive(user = {}) {
       "blocked",
       "suspended",
       "banned",
+      "archived",
+      "revoked",
+      "desactivado",
+      "inactivo",
+      "eliminado",
+      "bloqueado",
+      "suspendido",
     ].includes(status)
   ) {
     return false;
@@ -1601,7 +1715,9 @@ function normalizeActive(user = {}) {
     user.deleted === true ||
     user.isDeleted === true ||
     user.blocked === true ||
-    user.isBlocked === true
+    user.isBlocked === true ||
+    user.archived === true ||
+    user.revoked === true
   ) {
     return false;
   }
@@ -1770,18 +1886,22 @@ export function normalizeUser(user = null) {
     source.uuid ??
     source._id ??
     source.uid ??
+    source.sub ??
     profile.id ??
     profile.userId ??
     profile.user_id ??
     raw.id ??
     raw.userId ??
     raw.user_id ??
+    raw.sub ??
     null;
 
   const email =
     firstNonEmpty(
       source.email,
       source.mail,
+      source.emailLower,
+      source.email_lower,
       profile.email,
       profile.mail,
       raw.email,
@@ -1818,18 +1938,21 @@ export function normalizeUser(user = null) {
       firstNonEmpty(
         source.username,
         source.userName,
+        source.user_name,
         source.nick,
         source.alias,
         source.login,
         source.slug,
         profile.username,
         profile.userName,
+        profile.user_name,
         profile.nick,
         profile.alias,
         profile.login,
         profile.slug,
         raw.username,
         raw.userName,
+        raw.user_name,
         raw.nick,
         raw.alias,
         raw.login,
@@ -1842,6 +1965,8 @@ export function normalizeUser(user = null) {
     sanitizeUsername(
       firstNonEmpty(
         source.slug,
+        source.usernameSlug,
+        source.username_slug,
         profile.slug,
         raw.slug,
         username,
@@ -1854,6 +1979,8 @@ export function normalizeUser(user = null) {
       firstNonEmpty(
         source.role,
         source.rol,
+        source.userRole,
+        source.user_role,
         source.type,
         source.user_type,
         source.userType,
@@ -1861,8 +1988,12 @@ export function normalizeUser(user = null) {
         source.profileType,
         profile.role,
         profile.rol,
+        profile.userRole,
+        profile.user_role,
         raw.role,
-        raw.rol
+        raw.rol,
+        raw.userRole,
+        raw.user_role
       )
     );
 
@@ -1892,10 +2023,22 @@ export function normalizeUser(user = null) {
       source.user_id ??
       id,
 
+    uid:
+      source.uid ??
+      id,
+
+    sub:
+      source.sub ??
+      id,
+
     username,
     slug,
 
     name:
+      rawName,
+
+    nombre:
+      source.nombre ||
       rawName,
 
     displayName:
@@ -1911,7 +2054,23 @@ export function normalizeUser(user = null) {
 
     email,
 
+    emailLower:
+      firstNonEmpty(
+        source.emailLower,
+        source.email_lower,
+        email
+      ).toLowerCase(),
+
     role,
+    rol:
+      role,
+
+    roles:
+      Array.isArray(source.roles)
+        ? source.roles
+        : role
+          ? [role]
+          : [],
 
     avatar:
       hasAvatar === false
@@ -1919,6 +2078,11 @@ export function normalizeUser(user = null) {
         : avatar || null,
 
     avatarUrl:
+      hasAvatar === false
+        ? null
+        : avatar || null,
+
+    picture:
       hasAvatar === false
         ? null
         : avatar || null,
@@ -1972,15 +2136,18 @@ export function getUserUsername(user = null) {
     firstNonEmpty(
       source?.username,
       source?.userName,
+      source?.user_name,
       source?.nick,
       source?.alias,
       source?.login,
       source?.slug,
       source?.profile?.username,
       source?.profile?.userName,
+      source?.profile?.user_name,
       source?.profile?.slug,
       source?.raw?.username,
       source?.raw?.userName,
+      source?.raw?.user_name,
       source?.raw?.slug,
       source?.email
     )
@@ -2451,6 +2618,12 @@ export function detectNetworkHints(url = "") {
         "Petición cross-origin: revisa CORS y preflight OPTIONS."
       );
     }
+
+    if (FORBIDDEN_FRONTEND_API_ORIGINS.includes(apiOrigin)) {
+      hints.push(
+        "La petición apunta al dominio frontend. El backend canónico es https://api.onionit.net."
+      );
+    }
   } catch {}
 
   return hints;
@@ -2482,12 +2655,13 @@ export function getHelpersSnapshot() {
       ),
 
     apiBase:
-      normalizeApiBase(
-        config?.apiBase || ""
-      ),
+      getSafeApiBase(),
 
     apiBasePath:
       getApiBasePath(),
+
+    canonicalProductionApiBase:
+      CANONICAL_PRODUCTION_API_BASE,
 
     storagePrefix:
       getStoragePrefix(),
@@ -2553,6 +2727,7 @@ export default {
   slugify,
 
   normalizeApiBase,
+  getSafeApiBase,
   normalizePath,
   stripUsernamePrefix,
   normalizeCanonicalPath,

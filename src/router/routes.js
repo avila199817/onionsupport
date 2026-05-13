@@ -90,7 +90,7 @@ const ROUTE_SOURCE =
   "router:routes";
 
 const ROUTES_VERSION =
-  "14.0.0";
+  "14.1.0";
 
 const ROUTE_MAX_PATH_LENGTH =
   2048;
@@ -492,6 +492,17 @@ const CRITICAL_ROUTE_BINDINGS =
 
     Object.freeze({
       path:
+        ROUTE_PATHS.RESET_PASSWORD,
+      name:
+        ROUTE_NAMES.RESET_PASSWORD,
+      viewKey:
+        ROUTE_VIEW_KEYS.RESET_PASSWORD,
+      viewName:
+        ROUTE_VIEW_NAMES.RESET_PASSWORD,
+    }),
+
+    Object.freeze({
+      path:
         ROUTE_PATHS.RESET_PASSWORD_CONFIRM,
       name:
         ROUTE_NAMES.RESET_PASSWORD_CONFIRM,
@@ -630,21 +641,47 @@ const ROUTE_RENDER_EXPECTATIONS =
 ========================================================= */
 
 function t(key, fallback = "", params = {}) {
+  const cleanKey =
+    safeText(key, "");
+
+  const cleanFallback =
+    safeText(
+      fallback,
+      cleanKey
+    );
+
+  const cleanParams =
+    safeObject(params);
+
   try {
-    if (typeof I18n?.t === "function") {
+    if (isFunction(I18n?.t)) {
       return (
         I18n.t(
-          key,
-          params,
-          fallback
+          cleanKey,
+          cleanParams,
+          cleanFallback
         ) ||
-        fallback ||
-        key
+        cleanFallback ||
+        cleanKey
       );
     }
   } catch {}
 
-  return fallback || key;
+  try {
+    if (isFunction(I18n?.translate)) {
+      return (
+        I18n.translate(
+          cleanKey,
+          cleanParams,
+          cleanFallback
+        ) ||
+        cleanFallback ||
+        cleanKey
+      );
+    }
+  } catch {}
+
+  return cleanFallback || cleanKey;
 }
 
 /* =========================================================
@@ -799,7 +836,7 @@ function freezeArray(values = []) {
   );
 }
 
-function deepFreeze(value) {
+function deepFreeze(value, seen = new WeakSet()) {
   if (
     !value ||
     (
@@ -812,6 +849,12 @@ function deepFreeze(value) {
   }
 
   try {
+    if (seen.has(value)) {
+      return value;
+    }
+
+    seen.add(value);
+
     for (const key of Object.getOwnPropertyNames(value)) {
       const item =
         value[key];
@@ -824,7 +867,10 @@ function deepFreeze(value) {
         ) &&
         !Object.isFrozen(item)
       ) {
-        deepFreeze(item);
+        deepFreeze(
+          item,
+          seen
+        );
       }
     }
 
@@ -1068,7 +1114,7 @@ function buildRouteId({
   name = "route",
 } = {}) {
   const cleanPath =
-    normalizeRoutePath(path)
+    normalizeLiteralRoutePath(path)
       .replace(/^\//, "")
       .replace(/\//g, "_") ||
     "root";
@@ -1266,6 +1312,8 @@ function resolveViewRenderer(view) {
         view,
       kind:
         "function",
+      targetFirst:
+        true,
     };
   }
 
@@ -1278,6 +1326,8 @@ function resolveViewRenderer(view) {
         view.init.bind(view),
       kind:
         "object.init",
+      targetFirst:
+        true,
     };
   }
 
@@ -1290,6 +1340,8 @@ function resolveViewRenderer(view) {
         view.mount.bind(view),
       kind:
         "object.mount",
+      targetFirst:
+        true,
     };
   }
 
@@ -1302,6 +1354,8 @@ function resolveViewRenderer(view) {
         view.render.bind(view),
       kind:
         "object.render",
+      targetFirst:
+        true,
     };
   }
 
@@ -1314,6 +1368,8 @@ function resolveViewRenderer(view) {
         view.bootstrap.bind(view),
       kind:
         "object.bootstrap",
+      targetFirst:
+        true,
     };
   }
 
@@ -1322,6 +1378,8 @@ function resolveViewRenderer(view) {
       () => null,
     kind:
       "empty",
+    targetFirst:
+      true,
   };
 }
 
@@ -1431,7 +1489,7 @@ function createViewAdapter(view, config = {}) {
 
 function normalizeMeta(definition = {}) {
   const normalizedPath =
-    normalizeRoutePath(
+    normalizeLiteralRoutePath(
       definition.path || "/"
     );
 
@@ -1593,7 +1651,7 @@ function resolveRouteTitle(route) {
 
 function createRoute(definition = {}) {
   const normalizedPath =
-    normalizeRoutePath(
+    normalizeLiteralRoutePath(
       definition.path || "/"
     );
 
@@ -3129,11 +3187,17 @@ function assertAliasMap(routes) {
       normalizeLiteralRoutePath(alias);
 
     const cleanTarget =
-      normalizeRoutePath(target);
+      normalizeRouteLookupPath(target);
 
     if (cleanAlias !== alias) {
       throw new Error(
         `Router: ROUTE_ALIASES contiene alias no normalizado "${alias}". Esperado "${cleanAlias}".`
+      );
+    }
+
+    if (cleanAlias === cleanTarget) {
+      throw new Error(
+        `Router: ROUTE_ALIASES contiene alias redundante "${alias}".`
       );
     }
 
@@ -3189,7 +3253,7 @@ export function validateRoutesTable(AppCore, routes, normalizeCanonicalPath) {
     );
 
     const normalizedPath =
-      normalizeRoutePath(
+      normalizeLiteralRoutePath(
         route.path || "/"
       );
 

@@ -3,7 +3,7 @@
    Archivo: src/services/http.auth.js
 
    ONION SUPPORT · HTTP AUTH
-   AUTO REFRESH 401 · SINGLE FLIGHT · PUBLIC ENDPOINT SAFE
+   AUTO REFRESH 401 · SINGLE FLIGHT · PUBLIC ENDPOINT SAFE · 14/10
 
    Responsabilidades:
    - Resolver auto refresh ante respuestas 401 privadas.
@@ -35,6 +35,10 @@
    - No refrescar requests public/auth:false.
    - Serializar refresh concurrente.
    - Rate-limit opcional.
+   - Soporte Auth.refreshSession / refresh / refreshToken / restoreSession.
+   - Soporte refresh que devuelve boolean, token_only o payload completo.
+   - Aplica payload de sesión si el refresh devuelve token/user.
+   - Valida que exista access token usable tras refresh antes de replay.
    - Eventos sin tokens reales.
    - Stats consistentes.
    - Fallback si state no existe.
@@ -52,11 +56,17 @@ import {
 } from "./http.helpers.js";
 
 /* =========================================================
-   CONSTANTS
+   VERSION / CONSTANTS
 ========================================================= */
+
+export const HTTP_AUTH_VERSION =
+  "14.0.0";
 
 const LOG_PREFIX =
   "[HTTP Auth]";
+
+const DEFAULT_REFRESH_REASON =
+  "http-auto-refresh";
 
 const EVENTS =
   Object.freeze({
@@ -91,8 +101,30 @@ const EVENTS =
       "http:auto-refresh:applied",
   });
 
-const DEFAULT_REFRESH_REASON =
-  "http-auto-refresh";
+const BAD_TOKEN_VALUES =
+  Object.freeze([
+    "",
+    "null",
+    "undefined",
+    "false",
+    "true",
+    "nan",
+    "none",
+    "empty",
+    "[object object]",
+    "{}",
+    "[]",
+    "\"\"",
+    "''",
+  ]);
+
+const REFRESH_METHOD_CANDIDATES =
+  Object.freeze([
+    "refreshSession",
+    "refresh",
+    "refreshToken",
+    "restoreSession",
+  ]);
 
 /* =========================================================
    MODULE FALLBACK STATE
@@ -102,49 +134,8 @@ const fallbackRefreshState = {
   refreshPromise:
     null,
 
-  refreshStats: {
-    attempts:
-      0,
-
-    failures:
-      0,
-
-    skipped:
-      0,
-
-    joined:
-      0,
-
-    successes:
-      0,
-
-    applied:
-      0,
-
-    lastAttemptAt:
-      0,
-
-    lastSuccessAt:
-      0,
-
-    lastFailureAt:
-      0,
-
-    lastSkipAt:
-      0,
-
-    lastJoinAt:
-      0,
-
-    lastAppliedAt:
-      0,
-
-    lastSkipReason:
-      "",
-
-    lastError:
-      null,
-  },
+  refreshStats:
+    createRefreshStats(),
 };
 
 /* =========================================================
@@ -179,6 +170,10 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
+function safeLower(value, fallback = "") {
+  return safeText(value, fallback).toLowerCase();
+}
+
 function safeNumber(value, fallback = 0) {
   const number =
     Number(value);
@@ -186,6 +181,52 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(number)
     ? number
     : fallback;
+}
+
+function safeBool(value, fallback = false) {
+  if (value === true) return true;
+  if (value === false) return false;
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === "string") {
+    const clean =
+      value.trim().toLowerCase();
+
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "si",
+        "sí",
+        "on",
+        "enabled",
+        "active",
+        "ok",
+      ].includes(clean)
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "off",
+        "disabled",
+        "inactive",
+      ].includes(clean)
+    ) {
+      return false;
+    }
+  }
+
+  return Boolean(fallback);
 }
 
 function nowMs() {
@@ -204,12 +245,137 @@ function isoNow(ms = nowMs()) {
   }
 }
 
+function hasOwn(obj, key) {
+  try {
+    return Object.prototype.hasOwnProperty.call(
+      obj,
+      key
+    );
+  } catch {
+    return false;
+  }
+}
+
 function safeRedact(value = "") {
   try {
     return redactHttpValue(value);
   } catch {
     return safeText(value, "");
   }
+}
+
+/* =========================================================
+   TOKEN / SESSION HELPERS
+========================================================= */
+
+function stripBearer(token = "") {
+  return safeText(token, "")
+    .replace(/^Bearer\s+/i, "")
+    .trim();
+}
+
+function hasUsableToken(token = "") {
+  const value =
+    stripBearer(token);
+
+  if (!value) {
+    return false;
+  }
+
+  const lower =
+    value.toLowerCase();
+
+  if (BAD_TOKEN_VALUES.includes(lower)) {
+    return false;
+  }
+
+  if (/[\s\r\n\t]/.test(value)) {
+    return false;
+  }
+
+  return true;
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text =
+      safeText(value, "");
+
+    if (text) {
+      return text;
+    }
+  }
+
+  return "";
+}
+
+function firstObject(...values) {
+  for (const value of values) {
+    if (isObject(value)) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function hasUsableUser(user = null) {
+  const source =
+    safeObject(user, null);
+
+  if (!source) {
+    return false;
+  }
+
+  if (
+    source.active === false ||
+    source.disabled === true ||
+    source.isDisabled === true ||
+    source.deleted === true ||
+    source.isDeleted === true ||
+    source.blocked === true ||
+    source.isBlocked === true
+  ) {
+    return false;
+  }
+
+  const status =
+    safeLower(
+      source.status ||
+        source.estado ||
+        source.state ||
+        source.accountStatus ||
+        "",
+      ""
+    );
+
+  if (
+    [
+      "disabled",
+      "inactive",
+      "deleted",
+      "blocked",
+      "suspended",
+      "banned",
+    ].includes(status)
+  ) {
+    return false;
+  }
+
+  return Boolean(
+    safeText(source.id, "") ||
+      safeText(source.userId, "") ||
+      safeText(source.user_id, "") ||
+      safeText(source._id, "") ||
+      safeText(source.uid, "") ||
+      safeText(source.sub, "") ||
+      safeText(source.username, "") ||
+      safeText(source.userName, "") ||
+      safeText(source.email, "") ||
+      safeText(source.mail, "") ||
+      safeText(source.phone, "") ||
+      safeText(source.telefono, "")
+  );
 }
 
 /* =========================================================
@@ -228,6 +394,9 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
     AppCore?.events?.emit?.(
       name,
       sanitizeData({
+        version:
+          HTTP_AUTH_VERSION,
+
         at:
           isoNow(),
 
@@ -242,10 +411,15 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
 }
 
 function safeWarn(AppCore, ...args) {
+  const safeArgs =
+    args.map((item) =>
+      sanitizeData(item)
+    );
+
   try {
     AppCore?.utils?.warn?.(
       LOG_PREFIX,
-      ...args.map((item) => sanitizeData(item))
+      ...safeArgs
     );
 
     return;
@@ -254,7 +428,7 @@ function safeWarn(AppCore, ...args) {
   try {
     console.warn(
       LOG_PREFIX,
-      ...args.map((item) => sanitizeData(item))
+      ...safeArgs
     );
   } catch {}
 }
@@ -355,6 +529,9 @@ function sanitizeRequestContext(requestConfig = {}) {
 
 function createRefreshStats() {
   return {
+    version:
+      HTTP_AUTH_VERSION,
+
     attempts:
       0,
 
@@ -399,6 +576,27 @@ function createRefreshStats() {
   };
 }
 
+function normalizeStats(stats = {}) {
+  const target =
+    isObject(stats)
+      ? stats
+      : {};
+
+  const defaults =
+    createRefreshStats();
+
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!(key in target)) {
+      target[key] = value;
+    }
+  }
+
+  target.version =
+    HTTP_AUTH_VERSION;
+
+  return target;
+}
+
 function getRootRefreshState(state) {
   const root =
     state &&
@@ -406,24 +604,10 @@ function getRootRefreshState(state) {
       ? state
       : fallbackRefreshState;
 
-  if (
-    !root.refreshStats ||
-    typeof root.refreshStats !== "object"
-  ) {
-    root.refreshStats =
-      createRefreshStats();
-  }
+  root.refreshStats =
+    normalizeStats(root.refreshStats);
 
-  const defaults =
-    createRefreshStats();
-
-  for (const [key, value] of Object.entries(defaults)) {
-    if (!(key in root.refreshStats)) {
-      root.refreshStats[key] = value;
-    }
-  }
-
-  if (!Object.prototype.hasOwnProperty.call(root, "refreshPromise")) {
+  if (!hasOwn(root, "refreshPromise")) {
     root.refreshPromise =
       null;
   }
@@ -510,10 +694,13 @@ function markSuccess(root, AppCore, context, extra = {}) {
         true,
 
       authenticated:
-        true,
+        extra.authenticated === true,
 
-      hasSession:
-        true,
+      hasAccessToken:
+        extra.hasAccessToken === true,
+
+      hasRefreshContext:
+        extra.hasRefreshContext === true,
 
       ...safeObject(extra),
     }
@@ -546,13 +733,16 @@ function markApplied(root, AppCore, context, extra = {}) {
 }
 
 /* =========================================================
-   SESSION / AUTH HELPERS
+   APPCORE / AUTH HELPERS
 ========================================================= */
 
 function getCoreState(AppCore) {
   try {
     if (isFn(AppCore?.getState)) {
-      return AppCore.getState();
+      return AppCore.getState({
+        includeToken:
+          true,
+      });
     }
   } catch {}
 
@@ -561,6 +751,73 @@ function getCoreState(AppCore) {
   } catch {
     return {};
   }
+}
+
+function getAuthHeaderFrom(source) {
+  try {
+    if (isFn(source?.getAuthHeader)) {
+      const header =
+        source.getAuthHeader();
+
+      if (
+        header &&
+        typeof header === "object"
+      ) {
+        return header;
+      }
+    }
+  } catch {}
+
+  return {};
+}
+
+function hasTokenInHeader(header = {}) {
+  if (!header || typeof header !== "object") {
+    return false;
+  }
+
+  return Object.values(header).some((value) =>
+    hasUsableToken(
+      String(value || "")
+        .replace(/^Bearer\s+/i, "")
+    )
+  );
+}
+
+function getStateToken(AppCore) {
+  const state =
+    getCoreState(AppCore);
+
+  return firstNonEmpty(
+    state.token,
+    state.accessToken,
+    state.access_token,
+    state.session?.token,
+    state.session?.accessToken,
+    state.session?.access_token
+  );
+}
+
+function hasUsableAccessToken(AppCore, Auth) {
+  if (
+    hasTokenInHeader(
+      getAuthHeaderFrom(Auth)
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    hasTokenInHeader(
+      getAuthHeaderFrom(AppCore)
+    )
+  ) {
+    return true;
+  }
+
+  return hasUsableToken(
+    getStateToken(AppCore)
+  );
 }
 
 function isAuthenticatedEnough(AppCore, Auth) {
@@ -578,37 +835,25 @@ function isAuthenticatedEnough(AppCore, Auth) {
   );
 }
 
-function hasUsableAccessToken(AppCore, Auth) {
+function getRefreshTokenCandidate(AppCore, Auth) {
   try {
-    if (isFn(Auth?.getAuthHeader)) {
-      const header =
-        Auth.getAuthHeader();
+    if (isFn(Auth?.getStoredRefreshToken)) {
+      const token =
+        Auth.getStoredRefreshToken();
 
-      if (
-        header &&
-        typeof header === "object" &&
-        Object.values(header).some((value) =>
-          safeText(value, "").length > 0
-        )
-      ) {
-        return true;
+      if (hasUsableToken(token)) {
+        return token;
       }
     }
   } catch {}
 
   try {
-    if (isFn(AppCore?.getAuthHeader)) {
-      const header =
-        AppCore.getAuthHeader();
+    if (isFn(Auth?.getRefreshToken)) {
+      const token =
+        Auth.getRefreshToken();
 
-      if (
-        header &&
-        typeof header === "object" &&
-        Object.values(header).some((value) =>
-          safeText(value, "").length > 0
-        )
-      ) {
-        return true;
+      if (hasUsableToken(token)) {
+        return token;
       }
     }
   } catch {}
@@ -616,14 +861,59 @@ function hasUsableAccessToken(AppCore, Auth) {
   const state =
     getCoreState(AppCore);
 
-  return Boolean(
-    safeText(
-      state?.token ||
-        state?.accessToken ||
-        state?.access_token ||
-        "",
-      ""
-    )
+  return firstNonEmpty(
+    state.refreshToken,
+    state.refresh_token,
+    state.session?.refreshToken,
+    state.session?.refresh_token
+  );
+}
+
+function getSessionIdCandidate(AppCore, Auth) {
+  try {
+    if (isFn(Auth?.getStoredSessionId)) {
+      const sessionId =
+        Auth.getStoredSessionId();
+
+      if (safeText(sessionId, "")) {
+        return sessionId;
+      }
+    }
+  } catch {}
+
+  const state =
+    getCoreState(AppCore);
+
+  return firstNonEmpty(
+    state.sessionId,
+    state.session_id,
+    state.session?.sessionId,
+    state.session?.session_id
+  );
+}
+
+function getSessionUserIdCandidate(AppCore, Auth) {
+  try {
+    if (isFn(Auth?.getStoredSessionUserId)) {
+      const sessionUserId =
+        Auth.getStoredSessionUserId();
+
+      if (safeText(sessionUserId, "")) {
+        return sessionUserId;
+      }
+    }
+  } catch {}
+
+  const state =
+    getCoreState(AppCore);
+
+  return firstNonEmpty(
+    state.sessionUserId,
+    state.session_user_id,
+    state.session?.sessionUserId,
+    state.session?.session_user_id,
+    state.user?.userId,
+    state.user?.id
   );
 }
 
@@ -640,35 +930,44 @@ function hasRefreshContext(AppCore, Auth) {
     }
   } catch {}
 
-  try {
-    if (isFn(Auth?.getStoredRefreshToken)) {
-      return Boolean(
-        safeText(Auth.getStoredRefreshToken(), "")
-      );
-    }
-  } catch {}
+  const refreshToken =
+    getRefreshTokenCandidate(
+      AppCore,
+      Auth
+    );
 
-  const state =
-    getCoreState(AppCore);
+  if (hasUsableToken(refreshToken)) {
+    return true;
+  }
+
+  const sessionId =
+    getSessionIdCandidate(
+      AppCore,
+      Auth
+    );
+
+  const sessionUserId =
+    getSessionUserIdCandidate(
+      AppCore,
+      Auth
+    );
 
   return Boolean(
-    safeText(
-      state?.refreshToken ||
-        state?.refresh_token ||
-        state?.sessionId ||
-        state?.sessionUserId ||
-        "",
-      ""
-    )
+    safeText(sessionId, "") &&
+      safeText(sessionUserId, "")
   );
 }
 
 function hasRefreshCapability(AppCore, Auth) {
   return Boolean(
-    hasUsableAccessToken(AppCore, Auth) ||
-      hasRefreshContext(AppCore, Auth)
+    hasRefreshContext(AppCore, Auth) ||
+      hasUsableAccessToken(AppCore, Auth)
   );
 }
+
+/* =========================================================
+   REFRESH PAYLOAD EXTRACTION
+========================================================= */
 
 function extractSessionPayload(value = null) {
   if (!value) {
@@ -678,40 +977,212 @@ function extractSessionPayload(value = null) {
   const root =
     safeObject(value);
 
-  const nested =
-    safeObject(
-      root.session ||
-        root.data ||
-        root.payload ||
-        root.result ||
-        {}
+  const data =
+    safeObject(root.data);
+
+  const payload =
+    safeObject(root.payload);
+
+  const result =
+    safeObject(root.result);
+
+  const session =
+    safeObject(root.session);
+
+  const dataSession =
+    safeObject(data.session);
+
+  const payloadSession =
+    safeObject(payload.session);
+
+  const auth =
+    safeObject(root.auth);
+
+  const dataAuth =
+    safeObject(data.auth);
+
+  const user =
+    firstObject(
+      root.user,
+      root.usuario,
+      root.me,
+      root.account,
+      root.profile,
+
+      session.user,
+      session.usuario,
+      session.me,
+      session.account,
+      session.profile,
+
+      data.user,
+      data.usuario,
+      data.me,
+      data.account,
+      data.profile,
+
+      dataSession.user,
+      dataSession.usuario,
+      dataSession.me,
+      dataSession.account,
+      dataSession.profile,
+
+      payload.user,
+      payload.usuario,
+      payload.me,
+      payload.account,
+      payload.profile,
+
+      payloadSession.user,
+      payloadSession.usuario,
+      payloadSession.me,
+      payloadSession.account,
+      payloadSession.profile,
+
+      result.user,
+      result.usuario,
+      result.me,
+      result.account,
+      result.profile,
+
+      auth.user,
+      auth.usuario,
+      auth.me,
+      dataAuth.user,
+      dataAuth.usuario,
+      dataAuth.me
     );
 
   return {
     token:
-      root.token ||
-      root.accessToken ||
-      root.access_token ||
-      nested.token ||
-      nested.accessToken ||
-      nested.access_token ||
-      "",
+      firstNonEmpty(
+        root.token,
+        root.accessToken,
+        root.access_token,
+        root.jwt,
+        root.bearer,
+
+        session.token,
+        session.accessToken,
+        session.access_token,
+        session.jwt,
+        session.bearer,
+
+        data.token,
+        data.accessToken,
+        data.access_token,
+        data.jwt,
+        data.bearer,
+
+        dataSession.token,
+        dataSession.accessToken,
+        dataSession.access_token,
+        dataSession.jwt,
+        dataSession.bearer,
+
+        payload.token,
+        payload.accessToken,
+        payload.access_token,
+        payload.jwt,
+        payload.bearer,
+
+        payloadSession.token,
+        payloadSession.accessToken,
+        payloadSession.access_token,
+        payloadSession.jwt,
+        payloadSession.bearer,
+
+        result.token,
+        result.accessToken,
+        result.access_token,
+
+        auth.token,
+        auth.accessToken,
+        auth.access_token,
+        dataAuth.token,
+        dataAuth.accessToken,
+        dataAuth.access_token
+      ),
 
     refreshToken:
-      root.refreshToken ||
-      root.refresh_token ||
-      nested.refreshToken ||
-      nested.refresh_token ||
-      "",
+      firstNonEmpty(
+        root.refreshToken,
+        root.refresh_token,
+        session.refreshToken,
+        session.refresh_token,
+        data.refreshToken,
+        data.refresh_token,
+        dataSession.refreshToken,
+        dataSession.refresh_token,
+        payload.refreshToken,
+        payload.refresh_token,
+        payloadSession.refreshToken,
+        payloadSession.refresh_token,
+        result.refreshToken,
+        result.refresh_token,
+        auth.refreshToken,
+        auth.refresh_token,
+        dataAuth.refreshToken,
+        dataAuth.refresh_token
+      ),
+
+    sessionId:
+      firstNonEmpty(
+        root.sessionId,
+        root.session_id,
+        session.sessionId,
+        session.session_id,
+        data.sessionId,
+        data.session_id,
+        dataSession.sessionId,
+        dataSession.session_id,
+        payload.sessionId,
+        payload.session_id,
+        payloadSession.sessionId,
+        payloadSession.session_id
+      ),
+
+    sessionUserId:
+      firstNonEmpty(
+        root.sessionUserId,
+        root.session_user_id,
+        root.userId,
+        root.user_id,
+        session.sessionUserId,
+        session.session_user_id,
+        session.userId,
+        session.user_id,
+        data.sessionUserId,
+        data.session_user_id,
+        data.userId,
+        data.user_id,
+        dataSession.sessionUserId,
+        dataSession.session_user_id,
+        payload.sessionUserId,
+        payload.session_user_id,
+        payload.userId,
+        payload.user_id,
+        payloadSession.sessionUserId,
+        payloadSession.session_user_id
+      ),
 
     user:
-      root.user ||
-      root.usuario ||
-      root.account ||
-      nested.user ||
-      nested.usuario ||
-      nested.account ||
-      null,
+      user || null,
+
+    mode:
+      safeText(
+        root.mode ||
+          root.type ||
+          root.status ||
+          data.mode ||
+          data.type ||
+          payload.mode ||
+          payload.type ||
+          result.mode ||
+          result.type ||
+          "",
+        ""
+      ),
   };
 }
 
@@ -725,7 +1196,19 @@ function isRefreshResultPositive(result) {
   }
 
   if (typeof result === "string") {
-    return Boolean(safeText(result, ""));
+    return Boolean(
+      [
+        "ok",
+        "success",
+        "true",
+        "refreshed",
+        "token_only",
+        "token-only",
+        "session",
+      ].includes(
+        result.trim().toLowerCase()
+      )
+    );
   }
 
   const root =
@@ -743,11 +1226,31 @@ function isRefreshResultPositive(result) {
   const payload =
     extractSessionPayload(root);
 
+  if (
+    [
+      "token_only",
+      "token-only",
+      "session",
+      "refreshed",
+      "success",
+    ].includes(
+      safeLower(payload.mode, "")
+    )
+  ) {
+    return true;
+  }
+
   return Boolean(
     payload.token ||
-      payload.user
+      payload.user ||
+      payload.refreshToken ||
+      payload.sessionId
   );
 }
+
+/* =========================================================
+   APPLY SESSION
+========================================================= */
 
 async function applyRefreshPayloadIfNeeded({
   AppCore,
@@ -763,7 +1266,9 @@ async function applyRefreshPayloadIfNeeded({
     Boolean(
       payload.token ||
         payload.user ||
-        payload.refreshToken
+        payload.refreshToken ||
+        payload.sessionId ||
+        payload.sessionUserId
     );
 
   if (!hasSessionData) {
@@ -780,8 +1285,17 @@ async function applyRefreshPayloadIfNeeded({
           token:
             payload.token || undefined,
 
+          accessToken:
+            payload.token || undefined,
+
           refreshToken:
             payload.refreshToken || undefined,
+
+          sessionId:
+            payload.sessionId || undefined,
+
+          sessionUserId:
+            payload.sessionUserId || undefined,
 
           user:
             payload.user || undefined,
@@ -791,6 +1305,9 @@ async function applyRefreshPayloadIfNeeded({
 
           reason:
             DEFAULT_REFRESH_REASON,
+
+          preserveExistingUser:
+            !payload.user,
         });
 
       applied =
@@ -807,6 +1324,18 @@ async function applyRefreshPayloadIfNeeded({
               token:
                 payload.token || undefined,
 
+              accessToken:
+                payload.token || undefined,
+
+              refreshToken:
+                payload.refreshToken || undefined,
+
+              sessionId:
+                payload.sessionId || undefined,
+
+              sessionUserId:
+                payload.sessionUserId || undefined,
+
               user:
                 payload.user || undefined,
             },
@@ -816,11 +1345,32 @@ async function applyRefreshPayloadIfNeeded({
 
               reason:
                 DEFAULT_REFRESH_REASON,
+
+              preserveExistingUser:
+                !payload.user,
             }
           );
 
         applied =
           applyResult !== false;
+      }
+    } catch {}
+  }
+
+  if (!applied && payload.token) {
+    try {
+      if (isFn(Auth?.setToken)) {
+        const tokenResult =
+          Auth.setToken(
+            payload.token,
+            {
+              source:
+                "http.auth",
+            }
+          );
+
+        applied =
+          tokenResult !== false;
       }
     } catch {}
   }
@@ -843,6 +1393,24 @@ async function applyRefreshPayloadIfNeeded({
     } catch {}
   }
 
+  if (!applied && payload.user) {
+    try {
+      if (isFn(AppCore?.setUser)) {
+        const userResult =
+          AppCore.setUser(
+            payload.user,
+            {
+              source:
+                "http.auth",
+            }
+          );
+
+        applied =
+          userResult !== false;
+      }
+    } catch {}
+  }
+
   if (applied) {
     markApplied(
       root,
@@ -855,8 +1423,17 @@ async function applyRefreshPayloadIfNeeded({
         hasUser:
           Boolean(payload.user),
 
+        hasUsableUser:
+          hasUsableUser(payload.user),
+
         hasRefreshToken:
           Boolean(payload.refreshToken),
+
+        hasSessionId:
+          Boolean(payload.sessionId),
+
+        hasSessionUserId:
+          Boolean(payload.sessionUserId),
       }
     );
   }
@@ -864,19 +1441,25 @@ async function applyRefreshPayloadIfNeeded({
   return applied;
 }
 
-async function callRefreshSession({
-  Auth,
+/* =========================================================
+   REFRESH CALL
+========================================================= */
+
+function buildRefreshArgs({
   AppCore,
   requestConfig,
   error,
+  methodName = "",
 }) {
-  if (!isFn(Auth?.refreshSession)) {
-    return false;
-  }
-
-  return Auth.refreshSession({
+  return {
     silent:
       true,
+
+    notify:
+      false,
+
+    notifyServer:
+      false,
 
     reason:
       DEFAULT_REFRESH_REASON,
@@ -887,15 +1470,96 @@ async function callRefreshSession({
     source:
       "http.auth",
 
+    method:
+      methodName,
+
     error,
 
+    requestConfig:
+      sanitizeRequestContext(requestConfig),
+
     AppCore,
-  });
+
+    skipNavigation:
+      true,
+
+    skipPostRestoreNavigation:
+      true,
+
+    preserveRoute:
+      true,
+  };
+}
+
+async function callRefreshSession({
+  Auth,
+  AppCore,
+  requestConfig,
+  error,
+}) {
+  if (!Auth) {
+    return false;
+  }
+
+  let lastError =
+    null;
+
+  for (const methodName of REFRESH_METHOD_CANDIDATES) {
+    const fn =
+      Auth?.[methodName];
+
+    if (!isFn(fn)) {
+      continue;
+    }
+
+    try {
+      return await fn.call(
+        Auth,
+        buildRefreshArgs({
+          AppCore,
+          requestConfig,
+          error,
+          methodName,
+        })
+      );
+    } catch (refreshError) {
+      lastError =
+        refreshError;
+
+      /*
+        Si refreshSession existe y falla, no probamos métodos legacy
+        para evitar dobles peticiones contra /refresh.
+      */
+      if (methodName === "refreshSession") {
+        throw refreshError;
+      }
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return false;
+}
+
+function hasRefreshMethod(Auth) {
+  return REFRESH_METHOD_CANDIDATES.some((methodName) =>
+    isFn(Auth?.[methodName])
+  );
 }
 
 /* =========================================================
    SKIP RULES
 ========================================================= */
+
+function isRequestSignalAborted(requestConfig = {}) {
+  try {
+    return Boolean(requestConfig?.signal?.aborted);
+  } catch {
+    return false;
+  }
+}
 
 function shouldSkipRefresh({
   AppCore,
@@ -931,7 +1595,10 @@ function shouldSkipRefresh({
     );
   }
 
-  if (error?.aborted === true) {
+  if (
+    error?.aborted === true ||
+    isRequestSignalAborted(requestConfig)
+  ) {
     return markSkipped(
       root,
       AppCore,
@@ -990,6 +1657,11 @@ function shouldSkipRefresh({
     requestConfig?.url ||
     "";
 
+  /*
+    Regla del servicio:
+    El auto-refresh NO corre dentro de endpoints auth.
+    Auth.restore/Auth.login ya gestionan /me y /refresh en su propia capa.
+  */
   if (isAuthEndpoint(path)) {
     return markSkipped(
       root,
@@ -1026,21 +1698,12 @@ function shouldSkipRefresh({
     );
   }
 
-  if (!isFn(Auth?.refreshSession)) {
+  if (!hasRefreshMethod(Auth)) {
     return markSkipped(
       root,
       AppCore,
       context,
       "refresh-method-missing"
-    );
-  }
-
-  if (!isAuthenticatedEnough(AppCore, Auth)) {
-    return markSkipped(
-      root,
-      AppCore,
-      context,
-      "not-authenticated"
     );
   }
 
@@ -1074,8 +1737,14 @@ export async function runAutoRefreshIfNeeded({
   const stats =
     root.refreshStats;
 
+  const cfg =
+    safeObject(config);
+
+  const req =
+    safeObject(requestConfig);
+
   const context =
-    sanitizeRequestContext(requestConfig);
+    sanitizeRequestContext(req);
 
   const startedAt =
     nowMs();
@@ -1085,10 +1754,11 @@ export async function runAutoRefreshIfNeeded({
       shouldSkipRefresh({
         AppCore,
         Auth,
-        config,
+        config:
+          cfg,
         error,
         requestConfig:
-          safeObject(requestConfig),
+          req,
         context,
         root,
       });
@@ -1123,16 +1793,29 @@ export async function runAutoRefreshIfNeeded({
         const joinedResult =
           await root.refreshPromise;
 
+        const refreshed =
+          isRefreshResultPositive(joinedResult);
+
+        await applyRefreshPayloadIfNeeded({
+          AppCore,
+          Auth,
+          result:
+            joinedResult,
+          context,
+          root,
+        });
+
         const authenticated =
           isAuthenticatedEnough(AppCore, Auth);
 
-        const hasSession =
-          hasRefreshCapability(AppCore, Auth);
+        const hasAccessToken =
+          hasUsableAccessToken(AppCore, Auth);
+
+        const hasRefresh =
+          hasRefreshContext(AppCore, Auth);
 
         const ok =
-          Boolean(joinedResult) &&
-          authenticated &&
-          hasSession;
+          Boolean(refreshed && hasAccessToken);
 
         safeEmit(
           AppCore,
@@ -1142,12 +1825,11 @@ export async function runAutoRefreshIfNeeded({
           {
             ...context,
 
-            refreshed:
-              Boolean(joinedResult),
-
+            refreshed,
             authenticated,
-
-            hasSession,
+            hasAccessToken,
+            hasRefreshContext:
+              hasRefresh,
 
             durationMs:
               nowMs() - startedAt,
@@ -1178,7 +1860,7 @@ export async function runAutoRefreshIfNeeded({
 
     const minIntervalMs =
       safeNumber(
-        config?.refreshMinIntervalMs,
+        cfg.refreshMinIntervalMs,
         0
       );
 
@@ -1216,6 +1898,15 @@ export async function runAutoRefreshIfNeeded({
 
         attempt:
           stats.attempts,
+
+        authenticatedBefore:
+          isAuthenticatedEnough(AppCore, Auth),
+
+        hasAccessTokenBefore:
+          hasUsableAccessToken(AppCore, Auth),
+
+        hasRefreshContextBefore:
+          hasRefreshContext(AppCore, Auth),
       }
     );
 
@@ -1225,7 +1916,8 @@ export async function runAutoRefreshIfNeeded({
           callRefreshSession({
             Auth,
             AppCore,
-            requestConfig,
+            requestConfig:
+              req,
             error,
           })
         )
@@ -1252,13 +1944,22 @@ export async function runAutoRefreshIfNeeded({
     const authenticated =
       isAuthenticatedEnough(AppCore, Auth);
 
-    const hasSession =
-      hasRefreshCapability(AppCore, Auth);
+    const hasAccessToken =
+      hasUsableAccessToken(AppCore, Auth);
 
+    const hasRefresh =
+      hasRefreshContext(AppCore, Auth);
+
+    /*
+      Para que el HTTP Service pueda reintentar la request original,
+      la condición mínima es access token usable. No exigimos user usable aquí
+      porque algunos refresh devuelven token_only y Auth.restore se encarga de /me.
+    */
     const ok =
-      refreshed &&
-      authenticated &&
-      hasSession;
+      Boolean(
+        refreshed &&
+          hasAccessToken
+      );
 
     if (!ok) {
       const rejectedError = {
@@ -1266,14 +1967,16 @@ export async function runAutoRefreshIfNeeded({
           "RefreshRejected",
 
         message:
-          "Refresh finalizado sin sesión válida.",
+          "Refresh finalizado sin access token usable.",
 
         status:
           401,
 
         refreshed,
         authenticated,
-        hasSession,
+        hasAccessToken,
+        hasRefreshContext:
+          hasRefresh,
       };
 
       markFailure(
@@ -1285,7 +1988,10 @@ export async function runAutoRefreshIfNeeded({
         {
           refreshed,
           authenticated,
-          hasSession,
+          hasAccessToken,
+          hasRefreshContext:
+            hasRefresh,
+
           durationMs:
             nowMs() - startedAt,
         }
@@ -1299,6 +2005,12 @@ export async function runAutoRefreshIfNeeded({
       AppCore,
       context,
       {
+        refreshed,
+        authenticated,
+        hasAccessToken,
+        hasRefreshContext:
+          hasRefresh,
+
         durationMs:
           nowMs() - startedAt,
       }
@@ -1337,11 +2049,44 @@ export function getHttpAuthSnapshot(state) {
     getRootRefreshState(state);
 
   return sanitizeData({
+    version:
+      HTTP_AUTH_VERSION,
+
     refreshInFlight:
       Boolean(root.refreshPromise),
 
     refreshStats: {
       ...root.refreshStats,
+
+      lastAttemptAtIso:
+        root.refreshStats.lastAttemptAt
+          ? isoNow(root.refreshStats.lastAttemptAt)
+          : "",
+
+      lastSuccessAtIso:
+        root.refreshStats.lastSuccessAt
+          ? isoNow(root.refreshStats.lastSuccessAt)
+          : "",
+
+      lastFailureAtIso:
+        root.refreshStats.lastFailureAt
+          ? isoNow(root.refreshStats.lastFailureAt)
+          : "",
+
+      lastSkipAtIso:
+        root.refreshStats.lastSkipAt
+          ? isoNow(root.refreshStats.lastSkipAt)
+          : "",
+
+      lastJoinAtIso:
+        root.refreshStats.lastJoinAt
+          ? isoNow(root.refreshStats.lastJoinAt)
+          : "",
+
+      lastAppliedAtIso:
+        root.refreshStats.lastAppliedAt
+          ? isoNow(root.refreshStats.lastAppliedAt)
+          : "",
 
       lastError:
         root.refreshStats?.lastError || null,
@@ -1367,7 +2112,10 @@ export function resetHttpAuthRuntime(state) {
 ========================================================= */
 
 export default {
+  HTTP_AUTH_VERSION,
+
   runAutoRefreshIfNeeded,
+
   getHttpAuthSnapshot,
   resetHttpAuthRuntime,
 };

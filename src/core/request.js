@@ -13,9 +13,11 @@
    HARDENING EXTREMO:
    - single emit final
    - timeout real con AbortController
+   - timeout separado de abort manual
    - merge signals robusto
    - json/text/blob/arrayBuffer/formData auto
    - dedupe GET/HEAD
+   - OPTIONS sin body accidental
    - retry enterprise con backoff+jitter
    - retry HTTP real para 408/425/429/5xx
    - soporte Retry-After
@@ -24,6 +26,7 @@
    - abort in-flight opcional
    - errores consistentes
    - eventos sin tokens reales
+   - compat con hooks.runSeries y registry.hooks
    - compat con registry.hooks como arrays, funciones o entradas { handler }
    - /api/auth/me recibe Authorization si config lo marca como privado
    - no ReferenceError si fetch/FormData/Blob/Headers no existen
@@ -54,7 +57,7 @@ import {
 ========================================================= */
 
 const REQUEST_VERSION =
-  "11.0.0";
+  "12.0.0";
 
 const DEFAULT_METHOD =
   "GET";
@@ -89,6 +92,13 @@ const RETRYABLE_HTTP_STATUSES =
   ]);
 
 const BODYLESS_METHODS =
+  Object.freeze([
+    "GET",
+    "HEAD",
+    "OPTIONS",
+  ]);
+
+const DEDUPE_METHODS =
   Object.freeze([
     "GET",
     "HEAD",
@@ -174,17 +184,13 @@ function isObject(value) {
   );
 }
 
-function isAnyObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object"
-  );
-}
-
 function safeText(value, fallback = "") {
   try {
     if (typeof helperSafeText === "function") {
-      return helperSafeText(value, fallback);
+      return helperSafeText(
+        value,
+        fallback
+      );
     }
   } catch {}
 
@@ -269,7 +275,10 @@ function safeArray(value) {
 function safeObject(value, fallback = {}) {
   try {
     if (typeof helperSafeObject === "function") {
-      return helperSafeObject(value, fallback);
+      return helperSafeObject(
+        value,
+        fallback
+      );
     }
   } catch {}
 
@@ -281,7 +290,10 @@ function safeObject(value, fallback = {}) {
 function safeClone(value, fallback = null) {
   try {
     if (typeof helperSafeClone === "function") {
-      return helperSafeClone(value, fallback);
+      return helperSafeClone(
+        value,
+        fallback
+      );
     }
   } catch {}
 
@@ -317,9 +329,16 @@ function safeRedact(value = "") {
 }
 
 function safeEmit(events, eventName, payload = {}) {
+  const name =
+    safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
   try {
     events?.emit?.(
-      eventName,
+      name,
       payload
     );
 
@@ -365,7 +384,10 @@ function sleep(ms = 0) {
 
 function getFetch() {
   try {
-    if (typeof globalThis !== "undefined" && isFunction(globalThis.fetch)) {
+    if (
+      typeof globalThis !== "undefined" &&
+      isFunction(globalThis.fetch)
+    ) {
       return globalThis.fetch.bind(globalThis);
     }
   } catch {}
@@ -382,6 +404,12 @@ function normalizeMethod(method = DEFAULT_METHOD) {
 
 function isBodyAllowed(method = DEFAULT_METHOD) {
   return !BODYLESS_METHODS.includes(
+    normalizeMethod(method)
+  );
+}
+
+function canDedupeMethod(method = DEFAULT_METHOD) {
+  return DEDUPE_METHODS.includes(
     normalizeMethod(method)
   );
 }
@@ -601,6 +629,14 @@ export async function parseResponseBody(response, responseType = DEFAULT_RESPONS
   try {
     if (finalType === "response") {
       return response;
+    }
+
+    if (
+      finalType === "void" ||
+      finalType === "none" ||
+      finalType === "empty"
+    ) {
+      return null;
     }
 
     if (finalType === "blob") {
@@ -939,8 +975,15 @@ export function buildRequestError({
   error.timeout =
     timeout === true;
 
+  /*
+    Punto crítico:
+    timeout y abort manual se separan.
+    Si timeout=true, aborted=false para permitir retry.
+  */
   error.aborted =
-    aborted === true;
+    timeout === true
+      ? false
+      : aborted === true;
 
   error.raw =
     raw;
@@ -1051,7 +1094,7 @@ export function shouldRetryRequest(error, requestConfig = {}) {
     return false;
   }
 
-  if (error?.aborted) {
+  if (error?.aborted && !error?.timeout) {
     return false;
   }
 
@@ -1363,6 +1406,66 @@ async function safeRunHooks(hooks, payload, context = {}) {
   return current;
 }
 
+async function safeRunNamedHooks({
+  hooks,
+  registry,
+  name,
+  payload,
+  context,
+} = {}) {
+  const hookName =
+    safeText(name, "");
+
+  if (!hookName) {
+    return payload;
+  }
+
+  try {
+    if (isFunction(hooks?.runSeries)) {
+      return await hooks.runSeries(
+        hookName,
+        payload,
+        {
+          context:
+            safeObject(context),
+        }
+      );
+    }
+
+    if (isFunction(hooks?.run)) {
+      return await hooks.run(
+        hookName,
+        payload,
+        {
+          context:
+            safeObject(context),
+        }
+      );
+    }
+  } catch (error) {
+    safeWarn(
+      context?.utils,
+      `hooks.${hookName} falló.`,
+      error
+    );
+
+    if (context?.stopOnHookError === true) {
+      throw error;
+    }
+
+    return payload;
+  }
+
+  return safeRunHooks(
+    getRegistryHookList(
+      registry,
+      hookName
+    ),
+    payload,
+    context
+  );
+}
+
 /* =========================================================
    BODY SERIALIZATION
 ========================================================= */
@@ -1581,6 +1684,7 @@ export function createRequest({
   setError,
   utils,
   registry,
+  hooks,
 } = {}) {
   let requestSequence = 0;
 
@@ -1679,11 +1783,17 @@ export function createRequest({
   }
 
   function resolveAuthDefault(path = "", opts = {}) {
-    if (opts.public === true || opts.skipAuth === true) {
+    if (
+      opts.public === true ||
+      opts.skipAuth === true
+    ) {
       return false;
     }
 
-    if (opts.auth !== undefined && opts.auth !== null) {
+    if (
+      opts.auth !== undefined &&
+      opts.auth !== null
+    ) {
       return Boolean(opts.auth);
     }
 
@@ -1895,6 +2005,42 @@ export function createRequest({
     return merged;
   }
 
+  function incrementPending() {
+    try {
+      if (
+        state &&
+        typeof state === "object"
+      ) {
+        state.requestPending =
+          Math.max(
+            0,
+            safeNumber(
+              state.requestPending,
+              0
+            ) + 1
+          );
+      }
+    } catch {}
+  }
+
+  function decrementPending() {
+    try {
+      if (
+        state &&
+        typeof state === "object"
+      ) {
+        state.requestPending =
+          Math.max(
+            0,
+            safeNumber(
+              state.requestPending,
+              0
+            ) - 1
+          );
+      }
+    } catch {}
+  }
+
   async function request(path, options = {}) {
     const startedAt =
       Date.now();
@@ -1909,16 +2055,20 @@ export function createRequest({
       );
 
     let requestConfig =
-      await safeRunHooks(
-        getRegistryHookList(registry, "beforeRequest"),
-        baseConfig,
-        {
+      await safeRunNamedHooks({
+        hooks,
+        registry,
+        name:
+          "beforeRequest",
+        payload:
+          baseConfig,
+        context: {
           phase:
             "beforeRequest",
           requestId,
           utils,
-        }
-      );
+        },
+      });
 
     requestConfig =
       normalizeFinalRequestConfig(
@@ -1942,6 +2092,9 @@ export function createRequest({
       normalizeHeaders({
         Accept:
           "application/json",
+        ...safeObject(
+          config?.api?.headers
+        ),
         ...safeObject(
           requestConfig.headers
         ),
@@ -1967,14 +2120,14 @@ export function createRequest({
           finalHeaders,
       });
 
-    const canDedupe =
+    const dedupeAllowed =
       requestConfig.dedupe !== false &&
-      BODYLESS_METHODS.includes(method);
+      canDedupeMethod(method);
 
     const dedupeKey =
       requestConfig.dedupeKey
         ? safeText(requestConfig.dedupeKey, "")
-        : canDedupe
+        : dedupeAllowed
           ? buildFingerprint({
               method,
               url,
@@ -2017,6 +2170,8 @@ export function createRequest({
       startedAt;
     stats.lastUrl =
       redactedUrl;
+
+    incrementPending();
 
     const requestAbortController =
       createAbortControllerSafe();
@@ -2079,10 +2234,14 @@ export function createRequest({
                     requestConfig.timeout
                   );
 
+                const timeoutSignal =
+                  timeout.signal ||
+                  timeout.controller?.signal ||
+                  null;
+
                 const signal =
                   mergeAbortSignals([
-                    timeout.signal ||
-                      timeout.controller?.signal,
+                    timeoutSignal,
                     requestConfig.signal,
                     requestAbortController?.signal,
                   ]);
@@ -2161,11 +2320,30 @@ export function createRequest({
                     throw error;
                   }
 
+                  const timeoutReason =
+                    String(
+                      timeoutSignal?.reason ||
+                        timeout.controller?.signal?.reason ||
+                        ""
+                    ).toLowerCase();
+
                   const timeoutAborted =
-                    timeout.controller?.signal?.aborted === true &&
-                    String(timeout.controller?.signal?.reason || "")
-                      .toLowerCase()
-                      .includes("timeout");
+                    Boolean(
+                      timeoutSignal?.aborted === true &&
+                      (
+                        timeoutReason.includes("timeout") ||
+                        timeoutReason === ""
+                      )
+                    );
+
+                  const manualAborted =
+                    Boolean(
+                      requestAbortController?.signal?.aborted === true ||
+                      (
+                        requestConfig.signal?.aborted === true &&
+                        !timeoutAborted
+                      )
+                    );
 
                   throw buildRequestError({
                     url,
@@ -2174,8 +2352,11 @@ export function createRequest({
                       isProbablyTimeoutError(error) ||
                       timeoutAborted,
                     aborted:
-                      isAbortError(error) ||
-                      requestAbortController?.signal?.aborted === true,
+                      !timeoutAborted &&
+                      (
+                        manualAborted ||
+                        isAbortError(error)
+                      ),
                     raw:
                       error?.message ||
                       error,
@@ -2239,6 +2420,14 @@ export function createRequest({
               utils
             );
 
+          if (
+            state &&
+            typeof state === "object"
+          ) {
+            state.lastRequestStatus =
+              response.status || null;
+          }
+
           if (requestConfig.raw === true) {
             stats.success += 1;
 
@@ -2292,10 +2481,14 @@ export function createRequest({
           }
 
           const finalData =
-            await safeRunHooks(
-              getRegistryHookList(registry, "afterResponse"),
-              data,
-              {
+            await safeRunNamedHooks({
+              hooks,
+              registry,
+              name:
+                "afterResponse",
+              payload:
+                data,
+              context: {
                 phase:
                   "afterResponse",
                 requestId,
@@ -2309,8 +2502,8 @@ export function createRequest({
                     headers:
                       sanitizeHeadersForLog(finalHeaders),
                   },
-              }
-            );
+              },
+            });
 
           stats.success += 1;
 
@@ -2372,6 +2565,14 @@ export function createRequest({
               requestConfig
             );
 
+          if (
+            state &&
+            typeof state === "object"
+          ) {
+            state.lastRequestStatus =
+              normalized.status || 0;
+          }
+
           if (normalized.aborted) {
             stats.aborted += 1;
           }
@@ -2404,10 +2605,14 @@ export function createRequest({
           }
 
           if (!silent) {
-            await safeRunHooks(
-              getRegistryHookList(registry, "onRequestError"),
-              normalized,
-              {
+            await safeRunNamedHooks({
+              hooks,
+              registry,
+              name:
+                "onRequestError",
+              payload:
+                normalized,
+              context: {
                 phase:
                   "onRequestError",
                 requestId,
@@ -2420,8 +2625,8 @@ export function createRequest({
                     headers:
                       sanitizeHeadersForLog(finalHeaders),
                   },
-              }
-            );
+              },
+            });
           }
 
           if (
@@ -2468,6 +2673,8 @@ export function createRequest({
     try {
       return await promise;
     } finally {
+      decrementPending();
+
       if (dedupeKey) {
         inFlightRequests.delete(
           dedupeKey
@@ -2730,6 +2937,10 @@ export function createApiClient(request) {
     },
   };
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   REQUEST_VERSION,

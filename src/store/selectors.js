@@ -2,6 +2,9 @@
    Onion SPA - Store Selectors
    Archivo: src/store/selectors.js
 
+   ONION SUPPORT · STORE SELECTORS
+   SEMANTIC READ MODEL · STRICT AUTH · ROLE SAFE · 14/10
+
    Responsabilidades:
    - exponer selectores semánticos del store
    - leer estado derivado app / session / ui
@@ -10,9 +13,23 @@
    - centralizar lecturas frecuentes
    - evitar estados auth fantasma
    - normalizar roles / permisos
-   - soportar aliases admin/support/manager
+   - soportar aliases admin/support/manager/client/user
    - tolerar slices parciales durante boot
    - blindaje enterprise sin throws accidentales
+   - no filtrar tokens en snapshots públicos
+   - compatibilidad con colecciones heterogéneas
+   - compatibilidad con AppCore parcial durante arranque
+
+   HARDENING EXTREMO:
+   - authenticated estricto = token usable + usuario usable + usuario activo
+   - token() disponible para uso interno controlado
+   - sessionSnapshot() no expone token crudo
+   - authHeader() construye Authorization sólo si hay token usable
+   - roles/permissions normalizados sin acentos
+   - selectors sin dependencia de this para evitar rotura al destructurar métodos
+   - colecciones siempre clonadas salvo collectionRaw()
+   - entity lookup por aliases id/userId/ticketId/clienteId/facturaId
+   - snapshots seguros y estables
 ========================================================= */
 
 import {
@@ -25,45 +42,152 @@ import {
 } from "./collections.js";
 
 /* =========================================================
+   VERSION
+========================================================= */
+
+export const STORE_SELECTORS_VERSION =
+  "14.0.0";
+
+/* =========================================================
    ROLE CONSTANTS
 ========================================================= */
 
-const ADMIN_ROLE_KEYS = new Set([
-  "admin",
-  "administrator",
-  "administrador",
-  "superadmin",
-  "super_admin",
-  "super_administrador",
-  "owner",
-  "root",
-]);
+const ADMIN_ROLE_KEYS =
+  new Set([
+    "admin",
+    "administrator",
+    "administrador",
+    "superadmin",
+    "super_admin",
+    "super_administrador",
+    "owner",
+    "root",
+  ]);
 
-const SUPPORT_ROLE_KEYS = new Set([
-  "support",
-  "soporte",
-  "agent",
-  "agente",
-  "helpdesk",
-  "operator",
-  "operador",
-]);
+const SUPPORT_ROLE_KEYS =
+  new Set([
+    "support",
+    "soporte",
+    "agent",
+    "agente",
+    "helpdesk",
+    "operator",
+    "operador",
+    "technician",
+    "technical",
+    "tecnico",
+    "tecnica",
+    "técnico",
+    "técnica",
+    "it_support",
+    "support_agent",
+    "service_desk",
+  ]);
 
-const MANAGER_ROLE_KEYS = new Set([
-  "manager",
-  "gestor",
-  "gerente",
-  "lead",
-]);
+const MANAGER_ROLE_KEYS =
+  new Set([
+    "manager",
+    "gestor",
+    "gerente",
+    "lead",
+    "team_lead",
+    "supervisor",
+    "responsable",
+  ]);
+
+const CLIENT_ROLE_KEYS =
+  new Set([
+    "client",
+    "cliente",
+    "customer",
+    "account",
+    "particular",
+    "empresa",
+  ]);
+
+const USER_ROLE_KEYS =
+  new Set([
+    "user",
+    "usuario",
+    "member",
+    "miembro",
+  ]);
+
+const DISABLED_STATUS_KEYS =
+  new Set([
+    "disabled",
+    "inactive",
+    "deleted",
+    "blocked",
+    "suspended",
+    "banned",
+    "revoked",
+    "deactivated",
+    "desactivado",
+    "inactivo",
+    "eliminado",
+    "bloqueado",
+    "suspendido",
+    "baneado",
+    "revocado",
+  ]);
+
+const BAD_TOKEN_VALUES =
+  new Set([
+    "",
+    "null",
+    "undefined",
+    "false",
+    "true",
+    "nan",
+    "none",
+    "empty",
+    "[object object]",
+    "{}",
+    "[]",
+    "\"\"",
+    "''",
+  ]);
+
+const ENTITY_ID_KEYS =
+  Object.freeze([
+    "id",
+    "_id",
+    "uuid",
+
+    "userId",
+    "user_id",
+    "uid",
+    "sub",
+
+    "ticketId",
+    "ticket_id",
+    "incidenciaId",
+    "incidencia_id",
+
+    "clienteId",
+    "cliente_id",
+    "clientId",
+    "client_id",
+    "customerId",
+    "customer_id",
+
+    "facturaId",
+    "factura_id",
+    "invoiceId",
+    "invoice_id",
+    "numeroFacturaLegal",
+    "numero_factura_legal",
+  ]);
+
+const SENSITIVE_TOKEN_RE =
+  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|tempToken|temp_token|code|t)=)[^&#\s]+/gi;
 
 /* =========================================================
    BASICS
 ========================================================= */
 
-function safeText(
-  value,
-  fallback = ""
-) {
+function safeText(value, fallback = "") {
   if (
     value === null ||
     value === undefined
@@ -77,12 +201,26 @@ function safeText(
   return text || fallback;
 }
 
-function safeObject(value) {
+function safeLower(value, fallback = "") {
+  return safeText(value, fallback)
+    .toLowerCase();
+}
+
+function safeNumber(value, fallback = 0) {
+  const number =
+    Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : fallback;
+}
+
+function safeObject(value, fallback = {}) {
   return value &&
     typeof value === "object" &&
     !Array.isArray(value)
     ? value
-    : {};
+    : fallback;
 }
 
 function safeArray(value) {
@@ -114,7 +252,23 @@ function clone(value) {
     return value;
   }
 
-  return deepClone(value);
+  try {
+    return deepClone(value);
+  } catch {}
+
+  try {
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
+    }
+  } catch {}
+
+  try {
+    return JSON.parse(
+      JSON.stringify(value)
+    );
+  } catch {
+    return value;
+  }
 }
 
 function first(...values) {
@@ -146,18 +300,68 @@ function first(...values) {
   return null;
 }
 
-function hasOwn(
-  obj,
-  key
-) {
-  return Boolean(
-    obj &&
-      typeof obj === "object" &&
-      Object.prototype.hasOwnProperty.call(
-        obj,
-        key
-      )
+function hasOwn(obj, key) {
+  try {
+    return Boolean(
+      obj &&
+        typeof obj === "object" &&
+        Object.prototype.hasOwnProperty.call(
+          obj,
+          key
+        )
+    );
+  } catch {
+    return false;
+  }
+}
+
+function unique(values = []) {
+  return Array.from(
+    new Set(
+      safeArray(values)
+        .flat(Infinity)
+        .map((item) =>
+          safeText(item, "")
+        )
+        .filter(Boolean)
+    )
   );
+}
+
+function safeNowIso() {
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
+}
+
+function redactTokenInText(value = "") {
+  const text =
+    safeText(value, "");
+
+  if (!text) {
+    return "";
+  }
+
+  try {
+    return text.replace(
+      SENSITIVE_TOKEN_RE,
+      (match) => {
+        if (/^bearer\s+/i.test(match)) {
+          return "Bearer ***";
+        }
+
+        if (/^[?&#]/.test(match)) {
+          return match.replace(/=.+$/g, "=***");
+        }
+
+        return "***";
+      }
+    );
+  } catch {
+    return text;
+  }
 }
 
 /* =========================================================
@@ -201,12 +405,76 @@ function getMetaSlice(state) {
 }
 
 /* =========================================================
-   USER / TOKEN
+   TOKEN / USER
 ========================================================= */
 
+function stripBearerPrefix(token = "") {
+  return safeText(token, "")
+    .replace(/^Bearer\s+/i, "")
+    .trim();
+}
+
 function hasUsableToken(token = "") {
+  const value =
+    stripBearerPrefix(token);
+
+  if (!value) {
+    return false;
+  }
+
+  const lower =
+    value.toLowerCase();
+
+  if (BAD_TOKEN_VALUES.has(lower)) {
+    return false;
+  }
+
+  if (/[\s\r\n\t]/.test(value)) {
+    return false;
+  }
+
+  return true;
+}
+
+function isDisabledUser(user = null) {
+  const current =
+    safeObject(user);
+
+  const status =
+    safeLower(
+      first(
+        current.status,
+        current.estado,
+        current.state,
+        current.accountStatus,
+        current.account_status,
+        current.raw?.status,
+        current.raw?.estado
+      ),
+      ""
+    );
+
+  if (DISABLED_STATUS_KEYS.has(status)) {
+    return true;
+  }
+
   return Boolean(
-    safeText(token, "")
+    current.active === false ||
+      current.enabled === false ||
+      current.isEnabled === false ||
+      current.disabled === true ||
+      current.isDisabled === true ||
+      current.deleted === true ||
+      current.isDeleted === true ||
+      current.blocked === true ||
+      current.isBlocked === true ||
+      current.banned === true ||
+      current.suspended === true ||
+      current.revoked === true ||
+      current.deactivated === true ||
+      current.deletedAt ||
+      current.disabledAt ||
+      current.blockedAt
   );
 }
 
@@ -214,12 +482,17 @@ function hasUsableUser(user = null) {
   const current =
     safeObject(user);
 
+  if (!current || isDisabledUser(current)) {
+    return false;
+  }
+
   return Boolean(
     safeText(current.id, "") ||
       safeText(current.userId, "") ||
       safeText(current.user_id, "") ||
       safeText(current._id, "") ||
       safeText(current.uid, "") ||
+      safeText(current.sub, "") ||
       safeText(current.username, "") ||
       safeText(current.userName, "") ||
       safeText(current.user_name, "") ||
@@ -232,13 +505,17 @@ function hasUsableUser(user = null) {
 }
 
 function getTokenFromSession(session = {}) {
-  return safeText(
+  return stripBearerPrefix(
     first(
       session.token,
       session.accessToken,
-      session.access_token
-    ),
-    ""
+      session.access_token,
+      session.jwt,
+      session.bearer,
+      session.auth?.token,
+      session.auth?.accessToken,
+      session.auth?.access_token
+    ) || ""
   );
 }
 
@@ -246,12 +523,21 @@ function getUserFromSession(session = {}) {
   const user =
     first(
       session.user,
+      session.usuario,
       session.currentUser,
       session.authUser,
-      session.profile
+      session.sessionUser,
+      session.account,
+      session.profile,
+      session.me,
+      session.auth?.user,
+      session.auth?.usuario,
+      session.auth?.me
     );
 
-  return safeObject(user);
+  return hasUsableUser(user)
+    ? safeObject(user)
+    : null;
 }
 
 function getUserIdentity(user = null) {
@@ -264,12 +550,32 @@ function getUserIdentity(user = null) {
     safeText(current.id, "") ||
     safeText(current._id, "") ||
     safeText(current.uid, "") ||
+    safeText(current.sub, "") ||
     safeText(current.email, "") ||
     safeText(current.mail, "") ||
     safeText(current.username, "") ||
     safeText(current.userName, "") ||
+    safeText(current.user_name, "") ||
     safeText(current.phone, "") ||
     safeText(current.telefono, "") ||
+    ""
+  );
+}
+
+function getUserUsername(user = null) {
+  const current =
+    safeObject(user);
+
+  return (
+    safeText(current.username, "") ||
+    safeText(current.userName, "") ||
+    safeText(current.user_name, "") ||
+    safeText(current.nick, "") ||
+    safeText(current.alias, "") ||
+    safeText(current.login, "") ||
+    safeText(current.slug, "") ||
+    safeText(current.email, "") ||
+    safeText(current.mail, "") ||
     ""
   );
 }
@@ -278,6 +584,12 @@ function getUserDisplayName(user = null) {
   const current =
     safeObject(user);
 
+  const profile =
+    safeObject(current.profile);
+
+  const raw =
+    safeObject(current.raw);
+
   return (
     safeText(current.displayName, "") ||
     safeText(current.display_name, "") ||
@@ -285,6 +597,19 @@ function getUserDisplayName(user = null) {
     safeText(current.nombre, "") ||
     safeText(current.fullName, "") ||
     safeText(current.full_name, "") ||
+
+    safeText(profile.displayName, "") ||
+    safeText(profile.display_name, "") ||
+    safeText(profile.name, "") ||
+    safeText(profile.nombre, "") ||
+    safeText(profile.fullName, "") ||
+    safeText(profile.full_name, "") ||
+
+    safeText(raw.displayName, "") ||
+    safeText(raw.display_name, "") ||
+    safeText(raw.name, "") ||
+    safeText(raw.nombre, "") ||
+
     safeText(current.username, "") ||
     safeText(current.userName, "") ||
     safeText(current.email, "") ||
@@ -297,14 +622,82 @@ function getUserAvatar(user = null) {
   const current =
     safeObject(user);
 
+  const profile =
+    safeObject(current.profile);
+
+  const raw =
+    safeObject(current.raw);
+
+  const rawProfile =
+    safeObject(raw.profile);
+
+  const hasAvatar =
+    current.hasAvatar ??
+    current.has_avatar ??
+    profile.hasAvatar ??
+    profile.has_avatar ??
+    raw.hasAvatar ??
+    raw.has_avatar;
+
+  if (hasAvatar === false) {
+    return "";
+  }
+
   return (
     safeText(current.avatarUrl, "") ||
+    safeText(current.avatarURL, "") ||
     safeText(current.avatar_url, "") ||
     safeText(current.avatar, "") ||
     safeText(current.photoUrl, "") ||
+    safeText(current.photoURL, "") ||
     safeText(current.photo_url, "") ||
+    safeText(current.photo, "") ||
+    safeText(current.pictureUrl, "") ||
+    safeText(current.pictureURL, "") ||
+    safeText(current.picture_url, "") ||
     safeText(current.picture, "") ||
     safeText(current.imageUrl, "") ||
+    safeText(current.imageURL, "") ||
+    safeText(current.image_url, "") ||
+    safeText(current.image, "") ||
+
+    safeText(profile.avatarUrl, "") ||
+    safeText(profile.avatarURL, "") ||
+    safeText(profile.avatar_url, "") ||
+    safeText(profile.avatar, "") ||
+    safeText(profile.photoUrl, "") ||
+    safeText(profile.photoURL, "") ||
+    safeText(profile.photo_url, "") ||
+    safeText(profile.photo, "") ||
+    safeText(profile.pictureUrl, "") ||
+    safeText(profile.pictureURL, "") ||
+    safeText(profile.picture_url, "") ||
+    safeText(profile.picture, "") ||
+    safeText(profile.imageUrl, "") ||
+    safeText(profile.imageURL, "") ||
+    safeText(profile.image_url, "") ||
+    safeText(profile.image, "") ||
+
+    safeText(raw.avatarUrl, "") ||
+    safeText(raw.avatarURL, "") ||
+    safeText(raw.avatar_url, "") ||
+    safeText(raw.avatar, "") ||
+    safeText(raw.photoUrl, "") ||
+    safeText(raw.photoURL, "") ||
+    safeText(raw.photo_url, "") ||
+    safeText(raw.photo, "") ||
+    safeText(raw.pictureUrl, "") ||
+    safeText(raw.pictureURL, "") ||
+    safeText(raw.picture_url, "") ||
+    safeText(raw.picture, "") ||
+    safeText(raw.imageUrl, "") ||
+    safeText(raw.imageURL, "") ||
+    safeText(raw.image_url, "") ||
+    safeText(raw.image, "") ||
+
+    safeText(rawProfile.avatarUrl, "") ||
+    safeText(rawProfile.avatar_url, "") ||
+    safeText(rawProfile.avatar, "") ||
     ""
   );
 }
@@ -348,6 +741,18 @@ function isManagerRole(value = "") {
   );
 }
 
+function isClientRole(value = "") {
+  return CLIENT_ROLE_KEYS.has(
+    normalizeRole(value)
+  );
+}
+
+function isUserRole(value = "") {
+  return USER_ROLE_KEYS.has(
+    normalizeRole(value)
+  );
+}
+
 function expandRoleAliases(roles = []) {
   const normalized =
     normalizeRoles(roles);
@@ -355,9 +760,7 @@ function expandRoleAliases(roles = []) {
   const result =
     new Set(normalized);
 
-  if (
-    normalized.some(isAdminRole)
-  ) {
+  if (normalized.some(isAdminRole)) {
     for (const role of ADMIN_ROLE_KEYS) {
       result.add(role);
     }
@@ -365,24 +768,39 @@ function expandRoleAliases(roles = []) {
     result.add("admin");
   }
 
-  if (
-    normalized.some(isSupportRole)
-  ) {
+  if (normalized.some(isSupportRole)) {
     for (const role of SUPPORT_ROLE_KEYS) {
       result.add(role);
     }
 
     result.add("support");
+    result.add("agent");
   }
 
-  if (
-    normalized.some(isManagerRole)
-  ) {
+  if (normalized.some(isManagerRole)) {
     for (const role of MANAGER_ROLE_KEYS) {
       result.add(role);
     }
 
     result.add("manager");
+  }
+
+  if (normalized.some(isClientRole)) {
+    for (const role of CLIENT_ROLE_KEYS) {
+      result.add(role);
+    }
+
+    result.add("client");
+    result.add("cliente");
+  }
+
+  if (normalized.some(isUserRole)) {
+    for (const role of USER_ROLE_KEYS) {
+      result.add(role);
+    }
+
+    result.add("user");
+    result.add("usuario");
   }
 
   return Array.from(result)
@@ -393,22 +811,24 @@ function resolveCanonicalRole(roles = []) {
   const expanded =
     expandRoleAliases(roles);
 
-  if (
-    expanded.some(isAdminRole)
-  ) {
+  if (expanded.some(isAdminRole)) {
     return "admin";
   }
 
-  if (
-    expanded.some(isSupportRole)
-  ) {
+  if (expanded.some(isSupportRole)) {
     return "support";
   }
 
-  if (
-    expanded.some(isManagerRole)
-  ) {
+  if (expanded.some(isManagerRole)) {
     return "manager";
+  }
+
+  if (expanded.some(isClientRole)) {
+    return "client";
+  }
+
+  if (expanded.some(isUserRole)) {
+    return "user";
   }
 
   return expanded[0] || null;
@@ -546,64 +966,98 @@ function collectRolesFromUser(user = null) {
     ),
   ];
 
-  const adminFlag = [
-    current.isAdmin,
-    current.admin,
-    current.isSuperAdmin,
-    current.superAdmin,
-    current.is_super_admin,
-    current.canManageUsers,
-    current.can_manage_users,
-    current.canAccessUsers,
-    current.can_access_users,
+  const adminFlag =
+    [
+      current.isAdmin,
+      current.admin,
+      current.isSuperAdmin,
+      current.superAdmin,
+      current.is_super_admin,
+      current.canManageUsers,
+      current.can_manage_users,
+      current.canAccessUsers,
+      current.can_access_users,
 
-    profile.isAdmin,
-    profile.admin,
-    profile.isSuperAdmin,
-    profile.superAdmin,
-    profile.canManageUsers,
-    profile.canAccessUsers,
+      profile.isAdmin,
+      profile.admin,
+      profile.isSuperAdmin,
+      profile.superAdmin,
+      profile.canManageUsers,
+      profile.canAccessUsers,
 
-    account.isAdmin,
-    account.admin,
-    account.isSuperAdmin,
-    account.superAdmin,
+      account.isAdmin,
+      account.admin,
+      account.isSuperAdmin,
+      account.superAdmin,
 
-    meta.isAdmin,
-    meta.admin,
-    meta.isSuperAdmin,
-    meta.superAdmin,
-    meta.canManageUsers,
-    meta.canAccessUsers,
+      meta.isAdmin,
+      meta.admin,
+      meta.isSuperAdmin,
+      meta.superAdmin,
+      meta.canManageUsers,
+      meta.canAccessUsers,
 
-    claims.isAdmin,
-    claims.admin,
-    claims.isSuperAdmin,
-    claims.superAdmin,
-    claims.canManageUsers,
-    claims.canAccessUsers,
+      claims.isAdmin,
+      claims.admin,
+      claims.isSuperAdmin,
+      claims.superAdmin,
+      claims.canManageUsers,
+      claims.canAccessUsers,
 
-    raw.isAdmin,
-    raw.admin,
-    raw.isSuperAdmin,
-    raw.superAdmin,
-    raw.canManageUsers,
-    raw.canAccessUsers,
+      raw.isAdmin,
+      raw.admin,
+      raw.isSuperAdmin,
+      raw.superAdmin,
+      raw.canManageUsers,
+      raw.canAccessUsers,
 
-    raw?.profile?.isAdmin,
-    raw?.profile?.admin,
-    raw?.profile?.isSuperAdmin,
-    raw?.profile?.superAdmin,
+      raw?.profile?.isAdmin,
+      raw?.profile?.admin,
+      raw?.profile?.isSuperAdmin,
+      raw?.profile?.superAdmin,
 
-    raw?.meta?.isAdmin,
-    raw?.meta?.admin,
+      raw?.meta?.isAdmin,
+      raw?.meta?.admin,
 
-    raw?.claims?.isAdmin,
-    raw?.claims?.admin,
-  ].some((value) => value === true);
+      raw?.claims?.isAdmin,
+      raw?.claims?.admin,
+    ].some((value) => value === true);
+
+  const supportFlag =
+    [
+      current.isSupport,
+      current.support,
+      current.isAgent,
+      current.agent,
+      current.isTechnician,
+      current.technician,
+      current.tecnico,
+      current.técnico,
+
+      profile.isSupport,
+      profile.support,
+      profile.isAgent,
+      profile.agent,
+
+      meta.isSupport,
+      meta.support,
+      meta.isAgent,
+      meta.agent,
+
+      raw.isSupport,
+      raw.support,
+      raw.isAgent,
+      raw.agent,
+      raw.isTechnician,
+      raw.technician,
+    ].some((value) => value === true);
 
   if (adminFlag) {
     roles.push("admin");
+  }
+
+  if (supportFlag) {
+    roles.push("support");
   }
 
   return expandRoleAliases(roles);
@@ -641,38 +1095,50 @@ function collectPermissionsFromUser(user = null) {
   const claims =
     safeObject(current.claims);
 
-  return Array.from(
-    new Set(
-      [
-        ...normalizeRoles(current.permissions),
-        ...normalizeRoles(current.scopes),
-        ...normalizeRoles(current.authorities),
+  const account =
+    safeObject(current.account);
 
-        ...normalizeRoles(profile.permissions),
-        ...normalizeRoles(profile.scopes),
-        ...normalizeRoles(profile.authorities),
+  return unique([
+    ...normalizeRoles(current.permissions),
+    ...normalizeRoles(current.permisos),
+    ...normalizeRoles(current.scopes),
+    ...normalizeRoles(current.authorities),
+    ...normalizeRoles(current.claims),
 
-        ...normalizeRoles(meta.permissions),
-        ...normalizeRoles(meta.scopes),
+    ...normalizeRoles(profile.permissions),
+    ...normalizeRoles(profile.permisos),
+    ...normalizeRoles(profile.scopes),
+    ...normalizeRoles(profile.authorities),
 
-        ...normalizeRoles(claims.permissions),
-        ...normalizeRoles(claims.scopes),
+    ...normalizeRoles(account.permissions),
+    ...normalizeRoles(account.permisos),
+    ...normalizeRoles(account.scopes),
 
-        ...normalizeRoles(raw.permissions),
-        ...normalizeRoles(raw.scopes),
-        ...normalizeRoles(raw.authorities),
+    ...normalizeRoles(meta.permissions),
+    ...normalizeRoles(meta.permisos),
+    ...normalizeRoles(meta.scopes),
 
-        ...normalizeRoles(raw?.profile?.permissions),
-        ...normalizeRoles(raw?.profile?.scopes),
+    ...normalizeRoles(claims.permissions),
+    ...normalizeRoles(claims.permisos),
+    ...normalizeRoles(claims.scopes),
 
-        ...normalizeRoles(raw?.meta?.permissions),
-        ...normalizeRoles(raw?.meta?.scopes),
+    ...normalizeRoles(raw.permissions),
+    ...normalizeRoles(raw.permisos),
+    ...normalizeRoles(raw.scopes),
+    ...normalizeRoles(raw.authorities),
 
-        ...normalizeRoles(raw?.claims?.permissions),
-        ...normalizeRoles(raw?.claims?.scopes),
-      ].filter(Boolean)
-    )
-  );
+    ...normalizeRoles(raw?.profile?.permissions),
+    ...normalizeRoles(raw?.profile?.permisos),
+    ...normalizeRoles(raw?.profile?.scopes),
+
+    ...normalizeRoles(raw?.meta?.permissions),
+    ...normalizeRoles(raw?.meta?.permisos),
+    ...normalizeRoles(raw?.meta?.scopes),
+
+    ...normalizeRoles(raw?.claims?.permissions),
+    ...normalizeRoles(raw?.claims?.permisos),
+    ...normalizeRoles(raw?.claims?.scopes),
+  ]);
 }
 
 /* =========================================================
@@ -681,8 +1147,7 @@ function collectPermissionsFromUser(user = null) {
 
 function normalizeTheme(value = "") {
   const theme =
-    safeText(value, "")
-      .toLowerCase();
+    safeLower(value, "");
 
   if (theme === "light") {
     return "light";
@@ -716,6 +1181,111 @@ function getSystemThemeFallback() {
   return "light";
 }
 
+function normalizeLang(value = "") {
+  const lang =
+    safeLower(value, "")
+      .replace(/_/g, "-");
+
+  if (!lang) {
+    return "";
+  }
+
+  const firstPart =
+    lang.split("-")[0];
+
+  if (
+    firstPart === "spa" ||
+    firstPart === "spanish" ||
+    firstPart === "castellano"
+  ) {
+    return "es";
+  }
+
+  if (
+    firstPart === "eng" ||
+    firstPart === "english"
+  ) {
+    return "en";
+  }
+
+  if (
+    firstPart === "cat" ||
+    firstPart === "catalan" ||
+    firstPart === "català" ||
+    firstPart === "catalán"
+  ) {
+    return "ca";
+  }
+
+  return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(lang)
+    ? lang
+    : "";
+}
+
+/* =========================================================
+   COLLECTION HELPERS
+========================================================= */
+
+function safeEnsureCollectionKey(state, key) {
+  const rawKey =
+    safeText(key, "");
+
+  if (!rawKey) {
+    return "";
+  }
+
+  try {
+    return ensureCollectionKey(
+      state,
+      rawKey
+    );
+  } catch {
+    return rawKey;
+  }
+}
+
+function getEntityId(entity = null) {
+  const item =
+    safeObject(entity);
+
+  for (const key of ENTITY_ID_KEYS) {
+    const value =
+      safeText(item?.[key], "");
+
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
+function compareEntityId(entity = null, id = "") {
+  const target =
+    safeText(id, "");
+
+  if (!target) {
+    return false;
+  }
+
+  const item =
+    safeObject(entity);
+
+  return ENTITY_ID_KEYS.some((key) =>
+    safeText(item?.[key], "") === target
+  );
+}
+
+function normalizeCollectionValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      clone(item)
+    );
+  }
+
+  return clone(value);
+}
+
 /* =========================================================
    FACTORY
 ========================================================= */
@@ -723,29 +1293,32 @@ function getSystemThemeFallback() {
 export function createSelectors({
   AppCore,
   state,
-}) {
+} = {}) {
+  const rootState =
+    state || {};
+
   function app() {
-    return getAppSlice(state);
+    return getAppSlice(rootState);
   }
 
   function session() {
-    return getSessionSlice(state);
+    return getSessionSlice(rootState);
   }
 
   function ui() {
-    return getUiSlice(state);
+    return getUiSlice(rootState);
   }
 
   function entities() {
-    return getEntitiesSlice(state);
+    return getEntitiesSlice(rootState);
   }
 
   function flags() {
-    return getFlagsSlice(state);
+    return getFlagsSlice(rootState);
   }
 
   function meta() {
-    return getMetaSlice(state);
+    return getMetaSlice(rootState);
   }
 
   function cloneUser() {
@@ -802,38 +1375,175 @@ export function createSelectors({
     );
   }
 
-  function getCollection(key) {
-    const finalKey =
-      ensureCollectionKey(
-        state,
-        key
-      );
-
-    const value =
-      entities()[finalKey];
-
-    if (
-      Array.isArray(value)
-    ) {
-      return value.map((item) =>
-        clone(item)
-      );
+  function currentPermissionsValue() {
+    if (!authenticatedStrict()) {
+      return [];
     }
 
-    return clone(value);
+    return collectPermissionsFromUser(
+      getUserFromSession(
+        session()
+      )
+    );
+  }
+
+  function hasRoleSelector(...roles) {
+    if (!authenticatedStrict()) {
+      return false;
+    }
+
+    const allowed =
+      expandRoleAliases(
+        roles.flat()
+      );
+
+    if (!allowed.length) {
+      return true;
+    }
+
+    const current =
+      new Set(
+        currentRolesValue()
+      );
+
+    return allowed.some((role) =>
+      current.has(role)
+    );
+  }
+
+  function hasAllRolesSelector(roles = []) {
+    if (!authenticatedStrict()) {
+      return false;
+    }
+
+    const required =
+      expandRoleAliases(
+        toArray(roles).flat()
+      );
+
+    if (!required.length) {
+      return true;
+    }
+
+    const current =
+      new Set(
+        currentRolesValue()
+      );
+
+    return required.every((role) =>
+      current.has(role)
+    );
+  }
+
+  function hasPermissionSelector(...permissions) {
+    if (!authenticatedStrict()) {
+      return false;
+    }
+
+    const required =
+      normalizeRoles(
+        permissions.flat()
+      );
+
+    if (!required.length) {
+      return true;
+    }
+
+    const current =
+      new Set(
+        currentPermissionsValue()
+      );
+
+    return required.some((permission) =>
+      current.has(permission)
+    );
   }
 
   function getCollectionRaw(key) {
     const finalKey =
-      ensureCollectionKey(
-        state,
+      safeEnsureCollectionKey(
+        rootState,
         key
       );
+
+    if (!finalKey) {
+      return undefined;
+    }
 
     return entities()[finalKey];
   }
 
-  return {
+  function getCollection(key) {
+    return normalizeCollectionValue(
+      getCollectionRaw(key)
+    );
+  }
+
+  function getCollectionList(key) {
+    const value =
+      getCollectionRaw(key);
+
+    return Array.isArray(value)
+      ? value
+      : [];
+  }
+
+  function currentThemeValue() {
+    const fromState =
+      normalizeTheme(
+        ui().theme
+      );
+
+    const fromCore =
+      normalizeTheme(
+        AppCore?.state?.theme
+      );
+
+    const fromConfig =
+      normalizeTheme(
+        AppCore?.config?.defaultTheme
+      );
+
+    const resolved =
+      fromState ||
+      fromCore ||
+      fromConfig ||
+      getSystemThemeFallback();
+
+    return resolved === "system"
+      ? getSystemThemeFallback()
+      : resolved;
+  }
+
+  function currentThemePreferenceValue() {
+    return (
+      normalizeTheme(ui().themePreference) ||
+      normalizeTheme(ui().themeMode) ||
+      normalizeTheme(AppCore?.state?.themeMode) ||
+      normalizeTheme(AppCore?.state?.appearance) ||
+      normalizeTheme(AppCore?.config?.defaultTheme) ||
+      "system"
+    );
+  }
+
+  function currentLangValue() {
+    return (
+      normalizeLang(ui().lang) ||
+      normalizeLang(AppCore?.state?.lang) ||
+      normalizeLang(AppCore?.config?.defaultLang) ||
+      "es"
+    );
+  }
+
+  function getAppName() {
+    return (
+      safeText(AppCore?.config?.appName, "") ||
+      safeText(AppCore?.config?.name, "") ||
+      "Onion Support"
+    );
+  }
+
+  const selectors = {
     /* =====================================
        APP
     ===================================== */
@@ -866,9 +1576,18 @@ export function createSelectors({
       );
     },
 
+    isFatal() {
+      return Boolean(
+        app().fatal ||
+          app().appFatal
+      );
+    },
+
     lastError() {
       const error =
-        app().lastError;
+        app().lastError ||
+        app().error ||
+        null;
 
       return error
         ? clone(error)
@@ -884,21 +1603,55 @@ export function createSelectors({
       );
     },
 
+    currentCanonicalPath() {
+      return (
+        safeText(
+          app().canonicalPath,
+          ""
+        ) ||
+        selectors.currentRoute()
+      );
+    },
+
     currentPublicPath() {
       return (
         safeText(
           app().publicPath,
-          "/"
-        ) || "/"
+          ""
+        ) ||
+        selectors.currentRoute()
       );
     },
 
     routeSnapshot() {
       return {
         route:
-          this.currentRoute(),
+          selectors.currentRoute(),
+
+        canonicalPath:
+          selectors.currentCanonicalPath(),
+
         publicPath:
-          this.currentPublicPath(),
+          redactTokenInText(
+            selectors.currentPublicPath()
+          ),
+      };
+    },
+
+    appSnapshot() {
+      return {
+        ...clone(app()),
+
+        route:
+          selectors.currentRoute(),
+
+        canonicalPath:
+          selectors.currentCanonicalPath(),
+
+        publicPath:
+          redactTokenInText(
+            selectors.currentPublicPath()
+          ),
       };
     },
 
@@ -910,8 +1663,28 @@ export function createSelectors({
       return authenticatedStrict();
     },
 
+    hasToken() {
+      return hasUsableToken(
+        currentTokenValue()
+      );
+    },
+
+    hasUser() {
+      return hasUsableUser(
+        getUserFromSession(
+          session()
+        )
+      );
+    },
+
     currentUser() {
       return cloneUser();
+    },
+
+    currentUserRaw() {
+      return getUserFromSession(
+        session()
+      );
     },
 
     currentUserIdentity() {
@@ -922,19 +1695,29 @@ export function createSelectors({
       ) || null;
     },
 
-    currentUsername() {
+    currentUserId() {
       const user =
         getUserFromSession(
           session()
         );
 
       return (
-        safeText(user.username, "") ||
-        safeText(user.userName, "") ||
-        safeText(user.user_name, "") ||
-        safeText(user.email, "") ||
+        safeText(user?.userId, "") ||
+        safeText(user?.user_id, "") ||
+        safeText(user?.id, "") ||
+        safeText(user?._id, "") ||
+        safeText(user?.uid, "") ||
         null
       );
+    },
+
+    currentUsername() {
+      const user =
+        getUserFromSession(
+          session()
+        );
+
+      return getUserUsername(user) || null;
     },
 
     currentDisplayName() {
@@ -954,7 +1737,10 @@ export function createSelectors({
           session()
         );
 
-      return getUserAvatar(user) || null;
+      const avatar =
+        getUserAvatar(user);
+
+      return avatar || null;
     },
 
     currentRole() {
@@ -968,17 +1754,8 @@ export function createSelectors({
     },
 
     currentPermissions() {
-      if (!authenticatedStrict()) {
-        return [];
-      }
-
-      const user =
-        getUserFromSession(
-          session()
-        );
-
       return [
-        ...collectPermissionsFromUser(user),
+        ...currentPermissionsValue(),
       ];
     },
 
@@ -997,68 +1774,54 @@ export function createSelectors({
         .some(isManagerRole);
     },
 
+    isClient() {
+      return currentRolesValue()
+        .some(isClientRole);
+    },
+
+    isUser() {
+      return currentRolesValue()
+        .some(isUserRole);
+    },
+
     hasRole(...roles) {
-      if (!authenticatedStrict()) {
-        return false;
-      }
-
-      const allowed =
-        expandRoleAliases(
-          roles.flat()
-        );
-
-      if (!allowed.length) {
-        return true;
-      }
-
-      const current =
-        new Set(
-          currentRolesValue()
-        );
-
-      return allowed.some((role) =>
-        current.has(role)
+      return hasRoleSelector(
+        ...roles
       );
     },
 
     hasAnyRole(roles = []) {
-      return this.hasRole(
+      return hasRoleSelector(
         ...toArray(roles).flat()
       );
     },
 
     hasAllRoles(roles = []) {
-      if (!authenticatedStrict()) {
-        return false;
-      }
-
-      const required =
-        expandRoleAliases(
-          toArray(roles).flat()
-        );
-
-      if (!required.length) {
-        return true;
-      }
-
-      const current =
-        new Set(
-          currentRolesValue()
-        );
-
-      return required.every((role) =>
-        current.has(role)
+      return hasAllRolesSelector(
+        roles
       );
     },
 
     hasPermission(...permissions) {
+      return hasPermissionSelector(
+        ...permissions
+      );
+    },
+
+    hasAnyPermission(permissions = []) {
+      return hasPermissionSelector(
+        ...toArray(permissions).flat()
+      );
+    },
+
+    hasAllPermissions(permissions = []) {
       if (!authenticatedStrict()) {
         return false;
       }
 
       const required =
         normalizeRoles(
-          permissions.flat()
+          toArray(permissions).flat()
         );
 
       if (!required.length) {
@@ -1067,10 +1830,10 @@ export function createSelectors({
 
       const current =
         new Set(
-          this.currentPermissions()
+          currentPermissionsValue()
         );
 
-      return required.some((permission) =>
+      return required.every((permission) =>
         current.has(permission)
       );
     },
@@ -1086,25 +1849,56 @@ export function createSelectors({
 
     authHeader() {
       const token =
-        this.token();
+        selectors.token();
+
+      const headerName =
+        safeText(
+          AppCore?.config?.auth?.tokenHeader,
+          "Authorization"
+        );
+
+      const bearerPrefix =
+        safeText(
+          AppCore?.config?.auth?.bearerPrefix,
+          "Bearer"
+        );
 
       return token
         ? {
-            Authorization: `Bearer ${token}`,
+            [headerName]: `${bearerPrefix} ${token}`,
           }
         : {};
     },
 
-    sessionSnapshot() {
-      const currentSession =
-        session();
+    sessionSnapshot(options = {}) {
+      const opts =
+        safeObject(options);
+
+      const rawToken =
+        selectors.token();
+
+      const exposeToken =
+        opts.includeToken === true;
 
       return {
+        version:
+          STORE_SELECTORS_VERSION,
+
         authenticated:
           authenticatedStrict(),
 
+        hasToken:
+          Boolean(rawToken),
+
         token:
-          this.token(),
+          exposeToken
+            ? rawToken
+            : null,
+
+        accessToken:
+          exposeToken
+            ? rawToken
+            : null,
 
         user:
           cloneUser(),
@@ -1116,31 +1910,45 @@ export function createSelectors({
           currentRolesValue(),
 
         permissions:
-          this.currentPermissions(),
+          currentPermissionsValue(),
 
         isAdmin:
-          this.isAdmin(),
+          selectors.isAdmin(),
 
         isSupport:
-          this.isSupport(),
+          selectors.isSupport(),
 
         isManager:
-          this.isManager(),
+          selectors.isManager(),
+
+        isClient:
+          selectors.isClient(),
+
+        isUser:
+          selectors.isUser(),
 
         userIdentity:
-          this.currentUserIdentity(),
+          selectors.currentUserIdentity(),
+
+        userId:
+          selectors.currentUserId(),
 
         username:
-          this.currentUsername(),
+          selectors.currentUsername(),
 
         displayName:
-          this.currentDisplayName(),
+          selectors.currentDisplayName(),
 
         avatar:
-          this.currentAvatar(),
+          selectors.currentAvatar(),
 
         raw:
-          clone(currentSession),
+          opts.includeRaw === true
+            ? clone(session())
+            : null,
+
+        at:
+          safeNowIso(),
       };
     },
 
@@ -1149,45 +1957,15 @@ export function createSelectors({
     ===================================== */
 
     currentTheme() {
-      const fromState =
-        normalizeTheme(
-          ui().theme
-        );
+      return currentThemeValue();
+    },
 
-      const fromCore =
-        normalizeTheme(
-          AppCore?.state?.theme
-        );
-
-      const fromConfig =
-        normalizeTheme(
-          AppCore?.config?.defaultTheme
-        );
-
-      return (
-        fromState ||
-        fromCore ||
-        fromConfig ||
-        getSystemThemeFallback()
-      );
+    themePreference() {
+      return currentThemePreferenceValue();
     },
 
     currentLang() {
-      return (
-        safeText(
-          ui().lang,
-          ""
-        ) ||
-        safeText(
-          AppCore?.state?.lang,
-          ""
-        ) ||
-        safeText(
-          AppCore?.config?.defaultLang,
-          ""
-        ) ||
-        "es"
-      );
+      return currentLangValue();
     },
 
     isSidebarOpen() {
@@ -1202,11 +1980,7 @@ export function createSelectors({
           ui().pageTitle,
           ""
         ) ||
-        safeText(
-          AppCore?.config?.appName,
-          ""
-        ) ||
-        "Onion Support"
+        getAppName()
       );
     },
 
@@ -1220,33 +1994,49 @@ export function createSelectors({
           ui().pageTitle,
           ""
         ) ||
-        safeText(
-          AppCore?.config?.appName,
-          ""
-        ) ||
-        "Onion Support"
+        getAppName()
       );
     },
 
-    uiSnapshot() {
+    density() {
+      return (
+        safeText(ui().density, "") ||
+        safeText(AppCore?.state?.density, "") ||
+        safeText(AppCore?.config?.ui?.density, "") ||
+        "default"
+      );
+    },
+
+    uiSnapshot(options = {}) {
+      const opts =
+        safeObject(options);
+
       return {
         theme:
-          this.currentTheme(),
+          selectors.currentTheme(),
+
+        themePreference:
+          selectors.themePreference(),
 
         lang:
-          this.currentLang(),
+          selectors.currentLang(),
 
         sidebarOpen:
-          this.isSidebarOpen(),
+          selectors.isSidebarOpen(),
+
+        density:
+          selectors.density(),
 
         pageTitle:
-          this.pageTitle(),
+          selectors.pageTitle(),
 
         topbarTitle:
-          this.topbarTitle(),
+          selectors.topbarTitle(),
 
         raw:
-          clone(ui()),
+          opts.includeRaw === true
+            ? clone(ui())
+            : null,
       };
     },
 
@@ -1254,10 +2044,7 @@ export function createSelectors({
        FLAGS
     ===================================== */
 
-    flag(
-      key,
-      fallback = false
-    ) {
+    flag(key, fallback = false) {
       const name =
         safeText(key, "");
 
@@ -1265,9 +2052,7 @@ export function createSelectors({
         return fallback;
       }
 
-      if (
-        !hasOwn(flags(), name)
-      ) {
+      if (!hasOwn(flags(), name)) {
         return fallback;
       }
 
@@ -1280,6 +2065,30 @@ export function createSelectors({
       return clone(flags());
     },
 
+    isHydrating() {
+      return selectors.flag(
+        "hydrating",
+        false
+      );
+    },
+
+    isFetching(key = "") {
+      const clean =
+        safeText(key, "");
+
+      if (!clean) {
+        return false;
+      }
+
+      const direct =
+        `fetching${clean[0]?.toUpperCase() || ""}${clean.slice(1)}`;
+
+      return selectors.flag(
+        direct,
+        false
+      );
+    },
+
     /* =====================================
        ENTITIES
     ===================================== */
@@ -1289,19 +2098,21 @@ export function createSelectors({
     },
 
     collectionRaw(key) {
-      const value =
-        getCollectionRaw(key);
+      return getCollectionRaw(key);
+    },
 
-      return value;
+    collectionList(key) {
+      return getCollectionList(key)
+        .map((item) =>
+          clone(item)
+        );
     },
 
     count(key) {
       const value =
         getCollectionRaw(key);
 
-      if (
-        Array.isArray(value)
-      ) {
+      if (Array.isArray(value)) {
         return value.length;
       }
 
@@ -1311,16 +2122,14 @@ export function createSelectors({
     },
 
     isEmpty(key) {
-      return this.count(key) === 0;
+      return selectors.count(key) === 0;
     },
 
     first(key) {
       const value =
         getCollectionRaw(key);
 
-      if (
-        Array.isArray(value)
-      ) {
+      if (Array.isArray(value)) {
         return value.length
           ? clone(value[0])
           : null;
@@ -1335,9 +2144,7 @@ export function createSelectors({
       const value =
         getCollectionRaw(key);
 
-      if (
-        Array.isArray(value)
-      ) {
+      if (Array.isArray(value)) {
         return value.length
           ? clone(value[value.length - 1])
           : null;
@@ -1348,10 +2155,7 @@ export function createSelectors({
         : null;
     },
 
-    find(
-      key,
-      predicate
-    ) {
+    find(key, predicate) {
       const list =
         getCollectionRaw(key);
 
@@ -1362,24 +2166,36 @@ export function createSelectors({
         return null;
       }
 
-      const item =
-        list.find((entry, index) =>
-          predicate(
-            clone(entry),
-            index,
-            clone(list)
-          )
-        );
+      for (let index = 0; index < list.length; index += 1) {
+        const item =
+          list[index];
 
-      return item
-        ? clone(item)
-        : null;
+        let matched =
+          false;
+
+        try {
+          matched =
+            Boolean(
+              predicate(
+                clone(item),
+                index,
+                clone(list)
+              )
+            );
+        } catch {
+          matched =
+            false;
+        }
+
+        if (matched) {
+          return clone(item);
+        }
+      }
+
+      return null;
     },
 
-    filter(
-      key,
-      predicate
-    ) {
+    filter(key, predicate) {
       const list =
         getCollectionRaw(key);
 
@@ -1390,23 +2206,41 @@ export function createSelectors({
         return [];
       }
 
-      return list
-        .filter((entry, index) =>
-          predicate(
-            clone(entry),
-            index,
-            clone(list)
-          )
-        )
-        .map((entry) =>
-          clone(entry)
-        );
+      const output =
+        [];
+
+      for (let index = 0; index < list.length; index += 1) {
+        const item =
+          list[index];
+
+        let matched =
+          false;
+
+        try {
+          matched =
+            Boolean(
+              predicate(
+                clone(item),
+                index,
+                clone(list)
+              )
+            );
+        } catch {
+          matched =
+            false;
+        }
+
+        if (matched) {
+          output.push(
+            clone(item)
+          );
+        }
+      }
+
+      return output;
     },
 
-    map(
-      key,
-      mapper
-    ) {
+    map(key, mapper) {
       const list =
         getCollectionRaw(key);
 
@@ -1417,21 +2251,22 @@ export function createSelectors({
         return [];
       }
 
-      return list.map((entry, index) =>
-        clone(
-          mapper(
-            clone(entry),
-            index,
-            clone(list)
-          )
-        )
-      );
+      return list.map((entry, index) => {
+        try {
+          return clone(
+            mapper(
+              clone(entry),
+              index,
+              clone(list)
+            )
+          );
+        } catch {
+          return null;
+        }
+      });
     },
 
-    byId(
-      key,
-      id
-    ) {
+    byId(key, id) {
       const targetId =
         safeText(id, "");
 
@@ -1439,18 +2274,115 @@ export function createSelectors({
         return null;
       }
 
-      return this.find(
+      return selectors.find(
         key,
         (item) =>
-          safeText(item?.id, "") === targetId ||
-          safeText(item?._id, "") === targetId ||
-          safeText(item?.uuid, "") === targetId
+          compareEntityId(
+            item,
+            targetId
+          )
       );
+    },
+
+    ids(key) {
+      const list =
+        getCollectionRaw(key);
+
+      if (!Array.isArray(list)) {
+        const id =
+          getEntityId(list);
+
+        return id
+          ? [id]
+          : [];
+      }
+
+      return list
+        .map(getEntityId)
+        .filter(Boolean);
+    },
+
+    entityMap(key) {
+      const list =
+        getCollectionRaw(key);
+
+      const map =
+        new Map();
+
+      if (!Array.isArray(list)) {
+        const id =
+          getEntityId(list);
+
+        if (id) {
+          map.set(
+            id,
+            clone(list)
+          );
+        }
+
+        return map;
+      }
+
+      for (const item of list) {
+        const id =
+          getEntityId(item);
+
+        if (id) {
+          map.set(
+            id,
+            clone(item)
+          );
+        }
+      }
+
+      return map;
     },
 
     entitiesSnapshot() {
       return clone(
         entities()
+      );
+    },
+
+    incidencias() {
+      return selectors.collectionList(
+        "incidencias"
+      );
+    },
+
+    tickets() {
+      return selectors.collectionList(
+        "incidencias"
+      );
+    },
+
+    facturas() {
+      return selectors.collectionList(
+        "facturas"
+      );
+    },
+
+    usuarios() {
+      return selectors.collectionList(
+        "usuarios"
+      );
+    },
+
+    clientes() {
+      return selectors.collectionList(
+        "clientes"
+      );
+    },
+
+    recientes() {
+      return selectors.collectionList(
+        "recientes"
+      );
+    },
+
+    dashboard() {
+      return clone(
+        entities().dashboard || null
       );
     },
 
@@ -1468,6 +2400,20 @@ export function createSelectors({
       );
     },
 
+    revision() {
+      return safeNumber(
+        meta().revision,
+        0
+      );
+    },
+
+    createdAt() {
+      return (
+        meta().createdAt ||
+        null
+      );
+    },
+
     updatedAt() {
       return (
         meta().updatedAt ||
@@ -1479,30 +2425,56 @@ export function createSelectors({
        FULL SNAPSHOT
     ===================================== */
 
-    snapshot() {
+    snapshot(options = {}) {
+      const opts =
+        safeObject(options);
+
       return {
+        version:
+          STORE_SELECTORS_VERSION,
+
         app:
-          clone(app()),
+          selectors.appSnapshot(),
 
         session:
-          this.sessionSnapshot(),
+          selectors.sessionSnapshot({
+            includeToken:
+              opts.includeToken === true,
+            includeRaw:
+              opts.includeRawSession === true,
+          }),
 
         ui:
-          this.uiSnapshot(),
+          selectors.uiSnapshot({
+            includeRaw:
+              opts.includeRawUi === true,
+          }),
 
         flags:
           clone(flags()),
 
         entities:
-          clone(entities()),
+          opts.includeEntities === false
+            ? null
+            : clone(entities()),
 
         meta:
           clone(meta()),
+
+        at:
+          safeNowIso(),
       };
     },
   };
+
+  return selectors;
 }
 
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
 export default {
+  STORE_SELECTORS_VERSION,
   createSelectors,
 };

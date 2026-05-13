@@ -32,6 +32,7 @@
    - soporte usuario/topbar/sidebar montados tarde
    - protección contra onload/onerror obsoletos
    - sin innerHTML
+   - sin imports duplicados
 ========================================================= */
 
 import { config } from "./config.js";
@@ -49,7 +50,7 @@ import {
 ========================================================= */
 
 const UI_VERSION =
-  "11.0.0";
+  "12.0.0";
 
 const DEFAULT_USER_NAME =
   "Usuario";
@@ -86,7 +87,7 @@ const AVATAR_RENDER_TOKENS =
 
 const AVATAR_SELECTORS =
   Object.freeze({
-    root: [
+    root: Object.freeze([
       "#sidebar-avatar",
       "#sidebarAvatar",
       "[data-sidebar-avatar='true']",
@@ -94,33 +95,33 @@ const AVATAR_SELECTORS =
       "[data-user-avatar]",
       ".sidebar-avatar",
       ".user-avatar",
-    ],
+    ]),
 
-    topbarRoot: [
+    topbarRoot: Object.freeze([
       "#topbar-avatar",
       "#topbarAvatar",
       "[data-topbar-avatar='true']",
       "[data-topbar-avatar]",
       "[data-user-avatar-topbar]",
       ".topbar-avatar",
-    ],
+    ]),
 
-    image: [
+    image: Object.freeze([
       "#sidebarAvatarImage",
       "#topbarAvatarImage",
       ".avatar-image",
       "img[data-avatar-image='true']",
       "[data-avatar-image]",
       "img",
-    ],
+    ]),
 
-    fallback: [
+    fallback: Object.freeze([
       "#sidebarAvatarFallback",
       "#topbarAvatarFallback",
       ".avatar-fallback",
       "[data-avatar-fallback='true']",
       "[data-avatar-fallback]",
-    ],
+    ]),
   });
 
 const USER_NAME_SELECTORS =
@@ -183,33 +184,33 @@ const TOPBAR_TITLE_SELECTORS =
 
 const DYNAMIC_CONTAINER_SELECTORS =
   Object.freeze({
-    topbarViewContainer: [
+    topbarViewContainer: Object.freeze([
       "#topbarview-container",
       "#topbar-view-container",
       "[data-topbar-view-container='true']",
       "[data-topbar-view-container]",
       ".topbar-view-container",
-    ],
+    ]),
 
-    tableheadContainer: [
+    tableheadContainer: Object.freeze([
       "#tablehead-container",
       "#table-head-container",
       "[data-tablehead-container='true']",
       "[data-tablehead-container]",
       "[data-table-head-container]",
       ".tablehead-container",
-    ],
+    ]),
 
-    tablehead: [
+    tablehead: Object.freeze([
       "#table-head",
       "#tablehead",
       ".table-head",
       ".tablehead",
       "[data-tablehead]",
       "[data-table-head]",
-    ],
+    ]),
 
-    viewContainer: [
+    viewContainer: Object.freeze([
       "#view-container",
       "#router-view",
       "#app-view",
@@ -220,7 +221,7 @@ const DYNAMIC_CONTAINER_SELECTORS =
       "[data-router-outlet]",
       ".view-container",
       ".router-view",
-    ],
+    ]),
   });
 
 const USER_NODE_MAP =
@@ -295,7 +296,7 @@ function safeText(value, fallback = "") {
 }
 
 function safeObject(value, fallback = {}) {
-  return isObject(value)
+  return isPlainObject(value)
     ? value
     : fallback;
 }
@@ -334,9 +335,16 @@ function safeRedact(value = "") {
 }
 
 function safeEmit(events, eventName, payload = {}) {
+  const name =
+    safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
   try {
     events?.emit?.(
-      eventName,
+      name,
       payload
     );
 
@@ -425,6 +433,50 @@ function safeToggleClass(el, className, force) {
   return false;
 }
 
+function safeClassAdd(el, ...classes) {
+  if (!el) {
+    return false;
+  }
+
+  const clean =
+    classes
+      .map((item) => safeText(item, ""))
+      .filter(Boolean);
+
+  if (!clean.length) {
+    return false;
+  }
+
+  try {
+    el.classList.add(...clean);
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function safeClassRemove(el, ...classes) {
+  if (!el) {
+    return false;
+  }
+
+  const clean =
+    classes
+      .map((item) => safeText(item, ""))
+      .filter(Boolean);
+
+  if (!clean.length) {
+    return false;
+  }
+
+  try {
+    el.classList.remove(...clean);
+    return true;
+  } catch {}
+
+  return false;
+}
+
 function safeDatasetSet(el, key, value) {
   if (
     !el ||
@@ -460,10 +512,31 @@ function queryFirst(selectors = [], root = null) {
     root || document;
 
   for (const selector of safeArray(selectors)) {
+    const cleanSelector =
+      safeText(selector, "");
+
+    if (!cleanSelector) {
+      continue;
+    }
+
     try {
+      if (
+        cleanSelector.startsWith("#") &&
+        scope === document
+      ) {
+        const foundById =
+          document.getElementById(
+            cleanSelector.slice(1)
+          );
+
+        if (foundById) {
+          return foundById;
+        }
+      }
+
       const found =
         scope.querySelector?.(
-          selector
+          cleanSelector
         );
 
       if (found) {
@@ -487,11 +560,18 @@ function queryAll(selectors = [], root = null) {
     [];
 
   for (const selector of safeArray(selectors)) {
+    const cleanSelector =
+      safeText(selector, "");
+
+    if (!cleanSelector) {
+      continue;
+    }
+
     try {
       const nodes =
         Array.from(
           scope.querySelectorAll?.(
-            selector
+            cleanSelector
           ) || []
         );
 
@@ -578,6 +658,11 @@ function isImageElement(el) {
 }
 
 function removeNativeTooltip(el) {
+  /*
+    Regla del proyecto:
+    - quitar title nativo
+    - no tocar data-tooltip custom
+  */
   safeRemoveAttr(
     el,
     "title"
@@ -645,6 +730,42 @@ function getConfigValue(path = "", fallback = undefined) {
 }
 
 /* =========================================================
+   SAFE USER HELPERS
+========================================================= */
+
+function safeGetUserDisplayName(user = null) {
+  try {
+    return getUserDisplayName(user);
+  } catch {
+    return "";
+  }
+}
+
+function safeGetUserUsername(user = null) {
+  try {
+    return getUserUsername(user);
+  } catch {
+    return "";
+  }
+}
+
+function safeGetUserAvatarUrl(user = null) {
+  try {
+    return getUserAvatarUrl(user);
+  } catch {
+    return "";
+  }
+}
+
+function safeGetInitials(value = "") {
+  try {
+    return getInitials(value);
+  } catch {
+    return "";
+  }
+}
+
+/* =========================================================
    I18N
 ========================================================= */
 
@@ -658,6 +779,7 @@ function getI18nFromRuntime() {
       window.OnionI18n ||
       window.I18n ||
       window.AppI18n ||
+      window.__ONION_I18N__ ||
       null
     );
   } catch {
@@ -703,7 +825,7 @@ function normalizeTitle(value = "", fallback = config.appName || DEFAULT_TITLE) 
   return safeText(
     value,
     fallback
-  );
+  ).replace(/\s+/g, " ").slice(0, 160);
 }
 
 export function setDocumentTitle({
@@ -729,15 +851,21 @@ export function setDocumentTitle({
 
   if (titleKey) {
     finalTitle =
-      safeTranslate(
-        titleKey,
-        titleParams,
+      normalizeTitle(
+        safeTranslate(
+          titleKey,
+          titleParams,
+          baseTitle
+        ),
         baseTitle
       );
   }
 
   const cleanSuffix =
-    safeText(suffix, "");
+    normalizeTitle(
+      suffix,
+      ""
+    );
 
   if (
     cleanSuffix &&
@@ -763,16 +891,19 @@ export function setDocumentTitle({
     );
 
   let finalTopbarTitle =
-    safeText(
+    normalizeTitle(
       topbarTitle,
-      finalTitle
+      baseTitle
     );
 
   if (topbarTitleKey) {
     finalTopbarTitle =
-      safeTranslate(
-        topbarTitleKey,
-        topbarTitleParams,
+      normalizeTitle(
+        safeTranslate(
+          topbarTitleKey,
+          topbarTitleParams,
+          finalTopbarTitle
+        ),
         finalTopbarTitle
       );
   }
@@ -801,11 +932,6 @@ export function setDocumentTitle({
     removeNativeTooltip(
       topbarTitleNode
     );
-
-    /*
-      No se toca data-tooltip:
-      el tooltip custom pertenece a SidebarUI/TopbarUI/Tooltip.
-    */
   }
 
   safeEmit(
@@ -899,7 +1025,10 @@ export function clearDynamicContainers({
   }
 
   for (const key of safeArray(extraKeys)) {
-    if (key && !keys.includes(key)) {
+    if (
+      key &&
+      !keys.includes(key)
+    ) {
       keys.push(key);
     }
   }
@@ -946,6 +1075,12 @@ export function clearDynamicContainers({
         tablehead,
         "visible",
         "false"
+      );
+
+      safeDatasetSet(
+        tablehead,
+        "tableheadState",
+        "empty"
       );
     }
   }
@@ -1757,6 +1892,22 @@ function renderAvatarImage(
     }
   );
 
+  if (fallbackEl) {
+    fallbackEl.hidden =
+      false;
+
+    safeSetAttr(
+      fallbackEl,
+      "aria-hidden",
+      "false"
+    );
+
+    safeSetText(
+      fallbackEl,
+      cleanAvatarText
+    );
+  }
+
   try {
     imgEl.loading =
       "eager";
@@ -1772,6 +1923,15 @@ function renderAvatarImage(
 
     imgEl.alt =
       avatarAlt;
+
+    imgEl.hidden =
+      true;
+
+    safeSetAttr(
+      imgEl,
+      "aria-hidden",
+      "true"
+    );
 
     imgEl.onload =
       () => {
@@ -1831,16 +1991,10 @@ function renderAvatarImage(
         );
       };
 
-    /*
-      src al final para que onload/onerror ya estén armados.
-    */
     if (imgEl.src !== safeUrl) {
       imgEl.src =
         safeUrl;
     }
-
-    imgEl.hidden =
-      false;
   } catch {
     return renderAvatarFallback(
       avatarRoot,
@@ -1859,40 +2013,10 @@ function renderAvatarImage(
     );
   }
 
-  safeSetAttr(
-    imgEl,
-    "aria-hidden",
-    "false"
-  );
-
   removeNativeTooltip(
     imgEl
   );
 
-  if (fallbackEl) {
-    safeSetText(
-      fallbackEl,
-      cleanAvatarText
-    );
-
-    fallbackEl.hidden =
-      true;
-
-    safeSetAttr(
-      fallbackEl,
-      "aria-hidden",
-      "true"
-    );
-
-    removeNativeTooltip(
-      fallbackEl
-    );
-  }
-
-  /*
-    Si la imagen ya está en caché, algunos navegadores no disparan onload
-    de forma observable para este handler. Remate defensivo.
-  */
   nextFrame(() => {
     try {
       if (
@@ -1928,13 +2052,28 @@ function hasRealUser(user = null) {
     return false;
   }
 
+  if (
+    user.active === false ||
+    user.disabled === true ||
+    user.deleted === true ||
+    user.status === "disabled" ||
+    user.status === "inactive" ||
+    user.estado === "disabled" ||
+    user.estado === "inactive"
+  ) {
+    return false;
+  }
+
   return Boolean(
     safeText(user.id, "") ||
-    safeText(user.userId, "") ||
-    safeText(user.username, "") ||
-    safeText(user.email, "") ||
-    safeText(user.name, "") ||
-    safeText(user.displayName, "")
+      safeText(user.userId, "") ||
+      safeText(user.user_id, "") ||
+      safeText(user._id, "") ||
+      safeText(user.uid, "") ||
+      safeText(user.username, "") ||
+      safeText(user.email, "") ||
+      safeText(user.name, "") ||
+      safeText(user.displayName, "")
   );
 }
 
@@ -1952,12 +2091,12 @@ function resolveUserUiData(state = {}) {
 
   const displayName =
     authenticated && user
-      ? getUserDisplayName(user) || DEFAULT_USER_NAME
+      ? safeGetUserDisplayName(user) || DEFAULT_USER_NAME
       : DEFAULT_USER_NAME;
 
   const username =
     authenticated && user
-      ? getUserUsername(user) || ""
+      ? safeGetUserUsername(user) || ""
       : "";
 
   const role =
@@ -1973,12 +2112,12 @@ function resolveUserUiData(state = {}) {
 
   const avatarUrl =
     authenticated && user
-      ? getUserAvatarUrl(user)
+      ? safeGetUserAvatarUrl(user)
       : "";
 
   const avatarText =
     normalizeAvatarText(
-      getInitials(displayName) ||
+      safeGetInitials(displayName) ||
       (
         username
           ? username.slice(0, 2).toUpperCase()
@@ -1990,7 +2129,7 @@ function resolveUserUiData(state = {}) {
     `${safeTranslate(
       "common.user",
       {},
-      "User"
+      "Usuario"
     )} ${displayName}`;
 
   return {
@@ -2479,18 +2618,19 @@ function getElementState(el) {
       ).slice(0, 80),
 
     dataset:
-      isPlainObject(el.dataset)
-        ? {
-            avatarMode:
-              el.dataset.avatarMode || "",
-            avatarState:
-              el.dataset.avatarState || "",
-            authenticated:
-              el.dataset.authenticated || "",
-            username:
-              el.dataset.username || "",
-          }
-        : {},
+      {
+        avatarMode:
+          el.dataset?.avatarMode || "",
+
+        avatarState:
+          el.dataset?.avatarState || "",
+
+        authenticated:
+          el.dataset?.authenticated || "",
+
+        username:
+          el.dataset?.username || "",
+      },
   };
 }
 
@@ -2651,6 +2791,8 @@ export function getUiSnapshot({
 ========================================================= */
 
 export default {
+  UI_VERSION,
+
   setDocumentTitle,
   clearDynamicContainers,
   syncUserUI,

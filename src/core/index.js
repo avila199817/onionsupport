@@ -3,7 +3,7 @@
    Archivo: src/core/index.js
 
    ONION SUPPORT · CORE SINGLETON
-   GLOBAL CONFIG · STATE · EVENTS · STORAGE · REQUEST · MODULES · 13/10
+   GLOBAL CONFIG · STATE · EVENTS · STORAGE · REQUEST · MODULES · 14/10
 
    QUÉ CENTRALIZA:
    - configuración global
@@ -35,6 +35,9 @@
    - no duplicar eventos base de state/session
    - applySession compatible con payloads heterogéneos
    - clearSession bloquea auth fantasma
+   - createStorage recibe { utils, events }
+   - applySessionBase recibe storage real
+   - adaptadores setUser/setToken no envuelven mal payloads
 ========================================================= */
 
 import { config } from "./config.js";
@@ -123,7 +126,7 @@ export const AppCore = (() => {
   ======================================================= */
 
   const CORE_VERSION =
-    "13.0.0";
+    "14.0.0";
 
   const CORE_SOURCE =
     "core";
@@ -1846,7 +1849,10 @@ export const AppCore = (() => {
     safeFactory(
       createStorage,
       createFallbackStorage,
-      utils
+      {
+        utils,
+        events,
+      }
     );
 
   function createFallbackModules() {
@@ -2205,6 +2211,43 @@ export const AppCore = (() => {
       return false;
     }
 
+    if (
+      user.active === false ||
+      user.disabled === true ||
+      user.deleted === true ||
+      user.isDisabled === true ||
+      user.isDeleted === true
+    ) {
+      return false;
+    }
+
+    const status =
+      safeLower(
+        user.status ||
+          user.estado ||
+          user.state ||
+          "",
+        ""
+      );
+
+    if (
+      [
+        "disabled",
+        "inactive",
+        "deleted",
+        "blocked",
+        "suspended",
+        "banned",
+        "desactivado",
+        "inactivo",
+        "eliminado",
+        "bloqueado",
+        "suspendido",
+      ].includes(status)
+    ) {
+      return false;
+    }
+
     return USER_ID_KEYS.some((key) =>
       Boolean(
         safeText(user?.[key], "")
@@ -2217,6 +2260,17 @@ export const AppCore = (() => {
       if (hasUsableUser(value)) {
         return value;
       }
+
+      try {
+        const normalized =
+          value
+            ? normalizeUser(value)
+            : null;
+
+        if (hasUsableUser(normalized)) {
+          return normalized;
+        }
+      } catch {}
     }
 
     return null;
@@ -2226,9 +2280,13 @@ export const AppCore = (() => {
     const session =
       getNestedObject(root.session);
 
+    const sessionData =
+      getNestedObject(root.sessionData);
+
     return firstToken(
       ...TOKEN_STATE_KEYS.map((key) => root[key]),
-      ...TOKEN_STATE_KEYS.map((key) => session[key])
+      ...TOKEN_STATE_KEYS.map((key) => session[key]),
+      ...TOKEN_STATE_KEYS.map((key) => sessionData[key])
     );
   }
 
@@ -2236,9 +2294,13 @@ export const AppCore = (() => {
     const session =
       getNestedObject(root.session);
 
+    const sessionData =
+      getNestedObject(root.sessionData);
+
     return firstUser(
       ...USER_STATE_KEYS.map((key) => root[key]),
-      ...USER_STATE_KEYS.map((key) => session[key])
+      ...USER_STATE_KEYS.map((key) => session[key]),
+      ...USER_STATE_KEYS.map((key) => sessionData[key])
     );
   }
 
@@ -2701,6 +2763,13 @@ export const AppCore = (() => {
           payload
         );
       }
+
+      if (isFunction(hooks?.runSeries)) {
+        return await hooks.runSeries(
+          key,
+          payload
+        );
+      }
     } catch (error) {
       safeWarn(
         "hooks.run() falló.",
@@ -2954,23 +3023,25 @@ export const AppCore = (() => {
     return false;
   }
 
-  function clearDynamicContainers() {
+  function clearDynamicContainers(options = {}) {
     try {
       return clearDynamicContainersBase({
         dom,
         events,
+        ...ensureObject(options),
       });
     } catch {}
 
     return false;
   }
 
-  function syncUserUI() {
+  function syncUserUI(options = {}) {
     try {
       return syncUserUIBase({
         state,
         dom,
         events,
+        ...ensureObject(options),
       });
     } catch (error) {
       safeWarn(
@@ -3045,11 +3116,20 @@ export const AppCore = (() => {
     const session =
       ensureObject(source.session);
 
+    const sessionData =
+      ensureObject(source.sessionData);
+
     const dataSession =
       ensureObject(data.session);
 
+    const dataSessionData =
+      ensureObject(data.sessionData);
+
     const payloadSession =
       ensureObject(payloadData.session);
+
+    const payloadSessionData =
+      ensureObject(payloadData.sessionData);
 
     const auth =
       ensureObject(source.auth);
@@ -3074,6 +3154,12 @@ export const AppCore = (() => {
         session.account,
         session.profile,
 
+        sessionData.user,
+        sessionData.usuario,
+        sessionData.me,
+        sessionData.account,
+        sessionData.profile,
+
         data.user,
         data.usuario,
         data.me,
@@ -3088,6 +3174,12 @@ export const AppCore = (() => {
         dataSession.me,
         dataSession.account,
         dataSession.profile,
+
+        dataSessionData.user,
+        dataSessionData.usuario,
+        dataSessionData.me,
+        dataSessionData.account,
+        dataSessionData.profile,
 
         payloadData.user,
         payloadData.usuario,
@@ -3104,12 +3196,23 @@ export const AppCore = (() => {
         payloadSession.account,
         payloadSession.profile,
 
+        payloadSessionData.user,
+        payloadSessionData.usuario,
+        payloadSessionData.me,
+        payloadSessionData.account,
+        payloadSessionData.profile,
+
         auth.user,
         auth.usuario,
         auth.me,
+        auth.account,
+        auth.profile,
+
         dataAuth.user,
         dataAuth.usuario,
-        dataAuth.me
+        dataAuth.me,
+        dataAuth.account,
+        dataAuth.profile
       );
 
     const token =
@@ -3126,6 +3229,12 @@ export const AppCore = (() => {
         session.jwt,
         session.bearer,
 
+        sessionData.token,
+        sessionData.accessToken,
+        sessionData.access_token,
+        sessionData.jwt,
+        sessionData.bearer,
+
         data.token,
         data.accessToken,
         data.access_token,
@@ -3137,6 +3246,12 @@ export const AppCore = (() => {
         dataSession.access_token,
         dataSession.jwt,
         dataSession.bearer,
+
+        dataSessionData.token,
+        dataSessionData.accessToken,
+        dataSessionData.access_token,
+        dataSessionData.jwt,
+        dataSessionData.bearer,
 
         payloadData.token,
         payloadData.accessToken,
@@ -3150,12 +3265,23 @@ export const AppCore = (() => {
         payloadSession.jwt,
         payloadSession.bearer,
 
+        payloadSessionData.token,
+        payloadSessionData.accessToken,
+        payloadSessionData.access_token,
+        payloadSessionData.jwt,
+        payloadSessionData.bearer,
+
         auth.token,
         auth.accessToken,
         auth.access_token,
+        auth.jwt,
+        auth.bearer,
+
         dataAuth.token,
         dataAuth.accessToken,
-        dataAuth.access_token
+        dataAuth.access_token,
+        dataAuth.jwt,
+        dataAuth.bearer
       );
 
     return {
@@ -3165,10 +3291,82 @@ export const AppCore = (() => {
       token:
         token || null,
 
+      refreshToken:
+        firstToken(
+          source.refreshToken,
+          source.refresh_token,
+          data.refreshToken,
+          data.refresh_token,
+          auth.refreshToken,
+          auth.refresh_token
+        ),
+
+      tempToken:
+        firstToken(
+          source.tempToken,
+          source.temp_token,
+          source.temporaryToken,
+          source.temporary_token,
+          data.tempToken,
+          data.temp_token,
+          auth.tempToken,
+          auth.temp_token
+        ),
+
+      sessionId:
+        safeText(
+          source.sessionId ||
+            source.session_id ||
+            session.sessionId ||
+            session.session_id ||
+            session.id ||
+            sessionData.sessionId ||
+            sessionData.session_id ||
+            sessionData.id ||
+            data.sessionId ||
+            data.session_id ||
+            dataSession.sessionId ||
+            dataSession.session_id ||
+            dataSession.id ||
+            auth.sessionId ||
+            auth.session_id ||
+            "",
+          ""
+        ) || null,
+
+      sessionUserId:
+        safeText(
+          source.sessionUserId ||
+            source.session_user_id ||
+            source.userId ||
+            source.user_id ||
+            session.sessionUserId ||
+            session.session_user_id ||
+            session.userId ||
+            session.user_id ||
+            sessionData.sessionUserId ||
+            sessionData.session_user_id ||
+            sessionData.userId ||
+            sessionData.user_id ||
+            data.sessionUserId ||
+            data.session_user_id ||
+            data.userId ||
+            data.user_id ||
+            auth.sessionUserId ||
+            auth.session_user_id ||
+            auth.userId ||
+            auth.user_id ||
+            "",
+          ""
+        ) || null,
+
       route:
         source.route ||
+        source.canonicalPath ||
         data.route ||
+        data.canonicalPath ||
         payloadData.route ||
+        payloadData.canonicalPath ||
         null,
 
       publicPath:
@@ -3373,6 +3571,18 @@ export const AppCore = (() => {
     return result;
   }
 
+  function adaptSessionSetterValue(value, key) {
+    if (
+      value &&
+      typeof value === "object" &&
+      safeOwn(value, key)
+    ) {
+      return value[key];
+    }
+
+    return value;
+  }
+
   function applySession(session = {}, options = {}) {
     const payload =
       ensureObject(session);
@@ -3386,18 +3596,20 @@ export const AppCore = (() => {
     const token =
       safeOwn(payload, "token") ||
       safeOwn(payload, "accessToken") ||
-      safeOwn(payload, "access_token")
+      safeOwn(payload, "access_token") ||
+      extracted.token
         ? extracted.token
-        : extracted.token;
+        : undefined;
 
     const user =
       safeOwn(payload, "user") ||
       safeOwn(payload, "usuario") ||
       safeOwn(payload, "me") ||
       safeOwn(payload, "account") ||
-      safeOwn(payload, "profile")
+      safeOwn(payload, "profile") ||
+      extracted.user
         ? extracted.user
-        : extracted.user;
+        : undefined;
 
     let result =
       null;
@@ -3409,12 +3621,13 @@ export const AppCore = (() => {
       result =
         applySessionBase({
           state,
+          storage,
           events,
 
           setUser:
-            ({ user: nextUser }) =>
+            (value) =>
               setUser(
-                nextUser,
+                adaptSessionSetterValue(value, "user"),
                 {
                   source:
                     "core:applySession:setUser",
@@ -3422,9 +3635,9 @@ export const AppCore = (() => {
               ),
 
           setToken:
-            ({ token: nextToken }) =>
+            (value) =>
               setToken(
-                nextToken,
+                adaptSessionSetterValue(value, "token"),
                 {
                   source:
                     "core:applySession:setToken",
@@ -3436,11 +3649,26 @@ export const AppCore = (() => {
           token,
           user,
 
+          refreshToken:
+            extracted.refreshToken,
+
+          tempToken:
+            extracted.tempToken,
+
+          sessionId:
+            extracted.sessionId,
+
+          sessionUserId:
+            extracted.sessionUserId,
+
           route:
             extracted.route,
 
           publicPath:
             extracted.publicPath,
+
+          options:
+            opts,
         });
 
       baseSucceeded =
@@ -3661,7 +3889,7 @@ export const AppCore = (() => {
     return result;
   }
 
-  function setTheme(theme) {
+  function setTheme(theme, themeMode = "") {
     try {
       return setThemeBase({
         dom,
@@ -3669,6 +3897,7 @@ export const AppCore = (() => {
         events,
         setState,
         theme,
+        themeMode,
       });
     } catch {
       const cleanTheme =
@@ -3816,6 +4045,9 @@ export const AppCore = (() => {
           error:
             normalized,
 
+          lastError:
+            normalized,
+
           hasError:
             Boolean(normalized),
         },
@@ -3903,16 +4135,12 @@ export const AppCore = (() => {
       createRequest,
       createFallbackRequest,
       {
-        config,
         state,
         events,
-        storage,
         setError,
-        getState,
         utils,
         registry,
         hooks,
-        modules,
       }
     );
 
@@ -4253,6 +4481,7 @@ export const AppCore = (() => {
         state,
         storage,
         dom,
+        events,
       });
 
       return true;

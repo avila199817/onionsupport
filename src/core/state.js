@@ -3,7 +3,7 @@
    Archivo: src/core/state.js
 
    ONION SUPPORT · CORE STATE
-   GLOBAL STATE · STRICT AUTH · ROUTE/PUBLIC PATH SAFE · 13/10
+   GLOBAL STATE · STRICT AUTH · ROUTE/PUBLIC PATH SAFE · 14/10
 
    RESPONSABILIDADES:
    - definir el estado global base del core
@@ -16,6 +16,8 @@
    - evitar eventos falsos de state change
    - normalizar red/network/ui/boot/session
    - proteger snapshots frente a token leakage
+   - mantener compatibilidad con AppCore.setState()
+   - mantener aliases legacy setStateBase/getStateBase
 
    HARDENING EXTREMO:
    - estado inicial robusto
@@ -56,6 +58,9 @@ import {
    CONSTANTS
 ========================================================= */
 
+export const STATE_VERSION =
+  "14.0.0";
+
 const DEFAULT_ROUTE =
   "/";
 
@@ -64,9 +69,6 @@ const DEFAULT_LANG =
 
 const DEFAULT_THEME =
   "dark";
-
-const STATE_VERSION =
-  "13.0.0";
 
 const VALID_THEMES =
   Object.freeze([
@@ -121,6 +123,7 @@ const BOOLEAN_KEYS =
     "networkOffline",
 
     "bootHasProtectedToken",
+    "bootIsPublicTokenRoute",
     "bootIsActivation",
     "bootHasActivationToken",
     "bootIsResetConfirm",
@@ -131,14 +134,22 @@ const BOOLEAN_KEYS =
     "loginNavigationHandled",
     "postRestoreNavigationSkipped",
     "loginInProgress",
+    "twoFactorPending",
     "restoring",
     "authRestoring",
     "sessionRestoring",
+
+    "isAdmin",
+    "isSupport",
+    "isManager",
+    "isClient",
   ]);
 
 const NULLABLE_STRING_KEYS =
   Object.freeze([
     "role",
+    "rol",
+    "userRole",
     "username",
     "currentResolvedUsername",
     "resolvedUsername",
@@ -157,6 +168,9 @@ const NULLABLE_STRING_KEYS =
     "routeMode",
     "currentShellRoute",
     "currentShellCanonicalPath",
+
+    "sessionId",
+    "sessionUserId",
 
     "bootInitialUrl",
     "bootInitialPath",
@@ -185,6 +199,20 @@ const TOKEN_ALIAS_KEYS =
     "idToken",
     "id_token",
     "bearer",
+  ]);
+
+const USER_ALIAS_KEYS =
+  Object.freeze([
+    "user",
+    "currentUser",
+    "authUser",
+    "sessionUser",
+  ]);
+
+const SESSION_ALIAS_KEYS =
+  Object.freeze([
+    "session",
+    "sessionData",
   ]);
 
 const SENSITIVE_STATE_KEYS =
@@ -236,6 +264,75 @@ const REDACTABLE_PATH_KEYS =
 
 const INTERNAL_STATE_PATCH_EVENT =
   "app:state:patched";
+
+const ROLE_ALIASES =
+  Object.freeze({
+    administrator:
+      "admin",
+
+    administrador:
+      "admin",
+
+    superadmin:
+      "admin",
+
+    super_admin:
+      "admin",
+
+    "super-admin":
+      "admin",
+
+    owner:
+      "admin",
+
+    root:
+      "admin",
+
+    soporte:
+      "support",
+
+    tecnico:
+      "support",
+
+    "técnico":
+      "support",
+
+    technician:
+      "support",
+
+    agent:
+      "support",
+
+    agente:
+      "support",
+
+    helpdesk:
+      "support",
+
+    manager:
+      "manager",
+
+    gestor:
+      "manager",
+
+    gerente:
+      "manager",
+
+    supervisor:
+      "manager",
+
+    lead:
+      "manager",
+
+    cliente:
+      "client",
+
+    customer:
+      "client",
+
+    usuario:
+      "user",
+  });
 
 /* =========================================================
    BASIC HELPERS
@@ -340,12 +437,38 @@ function safeBool(value, fallback = false) {
   return Boolean(fallback);
 }
 
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
 function safeIsoDate(ms = Date.now()) {
   try {
     return new Date(ms).toISOString();
   } catch {
     return "";
   }
+}
+
+function unique(values = []) {
+  const result = [];
+  const seen = new Set();
+
+  for (const value of safeArray(values).flat(Infinity)) {
+    const clean =
+      safeText(value, "");
+
+    if (
+      clean &&
+      !seen.has(clean)
+    ) {
+      seen.add(clean);
+      result.push(clean);
+    }
+  }
+
+  return result;
 }
 
 function safeCloneValue(value, fallback = null) {
@@ -665,6 +788,65 @@ function normalizeError(value = null) {
   }
 }
 
+function normalizeRole(value = "") {
+  const role =
+    safeLower(value, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[\s-]+/g, "_")
+      .replace(/[^a-z0-9_:.]/g, "")
+      .replace(/^_+|_+$/g, "")
+      .trim();
+
+  return ROLE_ALIASES[role] || role || null;
+}
+
+function normalizeRoleList(value = []) {
+  const roles = [];
+
+  const pushRole = (item) => {
+    if (!item) {
+      return;
+    }
+
+    if (Array.isArray(item)) {
+      item.forEach(pushRole);
+      return;
+    }
+
+    if (isObject(item)) {
+      for (const [key, enabled] of Object.entries(item)) {
+        if (safeBool(enabled, false)) {
+          pushRole(key);
+        }
+      }
+
+      return;
+    }
+
+    if (typeof item === "string") {
+      item
+        .split(/[,\s|]+/g)
+        .map(normalizeRole)
+        .filter(Boolean)
+        .forEach((role) => roles.push(role));
+
+      return;
+    }
+
+    const role =
+      normalizeRole(item);
+
+    if (role) {
+      roles.push(role);
+    }
+  };
+
+  pushRole(value);
+
+  return unique(roles);
+}
+
 function resolveOnlineState() {
   try {
     if (typeof navigator !== "undefined") {
@@ -749,11 +931,13 @@ function resolveNetworkPatchFromStatus(statusValue) {
 }
 
 function resolveRole(user = null, explicitRole = "") {
-  const role =
-    safeLower(
+  const normalized =
+    normalizeRole(
       explicitRole ||
         user?.role ||
         user?.rol ||
+        user?.userRole ||
+        user?.user_role ||
         user?.type ||
         user?.userType ||
         user?.user_type ||
@@ -762,15 +946,31 @@ function resolveRole(user = null, explicitRole = "") {
         user?.profile?.rol ||
         user?.raw?.role ||
         user?.raw?.rol ||
-        "",
-      ""
-    )
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[\s-]+/g, "_")
-      .replace(/[^a-z0-9_:.]/g, "");
+        ""
+    );
 
-  return role || null;
+  return normalized || null;
+}
+
+function resolveRoles(user = null, explicitRoles = []) {
+  const role =
+    resolveRole(user);
+
+  const roles =
+    normalizeRoleList([
+      explicitRoles,
+      user?.roles,
+      user?.roleList,
+      user?.role_list,
+      user?.permissions?.roles,
+      role,
+    ]);
+
+  return roles.length
+    ? roles
+    : role
+      ? [role]
+      : [];
 }
 
 function extractUsernameFromPublicPath(publicPath = DEFAULT_ROUTE) {
@@ -791,6 +991,7 @@ function resolveUsernameFromUser(user = null) {
       safeGetUserUsername(user) ||
         user?.username ||
         user?.userName ||
+        user?.user_name ||
         user?.nick ||
         user?.alias ||
         user?.login ||
@@ -826,12 +1027,69 @@ function hasUsableUser(user = null) {
       safeText(normalized.user_id, "") ||
       safeText(normalized._id, "") ||
       safeText(normalized.uid, "") ||
+      safeText(normalized.sub, "") ||
       safeText(normalized.username, "") ||
       safeText(normalized.userName, "") ||
+      safeText(normalized.user_name, "") ||
       safeText(normalized.email, "") ||
       safeText(normalized.mail, "") ||
       safeText(normalized.phone, "") ||
       safeText(normalized.telefono, "")
+  );
+}
+
+function isUserInactive(user = null) {
+  if (!user || typeof user !== "object") {
+    return true;
+  }
+
+  const status =
+    safeLower(
+      user.status ||
+        user.estado ||
+        user.state ||
+        user.accountStatus ||
+        user.account_status ||
+        "",
+      ""
+    )
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[\s-]+/g, "_");
+
+  if (
+    [
+      "disabled",
+      "inactive",
+      "deleted",
+      "blocked",
+      "suspended",
+      "banned",
+      "archived",
+      "revoked",
+      "desactivado",
+      "inactivo",
+      "eliminado",
+      "bloqueado",
+      "suspendido",
+    ].includes(status)
+  ) {
+    return true;
+  }
+
+  return Boolean(
+    user.active === false ||
+      user.enabled === false ||
+      user.isActive === false ||
+      user.is_active === false ||
+      user.isEnabled === false ||
+      user.is_enabled === false ||
+      user.disabled === true ||
+      user.deleted === true ||
+      user.blocked === true ||
+      user.suspended === true ||
+      user.banned === true ||
+      user.archived === true
   );
 }
 
@@ -864,6 +1122,28 @@ function resolveCurrentResolvedUsername({
     fromPrevious ||
     null
   );
+}
+
+function roleFlags(roles = []) {
+  const roleSet =
+    new Set(
+      normalizeRoleList(roles)
+    );
+
+  return {
+    isAdmin:
+      roleSet.has("admin"),
+
+    isSupport:
+      roleSet.has("support") ||
+      roleSet.has("agent"),
+
+    isManager:
+      roleSet.has("manager"),
+
+    isClient:
+      roleSet.has("client"),
+  };
 }
 
 /* =========================================================
@@ -1026,15 +1306,7 @@ export function computeAuthenticated(nextUser, nextToken) {
     return false;
   }
 
-  if (
-    normalizedUser?.active === false ||
-    normalizedUser?.disabled === true ||
-    normalizedUser?.deleted === true ||
-    normalizedUser?.status === "disabled" ||
-    normalizedUser?.status === "inactive" ||
-    normalizedUser?.estado === "disabled" ||
-    normalizedUser?.estado === "inactive"
-  ) {
+  if (isUserInactive(normalizedUser)) {
     return false;
   }
 
@@ -1066,24 +1338,51 @@ function deriveAuthPatch({
       nextToken
     );
 
-  return {
-    authenticated,
-    hasToken,
+  const roles =
+    authenticated
+      ? resolveRoles(
+          nextUser,
+          hasOwn(patch, "roles")
+            ? patch.roles
+            : state.roles
+        )
+      : [];
 
-    role:
-      authenticated
-        ? resolveRole(
+  const role =
+    authenticated
+      ? (
+          resolveRole(
             nextUser,
             hasOwn(patch, "role")
               ? patch.role
               : state.role
-          )
-        : null,
+          ) ||
+          roles[0] ||
+          null
+        )
+      : null;
+
+  const flags =
+    roleFlags(roles);
+
+  return {
+    authenticated,
+    hasToken,
+
+    role,
+    rol:
+      role,
+    userRole:
+      role,
+
+    roles,
 
     username:
       authenticated
         ? resolveUsernameFromUser(nextUser)
         : null,
+
+    ...flags,
   };
 }
 
@@ -1091,9 +1390,12 @@ function deriveAuthPatch({
    STATE FACTORY
 ========================================================= */
 
-export function createInitialState({
-  config,
-} = {}) {
+export function createInitialState(input = {}) {
+  const localConfig =
+    input?.config ||
+    input ||
+    {};
+
   const route =
     safeLocationCanonicalPath();
 
@@ -1102,23 +1404,23 @@ export function createInitialState({
 
   const lang =
     normalizeLang(
-      config?.defaultLang ||
-        config?.lang ||
+      localConfig?.defaultLang ||
+        localConfig?.lang ||
         DEFAULT_LANG
     );
 
   const theme =
     normalizeTheme(
-      config?.defaultTheme ||
-        config?.theme ||
+      localConfig?.defaultTheme ||
+        localConfig?.theme ||
         DEFAULT_THEME
     );
 
   const themeMode =
     normalizeThemeMode(
-      config?.defaultThemeMode ||
-        config?.themeMode ||
-        config?.appearance ||
+      localConfig?.defaultThemeMode ||
+        localConfig?.themeMode ||
+        localConfig?.appearance ||
         ""
     ) || null;
 
@@ -1194,7 +1496,34 @@ export function createInitialState({
     user:
       null,
 
+    currentUser:
+      null,
+
+    authUser:
+      null,
+
+    sessionUser:
+      null,
+
     token:
+      null,
+
+    accessToken:
+      null,
+
+    access_token:
+      null,
+
+    refreshToken:
+      null,
+
+    refresh_token:
+      null,
+
+    tempToken:
+      null,
+
+    temp_token:
       null,
 
     hasToken:
@@ -1203,16 +1532,49 @@ export function createInitialState({
     role:
       null,
 
+    rol:
+      null,
+
+    userRole:
+      null,
+
+    roles:
+      [],
+
     username:
       null,
 
     authenticated:
       false,
 
+    isAdmin:
+      false,
+
+    isSupport:
+      false,
+
+    isManager:
+      false,
+
+    isClient:
+      false,
+
     currentResolvedUsername:
       null,
 
     resolvedUsername:
+      null,
+
+    session:
+      null,
+
+    sessionData:
+      null,
+
+    sessionId:
+      null,
+
+    sessionUserId:
       null,
 
     lang,
@@ -1312,6 +1674,9 @@ export function createInitialState({
     bootProtectedRouteKey:
       "",
 
+    bootIsPublicTokenRoute:
+      false,
+
     bootHasProtectedToken:
       false,
 
@@ -1363,6 +1728,9 @@ export function createInitialState({
     loginInProgress:
       false,
 
+    twoFactorPending:
+      false,
+
     restoring:
       false,
 
@@ -1387,10 +1755,18 @@ export function createInitialState({
 
 function sanitizeSnapshotValue(key, value, options = {}) {
   const includeToken =
-    options?.includeToken === true;
+    options?.includeToken === true ||
+    options?.unsafeIncludeToken === true;
 
   if (SENSITIVE_STATE_KEYS.includes(key)) {
-    if (includeToken && key === "token") {
+    if (
+      includeToken &&
+      (
+        key === "token" ||
+        key === "accessToken" ||
+        key === "access_token"
+      )
+    ) {
       return value || null;
     }
 
@@ -1410,7 +1786,12 @@ function sanitizeSnapshotValue(key, value, options = {}) {
     return normalizeError(value);
   }
 
-  if (key === "user") {
+  if (
+    key === "user" ||
+    key === "currentUser" ||
+    key === "authUser" ||
+    key === "sessionUser"
+  ) {
     return value
       ? sanitizeSnapshotDeep(value)
       : null;
@@ -1447,29 +1828,73 @@ export function cloneState(state, options = {}) {
       );
   }
 
+  const token =
+    source.token ||
+    source.accessToken ||
+    source.access_token ||
+    null;
+
+  const user =
+    source.user ||
+    source.currentUser ||
+    source.authUser ||
+    source.sessionUser ||
+    null;
+
+  const authenticated =
+    computeAuthenticated(
+      user,
+      token
+    );
+
   snapshot.__version =
     source.__version || STATE_VERSION;
 
   snapshot.user =
-    source.user
-      ? sanitizeSnapshotDeep(source.user)
+    user
+      ? sanitizeSnapshotDeep(user)
+      : null;
+
+  snapshot.currentUser =
+    user
+      ? sanitizeSnapshotDeep(user)
+      : null;
+
+  snapshot.authUser =
+    user
+      ? sanitizeSnapshotDeep(user)
+      : null;
+
+  snapshot.sessionUser =
+    user
+      ? sanitizeSnapshotDeep(user)
       : null;
 
   snapshot.token =
-    opts.includeToken === true
-      ? source.token || null
+    opts.includeToken === true ||
+    opts.unsafeIncludeToken === true
+      ? token || null
+      : null;
+
+  snapshot.accessToken =
+    opts.includeToken === true ||
+    opts.unsafeIncludeToken === true
+      ? token || null
+      : null;
+
+  snapshot.access_token =
+    opts.includeToken === true ||
+    opts.unsafeIncludeToken === true
+      ? token || null
       : null;
 
   snapshot.hasToken =
     Boolean(
-      safeHasValidToken(source.token)
+      safeHasValidToken(token)
     );
 
   snapshot.authenticated =
-    computeAuthenticated(
-      source.user,
-      source.token
-    );
+    authenticated;
 
   snapshot.lastError =
     normalizeError(
@@ -1537,6 +1962,9 @@ export function getState(state, options = {}) {
   );
 }
 
+export const getStateBase =
+  getState;
+
 function clonePatchForEvent(patch = {}) {
   const cloned =
     safeCloneValue(
@@ -1562,11 +1990,13 @@ function clonePatchForEvent(patch = {}) {
     }
   }
 
-  if (hasOwn(cloned, "user")) {
-    cloned.user =
-      cloned.user
-        ? sanitizeSnapshotDeep(cloned.user)
-        : null;
+  for (const key of USER_ALIAS_KEYS) {
+    if (hasOwn(cloned, key)) {
+      cloned[key] =
+        cloned[key]
+          ? sanitizeSnapshotDeep(cloned[key])
+          : null;
+    }
   }
 
   if (hasOwn(cloned, "error")) {
@@ -1591,19 +2021,162 @@ function clonePatchForEvent(patch = {}) {
 ========================================================= */
 
 function normalizeTokenAliases(normalizedPatch) {
-  if (hasOwn(normalizedPatch, "token")) {
-    return normalizedPatch;
+  if (!hasOwn(normalizedPatch, "token")) {
+    for (const key of TOKEN_ALIAS_KEYS) {
+      if (
+        key !== "token" &&
+        hasOwn(normalizedPatch, key)
+      ) {
+        normalizedPatch.token =
+          normalizedPatch[key];
+
+        break;
+      }
+    }
   }
 
-  for (const key of TOKEN_ALIAS_KEYS) {
-    if (
-      key !== "token" &&
-      hasOwn(normalizedPatch, key)
-    ) {
-      normalizedPatch.token =
-        normalizedPatch[key];
+  if (hasOwn(normalizedPatch, "token")) {
+    const token =
+      safeHasValidToken(
+        normalizedPatch.token
+      )
+        ? String(
+            normalizedPatch.token
+          ).trim()
+        : null;
 
-      return normalizedPatch;
+    normalizedPatch.token =
+      token;
+
+    normalizedPatch.accessToken =
+      token;
+
+    normalizedPatch.access_token =
+      token;
+  }
+
+  return normalizedPatch;
+}
+
+function normalizeRefreshTokenAliases(normalizedPatch) {
+  if (
+    hasOwn(normalizedPatch, "refreshToken") &&
+    !hasOwn(normalizedPatch, "refresh_token")
+  ) {
+    normalizedPatch.refresh_token =
+      normalizedPatch.refreshToken || null;
+  }
+
+  if (
+    hasOwn(normalizedPatch, "refresh_token") &&
+    !hasOwn(normalizedPatch, "refreshToken")
+  ) {
+    normalizedPatch.refreshToken =
+      normalizedPatch.refresh_token || null;
+  }
+
+  return normalizedPatch;
+}
+
+function normalizeTempTokenAliases(normalizedPatch) {
+  if (
+    hasOwn(normalizedPatch, "tempToken") &&
+    !hasOwn(normalizedPatch, "temp_token")
+  ) {
+    normalizedPatch.temp_token =
+      normalizedPatch.tempToken || null;
+  }
+
+  if (
+    hasOwn(normalizedPatch, "temp_token") &&
+    !hasOwn(normalizedPatch, "tempToken")
+  ) {
+    normalizedPatch.tempToken =
+      normalizedPatch.temp_token || null;
+  }
+
+  return normalizedPatch;
+}
+
+function normalizeUserAliases(normalizedPatch) {
+  if (!hasOwn(normalizedPatch, "user")) {
+    for (const key of USER_ALIAS_KEYS) {
+      if (
+        key !== "user" &&
+        hasOwn(normalizedPatch, key)
+      ) {
+        normalizedPatch.user =
+          normalizedPatch[key];
+
+        break;
+      }
+    }
+  }
+
+  if (hasOwn(normalizedPatch, "user")) {
+    const user =
+      safeNormalizeUser(
+        normalizedPatch.user
+      );
+
+    normalizedPatch.user =
+      user;
+
+    normalizedPatch.currentUser =
+      user;
+
+    normalizedPatch.authUser =
+      user;
+
+    normalizedPatch.sessionUser =
+      user;
+  }
+
+  return normalizedPatch;
+}
+
+function normalizeSessionAliases(normalizedPatch) {
+  if (!hasOwn(normalizedPatch, "session")) {
+    for (const key of SESSION_ALIAS_KEYS) {
+      if (
+        key !== "session" &&
+        hasOwn(normalizedPatch, key)
+      ) {
+        normalizedPatch.session =
+          normalizedPatch[key];
+
+        break;
+      }
+    }
+  }
+
+  if (hasOwn(normalizedPatch, "session")) {
+    const session =
+      normalizedPatch.session || null;
+
+    normalizedPatch.session =
+      session;
+
+    normalizedPatch.sessionData =
+      session;
+
+    if (session && typeof session === "object") {
+      if (!hasOwn(normalizedPatch, "sessionId")) {
+        normalizedPatch.sessionId =
+          session.sessionId ||
+          session.session_id ||
+          session.id ||
+          null;
+      }
+
+      if (!hasOwn(normalizedPatch, "sessionUserId")) {
+        normalizedPatch.sessionUserId =
+          session.sessionUserId ||
+          session.session_user_id ||
+          session.userId ||
+          session.user_id ||
+          null;
+      }
     }
   }
 
@@ -1793,6 +2366,7 @@ function normalizeBootPatch(normalizedPatch) {
   }
 
   for (const key of [
+    "bootIsPublicTokenRoute",
     "bootIsActivation",
     "bootHasActivationToken",
     "bootIsResetConfirm",
@@ -1807,44 +2381,34 @@ function normalizeBootPatch(normalizedPatch) {
     }
   }
 
-  return normalizedPatch;
-}
-
-function normalizeStatePatch(state, patch = {}) {
-  const normalizedPatch =
-    sanitizePatchInput(patch);
-
-  normalizeTokenAliases(
-    normalizedPatch
-  );
-
-  if (hasOwn(normalizedPatch, "user")) {
-    normalizedPatch.user =
-      safeNormalizeUser(
-        normalizedPatch.user
+  if (
+    hasOwn(normalizedPatch, "bootHasActivationToken") ||
+    hasOwn(normalizedPatch, "bootHasResetToken")
+  ) {
+    normalizedPatch.bootHasProtectedToken =
+      Boolean(
+        normalizedPatch.bootHasProtectedToken ||
+          normalizedPatch.bootHasActivationToken ||
+          normalizedPatch.bootHasResetToken
       );
   }
 
-  if (hasOwn(normalizedPatch, "token")) {
-    normalizedPatch.token =
-      safeHasValidToken(
-        normalizedPatch.token
-      )
-        ? String(
-            normalizedPatch.token
-          ).trim()
-        : null;
+  if (
+    hasOwn(normalizedPatch, "bootIsActivation") ||
+    hasOwn(normalizedPatch, "bootIsResetConfirm")
+  ) {
+    normalizedPatch.bootIsPublicTokenRoute =
+      Boolean(
+        normalizedPatch.bootIsPublicTokenRoute ||
+          normalizedPatch.bootIsActivation ||
+          normalizedPatch.bootIsResetConfirm
+      );
   }
 
-  normalizeRoutePatch(
-    state,
-    normalizedPatch
-  );
+  return normalizedPatch;
+}
 
-  normalizeBootPatch(
-    normalizedPatch
-  );
-
+function normalizePrimitivePatch(normalizedPatch) {
   if (hasOwn(normalizedPatch, "theme")) {
     normalizedPatch.theme =
       normalizeTheme(
@@ -1887,6 +2451,17 @@ function normalizeStatePatch(state, patch = {}) {
     }
   }
 
+  if (hasOwn(normalizedPatch, "roles")) {
+    normalizedPatch.roles =
+      normalizeRoleList(
+        normalizedPatch.roles
+      );
+  }
+
+  return normalizedPatch;
+}
+
+function normalizeNetworkPatch(normalizedPatch) {
   if (hasOwn(normalizedPatch, "online")) {
     Object.assign(
       normalizedPatch,
@@ -1914,6 +2489,10 @@ function normalizeStatePatch(state, patch = {}) {
     );
   }
 
+  return normalizedPatch;
+}
+
+function normalizeErrorPatch(normalizedPatch) {
   if (hasOwn(normalizedPatch, "error")) {
     normalizedPatch.error =
       normalizeError(
@@ -1940,6 +2519,21 @@ function normalizeStatePatch(state, patch = {}) {
       Boolean(normalizedPatch.lastError);
   }
 
+  if (
+    hasOwn(normalizedPatch, "hasError") &&
+    normalizedPatch.hasError === false
+  ) {
+    normalizedPatch.error =
+      null;
+
+    normalizedPatch.lastError =
+      null;
+  }
+
+  return normalizedPatch;
+}
+
+function normalizeRequestPatch(normalizedPatch) {
   if (hasOwn(normalizedPatch, "lastRequestUrl")) {
     normalizedPatch.lastRequestUrl =
       safeText(
@@ -1979,36 +2573,197 @@ function normalizeStatePatch(state, patch = {}) {
       );
   }
 
-  const shouldRecomputeAuth =
+  return normalizedPatch;
+}
+
+function shouldRecomputeAuthFromPatch(normalizedPatch) {
+  return Boolean(
     hasOwn(normalizedPatch, "user") ||
-    hasOwn(normalizedPatch, "token") ||
-    hasOwn(normalizedPatch, "accessToken") ||
-    hasOwn(normalizedPatch, "access_token") ||
-    hasOwn(normalizedPatch, "authenticated") ||
-    hasOwn(normalizedPatch, "hasToken") ||
-    hasOwn(normalizedPatch, "role") ||
-    hasOwn(normalizedPatch, "username");
+      hasOwn(normalizedPatch, "currentUser") ||
+      hasOwn(normalizedPatch, "authUser") ||
+      hasOwn(normalizedPatch, "sessionUser") ||
+      hasOwn(normalizedPatch, "token") ||
+      hasOwn(normalizedPatch, "accessToken") ||
+      hasOwn(normalizedPatch, "access_token") ||
+      hasOwn(normalizedPatch, "authenticated") ||
+      hasOwn(normalizedPatch, "hasToken") ||
+      hasOwn(normalizedPatch, "role") ||
+      hasOwn(normalizedPatch, "rol") ||
+      hasOwn(normalizedPatch, "userRole") ||
+      hasOwn(normalizedPatch, "roles") ||
+      hasOwn(normalizedPatch, "username")
+  );
+}
 
-  if (shouldRecomputeAuth) {
-    const authPatch =
-      deriveAuthPatch({
-        state,
-        patch:
-          normalizedPatch,
-      });
+function applyStrictAuthNormalization(state, normalizedPatch, options = {}) {
+  const forceUnauthenticated =
+    options?.forceUnauthenticated === true ||
+    normalizedPatch.authenticated === false;
 
-    normalizedPatch.authenticated =
-      authPatch.authenticated;
+  const shouldRecomputeAuth =
+    shouldRecomputeAuthFromPatch(normalizedPatch) ||
+    forceUnauthenticated;
 
-    normalizedPatch.hasToken =
-      authPatch.hasToken;
+  if (!shouldRecomputeAuth) {
+    return normalizedPatch;
+  }
+
+  const authPatch =
+    forceUnauthenticated
+      ? {
+          authenticated:
+            false,
+
+          hasToken:
+            false,
+
+          role:
+            null,
+
+          rol:
+            null,
+
+          userRole:
+            null,
+
+          roles:
+            [],
+
+          username:
+            null,
+
+          isAdmin:
+            false,
+
+          isSupport:
+            false,
+
+          isManager:
+            false,
+
+          isClient:
+            false,
+        }
+      : deriveAuthPatch({
+          state,
+          patch:
+            normalizedPatch,
+        });
+
+  Object.assign(
+    normalizedPatch,
+    authPatch
+  );
+
+  if (!authPatch.authenticated) {
+    normalizedPatch.user =
+      null;
+
+    normalizedPatch.currentUser =
+      null;
+
+    normalizedPatch.authUser =
+      null;
+
+    normalizedPatch.sessionUser =
+      null;
 
     normalizedPatch.role =
-      authPatch.role;
+      null;
+
+    normalizedPatch.rol =
+      null;
+
+    normalizedPatch.userRole =
+      null;
+
+    normalizedPatch.roles =
+      [];
 
     normalizedPatch.username =
-      authPatch.username;
+      null;
+
+    normalizedPatch.currentResolvedUsername =
+      null;
+
+    normalizedPatch.resolvedUsername =
+      null;
+
+    if (
+      forceUnauthenticated ||
+      !safeHasValidToken(normalizedPatch.token ?? state.token)
+    ) {
+      normalizedPatch.token =
+        null;
+
+      normalizedPatch.accessToken =
+        null;
+
+      normalizedPatch.access_token =
+        null;
+
+      normalizedPatch.hasToken =
+        false;
+    }
   }
+
+  return normalizedPatch;
+}
+
+function normalizeStatePatch(state, patch = {}, options = {}) {
+  const normalizedPatch =
+    sanitizePatchInput(patch);
+
+  normalizeTokenAliases(
+    normalizedPatch
+  );
+
+  normalizeRefreshTokenAliases(
+    normalizedPatch
+  );
+
+  normalizeTempTokenAliases(
+    normalizedPatch
+  );
+
+  normalizeUserAliases(
+    normalizedPatch
+  );
+
+  normalizeSessionAliases(
+    normalizedPatch
+  );
+
+  normalizeRoutePatch(
+    state,
+    normalizedPatch
+  );
+
+  normalizeBootPatch(
+    normalizedPatch
+  );
+
+  normalizePrimitivePatch(
+    normalizedPatch
+  );
+
+  normalizeNetworkPatch(
+    normalizedPatch
+  );
+
+  normalizeErrorPatch(
+    normalizedPatch
+  );
+
+  normalizeRequestPatch(
+    normalizedPatch
+  );
+
+  applyStrictAuthNormalization(
+    state,
+    normalizedPatch,
+    options
+  );
 
   const nextUserForUsername =
     hasOwn(normalizedPatch, "user")
@@ -2053,11 +2808,7 @@ function normalizeStatePatch(state, patch = {}) {
    WRITE STATE
 ========================================================= */
 
-export function setState({
-  state,
-  events,
-  patch = {},
-} = {}) {
+export function setStateBase(state, patch = {}, options = {}) {
   if (
     !state ||
     typeof state !== "object"
@@ -2075,10 +2826,16 @@ export function setState({
     return cloneState(state);
   }
 
+  const opts =
+    isObject(options)
+      ? options
+      : {};
+
   const normalizedPatch =
     normalizeStatePatch(
       state,
-      patch
+      patch,
+      opts
     );
 
   const changedKeys =
@@ -2123,30 +2880,59 @@ export function setState({
     cloneState(state);
 
   /*
-    AppCore.setState() es el emisor público.
-    state.js sólo emite diagnóstico interno para no duplicar app:state:change.
+    AppCore.setState() debe ser el emisor público.
+    Este evento interno queda opt-in para diagnóstico y evita tormentas.
   */
-  try {
-    events?.emit?.(
-      INTERNAL_STATE_PATCH_EVENT,
-      {
-        state:
-          nextSnapshot,
+  if (
+    opts.emitInternal === true &&
+    opts.silent !== true &&
+    opts.emit !== false
+  ) {
+    try {
+      opts.events?.emit?.(
+        INTERNAL_STATE_PATCH_EVENT,
+        {
+          state:
+            nextSnapshot,
 
-        patch:
-          clonePatchForEvent(
-            normalizedPatch
-          ),
+          patch:
+            clonePatchForEvent(
+              normalizedPatch
+            ),
 
-        previousState,
+          previousState,
 
-        changedKeys:
-          finalChangedKeys,
-      }
-    );
-  } catch {}
+          changedKeys:
+            finalChangedKeys,
+
+          source:
+            opts.source || "core:state",
+        }
+      );
+    } catch {}
+  }
 
   return nextSnapshot;
+}
+
+export function setState({
+  state,
+  events,
+  patch = {},
+  options = {},
+} = {}) {
+  return setStateBase(
+    state,
+    patch,
+    {
+      ...(
+        isObject(options)
+          ? options
+          : {}
+      ),
+      events,
+    }
+  );
 }
 
 /* =========================================================
@@ -2158,6 +2944,29 @@ export function getStateDebugSnapshot(state) {
     state && typeof state === "object"
       ? state
       : {};
+
+  const token =
+    source.token ||
+    source.accessToken ||
+    source.access_token ||
+    null;
+
+  const user =
+    source.user ||
+    source.currentUser ||
+    source.authUser ||
+    source.sessionUser ||
+    null;
+
+  const roles =
+    normalizeRoleList(
+      source.roles ||
+        user?.roles ||
+        []
+    );
+
+  const flags =
+    roleFlags(roles);
 
   return {
     version:
@@ -2233,35 +3042,49 @@ export function getStateDebugSnapshot(state) {
 
     authenticated:
       computeAuthenticated(
-        source.user,
-        source.token
+        user,
+        token
       ),
 
     hasToken:
       Boolean(
-        safeHasValidToken(source.token)
+        safeHasValidToken(token)
       ),
 
     hasUsableUser:
-      hasUsableUser(source.user),
+      hasUsableUser(user),
 
     role:
       source.role || null,
+
+    roles,
 
     username:
       source.username || null,
 
     displayName:
-      safeGetUserDisplayName(source.user),
+      safeGetUserDisplayName(user),
 
     avatarUrl:
-      safeGetUserAvatarUrl(source.user),
+      safeGetUserAvatarUrl(user),
 
     currentResolvedUsername:
       source.currentResolvedUsername || null,
 
     resolvedUsername:
       source.resolvedUsername || null,
+
+    isAdmin:
+      Boolean(source.isAdmin || flags.isAdmin),
+
+    isSupport:
+      Boolean(source.isSupport || flags.isSupport),
+
+    isManager:
+      Boolean(source.isManager || flags.isManager),
+
+    isClient:
+      Boolean(source.isClient || flags.isClient),
 
     lang:
       source.lang || DEFAULT_LANG,
@@ -2314,6 +3137,17 @@ export function getStateDebugSnapshot(state) {
 
     routeMode:
       source.routeMode || null,
+
+    session: {
+      hasSession:
+        Boolean(source.session || source.sessionData),
+
+      sessionId:
+        source.sessionId ? "***" : null,
+
+      sessionUserId:
+        source.sessionUserId ? "***" : null,
+    },
 
     online:
       source.online ?? null,
@@ -2393,6 +3227,9 @@ export function getStateDebugSnapshot(state) {
       bootProtectedRouteKey:
         source.bootProtectedRouteKey || "",
 
+      bootIsPublicTokenRoute:
+        Boolean(source.bootIsPublicTokenRoute),
+
       bootHasProtectedToken:
         Boolean(source.bootHasProtectedToken),
 
@@ -2461,10 +3298,19 @@ export function getStateDebugSnapshot(state) {
 ========================================================= */
 
 export default {
+  STATE_VERSION,
+
   createInitialState,
+
   cloneState,
+
   getState,
+  getStateBase,
+
   setState,
+  setStateBase,
+
   computeAuthenticated,
+
   getStateDebugSnapshot,
 };

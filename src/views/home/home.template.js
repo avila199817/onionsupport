@@ -2,8 +2,8 @@
    Onion SPA - Home Dashboard Template
    Archivo: src/views/home/home.template.js
 
-   FINAL EXTREME PRODUCTION TEMPLATE · HOME VIEW · USER + ADMIN
-   APPLE SAAS MODE · FACTURAS/INCIDENCIAS INSPIRED · 13/10
+   FINAL EXTREME PRODUCTION TEMPLATE · HOME VIEW · USER + ADMIN + SUPPORT
+   APPLE SAAS MODE · FACTURAS/INCIDENCIAS INSPIRED · 14/10
 
    PATCH · TEMPLATE CLEAN
    PATCH · CSS EXTERNALIZED
@@ -17,19 +17,21 @@
    PATCH · AVATAR FALLBACK CSP SAFE
    PATCH · EXTREME EMPTY/LOADING/REFRESH STATES
    PATCH · FULL DATA ATTR CONTRACT FOR BRIDGES
+   PATCH · MODULAR BACKEND READY WITHOUT /api/dashboard/*
+   PATCH · USERS UI ONLY FOR REAL ADMIN ROLE
 
-   RESPONSABILIDADES:
-   - render del home/dashboard para usuarios y administradores
-   - una única plantilla role-aware: user/admin/admin-like
-   - consumir datos normalizados desde home.selectors.js
-   - NO hacer fetch
-   - NO calcular normalización pesada dentro del template
-   - NO inyectar CSS desde JS
-   - NO usar estilos inline
-   - pintar hero, stats, widgets, acciones rápidas, actividad y tabla
-   - compatible con HomeView.js o render directo desde Router
-   - acciones compatibles con data-home-action y data-action
-   - CSP friendly: sin handlers inline tipo onerror
+   Responsabilidades:
+   - Render del home/dashboard para usuarios, soporte y administradores.
+   - Una única plantilla role-aware.
+   - Consumir datos normalizados desde home.selectors.js.
+   - NO hacer fetch.
+   - NO calcular normalización pesada dentro del template.
+   - NO inyectar CSS desde JS.
+   - NO usar estilos inline.
+   - Pintar hero, stats, widgets, acciones rápidas, actividad, facturas y tabla.
+   - Compatible con HomeView.js o render directo desde Router.
+   - Acciones compatibles con data-home-action y data-action.
+   - CSP friendly: sin handlers inline tipo onerror.
 ========================================================= */
 
 import {
@@ -64,6 +66,8 @@ import {
   getUser,
   getRole,
   isAdminRole,
+  isSupportRole,
+  canSeeUsersModule,
   getDisplayName,
   getAvatarUrl,
 
@@ -110,22 +114,24 @@ import {
    TEMPLATE CONSTANTS
 ========================================================= */
 
-const TEMPLATE_VERSION = "13.0.0-extreme";
+export const TEMPLATE_VERSION = "14.0.0";
 
 const HOME_DATA_SCOPE = "home-dashboard";
 
 const ACTIONS = Object.freeze({
   REFRESH: "refresh",
   RETRY: "retry",
-  CREATE_INCIDENCIA: "create-incidencia",
-  OPEN_TICKET: "open-ticket",
-  OPEN_INVOICE: "open-invoice",
-  OPEN_WIDGET: "open-widget",
-  OPEN_ACTIVITY: "open-activity",
-  NAVIGATE: "navigate-home",
-  COPY_TICKET_ID: "copy-ticket-id",
-  PREV_PAGE: "prev-page",
-  NEXT_PAGE: "next-page",
+
+  CREATE_INCIDENCIA: "create_incidencia",
+
+  OPEN_WIDGET: "open_widget",
+
+  NAVIGATE: "navigate_home",
+
+  COPY_ID: "copy_widget_id",
+
+  PREV_PAGE: "prev_page",
+  NEXT_PAGE: "next_page",
   GO_PAGE: "page",
 });
 
@@ -139,6 +145,9 @@ const STATUS_ORDER = Object.freeze([
 
 const WIDGET_LIMIT = 4;
 const ACTIVITY_LIMIT = 8;
+const INVOICE_LIMIT = 5;
+const CLIENT_LIMIT = 5;
+const USER_LIMIT = 5;
 
 /* =========================================================
    TEMPLATE SAFE HELPERS
@@ -188,6 +197,8 @@ function getLoadingState(input = {}) {
     loading: Boolean(state.loading || input.loading),
     refreshing: Boolean(state.refreshing || input.refreshing),
     creating: Boolean(state.creating || input.creating),
+    loaded: Boolean(state.loaded || input.loaded),
+    hydrated: Boolean(state.hydrated || input.hydrated),
     error: safeText(first(state.error, input.error), ""),
     openingTicketId: safeText(state.openingTicketId, ""),
     selectedTicketId: safeText(state.selectedTicketId, ""),
@@ -202,7 +213,15 @@ function getTemplateMeta(input = {}) {
 
   return {
     version: TEMPLATE_VERSION,
-    requestId: safeText(first(data.requestId, state.requestId, dashboard.requestId), ""),
+    requestId: safeText(
+      first(
+        data.requestId,
+        state.requestId,
+        dashboard.requestId,
+        dashboard.meta?.requestId
+      ),
+      ""
+    ),
     lastUpdatedAt: first(
       data.lastUpdatedAt,
       data.lastSyncAt,
@@ -210,8 +229,11 @@ function getTemplateMeta(input = {}) {
       state.lastSyncAt,
       dashboard.updatedAt,
       dashboard.generatedAt,
-      dashboard.lastSyncAt
+      dashboard.lastSyncAt,
+      dashboard.meta?.updatedAt
     ),
+    partial: Boolean(first(dashboard.partial, data.partial, false)),
+    errorsCount: safeArray(first(dashboard.errors, data.errors, [])).length,
   };
 }
 
@@ -223,6 +245,10 @@ function renderSrOnly(text = "") {
   }
 
   return `<span class="sr-only">${escapeHtml(label)}</span>`;
+}
+
+function renderSoftLabel(value = "", fallback = "—") {
+  return escapeHtml(safeText(value, fallback));
 }
 
 /* =========================================================
@@ -260,6 +286,7 @@ function icon(name = "") {
     x: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
     chevronRight: `<svg ${common}><path d="m9 18 6-6-6-6"/></svg>`,
     chevronLeft: `<svg ${common}><path d="m15 18-6-6 6-6"/></svg>`,
+    download: `<svg ${common}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>`,
   };
 
   return icons[name] || icons.activity;
@@ -288,7 +315,6 @@ function renderLoaderOnly(label = "Cargando") {
       class="home-loader-only"
       role="status"
       aria-label="${attr(label)}"
-      title="${attr(label)}"
       data-tooltip="${attr(label)}"
     >
       <span class="home-inline-spinner" aria-hidden="true"></span>
@@ -312,7 +338,6 @@ function renderUserAvatar(input = {}) {
     <div
       class="${joinClasses("home-user-avatar", avatarUrl ? "" : "home-user-avatar--fallback")}"
       aria-label="${attr(fullName)}"
-      title="${attr(fullName)}"
       data-tooltip="${attr(fullName)}"
       data-avatar-root="true"
       data-avatar-kind="user"
@@ -351,7 +376,6 @@ function renderTicketAvatar(item = {}) {
     <div
       class="${joinClasses("home-ticket-avatar", avatarUrl ? "" : "home-ticket-avatar--fallback")}"
       aria-label="${attr(fullName)}"
-      title="${attr(fullName)}"
       data-tooltip="${attr(fullName)}"
       data-avatar-root="true"
       data-avatar-kind="ticket"
@@ -401,7 +425,6 @@ function renderPriorityBadge(item = {}) {
   return `
     <span
       class="home-mini-badge home-mini-badge--${attr(key)}"
-      title="${attr(`Prioridad ${label}`)}"
       data-tooltip="${attr(`Prioridad ${label}`)}"
       data-priority-key="${attr(key)}"
     >
@@ -417,7 +440,6 @@ function renderCategoryBadge(item = {}) {
   return `
     <span
       class="home-mini-badge home-mini-badge--category"
-      title="${attr(category)}"
       data-tooltip="${attr(category)}"
     >
       ${escapeHtml(category)}
@@ -431,7 +453,6 @@ function renderAssignedBadge(item = {}) {
   return `
     <span
       class="home-mini-badge home-mini-badge--agent"
-      title="${attr(`Técnico · ${assigned}`)}"
       data-tooltip="${attr(`Técnico · ${assigned}`)}"
     >
       ${icon("users")}
@@ -507,9 +528,11 @@ function renderStatCard(card = {}, index = 0) {
       </div>
 
       <div class="home-stat-label">${escapeHtml(label)}</div>
-      <div class="home-stat-value" title="${attr(value)}" data-stat-value="${attr(value)}">
+
+      <div class="home-stat-value" data-stat-value="${attr(value)}">
         ${escapeHtml(value)}
       </div>
+
       ${text ? `<div class="home-stat-text">${escapeHtml(text)}</div>` : ""}
     </article>
   `;
@@ -517,11 +540,15 @@ function renderStatCard(card = {}, index = 0) {
 
 function normalizeQuickAction(action = {}) {
   const actionName = safeText(action.action, "");
+  const normalizedAction = normalizeKey(actionName);
+
   const isCreate =
-    actionName === ACTIONS.CREATE_INCIDENCIA ||
-    actionName === "create" ||
-    actionName === "new-ticket" ||
-    actionName === "create-ticket";
+    normalizedAction === ACTIONS.CREATE_INCIDENCIA ||
+    normalizedAction === "create" ||
+    normalizedAction === "new" ||
+    normalizedAction === "new_ticket" ||
+    normalizedAction === "create_ticket" ||
+    normalizedAction === "create_incidencia";
 
   const finalAction = isCreate
     ? ACTIONS.CREATE_INCIDENCIA
@@ -531,11 +558,19 @@ function normalizeQuickAction(action = {}) {
     ? ACTIONS.CREATE_INCIDENCIA
     : safeText(action.dataAction || ACTIONS.NAVIGATE, ACTIONS.NAVIGATE);
 
+  const route = isCreate
+    ? (
+        normalizeRoute(action.route || "") === HOME_ROUTES.INCIDENCIAS
+          ? "/incidencias/nueva"
+          : normalizeRoute(action.route || "/incidencias/nueva")
+      )
+    : normalizeRoute(action.route || "");
+
   return {
     ...safeObject(action),
     action: finalAction,
     dataAction,
-    route: normalizeRoute(action.route || ""),
+    route,
     modifier: normalizeKey(action.modifier || finalAction || "default"),
   };
 }
@@ -553,7 +588,7 @@ function renderQuickAction(action = {}, state = {}) {
   const route = item.route;
   const modifier = item.modifier;
 
-  const isCreate = actionName === ACTIONS.CREATE_INCIDENCIA;
+  const isCreate = normalizeKey(actionName) === ACTIONS.CREATE_INCIDENCIA;
 
   const isBusy =
     navigatingAction === actionName ||
@@ -609,10 +644,7 @@ function renderWidgetCard(widget = {}, index = 0) {
   const route = getWidgetRoute(widget);
   const status = safeText(first(widget.status, widget.estado, widget.state), "active");
 
-  const action = route
-    ? ACTIONS.NAVIGATE
-    : ACTIONS.OPEN_WIDGET;
-
+  const action = route ? ACTIONS.NAVIGATE : ACTIONS.OPEN_WIDGET;
   const modifier = normalizeKey(type || "widget");
 
   return `
@@ -628,7 +660,6 @@ function renderWidgetCard(widget = {}, index = 0) {
       data-href="${attr(route)}"
       data-status="${attr(status)}"
       data-payload="${datasetJson({ widgetId: id, type, route })}"
-      ${boolAttr(!route && action === ACTIONS.NAVIGATE, 'aria-disabled="true"')}
     >
       <span class="home-widget-glow" aria-hidden="true"></span>
 
@@ -703,10 +734,12 @@ function renderTicketRow(item = {}, state = {}) {
               <button
                 type="button"
                 class="home-ticket-id"
-                data-home-action="${ACTIONS.COPY_TICKET_ID}"
-                data-action="${ACTIONS.COPY_TICKET_ID}"
-                data-ticket-id="${attr(ticketId)}"
-                title="Copiar ID de incidencia"
+                data-home-action="${ACTIONS.COPY_ID}"
+                data-action="${ACTIONS.COPY_ID}"
+                data-widget-id="${attr(ticketId)}"
+                data-widget-key="${attr(ticketId)}"
+                data-entity-id="${attr(ticketId)}"
+                aria-label="Copiar ID de incidencia ${attr(ticketId)}"
                 data-tooltip="Copiar ID de incidencia"
               >
                 ${escapeHtml(ticketId)}
@@ -718,11 +751,14 @@ function renderTicketRow(item = {}, state = {}) {
             <button
               type="button"
               class="home-ticket-subject"
-              data-home-action="${ACTIONS.OPEN_TICKET}"
-              data-action="${ACTIONS.OPEN_TICKET}"
+              data-home-action="${ACTIONS.NAVIGATE}"
+              data-action="${ACTIONS.NAVIGATE}"
               data-ticket-id="${attr(ticketId)}"
               data-entity-id="${attr(ticketId)}"
-              title="${attr(subject)}"
+              data-route="${attr(HOME_ROUTES.INCIDENCIAS)}"
+              data-href="${attr(HOME_ROUTES.INCIDENCIAS)}"
+              data-payload="${datasetJson({ ticketId, incidenciaId: ticketId })}"
+              aria-label="Abrir incidencia ${attr(ticketId)}"
               data-tooltip="${attr(subject)}"
             >
               ${escapeHtml(subject)}
@@ -741,7 +777,6 @@ function renderTicketRow(item = {}, state = {}) {
       <td class="home-ticket-cell home-ticket-cell--owner">
         <span
           class="home-ticket-owner"
-          title="${attr(`${ownerName} · ${ownerEmail}`)}"
           data-tooltip="${attr(`${ownerName} · ${ownerEmail}`)}"
         >
           <strong>${escapeHtml(ownerName)}</strong>
@@ -756,7 +791,6 @@ function renderTicketRow(item = {}, state = {}) {
       <td class="home-ticket-cell home-ticket-cell--date">
         <span
           class="home-date-inline"
-          title="${attr(createdAt)}"
           data-tooltip="${attr(createdAt)}"
         >
           ${escapeHtml(createdAt)}
@@ -766,7 +800,6 @@ function renderTicketRow(item = {}, state = {}) {
       <td class="home-ticket-cell home-ticket-cell--date">
         <span
           class="home-date-inline"
-          title="${attr(formatDateTime(updatedAtRaw))}"
           data-tooltip="${attr(formatDateTime(updatedAtRaw))}"
         >
           ${escapeHtml(updatedAt)}
@@ -776,7 +809,6 @@ function renderTicketRow(item = {}, state = {}) {
       <td class="home-ticket-cell home-ticket-cell--attachments">
         <span
           class="home-attachments-pill"
-          title="${attr(`${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`)}"
           data-tooltip="${attr(`${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`)}"
         >
           ${icon("paperclip")}
@@ -788,13 +820,15 @@ function renderTicketRow(item = {}, state = {}) {
         <button
           type="button"
           class="${joinClasses("home-detail-btn", isOpening ? "is-loading" : "")}"
-          data-home-action="${ACTIONS.OPEN_TICKET}"
-          data-action="${ACTIONS.OPEN_TICKET}"
+          data-home-action="${ACTIONS.NAVIGATE}"
+          data-action="${ACTIONS.NAVIGATE}"
           data-ticket-id="${attr(ticketId)}"
           data-incidencia-id="${attr(ticketId)}"
           data-entity-id="${attr(ticketId)}"
           data-route="${attr(HOME_ROUTES.INCIDENCIAS)}"
-          title="Abrir detalle de incidencia"
+          data-href="${attr(HOME_ROUTES.INCIDENCIAS)}"
+          data-payload="${datasetJson({ ticketId, incidenciaId: ticketId })}"
+          aria-label="Abrir detalle de incidencia ${attr(ticketId)}"
           data-tooltip="Abrir detalle de incidencia"
           ${boolAttr(isOpening, 'disabled aria-busy="true"')}
         >
@@ -836,31 +870,31 @@ function renderActivityItem(item = {}) {
     ""
   );
 
-  const action = safeText(
-    first(
-      item.action,
-      item.raw?.action,
-      type === "ticket" && entityId ? ACTIONS.OPEN_TICKET : "",
-      type === "invoice" && entityId ? ACTIONS.OPEN_INVOICE : "",
-      route ? ACTIONS.NAVIGATE : "",
-      ACTIONS.OPEN_ACTIVITY
-    ),
-    ACTIONS.OPEN_ACTIVITY
-  );
+  const finalRoute =
+    route ||
+    (type === "ticket"
+      ? HOME_ROUTES.INCIDENCIAS
+      : type === "invoice"
+        ? HOME_ROUTES.FACTURAS
+        : type === "client"
+          ? HOME_ROUTES.CLIENTES
+          : type === "user"
+            ? HOME_ROUTES.USUARIOS
+            : HOME_ROUTES.HOME);
 
   return `
     <button
       type="button"
       class="home-activity-item home-activity-item--${attr(type || "activity")}"
-      data-home-action="${attr(action)}"
-      data-action="${attr(action)}"
-      data-route="${attr(route)}"
-      data-href="${attr(route)}"
+      data-home-action="${ACTIONS.NAVIGATE}"
+      data-action="${ACTIONS.NAVIGATE}"
+      data-route="${attr(finalRoute)}"
+      data-href="${attr(finalRoute)}"
       data-entity-id="${attr(entityId)}"
       data-ticket-id="${type === "ticket" ? attr(entityId) : ""}"
       data-invoice-id="${type === "invoice" ? attr(entityId) : ""}"
       data-factura-id="${type === "invoice" ? attr(entityId) : ""}"
-      data-payload="${datasetJson({ type, action, route, entityId })}"
+      data-payload="${datasetJson({ type, route: finalRoute, entityId })}"
     >
       <span class="home-activity-icon" aria-hidden="true">
         ${
@@ -883,7 +917,6 @@ function renderActivityItem(item = {}) {
 
       <span
         class="home-activity-time"
-        title="${attr(formatDateTime(date))}"
         data-tooltip="${attr(formatDateTime(date))}"
       >
         ${escapeHtml(formatRelativeDate(date))}
@@ -902,19 +935,128 @@ function renderInvoicePreviewItem(item = {}) {
     <button
       type="button"
       class="home-invoice-mini home-invoice-mini--${attr(status)}"
-      data-home-action="${ACTIONS.OPEN_INVOICE}"
-      data-action="${ACTIONS.OPEN_INVOICE}"
+      data-home-action="${ACTIONS.NAVIGATE}"
+      data-action="${ACTIONS.NAVIGATE}"
       data-invoice-id="${attr(id)}"
       data-factura-id="${attr(id)}"
       data-entity-id="${attr(id)}"
       data-route="${attr(HOME_ROUTES.FACTURAS)}"
+      data-href="${attr(HOME_ROUTES.FACTURAS)}"
+      data-payload="${datasetJson({ invoiceId: id, facturaId: id })}"
     >
       <span class="home-invoice-mini-icon" aria-hidden="true">${icon("invoice")}</span>
+
       <span class="home-invoice-mini-copy">
         <strong>${escapeHtml(id)}</strong>
         <span>${escapeHtml(formatMoney(amount, currency || DEFAULT_CURRENCY))}</span>
       </span>
+
       <span class="home-invoice-mini-status">${escapeHtml(status)}</span>
+    </button>
+  `;
+}
+
+function getClientDisplayName(item = {}) {
+  return safeText(
+    first(
+      item.name,
+      item.nombre,
+      item.displayName,
+      item.razonSocial,
+      item.company,
+      item.nombreContacto,
+      item.email,
+      item.raw?.name,
+      item.raw?.nombre,
+      item.raw?.displayName,
+      item.raw?.razonSocial,
+      item.raw?.company,
+      item.raw?.nombreContacto,
+      item.raw?.email
+    ),
+    "Cliente"
+  );
+}
+
+function getUserDisplayName(item = {}) {
+  return safeText(
+    first(
+      item.displayName,
+      item.fullName,
+      item.name,
+      item.nombre,
+      item.username,
+      item.email,
+      item.raw?.displayName,
+      item.raw?.fullName,
+      item.raw?.name,
+      item.raw?.nombre,
+      item.raw?.username,
+      item.raw?.email
+    ),
+    "Usuario"
+  );
+}
+
+function renderMiniEntityItem(item = {}, type = "client") {
+  const isUser = type === "user";
+  const label = isUser ? getUserDisplayName(item) : getClientDisplayName(item);
+
+  const email = safeText(
+    first(
+      item.email,
+      item.mail,
+      item.raw?.email,
+      item.raw?.mail
+    ),
+    "Sin email"
+  );
+
+  const entityId = safeText(
+    first(
+      item.userId,
+      item.usuarioId,
+      item.clienteId,
+      item.clientId,
+      item.customerId,
+      item.id,
+      item._id,
+      item.raw?.userId,
+      item.raw?.usuarioId,
+      item.raw?.clienteId,
+      item.raw?.clientId,
+      item.raw?.customerId,
+      item.raw?.id,
+      item.raw?._id
+    ),
+    ""
+  );
+
+  const route = isUser ? HOME_ROUTES.USUARIOS : HOME_ROUTES.CLIENTES;
+
+  return `
+    <button
+      type="button"
+      class="home-entity-mini home-entity-mini--${isUser ? "user" : "client"}"
+      data-home-action="${ACTIONS.NAVIGATE}"
+      data-action="${ACTIONS.NAVIGATE}"
+      data-route="${attr(route)}"
+      data-href="${attr(route)}"
+      data-entity-id="${attr(entityId)}"
+      data-payload="${datasetJson({ type, entityId })}"
+    >
+      <span class="home-entity-mini-avatar" data-avatar-seed="${attr(label)}" aria-hidden="true">
+        ${escapeHtml(getInitials(label))}
+      </span>
+
+      <span class="home-entity-mini-copy">
+        <strong>${escapeHtml(label)}</strong>
+        <span>${escapeHtml(email)}</span>
+      </span>
+
+      <span class="home-entity-mini-arrow" aria-hidden="true">
+        ${icon("chevronRight")}
+      </span>
     </button>
   `;
 }
@@ -941,6 +1083,7 @@ function renderEmptyState({
             <button
               type="button"
               class="home-btn home-btn--primary"
+              id="${action === ACTIONS.RETRY ? "home-retry-btn" : ""}"
               data-home-action="${attr(action)}"
               data-action="${attr(action)}"
             >
@@ -1028,6 +1171,7 @@ function renderErrorBanner(message = "") {
       <span class="home-error-banner-text">${escapeHtml(text)}</span>
       <button
         type="button"
+        id="home-retry-btn"
         class="home-error-banner-action"
         data-home-action="${ACTIONS.RETRY}"
         data-action="${ACTIONS.RETRY}"
@@ -1051,15 +1195,21 @@ export function renderHomeHeader(input = {}) {
   const displayName = getDisplayName(data);
   const role = getRole(data);
   const admin = isAdminRole(role);
-  const roleLabel = admin ? "ADMIN" : "USER";
+  const support = isSupportRole(role);
+
+  const roleLabel = admin ? "ADMIN" : support ? "SUPPORT" : "USER";
 
   const title = safeText(
     first(
       data.title,
       data.state?.title,
-      admin ? "Panel de control" : `Hola, ${displayName}`
+      admin
+        ? "Centro de control Onion"
+        : support
+          ? "Panel operativo de soporte"
+          : `Hola, ${displayName}`
     ),
-    admin ? "Panel de control" : "Tu home"
+    "Onion Support"
   );
 
   const subtitle = safeText(
@@ -1067,8 +1217,10 @@ export function renderHomeHeader(input = {}) {
       data.subtitle,
       data.state?.subtitle,
       admin
-        ? "Resumen operativo de Onion Support: incidencias, facturación, clientes y usuarios desde una vista clara y accionable."
-        : "Consulta tus incidencias, revisa tu actividad reciente y accede rápidamente a las zonas principales de tu cuenta."
+        ? "Resumen ejecutivo de incidencias, facturación, clientes y usuarios desde una vista clara, rápida y accionable."
+        : support
+          ? "Controla incidencias, clientes visibles y actividad operativa sin ruido."
+          : "Consulta tus incidencias, revisa tu actividad reciente y accede rápidamente a las zonas principales de tu cuenta."
     ),
     ""
   );
@@ -1077,17 +1229,23 @@ export function renderHomeHeader(input = {}) {
 
   return `
     <section
-      class="home-hero home-hero--${admin ? "admin" : "user"}"
+      class="home-hero home-hero--${admin ? "admin" : support ? "support" : "user"}"
       data-home-section="hero"
       data-home-role="${attr(role || "user")}"
     >
+      <div class="home-hero-bg" aria-hidden="true">
+        <span class="home-hero-orb home-hero-orb--one"></span>
+        <span class="home-hero-orb home-hero-orb--two"></span>
+        <span class="home-hero-orb home-hero-orb--three"></span>
+      </div>
+
       <div class="home-hero-top">
         <div class="home-hero-main">
           ${renderUserAvatar(data)}
 
           <div class="home-hero-copy">
             <span class="home-page-kicker">
-              ${icon(admin ? "shield" : "home")}
+              ${icon(admin ? "shield" : support ? "activity" : "home")}
               ${escapeHtml(`Onion Support · ${roleLabel}`)}
             </span>
 
@@ -1103,7 +1261,7 @@ export function renderHomeHeader(input = {}) {
             class="${joinClasses("home-btn", state.refreshing ? "is-loading" : "")}"
             data-home-action="${ACTIONS.REFRESH}"
             data-action="${ACTIONS.REFRESH}"
-            title="Actualizar home"
+            aria-label="Actualizar home"
             data-tooltip="Actualizar home"
             ${boolAttr(state.refreshing || state.loading, 'disabled aria-busy="true"')}
           >
@@ -1114,23 +1272,39 @@ export function renderHomeHeader(input = {}) {
             }
           </button>
 
+          <button
+            type="button"
+            id="home-export-btn"
+            class="home-btn home-btn--ghost"
+            data-home-action="export_csv"
+            data-action="export_csv"
+            data-export-mode="tickets"
+            data-export-filename="home-incidencias.csv"
+            aria-label="Exportar incidencias a CSV"
+            data-tooltip="Exportar incidencias a CSV"
+            ${boolAttr(state.loading || state.refreshing, "disabled")}
+          >
+            ${icon("download")}
+            <span class="home-btn-text">Exportar</span>
+          </button>
+
           ${
             admin
               ? `
                 <button
                   type="button"
                   id="home-admin-users-btn"
-                  class="home-btn"
-                  data-home-action="go-usuarios"
+                  class="home-btn home-btn--primary"
+                  data-home-action="go_usuarios"
                   data-action="${ACTIONS.NAVIGATE}"
                   data-route="${attr(HOME_ROUTES.USUARIOS)}"
                   data-href="${attr(HOME_ROUTES.USUARIOS)}"
-                  title="Gestionar usuarios"
+                  aria-label="Gestionar usuarios"
                   data-tooltip="Gestionar usuarios"
                   ${boolAttr(state.loading || state.refreshing, "disabled")}
                 >
                   ${icon("users")}
-                  <span class="home-btn-text">Gestionar usuarios</span>
+                  <span class="home-btn-text">Usuarios</span>
                 </button>
               `
               : `
@@ -1141,9 +1315,9 @@ export function renderHomeHeader(input = {}) {
                   data-home-action="${ACTIONS.CREATE_INCIDENCIA}"
                   data-action="${ACTIONS.CREATE_INCIDENCIA}"
                   data-quick-action="${ACTIONS.CREATE_INCIDENCIA}"
-                  data-route="${attr(HOME_ROUTES.INCIDENCIAS)}"
-                  data-href="${attr(HOME_ROUTES.INCIDENCIAS)}"
-                  title="Crear incidencia"
+                  data-route="/incidencias/nueva"
+                  data-href="/incidencias/nueva"
+                  aria-label="Crear incidencia"
                   data-tooltip="Crear incidencia"
                   ${boolAttr(primaryCreateDisabled, 'disabled aria-busy="true"')}
                 >
@@ -1161,7 +1335,7 @@ export function renderHomeHeader(input = {}) {
       <div class="home-hero-meta">
         <span class="home-meta-pill">
           ${icon("ticket")}
-          ${escapeHtml(`${formatNumber(stats.totalTickets)} incidencias registradas`)}
+          ${escapeHtml(`${formatNumber(stats.totalTickets)} incidencias`)}
         </span>
 
         <span class="home-meta-pill">
@@ -1171,17 +1345,28 @@ export function renderHomeHeader(input = {}) {
 
         <span class="home-meta-pill">
           ${icon("activity")}
-          ${escapeHtml(`Salud operativa · ${Math.round(safeNumber(stats.healthRatio, 100))}%`)}
+          ${escapeHtml(`Salud · ${Math.round(safeNumber(stats.healthRatio, 100))}%`)}
         </span>
 
         <span class="home-meta-pill">
           ${icon("refresh")}
           ${
             meta.lastUpdatedAt
-              ? escapeHtml(`Última actualización · ${formatRelativeDate(meta.lastUpdatedAt)}`)
-              : "Sin actualizaciones recientes"
+              ? escapeHtml(`Actualizado · ${formatRelativeDate(meta.lastUpdatedAt)}`)
+              : "Sin sincronización reciente"
           }
         </span>
+
+        ${
+          meta.partial
+            ? `
+              <span class="home-meta-pill home-meta-pill--warning">
+                ${icon("alert")}
+                ${escapeHtml(`Resumen parcial · ${formatNumber(meta.errorsCount)} avisos`)}
+              </span>
+            `
+            : ""
+        }
       </div>
 
       ${renderMetricMiniList(stats)}
@@ -1202,16 +1387,18 @@ export function renderHomeWidgets(input = {}) {
   const state = getLoadingState(data);
   const widgets = getWidgets(data).slice(0, WIDGET_LIMIT);
 
-  if (!state.loading && !widgets.length) {
-    return "";
-  }
-
   return `
     <section class="home-widgets" aria-label="Widgets del dashboard" data-home-section="widgets">
       ${
         state.loading && !widgets.length
           ? renderCardLoading(WIDGET_LIMIT)
-          : widgets.map((widget, index) => renderWidgetCard(widget, index)).join("")
+          : widgets.length
+            ? widgets.map((widget, index) => renderWidgetCard(widget, index)).join("")
+            : renderEmptyState({
+                title: "Sin widgets disponibles",
+                text: "El resumen se actualizará cuando haya métricas disponibles.",
+                iconName: "spark",
+              })
       }
     </section>
   `;
@@ -1226,18 +1413,22 @@ export function renderHomeQuickActions(input = {}) {
   const state = getLoadingState(data);
   const role = getRole(data);
   const admin = isAdminRole(role);
+  const support = isSupportRole(role);
   const actions = getQuickActions(data);
 
   return `
     <section class="home-panel home-panel--actions" data-home-section="quick-actions">
       <div class="home-panel-head">
         <div class="home-panel-copy">
+          <span class="home-panel-kicker">${escapeHtml(admin ? "Operación admin" : support ? "Operación soporte" : "Acciones")}</span>
           <h2 class="home-panel-title">Accesos rápidos</h2>
           <p class="home-panel-subtitle">
             ${escapeHtml(
               admin
                 ? "Atajos principales para operar el panel administrativo."
-                : "Acciones principales para moverte por tu cuenta."
+                : support
+                  ? "Atajos para operar soporte sin exponer gestión de usuarios."
+                  : "Acciones principales para moverte por tu cuenta."
             )}
           </p>
         </div>
@@ -1270,12 +1461,13 @@ export function renderHomeActivity(input = {}) {
     <section class="home-panel home-panel--activity" data-home-section="activity">
       <div class="home-panel-head">
         <div class="home-panel-copy">
+          <span class="home-panel-kicker">Timeline</span>
           <h2 class="home-panel-title">Actividad reciente</h2>
           <p class="home-panel-subtitle">
             ${
               state.loading && !activity.length
                 ? "Cargando actividad..."
-                : escapeHtml(`${formatNumber(activity.length)} movimientos recientes detectados`)
+                : escapeHtml(`${formatNumber(activity.length)} movimientos recientes`)
             }
           </p>
         </div>
@@ -1324,16 +1516,13 @@ export function renderHomeInvoicePreview(input = {}) {
   const data = safeObject(input);
   const state = getLoadingState(data);
   const collections = getCollections(data);
-  const invoices = safeArray(collections.invoices).slice(0, 5);
-
-  if (!state.loading && !invoices.length) {
-    return "";
-  }
+  const invoices = safeArray(collections.invoices).slice(0, INVOICE_LIMIT);
 
   return `
     <section class="home-panel home-panel--invoice-preview" data-home-section="invoice-preview">
       <div class="home-panel-head">
         <div class="home-panel-copy">
+          <span class="home-panel-kicker">Billing</span>
           <h2 class="home-panel-title">Facturación rápida</h2>
           <p class="home-panel-subtitle">
             ${
@@ -1377,6 +1566,87 @@ export function renderHomeInvoicePreview(input = {}) {
 }
 
 /* =========================================================
+   ENTITIES PREVIEW
+========================================================= */
+
+export function renderHomeEntitiesPreview(input = {}) {
+  const data = safeObject(input);
+  const state = getLoadingState(data);
+  const collections = getCollections(data);
+  const admin = isAdminRole(getRole(data));
+  const support = isSupportRole(getRole(data));
+  const showUsers = canSeeUsersModule(data);
+
+  const clients = safeArray(collections.clients).slice(0, CLIENT_LIMIT);
+  const users = showUsers ? safeArray(collections.users).slice(0, USER_LIMIT) : [];
+
+  if (!admin && !support && !clients.length) {
+    return "";
+  }
+
+  return `
+    <section class="home-panel home-panel--entities" data-home-section="entities">
+      <div class="home-panel-head">
+        <div class="home-panel-copy">
+          <span class="home-panel-kicker">Directorio</span>
+          <h2 class="home-panel-title">${showUsers ? "Clientes y usuarios" : "Clientes"}</h2>
+          <p class="home-panel-subtitle">
+            ${
+              state.loading && !clients.length && !users.length
+                ? "Cargando directorio..."
+                : escapeHtml(
+                    showUsers
+                      ? `${formatNumber(collections.clientsRemoteCount || clients.length)} clientes · ${formatNumber(collections.usersRemoteCount || users.length)} usuarios`
+                      : `${formatNumber(collections.clientsRemoteCount || clients.length)} clientes visibles`
+                  )
+            }
+          </p>
+        </div>
+
+        <button
+          type="button"
+          class="home-panel-link"
+          data-home-action="${ACTIONS.NAVIGATE}"
+          data-action="${ACTIONS.NAVIGATE}"
+          data-route="${attr(HOME_ROUTES.CLIENTES)}"
+          data-href="${attr(HOME_ROUTES.CLIENTES)}"
+        >
+          Ver clientes
+          ${icon("arrowRight")}
+        </button>
+      </div>
+
+      ${
+        state.loading && !clients.length && !users.length
+          ? renderCardLoading(3)
+          : `
+            <div class="home-entities-list">
+              ${
+                clients.length
+                  ? clients.map((item) => renderMiniEntityItem(item, "client")).join("")
+                  : renderEmptyState({
+                      title: "Sin clientes visibles",
+                      text: "Cuando haya clientes disponibles aparecerán aquí.",
+                      iconName: "client",
+                    })
+              }
+
+              ${
+                showUsers && users.length
+                  ? `
+                    <div class="home-entities-separator" aria-hidden="true"></div>
+                    ${users.map((item) => renderMiniEntityItem(item, "user")).join("")}
+                  `
+                  : ""
+              }
+            </div>
+          `
+      }
+    </section>
+  `;
+}
+
+/* =========================================================
    TICKETS TABLE
 ========================================================= */
 
@@ -1414,6 +1684,7 @@ export function renderHomeTicketsTable(input = {}) {
   const state = getLoadingState(data);
   const collections = getCollections(data);
   const admin = isAdminRole(getRole(data));
+  const support = isSupportRole(getRole(data));
 
   const tickets = collections.tickets;
 
@@ -1430,8 +1701,10 @@ export function renderHomeTicketsTable(input = {}) {
     <section class="home-tickets" data-home-section="tickets">
       <div class="home-panel-head">
         <div class="home-panel-copy">
+          <span class="home-panel-kicker">Service desk</span>
+
           <h2 class="home-panel-title">
-            ${escapeHtml(admin ? "Incidencias recientes" : "Tus últimas incidencias")}
+            ${escapeHtml(admin || support ? "Incidencias recientes" : "Tus últimas incidencias")}
           </h2>
 
           <p class="home-panel-subtitle">
@@ -1457,6 +1730,7 @@ export function renderHomeTicketsTable(input = {}) {
               data-home-action="${ACTIONS.PREV_PAGE}"
               data-action="${ACTIONS.PREV_PAGE}"
               data-page="${attr(String(Math.max(1, pagination.currentPage - 1)))}"
+              data-home-bindable="true"
               ${boolAttr(!pagination.hasPrev || state.loading || state.refreshing, 'disabled aria-disabled="true"')}
             >
               ${icon("chevronLeft")}
@@ -1473,6 +1747,7 @@ export function renderHomeTicketsTable(input = {}) {
               data-home-action="${ACTIONS.NEXT_PAGE}"
               data-action="${ACTIONS.NEXT_PAGE}"
               data-page="${attr(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
+              data-home-bindable="true"
               ${boolAttr(!pagination.hasNext || state.loading || state.refreshing, 'disabled aria-disabled="true"')}
             >
               <span>Siguiente</span>
@@ -1585,9 +1860,13 @@ export function renderHomeTemplate(input = {}) {
   const meta = getTemplateMeta(data);
   const role = getRole(data);
   const admin = isAdminRole(role);
+  const support = isSupportRole(role);
+
+  const dashboard = getDashboard(data);
 
   const payload = {
     ...data,
+    dashboard,
     includeStyles: false,
     state: {
       ...safeObject(data.state),
@@ -1599,19 +1878,23 @@ export function renderHomeTemplate(input = {}) {
     <section
       class="${joinClasses(
         "home-view-root",
-        admin ? "home-view-root--admin" : "home-view-root--user",
+        admin ? "home-view-root--admin" : support ? "home-view-root--support" : "home-view-root--user",
         state.loading ? "is-loading" : "",
         state.refreshing ? "is-refreshing" : "",
         state.creating ? "is-creating" : "",
-        state.error ? "has-error" : ""
+        state.error ? "has-error" : "",
+        meta.partial ? "is-partial" : ""
       )}"
       data-home-scope="true"
       data-home-data-scope="${attr(HOME_DATA_SCOPE)}"
       data-home-template-version="${attr(TEMPLATE_VERSION)}"
       data-home-role="${attr(role || "user")}"
       data-home-admin="${admin ? "true" : "false"}"
+      data-home-support="${support ? "true" : "false"}"
       data-request-id="${attr(meta.requestId)}"
       data-last-updated-at="${attr(meta.lastUpdatedAt || "")}"
+      data-partial="${meta.partial ? "true" : "false"}"
+      data-errors-count="${attr(String(meta.errorsCount || 0))}"
       aria-busy="${state.loading || state.refreshing ? "true" : "false"}"
     >
       ${renderErrorBanner(state.error)}
@@ -1622,7 +1905,8 @@ export function renderHomeTemplate(input = {}) {
       <section class="home-grid" data-home-section="main-grid">
         ${renderHomeQuickActions(payload)}
         ${renderHomeActivity(payload)}
-        ${admin ? renderHomeInvoicePreview(payload) : ""}
+        ${renderHomeInvoicePreview(payload)}
+        ${renderHomeEntitiesPreview(payload)}
       </section>
 
       ${renderHomeTicketsTable(payload)}
@@ -1638,5 +1922,9 @@ export const renderHomeViewTemplate = renderHomeTemplate;
 export const renderHomeDashboardTemplate = renderHomeTemplate;
 export const renderHome = renderHomeTemplate;
 export const renderDashboard = renderHomeTemplate;
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default renderHomeTemplate;

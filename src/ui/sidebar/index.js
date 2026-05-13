@@ -2,43 +2,40 @@
    Onion SPA - Sidebar UI
    Archivo: src/ui/sidebar/index.js
 
-   FINAL EXTREME SYSTEM · SIDEBAR UI ORCHESTRATOR · 15/10
-   ORCHESTRATOR ONLY · STATE.JS OWNER · EVENTS.JS OWNER · ACTIONS.JS OWNER
-   DESKTOP/MOBILE STABLE · DROPDOWN SAFE · BIND DEDUPE
-   ACTIVE ROUTE HARDENED · APPLE INDICATOR · NO STALE ROUTE
-   NO DOUBLE TOGGLE · NO DOUBLE NAVIGATION · NO POINTER-EVENTS NONE
-   NO DUPLICATE MODULE REGISTER · NO REBIND STORMS · LIGHT SYNC SAFE
+   ONION SUPPORT · SIDEBAR UI ORCHESTRATOR · 15/10
+   ORCHESTRATOR ONLY · STATE OWNER · EVENTS OWNER · ACTIONS OWNER
 
    RESPONSABILIDADES:
-   - montar sidebar
-   - registrar módulo en AppCore.modules sin duplicidades
-   - mantener referencias DOM sincronizadas
-   - renderizar usuario/avatar
-   - aplicar visibilidad por rol/admin
-   - exponer API pública estable
-   - delegar estado visual en state.js
-   - delegar dropdown en dropdown.js
-   - delegar acciones de negocio en actions.js
-   - delegar eventos DOM/core/router en events.js
-   - sincronizar item activo delegando en state.js
-   - sincronizar indicador activo delegando en state.js
-   - reparar DOM tras login/restore/router render sin duplicar binds
-   - evitar tormentas de bind/repair/init
-   - evitar pointer-events:none colgado en .sidebar-menu
-   - no escribir variables CSS del indicador desde index.js
-   - no gestionar transición visual propia desde index.js
-   - no registrar módulos si ya existe el mismo objeto
-   - no llamar refresh pesado en sync/render normales
+   - Montar sidebar.
+   - Registrar módulo en AppCore.modules sin duplicidades.
+   - Mantener referencias DOM sincronizadas.
+   - Renderizar usuario/avatar delegando en user.js.
+   - Aplicar visibilidad por rol/admin delegando en visibility.js.
+   - Exponer API pública estable.
+   - Delegar estado visual en state.js.
+   - Delegar dropdown en dropdown.js.
+   - Delegar acciones de negocio en actions.js.
+   - Delegar eventos DOM/core/router en events.js.
+   - Sincronizar item activo delegando en state.js.
+   - Sincronizar indicador activo delegando en state.js.
+   - Reparar DOM tras login/restore/router render sin duplicar binds.
+   - Evitar tormentas de bind/repair/init.
+   - Evitar pointer-events:none colgado en .sidebar-menu.
+   - No escribir variables CSS del indicador desde index.js.
+   - No gestionar transición visual propia desde index.js.
+   - No registrar módulos si ya existe el mismo objeto.
+   - No llamar refresh pesado en sync/render normales.
 
    REGLA DE ARQUITECTURA:
-   - template.js   = DOM base
-   - dom.js        = refs / mount / sanitation
-   - state.js      = estado visual sidebar + active item + indicator
-   - dropdown.js   = dropdown usuario
-   - visibility.js = permisos/rol
-   - actions.js    = acciones de negocio
-   - events.js     = listeners DOM/core/router
-   - index.js      = orquestador público
+   - template.js   = DOM base.
+   - dom.js        = refs / mount / sanitation.
+   - state.js      = estado visual sidebar + active item + indicator.
+   - dropdown.js   = dropdown usuario.
+   - user.js       = identidad/avatar/footer.
+   - visibility.js = permisos/rol.
+   - actions.js    = acciones de negocio.
+   - events.js     = listeners DOM/core/router.
+   - index.js      = orquestador público.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -56,16 +53,15 @@ import {
   getElements,
   hasSidebarShell,
   isShellHidden,
+  isRealShellHidden as isDomRealShellHidden,
   sanitizeFooterTooltipState,
+  getSidebarDomSnapshot,
 } from "./dom.js";
 
 import {
-  getUser,
-  getDisplayName,
-  getUsername,
-  getAvatarText,
-  getAvatarUrl,
-  renderAvatarImage,
+  renderUser as renderUserBase,
+  isAdmin as isAdminBase,
+  getSidebarUserSnapshot,
 } from "./user.js";
 
 import {
@@ -77,6 +73,8 @@ import {
   repairSidebarState as repairSidebarStateBase,
   syncActiveMenuItem,
   scheduleActiveMenuIndicator,
+  getSidebarStateSnapshot,
+  resetSidebarStateRuntime,
 } from "./state.js";
 
 import {
@@ -89,6 +87,7 @@ import {
 
 import {
   applyRoleVisibility as applyRoleVisibilityBase,
+  getRoleVisibilitySnapshot,
 } from "./visibility.js";
 
 import {
@@ -108,7 +107,12 @@ import {
 import {
   bindDomEvents,
   bindCoreEvents,
+  disposeSidebarEvents,
+  getSidebarEventsSnapshot,
 } from "./events.js";
+
+export const SIDEBAR_UI_VERSION =
+  "sidebar-ui-v15-orchestrator-only";
 
 export const SidebarUI = (() => {
   "use strict";
@@ -119,6 +123,12 @@ export const SidebarUI = (() => {
 
   const SOURCE =
     "SidebarUI";
+
+  const OWNER =
+    "index.js";
+
+  const LOG_PREFIX =
+    "[SidebarUI]";
 
   const BIND_DEDUP_WINDOW_MS =
     250;
@@ -144,11 +154,12 @@ export const SidebarUI = (() => {
   const INDICATOR_DELAY_TRANSITION_MS =
     420;
 
-  const MODULE_NAMES = Object.freeze([
-    "sidebar",
-    "SidebarUI",
-    "sidebarUI",
-  ]);
+  const MODULE_NAMES =
+    Object.freeze([
+      "sidebar",
+      "SidebarUI",
+      "sidebarUI",
+    ]);
 
   let initialized =
     false;
@@ -195,10 +206,11 @@ export const SidebarUI = (() => {
   let repairTimer =
     null;
 
-  const runtimeState = {
-    dropdownOpen:
-      false,
-  };
+  const runtimeState =
+    {
+      dropdownOpen:
+        false,
+    };
 
   /* ======================================================
      SAFE HELPERS
@@ -220,6 +232,14 @@ export const SidebarUI = (() => {
       return Date.now();
     } catch {
       return 0;
+    }
+  }
+
+  function safeIsoDate(ms = nowTs()) {
+    try {
+      return new Date(ms).toISOString();
+    } catch {
+      return "";
     }
   }
 
@@ -248,12 +268,6 @@ export const SidebarUI = (() => {
     )
       ? value
       : {};
-  }
-
-  function safeArray(value) {
-    return Array.isArray(value)
-      ? value
-      : [];
   }
 
   function safeBoolean(value, fallback = false) {
@@ -294,28 +308,33 @@ export const SidebarUI = (() => {
     }
 
     if (typeof value === "number") {
-      if (value === 1) return true;
-      if (value === 0) return false;
+      if (value === 1) {
+        return true;
+      }
+
+      if (value === 0) {
+        return false;
+      }
     }
 
     return fallback;
   }
 
   function safeNumber(value, fallback = 0) {
-    const n =
+    const number =
       Number(value);
 
-    return Number.isFinite(n)
-      ? n
+    return Number.isFinite(number)
+      ? number
       : fallback;
   }
 
   function clampNumber(value, min = 0, max = Number.POSITIVE_INFINITY) {
-    const n =
+    const number =
       safeNumber(value, min);
 
     return Math.min(
-      Math.max(n, min),
+      Math.max(number, min),
       max
     );
   }
@@ -369,7 +388,7 @@ export const SidebarUI = (() => {
     try {
       if (isFunction(AppCore?.utils?.warn)) {
         AppCore.utils.warn(
-          "[SidebarUI]",
+          LOG_PREFIX,
           ...args
         );
 
@@ -387,7 +406,7 @@ export const SidebarUI = (() => {
 
     try {
       console.warn(
-        "[SidebarUI]",
+        LOG_PREFIX,
         ...args
       );
     } catch {}
@@ -396,7 +415,7 @@ export const SidebarUI = (() => {
   function safeLog(...args) {
     try {
       AppCore?.utils?.log?.(
-        "[SidebarUI]",
+        LOG_PREFIX,
         ...args
       );
     } catch {}
@@ -415,12 +434,28 @@ export const SidebarUI = (() => {
       return false;
     }
 
-    const finalPayload = {
-      source:
-        SOURCE,
+    const data =
+      safeObject(payload);
 
-      ...safeObject(payload),
-    };
+    const finalPayload =
+      {
+        ...data,
+
+        source:
+          safeText(data.source, SOURCE),
+
+        owner:
+          OWNER,
+
+        version:
+          SIDEBAR_UI_VERSION,
+
+        at:
+          safeText(data.at, safeIsoDate()),
+
+        ts:
+          data.ts || nowTs(),
+      };
 
     try {
       if (isFunction(AppCore?.events?.emit)) {
@@ -562,7 +597,8 @@ export const SidebarUI = (() => {
   function clearVisualSyncTimer() {
     if (visualSyncTimer) {
       safeClearTimeout(visualSyncTimer);
-      visualSyncTimer = null;
+      visualSyncTimer =
+        null;
     }
 
     return true;
@@ -571,7 +607,8 @@ export const SidebarUI = (() => {
   function clearRepairTimer() {
     if (repairTimer) {
       safeClearTimeout(repairTimer);
-      repairTimer = null;
+      repairTimer =
+        null;
     }
 
     return true;
@@ -585,6 +622,12 @@ export const SidebarUI = (() => {
     try {
       return Boolean(
         isRealShellHidden(AppCore)
+      );
+    } catch {}
+
+    try {
+      return Boolean(
+        isDomRealShellHidden(AppCore)
       );
     } catch {}
 
@@ -606,11 +649,18 @@ export const SidebarUI = (() => {
         !AppCore.dom ||
         typeof AppCore.dom !== "object"
       ) {
-        AppCore.dom = {};
+        AppCore.dom =
+          {};
       }
 
       AppCore.dom.sidebar =
         el.sidebar || null;
+
+      AppCore.dom.sidebarRoot =
+        el.sidebar || null;
+
+      AppCore.dom.sidebarMount =
+        el.sidebarMount || null;
 
       AppCore.dom.sidebarMenu =
         el.sidebarMenu || null;
@@ -621,8 +671,17 @@ export const SidebarUI = (() => {
       AppCore.dom.sidebarAvatar =
         el.avatarEl || null;
 
+      AppCore.dom.sidebarAvatarImage =
+        el.avatarImage || null;
+
+      AppCore.dom.sidebarAvatarFallback =
+        el.avatarFallback || null;
+
       AppCore.dom.sidebarName =
         el.nameEl || null;
+
+      AppCore.dom.sidebarUserPlan =
+        el.planEl || null;
 
       AppCore.dom.sidebarLogo =
         el.logoEl || null;
@@ -637,13 +696,19 @@ export const SidebarUI = (() => {
         el.logoutBtn || null;
 
       AppCore.dom.sidebarToggle =
-        el.toggleBtn || null;
+        el.sidebarToggle || el.toggleBtn || null;
+
+      AppCore.dom.toggleBtn =
+        el.sidebarToggle || el.toggleBtn || null;
 
       AppCore.dom.sidebarMobileToggle =
         el.mobileToggleBtn || null;
 
       AppCore.dom.mobileSidebarToggle =
         el.mobileToggleBtn || null;
+
+      AppCore.dom.serverLink =
+        el.serverLink || null;
     } catch {}
 
     return el;
@@ -676,24 +741,30 @@ export const SidebarUI = (() => {
 
     try {
       if (sidebarMenu.style.pointerEvents === "none") {
-        sidebarMenu.style.pointerEvents = "";
-        repaired = true;
+        sidebarMenu.style.pointerEvents =
+          "";
+
+        repaired =
+          true;
       }
 
       if (sidebarMenu.hasAttribute("inert")) {
         sidebarMenu.removeAttribute("inert");
-        repaired = true;
+        repaired =
+          true;
       }
 
       if (sidebarMenu.getAttribute("aria-disabled") === "true") {
         sidebarMenu.removeAttribute("aria-disabled");
-        repaired = true;
+        repaired =
+          true;
       }
 
       if (sidebarMenu.dataset.visualSyncing === "true") {
         delete sidebarMenu.dataset.visualSyncing;
         delete sidebarMenu.dataset.visualSyncReason;
-        repaired = true;
+        repaired =
+          true;
       }
 
       sidebarMenu.classList?.remove?.(
@@ -717,7 +788,12 @@ export const SidebarUI = (() => {
 
   function mountAndRefresh(reason = "mount") {
     try {
-      mountSidebar(AppCore);
+      mountSidebar(
+        AppCore,
+        {
+          reason,
+        }
+      );
     } catch (error) {
       safeWarn(
         "mountSidebar falló.",
@@ -749,7 +825,8 @@ export const SidebarUI = (() => {
         !AppCore.state ||
         typeof AppCore.state !== "object"
       ) {
-        AppCore.state = {};
+        AppCore.state =
+          {};
       }
 
       const desiredOpen =
@@ -975,645 +1052,33 @@ export const SidebarUI = (() => {
   }
 
   /* ======================================================
-     ADMIN ROLE RESOLUTION
+     USER / ROLE
   ====================================================== */
-
-  const ADMIN_ROLE_KEYS =
-    new Set([
-      "admin",
-      "administrator",
-      "administrador",
-      "superadmin",
-      "super_admin",
-      "super_administrador",
-      "owner",
-      "root",
-    ]);
-
-  const ADMIN_PERMISSION_KEYS =
-    new Set([
-      "admin:*",
-      "admin.all",
-      "admin.full",
-      "admin.manage",
-
-      "users.manage",
-      "users:manage",
-      "users.write",
-      "users:write",
-      "users.admin",
-
-      "usuarios.manage",
-      "usuarios:manage",
-      "usuarios.write",
-      "usuarios:write",
-      "usuarios.admin",
-
-      "manage_users",
-      "can_manage_users",
-      "access_users",
-      "can_access_users",
-    ]);
-
-  function normalizeRole(value = "") {
-    return safeText(value, "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[\s-]+/g, "_")
-      .replace(/[^a-z0-9_:.]/g, "")
-      .trim();
-  }
-
-  function flattenRoleValue(value) {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      return [];
-    }
-
-    if (Array.isArray(value)) {
-      return value.flatMap(
-        flattenRoleValue
-      );
-    }
-
-    if (typeof value === "string") {
-      return value
-        .split(/[,\s|]+/)
-        .map((item) => item.trim())
-        .filter(Boolean);
-    }
-
-    if (
-      typeof value === "number" ||
-      typeof value === "boolean"
-    ) {
-      return [value];
-    }
-
-    if (typeof value === "object") {
-      const entries =
-        Object.entries(value);
-
-      const truthyKeys =
-        entries
-          .filter(([, entryValue]) =>
-            safeBoolean(entryValue, false)
-          )
-          .map(([key]) => key);
-
-      return [
-        value.role,
-        value.rol,
-        value.name,
-        value.key,
-        value.value,
-        value.id,
-        value.code,
-        value.slug,
-        value.type,
-        value.scope,
-        value.permission,
-
-        value.roles,
-        value.roleList,
-        value.role_list,
-        value.permissions,
-        value.scopes,
-        value.groups,
-        value.authorities,
-        value.items,
-        value.list,
-
-        ...truthyKeys,
-      ].flatMap(flattenRoleValue);
-    }
-
-    return [];
-  }
-
-  function normalizeRoles(value) {
-    return flattenRoleValue(value)
-      .flat(Infinity)
-      .map(normalizeRole)
-      .filter(Boolean);
-  }
-
-  function isAdminRole(value = "") {
-    return ADMIN_ROLE_KEYS.has(
-      normalizeRole(value)
-    );
-  }
-
-  function isAdminPermission(value = "") {
-    const key =
-      normalizeRole(value);
-
-    if (!key) {
-      return false;
-    }
-
-    if (ADMIN_PERMISSION_KEYS.has(key)) {
-      return true;
-    }
-
-    return (
-      key.startsWith("admin:") ||
-      key.startsWith("admin.") ||
-      key.includes(":admin") ||
-      key.includes(".admin")
-    );
-  }
-
-  function getAuthUser() {
-    try {
-      if (isFunction(Auth?.getUser)) {
-        return safeObject(Auth.getUser());
-      }
-    } catch {}
-
-    try {
-      if (isFunction(Auth?.getCurrentUser)) {
-        return safeObject(Auth.getCurrentUser());
-      }
-    } catch {}
-
-    try {
-      if (isFunction(Auth?.currentUser)) {
-        return safeObject(Auth.currentUser());
-      }
-    } catch {}
-
-    return {};
-  }
-
-  function getCurrentUser() {
-    return safeObject(
-      first(
-        AppCore?.state?.user,
-        AppCore?.state?.currentUser,
-        AppCore?.state?.sessionUser,
-        AppCore?.state?.authUser,
-        AppCore?.state?.session?.user,
-        getAuthUser()
-      )
-    );
-  }
-
-  function getRoleCandidates() {
-    const user =
-      getCurrentUser();
-
-    const raw =
-      safeObject(user?.raw);
-
-    const profile =
-      safeObject(user?.profile);
-
-    const account =
-      safeObject(user?.account);
-
-    const meta =
-      safeObject(user?.meta);
-
-    const claims =
-      safeObject(user?.claims);
-
-    const rawProfile =
-      safeObject(raw?.profile);
-
-    const rawMeta =
-      safeObject(raw?.meta);
-
-    const rawClaims =
-      safeObject(raw?.claims);
-
-    const roleCandidates = [
-      AppCore?.state?.role,
-      AppCore?.state?.rol,
-      AppCore?.state?.userRole,
-      AppCore?.state?.type,
-
-      AppCore?.state?.session?.role,
-      AppCore?.state?.session?.rol,
-      AppCore?.state?.session?.userRole,
-
-      user?.role,
-      user?.rol,
-      user?.userRole,
-      user?.user_role,
-      user?.type,
-      user?.userType,
-      user?.user_type,
-      user?.perfil,
-
-      profile.role,
-      profile.rol,
-      profile.userRole,
-      profile.user_role,
-      profile.type,
-      profile.perfil,
-
-      account.role,
-      account.rol,
-      account.userRole,
-      account.type,
-
-      meta.role,
-      meta.rol,
-      meta.userRole,
-
-      claims.role,
-      claims.rol,
-      claims.userRole,
-      claims["custom:role"],
-      claims["https://onion/role"],
-
-      raw.role,
-      raw.rol,
-      raw.userRole,
-      raw.user_role,
-      raw.type,
-      raw.userType,
-      raw.user_type,
-      raw.perfil,
-
-      rawProfile.role,
-      rawProfile.rol,
-      rawProfile.userRole,
-      rawProfile.user_role,
-      rawProfile.type,
-      rawProfile.perfil,
-
-      rawMeta.role,
-      rawMeta.rol,
-      rawMeta.userRole,
-
-      rawClaims.role,
-      rawClaims.rol,
-      rawClaims.userRole,
-      rawClaims["custom:role"],
-      rawClaims["https://onion/role"],
-
-      Auth?.role,
-      Auth?.userRole,
-    ];
-
-    try {
-      if (isFunction(Auth?.getRole)) {
-        roleCandidates.push(
-          Auth.getRole()
-        );
-      }
-    } catch {}
-
-    try {
-      if (isFunction(Auth?.getCurrentRole)) {
-        roleCandidates.push(
-          Auth.getCurrentRole()
-        );
-      }
-    } catch {}
-
-    const roleArrays = [
-      AppCore?.state?.roles,
-      AppCore?.state?.permissions,
-      AppCore?.state?.scopes,
-
-      AppCore?.state?.session?.roles,
-      AppCore?.state?.session?.permissions,
-      AppCore?.state?.session?.scopes,
-
-      user?.roles,
-      user?.roleList,
-      user?.role_list,
-      user?.permissions,
-      user?.scopes,
-      user?.groups,
-      user?.authorities,
-
-      profile.roles,
-      profile.permissions,
-      profile.scopes,
-      profile.groups,
-      profile.authorities,
-
-      account.roles,
-      account.permissions,
-      account.scopes,
-      account.groups,
-
-      meta.roles,
-      meta.permissions,
-      meta.scopes,
-      meta.groups,
-
-      claims.roles,
-      claims.permissions,
-      claims.scopes,
-      claims.groups,
-
-      raw.roles,
-      raw.roleList,
-      raw.role_list,
-      raw.permissions,
-      raw.scopes,
-      raw.groups,
-      raw.authorities,
-
-      rawProfile.roles,
-      rawProfile.permissions,
-      rawProfile.scopes,
-      rawProfile.groups,
-
-      rawMeta.roles,
-      rawMeta.scopes,
-
-      rawClaims.roles,
-      rawClaims.permissions,
-      rawClaims.scopes,
-      rawClaims.groups,
-
-      Auth?.roles,
-      Auth?.permissions,
-      Auth?.scopes,
-    ];
-
-    return [
-      ...roleCandidates,
-      ...roleArrays,
-    ];
-  }
-
-  function hasAdminFlag() {
-    const user =
-      getCurrentUser();
-
-    const raw =
-      safeObject(user?.raw);
-
-    const profile =
-      safeObject(user?.profile);
-
-    const account =
-      safeObject(user?.account);
-
-    const meta =
-      safeObject(user?.meta);
-
-    const claims =
-      safeObject(user?.claims);
-
-    return [
-      AppCore?.state?.isAdmin,
-      AppCore?.state?.admin,
-      AppCore?.state?.isSuperAdmin,
-      AppCore?.state?.superAdmin,
-      AppCore?.state?.canManageUsers,
-      AppCore?.state?.canAccessUsers,
-
-      AppCore?.state?.session?.isAdmin,
-      AppCore?.state?.session?.admin,
-      AppCore?.state?.session?.isSuperAdmin,
-      AppCore?.state?.session?.superAdmin,
-      AppCore?.state?.session?.canManageUsers,
-      AppCore?.state?.session?.canAccessUsers,
-
-      user?.isAdmin,
-      user?.admin,
-      user?.isSuperAdmin,
-      user?.superAdmin,
-      user?.canManageUsers,
-      user?.canAccessUsers,
-
-      profile.isAdmin,
-      profile.admin,
-      profile.isSuperAdmin,
-      profile.superAdmin,
-      profile.canManageUsers,
-      profile.canAccessUsers,
-
-      account.isAdmin,
-      account.admin,
-      account.isSuperAdmin,
-      account.superAdmin,
-
-      meta.isAdmin,
-      meta.admin,
-      meta.isSuperAdmin,
-      meta.superAdmin,
-      meta.canManageUsers,
-      meta.canAccessUsers,
-
-      claims.isAdmin,
-      claims.admin,
-      claims.isSuperAdmin,
-      claims.superAdmin,
-      claims.canManageUsers,
-      claims.canAccessUsers,
-
-      raw.isAdmin,
-      raw.admin,
-      raw.is_admin,
-      raw.isSuperAdmin,
-      raw.superAdmin,
-      raw.is_super_admin,
-      raw.canManageUsers,
-      raw.can_manage_users,
-      raw.canAccessUsers,
-      raw.can_access_users,
-    ].some((value) =>
-      safeBoolean(value, false)
-    );
-  }
 
   function isAdmin() {
-    if (hasAdminFlag()) {
-      return true;
-    }
-
     try {
-      if (
-        isFunction(Auth?.isCurrentUserAdmin) &&
-        Auth.isCurrentUserAdmin()
-      ) {
-        return true;
-      }
-    } catch {}
-
-    try {
-      if (
-        isFunction(Auth?.hasRole) &&
-        Auth.hasRole(
-          "admin",
-          "administrator",
-          "administrador",
-          "superadmin",
-          "super_admin",
-          "owner",
-          "root"
-        )
-      ) {
-        return true;
-      }
-    } catch {}
-
-    const roles =
-      normalizeRoles(
-        getRoleCandidates()
+      return Boolean(
+        isAdminBase(AppCore)
       );
-
-    return roles.some((role) =>
-      isAdminRole(role) ||
-      isAdminPermission(role)
-    );
+    } catch {
+      return false;
+    }
   }
-
-  /* ======================================================
-     USER RENDER
-  ====================================================== */
 
   function renderUser() {
     refreshSidebarDomRefs();
-
-    const {
-      nameEl,
-      avatarEl,
-      userToggle,
-      userDropdown,
-    } =
-      getElements(AppCore);
-
-    const user =
-      getUser(AppCore);
-
-    const displayName =
-      getDisplayName(
-        AppCore,
-        user
-      );
-
-    const username =
-      getUsername(
-        AppCore,
-        user
-      );
-
-    const avatarText =
-      getAvatarText(
-        AppCore,
-        user
-      );
-
-    const avatarUrl =
-      getAvatarUrl(user);
-
-    if (nameEl) {
-      try {
-        nameEl.textContent =
-          displayName;
-
-        if (username) {
-          nameEl.dataset.username =
-            username;
-        } else {
-          delete nameEl.dataset.username;
-        }
-
-        nameEl.removeAttribute("title");
-        nameEl.removeAttribute("data-tooltip");
-        nameEl.removeAttribute("aria-describedby");
-      } catch {}
-    }
-
-    if (avatarEl) {
-      try {
-        renderAvatarImage(
-          avatarEl,
-          avatarUrl,
-          displayName,
-          avatarText
-        );
-
-        avatarEl.setAttribute(
-          "aria-label",
-          `Avatar de ${displayName}`
-        );
-
-        if (username) {
-          avatarEl.dataset.username =
-            username;
-        } else {
-          delete avatarEl.dataset.username;
-        }
-
-        avatarEl.removeAttribute("title");
-        avatarEl.removeAttribute("data-tooltip");
-        avatarEl.removeAttribute("aria-describedby");
-      } catch {}
-    }
-
-    if (userToggle) {
-      try {
-        userToggle.setAttribute(
-          "aria-label",
-          `Abrir menú de usuario de ${displayName}`
-        );
-
-        userToggle.setAttribute(
-          "aria-haspopup",
-          "menu"
-        );
-
-        userToggle.removeAttribute("title");
-        userToggle.removeAttribute("data-tooltip");
-        userToggle.removeAttribute("aria-describedby");
-
-        if (
-          userDropdown?.id &&
-          !userToggle.getAttribute("aria-controls")
-        ) {
-          userToggle.setAttribute(
-            "aria-controls",
-            userDropdown.id
-          );
-        }
-      } catch {}
-    }
-
-    if (userDropdown) {
-      try {
-        userDropdown.removeAttribute("title");
-        userDropdown.removeAttribute("data-tooltip");
-        userDropdown.removeAttribute("aria-describedby");
-
-        if (!userDropdown.getAttribute("role")) {
-          userDropdown.setAttribute(
-            "role",
-            "menu"
-          );
-        }
-      } catch {}
-    }
+    ensureMenuInteractive("render-user");
 
     try {
-      sanitizeFooterTooltipState(AppCore);
-    } catch {}
+      return renderUserBase(AppCore);
+    } catch (error) {
+      safeWarn(
+        "renderUserBase falló.",
+        error
+      );
 
-    safeEmit(
-      "sidebar:user:rendered",
-      {
-        user,
-        displayName,
-        username,
-        isAdmin:
-          isAdmin(),
-      }
-    );
-
-    return true;
+      return false;
+    }
   }
 
   /* ======================================================
@@ -1796,17 +1261,28 @@ export const SidebarUI = (() => {
      DROPDOWN
   ====================================================== */
 
-  function ensureSidebarOpenForUserMenu() {
-    return actionEnsureSidebarOpenForUserMenu({
-      AppCore,
-      closeDropdown,
-      syncSidebarState,
-      reason:
-        "ensure-sidebar-open-for-user-menu",
-    });
+  function ensureSidebarOpenForUserMenu(options = {}) {
+    const opts =
+      safeObject(options);
+
+    return actionEnsureSidebarOpenForUserMenu(
+      {
+        AppCore,
+        closeDropdown,
+        syncSidebarState,
+        reason:
+          safeText(
+            opts.reason || opts.source,
+            "ensure-sidebar-open-for-user-menu"
+          ),
+      }
+    );
   }
 
   function openDropdown(options = {}) {
+    const opts =
+      safeObject(options);
+
     if (isShellBlocked()) {
       return false;
     }
@@ -1819,7 +1295,7 @@ export const SidebarUI = (() => {
         AppCore,
         runtimeState,
         ensureSidebarOpenForUserMenu,
-        safeObject(options)
+        opts
       );
 
     scheduleRouteAndIndicator(
@@ -1837,6 +1313,9 @@ export const SidebarUI = (() => {
   }
 
   function closeDropdown(options = {}) {
+    const opts =
+      safeObject(options);
+
     refreshSidebarDomRefs();
     ensureMenuInteractive("close-dropdown");
 
@@ -1844,7 +1323,7 @@ export const SidebarUI = (() => {
       closeDropdownBase(
         AppCore,
         runtimeState,
-        safeObject(options)
+        opts
       );
 
     scheduleRouteAndIndicator(
@@ -1862,6 +1341,9 @@ export const SidebarUI = (() => {
   }
 
   function toggleDropdown(options = {}) {
+    const opts =
+      safeObject(options);
+
     if (isShellBlocked()) {
       return false;
     }
@@ -1874,7 +1356,7 @@ export const SidebarUI = (() => {
         AppCore,
         runtimeState,
         ensureSidebarOpenForUserMenu,
-        safeObject(options)
+        opts
       );
 
     scheduleRouteAndIndicator(
@@ -1916,18 +1398,20 @@ export const SidebarUI = (() => {
       safeObject(options);
 
     const result =
-      actionSetSidebarOpen({
-        AppCore,
-        open:
-          Boolean(open),
-        closeDropdown,
-        syncSidebarState,
-        reason:
-          safeText(
-            opts.reason || opts.source,
-            "set-sidebar-open"
-          ),
-      });
+      actionSetSidebarOpen(
+        {
+          AppCore,
+          open:
+            Boolean(open),
+          closeDropdown,
+          syncSidebarState,
+          reason:
+            safeText(
+              opts.reason || opts.source,
+              "set-sidebar-open"
+            ),
+        }
+      );
 
     scheduleRouteAndIndicator(
       "set-sidebar-open",
@@ -1948,16 +1432,18 @@ export const SidebarUI = (() => {
       safeObject(options);
 
     const result =
-      actionOpenSidebar({
-        AppCore,
-        closeDropdown,
-        syncSidebarState,
-        reason:
-          safeText(
-            opts.reason || opts.source,
-            "open-sidebar"
-          ),
-      });
+      actionOpenSidebar(
+        {
+          AppCore,
+          closeDropdown,
+          syncSidebarState,
+          reason:
+            safeText(
+              opts.reason || opts.source,
+              "open-sidebar"
+            ),
+        }
+      );
 
     scheduleRouteAndIndicator(
       "open-sidebar",
@@ -1978,16 +1464,18 @@ export const SidebarUI = (() => {
       safeObject(options);
 
     const result =
-      actionCloseSidebar({
-        AppCore,
-        closeDropdown,
-        syncSidebarState,
-        reason:
-          safeText(
-            opts.reason || opts.source,
-            "close-sidebar"
-          ),
-      });
+      actionCloseSidebar(
+        {
+          AppCore,
+          closeDropdown,
+          syncSidebarState,
+          reason:
+            safeText(
+              opts.reason || opts.source,
+              "close-sidebar"
+            ),
+        }
+      );
 
     scheduleRouteAndIndicator(
       "close-sidebar",
@@ -2008,16 +1496,18 @@ export const SidebarUI = (() => {
       safeObject(options);
 
     const result =
-      actionToggleSidebar({
-        AppCore,
-        closeDropdown,
-        syncSidebarState,
-        reason:
-          safeText(
-            opts.reason || opts.source,
-            "toggle-sidebar"
-          ),
-      });
+      actionToggleSidebar(
+        {
+          AppCore,
+          closeDropdown,
+          syncSidebarState,
+          reason:
+            safeText(
+              opts.reason || opts.source,
+              "toggle-sidebar"
+            ),
+        }
+      );
 
     scheduleRouteAndIndicator(
       "toggle-sidebar",
@@ -2038,16 +1528,18 @@ export const SidebarUI = (() => {
       safeObject(options);
 
     const result =
-      actionCollapseSidebar({
-        AppCore,
-        closeDropdown,
-        syncSidebarState,
-        reason:
-          safeText(
-            opts.reason || opts.source,
-            "collapse-sidebar"
-          ),
-      });
+      actionCollapseSidebar(
+        {
+          AppCore,
+          closeDropdown,
+          syncSidebarState,
+          reason:
+            safeText(
+              opts.reason || opts.source,
+              "collapse-sidebar"
+            ),
+        }
+      );
 
     scheduleRouteAndIndicator(
       "collapse-sidebar",
@@ -2068,16 +1560,18 @@ export const SidebarUI = (() => {
       safeObject(options);
 
     const result =
-      actionExpandSidebar({
-        AppCore,
-        closeDropdown,
-        syncSidebarState,
-        reason:
-          safeText(
-            opts.reason || opts.source,
-            "expand-sidebar"
-          ),
-      });
+      actionExpandSidebar(
+        {
+          AppCore,
+          closeDropdown,
+          syncSidebarState,
+          reason:
+            safeText(
+              opts.reason || opts.source,
+              "expand-sidebar"
+            ),
+        }
+      );
 
     scheduleRouteAndIndicator(
       "expand-sidebar",
@@ -2097,16 +1591,18 @@ export const SidebarUI = (() => {
     const opts =
       safeObject(options);
 
-    return actionCloseSidebarOnMobileAfterNavigation({
-      AppCore,
-      closeDropdown,
-      syncSidebarState,
-      reason:
-        safeText(
-          opts.reason || opts.source,
-          "mobile-navigation"
-        ),
-    });
+    return actionCloseSidebarOnMobileAfterNavigation(
+      {
+        AppCore,
+        closeDropdown,
+        syncSidebarState,
+        reason:
+          safeText(
+            opts.reason || opts.source,
+            "mobile-navigation"
+          ),
+      }
+    );
   }
 
   async function navigateTo(route = "", options = {}) {
@@ -2121,23 +1617,25 @@ export const SidebarUI = (() => {
     }
 
     const result =
-      await actionNavigateFromSidebar({
-        AppCore,
-        Router,
-        target,
-        closeDropdown,
-        closeSidebarOnMobile:
-          true,
-        syncSidebarState,
-        replace:
-          opts.replace === true ||
-          opts.replaceState === true,
-        source:
-          safeText(
-            opts.source,
-            "sidebar-ui"
-          ),
-      });
+      await actionNavigateFromSidebar(
+        {
+          AppCore,
+          Router,
+          target,
+          closeDropdown,
+          closeSidebarOnMobile:
+            true,
+          syncSidebarState,
+          replace:
+            opts.replace === true ||
+            opts.replaceState === true,
+          source:
+            safeText(
+              opts.source,
+              "sidebar-ui"
+            ),
+        }
+      );
 
     scheduleRouteAndIndicator(
       "navigate-to",
@@ -2183,20 +1681,22 @@ export const SidebarUI = (() => {
 
   async function handleLogout() {
     const result =
-      await handleLogoutBase({
-        AppCore,
-        Auth,
-        Router,
-        closeDropdown,
-        renderUser,
-        applyRoleVisibility,
-        closeSidebarOnMobileAfterNavigation,
-        syncSidebarState,
-        getElements:
-          () => getElements(AppCore),
-        setLogoutInFlight,
-        isLogoutInFlight,
-      });
+      await handleLogoutBase(
+        {
+          AppCore,
+          Auth,
+          Router,
+          closeDropdown,
+          renderUser,
+          applyRoleVisibility,
+          closeSidebarOnMobileAfterNavigation,
+          syncSidebarState,
+          getElements:
+            () => getElements(AppCore),
+          setLogoutInFlight,
+          isLogoutInFlight,
+        }
+      );
 
     scheduleRouteAndIndicator(
       "logout",
@@ -2231,6 +1731,10 @@ export const SidebarUI = (() => {
       coreEventsCleanup?.();
     } catch {}
 
+    try {
+      disposeSidebarEvents(SCOPE);
+    } catch {}
+
     domEventsCleanup =
       null;
 
@@ -2254,13 +1758,15 @@ export const SidebarUI = (() => {
     cleanupBoundEvents();
 
     try {
-      closeDropdown({
-        force:
-          true,
+      closeDropdown(
+        {
+          force:
+            true,
 
-        reason:
-          "sidebar-cleanup",
-      });
+          reason:
+            "sidebar-cleanup",
+        }
+      );
     } catch {}
 
     ensureMenuInteractive("cleanup");
@@ -2388,41 +1894,45 @@ export const SidebarUI = (() => {
     try {
       bindGeneration += 1;
 
-      cleanupBoundEvents({
-        preserveBindingFlag:
-          true,
-      });
+      cleanupBoundEvents(
+        {
+          preserveBindingFlag:
+            true,
+        }
+      );
 
       try {
         domEventsCleanup =
-          bindDomEvents({
-            AppCore,
-            Router,
-            Auth,
-            state:
-              runtimeState,
-            scope:
-              SCOPE,
-            api,
+          bindDomEvents(
+            {
+              AppCore,
+              Router,
+              Auth,
+              state:
+                runtimeState,
+              scope:
+                SCOPE,
+              api,
 
-            handleLogout,
-            toggleSidebar,
-            toggleDropdown,
-            openDropdown,
-            closeDropdown,
-            closeSidebar,
-            closeSidebarOnMobileAfterNavigation,
-            syncSidebarState,
+              handleLogout,
+              toggleSidebar,
+              toggleDropdown,
+              openDropdown,
+              closeDropdown,
+              closeSidebar,
+              closeSidebarOnMobileAfterNavigation,
+              syncSidebarState,
 
-            getElements:
-              () => getElements(AppCore),
+              getElements:
+                () => getElements(AppCore),
 
-            isMobileViewport:
-              () => isMobileViewport(MOBILE_BREAKPOINT),
+              isMobileViewport:
+                () => isMobileViewport(MOBILE_BREAKPOINT),
 
-            getDesiredSidebarOpenState:
-              () => getDesiredSidebarOpenState(AppCore),
-          }) || null;
+              getDesiredSidebarOpenState:
+                () => getDesiredSidebarOpenState(AppCore),
+            }
+          ) || null;
       } catch (error) {
         safeWarn(
           "bindDomEvents falló.",
@@ -2432,28 +1942,30 @@ export const SidebarUI = (() => {
 
       try {
         coreEventsCleanup =
-          bindCoreEvents({
-            AppCore,
-            Router,
-            Auth,
-            state:
-              runtimeState,
-            scope:
-              SCOPE,
-            api,
+          bindCoreEvents(
+            {
+              AppCore,
+              Router,
+              Auth,
+              state:
+                runtimeState,
+              scope:
+                SCOPE,
+              api,
 
-            renderUser,
-            applyRoleVisibility,
-            syncSidebarState,
-            closeDropdown,
-            closeSidebarOnMobileAfterNavigation,
+              renderUser,
+              applyRoleVisibility,
+              syncSidebarState,
+              closeDropdown,
+              closeSidebarOnMobileAfterNavigation,
 
-            getSidebarSnapshot,
-            restoreSidebarState,
+              getSidebarSnapshot,
+              restoreSidebarState,
 
-            getElements:
-              () => getElements(AppCore),
-          }) || null;
+              getElements:
+                () => getElements(AppCore),
+            }
+          ) || null;
       } catch (error) {
         safeWarn(
           "bindCoreEvents falló.",
@@ -2724,6 +2236,7 @@ export const SidebarUI = (() => {
     }
 
     ensureRuntimeStateDefaults();
+
     sanitizeSidebarDom(
       `repair:${cleanReason}`
     );
@@ -2732,12 +2245,18 @@ export const SidebarUI = (() => {
       `repair:${cleanReason}`
     );
 
+    /*
+      Orden importante:
+      1. Usuario.
+      2. Visibilidad.
+      3. Dropdown.
+      Así roles/admin se calculan con identidad actualizada.
+    */
+    renderUser();
+    applyRoleVisibility();
     repairDropdown(
       `repair:${cleanReason}`
     );
-
-    renderUser();
-    applyRoleVisibility();
 
     if (opts.rebind === true) {
       bindEvents(
@@ -2875,15 +2394,17 @@ export const SidebarUI = (() => {
     } catch {}
 
     const result =
-      actionSetSidebarOpen({
-        AppCore,
-        open:
-          desiredOpen,
-        closeDropdown,
-        syncSidebarState,
-        reason:
-          "restore-sidebar-state",
-      });
+      actionSetSidebarOpen(
+        {
+          AppCore,
+          open:
+            desiredOpen,
+          closeDropdown,
+          syncSidebarState,
+          reason:
+            "restore-sidebar-state",
+        }
+      );
 
     scheduleRouteAndIndicator(
       "restore-sidebar-state",
@@ -3105,20 +2626,30 @@ export const SidebarUI = (() => {
     }
 
     ensureRuntimeStateDefaults();
+
     sanitizeSidebarDom("init");
 
     syncSidebarState();
+
+    /*
+      Orden crítico:
+      - user primero para que visibility lea roles/admin actuales.
+      - visibility después para ocultar/mostrar correctamente.
+      - dropdown después para reparar aria/foco sobre DOM final.
+    */
     renderUser();
     applyRoleVisibility();
     repairDropdown("init");
 
-    closeDropdown({
-      force:
-        true,
+    closeDropdown(
+      {
+        force:
+          true,
 
-      reason:
-        "init",
-    });
+        reason:
+          "init",
+      }
+    );
 
     initialized =
       true;
@@ -3178,6 +2709,13 @@ export const SidebarUI = (() => {
 
   function destroy() {
     cleanup();
+
+    try {
+      resetSidebarStateRuntime(
+        AppCore,
+        "sidebar-ui-destroy"
+      );
+    } catch {}
 
     initialized =
       false;
@@ -3279,6 +2817,9 @@ export const SidebarUI = (() => {
         }));
 
     return {
+      version:
+        SIDEBAR_UI_VERSION,
+
       initialized,
       eventsBound,
       bindingEvents,
@@ -3378,7 +2919,7 @@ export const SidebarUI = (() => {
           Boolean(elements.sidebarMenu),
 
         hasToggle:
-          Boolean(elements.toggleBtn),
+          Boolean(elements.toggleBtn || elements.sidebarToggle),
 
         hasMobileToggle:
           Boolean(elements.mobileToggleBtn),
@@ -3411,14 +2952,58 @@ export const SidebarUI = (() => {
           elements.sidebarMenu?.getAttribute?.("aria-disabled") || "",
       },
 
-      dropdown: {
-        ...safeObject(
+      dropdown:
+        safeObject(
           getDropdownSnapshot(
             AppCore,
             runtimeState
           )
         ),
-      },
+
+      user:
+        (() => {
+          try {
+            return getSidebarUserSnapshot(AppCore);
+          } catch {
+            return {};
+          }
+        })(),
+
+      visibility:
+        (() => {
+          try {
+            return getRoleVisibilitySnapshot(AppCore, isAdmin);
+          } catch {
+            return {};
+          }
+        })(),
+
+      sidebarDom:
+        (() => {
+          try {
+            return getSidebarDomSnapshot(AppCore);
+          } catch {
+            return {};
+          }
+        })(),
+
+      sidebarState:
+        (() => {
+          try {
+            return getSidebarStateSnapshot(AppCore);
+          } catch {
+            return {};
+          }
+        })(),
+
+      sidebarEvents:
+        (() => {
+          try {
+            return getSidebarEventsSnapshot(SCOPE);
+          } catch {
+            return {};
+          }
+        })(),
 
       activeRoute: {
         activeItems,
@@ -3496,13 +3081,15 @@ export const SidebarUI = (() => {
     ensureMenuInteractive("debug-indicator");
 
     const payload =
-      resolveRoutePayload({
-        reason:
-          "debug-indicator",
+      resolveRoutePayload(
+        {
+          reason:
+            "debug-indicator",
 
-        force:
-          true,
-      });
+          force:
+            true,
+        }
+      );
 
     const activeItem =
       syncActiveMenuItem(
@@ -3523,87 +3110,88 @@ export const SidebarUI = (() => {
     } =
       getElements(AppCore);
 
-    const snapshot = {
-      route:
-        payload.route,
+    const snapshot =
+      {
+        route:
+          payload.route,
 
-      browserRoute:
-        getBrowserPath(),
+        browserRoute:
+          getBrowserPath(),
 
-      hasSidebarMenu:
-        Boolean(sidebarMenu),
+        hasSidebarMenu:
+          Boolean(sidebarMenu),
 
-      hasActiveItem:
-        Boolean(activeItem),
+        hasActiveItem:
+          Boolean(activeItem),
 
-      activeRoute:
-        activeItem
-          ? normalizeRoutePath(
-              getRouteFromElement(activeItem)
-            )
-          : "",
+        activeRoute:
+          activeItem
+            ? normalizeRoutePath(
+                getRouteFromElement(activeItem)
+              )
+            : "",
 
-      activeText:
-        safeText(
-          activeItem?.textContent,
-          ""
-        ),
+        activeText:
+          safeText(
+            activeItem?.textContent,
+            ""
+          ),
 
-      indicatorReady:
-        sidebarMenu?.dataset?.indicatorReady || "",
+        indicatorReady:
+          sidebarMenu?.dataset?.indicatorReady || "",
 
-      indicatorReason:
-        sidebarMenu?.dataset?.indicatorReason || "",
+        indicatorReason:
+          sidebarMenu?.dataset?.indicatorReason || "",
 
-      indicatorRoute:
-        sidebarMenu?.dataset?.indicatorRoute || "",
+        indicatorRoute:
+          sidebarMenu?.dataset?.indicatorRoute || "",
 
-      indicatorCurrent:
-        sidebarMenu?.dataset?.indicatorCurrent || "",
+        indicatorCurrent:
+          sidebarMenu?.dataset?.indicatorCurrent || "",
 
-      variables: {
-        x:
-          sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
+        variables: {
+          x:
+            sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
 
-        y:
-          sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-y") || "",
+          y:
+            sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-y") || "",
 
-        w:
-          sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-w") || "",
+          w:
+            sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-w") || "",
 
-        h:
-          sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-h") || "",
+          h:
+            sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-h") || "",
 
-        opacity:
-          sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-opacity") || "",
-      },
+          opacity:
+            sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-opacity") || "",
+        },
 
-      menuItems:
-        getAllMenuItems().map((item) => ({
-          route:
-            normalizeRoutePath(
-              getRouteFromElement(item)
-            ),
+        menuItems:
+          getAllMenuItems().map((item) => ({
+            route:
+              normalizeRoutePath(
+                getRouteFromElement(item)
+              ),
 
-          rawRoute:
-            getRouteFromElement(item),
+            rawRoute:
+              getRouteFromElement(item),
 
-          text:
-            safeText(
-              item.textContent,
-              ""
-            ),
+            text:
+              safeText(
+                item.textContent,
+                ""
+              ),
 
-          active:
-            Boolean(
-              item.classList?.contains?.("active") ||
-                item.classList?.contains?.("is-active") ||
-                item.classList?.contains?.("router-active") ||
-                item.getAttribute?.("aria-current") === "page" ||
-                item.dataset?.active === "true"
-            ),
-        })),
-    };
+            active:
+              Boolean(
+                item.classList?.contains?.("active") ||
+                  item.classList?.contains?.("is-active") ||
+                  item.classList?.contains?.("router-active") ||
+                  item.getAttribute?.("aria-current") === "page" ||
+                  item.dataset?.active === "true"
+              ),
+          })),
+      };
 
     try {
       console.log(
@@ -3636,110 +3224,116 @@ export const SidebarUI = (() => {
      API
   ====================================================== */
 
-  const api = {
-    init,
-    destroy,
-    cleanup,
+  const api =
+    {
+      version:
+        SIDEBAR_UI_VERSION,
 
-    sync,
-    render:
+      init,
+      destroy,
+      cleanup,
+
       sync,
 
-    refresh,
-    repair,
-    scheduleRepair,
+      render:
+        sync,
 
-    bind:
+      refresh,
+      repair,
+      scheduleRepair,
+
+      bind:
+        bindEvents,
+
+      rebind:
+        rebindEvents,
+
       bindEvents,
-
-    rebind:
       rebindEvents,
 
-    bindEvents,
-    rebindEvents,
+      renderUser,
+      applyRoleVisibility,
 
-    renderUser,
-    applyRoleVisibility,
+      syncSidebarState,
+      repairSidebarState,
 
-    syncSidebarState,
-    repairSidebarState,
+      openDropdown,
+      closeDropdown,
+      toggleDropdown,
+      repairDropdown,
 
-    openDropdown,
-    closeDropdown,
-    toggleDropdown,
-    repairDropdown,
+      setSidebarOpen,
+      openSidebar,
+      closeSidebar,
+      toggleSidebar,
+      collapseSidebar,
+      expandSidebar,
 
-    setSidebarOpen,
-    openSidebar,
-    closeSidebar,
-    toggleSidebar,
-    collapseSidebar,
-    expandSidebar,
+      ensureSidebarOpenForUserMenu,
+      closeSidebarOnMobileAfterNavigation,
 
-    ensureSidebarOpenForUserMenu,
-    closeSidebarOnMobileAfterNavigation,
-
-    navigateTo,
-    navigate:
       navigateTo,
 
-    handleLogout,
+      navigate:
+        navigateTo,
 
-    updateToggleLabel:
-      () => updateToggleLabel(AppCore),
+      handleLogout,
 
-    syncRouteAndIndicator,
+      updateToggleLabel:
+        () => updateToggleLabel(AppCore),
 
-    syncIndicator:
-      (reason = "api:syncIndicator") =>
-        scheduleRouteAndIndicator(
-          reason,
-          {
-            delayMs:
-              0,
+      syncRouteAndIndicator,
 
-            force:
-              true,
-          }
-        ),
+      syncIndicator:
+        (reason = "api:syncIndicator") =>
+          scheduleRouteAndIndicator(
+            reason,
+            {
+              delayMs:
+                0,
 
-    scheduleIndicatorSync:
-      scheduleRouteAndIndicator,
+              force:
+                true,
+            }
+          ),
 
-    ensureMenuInteractive,
-    sanitizeSidebarDom,
+      scheduleIndicatorSync:
+        scheduleRouteAndIndicator,
 
-    isAdmin,
+      ensureMenuInteractive,
+      sanitizeSidebarDom,
 
-    registerModule,
-    exposeGlobalBridge,
+      isAdmin,
 
-    debug,
-    debugDropdown,
-    debugIndicator,
+      registerModule,
+      exposeGlobalBridge,
 
-    getSnapshot:
-      getSidebarSnapshot,
+      debug,
+      debugDropdown,
+      debugIndicator,
 
-    getState:
-      getSidebarSnapshot,
+      getSnapshot:
+        getSidebarSnapshot,
 
-    get initialized() {
-      return initialized;
-    },
+      getState:
+        getSidebarSnapshot,
 
-    get eventsBound() {
-      return eventsBound;
-    },
+      get initialized() {
+        return initialized;
+      },
 
-    get bindingEvents() {
-      return bindingEvents;
-    },
+      get eventsBound() {
+        return eventsBound;
+      },
 
-    get logoutInFlight() {
-      return logoutInFlight;
-    },
-  };
+      get bindingEvents() {
+        return bindingEvents;
+      },
+
+      get logoutInFlight() {
+        return logoutInFlight;
+      },
+    };
 
   return api;
 })();

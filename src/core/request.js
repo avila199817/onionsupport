@@ -2,7 +2,7 @@
    Onion SPA - Core Request
    Archivo: src/core/request.js
 
-   CORE REQUEST · API CLIENT · ENTERPRISE HARDENED · 14/10
+   CORE REQUEST · API CLIENT · ENTERPRISE HARDENED · 15/10
 
    RESPONSABILIDADES:
    - parsear respuestas HTTP
@@ -19,7 +19,7 @@
        apiClient.request(method, path, options)
 
    HARDENING EXTREMO:
-   - single emit final
+   - eventos finales controlados, lifecycle opt-in
    - timeout real con AbortController
    - timeout separado de abort manual
    - merge signals robusto
@@ -36,18 +36,17 @@
    - eventos sin tokens reales
    - compat con hooks.runSeries y registry.hooks
    - compat con registry.hooks como arrays, funciones o entradas { handler }
-   - /api/auth/me recibe Authorization si config lo marca como privado
+   - /api/auth/me, /auth/me y /me son privados y reciben Authorization
    - no ReferenceError si fetch/FormData/Blob/Headers/ReadableStream no existen
+   - no storm de app:request:start/attempt por defecto
 ========================================================= */
 
 import { config } from "./config.js";
 
 import {
-  now,
   buildUrl,
   hasValidToken,
   isPublicApiPath,
-  createAbortTimeout,
   mergeAbortSignals,
   normalizeHeaders,
   isAbortError,
@@ -65,7 +64,7 @@ import {
 ========================================================= */
 
 export const REQUEST_VERSION =
-  "14.0.0";
+  "15.0.0";
 
 const DEFAULT_METHOD =
   "GET";
@@ -331,7 +330,15 @@ function safeClone(value, fallback = null) {
   }
 }
 
-function safeIsoDate(ms = Date.now()) {
+function safeNow() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+function safeIsoDate(ms = safeNow()) {
   try {
     return new Date(ms).toISOString();
   } catch {
@@ -470,15 +477,97 @@ function getStateToken(state = {}) {
   );
 }
 
+function hashText(value = "") {
+  const text =
+    safeText(value, "");
+
+  let hash =
+    2166136261;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash +=
+      (hash << 1) +
+      (hash << 4) +
+      (hash << 7) +
+      (hash << 8) +
+      (hash << 24);
+  }
+
+  return `h${(hash >>> 0).toString(36)}`;
+}
+
+/* =========================================================
+   PATH POLICY
+========================================================= */
+
+function normalizePathForPolicy(path = "") {
+  let value =
+    safeText(path, "");
+
+  if (!value) {
+    return "/";
+  }
+
+  try {
+    const url =
+      new URL(
+        value,
+        typeof window !== "undefined"
+          ? window.location.origin
+          : "https://local.invalid"
+      );
+
+    value =
+      url.pathname || "/";
+  } catch {
+    value =
+      value.split("?")[0].split("#")[0] || "/";
+  }
+
+  value =
+    `/${value}`
+      .replace(/\/+/g, "/")
+      .replace(/\/$/, "");
+
+  if (!value) {
+    return "/";
+  }
+
+  return value.toLowerCase();
+}
+
+function isPrivateAuthMePath(path = "") {
+  const normalized =
+    normalizePathForPolicy(path);
+
+  return [
+    "/me",
+    "/api/me",
+    "/auth/me",
+    "/api/auth/me",
+  ].includes(normalized);
+}
+
+function isPublicPathForRequest(path = "") {
+  if (isPrivateAuthMePath(path)) {
+    return false;
+  }
+
+  try {
+    return Boolean(
+      isPublicApiPath(path)
+    );
+  } catch {
+    return false;
+  }
+}
+
 /* =========================================================
    REQUEST ARGUMENT NORMALIZATION
 ========================================================= */
 
 function normalizeRequestArguments(arg1, arg2 = {}, arg3 = undefined) {
-  /*
-    Firma:
-      request(method, path, options)
-  */
   if (
     typeof arg1 === "string" &&
     isKnownMethod(arg1) &&
@@ -496,10 +585,6 @@ function normalizeRequestArguments(arg1, arg2 = {}, arg3 = undefined) {
     };
   }
 
-  /*
-    Firma:
-      request(path, options)
-  */
   return {
     path:
       arg1,
@@ -1127,10 +1212,6 @@ export function buildRequestError({
   error.timeout =
     timeout === true;
 
-  /*
-    Timeout y abort manual quedan separados.
-    Si timeout=true, aborted=false para permitir retry.
-  */
   error.aborted =
     timeout === true
       ? false
@@ -1223,6 +1304,17 @@ function isRetryableMethod(method = DEFAULT_METHOD, requestConfig = {}) {
   return methods.includes(finalMethod);
 }
 
+function isNonReplayableBody(body) {
+  try {
+    return (
+      typeof ReadableStream !== "undefined" &&
+      body instanceof ReadableStream
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function shouldRetryRequest(error, requestConfig = {}) {
   const retries =
     safeNumber(
@@ -1242,6 +1334,13 @@ export function shouldRetryRequest(error, requestConfig = {}) {
     );
 
   if (!isRetryableMethod(method, requestConfig)) {
+    return false;
+  }
+
+  if (
+    isNonReplayableBody(requestConfig?.body) &&
+    requestConfig.retryUnsafeMethods !== true
+  ) {
     return false;
   }
 
@@ -1771,36 +1870,43 @@ function createAbortControllerSafe() {
 }
 
 function createTimeoutSafe(timeoutMs = 0) {
-  try {
-    if (isFunction(createAbortTimeout)) {
-      return createAbortTimeout(timeoutMs);
-    }
-  } catch {}
-
   const controller =
     createAbortControllerSafe();
+
+  const timeoutState = {
+    controller,
+    signal:
+      controller?.signal || null,
+    timeoutId:
+      null,
+    fired:
+      false,
+    clear() {
+      if (this.timeoutId) {
+        try {
+          clearTimeout(this.timeoutId);
+        } catch {}
+      }
+
+      this.timeoutId =
+        null;
+    },
+  };
 
   if (
     !controller ||
     !timeoutMs ||
     timeoutMs <= 0
   ) {
-    return {
-      controller,
-      signal:
-        controller?.signal || null,
-      timeoutId:
-        null,
-      clear() {},
-    };
+    return timeoutState;
   }
 
-  let timeoutId =
-    null;
-
   try {
-    timeoutId =
+    timeoutState.timeoutId =
       setTimeout(() => {
+        timeoutState.fired =
+          true;
+
         try {
           controller.abort("timeout");
         } catch {
@@ -1811,19 +1917,7 @@ function createTimeoutSafe(timeoutMs = 0) {
       }, timeoutMs);
   } catch {}
 
-  return {
-    controller,
-    signal:
-      controller.signal,
-    timeoutId,
-    clear() {
-      if (timeoutId) {
-        try {
-          clearTimeout(timeoutId);
-        } catch {}
-      }
-    },
-  };
+  return timeoutState;
 }
 
 function mergeSignalsSafe(signals = []) {
@@ -1834,6 +1928,12 @@ function mergeSignalsSafe(signals = []) {
   if (!cleanSignals.length) {
     return null;
   }
+
+  try {
+    if (isFunction(AbortSignal?.any)) {
+      return AbortSignal.any(cleanSignals);
+    }
+  } catch {}
 
   try {
     if (isFunction(mergeAbortSignals)) {
@@ -1949,6 +2049,102 @@ function buildFetchInit({
 }
 
 /* =========================================================
+   REQUEST URL / TELEMETRY POLICY
+========================================================= */
+
+function buildRequestUrl(path, query = null) {
+  try {
+    return buildUrl(
+      path,
+      query
+    );
+  } catch {}
+
+  const rawPath =
+    safeText(path, "/");
+
+  if (!query || !isObject(query)) {
+    return rawPath;
+  }
+
+  try {
+    const url =
+      new URL(
+        rawPath,
+        typeof window !== "undefined"
+          ? window.location.origin
+          : "https://local.invalid"
+      );
+
+    for (const [key, value] of Object.entries(query)) {
+      if (
+        value === undefined ||
+        value === null
+      ) {
+        continue;
+      }
+
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          url.searchParams.append(
+            key,
+            String(item)
+          );
+        }
+      } else {
+        url.searchParams.set(
+          key,
+          String(value)
+        );
+      }
+    }
+
+    if (/^https?:\/\//i.test(rawPath)) {
+      return url.toString();
+    }
+
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return rawPath;
+  }
+}
+
+function shouldEmitLifecycleEvent(requestConfig = {}, eventType = "") {
+  if (requestConfig.emitEvents === false) {
+    return false;
+  }
+
+  if (requestConfig.emitLifecycleEvents === true) {
+    return true;
+  }
+
+  if (eventType === "start") {
+    return requestConfig.emitStartEvent === true ||
+      config?.diagnostics?.requestLifecycleEvents === true ||
+      config?.debugRequestLifecycle === true;
+  }
+
+  if (eventType === "retry") {
+    return requestConfig.emitRetryEvents === true ||
+      config?.diagnostics?.requestRetryEvents === true ||
+      config?.debugRequestLifecycle === true;
+  }
+
+  if (eventType === "deduped") {
+    return requestConfig.emitDedupeEvents === true ||
+      config?.diagnostics?.requestDedupeEvents === true ||
+      config?.debugRequestLifecycle === true;
+  }
+
+  return false;
+}
+
+function shouldEmitFinalEvent(requestConfig = {}) {
+  return requestConfig.emitEvents !== false &&
+    requestConfig.emitFinalEvents !== false;
+}
+
+/* =========================================================
    REQUEST FACTORY
 ========================================================= */
 
@@ -2044,11 +2240,13 @@ export function createRequest({
     headers,
     payload,
     auth,
+    token,
   }) {
     return [
       method,
       url,
       auth ? "auth" : "public",
+      auth && token ? hashText(token) : "no-token",
       stableStringify(
         sanitizeHeadersForLog(headers)
       ),
@@ -2072,7 +2270,7 @@ export function createRequest({
       return Boolean(opts.auth);
     }
 
-    return !isPublicApiPath(path);
+    return !isPublicPathForRequest(path);
   }
 
   function buildBaseConfig(path, options = {}) {
@@ -2161,6 +2359,21 @@ export function createRequest({
       emitEvents:
         true,
 
+      emitFinalEvents:
+        true,
+
+      emitLifecycleEvents:
+        false,
+
+      emitStartEvent:
+        false,
+
+      emitRetryEvents:
+        false,
+
+      emitDedupeEvents:
+        false,
+
       storeError:
         true,
 
@@ -2225,12 +2438,21 @@ export function createRequest({
       merged.auth === null
     ) {
       merged.auth =
-        !isPublicApiPath(
+        !isPublicPathForRequest(
           merged.path
         );
     } else {
       merged.auth =
         Boolean(merged.auth);
+    }
+
+    if (isPrivateAuthMePath(merged.path) && merged.auth !== false) {
+      merged.auth =
+        true;
+      merged.public =
+        false;
+      merged.skipAuth =
+        false;
     }
 
     merged.timeout =
@@ -2277,6 +2499,14 @@ export function createRequest({
       safeArray(
         merged.retryMethods
       );
+
+    if (
+      isNonReplayableBody(merged.body) &&
+      merged.retryUnsafeMethods !== true
+    ) {
+      merged.retries =
+        0;
+    }
 
     return merged;
   }
@@ -2330,7 +2560,7 @@ export function createRequest({
       normalizedArgs.options;
 
     const startedAt =
-      Date.now();
+      safeNow();
 
     const requestId =
       `req_${++requestSequence}`;
@@ -2367,7 +2597,7 @@ export function createRequest({
       requestConfig.method;
 
     const url =
-      buildUrl(
+      buildRequestUrl(
         requestConfig.path,
         requestConfig.query
       );
@@ -2426,6 +2656,8 @@ export function createRequest({
               payload,
               auth:
                 requestConfig.auth,
+              token:
+                requestConfig.auth ? token : "",
             })
           : null;
 
@@ -2435,7 +2667,7 @@ export function createRequest({
     ) {
       stats.deduped += 1;
 
-      if (requestConfig.emitEvents !== false) {
+      if (shouldEmitLifecycleEvent(requestConfig, "deduped")) {
         safeEmit(
           events,
           REQUEST_EVENTS.deduped,
@@ -2446,8 +2678,6 @@ export function createRequest({
             method,
             auth:
               Boolean(requestConfig.auth),
-            dedupeKey:
-              safeRedact(dedupeKey),
           }
         );
       }
@@ -2473,7 +2703,7 @@ export function createRequest({
       );
     }
 
-    if (requestConfig.emitEvents !== false) {
+    if (shouldEmitLifecycleEvent(requestConfig, "start")) {
       safeEmit(
         events,
         REQUEST_EVENTS.start,
@@ -2503,7 +2733,7 @@ export function createRequest({
             typeof state === "object"
           ) {
             state.lastRequestAt =
-              now();
+              safeNow();
 
             state.lastRequestUrl =
               redactedUrl;
@@ -2524,14 +2754,9 @@ export function createRequest({
                     requestConfig.timeout
                   );
 
-                const timeoutSignal =
-                  timeout.signal ||
-                  timeout.controller?.signal ||
-                  null;
-
                 const signal =
                   mergeSignalsSafe([
-                    timeoutSignal,
+                    timeout.signal,
                     requestConfig.signal,
                     requestAbortController?.signal,
                   ]);
@@ -2588,7 +2813,7 @@ export function createRequest({
                     const errorData =
                       await parseResponseBody(
                         currentResponse,
-                        requestConfig.responseType
+                        DEFAULT_RESPONSE_TYPE
                       );
 
                     throw buildRequestError({
@@ -2610,19 +2835,14 @@ export function createRequest({
                     throw error;
                   }
 
-                  const timeoutReason =
-                    String(
-                      timeoutSignal?.reason ||
-                        timeout.controller?.signal?.reason ||
-                        ""
-                    ).toLowerCase();
-
                   const timeoutAborted =
                     Boolean(
-                      timeoutSignal?.aborted === true &&
+                      timeout.fired === true ||
                       (
-                        timeoutReason.includes("timeout") ||
-                        timeoutReason === ""
+                        timeout.signal?.aborted === true &&
+                        String(timeout.signal?.reason || "")
+                          .toLowerCase()
+                          .includes("timeout")
                       )
                     );
 
@@ -2639,8 +2859,8 @@ export function createRequest({
                     url,
                     method,
                     timeout:
-                      isProbablyTimeoutError(error) ||
-                      timeoutAborted,
+                      timeoutAborted ||
+                      isProbablyTimeoutError(error),
                     aborted:
                       !timeoutAborted &&
                       (
@@ -2658,17 +2878,13 @@ export function createRequest({
                   try {
                     timeout.clear?.();
                   } catch {}
-
-                  try {
-                    if (timeout.timeoutId) {
-                      clearTimeout(timeout.timeoutId);
-                    }
-                  } catch {}
                 }
               },
               {
                 ...requestConfig,
                 method,
+                body:
+                  payload,
                 retryDelay:
                   requestConfig.retryDelay,
                 retryMaxDelay:
@@ -2677,7 +2893,7 @@ export function createRequest({
                   (retryMeta) => {
                     stats.retry += 1;
 
-                    if (requestConfig.emitEvents === false) {
+                    if (!shouldEmitLifecycleEvent(requestConfig, "retry")) {
                       return;
                     }
 
@@ -2721,7 +2937,7 @@ export function createRequest({
           if (requestConfig.raw === true) {
             stats.success += 1;
 
-            if (requestConfig.emitEvents !== false) {
+            if (shouldEmitFinalEvent(requestConfig)) {
               safeEmit(
                 events,
                 REQUEST_EVENTS.success,
@@ -2734,7 +2950,7 @@ export function createRequest({
                     response.status,
                   attempts,
                   durationMs:
-                    Date.now() - startedAt,
+                    safeNow() - startedAt,
                   raw:
                     true,
                 }
@@ -2797,7 +3013,7 @@ export function createRequest({
 
           stats.success += 1;
 
-          if (requestConfig.emitEvents !== false) {
+          if (shouldEmitFinalEvent(requestConfig)) {
             safeEmit(
               events,
               REQUEST_EVENTS.success,
@@ -2810,7 +3026,7 @@ export function createRequest({
                   response.status,
                 attempts,
                 durationMs:
-                  Date.now() - startedAt,
+                  safeNow() - startedAt,
               }
             );
           }
@@ -2844,7 +3060,7 @@ export function createRequest({
             redactedUrl;
 
           normalized.durationMs =
-            Date.now() - startedAt;
+            safeNow() - startedAt;
 
           normalized.attempts =
             normalized.attempts || attempts;
@@ -2921,7 +3137,7 @@ export function createRequest({
 
           if (
             !silent &&
-            requestConfig.emitEvents !== false
+            shouldEmitFinalEvent(requestConfig)
           ) {
             safeEmit(
               events,
@@ -3039,25 +3255,30 @@ export function createRequest({
 
       stats.cleared += count;
 
-      safeEmit(
-        events,
-        REQUEST_EVENTS.clearInFlight,
-        {
-          count,
-          abort:
-            opts.abort === true,
-          reason:
-            opts.reason || "clearInFlight",
-          at:
-            safeIsoDate(),
-        }
-      );
+      if (opts.emitEvents !== false) {
+        safeEmit(
+          events,
+          REQUEST_EVENTS.clearInFlight,
+          {
+            count,
+            abort:
+              opts.abort === true,
+            reason:
+              opts.reason || "clearInFlight",
+            at:
+              safeIsoDate(),
+          }
+        );
+      }
 
       return count;
     };
 
   request.abortInFlight =
-    function abortInFlight(reason = "abortInFlight") {
+    function abortInFlight(reason = "abortInFlight", options = {}) {
+      const opts =
+        safeObject(options);
+
       let count = 0;
 
       for (const controller of inFlightControllers.values()) {
@@ -3067,16 +3288,18 @@ export function createRequest({
         } catch {}
       }
 
-      safeEmit(
-        events,
-        REQUEST_EVENTS.abort,
-        {
-          count,
-          reason,
-          at:
-            safeIsoDate(),
-        }
-      );
+      if (opts.emitEvents !== false) {
+        safeEmit(
+          events,
+          REQUEST_EVENTS.abort,
+          {
+            count,
+            reason,
+            at:
+              safeIsoDate(),
+          }
+        );
+      }
 
       return count;
     };
@@ -3246,8 +3469,8 @@ export function createApiClient(request) {
       return request.clearInFlight?.(options) || 0;
     },
 
-    abortInFlight(reason = "abortInFlight") {
-      return request.abortInFlight?.(reason) || 0;
+    abortInFlight(reason = "abortInFlight", options = {}) {
+      return request.abortInFlight?.(reason, options) || 0;
     },
   };
 }

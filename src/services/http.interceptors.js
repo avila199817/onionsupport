@@ -3,7 +3,7 @@
    Archivo: src/services/http.interceptors.js
 
    ONION SUPPORT · HTTP INTERCEPTORS
-   FIFO STABLE · PRIORITY SAFE · FAIL OPEN · TIMEOUT SAFE · 14/10
+   FIFO STABLE · PRIORITY SAFE · FAIL OPEN · TIMEOUT SAFE · 15/10
 
    Responsabilidades:
    - Registrar interceptores request / response / error.
@@ -48,7 +48,7 @@ import {
 ========================================================= */
 
 export const INTERCEPTORS_VERSION =
-  "14.0.0";
+  "15.0.0";
 
 const INTERCEPTOR_TYPES =
   Object.freeze([
@@ -62,6 +62,9 @@ const DEFAULT_TIMEOUT_MS =
 
 const MAX_RECENT =
   80;
+
+const MAX_BUCKET_SIZE =
+  250;
 
 const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
@@ -372,6 +375,9 @@ function createMeta() {
     onceRemoved:
       0,
 
+    rejectedRegisters:
+      0,
+
     lastRunAt:
       "",
 
@@ -437,6 +443,9 @@ function ensureState(interceptors) {
     state.meta.recent =
       [];
   }
+
+  state.meta.version =
+    INTERCEPTORS_VERSION;
 
   return state;
 }
@@ -568,6 +577,31 @@ function recordSkipped(interceptors, type = "") {
   );
 
   return true;
+}
+
+function recordRejectedRegister(interceptors, type = "", reason = "") {
+  const state =
+    ensureState(interceptors);
+
+  state.meta.rejectedRegisters =
+    toNonNegativeInt(
+      state.meta.rejectedRegisters,
+      0
+    ) + 1;
+
+  pushRecent(
+    state,
+    {
+      event:
+        "register:rejected",
+
+      type,
+
+      reason,
+    }
+  );
+
+  return false;
 }
 
 /* =========================================================
@@ -995,20 +1029,41 @@ function registerInterceptor(interceptors, type, handlerOrEntry, options = {}) {
   const opts =
     normalizedInput.options;
 
+  const state =
+    ensureState(interceptors);
+
   if (!isFn(fn)) {
+    recordRejectedRegister(
+      state,
+      cleanType,
+      "handler-missing"
+    );
+
     throw new Error(
       `use${cleanType[0].toUpperCase()}${cleanType.slice(1)}(fn) requiere una función`
     );
   }
-
-  const state =
-    ensureState(interceptors);
 
   const bucket =
     ensureBucket(
       state,
       cleanType
     );
+
+  if (
+    bucket.length >= MAX_BUCKET_SIZE &&
+    opts.force !== true
+  ) {
+    recordRejectedRegister(
+      state,
+      cleanType,
+      "max-bucket-size"
+    );
+
+    throw new Error(
+      `Demasiados interceptores registrados para ${cleanType}.`
+    );
+  }
 
   const id =
     safeText(opts.id, "") ||
@@ -1281,7 +1336,9 @@ export function ejectInterceptor(interceptors, type, ref) {
           normalizeType(type),
 
         ref:
-          safeText(ref, "[handler]"),
+          typeof ref === "function"
+            ? "[handler]"
+            : safeText(ref, "[handler]"),
       }
     );
   }

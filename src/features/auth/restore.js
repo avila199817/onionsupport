@@ -2,7 +2,7 @@
    Onion SPA - Auth Restore
    Archivo: src/features/auth/restore.js
 
-   AUTH RESTORE · EXTREME PRO SYSTEM · GOD MODE v11
+   AUTH RESTORE · EXTREME PRO SYSTEM · 15/10
    TOKEN → /ME FIRST · REFRESH CONTEXT LOCKED · NO GHOST AUTH
 
    RESPONSABILIDADES:
@@ -34,7 +34,9 @@
    - no borrar sesión local válida ante error transitorio de red/API
    - no reutilizar usuario antiguo tras refresh token-only
    - no marcar authenticated sin token + user válidos
-   - no emitir eventos restore desde login
+   - /api/auth/me privado con Authorization
+   - /api/auth/me sin auto-refresh interno duplicado
+   - refresh público sin auto-refresh recursivo
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -53,6 +55,7 @@ import {
   extractUser,
   extractRefreshToken,
   normalizeSessionPayload,
+  normalizeUser,
 } from "./normalize.js";
 
 import {
@@ -72,11 +75,14 @@ import {
    VERSION
 ========================================================= */
 
-const RESTORE_VERSION =
-  "11.0.0-god-mode";
+export const RESTORE_VERSION =
+  "15.0.0-god-mode";
 
 const RESTORE_SOURCE =
   "auth.restore";
+
+const BACKEND_ORIGIN =
+  "https://api.onionit.net";
 
 /* =========================================================
    INTERNAL RUNTIME SESSION
@@ -158,6 +164,8 @@ const RESET_TOKEN_PARAM_NAMES =
     "passwordResetToken",
     "reset_token",
     "password_reset_token",
+    "confirmToken",
+    "confirm_token",
     "code",
     "t",
   ]);
@@ -171,8 +179,12 @@ const PROTECTED_PUBLIC_TOKEN_ROUTES =
       path:
         ACTIVATION_PATH,
 
-      scrubFlag:
-        "scrubbedActivationToken",
+      scrubFlags:
+        [
+          "scrubbedActivationToken",
+          "activationTokenScrubbed",
+          "scrubbedActivateAccountToken",
+        ],
 
       windowKey:
         "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
@@ -205,8 +217,14 @@ const PROTECTED_PUBLIC_TOKEN_ROUTES =
       path:
         RESET_CONFIRM_PATH,
 
-      scrubFlag:
-        "scrubbedResetToken",
+      scrubFlags:
+        [
+          "scrubbedResetToken",
+          "resetTokenScrubbed",
+          "scrubbedResetPasswordToken",
+          "scrubbedResetConfirmToken",
+          "scrubbedPasswordResetToken",
+        ],
 
       windowKey:
         "__ONION_RESET_CONFIRM_INITIAL_URL__",
@@ -281,6 +299,75 @@ const TRANSIENT_STATUS_CODES =
     504,
   ]);
 
+const TOKEN_KEYS =
+  Object.freeze([
+    "token",
+    "accessToken",
+    "access_token",
+    "authToken",
+    "auth_token",
+    "jwt",
+    "bearer",
+    "idToken",
+    "id_token",
+  ]);
+
+const REFRESH_TOKEN_KEYS =
+  Object.freeze([
+    "refreshToken",
+    "refresh_token",
+  ]);
+
+const USER_KEYS =
+  Object.freeze([
+    "user",
+    "usuario",
+    "me",
+    "account",
+    "profile",
+    "currentUser",
+    "current_user",
+  ]);
+
+const SESSION_KEYS =
+  Object.freeze([
+    "session",
+    "sessionData",
+    "authSession",
+    "auth_session",
+  ]);
+
+const SESSION_ID_KEYS =
+  Object.freeze([
+    "sessionId",
+    "session_id",
+    "sid",
+    "id",
+  ]);
+
+const SESSION_USER_ID_KEYS =
+  Object.freeze([
+    "sessionUserId",
+    "session_user_id",
+    "userId",
+    "user_id",
+    "uid",
+    "sub",
+  ]);
+
+const AUTH_OBJECT_KEYS =
+  Object.freeze([
+    "data",
+    "payload",
+    "result",
+    "body",
+    "response",
+    "auth",
+    "authData",
+    "session",
+    "sessionData",
+  ]);
+
 /* =========================================================
    BASICS
 ========================================================= */
@@ -310,6 +397,12 @@ function safeObject(value, fallback = {}) {
     : fallback;
 }
 
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
 function safeNumber(value, fallback = 0) {
   const numeric =
     Number(value);
@@ -331,6 +424,13 @@ function safeText(value, fallback = "") {
     String(value).trim();
 
   return text || fallback;
+}
+
+function safeLower(value = "", fallback = "") {
+  return safeText(
+    value,
+    fallback
+  ).toLowerCase();
 }
 
 function safeBool(value, fallback = false) {
@@ -356,6 +456,8 @@ function safeBool(value, fallback = false) {
         "sí",
         "ok",
         "on",
+        "enabled",
+        "active",
       ].includes(key)
     ) {
       return true;
@@ -367,6 +469,8 @@ function safeBool(value, fallback = false) {
         "0",
         "no",
         "off",
+        "disabled",
+        "inactive",
       ].includes(key)
     ) {
       return false;
@@ -524,7 +628,7 @@ function warn(...args) {
 function redactRouteValue(value = "") {
   return safeText(value, "")
     .replace(
-      /([?&#](?:token|activationToken|activateToken|activation_token|activate_token|resetToken|passwordResetToken|reset_token|password_reset_token|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
+      /([?&#](?:token|activationToken|activateToken|activation_token|activate_token|resetToken|passwordResetToken|reset_token|password_reset_token|confirmToken|confirm_token|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
       "$1***"
     )
     .replace(
@@ -538,6 +642,10 @@ function redactRouteValue(value = "") {
     .replace(
       /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
       "$1***"
+    )
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
     );
 }
 
@@ -567,6 +675,11 @@ function sanitizeUserForEvent(user = null) {
     "mfaSecret",
     "reset",
     "activation",
+    "_rid",
+    "_self",
+    "_etag",
+    "_attachments",
+    "_ts",
   ]) {
     delete output[key];
   }
@@ -644,6 +757,24 @@ function sanitizeEventPayload(payload = {}) {
   return output;
 }
 
+function shouldEmitRestoreEvent(eventName = "", options = {}) {
+  const opts =
+    safeObject(options);
+
+  if (opts.emitEvents === false) {
+    return false;
+  }
+
+  if (
+    opts.silent === true &&
+    opts.emitSilentEvents !== true
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 function emit(eventName = "", payload = {}, options = {}) {
   const name =
     safeText(eventName, "");
@@ -652,8 +783,23 @@ function emit(eventName = "", payload = {}, options = {}) {
     return false;
   }
 
+  if (!shouldEmitRestoreEvent(name, options)) {
+    return false;
+  }
+
   const cleanPayload =
-    sanitizeEventPayload(payload);
+    sanitizeEventPayload({
+      source:
+        RESTORE_SOURCE,
+
+      version:
+        RESTORE_VERSION,
+
+      at:
+        safeIsoDate(),
+
+      ...safeObject(payload),
+    });
 
   let busAvailable =
     false;
@@ -676,10 +822,6 @@ function emit(eventName = "", payload = {}, options = {}) {
     }
   } catch {}
 
-  /*
-    Anti-duplicación:
-    si hay bus interno, no duplicamos a document salvo force.
-  */
   if (
     options.document === true ||
     (!busAvailable && isBrowser())
@@ -754,7 +896,7 @@ function buildErrorPayload(error = null) {
   };
 }
 
-function emitError(eventName, error, extra = {}) {
+function emitError(eventName, error, extra = {}, options = {}) {
   return emit(
     eventName,
     {
@@ -765,13 +907,55 @@ function emitError(eventName, error, extra = {}) {
         extractMessage(error),
       source:
         RESTORE_SOURCE,
-    }
+    },
+    options
   );
 }
 
 /* =========================================================
    API TRANSPORT
 ========================================================= */
+
+function resolveApiBase() {
+  const config =
+    safeObject(AppCore?.config);
+
+  return safeText(
+    config.apiBase ||
+      config.apiUrl ||
+      config.baseUrl ||
+      config.backendUrl ||
+      config.publicApiOrigin ||
+      BACKEND_ORIGIN,
+    BACKEND_ORIGIN
+  ).replace(/\/+$/g, "");
+}
+
+function buildAbsoluteApiUrl(path = "") {
+  const raw =
+    safeText(path, "/");
+
+  if (/^https?:\/\//i.test(raw)) {
+    return raw;
+  }
+
+  const base =
+    resolveApiBase();
+
+  const cleanPath =
+    raw.startsWith("/")
+      ? raw
+      : `/${raw}`;
+
+  if (
+    base.endsWith("/api") &&
+    cleanPath.startsWith("/api/")
+  ) {
+    return `${base}${cleanPath.slice(4)}`;
+  }
+
+  return `${base}${cleanPath}`;
+}
 
 function getHttpService() {
   return (
@@ -792,17 +976,74 @@ function getApiClient() {
     AppCore?.services?.api ||
     AppCore?.services?.http ||
     AppCore?.http ||
+    AppCore?.request ||
     null
   );
 }
 
 function resolveEndpoint(key, fallback = "") {
-  return safeText(
-    AUTH_ENDPOINTS?.[key] ||
-      AppCore?.config?.auth?.endpoints?.[key] ||
-      AppCore?.config?.endpoints?.auth?.[key],
-    fallback
-  );
+  const endpoint =
+    safeText(
+      AUTH_ENDPOINTS?.[key] ||
+        AUTH_ENDPOINTS?.auth?.[key] ||
+        AppCore?.config?.auth?.endpoints?.[key] ||
+        AppCore?.config?.endpoints?.auth?.[key],
+      fallback
+    );
+
+  if (/^https?:\/\//i.test(endpoint)) {
+    return endpoint;
+  }
+
+  if (endpoint.startsWith("/api/")) {
+    return endpoint;
+  }
+
+  if (endpoint.startsWith("/auth/")) {
+    return `/api${endpoint}`;
+  }
+
+  if (endpoint.startsWith("/")) {
+    return `/api/auth${endpoint}`;
+  }
+
+  return `/api/auth/${endpoint}`;
+}
+
+function buildAuthHeaders(options = {}) {
+  const opts =
+    safeObject(options);
+
+  const headers = {
+    Accept:
+      "application/json",
+    "X-Onion-Client":
+      "onion-spa",
+    ...(safeObject(opts.headers)),
+  };
+
+  if (
+    opts.auth === false ||
+    opts.skipAuth === true ||
+    opts.public === true
+  ) {
+    return headers;
+  }
+
+  const token =
+    opts.token ||
+    getCurrentToken();
+
+  if (
+    hasUsableToken(token) &&
+    !headers.Authorization &&
+    !headers.authorization
+  ) {
+    headers.Authorization =
+      `Bearer ${token}`;
+  }
+
+  return headers;
 }
 
 async function requestWithClient(client, method = "GET", path = "", body = null, options = {}) {
@@ -822,13 +1063,39 @@ async function requestWithClient(client, method = "GET", path = "", body = null,
     );
   }
 
+  const opts = {
+    ...safeObject(options),
+
+    method:
+      upperMethod,
+
+    headers:
+      buildAuthHeaders(options),
+
+    noStore:
+      true,
+
+    cache:
+      "no-store",
+  };
+
+  if (
+    body !== undefined &&
+    body !== null &&
+    upperMethod !== "GET" &&
+    upperMethod !== "HEAD"
+  ) {
+    opts.body =
+      body;
+  }
+
   if (
     upperMethod === "GET" &&
     isFunction(client.get)
   ) {
     return client.get(
       path,
-      options
+      opts
     );
   }
 
@@ -839,35 +1106,66 @@ async function requestWithClient(client, method = "GET", path = "", body = null,
     return client.post(
       path,
       body,
-      options
+      opts
+    );
+  }
+
+  if (
+    upperMethod === "PUT" &&
+    isFunction(client.put)
+  ) {
+    return client.put(
+      path,
+      body,
+      opts
+    );
+  }
+
+  if (
+    upperMethod === "PATCH" &&
+    isFunction(client.patch)
+  ) {
+    return client.patch(
+      path,
+      body,
+      opts
+    );
+  }
+
+  if (
+    upperMethod === "DELETE" &&
+    isFunction(client.delete)
+  ) {
+    return client.delete(
+      path,
+      opts
     );
   }
 
   if (isFunction(client.request)) {
     try {
       return await client.request(
+        upperMethod,
         path,
-        {
-          ...options,
-          method:
-            upperMethod,
-          ...(upperMethod === "GET" ? {} : { body }),
-        }
+        opts
       );
-    } catch (error) {
+    } catch (firstError) {
       try {
         return await client.request(
-          upperMethod,
           path,
-          {
-            ...options,
-            ...(upperMethod === "GET" ? {} : { body }),
-          }
+          opts
         );
       } catch {
-        throw error;
+        throw firstError;
       }
     }
+  }
+
+  if (isFunction(client)) {
+    return client(
+      path,
+      opts
+    );
   }
 
   throw createRestoreError(
@@ -881,13 +1179,165 @@ async function requestWithClient(client, method = "GET", path = "", body = null,
   );
 }
 
-async function apiGet(path, options = {}) {
+async function requestWithFetch(method = "GET", path = "", body = null, options = {}) {
+  if (
+    !isBrowser() ||
+    !isFunction(fetch)
+  ) {
+    throw createRestoreError(
+      "Fetch API no disponible.",
+      {
+        status:
+          500,
+        code:
+          "FETCH_UNAVAILABLE",
+      }
+    );
+  }
+
+  const upperMethod =
+    safeText(method, "GET")
+      .toUpperCase();
+
+  const url =
+    buildAbsoluteApiUrl(path);
+
+  const headers =
+    buildAuthHeaders(options);
+
+  const hasBody =
+    body !== undefined &&
+    body !== null &&
+    upperMethod !== "GET" &&
+    upperMethod !== "HEAD";
+
+  if (
+    hasBody &&
+    typeof FormData !== "undefined" &&
+    !(body instanceof FormData) &&
+    !headers["Content-Type"] &&
+    !headers["content-type"]
+  ) {
+    headers["Content-Type"] =
+      "application/json";
+  }
+
+  const response =
+    await fetch(url, {
+      method:
+        upperMethod,
+
+      credentials:
+        options.credentials || "include",
+
+      cache:
+        "no-store",
+
+      headers,
+
+      signal:
+        options.signal || undefined,
+
+      body:
+        hasBody
+          ? typeof FormData !== "undefined" && body instanceof FormData
+            ? body
+            : JSON.stringify(body)
+          : undefined,
+    });
+
+  const contentType =
+    response.headers?.get?.("content-type") || "";
+
+  let payload =
+    null;
+
+  if (contentType.includes("application/json")) {
+    try {
+      payload =
+        await response.json();
+    } catch {
+      payload =
+        null;
+    }
+  } else {
+    try {
+      payload =
+        await response.text();
+    } catch {
+      payload =
+        "";
+    }
+  }
+
+  if (!response.ok) {
+    const error =
+      createRestoreError(
+        safeText(
+          payload?.message ||
+            payload?.error ||
+            response.statusText,
+          `HTTP ${response.status}`
+        ),
+        {
+          status:
+            response.status,
+          code:
+            payload?.code ||
+            payload?.error ||
+            (
+              response.status === 401
+                ? "UNAUTHORIZED"
+                : response.status === 403
+                  ? "FORBIDDEN"
+                  : "AUTH_API_ERROR"
+            ),
+          response,
+        }
+      );
+
+    error.data =
+      payload;
+
+    throw error;
+  }
+
+  return payload;
+}
+
+async function authApiRequest(method = "GET", path = "", body = null, options = {}) {
   const client =
     getApiClient() ||
     getHttpService();
 
-  return requestWithClient(
-    client,
+  try {
+    return await requestWithClient(
+      client,
+      method,
+      path,
+      body,
+      options
+    );
+  } catch (coreError) {
+    if (
+      options.noFetchFallback === true ||
+      coreError?.name === "AbortError" ||
+      coreError?.aborted === true
+    ) {
+      throw coreError;
+    }
+
+    return requestWithFetch(
+      method,
+      path,
+      body,
+      options
+    );
+  }
+}
+
+async function apiGet(path, options = {}) {
+  return authApiRequest(
     "GET",
     path,
     null,
@@ -904,18 +1354,15 @@ async function apiGet(path, options = {}) {
         false,
       dedupe:
         false,
+      _skipAuthRefresh:
+        true,
       ...safeObject(options),
     }
   );
 }
 
 async function apiPost(path, body = {}, options = {}) {
-  const client =
-    getApiClient() ||
-    getHttpService();
-
-  return requestWithClient(
-    client,
+  return authApiRequest(
     "POST",
     path,
     body,
@@ -943,20 +1390,40 @@ async function apiPost(path, body = {}, options = {}) {
    SESSION VALIDATION
 ========================================================= */
 
+function stripBearer(token = "") {
+  return safeText(token, "")
+    .replace(/^Bearer\s+/i, "")
+    .trim();
+}
+
 function hasUsableToken(token = "") {
   const value =
-    safeText(token, "");
+    stripBearer(token);
 
   if (!value) {
     return false;
   }
 
+  const lower =
+    value.toLowerCase();
+
   if (
-    value === "null" ||
-    value === "undefined" ||
-    value === "false" ||
-    value === "[object Object]"
+    [
+      "null",
+      "undefined",
+      "false",
+      "true",
+      "nan",
+      "none",
+      "[object object]",
+      "{}",
+      "[]",
+    ].includes(lower)
   ) {
+    return false;
+  }
+
+  if (/[\s\r\n\t]/.test(value)) {
     return false;
   }
 
@@ -977,14 +1444,14 @@ function isUserActive(user = null) {
   }
 
   const status =
-    safeText(
+    safeLower(
       user.status ||
         user.estado ||
         user.state ||
         user.accountStatus ||
         "",
       ""
-    ).toLowerCase();
+    );
 
   if (
     [
@@ -994,6 +1461,12 @@ function isUserActive(user = null) {
       "blocked",
       "suspended",
       "banned",
+      "revoked",
+      "desactivado",
+      "inactivo",
+      "eliminado",
+      "bloqueado",
+      "suspendido",
     ].includes(status)
   ) {
     return false;
@@ -1005,7 +1478,10 @@ function isUserActive(user = null) {
     user.deleted === true ||
     user.isDeleted === true ||
     user.blocked === true ||
-    user.isBlocked === true
+    user.isBlocked === true ||
+    user.banned === true ||
+    user.suspended === true ||
+    user.revoked === true
   ) {
     return false;
   }
@@ -1031,6 +1507,28 @@ function isUserActive(user = null) {
   );
 }
 
+function normalizeUserForRestore(user = null) {
+  if (!isPlainObject(user)) {
+    return null;
+  }
+
+  try {
+    const normalized =
+      normalizeUser?.(user);
+
+    if (
+      normalized &&
+      hasUsableUser(normalized)
+    ) {
+      return normalized;
+    }
+  } catch {}
+
+  return hasUsableUser(user)
+    ? user
+    : null;
+}
+
 function hasUsableUser(user = {}) {
   if (
     !isPlainObject(user) ||
@@ -1053,7 +1551,9 @@ function hasUsableUser(user = {}) {
       safeText(user.mail, "") ||
       safeText(user.phone, "") ||
       safeText(user.telefono, "") ||
-      safeText(user.mobile, "")
+      safeText(user.mobile, "") ||
+      safeText(user.displayName, "") ||
+      safeText(user.name, "")
   );
 }
 
@@ -1061,16 +1561,16 @@ function getCurrentToken() {
   const state =
     getState();
 
-  return safeText(
-    first(
-      state.token,
-      state.accessToken,
-      state.access_token,
-      state.session?.token,
-      state.session?.accessToken,
-      state.session?.access_token
-    ),
-    ""
+  return firstText(
+    state.token,
+    state.accessToken,
+    state.access_token,
+    state.session?.token,
+    state.session?.accessToken,
+    state.session?.access_token,
+    state.sessionData?.token,
+    state.sessionData?.accessToken,
+    state.sessionData?.access_token
   );
 }
 
@@ -1078,13 +1578,16 @@ function getCurrentUser() {
   const state =
     getState();
 
-  return (
+  return normalizeUserForRestore(
     state.user ||
-    state.currentUser ||
-    state.authUser ||
-    state.sessionUser ||
-    state.session?.user ||
-    null
+      state.currentUser ||
+      state.authUser ||
+      state.sessionUser ||
+      state.session?.user ||
+      state.session?.usuario ||
+      state.sessionData?.user ||
+      state.sessionData?.usuario ||
+      null
   );
 }
 
@@ -1124,8 +1627,23 @@ function createRestoreError(
   error.response =
     response;
 
-  error.raw =
-    response;
+  try {
+    Object.defineProperty(
+      error,
+      "raw",
+      {
+        value:
+          response,
+        enumerable:
+          false,
+        configurable:
+          true,
+      }
+    );
+  } catch {
+    error.raw =
+      response;
+  }
 
   return error;
 }
@@ -1133,6 +1651,102 @@ function createRestoreError(
 /* =========================================================
    RESPONSE NORMALIZATION
 ========================================================= */
+
+function collectAuthObjects(raw = {}) {
+  const output =
+    [];
+
+  const seen =
+    new Set();
+
+  const queue =
+    [raw];
+
+  let guard =
+    0;
+
+  while (
+    queue.length &&
+    guard < 120
+  ) {
+    guard += 1;
+
+    const current =
+      queue.shift();
+
+    if (
+      !isPlainObject(current) ||
+      seen.has(current)
+    ) {
+      continue;
+    }
+
+    seen.add(current);
+    output.push(current);
+
+    for (const key of AUTH_OBJECT_KEYS) {
+      const nested =
+        current[key];
+
+      if (isPlainObject(nested)) {
+        queue.push(nested);
+      }
+    }
+
+    if (isPlainObject(current.response?.data)) {
+      queue.push(current.response.data);
+    }
+
+    if (isPlainObject(current.data?.auth)) {
+      queue.push(current.data.auth);
+    }
+
+    if (isPlainObject(current.data?.session)) {
+      queue.push(current.data.session);
+    }
+  }
+
+  return output;
+}
+
+function pickValueFromObjects(objects = [], keys = []) {
+  for (const object of objects) {
+    for (const key of keys) {
+      if (
+        object &&
+        object[key] !== null &&
+        object[key] !== undefined &&
+        object[key] !== ""
+      ) {
+        return object[key];
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function pickTextFromObjects(objects = [], keys = []) {
+  return safeText(
+    pickValueFromObjects(
+      objects,
+      keys
+    ),
+    ""
+  );
+}
+
+function pickObjectFromObjects(objects = [], keys = []) {
+  for (const object of objects) {
+    for (const key of keys) {
+      if (isPlainObject(object?.[key])) {
+        return object[key];
+      }
+    }
+  }
+
+  return null;
+}
 
 function getResponseNodes(response = null) {
   const raw =
@@ -1382,6 +1996,150 @@ function isExplicitAuthFailure(response = null) {
   );
 }
 
+function extractUserFallback(response = null) {
+  const objects =
+    collectAuthObjects(response);
+
+  const direct =
+    normalizeUserForRestore(
+      extractUser(response)
+    );
+
+  if (direct) {
+    return direct;
+  }
+
+  const candidate =
+    pickObjectFromObjects(
+      objects,
+      USER_KEYS
+    );
+
+  return normalizeUserForRestore(candidate);
+}
+
+function extractTokenFallback(response = null) {
+  const imported =
+    safeText(
+      extractToken(response),
+      ""
+    );
+
+  if (hasUsableToken(imported)) {
+    return imported;
+  }
+
+  return pickTextFromObjects(
+    collectAuthObjects(response),
+    TOKEN_KEYS
+  );
+}
+
+function extractRefreshTokenFallback(response = null) {
+  const imported =
+    safeText(
+      extractRefreshToken(response),
+      ""
+    );
+
+  if (imported) {
+    return imported;
+  }
+
+  return pickTextFromObjects(
+    collectAuthObjects(response),
+    REFRESH_TOKEN_KEYS
+  );
+}
+
+function normalizeSessionPayloadFallback(response = null) {
+  try {
+    const normalized =
+      normalizeSessionPayload(response);
+
+    if (isPlainObject(normalized)) {
+      return normalized;
+    }
+  } catch {}
+
+  const objects =
+    collectAuthObjects(response);
+
+  const session =
+    pickObjectFromObjects(
+      objects,
+      SESSION_KEYS
+    ) || {};
+
+  const sessionId =
+    pickTextFromObjects(
+      objects,
+      SESSION_ID_KEYS
+    );
+
+  const sessionUserId =
+    pickTextFromObjects(
+      objects,
+      SESSION_USER_ID_KEYS
+    );
+
+  if (
+    !Object.keys(session).length &&
+    !sessionId &&
+    !sessionUserId
+  ) {
+    return null;
+  }
+
+  return {
+    ...session,
+
+    sessionId:
+      session.sessionId ||
+      session.session_id ||
+      session.sid ||
+      session.id ||
+      sessionId ||
+      null,
+
+    session_id:
+      session.session_id ||
+      session.sessionId ||
+      session.sid ||
+      session.id ||
+      sessionId ||
+      null,
+
+    sessionUserId:
+      session.sessionUserId ||
+      session.session_user_id ||
+      session.userId ||
+      session.user_id ||
+      sessionUserId ||
+      null,
+
+    session_user_id:
+      session.session_user_id ||
+      session.sessionUserId ||
+      session.userId ||
+      session.user_id ||
+      sessionUserId ||
+      null,
+
+    userId:
+      session.userId ||
+      session.user_id ||
+      sessionUserId ||
+      null,
+
+    user_id:
+      session.user_id ||
+      session.userId ||
+      sessionUserId ||
+      null,
+  };
+}
+
 function normalizeAuthResponse(response = null) {
   if (isExplicitAuthFailure(response)) {
     return {
@@ -1417,21 +2175,21 @@ function normalizeAuthResponse(response = null) {
 
   const token =
     safeText(
-      extractToken(response),
+      extractTokenFallback(response),
       ""
     );
 
   const user =
-    extractUser(response);
+    extractUserFallback(response);
 
   const refreshToken =
     safeText(
-      extractRefreshToken(response),
+      extractRefreshTokenFallback(response),
       ""
     );
 
   const sessionData =
-    normalizeSessionPayload(response);
+    normalizeSessionPayloadFallback(response);
 
   const hasToken =
     hasUsableToken(token);
@@ -1994,8 +2752,15 @@ function isHistoryStateFlagEnabled(flag = "") {
 }
 
 function isTechnicalTokenScrubbed(routeConfig) {
-  return isHistoryStateFlagEnabled(
-    routeConfig?.scrubFlag || ""
+  const flags =
+    Array.isArray(routeConfig?.scrubFlags)
+      ? routeConfig.scrubFlags
+      : [
+          routeConfig?.scrubFlag,
+        ].filter(Boolean);
+
+  return flags.some((flag) =>
+    isHistoryStateFlagEnabled(flag)
   );
 }
 
@@ -2284,6 +3049,8 @@ function clearSessionLocalProtected({
     {
       forceUnauthenticated:
         true,
+      source:
+        `${RESTORE_SOURCE}:clear-protected`,
     }
   );
 
@@ -2303,7 +3070,8 @@ function clearSessionLocalProtected({
         ctx.publicPath,
       source:
         RESTORE_SOURCE,
-    }
+    },
+    options
   );
 
   return true;
@@ -2445,26 +3213,30 @@ function getSafeSessionSnapshot() {
     getState();
 
   const token =
-    safeText(
-      snapshot?.token ||
-        state.token ||
-        state.accessToken ||
-        state.access_token ||
-        state.session?.token ||
-        state.session?.accessToken ||
-        state.session?.access_token ||
-        "",
-      ""
+    firstText(
+      snapshot?.token,
+      snapshot?.accessToken,
+      state.token,
+      state.accessToken,
+      state.access_token,
+      state.session?.token,
+      state.session?.accessToken,
+      state.session?.access_token,
+      state.sessionData?.token,
+      state.sessionData?.accessToken
     );
 
   const user =
-    snapshot?.user ||
-    state.user ||
-    state.currentUser ||
-    state.authUser ||
-    state.sessionUser ||
-    state.session?.user ||
-    null;
+    normalizeUserForRestore(
+      snapshot?.user ||
+        state.user ||
+        state.currentUser ||
+        state.authUser ||
+        state.sessionUser ||
+        state.session?.user ||
+        state.sessionData?.user ||
+        null
+    );
 
   const authenticated =
     Boolean(
@@ -2585,7 +3357,7 @@ function applyAuthenticatedSession(payload = {}) {
     safeText(payload.token, "");
 
   const user =
-    payload.user || null;
+    normalizeUserForRestore(payload.user);
 
   if (
     !hasUsableToken(token) ||
@@ -2671,6 +3443,8 @@ function applyAuthenticatedSession(payload = {}) {
     {
       allowExplicitAuthenticated:
         true,
+      source:
+        `${RESTORE_SOURCE}:apply-authenticated`,
     }
   );
 
@@ -2748,6 +3522,8 @@ function applyProvisionalTokenSession(payload = {}) {
     {
       forceUnauthenticated:
         true,
+      source:
+        `${RESTORE_SOURCE}:apply-provisional-token`,
     }
   );
 
@@ -2810,6 +3586,8 @@ export async function fetchMe(sessionArg = {}) {
                 false,
               dedupe:
                 false,
+              _skipAuthRefresh:
+                true,
             }
           );
 
@@ -2819,12 +3597,13 @@ export async function fetchMe(sessionArg = {}) {
         assertNoExplicitFailure(auth);
 
         const user =
-          auth.user ||
-          extractUser(response?.data) ||
-          extractUser(response?.payload) ||
-          extractUser(response?.result) ||
-          extractUser(response) ||
-          null;
+          normalizeUserForRestore(
+            auth.user ||
+              extractUserFallback(response?.data) ||
+              extractUserFallback(response?.payload) ||
+              extractUserFallback(response?.result) ||
+              extractUserFallback(response)
+          );
 
         if (!hasUsableUser(user)) {
           throw createRestoreError(
@@ -3020,10 +3799,6 @@ export async function refreshSession(sessionArg = {}) {
           );
         }
 
-        /*
-          Caso A:
-          Refresh devuelve token + user.
-        */
         if (
           hasUsableToken(auth.token) &&
           hasUsableUser(auth.user)
@@ -3087,11 +3862,6 @@ export async function refreshSession(sessionArg = {}) {
           };
         }
 
-        /*
-          Caso B:
-          Refresh devuelve token pero no user.
-          Se borra cualquier user viejo y se fuerza /me.
-        */
         if (
           hasUsableToken(auth.token) &&
           !hasUsableUser(auth.user)
@@ -3160,11 +3930,6 @@ export async function refreshSession(sessionArg = {}) {
           };
         }
 
-        /*
-          Caso C:
-          Refresh devuelve user pero no token.
-          Sólo se acepta si ya existe token válido.
-        */
         if (
           !hasUsableToken(auth.token) &&
           hasUsableUser(auth.user)
@@ -3431,6 +4196,8 @@ function keepCachedSessionAfterTransientFailure({
     {
       allowExplicitAuthenticated:
         true,
+      source:
+        `${RESTORE_SOURCE}:keep-cached-transient`,
     }
   );
 
@@ -3511,7 +4278,8 @@ export async function restoreAfterMeFailure(
           Boolean(routeContext?.shouldProtect),
         protectedRouteKey:
           routeContext?.protectedRouteKey || "",
-      }
+      },
+      options
     );
 
     return {
@@ -3566,7 +4334,8 @@ export async function restoreAfterMeFailure(
           Boolean(routeContext?.shouldProtect),
         protectedRouteKey:
           routeContext?.protectedRouteKey || "",
-      }
+      },
+      options
     );
 
     return {
@@ -3650,7 +4419,8 @@ async function restoreUsingMeAfterRefreshFailure(
           Boolean(routeContext?.shouldProtect),
         protectedRouteKey:
           routeContext?.protectedRouteKey || "",
-      }
+      },
+      options
     );
 
     return {
@@ -3695,9 +4465,6 @@ export async function restoreSession(...args) {
   emit(
     "auth:restore:start",
     {
-      version:
-        RESTORE_VERSION,
-
       hasToken:
         hasUsableToken(getCurrentToken()),
 
@@ -3742,7 +4509,8 @@ export async function restoreSession(...args) {
 
       source:
         RESTORE_SOURCE,
-    }
+    },
+    options
   );
 
   session.restorePromise =
@@ -3776,7 +4544,8 @@ export async function restoreSession(...args) {
                 routeContext.protectedRouteKey,
               source:
                 RESTORE_SOURCE,
-            }
+            },
+            options
           );
 
           return {
@@ -3791,12 +4560,6 @@ export async function restoreSession(...args) {
           };
         }
 
-        /*
-          CRÍTICO:
-          Si hay token, primero /me.
-          Evita refresh innecesario con contexto legacy y corrige avatar/UI
-          en boot tras login o refresh de página.
-        */
         if (
           tokenAvailable &&
           shouldPreferMeBeforeRefresh()
@@ -3849,10 +4612,6 @@ export async function restoreSession(...args) {
           }
         }
 
-        /*
-          Sin token:
-          sólo se intenta refresh si hay contexto útil.
-        */
         if (refreshAvailable) {
           try {
             log(
@@ -3910,11 +4669,6 @@ export async function restoreSession(...args) {
               };
             }
 
-            /*
-              Error transitorio:
-              No se reintenta refresh aquí.
-              Si existe token por otro flujo, se valida con /me.
-            */
             const result =
               await restoreUsingMeAfterRefreshFailure(
                 session,
@@ -3986,7 +4740,8 @@ export async function restoreSession(...args) {
               routeContext.shouldProtect,
             protectedRouteKey:
               routeContext.protectedRouteKey,
-          }
+          },
+          options
         );
 
         return {
@@ -4155,6 +4910,21 @@ export function getRestoreSnapshot(sessionArg = {}) {
             getApiClient()?.request ||
             getHttpService()?.post ||
             getHttpService()?.request
+        ),
+
+      apiBase:
+        resolveApiBase(),
+
+      me:
+        resolveEndpoint(
+          "me",
+          "/api/auth/me"
+        ),
+
+      refresh:
+        resolveEndpoint(
+          "refresh",
+          "/api/auth/refresh"
         ),
     },
 

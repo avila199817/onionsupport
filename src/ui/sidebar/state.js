@@ -2,7 +2,7 @@
    Onion SPA - Sidebar State
    Archivo: src/ui/sidebar/state.js
 
-   ONION SUPPORT · SIDEBAR STATE · 15/10
+   ONION SUPPORT · SIDEBAR STATE · EXTREME 10/10
    DESKTOP/MOBILE STABLE · APPLE INDICATOR · ROUTE SAFE
 
    Responsabilidades:
@@ -57,7 +57,7 @@ import {
 ========================================================= */
 
 export const SIDEBAR_STATE_VERSION =
-  "sidebar-state-v15-desktop-mobile-indicator-safe";
+  "sidebar-state-v16-extreme-desktop-mobile-indicator-safe";
 
 /* =========================================================
    CONSTANTS
@@ -115,6 +115,7 @@ const TRANSITION_PROPS =
     "max-inline-size",
     "transform",
     "margin-inline-start",
+    "margin-left",
   ]);
 
 const MENU_ITEM_SELECTOR =
@@ -133,26 +134,34 @@ const ACTIVE_ITEM_SELECTOR =
     ".menu-item[data-active='true']",
     ".menu-item.active",
     ".menu-item.is-active",
+    ".menu-item.router-active",
     "[data-sidebar-nav='true'][aria-current='page']",
     "[data-sidebar-nav='true'][data-active='true']",
     "[data-sidebar-nav='true'].active",
     "[data-sidebar-nav='true'].is-active",
+    "[data-sidebar-nav='true'].router-active",
   ].join(",");
 
+/*
+  Importante:
+  data-admin-visible=false NO puede ocultar items normales.
+  Sólo cuenta si el elemento también declara regla admin real.
+*/
 const HIDDEN_ANCESTOR_SELECTOR =
   [
     "[hidden]",
     "[inert]",
     "[aria-hidden='true']",
     "[data-role-visible='false']",
-    "[data-admin-visible='false']",
     "[data-sidebar-visible='false']",
+    "[data-admin-visible='false'][data-admin-only='true']",
+    "[data-admin-visible='false'][data-sidebar-admin-only='true']",
+    "[data-admin-visible='false'][data-role='admin']",
+    "[data-admin-visible='false'][data-roles~='admin']",
+    "[data-admin-visible='false'][data-requires-role='admin']",
+    "[data-admin-visible='false'][data-required-role='admin']",
   ].join(",");
 
-/*
-  La clave izquierda puede venir de href/data-route.
-  La derecha debe ser la ruta canónica interna.
-*/
 const ROUTE_ALIASES =
   Object.freeze({
     "/home": "/",
@@ -425,12 +434,27 @@ function ensureStateBag(AppCore) {
 }
 
 function safeWarn(AppCore, ...args) {
+  let coreLogged =
+    false;
+
   try {
-    AppCore?.utils?.warn?.(
-      "[SidebarState]",
-      ...args
-    );
-  } catch {}
+    if (isFunction(AppCore?.utils?.warn)) {
+      AppCore.utils.warn(
+        "[SidebarState]",
+        ...args
+      );
+
+      coreLogged =
+        true;
+    }
+  } catch {
+    coreLogged =
+      false;
+  }
+
+  if (coreLogged) {
+    return;
+  }
 
   try {
     console.warn(
@@ -441,8 +465,11 @@ function safeWarn(AppCore, ...args) {
 }
 
 function buildEventPayload(payload = {}) {
+  const data =
+    safeObject(payload);
+
   return {
-    ...safeObject(payload),
+    ...data,
 
     source:
       SOURCE,
@@ -454,10 +481,10 @@ function buildEventPayload(payload = {}) {
       SIDEBAR_STATE_VERSION,
 
     ts:
-      safeObject(payload).ts || nowTs(),
+      data.ts || nowTs(),
 
     at:
-      safeObject(payload).at || safeIsoDate(),
+      data.at || safeIsoDate(),
   };
 }
 
@@ -472,14 +499,24 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
   const finalPayload =
     buildEventPayload(payload);
 
+  let busAvailable =
+    false;
+
+  let busEmitted =
+    false;
+
   try {
     if (isFunction(AppCore?.events?.emit)) {
+      busAvailable =
+        true;
+
       AppCore.events.emit(
         name,
         finalPayload
       );
 
-      return true;
+      busEmitted =
+        true;
     }
   } catch (error) {
     safeWarn(
@@ -489,11 +526,16 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
     );
   }
 
-  try {
-    if (
-      isBrowser() &&
-      typeof CustomEvent !== "undefined"
-    ) {
+  /*
+    No duplicar bus + window.
+    Window sólo fallback si no hay bus o si el bus falló antes de emitir.
+  */
+  if (
+    (!busAvailable || !busEmitted) &&
+    isBrowser() &&
+    typeof CustomEvent !== "undefined"
+  ) {
+    try {
       window.dispatchEvent(
         new CustomEvent(
           name,
@@ -505,10 +547,10 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
       );
 
       return true;
-    }
-  } catch {}
+    } catch {}
+  }
 
-  return false;
+  return busEmitted;
 }
 
 function getHtmlElement() {
@@ -518,18 +560,6 @@ function getHtmlElement() {
 
   try {
     return document.documentElement || null;
-  } catch {
-    return null;
-  }
-}
-
-function getBodyElement() {
-  if (!hasDocument()) {
-    return null;
-  }
-
-  try {
-    return document.body || null;
   } catch {
     return null;
   }
@@ -1590,8 +1620,38 @@ export function isSidebarCollapsedDesktop(AppCore) {
 }
 
 /* =========================================================
-   ROUTE HELPERS
+   ROUTER / ROUTE HELPERS
 ========================================================= */
+
+function getRouterCandidate(AppCore = null) {
+  try {
+    if (AppCore?.Router) {
+      return AppCore.Router;
+    }
+
+    if (AppCore?.router) {
+      return AppCore.router;
+    }
+
+    if (isFunction(AppCore?.modules?.get)) {
+      return (
+        AppCore.modules.get("Router") ||
+        AppCore.modules.get("router") ||
+        null
+      );
+    }
+
+    return (
+      AppCore?.modules?.Router ||
+      AppCore?.modules?.router ||
+      AppCore?.registry?.modules?.get?.("Router") ||
+      AppCore?.registry?.modules?.get?.("router") ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
 
 function stripPublicUsernamePrefix(pathname = "/") {
   const value =
@@ -1668,12 +1728,12 @@ function applyRouteAlias(pathname = "/") {
 
 function normalizePathLike(path = "/") {
   let value =
-    safeText(path, "/")
+    safeText(path, "")
       .replace(/\\/g, "/")
       .trim();
 
   if (!value) {
-    return "/";
+    return "";
   }
 
   if (
@@ -1778,7 +1838,7 @@ function normalizePathLike(path = "/") {
 
 function stripQuery(path = "/") {
   const normalized =
-    normalizePathLike(path);
+    normalizePathLike(path || "/") || "/";
 
   return normalized.split("?")[0] || "/";
 }
@@ -1803,12 +1863,12 @@ function getBrowserPublicPath() {
         hash
           .replace(/^#!\/?/, "/")
           .replace(/^#\/?/, "/")
-      );
+      ) || "/";
     }
 
     return normalizePathLike(
       `${window.location.pathname || "/"}${window.location.search || ""}`
-    );
+    ) || "/";
   } catch {
     return "/";
   }
@@ -1857,6 +1917,9 @@ function getExplicitPathCandidates(options = {}) {
     payload.to,
     payload.url,
     payload.route,
+
+    safeObject(payload.resolved).publicPath,
+    safeObject(payload.resolved).canonicalPath,
   ]
     .map((value) =>
       normalizePathLike(value || "")
@@ -1942,6 +2005,30 @@ function getCurrentPublicPathCandidates(AppCore, options = {}) {
     );
   }
 
+  const Router =
+    getRouterCandidate(AppCore);
+
+  try {
+    pushUniquePath(
+      candidates,
+      Router?.getCurrentPublicPath?.()
+    );
+  } catch {}
+
+  try {
+    pushUniquePath(
+      candidates,
+      Router?.getCurrentCanonicalPath?.()
+    );
+  } catch {}
+
+  try {
+    pushUniquePath(
+      candidates,
+      Router?.getCurrentPath?.()
+    );
+  } catch {}
+
   pushUniquePath(
     candidates,
     AppCore?.state?.publicPath
@@ -1961,27 +2048,6 @@ function getCurrentPublicPathCandidates(AppCore, options = {}) {
     candidates,
     AppCore?.state?.lastRoute
   );
-
-  try {
-    pushUniquePath(
-      candidates,
-      AppCore?.router?.getCurrentPublicPath?.()
-    );
-  } catch {}
-
-  try {
-    pushUniquePath(
-      candidates,
-      AppCore?.router?.getCurrentCanonicalPath?.()
-    );
-  } catch {}
-
-  try {
-    pushUniquePath(
-      candidates,
-      AppCore?.router?.getCurrentPath?.()
-    );
-  } catch {}
 
   const unique =
     uniqueArray(candidates);
@@ -2008,9 +2074,11 @@ function getMenuItemRoute(item = null) {
       item.dataset?.route ||
         item.dataset?.href ||
         item.dataset?.to ||
+        item.dataset?.publicPath ||
         item.getAttribute?.("data-route") ||
         item.getAttribute?.("data-href") ||
         item.getAttribute?.("data-to") ||
+        item.getAttribute?.("data-public-path") ||
         item.getAttribute?.("href") ||
         "",
       ""
@@ -2109,6 +2177,12 @@ function clearActiveItemClasses(sidebarMenu = null) {
       delete item.dataset.matchedRoute;
       delete item.dataset.matchedCurrent;
       delete item.dataset.matchCandidateIndex;
+
+      item.dataset.current =
+        DATA_FALSE;
+
+      item.dataset.selected =
+        DATA_FALSE;
     } catch {}
   }
 
@@ -2133,6 +2207,12 @@ function setActiveItemClasses(item = null) {
     );
 
     item.dataset.active =
+      DATA_TRUE;
+
+    item.dataset.current =
+      DATA_TRUE;
+
+    item.dataset.selected =
       DATA_TRUE;
 
     return true;
@@ -3804,6 +3884,11 @@ function syncVisibleSidebarBase(AppCore, {
       open
     );
 
+    /*
+      Desktop expandido es el estado base:
+      sin clase .open, sin .collapsed.
+      Mobile usa .open para overlay.
+    */
     toggleClasses(
       sidebar,
       {

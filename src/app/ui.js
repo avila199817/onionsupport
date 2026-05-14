@@ -25,6 +25,15 @@
    - AppUI NO debe escuchar app:user-ui:sync.
    - Sin CSS inline.
    - Sin estilos inyectados.
+
+   EXTREME MODE:
+   - Registry idempotente por módulo canónico.
+   - Aliases sin register() ruidoso.
+   - Protección anti-recursión y dedupe por firma.
+   - Queue de sync única.
+   - Fallbacks legacy para Sidebar/Topbar/Toast.
+   - Snapshot profundo pero sanitizado.
+   - Eventos internos deduplicados y limpiables.
 ========================================================= */
 
 import {
@@ -43,7 +52,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-const UI_VERSION = "15.0.0";
+export const UI_VERSION = "16.0.0-extreme-pro";
 const UI_SOURCE = "app:ui";
 
 const DEFAULT_SCOPE =
@@ -175,17 +184,20 @@ const UI_MODULE_ALIASES = Object.freeze({
   toast: Object.freeze([
     "toast",
     "Toast",
+    "toastModule",
     "notifications",
   ]),
 
   sidebar: Object.freeze([
     "sidebar",
+    "sidebarUI",
     "SidebarUI",
     "Sidebar",
   ]),
 
   topbar: Object.freeze([
     "topbar",
+    "topbarUI",
     "TopbarUI",
     "Topbar",
   ]),
@@ -287,6 +299,10 @@ const SENSITIVE_QUERY_PARAM_NAMES = Object.freeze([
   "two_factor_token",
   "mfaToken",
   "mfa_token",
+  "authorization",
+  "jwt",
+  "session",
+  "sid",
 ]);
 
 const SYNC_QUEUE_DELAY_MS = 0;
@@ -294,7 +310,11 @@ const SYNC_DEDUPE_MS = 80;
 const REPAIR_REQUEST_DEDUPE_MS = 140;
 const LANG_SYNC_DEDUPE_MS = 120;
 const ROUTE_SYNC_DEDUPE_MS = 80;
-const MAX_RECENT_EVENTS = 40;
+const THEME_SYNC_DEDUPE_MS = 120;
+const EMIT_DEDUPE_MS = 60;
+const MAX_RECENT_EVENTS = 50;
+const MAX_SANITIZE_DEPTH = 6;
+const MAX_SANITIZE_ARRAY = 80;
 
 /* =========================================================
    INTERNAL STATE
@@ -330,9 +350,17 @@ let lastLangSignatureAt = 0;
 let lastRouteSignature = "";
 let lastRouteSignatureAt = 0;
 
+let lastThemeSignature = "";
+let lastThemeSignatureAt = 0;
+
+let lastEmitSignature = "";
+let lastEmitSignatureAt = 0;
+
 const boundDisposers = [];
 const boundEvents = [];
 const boundEventKeys = new Set();
+const moduleRegistryCache = new Map();
+const moduleRegistryConflicts = new Set();
 
 const uiState = {
   initialized: false,
@@ -424,7 +452,10 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -617,6 +648,123 @@ function safeClone(value, fallback = null) {
 }
 
 /* =========================================================
+   DEP RESOLUTION
+========================================================= */
+
+function getModuleFromRegistry(AppCore, names = []) {
+  if (!AppCore) {
+    return null;
+  }
+
+  const keys =
+    safeArray(names)
+      .map((name) => safeText(name, ""))
+      .filter(Boolean);
+
+  try {
+    const modules = AppCore.modules;
+
+    if (modules) {
+      for (const key of keys) {
+        try {
+          if (isFunction(modules.get)) {
+            const value = modules.get(key);
+
+            if (value) {
+              return value;
+            }
+          }
+        } catch {}
+
+        try {
+          if (modules[key]) {
+            return modules[key];
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+
+  try {
+    const registryModules = AppCore.registry?.modules;
+
+    if (registryModules) {
+      for (const key of keys) {
+        if (isFunction(registryModules.get)) {
+          const value = registryModules.get(key);
+
+          if (value) {
+            return value;
+          }
+        }
+
+        if (registryModules[key]) {
+          return registryModules[key];
+        }
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
+function resolveDeps(first = {}, second = {}) {
+  const deps = normalizeDeps(first, second);
+  const AppCore = deps.AppCore || null;
+
+  return {
+    ...deps,
+
+    AppCore,
+
+    Auth:
+      deps.Auth ||
+      AppCore?.Auth ||
+      AppCore?.auth ||
+      getModuleFromRegistry(AppCore, ["Auth", "auth"]),
+
+    Router:
+      deps.Router ||
+      AppCore?.Router ||
+      AppCore?.router ||
+      getModuleFromRegistry(AppCore, ["Router", "router"]),
+
+    Store:
+      deps.Store ||
+      AppCore?.Store ||
+      AppCore?.store ||
+      getModuleFromRegistry(AppCore, ["Store", "store"]),
+
+    Toast:
+      deps.Toast ||
+      AppCore?.Toast ||
+      AppCore?.toastModule ||
+      AppCore?.toast ||
+      getModuleFromRegistry(AppCore, ["Toast", "toast", "toastModule", "notifications"]),
+
+    I18n:
+      deps.I18n ||
+      AppCore?.I18n ||
+      AppCore?.i18n ||
+      getModuleFromRegistry(AppCore, ["I18n", "i18n"]),
+
+    SidebarUI:
+      deps.SidebarUI ||
+      AppCore?.SidebarUI ||
+      AppCore?.sidebarUI ||
+      AppCore?.sidebar ||
+      getModuleFromRegistry(AppCore, ["SidebarUI", "sidebarUI", "sidebar", "Sidebar"]),
+
+    TopbarUI:
+      deps.TopbarUI ||
+      AppCore?.TopbarUI ||
+      AppCore?.topbarUI ||
+      AppCore?.topbar ||
+      getModuleFromRegistry(AppCore, ["TopbarUI", "topbarUI", "topbar", "Topbar"]),
+  };
+}
+
+/* =========================================================
    REDACTION / SANITIZE
 ========================================================= */
 
@@ -644,7 +792,17 @@ function redactSensitiveText(value = "") {
     );
 
     output = output.replace(
+      /(\/activate\/)([^/?#\s]+)/gi,
+      "$1***"
+    );
+
+    output = output.replace(
       /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+      "$1***"
+    );
+
+    output = output.replace(
+      /(\/password-reset\/confirm\/)([^/?#\s]+)/gi,
       "$1***"
     );
 
@@ -742,7 +900,7 @@ function normalizeError(error = null, fallback = "Error UI.") {
 }
 
 function sanitizePayload(value, depth = 0) {
-  if (depth > 5) {
+  if (depth > MAX_SANITIZE_DEPTH) {
     return "[MaxDepth]";
   }
 
@@ -781,7 +939,7 @@ function sanitizePayload(value, depth = 0) {
 
   if (Array.isArray(value)) {
     return value
-      .slice(0, 50)
+      .slice(0, MAX_SANITIZE_ARRAY)
       .map((item) =>
         sanitizePayload(
           item,
@@ -808,8 +966,14 @@ function sanitizePayload(value, depth = 0) {
     const output = {};
 
     for (const [key, item] of Object.entries(value)) {
-      if (/token|secret|password|authorization|bearer|credential|jwt/i.test(key)) {
-        output[key] = "***";
+      if (/token|secret|password|authorization|bearer|credential|jwt|session|refresh/i.test(key)) {
+        output[key] =
+          item === null ||
+          item === undefined ||
+          item === "" ||
+          typeof item === "boolean"
+            ? item
+            : "***";
         continue;
       }
 
@@ -1009,6 +1173,36 @@ function safeWindowDispatch(eventName, payload = {}) {
   return false;
 }
 
+function shouldDedupeEmit(eventName = "", payload = {}, force = false) {
+  if (force) {
+    return false;
+  }
+
+  const signature = [
+    safeText(eventName, ""),
+    safeText(payload?.reason || payload?.phase || "", ""),
+    safeText(payload?.source || "", ""),
+    safeText(payload?.route || payload?.canonicalPath || "", ""),
+    safeText(payload?.publicPath || "", ""),
+    payload?.ok === false ? "fail" : "ok",
+  ].join("|");
+
+  const current = safeNow();
+
+  if (
+    signature &&
+    signature === lastEmitSignature &&
+    current - lastEmitSignatureAt < EMIT_DEDUPE_MS
+  ) {
+    return true;
+  }
+
+  lastEmitSignature = signature;
+  lastEmitSignatureAt = current;
+
+  return false;
+}
+
 function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   const name = safeText(eventName, "");
 
@@ -1018,9 +1212,17 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
 
   const opts = ensureObject(options);
 
+  if (
+    opts.dedupe !== false &&
+    shouldDedupeEmit(name, payload, opts.force === true)
+  ) {
+    return false;
+  }
+
   const finalPayload =
     sanitizePayload({
       source: UI_SOURCE,
+      version: UI_VERSION,
       ...ensureObject(payload),
     });
 
@@ -1180,6 +1382,7 @@ function getUserId(user = null) {
     safeText(user?.user_id, "") ||
     safeText(user?._id, "") ||
     safeText(user?.uid, "") ||
+    safeText(user?.sub, "") ||
     ""
   );
 }
@@ -1203,13 +1406,18 @@ function hasUsableUser(user = null) {
 function getUserSnapshot(AppCore, Auth = null, Router = null) {
   const state = getSafeState(AppCore);
   const session = ensureObject(state.session);
+  const auth = ensureObject(state.auth);
 
   const user =
     state.user ||
     state.currentUser ||
     state.sessionUser ||
     state.authUser ||
+    state.me ||
+    state.account ||
+    state.profile ||
     session.user ||
+    auth.user ||
     getAuthUser(Auth) ||
     null;
 
@@ -1220,6 +1428,8 @@ function getUserSnapshot(AppCore, Auth = null, Router = null) {
     session.role ||
     session.rol ||
     session.userRole ||
+    auth.role ||
+    auth.rol ||
     user?.role ||
     user?.rol ||
     user?.userRole ||
@@ -1297,10 +1507,14 @@ function getUserSnapshot(AppCore, Auth = null, Router = null) {
 
     lang:
       state.lang ||
+      state.language ||
+      state.locale ||
       null,
 
     theme:
       state.theme ||
+      state.mode ||
+      state.appearance ||
       null,
 
     route,
@@ -1312,12 +1526,80 @@ function getUserSnapshot(AppCore, Auth = null, Router = null) {
    MODULE REGISTRY
 ========================================================= */
 
-function registerAliasOnCore(AppCore, alias, moduleRef) {
+function getRegisteredCoreModule(AppCore, name = "") {
+  const cleanName = safeText(name, "");
+
+  if (!AppCore || !cleanName) {
+    return null;
+  }
+
+  try {
+    if (isFunction(AppCore?.modules?.get)) {
+      const value = AppCore.modules.get(cleanName);
+
+      if (value) {
+        return value;
+      }
+    }
+  } catch {}
+
+  try {
+    if (AppCore?.modules?.[cleanName]) {
+      return AppCore.modules[cleanName];
+    }
+  } catch {}
+
+  try {
+    if (isFunction(AppCore?.registry?.modules?.get)) {
+      const value = AppCore.registry.modules.get(cleanName);
+
+      if (value) {
+        return value;
+      }
+    }
+  } catch {}
+
+  try {
+    if (AppCore?.[cleanName]) {
+      return AppCore[cleanName];
+    }
+  } catch {}
+
+  return null;
+}
+
+function markRegistryConflict(AppCore, name = "", alias = "") {
+  const key = `${safeText(name, "")}:${safeText(alias, "")}`;
+
+  if (moduleRegistryConflicts.has(key)) {
+    return;
+  }
+
+  moduleRegistryConflicts.add(key);
+
+  safeWarn(
+    AppCore,
+    "Conflicto de módulo UI en registry. Se conserva instancia existente.",
+    {
+      name,
+      alias,
+    }
+  );
+}
+
+function registerAliasOnCore(AppCore, name, alias, moduleRef) {
   if (
     !AppCore ||
     !alias ||
     !moduleRef
   ) {
+    return false;
+  }
+
+  const existing = getRegisteredCoreModule(AppCore, alias);
+
+  if (existing && !Object.is(existing, moduleRef)) {
+    markRegistryConflict(AppCore, name, alias);
     return false;
   }
 
@@ -1337,10 +1619,15 @@ function registerAliasOnCore(AppCore, alias, moduleRef) {
     }
   } catch {}
 
+  /*
+    Aliases sin modules.register() para evitar app:module:duplicate.
+    Sólo set/propiedad si está vacío o ya es la misma instancia.
+  */
   try {
     if (
       AppCore.modules &&
-      isExtensibleTarget(AppCore.modules)
+      isExtensibleTarget(AppCore.modules) &&
+      (!AppCore.modules[alias] || Object.is(AppCore.modules[alias], moduleRef))
     ) {
       AppCore.modules[alias] = moduleRef;
       ok = true;
@@ -1348,41 +1635,31 @@ function registerAliasOnCore(AppCore, alias, moduleRef) {
   } catch {}
 
   try {
-    if (isFunction(AppCore?.modules?.register)) {
-      AppCore.modules.register(
+    if (
+      isFunction(AppCore?.modules?.set) &&
+      !getRegisteredCoreModule(AppCore, alias)
+    ) {
+      const result = AppCore.modules.set(
         alias,
         moduleRef,
         {
-          overwrite: true,
-          replace: true,
           source: UI_SOURCE,
+          alias: true,
+          canonical: name,
+          silent: true,
+          emit: false,
         }
       );
 
-      ok = true;
-    }
-  } catch {}
-
-  try {
-    if (isFunction(AppCore?.modules?.set)) {
-      AppCore.modules.set(
-        alias,
-        moduleRef,
-        {
-          overwrite: true,
-          replace: true,
-          source: UI_SOURCE,
-        }
-      );
-
-      ok = true;
+      ok = result !== false || ok;
     }
   } catch {}
 
   try {
     if (
       AppCore?.registry?.modules &&
-      isFunction(AppCore.registry.modules.set)
+      isFunction(AppCore.registry.modules.set) &&
+      !getRegisteredCoreModule(AppCore, alias)
     ) {
       AppCore.registry.modules.set(
         alias,
@@ -1396,15 +1673,28 @@ function registerAliasOnCore(AppCore, alias, moduleRef) {
   return ok;
 }
 
-function registerAppModule(AppCore, name, moduleRef) {
+function registerCanonicalModule(AppCore, name, moduleRef) {
   const cleanName = safeText(name, "");
 
-  if (
-    !AppCore ||
-    !cleanName ||
-    !moduleRef
-  ) {
+  if (!AppCore || !cleanName || !moduleRef) {
     return false;
+  }
+
+  const existing = getRegisteredCoreModule(AppCore, cleanName);
+
+  if (existing && Object.is(existing, moduleRef)) {
+    return true;
+  }
+
+  if (existing && !Object.is(existing, moduleRef)) {
+    markRegistryConflict(AppCore, cleanName, cleanName);
+    return false;
+  }
+
+  const cache = moduleRegistryCache.get(cleanName);
+
+  if (cache && Object.is(cache.moduleRef, moduleRef)) {
+    return true;
   }
 
   let registered = false;
@@ -1419,6 +1709,90 @@ function registerAppModule(AppCore, name, moduleRef) {
     registered = true;
   } catch {}
 
+  try {
+    if (
+      !registered &&
+      isFunction(AppCore?.modules?.register)
+    ) {
+      const result = AppCore.modules.register(
+        cleanName,
+        moduleRef,
+        {
+          overwrite: false,
+          replace: false,
+          idempotent: true,
+          source: UI_SOURCE,
+        }
+      );
+
+      registered = result !== false;
+    }
+  } catch {}
+
+  try {
+    if (
+      !registered &&
+      isFunction(AppCore?.modules?.set)
+    ) {
+      const result = AppCore.modules.set(
+        cleanName,
+        moduleRef,
+        {
+          source: UI_SOURCE,
+          overwrite: false,
+          replace: false,
+        }
+      );
+
+      registered = result !== false;
+    }
+  } catch {}
+
+  try {
+    if (
+      !registered &&
+      AppCore.modules &&
+      isExtensibleTarget(AppCore.modules)
+    ) {
+      AppCore.modules[cleanName] = moduleRef;
+      registered = true;
+    }
+  } catch {}
+
+  try {
+    if (isExtensibleTarget(AppCore)) {
+      safeDefineValue(AppCore, cleanName, moduleRef);
+    }
+  } catch {}
+
+  if (registered) {
+    moduleRegistryCache.set(cleanName, {
+      moduleRef,
+      at: safeIsoDate(),
+    });
+  }
+
+  return registered;
+}
+
+function registerAppModule(AppCore, name, moduleRef) {
+  const cleanName = safeText(name, "");
+
+  if (
+    !AppCore ||
+    !cleanName ||
+    !moduleRef
+  ) {
+    return false;
+  }
+
+  let registered =
+    registerCanonicalModule(
+      AppCore,
+      cleanName,
+      moduleRef
+    );
+
   const aliases =
     UI_MODULE_ALIASES[cleanName] ||
     [cleanName];
@@ -1427,6 +1801,7 @@ function registerAppModule(AppCore, name, moduleRef) {
     if (
       registerAliasOnCore(
         AppCore,
+        cleanName,
         alias,
         moduleRef
       )
@@ -1977,7 +2352,7 @@ function shouldDedupeSync(snapshot = {}, reason = "", force = false) {
 }
 
 export function syncUserUI(first = {}, second = {}) {
-  const deps = normalizeDeps(first, second);
+  const deps = resolveDeps(first, second);
 
   const {
     AppCore,
@@ -2381,7 +2756,6 @@ function bindEvent(AppCore, scope, eventName, handler, label = "") {
     Bus interno primero.
     Window solo si no hay bus.
     No duplicar bus + window.
-    No usar cleanup.event para bus interno.
   */
   try {
     if (isFunction(AppCore?.events?.on)) {
@@ -2501,12 +2875,39 @@ function shouldDedupeRoute(detail = {}) {
   return false;
 }
 
+function getThemeSignature(detail = {}) {
+  return [
+    safeText(detail.theme, ""),
+    safeText(detail.mode, ""),
+    safeText(detail.appearance, ""),
+    safeText(detail.systemTheme, ""),
+  ].join("|");
+}
+
+function shouldDedupeTheme(detail = {}) {
+  const signature = getThemeSignature(detail);
+  const current = safeNow();
+
+  if (
+    signature &&
+    signature === lastThemeSignature &&
+    current - lastThemeSignatureAt < THEME_SYNC_DEDUPE_MS
+  ) {
+    return true;
+  }
+
+  lastThemeSignature = signature;
+  lastThemeSignatureAt = current;
+
+  return false;
+}
+
 /* =========================================================
    LANGUAGE BIND
 ========================================================= */
 
 export function bindAppLanguageSync(first = {}, second = {}) {
-  const deps = normalizeDeps(first, second);
+  const deps = resolveDeps(first, second);
 
   const {
     AppCore,
@@ -2609,6 +3010,7 @@ function getRepairSignature(detail = {}) {
 
 function shouldSkipRepairRequest(detail = {}) {
   const source = safeText(detail.source, "");
+  const event = safeText(detail.event, "");
 
   /*
     AppUI no escucha sus propios eventos.
@@ -2617,7 +3019,9 @@ function shouldSkipRepairRequest(detail = {}) {
   if (
     source === UI_SOURCE ||
     source === UI_EVENTS.userSync ||
-    source === "app:user-ui:sync"
+    event === UI_EVENTS.userSync ||
+    source === "app:user-ui:sync" ||
+    event === "app:user-ui:sync"
   ) {
     return true;
   }
@@ -2639,7 +3043,7 @@ function shouldSkipRepairRequest(detail = {}) {
 }
 
 export function bindUIRepairSync(first = {}, second = {}) {
-  const deps = normalizeDeps(first, second);
+  const deps = resolveDeps(first, second);
 
   const {
     AppCore,
@@ -2733,7 +3137,7 @@ export function bindUIRepairSync(first = {}, second = {}) {
 ========================================================= */
 
 export function bindUIRouteSync(first = {}, second = {}) {
-  const deps = normalizeDeps(first, second);
+  const deps = resolveDeps(first, second);
 
   const {
     AppCore,
@@ -2825,7 +3229,7 @@ export function bindUIRouteSync(first = {}, second = {}) {
 }
 
 export function bindUISessionSync(first = {}, second = {}) {
-  const deps = normalizeDeps(first, second);
+  const deps = resolveDeps(first, second);
 
   const {
     AppCore,
@@ -2919,7 +3323,7 @@ export function bindUISessionSync(first = {}, second = {}) {
 }
 
 export function bindUIThemeSync(first = {}, second = {}) {
-  const deps = normalizeDeps(first, second);
+  const deps = resolveDeps(first, second);
 
   const {
     AppCore,
@@ -2938,6 +3342,10 @@ export function bindUIThemeSync(first = {}, second = {}) {
   }
 
   const sync = (reason, detail = {}) => {
+    if (shouldDedupeTheme(detail)) {
+      return;
+    }
+
     syncUserUI({
       ...deps,
       reason,
@@ -2988,7 +3396,7 @@ export function bindUIThemeSync(first = {}, second = {}) {
 }
 
 export function bindUIRuntimeEvents(first = {}, second = {}) {
-  const deps = normalizeDeps(first, second);
+  const deps = resolveDeps(first, second);
 
   const {
     AppCore,
@@ -3225,7 +3633,7 @@ function attachToastBridge(AppCore, bridge) {
 
 export function bindToastBridge(first = {}, second = null) {
   const deps =
-    normalizeDeps(
+    resolveDeps(
       first,
       {
         Toast: second,
@@ -3301,7 +3709,7 @@ export function bindToastBridge(first = {}, second = null) {
 ========================================================= */
 
 export function repairUISystems(first = {}, second = {}) {
-  const deps = normalizeDeps(first, second);
+  const deps = resolveDeps(first, second);
 
   const {
     AppCore,
@@ -3387,6 +3795,8 @@ function markUiInitialized(AppCore, state = null, value = true) {
       {
         source: UI_SOURCE,
         emit: false,
+        emitState: false,
+        silent: true,
       }
     );
   } catch {
@@ -3489,7 +3899,7 @@ function exposeDebugApi(AppCore = null) {
 }
 
 export function initUISystems(first = {}) {
-  const deps = normalizeDeps(first);
+  const deps = resolveDeps(first);
 
   const {
     AppCore,
@@ -3785,7 +4195,7 @@ export function getUISystemsSnapshot(first = {}, second = {}) {
     SidebarUI,
     TopbarUI,
     Toast,
-  } = normalizeDeps(first, second);
+  } = resolveDeps(first, second);
 
   return sanitizePayload({
     version: UI_VERSION,
@@ -3860,6 +4270,14 @@ export function getUISystemsSnapshot(first = {}, second = {}) {
         TopbarUI
           ? wasModuleInitialized(TopbarUI)
           : false,
+    },
+
+    registry: {
+      cached:
+        Array.from(moduleRegistryCache.keys()),
+
+      conflicts:
+        Array.from(moduleRegistryConflicts),
     },
 
     user:
@@ -3947,6 +4365,22 @@ export function getUISystemsSnapshot(first = {}, second = {}) {
         lastRouteSignatureAt
           ? safeIsoDate(lastRouteSignatureAt)
           : "",
+
+      lastThemeSignature:
+        redactSensitiveText(lastThemeSignature),
+      lastThemeSignatureAt,
+      lastThemeSignatureAtIso:
+        lastThemeSignatureAt
+          ? safeIsoDate(lastThemeSignatureAt)
+          : "",
+
+      lastEmitSignature:
+        redactSensitiveText(lastEmitSignature),
+      lastEmitSignatureAt,
+      lastEmitSignatureAtIso:
+        lastEmitSignatureAt
+          ? safeIsoDate(lastEmitSignatureAt)
+          : "",
     },
   });
 }
@@ -3990,6 +4424,15 @@ export function resetUIRuntimeState() {
 
   lastRouteSignature = "";
   lastRouteSignatureAt = 0;
+
+  lastThemeSignature = "";
+  lastThemeSignatureAt = 0;
+
+  lastEmitSignature = "";
+  lastEmitSignatureAt = 0;
+
+  moduleRegistryCache.clear();
+  moduleRegistryConflicts.clear();
 
   uiState.initialized = false;
   uiState.initCount = 0;

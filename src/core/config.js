@@ -29,9 +29,9 @@
    - soporte rutas técnicas con token en query, path y hash-router
    - compatibilidad con request.js, auth restore, router y app bootstrap
    - API production hard-lock:
-       · frontend SPA: https://www.onionsupport.com
+       · frontend SPA: https://api.onionit.net
        · backend API:  https://api.onionit.net
-       · nunca usar https://www.onionsupport.com/api
+       · nunca usar https://api.onionit.net/api
 ========================================================= */
 
 /* =========================================================
@@ -51,9 +51,9 @@ const CANONICAL_PRODUCTION_API_BASE =
 const FORBIDDEN_FRONTEND_API_ORIGINS =
   Object.freeze([
     "https://onionsupport.com",
-    "https://www.onionsupport.com",
+    "https://api.onionit.net",
     "http://onionsupport.com",
-    "http://www.onionsupport.com",
+    "http://api.onionit.net",
   ]);
 
 /* =========================================================

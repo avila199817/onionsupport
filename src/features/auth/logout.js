@@ -2,7 +2,7 @@
    Onion SPA - Auth Logout
    Archivo: src/features/auth/logout.js
 
-   AUTH LOGOUT · EXTREME PRO SYSTEM · GOD MODE v11
+   AUTH LOGOUT · EXTREME PRO SYSTEM · 15/10
    LOCAL CLEAR GUARANTEED · REMOTE BEST-EFFORT · NO GHOST AUTH
 
    RESPONSABILIDADES:
@@ -10,8 +10,9 @@
    - invalidar refresh/session context si backend existe
    - limpiar estado AppCore
    - limpiar storage auth legacy/namespaced
+   - limpiar cookies auth no HttpOnly conocidas
    - redirigir de forma segura
-   - emitir eventos auth lifecycle
+   - emitir eventos auth lifecycle saneados
    - tolerar fallo de red sin bloquear logout local
    - reparar UI tras limpieza de sesión
    - evitar estados auth fantasma post-logout
@@ -35,6 +36,7 @@
    - no hace localStorage.clear()
    - no hace sessionStorage.clear()
    - no toca theme/lang/rutas públicas técnicas/initial URLs
+   - backend fallback fijo a https://api.onionit.net
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -69,7 +71,7 @@ import {
 ========================================================= */
 
 export const AUTH_LOGOUT_VERSION =
-  "11.0.0-god-mode";
+  "15.0.0-god-mode";
 
 let logoutPromise =
   null;
@@ -89,6 +91,9 @@ const DEFAULT_LOGOUT_TIMEOUT_MS =
 
 const LOGOUT_SOURCE =
   "auth.logout";
+
+const BACKEND_ORIGIN =
+  "https://api.onionit.net";
 
 const NO_TRANSPORT =
   Symbol("NO_TRANSPORT");
@@ -222,6 +227,34 @@ const KNOWN_AUTH_STORAGE_KEYS =
     "session.role",
   ]);
 
+const KNOWN_AUTH_COOKIE_NAMES =
+  Object.freeze([
+    "token",
+    "accessToken",
+    "access_token",
+    "refreshToken",
+    "refresh_token",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
+    "session",
+    "sessionId",
+    "session_id",
+    "sessionUserId",
+    "session_user_id",
+    "onion_token",
+    "onion_access_token",
+    "onion_refresh_token",
+    "onion_session",
+    "onion_session_id",
+    "onion_session_user_id",
+  ]);
+
 /* =========================================================
    BASICS
 ========================================================= */
@@ -312,6 +345,8 @@ function safeBool(value, fallback = false) {
       "sí",
       "ok",
       "on",
+      "enabled",
+      "active",
     ].includes(text)
   ) {
     return true;
@@ -323,6 +358,8 @@ function safeBool(value, fallback = false) {
       "0",
       "no",
       "off",
+      "disabled",
+      "inactive",
     ].includes(text)
   ) {
     return false;
@@ -345,7 +382,11 @@ function unique(values = []) {
 }
 
 function nowMs() {
-  return Date.now();
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
 }
 
 function safeIsoDate(ms = Date.now()) {
@@ -428,7 +469,7 @@ function redactSafe(value = "") {
   } catch {
     return safeText(value, "")
       .replace(
-        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
+        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
         "$1***"
       )
       .replace(
@@ -442,6 +483,10 @@ function redactSafe(value = "") {
       .replace(
         /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
         "$1***"
+      )
+      .replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
       );
   }
 }
@@ -584,9 +629,13 @@ function sanitizeError(error = null) {
     message:
       (() => {
         try {
-          return extractMessage(error);
+          return redactSafe(
+            extractMessage(error)
+          );
         } catch {
-          return error?.message || String(error);
+          return redactSafe(
+            error?.message || String(error)
+          );
         }
       })(),
 
@@ -602,6 +651,12 @@ function sanitizeError(error = null) {
       error?.data?.code ||
       error?.response?.data?.code ||
       null,
+
+    timeout:
+      Boolean(error?.timeout),
+
+    aborted:
+      Boolean(error?.aborted),
   };
 }
 
@@ -703,7 +758,18 @@ function sanitizeEventPayload(payload = {}, depth = 0) {
   return output;
 }
 
-function safeEmit(eventName, payload = {}) {
+function shouldEmitLogoutEvent(options = {}) {
+  return safeBool(
+    options.silent,
+    false
+  ) !== true;
+}
+
+function safeEmit(eventName, payload = {}, options = {}) {
+  if (!shouldEmitLogoutEvent(options)) {
+    return false;
+  }
+
   const name =
     safeText(eventName, "");
 
@@ -712,7 +778,18 @@ function safeEmit(eventName, payload = {}) {
   }
 
   const cleanPayload =
-    sanitizeEventPayload(payload);
+    sanitizeEventPayload({
+      source:
+        LOGOUT_SOURCE,
+
+      version:
+        AUTH_LOGOUT_VERSION,
+
+      at:
+        safeIsoDate(),
+
+      ...safeObject(payload),
+    });
 
   let emitted =
     false;
@@ -725,22 +802,6 @@ function safeEmit(eventName, payload = {}) {
 
     emitted =
       true;
-  } catch {}
-
-  try {
-    if (
-      isBrowser() &&
-      window?.AppCore?.events?.emit &&
-      window.AppCore !== AppCore
-    ) {
-      window.AppCore.events.emit(
-        name,
-        cleanPayload
-      );
-
-      emitted =
-        true;
-    }
   } catch {}
 
   try {
@@ -818,9 +879,35 @@ function isSafeRelativePathSafe(path = "") {
   }
 }
 
+function normalizeAuthEndpoint(endpoint = "", fallback = "/api/auth/logout") {
+  const raw =
+    safeText(endpoint, fallback);
+
+  if (/^https?:\/\//i.test(raw)) {
+    return raw;
+  }
+
+  if (raw.startsWith("/api/")) {
+    return raw;
+  }
+
+  if (raw.startsWith("/auth/")) {
+    return `/api${raw}`;
+  }
+
+  if (raw.startsWith("/")) {
+    return `/api/auth${raw}`;
+  }
+
+  return `/api/auth/${raw}`;
+}
+
 function resolveLogoutEndpoint() {
-  return safeText(
-    AUTH_ENDPOINTS?.logout,
+  return normalizeAuthEndpoint(
+    AUTH_ENDPOINTS?.logout ||
+      AUTH_ENDPOINTS?.auth?.logout ||
+      AppCore?.config?.auth?.endpoints?.logout ||
+      "/api/auth/logout",
     "/api/auth/logout"
   );
 }
@@ -928,10 +1015,20 @@ function updateCoreRouteState(path = DEFAULT_LOGIN_PATH) {
     );
   } catch {}
 
-  safeSetState({
-    route,
-    publicPath,
-  });
+  safeSetState(
+    {
+      route,
+      publicPath,
+    },
+    {
+      source:
+        `${LOGOUT_SOURCE}:route`,
+      emit:
+        false,
+      silent:
+        true,
+    }
+  );
 
   return {
     route,
@@ -980,6 +1077,8 @@ async function navigateTo(path = DEFAULT_LOGIN_PATH, options = {}) {
             {
               replaceState,
               force,
+              source:
+                LOGOUT_SOURCE,
             }
           );
 
@@ -1009,6 +1108,8 @@ async function navigateTo(path = DEFAULT_LOGIN_PATH, options = {}) {
             {
               replaceState,
               force,
+              source:
+                LOGOUT_SOURCE,
             }
           );
 
@@ -1045,6 +1146,8 @@ async function navigateTo(path = DEFAULT_LOGIN_PATH, options = {}) {
             {
               replaceState,
               force,
+              source:
+                LOGOUT_SOURCE,
             }
           );
 
@@ -1078,33 +1181,26 @@ async function navigateTo(path = DEFAULT_LOGIN_PATH, options = {}) {
         isBrowser() &&
         window.history?.replaceState
       ) {
+        const state = {
+          path:
+            target,
+          publicPath:
+            target,
+          canonicalPath:
+            normalizeCanonicalPathSafe(target),
+          source:
+            LOGOUT_SOURCE,
+        };
+
         if (replaceState) {
           window.history.replaceState(
-            {
-              path:
-                target,
-              publicPath:
-                target,
-              canonicalPath:
-                normalizeCanonicalPathSafe(target),
-              source:
-                LOGOUT_SOURCE,
-            },
+            state,
             "",
             target
           );
         } else {
           window.history.pushState(
-            {
-              path:
-                target,
-              publicPath:
-                target,
-              canonicalPath:
-                normalizeCanonicalPathSafe(target),
-              source:
-                LOGOUT_SOURCE,
-            },
+            state,
             "",
             target
           );
@@ -1189,6 +1285,7 @@ function getConfiguredTimeout(options = {}) {
   return safeNumber(
     options.timeout ??
       options.timeoutMs ??
+      AUTH_CONSTANTS?.logoutTimeoutMs ??
       AUTH_CONSTANTS?.requestTimeout ??
       DEFAULT_LOGOUT_TIMEOUT_MS,
     DEFAULT_LOGOUT_TIMEOUT_MS
@@ -1196,43 +1293,51 @@ function getConfiguredTimeout(options = {}) {
 }
 
 function buildLogoutBody() {
-  return {
-    refreshToken:
-      safeText(
-        getStoredRefreshToken(),
-        ""
-      ),
+  const refreshToken =
+    safeText(
+      getStoredRefreshToken(),
+      ""
+    );
 
-    refresh_token:
-      safeText(
-        getStoredRefreshToken(),
-        ""
-      ),
+  const sessionId =
+    safeText(
+      getStoredSessionId(),
+      ""
+    );
 
-    sessionId:
-      safeText(
-        getStoredSessionId(),
-        ""
-      ),
+  const userId =
+    safeText(
+      getStoredSessionUserId(),
+      ""
+    );
 
-    session_id:
-      safeText(
-        getStoredSessionId(),
-        ""
-      ),
+  const body = {};
 
-    userId:
-      safeText(
-        getStoredSessionUserId(),
-        ""
-      ),
+  if (refreshToken) {
+    body.refreshToken =
+      refreshToken;
 
-    user_id:
-      safeText(
-        getStoredSessionUserId(),
-        ""
-      ),
-  };
+    body.refresh_token =
+      refreshToken;
+  }
+
+  if (sessionId) {
+    body.sessionId =
+      sessionId;
+
+    body.session_id =
+      sessionId;
+  }
+
+  if (userId) {
+    body.userId =
+      userId;
+
+    body.user_id =
+      userId;
+  }
+
+  return body;
 }
 
 function getCurrentToken() {
@@ -1254,11 +1359,13 @@ function getCurrentToken() {
 function getApiBase() {
   return safeText(
     AppCore?.config?.apiBase ||
+      AppCore?.config?.apiBaseUrl ||
       AppCore?.config?.api?.baseUrl ||
       AppCore?.config?.api?.base ||
-      "",
-    ""
-  );
+      AppCore?.config?.backendUrl ||
+      BACKEND_ORIGIN,
+    BACKEND_ORIGIN
+  ).replace(/\/+$/g, "");
 }
 
 function joinApiUrl(apiBase = "", endpoint = "") {
@@ -1266,7 +1373,7 @@ function joinApiUrl(apiBase = "", endpoint = "") {
     safeText(endpoint, "");
 
   if (!cleanEndpoint) {
-    return "/api/auth/logout";
+    return `${BACKEND_ORIGIN}/api/auth/logout`;
   }
 
   if (/^https?:\/\//i.test(cleanEndpoint)) {
@@ -1274,32 +1381,23 @@ function joinApiUrl(apiBase = "", endpoint = "") {
   }
 
   const base =
-    safeText(apiBase, "");
-
-  if (!base) {
-    return cleanEndpoint;
-  }
-
-  const normalizedBase =
-    base.replace(/\/+$/g, "");
+    safeText(apiBase, BACKEND_ORIGIN)
+      .replace(/\/+$/g, "");
 
   let normalizedEndpoint =
     cleanEndpoint.startsWith("/")
       ? cleanEndpoint
       : `/${cleanEndpoint}`;
 
-  /*
-    Evita /api/api/auth/logout si apiBase ya termina en /api.
-  */
   if (
-    /\/api$/i.test(normalizedBase) &&
+    /\/api$/i.test(base) &&
     normalizedEndpoint.startsWith("/api/")
   ) {
     normalizedEndpoint =
       normalizedEndpoint.replace(/^\/api/i, "");
   }
 
-  return `${normalizedBase}${normalizedEndpoint}`;
+  return `${base}${normalizedEndpoint}`;
 }
 
 function buildFinalUrl(endpoint = "") {
@@ -1381,10 +1479,6 @@ function normalizeRemoteLogoutResult(result = null, options = {}) {
     };
   }
 
-  /*
-    Si un transporte ejecutó sin lanzar y devolvió null/undefined,
-    normalmente es 204 parseado como body vacío. Lo aceptamos.
-  */
   if (
     result === null ||
     result === undefined
@@ -1538,43 +1632,43 @@ async function callHttpRequest(http, endpoint, body, requestOptions) {
       return {
         handled:
           true,
-        value:
-          await http.request(
-            endpoint,
-            {
-              ...requestOptions,
-              method:
-                "POST",
-              body,
-            }
-          ),
-      };
-    } catch (firstError) {
-      try {
-        return {
-          handled:
-            true,
           value:
             await http.request(
-              "POST",
               endpoint,
               {
                 ...requestOptions,
+                method:
+                  "POST",
                 body,
               }
             ),
         };
-      } catch {
-        throw firstError;
+      } catch (firstError) {
+        try {
+          return {
+            handled:
+              true,
+            value:
+              await http.request(
+                "POST",
+                endpoint,
+                {
+                  ...requestOptions,
+                  body,
+                }
+              ),
+          };
+        } catch {
+          throw firstError;
+        }
       }
     }
-  }
 
   return {
     handled:
       false,
-      value:
-        NO_TRANSPORT,
+    value:
+      NO_TRANSPORT,
   };
 }
 
@@ -1702,6 +1796,8 @@ async function requestRemoteLogout(options = {}) {
         "application/json",
       "Content-Type":
         "application/json",
+      "X-Onion-Client":
+        "onion-spa",
     };
 
     const token =
@@ -1723,9 +1819,9 @@ async function requestRemoteLogout(options = {}) {
             "POST",
           headers,
           credentials:
-            AppCore?.config?.api?.withCredentials
-              ? "include"
-              : "omit",
+            AppCore?.config?.api?.withCredentials === false
+              ? "omit"
+              : "include",
           cache:
             "no-store",
           body:
@@ -1828,6 +1924,12 @@ function buildStorageClearCandidates() {
           `${prefix}_${key.replace(/[:.]/g, "_")}`
         );
       }
+
+      if (!key.startsWith(`${prefix}.`)) {
+        expanded.push(
+          `${prefix}.${key.replace(/:/g, ".")}`
+        );
+      }
     }
 
     expanded.push(
@@ -1883,6 +1985,69 @@ function clearKnownAuthWebStorage() {
           key
         ) || changed;
     } catch {}
+  }
+
+  return changed;
+}
+
+function clearKnownAuthCookies() {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  let changed =
+    false;
+
+  const names =
+    unique([
+      ...KNOWN_AUTH_COOKIE_NAMES,
+      ...buildStorageClearCandidates(),
+    ]);
+
+  let host =
+    "";
+
+  try {
+    host =
+      window.location?.hostname || "";
+  } catch {}
+
+  const domainCandidates =
+    unique([
+      "",
+      host,
+      host && host.includes(".")
+        ? `.${host}`
+        : "",
+    ]);
+
+  const pathCandidates =
+    [
+      "/",
+      "",
+    ];
+
+  const expires =
+    "Thu, 01 Jan 1970 00:00:00 GMT";
+
+  for (const name of names) {
+    if (!name) {
+      continue;
+    }
+
+    for (const path of pathCandidates) {
+      for (const domain of domainCandidates) {
+        try {
+          document.cookie =
+            `${encodeURIComponent(name)}=; expires=${expires}; max-age=0; path=${path || "/"}` +
+            (domain ? `; domain=${domain}` : "") +
+            "; SameSite=Lax";
+
+          changed =
+            true;
+        } catch {}
+      }
+    }
   }
 
   return changed;
@@ -2044,7 +2209,16 @@ function getClearAuthStatePatch(reason = "logout") {
     sessionUser:
       null,
 
+    account:
+      null,
+
+    profile:
+      null,
+
     role:
+      "",
+
+    rol:
       "",
 
     userRole:
@@ -2081,6 +2255,15 @@ function getClearAuthStatePatch(reason = "logout") {
       null,
 
     resolvedUsername:
+      null,
+
+    username:
+      null,
+
+    avatar:
+      null,
+
+    avatarUrl:
       null,
 
     loginInProgress:
@@ -2189,6 +2372,8 @@ function clearAppCoreSessionState(reason = "logout") {
       silent:
         true,
       reason,
+      source:
+        LOGOUT_SOURCE,
     });
   } catch {
     try {
@@ -2201,6 +2386,8 @@ function clearAppCoreSessionState(reason = "logout") {
       silent:
         true,
       reason,
+      source:
+        LOGOUT_SOURCE,
     });
   } catch {
     try {
@@ -2213,12 +2400,35 @@ function clearAppCoreSessionState(reason = "logout") {
     {
       forceUnauthenticated:
         true,
+      emit:
+        false,
+      emitState:
+        false,
+      emitDerived:
+        false,
+      silent:
+        true,
+      source:
+        `${LOGOUT_SOURCE}:local-clear`,
     }
   );
 
   try {
-    AppCore?.syncUserUI?.();
+    AppCore?.setLoading?.(false);
   } catch {}
+
+  try {
+    AppCore?.syncUserUI?.({
+      reason:
+        "logout",
+      source:
+        LOGOUT_SOURCE,
+    });
+  } catch {
+    try {
+      AppCore?.syncUserUI?.();
+    } catch {}
+  }
 
   return true;
 }
@@ -2233,12 +2443,6 @@ function clearLocalSessionGuaranteed(options = {}) {
       "logout"
     );
 
-  const silent =
-    safeBool(
-      opts.silent,
-      false
-    );
-
   try {
     clearSessionLocal({
       silent:
@@ -2247,10 +2451,6 @@ function clearLocalSessionGuaranteed(options = {}) {
       source:
         LOGOUT_SOURCE,
 
-      /*
-        No tocamos initial URLs. Sólo preservamos ruta si el caller lo pidió
-        explícitamente; el logout normal navega a /login.
-      */
       preserveRoute:
         opts.preserveRoute === true,
 
@@ -2286,6 +2486,7 @@ function clearLocalSessionGuaranteed(options = {}) {
   clearAppCoreSessionState(reason);
   clearAppCoreStorage();
   clearKnownAuthWebStorage();
+  clearKnownAuthCookies();
 
   if (opts.clearInFlightRequests !== false) {
     clearInFlightRequests();
@@ -2294,44 +2495,40 @@ function clearLocalSessionGuaranteed(options = {}) {
   clearDomAuthState();
   safeSetError(null);
 
-  if (!silent) {
-    safeEmit(
-      "auth:logout:local-cleared",
-      {
-        reason,
-        source:
-          LOGOUT_SOURCE,
-        authenticated:
-          false,
-        user:
-          null,
-        role:
-          null,
-      }
-    );
+  safeEmit(
+    "auth:logout:local-cleared",
+    {
+      reason,
+      authenticated:
+        false,
+      user:
+        null,
+      role:
+        null,
+    },
+    opts
+  );
 
-    safeEmit(
-      "app:ui:repair-request",
-      {
-        reason:
-          "logout-local-clear",
-        source:
-          LOGOUT_SOURCE,
-        authenticated:
-          false,
-        user:
-          null,
-        role:
-          null,
-        repairShell:
-          false,
-        hardRepair:
-          false,
-        rebind:
-          false,
-      }
-    );
-  }
+  safeEmit(
+    "app:ui:repair-request",
+    {
+      reason:
+        "logout-local-clear",
+      authenticated:
+        false,
+      user:
+        null,
+      role:
+        null,
+      repairShell:
+        false,
+      hardRepair:
+        false,
+      rebind:
+        false,
+    },
+    opts
+  );
 
   return true;
 }
@@ -2421,12 +2618,6 @@ async function executeLogout(options = {}) {
     opts.remote !== false &&
     opts.skipRemote !== true;
 
-  const silent =
-    safeBool(
-      opts.silent,
-      false
-    );
-
   const hardRedirect =
     safeBool(
       opts.hardRedirect,
@@ -2439,19 +2630,16 @@ async function executeLogout(options = {}) {
         "logout",
     });
 
-  if (!silent) {
-    safeEmit(
-      "auth:logout:start",
-      {
-        sequence,
-        before,
-        source:
-          LOGOUT_SOURCE,
-        at:
-          safeIsoDate(),
-      }
-    );
-  }
+  safeEmit(
+    "auth:logout:start",
+    {
+      sequence,
+      before,
+      at:
+        safeIsoDate(),
+    },
+    opts
+  );
 
   let remoteError =
     null;
@@ -2464,26 +2652,23 @@ async function executeLogout(options = {}) {
       remoteResult =
         await requestRemoteLogout(opts);
 
-      if (!silent) {
-        safeEmit(
-          remoteResult?.ok
-            ? "auth:logout:remote-success"
-            : "auth:logout:remote-soft-failure",
-          {
-            sequence,
-            ok:
-              Boolean(remoteResult?.ok),
-            status:
-              remoteResult?.status || null,
-            skipped:
-              Boolean(remoteResult?.skipped),
-            transport:
-              remoteResult?.transport || "",
-            source:
-              LOGOUT_SOURCE,
-          }
-        );
-      }
+      safeEmit(
+        remoteResult?.ok
+          ? "auth:logout:remote-success"
+          : "auth:logout:remote-soft-failure",
+        {
+          sequence,
+          ok:
+            Boolean(remoteResult?.ok),
+          status:
+            remoteResult?.status || null,
+          skipped:
+            Boolean(remoteResult?.skipped),
+          transport:
+            remoteResult?.transport || "",
+        },
+        opts
+      );
     } catch (error) {
       remoteError =
         error;
@@ -2493,30 +2678,26 @@ async function executeLogout(options = {}) {
         error
       );
 
-      if (!silent) {
-        safeEmit(
-          "auth:logout:remote-error",
-          {
-            sequence,
-            error,
-            message:
-              extractMessage(error),
-            source:
-              LOGOUT_SOURCE,
-          }
-        );
-      }
+      safeEmit(
+        "auth:logout:remote-error",
+        {
+          sequence,
+          error,
+          message:
+            extractMessage(error),
+        },
+        opts
+      );
     }
-  } else if (!silent) {
+  } else {
     safeEmit(
       "auth:logout:remote-skipped",
       {
         sequence,
         reason:
           "remote-disabled",
-        source:
-          LOGOUT_SOURCE,
-      }
+      },
+      opts
     );
   }
 
@@ -2526,7 +2707,6 @@ async function executeLogout(options = {}) {
   */
   clearLocalSessionGuaranteed({
     ...opts,
-    silent,
     reason:
       "logout",
   });
@@ -2549,109 +2729,87 @@ async function executeLogout(options = {}) {
       remoteResult?.ok !== false
     );
 
-  if (!silent) {
-    safeEmit(
-      "auth:logout:success",
-      {
-        sequence,
-        hadSession:
-          Boolean(before?.authenticated),
-        remoteOk,
-        remoteStatus:
-          remoteResult?.status || null,
-        remoteSkipped:
-          !shouldRemote || Boolean(remoteResult?.skipped),
-        remoteTransport:
-          remoteResult?.transport || "",
-        before,
-        after,
-        redirectTo:
-          finalRedirect,
-        durationMs:
-          nowMs() - startedAt,
-        source:
-          LOGOUT_SOURCE,
-      }
-    );
+  safeEmit(
+    "auth:logout:success",
+    {
+      sequence,
+      hadSession:
+        Boolean(before?.authenticated),
+      remoteOk,
+      remoteStatus:
+        remoteResult?.status || null,
+      remoteSkipped:
+        !shouldRemote || Boolean(remoteResult?.skipped),
+      remoteTransport:
+        remoteResult?.transport || "",
+      before,
+      after,
+      redirectTo:
+        finalRedirect,
+      durationMs:
+        nowMs() - startedAt,
+    },
+    opts
+  );
 
-    safeEmit(
-      "auth:logout",
-      {
-        sequence,
-        hadSession:
-          Boolean(before?.authenticated),
-        remoteOk,
-        remoteSkipped:
-          !shouldRemote || Boolean(remoteResult?.skipped),
-        redirectTo:
-          finalRedirect,
-        source:
-          LOGOUT_SOURCE,
-      }
-    );
+  safeEmit(
+    "auth:logout",
+    {
+      sequence,
+      hadSession:
+        Boolean(before?.authenticated),
+      remoteOk,
+      remoteSkipped:
+        !shouldRemote || Boolean(remoteResult?.skipped),
+      redirectTo:
+        finalRedirect,
+    },
+    opts
+  );
 
-    safeEmit(
-      "app:session:cleared",
-      {
-        sequence,
-        reason:
-          "logout",
-        authenticated:
-          false,
-        user:
-          null,
-        role:
-          null,
-        source:
-          LOGOUT_SOURCE,
-      }
-    );
+  safeEmit(
+    "app:session:cleared",
+    {
+      sequence,
+      reason:
+        "logout",
+      authenticated:
+        false,
+      user:
+        null,
+      role:
+        null,
+    },
+    opts
+  );
 
-    safeEmit(
-      "app:auth:change",
-      {
-        sequence,
-        authenticated:
-          false,
-        user:
-          null,
-        role:
-          null,
-        source:
-          LOGOUT_SOURCE,
-      }
-    );
+  safeEmit(
+    "app:auth:change",
+    {
+      sequence,
+      authenticated:
+        false,
+      user:
+        null,
+      role:
+        null,
+    },
+    opts
+  );
 
-    safeEmit(
-      "auth:change",
-      {
-        sequence,
-        authenticated:
-          false,
-        user:
-          null,
-        role:
-          null,
-        source:
-          LOGOUT_SOURCE,
-      }
-    );
-
-    safeEmit(
-      "app:user:change",
-      {
-        sequence,
-        authenticated:
-          false,
-        user:
-          null,
-        role:
-          null,
-        source:
-          LOGOUT_SOURCE,
-      }
-    );
-  }
+  safeEmit(
+    "app:user:change",
+    {
+      sequence,
+      authenticated:
+        false,
+      user:
+        null,
+      role:
+        null,
+    },
+    opts
+  );
 
   let navigation =
     null;
@@ -2674,19 +2832,16 @@ async function executeLogout(options = {}) {
         }
       );
 
-    if (!silent) {
-      safeEmit(
-        "auth:logout:navigated",
-        {
-          sequence,
-          navigation,
-          redirectTo:
-            finalRedirect,
-          source:
-            LOGOUT_SOURCE,
-        }
-      );
-    }
+    safeEmit(
+      "auth:logout:navigated",
+      {
+        sequence,
+        navigation,
+        redirectTo:
+          finalRedirect,
+      },
+      opts
+    );
   }
 
   return {
@@ -2770,8 +2925,11 @@ export async function logout(options = {}) {
             error,
             message:
               extractMessage(error),
-            source:
-              LOGOUT_SOURCE,
+          },
+          {
+            ...safeObject(options),
+            silent:
+              false,
           }
         );
 
@@ -2879,6 +3037,9 @@ export function getLogoutSnapshot() {
         )
       ),
 
+    apiBase:
+      getApiBase(),
+
     loginPath:
       resolveLoginPath(),
 
@@ -2926,6 +3087,9 @@ export function getLogoutSnapshot() {
 
     storageClearKeys:
       buildStorageClearCandidates(),
+
+    cookieClearNames:
+      [...KNOWN_AUTH_COOKIE_NAMES],
 
     at:
       safeIsoDate(),

@@ -23,6 +23,16 @@
    - No decidir navegación; eso vive en router.
    - Sin CSS inline.
    - Sin estilos inyectados.
+
+   EXTREME MODE:
+   - Auth/public route detection por path, hash-router y aliases.
+   - Protección fuerte de activate/reset con token en path/query/hash.
+   - App shell nunca se oculta físicamente salvo hideAppShell explícito.
+   - Chrome y shell son conceptos separados.
+   - Sync DOM idempotente para montajes tardíos de Sidebar/Topbar.
+   - Loader no se oculta durante boot salvo force.
+   - Eventos deduplicados y sanitizados.
+   - Snapshot profundo para diagnóstico.
 ========================================================= */
 
 import {
@@ -34,7 +44,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-const SHELL_VERSION = "14.0.0";
+export const SHELL_VERSION = "15.0.0-extreme-pro";
 
 const DEFAULT_ROUTE = "/";
 
@@ -163,26 +173,83 @@ const DOM_SELECTORS = Object.freeze({
   ]),
 });
 
-const AUTH_LIKE_PATHS = Object.freeze([
+const LOGIN_PATHS = Object.freeze([
   "/login",
   "/signin",
   "/sign-in",
+]);
+
+const REGISTER_PATHS = Object.freeze([
   "/register",
   "/signup",
   "/sign-up",
+]);
 
+const RESET_PASSWORD_PATHS = Object.freeze([
   "/forgot-password",
   "/recover-password",
   "/password-reset",
+  "/password-reset/request",
   "/reset-password",
-  "/reset-password/confirm",
+  "/reset-password/request",
+  "/reset-password-request",
+  "/request-reset-password",
+]);
 
+const RESET_CONFIRM_PATHS = Object.freeze([
+  "/reset-password/confirm",
+  "/reset-password-confirm",
+  "/password-reset/confirm",
+  "/password-reset-confirm",
+  "/confirm-reset-password",
+]);
+
+const ACTIVATION_PATHS = Object.freeze([
   "/activate-account",
+  "/activate",
+  "/activation",
+  "/account/activate",
+  "/activate/first-user",
+]);
+
+const AUTH_LIKE_PATHS = Object.freeze([
+  ...LOGIN_PATHS,
+  ...REGISTER_PATHS,
+  ...RESET_PASSWORD_PATHS,
+  ...RESET_CONFIRM_PATHS,
+  ...ACTIVATION_PATHS,
 ]);
 
 const AUTH_LIKE_PREFIXES = Object.freeze([
-  "/activate-account",
-  "/reset-password/confirm",
+  ...ACTIVATION_PATHS.map((path) => `${path}/`),
+  ...RESET_CONFIRM_PATHS.map((path) => `${path}/`),
+]);
+
+const TOKEN_ROUTE_CONFIGS = Object.freeze([
+  Object.freeze({
+    key: "activation",
+    paths: ACTIVATION_PATHS,
+    tokenParamNames: Object.freeze([
+      "token",
+      "activationToken",
+      "activateToken",
+      "code",
+      "t",
+    ]),
+  }),
+
+  Object.freeze({
+    key: "resetConfirm",
+    paths: RESET_CONFIRM_PATHS,
+    tokenParamNames: Object.freeze([
+      "token",
+      "resetToken",
+      "passwordResetToken",
+      "confirmToken",
+      "code",
+      "t",
+    ]),
+  }),
 ]);
 
 const TOKEN_PARAM_NAMES = Object.freeze([
@@ -197,6 +264,18 @@ const TOKEN_PARAM_NAMES = Object.freeze([
   "access_token",
   "refresh_token",
   "id_token",
+  "tempToken",
+  "temp_token",
+  "temporaryToken",
+  "temporary_token",
+  "twoFactorToken",
+  "two_factor_token",
+  "mfaToken",
+  "mfa_token",
+  "authorization",
+  "jwt",
+  "session",
+  "sid",
 ]);
 
 const BOOT_BODY_CLASSES = Object.freeze([
@@ -233,6 +312,7 @@ const AUTH_SCREEN_CLASS = "auth-screen";
 const LOGIN_NO_SCROLL_CLASS = "login-no-scroll";
 
 const SHELL_EVENT_DEDUPE_MS = 40;
+const SNAPSHOT_MAX_CLASS_LENGTH = 800;
 
 /* =========================================================
    RUNTIME
@@ -286,7 +366,10 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -353,19 +436,16 @@ function redactTokenInText(value = "") {
     } catch {}
   }
 
-  try {
-    output = output.replace(
-      /(\/activate-account\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
-  } catch {}
-
-  try {
-    output = output.replace(
-      /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
-  } catch {}
+  for (const config of TOKEN_ROUTE_CONFIGS) {
+    for (const path of safeArray(config.paths)) {
+      try {
+        output = output.replace(
+          new RegExp(`(${escapeRegExp(path)}\\/)([^/?#\\s]+)`, "gi"),
+          "$1***"
+        );
+      } catch {}
+    }
+  }
 
   try {
     output = output.replace(
@@ -407,7 +487,7 @@ function isDomNodeLike(value) {
 }
 
 function sanitizePayload(value, depth = 0) {
-  if (depth > 4) {
+  if (depth > 5) {
     return "[MaxDepth]";
   }
 
@@ -436,13 +516,13 @@ function sanitizePayload(value, depth = 0) {
         value.className?.baseVal ||
           value.className,
         ""
-      ),
+      ).slice(0, SNAPSHOT_MAX_CLASS_LENGTH),
     };
   }
 
   if (Array.isArray(value)) {
     return value
-      .slice(0, 60)
+      .slice(0, 80)
       .map((item) =>
         sanitizePayload(item, depth + 1)
       );
@@ -461,8 +541,8 @@ function sanitizePayload(value, depth = 0) {
     const output = {};
 
     for (const [key, item] of Object.entries(value)) {
-      if (/token|secret|password|authorization|credential/i.test(key)) {
-        output[key] = "***";
+      if (/token|secret|password|authorization|credential|jwt|session/i.test(key)) {
+        output[key] = item ? "***" : item;
         continue;
       }
 
@@ -738,10 +818,14 @@ function normalizeHashRouterPath(value = "") {
   }
 
   if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
+    return normalizeLocalFullPath(
+      raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE
+    );
   }
 
-  return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
+  return normalizeLocalFullPath(
+    raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE
+  );
 }
 
 function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
@@ -868,9 +952,7 @@ function normalizeLocalFullPath(path = DEFAULT_ROUTE) {
   }
 
   if (isHashRouterPath(raw)) {
-    return normalizeLocalFullPath(
-      normalizeHashRouterPath(raw)
-    );
+    return normalizeHashRouterPath(raw);
   }
 
   try {
@@ -881,9 +963,7 @@ function normalizeLocalFullPath(path = DEFAULT_ROUTE) {
         parsed.hash &&
         isHashRouterPath(parsed.hash)
       ) {
-        return normalizeLocalFullPath(
-          normalizeHashRouterPath(parsed.hash)
-        );
+        return normalizeHashRouterPath(parsed.hash);
       }
 
       return normalizeLocalFullPath(
@@ -1017,9 +1097,7 @@ function getBrowserPath() {
       hash &&
       isHashRouterPath(hash)
     ) {
-      return normalizeLocalFullPath(
-        normalizeHashRouterPath(hash)
-      );
+      return normalizeHashRouterPath(hash);
     }
 
     return normalizeLocalFullPath(
@@ -1028,6 +1106,48 @@ function getBrowserPath() {
   } catch {
     return DEFAULT_ROUTE;
   }
+}
+
+function pathHasAnyToken(path = "") {
+  const value = safeText(path, "");
+
+  if (!value) {
+    return false;
+  }
+
+  for (const name of TOKEN_PARAM_NAMES) {
+    try {
+      const parsed = new URL(value, getBaseOrigin());
+
+      if (parsed.searchParams.get(name)) {
+        return true;
+      }
+
+      if (parsed.hash && parsed.hash.includes("?")) {
+        const query = parsed.hash.split("?").slice(1).join("?");
+
+        if (query && new URLSearchParams(query).get(name)) {
+          return true;
+        }
+      }
+    } catch {}
+  }
+
+  for (const config of TOKEN_ROUTE_CONFIGS) {
+    for (const routePath of safeArray(config.paths)) {
+      const clean = stripSearchAndHash(pathnameOnly(null, value));
+
+      if (clean.startsWith(`${routePath}/`)) {
+        const token = clean.slice(`${routePath}/`.length).split("/")[0];
+
+        if (safeText(token, "")) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
 }
 
 /* =========================================================
@@ -1101,6 +1221,35 @@ function safeAssignDomCache(AppCore, payload = {}) {
   } catch {
     return false;
   }
+}
+
+function clearDomCache(AppCore) {
+  try {
+    if (AppCore?.dom && typeof AppCore.dom === "object") {
+      for (const key of Object.keys(AppCore.dom)) {
+        if (
+          [
+            "appShell",
+            "mainContent",
+            "appContent",
+            "viewContainer",
+            "sidebarMount",
+            "topbarMount",
+            "sidebar",
+            "topbar",
+            "tablehead",
+            "tableheadContainer",
+            "sidebarMobileToggle",
+            "loader",
+          ].includes(key)
+        ) {
+          delete AppCore.dom[key];
+        }
+      }
+    }
+  } catch {}
+
+  return true;
 }
 
 function getCachedDomElement(AppCore, key = "", selectors = []) {
@@ -1475,6 +1624,9 @@ function setCoreState(AppCore, payload = {}) {
       cleanPayload,
       {
         source: "app:shell",
+        emit: false,
+        emitState: false,
+        silent: true,
       }
     );
   } catch {}
@@ -1520,6 +1672,8 @@ function isBootingOrLoading(AppCore) {
       state.appBooting ||
       state.bootInProgress ||
       state.loaderVisible ||
+      state.sessionRestoring ||
+      state.authRestoring ||
       hasBodyBootClass()
   );
 }
@@ -1674,10 +1828,7 @@ function applyRootShellClasses(root, {
   toggleClass(root, ROUTE_APP_CLASS, !finalAuthLike);
 
   toggleClass(root, AUTH_SCREEN_CLASS, finalAuthLike);
-
-  if (!finalAuthLike) {
-    removeClass(root, LOGIN_NO_SCROLL_CLASS);
-  }
+  toggleClass(root, LOGIN_NO_SCROLL_CLASS, finalAuthLike);
 
   toggleClass(root, CHROME_HIDDEN_CLASS, !finalChromeVisible);
   toggleClass(root, CHROME_VISIBLE_CLASS, finalChromeVisible);
@@ -2013,39 +2164,30 @@ export function setShellVisibility(AppCore, visible = true, options = {}) {
 export function isLoginPath(AppCore, path = "") {
   const currentPath = pathnameOnly(AppCore, path);
 
-  return (
-    currentPath === "/login" ||
-    currentPath === "/signin" ||
-    currentPath === "/sign-in"
-  );
+  return LOGIN_PATHS.includes(currentPath);
 }
 
 export function isResetPasswordPath(AppCore, path = "") {
   const currentPath = pathnameOnly(AppCore, path);
 
-  return (
-    currentPath === "/reset-password" ||
-    currentPath === "/forgot-password" ||
-    currentPath === "/recover-password" ||
-    currentPath === "/password-reset"
-  );
+  return RESET_PASSWORD_PATHS.includes(currentPath);
 }
 
 export function isResetPasswordConfirmPath(AppCore, path = "") {
   const currentPath = pathnameOnly(AppCore, path);
 
-  return (
-    currentPath === "/reset-password/confirm" ||
-    currentPath.startsWith("/reset-password/confirm/")
+  return RESET_CONFIRM_PATHS.some((resetPath) =>
+    currentPath === resetPath ||
+    currentPath.startsWith(`${resetPath}/`)
   );
 }
 
 export function isActivateAccountPath(AppCore, path = "") {
   const currentPath = pathnameOnly(AppCore, path);
 
-  return (
-    currentPath === "/activate-account" ||
-    currentPath.startsWith("/activate-account/")
+  return ACTIVATION_PATHS.some((activationPath) =>
+    currentPath === activationPath ||
+    currentPath.startsWith(`${activationPath}/`)
   );
 }
 
@@ -2057,8 +2199,8 @@ export function isAuthLikePath(AppCore, path = "") {
   }
 
   return AUTH_LIKE_PREFIXES.some((prefix) =>
-    currentPath === prefix ||
-    currentPath.startsWith(`${prefix}/`)
+    currentPath === prefix.replace(/\/+$/g, "") ||
+    currentPath.startsWith(prefix)
   );
 }
 
@@ -2108,11 +2250,27 @@ function getRouterRoute(AppCore, Router, canonicalPath = "") {
   }
 }
 
+function safeGetCurrentCanonicalPath(AppCore, Router) {
+  try {
+    return getCurrentCanonicalPath(AppCore, Router);
+  } catch {
+    return "";
+  }
+}
+
+function safeGetCurrentPublicPath(AppCore, Router) {
+  try {
+    return getCurrentPublicPath(AppCore, Router);
+  } catch {
+    return "";
+  }
+}
+
 export function isAuthLikeRoute(AppCore, Router) {
   const canonical =
     normalizePath(
       AppCore,
-      getCurrentCanonicalPath(AppCore, Router) ||
+      safeGetCurrentCanonicalPath(AppCore, Router) ||
         AppCore?.state?.route ||
         DEFAULT_ROUTE
     );
@@ -2120,7 +2278,7 @@ export function isAuthLikeRoute(AppCore, Router) {
   const publicPath =
     normalizePath(
       AppCore,
-      getCurrentPublicPath(AppCore, Router) ||
+      safeGetCurrentPublicPath(AppCore, Router) ||
         AppCore?.state?.publicPath ||
         getBrowserPath() ||
         DEFAULT_ROUTE
@@ -2159,8 +2317,19 @@ export function updateShellVisibilityByRoute(AppCore, Router, options = {}) {
     normalizePath(
       AppCore,
       opts.canonicalPath ||
-        getCurrentCanonicalPath(AppCore, Router) ||
+        safeGetCurrentCanonicalPath(AppCore, Router) ||
         AppCore?.state?.route ||
+        DEFAULT_ROUTE
+    );
+
+  const publicPath =
+    normalizePath(
+      AppCore,
+      opts.publicPath ||
+        safeGetCurrentPublicPath(AppCore, Router) ||
+        AppCore?.state?.publicPath ||
+        getBrowserPath() ||
+        canonical ||
         DEFAULT_ROUTE
     );
 
@@ -2171,6 +2340,11 @@ export function updateShellVisibilityByRoute(AppCore, Router, options = {}) {
       Router,
       canonical
     );
+
+  const hasToken =
+    pathHasAnyToken(publicPath) ||
+    pathHasAnyToken(canonical) ||
+    pathHasAnyToken(getBrowserPath());
 
   const authLike =
     opts.authLike !== undefined
@@ -2187,6 +2361,7 @@ export function updateShellVisibilityByRoute(AppCore, Router, options = {}) {
       ...opts,
       authLike,
       hideAppShell: false,
+      tokenRoute: hasToken,
       reason:
         opts.reason ||
         "update-shell-visibility-by-route",
@@ -2532,7 +2707,7 @@ function getElementSnapshot(element) {
         element.className?.baseVal ||
           element.className,
         ""
-      ),
+      ).slice(0, SNAPSHOT_MAX_CLASS_LENGTH),
 
     childCount:
       (() => {
@@ -2571,12 +2746,12 @@ export function getShellSnapshot(AppCore, Router = null) {
   const state = getCoreState(AppCore);
 
   const canonical =
-    getCurrentCanonicalPath(AppCore, Router) ||
+    safeGetCurrentCanonicalPath(AppCore, Router) ||
     state.route ||
     DEFAULT_ROUTE;
 
   const publicPath =
-    getCurrentPublicPath(AppCore, Router) ||
+    safeGetCurrentPublicPath(AppCore, Router) ||
     state.publicPath ||
     DEFAULT_ROUTE;
 
@@ -2599,11 +2774,19 @@ export function getShellSnapshot(AppCore, Router = null) {
     authLike:
       isAuthLikeRoute(AppCore, Router),
 
+    tokenRoute:
+      pathHasAnyToken(canonical) ||
+      pathHasAnyToken(publicPath) ||
+      pathHasAnyToken(getBrowserPath()),
+
     canonical:
       redactTokenInText(canonical),
 
     publicPath:
       redactTokenInText(publicPath),
+
+    browserPath:
+      redactTokenInText(getBrowserPath()),
 
     booting:
       Boolean(state.booting),
@@ -2808,6 +2991,12 @@ function exposeDebugApi(AppCore = null) {
     reset:
       () =>
         resetShellRuntimeState(AppCore),
+
+    clearCache:
+      () => {
+        clearDomCache(AppCore);
+        return refreshShellElements(AppCore);
+      },
 
     setVisible:
       (visible = true, options = {}) =>

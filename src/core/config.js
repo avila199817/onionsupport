@@ -3,7 +3,7 @@
    Archivo: src/core/config.js
 
    ONION SUPPORT · CORE CONFIG
-   GLOBAL CONTRACT · ROUTES · API · AUTH · STORAGE · 15/10
+   GLOBAL CONTRACT · ROUTES · API · AUTH · STORAGE · 16/10
 
    RESPONSABILIDADES:
    - centralizar configuración global del núcleo
@@ -25,7 +25,7 @@
    - apiBase nunca acaba en /api porque endpoints ya incluyen /api
    - api.onionit.net NO es forbidden
    - forbidden sólo dominios frontend
-   - /api/auth/me, /auth/me y /me siempre privados
+   - /api/auth/me, /auth/me, /api/me y /me siempre privados
    - activation canónico: /api/auth/activate
    - activation legacy: /api/auth/activate-account
    - reset/activation/2FA públicos técnicos robustos
@@ -40,7 +40,7 @@
 ========================================================= */
 
 export const CONFIG_VERSION =
-  "15.0.0";
+  "16.0.0";
 
 /* =========================================================
    API BASE CONTRACT
@@ -48,6 +48,11 @@ export const CONFIG_VERSION =
 
 export const CANONICAL_PRODUCTION_API_BASE =
   "https://api.onionit.net";
+
+export const CANONICAL_BACKEND_API_ORIGINS =
+  Object.freeze([
+    "https://api.onionit.net",
+  ]);
 
 /*
   IMPORTANTE:
@@ -175,12 +180,17 @@ function safeArray(value) {
   return [];
 }
 
-function uniqueArray(values = []) {
-  const output =
-    [];
+function safeJsonKey(value) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
 
-  const seen =
-    new Set();
+function uniqueArray(values = []) {
+  const output = [];
+  const seen = new Set();
 
   for (const item of safeArray(values).flat(Infinity)) {
     const value =
@@ -199,7 +209,7 @@ function uniqueArray(values = []) {
     const key =
       typeof value === "string"
         ? value
-        : JSON.stringify(value);
+        : safeJsonKey(value);
 
     if (seen.has(key)) {
       continue;
@@ -249,6 +259,61 @@ function deepFreeze(value, seen = new WeakSet()) {
   }
 }
 
+function clonePlain(value, seen = new WeakMap()) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return value;
+  }
+
+  if (
+    typeof value !== "object"
+  ) {
+    return value;
+  }
+
+  try {
+    if (seen.has(value)) {
+      return seen.get(value);
+    }
+  } catch {}
+
+  if (Array.isArray(value)) {
+    const arr = [];
+    try {
+      seen.set(value, arr);
+    } catch {}
+
+    for (const item of value) {
+      arr.push(
+        clonePlain(
+          item,
+          seen
+        )
+      );
+    }
+
+    return arr;
+  }
+
+  const output = {};
+
+  try {
+    seen.set(value, output);
+  } catch {}
+
+  for (const [key, item] of Object.entries(value)) {
+    output[key] =
+      clonePlain(
+        item,
+        seen
+      );
+  }
+
+  return output;
+}
+
 function mergeObject(base = {}, override = {}) {
   if (isArray(base) && isArray(override)) {
     return uniqueArray([
@@ -259,10 +324,12 @@ function mergeObject(base = {}, override = {}) {
 
   const output =
     isArray(base)
-      ? [...base]
-      : {
-          ...(isObject(base) ? base : {}),
-        };
+      ? clonePlain(base)
+      : clonePlain(
+          isObject(base)
+            ? base
+            : {}
+        );
 
   if (
     !isObject(override) &&
@@ -303,7 +370,7 @@ function mergeObject(base = {}, override = {}) {
     }
 
     output[key] =
-      value;
+      clonePlain(value);
   }
 
   return output;
@@ -600,19 +667,23 @@ function normalizePathList(list = []) {
   );
 }
 
+function isPrivateMeLikePath(path = "") {
+  const clean =
+    stripSearchAndHash(path);
+
+  return (
+    clean === "/api/auth/me" ||
+    clean === "/auth/me" ||
+    clean === "/me" ||
+    clean === "/api/me"
+  );
+}
+
 function normalizeApiPathList(list = []) {
   return normalizePathList(list)
-    .filter((path) => {
-      const clean =
-        stripSearchAndHash(path);
-
-      return (
-        clean !== "/api/auth/me" &&
-        clean !== "/auth/me" &&
-        clean !== "/me" &&
-        clean !== "/api/me"
-      );
-    });
+    .filter((path) =>
+      !isPrivateMeLikePath(path)
+    );
 }
 
 /* =========================================================
@@ -662,6 +733,17 @@ function isForbiddenFrontendApiBase(value = "") {
   return FORBIDDEN_FRONTEND_API_ORIGINS.includes(origin);
 }
 
+function isCanonicalBackendApiOrigin(value = "") {
+  const origin =
+    getOriginFromUrlLike(value);
+
+  if (!origin) {
+    return false;
+  }
+
+  return CANONICAL_BACKEND_API_ORIGINS.includes(origin);
+}
+
 function normalizeAbsoluteApiBase(value = "") {
   const raw =
     safeText(value, "");
@@ -700,6 +782,14 @@ function normalizeAbsoluteApiBase(value = "") {
       return origin;
     }
 
+    /*
+      En el backend canónico no aceptamos path en apiBase.
+      Evita https://api.onionit.net/api/api/...
+    */
+    if (CANONICAL_BACKEND_API_ORIGINS.includes(origin)) {
+      return origin;
+    }
+
     return `${origin}${pathname}`.replace(/\/+$/g, "");
   } catch {
     return "";
@@ -724,12 +814,14 @@ function normalizeApiBaseUrl(
     - vacío => backend canónico
     - /api => backend canónico
     - dominio frontend => backend canónico
+    - cualquier base relativa => backend canónico
   */
   if (production) {
     if (
       !raw ||
       raw === "/api" ||
       raw === "api" ||
+      raw.startsWith("/") ||
       isForbiddenFrontendApiBase(raw)
     ) {
       return CANONICAL_PRODUCTION_API_BASE;
@@ -756,18 +848,14 @@ function normalizeApiBaseUrl(
         : normalizeBaseUrl(fallback);
     }
 
-    /*
-      Si alguien configura https://api.onionit.net/api,
-      se normaliza a https://api.onionit.net.
-    */
-    return normalized;
-  }
+    if (
+      production &&
+      isCanonicalBackendApiOrigin(normalized)
+    ) {
+      return CANONICAL_PRODUCTION_API_BASE;
+    }
 
-  /*
-    Si en producción alguien mete base relativa, no usamos same-origin.
-  */
-  if (production) {
-    return CANONICAL_PRODUCTION_API_BASE;
+    return normalized;
   }
 
   /*
@@ -855,6 +943,8 @@ function pickRuntimeOverrides(runtime = {}) {
     "debug",
 
     "apiBase",
+    "apiOrigin",
+    "apiUrl",
     "requestTimeout",
     "requestRetries",
     "requestRetryDelayMs",
@@ -870,10 +960,14 @@ function pickRuntimeOverrides(runtime = {}) {
     "routeAliases",
     "publicRoutes",
     "authLikeRoutes",
+    "technicalPublicRoutes",
     "protectedPublicTokenRoutes",
 
     "storageKeys",
     "legacyStorageKeys",
+
+    "publicApiPaths",
+    "privateApiPaths",
 
     "api",
     "auth",
@@ -989,6 +1083,8 @@ const RAW_API_BASE =
       "PUBLIC_API_ORIGIN",
     ],
     runtimeConfig.apiBase ||
+      runtimeConfig.apiOrigin ||
+      runtimeConfig.apiUrl ||
       runtimeConfig.api?.base ||
       runtimeConfig.api?.baseUrl ||
       runtimeConfig.api?.origin ||
@@ -1368,10 +1464,6 @@ const protectedPublicTokenRoutes = [
    STORAGE
 ========================================================= */
 
-/*
-  Nombres lógicos.
-  src/core/storage.js aplica namespace: `${storagePrefix}:${key}`.
-*/
 const storageKeys = {
   token:
     "token",
@@ -1527,10 +1619,6 @@ const legacyStorageKeys = {
    AUTH / API PATHS
 ========================================================= */
 
-/*
-  Público = no requiere Authorization.
-  /api/auth/me, /auth/me, /me y /api/me jamás son públicos.
-*/
 const publicApiPaths = normalizeApiPathList([
   "/api/auth/login",
   "/api/auth/refresh",
@@ -1584,7 +1672,320 @@ const privateApiPaths = normalizePathList([
   "/api/auth/activate/admin",
   "/api/auth/deactivate/admin",
   "/api/auth/deactivate/self",
+
+  "/api/tickets",
+  "/api/incidencias",
+  "/api/facturas",
+  "/api/invoices",
+  "/api/clientes",
+  "/api/clients",
+  "/api/users",
+  "/api/usuarios",
+  "/api/search",
+  "/api/hardware",
 ]);
+
+const authEndpoints = {
+  login:
+    "/api/auth/login",
+
+  logout:
+    "/api/auth/logout",
+
+  logoutAll:
+    "/api/auth/logout-all",
+
+  me:
+    "/api/auth/me",
+
+  profile:
+    "/api/auth/me",
+
+  currentUser:
+    "/api/auth/me",
+
+  current:
+    "/api/auth/me",
+
+  session:
+    "/api/auth/me",
+
+  refresh:
+    "/api/auth/refresh",
+
+  refreshSession:
+    "/api/auth/refresh",
+
+  tokenRefresh:
+    "/api/auth/refresh",
+
+  renew:
+    "/api/auth/refresh",
+
+  requestPasswordReset:
+    "/api/auth/reset-password-request",
+
+  resetPasswordRequest:
+    "/api/auth/reset-password-request",
+
+  forgotPassword:
+    "/api/auth/reset-password-request",
+
+  recoverPassword:
+    "/api/auth/reset-password-request",
+
+  passwordResetRequest:
+    "/api/auth/reset-password-request",
+
+  confirmPasswordReset:
+    "/api/auth/reset-password-confirm",
+
+  confirmResetPassword:
+    "/api/auth/reset-password-confirm",
+
+  resetPasswordConfirm:
+    "/api/auth/reset-password-confirm",
+
+  passwordResetConfirm:
+    "/api/auth/reset-password-confirm",
+
+  resetPasswordUpdate:
+    "/api/auth/reset-password-confirm",
+
+  resetPasswordFinalize:
+    "/api/auth/reset-password-confirm",
+
+  changeForgottenPassword:
+    "/api/auth/reset-password-confirm",
+
+  validateResetToken:
+    "/api/auth/reset-password/validate",
+
+  resetPasswordValidate:
+    "/api/auth/reset-password/validate",
+
+  validatePasswordReset:
+    "/api/auth/reset-password/validate",
+
+  passwordResetValidate:
+    "/api/auth/reset-password/validate",
+
+  activate:
+    "/api/auth/activate",
+
+  activateAccount:
+    "/api/auth/activate",
+
+  activation:
+    "/api/auth/activate",
+
+  accountActivation:
+    "/api/auth/activate",
+
+  createUserActivation:
+    "/api/auth/activate",
+
+  confirmActivation:
+    "/api/auth/activate",
+
+  activateAccountLegacy:
+    "/api/auth/activate-account",
+
+  activationLegacy:
+    "/api/auth/activate-account",
+
+  activateFirstUser:
+    "/api/auth/activate/first-user",
+
+  firstUserActivation:
+    "/api/auth/activate/first-user",
+
+  validateActivationToken:
+    "/api/auth/activate/validate",
+
+  activationValidate:
+    "/api/auth/activate/validate",
+
+  validateActivateAccount:
+    "/api/auth/activate/validate",
+
+  twoFactorLogin:
+    "/api/auth/2fa/login",
+
+  login2fa:
+    "/api/auth/2fa/login",
+
+  mfaLogin:
+    "/api/auth/2fa/login",
+
+  verify2FA:
+    "/api/auth/2fa/login",
+
+  verifyMfa:
+    "/api/auth/2fa/login",
+
+  twoFactorVerify:
+    "/api/auth/2fa/login",
+
+  twoFactorRequest:
+    "/api/auth/2fa/request",
+
+  request2FA:
+    "/api/auth/2fa/request",
+
+  requestMfa:
+    "/api/auth/2fa/request",
+
+  send2FA:
+    "/api/auth/2fa/request",
+
+  sendMfa:
+    "/api/auth/2fa/request",
+
+  twoFactorResend:
+    "/api/auth/2fa/resend",
+
+  resend2FA:
+    "/api/auth/2fa/resend",
+
+  resendMfa:
+    "/api/auth/2fa/resend",
+
+  health:
+    "/api/auth/_health",
+
+  authHealth:
+    "/api/auth/_health",
+};
+
+const authEndpointCandidates = {
+  login:
+    [
+      "/api/auth/login",
+    ],
+
+  logout:
+    [
+      "/api/auth/logout",
+    ],
+
+  me:
+    [
+      "/api/auth/me",
+      "/auth/me",
+      "/me",
+    ],
+
+  refresh:
+    [
+      "/api/auth/refresh",
+    ],
+
+  activateAccount:
+    [
+      "/api/auth/activate",
+      "/api/auth/activate-account",
+    ],
+
+  activateFirstUser:
+    [
+      "/api/auth/activate/first-user",
+    ],
+
+  validateActivationToken:
+    [
+      "/api/auth/activate/validate",
+      "/api/auth/activation/validate",
+      "/api/auth/activate-account/validate",
+    ],
+
+  requestPasswordReset:
+    [
+      "/api/auth/reset-password-request",
+      "/api/auth/forgot-password",
+      "/api/auth/password-reset/request",
+      "/api/auth/reset-password/request",
+    ],
+
+  confirmPasswordReset:
+    [
+      "/api/auth/reset-password-confirm",
+      "/api/auth/reset-password/confirm",
+      "/api/auth/password-reset/confirm",
+    ],
+
+  validateResetToken:
+    [
+      "/api/auth/reset-password/validate",
+      "/api/auth/reset-password-validate",
+      "/api/auth/password-reset/validate",
+    ],
+
+  twoFactorLogin:
+    [
+      "/api/auth/2fa/login",
+      "/api/auth/mfa/login",
+      "/api/auth/2fa/verify",
+      "/api/auth/mfa/verify",
+    ],
+
+  twoFactorRequest:
+    [
+      "/api/auth/2fa/request",
+      "/api/auth/mfa/request",
+    ],
+
+  twoFactorResend:
+    [
+      "/api/auth/2fa/resend",
+      "/api/auth/mfa/resend",
+    ],
+
+  health:
+    [
+      "/api/auth/_health",
+      "/api/auth/health",
+      "/api/_health",
+      "/health",
+    ],
+};
+
+const authEndpointGroups = {
+  public:
+    publicApiPaths,
+
+  private:
+    privateApiPaths,
+
+  session:
+    normalizePathList([
+      authEndpoints.login,
+      authEndpoints.logout,
+      authEndpoints.me,
+      authEndpoints.refresh,
+    ]),
+
+  activation:
+    normalizePathList([
+      ...authEndpointCandidates.activateAccount,
+      ...authEndpointCandidates.activateFirstUser,
+      ...authEndpointCandidates.validateActivationToken,
+    ]),
+
+  passwordReset:
+    normalizePathList([
+      ...authEndpointCandidates.requestPasswordReset,
+      ...authEndpointCandidates.confirmPasswordReset,
+      ...authEndpointCandidates.validateResetToken,
+    ]),
+
+  twoFactor:
+    normalizePathList([
+      ...authEndpointCandidates.twoFactorLogin,
+      ...authEndpointCandidates.twoFactorRequest,
+      ...authEndpointCandidates.twoFactorResend,
+    ]),
+};
 
 const auth = {
   bearerPrefix:
@@ -1623,229 +2024,14 @@ const auth = {
   postLoginFallback:
     routes.home,
 
-  endpoints: {
-    login:
-      "/api/auth/login",
+  endpoints:
+    authEndpoints,
 
-    logout:
-      "/api/auth/logout",
+  endpointCandidates:
+    authEndpointCandidates,
 
-    logoutAll:
-      "/api/auth/logout-all",
-
-    me:
-      "/api/auth/me",
-
-    profile:
-      "/api/auth/me",
-
-    currentUser:
-      "/api/auth/me",
-
-    current:
-      "/api/auth/me",
-
-    session:
-      "/api/auth/me",
-
-    refresh:
-      "/api/auth/refresh",
-
-    refreshSession:
-      "/api/auth/refresh",
-
-    tokenRefresh:
-      "/api/auth/refresh",
-
-    renew:
-      "/api/auth/refresh",
-
-    requestPasswordReset:
-      "/api/auth/reset-password-request",
-
-    resetPasswordRequest:
-      "/api/auth/reset-password-request",
-
-    forgotPassword:
-      "/api/auth/reset-password-request",
-
-    recoverPassword:
-      "/api/auth/reset-password-request",
-
-    passwordResetRequest:
-      "/api/auth/reset-password-request",
-
-    confirmPasswordReset:
-      "/api/auth/reset-password-confirm",
-
-    confirmResetPassword:
-      "/api/auth/reset-password-confirm",
-
-    resetPasswordConfirm:
-      "/api/auth/reset-password-confirm",
-
-    passwordResetConfirm:
-      "/api/auth/reset-password-confirm",
-
-    resetPasswordUpdate:
-      "/api/auth/reset-password-confirm",
-
-    resetPasswordFinalize:
-      "/api/auth/reset-password-confirm",
-
-    changeForgottenPassword:
-      "/api/auth/reset-password-confirm",
-
-    validateResetToken:
-      "/api/auth/reset-password/validate",
-
-    resetPasswordValidate:
-      "/api/auth/reset-password/validate",
-
-    validatePasswordReset:
-      "/api/auth/reset-password/validate",
-
-    passwordResetValidate:
-      "/api/auth/reset-password/validate",
-
-    /*
-      Canónico actual.
-    */
-    activate:
-      "/api/auth/activate",
-
-    activateAccount:
-      "/api/auth/activate",
-
-    activation:
-      "/api/auth/activate",
-
-    accountActivation:
-      "/api/auth/activate",
-
-    createUserActivation:
-      "/api/auth/activate",
-
-    confirmActivation:
-      "/api/auth/activate",
-
-    /*
-      Legacy compatible.
-    */
-    activateAccountLegacy:
-      "/api/auth/activate-account",
-
-    activationLegacy:
-      "/api/auth/activate-account",
-
-    activateFirstUser:
-      "/api/auth/activate/first-user",
-
-    firstUserActivation:
-      "/api/auth/activate/first-user",
-
-    validateActivationToken:
-      "/api/auth/activate/validate",
-
-    activationValidate:
-      "/api/auth/activate/validate",
-
-    validateActivateAccount:
-      "/api/auth/activate/validate",
-
-    twoFactorLogin:
-      "/api/auth/2fa/login",
-
-    login2fa:
-      "/api/auth/2fa/login",
-
-    mfaLogin:
-      "/api/auth/2fa/login",
-
-    verify2FA:
-      "/api/auth/2fa/login",
-
-    verifyMfa:
-      "/api/auth/2fa/login",
-
-    twoFactorVerify:
-      "/api/auth/2fa/login",
-
-    twoFactorRequest:
-      "/api/auth/2fa/request",
-
-    request2FA:
-      "/api/auth/2fa/request",
-
-    requestMfa:
-      "/api/auth/2fa/request",
-
-    send2FA:
-      "/api/auth/2fa/request",
-
-    sendMfa:
-      "/api/auth/2fa/request",
-
-    twoFactorResend:
-      "/api/auth/2fa/resend",
-
-    resend2FA:
-      "/api/auth/2fa/resend",
-
-    resendMfa:
-      "/api/auth/2fa/resend",
-
-    health:
-      "/api/auth/_health",
-
-    authHealth:
-      "/api/auth/_health",
-  },
-
-  endpointCandidates: {
-    me:
-      [
-        "/api/auth/me",
-        "/auth/me",
-        "/me",
-      ],
-
-    activateAccount:
-      [
-        "/api/auth/activate",
-        "/api/auth/activate-account",
-      ],
-
-    requestPasswordReset:
-      [
-        "/api/auth/reset-password-request",
-        "/api/auth/forgot-password",
-        "/api/auth/password-reset/request",
-        "/api/auth/reset-password/request",
-      ],
-
-    confirmPasswordReset:
-      [
-        "/api/auth/reset-password-confirm",
-        "/api/auth/reset-password/confirm",
-        "/api/auth/password-reset/confirm",
-      ],
-
-    validateResetToken:
-      [
-        "/api/auth/reset-password/validate",
-        "/api/auth/reset-password-validate",
-        "/api/auth/password-reset/validate",
-      ],
-
-    twoFactorLogin:
-      [
-        "/api/auth/2fa/login",
-        "/api/auth/mfa/login",
-        "/api/auth/2fa/verify",
-        "/api/auth/mfa/verify",
-      ],
-  },
+  endpointGroups:
+    authEndpointGroups,
 
   publicApiPaths,
   privateApiPaths,
@@ -1970,6 +2156,9 @@ const auth = {
     technical:
       "support",
 
+    staff:
+      "support",
+
     support:
       "support",
 
@@ -1980,6 +2169,9 @@ const auth = {
       "manager",
 
     gestor:
+      "manager",
+
+    gerente:
       "manager",
 
     lead:
@@ -2053,6 +2245,9 @@ const api = {
   canonicalProductionBase:
     CANONICAL_PRODUCTION_API_BASE,
 
+  canonicalBackendOrigins:
+    CANONICAL_BACKEND_API_ORIGINS,
+
   forbiddenFrontendOrigins:
     FORBIDDEN_FRONTEND_API_ORIGINS,
 
@@ -2109,6 +2304,12 @@ const api = {
       true
     ),
 
+  publicPaths:
+    publicApiPaths,
+
+  privatePaths:
+    privateApiPaths,
+
   headers: {
     Accept:
       "application/json",
@@ -2129,6 +2330,9 @@ const resources = {
 
     list:
       "/api/tickets",
+
+    stats:
+      "/api/tickets/stats",
 
     detail:
       "/api/tickets/:id",
@@ -2160,6 +2364,12 @@ const resources = {
 
     alias:
       "/api/incidencias",
+
+    list:
+      "/api/tickets",
+
+    detail:
+      "/api/tickets/:id",
   },
 
   invoices: {
@@ -2168,6 +2378,12 @@ const resources = {
 
     alias:
       "/api/invoices",
+
+    list:
+      "/api/facturas",
+
+    detail:
+      "/api/facturas/:id",
   },
 
   facturas: {
@@ -2176,6 +2392,12 @@ const resources = {
 
     alias:
       "/api/invoices",
+
+    list:
+      "/api/facturas",
+
+    detail:
+      "/api/facturas/:id",
   },
 
   users: {
@@ -2184,6 +2406,12 @@ const resources = {
 
     alias:
       "/api/usuarios",
+
+    list:
+      "/api/users",
+
+    detail:
+      "/api/users/:id",
   },
 
   usuarios: {
@@ -2192,6 +2420,12 @@ const resources = {
 
     alias:
       "/api/usuarios",
+
+    list:
+      "/api/users",
+
+    detail:
+      "/api/users/:id",
   },
 
   clients: {
@@ -2200,6 +2434,12 @@ const resources = {
 
     alias:
       "/api/clients",
+
+    list:
+      "/api/clientes",
+
+    detail:
+      "/api/clientes/:id",
   },
 
   clientes: {
@@ -2208,11 +2448,23 @@ const resources = {
 
     alias:
       "/api/clients",
+
+    list:
+      "/api/clientes",
+
+    detail:
+      "/api/clientes/:id",
   },
 
   hardware: {
     base:
       "/api/hardware",
+
+    list:
+      "/api/hardware",
+
+    detail:
+      "/api/hardware/:id",
   },
 
   search: {
@@ -2465,6 +2717,9 @@ const security = {
   canonicalProductionApiBase:
     CANONICAL_PRODUCTION_API_BASE,
 
+  canonicalBackendApiOrigins:
+    CANONICAL_BACKEND_API_ORIGINS,
+
   forbiddenFrontendApiOrigins:
     FORBIDDEN_FRONTEND_API_ORIGINS,
 
@@ -2692,6 +2947,9 @@ const baseConfig = {
   apiUrl:
     API_BASE,
 
+  publicApiPaths,
+  privateApiPaths,
+
   requestTimeout:
     api.timeout,
 
@@ -2721,6 +2979,9 @@ const baseConfig = {
 
   canonicalProductionApiBase:
     CANONICAL_PRODUCTION_API_BASE,
+
+  canonicalBackendApiOrigins:
+    CANONICAL_BACKEND_API_ORIGINS,
 
   forbiddenFrontendApiOrigins:
     FORBIDDEN_FRONTEND_API_ORIGINS,
@@ -2795,11 +3056,61 @@ function normalizeProtectedPublicTokenRoutes(list = []) {
     .filter(Boolean);
 }
 
+function normalizeEndpointMap(endpoints = {}) {
+  const output =
+    isObject(endpoints)
+      ? {
+          ...endpoints,
+        }
+      : {};
+
+  output.me =
+    "/api/auth/me";
+
+  output.profile =
+    "/api/auth/me";
+
+  output.currentUser =
+    "/api/auth/me";
+
+  output.current =
+    "/api/auth/me";
+
+  output.session =
+    "/api/auth/me";
+
+  output.activate =
+    "/api/auth/activate";
+
+  output.activateAccount =
+    "/api/auth/activate";
+
+  output.activation =
+    "/api/auth/activate";
+
+  output.accountActivation =
+    "/api/auth/activate";
+
+  output.createUserActivation =
+    "/api/auth/activate";
+
+  output.confirmActivation =
+    "/api/auth/activate";
+
+  output.activateAccountLegacy =
+    "/api/auth/activate-account";
+
+  output.activationLegacy =
+    "/api/auth/activate-account";
+
+  return output;
+}
+
 function normalizeFinalConfig(source = {}) {
   const output =
     mergeObject(
-      source,
-      {}
+      {},
+      source
     );
 
   output.__version =
@@ -2842,6 +3153,9 @@ function normalizeFinalConfig(source = {}) {
 
   output.canonicalProductionApiBase =
     CANONICAL_PRODUCTION_API_BASE;
+
+  output.canonicalBackendApiOrigins =
+    CANONICAL_BACKEND_API_ORIGINS;
 
   output.forbiddenFrontendApiOrigins =
     FORBIDDEN_FRONTEND_API_ORIGINS;
@@ -2943,17 +3257,31 @@ function normalizeFinalConfig(source = {}) {
         protectedPublicTokenRoutes
     );
 
+  output.publicApiPaths =
+    normalizeApiPathList(
+      output.publicApiPaths ||
+        output.auth?.publicApiPaths ||
+        publicApiPaths
+    );
+
+  output.privateApiPaths =
+    normalizePathList(
+      output.privateApiPaths ||
+        output.auth?.privateApiPaths ||
+        privateApiPaths
+    );
+
   if (output.auth) {
     output.auth.publicApiPaths =
       normalizeApiPathList(
         output.auth.publicApiPaths ||
-          publicApiPaths
+          output.publicApiPaths
       );
 
     output.auth.privateApiPaths =
       normalizePathList(
         output.auth.privateApiPaths ||
-          privateApiPaths
+          output.privateApiPaths
       );
 
     output.auth.technicalPublicRoutes =
@@ -2970,28 +3298,54 @@ function normalizeFinalConfig(source = {}) {
       output.protectedPublicTokenRoutes;
 
     output.auth.endpoints =
-      {
-        ...auth.endpoints,
+      normalizeEndpointMap({
+        ...authEndpoints,
         ...(output.auth.endpoints || {}),
+      });
+
+    output.auth.endpointCandidates =
+      mergeObject(
+        authEndpointCandidates,
+        output.auth.endpointCandidates || {}
+      );
+
+    output.auth.endpointGroups =
+      {
+        public:
+          output.auth.publicApiPaths,
+
+        private:
+          output.auth.privateApiPaths,
+
+        session:
+          normalizePathList([
+            output.auth.endpoints.login,
+            output.auth.endpoints.logout,
+            output.auth.endpoints.me,
+            output.auth.endpoints.refresh,
+          ]),
+
+        activation:
+          normalizePathList([
+            ...(output.auth.endpointCandidates.activateAccount || []),
+            ...(output.auth.endpointCandidates.activateFirstUser || []),
+            ...(output.auth.endpointCandidates.validateActivationToken || []),
+          ]),
+
+        passwordReset:
+          normalizePathList([
+            ...(output.auth.endpointCandidates.requestPasswordReset || []),
+            ...(output.auth.endpointCandidates.confirmPasswordReset || []),
+            ...(output.auth.endpointCandidates.validateResetToken || []),
+          ]),
+
+        twoFactor:
+          normalizePathList([
+            ...(output.auth.endpointCandidates.twoFactorLogin || []),
+            ...(output.auth.endpointCandidates.twoFactorRequest || []),
+            ...(output.auth.endpointCandidates.twoFactorResend || []),
+          ]),
       };
-
-    /*
-      Reafirmaciones críticas.
-    */
-    output.auth.endpoints.me =
-      "/api/auth/me";
-
-    output.auth.endpoints.activate =
-      "/api/auth/activate";
-
-    output.auth.endpoints.activateAccount =
-      "/api/auth/activate";
-
-    output.auth.endpoints.activation =
-      "/api/auth/activate";
-
-    output.auth.endpoints.activateAccountLegacy =
-      "/api/auth/activate-account";
   }
 
   if (output.api) {
@@ -3010,8 +3364,17 @@ function normalizeFinalConfig(source = {}) {
     output.api.canonicalProductionBase =
       CANONICAL_PRODUCTION_API_BASE;
 
+    output.api.canonicalBackendOrigins =
+      CANONICAL_BACKEND_API_ORIGINS;
+
     output.api.forbiddenFrontendOrigins =
       FORBIDDEN_FRONTEND_API_ORIGINS;
+
+    output.api.publicPaths =
+      output.publicApiPaths;
+
+    output.api.privatePaths =
+      output.privateApiPaths;
 
     output.api.timeout =
       safeNumber(
@@ -3139,6 +3502,9 @@ function normalizeFinalConfig(source = {}) {
     output.security.canonicalProductionApiBase =
       CANONICAL_PRODUCTION_API_BASE;
 
+    output.security.canonicalBackendApiOrigins =
+      CANONICAL_BACKEND_API_ORIGINS;
+
     output.security.forbiddenFrontendApiOrigins =
       FORBIDDEN_FRONTEND_API_ORIGINS;
   }
@@ -3175,12 +3541,28 @@ function normalizeFinalConfig(source = {}) {
 
     output.api.sameOrigin =
       !output.apiBase;
+
+    output.api.publicPaths =
+      output.publicApiPaths;
+
+    output.api.privatePaths =
+      output.privateApiPaths;
   }
 
-  if (output.auth?.publicApiPaths) {
+  if (output.auth) {
     output.auth.publicApiPaths =
       normalizeApiPathList(
         output.auth.publicApiPaths
+      );
+
+    output.auth.privateApiPaths =
+      normalizePathList(
+        output.auth.privateApiPaths
+      );
+
+    output.auth.endpoints =
+      normalizeEndpointMap(
+        output.auth.endpoints
       );
   }
 
@@ -3219,6 +3601,10 @@ export function getCanonicalProductionApiBase() {
 
 export function isForbiddenFrontendApiOrigin(value = "") {
   return isForbiddenFrontendApiBase(value);
+}
+
+export function isCanonicalBackendApiBase(value = "") {
+  return isCanonicalBackendApiOrigin(value);
 }
 
 export function getRoute(key = "home", fallback = "/") {
@@ -3442,6 +3828,18 @@ export function getAuthEndpointCandidates(key = "") {
     : [];
 }
 
+export function getAuthEndpointGroup(key = "") {
+  const cleanKey =
+    safeText(key, "");
+
+  const group =
+    config.auth?.endpointGroups?.[cleanKey];
+
+  return Array.isArray(group)
+    ? [...group]
+    : [];
+}
+
 export function getResourceEndpoint(resource = "", key = "base") {
   const resourceKey =
     safeText(resource, "");
@@ -3477,6 +3875,9 @@ export function getConfigSnapshot() {
 
     canonicalProductionApiBase:
       config.canonicalProductionApiBase,
+
+    canonicalBackendApiOrigins:
+      config.canonicalBackendApiOrigins,
 
     forbiddenFrontendApiOrigins:
       config.forbiddenFrontendApiOrigins,
@@ -3555,6 +3956,12 @@ export function getConfigSnapshot() {
 
     authEndpoints:
       config.auth.endpoints,
+
+    authEndpointCandidates:
+      config.auth.endpointCandidates,
+
+    authEndpointGroups:
+      config.auth.endpointGroups,
 
     resources:
       config.resources,

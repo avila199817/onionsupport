@@ -2,7 +2,7 @@
    Onion SPA - Auth Storage
    Archivo: src/features/auth/storage.js
 
-   AUTH STORAGE · FINAL EXTREME PRO SYSTEM · 11/10
+   AUTH STORAGE · FINAL EXTREME PRO SYSTEM · 15/10
 
    RESPONSABILIDADES:
    - centralizar storage auth
@@ -47,13 +47,16 @@ import {
 ========================================================= */
 
 export const AUTH_STORAGE_VERSION =
-  "11.0.0";
+  "15.0.0";
 
 const DEFAULT_PREFIX =
   "onion";
 
 const DEFAULT_SESSION_VALUE_MAX =
   200;
+
+const DEFAULT_TEXT_VALUE_MAX =
+  2048;
 
 const DEFAULT_TOKEN_MAX =
   8192;
@@ -94,11 +97,13 @@ const CORRUPTED_VALUES =
     "\"null\"",
     "false",
     "\"false\"",
+    "true",
+    "\"true\"",
     "nan",
+    "none",
     "{}",
     "[]",
     "[object object]",
-    "[object Object]",
     "\"\"",
     "''",
   ]);
@@ -221,6 +226,13 @@ function isPlainObject(value) {
   );
 }
 
+function isAnyObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object"
+  );
+}
+
 function isFunction(value) {
   return typeof value === "function";
 }
@@ -262,6 +274,8 @@ function safeBool(value, fallback = false) {
         "sí",
         "ok",
         "on",
+        "enabled",
+        "active",
       ].includes(key)
     ) {
       return true;
@@ -273,6 +287,8 @@ function safeBool(value, fallback = false) {
         "0",
         "no",
         "off",
+        "disabled",
+        "inactive",
       ].includes(key)
     ) {
       return false;
@@ -297,6 +313,22 @@ function safeObject(value) {
     : {};
 }
 
+function safeArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return [];
+  }
+
+  return [value];
+}
+
 function hasOwn(obj, key) {
   return Boolean(
     obj &&
@@ -311,7 +343,7 @@ function hasOwn(obj, key) {
 function unique(values = []) {
   return Array.from(
     new Set(
-      values
+      safeArray(values)
         .flat(Infinity)
         .map((item) =>
           safeText(item, "")
@@ -347,7 +379,124 @@ function safeWarn(...args) {
   } catch {}
 }
 
-function safeEmit(eventName, payload = {}) {
+/* =========================================================
+   SANITIZE / EVENTS
+========================================================= */
+
+function redactString(value = "") {
+  return safeText(value, "")
+    .replace(
+      /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token|temporaryToken|temporary_token|twoFactorToken|two_factor_token|mfaToken|mfa_token)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(
+      /(\/activate-account\/)([^/?#\s]+)/gi,
+      "$1***"
+    )
+    .replace(
+      /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+      "$1***"
+    )
+    .replace(
+      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+      "$1***"
+    )
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
+}
+
+function sanitizePayload(value, depth = 0, keyHint = "") {
+  const lowerKey =
+    safeText(keyHint, "").toLowerCase();
+
+  if (
+    /token|authorization|secret|password|credential|cookie|jwt|bearer|refresh|access|otp|mfa|2fa|code/i.test(lowerKey)
+  ) {
+    return value
+      ? "***"
+      : value;
+  }
+
+  if (depth > 5) {
+    return "[MaxDepth]";
+  }
+
+  if (typeof value === "string") {
+    return redactString(value);
+  }
+
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "bigint") {
+    return String(value);
+  }
+
+  if (typeof value === "function") {
+    return "[Function]";
+  }
+
+  if (value instanceof Error) {
+    return {
+      name:
+        value.name || "Error",
+
+      message:
+        redactString(value.message || ""),
+
+      code:
+        value.code || null,
+
+      status:
+        value.status || value.statusCode || null,
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 80)
+      .map((item) =>
+        sanitizePayload(
+          item,
+          depth + 1,
+          keyHint
+        )
+      );
+  }
+
+  if (isAnyObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value).slice(0, 100)) {
+      output[key] =
+        sanitizePayload(
+          item,
+          depth + 1,
+          key
+        );
+    }
+
+    return output;
+  }
+
+  return redactString(String(value));
+}
+
+function sanitizeMeta(meta = {}) {
+  return sanitizePayload(
+    safeObject(meta)
+  );
+}
+
+function safeEmit(eventName, payload = {}, options = {}) {
   const name =
     safeText(eventName, "");
 
@@ -355,10 +504,28 @@ function safeEmit(eventName, payload = {}) {
     return false;
   }
 
+  if (
+    options?.emit === false ||
+    options?.silent === true
+  ) {
+    return false;
+  }
+
   try {
     AppCore?.events?.emit?.(
       name,
-      payload
+      sanitizePayload({
+        source:
+          "auth.storage",
+
+        version:
+          AUTH_STORAGE_VERSION,
+
+        at:
+          safeIsoNow(),
+
+        ...safeObject(payload),
+      })
     );
 
     return true;
@@ -402,28 +569,6 @@ function recordStorageError(source = "storage", error = null, meta = {}) {
   return payload;
 }
 
-function sanitizeMeta(meta = {}) {
-  const source =
-    safeObject(meta);
-
-  const output =
-    {};
-
-  for (const [key, value] of Object.entries(source)) {
-    if (/token|session|authorization|secret|password|code/i.test(key)) {
-      output[key] =
-        value ? "***" : value;
-
-      continue;
-    }
-
-    output[key] =
-      value;
-  }
-
-  return output;
-}
-
 /* =========================================================
    CONFIG
 ========================================================= */
@@ -445,6 +590,15 @@ function getSessionValueMaxLen() {
       AUTH_CONSTANTS?.sessionValueMaxLength,
       DEFAULT_SESSION_VALUE_MAX
     ) || DEFAULT_SESSION_VALUE_MAX
+  );
+}
+
+function getTextValueMaxLen() {
+  return (
+    safeNumber(
+      AUTH_CONSTANTS?.textValueMaxLength,
+      DEFAULT_TEXT_VALUE_MAX
+    ) || DEFAULT_TEXT_VALUE_MAX
   );
 }
 
@@ -738,6 +892,8 @@ function getSlotKeys(slot = "") {
       "onion_refresh_token",
       "onion:refreshToken",
       "onion:refresh_token",
+      "onion.refreshToken",
+      "onion.refresh_token",
     ],
 
     tempToken: [
@@ -764,6 +920,8 @@ function getSlotKeys(slot = "") {
       "onion_mfa_token",
       "onion:tempToken",
       "onion:temp_token",
+      "onion.tempToken",
+      "onion.temp_token",
     ],
 
     accessToken: [
@@ -791,6 +949,9 @@ function getSlotKeys(slot = "") {
       "onion:token",
       "onion:accessToken",
       "onion:access_token",
+      "onion.token",
+      "onion.accessToken",
+      "onion.access_token",
     ],
 
     sessionId: [
@@ -807,6 +968,8 @@ function getSlotKeys(slot = "") {
       "onion_session_id",
       "onion:sessionId",
       "onion:session_id",
+      "onion.sessionId",
+      "onion.session_id",
     ],
 
     sessionUserId: [
@@ -829,6 +992,10 @@ function getSlotKeys(slot = "") {
       "onion:session_user_id",
       "onion:userId",
       "onion:user_id",
+      "onion.sessionUserId",
+      "onion.session_user_id",
+      "onion.userId",
+      "onion.user_id",
     ],
 
     userSlug: [
@@ -869,6 +1036,7 @@ function getSlotKeys(slot = "") {
       "session.role",
       "onion_role",
       "onion:role",
+      "onion.role",
     ],
 
     lastUsername: [
@@ -928,6 +1096,55 @@ function getSlotKeys(slot = "") {
   );
 }
 
+function getWriteSlotKeys(slot = "") {
+  const keys =
+    getStorageKeys();
+
+  const map = {
+    refreshToken: [
+      keys.refreshToken,
+      "refreshToken",
+      "refresh_token",
+    ],
+
+    tempToken: [
+      keys.tempToken,
+      "tempToken",
+      "temp_token",
+    ],
+
+    accessToken: [
+      keys.accessToken,
+      keys.token,
+      "accessToken",
+      "access_token",
+      "token",
+    ],
+
+    sessionId: [
+      keys.sessionId,
+      "sessionId",
+      "session_id",
+    ],
+
+    sessionUserId: [
+      keys.sessionUserId,
+      keys.userId,
+      "sessionUserId",
+      "session_user_id",
+      "userId",
+      "user_id",
+    ],
+  };
+
+  return unique(
+    map[slot] || [
+      keys[slot],
+      slot,
+    ]
+  );
+}
+
 function getKnownAuthKeys() {
   const keys =
     getStorageKeys();
@@ -954,9 +1171,12 @@ function getCoreAuthStorageKeys() {
   return unique([
     AppCore?.config?.storageKeys?.token,
     AppCore?.config?.storageKeys?.accessToken,
+    AppCore?.config?.storageKeys?.access_token,
     AppCore?.config?.storageKeys?.user,
     AppCore?.config?.storageKeys?.refreshToken,
+    AppCore?.config?.storageKeys?.refresh_token,
     AppCore?.config?.storageKeys?.tempToken,
+    AppCore?.config?.storageKeys?.temp_token,
     AppCore?.config?.storageKeys?.sessionId,
     AppCore?.config?.storageKeys?.sessionUserId,
     AppCore?.config?.storageKeys?.role,
@@ -965,6 +1185,9 @@ function getCoreAuthStorageKeys() {
     "accessToken",
     "access_token",
     "user",
+    "currentUser",
+    "authUser",
+    "sessionUser",
     "refreshToken",
     "refresh_token",
     "tempToken",
@@ -977,11 +1200,16 @@ function getCoreAuthStorageKeys() {
     "two_factor_token",
     "mfaToken",
     "mfa_token",
+    "session",
+    "sessionData",
     "sessionId",
     "session_id",
     "sessionUserId",
     "session_user_id",
     "role",
+    "rol",
+    "userRole",
+    "user_role",
   ]);
 }
 
@@ -1017,6 +1245,8 @@ function getLegacyAuthKeys() {
     "onion:refresh_token",
     "onion:tempToken",
     "onion:temp_token",
+    "onion:session",
+    "onion:sessionData",
     "onion:sessionId",
     "onion:session_id",
     "onion:sessionUserId",
@@ -1037,6 +1267,8 @@ function getLegacyAuthKeys() {
     "onion.refresh_token",
     "onion.tempToken",
     "onion.temp_token",
+    "onion.session",
+    "onion.sessionData",
     "onion.sessionId",
     "onion.session_id",
     "onion.sessionUserId",
@@ -1065,11 +1297,15 @@ function getLegacyAuthKeys() {
     "accessToken",
     "access_token",
     "session",
+    "sessionData",
     "session_id",
     "sessionId",
     "session_user_id",
     "sessionUserId",
     "user",
+    "currentUser",
+    "authUser",
+    "sessionUser",
     "user_id",
     "userId",
     "user_name",
@@ -1088,6 +1324,8 @@ function getLegacyAuthKeys() {
     "auth.refresh_token",
     "auth.tempToken",
     "auth.temp_token",
+    "auth.session",
+    "auth.sessionData",
     "auth.sessionId",
     "auth.session_id",
     "auth.sessionUserId",
@@ -1124,8 +1362,11 @@ function isCorruptedValue(value) {
   return CORRUPTED_VALUES.has(text);
 }
 
-function pickFromObject(obj = {}, preferredKeys = []) {
-  if (!isPlainObject(obj)) {
+function pickFromObject(obj = {}, preferredKeys = [], depth = 0) {
+  if (
+    !isPlainObject(obj) ||
+    depth > 4
+  ) {
     return "";
   }
 
@@ -1154,7 +1395,8 @@ function pickFromObject(obj = {}, preferredKeys = []) {
       const nested =
         pickFromObject(
           value,
-          preferredKeys
+          preferredKeys,
+          depth + 1
         );
 
       if (nested) {
@@ -1188,7 +1430,8 @@ function pickFromObject(obj = {}, preferredKeys = []) {
       const nested =
         pickFromObject(
           value,
-          preferredKeys
+          preferredKeys,
+          depth + 1
         );
 
       if (nested) {
@@ -1261,7 +1504,7 @@ function safeJsonUnwrap(value, preferredKeys = []) {
   }
 }
 
-function normalizeStoredValue(value = "") {
+function normalizeStoredValue(value = "", maxLen = getSessionValueMaxLen()) {
   const unwrapped =
     safeJsonUnwrap(
       value,
@@ -1272,17 +1515,26 @@ function normalizeStoredValue(value = "") {
     return "";
   }
 
+  const limit =
+    Math.max(
+      1,
+      safeNumber(
+        maxLen,
+        getSessionValueMaxLen()
+      )
+    );
+
   try {
     return (
       normalizeSessionValue(
         unwrapped,
-        getSessionValueMaxLen()
+        limit
       ) || ""
     );
   } catch {
     return safeText(unwrapped, "").slice(
       0,
-      getSessionValueMaxLen()
+      limit
     );
   }
 }
@@ -1307,7 +1559,11 @@ function normalizeStoredToken(value = "") {
         .trim();
   }
 
-  if (isCorruptedValue(token)) {
+  if (
+    !token ||
+    isCorruptedValue(token) ||
+    /[\r\n\t\s]/.test(token)
+  ) {
     return "";
   }
 
@@ -1335,7 +1591,10 @@ function normalizeStoredSessionId(value = "") {
       SESSION_ID_PICK_KEYS
     );
 
-  return normalizeStoredValue(unwrapped);
+  return normalizeStoredValue(
+    unwrapped,
+    getSessionValueMaxLen()
+  );
 }
 
 function normalizeStoredSessionUserId(value = "") {
@@ -1345,7 +1604,17 @@ function normalizeStoredSessionUserId(value = "") {
       SESSION_USER_ID_PICK_KEYS
     );
 
-  return normalizeStoredValue(unwrapped);
+  return normalizeStoredValue(
+    unwrapped,
+    getSessionValueMaxLen()
+  );
+}
+
+function normalizeStoredText(value = "") {
+  return normalizeStoredValue(
+    value,
+    getTextValueMaxLen()
+  );
 }
 
 function normalizeSessionData(sessionData = null, user = null) {
@@ -1359,7 +1628,7 @@ function normalizeSessionData(sessionData = null, user = null) {
     safeObject(user);
 
   const rawUser =
-    safeObject(raw.user);
+    safeObject(raw.user || raw.usuario);
 
   const sessionId =
     normalizeStoredSessionId(
@@ -1414,6 +1683,9 @@ function normalizeSessionData(sessionData = null, user = null) {
       sessionId || "",
 
     userId:
+      userId || "",
+
+    sessionUserId:
       userId || "",
   };
 }
@@ -1971,7 +2243,7 @@ function readRaw(key, fallback = "", preferredKeys = []) {
 }
 
 function readFirst(keys = [], fallback = "", preferredKeys = []) {
-  for (const key of keys) {
+  for (const key of unique(keys)) {
     const value =
       readRaw(
         key,
@@ -1999,8 +2271,19 @@ function writeRaw(key, value, options = {}) {
     safeText(value, "");
 
   if (!finalValue) {
-    return removeRaw(cleanKey);
+    return removeRaw(
+      cleanKey,
+      {
+        emit:
+          options.emit,
+        silent:
+          options.silent,
+      }
+    );
   }
+
+  const opts =
+    safeObject(options);
 
   const {
     sessionOnly = false,
@@ -2009,7 +2292,7 @@ function writeRaw(key, value, options = {}) {
     localStorage = true,
     sessionStorage = true,
     memory = true,
-  } = safeObject(options);
+  } = opts;
 
   const appOk =
     appStorage !== false &&
@@ -2077,10 +2360,8 @@ function writeRaw(key, value, options = {}) {
         memory:
           Boolean(memoryOk),
       },
-
-      at:
-        safeIsoNow(),
-    }
+    },
+    opts
   );
 
   return ok;
@@ -2091,11 +2372,21 @@ function writeRawMany(keys = [], value, options = {}) {
     safeText(value, "");
 
   if (!cleanValue) {
-    for (const key of keys) {
-      removeRaw(key);
+    let removed =
+      false;
+
+    for (const key of unique(keys)) {
+      removed =
+        removeRaw(
+          key,
+          {
+            emit:
+              false,
+          }
+        ) || removed;
     }
 
-    return false;
+    return removed;
   }
 
   let ok =
@@ -2113,7 +2404,7 @@ function writeRawMany(keys = [], value, options = {}) {
   return ok;
 }
 
-function removeRaw(key) {
+function removeRaw(key, options = {}) {
   const cleanKey =
     safeText(key, "");
 
@@ -2168,10 +2459,8 @@ function removeRaw(key) {
         memory:
           Boolean(memoryOk),
       },
-
-      at:
-        safeIsoNow(),
-    }
+    },
+    options
   );
 
   return ok;
@@ -2182,7 +2471,15 @@ function writeNullable(key, value, options = {}) {
     safeText(value, "");
 
   if (!finalValue) {
-    removeRaw(key);
+    removeRaw(
+      key,
+      {
+        ...options,
+        emit:
+          options.emit === true,
+      }
+    );
+
     return false;
   }
 
@@ -2193,21 +2490,43 @@ function writeNullable(key, value, options = {}) {
   );
 }
 
+function clearSlot(slot = "") {
+  const keys =
+    getSlotKeys(slot);
+
+  let removed =
+    false;
+
+  for (const key of keys) {
+    removed =
+      removeRaw(
+        key,
+        {
+          emit:
+            false,
+          silent:
+            true,
+        }
+      ) || removed;
+  }
+
+  return removed;
+}
+
 /* =========================================================
    TOKENS
 ========================================================= */
 
 export function persistRefreshToken(token = null) {
-  const keys =
-    getStorageKeys();
-
   const normalized =
     normalizeStoredToken(token);
 
+  if (!normalized) {
+    return clearSlot("refreshToken");
+  }
+
   return writeRawMany(
-    [
-      keys.refreshToken,
-    ],
+    getWriteSlotKeys("refreshToken"),
     normalized,
     {
       localOnly:
@@ -2236,16 +2555,15 @@ export function hasRefreshToken() {
 }
 
 export function persistTempToken(token = null) {
-  const keys =
-    getStorageKeys();
-
   const normalized =
     normalizeStoredToken(token);
 
+  if (!normalized) {
+    return clearSlot("tempToken");
+  }
+
   return writeRawMany(
-    [
-      keys.tempToken,
-    ],
+    getWriteSlotKeys("tempToken"),
     normalized,
     {
       localOnly:
@@ -2274,11 +2592,12 @@ export function hasTempToken() {
 }
 
 export function persistAccessToken(token = null) {
-  const keys =
-    getStorageKeys();
-
   const normalized =
     normalizeStoredToken(token);
+
+  if (!normalized) {
+    return clearSlot("accessToken");
+  }
 
   /*
     Compat crítica:
@@ -2286,13 +2605,7 @@ export function persistAccessToken(token = null) {
     Se persisten ambas claves lógicas, sin duplicar valor corrupto.
   */
   return writeRawMany(
-    unique([
-      keys.accessToken,
-      keys.token,
-      "accessToken",
-      "access_token",
-      "token",
-    ]),
+    getWriteSlotKeys("accessToken"),
     normalized,
     {
       localOnly:
@@ -2325,9 +2638,6 @@ export function hasAccessToken() {
 ========================================================= */
 
 export function persistSessionContext(sessionData = null, user = null) {
-  const keys =
-    getStorageKeys();
-
   const {
     sessionId,
     userId,
@@ -2337,15 +2647,31 @@ export function persistSessionContext(sessionData = null, user = null) {
       user
     );
 
-  writeNullable(
-    keys.sessionId,
-    sessionId
-  );
+  if (sessionId) {
+    writeRawMany(
+      getWriteSlotKeys("sessionId"),
+      sessionId,
+      {
+        emit:
+          false,
+      }
+    );
+  } else {
+    clearSlot("sessionId");
+  }
 
-  writeNullable(
-    keys.sessionUserId,
-    userId
-  );
+  if (userId) {
+    writeRawMany(
+      getWriteSlotKeys("sessionUserId"),
+      userId,
+      {
+        emit:
+          false,
+      }
+    );
+  } else {
+    clearSlot("sessionUserId");
+  }
 
   safeEmit(
     AUTH_STORAGE_EVENTS.sessionContext,
@@ -2355,9 +2681,6 @@ export function persistSessionContext(sessionData = null, user = null) {
 
       hasUserId:
         Boolean(userId),
-
-      at:
-        safeIsoNow(),
     }
   );
 
@@ -2405,17 +2728,21 @@ export function persistAuxSessionData(user = null) {
         safeUser.mail ??
         safeUser.name ??
         safeUser.nombre ??
-        ""
+        "",
+      getSessionValueMaxLen()
     );
 
   const slug =
     normalizeStoredValue(
       safeUser.slug ??
+        safeUser.usernameLower ??
+        safeUser.username_lower ??
         safeUser.username ??
         safeUser.userName ??
         safeUser.user_name ??
         safeUser.email ??
-        ""
+        "",
+      getSessionValueMaxLen()
     );
 
   const role =
@@ -2424,54 +2751,104 @@ export function persistAuxSessionData(user = null) {
         safeUser.rol ??
         safeUser.userRole ??
         safeUser.user_role ??
-        ""
+        "",
+      getSessionValueMaxLen()
     );
 
   if (userId) {
-    writeRaw(
-      keys.sessionUserId,
-      userId
+    writeRawMany(
+      getWriteSlotKeys("sessionUserId"),
+      userId,
+      {
+        emit:
+          false,
+      }
     );
   } else {
-    removeRaw(keys.sessionUserId);
+    clearSlot("sessionUserId");
   }
 
   if (username) {
     writeRaw(
       keys.userName,
-      username
+      username,
+      {
+        emit:
+          false,
+      }
     );
 
     writeRaw(
       keys.username,
-      username
+      username,
+      {
+        emit:
+          false,
+      }
     );
 
     writeRaw(
       keys.lastUsername,
-      username
+      username,
+      {
+        emit:
+          false,
+      }
     );
   } else {
-    removeRaw(keys.userName);
-    removeRaw(keys.username);
+    removeRaw(
+      keys.userName,
+      {
+        emit:
+          false,
+      }
+    );
+
+    removeRaw(
+      keys.username,
+      {
+        emit:
+          false,
+      }
+    );
   }
 
   if (slug) {
     writeRaw(
       keys.userSlug,
-      slug
+      slug,
+      {
+        emit:
+          false,
+      }
     );
   } else {
-    removeRaw(keys.userSlug);
+    removeRaw(
+      keys.userSlug,
+      {
+        emit:
+          false,
+        }
+    );
   }
 
   if (role) {
     writeRaw(
       keys.role,
-      role
+      role,
+      {
+        emit:
+          false,
+      }
     );
   } else {
-    removeRaw(keys.role);
+    removeRaw(
+      keys.role,
+      {
+        emit:
+          false,
+      }
+    );
   }
 
   safeEmit(
@@ -2488,9 +2865,6 @@ export function persistAuxSessionData(user = null) {
 
       hasRole:
         Boolean(role),
-
-      at:
-        safeIsoNow(),
     }
   );
 
@@ -2515,6 +2889,34 @@ export function getStoredSessionUserId() {
       SESSION_USER_ID_PICK_KEYS
     )
   );
+}
+
+export function getStoredSessionContext() {
+  const sessionId =
+    getStoredSessionId();
+
+  const sessionUserId =
+    getStoredSessionUserId();
+
+  return {
+    sessionId:
+      sessionId || null,
+
+    session_id:
+      sessionId || null,
+
+    userId:
+      sessionUserId || null,
+
+    user_id:
+      sessionUserId || null,
+
+    sessionUserId:
+      sessionUserId || null,
+
+    session_user_id:
+      sessionUserId || null,
+  };
 }
 
 export function hasSessionContext() {
@@ -2549,7 +2951,8 @@ export function getStoredUserSlug() {
       getSlotKeys("userSlug"),
       "",
       TEXT_VALUE_PICK_KEYS
-    )
+    ),
+    getSessionValueMaxLen()
   );
 }
 
@@ -2559,7 +2962,8 @@ export function getStoredUserName() {
       getSlotKeys("userName"),
       "",
       TEXT_VALUE_PICK_KEYS
-    )
+    ),
+    getSessionValueMaxLen()
   );
 }
 
@@ -2569,7 +2973,8 @@ export function getStoredRole() {
       getSlotKeys("role"),
       "",
       TEXT_VALUE_PICK_KEYS
-    )
+    ),
+    getSessionValueMaxLen()
   );
 }
 
@@ -2579,7 +2984,8 @@ export function getStoredLastUsername() {
       getSlotKeys("lastUsername"),
       "",
       TEXT_VALUE_PICK_KEYS
-    )
+    ),
+    getSessionValueMaxLen()
   );
 }
 
@@ -2589,12 +2995,12 @@ export function persistLastLoginIdentifier(value = null) {
 
   return writeNullable(
     keys.lastLoginIdentifier,
-    normalizeStoredValue(value)
+    normalizeStoredText(value)
   );
 }
 
 export function getStoredLastLoginIdentifier() {
-  return normalizeStoredValue(
+  return normalizeStoredText(
     readFirst(
       getSlotKeys("lastLoginIdentifier"),
       "",
@@ -2609,12 +3015,12 @@ export function persistLastResetIdentifier(value = null) {
 
   return writeNullable(
     keys.lastResetIdentifier,
-    normalizeStoredValue(value)
+    normalizeStoredText(value)
   );
 }
 
 export function getStoredLastResetIdentifier() {
-  return normalizeStoredValue(
+  return normalizeStoredText(
     readFirst(
       getSlotKeys("lastResetIdentifier"),
       "",
@@ -2629,18 +3035,22 @@ export function persistRedirectAfterLogin(value = null) {
 
   return writeNullable(
     keys.redirectAfterLogin,
-    normalizeStoredValue(value)
+    normalizeStoredText(value)
   );
 }
 
 export function getStoredRedirectAfterLogin() {
-  return normalizeStoredValue(
+  return normalizeStoredText(
     readFirst(
       getSlotKeys("redirectAfterLogin"),
       "",
       TEXT_VALUE_PICK_KEYS
     )
   );
+}
+
+export function removeStoredRedirectAfterLogin() {
+  return clearSlot("redirectAfterLogin");
 }
 
 /* =========================================================
@@ -2669,7 +3079,17 @@ export function repairCorruptedAuthStorage() {
       continue;
     }
 
-    if (removeRaw(key)) {
+    if (
+      removeRaw(
+        key,
+        {
+          emit:
+            false,
+          silent:
+            true,
+        }
+      )
+    ) {
       removed += 1;
     }
   }
@@ -2678,8 +3098,6 @@ export function repairCorruptedAuthStorage() {
     AUTH_STORAGE_EVENTS.repair,
     {
       removed,
-      at:
-        safeIsoNow(),
     }
   );
 
@@ -2715,9 +3133,6 @@ export function clearAuthStorage(options = {}) {
         )
       : true;
 
-  const includeRuntime =
-    opts.includeRuntime === true;
-
   const keys =
     includeLegacy
       ? getAllAuthClearKeys()
@@ -2727,7 +3142,17 @@ export function clearAuthStorage(options = {}) {
     0;
 
   for (const key of keys) {
-    if (removeRaw(key)) {
+    if (
+      removeRaw(
+        key,
+        {
+          emit:
+            false,
+          silent:
+            true,
+        }
+      )
+    ) {
       removed += 1;
     }
   }
@@ -2749,23 +3174,6 @@ export function clearAuthStorage(options = {}) {
       - window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__
       - window.__ONION_RESET_CONFIRM_INITIAL_URL__
   */
-  if (
-    includeRuntime &&
-    isBrowser()
-  ) {
-    for (const key of PROTECTED_RUNTIME_KEYS) {
-      try {
-        /*
-          Sólo si en algún test técnico se pide explícitamente.
-          Por defecto NO se ejecuta.
-        */
-        if (opts.clearRuntimeProtectedKeys === true) {
-          window[key] =
-            "";
-        }
-      } catch {}
-    }
-  }
 
   if (!silent) {
     safeEmit(
@@ -2774,8 +3182,6 @@ export function clearAuthStorage(options = {}) {
         removed,
         includeLegacy:
           Boolean(includeLegacy),
-        at:
-          safeIsoNow(),
       }
     );
   }
@@ -2944,6 +3350,7 @@ export default {
 
   getStoredSessionId,
   getStoredSessionUserId,
+  getStoredSessionContext,
 
   hasSessionContext,
   hasRefreshContext,
@@ -2962,6 +3369,7 @@ export default {
 
   persistRedirectAfterLogin,
   getStoredRedirectAfterLogin,
+  removeStoredRedirectAfterLogin,
 
   repairCorruptedAuthStorage,
 

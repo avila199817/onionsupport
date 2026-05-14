@@ -2,7 +2,7 @@
    Onion SPA - Auth Normalize
    Archivo: src/features/auth/normalize.js
 
-   AUTH NORMALIZER · FINAL EXTREME PRO SYSTEM · 11/10
+   AUTH NORMALIZER · FINAL EXTREME PRO SYSTEM · 15/10
 
    RESPONSABILIDADES:
    - normalizar usuarios heterogéneos del backend
@@ -37,14 +37,17 @@ import {
 
 import {
   AUTH_CONSTANTS,
+  AUTH_FAILURE_CODES as AUTH_FAILURE_CODE_LIST,
+  AUTH_SUCCESS_STATUSES as AUTH_SUCCESS_STATUS_LIST,
+  AUTH_2FA_STATUSES as AUTH_2FA_STATUS_LIST,
 } from "./constants.js";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-const AUTH_NORMALIZE_VERSION =
-  "11.0.0";
+export const AUTH_NORMALIZE_VERSION =
+  "15.0.0";
 
 const DEFAULT_TOKEN_MAX_LENGTH =
   8192;
@@ -65,6 +68,7 @@ const ADMIN_ROLE_KEYS =
     "administrador",
     "superadmin",
     "super_admin",
+    "super-administrador",
     "super_administrador",
     "owner",
     "root",
@@ -93,6 +97,7 @@ const MANAGER_ROLE_KEYS =
     "gerente",
     "lead",
     "team_lead",
+    "team-lead",
     "supervisor",
     "responsable",
   ]);
@@ -108,9 +113,14 @@ const CLIENT_ROLE_KEYS =
 
 const AUTH_FAILURE_CODES =
   new Set([
+    ...(Array.isArray(AUTH_FAILURE_CODE_LIST)
+      ? AUTH_FAILURE_CODE_LIST
+      : []),
+
     "INVALID_CREDENTIALS",
     "MISSING_CREDENTIALS",
     "ACCOUNT_TEMPORARILY_LOCKED",
+    "ACCOUNT_LOCKED",
     "ACCOUNT_DISABLED",
     "USER_DISABLED",
     "USER_NOT_AVAILABLE",
@@ -163,6 +173,10 @@ const AUTH_FAILURE_STATUS_KEYS =
 
 const AUTH_SUCCESS_STATUS_KEYS =
   new Set([
+    ...(Array.isArray(AUTH_SUCCESS_STATUS_LIST)
+      ? AUTH_SUCCESS_STATUS_LIST
+      : []),
+
     "ok",
     "success",
     "successful",
@@ -170,18 +184,23 @@ const AUTH_SUCCESS_STATUS_KEYS =
     "active",
     "valid",
     "token_only",
+    "token-only",
     "user_only",
-    "2fa_required",
-    "mfa_required",
-    "totp_required",
-    "two_factor_required",
+    "user-only",
+    "session",
+    "refreshed",
   ]);
 
 const TWO_FACTOR_STATUS_KEYS =
   new Set([
+    ...(Array.isArray(AUTH_2FA_STATUS_LIST)
+      ? AUTH_2FA_STATUS_LIST
+      : []),
+
     "2fa_required",
     "mfa_required",
     "totp_required",
+    "otp_required",
     "two_factor_required",
     "verification_required",
     "challenge_required",
@@ -218,6 +237,8 @@ const TEMP_TOKEN_KEYS =
     "two_factor_token",
     "mfaToken",
     "mfa_token",
+    "otpToken",
+    "otp_token",
   ]);
 
 const TOKEN_FALSE_VALUES =
@@ -226,6 +247,7 @@ const TOKEN_FALSE_VALUES =
     "null",
     "undefined",
     "false",
+    "true",
     "none",
     "nan",
     "{}",
@@ -386,30 +408,6 @@ function safeObject(value) {
     : {};
 }
 
-function safeClone(value, fallback = null) {
-  if (value === undefined) {
-    return fallback;
-  }
-
-  if (value === null) {
-    return null;
-  }
-
-  try {
-    if (typeof structuredClone === "function") {
-      return structuredClone(value);
-    }
-  } catch {}
-
-  try {
-    return JSON.parse(
-      JSON.stringify(value)
-    );
-  } catch {
-    return fallback;
-  }
-}
-
 function toArray(value) {
   if (Array.isArray(value)) {
     return value;
@@ -461,12 +459,6 @@ function pickFirst(...values) {
   return null;
 }
 
-function pickFirstText(...values) {
-  return normalizeString(
-    pickFirst(...values) || ""
-  );
-}
-
 function pickFirstObject(...values) {
   for (const value of values) {
     if (isObject(value)) {
@@ -492,6 +484,7 @@ function unique(values = []) {
   return Array.from(
     new Set(
       values
+        .flat(Infinity)
         .map((item) =>
           normalizeString(item)
         )
@@ -659,6 +652,12 @@ function pickTokenFromObject(value = null) {
   return null;
 }
 
+export function hasUsableToken(token = null) {
+  return Boolean(
+    normalizeTokenLike(token)
+  );
+}
+
 function normalizeTokenLike(
   value = null,
   maxLength = getTokenMaxLength()
@@ -701,7 +700,10 @@ function normalizeTokenLike(
   const lower =
     normalized.toLowerCase();
 
-  if (TOKEN_FALSE_VALUES.has(lower)) {
+  if (
+    TOKEN_FALSE_VALUES.has(lower) ||
+    /[\r\n\t\s]/.test(normalized)
+  ) {
     return null;
   }
 
@@ -880,7 +882,7 @@ export function expandRoleAliases(roles = []) {
   );
 }
 
-function normalizeCanonicalRole(value = "user") {
+function normalizeCanonicalRole(value = "client") {
   const roles =
     expandRoleAliases(value);
 
@@ -900,7 +902,7 @@ function normalizeCanonicalRole(value = "user") {
     return "client";
   }
 
-  return roles[0] || "user";
+  return roles[0] || "client";
 }
 
 function normalizePermissionList(value) {
@@ -1216,7 +1218,7 @@ function hasTokenLikeKeys(value = {}) {
   );
 }
 
-function isAuthEnvelope(value = {}) {
+export function isAuthEnvelope(value = {}) {
   if (!isObject(value)) {
     return false;
   }
@@ -1257,88 +1259,6 @@ function looksLikeUser(value = null) {
 /* =========================================================
    ENVELOPE HELPERS
 ========================================================= */
-
-function getNestedAuthNodes(payload = {}) {
-  const root =
-    safeObject(payload);
-
-  const data =
-    safeObject(root.data);
-
-  const payloadNode =
-    safeObject(root.payload);
-
-  const result =
-    safeObject(root.result);
-
-  const body =
-    safeObject(root.body);
-
-  const response =
-    safeObject(root.response);
-
-  const responseData =
-    safeObject(response.data);
-
-  const meta =
-    safeObject(root.meta);
-
-  const session =
-    pickFirstObject(
-      root.session,
-      root.sessionData,
-      data.session,
-      data.sessionData,
-      payloadNode.session,
-      payloadNode.sessionData,
-      result.session,
-      result.sessionData,
-      body.session,
-      body.sessionData,
-      responseData.session,
-      responseData.sessionData,
-      meta.session
-    ) || {};
-
-  const auth =
-    pickFirstObject(
-      root.auth,
-      root.authData,
-      data.auth,
-      data.authData,
-      payloadNode.auth,
-      payloadNode.authData,
-      result.auth,
-      result.authData,
-      body.auth,
-      body.authData,
-      responseData.auth,
-      responseData.authData,
-      meta.auth
-    ) || {};
-
-  const sessionData =
-    safeObject(session.data);
-
-  const authData =
-    safeObject(auth.data);
-
-  return {
-    root,
-    data,
-    payload:
-      payloadNode,
-    result,
-    body,
-    response,
-    responseData,
-    meta,
-    session,
-    auth,
-    sessionData,
-    authData,
-  };
-}
 
 function unwrapAuthPayload(payload = null, depth = 0) {
   if (
@@ -1595,6 +1515,9 @@ function createAuthNormalizeError(
     "AuthNormalizeError";
 
   error.status =
+    status;
+
+  error.statusCode =
     status;
 
   error.code =
@@ -1906,17 +1829,21 @@ function collectPermissions(rawUser = {}) {
 
   return unique([
     ...normalizePermissionList(user.permissions),
+    ...normalizePermissionList(user.permisos),
     ...normalizePermissionList(user.scopes),
     ...normalizePermissionList(user.authorities),
 
     ...normalizePermissionList(profile.permissions),
+    ...normalizePermissionList(profile.permisos),
     ...normalizePermissionList(profile.scopes),
     ...normalizePermissionList(profile.authorities),
 
     ...normalizePermissionList(meta.permissions),
+    ...normalizePermissionList(meta.permisos),
     ...normalizePermissionList(meta.scopes),
 
     ...normalizePermissionList(claims.permissions),
+    ...normalizePermissionList(claims.permisos),
     ...normalizePermissionList(claims.scopes),
 
     ...normalizePermissionList(permissionsNode.items),
@@ -1924,17 +1851,21 @@ function collectPermissions(rawUser = {}) {
     ...normalizePermissionList(permissionsNode.scopes),
 
     ...normalizePermissionList(raw.permissions),
+    ...normalizePermissionList(raw.permisos),
     ...normalizePermissionList(raw.scopes),
     ...normalizePermissionList(raw.authorities),
 
     ...normalizePermissionList(rawProfile.permissions),
+    ...normalizePermissionList(rawProfile.permisos),
     ...normalizePermissionList(rawProfile.scopes),
     ...normalizePermissionList(rawProfile.authorities),
 
     ...normalizePermissionList(rawMeta.permissions),
+    ...normalizePermissionList(rawMeta.permisos),
     ...normalizePermissionList(rawMeta.scopes),
 
     ...normalizePermissionList(rawClaims.permissions),
+    ...normalizePermissionList(rawClaims.permisos),
     ...normalizePermissionList(rawClaims.scopes),
 
     ...normalizePermissionList(rawPermissions.items),
@@ -2193,7 +2124,7 @@ export function normalizeUser(rawUser = null) {
       rawAccount.login,
       rawAccount.slug,
 
-      email,
+      email ? email.split("@")[0] : "",
       phone,
       id,
       userId
@@ -2262,7 +2193,11 @@ export function normalizeUser(rawUser = null) {
     collectRoleCandidates(rawUser);
 
   const role =
-    normalizeCanonicalRole(roles);
+    normalizeCanonicalRole(
+      roles.length
+        ? roles
+        : ["client"]
+    );
 
   const permissions =
     collectPermissions(rawUser);
@@ -2292,16 +2227,28 @@ export function normalizeUser(rawUser = null) {
     normalizeTheme(
       pickFirst(
         rawUser.theme,
+        rawUser.mode,
+        rawUser.appearance,
         preferences.theme,
+        preferences.mode,
+        preferences.appearance,
         settings.theme,
+        settings.mode,
+        settings.appearance,
         profile.theme,
         account.theme,
         meta.theme,
         claims.theme,
 
         raw.theme,
+        raw.mode,
+        raw.appearance,
         rawPreferences.theme,
+        rawPreferences.mode,
+        rawPreferences.appearance,
         rawSettings.theme,
+        rawSettings.mode,
+        rawSettings.appearance,
         rawProfile.theme,
         rawAccount.theme,
         rawMeta.theme,
@@ -2353,6 +2300,51 @@ export function normalizeUser(rawUser = null) {
         )
       : null;
 
+  const lang =
+    normalizeString(
+      pickFirst(
+        rawUser.lang,
+        rawUser.language,
+        rawUser.locale,
+
+        preferences.lang,
+        preferences.language,
+        preferences.locale,
+
+        settings.lang,
+        settings.language,
+        settings.locale,
+
+        profile.lang,
+        profile.language,
+        profile.locale,
+
+        account.lang,
+        account.language,
+        account.locale,
+
+        raw.lang,
+        raw.language,
+        raw.locale,
+
+        rawPreferences.lang,
+        rawPreferences.language,
+        rawPreferences.locale,
+
+        rawSettings.lang,
+        rawSettings.language,
+        rawSettings.locale,
+
+        rawProfile.lang,
+        rawProfile.language,
+        rawProfile.locale,
+
+        rawAccount.lang,
+        rawAccount.language,
+        rawAccount.locale
+      ) || ""
+    );
+
   const clienteId =
     pickFirst(
       rawUser.clienteId,
@@ -2392,6 +2384,33 @@ export function normalizeUser(rawUser = null) {
       rawAccount.customer_id
     );
 
+  const tokenVersion =
+    pickFirst(
+      rawUser.tokenVersion,
+      rawUser.token_version,
+      rawUser.tv,
+
+      profile.tokenVersion,
+      profile.token_version,
+      profile.tv,
+
+      account.tokenVersion,
+      account.token_version,
+      account.tv,
+
+      raw.tokenVersion,
+      raw.token_version,
+      raw.tv,
+
+      rawProfile.tokenVersion,
+      rawProfile.token_version,
+      rawProfile.tv,
+
+      rawAccount.tokenVersion,
+      rawAccount.token_version,
+      rawAccount.tv
+    );
+
   const status =
     normalizeRoleKey(
       pickFirst(
@@ -2421,6 +2440,7 @@ export function normalizeUser(rawUser = null) {
       "blocked",
       "suspended",
       "banned",
+      "revoked",
     ].includes(status);
 
   const explicitActiveValue =
@@ -2542,15 +2562,41 @@ export function normalizeUser(rawUser = null) {
 
   return {
     id:
-      id || null,
+      id || userId || null,
 
     userId:
       userId || id || null,
 
+    user_id:
+      userId || id || null,
+
+    uid:
+      userId || id || null,
+
+    sub:
+      userId || id || null,
+
     username,
+    userName:
+      username,
+    user_name:
+      username,
+
+    usernameLower:
+      username || null,
+
+    username_lower:
+      username || null,
+
     slug,
 
     name:
+      displayName || "Usuario",
+
+    nombre:
+      displayName || "Usuario",
+
+    fullName:
       displayName || "Usuario",
 
     displayName:
@@ -2559,7 +2605,19 @@ export function normalizeUser(rawUser = null) {
     email:
       email || "",
 
+    emailLower:
+      email || "",
+
+    email_lower:
+      email || "",
+
     phone:
+      phone || null,
+
+    telefono:
+      phone || null,
+
+    mobile:
       phone || null,
 
     role,
@@ -2569,6 +2627,8 @@ export function normalizeUser(rawUser = null) {
     roles,
 
     permissions,
+    permisos:
+      permissions,
 
     isAdmin:
       roles.some(isAdminRole),
@@ -2620,6 +2680,9 @@ export function normalizeUser(rawUser = null) {
     avatarUrl:
       avatar,
 
+    avatar_url:
+      avatar,
+
     photoUrl:
       avatar,
 
@@ -2656,12 +2719,54 @@ export function normalizeUser(rawUser = null) {
     theme:
       normalizedTheme || null,
 
+    mode:
+      normalizedTheme || null,
+
+    appearance:
+      normalizedTheme || null,
+
+    lang:
+      lang || null,
+
+    language:
+      lang || null,
+
+    locale:
+      lang || null,
+
     emailVerified,
 
     twofa_enabled:
       twofaEnabled,
 
     twofaEnabled,
+
+    twoFactorEnabled:
+      twofaEnabled,
+
+    mfaEnabled:
+      twofaEnabled,
+
+    tokenVersion:
+      tokenVersion ?? null,
+
+    token_version:
+      tokenVersion ?? null,
+
+    tv:
+      tokenVersion ?? null,
+
+    preferences:
+      sanitizeRawObject(
+        preferences,
+        0
+      ) || {},
+
+    settings:
+      sanitizeRawObject(
+        settings,
+        0
+      ) || {},
 
     profile:
       cleanProfile || {},
@@ -2777,11 +2882,32 @@ export function normalizeSessionPayload(payload = null) {
       )
     ) || null;
 
+  const tokenVersion =
+    pickFirst(
+      sessionNode.tokenVersion,
+      sessionNode.token_version,
+      sessionNode.tv,
+
+      pickValueFromObjects(
+        objects,
+        [
+          "tokenVersion",
+          "token_version",
+          "tv",
+        ]
+      ),
+
+      userCandidate?.tokenVersion,
+      userCandidate?.token_version,
+      userCandidate?.tv
+    ) ?? null;
+
   const hasSessionData =
     Boolean(
       sessionId ||
         userId ||
-        expiresAt
+        expiresAt ||
+        tokenVersion !== null
     );
 
   if (!hasSessionData) {
@@ -2798,6 +2924,9 @@ export function normalizeSessionPayload(payload = null) {
     session_id:
       sessionId || null,
 
+    sid:
+      sessionId || null,
+
     userId:
       userId || null,
 
@@ -2812,7 +2941,17 @@ export function normalizeSessionPayload(payload = null) {
 
     expiresAt,
 
+    expires_at:
+      expiresAt,
+
     refreshExpiresAt:
+      pickFirst(
+        sessionNode.refreshExpiresAt,
+        sessionNode.refresh_expires_at,
+        expiresAt
+      ) || null,
+
+    refresh_expires_at:
       pickFirst(
         sessionNode.refreshExpiresAt,
         sessionNode.refresh_expires_at,
@@ -2857,6 +2996,12 @@ export function normalizeSessionPayload(payload = null) {
           ]
         )
       ) || null,
+
+    tokenVersion,
+    token_version:
+      tokenVersion,
+    tv:
+      tokenVersion,
   };
 }
 
@@ -2949,6 +3094,8 @@ export function extractRequires2FA(payload = null) {
     "mfa_required",
     "totpRequired",
     "totp_required",
+    "otpRequired",
+    "otp_required",
     "challengeRequired",
     "challenge_required",
   ];
@@ -2988,7 +3135,12 @@ export function extractUser(payload = null) {
       );
 
     if (looksLikeUser(direct)) {
-      return normalizeUser(direct);
+      const normalized =
+        normalizeUser(direct);
+
+      if (normalized) {
+        return normalized;
+      }
     }
   }
 
@@ -3003,7 +3155,12 @@ export function extractUser(payload = null) {
       hasNestedUserIdentity(payload)
     )
   ) {
-    return normalizeUser(payload);
+    const normalized =
+      normalizeUser(payload);
+
+    if (normalized) {
+      return normalized;
+    }
   }
 
   const unwrapped =
@@ -3136,10 +3293,16 @@ export function validateAuthResponse(response = null, options = {}) {
       accessToken:
         null,
 
-      user:
+      access_token:
         null,
 
+      user:
+        user || null,
+
       refreshToken:
+        null,
+
+      refresh_token:
         null,
 
       session:
@@ -3149,6 +3312,9 @@ export function validateAuthResponse(response = null, options = {}) {
         null,
 
       tempToken:
+        tempToken || null,
+
+      temp_token:
         tempToken || null,
 
       requires2FA:
@@ -3181,10 +3347,22 @@ export function validateAuthResponse(response = null, options = {}) {
       accessToken:
         token || null,
 
+      access_token:
+        token || null,
+
       user:
         user || null,
 
+      usuario:
+        user || null,
+
+      me:
+        user || null,
+
       refreshToken:
+        refreshToken || null,
+
+      refresh_token:
         refreshToken || null,
 
       session:
@@ -3194,6 +3372,9 @@ export function validateAuthResponse(response = null, options = {}) {
         sessionData || null,
 
       tempToken:
+        null,
+
+      temp_token:
         null,
 
       requires2FA:
@@ -3234,10 +3415,16 @@ export function validateAuthResponse(response = null, options = {}) {
       accessToken:
         token || null,
 
+      access_token:
+        token || null,
+
       user:
         null,
 
       refreshToken:
+        refreshToken || null,
+
+      refresh_token:
         refreshToken || null,
 
       session:
@@ -3247,6 +3434,9 @@ export function validateAuthResponse(response = null, options = {}) {
         sessionData || null,
 
       tempToken:
+        null,
+
+      temp_token:
         null,
 
       requires2FA:
@@ -3281,10 +3471,22 @@ export function validateAuthResponse(response = null, options = {}) {
       accessToken:
         null,
 
+      access_token:
+        null,
+
       user:
         user || null,
 
+      usuario:
+        user || null,
+
+      me:
+        user || null,
+
       refreshToken:
+        refreshToken || null,
+
+      refresh_token:
         refreshToken || null,
 
       session:
@@ -3294,6 +3496,9 @@ export function validateAuthResponse(response = null, options = {}) {
         sessionData || null,
 
       tempToken:
+        null,
+
+      temp_token:
         null,
 
       requires2FA:
@@ -3354,6 +3559,9 @@ export function normalizeAuthResponse(response = null, options = {}) {
         getResponseMessage(response) || "",
     };
   } catch (error) {
+    const tempToken =
+      extractTempToken(response);
+
     return {
       ok:
         false,
@@ -3386,10 +3594,16 @@ export function normalizeAuthResponse(response = null, options = {}) {
       accessToken:
         null,
 
-      user:
+      access_token:
         null,
 
+      user:
+        extractUser(response),
+
       refreshToken:
+        null,
+
+      refresh_token:
         null,
 
       session:
@@ -3399,10 +3613,13 @@ export function normalizeAuthResponse(response = null, options = {}) {
         null,
 
       tempToken:
-        null,
+        tempToken || null,
+
+      temp_token:
+        tempToken || null,
 
       requires2FA:
-        false,
+        extractRequires2FA(response),
 
       valid:
         false,
@@ -3414,6 +3631,16 @@ export function normalizeAuthResponse(response = null, options = {}) {
       response,
     };
   }
+}
+
+/*
+  Alias público cómodo para módulos que esperen nombre de payload.
+*/
+export function normalizeAuthPayload(response = null, options = {}) {
+  return normalizeAuthResponse(
+    response,
+    options
+  );
 }
 
 /* =========================================================
@@ -3559,6 +3786,9 @@ export default {
   normalizeRoleList,
   expandRoleAliases,
 
+  hasUsableToken,
+  isAuthEnvelope,
+
   extractToken,
   extractRefreshToken,
   extractTempToken,
@@ -3567,6 +3797,7 @@ export default {
 
   validateAuthResponse,
   normalizeAuthResponse,
+  normalizeAuthPayload,
 
   getAuthNormalizeSnapshot,
 };

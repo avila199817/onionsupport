@@ -2,7 +2,7 @@
    Onion SPA - Sidebar Actions
    Archivo: src/ui/sidebar/actions.js
 
-   ONION SUPPORT · SIDEBAR ACTIONS · 15/10
+   ONION SUPPORT · SIDEBAR ACTIONS · EXTREME 10/10
    BUSINESS ACTIONS ONLY · LOGOUT SAFE · STATE.JS OWNER
 
    RESPONSABILIDADES:
@@ -47,7 +47,7 @@ import {
 ========================================================= */
 
 export const SIDEBAR_ACTIONS_VERSION =
-  "sidebar-actions-v15-business-state-logout-safe";
+  "sidebar-actions-v16-extreme-business-state-logout-safe";
 
 /* =========================================================
    MODULE RUNTIME
@@ -227,17 +227,54 @@ const ROUTE_ALIASES =
     "/servidor": "/servidor",
   });
 
+const SENSITIVE_QUERY_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
+    "code",
+    "t",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
+  ]);
+
+const SENSITIVE_OBJECT_KEY_RE =
+  /token|secret|password|authorization|credential|jwt|bearer|otp|code/i;
+
 const AUTH_STATE_KEYS_TO_NULL =
   Object.freeze([
     "token",
     "accessToken",
     "access_token",
+    "authToken",
+    "auth_token",
+    "jwt",
+    "idToken",
+    "id_token",
 
     "refreshToken",
     "refresh_token",
 
     "tempToken",
     "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
 
     "session",
     "sessionData",
@@ -284,6 +321,7 @@ const AUTH_STATE_KEYS_TO_EMPTY_ARRAY =
   Object.freeze([
     "roles",
     "permissions",
+    "permisos",
     "scopes",
     "groups",
     "authorities",
@@ -293,6 +331,7 @@ const AUTH_STATE_KEYS_TO_FALSE =
   Object.freeze([
     "authenticated",
     "isAuthenticated",
+    "hasToken",
 
     "isAdmin",
     "admin",
@@ -306,12 +345,16 @@ const AUTH_STATE_KEYS_TO_FALSE =
     "isManager",
     "manager",
 
+    "twoFactorPending",
+    "mfaPending",
+
     "loginInProgress",
     "authLoginInProgress",
     "isLoggingIn",
 
     "restoreInProgress",
     "sessionRestoreInProgress",
+    "authRestoreInProgress",
   ]);
 
 /* =========================================================
@@ -386,34 +429,255 @@ function safeIsoDate(ms = nowTs()) {
   }
 }
 
-function safeWarn(AppCore, ...args) {
+function escapeRegExp(value = "") {
+  return String(value)
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function redactSensitiveText(value = "") {
+  let output =
+    safeText(value, "");
+
+  if (!output) {
+    return "";
+  }
+
+  for (const name of SENSITIVE_QUERY_PARAM_NAMES) {
+    try {
+      const escaped =
+        escapeRegExp(name);
+
+      output =
+        output.replace(
+          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
+    } catch {}
+  }
+
   try {
-    AppCore?.utils?.warn?.(
-      LOG_PREFIX,
-      ...args
+    output =
+      output.replace(
+        /(\/activate-account\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
+  } catch {}
+
+  try {
+    output =
+      output.replace(
+        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
+  } catch {}
+
+  try {
+    output =
+      output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
+  } catch {}
+
+  try {
+    output =
+      output.replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
+      );
+  } catch {}
+
+  return output;
+}
+
+function isDomNodeLike(value) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  try {
+    return Boolean(
+      typeof Node !== "undefined" &&
+        value instanceof Node
     );
   } catch {}
 
   try {
+    return Boolean(
+      value.nodeType &&
+        value.nodeName
+    );
+  } catch {}
+
+  return false;
+}
+
+function sanitizePayload(value, depth = 0) {
+  if (depth > 6) {
+    return "[MaxDepth]";
+  }
+
+  if (typeof value === "string") {
+    return redactSensitiveText(value);
+  }
+
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "function") {
+    return "[Function]";
+  }
+
+  if (isDomNodeLike(value)) {
+    return {
+      node:
+        safeText(value.nodeName, "Node"),
+
+      id:
+        safeText(value.id, ""),
+
+      className:
+        safeText(value.className?.baseVal || value.className, ""),
+    };
+  }
+
+  if (value instanceof Error) {
+    return cloneError(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 80)
+      .map((item) =>
+        sanitizePayload(item, depth + 1)
+      );
+  }
+
+  if (value instanceof Map) {
+    return {
+      type: "Map",
+      size: value.size,
+    };
+  }
+
+  if (value instanceof Set) {
+    return {
+      type: "Set",
+      size: value.size,
+    };
+  }
+
+  if (
+    value &&
+    typeof value === "object"
+  ) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      if (SENSITIVE_OBJECT_KEY_RE.test(key)) {
+        if (
+          item === null ||
+          item === undefined ||
+          item === "" ||
+          typeof item === "boolean"
+        ) {
+          output[key] =
+            item;
+        } else {
+          output[key] =
+            "***";
+        }
+
+        continue;
+      }
+
+      output[key] =
+        sanitizePayload(
+          item,
+          depth + 1
+        );
+    }
+
+    return output;
+  }
+
+  return String(value);
+}
+
+function safeWarn(AppCore, ...args) {
+  const cleanArgs =
+    args.map((item) =>
+      sanitizePayload(item)
+    );
+
+  let logged =
+    false;
+
+  try {
+    if (isFunction(AppCore?.utils?.warn)) {
+      AppCore.utils.warn(
+        LOG_PREFIX,
+        ...cleanArgs
+      );
+
+      logged =
+        true;
+    }
+  } catch {
+    logged =
+      false;
+  }
+
+  if (logged) {
+    return;
+  }
+
+  try {
     console.warn(
       LOG_PREFIX,
-      ...args
+      ...cleanArgs
     );
   } catch {}
 }
 
 function safeError(AppCore, ...args) {
-  try {
-    AppCore?.utils?.error?.(
-      LOG_PREFIX,
-      ...args
+  const cleanArgs =
+    args.map((item) =>
+      sanitizePayload(item)
     );
-  } catch {}
+
+  let logged =
+    false;
+
+  try {
+    if (isFunction(AppCore?.utils?.error)) {
+      AppCore.utils.error(
+        LOG_PREFIX,
+        ...cleanArgs
+      );
+
+      logged =
+        true;
+    }
+  } catch {
+    logged =
+      false;
+  }
+
+  if (logged) {
+    return;
+  }
 
   try {
     console.error(
       LOG_PREFIX,
-      ...args
+      ...cleanArgs
     );
   } catch {}
 }
@@ -430,7 +694,7 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
     safeObject(payload);
 
   const finalPayload =
-    {
+    sanitizePayload({
       ...data,
 
       source:
@@ -450,16 +714,26 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
 
       ts:
         data.ts || nowTs(),
-    };
+    });
+
+  let busAvailable =
+    false;
+
+  let busEmitted =
+    false;
 
   try {
     if (isFunction(AppCore?.events?.emit)) {
+      busAvailable =
+        true;
+
       AppCore.events.emit(
         name,
         finalPayload
       );
 
-      return true;
+      busEmitted =
+        true;
     }
   } catch (error) {
     safeWarn(
@@ -469,11 +743,16 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
     );
   }
 
-  try {
-    if (
-      isBrowser() &&
-      typeof CustomEvent !== "undefined"
-    ) {
+  /*
+    Anti-duplicación:
+    si hay bus interno y emitió, no duplicamos en window.
+  */
+  if (
+    (!busAvailable || !busEmitted) &&
+    isBrowser() &&
+    typeof CustomEvent !== "undefined"
+  ) {
+    try {
       window.dispatchEvent(
         new CustomEvent(
           name,
@@ -485,10 +764,10 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
       );
 
       return true;
-    }
-  } catch {}
+    } catch {}
+  }
 
-  return false;
+  return busEmitted;
 }
 
 function sleep(ms = 0) {
@@ -575,15 +854,23 @@ async function withTimeout(
 }
 
 function cloneError(error = null) {
+  if (!error) {
+    return null;
+  }
+
   return {
     name:
-      safeText(error?.name, ""),
+      safeText(error?.name, "Error"),
 
     message:
-      safeText(error?.message, ""),
+      redactSensitiveText(
+        safeText(error?.message || error, "")
+      ),
 
     code:
-      safeText(error?.code, ""),
+      redactSensitiveText(
+        safeText(error?.code, "")
+      ) || null,
 
     status:
       error?.status ??
@@ -609,10 +896,30 @@ function safeSetLoading(AppCore, value = false) {
 
   try {
     if (isFunction(AppCore?.setState)) {
-      AppCore.setState({ loading });
+      AppCore.setState(
+        {
+          loading,
+        },
+        {
+          source:
+            "sidebar:actions",
+          emit:
+            false,
+          emitState:
+            false,
+          silent:
+            true,
+        }
+      );
+
       return true;
     }
-  } catch {}
+  } catch {
+    try {
+      AppCore?.setState?.({ loading });
+      return true;
+    } catch {}
+  }
 
   try {
     if (
@@ -918,6 +1225,13 @@ function normalizeRoutePath(path = "/") {
     : cleanPathname;
 }
 
+function stripQuery(path = "/") {
+  const normalized =
+    normalizeRoutePath(path || "/") || "/";
+
+  return normalized.split("?")[0] || "/";
+}
+
 function dispatchPopStateSafe() {
   if (!isBrowser()) {
     return false;
@@ -940,6 +1254,68 @@ function dispatchPopStateSafe() {
   } catch {}
 
   return false;
+}
+
+function patchRouteState(AppCore, target = LOGIN_ROUTE) {
+  const publicPath =
+    normalizeRoutePath(target || LOGIN_ROUTE) || LOGIN_ROUTE;
+
+  const canonicalPath =
+    stripQuery(publicPath);
+
+  const patch =
+    {
+      publicPath,
+      route:
+        canonicalPath,
+      canonicalPath,
+    };
+
+  try {
+    if (
+      AppCore?.state &&
+      typeof AppCore.state === "object"
+    ) {
+      Object.assign(
+        AppCore.state,
+        patch
+      );
+    }
+  } catch {}
+
+  try {
+    AppCore?.setState?.(
+      patch,
+      {
+        source:
+          "sidebar:actions:navigation",
+        emit:
+          false,
+        emitState:
+          false,
+        silent:
+          true,
+      }
+    );
+  } catch {}
+
+  try {
+    AppCore?.patchState?.(
+      patch,
+      {
+        source:
+          "sidebar:actions:navigation",
+        emit:
+          false,
+        emitState:
+          false,
+        silent:
+          true,
+      }
+    );
+  } catch {}
+
+  return patch;
 }
 
 /* =========================================================
@@ -1377,6 +1753,73 @@ export function closeSidebarOnMobileAfterNavigation({
    NAVIGATION ACTIONS
 ========================================================= */
 
+async function invokeNavigationCandidate(candidate, cleanTarget, options) {
+  if (
+    !candidate?.enabled ||
+    !isFunction(candidate.fn)
+  ) {
+    return {
+      ok:
+        false,
+
+      skipped:
+        true,
+
+      method:
+        candidate?.name || "",
+    };
+  }
+
+  try {
+    const result =
+      await Promise.resolve(
+        candidate.fn.apply(
+          candidate.ctx,
+          candidate.args
+        )
+      );
+
+    if (result === false) {
+      return {
+        ok:
+          false,
+
+        skipped:
+          false,
+
+        method:
+          candidate.name,
+
+        returnedFalse:
+          true,
+      };
+    }
+
+    return {
+      ok:
+        true,
+
+      method:
+        candidate.name,
+
+      result,
+    };
+  } catch (error) {
+    return {
+      ok:
+        false,
+
+      skipped:
+        false,
+
+      method:
+        candidate.name,
+
+      error,
+    };
+  }
+}
+
 async function navigateToTarget({
   AppCore,
   Router,
@@ -1395,8 +1838,27 @@ async function navigateToTarget({
     normalizeRoutePath(target);
 
   if (!cleanTarget) {
+    safeEmit(
+      AppCore,
+      EVENTS.navigationError,
+      {
+        target,
+        error:
+          {
+            code:
+              "INVALID_TARGET",
+            message:
+              "Destino de navegación no seguro o vacío.",
+          },
+        source,
+      }
+    );
+
     return false;
   }
+
+  const canonicalPath =
+    stripQuery(cleanTarget);
 
   const options =
     {
@@ -1410,6 +1872,14 @@ async function navigateToTarget({
         Boolean(force),
 
       source,
+
+      publicPath:
+        cleanTarget,
+
+      requestedPath:
+        cleanTarget,
+
+      canonicalPath,
     };
 
   safeEmit(
@@ -1418,6 +1888,8 @@ async function navigateToTarget({
     {
       target:
         cleanTarget,
+
+      canonicalPath,
 
       replace:
         Boolean(replace),
@@ -1529,19 +2001,17 @@ async function navigateToTarget({
     ];
 
   for (const candidate of candidates) {
-    if (
-      !candidate.enabled ||
-      !isFunction(candidate.fn)
-    ) {
-      continue;
-    }
+    const result =
+      await invokeNavigationCandidate(
+        candidate,
+        cleanTarget,
+        options
+      );
 
-    try {
-      await Promise.resolve(
-        candidate.fn.apply(
-          candidate.ctx,
-          candidate.args
-        )
+    if (result.ok) {
+      patchRouteState(
+        AppCore,
+        cleanTarget
       );
 
       safeEmit(
@@ -1552,10 +2022,12 @@ async function navigateToTarget({
             true,
 
           method:
-            candidate.name,
+            result.method,
 
           target:
             cleanTarget,
+
+          canonicalPath,
 
           replace:
             Boolean(replace),
@@ -1568,11 +2040,16 @@ async function navigateToTarget({
       );
 
       return true;
-    } catch (error) {
+    }
+
+    if (
+      !result.skipped &&
+      result.error
+    ) {
       safeWarn(
         AppCore,
-        `${candidate.name}("${cleanTarget}") falló.`,
-        error
+        `${result.method}("${cleanTarget}") falló.`,
+        result.error
       );
     }
   }
@@ -1590,6 +2067,8 @@ async function navigateToTarget({
 
         target:
           cleanTarget,
+
+        canonicalPath,
 
         reason:
           "not-browser",
@@ -1610,8 +2089,7 @@ async function navigateToTarget({
         publicPath:
           cleanTarget,
 
-        canonicalPath:
-          cleanTarget,
+        canonicalPath,
 
         source,
 
@@ -1633,6 +2111,11 @@ async function navigateToTarget({
       );
     }
 
+    patchRouteState(
+      AppCore,
+      cleanTarget
+    );
+
     dispatchPopStateSafe();
 
     safeEmit(
@@ -1650,6 +2133,8 @@ async function navigateToTarget({
         target:
           cleanTarget,
 
+        canonicalPath,
+
         replace:
           Boolean(replace),
 
@@ -1665,6 +2150,8 @@ async function navigateToTarget({
       {
         target:
           cleanTarget,
+
+        canonicalPath,
 
         error:
           cloneError(error),
@@ -1766,7 +2253,10 @@ function getActionControls(elements = {}) {
       root.logoutBtn,
       root.userToggle,
       root.toggleBtn,
+      root.sidebarToggle,
       root.mobileToggleBtn,
+      root.mobileSidebarToggle,
+      root.sidebarMobileToggle,
     ]
   );
 }
@@ -1785,6 +2275,9 @@ function captureControlState(element) {
   let busy =
     null;
 
+  let sidebarActionBusy =
+    null;
+
   let inert =
     false;
 
@@ -1795,6 +2288,9 @@ function captureControlState(element) {
     false;
 
   let hadBusy =
+    false;
+
+  let hadSidebarActionBusy =
     false;
 
   let hadInertAttr =
@@ -1843,6 +2339,20 @@ function captureControlState(element) {
   } catch {}
 
   try {
+    hadSidebarActionBusy =
+      Boolean(
+        element.dataset &&
+          Object.prototype.hasOwnProperty.call(
+            element.dataset,
+            "sidebarActionBusy"
+          )
+      );
+
+    sidebarActionBusy =
+      element.dataset?.sidebarActionBusy;
+  } catch {}
+
+  try {
     inert =
       Boolean(element.inert);
   } catch {}
@@ -1878,6 +2388,9 @@ function captureControlState(element) {
 
     hadBusy,
     busy,
+
+    hadSidebarActionBusy,
+    sidebarActionBusy,
 
     hadInertAttr,
     hadIsDisabledClass,
@@ -2010,7 +2523,12 @@ function restoreControlsState(snapshot = []) {
         delete element.dataset.busy;
       }
 
-      delete element.dataset.sidebarActionBusy;
+      if (item.hadSidebarActionBusy) {
+        element.dataset.sidebarActionBusy =
+          item.sidebarActionBusy || "false";
+      } else {
+        delete element.dataset.sidebarActionBusy;
+      }
     } catch {}
 
     try {
@@ -2605,6 +3123,12 @@ function buildClearedAuthPatch() {
       [];
   });
 
+  patch.lastAuthSource =
+    "logout";
+
+  patch.lastLogoutAt =
+    safeIsoDate();
+
   return patch;
 }
 
@@ -2645,16 +3169,28 @@ function patchNestedAuthObjects(AppCore) {
             isAuthenticated:
               false,
 
+            hasToken:
+              false,
+
             token:
               null,
 
             accessToken:
               null,
 
+            access_token:
+              null,
+
             refreshToken:
               null,
 
+            refresh_token:
+              null,
+
             tempToken:
+              null,
+
+            temp_token:
               null,
 
             user:
@@ -2729,6 +3265,7 @@ function clearAuthHeaders(AppCore, Auth) {
       AppCore?.client,
       AppCore?.services?.http,
       AppCore?.services?.api,
+      AppCore?.services?.apiClient,
       Auth?.http,
       Auth?.api,
       Auth?.client,
@@ -2866,6 +3403,9 @@ async function clearAuthLocal(Auth, AppCore) {
 
       emit:
         false,
+
+      emitEvents:
+        false,
     };
 
   const candidates =
@@ -2924,6 +3464,9 @@ function clearAppCoreSession(AppCore) {
 
           emit:
             false,
+
+          emitEvents:
+            false,
         }
       );
 
@@ -2956,7 +3499,51 @@ function clearAppCoreSession(AppCore) {
 
   try {
     if (isFunction(AppCore?.setState)) {
-      AppCore.setState(patch);
+      AppCore.setState(
+        patch,
+        {
+          source:
+            "sidebar:logout",
+          forceUnauthenticated:
+            true,
+          emit:
+            false,
+          emitState:
+            false,
+          silent:
+            true,
+        }
+      );
+
+      cleared =
+        true;
+    }
+  } catch {
+    try {
+      AppCore?.setState?.(patch);
+      cleared =
+        true;
+    } catch {}
+  }
+
+  try {
+    if (isFunction(AppCore?.patchState)) {
+      AppCore.patchState(
+        patch,
+        {
+          source:
+            "sidebar:logout",
+          forceUnauthenticated:
+            true,
+          emit:
+            false,
+          emitState:
+            false,
+          silent:
+            true,
+        }
+      );
+
       cleared =
         true;
     }
@@ -3111,6 +3698,12 @@ function hideGlobalLoader(AppCore, reason = "sidebar:logout") {
       "app-booting",
       "loading"
     );
+
+    document.documentElement?.dataset &&
+      (document.documentElement.dataset.appLoading = "false");
+
+    document.body?.dataset &&
+      (document.body.dataset.appLoading = "false");
   } catch {}
 
   const selectors =
@@ -3158,6 +3751,9 @@ function hideGlobalLoader(AppCore, reason = "sidebar:logout") {
 
       loader.dataset.loaderVisible =
         "false";
+
+      loader.dataset.loaderState =
+        "hidden";
 
       loader.hidden =
         true;
@@ -3237,6 +3833,12 @@ function syncSidebarAfterLogout({
         false;
     }
   }
+
+  try {
+    if (isFunction(syncSidebarState)) {
+      syncSidebarState();
+    }
+  } catch {}
 
   safeEmit(
     AppCore,
@@ -3496,6 +4098,12 @@ async function runRemoteLogout({
         false,
 
       emit:
+        false,
+
+      emitEvents:
+        false,
+
+      toast:
         false,
     };
 

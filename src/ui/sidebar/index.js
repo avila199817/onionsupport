@@ -2,7 +2,7 @@
    Onion SPA - Sidebar UI
    Archivo: src/ui/sidebar/index.js
 
-   ONION SUPPORT · SIDEBAR UI ORCHESTRATOR · 15/10
+   ONION SUPPORT · SIDEBAR UI ORCHESTRATOR · EXTREME 10/10
    ORCHESTRATOR ONLY · STATE OWNER · EVENTS OWNER · ACTIONS OWNER
 
    RESPONSABILIDADES:
@@ -25,6 +25,15 @@
    - No gestionar transición visual propia desde index.js.
    - No registrar módulos si ya existe el mismo objeto.
    - No llamar refresh pesado en sync/render normales.
+   - Aceptar firmas modernas desde AppUI:
+       · renderUser(reason, context)
+       · refreshUser(reason, context)
+       · updateUser(reason, context)
+       · syncUser(reason, context)
+       · sync(reason, context)
+       · repair(reason, context)
+   - Si AppUI entrega user/context, sincronizarlo antes de pintar identidad.
+   - Blindar footer/avatar/name contra estados fantasma o usuario obsoleto.
 
    REGLA DE ARQUITECTURA:
    - template.js   = DOM base.
@@ -112,7 +121,7 @@ import {
 } from "./events.js";
 
 export const SIDEBAR_UI_VERSION =
-  "sidebar-ui-v15-orchestrator-only";
+  "sidebar-ui-v16-extreme-orchestrator-hardened";
 
 export const SidebarUI = (() => {
   "use strict";
@@ -121,96 +130,74 @@ export const SidebarUI = (() => {
      INTERNAL STATE
   ====================================================== */
 
-  const SOURCE =
-    "SidebarUI";
+  const SOURCE = "SidebarUI";
+  const OWNER = "index.js";
+  const LOG_PREFIX = "[SidebarUI]";
 
-  const OWNER =
-    "index.js";
+  const BIND_DEDUP_WINDOW_MS = 250;
+  const REPAIR_DEDUP_WINDOW_MS = 180;
+  const SYNC_DEDUP_WINDOW_MS = 90;
+  const USER_SYNC_DEDUP_WINDOW_MS = 80;
 
-  const LOG_PREFIX =
-    "[SidebarUI]";
+  const INDICATOR_DELAY_INIT_MS = 32;
+  const INDICATOR_DELAY_REFRESH_MS = 40;
+  const INDICATOR_DELAY_REPAIR_MS = 48;
+  const INDICATOR_DELAY_ROUTE_MS = 56;
+  const INDICATOR_DELAY_TRANSITION_MS = 420;
 
-  const BIND_DEDUP_WINDOW_MS =
-    250;
+  const MODULE_NAMES = Object.freeze([
+    "sidebar",
+    "SidebarUI",
+    "sidebarUI",
+  ]);
 
-  const REPAIR_DEDUP_WINDOW_MS =
-    180;
+  const USER_SOURCE_KEYS = Object.freeze([
+    "user",
+    "usuario",
+    "currentUser",
+    "authUser",
+    "sessionUser",
+    "account",
+    "profile",
+    "me",
+  ]);
 
-  const SYNC_DEDUP_WINDOW_MS =
-    90;
+  const SESSION_SOURCE_KEYS = Object.freeze([
+    "session",
+    "sessionData",
+    "auth",
+    "data",
+    "payload",
+  ]);
 
-  const INDICATOR_DELAY_INIT_MS =
-    32;
+  let initialized = false;
+  let logoutInFlight = false;
 
-  const INDICATOR_DELAY_REFRESH_MS =
-    40;
+  let eventsBound = false;
+  let bindingEvents = false;
+  let bindGeneration = 0;
 
-  const INDICATOR_DELAY_REPAIR_MS =
-    48;
+  let lastBindAt = 0;
+  let lastBindReason = "";
 
-  const INDICATOR_DELAY_ROUTE_MS =
-    56;
+  let lastRepairAt = 0;
+  let lastRepairReason = "";
 
-  const INDICATOR_DELAY_TRANSITION_MS =
-    420;
+  let lastSyncAt = 0;
+  let lastSyncReason = "";
 
-  const MODULE_NAMES =
-    Object.freeze([
-      "sidebar",
-      "SidebarUI",
-      "sidebarUI",
-    ]);
+  let lastUserSyncAt = 0;
+  let lastUserSyncSignature = "";
 
-  let initialized =
-    false;
+  let domEventsCleanup = null;
+  let coreEventsCleanup = null;
 
-  let logoutInFlight =
-    false;
+  let visualSyncTimer = null;
+  let repairTimer = null;
 
-  let eventsBound =
-    false;
-
-  let bindingEvents =
-    false;
-
-  let bindGeneration =
-    0;
-
-  let lastBindAt =
-    0;
-
-  let lastBindReason =
-    "";
-
-  let lastRepairAt =
-    0;
-
-  let lastRepairReason =
-    "";
-
-  let lastSyncAt =
-    0;
-
-  let lastSyncReason =
-    "";
-
-  let domEventsCleanup =
-    null;
-
-  let coreEventsCleanup =
-    null;
-
-  let visualSyncTimer =
-    null;
-
-  let repairTimer =
-    null;
-
-  const runtimeState =
-    {
-      dropdownOpen:
-        false,
-    };
+  const runtimeState = {
+    dropdownOpen: false,
+  };
 
   /* ======================================================
      SAFE HELPERS
@@ -260,6 +247,10 @@ export const SidebarUI = (() => {
     return text || fallback;
   }
 
+  function safeLower(value, fallback = "") {
+    return safeText(value, fallback).toLowerCase();
+  }
+
   function safeObject(value) {
     return (
       value &&
@@ -268,6 +259,12 @@ export const SidebarUI = (() => {
     )
       ? value
       : {};
+  }
+
+  function safeArray(value) {
+    return Array.isArray(value)
+      ? value
+      : [];
   }
 
   function safeBoolean(value, fallback = false) {
@@ -308,21 +305,15 @@ export const SidebarUI = (() => {
     }
 
     if (typeof value === "number") {
-      if (value === 1) {
-        return true;
-      }
-
-      if (value === 0) {
-        return false;
-      }
+      if (value === 1) return true;
+      if (value === 0) return false;
     }
 
-    return fallback;
+    return Boolean(fallback);
   }
 
   function safeNumber(value, fallback = 0) {
-    const number =
-      Number(value);
+    const number = Number(value);
 
     return Number.isFinite(number)
       ? number
@@ -331,7 +322,10 @@ export const SidebarUI = (() => {
 
   function clampNumber(value, min = 0, max = Number.POSITIVE_INFINITY) {
     const number =
-      safeNumber(value, min);
+      safeNumber(
+        value,
+        min
+      );
 
     return Math.min(
       Math.max(number, min),
@@ -341,6 +335,59 @@ export const SidebarUI = (() => {
 
   function isFunction(value) {
     return typeof value === "function";
+  }
+
+  function isObjectLike(value) {
+    return (
+      value !== null &&
+      (
+        typeof value === "object" ||
+        typeof value === "function"
+      )
+    );
+  }
+
+  function canExtend(value) {
+    try {
+      return (
+        isObjectLike(value) &&
+        Object.isExtensible(value)
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function defineHiddenValue(target, key, value) {
+    if (
+      !target ||
+      !key ||
+      !canExtend(target)
+    ) {
+      return false;
+    }
+
+    try {
+      Object.defineProperty(
+        target,
+        key,
+        {
+          value,
+          configurable: true,
+          enumerable: false,
+          writable: true,
+        }
+      );
+
+      return true;
+    } catch {}
+
+    try {
+      target[key] = value;
+      return true;
+    } catch {}
+
+    return false;
   }
 
   function first(...values) {
@@ -381,9 +428,21 @@ export const SidebarUI = (() => {
     return null;
   }
 
+  function uniqueStrings(values = []) {
+    return [
+      ...new Set(
+        safeArray(values)
+          .flat(Infinity)
+          .map((value) =>
+            safeText(value, "")
+          )
+          .filter(Boolean)
+      ),
+    ];
+  }
+
   function safeWarn(...args) {
-    let logged =
-      false;
+    let logged = false;
 
     try {
       if (isFunction(AppCore?.utils?.warn)) {
@@ -392,12 +451,10 @@ export const SidebarUI = (() => {
           ...args
         );
 
-        logged =
-          true;
+        logged = true;
       }
     } catch {
-      logged =
-        false;
+      logged = false;
     }
 
     if (logged) {
@@ -419,80 +476,6 @@ export const SidebarUI = (() => {
         ...args
       );
     } catch {}
-  }
-
-  /*
-    Importante:
-    No emitimos por AppCore.events Y window a la vez.
-    events.js escucha el bus cuando existe.
-  */
-  function safeEmit(eventName = "", payload = {}) {
-    const name =
-      safeText(eventName, "");
-
-    if (!name) {
-      return false;
-    }
-
-    const data =
-      safeObject(payload);
-
-    const finalPayload =
-      {
-        ...data,
-
-        source:
-          safeText(data.source, SOURCE),
-
-        owner:
-          OWNER,
-
-        version:
-          SIDEBAR_UI_VERSION,
-
-        at:
-          safeText(data.at, safeIsoDate()),
-
-        ts:
-          data.ts || nowTs(),
-      };
-
-    try {
-      if (isFunction(AppCore?.events?.emit)) {
-        AppCore.events.emit(
-          name,
-          finalPayload
-        );
-
-        return true;
-      }
-    } catch (error) {
-      safeWarn(
-        `AppCore.events.emit("${name}") falló.`,
-        error
-      );
-    }
-
-    try {
-      if (
-        isBrowser() &&
-        typeof CustomEvent !== "undefined"
-      ) {
-        window.dispatchEvent(
-          new CustomEvent(
-            name,
-            {
-              detail:
-                finalPayload,
-            }
-          )
-        );
-
-        return true;
-      }
-    } catch {}
-
-    return false;
   }
 
   function safeSetTimeout(callback, ms = 0) {
@@ -594,11 +577,89 @@ export const SidebarUI = (() => {
     }
   }
 
+  function getPayload(input = {}) {
+    const raw =
+      input || {};
+
+    if (
+      raw &&
+      typeof raw === "object" &&
+      "detail" in raw &&
+      raw.detail !== undefined
+    ) {
+      return safeObject(raw.detail);
+    }
+
+    if (
+      raw &&
+      typeof raw === "object" &&
+      "payload" in raw &&
+      raw.payload !== undefined
+    ) {
+      return safeObject(raw.payload);
+    }
+
+    return safeObject(raw);
+  }
+
+  function normalizeInvocation(
+    reasonOrPayload = "sidebar",
+    context = {},
+    fallbackReason = "sidebar"
+  ) {
+    let reason = fallbackReason;
+    let payload = {};
+    let options = {};
+
+    if (typeof reasonOrPayload === "string") {
+      reason =
+        safeText(
+          reasonOrPayload,
+          fallbackReason
+        );
+
+      payload =
+        getPayload(context);
+
+      options =
+        safeObject(context);
+    } else {
+      payload =
+        getPayload(reasonOrPayload);
+
+      options =
+        {
+          ...payload,
+          ...safeObject(context),
+        };
+
+      reason =
+        safeText(
+          payload.reason ||
+            payload.phase ||
+            payload.event ||
+            payload.type ||
+            payload.source ||
+            context?.reason,
+          fallbackReason
+        );
+    }
+
+    return {
+      reason,
+      payload,
+      options,
+      raw:
+        reasonOrPayload,
+      context:
+        safeObject(context),
+    };
+  }
+
   function clearVisualSyncTimer() {
     if (visualSyncTimer) {
       safeClearTimeout(visualSyncTimer);
-      visualSyncTimer =
-        null;
+      visualSyncTimer = null;
     }
 
     return true;
@@ -607,11 +668,954 @@ export const SidebarUI = (() => {
   function clearRepairTimer() {
     if (repairTimer) {
       safeClearTimeout(repairTimer);
-      repairTimer =
-        null;
+      repairTimer = null;
     }
 
     return true;
+  }
+
+  function sanitizeForEvent(value, depth = 0) {
+    if (depth > 5) {
+      return "[MaxDepth]";
+    }
+
+    if (
+      value === null ||
+      value === undefined ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      return value;
+    }
+
+    if (typeof value === "string") {
+      return value
+        .replace(
+          /([?&#](token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
+          "$1***"
+        )
+        .replace(
+          /(\/activate-account\/)([^/?#\s]+)/gi,
+          "$1***"
+        )
+        .replace(
+          /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+          "$1***"
+        )
+        .replace(
+          /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+          "$1***"
+        );
+    }
+
+    if (typeof value === "function") {
+      return "[Function]";
+    }
+
+    if (Array.isArray(value)) {
+      return value
+        .slice(0, 80)
+        .map((item) =>
+          sanitizeForEvent(item, depth + 1)
+        );
+    }
+
+    if (
+      value &&
+      typeof value === "object"
+    ) {
+      const output = {};
+
+      for (const [key, item] of Object.entries(value)) {
+        if (/token|secret|password|authorization|credential|jwt|bearer|otp|code/i.test(key)) {
+          output[key] = "***";
+          continue;
+        }
+
+        output[key] =
+          sanitizeForEvent(
+            item,
+            depth + 1
+          );
+      }
+
+      return output;
+    }
+
+    return String(value);
+  }
+
+  /*
+    Importante:
+    No emitimos por AppCore.events Y window a la vez.
+    events.js escucha el bus cuando existe.
+  */
+  function safeEmit(eventName = "", payload = {}) {
+    const name =
+      safeText(eventName, "");
+
+    if (!name) {
+      return false;
+    }
+
+    const data =
+      safeObject(payload);
+
+    const finalPayload =
+      sanitizeForEvent({
+        ...data,
+
+        source:
+          safeText(data.source, SOURCE),
+
+        owner:
+          OWNER,
+
+        version:
+          SIDEBAR_UI_VERSION,
+
+        at:
+          safeText(data.at, safeIsoDate()),
+
+        ts:
+          data.ts || nowTs(),
+      });
+
+    try {
+      if (isFunction(AppCore?.events?.emit)) {
+        AppCore.events.emit(
+          name,
+          finalPayload
+        );
+
+        return true;
+      }
+    } catch (error) {
+      safeWarn(
+        `AppCore.events.emit("${name}") falló.`,
+        error
+      );
+    }
+
+    try {
+      if (
+        isBrowser() &&
+        typeof CustomEvent !== "undefined"
+      ) {
+        window.dispatchEvent(
+          new CustomEvent(
+            name,
+            {
+              detail:
+                finalPayload,
+            }
+          )
+        );
+
+        return true;
+      }
+    } catch {}
+
+    return false;
+  }
+
+  /* ======================================================
+     USER CONTEXT HARDENING
+  ====================================================== */
+
+  function getAuthUser() {
+    try {
+      return (
+        Auth?.getUser?.() ||
+        Auth?.getCurrentUser?.() ||
+        Auth?.user ||
+        null
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  function getAuthRole() {
+    try {
+      return (
+        Auth?.getCurrentRole?.() ||
+        Auth?.getRole?.() ||
+        Auth?.role ||
+        null
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  function getState() {
+    try {
+      return safeObject(AppCore?.state);
+    } catch {
+      return {};
+    }
+  }
+
+  function getStateUser() {
+    const state =
+      getState();
+
+    return (
+      state.user ||
+      state.currentUser ||
+      state.sessionUser ||
+      state.authUser ||
+      state.session?.user ||
+      null
+    );
+  }
+
+  function resolveAvatar(user = {}) {
+    const source =
+      safeObject(user);
+
+    return (
+      safeText(source.avatar, "") ||
+      safeText(source.avatarUrl, "") ||
+      safeText(source.avatarURL, "") ||
+      safeText(source.avatar_url, "") ||
+      safeText(source.photo, "") ||
+      safeText(source.photoUrl, "") ||
+      safeText(source.photoURL, "") ||
+      safeText(source.photo_url, "") ||
+      safeText(source.image, "") ||
+      safeText(source.imageUrl, "") ||
+      safeText(source.imageURL, "") ||
+      safeText(source.image_url, "") ||
+      safeText(source.profileImage, "") ||
+      safeText(source.profile_image, "") ||
+      safeText(source.picture, "") ||
+      safeText(source.pictureUrl, "") ||
+      safeText(source.pictureURL, "") ||
+      safeText(source.picture_url, "") ||
+      null
+    );
+  }
+
+  function normalizeUsername(value = "") {
+    return safeText(value, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/^@+/, "")
+      .replace(/\s+/g, "")
+      .replace(/[^a-zA-Z0-9._-]/g, "")
+      .toLowerCase();
+  }
+
+  function normalizeRole(value = "user") {
+    return (
+      safeLower(value || "user", "user") ||
+      "user"
+    );
+  }
+
+  function isUserActive(user = {}) {
+    const source =
+      safeObject(user);
+
+    const status =
+      safeLower(
+        source.status ||
+          source.estado ||
+          source.state ||
+          source.accountStatus ||
+          "",
+        ""
+      );
+
+    if (
+      source.deletedAt ||
+      source.deleted === true ||
+      source.disabled === true ||
+      source.blocked === true ||
+      source.banned === true ||
+      source.suspended === true ||
+      source.revoked === true
+    ) {
+      return false;
+    }
+
+    if (
+      [
+        "disabled",
+        "inactive",
+        "deleted",
+        "blocked",
+        "banned",
+        "suspended",
+        "revoked",
+        "desactivado",
+        "inactivo",
+        "eliminado",
+        "bloqueado",
+        "suspendido",
+      ].includes(status)
+    ) {
+      return false;
+    }
+
+    const activeCandidate =
+      source.active ??
+      source.isActive ??
+      source.is_active ??
+      source.enabled ??
+      source.isEnabled;
+
+    if (
+      activeCandidate === undefined ||
+      activeCandidate === null ||
+      activeCandidate === ""
+    ) {
+      return true;
+    }
+
+    return safeBoolean(
+      activeCandidate,
+      true
+    );
+  }
+
+  function hasUsableUser(user = {}) {
+    const source =
+      safeObject(user);
+
+    if (
+      !source ||
+      !Object.keys(source).length ||
+      !isUserActive(source)
+    ) {
+      return false;
+    }
+
+    return Boolean(
+      safeText(source.id, "") ||
+        safeText(source.userId, "") ||
+        safeText(source.user_id, "") ||
+        safeText(source.uid, "") ||
+        safeText(source.sub, "") ||
+        safeText(source._id, "") ||
+        safeText(source.username, "") ||
+        safeText(source.userName, "") ||
+        safeText(source.user_name, "") ||
+        safeText(source.email, "") ||
+        safeText(source.mail, "") ||
+        safeText(source.phone, "") ||
+        safeText(source.telefono, "") ||
+        safeText(source.mobile, "") ||
+        safeText(source.name, "") ||
+        safeText(source.displayName, "")
+    );
+  }
+
+  function normalizeUserForSidebar(user = {}, extra = {}) {
+    const source =
+      safeObject(user);
+
+    if (!Object.keys(source).length) {
+      return null;
+    }
+
+    const ctx =
+      safeObject(extra);
+
+    const userId =
+      safeText(
+        first(
+          source.userId,
+          source.user_id,
+          source.uid,
+          source.sub,
+          source.id,
+          source._id,
+          ctx.userId,
+          ctx.uid,
+          ctx.sub
+        ),
+        ""
+      );
+
+    const email =
+      safeText(
+        first(
+          source.email,
+          source.mail,
+          ctx.email
+        ),
+        ""
+      );
+
+    const username =
+      safeText(
+        first(
+          source.username,
+          source.userName,
+          source.user_name,
+          source.usernameLower,
+          source.username_lower,
+          source.slug,
+          ctx.username,
+          email
+        ),
+        ""
+      );
+
+    const usernameLower =
+      normalizeUsername(
+        first(
+          source.usernameLower,
+          source.username_lower,
+          username
+        ) || ""
+      );
+
+    const slug =
+      normalizeUsername(
+        first(
+          source.slug,
+          source.usernameSlug,
+          source.username_slug,
+          usernameLower,
+          username,
+          email,
+          userId
+        ) || ""
+      );
+
+    const role =
+      normalizeRole(
+        first(
+          source.role,
+          source.rol,
+          source.userRole,
+          source.user_role,
+          source.type,
+          source.tipo,
+          ctx.role,
+          ctx.rol,
+          getState().role,
+          getAuthRole(),
+          "user"
+        )
+      );
+
+    const displayName =
+      safeText(
+        first(
+          source.displayName,
+          source.fullName,
+          source.name,
+          source.nombre,
+          source.username,
+          username,
+          email,
+          ctx.displayName,
+          ctx.name,
+          "Usuario"
+        ),
+        "Usuario"
+      );
+
+    const avatar =
+      resolveAvatar(source) ||
+      safeText(ctx.avatarUrl || ctx.avatar || "", "") ||
+      null;
+
+    const plan =
+      safeText(
+        first(
+          source.plan,
+          source.planName,
+          source.plan_name,
+          source.subscriptionPlan,
+          source.subscription_plan,
+          source.accountPlan,
+          source.account_plan,
+          source.customerPlan,
+          source.customer_plan,
+          source.billingPlan,
+          source.billing_plan,
+          ctx.plan,
+          ctx.planName,
+          ctx.subscriptionPlan
+        ),
+        ""
+      );
+
+    return {
+      ...source,
+
+      id:
+        source.id ||
+        userId ||
+        null,
+
+      userId:
+        source.userId ||
+        userId ||
+        null,
+
+      uid:
+        source.uid ||
+        userId ||
+        null,
+
+      sub:
+        source.sub ||
+        userId ||
+        null,
+
+      email:
+        email || null,
+
+      emailLower:
+        source.emailLower ||
+        source.email_lower ||
+        (email ? email.toLowerCase() : null),
+
+      username:
+        username || null,
+
+      usernameLower:
+        usernameLower || null,
+
+      username_lower:
+        source.username_lower ||
+        usernameLower ||
+        null,
+
+      slug:
+        slug || null,
+
+      name:
+        displayName,
+
+      nombre:
+        source.nombre ||
+        displayName,
+
+      displayName,
+
+      fullName:
+        source.fullName ||
+        displayName,
+
+      role,
+
+      rol:
+        role,
+
+      roles:
+        uniqueStrings([
+          role,
+          ...safeArray(source.roles),
+        ]),
+
+      permissions:
+        safeArray(
+          source.permissions ||
+            source.permisos
+        ),
+
+      permisos:
+        safeArray(
+          source.permisos ||
+            source.permissions
+        ),
+
+      avatar:
+        avatar || null,
+
+      avatarUrl:
+        avatar || null,
+
+      picture:
+        avatar || null,
+
+      hasAvatar:
+        source.hasAvatar === true ||
+        source.has_avatar === true ||
+        Boolean(avatar),
+
+      plan:
+        plan || source.plan || null,
+
+      planName:
+        plan || source.planName || null,
+
+      subscriptionPlan:
+        plan || source.subscriptionPlan || null,
+
+      active:
+        isUserActive(source),
+    };
+  }
+
+  function extractUserFromSource(source = {}) {
+    const data =
+      safeObject(source);
+
+    for (const key of USER_SOURCE_KEYS) {
+      if (hasUsableUser(data[key])) {
+        return data[key];
+      }
+    }
+
+    for (const key of SESSION_SOURCE_KEYS) {
+      const nested =
+        safeObject(data[key]);
+
+      for (const userKey of USER_SOURCE_KEYS) {
+        if (hasUsableUser(nested[userKey])) {
+          return nested[userKey];
+        }
+      }
+
+      if (hasUsableUser(nested.user)) {
+        return nested.user;
+      }
+    }
+
+    if (hasUsableUser(data.snapshot?.user)) {
+      return data.snapshot.user;
+    }
+
+    if (hasUsableUser(data.payload?.snapshot?.user)) {
+      return data.payload.snapshot.user;
+    }
+
+    if (
+      safeText(data.username || data.email || data.displayName || data.name, "")
+    ) {
+      return {
+        id:
+          data.userId ||
+          data.id ||
+          null,
+
+        userId:
+          data.userId ||
+          data.id ||
+          null,
+
+        username:
+          data.username ||
+          null,
+
+        email:
+          data.email ||
+          null,
+
+        name:
+          data.name ||
+          data.displayName ||
+          data.username ||
+          data.email ||
+          "Usuario",
+
+        displayName:
+          data.displayName ||
+          data.name ||
+          data.username ||
+          data.email ||
+          "Usuario",
+
+        role:
+          data.role ||
+          data.rol ||
+          null,
+
+        avatar:
+          data.avatar ||
+          data.avatarUrl ||
+          null,
+
+        avatarUrl:
+          data.avatarUrl ||
+          data.avatar ||
+          null,
+
+        plan:
+          data.plan ||
+          data.planName ||
+          data.subscriptionPlan ||
+          null,
+      };
+    }
+
+    return null;
+  }
+
+  function extractUserContext(reasonOrPayload = {}, context = {}) {
+    const payload =
+      getPayload(reasonOrPayload);
+
+    const ctx =
+      safeObject(context);
+
+    const userCandidate =
+      extractUserFromSource(ctx) ||
+      extractUserFromSource(payload) ||
+      extractUserFromSource(ctx.payload) ||
+      extractUserFromSource(payload.payload) ||
+      extractUserFromSource(ctx.snapshot) ||
+      extractUserFromSource(payload.snapshot) ||
+      getAuthUser() ||
+      getStateUser() ||
+      null;
+
+    const extra =
+      {
+        ...payload,
+        ...ctx,
+        ...safeObject(ctx.snapshot),
+        ...safeObject(payload.snapshot),
+      };
+
+    const normalized =
+      normalizeUserForSidebar(
+        userCandidate,
+        extra
+      );
+
+    return {
+      user:
+        normalized,
+
+      authenticated:
+        payload.authenticated === true ||
+        ctx.authenticated === true ||
+        getState().authenticated === true,
+
+      role:
+        safeText(
+          extra.role ||
+            extra.rol ||
+            normalized?.role ||
+            getState().role ||
+            "",
+          ""
+        ),
+
+      source:
+        safeText(
+          extra.source ||
+            payload.source ||
+            ctx.source ||
+            SOURCE,
+          SOURCE
+        ),
+    };
+  }
+
+  function getUserSignature(user = null, role = "") {
+    if (!hasUsableUser(user)) {
+      return "";
+    }
+
+    return [
+      safeText(user.id || user.userId || user.uid || user.sub, ""),
+      safeText(user.username || user.usernameLower || user.slug, ""),
+      safeText(user.email || user.emailLower, ""),
+      safeText(user.displayName || user.name, ""),
+      safeText(user.avatarUrl || user.avatar || user.picture, ""),
+      safeText(role || user.role || user.rol, ""),
+      safeText(user.plan || user.planName || user.subscriptionPlan, ""),
+    ].join("|");
+  }
+
+  function shouldDedupeUserSync(user = null, role = "", reason = "", force = false) {
+    if (force === true) {
+      return false;
+    }
+
+    const signature =
+      [
+        safeText(reason, ""),
+        getUserSignature(user, role),
+      ].join("::");
+
+    const ts =
+      nowTs();
+
+    if (
+      signature &&
+      signature === lastUserSyncSignature &&
+      ts - lastUserSyncAt < USER_SYNC_DEDUP_WINDOW_MS
+    ) {
+      return true;
+    }
+
+    lastUserSyncSignature =
+      signature;
+
+    lastUserSyncAt =
+      ts;
+
+    return false;
+  }
+
+  function applyUserContextToCore(reasonOrPayload = {}, context = {}) {
+    const {
+      reason,
+      options,
+    } =
+      normalizeInvocation(
+        reasonOrPayload,
+        context,
+        "user-context"
+      );
+
+    const userContext =
+      extractUserContext(
+        reasonOrPayload,
+        context
+      );
+
+    const user =
+      userContext.user;
+
+    if (!hasUsableUser(user)) {
+      return {
+        applied:
+          false,
+        user:
+          null,
+        role:
+          userContext.role || "",
+      };
+    }
+
+    const role =
+      normalizeRole(
+        userContext.role ||
+          user.role ||
+          user.rol ||
+          "user"
+      );
+
+    if (
+      shouldDedupeUserSync(
+        user,
+        role,
+        reason,
+        options.force === true
+      )
+    ) {
+      return {
+        applied:
+          false,
+        deduped:
+          true,
+        user,
+        role,
+      };
+    }
+
+    const authenticated =
+      userContext.authenticated ||
+      getState().authenticated === true;
+
+    const patch = {
+      user,
+      currentUser:
+        user,
+      authUser:
+        user,
+      sessionUser:
+        user,
+
+      role,
+      rol:
+        role,
+      userRole:
+        role,
+
+      roles:
+        uniqueStrings([
+          role,
+          ...safeArray(user.roles),
+        ]),
+
+      currentResolvedUsername:
+        user.slug ||
+        user.usernameLower ||
+        user.username ||
+        getState().currentResolvedUsername ||
+        null,
+
+      resolvedUsername:
+        user.slug ||
+        user.usernameLower ||
+        user.username ||
+        getState().resolvedUsername ||
+        null,
+
+      sidebarUserSyncedAt:
+        safeIsoDate(),
+      sidebarUserSyncedReason:
+        reason,
+    };
+
+    if (authenticated) {
+      patch.authenticated = true;
+    }
+
+    try {
+      if (
+        AppCore?.state &&
+        typeof AppCore.state === "object"
+      ) {
+        Object.assign(
+          AppCore.state,
+          patch
+        );
+      }
+    } catch {}
+
+    try {
+      AppCore?.setState?.(
+        patch,
+        {
+          source:
+            "sidebar:user-context",
+          emit:
+            false,
+          emitState:
+            false,
+          silent:
+            true,
+        }
+      );
+    } catch {}
+
+    try {
+      AppCore?.patchState?.(
+        patch,
+        {
+          source:
+            "sidebar:user-context",
+          emit:
+            false,
+          emitState:
+            false,
+          silent:
+            true,
+        }
+      );
+    } catch {}
+
+    return {
+      applied:
+        true,
+      user,
+      role,
+    };
   }
 
   /* ======================================================
@@ -649,8 +1653,7 @@ export const SidebarUI = (() => {
         !AppCore.dom ||
         typeof AppCore.dom !== "object"
       ) {
-        AppCore.dom =
-          {};
+        AppCore.dom = {};
       }
 
       AppCore.dom.sidebar =
@@ -680,7 +1683,13 @@ export const SidebarUI = (() => {
       AppCore.dom.sidebarName =
         el.nameEl || null;
 
+      AppCore.dom.sidebarUserName =
+        el.nameEl || null;
+
       AppCore.dom.sidebarUserPlan =
+        el.planEl || null;
+
+      AppCore.dom.sidebarPlan =
         el.planEl || null;
 
       AppCore.dom.sidebarLogo =
@@ -736,35 +1745,31 @@ export const SidebarUI = (() => {
       return false;
     }
 
-    let repaired =
-      false;
+    let repaired = false;
 
     try {
+      /*
+        Limpieza de restos legacy. No se aplican estilos inline nuevos.
+      */
       if (sidebarMenu.style.pointerEvents === "none") {
-        sidebarMenu.style.pointerEvents =
-          "";
-
-        repaired =
-          true;
+        sidebarMenu.style.pointerEvents = "";
+        repaired = true;
       }
 
       if (sidebarMenu.hasAttribute("inert")) {
         sidebarMenu.removeAttribute("inert");
-        repaired =
-          true;
+        repaired = true;
       }
 
       if (sidebarMenu.getAttribute("aria-disabled") === "true") {
         sidebarMenu.removeAttribute("aria-disabled");
-        repaired =
-          true;
+        repaired = true;
       }
 
       if (sidebarMenu.dataset.visualSyncing === "true") {
         delete sidebarMenu.dataset.visualSyncing;
         delete sidebarMenu.dataset.visualSyncReason;
-        repaired =
-          true;
+        repaired = true;
       }
 
       sidebarMenu.classList?.remove?.(
@@ -825,8 +1830,7 @@ export const SidebarUI = (() => {
         !AppCore.state ||
         typeof AppCore.state !== "object"
       ) {
-        AppCore.state =
-          {};
+        AppCore.state = {};
       }
 
       const desiredOpen =
@@ -840,8 +1844,7 @@ export const SidebarUI = (() => {
       }
 
       if (typeof AppCore.state.sidebarMobileOpen !== "boolean") {
-        AppCore.state.sidebarMobileOpen =
-          false;
+        AppCore.state.sidebarMobileOpen = false;
       }
 
       AppCore.state.sidebarOpen =
@@ -958,6 +1961,22 @@ export const SidebarUI = (() => {
     }
   }
 
+  function getRouterPublicPathSafe() {
+    try {
+      return Router?.getCurrentPublicPath?.() || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function getRouterCanonicalPathSafe() {
+    try {
+      return Router?.getCurrentCanonicalPath?.() || "";
+    } catch {
+      return "";
+    }
+  }
+
   function resolveRoutePayload(options = {}) {
     const opts =
       safeObject(options);
@@ -980,7 +1999,7 @@ export const SidebarUI = (() => {
         payload.url,
         payload.route,
 
-        Router?.getCurrentPublicPath?.(),
+        getRouterPublicPathSafe(),
         AppCore?.state?.publicPath,
         AppCore?.state?.route,
         AppCore?.state?.canonicalPath,
@@ -1005,6 +2024,16 @@ export const SidebarUI = (() => {
 
       currentPublicPath:
         normalized,
+
+      canonicalPath:
+        normalizeRoutePath(
+          opts.canonicalPath ||
+            payload.canonicalPath ||
+            getRouterCanonicalPathSafe() ||
+            AppCore?.state?.canonicalPath ||
+            AppCore?.state?.route ||
+            normalized
+        ) || normalized,
     };
   }
 
@@ -1065,39 +2094,146 @@ export const SidebarUI = (() => {
     }
   }
 
-  function renderUser() {
-    refreshSidebarDomRefs();
-    ensureMenuInteractive("render-user");
-
-    try {
-      return renderUserBase(AppCore);
-    } catch (error) {
-      safeWarn(
-        "renderUserBase falló.",
-        error
+  function renderUser(reasonOrPayload = "render-user", context = {}) {
+    const {
+      reason,
+      payload,
+    } =
+      normalizeInvocation(
+        reasonOrPayload,
+        context,
+        "render-user"
       );
 
-      return false;
+    const userContext =
+      applyUserContextToCore(
+        {
+          ...payload,
+          reason,
+        },
+        context
+      );
+
+    refreshSidebarDomRefs();
+    ensureMenuInteractive(reason);
+
+    try {
+      return renderUserBase(
+        AppCore,
+        {
+          reason,
+          user:
+            userContext.user || getStateUser(),
+          role:
+            userContext.role || getState().role || "",
+          source:
+            SOURCE,
+        }
+      );
+    } catch {
+      try {
+        return renderUserBase(AppCore);
+      } catch (error) {
+        safeWarn(
+          "renderUserBase falló.",
+          error
+        );
+
+        return false;
+      }
     }
+  }
+
+  function refreshUser(reasonOrPayload = "refresh-user", context = {}) {
+    return renderUser(
+      reasonOrPayload,
+      context
+    );
+  }
+
+  function updateUser(reasonOrPayload = "update-user", context = {}) {
+    return renderUser(
+      reasonOrPayload,
+      context
+    );
+  }
+
+  function syncUser(reasonOrPayload = "sync-user", context = {}) {
+    const {
+      reason,
+    } =
+      normalizeInvocation(
+        reasonOrPayload,
+        context,
+        "sync-user"
+      );
+
+    const userRendered =
+      renderUser(
+        reasonOrPayload,
+        context
+      );
+
+    const visibilitySynced =
+      applyRoleVisibility(
+        `${reason}:visibility`,
+        context
+      );
+
+    return Boolean(
+      userRendered ||
+        visibilitySynced
+    );
   }
 
   /* ======================================================
      VISIBILITY
   ====================================================== */
 
-  function applyRoleVisibility() {
-    refreshSidebarDomRefs();
-    ensureMenuInteractive("apply-role-visibility");
-
-    const result =
-      applyRoleVisibilityBase(
-        AppCore,
-        null,
-        isAdmin
+  function applyRoleVisibility(reasonOrPayload = "apply-role-visibility", context = {}) {
+    const {
+      reason,
+      payload,
+    } =
+      normalizeInvocation(
+        reasonOrPayload,
+        context,
+        "apply-role-visibility"
       );
 
+    applyUserContextToCore(
+      {
+        ...payload,
+        reason,
+      },
+      context
+    );
+
+    refreshSidebarDomRefs();
+    ensureMenuInteractive(reason);
+
+    let result =
+      false;
+
+    try {
+      result =
+        applyRoleVisibilityBase(
+          AppCore,
+          null,
+          isAdmin
+        );
+    } catch (error) {
+      safeWarn(
+        "applyRoleVisibilityBase falló.",
+        error
+      );
+
+      result =
+        false;
+    }
+
     scheduleRouteAndIndicator(
-      "apply-role-visibility",
+      reason,
       {
         delayMs:
           INDICATOR_DELAY_REFRESH_MS,
@@ -1114,9 +2250,18 @@ export const SidebarUI = (() => {
      STATE / INDICATOR
   ====================================================== */
 
-  function syncSidebarState() {
+  function syncSidebarState(reasonOrPayload = "sync-sidebar-state", context = {}) {
+    const {
+      reason,
+    } =
+      normalizeInvocation(
+        reasonOrPayload,
+        context,
+        "sync-sidebar-state"
+      );
+
     refreshSidebarDomRefs();
-    ensureMenuInteractive("sync-sidebar-state");
+    ensureMenuInteractive(reason);
 
     return syncSidebarStateBase(
       AppCore,
@@ -1124,7 +2269,16 @@ export const SidebarUI = (() => {
     );
   }
 
-  function repairSidebarState(reason = "repair-sidebar-state") {
+  function repairSidebarState(reasonOrPayload = "repair-sidebar-state", context = {}) {
+    const {
+      reason,
+    } =
+      normalizeInvocation(
+        reasonOrPayload,
+        context,
+        "repair-sidebar-state"
+      );
+
     refreshSidebarDomRefs();
     ensureMenuInteractive(reason);
 
@@ -1148,9 +2302,16 @@ export const SidebarUI = (() => {
     return result;
   }
 
-  function syncRouteAndIndicator(reason = "route-sync", options = {}) {
-    const opts =
-      safeObject(options);
+  function syncRouteAndIndicator(reasonOrPayload = "route-sync", options = {}) {
+    const {
+      reason,
+      options: opts,
+    } =
+      normalizeInvocation(
+        reasonOrPayload,
+        options,
+        "route-sync"
+      );
 
     const payload =
       resolveRoutePayload(opts);
@@ -1210,6 +2371,10 @@ export const SidebarUI = (() => {
         reason,
         route:
           payload.route,
+        publicPath:
+          payload.publicPath,
+        canonicalPath:
+          payload.canonicalPath,
         hasActiveItem:
           Boolean(activeItem),
       }
@@ -1229,8 +2394,7 @@ export const SidebarUI = (() => {
 
     visualSyncTimer =
       safeSetTimeout(() => {
-        visualSyncTimer =
-          null;
+        visualSyncTimer = null;
 
         if (
           opts.bindGenerationSafe !== false &&
@@ -1735,18 +2899,12 @@ export const SidebarUI = (() => {
       disposeSidebarEvents(SCOPE);
     } catch {}
 
-    domEventsCleanup =
-      null;
-
-    coreEventsCleanup =
-      null;
-
-    eventsBound =
-      false;
+    domEventsCleanup = null;
+    coreEventsCleanup = null;
+    eventsBound = false;
 
     if (opts.preserveBindingFlag !== true) {
-      bindingEvents =
-        false;
+      bindingEvents = false;
     }
 
     ensureMenuInteractive("cleanup-bound-events");
@@ -1888,8 +3046,7 @@ export const SidebarUI = (() => {
       return api;
     }
 
-    bindingEvents =
-      true;
+    bindingEvents = true;
 
     try {
       bindGeneration += 1;
@@ -1954,6 +3111,10 @@ export const SidebarUI = (() => {
               api,
 
               renderUser,
+              refreshUser,
+              updateUser,
+              syncUser,
+
               applyRoleVisibility,
               syncSidebarState,
               closeDropdown,
@@ -2025,8 +3186,7 @@ export const SidebarUI = (() => {
 
       return api;
     } finally {
-      bindingEvents =
-        false;
+      bindingEvents = false;
     }
   }
 
@@ -2044,23 +3204,28 @@ export const SidebarUI = (() => {
      REFRESH / SYNC / REPAIR
   ====================================================== */
 
-  function sync(reason = "sync", options = {}) {
-    const opts =
-      safeObject(options);
-
-    const cleanReason =
-      safeText(reason, "sync");
+  function sync(reasonOrPayload = "sync", options = {}) {
+    const {
+      reason,
+      options: opts,
+      payload,
+    } =
+      normalizeInvocation(
+        reasonOrPayload,
+        options,
+        "sync"
+      );
 
     const ts =
       nowTs();
 
     if (
       opts.force !== true &&
-      cleanReason === lastSyncReason &&
+      reason === lastSyncReason &&
       ts - lastSyncAt < SYNC_DEDUP_WINDOW_MS
     ) {
       scheduleRouteAndIndicator(
-        `sync:deduped:${cleanReason}`,
+        `sync:deduped:${reason}`,
         {
           delayMs:
             INDICATOR_DELAY_REFRESH_MS,
@@ -2073,32 +3238,39 @@ export const SidebarUI = (() => {
       return api;
     }
 
-    lastSyncAt =
-      ts;
+    lastSyncAt = ts;
+    lastSyncReason = reason;
 
-    lastSyncReason =
-      cleanReason;
+    mountAndRefresh(reason);
+    sanitizeSidebarDom(`sync:${reason}`);
 
-    mountAndRefresh(cleanReason);
-    sanitizeSidebarDom(`sync:${cleanReason}`);
+    applyUserContextToCore(
+      {
+        ...payload,
+        reason,
+      },
+      opts
+    );
 
-    syncSidebarState();
+    syncSidebarState(reason, opts);
 
     if (opts.user !== false) {
-      renderUser();
+      renderUser(reason, opts);
     }
 
     if (opts.visibility !== false) {
-      applyRoleVisibility();
+      applyRoleVisibility(reason, opts);
     }
 
     if (opts.dropdownRepair === true) {
-      repairDropdown(`sync:${cleanReason}`);
+      repairDropdown(`sync:${reason}`);
     }
 
     scheduleRouteAndIndicator(
-      `sync:${cleanReason}`,
+      `sync:${reason}`,
       {
+        ...opts,
+
         delayMs:
           typeof opts.delayMs === "number"
             ? opts.delayMs
@@ -2113,9 +3285,7 @@ export const SidebarUI = (() => {
       safeEmit(
         "sidebar:synced",
         {
-          reason:
-            cleanReason,
-
+          reason,
           snapshot:
             getSidebarSnapshot(),
         }
@@ -2125,26 +3295,40 @@ export const SidebarUI = (() => {
     return api;
   }
 
-  function refresh(reason = "refresh") {
-    const cleanReason =
-      safeText(reason, "refresh");
+  function refresh(reasonOrPayload = "refresh", context = {}) {
+    const {
+      reason,
+      options,
+      payload,
+    } =
+      normalizeInvocation(
+        reasonOrPayload,
+        context,
+        "refresh"
+      );
 
-    mountAndRefresh(cleanReason);
+    mountAndRefresh(reason);
     ensureRuntimeStateDefaults();
 
     sanitizeSidebarDom(
-      `refresh:${cleanReason}`
+      `refresh:${reason}`
     );
 
-    syncSidebarState();
-    renderUser();
-    applyRoleVisibility();
-    repairDropdown(
-      `refresh:${cleanReason}`
+    applyUserContextToCore(
+      {
+        ...payload,
+        reason,
+      },
+      options
     );
+
+    syncSidebarState(reason, options);
+    renderUser(reason, options);
+    applyRoleVisibility(reason, options);
+    repairDropdown(`refresh:${reason}`);
 
     scheduleRouteAndIndicator(
-      `refresh:${cleanReason}`,
+      `refresh:${reason}`,
       {
         delayMs:
           INDICATOR_DELAY_REFRESH_MS,
@@ -2157,9 +3341,7 @@ export const SidebarUI = (() => {
     safeEmit(
       "sidebar:refreshed",
       {
-        reason:
-          cleanReason,
-
+        reason,
         snapshot:
           getSidebarSnapshot(),
       }
@@ -2168,12 +3350,17 @@ export const SidebarUI = (() => {
     return api;
   }
 
-  function repair(reason = "repair", options = {}) {
-    const opts =
-      safeObject(options);
-
-    const cleanReason =
-      safeText(reason, "repair");
+  function repair(reasonOrPayload = "repair", options = {}) {
+    const {
+      reason,
+      options: opts,
+      payload,
+    } =
+      normalizeInvocation(
+        reasonOrPayload,
+        options,
+        "repair"
+      );
 
     const ts =
       nowTs();
@@ -2183,7 +3370,7 @@ export const SidebarUI = (() => {
       ts - lastRepairAt < REPAIR_DEDUP_WINDOW_MS
     ) {
       scheduleRouteAndIndicator(
-        `repair:deduped:${cleanReason}`,
+        `repair:deduped:${reason}`,
         {
           delayMs:
             INDICATOR_DELAY_REPAIR_MS,
@@ -2196,14 +3383,10 @@ export const SidebarUI = (() => {
       safeEmit(
         "sidebar:repair:deduped",
         {
-          reason:
-            cleanReason,
-
+          reason,
           sinceLastRepairMs:
             ts - lastRepairAt,
-
           lastRepairReason,
-
           snapshot:
             getSidebarSnapshot(),
         }
@@ -2212,23 +3395,19 @@ export const SidebarUI = (() => {
       return api;
     }
 
-    lastRepairAt =
-      ts;
-
-    lastRepairReason =
-      cleanReason;
+    lastRepairAt = ts;
+    lastRepairReason = reason;
 
     const {
       mounted,
     } =
-      mountAndRefresh(cleanReason);
+      mountAndRefresh(reason);
 
     if (!mounted) {
       safeWarn(
         "No se pudo reparar sidebar: shell ausente.",
         {
-          reason:
-            cleanReason,
+          reason,
         }
       );
 
@@ -2238,11 +3417,20 @@ export const SidebarUI = (() => {
     ensureRuntimeStateDefaults();
 
     sanitizeSidebarDom(
-      `repair:${cleanReason}`
+      `repair:${reason}`
+    );
+
+    applyUserContextToCore(
+      {
+        ...payload,
+        reason,
+      },
+      opts
     );
 
     repairSidebarState(
-      `repair:${cleanReason}`
+      `repair:${reason}`,
+      opts
     );
 
     /*
@@ -2252,15 +3440,15 @@ export const SidebarUI = (() => {
       3. Dropdown.
       Así roles/admin se calculan con identidad actualizada.
     */
-    renderUser();
-    applyRoleVisibility();
+    renderUser(reason, opts);
+    applyRoleVisibility(reason, opts);
     repairDropdown(
-      `repair:${cleanReason}`
+      `repair:${reason}`
     );
 
     if (opts.rebind === true) {
       bindEvents(
-        `repair:${cleanReason}`,
+        `repair:${reason}`,
         {
           force:
             true,
@@ -2268,15 +3456,14 @@ export const SidebarUI = (() => {
       );
     } else if (!eventsBound) {
       bindEvents(
-        `repair:${cleanReason}`
+        `repair:${reason}`
       );
     }
 
-    initialized =
-      true;
+    initialized = true;
 
     scheduleRouteAndIndicator(
-      `repair:${cleanReason}`,
+      `repair:${reason}`,
       {
         delayMs:
           INDICATOR_DELAY_REPAIR_MS,
@@ -2288,11 +3475,11 @@ export const SidebarUI = (() => {
 
     afterPaint(() => {
       ensureMenuInteractive(
-        `repair:${cleanReason}:after-paint`
+        `repair:${reason}:after-paint`
       );
 
       syncRouteAndIndicator(
-        `repair:${cleanReason}:after-paint`,
+        `repair:${reason}:after-paint`,
         {
           delayMs:
             0,
@@ -2306,12 +3493,9 @@ export const SidebarUI = (() => {
     safeEmit(
       "sidebar:repaired",
       {
-        reason:
-          cleanReason,
-
+        reason,
         snapshot:
           getSidebarSnapshot(),
-
         isAdmin:
           isAdmin(),
       }
@@ -2335,8 +3519,7 @@ export const SidebarUI = (() => {
 
     repairTimer =
       safeSetTimeout(() => {
-        repairTimer =
-          null;
+        repairTimer = null;
 
         repair(
           reason,
@@ -2450,7 +3633,39 @@ export const SidebarUI = (() => {
       }
     } catch {}
 
+    try {
+      const value =
+        AppCore?.modules?.[cleanName];
+
+      if (value) {
+        return value;
+      }
+    } catch {}
+
     return null;
+  }
+
+  function exposeCoreAlias(name = "") {
+    const cleanName =
+      safeText(name, "");
+
+    if (!cleanName) {
+      return false;
+    }
+
+    try {
+      if (AppCore?.[cleanName] !== api) {
+        defineHiddenValue(
+          AppCore,
+          cleanName,
+          api
+        );
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function registerSingleModule(name = "") {
@@ -2465,11 +3680,11 @@ export const SidebarUI = (() => {
       getRegisteredModule(cleanName);
 
     if (current === api) {
+      exposeCoreAlias(cleanName);
       return false;
     }
 
-    let changed =
-      false;
+    let changed = false;
 
     try {
       if (isFunction(AppCore?.modules?.register)) {
@@ -2487,14 +3702,16 @@ export const SidebarUI = (() => {
               silentDuplicate:
                 true,
 
+              idempotent:
+                true,
+
               source:
                 SOURCE,
             }
           );
 
         if (result !== false) {
-          changed =
-            true;
+          changed = true;
         }
       }
     } catch {}
@@ -2516,15 +3733,29 @@ export const SidebarUI = (() => {
                 silentDuplicate:
                   true,
 
+                idempotent:
+                  true,
+
                 source:
                   SOURCE,
               }
             );
 
           if (result !== false) {
-            changed =
-              true;
+            changed = true;
           }
+        }
+      } catch {}
+    }
+
+    if (!changed) {
+      try {
+        if (
+          AppCore?.modules &&
+          canExtend(AppCore.modules)
+        ) {
+          AppCore.modules[cleanName] = api;
+          changed = true;
         }
       } catch {}
     }
@@ -2535,22 +3766,38 @@ export const SidebarUI = (() => {
         api
       );
 
-      changed =
-        true;
+      changed = true;
     } catch {}
+
+    exposeCoreAlias(cleanName);
 
     return changed;
   }
 
   function registerModule() {
-    let changed =
-      false;
+    let changed = false;
 
     for (const name of MODULE_NAMES) {
       if (registerSingleModule(name)) {
-        changed =
-          true;
+        changed = true;
       }
+    }
+
+    try {
+      exposeCoreAlias("Sidebar");
+      exposeCoreAlias("SidebarUI");
+      exposeCoreAlias("sidebar");
+      exposeCoreAlias("sidebarUI");
+    } catch {}
+
+    if (changed) {
+      safeEmit(
+        "sidebar:module:registered",
+        {
+          names:
+            [...MODULE_NAMES],
+        }
+      );
     }
 
     return changed;
@@ -2563,13 +3810,11 @@ export const SidebarUI = (() => {
 
     try {
       if (window.SidebarUI !== api) {
-        window.SidebarUI =
-          api;
+        window.SidebarUI = api;
       }
 
       if (window.OnionSidebarUI !== api) {
-        window.OnionSidebarUI =
-          api;
+        window.OnionSidebarUI = api;
       }
 
       return true;
@@ -2603,6 +3848,7 @@ export const SidebarUI = (() => {
       return sync(
         "init-already-initialized",
         {
+          ...opts,
           force:
             opts.force === true,
 
@@ -2629,7 +3875,18 @@ export const SidebarUI = (() => {
 
     sanitizeSidebarDom("init");
 
-    syncSidebarState();
+    applyUserContextToCore(
+      {
+        reason:
+          "init",
+        user:
+          getAuthUser() ||
+          getStateUser(),
+      },
+      opts
+    );
+
+    syncSidebarState("init", opts);
 
     /*
       Orden crítico:
@@ -2637,8 +3894,8 @@ export const SidebarUI = (() => {
       - visibility después para ocultar/mostrar correctamente.
       - dropdown después para reparar aria/foco sobre DOM final.
     */
-    renderUser();
-    applyRoleVisibility();
+    renderUser("init", opts);
+    applyRoleVisibility("init", opts);
     repairDropdown("init");
 
     closeDropdown(
@@ -2651,8 +3908,7 @@ export const SidebarUI = (() => {
       }
     );
 
-    initialized =
-      true;
+    initialized = true;
 
     registerModule();
     exposeGlobalBridge();
@@ -2717,34 +3973,24 @@ export const SidebarUI = (() => {
       );
     } catch {}
 
-    initialized =
-      false;
+    initialized = false;
+    logoutInFlight = false;
 
-    logoutInFlight =
-      false;
-
-    runtimeState.dropdownOpen =
-      false;
+    runtimeState.dropdownOpen = false;
 
     bindGeneration += 1;
 
-    lastBindAt =
-      0;
+    lastBindAt = 0;
+    lastBindReason = "";
 
-    lastBindReason =
-      "";
+    lastRepairAt = 0;
+    lastRepairReason = "";
 
-    lastRepairAt =
-      0;
+    lastSyncAt = 0;
+    lastSyncReason = "";
 
-    lastRepairReason =
-      "";
-
-    lastSyncAt =
-      0;
-
-    lastSyncReason =
-      "";
+    lastUserSyncAt = 0;
+    lastUserSyncSignature = "";
 
     ensureMenuInteractive("destroy");
 
@@ -2767,11 +4013,8 @@ export const SidebarUI = (() => {
     const elements =
       getElements(AppCore);
 
-    let mobile =
-      false;
-
-    let open =
-      true;
+    let mobile = false;
+    let open = true;
 
     try {
       mobile =
@@ -2816,7 +4059,7 @@ export const SidebarUI = (() => {
             ),
         }));
 
-    return {
+    return sanitizeForEvent({
       version:
         SIDEBAR_UI_VERSION,
 
@@ -2833,6 +4076,9 @@ export const SidebarUI = (() => {
 
       lastSyncAt,
       lastSyncReason,
+
+      lastUserSyncAt,
+      lastUserSyncSignature,
 
       logoutInFlight,
 
@@ -2902,13 +4148,10 @@ export const SidebarUI = (() => {
           AppCore?.state?.canonicalPath || "",
 
         routerPublicPath:
-          (() => {
-            try {
-              return Router?.getCurrentPublicPath?.() || "";
-            } catch {
-              return "";
-            }
-          })(),
+          getRouterPublicPathSafe(),
+
+        routerCanonicalPath:
+          getRouterCanonicalPathSafe(),
       },
 
       dom: {
@@ -2932,6 +4175,21 @@ export const SidebarUI = (() => {
 
         hasLogout:
           Boolean(elements.logoutBtn),
+
+        hasAvatar:
+          Boolean(elements.avatarEl),
+
+        hasAvatarImage:
+          Boolean(elements.avatarImage),
+
+        hasAvatarFallback:
+          Boolean(elements.avatarFallback),
+
+        hasName:
+          Boolean(elements.nameEl),
+
+        hasPlan:
+          Boolean(elements.planEl),
 
         sidebarHidden:
           Boolean(elements.sidebar?.hidden),
@@ -2964,6 +4222,57 @@ export const SidebarUI = (() => {
         (() => {
           try {
             return getSidebarUserSnapshot(AppCore);
+          } catch {
+            return {};
+          }
+        })(),
+
+      appUser:
+        (() => {
+          try {
+            const user =
+              getStateUser();
+
+            return {
+              hasUser:
+                hasUsableUser(user),
+
+              id:
+                user?.id ||
+                user?.userId ||
+                user?.uid ||
+                null,
+
+              username:
+                user?.username ||
+                user?.usernameLower ||
+                user?.slug ||
+                null,
+
+              displayName:
+                user?.displayName ||
+                user?.name ||
+                null,
+
+              role:
+                AppCore?.state?.role ||
+                user?.role ||
+                user?.rol ||
+                null,
+
+              hasAvatar:
+                Boolean(
+                  user?.avatar ||
+                    user?.avatarUrl ||
+                    user?.picture
+                ),
+
+              plan:
+                user?.plan ||
+                user?.planName ||
+                user?.subscriptionPlan ||
+                null,
+            };
           } catch {
             return {};
           }
@@ -3053,7 +4362,7 @@ export const SidebarUI = (() => {
         safeObject(
           getSidebarActionsSnapshot()
         ),
-    };
+    });
   }
 
   function debugDropdown() {
@@ -3252,6 +4561,10 @@ export const SidebarUI = (() => {
       rebindEvents,
 
       renderUser,
+      refreshUser,
+      updateUser,
+      syncUser,
+
       applyRoleVisibility,
 
       syncSidebarState,

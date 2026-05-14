@@ -2,7 +2,7 @@
    Onion SPA - Sidebar User
    Archivo: src/ui/sidebar/user.js
 
-   ONION SUPPORT · SIDEBAR USER · AVATAR · 15/10
+   ONION SUPPORT · SIDEBAR USER · AVATAR · EXTREME 10/10
    RESTORE SAFE · LOGOUT SAFE · AVATAR ANTI-RACE · ROLE SAFE
 
    RESPONSABILIDADES:
@@ -28,7 +28,8 @@
    - Soporta user/profile/account/meta/claims/raw/customer/cliente.
    - Soporta avatarUrl/photoUrl/picture/profileImage anidados.
    - Bloquea protocolos peligrosos.
-   - Bloquea data:image/svg+xml para evitar vectores SVG.
+   - Bloquea data:image/svg+xml.
+   - Bloquea URLs http externas no locales.
    - Cache bust con avatarUpdatedAt/avatarVersion.
    - Fallback inmediato mientras carga imagen real.
    - onload/onerror con token anti-race.
@@ -38,6 +39,7 @@
    - Resuelve Auth aunque esté en AppCore.modules o window.
    - Soporta payloads de sesión heterogéneos.
    - Evita false positives de usuario vacío.
+   - Redacta tokens/URLs sensibles en eventos, datasets y snapshots.
 ========================================================= */
 
 import {
@@ -60,7 +62,7 @@ import {
 ========================================================= */
 
 export const SIDEBAR_USER_VERSION =
-  "sidebar-user-v15-restore-safe-avatar-safe";
+  "sidebar-user-v16-extreme-avatar-auth-safe";
 
 /* =========================================================
    CONSTANTS
@@ -89,6 +91,9 @@ const AVATAR_CACHE_PARAM =
 
 const AVATAR_RENDER_SEQ_DATASET_KEY =
   "avatarRenderSeq";
+
+const AVATAR_URL_HASH_DATASET_KEY =
+  "avatarUrlHash";
 
 const AVATAR_COLOR_STORAGE_KEY =
   "onion:sidebar:avatar:color";
@@ -122,6 +127,9 @@ const DEFAULT_ADMIN_ROLE_KEYS =
     "root",
     "support_admin",
     "soporte_admin",
+    "sysadmin",
+    "system_admin",
+    "platform_admin",
   ]);
 
 const DEFAULT_ADMIN_PERMISSION_KEYS =
@@ -136,6 +144,8 @@ const DEFAULT_ADMIN_PERMISSION_KEYS =
     "servidor:manage",
     "settings:manage",
     "ajustes:manage",
+    "billing:manage",
+    "facturas:manage",
   ]);
 
 const DEFAULT_ADMIN_FLAG_KEYS =
@@ -150,20 +160,26 @@ const DEFAULT_ADMIN_FLAG_KEYS =
     "canAccessUsers",
     "canManageServer",
     "canAccessServer",
+    "canManageSettings",
+    "canAccessSettings",
+    "canManageBilling",
   ]);
 
 const ADMIN_ROLE_KEYS =
-  Array.isArray(SIDEBAR_ADMIN_ROLE_KEYS)
+  Array.isArray(SIDEBAR_ADMIN_ROLE_KEYS) &&
+  SIDEBAR_ADMIN_ROLE_KEYS.length
     ? SIDEBAR_ADMIN_ROLE_KEYS
     : DEFAULT_ADMIN_ROLE_KEYS;
 
 const ADMIN_PERMISSION_KEYS =
-  Array.isArray(SIDEBAR_ADMIN_PERMISSION_KEYS)
+  Array.isArray(SIDEBAR_ADMIN_PERMISSION_KEYS) &&
+  SIDEBAR_ADMIN_PERMISSION_KEYS.length
     ? SIDEBAR_ADMIN_PERMISSION_KEYS
     : DEFAULT_ADMIN_PERMISSION_KEYS;
 
 const ADMIN_FLAG_KEYS =
-  Array.isArray(SIDEBAR_ADMIN_FLAG_KEYS)
+  Array.isArray(SIDEBAR_ADMIN_FLAG_KEYS) &&
+  SIDEBAR_ADMIN_FLAG_KEYS.length
     ? SIDEBAR_ADMIN_FLAG_KEYS
     : DEFAULT_ADMIN_FLAG_KEYS;
 
@@ -257,6 +273,54 @@ const SAFE_DATA_IMAGE_PREFIXES =
     "data:image/bmp",
   ]);
 
+const SENSITIVE_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
+    "code",
+    "t",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
+    "sig",
+    "signature",
+    "se",
+    "sp",
+    "sv",
+    "sr",
+    "skoid",
+    "sktid",
+    "skt",
+    "ske",
+    "sks",
+    "skv",
+  ]);
+
+const INACTIVE_STATUS_VALUES =
+  Object.freeze([
+    "disabled",
+    "inactive",
+    "deleted",
+    "blocked",
+    "suspended",
+    "banned",
+    "revoked",
+    "archived",
+    "deactivated",
+  ]);
+
 let memoryAvatarGradient =
   "";
 
@@ -297,7 +361,10 @@ function safeText(value, fallback = "") {
   }
 
   const text =
-    String(value).trim();
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return text || fallback;
 }
@@ -417,22 +484,6 @@ function safeBoolean(value, fallback = false) {
   return fallback;
 }
 
-function safeWarn(AppCore, ...args) {
-  try {
-    AppCore?.utils?.warn?.(
-      LOG_PREFIX,
-      ...args
-    );
-  } catch {}
-
-  try {
-    console.warn(
-      LOG_PREFIX,
-      ...args
-    );
-  } catch {}
-}
-
 function nowMs() {
   try {
     return Date.now();
@@ -449,74 +500,22 @@ function safeIsoDate(ms = nowMs()) {
   }
 }
 
-function safeEmit(AppCore, eventName = "", payload = {}) {
-  const name =
-    safeText(eventName, "");
-
-  if (!name) {
-    return false;
-  }
-
-  const data =
-    safeObject(payload);
-
-  const finalPayload =
-    {
-      ...data,
-
-      source:
-        safeText(data.source, SOURCE),
-
-      owner:
-        OWNER,
-
-      version:
-        SIDEBAR_USER_VERSION,
-
-      at:
-        safeText(data.at, safeIsoDate()),
-
-      ts:
-        data.ts || nowMs(),
-    };
-
+function safeWarn(AppCore, ...args) {
   try {
-    if (isFn(AppCore?.events?.emit)) {
-      AppCore.events.emit(
-        name,
-        finalPayload
-      );
-
-      return true;
-    }
-  } catch (error) {
-    safeWarn(
-      AppCore,
-      `AppCore.events.emit("${name}") falló.`,
-      error
+    AppCore?.utils?.warn?.(
+      LOG_PREFIX,
+      ...args.map((item) => sanitizePayload(item))
     );
-  }
 
-  try {
-    if (
-      isBrowser() &&
-      typeof CustomEvent !== "undefined"
-    ) {
-      window.dispatchEvent(
-        new CustomEvent(
-          name,
-          {
-            detail:
-              finalPayload,
-          }
-        )
-      );
-
-      return true;
-    }
+    return;
   } catch {}
 
-  return false;
+  try {
+    console.warn(
+      LOG_PREFIX,
+      ...args.map((item) => sanitizePayload(item))
+    );
+  } catch {}
 }
 
 function normalizeString(value = "") {
@@ -559,6 +558,47 @@ function hashString(value = "") {
   } catch {
     return `h${Math.abs(text.length || 0).toString(36)}`;
   }
+}
+
+function safeCssIdSelector(id = "") {
+  const cleanId =
+    safeText(id, "");
+
+  if (!cleanId) {
+    return "";
+  }
+
+  try {
+    if (
+      isBrowser() &&
+      window.CSS &&
+      isFn(window.CSS.escape)
+    ) {
+      return `#${window.CSS.escape(cleanId)}`;
+    }
+  } catch {}
+
+  return `#${cleanId.replace(/[^A-Za-z0-9_-]/g, "\\$&")}`;
+}
+
+function isPlaceholderText(value = "") {
+  const text =
+    safeText(value, "")
+      .toLowerCase();
+
+  return (
+    !text ||
+    [
+      "null",
+      "undefined",
+      "false",
+      "true",
+      "nan",
+      "none",
+      "[object object]",
+      "object object",
+    ].includes(text)
+  );
 }
 
 function setDatasetValue(element = null, key = "", value = "") {
@@ -622,6 +662,278 @@ function removeTooltipAttributesDeep(element = null) {
   } catch {
     return false;
   }
+}
+
+/* =========================================================
+   REDACTION / SANITIZE
+========================================================= */
+
+function escapeRegExp(value = "") {
+  return String(value).replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
+  );
+}
+
+function redactSensitiveText(value = "") {
+  let output =
+    safeText(value, "");
+
+  if (!output) {
+    return "";
+  }
+
+  for (const name of SENSITIVE_PARAM_NAMES) {
+    try {
+      const escaped =
+        escapeRegExp(name);
+
+      output =
+        output.replace(
+          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
+    } catch {}
+  }
+
+  try {
+    output =
+      output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
+  } catch {}
+
+  try {
+    output =
+      output.replace(
+        /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
+        "$1$2***"
+      );
+  } catch {}
+
+  try {
+    output =
+      output.replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
+      );
+  } catch {}
+
+  return output;
+}
+
+function isDomNodeLike(value) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  try {
+    return Boolean(
+      typeof Node !== "undefined" &&
+        value instanceof Node
+    );
+  } catch {}
+
+  try {
+    return Boolean(
+      value.nodeType &&
+        value.nodeName
+    );
+  } catch {}
+
+  return false;
+}
+
+function sanitizePayload(value, depth = 0) {
+  if (depth > 6) {
+    return "[MaxDepth]";
+  }
+
+  if (typeof value === "string") {
+    return redactSensitiveText(value);
+  }
+
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "function") {
+    return "[Function]";
+  }
+
+  if (isDomNodeLike(value)) {
+    return {
+      node:
+        safeText(value.nodeName, "Node"),
+
+      id:
+        safeText(value.id, ""),
+
+      className:
+        safeText(
+          value.className?.baseVal ||
+            value.className,
+          ""
+        ),
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 80)
+      .map((item) =>
+        sanitizePayload(item, depth + 1)
+      );
+  }
+
+  if (value instanceof Error) {
+    return {
+      name:
+        safeText(value.name, "Error"),
+
+      message:
+        redactSensitiveText(value.message || ""),
+
+      code:
+        value.code || null,
+
+      status:
+        value.status || value.statusCode || null,
+
+      stack:
+        redactSensitiveText(value.stack || ""),
+    };
+  }
+
+  if (value instanceof Map) {
+    return {
+      type:
+        "Map",
+      size:
+        value.size,
+    };
+  }
+
+  if (value instanceof Set) {
+    return {
+      type:
+        "Set",
+      size:
+        value.size,
+    };
+  }
+
+  if (
+    value &&
+    typeof value === "object"
+  ) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      if (
+        /token|secret|password|authorization|credential|jwt|bearer|otp|code|sig|signature/i.test(key)
+      ) {
+        if (
+          item === null ||
+          item === undefined ||
+          item === "" ||
+          typeof item === "boolean"
+        ) {
+          output[key] = item;
+        } else {
+          output[key] = "***";
+        }
+
+        continue;
+      }
+
+      output[key] =
+        sanitizePayload(
+          item,
+          depth + 1
+        );
+    }
+
+    return output;
+  }
+
+  return String(value);
+}
+
+function safeEmit(AppCore, eventName = "", payload = {}) {
+  const name =
+    safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  const data =
+    safeObject(payload);
+
+  const finalPayload =
+    sanitizePayload({
+      ...data,
+
+      source:
+        safeText(data.source, SOURCE),
+
+      owner:
+        OWNER,
+
+      version:
+        SIDEBAR_USER_VERSION,
+
+      at:
+        safeText(data.at, safeIsoDate()),
+
+      ts:
+        data.ts || nowMs(),
+    });
+
+  try {
+    if (isFn(AppCore?.events?.emit)) {
+      AppCore.events.emit(
+        name,
+        finalPayload
+      );
+
+      return true;
+    }
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      `AppCore.events.emit("${name}") falló.`,
+      error
+    );
+  }
+
+  try {
+    if (
+      isBrowser() &&
+      typeof CustomEvent !== "undefined"
+    ) {
+      window.dispatchEvent(
+        new CustomEvent(
+          name,
+          {
+            detail:
+              finalPayload,
+          }
+        )
+      );
+
+      return true;
+    }
+  } catch {}
+
+  return false;
 }
 
 /* =========================================================
@@ -802,7 +1114,10 @@ function getUserFromAuthLikeSources(AppCore = null) {
     const unwrapped =
       unwrapUserPayload(user);
 
-    if (isNonEmptyObject(unwrapped)) {
+    if (
+      isNonEmptyObject(unwrapped) &&
+      hasUsableUserIdentity(unwrapped)
+    ) {
       return unwrapped;
     }
   }
@@ -992,7 +1307,10 @@ function isAuthRestoreInProgress(AppCore = null) {
     safeObject(AppCore?.state);
 
   return Boolean(
-    state.restoreInProgress === true ||
+    state.restoring === true ||
+      state.authRestoring === true ||
+      state.sessionRestoring === true ||
+      state.restoreInProgress === true ||
       state.sessionRestoreInProgress === true ||
       state.authRestoreInProgress === true ||
       state.auth?.restoreInProgress === true ||
@@ -1028,9 +1346,9 @@ function isExplicitlyUnauthenticated(AppCore = null) {
 
 function shouldUseStoredUserFallback(AppCore = null) {
   /*
-    Regla anti-ghost:
-    Si AppCore ya declaró sesión no autenticada, NO resucitamos
-    usuario desde storage. El restore oficial debe repintar después.
+    Anti-ghost:
+    Si AppCore declaró sesión no autenticada, NO se resucita usuario
+    desde storage. El restore oficial repintará cuando corresponda.
   */
   if (
     isExplicitlyUnauthenticated(AppCore) &&
@@ -1191,12 +1509,93 @@ function getProfileLikeBranches(user = null) {
   ].filter(isNonEmptyObject);
 }
 
+function isBranchMarkedInactive(branch = null) {
+  const current =
+    safeObject(branch);
+
+  if (!isNonEmptyObject(current)) {
+    return false;
+  }
+
+  const status =
+    safeText(
+      first(
+        current.status,
+        current.estado,
+        current.state,
+        current.accountStatus,
+        current.account_status,
+        current.userStatus,
+        current.user_status
+      ),
+      ""
+    )
+      .toLowerCase()
+      .trim();
+
+  if (
+    status &&
+    INACTIVE_STATUS_VALUES.includes(status)
+  ) {
+    return true;
+  }
+
+  if (
+    current.disabled === true ||
+    current.isDisabled === true ||
+    current.is_disabled === true ||
+    current.deleted === true ||
+    current.isDeleted === true ||
+    current.is_deleted === true ||
+    current.blocked === true ||
+    current.isBlocked === true ||
+    current.is_blocked === true ||
+    current.suspended === true ||
+    current.isSuspended === true ||
+    current.is_suspended === true
+  ) {
+    return true;
+  }
+
+  const activeCandidate =
+    first(
+      current.active,
+      current.isActive,
+      current.is_active,
+      current.enabled,
+      current.isEnabled,
+      current.is_enabled
+    );
+
+  if (
+    activeCandidate !== null &&
+    activeCandidate !== undefined &&
+    activeCandidate !== ""
+  ) {
+    return !safeBoolean(activeCandidate, true);
+  }
+
+  return false;
+}
+
 function hasUsableUserIdentity(user = null) {
   const current =
     safeObject(user);
 
+  if (!isNonEmptyObject(current)) {
+    return false;
+  }
+
   const branches =
     getProfileLikeBranches(current);
+
+  if (
+    branches.some((branch) =>
+      isBranchMarkedInactive(branch)
+    )
+  ) {
+    return false;
+  }
 
   return branches.some((branch) => {
     return Boolean(
@@ -1228,6 +1627,17 @@ function hasUsableUserIdentity(user = null) {
    DISPLAY / USERNAME
 ========================================================= */
 
+function coerceDisplayValue(value = "") {
+  const text =
+    safeText(value, "");
+
+  if (isPlaceholderText(text)) {
+    return "";
+  }
+
+  return text;
+}
+
 export function getDisplayName(AppCore, user = null) {
   const currentUser =
     safeObject(user || getUser(AppCore));
@@ -1242,9 +1652,8 @@ export function getDisplayName(AppCore, user = null) {
   try {
     if (isFn(AppCore?.getUserDisplayName)) {
       const value =
-        safeText(
-          AppCore.getUserDisplayName(currentUser),
-          ""
+        coerceDisplayValue(
+          AppCore.getUserDisplayName(currentUser)
         );
 
       if (value) {
@@ -1256,9 +1665,8 @@ export function getDisplayName(AppCore, user = null) {
   try {
     if (isFn(AppCore?.utils?.getUserDisplayName)) {
       const value =
-        safeText(
-          AppCore.utils.getUserDisplayName(currentUser),
-          ""
+        coerceDisplayValue(
+          AppCore.utils.getUserDisplayName(currentUser)
         );
 
       if (value) {
@@ -1305,10 +1713,7 @@ export function getDisplayName(AppCore, user = null) {
       ])
     );
 
-  return safeText(
-    value,
-    DEFAULT_DISPLAY_NAME
-  );
+  return coerceDisplayValue(value) || DEFAULT_DISPLAY_NAME;
 }
 
 function sanitizeUsername(value = "") {
@@ -1638,6 +2043,27 @@ function coerceAvatarUrlValue(value = "") {
   return safeText(value, "");
 }
 
+function isLocalHttpUrl(url) {
+  try {
+    const parsed =
+      new URL(
+        url,
+        getBaseOrigin()
+      );
+
+    return (
+      parsed.protocol === "http:" &&
+      (
+        parsed.hostname === "localhost" ||
+        parsed.hostname === "127.0.0.1" ||
+        parsed.hostname === "::1"
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+
 function sanitizeAvatarUrl(value = "") {
   const raw =
     safeText(
@@ -1646,6 +2072,10 @@ function sanitizeAvatarUrl(value = "") {
     );
 
   if (!raw) {
+    return "";
+  }
+
+  if (/[\r\n\t]/.test(raw)) {
     return "";
   }
 
@@ -1659,11 +2089,13 @@ function sanitizeAvatarUrl(value = "") {
     lower.startsWith("javascript:") ||
     lower.startsWith("vbscript:") ||
     lower.startsWith("file:") ||
+    lower.startsWith("filesystem:") ||
     lower.startsWith("data:text/") ||
     lower.startsWith("data:application/") ||
     lower.startsWith("data:audio/") ||
     lower.startsWith("data:video/") ||
-    lower.startsWith("data:image/svg")
+    lower.startsWith("data:image/svg") ||
+    lower.startsWith("//")
   ) {
     return "";
   }
@@ -1679,8 +2111,11 @@ function sanitizeAvatarUrl(value = "") {
       : "";
   }
 
+  if (lower.startsWith("blob:")) {
+    return raw;
+  }
+
   if (
-    lower.startsWith("blob:") ||
     lower.startsWith("/") ||
     lower.startsWith("./") ||
     lower.startsWith("../")
@@ -1688,15 +2123,21 @@ function sanitizeAvatarUrl(value = "") {
     return raw;
   }
 
-  if (
-    lower.startsWith("http://") ||
-    lower.startsWith("https://")
-  ) {
-    try {
-      const url =
-        new URL(raw, getBaseOrigin());
+  if (lower.startsWith("http://")) {
+    if (!isLocalHttpUrl(raw)) {
+      return "";
+    }
 
-      return url.toString();
+    try {
+      return new URL(raw, getBaseOrigin()).toString();
+    } catch {
+      return "";
+    }
+  }
+
+  if (lower.startsWith("https://")) {
+    try {
+      return new URL(raw, getBaseOrigin()).toString();
     } catch {
       return "";
     }
@@ -2312,6 +2753,7 @@ function getAvatarColorScope(AppCore = null, user = null) {
       state.loginAt,
       state.loggedAt,
       state.authenticatedAt,
+      state.lastLoginAt,
       session.loginAt,
       session.loggedAt,
       session.authenticatedAt,
@@ -2464,6 +2906,9 @@ function applyAvatarSessionColor(
     if (avatarEl) {
       avatarEl.dataset.avatarColor =
         gradient;
+
+      avatarEl.dataset.avatarColorHash =
+        hashString(gradient);
     }
   } catch {}
 
@@ -2529,7 +2974,7 @@ function getAvatarNodes(avatarEl) {
     imgEl =
       (
         imageId
-          ? avatarEl.querySelector(`#${imageId}`)
+          ? avatarEl.querySelector(safeCssIdSelector(imageId))
           : null
       ) ||
       avatarEl.querySelector(".avatar-image") ||
@@ -2544,7 +2989,7 @@ function getAvatarNodes(avatarEl) {
     fallbackEl =
       (
         fallbackId
-          ? avatarEl.querySelector(`#${fallbackId}`)
+          ? avatarEl.querySelector(safeCssIdSelector(fallbackId))
           : null
       ) ||
       avatarEl.querySelector(".avatar-fallback") ||
@@ -2664,6 +3109,9 @@ function setAvatarState(
     return false;
   }
 
+  const cleanUrl =
+    safeText(url, "");
+
   try {
     avatarEl.classList.toggle(
       "has-image",
@@ -2694,11 +3142,15 @@ function setAvatarState(
     avatarEl.dataset.avatarError =
       error ? "true" : "false";
 
-    if (url) {
+    if (cleanUrl) {
       avatarEl.dataset.avatarUrl =
-        url;
+        redactSensitiveText(cleanUrl);
+
+      avatarEl.dataset[AVATAR_URL_HASH_DATASET_KEY] =
+        hashString(cleanUrl);
     } else {
       delete avatarEl.dataset.avatarUrl;
+      delete avatarEl.dataset[AVATAR_URL_HASH_DATASET_KEY];
     }
 
     return true;
@@ -2906,6 +3358,69 @@ export function renderAvatarImage(
     );
   }
 
+  const urlHash =
+    hashString(safeUrl);
+
+  const existingUrlHash =
+    safeText(
+      avatarEl.dataset?.[AVATAR_URL_HASH_DATASET_KEY],
+      ""
+    );
+
+  /*
+    Anti-flicker:
+    Si la misma imagen ya está cargada, no reiniciamos la carga.
+  */
+  if (
+    existingUrlHash === urlHash &&
+    imgEl.complete === true &&
+    Number(imgEl.naturalWidth || 0) > 0 &&
+    avatarEl.dataset?.hasImage === "true"
+  ) {
+    syncAvatarBaseAttrs(
+      avatarEl,
+      finalDisplayName
+    );
+
+    try {
+      imgEl.alt =
+        `Avatar de ${finalDisplayName}`;
+
+      imgEl.hidden =
+        false;
+    } catch {}
+
+    setFallbackNode(
+      {
+        avatarEl,
+        fallbackEl,
+        text:
+          finalAvatarText,
+        visible:
+          false,
+      }
+    );
+
+    setAvatarState(
+      avatarEl,
+      {
+        hasImage:
+          true,
+
+        loading:
+          false,
+
+        url:
+          safeUrl,
+
+        error:
+          false,
+      }
+    );
+
+    return true;
+  }
+
   const renderSeq =
     nextAvatarRenderSeq(avatarEl);
 
@@ -3014,7 +3529,9 @@ export function renderAvatarImage(
           EVENTS.userAvatarLoaded,
           {
             url:
-              safeUrl,
+              redactSensitiveText(safeUrl),
+
+            urlHash,
 
             displayName:
               finalDisplayName,
@@ -3057,7 +3574,9 @@ export function renderAvatarImage(
           EVENTS.userAvatarError,
           {
             url:
-              safeUrl,
+              redactSensitiveText(safeUrl),
+
+            urlHash,
 
             displayName:
               finalDisplayName,
@@ -3079,6 +3598,7 @@ export function renderAvatarImage(
 
     try {
       imgEl.removeAttribute("src");
+      imgEl.removeAttribute("srcset");
     } catch {}
 
     imgEl.src =
@@ -3160,7 +3680,7 @@ function getPlanElement(userToggle = null, explicitPlanEl = null) {
     return (
       (
         planId
-          ? userToggle.querySelector(`#${planId}`)
+          ? userToggle.querySelector(safeCssIdSelector(planId))
           : null
       ) ||
       userToggle.querySelector(".plan") ||
@@ -3189,9 +3709,11 @@ function setUserDataset(element = null, {
   setDatasetValue(element, "username", username || "");
   setDatasetValue(element, "displayName", displayName || "");
   setDatasetValue(element, "admin", admin ? "true" : "false");
-  setDatasetValue(element, "avatarUrl", avatarUrl || "");
+  setDatasetValue(element, "avatarUrl", avatarUrl ? redactSensitiveText(avatarUrl) : "");
+  setDatasetValue(element, "avatarUrlHash", avatarUrl ? hashString(avatarUrl) : "");
   setDatasetValue(element, "avatarText", avatarText || "");
   setDatasetValue(element, "avatarColor", avatarColor || "");
+  setDatasetValue(element, "avatarColorHash", avatarColor ? hashString(avatarColor) : "");
   setDatasetValue(element, "hasUser", hasUser ? "true" : "false");
 
   return true;
@@ -3212,7 +3734,7 @@ function buildPublicUserSnapshot({
   const current =
     safeObject(user);
 
-  return {
+  return sanitizePayload({
     hasUser:
       Boolean(hasUser),
 
@@ -3254,10 +3776,22 @@ function buildPublicUserSnapshot({
       avatarText || DEFAULT_AVATAR_TEXT,
 
     avatarUrl:
-      avatarUrl || null,
+      avatarUrl
+        ? redactSensitiveText(avatarUrl)
+        : null,
+
+    avatarUrlHash:
+      avatarUrl
+        ? hashString(avatarUrl)
+        : null,
 
     avatarColor:
       avatarColor || "",
+
+    avatarColorHash:
+      avatarColor
+        ? hashString(avatarColor)
+        : null,
 
     username:
       username || null,
@@ -3272,7 +3806,7 @@ function buildPublicUserSnapshot({
       Array.isArray(roles)
         ? roles
         : [],
-  };
+  });
 }
 
 /* =========================================================
@@ -3445,6 +3979,12 @@ export function renderUser(AppCore) {
         resolvedPlanEl.textContent =
           planLabel;
 
+        setDatasetValue(
+          resolvedPlanEl,
+          "hasUser",
+          hasUser ? "true" : "false"
+        );
+
         removeTooltipAttributes(resolvedPlanEl);
       }
     } catch {}
@@ -3452,6 +3992,12 @@ export function renderUser(AppCore) {
     try {
       planEl.textContent =
         planLabel;
+
+      setDatasetValue(
+        planEl,
+        "hasUser",
+        hasUser ? "true" : "false"
+      );
 
       removeTooltipAttributes(planEl);
     } catch {}
@@ -3515,6 +4061,21 @@ export function renderUser(AppCore) {
    DEBUG
 ========================================================= */
 
+function sanitizeDataset(dataset = {}) {
+  const output = {};
+
+  try {
+    for (const [key, value] of Object.entries(dataset || {})) {
+      output[key] =
+        typeof value === "string"
+          ? redactSensitiveText(value)
+          : value;
+    }
+  } catch {}
+
+  return output;
+}
+
 export function getSidebarUserSnapshot(AppCore) {
   const {
     nameEl,
@@ -3567,7 +4128,7 @@ export function getSidebarUserSnapshot(AppCore) {
       ? isAdmin(AppCore, user)
       : false;
 
-  return {
+  return sanitizePayload({
     version:
       SIDEBAR_USER_VERSION,
 
@@ -3606,14 +4167,28 @@ export function getSidebarUserSnapshot(AppCore) {
       ).user,
 
     displayName,
+
     username:
       username || null,
 
     avatarText,
+
     avatarUrl:
-      avatarUrl || null,
+      avatarUrl
+        ? redactSensitiveText(avatarUrl)
+        : null,
+
+    avatarUrlHash:
+      avatarUrl
+        ? hashString(avatarUrl)
+        : null,
 
     avatarColor,
+
+    avatarColorHash:
+      avatarColor
+        ? hashString(avatarColor)
+        : null,
 
     planLabel:
       getPlanLabel(AppCore, user),
@@ -3634,7 +4209,7 @@ export function getSidebarUserSnapshot(AppCore) {
         nameEl?.textContent || "",
 
       nameDataset:
-        { ...(nameEl?.dataset || {}) },
+        sanitizeDataset(nameEl?.dataset || {}),
 
       hasAvatar:
         Boolean(avatarEl),
@@ -3654,11 +4229,17 @@ export function getSidebarUserSnapshot(AppCore) {
       avatarUrl:
         avatarEl?.dataset?.avatarUrl || "",
 
+      avatarUrlHash:
+        avatarEl?.dataset?.[AVATAR_URL_HASH_DATASET_KEY] || "",
+
       avatarText:
         avatarEl?.dataset?.avatarText || "",
 
       avatarColor:
         avatarEl?.dataset?.avatarColor || "",
+
+      avatarColorHash:
+        avatarEl?.dataset?.avatarColorHash || "",
 
       avatarSeq:
         avatarEl?.dataset?.[AVATAR_RENDER_SEQ_DATASET_KEY] || "",
@@ -3673,7 +4254,7 @@ export function getSidebarUserSnapshot(AppCore) {
         userToggle?.getAttribute?.("aria-expanded") || "",
 
       userToggleDataset:
-        { ...(userToggle?.dataset || {}) },
+        sanitizeDataset(userToggle?.dataset || {}),
 
       hasUserDropdown:
         Boolean(userDropdown),
@@ -3682,7 +4263,7 @@ export function getSidebarUserSnapshot(AppCore) {
         userDropdown?.getAttribute?.("aria-hidden") || "",
 
       userDropdownDataset:
-        { ...(userDropdown?.dataset || {}) },
+        sanitizeDataset(userDropdown?.dataset || {}),
 
       hasPlan:
         Boolean(planEl),
@@ -3690,7 +4271,7 @@ export function getSidebarUserSnapshot(AppCore) {
       planText:
         planEl?.textContent || "",
     },
-  };
+  });
 }
 
 /* =========================================================

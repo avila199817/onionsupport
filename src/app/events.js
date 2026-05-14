@@ -30,6 +30,16 @@
    - app:lang:change no rerenderiza salvo flag explícito.
    - Sin CSS inline.
    - Sin estilos inyectados.
+
+   EXTREME MODE:
+   - Binding idempotente por evento + label.
+   - Window fallback sólo si no hay bus interno.
+   - Redacción fuerte de tokens path/query/hash/JWT/Bearer.
+   - Soporte hash-router y /@usuario para normalización local.
+   - State sync silencioso y directo para no crear route-change loops.
+   - UI sync ligera, deduplicada y sin rebind.
+   - Router rendered sin UI sync automática.
+   - Debug API en window.__ONION_APP_EVENTS__ y AppCore.AppEvents.
 ========================================================= */
 
 import {
@@ -55,17 +65,27 @@ import {
    CONSTANTS
 ========================================================= */
 
-const APP_EVENTS_VERSION = "14.0.0";
+export const APP_EVENTS_VERSION = "15.0.0-extreme-pro";
+
+const EVENTS_SOURCE = "app:events";
 
 const DEFAULT_SCOPE =
   APP_SCOPES?.events ||
   APP_SCOPE ||
   "app:events";
 
+const DEFAULT_ROUTE = "/";
+
 const TOAST_DEDUPE_MS = 1200;
 const LANG_RERENDER_DEDUPE_MS = 250;
 const ROUTER_RENDER_SYNC_DEDUPE_MS = 40;
 const UI_SYNC_DEDUPE_MS = 80;
+const THEME_SYNC_DEDUPE_MS = 120;
+const EVENT_EMIT_DEDUPE_MS = 80;
+
+const MAX_SANITIZE_DEPTH = 7;
+const MAX_SANITIZE_ARRAY = 100;
+const MAX_RECENT_EVENTS = 80;
 
 const EVENT_NAMES = Object.freeze({
   appReady:
@@ -213,6 +233,8 @@ const TOPBAR_LIGHT_USER_METHODS = Object.freeze([
 const TOPBAR_LIGHT_VISUAL_METHODS = Object.freeze([
   "syncRoute",
   "updateRoute",
+  "syncBreadcrumb",
+  "updateBreadcrumb",
 ]);
 
 const TOPBAR_LIGHT_FALLBACK_METHODS = Object.freeze([
@@ -240,10 +262,28 @@ const SENSITIVE_QUERY_PARAM_NAMES = Object.freeze([
   "two_factor_token",
   "mfaToken",
   "mfa_token",
+  "authorization",
+  "jwt",
+  "session",
+  "sid",
+]);
+
+const TOKEN_ROUTE_PATHS = Object.freeze([
+  "/activate-account",
+  "/activate",
+  "/activation",
+  "/account/activate",
+  "/activate/first-user",
+  "/reset-password/confirm",
+  "/reset-password-confirm",
+  "/password-reset/confirm",
+  "/password-reset-confirm",
 ]);
 
 const SENSITIVE_OBJECT_KEY_RE =
-  /token|secret|password|authorization|credential|jwt|bearer|otp|code/i;
+  /token|secret|password|authorization|credential|jwt|bearer|otp|code|session|refresh/i;
+
+const PUBLIC_USERNAME_RE = /^@[A-Za-z0-9._-]{1,80}$/;
 
 /* =========================================================
    INTERNAL STATE
@@ -265,6 +305,12 @@ let lastToastAt = 0;
 let lastUiSyncKey = "";
 let lastUiSyncAt = 0;
 
+let lastThemeSyncKey = "";
+let lastThemeSyncAt = 0;
+
+let lastEmitKey = "";
+let lastEmitAt = 0;
+
 let debugApiInstalled = false;
 
 const boundDisposers = [];
@@ -280,6 +326,7 @@ const eventState = {
   lastError: null,
 
   boundEvents: [],
+  recent: [],
 };
 
 /* =========================================================
@@ -301,7 +348,10 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -311,6 +361,16 @@ function isObject(value) {
     value !== null &&
     typeof value === "object" &&
     !Array.isArray(value)
+  );
+}
+
+function isObjectLike(value) {
+  return (
+    value !== null &&
+    (
+      typeof value === "object" ||
+      typeof value === "function"
+    )
   );
 }
 
@@ -363,6 +423,49 @@ function unique(values = []) {
   }
 
   return output;
+}
+
+function isExtensibleTarget(value) {
+  try {
+    return (
+      isObjectLike(value) &&
+      Object.isExtensible(value)
+    );
+  } catch {}
+
+  return false;
+}
+
+function safeDefineValue(target, key, value) {
+  if (
+    !target ||
+    !key ||
+    !isExtensibleTarget(target)
+  ) {
+    return false;
+  }
+
+  try {
+    Object.defineProperty(
+      target,
+      key,
+      {
+        value,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+      }
+    );
+
+    return true;
+  } catch {}
+
+  try {
+    target[key] = value;
+    return true;
+  } catch {}
+
+  return false;
 }
 
 function getEventPayload(eventOrPayload = {}) {
@@ -434,19 +537,21 @@ function redactSensitiveText(value = "") {
       );
     }
 
-    output = output.replace(
-      /(\/activate-account\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
-
-    output = output.replace(
-      /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
+    for (const path of TOKEN_ROUTE_PATHS) {
+      output = output.replace(
+        new RegExp(`(${escapeRegExp(path)}\\/)([^/?#\\s]+)`, "gi"),
+        "$1***"
+      );
+    }
 
     output = output.replace(
       /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
       "$1***"
+    );
+
+    output = output.replace(
+      /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
+      "$1$2***"
     );
 
     output = output.replace(
@@ -493,7 +598,12 @@ function normalizeError(error = null) {
     };
   }
 
-  const object = ensureObject(error);
+  const object =
+    ensureObject(
+      error?.error ||
+        error?.reason ||
+        error
+    );
 
   const payload = {
     name:
@@ -530,7 +640,7 @@ function normalizeError(error = null) {
 }
 
 function sanitizePayload(value, depth = 0) {
-  if (depth > 6) {
+  if (depth > MAX_SANITIZE_DEPTH) {
     return "[MaxDepth]";
   }
 
@@ -574,10 +684,24 @@ function sanitizePayload(value, depth = 0) {
 
   if (Array.isArray(value)) {
     return value
-      .slice(0, 80)
+      .slice(0, MAX_SANITIZE_ARRAY)
       .map((item) =>
         sanitizePayload(item, depth + 1)
       );
+  }
+
+  if (value instanceof Map) {
+    return {
+      type: "Map",
+      size: value.size,
+    };
+  }
+
+  if (value instanceof Set) {
+    return {
+      type: "Set",
+      size: value.size,
+    };
   }
 
   if (isObject(value)) {
@@ -749,6 +873,34 @@ function safeWindowDispatch(eventName, payload = {}) {
   return false;
 }
 
+function shouldDedupeEmit(eventName = "", payload = {}, force = false) {
+  if (force) {
+    return false;
+  }
+
+  const key = [
+    safeText(eventName, ""),
+    safeText(payload?.reason || payload?.phase || "", ""),
+    safeText(payload?.route || payload?.canonicalPath || "", ""),
+    safeText(payload?.publicPath || "", ""),
+    payload?.ok === false ? "fail" : "ok",
+  ].join("|");
+
+  const now = safeNow();
+
+  if (
+    key === lastEmitKey &&
+    now - lastEmitAt < EVENT_EMIT_DEDUPE_MS
+  ) {
+    return true;
+  }
+
+  lastEmitKey = key;
+  lastEmitAt = now;
+
+  return false;
+}
+
 function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   const cleanEventName = safeText(eventName, "");
 
@@ -757,7 +909,20 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   }
 
   const opts = ensureObject(options);
-  const cleanPayload = sanitizePayload(payload);
+
+  if (
+    opts.dedupe !== false &&
+    shouldDedupeEmit(cleanEventName, payload, opts.force === true)
+  ) {
+    return false;
+  }
+
+  const cleanPayload =
+    sanitizePayload({
+      version: APP_EVENTS_VERSION,
+      source: EVENTS_SOURCE,
+      ...ensureObject(payload),
+    });
 
   let busAvailable = false;
   let busEmitted = false;
@@ -801,15 +966,31 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   return busEmitted;
 }
 
+function pushRecent(event = {}) {
+  const data = sanitizePayload(event);
+
+  eventState.recent.unshift(data);
+
+  if (eventState.recent.length > MAX_RECENT_EVENTS) {
+    eventState.recent =
+      eventState.recent.slice(0, MAX_RECENT_EVENTS);
+  }
+}
+
 function recordHandled(eventName = "", payload = {}) {
   eventState.totalHandled += 1;
   eventState.lastEvent = safeText(eventName, "");
   eventState.lastEventAt = safeNow();
 
-  return createHandledPayload(
-    eventName,
-    payload
-  );
+  const handled =
+    createHandledPayload(
+      eventName,
+      payload
+    );
+
+  pushRecent(handled);
+
+  return handled;
 }
 
 function recordError(AppCore, eventName = "", error = null) {
@@ -833,6 +1014,13 @@ function recordError(AppCore, eventName = "", error = null) {
     at:
       safeIsoDate(),
   };
+
+  pushRecent({
+    event: "error",
+    payload: eventState.lastError,
+    at: safeIsoDate(),
+    atMs: safeNow(),
+  });
 
   safeError(
     AppCore,
@@ -1116,7 +1304,7 @@ function setI18nLangSoft(I18n, lang = "es") {
             cleanLang,
             {
               silent: true,
-              source: "app:events",
+              source: EVENTS_SOURCE,
             }
           );
 
@@ -1181,7 +1369,7 @@ async function safeRerenderCurrentRoute({
           AppCore,
           Router,
           reason,
-          source: "app:events",
+          source: EVENTS_SOURCE,
         })
       );
 
@@ -1216,7 +1404,7 @@ async function safeRerenderCurrentRoute({
       await Promise.resolve(
         Router.rerenderCurrentRoute({
           reason,
-          source: "app:events",
+          source: EVENTS_SOURCE,
           force: true,
         })
       );
@@ -1239,7 +1427,7 @@ async function safeRerenderCurrentRoute({
           {
             force: true,
             reason,
-            source: "app:events",
+            source: EVENTS_SOURCE,
             preservePublicPath: true,
             publicPath,
             canonicalPath,
@@ -1269,7 +1457,7 @@ async function safeRerenderCurrentRoute({
             replaceState: true,
             force: true,
             reason,
-            source: "app:events",
+            source: EVENTS_SOURCE,
             preservePublicPath: true,
             i18nRerender: true,
           }
@@ -1293,8 +1481,103 @@ async function safeRerenderCurrentRoute({
    PATH / ROUTER
 ========================================================= */
 
-function localNormalizePublicPath(path = "/") {
-  const raw = safeText(path, "/") || "/";
+function getBaseOrigin() {
+  if (
+    isBrowser() &&
+    window.location?.origin
+  ) {
+    return window.location.origin;
+  }
+
+  return "http://localhost";
+}
+
+function isHashRouterPath(value = "") {
+  const raw = safeText(value, "");
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+function normalizePathnameOnly(pathname = "/") {
+  let value =
+    safeText(pathname, "/")
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+  if (!value) {
+    value = "/";
+  }
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  const output = [];
+
+  for (const segment of value.split("/").filter(Boolean)) {
+    if (segment === ".") {
+      continue;
+    }
+
+    if (segment === "..") {
+      output.pop();
+      continue;
+    }
+
+    output.push(segment);
+  }
+
+  value = `/${output.join("/")}`;
+
+  if (!value) {
+    value = "/";
+  }
+
+  if (
+    value.length > 1 &&
+    value.endsWith("/")
+  ) {
+    value = value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
+}
+
+function normalizeSearch(search = "") {
+  const value = safeText(search, "");
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value = safeText(hash, "");
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
+}
+
+function splitLocalFullPath(value = "/") {
+  const raw = safeText(value, "/");
+
+  if (isHashRouterPath(raw)) {
+    return splitLocalFullPath(
+      normalizeHashRouterPath(raw)
+    );
+  }
 
   let pathname = raw;
   let search = "";
@@ -1314,51 +1597,116 @@ function localNormalizePublicPath(path = "/") {
     pathname = pathname.slice(0, searchIndex) || "/";
   }
 
-  pathname =
-    pathname
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
+  return {
+    pathname:
+      normalizePathnameOnly(pathname),
 
-  if (!pathname.startsWith("/")) {
-    pathname = `/${pathname}`;
+    search:
+      normalizeSearch(search),
+
+    hash:
+      normalizeHash(hash),
+  };
+}
+
+function normalizeLocalFullPath(path = "/") {
+  const raw = safeText(path, "/");
+
+  if (!raw) {
+    return "/";
   }
 
-  if (
-    pathname.length > 1 &&
-    pathname.endsWith("/")
-  ) {
-    pathname = pathname.replace(/\/+$/g, "") || "/";
+  if (isHashRouterPath(raw)) {
+    return normalizeHashRouterPath(raw);
   }
 
-  if (
-    search &&
-    !search.startsWith("?")
-  ) {
-    search = `?${search.replace(/^\?+/, "")}`;
-  }
+  try {
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
+      const parsed = new URL(raw, getBaseOrigin());
 
-  if (
-    hash &&
-    !hash.startsWith("#")
-  ) {
-    hash = `#${hash.replace(/^#+/, "")}`;
-  }
+      if (parsed.origin !== getBaseOrigin()) {
+        return "/";
+      }
+
+      if (
+        parsed.hash &&
+        isHashRouterPath(parsed.hash)
+      ) {
+        return normalizeHashRouterPath(parsed.hash);
+      }
+
+      return normalizeLocalFullPath(
+        `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
+      );
+    }
+  } catch {}
+
+  const {
+    pathname,
+    search,
+    hash,
+  } = splitLocalFullPath(raw);
 
   return `${pathname}${search}${hash}`;
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return normalizeLocalFullPath(
+      raw.replace(/^#!\/?/, "/")
+    );
+  }
+
+  return normalizeLocalFullPath(
+    raw.replace(/^#\/?/, "/")
+  );
+}
+
+function localNormalizePublicPath(path = "/") {
+  return normalizeLocalFullPath(path || "/");
+}
+
+function stripPublicUsernamePrefix(pathname = "/") {
+  const clean =
+    normalizePathnameOnly(pathname || "/");
+
+  const segments =
+    clean
+      .split("/")
+      .filter(Boolean);
+
+  if (
+    segments.length > 0 &&
+    PUBLIC_USERNAME_RE.test(segments[0])
+  ) {
+    const rest =
+      segments
+        .slice(1)
+        .join("/");
+
+    return rest
+      ? normalizePathnameOnly(`/${rest}`)
+      : "/";
+  }
+
+  return clean;
 }
 
 function localNormalizeCanonicalPath(path = "/") {
   const publicPath =
     localNormalizePublicPath(path);
 
-  const clean =
-    publicPath
-      .split("?")[0]
-      .split("#")[0]
-      .replace(/^\/@[^/]+(?=\/|$)/i, "")
-      .replace(/\/+$/g, "") || "/";
+  const {
+    pathname,
+  } = splitLocalFullPath(publicPath);
 
-  return clean || "/";
+  return stripPublicUsernamePrefix(pathname) || "/";
 }
 
 function normalizePublicSafe(AppCore, path = "/") {
@@ -1806,7 +2154,11 @@ function getUiSyncDedupeKey(context = {}) {
   ].join("|");
 }
 
-function shouldSkipUiSync(context = {}) {
+function shouldSkipUiSync(context = {}, force = false) {
+  if (force === true) {
+    return false;
+  }
+
   const current = safeNow();
 
   const key =
@@ -1899,8 +2251,7 @@ async function safeSyncUI({
   };
 
   if (
-    force !== true &&
-    shouldSkipUiSync(context)
+    shouldSkipUiSync(context, force)
   ) {
     return true;
   }
@@ -1927,6 +2278,7 @@ async function safeSyncUI({
           ...context,
           rebind: false,
           hardRepair: false,
+          force: true,
         })
       );
 
@@ -1969,7 +2321,7 @@ async function safeSyncUI({
       AppCore,
       EVENT_NAMES.appEventsUiSynced,
       {
-        source: "app:events",
+        source: EVENTS_SOURCE,
 
         reason:
           context.reason,
@@ -2006,7 +2358,7 @@ function safeRequestUiRepair(AppCore, reason = "event", payload = {}) {
     NO se usa automáticamente desde router:rendered.
   */
   const detail = {
-    source: "app:events",
+    source: EVENTS_SOURCE,
 
     reason:
       safeText(reason, "event"),
@@ -2310,6 +2662,8 @@ function bindLanguageEvents(context) {
         AppCore,
         {
           lang,
+          language: lang,
+          locale: lang,
         }
       );
 
@@ -2360,6 +2714,30 @@ function bindLanguageEvents(context) {
   });
 }
 
+function shouldSkipThemeSync(payload = {}) {
+  const key = [
+    safeText(payload?.theme, ""),
+    safeText(payload?.mode, ""),
+    safeText(payload?.appearance, ""),
+    safeText(payload?.value, ""),
+  ].join("|");
+
+  const current = safeNow();
+
+  if (
+    key &&
+    key === lastThemeSyncKey &&
+    current - lastThemeSyncAt < THEME_SYNC_DEDUPE_MS
+  ) {
+    return true;
+  }
+
+  lastThemeSyncKey = key;
+  lastThemeSyncAt = current;
+
+  return false;
+}
+
 function bindThemeEvents(context) {
   const {
     AppCore,
@@ -2374,10 +2752,15 @@ function bindThemeEvents(context) {
       EVENT_NAMES.legacyThemeChange,
     ],
     handler: async (payload) => {
+      if (shouldSkipThemeSync(payload)) {
+        return;
+      }
+
       const theme =
         safeText(
           payload?.theme ||
             payload?.mode ||
+            payload?.appearance ||
             payload?.value ||
             "",
           ""
@@ -2388,6 +2771,8 @@ function bindThemeEvents(context) {
           AppCore,
           {
             theme,
+            mode: payload?.mode || theme,
+            appearance: payload?.appearance || payload?.mode || theme,
           }
         );
       }
@@ -2396,6 +2781,7 @@ function bindThemeEvents(context) {
         ...context,
         reason: "theme-change",
         payload,
+        force: true,
       });
     },
   });
@@ -2552,7 +2938,7 @@ function bindRouterEvents(context) {
       AppCore,
       EVENT_NAMES.appRouteSynced,
       {
-        source: "app:events",
+        source: EVENTS_SOURCE,
 
         reason:
           payload?.phase ||
@@ -2615,7 +3001,7 @@ function bindRouterEvents(context) {
         AppCore,
         EVENT_NAMES.appRouteSynced,
         {
-          source: "app:events",
+          source: EVENTS_SOURCE,
 
           reason: "router:render:async-complete",
 
@@ -2671,6 +3057,10 @@ function exposeDebugApi(AppCore = null) {
 
     reset:
       resetAppEventsState,
+
+    unbind:
+      () =>
+        unbindAppEvents(AppCore),
 
     requestUiRepair:
       (reason = "debug", payload = {}) =>
@@ -2874,7 +3264,7 @@ export function unbindAppEvents(AppCore = null) {
 }
 
 export function getAppEventsSnapshot() {
-  return {
+  return sanitizePayload({
     version: APP_EVENTS_VERSION,
 
     eventsBound:
@@ -2934,6 +3324,26 @@ export function getAppEventsSnapshot() {
         ? safeIsoDate(lastUiSyncAt)
         : "",
 
+    lastThemeSyncKey:
+      redactKey(lastThemeSyncKey),
+
+    lastThemeSyncAt,
+
+    lastThemeSyncAtIso:
+      lastThemeSyncAt
+        ? safeIsoDate(lastThemeSyncAt)
+        : "",
+
+    lastEmitKey:
+      redactKey(lastEmitKey),
+
+    lastEmitAt,
+
+    lastEmitAtIso:
+      lastEmitAt
+        ? safeIsoDate(lastEmitAt)
+        : "",
+
     totalHandled:
       eventState.totalHandled,
 
@@ -2953,7 +3363,13 @@ export function getAppEventsSnapshot() {
 
     lastError:
       eventState.lastError,
-  };
+
+    recent:
+      eventState.recent.slice(0, MAX_RECENT_EVENTS),
+
+    debugApiInstalled:
+      Boolean(debugApiInstalled),
+  });
 }
 
 export function resetAppEventsState() {
@@ -2969,6 +3385,12 @@ export function resetAppEventsState() {
   lastUiSyncKey = "";
   lastUiSyncAt = 0;
 
+  lastThemeSyncKey = "";
+  lastThemeSyncAt = 0;
+
+  lastEmitKey = "";
+  lastEmitAt = 0;
+
   eventState.totalHandled = 0;
   eventState.totalErrors = 0;
 
@@ -2976,6 +3398,7 @@ export function resetAppEventsState() {
   eventState.lastEventAt = 0;
 
   eventState.lastError = null;
+  eventState.recent = [];
 
   return getAppEventsSnapshot();
 }

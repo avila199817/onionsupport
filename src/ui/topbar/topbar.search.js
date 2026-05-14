@@ -2634,6 +2634,55 @@ function renderActionPill(AppCore, item = {}) {
   `;
 }
 
+function getResultItemFromEvent(event, runtime) {
+  const node = event?.target?.closest?.(".search-result");
+
+  if (!node) return { node: null, item: null, index: -1 };
+
+  const index = Number(node.dataset.index);
+
+  if (!Number.isFinite(index) || index < 0) {
+    return { node, item: null, index: -1 };
+  }
+
+  const item = Array.isArray(runtime?.currentItems)
+    ? runtime.currentItems[index] || null
+    : null;
+
+  return { node, item, index };
+}
+
+function ensureResultsDelegation({ runtime, getDom }) {
+  const { searchResults } = getDom();
+
+  if (!runtime || !searchResults) return;
+  if (runtime.resultsDelegated === true) return;
+
+  searchResults.addEventListener("click", async (event) => {
+    const { item } = getResultItemFromEvent(event, runtime);
+    if (!item) return;
+
+    await goToResult({
+      AppCore: runtime.AppCore,
+      Router: runtime.Router,
+      runtime,
+      getDom,
+      closeSidebarMobile: runtime.closeSidebarMobile,
+      item,
+    });
+  });
+
+  searchResults.addEventListener("mouseenter", (event) => {
+    const { index } = getResultItemFromEvent(event, runtime);
+    if (index < 0) return;
+
+    runtime.activeIndex = index;
+    updateActiveVisuals(runtime, getDom);
+  }, true);
+
+  runtime.resultsDelegated = true;
+}
+
 export function renderResults({
   AppCore,
   Router,
@@ -2646,6 +2695,7 @@ export function renderResults({
   const { searchResults } = getDom();
 
   if (!searchResults) return;
+  ensureResultsDelegation({ runtime, getDom });
 
   searchResults.innerHTML = "";
 
@@ -2718,26 +2768,6 @@ export function renderResults({
         </span>
       `;
 
-      resultEl.addEventListener("click", async () => {
-        await goToResult({
-          AppCore,
-          Router,
-          runtime,
-          getDom,
-          closeSidebarMobile,
-          item,
-        });
-      });
-
-      resultEl.addEventListener("mouseenter", () => {
-        const idx = Number(resultEl.dataset.index);
-
-        if (!Number.isNaN(idx)) {
-          runtime.activeIndex = idx;
-          updateActiveVisuals(runtime, getDom);
-        }
-      });
-
       runtime.currentItems.push(item);
       groupEl.appendChild(resultEl);
     });
@@ -2767,6 +2797,8 @@ export async function runSearch({
   const q = normalizeQuery(query);
 
   runtime.AppCore = AppCore;
+  runtime.Router = Router;
+  runtime.closeSidebarMobile = closeSidebarMobile;
   runtime.currentQuery = q;
   runtime.searchSeq = Number(runtime.searchSeq || 0) + 1;
 

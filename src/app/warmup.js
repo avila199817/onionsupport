@@ -9,7 +9,7 @@
    - Ejecutar diagnóstico inicial seguro.
    - Registrar estado real tras restoreSession.
    - Facilitar trazabilidad del arranque.
-   - No mutar estado de aplicación.
+   - No mutar estado de aplicación salvo API debug opcional no enumerable.
    - No tocar sesión/token/storage salvo lectura segura.
    - No exponer tokens en logs/eventos/snapshots.
    - Resolver dependencias desde argumentos, AppCore o registry.
@@ -23,10 +23,12 @@
    - Snapshot de app/auth/router/store/i18n/ui/shell/loader/history.
    - Detección de rutas públicas técnicas con token.
    - Soporte /@usuario/activate-account y /@usuario/reset-password/confirm.
+   - Soporte aliases legacy de activation/reset.
+   - Soporte hash-router: /#/login, /#/activate-account?token=...
    - No exige Router.render si existe navigate/go/push/rerender.
    - No avisa I18N_MISSING si hay state.lang/document.lang/i18nInitialized.
    - Warnings sólo para problemas accionables reales.
-   - Dedupe de warnings/eventos.
+   - Dedupe de warnings/eventos/logs.
    - Cero throws accidentales.
 ========================================================= */
 
@@ -34,17 +36,21 @@
    CONSTANTS
 ========================================================= */
 
-export const WARMUP_VERSION = "14.0.0";
+export const WARMUP_VERSION = "15.0.0-extreme-pro";
 
 const WARMUP_LABEL = "[AppWarmup]";
 
 const DEFAULT_LANG = "es";
-const DEFAULT_THEME = "dark";
+const DEFAULT_THEME = "light";
 const DEFAULT_ROUTE = "/";
 
 const WARMUP_WARNING_DEDUPE_MS = 1200;
 const WARMUP_LOG_DEDUPE_MS = 800;
-const MAX_RECENT_SNAPSHOTS = 6;
+const WARMUP_EVENT_DEDUPE_MS = 250;
+const MAX_RECENT_SNAPSHOTS = 8;
+const MAX_SANITIZE_DEPTH = 8;
+const MAX_ARRAY_SNAPSHOT_ITEMS = 100;
+const MAX_CLASSNAME_LENGTH = 800;
 
 const TOKEN_PARAM_NAMES = Object.freeze([
   "token",
@@ -66,6 +72,11 @@ const TOKEN_PARAM_NAMES = Object.freeze([
   "two_factor_token",
   "mfaToken",
   "mfa_token",
+  "authorization",
+  "auth",
+  "jwt",
+  "session",
+  "sid",
 ]);
 
 const KNOWN_TOKEN_STORAGE_KEYS = Object.freeze([
@@ -77,6 +88,9 @@ const KNOWN_TOKEN_STORAGE_KEYS = Object.freeze([
   "refresh_token",
   "sessionToken",
   "tempToken",
+  "temporaryToken",
+  "twoFactorToken",
+  "mfaToken",
 
   "onion:token",
   "onion:accessToken",
@@ -84,7 +98,6 @@ const KNOWN_TOKEN_STORAGE_KEYS = Object.freeze([
   "onion:session",
   "onion:auth",
   "onion:auth:token",
-
   "onion.auth",
   "onion.session",
 
@@ -92,10 +105,56 @@ const KNOWN_TOKEN_STORAGE_KEYS = Object.freeze([
   "session",
 ]);
 
+const ACTIVATION_PATHS = Object.freeze([
+  "/activate-account",
+  "/activate",
+  "/activation",
+  "/account/activate",
+  "/activate/first-user",
+]);
+
+const RESET_CONFIRM_PATHS = Object.freeze([
+  "/reset-password/confirm",
+  "/reset-password-confirm",
+  "/password-reset/confirm",
+  "/password-reset-confirm",
+  "/confirm-reset-password",
+]);
+
+const RESET_REQUEST_PATHS = Object.freeze([
+  "/forgot-password",
+  "/recover-password",
+  "/password-reset",
+  "/password-reset/request",
+  "/reset-password",
+  "/reset-password/request",
+  "/reset-password-request",
+  "/request-reset-password",
+]);
+
+const AUTH_LIKE_PATHS = Object.freeze([
+  "/login",
+  "/signin",
+  "/sign-in",
+  "/register",
+  "/signup",
+  "/sign-up",
+
+  ...RESET_REQUEST_PATHS,
+  ...RESET_CONFIRM_PATHS,
+  ...ACTIVATION_PATHS,
+]);
+
+const AUTH_LIKE_PREFIXES = Object.freeze([
+  ...ACTIVATION_PATHS.map((path) => `${path}/`),
+  ...RESET_CONFIRM_PATHS.map((path) => `${path}/`),
+]);
+
 const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
   Object.freeze({
     key: "activation",
-    path: "/activate-account",
+    canonicalPath: "/activate-account",
+    paths: ACTIVATION_PATHS,
 
     windowKeys: Object.freeze([
       "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
@@ -120,7 +179,8 @@ const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
 
   Object.freeze({
     key: "resetConfirm",
-    path: "/reset-password/confirm",
+    canonicalPath: "/reset-password/confirm",
+    paths: RESET_CONFIRM_PATHS,
 
     windowKeys: Object.freeze([
       "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
@@ -148,28 +208,6 @@ const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
   }),
 ]);
 
-const AUTH_LIKE_PATHS = Object.freeze([
-  "/login",
-  "/signin",
-  "/sign-in",
-  "/register",
-  "/signup",
-  "/sign-up",
-
-  "/forgot-password",
-  "/recover-password",
-  "/password-reset",
-  "/reset-password",
-  "/reset-password/confirm",
-
-  "/activate-account",
-]);
-
-const AUTH_LIKE_PREFIXES = Object.freeze([
-  "/activate-account/",
-  "/reset-password/confirm/",
-]);
-
 const PUBLIC_USERNAME_RE = /^@[A-Za-z0-9._-]{1,80}$/;
 
 const DOM_IDS = Object.freeze({
@@ -186,6 +224,7 @@ const DOM_IDS = Object.freeze({
   topbar: "app-topbar",
   tablehead: "table-head",
   tableheadContainer: "tablehead-container",
+  mobileSidebarToggle: "toggleSidebarMobile",
 });
 
 const DOM_SELECTORS = Object.freeze({
@@ -208,6 +247,7 @@ const DOM_SELECTORS = Object.freeze({
     "[data-shell]",
     "[data-app-shell]",
     "[data-app-shell='true']",
+    ".layout",
   ]),
 
   main: Object.freeze([
@@ -280,6 +320,12 @@ const DOM_SELECTORS = Object.freeze({
     ".tablehead-container",
     "[data-tablehead-container]",
   ]),
+
+  mobileSidebarToggle: Object.freeze([
+    "#toggleSidebarMobile",
+    "[data-sidebar-mobile-toggle]",
+    "[data-mobile-sidebar-toggle]",
+  ]),
 });
 
 const WARMUP_EVENTS = Object.freeze({
@@ -290,6 +336,19 @@ const WARMUP_EVENTS = Object.freeze({
   debugReady: "app:warmup:debug-ready",
 });
 
+const HIDDEN_LOADER_CLASSES = Object.freeze([
+  "is-hidden",
+  "has-hidden",
+  "loader-hidden",
+]);
+
+const VISIBLE_LOADER_CLASSES = Object.freeze([
+  "is-visible",
+  "is-entering",
+  "is-leaving",
+  "loader-visible",
+]);
+
 /* =========================================================
    MODULE STATE
 ========================================================= */
@@ -299,6 +358,9 @@ let lastWarningAt = 0;
 
 let lastLogKey = "";
 let lastLogAt = 0;
+
+let lastEventKey = "";
+let lastEventAt = 0;
 
 let lastSnapshot = null;
 let lastSummary = null;
@@ -354,7 +416,10 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -525,6 +590,26 @@ function getModuleFromRegistry(AppCore, names = []) {
     } catch {}
   }
 
+  try {
+    const registryModules = AppCore?.registry?.modules;
+
+    if (registryModules) {
+      for (const key of keys) {
+        if (isFunction(registryModules.get)) {
+          const value = registryModules.get(key);
+
+          if (value) {
+            return value;
+          }
+        }
+
+        if (registryModules[key]) {
+          return registryModules[key];
+        }
+      }
+    }
+  } catch {}
+
   return null;
 }
 
@@ -588,11 +673,13 @@ function resolveRuntimeDeps(first = {}, second = {}) {
     deps.SidebarUI ||
     AppCore?.SidebarUI ||
     AppCore?.sidebar ||
+    AppCore?.sidebarUI ||
     getModuleFromRegistry(
       AppCore,
       [
         "SidebarUI",
         "sidebar",
+        "sidebarUI",
       ]
     );
 
@@ -600,11 +687,13 @@ function resolveRuntimeDeps(first = {}, second = {}) {
     deps.TopbarUI ||
     AppCore?.TopbarUI ||
     AppCore?.topbar ||
+    AppCore?.topbarUI ||
     getModuleFromRegistry(
       AppCore,
       [
         "TopbarUI",
         "topbar",
+        "topbarUI",
       ]
     );
 
@@ -612,11 +701,13 @@ function resolveRuntimeDeps(first = {}, second = {}) {
     deps.Toast ||
     AppCore?.Toast ||
     AppCore?.toast ||
+    AppCore?.toastModule ||
     getModuleFromRegistry(
       AppCore,
       [
         "Toast",
         "toast",
+        "toastModule",
       ]
     );
 
@@ -637,6 +728,10 @@ function resolveRuntimeDeps(first = {}, second = {}) {
    REDACTION / SANITIZE
 ========================================================= */
 
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function redactTokenInText(value = "") {
   let output = safeText(value, "");
 
@@ -646,8 +741,7 @@ function redactTokenInText(value = "") {
 
   for (const name of TOKEN_PARAM_NAMES) {
     try {
-      const escaped =
-        String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const escaped = escapeRegExp(name);
 
       output =
         output.replace(
@@ -657,21 +751,17 @@ function redactTokenInText(value = "") {
     } catch {}
   }
 
-  try {
-    output =
-      output.replace(
-        /(\/activate-account\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
-  } catch {}
-
-  try {
-    output =
-      output.replace(
-        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
-  } catch {}
+  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+    for (const routePath of safeArray(config.paths)) {
+      try {
+        output =
+          output.replace(
+            new RegExp(`(${escapeRegExp(routePath)}\\/)([^/?#\\s]+)`, "gi"),
+            "$1***"
+          );
+      } catch {}
+    }
+  }
 
   try {
     output =
@@ -726,7 +816,7 @@ function isDomNodeLike(value) {
 }
 
 function sanitizeSnapshotValue(value, depth = 0) {
-  if (depth > 8) {
+  if (depth > MAX_SANITIZE_DEPTH) {
     return "[MaxDepth]";
   }
 
@@ -756,13 +846,14 @@ function sanitizeSnapshotValue(value, depth = 0) {
         safeText(value.id, ""),
 
       className:
-        safeText(value.className?.baseVal || value.className, ""),
+        safeText(value.className?.baseVal || value.className, "")
+          .slice(0, MAX_CLASSNAME_LENGTH),
     };
   }
 
   if (Array.isArray(value)) {
     return value
-      .slice(0, 80)
+      .slice(0, MAX_ARRAY_SNAPSHOT_ITEMS)
       .map((item) =>
         sanitizeSnapshotValue(item, depth + 1)
       );
@@ -793,19 +884,15 @@ function sanitizeSnapshotValue(value, depth = 0) {
 
   if (value instanceof Map) {
     return {
-      type:
-        "Map",
-      size:
-        value.size,
+      type: "Map",
+      size: value.size,
     };
   }
 
   if (value instanceof Set) {
     return {
-      type:
-        "Set",
-      size:
-        value.size,
+      type: "Set",
+      size: value.size,
     };
   }
 
@@ -820,7 +907,7 @@ function sanitizeSnapshotValue(value, depth = 0) {
       }
 
       if (
-        /token|secret|password|authorization|credential|cookie|jwt|bearer/i.test(cleanKey)
+        /token|secret|password|authorization|credential|cookie|jwt|bearer|session|refresh/i.test(cleanKey)
       ) {
         if (
           typeof item === "boolean" ||
@@ -951,6 +1038,30 @@ function safeCreateCustomEvent(name, detail = {}) {
   }
 }
 
+function shouldEmitEvent(eventName = "", payload = {}) {
+  const key = [
+    safeText(eventName, ""),
+    safeText(payload?.reason, ""),
+    safeText(payload?.health?.status || payload?.warning?.code || "", ""),
+    safeText(payload?.route || payload?.app?.route || "", ""),
+    safeText(payload?.publicPath || payload?.app?.publicPath || "", ""),
+  ].join("|");
+
+  const now = epochMs();
+
+  if (
+    key === lastEventKey &&
+    now - lastEventAt < WARMUP_EVENT_DEDUPE_MS
+  ) {
+    return false;
+  }
+
+  lastEventKey = key;
+  lastEventAt = now;
+
+  return true;
+}
+
 function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   const name = safeText(eventName, "");
 
@@ -959,6 +1070,13 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   }
 
   const opts = ensureObject(options);
+
+  if (
+    opts.dedupe !== false &&
+    !shouldEmitEvent(name, payload)
+  ) {
+    return false;
+  }
 
   const cleanPayload =
     sanitizeSnapshotValue(payload);
@@ -1153,10 +1271,10 @@ function normalizeHashRouterPath(value = "") {
   }
 
   if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/");
+    return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
   }
 
-  return raw.replace(/^#\/?/, "/");
+  return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
 }
 
 function splitFullPath(value = DEFAULT_ROUTE) {
@@ -1404,7 +1522,9 @@ function hasTokenInSearch(search = "", names = []) {
 }
 
 function getPathToken(config = null, value = "") {
-  if (!config?.path) {
+  const paths = safeArray(config?.paths);
+
+  if (!paths.length) {
     return "";
   }
 
@@ -1418,23 +1538,27 @@ function getPathToken(config = null, value = "") {
   const clean =
     getCanonicalCleanPath(path);
 
-  if (!clean.startsWith(`${config.path}/`)) {
-    return "";
+  for (const routePath of paths) {
+    if (!clean.startsWith(`${routePath}/`)) {
+      continue;
+    }
+
+    const token =
+      clean
+        .slice(`${routePath}/`.length)
+        .split("/")[0];
+
+    try {
+      return safeText(
+        decodeURIComponent(token || ""),
+        ""
+      );
+    } catch {
+      return safeText(token, "");
+    }
   }
 
-  const token =
-    clean
-      .slice(`${config.path}/`.length)
-      .split("/")[0];
-
-  try {
-    return safeText(
-      decodeURIComponent(token || ""),
-      ""
-    );
-  } catch {
-    return safeText(token, "");
-  }
+  return "";
 }
 
 function hasRouteToken(config = null, value = "") {
@@ -1561,6 +1685,21 @@ function getWindowValue(key = "") {
   }
 }
 
+function getWindowRawValue(key = "") {
+  if (
+    !isBrowser() ||
+    !key
+  ) {
+    return null;
+  }
+
+  try {
+    return window[key] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function getHistoryStateFlag(flag = "") {
   if (
     !isBrowser() ||
@@ -1577,7 +1716,7 @@ function getHistoryStateFlag(flag = "") {
 }
 
 function matchesProtectedTokenRoute(config = null, value = "") {
-  if (!config?.path) {
+  if (!config) {
     return false;
   }
 
@@ -1587,10 +1726,16 @@ function matchesProtectedTokenRoute(config = null, value = "") {
   const clean =
     getCanonicalCleanPath(path);
 
-  return (
-    clean === config.path ||
-    clean.startsWith(`${config.path}/`)
+  return safeArray(config.paths).some((routePath) =>
+    clean === routePath ||
+    clean.startsWith(`${routePath}/`)
   );
+}
+
+function getBootContextSnapshot() {
+  const context = getWindowRawValue("__ONION_BOOT_CONTEXT__");
+
+  return sanitizeSnapshotValue(ensureObject(context));
 }
 
 function getProtectedTokenRouteSnapshot() {
@@ -1598,22 +1743,31 @@ function getProtectedTokenRouteSnapshot() {
 
   if (isBrowser()) {
     try {
-      candidates.push(
-        window.location.href || ""
-      );
+      candidates.push(window.location.href || "");
     } catch {}
 
     try {
-      candidates.push(
-        getBrowserPublicPath()
-      );
+      candidates.push(getBrowserPublicPath());
     } catch {}
 
     try {
-      candidates.push(
-        getWindowValue("__ONION_INITIAL_URL__")
-      );
+      candidates.push(getWindowValue("__ONION_INITIAL_URL__"));
     } catch {}
+
+    const bootContext = ensureObject(getWindowRawValue("__ONION_BOOT_CONTEXT__"));
+
+    candidates.push(
+      bootContext.initialUrl,
+      bootContext.protectedInitialUrl,
+      bootContext.protectedInitialPath,
+      bootContext.protectedInitialPublicPath,
+      bootContext.activationInitialUrl,
+      bootContext.activationInitialPath,
+      bootContext.activationInitialPublicPath,
+      bootContext.resetConfirmInitialUrl,
+      bootContext.resetConfirmInitialPath,
+      bootContext.resetConfirmInitialPublicPath
+    );
   }
 
   for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
@@ -1656,8 +1810,11 @@ function getProtectedTokenRouteSnapshot() {
         key:
           config.key,
 
-        path:
-          config.path,
+        canonicalPath:
+          config.canonicalPath,
+
+        paths:
+          safeArray(config.paths),
 
         matched:
           matchedCandidates.length > 0,
@@ -1708,6 +1865,7 @@ function getLocationSnapshot() {
       hash: "",
       publicPath: DEFAULT_ROUTE,
       normalizedPublicPath: DEFAULT_ROUTE,
+      canonicalPath: DEFAULT_ROUTE,
       hashRouterPath: "",
       authLike: false,
     };
@@ -1725,6 +1883,9 @@ function getLocationSnapshot() {
 
     const publicPath =
       `${pathname}${search}${hash}` || DEFAULT_ROUTE;
+
+    const normalizedPublicPath =
+      getBrowserPublicPath();
 
     return {
       href:
@@ -1748,9 +1909,10 @@ function getLocationSnapshot() {
         redactTokenInText(publicPath),
 
       normalizedPublicPath:
-        redactTokenInText(
-          getBrowserPublicPath()
-        ),
+        redactTokenInText(normalizedPublicPath),
+
+      canonicalPath:
+        redactTokenInText(getCanonicalCleanPath(normalizedPublicPath)),
 
       hashRouterPath:
         hash && isHashRouterPath(hash)
@@ -1771,6 +1933,7 @@ function getLocationSnapshot() {
       hash: "",
       publicPath: DEFAULT_ROUTE,
       normalizedPublicPath: DEFAULT_ROUTE,
+      canonicalPath: DEFAULT_ROUTE,
       hashRouterPath: "",
       authLike: false,
     };
@@ -1850,7 +2013,7 @@ function getDocumentSnapshot() {
         html?.dataset?.chrome || null,
 
       className:
-        safeText(html?.className, ""),
+        safeText(html?.className, "").slice(0, MAX_CLASSNAME_LENGTH),
     };
   } catch {
     return {
@@ -1965,6 +2128,8 @@ function getPerformanceSnapshot() {
     navigationType: "",
     domContentLoadedMs: 0,
     loadEventMs: 0,
+    firstPaintMs: 0,
+    firstContentfulPaintMs: 0,
     memory: null,
   };
 
@@ -1995,6 +2160,21 @@ function getPerformanceSnapshot() {
           Math.round(
             nav.loadEventEnd || 0
           );
+      }
+    } catch {}
+
+    try {
+      const paints =
+        performance.getEntriesByType?.("paint") || [];
+
+      for (const paint of paints) {
+        if (paint.name === "first-paint") {
+          output.firstPaintMs = Math.round(paint.startTime || 0);
+        }
+
+        if (paint.name === "first-contentful-paint") {
+          output.firstContentfulPaintMs = Math.round(paint.startTime || 0);
+        }
       }
     } catch {}
 
@@ -2068,20 +2248,11 @@ function getStorageLength(storage) {
 function getStorageTokenHints() {
   if (!isBrowser()) {
     return {
-      localStorage:
-        false,
-
-      sessionStorage:
-        false,
-
-      localStorageLength:
-        0,
-
-      sessionStorageLength:
-        0,
-
-      keys:
-        [],
+      localStorage: false,
+      sessionStorage: false,
+      localStorageLength: 0,
+      sessionStorageLength: 0,
+      keys: [],
     };
   }
 
@@ -2205,11 +2376,8 @@ function getClassList(element) {
 function getDomElementSnapshot(id = "", selectors = []) {
   if (!isBrowser()) {
     return {
-      exists:
-        false,
-
-      id:
-        safeText(id, ""),
+      exists: false,
+      id: safeText(id, ""),
     };
   }
 
@@ -2227,11 +2395,8 @@ function getDomElementSnapshot(id = "", selectors = []) {
 
     if (!element) {
       return {
-        exists:
-          false,
-
-        id:
-          cleanId,
+        exists: false,
+        id: cleanId,
       };
     }
 
@@ -2298,7 +2463,7 @@ function getDomElementSnapshot(id = "", selectors = []) {
           element.className?.baseVal ||
             element.className,
           ""
-        ),
+        ).slice(0, MAX_CLASSNAME_LENGTH),
 
       classes:
         getClassList(element),
@@ -2319,11 +2484,8 @@ function getDomElementSnapshot(id = "", selectors = []) {
     };
   } catch {
     return {
-      exists:
-        false,
-
-      id:
-        safeText(id, ""),
+      exists: false,
+      id: safeText(id, ""),
     };
   }
 }
@@ -2419,6 +2581,12 @@ function getShellSnapshot(AppCore) {
         DOM_IDS.tableheadContainer,
         DOM_SELECTORS.tableheadContainer
       ),
+
+    mobileSidebarToggle:
+      getDomElementSnapshot(
+        DOM_IDS.mobileSidebarToggle,
+        DOM_SELECTORS.mobileSidebarToggle
+      ),
   };
 
   const loaderVisible =
@@ -2428,8 +2596,9 @@ function getShellSnapshot(AppCore) {
         elements.loader.ariaHidden !== "true" &&
         elements.loader.dataset.loaderVisible !== "false" &&
         elements.loader.dataset.loaderState !== "hidden" &&
-        !elements.loader.classes?.includes?.("is-hidden") &&
-        !elements.loader.classes?.includes?.("has-hidden")
+        !elements.loader.classes?.some?.((className) =>
+          HIDDEN_LOADER_CLASSES.includes(className)
+        )
     );
 
   const chromeVisible =
@@ -2489,7 +2658,7 @@ function getShellSnapshot(AppCore) {
         Boolean(body),
 
       className:
-        safeText(body?.className, ""),
+        safeText(body?.className, "").slice(0, MAX_CLASSNAME_LENGTH),
 
       classes:
         getClassList(body),
@@ -2515,7 +2684,7 @@ function getShellSnapshot(AppCore) {
         Boolean(html),
 
       className:
-        safeText(html?.className, ""),
+        safeText(html?.className, "").slice(0, MAX_CLASSNAME_LENGTH),
 
       classes:
         getClassList(html),
@@ -2564,6 +2733,13 @@ function getShellSnapshot(AppCore) {
           body?.classList?.contains?.("route-auth") ||
           html?.classList?.contains?.("route-auth")
       ),
+
+    visibleLoaderClass:
+      Boolean(
+        elements.loader.classes?.some?.((className) =>
+          VISIBLE_LOADER_CLASSES.includes(className)
+        )
+      ),
   };
 }
 
@@ -2589,7 +2765,11 @@ function getUserSnapshot(AppCore, Auth = null) {
     state.currentUser ||
     state.sessionUser ||
     state.authUser ||
+    state.me ||
+    state.account ||
+    state.profile ||
     state.session?.user ||
+    state.auth?.user ||
     authUser ||
     null;
 
@@ -2601,6 +2781,7 @@ function getUserSnapshot(AppCore, Auth = null) {
       user?.id ||
       user?.userId ||
       user?.uid ||
+      user?.sub ||
       null,
 
     username:
@@ -2626,6 +2807,7 @@ function getUserSnapshot(AppCore, Auth = null) {
       state.rol ||
       state.userRole ||
       state.session?.role ||
+      state.auth?.role ||
       user?.role ||
       user?.rol ||
       Auth?.role ||
@@ -2679,8 +2861,11 @@ function getAuthSnapshot(AppCore, Auth = null) {
       Boolean(
         state.token ||
           state.accessToken ||
+          state.access_token ||
           state.session?.token ||
-          state.session?.accessToken
+          state.session?.accessToken ||
+          state.auth?.token ||
+          state.auth?.accessToken
       ),
 
     hasAuthHeader:
@@ -2705,7 +2890,11 @@ function getAuthSnapshot(AppCore, Auth = null) {
       ),
 
     hasRestoreSession:
-      isFunction(Auth?.restoreSession),
+      Boolean(
+        isFunction(Auth?.restoreSession) ||
+          isFunction(Auth?.restore) ||
+          isFunction(Auth?.session?.restore)
+      ),
 
     hasLogin:
       isFunction(Auth?.login),
@@ -3155,8 +3344,11 @@ function getAppStateSnapshot(AppCore) {
       Boolean(
         state.token ||
           state.accessToken ||
+          state.access_token ||
           state.session?.token ||
-          state.session?.accessToken
+          state.session?.accessToken ||
+          state.auth?.token ||
+          state.auth?.accessToken
       ),
 
     role:
@@ -3181,8 +3373,20 @@ function getAppStateSnapshot(AppCore) {
     theme:
       state.theme || DEFAULT_THEME,
 
+    mode:
+      state.mode || null,
+
+    appearance:
+      state.appearance || null,
+
     lang:
       state.lang || DEFAULT_LANG,
+
+    language:
+      state.language || state.lang || DEFAULT_LANG,
+
+    locale:
+      state.locale || state.lang || DEFAULT_LANG,
 
     sidebarOpen:
       typeof state.sidebarOpen === "boolean"
@@ -3213,6 +3417,13 @@ function getAppStateSnapshot(AppCore) {
 
     loading:
       Boolean(state.loading),
+
+    restoring:
+      Boolean(
+        state.restoring ||
+          state.authRestoring ||
+          state.sessionRestoring
+      ),
 
     bootPhase:
       state.bootPhase || null,
@@ -3246,14 +3457,9 @@ function buildWarmupWarnings(snapshot = {}) {
 
   if (!snapshot.app?.apiBase) {
     warnings.push({
-      code:
-        "API_BASE_MISSING",
-
-      severity:
-        "medium",
-
-      message:
-        "apiBase no configurada.",
+      code: "API_BASE_MISSING",
+      severity: "medium",
+      message: "apiBase no configurada.",
     });
   }
 
@@ -3262,14 +3468,9 @@ function buildWarmupWarnings(snapshot = {}) {
     !snapshot.auth?.user?.username
   ) {
     warnings.push({
-      code:
-        "AUTH_WITHOUT_VISIBLE_USERNAME",
-
-      severity:
-        "medium",
-
-      message:
-        "Sesión autenticada sin username visible.",
+      code: "AUTH_WITHOUT_VISIBLE_USERNAME",
+      severity: "medium",
+      message: "Sesión autenticada sin username visible.",
     });
   }
 
@@ -3281,12 +3482,8 @@ function buildWarmupWarnings(snapshot = {}) {
     !snapshot.storage?.sessionStorage
   ) {
     warnings.push({
-      code:
-        "AUTH_WITHOUT_VISIBLE_TOKEN_HINT",
-
-      severity:
-        "low",
-
+      code: "AUTH_WITHOUT_VISIBLE_TOKEN_HINT",
+      severity: "low",
       message:
         "Sesión autenticada sin token/header/storage visible. Si la sesión usa cookie HttpOnly, este aviso es esperado.",
     });
@@ -3298,14 +3495,9 @@ function buildWarmupWarnings(snapshot = {}) {
     !snapshot.router?.statePublicPath
   ) {
     warnings.push({
-      code:
-        "ROUTER_UNAVAILABLE",
-
-      severity:
-        "high",
-
-      message:
-        "Router no detectable en deps/AppCore.",
+      code: "ROUTER_UNAVAILABLE",
+      severity: "high",
+      message: "Router no detectable en deps/AppCore.",
     });
   }
 
@@ -3315,40 +3507,25 @@ function buildWarmupWarnings(snapshot = {}) {
     !snapshot.router?.configured
   ) {
     warnings.push({
-      code:
-        "ROUTER_NOT_READY",
-
-      severity:
-        "high",
-
-      message:
-        "Router detectado pero sin capacidad de navegación/render aparente.",
+      code: "ROUTER_NOT_READY",
+      severity: "high",
+      message: "Router detectado pero sin capacidad de navegación/render aparente.",
     });
   }
 
   if (!snapshot.shell?.elements?.viewContainer?.exists) {
     warnings.push({
-      code:
-        "VIEW_CONTAINER_MISSING",
-
-      severity:
-        "critical",
-
-      message:
-        "No existe #view-container en el DOM.",
+      code: "VIEW_CONTAINER_MISSING",
+      severity: "critical",
+      message: "No existe #view-container en el DOM.",
     });
   }
 
   if (!snapshot.shell?.elements?.shell?.exists) {
     warnings.push({
-      code:
-        "APP_SHELL_MISSING",
-
-      severity:
-        "high",
-
-      message:
-        "No existe #app-shell en el DOM.",
+      code: "APP_SHELL_MISSING",
+      severity: "high",
+      message: "No existe #app-shell en el DOM.",
     });
   }
 
@@ -3358,14 +3535,9 @@ function buildWarmupWarnings(snapshot = {}) {
     snapshot.shell?.loaderVisible
   ) {
     warnings.push({
-      code:
-        "LOADER_VISIBLE_AFTER_READY",
-
-      severity:
-        "medium",
-
-      message:
-        "El loader parece visible aunque la app está lista.",
+      code: "LOADER_VISIBLE_AFTER_READY",
+      severity: "medium",
+      message: "El loader parece visible aunque la app está lista.",
     });
   }
 
@@ -3375,14 +3547,22 @@ function buildWarmupWarnings(snapshot = {}) {
     snapshot.shell?.authScreen
   ) {
     warnings.push({
-      code:
-        "AUTH_SCREEN_STALE_ON_PRIVATE_ROUTE",
+      code: "AUTH_SCREEN_STALE_ON_PRIVATE_ROUTE",
+      severity: "medium",
+      message: "Quedan clases de auth-screen en una ruta no auth-like.",
+    });
+  }
 
-      severity:
-        "medium",
-
+  if (
+    snapshot.publicTokenRoutes?.anyHasToken &&
+    snapshot.router?.initialRouteRendered &&
+    snapshot.location?.authLike === false
+  ) {
+    warnings.push({
+      code: "PUBLIC_TOKEN_ROUTE_RENDER_RISK",
+      severity: "medium",
       message:
-        "Quedan clases de auth-screen en una ruta no auth-like.",
+        "Se detecta token público preservado, pero la ruta actual ya no parece auth-like. Verifica que no se haya redirigido durante boot.",
     });
   }
 
@@ -3399,14 +3579,9 @@ function buildWarmupWarnings(snapshot = {}) {
     !snapshot.document?.lang
   ) {
     warnings.push({
-      code:
-        "I18N_UNAVAILABLE",
-
-      severity:
-        "low",
-
-      message:
-        "No se detecta idioma runtime ni módulo I18n.",
+      code: "I18N_UNAVAILABLE",
+      severity: "low",
+      message: "No se detecta idioma runtime ni módulo I18n.",
     });
   }
 
@@ -3444,11 +3619,11 @@ function computeWarmupHealth(snapshot = {}) {
     score,
 
     status:
-      score >= 90
+      score >= 95
         ? "excellent"
-        : score >= 75
+        : score >= 85
           ? "good"
-          : score >= 55
+          : score >= 65
             ? "degraded"
             : "critical",
 
@@ -3524,6 +3699,9 @@ export function createWarmupSnapshot(first = {}, second = {}) {
 
     storage:
       getStorageTokenHints(),
+
+    bootContext:
+      getBootContextSnapshot(),
 
     publicTokenRoutes:
       getProtectedTokenRouteSnapshot(),
@@ -3651,6 +3829,9 @@ export function getWarmupSummary(snapshot = {}) {
 
     loading:
       Boolean(data.app?.loading),
+
+    restoring:
+      Boolean(data.app?.restoring),
 
     initialRouteRendered:
       Boolean(data.app?.initialRouteRendered),
@@ -3781,6 +3962,16 @@ export function getWarmupRuntimeSnapshot() {
         ? safeIsoDate(lastLogAt)
         : "",
 
+    lastEventKey:
+      redactTokenInText(lastEventKey),
+
+    lastEventAt,
+
+    lastEventAtIso:
+      lastEventAt
+        ? safeIsoDate(lastEventAt)
+        : "",
+
     lastSummary,
 
     recentSnapshots:
@@ -3794,6 +3985,9 @@ export function resetWarmupRuntimeState() {
 
   lastLogKey = "";
   lastLogAt = 0;
+
+  lastEventKey = "";
+  lastEventAt = 0;
 
   lastSnapshot = null;
   lastSummary = null;

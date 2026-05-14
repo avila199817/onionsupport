@@ -2,66 +2,23 @@
    Onion SPA - Auth / Session
    Archivo: src/features/auth/index.js
 
-   AUTH FACADE · SESSION ORCHESTRATOR · GOD MODE v12.2
-   ENTERPRISE HARDENED · NO DUPLICATE CANONICAL EVENTS
+   AUTH FACADE · SESSION ORCHESTRATOR · EXTREME 10/10
+   BACKEND ALIGNED · API.ONIONIT.NET · ME SAFE · SIDEBAR USER SAFE
 
    RESPONSABILIDADES:
    - punto de entrada público del módulo auth
    - composición de login / logout / restore / refresh / me / guards
-   - composición de activation / 2FA / password-reset
-   - exponer helpers auth para toda la SPA
-   - serializar restore / refresh / me / login
-   - mantener compatibilidad con backend heterogéneo
-   - exponer aliases públicos estables para auth flows
-   - integrar activación de cuenta
-   - integrar forgot-password / reset-password request
-   - integrar confirmación de reset-password
-   - integrar validación de reset-password token
-   - integrar 2FA/MFA sin marcar authenticated antes de sesión válida
-   - preservar rutas públicas técnicas durante restore/clear
-   - no romper /activate-account?token=...
-   - no romper /activate-account/<token>
-   - no romper /reset-password/confirm?token=...
-   - no romper /reset-password/confirm/<token>
-   - alinear login con sessionId/userId/refreshToken/sessionData
-   - evitar duplicidades raras entre session y sessionData
-   - emitir auth:login:success una sola vez desde esta fachada
-   - no reemitir auth:session:applied / app:user:change si coreLogin ya aplicó sesión
-   - no emitir eventos restore desde login
-   - eventos públicos sin tokens reales
-   - snapshot debug enterprise sin secretos
-
-   CONTRATO LOGIN ACTUAL:
-   - coreLogin() aplica sesión internamente
-   - coreLogin() puede emitir:
-       · auth:login:session-committed
-       · auth:session:applied
-       · app:user:change
-       · app:auth:ready
-   - Auth facade emite sólo:
-       · auth:login:success
-       · app:ui:repair-request
-       · app:ui:repair
-   - Auth facade NO duplica:
-       · auth:session:applied
-       · app:user:change
-       · app:auth:ready
-       · auth:login:error
-       · auth:login:2fa-required
-
-   HARDENING EXTREMO:
-   - singleton público congelado
-   - runtime session mutable pero encapsulado
-   - wrappers robustos sin duplicar eventos canónicos restore/refresh/me
-   - login público con validación final token + user
-   - login no acepta ok:false / success:false / status >= 400
-   - login no permite sesión válida sin token + usuario usable
-   - login limpia sesión antigua si backend responde error
-   - login corta fugas de avatar/dashboard cacheado tras fallo
-   - login preserva flujo 2FA sin marcar authenticated
-   - login fuerza sync final silencioso sobre AppCore tras éxito
-   - afterPaint sólo repara UI
-   - activation / 2FA / password reset aislados y sin refresh automático
+   - integración robusta con AppCore.http / AppCore.apiClient / AppCore.request
+   - fallback fetch seguro contra https://api.onionit.net
+   - normalizar payload heterogéneo del backend Onion Auth
+   - aplicar sesión sólo con token + usuario usable
+   - usar /api/auth/me como fuente real de usuario/avatar tras restore
+   - exponer Auth.getUser / getCurrentUser / getProfile / getAccount
+   - pintar sidebar/topbar vía AppCore.state + app:ui:repair-request
+   - preservar rutas públicas técnicas con token
+   - evitar auth fantasma
+   - evitar duplicidad de eventos canónicos
+   - no exponer tokens en snapshots/eventos
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -139,8 +96,8 @@ import * as TwoFactorApi from "./2fa.js";
 import * as PasswordResetApi from "./password-reset.js";
 
 import {
-  fetchMe,
-  refreshSession,
+  fetchMe as restoreFetchMe,
+  refreshSession as refreshSessionCore,
   restoreSession as restoreSessionCore,
   getRestoreSnapshot,
 } from "./restore.js";
@@ -167,14 +124,13 @@ import {
 ========================================================= */
 
 const AUTH_MODULE_VERSION =
-  "12.2.0";
-
-/* =========================================================
-   CONSTANTS / FALLBACKS
-========================================================= */
+  "13.0.0-extreme-me-sidebar-safe";
 
 const AUTH_SOURCE =
   "Auth";
+
+const BACKEND_ORIGIN =
+  "https://api.onionit.net";
 
 const DEFAULT_ROUTE =
   "/";
@@ -288,6 +244,7 @@ const TOKEN_KEYS =
     "authToken",
     "auth_token",
     "jwt",
+    "bearer",
     "idToken",
     "id_token",
   ]);
@@ -304,6 +261,8 @@ const TEMP_TOKEN_KEYS =
     "temp_token",
     "temporaryToken",
     "temporary_token",
+    "challengeToken",
+    "challenge_token",
     "twoFactorToken",
     "two_factor_token",
     "mfaToken",
@@ -317,6 +276,8 @@ const USER_KEYS =
     "account",
     "profile",
     "me",
+    "currentUser",
+    "current_user",
   ]);
 
 const SESSION_KEYS =
@@ -393,11 +354,15 @@ const REDIRECT_KEYS =
 const TWO_FACTOR_BOOL_KEYS =
   Object.freeze([
     "requires2FA",
+    "requires_2fa",
     "require2FA",
+    "require_2fa",
     "requiresTwoFactor",
     "twoFactorRequired",
     "mfaRequired",
+    "mfa_required",
     "requiresMfa",
+    "requires_mfa",
   ]);
 
 const TWO_FACTOR_STATUSES =
@@ -428,6 +393,12 @@ const SENSITIVE_USER_KEYS =
     "reset",
     "activation",
     "otp",
+    "totp",
+    "_rid",
+    "_self",
+    "_etag",
+    "_attachments",
+    "_ts",
   ]);
 
 /* =========================================================
@@ -466,9 +437,19 @@ function safeText(value, fallback = "") {
   }
 
   const text =
-    String(value).trim();
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return text || fallback;
+}
+
+function safeLower(value, fallback = "") {
+  return safeText(
+    value,
+    fallback
+  ).toLowerCase();
 }
 
 function safeNumber(value, fallback = 0) {
@@ -494,6 +475,12 @@ function safeObject(value) {
     : {};
 }
 
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
 function isFunction(value) {
   return typeof value === "function";
 }
@@ -509,8 +496,7 @@ function normalizeBoolean(value, fallback = false) {
   }
 
   const text =
-    safeText(value, "")
-      .toLowerCase();
+    safeLower(value, "");
 
   if (
     [
@@ -521,6 +507,8 @@ function normalizeBoolean(value, fallback = false) {
       "sí",
       "ok",
       "on",
+      "active",
+      "enabled",
     ].includes(text)
   ) {
     return true;
@@ -532,6 +520,8 @@ function normalizeBoolean(value, fallback = false) {
       "0",
       "no",
       "off",
+      "inactive",
+      "disabled",
     ].includes(text)
   ) {
     return false;
@@ -569,6 +559,19 @@ function pickFirstText(...values) {
   return "";
 }
 
+function uniqueStrings(values = []) {
+  return [
+    ...new Set(
+      safeArray(values)
+        .flat(Infinity)
+        .map((value) =>
+          safeText(value, "")
+        )
+        .filter(Boolean)
+    ),
+  ];
+}
+
 function safeCall(fn, fallback, ...args) {
   try {
     if (!isFunction(fn)) {
@@ -586,6 +589,8 @@ function safeExtractMessage(error) {
     return (
       extractMessage?.(error) ||
       error?.message ||
+      error?.response?.data?.message ||
+      error?.data?.message ||
       String(error)
     );
   } catch {
@@ -701,6 +706,22 @@ function redactTokenInText(value = "") {
   return output;
 }
 
+function sanitizePublicUser(user = null) {
+  if (!isPlainObject(user)) {
+    return null;
+  }
+
+  const safe = {
+    ...user,
+  };
+
+  for (const key of SENSITIVE_USER_KEYS) {
+    delete safe[key];
+  }
+
+  return safe;
+}
+
 function sanitizeRouteContext(context = {}) {
   const safe =
     safeObject(context);
@@ -725,22 +746,6 @@ function sanitizeRouteContext(context = {}) {
   };
 }
 
-function sanitizePublicUser(user = null) {
-  if (!isPlainObject(user)) {
-    return null;
-  }
-
-  const safe = {
-    ...user,
-  };
-
-  for (const key of SENSITIVE_USER_KEYS) {
-    delete safe[key];
-  }
-
-  return safe;
-}
-
 function sanitizeEventPayload(payload = {}) {
   if (!isPlainObject(payload)) {
     return payload;
@@ -754,6 +759,12 @@ function sanitizeEventPayload(payload = {}) {
     ...TOKEN_KEYS,
     ...REFRESH_TOKEN_KEYS,
     ...TEMP_TOKEN_KEYS,
+    "authorization",
+    "password",
+    "secret",
+    "otp",
+    "totp",
+    "code",
   ]) {
     if (key in output) {
       output[key] =
@@ -763,9 +774,7 @@ function sanitizeEventPayload(payload = {}) {
 
   if (output.user) {
     output.user =
-      sanitizePublicUser(
-        output.user
-      );
+      sanitizePublicUser(output.user);
   }
 
   for (const key of [
@@ -775,6 +784,7 @@ function sanitizeEventPayload(payload = {}) {
     "url",
     "currentPath",
     "currentCanonicalPath",
+    "endpoint",
   ]) {
     if (output[key]) {
       output[key] =
@@ -784,9 +794,7 @@ function sanitizeEventPayload(payload = {}) {
 
   if (output.routeContext) {
     output.routeContext =
-      sanitizeRouteContext(
-        output.routeContext
-      );
+      sanitizeRouteContext(output.routeContext);
   }
 
   if (output.raw) {
@@ -806,7 +814,18 @@ function emit(eventName, payload = {}) {
   }
 
   const cleanPayload =
-    sanitizeEventPayload(payload);
+    sanitizeEventPayload({
+      source:
+        AUTH_SOURCE,
+
+      version:
+        AUTH_MODULE_VERSION,
+
+      at:
+        isoNow(),
+
+      ...safeObject(payload),
+    });
 
   try {
     if (isFunction(AppCore?.events?.emit)) {
@@ -821,14 +840,10 @@ function emit(eventName, payload = {}) {
 
   try {
     if (isBrowser()) {
-      document.dispatchEvent(
+      window.dispatchEvent(
         new CustomEvent(name, {
           detail:
             cleanPayload,
-          bubbles:
-            false,
-          cancelable:
-            false,
         })
       );
 
@@ -868,6 +883,422 @@ function createRuntimeErrorSnapshot(type, error) {
 }
 
 /* =========================================================
+   API CLIENT BRIDGE · CORE HTTP FIRST
+========================================================= */
+
+function resolveAuthEndpoint(name = "me", fallback = "/api/auth/me") {
+  const fromConstants =
+    AUTH_ENDPOINTS?.[name] ||
+    AUTH_ENDPOINTS?.auth?.[name] ||
+    "";
+
+  const endpoint =
+    safeText(
+      fromConstants,
+      fallback
+    );
+
+  if (/^https?:\/\//i.test(endpoint)) {
+    return endpoint;
+  }
+
+  if (endpoint.startsWith("/api/")) {
+    return endpoint;
+  }
+
+  if (endpoint.startsWith("/auth/")) {
+    return `/api${endpoint}`;
+  }
+
+  if (endpoint.startsWith("/")) {
+    return `/api/auth${endpoint}`;
+  }
+
+  return `/api/auth/${endpoint}`;
+}
+
+function resolveApiBase() {
+  const config =
+    safeObject(AppCore?.config);
+
+  return safeText(
+    config.apiBase ||
+      config.apiUrl ||
+      config.baseUrl ||
+      config.backendUrl ||
+      config.publicApiOrigin ||
+      BACKEND_ORIGIN,
+    BACKEND_ORIGIN
+  ).replace(/\/+$/g, "");
+}
+
+function buildAbsoluteApiUrl(path = "") {
+  const raw =
+    safeText(path, "/");
+
+  if (/^https?:\/\//i.test(raw)) {
+    return raw;
+  }
+
+  const base =
+    resolveApiBase();
+
+  const cleanPath =
+    raw.startsWith("/")
+      ? raw
+      : `/${raw}`;
+
+  if (
+    base.endsWith("/api") &&
+    cleanPath.startsWith("/api/")
+  ) {
+    return `${base}${cleanPath.slice(4)}`;
+  }
+
+  return `${base}${cleanPath}`;
+}
+
+function getCoreHttpClient() {
+  return (
+    AppCore?.http ||
+    AppCore?.Http ||
+    AppCore?.apiClient ||
+    AppCore?.request ||
+    AppCore?.services?.http ||
+    AppCore?.services?.Http ||
+    AppCore?.services?.apiClient ||
+    AppCore?.services?.api ||
+    null
+  );
+}
+
+function getCurrentTokenFromCore() {
+  try {
+    const header =
+      AppCore?.getAuthHeader?.() || {};
+
+    const auth =
+      header.Authorization ||
+      header.authorization ||
+      "";
+
+    const tokenFromHeader =
+      safeText(auth, "").replace(/^Bearer\s+/i, "");
+
+    if (hasUsableToken(tokenFromHeader)) {
+      return tokenFromHeader;
+    }
+  } catch {}
+
+  const state =
+    safeObject(AppCore?.state);
+
+  return pickFirstText(
+    state.token,
+    state.accessToken,
+    state.access_token,
+    state.session?.token,
+    state.session?.accessToken,
+    state.sessionData?.token,
+    state.sessionData?.accessToken
+  );
+}
+
+function buildAuthHeaders(options = {}) {
+  const opts =
+    safeObject(options);
+
+  const headers = {
+    ...(safeObject(opts.headers)),
+  };
+
+  if (opts.auth === false || opts.skipAuth === true) {
+    return headers;
+  }
+
+  const token =
+    opts.token ||
+    getCurrentTokenFromCore();
+
+  if (
+    token &&
+    !headers.Authorization &&
+    !headers.authorization
+  ) {
+    headers.Authorization =
+      `Bearer ${token}`;
+  }
+
+  return headers;
+}
+
+async function requestWithCoreClient(method = "GET", path = "", body = undefined, options = {}) {
+  const client =
+    getCoreHttpClient();
+
+  if (!client) {
+    throw new Error("CORE_HTTP_CLIENT_MISSING");
+  }
+
+  const upperMethod =
+    safeText(method, "GET").toUpperCase();
+
+  const opts = {
+    ...safeObject(options),
+
+    method:
+      upperMethod,
+
+    auth:
+      options.auth !== false,
+
+    headers:
+      buildAuthHeaders(options),
+
+    noStore:
+      true,
+
+    cache:
+      "no-store",
+
+    _skipAuthRefresh:
+      options._skipAuthRefresh === true,
+  };
+
+  if (body !== undefined && body !== null) {
+    opts.body =
+      body;
+  }
+
+  if (
+    upperMethod === "GET" &&
+    isFunction(client.get)
+  ) {
+    return client.get(
+      path,
+      opts
+    );
+  }
+
+  if (
+    upperMethod === "POST" &&
+    isFunction(client.post)
+  ) {
+    return client.post(
+      path,
+      body,
+      opts
+    );
+  }
+
+  if (
+    upperMethod === "PUT" &&
+    isFunction(client.put)
+  ) {
+    return client.put(
+      path,
+      body,
+      opts
+    );
+  }
+
+  if (
+    upperMethod === "PATCH" &&
+    isFunction(client.patch)
+  ) {
+    return client.patch(
+      path,
+      body,
+      opts
+    );
+  }
+
+  if (
+    upperMethod === "DELETE" &&
+    isFunction(client.delete)
+  ) {
+    return client.delete(
+      path,
+      opts
+    );
+  }
+
+  if (isFunction(client.request)) {
+    try {
+      return await client.request(
+        upperMethod,
+        path,
+        opts
+      );
+    } catch (error) {
+      try {
+        return await client.request(
+          path,
+          opts
+        );
+      } catch {
+        throw error;
+      }
+    }
+  }
+
+  if (isFunction(client)) {
+    return client(
+      path,
+      opts
+    );
+  }
+
+  throw new Error("CORE_HTTP_CLIENT_INVALID");
+}
+
+async function requestWithFetch(method = "GET", path = "", body = undefined, options = {}) {
+  if (
+    !isBrowser() ||
+    !isFunction(fetch)
+  ) {
+    throw new Error("FETCH_UNAVAILABLE");
+  }
+
+  const upperMethod =
+    safeText(method, "GET").toUpperCase();
+
+  const url =
+    buildAbsoluteApiUrl(path);
+
+  const headers =
+    buildAuthHeaders(options);
+
+  const hasBody =
+    body !== undefined &&
+    body !== null &&
+    upperMethod !== "GET" &&
+    upperMethod !== "HEAD";
+
+  if (
+    hasBody &&
+    !(body instanceof FormData) &&
+    !headers["Content-Type"] &&
+    !headers["content-type"]
+  ) {
+    headers["Content-Type"] =
+      "application/json";
+  }
+
+  const response =
+    await fetch(url, {
+      method:
+        upperMethod,
+
+      credentials:
+        options.credentials || "include",
+
+      cache:
+        "no-store",
+
+      headers,
+
+      signal:
+        options.signal || undefined,
+
+      body:
+        hasBody
+          ? body instanceof FormData
+            ? body
+            : JSON.stringify(body)
+          : undefined,
+    });
+
+  const contentType =
+    response.headers?.get?.("content-type") || "";
+
+  let payload =
+    null;
+
+  if (contentType.includes("application/json")) {
+    try {
+      payload =
+        await response.json();
+    } catch {
+      payload =
+        null;
+    }
+  } else {
+    try {
+      payload =
+        await response.text();
+    } catch {
+      payload =
+        "";
+    }
+  }
+
+  if (!response.ok) {
+    const error =
+      new Error(
+        safeText(
+          payload?.message ||
+            payload?.error ||
+            response.statusText,
+          `HTTP ${response.status}`
+        )
+      );
+
+    error.name =
+      "AuthApiError";
+
+    error.status =
+      response.status;
+
+    error.code =
+      payload?.code ||
+      payload?.error ||
+      (
+        response.status === 401
+          ? "UNAUTHORIZED"
+          : response.status === 403
+            ? "FORBIDDEN"
+            : "AUTH_API_ERROR"
+      );
+
+    error.response =
+      response;
+
+    error.data =
+      payload;
+
+    throw error;
+  }
+
+  return payload;
+}
+
+async function authApiRequest(method = "GET", path = "", body = undefined, options = {}) {
+  try {
+    return await requestWithCoreClient(
+      method,
+      path,
+      body,
+      options
+    );
+  } catch (coreError) {
+    if (
+      options.noFetchFallback === true ||
+      coreError?.name === "AbortError"
+    ) {
+      throw coreError;
+    }
+
+    return requestWithFetch(
+      method,
+      path,
+      body,
+      options
+    );
+  }
+}
+
+/* =========================================================
    MODULE EXPORT RESOLUTION
 ========================================================= */
 
@@ -900,781 +1331,1040 @@ function missingHandler(label = "handler") {
 }
 
 /* =========================================================
-   ACTIVATION RESOLUTION
+   PAYLOAD NORMALIZATION
 ========================================================= */
 
-const activateAccountExecutor =
-  getModuleExport(
-    ActivationApi,
-    "activateAccount",
-    "activate",
-    "activation",
-    "confirmActivation",
-    "accountActivation",
-    "createUserActivation"
-  );
+function collectAuthObjects(raw = {}) {
+  const output =
+    [];
 
-const activateFirstUserExecutor =
-  getModuleExport(
-    ActivationApi,
-    "activateFirstUser",
-    "firstUserActivation",
-    "activateInitialUser"
-  );
+  const seen =
+    new Set();
 
-const validateActivationTokenExecutor =
-  getModuleExport(
-    ActivationApi,
-    "validateActivationToken",
-    "validateActivateAccountToken",
-    "validateActivateToken",
-    "validateAccountActivationToken",
-    "activationValidate"
-  );
+  const queue =
+    [raw];
 
-const getActivateAccountEndpoint =
-  getModuleExport(
-    ActivationApi,
-    "getActivateAccountEndpoint",
-    "getActivationEndpoint",
-    "getAccountActivationEndpoint"
-  ) ||
-  (() =>
-    AUTH_ENDPOINTS?.activateAccount ||
-    AUTH_ENDPOINTS?.activation ||
-    AUTH_ENDPOINTS?.activate ||
-    null);
+  let guard =
+    0;
 
-const getActivateFirstUserEndpoint =
-  getModuleExport(
-    ActivationApi,
-    "getActivateFirstUserEndpoint",
-    "getFirstUserActivationEndpoint"
-  ) ||
-  (() =>
-    AUTH_ENDPOINTS?.activateFirstUser ||
-    AUTH_ENDPOINTS?.firstUserActivation ||
-    null);
+  while (
+    queue.length &&
+    guard < 140
+  ) {
+    guard += 1;
 
-const getValidateActivationTokenEndpoint =
-  getModuleExport(
-    ActivationApi,
-    "getValidateActivationTokenEndpoint",
-    "getValidateActivateAccountTokenEndpoint"
-  ) ||
-  (() =>
-    AUTH_ENDPOINTS?.validateActivationToken ||
-    AUTH_ENDPOINTS?.activationValidate ||
-    null);
+    const current =
+      queue.shift();
 
-const resolveActivationToken =
-  getModuleExport(
-    ActivationApi,
-    "resolveActivationToken",
-    "extractActivationToken"
-  ) ||
-  (() => "");
+    if (
+      !isPlainObject(current) ||
+      seen.has(current)
+    ) {
+      continue;
+    }
 
-const normalizeActivationPayload =
-  getModuleExport(
-    ActivationApi,
-    "normalizeActivationPayload",
-    "normalizeActivateAccountPayload"
-  ) ||
-  ((payload = {}) =>
-    payload);
+    seen.add(current);
+    output.push(current);
 
-const normalizeFirstUserActivationPayload =
-  getModuleExport(
-    ActivationApi,
-    "normalizeFirstUserActivationPayload"
-  ) ||
-  ((payload = {}) =>
-    payload);
+    for (const key of AUTH_OBJECT_KEYS) {
+      const nested =
+        current[key];
 
-const buildActivationRequestBody =
-  getModuleExport(
-    ActivationApi,
-    "buildActivationRequestBody",
-    "buildActivateAccountBody"
-  ) ||
-  ((payload = {}) =>
-    payload);
+      if (isPlainObject(nested)) {
+        queue.push(nested);
+      }
+    }
 
-const buildActivateFirstUserBody =
-  getModuleExport(
-    ActivationApi,
-    "buildActivateFirstUserBody",
-    "buildFirstUserActivationBody"
-  ) ||
-  ((payload = {}) =>
-    payload);
+    if (isPlainObject(current.response?.data)) {
+      queue.push(current.response.data);
+    }
 
-const normalizeActivationResponse =
-  getModuleExport(
-    ActivationApi,
-    "normalizeActivationResponse",
-    "normalizeActivateAccountResponse"
-  ) ||
-  ((response = {}) =>
-    response);
+    if (isPlainObject(current.data?.auth)) {
+      queue.push(current.data.auth);
+    }
 
-const normalizeFirstUserActivationResponse =
-  getModuleExport(
-    ActivationApi,
-    "normalizeFirstUserActivationResponse"
-  ) ||
-  ((response = {}) =>
-    response);
+    if (isPlainObject(current.data?.session)) {
+      queue.push(current.data.session);
+    }
 
-async function activateAccount(payload = {}, options = {}) {
-  const executor =
-    activateAccountExecutor ||
-    missingHandler("activateAccount en ./activation.js");
+    if (isPlainObject(current.auth?.session)) {
+      queue.push(current.auth.session);
+    }
+  }
 
-  return executor(
-    payload,
-    options
+  return output;
+}
+
+function pickValueFromObjects(objects = [], keys = []) {
+  for (const object of objects) {
+    for (const key of keys) {
+      if (
+        object &&
+        object[key] !== null &&
+        object[key] !== undefined &&
+        object[key] !== ""
+      ) {
+        return object[key];
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function pickTextFromObjects(objects = [], keys = []) {
+  return safeText(
+    pickValueFromObjects(
+      objects,
+      keys
+    ),
+    ""
   );
 }
 
-async function activate(payload = {}, options = {}) {
-  return activateAccount(
-    payload,
-    options
+function pickObjectFromObjects(objects = [], keys = []) {
+  for (const object of objects) {
+    for (const key of keys) {
+      if (isPlainObject(object?.[key])) {
+        return object[key];
+      }
+    }
+  }
+
+  return null;
+}
+
+function pickBoolFromObjects(objects = [], keys = []) {
+  for (const object of objects) {
+    for (const key of keys) {
+      if (
+        key in safeObject(object) &&
+        normalizeBoolean(
+          object[key],
+          false
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function hasUsableToken(token = "") {
+  const value =
+    safeText(token, "");
+
+  if (!value) {
+    return false;
+  }
+
+  const lower =
+    value.toLowerCase();
+
+  if (
+    [
+      "null",
+      "undefined",
+      "false",
+      "true",
+      "nan",
+      "none",
+      "[object object]",
+    ].includes(lower)
+  ) {
+    return false;
+  }
+
+  if (/[\s\r\n\t]/.test(value)) {
+    return false;
+  }
+
+  try {
+    if (isFunction(AppCore?.utils?.hasValidToken)) {
+      return Boolean(
+        AppCore.utils.hasValidToken(value)
+      );
+    }
+  } catch {}
+
+  return true;
+}
+
+function isUserActive(user = {}) {
+  if (!isPlainObject(user)) {
+    return false;
+  }
+
+  const status =
+    safeLower(
+      user.status ||
+        user.estado ||
+        user.state ||
+        user.accountStatus ||
+        "",
+      ""
+    );
+
+  if (
+    [
+      "disabled",
+      "inactive",
+      "deleted",
+      "blocked",
+      "suspended",
+      "banned",
+      "revoked",
+      "desactivado",
+      "inactivo",
+      "eliminado",
+      "bloqueado",
+      "suspendido",
+    ].includes(status)
+  ) {
+    return false;
+  }
+
+  if (
+    user.deletedAt ||
+    user.deleted === true ||
+    user.isDeleted === true ||
+    user.disabled === true ||
+    user.isDisabled === true ||
+    user.blocked === true ||
+    user.isBlocked === true ||
+    user.banned === true ||
+    user.suspended === true ||
+    user.revoked === true
+  ) {
+    return false;
+  }
+
+  const activeCandidate =
+    user.active ??
+    user.isActive ??
+    user.is_active ??
+    user.enabled ??
+    user.isEnabled;
+
+  if (
+    activeCandidate === undefined ||
+    activeCandidate === null ||
+    activeCandidate === ""
+  ) {
+    return true;
+  }
+
+  return normalizeBoolean(
+    activeCandidate,
+    true
   );
 }
 
-async function activation(payload = {}, options = {}) {
-  return activateAccount(
-    payload,
-    options
+function hasUsableUser(user = {}) {
+  if (
+    !isPlainObject(user) ||
+    !isUserActive(user)
+  ) {
+    return false;
+  }
+
+  return Boolean(
+    safeText(user.id, "") ||
+      safeText(user.userId, "") ||
+      safeText(user.user_id, "") ||
+      safeText(user._id, "") ||
+      safeText(user.uid, "") ||
+      safeText(user.sub, "") ||
+      safeText(user.username, "") ||
+      safeText(user.userName, "") ||
+      safeText(user.user_name, "") ||
+      safeText(user.email, "") ||
+      safeText(user.mail, "") ||
+      safeText(user.phone, "") ||
+      safeText(user.telefono, "") ||
+      safeText(user.mobile, "") ||
+      safeText(user.displayName, "") ||
+      safeText(user.name, "")
   );
 }
 
-async function confirmActivation(payload = {}, options = {}) {
-  return activateAccount(
-    payload,
-    options
+function resolveAvatar(user = {}) {
+  const source =
+    safeObject(user);
+
+  return (
+    safeText(source.avatar, "") ||
+    safeText(source.avatarUrl, "") ||
+    safeText(source.avatarURL, "") ||
+    safeText(source.avatar_url, "") ||
+    safeText(source.photo, "") ||
+    safeText(source.photoUrl, "") ||
+    safeText(source.photoURL, "") ||
+    safeText(source.photo_url, "") ||
+    safeText(source.image, "") ||
+    safeText(source.imageUrl, "") ||
+    safeText(source.imageURL, "") ||
+    safeText(source.image_url, "") ||
+    safeText(source.profileImage, "") ||
+    safeText(source.profileImageUrl, "") ||
+    safeText(source.profile_image, "") ||
+    safeText(source.profile_image_url, "") ||
+    safeText(source.picture, "") ||
+    safeText(source.pictureUrl, "") ||
+    safeText(source.pictureURL, "") ||
+    safeText(source.picture_url, "") ||
+    null
   );
 }
 
-async function accountActivation(payload = {}, options = {}) {
-  return activateAccount(
-    payload,
-    options
+function normalizeUsername(value = "") {
+  return safeText(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^@+/, "")
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+}
+
+function normalizeLoginUserForState(user = {}) {
+  const clean =
+    safeObject(user);
+
+  try {
+    const normalized =
+      normalizeUser?.(clean);
+
+    if (
+      normalized &&
+      hasUsableUser(normalized)
+    ) {
+      return normalizeFinalUser(normalized);
+    }
+  } catch {}
+
+  return hasUsableUser(clean)
+    ? normalizeFinalUser(clean)
+    : null;
+}
+
+function normalizeFinalUser(user = {}) {
+  const source =
+    safeObject(user);
+
+  if (!hasUsableUser(source)) {
+    return null;
+  }
+
+  const userId =
+    pickFirstText(
+      source.userId,
+      source.user_id,
+      source.uid,
+      source.sub,
+      source.id,
+      source._id
+    );
+
+  const email =
+    pickFirstText(
+      source.email,
+      source.emailLower,
+      source.email_lower,
+      source.mail
+    );
+
+  const username =
+    pickFirstText(
+      source.username,
+      source.userName,
+      source.user_name,
+      source.usernameLower,
+      source.username_lower,
+      source.slug,
+      email ? email.split("@")[0] : ""
+    );
+
+  const usernameLower =
+    normalizeUsername(
+      pickFirstText(
+        source.usernameLower,
+        source.username_lower,
+        username
+      )
+    );
+
+  const slug =
+    normalizeUsername(
+      pickFirstText(
+        source.slug,
+        source.usernameSlug,
+        source.username_slug,
+        usernameLower,
+        username,
+        email,
+        userId
+      )
+    );
+
+  const displayName =
+    pickFirstText(
+      source.displayName,
+      source.fullName,
+      source.name,
+      source.nombre,
+      username,
+      email,
+      "Usuario"
+    );
+
+  const role =
+    safeLower(
+      pickFirstText(
+        source.role,
+        source.rol,
+        source.userRole,
+        source.user_role,
+        source.type,
+        source.tipo,
+        "user"
+      ),
+      "user"
+    );
+
+  const avatar =
+    resolveAvatar(source);
+
+  const preferences =
+    safeObject(source.preferences);
+
+  return {
+    ...source,
+
+    id:
+      source.id ||
+      userId ||
+      null,
+
+    userId:
+      source.userId ||
+      userId ||
+      null,
+
+    user_id:
+      source.user_id ||
+      userId ||
+      null,
+
+    uid:
+      source.uid ||
+      userId ||
+      null,
+
+    sub:
+      source.sub ||
+      userId ||
+      null,
+
+    email:
+      email || null,
+
+    emailLower:
+      source.emailLower ||
+      source.email_lower ||
+      (email ? email.toLowerCase() : null),
+
+    username:
+      username || null,
+
+    userName:
+      source.userName ||
+      username ||
+      null,
+
+    usernameLower:
+      usernameLower || null,
+
+    username_lower:
+      source.username_lower ||
+      usernameLower ||
+      null,
+
+    slug:
+      slug || null,
+
+    name:
+      displayName,
+
+    nombre:
+      source.nombre ||
+      displayName,
+
+    displayName,
+
+    fullName:
+      source.fullName ||
+      displayName,
+
+    role,
+    rol:
+      role,
+
+    roles:
+      uniqueStrings([
+        role,
+        ...safeArray(source.roles),
+      ]),
+
+    permissions:
+      safeArray(
+        source.permissions ||
+          source.permisos
+      ),
+
+    permisos:
+      safeArray(
+        source.permisos ||
+          source.permissions
+      ),
+
+    avatar:
+      avatar || null,
+
+    avatarUrl:
+      avatar || null,
+
+    picture:
+      avatar || null,
+
+    hasAvatar:
+      source.hasAvatar === true ||
+      source.has_avatar === true ||
+      source.avatarEnabled === true ||
+      source.avatar_enabled === true ||
+      Boolean(avatar),
+
+    avatarUpdatedAt:
+      source.avatarUpdatedAt ||
+      source.avatar_updated_at ||
+      source.pictureUpdatedAt ||
+      source.picture_updated_at ||
+      null,
+
+    active:
+      isUserActive(source),
+
+    theme:
+      source.theme ||
+      preferences.theme ||
+      null,
+
+    mode:
+      source.mode ||
+      preferences.mode ||
+      null,
+
+    appearance:
+      source.appearance ||
+      preferences.appearance ||
+      null,
+
+    lang:
+      source.lang ||
+      preferences.lang ||
+      source.language ||
+      preferences.language ||
+      null,
+
+    language:
+      source.language ||
+      preferences.language ||
+      source.lang ||
+      preferences.lang ||
+      null,
+
+    locale:
+      source.locale ||
+      preferences.locale ||
+      source.language ||
+      source.lang ||
+      null,
+
+    preferences,
+  };
+}
+
+function normalizeSessionContext(sessionInput = null, user = null, fallback = {}) {
+  const source =
+    safeObject(sessionInput);
+
+  const fallbackObj =
+    safeObject(fallback);
+
+  const sessionId =
+    pickFirstText(
+      ...SESSION_ID_KEYS.map((key) =>
+        source[key]
+      ),
+      fallbackObj.sessionId,
+      fallbackObj.session_id,
+      fallbackObj.sid,
+      fallbackObj.id,
+      getStoredSessionId()
+    );
+
+  const sessionUserId =
+    pickFirstText(
+      source.sessionUserId,
+      source.session_user_id,
+      ...SESSION_USER_ID_KEYS.map((key) =>
+        source[key]
+      ),
+      fallbackObj.sessionUserId,
+      fallbackObj.session_user_id,
+      fallbackObj.userId,
+      fallbackObj.user_id,
+      user?.userId,
+      user?.user_id,
+      user?.id,
+      user?.uid,
+      getStoredSessionUserId()
+    );
+
+  const expiresAt =
+    pickFirstText(
+      ...SESSION_EXPIRES_KEYS.map((key) =>
+        source[key]
+      ),
+      fallbackObj.expiresAt,
+      fallbackObj.refreshExpiresAt
+    );
+
+  const hasAny =
+    Object.keys(source).length > 0 ||
+    Boolean(
+      sessionId ||
+        sessionUserId ||
+        expiresAt
+    );
+
+  if (!hasAny) {
+    return null;
+  }
+
+  return {
+    ...source,
+
+    id:
+      source.id ||
+      sessionId ||
+      null,
+
+    sessionId:
+      source.sessionId ||
+      source.session_id ||
+      source.sid ||
+      sessionId ||
+      null,
+
+    session_id:
+      source.session_id ||
+      source.sessionId ||
+      source.sid ||
+      sessionId ||
+      null,
+
+    userId:
+      source.userId ||
+      source.user_id ||
+      source.uid ||
+      sessionUserId ||
+      null,
+
+    user_id:
+      source.user_id ||
+      source.userId ||
+      source.uid ||
+      sessionUserId ||
+      null,
+
+    sessionUserId:
+      source.sessionUserId ||
+      source.session_user_id ||
+      sessionUserId ||
+      null,
+
+    session_user_id:
+      source.session_user_id ||
+      source.sessionUserId ||
+      sessionUserId ||
+      null,
+
+    expiresAt:
+      source.expiresAt ||
+      source.expires_at ||
+      source.refreshExpiresAt ||
+      source.refresh_expires_at ||
+      expiresAt ||
+      null,
+
+    refreshExpiresAt:
+      source.refreshExpiresAt ||
+      source.refresh_expires_at ||
+      source.expiresAt ||
+      source.expires_at ||
+      expiresAt ||
+      null,
+  };
+}
+
+function isExplicitFailureFromObjects(objects = []) {
+  const statusValue =
+    pickFirstValue(
+      pickValueFromObjects(
+        objects,
+        STATUS_KEYS
+      )
+    );
+
+  const statusNumber =
+    Number(statusValue || 0);
+
+  if (
+    Number.isFinite(statusNumber) &&
+    statusNumber >= 400
+  ) {
+    return true;
+  }
+
+  const code =
+    safeText(
+      pickTextFromObjects(
+        objects,
+        CODE_KEYS
+      ),
+      ""
+    ).toUpperCase();
+
+  if (
+    code &&
+    AUTH_FAILURE_CODES.has(code)
+  ) {
+    return true;
+  }
+
+  return objects.some((object) =>
+    object?.ok === false ||
+    object?.success === false ||
+    object?.authenticated === false && object?.code && object?.code !== "ME_OK"
   );
 }
 
-async function createUserActivation(payload = {}, options = {}) {
-  return activateAccount(
-    payload,
-    options
-  );
+function normalizeAuthPayload(result = {}, options = {}) {
+  const raw =
+    safeObject(result);
+
+  const opts =
+    safeObject(options);
+
+  const objects =
+    collectAuthObjects(raw);
+
+  const token =
+    pickFirstText(
+      pickTextFromObjects(objects, TOKEN_KEYS),
+      opts.fallbackToken,
+      opts.useCurrentToken !== false
+        ? getCurrentTokenFromCore()
+        : ""
+    );
+
+  const refreshToken =
+    pickTextFromObjects(
+      objects,
+      REFRESH_TOKEN_KEYS
+    );
+
+  const tempToken =
+    pickTextFromObjects(
+      objects,
+      TEMP_TOKEN_KEYS
+    );
+
+  const userRaw =
+    pickObjectFromObjects(
+      objects,
+      USER_KEYS
+    ) ||
+    raw.user ||
+    raw.usuario ||
+    raw.me ||
+    raw.account ||
+    raw.profile ||
+    raw.data?.user ||
+    raw.data?.usuario ||
+    raw.data?.me ||
+    raw.auth?.user ||
+    raw.auth?.usuario ||
+    null;
+
+  const rootAvatar =
+    pickFirstText(
+      raw.avatar,
+      raw.avatarUrl,
+      raw.data?.avatar,
+      raw.data?.avatarUrl
+    );
+
+  const user =
+    normalizeLoginUserForState(
+      userRaw
+        ? {
+            ...safeObject(userRaw),
+
+            avatar:
+              resolveAvatar(userRaw) ||
+              rootAvatar ||
+              undefined,
+
+            avatarUrl:
+              resolveAvatar(userRaw) ||
+              rootAvatar ||
+              undefined,
+
+            hasAvatar:
+              userRaw.hasAvatar === true ||
+              userRaw.has_avatar === true ||
+              Boolean(
+                resolveAvatar(userRaw) ||
+                  rootAvatar
+              ),
+          }
+        : {}
+    );
+
+  const sessionRaw =
+    pickObjectFromObjects(
+      objects,
+      SESSION_KEYS
+    );
+
+  const sessionId =
+    pickTextFromObjects(
+      objects,
+      SESSION_ID_KEYS
+    );
+
+  const sessionUserId =
+    pickTextFromObjects(
+      objects,
+      SESSION_USER_ID_KEYS
+    );
+
+  const expiresAt =
+    pickTextFromObjects(
+      objects,
+      SESSION_EXPIRES_KEYS
+    );
+
+  const sessionData =
+    normalizeSessionContext(
+      sessionRaw,
+      user,
+      {
+        sessionId,
+        userId:
+          sessionUserId,
+        expiresAt,
+      }
+    );
+
+  const statusValue =
+    pickFirstValue(
+      pickValueFromObjects(
+        objects,
+        STATUS_KEYS
+      )
+    );
+
+  const code =
+    pickTextFromObjects(
+      objects,
+      CODE_KEYS
+    );
+
+  const message =
+    pickTextFromObjects(
+      objects,
+      MESSAGE_KEYS
+    );
+
+  const redirectTo =
+    pickTextFromObjects(
+      objects,
+      REDIRECT_KEYS
+    );
+
+  const statusText =
+    safeLower(
+      statusValue,
+      ""
+    );
+
+  const requires2FA =
+    Boolean(
+      tempToken ||
+        pickBoolFromObjects(
+          objects,
+          TWO_FACTOR_BOOL_KEYS
+        ) ||
+        TWO_FACTOR_STATUSES.has(statusText)
+    );
+
+  const explicitFailure =
+    !requires2FA &&
+    isExplicitFailureFromObjects(objects);
+
+  const hasToken =
+    hasUsableToken(token);
+
+  const hasUser =
+    hasUsableUser(user);
+
+  const authenticated =
+    !explicitFailure &&
+    !requires2FA &&
+    hasToken &&
+    hasUser;
+
+  return {
+    raw:
+      result,
+
+    ok:
+      explicitFailure
+        ? false
+        : authenticated || requires2FA || (opts.allowUserOnly === true && hasUser),
+
+    success:
+      explicitFailure
+        ? false
+        : authenticated || requires2FA || (opts.allowUserOnly === true && hasUser),
+
+    explicitFailure,
+    authenticated,
+
+    token:
+      hasToken
+        ? token
+        : "",
+
+    accessToken:
+      hasToken
+        ? token
+        : "",
+
+    refreshToken:
+      safeText(refreshToken, ""),
+
+    user:
+      hasUser
+        ? user
+        : null,
+
+    tempToken:
+      safeText(tempToken, ""),
+
+    requires2FA,
+
+    session:
+      sessionData,
+
+    sessionData,
+
+    sessionId:
+      sessionData?.sessionId ||
+      sessionId ||
+      "",
+
+    sessionUserId:
+      sessionData?.sessionUserId ||
+      sessionData?.userId ||
+      sessionUserId ||
+      "",
+
+    status:
+      safeText(
+        statusValue,
+        explicitFailure
+          ? "auth_failed"
+          : requires2FA
+            ? "2fa_required"
+            : authenticated
+              ? "authenticated"
+              : hasUser
+                ? "user_loaded"
+                : ""
+      ),
+
+    code:
+      safeText(code, ""),
+
+    message:
+      safeText(message, ""),
+
+    redirectTo:
+      safeText(redirectTo, ""),
+  };
 }
 
-async function activateFirstUser(payload = {}, options = {}) {
-  const executor =
-    activateFirstUserExecutor ||
-    missingHandler("activateFirstUser en ./activation.js");
-
-  return executor(
-    payload,
-    options
-  );
-}
-
-async function firstUserActivation(payload = {}, options = {}) {
-  return activateFirstUser(
-    payload,
-    options
-  );
-}
-
-async function activateInitialUser(payload = {}, options = {}) {
-  return activateFirstUser(
-    payload,
-    options
-  );
-}
-
-async function validateActivationToken(payload = {}, options = {}) {
-  const executor =
-    validateActivationTokenExecutor ||
-    missingHandler("validateActivationToken en ./activation.js");
-
-  return executor(
-    payload,
-    options
-  );
-}
-
-async function validateActivateAccountToken(payload = {}, options = {}) {
-  return validateActivationToken(
-    payload,
-    options
-  );
-}
-
-async function activationValidate(payload = {}, options = {}) {
-  return validateActivationToken(
-    payload,
-    options
-  );
-}
-
-/* =========================================================
-   2FA RESOLUTION
-========================================================= */
-
-const verifyTwoFactorExecutor =
-  getModuleExport(
-    TwoFactorApi,
-    "verifyTwoFactor",
-    "verify2FA",
-    "login2fa",
-    "twoFactorLogin",
-    "twoFactorVerify",
-    "verifyMfa",
-    "mfaLogin",
-    "submitTwoFactorCode"
-  );
-
-const requestTwoFactorCodeExecutor =
-  getModuleExport(
-    TwoFactorApi,
-    "requestTwoFactorCode",
-    "request2FA",
-    "requestMfa",
-    "sendTwoFactorCode"
-  );
-
-const resendTwoFactorCodeExecutor =
-  getModuleExport(
-    TwoFactorApi,
-    "resendTwoFactorCode",
-    "resend2FA",
-    "resendMfa"
-  );
-
-const getTwoFactorLoginEndpoint =
-  getModuleExport(
-    TwoFactorApi,
-    "getTwoFactorLoginEndpoint",
-    "getTwoFactorVerifyEndpoint",
-    "getMfaVerifyEndpoint"
-  ) ||
-  (() =>
-    AUTH_ENDPOINTS?.twoFactorLogin ||
-    AUTH_ENDPOINTS?.login2fa ||
-    AUTH_ENDPOINTS?.mfaLogin ||
-    null);
-
-const getTwoFactorRequestEndpoint =
-  getModuleExport(
-    TwoFactorApi,
-    "getTwoFactorRequestEndpoint"
-  ) ||
-  (() =>
-    AUTH_ENDPOINTS?.twoFactorRequest ||
-    AUTH_ENDPOINTS?.request2FA ||
-    AUTH_ENDPOINTS?.requestMfa ||
-    null);
-
-const getTwoFactorResendEndpoint =
-  getModuleExport(
-    TwoFactorApi,
-    "getTwoFactorResendEndpoint"
-  ) ||
-  (() =>
-    AUTH_ENDPOINTS?.twoFactorResend ||
-    AUTH_ENDPOINTS?.resend2FA ||
-    AUTH_ENDPOINTS?.resendMfa ||
-    null);
-
-const resolveTwoFactorTempToken =
-  getModuleExport(
-    TwoFactorApi,
-    "resolveTwoFactorTempToken"
-  ) ||
-  (() =>
-    getStoredTempToken() || "");
-
-const normalizeTwoFactorPayload =
-  getModuleExport(
-    TwoFactorApi,
-    "normalizeTwoFactorPayload",
-    "normalizeVerifyTwoFactorPayload"
-  ) ||
-  ((payload = {}) =>
-    payload);
-
-const normalizeRequestTwoFactorPayload =
-  getModuleExport(
-    TwoFactorApi,
-    "normalizeRequestTwoFactorPayload"
-  ) ||
-  ((payload = {}) =>
-    payload);
-
-const buildTwoFactorVerifyBody =
-  getModuleExport(
-    TwoFactorApi,
-    "buildTwoFactorVerifyBody",
-    "buildVerifyTwoFactorBody"
-  ) ||
-  ((payload = {}) =>
-    payload);
-
-const buildTwoFactorRequestBody =
-  getModuleExport(
-    TwoFactorApi,
-    "buildTwoFactorRequestBody",
-    "buildRequestTwoFactorBody"
-  ) ||
-  ((payload = {}) =>
-    payload);
-
-const buildResendTwoFactorBody =
-  getModuleExport(
-    TwoFactorApi,
-    "buildResendTwoFactorBody"
-  ) ||
-  ((payload = {}) =>
-    payload);
-
-const normalizeTwoFactorResponse =
-  getModuleExport(
-    TwoFactorApi,
-    "normalizeTwoFactorResponse",
-    "normalizeVerifyTwoFactorResponse"
-  ) ||
-  ((response = {}) =>
-    response);
-
-const normalizeRequestTwoFactorResponse =
-  getModuleExport(
-    TwoFactorApi,
-    "normalizeRequestTwoFactorResponse"
-  ) ||
-  ((response = {}) =>
-    response);
-
-const normalizeResendTwoFactorResponse =
-  getModuleExport(
-    TwoFactorApi,
-    "normalizeResendTwoFactorResponse"
-  ) ||
-  ((response = {}) =>
-    response);
-
-const isTwoFactorRoute =
-  getModuleExport(
-    TwoFactorApi,
-    "isTwoFactorRoute"
-  ) ||
-  (() =>
-    false);
-
-const getTwoFactorRedirectPath =
-  getModuleExport(
-    TwoFactorApi,
-    "getTwoFactorRedirectPath"
-  ) ||
-  (() =>
-    DEFAULT_2FA_PATH);
-
-async function verifyTwoFactor(payload = {}, options = {}) {
-  const executor =
-    verifyTwoFactorExecutor ||
-    missingHandler("verifyTwoFactor en ./2fa.js");
-
-  return executor(
-    payload,
-    options
-  );
-}
-
-async function verify2FA(payload = {}, options = {}) {
-  return verifyTwoFactor(
-    payload,
-    options
-  );
-}
-
-async function login2fa(payload = {}, options = {}) {
-  return verifyTwoFactor(
-    payload,
-    options
-  );
-}
-
-async function twoFactorLogin(payload = {}, options = {}) {
-  return verifyTwoFactor(
-    payload,
-    options
-  );
-}
-
-async function twoFactorVerify(payload = {}, options = {}) {
-  return verifyTwoFactor(
-    payload,
-    options
-  );
-}
-
-async function verifyMfa(payload = {}, options = {}) {
-  return verifyTwoFactor(
-    payload,
-    options
-  );
-}
-
-async function mfaLogin(payload = {}, options = {}) {
-  return verifyTwoFactor(
-    payload,
-    options
-  );
-}
-
-async function submitTwoFactorCode(payload = {}, options = {}) {
-  return verifyTwoFactor(
-    payload,
-    options
-  );
-}
-
-async function requestTwoFactorCode(payload = {}, options = {}) {
-  const executor =
-    requestTwoFactorCodeExecutor ||
-    missingHandler("requestTwoFactorCode en ./2fa.js");
-
-  return executor(
-    payload,
-    options
-  );
-}
-
-async function request2FA(payload = {}, options = {}) {
-  return requestTwoFactorCode(
-    payload,
-    options
-  );
-}
-
-async function requestMfa(payload = {}, options = {}) {
-  return requestTwoFactorCode(
-    payload,
-    options
-  );
-}
-
-async function sendTwoFactorCode(payload = {}, options = {}) {
-  return requestTwoFactorCode(
-    payload,
-    options
-  );
-}
-
-async function resendTwoFactorCode(payload = {}, options = {}) {
-  const executor =
-    resendTwoFactorCodeExecutor ||
-    missingHandler("resendTwoFactorCode en ./2fa.js");
-
-  return executor(
-    payload,
-    options
-  );
-}
-
-async function resend2FA(payload = {}, options = {}) {
-  return resendTwoFactorCode(
-    payload,
-    options
-  );
-}
-
-async function resendMfa(payload = {}, options = {}) {
-  return resendTwoFactorCode(
-    payload,
-    options
-  );
-}
-
-/* =========================================================
-   PASSWORD RESET RESOLUTION
-========================================================= */
-
-const requestPasswordResetExecutor =
-  getModuleExport(
-    PasswordResetApi,
-    "requestPasswordReset",
-    "forgotPassword",
-    "resetPasswordRequest",
-    "requestResetPassword",
-    "passwordResetRequest",
-    "recoverPassword"
-  );
-
-const confirmResetPasswordExecutor =
-  getModuleExport(
-    PasswordResetApi,
-    "confirmResetPassword",
-    "resetPasswordConfirm",
-    "confirmPasswordReset",
-    "passwordResetConfirm"
-  );
-
-const validateResetPasswordTokenExecutor =
-  getModuleExport(
-    PasswordResetApi,
-    "validateResetPasswordToken",
-    "validateResetToken",
-    "resetPasswordValidate",
-    "validatePasswordReset",
-    "passwordResetValidate"
-  );
-
-const getRequestPasswordResetEndpoint =
-  getModuleExport(
-    PasswordResetApi,
-    "getRequestPasswordResetEndpoint",
-    "getResetPasswordRequestEndpoint"
-  ) ||
-  (() =>
-    AUTH_ENDPOINTS?.forgotPassword ||
-    AUTH_ENDPOINTS?.resetPasswordRequest ||
-    AUTH_ENDPOINTS?.requestPasswordReset ||
-    null);
-
-const getConfirmResetPasswordEndpoint =
-  getModuleExport(
-    PasswordResetApi,
-    "getConfirmResetPasswordEndpoint",
-    "getConfirmPasswordResetEndpoint"
-  ) ||
-  (() =>
-    AUTH_ENDPOINTS?.confirmResetPassword ||
-    AUTH_ENDPOINTS?.confirmPasswordReset ||
-    AUTH_ENDPOINTS?.resetPasswordConfirm ||
-    null);
-
-const getValidateResetTokenEndpoint =
-  getModuleExport(
-    PasswordResetApi,
-    "getValidateResetTokenEndpoint",
-    "getValidateResetPasswordTokenEndpoint"
-  ) ||
-  (() =>
-    AUTH_ENDPOINTS?.validateResetToken ||
-    AUTH_ENDPOINTS?.resetPasswordValidate ||
-    null);
-
-const resolveResetPasswordIdentifier =
-  getModuleExport(
-    PasswordResetApi,
-    "resolveResetPasswordIdentifier"
-  ) ||
-  ((value) =>
-    String(value || "").trim());
-
-const resolveResetPasswordToken =
-  getModuleExport(
-    PasswordResetApi,
-    "resolveResetPasswordToken"
-  ) ||
-  (() => "");
-
-const normalizeResetPasswordPayload =
-  getModuleExport(
-    PasswordResetApi,
-    "normalizeResetPasswordPayload"
-  ) ||
-  ((payload = {}) =>
-    payload);
-
-const normalizeConfirmResetPasswordPayload =
-  getModuleExport(
-    PasswordResetApi,
-    "normalizeConfirmResetPasswordPayload"
-  ) ||
-  ((payload = {}) =>
-    payload);
-
-const normalizeValidateResetTokenPayload =
-  getModuleExport(
-    PasswordResetApi,
-    "normalizeValidateResetTokenPayload",
-    "normalizeValidateResetPasswordTokenPayload"
-  ) ||
-  ((payload = {}) =>
-    payload);
-
-const buildResetPasswordRequestBody =
-  getModuleExport(
-    PasswordResetApi,
-    "buildResetPasswordRequestBody"
-  ) ||
-  ((payload = {}) =>
-    payload);
-
-const buildConfirmResetPasswordBody =
-  getModuleExport(
-    PasswordResetApi,
-    "buildConfirmResetPasswordBody"
-  ) ||
-  ((payload = {}) =>
-    payload);
-
-const buildValidateResetTokenBody =
-  getModuleExport(
-    PasswordResetApi,
-    "buildValidateResetTokenBody",
-    "buildValidateResetPasswordTokenBody"
-  ) ||
-  ((payload = {}) =>
-    payload);
-
-const normalizeResetPasswordResponse =
-  getModuleExport(
-    PasswordResetApi,
-    "normalizeResetPasswordResponse"
-  ) ||
-  ((response = {}) =>
-    response);
-
-const normalizeConfirmResetPasswordResponse =
-  getModuleExport(
-    PasswordResetApi,
-    "normalizeConfirmResetPasswordResponse"
-  ) ||
-  ((response = {}) =>
-    response);
-
-const normalizeValidateResetTokenResponse =
-  getModuleExport(
-    PasswordResetApi,
-    "normalizeValidateResetTokenResponse",
-    "normalizeValidateResetPasswordTokenResponse"
-  ) ||
-  ((response = {}) =>
-    response);
-
-async function requestPasswordResetPublic(payload = {}, options = {}) {
-  const executor =
-    requestPasswordResetExecutor ||
-    missingHandler("requestPasswordReset en ./password-reset.js");
-
-  return executor(
-    payload,
-    options
-  );
-}
-
-async function resetPasswordRequestPublic(payload = {}, options = {}) {
-  return requestPasswordResetPublic(
-    payload,
-    options
-  );
-}
-
-async function requestResetPassword(payload = {}, options = {}) {
-  return requestPasswordResetPublic(
-    payload,
-    options
-  );
-}
-
-async function passwordResetRequest(payload = {}, options = {}) {
-  return requestPasswordResetPublic(
-    payload,
-    options
-  );
-}
-
-async function forgotPasswordPublic(payload = {}, options = {}) {
-  return requestPasswordResetPublic(
-    payload,
-    options
-  );
-}
-
-async function recoverPassword(payload = {}, options = {}) {
-  return requestPasswordResetPublic(
-    payload,
-    options
-  );
-}
-
-async function confirmResetPassword(payload = {}, options = {}) {
-  const executor =
-    confirmResetPasswordExecutor ||
-    missingHandler("confirmResetPassword en ./password-reset.js");
-
-  return executor(
-    payload,
-    options
-  );
-}
-
-async function resetPasswordConfirm(payload = {}, options = {}) {
-  return confirmResetPassword(
-    payload,
-    options
-  );
-}
-
-async function confirmPasswordReset(payload = {}, options = {}) {
-  return confirmResetPassword(
-    payload,
-    options
-  );
-}
-
-async function passwordResetConfirm(payload = {}, options = {}) {
-  return confirmResetPassword(
-    payload,
-    options
-  );
-}
-
-async function validateResetPasswordToken(payload = {}, options = {}) {
-  const executor =
-    validateResetPasswordTokenExecutor ||
-    missingHandler("validateResetPasswordToken en ./password-reset.js");
-
-  return executor(
-    payload,
-    options
-  );
-}
-
-async function validateResetToken(payload = {}, options = {}) {
-  return validateResetPasswordToken(
-    payload,
-    options
-  );
-}
-
-async function resetPasswordValidate(payload = {}, options = {}) {
-  return validateResetPasswordToken(
-    payload,
-    options
-  );
-}
-
-async function validatePasswordReset(payload = {}, options = {}) {
-  return validateResetPasswordToken(
-    payload,
-    options
-  );
-}
-
-async function passwordResetValidate(payload = {}, options = {}) {
-  return validateResetPasswordToken(
-    payload,
-    options
-  );
+function createAuthErrorFromResult(
+  normalized = {},
+  fallbackMessage = "No se pudo completar la autenticación."
+) {
+  const message =
+    safeText(
+      normalized.message,
+      ""
+    ) ||
+    fallbackMessage;
+
+  const error =
+    new Error(message);
+
+  error.name =
+    "AuthError";
+
+  const statusAsNumber =
+    Number(normalized.status);
+
+  error.status =
+    Number.isFinite(statusAsNumber) &&
+    statusAsNumber >= 400
+      ? statusAsNumber
+      : 401;
+
+  error.code =
+    normalized.code ||
+    "INVALID_AUTH_SESSION";
+
+  error.data = {
+    code:
+      error.code,
+
+    message,
+
+    status:
+      normalized.status ||
+      "auth_failed",
+  };
+
+  error.raw =
+    normalized.raw || null;
+
+  return error;
 }
 
 /* =========================================================
@@ -2146,8 +2836,142 @@ function getCurrentRouteContext() {
 }
 
 /* =========================================================
-   RESTORE ARG RESOLUTION
+   SESSION RUNTIME
 ========================================================= */
+
+function createInitialSessionState() {
+  return {
+    loggingIn:
+      false,
+
+    restoring:
+      false,
+
+    checking:
+      false,
+
+    refreshing:
+      false,
+
+    twoFactorPending:
+      false,
+
+    lastLoginAt:
+      null,
+
+    lastLoginErrorAt:
+      null,
+
+    lastCheckAt:
+      null,
+
+    lastRefreshAt:
+      null,
+
+    lastRestoreAt:
+      null,
+
+    loginPromise:
+      null,
+
+    refreshPromise:
+      null,
+
+    mePromise:
+      null,
+
+    restorePromise:
+      null,
+
+    loginFailCount:
+      0,
+
+    refreshFailCount:
+      0,
+
+    restoreFailCount:
+      0,
+
+    refreshBlockedUntil:
+      0,
+
+    lastError:
+      null,
+
+    lastLoginResult:
+      null,
+
+    lastMeResult:
+      null,
+  };
+}
+
+function cloneRuntimeSessionState(source = {}) {
+  return {
+    loggingIn:
+      Boolean(source.loggingIn),
+
+    restoring:
+      Boolean(source.restoring),
+
+    checking:
+      Boolean(source.checking),
+
+    refreshing:
+      Boolean(source.refreshing),
+
+    twoFactorPending:
+      Boolean(source.twoFactorPending),
+
+    lastLoginAt:
+      source.lastLoginAt || null,
+
+    lastLoginErrorAt:
+      source.lastLoginErrorAt || null,
+
+    lastCheckAt:
+      source.lastCheckAt || null,
+
+    lastRefreshAt:
+      source.lastRefreshAt || null,
+
+    lastRestoreAt:
+      source.lastRestoreAt || null,
+
+    loginInFlight:
+      Boolean(source.loginPromise),
+
+    refreshInFlight:
+      Boolean(source.refreshPromise),
+
+    meInFlight:
+      Boolean(source.mePromise),
+
+    restoreInFlight:
+      Boolean(source.restorePromise),
+
+    loginFailCount:
+      Number(source.loginFailCount || 0),
+
+    refreshFailCount:
+      Number(source.refreshFailCount || 0),
+
+    restoreFailCount:
+      Number(source.restoreFailCount || 0),
+
+    refreshBlockedUntil:
+      Number(source.refreshBlockedUntil || 0),
+
+    lastError:
+      source.lastError || null,
+
+    lastLoginResult:
+      source.lastLoginResult || null,
+
+    lastMeResult:
+      source.lastMeResult || null,
+  };
+}
 
 function looksLikeRuntimeSession(value) {
   return Boolean(
@@ -2256,746 +3080,172 @@ function normalizeRestoreOptions(options = {}) {
   };
 }
 
-/* =========================================================
-   PAYLOAD NORMALIZATION
-========================================================= */
+function setRuntimeFlag(sessionState, type, value) {
+  if (!sessionState) {
+    return;
+  }
 
-function collectAuthObjects(raw = {}) {
-  const output =
-    [];
+  if (type === "login") {
+    sessionState.loggingIn =
+      Boolean(value);
+  }
 
-  const seen =
-    new Set();
+  if (type === "restore") {
+    sessionState.restoring =
+      Boolean(value);
+  }
 
-  const queue =
-    [raw];
+  if (type === "refresh") {
+    sessionState.refreshing =
+      Boolean(value);
+  }
 
-  let guard =
-    0;
+  if (type === "me") {
+    sessionState.checking =
+      Boolean(value);
+  }
+}
 
-  while (
-    queue.length &&
-    guard < 100
-  ) {
-    guard += 1;
+function markRuntimeSuccess(sessionState, type) {
+  if (!sessionState) {
+    return;
+  }
 
-    const current =
-      queue.shift();
+  const current =
+    nowMs();
 
-    if (
-      !isPlainObject(current) ||
-      seen.has(current)
-    ) {
-      continue;
-    }
+  if (type === "login") {
+    sessionState.lastLoginAt =
+      current;
+    sessionState.loginFailCount =
+      0;
+  }
 
-    seen.add(current);
-    output.push(current);
+  if (type === "restore") {
+    sessionState.lastRestoreAt =
+      current;
+    sessionState.restoreFailCount =
+      0;
+  }
 
-    for (const key of AUTH_OBJECT_KEYS) {
-      const nested =
-        current[key];
+  if (type === "refresh") {
+    sessionState.lastRefreshAt =
+      current;
+    sessionState.refreshFailCount =
+      0;
+    sessionState.refreshBlockedUntil =
+      0;
+  }
 
-      if (isPlainObject(nested)) {
-        queue.push(nested);
-      }
-    }
+  if (type === "me") {
+    sessionState.lastCheckAt =
+      current;
+  }
+}
 
-    if (isPlainObject(current.response?.data)) {
-      queue.push(current.response.data);
-    }
+function markRuntimeError(sessionState, type, error) {
+  if (!sessionState) {
+    return;
+  }
 
-    if (isPlainObject(current.data?.auth)) {
-      queue.push(current.data.auth);
-    }
+  sessionState.lastError =
+    createRuntimeErrorSnapshot(
+      type,
+      error
+    );
 
-    if (isPlainObject(current.data?.session)) {
-      queue.push(current.data.session);
-    }
+  if (type === "login") {
+    sessionState.loginFailCount =
+      Number(sessionState.loginFailCount || 0) + 1;
 
-    if (isPlainObject(current.auth?.session)) {
-      queue.push(current.auth.session);
+    sessionState.lastLoginErrorAt =
+      nowMs();
+  }
+
+  if (type === "refresh") {
+    sessionState.refreshFailCount =
+      Number(sessionState.refreshFailCount || 0) + 1;
+
+    if (sessionState.refreshFailCount >= 3) {
+      sessionState.refreshBlockedUntil =
+        nowMs() + 30_000;
     }
   }
 
-  return output;
-}
-
-function pickValueFromObjects(objects = [], keys = []) {
-  for (const object of objects) {
-    for (const key of keys) {
-      if (
-        object &&
-        object[key] !== null &&
-        object[key] !== undefined &&
-        object[key] !== ""
-      ) {
-        return object[key];
-      }
-    }
+  if (type === "restore") {
+    sessionState.restoreFailCount =
+      Number(sessionState.restoreFailCount || 0) + 1;
   }
-
-  return undefined;
 }
 
-function pickTextFromObjects(objects = [], keys = []) {
-  return safeText(
-    pickValueFromObjects(
-      objects,
-      keys
-    ),
-    ""
+async function runRuntimeMetric(sessionState, type, executor, args = []) {
+  const startedAt =
+    nowMs();
+
+  setRuntimeFlag(
+    sessionState,
+    type,
+    true
   );
-}
 
-function pickObjectFromObjects(objects = [], keys = []) {
-  for (const object of objects) {
-    for (const key of keys) {
-      if (isPlainObject(object?.[key])) {
-        return object[key];
-      }
-    }
-  }
-
-  return null;
-}
-
-function pickBoolFromObjects(objects = [], keys = []) {
-  for (const object of objects) {
-    for (const key of keys) {
-      if (
-        key in safeObject(object) &&
-        normalizeBoolean(
-          object[key],
-          false
-        )
-      ) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-function hasUsableToken(token = "") {
-  const value =
-    safeText(token, "");
-
-  if (!value) {
-    return false;
-  }
-
-  if (
-    value === "null" ||
-    value === "undefined" ||
-    value === "false" ||
-    value === "[object Object]"
-  ) {
-    return false;
-  }
+  emit(
+    `auth:runtime:${type}:start`,
+    {}
+  );
 
   try {
-    if (isFunction(AppCore?.utils?.hasValidToken)) {
-      return Boolean(
-        AppCore.utils.hasValidToken(value)
+    const result =
+      await Promise.resolve(
+        executor(...args)
       );
-    }
-  } catch {}
 
-  return true;
-}
-
-function hasUsableUser(user = {}) {
-  if (!isPlainObject(user)) {
-    return false;
-  }
-
-  return Boolean(
-    safeText(user.id, "") ||
-      safeText(user.userId, "") ||
-      safeText(user.user_id, "") ||
-      safeText(user._id, "") ||
-      safeText(user.uid, "") ||
-      safeText(user.username, "") ||
-      safeText(user.userName, "") ||
-      safeText(user.user_name, "") ||
-      safeText(user.email, "") ||
-      safeText(user.mail, "") ||
-      safeText(user.phone, "") ||
-      safeText(user.telefono, "") ||
-      safeText(user.mobile, "")
-  );
-}
-
-function normalizeLoginUserForState(user = {}) {
-  const clean =
-    safeObject(user);
-
-  try {
-    const normalized =
-      normalizeUser?.(clean);
-
-    if (
-      normalized &&
-      hasUsableUser(normalized)
-    ) {
-      return normalized;
-    }
-  } catch {}
-
-  return hasUsableUser(clean)
-    ? clean
-    : null;
-}
-
-function normalizeSessionContext(sessionInput = null, user = null, fallback = {}) {
-  const source =
-    safeObject(sessionInput);
-
-  const fallbackObj =
-    safeObject(fallback);
-
-  const sessionId =
-    pickFirstText(
-      ...SESSION_ID_KEYS.map((key) =>
-        source[key]
-      ),
-      fallbackObj.sessionId,
-      fallbackObj.session_id,
-      fallbackObj.id,
-      getStoredSessionId()
+    markRuntimeSuccess(
+      sessionState,
+      type
     );
 
-  const sessionUserId =
-    pickFirstText(
-      source.sessionUserId,
-      source.session_user_id,
-      ...SESSION_USER_ID_KEYS.map((key) =>
-        source[key]
-      ),
-      fallbackObj.sessionUserId,
-      fallbackObj.session_user_id,
-      fallbackObj.userId,
-      fallbackObj.user_id,
-      user?.userId,
-      user?.user_id,
-      user?.id,
-      user?.uid,
-      getStoredSessionUserId()
-    );
-
-  const expiresAt =
-    pickFirstText(
-      ...SESSION_EXPIRES_KEYS.map((key) =>
-        source[key]
-      ),
-      fallbackObj.expiresAt,
-      fallbackObj.refreshExpiresAt
-    );
-
-  const hasAny =
-    Object.keys(source).length > 0 ||
-    Boolean(
-      sessionId ||
-        sessionUserId ||
-        expiresAt
-    );
-
-  if (!hasAny) {
-    return null;
-  }
-
-  return {
-    ...source,
-
-    id:
-      source.id ||
-      sessionId ||
-      null,
-
-    sessionId:
-      source.sessionId ||
-      source.session_id ||
-      source.sid ||
-      sessionId ||
-      null,
-
-    session_id:
-      source.session_id ||
-      source.sessionId ||
-      source.sid ||
-      sessionId ||
-      null,
-
-    userId:
-      source.userId ||
-      source.user_id ||
-      source.uid ||
-      sessionUserId ||
-      null,
-
-    user_id:
-      source.user_id ||
-      source.userId ||
-      source.uid ||
-      sessionUserId ||
-      null,
-
-    sessionUserId:
-      source.sessionUserId ||
-      source.session_user_id ||
-      sessionUserId ||
-      null,
-
-    session_user_id:
-      source.session_user_id ||
-      source.sessionUserId ||
-      sessionUserId ||
-      null,
-
-    expiresAt:
-      source.expiresAt ||
-      source.expires_at ||
-      source.refreshExpiresAt ||
-      source.refresh_expires_at ||
-      expiresAt ||
-      null,
-
-    refreshExpiresAt:
-      source.refreshExpiresAt ||
-      source.refresh_expires_at ||
-      source.expiresAt ||
-      source.expires_at ||
-      expiresAt ||
-      null,
-  };
-}
-
-function isExplicitLoginFailureFromObjects(objects = []) {
-  const statusValue =
-    pickFirstValue(
-      pickValueFromObjects(
-        objects,
-        STATUS_KEYS
-      )
-    );
-
-  const statusNumber =
-    Number(statusValue || 0);
-
-  if (
-    Number.isFinite(statusNumber) &&
-    statusNumber >= 400
-  ) {
-    return true;
-  }
-
-  const code =
-    safeText(
-      pickTextFromObjects(
-        objects,
-        CODE_KEYS
-      ),
-      ""
-    ).toUpperCase();
-
-  if (
-    code &&
-    AUTH_FAILURE_CODES.has(code)
-  ) {
-    return true;
-  }
-
-  return objects.some((object) =>
-    object?.ok === false ||
-    object?.success === false
-  );
-}
-
-function normalizePublicLoginResult(result = {}) {
-  const raw =
-    safeObject(result);
-
-  const objects =
-    collectAuthObjects(raw);
-
-  const token =
-    pickTextFromObjects(
-      objects,
-      TOKEN_KEYS
-    );
-
-  const refreshToken =
-    pickTextFromObjects(
-      objects,
-      REFRESH_TOKEN_KEYS
-    );
-
-  const tempToken =
-    pickTextFromObjects(
-      objects,
-      TEMP_TOKEN_KEYS
-    );
-
-  const userRaw =
-    pickObjectFromObjects(
-      objects,
-      USER_KEYS
-    );
-
-  const user =
-    normalizeLoginUserForState(
-      userRaw ||
-        raw.user ||
-        raw.usuario ||
-        {}
-    );
-
-  const sessionRaw =
-    pickObjectFromObjects(
-      objects,
-      SESSION_KEYS
-    );
-
-  const sessionId =
-    pickTextFromObjects(
-      objects,
-      SESSION_ID_KEYS
-    );
-
-  const sessionUserId =
-    pickTextFromObjects(
-      objects,
-      SESSION_USER_ID_KEYS
-    );
-
-  const expiresAt =
-    pickTextFromObjects(
-      objects,
-      SESSION_EXPIRES_KEYS
-    );
-
-  const sessionData =
-    normalizeSessionContext(
-      sessionRaw,
-      user,
+    emit(
+      `auth:runtime:${type}:success`,
       {
-        sessionId,
-        userId:
-          sessionUserId,
-        expiresAt,
+        durationMs:
+          nowMs() - startedAt,
+
+        ok:
+          result?.ok !== false,
       }
     );
 
-  const statusValue =
-    pickFirstValue(
-      pickValueFromObjects(
-        objects,
-        STATUS_KEYS
-      )
+    return result;
+  } catch (error) {
+    markRuntimeError(
+      sessionState,
+      type,
+      error
     );
 
-  const code =
-    pickTextFromObjects(
-      objects,
-      CODE_KEYS
+    emit(
+      `auth:runtime:${type}:error`,
+      {
+        durationMs:
+          nowMs() - startedAt,
+
+        error:
+          sessionState.lastError,
+      }
     );
 
-  const message =
-    pickTextFromObjects(
-      objects,
-      MESSAGE_KEYS
+    throw error;
+  } finally {
+    setRuntimeFlag(
+      sessionState,
+      type,
+      false
     );
-
-  const redirectTo =
-    pickTextFromObjects(
-      objects,
-      REDIRECT_KEYS
-    );
-
-  const statusText =
-    safeText(
-      statusValue,
-      ""
-    ).toLowerCase();
-
-  const requires2FA =
-    Boolean(
-      tempToken ||
-        pickBoolFromObjects(
-          objects,
-          TWO_FACTOR_BOOL_KEYS
-        ) ||
-        TWO_FACTOR_STATUSES.has(statusText)
-    );
-
-  const explicitFailure =
-    !requires2FA &&
-    isExplicitLoginFailureFromObjects(objects);
-
-  const authenticated =
-    !explicitFailure &&
-    !requires2FA &&
-    hasUsableToken(token) &&
-    hasUsableUser(user);
-
-  return {
-    raw:
-      result,
-
-    ok:
-      explicitFailure
-        ? false
-        : authenticated || requires2FA,
-
-    success:
-      explicitFailure
-        ? false
-        : authenticated || requires2FA,
-
-    explicitFailure,
-    authenticated,
-
-    token:
-      safeText(token, ""),
-
-    accessToken:
-      safeText(token, ""),
-
-    refreshToken:
-      safeText(refreshToken, ""),
-
-    user:
-      hasUsableUser(user)
-        ? user
-        : null,
-
-    tempToken:
-      safeText(tempToken, ""),
-
-    requires2FA,
-
-    session:
-      sessionData,
-
-    sessionData,
-
-    sessionId:
-      sessionData?.sessionId ||
-      sessionId ||
-      "",
-
-    sessionUserId:
-      sessionData?.sessionUserId ||
-      sessionData?.userId ||
-      sessionUserId ||
-      "",
-
-    status:
-      safeText(
-        statusValue,
-        explicitFailure
-          ? "auth_failed"
-          : requires2FA
-            ? "2fa_required"
-            : authenticated
-              ? "authenticated"
-              : ""
-      ),
-
-    code:
-      safeText(code, ""),
-
-    message:
-      safeText(message, ""),
-
-    redirectTo:
-      safeText(redirectTo, ""),
-  };
-}
-
-function createLoginErrorFromResult(
-  normalized = {},
-  fallbackMessage = "No se pudo iniciar sesión."
-) {
-  const message =
-    safeText(
-      normalized.message,
-      ""
-    ) ||
-    fallbackMessage;
-
-  const error =
-    new Error(message);
-
-  error.name =
-    "AuthLoginError";
-
-  const statusAsNumber =
-    Number(normalized.status);
-
-  error.status =
-    Number.isFinite(statusAsNumber) &&
-    statusAsNumber >= 400
-      ? statusAsNumber
-      : 401;
-
-  error.code =
-    normalized.code ||
-    "INVALID_LOGIN_SESSION";
-
-  error.data = {
-    code:
-      error.code,
-
-    message,
-
-    status:
-      normalized.status ||
-      "auth_failed",
-  };
-
-  error.raw =
-    normalized.raw || null;
-
-  return error;
+  }
 }
 
 /* =========================================================
-   INTERNAL SESSION STATE
-========================================================= */
-
-function createInitialSessionState() {
-  return {
-    loggingIn:
-      false,
-
-    restoring:
-      false,
-
-    checking:
-      false,
-
-    refreshing:
-      false,
-
-    twoFactorPending:
-      false,
-
-    lastLoginAt:
-      null,
-
-    lastLoginErrorAt:
-      null,
-
-    lastCheckAt:
-      null,
-
-    lastRefreshAt:
-      null,
-
-    lastRestoreAt:
-      null,
-
-    loginPromise:
-      null,
-
-    refreshPromise:
-      null,
-
-    mePromise:
-      null,
-
-    restorePromise:
-      null,
-
-    loginFailCount:
-      0,
-
-    refreshFailCount:
-      0,
-
-    restoreFailCount:
-      0,
-
-    refreshBlockedUntil:
-      0,
-
-    lastError:
-      null,
-
-    lastLoginResult:
-      null,
-  };
-}
-
-function cloneRuntimeSessionState(source = {}) {
-  return {
-    loggingIn:
-      Boolean(source.loggingIn),
-
-    restoring:
-      Boolean(source.restoring),
-
-    checking:
-      Boolean(source.checking),
-
-    refreshing:
-      Boolean(source.refreshing),
-
-    twoFactorPending:
-      Boolean(source.twoFactorPending),
-
-    lastLoginAt:
-      source.lastLoginAt || null,
-
-    lastLoginErrorAt:
-      source.lastLoginErrorAt || null,
-
-    lastCheckAt:
-      source.lastCheckAt || null,
-
-    lastRefreshAt:
-      source.lastRefreshAt || null,
-
-    lastRestoreAt:
-      source.lastRestoreAt || null,
-
-    loginInFlight:
-      Boolean(source.loginPromise),
-
-    refreshInFlight:
-      Boolean(source.refreshPromise),
-
-    meInFlight:
-      Boolean(source.mePromise),
-
-    restoreInFlight:
-      Boolean(source.restorePromise),
-
-    loginFailCount:
-      Number(source.loginFailCount || 0),
-
-    refreshFailCount:
-      Number(source.refreshFailCount || 0),
-
-    restoreFailCount:
-      Number(source.restoreFailCount || 0),
-
-    refreshBlockedUntil:
-      Number(source.refreshBlockedUntil || 0),
-
-    lastError:
-      source.lastError || null,
-
-    lastLoginResult:
-      source.lastLoginResult || null,
-  };
-}
-
-/* =========================================================
-   LOGIN COMMIT / CLEAR
+   SESSION COMMIT
 ========================================================= */
 
 function extractRoleFromUser(user = {}) {
@@ -3024,7 +3274,7 @@ function extractRoleFromUser(user = {}) {
   );
 }
 
-function applyAcceptedLoginSession(normalized = {}) {
+function buildSessionPayloadFromNormalized(normalized = {}, source = "Auth.session") {
   const raw =
     safeObject(normalized.raw);
 
@@ -3034,10 +3284,10 @@ function applyAcceptedLoginSession(normalized = {}) {
     );
 
   const token =
-    safeText(
-      normalized.token ||
-        normalized.accessToken,
-      ""
+    pickFirstText(
+      normalized.token,
+      normalized.accessToken,
+      getCurrentTokenFromCore()
     );
 
   const refreshToken =
@@ -3066,7 +3316,7 @@ function applyAcceptedLoginSession(normalized = {}) {
       }
     );
 
-  const sessionPayload = {
+  return {
     ...raw,
 
     ok:
@@ -3076,13 +3326,19 @@ function applyAcceptedLoginSession(normalized = {}) {
       true,
 
     authenticated:
-      true,
+      Boolean(
+        hasUsableToken(token) &&
+          hasUsableUser(user)
+      ),
 
-    token,
+    token:
+      token || null,
+
     accessToken:
-      token,
+      token || null,
+
     access_token:
-      token,
+      token || null,
 
     refreshToken:
       refreshToken ||
@@ -3148,11 +3404,236 @@ function applyAcceptedLoginSession(normalized = {}) {
       true,
 
     eventMode:
-      "login",
+      source,
 
-    source:
-      "Auth.login",
+    source,
   };
+}
+
+function reinforceCoreSession(sessionPayload = {}, options = {}) {
+  const payload =
+    safeObject(sessionPayload);
+
+  const opts =
+    safeObject(options);
+
+  const user =
+    normalizeLoginUserForState(
+      payload.user ||
+        payload.usuario ||
+        payload.me ||
+        payload.account ||
+        payload.profile ||
+        {}
+    );
+
+  const token =
+    pickFirstText(
+      payload.token,
+      payload.accessToken,
+      payload.access_token,
+      getCurrentTokenFromCore()
+    );
+
+  const role =
+    extractRoleFromUser(user);
+
+  const sessionData =
+    normalizeSessionContext(
+      payload.sessionData ||
+        payload.session ||
+        {},
+      user,
+      payload
+    );
+
+  const patch = {
+    authenticated:
+      Boolean(
+        hasUsableToken(token) &&
+          hasUsableUser(user)
+      ),
+
+    hasToken:
+      Boolean(
+        hasUsableToken(token)
+      ),
+
+    token:
+      hasUsableToken(token)
+        ? token
+        : null,
+
+    accessToken:
+      hasUsableToken(token)
+        ? token
+        : null,
+
+    access_token:
+      hasUsableToken(token)
+        ? token
+        : null,
+
+    user:
+      hasUsableUser(user)
+        ? user
+        : null,
+
+    currentUser:
+      hasUsableUser(user)
+        ? user
+        : null,
+
+    sessionUser:
+      hasUsableUser(user)
+        ? user
+        : null,
+
+    authUser:
+      hasUsableUser(user)
+        ? user
+        : null,
+
+    account:
+      hasUsableUser(user)
+        ? user
+        : null,
+
+    profile:
+      hasUsableUser(user)
+        ? user
+        : null,
+
+    role:
+      role || null,
+
+    rol:
+      role || null,
+
+    userRole:
+      role || null,
+
+    roles:
+      uniqueStrings([
+        role,
+        ...safeArray(user?.roles),
+      ]),
+
+    session:
+      sessionData,
+
+    sessionData,
+
+    sessionId:
+      sessionData?.sessionId ||
+      payload.sessionId ||
+      null,
+
+    sessionUserId:
+      sessionData?.sessionUserId ||
+      sessionData?.userId ||
+      payload.sessionUserId ||
+      user?.userId ||
+      user?.id ||
+      null,
+
+    username:
+      user?.username ||
+      user?.usernameLower ||
+      user?.slug ||
+      null,
+
+    currentResolvedUsername:
+      user?.slug ||
+      user?.usernameLower ||
+      user?.username ||
+      null,
+
+    resolvedUsername:
+      user?.slug ||
+      user?.usernameLower ||
+      user?.username ||
+      null,
+
+    avatar:
+      user?.avatar ||
+      user?.avatarUrl ||
+      null,
+
+    avatarUrl:
+      user?.avatarUrl ||
+      user?.avatar ||
+      null,
+  };
+
+  try {
+    AppCore?.setState?.(
+      patch,
+      {
+        source:
+          opts.source || "Auth.reinforceCoreSession",
+
+        emit:
+          false,
+
+        emitState:
+          false,
+
+        emitDerived:
+          false,
+
+        silent:
+          true,
+
+        forceUnauthenticated:
+          patch.authenticated !== true,
+      }
+    );
+  } catch {
+    try {
+      if (
+        AppCore?.state &&
+        typeof AppCore.state === "object"
+      ) {
+        Object.assign(
+          AppCore.state,
+          patch
+        );
+      }
+    } catch {}
+  }
+
+  try {
+    AppCore?.applySession?.(
+      {
+        ...payload,
+        ...patch,
+      },
+      {
+        source:
+          opts.source || "Auth.reinforceCoreSession",
+
+        emit:
+          false,
+
+        silent:
+          true,
+      }
+    );
+  } catch {}
+
+  return patch;
+}
+
+function applyAcceptedSession(normalized = {}, options = {}) {
+  const opts =
+    safeObject(options);
+
+  const sessionPayload =
+    buildSessionPayloadFromNormalized(
+      normalized,
+      opts.source || "Auth.session"
+    );
 
   let snapshot =
     null;
@@ -3164,75 +3645,105 @@ function applyAcceptedLoginSession(normalized = {}) {
     }
   } catch (error) {
     safeWarn(
-      "applySession no pudo reforzar sesión post-login.",
+      "applySession no pudo aplicar sesión.",
       error
     );
   }
+
+  const corePatch =
+    reinforceCoreSession(
+      sessionPayload,
+      {
+        source:
+          opts.source || "Auth.session",
+      }
+    );
 
   const finalSnapshot =
     snapshot ||
     buildSessionSnapshot({
       source:
-        "Auth.login",
+        opts.source || "Auth.session",
       eventMode:
-        "login",
+        opts.eventMode || "session",
     });
 
-  const finalRole =
-    finalSnapshot?.role ||
-    role ||
-    user?.role ||
-    user?.rol ||
-    "";
-
-  const finalRoles =
-    Array.isArray(finalSnapshot?.roles)
-      ? finalSnapshot.roles
-      : Array.isArray(user?.roles)
-        ? user.roles
-        : [];
-
   try {
-    AppCore?.syncUserUI?.();
-  } catch {}
+    AppCore?.syncUserUI?.({
+      reason:
+        opts.reason || "auth-session-applied",
+      source:
+        opts.source || "Auth.session",
+    });
+  } catch {
+    try {
+      AppCore?.syncUserUI?.();
+    } catch {}
+  }
+
+  if (opts.emitRepair !== false) {
+    emit(
+      "app:ui:repair-request",
+      {
+        reason:
+          opts.reason || "auth-session-applied",
+
+        authenticated:
+          Boolean(corePatch.authenticated),
+
+        user:
+          corePatch.user || null,
+
+        role:
+          corePatch.role || null,
+
+        repairShell:
+          false,
+
+        hardRepair:
+          false,
+
+        rebind:
+          false,
+      }
+    );
+  }
 
   return {
-    user,
+    user:
+      corePatch.user,
+
     role:
-      finalRole,
+      corePatch.role,
 
     roles:
-      finalRoles,
+      corePatch.roles || [],
 
-    token,
+    token:
+      corePatch.token,
+
     refreshToken:
       sessionPayload.refreshToken || null,
 
     session:
-      finalSnapshot?.session ||
-      sessionData ||
+      corePatch.session ||
+      sessionPayload.session ||
       null,
 
     sessionData:
-      finalSnapshot?.sessionData ||
-      finalSnapshot?.session ||
-      sessionData ||
+      corePatch.sessionData ||
+      corePatch.session ||
+      sessionPayload.sessionData ||
       null,
 
     sessionId:
-      finalSnapshot?.sessionId ||
-      finalSnapshot?.session?.sessionId ||
-      sessionData?.sessionId ||
-      normalized.sessionId ||
+      corePatch.sessionId ||
+      sessionPayload.sessionId ||
       null,
 
     sessionUserId:
-      finalSnapshot?.sessionUserId ||
-      finalSnapshot?.session?.sessionUserId ||
-      finalSnapshot?.session?.userId ||
-      sessionData?.sessionUserId ||
-      sessionData?.userId ||
-      normalized.sessionUserId ||
+      corePatch.sessionUserId ||
+      sessionPayload.sessionUserId ||
       null,
 
     snapshot:
@@ -3304,11 +3815,9 @@ function clearAuthState(reason = "auth_clear", options = {}) {
       silent:
         true,
       reason,
+      source:
+        "Auth.clear",
     });
-  } catch {}
-
-  try {
-    AppCore?.session?.clear?.();
   } catch {}
 
   const patch = {
@@ -3330,11 +3839,20 @@ function clearAuthState(reason = "auth_clear", options = {}) {
     authUser:
       null,
 
+    account:
+      null,
+
+    profile:
+      null,
+
     role:
-      "",
+      null,
+
+    rol:
+      null,
 
     userRole:
-      "",
+      null,
 
     roles:
       [],
@@ -3357,6 +3875,15 @@ function clearAuthState(reason = "auth_clear", options = {}) {
     accessToken:
       null,
 
+    access_token:
+      null,
+
+    refreshToken:
+      null,
+
+    refresh_token:
+      null,
+
     session:
       null,
 
@@ -3369,10 +3896,19 @@ function clearAuthState(reason = "auth_clear", options = {}) {
     sessionUserId:
       null,
 
+    username:
+      null,
+
     currentResolvedUsername:
       null,
 
     resolvedUsername:
+      null,
+
+    avatar:
+      null,
+
+    avatarUrl:
       null,
 
     twoFactorPending:
@@ -3380,13 +3916,25 @@ function clearAuthState(reason = "auth_clear", options = {}) {
 
     tempToken:
       null,
+    temp_token:
+      null,
   };
 
   try {
     AppCore?.setState?.(
       patch,
       {
+        source:
+          "Auth.clear",
         forceUnauthenticated:
+          true,
+        emit:
+          false,
+        emitState:
+          false,
+        emitDerived:
+          false,
+        silent:
           true,
       }
     );
@@ -3415,39 +3963,56 @@ function clearAuthState(reason = "auth_clear", options = {}) {
     } catch {}
 
     try {
-      AppCore?.setState?.({
-        route:
-          routeContext.route,
+      AppCore?.setState?.(
+        {
+          route:
+            routeContext.route,
 
-        publicPath:
-          routeContext.publicPath,
+          publicPath:
+            routeContext.publicPath,
 
-        bootIsActivation:
-          Boolean(routeContext.activationBoot),
+          bootIsActivation:
+            Boolean(routeContext.activationBoot),
 
-        bootHasActivationToken:
-          Boolean(routeContext.activationBoot),
+          bootHasActivationToken:
+            Boolean(routeContext.activationBoot),
 
-        bootIsResetConfirm:
-          Boolean(routeContext.resetConfirmBoot),
+          bootIsResetConfirm:
+            Boolean(routeContext.resetConfirmBoot),
 
-        bootHasResetToken:
-          Boolean(routeContext.resetConfirmBoot),
-      });
+          bootHasResetToken:
+            Boolean(routeContext.resetConfirmBoot),
+        },
+        {
+          source:
+            "Auth.clear:preserve-route",
+          emit:
+            false,
+          silent:
+            true,
+        }
+      );
     } catch {}
   }
 
   try {
-    AppCore?.syncUserUI?.();
-  } catch {}
+    AppCore?.syncUserUI?.({
+      reason:
+        `auth-clear:${reason}`,
+      source:
+        "Auth.clear",
+    });
+  } catch {
+    try {
+      AppCore?.syncUserUI?.();
+    } catch {}
+  }
 
   if (opts.emit === true) {
     emit(
       "auth:session:cleared-by-auth",
       {
         reason,
-        source:
-          AUTH_SOURCE,
         routeContext:
           sanitizeRouteContext(routeContext),
       }
@@ -3462,8 +4027,6 @@ function clearAuthState(reason = "auth_clear", options = {}) {
           false,
         user:
           null,
-        source:
-          AUTH_SOURCE,
       }
     );
   }
@@ -3484,58 +4047,73 @@ function markTwoFactorPending(sessionState, normalized = {}) {
   } catch {}
 
   try {
-    AppCore?.setState?.({
-      authenticated:
-        false,
+    AppCore?.setState?.(
+      {
+        authenticated:
+          false,
 
-      hasToken:
-        false,
+        hasToken:
+          false,
 
-      token:
-        null,
+        token:
+          null,
 
-      accessToken:
-        null,
+        accessToken:
+          null,
 
-      user:
-        null,
+        access_token:
+          null,
 
-      currentUser:
-        null,
+        user:
+          null,
 
-      sessionUser:
-        null,
+        currentUser:
+          null,
 
-      authUser:
-        null,
+        sessionUser:
+          null,
 
-      role:
-        "",
+        authUser:
+          null,
 
-      userRole:
-        "",
+        role:
+          null,
 
-      roles:
-        [],
+        userRole:
+          null,
 
-      session:
-        null,
+        roles:
+          [],
 
-      sessionData:
-        null,
+        session:
+          null,
 
-      sessionId:
-        null,
+        sessionData:
+          null,
 
-      sessionUserId:
-        null,
+        sessionId:
+          null,
 
-      twoFactorPending:
-        true,
+        sessionUserId:
+          null,
 
-      tempToken:
-        normalized.tempToken || null,
-    });
+        twoFactorPending:
+          true,
+
+        tempToken:
+          normalized.tempToken || null,
+      },
+      {
+        source:
+          "Auth.2fa",
+        forceUnauthenticated:
+          true,
+        emit:
+          false,
+        silent:
+          true,
+      }
+    );
   } catch {}
 
   try {
@@ -3549,11 +4127,13 @@ function markTwoFactorPending(sessionState, normalized = {}) {
         "auth-login-2fa-required",
       authenticated:
         false,
-      source:
-        AUTH_SOURCE,
     }
   );
 }
+
+/* =========================================================
+   LOGIN EVENTS
+========================================================= */
 
 function buildAcceptedLoginPayload({
   normalized = {},
@@ -3582,9 +4162,6 @@ function buildAcceptedLoginPayload({
 
     authenticated:
       true,
-
-    source:
-      AUTH_SOURCE,
 
     reason,
 
@@ -3703,177 +4280,8 @@ function schedulePostLoginRepair({
 }
 
 /* =========================================================
-   RUNTIME METRICS
+   REFRESH / RESTORE RESULT
 ========================================================= */
-
-function setRuntimeFlag(sessionState, type, value) {
-  if (!sessionState) {
-    return;
-  }
-
-  if (type === "login") {
-    sessionState.loggingIn =
-      Boolean(value);
-  }
-
-  if (type === "restore") {
-    sessionState.restoring =
-      Boolean(value);
-  }
-
-  if (type === "refresh") {
-    sessionState.refreshing =
-      Boolean(value);
-  }
-
-  if (type === "me") {
-    sessionState.checking =
-      Boolean(value);
-  }
-}
-
-function markRuntimeSuccess(sessionState, type) {
-  if (!sessionState) {
-    return;
-  }
-
-  const current =
-    nowMs();
-
-  if (type === "login") {
-    sessionState.lastLoginAt =
-      current;
-  }
-
-  if (type === "restore") {
-    sessionState.lastRestoreAt =
-      current;
-  }
-
-  if (type === "refresh") {
-    sessionState.lastRefreshAt =
-      current;
-    sessionState.refreshFailCount =
-      0;
-    sessionState.refreshBlockedUntil =
-      0;
-  }
-
-  if (type === "me") {
-    sessionState.lastCheckAt =
-      current;
-  }
-}
-
-function markRuntimeError(sessionState, type, error) {
-  if (!sessionState) {
-    return;
-  }
-
-  sessionState.lastError =
-    createRuntimeErrorSnapshot(
-      type,
-      error
-    );
-
-  if (type === "login") {
-    sessionState.loginFailCount =
-      Number(sessionState.loginFailCount || 0) + 1;
-
-    sessionState.lastLoginErrorAt =
-      nowMs();
-  }
-
-  if (type === "refresh") {
-    sessionState.refreshFailCount =
-      Number(sessionState.refreshFailCount || 0) + 1;
-
-    if (sessionState.refreshFailCount >= 3) {
-      sessionState.refreshBlockedUntil =
-        nowMs() + 30_000;
-    }
-  }
-
-  if (type === "restore") {
-    sessionState.restoreFailCount =
-      Number(sessionState.restoreFailCount || 0) + 1;
-  }
-}
-
-async function runRuntimeMetric(sessionState, type, executor, args = []) {
-  const startedAt =
-    nowMs();
-
-  setRuntimeFlag(
-    sessionState,
-    type,
-    true
-  );
-
-  emit(
-    `auth:runtime:${type}:start`,
-    {
-      source:
-        AUTH_SOURCE,
-    }
-  );
-
-  try {
-    const result =
-      await Promise.resolve(
-        executor(...args)
-      );
-
-    markRuntimeSuccess(
-      sessionState,
-      type
-    );
-
-    emit(
-      `auth:runtime:${type}:success`,
-      {
-        durationMs:
-          nowMs() - startedAt,
-
-        ok:
-          result?.ok !== false,
-
-        source:
-          AUTH_SOURCE,
-      }
-    );
-
-    return result;
-  } catch (error) {
-    markRuntimeError(
-      sessionState,
-      type,
-      error
-    );
-
-    emit(
-      `auth:runtime:${type}:error`,
-      {
-        durationMs:
-          nowMs() - startedAt,
-
-        error:
-          sessionState.lastError,
-
-        source:
-          AUTH_SOURCE,
-      }
-    );
-
-    throw error;
-  } finally {
-    setRuntimeFlag(
-      sessionState,
-      type,
-      false
-    );
-  }
-}
 
 function normalizeRefreshResult(result) {
   if (result === true) {
@@ -3934,31 +4342,227 @@ function isRefreshResultSuccessful(result) {
 }
 
 /* =========================================================
-   CORE EXECUTORS
+   DIRECT ME
 ========================================================= */
 
-async function executeFetchMe(runtimeSession) {
-  if (!isFunction(fetchMe)) {
+async function fetchMeDirect(options = {}) {
+  const endpoint =
+    resolveAuthEndpoint(
+      "me",
+      "/api/auth/me"
+    );
+
+  return authApiRequest(
+    "GET",
+    endpoint,
+    undefined,
+    {
+      ...safeObject(options),
+
+      auth:
+        true,
+
+      skipAuth:
+        false,
+
+      _skipAuthRefresh:
+        options._skipAuthRefresh === true,
+
+      noStore:
+        true,
+    }
+  );
+}
+
+function normalizeMeResult(raw = {}) {
+  return normalizeAuthPayload(
+    raw,
+    {
+      allowUserOnly:
+        true,
+      useCurrentToken:
+        true,
+      fallbackToken:
+        getCurrentTokenFromCore(),
+    }
+  );
+}
+
+function commitMeResult(raw = {}, options = {}) {
+  const normalized =
+    normalizeMeResult(raw);
+
+  if (
+    normalized.explicitFailure ||
+    normalized.ok === false ||
+    !hasUsableUser(normalized.user)
+  ) {
     return {
       ok:
         false,
-      user:
-        null,
+      committed:
+        false,
+      normalized,
     };
   }
 
-  return fetchMe(runtimeSession);
+  const committed =
+    applyAcceptedSession(
+      normalized,
+      {
+        source:
+          options.source || "Auth.fetchMe",
+
+        reason:
+          options.reason || "auth-fetch-me",
+
+        eventMode:
+          "me",
+
+        emitRepair:
+          options.emitRepair !== false,
+      }
+    );
+
+  return {
+    ok:
+      true,
+    committed:
+      true,
+    normalized,
+    ...committed,
+  };
+}
+
+/* =========================================================
+   EXECUTORS
+========================================================= */
+
+async function executeFetchMe(runtimeSession, options = {}) {
+  let restoreResult =
+    null;
+
+  let restoreError =
+    null;
+
+  if (
+    isFunction(restoreFetchMe) &&
+    options.forceDirect !== true
+  ) {
+    try {
+      restoreResult =
+        await restoreFetchMe(runtimeSession);
+
+      const committed =
+        commitMeResult(
+          restoreResult,
+          {
+            source:
+              "Auth.fetchMe:restore",
+            reason:
+              "auth-fetch-me-restore",
+          }
+        );
+
+      if (committed.ok) {
+        return {
+          ...safeObject(restoreResult),
+          ...committed,
+          ok:
+            true,
+          user:
+            committed.user,
+        };
+      }
+    } catch (error) {
+      restoreError =
+        error;
+    }
+  }
+
+  try {
+    const direct =
+      await fetchMeDirect(options);
+
+    const committed =
+      commitMeResult(
+        direct,
+        {
+          source:
+            "Auth.fetchMe:direct",
+          reason:
+            "auth-fetch-me-direct",
+        }
+      );
+
+    if (!committed.ok) {
+      throw createAuthErrorFromResult(
+        committed.normalized,
+        "No se pudo validar /me."
+      );
+    }
+
+    return {
+      ...safeObject(direct),
+      ...committed,
+      ok:
+        true,
+      user:
+        committed.user,
+    };
+  } catch (directError) {
+    if (restoreError) {
+      directError.restoreError =
+        restoreError;
+    }
+
+    throw directError;
+  }
 }
 
 async function executeRefreshSession(runtimeSession) {
-  if (!isFunction(refreshSession)) {
+  if (!isFunction(refreshSessionCore)) {
     return {
       ok:
         false,
     };
   }
 
-  return refreshSession(runtimeSession);
+  const result =
+    await refreshSessionCore(runtimeSession);
+
+  const normalized =
+    normalizeAuthPayload(
+      result,
+      {
+        allowUserOnly:
+          false,
+        useCurrentToken:
+          true,
+      }
+    );
+
+  if (
+    normalized.user &&
+    (
+      normalized.token ||
+      getCurrentTokenFromCore()
+    )
+  ) {
+    applyAcceptedSession(
+      normalized,
+      {
+        source:
+          "Auth.refreshSession",
+        reason:
+          "auth-refresh-session",
+        eventMode:
+          "refresh",
+      }
+    );
+  }
+
+  return result;
 }
 
 async function executeRestoreSession(runtimeSession, options = {}) {
@@ -3971,10 +4575,80 @@ async function executeRestoreSession(runtimeSession, options = {}) {
     };
   }
 
-  return restoreSessionCore(
-    runtimeSession,
-    options
-  );
+  const result =
+    await restoreSessionCore(
+      runtimeSession,
+      options
+    );
+
+  const normalized =
+    normalizeAuthPayload(
+      result,
+      {
+        allowUserOnly:
+          true,
+        useCurrentToken:
+          true,
+      }
+    );
+
+  if (
+    normalized.user &&
+    (
+      normalized.token ||
+      getCurrentTokenFromCore()
+    )
+  ) {
+    applyAcceptedSession(
+      normalized,
+      {
+        source:
+          "Auth.restoreSession",
+        reason:
+          "auth-restore-session",
+          eventMode:
+          "restore",
+        emitRepair:
+          true,
+      }
+    );
+
+    return result;
+  }
+
+  if (
+    getCurrentTokenFromCore() &&
+    options.skipMeAfterRestore !== true
+  ) {
+    try {
+      const meResult =
+        await executeFetchMe(
+          runtimeSession,
+          {
+            forceDirect:
+              options.forceDirectMe === true,
+          }
+        );
+
+      return {
+        ...safeObject(result),
+        me:
+          meResult,
+        user:
+          meResult.user || result?.user || null,
+        ok:
+          meResult.ok !== false,
+      };
+    } catch (error) {
+      if (options.publicRoute === true) {
+        return result;
+      }
+
+      throw error;
+    }
+  }
+
+  return result;
 }
 
 /* =========================================================
@@ -4018,6 +4692,667 @@ function readLoginCredentialsFromForm(formElement) {
       formData.get("remember") === "true" ||
       formData.get("remember") === "1",
   };
+}
+
+/* =========================================================
+   ACTIVATION RESOLUTION
+========================================================= */
+
+const activateAccountExecutor =
+  getModuleExport(
+    ActivationApi,
+    "activateAccount",
+    "activate",
+    "activation",
+    "confirmActivation",
+    "accountActivation",
+    "createUserActivation"
+  );
+
+const activateFirstUserExecutor =
+  getModuleExport(
+    ActivationApi,
+    "activateFirstUser",
+    "firstUserActivation",
+    "activateInitialUser"
+  );
+
+const validateActivationTokenExecutor =
+  getModuleExport(
+    ActivationApi,
+    "validateActivationToken",
+    "validateActivateAccountToken",
+    "validateActivateToken",
+    "validateAccountActivationToken",
+    "activationValidate"
+  );
+
+const getActivateAccountEndpoint =
+  getModuleExport(
+    ActivationApi,
+    "getActivateAccountEndpoint",
+    "getActivationEndpoint",
+    "getAccountActivationEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.activateAccount ||
+    AUTH_ENDPOINTS?.activation ||
+    AUTH_ENDPOINTS?.activate ||
+    null);
+
+const getActivateFirstUserEndpoint =
+  getModuleExport(
+    ActivationApi,
+    "getActivateFirstUserEndpoint",
+    "getFirstUserActivationEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.activateFirstUser ||
+    AUTH_ENDPOINTS?.firstUserActivation ||
+    null);
+
+const getValidateActivationTokenEndpoint =
+  getModuleExport(
+    ActivationApi,
+    "getValidateActivationTokenEndpoint",
+    "getValidateActivateAccountTokenEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.validateActivationToken ||
+    AUTH_ENDPOINTS?.activationValidate ||
+    null);
+
+const resolveActivationToken =
+  getModuleExport(
+    ActivationApi,
+    "resolveActivationToken",
+    "extractActivationToken"
+  ) ||
+  (() => "");
+
+const normalizeActivationPayload =
+  getModuleExport(
+    ActivationApi,
+    "normalizeActivationPayload",
+    "normalizeActivateAccountPayload"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const normalizeFirstUserActivationPayload =
+  getModuleExport(
+    ActivationApi,
+    "normalizeFirstUserActivationPayload"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const buildActivationRequestBody =
+  getModuleExport(
+    ActivationApi,
+    "buildActivationRequestBody",
+    "buildActivateAccountBody"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const buildActivateFirstUserBody =
+  getModuleExport(
+    ActivationApi,
+    "buildActivateFirstUserBody",
+    "buildFirstUserActivationBody"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const normalizeActivationResponse =
+  getModuleExport(
+    ActivationApi,
+    "normalizeActivationResponse",
+    "normalizeActivateAccountResponse"
+  ) ||
+  ((response = {}) =>
+    response);
+
+const normalizeFirstUserActivationResponse =
+  getModuleExport(
+    ActivationApi,
+    "normalizeFirstUserActivationResponse"
+  ) ||
+  ((response = {}) =>
+    response);
+
+async function activateAccount(payload = {}, options = {}) {
+  const executor =
+    activateAccountExecutor ||
+    missingHandler("activateAccount en ./activation.js");
+
+  return executor(
+    payload,
+    options
+  );
+}
+
+async function activate(payload = {}, options = {}) {
+  return activateAccount(payload, options);
+}
+
+async function activation(payload = {}, options = {}) {
+  return activateAccount(payload, options);
+}
+
+async function confirmActivation(payload = {}, options = {}) {
+  return activateAccount(payload, options);
+}
+
+async function accountActivation(payload = {}, options = {}) {
+  return activateAccount(payload, options);
+}
+
+async function createUserActivation(payload = {}, options = {}) {
+  return activateAccount(payload, options);
+}
+
+async function activateFirstUser(payload = {}, options = {}) {
+  const executor =
+    activateFirstUserExecutor ||
+    missingHandler("activateFirstUser en ./activation.js");
+
+  return executor(
+    payload,
+    options
+  );
+}
+
+async function firstUserActivation(payload = {}, options = {}) {
+  return activateFirstUser(payload, options);
+}
+
+async function activateInitialUser(payload = {}, options = {}) {
+  return activateFirstUser(payload, options);
+}
+
+async function validateActivationToken(payload = {}, options = {}) {
+  const executor =
+    validateActivationTokenExecutor ||
+    missingHandler("validateActivationToken en ./activation.js");
+
+  return executor(
+    payload,
+    options
+  );
+}
+
+async function validateActivateAccountToken(payload = {}, options = {}) {
+  return validateActivationToken(payload, options);
+}
+
+async function activationValidate(payload = {}, options = {}) {
+  return validateActivationToken(payload, options);
+}
+
+/* =========================================================
+   2FA RESOLUTION
+========================================================= */
+
+const verifyTwoFactorExecutor =
+  getModuleExport(
+    TwoFactorApi,
+    "verifyTwoFactor",
+    "verify2FA",
+    "login2fa",
+    "twoFactorLogin",
+    "twoFactorVerify",
+    "verifyMfa",
+    "mfaLogin",
+    "submitTwoFactorCode"
+  );
+
+const requestTwoFactorCodeExecutor =
+  getModuleExport(
+    TwoFactorApi,
+    "requestTwoFactorCode",
+    "request2FA",
+    "requestMfa",
+    "sendTwoFactorCode"
+  );
+
+const resendTwoFactorCodeExecutor =
+  getModuleExport(
+    TwoFactorApi,
+    "resendTwoFactorCode",
+    "resend2FA",
+    "resendMfa"
+  );
+
+const getTwoFactorLoginEndpoint =
+  getModuleExport(
+    TwoFactorApi,
+    "getTwoFactorLoginEndpoint",
+    "getTwoFactorVerifyEndpoint",
+    "getMfaVerifyEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.twoFactorLogin ||
+    AUTH_ENDPOINTS?.login2fa ||
+    AUTH_ENDPOINTS?.mfaLogin ||
+    null);
+
+const getTwoFactorRequestEndpoint =
+  getModuleExport(
+    TwoFactorApi,
+    "getTwoFactorRequestEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.twoFactorRequest ||
+    AUTH_ENDPOINTS?.request2FA ||
+    AUTH_ENDPOINTS?.requestMfa ||
+    null);
+
+const getTwoFactorResendEndpoint =
+  getModuleExport(
+    TwoFactorApi,
+    "getTwoFactorResendEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.twoFactorResend ||
+    AUTH_ENDPOINTS?.resend2FA ||
+    AUTH_ENDPOINTS?.resendMfa ||
+    null);
+
+const resolveTwoFactorTempToken =
+  getModuleExport(
+    TwoFactorApi,
+    "resolveTwoFactorTempToken"
+  ) ||
+  (() =>
+    getStoredTempToken() || "");
+
+const normalizeTwoFactorPayload =
+  getModuleExport(
+    TwoFactorApi,
+    "normalizeTwoFactorPayload",
+    "normalizeVerifyTwoFactorPayload"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const normalizeRequestTwoFactorPayload =
+  getModuleExport(
+    TwoFactorApi,
+    "normalizeRequestTwoFactorPayload"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const buildTwoFactorVerifyBody =
+  getModuleExport(
+    TwoFactorApi,
+    "buildTwoFactorVerifyBody",
+    "buildVerifyTwoFactorBody"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const buildTwoFactorRequestBody =
+  getModuleExport(
+    TwoFactorApi,
+    "buildTwoFactorRequestBody",
+    "buildRequestTwoFactorBody"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const buildResendTwoFactorBody =
+  getModuleExport(
+    TwoFactorApi,
+    "buildResendTwoFactorBody"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const normalizeTwoFactorResponse =
+  getModuleExport(
+    TwoFactorApi,
+    "normalizeTwoFactorResponse",
+    "normalizeVerifyTwoFactorResponse"
+  ) ||
+  ((response = {}) =>
+    response);
+
+const normalizeRequestTwoFactorResponse =
+  getModuleExport(
+    TwoFactorApi,
+    "normalizeRequestTwoFactorResponse"
+  ) ||
+  ((response = {}) =>
+    response);
+
+const normalizeResendTwoFactorResponse =
+  getModuleExport(
+    TwoFactorApi,
+    "normalizeResendTwoFactorResponse"
+  ) ||
+  ((response = {}) =>
+    response);
+
+const isTwoFactorRoute =
+  getModuleExport(
+    TwoFactorApi,
+    "isTwoFactorRoute"
+  ) ||
+  (() =>
+    false);
+
+const getTwoFactorRedirectPath =
+  getModuleExport(
+    TwoFactorApi,
+    "getTwoFactorRedirectPath"
+  ) ||
+  (() =>
+    DEFAULT_2FA_PATH);
+
+async function verifyTwoFactor(payload = {}, options = {}) {
+  const executor =
+    verifyTwoFactorExecutor ||
+    missingHandler("verifyTwoFactor en ./2fa.js");
+
+  return executor(payload, options);
+}
+
+async function verify2FA(payload = {}, options = {}) {
+  return verifyTwoFactor(payload, options);
+}
+
+async function login2fa(payload = {}, options = {}) {
+  return verifyTwoFactor(payload, options);
+}
+
+async function twoFactorLogin(payload = {}, options = {}) {
+  return verifyTwoFactor(payload, options);
+}
+
+async function twoFactorVerify(payload = {}, options = {}) {
+  return verifyTwoFactor(payload, options);
+}
+
+async function verifyMfa(payload = {}, options = {}) {
+  return verifyTwoFactor(payload, options);
+}
+
+async function mfaLogin(payload = {}, options = {}) {
+  return verifyTwoFactor(payload, options);
+}
+
+async function submitTwoFactorCode(payload = {}, options = {}) {
+  return verifyTwoFactor(payload, options);
+}
+
+async function requestTwoFactorCode(payload = {}, options = {}) {
+  const executor =
+    requestTwoFactorCodeExecutor ||
+    missingHandler("requestTwoFactorCode en ./2fa.js");
+
+  return executor(payload, options);
+}
+
+async function request2FA(payload = {}, options = {}) {
+  return requestTwoFactorCode(payload, options);
+}
+
+async function requestMfa(payload = {}, options = {}) {
+  return requestTwoFactorCode(payload, options);
+}
+
+async function sendTwoFactorCode(payload = {}, options = {}) {
+  return requestTwoFactorCode(payload, options);
+}
+
+async function resendTwoFactorCode(payload = {}, options = {}) {
+  const executor =
+    resendTwoFactorCodeExecutor ||
+    missingHandler("resendTwoFactorCode en ./2fa.js");
+
+  return executor(payload, options);
+}
+
+async function resend2FA(payload = {}, options = {}) {
+  return resendTwoFactorCode(payload, options);
+}
+
+async function resendMfa(payload = {}, options = {}) {
+  return resendTwoFactorCode(payload, options);
+}
+
+/* =========================================================
+   PASSWORD RESET RESOLUTION
+========================================================= */
+
+const requestPasswordResetExecutor =
+  getModuleExport(
+    PasswordResetApi,
+    "requestPasswordReset",
+    "forgotPassword",
+    "resetPasswordRequest",
+    "requestResetPassword",
+    "passwordResetRequest",
+    "recoverPassword"
+  );
+
+const confirmResetPasswordExecutor =
+  getModuleExport(
+    PasswordResetApi,
+    "confirmResetPassword",
+    "resetPasswordConfirm",
+    "confirmPasswordReset",
+    "passwordResetConfirm"
+  );
+
+const validateResetPasswordTokenExecutor =
+  getModuleExport(
+    PasswordResetApi,
+    "validateResetPasswordToken",
+    "validateResetToken",
+    "resetPasswordValidate",
+    "validatePasswordReset",
+    "passwordResetValidate"
+  );
+
+const getRequestPasswordResetEndpoint =
+  getModuleExport(
+    PasswordResetApi,
+    "getRequestPasswordResetEndpoint",
+    "getResetPasswordRequestEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.forgotPassword ||
+    AUTH_ENDPOINTS?.resetPasswordRequest ||
+    AUTH_ENDPOINTS?.requestPasswordReset ||
+    null);
+
+const getConfirmResetPasswordEndpoint =
+  getModuleExport(
+    PasswordResetApi,
+    "getConfirmResetPasswordEndpoint",
+    "getConfirmPasswordResetEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.confirmResetPassword ||
+    AUTH_ENDPOINTS?.confirmPasswordReset ||
+    AUTH_ENDPOINTS?.resetPasswordConfirm ||
+    null);
+
+const getValidateResetTokenEndpoint =
+  getModuleExport(
+    PasswordResetApi,
+    "getValidateResetTokenEndpoint",
+    "getValidateResetPasswordTokenEndpoint"
+  ) ||
+  (() =>
+    AUTH_ENDPOINTS?.validateResetToken ||
+    AUTH_ENDPOINTS?.resetPasswordValidate ||
+    null);
+
+const resolveResetPasswordIdentifier =
+  getModuleExport(
+    PasswordResetApi,
+    "resolveResetPasswordIdentifier"
+  ) ||
+  ((value) =>
+    String(value || "").trim());
+
+const resolveResetPasswordToken =
+  getModuleExport(
+    PasswordResetApi,
+    "resolveResetPasswordToken"
+  ) ||
+  (() => "");
+
+const normalizeResetPasswordPayload =
+  getModuleExport(
+    PasswordResetApi,
+    "normalizeResetPasswordPayload"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const normalizeConfirmResetPasswordPayload =
+  getModuleExport(
+    PasswordResetApi,
+    "normalizeConfirmResetPasswordPayload"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const normalizeValidateResetTokenPayload =
+  getModuleExport(
+    PasswordResetApi,
+    "normalizeValidateResetTokenPayload",
+    "normalizeValidateResetPasswordTokenPayload"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const buildResetPasswordRequestBody =
+  getModuleExport(
+    PasswordResetApi,
+    "buildResetPasswordRequestBody"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const buildConfirmResetPasswordBody =
+  getModuleExport(
+    PasswordResetApi,
+    "buildConfirmResetPasswordBody"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const buildValidateResetTokenBody =
+  getModuleExport(
+    PasswordResetApi,
+    "buildValidateResetTokenBody",
+    "buildValidateResetPasswordTokenBody"
+  ) ||
+  ((payload = {}) =>
+    payload);
+
+const normalizeResetPasswordResponse =
+  getModuleExport(
+    PasswordResetApi,
+    "normalizeResetPasswordResponse"
+  ) ||
+  ((response = {}) =>
+    response);
+
+const normalizeConfirmResetPasswordResponse =
+  getModuleExport(
+    PasswordResetApi,
+    "normalizeConfirmResetPasswordResponse"
+  ) ||
+  ((response = {}) =>
+    response);
+
+const normalizeValidateResetTokenResponse =
+  getModuleExport(
+    PasswordResetApi,
+    "normalizeValidateResetTokenResponse",
+    "normalizeValidateResetPasswordTokenResponse"
+  ) ||
+  ((response = {}) =>
+    response);
+
+async function requestPasswordResetPublic(payload = {}, options = {}) {
+  const executor =
+    requestPasswordResetExecutor ||
+    missingHandler("requestPasswordReset en ./password-reset.js");
+
+  return executor(payload, options);
+}
+
+async function resetPasswordRequestPublic(payload = {}, options = {}) {
+  return requestPasswordResetPublic(payload, options);
+}
+
+async function requestResetPassword(payload = {}, options = {}) {
+  return requestPasswordResetPublic(payload, options);
+}
+
+async function passwordResetRequest(payload = {}, options = {}) {
+  return requestPasswordResetPublic(payload, options);
+}
+
+async function forgotPasswordPublic(payload = {}, options = {}) {
+  return requestPasswordResetPublic(payload, options);
+}
+
+async function recoverPassword(payload = {}, options = {}) {
+  return requestPasswordResetPublic(payload, options);
+}
+
+async function confirmResetPassword(payload = {}, options = {}) {
+  const executor =
+    confirmResetPasswordExecutor ||
+    missingHandler("confirmResetPassword en ./password-reset.js");
+
+  return executor(payload, options);
+}
+
+async function resetPasswordConfirm(payload = {}, options = {}) {
+  return confirmResetPassword(payload, options);
+}
+
+async function confirmPasswordReset(payload = {}, options = {}) {
+  return confirmResetPassword(payload, options);
+}
+
+async function passwordResetConfirm(payload = {}, options = {}) {
+  return confirmResetPassword(payload, options);
+}
+
+async function validateResetPasswordToken(payload = {}, options = {}) {
+  const executor =
+    validateResetPasswordTokenExecutor ||
+    missingHandler("validateResetPasswordToken en ./password-reset.js");
+
+  return executor(payload, options);
+}
+
+async function validateResetToken(payload = {}, options = {}) {
+  return validateResetPasswordToken(payload, options);
+}
+
+async function resetPasswordValidate(payload = {}, options = {}) {
+  return validateResetPasswordToken(payload, options);
+}
+
+async function validatePasswordReset(payload = {}, options = {}) {
+  return validateResetPasswordToken(payload, options);
+}
+
+async function passwordResetValidate(payload = {}, options = {}) {
+  return validateResetPasswordToken(payload, options);
 }
 
 /* =========================================================
@@ -4073,6 +5408,15 @@ function attachAuthToCore(api) {
     );
   } catch {}
 
+  try {
+    if (isBrowser()) {
+      window.Auth =
+        api;
+      window.OnionAuth =
+        api;
+    }
+  } catch {}
+
   return true;
 }
 
@@ -4087,13 +5431,117 @@ export const Auth = (() => {
     createInitialSessionState();
 
   /* =======================================================
+     USER GETTERS · CRITICAL FOR SIDEBAR
+  ======================================================= */
+
+  function getUser() {
+    const state =
+      safeObject(AppCore?.state);
+
+    const candidate =
+      state.user ||
+      state.currentUser ||
+      state.sessionUser ||
+      state.authUser ||
+      state.account ||
+      state.profile ||
+      state.session?.user ||
+      state.session?.usuario ||
+      state.session?.me ||
+      state.sessionData?.user ||
+      state.sessionData?.usuario ||
+      state.sessionData?.me ||
+      null;
+
+    return normalizeLoginUserForState(candidate || {});
+  }
+
+  function getCurrentUser() {
+    return getUser();
+  }
+
+  function currentUser() {
+    return getUser();
+  }
+
+  function getProfile() {
+    return getUser();
+  }
+
+  function getAccount() {
+    return getUser();
+  }
+
+  function getSessionUser() {
+    return getUser();
+  }
+
+  function getToken() {
+    return getCurrentTokenFromCore() || null;
+  }
+
+  function getAccessToken() {
+    return getToken();
+  }
+
+  function hasValidToken() {
+    return hasUsableToken(getToken());
+  }
+
+  function getRole() {
+    return (
+      safeCall(
+        getCurrentRole,
+        null
+      ) ||
+      getUser()?.role ||
+      getUser()?.rol ||
+      null
+    );
+  }
+
+  function getRoles() {
+    const roles =
+      safeCall(
+        getCurrentRoles,
+        []
+      );
+
+    return uniqueStrings([
+      ...safeArray(roles),
+      ...safeArray(getUser()?.roles),
+      getRole(),
+    ]);
+  }
+
+  function getPermissions() {
+    const user =
+      getUser();
+
+    return uniqueStrings([
+      ...safeArray(user?.permissions),
+      ...safeArray(user?.permisos),
+    ]);
+  }
+
+  /* =======================================================
      SERIALIZED WRAPPERS
   ======================================================= */
 
-  async function fetchMePublic(sessionArg = session) {
+  async function fetchMePublic(sessionArg = session, options = {}) {
     if (session.mePromise) {
       return session.mePromise;
     }
+
+    const runtimeSession =
+      looksLikeRuntimeSession(sessionArg)
+        ? sessionArg
+        : session;
+
+    const requestOptions =
+      looksLikeRuntimeSession(sessionArg)
+        ? options
+        : safeObject(sessionArg);
 
     session.mePromise =
       runRuntimeMetric(
@@ -4101,12 +5549,41 @@ export const Auth = (() => {
         "me",
         executeFetchMe,
         [
-          sessionArg || session,
+          runtimeSession,
+          requestOptions,
         ]
-      ).finally(() => {
-        session.mePromise =
-          null;
-      });
+      )
+        .then((result) => {
+          session.lastMeResult = {
+            ok:
+              result?.ok !== false,
+            hasUser:
+              hasUsableUser(result?.user),
+            userId:
+              result?.user?.userId ||
+              result?.user?.id ||
+              null,
+            username:
+              result?.user?.username ||
+              result?.user?.usernameLower ||
+              result?.user?.slug ||
+              null,
+            hasAvatar:
+              Boolean(
+                result?.user?.avatar ||
+                  result?.user?.avatarUrl ||
+                  result?.user?.picture
+              ),
+            at:
+              isoNow(),
+          };
+
+          return result;
+        })
+        .finally(() => {
+          session.mePromise =
+            null;
+        });
 
     return session.mePromise;
   }
@@ -4144,7 +5621,7 @@ export const Auth = (() => {
           sessionArg || session,
         ]
       )
-        .then((result) => {
+        .then(async (result) => {
           const normalized =
             normalizeRefreshResult(result);
 
@@ -4160,6 +5637,18 @@ export const Auth = (() => {
                   normalized,
               }
             );
+          }
+
+          if (
+            !hasUsableUser(getUser()) &&
+            getCurrentTokenFromCore()
+          ) {
+            try {
+              await fetchMePublic(session, {
+                forceDirect:
+                  true,
+              });
+            } catch {}
           }
 
           return normalized;
@@ -4201,10 +5690,29 @@ export const Auth = (() => {
           runtimeSession,
           options,
         ]
-      ).finally(() => {
-        session.restorePromise =
-          null;
-      });
+      )
+        .then(async (result) => {
+          if (
+            getCurrentTokenFromCore() &&
+            !hasUsableUser(getUser()) &&
+            options.publicRoute !== true
+          ) {
+            try {
+              return await fetchMePublic(session, {
+                forceDirect:
+                  true,
+              });
+            } catch {
+              return result;
+            }
+          }
+
+          return result;
+        })
+        .finally(() => {
+          session.restorePromise =
+            null;
+        });
 
     return session.restorePromise;
   }
@@ -4225,10 +5733,7 @@ export const Auth = (() => {
 
     emit(
       "auth:login:start",
-      {
-        source:
-          AUTH_SOURCE,
-      }
+      {}
     );
 
     session.loginPromise =
@@ -4258,7 +5763,15 @@ export const Auth = (() => {
             );
 
           const normalized =
-            normalizePublicLoginResult(result);
+            normalizeAuthPayload(
+              result,
+              {
+                allowUserOnly:
+                  false,
+                useCurrentToken:
+                  true,
+              }
+            );
 
           session.lastLoginResult = {
             ok:
@@ -4343,7 +5856,7 @@ export const Auth = (() => {
               }
             );
 
-            throw createLoginErrorFromResult(
+            throw createAuthErrorFromResult(
               normalized,
               "Credenciales incorrectas."
             );
@@ -4363,14 +5876,24 @@ export const Auth = (() => {
               }
             );
 
-            throw createLoginErrorFromResult(
+            throw createAuthErrorFromResult(
               normalized,
               "Login inválido: el servidor no devolvió una sesión válida."
             );
           }
 
           const committed =
-            applyAcceptedLoginSession(normalized);
+            applyAcceptedSession(
+              normalized,
+              {
+                source:
+                  "Auth.login",
+                reason:
+                  "auth-login-success",
+                eventMode:
+                  "login",
+              }
+            );
 
           markRuntimeSuccess(
             session,
@@ -4474,8 +5997,6 @@ export const Auth = (() => {
                 nowMs() - startedAt,
               error:
                 session.lastError,
-              source:
-                AUTH_SOURCE,
             }
           );
 
@@ -4603,40 +6124,27 @@ export const Auth = (() => {
         null;
     }
 
-    const activationSnapshot =
-      safeCall(
-        getModuleExport(
-          ActivationApi,
-          "getActivationSnapshot",
-          "getActivationDebugSnapshot",
-          "getAccountActivationSnapshot"
-        ),
-        null
-      );
-
-    const twoFactorSnapshot =
-      safeCall(
-        getModuleExport(
-          TwoFactorApi,
-          "getTwoFactorSnapshot",
-          "getTwoFactorDebugSnapshot"
-        ),
-        null
-      );
-
-    const passwordResetSnapshot =
-      safeCall(
-        getModuleExport(
-          PasswordResetApi,
-          "getPasswordResetSnapshot",
-          "getPasswordResetDebugSnapshot"
-        ),
-        null
-      );
+    const currentUserValue =
+      getUser();
 
     return {
       version:
         AUTH_MODULE_VERSION,
+
+      backend:
+        {
+          origin:
+            BACKEND_ORIGIN,
+
+          apiBase:
+            resolveApiBase(),
+
+          me:
+            resolveAuthEndpoint(
+              "me",
+              "/api/auth/me"
+            ),
+        },
 
       endpoints:
         AUTH_ENDPOINTS,
@@ -4658,17 +6166,63 @@ export const Auth = (() => {
           )
         ),
 
+      hasToken:
+        hasValidToken(),
+
+      hasUser:
+        hasUsableUser(currentUserValue),
+
+      user:
+        currentUserValue
+          ? {
+              id:
+                currentUserValue.id ||
+                currentUserValue.userId ||
+                null,
+
+              userId:
+                currentUserValue.userId ||
+                currentUserValue.id ||
+                null,
+
+              username:
+                currentUserValue.username ||
+                currentUserValue.usernameLower ||
+                currentUserValue.slug ||
+                null,
+
+              displayName:
+                currentUserValue.displayName ||
+                currentUserValue.name ||
+                null,
+
+              role:
+                currentUserValue.role ||
+                currentUserValue.rol ||
+                null,
+
+              hasAvatar:
+                Boolean(
+                  currentUserValue.avatar ||
+                    currentUserValue.avatarUrl ||
+                    currentUserValue.picture
+                ),
+
+              avatarUrl:
+                currentUserValue.avatarUrl
+                  ? redactTokenInText(currentUserValue.avatarUrl)
+                  : null,
+            }
+          : null,
+
       role:
-        safeCall(
-          getCurrentRole,
-          null
-        ),
+        getRole(),
 
       roles:
-        safeCall(
-          getCurrentRoles,
-          []
-        ),
+        getRoles(),
+
+      permissions:
+        getPermissions(),
 
       isAdmin:
         Boolean(
@@ -4765,48 +6319,6 @@ export const Auth = (() => {
             ? "***"
             : null,
       },
-
-      activation: {
-        hasActivateAccount:
-          isFunction(activateAccountExecutor),
-
-        hasActivateFirstUser:
-          isFunction(activateFirstUserExecutor),
-
-        hasValidateActivationToken:
-          isFunction(validateActivationTokenExecutor),
-
-        snapshot:
-          activationSnapshot || null,
-      },
-
-      twoFactor: {
-        hasVerifyTwoFactor:
-          isFunction(verifyTwoFactorExecutor),
-
-        hasRequestTwoFactorCode:
-          isFunction(requestTwoFactorCodeExecutor),
-
-        hasResendTwoFactorCode:
-          isFunction(resendTwoFactorCodeExecutor),
-
-        snapshot:
-          twoFactorSnapshot || null,
-      },
-
-      passwordReset: {
-        hasRequestPasswordReset:
-          isFunction(requestPasswordResetExecutor),
-
-        hasConfirmResetPassword:
-          isFunction(confirmResetPasswordExecutor),
-
-        hasValidateResetPasswordToken:
-          isFunction(validateResetPasswordTokenExecutor),
-
-        snapshot:
-          passwordResetSnapshot || null,
-      },
     };
   }
 
@@ -4823,6 +6335,22 @@ export const Auth = (() => {
     AUTH_CONSTANTS,
 
     session,
+
+    /* USER CRITICAL API */
+    getUser,
+    getCurrentUser,
+    currentUser,
+    getProfile,
+    getAccount,
+    getSessionUser,
+
+    getToken,
+    getAccessToken,
+    hasValidToken,
+
+    getRole,
+    getRoles,
+    getPermissions,
 
     /* AUTH ACTIONS */
     login:
@@ -4951,10 +6479,22 @@ export const Auth = (() => {
     fetchMe:
       fetchMePublic,
 
+    me:
+      fetchMePublic,
+
+    loadMe:
+      fetchMePublic,
+
     refreshSession:
       refreshSessionPublic,
 
+    refresh:
+      refreshSessionPublic,
+
     restoreSession:
+      restoreSessionPublic,
+
+    restore:
       restoreSessionPublic,
 
     /* STATE */
@@ -4994,12 +6534,41 @@ export const Auth = (() => {
     clearSession:
       clearSessionPublic,
 
-    applySession,
+    applySession:
+      (payload = {}, options = {}) => {
+        const normalized =
+          normalizeAuthPayload(
+            payload,
+            {
+              allowUserOnly:
+                true,
+              useCurrentToken:
+                true,
+            }
+          );
+
+        return applyAcceptedSession(
+          normalized,
+          {
+            source:
+              options.source || "Auth.applySession",
+            reason:
+              options.reason || "auth-apply-session",
+            eventMode:
+              options.eventMode || "manual",
+            emitRepair:
+              options.emitRepair !== false,
+          }
+        );
+      },
+
     buildSessionSnapshot,
     getSessionDebugSnapshot,
 
     /* NORMALIZE */
     normalizeUser,
+
+    normalizeAuthPayload,
 
     /* LOGIN HELPERS */
     resolveLoginIdentifier,
@@ -5038,6 +6607,10 @@ export const Auth = (() => {
       safeNormalizeCanonicalPath,
 
     sanitizeRedirectPath,
+
+    /* API */
+    authApiRequest,
+    fetchMeDirect,
 
     /* DEBUG */
     getAuthModuleSnapshot,

@@ -26,19 +26,28 @@
    - Sin throws accidentales.
    - safeEmit usa bus interno o window, no ambos.
    - Boot error debe funcionar aunque falten Router/Auth/Toast/AppCore.
+
+   EXTREME MODE:
+   - Fallback view container si #view-container falta.
+   - Fatal DOM state endurecido para html/body/shell/main/view.
+   - Limpieza de sesión local robusta.
+   - Redacción fuerte query/path/Bearer/JWT/authorization.
+   - Dedupe de toast/render/telemetry.
+   - Debug API segura en window.__ONION_APP_ERRORS__ y AppCore.Errors.
 ========================================================= */
 
 import {
   APP_SCOPE,
   APP_SCOPES,
   APP_EVENTS,
+  LOGIN_PATH as LOGIN_PATH_FROM_CONSTANTS,
 } from "./constants.js";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-export const APP_ERRORS_VERSION = "14.0.0";
+export const APP_ERRORS_VERSION = "15.0.0-extreme-pro";
 
 const DEFAULT_ERROR_SCOPE =
   APP_SCOPES?.errors ||
@@ -47,7 +56,9 @@ const DEFAULT_ERROR_SCOPE =
   "app:errors";
 
 const ERROR_THROTTLE_MS = 2500;
-const MAX_RECENT_ERRORS = 16;
+const RENDER_THROTTLE_MS = 1200;
+const TELEMETRY_THROTTLE_MS = 900;
+const MAX_RECENT_ERRORS = 24;
 
 const FALLBACK_ERROR_MESSAGE =
   "Se produjo un error inesperado.";
@@ -55,24 +66,48 @@ const FALLBACK_ERROR_MESSAGE =
 const FALLBACK_BOOT_ERROR_MESSAGE =
   "No se pudo iniciar la aplicación correctamente.";
 
-const LOGIN_PATH = "/login";
+const LOGIN_PATH =
+  LOGIN_PATH_FROM_CONSTANTS ||
+  "/login";
 
 const DOM_IDS = Object.freeze({
-  appLoader: "app-loader",
-  appShell: "app-shell",
-  mainContent: "main-content",
-  appContent: "app-content",
-  viewContainer: "view-container",
+  app:
+    "app",
+
+  appRoot:
+    "app-root",
+
+  appLoader:
+    "app-loader",
+
+  appShell:
+    "app-shell",
+
+  mainContent:
+    "main-content",
+
+  appContent:
+    "app-content",
+
+  viewContainer:
+    "view-container",
 });
 
 const VIEW_CONTAINER_SELECTOR =
   "#view-container,[data-view-root],[data-router-view],[data-view-container='true'],.view-container";
 
 const ERROR_ACTIONS = Object.freeze({
-  retry: "retry",
-  reboot: "reboot",
-  resetSession: "reset-session",
-  goLogin: "go-login",
+  retry:
+    "retry",
+
+  reboot:
+    "reboot",
+
+  resetSession:
+    "reset-session",
+
+  goLogin:
+    "go-login",
 });
 
 const TOKEN_PARAM_NAMES = Object.freeze([
@@ -95,6 +130,22 @@ const TOKEN_PARAM_NAMES = Object.freeze([
   "two_factor_token",
   "mfaToken",
   "mfa_token",
+  "authorization",
+  "jwt",
+  "session",
+  "sid",
+]);
+
+const TOKEN_ROUTE_PATHS = Object.freeze([
+  "/activate-account",
+  "/activate",
+  "/activation",
+  "/account/activate",
+  "/activate/first-user",
+  "/reset-password/confirm",
+  "/reset-password-confirm",
+  "/password-reset/confirm",
+  "/password-reset-confirm",
 ]);
 
 const ERROR_EVENTS = Object.freeze({
@@ -116,6 +167,15 @@ const ERROR_EVENTS = Object.freeze({
   render:
     "app:boot:error:render",
 
+  runtime:
+    "app:error:runtime",
+
+  resource:
+    "app:error:resource",
+
+  promise:
+    "app:error:promise",
+
   handlersBound:
     "app:errors:handlers:bound",
 
@@ -128,6 +188,10 @@ const ERROR_EVENTS = Object.freeze({
 
 const FATAL_CLASSES = Object.freeze([
   "app-fatal",
+]);
+
+const ERROR_CLASSES = Object.freeze([
+  "app-error",
 ]);
 
 const LOADING_CLASSES = Object.freeze([
@@ -193,7 +257,16 @@ const AUTH_STORAGE_KEYS = Object.freeze([
 const IGNORED_ERROR_PATTERNS = Object.freeze([
   /ResizeObserver loop limit exceeded/i,
   /ResizeObserver loop completed with undelivered notifications/i,
+  /Script error\.?$/i,
 ]);
+
+const BOOT_ERROR_VIEW_DATASET = Object.freeze({
+  view:
+    "boot-error",
+
+  bootErrorView:
+    "true",
+});
 
 /* =========================================================
    INTERNAL STATE
@@ -213,6 +286,9 @@ const errorState = {
 
   lastRenderKey: "",
   lastRenderAt: 0,
+
+  lastTelemetryKey: "",
+  lastTelemetryAt: 0,
 
   handling: false,
   rendering: false,
@@ -248,7 +324,11 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return text || fallback;
 }
@@ -301,19 +381,6 @@ function safeIsoDate(ms = now()) {
   } catch {
     return "";
   }
-}
-
-function safeInvoke(fn, thisArg = null, args = []) {
-  try {
-    if (isFunction(fn)) {
-      return fn.apply(
-        thisArg,
-        safeArray(args)
-      );
-    }
-  } catch {}
-
-  return undefined;
 }
 
 function isExtensibleTarget(value) {
@@ -384,24 +451,26 @@ export function redactTokenInText(value = "") {
     } catch {}
   }
 
-  try {
-    output = output.replace(
-      /(\/activate-account\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
-  } catch {}
-
-  try {
-    output = output.replace(
-      /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
-  } catch {}
+  for (const routePath of TOKEN_ROUTE_PATHS) {
+    try {
+      output = output.replace(
+        new RegExp(`(${escapeRegExp(routePath)}\\/)([^/?#\\s]+)`, "gi"),
+        "$1***"
+      );
+    } catch {}
+  }
 
   try {
     output = output.replace(
       /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
       "$1***"
+    );
+  } catch {}
+
+  try {
+    output = output.replace(
+      /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
+      "$1$2***"
     );
   } catch {}
 
@@ -518,7 +587,7 @@ function sanitizeValue(value, depth = 0) {
 
     for (const [key, item] of Object.entries(value)) {
       if (
-        /token|secret|password|authorization|credential|jwt|bearer|otp|code/i.test(key)
+        /token|secret|password|authorization|credential|jwt|bearer|otp|code|session|refresh/i.test(key)
       ) {
         if (
           item === null ||
@@ -680,7 +749,13 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   }
 
   const cleanPayload =
-    sanitizeValue(payload);
+    sanitizeValue({
+      version:
+        APP_ERRORS_VERSION,
+      source:
+        "app:errors",
+      ...ensureObject(payload),
+    });
 
   const opts =
     ensureObject(options);
@@ -726,6 +801,12 @@ function safeSetError(AppCore, snapshot = null) {
     hasError: Boolean(snapshot),
     error: snapshot,
     lastError: snapshot,
+
+    lastAppError: snapshot,
+    lastBootError:
+      snapshot?.boot === true
+        ? snapshot
+        : AppCore?.state?.lastBootError || null,
   };
 
   try {
@@ -929,6 +1010,61 @@ function getErrorColumn(error = null) {
   );
 }
 
+function getErrorKind(error = null, source = "") {
+  const message =
+    getRawErrorMessage(error, "")
+      .toLowerCase();
+
+  const src =
+    safeText(source, "").toLowerCase();
+
+  if (src.includes("resource")) {
+    return "resource";
+  }
+
+  if (src.includes("unhandledrejection")) {
+    return "promise";
+  }
+
+  if (
+    /failed to fetch dynamically imported module/i.test(message) ||
+    /importing a module script failed/i.test(message) ||
+    /loading chunk/i.test(message) ||
+    /chunkloaderror/i.test(message) ||
+    /module script/i.test(message)
+  ) {
+    return "chunk";
+  }
+
+  if (
+    /networkerror/i.test(message) ||
+    /failed to fetch/i.test(message) ||
+    /load failed/i.test(message) ||
+    /network request failed/i.test(message) ||
+    /err_internet_disconnected/i.test(message)
+  ) {
+    return "network";
+  }
+
+  if (
+    /unauthorized/i.test(message) ||
+    /forbidden/i.test(message) ||
+    /\b401\b/.test(message) ||
+    /\b403\b/.test(message)
+  ) {
+    return "auth";
+  }
+
+  if (
+    /quotaexceedederror/i.test(message) ||
+    /quota exceeded/i.test(message)
+  ) {
+    return "storage";
+  }
+
+  return "runtime";
+}
+
 function getFriendlyErrorMessage(rawMessage = "", fallback = FALLBACK_ERROR_MESSAGE) {
   const message =
     redactTokenInText(
@@ -1024,6 +1160,9 @@ export function createErrorSnapshot({
     source:
       safeText(source, "runtime"),
 
+    kind:
+      getErrorKind(error, source),
+
     severity:
       safeText(severity, "error"),
 
@@ -1086,6 +1225,7 @@ function pushRecentError(snapshot = {}) {
 function getThrottleKey(snapshot = {}) {
   return [
     snapshot.source,
+    snapshot.kind,
     snapshot.name,
     snapshot.code,
     snapshot.message,
@@ -1126,13 +1266,33 @@ function shouldThrottleRender(snapshot = {}) {
 
   if (
     errorState.lastRenderKey === key &&
-    time - errorState.lastRenderAt < ERROR_THROTTLE_MS
+    time - errorState.lastRenderAt < RENDER_THROTTLE_MS
   ) {
     return true;
   }
 
   errorState.lastRenderKey = key;
   errorState.lastRenderAt = time;
+
+  return false;
+}
+
+function shouldThrottleTelemetry(snapshot = {}) {
+  const key =
+    getThrottleKey(snapshot);
+
+  const time =
+    now();
+
+  if (
+    errorState.lastTelemetryKey === key &&
+    time - errorState.lastTelemetryAt < TELEMETRY_THROTTLE_MS
+  ) {
+    return true;
+  }
+
+  errorState.lastTelemetryKey = key;
+  errorState.lastTelemetryAt = time;
 
   return false;
 }
@@ -1433,6 +1593,10 @@ function safeRedirect(path = LOGIN_PATH) {
 }
 
 function safeRebootApp(AppCore) {
+  if (!isBrowser()) {
+    return false;
+  }
+
   try {
     const app =
       window.__ONION_APP__ ||
@@ -1474,14 +1638,21 @@ function clearBrowserAuthStorage() {
 
   let changed = false;
 
-  for (const storage of [
-    window.localStorage,
-    window.sessionStorage,
-  ]) {
-    if (!storage) {
-      continue;
-    }
+  const storages = [];
 
+  try {
+    if (window.localStorage) {
+      storages.push(window.localStorage);
+    }
+  } catch {}
+
+  try {
+    if (window.sessionStorage) {
+      storages.push(window.sessionStorage);
+    }
+  } catch {}
+
+  for (const storage of storages) {
     for (const key of AUTH_STORAGE_KEYS) {
       try {
         storage.removeItem(key);
@@ -1757,12 +1928,111 @@ function safeSetShellVisibility(setShellVisibility, AppCore, visible = false) {
   return false;
 }
 
+/* =========================================================
+   VIEW CONTAINER FALLBACK
+========================================================= */
+
 function getFallbackViewContainer() {
   if (!isBrowser()) {
     return null;
   }
 
   return query(VIEW_CONTAINER_SELECTOR);
+}
+
+function createFallbackViewContainer(AppCore = null) {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    let shell =
+      getById(DOM_IDS.appShell);
+
+    if (!shell) {
+      shell =
+        createElement("div", {
+          id:
+            DOM_IDS.appShell,
+          className:
+            "app-shell",
+          dataset: {
+            appShell:
+              "true",
+            shell:
+              "fatal",
+          },
+        });
+
+      const mount =
+        document.body ||
+        document.documentElement;
+
+      mount.appendChild(shell);
+    }
+
+    let main =
+      getById(DOM_IDS.mainContent);
+
+    if (!main) {
+      main =
+        createElement("main", {
+          id:
+            DOM_IDS.mainContent,
+          className:
+            "main-content",
+          attrs: {
+            role:
+              "main",
+          },
+          dataset: {
+            mainContent:
+              "true",
+          },
+        });
+
+      shell.appendChild(main);
+    }
+
+    let view =
+      getById(DOM_IDS.viewContainer);
+
+    if (!view) {
+      view =
+        createElement("div", {
+          id:
+            DOM_IDS.viewContainer,
+          className:
+            "view-container",
+          dataset: {
+            viewContainer:
+              "true",
+            routerView:
+              "true",
+            viewRoot:
+              "true",
+          },
+        });
+
+      main.appendChild(view);
+    }
+
+    try {
+      if (
+        AppCore &&
+        typeof AppCore === "object"
+      ) {
+        AppCore.dom = AppCore.dom || {};
+        AppCore.dom.appShell = shell;
+        AppCore.dom.mainContent = main;
+        AppCore.dom.viewContainer = view;
+      }
+    } catch {}
+
+    return view;
+  } catch {
+    return null;
+  }
 }
 
 function resolveViewContainer(AppCore, getViewContainer) {
@@ -1794,7 +2064,10 @@ function resolveViewContainer(AppCore, getViewContainer) {
     }
   } catch {}
 
-  return getFallbackViewContainer();
+  return (
+    getFallbackViewContainer() ||
+    createFallbackViewContainer(AppCore)
+  );
 }
 
 function markFatalDomState(AppCore, snapshot = {}) {
@@ -1832,6 +2105,11 @@ function markFatalDomState(AppCore, snapshot = {}) {
       addClasses(
         root,
         FATAL_CLASSES
+      );
+
+      addClasses(
+        root,
+        ERROR_CLASSES
       );
 
       removeClasses(
@@ -1964,6 +2242,9 @@ function markFatalDomState(AppCore, snapshot = {}) {
       appFatal: true,
       fatal: true,
       fatalAt: snapshot.at || safeIsoDate(),
+
+      bootPhase: "fatal",
+      lastBootError: snapshot,
     };
 
     try {
@@ -2108,6 +2389,7 @@ function createBootErrorDetails(snapshot = {}) {
   pre.textContent =
     [
       raw ? `Mensaje: ${raw}` : "",
+      snapshot.kind ? `Tipo: ${snapshot.kind}` : "",
       snapshot.url ? `URL: ${snapshot.url}` : "",
       snapshot.line ? `Línea: ${snapshot.line}` : "",
       snapshot.column ? `Columna: ${snapshot.column}` : "",
@@ -2136,12 +2418,8 @@ function buildBootErrorNode(snapshot = {}) {
         "aria-labelledby":
           "boot-error-title",
       },
-      dataset: {
-        view:
-          "boot-error",
-        bootErrorView:
-          "true",
-      },
+      dataset:
+        BOOT_ERROR_VIEW_DATASET,
     });
 
   const card =
@@ -2229,6 +2507,11 @@ function buildBootErrorNode(snapshot = {}) {
       createBootErrorMetaRow(
         "Código:",
         snapshot.code || snapshot.name || "BOOT_ERROR"
+      ),
+
+      createBootErrorMetaRow(
+        "Tipo:",
+        snapshot.kind || "runtime"
       ),
 
       createBootErrorMetaRow(
@@ -2680,6 +2963,26 @@ export function reportAppError({
   });
 }
 
+function emitTelemetry(AppCore, snapshot = {}) {
+  if (shouldThrottleTelemetry(snapshot)) {
+    return false;
+  }
+
+  return safeEmit(
+    AppCore,
+    ERROR_EVENTS.telemetry,
+    {
+      ...snapshot,
+
+      recentCount:
+        errorState.recent.length,
+
+      total:
+        errorState.total,
+    }
+  );
+}
+
 function processRuntimeError({
   AppCore,
   Toast,
@@ -2725,18 +3028,31 @@ function processRuntimeError({
       snapshot
     );
 
+    if (snapshot.kind === "resource") {
+      safeEmit(
+        AppCore,
+        ERROR_EVENTS.resource,
+        snapshot
+      );
+    }
+
+    if (snapshot.kind === "promise") {
+      safeEmit(
+        AppCore,
+        ERROR_EVENTS.promise,
+        snapshot
+      );
+    }
+
     safeEmit(
       AppCore,
-      ERROR_EVENTS.telemetry,
-      {
-        ...snapshot,
+      ERROR_EVENTS.runtime,
+      snapshot
+    );
 
-        recentCount:
-          errorState.recent.length,
-
-        total:
-          errorState.total,
-      }
+    emitTelemetry(
+      AppCore,
+      snapshot
     );
 
     if (
@@ -3136,6 +3452,21 @@ function exposeDebugApi(AppCore = null) {
           ...ensureObject(options),
         }),
 
+    renderBootError:
+      (error = null, options = {}) =>
+        renderBootError({
+          AppCore,
+          error,
+          ...ensureObject(options),
+        }),
+
+    clearAuthSession:
+      (Auth = null) =>
+        clearAuthSession(
+          Auth,
+          AppCore
+        ),
+
     bind:
       (options = {}) =>
         bindGlobalErrorHandlers({
@@ -3233,6 +3564,17 @@ export function getErrorStateSnapshot() {
         ? safeIsoDate(errorState.lastRenderAt)
         : "",
 
+    lastTelemetryKey:
+      redactTokenInText(errorState.lastTelemetryKey),
+
+    lastTelemetryAt:
+      errorState.lastTelemetryAt,
+
+    lastTelemetryAtIso:
+      errorState.lastTelemetryAt
+        ? safeIsoDate(errorState.lastTelemetryAt)
+        : "",
+
     recent:
       errorState.recent.map((item) => ({
         index:
@@ -3240,6 +3582,9 @@ export function getErrorStateSnapshot() {
 
         source:
           item.source,
+
+        kind:
+          item.kind,
 
         severity:
           item.severity,
@@ -3283,6 +3628,9 @@ export function resetErrorState() {
 
   errorState.lastRenderKey = "";
   errorState.lastRenderAt = 0;
+
+  errorState.lastTelemetryKey = "";
+  errorState.lastTelemetryAt = 0;
 
   errorState.handling = false;
   errorState.rendering = false;

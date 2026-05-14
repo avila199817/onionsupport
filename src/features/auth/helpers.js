@@ -2,7 +2,8 @@
    Onion SPA - Auth Helpers
    Archivo: src/features/auth/helpers.js
 
-   AUTH HELPERS · FINAL EXTREME PRO SYSTEM · 11/10
+   AUTH HELPERS · FINAL EXTREME PRO SYSTEM · GOD MODE v15
+   ROUTE SAFE · TOKEN SAFE · HASH ROUTER SAFE · NO GHOST AUTH
 
    RESPONSABILIDADES:
    - helpers base auth
@@ -46,8 +47,8 @@ import {
    CONSTANTS
 ========================================================= */
 
-const AUTH_HELPERS_VERSION =
-  "11.0.0";
+export const AUTH_HELPERS_VERSION =
+  "15.0.0";
 
 const DEFAULT_ROUTE =
   "/";
@@ -103,6 +104,9 @@ const DEFAULT_PUBLIC_TECHNICAL_ROUTES =
     "/forgot-password",
     "/recover-password",
     "/password-reset",
+    "/2fa",
+    "/otp",
+    "/mfa",
   ]);
 
 const CORRUPTED_TEXT_VALUES =
@@ -111,6 +115,7 @@ const CORRUPTED_TEXT_VALUES =
     "undefined",
     "null",
     "false",
+    "true",
     "none",
     "nan",
     "[object object]",
@@ -119,12 +124,34 @@ const CORRUPTED_TEXT_VALUES =
     "\"undefined\"",
     "\"null\"",
     "\"false\"",
+    "\"true\"",
+    "\"\"",
+    "''",
   ]);
 
 const TECHNICAL_TOKEN_PATHS =
   Object.freeze([
     "/activate-account",
     "/reset-password/confirm",
+  ]);
+
+const TECHNICAL_CANONICAL_COLLAPSE =
+  Object.freeze([
+    Object.freeze({
+      base:
+        "/activate-account",
+
+      canonical:
+        "/activate-account",
+    }),
+
+    Object.freeze({
+      base:
+        "/reset-password/confirm",
+
+      canonical:
+        "/reset-password/confirm",
+    }),
   ]);
 
 const FALLBACK_TOKEN_PARAM_NAMES =
@@ -173,6 +200,24 @@ const FALLBACK_TOKEN_PARAM_NAMES =
         "auth_token",
         "jwt",
         "bearer",
+      ]),
+
+    twoFactor:
+      Object.freeze([
+        "tempToken",
+        "temp_token",
+        "temporaryToken",
+        "temporary_token",
+        "challengeToken",
+        "challenge_token",
+        "twoFactorToken",
+        "two_factor_token",
+        "mfaToken",
+        "mfa_token",
+        "code",
+        "otp",
+        "totp",
+        "t",
       ]),
   });
 
@@ -307,6 +352,21 @@ export function safeArray(value) {
     : [];
 }
 
+export function toArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return [];
+  }
+
+  return [value];
+}
+
 export function safeClone(value, fallback = null) {
   try {
     if (typeof AppCore?.utils?.safeClone === "function") {
@@ -353,9 +413,14 @@ function isCorruptedTextValue(value = "") {
 }
 
 function unique(values = []) {
+  const input =
+    Array.isArray(values)
+      ? values
+      : [values];
+
   return Array.from(
     new Set(
-      safeArray(values)
+      input
         .flat(Infinity)
         .map((value) =>
           safeText(value, "")
@@ -697,6 +762,22 @@ export function stripUsernamePrefix(path = DEFAULT_ROUTE) {
   );
 }
 
+function collapseTechnicalCanonical(pathname = DEFAULT_ROUTE) {
+  const clean =
+    normalizePathnameOnly(pathname);
+
+  for (const item of TECHNICAL_CANONICAL_COLLAPSE) {
+    if (
+      clean === item.base ||
+      clean.startsWith(`${item.base}/`)
+    ) {
+      return item.canonical;
+    }
+  }
+
+  return clean;
+}
+
 export function normalizePath(path = DEFAULT_ROUTE) {
   const raw =
     limitUrlLike(path) ||
@@ -740,7 +821,8 @@ export function normalizePublicPath(path = DEFAULT_ROUTE) {
 
   if (
     raw.includes("?") ||
-    raw.includes("#")
+    raw.includes("#") ||
+    raw.startsWith("/@")
   ) {
     return fallback;
   }
@@ -758,7 +840,7 @@ export function normalizePublicPath(path = DEFAULT_ROUTE) {
   Canonical:
   - elimina /@usuario
   - elimina query/hash
-  - conserva path-token sólo como path canónico local cuando se necesite
+  - colapsa tokens técnicos de path a su ruta base
 */
 export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
   const raw =
@@ -766,13 +848,16 @@ export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
     DEFAULT_ROUTE;
 
   const fallback =
-    stripSearchAndHash(
-      stripUsernamePrefix(raw)
+    collapseTechnicalCanonical(
+      stripSearchAndHash(
+        stripUsernamePrefix(raw)
+      )
     );
 
   if (
     raw.includes("?") ||
-    raw.includes("#")
+    raw.includes("#") ||
+    raw.startsWith("/@")
   ) {
     return fallback;
   }
@@ -782,8 +867,10 @@ export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
     coreNormalizePath(raw);
 
   return delegated
-    ? stripSearchAndHash(
-        stripUsernamePrefix(delegated)
+    ? collapseTechnicalCanonical(
+        stripSearchAndHash(
+          stripUsernamePrefix(delegated)
+        )
       )
     : fallback;
 }
@@ -1172,22 +1259,60 @@ function getSessionMaxLength(maxLength = AUTH_CONSTANTS?.sessionValueMaxLength) 
   ) || SAFE_SESSION_VALUE_FALLBACK_MAX;
 }
 
+function unwrapTokenCandidate(value = null) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return null;
+  }
+
+  if (isObject(value)) {
+    for (const key of [
+      "token",
+      "accessToken",
+      "access_token",
+      "refreshToken",
+      "refresh_token",
+      "tempToken",
+      "temp_token",
+      "value",
+      "raw",
+      "data",
+    ]) {
+      if (
+        value[key] !== null &&
+        value[key] !== undefined &&
+        value[key] !== ""
+      ) {
+        return value[key];
+      }
+    }
+
+    return null;
+  }
+
+  return value;
+}
+
 export function normalizeTokenValue(
   token = null,
   maxLength = AUTH_CONSTANTS?.tokenMaxLength
 ) {
+  const candidate =
+    unwrapTokenCandidate(token);
+
   if (
-    token === null ||
-    token === undefined
+    candidate === null ||
+    candidate === undefined
   ) {
     return null;
   }
 
   let normalized =
-    String(token)
+    String(candidate)
       .normalize("NFKC")
-      .trim()
-      .replace(/[\r\n\t]/g, "");
+      .trim();
 
   if (/^bearer\s+/i.test(normalized)) {
     normalized =
@@ -1203,9 +1328,13 @@ export function normalizeTokenValue(
   }
 
   /*
-    Regla dura:
-    no truncamos tokens. Si excede, es corrupto.
+    Tokens no se mutan ni se truncan.
+    Whitespace interno => corrupto.
   */
+  if (/[\r\n\t\s]/.test(normalized)) {
+    return null;
+  }
+
   if (normalized.length > getTokenMaxLength(maxLength)) {
     return null;
   }
@@ -1249,7 +1378,7 @@ export function hasValidToken(token = AppCore?.state?.token) {
   );
 }
 
-function getTokenParamNames(type = "generic") {
+export function getAuthTokenParamNames(type = "generic") {
   const cleanType =
     safeText(type, "generic");
 
@@ -1260,14 +1389,16 @@ function getTokenParamNames(type = "generic") {
     Array.isArray(fromConstants) &&
     fromConstants.length
   ) {
-    return fromConstants;
+    return [...fromConstants];
   }
 
-  return FALLBACK_TOKEN_PARAM_NAMES[cleanType] ||
-    FALLBACK_TOKEN_PARAM_NAMES.generic;
+  return [
+    ...(FALLBACK_TOKEN_PARAM_NAMES[cleanType] ||
+      FALLBACK_TOKEN_PARAM_NAMES.generic),
+  ];
 }
 
-function getAllTokenParamNames() {
+export function getAllAuthTokenParamNames() {
   try {
     return unique([
       ...Object.values(FALLBACK_TOKEN_PARAM_NAMES).flat(),
@@ -1284,7 +1415,7 @@ export function hasTokenInSearch(search = "", names = []) {
   const finalNames =
     Array.isArray(names) && names.length
       ? names
-      : getTokenParamNames("generic");
+      : getAuthTokenParamNames("generic");
 
   try {
     const params =
@@ -1311,7 +1442,7 @@ export function extractTokenFromSearch(search = "", names = []) {
   const finalNames =
     Array.isArray(names) && names.length
       ? names
-      : getTokenParamNames("generic");
+      : getAuthTokenParamNames("generic");
 
   try {
     const params =
@@ -1340,21 +1471,23 @@ export function extractPathToken(path = "", basePath = "") {
   const normalized =
     normalizePublicPath(path);
 
-  const clean =
-    normalizeCanonicalPath(normalized);
+  const pathname =
+    stripSearchAndHash(
+      stripUsernamePrefix(normalized)
+    );
 
   const base =
     normalizeCanonicalPath(basePath);
 
   if (
     !base ||
-    !clean.startsWith(`${base}/`)
+    !pathname.startsWith(`${base}/`)
   ) {
     return null;
   }
 
   const token =
-    clean
+    pathname
       .slice(`${base}/`.length)
       .split("/")[0];
 
@@ -1413,7 +1546,7 @@ export function extractActivationToken(pathOrUrl = getCurrentPublicPath()) {
   const fromSearch =
     extractTokenFromSearch(
       search,
-      getTokenParamNames("activation")
+      getAuthTokenParamNames("activation")
     );
 
   if (fromSearch) {
@@ -1422,7 +1555,7 @@ export function extractActivationToken(pathOrUrl = getCurrentPublicPath()) {
 
   return extractTokenFromHashQuery(
     hash,
-    getTokenParamNames("activation")
+    getAuthTokenParamNames("activation")
   );
 }
 
@@ -1449,7 +1582,7 @@ export function extractResetToken(pathOrUrl = getCurrentPublicPath()) {
   const fromSearch =
     extractTokenFromSearch(
       search,
-      getTokenParamNames("reset")
+      getAuthTokenParamNames("reset")
     );
 
   if (fromSearch) {
@@ -1458,8 +1591,50 @@ export function extractResetToken(pathOrUrl = getCurrentPublicPath()) {
 
   return extractTokenFromHashQuery(
     hash,
-    getTokenParamNames("reset")
+    getAuthTokenParamNames("reset")
   );
+}
+
+export function hasTokenInUrl(pathOrUrl = "", type = "generic") {
+  const path =
+    pathFromUrlLike(pathOrUrl);
+
+  if (!path) {
+    return false;
+  }
+
+  const {
+    search,
+    hash,
+  } =
+    splitPath(path);
+
+  if (
+    hasTokenInSearch(
+      search,
+      getAuthTokenParamNames(type)
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    hash &&
+    hash.includes("?")
+  ) {
+    const query =
+      hash
+        .split("?")
+        .slice(1)
+        .join("?");
+
+    return hasTokenInSearch(
+      query ? `?${query}` : "",
+      getAuthTokenParamNames(type)
+    );
+  }
+
+  return false;
 }
 
 export function hasActivationToken(pathOrUrl = getCurrentPublicPath()) {
@@ -1483,7 +1658,7 @@ function redactQueryTokens(value = "") {
     safeText(value, "");
 
   const names =
-    getAllTokenParamNames();
+    getAllAuthTokenParamNames();
 
   for (const name of names) {
     const escapedName =
@@ -1506,7 +1681,7 @@ function redactJsonTokenFields(value = "") {
 
   const names =
     unique([
-      ...getAllTokenParamNames(),
+      ...getAllAuthTokenParamNames(),
       "authorization",
       "password",
       "secret",
@@ -1610,7 +1785,22 @@ export function extractMessage(error) {
     );
   }
 
+  const firstArrayError =
+    Array.isArray(error?.errors)
+      ? error.errors[0]
+      : Array.isArray(error?.data?.errors)
+        ? error.data.errors[0]
+        : Array.isArray(error?.response?.data?.errors)
+          ? error.response.data.errors[0]
+          : null;
+
   const candidates = [
+    firstArrayError?.message,
+    firstArrayError?.detail,
+    typeof firstArrayError === "string"
+      ? firstArrayError
+      : "",
+
     error?.data?.message,
     error?.data?.mensaje,
     error?.data?.detail,
@@ -1684,6 +1874,12 @@ export function buildSafeErrorPayload(error) {
       error?.data?.code ||
       error?.response?.data?.code ||
       null,
+
+    timeout:
+      error?.timeout === true,
+
+    aborted:
+      error?.aborted === true,
   };
 }
 
@@ -1739,6 +1935,10 @@ export function sanitizeAuthPayload(payload = {}, depth = 0, seen = new WeakSet(
     return typeof payload === "string"
       ? redactTokenInText(payload)
       : payload;
+  }
+
+  if (payload instanceof Error) {
+    return buildSafeErrorPayload(payload);
   }
 
   try {
@@ -1823,6 +2023,9 @@ export function getAuthHelpersSnapshot() {
 
     hasCoreUtils:
       Boolean(AppCore?.utils),
+
+    at:
+      new Date().toISOString(),
   };
 }
 
@@ -1844,6 +2047,7 @@ export default {
   isPlainObject,
   isFn,
   safeArray,
+  toArray,
   safeClone,
 
   isHashRouterPath,
@@ -1883,7 +2087,10 @@ export default {
   normalizeSessionValue,
   hasValidToken,
 
+  getAuthTokenParamNames,
+  getAllAuthTokenParamNames,
   hasTokenInSearch,
+  hasTokenInUrl,
   extractTokenFromSearch,
   extractPathToken,
   extractActivationToken,

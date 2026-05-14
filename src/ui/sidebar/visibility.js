@@ -2,7 +2,7 @@
    Onion SPA - Sidebar Visibility
    Archivo: src/ui/sidebar/visibility.js
 
-   ONION SUPPORT · SIDEBAR VISIBILITY · 15/10
+   ONION SUPPORT · SIDEBAR VISIBILITY · EXTREME 10/10
    ROLE SAFE · ADMIN RECOVERABLE · NORMAL ITEMS REPAIR
 
    RESPONSABILIDADES:
@@ -34,6 +34,7 @@
    - visibility.js no toca open/collapsed del sidebar.
    - visibility.js no toca dropdown.
    - visibility.js no navega.
+   - Sin CSS inline nuevo: sólo limpia/restaura display legacy si existía.
 ========================================================= */
 
 import {
@@ -60,7 +61,7 @@ import {
 ========================================================= */
 
 export const SIDEBAR_VISIBILITY_VERSION =
-  "sidebar-visibility-v15-role-safe-admin-repair";
+  "sidebar-visibility-v16-extreme-role-safe";
 
 /* =========================================================
    CONSTANTS
@@ -68,6 +69,7 @@ export const SIDEBAR_VISIBILITY_VERSION =
 
 /*
   Selectores que representan REGLAS reales de acceso.
+
   Importante:
   NO incluir aquí:
     [data-admin-visible]
@@ -145,7 +147,8 @@ const DEFAULT_ADMIN_ROLE_KEYS =
     "owner",
     "root",
     "staff",
-    "support",
+    "support_admin",
+    "soporte_admin",
   ]);
 
 const DEFAULT_ADMIN_PERMISSION_KEYS =
@@ -212,6 +215,16 @@ const DEFAULT_ADMIN_PERMISSION_KEYS =
     "servidor:admin",
     "servidor.access",
     "servidor:access",
+
+    "settings.manage",
+    "settings:manage",
+    "settings.admin",
+    "settings:admin",
+
+    "ajustes.manage",
+    "ajustes:manage",
+    "ajustes.admin",
+    "ajustes:admin",
   ]);
 
 const DEFAULT_ADMIN_FLAG_KEYS =
@@ -233,11 +246,17 @@ const DEFAULT_ADMIN_FLAG_KEYS =
     "canManageClients",
     "can_manage_clients",
 
+    "canAccessClients",
+    "can_access_clients",
+
     "canAccessServer",
     "can_access_server",
 
     "canManageServer",
     "can_manage_server",
+
+    "canManageSettings",
+    "can_manage_settings",
   ]);
 
 const ORIGINAL_NONE =
@@ -381,6 +400,7 @@ function safeBoolean(value, fallback = false) {
         "sí",
         "ok",
         "on",
+        "y",
       ].includes(key)
     ) {
       return true;
@@ -392,6 +412,7 @@ function safeBoolean(value, fallback = false) {
         "0",
         "no",
         "off",
+        "n",
       ].includes(key)
     ) {
       return false;
@@ -439,12 +460,27 @@ function safeIsoDate(ms = nowTs()) {
 }
 
 function safeWarn(AppCore, ...args) {
+  let coreLogged =
+    false;
+
   try {
-    AppCore?.utils?.warn?.(
-      LOG_PREFIX,
-      ...args
-    );
-  } catch {}
+    if (isFn(AppCore?.utils?.warn)) {
+      AppCore.utils.warn(
+        LOG_PREFIX,
+        ...args
+      );
+
+      coreLogged =
+        true;
+    }
+  } catch {
+    coreLogged =
+      false;
+  }
+
+  if (coreLogged) {
+    return;
+  }
 
   try {
     console.warn(
@@ -485,14 +521,24 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
         data.ts || nowTs(),
     };
 
+  let busAvailable =
+    false;
+
+  let busEmitted =
+    false;
+
   try {
     if (isFn(AppCore?.events?.emit)) {
+      busAvailable =
+        true;
+
       AppCore.events.emit(
         name,
         finalPayload
       );
 
-      return true;
+      busEmitted =
+        true;
     }
   } catch (error) {
     safeWarn(
@@ -502,11 +548,16 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
     );
   }
 
-  try {
-    if (
-      isBrowser() &&
-      typeof CustomEvent !== "undefined"
-    ) {
+  /*
+    Anti-storm:
+    si hay bus interno, NO duplicamos en window.
+  */
+  if (
+    !busAvailable &&
+    isBrowser() &&
+    typeof CustomEvent !== "undefined"
+  ) {
+    try {
       window.dispatchEvent(
         new CustomEvent(
           name,
@@ -518,10 +569,10 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
       );
 
       return true;
-    }
-  } catch {}
+    } catch {}
+  }
 
-  return false;
+  return busEmitted;
 }
 
 /* =========================================================
@@ -680,7 +731,7 @@ const ADMIN_FLAG_KEYS =
   );
 
 /* =========================================================
-   ROLE / PERMISSION RESOLUTION
+   ADMIN / ROLE MATCHING
 ========================================================= */
 
 function isAdminRole(value = "") {
@@ -712,6 +763,58 @@ function isAdminPermission(value = "") {
   );
 }
 
+function roleMatchesRequirement(userRole = "", requirement = "") {
+  const role =
+    normalizeRole(userRole);
+
+  const required =
+    normalizeRole(requirement);
+
+  if (
+    !role ||
+    !required
+  ) {
+    return false;
+  }
+
+  if (
+    role === required ||
+    role === "*"
+  ) {
+    return true;
+  }
+
+  if (
+    required.endsWith(":*") &&
+    role.startsWith(required.slice(0, -1))
+  ) {
+    return true;
+  }
+
+  if (
+    required.endsWith(".*") &&
+    role.startsWith(required.slice(0, -1))
+  ) {
+    return true;
+  }
+
+  if (
+    role.endsWith(":*") &&
+    required.startsWith(role.slice(0, -1))
+  ) {
+    return true;
+  }
+
+  if (
+    role.endsWith(".*") &&
+    required.startsWith(role.slice(0, -1))
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 function expandRoleAliases(roles = []) {
   const normalized =
     normalizeRoles(roles);
@@ -738,6 +841,10 @@ function expandRoleAliases(roles = []) {
     .filter(Boolean);
 }
 
+/* =========================================================
+   APP / AUTH USER SOURCES
+========================================================= */
+
 function getModuleCandidate(AppCore = null, ...names) {
   try {
     if (isFn(AppCore?.modules?.get)) {
@@ -760,6 +867,19 @@ function getModuleCandidate(AppCore = null, ...names) {
     }
   } catch {}
 
+  try {
+    if (AppCore?.registry?.modules?.get) {
+      for (const name of names) {
+        const mod =
+          AppCore.registry.modules.get(name);
+
+        if (mod) {
+          return mod;
+        }
+      }
+    }
+  } catch {}
+
   return null;
 }
 
@@ -774,6 +894,7 @@ function getAuthCandidate(AppCore = null) {
     ) ||
     AppCore?.auth ||
     AppCore?.Auth ||
+    AppCore?.features?.auth ||
     null
   );
 }
@@ -793,6 +914,7 @@ function unwrapUserPayload(payload = null) {
       value.currentUser,
       value.profile,
       value.account?.user,
+      value.account,
       value.session?.user,
       value.data?.user,
       value.data?.usuario,
@@ -803,6 +925,7 @@ function unwrapUserPayload(payload = null) {
       value.payload?.currentUser,
       value.result?.user,
       value.result?.currentUser,
+      value.me,
       value
     );
 
@@ -854,10 +977,24 @@ function getCurrentUser(AppCore = null) {
       state.sessionUser,
       state.authUser,
       state.profile,
+      state.account,
+
       state.session?.user,
+      state.session?.usuario,
+      state.session?.currentUser,
+      state.session?.profile,
+      state.session?.account,
+
       state.auth?.user,
+      state.auth?.usuario,
+      state.auth?.currentUser,
+      state.auth?.profile,
+      state.auth?.account,
+
       authUser,
       auth?.user,
+      auth?.currentUser,
+      auth?.session?.user,
       {}
     )
   );
@@ -873,6 +1010,9 @@ function getUserBranches(user = null) {
     safeObject(current.raw),
     safeObject(current.profile),
     safeObject(current.account),
+    safeObject(current.customer),
+    safeObject(current.client),
+    safeObject(current.cliente),
     safeObject(current.meta),
     safeObject(current.claims),
     safeObject(current.permissions),
@@ -961,6 +1101,7 @@ function getRoleCandidatesFromAppCore(AppCore = null) {
       state.roleList,
       state.role_list,
       state.permissions,
+      state.permisos,
       state.scopes,
       state.groups,
       state.authorities,
@@ -969,12 +1110,14 @@ function getRoleCandidatesFromAppCore(AppCore = null) {
       session.roleList,
       session.role_list,
       session.permissions,
+      session.permisos,
       session.scopes,
       session.groups,
       session.authorities,
 
       auth?.roles,
       auth?.permissions,
+      auth?.permisos,
       auth?.scopes,
 
       ...branches.flatMap((branch) => [
@@ -982,6 +1125,7 @@ function getRoleCandidatesFromAppCore(AppCore = null) {
         branch.roleList,
         branch.role_list,
         branch.permissions,
+        branch.permisos,
         branch.scopes,
         branch.groups,
         branch.authorities,
@@ -1299,7 +1443,9 @@ function getElementRequiredRolesRaw(element = null) {
     roles.push("admin");
   }
 
-  return roles;
+  return roles
+    .map(normalizeRole)
+    .filter(Boolean);
 }
 
 function getElementRequiredRoles(element = null) {
@@ -1339,6 +1485,15 @@ function isElementAccessControlled(element = null) {
   return getElementRequiredRolesRaw(element).length > 0;
 }
 
+function userHasRequirement(userRoles = [], requirement = "") {
+  const roles =
+    expandRoleAliases(userRoles);
+
+  return roles.some((role) =>
+    roleMatchesRequirement(role, requirement)
+  );
+}
+
 function shouldShowElementForRoles(
   element = null,
   userRoles = [],
@@ -1356,34 +1511,30 @@ function shouldShowElementForRoles(
   }
 
   /*
-    Admin real ve todo lo controlado dentro del sidebar.
-    Esto evita que un admin pierda items con data-roles="support".
+    Admin real ve todos los elementos controlados.
   */
   if (admin) {
     return true;
   }
 
-  const requiresAdmin =
-    requiredRoles.some(isAdminRole) ||
-    requiredRoles.some(isAdminPermission) ||
-    isElementAdminOnly(element);
-
-  if (requiresAdmin) {
+  /*
+    data-admin-only="true" sí exige admin real o rol/permiso admin.
+  */
+  if (isElementAdminOnly(element)) {
     return safeArray(userRoles).some((role) =>
       isAdminRole(role) ||
       isAdminPermission(role)
     );
   }
 
-  const userRoleSet =
-    new Set(normalizeRoles(userRoles));
-
-  return requiredRoles.some((role) => {
-    const normalized =
-      normalizeRole(role);
-
-    return userRoleSet.has(normalized);
-  });
+  /*
+    data-roles="admin,support":
+    support puede verlo aunque no sea admin.
+    Si sólo pide admin, queda oculto para no-admin.
+  */
+  return requiredRoles.some((requirement) =>
+    userHasRequirement(userRoles, requirement)
+  );
 }
 
 /* =========================================================
@@ -1425,8 +1576,14 @@ function rememberOriginalDisplay(element = null) {
   const currentDisplay =
     element.style.display || "";
 
+  const legacyHiddenDisplay =
+    currentDisplay === "none" &&
+    isInitiallyTemplateHiddenRoleElement(element);
+
   element.dataset.sidebarOriginalDisplay =
-    currentDisplay || ORIGINAL_EMPTY;
+    legacyHiddenDisplay || !currentDisplay
+      ? ORIGINAL_EMPTY
+      : currentDisplay;
 
   element.dataset.sidebarOriginalDisplaySet =
     "true";
@@ -1525,8 +1682,12 @@ function restoreDisplay(element = null) {
     !value ||
     value === ORIGINAL_EMPTY
   ) {
+    /*
+      Limpia restos inline legacy. No inyecta CSS nuevo.
+    */
     element.style.display =
       "";
+
     return;
   }
 
@@ -1915,9 +2076,11 @@ function setElementVisible(element = null, visible = true) {
       true
     );
 
-    element.style.display =
-      "none";
-
+    /*
+      Sin CSS inline nuevo.
+      hidden + aria-hidden + inert son suficientes.
+      Si hay display legacy, se conserva en dataset para restaurarlo.
+    */
     element.setAttribute(
       "tabindex",
       "-1"
@@ -1945,6 +2108,10 @@ function setElementVisible(element = null, visible = true) {
 
     try {
       delete element.dataset.active;
+      element.dataset.current =
+        "false";
+      element.dataset.selected =
+        "false";
     } catch {}
 
     disableDescendantFocus(element);
@@ -2052,6 +2219,10 @@ function clearHiddenActiveState(sidebar = null) {
 
         try {
           delete element.dataset.active;
+          element.dataset.current =
+            "false";
+          element.dataset.selected =
+            "false";
         } catch {}
 
         cleared += 1;
@@ -2123,11 +2294,12 @@ function repairNormalSidebarItems(sidebar = null) {
       element.dataset?.roleVisible === "false" ||
       element.dataset?.adminVisible === "false" ||
       element.classList?.contains?.("is-role-hidden") ||
-      element.classList?.contains?.("is-admin-hidden");
+      element.classList?.contains?.("is-admin-hidden") ||
+      element.style?.display === "none";
 
     /*
       Los items normales del menú deben estar visibles siempre.
-      Esto repara el caso exacto: admin ve sólo Usuarios/Clientes/Servidor.
+      Esto repara el caso crítico: admin ve sólo Usuarios/Clientes/Servidor.
     */
     setElementVisible(
       element,
@@ -2151,6 +2323,14 @@ function repairNormalSidebarItems(sidebar = null) {
         "is-role-hidden",
         "is-admin-hidden"
       );
+
+      /*
+        Limpieza de inline display heredado; no añade estilo nuevo.
+      */
+      if (element.style?.display === "none") {
+        element.style.display =
+          "";
+      }
     } catch {}
 
     if (wasBroken) {
@@ -2213,6 +2393,17 @@ function runLegacyServerNavEnsure({
     return true;
   } catch {}
 
+  try {
+    ensureServerNavItem({
+      AppCore,
+      admin,
+      roles:
+        userRoles,
+    });
+
+    return true;
+  } catch {}
+
   return false;
 }
 
@@ -2235,6 +2426,8 @@ function normalizeServerItemIfPresent(sidebar = null) {
           : null
       ) ||
       sidebar.querySelector(`[data-route="${serverRoute}"]`) ||
+      sidebar.querySelector(`[data-href="${serverRoute}"]`) ||
+      sidebar.querySelector(`[data-to="${serverRoute}"]`) ||
       sidebar.querySelector(`[href="${serverRoute}"]`);
 
     if (!item) {
@@ -2253,6 +2446,11 @@ function normalizeServerItemIfPresent(sidebar = null) {
 
     if (!item.dataset.requiresRole) {
       item.dataset.requiresRole =
+        "admin";
+    }
+
+    if (!item.dataset.requiredRole) {
+      item.dataset.requiredRole =
         "admin";
     }
 
@@ -2293,6 +2491,8 @@ function getElementSnapshot(element = null) {
 
     route:
       element.getAttribute?.("data-route") ||
+      element.getAttribute?.("data-href") ||
+      element.getAttribute?.("data-to") ||
       element.getAttribute?.("href") ||
       "",
 
@@ -2301,6 +2501,12 @@ function getElementSnapshot(element = null) {
 
     requiredRoles:
       getElementRequiredRoles(element),
+
+    requiredRolesRaw:
+      getElementRequiredRolesRaw(element),
+
+    adminOnly:
+      isElementAdminOnly(element),
 
     adminManaged:
       elementRequiresAdmin(element),
@@ -2353,6 +2559,11 @@ export function getRoleVisibilitySnapshot(AppCore, isAdminFn) {
   const menuElements =
     getMenuRepairElements(sidebar);
 
+  const normalMenuElements =
+    menuElements.filter((element) =>
+      !isElementAccessControlled(element)
+    );
+
   const visibleElements =
     roleElements.filter(isRoleElementVisible);
 
@@ -2386,10 +2597,16 @@ export function getRoleVisibilitySnapshot(AppCore, isAdminFn) {
 
       menuTotal:
         menuElements.length,
+
+      normalMenuTotal:
+        normalMenuElements.length,
     },
 
     roleItems:
       roleElements.map(getElementSnapshot),
+
+    normalMenuItems:
+      normalMenuElements.map(getElementSnapshot),
 
     menuItems:
       menuElements.map(getElementSnapshot),
@@ -2482,7 +2699,7 @@ export function applyRoleVisibility(
     normalizeServerItemIfPresent(sidebar);
 
   /*
-    1. Primero se reparan los items normales.
+    1. Primero se reparan items normales.
        Esto impide que un admin vea sólo Usuarios/Clientes/Servidor.
   */
   const normalRepair =
@@ -2529,6 +2746,8 @@ export function applyRoleVisibility(
 
         route:
           element.getAttribute?.("data-route") ||
+          element.getAttribute?.("data-href") ||
+          element.getAttribute?.("data-to") ||
           element.getAttribute?.("href") ||
           "",
 
@@ -2536,6 +2755,12 @@ export function applyRoleVisibility(
           safeText(element.textContent, ""),
 
         requiredRoles,
+
+        requiredRolesRaw:
+          getElementRequiredRolesRaw(element),
+
+        adminOnly:
+          isElementAdminOnly(element),
 
         adminManaged:
           elementRequiresAdmin(element),
@@ -2628,6 +2853,8 @@ export function applyRoleVisibility(
           "role-visibility",
 
         clearedActiveCount,
+
+        hiddenCount,
 
         normalRepairedCount:
           normalRepair.repairedCount,

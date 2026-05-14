@@ -3,61 +3,67 @@
    Archivo: src/core/config.js
 
    ONION SUPPORT · CORE CONFIG
-   GLOBAL CONTRACT · ROUTES · API · AUTH · STORAGE · 14/10
+   GLOBAL CONTRACT · ROUTES · API · AUTH · STORAGE · 15/10
 
    RESPONSABILIDADES:
    - centralizar configuración global del núcleo
+   - fijar API real del backend: https://api.onionit.net
+   - evitar llamadas accidentales a dominios frontend /api
    - exponer rutas base canónicas del SPA
    - exponer aliases legacy sin contaminar rutas canónicas
    - exponer rutas públicas técnicas
-   - exponer claves de storage lógicas
-   - exponer flags de auth, UI, router, loader y request
+   - exponer rutas con token técnico por query/path/hash-router
+   - exponer claves storage lógicas
+   - exponer endpoints auth/resources
+   - exponer flags de auth, UI, router, loader, request y diagnostics
    - permitir overrides runtime seguros
    - evitar mutaciones accidentales
 
    HARDENING EXTREMO:
    - Object.freeze profundo con protección de ciclos
-   - valores normalizados
-   - compatibilidad con config legacy
-   - rutas públicas/token centralizadas
-   - storage keys namespaced por storage.js, no duplicadas aquí
-   - flags enterprise
-   - publicApiPaths estrictas: /me NO es público
+   - apiBase producción siempre https://api.onionit.net
+   - apiBase nunca acaba en /api porque endpoints ya incluyen /api
+   - api.onionit.net NO es forbidden
+   - forbidden sólo dominios frontend
+   - /api/auth/me, /auth/me y /me siempre privados
+   - activation canónico: /api/auth/activate
+   - activation legacy: /api/auth/activate-account
+   - reset/activation/2FA públicos técnicos robustos
    - runtime overrides defensivos
    - snapshots seguros
    - soporte Azure Static Web Apps / history fallback
-   - soporte rutas técnicas con token en query, path y hash-router
-   - compatibilidad con request.js, auth restore, router y app bootstrap
-   - API production hard-lock:
-       · frontend SPA: https://api.onionit.net
-       · backend API:  https://api.onionit.net
-       · nunca usar https://api.onionit.net/api
+   - soporte hash-router #/... y hashbang #!...
 ========================================================= */
 
 /* =========================================================
    VERSION
 ========================================================= */
 
-const CONFIG_VERSION =
-  "14.0.0";
+export const CONFIG_VERSION =
+  "15.0.0";
 
 /* =========================================================
    API BASE CONTRACT
 ========================================================= */
 
-const CANONICAL_PRODUCTION_API_BASE =
+export const CANONICAL_PRODUCTION_API_BASE =
   "https://api.onionit.net";
 
-const FORBIDDEN_FRONTEND_API_ORIGINS =
+/*
+  IMPORTANTE:
+  api.onionit.net es el BACKEND BUENO.
+  Aquí sólo van orígenes de frontend que nunca deben actuar como API base.
+*/
+export const FORBIDDEN_FRONTEND_API_ORIGINS =
   Object.freeze([
     "https://onionsupport.com",
-    "https://api.onionit.net",
+    "https://www.onionsupport.com",
     "http://onionsupport.com",
-    "http://api.onionit.net",
+    "http://www.onionsupport.com",
   ]);
 
 /* =========================================================
-   HELPERS
+   BASIC HELPERS
 ========================================================= */
 
 function isObject(value) {
@@ -68,46 +74,18 @@ function isObject(value) {
   );
 }
 
-function isArray(value) {
-  return Array.isArray(value);
+function isObjectLike(value) {
+  return (
+    value !== null &&
+    (
+      typeof value === "object" ||
+      typeof value === "function"
+    )
+  );
 }
 
-function deepFreeze(value, seen = new WeakSet()) {
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Object.isFrozen(value)
-  ) {
-    return value;
-  }
-
-  try {
-    if (seen.has(value)) {
-      return value;
-    }
-
-    seen.add(value);
-
-    for (const key of Object.getOwnPropertyNames(value)) {
-      const child =
-        value[key];
-
-      if (
-        child &&
-        typeof child === "object" &&
-        !Object.isFrozen(child)
-      ) {
-        deepFreeze(
-          child,
-          seen
-        );
-      }
-    }
-
-    return Object.freeze(value);
-  } catch {
-    return value;
-  }
+function isArray(value) {
+  return Array.isArray(value);
 }
 
 function safeText(value, fallback = "") {
@@ -119,17 +97,20 @@ function safeText(value, fallback = "") {
   }
 
   const text =
-    String(value).trim();
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return text || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
-  const number =
+  const numeric =
     Number(value);
 
-  return Number.isFinite(number)
-    ? number
+  return Number.isFinite(numeric)
+    ? numeric
     : fallback;
 }
 
@@ -195,148 +176,142 @@ function safeArray(value) {
 }
 
 function uniqueArray(values = []) {
-  return Array.from(
-    new Set(
-      safeArray(values)
-        .filter((item) =>
-          item !== undefined &&
-          item !== null &&
-          item !== ""
-        )
-    )
-  );
+  const output =
+    [];
+
+  const seen =
+    new Set();
+
+  for (const item of safeArray(values).flat(Infinity)) {
+    const value =
+      typeof item === "string"
+        ? item.trim()
+        : item;
+
+    if (
+      value === undefined ||
+      value === null ||
+      value === ""
+    ) {
+      continue;
+    }
+
+    const key =
+      typeof value === "string"
+        ? value
+        : JSON.stringify(value);
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    output.push(value);
+  }
+
+  return output;
 }
 
-function normalizePath(path = "/") {
-  const raw =
-    safeText(path, "/");
-
-  let pathname =
-    raw;
-
-  let search =
-    "";
-
-  let hash =
-    "";
-
-  const hashIndex =
-    pathname.indexOf("#");
-
-  if (hashIndex >= 0) {
-    hash =
-      pathname.slice(hashIndex);
-
-    pathname =
-      pathname.slice(0, hashIndex) || "/";
+function deepFreeze(value, seen = new WeakSet()) {
+  if (
+    !isObjectLike(value) ||
+    Object.isFrozen(value)
+  ) {
+    return value;
   }
 
-  const searchIndex =
-    pathname.indexOf("?");
+  try {
+    if (seen.has(value)) {
+      return value;
+    }
 
-  if (searchIndex >= 0) {
-    search =
-      pathname.slice(searchIndex);
+    seen.add(value);
 
-    pathname =
-      pathname.slice(0, searchIndex) || "/";
+    for (const key of Object.getOwnPropertyNames(value)) {
+      const child =
+        value[key];
+
+      if (
+        child &&
+        typeof child === "object" &&
+        !Object.isFrozen(child)
+      ) {
+        deepFreeze(
+          child,
+          seen
+        );
+      }
+    }
+
+    return Object.freeze(value);
+  } catch {
+    return value;
+  }
+}
+
+function mergeObject(base = {}, override = {}) {
+  if (isArray(base) && isArray(override)) {
+    return uniqueArray([
+      ...base,
+      ...override,
+    ]);
   }
 
-  let value =
-    safeText(pathname, "/")
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
-
-  if (!value) {
-    value = "/";
-  }
-
-  if (!value.startsWith("/")) {
-    value =
-      `/${value}`;
-  }
+  const output =
+    isArray(base)
+      ? [...base]
+      : {
+          ...(isObject(base) ? base : {}),
+        };
 
   if (
-    value.length > 1 &&
-    value.endsWith("/")
+    !isObject(override) &&
+    !isArray(override)
   ) {
-    value =
-      value.replace(/\/+$/g, "") ||
-      "/";
+    return output;
   }
 
-  return `${value}${search}${hash}`;
-}
+  for (const [key, value] of Object.entries(override)) {
+    if (value === undefined) {
+      continue;
+    }
 
-function stripSearchAndHash(path = "/") {
-  const normalized =
-    normalizePath(path);
+    if (
+      isObject(value) &&
+      isObject(output[key])
+    ) {
+      output[key] =
+        mergeObject(
+          output[key],
+          value
+        );
 
-  return (
-    normalized
-      .split("?")[0]
-      .split("#")[0] ||
-    "/"
-  );
-}
+      continue;
+    }
 
-function normalizeStoragePrefix(value = "onion") {
-  return safeText(value, "onion")
-    .replace(/[^a-zA-Z0-9:_-]/g, "")
-    .replace(/:+$/g, "") ||
-    "onion";
-}
+    if (
+      isArray(value) &&
+      isArray(output[key])
+    ) {
+      output[key] =
+        uniqueArray([
+          ...output[key],
+          ...value,
+        ]);
 
-function normalizeLang(value = "es") {
-  const raw =
-    safeText(value, "es")
-      .toLowerCase()
-      .replace(/_/g, "-");
+      continue;
+    }
 
-  const first =
-    raw.split("-")[0] || raw;
-
-  if (
-    first === "spa" ||
-    first === "spanish" ||
-    first === "castellano" ||
-    first === "español"
-  ) {
-    return "es";
+    output[key] =
+      value;
   }
 
-  if (
-    first === "eng" ||
-    first === "english"
-  ) {
-    return "en";
-  }
-
-  if (
-    first === "cat" ||
-    first === "catalan" ||
-    first === "català" ||
-    first === "catalán"
-  ) {
-    return "ca";
-  }
-
-  return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(raw)
-    ? raw
-    : "es";
+  return output;
 }
 
-function normalizeTheme(value = "dark") {
-  const theme =
-    safeText(value, "dark")
-      .toLowerCase();
-
-  if (theme === "light") {
-    return "light";
-  }
-
-  return "dark";
-}
+/* =========================================================
+   RUNTIME / ENV HELPERS
+========================================================= */
 
 function getGlobalObject() {
   try {
@@ -441,61 +416,178 @@ function getEnvValue(keys = [], fallback = "") {
   return fallback;
 }
 
-function mergeObject(base = {}, override = {}) {
-  if (isArray(base) && isArray(override)) {
-    return uniqueArray([
-      ...base,
-      ...override,
-    ]);
+function isProductionEnv(env = "") {
+  const clean =
+    safeText(env, "")
+      .toLowerCase();
+
+  return (
+    clean === "production" ||
+    clean === "prod"
+  );
+}
+
+/* =========================================================
+   PATH HELPERS
+========================================================= */
+
+function isHashRouterPath(value = "") {
+  const raw =
+    safeText(value, "");
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "/";
   }
 
-  const output =
-    isArray(base)
-      ? [...base]
-      : {
-          ...base,
-        };
-
-  if (!isObject(override) && !isArray(override)) {
-    return output;
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/") || "/";
   }
 
-  for (const [key, value] of Object.entries(override)) {
-    if (value === undefined) {
+  return raw.replace(/^#\/?/, "/") || "/";
+}
+
+function normalizePathnameOnly(pathname = "/") {
+  let value =
+    safeText(pathname, "/")
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+  if (!value) {
+    value = "/";
+  }
+
+  if (!value.startsWith("/")) {
+    value =
+      `/${value}`;
+  }
+
+  const segments =
+    value.split("/");
+
+  const normalized =
+    [];
+
+  for (const segment of segments) {
+    if (
+      !segment ||
+      segment === "."
+    ) {
       continue;
     }
+
+    if (segment === "..") {
+      normalized.pop();
+      continue;
+    }
+
+    normalized.push(segment);
+  }
+
+  value =
+    `/${normalized.join("/")}` || "/";
+
+  if (
+    value.length > 1 &&
+    value.endsWith("/")
+  ) {
+    value =
+      value.replace(/\/+$/g, "") ||
+      "/";
+  }
+
+  return value;
+}
+
+function pathFromUrlLike(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  if (isHashRouterPath(raw)) {
+    return normalizeHashRouterPath(raw);
+  }
+
+  try {
+    const parsed =
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
 
     if (
-      isObject(value) &&
-      isObject(output[key])
+      parsed.hash &&
+      isHashRouterPath(parsed.hash)
     ) {
-      output[key] =
-        mergeObject(
-          output[key],
-          value
-        );
-
-      continue;
+      return normalizeHashRouterPath(parsed.hash);
     }
 
-    if (
-      isArray(value) &&
-      isArray(output[key])
-    ) {
-      output[key] =
-        uniqueArray([
-          ...output[key],
-          ...value,
-        ]);
+    return `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`;
+  } catch {
+    return raw;
+  }
+}
 
-      continue;
-    }
+function normalizePath(path = "/") {
+  const raw =
+    pathFromUrlLike(path) || "/";
 
-    output[key] =
-      value;
+  let pathname =
+    raw;
+
+  let search =
+    "";
+
+  let hash =
+    "";
+
+  const hashIndex =
+    pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash =
+      pathname.slice(hashIndex);
+
+    pathname =
+      pathname.slice(0, hashIndex) || "/";
   }
 
-  return output;
+  const searchIndex =
+    pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search =
+      pathname.slice(searchIndex);
+
+    pathname =
+      pathname.slice(0, searchIndex) || "/";
+  }
+
+  return `${normalizePathnameOnly(pathname)}${search}${hash}`;
+}
+
+function stripSearchAndHash(path = "/") {
+  const normalized =
+    normalizePath(path);
+
+  return (
+    normalized
+      .split("?")[0]
+      .split("#")[0] ||
+    "/"
+  );
 }
 
 function normalizePathList(list = []) {
@@ -517,27 +609,24 @@ function normalizeApiPathList(list = []) {
       return (
         clean !== "/api/auth/me" &&
         clean !== "/auth/me" &&
-        clean !== "/me"
+        clean !== "/me" &&
+        clean !== "/api/me"
       );
     });
 }
 
-function isProductionEnv(env = "") {
-  const clean =
-    safeText(env, "")
-      .toLowerCase();
-
-  return (
-    clean === "production" ||
-    clean === "prod"
-  );
-}
+/* =========================================================
+   API BASE HELPERS
+========================================================= */
 
 function normalizeBaseUrl(value = "") {
   const raw =
     safeText(value, "");
 
-  if (!raw || raw === "/") {
+  if (
+    !raw ||
+    raw === "/"
+  ) {
     return "";
   }
 
@@ -553,11 +642,10 @@ function getOriginFromUrlLike(value = "") {
   }
 
   try {
-    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      return new URL(raw).origin;
-    }
-
-    return new URL(raw, getBaseOrigin()).origin;
+    return new URL(
+      raw,
+      getBaseOrigin()
+    ).origin;
   } catch {
     return "";
   }
@@ -574,10 +662,57 @@ function isForbiddenFrontendApiBase(value = "") {
   return FORBIDDEN_FRONTEND_API_ORIGINS.includes(origin);
 }
 
-function normalizeApiBaseUrl(value = "", {
-  env = "production",
-  fallback = "",
-} = {}) {
+function normalizeAbsoluteApiBase(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    const parsed =
+      new URL(raw);
+
+    if (
+      parsed.protocol !== "https:" &&
+      parsed.protocol !== "http:"
+    ) {
+      return "";
+    }
+
+    const origin =
+      parsed.origin.replace(/\/+$/g, "");
+
+    const pathname =
+      normalizePathnameOnly(
+        parsed.pathname || "/"
+      );
+
+    /*
+      apiBase debe ser origin-only cuando el path es /api.
+      Los endpoints ya incluyen /api.
+    */
+    if (
+      pathname === "/" ||
+      pathname === "/api"
+    ) {
+      return origin;
+    }
+
+    return `${origin}${pathname}`.replace(/\/+$/g, "");
+  } catch {
+    return "";
+  }
+}
+
+function normalizeApiBaseUrl(
+  value = "",
+  {
+    env = "production",
+    fallback = "",
+  } = {}
+) {
   const production =
     isProductionEnv(env);
 
@@ -586,9 +721,9 @@ function normalizeApiBaseUrl(value = "", {
 
   /*
     Producción:
-    - si no hay apiBase, NO se usa same-origin
-    - si viene onionsupport.com, se corrige a api.onionit.net
-    - si viene /api, se corrige a api.onionit.net
+    - vacío => backend canónico
+    - /api => backend canónico
+    - dominio frontend => backend canónico
   */
   if (production) {
     if (
@@ -611,7 +746,99 @@ function normalizeApiBaseUrl(value = "", {
       : normalizeBaseUrl(fallback);
   }
 
+  if (/^https?:\/\//i.test(raw)) {
+    const normalized =
+      normalizeAbsoluteApiBase(raw);
+
+    if (!normalized) {
+      return production
+        ? CANONICAL_PRODUCTION_API_BASE
+        : normalizeBaseUrl(fallback);
+    }
+
+    /*
+      Si alguien configura https://api.onionit.net/api,
+      se normaliza a https://api.onionit.net.
+    */
+    return normalized;
+  }
+
+  /*
+    Si en producción alguien mete base relativa, no usamos same-origin.
+  */
+  if (production) {
+    return CANONICAL_PRODUCTION_API_BASE;
+  }
+
+  /*
+    Dev:
+    - /api como base produce duplicidad con endpoints /api/...
+      Se interpreta como same-origin vacío.
+  */
+  if (
+    raw === "/api" ||
+    raw === "api"
+  ) {
+    return "";
+  }
+
   return raw;
+}
+
+function normalizeStoragePrefix(value = "onion") {
+  return safeText(value, "onion")
+    .replace(/[^a-zA-Z0-9:_-]/g, "")
+    .replace(/^:+|:+$/g, "") ||
+    "onion";
+}
+
+function normalizeLang(value = "es") {
+  const raw =
+    safeText(value, "es")
+      .toLowerCase()
+      .replace(/_/g, "-");
+
+  const first =
+    raw.split("-")[0] || raw;
+
+  if (
+    first === "spa" ||
+    first === "spanish" ||
+    first === "castellano" ||
+    first === "español"
+  ) {
+    return "es";
+  }
+
+  if (
+    first === "eng" ||
+    first === "english"
+  ) {
+    return "en";
+  }
+
+  if (
+    first === "cat" ||
+    first === "catalan" ||
+    first === "català" ||
+    first === "catalán"
+  ) {
+    return "ca";
+  }
+
+  return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(raw)
+    ? raw
+    : "es";
+}
+
+function normalizeTheme(value = "dark") {
+  const theme =
+    safeText(value, "dark")
+      .toLowerCase();
+
+  return theme === "light"
+    ? "light"
+    : "dark";
 }
 
 function pickRuntimeOverrides(runtime = {}) {
@@ -748,15 +975,23 @@ const RAW_API_BASE =
   getEnvValue(
     [
       "ONION_API_BASE",
-      "VITE_ONION_API_BASE",
-      "API_BASE",
-      "API_URL",
+      "ONION_API_ORIGIN",
       "ONION_API_URL",
+      "VITE_ONION_API_BASE",
+      "VITE_ONION_API_ORIGIN",
       "VITE_ONION_API_URL",
+      "VITE_API_BASE",
+      "VITE_API_ORIGIN",
+      "VITE_API_URL",
+      "API_BASE",
+      "API_ORIGIN",
+      "API_URL",
+      "PUBLIC_API_ORIGIN",
     ],
     runtimeConfig.apiBase ||
       runtimeConfig.api?.base ||
       runtimeConfig.api?.baseUrl ||
+      runtimeConfig.api?.origin ||
       ""
   );
 
@@ -764,7 +999,9 @@ const API_BASE =
   normalizeApiBaseUrl(
     RAW_API_BASE,
     {
-      env: APP_ENV,
+      env:
+        APP_ENV,
+
       fallback:
         isProductionEnv(APP_ENV)
           ? CANONICAL_PRODUCTION_API_BASE
@@ -780,7 +1017,9 @@ const STORAGE_PREFIX =
         "VITE_ONION_STORAGE_PREFIX",
         "APP_STORAGE_PREFIX",
       ],
-      runtimeConfig.storagePrefix || "onion"
+      runtimeConfig.storagePrefix ||
+        runtimeConfig.appKey ||
+        "onion"
     )
   );
 
@@ -842,6 +1081,15 @@ const routes = {
 
   passwordReset:
     "/password-reset",
+
+  twoFactor:
+    "/2fa",
+
+  otp:
+    "/otp",
+
+  mfa:
+    "/mfa",
 };
 
 const routeAliases = {
@@ -849,6 +1097,9 @@ const routeAliases = {
     routes.home,
 
   "/dashboard":
+    routes.home,
+
+  "/panel":
     routes.home,
 
   "/tickets":
@@ -904,6 +1155,42 @@ const routeAliases = {
 
   "/server":
     routes.servidor,
+
+  "/activate":
+    routes.activateAccount,
+
+  "/activation":
+    routes.activateAccount,
+
+  "/activate-account":
+    routes.activateAccount,
+
+  "/forgot":
+    routes.forgotPassword,
+
+  "/recover":
+    routes.recoverPassword,
+
+  "/password-reset":
+    routes.passwordReset,
+
+  "/reset":
+    routes.resetPassword,
+
+  "/reset-confirm":
+    routes.resetPasswordConfirm,
+
+  "/2-factor":
+    routes.twoFactor,
+
+  "/two-factor":
+    routes.twoFactor,
+
+  "/mfa":
+    routes.mfa,
+
+  "/otp":
+    routes.otp,
 };
 
 const publicRoutes = normalizePathList([
@@ -914,6 +1201,9 @@ const publicRoutes = normalizePathList([
   routes.forgotPassword,
   routes.recoverPassword,
   routes.passwordReset,
+  routes.twoFactor,
+  routes.otp,
+  routes.mfa,
   routes.forbidden,
   routes.notFound,
 ]);
@@ -926,6 +1216,21 @@ const authLikeRoutes = normalizePathList([
   routes.forgotPassword,
   routes.recoverPassword,
   routes.passwordReset,
+  routes.twoFactor,
+  routes.otp,
+  routes.mfa,
+]);
+
+const technicalPublicRoutes = normalizePathList([
+  routes.activateAccount,
+  routes.resetPassword,
+  routes.resetPasswordConfirm,
+  routes.forgotPassword,
+  routes.recoverPassword,
+  routes.passwordReset,
+  routes.twoFactor,
+  routes.otp,
+  routes.mfa,
 ]);
 
 const protectedPublicTokenRoutes = [
@@ -1064,9 +1369,8 @@ const protectedPublicTokenRoutes = [
 ========================================================= */
 
 /*
-  Estas claves son nombres lógicos.
-  storage.js debe aplicar el namespace real:
-  `${storagePrefix}:${key}`.
+  Nombres lógicos.
+  src/core/storage.js aplica namespace: `${storagePrefix}:${key}`.
 */
 const storageKeys = {
   token:
@@ -1075,11 +1379,26 @@ const storageKeys = {
   accessToken:
     "accessToken",
 
+  access_token:
+    "access_token",
+
   refreshToken:
     "refreshToken",
 
+  refresh_token:
+    "refresh_token",
+
   tempToken:
     "tempToken",
+
+  temp_token:
+    "temp_token",
+
+  session:
+    "session",
+
+  sessionData:
+    "sessionData",
 
   sessionId:
     "sessionId",
@@ -1090,8 +1409,23 @@ const storageKeys = {
   user:
     "user",
 
+  currentUser:
+    "currentUser",
+
+  authUser:
+    "authUser",
+
+  sessionUser:
+    "sessionUser",
+
   role:
     "role",
+
+  userRole:
+    "userRole",
+
+  roles:
+    "roles",
 
   theme:
     "theme",
@@ -1105,8 +1439,17 @@ const storageKeys = {
   lang:
     "lang",
 
+  language:
+    "language",
+
+  locale:
+    "locale",
+
   sidebarOpen:
     "sidebarOpen",
+
+  sidebarCollapsed:
+    "sidebarCollapsed",
 
   lastRoute:
     "lastRoute",
@@ -1116,6 +1459,9 @@ const storageKeys = {
 
   postLoginTarget:
     "postLoginTarget",
+
+  redirectAfterLogin:
+    "redirectAfterLogin",
 
   authContext:
     "authContext",
@@ -1155,6 +1501,9 @@ const legacyStorageKeys = {
   userName:
     "onion_user_name",
 
+  username:
+    "onion_username",
+
   role:
     "onion_role",
 
@@ -1175,14 +1524,12 @@ const legacyStorageKeys = {
 };
 
 /* =========================================================
-   AUTH / API
+   AUTH / API PATHS
 ========================================================= */
 
 /*
-  IMPORTANTE:
-  /api/auth/me NO va en publicApiPaths.
-  Si /me es público para request.js, no se inyecta Authorization
-  y falla restore/avatar/user tras refresh.
+  Público = no requiere Authorization.
+  /api/auth/me, /auth/me, /me y /api/me jamás son públicos.
 */
 const publicApiPaths = normalizeApiPathList([
   "/api/auth/login",
@@ -1192,6 +1539,15 @@ const publicApiPaths = normalizeApiPathList([
   "/api/auth/reset-password-confirm",
   "/api/auth/reset-password/validate",
 
+  "/api/auth/forgot-password",
+  "/api/auth/password-reset/request",
+  "/api/auth/reset-password/request",
+  "/api/auth/reset-password/confirm",
+  "/api/auth/password-reset/confirm",
+  "/api/auth/reset-password-validate",
+  "/api/auth/password-reset/validate",
+
+  "/api/auth/activate",
   "/api/auth/activate-account",
   "/api/auth/activate/first-user",
   "/api/auth/activate/validate",
@@ -1199,8 +1555,14 @@ const publicApiPaths = normalizeApiPathList([
   "/api/auth/2fa/login",
   "/api/auth/2fa/request",
   "/api/auth/2fa/resend",
+  "/api/auth/2fa/verify",
+  "/api/auth/mfa/login",
+  "/api/auth/mfa/request",
+  "/api/auth/mfa/resend",
+  "/api/auth/mfa/verify",
 
   "/api/auth/_health",
+  "/api/auth/health",
   "/api/_health",
   "/health",
 ]);
@@ -1209,12 +1571,12 @@ const privateApiPaths = normalizePathList([
   "/api/auth/me",
   "/auth/me",
   "/me",
+  "/api/me",
 
   "/api/auth/logout",
   "/api/auth/logout-all",
 
   "/api/auth/2fa/setup",
-  "/api/auth/2fa/verify",
   "/api/auth/2fa/confirm",
   "/api/auth/2fa/disable",
 
@@ -1274,40 +1636,121 @@ const auth = {
     me:
       "/api/auth/me",
 
+    profile:
+      "/api/auth/me",
+
+    currentUser:
+      "/api/auth/me",
+
+    current:
+      "/api/auth/me",
+
+    session:
+      "/api/auth/me",
+
     refresh:
       "/api/auth/refresh",
 
-    resetPasswordRequest:
-      "/api/auth/reset-password-request",
+    refreshSession:
+      "/api/auth/refresh",
+
+    tokenRefresh:
+      "/api/auth/refresh",
+
+    renew:
+      "/api/auth/refresh",
 
     requestPasswordReset:
+      "/api/auth/reset-password-request",
+
+    resetPasswordRequest:
       "/api/auth/reset-password-request",
 
     forgotPassword:
       "/api/auth/reset-password-request",
 
+    recoverPassword:
+      "/api/auth/reset-password-request",
+
+    passwordResetRequest:
+      "/api/auth/reset-password-request",
+
+    confirmPasswordReset:
+      "/api/auth/reset-password-confirm",
+
+    confirmResetPassword:
+      "/api/auth/reset-password-confirm",
+
     resetPasswordConfirm:
       "/api/auth/reset-password-confirm",
 
-    confirmPasswordReset:
+    passwordResetConfirm:
+      "/api/auth/reset-password-confirm",
+
+    resetPasswordUpdate:
+      "/api/auth/reset-password-confirm",
+
+    resetPasswordFinalize:
+      "/api/auth/reset-password-confirm",
+
+    changeForgottenPassword:
       "/api/auth/reset-password-confirm",
 
     validateResetToken:
       "/api/auth/reset-password/validate",
 
+    resetPasswordValidate:
+      "/api/auth/reset-password/validate",
+
+    validatePasswordReset:
+      "/api/auth/reset-password/validate",
+
+    passwordResetValidate:
+      "/api/auth/reset-password/validate",
+
+    /*
+      Canónico actual.
+    */
     activate:
-      "/api/auth/activate-account",
+      "/api/auth/activate",
 
     activateAccount:
-      "/api/auth/activate-account",
+      "/api/auth/activate",
 
     activation:
+      "/api/auth/activate",
+
+    accountActivation:
+      "/api/auth/activate",
+
+    createUserActivation:
+      "/api/auth/activate",
+
+    confirmActivation:
+      "/api/auth/activate",
+
+    /*
+      Legacy compatible.
+    */
+    activateAccountLegacy:
+      "/api/auth/activate-account",
+
+    activationLegacy:
       "/api/auth/activate-account",
 
     activateFirstUser:
       "/api/auth/activate/first-user",
 
+    firstUserActivation:
+      "/api/auth/activate/first-user",
+
     validateActivationToken:
+      "/api/auth/activate/validate",
+
+    activationValidate:
+      "/api/auth/activate/validate",
+
+    validateActivateAccount:
       "/api/auth/activate/validate",
 
     twoFactorLogin:
@@ -1319,27 +1762,173 @@ const auth = {
     mfaLogin:
       "/api/auth/2fa/login",
 
+    verify2FA:
+      "/api/auth/2fa/login",
+
+    verifyMfa:
+      "/api/auth/2fa/login",
+
+    twoFactorVerify:
+      "/api/auth/2fa/login",
+
     twoFactorRequest:
+      "/api/auth/2fa/request",
+
+    request2FA:
+      "/api/auth/2fa/request",
+
+    requestMfa:
+      "/api/auth/2fa/request",
+
+    send2FA:
+      "/api/auth/2fa/request",
+
+    sendMfa:
       "/api/auth/2fa/request",
 
     twoFactorResend:
       "/api/auth/2fa/resend",
 
+    resend2FA:
+      "/api/auth/2fa/resend",
+
+    resendMfa:
+      "/api/auth/2fa/resend",
+
     health:
+      "/api/auth/_health",
+
+    authHealth:
       "/api/auth/_health",
   },
 
-  publicApiPaths,
+  endpointCandidates: {
+    me:
+      [
+        "/api/auth/me",
+        "/auth/me",
+        "/me",
+      ],
 
+    activateAccount:
+      [
+        "/api/auth/activate",
+        "/api/auth/activate-account",
+      ],
+
+    requestPasswordReset:
+      [
+        "/api/auth/reset-password-request",
+        "/api/auth/forgot-password",
+        "/api/auth/password-reset/request",
+        "/api/auth/reset-password/request",
+      ],
+
+    confirmPasswordReset:
+      [
+        "/api/auth/reset-password-confirm",
+        "/api/auth/reset-password/confirm",
+        "/api/auth/password-reset/confirm",
+      ],
+
+    validateResetToken:
+      [
+        "/api/auth/reset-password/validate",
+        "/api/auth/reset-password-validate",
+        "/api/auth/password-reset/validate",
+      ],
+
+    twoFactorLogin:
+      [
+        "/api/auth/2fa/login",
+        "/api/auth/mfa/login",
+        "/api/auth/2fa/verify",
+        "/api/auth/mfa/verify",
+      ],
+  },
+
+  publicApiPaths,
   privateApiPaths,
 
-  technicalPublicRoutes:
-    [
-      routes.activateAccount,
-      routes.resetPasswordConfirm,
-    ],
+  technicalPublicRoutes,
 
   protectedPublicTokenRoutes,
+
+  publicTechnicalRoutes:
+    technicalPublicRoutes,
+
+  tokenParamNames: {
+    generic:
+      [
+        "token",
+        "code",
+        "t",
+      ],
+
+    auth:
+      [
+        "token",
+        "accessToken",
+        "access_token",
+        "authToken",
+        "auth_token",
+        "jwt",
+        "idToken",
+        "id_token",
+        "code",
+        "t",
+      ],
+
+    refresh:
+      [
+        "refreshToken",
+        "refresh_token",
+        "token",
+        "code",
+        "t",
+      ],
+
+    activation:
+      [
+        "token",
+        "activationToken",
+        "activateToken",
+        "activation_token",
+        "activate_token",
+        "code",
+        "t",
+      ],
+
+    reset:
+      [
+        "token",
+        "resetToken",
+        "passwordResetToken",
+        "confirmToken",
+        "reset_token",
+        "password_reset_token",
+        "confirm_token",
+        "code",
+        "t",
+      ],
+
+    twoFactor:
+      [
+        "tempToken",
+        "temp_token",
+        "temporaryToken",
+        "temporary_token",
+        "challengeToken",
+        "challenge_token",
+        "twoFactorToken",
+        "two_factor_token",
+        "mfaToken",
+        "mfa_token",
+        "code",
+        "otp",
+        "totp",
+      ],
+  },
 
   roles: {
     admin:
@@ -1378,6 +1967,9 @@ const auth = {
     technician:
       "support",
 
+    technical:
+      "support",
+
     support:
       "support",
 
@@ -1391,6 +1983,9 @@ const auth = {
       "manager",
 
     lead:
+      "manager",
+
+    supervisor:
       "manager",
 
     user:
@@ -1449,6 +2044,9 @@ const api = {
   baseUrl:
     API_BASE,
 
+  origin:
+    API_BASE,
+
   sameOrigin:
     !API_BASE,
 
@@ -1457,6 +2055,9 @@ const api = {
 
   forbiddenFrontendOrigins:
     FORBIDDEN_FRONTEND_API_ORIGINS,
+
+  prefix:
+    "/api",
 
   timeout:
     safeNumber(
@@ -1505,7 +2106,7 @@ const api = {
     safeBool(
       runtimeConfig.withCredentials ??
         runtimeConfig.api?.withCredentials,
-      false
+      true
     ),
 
   headers: {
@@ -1620,6 +2221,14 @@ const resources = {
 
     global:
       "/api/search",
+  },
+
+  health: {
+    base:
+      "/api/health",
+
+    auth:
+      "/api/auth/_health",
   },
 };
 
@@ -1762,6 +2371,14 @@ const router = {
   routes,
 
   routeAliases,
+
+  publicRoutes,
+
+  authLikeRoutes,
+
+  technicalPublicRoutes,
+
+  protectedPublicTokenRoutes,
 
   events: {
     beforeRender:
@@ -2026,10 +2643,19 @@ const diagnostics = {
 
   exposeDebugBridge:
     true,
+
+  requestLifecycleEvents:
+    false,
+
+  requestRetryEvents:
+    false,
+
+  requestDedupeEvents:
+    false,
 };
 
 /* =========================================================
-   CONFIG
+   CONFIG BUILD
 ========================================================= */
 
 const baseConfig = {
@@ -2058,6 +2684,12 @@ const baseConfig = {
     DEBUG,
 
   apiBase:
+    API_BASE,
+
+  apiOrigin:
+    API_BASE,
+
+  apiUrl:
     API_BASE,
 
   requestTimeout:
@@ -2097,6 +2729,7 @@ const baseConfig = {
   routeAliases,
   publicRoutes,
   authLikeRoutes,
+  technicalPublicRoutes,
   protectedPublicTokenRoutes,
 
   storageKeys,
@@ -2115,6 +2748,53 @@ const baseConfig = {
   security,
 };
 
+function normalizeProtectedPublicTokenRoutes(list = []) {
+  return safeArray(list)
+    .map((item) => {
+      if (!isObject(item)) {
+        return null;
+      }
+
+      const path =
+        stripSearchAndHash(
+          item.path || "/"
+        );
+
+      const windowKeys =
+        uniqueArray([
+          ...safeArray(item.windowKeys),
+          item.windowKey,
+        ]);
+
+      return {
+        ...item,
+
+        path,
+
+        windowKey:
+          item.windowKey || windowKeys[0] || "",
+
+        windowKeys,
+
+        tokenParamNames:
+          uniqueArray(
+            item.tokenParamNames || []
+          ),
+
+        scrubbedStateKeys:
+          uniqueArray(
+            item.scrubbedStateKeys || []
+          ),
+
+        scrubbedHistoryKeys:
+          uniqueArray(
+            item.scrubbedHistoryKeys || []
+          ),
+      };
+    })
+    .filter(Boolean);
+}
+
 function normalizeFinalConfig(source = {}) {
   const output =
     mergeObject(
@@ -2130,7 +2810,8 @@ function normalizeFinalConfig(source = {}) {
 
   output.appName =
     safeText(
-      output.appName || output.name,
+      output.appName ||
+        output.name,
       APP_NAME
     );
 
@@ -2145,7 +2826,8 @@ function normalizeFinalConfig(source = {}) {
 
   output.env =
     safeText(
-      output.env || output.environment,
+      output.env ||
+        output.environment,
       APP_ENV
     ).toLowerCase();
 
@@ -2167,8 +2849,11 @@ function normalizeFinalConfig(source = {}) {
   output.apiBase =
     normalizeApiBaseUrl(
       output.apiBase ||
+        output.apiOrigin ||
+        output.apiUrl ||
         output.api?.base ||
         output.api?.baseUrl ||
+        output.api?.origin ||
         API_BASE,
       {
         env:
@@ -2180,6 +2865,12 @@ function normalizeFinalConfig(source = {}) {
             : API_BASE,
       }
     );
+
+  output.apiOrigin =
+    output.apiBase;
+
+  output.apiUrl =
+    output.apiBase;
 
   output.storagePrefix =
     normalizeStoragePrefix(
@@ -2224,7 +2915,7 @@ function normalizeFinalConfig(source = {}) {
   output.routeAliases =
     Object.fromEntries(
       Object.entries(output.routeAliases || {}).map(([key, value]) => [
-        normalizePath(key),
+        stripSearchAndHash(key),
         stripSearchAndHash(value),
       ])
     );
@@ -2239,72 +2930,68 @@ function normalizeFinalConfig(source = {}) {
       output.authLikeRoutes || []
     );
 
+  output.technicalPublicRoutes =
+    normalizePathList(
+      output.technicalPublicRoutes ||
+        output.auth?.technicalPublicRoutes ||
+        technicalPublicRoutes
+    );
+
   output.protectedPublicTokenRoutes =
-    safeArray(
-      output.protectedPublicTokenRoutes || []
-    )
-      .map((item) => {
-        if (!isObject(item)) {
-          return null;
-        }
-
-        const path =
-          stripSearchAndHash(
-            item.path || "/"
-          );
-
-        const windowKeys =
-          uniqueArray([
-            ...safeArray(item.windowKeys),
-            item.windowKey,
-          ]);
-
-        return {
-          ...item,
-
-          path,
-
-          windowKey:
-            item.windowKey || windowKeys[0] || "",
-
-          windowKeys,
-
-          tokenParamNames:
-            uniqueArray(
-              item.tokenParamNames || []
-            ),
-
-          scrubbedStateKeys:
-            uniqueArray(
-              item.scrubbedStateKeys || []
-            ),
-
-          scrubbedHistoryKeys:
-            uniqueArray(
-              item.scrubbedHistoryKeys || []
-            ),
-        };
-      })
-      .filter(Boolean);
+    normalizeProtectedPublicTokenRoutes(
+      output.protectedPublicTokenRoutes ||
+        protectedPublicTokenRoutes
+    );
 
   if (output.auth) {
     output.auth.publicApiPaths =
       normalizeApiPathList(
-        output.auth.publicApiPaths || []
+        output.auth.publicApiPaths ||
+          publicApiPaths
       );
 
     output.auth.privateApiPaths =
       normalizePathList(
-        output.auth.privateApiPaths || privateApiPaths
+        output.auth.privateApiPaths ||
+          privateApiPaths
       );
 
     output.auth.technicalPublicRoutes =
       normalizePathList(
-        output.auth.technicalPublicRoutes || []
+        output.auth.technicalPublicRoutes ||
+          output.technicalPublicRoutes ||
+          technicalPublicRoutes
       );
+
+    output.auth.publicTechnicalRoutes =
+      output.auth.technicalPublicRoutes;
 
     output.auth.protectedPublicTokenRoutes =
       output.protectedPublicTokenRoutes;
+
+    output.auth.endpoints =
+      {
+        ...auth.endpoints,
+        ...(output.auth.endpoints || {}),
+      };
+
+    /*
+      Reafirmaciones críticas.
+    */
+    output.auth.endpoints.me =
+      "/api/auth/me";
+
+    output.auth.endpoints.activate =
+      "/api/auth/activate";
+
+    output.auth.endpoints.activateAccount =
+      "/api/auth/activate";
+
+    output.auth.endpoints.activation =
+      "/api/auth/activate";
+
+    output.auth.endpoints.activateAccountLegacy =
+      "/api/auth/activate-account";
   }
 
   if (output.api) {
@@ -2312,6 +2999,9 @@ function normalizeFinalConfig(source = {}) {
       output.apiBase;
 
     output.api.baseUrl =
+      output.apiBase;
+
+    output.api.origin =
       output.apiBase;
 
     output.api.sameOrigin =
@@ -2360,6 +3050,12 @@ function normalizeFinalConfig(source = {}) {
         ).map((item) =>
           safeText(item, "").toUpperCase()
         )
+      );
+
+    output.api.withCredentials =
+      safeBool(
+        output.api.withCredentials,
+        true
       );
   }
 
@@ -2447,6 +3143,47 @@ function normalizeFinalConfig(source = {}) {
       FORBIDDEN_FRONTEND_API_ORIGINS;
   }
 
+  /*
+    Candados finales.
+  */
+  output.apiBase =
+    normalizeApiBaseUrl(
+      output.apiBase,
+      {
+        env:
+          output.env,
+        fallback:
+          CANONICAL_PRODUCTION_API_BASE,
+      }
+    );
+
+  output.apiOrigin =
+    output.apiBase;
+
+  output.apiUrl =
+    output.apiBase;
+
+  if (output.api) {
+    output.api.base =
+      output.apiBase;
+
+    output.api.baseUrl =
+      output.apiBase;
+
+    output.api.origin =
+      output.apiBase;
+
+    output.api.sameOrigin =
+      !output.apiBase;
+  }
+
+  if (output.auth?.publicApiPaths) {
+    output.auth.publicApiPaths =
+      normalizeApiPathList(
+        output.auth.publicApiPaths
+      );
+  }
+
   return output;
 }
 
@@ -2470,6 +3207,10 @@ export function getConfig() {
 
 export function getApiBase() {
   return config.apiBase;
+}
+
+export function getApiOrigin() {
+  return config.apiOrigin || config.apiBase;
 }
 
 export function getCanonicalProductionApiBase() {
@@ -2572,7 +3313,32 @@ function stripApiBasePrefix(path = "/") {
   return normalized;
 }
 
+function isPrivateMePath(path = "") {
+  const clean =
+    stripSearchAndHash(
+      normalizePath(path)
+    );
+
+  const withoutApiBase =
+    stripApiBasePrefix(clean);
+
+  return (
+    clean === "/api/auth/me" ||
+    clean === "/auth/me" ||
+    clean === "/me" ||
+    clean === "/api/me" ||
+    withoutApiBase === "/api/auth/me" ||
+    withoutApiBase === "/auth/me" ||
+    withoutApiBase === "/me" ||
+    withoutApiBase === "/api/me"
+  );
+}
+
 export function isPublicApiPath(path = "") {
+  if (isPrivateMePath(path)) {
+    return false;
+  }
+
   const cleanPath =
     stripSearchAndHash(
       normalizePath(path)
@@ -2580,21 +3346,6 @@ export function isPublicApiPath(path = "") {
 
   const withoutApiBase =
     stripApiBasePrefix(cleanPath);
-
-  /*
-    Blindaje explícito:
-    /me nunca público.
-  */
-  if (
-    cleanPath === "/api/auth/me" ||
-    cleanPath === "/auth/me" ||
-    cleanPath === "/me" ||
-    withoutApiBase === "/api/auth/me" ||
-    withoutApiBase === "/auth/me" ||
-    withoutApiBase === "/me"
-  ) {
-    return false;
-  }
 
   return config.auth.publicApiPaths.some((publicPath) => {
     const current =
@@ -2617,6 +3368,10 @@ export function isPublicApiPath(path = "") {
 }
 
 export function isPrivateApiPath(path = "") {
+  if (isPrivateMePath(path)) {
+    return true;
+  }
+
   const cleanPath =
     stripSearchAndHash(
       normalizePath(path)
@@ -2675,6 +3430,18 @@ export function getAuthEndpoint(key = "") {
   return config.auth?.endpoints?.[cleanKey] || "";
 }
 
+export function getAuthEndpointCandidates(key = "") {
+  const cleanKey =
+    safeText(key, "");
+
+  const candidates =
+    config.auth?.endpointCandidates?.[cleanKey];
+
+  return Array.isArray(candidates)
+    ? [...candidates]
+    : [];
+}
+
 export function getResourceEndpoint(resource = "", key = "base") {
   const resourceKey =
     safeText(resource, "");
@@ -2705,6 +3472,9 @@ export function getConfigSnapshot() {
     apiBase:
       config.apiBase,
 
+    apiOrigin:
+      config.apiOrigin,
+
     canonicalProductionApiBase:
       config.canonicalProductionApiBase,
 
@@ -2713,6 +3483,9 @@ export function getConfigSnapshot() {
 
     apiSameOrigin:
       config.api?.sameOrigin,
+
+    apiWithCredentials:
+      config.api?.withCredentials,
 
     requestTimeout:
       config.requestTimeout,
@@ -2755,6 +3528,24 @@ export function getConfigSnapshot() {
 
     technicalPublicRoutes:
       config.auth.technicalPublicRoutes,
+
+    protectedPublicTokenRoutes:
+      config.protectedPublicTokenRoutes.map((route) => ({
+        key:
+          route.key,
+
+        path:
+          route.path,
+
+        windowKey:
+          route.windowKey,
+
+        windowKeys:
+          route.windowKeys,
+
+        tokenParamNames:
+          route.tokenParamNames,
+      })),
 
     publicApiPaths:
       config.auth.publicApiPaths,

@@ -21,13 +21,19 @@
    - Sin montajes duplicados.
    - Sin responsabilidades duplicadas con main.js ni loader.js.
 
-   FIX 14.3:
-   - Registro idempotente de módulos bridge.
-   - No registrar aliases como módulos independientes.
-   - Evitar app:module:duplicate durante boot.
-   - Evitar llamadas repetidas ruidosas a modules.register().
-   - Mantener AppCore.Router/AppCore.router como propiedades directas.
-   - Registrar en Core una sola vez por nombre canónico con aliases.
+   EXTREME MODE:
+   - Boot idempotente por ciclo.
+   - Control de race conditions entre boot/reboot.
+   - Preservación fuerte de rutas públicas con token.
+   - Registro bridge de módulos sin duplicados.
+   - AppCore.Router/AppCore.router como propiedades directas.
+   - Registro canónico de módulos con aliases.
+   - UI firebreak contra eventos recursivos.
+   - Throttle para reparación UI y sync de usuario.
+   - Loader con mínimo visible + failsafe.
+   - Sanitización profunda de logs/eventos.
+   - Eventos de diagnóstico sin exponer tokens.
+   - Tolerancia a módulos legacy/faltantes.
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -127,7 +133,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-const APP_BOOTSTRAP_VERSION = "14.3.0";
+const APP_BOOTSTRAP_VERSION = "15.0.0-extreme-pro";
 const BOOT_SOURCE = "app:index";
 
 const DEFAULT_SCOPE =
@@ -147,6 +153,14 @@ const RUNTIME_KEYS = Object.freeze({
   appApi:
     APP_RUNTIME_KEYS?.appApi ||
     "__ONION_APP__",
+
+  bootSnapshot:
+    APP_RUNTIME_KEYS?.bootSnapshot ||
+    "__ONION_BOOT_SNAPSHOT__",
+
+  lastReadyAt:
+    APP_RUNTIME_KEYS?.lastReadyAt ||
+    "__ONION_APP_LAST_READY_AT__",
 });
 
 const BOOT_EVENTS = Object.freeze({
@@ -157,6 +171,10 @@ const BOOT_EVENTS = Object.freeze({
   state:
     APP_EVENTS?.bootState ||
     "app:boot:state",
+
+  step:
+    APP_EVENTS?.bootStep ||
+    "app:boot:step",
 
   ready:
     APP_EVENTS?.bootReady ||
@@ -224,7 +242,18 @@ const UI_SYNC_THROTTLE_MS =
     ) || 100
   );
 
+const BOOT_STEP_MAX_DURATION_MS =
+  Math.max(
+    0,
+    Number(
+      BOOT_CONSTANTS?.stepWarnMs ??
+      2500
+    ) || 2500
+  );
+
 const UI_REASON_MAX_LENGTH = 180;
+const SANITIZE_MAX_DEPTH = 7;
+const SANITIZE_MAX_ARRAY = 100;
 
 const FALLBACK_PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
   Object.freeze({
@@ -335,15 +364,25 @@ const FALLBACK_PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
 ]);
 
 const PUBLIC_TOKEN_ROUTES =
-  Array.isArray(PROTECTED_PUBLIC_TOKEN_ROUTES) &&
-  PROTECTED_PUBLIC_TOKEN_ROUTES.length
-    ? PROTECTED_PUBLIC_TOKEN_ROUTES
-    : FALLBACK_PROTECTED_PUBLIC_TOKEN_ROUTES;
+  normalizeProtectedPublicTokenRoutes(
+    Array.isArray(PROTECTED_PUBLIC_TOKEN_ROUTES) &&
+    PROTECTED_PUBLIC_TOKEN_ROUTES.length
+      ? PROTECTED_PUBLIC_TOKEN_ROUTES
+      : FALLBACK_PROTECTED_PUBLIC_TOKEN_ROUTES
+  );
 
 const SENSITIVE_PARAM_NAMES =
   Array.isArray(GENERIC_SENSITIVE_PARAM_NAMES) &&
   GENERIC_SENSITIVE_PARAM_NAMES.length
-    ? GENERIC_SENSITIVE_PARAM_NAMES
+    ? Object.freeze(
+        Array.from(
+          new Set(
+            GENERIC_SENSITIVE_PARAM_NAMES
+              .map((item) => safeText(item, ""))
+              .filter(Boolean)
+          )
+        )
+      )
     : Object.freeze([
         "token",
         "activationToken",
@@ -364,6 +403,10 @@ const SENSITIVE_PARAM_NAMES =
         "two_factor_token",
         "mfaToken",
         "mfa_token",
+        "authorization",
+        "auth",
+        "jwt",
+        "session",
       ]);
 
 /* =========================================================
@@ -409,7 +452,10 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -523,6 +569,56 @@ function safeCreateCustomEvent(name = "", detail = {}) {
   } catch {
     return null;
   }
+}
+
+function normalizeProtectedPublicTokenRoutes(routes = []) {
+  const defaultsByKey = new Map(
+    FALLBACK_PROTECTED_PUBLIC_TOKEN_ROUTES.map((item) => [
+      item.key,
+      item,
+    ])
+  );
+
+  return Object.freeze(
+    safeArray(routes)
+      .map((item) => {
+        const source = safeObject(item);
+        const key = safeText(source.key, "");
+        const fallback = defaultsByKey.get(key) || {};
+
+        const path = normalizePathnameOnly(
+          source.path ||
+            fallback.path ||
+            DEFAULT_ROUTE ||
+            "/"
+        );
+
+        return Object.freeze({
+          ...fallback,
+          ...source,
+
+          key,
+          path,
+
+          windowKeys: Object.freeze(
+            safeArray(source.windowKeys?.length ? source.windowKeys : fallback.windowKeys)
+          ),
+
+          scrubbedStateKeys: Object.freeze(
+            safeArray(source.scrubbedStateKeys?.length ? source.scrubbedStateKeys : fallback.scrubbedStateKeys)
+          ),
+
+          scrubbedHistoryKeys: Object.freeze(
+            safeArray(source.scrubbedHistoryKeys?.length ? source.scrubbedHistoryKeys : fallback.scrubbedHistoryKeys)
+          ),
+
+          tokenParamNames: Object.freeze(
+            safeArray(source.tokenParamNames?.length ? source.tokenParamNames : fallback.tokenParamNames)
+          ),
+        });
+      })
+      .filter((item) => item.key && item.path)
+  );
 }
 
 /* =========================================================
@@ -865,7 +961,7 @@ function isDomNodeLike(value) {
 }
 
 function sanitizePayload(value, depth = 0) {
-  if (depth > 6) {
+  if (depth > SANITIZE_MAX_DEPTH) {
     return "[MaxDepth]";
   }
 
@@ -900,7 +996,7 @@ function sanitizePayload(value, depth = 0) {
 
   if (Array.isArray(value)) {
     return value
-      .slice(0, 80)
+      .slice(0, SANITIZE_MAX_ARRAY)
       .map((item) =>
         sanitizePayload(item, depth + 1)
       );
@@ -923,7 +1019,7 @@ function sanitizePayload(value, depth = 0) {
 
     for (const [key, item] of Object.entries(value)) {
       if (
-        /token|secret|password|authorization|credential/i.test(key) &&
+        /token|secret|password|authorization|credential|session|jwt/i.test(key) &&
         item
       ) {
         output[key] = "***";
@@ -955,6 +1051,21 @@ function getWindowValue(key = "") {
     return safeText(window[key], "");
   } catch {
     return "";
+  }
+}
+
+function getWindowRawValue(key = "") {
+  if (
+    !isBrowser() ||
+    !key
+  ) {
+    return null;
+  }
+
+  try {
+    return window[key] ?? null;
+  } catch {
+    return null;
   }
 }
 
@@ -1265,9 +1376,20 @@ function setStoredInitialUrl(config = null, value = "") {
 }
 
 function resolveProtectedInitialContext(href = "") {
+  const bootContextRaw =
+    getWindowRawValue(RUNTIME_KEYS.bootContext);
+
+  const bootContext =
+    isObject(bootContextRaw)
+      ? bootContextRaw
+      : {};
+
   const candidates = [
     href,
     getInitialUrl(),
+    bootContext.protectedInitialUrl,
+    bootContext.activationInitialUrl,
+    bootContext.resetConfirmInitialUrl,
     getBrowserPublicPath(),
     ...PUBLIC_TOKEN_ROUTES.flatMap((config) =>
       getStoredInitialUrls(config)
@@ -1660,6 +1782,8 @@ export const App = (() => {
     lastBootErrorAt: 0,
 
     lastBootOptions: null,
+    lastBootSteps: [],
+    lastError: null,
   };
 
   let uiRepairRunning = false;
@@ -1672,6 +1796,7 @@ export const App = (() => {
   let uiSyncLastReason = "";
 
   const boundWindowEvents = [];
+  const boundBusEvents = [];
 
   /* =======================================================
      SAFE LOG / EMIT
@@ -1816,6 +1941,29 @@ export const App = (() => {
     }
   }
 
+  function safeBusOn(eventName, handler) {
+    if (
+      !eventName ||
+      !isFunction(handler) ||
+      !isFunction(AppCore?.events?.on)
+    ) {
+      return false;
+    }
+
+    try {
+      AppCore.events.on(eventName, handler);
+
+      boundBusEvents.push({
+        eventName,
+        handler,
+      });
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function unbindWindowEvents() {
     if (!isBrowser()) {
       boundWindowEvents.length = 0;
@@ -1828,6 +1976,20 @@ export const App = (() => {
           item.eventName,
           item.handler
         );
+      } catch {}
+    }
+
+    return true;
+  }
+
+  function unbindBusEvents() {
+    for (const item of boundBusEvents.splice(0)) {
+      try {
+        if (isFunction(AppCore?.events?.off)) {
+          AppCore.events.off(item.eventName, item.handler);
+        } else if (isFunction(AppCore?.events?.removeListener)) {
+          AppCore.events.removeListener(item.eventName, item.handler);
+        }
       } catch {}
     }
 
@@ -1973,6 +2135,29 @@ export const App = (() => {
       publicPath:
         routeSnapshot.publicPath,
     };
+  }
+
+  function persistBootSnapshot(reason = "snapshot") {
+    const snapshot = sanitizePayload({
+      version: APP_BOOTSTRAP_VERSION,
+      reason,
+      state: {
+        booted: state.booted,
+        booting: state.booting,
+        cycleId: state.bootCycleId,
+        finalizedCycleId: state.finalizedCycleId,
+        readyEmitted: state.readyEmitted,
+        route: getCurrentRouteSnapshot(),
+        bootUrlContext: sanitizeBootContextForLog(refreshBootUrlContext()),
+      },
+      at: safeIsoDate(),
+    });
+
+    try {
+      setWindowValue(RUNTIME_KEYS.bootSnapshot, snapshot);
+    } catch {}
+
+    return snapshot;
   }
 
   /* =======================================================
@@ -2260,6 +2445,7 @@ export const App = (() => {
       ["http", Http],
 
       ["Toast", Toast],
+      ["toast", Toast],
       ["toastModule", Toast],
 
       ["I18n", I18n],
@@ -2508,6 +2694,8 @@ export const App = (() => {
         "syncRouteAndIndicator",
         "syncIndicator",
         "updateToggleLabel",
+        "sync",
+        "refresh",
       ],
       reason,
       context
@@ -3046,25 +3234,10 @@ export const App = (() => {
       );
     };
 
-    const bindBus = (eventName, handler) => {
-      try {
-        if (isFunction(AppCore?.events?.on)) {
-          AppCore.events.on(
-            eventName,
-            handler
-          );
-
-          return true;
-        }
-      } catch {}
-
-      return false;
-    };
-
     const hasBus = isFunction(AppCore?.events?.on);
 
     if (hasBus) {
-      bindBus(
+      safeBusOn(
         ROUTER_EVENTS?.rendered ||
           "router:rendered",
         (payload) => {
@@ -3081,7 +3254,7 @@ export const App = (() => {
         }
       );
 
-      bindBus(
+      safeBusOn(
         ROUTER_EVENTS?.asyncComplete ||
           "router:render:async-complete",
         (payload) => {
@@ -3098,7 +3271,7 @@ export const App = (() => {
         }
       );
 
-      bindBus(
+      safeBusOn(
         APP_EVENTS?.routeChange ||
           "app:route:change",
         (payload) => {
@@ -3115,7 +3288,7 @@ export const App = (() => {
         }
       );
 
-      bindBus(
+      safeBusOn(
         APP_EVENTS?.uiRepairRequest ||
           "app:ui:repair-request",
         (payload) => {
@@ -3155,7 +3328,7 @@ export const App = (() => {
         APP_EVENTS?.themeChange || "app:theme:change",
         "theme:change",
       ].forEach((eventName) => {
-        bindBus(eventName, (payload) => {
+        safeBusOn(eventName, (payload) => {
           scheduleUIRepair(
             getReason(payload, eventName),
             {
@@ -3385,6 +3558,84 @@ export const App = (() => {
   function resetCycleRuntimeState() {
     state.bootNavigationHandled = false;
     state.initialRouteRendered = false;
+    state.lastBootSteps = [];
+    state.lastError = null;
+  }
+
+  function recordBootStep(name = "", payload = {}) {
+    const item = {
+      name: safeText(name, "unknown"),
+      at: safeIsoDate(),
+      ms: nowEpochMs(),
+      ...sanitizePayload(payload),
+    };
+
+    state.lastBootSteps.push(item);
+
+    if (state.lastBootSteps.length > 80) {
+      state.lastBootSteps.splice(
+        0,
+        state.lastBootSteps.length - 80
+      );
+    }
+
+    safeEmit(
+      BOOT_EVENTS.step,
+      item
+    );
+
+    return item;
+  }
+
+  async function runBootStep(name = "", fn, payload = {}) {
+    const stepName = safeText(name, "unknown");
+    const startedAt = nowEpochMs();
+
+    recordBootStep(
+      `${stepName}:start`,
+      payload
+    );
+
+    try {
+      const result = await Promise.resolve(
+        isFunction(fn)
+          ? fn()
+          : null
+      );
+
+      const durationMs = nowEpochMs() - startedAt;
+
+      recordBootStep(
+        `${stepName}:done`,
+        {
+          durationMs,
+        }
+      );
+
+      if (durationMs > BOOT_STEP_MAX_DURATION_MS) {
+        safeWarn(
+          "Boot step lento.",
+          {
+            step: stepName,
+            durationMs,
+          }
+        );
+      }
+
+      return result;
+    } catch (error) {
+      const durationMs = nowEpochMs() - startedAt;
+
+      recordBootStep(
+        `${stepName}:error`,
+        {
+          durationMs,
+          error,
+        }
+      );
+
+      throw error;
+    }
   }
 
   function emitBootState(phase = "unknown", extra = {}) {
@@ -3509,6 +3760,7 @@ export const App = (() => {
     state.booting = false;
     state.booted = false;
     state.lastBootErrorAt = nowEpochMs();
+    state.lastError = sanitizePayload(error);
 
     try {
       markBootError?.(
@@ -4541,11 +4793,17 @@ export const App = (() => {
     if (!state.readyEmitted) {
       state.readyEmitted = true;
 
+      const readyAt = safeIsoDate();
+
+      try {
+        setWindowValue(RUNTIME_KEYS.lastReadyAt, readyAt);
+      } catch {}
+
       safeEmit(
         BOOT_EVENTS.ready,
         {
           cycleId,
-          at: safeIsoDate(),
+          at: readyAt,
         }
       );
 
@@ -4567,6 +4825,8 @@ export const App = (() => {
       );
     }
 
+    persistBootSnapshot("finalize-boot");
+
     return true;
   }
 
@@ -4580,10 +4840,16 @@ export const App = (() => {
       sanitizeBootContextForLog(bootContext)
     );
 
-    await renderInitialRouteBlock({
-      cycleId,
-      reason: "public-token-first",
-    });
+    await runBootStep(
+      "render-public-token-route",
+      () => renderInitialRouteBlock({
+        cycleId,
+        reason: "public-token-first",
+      }),
+      {
+        cycleId,
+      }
+    );
 
     bindRouterBlock("public-token-first");
 
@@ -4596,11 +4862,17 @@ export const App = (() => {
     const beforeRestore = getCurrentRouteSnapshot();
 
     const restoreResult =
-      await restoreSessionBlock({
-        cycleId,
-        nonBlocking: false,
-        skipPostRestoreNavigation: false,
-      });
+      await runBootStep(
+        "restore-session",
+        () => restoreSessionBlock({
+          cycleId,
+          nonBlocking: false,
+          skipPostRestoreNavigation: false,
+        }),
+        {
+          cycleId,
+        }
+      );
 
     const afterRestore = getCurrentRouteSnapshot();
 
@@ -4645,10 +4917,16 @@ export const App = (() => {
         }
       );
     } else {
-      await renderInitialRouteBlock({
-        cycleId,
-        reason: "after-restore",
-      });
+      await runBootStep(
+        "render-after-restore",
+        () => renderInitialRouteBlock({
+          cycleId,
+          reason: "after-restore",
+        }),
+        {
+          cycleId,
+        }
+      );
     }
 
     bindRouterBlock("after-initial-route");
@@ -4682,14 +4960,32 @@ export const App = (() => {
       showBootLoader("boot-start");
 
       refreshBootUrlContext();
-      exposeRuntimeModulesToCore();
-      bindGlobalHandlersBlock();
 
-      await Promise.resolve(
-        AppCore?.init?.({
+      await runBootStep(
+        "expose-runtime-modules:early",
+        () => exposeRuntimeModulesToCore(),
+        {
+          cycleId,
+        }
+      );
+
+      await runBootStep(
+        "bind-global-handlers",
+        () => bindGlobalHandlersBlock(),
+        {
+          cycleId,
+        }
+      );
+
+      await runBootStep(
+        "core-init",
+        () => AppCore?.init?.({
           source: BOOT_SOURCE,
           cycleId,
-        })
+        }),
+        {
+          cycleId,
+        }
       );
 
       exposeRuntimeModulesToCore();
@@ -4707,15 +5003,54 @@ export const App = (() => {
 
       exposeRuntimeModulesToCore();
 
-      bindAppEventsBlock();
+      await runBootStep(
+        "bind-app-events",
+        () => bindAppEventsBlock(),
+        {
+          cycleId,
+        }
+      );
 
-      initServices();
-      initStoreBlock();
-      initI18nBlock();
+      await runBootStep(
+        "init-services",
+        () => initServices(),
+        {
+          cycleId,
+        }
+      );
 
-      configureRouterBlock();
+      await runBootStep(
+        "init-store",
+        () => initStoreBlock(),
+        {
+          cycleId,
+        }
+      );
 
-      const uiOk = initUIBlock();
+      await runBootStep(
+        "init-i18n",
+        () => initI18nBlock(),
+        {
+          cycleId,
+        }
+      );
+
+      await runBootStep(
+        "configure-router",
+        () => configureRouterBlock(),
+        {
+          cycleId,
+        }
+      );
+
+      const uiOk =
+        await runBootStep(
+          "init-ui",
+          () => initUIBlock(),
+          {
+            cycleId,
+          }
+        );
 
       if (!uiOk) {
         safeWarn(
@@ -4755,7 +5090,13 @@ export const App = (() => {
         }
       );
 
-      await finalizeBoot(cycleId);
+      await runBootStep(
+        "finalize-boot",
+        () => finalizeBoot(cycleId),
+        {
+          cycleId,
+        }
+      );
 
       return api;
     } catch (error) {
@@ -4822,6 +5163,8 @@ export const App = (() => {
           hideLoader: forceHideLoader,
         });
       } catch {}
+
+      persistBootSnapshot("boot-error");
 
       return api;
     }
@@ -4947,6 +5290,43 @@ export const App = (() => {
     });
   }
 
+  function destroy(options = {}) {
+    const opts = safeObject(options);
+
+    try {
+      clearBootFailsafeTimer(state, AppCore);
+    } catch {}
+
+    if (opts.unbindWindowEvents !== false) {
+      unbindWindowEvents();
+    }
+
+    if (opts.unbindBusEvents === true) {
+      unbindBusEvents();
+      state.uiRepairEventsBound = false;
+      state.appEventsBound = false;
+    }
+
+    state.booting = false;
+    state.bootPromise = null;
+    state.restorePromise = null;
+    state.loaderVisible = false;
+
+    forceHideBootLoader("app-destroy");
+
+    safeEmit(
+      APP_EVENTS?.destroy ||
+        "app:destroy",
+      {
+        reason:
+          opts.reason ||
+          "manual",
+      }
+    );
+
+    return true;
+  }
+
   function getState() {
     const context = refreshBootUrlContext();
 
@@ -5031,6 +5411,14 @@ export const App = (() => {
         uiSyncLastAt,
         uiSyncLastReason,
       },
+
+      events: {
+        boundWindowEvents:
+          boundWindowEvents.map((item) => item.eventName),
+
+        boundBusEvents:
+          boundBusEvents.map((item) => item.eventName),
+      },
     });
   }
 
@@ -5039,6 +5427,7 @@ export const App = (() => {
 
     boot,
     reboot,
+    destroy,
     getState,
 
     repairUI: repairUISystems,
@@ -5060,6 +5449,7 @@ export const App = (() => {
     isPublicTokenBoot,
 
     unbindWindowEvents,
+    unbindBusEvents,
   };
 
   try {

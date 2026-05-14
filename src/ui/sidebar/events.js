@@ -2,7 +2,7 @@
    Onion SPA - Sidebar Events
    Archivo: src/ui/sidebar/events.js
 
-   ONION SUPPORT · SIDEBAR EVENTS · 15/10
+   ONION SUPPORT · SIDEBAR EVENTS · EXTREME 10/10
    VISUAL COMMIT · ROUTER SAFE · STALE ROUTE FIREBREAK
 
    Responsabilidades:
@@ -36,20 +36,6 @@
    - Indicador se recalcula después del layout final.
    - Durante transición se oculta el indicador por state.js.
    - Handlers viejos quedan invalidados por epoch aunque el bus no permita off().
-
-   CLICK SIDEBAR:
-   - Clicks del menú navegan explícitamente con Router.navigate().
-   - Listener document click en capture para ganar al Router global.
-   - Soporta data-route / data-href / data-to / href.
-   - Respeta Ctrl/Cmd/Shift/Alt click.
-   - Respeta target="_blank", download, URLs externas y href inseguros.
-   - Botones del dropdown con data-route también navegan.
-
-   ACTIVE WRONG:
-   - En commits de router, la URL visible tiene prioridad.
-   - Payloads viejos de router/app state no pisan el activo.
-   - /@usuario/facturas se normaliza a /facturas.
-   - Alias ES/CA/EN sincronizados con template.js/state.js.
 ========================================================= */
 
 import {
@@ -70,7 +56,7 @@ import {
 ========================================================= */
 
 export const SIDEBAR_EVENTS_VERSION =
-  "sidebar-events-v15-visual-commit-router-safe";
+  "sidebar-events-v16-extreme-visual-commit-router-safe";
 
 /* =========================================================
    LOCAL CLEANUP / EPOCHS
@@ -206,24 +192,39 @@ const INTERACTIVE_SELECTOR =
     "[data-sidebar-action]",
   ].join(",");
 
-const HIDDEN_TARGET_SELECTOR =
+const HARD_HIDDEN_TARGET_SELECTOR =
   [
     "[hidden]",
     "[inert]",
     "[data-sidebar-visible='false']",
     "[data-role-visible='false']",
-    "[data-admin-visible='false']",
   ].join(",");
 
-const HIDDEN_VISIBLE_SELECTOR =
-  [
-    "[hidden]",
-    "[inert]",
-    "[aria-hidden='true']",
-    "[data-role-visible='false']",
-    "[data-admin-visible='false']",
-    "[data-sidebar-visible='false']",
-  ].join(",");
+const ADMIN_HIDDEN_SELECTOR =
+  "[data-admin-visible='false']";
+
+const ARIA_HIDDEN_SELECTOR =
+  "[aria-hidden='true']";
+
+const ACCESS_RULE_ATTRS =
+  Object.freeze([
+    "data-role",
+    "data-roles",
+    "data-admin-only",
+    "data-sidebar-admin-only",
+    "data-requires-role",
+    "data-requires-roles",
+    "data-required-role",
+    "data-required-roles",
+    "data-sidebar-role",
+    "data-sidebar-roles",
+    "data-permission",
+    "data-permissions",
+    "data-sidebar-permission",
+    "data-sidebar-permissions",
+    "data-scope",
+    "data-scopes",
+  ]);
 
 /* =========================================================
    BASICS
@@ -346,12 +347,27 @@ function resolveLocalScope(scope = DEFAULT_SCOPE, type = "local") {
 }
 
 function safeWarn(AppCore, ...args) {
+  let logged =
+    false;
+
   try {
-    AppCore?.utils?.warn?.(
-      "[SidebarEvents]",
-      ...args
-    );
-  } catch {}
+    if (isFn(AppCore?.utils?.warn)) {
+      AppCore.utils.warn(
+        "[SidebarEvents]",
+        ...args
+      );
+
+      logged =
+        true;
+    }
+  } catch {
+    logged =
+      false;
+  }
+
+  if (logged) {
+    return;
+  }
 
   try {
     console.warn(
@@ -402,14 +418,24 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
       ...safeObject(payload),
     };
 
+  let busAvailable =
+    false;
+
+  let busEmitted =
+    false;
+
   try {
     if (isFn(AppCore?.events?.emit)) {
+      busAvailable =
+        true;
+
       AppCore.events.emit(
         name,
         finalPayload
       );
 
-      return true;
+      busEmitted =
+        true;
     }
   } catch (error) {
     safeWarn(
@@ -419,11 +445,12 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
     );
   }
 
-  try {
-    if (
-      isBrowser() &&
-      typeof CustomEvent !== "undefined"
-    ) {
+  if (
+    (!busAvailable || !busEmitted) &&
+    isBrowser() &&
+    typeof CustomEvent !== "undefined"
+  ) {
+    try {
       window.dispatchEvent(
         new CustomEvent(
           name,
@@ -435,10 +462,10 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
       );
 
       return true;
-    }
-  } catch {}
+    } catch {}
+  }
 
-  return false;
+  return busEmitted;
 }
 
 function safeWindowTimeout(fn, ms = 0) {
@@ -700,6 +727,189 @@ function preventDefaultAndStop(event) {
   try {
     event?.stopImmediatePropagation?.();
   } catch {}
+}
+
+/* =========================================================
+   HIDDEN / ACCESS HELPERS
+========================================================= */
+
+function splitAccessValues(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .split(/[,\s|;]+/)
+    .map((item) =>
+      item
+        .replace(/[\s-]+/g, "_")
+        .trim()
+    )
+    .filter(Boolean);
+}
+
+function boolAttr(value = "") {
+  const text =
+    safeText(value, "").toLowerCase();
+
+  return (
+    value === "" ||
+    text === "true" ||
+    text === "1" ||
+    text === "yes" ||
+    text === "si" ||
+    text === "sí" ||
+    text === "on"
+  );
+}
+
+function hasAccessRuleAttr(element = null) {
+  if (!element) {
+    return false;
+  }
+
+  return ACCESS_RULE_ATTRS.some((attr) => {
+    try {
+      return element.hasAttribute?.(attr);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function elementRequiresAdmin(element = null) {
+  if (!element) {
+    return false;
+  }
+
+  try {
+    const directAdmin =
+      element.getAttribute("data-admin-only");
+
+    if (
+      directAdmin !== null &&
+      boolAttr(directAdmin)
+    ) {
+      return true;
+    }
+
+    const sidebarAdmin =
+      element.getAttribute("data-sidebar-admin-only");
+
+    if (
+      sidebarAdmin !== null &&
+      boolAttr(sidebarAdmin)
+    ) {
+      return true;
+    }
+
+    const values =
+      [
+        element.getAttribute("data-role"),
+        element.getAttribute("data-roles"),
+        element.getAttribute("data-sidebar-role"),
+        element.getAttribute("data-sidebar-roles"),
+        element.getAttribute("data-requires-role"),
+        element.getAttribute("data-requires-roles"),
+        element.getAttribute("data-required-role"),
+        element.getAttribute("data-required-roles"),
+        element.getAttribute("data-permission"),
+        element.getAttribute("data-permissions"),
+        element.getAttribute("data-sidebar-permission"),
+        element.getAttribute("data-sidebar-permissions"),
+        element.getAttribute("data-scope"),
+        element.getAttribute("data-scopes"),
+      ]
+        .flatMap(splitAccessValues);
+
+    return values.some((value) => {
+      return (
+        value === "admin" ||
+        value === "administrator" ||
+        value === "superadmin" ||
+        value === "super_admin" ||
+        value === "owner" ||
+        value === "root" ||
+        value === "*" ||
+        value.startsWith("admin:") ||
+        value.startsWith("admin.") ||
+        value.includes(":admin") ||
+        value.includes(".admin")
+      );
+    });
+  } catch {
+    return false;
+  }
+}
+
+function findBlockingHiddenAncestor(element = null) {
+  if (!element) {
+    return null;
+  }
+
+  try {
+    const hardHidden =
+      element.closest?.(HARD_HIDDEN_TARGET_SELECTOR);
+
+    if (hardHidden) {
+      return hardHidden;
+    }
+
+    const adminHidden =
+      element.closest?.(ADMIN_HIDDEN_SELECTOR);
+
+    if (
+      adminHidden &&
+      (
+        elementRequiresAdmin(adminHidden) ||
+        hasAccessRuleAttr(adminHidden)
+      )
+    ) {
+      return adminHidden;
+    }
+
+    const ariaHidden =
+      element.closest?.(ARIA_HIDDEN_SELECTOR);
+
+    if (!ariaHidden) {
+      return null;
+    }
+
+    /*
+      No bloquear clicks sólo porque el icono SVG/span decorativo tenga aria-hidden.
+      Sí bloquear si el propio elemento interactivo está aria-hidden.
+    */
+    const interactiveParent =
+      element.closest?.(INTERACTIVE_SELECTOR);
+
+    if (!interactiveParent) {
+      return ariaHidden;
+    }
+
+    if (ariaHidden === interactiveParent) {
+      return ariaHidden;
+    }
+
+    if (!interactiveParent.contains(ariaHidden)) {
+      return ariaHidden;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldIgnoreHiddenTarget(target = null) {
+  const element =
+    getElementTarget(target);
+
+  if (!element) {
+    return false;
+  }
+
+  return Boolean(
+    findBlockingHiddenAncestor(element)
+  );
 }
 
 /* =========================================================
@@ -992,6 +1202,26 @@ function getRouterPath(Router = null) {
   );
 }
 
+function getRouterCandidate(AppCore = null, Router = null) {
+  if (Router) {
+    return Router;
+  }
+
+  try {
+    return (
+      AppCore?.Router ||
+      AppCore?.router ||
+      AppCore?.modules?.Router ||
+      AppCore?.modules?.router ||
+      AppCore?.modules?.get?.("Router") ||
+      AppCore?.modules?.get?.("router") ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
 function getAppStatePath(AppCore = null) {
   return normalizeRoutePath(
     first(
@@ -1032,6 +1262,9 @@ function collectExplicitRouteCandidates(payload = {}) {
     detail.route?.path,
     detail.route?.canonicalPath,
 
+    detail.resolved?.publicPath,
+    detail.resolved?.canonicalPath,
+
     detail.payload?.publicPath,
     detail.payload?.path,
     detail.payload?.requestedPath,
@@ -1039,6 +1272,9 @@ function collectExplicitRouteCandidates(payload = {}) {
     detail.payload?.route,
     detail.payload?.to,
     detail.payload?.url,
+
+    detail.payload?.resolved?.publicPath,
+    detail.payload?.resolved?.canonicalPath,
 
     detail.detail?.publicPath,
     detail.detail?.path,
@@ -1097,12 +1333,14 @@ function resolveFreshRoute(payload = {}, AppCore = null, Router = null, options 
   const browser =
     getBrowserPath();
 
-  const router =
-    getRouterPath(
-      Router ||
-        AppCore?.Router ||
-        AppCore?.router
+  const finalRouter =
+    getRouterCandidate(
+      AppCore,
+      Router
     );
+
+  const router =
+    getRouterPath(finalRouter);
 
   const appState =
     getAppStatePath(AppCore);
@@ -1191,9 +1429,10 @@ function buildRoutePayload(ctx = {}, payload = {}, reason = "", options = {}) {
     ctx.AppCore;
 
   const Router =
-    ctx.Router ||
-    AppCore?.Router ||
-    AppCore?.router;
+    getRouterCandidate(
+      AppCore,
+      ctx.Router
+    );
 
   const route =
     resolveFreshRoute(
@@ -1391,9 +1630,10 @@ async function navigateFromSidebar({
   source = "sidebar",
 } = {}) {
   const finalRouter =
-    Router ||
-    AppCore?.Router ||
-    AppCore?.router;
+    getRouterCandidate(
+      AppCore,
+      Router
+    );
 
   const cleanTarget =
     normalizeSidebarTarget(
@@ -1561,7 +1801,7 @@ function isVisibleMenuItem(item = null) {
       return false;
     }
 
-    if (item.closest?.(HIDDEN_VISIBLE_SELECTOR)) {
+    if (findBlockingHiddenAncestor(item)) {
       return false;
     }
 
@@ -1609,6 +1849,12 @@ function clearActiveItemClasses(sidebarMenu = null) {
         delete item.dataset.matchedRoute;
         delete item.dataset.matchedCurrent;
         delete item.dataset.matchCandidateIndex;
+
+        item.dataset.current =
+          "false";
+
+        item.dataset.selected =
+          "false";
       }
     } catch {}
   }
@@ -1635,6 +1881,12 @@ function setActiveItemClasses(item = null, matchedRoute = "", currentRoute = "")
 
     if (item.dataset) {
       item.dataset.active =
+        DATA_TRUE;
+
+      item.dataset.current =
+        DATA_TRUE;
+
+      item.dataset.selected =
         DATA_TRUE;
 
       item.dataset.matchedRoute =
@@ -1903,7 +2155,7 @@ function runLocalCleanups(scope) {
   const cleanups =
     localCleanups.get(scopeName) || [];
 
-  for (const cleanup of cleanups) {
+  for (const cleanup of cleanups.splice(0)) {
     try {
       cleanup?.();
     } catch {}
@@ -2182,9 +2434,10 @@ function syncActiveMenuItem(ctx = {}, payload = {}) {
     ctx.AppCore;
 
   const Router =
-    ctx.Router ||
-    AppCore?.Router ||
-    AppCore?.router;
+    getRouterCandidate(
+      AppCore,
+      ctx.Router
+    );
 
   const reason =
     safeText(
@@ -2275,9 +2528,10 @@ function syncActiveMenuIndicator(ctx = {}, options = {}) {
     ctx.AppCore;
 
   const Router =
-    ctx.Router ||
-    AppCore?.Router ||
-    AppCore?.router;
+    getRouterCandidate(
+      AppCore,
+      ctx.Router
+    );
 
   const reason =
     safeText(
@@ -2340,9 +2594,10 @@ function scheduleActiveMenuIndicator(ctx = {}, options = {}) {
     ctx.AppCore;
 
   const Router =
-    ctx.Router ||
-    AppCore?.Router ||
-    AppCore?.router;
+    getRouterCandidate(
+      AppCore,
+      ctx.Router
+    );
 
   const reason =
     safeText(
@@ -2788,41 +3043,6 @@ function isInsideSidebarArea(elements = {}, target = null) {
   );
 }
 
-function shouldIgnoreHiddenTarget(target = null) {
-  const element =
-    getElementTarget(target);
-
-  if (!element) {
-    return false;
-  }
-
-  const hardHidden =
-    element.closest(HIDDEN_TARGET_SELECTOR);
-
-  if (hardHidden) {
-    return true;
-  }
-
-  const ariaHidden =
-    element.closest("[aria-hidden='true']");
-
-  if (!ariaHidden) {
-    return false;
-  }
-
-  const interactiveParent =
-    element.closest(INTERACTIVE_SELECTOR);
-
-  if (
-    interactiveParent &&
-    interactiveParent.contains(ariaHidden)
-  ) {
-    return ariaHidden === interactiveParent;
-  }
-
-  return true;
-}
-
 function preventHiddenTargetClick(event) {
   const target =
     getElementTarget(event);
@@ -2983,9 +3203,10 @@ export function handleDocumentClick({
     }
 
     const finalRouter =
-      Router ||
-      AppCore?.Router ||
-      AppCore?.router;
+      getRouterCandidate(
+        AppCore,
+        Router
+      );
 
     const targetPath =
       normalizeSidebarTarget(
@@ -3076,6 +3297,9 @@ export function handleDocumentClick({
         preferExplicitRoute:
           true,
 
+        forceRoute:
+          true,
+
         activeItem,
 
         delayMs:
@@ -3127,9 +3351,10 @@ export function handleDocumentClick({
     }
 
     const finalRouter =
-      Router ||
-      AppCore?.Router ||
-      AppCore?.router;
+      getRouterCandidate(
+        AppCore,
+        Router
+      );
 
     const targetPath =
       normalizeSidebarTarget(
@@ -3264,9 +3489,10 @@ export function handleSidebarMenuClick({
   }
 
   const finalRouter =
-    Router ||
-    AppCore?.Router ||
-    AppCore?.router;
+    getRouterCandidate(
+      AppCore,
+      Router
+    );
 
   const targetPath =
     normalizeSidebarTarget(
@@ -3355,6 +3581,9 @@ export function handleSidebarMenuClick({
         targetPath,
 
       preferExplicitRoute:
+        true,
+
+      forceRoute:
         true,
 
       activeItem,
@@ -3494,9 +3723,10 @@ export function handleResize({
     {
       AppCore,
       Router:
-        Router ||
-        AppCore?.Router ||
-        AppCore?.router,
+        getRouterCandidate(
+          AppCore,
+          Router
+        ),
 
       getElements:
         resolver,
@@ -3576,12 +3806,7 @@ export function bindDomEvents(ctx = {}) {
   const epoch =
     resetLocalScope(localScope);
 
-  bindDom(
-    AppCore,
-    localScope,
-    epoch,
-    document,
-    "click",
+  const clickHandler =
     (event) =>
       handleDocumentClick(
         {
@@ -3595,7 +3820,29 @@ export function bindDomEvents(ctx = {}) {
           getElements:
             resolver,
         }
-      ),
+      );
+
+  /*
+    Window capture intenta ganar a routers globales en document capture.
+    Document capture queda como respaldo.
+  */
+  bindDom(
+    AppCore,
+    localScope,
+    epoch,
+    window,
+    "click",
+    clickHandler,
+    true
+  );
+
+  bindDom(
+    AppCore,
+    localScope,
+    epoch,
+    document,
+    "click",
+    clickHandler,
     true
   );
 
@@ -3627,23 +3874,18 @@ export function bindDomEvents(ctx = {}) {
     }
   );
 
+  let resizeTimer =
+    null;
+
   const resizeHandler =
-    isFn(AppCore?.utils?.debounce)
-      ? AppCore.utils.debounce(
-          () =>
-            handleResize(
-              {
-                AppCore,
-                Router,
-                syncSidebarState,
-                closeDropdown,
-                getElements:
-                  resolver,
-              }
-            ),
-          RESIZE_DEBOUNCE_MS
-        )
-      : () =>
+    () => {
+      clearWindowTimeout(resizeTimer);
+
+      resizeTimer =
+        safeWindowTimeout(() => {
+          resizeTimer =
+            null;
+
           handleResize(
             {
               AppCore,
@@ -3654,6 +3896,17 @@ export function bindDomEvents(ctx = {}) {
                 resolver,
             }
           );
+        }, RESIZE_DEBOUNCE_MS);
+    };
+
+  pushLocalCleanup(
+    localScope,
+    () => {
+      clearWindowTimeout(resizeTimer);
+      resizeTimer =
+        null;
+    }
+  );
 
   bindDom(
     AppCore,
@@ -3669,15 +3922,25 @@ export function bindDomEvents(ctx = {}) {
     localScope,
     epoch,
     window,
+    "orientationchange",
+    resizeHandler
+  );
+
+  bindDom(
+    AppCore,
+    localScope,
+    epoch,
+    window,
     "popstate",
     () => {
       const localCtx =
         {
           AppCore,
           Router:
-            Router ||
-            AppCore?.Router ||
-            AppCore?.router,
+            getRouterCandidate(
+              AppCore,
+              Router
+            ),
 
           getElements:
             resolver,
@@ -3734,9 +3997,10 @@ export function bindDomEvents(ctx = {}) {
         {
           AppCore,
           Router:
-            Router ||
-            AppCore?.Router ||
-            AppCore?.router,
+            getRouterCandidate(
+              AppCore,
+              Router
+            ),
 
           getElements:
             resolver,
@@ -3835,9 +4099,10 @@ export function bindCoreEvents(ctx = {}) {
       AppCore,
 
       Router:
-        Router ||
-        AppCore?.Router ||
-        AppCore?.router,
+        getRouterCandidate(
+          AppCore,
+          Router
+        ),
 
       renderUser,
       applyRoleVisibility,
@@ -4147,15 +4412,20 @@ export function bindCoreEvents(ctx = {}) {
     [
       "app:user:change",
       "app:user:updated",
+      "auth:user:change",
+
       "app:session:change",
       "app:session:restored",
-      "app:auth:change",
+      "auth:session:restored",
+      "auth:session:applied",
+      "auth:login:session-committed",
 
+      "app:auth:ready",
+      "app:auth:change",
       "auth:change",
       "auth:updated",
       "auth:restore:success",
-      "auth:session:restored",
-      "auth:session:applied",
+      "auth:token:refreshed",
     ],
     commitIdentity
   );
@@ -4171,6 +4441,8 @@ export function bindCoreEvents(ctx = {}) {
 
   bindMany(
     [
+      "auth:login:2fa-required",
+      "auth:login:error",
       "app:session:cleared",
       "auth:session:cleared",
       "auth:logout",
@@ -4263,10 +4535,16 @@ export function bindCoreEvents(ctx = {}) {
 
   [
     "app:route:change",
+    "app:events:route-synced",
+    "app:router:state-synced",
+    "app:router:initial-render:done",
+
     "router:route:change",
     "router:navigation:complete",
     "router:render:async-complete",
     "router:rendered:complete",
+
+    "app:i18n:rerender:done",
   ].forEach((eventName) => {
     bindCoreEvent(
       AppCore,
@@ -4324,7 +4602,57 @@ export function bindCoreEvents(ctx = {}) {
 
   bindMany(
     [
+      "sidebar:indicator:refresh-request",
+      "sidebar:active:invalidated",
+    ],
+    (eventOrPayload = {}) => {
+      const detail =
+        getEventDetail(eventOrPayload);
+
+      visualCommitter.schedule(
+        {
+          key:
+            "indicator-refresh-request",
+
+          reason:
+            safeText(
+              detail.reason ||
+                "sidebar:indicator:refresh-request",
+              "sidebar:indicator:refresh-request"
+            ),
+
+          payload:
+            detail,
+
+          renderIdentity:
+            false,
+
+          syncState:
+            false,
+
+          closeDropdown:
+            false,
+
+          delayMs:
+            32,
+
+          frames:
+            2,
+
+          indicatorDelayMs:
+            32,
+
+          force:
+            true,
+        }
+      );
+    }
+  );
+
+  bindMany(
+    [
       "app:ready",
+      "app:ui:ready",
       "app:boot:ready",
       "app:boot:complete",
       "router:bound",
@@ -4379,8 +4707,10 @@ export function bindCoreEvents(ctx = {}) {
     [
       "app:lang:change",
       "i18n:change",
+      "app:i18n:sync",
       "theme:change",
       "app:theme:change",
+      "onion:theme:change",
     ],
     (eventOrPayload = {}) => {
       const detail =

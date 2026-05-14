@@ -3,7 +3,7 @@
    Archivo: src/core/storage.js
 
    ONION SUPPORT · CORE STORAGE
-   NAMESPACED STORAGE · LOCAL/SESSION/MEMORY · SAFE LEGACY CLEANUP · 14/10
+   NAMESPACED STORAGE · LOCAL/SESSION/MEMORY · SAFE LEGACY CLEANUP · 15/10
 
    RESPONSABILIDADES:
    - encapsular acceso localStorage/sessionStorage namespaced
@@ -21,6 +21,7 @@
    - JSON seguro
    - fallback silencioso ante quota/private mode
    - protección contra "undefined"/"null"/"[object Object]" corruptos
+   - NO trata false / {} / [] como corruptos genéricos
    - namespace estable
    - aliases remove/delete/del
    - limpieza legacy ampliada pero segura
@@ -30,7 +31,7 @@
    - cero throws accidentales
    - soporte local/session/memory
    - soporte getJson/setJson/getRaw/setRaw
-   - soporte all/session/sessionAlso/memory/memoryAlso
+   - soporte all/session/sessionAlso/localAlso/memory/memoryAlso
 ========================================================= */
 
 import { config } from "./config.js";
@@ -48,7 +49,7 @@ import {
 ========================================================= */
 
 const STORAGE_VERSION =
-  "14.0.0";
+  "15.0.0";
 
 const DEFAULT_PREFIX =
   "onion";
@@ -73,8 +74,11 @@ const CORRUPTED_RAW_VALUES =
     "null",
     "nan",
     "[object Object]",
+    "[object object]",
     "\"\"",
     "''",
+    "\"undefined\"",
+    "\"null\"",
   ]);
 
 const SENSITIVE_KEY_RE =
@@ -84,7 +88,7 @@ const SESSIONISH_KEY_RE =
   /(session|token|auth|user|role|login|otp|mfa|2fa|post_login|postLogin|redirectAfterLogin|redirect_after_login)/i;
 
 const PREFERENCE_KEY_RE =
-  /(^|[:._-])(theme|themeMode|appearance|lang|language|locale|sidebarOpen|density|preferences|settings|ui)([:._-]|$)/i;
+  /(^|[:._-])(theme|themeMode|theme_mode|appearance|lang|language|locale|sidebarOpen|sidebar_open|density|preferences|preferencias|settings|ui)([:._-]|$)/i;
 
 const LEGACY_EXTRA_KEYS =
   Object.freeze([
@@ -99,23 +103,45 @@ const LEGACY_EXTRA_KEYS =
     "onion_user_id",
     "onion_user_slug",
     "onion_user_name",
+    "onion_username",
     "onion_role",
+    "onion_roles",
+    "onion_session",
+    "onion_session_data",
     "onion_session_id",
     "onion_session_user_id",
     "onion_post_login_target",
+    "onion_redirect_after_login",
 
     "onion.token",
     "onion.accessToken",
+    "onion.access_token",
     "onion.refreshToken",
+    "onion.refresh_token",
     "onion.tempToken",
+    "onion.temp_token",
     "onion.temporaryToken",
+    "onion.temporary_token",
     "onion.twoFactorToken",
+    "onion.two_factor_token",
     "onion.mfaToken",
+    "onion.mfa_token",
     "onion.user",
+    "onion.currentUser",
+    "onion.authUser",
+    "onion.sessionUser",
     "onion.role",
+    "onion.roles",
+    "onion.session",
+    "onion.sessionData",
     "onion.sessionId",
+    "onion.session_id",
     "onion.sessionUserId",
+    "onion.session_user_id",
     "onion.postLoginTarget",
+    "onion.post_login_target",
+    "onion.redirectAfterLogin",
+    "onion.redirect_after_login",
 
     "onion:token",
     "onion:accessToken",
@@ -131,21 +157,28 @@ const LEGACY_EXTRA_KEYS =
     "onion:mfaToken",
     "onion:mfa_token",
     "onion:user",
+    "onion:currentUser",
+    "onion:authUser",
+    "onion:sessionUser",
     "onion:userId",
     "onion:user_id",
     "onion:userName",
     "onion:user_name",
+    "onion:username",
     "onion:userSlug",
     "onion:user_slug",
     "onion:role",
+    "onion:roles",
     "onion:session",
     "onion:sessionData",
-    "onion:sessionId",
     "onion:session_id",
+    "onion:sessionId",
     "onion:sessionUserId",
     "onion:session_user_id",
     "onion:postLoginTarget",
     "onion:post_login_target",
+    "onion:redirectAfterLogin",
+    "onion:redirect_after_login",
 
     "token",
     "accessToken",
@@ -199,6 +232,9 @@ const STORAGE_EVENTS =
 
     legacyCleared:
       "app:core:storage:legacy-cleared",
+
+    migrated:
+      "app:core:storage:migrated",
   });
 
 /* =========================================================
@@ -274,9 +310,18 @@ function safeNumber(value, fallback = 0) {
 }
 
 function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return [];
+  }
+
+  return [value];
 }
 
 function unique(values = []) {
@@ -311,7 +356,7 @@ function safeEmit(events, eventName, payload = {}) {
     if (isFunction(events?.emit)) {
       events.emit(
         name,
-        payload
+        sanitizeStoragePayload(payload)
       );
 
       return true;
@@ -478,7 +523,10 @@ function getNamespacedKey(key = "") {
     const built =
       buildStorageKey(cleanKey);
 
-    if (safeText(built, "")) {
+    if (
+      safeText(built, "") &&
+      isNamespacedKey(built)
+    ) {
       return built;
     }
   } catch {}
@@ -494,6 +542,22 @@ function isCurrentNamespacedKey(key = "") {
   return isNamespacedKey(
     safeText(key, "")
   );
+}
+
+function namespacePrefix(namespace = "") {
+  const clean =
+    safeText(namespace, "");
+
+  if (!clean) {
+    return getPrefix();
+  }
+
+  const namespaced =
+    getNamespacedKey(clean);
+
+  return namespaced.endsWith(":")
+    ? namespaced
+    : `${namespaced}:`;
 }
 
 /* =========================================================
@@ -601,7 +665,7 @@ function getUsableStorage(kind = DEFAULT_KIND) {
   return getStorageObject(finalKind);
 }
 
-function readRawFromStorage(kind, namespacedKey, fallback = null) {
+function readRawFromStorage(kind, namespacedKey, fallback = undefined) {
   const storage =
     getUsableStorage(kind);
 
@@ -679,7 +743,7 @@ function removeFromStorage(kind, namespacedKey) {
    MEMORY FALLBACK
 ========================================================= */
 
-function readRawFromMemory(namespacedKey, fallback = null) {
+function readRawFromMemory(namespacedKey, fallback = undefined) {
   if (!memoryStorage.has(namespacedKey)) {
     return fallback;
   }
@@ -744,6 +808,76 @@ function sanitizeSnapshotValue(key = "", value = "") {
     );
   } catch {
     return value;
+  }
+}
+
+function sanitizeStoragePayload(value, depth = 0, keyHint = "") {
+  if (depth > 4) {
+    return "[depth-limit]";
+  }
+
+  if (
+    /token|authorization|password|secret|session|otp|code|jwt|bearer|credential|cookie|csrf|xsrf|mfa|2fa/i.test(
+      safeText(keyHint, "")
+    )
+  ) {
+    return value ? "***" : null;
+  }
+
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return sanitizeSnapshotValue(
+      keyHint,
+      value
+    );
+  }
+
+  if (typeof value === "function") {
+    return "[function]";
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 80)
+      .map((item) =>
+        sanitizeStoragePayload(
+          item,
+          depth + 1,
+          keyHint
+        )
+      );
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value).slice(0, 120)) {
+      output[key] =
+        sanitizeStoragePayload(
+          item,
+          depth + 1,
+          key
+        );
+    }
+
+    return output;
+  }
+
+  try {
+    return sanitizeSnapshotValue(
+      keyHint,
+      String(value)
+    );
+  } catch {
+    return "[unserializable]";
   }
 }
 
@@ -1085,6 +1219,9 @@ export function createStorage(input = {}) {
     repair:
       0,
 
+    migrate:
+      0,
+
     errors:
       0,
 
@@ -1134,6 +1271,10 @@ export function createStorage(input = {}) {
   }
 
   function recordError(error, operation = "", key = "", kind = "") {
+    if (!error) {
+      return;
+    }
+
     stats.errors += 1;
 
     lastStorageError =
@@ -1188,12 +1329,25 @@ export function createStorage(input = {}) {
         ? options
         : {};
 
-    if (opts.memory === true) {
+    if (
+      opts.memory === true ||
+      opts.memoryOnly === true
+    ) {
       return "memory";
     }
 
-    if (opts.session === true) {
+    if (
+      opts.session === true ||
+      opts.sessionOnly === true
+    ) {
       return "session";
+    }
+
+    if (
+      opts.local === true ||
+      opts.localOnly === true
+    ) {
+      return "local";
     }
 
     return normalizeKind(
@@ -1201,6 +1355,145 @@ export function createStorage(input = {}) {
         opts.storage ||
         DEFAULT_KIND
     );
+  }
+
+  function resolveReadTargets(options = {}) {
+    const opts =
+      isObject(options)
+        ? options
+        : {};
+
+    const requestedKind =
+      resolveKindFromOptions(opts);
+
+    if (opts.all === true) {
+      return unique([
+        requestedKind,
+        "local",
+        "session",
+        "memory",
+      ]);
+    }
+
+    if (requestedKind === "memory") {
+      return [
+        "memory",
+      ];
+    }
+
+    if (requestedKind === "session") {
+      return unique([
+        "session",
+        opts.fallbackLocal === true
+          ? "local"
+          : "",
+        opts.memoryAlso === false
+          ? ""
+          : "memory",
+      ]);
+    }
+
+    return unique([
+      "local",
+      opts.fallbackSession === false
+        ? ""
+        : "session",
+      opts.memoryAlso === false
+        ? ""
+        : "memory",
+    ]);
+  }
+
+  function resolveWriteTargets(options = {}) {
+    const opts =
+      isObject(options)
+        ? options
+        : {};
+
+    const requestedKind =
+      resolveKindFromOptions(opts);
+
+    if (opts.all === true) {
+      return [
+        "local",
+        "session",
+        "memory",
+      ];
+    }
+
+    if (requestedKind === "memory") {
+      return [
+        "memory",
+      ];
+    }
+
+    if (requestedKind === "session") {
+      return unique([
+        "session",
+        opts.localAlso === true
+          ? "local"
+          : "",
+        opts.memoryAlso === false
+          ? ""
+          : "memory",
+      ]);
+    }
+
+    return unique([
+      "local",
+      opts.sessionAlso === true
+        ? "session"
+        : "",
+      opts.memoryAlso === false
+        ? ""
+        : "memory",
+    ]);
+  }
+
+  function resolveRemoveTargets(options = {}) {
+    const opts =
+      isObject(options)
+        ? options
+        : {};
+
+    const requestedKind =
+      resolveKindFromOptions(opts);
+
+    if (opts.all === true) {
+      return [
+        "local",
+        "session",
+        "memory",
+      ];
+    }
+
+    if (requestedKind === "memory") {
+      return [
+        "memory",
+      ];
+    }
+
+    if (requestedKind === "session") {
+      return unique([
+        "session",
+        opts.localAlso === true
+          ? "local"
+          : "",
+        opts.memoryAlso === false
+          ? ""
+          : "memory",
+      ]);
+    }
+
+    return unique([
+      "local",
+      opts.sessionAlso === true
+        ? "session"
+        : "",
+      opts.memoryAlso === false
+        ? ""
+        : "memory",
+    ]);
   }
 
   function incrementReadCounter(kind) {
@@ -1243,62 +1536,48 @@ export function createStorage(input = {}) {
       requestedKind
     );
 
-    if (requestedKind === "memory") {
-      incrementReadCounter("memory");
+    const targets =
+      resolveReadTargets(opts);
 
-      return readRawFromMemory(
-        namespacedKey,
-        fallback
-      );
-    }
+    for (const target of targets) {
+      if (target === "memory") {
+        incrementReadCounter("memory");
 
-    const raw =
-      readRawFromStorage(
-        requestedKind,
-        namespacedKey,
-        undefined
-      );
+        const memoryRaw =
+          readRawFromMemory(
+            namespacedKey,
+            undefined
+          );
 
-    incrementReadCounter(requestedKind);
+        if (memoryRaw !== undefined) {
+          return memoryRaw;
+        }
 
-    if (raw !== undefined) {
-      writeRawToMemory(
-        namespacedKey,
-        raw
-      );
+        continue;
+      }
 
-      return raw;
-    }
-
-    if (
-      requestedKind === "local" &&
-      opts.fallbackSession !== false
-    ) {
-      const sessionRaw =
+      const raw =
         readRawFromStorage(
-          "session",
+          target,
           namespacedKey,
           undefined
         );
 
-      incrementReadCounter("session");
+      incrementReadCounter(target);
 
-      if (sessionRaw !== undefined) {
-        writeRawToMemory(
-          namespacedKey,
-          sessionRaw
-        );
+      if (raw !== undefined) {
+        if (opts.memoryAlso !== false) {
+          writeRawToMemory(
+            namespacedKey,
+            raw
+          );
+        }
 
-        return sessionRaw;
+        return raw;
       }
     }
 
-    incrementReadCounter("memory");
-
-    return readRawFromMemory(
-      namespacedKey,
-      fallback
-    );
+    return fallback;
   }
 
   function get(name, fallback = null, options = {}) {
@@ -1333,40 +1612,13 @@ export function createStorage(input = {}) {
     const namespacedKey =
       key(name);
 
-    const requestedKind =
-      resolveKindFromOptions(opts);
-
     const targets =
-      opts.all === true
-        ? [
-            "local",
-            "session",
-            "memory",
-          ]
-        : requestedKind === "session"
-          ? [
-              "session",
-              "memory",
-            ]
-          : requestedKind === "memory"
-            ? [
-                "memory",
-              ]
-            : opts.sessionAlso === true
-              ? [
-                  "local",
-                  "session",
-                  "memory",
-                ]
-              : [
-                  "local",
-                  "memory",
-                ];
+      resolveWriteTargets(opts);
 
     let written =
       false;
 
-    for (const target of unique(targets)) {
+    for (const target of targets) {
       if (target === "memory") {
         incrementWriteCounter("memory");
 
@@ -1519,33 +1771,20 @@ export function createStorage(input = {}) {
       requestedKind
     );
 
-    if (
-      requestedKind === "local" ||
-      opts.all === true
-    ) {
-      removeFromStorage(
-        "local",
-        namespacedKey
-      );
-    }
+    const targets =
+      resolveRemoveTargets(opts);
 
-    if (
-      requestedKind === "session" ||
-      opts.all === true ||
-      opts.sessionAlso === true
-    ) {
-      removeFromStorage(
-        "session",
-        namespacedKey
-      );
-    }
+    for (const target of targets) {
+      if (target === "memory") {
+        removeFromMemory(
+          namespacedKey
+        );
 
-    if (
-      requestedKind === "memory" ||
-      opts.all === true ||
-      opts.memoryAlso !== false
-    ) {
-      removeFromMemory(
+        continue;
+      }
+
+      removeFromStorage(
+        target,
         namespacedKey
       );
     }
@@ -1573,40 +1812,54 @@ export function createStorage(input = {}) {
       requestedKind
     );
 
-    if (requestedKind === "memory") {
-      return memoryStorage.has(
-        namespacedKey
-      );
-    }
+    const targets =
+      resolveReadTargets(opts);
 
-    const storage =
-      getUsableStorage(requestedKind);
+    for (const target of targets) {
+      if (target === "memory") {
+        if (memoryStorage.has(namespacedKey)) {
+          const raw =
+            memoryStorage.get(namespacedKey);
 
-    if (storage) {
+          if (!isCorruptedRawValue(raw)) {
+            return true;
+          }
+        }
+
+        continue;
+      }
+
+      const storage =
+        getUsableStorage(target);
+
+      if (!storage) {
+        continue;
+      }
+
       try {
         const raw =
           storage.getItem(namespacedKey);
 
-        incrementReadCounter(requestedKind);
+        incrementReadCounter(target);
 
-        return (
+        if (
           raw !== null &&
           raw !== undefined &&
           !isCorruptedRawValue(raw)
-        );
+        ) {
+          return true;
+        }
       } catch (error) {
         recordError(
           error,
           "has",
           namespacedKey,
-          requestedKind
+          target
         );
       }
     }
 
-    return memoryStorage.has(
-      namespacedKey
-    );
+    return false;
   }
 
   function keys(options = {}) {
@@ -1621,16 +1874,16 @@ export function createStorage(input = {}) {
     const includeValues =
       Boolean(opts.includeValues);
 
-    const prefix =
+    const rawPrefix =
       opts.prefix
-        ? getNamespacedKey(opts.prefix)
+        ? namespacePrefix(opts.prefix)
         : getPrefix();
 
     stats.keys += 1;
 
     touch(
       "keys",
-      prefix,
+      rawPrefix,
       requestedKind
     );
 
@@ -1685,15 +1938,23 @@ export function createStorage(input = {}) {
               "session",
               "memory",
             ]
-          : [
+          : unique([
               requestedKind,
-              "memory",
-            ];
+              opts.sessionAlso === true
+                ? "session"
+                : "",
+              opts.localAlso === true
+                ? "local"
+                : "",
+              opts.memoryAlso === false
+                ? ""
+                : "memory",
+            ]);
 
-    for (const kind of unique(kindsToRead)) {
+    for (const kind of kindsToRead) {
       if (kind === "memory") {
         for (const currentKey of memoryStorage.keys()) {
-          if (currentKey.startsWith(prefix)) {
+          if (currentKey.startsWith(rawPrefix)) {
             pushKey(
               currentKey,
               () =>
@@ -1712,7 +1973,7 @@ export function createStorage(input = {}) {
         collectStorageKeys(
           storage,
           (currentKey) =>
-            currentKey.startsWith(prefix)
+            currentKey.startsWith(rawPrefix)
         );
 
       for (const currentKey of backendKeys) {
@@ -1743,7 +2004,7 @@ export function createStorage(input = {}) {
 
     const prefix =
       namespace
-        ? getNamespacedKey(namespace)
+        ? namespacePrefix(namespace)
         : getPrefix();
 
     const requestedKind =
@@ -1760,10 +2021,18 @@ export function createStorage(input = {}) {
           ? [
               "memory",
             ]
-          : [
+          : unique([
               requestedKind,
-              "memory",
-            ];
+              opts.sessionAlso === true
+                ? "session"
+                : "",
+              opts.localAlso === true
+                ? "local"
+                : "",
+              opts.memoryAlso === false
+                ? ""
+                : "memory",
+            ]);
 
     let removed = 0;
 
@@ -1775,7 +2044,7 @@ export function createStorage(input = {}) {
       requestedKind
     );
 
-    for (const kind of unique(kindsToClear)) {
+    for (const kind of kindsToClear) {
       if (kind === "memory") {
         for (const currentKey of Array.from(memoryStorage.keys())) {
           if (currentKey.startsWith(prefix)) {
@@ -1889,7 +2158,7 @@ export function createStorage(input = {}) {
 
     const prefix =
       opts.prefix
-        ? getNamespacedKey(opts.prefix)
+        ? namespacePrefix(opts.prefix)
         : getPrefix();
 
     const kindsToRepair =
@@ -1903,10 +2172,18 @@ export function createStorage(input = {}) {
           ? [
               "memory",
             ]
-          : [
+          : unique([
               requestedKind,
-              "memory",
-            ];
+              opts.sessionAlso === true
+                ? "session"
+                : "",
+              opts.localAlso === true
+                ? "local"
+                : "",
+              opts.memoryAlso === false
+                ? ""
+                : "memory",
+            ]);
 
     let repaired = 0;
 
@@ -1918,7 +2195,7 @@ export function createStorage(input = {}) {
       requestedKind
     );
 
-    for (const kind of unique(kindsToRepair)) {
+    for (const kind of kindsToRepair) {
       if (kind === "memory") {
         for (const [currentKey, raw] of Array.from(memoryStorage.entries())) {
           if (
@@ -2003,7 +2280,8 @@ export function createStorage(input = {}) {
     if (
       !fromKey ||
       !toKey ||
-      isCurrentNamespacedKey(fromKey)
+      isCurrentNamespacedKey(fromKey) ||
+      isPreferenceLikeKey(fromKey)
     ) {
       return false;
     }
@@ -2045,12 +2323,42 @@ export function createStorage(input = {}) {
 
     if (
       ok &&
-      opts.removeLegacy !== false &&
-      !isPreferenceLikeKey(fromKey)
+      opts.removeLegacy !== false
     ) {
       try {
         storage?.removeItem?.(fromKey);
       } catch {}
+    }
+
+    if (ok) {
+      stats.migrate += 1;
+
+      safeEmit(
+        events,
+        STORAGE_EVENTS.migrated,
+        {
+          from:
+            sanitizeSnapshotValue(
+              fromKey,
+              fromKey
+            ),
+
+          to:
+            sanitizeSnapshotValue(
+              key(toKey),
+              key(toKey)
+            ),
+
+          kind:
+            requestedKind,
+
+          removedLegacy:
+            opts.removeLegacy !== false,
+
+          at:
+            safeIsoDate(),
+        }
+      );
     }
 
     return ok;
@@ -2089,6 +2397,11 @@ export function createStorage(input = {}) {
 
       memoryFallbackSize:
         memoryStorage.size,
+
+      knownLegacyKeys:
+        opts.includeLegacyKeys === true
+          ? getLegacyKeys()
+          : [],
 
       keys:
         includeKeys

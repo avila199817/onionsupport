@@ -40,6 +40,8 @@
    - applySessionBase recibe storage real
    - adaptadores setUser/setToken no envuelven mal payloads
    - HTTP único conectado a src/core/http.js
+   - HTTP bridge idempotente
+   - aliases internos sin app:module:duplicate storm
 ========================================================= */
 
 import { config } from "./config.js";
@@ -129,7 +131,7 @@ export const AppCore = (() => {
      CONSTANTS
   ======================================================= */
 
-  const CORE_VERSION = "15.0.0";
+  const CORE_VERSION = "15.1.0";
   const CORE_SOURCE = "core";
 
   const DEFAULT_APP_NAME = "Onion Support";
@@ -274,6 +276,9 @@ export const AppCore = (() => {
   let httpBridge = null;
   let requestBridge = null;
   let apiClientBridge = null;
+
+  let httpBridgeInstalled = false;
+  let httpReadyEmitted = false;
 
   /* =======================================================
      BASIC SAFE HELPERS
@@ -3548,34 +3553,71 @@ export const AppCore = (() => {
      MODULE BRIDGES
   ======================================================= */
 
-  function registerBridgeModule(name = "", value = null) {
-    const aliases =
+  function getUniqueBridgeAliases(name = "") {
+    const rawAliases =
       BRIDGE_MODULE_ALIASES[name] ||
       [name];
 
-    if (!value) {
+    const output = [];
+    const seen = new Set();
+
+    for (const alias of rawAliases) {
+      const clean = safeText(alias, "");
+
+      if (
+        !clean ||
+        seen.has(clean)
+      ) {
+        continue;
+      }
+
+      seen.add(clean);
+      output.push(clean);
+    }
+
+    return output;
+  }
+
+  function registerBridgeModule(name = "", value = null, options = {}) {
+    const aliases = getUniqueBridgeAliases(name);
+    const opts = ensureObject(options);
+
+    if (
+      !aliases.length ||
+      !value
+    ) {
       return false;
     }
 
+    let changed = false;
+
     for (const alias of aliases) {
       try {
-        modules?.register?.(
-          alias,
-          value,
-          {
-            replace: true,
-            overwrite: true,
-            source: CORE_SOURCE,
-          }
-        );
-      } catch {
-        try {
-          registry.modules.set(alias, value);
-        } catch {}
-      }
+        const current = registry.modules.get(alias);
+
+        if (current === value) {
+          continue;
+        }
+
+        registry.modules.set(alias, value);
+        changed = true;
+
+        if (opts.emit === true) {
+          safeEmit(
+            current
+              ? EVENTS.moduleReplaced
+              : EVENTS.moduleRegistered,
+            {
+              name: alias,
+              replaced: Boolean(current),
+              source: safeText(opts.source, CORE_SOURCE),
+            }
+          );
+        }
+      } catch {}
     }
 
-    return true;
+    return changed || true;
   }
 
   function getBridgeModule(name = "") {
@@ -3745,7 +3787,7 @@ export const AppCore = (() => {
           requestFn(
             url,
             {
-              ...ensureObject(options),
+              ...options,
               method: "GET",
             }
           )
@@ -3796,7 +3838,7 @@ export const AppCore = (() => {
           requestFn(
             url,
             {
-              ...ensureObject(options),
+              ...options,
               method: "DELETE",
             }
           )
@@ -3996,14 +4038,29 @@ export const AppCore = (() => {
       return false;
     }
 
-    try {
-      registerBridgeModule("Http", client);
-      registerBridgeModule("http", client);
-      registerBridgeModule("ApiClient", client);
-      registerBridgeModule("apiClient", client);
-    } catch {}
+    const aliases = [
+      "Http",
+      "http",
+      "ApiClient",
+      "apiClient",
+    ];
 
-    return true;
+    let changed = false;
+
+    for (const alias of aliases) {
+      try {
+        const current = registry.modules.get(alias);
+
+        if (current === client) {
+          continue;
+        }
+
+        registry.modules.set(alias, client);
+        changed = true;
+      } catch {}
+    }
+
+    return changed || true;
   }
 
   function ensureServicesBag() {
@@ -4021,7 +4078,19 @@ export const AppCore = (() => {
     }
   }
 
-  function installHttpBridge(reason = "core:http:install") {
+  function installHttpBridge(reason = "core:http:install", options = {}) {
+    const opts = ensureObject(options);
+
+    if (
+      httpBridgeInstalled &&
+      httpBridge &&
+      opts.force !== true
+    ) {
+      registerHttpAliases(httpBridge);
+
+      return httpBridge;
+    }
+
     const context = {
       AppCore: api,
       core: api,
@@ -4070,8 +4139,11 @@ export const AppCore = (() => {
           apiClient
       );
 
+    const previousHttpBridge = httpBridge;
+
     httpBridge = client;
     apiClientBridge = client;
+    httpBridgeInstalled = true;
 
     if (isFunction(client.request)) {
       try {
@@ -4103,20 +4175,28 @@ export const AppCore = (() => {
       api.Http = client;
     } catch {}
 
-    safeEmit(
-      EVENTS.httpReady,
-      {
-        installed: true,
-        reason,
+    if (
+      !httpReadyEmitted ||
+      previousHttpBridge !== client ||
+      opts.force === true
+    ) {
+      httpReadyEmitted = true;
 
-        hasRequest: isFunction(client.request),
-        hasGet: isFunction(client.get),
-        hasPost: isFunction(client.post),
-        hasMe: isFunction(client.me),
+      safeEmit(
+        EVENTS.httpReady,
+        {
+          installed: true,
+          reason,
 
-        source: "core:index",
-      }
-    );
+          hasRequest: isFunction(client.request),
+          hasGet: isFunction(client.get),
+          hasPost: isFunction(client.post),
+          hasMe: isFunction(client.me),
+
+          source: "core:index",
+        }
+      );
+    }
 
     return client;
   }
@@ -4545,6 +4625,8 @@ export const AppCore = (() => {
     initialized = false;
     initPromise = null;
     networkEventsBound = false;
+    httpBridgeInstalled = false;
+    httpReadyEmitted = false;
 
     setState(
       {
@@ -4656,6 +4738,9 @@ export const AppCore = (() => {
         Http: Boolean(getHttpClient()),
         http: Boolean(getHttpClient()),
         apiClient: Boolean(getActiveApiClient()),
+
+        httpBridgeInstalled: Boolean(httpBridgeInstalled),
+        httpReadyEmitted: Boolean(httpReadyEmitted),
       },
 
       events:
@@ -4801,6 +4886,7 @@ export const AppCore = (() => {
 
             httpBridge = client;
             apiClientBridge = client;
+            httpBridgeInstalled = true;
 
             if (isFunction(client.request)) {
               try {
@@ -4827,6 +4913,7 @@ export const AppCore = (() => {
 
             httpBridge = client;
             apiClientBridge = client;
+            httpBridgeInstalled = true;
 
             registerHttpAliases(client);
           }
@@ -4845,6 +4932,7 @@ export const AppCore = (() => {
 
             httpBridge = client;
             apiClientBridge = client;
+            httpBridgeInstalled = true;
 
             registerHttpAliases(client);
           }

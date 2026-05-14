@@ -62,9 +62,9 @@ const CANONICAL_PRODUCTION_API_BASE =
 const FORBIDDEN_FRONTEND_API_ORIGINS =
   Object.freeze([
     "https://onionsupport.com",
-    "https://www.onionsupport.com",
+    "https://api.onionit.net",
     "http://onionsupport.com",
-    "http://www.onionsupport.com",
+    "http://api.onionit.net",
   ]);
 
 const SAFE_USERNAME_MAX =

@@ -27,6 +27,16 @@
    - preboot/theme.js resuelve html[data-theme].
    - loader.css controla presentación visual.
    - Este módulo sólo controla estado/clases/atributos.
+
+   EXTREME MODE:
+   - Race-safe por sequenceId.
+   - Failsafe idempotente con armId.
+   - Boot guard: no oculta durante boot salvo finalize/force/failsafe.
+   - Compatible con AppCore.setState / AppCore.state.
+   - Compatible con loader estático y fallback generado.
+   - Logo dark/light tolerante.
+   - Eventos deduplicados y sanitizados.
+   - Snapshot profundo de loader/shell/document/theme/failsafe.
 ========================================================= */
 
 import {
@@ -40,12 +50,14 @@ import {
    CONSTANTS
 ========================================================= */
 
-const LOADER_VERSION = "14.0.0";
+export const LOADER_VERSION = "15.0.0-extreme-pro";
+
+const LOADER_SOURCE = "app:loader";
 
 const LOADER_ID = "app-loader";
 
 const LOADER_SELECTOR =
-  "#app-loader,.app-loader,[data-app-loader='true']";
+  "#app-loader,.app-loader,[data-app-loader='true'],[data-app-loader]";
 
 const SHELL_ID = "app-shell";
 const MAIN_ID = "main-content";
@@ -71,7 +83,9 @@ const DEFAULT_MIN_VISIBLE_MS =
 
 const DEFAULT_FAILSAFE_MS = 12000;
 const MIN_FAILSAFE_MS = 8000;
+const MAX_FAILSAFE_MS = 120000;
 const FAILSAFE_WARN_DEDUPE_MS = 30000;
+const EVENT_DEDUPE_MS = 80;
 
 const DEFAULT_LOADER_LOGO_WHITE_URL =
   resolveModuleAssetUrl(
@@ -127,6 +141,7 @@ const LOADER_LEAVING_CLASSES = Object.freeze([
 const LOADER_HIDDEN_CLASSES = Object.freeze([
   "is-hidden",
   "has-hidden",
+  "loader-hidden",
 ]);
 
 const LOADER_DOM_STATES = Object.freeze({
@@ -170,6 +185,9 @@ const EVENT_NAMES = Object.freeze({
 
   debugApi:
     "app:loader:debug-api",
+
+  state:
+    "app:loader:state",
 });
 
 const LEGACY_EVENT_ALIASES = Object.freeze({
@@ -209,7 +227,14 @@ const SENSITIVE_QUERY_PARAM_NAMES = Object.freeze([
   "two_factor_token",
   "mfaToken",
   "mfa_token",
+  "authorization",
+  "jwt",
+  "session",
+  "sid",
 ]);
+
+const MAX_SANITIZE_DEPTH = 5;
+const MAX_SANITIZE_ARRAY = 80;
 
 /* =========================================================
    MODULE RUNTIME
@@ -226,6 +251,9 @@ let failsafeArmSequence = 0;
 
 let lastFailsafeWarnKey = "";
 let lastFailsafeWarnAt = 0;
+
+let lastEventKey = "";
+let lastEventAt = 0;
 
 let lastLoaderError = null;
 
@@ -260,7 +288,10 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -271,6 +302,32 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(number)
     ? number
     : fallback;
+}
+
+function parseInteger(value, fallback = 0, options = {}) {
+  const number = Number.parseInt(value ?? "", 10);
+
+  if (!Number.isFinite(number)) {
+    return fallback;
+  }
+
+  const min = Number.isFinite(options.min)
+    ? Number(options.min)
+    : null;
+
+  const max = Number.isFinite(options.max)
+    ? Number(options.max)
+    : null;
+
+  if (min !== null && number < min) {
+    return fallback;
+  }
+
+  if (max !== null && number > max) {
+    return fallback;
+  }
+
+  return number;
 }
 
 function safeObject(value) {
@@ -340,6 +397,19 @@ function clearTimer(id) {
   } catch {}
 
   return false;
+}
+
+function safeClamp(value, fallback, min, max) {
+  const number =
+    safeNumber(
+      value,
+      fallback
+    );
+
+  return Math.max(
+    min,
+    Math.min(max, number)
+  );
 }
 
 function requestPaint() {
@@ -423,7 +493,7 @@ function safeSetCoreState(AppCore, patch = {}, options = {}) {
       AppCore.setState(
         cleanPatch,
         {
-          source: "app:loader",
+          source: LOADER_SOURCE,
           emit: opts.emit === true,
           emitState: opts.emitState === true,
           silent: opts.silent !== false,
@@ -492,6 +562,21 @@ function safeSetDomRef(AppCore, key = "", value = null) {
     }
   } catch {}
 
+  try {
+    if (
+      AppCore &&
+      typeof AppCore === "object" &&
+      Object.isExtensible(AppCore)
+    ) {
+      AppCore.dom = {
+        ...safeObject(AppCore.dom),
+        [key]: value,
+      };
+
+      return true;
+    }
+  } catch {}
+
   return false;
 }
 
@@ -523,13 +608,28 @@ function redactSensitiveText(value = "") {
     );
 
     output = output.replace(
+      /(\/activate\/)([^/?#\s]+)/gi,
+      "$1***"
+    );
+
+    output = output.replace(
       /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+      "$1***"
+    );
+
+    output = output.replace(
+      /(\/password-reset\/confirm\/)([^/?#\s]+)/gi,
       "$1***"
     );
 
     output = output.replace(
       /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
       "$1***"
+    );
+
+    output = output.replace(
+      /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
+      "$1$2***"
     );
 
     output = output.replace(
@@ -564,7 +664,7 @@ function isDomNodeLike(value) {
 }
 
 function sanitizePayload(value, depth = 0) {
-  if (depth > 4) {
+  if (depth > MAX_SANITIZE_DEPTH) {
     return "[MaxDepth]";
   }
 
@@ -599,7 +699,7 @@ function sanitizePayload(value, depth = 0) {
 
   if (Array.isArray(value)) {
     return value
-      .slice(0, 50)
+      .slice(0, MAX_SANITIZE_ARRAY)
       .map((item) =>
         sanitizePayload(item, depth + 1)
       );
@@ -611,6 +711,7 @@ function sanitizePayload(value, depth = 0) {
       message: redactSensitiveText(value.message || ""),
       code: value.code || null,
       status: value.status || value.statusCode || null,
+      stack: redactSensitiveText(value.stack || ""),
     };
   }
 
@@ -635,8 +736,14 @@ function sanitizePayload(value, depth = 0) {
     const output = {};
 
     for (const [key, item] of Object.entries(value)) {
-      if (/token|secret|password|authorization|credential/i.test(key)) {
-        output[key] = "***";
+      if (/token|secret|password|authorization|credential|jwt|bearer|session|refresh/i.test(key)) {
+        output[key] =
+          item === null ||
+          item === undefined ||
+          item === "" ||
+          typeof item === "boolean"
+            ? item
+            : "***";
         continue;
       }
 
@@ -711,6 +818,34 @@ function recordLoaderError(AppCore, source = "loader", error = null) {
   return lastLoaderError;
 }
 
+function shouldDedupeEvent(eventName = "", payload = {}, force = false) {
+  if (force) {
+    return false;
+  }
+
+  const key = [
+    safeText(eventName, ""),
+    safeText(payload?.reason, ""),
+    safeText(payload?.loaderState || payload?.state, ""),
+    payload?.forced ? "forced" : "normal",
+    payload?.fatal ? "fatal" : "ok",
+  ].join("|");
+
+  const current = epochNow();
+
+  if (
+    key === lastEventKey &&
+    current - lastEventAt < EVENT_DEDUPE_MS
+  ) {
+    return true;
+  }
+
+  lastEventKey = key;
+  lastEventAt = current;
+
+  return false;
+}
+
 function safeEmit(AppCore, eventName = "", payload = {}, options = {}) {
   const name = safeText(eventName, "");
 
@@ -719,6 +854,14 @@ function safeEmit(AppCore, eventName = "", payload = {}, options = {}) {
   }
 
   const opts = safeObject(options);
+
+  if (
+    opts.dedupe !== false &&
+    shouldDedupeEvent(name, payload, opts.force === true)
+  ) {
+    return false;
+  }
+
   const cleanPayload = sanitizePayload(payload);
 
   let busAvailable = false;
@@ -758,9 +901,10 @@ function safeEmit(AppCore, eventName = "", payload = {}, options = {}) {
   return busEmitted;
 }
 
-function emitLoaderEvent(AppCore, eventName = "", payload = {}, aliases = []) {
+function emitLoaderEvent(AppCore, eventName = "", payload = {}, aliases = [], options = {}) {
   const finalPayload = {
     version: LOADER_VERSION,
+    source: LOADER_SOURCE,
     at: safeIsoDate(),
     ...safeObject(payload),
   };
@@ -771,7 +915,8 @@ function emitLoaderEvent(AppCore, eventName = "", payload = {}, aliases = []) {
     safeEmit(
       AppCore,
       eventName,
-      finalPayload
+      finalPayload,
+      options
     )
   ) {
     emitted = true;
@@ -784,7 +929,11 @@ function emitLoaderEvent(AppCore, eventName = "", payload = {}, aliases = []) {
       safeEmit(
         AppCore,
         alias,
-        finalPayload
+        finalPayload,
+        {
+          ...options,
+          dedupe: false,
+        }
       )
     ) {
       emitted = true;
@@ -1176,7 +1325,9 @@ function getCurrentTheme(AppCore) {
   try {
     const stateTheme =
       resolveThemeValue(
-        AppCore?.state?.theme
+        AppCore?.state?.theme ||
+          AppCore?.state?.mode ||
+          AppCore?.state?.appearance
       );
 
     if (stateTheme) {
@@ -1309,15 +1460,12 @@ function getLoaderConfig(AppCore) {
 }
 
 function getFailsafeTimeoutMs(timeoutMs = null) {
-  return Math.max(
+  return safeClamp(
+    timeoutMs ??
+      BOOT_FAILSAFE_LOADER_MS,
+    DEFAULT_FAILSAFE_MS,
     MIN_FAILSAFE_MS,
-    safeNumber(
-      timeoutMs,
-      safeNumber(
-        BOOT_FAILSAFE_LOADER_MS,
-        DEFAULT_FAILSAFE_MS
-      )
-    )
+    MAX_FAILSAFE_MS
   );
 }
 
@@ -1804,6 +1952,11 @@ function syncExistingLoaderAssets(AppCore, loader) {
         ".app-loader__logo--light,[data-loader-logo-light='true']"
       );
 
+    const genericLogo =
+      loader.querySelector?.(
+        ".app-loader__logo:not(.app-loader__logo--dark):not(.app-loader__logo--light),[data-loader-logo='true']"
+      );
+
     if (
       darkLogo &&
       !safeText(darkLogo.getAttribute("src"), "")
@@ -1823,6 +1976,17 @@ function syncExistingLoaderAssets(AppCore, loader) {
         lightLogo,
         "src",
         cfg.logoBlackUrl
+      );
+    }
+
+    if (
+      genericLogo &&
+      !safeText(genericLogo.getAttribute("src"), "")
+    ) {
+      setAttr(
+        genericLogo,
+        "src",
+        cfg.logoUrl
       );
     }
 
@@ -2175,7 +2339,23 @@ function isLoaderActuallyVisible(loader) {
 
     if (
       loader.classList?.contains?.("is-hidden") ||
-      loader.classList?.contains?.("has-hidden")
+      loader.classList?.contains?.("has-hidden") ||
+      loader.classList?.contains?.("loader-hidden")
+    ) {
+      return false;
+    }
+
+    if (loader.getAttribute("aria-hidden") === "true") {
+      return false;
+    }
+
+    if (loader.dataset?.loaderVisible === "false") {
+      return false;
+    }
+
+    if (
+      loader.dataset?.loaderState === LOADER_DOM_STATES.hidden ||
+      loader.dataset?.loaderState === "removed"
     ) {
       return false;
     }
@@ -2627,6 +2807,7 @@ export function showLoader(AppCore, options = {}) {
       hasLoader: Boolean(loader),
       booting: Boolean(opts.booting),
       reason: safeText(opts.reason, ""),
+      loaderState,
     },
     LEGACY_EVENT_ALIASES.show
   );
@@ -2693,8 +2874,12 @@ export function forceHideLoader(AppCore, options = {}) {
       hasLoader: Boolean(loader),
       fatal: Boolean(opts.fatal),
       reason: safeText(opts.reason, ""),
+      loaderState: finalLoaderState,
     },
-    LEGACY_EVENT_ALIASES.forceHide
+    LEGACY_EVENT_ALIASES.forceHide,
+    {
+      force: true,
+    }
   );
 
   return true;
@@ -2830,6 +3015,7 @@ export function hideLoader(AppCore, options = {}) {
         remaining,
         fatal: Boolean(opts.fatal),
         reason: safeText(opts.reason, ""),
+        loaderState: finalLoaderState,
       },
       LEGACY_EVENT_ALIASES.hide
     );
@@ -2902,6 +3088,7 @@ export function takeOverStaticLoader(AppCore) {
     EVENT_NAMES.takeover,
     {
       hasLoader: Boolean(loader),
+      loaderState: LOADER_DOM_STATES.booting,
     }
   );
 
@@ -3165,7 +3352,11 @@ export function armBootFailsafeLoader({
           emitLoaderEvent(
             AppCore,
             EVENT_NAMES.failsafe,
-            payload
+            payload,
+            [],
+            {
+              force: true,
+            }
           );
 
           clearBootFailsafeTimer(state, AppCore);
@@ -3372,6 +3563,13 @@ export function getLoaderSnapshot(AppCore, state = null) {
     state?.publicPath ||
     "/";
 
+  const failsafeStarted =
+    safeNumber(
+      state?.bootFailsafeStartedAt ||
+        coreState.bootFailsafeStartedAt,
+      0
+    );
+
   return {
     version: LOADER_VERSION,
 
@@ -3484,25 +3682,11 @@ export function getLoaderSnapshot(AppCore, state = null) {
       ),
 
     failsafeStartedAt:
-      safeNumber(
-        state?.bootFailsafeStartedAt ||
-          coreState.bootFailsafeStartedAt,
-        0
-      ),
+      failsafeStarted,
 
     failsafeStartedAtIso:
-      safeNumber(
-        state?.bootFailsafeStartedAt ||
-          coreState.bootFailsafeStartedAt,
-        0
-      )
-        ? safeIsoDate(
-            safeNumber(
-              state?.bootFailsafeStartedAt ||
-                coreState.bootFailsafeStartedAt,
-              0
-            )
-          )
+      failsafeStarted
+        ? safeIsoDate(failsafeStarted)
         : "",
 
     failsafeArmId:
@@ -3522,6 +3706,16 @@ export function getLoaderSnapshot(AppCore, state = null) {
 
     sequence,
     failsafeArmSequence,
+
+    lastEventKey:
+      redactSensitiveText(lastEventKey),
+
+    lastEventAt,
+
+    lastEventAtIso:
+      lastEventAt
+        ? safeIsoDate(lastEventAt)
+        : "",
 
     lastFailsafeWarnKey:
       redactSensitiveText(lastFailsafeWarnKey),
@@ -3546,6 +3740,9 @@ export function getLoaderSnapshot(AppCore, state = null) {
 
     logoBlackUrl:
       DEFAULT_LOADER_LOGO_BLACK_URL,
+
+    debugApiInstalled:
+      Boolean(debugApiInstalled),
   };
 }
 

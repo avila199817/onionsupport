@@ -35,6 +35,9 @@
    - AbortController server/browser safe
    - headers normalizados sin valores vacíos
    - redacción de JWT, bearer y query tokens
+   - api.onionit.net permitido como backend canónico
+   - dominios frontend bloqueados como API base
+   - producción fuerza https://api.onionit.net
    - cero throws accidentales
 ========================================================= */
 
@@ -45,7 +48,7 @@ import { config } from "./config.js";
 ========================================================= */
 
 export const HELPERS_VERSION =
-  "15.0.0";
+  "15.1.0";
 
 const DEFAULT_ROUTE =
   "/";
@@ -1088,12 +1091,7 @@ export function normalizeApiBase(base = "") {
 
   if (
     !raw ||
-    raw === "/"
-  ) {
-    return "";
-  }
-
-  if (
+    raw === "/" ||
     raw === "/api" ||
     raw === "api"
   ) {
@@ -1112,12 +1110,17 @@ export function normalizeApiBase(base = "") {
         normalizePathnameOnly(parsed.pathname || "/");
 
       /*
-        apiBase debe ser origin-only cuando el path es /api,
-        porque los endpoints ya llevan /api.
+        apiBase debe ser origin-only cuando:
+        - path es /
+        - path es /api
+        - origen es api.onionit.net
+
+        Los endpoints ya incluyen /api.
       */
       if (
         pathname === "/" ||
-        pathname === "/api"
+        pathname === "/api" ||
+        origin === getOriginFromUrlLike(CANONICAL_PRODUCTION_API_BASE)
       ) {
         return origin;
       }
@@ -1340,14 +1343,34 @@ export function buildPublicPath(path = DEFAULT_ROUTE, username = "") {
 ========================================================= */
 
 function getForbiddenFrontendApiOrigins() {
-  return unique([
+  const rawOrigins = [
     ...FALLBACK_FORBIDDEN_FRONTEND_API_ORIGINS,
     ...(config?.forbiddenFrontendApiOrigins || []),
     ...(config?.api?.forbiddenFrontendOrigins || []),
     ...(config?.security?.forbiddenFrontendApiOrigins || []),
-  ])
+  ];
+
+  const backendOrigins =
+    unique([
+      CANONICAL_PRODUCTION_API_BASE,
+      ...(config?.canonicalBackendApiOrigins || []),
+      ...(config?.api?.canonicalBackendOrigins || []),
+      ...(config?.security?.canonicalBackendApiOrigins || []),
+    ])
+      .map((origin) =>
+        getOriginFromUrlLike(origin)
+      )
+      .filter(Boolean);
+
+  return unique(
+    rawOrigins
+      .map((origin) =>
+        getOriginFromUrlLike(origin)
+      )
+      .filter(Boolean)
+  )
     .filter((origin) =>
-      origin !== CANONICAL_PRODUCTION_API_BASE
+      !backendOrigins.includes(origin)
     );
 }
 
@@ -1398,7 +1421,7 @@ function isProductionEnv() {
 }
 
 export function getSafeApiBase() {
-  const apiBase =
+  const configuredBase =
     normalizeApiBase(
       config?.apiBase ||
         config?.apiOrigin ||
@@ -1409,30 +1432,25 @@ export function getSafeApiBase() {
         ""
     );
 
-  if (
-    isProductionEnv() &&
-    (
-      !apiBase ||
-      apiBase === "/api" ||
-      apiBase === "api" ||
-      isForbiddenFrontendApiBase(apiBase)
-    )
-  ) {
-    return CANONICAL_PRODUCTION_API_BASE;
-  }
-
-  if (isForbiddenFrontendApiBase(apiBase)) {
+  /*
+    Candado definitivo:
+    En producción el backend es SIEMPRE api.onionit.net.
+    No se permite same-origin ni dominios frontend ni otros hosts.
+  */
+  if (isProductionEnv()) {
     return CANONICAL_PRODUCTION_API_BASE;
   }
 
   if (
-    isProductionEnv() &&
-    !isAbsoluteUrl(apiBase)
+    !configuredBase ||
+    configuredBase === "/api" ||
+    configuredBase === "api" ||
+    isForbiddenFrontendApiBase(configuredBase)
   ) {
     return CANONICAL_PRODUCTION_API_BASE;
   }
 
-  return apiBase;
+  return configuredBase;
 }
 
 function getBasePathFromUrlLike(base = "") {
@@ -1627,6 +1645,45 @@ function appendQueryToUrl(baseUrl = "", query = null) {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
+function rewriteForbiddenFrontendApiUrl(url = "") {
+  const raw =
+    safeText(url, "");
+
+  if (!raw || !isAbsoluteUrl(raw)) {
+    return raw;
+  }
+
+  try {
+    const parsed =
+      new URL(raw);
+
+    const origin =
+      parsed.origin;
+
+    if (!getForbiddenFrontendApiOrigins().includes(origin)) {
+      return raw;
+    }
+
+    /*
+      Sólo reescribimos URLs que parecen API.
+      Un enlace externo normal no se toca.
+    */
+    if (
+      parsed.pathname === "/api" ||
+      parsed.pathname.startsWith("/api/")
+    ) {
+      const backend =
+        new URL(CANONICAL_PRODUCTION_API_BASE);
+
+      return `${backend.origin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+
+    return raw;
+  } catch {
+    return raw;
+  }
+}
+
 export function buildUrl(path = "", query = null) {
   const rawPath =
     String(path || "").trim();
@@ -1636,7 +1693,7 @@ export function buildUrl(path = "", query = null) {
 
   const baseUrl =
     isAbsoluteUrl(rawPath)
-      ? rawPath
+      ? rewriteForbiddenFrontendApiUrl(rawPath)
       : joinUrl(
           apiBase,
           rawPath
@@ -1740,6 +1797,18 @@ function getConfiguredPublicApiPaths() {
   ]);
 }
 
+function getConfiguredPrivateApiPaths() {
+  const configured =
+    config?.auth?.privateApiPaths ||
+    config?.privateApiPaths ||
+    [];
+
+  return unique([
+    ...PRIVATE_API_PATHS,
+    ...safeArray(configured),
+  ]);
+}
+
 function isExplicitPrivateApiPath(path = "") {
   const normalized =
     normalizeCanonicalPath(path);
@@ -1799,7 +1868,38 @@ export function isPublicApiPath(path = "") {
 }
 
 export function isPrivateApiPath(path = "") {
-  return isExplicitPrivateApiPath(path);
+  const normalized =
+    normalizeCanonicalPath(path);
+
+  const withoutApiBase =
+    stripApiBasePrefix(normalized);
+
+  if (
+    isExplicitPrivateApiPath(normalized) ||
+    isExplicitPrivateApiPath(withoutApiBase)
+  ) {
+    return true;
+  }
+
+  const list =
+    getConfiguredPrivateApiPaths();
+
+  return list.some((privatePath) => {
+    const current =
+      normalizeCanonicalPath(privatePath);
+
+    const currentWithoutApiBase =
+      stripApiBasePrefix(current);
+
+    return (
+      normalized === current ||
+      normalized.startsWith(`${current}/`) ||
+      withoutApiBase === current ||
+      withoutApiBase.startsWith(`${current}/`) ||
+      normalized === currentWithoutApiBase ||
+      normalized.startsWith(`${currentWithoutApiBase}/`)
+    );
+  });
 }
 
 /* =========================================================
@@ -2416,6 +2516,7 @@ export function normalizeUser(user = null) {
       id,
 
     username,
+
     usernameLower:
       source.usernameLower ||
       source.username_lower ||
@@ -2465,6 +2566,7 @@ export function normalizeUser(user = null) {
       ).toLowerCase(),
 
     role,
+
     rol:
       role,
 
@@ -2782,8 +2884,10 @@ export function createAbortTimeout(ms = config?.requestTimeout) {
       controller,
       timeoutId:
         null,
+
       signal:
         controller.signal,
+
       clear:
         () => {},
     };
@@ -2803,6 +2907,7 @@ export function createAbortTimeout(ms = config?.requestTimeout) {
   return {
     controller,
     timeoutId,
+
     signal:
       controller.signal,
 
@@ -3112,6 +3217,9 @@ export function getHelpersSnapshot() {
 
     meIsPublic:
       isPublicApiPath("/api/auth/me"),
+
+    meIsPrivate:
+      isPrivateApiPath("/api/auth/me"),
 
     activateEndpoint:
       config?.auth?.endpoints?.activate ||

@@ -2,19 +2,19 @@
    Onion SPA - Auth 2FA
    Archivo: src/features/auth/2fa.js
 
-   AUTH 2FA / MFA · FINAL EXTREME PRO SYSTEM · GOD MODE v11
+   AUTH 2FA / MFA · FINAL EXTREME PRO SYSTEM · GOD MODE v15
 
    RESPONSABILIDADES:
    - verificar códigos 2FA/MFA/TOTP/OTP
    - consumir tempToken/challengeToken generado por login
    - leer tempToken desde payload, storage, query, path y hash-router
    - ejecutar verificación contra API pública
-   - soportar backend Onion Auth v6:
+   - soportar backend Onion Auth:
        · token / accessToken / access_token
        · refreshToken / refresh_token
        · session / sessionData
        · user / usuario / me / account / profile
-       · data / auth
+       · data / payload / result / body / response.data / auth
    - aplicar sesión sólo si backend devuelve token + user válidos
    - limpiar tempToken tras verificación correcta
    - no marcar authenticated en respuestas parciales
@@ -42,14 +42,14 @@ import { AppCore } from "../../core/index.js";
 
 import {
   AUTH_ENDPOINTS,
+  AUTH_ENDPOINT_CANDIDATES,
   AUTH_CONSTANTS,
-  AUTH_STORAGE_KEYS,
   AUTH_TOKEN_PARAM_NAMES,
   getTwoFactorLoginEndpoint as getTwoFactorLoginEndpointFromConstants,
 } from "./constants.js";
 
 import {
-  normalizeTokenValue,
+  normalizeTokenValue as helperNormalizeTokenValue,
   sanitizeRedirectPath,
   redactTokenInText,
 } from "./helpers.js";
@@ -75,7 +75,7 @@ import {
 ========================================================= */
 
 export const TWO_FACTOR_MODULE_VERSION =
-  "2fa.11.0.0-god-mode";
+  "2fa.15.0.0";
 
 /* =========================================================
    CONSTANTS
@@ -84,14 +84,35 @@ export const TWO_FACTOR_MODULE_VERSION =
 const DEFAULT_VERIFY_ENDPOINT =
   "/api/auth/2fa/login";
 
+const DEFAULT_VERIFY_MFA_ENDPOINT =
+  "/api/auth/mfa/login";
+
+const DEFAULT_VERIFY_OTP_ENDPOINT =
+  "/api/auth/otp/login";
+
+const DEFAULT_VERIFY_2FA_ENDPOINT =
+  "/api/auth/2fa/verify";
+
+const DEFAULT_VERIFY_MFA_ALT_ENDPOINT =
+  "/api/auth/mfa/verify";
+
 const DEFAULT_REQUEST_ENDPOINT =
   "/api/auth/2fa/request";
+
+const DEFAULT_REQUEST_MFA_ENDPOINT =
+  "/api/auth/mfa/request";
+
+const DEFAULT_REQUEST_OTP_ENDPOINT =
+  "/api/auth/otp/request";
 
 const DEFAULT_RESEND_ENDPOINT =
   "/api/auth/2fa/resend";
 
-const DEFAULT_LOGIN_REDIRECT =
-  "/login";
+const DEFAULT_RESEND_MFA_ENDPOINT =
+  "/api/auth/mfa/resend";
+
+const DEFAULT_RESEND_OTP_ENDPOINT =
+  "/api/auth/otp/resend";
 
 const DEFAULT_HOME_REDIRECT =
   "/";
@@ -175,12 +196,14 @@ const CORRUPTED_TEXT_VALUES =
     "undefined",
     "null",
     "false",
+    "true",
     "[object object]",
     "{}",
     "[]",
     "\"undefined\"",
     "\"null\"",
     "\"false\"",
+    "\"true\"",
   ]);
 
 const TEMP_TOKEN_FIELD_NAMES =
@@ -195,6 +218,8 @@ const TEMP_TOKEN_FIELD_NAMES =
     "two_factor_token",
     "mfaToken",
     "mfa_token",
+    "otpToken",
+    "otp_token",
     "token",
   ]);
 
@@ -240,6 +265,14 @@ const REQUEST_METHOD_OPTIONS =
     skipAuthRefresh:
       true,
   });
+
+const FALLBACK_NEXT_ENDPOINT_STATUSES =
+  new Set([
+    404,
+    405,
+    410,
+    501,
+  ]);
 
 /* =========================================================
    RUNTIME STATE
@@ -305,9 +338,9 @@ function nowMs() {
   }
 }
 
-function isoNow() {
+function isoNow(ms = nowMs()) {
   try {
-    return new Date().toISOString();
+    return new Date(ms).toISOString();
   } catch {
     return "";
   }
@@ -359,6 +392,8 @@ function safeBool(value, fallback = false) {
       "sí",
       "ok",
       "on",
+      "enabled",
+      "active",
     ].includes(text)
   ) {
     return true;
@@ -370,6 +405,8 @@ function safeBool(value, fallback = false) {
       "0",
       "no",
       "off",
+      "disabled",
+      "inactive",
     ].includes(text)
   ) {
     return false;
@@ -400,6 +437,21 @@ function safeObject(value) {
   return isObject(value)
     ? value
     : {};
+}
+
+function safeArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return [];
+  }
+
+  return [value];
 }
 
 function isFunction(value) {
@@ -468,6 +520,19 @@ function safeClone(value, fallback = null) {
   }
 }
 
+function unique(values = []) {
+  return Array.from(
+    new Set(
+      safeArray(values)
+        .flat(Infinity)
+        .map((item) =>
+          safeText(item, "")
+        )
+        .filter(Boolean)
+    )
+  );
+}
+
 /* =========================================================
    EVENT SAFETY
 ========================================================= */
@@ -478,7 +543,11 @@ function redactSafe(value = "") {
   } catch {
     return safeText(value, "")
       .replace(
-        /([?&#](?:token|tempToken|temp_token|temporaryToken|temporary_token|challengeToken|challenge_token|twoFactorToken|two_factor_token|mfaToken|mfa_token|code|otp|totp|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
+        /([?&#](?:token|tempToken|temp_token|temporaryToken|temporary_token|challengeToken|challenge_token|twoFactorToken|two_factor_token|mfaToken|mfa_token|otpToken|otp_token|code|otp|totp|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
+        "$1***"
+      )
+      .replace(
+        /(\/(?:2fa|otp|mfa)\/)([^/?#\s]+)/gi,
         "$1***"
       )
       .replace(
@@ -519,6 +588,7 @@ function sanitizeEventPayload(payload = {}, depth = 0) {
       lower.includes("token") ||
       lower.includes("authorization") ||
       lower.includes("password") ||
+      lower.includes("secret") ||
       lower === "code" ||
       lower === "otp" ||
       lower === "totp" ||
@@ -683,6 +753,15 @@ function getCooldownMs() {
   );
 }
 
+function getMaxAttempts() {
+  return clampNumber(
+    AUTH_CONSTANTS?.twoFactorMaxAttempts ??
+      5,
+    1,
+    50
+  );
+}
+
 /* =========================================================
    DEFAULT MESSAGES
 ========================================================= */
@@ -775,6 +854,46 @@ function getConfiguredResendEndpoint() {
     ],
     DEFAULT_RESEND_ENDPOINT
   );
+}
+
+function endpointCandidatesFor(type = "verify") {
+  if (type === "request") {
+    return unique([
+      getConfiguredRequestEndpoint(),
+      AUTH_ENDPOINTS?.twoFactorRequest,
+      AUTH_ENDPOINTS?.request2FA,
+      AUTH_ENDPOINTS?.requestMfa,
+      AUTH_ENDPOINTS?.send2FA,
+      AUTH_ENDPOINTS?.sendMfa,
+      DEFAULT_REQUEST_ENDPOINT,
+      DEFAULT_REQUEST_MFA_ENDPOINT,
+      DEFAULT_REQUEST_OTP_ENDPOINT,
+    ]);
+  }
+
+  if (type === "resend") {
+    return unique([
+      getConfiguredResendEndpoint(),
+      AUTH_ENDPOINTS?.twoFactorResend,
+      AUTH_ENDPOINTS?.resend2FA,
+      AUTH_ENDPOINTS?.resendMfa,
+      DEFAULT_RESEND_ENDPOINT,
+      DEFAULT_RESEND_MFA_ENDPOINT,
+      DEFAULT_RESEND_OTP_ENDPOINT,
+    ]);
+  }
+
+  return unique([
+    getConfiguredVerifyEndpoint(),
+    ...(Array.isArray(AUTH_ENDPOINT_CANDIDATES?.twoFactorLogin)
+      ? AUTH_ENDPOINT_CANDIDATES.twoFactorLogin
+      : []),
+    DEFAULT_VERIFY_ENDPOINT,
+    DEFAULT_VERIFY_MFA_ENDPOINT,
+    DEFAULT_VERIFY_OTP_ENDPOINT,
+    DEFAULT_VERIFY_2FA_ENDPOINT,
+    DEFAULT_VERIFY_MFA_ALT_ENDPOINT,
+  ]);
 }
 
 export function getTwoFactorLoginEndpoint() {
@@ -937,6 +1056,33 @@ function normalizeHashRouterPath(value = "") {
   return raw.replace(/^#\/?/, "/") || "/";
 }
 
+function normalizePathnameOnly(pathname = "/") {
+  let value =
+    safeText(pathname, "/")
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+  if (!value) {
+    value = "/";
+  }
+
+  if (!value.startsWith("/")) {
+    value =
+      `/${value}`;
+  }
+
+  if (
+    value.length > 1 &&
+    value.endsWith("/")
+  ) {
+    value =
+      value.replace(/\/+$/g, "") ||
+      "/";
+  }
+
+  return value;
+}
+
 function getCurrentPath() {
   if (!isBrowser()) {
     return "";
@@ -984,10 +1130,63 @@ function getTokenParamNames() {
     "two_factor_token",
     "mfaToken",
     "mfa_token",
+    "otpToken",
+    "otp_token",
     "token",
     "code",
     "t",
   ];
+}
+
+function normalizeTempTokenValue(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (
+    !raw ||
+    isCorruptedTextValue(raw)
+  ) {
+    return "";
+  }
+
+  let normalized =
+    "";
+
+  try {
+    normalized =
+      helperNormalizeTokenValue(
+        raw,
+        getTokenMaxLength()
+      ) || "";
+  } catch {
+    normalized =
+      raw;
+  }
+
+  normalized =
+    safeText(normalized, "");
+
+  if (/^bearer\s+/i.test(normalized)) {
+    normalized =
+      normalized.replace(/^bearer\s+/i, "")
+        .trim();
+  }
+
+  if (
+    !normalized ||
+    isCorruptedTextValue(normalized) ||
+    /[\r\n\t\s]/.test(normalized)
+  ) {
+    return "";
+  }
+
+  if (
+    normalized.length > getTokenMaxLength()
+  ) {
+    return "";
+  }
+
+  return normalized;
 }
 
 function extractTempTokenFromSearch(search = "", names = getTokenParamNames()) {
@@ -997,9 +1196,8 @@ function extractTempTokenFromSearch(search = "", names = getTokenParamNames()) {
 
     for (const name of names) {
       const token =
-        normalizeTokenValue(
-          params.get(name),
-          getTokenMaxLength()
+        normalizeTempTokenValue(
+          params.get(name)
         );
 
       if (token) {
@@ -1011,7 +1209,7 @@ function extractTempTokenFromSearch(search = "", names = getTokenParamNames()) {
   return "";
 }
 
-function extractTokenFromHashQuery(hash = "", names = getTokenParamNames()) {
+function extractTempTokenFromHashQuery(hash = "", names = getTokenParamNames()) {
   const cleanHash =
     safeText(hash, "");
 
@@ -1034,6 +1232,67 @@ function extractTokenFromHashQuery(hash = "", names = getTokenParamNames()) {
   );
 }
 
+function extractTempTokenFromPath(path = "") {
+  const raw =
+    safeText(path, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  let pathname =
+    "";
+
+  try {
+    const parsed =
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
+
+    pathname =
+      normalizePathnameOnly(
+        parsed.pathname || "/"
+      );
+  } catch {
+    pathname =
+      normalizePathnameOnly(
+        raw
+          .split("?")[0]
+          .split("#")[0] ||
+          "/"
+      );
+  }
+
+  const routePrefixes = [
+    TWO_FACTOR_PATH,
+    OTP_PATH,
+    MFA_PATH,
+  ];
+
+  for (const route of routePrefixes) {
+    const marker =
+      `${route}/`;
+
+    if (pathname.startsWith(marker)) {
+      const token =
+        pathname
+          .slice(marker.length)
+          .split("/")[0];
+
+      try {
+        return normalizeTempTokenValue(
+          decodeURIComponent(token || "")
+        ) || "";
+      } catch {
+        return normalizeTempTokenValue(token) || "";
+      }
+    }
+  }
+
+  return "";
+}
+
 function extractTempTokenFromUrl(pathOrUrl = getCurrentPath()) {
   const raw =
     safeText(pathOrUrl, "");
@@ -1046,6 +1305,13 @@ function extractTempTokenFromUrl(pathOrUrl = getCurrentPath()) {
     isHashRouterPath(raw)
       ? normalizeHashRouterPath(raw)
       : raw;
+
+  const pathToken =
+    extractTempTokenFromPath(normalizedRaw);
+
+  if (pathToken) {
+    return pathToken;
+  }
 
   try {
     const parsed =
@@ -1064,8 +1330,41 @@ function extractTempTokenFromUrl(pathOrUrl = getCurrentPath()) {
       return fromSearch;
     }
 
+    if (
+      parsed.hash &&
+      isHashRouterPath(parsed.hash)
+    ) {
+      const hashPath =
+        normalizeHashRouterPath(parsed.hash);
+
+      const hashPathToken =
+        extractTempTokenFromPath(hashPath);
+
+      if (hashPathToken) {
+        return hashPathToken;
+      }
+
+      const hashQuery =
+        hashPath.includes("?")
+          ? hashPath
+              .split("?")
+              .slice(1)
+              .join("?")
+          : "";
+
+      const fromHashRouterQuery =
+        extractTempTokenFromSearch(
+          hashQuery ? `?${hashQuery}` : "",
+          getTokenParamNames()
+        );
+
+      if (fromHashRouterQuery) {
+        return fromHashRouterQuery;
+      }
+    }
+
     const fromHash =
-      extractTokenFromHashQuery(
+      extractTempTokenFromHashQuery(
         parsed.hash,
         getTokenParamNames()
       );
@@ -1100,7 +1399,7 @@ function extractTempTokenFromUrl(pathOrUrl = getCurrentPath()) {
 }
 
 export function resolveTwoFactorTempToken(payload = {}) {
-  return normalizeTokenValue(
+  return normalizeTempTokenValue(
     payload?.tempToken ??
       payload?.temp_token ??
       payload?.temporaryToken ??
@@ -1111,10 +1410,11 @@ export function resolveTwoFactorTempToken(payload = {}) {
       payload?.two_factor_token ??
       payload?.mfaToken ??
       payload?.mfa_token ??
+      payload?.otpToken ??
+      payload?.otp_token ??
       payload?.token ??
       getStoredTempToken() ??
-      extractTempTokenFromUrl(),
-    getTokenMaxLength()
+      extractTempTokenFromUrl()
   ) || "";
 }
 
@@ -1327,6 +1627,12 @@ export function buildTwoFactorVerifyBody(payload = {}) {
     mfa_token:
       normalized.tempToken,
 
+    otpToken:
+      normalized.tempToken,
+
+    otp_token:
+      normalized.tempToken,
+
     token:
       normalized.tempToken,
 
@@ -1382,6 +1688,12 @@ export function buildTwoFactorVerifyBody(payload = {}) {
     remember:
       normalized.remember,
 
+    rememberMe:
+      normalized.remember,
+
+    remember_me:
+      normalized.remember,
+
     trustDevice:
       normalized.trustDevice,
 
@@ -1420,6 +1732,12 @@ export function buildTwoFactorRequestBody(payload = {}) {
     temp_token:
       normalized.tempToken,
 
+    temporaryToken:
+      normalized.tempToken,
+
+    temporary_token:
+      normalized.tempToken,
+
     challengeToken:
       normalized.tempToken,
 
@@ -1436,6 +1754,12 @@ export function buildTwoFactorRequestBody(payload = {}) {
       normalized.tempToken,
 
     mfa_token:
+      normalized.tempToken,
+
+    otpToken:
+      normalized.tempToken,
+
+    otp_token:
       normalized.tempToken,
 
     token:
@@ -1530,112 +1854,37 @@ function getNode(input = {}) {
   };
 }
 
+function nodeList(input = {}) {
+  const nodes =
+    getNode(input);
+
+  return Object.values(nodes)
+    .filter(isObject);
+}
+
 /* =========================================================
    RESPONSE RESOLUTION
 ========================================================= */
 
 function resolveExplicitOk(input = {}) {
-  const {
-    root,
-    data,
-    payload,
-    result,
-    body,
-    responseNode,
-    responseData,
-    auth,
-    authData,
-    session,
-    sessionData,
-    meta,
-  } = getNode(input);
+  const nodes =
+    nodeList(input);
 
-  const values = [
-    root.ok,
-    root.success,
-    root.valid,
-    root.accepted,
-    root.completed,
-    root.verified,
-    root.authenticated,
-
-    data.ok,
-    data.success,
-    data.valid,
-    data.accepted,
-    data.completed,
-    data.verified,
-    data.authenticated,
-
-    payload.ok,
-    payload.success,
-    payload.valid,
-    payload.accepted,
-    payload.completed,
-    payload.verified,
-    payload.authenticated,
-
-    result.ok,
-    result.success,
-    result.valid,
-    result.accepted,
-    result.completed,
-    result.verified,
-    result.authenticated,
-
-    body.ok,
-    body.success,
-    body.valid,
-    body.accepted,
-    body.completed,
-    body.verified,
-    body.authenticated,
-
-    responseNode.ok,
-    responseNode.success,
-    responseNode.valid,
-    responseNode.accepted,
-    responseNode.completed,
-    responseNode.verified,
-    responseNode.authenticated,
-
-    responseData.ok,
-    responseData.success,
-    responseData.valid,
-    responseData.accepted,
-    responseData.completed,
-    responseData.verified,
-    responseData.authenticated,
-
-    auth.ok,
-    auth.success,
-    auth.valid,
-    auth.verified,
-    auth.authenticated,
-
-    authData.ok,
-    authData.success,
-    authData.valid,
-    authData.verified,
-    authData.authenticated,
-
-    session.ok,
-    session.success,
-    session.authenticated,
-
-    sessionData.ok,
-    sessionData.success,
-    sessionData.authenticated,
-
-    meta.ok,
-    meta.success,
-    meta.valid,
-    meta.completed,
+  const keys = [
+    "ok",
+    "success",
+    "valid",
+    "accepted",
+    "completed",
+    "verified",
+    "authenticated",
   ];
 
-  for (const value of values) {
-    if (typeof value === "boolean") {
-      return value;
+  for (const node of nodes) {
+    for (const key of keys) {
+      if (typeof node[key] === "boolean") {
+        return node[key];
+      }
     }
   }
 
@@ -1643,73 +1892,27 @@ function resolveExplicitOk(input = {}) {
 }
 
 function resolveStatus(input = {}) {
-  const {
-    root,
-    data,
-    payload,
-    result,
-    body,
-    responseNode,
-    responseData,
-    auth,
-    authData,
-    session,
-    sessionData,
-    meta,
-  } = getNode(input);
+  const nodes =
+    nodeList(input);
 
-  return safeNumber(
-    pickFirst(
-      root.status,
-      root.statusCode,
-      root.status_code,
+  for (const node of nodes) {
+    const status =
+      pickFirst(
+        node.status,
+        node.statusCode,
+        node.status_code
+      );
 
-      data.status,
-      data.statusCode,
-      data.status_code,
+    if (
+      status !== null &&
+      status !== undefined &&
+      status !== ""
+    ) {
+      return safeNumber(status, 0);
+    }
+  }
 
-      payload.status,
-      payload.statusCode,
-      payload.status_code,
-
-      result.status,
-      result.statusCode,
-      result.status_code,
-
-      body.status,
-      body.statusCode,
-      body.status_code,
-
-      responseNode.status,
-      responseNode.statusCode,
-      responseNode.status_code,
-
-      responseData.status,
-      responseData.statusCode,
-      responseData.status_code,
-
-      auth.status,
-      auth.statusCode,
-      auth.status_code,
-
-      authData.status,
-      authData.statusCode,
-      authData.status_code,
-
-      session.status,
-      session.statusCode,
-      session.status_code,
-
-      sessionData.status,
-      sessionData.statusCode,
-      sessionData.status_code,
-
-      meta.status,
-      meta.statusCode,
-      meta.status_code
-    ),
-    0
-  );
+  return 0;
 }
 
 function normalizeStatusText(value = "") {
@@ -1733,89 +1936,24 @@ function normalizeStatusText(value = "") {
 }
 
 function resolveStatusText(input = {}) {
-  const {
-    root,
-    data,
-    payload,
-    result,
-    body,
-    responseNode,
-    responseData,
-    auth,
-    authData,
-    session,
-    sessionData,
-    meta,
-  } = getNode(input);
+  const nodes =
+    nodeList(input);
 
-  const candidates = [
-    root.statusText,
-    root.status_text,
-    root.state,
-    root.status,
+  for (const node of nodes) {
+    const candidates = [
+      node.statusText,
+      node.status_text,
+      node.state,
+      node.status,
+    ];
 
-    data.statusText,
-    data.status_text,
-    data.state,
-    data.status,
+    for (const candidate of candidates) {
+      const text =
+        normalizeStatusText(candidate);
 
-    payload.statusText,
-    payload.status_text,
-    payload.state,
-    payload.status,
-
-    result.statusText,
-    result.status_text,
-    result.state,
-    result.status,
-
-    body.statusText,
-    body.status_text,
-    body.state,
-    body.status,
-
-    responseNode.statusText,
-    responseNode.status_text,
-    responseNode.state,
-    responseNode.status,
-
-    responseData.statusText,
-    responseData.status_text,
-    responseData.state,
-    responseData.status,
-
-    auth.statusText,
-    auth.status_text,
-    auth.state,
-    auth.status,
-
-    authData.statusText,
-    authData.status_text,
-    authData.state,
-    authData.status,
-
-    session.statusText,
-    session.status_text,
-    session.state,
-    session.status,
-
-    sessionData.statusText,
-    sessionData.status_text,
-    sessionData.state,
-    sessionData.status,
-
-    meta.statusText,
-    meta.status_text,
-    meta.state,
-    meta.status,
-  ];
-
-  for (const candidate of candidates) {
-    const text =
-      normalizeStatusText(candidate);
-
-    if (text) {
-      return text;
+      if (text) {
+        return text;
+      }
     }
   }
 
@@ -1823,85 +1961,24 @@ function resolveStatusText(input = {}) {
 }
 
 function resolveCode(input = {}) {
-  const {
-    root,
-    data,
-    payload,
-    result,
-    body,
-    responseNode,
-    responseData,
-    auth,
-    authData,
-    session,
-    sessionData,
-    meta,
-  } = getNode(input);
+  const nodes =
+    nodeList(input);
 
-  return safeText(
-    pickFirst(
-      root.code,
-      root.errorCode,
-      root.error_code,
-      root.error,
+  for (const node of nodes) {
+    const code =
+      pickFirstText(
+        node.code,
+        node.errorCode,
+        node.error_code,
+        node.error
+      );
 
-      data.code,
-      data.errorCode,
-      data.error_code,
-      data.error,
+    if (code) {
+      return code;
+    }
+  }
 
-      payload.code,
-      payload.errorCode,
-      payload.error_code,
-      payload.error,
-
-      result.code,
-      result.errorCode,
-      result.error_code,
-      result.error,
-
-      body.code,
-      body.errorCode,
-      body.error_code,
-      body.error,
-
-      responseNode.code,
-      responseNode.errorCode,
-      responseNode.error_code,
-      responseNode.error,
-
-      responseData.code,
-      responseData.errorCode,
-      responseData.error_code,
-      responseData.error,
-
-      auth.code,
-      auth.errorCode,
-      auth.error_code,
-      auth.error,
-
-      authData.code,
-      authData.errorCode,
-      authData.error_code,
-      authData.error,
-
-      session.code,
-      session.errorCode,
-      session.error_code,
-      session.error,
-
-      sessionData.code,
-      sessionData.errorCode,
-      sessionData.error_code,
-      sessionData.error,
-
-      meta.code,
-      meta.errorCode,
-      meta.error_code,
-      meta.error
-    ),
-    ""
-  );
+  return "";
 }
 
 function parseRetryAfterToSeconds(value = "") {
@@ -1936,255 +2013,102 @@ function parseRetryAfterToSeconds(value = "") {
 }
 
 function resolveRetryAfter(input = {}) {
-  const {
-    root,
-    data,
-    payload,
-    result,
-    body,
-    responseNode,
-    responseData,
-    auth,
-    authData,
-    meta,
-  } = getNode(input);
+  const nodes =
+    nodeList(input);
 
-  return Math.max(
-    0,
-    safeNumber(
-      pickFirst(
-        root.retryAfter,
-        root.retry_after,
-        root.cooldownSeconds,
-        root.cooldown_seconds,
-        root.rateLimitSeconds,
-        root.rate_limit_seconds,
+  for (const node of nodes) {
+    const retryAfter =
+      safeNumber(
+        pickFirst(
+          node.retryAfter,
+          node.retry_after,
+          node.cooldownSeconds,
+          node.cooldown_seconds,
+          node.rateLimitSeconds,
+          node.rate_limit_seconds
+        ),
+        0
+      );
 
-        data.retryAfter,
-        data.retry_after,
-        data.cooldownSeconds,
-        data.cooldown_seconds,
-        data.rateLimitSeconds,
-        data.rate_limit_seconds,
+    if (retryAfter > 0) {
+      return retryAfter;
+    }
+  }
 
-        payload.retryAfter,
-        payload.retry_after,
-        payload.cooldownSeconds,
-        payload.cooldown_seconds,
-
-        result.retryAfter,
-        result.retry_after,
-        result.cooldownSeconds,
-        result.cooldown_seconds,
-
-        body.retryAfter,
-        body.retry_after,
-        body.cooldownSeconds,
-        body.cooldown_seconds,
-
-        responseNode.retryAfter,
-        responseNode.retry_after,
-        responseNode.cooldownSeconds,
-        responseNode.cooldown_seconds,
-
-        responseData.retryAfter,
-        responseData.retry_after,
-        responseData.cooldownSeconds,
-        responseData.cooldown_seconds,
-
-        auth.retryAfter,
-        auth.retry_after,
-        auth.cooldownSeconds,
-        auth.cooldown_seconds,
-
-        authData.retryAfter,
-        authData.retry_after,
-        authData.cooldownSeconds,
-        authData.cooldown_seconds,
-
-        meta.retryAfter,
-        meta.retry_after,
-        meta.cooldownSeconds,
-        meta.cooldown_seconds
-      ),
-      0
-    )
-  );
+  return 0;
 }
 
 function resolveMessage(input = {}, fallback = "") {
-  const {
-    root,
-    data,
-    payload,
-    result,
-    body,
-    responseNode,
-    responseData,
-    auth,
-    authData,
-    session,
-    sessionData,
-    meta,
-  } = getNode(input);
+  const nodes =
+    nodeList(input);
 
-  return pickFirstText(
-    root.message,
-    root.mensaje,
-    root.detail,
-    root.description,
-    root.error,
+  for (const node of nodes) {
+    const message =
+      pickFirstText(
+        node.message,
+        node.mensaje,
+        node.detail,
+        node.description,
+        node.error,
+        node.title,
+        node.reason,
+        node.msg
+      );
 
-    data.message,
-    data.mensaje,
-    data.detail,
-    data.description,
-    data.error,
+    if (message) {
+      return message;
+    }
+  }
 
-    payload.message,
-    payload.mensaje,
-    payload.detail,
-    payload.description,
-    payload.error,
-
-    result.message,
-    result.mensaje,
-    result.detail,
-    result.description,
-    result.error,
-
-    body.message,
-    body.mensaje,
-    body.detail,
-    body.description,
-    body.error,
-
-    responseNode.message,
-    responseNode.mensaje,
-    responseNode.detail,
-    responseNode.description,
-    responseNode.error,
-
-    responseData.message,
-    responseData.mensaje,
-    responseData.detail,
-    responseData.description,
-    responseData.error,
-
-    auth.message,
-    auth.mensaje,
-    auth.detail,
-    auth.error,
-
-    authData.message,
-    authData.mensaje,
-    authData.detail,
-    authData.error,
-
-    session.message,
-    session.mensaje,
-    session.detail,
-    session.error,
-
-    sessionData.message,
-    sessionData.mensaje,
-    sessionData.detail,
-    sessionData.error,
-
-    meta.message,
-    meta.mensaje,
-    meta.detail,
-    meta.description,
-    meta.error,
-
-    fallback
-  );
+  return fallback;
 }
 
 function resolveRedirectTo(input = {}, fallback = "") {
-  const {
-    root,
-    data,
-    payload,
-    result,
-    body,
-    responseNode,
-    responseData,
-    auth,
-    authData,
-    meta,
-  } = getNode(input);
+  const nodes =
+    nodeList(input);
 
-  return sanitizeRedirect(
-    pickFirstText(
-      root.redirectTo,
-      root.redirect_to,
-      root.redirect,
-      root.next,
-      root.nextPath,
-      root.next_path,
+  for (const node of nodes) {
+    const redirect =
+      sanitizeRedirect(
+        pickFirstText(
+          node.redirectTo,
+          node.redirect_to,
+          node.redirect,
+          node.next,
+          node.nextPath,
+          node.next_path,
+          node.returnTo,
+          node.return_to
+        ),
+        ""
+      );
 
-      data.redirectTo,
-      data.redirect_to,
-      data.redirect,
-      data.next,
-      data.nextPath,
-      data.next_path,
+    if (redirect) {
+      return redirect;
+    }
+  }
 
-      payload.redirectTo,
-      payload.redirect_to,
-      payload.redirect,
-      payload.next,
-      payload.nextPath,
-      payload.next_path,
+  return fallback;
+}
 
-      result.redirectTo,
-      result.redirect_to,
-      result.redirect,
-      result.next,
-      result.nextPath,
-      result.next_path,
+function extractTempTokenFromResponse(input = {}) {
+  const nodes =
+    nodeList(input);
 
-      body.redirectTo,
-      body.redirect_to,
-      body.redirect,
-      body.next,
-      body.nextPath,
-      body.next_path,
+  for (const node of nodes) {
+    for (const key of TEMP_TOKEN_FIELD_NAMES) {
+      const token =
+        normalizeTempTokenValue(
+          node?.[key]
+        );
 
-      responseNode.redirectTo,
-      responseNode.redirect_to,
-      responseNode.redirect,
-      responseNode.next,
-      responseNode.nextPath,
-      responseNode.next_path,
+      if (token) {
+        return token;
+      }
+    }
+  }
 
-      responseData.redirectTo,
-      responseData.redirect_to,
-      responseData.redirect,
-      responseData.next,
-      responseData.nextPath,
-      responseData.next_path,
-
-      auth.redirectTo,
-      auth.redirect_to,
-      auth.redirect,
-      auth.next,
-
-      authData.redirectTo,
-      authData.redirect_to,
-      authData.redirect,
-      authData.next,
-
-      meta.redirectTo,
-      meta.redirect_to,
-      meta.redirect,
-      meta.next,
-
-      fallback
-    ),
-    fallback
-  );
+  return "";
 }
 
 function isExplicitFailure(input = {}) {
@@ -2241,6 +2165,16 @@ function isDeclaredSuccess(input = {}) {
     return false;
   }
 
+  const status =
+    resolveStatus(input);
+
+  if (
+    status >= 200 &&
+    status < 300
+  ) {
+    return true;
+  }
+
   const statusText =
     resolveStatusText(input);
 
@@ -2263,6 +2197,7 @@ function hasCompleteSession(input = {}) {
       (
         user.id ||
         user.userId ||
+        user.user_id ||
         user.email ||
         user.username ||
         user.phone
@@ -2284,16 +2219,8 @@ function isCooldownResponse(input = {}) {
   const statusText =
     resolveStatusText(input);
 
-  const {
-    root,
-    data,
-    payload,
-    result,
-    body,
-    responseNode,
-    responseData,
-    meta,
-  } = getNode(input);
+  const nodes =
+    nodeList(input);
 
   return Boolean(
     status === 429 ||
@@ -2302,14 +2229,11 @@ function isCooldownResponse(input = {}) {
       code === "TOO_MANY_REQUESTS" ||
       statusText === "rate_limited" ||
       statusText === "too_many_requests" ||
-      root.cooldown === true ||
-      data.cooldown === true ||
-      payload.cooldown === true ||
-      result.cooldown === true ||
-      body.cooldown === true ||
-      responseNode.cooldown === true ||
-      responseData.cooldown === true ||
-      meta.cooldown === true
+      nodes.some((node) =>
+        node.cooldown === true ||
+        node.rateLimited === true ||
+        node.rate_limited === true
+      )
   );
 }
 
@@ -2355,6 +2279,9 @@ function buildBaseNormalizedResponse({
   const sessionData =
     normalizeSessionPayload(input);
 
+  const tempToken =
+    extractTempTokenFromResponse(input);
+
   const message =
     resolveMessage(
       input,
@@ -2374,6 +2301,9 @@ function buildBaseNormalizedResponse({
       ok,
     error:
       !ok,
+
+    verified:
+      ok,
 
     authenticated:
       Boolean(sessionComplete),
@@ -2411,10 +2341,28 @@ function buildBaseNormalizedResponse({
     accessToken:
       token || null,
 
+    access_token:
+      token || null,
+
     refreshToken:
       refreshToken || null,
 
+    refresh_token:
+      refreshToken || null,
+
+    tempToken:
+      tempToken || null,
+
+    temp_token:
+      tempToken || null,
+
     user:
+      user || null,
+
+    usuario:
+      user || null,
+
+    me:
       user || null,
 
     session:
@@ -2662,6 +2610,24 @@ function rememberResult(type = "unknown", result = {}) {
   }
 }
 
+function getErrorStatus(error = null) {
+  return safeNumber(
+    error?.status ||
+      error?.statusCode ||
+      error?.response?.status ||
+      error?.data?.status ||
+      error?.response?.data?.status ||
+      0,
+    0
+  );
+}
+
+function shouldTryNextEndpoint(error = null) {
+  return FALLBACK_NEXT_ENDPOINT_STATUSES.has(
+    getErrorStatus(error)
+  );
+}
+
 function getRemainingCooldownSeconds() {
   const remaining =
     runtime.cooldownUntil - nowMs();
@@ -2718,8 +2684,121 @@ function buildCooldownResponse(message = getRateLimitMessage()) {
 }
 
 /* =========================================================
-   FETCH WITH TIMEOUT
+   ABORT / FETCH WITH TIMEOUT
 ========================================================= */
+
+function hasAbortSignal(value = null) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "aborted" in value &&
+      isFunction(value.addEventListener)
+  );
+}
+
+function createAbortError(message = "Request aborted") {
+  try {
+    if (typeof DOMException !== "undefined") {
+      return new DOMException(
+        message,
+        "AbortError"
+      );
+    }
+  } catch {}
+
+  const error =
+    new Error(message);
+
+  error.name =
+    "AbortError";
+  error.aborted =
+    true;
+
+  return error;
+}
+
+function mergeAbortSignals(signals = []) {
+  const validSignals =
+    safeArray(signals)
+      .filter(hasAbortSignal);
+
+  if (!validSignals.length) {
+    return null;
+  }
+
+  if (validSignals.length === 1) {
+    return validSignals[0];
+  }
+
+  if (typeof AbortController === "undefined") {
+    return validSignals[0];
+  }
+
+  const controller =
+    new AbortController();
+
+  const cleanups =
+    [];
+
+  function cleanup() {
+    for (const dispose of cleanups.splice(0)) {
+      try {
+        dispose();
+      } catch {}
+    }
+  }
+
+  function abortFrom(signal) {
+    if (controller.signal.aborted) {
+      return;
+    }
+
+    try {
+      controller.abort(
+        signal.reason ||
+          createAbortError()
+      );
+    } catch {
+      try {
+        controller.abort();
+      } catch {}
+    } finally {
+      cleanup();
+    }
+  }
+
+  for (const signal of validSignals) {
+    if (signal.aborted) {
+      abortFrom(signal);
+      break;
+    }
+
+    const handler =
+      () => abortFrom(signal);
+
+    try {
+      signal.addEventListener(
+        "abort",
+        handler,
+        {
+          once:
+            true,
+        }
+      );
+
+      cleanups.push(() => {
+        try {
+          signal.removeEventListener(
+            "abort",
+            handler
+          );
+        } catch {}
+      });
+    } catch {}
+  }
+
+  return controller.signal;
+}
 
 async function parseFetchBody(httpResponse) {
   const contentType =
@@ -2756,7 +2835,8 @@ async function parseFetchBody(httpResponse) {
 async function fetchJsonWithTimeout(
   url,
   body,
-  timeoutMs = getRequestTimeout()
+  timeoutMs = getRequestTimeout(),
+  externalSignal = null
 ) {
   if (typeof fetch !== "function") {
     const error =
@@ -2770,14 +2850,26 @@ async function fetchJsonWithTimeout(
     throw error;
   }
 
+  if (externalSignal?.aborted) {
+    throw createAbortError(
+      "Request aborted before two-factor fetch."
+    );
+  }
+
   const controller =
     typeof AbortController !== "undefined"
       ? new AbortController()
       : null;
 
+  let timeoutTriggered =
+    false;
+
   const timer =
     controller
       ? setTimeout(() => {
+          timeoutTriggered =
+            true;
+
           try {
             controller.abort("two-factor-timeout");
           } catch {
@@ -2787,6 +2879,12 @@ async function fetchJsonWithTimeout(
           }
         }, timeoutMs)
       : null;
+
+  const signal =
+    mergeAbortSignals([
+      controller?.signal,
+      externalSignal,
+    ]);
 
   try {
     const httpResponse =
@@ -2812,7 +2910,7 @@ async function fetchJsonWithTimeout(
           JSON.stringify(body),
 
         signal:
-          controller?.signal,
+          signal || undefined,
       });
 
     const payload =
@@ -2867,6 +2965,19 @@ async function fetchJsonWithTimeout(
     }
 
     return enrichedPayload;
+  } catch (error) {
+    if (timeoutTriggered) {
+      try {
+        error.timeout =
+          true;
+        error.aborted =
+          false;
+        error.code =
+          error.code || "REQUEST_TIMEOUT";
+      } catch {}
+    }
+
+    throw error;
   } finally {
     if (timer) {
       clearTimeout(timer);
@@ -2947,22 +3058,22 @@ async function requestWithApiClient(endpoint, body, options = {}) {
         }
       );
     } catch (error) {
-      if (
-        error?.status ||
-        error?.response?.status ||
-        error?.data?.status
-      ) {
+      if (shouldTryNextEndpoint(error)) {
         throw error;
       }
 
-      return apiClient.request(
-        "POST",
-        endpoint,
-        {
-          ...requestOptions,
-          body,
-        }
-      );
+      try {
+        return await apiClient.request(
+          "POST",
+          endpoint,
+          {
+            ...requestOptions,
+            body,
+          }
+        );
+      } catch {
+        throw error;
+      }
     }
   }
 
@@ -2988,22 +3099,22 @@ async function requestWithAppCoreRequest(endpoint, body, options = {}) {
       }
     );
   } catch (error) {
-    if (
-      error?.status ||
-      error?.response?.status ||
-      error?.data?.status
-    ) {
+    if (shouldTryNextEndpoint(error)) {
       throw error;
     }
 
-    return AppCore.request(
-      "POST",
-      endpoint,
-      {
-        ...requestOptions,
-        body,
-      }
-    );
+    try {
+      return await AppCore.request(
+        "POST",
+        endpoint,
+        {
+          ...requestOptions,
+          body,
+        }
+      );
+    } catch {
+      throw error;
+    }
   }
 }
 
@@ -3041,37 +3152,38 @@ async function requestWithHttpService(endpoint, body, options = {}) {
         }
       );
     } catch (error) {
-      if (
-        error?.status ||
-        error?.response?.status ||
-        error?.data?.status
-      ) {
+      if (shouldTryNextEndpoint(error)) {
         throw error;
       }
 
-      return http.request(
-        endpoint,
-        {
-          ...requestOptions,
-          method:
-            "POST",
-          body,
-        }
-      );
+      try {
+        return await http.request(
+          endpoint,
+          {
+            ...requestOptions,
+            method:
+              "POST",
+            body,
+          }
+        );
+      } catch {
+        throw error;
+      }
     }
   }
 
   return null;
 }
 
-async function requestWithFetch(endpoint, body) {
+async function requestWithFetch(endpoint, body, options = {}) {
   const url =
     buildFinalUrl(endpoint);
 
   return fetchJsonWithTimeout(
     url,
     body,
-    getRequestTimeout()
+    getRequestTimeout(),
+    options?.signal || null
   );
 }
 
@@ -3083,29 +3195,61 @@ async function executeTwoFactorRequest(endpoint, body, options = {}) {
   ];
 
   for (const transport of transports) {
-    try {
-      const result =
-        await transport(
-          endpoint,
-          body,
-          options
-        );
+    const result =
+      await transport(
+        endpoint,
+        body,
+        options
+      );
 
-      if (
-        result !== null &&
-        result !== undefined
-      ) {
-        return result;
-      }
-    } catch (error) {
-      throw error;
+    if (
+      result !== null &&
+      result !== undefined
+    ) {
+      return result;
     }
   }
 
   return requestWithFetch(
     endpoint,
-    body
+    body,
+    options
   );
+}
+
+async function executeTwoFactorRequestWithCandidates(
+  candidates = [],
+  body = {},
+  options = {}
+) {
+  const endpoints =
+    unique(candidates);
+
+  let lastError =
+    null;
+
+  for (const endpoint of endpoints) {
+    try {
+      return await executeTwoFactorRequest(
+        endpoint,
+        body,
+        {
+          ...safeObject(options),
+          endpoint,
+        }
+      );
+    } catch (error) {
+      lastError =
+        error;
+
+      if (!shouldTryNextEndpoint(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError ||
+    new Error("No hay endpoint 2FA disponible.");
 }
 
 /* =========================================================
@@ -3167,6 +3311,22 @@ function validateRequestPayload(normalized = {}) {
    SESSION COMMIT
 ========================================================= */
 
+function hasUsableReturnedUser(user = null) {
+  return Boolean(
+    user &&
+      isObject(user) &&
+      user.active !== false &&
+      (
+        user.id ||
+        user.userId ||
+        user.user_id ||
+        user.email ||
+        user.username ||
+        user.phone
+      )
+  );
+}
+
 function clearTempTokenSafe() {
   try {
     persistTempToken(null);
@@ -3179,11 +3339,39 @@ function clearTempTokenSafe() {
   return true;
 }
 
+function maybePersistReturnedTempToken(normalizedResponse = {}, source = "2fa") {
+  const token =
+    normalizeTempTokenValue(
+      normalizedResponse?.tempToken ||
+        normalizedResponse?.temp_token ||
+        ""
+    );
+
+  if (!token) {
+    return false;
+  }
+
+  try {
+    persistTempToken(token);
+  } catch {}
+
+  safeEmit(
+    "auth:2fa:temp-token-updated",
+    {
+      source,
+      hasTempToken:
+        true,
+    }
+  );
+
+  return true;
+}
+
 function maybeApplyReturnedSession(normalizedResponse = {}, source = "2fa") {
   if (
     !normalizedResponse?.authenticated ||
     !normalizedResponse?.token ||
-    !normalizedResponse?.user
+    !hasUsableReturnedUser(normalizedResponse?.user)
   ) {
     return null;
   }
@@ -3303,8 +3491,8 @@ export async function verifyTwoFactor(payload = {}, options = {}) {
     });
   }
 
-  const endpoint =
-    getTwoFactorVerifyEndpoint();
+  const endpoints =
+    endpointCandidatesFor("verify");
 
   const body =
     buildTwoFactorVerifyBody(normalized);
@@ -3316,7 +3504,7 @@ export async function verifyTwoFactor(payload = {}, options = {}) {
   safeEmit(
     "auth:2fa:verify:start",
     {
-      endpoint,
+      endpoints,
       hasIdentifier:
         Boolean(normalized.identifier),
       trustDevice:
@@ -3330,8 +3518,8 @@ export async function verifyTwoFactor(payload = {}, options = {}) {
     (async () => {
       try {
         const raw =
-          await executeTwoFactorRequest(
-            endpoint,
+          await executeTwoFactorRequestWithCandidates(
+            endpoints,
             body,
             {
               ...safeObject(options),
@@ -3380,6 +3568,16 @@ export async function verifyTwoFactor(payload = {}, options = {}) {
             "La verificación no devolvió una sesión completa.";
         }
 
+        if (
+          finalResponse.ok &&
+          finalResponse.tempToken
+        ) {
+          maybePersistReturnedTempToken(
+            finalResponse,
+            "2fa:verify"
+          );
+        }
+
         rememberResult(
           "verify",
           finalResponse
@@ -3409,11 +3607,7 @@ export async function verifyTwoFactor(payload = {}, options = {}) {
 
         if (
           runtime.failCount >=
-          clampNumber(
-            AUTH_CONSTANTS?.twoFactorMaxAttempts ?? 5,
-            1,
-            50
-          )
+          getMaxAttempts()
         ) {
           runtime.cooldownUntil =
             nowMs() + getCooldownMs();
@@ -3490,8 +3684,8 @@ export async function requestTwoFactorCode(payload = {}, options = {}) {
     });
   }
 
-  const endpoint =
-    getTwoFactorRequestEndpoint();
+  const endpoints =
+    endpointCandidatesFor("request");
 
   const body =
     buildTwoFactorRequestBody(normalized);
@@ -3503,7 +3697,7 @@ export async function requestTwoFactorCode(payload = {}, options = {}) {
   safeEmit(
     "auth:2fa:request:start",
     {
-      endpoint,
+      endpoints,
       hasIdentifier:
         Boolean(normalized.identifier),
       method:
@@ -3515,8 +3709,8 @@ export async function requestTwoFactorCode(payload = {}, options = {}) {
     (async () => {
       try {
         const raw =
-          await executeTwoFactorRequest(
-            endpoint,
+          await executeTwoFactorRequestWithCandidates(
+            endpoints,
             body,
             {
               ...safeObject(options),
@@ -3536,6 +3730,16 @@ export async function requestTwoFactorCode(payload = {}, options = {}) {
         const normalizedResponse =
           normalizeRequestTwoFactorResponse(raw);
 
+        if (
+          normalizedResponse.ok &&
+          normalizedResponse.tempToken
+        ) {
+          maybePersistReturnedTempToken(
+            normalizedResponse,
+            "2fa:request"
+          );
+        }
+
         rememberResult(
           "request",
           normalizedResponse
@@ -3554,6 +3758,8 @@ export async function requestTwoFactorCode(payload = {}, options = {}) {
               normalizedResponse.cooldown,
             retryAfter:
               normalizedResponse.retryAfter,
+            hasTempToken:
+              Boolean(normalizedResponse.tempToken),
           }
         );
 
@@ -3624,8 +3830,8 @@ export async function resendTwoFactorCode(payload = {}, options = {}) {
     });
   }
 
-  const endpoint =
-    getTwoFactorResendEndpoint();
+  const endpoints =
+    endpointCandidatesFor("resend");
 
   const body =
     buildResendTwoFactorBody(normalized);
@@ -3637,7 +3843,7 @@ export async function resendTwoFactorCode(payload = {}, options = {}) {
   safeEmit(
     "auth:2fa:resend:start",
     {
-      endpoint,
+      endpoints,
       hasIdentifier:
         Boolean(normalized.identifier),
       method:
@@ -3649,8 +3855,8 @@ export async function resendTwoFactorCode(payload = {}, options = {}) {
     (async () => {
       try {
         const raw =
-          await executeTwoFactorRequest(
-            endpoint,
+          await executeTwoFactorRequestWithCandidates(
+            endpoints,
             body,
             {
               ...safeObject(options),
@@ -3670,6 +3876,16 @@ export async function resendTwoFactorCode(payload = {}, options = {}) {
         const normalizedResponse =
           normalizeResendTwoFactorResponse(raw);
 
+        if (
+          normalizedResponse.ok &&
+          normalizedResponse.tempToken
+        ) {
+          maybePersistReturnedTempToken(
+            normalizedResponse,
+            "2fa:resend"
+          );
+        }
+
         rememberResult(
           "resend",
           normalizedResponse
@@ -3688,6 +3904,8 @@ export async function resendTwoFactorCode(payload = {}, options = {}) {
               normalizedResponse.cooldown,
             retryAfter:
               normalizedResponse.retryAfter,
+            hasTempToken:
+              Boolean(normalizedResponse.tempToken),
           }
         );
 
@@ -3833,11 +4051,12 @@ export function isTwoFactorRoute(path = getCurrentPath()) {
     safeText(path, "");
 
   const clean =
-    raw
-      .split("?")[0]
-      .split("#")[0]
-      .replace(/\/+$/g, "") ||
-    "/";
+    normalizePathnameOnly(
+      raw
+        .split("?")[0]
+        .split("#")[0] ||
+        "/"
+    );
 
   return (
     clean === TWO_FACTOR_PATH ||
@@ -3903,11 +4122,20 @@ export function getTwoFactorSnapshot() {
     verifyEndpoint:
       getTwoFactorVerifyEndpoint(),
 
+    verifyEndpointCandidates:
+      endpointCandidatesFor("verify"),
+
     requestEndpoint:
       getTwoFactorRequestEndpoint(),
 
+    requestEndpointCandidates:
+      endpointCandidatesFor("request"),
+
     resendEndpoint:
       getTwoFactorResendEndpoint(),
+
+    resendEndpointCandidates:
+      endpointCandidatesFor("resend"),
 
     currentPath:
       redactSafe(
@@ -3943,6 +4171,9 @@ export function getTwoFactorSnapshot() {
 
       cooldownMs:
         getCooldownMs(),
+
+      maxAttempts:
+        getMaxAttempts(),
     },
 
     runtime: {
@@ -4011,6 +4242,9 @@ export function getTwoFactorSnapshot() {
       hasFetch:
         typeof fetch === "function",
     },
+
+    at:
+      isoNow(),
   };
 }
 

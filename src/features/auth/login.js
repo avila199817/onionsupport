@@ -2,24 +2,28 @@
    Onion SPA - Auth Login
    Archivo: src/features/auth/login.js
 
-   EXTREME PRO SYSTEM · AUTH LOGIN · GOD MODE v13
-   NO CSS · NO INLINE STYLE · NO AUTH FANTASMA · NO EVENT DUPLICATION
+   EXTREME PRO SYSTEM · AUTH LOGIN · GOD MODE v14
+   BACKEND ALIGNED · NO CSS · NO INLINE STYLE · NO AUTH FANTASMA
+   NO EVENT DUPLICATION · COSMOS SESSION SAFE · 2FA SAFE
 
    RESPONSABILIDADES:
    - preparar credenciales login
    - construir payload robusto para backend heterogéneo
    - ejecutar login contra API pública
    - soportar backend Onion Auth:
+       · ok / success / authenticated
        · token / accessToken / access_token
        · refreshToken / refresh_token
        · session / sessionData
        · sessionId / session_id
        · userId / user_id
        · user / usuario / me / account / profile
+       · cliente / client
+       · routing
        · data / payload / result / body / response / auth
    - soportar 2FA sin marcar authenticated
    - aplicar sesión sólo con token + user válidos
-   - preservar sessionId/userId/expiresAt para refresh
+   - preservar sessionId/userId/expiresAt/tokenVersion para refresh
    - navegación SPA consistente tras login real
    - submit desde formularios HTML
    - mutex real contra login concurrente
@@ -85,8 +89,8 @@ import {
    VERSION / RUNTIME
 ========================================================= */
 
-const LOGIN_VERSION =
-  "13.0.0";
+export const LOGIN_VERSION =
+  "14.0.0-extreme-pro-backend-aligned";
 
 let loginPromise =
   null;
@@ -116,6 +120,9 @@ const DEFAULT_2FA_PATH =
 const DEFAULT_LOGIN_TIMEOUT_MS =
   30_000;
 
+const DEFAULT_CREDENTIALS_MODE =
+  "include";
+
 const ROUTE_DEFAULT_REDIRECTS =
   new Set([
     "/usuarios",
@@ -134,6 +141,7 @@ const AUTH_FAILURE_CODES =
     "INVALID_CREDENTIALS",
     "MISSING_CREDENTIALS",
     "ACCOUNT_TEMPORARILY_LOCKED",
+    "ACCOUNT_LOCKED",
     "ACCOUNT_DISABLED",
     "USER_DISABLED",
     "USER_NOT_AVAILABLE",
@@ -251,10 +259,13 @@ const AUTH_OBJECT_KEYS =
     "result",
     "body",
     "response",
+    "resource",
+    "value",
     "session",
     "sessionData",
     "auth",
     "authData",
+    "account",
   ]);
 
 const AUTH_TOKEN_KEYS =
@@ -267,6 +278,7 @@ const AUTH_TOKEN_KEYS =
     "jwt",
     "idToken",
     "id_token",
+    "bearer",
   ]);
 
 const REFRESH_TOKEN_KEYS =
@@ -287,6 +299,8 @@ const TEMP_TOKEN_KEYS =
     "two_factor_token",
     "mfaToken",
     "mfa_token",
+    "otpToken",
+    "otp_token",
   ]);
 
 const USER_KEYS =
@@ -300,6 +314,29 @@ const USER_KEYS =
     "current_user",
   ]);
 
+const CLIENT_KEYS =
+  Object.freeze([
+    "cliente",
+    "client",
+    "customer",
+    "organization",
+    "tenant",
+  ]);
+
+const ROUTING_KEYS =
+  Object.freeze([
+    "routing",
+    "routes",
+    "paths",
+  ]);
+
+const PREFERENCES_KEYS =
+  Object.freeze([
+    "preferences",
+    "preferencias",
+    "prefs",
+  ]);
+
 const ROLE_KEYS =
   Object.freeze([
     "role",
@@ -310,6 +347,14 @@ const ROLE_KEYS =
     "user_role",
     "userType",
     "user_type",
+  ]);
+
+const PERMISSIONS_KEYS =
+  Object.freeze([
+    "permissions",
+    "permisos",
+    "scopes",
+    "scope",
   ]);
 
 const STATUS_KEYS =
@@ -345,6 +390,8 @@ const REDIRECT_KEYS =
     "next",
     "nextPath",
     "next_path",
+    "returnTo",
+    "return_to",
   ]);
 
 const SESSION_OBJECT_KEYS =
@@ -380,6 +427,14 @@ const SESSION_EXPIRES_KEYS =
     "refresh_expires_at",
     "expiration",
     "expires",
+    "exp",
+  ]);
+
+const TOKEN_VERSION_KEYS =
+  Object.freeze([
+    "tokenVersion",
+    "token_version",
+    "tv",
   ]);
 
 const TWO_FACTOR_BOOL_KEYS =
@@ -389,11 +444,15 @@ const TWO_FACTOR_BOOL_KEYS =
     "require2FA",
     "require_2fa",
     "requiresTwoFactor",
+    "requires_two_factor",
     "twoFactorRequired",
+    "two_factor_required",
     "mfaRequired",
     "mfa_required",
     "requiresMfa",
     "requires_mfa",
+    "otpRequired",
+    "otp_required",
   ]);
 
 const TWO_FACTOR_STATUSES =
@@ -402,6 +461,7 @@ const TWO_FACTOR_STATUSES =
     "mfa_required",
     "two_factor_required",
     "totp_required",
+    "otp_required",
   ]);
 
 /* =========================================================
@@ -417,7 +477,10 @@ function safeText(value, fallback = "") {
   }
 
   const text =
-    String(value).trim();
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return text || fallback;
 }
@@ -495,17 +558,6 @@ function safeArray(value) {
 
 function isFunction(value) {
   return typeof value === "function";
-}
-
-function hasOwn(object, key) {
-  try {
-    return Object.prototype.hasOwnProperty.call(
-      object,
-      key
-    );
-  } catch {
-    return false;
-  }
 }
 
 function unique(values = []) {
@@ -631,7 +683,17 @@ function safeSetState(patch = {}, options = {}) {
   try {
     AppCore?.setState?.(
       cleanPatch,
-      options
+      {
+        source:
+          LOGIN_SOURCE,
+        emit:
+          options.emit === true,
+        emitState:
+          options.emitState === true,
+        silent:
+          options.silent !== false,
+        ...safeObject(options),
+      }
     );
   } catch {}
 
@@ -727,6 +789,54 @@ function safeWarn(...args) {
    EVENTS
 ========================================================= */
 
+function sanitizeUserForEvent(user = null) {
+  if (!isPlainObject(user)) {
+    return null;
+  }
+
+  const cloned = {
+    ...user,
+  };
+
+  for (const key of [
+    "password",
+    "passwordHash",
+    "password_hash",
+    "hash",
+    "twofa_secret",
+    "twofaSecret",
+    "mfa_secret",
+    "mfaSecret",
+    "refreshToken",
+    "refresh_token",
+    "token",
+    "accessToken",
+    "access_token",
+    "tempToken",
+    "temp_token",
+    "secret",
+  ]) {
+    delete cloned[key];
+  }
+
+  if (cloned.avatar) {
+    cloned.avatar =
+      redactSafe(cloned.avatar);
+  }
+
+  if (cloned.avatarUrl) {
+    cloned.avatarUrl =
+      redactSafe(cloned.avatarUrl);
+  }
+
+  if (cloned.picture) {
+    cloned.picture =
+      redactSafe(cloned.picture);
+  }
+
+  return cloned;
+}
+
 function sanitizeEventPayload(payload = {}) {
   if (!isPlainObject(payload)) {
     return payload;
@@ -783,40 +893,9 @@ function sanitizeEventPayload(payload = {}) {
     };
   }
 
-  if (output.user && isPlainObject(output.user)) {
-    output.user = {
-      ...output.user,
-      password:
-        undefined,
-      passwordHash:
-        undefined,
-      password_hash:
-        undefined,
-      refreshToken:
-        undefined,
-      refresh_token:
-        undefined,
-      token:
-        undefined,
-      accessToken:
-        undefined,
-      access_token:
-        undefined,
-      tempToken:
-        undefined,
-      temp_token:
-        undefined,
-    };
-
-    if (output.user.avatar) {
-      output.user.avatar =
-        redactSafe(output.user.avatar);
-    }
-
-    if (output.user.avatarUrl) {
-      output.user.avatarUrl =
-        redactSafe(output.user.avatarUrl);
-    }
+  if (output.user) {
+    output.user =
+      sanitizeUserForEvent(output.user);
   }
 
   if (output.error?.raw) {
@@ -1037,6 +1116,67 @@ function clearLoginAbortController(abortCtx = null) {
   return true;
 }
 
+async function readMaybeResponse(value) {
+  if (
+    value &&
+    typeof Response !== "undefined" &&
+    value instanceof Response
+  ) {
+    let payload =
+      null;
+
+    try {
+      payload =
+        await value.json();
+    } catch {
+      payload =
+        null;
+    }
+
+    if (!value.ok) {
+      const message =
+        extractMessage(payload) ||
+        payload?.message ||
+        payload?.error ||
+        `HTTP ${value.status}`;
+
+      const error =
+        createAuthError(
+          message,
+          {
+            status:
+              value.status,
+            code:
+              payload?.code ||
+              payload?.error ||
+              (
+                value.status === 401
+                  ? "UNAUTHORIZED"
+                  : value.status === 403
+                    ? "FORBIDDEN"
+                    : "LOGIN_FAILED"
+              ),
+            raw:
+              payload || value,
+          }
+        );
+
+      error.response = {
+        status:
+          value.status,
+        data:
+          payload,
+      };
+
+      throw error;
+    }
+
+    return payload;
+  }
+
+  return value;
+}
+
 async function nativeFetchPost(path, body = {}, options = {}) {
   if (
     !isBrowser() ||
@@ -1059,6 +1199,10 @@ async function nativeFetchPost(path, body = {}, options = {}) {
   const headers = {
     "Content-Type":
       "application/json",
+    "X-Onion-Auth-Flow":
+      "login",
+    "X-Request-Source":
+      LOGIN_SOURCE,
     ...(safeObject(options.headers)),
   };
 
@@ -1068,7 +1212,8 @@ async function nativeFetchPost(path, body = {}, options = {}) {
         "POST",
       headers,
       credentials:
-        options.credentials || "include",
+        options.credentials ||
+        DEFAULT_CREDENTIALS_MODE,
       cache:
         "no-store",
       signal:
@@ -1077,56 +1222,7 @@ async function nativeFetchPost(path, body = {}, options = {}) {
         JSON.stringify(body || {}),
     });
 
-  let payload =
-    null;
-
-  try {
-    payload =
-      await response.json();
-  } catch {
-    payload =
-      null;
-  }
-
-  if (!response.ok) {
-    const message =
-      extractMessage(payload) ||
-      payload?.message ||
-      payload?.error ||
-      `HTTP ${response.status}`;
-
-    const error =
-      createAuthError(
-        message,
-        {
-          status:
-            response.status,
-          code:
-            payload?.code ||
-            payload?.error ||
-            (
-              response.status === 401
-                ? "UNAUTHORIZED"
-                : response.status === 403
-                  ? "FORBIDDEN"
-                  : "LOGIN_FAILED"
-            ),
-          raw:
-            payload || response,
-        }
-      );
-
-    error.response = {
-      status:
-        response.status,
-      data:
-        payload,
-    };
-
-    throw error;
-  }
-
-  return payload;
+  return await readMaybeResponse(response);
 }
 
 async function apiPost(path, body = {}, options = {}) {
@@ -1149,6 +1245,16 @@ async function apiPost(path, body = {}, options = {}) {
       true,
     skipAuth:
       true,
+    credentials:
+      options.credentials ||
+      DEFAULT_CREDENTIALS_MODE,
+    headers: {
+      "X-Onion-Auth-Flow":
+        "login",
+      "X-Request-Source":
+        LOGIN_SOURCE,
+      ...safeObject(options.headers),
+    },
   };
 
   try {
@@ -1156,11 +1262,14 @@ async function apiPost(path, body = {}, options = {}) {
       apiClient &&
       isFunction(apiClient.post)
     ) {
-      return await apiClient.post(
-        path,
-        body,
-        finalOptions
-      );
+      const result =
+        await apiClient.post(
+          path,
+          body,
+          finalOptions
+        );
+
+      return await readMaybeResponse(result);
     }
 
     if (
@@ -1168,25 +1277,31 @@ async function apiPost(path, body = {}, options = {}) {
       isFunction(apiClient.request)
     ) {
       try {
-        return await apiClient.request(
-          path,
-          {
-            ...finalOptions,
-            method:
-              "POST",
-            body,
-          }
-        );
-      } catch (error) {
-        try {
-          return await apiClient.request(
-            "POST",
+        const result =
+          await apiClient.request(
             path,
             {
               ...finalOptions,
+              method:
+                "POST",
               body,
             }
           );
+
+        return await readMaybeResponse(result);
+      } catch (error) {
+        try {
+          const result =
+            await apiClient.request(
+              "POST",
+              path,
+              {
+                ...finalOptions,
+                body,
+              }
+            );
+
+          return await readMaybeResponse(result);
         } catch {
           throw error;
         }
@@ -1629,6 +1744,10 @@ function emitLoginSessionCommitted(reason = "login-session-applied", extra = {})
       getState().sessionId ||
       getState().session?.sessionId ||
       null,
+    tokenVersion:
+      getState().tokenVersion ??
+      getState().session?.tokenVersion ??
+      null,
     ...extra,
   };
 
@@ -1695,7 +1814,12 @@ async function resolveRouter() {
   for (const candidate of candidates) {
     if (
       candidate &&
-      isFunction(candidate.navigate)
+      (
+        isFunction(candidate.navigate) ||
+        isFunction(candidate.go) ||
+        isFunction(candidate.push) ||
+        isFunction(candidate.render)
+      )
     ) {
       return candidate;
     }
@@ -1712,7 +1836,12 @@ async function resolveRouter() {
 
     if (
       router &&
-      isFunction(router.navigate)
+      (
+        isFunction(router.navigate) ||
+        isFunction(router.go) ||
+        isFunction(router.push) ||
+        isFunction(router.render)
+      )
     ) {
       return router;
     }
@@ -1752,6 +1881,8 @@ function updateCoreRouteState(target = "/") {
   safeSetState({
     route:
       canonical,
+    canonicalPath:
+      canonical,
     publicPath:
       cleanTarget,
     lastRoute:
@@ -1767,6 +1898,136 @@ function updateCoreRouteState(target = "/") {
       cleanTarget,
     previousRoute,
     previousPublicPath,
+  };
+}
+
+async function callRouterNavigation(router, target, options = {}) {
+  const targetCanonical =
+    configLikeRoute(
+      normalizeCanonicalPath(target)
+    );
+
+  if (
+    router &&
+    isFunction(router.navigate)
+  ) {
+    const result =
+      router.navigate(
+        target,
+        options
+      );
+
+    if (
+      result &&
+      isFunction(result.then)
+    ) {
+      await result;
+    }
+
+    return {
+      ok:
+        true,
+      method:
+        "navigate",
+    };
+  }
+
+  if (
+    router &&
+    isFunction(router.go)
+  ) {
+    const result =
+      router.go(
+        target,
+        options
+      );
+
+    if (
+      result &&
+      isFunction(result.then)
+    ) {
+      await result;
+    }
+
+    return {
+      ok:
+        true,
+      method:
+        "go",
+    };
+  }
+
+  if (
+    router &&
+    isFunction(router.push)
+  ) {
+    const result =
+      router.push(
+        target,
+        options
+      );
+
+    if (
+      result &&
+      isFunction(result.then)
+    ) {
+      await result;
+    }
+
+    return {
+      ok:
+        true,
+      method:
+        "push",
+    };
+  }
+
+  if (
+    router &&
+    isFunction(router.render)
+  ) {
+    const result =
+      router.render(
+        targetCanonical,
+        {
+          ...options,
+          publicPath:
+            target,
+          requestedPath:
+            target,
+          canonicalPath:
+            targetCanonical,
+          preservePublicPath:
+            true,
+          replaceState:
+            options.replaceState !== false,
+          force:
+            true,
+          source:
+            LOGIN_SOURCE,
+        }
+      );
+
+    if (
+      result &&
+      isFunction(result.then)
+    ) {
+      await result;
+    }
+
+    return {
+      ok:
+        true,
+      method:
+        "render",
+    };
+  }
+
+  return {
+    ok:
+      false,
+    method:
+      "",
   };
 }
 
@@ -1829,6 +2090,8 @@ async function safeNavigate(path = "/", options = {}) {
         true,
       skipped:
         true,
+      method:
+        "same-route",
       reason:
         "same-route",
       target,
@@ -1849,13 +2112,11 @@ async function safeNavigate(path = "/", options = {}) {
   const router =
     await resolveRouter();
 
-  if (
-    router &&
-    isFunction(router.navigate)
-  ) {
+  if (router) {
     try {
-      const result =
-        router.navigate(
+      const nav =
+        await callRouterNavigation(
+          router,
           target,
           {
             replaceState,
@@ -1863,45 +2124,45 @@ async function safeNavigate(path = "/", options = {}) {
               true,
             source:
               LOGIN_SOURCE,
+            reason,
           }
         );
 
-      if (
-        result &&
-        isFunction(result.then)
-      ) {
-        await result;
+      if (nav.ok) {
+        updateCoreRouteState(target);
+
+        clearAuthScreenDomState(
+          `${reason}:${nav.method}`
+        );
+
+        const navResult = {
+          ok:
+            true,
+          skipped:
+            false,
+          method:
+            nav.method,
+          reason:
+            "router",
+          target,
+        };
+
+        safeEmit(
+          "auth:login:navigation:complete",
+          {
+            ...navResult,
+            source:
+              LOGIN_SOURCE,
+            method:
+              nav.method,
+          }
+        );
+
+        return navResult;
       }
-
-      updateCoreRouteState(target);
-
-      clearAuthScreenDomState(
-        `${reason}:router`
-      );
-
-      const navResult = {
-        ok:
-          true,
-        skipped:
-          false,
-        reason:
-          "router",
-        target,
-      };
-
-      safeEmit(
-        "auth:login:navigation:complete",
-        {
-          ...navResult,
-          source:
-            LOGIN_SOURCE,
-        }
-      );
-
-      return navResult;
     } catch (error) {
       safeWarn(
-        "Router.navigate falló.",
+        "Router navigation falló.",
         error
       );
 
@@ -1958,6 +2219,8 @@ async function safeNavigate(path = "/", options = {}) {
           true,
         skipped:
           false,
+        method:
+          "history",
         reason:
           "history",
         target,
@@ -1990,6 +2253,8 @@ async function safeNavigate(path = "/", options = {}) {
           true,
         skipped:
           false,
+        method:
+          "location",
         reason:
           "location",
         target,
@@ -2002,6 +2267,8 @@ async function safeNavigate(path = "/", options = {}) {
       false,
     skipped:
       false,
+    method:
+      "",
     reason:
       "navigation-failed",
     target,
@@ -2109,36 +2376,68 @@ export function buildLoginRequestBody(credentials = {}) {
   const email =
     looksLikeEmail(clean)
       ? clean.toLowerCase()
-      : undefined;
+      : "";
 
   const phone =
     !email &&
     looksLikePhone(clean)
       ? normalizePhone(clean)
-      : undefined;
+      : "";
 
   const username =
     !email &&
     !phone
       ? sanitizeUsername(clean)
-      : undefined;
+      : "";
+
+  const slug =
+    username ||
+    sanitizeUsername(clean);
 
   return {
     identifier:
       clean,
 
-    email,
-    phone,
-    username,
+    email:
+      email || undefined,
+
+    emailLower:
+      email || undefined,
+
+    email_lower:
+      email || undefined,
+
+    phone:
+      phone || undefined,
+
+    telefono:
+      phone || undefined,
+
+    username:
+      username || undefined,
+
+    usernameLower:
+      username || undefined,
+
+    username_lower:
+      username || undefined,
+
+    slug:
+      slug || undefined,
 
     user:
-      username,
+      username || clean,
 
     login:
       clean,
 
     password,
+
     remember,
+    rememberMe:
+      remember,
+    remember_me:
+      remember,
   };
 }
 
@@ -2195,11 +2494,6 @@ function normalizeRedirectCandidate(value = "") {
     return "";
   }
 
-  /*
-    No se bloquean /incidencias, /facturas, etc. cuando vienen
-    de redirect explícito. Sólo se filtran como home configurado
-    por defecto si son residuos de rol.
-  */
   return candidate;
 }
 
@@ -2216,6 +2510,7 @@ function getRedirectFromUrl() {
       params.get("redirect") ||
         params.get("next") ||
         params.get("target") ||
+        params.get("returnTo") ||
         ""
     );
   } catch {
@@ -2232,6 +2527,7 @@ function getRedirectFromOptions(options = {}) {
       opts.redirect ||
       opts.target ||
       opts.next ||
+      opts.returnTo ||
       ""
   );
 }
@@ -2302,6 +2598,7 @@ export function getPostLoginTarget(user = AppCore?.state?.user, options = {}) {
   const userHome =
     user?.homePath ||
     user?.routing?.homePath ||
+    user?.routing?.panelPath ||
     user?.preferences?.homePath ||
     "";
 
@@ -2337,7 +2634,7 @@ function collectAuthObjects(raw = {}) {
 
   while (
     queue.length &&
-    guard < 100
+    guard < 140
   ) {
     guard += 1;
 
@@ -2378,6 +2675,10 @@ function collectAuthObjects(raw = {}) {
     if (isPlainObject(current.auth?.session)) {
       queue.push(current.auth.session);
     }
+
+    if (isPlainObject(current.data?.data)) {
+      queue.push(current.data.data);
+    }
   }
 
   return output;
@@ -2417,6 +2718,30 @@ function pickObjectFromObjects(objects = [], keys = []) {
   }
 
   return null;
+}
+
+function pickArrayFromObjects(objects = [], keys = []) {
+  for (const object of objects) {
+    for (const key of keys) {
+      if (Array.isArray(object?.[key])) {
+        return object[key];
+      }
+
+      if (
+        typeof object?.[key] === "string" &&
+        object[key]
+      ) {
+        return object[key]
+          .split(/[,\s]+/)
+          .map((item) =>
+            item.trim()
+          )
+          .filter(Boolean);
+      }
+    }
+  }
+
+  return [];
 }
 
 function pickBoolFromObjects(objects = [], keys = []) {
@@ -2508,6 +2833,12 @@ function isUserActive(user = null) {
       "blocked",
       "suspended",
       "banned",
+      "revoked",
+      "desactivado",
+      "inactivo",
+      "bloqueado",
+      "eliminado",
+      "suspendido",
     ].includes(status)
   ) {
     return false;
@@ -2519,7 +2850,10 @@ function isUserActive(user = null) {
     user.deleted === true ||
     user.isDeleted === true ||
     user.blocked === true ||
-    user.isBlocked === true
+    user.isBlocked === true ||
+    user.banned === true ||
+    user.suspended === true ||
+    user.revoked === true
   ) {
     return false;
   }
@@ -2584,6 +2918,20 @@ function normalizeUserForClient(user = {}) {
   const avatar =
     resolveAvatar(user);
 
+  const preferences =
+    safeObject(
+      user.preferences ||
+        user.preferencias ||
+        {}
+    );
+
+  const permissions =
+    safeArray(
+      user.permissions ||
+        user.permisos ||
+        []
+    );
+
   return {
     ...user,
 
@@ -2599,6 +2947,11 @@ function normalizeUserForClient(user = {}) {
 
     uid:
       user.uid ||
+      userId ||
+      null,
+
+    sub:
+      user.sub ||
       userId ||
       null,
 
@@ -2651,11 +3004,15 @@ function normalizeUserForClient(user = {}) {
     rol:
       role,
 
-    permissions:
-      safeArray(user.permissions || user.permisos),
+    roles:
+      unique([
+        role,
+        ...safeArray(user.roles),
+      ]),
 
+    permissions,
     permisos:
-      safeArray(user.permisos || user.permissions),
+      permissions,
 
     avatar,
     avatarUrl:
@@ -2667,6 +3024,34 @@ function normalizeUserForClient(user = {}) {
       user.hasAvatar === true ||
       user.has_avatar === true ||
       Boolean(avatar),
+
+    preferences,
+
+    lang:
+      user.lang ||
+      user.language ||
+      user.locale ||
+      preferences.lang ||
+      null,
+
+    theme:
+      user.theme ||
+      user.mode ||
+      user.appearance ||
+      preferences.theme ||
+      null,
+
+    tokenVersion:
+      user.tokenVersion ??
+      user.token_version ??
+      user.tv ??
+      null,
+
+    clienteId:
+      user.clienteId ||
+      user.clientId ||
+      user.customerId ||
+      null,
 
     active:
       isUserActive(user),
@@ -2697,6 +3082,38 @@ function hasUsableUser(user = {}) {
       safeText(user.telefono, "") ||
       safeText(user.mobile, "")
   );
+}
+
+function normalizeCliente(cliente = null) {
+  if (!isPlainObject(cliente)) {
+    return null;
+  }
+
+  const clienteId =
+    pickFirstText(
+      cliente.id,
+      cliente.clienteId,
+      cliente.clientId,
+      cliente.customerId
+    );
+
+  return {
+    ...cliente,
+    id:
+      cliente.id ||
+      clienteId ||
+      null,
+    clienteId:
+      cliente.clienteId ||
+      clienteId ||
+      null,
+    clientId:
+      cliente.clientId ||
+      clienteId ||
+      null,
+    active:
+      cliente.active !== false,
+  };
 }
 
 function normalizeSessionData(session = {}, fallbackUser = {}) {
@@ -2730,10 +3147,21 @@ function normalizeSessionData(session = {}, fallbackUser = {}) {
       )
     );
 
+  const tokenVersion =
+    pickFirstValue(
+      ...TOKEN_VERSION_KEYS.map((key) =>
+        source[key]
+      ),
+      fallbackUser?.tokenVersion,
+      fallbackUser?.token_version,
+      fallbackUser?.tv
+    );
+
   if (
     !sessionId &&
     !userId &&
     !expiresAt &&
+    tokenVersion === "" &&
     !Object.keys(source).length
   ) {
     return null;
@@ -2757,6 +3185,11 @@ function normalizeSessionData(session = {}, fallbackUser = {}) {
     session_id:
       source.session_id ||
       source.sessionId ||
+      source.sid ||
+      sessionId ||
+      null,
+
+    sid:
       source.sid ||
       sessionId ||
       null,
@@ -2802,6 +3235,16 @@ function normalizeSessionData(session = {}, fallbackUser = {}) {
       source.expires_at ||
       expiresAt ||
       null,
+
+    tokenVersion:
+      tokenVersion !== ""
+        ? tokenVersion
+        : null,
+
+    tv:
+      tokenVersion !== ""
+        ? tokenVersion
+        : null,
   };
 }
 
@@ -2836,16 +3279,40 @@ function extractAuthFields(raw = {}) {
   const user =
     normalizeUserForClient(userRaw);
 
+  const cliente =
+    normalizeCliente(
+      pickObjectFromObjects(
+        objects,
+        CLIENT_KEYS
+      )
+    );
+
+  const routing =
+    pickObjectFromObjects(
+      objects,
+      ROUTING_KEYS
+    );
+
+  const preferences =
+    pickObjectFromObjects(
+      objects,
+      PREFERENCES_KEYS
+    );
+
   const role =
     pickFirstText(
       pickTextFromObjects(objects, ROLE_KEYS),
       user?.role,
       user?.rol,
-      user?.type,
-      user?.tipo,
-      user?.userType,
-      user?.user_type
+      "user"
     );
+
+  const permissions =
+    unique([
+      ...pickArrayFromObjects(objects, PERMISSIONS_KEYS),
+      ...safeArray(user?.permissions),
+      ...safeArray(user?.permisos),
+    ]);
 
   const status =
     pickFirstValue(
@@ -2914,6 +3381,14 @@ function extractAuthFields(raw = {}) {
       ])
     );
 
+  const tokenVersion =
+    pickFirstValue(
+      sessionData?.tokenVersion,
+      sessionData?.tv,
+      user?.tokenVersion,
+      pickValueFromObjects(objects, TOKEN_VERSION_KEYS)
+    );
+
   const statusText =
     safeText(status, "")
       .toLowerCase();
@@ -2947,7 +3422,8 @@ function extractAuthFields(raw = {}) {
     objects.some((object) => {
       return (
         object?.ok === false ||
-        object?.success === false
+        object?.success === false ||
+        object?.authenticated === false && !requires2FA
       );
     });
 
@@ -2971,7 +3447,13 @@ function extractAuthFields(raw = {}) {
     tempToken,
     user:
       user || null,
+    cliente,
+    routing:
+      routing || null,
+    preferences:
+      preferences || null,
     role,
+    permissions,
     status,
     code,
     message,
@@ -2979,6 +3461,7 @@ function extractAuthFields(raw = {}) {
     sessionData,
     sessionId,
     sessionUserId,
+    tokenVersion,
     requires2FA,
     explicitFailure,
     authenticated,
@@ -3087,8 +3570,20 @@ function normalizeAuthPayload({
     user:
       fields.user,
 
+    cliente:
+      fields.cliente,
+
+    routing:
+      fields.routing,
+
+    preferences:
+      fields.preferences,
+
     role:
-      safeText(fields.role, ""),
+      safeText(fields.role, "user"),
+
+    permissions:
+      fields.permissions,
 
     sessionData:
       fields.sessionData,
@@ -3101,6 +3596,9 @@ function normalizeAuthPayload({
 
     sessionUserId:
       fields.sessionUserId,
+
+    tokenVersion:
+      fields.tokenVersion,
 
     requires2FA:
       fields.requires2FA,
@@ -3125,6 +3623,9 @@ function createAuthError(
     "AuthLoginError";
 
   error.status =
+    status;
+
+  error.statusCode =
     status;
 
   error.code =
@@ -3384,9 +3885,16 @@ function clearAuthRuntimeState(reason = "login_cleanup", options = {}) {
 
       role:
         null,
+      rol:
+        null,
       userRole:
         null,
       roles:
+        [],
+
+      permissions:
+        [],
+      permisos:
         [],
 
       token:
@@ -3394,6 +3902,10 @@ function clearAuthRuntimeState(reason = "login_cleanup", options = {}) {
       accessToken:
         null,
       access_token:
+        null,
+      refreshToken:
+        null,
+      refresh_token:
         null,
 
       session:
@@ -3403,6 +3915,13 @@ function clearAuthRuntimeState(reason = "login_cleanup", options = {}) {
       sessionId:
         null,
       sessionUserId:
+        null,
+
+      cliente:
+        null,
+      client:
+        null,
+      clienteId:
         null,
 
       currentResolvedUsername:
@@ -3422,6 +3941,10 @@ function clearAuthRuntimeState(reason = "login_cleanup", options = {}) {
     },
     {
       forceUnauthenticated:
+        true,
+      emit:
+        false,
+      silent:
         true,
     }
   );
@@ -3469,12 +3992,39 @@ function enforceAuthenticatedCoreState(snapshot = {}) {
     snapshot.access_token ||
     "";
 
+  const refreshToken =
+    snapshot.refreshToken ||
+    snapshot.refresh_token ||
+    "";
+
   const role =
     snapshot.role ||
     snapshot.rol ||
     user?.role ||
     user?.rol ||
-    "";
+    "user";
+
+  const cliente =
+    normalizeCliente(
+      snapshot.cliente ||
+      snapshot.client ||
+      null
+    );
+
+  const routing =
+    safeObject(
+      snapshot.routing ||
+        user?.routing ||
+        {}
+    );
+
+  const permissions =
+    unique([
+      ...safeArray(snapshot.permissions),
+      ...safeArray(snapshot.permisos),
+      ...safeArray(user?.permissions),
+      ...safeArray(user?.permisos),
+    ]);
 
   const session =
     normalizeSessionData(
@@ -3502,6 +4052,13 @@ function enforceAuthenticatedCoreState(snapshot = {}) {
     user?.id ||
     null;
 
+  const tokenVersion =
+    snapshot.tokenVersion ??
+    snapshot.tv ??
+    session?.tokenVersion ??
+    user?.tokenVersion ??
+    null;
+
   const roles =
     safeArray(user?.roles).length
       ? safeArray(user.roles)
@@ -3511,6 +4068,8 @@ function enforceAuthenticatedCoreState(snapshot = {}) {
     ...safeObject(session),
     sessionId,
     session_id:
+      sessionId,
+    sid:
       sessionId,
     userId:
       sessionUserId,
@@ -3522,11 +4081,21 @@ function enforceAuthenticatedCoreState(snapshot = {}) {
     user,
     role,
     roles,
+    permissions,
+    permisos:
+      permissions,
     token,
     accessToken:
       token,
     access_token:
       token,
+    refreshToken:
+      refreshToken || null,
+    refresh_token:
+      refreshToken || null,
+    tokenVersion,
+    tv:
+      tokenVersion,
     authenticated:
       true,
     source:
@@ -3549,15 +4118,30 @@ function enforceAuthenticatedCoreState(snapshot = {}) {
         user,
 
       role,
+      rol:
+        role,
       userRole:
         role,
       roles,
+
+      permissions,
+      permisos:
+        permissions,
 
       token,
       accessToken:
         token,
       access_token:
         token,
+
+      refreshToken:
+        refreshToken || null,
+      refresh_token:
+        refreshToken || null,
+
+      tokenVersion,
+      tv:
+        tokenVersion,
 
       twoFactorPending:
         false,
@@ -3573,6 +4157,18 @@ function enforceAuthenticatedCoreState(snapshot = {}) {
 
       sessionId,
       sessionUserId,
+
+      cliente,
+      client:
+        cliente,
+      clienteId:
+        user?.clienteId ||
+        user?.clientId ||
+        cliente?.clienteId ||
+        cliente?.clientId ||
+        null,
+
+      routing,
 
       currentResolvedUsername:
         user?.slug ||
@@ -3596,18 +4192,27 @@ function enforceAuthenticatedCoreState(snapshot = {}) {
         false,
       allowExplicitAuthenticated:
         true,
+      emit:
+        false,
+      silent:
+        true,
     }
   );
 
   return {
     user,
     token,
+    refreshToken,
     role,
     roles,
+    permissions,
+    cliente,
+    routing,
     session:
       sessionAlias,
     sessionId,
     sessionUserId,
+    tokenVersion,
   };
 }
 
@@ -3640,20 +4245,56 @@ function applyAuthenticatedSession(authData = {}) {
     profile:
       authData.user,
 
+    cliente:
+      authData.cliente,
+    client:
+      authData.cliente,
+
+    routing:
+      authData.routing ||
+      {},
+
+    preferences:
+      authData.preferences ||
+      authData.user?.preferences ||
+      {},
+
     role:
       authData.role ||
       authData.user?.role ||
-      "",
+      "user",
     rol:
       authData.role ||
       authData.user?.role ||
-      "",
+      "user",
+
+    permissions:
+      authData.permissions ||
+      authData.user?.permissions ||
+      [],
+
+    permisos:
+      authData.permissions ||
+      authData.user?.permisos ||
+      [],
 
     refreshToken:
       authData.refreshToken ||
       null,
     refresh_token:
       authData.refreshToken ||
+      null,
+
+    tokenVersion:
+      authData.tokenVersion ??
+      authData.user?.tokenVersion ??
+      sessionData?.tokenVersion ??
+      null,
+
+    tv:
+      authData.tokenVersion ??
+      authData.user?.tokenVersion ??
+      sessionData?.tokenVersion ??
       null,
 
     session:
@@ -3723,9 +4364,16 @@ function applyAuthenticatedSession(authData = {}) {
         authData.user,
       usuario:
         authData.user,
+      cliente:
+        authData.cliente,
+      client:
+        authData.cliente,
       session:
         sessionData,
       sessionData,
+      routing:
+        authData.routing ||
+        {},
       authenticated:
         true,
     },
@@ -3786,6 +4434,12 @@ function applyAuthenticatedSession(authData = {}) {
     snapshot.accessToken ||
     snapshot.token;
 
+  snapshot.refreshToken =
+    snapshot.refreshToken ||
+    snapshot.refresh_token ||
+    authData.refreshToken ||
+    "";
+
   snapshot.user =
     normalizeUserForClient(
       snapshot.user ||
@@ -3797,7 +4451,14 @@ function applyAuthenticatedSession(authData = {}) {
     authData.role ||
     snapshot.user?.role ||
     snapshot.user?.rol ||
-    "";
+    "user";
+
+  snapshot.permissions =
+    unique([
+      ...safeArray(snapshot.permissions),
+      ...safeArray(snapshot.permisos),
+      ...safeArray(authData.permissions),
+    ]);
 
   snapshot.session =
     normalizeSessionData(
@@ -3810,6 +4471,28 @@ function applyAuthenticatedSession(authData = {}) {
 
   snapshot.sessionData =
     snapshot.session;
+
+  snapshot.cliente =
+    normalizeCliente(
+      snapshot.cliente ||
+      snapshot.client ||
+      authData.cliente
+    );
+
+  snapshot.client =
+    snapshot.cliente;
+
+  snapshot.routing =
+    snapshot.routing ||
+    authData.routing ||
+    {};
+
+  snapshot.tokenVersion =
+    snapshot.tokenVersion ??
+    authData.tokenVersion ??
+    snapshot.session?.tokenVersion ??
+    snapshot.user?.tokenVersion ??
+    null;
 
   /*
     No llamamos AppCore.applySession aquí:
@@ -3922,6 +4605,8 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
           authData.sessionData?.sessionId ||
             authData.sessionId
         ),
+      tokenVersion:
+        authData.tokenVersion ?? null,
       validationOk:
         validation.ok,
       source:
@@ -4019,6 +4704,10 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
           null,
         access_token:
           null,
+        refreshToken:
+          null,
+        refresh_token:
+          null,
 
         user:
           null,
@@ -4031,10 +4720,17 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
 
         role:
           null,
+        rol:
+          null,
         userRole:
           null,
 
         roles:
+          [],
+
+        permissions:
+          [],
+        permisos:
           [],
 
         session:
@@ -4059,6 +4755,10 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
       },
       {
         forceUnauthenticated:
+          true,
+        emit:
+          false,
+        silent:
           true,
       }
     );
@@ -4213,16 +4913,38 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
     accessToken:
       snapshot.token,
 
+    refreshToken:
+      snapshot.refreshToken ||
+      authData.refreshToken ||
+      "",
+
     user:
       snapshot.user,
+
     role:
       snapshot.role ||
       authData.role ||
-      "",
+      "user",
 
-    refreshToken:
-      authData.refreshToken ||
-      "",
+    permissions:
+      snapshot.permissions ||
+      authData.permissions ||
+      [],
+
+    cliente:
+      snapshot.cliente ||
+      authData.cliente ||
+      null,
+
+    client:
+      snapshot.cliente ||
+      authData.cliente ||
+      null,
+
+    routing:
+      snapshot.routing ||
+      authData.routing ||
+      {},
 
     session:
       snapshot.session ||
@@ -4239,6 +4961,17 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
       snapshot.session?.sessionId ||
       snapshot.sessionData?.sessionId ||
       authData.sessionId ||
+      null,
+
+    sessionUserId:
+      snapshot.session?.sessionUserId ||
+      snapshot.sessionData?.sessionUserId ||
+      authData.sessionUserId ||
+      null,
+
+    tokenVersion:
+      snapshot.tokenVersion ??
+      authData.tokenVersion ??
       null,
 
     redirectTo,
@@ -4264,6 +4997,8 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
         redirectTo,
         sessionId:
           result.sessionId,
+        tokenVersion:
+          result.tokenVersion,
         source:
           LOGIN_SOURCE,
         sequence,
@@ -4314,6 +5049,10 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
         Boolean(result.user),
       hasSession:
         Boolean(result.sessionId),
+      hasRefreshToken:
+        Boolean(result.refreshToken),
+      tokenVersion:
+        result.tokenVersion ?? null,
     }
   );
 
@@ -4574,6 +5313,14 @@ export function getLoginSnapshot() {
     refreshToken:
       null,
 
+    hasRefreshToken:
+      Boolean(
+        state.refreshToken ||
+        state.refresh_token ||
+        state.session?.refreshToken ||
+        state.sessionData?.refreshToken
+      ),
+
     hasUser:
       hasUsableUser(user),
 
@@ -4587,6 +5334,12 @@ export function getLoginSnapshot() {
       user?.role ||
       null,
 
+    permissions:
+      safeArray(
+        state.permissions ||
+          user?.permissions
+      ),
+
     hasSession:
       Boolean(
         state.session?.sessionId ||
@@ -4599,6 +5352,27 @@ export function getLoginSnapshot() {
       state.sessionData?.sessionId ||
       state.sessionId ||
       null,
+
+    sessionUserId:
+      state.session?.sessionUserId ||
+      state.sessionData?.sessionUserId ||
+      state.sessionUserId ||
+      null,
+
+    tokenVersion:
+      state.tokenVersion ??
+      state.session?.tokenVersion ??
+      state.sessionData?.tokenVersion ??
+      user?.tokenVersion ??
+      null,
+
+    hasCliente:
+      Boolean(
+        state.cliente ||
+          state.client ||
+          user?.clienteId ||
+          user?.clientId
+      ),
 
     loginInProgress:
       Boolean(state.loginInProgress),

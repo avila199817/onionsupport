@@ -3,7 +3,7 @@
    Archivo: src/core/helpers.js
 
    ONION SUPPORT · CORE HELPERS
-   PATHS · USER · URL · REQUEST · TOKEN SAFE · 14/10
+   PATHS · USER · URL · REQUEST · TOKEN SAFE · 15/10
 
    RESPONSABILIDADES:
    - utilidades base del core
@@ -45,7 +45,7 @@ import { config } from "./config.js";
 ========================================================= */
 
 export const HELPERS_VERSION =
-  "14.0.0";
+  "15.0.0";
 
 const DEFAULT_ROUTE =
   "/";
@@ -57,14 +57,20 @@ const DEFAULT_STORAGE_PREFIX =
   "onion";
 
 const CANONICAL_PRODUCTION_API_BASE =
+  config?.canonicalProductionApiBase ||
   "https://api.onionit.net";
 
-const FORBIDDEN_FRONTEND_API_ORIGINS =
+/*
+  IMPORTANTE:
+  api.onionit.net NO es forbidden.
+  Es el backend canónico.
+*/
+const FALLBACK_FORBIDDEN_FRONTEND_API_ORIGINS =
   Object.freeze([
     "https://onionsupport.com",
-    "https://api.onionit.net",
+    "https://www.onionsupport.com",
     "http://onionsupport.com",
-    "http://api.onionit.net",
+    "http://www.onionsupport.com",
   ]);
 
 const SAFE_USERNAME_MAX =
@@ -121,6 +127,8 @@ const TOKEN_PARAM_NAMES =
     "mfaToken",
     "mfa_token",
     "code",
+    "otp",
+    "totp",
     "t",
     "access_token",
     "refresh_token",
@@ -162,7 +170,11 @@ const DEFAULT_PUBLIC_API_PATHS =
     "/auth/password/reset",
     "/auth/reset-password-request",
     "/auth/reset-password-confirm",
+    "/auth/reset-password/validate",
     "/auth/2fa/login",
+    "/auth/2fa/request",
+    "/auth/2fa/resend",
+    "/auth/mfa/login",
 
     "/activate-account",
     "/reset-password",
@@ -174,19 +186,38 @@ const DEFAULT_PUBLIC_API_PATHS =
     "/api/auth/otp",
     "/api/auth/otp/request",
     "/api/auth/otp/verify",
+
+    /*
+      Canónico actual.
+    */
     "/api/auth/activate",
+
+    /*
+      Legacy compatible.
+    */
     "/api/auth/activate-account",
+
     "/api/auth/activate/first-user",
+    "/api/auth/activate/validate",
     "/api/auth/reset",
     "/api/auth/reset-password",
     "/api/auth/password/reset",
     "/api/auth/reset-password-request",
     "/api/auth/reset-password-confirm",
+    "/api/auth/reset-password/confirm",
     "/api/auth/reset-password/validate",
+    "/api/auth/password-reset/request",
+    "/api/auth/password-reset/confirm",
+    "/api/auth/password-reset/validate",
+    "/api/auth/forgot-password",
     "/api/auth/2fa/login",
     "/api/auth/2fa/request",
     "/api/auth/2fa/resend",
+    "/api/auth/2fa/verify",
+    "/api/auth/mfa/login",
+    "/api/auth/mfa/verify",
     "/api/auth/_health",
+    "/api/auth/health",
     "/api/_health",
     "/api/activate-account",
     "/api/reset-password",
@@ -197,9 +228,62 @@ const DEFAULT_PUBLIC_API_PATHS =
 const PRIVATE_API_PATHS =
   Object.freeze([
     "/api/auth/me",
+    "/api/me",
     "/auth/me",
     "/me",
   ]);
+
+const USER_IDENTITY_KEYS =
+  Object.freeze([
+    "id",
+    "userId",
+    "user_id",
+    "_id",
+    "uuid",
+    "uid",
+    "sub",
+    "username",
+    "userName",
+    "user_name",
+    "email",
+    "mail",
+    "phone",
+    "telefono",
+    "mobile",
+    "cellphone",
+  ]);
+
+const AUTH_ENVELOPE_KEYS =
+  Object.freeze([
+    "ok",
+    "success",
+    "authenticated",
+    "status",
+    "statusCode",
+    "status_code",
+    "error",
+    "errorCode",
+    "error_code",
+    "token",
+    "accessToken",
+    "access_token",
+    "refreshToken",
+    "refresh_token",
+    "tempToken",
+    "temp_token",
+    "data",
+    "payload",
+    "result",
+    "body",
+    "response",
+    "auth",
+    "authData",
+    "session",
+    "sessionData",
+  ]);
+
+const SENSITIVE_USER_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
 
 const JWT_RE =
   /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
@@ -284,7 +368,10 @@ export function safeText(value, fallback = "") {
 }
 
 export function safeLower(value, fallback = "") {
-  return safeText(value, fallback).toLowerCase();
+  return safeText(
+    value,
+    fallback
+  ).toLowerCase();
 }
 
 export function safeNumber(value, fallback = 0) {
@@ -355,10 +442,18 @@ export function safeObject(value, fallback = {}) {
 }
 
 export function unique(values = []) {
-  const output = [];
-  const seen = new Set();
+  const input =
+    Array.isArray(values)
+      ? values
+      : [values];
 
-  for (const value of safeArray(values)) {
+  const output =
+    [];
+
+  const seen =
+    new Set();
+
+  for (const value of input.flat(Infinity)) {
     const clean =
       safeText(value, "");
 
@@ -404,12 +499,30 @@ export function isDomScope(scope) {
   }
 
   try {
+    const hasElement =
+      typeof Element !== "undefined";
+
+    const hasDocument =
+      typeof Document !== "undefined";
+
+    const hasDocumentFragment =
+      typeof DocumentFragment !== "undefined";
+
     return (
       scope === document ||
       scope === window ||
-      scope instanceof Element ||
-      scope instanceof Document ||
-      scope instanceof DocumentFragment
+      (
+        hasElement &&
+        scope instanceof Element
+      ) ||
+      (
+        hasDocument &&
+        scope instanceof Document
+      ) ||
+      (
+        hasDocumentFragment &&
+        scope instanceof DocumentFragment
+      )
     );
   } catch {
     return false;
@@ -583,8 +696,10 @@ function cloneDeepFallback(value, fallback = null, depth = 0, seen = new WeakMap
   }
 
   const output = {};
+
   const entries =
-    Object.entries(value).slice(0, MAX_SAFE_CLONE_KEYS);
+    Object.entries(value)
+      .slice(0, MAX_SAFE_CLONE_KEYS);
 
   for (const [key, item] of entries) {
     output[key] =
@@ -680,10 +795,13 @@ export function cloneError(error = null) {
 
   if (typeof error === "object") {
     const cloned =
-      safeClone(error, {
-        message:
-          redactTokenInText(String(error)),
-      });
+      safeClone(
+        error,
+        {
+          message:
+            redactTokenInText(String(error)),
+        }
+      );
 
     if (cloned?.message) {
       cloned.message =
@@ -711,6 +829,22 @@ function escapeRegExp(value = "") {
     .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function getAllTokenParamNames() {
+  try {
+    const fromConfig =
+      Object.values(config?.auth?.tokenParamNames || {})
+        .flat();
+
+    return unique([
+      ...TOKEN_PARAM_NAMES,
+      ...fromConfig,
+      ...(config?.security?.sensitiveQueryParams || []),
+    ]);
+  } catch {
+    return [...TOKEN_PARAM_NAMES];
+  }
+}
+
 export function redactTokenInText(value = "") {
   let output =
     safeText(value, "");
@@ -719,7 +853,7 @@ export function redactTokenInText(value = "") {
     return "";
   }
 
-  for (const name of TOKEN_PARAM_NAMES) {
+  for (const name of getAllTokenParamNames()) {
     try {
       output = output.replace(
         new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi"),
@@ -905,6 +1039,7 @@ export function getSearchAndHash(path = DEFAULT_ROUTE) {
 export function sanitizeUsername(value = "") {
   let raw =
     String(value || "")
+      .normalize("NFKC")
       .trim();
 
   if (!raw) {
@@ -937,6 +1072,7 @@ export function slugify(value = "") {
   return String(value || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .normalize("NFKC")
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
@@ -950,8 +1086,46 @@ export function normalizeApiBase(base = "") {
     String(base || "")
       .trim();
 
-  if (!raw || raw === "/") {
+  if (
+    !raw ||
+    raw === "/"
+  ) {
     return "";
+  }
+
+  if (
+    raw === "/api" ||
+    raw === "api"
+  ) {
+    return "";
+  }
+
+  if (isAbsoluteUrl(raw)) {
+    try {
+      const parsed =
+        new URL(raw);
+
+      const origin =
+        parsed.origin.replace(/\/+$/g, "");
+
+      const pathname =
+        normalizePathnameOnly(parsed.pathname || "/");
+
+      /*
+        apiBase debe ser origin-only cuando el path es /api,
+        porque los endpoints ya llevan /api.
+      */
+      if (
+        pathname === "/" ||
+        pathname === "/api"
+      ) {
+        return origin;
+      }
+
+      return `${origin}${pathname}`.replace(/\/+$/g, "");
+    } catch {
+      return "";
+    }
   }
 
   return raw.replace(/\/+$/, "");
@@ -965,17 +1139,20 @@ function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
       .replace(/\/{2,}/g, "/");
 
   if (!value) {
-    value = DEFAULT_ROUTE;
+    value =
+      DEFAULT_ROUTE;
   }
 
   if (!value.startsWith("/")) {
-    value = `/${value}`;
+    value =
+      `/${value}`;
   }
 
   const segments =
     value.split("/");
 
-  const normalizedSegments = [];
+  const normalizedSegments =
+    [];
 
   for (const segment of segments) {
     if (
@@ -1162,6 +1339,18 @@ export function buildPublicPath(path = DEFAULT_ROUTE, username = "") {
    URL / REQUEST
 ========================================================= */
 
+function getForbiddenFrontendApiOrigins() {
+  return unique([
+    ...FALLBACK_FORBIDDEN_FRONTEND_API_ORIGINS,
+    ...(config?.forbiddenFrontendApiOrigins || []),
+    ...(config?.api?.forbiddenFrontendOrigins || []),
+    ...(config?.security?.forbiddenFrontendApiOrigins || []),
+  ])
+    .filter((origin) =>
+      origin !== CANONICAL_PRODUCTION_API_BASE
+    );
+}
+
 function getOriginFromUrlLike(value = "") {
   const raw =
     safeText(value, "");
@@ -1189,7 +1378,8 @@ function isForbiddenFrontendApiBase(value = "") {
     return false;
   }
 
-  return FORBIDDEN_FRONTEND_API_ORIGINS.includes(origin);
+  return getForbiddenFrontendApiOrigins()
+    .includes(origin);
 }
 
 function isProductionEnv() {
@@ -1211,8 +1401,11 @@ export function getSafeApiBase() {
   const apiBase =
     normalizeApiBase(
       config?.apiBase ||
+        config?.apiOrigin ||
+        config?.apiUrl ||
         config?.api?.base ||
         config?.api?.baseUrl ||
+        config?.api?.origin ||
         ""
     );
 
@@ -1229,6 +1422,13 @@ export function getSafeApiBase() {
   }
 
   if (isForbiddenFrontendApiBase(apiBase)) {
+    return CANONICAL_PRODUCTION_API_BASE;
+  }
+
+  if (
+    isProductionEnv() &&
+    !isAbsoluteUrl(apiBase)
+  ) {
     return CANONICAL_PRODUCTION_API_BASE;
   }
 
@@ -1322,15 +1522,27 @@ function appendQueryToUrl(baseUrl = "", query = null) {
     return baseUrl;
   }
 
-  const queryEntries =
-    typeof URLSearchParams !== "undefined" &&
-    query instanceof URLSearchParams
-      ? Array.from(query.entries())
-      : Array.isArray(query)
-        ? query
-        : isPlainObject(query)
-          ? Object.entries(query)
-          : [];
+  let queryEntries =
+    [];
+
+  try {
+    if (
+      typeof URLSearchParams !== "undefined" &&
+      query instanceof URLSearchParams
+    ) {
+      queryEntries =
+        Array.from(query.entries());
+    } else if (Array.isArray(query)) {
+      queryEntries =
+        query;
+    } else if (isPlainObject(query)) {
+      queryEntries =
+        Object.entries(query);
+    }
+  } catch {
+    queryEntries =
+      [];
+  }
 
   if (!queryEntries.length) {
     return baseUrl;
@@ -1461,12 +1673,7 @@ export function hasValidToken(token = null) {
     return false;
   }
 
-  if (
-    value.includes(" ") ||
-    value.includes("\n") ||
-    value.includes("\r") ||
-    value.includes("\t")
-  ) {
+  if (/[\s\r\n\t]/.test(value)) {
     return false;
   }
 
@@ -1591,6 +1798,10 @@ export function isPublicApiPath(path = "") {
   });
 }
 
+export function isPrivateApiPath(path = "") {
+  return isExplicitPrivateApiPath(path);
+}
+
 /* =========================================================
    USER NORMALIZATION
 ========================================================= */
@@ -1605,6 +1816,57 @@ function normalizeRole(value = "") {
     .trim();
 }
 
+function looksLikeAuthEnvelope(value = {}) {
+  if (!isPlainObject(value)) {
+    return false;
+  }
+
+  return AUTH_ENVELOPE_KEYS.some((key) =>
+    hasOwn(value, key)
+  );
+}
+
+function hasIdentityInObject(value = {}) {
+  if (!isPlainObject(value)) {
+    return false;
+  }
+
+  return USER_IDENTITY_KEYS.some((key) =>
+    Boolean(
+      safeText(value[key], "")
+    )
+  );
+}
+
+function hasNestedUserIdentity(value = {}) {
+  if (!isPlainObject(value)) {
+    return false;
+  }
+
+  const branches = [
+    value,
+    value.user,
+    value.usuario,
+    value.me,
+    value.account,
+    value.profile,
+    value.currentUser,
+    value.authUser,
+    value.sessionUser,
+    value.data?.user,
+    value.data?.usuario,
+    value.data?.me,
+    value.payload?.user,
+    value.payload?.me,
+    value.raw,
+    value.raw?.user,
+    value.raw?.profile,
+    value.raw?.account,
+  ];
+
+  return branches.some(hasIdentityInObject);
+}
+
 function unwrapUserPayload(payload = null) {
   if (
     !payload ||
@@ -1613,65 +1875,38 @@ function unwrapUserPayload(payload = null) {
     return payload;
   }
 
-  if (
-    isPlainObject(payload.user) &&
-    (
-      hasOwn(payload, "ok") ||
-      hasOwn(payload, "success") ||
-      hasOwn(payload, "data") ||
-      hasOwn(payload, "token") ||
-      hasOwn(payload, "accessToken")
-    )
-  ) {
-    return payload.user;
-  }
+  const candidates = [
+    payload.user,
+    payload.usuario,
+    payload.me,
+    payload.account,
+    payload.profile,
+    payload.currentUser,
+    payload.authUser,
+    payload.sessionUser,
+    payload.data?.user,
+    payload.data?.usuario,
+    payload.data?.me,
+    payload.payload?.user,
+    payload.payload?.usuario,
+    payload.payload?.me,
+    payload.result?.user,
+    payload.result?.usuario,
+    payload.result?.me,
+    payload.auth?.user,
+    payload.auth?.usuario,
+    payload.auth?.me,
+    payload.session?.user,
+    payload.sessionData?.user,
+  ];
 
-  if (isPlainObject(payload.usuario)) {
-    return payload.usuario;
-  }
-
-  if (isPlainObject(payload.me)) {
-    return payload.me;
-  }
-
-  if (isPlainObject(payload.account)) {
-    return payload.account;
-  }
-
-  if (isPlainObject(payload.profile)) {
-    return payload.profile;
-  }
-
-  if (isPlainObject(payload.data?.user)) {
-    return payload.data.user;
-  }
-
-  if (isPlainObject(payload.data?.usuario)) {
-    return payload.data.usuario;
-  }
-
-  if (isPlainObject(payload.data?.me)) {
-    return payload.data.me;
-  }
-
-  if (isPlainObject(payload.payload?.user)) {
-    return payload.payload.user;
-  }
-
-  if (isPlainObject(payload.payload?.me)) {
-    return payload.payload.me;
-  }
-
-  if (isPlainObject(payload.currentUser)) {
-    return payload.currentUser;
-  }
-
-  if (isPlainObject(payload.authUser)) {
-    return payload.authUser;
-  }
-
-  if (isPlainObject(payload.sessionUser)) {
-    return payload.sessionUser;
+  for (const candidate of candidates) {
+    if (
+      isPlainObject(candidate) &&
+      hasNestedUserIdentity(candidate)
+    ) {
+      return candidate;
+    }
   }
 
   return payload;
@@ -1743,6 +1978,66 @@ function normalizeActive(user = {}) {
   );
 }
 
+function isSafeAvatarUrl(url = "") {
+  const value =
+    safeText(url, "");
+
+  if (!value) {
+    return false;
+  }
+
+  const lower =
+    value.toLowerCase();
+
+  if (
+    lower.startsWith("javascript:") ||
+    lower.startsWith("vbscript:") ||
+    lower.startsWith("data:text/html") ||
+    lower.startsWith("data:application/")
+  ) {
+    return false;
+  }
+
+  /*
+    Bloqueo deliberado: SVG en data URL puede contener scripting.
+  */
+  if (lower.startsWith("data:image/svg")) {
+    return false;
+  }
+
+  if (lower.startsWith("data:")) {
+    return /^data:image\/(png|jpe?g|gif|webp|avif);base64,/i.test(value);
+  }
+
+  if (lower.startsWith("blob:")) {
+    return true;
+  }
+
+  if (/^\/(?!\/)/.test(value)) {
+    return true;
+  }
+
+  if (/^\.\.?\//.test(value)) {
+    return true;
+  }
+
+  try {
+    const parsed =
+      new URL(
+        value,
+        getBaseOrigin()
+      );
+
+    return [
+      "http:",
+      "https:",
+      "blob:",
+    ].includes(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
+
 function resolveAvatarCandidate(user = {}) {
   const profile =
     isPlainObject(user.profile)
@@ -1769,93 +2064,156 @@ function resolveAvatarCandidate(user = {}) {
       ? user.settings
       : {};
 
-  return firstNonEmpty(
-    user.avatarUrl,
-    user.avatarURL,
-    user.avatar_url,
-    user.avatar,
-    user.photo,
-    user.photoUrl,
-    user.photoURL,
-    user.photo_url,
-    user.image,
-    user.imageUrl,
-    user.imageURL,
-    user.image_url,
-    user.profileImage,
-    user.profile_image,
-    user.picture,
-    user.pictureUrl,
-    user.pictureURL,
-    user.picture_url,
-    user.thumbnail,
-    user.thumbnailUrl,
-    user.thumbnail_url,
+  const candidate =
+    firstNonEmpty(
+      user.avatarUrl,
+      user.avatarURL,
+      user.avatar_url,
+      user.avatar,
+      user.photo,
+      user.photoUrl,
+      user.photoURL,
+      user.photo_url,
+      user.image,
+      user.imageUrl,
+      user.imageURL,
+      user.image_url,
+      user.profileImage,
+      user.profile_image,
+      user.picture,
+      user.pictureUrl,
+      user.pictureURL,
+      user.picture_url,
+      user.thumbnail,
+      user.thumbnailUrl,
+      user.thumbnail_url,
 
-    profile.avatarUrl,
-    profile.avatarURL,
-    profile.avatar_url,
-    profile.avatar,
-    profile.photo,
-    profile.photoUrl,
-    profile.photoURL,
-    profile.photo_url,
-    profile.image,
-    profile.imageUrl,
-    profile.imageURL,
-    profile.image_url,
-    profile.picture,
-    profile.pictureUrl,
-    profile.pictureURL,
-    profile.picture_url,
+      profile.avatarUrl,
+      profile.avatarURL,
+      profile.avatar_url,
+      profile.avatar,
+      profile.photo,
+      profile.photoUrl,
+      profile.photoURL,
+      profile.photo_url,
+      profile.image,
+      profile.imageUrl,
+      profile.imageURL,
+      profile.image_url,
+      profile.picture,
+      profile.pictureUrl,
+      profile.pictureURL,
+      profile.picture_url,
 
-    meta.avatarUrl,
-    meta.avatarURL,
-    meta.avatar_url,
-    meta.avatar,
-    meta.picture,
-    meta.pictureUrl,
-    meta.pictureURL,
-    meta.picture_url,
+      meta.avatarUrl,
+      meta.avatarURL,
+      meta.avatar_url,
+      meta.avatar,
+      meta.picture,
+      meta.pictureUrl,
+      meta.pictureURL,
+      meta.picture_url,
 
-    settings.avatarUrl,
-    settings.avatar_url,
-    settings.avatar,
+      settings.avatarUrl,
+      settings.avatar_url,
+      settings.avatar,
 
-    raw.avatarUrl,
-    raw.avatarURL,
-    raw.avatar_url,
-    raw.avatar,
-    raw.photo,
-    raw.photoUrl,
-    raw.photoURL,
-    raw.photo_url,
-    raw.image,
-    raw.imageUrl,
-    raw.imageURL,
-    raw.image_url,
-    raw.picture,
-    raw.pictureUrl,
-    raw.pictureURL,
-    raw.picture_url,
+      raw.avatarUrl,
+      raw.avatarURL,
+      raw.avatar_url,
+      raw.avatar,
+      raw.photo,
+      raw.photoUrl,
+      raw.photoURL,
+      raw.photo_url,
+      raw.image,
+      raw.imageUrl,
+      raw.imageURL,
+      raw.image_url,
+      raw.picture,
+      raw.pictureUrl,
+      raw.pictureURL,
+      raw.picture_url,
 
-    rawProfile.avatarUrl,
-    rawProfile.avatarURL,
-    rawProfile.avatar_url,
-    rawProfile.avatar,
-    rawProfile.photo,
-    rawProfile.photoUrl,
-    rawProfile.photoURL,
-    rawProfile.photo_url,
-    rawProfile.image,
-    rawProfile.imageUrl,
-    rawProfile.imageURL,
-    rawProfile.image_url,
-    rawProfile.picture,
-    rawProfile.pictureUrl,
-    rawProfile.pictureURL,
-    rawProfile.picture_url
-  );
+      rawProfile.avatarUrl,
+      rawProfile.avatarURL,
+      rawProfile.avatar_url,
+      rawProfile.avatar,
+      rawProfile.photo,
+      rawProfile.photoUrl,
+      rawProfile.photoURL,
+      rawProfile.photo_url,
+      rawProfile.image,
+      rawProfile.imageUrl,
+      rawProfile.imageURL,
+      rawProfile.image_url,
+      rawProfile.picture,
+      rawProfile.pictureUrl,
+      rawProfile.pictureURL,
+      rawProfile.picture_url
+    );
+
+  return isSafeAvatarUrl(candidate)
+    ? candidate
+    : "";
+}
+
+function sanitizeUserPayloadForState(value = {}, depth = 0, seen = new WeakSet()) {
+  if (depth > 4) {
+    return {};
+  }
+
+  if (!isPlainObject(value)) {
+    return {};
+  }
+
+  try {
+    if (seen.has(value)) {
+      return {};
+    }
+
+    seen.add(value);
+  } catch {}
+
+  const output = {};
+
+  for (const [key, item] of Object.entries(value).slice(0, 160)) {
+    if (SENSITIVE_USER_KEY_RE.test(key)) {
+      continue;
+    }
+
+    if (Array.isArray(item)) {
+      output[key] =
+        item.slice(0, 120)
+          .map((entry) =>
+            isPlainObject(entry)
+              ? sanitizeUserPayloadForState(
+                  entry,
+                  depth + 1,
+                  seen
+                )
+              : entry
+          );
+
+      continue;
+    }
+
+    if (isPlainObject(item)) {
+      output[key] =
+        sanitizeUserPayloadForState(
+          item,
+          depth + 1,
+          seen
+        );
+
+      continue;
+    }
+
+    output[key] =
+      item;
+  }
+
+  return output;
 }
 
 export function normalizeUser(user = null) {
@@ -1864,8 +2222,24 @@ export function normalizeUser(user = null) {
 
   if (
     !source ||
-    typeof source !== "object"
+    typeof source !== "object" ||
+    Array.isArray(source)
   ) {
+    return null;
+  }
+
+  /*
+    Evita convertir envelopes auth completos en usuarios fantasma:
+      { ok:true, token:"...", data:{...} }
+  */
+  if (
+    looksLikeAuthEnvelope(source) &&
+    !hasNestedUserIdentity(source)
+  ) {
+    return null;
+  }
+
+  if (!hasNestedUserIdentity(source)) {
     return null;
   }
 
@@ -1930,6 +2304,7 @@ export function normalizeUser(user = null) {
       raw.displayName,
       source.username,
       email,
+      id,
       "Usuario"
     );
 
@@ -1957,7 +2332,8 @@ export function normalizeUser(user = null) {
         raw.alias,
         raw.login,
         raw.slug,
-        email
+        email,
+        id
       )
     );
 
@@ -2013,14 +2389,22 @@ export function normalizeUser(user = null) {
   const active =
     normalizeActive(source);
 
+  const cleanSource =
+    sanitizeUserPayloadForState(source);
+
   return {
-    ...source,
+    ...cleanSource,
 
     id,
 
     userId:
       source.userId ??
       source.user_id ??
+      id,
+
+    user_id:
+      source.user_id ??
+      source.userId ??
       id,
 
     uid:
@@ -2032,6 +2416,18 @@ export function normalizeUser(user = null) {
       id,
 
     username,
+    usernameLower:
+      source.usernameLower ||
+      source.username_lower ||
+      username ||
+      null,
+
+    username_lower:
+      source.username_lower ||
+      source.usernameLower ||
+      username ||
+      null,
+
     slug,
 
     name:
@@ -2061,6 +2457,13 @@ export function normalizeUser(user = null) {
         email
       ).toLowerCase(),
 
+    email_lower:
+      firstNonEmpty(
+        source.email_lower,
+        source.emailLower,
+        email
+      ).toLowerCase(),
+
     role,
     rol:
       role,
@@ -2071,6 +2474,18 @@ export function normalizeUser(user = null) {
         : role
           ? [role]
           : [],
+
+    permissions:
+      safeArray(
+        source.permissions ||
+          source.permisos
+      ),
+
+    permisos:
+      safeArray(
+        source.permisos ||
+          source.permissions
+      ),
 
     avatar:
       hasAvatar === false
@@ -2149,7 +2564,9 @@ export function getUserUsername(user = null) {
       source?.raw?.userName,
       source?.raw?.user_name,
       source?.raw?.slug,
-      source?.email
+      source?.email,
+      source?.id,
+      source?.userId
     )
   );
 }
@@ -2398,7 +2815,8 @@ export function createAbortTimeout(ms = config?.requestTimeout) {
 }
 
 export function normalizeHeaders(headers = {}) {
-  let source = [];
+  let source =
+    [];
 
   try {
     if (
@@ -2415,7 +2833,8 @@ export function normalizeHeaders(headers = {}) {
         Object.entries(headers || {});
     }
   } catch {
-    source = [];
+    source =
+      [];
   }
 
   return source.reduce((acc, [key, value]) => {
@@ -2441,7 +2860,8 @@ export function normalizeHeaders(headers = {}) {
 
 export function mergeAbortSignals(signals = []) {
   const validSignals =
-    safeArray(signals).filter(Boolean);
+    safeArray(signals)
+      .filter(Boolean);
 
   if (!validSignals.length) {
     return null;
@@ -2451,6 +2871,15 @@ export function mergeAbortSignals(signals = []) {
     return validSignals[0];
   }
 
+  try {
+    if (
+      typeof AbortSignal !== "undefined" &&
+      typeof AbortSignal.any === "function"
+    ) {
+      return AbortSignal.any(validSignals);
+    }
+  } catch {}
+
   if (typeof AbortController === "undefined") {
     return validSignals[0] || null;
   }
@@ -2458,7 +2887,8 @@ export function mergeAbortSignals(signals = []) {
   const controller =
     new AbortController();
 
-  const cleanups = [];
+  const cleanups =
+    [];
 
   function teardown() {
     for (const cleanup of cleanups) {
@@ -2467,7 +2897,8 @@ export function mergeAbortSignals(signals = []) {
       } catch {}
     }
 
-    cleanups.length = 0;
+    cleanups.length =
+      0;
   }
 
   function abortFrom(sourceSignal) {
@@ -2494,9 +2925,10 @@ export function mergeAbortSignals(signals = []) {
       continue;
     }
 
-    const onAbort = () => {
-      abortFrom(signal);
-    };
+    const onAbort =
+      () => {
+        abortFrom(signal);
+      };
 
     try {
       signal.addEventListener(
@@ -2509,10 +2941,12 @@ export function mergeAbortSignals(signals = []) {
       );
 
       cleanups.push(() => {
-        signal.removeEventListener(
-          "abort",
-          onAbort
-        );
+        try {
+          signal.removeEventListener(
+            "abort",
+            onAbort
+          );
+        } catch {}
       });
     } catch {}
   }
@@ -2561,7 +2995,8 @@ export function isProbablyTimeoutError(error) {
 }
 
 export function detectNetworkHints(url = "") {
-  const hints = [];
+  const hints =
+    [];
 
   if (!isBrowser()) {
     return hints;
@@ -2619,7 +3054,7 @@ export function detectNetworkHints(url = "") {
       );
     }
 
-    if (FORBIDDEN_FRONTEND_API_ORIGINS.includes(apiOrigin)) {
+    if (getForbiddenFrontendApiOrigins().includes(apiOrigin)) {
       hints.push(
         "La petición apunta al dominio frontend. El backend canónico es https://api.onionit.net."
       );
@@ -2663,6 +3098,9 @@ export function getHelpersSnapshot() {
     canonicalProductionApiBase:
       CANONICAL_PRODUCTION_API_BASE,
 
+    forbiddenFrontendApiOrigins:
+      getForbiddenFrontendApiOrigins(),
+
     storagePrefix:
       getStoragePrefix(),
 
@@ -2671,6 +3109,13 @@ export function getHelpersSnapshot() {
 
     defaultTheme:
       config?.defaultTheme || "dark",
+
+    meIsPublic:
+      isPublicApiPath("/api/auth/me"),
+
+    activateEndpoint:
+      config?.auth?.endpoints?.activate ||
+      "/api/auth/activate",
   };
 }
 
@@ -2740,6 +3185,7 @@ export default {
   stripBearerPrefix,
   hasValidToken,
   isPublicApiPath,
+  isPrivateApiPath,
 
   normalizeUser,
   getUserDisplayName,

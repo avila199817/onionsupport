@@ -3,7 +3,7 @@
    Archivo: src/services/http.auth.js
 
    ONION SUPPORT · HTTP AUTH
-   AUTO REFRESH 401 · SINGLE FLIGHT · PUBLIC ENDPOINT SAFE · 14/10
+   AUTO REFRESH 401 · SINGLE FLIGHT · PUBLIC ENDPOINT SAFE · 15/10
 
    Responsabilidades:
    - Resolver auto refresh ante respuestas 401 privadas.
@@ -11,7 +11,7 @@
    - Excluir endpoints auth de control del auto refresh.
    - Excluir endpoints públicos técnicos del auto refresh.
    - Excluir requests public/auth:false.
-   - Mantener /api/auth/me como endpoint privado.
+   - Mantener /api/auth/me, /auth/me, /api/me y /me como endpoints privados.
    - No hacer logout aquí.
    - Devolver true/false limpio al HTTP Service.
    - Mantener stats de refresh para diagnóstico.
@@ -32,7 +32,7 @@
    - No refrescar si status !== 401.
    - No refrescar si ya se intentó refresh.
    - No refrescar login/refresh/logout/activation/reset/2FA/health.
-   - /api/auth/me, /auth/me y /me NO son públicos.
+   - /api/auth/me, /auth/me, /api/me y /me NO son públicos.
    - No refrescar endpoints públicos técnicos.
    - No refrescar requests public/auth:false.
    - Serializar refresh concurrente.
@@ -41,6 +41,7 @@
    - Soporte refresh que devuelve boolean, token_only o payload completo.
    - Aplica payload de sesión si el refresh devuelve token/user/session.
    - Valida access token usable tras refresh antes de replay.
+   - Eventos internos opt-in para evitar storms.
    - Eventos sin tokens reales.
    - Stats consistentes.
    - Fallback si state no existe.
@@ -58,7 +59,7 @@ import {
 ========================================================= */
 
 export const HTTP_AUTH_VERSION =
-  "14.1.0";
+  "15.0.0";
 
 const LOG_PREFIX =
   "[HTTP Auth]";
@@ -127,6 +128,7 @@ const REFRESH_METHOD_CANDIDATES =
 const AUTH_ME_ENDPOINTS =
   Object.freeze([
     "/me",
+    "/api/me",
     "/auth/me",
     "/api/auth/me",
   ]);
@@ -217,6 +219,13 @@ function isObject(value) {
   );
 }
 
+function isAnyObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object"
+  );
+}
+
 function safeObject(value, fallback = {}) {
   return isObject(value)
     ? value
@@ -256,52 +265,6 @@ function safeNumber(value, fallback = 0) {
     : fallback;
 }
 
-function safeBool(value, fallback = false) {
-  if (value === true) return true;
-  if (value === false) return false;
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-
-  if (typeof value === "string") {
-    const clean =
-      value.trim().toLowerCase();
-
-    if (
-      [
-        "true",
-        "1",
-        "yes",
-        "si",
-        "sí",
-        "on",
-        "enabled",
-        "active",
-        "ok",
-      ].includes(clean)
-    ) {
-      return true;
-    }
-
-    if (
-      [
-        "false",
-        "0",
-        "no",
-        "off",
-        "disabled",
-        "inactive",
-      ].includes(clean)
-    ) {
-      return false;
-    }
-  }
-
-  return Boolean(fallback);
-}
-
 function nowMs() {
   try {
     return Date.now();
@@ -338,6 +301,56 @@ function safeRedact(value = "") {
 }
 
 /* =========================================================
+   EVENT POLICY
+========================================================= */
+
+function getDiagnostics(AppCore = null) {
+  try {
+    return AppCore?.config?.diagnostics || {};
+  } catch {
+    return {};
+  }
+}
+
+function shouldEmitAuthEvent(AppCore = null, config = {}, requestConfig = {}, eventName = "") {
+  const cfg =
+    safeObject(config);
+
+  const req =
+    safeObject(requestConfig);
+
+  if (req.emitEvents === false) {
+    return false;
+  }
+
+  if (
+    req.emitAuthRefreshEvents === true ||
+    req.emitAutoRefreshEvents === true ||
+    req.debugAuthRefreshEvents === true
+  ) {
+    return true;
+  }
+
+  if (
+    cfg.emitAuthRefreshEvents === true ||
+    cfg.emitAutoRefreshEvents === true ||
+    cfg.debugAuthRefreshEvents === true
+  ) {
+    return true;
+  }
+
+  const diagnostics =
+    getDiagnostics(AppCore);
+
+  return Boolean(
+    diagnostics.httpAuthEvents === true ||
+      diagnostics.httpAutoRefreshEvents === true ||
+      diagnostics.httpLifecycleEvents === true ||
+      AppCore?.config?.debugHttpAuth === true
+  );
+}
+
+/* =========================================================
    ENDPOINT POLICY
 ========================================================= */
 
@@ -369,17 +382,27 @@ export function normalizeEndpointPath(path = "") {
         getBaseOrigin()
       );
 
-    return safeLower(
-      parsed.pathname || raw
-    ).replace(/\/{2,}/g, "/");
+    const clean =
+      safeLower(
+        parsed.pathname || raw
+      )
+        .replace(/\/{2,}/g, "/")
+        .replace(/\/$/, "");
+
+    return clean || "/";
   } catch {}
 
-  return safeLower(
-    raw
-      .split("?")[0]
-      .split("#")[0] ||
+  const fallback =
+    safeLower(
       raw
-  ).replace(/\/{2,}/g, "/");
+        .split("?")[0]
+        .split("#")[0] ||
+        raw
+    )
+      .replace(/\/{2,}/g, "/")
+      .replace(/\/$/, "");
+
+  return fallback || "/";
 }
 
 function stripApiPrefix(path = "") {
@@ -622,6 +645,11 @@ function hasUsableUser(user = null) {
       "blocked",
       "suspended",
       "banned",
+      "desactivado",
+      "inactivo",
+      "eliminado",
+      "bloqueado",
+      "suspendido",
     ].includes(status)
   ) {
     return false;
@@ -636,6 +664,7 @@ function hasUsableUser(user = null) {
       safeText(source.sub, "") ||
       safeText(source.username, "") ||
       safeText(source.userName, "") ||
+      safeText(source.user_name, "") ||
       safeText(source.email, "") ||
       safeText(source.mail, "") ||
       safeText(source.phone, "") ||
@@ -647,11 +676,15 @@ function hasUsableUser(user = null) {
    EVENTS / LOGS
 ========================================================= */
 
-function safeEmit(AppCore, eventName = "", payload = {}) {
+function safeEmit(AppCore, config, requestConfig, eventName = "", payload = {}) {
   const name =
     safeText(eventName, "");
 
   if (!name) {
+    return false;
+  }
+
+  if (!shouldEmitAuthEvent(AppCore, config, requestConfig, name)) {
     return false;
   }
 
@@ -691,10 +724,15 @@ function safeWarn(AppCore, ...args) {
   } catch {}
 
   try {
-    console.warn(
-      LOG_PREFIX,
-      ...safeArgs
-    );
+    if (
+      AppCore?.config?.debug === true ||
+      AppCore?.config?.debugHttpAuth === true
+    ) {
+      console.warn(
+        LOG_PREFIX,
+        ...safeArgs
+      );
+    }
   } catch {}
 }
 
@@ -880,7 +918,7 @@ function getRootRefreshState(state) {
   return root;
 }
 
-function markSkipped(root, AppCore, context, reason) {
+function markSkipped(root, AppCore, config, requestConfig, context, reason) {
   const stats =
     root.refreshStats;
 
@@ -895,6 +933,8 @@ function markSkipped(root, AppCore, context, reason) {
 
   safeEmit(
     AppCore,
+    config,
+    requestConfig,
     EVENTS.skipped,
     {
       ...context,
@@ -907,7 +947,7 @@ function markSkipped(root, AppCore, context, reason) {
   return false;
 }
 
-function markFailure(root, AppCore, context, error, eventName = EVENTS.error, extra = {}) {
+function markFailure(root, AppCore, config, requestConfig, context, error, eventName = EVENTS.error, extra = {}) {
   const stats =
     root.refreshStats;
 
@@ -922,6 +962,8 @@ function markFailure(root, AppCore, context, error, eventName = EVENTS.error, ex
 
   safeEmit(
     AppCore,
+    config,
+    requestConfig,
     eventName,
     {
       ...context,
@@ -936,7 +978,7 @@ function markFailure(root, AppCore, context, error, eventName = EVENTS.error, ex
   return false;
 }
 
-function markSuccess(root, AppCore, context, extra = {}) {
+function markSuccess(root, AppCore, config, requestConfig, context, extra = {}) {
   const stats =
     root.refreshStats;
 
@@ -951,6 +993,8 @@ function markSuccess(root, AppCore, context, extra = {}) {
 
   safeEmit(
     AppCore,
+    config,
+    requestConfig,
     EVENTS.success,
     {
       ...context,
@@ -974,7 +1018,7 @@ function markSuccess(root, AppCore, context, extra = {}) {
   return true;
 }
 
-function markApplied(root, AppCore, context, extra = {}) {
+function markApplied(root, AppCore, config, requestConfig, context, extra = {}) {
   const stats =
     root.refreshStats;
 
@@ -986,6 +1030,8 @@ function markApplied(root, AppCore, context, extra = {}) {
 
   safeEmit(
     AppCore,
+    config,
+    requestConfig,
     EVENTS.applied,
     {
       ...context,
@@ -1254,11 +1300,20 @@ function extractSessionPayload(value = null) {
   const session =
     safeObject(root.session);
 
+  const sessionData =
+    safeObject(root.sessionData);
+
   const dataSession =
     safeObject(data.session);
 
+  const dataSessionData =
+    safeObject(data.sessionData);
+
   const payloadSession =
     safeObject(payload.session);
+
+  const payloadSessionData =
+    safeObject(payload.sessionData);
 
   const auth =
     safeObject(root.auth);
@@ -1280,6 +1335,12 @@ function extractSessionPayload(value = null) {
       session.account,
       session.profile,
 
+      sessionData.user,
+      sessionData.usuario,
+      sessionData.me,
+      sessionData.account,
+      sessionData.profile,
+
       data.user,
       data.usuario,
       data.me,
@@ -1292,6 +1353,12 @@ function extractSessionPayload(value = null) {
       dataSession.account,
       dataSession.profile,
 
+      dataSessionData.user,
+      dataSessionData.usuario,
+      dataSessionData.me,
+      dataSessionData.account,
+      dataSessionData.profile,
+
       payload.user,
       payload.usuario,
       payload.me,
@@ -1303,6 +1370,12 @@ function extractSessionPayload(value = null) {
       payloadSession.me,
       payloadSession.account,
       payloadSession.profile,
+
+      payloadSessionData.user,
+      payloadSessionData.usuario,
+      payloadSessionData.me,
+      payloadSessionData.account,
+      payloadSessionData.profile,
 
       result.user,
       result.usuario,
@@ -1333,6 +1406,10 @@ function extractSessionPayload(value = null) {
         session.jwt,
         session.bearer,
 
+        sessionData.token,
+        sessionData.accessToken,
+        sessionData.access_token,
+
         data.token,
         data.accessToken,
         data.access_token,
@@ -1345,6 +1422,10 @@ function extractSessionPayload(value = null) {
         dataSession.jwt,
         dataSession.bearer,
 
+        dataSessionData.token,
+        dataSessionData.accessToken,
+        dataSessionData.access_token,
+
         payload.token,
         payload.accessToken,
         payload.access_token,
@@ -1356,6 +1437,10 @@ function extractSessionPayload(value = null) {
         payloadSession.access_token,
         payloadSession.jwt,
         payloadSession.bearer,
+
+        payloadSessionData.token,
+        payloadSessionData.accessToken,
+        payloadSessionData.access_token,
 
         result.token,
         result.accessToken,
@@ -1375,6 +1460,8 @@ function extractSessionPayload(value = null) {
         root.refresh_token,
         session.refreshToken,
         session.refresh_token,
+        sessionData.refreshToken,
+        sessionData.refresh_token,
         data.refreshToken,
         data.refresh_token,
         dataSession.refreshToken,
@@ -1397,10 +1484,15 @@ function extractSessionPayload(value = null) {
         root.session_id,
         session.sessionId,
         session.session_id,
+        session.id,
+        sessionData.sessionId,
+        sessionData.session_id,
+        sessionData.id,
         data.sessionId,
         data.session_id,
         dataSession.sessionId,
         dataSession.session_id,
+        dataSession.id,
         payload.sessionId,
         payload.session_id,
         payloadSession.sessionId,
@@ -1417,6 +1509,10 @@ function extractSessionPayload(value = null) {
         session.session_user_id,
         session.userId,
         session.user_id,
+        sessionData.sessionUserId,
+        sessionData.session_user_id,
+        sessionData.userId,
+        sessionData.user_id,
         data.sessionUserId,
         data.session_user_id,
         data.userId,
@@ -1590,6 +1686,8 @@ async function callApplySessionFlexible({
 async function applyRefreshPayloadIfNeeded({
   AppCore,
   Auth,
+  config,
+  requestConfig,
   result,
   context,
   root,
@@ -1716,6 +1814,8 @@ async function applyRefreshPayloadIfNeeded({
     markApplied(
       root,
       AppCore,
+      config,
+      requestConfig,
       context,
       {
         hasToken:
@@ -1882,6 +1982,8 @@ function shouldSkipRefresh({
     return markSkipped(
       root,
       AppCore,
+      config,
+      requestConfig,
       context,
       "auto-refresh-disabled"
     );
@@ -1891,6 +1993,8 @@ function shouldSkipRefresh({
     return markSkipped(
       root,
       AppCore,
+      config,
+      requestConfig,
       context,
       "status-not-401"
     );
@@ -1903,6 +2007,8 @@ function shouldSkipRefresh({
     return markSkipped(
       root,
       AppCore,
+      config,
+      requestConfig,
       context,
       "request-aborted"
     );
@@ -1912,6 +2018,8 @@ function shouldSkipRefresh({
     return markSkipped(
       root,
       AppCore,
+      config,
+      requestConfig,
       context,
       "request-timeout"
     );
@@ -1921,6 +2029,8 @@ function shouldSkipRefresh({
     return markSkipped(
       root,
       AppCore,
+      config,
+      requestConfig,
       context,
       "public-request"
     );
@@ -1930,6 +2040,8 @@ function shouldSkipRefresh({
     return markSkipped(
       root,
       AppCore,
+      config,
+      requestConfig,
       context,
       "auth-disabled-request"
     );
@@ -1939,6 +2051,8 @@ function shouldSkipRefresh({
     return markSkipped(
       root,
       AppCore,
+      config,
+      requestConfig,
       context,
       "skip-auth-refresh-flag"
     );
@@ -1948,6 +2062,8 @@ function shouldSkipRefresh({
     return markSkipped(
       root,
       AppCore,
+      config,
+      requestConfig,
       context,
       "auth-refresh-already-attempted"
     );
@@ -1958,17 +2074,13 @@ function shouldSkipRefresh({
     requestConfig?.url ||
     "";
 
-  /*
-    /api/auth/me, /auth/me y /me son PRIVADOS:
-    - no son públicos
-    - no se bloquean como endpoint auth de control
-    - pueden disparar refresh si devuelven 401
-  */
   if (!isAuthMeEndpoint(path)) {
     if (isAuthRefreshControlEndpoint(path)) {
       return markSkipped(
         root,
         AppCore,
+        config,
+        requestConfig,
         context,
         "auth-control-endpoint"
       );
@@ -1978,6 +2090,8 @@ function shouldSkipRefresh({
       return markSkipped(
         root,
         AppCore,
+        config,
+        requestConfig,
         context,
         "public-auth-endpoint"
       );
@@ -1988,6 +2102,8 @@ function shouldSkipRefresh({
     return markSkipped(
       root,
       AppCore,
+      config,
+      requestConfig,
       context,
       "technical-public-route"
     );
@@ -1997,6 +2113,8 @@ function shouldSkipRefresh({
     return markSkipped(
       root,
       AppCore,
+      config,
+      requestConfig,
       context,
       "public-endpoint"
     );
@@ -2006,6 +2124,8 @@ function shouldSkipRefresh({
     return markSkipped(
       root,
       AppCore,
+      config,
+      requestConfig,
       context,
       "refresh-method-missing"
     );
@@ -2015,6 +2135,8 @@ function shouldSkipRefresh({
     return markSkipped(
       root,
       AppCore,
+      config,
+      requestConfig,
       context,
       "missing-refresh-capability"
     );
@@ -2084,6 +2206,8 @@ export async function runAutoRefreshIfNeeded({
 
       safeEmit(
         AppCore,
+        cfg,
+        req,
         EVENTS.join,
         {
           ...context,
@@ -2103,6 +2227,10 @@ export async function runAutoRefreshIfNeeded({
         await applyRefreshPayloadIfNeeded({
           AppCore,
           Auth,
+          config:
+            cfg,
+          requestConfig:
+            req,
           result:
             joinedResult,
           context,
@@ -2123,6 +2251,8 @@ export async function runAutoRefreshIfNeeded({
 
         safeEmit(
           AppCore,
+          cfg,
+          req,
           ok
             ? EVENTS.joinSuccess
             : EVENTS.joinFailed,
@@ -2145,6 +2275,8 @@ export async function runAutoRefreshIfNeeded({
         markFailure(
           root,
           AppCore,
+          cfg,
+          req,
           context,
           joinError,
           EVENTS.joinError,
@@ -2176,6 +2308,8 @@ export async function runAutoRefreshIfNeeded({
       return markSkipped(
         root,
         AppCore,
+        cfg,
+        req,
         context,
         "refresh-rate-limited"
       );
@@ -2196,6 +2330,8 @@ export async function runAutoRefreshIfNeeded({
 
     safeEmit(
       AppCore,
+      cfg,
+      req,
       EVENTS.start,
       {
         ...context,
@@ -2236,6 +2372,10 @@ export async function runAutoRefreshIfNeeded({
     await applyRefreshPayloadIfNeeded({
       AppCore,
       Auth,
+      config:
+        cfg,
+      requestConfig:
+        req,
       result:
         refreshResult,
       context,
@@ -2257,8 +2397,7 @@ export async function runAutoRefreshIfNeeded({
     /*
       Para que el HTTP Service pueda reintentar la request original,
       la condición mínima es access token usable.
-      No exigimos user usable aquí porque algunos refresh devuelven token_only
-      y Auth.restore/Auth.me pueden completar usuario después.
+      No exigimos user usable aquí porque algunos refresh devuelven token_only.
     */
     const ok =
       Boolean(
@@ -2287,6 +2426,8 @@ export async function runAutoRefreshIfNeeded({
       markFailure(
         root,
         AppCore,
+        cfg,
+        req,
         context,
         rejectedError,
         EVENTS.rejected,
@@ -2308,6 +2449,8 @@ export async function runAutoRefreshIfNeeded({
     markSuccess(
       root,
       AppCore,
+      cfg,
+      req,
       context,
       {
         refreshed,
@@ -2332,6 +2475,8 @@ export async function runAutoRefreshIfNeeded({
     markFailure(
       root,
       AppCore,
+      cfg,
+      req,
       context,
       refreshError,
       EVENTS.error,

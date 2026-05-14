@@ -3,7 +3,7 @@
    Archivo: src/services/index.js
 
    ONION SUPPORT · HTTP SERVICE
-   CORE API CLIENT BRIDGE · AUTH SAFE · RETRY SAFE · LOADER SAFE · 14/10
+   CORE API CLIENT BRIDGE · AUTH SAFE · RETRY SAFE · LOADER SAFE · 15/10
 
    Responsabilidades:
    - Servicio HTTP público de la SPA.
@@ -29,18 +29,20 @@
        Http.delete(path, body, options)
 
    HARDENING EXTREMO:
-   - init idempotente real
+   - init idempotente real y silencioso
    - interceptores base registrados una sola vez
+   - bridge idempotente sin app:module:duplicate storm
    - refresh lock para evitar refresh paralelo
    - loader con pendingRequests balanceado por request real
-   - eventos consistentes y redactados
+   - eventos lifecycle opt-in para no saturar CoreEvents
+   - eventos finales controlados y redactados
    - cero tokens crudos en logs/eventos/snapshots
    - compatible con AppCore congelado mediante accessors/modules
    - sin doble refresh
    - sin doble logout
    - sin lógicas duplicadas
    - no refresca en login/refresh/logout/activation/reset/2FA público
-   - /api/auth/me sigue siendo endpoint privado y puede usar Authorization
+   - /api/auth/me, /auth/me y /me siguen siendo privados y pueden usar Authorization
    - evita auto-logout si el error no pertenece a request privado autenticado
    - evita leak de respuesta completa en eventos
 ========================================================= */
@@ -58,7 +60,6 @@ import {
   buildRequestSummary,
   buildDefaultRequestConfig,
   withSignal,
-  sanitizeData,
 } from "./http.helpers.js";
 
 import {
@@ -107,7 +108,7 @@ export const Http = (() => {
   ======================================================= */
 
   const SERVICE_VERSION =
-    "14.1.0";
+    "15.0.0";
 
   const SERVICE_NAME =
     "http";
@@ -235,10 +236,6 @@ export const Http = (() => {
       "authorization",
     ]);
 
-  /*
-    Endpoints auth públicos o técnicos donde NO debe entrar
-    refresh automático ni auto-logout.
-  */
   const PUBLIC_AUTH_ENDPOINT_MARKERS =
     Object.freeze([
       "/auth/login",
@@ -265,8 +262,8 @@ export const Http = (() => {
     ]);
 
   /*
-    Endpoints auth privados o de control donde refrescar puede producir bucles.
-    /auth/me NO está aquí: sigue siendo privado y debe recibir Authorization.
+    Endpoints auth de control donde refrescar puede producir bucles.
+    /auth/me NO está aquí: sigue siendo privado.
   */
   const AUTH_CONTROL_SKIP_REFRESH_MARKERS =
     Object.freeze([
@@ -305,6 +302,14 @@ export const Http = (() => {
       "/reset-password/confirm",
     ]);
 
+  const PRIVATE_AUTH_ME_PATHS =
+    Object.freeze([
+      "/me",
+      "/api/me",
+      "/auth/me",
+      "/api/auth/me",
+    ]);
+
   const RESPONSE_PREVIEW_KEYS =
     Object.freeze([
       "ok",
@@ -337,12 +342,51 @@ export const Http = (() => {
   let logoutPromise =
     null;
 
+  let readyEventEmitted =
+    false;
+
+  let bridgeAttachedEventEmitted =
+    false;
+
   /* =======================================================
      CONFIG
   ======================================================= */
 
   const config = {
     ...HTTP_CONFIG,
+
+    /*
+      Política de eventos:
+      - lifecycle = start/finalize/interceptor/initSkipped/bridgeAttached.
+      - final = success/error.
+      Por defecto lifecycle queda apagado para evitar storm.
+    */
+    emitLifecycleEvents:
+      HTTP_CONFIG?.emitLifecycleEvents === true,
+
+    emitFinalEvents:
+      HTTP_CONFIG?.emitFinalEvents !== false,
+
+    emitReadyEvent:
+      HTTP_CONFIG?.emitReadyEvent !== false,
+
+    emitBridgeEvent:
+      HTTP_CONFIG?.emitBridgeEvent === true,
+
+    emitInterceptorEvents:
+      HTTP_CONFIG?.emitInterceptorEvents === true,
+
+    emitInitSkippedEvents:
+      HTTP_CONFIG?.emitInitSkippedEvents === true,
+
+    emitRefreshEvents:
+      HTTP_CONFIG?.emitRefreshEvents !== false,
+
+    emitReplayEvents:
+      HTTP_CONFIG?.emitReplayEvents !== false,
+
+    emitAutoLogoutEvents:
+      HTTP_CONFIG?.emitAutoLogoutEvents !== false,
   };
 
   /* =======================================================
@@ -634,7 +678,105 @@ export const Http = (() => {
     );
   }
 
-  function safeEmit(eventName = "", payload = {}) {
+  function shouldEmitLifecycleEvent(requestConfig = {}, type = "") {
+    const cfg =
+      safeObject(requestConfig);
+
+    if (cfg.emitEvents === false) {
+      return false;
+    }
+
+    if (cfg.emitLifecycleEvents === true) {
+      return true;
+    }
+
+    if (config.emitLifecycleEvents === true) {
+      return true;
+    }
+
+    if (
+      type === "start" &&
+      cfg.emitStartEvent === true
+    ) {
+      return true;
+    }
+
+    if (
+      type === "finalize" &&
+      cfg.emitFinalizeEvent === true
+    ) {
+      return true;
+    }
+
+    return Boolean(
+      AppCore?.config?.diagnostics?.httpLifecycleEvents === true ||
+        AppCore?.config?.debugHttpLifecycle === true ||
+        AppCore?.config?.debug === true && cfg.debugEvents === true
+    );
+  }
+
+  function shouldEmitFinalEvent(requestConfig = {}) {
+    const cfg =
+      safeObject(requestConfig);
+
+    if (cfg.emitEvents === false) {
+      return false;
+    }
+
+    if (cfg.emitFinalEvents === false) {
+      return false;
+    }
+
+    if (config.emitFinalEvents === false) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function shouldEmitServiceEvent(kind = "", requestConfig = {}) {
+    const cfg =
+      safeObject(requestConfig);
+
+    if (cfg.emitEvents === false) {
+      return false;
+    }
+
+    if (kind === "ready") {
+      return config.emitReadyEvent !== false;
+    }
+
+    if (kind === "bridge") {
+      return config.emitBridgeEvent === true ||
+        AppCore?.config?.diagnostics?.httpLifecycleEvents === true;
+    }
+
+    if (kind === "interceptor") {
+      return config.emitInterceptorEvents === true ||
+        AppCore?.config?.diagnostics?.httpLifecycleEvents === true;
+    }
+
+    if (kind === "initSkipped") {
+      return config.emitInitSkippedEvents === true ||
+        AppCore?.config?.diagnostics?.httpLifecycleEvents === true;
+    }
+
+    if (kind === "refresh") {
+      return config.emitRefreshEvents !== false;
+    }
+
+    if (kind === "replay") {
+      return config.emitReplayEvents !== false;
+    }
+
+    if (kind === "autoLogout") {
+      return config.emitAutoLogoutEvents !== false;
+    }
+
+    return true;
+  }
+
+  function safeEmit(eventName = "", payload = {}, options = {}) {
     const name =
       safeText(eventName, "");
 
@@ -645,7 +787,8 @@ export const Http = (() => {
     try {
       AppCore?.events?.emit?.(
         name,
-        sanitizePayload(payload)
+        sanitizePayload(payload),
+        options
       );
 
       return true;
@@ -674,10 +817,12 @@ export const Http = (() => {
     } catch {}
 
     try {
-      console.warn(
-        LOG_PREFIX,
-        ...args.map((item) => sanitizePayload(item))
-      );
+      if (AppCore?.config?.debug || config.debug) {
+        console.warn(
+          LOG_PREFIX,
+          ...args.map((item) => sanitizePayload(item))
+        );
+      }
     } catch {}
   }
 
@@ -1234,7 +1379,9 @@ export const Http = (() => {
 
       return safeLower(
         parsed.pathname || raw
-      ).replace(/\/{2,}/g, "/");
+      )
+        .replace(/\/{2,}/g, "/")
+        .replace(/\/$/, "") || "/";
     } catch {}
 
     return safeLower(
@@ -1242,7 +1389,9 @@ export const Http = (() => {
         .split("?")[0]
         .split("#")[0] ||
         raw
-    ).replace(/\/{2,}/g, "/");
+    )
+      .replace(/\/{2,}/g, "/")
+      .replace(/\/$/, "") || "/";
   }
 
   function getComparableEndpointPaths(path = "") {
@@ -1288,7 +1437,21 @@ export const Http = (() => {
     });
   }
 
+  function isAuthMeEndpoint(path = "") {
+    const candidates =
+      getComparableEndpointPaths(path);
+
+    return candidates.some((candidate) => (
+      PRIVATE_AUTH_ME_PATHS.includes(candidate) ||
+      candidate.endsWith("/auth/me")
+    ));
+  }
+
   function isPublicAuthEndpoint(path = "") {
+    if (isAuthMeEndpoint(path)) {
+      return false;
+    }
+
     return endpointIncludes(
       path,
       PUBLIC_AUTH_ENDPOINT_MARKERS
@@ -1296,6 +1459,10 @@ export const Http = (() => {
   }
 
   function isAuthRefreshControlEndpoint(path = "") {
+    if (isAuthMeEndpoint(path)) {
+      return false;
+    }
+
     return endpointIncludes(
       path,
       AUTH_CONTROL_SKIP_REFRESH_MARKERS
@@ -1322,6 +1489,10 @@ export const Http = (() => {
   }
 
   function isPublicEndpoint(path = "") {
+    if (isAuthMeEndpoint(path)) {
+      return false;
+    }
+
     if (
       isPublicAuthEndpoint(path) ||
       isTechnicalPublicSpaEndpoint(path)
@@ -1337,27 +1508,7 @@ export const Http = (() => {
       }
     } catch {}
 
-    try {
-      if (isFunction(AppCore?.isPublicApiPath)) {
-        return Boolean(
-          AppCore.isPublicApiPath(path)
-        );
-      }
-    } catch {}
-
     return false;
-  }
-
-  function isAuthMeEndpoint(path = "") {
-    const candidates =
-      getComparableEndpointPaths(path);
-
-    return candidates.some((candidate) => (
-      candidate === "/me" ||
-      candidate === "/auth/me" ||
-      candidate === "/api/auth/me" ||
-      candidate.endsWith("/auth/me")
-    ));
   }
 
   function isAuthEndpoint(path = "") {
@@ -1379,6 +1530,26 @@ export const Http = (() => {
       cfg.path ||
       cfg.url ||
       "";
+
+    if (isAuthMeEndpoint(path)) {
+      return {
+        ...cfg,
+
+        auth:
+          cfg.auth === false ? false : true,
+
+        public:
+          false,
+
+        skipAuth:
+          false,
+
+        _skipAuthRefresh:
+          cfg._skipAuthRefresh === true
+            ? true
+            : false,
+      };
+    }
 
     const publicByFlag =
       cfg.public === true ||
@@ -1425,6 +1596,10 @@ export const Http = (() => {
       return false;
     }
 
+    if (isAuthMeEndpoint(path)) {
+      return true;
+    }
+
     if (cfg.public === true || cfg.skipAuth === true) {
       return false;
     }
@@ -1435,14 +1610,6 @@ export const Http = (() => {
 
     if (isAuthRefreshControlEndpoint(path)) {
       return false;
-    }
-
-    /*
-      /api/auth/me sí es privado.
-      Nota: para refrescar también debe permitirlo http.auth.js.
-    */
-    if (isAuthMeEndpoint(path)) {
-      return true;
     }
 
     return true;
@@ -1514,6 +1681,25 @@ export const Http = (() => {
      APPCORE BRIDGE
   ======================================================= */
 
+  function getRegisteredModule(name = "") {
+    const cleanName =
+      safeText(name, "");
+
+    if (!cleanName) {
+      return null;
+    }
+
+    try {
+      return AppCore?.modules?.get?.(cleanName) || null;
+    } catch {}
+
+    try {
+      return AppCore?.registry?.modules?.get?.(cleanName) || null;
+    } catch {}
+
+    return null;
+  }
+
   function registerModule(name = "", value = null, aliases = []) {
     const cleanName =
       safeText(name, "");
@@ -1539,36 +1725,57 @@ export const Http = (() => {
       false;
 
     for (const moduleName of names) {
-      try {
-        const result =
-          AppCore?.modules?.register?.(
-            moduleName,
-            value,
-            {
-              replace:
-                true,
+      const current =
+        getRegisteredModule(moduleName);
 
-              overwrite:
-                true,
+      if (current === value) {
+        ok =
+          true;
 
-              source:
-                "http.service",
-            }
-          );
+        continue;
+      }
 
-        if (result !== false) {
-          ok = true;
-        }
-      } catch {}
-
+      /*
+        Preferimos registry directo para bridges internos: evita eventos
+        app:module:duplicate/replaced innecesarios.
+      */
       try {
         AppCore?.registry?.modules?.set?.(
           moduleName,
           value
         );
 
-        ok = true;
+        ok =
+          true;
       } catch {}
+
+      if (!ok) {
+        try {
+          const result =
+            AppCore?.modules?.register?.(
+              moduleName,
+              value,
+              {
+                replace:
+                  true,
+
+                overwrite:
+                  true,
+
+                source:
+                  "http.service",
+
+                emit:
+                  false,
+              }
+            );
+
+          if (result !== false) {
+            ok =
+              true;
+          }
+        } catch {}
+      }
     }
 
     return ok;
@@ -1578,8 +1785,8 @@ export const Http = (() => {
     return Boolean(
       AppCore?.Http === api ||
         AppCore?.http === api ||
-        AppCore?.modules?.get?.("Http") === api ||
-        AppCore?.modules?.get?.("http") === api
+        getRegisteredModule("Http") === api ||
+        getRegisteredModule("http") === api
     );
   }
 
@@ -1598,14 +1805,16 @@ export const Http = (() => {
       AppCore.Http =
         api;
 
-      attached = true;
+      attached =
+        true;
     } catch {}
 
     try {
       AppCore.http =
         api;
 
-      attached = true;
+      attached =
+        true;
     } catch {}
 
     try {
@@ -1627,7 +1836,8 @@ export const Http = (() => {
         AppCore.services.http =
           api;
 
-        attached = true;
+        attached =
+          true;
       }
     } catch {}
 
@@ -1644,22 +1854,31 @@ export const Http = (() => {
         ]
       )
     ) {
-      attached = true;
+      attached =
+        true;
     }
 
     state.bridgeAttached =
       true;
 
-    safeEmit(
-      EVENTS.bridgeAttached,
-      {
-        attached,
-        hasAppCoreHttp:
-          Boolean(AppCore?.http || AppCore?.Http),
-        hasAppCoreModules:
-          Boolean(AppCore?.modules),
-      }
-    );
+    if (
+      !bridgeAttachedEventEmitted &&
+      shouldEmitServiceEvent("bridge")
+    ) {
+      bridgeAttachedEventEmitted =
+        true;
+
+      safeEmit(
+        EVENTS.bridgeAttached,
+        {
+          attached,
+          hasAppCoreHttp:
+            Boolean(AppCore?.http || AppCore?.Http),
+          hasAppCoreModules:
+            Boolean(AppCore?.modules),
+        }
+      );
+    }
 
     return true;
   }
@@ -1676,13 +1895,15 @@ export const Http = (() => {
         options
       );
 
-    safeEmit(
-      EVENTS.interceptorRegistered,
-      {
-        type:
-          "request",
-      }
-    );
+    if (shouldEmitServiceEvent("interceptor")) {
+      safeEmit(
+        EVENTS.interceptorRegistered,
+        {
+          type:
+            "request",
+        }
+      );
+    }
 
     return off;
   }
@@ -1695,13 +1916,15 @@ export const Http = (() => {
         options
       );
 
-    safeEmit(
-      EVENTS.interceptorRegistered,
-      {
-        type:
-          "response",
-      }
-    );
+    if (shouldEmitServiceEvent("interceptor")) {
+      safeEmit(
+        EVENTS.interceptorRegistered,
+        {
+          type:
+            "response",
+        }
+      );
+    }
 
     return off;
   }
@@ -1714,13 +1937,15 @@ export const Http = (() => {
         options
       );
 
-    safeEmit(
-      EVENTS.interceptorRegistered,
-      {
-        type:
-          "error",
-      }
-    );
+    if (shouldEmitServiceEvent("interceptor")) {
+      safeEmit(
+        EVENTS.interceptorRegistered,
+        {
+          type:
+            "error",
+        }
+      );
+    }
 
     return off;
   }
@@ -1732,15 +1957,17 @@ export const Http = (() => {
         type
       );
 
-    safeEmit(
-      EVENTS.interceptorsCleared,
-      {
-        type:
-          safeText(type, "all"),
+    if (shouldEmitServiceEvent("interceptor")) {
+      safeEmit(
+        EVENTS.interceptorsCleared,
+        {
+          type:
+            safeText(type, "all"),
 
-        removed,
-      }
-    );
+          removed,
+        }
+      );
+    }
 
     return removed;
   }
@@ -1855,9 +2082,6 @@ export const Http = (() => {
   ======================================================= */
 
   function normalizeRequestArgs(arg1 = DEFAULT_METHOD, arg2 = "", arg3 = {}) {
-    /*
-      Http.request("GET", "/api/x", options)
-    */
     if (
       typeof arg1 === "string" &&
       isKnownMethod(arg1) &&
@@ -1875,9 +2099,6 @@ export const Http = (() => {
       };
     }
 
-    /*
-      Http.request("/api/x", options)
-    */
     return {
       method:
         normalizeMethod(
@@ -2040,6 +2261,17 @@ export const Http = (() => {
       requestConfig.apiBase ||
       getCoreApiBase();
 
+    if (isAuthMeEndpoint(requestConfig.path) && requestConfig.auth !== false) {
+      requestConfig.auth =
+        true;
+
+      requestConfig.public =
+        false;
+
+      requestConfig.skipAuth =
+        false;
+    }
+
     if (isBodylessMethod(requestConfig.method)) {
       delete requestConfig.body;
     }
@@ -2093,21 +2325,23 @@ export const Http = (() => {
     state.lastRefreshAt =
       isoNow();
 
-    safeEmit(
-      EVENTS.refreshStart,
-      {
-        requestId,
+    if (shouldEmitServiceEvent("refresh", refreshConfig)) {
+      safeEmit(
+        EVENTS.refreshStart,
+        {
+          requestId,
 
-        method:
-          refreshConfig.method,
+          method:
+            refreshConfig.method,
 
-        path:
-          redactTokenInText(refreshConfig.path),
+          path:
+            redactTokenInText(refreshConfig.path),
 
-        status:
-          normalizedInitialError.status,
-      }
-    );
+          status:
+            normalizedInitialError.status,
+        }
+      );
+    }
 
     let refreshed =
       false;
@@ -2153,18 +2387,20 @@ export const Http = (() => {
           false,
       };
 
-      safeEmit(
-        EVENTS.refreshError,
-        {
-          requestId,
+      if (shouldEmitServiceEvent("refresh", failedConfig)) {
+        safeEmit(
+          EVENTS.refreshError,
+          {
+            requestId,
 
-          path:
-            redactTokenInText(failedConfig.path),
+            path:
+              redactTokenInText(failedConfig.path),
 
-          error:
-            sanitizeErrorForEvent(normalizedInitialError),
-        }
-      );
+            error:
+              sanitizeErrorForEvent(normalizedInitialError),
+          }
+        );
+      }
 
       return {
         ok:
@@ -2180,15 +2416,17 @@ export const Http = (() => {
 
     state.refreshSuccessCount += 1;
 
-    safeEmit(
-      EVENTS.refreshSuccess,
-      {
-        requestId,
+    if (shouldEmitServiceEvent("refresh", refreshConfig)) {
+      safeEmit(
+        EVENTS.refreshSuccess,
+        {
+          requestId,
 
-        path:
-          redactTokenInText(refreshConfig.path),
-      }
-    );
+          path:
+            redactTokenInText(refreshConfig.path),
+        }
+      );
+    }
 
     const replayConfig =
       normalizePublicRequestConfig({
@@ -2213,18 +2451,20 @@ export const Http = (() => {
     state.lastReplayAt =
       isoNow();
 
-    safeEmit(
-      EVENTS.replayStart,
-      {
-        requestId,
+    if (shouldEmitServiceEvent("replay", replayConfig)) {
+      safeEmit(
+        EVENTS.replayStart,
+        {
+          requestId,
 
-        method:
-          replayConfig.method,
+          method:
+            replayConfig.method,
 
-        path:
-          redactTokenInText(replayConfig.path),
-      }
-    );
+          path:
+            redactTokenInText(replayConfig.path),
+        }
+      );
+    }
 
     try {
       const response =
@@ -2235,21 +2475,23 @@ export const Http = (() => {
 
       state.replaySuccessCount += 1;
 
-      safeEmit(
-        EVENTS.replaySuccess,
-        {
-          requestId,
+      if (shouldEmitServiceEvent("replay", replayConfig)) {
+        safeEmit(
+          EVENTS.replaySuccess,
+          {
+            requestId,
 
-          method:
-            replayConfig.method,
+            method:
+              replayConfig.method,
 
-          path:
-            redactTokenInText(replayConfig.path),
+            path:
+              redactTokenInText(replayConfig.path),
 
-          response:
-            summarizeResponseForEvent(response),
-        }
-      );
+            response:
+              summarizeResponseForEvent(response),
+          }
+        );
+      }
 
       return {
         ok:
@@ -2271,21 +2513,23 @@ export const Http = (() => {
       state.lastReplayErrorAt =
         isoNow();
 
-      safeEmit(
-        EVENTS.replayError,
-        {
-          requestId,
+      if (shouldEmitServiceEvent("replay", replayConfig)) {
+        safeEmit(
+          EVENTS.replayError,
+          {
+            requestId,
 
-          method:
-            replayConfig.method,
+            method:
+              replayConfig.method,
 
-          path:
-            redactTokenInText(replayConfig.path),
+            path:
+              redactTokenInText(replayConfig.path),
 
-          error:
-            sanitizeErrorForEvent(normalizedReplayError),
-        }
-      );
+            error:
+              sanitizeErrorForEvent(normalizedReplayError),
+          }
+        );
+      }
 
       return {
         ok:
@@ -2312,8 +2556,37 @@ export const Http = (() => {
     if (!shouldAutoLogout(error, requestConfig)) {
       state.autoLogoutSkippedCount += 1;
 
+      if (shouldEmitServiceEvent("autoLogout", requestConfig)) {
+        safeEmit(
+          EVENTS.autoLogoutSkipped,
+          {
+            requestId:
+              requestConfig?.requestId || "",
+
+            path:
+              redactTokenInText(
+                requestConfig?.path || ""
+              ),
+
+            error:
+              sanitizeErrorForEvent(error),
+          }
+        );
+      }
+
+      return false;
+    }
+
+    state.autoLogoutInFlight =
+      true;
+
+    state.autoLogoutCount += 1;
+    state.lastAutoLogoutAt =
+      isoNow();
+
+    if (shouldEmitServiceEvent("autoLogout", requestConfig)) {
       safeEmit(
-        EVENTS.autoLogoutSkipped,
+        EVENTS.autoLogoutStart,
         {
           requestId:
             requestConfig?.requestId || "",
@@ -2327,32 +2600,7 @@ export const Http = (() => {
             sanitizeErrorForEvent(error),
         }
       );
-
-      return false;
     }
-
-    state.autoLogoutInFlight =
-      true;
-
-    state.autoLogoutCount += 1;
-    state.lastAutoLogoutAt =
-      isoNow();
-
-    safeEmit(
-      EVENTS.autoLogoutStart,
-      {
-        requestId:
-          requestConfig?.requestId || "",
-
-        path:
-          redactTokenInText(
-            requestConfig?.path || ""
-          ),
-
-        error:
-          sanitizeErrorForEvent(error),
-      }
-    );
 
     logoutPromise =
       Promise.resolve()
@@ -2369,18 +2617,20 @@ export const Http = (() => {
                 "http-401-after-refresh",
             });
 
-            safeEmit(
-              EVENTS.autoLogoutSuccess,
-              {
-                requestId:
-                  requestConfig?.requestId || "",
+            if (shouldEmitServiceEvent("autoLogout", requestConfig)) {
+              safeEmit(
+                EVENTS.autoLogoutSuccess,
+                {
+                  requestId:
+                    requestConfig?.requestId || "",
 
-                path:
-                  redactTokenInText(
-                    requestConfig?.path || ""
-                  ),
-              }
-            );
+                  path:
+                    redactTokenInText(
+                      requestConfig?.path || ""
+                    ),
+                }
+              );
+            }
 
             return true;
           } catch (logoutError) {
@@ -2389,16 +2639,18 @@ export const Http = (() => {
               logoutError
             );
 
-            safeEmit(
-              EVENTS.autoLogoutError,
-              {
-                requestId:
-                  requestConfig?.requestId || "",
+            if (shouldEmitServiceEvent("autoLogout", requestConfig)) {
+              safeEmit(
+                EVENTS.autoLogoutError,
+                {
+                  requestId:
+                    requestConfig?.requestId || "",
 
-                error:
-                  sanitizeErrorForEvent(logoutError),
-              }
-            );
+                  error:
+                    sanitizeErrorForEvent(logoutError),
+                }
+              );
+            }
 
             return false;
           }
@@ -2488,15 +2740,17 @@ export const Http = (() => {
           requestConfig.requestId
         );
 
-      safeEmit(
-        EVENTS.requestStart,
-        sanitizeRequestConfigForEvent({
-          ...requestConfig,
+      if (shouldEmitLifecycleEvent(requestConfig, "start")) {
+        safeEmit(
+          EVENTS.requestStart,
+          sanitizeRequestConfigForEvent({
+            ...requestConfig,
 
-          useLoader:
-            loaderEnabled,
-        })
-      );
+            useLoader:
+              loaderEnabled,
+          })
+        );
+      }
 
       let response =
         null;
@@ -2526,22 +2780,24 @@ export const Http = (() => {
           ) {
             state.refreshSkippedCount += 1;
 
-            safeEmit(
-              EVENTS.refreshSkipped,
-              {
-                requestId:
-                  requestConfig.requestId,
+            if (shouldEmitServiceEvent("refresh", requestConfig)) {
+              safeEmit(
+                EVENTS.refreshSkipped,
+                {
+                  requestId:
+                    requestConfig.requestId,
 
-                path:
-                  redactTokenInText(requestConfig.path),
+                  path:
+                    redactTokenInText(requestConfig.path),
 
-                reason:
-                  "not-eligible",
+                  reason:
+                    "not-eligible",
 
-                error:
-                  sanitizeErrorForEvent(normalizedInitialError),
-              }
-            );
+                  error:
+                    sanitizeErrorForEvent(normalizedInitialError),
+                }
+              );
+            }
           }
 
           throw normalizedInitialError;
@@ -2577,25 +2833,27 @@ export const Http = (() => {
       state.lastSuccessAt =
         isoNow();
 
-      safeEmit(
-        EVENTS.requestSuccess,
-        {
-          requestId:
-            requestConfig.requestId,
+      if (shouldEmitFinalEvent(requestConfig)) {
+        safeEmit(
+          EVENTS.requestSuccess,
+          {
+            requestId:
+              requestConfig.requestId,
 
-          method:
-            requestConfig.method,
+            method:
+              requestConfig.method,
 
-          path:
-            redactTokenInText(requestConfig.path),
+            path:
+              redactTokenInText(requestConfig.path),
 
-          durationMs:
-            nowMs() - startedAt,
+            durationMs:
+              nowMs() - startedAt,
 
-          response:
-            summarizeResponseForEvent(interceptedResponse),
-        }
-      );
+            response:
+              summarizeResponseForEvent(interceptedResponse),
+          }
+        );
+      }
 
       if (
         shouldLogResponses(
@@ -2677,27 +2935,29 @@ export const Http = (() => {
           finalError
         );
 
-      safeEmit(
-        EVENTS.requestError,
-        {
-          requestId:
-            requestConfig?.requestId || "",
+      if (shouldEmitFinalEvent(requestConfig || {})) {
+        safeEmit(
+          EVENTS.requestError,
+          {
+            requestId:
+              requestConfig?.requestId || "",
 
-          method:
-            requestConfig?.method || method,
+            method:
+              requestConfig?.method || method,
 
-          path:
-            redactTokenInText(
-              requestConfig?.path || path
-            ),
+            path:
+              redactTokenInText(
+                requestConfig?.path || path
+              ),
 
-          durationMs:
-            nowMs() - startedAt,
+            durationMs:
+              nowMs() - startedAt,
 
-          error:
-            sanitizeErrorForEvent(finalError),
-        }
-      );
+            error:
+              sanitizeErrorForEvent(finalError),
+          }
+        );
+      }
 
       if (
         shouldLogErrors(
@@ -2729,27 +2989,29 @@ export const Http = (() => {
         requestConfig?.requestId || ""
       );
 
-      safeEmit(
-        EVENTS.requestFinalize,
-        {
-          requestId:
-            requestConfig?.requestId || "",
+      if (shouldEmitLifecycleEvent(requestConfig || {}, "finalize")) {
+        safeEmit(
+          EVENTS.requestFinalize,
+          {
+            requestId:
+              requestConfig?.requestId || "",
 
-          method:
-            requestConfig?.method || method,
+            method:
+              requestConfig?.method || method,
 
-          path:
-            redactTokenInText(
-              requestConfig?.path || path
-            ),
+            path:
+              redactTokenInText(
+                requestConfig?.path || path
+              ),
 
-          pendingRequests:
-            state.pendingRequests,
+            pendingRequests:
+              state.pendingRequests,
 
-          durationMs:
-            nowMs() - startedAt,
-        }
-      );
+            durationMs:
+              nowMs() - startedAt,
+          }
+        );
+      }
     }
   }
 
@@ -2943,12 +3205,6 @@ export const Http = (() => {
           "application/json";
       }
 
-      /*
-        No se fuerza Content-Type aquí:
-        - FormData debe dejar que el browser ponga boundary.
-        - Core/request engine decidirán si es JSON.
-      */
-
       return {
         ...cfg,
         headers,
@@ -2974,16 +3230,18 @@ export const Http = (() => {
     if (state.initialized) {
       attachToAppCore();
 
-      safeEmit(
-        EVENTS.initSkipped,
-        {
-          reason:
-            "already-initialized",
+      if (shouldEmitServiceEvent("initSkipped")) {
+        safeEmit(
+          EVENTS.initSkipped,
+          {
+            reason:
+              "already-initialized",
 
-          version:
-            SERVICE_VERSION,
-        }
-      );
+            version:
+              SERVICE_VERSION,
+          }
+        );
+      }
 
       return api;
     }
@@ -2991,16 +3249,18 @@ export const Http = (() => {
     if (state.initializing) {
       attachToAppCore();
 
-      safeEmit(
-        EVENTS.initSkipped,
-        {
-          reason:
-            "initializing",
+      if (shouldEmitServiceEvent("initSkipped")) {
+        safeEmit(
+          EVENTS.initSkipped,
+          {
+            reason:
+              "initializing",
 
-          version:
-            SERVICE_VERSION,
-        }
-      );
+            version:
+              SERVICE_VERSION,
+          }
+        );
+      }
 
       return api;
     }
@@ -3015,19 +3275,27 @@ export const Http = (() => {
       state.initialized =
         true;
 
-      safeEmit(
-        EVENTS.ready,
-        {
-          version:
-            SERVICE_VERSION,
+      if (
+        !readyEventEmitted &&
+        shouldEmitServiceEvent("ready")
+      ) {
+        readyEventEmitted =
+          true;
 
-          bridgeAttached:
-            state.bridgeAttached,
+        safeEmit(
+          EVENTS.ready,
+          {
+            version:
+              SERVICE_VERSION,
 
-          snapshot:
-            getHttpSnapshot(),
-        }
-      );
+            bridgeAttached:
+              state.bridgeAttached,
+
+            snapshot:
+              getHttpSnapshot(),
+          }
+        );
+      }
 
       return api;
     } finally {
@@ -3068,6 +3336,12 @@ export const Http = (() => {
             useLoader:
               config.useLoader ?? null,
 
+            emitLifecycleEvents:
+              config.emitLifecycleEvents === true,
+
+            emitFinalEvents:
+              config.emitFinalEvents !== false,
+
             apiBase:
               getCoreApiBase(),
           }),
@@ -3106,6 +3380,10 @@ export const Http = (() => {
 
       baseInterceptorsRegistered:
         state.baseInterceptorsRegistered,
+
+      readyEventEmitted,
+
+      bridgeAttachedEventEmitted,
 
       pendingRequests:
         state.pendingRequests,
@@ -3209,6 +3487,21 @@ export const Http = (() => {
         useLoader:
           config.useLoader ?? null,
 
+        emitLifecycleEvents:
+          config.emitLifecycleEvents === true,
+
+        emitFinalEvents:
+          config.emitFinalEvents !== false,
+
+        emitRefreshEvents:
+          config.emitRefreshEvents !== false,
+
+        emitReplayEvents:
+          config.emitReplayEvents !== false,
+
+        emitAutoLogoutEvents:
+          config.emitAutoLogoutEvents !== false,
+
         apiBase:
           getCoreApiBase(),
       },
@@ -3241,6 +3534,9 @@ export const Http = (() => {
       endpointPolicy: {
         authMePrivate:
           true,
+
+        privateAuthMePaths:
+          PRIVATE_AUTH_ME_PATHS,
 
         publicAuthMarkers:
           PUBLIC_AUTH_ENDPOINT_MARKERS.length,

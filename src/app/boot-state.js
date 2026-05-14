@@ -30,13 +30,20 @@
    - Evita app-ready en estado fatal/error.
    - Sin CSS inline.
    - Sin estilos inyectados.
+
+   EXTREME MODE:
+   - Limpieza estricta de estados terminales antiguos.
+   - Evita ready fantasma tras error/reboot.
+   - Evita error fantasma tras ready/boot.
+   - Eventos app/store/document deduplicados por firma.
+   - Snapshots sanitizados y compatibles con debug.
 ========================================================= */
 
 /* =========================================================
    VERSION
 ========================================================= */
 
-export const BOOT_STATE_VERSION = "15.0.0";
+export const BOOT_STATE_VERSION = "16.0.0-extreme-pro";
 
 /* =========================================================
    CONSTANTS
@@ -133,6 +140,22 @@ const SENSITIVE_QUERY_PARAM_NAMES = Object.freeze([
   "two_factor_token",
   "mfaToken",
   "mfa_token",
+  "authorization",
+  "jwt",
+  "session",
+  "sid",
+]);
+
+const TOKEN_ROUTE_PATHS = Object.freeze([
+  "/activate-account",
+  "/activate",
+  "/activation",
+  "/account/activate",
+  "/activate/first-user",
+  "/reset-password/confirm",
+  "/reset-password-confirm",
+  "/password-reset/confirm",
+  "/password-reset-confirm",
 ]);
 
 const DOCUMENT_STATE_CLASSES = Object.freeze([
@@ -146,9 +169,9 @@ const DOCUMENT_STATE_CLASSES = Object.freeze([
   "loading",
 ]);
 
-const APP_SIGNATURES = new WeakMap();
-const STORE_SIGNATURES = new WeakMap();
-const DOCUMENT_SIGNATURES = new WeakMap();
+let APP_SIGNATURES = new WeakMap();
+let STORE_SIGNATURES = new WeakMap();
+let DOCUMENT_SIGNATURES = new WeakMap();
 
 let fallbackAppSignature = "";
 let fallbackStoreSignature = "";
@@ -274,7 +297,10 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -438,6 +464,13 @@ function hasUsableTarget(target) {
    REDACTION / SANITIZE
 ========================================================= */
 
+function escapeRegExp(value = "") {
+  return String(value).replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
+  );
+}
+
 function redactSensitiveText(value = "") {
   let output = safeText(value, "");
 
@@ -448,7 +481,7 @@ function redactSensitiveText(value = "") {
   try {
     for (const name of SENSITIVE_QUERY_PARAM_NAMES) {
       const escaped =
-        String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        escapeRegExp(name);
 
       output = output.replace(
         new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
@@ -456,19 +489,21 @@ function redactSensitiveText(value = "") {
       );
     }
 
-    output = output.replace(
-      /(\/activate-account\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
-
-    output = output.replace(
-      /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
+    for (const routePath of TOKEN_ROUTE_PATHS) {
+      output = output.replace(
+        new RegExp(`(${escapeRegExp(routePath)}\\/)([^/?#\\s]+)`, "gi"),
+        "$1***"
+      );
+    }
 
     output = output.replace(
       /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
       "$1***"
+    );
+
+    output = output.replace(
+      /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
+      "$1$2***"
     );
 
     output = output.replace(
@@ -688,7 +723,7 @@ function sanitizePayload(value, depth = 0) {
 
     for (const [key, item] of Object.entries(value)) {
       if (
-        /token|secret|password|authorization|bearer|credential|jwt|otp|code/i.test(key)
+        /token|secret|password|authorization|bearer|credential|jwt|otp|code|session|refresh/i.test(key)
       ) {
         if (
           item === null ||
@@ -1009,6 +1044,8 @@ export function normalizeBootPhase(value = "") {
 
     init: BOOT_PHASES.PREPARING,
     initializing: BOOT_PHASES.PREPARING,
+    prepare: BOOT_PHASES.PREPARING,
+    preparing: BOOT_PHASES.PREPARING,
 
     service: BOOT_PHASES.SERVICES,
     services: BOOT_PHASES.SERVICES,
@@ -1016,10 +1053,13 @@ export function normalizeBootPhase(value = "") {
     store: BOOT_PHASES.STORE,
 
     lang: BOOT_PHASES.I18N,
+    language: BOOT_PHASES.I18N,
     i18n: BOOT_PHASES.I18N,
 
     ui: BOOT_PHASES.UI,
 
+    auth: BOOT_PHASES.RESTORING,
+    session: BOOT_PHASES.RESTORING,
     restore: BOOT_PHASES.RESTORING,
     restoring: BOOT_PHASES.RESTORING,
 
@@ -1036,6 +1076,7 @@ export function normalizeBootPhase(value = "") {
     completed: BOOT_PHASES.READY,
     done: BOOT_PHASES.READY,
     success: BOOT_PHASES.READY,
+    ready: BOOT_PHASES.READY,
 
     failure: BOOT_PHASES.ERROR,
     failed: BOOT_PHASES.ERROR,
@@ -1282,37 +1323,64 @@ function buildCommonBootTiming({
   const cleanPhase =
     normalizeBootPhase(phase) || BOOT_PHASES.IDLE;
 
+  const resetTiming =
+    input.resetTiming === true;
+
+  const previousTiming =
+    resetTiming
+      ? {}
+      : previous;
+
+  const booting =
+    isBootingPhase(cleanPhase);
+
+  const ready =
+    cleanPhase === BOOT_PHASES.READY;
+
+  const error =
+    cleanPhase === BOOT_PHASES.ERROR;
+
+  const fatal =
+    cleanPhase === BOOT_PHASES.FATAL;
+
   return {
     bootStartedAt:
       safeText(input.bootStartedAt, "") ||
       (
-        isBootingPhase(cleanPhase)
-          ? safeText(previous.bootStartedAt, "") || clock.iso
-          : safeText(previous.bootStartedAt, "")
+        booting
+          ? safeText(previousTiming.bootStartedAt, "") || clock.iso
+          : safeText(previousTiming.bootStartedAt, "")
       ),
 
+    /*
+      Limpieza estricta:
+      - readyAt sólo existe en fase READY.
+      - errorAt sólo existe en fase ERROR.
+      - fatalAt sólo existe en fase FATAL.
+      Evita fantasmas visuales tras reboot/error/ready.
+    */
     bootReadyAt:
       safeText(input.bootReadyAt, "") ||
       (
-        cleanPhase === BOOT_PHASES.READY
+        ready
           ? clock.iso
-          : safeText(previous.bootReadyAt, "")
+          : ""
       ),
 
     bootErrorAt:
       safeText(input.bootErrorAt, "") ||
       (
-        cleanPhase === BOOT_PHASES.ERROR
+        error
           ? clock.iso
-          : safeText(previous.bootErrorAt, "")
+          : ""
       ),
 
     bootFatalAt:
       safeText(input.bootFatalAt, "") ||
       (
-        cleanPhase === BOOT_PHASES.FATAL
+        fatal
           ? clock.iso
-          : safeText(previous.bootFatalAt, "")
+          : ""
       ),
   };
 }
@@ -2478,6 +2546,9 @@ export function markBootStart(AppCore, Store, options = {}) {
 
     phase: finalPhase,
 
+    error: null,
+    fatal: false,
+
     reason:
       safeText(
         input.reason,
@@ -2665,6 +2736,7 @@ export function markRebootState(AppCore, Store, options = {}) {
     lastBootError: null,
     error: null,
     fatal: false,
+    resetTiming: true,
 
     reason:
       safeText(
@@ -2763,6 +2835,10 @@ export function hasBootError(AppCore) {
 }
 
 export function resetBootStateSignatures() {
+  APP_SIGNATURES = new WeakMap();
+  STORE_SIGNATURES = new WeakMap();
+  DOCUMENT_SIGNATURES = new WeakMap();
+
   fallbackAppSignature = "";
   fallbackStoreSignature = "";
   fallbackDocumentSignature = "";

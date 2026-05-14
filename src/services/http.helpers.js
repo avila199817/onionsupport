@@ -3,7 +3,7 @@
    Archivo: src/services/http.helpers.js
 
    ONION SUPPORT · HTTP HELPERS
-   PURE HELPERS · RETRY SAFE · ERROR SAFE · TOKEN SAFE · 14/10
+   PURE HELPERS · RETRY SAFE · ERROR SAFE · TOKEN SAFE · 15/10
 
    Responsabilidades:
    - Config base del servicio HTTP.
@@ -23,7 +23,7 @@
    - Sin acceso obligatorio a window/document.
    - Sin exposición de tokens en logs/summaries/errors.
    - Compatibilidad con /api/auth y /auth.
-   - /api/auth/me NO es público.
+   - /api/auth/me, /auth/me, /api/me y /me NO son públicos.
    - Activation/reset tratados como públicos.
    - Retry solo seguro por defecto.
    - Retry unsafe solo si el caller lo pide.
@@ -32,6 +32,7 @@
    - Headers normalizados desde Object, Headers o arrays.
    - Error.raw no enumerable.
    - Snapshots y summaries redactados.
+   - Eventos HTTP low-level apagados por defecto desde config.
 ========================================================= */
 
 /* =========================================================
@@ -110,6 +111,42 @@ export const HTTP_CONFIG = Object.freeze({
 
   clientHeaderValue:
     "onion-spa",
+
+  emitLifecycleEvents:
+    false,
+
+  emitFinalEvents:
+    true,
+
+  emitReadyEvent:
+    true,
+
+  emitBridgeEvent:
+    false,
+
+  emitInterceptorEvents:
+    false,
+
+  emitInitSkippedEvents:
+    false,
+
+  emitRefreshEvents:
+    true,
+
+  emitReplayEvents:
+    true,
+
+  emitAutoLogoutEvents:
+    true,
+
+  emitRuntimeEvents:
+    false,
+
+  emitAuthRefreshEvents:
+    false,
+
+  emitRequestEngineEvents:
+    false,
 });
 
 /* =========================================================
@@ -117,7 +154,7 @@ export const HTTP_CONFIG = Object.freeze({
 ========================================================= */
 
 export const HTTP_HELPERS_VERSION =
-  "14.0.0";
+  "15.0.0";
 
 const DEFAULT_METHOD =
   "GET";
@@ -205,6 +242,14 @@ const SENSITIVE_HEADER_PARTS =
 
 const SENSITIVE_OBJECT_KEY_RE =
   /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
+
+const AUTH_ME_ENDPOINTS =
+  Object.freeze([
+    "/me",
+    "/api/me",
+    "/auth/me",
+    "/api/auth/me",
+  ]);
 
 const AUTH_ENDPOINT_MARKERS =
   Object.freeze([
@@ -869,6 +914,14 @@ export function sanitizeData(value, depth = 0, keyHint = "") {
     };
   }
 
+  if (typeof Headers !== "undefined") {
+    try {
+      if (value instanceof Headers) {
+        return sanitizeHeaders(value);
+      }
+    } catch {}
+  }
+
   if (value instanceof Error) {
     return {
       name:
@@ -973,6 +1026,7 @@ export function sanitizeRequestConfig(requestConfig = {}) {
 
   delete sanitized.rawToken;
   delete sanitized.authorization;
+  delete sanitized.Authorization;
 
   return sanitized;
 }
@@ -1068,29 +1122,27 @@ export function endpointMatches(path = "", markers = []) {
   });
 }
 
-export function isAuthEndpoint(path = "") {
-  return endpointMatches(
-    path,
-    AUTH_ENDPOINT_MARKERS
-  );
-}
-
 export function isAuthMeEndpoint(path = "") {
   const paths =
     getComparableEndpointPaths(path);
 
   return paths.some((candidate) =>
-    candidate === "/me" ||
-    candidate === "/auth/me" ||
-    candidate === "/api/auth/me" ||
+    AUTH_ME_ENDPOINTS.includes(candidate) ||
     candidate.endsWith("/auth/me")
   );
 }
 
+export function isAuthEndpoint(path = "") {
+  return Boolean(
+    isAuthMeEndpoint(path) ||
+      endpointMatches(
+        path,
+        AUTH_ENDPOINT_MARKERS
+      )
+  );
+}
+
 export function isPublicAuthEndpoint(path = "") {
-  /*
-    /api/auth/me queda explícitamente privado.
-  */
   if (isAuthMeEndpoint(path)) {
     return false;
   }
@@ -1133,6 +1185,10 @@ export function isTechnicalPublicSpaEndpoint(path = "") {
 }
 
 export function isPublicEndpoint(path = "") {
+  if (isAuthMeEndpoint(path)) {
+    return false;
+  }
+
   return (
     isPublicAuthEndpoint(path) ||
     isTechnicalPublicRoute(path)
@@ -1241,41 +1297,44 @@ export function createTimeoutSignal(ms = 0) {
   const controller =
     createAbortControllerSafe();
 
+  const timeoutState = {
+    controller,
+
+    signal:
+      controller?.signal || null,
+
+    timeoutId:
+      null,
+
+    fired:
+      false,
+
+    clear() {
+      if (this.timeoutId) {
+        try {
+          clearTimeout(this.timeoutId);
+        } catch {}
+      }
+
+      this.timeoutId =
+        null;
+    },
+  };
+
   if (!controller) {
-    return {
-      controller:
-        null,
-
-      signal:
-        null,
-
-      timeoutId:
-        null,
-
-      clear() {},
-    };
+    return timeoutState;
   }
 
   if (timeoutMs <= 0) {
-    return {
-      controller,
-
-      signal:
-        controller.signal,
-
-      timeoutId:
-        null,
-
-      clear() {},
-    };
+    return timeoutState;
   }
 
-  let timeoutId =
-    null;
-
   try {
-    timeoutId =
+    timeoutState.timeoutId =
       setTimeout(() => {
+        timeoutState.fired =
+          true;
+
         try {
           controller.abort("timeout");
         } catch {
@@ -1286,22 +1345,7 @@ export function createTimeoutSignal(ms = 0) {
       }, timeoutMs);
   } catch {}
 
-  return {
-    controller,
-
-    signal:
-      controller.signal,
-
-    timeoutId,
-
-    clear() {
-      if (timeoutId) {
-        try {
-          clearTimeout(timeoutId);
-        } catch {}
-      }
-    },
-  };
+  return timeoutState;
 }
 
 export function mergeSignals(signals = []) {
@@ -1313,6 +1357,15 @@ export function mergeSignals(signals = []) {
   if (!validSignals.length) {
     return null;
   }
+
+  try {
+    if (
+      typeof AbortSignal !== "undefined" &&
+      isFn(AbortSignal.any)
+    ) {
+      return AbortSignal.any(validSignals);
+    }
+  } catch {}
 
   if (validSignals.length === 1) {
     return validSignals[0];
@@ -1392,10 +1445,14 @@ export function isAbortError(error) {
   const message =
     safeLower(error?.message || "");
 
+  const code =
+    safeLower(error?.code || "");
+
   return (
     name === "AbortError" ||
-    error?.code === "ABORT_ERR" ||
-    error?.code === 20 ||
+    safeLower(name) === "aborterror" ||
+    code === "abort_err" ||
+    code === "20" ||
     error?.aborted === true ||
     message.includes("aborted") ||
     message.includes("abort")
@@ -1467,11 +1524,17 @@ export function isRetryableError(error, options = {}) {
     return false;
   }
 
-  if (isAbortError(error)) {
+  const timeout =
+    isTimeoutError(error);
+
+  if (
+    !timeout &&
+    isAbortError(error)
+  ) {
     return false;
   }
 
-  if (isTimeoutError(error)) {
+  if (timeout) {
     return true;
   }
 
@@ -1682,9 +1745,15 @@ export function shouldRetry(config, error, requestConfig = {}, attempt = 0) {
     return false;
   }
 
+  const timeout =
+    isTimeoutError(error);
+
   if (
-    error?.aborted === true ||
-    isAbortError(error)
+    !timeout &&
+    (
+      error?.aborted === true ||
+      isAbortError(error)
+    )
   ) {
     return false;
   }
@@ -1851,6 +1920,18 @@ export function normalizeError(error, requestConfig = null) {
   if (
     error?.name === "HttpErrorNormalized"
   ) {
+    const timeout =
+      error.timeout === true ||
+      isTimeoutError(error);
+
+    const aborted =
+      timeout
+        ? false
+        : (
+            error.aborted === true ||
+            isAbortError(error)
+          );
+
     const normalizedAgain = {
       ...error,
 
@@ -1877,6 +1958,10 @@ export function normalizeError(error, requestConfig = null) {
             requestConfig ||
             {}
         ),
+
+      aborted,
+
+      timeout,
 
       at:
         error.at || isoNow(),
@@ -1926,6 +2011,18 @@ export function normalizeError(error, requestConfig = null) {
   const headers =
     extractErrorHeaders(error);
 
+  const timeout =
+    error?.timeout === true ||
+    isTimeoutError(error);
+
+  const aborted =
+    timeout
+      ? false
+      : (
+          error?.aborted === true ||
+          isAbortError(error)
+        );
+
   const normalized = {
     name:
       "HttpErrorNormalized",
@@ -1963,11 +2060,9 @@ export function normalizeError(error, requestConfig = null) {
     requestConfig:
       sanitizedConfig,
 
-    aborted:
-      isAbortError(error),
+    aborted,
 
-    timeout:
-      isTimeoutError(error),
+    timeout,
 
     retryable:
       isRetryableError(error, {
@@ -2096,6 +2191,10 @@ function shouldDefaultPublic(path = "", options = {}) {
   const opts =
     safeObject(options);
 
+  if (isAuthMeEndpoint(path)) {
+    return false;
+  }
+
   return Boolean(
     opts.public === true ||
       opts.auth === false ||
@@ -2155,6 +2254,9 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
       opts
     );
 
+  const authMeEndpoint =
+    isAuthMeEndpoint(finalPath);
+
   const defaultTimeout =
     resolveDefaultTimeout(
       cfg,
@@ -2162,9 +2264,11 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
     );
 
   const defaultAuth =
-    publicEndpoint
-      ? false
-      : cfg.defaultAuth !== false;
+    authMeEndpoint
+      ? true
+      : publicEndpoint
+        ? false
+        : cfg.defaultAuth !== false;
 
   const defaultUseLoader =
     cfg.defaultUseLoader !== false;
@@ -2299,6 +2403,24 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
     _startedAt:
       0,
 
+    emitEvents:
+      true,
+
+    emitFinalEvents:
+      cfg.emitFinalEvents !== false,
+
+    emitLifecycleEvents:
+      cfg.emitLifecycleEvents === true,
+
+    emitRuntimeEvents:
+      cfg.emitRuntimeEvents === true,
+
+    emitAuthRefreshEvents:
+      cfg.emitAuthRefreshEvents === true,
+
+    emitRequestEngineEvents:
+      cfg.emitRequestEngineEvents === true,
+
     _skipRetry:
       false,
 
@@ -2320,19 +2442,34 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
     ...opts,
   };
 
-  const mergedPublic =
-    shouldDefaultPublic(
+  const mergedPath =
+    safeText(
       merged.path || finalPath,
-      merged
+      finalPath
     );
 
-  const mergedAuth =
-    merged.auth === false ||
-    merged.public === true ||
-    merged.skipAuth === true ||
-    mergedPublic
+  const mergedAuthMe =
+    isAuthMeEndpoint(mergedPath);
+
+  const mergedPublic =
+    mergedAuthMe
       ? false
-      : merged.auth ?? defaultAuth;
+      : shouldDefaultPublic(
+          mergedPath,
+          merged
+        );
+
+  const mergedAuth =
+    mergedAuthMe
+      ? merged.auth === false
+        ? false
+        : true
+      : merged.auth === false ||
+        merged.public === true ||
+        merged.skipAuth === true ||
+        mergedPublic
+          ? false
+          : merged.auth ?? defaultAuth;
 
   const headers =
     normalizeHeaders(
@@ -2348,10 +2485,7 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
       ),
 
     path:
-      safeText(
-        merged.path || finalPath,
-        finalPath
-      ),
+      mergedPath,
 
     apiBase:
       resolveApiBase(
@@ -2468,13 +2602,35 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
         0
       ),
 
+    emitEvents:
+      merged.emitEvents !== false,
+
+    emitFinalEvents:
+      merged.emitFinalEvents !== false,
+
+    emitLifecycleEvents:
+      merged.emitLifecycleEvents === true,
+
+    emitRuntimeEvents:
+      merged.emitRuntimeEvents === true,
+
+    emitAuthRefreshEvents:
+      merged.emitAuthRefreshEvents === true,
+
+    emitRequestEngineEvents:
+      merged.emitRequestEngineEvents === true,
+
     _skipRetry:
       merged._skipRetry === true,
 
     _skipAuthRefresh:
-      merged._skipAuthRefresh === true ||
-      mergedPublic ||
-      mergedAuth === false,
+      mergedAuthMe
+        ? merged._skipAuthRefresh === true
+        : (
+            merged._skipAuthRefresh === true ||
+            mergedPublic ||
+            mergedAuth === false
+          ),
 
     _authRefreshAttempted:
       merged._authRefreshAttempted === true,
@@ -2521,11 +2677,29 @@ export function getHttpHelpersSnapshot() {
 
         defaultResponseType:
           HTTP_CONFIG.defaultResponseType,
+
+        emitLifecycleEvents:
+          HTTP_CONFIG.emitLifecycleEvents,
+
+        emitFinalEvents:
+          HTTP_CONFIG.emitFinalEvents,
+
+        emitRuntimeEvents:
+          HTTP_CONFIG.emitRuntimeEvents,
+
+        emitAuthRefreshEvents:
+          HTTP_CONFIG.emitAuthRefreshEvents,
+
+        emitRequestEngineEvents:
+          HTTP_CONFIG.emitRequestEngineEvents,
       },
 
     endpointPolicy: {
       authMePrivate:
         true,
+
+      authMeEndpoints:
+        [...AUTH_ME_ENDPOINTS],
 
       authMarkers:
         AUTH_ENDPOINT_MARKERS.length,

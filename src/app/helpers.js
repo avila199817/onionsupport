@@ -36,6 +36,18 @@
    - Scrub detection por history.state.
    - No open-redirect.
    - Debug snapshot sin tokens reales.
+
+   EXTREME MODE:
+   - Canonicalización fuerte de aliases:
+       /activate, /activation, /account/activate, /activate/first-user
+         -> /activate-account
+       /password-reset/confirm, /reset-password-confirm, /password-reset-confirm
+         -> /reset-password/confirm
+   - publicPath conserva la URL real.
+   - canonicalPath usa path interno estable.
+   - Soporta /@usuario/activate-account?token=...
+   - Soporta /@usuario/reset-password/confirm/<token>
+   - Registro de módulos con aliases sin duplicados destructivos.
 ========================================================= */
 
 import {
@@ -50,7 +62,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const HELPERS_VERSION = "14.1.0";
+export const HELPERS_VERSION = "15.0.0-extreme-pro";
 
 const DEFAULT_ROUTE = "/";
 const DEFAULT_SCOPE = APP_SCOPE || "app";
@@ -65,6 +77,19 @@ const BOOT_CONTEXT_KEY =
 
 const ACTIVATION_PATH = "/activate-account";
 const RESET_CONFIRM_PATH = "/reset-password/confirm";
+
+const ACTIVATION_ALIASES = Object.freeze([
+  "/activate",
+  "/activation",
+  "/account/activate",
+  "/activate/first-user",
+]);
+
+const RESET_CONFIRM_ALIASES = Object.freeze([
+  "/reset-password-confirm",
+  "/password-reset/confirm",
+  "/password-reset-confirm",
+]);
 
 const ACTIVATION_TOKEN_PARAM_NAMES = Object.freeze([
   "token",
@@ -107,6 +132,10 @@ const GENERIC_TOKEN_PARAM_NAMES = Object.freeze(
         "two_factor_token",
         "mfaToken",
         "mfa_token",
+        "authorization",
+        "jwt",
+        "session",
+        "sid",
       ]
 );
 
@@ -114,13 +143,17 @@ const FALLBACK_PUBLIC_TOKEN_ROUTES = Object.freeze([
   Object.freeze({
     key: "activation",
     path: ACTIVATION_PATH,
+    aliases: ACTIVATION_ALIASES,
 
     windowKey:
       APP_RUNTIME_KEYS?.activateAccountInitialUrl ||
+      APP_RUNTIME_KEYS?.activationInitialUrl ||
       "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
 
     windowKeys: Object.freeze([
       APP_RUNTIME_KEYS?.activateAccountInitialUrl ||
+        "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+      APP_RUNTIME_KEYS?.activationInitialUrl ||
         "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
     ]),
 
@@ -164,6 +197,7 @@ const FALLBACK_PUBLIC_TOKEN_ROUTES = Object.freeze([
   Object.freeze({
     key: "resetConfirm",
     path: RESET_CONFIRM_PATH,
+    aliases: RESET_CONFIRM_ALIASES,
 
     windowKey:
       APP_RUNTIME_KEYS?.resetConfirmInitialUrl ||
@@ -267,7 +301,11 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return text || fallback;
 }
@@ -440,10 +478,10 @@ function normalizeHashRouterPath(value = "") {
   }
 
   if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/");
+    return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
   }
 
-  return raw.replace(/^#\/?/, "/");
+  return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
 }
 
 /* =========================================================
@@ -635,7 +673,7 @@ export function normalizePublicPath(first = DEFAULT_ROUTE, second = undefined) {
   /*
     publicPath conserva query/hash.
     No delegamos a normalizadores globales si hay query/hash:
-    algunos normalizadores legacy devuelven solo pathname y destruyen token.
+    algunos normalizadores legacy devuelven sólo pathname y destruyen token.
   */
   const hasSuffix =
     raw.includes("?") ||
@@ -743,12 +781,297 @@ export function stripUsernamePrefix(path = DEFAULT_ROUTE) {
   );
 }
 
-function fallbackNormalizeCanonicalPath(path = DEFAULT_ROUTE) {
-  const stripped =
-    stripUsernamePrefix(path);
+/* =========================================================
+   PROTECTED ROUTE CONFIG
+========================================================= */
+
+function getFallbackRouteByPath(path = "") {
+  const cleanPath =
+    normalizePathnameOnly(path || DEFAULT_ROUTE);
+
+  return (
+    FALLBACK_PUBLIC_TOKEN_ROUTES.find((item) => {
+      const paths = [
+        item.path,
+        ...safeArray(item.aliases),
+      ];
+
+      return paths.includes(cleanPath);
+    }) || null
+  );
+}
+
+function getFallbackRouteByKey(key = "") {
+  const cleanKey =
+    safeText(key, "");
+
+  return (
+    FALLBACK_PUBLIC_TOKEN_ROUTES.find((item) =>
+      item.key === cleanKey
+    ) || null
+  );
+}
+
+function normalizeRouteAliasList(path = "", aliases = []) {
+  return unique([
+    path,
+    ...safeArray(aliases),
+  ])
+    .map((item) =>
+      normalizePathnameOnly(item || DEFAULT_ROUTE)
+    )
+    .filter((item) =>
+      item &&
+      item !== DEFAULT_ROUTE
+    );
+}
+
+function normalizeProtectedRouteConfig(config = {}) {
+  const item =
+    safeObject(config);
+
+  const rawPath =
+    item.path ||
+    item.route ||
+    item.canonicalPath ||
+    DEFAULT_ROUTE;
+
+  const path =
+    normalizePathnameOnly(rawPath);
+
+  const key =
+    safeText(
+      item.key ||
+        item.name ||
+        path
+          .replace(/^\/+/, "")
+          .replace(/[/-]/g, "_"),
+      ""
+    );
+
+  const fallback =
+    getFallbackRouteByKey(key) ||
+    getFallbackRouteByPath(path) ||
+    {};
+
+  const defaultAliases =
+    key === "activation" || path === ACTIVATION_PATH
+      ? ACTIVATION_ALIASES
+      : key === "resetConfirm" || path === RESET_CONFIRM_PATH
+        ? RESET_CONFIRM_ALIASES
+        : [];
+
+  const aliases =
+    normalizeRouteAliasList(
+      path,
+      [
+        ...safeArray(fallback.aliases),
+        ...safeArray(item.aliases),
+        ...defaultAliases,
+      ]
+    ).filter((itemPath) =>
+      itemPath !== path
+    );
+
+  const windowKeys =
+    unique([
+      ...safeArray(fallback.windowKeys),
+      fallback.windowKey,
+      ...safeArray(item.windowKeys),
+      item.windowKey,
+      item.initialWindowKey,
+      item.runtimeKey,
+    ]);
+
+  const defaultTokenNames =
+    path === ACTIVATION_PATH || key === "activation"
+      ? ACTIVATION_TOKEN_PARAM_NAMES
+      : path === RESET_CONFIRM_PATH || key === "resetConfirm"
+        ? RESET_TOKEN_PARAM_NAMES
+        : [];
+
+  const tokenParamNames =
+    unique([
+      ...safeArray(fallback.tokenParamNames),
+      ...safeArray(item.tokenParamNames),
+      ...defaultTokenNames,
+    ]);
+
+  const scrubbedStateKeys =
+    unique([
+      ...safeArray(fallback.scrubbedStateKeys),
+      ...safeArray(item.scrubbedStateKeys),
+    ]);
+
+  const scrubbedHistoryKeys =
+    unique([
+      ...safeArray(fallback.scrubbedHistoryKeys),
+      ...safeArray(item.scrubbedHistoryKeys),
+    ]);
+
+  return Object.freeze({
+    ...fallback,
+    ...item,
+
+    key,
+    path,
+
+    aliases:
+      Object.freeze(aliases),
+
+    allPaths:
+      Object.freeze(
+        normalizeRouteAliasList(
+          path,
+          aliases
+        )
+      ),
+
+    windowKey:
+      windowKeys[0] || "",
+
+    windowKeys:
+      Object.freeze(windowKeys),
+
+    stateUrlKey:
+      item.stateUrlKey ||
+      fallback.stateUrlKey ||
+      "",
+
+    statePathKey:
+      item.statePathKey ||
+      fallback.statePathKey ||
+      "",
+
+    statePublicPathKey:
+      item.statePublicPathKey ||
+      fallback.statePublicPathKey ||
+      "",
+
+    stateIsRouteKey:
+      item.stateIsRouteKey ||
+      fallback.stateIsRouteKey ||
+      "",
+
+    stateHasTokenKey:
+      item.stateHasTokenKey ||
+      fallback.stateHasTokenKey ||
+      "",
+
+    scrubbedStateKeys:
+      Object.freeze(scrubbedStateKeys),
+
+    scrubbedHistoryKeys:
+      Object.freeze(scrubbedHistoryKeys),
+
+    tokenParamNames:
+      Object.freeze(tokenParamNames),
+  });
+}
+
+export const PROTECTED_PUBLIC_TOKEN_ROUTES =
+  Object.freeze(
+    (
+      Array.isArray(CONSTANT_PUBLIC_TOKEN_ROUTES) &&
+      CONSTANT_PUBLIC_TOKEN_ROUTES.length
+        ? CONSTANT_PUBLIC_TOKEN_ROUTES
+        : FALLBACK_PUBLIC_TOKEN_ROUTES
+    )
+      .map((config) =>
+        normalizeProtectedRouteConfig(config)
+      )
+      .filter((config) =>
+        config.path &&
+        config.path !== DEFAULT_ROUTE
+      )
+  );
+
+function getRoutePaths(config = null) {
+  return safeArray(config?.allPaths).length
+    ? safeArray(config.allPaths)
+    : normalizeRouteAliasList(
+        config?.path || "",
+        config?.aliases || []
+      );
+}
+
+function getCanonicalPathForProtectedConfig(config = null) {
+  return normalizePathnameOnly(
+    config?.path || DEFAULT_ROUTE
+  );
+}
+
+function getMatchedProtectedRoutePath(config = null, canonicalPath = "") {
+  const clean =
+    normalizePathnameOnly(canonicalPath || DEFAULT_ROUTE);
+
+  for (const routePath of getRoutePaths(config)) {
+    if (
+      clean === routePath ||
+      clean.startsWith(`${routePath}/`)
+    ) {
+      return routePath;
+    }
+  }
+
+  return "";
+}
+
+function canonicalizeProtectedAliasPath(path = DEFAULT_ROUTE) {
+  const publicPath =
+    fallbackNormalizePath(path);
 
   const pathname =
+    stripSearchAndHash(publicPath);
+
+  const suffix =
+    getSearchAndHash(publicPath);
+
+  const stripped =
+    stripUsernamePrefix(pathname);
+
+  const cleanCanonical =
     stripSearchAndHash(stripped);
+
+  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+    const matchedPath =
+      getMatchedProtectedRoutePath(
+        config,
+        cleanCanonical
+      );
+
+    if (!matchedPath) {
+      continue;
+    }
+
+    const targetPath =
+      getCanonicalPathForProtectedConfig(config);
+
+    if (matchedPath === targetPath) {
+      return fallbackNormalizePath(
+        `${cleanCanonical}${suffix}`
+      );
+    }
+
+    const rest =
+      cleanCanonical.slice(matchedPath.length);
+
+    return fallbackNormalizePath(
+      `${targetPath}${rest}${suffix}`
+    );
+  }
+
+  return fallbackNormalizePath(
+    `${cleanCanonical}${suffix}`
+  );
+}
+
+function fallbackNormalizeCanonicalPath(path = DEFAULT_ROUTE) {
+  const canonicalized =
+    canonicalizeProtectedAliasPath(path);
+
+  const pathname =
+    stripSearchAndHash(canonicalized);
 
   return normalizePathnameOnly(pathname);
 }
@@ -978,155 +1301,6 @@ export function normalizeInternalPathTarget(value = DEFAULT_ROUTE, fallback = DE
 }
 
 /* =========================================================
-   PROTECTED ROUTE CONFIG
-========================================================= */
-
-function getFallbackRouteByPath(path = "") {
-  const cleanPath =
-    normalizePathnameOnly(path || DEFAULT_ROUTE);
-
-  return (
-    FALLBACK_PUBLIC_TOKEN_ROUTES.find((item) =>
-      item.path === cleanPath
-    ) || null
-  );
-}
-
-function getFallbackRouteByKey(key = "") {
-  const cleanKey =
-    safeText(key, "");
-
-  return (
-    FALLBACK_PUBLIC_TOKEN_ROUTES.find((item) =>
-      item.key === cleanKey
-    ) || null
-  );
-}
-
-function normalizeProtectedRouteConfig(config = {}) {
-  const item =
-    safeObject(config);
-
-  const rawPath =
-    item.path ||
-    item.route ||
-    item.canonicalPath ||
-    DEFAULT_ROUTE;
-
-  const path =
-    normalizePathnameOnly(rawPath);
-
-  const key =
-    safeText(
-      item.key ||
-        item.name ||
-        path
-          .replace(/^\/+/, "")
-          .replace(/[/-]/g, "_"),
-      ""
-    );
-
-  const fallback =
-    getFallbackRouteByKey(key) ||
-    getFallbackRouteByPath(path) ||
-    {};
-
-  const windowKeys =
-    unique([
-      ...safeArray(fallback.windowKeys),
-      fallback.windowKey,
-      ...safeArray(item.windowKeys),
-      item.windowKey,
-      item.initialWindowKey,
-      item.runtimeKey,
-    ]);
-
-  const defaultTokenNames =
-    path === ACTIVATION_PATH || key === "activation"
-      ? ACTIVATION_TOKEN_PARAM_NAMES
-      : path === RESET_CONFIRM_PATH || key === "resetConfirm"
-        ? RESET_TOKEN_PARAM_NAMES
-        : [];
-
-  const tokenParamNames =
-    unique([
-      ...safeArray(fallback.tokenParamNames),
-      ...safeArray(item.tokenParamNames),
-      ...defaultTokenNames,
-    ]);
-
-  const scrubbedStateKeys =
-    unique([
-      ...safeArray(fallback.scrubbedStateKeys),
-      ...safeArray(fallback.scrubbedHistoryKeys),
-      ...safeArray(item.scrubbedStateKeys),
-      ...safeArray(item.scrubbedHistoryKeys),
-    ]);
-
-  return Object.freeze({
-    ...fallback,
-    ...item,
-
-    key,
-    path,
-
-    windowKey:
-      windowKeys[0] || "",
-
-    windowKeys:
-      Object.freeze(windowKeys),
-
-    stateUrlKey:
-      item.stateUrlKey ||
-      fallback.stateUrlKey ||
-      "",
-
-    statePathKey:
-      item.statePathKey ||
-      fallback.statePathKey ||
-      "",
-
-    statePublicPathKey:
-      item.statePublicPathKey ||
-      fallback.statePublicPathKey ||
-      "",
-
-    stateIsRouteKey:
-      item.stateIsRouteKey ||
-      fallback.stateIsRouteKey ||
-      "",
-
-    stateHasTokenKey:
-      item.stateHasTokenKey ||
-      fallback.stateHasTokenKey ||
-      "",
-
-    scrubbedStateKeys:
-      Object.freeze(scrubbedStateKeys),
-
-    tokenParamNames:
-      Object.freeze(tokenParamNames),
-  });
-}
-
-export const PROTECTED_PUBLIC_TOKEN_ROUTES =
-  Object.freeze(
-    (
-      Array.isArray(CONSTANT_PUBLIC_TOKEN_ROUTES) &&
-      CONSTANT_PUBLIC_TOKEN_ROUTES.length
-        ? CONSTANT_PUBLIC_TOKEN_ROUTES
-        : FALLBACK_PUBLIC_TOKEN_ROUTES
-    )
-      .map((config) =>
-        normalizeProtectedRouteConfig(config)
-      )
-      .filter((config) =>
-        config.path &&
-        config.path !== DEFAULT_ROUTE
-      )
-  );
-
-/* =========================================================
    TOKEN REDACTION
 ========================================================= */
 
@@ -1152,20 +1326,22 @@ export function redactTokenInText(value = "") {
   }
 
   for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
-    try {
-      const escapedPath =
-        String(config.path || "").replace(/\//g, "\\/");
+    for (const routePath of getRoutePaths(config)) {
+      try {
+        const escapedPath =
+          String(routePath || "").replace(/\//g, "\\/");
 
-      if (!escapedPath) {
-        continue;
-      }
+        if (!escapedPath) {
+          continue;
+        }
 
-      output =
-        output.replace(
-          new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
-          "$1/***"
-        );
-    } catch {}
+        output =
+          output.replace(
+            new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
+            "$1/***"
+          );
+      } catch {}
+    }
   }
 
   try {
@@ -1173,6 +1349,14 @@ export function redactTokenInText(value = "") {
       output.replace(
         /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
         "$1***"
+      );
+  } catch {}
+
+  try {
+    output =
+      output.replace(
+        /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
+        "$1$2***"
       );
   } catch {}
 
@@ -1200,11 +1384,15 @@ function matchesProtectedRoute(config, pathOrUrl = "") {
     pathFromUrlLike(pathOrUrl);
 
   const canonical =
-    fallbackNormalizeCanonicalPath(path);
+    stripSearchAndHash(
+      stripUsernamePrefix(path)
+    );
 
-  return (
-    canonical === config.path ||
-    canonical.startsWith(`${config.path}/`)
+  return Boolean(
+    getMatchedProtectedRoutePath(
+      config,
+      canonical
+    )
   );
 }
 
@@ -1228,15 +1416,27 @@ function extractPathToken(config, pathOrUrl = "") {
     pathFromUrlLike(pathOrUrl);
 
   const canonical =
-    fallbackNormalizeCanonicalPath(path);
+    stripSearchAndHash(
+      stripUsernamePrefix(path)
+    );
 
-  if (!canonical.startsWith(`${config.path}/`)) {
+  const matchedPath =
+    getMatchedProtectedRoutePath(
+      config,
+      canonical
+    );
+
+  if (!matchedPath) {
+    return "";
+  }
+
+  if (!canonical.startsWith(`${matchedPath}/`)) {
     return "";
   }
 
   const token =
     canonical
-      .slice(`${config.path}/`.length)
+      .slice(`${matchedPath}/`.length)
       .split("/")[0];
 
   try {
@@ -1650,6 +1850,26 @@ function isProtectedTokenScrubbed(config = null) {
       }
     }
 
+    for (const key of safeArray(config.scrubbedHistoryKeys)) {
+      if (historyState[key]) {
+        if (
+          key === "scrubbedPublicTokenRoute" ||
+          key === "scrubbedTokenRoute"
+        ) {
+          if (
+            historyState[key] === true ||
+            historyState[key] === config.key
+          ) {
+            return true;
+          }
+
+          continue;
+        }
+
+        return true;
+      }
+    }
+
     if (
       historyState.scrubbedPublicTokenRoute === true ||
       historyState.scrubbedTokenRoute === true ||
@@ -1724,6 +1944,9 @@ export function captureInitialUrl(AppCore = null) {
             true,
 
           [APP_STATE_KEYS?.bootHasPublicToken || "bootHasPublicToken"]:
+            true,
+
+          [APP_STATE_KEYS?.bootHasProtectedToken || "bootHasProtectedToken"]:
             true,
         };
 
@@ -1815,7 +2038,10 @@ function getStateProtectedUrlCandidates(AppCore) {
     bootContext.bootActivationInitialPublicPath,
     bootContext.bootResetConfirmInitialUrl,
     bootContext.bootResetConfirmInitialPath,
-    bootContext.bootResetConfirmInitialPublicPath
+    bootContext.bootResetConfirmInitialPublicPath,
+    bootContext.bootResetPasswordConfirmInitialUrl,
+    bootContext.bootResetPasswordConfirmInitialPath,
+    bootContext.bootResetPasswordConfirmInitialPublicPath
   );
 
   return values
@@ -2373,6 +2599,51 @@ export function clearScope(AppCore, scope = DEFAULT_SCOPE) {
    MODULES
 ========================================================= */
 
+function getRegisteredModule(AppCore, name = "") {
+  const cleanName =
+    safeText(name, "");
+
+  if (!cleanName) {
+    return null;
+  }
+
+  try {
+    if (isFunction(AppCore?.modules?.get)) {
+      const value =
+        AppCore.modules.get(cleanName);
+
+      if (value) {
+        return value;
+      }
+    }
+  } catch {}
+
+  try {
+    if (AppCore?.modules?.[cleanName]) {
+      return AppCore.modules[cleanName];
+    }
+  } catch {}
+
+  try {
+    if (AppCore?.registry?.modules?.get) {
+      const value =
+        AppCore.registry.modules.get(cleanName);
+
+      if (value) {
+        return value;
+      }
+    }
+  } catch {}
+
+  try {
+    if (AppCore?.[cleanName]) {
+      return AppCore[cleanName];
+    }
+  } catch {}
+
+  return null;
+}
+
 export function registerModule(AppCore, name, moduleRef, aliases = []) {
   const moduleName =
     safeText(name, "");
@@ -2416,6 +2687,20 @@ export function registerModule(AppCore, name, moduleRef, aliases = []) {
   }
 
   for (const currentName of names) {
+    const already =
+      getRegisteredModule(
+        AppCore,
+        currentName
+      );
+
+    if (
+      already &&
+      Object.is(already, moduleRef)
+    ) {
+      anyRegistered = true;
+      continue;
+    }
+
     let registered = false;
 
     try {
@@ -2425,8 +2710,10 @@ export function registerModule(AppCore, name, moduleRef, aliases = []) {
           moduleRef,
           {
             replace:
-              true,
+              false,
             overwrite:
+              false,
+            idempotent:
               true,
             source:
               "app:helpers",
@@ -2445,8 +2732,10 @@ export function registerModule(AppCore, name, moduleRef, aliases = []) {
             moduleRef,
             {
               replace:
-                true,
+                false,
               overwrite:
+                false,
+              idempotent:
                 true,
               source:
                 "app:helpers",
@@ -2460,7 +2749,10 @@ export function registerModule(AppCore, name, moduleRef, aliases = []) {
 
     if (!registered) {
       try {
-        if (canExtend(modules)) {
+        if (
+          canExtend(modules) &&
+          !modules[currentName]
+        ) {
           modules[currentName] =
             moduleRef;
 
@@ -2473,7 +2765,8 @@ export function registerModule(AppCore, name, moduleRef, aliases = []) {
       try {
         if (
           AppCore?.registry?.modules &&
-          isFunction(AppCore.registry.modules.set)
+          isFunction(AppCore.registry.modules.set) &&
+          !AppCore.registry.modules.get?.(currentName)
         ) {
           AppCore.registry.modules.set(
             currentName,
@@ -2562,6 +2855,12 @@ function getInitialUrlSnapshot() {
 
         path:
           config.path,
+
+        aliases:
+          [...safeArray(config.aliases)],
+
+        allPaths:
+          [...getRoutePaths(config)],
 
         windowKeys:
           [...safeArray(config.windowKeys)],

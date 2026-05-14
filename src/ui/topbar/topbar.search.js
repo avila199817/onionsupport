@@ -2773,6 +2773,9 @@ export async function runSearch({
   const seq = runtime.searchSeq;
 
   if (!q || q.length < TOPBAR_SEARCH_CONFIG.minQueryLength) {
+    // Si la query queda por debajo del mínimo, cancelamos cualquier request
+    // en vuelo para evitar respuestas tardías y carreras visuales.
+    abortSearch(runtime);
     hideResultsContainer(runtime, getDom);
     return;
   }

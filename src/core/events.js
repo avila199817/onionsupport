@@ -3,7 +3,7 @@
    Archivo: src/core/events.js
 
    ONION SUPPORT · CORE EVENTS
-   FINAL PRO SYSTEM · EVENT BUS / FIREBREAK SAFE · 14/10
+   FINAL PRO SYSTEM · EVENT BUS / FIREBREAK SAFE · 15/10
 
    Responsabilidades:
    - centralizar el event bus del Core
@@ -29,6 +29,8 @@
    - redacción defensiva de tokens/secrets en snapshots
    - captura errores async de handlers con .catch()
    - soporte wildcard "*" en memoria para diagnóstico
+   - firebreak HTTP/noisy events sin llenar consola
+   - throttling global de warnings incluso con buses duplicados
    - alias snapshot/getSnapshot/getDebugSnapshot
 ========================================================= */
 
@@ -42,7 +44,7 @@ import {
 ========================================================= */
 
 const EVENTS_VERSION =
-  "14.0.0";
+  "15.0.0";
 
 const DEFAULT_TARGET =
   "document";
@@ -51,7 +53,7 @@ const WILDCARD_EVENT =
   "*";
 
 const MAX_RECENT_EVENTS =
-  96;
+  120;
 
 const MAX_SYNC_EMIT_DEPTH =
   12;
@@ -66,10 +68,10 @@ const MAX_EMITS_PER_EVENT_PER_WINDOW =
   180;
 
 const MAX_LOW_PRIORITY_EMITS_PER_WINDOW =
-  1800;
+  1200;
 
 const MAX_LOW_PRIORITY_EMITS_PER_EVENT_PER_WINDOW =
-  360;
+  240;
 
 const MAX_CRITICAL_EMITS_PER_WINDOW =
   2500;
@@ -81,10 +83,16 @@ const MAX_ABSOLUTE_EMITS_PER_WINDOW =
   5000;
 
 const DROP_WARNING_INTERVAL_MS =
-  1200;
+  1600;
+
+const DROP_WARNING_PER_EVENT_INTERVAL_MS =
+  7000;
 
 const NOISY_RECENT_SAMPLE_MS =
-  160;
+  220;
+
+const GLOBAL_DROP_GUARD_KEY =
+  "__ONION_CORE_EVENTS_DROP_GUARD__";
 
 const CRITICAL_EVENT_NAMES =
   new Set([
@@ -97,6 +105,7 @@ const CRITICAL_EVENT_NAMES =
     "app:core:init:start",
     "app:core:ready",
     "app:core:init:error",
+    "app:core:reboot",
 
     "app:state:change",
     "app:state:patched",
@@ -120,9 +129,6 @@ const CRITICAL_EVENT_NAMES =
     "app:lang:change",
     "app:theme:change",
 
-    "app:module:registered",
-    "app:module:replaced",
-
     "router:before-render",
     "router:rendered",
     "router:render:async-complete",
@@ -138,6 +144,7 @@ const CRITICAL_EVENT_NAMES =
     "auth:restore:error",
 
     "app:request:error",
+    "http:request:error",
   ]);
 
 const CRITICAL_EVENT_PREFIXES =
@@ -155,14 +162,21 @@ const LOW_PRIORITY_EVENT_PREFIXES =
     "toast:",
     "tooltip:",
     "loader:",
+
     "app:user-ui:",
+    "app:ui:",
     "app:ui:module:",
     "app:ui:toast-bridge:",
     "app:boot:loader:",
-    "app:request:start",
-    "app:request:success",
-    "app:request:retry",
-    "app:request:deduped",
+
+    "app:module:",
+    "app:http:",
+    "app:request:",
+
+    "http:",
+    "network:",
+    "app:network:",
+    "core:network:",
   ]);
 
 const LOW_PRIORITY_EVENT_NAMES =
@@ -173,6 +187,28 @@ const LOW_PRIORITY_EVENT_NAMES =
     "app:ui:init:start",
     "app:ui:init:success",
     "app:ui:init:error",
+
+    "app:module:registered",
+    "app:module:replaced",
+    "app:module:duplicate",
+
+    "http:request:start",
+    "http:request:attempt",
+    "http:request:success",
+    "http:request:error",
+    "http:request:retry",
+    "http:request:deduped",
+    "http:request:complete",
+    "http:pending:change",
+
+    "app:request:start",
+    "app:request:attempt",
+    "app:request:success",
+    "app:request:error",
+    "app:request:retry",
+    "app:request:deduped",
+    "app:request:complete",
+    "app:pending:change",
   ]);
 
 const SILENT_DROP_PREFIXES =
@@ -182,6 +218,24 @@ const SILENT_DROP_PREFIXES =
     "sidebar:visual:",
     "topbar:visual:",
     "tooltip:position:",
+
+    "http:request:",
+    "http:pending:",
+    "app:request:",
+    "app:pending:",
+  ]);
+
+const SILENT_DROP_NAMES =
+  new Set([
+    "app:module:duplicate",
+
+    "http:request:start",
+    "http:request:attempt",
+    "http:pending:change",
+
+    "app:request:start",
+    "app:request:attempt",
+    "app:pending:change",
   ]);
 
 const SENSITIVE_KEY_RE =
@@ -207,6 +261,83 @@ function localIsBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
+}
+
+function getGlobalObject() {
+  try {
+    if (typeof globalThis !== "undefined") {
+      return globalThis;
+    }
+  } catch {}
+
+  try {
+    if (typeof window !== "undefined") {
+      return window;
+    }
+  } catch {}
+
+  return null;
+}
+
+function getGlobalDropGuard() {
+  const root =
+    getGlobalObject();
+
+  if (!root) {
+    return {
+      lastWarningAt:
+        0,
+
+      lastByKey:
+        new Map(),
+
+      suppressed:
+        0,
+    };
+  }
+
+  try {
+    if (!root[GLOBAL_DROP_GUARD_KEY]) {
+      Object.defineProperty(
+        root,
+        GLOBAL_DROP_GUARD_KEY,
+        {
+          value: {
+            lastWarningAt:
+              0,
+
+            lastByKey:
+              new Map(),
+
+            suppressed:
+              0,
+          },
+
+          configurable:
+            true,
+
+          enumerable:
+            false,
+
+          writable:
+            true,
+        }
+      );
+    }
+
+    return root[GLOBAL_DROP_GUARD_KEY];
+  } catch {}
+
+  return {
+    lastWarningAt:
+      0,
+
+    lastByKey:
+      new Map(),
+
+    suppressed:
+      0,
+  };
 }
 
 function isFunction(value) {
@@ -364,13 +495,20 @@ function normalizeDomOptions(options = false) {
     return false;
   }
 
-  return {
+  const finalOptions = {
     capture:
       Boolean(normalized.capture),
 
     passive:
       Boolean(normalized.passive),
   };
+
+  if (normalized.signal) {
+    finalOptions.signal =
+      normalized.signal;
+  }
+
+  return finalOptions;
 }
 
 function wantsOnce(options = false) {
@@ -572,9 +710,15 @@ function isLowPriorityEvent(name = "") {
 }
 
 function isSilentDropEvent(name = "") {
-  return startsWithAny(
-    normalizeEventName(name),
-    SILENT_DROP_PREFIXES
+  const eventName =
+    normalizeEventName(name);
+
+  return Boolean(
+    SILENT_DROP_NAMES.has(eventName) ||
+    startsWithAny(
+      eventName,
+      SILENT_DROP_PREFIXES
+    )
   );
 }
 
@@ -656,7 +800,7 @@ function normalizeOptionsForKey(options = false) {
     normalizeDomOptions(options);
 
   if (normalized === true) {
-    return "capture:true|passive:false";
+    return "capture:true|passive:false|signal:false";
   }
 
   if (
@@ -664,13 +808,14 @@ function normalizeOptionsForKey(options = false) {
     normalized === null ||
     normalized === undefined
   ) {
-    return "capture:false|passive:false";
+    return "capture:false|passive:false|signal:false";
   }
 
   if (isObject(normalized)) {
     return [
       `capture:${Boolean(normalized.capture)}`,
       `passive:${Boolean(normalized.passive)}`,
+      `signal:${Boolean(normalized.signal)}`,
     ].join("|");
   }
 
@@ -897,6 +1042,9 @@ export function createEvents({
   const recentSampleMap =
     new Map();
 
+  const dropRateMap =
+    new Map();
+
   let rateWindowStartedAt =
     safeNow();
 
@@ -949,6 +1097,9 @@ export function createEvents({
       0,
 
     dropCount:
+      0,
+
+    silentDropCount:
       0,
 
     wildcardEmitCount:
@@ -1104,15 +1255,104 @@ export function createEvents({
     );
   }
 
+  function shouldWarnDrop(name = "", reason = "") {
+    const eventName =
+      normalizeEventName(name);
+
+    if (isSilentDropEvent(eventName)) {
+      state.silentDropCount += 1;
+      return false;
+    }
+
+    const guard =
+      getGlobalDropGuard();
+
+    const current =
+      safeNow();
+
+    const key =
+      `${eventName}:${safeText(reason, "")}`;
+
+    const lastByKey =
+      safeNumber(
+        guard.lastByKey?.get?.(key),
+        0
+      );
+
+    if (
+      current - lastByKey <
+      DROP_WARNING_PER_EVENT_INTERVAL_MS
+    ) {
+      guard.suppressed =
+        safeNumber(
+          guard.suppressed,
+          0
+        ) + 1;
+
+      return false;
+    }
+
+    const localLast =
+      safeNumber(
+        lastDropWarningAt,
+        0
+      );
+
+    const globalLast =
+      safeNumber(
+        guard.lastWarningAt,
+        0
+      );
+
+    if (
+      current - localLast < DROP_WARNING_INTERVAL_MS ||
+      current - globalLast < DROP_WARNING_INTERVAL_MS
+    ) {
+      guard.suppressed =
+        safeNumber(
+          guard.suppressed,
+          0
+        ) + 1;
+
+      return false;
+    }
+
+    lastDropWarningAt =
+      current;
+
+    guard.lastWarningAt =
+      current;
+
+    try {
+      guard.lastByKey.set(
+        key,
+        current
+      );
+    } catch {}
+
+    return true;
+  }
+
   function recordDrop(name = "", reason = "", detail = {}) {
+    const eventName =
+      normalizeEventName(name);
+
     state.dropCount += 1;
+
+    const dropKey =
+      `${eventName}:${safeText(reason, "")}`;
+
+    dropRateMap.set(
+      dropKey,
+      safeNumber(
+        dropRateMap.get(dropKey),
+        0
+      ) + 1
+    );
 
     state.lastDroppedEvent = {
       name:
-        safeText(
-          name,
-          ""
-        ),
+        eventName,
 
       reason:
         safeText(
@@ -1121,7 +1361,7 @@ export function createEvents({
         ),
 
       className:
-        getEventClass(name),
+        getEventClass(eventName),
 
       at:
         safeIsoDate(),
@@ -1129,38 +1369,27 @@ export function createEvents({
 
     pushRecentEvent(
       "drop",
-      name,
+      eventName,
       mergePreviewWithReason(
         reason,
         detail
       )
     );
 
-    const current =
-      safeNow();
-
-    if (
-      isSilentDropEvent(name) &&
-      current - lastDropWarningAt < DROP_WARNING_INTERVAL_MS * 4
-    ) {
+    if (!shouldWarnDrop(eventName, reason)) {
       return;
     }
 
-    if (current - lastDropWarningAt > DROP_WARNING_INTERVAL_MS) {
-      lastDropWarningAt =
-        current;
-
-      safeWarn(
-        `Evento bloqueado por firebreak: ${name}`,
-        {
-          reason,
-          className:
-            getEventClass(name),
-          detail:
-            safePreview(detail),
-        }
-      );
-    }
+    safeWarn(
+      `Evento bloqueado por firebreak: ${eventName}`,
+      {
+        reason,
+        className:
+          getEventClass(eventName),
+        detail:
+          safePreview(detail),
+      }
+    );
   }
 
   function resetRateWindowIfNeeded() {
@@ -1197,6 +1426,7 @@ export function createEvents({
 
     eventRateMap.clear();
     recentSampleMap.clear();
+    dropRateMap.clear();
   }
 
   function shouldAllowEmit(eventName = "", options = {}) {
@@ -1832,18 +2062,6 @@ export function createEvents({
     return true;
   }
 
-  function removeActiveRecord(record) {
-    if (!record?.key) {
-      return false;
-    }
-
-    activeListeners.delete(
-      record.key
-    );
-
-    return true;
-  }
-
   function on(name, handler, options = false) {
     const eventName =
       normalizeEventName(name);
@@ -2429,6 +2647,9 @@ export function createEvents({
   }
 
   function getSnapshot() {
+    const globalGuard =
+      getGlobalDropGuard();
+
     return {
       version:
         state.version,
@@ -2460,6 +2681,9 @@ export function createEvents({
       dropCount:
         state.dropCount,
 
+      silentDropCount:
+        state.silentDropCount,
+
       wildcardEmitCount:
         state.wildcardEmitCount,
 
@@ -2488,6 +2712,25 @@ export function createEvents({
 
       eventNames:
         names(),
+
+      globalDropGuard: {
+        suppressed:
+          safeNumber(
+            globalGuard.suppressed,
+            0
+          ),
+
+        lastWarningAt:
+          safeNumber(
+            globalGuard.lastWarningAt,
+            0
+          ),
+
+        lastWarningAtIso:
+          globalGuard.lastWarningAt
+            ? safeIsoDate(globalGuard.lastWarningAt)
+            : "",
+      },
 
       firebreaks: {
         maxSyncEmitDepth,
@@ -2520,6 +2763,11 @@ export function createEvents({
         currentEventRates:
           Object.fromEntries(
             eventRateMap.entries()
+          ),
+
+        currentDropRates:
+          Object.fromEntries(
+            dropRateMap.entries()
           ),
 
         currentEmitDepth:
@@ -2569,6 +2817,7 @@ export function createEvents({
     emitDepthByName.clear();
     eventRateMap.clear();
     recentSampleMap.clear();
+    dropRateMap.clear();
 
     rateWindowStartedAt =
       safeNow();
@@ -2607,6 +2856,9 @@ export function createEvents({
       0;
 
     state.dropCount =
+      0;
+
+    state.silentDropCount =
       0;
 
     state.wildcardEmitCount =

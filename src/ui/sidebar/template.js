@@ -2,7 +2,7 @@
    Onion SPA - Sidebar Template
    Archivo: src/ui/sidebar/template.js
 
-   ONION SUPPORT · SIDEBAR TEMPLATE · 15/10
+   ONION SUPPORT · SIDEBAR TEMPLATE · EXTREME 10/10
    I18N · A11Y · DOM SAFE · DROPDOWN SAFE · ROUTE SAFE
 
    Responsabilidades:
@@ -103,38 +103,7 @@ import {
 ========================================================= */
 
 export const SIDEBAR_TEMPLATE_VERSION =
-  "sidebar-template-v15-extreme-dom-contract";
-
-/* =========================================================
-   I18N
-========================================================= */
-
-function t(key, fallback = "", params = {}) {
-  const cleanKey =
-    safeText(key, "");
-
-  const cleanFallback =
-    safeText(fallback, cleanKey);
-
-  if (!cleanKey) {
-    return cleanFallback;
-  }
-
-  try {
-    if (typeof I18n?.t === "function") {
-      return (
-        I18n.t(
-          cleanKey,
-          params,
-          cleanFallback
-        ) ||
-        cleanFallback
-      );
-    }
-  } catch {}
-
-  return cleanFallback;
-}
+  "sidebar-template-v16-extreme-dom-contract";
 
 /* =========================================================
    SAFE TEXT / HTML
@@ -155,6 +124,22 @@ function safeText(value, fallback = "") {
       .trim();
 
   return text || fallback;
+}
+
+function safeObject(value, fallback = {}) {
+  return (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  )
+    ? value
+    : fallback;
+}
+
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 function escapeHtml(value = "") {
@@ -180,8 +165,7 @@ function normalizeKey(value = "") {
 }
 
 function booleanAttr(name = "", enabled = false) {
-  const cleanName =
-    safeText(name, "");
+  const cleanName = safeText(name, "");
 
   if (!cleanName || !enabled) {
     return "";
@@ -191,10 +175,13 @@ function booleanAttr(name = "", enabled = false) {
 }
 
 function attr(name = "", value = "") {
-  const cleanName =
-    safeText(name, "");
+  const cleanName = safeText(name, "");
 
   if (!cleanName) {
+    return "";
+  }
+
+  if (!/^[A-Za-z_:][A-Za-z0-9_:.-]*$/.test(cleanName)) {
     return "";
   }
 
@@ -208,11 +195,157 @@ function attr(name = "", value = "") {
   return ` ${cleanName}="${escapeAttr(value)}"`;
 }
 
-function dataAttr(name = "", value = "") {
-  return attr(
-    name,
-    value
+/* =========================================================
+   LOCAL CONTRACT FALLBACKS
+========================================================= */
+
+const I18N_KEYS =
+  safeObject(SIDEBAR_I18N_KEYS);
+
+const RAW_ROUTES =
+  safeObject(SIDEBAR_ROUTES);
+
+const ROUTE_ALIASES =
+  Object.freeze({
+    ...safeObject(SIDEBAR_ROUTE_ALIASES),
+  });
+
+const ACTIONS =
+  Object.freeze({
+    navigate:
+      safeText(SIDEBAR_ACTION_NAVIGATE, "navigate"),
+
+    toggle:
+      safeText(SIDEBAR_ACTION_TOGGLE, "toggle-sidebar"),
+
+    toggleUser:
+      safeText(SIDEBAR_ACTION_TOGGLE_USER, "toggle-user-dropdown"),
+
+    addAccount:
+      safeText(SIDEBAR_ACTION_ADD_ACCOUNT, "add-account"),
+
+    changePlan:
+      safeText(SIDEBAR_ACTION_CHANGE_PLAN, "change-plan"),
+
+    profile:
+      safeText(SIDEBAR_ACTION_PROFILE, "profile"),
+
+    settings:
+      safeText(SIDEBAR_ACTION_SETTINGS, "settings"),
+
+    help:
+      safeText(SIDEBAR_ACTION_HELP, "help"),
+
+    logout:
+      safeText(SIDEBAR_ACTION_LOGOUT, "logout"),
+  });
+
+const IDS =
+  Object.freeze({
+    root:
+      safeText(SIDEBAR_ROOT_ID, "app-sidebar"),
+
+    mount:
+      safeText(SIDEBAR_MOUNT_ID, "sidebar-mount"),
+
+    nav:
+      safeText(SIDEBAR_NAV_ID, "sidebar-nav"),
+
+    menu:
+      safeText(SIDEBAR_MENU_ID, "sidebar-menu"),
+
+    recents:
+      safeText(SIDEBAR_RECENTS_ID, "sidebar-recents"),
+
+    footer:
+      safeText(SIDEBAR_FOOTER_ID, "sidebar-footer"),
+
+    indicator:
+      safeText(SIDEBAR_INDICATOR_ID, "sidebar-active-indicator"),
+
+    toggle:
+      safeText(SIDEBAR_TOGGLE_ID, "toggleSidebar"),
+
+    mobileToggle:
+      safeText(SIDEBAR_MOBILE_TOGGLE_ID, "toggleSidebarMobile"),
+
+    logo:
+      safeText(SIDEBAR_LOGO_ID, "sidebar-logo"),
+
+    userSection:
+      safeText(USER_SECTION_ID, "sidebar-user-section"),
+
+    userToggle:
+      safeText(USER_TOGGLE_ID, "userToggle"),
+
+    userDropdown:
+      safeText(USER_DROPDOWN_ID, "userDropdown"),
+
+    logout:
+      safeText(LOGOUT_BUTTON_ID, "logout-btn"),
+
+    avatar:
+      safeText(SIDEBAR_AVATAR_ID, "sidebarAvatar"),
+
+    avatarImage:
+      safeText(SIDEBAR_AVATAR_IMAGE_ID, "sidebarAvatarImage"),
+
+    avatarFallback:
+      safeText(SIDEBAR_AVATAR_FALLBACK_ID, "sidebarAvatarFallback"),
+
+    name:
+      safeText(SIDEBAR_NAME_ID, "sidebarName"),
+
+    plan:
+      safeText(SIDEBAR_USER_PLAN_ID, "sidebarUserPlan"),
+
+    server:
+      safeText(SERVER_NAV_ID, "server-nav"),
+  });
+
+function i18nKey(name = "", fallback = "") {
+  return safeText(
+    I18N_KEYS[name],
+    fallback
   );
+}
+
+/* =========================================================
+   I18N
+========================================================= */
+
+function t(key, fallback = "", params = {}) {
+  const cleanKey = safeText(key, "");
+  const cleanFallback = safeText(fallback, cleanKey);
+
+  if (!cleanKey) {
+    return cleanFallback;
+  }
+
+  try {
+    if (typeof I18n?.t === "function") {
+      const attempts = [
+        () => I18n.t(cleanKey, params, cleanFallback),
+        () => I18n.t(cleanKey, cleanFallback, params),
+        () => I18n.t(cleanKey),
+      ];
+
+      for (const attempt of attempts) {
+        try {
+          const value = safeText(attempt(), "");
+
+          if (
+            value &&
+            value !== cleanKey
+          ) {
+            return value;
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+
+  return cleanFallback;
 }
 
 /* =========================================================
@@ -220,53 +353,120 @@ function dataAttr(name = "", value = "") {
 ========================================================= */
 
 function isUnsafeHref(value = "") {
-  const raw =
-    safeText(value, "")
-      .toLowerCase();
+  const raw = safeText(value, "");
+  const lower = raw.toLowerCase();
 
   return Boolean(
-    raw.startsWith("javascript:") ||
-      raw.startsWith("data:") ||
-      raw.startsWith("vbscript:") ||
-      raw.startsWith("file:") ||
-      raw.startsWith("mailto:") ||
-      raw.startsWith("tel:")
+    !raw ||
+      /[\r\n\t\\]/.test(raw) ||
+      lower.startsWith("//") ||
+      lower.startsWith("javascript:") ||
+      lower.startsWith("data:") ||
+      lower.startsWith("vbscript:") ||
+      lower.startsWith("file:") ||
+      lower.startsWith("mailto:") ||
+      lower.startsWith("tel:") ||
+      /^[a-z][a-z\d+.-]*:\/\//i.test(raw)
   );
 }
 
-function splitRoute(value = "/") {
-  const raw =
-    safeText(value, "/");
+function normalizePathnameOnly(pathname = "/") {
+  let value =
+    safeText(pathname, "/")
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
 
-  let pathname =
-    raw;
-
-  let search =
-    "";
-
-  let hash =
-    "";
-
-  const hashIndex =
-    pathname.indexOf("#");
-
-  if (hashIndex >= 0) {
-    hash =
-      pathname.slice(hashIndex);
-
-    pathname =
-      pathname.slice(0, hashIndex) || "/";
+  if (!value) {
+    value = "/";
   }
 
-  const searchIndex =
-    pathname.indexOf("?");
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  const segments = [];
+
+  for (const rawSegment of value.split("/").filter(Boolean)) {
+    let segment = rawSegment;
+
+    try {
+      segment = decodeURIComponent(rawSegment);
+    } catch {}
+
+    if (
+      segment === "." ||
+      segment === ""
+    ) {
+      continue;
+    }
+
+    if (segment === "..") {
+      segments.pop();
+      continue;
+    }
+
+    segments.push(rawSegment);
+  }
+
+  value = `/${segments.join("/")}`;
+
+  if (!value) {
+    value = "/";
+  }
+
+  if (
+    value.length > 1 &&
+    value.endsWith("/")
+  ) {
+    value = value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
+}
+
+function normalizeSearch(search = "") {
+  const value = safeText(search, "");
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value = safeText(hash, "");
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
+}
+
+function splitRoute(value = "/") {
+  const raw = safeText(value, "/");
+
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || "/";
+  }
+
+  const searchIndex = pathname.indexOf("?");
 
   if (searchIndex >= 0) {
-    search =
-      pathname.slice(searchIndex);
-
-    pathname =
-      pathname.slice(0, searchIndex) || "/";
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || "/";
   }
 
   return {
@@ -280,72 +480,184 @@ function normalizeRoute(value = "/", {
   preserveSearch = false,
   preserveHash = false,
 } = {}) {
-  let text =
-    safeText(value, "/");
+  let text = safeText(value, "/");
 
   if (!text || isUnsafeHref(text)) {
     return "/";
   }
 
-  if (/^[a-z][a-z\d+.-]*:\/\//i.test(text)) {
-    return "/";
-  }
-
   if (text.startsWith("#/")) {
-    text =
-      text.replace(/^#\/?/, "/");
+    text = text.replace(/^#\/?/, "/");
   } else if (text.startsWith("#!")) {
-    text =
-      text.replace(/^#!\/?/, "/");
+    text = text.replace(/^#!\/?/, "/");
   } else if (text.startsWith("#")) {
     return "/";
   }
 
-  text =
-    text
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
-
   if (!text.startsWith("/")) {
-    text =
-      `/${text}`;
+    text = `/${text}`;
   }
 
-  const parts =
-    splitRoute(text);
+  const parts = splitRoute(text);
 
-  let pathname =
-    parts.pathname || "/";
-
-  if (
-    pathname.length > 1 &&
-    pathname.endsWith("/")
-  ) {
-    pathname =
-      pathname.replace(/\/+$/g, "") || "/";
-  }
+  const pathname =
+    normalizePathnameOnly(parts.pathname || "/");
 
   const aliased =
-    SIDEBAR_ROUTE_ALIASES[pathname] ||
+    ROUTE_ALIASES[pathname] ||
     pathname;
 
   return `${aliased}${
-    preserveSearch ? parts.search : ""
+    preserveSearch ? normalizeSearch(parts.search) : ""
   }${
-    preserveHash ? parts.hash : ""
+    preserveHash ? normalizeHash(parts.hash) : ""
   }`;
 }
 
 function canonicalRoute(value = "/") {
-  return normalizeRoute(
-    value,
+  return normalizeRoute(value, {
+    preserveSearch: false,
+    preserveHash: false,
+  });
+}
+
+const ROUTES =
+  Object.freeze({
+    home:
+      canonicalRoute(RAW_ROUTES.home || "/"),
+
+    tickets:
+      canonicalRoute(RAW_ROUTES.tickets || RAW_ROUTES.incidencias || "/incidencias"),
+
+    invoices:
+      canonicalRoute(RAW_ROUTES.invoices || RAW_ROUTES.facturas || "/facturas"),
+
+    users:
+      canonicalRoute(RAW_ROUTES.users || RAW_ROUTES.usuarios || "/usuarios"),
+
+    clients:
+      canonicalRoute(RAW_ROUTES.clients || RAW_ROUTES.clientes || "/clientes"),
+
+    account:
+      canonicalRoute(RAW_ROUTES.account || RAW_ROUTES.profile || "/cuenta"),
+
+    settings:
+      canonicalRoute(RAW_ROUTES.settings || RAW_ROUTES.configuracion || "/configuracion"),
+
+    server:
+      canonicalRoute(RAW_ROUTES.server || RAW_ROUTES.servidor || "/servidor"),
+  });
+
+function getDefaultNavItems() {
+  return [
     {
-      preserveSearch:
-        false,
-      preserveHash:
-        false,
-    }
-  );
+      key: "home",
+      route: ROUTES.home,
+      icon: "home",
+      i18nKey: "sidebar.nav.home",
+      labelFallback: "Inicio",
+      order: 10,
+    },
+    {
+      key: "tickets",
+      route: ROUTES.tickets,
+      icon: "tickets",
+      i18nKey: "sidebar.nav.tickets",
+      labelFallback: "Incidencias",
+      order: 20,
+    },
+    {
+      key: "invoices",
+      route: ROUTES.invoices,
+      icon: "invoices",
+      i18nKey: "sidebar.nav.invoices",
+      labelFallback: "Facturas",
+      order: 30,
+    },
+    {
+      key: "clients",
+      route: ROUTES.clients,
+      icon: "clients",
+      i18nKey: "sidebar.nav.clients",
+      labelFallback: "Clientes",
+      order: 40,
+      adminOnly: true,
+      requiredRole: "admin",
+    },
+    {
+      key: "users",
+      route: ROUTES.users,
+      icon: "users",
+      i18nKey: "sidebar.nav.users",
+      labelFallback: "Usuarios",
+      order: 50,
+      adminOnly: true,
+      requiredRole: "admin",
+    },
+    {
+      key: "server",
+      route: ROUTES.server,
+      icon: "server",
+      i18nKey: "sidebar.nav.server",
+      labelFallback: "Servidor",
+      order: 60,
+      adminOnly: true,
+      requiredRole: "admin",
+    },
+  ];
+}
+
+function getNavItems() {
+  const source =
+    Array.isArray(SIDEBAR_NAV_ITEMS) &&
+    SIDEBAR_NAV_ITEMS.length
+      ? SIDEBAR_NAV_ITEMS
+      : getDefaultNavItems();
+
+  const seen = new Set();
+
+  return source
+    .map((item) => {
+      const sourceItem = safeObject(item);
+
+      const route =
+        canonicalRoute(
+          sourceItem.route ||
+            sourceItem.path ||
+            sourceItem.href ||
+            ROUTES.home
+        );
+
+      const key =
+        normalizeKey(
+          sourceItem.key ||
+            sourceItem.id ||
+            route
+        );
+
+      return {
+        ...sourceItem,
+        key,
+        route,
+        order:
+          Number.isFinite(Number(sourceItem.order))
+            ? Number(sourceItem.order)
+            : 999,
+      };
+    })
+    .filter((item) => {
+      if (
+        !item.key ||
+        !item.route ||
+        seen.has(item.route)
+      ) {
+        return false;
+      }
+
+      seen.add(item.route);
+      return true;
+    })
+    .sort((a, b) => a.order - b.order);
 }
 
 /* =========================================================
@@ -427,38 +739,12 @@ const Icons = Object.freeze({
 
   server: `
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" focusable="false" aria-hidden="true">
-              <rect
-                x="4"
-                y="5"
-                width="16"
-                height="5"
-                rx="1.5"
-                stroke="currentColor"
-                stroke-width="1.6"
-              />
-              <rect
-                x="4"
-                y="14"
-                width="16"
-                height="5"
-                rx="1.5"
-                stroke="currentColor"
-                stroke-width="1.6"
-              />
-              <circle cx="8" cy="7.5" r="1" fill="currentColor" />
-              <circle cx="8" cy="16.5" r="1" fill="currentColor" />
-              <path
-                d="M11 7.5h5"
-                stroke="currentColor"
-                stroke-width="1.4"
-                stroke-linecap="round"
-              />
-              <path
-                d="M11 16.5h5"
-                stroke="currentColor"
-                stroke-width="1.4"
-                stroke-linecap="round"
-              />
+              <rect x="4" y="5" width="16" height="5" rx="1.5" stroke="currentColor" stroke-width="1.6"/>
+              <rect x="4" y="14" width="16" height="5" rx="1.5" stroke="currentColor" stroke-width="1.6"/>
+              <circle cx="8" cy="7.5" r="1" fill="currentColor"/>
+              <circle cx="8" cy="16.5" r="1" fill="currentColor"/>
+              <path d="M11 7.5h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              <path d="M11 16.5h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
             </svg>
   `,
 
@@ -544,124 +830,120 @@ const Icons = Object.freeze({
 ========================================================= */
 
 function getSidebarLabels(overrides = {}) {
-  const source =
-    overrides &&
-    typeof overrides === "object"
-      ? overrides
-      : {};
+  const source = safeObject(overrides);
 
   const labels = {
     sidebarAria:
       t(
-        SIDEBAR_I18N_KEYS.ariaMain,
+        i18nKey("ariaMain", "sidebar.aria.main"),
         "Barra lateral principal"
       ),
 
     navAria:
       t(
-        SIDEBAR_I18N_KEYS.ariaNavigation,
+        i18nKey("ariaNavigation", "sidebar.aria.navigation"),
         "Navegación principal"
       ),
 
     logoLink:
       t(
-        SIDEBAR_I18N_KEYS.logoAriaLabel,
+        i18nKey("logoAriaLabel", "sidebar.logo.ariaLabel"),
         "Ir al inicio"
       ),
 
     logoAlt:
       t(
-        SIDEBAR_I18N_KEYS.logoAlt,
+        i18nKey("logoAlt", "sidebar.logo.alt"),
         "Onion Support"
       ),
 
     collapseSidebar:
       t(
-        SIDEBAR_I18N_KEYS.toggleCollapse,
+        i18nKey("toggleCollapse", "sidebar.toggle.collapse"),
         "Contraer barra lateral"
       ),
 
     expandSidebar:
       t(
-        SIDEBAR_I18N_KEYS.toggleExpand,
+        i18nKey("toggleExpand", "sidebar.toggle.expand"),
         "Expandir barra lateral"
       ),
 
     recentsAria:
       t(
-        SIDEBAR_I18N_KEYS.recentsAriaLabel,
+        i18nKey("recentsAriaLabel", "sidebar.recents.ariaLabel"),
         "Recientes"
       ),
 
     recentsTitle:
       t(
-        SIDEBAR_I18N_KEYS.recentsTitle,
+        i18nKey("recentsTitle", "sidebar.recents.title"),
         "Recientes"
       ),
 
     userToggle:
       t(
-        SIDEBAR_I18N_KEYS.userToggleAriaLabel,
+        i18nKey("userToggleAriaLabel", "sidebar.user.toggle"),
         "Abrir menú de usuario"
       ),
 
     userAvatar:
       t(
-        SIDEBAR_I18N_KEYS.userAvatarAriaLabel,
+        i18nKey("userAvatarAriaLabel", "sidebar.user.avatar"),
         "Avatar usuario"
       ),
 
     userDefaultName:
       t(
-        SIDEBAR_I18N_KEYS.userDefaultName,
+        i18nKey("userDefaultName", "sidebar.user.defaultName"),
         "Usuario"
       ),
 
     userPlan:
       t(
-        SIDEBAR_I18N_KEYS.userPlan,
+        i18nKey("userPlan", "sidebar.user.plan"),
         "Go Plan"
       ),
 
     userMenu:
       t(
-        SIDEBAR_I18N_KEYS.userDropdownAriaLabel,
+        i18nKey("userDropdownAriaLabel", "sidebar.user.menu"),
         "Menú de usuario"
       ),
 
     addAccount:
       t(
-        SIDEBAR_I18N_KEYS.userAddAccount,
+        i18nKey("userAddAccount", "sidebar.user.addAccount"),
         "Añadir cuenta"
       ),
 
     changePlan:
       t(
-        SIDEBAR_I18N_KEYS.userChangePlan,
+        i18nKey("userChangePlan", "sidebar.user.changePlan"),
         "Cambiar plan"
       ),
 
     profile:
       t(
-        SIDEBAR_I18N_KEYS.userProfile,
+        i18nKey("userProfile", "sidebar.user.profile"),
         "Perfil"
       ),
 
     userSettings:
       t(
-        SIDEBAR_I18N_KEYS.userSettings,
+        i18nKey("userSettings", "sidebar.user.settings"),
         "Configuración"
       ),
 
     help:
       t(
-        SIDEBAR_I18N_KEYS.userHelp,
+        i18nKey("userHelp", "sidebar.user.help"),
         "Ayuda"
       ),
 
     logout:
       t(
-        SIDEBAR_I18N_KEYS.userLogout,
+        i18nKey("userLogout", "sidebar.user.logout"),
         "Cerrar sesión"
       ),
   };
@@ -674,8 +956,8 @@ function getSidebarLabels(overrides = {}) {
 
 function getMenuLabel(item = {}) {
   return t(
-    item.i18nKey,
-    item.labelFallback || item.key || ""
+    item.i18nKey || `sidebar.nav.${item.key}`,
+    item.labelFallback || item.label || item.key || ""
   );
 }
 
@@ -685,20 +967,28 @@ function getMenuLabel(item = {}) {
 
 function renderRoleVisibilityAttrs(item = {}) {
   const adminOnly =
-    item.adminOnly === true;
+    item.adminOnly === true ||
+    item.admin === true ||
+    item.requiresAdmin === true;
 
   const requiredRole =
     adminOnly
       ? safeText(
-          item.requiredRole,
+          item.requiredRole ||
+            item.role ||
+            "admin",
           "admin"
         )
       : "";
 
   const requiredRoles =
-    Array.isArray(item.requiredRoles)
-      ? item.requiredRoles.join(",")
-      : requiredRole;
+    adminOnly
+      ? (
+          Array.isArray(item.requiredRoles)
+            ? item.requiredRoles.join(",")
+            : requiredRole
+        )
+      : "";
 
   if (!adminOnly) {
     return `
@@ -714,6 +1004,7 @@ function renderRoleVisibilityAttrs(item = {}) {
           data-role-visible="true"
           data-admin-visible="true"
           data-hidden-default="false"
+          data-role-hidden="false"
         `;
   }
 
@@ -730,6 +1021,7 @@ function renderRoleVisibilityAttrs(item = {}) {
           data-role-visible="false"
           data-admin-visible="false"
           data-hidden-default="true"
+          data-role-hidden="true"
           aria-hidden="true"
           tabindex="-1"
           hidden
@@ -740,18 +1032,17 @@ function renderRoleVisibilityAttrs(item = {}) {
    MENU ITEM
 ========================================================= */
 
-function renderMenuItem(item = {}) {
+function renderMenuItem(item = {}, index = 0) {
   const route =
     canonicalRoute(
-      item.route || SIDEBAR_ROUTES.home
+      item.route || ROUTES.home
     );
 
-  const label =
-    getMenuLabel(item);
+  const label = getMenuLabel(item);
 
   const i18nKey =
     safeText(
-      item.i18nKey,
+      item.i18nKey || `sidebar.nav.${item.key}`,
       ""
     );
 
@@ -769,29 +1060,29 @@ function renderMenuItem(item = {}) {
     Icons.home;
 
   const isServer =
-    route === SIDEBAR_ROUTES.server ||
+    route === ROUTES.server ||
     item.key === "server";
 
-  const cleanRoute =
-    escapeAttr(route);
+  const cleanRoute = escapeAttr(route);
+  const cleanLabel = escapeAttr(label);
+  const cleanI18nKey = escapeAttr(i18nKey);
+  const cleanRouteKey = escapeAttr(routeKey);
 
-  const cleanLabel =
-    escapeAttr(label);
+  const adminOnly =
+    item.adminOnly === true ||
+    item.admin === true ||
+    item.requiresAdmin === true;
 
-  const cleanI18nKey =
-    escapeAttr(i18nKey);
-
-  const cleanRouteKey =
-    escapeAttr(routeKey);
-
-  const itemClass =
-    item.adminOnly
-      ? "menu-item is-role-hidden is-admin-hidden"
-      : "menu-item";
+  const itemClass = [
+    "menu-item",
+    adminOnly ? "is-role-hidden is-admin-hidden" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return `
         <a
-          ${isServer ? `id="${SERVER_NAV_ID}"` : ""}
+          ${isServer ? `id="${IDS.server}"` : ""}
           href="${cleanRoute}"
           class="${itemClass}"
           data-spa="true"
@@ -809,9 +1100,10 @@ function renderMenuItem(item = {}) {
           data-nav-key="${cleanRouteKey}"
           data-route-key="${cleanRouteKey}"
           data-menu-key="${cleanRouteKey}"
-          data-action="${SIDEBAR_ACTION_NAVIGATE}"
-          data-sidebar-action="${SIDEBAR_ACTION_NAVIGATE}"
-          data-nav-action="${SIDEBAR_ACTION_NAVIGATE}"
+          data-menu-index="${Number(index) || 0}"
+          data-action="${ACTIONS.navigate}"
+          data-sidebar-action="${ACTIONS.navigate}"
+          data-nav-action="${ACTIONS.navigate}"
           data-active="false"
           data-current="false"
           data-selected="false"
@@ -850,35 +1142,25 @@ function renderDropdownButton({
   danger = false,
   disabled = false,
 } = {}) {
-  const cleanId =
-    safeText(id, "");
+  const cleanId = safeText(id, "");
+  const cleanLabel = escapeHtml(label);
+  const cleanLabelAttr = escapeAttr(label);
+  const cleanI18nKey = escapeAttr(i18nKey);
 
-  const cleanLabel =
-    escapeHtml(label);
-
-  const cleanLabelAttr =
-    escapeAttr(label);
-
-  const cleanI18nKey =
-    escapeAttr(i18nKey);
-
-  const cleanDropdownAction =
-    escapeAttr(
-      action || "dropdown-action"
-    );
+  const dropdownAction =
+    safeText(action || "dropdown-action", "dropdown-action");
 
   const normalizedRoute =
     route
       ? canonicalRoute(route)
       : "";
 
-  const cleanRoute =
-    escapeAttr(normalizedRoute);
+  const cleanRoute = escapeAttr(normalizedRoute);
 
   const primaryAction =
     normalizedRoute
-      ? SIDEBAR_ACTION_NAVIGATE
-      : cleanDropdownAction;
+      ? ACTIONS.navigate
+      : dropdownAction;
 
   return `
           <button
@@ -887,7 +1169,7 @@ function renderDropdownButton({
             class="dropdown-item${danger ? " dropdown-item-danger" : ""}"
             role="menuitem"
             data-dropdown-item="true"
-            data-dropdown-action="${cleanDropdownAction}"
+            data-dropdown-action="${escapeAttr(dropdownAction)}"
             data-sidebar-action="${escapeAttr(primaryAction)}"
             data-action="${escapeAttr(primaryAction)}"
             ${cleanRoute ? `data-route="${cleanRoute}" data-href="${cleanRoute}" data-to="${cleanRoute}" data-public-path="${cleanRoute}" data-canonical-path="${cleanRoute}" data-sidebar-route="${cleanRoute}"` : ""}
@@ -915,12 +1197,11 @@ ${icon}
 ========================================================= */
 
 function renderLogo(labels) {
-  const route =
-    SIDEBAR_ROUTES.home;
+  const route = ROUTES.home;
 
   return `
         <a
-          id="${SIDEBAR_LOGO_ID}"
+          id="${IDS.logo}"
           href="${route}"
           class="logo"
           data-spa="true"
@@ -930,17 +1211,17 @@ function renderLogo(labels) {
           data-public-path="${route}"
           data-canonical-path="${route}"
           data-sidebar-logo="true"
-          data-sidebar-action="${SIDEBAR_ACTION_NAVIGATE}"
-          data-action="${SIDEBAR_ACTION_NAVIGATE}"
+          data-sidebar-action="${ACTIONS.navigate}"
+          data-action="${ACTIONS.navigate}"
           aria-label="${escapeAttr(labels.logoLink)}"
-          data-i18n-aria-label="${SIDEBAR_I18N_KEYS.logoAriaLabel}"
+          data-i18n-aria-label="${escapeAttr(i18nKey("logoAriaLabel", "sidebar.logo.ariaLabel"))}"
         >
           <img
             class="logo-dark"
             draggable="false"
             src="/src/media/img/favicon_white.png"
             alt="${escapeAttr(labels.logoAlt)}"
-            data-i18n-alt="${SIDEBAR_I18N_KEYS.logoAlt}"
+            data-i18n-alt="${escapeAttr(i18nKey("logoAlt", "sidebar.logo.alt"))}"
             width="36"
             height="36"
             decoding="async"
@@ -952,7 +1233,7 @@ function renderLogo(labels) {
             draggable="false"
             src="/src/media/img/favicon_black.png"
             alt="${escapeAttr(labels.logoAlt)}"
-            data-i18n-alt="${SIDEBAR_I18N_KEYS.logoAlt}"
+            data-i18n-alt="${escapeAttr(i18nKey("logoAlt", "sidebar.logo.alt"))}"
             width="36"
             height="36"
             decoding="async"
@@ -979,24 +1260,24 @@ function renderDesktopToggle(labels, {
       ? labels.expandSidebar
       : labels.collapseSidebar;
 
-  const i18nKey =
+  const i18nKeyValue =
     collapsed
-      ? SIDEBAR_I18N_KEYS.toggleExpand
-      : SIDEBAR_I18N_KEYS.toggleCollapse;
+      ? i18nKey("toggleExpand", "sidebar.toggle.expand")
+      : i18nKey("toggleCollapse", "sidebar.toggle.collapse");
 
   return `
         <button
-          id="${SIDEBAR_TOGGLE_ID}"
+          id="${IDS.toggle}"
           type="button"
           class="sidebar-toggle"
           data-sidebar-toggle="true"
-          data-sidebar-action="${SIDEBAR_ACTION_TOGGLE}"
-          data-action="${SIDEBAR_ACTION_TOGGLE}"
+          data-sidebar-action="${ACTIONS.toggle}"
+          data-action="${ACTIONS.toggle}"
           data-tooltip="${escapeAttr(tooltip)}"
-          data-i18n-data-tooltip="${i18nKey}"
+          data-i18n-data-tooltip="${escapeAttr(i18nKeyValue)}"
           aria-label="${escapeAttr(tooltip)}"
-          data-i18n-aria-label="${i18nKey}"
-          aria-controls="${SIDEBAR_ROOT_ID} ${SIDEBAR_MENU_ID}"
+          data-i18n-aria-label="${escapeAttr(i18nKeyValue)}"
+          aria-controls="${IDS.root} ${IDS.menu}"
           aria-expanded="${expanded}"
           data-state="${state}"
         >
@@ -1004,25 +1285,20 @@ ${Icons.desktopToggle}
         </button>`;
 }
 
-function renderMainMenu() {
-  const items =
-    SIDEBAR_NAV_ITEMS
-      .slice()
-      .sort((a, b) =>
-        Number(a.order || 0) - Number(b.order || 0)
-      );
+function renderMainMenu(labels) {
+  const items = getNavItems();
 
   return `
       <nav
-        id="${SIDEBAR_NAV_ID}"
+        id="${IDS.nav}"
         class="sidebar-nav"
         data-sidebar-nav-id="true"
         data-sidebar-nav-root="true"
-        aria-label="${escapeAttr(t(SIDEBAR_I18N_KEYS.ariaNavigation, "Navegación principal"))}"
-        data-i18n-aria-label="${SIDEBAR_I18N_KEYS.ariaNavigation}"
+        aria-label="${escapeAttr(labels.navAria)}"
+        data-i18n-aria-label="${escapeAttr(i18nKey("ariaNavigation", "sidebar.aria.navigation"))}"
       >
         <div
-          id="${SIDEBAR_MENU_ID}"
+          id="${IDS.menu}"
           class="sidebar-menu"
           data-sidebar-menu="true"
           data-nav-area="sidebar"
@@ -1034,7 +1310,7 @@ function renderMainMenu() {
           data-indicator-reason="initial"
         >
           <span
-            id="${SIDEBAR_INDICATOR_ID}"
+            id="${IDS.indicator}"
             class="sidebar-active-indicator"
             aria-hidden="true"
             data-sidebar-indicator="true"
@@ -1042,7 +1318,7 @@ function renderMainMenu() {
             data-state="idle"
           ></span>
 
-${items.map((item) => renderMenuItem(item)).join("\n")}
+${items.map((item, index) => renderMenuItem(item, index)).join("\n")}
         </div>
       </nav>`;
 }
@@ -1050,16 +1326,16 @@ ${items.map((item) => renderMenuItem(item)).join("\n")}
 function renderRecents(labels) {
   return `
       <section
-        id="${SIDEBAR_RECENTS_ID}"
+        id="${IDS.recents}"
         class="sidebar-section"
         aria-label="${escapeAttr(labels.recentsAria)}"
-        data-i18n-aria-label="${SIDEBAR_I18N_KEYS.recentsAriaLabel}"
+        data-i18n-aria-label="${escapeAttr(i18nKey("recentsAriaLabel", "sidebar.recents.ariaLabel"))}"
         data-sidebar-recents="true"
         data-sidebar-recent="true"
       >
         <span
           class="section-title"
-          data-i18n="${SIDEBAR_I18N_KEYS.recentsTitle}"
+          data-i18n="${escapeAttr(i18nKey("recentsTitle", "sidebar.recents.title"))}"
         >${escapeHtml(labels.recentsTitle)}</span>
       </section>`;
 }
@@ -1067,30 +1343,31 @@ function renderRecents(labels) {
 function renderUserToggle(labels) {
   return `
         <button
-          id="${USER_TOGGLE_ID}"
+          id="${IDS.userToggle}"
           type="button"
           class="user"
           data-user-toggle="true"
           data-user-menu-toggle="true"
           data-sidebar-user-toggle="true"
           data-dropdown-toggle="user"
-          data-dropdown-target="${USER_DROPDOWN_ID}"
-          data-sidebar-action="${SIDEBAR_ACTION_TOGGLE_USER}"
-          data-action="${SIDEBAR_ACTION_TOGGLE_USER}"
+          data-dropdown-target="${IDS.userDropdown}"
+          data-sidebar-action="${ACTIONS.toggleUser}"
+          data-action="${ACTIONS.toggleUser}"
           aria-haspopup="menu"
           aria-expanded="false"
-          aria-controls="${USER_DROPDOWN_ID}"
+          aria-controls="${IDS.userDropdown}"
           aria-label="${escapeAttr(labels.userToggle)}"
-          data-i18n-aria-label="${SIDEBAR_I18N_KEYS.userToggleAriaLabel}"
+          data-i18n-aria-label="${escapeAttr(i18nKey("userToggleAriaLabel", "sidebar.user.toggle"))}"
           data-state="closed"
           data-dropdown-open="false"
           data-authenticated="false"
         >
           <span
-            id="${SIDEBAR_AVATAR_ID}"
+            id="${IDS.avatar}"
             class="avatar"
+            role="img"
             aria-label="${escapeAttr(labels.userAvatar)}"
-            data-i18n-aria-label="${SIDEBAR_I18N_KEYS.userAvatarAriaLabel}"
+            data-i18n-aria-label="${escapeAttr(i18nKey("userAvatarAriaLabel", "sidebar.user.avatar"))}"
             data-default-avatar="ON"
             data-avatar-root="true"
             data-sidebar-avatar="true"
@@ -1100,7 +1377,7 @@ function renderUserToggle(labels) {
             data-authenticated="false"
           >
             <img
-              id="${SIDEBAR_AVATAR_IMAGE_ID}"
+              id="${IDS.avatarImage}"
               class="avatar-image"
               alt=""
               draggable="false"
@@ -1113,30 +1390,31 @@ function renderUserToggle(labels) {
             >
 
             <span
-              id="${SIDEBAR_AVATAR_FALLBACK_ID}"
+              id="${IDS.avatarFallback}"
               class="avatar-fallback"
               data-avatar-fallback="true"
-              aria-hidden="false"
+              aria-hidden="true"
             >ON</span>
           </span>
 
           <span class="user-info">
             <span
-              id="${SIDEBAR_NAME_ID}"
+              id="${IDS.name}"
               class="name"
               data-sidebar-name="true"
               data-user-name="true"
-              data-default-i18n="${SIDEBAR_I18N_KEYS.userDefaultName}"
+              data-default-i18n="${escapeAttr(i18nKey("userDefaultName", "sidebar.user.defaultName"))}"
               data-default-name="${escapeAttr(labels.userDefaultName)}"
               data-authenticated="false"
+              aria-live="polite"
             >${escapeHtml(labels.userDefaultName)}</span>
 
             <span
-              id="${SIDEBAR_USER_PLAN_ID}"
+              id="${IDS.plan}"
               class="plan"
               data-sidebar-user-plan="true"
               data-static="true"
-              data-i18n="${SIDEBAR_I18N_KEYS.userPlan}"
+              data-i18n="${escapeAttr(i18nKey("userPlan", "sidebar.user.plan"))}"
             >${escapeHtml(labels.userPlan)}</span>
           </span>
 
@@ -1147,11 +1425,11 @@ ${Icons.chevron}
 function renderUserDropdown(labels) {
   return `
         <div
-          id="${USER_DROPDOWN_ID}"
+          id="${IDS.userDropdown}"
           class="user-dropdown"
           role="menu"
           aria-label="${escapeAttr(labels.userMenu)}"
-          data-i18n-aria-label="${SIDEBAR_I18N_KEYS.userDropdownAriaLabel}"
+          data-i18n-aria-label="${escapeAttr(i18nKey("userDropdownAriaLabel", "sidebar.user.menu"))}"
           data-user-dropdown="true"
           data-user-menu="true"
           data-sidebar-user-dropdown="true"
@@ -1167,8 +1445,8 @@ function renderUserDropdown(labels) {
         >
 ${renderDropdownButton({
   label: labels.addAccount,
-  i18nKey: SIDEBAR_I18N_KEYS.userAddAccount,
-  action: SIDEBAR_ACTION_ADD_ACCOUNT,
+  i18nKey: i18nKey("userAddAccount", "sidebar.user.addAccount"),
+  action: ACTIONS.addAccount,
   icon: Icons.plus,
 })}
 
@@ -1176,24 +1454,24 @@ ${renderDropdownButton({
 
 ${renderDropdownButton({
   label: labels.changePlan,
-  i18nKey: SIDEBAR_I18N_KEYS.userChangePlan,
-  action: SIDEBAR_ACTION_CHANGE_PLAN,
+  i18nKey: i18nKey("userChangePlan", "sidebar.user.changePlan"),
+  action: ACTIONS.changePlan,
   icon: Icons.upgrade,
 })}
 
 ${renderDropdownButton({
   label: labels.profile,
-  i18nKey: SIDEBAR_I18N_KEYS.userProfile,
-  action: SIDEBAR_ACTION_PROFILE,
-  route: SIDEBAR_ROUTES.account,
+  i18nKey: i18nKey("userProfile", "sidebar.user.profile"),
+  action: ACTIONS.profile,
+  route: ROUTES.account,
   icon: Icons.account,
 })}
 
 ${renderDropdownButton({
   label: labels.userSettings,
-  i18nKey: SIDEBAR_I18N_KEYS.userSettings,
-  action: SIDEBAR_ACTION_SETTINGS,
-  route: SIDEBAR_ROUTES.settings,
+  i18nKey: i18nKey("userSettings", "sidebar.user.settings"),
+  action: ACTIONS.settings,
+  route: ROUTES.settings,
   icon: Icons.settings,
 })}
 
@@ -1201,16 +1479,16 @@ ${renderDropdownButton({
 
 ${renderDropdownButton({
   label: labels.help,
-  i18nKey: SIDEBAR_I18N_KEYS.userHelp,
-  action: SIDEBAR_ACTION_HELP,
+  i18nKey: i18nKey("userHelp", "sidebar.user.help"),
+  action: ACTIONS.help,
   icon: Icons.help,
 })}
 
 ${renderDropdownButton({
-  id: LOGOUT_BUTTON_ID,
+  id: IDS.logout,
   label: labels.logout,
-  i18nKey: SIDEBAR_I18N_KEYS.userLogout,
-  action: SIDEBAR_ACTION_LOGOUT,
+  i18nKey: i18nKey("userLogout", "sidebar.user.logout"),
+  action: ACTIONS.logout,
   icon: Icons.logout,
   danger: true,
 })}
@@ -1220,7 +1498,7 @@ ${renderDropdownButton({
 function renderFooter(labels) {
   return `
       <footer
-        id="${SIDEBAR_FOOTER_ID}"
+        id="${IDS.footer}"
         class="sidebar-footer"
         data-sidebar-footer="true"
         data-sidebar-user-section="true"
@@ -1228,7 +1506,7 @@ function renderFooter(labels) {
         data-user-dropdown-open="false"
       >
         <div
-          id="${USER_SECTION_ID}"
+          id="${IDS.userSection}"
           class="sidebar-user"
           data-sidebar-user-section="true"
         >
@@ -1248,8 +1526,7 @@ function resolveInitialUiState(options = {}) {
     options?.collapsed === true ||
     options?.desktopCollapsed === true;
 
-  const open =
-    !collapsed;
+  const open = !collapsed;
 
   return {
     collapsed,
@@ -1271,16 +1548,10 @@ function resolveInitialUiState(options = {}) {
 ========================================================= */
 
 export function getSidebarTemplate(options = {}) {
-  const opts =
-    options &&
-    typeof options === "object"
-      ? options
-      : {};
+  const opts = safeObject(options);
 
   const labels =
-    getSidebarLabels(
-      opts.labels
-    );
+    getSidebarLabels(opts.labels);
 
   const ui =
     resolveInitialUiState(opts);
@@ -1294,17 +1565,17 @@ export function getSidebarTemplate(options = {}) {
 
   return `
     <aside
-      id="${SIDEBAR_ROOT_ID}"
+      id="${IDS.root}"
       class="${rootClasses}"
       role="complementary"
       aria-label="${escapeAttr(labels.sidebarAria)}"
-      data-i18n-aria-label="${SIDEBAR_I18N_KEYS.ariaMain}"
+      data-i18n-aria-label="${escapeAttr(i18nKey("ariaMain", "sidebar.aria.main"))}"
       data-sidebar-root="true"
       data-sidebar="true"
-      data-component="${SIDEBAR_COMPONENT_NAME}"
-      data-module="${SIDEBAR_MODULE_NAME}"
+      data-component="${escapeAttr(safeText(SIDEBAR_COMPONENT_NAME, "sidebar"))}"
+      data-module="${escapeAttr(safeText(SIDEBAR_MODULE_NAME, "SidebarUI"))}"
       data-template-version="${SIDEBAR_TEMPLATE_VERSION}"
-      data-constants-version="${SIDEBAR_CONSTANTS_VERSION}"
+      data-constants-version="${escapeAttr(safeText(SIDEBAR_CONSTANTS_VERSION, ""))}"
       data-mounted="false"
       data-ready="false"
       data-open="${ui.dataOpen}"
@@ -1340,31 +1611,34 @@ ${renderFooter(labels)}
 ========================================================= */
 
 export function getSidebarTemplateSnapshot() {
+  const navItems =
+    getNavItems();
+
   return {
     version:
       SIDEBAR_TEMPLATE_VERSION,
 
     component:
-      SIDEBAR_COMPONENT_NAME,
+      safeText(SIDEBAR_COMPONENT_NAME, "sidebar"),
 
     module:
-      SIDEBAR_MODULE_NAME,
+      safeText(SIDEBAR_MODULE_NAME, "SidebarUI"),
 
     constantsVersion:
-      SIDEBAR_CONSTANTS_VERSION,
+      safeText(SIDEBAR_CONSTANTS_VERSION, ""),
 
     routes:
       {
-        ...SIDEBAR_ROUTES,
+        ...ROUTES,
       },
 
     aliases:
       {
-        ...SIDEBAR_ROUTE_ALIASES,
+        ...ROUTE_ALIASES,
       },
 
     navItems:
-      SIDEBAR_NAV_ITEMS.map((item) => ({
+      navItems.map((item) => ({
         key:
           item.key,
 
@@ -1375,10 +1649,12 @@ export function getSidebarTemplateSnapshot() {
           item.icon,
 
         i18nKey:
-          item.i18nKey,
+          item.i18nKey || `sidebar.nav.${item.key}`,
 
         adminOnly:
-          item.adminOnly === true,
+          item.adminOnly === true ||
+          item.admin === true ||
+          item.requiresAdmin === true,
 
         order:
           item.order || 0,
@@ -1386,62 +1662,67 @@ export function getSidebarTemplateSnapshot() {
 
     ids: {
       sidebarRootId:
-        SIDEBAR_ROOT_ID,
+        IDS.root,
 
       sidebarMountId:
-        SIDEBAR_MOUNT_ID,
+        IDS.mount,
 
       sidebarNavId:
-        SIDEBAR_NAV_ID,
+        IDS.nav,
 
       sidebarMenuId:
-        SIDEBAR_MENU_ID,
+        IDS.menu,
 
       sidebarRecentsId:
-        SIDEBAR_RECENTS_ID,
+        IDS.recents,
 
       sidebarFooterId:
-        SIDEBAR_FOOTER_ID,
+        IDS.footer,
 
       sidebarIndicatorId:
-        SIDEBAR_INDICATOR_ID,
+        IDS.indicator,
 
       userToggleId:
-        USER_TOGGLE_ID,
+        IDS.userToggle,
 
       userDropdownId:
-        USER_DROPDOWN_ID,
+        IDS.userDropdown,
 
       logoutButtonId:
-        LOGOUT_BUTTON_ID,
+        IDS.logout,
 
       sidebarAvatarId:
-        SIDEBAR_AVATAR_ID,
+        IDS.avatar,
 
       sidebarNameId:
-        SIDEBAR_NAME_ID,
+        IDS.name,
 
       logoId:
-        SIDEBAR_LOGO_ID,
+        IDS.logo,
 
       desktopToggleId:
-        SIDEBAR_TOGGLE_ID,
+        IDS.toggle,
 
       mobileToggleId:
-        SIDEBAR_MOBILE_TOGGLE_ID,
+        IDS.mobileToggle,
 
       mobileToggleRenderedInsideSidebar:
         false,
 
       avatarImageId:
-        SIDEBAR_AVATAR_IMAGE_ID,
+        IDS.avatarImage,
 
       avatarFallbackId:
-        SIDEBAR_AVATAR_FALLBACK_ID,
+        IDS.avatarFallback,
 
       userPlanId:
-        SIDEBAR_USER_PLAN_ID,
+        IDS.plan,
     },
+
+    actions:
+      {
+        ...ACTIONS,
+      },
 
     contract: {
       logoTooltip:
@@ -1473,11 +1754,14 @@ export function getSidebarTemplateSnapshot() {
 
       usesConstantsIds:
         true,
+
+      unsafeExternalRoutes:
+        false,
     },
 
     dataAttrs:
       {
-        ...SIDEBAR_DATA_ATTRS,
+        ...safeObject(SIDEBAR_DATA_ATTRS),
       },
   };
 }

@@ -41,6 +41,14 @@
    - rerenderCurrentRoute({ AppCore, Router })
    - t("key", "fallback", params)
    - t({ I18n, key, fallback, params })
+
+   EXTREME MODE:
+   - Colas de rerender con collapsing.
+   - Dedupe de emisiones de idioma.
+   - Fallback dictionary lookup profundo.
+   - Interpolación robusta {name} / {{name}} / :name.
+   - Bridge global debug seguro.
+   - No emite flags que provoquen doble rerender en AppEvents.
 ========================================================= */
 
 import {
@@ -63,7 +71,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-const I18N_VERSION = "14.0.0";
+export const I18N_VERSION = "15.0.0-extreme-pro";
 
 const I18N_SOURCE = "app:i18n";
 
@@ -86,36 +94,76 @@ const LANG_STORAGE_KEY =
   UI_CONSTANTS?.langStorageKey ||
   "lang";
 
-const LANG_STORAGE_KEYS = Object.freeze([
-  LANG_STORAGE_KEY,
-  "onion:lang",
-  "onion.lang",
-  "onion_language",
-  "language",
-]);
+const LANG_STORAGE_KEYS = Object.freeze(
+  uniqueStatic([
+    LANG_STORAGE_KEY,
+    "onion:lang",
+    "onion.lang",
+    "onion_language",
+    "onion:language",
+    "onion.language",
+    "language",
+    "locale",
+    "lang",
+  ])
+);
 
-const KNOWN_LANGS = Object.freeze([
-  "es",
-  "en",
-  "ca",
-]);
+const KNOWN_LANGS = Object.freeze(
+  uniqueStatic([
+    ...(
+      Array.isArray(UI_CONSTANTS?.supportedLangs)
+        ? UI_CONSTANTS.supportedLangs
+        : []
+    ),
+    "es",
+    "en",
+    "ca",
+  ])
+);
 
 const LANG_ALIASES = Object.freeze({
   es: "es",
+  "es-es": "es",
   spa: "es",
   spanish: "es",
   castellano: "es",
   español: "es",
+  espanol: "es",
 
   en: "en",
+  "en-us": "en",
+  "en-gb": "en",
   eng: "en",
   english: "en",
 
   ca: "ca",
+  "ca-es": "ca",
   cat: "ca",
   catalan: "ca",
   català: "ca",
+  catalá: "ca",
   catalán: "ca",
+  catalan: "ca",
+});
+
+const LANG_META = Object.freeze({
+  es: Object.freeze({
+    lang: "es",
+    locale: "es-ES",
+    direction: "ltr",
+  }),
+
+  en: Object.freeze({
+    lang: "en",
+    locale: "en-US",
+    direction: "ltr",
+  }),
+
+  ca: Object.freeze({
+    lang: "ca",
+    locale: "ca-ES",
+    direction: "ltr",
+  }),
 });
 
 const I18N_EVENTS = Object.freeze({
@@ -126,8 +174,20 @@ const I18N_EVENTS = Object.freeze({
   i18nReady:
     "app:i18n:ready",
 
+  i18nInitStart:
+    "app:i18n:init:start",
+
+  i18nInitDone:
+    "app:i18n:init:done",
+
   i18nSync:
     "app:i18n:sync",
+
+  i18nChangeStart:
+    "app:i18n:change:start",
+
+  i18nChangeDone:
+    "app:i18n:change:done",
 
   i18nError:
     "app:i18n:error",
@@ -146,6 +206,9 @@ const I18N_EVENTS = Object.freeze({
 
   i18nRerenderError:
     "app:i18n:rerender:error",
+
+  i18nRerenderSkipped:
+    "app:i18n:rerender:skipped",
 });
 
 const INIT_METHODS = Object.freeze([
@@ -155,18 +218,27 @@ const INIT_METHODS = Object.freeze([
   "start",
 ]);
 
+const CONFIGURE_METHODS = Object.freeze([
+  "configure",
+  "setup",
+  "bindCore",
+]);
+
 const SET_LANG_METHODS = Object.freeze([
   "setLang",
   "setLanguage",
   "changeLang",
   "changeLanguage",
   "use",
+  "setLocale",
+  "changeLocale",
 ]);
 
 const GET_LANG_METHODS = Object.freeze([
   "getLang",
   "getLanguage",
   "getCurrentLang",
+  "getLocale",
   "current",
 ]);
 
@@ -175,12 +247,14 @@ const GET_AVAILABLE_METHODS = Object.freeze([
   "getAvailableLangs",
   "getLanguages",
   "getLocales",
+  "availableLanguages",
 ]);
 
 const TRANSLATE_METHODS = Object.freeze([
   "t",
   "translate",
   "get",
+  "message",
 ]);
 
 const ROUTER_RERENDER_METHODS = Object.freeze([
@@ -192,6 +266,7 @@ const PUBLIC_PATH_KEYS = Object.freeze([
   "publicPath",
   "currentPublicPath",
   "lastPublicPath",
+  "requestedPath",
 ]);
 
 const CANONICAL_PATH_KEYS = Object.freeze([
@@ -208,10 +283,15 @@ const DICTIONARY_KEYS = Object.freeze([
   "locales",
   "translations",
   "resources",
+  "catalogs",
 ]);
 
 const SENSITIVE_OBJECT_KEY_RE =
   /token|secret|password|authorization|credential|jwt|bearer|otp|code/i;
+
+const LANG_EMIT_DEDUPE_MS = 80;
+const RERENDER_DEDUPE_MS = 80;
+const MAX_ERROR_HISTORY = 12;
 
 /* =========================================================
    MODULE STATE
@@ -226,9 +306,18 @@ let currentRouterRef = null;
 
 let rerenderPromise = null;
 let rerenderQueued = false;
+let queuedRerenderDeps = null;
 
+let changePromise = null;
 let changeSequence = 0;
+
 let debugBridgeReady = false;
+
+let lastLangEmitKey = "";
+let lastLangEmitAt = 0;
+
+let lastRerenderKey = "";
+let lastRerenderAt = 0;
 
 const i18nState = {
   initialized: false,
@@ -238,6 +327,7 @@ const i18nState = {
   lastReason: "",
 
   lastSyncAt: 0,
+  lastChangeAt: 0,
   lastRerenderAt: 0,
 
   rerendering: false,
@@ -250,6 +340,33 @@ const i18nState = {
 
   errors: [],
 };
+
+/* =========================================================
+   STATIC HELPERS
+========================================================= */
+
+function uniqueStatic(values = []) {
+  const seen = new Set();
+  const result = [];
+
+  for (const value of Array.isArray(values) ? values : []) {
+    const text =
+      value === null ||
+      value === undefined
+        ? ""
+        : String(value).trim();
+
+    if (
+      text &&
+      !seen.has(text)
+    ) {
+      seen.add(text);
+      result.push(text);
+    }
+  }
+
+  return result;
+}
 
 /* =========================================================
    BASICS
@@ -330,7 +447,11 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return text || fallback;
 }
@@ -418,6 +539,17 @@ function safeMethod(target, methodName, args = []) {
   );
 }
 
+async function maybeAwait(value) {
+  if (
+    value &&
+    isFunction(value.then)
+  ) {
+    return await value;
+  }
+
+  return value;
+}
+
 function defineValue(target, key, value) {
   if (
     !target ||
@@ -480,6 +612,10 @@ function redactText(value = "") {
       .replace(
         /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
         "$1***"
+      )
+      .replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
       );
   }
 }
@@ -523,17 +659,25 @@ function normalizeError(error, fallback = "Error i18n.") {
     };
   }
 
+  const source =
+    error?.error ||
+    error?.reason ||
+    error;
+
   return {
     name:
       safeText(
-        error?.name,
+        source?.name ||
+          source?.constructor?.name,
         "I18nError"
       ),
 
     message:
       redactText(
         safeText(
-          error?.message || error,
+          source?.message ||
+            source?.reason ||
+            source,
           fallback
         )
       ),
@@ -541,12 +685,19 @@ function normalizeError(error, fallback = "Error i18n.") {
     code:
       redactText(
         safeText(
-          error?.code ||
-            error?.status ||
-            error?.statusCode,
+          source?.code ||
+            source?.status ||
+            source?.statusCode,
           "I18N_ERROR"
         )
       ),
+
+    stack:
+      source?.stack
+        ? redactText(
+            safeText(source.stack, "")
+          )
+        : "",
   };
 }
 
@@ -601,6 +752,20 @@ function sanitizePayload(value, depth = 0) {
       );
   }
 
+  if (value instanceof Map) {
+    return {
+      type: "Map",
+      size: value.size,
+    };
+  }
+
+  if (value instanceof Set) {
+    return {
+      type: "Set",
+      size: value.size,
+    };
+  }
+
   if (isObject(value)) {
     const output = {};
 
@@ -652,7 +817,9 @@ function looksLikeDepsObject(value) {
       "TopbarUI" in value ||
       "Toast" in value ||
       "lang" in value ||
-      "reason" in value
+      "reason" in value ||
+      "syncUserUI" in value ||
+      "applyPostRenderLoaderPolicy" in value
   );
 }
 
@@ -995,6 +1162,41 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   return busEmitted;
 }
 
+function shouldEmitLangChange(payload = {}) {
+  const key = [
+    safeText(payload.lang, ""),
+    safeText(payload.previousLang, ""),
+    safeText(payload.reason, ""),
+    safeText(payload.sequence, ""),
+  ].join("|");
+
+  const current = safeNow();
+
+  if (
+    key === lastLangEmitKey &&
+    current - lastLangEmitAt < LANG_EMIT_DEDUPE_MS
+  ) {
+    return false;
+  }
+
+  lastLangEmitKey = key;
+  lastLangEmitAt = current;
+
+  return true;
+}
+
+function emitLangChange(AppCore, payload = {}) {
+  if (!shouldEmitLangChange(payload)) {
+    return false;
+  }
+
+  return safeEmit(
+    AppCore,
+    I18N_EVENTS.langChange,
+    payload
+  );
+}
+
 function pushError(AppCore, error, source = "i18n") {
   const snapshot = {
     source:
@@ -1017,9 +1219,9 @@ function pushError(AppCore, error, source = "i18n") {
 
   i18nState.errors.unshift(snapshot);
 
-  if (i18nState.errors.length > 10) {
+  if (i18nState.errors.length > MAX_ERROR_HISTORY) {
     i18nState.errors =
-      i18nState.errors.slice(0, 10);
+      i18nState.errors.slice(0, MAX_ERROR_HISTORY);
   }
 
   safeEmit(
@@ -1081,6 +1283,22 @@ function normalizeLangList(values = []) {
       )
       .filter(Boolean)
   );
+}
+
+function getLangMeta(lang = FALLBACK_LANG) {
+  const cleanLang =
+    safeLang(lang, FALLBACK_LANG);
+
+  return {
+    ...(LANG_META[cleanLang] || {}),
+    lang: cleanLang,
+    locale:
+      LANG_META[cleanLang]?.locale ||
+      cleanLang,
+    direction:
+      LANG_META[cleanLang]?.direction ||
+      "ltr",
+  };
 }
 
 /* =========================================================
@@ -1179,6 +1397,9 @@ function setDocumentLang(lang = FALLBACK_LANG) {
       FALLBACK_LANG
     );
 
+  const meta =
+    getLangMeta(cleanLang);
+
   try {
     document.documentElement.setAttribute(
       "lang",
@@ -1186,6 +1407,17 @@ function setDocumentLang(lang = FALLBACK_LANG) {
     );
 
     document.documentElement.lang = cleanLang;
+
+    document.documentElement.setAttribute(
+      "dir",
+      meta.direction || "ltr"
+    );
+
+    document.documentElement.dataset.lang =
+      cleanLang;
+
+    document.documentElement.dataset.locale =
+      meta.locale || cleanLang;
 
     return true;
   } catch {}
@@ -1355,6 +1587,7 @@ function getI18nLang(I18n) {
     safeLang(I18n?.lang, "") ||
     safeLang(I18n?.currentLang, "") ||
     safeLang(I18n?.language, "") ||
+    safeLang(I18n?.locale, "") ||
     ""
   );
 }
@@ -1395,6 +1628,8 @@ function setI18nLang(I18n, lang = FALLBACK_LANG, options = {}) {
       typeof I18n === "object"
     ) {
       I18n.lang = cleanLang;
+      I18n.language = cleanLang;
+      I18n.locale = getLangMeta(cleanLang).locale;
       ok = true;
     }
   } catch {}
@@ -1420,12 +1655,7 @@ async function setI18nLangAsync(I18n, lang = FALLBACK_LANG, options = {}) {
           options
         );
 
-      if (
-        result &&
-        isFunction(result.then)
-      ) {
-        await result;
-      }
+      await maybeAwait(result);
 
       ok = true;
       break;
@@ -1438,6 +1668,8 @@ async function setI18nLangAsync(I18n, lang = FALLBACK_LANG, options = {}) {
       typeof I18n === "object"
     ) {
       I18n.lang = cleanLang;
+      I18n.language = cleanLang;
+      I18n.locale = getLangMeta(cleanLang).locale;
       ok = true;
     }
   } catch {}
@@ -1531,6 +1763,11 @@ function interpolateText(value = "", params = {}) {
 
       output = output.replace(
         new RegExp(`\\{\\s*${safeKey}\\s*\\}`, "g"),
+        replacement
+      );
+
+      output = output.replace(
+        new RegExp(`:${safeKey}\\b`, "g"),
         replacement
       );
     } catch {}
@@ -1851,18 +2088,13 @@ function registerI18nModule(AppCore, I18n) {
   try {
     registerModule(
       AppCore,
-      "i18n",
-      I18n
-    );
-
-    registered = true;
-  } catch {}
-
-  try {
-    registerModule(
-      AppCore,
       "I18n",
-      I18n
+      I18n,
+      [
+        "i18n",
+        "Lang",
+        "lang",
+      ]
     );
 
     registered = true;
@@ -1874,34 +2106,35 @@ function registerI18nModule(AppCore, I18n) {
     if (modules) {
       if (isFunction(modules.register)) {
         modules.register(
-          "i18n",
-          I18n,
-          {
-            overwrite: true,
-            replace: true,
-            source: I18N_SOURCE,
-          }
-        );
-
-        modules.register(
           "I18n",
           I18n,
           {
-            overwrite: true,
-            replace: true,
+            overwrite: false,
+            replace: false,
+            idempotent: true,
+            aliases: [
+              "i18n",
+              "Lang",
+              "lang",
+            ],
             source: I18N_SOURCE,
           }
         );
 
         registered = true;
       } else if (isFunction(modules.set)) {
-        modules.set("i18n", I18n);
-        modules.set("I18n", I18n);
+        if (!modules.get?.("I18n")) {
+          modules.set("I18n", I18n);
+        }
+
+        if (!modules.get?.("i18n")) {
+          modules.set("i18n", I18n);
+        }
 
         registered = true;
       } else if (isExtensibleObject(modules)) {
-        modules.i18n = I18n;
-        modules.I18n = I18n;
+        modules.I18n = modules.I18n || I18n;
+        modules.i18n = modules.i18n || I18n;
 
         registered = true;
       }
@@ -1914,8 +2147,8 @@ function registerI18nModule(AppCore, I18n) {
       isExtensibleObject(AppCore)
     ) {
       AppCore.modules = {
-        i18n: I18n,
         I18n,
+        i18n: I18n,
       };
 
       registered = true;
@@ -1924,8 +2157,8 @@ function registerI18nModule(AppCore, I18n) {
 
   try {
     if (isExtensibleObject(AppCore)) {
-      AppCore.I18n = I18n;
-      AppCore.i18n = I18n;
+      AppCore.I18n = AppCore.I18n || I18n;
+      AppCore.i18n = AppCore.i18n || I18n;
 
       registered = true;
     }
@@ -1936,8 +2169,13 @@ function registerI18nModule(AppCore, I18n) {
       AppCore?.registry?.modules &&
       isFunction(AppCore.registry.modules.set)
     ) {
-      AppCore.registry.modules.set("i18n", I18n);
-      AppCore.registry.modules.set("I18n", I18n);
+      if (!AppCore.registry.modules.get?.("I18n")) {
+        AppCore.registry.modules.set("I18n", I18n);
+      }
+
+      if (!AppCore.registry.modules.get?.("i18n")) {
+        AppCore.registry.modules.set("i18n", I18n);
+      }
 
       registered = true;
     }
@@ -1950,10 +2188,14 @@ function resolveInitialLang(AppCore, I18n, preferred = "") {
   const candidates = [
     preferred,
     AppCore?.state?.lang,
+    AppCore?.state?.language,
+    AppCore?.state?.locale,
     readStoredLang(),
     getI18nLang(I18n),
     getDocumentLang(),
     AppCore?.config?.lang,
+    AppCore?.config?.language,
+    AppCore?.config?.locale,
     AppCore?.config?.defaultLang,
     DEFAULT_LANG,
     FALLBACK_LANG,
@@ -1995,40 +2237,36 @@ function bindCoreToI18n(AppCore, I18n) {
 
   let ok = false;
 
-  try {
-    if (isFunction(I18n?.bindCore)) {
-      I18n.bindCore(AppCore);
+  for (const methodName of CONFIGURE_METHODS) {
+    try {
+      if (!isFunction(I18n?.[methodName])) {
+        continue;
+      }
+
+      if (methodName === "bindCore") {
+        I18n[methodName](AppCore);
+      } else {
+        I18n[methodName]({
+          core: AppCore,
+          AppCore,
+          source: I18N_SOURCE,
+        });
+      }
+
       ok = true;
-    }
-  } catch (error) {
-    pushError(
-      AppCore,
-      error,
-      "I18n.bindCore"
-    );
-
-    safeWarn(
-      AppCore,
-      "I18n.bindCore(AppCore) falló.",
-      error
-    );
-  }
-
-  try {
-    if (isFunction(I18n?.configure)) {
-      I18n.configure({
-        core: AppCore,
+    } catch (error) {
+      pushError(
         AppCore,
-      });
+        error,
+        `I18n.${methodName}`
+      );
 
-      ok = true;
+      safeWarn(
+        AppCore,
+        `I18n.${methodName} falló.`,
+        error
+      );
     }
-  } catch (error) {
-    pushError(
-      AppCore,
-      error,
-      "I18n.configure"
-    );
   }
 
   boundCore = AppCore;
@@ -2189,6 +2427,15 @@ function exposeDebugBridge(AppCore, I18n, Router) {
           ...ensureObject(options),
         }),
 
+    sync:
+      (options = {}) =>
+        syncLangState({
+          AppCore,
+          I18n,
+          Router,
+          ...ensureObject(options),
+        }),
+
     reset:
       resetI18nRuntimeState,
   };
@@ -2318,10 +2565,17 @@ export function syncLangState(first = {}, second = null) {
   const available =
     getAvailableLangs(I18n);
 
+  const meta =
+    getLangMeta(finalLang);
+
   safeSetState(
     AppCore,
     {
       lang: finalLang,
+      language: finalLang,
+      locale: meta.locale,
+      dir: meta.direction,
+
       fallbackLang: FALLBACK_LANG,
       defaultLang: DEFAULT_LANG,
       availableLangs: available,
@@ -2360,6 +2614,10 @@ export function syncLangState(first = {}, second = null) {
 
   const payload = {
     lang: finalLang,
+    language: finalLang,
+    locale: meta.locale,
+    dir: meta.direction,
+
     fallbackLang: FALLBACK_LANG,
     defaultLang: DEFAULT_LANG,
     available,
@@ -2427,6 +2685,11 @@ export function initI18n(first = {}, second = null) {
         reason: "init-i18n:already-initialized",
       });
 
+    registerI18nModule(
+      AppCore,
+      I18n
+    );
+
     attachAppCoreBridge(
       AppCore,
       I18n,
@@ -2441,6 +2704,16 @@ export function initI18n(first = {}, second = null) {
 
     return Boolean(lang);
   }
+
+  safeEmit(
+    AppCore,
+    I18N_EVENTS.i18nInitStart,
+    {
+      scope: DEFAULT_SCOPE,
+      force: Boolean(force),
+      at: safeIsoDate(),
+    }
+  );
 
   registerI18nModule(
     AppCore,
@@ -2527,6 +2800,15 @@ export function initI18n(first = {}, second = null) {
 
   safeEmit(
     AppCore,
+    I18N_EVENTS.i18nInitDone,
+    {
+      ...payload,
+      ok: true,
+    }
+  );
+
+  safeEmit(
+    AppCore,
     I18N_EVENTS.i18nReady,
     payload
   );
@@ -2544,7 +2826,34 @@ export function initI18n(first = {}, second = null) {
    LANGUAGE CHANGE
 ========================================================= */
 
+function shouldRerenderAfterChange({
+  rerender = true,
+  force = false,
+  forceRerender = false,
+  finalLang = "",
+  currentLang = "",
+} = {}) {
+  if (rerender === false) {
+    return false;
+  }
+
+  if (
+    force === true ||
+    forceRerender === true
+  ) {
+    return true;
+  }
+
+  return finalLang !== currentLang;
+}
+
 export async function changeLanguage(first = {}, second = null) {
+  const deps =
+    resolveRuntimeDeps(
+      first,
+      second
+    );
+
   const {
     AppCore,
     I18n,
@@ -2555,12 +2864,10 @@ export async function changeLanguage(first = {}, second = null) {
     rerender = true,
     persist = true,
     emit = true,
+    force = false,
+    forceRerender = false,
     reason = "change-language",
-  } =
-    resolveRuntimeDeps(
-      first,
-      second
-    );
+  } = deps;
 
   rememberRuntimeDeps({
     AppCore,
@@ -2568,110 +2875,184 @@ export async function changeLanguage(first = {}, second = null) {
     Router,
   });
 
-  const sequence = ++changeSequence;
+  /*
+    Serializamos cambios de idioma para evitar carreras entre:
+    - user click rápido
+    - restoreSession
+    - events.js
+  */
+  if (changePromise && force !== true) {
+    try {
+      await changePromise;
+    } catch {}
+  }
 
-  const requestedLang =
-    safeLang(
-      lang ||
-        second ||
-        "",
-      ""
-    );
+  changePromise =
+    (async () => {
+      const sequence = ++changeSequence;
 
-  const currentLang =
-    safeLang(
-      AppCore?.state?.lang ||
-        getI18nLang(I18n) ||
-        getDocumentLang() ||
-        readStoredLang() ||
-        DEFAULT_LANG,
-      FALLBACK_LANG
-    );
+      const requestedLang =
+        safeLang(
+          lang ||
+            second ||
+            "",
+          ""
+        );
 
-  const finalLang =
-    normalizeAvailableLang(
-      I18n,
-      requestedLang || currentLang || DEFAULT_LANG,
-      FALLBACK_LANG
-    );
+      const currentLang =
+        safeLang(
+          AppCore?.state?.lang ||
+            getI18nLang(I18n) ||
+            getDocumentLang() ||
+            readStoredLang() ||
+            DEFAULT_LANG,
+          FALLBACK_LANG
+        );
 
-  i18nState.lastRequestedLang =
-    requestedLang || finalLang;
+      const finalLang =
+        normalizeAvailableLang(
+          I18n,
+          requestedLang || currentLang || DEFAULT_LANG,
+          FALLBACK_LANG
+        );
 
-  i18nState.changeCount += 1;
+      i18nState.lastRequestedLang =
+        requestedLang || finalLang;
 
-  await setI18nLangAsync(
-    I18n,
-    finalLang,
-    {
-      reason,
-      source: "app:i18n:change",
-      sequence,
-    }
-  );
+      i18nState.changeCount += 1;
+      i18nState.lastChangeAt = safeNow();
 
-  syncLangState({
-    AppCore,
-    I18n,
-    Router,
-    lang: finalLang,
-    reason,
-    persist,
-    emit: false,
-  });
+      safeEmit(
+        AppCore,
+        I18N_EVENTS.i18nChangeStart,
+        {
+          lang: finalLang,
+          requestedLang: requestedLang || finalLang,
+          previousLang: currentLang,
+          reason,
+          sequence,
+          at: safeIsoDate(),
+        }
+      );
 
-  const payload = {
-    lang: finalLang,
-    requestedLang: requestedLang || finalLang,
-    previousLang: currentLang,
+      await setI18nLangAsync(
+        I18n,
+        finalLang,
+        {
+          reason,
+          source: "app:i18n:change",
+          sequence,
+        }
+      );
 
-    fallbackLang: FALLBACK_LANG,
-    defaultLang: DEFAULT_LANG,
-    available: getAvailableLangs(I18n),
-
-    reason:
-      safeText(
+      syncLangState({
+        AppCore,
+        I18n,
+        Router,
+        lang: finalLang,
         reason,
-        "change-language"
-      ),
+        persist,
+        emit: false,
+      });
 
-    /*
-      Clave anti doble render:
-      src/app/events.js sólo rerenderiza si se pide explícitamente
-      con rerenderByEvents/appEventsRerender/forceEventsRerender.
-      Aun así dejamos flags defensivos.
-    */
-    rerender: false,
-    rerenderByEvents: false,
-    appEventsRerender: false,
-    forceEventsRerender: false,
-    rerenderHandledBy: "app:i18n",
+      const meta =
+        getLangMeta(finalLang);
 
-    sequence,
-    at: safeIsoDate(),
-  };
+      const payload = {
+        lang: finalLang,
+        language: finalLang,
+        locale: meta.locale,
+        dir: meta.direction,
 
-  if (emit) {
-    safeEmit(
-      AppCore,
-      I18N_EVENTS.langChange,
-      payload
-    );
+        requestedLang: requestedLang || finalLang,
+        previousLang: currentLang,
+
+        fallbackLang: FALLBACK_LANG,
+        defaultLang: DEFAULT_LANG,
+        available: getAvailableLangs(I18n),
+
+        reason:
+          safeText(
+            reason,
+            "change-language"
+          ),
+
+        /*
+          Clave anti doble render:
+          src/app/events.js sólo rerenderiza si se pide explícitamente
+          con rerenderByEvents/appEventsRerender/forceEventsRerender.
+          Aquí dejamos flags defensivos.
+        */
+        rerender: false,
+        rerenderByEvents: false,
+        appEventsRerender: false,
+        forceEventsRerender: false,
+        rerenderHandledBy: "app:i18n",
+
+        sequence,
+        at: safeIsoDate(),
+      };
+
+      if (emit) {
+        emitLangChange(
+          AppCore,
+          payload
+        );
+      }
+
+      const shouldRender =
+        shouldRerenderAfterChange({
+          rerender,
+          force,
+          forceRerender,
+          finalLang,
+          currentLang,
+        });
+
+      if (shouldRender) {
+        await rerenderCurrentRoute({
+          AppCore,
+          Router,
+          I18n,
+          applyPostRenderLoaderPolicy,
+          syncUserUI,
+          reason: `${reason}:rerender`,
+          sequence,
+          force: force || forceRerender,
+        });
+      } else {
+        safeEmit(
+          AppCore,
+          I18N_EVENTS.i18nRerenderSkipped,
+          {
+            lang: finalLang,
+            previousLang: currentLang,
+            reason,
+            sequence,
+            sameLang: finalLang === currentLang,
+            at: safeIsoDate(),
+          }
+        );
+      }
+
+      safeEmit(
+        AppCore,
+        I18N_EVENTS.i18nChangeDone,
+        {
+          ...payload,
+          rerendered: Boolean(shouldRender),
+          at: safeIsoDate(),
+        }
+      );
+
+      return finalLang;
+    })();
+
+  try {
+    return await changePromise;
+  } finally {
+    changePromise = null;
   }
-
-  if (rerender) {
-    await rerenderCurrentRoute({
-      AppCore,
-      Router,
-      I18n,
-      applyPostRenderLoaderPolicy,
-      syncUserUI,
-      reason: `${reason}:rerender`,
-      sequence,
-    });
-  }
-
-  return finalLang;
 }
 
 /* =========================================================
@@ -3030,6 +3411,39 @@ function syncAfterRender({
   return false;
 }
 
+function shouldDedupeRerender({
+  publicPath = "/",
+  canonicalPath = "/",
+  lang = "",
+  reason = "",
+  force = false,
+} = {}) {
+  if (force === true) {
+    return false;
+  }
+
+  const key = [
+    safeText(publicPath, "/"),
+    safeText(canonicalPath, "/"),
+    safeText(lang, ""),
+    safeText(reason, ""),
+  ].join("|");
+
+  const current = safeNow();
+
+  if (
+    key === lastRerenderKey &&
+    current - lastRerenderAt < RERENDER_DEDUPE_MS
+  ) {
+    return true;
+  }
+
+  lastRerenderKey = key;
+  lastRerenderAt = current;
+
+  return false;
+}
+
 export async function rerenderCurrentRoute(first = {}, second = null) {
   const deps =
     resolveRuntimeDeps(
@@ -3041,6 +3455,16 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
 
   if (rerenderPromise) {
     rerenderQueued = true;
+    queuedRerenderDeps = {
+      ...deps,
+      reason:
+        safeText(
+          deps.reason,
+          "i18n-rerender"
+        ) + ":queued",
+      force: true,
+    };
+
     return rerenderPromise;
   }
 
@@ -3054,6 +3478,7 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
         syncUserUI,
         reason = "i18n-rerender",
         sequence = changeSequence,
+        force = false,
       } = deps;
 
       i18nState.rerendering = true;
@@ -3072,6 +3497,35 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
           reason: `${reason}:pre-render`,
           emit: false,
         });
+
+      if (
+        shouldDedupeRerender({
+          ...paths,
+          lang,
+          reason,
+          force,
+        })
+      ) {
+        safeEmit(
+          AppCore,
+          I18N_EVENTS.i18nRerenderSkipped,
+          {
+            publicPath:
+              redactText(paths.publicPath),
+
+            canonicalPath:
+              redactText(paths.canonicalPath),
+
+            lang,
+            reason,
+            sequence,
+            deduped: true,
+            at: safeIsoDate(),
+          }
+        );
+
+        return true;
+      }
 
       const startPayload = {
         publicPath:
@@ -3177,13 +3631,19 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
         rerenderPromise = null;
 
         if (rerenderQueued) {
-          rerenderQueued = false;
-
-          safeSetTimeout(() => {
-            rerenderCurrentRoute({
+          const queued =
+            queuedRerenderDeps ||
+            {
               ...deps,
               reason: "i18n-rerender:queued",
-            });
+              force: true,
+            };
+
+          rerenderQueued = false;
+          queuedRerenderDeps = null;
+
+          safeSetTimeout(() => {
+            rerenderCurrentRoute(queued);
           }, 0);
         }
       }
@@ -3294,6 +3754,18 @@ export function getI18nSnapshot(first = {}, second = null) {
   const storedLang =
     readStoredLang();
 
+  const effectiveLang =
+    safeLang(
+      stateLang ||
+        i18nLang ||
+        documentLang ||
+        storedLang ||
+        FALLBACK_LANG
+    );
+
+  const meta =
+    getLangMeta(effectiveLang);
+
   return sanitizePayload({
     version:
       I18N_VERSION,
@@ -3321,13 +3793,16 @@ export function getI18nSnapshot(first = {}, second = null) {
       Boolean(debugBridgeReady),
 
     lang:
-      safeLang(
-        stateLang ||
-          i18nLang ||
-          documentLang ||
-          storedLang ||
-          FALLBACK_LANG
-      ),
+      effectiveLang,
+
+    language:
+      effectiveLang,
+
+    locale:
+      meta.locale,
+
+    dir:
+      meta.direction,
 
     stateLang,
     i18nLang,
@@ -3363,6 +3838,14 @@ export function getI18nSnapshot(first = {}, second = null) {
     lastSyncAtIso:
       i18nState.lastSyncAt
         ? safeIsoDate(i18nState.lastSyncAt)
+        : "",
+
+    lastChangeAt:
+      i18nState.lastChangeAt,
+
+    lastChangeAtIso:
+      i18nState.lastChangeAt
+        ? safeIsoDate(i18nState.lastChangeAt)
         : "",
 
     rerendering:
@@ -3408,15 +3891,24 @@ export function resetI18nRuntimeState() {
 
   rerenderPromise = null;
   rerenderQueued = false;
+  queuedRerenderDeps = null;
 
+  changePromise = null;
   changeSequence = 0;
   debugBridgeReady = false;
+
+  lastLangEmitKey = "";
+  lastLangEmitAt = 0;
+
+  lastRerenderKey = "";
+  lastRerenderAt = 0;
 
   i18nState.initialized = false;
   i18nState.lastLang = "";
   i18nState.lastRequestedLang = "";
   i18nState.lastReason = "";
   i18nState.lastSyncAt = 0;
+  i18nState.lastChangeAt = 0;
   i18nState.lastRerenderAt = 0;
   i18nState.rerendering = false;
   i18nState.rerenderCount = 0;

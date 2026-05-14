@@ -2,7 +2,7 @@
    Onion SPA - Auth Guards
    Archivo: src/features/auth/guards.js
 
-   AUTH GUARDS · STRICT SESSION GATE · GOD MODE v11
+   AUTH GUARDS · STRICT SESSION GATE · EXTREME 15/10
 
    RESPONSABILIDADES:
    - exponer helpers auth de estado
@@ -17,6 +17,7 @@
 
    HARDENING EXTREMO:
    - authenticated sólo true con token usable + usuario usable + usuario activo
+   - token usable puede existir sin user para /me durante restore, pero NO autentica
    - sync auth robusto con AppCore parcial
    - zero ghost auth
    - navegación opcional automática
@@ -52,8 +53,11 @@ import {
    CONSTANTS
 ========================================================= */
 
-const GUARDS_VERSION =
-  "11.0.0-god-mode";
+export const GUARDS_VERSION =
+  "15.0.0";
+
+const GUARDS_SOURCE =
+  "auth.guards";
 
 const LOGIN_PATH =
   "/login";
@@ -99,6 +103,7 @@ const TOKEN_FALSE_VALUES =
     "null",
     "undefined",
     "false",
+    "true",
     "none",
     "nan",
     "[object object]",
@@ -323,6 +328,8 @@ function safeBool(value, fallback = false) {
       "sí",
       "ok",
       "on",
+      "enabled",
+      "active",
     ].includes(text)
   ) {
     return true;
@@ -334,6 +341,8 @@ function safeBool(value, fallback = false) {
       "0",
       "no",
       "off",
+      "disabled",
+      "inactive",
     ].includes(text)
   ) {
     return false;
@@ -434,7 +443,19 @@ function safeSetState(patch = {}, options = {}) {
   try {
     AppCore?.setState?.(
       cleanPatch,
-      options
+      {
+        source:
+          GUARDS_SOURCE,
+        emit:
+          false,
+        emitState:
+          false,
+        emitDerived:
+          false,
+        silent:
+          true,
+        ...safeObject(options),
+      }
     );
   } catch {}
 
@@ -463,7 +484,7 @@ function redactSafe(value = "") {
   } catch {
     return safeText(value, "")
       .replace(
-        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
+        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token)=)([^&#\s]+)/gi,
         "$1***"
       )
       .replace(
@@ -477,6 +498,10 @@ function redactSafe(value = "") {
       .replace(
         /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
         "$1***"
+      )
+      .replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
       );
   }
 }
@@ -601,7 +626,15 @@ function sanitizeGuardPayload(payload = {}, depth = 0) {
   return output;
 }
 
-function safeEmit(eventName, payload = {}) {
+function safeEmit(eventName, payload = {}, options = {}) {
+  if (
+    options?.emitEvents === false ||
+    options?.emit === false ||
+    options?.silent === true
+  ) {
+    return false;
+  }
+
   const cleanEvent =
     safeText(eventName, "");
 
@@ -610,7 +643,18 @@ function safeEmit(eventName, payload = {}) {
   }
 
   const cleanPayload =
-    sanitizeGuardPayload(payload);
+    sanitizeGuardPayload({
+      source:
+        GUARDS_SOURCE,
+
+      version:
+        GUARDS_VERSION,
+
+      at:
+        safeIsoDate(),
+
+      ...safeObject(payload),
+    });
 
   let emitted =
     false;
@@ -729,6 +773,31 @@ function hasUsableToken(token = null) {
    PATH HELPERS
 ========================================================= */
 
+function isHashRouterPath(value = "") {
+  const raw =
+    String(value || "").trim();
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw =
+    String(value || "").trim();
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/") || "/";
+  }
+
+  return raw.replace(/^#\/?/, "/") || "/";
+}
+
 function normalizePathFallback(path = "/") {
   let value =
     safeText(path, "/")
@@ -755,6 +824,10 @@ function normalizePublicPathSafe(path = "/") {
   const raw =
     safeText(path, "/");
 
+  if (isHashRouterPath(raw)) {
+    return normalizeHashRouterPath(raw);
+  }
+
   try {
     return normalizePath(raw);
   } catch {
@@ -765,6 +838,15 @@ function normalizePublicPathSafe(path = "/") {
 function normalizeCanonicalPathSafe(path = "/") {
   const raw =
     safeText(path, "/");
+
+  if (isHashRouterPath(raw)) {
+    return normalizePathFallback(
+      normalizeHashRouterPath(raw)
+        .split("?")[0]
+        .split("#")[0] ||
+        "/"
+    );
+  }
 
   try {
     return normalizeCanonicalPath(raw);
@@ -784,8 +866,24 @@ function getBrowserPublicPath() {
   }
 
   try {
+    const pathname =
+      window.location.pathname || "/";
+
+    const search =
+      window.location.search || "";
+
+    const hash =
+      window.location.hash || "";
+
+    if (
+      hash &&
+      isHashRouterPath(hash)
+    ) {
+      return normalizeHashRouterPath(hash);
+    }
+
     return normalizePublicPathSafe(
-      `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
+      `${pathname}${search}${hash}`
     );
   } catch {
     return "";
@@ -1103,7 +1201,8 @@ function navigateTo(path = "/", options = {}) {
       hardRedirect,
       reason:
         options.reason || "guard",
-    }
+    },
+    options
   );
 
   if (!hardRedirect) {
@@ -1118,6 +1217,8 @@ function navigateTo(path = "/", options = {}) {
             {
               replaceState,
               force,
+              source:
+                GUARDS_SOURCE,
             }
           );
 
@@ -1143,6 +1244,8 @@ function navigateTo(path = "/", options = {}) {
             {
               replaceState,
               force,
+              source:
+                GUARDS_SOURCE,
             }
           );
 
@@ -1205,6 +1308,9 @@ function getCurrentToken() {
     state.session?.token ||
     state.session?.accessToken ||
     state.session?.access_token ||
+    state.sessionData?.token ||
+    state.sessionData?.accessToken ||
+    state.sessionData?.access_token ||
     null
   );
 }
@@ -1218,7 +1324,14 @@ export function getCurrentUser() {
     state.currentUser ||
     state.sessionUser ||
     state.authUser ||
+    state.account ||
+    state.profile ||
     state.session?.user ||
+    state.session?.usuario ||
+    state.session?.me ||
+    state.sessionData?.user ||
+    state.sessionData?.usuario ||
+    state.sessionData?.me ||
     null
   );
 }
@@ -1243,7 +1356,10 @@ function hasUsableUser(user = null) {
       safeText(user.mail, "") ||
       safeText(user.phone, "") ||
       safeText(user.telefono, "") ||
-      safeText(user.mobile, "")
+      safeText(user.mobile, "") ||
+      safeText(user.displayName, "") ||
+      safeText(user.name, "") ||
+      safeText(user.nombre, "")
   );
 }
 
@@ -1282,6 +1398,7 @@ function isUserActive(user = null) {
       "locked",
       "banned",
       "deactivated",
+      "revoked",
       "bloqueado",
       "eliminado",
       "inactivo",
@@ -1305,7 +1422,8 @@ function isUserActive(user = null) {
     user.deleted === true ||
     user.archived === true ||
     user.suspended === true ||
-    user.banned === true
+    user.banned === true ||
+    user.revoked === true
   );
 }
 
@@ -1360,6 +1478,11 @@ export function syncAuthState() {
           ? cleanToken
           : null,
 
+      access_token:
+        hasToken
+          ? cleanToken
+          : null,
+
       user:
         authenticated
           ? user
@@ -1380,7 +1503,20 @@ export function syncAuthState() {
           ? user
           : null,
 
+      account:
+        authenticated
+          ? user
+          : null,
+
+      profile:
+        authenticated
+          ? user
+          : null,
+
       role:
+        role || "",
+
+      rol:
         role || "",
 
       userRole:
@@ -1406,6 +1542,22 @@ export function syncAuthState() {
       isClient:
         authenticated &&
         roles.some(isClientRole),
+
+      currentResolvedUsername:
+        authenticated
+          ? user?.slug ||
+            user?.usernameLower ||
+            user?.username ||
+            null
+          : null,
+
+      resolvedUsername:
+        authenticated
+          ? user?.slug ||
+            user?.usernameLower ||
+            user?.username ||
+            null
+          : null,
     },
     {
       forceUnauthenticated:
@@ -1753,6 +1905,8 @@ function collectRoleCandidatesFromUser(user = null) {
     state.user_role,
     state.session?.role,
     state.session?.rol,
+    state.sessionData?.role,
+    state.sessionData?.rol,
   ];
 
   const arrays = [
@@ -1805,6 +1959,7 @@ function collectRoleCandidatesFromUser(user = null) {
 
     state.roles,
     state.session?.roles,
+    state.sessionData?.roles,
   ];
 
   const adminFlag =
@@ -1875,6 +2030,7 @@ function collectRoleCandidatesFromUser(user = null) {
 
       state.isAdmin,
       state.session?.isAdmin,
+      state.sessionData?.isAdmin,
     ].some((value) =>
       isTruthyPermission(value)
     );
@@ -2030,9 +2186,6 @@ function buildBlockedPayload({
     getCurrentToken();
 
   return {
-    version:
-      GUARDS_VERSION,
-
     reason:
       safeText(reason, "blocked"),
 
@@ -2066,9 +2219,6 @@ function buildBlockedPayload({
     user:
       sanitizeUserForEvent(user),
 
-    at:
-      safeIsoDate(),
-
     ...extra,
   };
 }
@@ -2079,9 +2229,6 @@ function buildAllowedPayload({
   extra = {},
 } = {}) {
   return {
-    version:
-      GUARDS_VERSION,
-
     reason:
       safeText(reason, "allowed"),
 
@@ -2100,9 +2247,6 @@ function buildAllowedPayload({
     currentRoles:
       getCurrentRoles(),
 
-    at:
-      safeIsoDate(),
-
     ...extra,
   };
 }
@@ -2112,6 +2256,9 @@ function buildAllowedPayload({
 ========================================================= */
 
 export function guardAuthenticated(options = {}) {
+  const opts =
+    safeObject(options);
+
   const {
     path = "",
     redirectTo = LOGIN_PATH,
@@ -2121,7 +2268,7 @@ export function guardAuthenticated(options = {}) {
     allowPublicTechnicalRoutes = true,
     emitEvents = true,
   } =
-    safeObject(options);
+    opts;
 
   const currentPath =
     normalizeCanonicalPathSafe(
@@ -2146,7 +2293,8 @@ export function guardAuthenticated(options = {}) {
             "public-technical-route",
           path:
             currentPath,
-        })
+        }),
+        opts
       );
     }
 
@@ -2162,7 +2310,8 @@ export function guardAuthenticated(options = {}) {
             "authenticated",
           path:
             currentPath,
-        })
+        }),
+        opts
       );
     }
 
@@ -2193,7 +2342,8 @@ export function guardAuthenticated(options = {}) {
   if (emitEvents !== false) {
     safeEmit(
       "auth:guard:blocked",
-      payload
+      payload,
+      opts
     );
   }
 
@@ -2212,6 +2362,7 @@ export function guardAuthenticated(options = {}) {
           Boolean(hardRedirect),
         reason:
           "not-authenticated",
+        emitEvents,
       }
     );
   }
@@ -2224,6 +2375,9 @@ export function guardRole(roles = [], options = {}) {
     safeArray(roles)
       .flat(Infinity);
 
+  const opts =
+    safeObject(options);
+
   const {
     path = "",
     redirectTo = DEFAULT_FORBIDDEN_PATH,
@@ -2234,7 +2388,7 @@ export function guardRole(roles = [], options = {}) {
     allowPublicTechnicalRoutes = true,
     emitEvents = true,
   } =
-    safeObject(options);
+    opts;
 
   const currentPath =
     normalizeCanonicalPathSafe(
@@ -2259,7 +2413,8 @@ export function guardRole(roles = [], options = {}) {
             "public-technical-route",
           path:
             currentPath,
-        })
+        }),
+        opts
       );
     }
 
@@ -2292,7 +2447,8 @@ export function guardRole(roles = [], options = {}) {
     if (emitEvents !== false) {
       safeEmit(
         "auth:guard:blocked",
-        payload
+        payload,
+        opts
       );
     }
 
@@ -2308,6 +2464,7 @@ export function guardRole(roles = [], options = {}) {
             Boolean(hardRedirect),
           reason:
             "role:not-authenticated",
+          emitEvents,
         }
       );
     }
@@ -2327,7 +2484,8 @@ export function guardRole(roles = [], options = {}) {
           extra: {
             requiredRoles,
           },
-        })
+        }),
+        opts
       );
     }
 
@@ -2356,7 +2514,8 @@ export function guardRole(roles = [], options = {}) {
   if (emitEvents !== false) {
     safeEmit(
       "auth:guard:blocked",
-      payload
+      payload,
+      opts
     );
   }
 
@@ -2372,6 +2531,7 @@ export function guardRole(roles = [], options = {}) {
           Boolean(hardRedirect),
         reason:
           "insufficient-role",
+        emitEvents,
       }
     );
   }
@@ -2380,6 +2540,9 @@ export function guardRole(roles = [], options = {}) {
 }
 
 export function guardGuest(options = {}) {
+  const opts =
+    safeObject(options);
+
   const {
     redirectTo = DEFAULT_HOME_PATH,
     autoNavigate = false,
@@ -2387,7 +2550,7 @@ export function guardGuest(options = {}) {
     allowPublicTechnicalRoutes = true,
     emitEvents = true,
   } =
-    safeObject(options);
+    opts;
 
   const currentPath =
     getCurrentPath();
@@ -2410,7 +2573,8 @@ export function guardGuest(options = {}) {
             "public-technical-route",
           path:
             currentPath,
-        })
+        }),
+        opts
       );
     }
 
@@ -2426,7 +2590,8 @@ export function guardGuest(options = {}) {
             "guest",
           path:
             currentPath,
-        })
+        }),
+        opts
       );
     }
 
@@ -2449,7 +2614,8 @@ export function guardGuest(options = {}) {
           currentPath,
         redirectTo:
           finalRedirect,
-      })
+      }),
+      opts
     );
   }
 
@@ -2465,6 +2631,7 @@ export function guardGuest(options = {}) {
           Boolean(hardRedirect),
         reason:
           "already-authenticated",
+        emitEvents,
       }
     );
   }
@@ -2551,7 +2718,8 @@ export function buildGuardErrorPayload(error) {
     })();
 
   return {
-    message,
+    message:
+      redactSafe(message),
 
     name:
       error?.name || "Error",
@@ -2680,6 +2848,8 @@ export function getAuthGuardsSnapshot() {
 ========================================================= */
 
 export default {
+  GUARDS_VERSION,
+
   syncAuthState,
 
   isAuthenticated,

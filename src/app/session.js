@@ -22,6 +22,17 @@
    - Sin CSS inline.
    - Sin estilos inyectados.
    - Sin dependencia dura con shell.js.
+
+   EXTREME MODE:
+   - Restore idempotente por módulo y por state.
+   - Protección fuerte contra redirects durante rutas públicas técnicas.
+   - Detección de tokens en query, path, hash y hash-router.
+   - Soporte de aliases legacy de activation/reset.
+   - Limpieza de auth fantasma antes/después de restore y navegación.
+   - Aplicación tolerante de payloads heterogéneos de Auth.restore().
+   - Eventos deduplicados y sanitizados.
+   - Post-login target validado contra open redirects.
+   - Reparación DOM no invasiva vía classes/attributes.
 ========================================================= */
 
 import {
@@ -33,13 +44,31 @@ import {
    CONSTANTS
 ========================================================= */
 
-const SESSION_VERSION = "14.0.0";
+export const SESSION_VERSION = "15.0.0-extreme-pro";
+
+const MODULE_SOURCE = "AppSession";
 
 const LOGIN_PATH = "/login";
 
 const ACTIVATION_PATH = "/activate-account";
+const ACTIVATION_ALIAS_PATHS = Object.freeze([
+  "/activate-account",
+  "/activate",
+  "/activation",
+  "/account/activate",
+  "/activate/first-user",
+]);
+
 const RESET_PASSWORD_PATH = "/reset-password";
 const RESET_CONFIRM_PATH = "/reset-password/confirm";
+const RESET_CONFIRM_ALIAS_PATHS = Object.freeze([
+  "/reset-password/confirm",
+  "/reset-password-confirm",
+  "/password-reset/confirm",
+  "/password-reset-confirm",
+  "/confirm-reset-password",
+]);
+
 const FORGOT_PASSWORD_PATH = "/forgot-password";
 const RECOVER_PASSWORD_PATH = "/recover-password";
 const PASSWORD_RESET_PATH = "/password-reset";
@@ -47,34 +76,53 @@ const PASSWORD_RESET_PATH = "/password-reset";
 const DEFAULT_HOME_PATH = "/";
 
 const SESSION_READY_EVENT_DEDUPE_MS = 160;
+const RESTORE_STEP_WARN_MS = 2500;
+const SANITIZE_MAX_DEPTH = 8;
+const SANITIZE_MAX_ARRAY_ITEMS = 100;
 
 const PUBLIC_TECHNICAL_ROUTES = Object.freeze([
   ACTIVATION_PATH,
+  "/activate",
+  "/activation",
+  "/account/activate",
+  "/activate/first-user",
+
   RESET_PASSWORD_PATH,
   RESET_CONFIRM_PATH,
+  "/reset-password-confirm",
+
   FORGOT_PASSWORD_PATH,
   RECOVER_PASSWORD_PATH,
+
   PASSWORD_RESET_PATH,
+  "/password-reset/request",
+  "/password-reset/confirm",
+  "/password-reset-confirm",
+  "/confirm-reset-password",
 ]);
 
 const PUBLIC_TECHNICAL_PREFIXES = Object.freeze([
   `${ACTIVATION_PATH}/`,
+  "/activate/",
+  "/activation/",
+  "/account/activate/",
+  "/activate/first-user/",
+
   `${RESET_CONFIRM_PATH}/`,
+  "/reset-password-confirm/",
+  "/password-reset/confirm/",
+  "/password-reset-confirm/",
+  "/confirm-reset-password/",
 ]);
 
 const AUTH_LIKE_ROUTES = Object.freeze([
   LOGIN_PATH,
-  RESET_PASSWORD_PATH,
-  RESET_CONFIRM_PATH,
-  FORGOT_PASSWORD_PATH,
-  RECOVER_PASSWORD_PATH,
-  PASSWORD_RESET_PATH,
-  ACTIVATION_PATH,
+
+  ...PUBLIC_TECHNICAL_ROUTES,
 ]);
 
 const AUTH_LIKE_PREFIXES = Object.freeze([
-  `${ACTIVATION_PATH}/`,
-  `${RESET_CONFIRM_PATH}/`,
+  ...PUBLIC_TECHNICAL_PREFIXES,
 ]);
 
 const ACTIVATION_TOKEN_PARAM_NAMES = Object.freeze([
@@ -103,23 +151,33 @@ const GENERIC_SENSITIVE_PARAM_NAMES = Object.freeze([
   "confirmToken",
   "code",
   "t",
+
   "access_token",
   "refresh_token",
   "id_token",
+
   "tempToken",
   "temp_token",
   "temporaryToken",
   "temporary_token",
+
   "twoFactorToken",
   "two_factor_token",
   "mfaToken",
   "mfa_token",
+
+  "authorization",
+  "auth",
+  "jwt",
+  "session",
+  "sid",
 ]);
 
 const TOKEN_ROUTE_CONFIGS = Object.freeze([
   Object.freeze({
     key: "activation",
     path: ACTIVATION_PATH,
+    paths: ACTIVATION_ALIAS_PATHS,
 
     initialWindowKeys: Object.freeze([
       "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
@@ -139,6 +197,7 @@ const TOKEN_ROUTE_CONFIGS = Object.freeze([
   Object.freeze({
     key: "resetConfirm",
     path: RESET_CONFIRM_PATH,
+    paths: RESET_CONFIRM_ALIAS_PATHS,
 
     initialWindowKeys: Object.freeze([
       "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
@@ -161,9 +220,14 @@ const TOKEN_ROUTE_CONFIGS = Object.freeze([
 
 const RUNTIME_WINDOW_KEYS = Object.freeze({
   initialUrl: "__ONION_INITIAL_URL__",
+  bootContext: "__ONION_BOOT_CONTEXT__",
+
   activationInitialUrl: "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+
   resetPasswordConfirmInitialUrl: "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
   resetConfirmInitialUrl: "__ONION_RESET_CONFIRM_INITIAL_URL__",
+
+  sessionSnapshot: "__ONION_SESSION_BOOTSTRAP_SNAPSHOT__",
 });
 
 const SESSION_EVENTS = Object.freeze({
@@ -179,10 +243,12 @@ const SESSION_EVENTS = Object.freeze({
   authNavigation: "app:auth:navigation",
   authScreenCleared: "app:shell:auth-screen-cleared",
   ghostAuthBlocked: "app:auth:ghost-blocked",
+
+  restoreStep: "app:session:restore:step",
 });
 
 const SENSITIVE_OBJECT_KEY_RE =
-  /token|secret|password|authorization|credential|jwt|bearer|otp|code/i;
+  /token|secret|password|authorization|credential|jwt|bearer|otp|code|session|refresh/i;
 
 /* =========================================================
    MODULE RUNTIME
@@ -236,7 +302,10 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -273,9 +342,7 @@ function safeClone(value, fallback = null) {
   } catch {}
 
   try {
-    return JSON.parse(
-      JSON.stringify(value)
-    );
+    return JSON.parse(JSON.stringify(value));
   } catch {
     return fallback;
   }
@@ -388,6 +455,17 @@ function escapeRegExp(value = "") {
   );
 }
 
+function getConfigPaths(config = {}) {
+  const paths = [
+    ...safeArray(config.paths),
+    config.path,
+  ]
+    .map((item) => normalizePathnameOnly(item || ""))
+    .filter(Boolean);
+
+  return Array.from(new Set(paths));
+}
+
 function redactTokenInText(value = "") {
   const raw = safeText(value, "");
 
@@ -398,14 +476,16 @@ function redactTokenInText(value = "") {
   let output = raw;
 
   for (const config of TOKEN_ROUTE_CONFIGS) {
-    const escapedPath = escapeRegExp(config.path);
+    for (const path of getConfigPaths(config)) {
+      const escapedPath = escapeRegExp(path);
 
-    try {
-      output = output.replace(
-        new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
-        "$1/***"
-      );
-    } catch {}
+      try {
+        output = output.replace(
+          new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
+          "$1/***"
+        );
+      } catch {}
+    }
 
     for (const name of config.tokenParamNames) {
       try {
@@ -505,7 +585,7 @@ function sanitizeError(error = null) {
 }
 
 function sanitizePayload(value, depth = 0) {
-  if (depth > 8) {
+  if (depth > SANITIZE_MAX_DEPTH) {
     return "[MaxDepth]";
   }
 
@@ -544,7 +624,7 @@ function sanitizePayload(value, depth = 0) {
 
   if (Array.isArray(value)) {
     return value
-      .slice(0, 80)
+      .slice(0, SANITIZE_MAX_ARRAY_ITEMS)
       .map((item) =>
         sanitizePayload(item, depth + 1)
       );
@@ -599,6 +679,10 @@ function sanitizeRestoreResult(result = {}) {
     "password",
     "code",
     "otp",
+    "tempToken",
+    "temporaryToken",
+    "twoFactorToken",
+    "mfaToken",
   ];
 
   for (const key of sensitiveKeys) {
@@ -723,7 +807,7 @@ function emit(AppCore, eventName, payload = {}, options = {}) {
   const cleanPayload =
     sanitizePayload({
       version: SESSION_VERSION,
-      source: "AppSession",
+      source: MODULE_SOURCE,
       ...safeObject(payload),
     });
 
@@ -762,6 +846,54 @@ function emit(AppCore, eventName, payload = {}, options = {}) {
   }
 
   return busEmitted;
+}
+
+function emitStep(AppCore, name = "", payload = {}) {
+  emit(
+    AppCore,
+    SESSION_EVENTS.restoreStep,
+    {
+      step: safeText(name, "unknown"),
+      at: safeIsoDate(),
+      ...safeObject(payload),
+    }
+  );
+}
+
+async function runRestoreStep(AppCore, name = "", fn) {
+  const startedAt = safeNow();
+
+  emitStep(AppCore, `${name}:start`);
+
+  try {
+    const result = await Promise.resolve(
+      isFunction(fn)
+        ? fn()
+        : null
+    );
+
+    const durationMs = safeNow() - startedAt;
+
+    emitStep(AppCore, `${name}:done`, {
+      durationMs,
+    });
+
+    if (durationMs > RESTORE_STEP_WARN_MS) {
+      safeWarn(AppCore, "Restore step lento.", {
+        step: name,
+        durationMs,
+      });
+    }
+
+    return result;
+  } catch (error) {
+    emitStep(AppCore, `${name}:error`, {
+      durationMs: safeNow() - startedAt,
+      error,
+    });
+
+    throw error;
+  }
 }
 
 /* =========================================================
@@ -1031,6 +1163,37 @@ function getWindowValue(key = "") {
   }
 }
 
+function getWindowRawValue(key = "") {
+  if (
+    !isBrowser() ||
+    !key
+  ) {
+    return null;
+  }
+
+  try {
+    return window[key] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function setWindowValue(key = "", value = null) {
+  if (
+    !isBrowser() ||
+    !key
+  ) {
+    return false;
+  }
+
+  try {
+    window[key] = value;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function getWindowFirstValue(keys = []) {
   for (const key of safeArray(keys)) {
     const value = getWindowValue(key);
@@ -1047,6 +1210,14 @@ function getInitialUrl() {
   return getWindowValue(
     RUNTIME_WINDOW_KEYS.initialUrl
   );
+}
+
+function getBootContext() {
+  const context = getWindowRawValue(
+    RUNTIME_WINDOW_KEYS.bootContext
+  );
+
+  return safeObject(context);
 }
 
 function getActivationInitialUrl() {
@@ -1116,6 +1287,7 @@ function getState(AppCore) {
 
 function getBootInitialPath(AppCore) {
   const state = getState(AppCore);
+  const bootContext = getBootContext();
 
   return (
     safeText(state.bootProtectedInitialPublicPath, "") ||
@@ -1124,10 +1296,20 @@ function getBootInitialPath(AppCore) {
     safeText(state.bootProtectedInitialPath, "") ||
     safeText(state.bootActivationInitialPath, "") ||
     safeText(state.bootResetConfirmInitialPath, "") ||
+
+    safeText(bootContext.protectedInitialPublicPath, "") ||
+    safeText(bootContext.activationInitialPublicPath, "") ||
+    safeText(bootContext.resetConfirmInitialPublicPath, "") ||
+    safeText(bootContext.protectedInitialPath, "") ||
+    safeText(bootContext.activationInitialPath, "") ||
+    safeText(bootContext.resetConfirmInitialPath, "") ||
+
     pathFromUrlLike(getActivationInitialUrl()) ||
     pathFromUrlLike(getResetConfirmInitialUrl()) ||
     pathFromUrlLike(safeText(state.bootProtectedInitialUrl, "")) ||
     pathFromUrlLike(safeText(state.bootInitialUrl, "")) ||
+    pathFromUrlLike(safeText(bootContext.protectedInitialUrl, "")) ||
+    pathFromUrlLike(safeText(bootContext.initialUrl, "")) ||
     pathFromUrlLike(getInitialUrl()) ||
     getBrowserPublicPath() ||
     safeText(state.publicPath, "") ||
@@ -1421,19 +1603,27 @@ function hasRouteToken({
 }
 
 function hasActivationToken(value = "") {
-  return hasRouteToken({
-    value,
-    basePath: ACTIVATION_PATH,
-    tokenParamNames: ACTIVATION_TOKEN_PARAM_NAMES,
-  });
+  return getConfigPaths(
+    TOKEN_ROUTE_CONFIGS.find((item) => item.key === "activation")
+  ).some((path) =>
+    hasRouteToken({
+      value,
+      basePath: path,
+      tokenParamNames: ACTIVATION_TOKEN_PARAM_NAMES,
+    })
+  );
 }
 
 function hasResetConfirmToken(value = "") {
-  return hasRouteToken({
-    value,
-    basePath: RESET_CONFIRM_PATH,
-    tokenParamNames: RESET_TOKEN_PARAM_NAMES,
-  });
+  return getConfigPaths(
+    TOKEN_ROUTE_CONFIGS.find((item) => item.key === "resetConfirm")
+  ).some((path) =>
+    hasRouteToken({
+      value,
+      basePath: path,
+      tokenParamNames: RESET_TOKEN_PARAM_NAMES,
+    })
+  );
 }
 
 function getHistoryState() {
@@ -1508,16 +1698,24 @@ function normalizeCanonicalCandidate(path = "/") {
   );
 }
 
-function isPublicTechnicalCanonicalPath(canonicalPath = "/") {
+function isPathMatchingAny(path = "/", routes = [], prefixes = []) {
   const clean =
-    normalizeCanonicalCandidate(canonicalPath || "/");
+    normalizeCanonicalCandidate(path || "/");
 
-  if (PUBLIC_TECHNICAL_ROUTES.includes(clean)) {
+  if (safeArray(routes).includes(clean)) {
     return true;
   }
 
-  return PUBLIC_TECHNICAL_PREFIXES.some((prefix) =>
+  return safeArray(prefixes).some((prefix) =>
     clean.startsWith(prefix)
+  );
+}
+
+function isPublicTechnicalCanonicalPath(canonicalPath = "/") {
+  return isPathMatchingAny(
+    canonicalPath,
+    PUBLIC_TECHNICAL_ROUTES,
+    PUBLIC_TECHNICAL_PREFIXES
   );
 }
 
@@ -1525,9 +1723,11 @@ function isActivationCanonicalPath(canonicalPath = "/") {
   const clean =
     normalizeCanonicalCandidate(canonicalPath);
 
-  return (
-    clean === ACTIVATION_PATH ||
-    clean.startsWith(`${ACTIVATION_PATH}/`)
+  return getConfigPaths(
+    TOKEN_ROUTE_CONFIGS.find((item) => item.key === "activation")
+  ).some((path) =>
+    clean === path ||
+    clean.startsWith(`${path}/`)
   );
 }
 
@@ -1535,9 +1735,11 @@ function isResetConfirmCanonicalPath(canonicalPath = "/") {
   const clean =
     normalizeCanonicalCandidate(canonicalPath);
 
-  return (
-    clean === RESET_CONFIRM_PATH ||
-    clean.startsWith(`${RESET_CONFIRM_PATH}/`)
+  return getConfigPaths(
+    TOKEN_ROUTE_CONFIGS.find((item) => item.key === "resetConfirm")
+  ).some((path) =>
+    clean === path ||
+    clean.startsWith(`${path}/`)
   );
 }
 
@@ -1546,24 +1748,69 @@ function isLoginCanonicalPath(canonicalPath = "/") {
 }
 
 function isAuthLikeCanonicalPath(canonicalPath = "/") {
-  const clean =
-    normalizeCanonicalCandidate(canonicalPath);
-
-  if (AUTH_LIKE_ROUTES.includes(clean)) {
-    return true;
-  }
-
-  return AUTH_LIKE_PREFIXES.some((prefix) =>
-    clean.startsWith(prefix)
+  return isPathMatchingAny(
+    canonicalPath,
+    AUTH_LIKE_ROUTES,
+    AUTH_LIKE_PREFIXES
   );
+}
+
+function getBootCandidateValues(AppCore) {
+  const state = getState(AppCore);
+  const bootContext = getBootContext();
+
+  return [
+    state.bootProtectedInitialUrl,
+    state.bootProtectedInitialPublicPath,
+    state.bootProtectedInitialPath,
+
+    state.bootActivationInitialUrl,
+    state.bootActivationInitialPublicPath,
+    state.bootActivationInitialPath,
+
+    state.bootResetConfirmInitialUrl,
+    state.bootResetConfirmInitialPublicPath,
+    state.bootResetConfirmInitialPath,
+
+    state.bootResetPasswordConfirmInitialUrl,
+    state.bootResetPasswordConfirmInitialPublicPath,
+    state.bootResetPasswordConfirmInitialPath,
+
+    bootContext.protectedInitialUrl,
+    bootContext.protectedInitialPublicPath,
+    bootContext.protectedInitialPath,
+
+    bootContext.activationInitialUrl,
+    bootContext.activationInitialPublicPath,
+    bootContext.activationInitialPath,
+
+    bootContext.resetConfirmInitialUrl,
+    bootContext.resetConfirmInitialPublicPath,
+    bootContext.resetConfirmInitialPath,
+
+    getActivationInitialUrl(),
+    getResetConfirmInitialUrl(),
+
+    state.bootInitialUrl,
+    bootContext.initialUrl,
+    getInitialUrl(),
+
+    getBrowserPublicPath(),
+
+    state.publicPath,
+    state.route,
+  ]
+    .map((item) => safeText(item, ""))
+    .filter(Boolean);
 }
 
 function isActivationBoot(AppCore) {
   const state = getState(AppCore);
+  const bootContext = getBootContext();
 
   if (
-    state.bootIsActivation === true &&
-    state.bootHasActivationToken === true
+    (state.bootIsActivation === true && state.bootHasActivationToken === true) ||
+    (bootContext.isActivation === true && bootContext.hasActivationToken === true)
   ) {
     return true;
   }
@@ -1572,41 +1819,21 @@ function isActivationBoot(AppCore) {
     return false;
   }
 
-  const candidates = [
-    state.bootActivationInitialUrl,
-    state.bootActivationInitialPublicPath,
-    state.bootActivationInitialPath,
-    state.bootProtectedInitialUrl,
-    state.bootProtectedInitialPublicPath,
-    state.bootProtectedInitialPath,
-    getActivationInitialUrl(),
-    state.bootInitialUrl,
-    getInitialUrl(),
-    getBrowserPublicPath(),
-    state.publicPath,
-    state.route,
-  ];
-
-  return candidates.some((candidate) => {
-    const value = safeText(candidate, "");
-
-    if (!value) {
-      return false;
-    }
-
+  return getBootCandidateValues(AppCore).some((candidate) => {
     return (
-      isActivationCanonicalPath(value) &&
-      hasActivationToken(value)
+      isActivationCanonicalPath(candidate) &&
+      hasActivationToken(candidate)
     );
   });
 }
 
 function isResetConfirmBoot(AppCore) {
   const state = getState(AppCore);
+  const bootContext = getBootContext();
 
   if (
-    state.bootIsResetConfirm === true &&
-    state.bootHasResetToken === true
+    (state.bootIsResetConfirm === true && state.bootHasResetToken === true) ||
+    (bootContext.isResetConfirm === true && bootContext.hasResetToken === true)
   ) {
     return true;
   }
@@ -1615,34 +1842,10 @@ function isResetConfirmBoot(AppCore) {
     return false;
   }
 
-  const candidates = [
-    state.bootResetConfirmInitialUrl,
-    state.bootResetConfirmInitialPublicPath,
-    state.bootResetConfirmInitialPath,
-    state.bootResetPasswordConfirmInitialUrl,
-    state.bootResetPasswordConfirmInitialPublicPath,
-    state.bootResetPasswordConfirmInitialPath,
-    state.bootProtectedInitialUrl,
-    state.bootProtectedInitialPublicPath,
-    state.bootProtectedInitialPath,
-    getResetConfirmInitialUrl(),
-    state.bootInitialUrl,
-    getInitialUrl(),
-    getBrowserPublicPath(),
-    state.publicPath,
-    state.route,
-  ];
-
-  return candidates.some((candidate) => {
-    const value = safeText(candidate, "");
-
-    if (!value) {
-      return false;
-    }
-
+  return getBootCandidateValues(AppCore).some((candidate) => {
     return (
-      isResetConfirmCanonicalPath(value) &&
-      hasResetConfirmToken(value)
+      isResetConfirmCanonicalPath(candidate) &&
+      hasResetConfirmToken(candidate)
     );
   });
 }
@@ -1691,7 +1894,10 @@ function setCoreState(AppCore, patch = {}, options = {}) {
       AppCore.setState(
         patch,
         {
-          source: "AppSession",
+          source: MODULE_SOURCE,
+          emit: false,
+          emitState: false,
+          silent: true,
           ...safeObject(options),
         }
       );
@@ -1705,7 +1911,10 @@ function setCoreState(AppCore, patch = {}, options = {}) {
       AppCore.patchState(
         patch,
         {
-          source: "AppSession",
+          source: MODULE_SOURCE,
+          emit: false,
+          emitState: false,
+          silent: true,
           ...safeObject(options),
         }
       );
@@ -1725,7 +1934,11 @@ function getResolvedUserObject(AppCore) {
     state.currentUser ||
     state.sessionUser ||
     state.authUser ||
+    state.me ||
+    state.account ||
+    state.profile ||
     state.session?.user ||
+    state.auth?.user ||
     null
   );
 }
@@ -1756,6 +1969,8 @@ function getResolvedSessionRole(AppCore) {
     state.userRole ||
     state.session?.role ||
     state.session?.rol ||
+    state.auth?.role ||
+    state.auth?.rol ||
     user?.role ||
     user?.rol ||
     user?.type ||
@@ -1784,6 +1999,7 @@ function hasUsableSessionUser(user = null) {
     safeText(user.user_id, "") ||
     safeText(user._id, "") ||
     safeText(user.uid, "") ||
+    safeText(user.sub, "") ||
     safeText(user.username, "") ||
     safeText(user.userName, "") ||
     safeText(user.user_name, "") ||
@@ -1825,6 +2041,24 @@ function hasTokenLike(value = "") {
   return true;
 }
 
+function getCurrentToken(AppCore) {
+  const state = getState(AppCore);
+
+  return (
+    firstToken(
+      state.token,
+      state.accessToken,
+      state.access_token,
+      state.auth?.token,
+      state.auth?.accessToken,
+      state.auth?.access_token,
+      state.session?.token,
+      state.session?.accessToken,
+      state.session?.access_token
+    ) || null
+  );
+}
+
 function isAuthenticated(AppCore) {
   const state = getState(AppCore);
 
@@ -1857,14 +2091,21 @@ function enforceNoGhostAuth(AppCore, reason = "ghost-auth-check") {
     {
       authenticated: false,
       role: null,
+      rol: null,
       username: null,
       currentResolvedUsername: null,
       resolvedUsername: null,
+      user: null,
+      currentUser: null,
+      sessionUser: null,
+      authUser: null,
     },
     {
       source: `AppSession:${reason}`,
       forceUnauthenticated: true,
       emit: false,
+      emitState: false,
+      silent: true,
     }
   );
 
@@ -1928,80 +2169,103 @@ function isAuthLoginInProgress(Auth, state = {}) {
    SNAPSHOTS
 ========================================================= */
 
+function persistSessionSnapshot(snapshot = {}) {
+  try {
+    setWindowValue(
+      RUNTIME_WINDOW_KEYS.sessionSnapshot,
+      sanitizePayload(snapshot)
+    );
+  } catch {}
+
+  return snapshot;
+}
+
 function buildSnapshot(AppCore, extras = {}) {
   const state = getState(AppCore);
 
-  return sanitizePayload({
-    version: SESSION_VERSION,
+  const snapshot =
+    sanitizePayload({
+      version: SESSION_VERSION,
 
-    authenticated:
-      isAuthenticated(AppCore),
+      authenticated:
+        isAuthenticated(AppCore),
 
-    user:
-      getResolvedUserObject(AppCore),
+      user:
+        getResolvedUserObject(AppCore),
 
-    username:
-      getResolvedSessionUser(AppCore),
+      username:
+        getResolvedSessionUser(AppCore),
 
-    role:
-      getResolvedSessionRole(AppCore),
+      role:
+        getResolvedSessionRole(AppCore),
 
-    route:
-      state.route || "/",
+      hasToken:
+        Boolean(getCurrentToken(AppCore)),
 
-    publicPath:
-      state.publicPath || "/",
+      route:
+        state.route || "/",
 
-    bootInitialUrl:
-      redactTokenInText(
-        state.bootInitialUrl ||
-          getInitialUrl() ||
-          ""
-      ) || null,
+      publicPath:
+        state.publicPath || "/",
 
-    bootProtectedInitialUrl:
-      redactTokenInText(
-        state.bootProtectedInitialUrl ||
-          ""
-      ) || null,
+      bootInitialUrl:
+        redactTokenInText(
+          state.bootInitialUrl ||
+            getBootContext().initialUrl ||
+            getInitialUrl() ||
+            ""
+        ) || null,
 
-    bootActivationInitialUrl:
-      redactTokenInText(
-        state.bootActivationInitialUrl ||
-          getActivationInitialUrl() ||
-          ""
-      ) || null,
+      bootProtectedInitialUrl:
+        redactTokenInText(
+          state.bootProtectedInitialUrl ||
+            getBootContext().protectedInitialUrl ||
+            ""
+        ) || null,
 
-    bootResetConfirmInitialUrl:
-      redactTokenInText(
-        state.bootResetConfirmInitialUrl ||
-          getResetConfirmInitialUrl() ||
-          ""
-      ) || null,
+      bootActivationInitialUrl:
+        redactTokenInText(
+          state.bootActivationInitialUrl ||
+            getBootContext().activationInitialUrl ||
+            getActivationInitialUrl() ||
+            ""
+        ) || null,
 
-    bootIsActivation:
-      Boolean(state.bootIsActivation),
+      bootResetConfirmInitialUrl:
+        redactTokenInText(
+          state.bootResetConfirmInitialUrl ||
+            getBootContext().resetConfirmInitialUrl ||
+            getResetConfirmInitialUrl() ||
+            ""
+        ) || null,
 
-    bootHasActivationToken:
-      Boolean(state.bootHasActivationToken),
+      bootIsActivation:
+        Boolean(state.bootIsActivation || getBootContext().isActivation),
 
-    bootIsResetConfirm:
-      Boolean(state.bootIsResetConfirm),
+      bootHasActivationToken:
+        Boolean(state.bootHasActivationToken || getBootContext().hasActivationToken),
 
-    bootHasResetToken:
-      Boolean(state.bootHasResetToken),
+      bootIsResetConfirm:
+        Boolean(state.bootIsResetConfirm || getBootContext().isResetConfirm),
 
-    activationTokenScrubbed:
-      isActivationTokenScrubbed(),
+      bootHasResetToken:
+        Boolean(state.bootHasResetToken || getBootContext().hasResetToken),
 
-    resetConfirmTokenScrubbed:
-      isResetConfirmTokenScrubbed(),
+      activationTokenScrubbed:
+        isActivationTokenScrubbed(),
 
-    at:
-      safeIsoDate(),
+      resetConfirmTokenScrubbed:
+        isResetConfirmTokenScrubbed(),
 
-    ...extras,
-  });
+      at:
+        safeIsoDate(),
+
+      ...extras,
+    });
+
+  persistSessionSnapshot(snapshot);
+
+  return snapshot;
 }
 
 /* =========================================================
@@ -2032,27 +2296,63 @@ function extractSessionPayloadFromResult(result = {}) {
   const source = safeObject(result);
   const data = safeObject(source.data);
   const payload = safeObject(source.payload);
+  const auth = safeObject(source.auth);
   const session = safeObject(source.session);
+  const sessionData = safeObject(source.sessionData);
   const dataSession = safeObject(data.session);
   const payloadSession = safeObject(payload.session);
+  const authSession = safeObject(auth.session);
 
   const user =
     firstUsableUser(
       source.user,
+      source.usuario,
+      source.me,
+      source.account,
+      source.profile,
       source.currentUser,
       source.sessionUser,
       source.authUser,
+
       session.user,
+      session.usuario,
+      session.me,
+      session.account,
+      session.profile,
+
+      sessionData.user,
+      sessionData.usuario,
+
       data.user,
+      data.usuario,
+      data.me,
+      data.account,
+      data.profile,
       data.currentUser,
       data.sessionUser,
       data.authUser,
+
       dataSession.user,
+      dataSession.usuario,
+
       payload.user,
+      payload.usuario,
+      payload.me,
+      payload.account,
+      payload.profile,
       payload.currentUser,
       payload.sessionUser,
       payload.authUser,
-      payloadSession.user
+
+      payloadSession.user,
+      payloadSession.usuario,
+
+      auth.user,
+      auth.usuario,
+      auth.me,
+      auth.account,
+      auth.profile,
+      authSession.user
     );
 
   const token =
@@ -2062,28 +2362,58 @@ function extractSessionPayloadFromResult(result = {}) {
       source.access_token,
       source.jwt,
       source.bearer,
+
       session.token,
       session.accessToken,
       session.access_token,
+
+      sessionData.token,
+      sessionData.accessToken,
+      sessionData.access_token,
+
       data.token,
       data.accessToken,
       data.access_token,
       data.jwt,
+
       dataSession.token,
       dataSession.accessToken,
       dataSession.access_token,
+
       payload.token,
       payload.accessToken,
       payload.access_token,
       payload.jwt,
+
       payloadSession.token,
       payloadSession.accessToken,
-      payloadSession.access_token
+      payloadSession.access_token,
+
+      auth.token,
+      auth.accessToken,
+      auth.access_token,
+      authSession.token
+    );
+
+  const refreshToken =
+    firstToken(
+      source.refreshToken,
+      source.refresh_token,
+      session.refreshToken,
+      session.refresh_token,
+      sessionData.refreshToken,
+      data.refreshToken,
+      data.refresh_token,
+      payload.refreshToken,
+      payload.refresh_token,
+      auth.refreshToken,
+      auth.refresh_token
     );
 
   return {
     user,
     token,
+    refreshToken,
   };
 }
 
@@ -2099,6 +2429,7 @@ function maybeApplyRestoreResultToCore({
   const {
     user,
     token,
+    refreshToken,
   } =
     extractSessionPayloadFromResult(result);
 
@@ -2112,6 +2443,15 @@ function maybeApplyRestoreResultToCore({
   ) {
     patch.token = token;
     patch.accessToken = token;
+    patch.access_token = token;
+  }
+
+  if (
+    refreshToken &&
+    !hasTokenLike(currentState.refreshToken)
+  ) {
+    patch.refreshToken = refreshToken;
+    patch.refresh_token = refreshToken;
   }
 
   if (
@@ -2121,6 +2461,9 @@ function maybeApplyRestoreResultToCore({
     )
   ) {
     patch.user = user;
+    patch.currentUser = user;
+    patch.sessionUser = user;
+    patch.authUser = user;
   }
 
   const resolvedUser =
@@ -2128,7 +2471,7 @@ function maybeApplyRestoreResultToCore({
     getResolvedUserObject(AppCore);
 
   if (
-    token &&
+    (token || getCurrentToken(AppCore)) &&
     hasUsableSessionUser(resolvedUser)
   ) {
     patch.authenticated = true;
@@ -2138,6 +2481,19 @@ function maybeApplyRestoreResultToCore({
       getResolvedSessionRole(AppCore) ||
       resolvedUser?.role ||
       resolvedUser?.rol ||
+      null;
+
+    patch.rol =
+      patch.rol ||
+      patch.role ||
+      null;
+
+    patch.username =
+      patch.username ||
+      resolvedUser?.username ||
+      resolvedUser?.email ||
+      resolvedUser?.userId ||
+      resolvedUser?.id ||
       null;
   }
 
@@ -2152,6 +2508,8 @@ function maybeApplyRestoreResultToCore({
         {
           source: `AppSession:${reason}`,
           emit: false,
+          emitState: false,
+          silent: true,
         }
       );
 
@@ -2166,6 +2524,8 @@ function maybeApplyRestoreResultToCore({
       {
         source: `AppSession:${reason}`,
         emit: false,
+        emitState: false,
+        silent: true,
       }
     );
 
@@ -2195,7 +2555,7 @@ async function runSyncUserUI({
     Auth,
     Router,
     reason,
-    source: "AppSession",
+    source: MODULE_SOURCE,
   };
 
   let synced = false;
@@ -2526,6 +2886,8 @@ function markNavigationHandled({
     {
       source: "AppSession:navigation-handled",
       emit: false,
+      emitState: false,
+      silent: true,
     }
   );
 }
@@ -2707,7 +3069,7 @@ async function runRouterNavigation({
             {
               replaceState,
               force,
-              source: "AppSession",
+              source: MODULE_SOURCE,
             }
           )
         );
@@ -2731,7 +3093,7 @@ async function runRouterNavigation({
             {
               replaceState,
               force,
-              source: "AppSession",
+              source: MODULE_SOURCE,
               reason: "post-restore-login-navigation",
             }
           )
@@ -2743,6 +3105,31 @@ async function runRouterNavigation({
     safeWarn(
       AppCore,
       "Router.navigate() falló:",
+      error
+    );
+  }
+
+  try {
+    if (isFunction(Router.render)) {
+      const result =
+        await runMaybePromise(
+          Router.render(
+            normalizedTarget,
+            {
+              replaceState,
+              force,
+              source: MODULE_SOURCE,
+              reason: "post-restore-login-render-fallback",
+            }
+          )
+        );
+
+      return result !== false;
+    }
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      "Router.render() fallback falló:",
       error
     );
   }
@@ -3005,9 +3392,14 @@ function buildAuthRestoreOptions({
     silent: true,
 
     skipNavigation: true,
+    skipRedirect: true,
+    noRedirect: true,
 
     preserveCurrentRoute: publicTechnicalBoot,
     preserveRoute: publicTechnicalBoot,
+    preservePublicPath: publicTechnicalBoot,
+    preserveSearch: publicTechnicalBoot,
+    preserveHash: publicTechnicalBoot,
 
     publicRoute: publicTechnicalBoot,
     technicalPublicRoute: publicTechnicalBoot,
@@ -3095,7 +3487,9 @@ export async function restoreAuthSession({
     );
   }
 
-  const promise =
+  let promise = null;
+
+  promise =
     (async () => {
       const activationBoot = isActivationBoot(AppCore);
       const resetConfirmBoot = isResetConfirmBoot(AppCore);
@@ -3112,6 +3506,8 @@ export async function restoreAuthSession({
           {
             source: "AppSession:restore-start",
             emit: false,
+            emitState: false,
+            silent: true,
           }
         );
 
@@ -3144,10 +3540,14 @@ export async function restoreAuthSession({
           });
 
         const result =
-          await callAuthRestoreSession({
-            Auth,
-            options: restoreOptions,
-          });
+          await runRestoreStep(
+            AppCore,
+            "auth-restore",
+            () => callAuthRestoreSession({
+              Auth,
+              options: restoreOptions,
+            })
+          );
 
         maybeApplyRestoreResultToCore({
           AppCore,
@@ -3161,13 +3561,17 @@ export async function restoreAuthSession({
         );
 
         if (syncUi) {
-          await runSyncUserUI({
+          await runRestoreStep(
             AppCore,
-            Auth,
-            Router,
-            syncUserUI,
-            reason: "restore-auth-session",
-          });
+            "sync-ui-after-auth-restore",
+            () => runSyncUserUI({
+              AppCore,
+              Auth,
+              Router,
+              syncUserUI,
+              reason: "restore-auth-session",
+            })
+          );
         }
 
         const authenticated = isAuthenticated(AppCore);
@@ -3275,6 +3679,8 @@ export async function restoreAuthSession({
           {
             source: "AppSession:restore-finally",
             emit: false,
+            emitState: false,
+            silent: true,
           }
         );
 
@@ -3354,16 +3760,19 @@ export async function restoreSessionInBackground({
       });
 
     try {
-      await Promise.resolve(
-        isFunction(warmup)
-          ? warmup({
-              AppCore,
-              Auth,
-              Router,
-              Store,
-              reason: "session-restore",
-            })
-          : null
+      await runRestoreStep(
+        AppCore,
+        "warmup",
+        () =>
+          isFunction(warmup)
+            ? warmup({
+                AppCore,
+                Auth,
+                Router,
+                Store,
+                reason: "session-restore",
+              })
+            : null
       );
     } catch (error) {
       safeWarn(
@@ -3633,6 +4042,9 @@ export function getSessionBootstrapSnapshot({
       redactTokenInText(
         getBootInitialPath(AppCore)
       ),
+
+    bootContext:
+      sanitizePayload(getBootContext()),
 
     ghostAuthBlocked:
       Boolean(

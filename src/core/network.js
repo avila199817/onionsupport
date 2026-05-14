@@ -3,7 +3,7 @@
    Archivo: src/core/network.js
 
    ONION SUPPORT · CORE NETWORK
-   CONNECTIVITY EVENTS · STATE SYNC · CLEANUP SAFE · 13/10
+   CONNECTIVITY EVENTS · STATE SYNC · CLEANUP SAFE · 14/10
 
    Responsabilidades:
    - bind de eventos de conectividad del navegador
@@ -38,7 +38,7 @@ import { isBrowser } from "./helpers.js";
 ========================================================= */
 
 const NETWORK_VERSION =
-  "13.0.0";
+  "14.0.0";
 
 const NETWORK_SCOPE =
   "core:network";
@@ -88,6 +88,27 @@ const NETWORK_EVENTS =
       "core:network:error",
   });
 
+const PASSIVE_REASONS =
+  new Set([
+    "focus",
+    "pageshow",
+    "visibilitychange",
+    "already-bound",
+    "manual",
+    "refresh-context",
+    "snapshot",
+  ]);
+
+const HARD_REASONS =
+  new Set([
+    "online",
+    "offline",
+    "connection-change",
+    "bind",
+    "force",
+    "server",
+  ]);
+
 /* =========================================================
    MODULE STATE
 ========================================================= */
@@ -114,6 +135,9 @@ let lastSyncAt =
   0;
 
 let lastVisibilityState =
+  null;
+
+let lastHidden =
   null;
 
 let lastConnectionFingerprint =
@@ -160,6 +184,9 @@ const stats = {
     0,
 
   connection:
+    0,
+
+  throttled:
     0,
 
   errors:
@@ -219,6 +246,45 @@ function safeNumber(value, fallback = 0) {
     : fallback;
 }
 
+function safeBool(value, fallback = false) {
+  if (value === true) return true;
+  if (value === false) return false;
+  if (value === 1) return true;
+  if (value === 0) return false;
+
+  if (typeof value === "string") {
+    const clean =
+      value.trim().toLowerCase();
+
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "si",
+        "sí",
+        "ok",
+        "on",
+      ].includes(clean)
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "off",
+      ].includes(clean)
+    ) {
+      return false;
+    }
+  }
+
+  return Boolean(fallback);
+}
+
 function isFunction(value) {
   return typeof value === "function";
 }
@@ -229,6 +295,18 @@ function isObject(value) {
     typeof value === "object" &&
     !Array.isArray(value)
   );
+}
+
+function safeObject(value, fallback = {}) {
+  return isObject(value)
+    ? value
+    : fallback;
+}
+
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 function safeIsoDate(ms = Date.now()) {
@@ -247,6 +325,22 @@ function safeNow() {
   }
 }
 
+function safeClone(value, fallback = null) {
+  try {
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
+    }
+  } catch {}
+
+  try {
+    return JSON.parse(
+      JSON.stringify(value)
+    );
+  } catch {
+    return fallback;
+  }
+}
+
 function safeEmit(events, name, payload = {}) {
   const eventName =
     safeText(name, "");
@@ -258,7 +352,7 @@ function safeEmit(events, name, payload = {}) {
   try {
     events?.emit?.(
       eventName,
-      payload
+      sanitizePayload(payload)
     );
 
     return true;
@@ -305,27 +399,6 @@ function safeWarn(utils, ...args) {
       ...args
     );
   } catch {}
-}
-
-function pushRecent(type = "event", payload = {}) {
-  const atMs =
-    safeNow();
-
-  recentEvents.unshift({
-    type:
-      safeText(type, "event"),
-
-    ...sanitizePayload(payload),
-
-    at:
-      safeIsoDate(atMs),
-
-    atMs,
-  });
-
-  if (recentEvents.length > MAX_RECENT_EVENTS) {
-    recentEvents.splice(MAX_RECENT_EVENTS);
-  }
 }
 
 function sanitizePayload(value, depth = 0) {
@@ -397,6 +470,27 @@ function sanitizePayload(value, depth = 0) {
     return String(value);
   } catch {
     return "[unserializable]";
+  }
+}
+
+function pushRecent(type = "event", payload = {}) {
+  const atMs =
+    safeNow();
+
+  recentEvents.unshift({
+    type:
+      safeText(type, "event"),
+
+    ...sanitizePayload(payload),
+
+    at:
+      safeIsoDate(atMs),
+
+    atMs,
+  });
+
+  if (recentEvents.length > MAX_RECENT_EVENTS) {
+    recentEvents.splice(MAX_RECENT_EVENTS);
   }
 }
 
@@ -565,6 +659,12 @@ function getConnectionSnapshot() {
         typeof connection.saveData === "boolean"
           ? connection.saveData
           : null,
+
+      supportsChangeEvent:
+        isFunction(connection.addEventListener),
+
+      supportsOnChange:
+        "onchange" in connection,
     };
   } catch {}
 
@@ -659,7 +759,7 @@ function updateActiveContext({
   activeContext.scope =
     safeText(
       scope,
-      NETWORK_SCOPE
+      activeContext.scope || NETWORK_SCOPE
     );
 
   return activeContext;
@@ -700,8 +800,27 @@ function buildStatePatch({
     networkStatus:
       status,
 
+    networkKnown:
+      online === true ||
+      online === false,
+
     networkConnection:
       connection,
+
+    networkEffectiveType:
+      connection?.effectiveType || null,
+
+    networkType:
+      connection?.type || null,
+
+    networkDownlink:
+      connection?.downlink ?? null,
+
+    networkRtt:
+      connection?.rtt ?? null,
+
+    networkSaveData:
+      connection?.saveData ?? null,
 
     networkVisibilityState:
       getVisibilityState(),
@@ -793,8 +912,8 @@ function writeNetworkState(state, patch = {}, setState = null) {
     removeUndefinedKeys(patch);
 
   /*
-    Si online es unknown, evitamos setState porque otros normalizadores
-    podrían convertir null en false. Mutación directa controlada.
+    Si online es unknown, evitamos setState porque algún normalizador
+    legacy podría convertir null en false. Mutación directa controlada.
   */
   if (
     isFunction(setState) &&
@@ -808,6 +927,16 @@ function writeNetworkState(state, patch = {}, setState = null) {
         emitDerived:
           false,
       });
+
+      /*
+        Reafirmación controlada para mantener aliases network* vivos.
+      */
+      try {
+        Object.assign(
+          state,
+          cleanPatch
+        );
+      } catch {}
 
       return true;
     } catch {}
@@ -847,6 +976,10 @@ function buildPayload({
         : !online,
 
     status,
+
+    known:
+      online === true ||
+      online === false,
 
     reason:
       safeText(reason, "sync"),
@@ -964,28 +1097,37 @@ function emitNetworkState({
   return payload;
 }
 
-function shouldThrottlePassiveSync(reason = "", force = false, nextOnline = null, nextStatus = "unknown") {
+function shouldThrottlePassiveSync({
+  reason = "",
+  force = false,
+  nextOnline = null,
+  nextStatus = "unknown",
+  nextVisibilityState = null,
+  nextHidden = null,
+  nextConnectionFingerprint = "",
+} = {}) {
   if (force) {
-    return false;
-  }
-
-  if (
-    nextOnline !== lastOnline ||
-    nextStatus !== lastStatus
-  ) {
     return false;
   }
 
   const cleanReason =
     safeText(reason, "");
 
+  if (HARD_REASONS.has(cleanReason)) {
+    return false;
+  }
+
   if (
-    cleanReason === "online" ||
-    cleanReason === "offline" ||
-    cleanReason === "connection-change" ||
-    cleanReason === "bind" ||
-    cleanReason === "force"
+    nextOnline !== lastOnline ||
+    nextStatus !== lastStatus ||
+    nextVisibilityState !== lastVisibilityState ||
+    nextHidden !== lastHidden ||
+    nextConnectionFingerprint !== lastConnectionFingerprint
   ) {
+    return false;
+  }
+
+  if (!PASSIVE_REASONS.has(cleanReason)) {
     return false;
   }
 
@@ -1035,9 +1177,68 @@ function clearManualDisposers() {
     0;
 }
 
+function normalizeDisposer(candidate) {
+  if (isFunction(candidate)) {
+    return candidate;
+  }
+
+  if (isFunction(candidate?.dispose)) {
+    return () => {
+      try {
+        candidate.dispose();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+  }
+
+  if (isFunction(candidate?.off)) {
+    return () => {
+      try {
+        candidate.off();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+  }
+
+  if (isFunction(candidate?.remove)) {
+    return () => {
+      try {
+        candidate.remove();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+  }
+
+  return null;
+}
+
 /* =========================================================
    BIND HELPERS
 ========================================================= */
+
+function ensureCleanupScope(cleanup, scope = NETWORK_SCOPE) {
+  try {
+    if (isFunction(cleanup?.ensureScope)) {
+      cleanup.ensureScope(scope);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (isFunction(cleanup?.scope)) {
+      cleanup.scope(scope);
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
 
 function bindDomEvent({
   cleanup,
@@ -1057,7 +1258,7 @@ function bindDomEvent({
 
   try {
     if (isFunction(cleanup?.event)) {
-      const dispose =
+      const maybeDispose =
         cleanup.event(
           scope,
           target,
@@ -1066,11 +1267,14 @@ function bindDomEvent({
           options
         );
 
-      if (isFunction(dispose)) {
-        return dispose;
+      const disposer =
+        normalizeDisposer(maybeDispose);
+
+      if (disposer) {
+        return disposer;
       }
 
-      if (dispose === true) {
+      if (maybeDispose === true) {
         return () => true;
       }
     }
@@ -1078,7 +1282,7 @@ function bindDomEvent({
 
   try {
     if (isFunction(cleanup?.on)) {
-      const dispose =
+      const maybeDispose =
         cleanup.on(
           scope,
           target,
@@ -1087,11 +1291,14 @@ function bindDomEvent({
           options
         );
 
-      if (isFunction(dispose)) {
-        return dispose;
+      const disposer =
+        normalizeDisposer(maybeDispose);
+
+      if (disposer) {
+        return disposer;
       }
 
-      if (dispose === true) {
+      if (maybeDispose === true) {
         return () => true;
       }
     }
@@ -1226,25 +1433,57 @@ export function syncNetworkState({
   const status =
     onlineToStatus(online);
 
+  const visibilityState =
+    getVisibilityState();
+
+  const hidden =
+    getDocumentHidden();
+
+  const connection =
+    getConnectionSnapshot();
+
+  const currentConnectionFingerprint =
+    connectionFingerprint(
+      connection
+    );
+
   if (
-    shouldThrottlePassiveSync(
+    shouldThrottlePassiveSync({
       reason,
       force,
-      online,
-      status
-    )
+      nextOnline:
+        online,
+      nextStatus:
+        status,
+      nextVisibilityState:
+        visibilityState,
+      nextHidden:
+        hidden,
+      nextConnectionFingerprint:
+        currentConnectionFingerprint,
+    })
   ) {
-    return buildPayload({
-      state:
-        ctx.state,
-      online:
-        lastOnline,
-      reason:
-        `${safeText(reason, "sync")}:throttled`,
-      changed:
-        false,
-      source,
-    });
+    stats.throttled += 1;
+
+    const payload =
+      buildPayload({
+        state:
+          ctx.state,
+        online:
+          lastOnline,
+        reason:
+          `${safeText(reason, "sync")}:throttled`,
+        changed:
+          false,
+        source,
+      });
+
+    pushRecent(
+      "throttled",
+      payload
+    );
+
+    return payload;
   }
 
   const changed =
@@ -1277,20 +1516,21 @@ export function syncNetworkState({
   lastSyncAt =
     safeNow();
 
+  lastVisibilityState =
+    visibilityState;
+
+  lastHidden =
+    hidden;
+
+  lastConnectionFingerprint =
+    currentConnectionFingerprint;
+
   stats.sync += 1;
 
   if (changed) {
     lastChangeAt =
       lastSyncAt;
   }
-
-  const connection =
-    getConnectionSnapshot();
-
-  lastConnectionFingerprint =
-    connectionFingerprint(
-      connection
-    );
 
   return emitNetworkState({
     state:
@@ -1370,13 +1610,6 @@ function handleVisibilityChange() {
   const changed =
     lastVisibilityState !== nextVisibility;
 
-  lastVisibilityState =
-    nextVisibility;
-
-  if (changed) {
-    stats.visibility += 1;
-  }
-
   const payload =
     syncNetworkState({
       state:
@@ -1398,23 +1631,23 @@ function handleVisibilityChange() {
     });
 
   if (changed) {
+    stats.visibility += 1;
+
+    const finalPayload = {
+      ...payload,
+      visibilityState:
+        nextVisibility,
+    };
+
     safeEmit(
       ctx.events,
       NETWORK_EVENTS.visibility,
-      {
-        ...payload,
-        visibilityState:
-          nextVisibility,
-      }
+      finalPayload
     );
 
     pushRecent(
       "visibility",
-      {
-        ...payload,
-        visibilityState:
-          nextVisibility,
-      }
+      finalPayload
     );
   }
 }
@@ -1554,9 +1787,6 @@ function handleConnectionChange() {
   const changed =
     fingerprint !== lastConnectionFingerprint;
 
-  lastConnectionFingerprint =
-    fingerprint;
-
   stats.connection += 1;
 
   const payload =
@@ -1636,6 +1866,20 @@ export function bindNetworkEvents({
       setState
     );
 
+    pushRecent(
+      "server",
+      {
+        version:
+          NETWORK_VERSION,
+        status:
+          "unknown",
+        reason:
+          "server",
+        at:
+          safeIsoDate(),
+      }
+    );
+
     return false;
   }
 
@@ -1678,10 +1922,11 @@ export function bindNetworkEvents({
   }
 
   try {
-    cleanup?.scope?.(scope);
-  } catch {}
+    ensureCleanupScope(
+      cleanup,
+      scope
+    );
 
-  try {
     bindDomEvent({
       cleanup,
       scope,
@@ -1691,6 +1936,11 @@ export function bindNetworkEvents({
         "online",
       handler:
         handleOnline,
+      options:
+        {
+          passive:
+            true,
+        },
     });
 
     bindDomEvent({
@@ -1702,6 +1952,11 @@ export function bindNetworkEvents({
         "offline",
       handler:
         handleOffline,
+      options:
+        {
+          passive:
+            true,
+        },
     });
 
     bindDomEvent({
@@ -1713,6 +1968,11 @@ export function bindNetworkEvents({
         "visibilitychange",
       handler:
         handleVisibilityChange,
+      options:
+        {
+          passive:
+            true,
+        },
     });
 
     bindDomEvent({
@@ -1724,6 +1984,11 @@ export function bindNetworkEvents({
         "focus",
       handler:
         handleFocus,
+      options:
+        {
+          passive:
+            true,
+        },
     });
 
     bindDomEvent({
@@ -1735,6 +2000,11 @@ export function bindNetworkEvents({
         "pageshow",
       handler:
         handlePageShow,
+      options:
+        {
+          passive:
+            true,
+        },
     });
 
     bindDomEvent({
@@ -1746,6 +2016,11 @@ export function bindNetworkEvents({
         "pagehide",
       handler:
         handlePageHide,
+      options:
+        {
+          passive:
+            true,
+        },
     });
 
     const connection =
@@ -1770,6 +2045,9 @@ export function bindNetworkEvents({
 
     lastVisibilityState =
       getVisibilityState();
+
+    lastHidden =
+      getDocumentHidden();
 
     lastConnectionFingerprint =
       connectionFingerprint(
@@ -1796,6 +2074,8 @@ export function bindNetworkEvents({
       ...payload,
       scope,
       bindingId,
+      hasConnectionApi:
+        Boolean(connection),
     };
 
     safeEmit(
@@ -1910,11 +2190,30 @@ export function unbindNetworkEvents({
 }
 
 /* =========================================================
+   PUBLIC STATUS HELPERS
+========================================================= */
+
+export function isNetworkOnline() {
+  return getNavigatorOnline() === true;
+}
+
+export function isNetworkOffline() {
+  return getNavigatorOnline() === false;
+}
+
+export function getNetworkStatus() {
+  return onlineToStatus(
+    getNavigatorOnline()
+  );
+}
+
+/* =========================================================
    SNAPSHOT
 ========================================================= */
 
 export function getNetworkSnapshot({
   state,
+  includeRecent = true,
 } = {}) {
   const sourceState =
     state ||
@@ -1922,6 +2221,9 @@ export function getNetworkSnapshot({
 
   const currentOnline =
     getNavigatorOnline();
+
+  const connection =
+    getConnectionSnapshot();
 
   return {
     version:
@@ -1935,10 +2237,19 @@ export function getNetworkSnapshot({
     online:
       currentOnline,
 
+    offline:
+      currentOnline === null
+        ? null
+        : !currentOnline,
+
     status:
       onlineToStatus(
         currentOnline
       ),
+
+    known:
+      currentOnline === true ||
+      currentOnline === false,
 
     lastOnline,
 
@@ -1962,13 +2273,35 @@ export function getNetworkSnapshot({
 
     lastVisibilityState,
 
+    lastHidden,
+
     lastConnectionFingerprint,
+
+    currentConnectionFingerprint:
+      connectionFingerprint(connection),
 
     manualDisposerCount:
       manualDisposers.size,
 
     activeScope:
       activeContext.scope,
+
+    activeContext: {
+      hasState:
+        Boolean(activeContext.state),
+
+      hasEvents:
+        Boolean(activeContext.events),
+
+      hasCleanup:
+        Boolean(activeContext.cleanup),
+
+      hasUtils:
+        Boolean(activeContext.utils),
+
+      hasSetState:
+        Boolean(activeContext.setState),
+    },
 
     stats: {
       ...stats,
@@ -1988,6 +2321,9 @@ export function getNetworkSnapshot({
 
       networkOffline:
         sourceState?.networkOffline ?? null,
+
+      networkKnown:
+        sourceState?.networkKnown ?? null,
 
       networkStatus:
         sourceState?.networkStatus || "",
@@ -2009,17 +2345,43 @@ export function getNetworkSnapshot({
 
       connection:
         sourceState?.networkConnection || null,
+
+      effectiveType:
+        sourceState?.networkEffectiveType || null,
+
+      connectionType:
+        sourceState?.networkType || null,
+
+      downlink:
+        sourceState?.networkDownlink ?? null,
+
+      rtt:
+        sourceState?.networkRtt ?? null,
+
+      saveData:
+        sourceState?.networkSaveData ?? null,
     },
 
     browser:
       getBrowserNetworkSnapshot(),
 
     recent:
-      recentEvents.map((item) => ({
-        ...item,
-      })),
+      includeRecent === false
+        ? []
+        : recentEvents.map((item) => ({
+            ...item,
+          })),
 
-    lastError,
+    lastError:
+      lastError
+        ? safeClone(
+            lastError,
+            null
+          )
+        : null,
+
+    at:
+      safeIsoDate(),
   };
 }
 
@@ -2042,5 +2404,10 @@ export default {
   unbindNetworkEvents,
   refreshNetworkContext,
   syncNetworkState,
+
+  isNetworkOnline,
+  isNetworkOffline,
+  getNetworkStatus,
+
   getNetworkSnapshot,
 };

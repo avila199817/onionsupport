@@ -2,7 +2,7 @@
    Onion SPA - Core Request
    Archivo: src/core/request.js
 
-   CORE REQUEST · API CLIENT · ENTERPRISE HARDENED · 15/10
+   CORE REQUEST · API CLIENT · ENTERPRISE HARDENED · 16/10
 
    RESPONSABILIDADES:
    - parsear respuestas HTTP
@@ -23,6 +23,7 @@
    - timeout real con AbortController
    - timeout separado de abort manual
    - merge signals robusto
+   - retry delay abortable
    - json/text/blob/arrayBuffer/formData auto
    - dedupe GET/HEAD
    - OPTIONS sin body accidental
@@ -64,7 +65,7 @@ import {
 ========================================================= */
 
 export const REQUEST_VERSION =
-  "15.0.0";
+  "16.0.0";
 
 const DEFAULT_METHOD =
   "GET";
@@ -392,22 +393,6 @@ function safeWarn(utils, ...args) {
   } catch {}
 }
 
-function sleep(ms = 0) {
-  return new Promise((resolve) => {
-    try {
-      setTimeout(
-        resolve,
-        Math.max(
-          0,
-          safeNumber(ms, 0)
-        )
-      );
-    } catch {
-      resolve();
-    }
-  });
-}
-
 function getFetch() {
   try {
     if (
@@ -422,15 +407,21 @@ function getFetch() {
 }
 
 function normalizeMethod(method = DEFAULT_METHOD) {
-  return safeText(
-    method,
-    DEFAULT_METHOD
-  ).toUpperCase();
+  const clean =
+    safeText(
+      method,
+      DEFAULT_METHOD
+    ).toUpperCase();
+
+  return KNOWN_METHODS.includes(clean)
+    ? clean
+    : DEFAULT_METHOD;
 }
 
 function isKnownMethod(value = "") {
   return KNOWN_METHODS.includes(
-    normalizeMethod(value)
+    safeText(value, "")
+      .toUpperCase()
   );
 }
 
@@ -564,7 +555,7 @@ function isPublicPathForRequest(path = "") {
 }
 
 /* =========================================================
-   REQUEST ARGUMENT NORMALIZATION
+   ARGUMENTS
 ========================================================= */
 
 function normalizeRequestArguments(arg1, arg2 = {}, arg3 = undefined) {
@@ -858,7 +849,10 @@ export async function parseResponseBody(response, responseType = DEFAULT_RESPONS
     ).toLowerCase();
 
   try {
-    if (finalType === "response") {
+    if (
+      finalType === "response" ||
+      finalType === "raw"
+    ) {
       return response;
     }
 
@@ -1006,7 +1000,7 @@ function sanitizeValueForEvent(value, depth = 0, keyHint = "") {
       : null;
   }
 
-  if (depth > 3) {
+  if (depth > 4) {
     return "[depth-limit]";
   }
 
@@ -1184,9 +1178,10 @@ export function buildRequestError({
   const finalMethod =
     normalizeMethod(method);
 
-  const error = new Error(
-    safeRedact(message)
-  );
+  const error =
+    new Error(
+      safeRedact(message)
+    );
 
   error.name =
     "RequestError";
@@ -1244,6 +1239,172 @@ export function buildRequestError({
     safeIsoDate();
 
   return error;
+}
+
+/* =========================================================
+   ABORT / DELAY
+========================================================= */
+
+function isSignal(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "aborted" in value &&
+      isFunction(value.addEventListener)
+  );
+}
+
+function isSignalAborted(signal) {
+  try {
+    return Boolean(signal?.aborted);
+  } catch {
+    return false;
+  }
+}
+
+function getSignalReason(signal) {
+  try {
+    return signal?.reason || null;
+  } catch {
+    return null;
+  }
+}
+
+function abortReasonToMessage(reason, fallback = "Request aborted") {
+  if (reason instanceof Error) {
+    return reason.message || fallback;
+  }
+
+  return safeText(
+    reason?.message || reason,
+    fallback
+  );
+}
+
+function createAbortRequestError({
+  signal = null,
+  url = "",
+  method = DEFAULT_METHOD,
+  requestId = "",
+  attempt = 0,
+  attempts = 0,
+  message = "Request aborted",
+} = {}) {
+  return buildRequestError({
+    url,
+    method,
+    aborted:
+      true,
+    timeout:
+      false,
+    raw:
+      abortReasonToMessage(
+        getSignalReason(signal),
+        message
+      ),
+    requestId,
+    attempt,
+    attempts,
+  });
+}
+
+function abortableDelay(ms = 0, signal = null) {
+  const delayMs =
+    Math.max(
+      0,
+      safeNumber(ms, 0)
+    );
+
+  if (delayMs <= 0) {
+    return Promise.resolve(true);
+  }
+
+  if (isSignalAborted(signal)) {
+    return Promise.reject(
+      createAbortRequestError({
+        signal,
+        message:
+          "Request aborted before retry delay",
+      })
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled =
+      false;
+
+    let timer =
+      null;
+
+    const cleanup = () => {
+      try {
+        if (timer) {
+          clearTimeout(timer);
+        }
+      } catch {}
+
+      try {
+        signal?.removeEventListener?.(
+          "abort",
+          onAbort
+        );
+      } catch {}
+
+      timer =
+        null;
+    };
+
+    const onAbort = () => {
+      if (settled) {
+        return;
+      }
+
+      settled =
+        true;
+
+      cleanup();
+
+      reject(
+        createAbortRequestError({
+          signal,
+          message:
+            "Request aborted during retry delay",
+        })
+      );
+    };
+
+    try {
+      timer =
+        setTimeout(() => {
+          if (settled) {
+            return;
+          }
+
+          settled =
+            true;
+
+          cleanup();
+          resolve(true);
+        }, delayMs);
+
+      if (isSignal(signal)) {
+        signal.addEventListener(
+          "abort",
+          onAbort,
+          {
+            once:
+              true,
+          }
+        );
+      }
+    } catch (error) {
+      settled =
+        true;
+
+      cleanup();
+      reject(error);
+    }
+  });
 }
 
 /* =========================================================
@@ -1435,14 +1596,28 @@ export async function executeFetchWithRetry(url, fetchFactory, requestConfig = {
       0
     );
 
-  const sleeper =
-    utils?.sleep ||
-    sleep;
+  let attempt =
+    0;
 
-  let attempt = 0;
-  let lastError = null;
+  let lastError =
+    null;
 
   while (attempt <= retries) {
+    if (isSignalAborted(requestConfig.retrySignal)) {
+      throw createAbortRequestError({
+        signal:
+          requestConfig.retrySignal,
+        url,
+        method:
+          requestConfig.method,
+        attempt,
+        attempts:
+          attempt + 1,
+        message:
+          "Request aborted before attempt",
+      });
+    }
+
     try {
       return await fetchFactory(attempt);
     } catch (error) {
@@ -1509,7 +1684,27 @@ export async function executeFetchWithRetry(url, fetchFactory, requestConfig = {
         });
       } catch {}
 
-      await sleeper(delayMs);
+      try {
+        await abortableDelay(
+          delayMs,
+          requestConfig.retrySignal
+        );
+      } catch (delayError) {
+        throw delayError?.status !== undefined
+          ? delayError
+          : createAbortRequestError({
+              signal:
+                requestConfig.retrySignal,
+              url,
+              method:
+                requestConfig.method,
+              attempt,
+              attempts:
+                attempt + 1,
+              message:
+                "Request aborted during retry delay",
+            });
+      }
 
       attempt += 1;
     }
@@ -1672,25 +1867,35 @@ async function safeRunNamedHooks({
 
   try {
     if (isFunction(hooks?.runSeries)) {
-      return await hooks.runSeries(
-        hookName,
-        payload,
-        {
-          context:
-            safeObject(context),
-        }
-      );
+      const result =
+        await hooks.runSeries(
+          hookName,
+          payload,
+          {
+            context:
+              safeObject(context),
+          }
+        );
+
+      return result === undefined
+        ? payload
+        : result;
     }
 
     if (isFunction(hooks?.run)) {
-      return await hooks.run(
-        hookName,
-        payload,
-        {
-          context:
-            safeObject(context),
-        }
-      );
+      const result =
+        await hooks.run(
+          hookName,
+          payload,
+          {
+            context:
+              safeObject(context),
+          }
+        );
+
+      return result === undefined
+        ? payload
+        : result;
     }
   } catch (error) {
     safeWarn(
@@ -1721,38 +1926,58 @@ async function safeRunNamedHooks({
 ========================================================= */
 
 function isFormDataBody(value) {
-  return (
-    typeof FormData !== "undefined" &&
-    value instanceof FormData
-  );
+  try {
+    return (
+      typeof FormData !== "undefined" &&
+      value instanceof FormData
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isUrlSearchParamsBody(value) {
-  return (
-    typeof URLSearchParams !== "undefined" &&
-    value instanceof URLSearchParams
-  );
+  try {
+    return (
+      typeof URLSearchParams !== "undefined" &&
+      value instanceof URLSearchParams
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isBlobBody(value) {
-  return (
-    typeof Blob !== "undefined" &&
-    value instanceof Blob
-  );
+  try {
+    return (
+      typeof Blob !== "undefined" &&
+      value instanceof Blob
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isArrayBufferBody(value) {
-  return (
-    typeof ArrayBuffer !== "undefined" &&
-    value instanceof ArrayBuffer
-  );
+  try {
+    return (
+      typeof ArrayBuffer !== "undefined" &&
+      value instanceof ArrayBuffer
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isReadableStreamBody(value) {
-  return (
-    typeof ReadableStream !== "undefined" &&
-    value instanceof ReadableStream
-  );
+  try {
+    return (
+      typeof ReadableStream !== "undefined" &&
+      value instanceof ReadableStream
+    );
+  } catch {
+    return false;
+  }
 }
 
 function serializeBody({
@@ -1842,6 +2067,7 @@ function serializeBody({
 
     if (
       contentType.includes("application/json") ||
+      contentType.includes("+json") ||
       !contentType
     ) {
       try {
@@ -1923,14 +2149,17 @@ function createTimeoutSafe(timeoutMs = 0) {
 function mergeSignalsSafe(signals = []) {
   const cleanSignals =
     safeArray(signals)
-      .filter(Boolean);
+      .filter(isSignal);
 
   if (!cleanSignals.length) {
     return null;
   }
 
   try {
-    if (isFunction(AbortSignal?.any)) {
+    if (
+      typeof AbortSignal !== "undefined" &&
+      isFunction(AbortSignal.any)
+    ) {
       return AbortSignal.any(cleanSignals);
     }
   } catch {}
@@ -1952,36 +2181,60 @@ function mergeSignalsSafe(signals = []) {
     return cleanSignals[0] || null;
   }
 
+  const cleanupFns =
+    [];
+
+  const cleanup = () => {
+    for (const fn of cleanupFns.splice(0)) {
+      try {
+        fn();
+      } catch {}
+    }
+  };
+
+  const abortFrom = (signal) => {
+    if (controller.signal.aborted) {
+      return;
+    }
+
+    try {
+      controller.abort(
+        getSignalReason(signal) || "aborted"
+      );
+    } catch {
+      try {
+        controller.abort();
+      } catch {}
+    } finally {
+      cleanup();
+    }
+  };
+
   for (const signal of cleanSignals) {
     if (signal?.aborted) {
-      try {
-        controller.abort(signal.reason || "aborted");
-      } catch {
-        try {
-          controller.abort();
-        } catch {}
-      }
-
+      abortFrom(signal);
       return controller.signal;
     }
+
+    const onAbort =
+      () => abortFrom(signal);
 
     try {
       signal.addEventListener(
         "abort",
-        () => {
-          try {
-            controller.abort(signal.reason || "aborted");
-          } catch {
-            try {
-              controller.abort();
-            } catch {}
-          }
-        },
+        onAbort,
         {
           once:
             true,
         }
       );
+
+      cleanupFns.push(() => {
+        signal.removeEventListener(
+          "abort",
+          onAbort
+        );
+      });
     } catch {}
   }
 
@@ -2049,7 +2302,7 @@ function buildFetchInit({
 }
 
 /* =========================================================
-   REQUEST URL / TELEMETRY POLICY
+   URL / EVENTS POLICY
 ========================================================= */
 
 function buildRequestUrl(path, query = null) {
@@ -2156,7 +2409,8 @@ export function createRequest({
   registry,
   hooks,
 } = {}) {
-  let requestSequence = 0;
+  let requestSequence =
+    0;
 
   const inFlightRequests =
     new Map();
@@ -2255,6 +2509,10 @@ export function createRequest({
   }
 
   function resolveAuthDefault(path = "", opts = {}) {
+    if (isPrivateAuthMePath(path)) {
+      return true;
+    }
+
     if (
       opts.public === true ||
       opts.skipAuth === true ||
@@ -2271,6 +2529,22 @@ export function createRequest({
     }
 
     return !isPublicPathForRequest(path);
+  }
+
+  function resolveBodyFromOptions(opts = {}) {
+    if (opts.body !== undefined) {
+      return opts.body;
+    }
+
+    if (opts.data !== undefined) {
+      return opts.data;
+    }
+
+    if (opts.payload !== undefined) {
+      return opts.payload;
+    }
+
+    return null;
   }
 
   function buildBaseConfig(path, options = {}) {
@@ -2291,16 +2565,17 @@ export function createRequest({
         {},
 
       body:
-        null,
+        resolveBodyFromOptions(opts),
 
       auth:
         authDefault,
 
       public:
-        false,
+        authDefault === false &&
+        isPublicPathForRequest(path),
 
       skipAuth:
-        false,
+        authDefault === false,
 
       timeout:
         getConfiguredTimeout(),
@@ -2318,9 +2593,12 @@ export function createRequest({
         opts.params ?? null,
 
       credentials:
-        config?.api?.withCredentials
-          ? "include"
-          : "omit",
+        config?.api?.credentials ||
+        (
+          config?.api?.withCredentials
+            ? "include"
+            : "same-origin"
+        ),
 
       signal:
         null,
@@ -2421,18 +2699,40 @@ export function createRequest({
         baseConfig.path
       );
 
+    if (
+      merged.body === undefined &&
+      (
+        merged.data !== undefined ||
+        merged.payload !== undefined
+      )
+    ) {
+      merged.body =
+        merged.data !== undefined
+          ? merged.data
+          : merged.payload;
+    }
+
     merged.query =
       merged.query ??
       merged.params ??
       null;
 
-    if (
+    if (isPrivateAuthMePath(merged.path)) {
+      merged.auth =
+        true;
+      merged.public =
+        false;
+      merged.skipAuth =
+        false;
+    } else if (
       merged.public === true ||
       merged.skipAuth === true ||
       merged.auth === false
     ) {
       merged.auth =
         false;
+      merged.skipAuth =
+        true;
     } else if (
       merged.auth === undefined ||
       merged.auth === null
@@ -2446,13 +2746,10 @@ export function createRequest({
         Boolean(merged.auth);
     }
 
-    if (isPrivateAuthMePath(merged.path) && merged.auth !== false) {
-      merged.auth =
-        true;
+    if (merged.auth === false) {
       merged.public =
-        false;
-      merged.skipAuth =
-        false;
+        merged.public === true ||
+        isPublicPathForRequest(merged.path);
     }
 
     merged.timeout =
@@ -2525,6 +2822,15 @@ export function createRequest({
               0
             ) + 1
           );
+
+        state.pendingRequests =
+          Math.max(
+            0,
+            safeNumber(
+              state.pendingRequests,
+              0
+            ) + 1
+          );
       }
     } catch {}
   }
@@ -2540,6 +2846,15 @@ export function createRequest({
             0,
             safeNumber(
               state.requestPending,
+              0
+            ) - 1
+          );
+
+        state.pendingRequests =
+          Math.max(
+            0,
+            safeNumber(
+              state.pendingRequests,
               0
             ) - 1
           );
@@ -2622,12 +2937,20 @@ export function createRequest({
 
     if (
       requestConfig.auth &&
-      hasValidToken(token)
+      hasValidToken(token) &&
+      !hasHeader(finalHeaders, "Authorization")
     ) {
       setHeader(
         finalHeaders,
         config?.auth?.tokenHeader || "Authorization",
         `${config?.auth?.bearerPrefix || "Bearer"} ${token}`
+      );
+    }
+
+    if (!requestConfig.auth) {
+      deleteHeader(
+        finalHeaders,
+        "Authorization"
       );
     }
 
@@ -2702,6 +3025,12 @@ export function createRequest({
         requestAbortController
       );
     }
+
+    const retrySignal =
+      mergeSignalsSafe([
+        requestConfig.signal,
+        requestAbortController?.signal,
+      ]);
 
     if (shouldEmitLifecycleEvent(requestConfig, "start")) {
       safeEmit(
@@ -2885,6 +3214,7 @@ export function createRequest({
                 method,
                 body:
                   payload,
+                retrySignal,
                 retryDelay:
                   requestConfig.retryDelay,
                 retryMaxDelay:
@@ -3212,6 +3542,9 @@ export function createRequest({
         inFlight:
           inFlightRequests.size,
 
+        controllers:
+          inFlightControllers.size,
+
         inFlightRequests:
           opts.includeInFlight === true
             ? Array.from(inFlightMeta.values())
@@ -3222,6 +3555,20 @@ export function createRequest({
             stats,
             {}
           ),
+
+        state: {
+          requestPending:
+            safeNumber(
+              state?.requestPending,
+              0
+            ),
+
+          pendingRequests:
+            safeNumber(
+              state?.pendingRequests,
+              0
+            ),
+        },
 
         at:
           safeIsoDate(),
@@ -3279,7 +3626,8 @@ export function createRequest({
       const opts =
         safeObject(options);
 
-      let count = 0;
+      let count =
+        0;
 
       for (const controller of inFlightControllers.values()) {
         try {
@@ -3481,6 +3829,7 @@ export function createApiClient(request) {
 
 export default {
   REQUEST_VERSION,
+  REQUEST_EVENTS,
 
   createRequest,
   createApiClient,

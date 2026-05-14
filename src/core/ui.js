@@ -3,10 +3,10 @@
    Archivo: src/core/ui.js
 
    ONION SUPPORT · CORE UI
-   GLOBAL UI HELPERS · USER VISUAL SYNC · AVATAR SAFE · 14/10
+   GLOBAL UI HELPERS · USER VISUAL SYNC · AVATAR SAFE · 15/10
 
    RESPONSABILIDADES:
-   - helpers UI globales del core
+   - helpers UI globales del Core
    - sincronizar título documento
    - limpiar contenedores dinámicos shell
    - sincronizar bloque visual usuario
@@ -16,6 +16,8 @@
    FIX CRÍTICO:
    - no destruir la estructura DOM del avatar del sidebar
    - respetar #sidebarAvatarImage y #sidebarAvatarFallback
+   - soportar avatarRoot como contenedor o como <img>
+   - si falta root, resolverlo desde imagen/fallback existentes
    - evitar innerHTML/textContent sobre el root del avatar
    - evitar title nativo en avatar/nombre
    - no forzar ni borrar data-tooltip custom
@@ -28,13 +30,12 @@
    - title reactivo robusto
    - sync UI segura aunque falten nodos
    - browser/server safe
-   - recache DOM ligero si el módulo UI montó tarde
+   - recache DOM ligero si UI montó tarde
    - eventos consistentes
    - snapshots útiles
-   - soporte avatarRoot img o contenedor
-   - soporte usuario/topbar/sidebar montados tarde
    - protección contra onload/onerror obsoletos
    - sin innerHTML
+   - sin estilos inline
    - sin imports duplicados
 ========================================================= */
 
@@ -53,7 +54,7 @@ import {
 ========================================================= */
 
 const UI_VERSION =
-  "14.0.0";
+  "15.0.0-avatar-safe";
 
 const DEFAULT_USER_NAME =
   "Usuario";
@@ -85,46 +86,115 @@ const AVATAR_FALLBACK_EVENT =
 const USER_RECACHE_EVENT =
   "app:user-ui:recache";
 
+const USER_DEFERRED_SYNC_EVENT =
+  "app:user-ui:deferred-sync";
+
 const AVATAR_RENDER_TOKENS =
   new WeakMap();
 
+let deferredUserSyncScheduled =
+  false;
+
+const SIDEBAR_SCOPE_SELECTORS =
+  Object.freeze([
+    "#sidebar",
+    "#app-sidebar",
+    "#sidebar-mount",
+    "[data-sidebar]",
+    "[data-sidebar-mount]",
+    ".sidebar",
+    ".app-sidebar",
+  ]);
+
+const TOPBAR_SCOPE_SELECTORS =
+  Object.freeze([
+    "#topbar",
+    "#app-topbar",
+    "#topbar-mount",
+    "[data-topbar]",
+    "[data-topbar-mount]",
+    ".topbar",
+    ".app-topbar",
+  ]);
+
 const AVATAR_SELECTORS =
   Object.freeze({
-    root: Object.freeze([
-      "#sidebar-avatar",
-      "#sidebarAvatar",
-      "[data-sidebar-avatar='true']",
-      "[data-sidebar-avatar]",
-      "[data-user-avatar]",
-      ".sidebar-avatar",
-      ".user-avatar",
-    ]),
+    sidebarRoot:
+      Object.freeze([
+        "#sidebar-avatar",
+        "#sidebarAvatar",
+        "[data-sidebar-avatar='true']",
+        "[data-sidebar-avatar]",
+        "[data-user-avatar='sidebar']",
+        "[data-user-avatar]",
+        ".sidebar-avatar",
+        ".user-avatar",
+      ]),
 
-    topbarRoot: Object.freeze([
-      "#topbar-avatar",
-      "#topbarAvatar",
-      "[data-topbar-avatar='true']",
-      "[data-topbar-avatar]",
-      "[data-user-avatar-topbar]",
-      ".topbar-avatar",
-    ]),
+    topbarRoot:
+      Object.freeze([
+        "#topbar-avatar",
+        "#topbarAvatar",
+        "[data-topbar-avatar='true']",
+        "[data-topbar-avatar]",
+        "[data-user-avatar='topbar']",
+        "[data-user-avatar-topbar]",
+        ".topbar-avatar",
+      ]),
 
-    image: Object.freeze([
-      "#sidebarAvatarImage",
-      "#topbarAvatarImage",
-      ".avatar-image",
-      "img[data-avatar-image='true']",
-      "[data-avatar-image]",
-      "img",
-    ]),
+    sidebarImage:
+      Object.freeze([
+        "#sidebarAvatarImage",
+        "img[data-sidebar-avatar-image='true']",
+        "[data-sidebar-avatar-image]",
+        "img[data-avatar-image='sidebar']",
+        ".sidebar-avatar img",
+        ".sidebar-avatar__image",
+        ".avatar-image",
+        "img[data-avatar-image='true']",
+        "[data-avatar-image]",
+        "img",
+      ]),
 
-    fallback: Object.freeze([
-      "#sidebarAvatarFallback",
-      "#topbarAvatarFallback",
-      ".avatar-fallback",
-      "[data-avatar-fallback='true']",
-      "[data-avatar-fallback]",
-    ]),
+    topbarImage:
+      Object.freeze([
+        "#topbarAvatarImage",
+        "img[data-topbar-avatar-image='true']",
+        "[data-topbar-avatar-image]",
+        "img[data-avatar-image='topbar']",
+        ".topbar-avatar img",
+        ".topbar-avatar__image",
+        ".avatar-image",
+        "img[data-avatar-image='true']",
+        "[data-avatar-image]",
+        "img",
+      ]),
+
+    sidebarFallback:
+      Object.freeze([
+        "#sidebarAvatarFallback",
+        "[data-sidebar-avatar-fallback='true']",
+        "[data-sidebar-avatar-fallback]",
+        "[data-avatar-fallback='sidebar']",
+        ".sidebar-avatar-fallback",
+        ".sidebar-avatar__fallback",
+        ".avatar-fallback",
+        "[data-avatar-fallback='true']",
+        "[data-avatar-fallback]",
+      ]),
+
+    topbarFallback:
+      Object.freeze([
+        "#topbarAvatarFallback",
+        "[data-topbar-avatar-fallback='true']",
+        "[data-topbar-avatar-fallback]",
+        "[data-avatar-fallback='topbar']",
+        ".topbar-avatar-fallback",
+        ".topbar-avatar__fallback",
+        ".avatar-fallback",
+        "[data-avatar-fallback='true']",
+        "[data-avatar-fallback]",
+      ]),
   });
 
 const USER_NAME_SELECTORS =
@@ -133,6 +203,7 @@ const USER_NAME_SELECTORS =
     "#sidebarName",
     "[data-sidebar-name='true']",
     "[data-sidebar-name]",
+    "[data-user-name='sidebar']",
     "[data-user-name]",
     ".sidebar-name",
     ".user-name",
@@ -144,6 +215,7 @@ const TOPBAR_USER_NAME_SELECTORS =
     "#topbarUserName",
     "[data-topbar-user-name='true']",
     "[data-topbar-user-name]",
+    "[data-user-name='topbar']",
     "[data-user-name-topbar]",
     ".topbar-user-name",
   ]);
@@ -187,44 +259,48 @@ const TOPBAR_TITLE_SELECTORS =
 
 const DYNAMIC_CONTAINER_SELECTORS =
   Object.freeze({
-    topbarViewContainer: Object.freeze([
-      "#topbarview-container",
-      "#topbar-view-container",
-      "[data-topbar-view-container='true']",
-      "[data-topbar-view-container]",
-      ".topbar-view-container",
-    ]),
+    topbarViewContainer:
+      Object.freeze([
+        "#topbarview-container",
+        "#topbar-view-container",
+        "[data-topbar-view-container='true']",
+        "[data-topbar-view-container]",
+        ".topbar-view-container",
+      ]),
 
-    tableheadContainer: Object.freeze([
-      "#tablehead-container",
-      "#table-head-container",
-      "[data-tablehead-container='true']",
-      "[data-tablehead-container]",
-      "[data-table-head-container]",
-      ".tablehead-container",
-    ]),
+    tableheadContainer:
+      Object.freeze([
+        "#tablehead-container",
+        "#table-head-container",
+        "[data-tablehead-container='true']",
+        "[data-tablehead-container]",
+        "[data-table-head-container]",
+        ".tablehead-container",
+      ]),
 
-    tablehead: Object.freeze([
-      "#table-head",
-      "#tablehead",
-      ".table-head",
-      ".tablehead",
-      "[data-tablehead]",
-      "[data-table-head]",
-    ]),
+    tablehead:
+      Object.freeze([
+        "#table-head",
+        "#tablehead",
+        ".table-head",
+        ".tablehead",
+        "[data-tablehead]",
+        "[data-table-head]",
+      ]),
 
-    viewContainer: Object.freeze([
-      "#view-container",
-      "#router-view",
-      "#app-view",
-      "[data-view-root]",
-      "[data-view-container='true']",
-      "[data-view-container]",
-      "[data-router-view]",
-      "[data-router-outlet]",
-      ".view-container",
-      ".router-view",
-    ]),
+    viewContainer:
+      Object.freeze([
+        "#view-container",
+        "#router-view",
+        "#app-view",
+        "[data-view-root]",
+        "[data-view-container='true']",
+        "[data-view-container]",
+        "[data-router-view]",
+        "[data-router-outlet]",
+        ".view-container",
+        ".router-view",
+      ]),
   });
 
 const USER_NODE_MAP =
@@ -233,7 +309,7 @@ const USER_NODE_MAP =
       USER_NAME_SELECTORS,
 
     sidebarAvatar:
-      AVATAR_SELECTORS.root,
+      AVATAR_SELECTORS.sidebarRoot,
 
     topbarUserName:
       TOPBAR_USER_NAME_SELECTORS,
@@ -307,10 +383,38 @@ function safeObject(value, fallback = {}) {
 function safeBool(value, fallback = false) {
   if (value === true) return true;
   if (value === false) return false;
-  if (value === "true") return true;
-  if (value === "false") return false;
   if (value === 1) return true;
   if (value === 0) return false;
+
+  if (typeof value === "string") {
+    const clean =
+      value.trim().toLowerCase();
+
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "si",
+        "sí",
+        "ok",
+        "on",
+      ].includes(clean)
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "off",
+      ].includes(clean)
+    ) {
+      return false;
+    }
+  }
 
   return Boolean(fallback);
 }
@@ -337,33 +441,13 @@ function safeRedact(value = "") {
   }
 }
 
-function safeEmit(events, eventName, payload = {}) {
-  const name =
-    safeText(eventName, "");
-
-  if (!name) {
-    return false;
-  }
-
-  try {
-    events?.emit?.(
-      name,
-      sanitizeEventPayload(payload)
-    );
-
-    return true;
-  } catch {}
-
-  return false;
-}
-
 function sanitizeEventPayload(value, depth = 0, keyHint = "") {
   if (depth > 4) {
     return "[depth-limit]";
   }
 
   if (
-    /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|avatarUrl|avatar_url|signedUrl|sas/i.test(
+    /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|avatarUrl|avatar_url|signedUrl|signed_url|sas|blobUrl|downloadUrl|viewUrl/i.test(
       safeText(keyHint, "")
     )
   ) {
@@ -447,14 +531,39 @@ function sanitizeEventPayload(value, depth = 0, keyHint = "") {
   }
 }
 
+function safeEmit(events, eventName, payload = {}) {
+  const name =
+    safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  try {
+    events?.emit?.(
+      name,
+      sanitizeEventPayload(payload)
+    );
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
 function safeSetText(el, value = "") {
   if (!el) {
     return false;
   }
 
   try {
-    el.textContent =
+    const next =
       safeText(value, "");
+
+    if (el.textContent !== next) {
+      el.textContent =
+        next;
+    }
 
     return true;
   } catch {}
@@ -477,7 +586,9 @@ function safeSetAttr(el, name, value) {
       value === ""
     ) {
       el.removeAttribute(name);
-    } else {
+    } else if (
+      el.getAttribute(name) !== String(value)
+    ) {
       el.setAttribute(
         name,
         String(value)
@@ -585,12 +696,43 @@ function safeDatasetSet(el, key, value) {
       value === ""
     ) {
       delete el.dataset[key];
-    } else {
+    } else if (
+      el.dataset[key] !== String(value)
+    ) {
       el.dataset[key] =
         String(value);
     }
 
     return true;
+  } catch {}
+
+  return false;
+}
+
+function isConnected(el) {
+  if (!el) {
+    return false;
+  }
+
+  try {
+    if (
+      isBrowser() &&
+      (
+        el === document ||
+        el === document.documentElement ||
+        el === document.body
+      )
+    ) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    return Boolean(el.isConnected);
+  } catch {}
+
+  try {
+    return document.contains(el);
   } catch {}
 
   return false;
@@ -679,33 +821,55 @@ function queryAll(selectors = [], root = null) {
   return output;
 }
 
-function isConnected(el) {
-  if (!el) {
-    return false;
+function queryFirstInScopes(selectors = [], scopes = []) {
+  for (const scope of safeArray(scopes)) {
+    if (!scope || !isConnected(scope)) {
+      continue;
+    }
+
+    const found =
+      queryFirst(
+        selectors,
+        scope
+      );
+
+    if (found) {
+      return found;
+    }
   }
 
-  try {
-    if (
-      isBrowser() &&
-      (
-        el === document ||
-        el === document.documentElement ||
-        el === document.body
-      )
-    ) {
-      return true;
-    }
-  } catch {}
+  return queryFirst(selectors);
+}
 
-  try {
-    return Boolean(el.isConnected);
-  } catch {}
+function getScopeNodes(dom, kind = "sidebar") {
+  if (!isBrowser()) {
+    return [];
+  }
 
-  try {
-    return document.contains(el);
-  } catch {}
+  const nodes =
+    [];
 
-  return false;
+  if (kind === "sidebar") {
+    nodes.push(
+      dom?.sidebar,
+      dom?.sidebarRoot,
+      dom?.sidebarMount,
+      queryFirst(SIDEBAR_SCOPE_SELECTORS)
+    );
+  } else if (kind === "topbar") {
+    nodes.push(
+      dom?.topbar,
+      dom?.topbarRoot,
+      dom?.topbarMount,
+      queryFirst(TOPBAR_SCOPE_SELECTORS)
+    );
+  }
+
+  return nodes.filter((node, index, arr) =>
+    node &&
+    isConnected(node) &&
+    arr.indexOf(node) === index
+  );
 }
 
 function resolveDomNode(dom, key, selectors = [], root = null) {
@@ -720,10 +884,14 @@ function resolveDomNode(dom, key, selectors = [], root = null) {
   }
 
   const found =
-    queryFirst(
-      selectors,
-      root
-    );
+    root
+      ? queryFirst(
+          selectors,
+          root
+        )
+      : queryFirst(
+          selectors
+        );
 
   try {
     if (
@@ -732,6 +900,46 @@ function resolveDomNode(dom, key, selectors = [], root = null) {
       key
     ) {
       dom[key] =
+        found;
+    }
+  } catch {}
+
+  return found;
+}
+
+function resolveScopedDomNode(dom, key, selectors = [], kind = "") {
+  const cached =
+    dom?.[key] || null;
+
+  if (
+    cached &&
+    isConnected(cached)
+  ) {
+    return cached;
+  }
+
+  const scopes =
+    kind
+      ? getScopeNodes(dom, kind)
+      : [];
+
+  const found =
+    scopes.length
+      ? queryFirstInScopes(
+          selectors,
+          scopes
+        )
+      : queryFirst(selectors);
+
+  try {
+    if (
+      found &&
+      dom &&
+      key
+    ) {
+      dom[key] =
+        found;
+      dom[`${key}El`] =
         found;
     }
   } catch {}
@@ -752,9 +960,9 @@ function isImageElement(el) {
 
 function removeNativeTooltip(el) {
   /*
-    Regla del proyecto:
+    Regla Onion:
     - eliminar title nativo
-    - no tocar data-tooltip custom
+    - NO tocar data-tooltip custom
   */
   safeRemoveAttr(
     el,
@@ -1024,10 +1232,11 @@ export function setDocumentTitle(input = {}, maybeExtra = {}) {
 
   const topbarTitleNode =
     dom?.topbarTitle ||
-    resolveDomNode(
+    resolveScopedDomNode(
       dom,
       "topbarTitle",
-      TOPBAR_TITLE_SELECTORS
+      TOPBAR_TITLE_SELECTORS,
+      "topbar"
     );
 
   let finalTopbarTitle =
@@ -1123,6 +1332,7 @@ function resolveDynamicContainer(dom, key = "") {
 
   return (
     dom?.[key] ||
+    dom?.[`${key}El`] ||
     resolveDomNode(
       dom,
       key,
@@ -1190,11 +1400,15 @@ export function clearDynamicContainers({
 
   if (
     resetTableheadVisibility !== false &&
-    cleared.includes("tableheadContainer")
+    (
+      cleared.includes("tableheadContainer") ||
+      includeTablehead !== false
+    )
   ) {
     const tablehead =
       dom?.tablehead ||
       dom?.tableHead ||
+      dom?.tableheadEl ||
       resolveDynamicContainer(
         dom,
         "tablehead"
@@ -1306,7 +1520,37 @@ function normalizeAvatarText(value = "") {
   return text || DEFAULT_AVATAR_TEXT;
 }
 
-function getAvatarNodes(avatarRoot) {
+function getAvatarSelectors(idPrefix = "sidebar") {
+  const prefix =
+    safeText(idPrefix, "sidebar")
+      .toLowerCase();
+
+  if (prefix === "topbar") {
+    return {
+      root:
+        AVATAR_SELECTORS.topbarRoot,
+      image:
+        AVATAR_SELECTORS.topbarImage,
+      fallback:
+        AVATAR_SELECTORS.topbarFallback,
+      kind:
+        "topbar",
+    };
+  }
+
+  return {
+    root:
+      AVATAR_SELECTORS.sidebarRoot,
+    image:
+      AVATAR_SELECTORS.sidebarImage,
+    fallback:
+      AVATAR_SELECTORS.sidebarFallback,
+    kind:
+      "sidebar",
+  };
+}
+
+function getAvatarNodes(avatarRoot, idPrefix = "sidebar") {
   if (!avatarRoot) {
     return {
       imgEl:
@@ -1327,15 +1571,18 @@ function getAvatarNodes(avatarRoot) {
     };
   }
 
+  const selectors =
+    getAvatarSelectors(idPrefix);
+
   const imgEl =
     queryFirst(
-      AVATAR_SELECTORS.image,
+      selectors.image,
       avatarRoot
     );
 
   const fallbackEl =
     queryFirst(
-      AVATAR_SELECTORS.fallback,
+      selectors.fallback,
       avatarRoot
     );
 
@@ -1343,6 +1590,94 @@ function getAvatarNodes(avatarRoot) {
     imgEl,
     fallbackEl,
   };
+}
+
+function resolveAvatarRoot(dom, key, idPrefix = "sidebar") {
+  const cached =
+    dom?.[key] || null;
+
+  if (
+    cached &&
+    isConnected(cached)
+  ) {
+    return cached;
+  }
+
+  const selectors =
+    getAvatarSelectors(idPrefix);
+
+  const scopes =
+    getScopeNodes(
+      dom,
+      selectors.kind
+    );
+
+  let root =
+    scopes.length
+      ? queryFirstInScopes(
+          selectors.root,
+          scopes
+        )
+      : queryFirst(
+          selectors.root
+        );
+
+  if (!root) {
+    const image =
+      scopes.length
+        ? queryFirstInScopes(
+            selectors.image,
+            scopes
+          )
+        : queryFirst(
+            selectors.image
+          );
+
+    const fallback =
+      scopes.length
+        ? queryFirstInScopes(
+            selectors.fallback,
+            scopes
+          )
+        : queryFirst(
+            selectors.fallback
+          );
+
+    if (
+      image?.parentElement &&
+      fallback?.parentElement &&
+      image.parentElement === fallback.parentElement
+    ) {
+      root =
+        image.parentElement;
+    } else if (image?.parentElement) {
+      root =
+        image.parentElement;
+    } else if (fallback?.parentElement) {
+      root =
+        fallback.parentElement;
+    } else {
+      root =
+        image ||
+        fallback ||
+        null;
+    }
+  }
+
+  try {
+    if (
+      root &&
+      dom &&
+      key
+    ) {
+      dom[key] =
+        root;
+      dom[`${key}El`] =
+        root;
+    }
+  } catch {}
+
+  return root;
 }
 
 function getNextAvatarRenderToken(avatarRoot) {
@@ -1394,7 +1729,10 @@ function ensureAvatarImageNode(avatarRoot, idPrefix = "sidebar") {
   }
 
   const { imgEl } =
-    getAvatarNodes(avatarRoot);
+    getAvatarNodes(
+      avatarRoot,
+      idPrefix
+    );
 
   if (imgEl) {
     safeDatasetSet(
@@ -1416,9 +1754,12 @@ function ensureAvatarImageNode(avatarRoot, idPrefix = "sidebar") {
     return null;
   }
 
-  created.id =
-    created.id ||
-    `${idPrefix}AvatarImage`;
+  if (!created.id) {
+    created.id =
+      idPrefix === "topbar"
+        ? "topbarAvatarImage"
+        : "sidebarAvatarImage";
+  }
 
   created.className =
     safeText(
@@ -1479,7 +1820,10 @@ function ensureAvatarFallbackNode(avatarRoot, avatarText = DEFAULT_AVATAR_TEXT, 
   }
 
   const { fallbackEl } =
-    getAvatarNodes(avatarRoot);
+    getAvatarNodes(
+      avatarRoot,
+      idPrefix
+    );
 
   if (fallbackEl) {
     safeDatasetSet(
@@ -1517,9 +1861,12 @@ function ensureAvatarFallbackNode(avatarRoot, avatarText = DEFAULT_AVATAR_TEXT, 
     return null;
   }
 
-  created.id =
-    created.id ||
-    `${idPrefix}AvatarFallback`;
+  if (!created.id) {
+    created.id =
+      idPrefix === "topbar"
+        ? "topbarAvatarFallback"
+        : "sidebarAvatarFallback";
+  }
 
   created.className =
     safeText(
@@ -1555,7 +1902,7 @@ function ensureAvatarFallbackNode(avatarRoot, avatarText = DEFAULT_AVATAR_TEXT, 
   return created;
 }
 
-function cleanupDuplicateAvatarNodes(avatarRoot) {
+function cleanupDuplicateAvatarNodes(avatarRoot, idPrefix = "sidebar") {
   if (
     !avatarRoot ||
     isImageElement(avatarRoot)
@@ -1563,15 +1910,18 @@ function cleanupDuplicateAvatarNodes(avatarRoot) {
     return false;
   }
 
+  const selectors =
+    getAvatarSelectors(idPrefix);
+
   const images =
     queryAll(
-      AVATAR_SELECTORS.image,
+      selectors.image,
       avatarRoot
     );
 
   const fallbacks =
     queryAll(
-      AVATAR_SELECTORS.fallback,
+      selectors.fallback,
       avatarRoot
     );
 
@@ -1702,7 +2052,8 @@ function renderAvatarFallback(
     );
 
   cleanupDuplicateAvatarNodes(
-    avatarRoot
+    avatarRoot,
+    idPrefix
   );
 
   const imgEl =
@@ -1747,8 +2098,10 @@ function renderAvatarFallback(
   }
 
   if (fallbackEl) {
-    fallbackEl.hidden =
-      false;
+    try {
+      fallbackEl.hidden =
+        false;
+    } catch {}
 
     safeSetAttr(
       fallbackEl,
@@ -1970,7 +2323,8 @@ function renderAvatarImage(
   }
 
   cleanupDuplicateAvatarNodes(
-    avatarRoot
+    avatarRoot,
+    idPrefix
   );
 
   const renderToken =
@@ -2047,8 +2401,10 @@ function renderAvatarImage(
   );
 
   if (fallbackEl) {
-    fallbackEl.hidden =
-      false;
+    try {
+      fallbackEl.hidden =
+        false;
+    } catch {}
 
     safeSetAttr(
       fallbackEl,
@@ -2196,19 +2552,60 @@ function renderAvatarImage(
    USER UI DATA
 ========================================================= */
 
+function normalizeStatus(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .trim();
+}
+
 function hasRealUser(user = null) {
   if (!user || !isObject(user)) {
     return false;
   }
 
+  const status =
+    normalizeStatus(
+      user.status ??
+      user.estado ??
+      user.state ??
+      user.accountStatus ??
+      user.account_status ??
+      ""
+    );
+
+  if (
+    [
+      "disabled",
+      "inactive",
+      "deleted",
+      "blocked",
+      "suspended",
+      "banned",
+      "desactivado",
+      "inactivo",
+      "eliminado",
+      "bloqueado",
+      "suspendido",
+    ].includes(status)
+  ) {
+    return false;
+  }
+
   if (
     user.active === false ||
+    user.enabled === false ||
     user.disabled === true ||
     user.deleted === true ||
-    user.status === "disabled" ||
-    user.status === "inactive" ||
-    user.estado === "disabled" ||
-    user.estado === "inactive"
+    user.isActive === false ||
+    user.is_active === false ||
+    user.isEnabled === false ||
+    user.is_enabled === false ||
+    user.isDisabled === true ||
+    user.isDeleted === true ||
+    user.blocked === true
   ) {
     return false;
   }
@@ -2219,8 +2616,12 @@ function hasRealUser(user = null) {
       safeText(user.user_id, "") ||
       safeText(user._id, "") ||
       safeText(user.uid, "") ||
+      safeText(user.sub, "") ||
       safeText(user.username, "") ||
+      safeText(user.userName, "") ||
+      safeText(user.user_name, "") ||
       safeText(user.email, "") ||
+      safeText(user.mail, "") ||
       safeText(user.name, "") ||
       safeText(user.displayName, "")
   );
@@ -2233,9 +2634,18 @@ function resolveUserUiData(state = {}) {
   const authenticated =
     Boolean(root.authenticated);
 
+  const candidateUser =
+    root.user ||
+    root.currentUser ||
+    root.authUser ||
+    root.sessionUser ||
+    root.session?.user ||
+    root.sessionData?.user ||
+    null;
+
   const user =
-    authenticated && hasRealUser(root.user)
-      ? root.user
+    authenticated && hasRealUser(candidateUser)
+      ? candidateUser
       : null;
 
   const displayName =
@@ -2249,9 +2659,10 @@ function resolveUserUiData(state = {}) {
       : "";
 
   const role =
-    authenticated
+    authenticated && user
       ? safeText(
           root.role ||
+            root.userRole ||
             user?.role ||
             user?.rol ||
             "",
@@ -2342,10 +2753,11 @@ function syncTextUserNode(node, {
 function syncSidebarName(dom, data = {}) {
   const sidebarName =
     dom?.sidebarName ||
-    resolveDomNode(
+    resolveScopedDomNode(
       dom,
       "sidebarName",
-      USER_NAME_SELECTORS
+      USER_NAME_SELECTORS,
+      "sidebar"
     );
 
   return syncTextUserNode(
@@ -2357,10 +2769,11 @@ function syncSidebarName(dom, data = {}) {
 function syncTopbarUserName(dom, data = {}) {
   const topbarUserName =
     dom?.topbarUserName ||
-    resolveDomNode(
+    resolveScopedDomNode(
       dom,
       "topbarUserName",
-      TOPBAR_USER_NAME_SELECTORS
+      TOPBAR_USER_NAME_SELECTORS,
+      "topbar"
     );
 
   return syncTextUserNode(
@@ -2369,13 +2782,12 @@ function syncTopbarUserName(dom, data = {}) {
   );
 }
 
-function syncAvatarRoot(dom, key, selectors, idPrefix, data, events = null) {
+function syncAvatarRoot(dom, key, idPrefix, data, events = null) {
   const avatarRoot =
-    dom?.[key] ||
-    resolveDomNode(
+    resolveAvatarRoot(
       dom,
       key,
-      selectors
+      idPrefix
     );
 
   if (!avatarRoot) {
@@ -2430,7 +2842,6 @@ function syncSidebarAvatar(dom, data, events = null) {
   return syncAvatarRoot(
     dom,
     "sidebarAvatar",
-    AVATAR_SELECTORS.root,
     "sidebar",
     data,
     events
@@ -2441,7 +2852,6 @@ function syncTopbarAvatar(dom, data, events = null) {
   return syncAvatarRoot(
     dom,
     "topbarAvatar",
-    AVATAR_SELECTORS.topbarRoot,
     "topbar",
     data,
     events
@@ -2451,10 +2861,17 @@ function syncTopbarAvatar(dom, data, events = null) {
 function syncUserToggle(dom, data) {
   const toggle =
     dom?.userToggle ||
-    resolveDomNode(
+    resolveScopedDomNode(
       dom,
       "userToggle",
-      USER_TOGGLE_SELECTORS
+      USER_TOGGLE_SELECTORS,
+      "sidebar"
+    ) ||
+    resolveScopedDomNode(
+      dom,
+      "userToggle",
+      USER_TOGGLE_SELECTORS,
+      "topbar"
     );
 
   if (!toggle) {
@@ -2501,10 +2918,17 @@ function syncUserToggle(dom, data) {
 function syncUserDropdown(dom, data) {
   const dropdown =
     dom?.userDropdown ||
-    resolveDomNode(
+    resolveScopedDomNode(
       dom,
       "userDropdown",
-      USER_DROPDOWN_SELECTORS
+      USER_DROPDOWN_SELECTORS,
+      "sidebar"
+    ) ||
+    resolveScopedDomNode(
+      dom,
+      "userDropdown",
+      USER_DROPDOWN_SELECTORS,
+      "topbar"
     );
 
   if (!dropdown) {
@@ -2535,10 +2959,17 @@ function syncUserDropdown(dom, data) {
 function syncLogoutButton(dom, data) {
   const logoutBtn =
     dom?.logoutBtn ||
-    resolveDomNode(
+    resolveScopedDomNode(
       dom,
       "logoutBtn",
-      LOGOUT_SELECTORS
+      LOGOUT_SELECTORS,
+      "sidebar"
+    ) ||
+    resolveScopedDomNode(
+      dom,
+      "logoutBtn",
+      LOGOUT_SELECTORS,
+      "topbar"
     );
 
   if (!logoutBtn) {
@@ -2558,6 +2989,10 @@ function syncLogoutButton(dom, data) {
   return true;
 }
 
+/* =========================================================
+   RECACHE
+========================================================= */
+
 export function recacheUserNodes(dom, events = null) {
   if (!dom) {
     return {};
@@ -2566,16 +3001,101 @@ export function recacheUserNodes(dom, events = null) {
   const result =
     {};
 
-  for (const [key, selectors] of Object.entries(USER_NODE_MAP)) {
-    result[key] =
-      Boolean(
-        resolveDomNode(
-          dom,
-          key,
-          selectors
-        )
-      );
-  }
+  result.sidebarName =
+    Boolean(
+      resolveScopedDomNode(
+        dom,
+        "sidebarName",
+        USER_NAME_SELECTORS,
+        "sidebar"
+      )
+    );
+
+  result.sidebarAvatar =
+    Boolean(
+      resolveAvatarRoot(
+        dom,
+        "sidebarAvatar",
+        "sidebar"
+      )
+    );
+
+  result.topbarUserName =
+    Boolean(
+      resolveScopedDomNode(
+        dom,
+        "topbarUserName",
+        TOPBAR_USER_NAME_SELECTORS,
+        "topbar"
+      )
+    );
+
+  result.topbarAvatar =
+    Boolean(
+      resolveAvatarRoot(
+        dom,
+        "topbarAvatar",
+        "topbar"
+      )
+    );
+
+  result.userToggle =
+    Boolean(
+      resolveScopedDomNode(
+        dom,
+        "userToggle",
+        USER_TOGGLE_SELECTORS,
+        "sidebar"
+      ) ||
+      resolveScopedDomNode(
+        dom,
+        "userToggle",
+        USER_TOGGLE_SELECTORS,
+        "topbar"
+      )
+    );
+
+  result.userDropdown =
+    Boolean(
+      resolveScopedDomNode(
+        dom,
+        "userDropdown",
+        USER_DROPDOWN_SELECTORS,
+        "sidebar"
+      ) ||
+      resolveScopedDomNode(
+        dom,
+        "userDropdown",
+        USER_DROPDOWN_SELECTORS,
+        "topbar"
+      )
+    );
+
+  result.logoutBtn =
+    Boolean(
+      resolveScopedDomNode(
+        dom,
+        "logoutBtn",
+        LOGOUT_SELECTORS,
+        "sidebar"
+      ) ||
+      resolveScopedDomNode(
+        dom,
+        "logoutBtn",
+        LOGOUT_SELECTORS,
+        "topbar"
+      )
+    );
+
+  result.topbarTitle =
+    Boolean(
+      resolveScopedDomNode(
+        dom,
+        "topbarTitle",
+        TOPBAR_TITLE_SELECTORS,
+        "topbar"
+      )
+    );
 
   safeEmit(
     events,
@@ -2592,6 +3112,61 @@ export function recacheUserNodes(dom, events = null) {
   return result;
 }
 
+function shouldScheduleDeferredSync(synced = {}) {
+  return !(
+    synced.sidebarName ||
+    synced.sidebarAvatar ||
+    synced.topbarUserName ||
+    synced.topbarAvatar ||
+    synced.userToggle
+  );
+}
+
+function scheduleDeferredUserSync(args = {}) {
+  if (
+    deferredUserSyncScheduled ||
+    !isBrowser()
+  ) {
+    return false;
+  }
+
+  deferredUserSyncScheduled =
+    true;
+
+  nextFrame(() => {
+    deferredUserSyncScheduled =
+      false;
+
+    safeEmit(
+      args.events,
+      USER_DEFERRED_SYNC_EVENT,
+      {
+        reason:
+          "nodes-mounted-late",
+
+        at:
+          safeNowIso(),
+      }
+    );
+
+    try {
+      syncUserUI({
+        ...args,
+        recache:
+          true,
+        deferIfMissing:
+          false,
+      });
+    } catch {}
+  });
+
+  return true;
+}
+
+/* =========================================================
+   SYNC USER UI
+========================================================= */
+
 export function syncUserUI(input = {}) {
   const args =
     normalizeSyncArgs(input);
@@ -2601,6 +3176,7 @@ export function syncUserUI(input = {}) {
     dom,
     events,
     recache = true,
+    deferIfMissing = true,
   } =
     args;
 
@@ -2659,6 +3235,13 @@ export function syncUserUI(input = {}) {
         data
       ),
   };
+
+  if (
+    deferIfMissing !== false &&
+    shouldScheduleDeferredSync(synced)
+  ) {
+    scheduleDeferredUserSync(args);
+  }
 
   const payload = {
     displayName:
@@ -2784,9 +3367,12 @@ function getElementState(el) {
   };
 }
 
-function getAvatarSnapshot(root) {
+function getAvatarSnapshot(root, idPrefix = "sidebar") {
   const avatarNodes =
-    getAvatarNodes(root);
+    getAvatarNodes(
+      root,
+      idPrefix
+    );
 
   return {
     root:
@@ -2825,14 +3411,18 @@ export function getUiSnapshot({
 
   const sidebarAvatarRoot =
     dom?.sidebarAvatar ||
-    queryFirst(
-      AVATAR_SELECTORS.root
+    resolveAvatarRoot(
+      dom,
+      "sidebarAvatar",
+      "sidebar"
     );
 
   const topbarAvatarRoot =
     dom?.topbarAvatar ||
-    queryFirst(
-      AVATAR_SELECTORS.topbarRoot
+    resolveAvatarRoot(
+      dom,
+      "topbarAvatar",
+      "topbar"
     );
 
   return {
@@ -2922,12 +3512,14 @@ export function getUiSnapshot({
     avatar: {
       sidebar:
         getAvatarSnapshot(
-          sidebarAvatarRoot
+          sidebarAvatarRoot,
+          "sidebar"
         ),
 
       topbar:
         getAvatarSnapshot(
-          topbarAvatarRoot
+          topbarAvatarRoot,
+          "topbar"
         ),
     },
 

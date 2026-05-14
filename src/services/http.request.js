@@ -3,12 +3,12 @@
    Archivo: src/services/http.request.js
 
    ONION SUPPORT · HTTP REQUEST ENGINE
-   BASE EXECUTION · RETRY ENGINE · ABORT SAFE · TOKEN SAFE · 14/10
+   BASE EXECUTION · RETRY ENGINE · ABORT SAFE · TOKEN SAFE · 15/10
 
    Responsabilidades:
    - Ejecutar requests base contra AppCore.apiClient / AppCore.request.
    - Aplicar retry policy con backoff + jitter.
-   - Emitir eventos internos de intento/retry sin romper el flujo.
+   - Emitir eventos internos de intento/retry solo si diagnostics lo pide.
    - Respetar AbortSignal antes, durante y después del retry delay.
    - Normalizar errores para el caller.
    - Evitar retry interno duplicado de AppCore.apiClient.
@@ -25,6 +25,7 @@
    - Abort pre-attempt / during-delay / post-delay.
    - Retry budget por tiempo.
    - Eventos sin tokens reales.
+   - Eventos internos opt-in para evitar firebreak storms.
    - AppCore parcial tolerado.
    - apiClient faltante con fallback controlado.
    - Retry-After vía helper.
@@ -34,6 +35,7 @@
    - Fallback fetch con expectedStatuses.
    - No doble /api si apiBase ya trae /api.
    - No exponer headers/body sensibles en eventos.
+   - Evita recursión si AppCore.apiClient/AppCore.request apuntan al Http service.
 ========================================================= */
 
 import {
@@ -57,7 +59,7 @@ import {
 ========================================================= */
 
 export const HTTP_REQUEST_ENGINE_VERSION =
-  "14.0.0";
+  "15.0.0";
 
 /* =========================================================
    MODULE STATE
@@ -86,6 +88,7 @@ const BODYLESS_METHODS =
 const JSON_CONTENT_TYPES =
   Object.freeze([
     "application/json",
+    "application/problem+json",
     "+json",
   ]);
 
@@ -350,6 +353,21 @@ function joinUrl(base = "", path = "") {
   return `${cleanBase}/${normalizedPath.replace(/^\/+/g, "")}`;
 }
 
+function looksLikeHttpService(candidate = null) {
+  return Boolean(
+    candidate &&
+      typeof candidate === "object" &&
+      (
+        candidate.SERVICE_NAME === "http" ||
+        candidate.SERVICE_VERSION ||
+        candidate.events?.requestStart === "http:request:start"
+      ) &&
+      isFunction(candidate.request) &&
+      isFunction(candidate.get) &&
+      isFunction(candidate.post)
+  );
+}
+
 /* =========================================================
    SIGNAL / ABORT
 ========================================================= */
@@ -427,6 +445,22 @@ function createAbortErrorObject(message = "Request aborted", reason = null) {
   return error;
 }
 
+function createTimeoutErrorObject(message = "Request timeout") {
+  const error =
+    new Error(message);
+
+  error.name =
+    "TimeoutError";
+
+  error.code =
+    "REQUEST_TIMEOUT";
+
+  error.timeout =
+    true;
+
+  return error;
+}
+
 function buildAbortError(signal, requestConfig = {}, message = "Request aborted") {
   const reason =
     getSignalReason(signal);
@@ -447,22 +481,6 @@ function buildAbortError(signal, requestConfig = {}, message = "Request aborted"
   );
 }
 
-function createTimeoutErrorObject(message = "Request timeout") {
-  const error =
-    new Error(message);
-
-  error.name =
-    "TimeoutError";
-
-  error.code =
-    "REQUEST_TIMEOUT";
-
-  error.timeout =
-    true;
-
-  return error;
-}
-
 function abortSignalAny(signals = []) {
   const validSignals =
     signals.filter(hasAbortSignal);
@@ -470,6 +488,12 @@ function abortSignalAny(signals = []) {
   if (!validSignals.length) {
     return null;
   }
+
+  try {
+    if (typeof AbortSignal !== "undefined" && isFunction(AbortSignal.any)) {
+      return AbortSignal.any(validSignals);
+    }
+  } catch {}
 
   if (validSignals.length === 1) {
     return validSignals[0];
@@ -547,20 +571,25 @@ function createTimeoutSignal(timeoutMs = 0) {
   const timeout =
     safeNumber(timeoutMs, 0);
 
+  const state = {
+    signal:
+      null,
+
+    controller:
+      null,
+
+    fired:
+      false,
+
+    clear:
+      () => {},
+  };
+
   if (
     timeout <= 0 ||
     typeof AbortController === "undefined"
   ) {
-    return {
-      signal:
-        null,
-
-      controller:
-        null,
-
-      clear:
-        () => {},
-    };
+    return state;
   }
 
   const controller =
@@ -569,9 +598,18 @@ function createTimeoutSignal(timeoutMs = 0) {
   let timer =
     null;
 
+  state.controller =
+    controller;
+
+  state.signal =
+    controller.signal;
+
   try {
     timer =
       setTimeout(() => {
+        state.fired =
+          true;
+
         try {
           controller.abort(
             createTimeoutErrorObject()
@@ -584,35 +622,65 @@ function createTimeoutSignal(timeoutMs = 0) {
       }, timeout);
   } catch {}
 
-  return {
-    signal:
-      controller.signal,
+  state.clear =
+    () => {
+      try {
+        if (timer) {
+          clearTimeout(timer);
+        }
+      } catch {}
 
-    controller,
+      timer =
+        null;
+    };
 
-    clear:
-      () => {
-        try {
-          if (timer) {
-            clearTimeout(timer);
-          }
-        } catch {}
-
-        timer =
-          null;
-      },
-  };
+  return state;
 }
 
 /* =========================================================
    EVENTS / LOGS
 ========================================================= */
 
-function safeEmit(AppCore, eventName = "", payload = {}) {
+function shouldEmitEngineEvent(AppCore, requestConfig = {}, eventName = "") {
+  const cfg =
+    safeObject(requestConfig);
+
+  if (cfg.emitEvents === false) {
+    return false;
+  }
+
+  if (cfg.emitEngineEvents === true) {
+    return true;
+  }
+
+  if (cfg.emitRequestEngineEvents === true) {
+    return true;
+  }
+
+  if (cfg.debugEngineEvents === true) {
+    return true;
+  }
+
+  try {
+    return Boolean(
+      AppCore?.config?.diagnostics?.httpRequestEngineEvents === true ||
+        AppCore?.config?.diagnostics?.httpLifecycleEvents === true ||
+        AppCore?.config?.debugHttpRequestEngine === true
+    );
+  } catch {}
+
+  return false;
+}
+
+function safeEmit(AppCore, eventName = "", payload = {}, requestConfig = {}) {
   const name =
     safeText(eventName, "");
 
   if (!name) {
+    return false;
+  }
+
+  if (!shouldEmitEngineEvent(AppCore, requestConfig, name)) {
     return false;
   }
 
@@ -649,10 +717,12 @@ function safeWarn(AppCore, ...args) {
   } catch {}
 
   try {
-    console.warn(
-      "[HTTP Request]",
-      ...safeArgs
-    );
+    if (AppCore?.config?.debug || AppCore?.config?.debugHttpRequestEngine) {
+      console.warn(
+        "[HTTP Request]",
+        ...safeArgs
+      );
+    }
   } catch {}
 }
 
@@ -1060,7 +1130,8 @@ function resolveRequestUrl(AppCore, requestConfig = {}) {
   try {
     base =
       safeText(
-        AppCore?.config?.apiBase ||
+        cfg.apiBase ||
+          AppCore?.config?.apiBase ||
           AppCore?.config?.apiBaseUrl ||
           AppCore?.config?.baseURL ||
           AppCore?.config?.baseUrl ||
@@ -1181,6 +1252,16 @@ function prepareFallbackBodyAndHeaders(requestConfig = {}) {
     safeUpper(cfg.method, DEFAULT_METHOD);
 
   if (BODYLESS_METHODS.includes(method)) {
+    deleteHeader(
+      headers,
+      "Content-Type"
+    );
+
+    deleteHeader(
+      headers,
+      "content-type"
+    );
+
     return {
       body:
         undefined,
@@ -1568,8 +1649,27 @@ function buildCoreRequestOptions(requestConfig = {}) {
     expectedStatuses:
       cfg.expectedStatuses || [],
 
+    /*
+      El service engine gestiona retry.
+      Core/apiClient debe ejecutar un solo intento.
+    */
     emitEvents:
       cfg.emitCoreEvents === true,
+
+    emitLifecycleEvents:
+      false,
+
+    emitStartEvent:
+      false,
+
+    emitRetryEvents:
+      false,
+
+    emitDedupeEvents:
+      false,
+
+    emitFinalEvents:
+      cfg.emitCoreFinalEvents === true,
 
     storeError:
       cfg.storeCoreError === true,
@@ -1577,10 +1677,6 @@ function buildCoreRequestOptions(requestConfig = {}) {
     silent:
       cfg.silent === true,
 
-    /*
-      Este engine gestiona retry.
-      El Core/apiClient debe ejecutar un solo intento.
-    */
     retries:
       0,
 
@@ -1611,7 +1707,8 @@ async function executeViaApiClient(AppCore, requestConfig = {}) {
 
   if (
     !apiClient ||
-    !isFunction(apiClient.request)
+    !isFunction(apiClient.request) ||
+    looksLikeHttpService(apiClient)
   ) {
     return {
       available:
@@ -1631,12 +1728,6 @@ async function executeViaApiClient(AppCore, requestConfig = {}) {
   const options =
     buildCoreRequestOptions(cfg);
 
-  /*
-    El apiClient del Core soporta:
-      apiClient.request(path, options)
-      apiClient.request(method, path, options)
-    Usamos firma path/options para máxima compatibilidad.
-  */
   const result =
     await apiClient.request(
       target,
@@ -1653,7 +1744,10 @@ async function executeViaApiClient(AppCore, requestConfig = {}) {
 }
 
 async function executeViaCoreRequest(AppCore, requestConfig = {}) {
-  if (!isFunction(AppCore?.request)) {
+  if (
+    !isFunction(AppCore?.request) ||
+    AppCore?.request === requestConfig?.serviceRequest
+  ) {
     return {
       available:
         false,
@@ -1809,7 +1903,7 @@ async function executeViaFetch(AppCore, requestConfig = {}) {
     };
   } catch (error) {
     const timeoutAborted =
-      Boolean(timeout.signal?.aborted);
+      Boolean(timeout.fired === true || timeout.signal?.aborted);
 
     const manualAborted =
       Boolean(
@@ -2105,10 +2199,6 @@ export async function executeWithRetry({
     null;
 
   while (true) {
-    /* =====================================================
-       PRE-ATTEMPT ABORT / BUDGET
-    ===================================================== */
-
     if (isSignalAborted(cfg.signal)) {
       lastError =
         buildAbortError(
@@ -2163,15 +2253,12 @@ export async function executeWithRetry({
             error:
               sanitizeErrorForEvent(lastError),
           },
-        })
+        }),
+        cfg
       );
 
       throw lastError;
     }
-
-    /* =====================================================
-       ATTEMPT START
-    ===================================================== */
 
     safeEmit(
       AppCore,
@@ -2182,7 +2269,8 @@ export async function executeWithRetry({
           cfg,
         attempt,
         startedAt,
-      })
+      }),
+      cfg
     );
 
     try {
@@ -2201,7 +2289,8 @@ export async function executeWithRetry({
             cfg,
           attempt,
           startedAt,
-        })
+        }),
+        cfg
       );
 
       return response;
@@ -2232,6 +2321,8 @@ export async function executeWithRetry({
       if (isTimeoutError(lastError)) {
         lastError.timeout =
           true;
+        lastError.aborted =
+          false;
       }
 
       safeEmit(
@@ -2247,12 +2338,9 @@ export async function executeWithRetry({
             error:
               sanitizeErrorForEvent(lastError),
           },
-        })
+        }),
+        cfg
       );
-
-      /* ===================================================
-         RETRY DECISION
-      =================================================== */
 
       const canRetry =
         shouldRetry(
@@ -2285,15 +2373,12 @@ export async function executeWithRetry({
               error:
                 sanitizeErrorForEvent(lastError),
             },
-          })
+          }),
+          cfg
         );
 
         break;
       }
-
-      /* ===================================================
-         RETRY DELAY
-      =================================================== */
 
       let waitMs =
         buildRetryDelay(
@@ -2345,7 +2430,8 @@ export async function executeWithRetry({
                 error:
                   sanitizeErrorForEvent(lastError),
               },
-            })
+            }),
+            cfg
           );
 
           break;
@@ -2376,7 +2462,8 @@ export async function executeWithRetry({
             error:
               sanitizeErrorForEvent(lastError),
           },
-        })
+        }),
+        cfg
       );
 
       try {
@@ -2464,7 +2551,8 @@ export async function executeWithRetry({
               error:
                 sanitizeErrorForEvent(lastError),
             },
-          })
+          }),
+          cfg
         );
 
         break;
@@ -2497,10 +2585,6 @@ export async function executeWithRetry({
     }
   }
 
-  /* =======================================================
-     FINAL THROW
-  ======================================================= */
-
   if (!lastError) {
     lastError =
       normalizeError(
@@ -2529,6 +2613,8 @@ export async function executeWithRetry({
   if (isTimeoutError(lastError)) {
     lastError.timeout =
       true;
+    lastError.aborted =
+      false;
   }
 
   lastError.requestId =
@@ -2576,7 +2662,8 @@ export async function executeWithRetry({
 
       error:
         sanitizeErrorForEvent(lastError),
-    }
+    },
+    cfg
   );
 
   throw lastError;

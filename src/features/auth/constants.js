@@ -3,12 +3,13 @@
    Archivo: src/features/auth/constants.js
 
    AUTH CONTRACT · ENTERPRISE HARDENED · NO APPCORE DEP
-   FINAL EXTREME SYSTEM · 11/10
+   FINAL EXTREME SYSTEM · 15/10
 
    RESPONSABILIDADES:
    - centralizar endpoints auth
    - centralizar endpoints de activación de cuenta
    - centralizar endpoints password-reset request / confirm / validate
+   - centralizar endpoints 2FA/MFA
    - centralizar claves storage auxiliar
    - centralizar límites y constantes sesión
    - centralizar rutas SPA públicas técnicas
@@ -37,19 +38,11 @@
 ========================================================= */
 
 export const AUTH_CONSTANTS_VERSION =
-  "11.0.0";
+  "15.0.0";
 
 /* =========================================================
    BASE HELPERS
 ========================================================= */
-
-function isPlainObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
-}
 
 function isObjectLike(value) {
   return (
@@ -467,6 +460,12 @@ export const REFRESH_ENDPOINT =
 export const TWO_FACTOR_LOGIN_ENDPOINT =
   "/api/auth/2fa/login";
 
+export const TWO_FACTOR_REQUEST_ENDPOINT =
+  "/api/auth/2fa/request";
+
+export const TWO_FACTOR_RESEND_ENDPOINT =
+  "/api/auth/2fa/resend";
+
 export const HEALTH_ENDPOINT =
   "/api/auth/_health";
 
@@ -482,6 +481,9 @@ export const ACTIVATE_ACCOUNT_LEGACY_ENDPOINT =
 
 export const ACTIVATE_FIRST_USER_ENDPOINT =
   "/api/auth/activate/first-user";
+
+export const VALIDATE_ACTIVATION_TOKEN_ENDPOINT =
+  "/api/auth/activate/validate";
 
 export const REQUEST_RESET_ENDPOINT =
   "/api/auth/reset-password-request";
@@ -706,6 +708,36 @@ export const AUTH_ENDPOINTS =
     twoFactorVerify:
       TWO_FACTOR_LOGIN_ENDPOINT,
 
+    requestTwoFactor:
+      TWO_FACTOR_REQUEST_ENDPOINT,
+
+    requestTwoFactorCode:
+      TWO_FACTOR_REQUEST_ENDPOINT,
+
+    twoFactorRequest:
+      TWO_FACTOR_REQUEST_ENDPOINT,
+
+    request2FA:
+      TWO_FACTOR_REQUEST_ENDPOINT,
+
+    requestMfa:
+      TWO_FACTOR_REQUEST_ENDPOINT,
+
+    resendTwoFactor:
+      TWO_FACTOR_RESEND_ENDPOINT,
+
+    resendTwoFactorCode:
+      TWO_FACTOR_RESEND_ENDPOINT,
+
+    twoFactorResend:
+      TWO_FACTOR_RESEND_ENDPOINT,
+
+    resend2FA:
+      TWO_FACTOR_RESEND_ENDPOINT,
+
+    resendMfa:
+      TWO_FACTOR_RESEND_ENDPOINT,
+
     /* HEALTH */
     health:
       HEALTH_ENDPOINT,
@@ -743,6 +775,18 @@ export const AUTH_ENDPOINTS =
 
     firstUserActivation:
       ACTIVATE_FIRST_USER_ENDPOINT,
+
+    validateActivationToken:
+      VALIDATE_ACTIVATION_TOKEN_ENDPOINT,
+
+    validateActivateAccountToken:
+      VALIDATE_ACTIVATION_TOKEN_ENDPOINT,
+
+    validateActivateToken:
+      VALIDATE_ACTIVATION_TOKEN_ENDPOINT,
+
+    activationValidate:
+      VALIDATE_ACTIVATION_TOKEN_ENDPOINT,
 
     /* PASSWORD RESET REQUEST */
     requestPasswordReset:
@@ -792,6 +836,9 @@ export const AUTH_ENDPOINTS =
     validateResetToken:
       VALIDATE_RESET_ENDPOINT,
 
+    validateResetPasswordToken:
+      VALIDATE_RESET_ENDPOINT,
+
     resetPasswordValidate:
       VALIDATE_RESET_ENDPOINT,
 
@@ -834,8 +881,27 @@ export const AUTH_ENDPOINT_CANDIDATES =
       unique([
         TWO_FACTOR_LOGIN_ENDPOINT,
         "/api/auth/mfa/login",
+        "/api/auth/otp/login",
         "/api/auth/2fa/verify",
         "/api/auth/mfa/verify",
+        "/api/auth/otp/verify",
+      ]),
+
+    twoFactorRequest:
+      unique([
+        TWO_FACTOR_REQUEST_ENDPOINT,
+        "/api/auth/mfa/request",
+        "/api/auth/otp/request",
+        "/api/auth/2fa/send",
+        "/api/auth/mfa/send",
+        "/api/auth/otp/send",
+      ]),
+
+    twoFactorResend:
+      unique([
+        TWO_FACTOR_RESEND_ENDPOINT,
+        "/api/auth/mfa/resend",
+        "/api/auth/otp/resend",
       ]),
 
     health:
@@ -857,6 +923,13 @@ export const AUTH_ENDPOINT_CANDIDATES =
         ACTIVATE_FIRST_USER_ENDPOINT,
       ]),
 
+    validateActivationToken:
+      unique([
+        VALIDATE_ACTIVATION_TOKEN_ENDPOINT,
+        "/api/auth/activation/validate",
+        "/api/auth/activate-account/validate",
+      ]),
+
     requestPasswordReset:
       unique([
         REQUEST_RESET_ENDPOINT,
@@ -876,6 +949,7 @@ export const AUTH_ENDPOINT_CANDIDATES =
       unique([
         VALIDATE_RESET_ENDPOINT,
         "/api/auth/reset-password-validate",
+        "/api/auth/reset-password/validate",
         "/api/auth/password-reset/validate",
       ]),
   });
@@ -908,15 +982,20 @@ export const AUTH_ENDPOINT_GROUPS =
         AUTH_ENDPOINTS.login,
         AUTH_ENDPOINTS.refresh,
         AUTH_ENDPOINTS.twoFactorLogin,
+        AUTH_ENDPOINTS.twoFactorRequest,
+        AUTH_ENDPOINTS.twoFactorResend,
         AUTH_ENDPOINTS.health,
 
         ...AUTH_ENDPOINT_CANDIDATES.health,
         ...AUTH_ENDPOINT_CANDIDATES.activateAccount,
         ...AUTH_ENDPOINT_CANDIDATES.activateFirstUser,
+        ...AUTH_ENDPOINT_CANDIDATES.validateActivationToken,
         ...AUTH_ENDPOINT_CANDIDATES.requestPasswordReset,
         ...AUTH_ENDPOINT_CANDIDATES.confirmPasswordReset,
         ...AUTH_ENDPOINT_CANDIDATES.validateResetToken,
         ...AUTH_ENDPOINT_CANDIDATES.twoFactorLogin,
+        ...AUTH_ENDPOINT_CANDIDATES.twoFactorRequest,
+        ...AUTH_ENDPOINT_CANDIDATES.twoFactorResend,
       ]),
 
     private:
@@ -924,6 +1003,27 @@ export const AUTH_ENDPOINT_GROUPS =
         AUTH_ENDPOINTS.logout,
         AUTH_ENDPOINTS.me,
         ...AUTH_ENDPOINT_CANDIDATES.me,
+      ]),
+
+    controlSkipRefresh:
+      removePrivateMeEndpoints([
+        AUTH_ENDPOINTS.login,
+        AUTH_ENDPOINTS.refresh,
+        AUTH_ENDPOINTS.logout,
+        AUTH_ENDPOINTS.twoFactorLogin,
+        AUTH_ENDPOINTS.twoFactorRequest,
+        AUTH_ENDPOINTS.twoFactorResend,
+
+        ...AUTH_ENDPOINT_CANDIDATES.twoFactorLogin,
+        ...AUTH_ENDPOINT_CANDIDATES.twoFactorRequest,
+        ...AUTH_ENDPOINT_CANDIDATES.twoFactorResend,
+        ...AUTH_ENDPOINT_CANDIDATES.activateAccount,
+        ...AUTH_ENDPOINT_CANDIDATES.activateFirstUser,
+        ...AUTH_ENDPOINT_CANDIDATES.validateActivationToken,
+        ...AUTH_ENDPOINT_CANDIDATES.requestPasswordReset,
+        ...AUTH_ENDPOINT_CANDIDATES.confirmPasswordReset,
+        ...AUTH_ENDPOINT_CANDIDATES.validateResetToken,
+        ...AUTH_ENDPOINT_CANDIDATES.health,
       ]),
 
     session:
@@ -938,6 +1038,7 @@ export const AUTH_ENDPOINT_GROUPS =
       normalizeEndpointList([
         ...AUTH_ENDPOINT_CANDIDATES.activateAccount,
         ...AUTH_ENDPOINT_CANDIDATES.activateFirstUser,
+        ...AUTH_ENDPOINT_CANDIDATES.validateActivationToken,
       ]),
 
     passwordReset:
@@ -950,6 +1051,8 @@ export const AUTH_ENDPOINT_GROUPS =
     twoFactor:
       normalizeEndpointList([
         ...AUTH_ENDPOINT_CANDIDATES.twoFactorLogin,
+        ...AUTH_ENDPOINT_CANDIDATES.twoFactorRequest,
+        ...AUTH_ENDPOINT_CANDIDATES.twoFactorResend,
       ]),
   });
 
@@ -961,6 +1064,11 @@ export const AUTH_PUBLIC_API_PATHS =
 export const AUTH_PRIVATE_API_PATHS =
   deepFreeze([
     ...AUTH_ENDPOINT_GROUPS.private,
+  ]);
+
+export const AUTH_CONTROL_SKIP_REFRESH_PATHS =
+  deepFreeze([
+    ...AUTH_ENDPOINT_GROUPS.controlSkipRefresh,
   ]);
 
 /* =========================================================
@@ -1154,6 +1262,9 @@ export const AUTH_CONSTANTS =
     sessionValueMaxLength:
       200,
 
+    textValueMaxLength:
+      2048,
+
     /* REFRESH */
     refreshRetryCooldownMs:
       30000,
@@ -1167,6 +1278,9 @@ export const AUTH_CONSTANTS =
     /* REQUEST */
     requestTimeout:
       15000,
+
+    loginTimeoutMs:
+      30000,
 
     /* ACTIVATION */
     activationPasswordMinLength:
@@ -1233,6 +1347,7 @@ export const AUTH_FAILURE_CODES =
     "INVALID_CREDENTIALS",
     "MISSING_CREDENTIALS",
     "ACCOUNT_TEMPORARILY_LOCKED",
+    "ACCOUNT_LOCKED",
     "ACCOUNT_DISABLED",
     "USER_DISABLED",
     "USER_NOT_AVAILABLE",
@@ -1274,7 +1389,11 @@ export const AUTH_SUCCESS_STATUSES =
     "active",
     "valid",
     "token_only",
+    "token-only",
     "user_only",
+    "user-only",
+    "session",
+    "refreshed",
   ]);
 
 export const AUTH_2FA_STATUSES =
@@ -1282,6 +1401,7 @@ export const AUTH_2FA_STATUSES =
     "2fa_required",
     "mfa_required",
     "totp_required",
+    "otp_required",
     "two_factor_required",
     "verification_required",
   ]);
@@ -1289,6 +1409,165 @@ export const AUTH_2FA_STATUSES =
 /* =========================================================
    GENERIC GETTERS
 ========================================================= */
+
+function resolveCandidateKey(key = "") {
+  const cleanKey =
+    normalizeKey(key);
+
+  const aliases = {
+    signIn:
+      "login",
+
+    signin:
+      "login",
+
+    authenticate:
+      "login",
+
+    signOut:
+      "logout",
+
+    signout:
+      "logout",
+
+    profile:
+      "me",
+
+    currentUser:
+      "me",
+
+    current:
+      "me",
+
+    session:
+      "me",
+
+    refreshSession:
+      "refresh",
+
+    tokenRefresh:
+      "refresh",
+
+    renew:
+      "refresh",
+
+    login2fa:
+      "twoFactorLogin",
+
+    mfaLogin:
+      "twoFactorLogin",
+
+    verify2FA:
+      "twoFactorLogin",
+
+    verifyMfa:
+      "twoFactorLogin",
+
+    twoFactorVerify:
+      "twoFactorLogin",
+
+    requestTwoFactor:
+      "twoFactorRequest",
+
+    requestTwoFactorCode:
+      "twoFactorRequest",
+
+    request2FA:
+      "twoFactorRequest",
+
+    requestMfa:
+      "twoFactorRequest",
+
+    resendTwoFactor:
+      "twoFactorResend",
+
+    resendTwoFactorCode:
+      "twoFactorResend",
+
+    resend2FA:
+      "twoFactorResend",
+
+    resendMfa:
+      "twoFactorResend",
+
+    activation:
+      "activateAccount",
+
+    accountActivation:
+      "activateAccount",
+
+    createUserActivation:
+      "activateAccount",
+
+    confirmActivation:
+      "activateAccount",
+
+    activate:
+      "activateAccount",
+
+    firstUserActivation:
+      "activateFirstUser",
+
+    validateActivateAccountToken:
+      "validateActivationToken",
+
+    validateActivateToken:
+      "validateActivationToken",
+
+    activationValidate:
+      "validateActivationToken",
+
+    resetPasswordRequest:
+      "requestPasswordReset",
+
+    forgotPassword:
+      "requestPasswordReset",
+
+    recoverPassword:
+      "requestPasswordReset",
+
+    recover:
+      "requestPasswordReset",
+
+    forgot:
+      "requestPasswordReset",
+
+    passwordResetRequest:
+      "requestPasswordReset",
+
+    confirmResetPassword:
+      "confirmPasswordReset",
+
+    resetPasswordConfirm:
+      "confirmPasswordReset",
+
+    passwordResetConfirm:
+      "confirmPasswordReset",
+
+    resetPasswordUpdate:
+      "confirmPasswordReset",
+
+    resetPasswordFinalize:
+      "confirmPasswordReset",
+
+    changeForgottenPassword:
+      "confirmPasswordReset",
+
+    validateResetPasswordToken:
+      "validateResetToken",
+
+    resetPasswordValidate:
+      "validateResetToken",
+
+    validatePasswordReset:
+      "validateResetToken",
+
+    passwordResetValidate:
+      "validateResetToken",
+  };
+
+  return aliases[cleanKey] || cleanKey;
+}
 
 export function getAuthEndpoint(key = "", fallback = "") {
   const cleanKey =
@@ -1304,6 +1583,19 @@ export function getAuthEndpoint(key = "", fallback = "") {
     return endpoint.trim();
   }
 
+  const candidateKey =
+    resolveCandidateKey(cleanKey);
+
+  const canonicalEndpoint =
+    AUTH_ENDPOINTS[candidateKey];
+
+  if (
+    typeof canonicalEndpoint === "string" &&
+    canonicalEndpoint.trim()
+  ) {
+    return canonicalEndpoint.trim();
+  }
+
   return safeText(
     fallback,
     ""
@@ -1312,7 +1604,7 @@ export function getAuthEndpoint(key = "", fallback = "") {
 
 export function getAuthEndpointCandidates(key = "", fallback = "") {
   const cleanKey =
-    normalizeKey(key);
+    resolveCandidateKey(key);
 
   const candidates =
     AUTH_ENDPOINT_CANDIDATES[cleanKey];
@@ -1439,6 +1731,20 @@ export function getTwoFactorLoginEndpoint() {
   );
 }
 
+export function getTwoFactorRequestEndpoint() {
+  return getAuthEndpoint(
+    "twoFactorRequest",
+    TWO_FACTOR_REQUEST_ENDPOINT
+  );
+}
+
+export function getTwoFactorResendEndpoint() {
+  return getAuthEndpoint(
+    "twoFactorResend",
+    TWO_FACTOR_RESEND_ENDPOINT
+  );
+}
+
 export function getAuthHealthEndpoint() {
   return getAuthEndpoint(
     "health",
@@ -1472,10 +1778,28 @@ export function getActivateFirstUserEndpoint() {
   );
 }
 
+export function getValidateActivationTokenEndpoint() {
+  return getAuthEndpoint(
+    "validateActivationToken",
+    VALIDATE_ACTIVATION_TOKEN_ENDPOINT
+  );
+}
+
+export function getValidateActivateAccountTokenEndpoint() {
+  return getValidateActivationTokenEndpoint();
+}
+
 export function getActivateAccountEndpointCandidates() {
   return getAuthEndpointCandidates(
     "activateAccount",
     ACTIVATE_ACCOUNT_ENDPOINT
+  );
+}
+
+export function getValidateActivationTokenEndpointCandidates() {
+  return getAuthEndpointCandidates(
+    "validateActivationToken",
+    VALIDATE_ACTIVATION_TOKEN_ENDPOINT
   );
 }
 
@@ -1497,11 +1821,19 @@ export function getConfirmPasswordResetEndpoint() {
   );
 }
 
+export function getConfirmResetPasswordEndpoint() {
+  return getConfirmPasswordResetEndpoint();
+}
+
 export function getValidateResetTokenEndpoint() {
   return getAuthEndpoint(
     "validateResetToken",
     VALIDATE_RESET_ENDPOINT
   );
+}
+
+export function getValidateResetPasswordTokenEndpoint() {
+  return getValidateResetTokenEndpoint();
 }
 
 export function getRequestPasswordResetEndpointCandidates() {
@@ -1695,6 +2027,14 @@ export function getRequestTimeout() {
   );
 }
 
+export function getLoginTimeoutMs() {
+  return clampNumber(
+    getAuthConstant("loginTimeoutMs", 30000),
+    1000,
+    120000
+  );
+}
+
 export function getRefreshRetryCooldownMs() {
   return clampNumber(
     getAuthConstant("refreshRetryCooldownMs", 30000),
@@ -1880,6 +2220,17 @@ export function isPrivateAuthEndpoint(path = "") {
       path,
       AUTH_ENDPOINT_GROUPS.private
     )
+  );
+}
+
+export function isAuthControlSkipRefreshEndpoint(path = "") {
+  if (isMeEndpoint(path)) {
+    return false;
+  }
+
+  return isEndpointInGroup(
+    path,
+    AUTH_CONTROL_SKIP_REFRESH_PATHS
   );
 }
 
@@ -2169,6 +2520,9 @@ export function getAuthConstantsSnapshot() {
     privateApiPaths:
       AUTH_PRIVATE_API_PATHS,
 
+    controlSkipRefreshPaths:
+      AUTH_CONTROL_SKIP_REFRESH_PATHS,
+
     storageKeys:
       AUTH_STORAGE_KEYS,
 
@@ -2211,12 +2565,17 @@ export default deepFreeze({
   ME_LEGACY_ENDPOINT,
   ME_AUTH_LEGACY_ENDPOINT,
   REFRESH_ENDPOINT,
+
   TWO_FACTOR_LOGIN_ENDPOINT,
+  TWO_FACTOR_REQUEST_ENDPOINT,
+  TWO_FACTOR_RESEND_ENDPOINT,
+
   HEALTH_ENDPOINT,
 
   ACTIVATE_ACCOUNT_ENDPOINT,
   ACTIVATE_ACCOUNT_LEGACY_ENDPOINT,
   ACTIVATE_FIRST_USER_ENDPOINT,
+  VALIDATE_ACTIVATION_TOKEN_ENDPOINT,
 
   REQUEST_RESET_ENDPOINT,
   CONFIRM_RESET_ENDPOINT,
@@ -2227,6 +2586,7 @@ export default deepFreeze({
   AUTH_ENDPOINT_GROUPS,
   AUTH_PUBLIC_API_PATHS,
   AUTH_PRIVATE_API_PATHS,
+  AUTH_CONTROL_SKIP_REFRESH_PATHS,
 
   AUTH_STORAGE_KEYS,
   AUTH_LEGACY_STORAGE_KEYS,
@@ -2262,17 +2622,24 @@ export default deepFreeze({
   getMeEndpoint,
   getRefreshEndpoint,
   getTwoFactorLoginEndpoint,
+  getTwoFactorRequestEndpoint,
+  getTwoFactorResendEndpoint,
   getAuthHealthEndpoint,
 
   getActivateAccountEndpoint,
   getActivationEndpoint,
   getAccountActivationEndpoint,
   getActivateFirstUserEndpoint,
+  getValidateActivationTokenEndpoint,
+  getValidateActivateAccountTokenEndpoint,
   getActivateAccountEndpointCandidates,
+  getValidateActivationTokenEndpointCandidates,
 
   getRequestPasswordResetEndpoint,
   getConfirmPasswordResetEndpoint,
+  getConfirmResetPasswordEndpoint,
   getValidateResetTokenEndpoint,
+  getValidateResetPasswordTokenEndpoint,
   getRequestPasswordResetEndpointCandidates,
   getConfirmPasswordResetEndpointCandidates,
   getValidateResetTokenEndpointCandidates,
@@ -2297,6 +2664,7 @@ export default deepFreeze({
   getSessionValueMaxLength,
 
   getRequestTimeout,
+  getLoginTimeoutMs,
   getRefreshRetryCooldownMs,
   getMaxSequentialRefreshFailures,
   getLoginCooldownMs,
@@ -2315,6 +2683,7 @@ export default deepFreeze({
   isMeEndpoint,
   isPublicAuthEndpoint,
   isPrivateAuthEndpoint,
+  isAuthControlSkipRefreshEndpoint,
   isPasswordResetEndpoint,
   isActivationEndpoint,
   isTwoFactorEndpoint,

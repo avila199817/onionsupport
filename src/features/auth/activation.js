@@ -2,7 +2,7 @@
    Onion SPA - Auth Activation
    Archivo: src/features/auth/activation.js
 
-   AUTH ACTIVATION · FINAL EXTREME PRO SYSTEM · GOD MODE v11
+   AUTH ACTIVATION · FINAL EXTREME PRO SYSTEM · GOD MODE v15
 
    RESPONSABILIDADES:
    - activar cuentas mediante token técnico
@@ -33,13 +33,14 @@
    - no sessionStorage.clear()
    - no refresh automático
    - no marca authenticated sin token + user válidos
-   - éxito estricto: ok/success/activated/valid/completed o sesión completa
+   - éxito estricto: ok/success/activated/valid/completed/2xx o sesión completa
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
 import {
   AUTH_ENDPOINTS,
+  AUTH_ENDPOINT_CANDIDATES,
   AUTH_CONSTANTS,
   AUTH_TOKEN_PARAM_NAMES,
   getActivateAccountEndpoint as getActivateAccountEndpointFromConstants,
@@ -47,7 +48,7 @@ import {
 } from "./constants.js";
 
 import {
-  normalizeTokenValue,
+  normalizeTokenValue as helperNormalizeTokenValue,
   sanitizeRedirectPath,
   redactTokenInText,
 } from "./helpers.js";
@@ -68,7 +69,7 @@ import {
 ========================================================= */
 
 export const ACTIVATION_MODULE_VERSION =
-  "activation.11.0.0-god-mode";
+  "activation.15.0.0";
 
 /* =========================================================
    CONSTANTS
@@ -77,11 +78,17 @@ export const ACTIVATION_MODULE_VERSION =
 const DEFAULT_ACTIVATE_ENDPOINT =
   "/api/auth/activate";
 
+const DEFAULT_ACTIVATE_LEGACY_ENDPOINT =
+  "/api/auth/activate-account";
+
 const DEFAULT_ACTIVATE_FIRST_USER_ENDPOINT =
   "/api/auth/activate/first-user";
 
 const DEFAULT_VALIDATE_ENDPOINT =
   "/api/auth/activate/validate";
+
+const DEFAULT_VALIDATE_LEGACY_ENDPOINT =
+  "/api/auth/activate-account/validate";
 
 const DEFAULT_LOGIN_REDIRECT =
   "/login";
@@ -160,12 +167,14 @@ const CORRUPTED_TEXT_VALUES =
     "undefined",
     "null",
     "false",
+    "true",
     "[object object]",
     "{}",
     "[]",
     "\"undefined\"",
     "\"null\"",
     "\"false\"",
+    "\"true\"",
   ]);
 
 const PASSWORD_FIELD_NAMES =
@@ -279,9 +288,9 @@ function nowMs() {
   }
 }
 
-function isoNow() {
+function isoNow(ms = nowMs()) {
   try {
-    return new Date().toISOString();
+    return new Date(ms).toISOString();
   } catch {
     return "";
   }
@@ -398,6 +407,19 @@ function safeClone(value, fallback = null) {
   } catch {
     return fallback;
   }
+}
+
+function unique(values = []) {
+  return Array.from(
+    new Set(
+      values
+        .flat(Infinity)
+        .map((item) =>
+          safeText(item, "")
+        )
+        .filter(Boolean)
+    )
+  );
 }
 
 /* =========================================================
@@ -710,11 +732,47 @@ function getConfiguredValidateEndpoint() {
   );
 }
 
+function endpointCandidatesFor(type = "activate") {
+  if (type === "first-user") {
+    return unique([
+      getConfiguredActivateFirstUserEndpoint(),
+      ...(Array.isArray(AUTH_ENDPOINT_CANDIDATES?.activateFirstUser)
+        ? AUTH_ENDPOINT_CANDIDATES.activateFirstUser
+        : []),
+      DEFAULT_ACTIVATE_FIRST_USER_ENDPOINT,
+    ]);
+  }
+
+  if (type === "validate") {
+    return unique([
+      getConfiguredValidateEndpoint(),
+      ...(Array.isArray(AUTH_ENDPOINT_CANDIDATES?.validateActivationToken)
+        ? AUTH_ENDPOINT_CANDIDATES.validateActivationToken
+        : []),
+      DEFAULT_VALIDATE_ENDPOINT,
+      DEFAULT_VALIDATE_LEGACY_ENDPOINT,
+    ]);
+  }
+
+  return unique([
+    getConfiguredActivateEndpoint(),
+    ...(Array.isArray(AUTH_ENDPOINT_CANDIDATES?.activateAccount)
+      ? AUTH_ENDPOINT_CANDIDATES.activateAccount
+      : []),
+    DEFAULT_ACTIVATE_ENDPOINT,
+    DEFAULT_ACTIVATE_LEGACY_ENDPOINT,
+  ]);
+}
+
 export function getActivateAccountEndpoint() {
   return getConfiguredActivateEndpoint();
 }
 
 export function getActivationEndpoint() {
+  return getConfiguredActivateEndpoint();
+}
+
+export function getAccountActivationEndpoint() {
   return getConfiguredActivateEndpoint();
 }
 
@@ -727,6 +785,18 @@ export function getFirstUserActivationEndpoint() {
 }
 
 export function getValidateActivationTokenEndpoint() {
+  return getConfiguredValidateEndpoint();
+}
+
+export function getValidateActivateAccountTokenEndpoint() {
+  return getConfiguredValidateEndpoint();
+}
+
+export function getValidateActivateTokenEndpoint() {
+  return getConfiguredValidateEndpoint();
+}
+
+export function getValidateAccountActivationTokenEndpoint() {
   return getConfiguredValidateEndpoint();
 }
 
@@ -917,6 +987,57 @@ function getTokenParamNames(type = "activation") {
   ];
 }
 
+function normalizeActivationTokenValue(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (
+    !raw ||
+    isCorruptedTextValue(raw)
+  ) {
+    return "";
+  }
+
+  let normalized =
+    "";
+
+  try {
+    normalized =
+      helperNormalizeTokenValue(
+        raw,
+        getTokenMaxLength()
+      ) || "";
+  } catch {
+    normalized =
+      raw;
+  }
+
+  normalized =
+    safeText(normalized, "");
+
+  if (/^bearer\s+/i.test(normalized)) {
+    normalized =
+      normalized.replace(/^bearer\s+/i, "")
+        .trim();
+  }
+
+  if (
+    !normalized ||
+    isCorruptedTextValue(normalized) ||
+    /[\r\n\t\s]/.test(normalized)
+  ) {
+    return "";
+  }
+
+  if (
+    normalized.length > getTokenMaxLength()
+  ) {
+    return "";
+  }
+
+  return normalized;
+}
+
 function extractTokenFromSearch(search = "", names = getTokenParamNames("activation")) {
   try {
     const params =
@@ -924,9 +1045,8 @@ function extractTokenFromSearch(search = "", names = getTokenParamNames("activat
 
     for (const name of names) {
       const token =
-        normalizeTokenValue(
-          params.get(name),
-          getTokenMaxLength()
+        normalizeActivationTokenValue(
+          params.get(name)
         );
 
       if (token) {
@@ -989,18 +1109,34 @@ function extractTokenFromPath(path = "") {
           .split("/")[0];
 
       try {
-        return normalizeTokenValue(
-          decodeURIComponent(token || ""),
-          getTokenMaxLength()
+        return normalizeActivationTokenValue(
+          decodeURIComponent(token || "")
         ) || "";
       } catch {
-        return normalizeTokenValue(
-          token,
-          getTokenMaxLength()
-        ) || "";
+        return normalizeActivationTokenValue(token) || "";
       }
     }
-  } catch {}
+  } catch {
+    const marker =
+      `${ACTIVATION_PATH}/`;
+
+    if (raw.startsWith(marker)) {
+      const token =
+        raw
+          .slice(marker.length)
+          .split("?")[0]
+          .split("#")[0]
+          .split("/")[0];
+
+      try {
+        return normalizeActivationTokenValue(
+          decodeURIComponent(token || "")
+        ) || "";
+      } catch {
+        return normalizeActivationTokenValue(token) || "";
+      }
+    }
+  }
 
   return "";
 }
@@ -1018,11 +1154,11 @@ function extractActivationTokenFromUrl(pathOrUrl = getCurrentPath()) {
       ? normalizeHashRouterPath(raw)
       : raw;
 
-  const pathToken =
+  const directPathToken =
     extractTokenFromPath(normalizedRaw);
 
-  if (pathToken) {
-    return pathToken;
+  if (directPathToken) {
+    return directPathToken;
   }
 
   try {
@@ -1040,6 +1176,39 @@ function extractActivationTokenFromUrl(pathOrUrl = getCurrentPath()) {
 
     if (fromSearch) {
       return fromSearch;
+    }
+
+    if (
+      parsed.hash &&
+      isHashRouterPath(parsed.hash)
+    ) {
+      const hashPath =
+        normalizeHashRouterPath(parsed.hash);
+
+      const hashPathToken =
+        extractTokenFromPath(hashPath);
+
+      if (hashPathToken) {
+        return hashPathToken;
+      }
+
+      const hashQuery =
+        hashPath.includes("?")
+          ? hashPath
+              .split("?")
+              .slice(1)
+              .join("?")
+          : "";
+
+      const fromHashRouterQuery =
+        extractTokenFromSearch(
+          hashQuery ? `?${hashQuery}` : "",
+          getTokenParamNames("activation")
+        );
+
+      if (fromHashRouterQuery) {
+        return fromHashRouterQuery;
+      }
     }
 
     const fromHash =
@@ -1078,7 +1247,7 @@ function extractActivationTokenFromUrl(pathOrUrl = getCurrentPath()) {
 }
 
 export function resolveActivationToken(payload = {}) {
-  return normalizeTokenValue(
+  return normalizeActivationTokenValue(
     payload?.token ??
       payload?.code ??
       payload?.activationToken ??
@@ -1086,9 +1255,12 @@ export function resolveActivationToken(payload = {}) {
       payload?.activation_token ??
       payload?.activate_token ??
       payload?.t ??
-      extractActivationTokenFromUrl(),
-    getTokenMaxLength()
+      extractActivationTokenFromUrl()
   ) || "";
+}
+
+export function extractActivationToken(value = getCurrentPath()) {
+  return extractActivationTokenFromUrl(value);
 }
 
 /* =========================================================
@@ -1142,6 +1314,10 @@ function normalizeIdentifier(value = "") {
     return "";
   }
 
+  /*
+    No truncamos silenciosamente.
+    Permitimos +1 para que la validación detecte exceso.
+  */
   return raw.slice(
     0,
     getIdentifierMaxLength() + 1
@@ -2095,6 +2271,16 @@ function isDeclaredSuccess(input = {}) {
     return false;
   }
 
+  const status =
+    resolveStatus(input);
+
+  if (
+    status >= 200 &&
+    status < 300
+  ) {
+    return true;
+  }
+
   const statusText =
     resolveStatusText(input);
 
@@ -2229,6 +2415,12 @@ function buildBaseNormalizedResponse({
     error:
       !ok,
 
+    activated:
+      ok,
+
+    valid:
+      ok,
+
     authenticated:
       Boolean(sessionComplete),
 
@@ -2265,10 +2457,22 @@ function buildBaseNormalizedResponse({
     accessToken:
       token || null,
 
+    access_token:
+      token || null,
+
     refreshToken:
       refreshToken || null,
 
+    refresh_token:
+      refreshToken || null,
+
     user:
+      user || null,
+
+    usuario:
+      user || null,
+
+    me:
       user || null,
 
     session:
@@ -2498,6 +2702,26 @@ function rememberResult(type = "unknown", result = {}) {
     at:
       isoNow(),
   };
+}
+
+function shouldTryNextEndpoint(error = null) {
+  const status =
+    safeNumber(
+      error?.status ||
+        error?.statusCode ||
+        error?.response?.status ||
+        error?.data?.status ||
+        error?.response?.data?.status ||
+        0,
+      0
+    );
+
+  return [
+    404,
+    405,
+    410,
+    501,
+  ].includes(status);
 }
 
 /* =========================================================
@@ -2730,22 +2954,22 @@ async function requestWithApiClient(endpoint, body, options = {}) {
         }
       );
     } catch (error) {
-      if (
-        error?.status ||
-        error?.response?.status ||
-        error?.data?.status
-      ) {
+      if (shouldTryNextEndpoint(error)) {
         throw error;
       }
 
-      return apiClient.request(
-        "POST",
-        endpoint,
-        {
-          ...requestOptions,
-          body,
-        }
-      );
+      try {
+        return await apiClient.request(
+          "POST",
+          endpoint,
+          {
+            ...requestOptions,
+            body,
+          }
+        );
+      } catch {
+        throw error;
+      }
     }
   }
 
@@ -2771,22 +2995,22 @@ async function requestWithAppCoreRequest(endpoint, body, options = {}) {
       }
     );
   } catch (error) {
-    if (
-      error?.status ||
-      error?.response?.status ||
-      error?.data?.status
-    ) {
+    if (shouldTryNextEndpoint(error)) {
       throw error;
     }
 
-    return AppCore.request(
-      "POST",
-      endpoint,
-      {
-        ...requestOptions,
-        body,
-      }
-    );
+    try {
+      return await AppCore.request(
+        "POST",
+        endpoint,
+        {
+          ...requestOptions,
+          body,
+        }
+      );
+    } catch {
+      throw error;
+    }
   }
 }
 
@@ -2824,23 +3048,23 @@ async function requestWithHttpService(endpoint, body, options = {}) {
         }
       );
     } catch (error) {
-      if (
-        error?.status ||
-        error?.response?.status ||
-        error?.data?.status
-      ) {
+      if (shouldTryNextEndpoint(error)) {
         throw error;
       }
 
-      return http.request(
-        endpoint,
-        {
-          ...requestOptions,
-          method:
-            "POST",
-          body,
-        }
-      );
+      try {
+        return await http.request(
+          endpoint,
+          {
+            ...requestOptions,
+            method:
+              "POST",
+            body,
+          }
+        );
+      } catch {
+        throw error;
+      }
     }
   }
 
@@ -2866,22 +3090,18 @@ async function executeActivationRequest(endpoint, body, options = {}) {
   ];
 
   for (const transport of transports) {
-    try {
-      const result =
-        await transport(
-          endpoint,
-          body,
-          options
-        );
+    const result =
+      await transport(
+        endpoint,
+        body,
+        options
+      );
 
-      if (
-        result !== null &&
-        result !== undefined
-      ) {
-        return result;
-      }
-    } catch (error) {
-      throw error;
+    if (
+      result !== null &&
+      result !== undefined
+    ) {
+      return result;
     }
   }
 
@@ -2889,6 +3109,41 @@ async function executeActivationRequest(endpoint, body, options = {}) {
     endpoint,
     body
   );
+}
+
+async function executeActivationRequestWithCandidates(
+  candidates = [],
+  body = {},
+  options = {}
+) {
+  const endpoints =
+    unique(candidates);
+
+  let lastError =
+    null;
+
+  for (const endpoint of endpoints) {
+    try {
+      return await executeActivationRequest(
+        endpoint,
+        body,
+        {
+          ...options,
+          endpoint,
+        }
+      );
+    } catch (error) {
+      lastError =
+        error;
+
+      if (!shouldTryNextEndpoint(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError ||
+    new Error("No hay endpoint de activación disponible.");
 }
 
 /* =========================================================
@@ -2905,6 +3160,14 @@ function validateActivationPayload(normalized = {}, options = {}) {
     getTokenMinLength()
   ) {
     return "El token de activación no es válido.";
+  }
+
+  if (
+    normalized.identifier &&
+    normalized.identifier.length >
+      getIdentifierMaxLength()
+  ) {
+    return "El identificador es demasiado largo.";
   }
 
   if (options.allowPasswordless === true) {
@@ -2996,6 +3259,13 @@ function validateFirstUserPayload(normalized = {}, options = {}) {
   }
 
   if (
+    normalized.confirmPassword.length >
+    getPasswordMaxLength()
+  ) {
+    return "La confirmación de contraseña es demasiado larga.";
+  }
+
+  if (
     normalized.password !==
     normalized.confirmPassword
   ) {
@@ -3024,11 +3294,27 @@ function validateTokenPayload(normalized = {}) {
    SESSION COMMIT
 ========================================================= */
 
+function hasUsableReturnedUser(user = null) {
+  return Boolean(
+    user &&
+      isObject(user) &&
+      user.active !== false &&
+      (
+        user.id ||
+        user.userId ||
+        user.user_id ||
+        user.email ||
+        user.username ||
+        user.phone
+      )
+  );
+}
+
 function maybeApplyReturnedSession(normalizedResponse = {}, source = "activation") {
   if (
     !normalizedResponse?.authenticated ||
     !normalizedResponse?.token ||
-    !normalizedResponse?.user
+    !hasUsableReturnedUser(normalizedResponse?.user)
   ) {
     return null;
   }
@@ -3137,8 +3423,8 @@ export async function activateAccount(payload = {}, options = {}) {
     });
   }
 
-  const endpoint =
-    getActivateAccountEndpoint();
+  const endpoints =
+    endpointCandidatesFor("activate");
 
   const body =
     buildActivateAccountBody(normalized);
@@ -3150,7 +3436,7 @@ export async function activateAccount(payload = {}, options = {}) {
   safeEmit(
     "auth:activation:start",
     {
-      endpoint,
+      endpoints,
       hasPassword:
         Boolean(normalized.password),
       hasIdentifier:
@@ -3162,8 +3448,8 @@ export async function activateAccount(payload = {}, options = {}) {
     (async () => {
       try {
         const raw =
-          await executeActivationRequest(
-            endpoint,
+          await executeActivationRequestWithCandidates(
+            endpoints,
             body,
             {
               ...safeObject(options),
@@ -3291,8 +3577,8 @@ export async function activateFirstUser(payload = {}, options = {}) {
     });
   }
 
-  const endpoint =
-    getActivateFirstUserEndpoint();
+  const endpoints =
+    endpointCandidatesFor("first-user");
 
   const body =
     buildActivateFirstUserBody(normalized);
@@ -3304,7 +3590,7 @@ export async function activateFirstUser(payload = {}, options = {}) {
   safeEmit(
     "auth:activation:first-user:start",
     {
-      endpoint,
+      endpoints,
       identifierType:
         normalized.email
           ? "email"
@@ -3322,8 +3608,8 @@ export async function activateFirstUser(payload = {}, options = {}) {
     (async () => {
       try {
         const raw =
-          await executeActivationRequest(
-            endpoint,
+          await executeActivationRequestWithCandidates(
+            endpoints,
             body,
             {
               ...safeObject(options),
@@ -3448,8 +3734,8 @@ export async function validateActivationToken(payload = {}, options = {}) {
     });
   }
 
-  const endpoint =
-    getValidateActivationTokenEndpoint();
+  const endpoints =
+    endpointCandidatesFor("validate");
 
   const body =
     buildValidateActivationTokenBody(normalized);
@@ -3461,7 +3747,7 @@ export async function validateActivationToken(payload = {}, options = {}) {
   safeEmit(
     "auth:activation:validate:start",
     {
-      endpoint,
+      endpoints,
     }
   );
 
@@ -3469,8 +3755,8 @@ export async function validateActivationToken(payload = {}, options = {}) {
     (async () => {
       try {
         const raw =
-          await executeActivationRequest(
-            endpoint,
+          await executeActivationRequestWithCandidates(
+            endpoints,
             body,
             {
               ...safeObject(options),
@@ -3614,6 +3900,20 @@ export async function validateActivateAccountToken(payload = {}, options = {}) {
   );
 }
 
+export async function validateActivateToken(payload = {}, options = {}) {
+  return validateActivationToken(
+    payload,
+    options
+  );
+}
+
+export async function validateAccountActivationToken(payload = {}, options = {}) {
+  return validateActivationToken(
+    payload,
+    options
+  );
+}
+
 export async function activationValidate(payload = {}, options = {}) {
   return validateActivationToken(
     payload,
@@ -3655,11 +3955,20 @@ export function getActivationSnapshot() {
     activateEndpoint:
       getActivateAccountEndpoint(),
 
+    activateEndpointCandidates:
+      endpointCandidatesFor("activate"),
+
     activateFirstUserEndpoint:
       getActivateFirstUserEndpoint(),
 
+    activateFirstUserEndpointCandidates:
+      endpointCandidatesFor("first-user"),
+
     validateEndpoint:
       getValidateActivationTokenEndpoint(),
+
+    validateEndpointCandidates:
+      endpointCandidatesFor("validate"),
 
     currentPath:
       redactSafe(
@@ -3748,6 +4057,9 @@ export function getActivationSnapshot() {
       hasFetch:
         typeof fetch === "function",
     },
+
+    at:
+      isoNow(),
   };
 }
 
@@ -3794,9 +4106,12 @@ const Activation =
 
       validateActivationToken,
       validateActivateAccountToken,
+      validateActivateToken,
+      validateAccountActivationToken,
       activationValidate,
 
       resolveActivationToken,
+      extractActivationToken,
 
       normalizeActivationPayload,
       normalizeActivateAccountPayload,
@@ -3816,9 +4131,13 @@ const Activation =
 
       getActivateAccountEndpoint,
       getActivationEndpoint,
+      getAccountActivationEndpoint,
       getActivateFirstUserEndpoint,
       getFirstUserActivationEndpoint,
       getValidateActivationTokenEndpoint,
+      getValidateActivateAccountTokenEndpoint,
+      getValidateActivateTokenEndpoint,
+      getValidateAccountActivationTokenEndpoint,
 
       getActivationSnapshot,
       getActivationDebugPayload,

@@ -2,7 +2,7 @@
    Onion SPA - Sidebar Dropdown
    Archivo: src/ui/sidebar/dropdown.js
 
-   ONION SUPPORT · SIDEBAR DROPDOWN · 15/10
+   ONION SUPPORT · SIDEBAR DROPDOWN · EXTREME 10/10
    USER MENU · A11Y SAFE · RERENDER SAFE · DATA CONTRACT
 
    Responsabilidades:
@@ -51,7 +51,7 @@ import {
 ========================================================= */
 
 export const SIDEBAR_DROPDOWN_VERSION =
-  "sidebar-dropdown-v15-a11y-rerender-safe";
+  "sidebar-dropdown-v16-extreme-a11y-rerender-safe";
 
 /* =========================================================
    CONSTANTS
@@ -62,6 +62,9 @@ const SOURCE =
 
 const OWNER =
   "dropdown.js";
+
+const LOG_PREFIX =
+  "[SidebarDropdown]";
 
 const DROPDOWN_ID_FALLBACK =
   USER_DROPDOWN_ID ||
@@ -141,16 +144,29 @@ const TOOLTIP_SELECTOR =
     "[aria-describedby]",
   ].join(",");
 
+const HARD_HIDDEN_SELECTOR =
+  [
+    "[hidden]",
+    "[inert]",
+    "[aria-hidden='true']",
+    "[data-sidebar-visible='false']",
+    "[data-role-visible='false']",
+    "[data-admin-visible='false']",
+  ].join(",");
+
 const FOOTER_SELECTOR =
   ".sidebar-footer,[data-sidebar-footer='true'],[data-sidebar-footer]";
 
 const EVENT_DROPDOWN_CHANGE =
+  SIDEBAR_EVENTS?.dropdownChange ||
   "sidebar:dropdown:change";
 
 const EVENT_DROPDOWN_BLOCKED =
+  SIDEBAR_EVENTS?.dropdownBlocked ||
   "sidebar:dropdown:blocked";
 
 const EVENT_DROPDOWN_REPAIRED =
+  SIDEBAR_EVENTS?.dropdownRepaired ||
   "sidebar:dropdown:repaired";
 
 const EVENT_DROPDOWN_OPEN =
@@ -165,6 +181,27 @@ const EVENT_DROPDOWN_TOGGLE =
   SIDEBAR_EVENTS?.dropdownToggle ||
   "sidebar:dropdown:toggle";
 
+const EVENT_DROPDOWN_FOCUS_MOVED =
+  SIDEBAR_EVENTS?.dropdownFocusMoved ||
+  "sidebar:dropdown:focus-moved";
+
+const EVENT_DROPDOWN_STATE_FORCED =
+  SIDEBAR_EVENTS?.dropdownStateForced ||
+  "sidebar:dropdown:state-forced";
+
+const EMIT_DEDUPE_MS =
+  24;
+
+/* =========================================================
+   MODULE STATE
+========================================================= */
+
+let lastEmitSignature =
+  "";
+
+let lastEmitAt =
+  0;
+
 /* =========================================================
    SAFE HELPERS
 ========================================================= */
@@ -178,10 +215,6 @@ function isBrowser() {
 
 function hasDocument() {
   return typeof document !== "undefined";
-}
-
-function hasWindow() {
-  return typeof window !== "undefined";
 }
 
 function safeText(value, fallback = "") {
@@ -237,6 +270,8 @@ function safeBoolean(value, fallback = false) {
         "on",
         "open",
         "opened",
+        "visible",
+        "shown",
       ].includes(key)
     ) {
       return true;
@@ -250,6 +285,8 @@ function safeBoolean(value, fallback = false) {
         "off",
         "closed",
         "close",
+        "hidden",
+        "hide",
       ].includes(key)
     ) {
       return false;
@@ -293,32 +330,67 @@ function safeIsoDate(ms = nowTs()) {
 }
 
 function safeWarn(AppCore, ...args) {
+  let logged =
+    false;
+
   try {
-    AppCore?.utils?.warn?.(
-      "[SidebarDropdown]",
-      ...args
-    );
-  } catch {}
+    if (isFunction(AppCore?.utils?.warn)) {
+      AppCore.utils.warn(
+        LOG_PREFIX,
+        ...args
+      );
+
+      logged =
+        true;
+    }
+  } catch {
+    logged =
+      false;
+  }
+
+  if (logged) {
+    return;
+  }
 
   try {
     console.warn(
-      "[SidebarDropdown]",
+      LOG_PREFIX,
       ...args
     );
   } catch {}
+}
+
+function makeEmitSignature(eventName = "", payload = {}) {
+  const data =
+    safeObject(payload);
+
+  return [
+    eventName,
+    data.open,
+    data.previousOpen,
+    data.changed,
+    data.reason,
+    data.hasDropdown,
+    data.hasToggle,
+  ]
+    .map((item) => String(item))
+    .join("|");
 }
 
 /*
   No emitimos por AppCore.events Y window a la vez.
   Si el bus existe, usamos bus. Window sólo fallback.
 */
-function safeEmit(AppCore, eventName = "", payload = {}) {
+function safeEmit(AppCore, eventName = "", payload = {}, options = {}) {
   const name =
     safeText(eventName, "");
 
   if (!name) {
     return false;
   }
+
+  const opts =
+    safeObject(options);
 
   const data =
     safeObject(payload);
@@ -343,14 +415,47 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
         data.ts || nowTs(),
     };
 
+  const signature =
+    makeEmitSignature(
+      name,
+      finalPayload
+    );
+
+  const ts =
+    nowTs();
+
+  if (
+    opts.force !== true &&
+    signature === lastEmitSignature &&
+    ts - lastEmitAt < EMIT_DEDUPE_MS
+  ) {
+    return false;
+  }
+
+  lastEmitSignature =
+    signature;
+
+  lastEmitAt =
+    ts;
+
+  let busAvailable =
+    false;
+
+  let busEmitted =
+    false;
+
   try {
     if (isFunction(AppCore?.events?.emit)) {
+      busAvailable =
+        true;
+
       AppCore.events.emit(
         name,
         finalPayload
       );
 
-      return true;
+      busEmitted =
+        true;
     }
   } catch (error) {
     safeWarn(
@@ -360,11 +465,12 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
     );
   }
 
-  try {
-    if (
-      isBrowser() &&
-      typeof CustomEvent !== "undefined"
-    ) {
+  if (
+    (!busAvailable || !busEmitted) &&
+    isBrowser() &&
+    typeof CustomEvent !== "undefined"
+  ) {
+    try {
       window.dispatchEvent(
         new CustomEvent(
           name,
@@ -376,10 +482,10 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
       );
 
       return true;
-    }
-  } catch {}
+    } catch {}
+  }
 
-  return false;
+  return busEmitted;
 }
 
 function afterPaint(callback) {
@@ -548,6 +654,18 @@ function toggleClasses(element, classNames = [], enabled = false) {
   return true;
 }
 
+function hasClass(element = null, className = "") {
+  if (!element || !className) {
+    return false;
+  }
+
+  try {
+    return element.classList.contains(className);
+  } catch {
+    return false;
+  }
+}
+
 function removeInlineProperty(element, property = "") {
   if (!element || !property) {
     return false;
@@ -699,13 +817,38 @@ function isElementConnected(element = null) {
   }
 }
 
-function hasClass(element = null, className = "") {
-  if (!element || !className) {
-    return false;
+function isElementDisabled(element = null) {
+  if (!element) {
+    return true;
   }
 
   try {
-    return element.classList.contains(className);
+    if (element.disabled === true) {
+      return true;
+    }
+  } catch {}
+
+  return Boolean(
+    element.getAttribute?.("aria-disabled") === "true" ||
+      element.hasAttribute?.("disabled") ||
+      element.hasAttribute?.("inert") ||
+      element.hidden === true
+  );
+}
+
+function isElementHardHidden(element = null) {
+  if (!element) {
+    return true;
+  }
+
+  try {
+    return Boolean(
+      element.hidden === true ||
+        element.hasAttribute?.("hidden") ||
+        element.hasAttribute?.("inert") ||
+        element.getAttribute?.("aria-hidden") === "true" ||
+        element.closest?.(HARD_HIDDEN_SELECTOR)
+    );
   } catch {
     return false;
   }
@@ -885,38 +1028,73 @@ function repairStaleSidebarHidden(AppCore) {
 
   const {
     sidebar,
+    userToggle,
   } =
     getElements(AppCore);
 
+  let repaired =
+    false;
+
   if (
-    !sidebar ||
-    sidebar.hidden !== true
+    sidebar &&
+    sidebar.hidden === true
   ) {
-    return false;
+    try {
+      sidebar.hidden =
+        false;
+
+      sidebar.removeAttribute(
+        "hidden"
+      );
+
+      sidebar.setAttribute(
+        "aria-hidden",
+        "false"
+      );
+
+      repaired =
+        true;
+    } catch {}
   }
 
-  /*
-    Reparación mínima:
-    No tocamos open/collapsed. Eso es propiedad de state.js.
-    Sólo desbloqueamos un hidden stale que impediría abrir el menú.
-  */
-  try {
-    sidebar.hidden =
-      false;
+  if (
+    userToggle &&
+    userToggle.hidden === true
+  ) {
+    try {
+      userToggle.hidden =
+        false;
 
-    sidebar.removeAttribute(
-      "hidden"
-    );
+      userToggle.removeAttribute(
+        "hidden"
+      );
 
-    sidebar.setAttribute(
-      "aria-hidden",
-      "false"
-    );
+      userToggle.setAttribute(
+        "aria-hidden",
+        "false"
+      );
 
-    return true;
-  } catch {
-    return false;
+      userToggle.removeAttribute(
+        "inert"
+      );
+
+      repaired =
+        true;
+    } catch {}
   }
+
+  if (repaired) {
+    safeEmit(
+      AppCore,
+      EVENT_DROPDOWN_STATE_FORCED,
+      {
+        reason:
+          "stale-sidebar-hidden-repaired",
+      }
+    );
+  }
+
+  return repaired;
 }
 
 /* =========================================================
@@ -1029,13 +1207,26 @@ function closeFocusedNodeBeforeHide(userDropdown = null, userToggle = null, opti
     opts.restoreFocus === true &&
     userToggle &&
     isElementConnected(userToggle) &&
-    !userToggle.hidden
+    !userToggle.hidden &&
+    !isElementDisabled(userToggle)
   ) {
     try {
       userToggle.focus?.(
         {
           preventScroll:
             true,
+        }
+      );
+
+      safeEmit(
+        opts.AppCore || null,
+        EVENT_DROPDOWN_FOCUS_MOVED,
+        {
+          reason:
+            opts.reason || "dropdown-close",
+
+          target:
+            "toggle",
         }
       );
     } catch {}
@@ -1373,6 +1564,82 @@ function syncDropdownContainers(AppCore, open = false) {
 }
 
 /* =========================================================
+   OPEN GUARDS
+========================================================= */
+
+function canOpenDropdown(AppCore) {
+  if (isDropdownShellBlocked(AppCore)) {
+    return {
+      ok:
+        false,
+
+      reason:
+        "shell-hidden",
+    };
+  }
+
+  repairStaleSidebarHidden(AppCore);
+
+  const {
+    userToggle,
+    userDropdown,
+  } =
+    getElements(AppCore);
+
+  if (!userDropdown) {
+    return {
+      ok:
+        false,
+
+      reason:
+        "dropdown-missing",
+    };
+  }
+
+  if (!userToggle) {
+    return {
+      ok:
+        false,
+
+      reason:
+        "toggle-missing",
+    };
+  }
+
+  if (isElementDisabled(userToggle)) {
+    return {
+      ok:
+        false,
+
+      reason:
+        "toggle-disabled",
+    };
+  }
+
+  /*
+    Si el toggle sigue dentro de un ancestro hidden después de reparar,
+    no abrimos para evitar estados imposibles.
+  */
+  if (isElementHardHidden(userToggle)) {
+    return {
+      ok:
+        false,
+
+      reason:
+        "toggle-hidden",
+    };
+  }
+
+  return {
+    ok:
+      true,
+
+    reason:
+      "ok",
+  };
+}
+
+/* =========================================================
    DOM SYNC
 ========================================================= */
 
@@ -1392,10 +1659,21 @@ function syncDropdownDom(AppCore, localState, open = false, options = {}) {
   } =
     getElements(AppCore);
 
+  const openGuard =
+    requestedOpen
+      ? canOpenDropdown(AppCore)
+      : {
+          ok:
+            true,
+
+          reason:
+            "closing",
+        };
+
   const actualOpen =
     requestedOpen &&
     Boolean(userDropdown) &&
-    !isDropdownShellBlocked(AppCore);
+    openGuard.ok === true;
 
   state.dropdownOpen =
     actualOpen;
@@ -1418,6 +1696,12 @@ function syncDropdownDom(AppCore, localState, open = false, options = {}) {
         false,
 
       requestedOpen,
+
+      blocked:
+        requestedOpen,
+
+      blockReason:
+        requestedOpen ? "dropdown-missing" : "",
 
       hasDropdown:
         false,
@@ -1501,8 +1785,13 @@ function syncDropdownDom(AppCore, localState, open = false, options = {}) {
       userDropdown,
       userToggle,
       {
+        AppCore,
+
         restoreFocus:
           opts.restoreFocus === true,
+
+        reason:
+          opts.reason || "close-dropdown",
       }
     );
 
@@ -1611,6 +1900,14 @@ function syncDropdownDom(AppCore, localState, open = false, options = {}) {
 
     requestedOpen,
 
+    blocked:
+      requestedOpen && !actualOpen,
+
+    blockReason:
+      requestedOpen && !actualOpen
+        ? openGuard.reason || "blocked"
+        : "",
+
     hasDropdown:
       true,
 
@@ -1656,6 +1953,12 @@ function emitDropdownLifecycle(AppCore, {
       requestedOpen:
         Boolean(result.requestedOpen),
 
+      blocked:
+        Boolean(result.blocked),
+
+      blockReason:
+        safeText(result.blockReason, ""),
+
       hasDropdown:
         Boolean(result.hasDropdown),
 
@@ -1675,11 +1978,23 @@ function emitDropdownLifecycle(AppCore, {
     payload
   );
 
+  if (result.blocked) {
+    safeEmit(
+      AppCore,
+      EVENT_DROPDOWN_BLOCKED,
+      payload
+    );
+  }
+
   if (changed) {
     safeEmit(
       AppCore,
       open ? EVENT_DROPDOWN_OPEN : EVENT_DROPDOWN_CLOSE,
-      payload
+      payload,
+      {
+        force:
+          true,
+      }
     );
   }
 
@@ -1711,6 +2026,9 @@ export function setDropdownOpen(AppCore, localState, value, options = {}) {
       {
         restoreFocus:
           opts.restoreFocus === true,
+
+        reason:
+          opts.reason || "set-dropdown-open",
       }
     );
 
@@ -1745,7 +2063,8 @@ export function setDropdownOpen(AppCore, localState, value, options = {}) {
 
   if (
     changed ||
-    opts.forceEmit === true
+    opts.forceEmit === true ||
+    result.blocked === true
   ) {
     emitDropdownLifecycle(
       AppCore,
@@ -1805,6 +2124,10 @@ export function openDropdown(
 
         snapshot:
           getDropdownSnapshot(AppCore, state),
+      },
+      {
+        force:
+          true,
       }
     );
 
@@ -1870,6 +2193,9 @@ export function closeDropdown(AppCore, localState, options = {}) {
       {
         restoreFocus:
           opts.restoreFocus === true,
+
+        reason:
+          opts.reason || "close-dropdown:already-closed",
       }
     );
 
@@ -1928,6 +2254,10 @@ export function toggleDropdown(
 
         snapshot:
           getDropdownSnapshot(AppCore, state),
+      },
+      {
+        force:
+          true,
       }
     );
 
@@ -1948,6 +2278,10 @@ export function toggleDropdown(
 
       previousOpen:
         currentlyOpen,
+    },
+    {
+      force:
+        opts.forceEmit === true,
     }
   );
 
@@ -2040,6 +2374,9 @@ export function repairDropdown(AppCore, localState = {}, options = {}) {
       {
         restoreFocus:
           false,
+
+        reason:
+          opts.reason || "repair-dropdown",
       }
     );
 
@@ -2055,6 +2392,10 @@ export function repairDropdown(AppCore, localState = {}, options = {}) {
 
         snapshot:
           getDropdownSnapshot(AppCore, state),
+      },
+      {
+        force:
+          opts.forceEmit === true,
       }
     );
   }
@@ -2182,6 +2523,9 @@ export function getDropdownSnapshot(AppCore, localState = {}) {
 
       disabled:
         Boolean(userToggle?.disabled),
+
+      hardHidden:
+        Boolean(userToggle && isElementHardHidden(userToggle)),
     },
 
     dropdown: {

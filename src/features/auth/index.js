@@ -2,7 +2,7 @@
    Onion SPA - Auth / Session
    Archivo: src/features/auth/index.js
 
-   AUTH FACADE · SESSION ORCHESTRATOR · EXTREME 10/10
+   AUTH FACADE · SESSION ORCHESTRATOR · EXTREME 15/10
    BACKEND ALIGNED · API.ONIONIT.NET · ME SAFE · SIDEBAR USER SAFE
 
    RESPONSABILIDADES:
@@ -11,7 +11,8 @@
    - integración robusta con AppCore.http / AppCore.apiClient / AppCore.request
    - fallback fetch seguro contra https://api.onionit.net
    - normalizar payload heterogéneo del backend Onion Auth
-   - aplicar sesión sólo con token + usuario usable
+   - aplicar sesión completa sólo con token + usuario usable
+   - permitir token_only refresh sin destruir usuario existente
    - usar /api/auth/me como fuente real de usuario/avatar tras restore
    - exponer Auth.getUser / getCurrentUser / getProfile / getAccount
    - pintar sidebar/topbar vía AppCore.state + app:ui:repair-request
@@ -19,6 +20,7 @@
    - evitar auth fantasma
    - evitar duplicidad de eventos canónicos
    - no exponer tokens en snapshots/eventos
+   - bridge Auth idempotente y silencioso
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -124,7 +126,7 @@ import {
 ========================================================= */
 
 const AUTH_MODULE_VERSION =
-  "13.0.0-extreme-me-sidebar-safe";
+  "15.0.0-extreme-me-sidebar-safe";
 
 const AUTH_SOURCE =
   "Auth";
@@ -399,6 +401,22 @@ const SENSITIVE_USER_KEYS =
     "_etag",
     "_attachments",
     "_ts",
+  ]);
+
+const AUTH_LOW_LEVEL_EVENT_PREFIXES =
+  Object.freeze([
+    "auth:runtime:",
+    "auth:session:loaded",
+    "auth:session:restored",
+    "auth:session:applied",
+  ]);
+
+const AUTH_ALWAYS_EMIT_EVENTS =
+  new Set([
+    "auth:login:start",
+    "auth:login:success",
+    "app:ui:repair-request",
+    "app:ui:repair",
   ]);
 
 /* =========================================================
@@ -805,11 +823,67 @@ function sanitizeEventPayload(payload = {}) {
   return output;
 }
 
-function emit(eventName, payload = {}) {
+function shouldEmitAuthEvent(eventName = "", options = {}) {
   const name =
     safeText(eventName, "");
 
   if (!name) {
+    return false;
+  }
+
+  if (AUTH_ALWAYS_EMIT_EVENTS.has(name)) {
+    return true;
+  }
+
+  const opts =
+    safeObject(options);
+
+  if (opts.emitEvents === false) {
+    return false;
+  }
+
+  if (
+    opts.emitAuthRuntimeEvents === true ||
+    opts.emitAuthLifecycleEvents === true ||
+    opts.debugAuthEvents === true
+  ) {
+    return true;
+  }
+
+  try {
+    const diagnostics =
+      AppCore?.config?.diagnostics || {};
+
+    if (
+      diagnostics.authEvents === true ||
+      diagnostics.authRuntimeEvents === true ||
+      diagnostics.authLifecycleEvents === true ||
+      AppCore?.config?.debugAuthEvents === true
+    ) {
+      return true;
+    }
+  } catch {}
+
+  if (
+    AUTH_LOW_LEVEL_EVENT_PREFIXES.some((prefix) =>
+      name.startsWith(prefix)
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function emit(eventName, payload = {}, options = {}) {
+  const name =
+    safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  if (!shouldEmitAuthEvent(name, options)) {
     return false;
   }
 
@@ -1021,7 +1095,7 @@ function buildAuthHeaders(options = {}) {
     getCurrentTokenFromCore();
 
   if (
-    token &&
+    hasUsableToken(token) &&
     !headers.Authorization &&
     !headers.authorization
   ) {
@@ -1177,6 +1251,7 @@ async function requestWithFetch(method = "GET", path = "", body = undefined, opt
 
   if (
     hasBody &&
+    typeof FormData !== "undefined" &&
     !(body instanceof FormData) &&
     !headers["Content-Type"] &&
     !headers["content-type"]
@@ -1203,7 +1278,7 @@ async function requestWithFetch(method = "GET", path = "", body = undefined, opt
 
       body:
         hasBody
-          ? body instanceof FormData
+          ? typeof FormData !== "undefined" && body instanceof FormData
             ? body
             : JSON.stringify(body)
           : undefined,
@@ -2213,6 +2288,22 @@ function normalizeAuthPayload(result = {}, options = {}) {
       ""
     );
 
+  const mode =
+    safeLower(
+      pickFirstText(
+        raw.mode,
+        raw.type,
+        raw.data?.mode,
+        raw.data?.type,
+        raw.payload?.mode,
+        raw.payload?.type,
+        raw.result?.mode,
+        raw.result?.type,
+        statusValue
+      ),
+      ""
+    );
+
   const requires2FA =
     Boolean(
       tempToken ||
@@ -2233,6 +2324,17 @@ function normalizeAuthPayload(result = {}, options = {}) {
   const hasUser =
     hasUsableUser(user);
 
+  const tokenOnly =
+    !explicitFailure &&
+    !requires2FA &&
+    hasToken &&
+    (
+      mode === "token_only" ||
+      mode === "token-only" ||
+      opts.allowTokenOnly === true ||
+      !hasUser
+    );
+
   const authenticated =
     !explicitFailure &&
     !requires2FA &&
@@ -2246,15 +2348,16 @@ function normalizeAuthPayload(result = {}, options = {}) {
     ok:
       explicitFailure
         ? false
-        : authenticated || requires2FA || (opts.allowUserOnly === true && hasUser),
+        : authenticated || tokenOnly || requires2FA || (opts.allowUserOnly === true && hasUser),
 
     success:
       explicitFailure
         ? false
-        : authenticated || requires2FA || (opts.allowUserOnly === true && hasUser),
+        : authenticated || tokenOnly || requires2FA || (opts.allowUserOnly === true && hasUser),
 
     explicitFailure,
     authenticated,
+    tokenOnly,
 
     token:
       hasToken
@@ -2304,9 +2407,11 @@ function normalizeAuthPayload(result = {}, options = {}) {
             ? "2fa_required"
             : authenticated
               ? "authenticated"
-              : hasUser
-                ? "user_loaded"
-                : ""
+              : tokenOnly
+                ? "token_only"
+                : hasUser
+                  ? "user_loaded"
+                  : ""
       ),
 
     code:
@@ -3178,7 +3283,7 @@ function markRuntimeError(sessionState, type, error) {
   }
 }
 
-async function runRuntimeMetric(sessionState, type, executor, args = []) {
+async function runRuntimeMetric(sessionState, type, executor, args = [], eventOptions = {}) {
   const startedAt =
     nowMs();
 
@@ -3190,7 +3295,8 @@ async function runRuntimeMetric(sessionState, type, executor, args = []) {
 
   emit(
     `auth:runtime:${type}:start`,
-    {}
+    {},
+    eventOptions
   );
 
   try {
@@ -3212,7 +3318,8 @@ async function runRuntimeMetric(sessionState, type, executor, args = []) {
 
         ok:
           result?.ok !== false,
-      }
+      },
+      eventOptions
     );
 
     return result;
@@ -3231,7 +3338,8 @@ async function runRuntimeMetric(sessionState, type, executor, args = []) {
 
         error:
           sessionState.lastError,
-      }
+      },
+      eventOptions
     );
 
     throw error;
@@ -3274,14 +3382,32 @@ function extractRoleFromUser(user = {}) {
   );
 }
 
-function buildSessionPayloadFromNormalized(normalized = {}, source = "Auth.session") {
+function buildSessionPayloadFromNormalized(normalized = {}, source = "Auth.session", options = {}) {
   const raw =
     safeObject(normalized.raw);
 
-  const user =
+  const opts =
+    safeObject(options);
+
+  const explicitUser =
     normalizeLoginUserForState(
       normalized.user || {}
     );
+
+  const existingUser =
+    opts.preserveExistingUser === true
+      ? normalizeLoginUserForState(
+          AppCore?.state?.user ||
+            AppCore?.state?.currentUser ||
+            AppCore?.state?.sessionUser ||
+            {}
+        )
+      : null;
+
+  const user =
+    explicitUser ||
+    existingUser ||
+    null;
 
   const token =
     pickFirstText(
@@ -3297,7 +3423,7 @@ function buildSessionPayloadFromNormalized(normalized = {}, source = "Auth.sessi
     );
 
   const role =
-    extractRoleFromUser(user);
+    extractRoleFromUser(user || {});
 
   const sessionData =
     normalizeSessionContext(
@@ -3398,7 +3524,7 @@ function buildSessionPayloadFromNormalized(normalized = {}, source = "Auth.sessi
       null,
 
     preserveExistingUser:
-      false,
+      opts.preserveExistingUser === true,
 
     silent:
       true,
@@ -3417,7 +3543,7 @@ function reinforceCoreSession(sessionPayload = {}, options = {}) {
   const opts =
     safeObject(options);
 
-  const user =
+  const explicitUser =
     normalizeLoginUserForState(
       payload.user ||
         payload.usuario ||
@@ -3427,6 +3553,21 @@ function reinforceCoreSession(sessionPayload = {}, options = {}) {
         {}
     );
 
+  const existingUser =
+    opts.preserveExistingUser === true || payload.preserveExistingUser === true
+      ? normalizeLoginUserForState(
+          AppCore?.state?.user ||
+            AppCore?.state?.currentUser ||
+            AppCore?.state?.sessionUser ||
+            {}
+        )
+      : null;
+
+  const user =
+    explicitUser ||
+    existingUser ||
+    null;
+
   const token =
     pickFirstText(
       payload.token,
@@ -3435,8 +3576,14 @@ function reinforceCoreSession(sessionPayload = {}, options = {}) {
       getCurrentTokenFromCore()
     );
 
+  const hasToken =
+    hasUsableToken(token);
+
+  const hasUser =
+    hasUsableUser(user);
+
   const role =
-    extractRoleFromUser(user);
+    extractRoleFromUser(user || {});
 
   const sessionData =
     normalizeSessionContext(
@@ -3450,74 +3597,80 @@ function reinforceCoreSession(sessionPayload = {}, options = {}) {
   const patch = {
     authenticated:
       Boolean(
-        hasUsableToken(token) &&
-          hasUsableUser(user)
+        hasToken &&
+          hasUser
       ),
 
     hasToken:
-      Boolean(
-        hasUsableToken(token)
-      ),
+      hasToken,
 
     token:
-      hasUsableToken(token)
+      hasToken
         ? token
         : null,
 
     accessToken:
-      hasUsableToken(token)
+      hasToken
         ? token
         : null,
 
     access_token:
-      hasUsableToken(token)
+      hasToken
         ? token
         : null,
 
     user:
-      hasUsableUser(user)
+      hasUser
         ? user
         : null,
 
     currentUser:
-      hasUsableUser(user)
+      hasUser
         ? user
         : null,
 
     sessionUser:
-      hasUsableUser(user)
+      hasUser
         ? user
         : null,
 
     authUser:
-      hasUsableUser(user)
+      hasUser
         ? user
         : null,
 
     account:
-      hasUsableUser(user)
+      hasUser
         ? user
         : null,
 
     profile:
-      hasUsableUser(user)
+      hasUser
         ? user
         : null,
 
     role:
-      role || null,
+      hasUser
+        ? role || null
+        : null,
 
     rol:
-      role || null,
+      hasUser
+        ? role || null
+        : null,
 
     userRole:
-      role || null,
+      hasUser
+        ? role || null
+        : null,
 
     roles:
-      uniqueStrings([
-        role,
-        ...safeArray(user?.roles),
-      ]),
+      hasUser
+        ? uniqueStrings([
+            role,
+            ...safeArray(user?.roles),
+          ])
+        : [],
 
     session:
       sessionData,
@@ -3538,32 +3691,42 @@ function reinforceCoreSession(sessionPayload = {}, options = {}) {
       null,
 
     username:
-      user?.username ||
-      user?.usernameLower ||
-      user?.slug ||
-      null,
+      hasUser
+        ? user?.username ||
+          user?.usernameLower ||
+          user?.slug ||
+          null
+        : null,
 
     currentResolvedUsername:
-      user?.slug ||
-      user?.usernameLower ||
-      user?.username ||
-      null,
+      hasUser
+        ? user?.slug ||
+          user?.usernameLower ||
+          user?.username ||
+          null
+        : null,
 
     resolvedUsername:
-      user?.slug ||
-      user?.usernameLower ||
-      user?.username ||
-      null,
+      hasUser
+        ? user?.slug ||
+          user?.usernameLower ||
+          user?.username ||
+          null
+        : null,
 
     avatar:
-      user?.avatar ||
-      user?.avatarUrl ||
-      null,
+      hasUser
+        ? user?.avatar ||
+          user?.avatarUrl ||
+          null
+        : null,
 
     avatarUrl:
-      user?.avatarUrl ||
-      user?.avatar ||
-      null,
+      hasUser
+        ? user?.avatarUrl ||
+          user?.avatar ||
+          null
+        : null,
   };
 
   try {
@@ -3618,6 +3781,9 @@ function reinforceCoreSession(sessionPayload = {}, options = {}) {
 
         silent:
           true,
+
+        preserveExistingUser:
+          opts.preserveExistingUser === true || payload.preserveExistingUser === true,
       }
     );
   } catch {}
@@ -3625,14 +3791,148 @@ function reinforceCoreSession(sessionPayload = {}, options = {}) {
   return patch;
 }
 
+function applyTokenOnlySession(normalized = {}, options = {}) {
+  const opts =
+    safeObject(options);
+
+  const token =
+    pickFirstText(
+      normalized.token,
+      normalized.accessToken
+    );
+
+  if (!hasUsableToken(token)) {
+    return {
+      ok:
+        false,
+      tokenOnly:
+        true,
+      applied:
+        false,
+    };
+  }
+
+  const existingUser =
+    normalizeLoginUserForState(
+      AppCore?.state?.user ||
+        AppCore?.state?.currentUser ||
+        AppCore?.state?.sessionUser ||
+        {}
+    );
+
+  try {
+    AppCore?.setToken?.(
+      token,
+      {
+        source:
+          opts.source || "Auth.tokenOnly",
+        emit:
+          false,
+        silent:
+          true,
+      }
+    );
+  } catch {}
+
+  const payload = {
+    token,
+    accessToken:
+      token,
+    access_token:
+      token,
+    refreshToken:
+      normalized.refreshToken || undefined,
+    sessionId:
+      normalized.sessionId || undefined,
+    sessionUserId:
+      normalized.sessionUserId || undefined,
+    user:
+      existingUser || undefined,
+    preserveExistingUser:
+      true,
+  };
+
+  const patch =
+    reinforceCoreSession(
+      payload,
+      {
+        source:
+          opts.source || "Auth.tokenOnly",
+        preserveExistingUser:
+          true,
+      }
+    );
+
+  return {
+    ok:
+      true,
+
+    tokenOnly:
+      true,
+
+    applied:
+      true,
+
+    token,
+
+    user:
+      patch.user || existingUser || null,
+
+    role:
+      patch.role || null,
+
+    roles:
+      patch.roles || [],
+
+    session:
+      patch.session || null,
+
+    sessionData:
+      patch.sessionData || null,
+
+    sessionId:
+      patch.sessionId || normalized.sessionId || null,
+
+    sessionUserId:
+      patch.sessionUserId || normalized.sessionUserId || null,
+
+    snapshot:
+      buildSessionSnapshot({
+        source:
+          opts.source || "Auth.tokenOnly",
+        eventMode:
+          opts.eventMode || "token_only",
+      }),
+  };
+}
+
 function applyAcceptedSession(normalized = {}, options = {}) {
   const opts =
     safeObject(options);
 
+  if (
+    normalized.tokenOnly === true ||
+    (
+      hasUsableToken(normalized.token || normalized.accessToken) &&
+      !hasUsableUser(normalized.user) &&
+      opts.allowTokenOnly !== false
+    )
+  ) {
+    return applyTokenOnlySession(
+      normalized,
+      {
+        ...opts,
+        preserveExistingUser:
+          true,
+      }
+    );
+  }
+
   const sessionPayload =
     buildSessionPayloadFromNormalized(
       normalized,
-      opts.source || "Auth.session"
+      opts.source || "Auth.session",
+      opts
     );
 
   let snapshot =
@@ -3656,6 +3956,8 @@ function applyAcceptedSession(normalized = {}, options = {}) {
       {
         source:
           opts.source || "Auth.session",
+        preserveExistingUser:
+          opts.preserveExistingUser === true,
       }
     );
 
@@ -4537,10 +4839,28 @@ async function executeRefreshSession(runtimeSession) {
       {
         allowUserOnly:
           false,
+        allowTokenOnly:
+          true,
         useCurrentToken:
           true,
       }
     );
+
+  if (normalized.tokenOnly) {
+    applyTokenOnlySession(
+      normalized,
+      {
+        source:
+          "Auth.refreshSession",
+        reason:
+          "auth-refresh-token-only",
+        eventMode:
+          "refresh",
+      }
+    );
+
+    return result;
+  }
 
   if (
     normalized.user &&
@@ -4587,10 +4907,26 @@ async function executeRestoreSession(runtimeSession, options = {}) {
       {
         allowUserOnly:
           true,
+        allowTokenOnly:
+          true,
         useCurrentToken:
           true,
       }
     );
+
+  if (normalized.tokenOnly) {
+    applyTokenOnlySession(
+      normalized,
+      {
+        source:
+          "Auth.restoreSession",
+        reason:
+          "auth-restore-token-only",
+        eventMode:
+          "restore",
+      }
+    );
+  }
 
   if (
     normalized.user &&
@@ -5359,54 +5695,101 @@ async function passwordResetValidate(payload = {}, options = {}) {
    CORE BRIDGE
 ========================================================= */
 
+function getRegisteredCoreModule(name = "") {
+  const clean =
+    safeText(name, "");
+
+  if (!clean) {
+    return null;
+  }
+
+  try {
+    return AppCore?.modules?.get?.(clean) || null;
+  } catch {}
+
+  try {
+    return AppCore?.registry?.modules?.get?.(clean) || null;
+  } catch {}
+
+  return null;
+}
+
+function setCoreModuleSilently(name = "", value = null) {
+  const clean =
+    safeText(name, "");
+
+  if (
+    !clean ||
+    !value
+  ) {
+    return false;
+  }
+
+  try {
+    if (getRegisteredCoreModule(clean) === value) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    AppCore?.registry?.modules?.set?.(
+      clean,
+      value
+    );
+
+    return true;
+  } catch {}
+
+  try {
+    AppCore?.modules?.register?.(
+      clean,
+      value,
+      {
+        overwrite:
+          true,
+        replace:
+          true,
+        source:
+          "features/auth/index.js",
+        emit:
+          false,
+      }
+    );
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
 function attachAuthToCore(api) {
+  if (!api) {
+    return false;
+  }
+
   try {
-    AppCore.Auth =
-      api;
+    if (AppCore.Auth !== api) {
+      AppCore.Auth =
+        api;
+    }
   } catch {}
 
   try {
-    AppCore.auth =
-      api;
+    if (AppCore.auth !== api) {
+      AppCore.auth =
+        api;
+    }
   } catch {}
 
-  try {
-    AppCore?.modules?.register?.(
-      "Auth",
-      api,
-      {
-        overwrite:
-          true,
-        replace:
-          true,
-        aliases:
-          [
-            "auth",
-          ],
-        source:
-          "features/auth/index.js",
-      }
-    );
-  } catch {}
+  setCoreModuleSilently(
+    "Auth",
+    api
+  );
 
-  try {
-    AppCore?.modules?.register?.(
-      "auth",
-      api,
-      {
-        overwrite:
-          true,
-        replace:
-          true,
-        aliases:
-          [
-            "Auth",
-          ],
-        source:
-          "features/auth/index.js",
-      }
-    );
-  } catch {}
+  setCoreModuleSilently(
+    "auth",
+    api
+  );
 
   try {
     if (isBrowser()) {
@@ -5551,7 +5934,8 @@ export const Auth = (() => {
         [
           runtimeSession,
           requestOptions,
-        ]
+        ],
+        requestOptions
       )
         .then((result) => {
           session.lastMeResult = {
@@ -5619,7 +6003,8 @@ export const Auth = (() => {
         executeRefreshSession,
         [
           sessionArg || session,
-        ]
+        ],
+        safeObject(sessionArg)
       )
         .then(async (result) => {
           const normalized =
@@ -5689,7 +6074,8 @@ export const Auth = (() => {
         [
           runtimeSession,
           options,
-        ]
+        ],
+        options
       )
         .then(async (result) => {
           if (
@@ -5767,6 +6153,8 @@ export const Auth = (() => {
               result,
               {
                 allowUserOnly:
+                  false,
+                allowTokenOnly:
                   false,
                 useCurrentToken:
                   true,
@@ -5892,6 +6280,8 @@ export const Auth = (() => {
                   "auth-login-success",
                 eventMode:
                   "login",
+                allowTokenOnly:
+                  false,
               }
             );
 
@@ -5997,7 +6387,8 @@ export const Auth = (() => {
                 nowMs() - startedAt,
               error:
                 session.lastError,
-            }
+            },
+            options
           );
 
           throw error;
@@ -6491,6 +6882,9 @@ export const Auth = (() => {
     refresh:
       refreshSessionPublic,
 
+    refreshToken:
+      refreshSessionPublic,
+
     restoreSession:
       restoreSessionPublic,
 
@@ -6542,6 +6936,8 @@ export const Auth = (() => {
             {
               allowUserOnly:
                 true,
+              allowTokenOnly:
+                options.allowTokenOnly !== false,
               useCurrentToken:
                 true,
             }
@@ -6558,6 +6954,11 @@ export const Auth = (() => {
               options.eventMode || "manual",
             emitRepair:
               options.emitRepair !== false,
+            preserveExistingUser:
+              options.preserveExistingUser === true ||
+              normalized.tokenOnly === true,
+            allowTokenOnly:
+              options.allowTokenOnly !== false,
           }
         );
       },

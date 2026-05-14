@@ -3,7 +3,7 @@
    Archivo: src/core/index.js
 
    ONION SUPPORT · CORE SINGLETON
-   GLOBAL CONFIG · STATE · EVENTS · STORAGE · REQUEST · MODULES · 14/10
+   GLOBAL CONFIG · STATE · EVENTS · STORAGE · REQUEST · HTTP · MODULES · 15/10
 
    QUÉ CENTRALIZA:
    - configuración global
@@ -16,6 +16,7 @@
    - módulos
    - hooks
    - request/api client
+   - core http bridge
    - init idempotente real
    - wrappers seguros de session/ui
    - bridge global Toast
@@ -38,6 +39,7 @@
    - createStorage recibe { utils, events }
    - applySessionBase recibe storage real
    - adaptadores setUser/setToken no envuelven mal payloads
+   - HTTP único conectado a src/core/http.js
 ========================================================= */
 
 import { config } from "./config.js";
@@ -110,6 +112,8 @@ import {
   createApiClient,
 } from "./request.js";
 
+import * as CoreHttpModule from "./http.js";
+
 import {
   bindNetworkEvents,
 } from "./network.js";
@@ -125,230 +129,151 @@ export const AppCore = (() => {
      CONSTANTS
   ======================================================= */
 
-  const CORE_VERSION =
-    "14.0.0";
+  const CORE_VERSION = "15.0.0";
+  const CORE_SOURCE = "core";
 
-  const CORE_SOURCE =
-    "core";
+  const DEFAULT_APP_NAME = "Onion Support";
+  const DEFAULT_STORAGE_PREFIX = "onion";
+  const DEFAULT_LANG = "es";
+  const DEFAULT_THEME = "dark";
 
-  const DEFAULT_APP_NAME =
-    "Onion Support";
+  const EVENTS = Object.freeze({
+    coreInitStart: "app:core:init:start",
+    coreReady: "app:core:ready",
+    coreInitError: "app:core:init:error",
+    coreReboot: "app:core:reboot",
 
-  const DEFAULT_STORAGE_PREFIX =
-    "onion";
+    stateChange: "app:state:change",
+    authChange: "app:auth:change",
+    userChange: "app:user:change",
+    routeChange: "app:route:change",
+    publicPathChange: "app:public-path:change",
 
-  const DEFAULT_LANG =
-    "es";
+    sessionApplied: "app:session:applied",
+    sessionCleared: "app:session:cleared",
 
-  const DEFAULT_THEME =
-    "dark";
+    moduleRegistered: "app:module:registered",
+    moduleReplaced: "app:module:replaced",
 
-  const EVENTS =
-    Object.freeze({
-      coreInitStart:
-        "app:core:init:start",
+    toastBridgeReady: "app:toast:bridge-ready",
+    httpReady: "app:http:ready",
+  });
 
-      coreReady:
-        "app:core:ready",
+  const SENSITIVE_STATE_KEYS = Object.freeze([
+    "token",
+    "accessToken",
+    "access_token",
+    "refreshToken",
+    "refresh_token",
+    "idToken",
+    "id_token",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "mfaToken",
+    "mfa_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "password",
+    "otp",
+    "code",
+    "authorization",
+    "jwt",
+    "bearer",
+  ]);
 
-      coreInitError:
-        "app:core:init:error",
+  const SENSITIVE_PARAM_NAMES = Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
+    "code",
+    "t",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
+  ]);
 
-      coreReboot:
-        "app:core:reboot",
+  const TOKEN_STATE_KEYS = Object.freeze([
+    "token",
+    "accessToken",
+    "access_token",
+    "jwt",
+    "bearer",
+    "idToken",
+    "id_token",
+  ]);
 
-      stateChange:
-        "app:state:change",
+  const USER_STATE_KEYS = Object.freeze([
+    "user",
+    "currentUser",
+    "sessionUser",
+    "authUser",
+    "account",
+    "profile",
+    "usuario",
+    "me",
+  ]);
 
-      authChange:
-        "app:auth:change",
+  const USER_ID_KEYS = Object.freeze([
+    "id",
+    "userId",
+    "user_id",
+    "_id",
+    "uid",
+    "sub",
+    "username",
+    "userName",
+    "user_name",
+    "email",
+    "mail",
+    "phone",
+    "telefono",
+    "mobile",
+  ]);
 
-      userChange:
-        "app:user:change",
+  const BRIDGE_MODULE_ALIASES = Object.freeze({
+    Router: Object.freeze(["Router", "router"]),
+    router: Object.freeze(["router", "Router"]),
 
-      routeChange:
-        "app:route:change",
+    Auth: Object.freeze(["Auth", "auth"]),
+    auth: Object.freeze(["auth", "Auth"]),
 
-      publicPathChange:
-        "app:public-path:change",
+    Store: Object.freeze(["Store", "store"]),
+    store: Object.freeze(["store", "Store"]),
 
-      sessionApplied:
-        "app:session:applied",
+    Http: Object.freeze(["Http", "http"]),
+    http: Object.freeze(["http", "Http"]),
 
-      sessionCleared:
-        "app:session:cleared",
-
-      moduleRegistered:
-        "app:module:registered",
-
-      moduleReplaced:
-        "app:module:replaced",
-
-      toastBridgeReady:
-        "app:toast:bridge-ready",
-    });
-
-  const SENSITIVE_STATE_KEYS =
-    Object.freeze([
-      "token",
-      "accessToken",
-      "access_token",
-      "refreshToken",
-      "refresh_token",
-      "idToken",
-      "id_token",
-      "tempToken",
-      "temp_token",
-      "temporaryToken",
-      "temporary_token",
-      "mfaToken",
-      "mfa_token",
-      "twoFactorToken",
-      "two_factor_token",
-      "password",
-      "otp",
-      "code",
-      "authorization",
-      "jwt",
-      "bearer",
-    ]);
-
-  const SENSITIVE_PARAM_NAMES =
-    Object.freeze([
-      "token",
-      "activationToken",
-      "activateToken",
-      "resetToken",
-      "passwordResetToken",
-      "confirmToken",
-      "code",
-      "t",
-      "access_token",
-      "refresh_token",
-      "id_token",
-      "tempToken",
-      "temp_token",
-      "temporaryToken",
-      "temporary_token",
-      "twoFactorToken",
-      "two_factor_token",
-      "mfaToken",
-      "mfa_token",
-    ]);
-
-  const TOKEN_STATE_KEYS =
-    Object.freeze([
-      "token",
-      "accessToken",
-      "access_token",
-      "jwt",
-      "bearer",
-      "idToken",
-      "id_token",
-    ]);
-
-  const USER_STATE_KEYS =
-    Object.freeze([
-      "user",
-      "currentUser",
-      "sessionUser",
-      "authUser",
-      "account",
-      "profile",
-      "usuario",
-      "me",
-    ]);
-
-  const USER_ID_KEYS =
-    Object.freeze([
-      "id",
-      "userId",
-      "user_id",
-      "_id",
-      "uid",
-      "sub",
-      "username",
-      "userName",
-      "user_name",
-      "email",
-      "mail",
-      "phone",
-      "telefono",
-      "mobile",
-    ]);
-
-  const BRIDGE_MODULE_ALIASES =
-    Object.freeze({
-      Router:
-        Object.freeze([
-          "Router",
-          "router",
-        ]),
-
-      router:
-        Object.freeze([
-          "router",
-          "Router",
-        ]),
-
-      Auth:
-        Object.freeze([
-          "Auth",
-          "auth",
-        ]),
-
-      auth:
-        Object.freeze([
-          "auth",
-          "Auth",
-        ]),
-
-      Store:
-        Object.freeze([
-          "Store",
-          "store",
-        ]),
-
-      store:
-        Object.freeze([
-          "store",
-          "Store",
-        ]),
-
-      Http:
-        Object.freeze([
-          "Http",
-          "http",
-        ]),
-
-      http:
-        Object.freeze([
-          "http",
-          "Http",
-        ]),
-    });
+    ApiClient: Object.freeze(["ApiClient", "apiClient"]),
+    apiClient: Object.freeze(["apiClient", "ApiClient"]),
+  });
 
   /* =======================================================
      RUNTIME FLAGS
   ======================================================= */
 
-  let initPromise =
-    null;
+  let initPromise = null;
+  let initialized = false;
+  let initCycle = 0;
+  let networkEventsBound = false;
+  let showToastBridge = null;
+  let readyCallbacksFlushed = false;
 
-  let initialized =
-    false;
-
-  let initCycle =
-    0;
-
-  let networkEventsBound =
-    false;
-
-  let showToastBridge =
-    null;
-
-  let readyCallbacksFlushed =
-    false;
+  let httpBridge = null;
+  let requestBridge = null;
+  let apiClientBridge = null;
 
   /* =======================================================
      BASIC SAFE HELPERS
@@ -377,9 +302,60 @@ export const AppCore = (() => {
   }
 
   function ensureObject(value) {
-    return isObject(value)
-      ? value
-      : {};
+    return isObject(value) ? value : {};
+  }
+
+  function isObjectLike(value) {
+    return (
+      value !== null &&
+      (
+        typeof value === "object" ||
+        typeof value === "function"
+      )
+    );
+  }
+
+  function canExtend(value) {
+    try {
+      return (
+        isObjectLike(value) &&
+        Object.isExtensible(value)
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function defineHiddenValue(target, key, value) {
+    if (
+      !target ||
+      !key ||
+      !canExtend(target)
+    ) {
+      return false;
+    }
+
+    try {
+      Object.defineProperty(
+        target,
+        key,
+        {
+          value,
+          configurable: true,
+          enumerable: false,
+          writable: true,
+        }
+      );
+
+      return true;
+    } catch {}
+
+    try {
+      target[key] = value;
+      return true;
+    } catch {}
+
+    return false;
   }
 
   function isFunction(value) {
@@ -394,17 +370,13 @@ export const AppCore = (() => {
       return fallback;
     }
 
-    const text =
-      String(value).trim();
+    const text = String(value).trim();
 
     return text || fallback;
   }
 
   function safeLower(value, fallback = "") {
-    return safeText(
-      value,
-      fallback
-    ).toLowerCase();
+    return safeText(value, fallback).toLowerCase();
   }
 
   function safeBool(value, fallback = false) {
@@ -417,10 +389,7 @@ export const AppCore = (() => {
     }
 
     if (typeof value === "string") {
-      const clean =
-        value
-          .trim()
-          .toLowerCase();
+      const clean = value.trim().toLowerCase();
 
       if (
         [
@@ -456,8 +425,7 @@ export const AppCore = (() => {
   }
 
   function safeNumber(value, fallback = 0) {
-    const number =
-      Number(value);
+    const number = Number(value);
 
     return Number.isFinite(number)
       ? number
@@ -488,10 +456,7 @@ export const AppCore = (() => {
 
   function safeOwn(object, key) {
     try {
-      return Object.prototype.hasOwnProperty.call(
-        object,
-        key
-      );
+      return Object.prototype.hasOwnProperty.call(object, key);
     } catch {
       return false;
     }
@@ -500,8 +465,7 @@ export const AppCore = (() => {
   function safeFactory(factory, fallback, ...args) {
     try {
       if (isFunction(factory)) {
-        const value =
-          factory(...args);
+        const value = factory(...args);
 
         if (value) {
           return value;
@@ -537,14 +501,9 @@ export const AppCore = (() => {
 
   function safeConsole(method = "log", ...args) {
     try {
-      const fn =
-        console?.[method] ||
-        console?.log;
+      const fn = console?.[method] || console?.log;
 
-      fn?.(
-        `[${getAppName()}]`,
-        ...args
-      );
+      fn?.(`[${getAppName()}]`, ...args);
     } catch {}
   }
 
@@ -553,10 +512,7 @@ export const AppCore = (() => {
       return;
     }
 
-    safeConsole(
-      "log",
-      ...args
-    );
+    safeConsole("log", ...args);
   }
 
   function safeWarn(...args) {
@@ -564,17 +520,49 @@ export const AppCore = (() => {
       return;
     }
 
-    safeConsole(
-      "warn",
-      ...args
-    );
+    safeConsole("warn", ...args);
   }
 
   function safeError(...args) {
-    safeConsole(
-      "error",
-      ...args
-    );
+    safeConsole("error", ...args);
+  }
+
+  function first(...values) {
+    for (const value of values) {
+      if (
+        value === undefined ||
+        value === null
+      ) {
+        continue;
+      }
+
+      if (
+        typeof value === "string" &&
+        value.trim() === ""
+      ) {
+        continue;
+      }
+
+      if (
+        Array.isArray(value) &&
+        value.length === 0
+      ) {
+        continue;
+      }
+
+      if (
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        Object.keys(value).length === 0
+      ) {
+        continue;
+      }
+
+      return value;
+    }
+
+    return null;
   }
 
   /* =======================================================
@@ -589,51 +577,43 @@ export const AppCore = (() => {
   }
 
   function redactTokenInText(value = "") {
-    const raw =
-      safeText(value, "");
+    const raw = safeText(value, "");
 
     if (!raw) {
       return "";
     }
 
-    let output =
-      raw;
+    let output = raw;
 
     try {
       for (const name of SENSITIVE_PARAM_NAMES) {
-        const escaped =
-          escapeRegExp(name);
+        const escaped = escapeRegExp(name);
 
-        output =
-          output.replace(
-            new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
-            "$1***"
-          );
+        output = output.replace(
+          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
       }
 
-      output =
-        output.replace(
-          /(\/activate-account\/)([^/?#\s]+)/gi,
-          "$1***"
-        );
+      output = output.replace(
+        /(\/activate-account\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
 
-      output =
-        output.replace(
-          /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-          "$1***"
-        );
+      output = output.replace(
+        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
 
-      output =
-        output.replace(
-          /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-          "$1***"
-        );
+      output = output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
 
-      output =
-        output.replace(
-          /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-          "***"
-        );
+      output = output.replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
+      );
     } catch {}
 
     return output;
@@ -650,38 +630,28 @@ export const AppCore = (() => {
       error;
 
     return {
-      name:
-        safeText(candidate?.name, "Error"),
+      name: safeText(candidate?.name, "Error"),
 
-      message:
-        redactTokenInText(
-          safeText(
-            candidate?.message ||
-              candidate?.reason ||
-              candidate,
-            "Error"
-          )
-        ),
-
-      code:
+      message: redactTokenInText(
         safeText(
-          candidate?.code ||
-            candidate?.statusCode ||
-            "",
-          ""
-        ),
+          candidate?.message ||
+            candidate?.reason ||
+            candidate,
+          "Error"
+        )
+      ),
 
-      status:
-        safeNumber(candidate?.status, 0),
+      code: safeText(
+        candidate?.code ||
+          candidate?.statusCode ||
+          "",
+        ""
+      ),
 
-      timeout:
-        Boolean(candidate?.timeout),
-
-      aborted:
-        Boolean(candidate?.aborted),
-
-      at:
-        safeIsoDate(),
+      status: safeNumber(candidate?.status, 0),
+      timeout: Boolean(candidate?.timeout),
+      aborted: Boolean(candidate?.aborted),
+      at: safeIsoDate(),
     };
   }
 
@@ -694,12 +664,9 @@ export const AppCore = (() => {
     let clean = {};
 
     try {
-      clean =
-        safeClone(source, {}) || {};
+      clean = safeClone(source, {}) || {};
     } catch {
-      clean = {
-        ...source,
-      };
+      clean = { ...source };
     }
 
     for (const key of SENSITIVE_STATE_KEYS) {
@@ -723,19 +690,16 @@ export const AppCore = (() => {
       "lastRequestUrl",
     ]) {
       if (clean[key]) {
-        clean[key] =
-          redactTokenInText(clean[key]);
+        clean[key] = redactTokenInText(clean[key]);
       }
     }
 
     if (clean.error) {
-      clean.error =
-        sanitizeErrorForSnapshot(clean.error);
+      clean.error = sanitizeErrorForSnapshot(clean.error);
     }
 
     if (clean.lastError) {
-      clean.lastError =
-        sanitizeErrorForSnapshot(clean.lastError);
+      clean.lastError = sanitizeErrorForSnapshot(clean.lastError);
     }
 
     return clean;
@@ -772,30 +736,24 @@ export const AppCore = (() => {
   ======================================================= */
 
   function createFallbackEvents() {
-    const listeners =
-      new Map();
+    const listeners = new Map();
 
     function getSet(name) {
-      const key =
-        safeText(name, "");
+      const key = safeText(name, "");
 
       if (!key) {
         return null;
       }
 
       if (!listeners.has(key)) {
-        listeners.set(
-          key,
-          new Set()
-        );
+        listeners.set(key, new Set());
       }
 
       return listeners.get(key);
     }
 
     function on(name, handler) {
-      const key =
-        safeText(name, "");
+      const key = safeText(name, "");
 
       if (
         !key ||
@@ -804,8 +762,7 @@ export const AppCore = (() => {
         return () => {};
       }
 
-      const set =
-        getSet(key);
+      const set = getSet(key);
 
       if (!set) {
         return () => {};
@@ -813,11 +770,7 @@ export const AppCore = (() => {
 
       set.add(handler);
 
-      return () =>
-        off(
-          key,
-          handler
-        );
+      return () => off(key, handler);
     }
 
     function once(name, handler) {
@@ -828,40 +781,31 @@ export const AppCore = (() => {
         return () => {};
       }
 
-      let disposed =
-        false;
+      let disposed = false;
 
-      const dispose =
-        on(
-          name,
-          (...args) => {
-            if (disposed) {
-              return;
-            }
-
-            disposed =
-              true;
-
-            dispose();
-
-            try {
-              handler(...args);
-            } catch (error) {
-              safeWarn(
-                "Fallback once handler error:",
-                name,
-                error
-              );
-            }
+      const dispose = on(
+        name,
+        (...args) => {
+          if (disposed) {
+            return;
           }
-        );
+
+          disposed = true;
+          dispose();
+
+          try {
+            handler(...args);
+          } catch (error) {
+            safeWarn("Fallback once handler error:", name, error);
+          }
+        }
+      );
 
       return dispose;
     }
 
     function off(name, handler) {
-      const key =
-        safeText(name, "");
+      const key = safeText(name, "");
 
       if (!key) {
         return false;
@@ -873,9 +817,7 @@ export const AppCore = (() => {
           return true;
         }
 
-        listeners
-          .get(key)
-          ?.delete(handler);
+        listeners.get(key)?.delete(handler);
 
         return true;
       } catch {
@@ -884,22 +826,14 @@ export const AppCore = (() => {
     }
 
     function emit(name, payload = {}) {
-      const key =
-        safeText(name, "");
+      const key = safeText(name, "");
 
       if (!key) {
         return false;
       }
 
-      const handlers =
-        Array.from(
-          listeners.get(key) || []
-        );
-
-      const wildcardHandlers =
-        Array.from(
-          listeners.get("*") || []
-        );
+      const handlers = Array.from(listeners.get(key) || []);
+      const wildcardHandlers = Array.from(listeners.get("*") || []);
 
       if (
         !handlers.length &&
@@ -909,12 +843,8 @@ export const AppCore = (() => {
       }
 
       const eventLike = {
-        type:
-          key,
-
-        detail:
-          payload,
-
+        type: key,
+        detail: payload,
         payload,
       };
 
@@ -922,26 +852,15 @@ export const AppCore = (() => {
         try {
           handler(eventLike);
         } catch (error) {
-          safeWarn(
-            "Fallback event handler error:",
-            key,
-            error
-          );
+          safeWarn("Fallback event handler error:", key, error);
         }
       }
 
       for (const handler of wildcardHandlers) {
         try {
-          handler(
-            key,
-            payload
-          );
+          handler(key, payload);
         } catch (error) {
-          safeWarn(
-            "Fallback wildcard handler error:",
-            key,
-            error
-          );
+          safeWarn("Fallback wildcard handler error:", key, error);
         }
       }
 
@@ -949,8 +868,7 @@ export const AppCore = (() => {
     }
 
     function clear(name = "") {
-      const key =
-        safeText(name, "");
+      const key = safeText(name, "");
 
       if (key) {
         listeners.delete(key);
@@ -962,40 +880,30 @@ export const AppCore = (() => {
     }
 
     function listenerCount(name = "") {
-      const key =
-        safeText(name, "");
+      const key = safeText(name, "");
 
       if (key) {
         return listeners.get(key)?.size || 0;
       }
 
-      let total =
-        0;
+      let total = 0;
 
       for (const set of listeners.values()) {
-        total +=
-          set.size;
+        total += set.size;
       }
 
       return total;
     }
 
     function names() {
-      return Array.from(
-        listeners.keys()
-      );
+      return Array.from(listeners.keys());
     }
 
     function getSnapshot() {
       return {
-        fallback:
-          true,
-
-        names:
-          names(),
-
-        listenerCount:
-          listenerCount(),
+        fallback: true,
+        names: names(),
+        listenerCount: listenerCount(),
       };
     }
 
@@ -1008,10 +916,8 @@ export const AppCore = (() => {
       listenerCount,
       names,
       getSnapshot,
-      getDebugSnapshot:
-        getSnapshot,
-      snapshot:
-        getSnapshot,
+      getDebugSnapshot: getSnapshot,
+      snapshot: getSnapshot,
     };
   }
 
@@ -1020,39 +926,26 @@ export const AppCore = (() => {
   ======================================================= */
 
   const registry = {
-    modules:
-      new Map(),
-
-    scopes:
-      new Map(),
+    modules: new Map(),
+    scopes: new Map(),
 
     hooks: {
-      beforeInit:
-        [],
-
-      afterInit:
-        [],
-
-      beforeRequest:
-        [],
-
-      afterResponse:
-        [],
-
-      onRequestError:
-        [],
+      beforeInit: [],
+      afterInit: [],
+      beforeRequest: [],
+      afterResponse: [],
+      onRequestError: [],
     },
   };
 
-  const events =
-    safeFactory(
-      createEvents,
-      createFallbackEvents,
-      {
-        maxRecentEvents:
-          config?.diagnostics?.maxRecentEvents,
-      }
-    );
+  const events = safeFactory(
+    createEvents,
+    createFallbackEvents,
+    {
+      maxRecentEvents:
+        config?.diagnostics?.maxRecentEvents,
+    }
+  );
 
   const state =
     safeFactory(
@@ -1074,19 +967,14 @@ export const AppCore = (() => {
   ======================================================= */
 
   function safeEmit(name, payload = {}) {
-    const eventName =
-      safeText(name, "");
+    const eventName = safeText(name, "");
 
     if (!eventName) {
       return false;
     }
 
     try {
-      events?.emit?.(
-        eventName,
-        payload
-      );
-
+      events?.emit?.(eventName, payload);
       return true;
     } catch {}
 
@@ -1103,16 +991,10 @@ export const AppCore = (() => {
         return null;
       }
 
-      const root =
-        scope ||
-        document;
+      const root = scope || document;
 
       try {
-        return (
-          root?.querySelector?.(
-            selector
-          ) || null
-        );
+        return root?.querySelector?.(selector) || null;
       } catch {
         return null;
       }
@@ -1123,16 +1005,10 @@ export const AppCore = (() => {
         return [];
       }
 
-      const root =
-        scope ||
-        document;
+      const root = scope || document;
 
       try {
-        return Array.from(
-          root?.querySelectorAll?.(
-            selector
-          ) || []
-        );
+        return Array.from(root?.querySelectorAll?.(selector) || []);
       } catch {
         return [];
       }
@@ -1160,19 +1036,11 @@ export const AppCore = (() => {
       }
 
       try {
-        target.addEventListener(
-          ev,
-          fn,
-          opts
-        );
+        target.addEventListener(ev, fn, opts);
 
         return () => {
           try {
-            target.removeEventListener(
-              ev,
-              fn,
-              opts
-            );
+            target.removeEventListener(ev, fn, opts);
           } catch {}
         };
       } catch {
@@ -1182,11 +1050,7 @@ export const AppCore = (() => {
 
     off(target, ev, fn, opts = false) {
       try {
-        target?.removeEventListener?.(
-          ev,
-          fn,
-          opts
-        );
+        target?.removeEventListener?.(ev, fn, opts);
       } catch {}
     },
 
@@ -1195,10 +1059,7 @@ export const AppCore = (() => {
         try {
           setTimeout(
             resolve,
-            Math.max(
-              0,
-              safeNumber(ms, 0)
-            )
+            Math.max(0, safeNumber(ms, 0))
           );
         } catch {
           resolve();
@@ -1249,17 +1110,10 @@ export const AppCore = (() => {
       } catch {}
     },
 
-    log:
-      safeLog,
-
-    warn:
-      safeWarn,
-
-    error:
-      safeError,
-
-    emit:
-      safeEmit,
+    log: safeLog,
+    warn: safeWarn,
+    error: safeError,
+    emit: safeEmit,
 
     safeClone,
     cloneError,
@@ -1291,18 +1145,13 @@ export const AppCore = (() => {
     safeBool,
     safeNumber,
     safeArray,
-
-    safeObject:
-      ensureObject,
+    safeObject: ensureObject,
 
     isObject,
     isFunction,
 
-    now:
-      safeNow,
-
-    nowIso:
-      safeIsoDate,
+    now: safeNow,
+    nowIso: safeIsoDate,
   };
 
   /* =======================================================
@@ -1311,19 +1160,14 @@ export const AppCore = (() => {
 
   function createFallbackCleanup() {
     function ensureScope(name = "global") {
-      const scopeName =
-        safeText(name, "global");
+      const scopeName = safeText(name, "global");
 
       if (!registry.scopes.has(scopeName)) {
-        registry.scopes.set(
-          scopeName,
-          new Set()
-        );
+        registry.scopes.set(scopeName, new Set());
       }
 
       return {
-        name:
-          scopeName,
+        name: scopeName,
       };
     }
 
@@ -1332,61 +1176,34 @@ export const AppCore = (() => {
         return false;
       }
 
-      const scope =
-        ensureScope(scopeName).name;
+      const scope = ensureScope(scopeName).name;
 
-      registry.scopes
-        .get(scope)
-        .add(disposer);
+      registry.scopes.get(scope).add(disposer);
 
       return true;
     }
 
     function event(scopeName, targetOrName, eventNameOrHandler, handlerOrOptions, maybeOptions) {
-      const scope =
-        ensureScope(scopeName).name;
+      const scope = ensureScope(scopeName).name;
 
-      let target =
-        null;
-
-      let eventName =
-        "";
-
-      let handler =
-        null;
-
-      let options =
-        false;
+      let target = null;
+      let eventName = "";
+      let handler = null;
+      let options = false;
 
       if (
         targetOrName &&
         isFunction(targetOrName.addEventListener)
       ) {
-        target =
-          targetOrName;
-
-        eventName =
-          safeText(eventNameOrHandler, "");
-
-        handler =
-          handlerOrOptions;
-
-        options =
-          maybeOptions || false;
+        target = targetOrName;
+        eventName = safeText(eventNameOrHandler, "");
+        handler = handlerOrOptions;
+        options = maybeOptions || false;
       } else {
-        target =
-          isBrowser()
-            ? window
-            : null;
-
-        eventName =
-          safeText(targetOrName, "");
-
-        handler =
-          eventNameOrHandler;
-
-        options =
-          handlerOrOptions || false;
+        target = isBrowser() ? window : null;
+        eventName = safeText(targetOrName, "");
+        handler = eventNameOrHandler;
+        options = handlerOrOptions || false;
       }
 
       if (
@@ -1398,19 +1215,11 @@ export const AppCore = (() => {
       }
 
       try {
-        target.addEventListener(
-          eventName,
-          handler,
-          options
-        );
+        target.addEventListener(eventName, handler, options);
 
         add(scope, () => {
           try {
-            target.removeEventListener(
-              eventName,
-              handler,
-              options
-            );
+            target.removeEventListener(eventName, handler, options);
           } catch {}
         });
 
@@ -1429,10 +1238,7 @@ export const AppCore = (() => {
         const id =
           setTimeout(
             callback,
-            Math.max(
-              0,
-              safeNumber(delay, 0)
-            )
+            Math.max(0, safeNumber(delay, 0))
           );
 
         add(scopeName, () => {
@@ -1456,10 +1262,7 @@ export const AppCore = (() => {
         const id =
           setInterval(
             callback,
-            Math.max(
-              0,
-              safeNumber(delay, 0)
-            )
+            Math.max(0, safeNumber(delay, 0))
           );
 
         add(scopeName, () => {
@@ -1475,11 +1278,8 @@ export const AppCore = (() => {
     }
 
     function run(scopeName = "global") {
-      const scope =
-        safeText(scopeName, "global");
-
-      const disposers =
-        registry.scopes.get(scope);
+      const scope = safeText(scopeName, "global");
+      const disposers = registry.scopes.get(scope);
 
       if (!disposers) {
         return true;
@@ -1512,51 +1312,36 @@ export const AppCore = (() => {
 
     function getSnapshot() {
       return {
-        fallback:
-          true,
-
-        scopeCount:
-          registry.scopes.size,
+        fallback: true,
+        scopeCount: registry.scopes.size,
 
         scopes:
           Array.from(registry.scopes.entries()).map(([name, disposers]) => ({
             name,
-            count:
-              disposers?.size || 0,
+            count: disposers?.size || 0,
           })),
       };
     }
 
     return {
-      scope:
-        ensureScope,
-
+      scope: ensureScope,
       ensureScope,
       add,
 
-      on:
-        event,
-
+      on: event,
       event,
+
       timeout,
-
-      timer:
-        timeout,
-
+      timer: timeout,
       interval,
+
       run,
       clear,
-
-      dispose:
-        run,
+      dispose: run,
 
       getSnapshot,
-
-      getDebugSnapshot:
-        getSnapshot,
-
-      snapshot:
-        getSnapshot,
+      getDebugSnapshot: getSnapshot,
+      snapshot: getSnapshot,
     };
   }
 
@@ -1565,8 +1350,7 @@ export const AppCore = (() => {
   ======================================================= */
 
   function createFallbackStorage() {
-    const memory =
-      new Map();
+    const memory = new Map();
 
     const prefix =
       safeText(
@@ -1577,8 +1361,7 @@ export const AppCore = (() => {
       );
 
     function normalizeKey(name = "") {
-      const clean =
-        safeText(name, "");
+      const clean = safeText(name, "");
 
       if (!clean) {
         return `${prefix}:`;
@@ -1608,15 +1391,11 @@ export const AppCore = (() => {
     }
 
     function getRaw(name, fallback = null) {
-      const finalKey =
-        normalizeKey(name);
+      const finalKey = normalizeKey(name);
 
       try {
-        const local =
-          getStorage("localStorage");
-
-        const localValue =
-          local?.getItem?.(finalKey);
+        const local = getStorage("localStorage");
+        const localValue = local?.getItem?.(finalKey);
 
         if (
           localValue !== null &&
@@ -1627,11 +1406,8 @@ export const AppCore = (() => {
       } catch {}
 
       try {
-        const session =
-          getStorage("sessionStorage");
-
-        const sessionValue =
-          session?.getItem?.(finalKey);
+        const session = getStorage("sessionStorage");
+        const sessionValue = session?.getItem?.(finalKey);
 
         if (
           sessionValue !== null &&
@@ -1647,8 +1423,7 @@ export const AppCore = (() => {
     }
 
     function setRaw(name, value, options = {}) {
-      const finalKey =
-        normalizeKey(name);
+      const finalKey = normalizeKey(name);
 
       const raw =
         value === null ||
@@ -1656,10 +1431,7 @@ export const AppCore = (() => {
           ? ""
           : String(value);
 
-      memory.set(
-        finalKey,
-        raw
-      );
+      memory.set(finalKey, raw);
 
       const target =
         options?.session === true
@@ -1667,10 +1439,7 @@ export const AppCore = (() => {
           : getStorage("localStorage");
 
       try {
-        target?.setItem?.(
-          finalKey,
-          raw
-        );
+        target?.setItem?.(finalKey, raw);
       } catch {}
 
       return true;
@@ -1693,21 +1462,13 @@ export const AppCore = (() => {
     }
 
     function get(name, fallback = null) {
-      const raw =
-        getRaw(
-          name,
-          undefined
-        );
+      const raw = getRaw(name, undefined);
 
       if (raw === undefined) {
         return fallback;
       }
 
-      const parsed =
-        parseJson(
-          raw,
-          undefined
-        );
+      const parsed = parseJson(raw, undefined);
 
       return parsed === undefined
         ? raw
@@ -1738,16 +1499,11 @@ export const AppCore = (() => {
     }
 
     function setJson(name, value, options = {}) {
-      return set(
-        name,
-        value,
-        options
-      );
+      return set(name, value, options);
     }
 
     function remove(name) {
-      const finalKey =
-        normalizeKey(name);
+      const finalKey = normalizeKey(name);
 
       memory.delete(finalKey);
 
@@ -1763,26 +1519,18 @@ export const AppCore = (() => {
     }
 
     function has(name) {
-      const value =
-        getRaw(
-          name,
-          undefined
-        );
+      const value = getRaw(name, undefined);
 
       return value !== undefined;
     }
 
     function keys() {
-      return Array.from(
-        memory.keys()
-      );
+      return Array.from(memory.keys());
     }
 
     function getSnapshot() {
       return {
-        fallback:
-          true,
-
+        fallback: true,
         prefix,
 
         memoryKeys:
@@ -1795,9 +1543,7 @@ export const AppCore = (() => {
     return {
       prefix,
 
-      key:
-        normalizeKey,
-
+      key: normalizeKey,
       normalizeKey,
 
       getRaw,
@@ -1810,23 +1556,15 @@ export const AppCore = (() => {
       setJson,
 
       remove,
-
-      del:
-        remove,
-
-      delete:
-        remove,
+      del: remove,
+      delete: remove,
 
       has,
       keys,
 
       getSnapshot,
-
-      getDebugSnapshot:
-        getSnapshot,
-
-      snapshot:
-        getSnapshot,
+      getDebugSnapshot: getSnapshot,
+      snapshot: getSnapshot,
     };
   }
 
@@ -1861,20 +1599,15 @@ export const AppCore = (() => {
     }
 
     function has(name) {
-      return registry.modules.has(
-        canonical(name)
-      );
+      return registry.modules.has(canonical(name));
     }
 
     function get(name) {
-      return registry.modules.get(
-        canonical(name)
-      ) || null;
+      return registry.modules.get(canonical(name)) || null;
     }
 
     function register(name, moduleRef, options = {}) {
-      const key =
-        canonical(name);
+      const key = canonical(name);
 
       if (
         !key ||
@@ -1883,8 +1616,7 @@ export const AppCore = (() => {
         return false;
       }
 
-      const exists =
-        registry.modules.has(key);
+      const exists = registry.modules.has(key);
 
       if (
         exists &&
@@ -1894,22 +1626,16 @@ export const AppCore = (() => {
         return registry.modules.get(key);
       }
 
-      registry.modules.set(
-        key,
-        moduleRef
-      );
+      registry.modules.set(key, moduleRef);
 
       safeEmit(
         exists
           ? EVENTS.moduleReplaced
           : EVENTS.moduleRegistered,
         {
-          name:
-            key,
-          replaced:
-            exists,
-          source:
-            CORE_SOURCE,
+          name: key,
+          replaced: exists,
+          source: CORE_SOURCE,
         }
       );
 
@@ -1922,36 +1648,25 @@ export const AppCore = (() => {
         moduleRef,
         {
           ...ensureObject(options),
-          replace:
-            options?.replace !== false,
-          overwrite:
-            options?.overwrite !== false,
+          replace: options?.replace !== false,
+          overwrite: options?.overwrite !== false,
         }
       );
     }
 
     function remove(name) {
-      return registry.modules.delete(
-        canonical(name)
-      );
+      return registry.modules.delete(canonical(name));
     }
 
     function list() {
-      return Array.from(
-        registry.modules.keys()
-      );
+      return Array.from(registry.modules.keys());
     }
 
     function getSnapshot() {
       return {
-        fallback:
-          true,
-
-        count:
-          registry.modules.size,
-
-        modules:
-          list(),
+        fallback: true,
+        count: registry.modules.size,
+        modules: list(),
       };
     }
 
@@ -1961,41 +1676,32 @@ export const AppCore = (() => {
       register,
       set,
       remove,
-
-      delete:
-        remove,
-
+      delete: remove,
       list,
+
       getSnapshot,
-
-      getDebugSnapshot:
-        getSnapshot,
-
-      snapshot:
-        getSnapshot,
+      getDebugSnapshot: getSnapshot,
+      snapshot: getSnapshot,
     };
   }
 
   function createFallbackHooks() {
     function ensureHookList(name = "") {
-      const key =
-        safeText(name, "");
+      const key = safeText(name, "");
 
       if (!key) {
         return null;
       }
 
       if (!Array.isArray(registry.hooks[key])) {
-        registry.hooks[key] =
-          [];
+        registry.hooks[key] = [];
       }
 
       return registry.hooks[key];
     }
 
     function add(name, handler) {
-      const list =
-        ensureHookList(name);
+      const list = ensureHookList(name);
 
       if (
         !list ||
@@ -2007,8 +1713,7 @@ export const AppCore = (() => {
       list.push(handler);
 
       return () => {
-        const key =
-          safeText(name, "");
+        const key = safeText(name, "");
 
         registry.hooks[key] =
           safeArray(registry.hooks[key]).filter((item) =>
@@ -2025,8 +1730,7 @@ export const AppCore = (() => {
           ]
         );
 
-      let current =
-        payload;
+      let current = payload;
 
       for (const hook of list) {
         if (!isFunction(hook)) {
@@ -2034,19 +1738,13 @@ export const AppCore = (() => {
         }
 
         try {
-          const next =
-            await hook(current);
+          const next = await hook(current);
 
           if (next !== undefined) {
-            current =
-              next;
+            current = next;
           }
         } catch (error) {
-          safeWarn(
-            "Hook error:",
-            name,
-            error
-          );
+          safeWarn("Hook error:", name, error);
         }
       }
 
@@ -2062,18 +1760,15 @@ export const AppCore = (() => {
     }
 
     function clear(name = "") {
-      const key =
-        safeText(name, "");
+      const key = safeText(name, "");
 
       if (key) {
-        registry.hooks[key] =
-          [];
+        registry.hooks[key] = [];
         return true;
       }
 
       Object.keys(registry.hooks).forEach((hookName) => {
-        registry.hooks[hookName] =
-          [];
+        registry.hooks[hookName] = [];
       });
 
       return true;
@@ -2092,23 +1787,15 @@ export const AppCore = (() => {
 
     return {
       add,
-
-      on:
-        add,
-
-      use:
-        add,
-
+      on: add,
+      use: add,
       run,
       get,
       clear,
+
       getSnapshot,
-
-      getDebugSnapshot:
-        getSnapshot,
-
-      snapshot:
-        getSnapshot,
+      getDebugSnapshot: getSnapshot,
+      snapshot: getSnapshot,
     };
   }
 
@@ -2149,15 +1836,13 @@ export const AppCore = (() => {
   }
 
   function hasTokenValue(token) {
-    const text =
-      safeText(token, "");
+    const text = safeText(token, "");
 
     if (!text) {
       return false;
     }
 
-    const lower =
-      text.toLowerCase();
+    const lower = text.toLowerCase();
 
     if (
       [
@@ -2178,9 +1863,7 @@ export const AppCore = (() => {
     }
 
     try {
-      return Boolean(
-        hasValidToken(text)
-      );
+      return Boolean(hasValidToken(text));
     } catch {}
 
     return true;
@@ -2277,11 +1960,8 @@ export const AppCore = (() => {
   }
 
   function getStateToken(root = ensureState()) {
-    const session =
-      getNestedObject(root.session);
-
-    const sessionData =
-      getNestedObject(root.sessionData);
+    const session = getNestedObject(root.session);
+    const sessionData = getNestedObject(root.sessionData);
 
     return firstToken(
       ...TOKEN_STATE_KEYS.map((key) => root[key]),
@@ -2291,11 +1971,8 @@ export const AppCore = (() => {
   }
 
   function getStateUser(root = ensureState()) {
-    const session =
-      getNestedObject(root.session);
-
-    const sessionData =
-      getNestedObject(root.sessionData);
+    const session = getNestedObject(root.session);
+    const sessionData = getNestedObject(root.sessionData);
 
     return firstUser(
       ...USER_STATE_KEYS.map((key) => root[key]),
@@ -2378,18 +2055,14 @@ export const AppCore = (() => {
   }
 
   function computeAuthValue(root, options = {}) {
-    const opts =
-      ensureObject(options);
+    const opts = ensureObject(options);
 
     if (opts.forceUnauthenticated === true) {
       return false;
     }
 
-    const token =
-      getStateToken(root);
-
-    const user =
-      getStateUser(root);
+    const token = getStateToken(root);
+    const user = getStateUser(root);
 
     if (
       !hasTokenValue(token) ||
@@ -2411,20 +2084,13 @@ export const AppCore = (() => {
   }
 
   function syncDerivedAuthState(options = {}) {
-    const root =
-      ensureState();
+    const root = ensureState();
 
-    const token =
-      getStateToken(root);
+    const token = getStateToken(root);
+    const user = getStateUser(root);
 
-    const user =
-      getStateUser(root);
-
-    const tokenValid =
-      hasTokenValue(token);
-
-    const userValid =
-      hasUsableUser(user);
+    const tokenValid = hasTokenValue(token);
+    const userValid = hasUsableUser(user);
 
     const authenticated =
       computeAuthValue(
@@ -2436,45 +2102,23 @@ export const AppCore = (() => {
         options
       );
 
-    root.token =
-      tokenValid
-        ? token
-        : null;
+    root.token = tokenValid ? token : null;
+    root.accessToken = tokenValid ? token : null;
+    root.access_token = tokenValid ? token : null;
 
-    root.accessToken =
-      tokenValid
-        ? token
-        : null;
+    root.user = userValid ? user : null;
 
-    root.access_token =
-      tokenValid
-        ? token
-        : null;
-
-    root.user =
-      userValid
-        ? user
-        : null;
-
-    root.authenticated =
-      authenticated;
-
-    root.hasToken =
-      tokenValid;
+    root.authenticated = authenticated;
+    root.hasToken = tokenValid;
 
     root.role =
       authenticated
-        ? normalizeRoleValue(
-            root.user,
-            root.role
-          )
+        ? normalizeRoleValue(root.user, root.role)
         : null;
 
     root.username =
       authenticated
-        ? resolveUsernameValue(
-            root.user
-          )
+        ? resolveUsernameValue(root.user)
         : null;
 
     root.currentResolvedUsername =
@@ -2486,17 +2130,10 @@ export const AppCore = (() => {
       root.currentResolvedUsername || null;
 
     if (!authenticated) {
-      root.role =
-        null;
-
-      root.username =
-        null;
-
-      root.currentResolvedUsername =
-        null;
-
-      root.resolvedUsername =
-        null;
+      root.role = null;
+      root.username = null;
+      root.currentResolvedUsername = null;
+      root.resolvedUsername = null;
     }
 
     return root;
@@ -2504,35 +2141,16 @@ export const AppCore = (() => {
 
   function selectStateMarkers(root = {}) {
     return {
-      authenticated:
-        Boolean(root.authenticated),
-
-      hasToken:
-        Boolean(root.hasToken),
-
-      user:
-        root.user || null,
-
-      username:
-        root.username || null,
-
-      role:
-        root.role || null,
-
-      currentResolvedUsername:
-        root.currentResolvedUsername || null,
-
-      route:
-        root.route || "/",
-
-      publicPath:
-        root.publicPath || "/",
-
-      lang:
-        root.lang || DEFAULT_LANG,
-
-      theme:
-        root.theme || DEFAULT_THEME,
+      authenticated: Boolean(root.authenticated),
+      hasToken: Boolean(root.hasToken),
+      user: root.user || null,
+      username: root.username || null,
+      role: root.role || null,
+      currentResolvedUsername: root.currentResolvedUsername || null,
+      route: root.route || "/",
+      publicPath: root.publicPath || "/",
+      lang: root.lang || DEFAULT_LANG,
+      theme: root.theme || DEFAULT_THEME,
     };
   }
 
@@ -2557,31 +2175,20 @@ export const AppCore = (() => {
 
   function markerChanged(before = {}, after = {}, keys = []) {
     return safeArray(keys).some((key) =>
-      !sameMarkerValue(
-        before[key],
-        after[key]
-      )
+      !sameMarkerValue(before[key], after[key])
     );
   }
 
   function clonePublicState({ safe = false } = {}) {
-    let snapshot =
-      null;
+    let snapshot = null;
 
     try {
-      snapshot =
-        cloneState(
-          ensureState()
-        );
+      snapshot = cloneState(ensureState());
     } catch {}
 
     if (!snapshot) {
       try {
-        snapshot =
-          safeClone(
-            ensureState(),
-            {}
-          );
+        snapshot = safeClone(ensureState(), {});
       } catch {}
     }
 
@@ -2597,17 +2204,14 @@ export const AppCore = (() => {
   }
 
   function emitDerivedStateChanges(before = {}, after = {}, patch = {}, options = {}) {
-    const opts =
-      ensureObject(options);
+    const opts = ensureObject(options);
 
     if (opts.emit === false) {
       return false;
     }
 
     const changedKeys =
-      Object.keys(
-        ensureObject(patch)
-      );
+      Object.keys(ensureObject(patch));
 
     if (
       opts.emitState === true &&
@@ -2641,23 +2245,12 @@ export const AppCore = (() => {
       safeEmit(
         EVENTS.authChange,
         {
-          authenticated:
-            Boolean(after.authenticated),
-
-          hasToken:
-            Boolean(after.hasToken),
-
-          role:
-            after.role || null,
-
-          username:
-            after.username || null,
-
-          previousAuthenticated:
-            Boolean(before.authenticated),
-
-          source:
-            safeText(opts.source, "core:setState"),
+          authenticated: Boolean(after.authenticated),
+          hasToken: Boolean(after.hasToken),
+          role: after.role || null,
+          username: after.username || null,
+          previousAuthenticated: Boolean(before.authenticated),
+          source: safeText(opts.source, "core:setState"),
         }
       );
     }
@@ -2674,25 +2267,17 @@ export const AppCore = (() => {
       safeEmit(
         EVENTS.userChange,
         {
-          authenticated:
-            Boolean(after.authenticated),
+          authenticated: Boolean(after.authenticated),
 
           user:
             after.authenticated
               ? after.user || null
               : null,
 
-          username:
-            after.username || null,
-
-          currentResolvedUsername:
-            after.currentResolvedUsername || null,
-
-          role:
-            after.role || null,
-
-          source:
-            safeText(opts.source, "core:setState"),
+          username: after.username || null,
+          currentResolvedUsername: after.currentResolvedUsername || null,
+          role: after.role || null,
+          source: safeText(opts.source, "core:setState"),
         }
       );
     }
@@ -2706,17 +2291,10 @@ export const AppCore = (() => {
       safeEmit(
         EVENTS.routeChange,
         {
-          route:
-            after.route || "/",
-
-          previousRoute:
-            before.route || "/",
-
-          publicPath:
-            after.publicPath || "/",
-
-          source:
-            safeText(opts.source, "core:setState"),
+          route: after.route || "/",
+          previousRoute: before.route || "/",
+          publicPath: after.publicPath || "/",
+          source: safeText(opts.source, "core:setState"),
         }
       );
     }
@@ -2730,17 +2308,10 @@ export const AppCore = (() => {
       safeEmit(
         EVENTS.publicPathChange,
         {
-          publicPath:
-            after.publicPath || "/",
-
-          previousPublicPath:
-            before.publicPath || "/",
-
-          route:
-            after.route || "/",
-
-          source:
-            safeText(opts.source, "core:setState"),
+          publicPath: after.publicPath || "/",
+          previousPublicPath: before.publicPath || "/",
+          route: after.route || "/",
+          source: safeText(opts.source, "core:setState"),
         }
       );
     }
@@ -2749,8 +2320,7 @@ export const AppCore = (() => {
   }
 
   async function runInitHooks(type, payload = {}) {
-    const key =
-      safeText(type, "");
+    const key = safeText(type, "");
 
     if (!key) {
       return payload;
@@ -2758,28 +2328,17 @@ export const AppCore = (() => {
 
     try {
       if (isFunction(hooks?.run)) {
-        return await hooks.run(
-          key,
-          payload
-        );
+        return await hooks.run(key, payload);
       }
 
       if (isFunction(hooks?.runSeries)) {
-        return await hooks.runSeries(
-          key,
-          payload
-        );
+        return await hooks.runSeries(key, payload);
       }
     } catch (error) {
-      safeWarn(
-        "hooks.run() falló.",
-        key,
-        error
-      );
+      safeWarn("hooks.run() falló.", key, error);
     }
 
-    const list =
-      registry?.hooks?.[key];
+    const list = registry?.hooks?.[key];
 
     if (
       !Array.isArray(list) ||
@@ -2788,8 +2347,7 @@ export const AppCore = (() => {
       return payload;
     }
 
-    let current =
-      payload;
+    let current = payload;
 
     for (const hook of list) {
       if (!isFunction(hook)) {
@@ -2797,19 +2355,13 @@ export const AppCore = (() => {
       }
 
       try {
-        const next =
-          await hook(current);
+        const next = await hook(current);
 
         if (next !== undefined) {
-          current =
-            next;
+          current = next;
         }
       } catch (error) {
-        safeWarn(
-          "Hook error:",
-          key,
-          error
-        );
+        safeWarn("Hook error:", key, error);
       }
     }
 
@@ -2821,8 +2373,7 @@ export const AppCore = (() => {
   ======================================================= */
 
   function setState(patch = {}, options = {}) {
-    const root =
-      ensureState();
+    const root = ensureState();
 
     const cleanPatch =
       patch &&
@@ -2831,40 +2382,26 @@ export const AppCore = (() => {
         ? patch
         : {};
 
-    const opts =
-      ensureObject(options);
+    const opts = ensureObject(options);
 
-    const before =
-      selectStateMarkers(root);
+    const before = selectStateMarkers(root);
 
-    let baseSucceeded =
-      false;
+    let baseSucceeded = false;
 
     try {
       setStateBase({
-        state:
-          root,
-
+        state: root,
         events,
-
-        patch:
-          cleanPatch,
+        patch: cleanPatch,
       });
 
-      baseSucceeded =
-        true;
+      baseSucceeded = true;
     } catch (error) {
       try {
-        Object.assign(
-          root,
-          cleanPatch
-        );
+        Object.assign(root, cleanPatch);
       } catch {}
 
-      safeWarn(
-        "setStateBase falló; aplicado fallback.",
-        error
-      );
+      safeWarn("setStateBase falló; aplicado fallback.", error);
     }
 
     syncDerivedAuthState({
@@ -2872,8 +2409,7 @@ export const AppCore = (() => {
         opts.forceUnauthenticated === true,
     });
 
-    const after =
-      selectStateMarkers(root);
+    const after = selectStateMarkers(root);
 
     emitDerivedStateChanges(
       before,
@@ -2899,14 +2435,10 @@ export const AppCore = (() => {
   function getState(options = {}) {
     syncDerivedAuthState();
 
-    const opts =
-      ensureObject(options);
+    const opts = ensureObject(options);
 
     try {
-      const snapshot =
-        getStateBase(
-          ensureState()
-        );
+      const snapshot = getStateBase(ensureState());
 
       return opts.safe
         ? sanitizeStateForSnapshot(snapshot)
@@ -2920,18 +2452,13 @@ export const AppCore = (() => {
   }
 
   function patchState(patch = {}, options = {}) {
-    return setState(
-      patch,
-      options
-    );
+    return setState(patch, options);
   }
 
   function isAuthenticated() {
     syncDerivedAuthState();
 
-    return Boolean(
-      state.authenticated
-    );
+    return Boolean(state.authenticated);
   }
 
   function getCurrentUser() {
@@ -2966,8 +2493,7 @@ export const AppCore = (() => {
   function getAuthHeader() {
     syncDerivedAuthState();
 
-    const token =
-      safeText(state.token, "");
+    const token = safeText(state.token, "");
 
     if (!token) {
       return {};
@@ -3044,11 +2570,7 @@ export const AppCore = (() => {
         ...ensureObject(options),
       });
     } catch (error) {
-      safeWarn(
-        "syncUserUIBase falló.",
-        error
-      );
-
+      safeWarn("syncUserUIBase falló.", error);
       return false;
     }
   }
@@ -3058,20 +2580,14 @@ export const AppCore = (() => {
       return false;
     }
 
-    showToastBridge =
-      fn;
+    showToastBridge = fn;
 
     safeEmit(
       EVENTS.toastBridgeReady,
       {
-        ready:
-          true,
-
-        at:
-          safeIsoDate(),
-
-        source:
-          CORE_SOURCE,
+        ready: true,
+        at: safeIsoDate(),
+        source: CORE_SOURCE,
       }
     );
 
@@ -3084,17 +2600,9 @@ export const AppCore = (() => {
     }
 
     try {
-      return showToastBridge(
-        message,
-        type,
-        options
-      );
+      return showToastBridge(message, type, options);
     } catch (error) {
-      safeWarn(
-        "showToast bridge falló.",
-        error
-      );
-
+      safeWarn("showToast bridge falló.", error);
       return null;
     }
   }
@@ -3104,38 +2612,22 @@ export const AppCore = (() => {
   ======================================================= */
 
   function extractSessionPayload(payload = {}) {
-    const source =
-      ensureObject(payload);
+    const source = ensureObject(payload);
 
-    const data =
-      ensureObject(source.data);
+    const data = ensureObject(source.data);
+    const payloadData = ensureObject(source.payload);
 
-    const payloadData =
-      ensureObject(source.payload);
+    const session = ensureObject(source.session);
+    const sessionData = ensureObject(source.sessionData);
 
-    const session =
-      ensureObject(source.session);
+    const dataSession = ensureObject(data.session);
+    const dataSessionData = ensureObject(data.sessionData);
 
-    const sessionData =
-      ensureObject(source.sessionData);
+    const payloadSession = ensureObject(payloadData.session);
+    const payloadSessionData = ensureObject(payloadData.sessionData);
 
-    const dataSession =
-      ensureObject(data.session);
-
-    const dataSessionData =
-      ensureObject(data.sessionData);
-
-    const payloadSession =
-      ensureObject(payloadData.session);
-
-    const payloadSessionData =
-      ensureObject(payloadData.sessionData);
-
-    const auth =
-      ensureObject(source.auth);
-
-    const dataAuth =
-      ensureObject(data.auth);
+    const auth = ensureObject(source.auth);
+    const dataAuth = ensureObject(data.auth);
 
     const user =
       firstUser(
@@ -3285,11 +2777,8 @@ export const AppCore = (() => {
       );
 
     return {
-      user:
-        user || null,
-
-      token:
-        token || null,
+      user: user || null,
+      token: token || null,
 
       refreshToken:
         firstToken(
@@ -3388,35 +2877,24 @@ export const AppCore = (() => {
         setState,
         events,
         route,
-        options:
-          ensureObject(options),
+        options: ensureObject(options),
       });
     } catch (error) {
       const cleanRoute =
-        normalizeCanonicalPath(
-          route || "/"
-        );
+        normalizeCanonicalPath(route || "/");
 
       setState(
         {
-          route:
-            cleanRoute,
-
-          canonicalPath:
-            cleanRoute,
+          route: cleanRoute,
+          canonicalPath: cleanRoute,
         },
         {
-          source:
-            "core:setRoute:fallback",
-          emitDerived:
-            true,
+          source: "core:setRoute:fallback",
+          emitDerived: true,
         }
       );
 
-      safeWarn(
-        "setRouteBase falló; aplicado fallback.",
-        error
-      );
+      safeWarn("setRouteBase falló; aplicado fallback.", error);
 
       return cleanRoute;
     }
@@ -3430,40 +2908,29 @@ export const AppCore = (() => {
         setState,
         events,
         path,
-        options:
-          ensureObject(options),
+        options: ensureObject(options),
       });
     } catch (error) {
-      const cleanPath =
-        normalizePath(
-          path || "/"
-        );
+      const cleanPath = normalizePath(path || "/");
 
       setState(
         {
-          publicPath:
-            cleanPath,
+          publicPath: cleanPath,
         },
         {
-          source:
-            "core:setPublicPath:fallback",
-          emitDerived:
-            true,
+          source: "core:setPublicPath:fallback",
+          emitDerived: true,
         }
       );
 
-      safeWarn(
-        "setPublicPathBase falló; aplicado fallback.",
-        error
-      );
+      safeWarn("setPublicPathBase falló; aplicado fallback.", error);
 
       return cleanPath;
     }
   }
 
   function setUser(user = null, options = {}) {
-    let result =
-      null;
+    let result = null;
 
     try {
       result =
@@ -3474,8 +2941,7 @@ export const AppCore = (() => {
           setState,
           syncUserUI,
           user,
-          options:
-            ensureObject(options),
+          options: ensureObject(options),
         });
     } catch (error) {
       setState(
@@ -3486,22 +2952,15 @@ export const AppCore = (() => {
               : null,
         },
         {
-          source:
-            "core:setUser:fallback",
-          forceUnauthenticated:
-            !user && !state.token,
-          emitDerived:
-            true,
+          source: "core:setUser:fallback",
+          forceUnauthenticated: !user && !state.token,
+          emitDerived: true,
         }
       );
 
-      safeWarn(
-        "setUserBase falló; aplicado fallback.",
-        error
-      );
+      safeWarn("setUserBase falló; aplicado fallback.", error);
 
-      result =
-        state.user;
+      result = state.user;
     }
 
     syncDerivedAuthState({
@@ -3513,8 +2972,7 @@ export const AppCore = (() => {
   }
 
   function setToken(token = null, options = {}) {
-    let result =
-      null;
+    let result = null;
 
     try {
       result =
@@ -3524,8 +2982,7 @@ export const AppCore = (() => {
           events,
           setState,
           token,
-          options:
-            ensureObject(options),
+          options: ensureObject(options),
         });
     } catch (error) {
       const cleanToken =
@@ -3535,32 +2992,20 @@ export const AppCore = (() => {
 
       setState(
         {
-          token:
-            cleanToken,
-
-          accessToken:
-            cleanToken,
-
-          access_token:
-            cleanToken,
+          token: cleanToken,
+          accessToken: cleanToken,
+          access_token: cleanToken,
         },
         {
-          source:
-            "core:setToken:fallback",
-          forceUnauthenticated:
-            !cleanToken,
-          emitDerived:
-            true,
+          source: "core:setToken:fallback",
+          forceUnauthenticated: !cleanToken,
+          emitDerived: true,
         }
       );
 
-      safeWarn(
-        "setTokenBase falló; aplicado fallback.",
-        error
-      );
+      safeWarn("setTokenBase falló; aplicado fallback.", error);
 
-      result =
-        state.token;
+      result = state.token;
     }
 
     syncDerivedAuthState({
@@ -3584,11 +3029,8 @@ export const AppCore = (() => {
   }
 
   function applySession(session = {}, options = {}) {
-    const payload =
-      ensureObject(session);
-
-    const opts =
-      ensureObject(options);
+    const payload = ensureObject(session);
+    const opts = ensureObject(options);
 
     const extracted =
       extractSessionPayload(payload);
@@ -3611,11 +3053,8 @@ export const AppCore = (() => {
         ? extracted.user
         : undefined;
 
-    let result =
-      null;
-
-    let baseSucceeded =
-      false;
+    let result = null;
+    let baseSucceeded = false;
 
     try {
       result =
@@ -3629,8 +3068,7 @@ export const AppCore = (() => {
               setUser(
                 adaptSessionSetterValue(value, "user"),
                 {
-                  source:
-                    "core:applySession:setUser",
+                  source: "core:applySession:setUser",
                 }
               ),
 
@@ -3639,8 +3077,7 @@ export const AppCore = (() => {
               setToken(
                 adaptSessionSetterValue(value, "token"),
                 {
-                  source:
-                    "core:applySession:setToken",
+                  source: "core:applySession:setToken",
                 }
               ),
 
@@ -3649,37 +3086,23 @@ export const AppCore = (() => {
           token,
           user,
 
-          refreshToken:
-            extracted.refreshToken,
+          refreshToken: extracted.refreshToken,
+          tempToken: extracted.tempToken,
+          sessionId: extracted.sessionId,
+          sessionUserId: extracted.sessionUserId,
+          route: extracted.route,
+          publicPath: extracted.publicPath,
 
-          tempToken:
-            extracted.tempToken,
-
-          sessionId:
-            extracted.sessionId,
-
-          sessionUserId:
-            extracted.sessionUserId,
-
-          route:
-            extracted.route,
-
-          publicPath:
-            extracted.publicPath,
-
-          options:
-            opts,
+          options: opts,
         });
 
-      baseSucceeded =
-        true;
+      baseSucceeded = true;
     } catch (error) {
       if (token !== undefined) {
         setToken(
           token,
           {
-            source:
-              "core:applySession:fallback-token",
+            source: "core:applySession:fallback-token",
           }
         );
       }
@@ -3688,8 +3111,7 @@ export const AppCore = (() => {
         setUser(
           user,
           {
-            source:
-              "core:applySession:fallback-user",
+            source: "core:applySession:fallback-user",
           }
         );
       }
@@ -3698,8 +3120,7 @@ export const AppCore = (() => {
         setRoute(
           extracted.route,
           {
-            source:
-              "core:applySession:fallback-route",
+            source: "core:applySession:fallback-route",
           }
         );
       }
@@ -3708,23 +3129,16 @@ export const AppCore = (() => {
         setPublicPath(
           extracted.publicPath,
           {
-            source:
-              "core:applySession:fallback-public-path",
+            source: "core:applySession:fallback-public-path",
           }
         );
       }
 
-      safeWarn(
-        "applySessionBase falló; aplicado fallback.",
-        error
-      );
+      safeWarn("applySessionBase falló; aplicado fallback.", error);
 
       result = {
-        token:
-          state.token,
-
-        user:
-          state.user,
+        token: state.token,
+        user: state.user,
       };
     }
 
@@ -3740,20 +3154,11 @@ export const AppCore = (() => {
       safeEmit(
         EVENTS.sessionApplied,
         {
-          authenticated:
-            Boolean(state.authenticated),
-
-          hasToken:
-            Boolean(state.hasToken),
-
-          username:
-            state.username || null,
-
-          currentResolvedUsername:
-            state.currentResolvedUsername || null,
-
-          source:
-            safeText(opts.source, "core:applySession:fallback"),
+          authenticated: Boolean(state.authenticated),
+          hasToken: Boolean(state.hasToken),
+          username: state.username || null,
+          currentResolvedUsername: state.currentResolvedUsername || null,
+          source: safeText(opts.source, "core:applySession:fallback"),
         }
       );
     }
@@ -3762,14 +3167,10 @@ export const AppCore = (() => {
   }
 
   function clearSession(options = {}) {
-    const opts =
-      ensureObject(options);
+    const opts = ensureObject(options);
 
-    let result =
-      null;
-
-    let baseSucceeded =
-      false;
+    let result = null;
+    let baseSucceeded = false;
 
     try {
       result =
@@ -3780,94 +3181,50 @@ export const AppCore = (() => {
           setState,
           syncUserUI,
           utils,
-          options:
-            opts,
+          options: opts,
         });
 
-      baseSucceeded =
-        true;
+      baseSucceeded = true;
     } catch (error) {
       setState(
         {
-          token:
-            null,
+          token: null,
+          accessToken: null,
+          access_token: null,
+          refreshToken: null,
+          refresh_token: null,
+          idToken: null,
+          id_token: null,
+          tempToken: null,
+          temp_token: null,
 
-          accessToken:
-            null,
+          user: null,
+          currentUser: null,
+          sessionUser: null,
+          authUser: null,
 
-          access_token:
-            null,
+          authenticated: false,
+          hasToken: false,
 
-          refreshToken:
-            null,
-
-          refresh_token:
-            null,
-
-          idToken:
-            null,
-
-          id_token:
-            null,
-
-          tempToken:
-            null,
-
-          temp_token:
-            null,
-
-          user:
-            null,
-
-          currentUser:
-            null,
-
-          sessionUser:
-            null,
-
-          authUser:
-            null,
-
-          authenticated:
-            false,
-
-          hasToken:
-            false,
-
-          role:
-            null,
-
-          username:
-            null,
-
-          currentResolvedUsername:
-            null,
-
-          resolvedUsername:
-            null,
+          role: null,
+          username: null,
+          currentResolvedUsername: null,
+          resolvedUsername: null,
         },
         {
-          source:
-            "core:clearSession:fallback",
-          forceUnauthenticated:
-            true,
-          emitDerived:
-            true,
+          source: "core:clearSession:fallback",
+          forceUnauthenticated: true,
+          emitDerived: true,
         }
       );
 
-      safeWarn(
-        "clearSessionBase falló; aplicado fallback.",
-        error
-      );
+      safeWarn("clearSessionBase falló; aplicado fallback.", error);
 
-      result =
-        true;
+      result = true;
     }
 
     syncDerivedAuthState({
-      forceUnauthenticated:
-        true,
+      forceUnauthenticated: true,
     });
 
     if (
@@ -3877,11 +3234,8 @@ export const AppCore = (() => {
       safeEmit(
         EVENTS.sessionCleared,
         {
-          silent:
-            Boolean(opts.silent),
-
-          source:
-            safeText(opts.source, "core:clearSession:fallback"),
+          silent: Boolean(opts.silent),
+          source: safeText(opts.source, "core:clearSession:fallback"),
         }
       );
     }
@@ -3901,21 +3255,16 @@ export const AppCore = (() => {
       });
     } catch {
       const cleanTheme =
-        safeText(
-          theme,
-          DEFAULT_THEME
-        ).toLowerCase() === "light"
+        safeText(theme, DEFAULT_THEME).toLowerCase() === "light"
           ? "light"
           : DEFAULT_THEME;
 
       setState(
         {
-          theme:
-            cleanTheme,
+          theme: cleanTheme,
         },
         {
-          source:
-            "core:setTheme:fallback",
+          source: "core:setTheme:fallback",
         }
       );
 
@@ -3934,36 +3283,28 @@ export const AppCore = (() => {
       });
     } catch {
       const cleanLang =
-        safeText(
-          lang,
-          DEFAULT_LANG
-        ).toLowerCase();
+        safeText(lang, DEFAULT_LANG).toLowerCase();
 
       setState(
         {
-          lang:
-            cleanLang,
+          lang: cleanLang,
         },
         {
-          source:
-            "core:setLang:fallback",
+          source: "core:setLang:fallback",
         }
       );
 
       try {
         if (isBrowser()) {
-          document.documentElement.lang =
-            cleanLang;
+          document.documentElement.lang = cleanLang;
         }
       } catch {}
 
       safeEmit(
         "app:lang:change",
         {
-          lang:
-            cleanLang,
-          source:
-            "core:setLang:fallback",
+          lang: cleanLang,
+          source: "core:setLang:fallback",
         }
       );
 
@@ -3981,17 +3322,14 @@ export const AppCore = (() => {
         value,
       });
     } catch {
-      const next =
-        Boolean(value);
+      const next = Boolean(value);
 
       setState(
         {
-          sidebarOpen:
-            next,
+          sidebarOpen: next,
         },
         {
-          source:
-            "core:setSidebarOpen:fallback",
+          source: "core:setSidebarOpen:fallback",
         }
       );
 
@@ -4008,17 +3346,14 @@ export const AppCore = (() => {
         value,
       });
     } catch {
-      const next =
-        Boolean(value);
+      const next = Boolean(value);
 
       setState(
         {
-          loading:
-            next,
+          loading: next,
         },
         {
-          source:
-            "core:setLoading:fallback",
+          source: "core:setLoading:fallback",
         }
       );
 
@@ -4042,18 +3377,12 @@ export const AppCore = (() => {
 
       setState(
         {
-          error:
-            normalized,
-
-          lastError:
-            normalized,
-
-          hasError:
-            Boolean(normalized),
+          error: normalized,
+          lastError: normalized,
+          hasError: Boolean(normalized),
         },
         {
-          source:
-            "core:setError:fallback",
+          source: "core:setError:fallback",
         }
       );
 
@@ -4068,38 +3397,27 @@ export const AppCore = (() => {
   function createFallbackRequest() {
     return async function fallbackRequest(url, options = {}) {
       if (!isBrowser() || !isFunction(fetch)) {
-        throw new Error(
-          "Fetch API no disponible."
-        );
+        throw new Error("Fetch API no disponible.");
       }
 
-      const response =
-        await fetch(
-          url,
-          options
-        );
+      const response = await fetch(url, options);
 
       const contentType =
         response.headers?.get?.("content-type") || "";
 
-      let body =
-        null;
+      let body = null;
 
       if (contentType.includes("application/json")) {
         try {
-          body =
-            await response.json();
+          body = await response.json();
         } catch {
-          body =
-            null;
+          body = null;
         }
       } else {
         try {
-          body =
-            await response.text();
+          body = await response.text();
         } catch {
-          body =
-            "";
+          body = "";
         }
       }
 
@@ -4114,14 +3432,9 @@ export const AppCore = (() => {
             )
           );
 
-        error.status =
-          response.status;
-
-        error.response =
-          response;
-
-        error.body =
-          body;
+        error.status = response.status;
+        error.response = response;
+        error.body = body;
 
         throw error;
       }
@@ -4151,37 +3464,35 @@ export const AppCore = (() => {
         : createFallbackRequest();
 
     function buildJsonOptions(method, body, options = {}) {
-      const opts =
-        ensureObject(options);
+      const opts = ensureObject(options);
 
       const headers = {
-        "Content-Type":
-          "application/json",
+        "Content-Type": "application/json",
         ...(opts.headers || {}),
       };
 
       return {
         ...opts,
         method,
+
         body:
           body === undefined
             ? undefined
             : JSON.stringify(body),
+
         headers,
       };
     }
 
     return {
-      request:
-        call,
+      request: call,
 
       get(url, options = {}) {
         return call(
           url,
           {
             ...options,
-            method:
-              "GET",
+            method: "GET",
           }
         );
       },
@@ -4189,33 +3500,21 @@ export const AppCore = (() => {
       post(url, body = undefined, options = {}) {
         return call(
           url,
-          buildJsonOptions(
-            "POST",
-            body,
-            options
-          )
+          buildJsonOptions("POST", body, options)
         );
       },
 
       put(url, body = undefined, options = {}) {
         return call(
           url,
-          buildJsonOptions(
-            "PUT",
-            body,
-            options
-          )
+          buildJsonOptions("PUT", body, options)
         );
       },
 
       patch(url, body = undefined, options = {}) {
         return call(
           url,
-          buildJsonOptions(
-            "PATCH",
-            body,
-            options
-          )
+          buildJsonOptions("PATCH", body, options)
         );
       },
 
@@ -4224,17 +3523,13 @@ export const AppCore = (() => {
           url,
           {
             ...options,
-            method:
-              "DELETE",
+            method: "DELETE",
           }
         );
       },
 
       del(url, options = {}) {
-        return this.delete(
-          url,
-          options
-        );
+        return this.delete(url, options);
       },
     };
   }
@@ -4246,561 +3541,8 @@ export const AppCore = (() => {
       request
     );
 
-  /* =======================================================
-     READY
-  ======================================================= */
-
-  function ready(fn) {
-    if (!isFunction(fn)) {
-      return () => {};
-    }
-
-    if (!isBrowser()) {
-      try {
-        fn();
-      } catch (error) {
-        safeError(
-          "ready() server callback error:",
-          error
-        );
-      }
-
-      return () => {};
-    }
-
-    if (!isDocumentReady()) {
-      let disposed =
-        false;
-
-      const handler =
-        () => {
-          if (disposed) {
-            return;
-          }
-
-          disposed =
-            true;
-
-          readyCallbacksFlushed =
-            true;
-
-          try {
-            fn();
-          } catch (error) {
-            safeError(
-              "ready() callback error:",
-              error
-            );
-          }
-        };
-
-      try {
-        document.addEventListener(
-          "DOMContentLoaded",
-          handler,
-          {
-            once:
-              true,
-          }
-        );
-
-        return () => {
-          disposed =
-            true;
-
-          try {
-            document.removeEventListener(
-              "DOMContentLoaded",
-              handler
-            );
-          } catch {}
-        };
-      } catch {
-        return () => {};
-      }
-    }
-
-    try {
-      readyCallbacksFlushed =
-        true;
-
-      fn();
-    } catch (error) {
-      safeError(
-        "ready() callback error:",
-        error
-      );
-    }
-
-    return () => {};
-  }
-
-  /* =======================================================
-     INIT HELPERS
-  ======================================================= */
-
-  function markCoreBooting(cycleId) {
-    setState(
-      {
-        booting:
-          true,
-
-        ready:
-          false,
-
-        initialized:
-          false,
-
-        coreInitializing:
-          true,
-
-        coreInitCycle:
-          cycleId,
-
-        coreVersion:
-          CORE_VERSION,
-      },
-      {
-        source:
-          "core:init:booting",
-      }
-    );
-  }
-
-  function markCoreReady(cycleId) {
-    setState(
-      {
-        initialized:
-          true,
-
-        booting:
-          false,
-
-        ready:
-          true,
-
-        coreInitializing:
-          false,
-
-        coreReady:
-          true,
-
-        coreInitCycle:
-          cycleId,
-
-        coreVersion:
-          CORE_VERSION,
-
-        coreReadyAt:
-          safeIsoDate(),
-      },
-      {
-        source:
-          "core:init:ready",
-      }
-    );
-  }
-
-  function markCoreError(error, cycleId) {
-    setState(
-      {
-        initialized:
-          false,
-
-        ready:
-          false,
-
-        booting:
-          false,
-
-        coreInitializing:
-          false,
-
-        coreReady:
-          false,
-
-        coreInitCycle:
-          cycleId,
-
-        coreVersion:
-          CORE_VERSION,
-
-        coreErrorAt:
-          safeIsoDate(),
-      },
-      {
-        source:
-          "core:init:error",
-      }
-    );
-
-    setError(error);
-  }
-
-  function safeCacheDom() {
-    try {
-      cacheDom({
-        dom,
-        utils,
-        events,
-      });
-
-      return true;
-    } catch (error) {
-      safeWarn(
-        "cacheDom() falló.",
-        error
-      );
-
-      return false;
-    }
-  }
-
-  function safeValidateRequiredDom() {
-    try {
-      validateRequiredDom({
-        dom,
-        utils,
-        events,
-      });
-
-      return true;
-    } catch (error) {
-      safeWarn(
-        "validateRequiredDom() falló.",
-        error
-      );
-
-      return false;
-    }
-  }
-
-  function safeLoadPreferences() {
-    try {
-      loadPreferences({
-        state,
-        storage,
-        dom,
-        events,
-      });
-
-      return true;
-    } catch (error) {
-      safeWarn(
-        "loadPreferences() falló.",
-        error
-      );
-
-      return false;
-    }
-  }
-
-  function safeLoadSession() {
-    try {
-      loadSession({
-        state,
-        storage,
-        dom,
-        events,
-      });
-
-      return true;
-    } catch (error) {
-      safeWarn(
-        "loadSession() falló.",
-        error
-      );
-
-      return false;
-    }
-  }
-
-  function safeSyncBaseUI() {
-    try {
-      syncBaseUI({
-        setDocumentTitle,
-        syncUserUI,
-      });
-
-      return true;
-    } catch (error) {
-      safeWarn(
-        "syncBaseUI() falló.",
-        error
-      );
-
-      return false;
-    }
-  }
-
-  function safeBindNetworkEvents() {
-    if (networkEventsBound) {
-      return true;
-    }
-
-    if (config?.featureFlags?.enableNetworkEvents === false) {
-      return false;
-    }
-
-    try {
-      bindNetworkEvents({
-        state,
-        events,
-        cleanup,
-        utils,
-      });
-
-      networkEventsBound =
-        true;
-
-      return true;
-    } catch (error) {
-      safeWarn(
-        "bindNetworkEvents() falló.",
-        error
-      );
-
-      return false;
-    }
-  }
-
-  /* =======================================================
-     INIT
-  ======================================================= */
-
-  async function doInit() {
-    const cycleId =
-      ++initCycle;
-
-    try {
-      markCoreBooting(
-        cycleId
-      );
-
-      safeEmit(
-        EVENTS.coreInitStart,
-        {
-          cycleId,
-
-          version:
-            CORE_VERSION,
-
-          state:
-            clonePublicState({
-              safe:
-                true,
-            }),
-
-          source:
-            CORE_SOURCE,
-        }
-      );
-
-      await runInitHooks(
-        "beforeInit",
-        {
-          state,
-          dom,
-          config,
-          events,
-          utils,
-          storage,
-          cleanup,
-          modules,
-          hooks,
-          request,
-          apiClient,
-          cycleId,
-          version:
-            CORE_VERSION,
-        }
-      );
-
-      safeCacheDom();
-      safeValidateRequiredDom();
-
-      safeLoadPreferences();
-      safeLoadSession();
-
-      syncDerivedAuthState();
-
-      safeSyncBaseUI();
-      safeBindNetworkEvents();
-
-      initialized =
-        true;
-
-      markCoreReady(
-        cycleId
-      );
-
-      await runInitHooks(
-        "afterInit",
-        {
-          state,
-          dom,
-          config,
-          events,
-          utils,
-          storage,
-          cleanup,
-          modules,
-          hooks,
-          request,
-          apiClient,
-          cycleId,
-          version:
-            CORE_VERSION,
-        }
-      );
-
-      safeEmit(
-        EVENTS.coreReady,
-        {
-          cycleId,
-
-          version:
-            CORE_VERSION,
-
-          state:
-            clonePublicState({
-              safe:
-                true,
-            }),
-
-          source:
-            CORE_SOURCE,
-        }
-      );
-
-      safeLog(
-        "Core ready.",
-        {
-          cycleId,
-          authenticated:
-            Boolean(state.authenticated),
-          hasToken:
-            Boolean(state.hasToken),
-          route:
-            state.route || "/",
-          publicPath:
-            redactTokenInText(state.publicPath || "/"),
-          lang:
-            state.lang || DEFAULT_LANG,
-          theme:
-            state.theme || DEFAULT_THEME,
-        }
-      );
-
-      return api;
-    } catch (error) {
-      initialized =
-        false;
-
-      markCoreError(
-        error,
-        cycleId
-      );
-
-      safeEmit(
-        EVENTS.coreInitError,
-        {
-          cycleId,
-
-          version:
-            CORE_VERSION,
-
-          error:
-            sanitizeErrorForSnapshot(error),
-
-          source:
-            CORE_SOURCE,
-        }
-      );
-
-      throw error;
-    } finally {
-      initPromise =
-        null;
-    }
-  }
-
-  async function init(options = {}) {
-    const opts =
-      ensureObject(options);
-
-    if (
-      !opts.force &&
-      (
-        initialized ||
-        state.initialized
-      )
-    ) {
-      syncDerivedAuthState();
-
-      return api;
-    }
-
-    if (initPromise) {
-      return initPromise;
-    }
-
-    initPromise =
-      doInit();
-
-    return initPromise;
-  }
-
-  function rebootCore(options = {}) {
-    initialized =
-      false;
-
-    initPromise =
-      null;
-
-    networkEventsBound =
-      false;
-
-    setState(
-      {
-        initialized:
-          false,
-
-        ready:
-          false,
-
-        booting:
-          false,
-
-        coreReady:
-          false,
-
-        coreInitializing:
-          false,
-      },
-      {
-        source:
-          "core:reboot",
-      }
-    );
-
-    safeEmit(
-      EVENTS.coreReboot,
-      {
-        at:
-          safeIsoDate(),
-
-        source:
-          CORE_SOURCE,
-      }
-    );
-
-    return init({
-      ...ensureObject(options),
-      force:
-        true,
-    });
-  }
+  requestBridge = request;
+  apiClientBridge = apiClient;
 
   /* =======================================================
      MODULE BRIDGES
@@ -4821,20 +3563,14 @@ export const AppCore = (() => {
           alias,
           value,
           {
-            replace:
-              true,
-            overwrite:
-              true,
-            source:
-              CORE_SOURCE,
+            replace: true,
+            overwrite: true,
+            source: CORE_SOURCE,
           }
         );
       } catch {
         try {
-          registry.modules.set(
-            alias,
-            value
-          );
+          registry.modules.set(alias, value);
         } catch {}
       }
     }
@@ -4863,111 +3599,1039 @@ export const AppCore = (() => {
   }
 
   /* =======================================================
+     HTTP BRIDGE · CORE HTTP CONNECTOR
+  ======================================================= */
+
+  function getHttpExport(name = "") {
+    try {
+      return CoreHttpModule?.[name];
+    } catch {
+      return null;
+    }
+  }
+
+  function getDefaultHttpExport() {
+    try {
+      return CoreHttpModule?.default || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function isFormDataLike(value) {
+    try {
+      return (
+        typeof FormData !== "undefined" &&
+        value instanceof FormData
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function createHttpJsonOptions(method = "GET", body = undefined, options = {}) {
+    const opts = ensureObject(options);
+    const bodyIsForm = isFormDataLike(body);
+
+    const headers =
+      bodyIsForm
+        ? {
+            ...(opts.headers || {}),
+          }
+        : {
+            "Content-Type": "application/json",
+            ...(opts.headers || {}),
+          };
+
+    return {
+      ...opts,
+
+      method:
+        safeText(method, "GET").toUpperCase(),
+
+      headers,
+
+      body:
+        body === undefined
+          ? undefined
+          : bodyIsForm
+            ? body
+            : JSON.stringify(body),
+    };
+  }
+
+  function getAuthEndpoint(name = "", fallback = "") {
+    const cleanName = safeText(name, "");
+
+    const authConfig = ensureObject(config?.auth);
+    const apiConfig = ensureObject(config?.api);
+    const endpoints = ensureObject(authConfig.endpoints || apiConfig.endpoints);
+
+    return (
+      safeText(endpoints?.[cleanName], "") ||
+      safeText(authConfig?.[`${cleanName}Endpoint`], "") ||
+      safeText(apiConfig?.[`${cleanName}Endpoint`], "") ||
+      fallback
+    );
+  }
+
+  function setHttpMember(target, key = "", value = null) {
+    if (
+      !target ||
+      !key ||
+      value === null ||
+      value === undefined
+    ) {
+      return false;
+    }
+
+    try {
+      if (
+        target[key] === undefined ||
+        target[key] === null
+      ) {
+        target[key] = value;
+        return true;
+      }
+    } catch {}
+
+    try {
+      defineHiddenValue(target, key, value);
+      return true;
+    } catch {}
+
+    return false;
+  }
+
+  function createHttpCompatClient(candidate = null) {
+    const source =
+      candidate &&
+      (
+        typeof candidate === "object" ||
+        typeof candidate === "function"
+      )
+        ? candidate
+        : {};
+
+    let client = source;
+
+    try {
+      if (
+        !Object.isExtensible(client) ||
+        Array.isArray(client)
+      ) {
+        client = {};
+      }
+    } catch {
+      client = {};
+    }
+
+    const requestFn =
+      isFunction(source.request)
+        ? source.request.bind(source)
+        : isFunction(source)
+          ? source
+          : isFunction(requestBridge)
+            ? requestBridge
+            : request;
+
+    setHttpMember(client, "request", requestFn);
+
+    if (!isFunction(client.get)) {
+      setHttpMember(
+        client,
+        "get",
+        (url, options = {}) =>
+          requestFn(
+            url,
+            {
+              ...ensureObject(options),
+              method: "GET",
+            }
+          )
+      );
+    }
+
+    if (!isFunction(client.post)) {
+      setHttpMember(
+        client,
+        "post",
+        (url, body = undefined, options = {}) =>
+          requestFn(
+            url,
+            createHttpJsonOptions("POST", body, options)
+          )
+      );
+    }
+
+    if (!isFunction(client.put)) {
+      setHttpMember(
+        client,
+        "put",
+        (url, body = undefined, options = {}) =>
+          requestFn(
+            url,
+            createHttpJsonOptions("PUT", body, options)
+          )
+      );
+    }
+
+    if (!isFunction(client.patch)) {
+      setHttpMember(
+        client,
+        "patch",
+        (url, body = undefined, options = {}) =>
+          requestFn(
+            url,
+            createHttpJsonOptions("PATCH", body, options)
+          )
+      );
+    }
+
+    if (!isFunction(client.delete)) {
+      setHttpMember(
+        client,
+        "delete",
+        (url, options = {}) =>
+          requestFn(
+            url,
+            {
+              ...ensureObject(options),
+              method: "DELETE",
+            }
+          )
+      );
+    }
+
+    if (!isFunction(client.del)) {
+      setHttpMember(
+        client,
+        "del",
+        (url, options = {}) =>
+          client.delete(url, options)
+      );
+    }
+
+    if (!isFunction(client.login)) {
+      setHttpMember(
+        client,
+        "login",
+        (body = {}, options = {}) =>
+          client.post(
+            getAuthEndpoint("login", "/api/auth/login"),
+            body,
+            {
+              public: true,
+              auth: false,
+              skipAuth: true,
+              ...ensureObject(options),
+            }
+          )
+      );
+    }
+
+    if (!isFunction(client.refresh)) {
+      setHttpMember(
+        client,
+        "refresh",
+        (body = {}, options = {}) =>
+          client.post(
+            getAuthEndpoint("refresh", "/api/auth/refresh"),
+            body,
+            {
+              public: true,
+              auth: false,
+              skipAuth: true,
+              ...ensureObject(options),
+            }
+          )
+      );
+    }
+
+    if (!isFunction(client.me)) {
+      setHttpMember(
+        client,
+        "me",
+        (options = {}) =>
+          client.get(
+            getAuthEndpoint("me", "/api/auth/me"),
+            {
+              auth: true,
+              noCache: true,
+              ...ensureObject(options),
+            }
+          )
+      );
+    }
+
+    if (!isFunction(client.logout)) {
+      setHttpMember(
+        client,
+        "logout",
+        (body = {}, options = {}) =>
+          client.post(
+            getAuthEndpoint("logout", "/api/auth/logout"),
+            body,
+            {
+              auth: true,
+              noCache: true,
+              ...ensureObject(options),
+            }
+          )
+      );
+    }
+
+    if (!isFunction(client.getSnapshot)) {
+      setHttpMember(
+        client,
+        "getSnapshot",
+        () => ({
+          version:
+            safeText(
+              client.version ||
+                client.HTTP_VERSION ||
+                client.CORE_HTTP_VERSION,
+              "core-http-bridge"
+            ),
+
+          installed: true,
+
+          hasRequest: isFunction(client.request),
+          hasGet: isFunction(client.get),
+          hasPost: isFunction(client.post),
+          hasMe: isFunction(client.me),
+
+          source: "core:index:http-bridge",
+          at: safeIsoDate(),
+        })
+      );
+    }
+
+    if (!isFunction(client.snapshot)) {
+      setHttpMember(
+        client,
+        "snapshot",
+        client.getSnapshot
+      );
+    }
+
+    return client;
+  }
+
+  function callHttpInstaller(installer, context = {}) {
+    if (!isFunction(installer)) {
+      return null;
+    }
+
+    const attempts = [
+      () => installer(api, context),
+      () => installer(context),
+      () => installer({
+        AppCore: api,
+        core: api,
+        ...context,
+      }),
+      () => installer(api),
+    ];
+
+    for (const attempt of attempts) {
+      try {
+        const result = attempt();
+
+        if (result) {
+          return result;
+        }
+      } catch {}
+    }
+
+    return null;
+  }
+
+  function resolveHttpCandidate(context = {}) {
+    const installers = [
+      getHttpExport("installHttp"),
+      getHttpExport("installCoreHttp"),
+      getHttpExport("install"),
+    ].filter(isFunction);
+
+    const defaultExport = getDefaultHttpExport();
+
+    if (isFunction(defaultExport)) {
+      installers.push(defaultExport);
+    }
+
+    for (const installer of installers) {
+      const installed =
+        callHttpInstaller(installer, context);
+
+      if (installed) {
+        return installed;
+      }
+
+      const fromApi =
+        getBridgeModule("Http") ||
+        getBridgeModule("http");
+
+      if (fromApi) {
+        return fromApi;
+      }
+    }
+
+    return (
+      getHttpExport("Http") ||
+      getHttpExport("http") ||
+      getHttpExport("apiClient") ||
+      getHttpExport("client") ||
+      (
+        defaultExport &&
+        typeof defaultExport === "object"
+          ? defaultExport
+          : null
+      )
+    );
+  }
+
+  function registerHttpAliases(client = null) {
+    if (!client) {
+      return false;
+    }
+
+    try {
+      registerBridgeModule("Http", client);
+      registerBridgeModule("http", client);
+      registerBridgeModule("ApiClient", client);
+      registerBridgeModule("apiClient", client);
+    } catch {}
+
+    return true;
+  }
+
+  function ensureServicesBag() {
+    try {
+      if (
+        !api.services ||
+        typeof api.services !== "object"
+      ) {
+        api.services = {};
+      }
+
+      return api.services;
+    } catch {
+      return null;
+    }
+  }
+
+  function installHttpBridge(reason = "core:http:install") {
+    const context = {
+      AppCore: api,
+      core: api,
+
+      config,
+      state,
+      dom,
+
+      events,
+      storage,
+      cleanup,
+      modules,
+      hooks,
+      utils,
+
+      request: requestBridge || request,
+      baseRequest: request,
+
+      apiClient: apiClientBridge || apiClient,
+      baseApiClient: apiClient,
+
+      getState,
+      setState,
+      patchState,
+
+      setError,
+      getAuthHeader,
+
+      setToken,
+      setUser,
+      applySession,
+      clearSession,
+
+      source: "core:index",
+      reason,
+    };
+
+    const candidate =
+      resolveHttpCandidate(context);
+
+    const client =
+      createHttpCompatClient(
+        candidate ||
+          httpBridge ||
+          apiClientBridge ||
+          apiClient
+      );
+
+    httpBridge = client;
+    apiClientBridge = client;
+
+    if (isFunction(client.request)) {
+      try {
+        requestBridge = client.request.bind(client);
+      } catch {
+        requestBridge = client.request;
+      }
+    }
+
+    registerHttpAliases(client);
+
+    const services = ensureServicesBag();
+
+    if (services) {
+      try {
+        services.http = client;
+        services.Http = client;
+        services.api = client;
+        services.apiClient = client;
+      } catch {}
+    }
+
+    try {
+      api.apiClient = client;
+    } catch {}
+
+    try {
+      api.http = client;
+      api.Http = client;
+    } catch {}
+
+    safeEmit(
+      EVENTS.httpReady,
+      {
+        installed: true,
+        reason,
+
+        hasRequest: isFunction(client.request),
+        hasGet: isFunction(client.get),
+        hasPost: isFunction(client.post),
+        hasMe: isFunction(client.me),
+
+        source: "core:index",
+      }
+    );
+
+    return client;
+  }
+
+  function getHttpClient() {
+    return (
+      httpBridge ||
+      getBridgeModule("Http") ||
+      getBridgeModule("http") ||
+      apiClientBridge ||
+      apiClient
+    );
+  }
+
+  function getActiveRequest() {
+    const client = getHttpClient();
+
+    if (isFunction(client?.request)) {
+      try {
+        return client.request.bind(client);
+      } catch {
+        return client.request;
+      }
+    }
+
+    return requestBridge || request;
+  }
+
+  function getActiveApiClient() {
+    return getHttpClient();
+  }
+
+  /* =======================================================
+     READY
+  ======================================================= */
+
+  function ready(fn) {
+    if (!isFunction(fn)) {
+      return () => {};
+    }
+
+    if (!isBrowser()) {
+      try {
+        fn();
+      } catch (error) {
+        safeError("ready() server callback error:", error);
+      }
+
+      return () => {};
+    }
+
+    if (!isDocumentReady()) {
+      let disposed = false;
+
+      const handler = () => {
+        if (disposed) {
+          return;
+        }
+
+        disposed = true;
+        readyCallbacksFlushed = true;
+
+        try {
+          fn();
+        } catch (error) {
+          safeError("ready() callback error:", error);
+        }
+      };
+
+      try {
+        document.addEventListener(
+          "DOMContentLoaded",
+          handler,
+          {
+            once: true,
+          }
+        );
+
+        return () => {
+          disposed = true;
+
+          try {
+            document.removeEventListener("DOMContentLoaded", handler);
+          } catch {}
+        };
+      } catch {
+        return () => {};
+      }
+    }
+
+    try {
+      readyCallbacksFlushed = true;
+      fn();
+    } catch (error) {
+      safeError("ready() callback error:", error);
+    }
+
+    return () => {};
+  }
+
+  /* =======================================================
+     INIT HELPERS
+  ======================================================= */
+
+  function markCoreBooting(cycleId) {
+    setState(
+      {
+        booting: true,
+        ready: false,
+        initialized: false,
+        coreInitializing: true,
+        coreInitCycle: cycleId,
+        coreVersion: CORE_VERSION,
+      },
+      {
+        source: "core:init:booting",
+      }
+    );
+  }
+
+  function markCoreReady(cycleId) {
+    setState(
+      {
+        initialized: true,
+        booting: false,
+        ready: true,
+        coreInitializing: false,
+        coreReady: true,
+        coreInitCycle: cycleId,
+        coreVersion: CORE_VERSION,
+        coreReadyAt: safeIsoDate(),
+      },
+      {
+        source: "core:init:ready",
+      }
+    );
+  }
+
+  function markCoreError(error, cycleId) {
+    setState(
+      {
+        initialized: false,
+        ready: false,
+        booting: false,
+        coreInitializing: false,
+        coreReady: false,
+        coreInitCycle: cycleId,
+        coreVersion: CORE_VERSION,
+        coreErrorAt: safeIsoDate(),
+      },
+      {
+        source: "core:init:error",
+      }
+    );
+
+    setError(error);
+  }
+
+  function safeCacheDom() {
+    try {
+      cacheDom({
+        dom,
+        utils,
+        events,
+      });
+
+      return true;
+    } catch (error) {
+      safeWarn("cacheDom() falló.", error);
+      return false;
+    }
+  }
+
+  function safeValidateRequiredDom() {
+    try {
+      validateRequiredDom({
+        dom,
+        utils,
+        events,
+      });
+
+      return true;
+    } catch (error) {
+      safeWarn("validateRequiredDom() falló.", error);
+      return false;
+    }
+  }
+
+  function safeLoadPreferences() {
+    try {
+      loadPreferences({
+        state,
+        storage,
+        dom,
+        events,
+      });
+
+      return true;
+    } catch (error) {
+      safeWarn("loadPreferences() falló.", error);
+      return false;
+    }
+  }
+
+  function safeLoadSession() {
+    try {
+      loadSession({
+        state,
+        storage,
+        dom,
+        events,
+      });
+
+      return true;
+    } catch (error) {
+      safeWarn("loadSession() falló.", error);
+      return false;
+    }
+  }
+
+  function safeSyncBaseUI() {
+    try {
+      syncBaseUI({
+        setDocumentTitle,
+        syncUserUI,
+      });
+
+      return true;
+    } catch (error) {
+      safeWarn("syncBaseUI() falló.", error);
+      return false;
+    }
+  }
+
+  function safeBindNetworkEvents() {
+    if (networkEventsBound) {
+      return true;
+    }
+
+    if (config?.featureFlags?.enableNetworkEvents === false) {
+      return false;
+    }
+
+    try {
+      bindNetworkEvents({
+        state,
+        events,
+        cleanup,
+        utils,
+      });
+
+      networkEventsBound = true;
+
+      return true;
+    } catch (error) {
+      safeWarn("bindNetworkEvents() falló.", error);
+      return false;
+    }
+  }
+
+  /* =======================================================
+     INIT
+  ======================================================= */
+
+  async function doInit() {
+    const cycleId = ++initCycle;
+
+    try {
+      markCoreBooting(cycleId);
+
+      installHttpBridge("core:init:before-hooks");
+
+      safeEmit(
+        EVENTS.coreInitStart,
+        {
+          cycleId,
+          version: CORE_VERSION,
+
+          state:
+            clonePublicState({
+              safe: true,
+            }),
+
+          source: CORE_SOURCE,
+        }
+      );
+
+      await runInitHooks(
+        "beforeInit",
+        {
+          state,
+          dom,
+          config,
+          events,
+          utils,
+          storage,
+          cleanup,
+          modules,
+          hooks,
+
+          request: getActiveRequest(),
+          apiClient: getActiveApiClient(),
+          http: getHttpClient(),
+          Http: getHttpClient(),
+
+          cycleId,
+          version: CORE_VERSION,
+        }
+      );
+
+      safeCacheDom();
+      safeValidateRequiredDom();
+
+      safeLoadPreferences();
+      safeLoadSession();
+
+      syncDerivedAuthState();
+
+      safeSyncBaseUI();
+      safeBindNetworkEvents();
+
+      initialized = true;
+
+      markCoreReady(cycleId);
+
+      await runInitHooks(
+        "afterInit",
+        {
+          state,
+          dom,
+          config,
+          events,
+          utils,
+          storage,
+          cleanup,
+          modules,
+          hooks,
+
+          request: getActiveRequest(),
+          apiClient: getActiveApiClient(),
+          http: getHttpClient(),
+          Http: getHttpClient(),
+
+          cycleId,
+          version: CORE_VERSION,
+        }
+      );
+
+      safeEmit(
+        EVENTS.coreReady,
+        {
+          cycleId,
+          version: CORE_VERSION,
+
+          state:
+            clonePublicState({
+              safe: true,
+            }),
+
+          source: CORE_SOURCE,
+        }
+      );
+
+      safeLog(
+        "Core ready.",
+        {
+          cycleId,
+          authenticated: Boolean(state.authenticated),
+          hasToken: Boolean(state.hasToken),
+          route: state.route || "/",
+          publicPath: redactTokenInText(state.publicPath || "/"),
+          lang: state.lang || DEFAULT_LANG,
+          theme: state.theme || DEFAULT_THEME,
+          hasHttp: Boolean(getHttpClient()),
+        }
+      );
+
+      return api;
+    } catch (error) {
+      initialized = false;
+
+      markCoreError(error, cycleId);
+
+      safeEmit(
+        EVENTS.coreInitError,
+        {
+          cycleId,
+          version: CORE_VERSION,
+          error: sanitizeErrorForSnapshot(error),
+          source: CORE_SOURCE,
+        }
+      );
+
+      throw error;
+    } finally {
+      initPromise = null;
+    }
+  }
+
+  async function init(options = {}) {
+    const opts = ensureObject(options);
+
+    if (
+      !opts.force &&
+      (
+        initialized ||
+        state.initialized
+      )
+    ) {
+      syncDerivedAuthState();
+      installHttpBridge("core:init:already-initialized");
+
+      return api;
+    }
+
+    if (initPromise) {
+      return initPromise;
+    }
+
+    initPromise = doInit();
+
+    return initPromise;
+  }
+
+  function rebootCore(options = {}) {
+    initialized = false;
+    initPromise = null;
+    networkEventsBound = false;
+
+    setState(
+      {
+        initialized: false,
+        ready: false,
+        booting: false,
+        coreReady: false,
+        coreInitializing: false,
+      },
+      {
+        source: "core:reboot",
+      }
+    );
+
+    safeEmit(
+      EVENTS.coreReboot,
+      {
+        at: safeIsoDate(),
+        source: CORE_SOURCE,
+      }
+    );
+
+    return init({
+      ...ensureObject(options),
+      force: true,
+    });
+  }
+
+  /* =======================================================
      SNAPSHOT
   ======================================================= */
 
   function getSnapshot(options = {}) {
     syncDerivedAuthState();
 
-    const opts =
-      ensureObject(options);
+    const opts = ensureObject(options);
 
     return {
-      appName:
-        getAppName(),
+      appName: getAppName(),
+      version: CORE_VERSION,
+      debug: getDebugEnabled(),
 
-      version:
-        CORE_VERSION,
-
-      debug:
-        getDebugEnabled(),
-
-      initialized:
-        Boolean(initialized || state.initialized),
-
-      initInFlight:
-        Boolean(initPromise),
-
+      initialized: Boolean(initialized || state.initialized),
+      initInFlight: Boolean(initPromise),
       initCycle,
-
-      networkEventsBound:
-        Boolean(networkEventsBound),
-
-      readyCallbacksFlushed:
-        Boolean(readyCallbacksFlushed),
+      networkEventsBound: Boolean(networkEventsBound),
+      readyCallbacksFlushed: Boolean(readyCallbacksFlushed),
 
       state: {
-        initialized:
-          Boolean(state.initialized),
+        initialized: Boolean(state.initialized),
+        ready: Boolean(state.ready),
+        booting: Boolean(state.booting),
+        loading: Boolean(state.loading),
 
-        ready:
-          Boolean(state.ready),
+        authenticated: Boolean(state.authenticated),
+        hasToken: Boolean(state.hasToken),
 
-        booting:
-          Boolean(state.booting),
+        role: state.role || null,
+        username: state.username || null,
+        currentResolvedUsername: state.currentResolvedUsername || null,
 
-        loading:
-          Boolean(state.loading),
+        route: redactTokenInText(state.route || "/"),
+        publicPath: redactTokenInText(state.publicPath || "/"),
 
-        authenticated:
-          Boolean(state.authenticated),
+        theme: state.theme || DEFAULT_THEME,
+        lang: state.lang || DEFAULT_LANG,
 
-        hasToken:
-          Boolean(state.hasToken),
-
-        role:
-          state.role || null,
-
-        username:
-          state.username || null,
-
-        currentResolvedUsername:
-          state.currentResolvedUsername || null,
-
-        route:
-          redactTokenInText(state.route || "/"),
-
-        publicPath:
-          redactTokenInText(state.publicPath || "/"),
-
-        theme:
-          state.theme || DEFAULT_THEME,
-
-        lang:
-          state.lang || DEFAULT_LANG,
-
-        hasError:
-          Boolean(state.error || state.hasError),
+        hasError: Boolean(state.error || state.hasError),
       },
 
       dom: {
-        hasViewContainer:
-          Boolean(dom.viewContainer),
-
-        hasSidebar:
-          Boolean(dom.sidebar),
-
-        hasTopbar:
-          Boolean(dom.topbar),
-
-        hasLoader:
-          Boolean(dom.loader),
-
-        hasShell:
-          Boolean(dom.appShell || dom.shell),
+        hasViewContainer: Boolean(dom.viewContainer),
+        hasSidebar: Boolean(dom.sidebar),
+        hasTopbar: Boolean(dom.topbar),
+        hasLoader: Boolean(dom.loader),
+        hasShell: Boolean(dom.appShell || dom.shell),
       },
 
       registry: {
-        moduleCount:
-          registry.modules?.size || 0,
+        moduleCount: registry.modules?.size || 0,
 
         modules:
           Array.from(
             registry.modules?.keys?.() || []
           ),
 
-        scopeCount:
-          registry.scopes?.size || 0,
+        scopeCount: registry.scopes?.size || 0,
 
         hookCounts:
           Object.fromEntries(
@@ -4983,20 +4647,15 @@ export const AppCore = (() => {
       },
 
       bridges: {
-        toast:
-          Boolean(showToastBridge),
+        toast: Boolean(showToastBridge),
 
-        Router:
-          Boolean(getBridgeModule("Router")),
+        Router: Boolean(getBridgeModule("Router")),
+        Auth: Boolean(getBridgeModule("Auth")),
+        Store: Boolean(getBridgeModule("Store")),
 
-        Auth:
-          Boolean(getBridgeModule("Auth")),
-
-        Store:
-          Boolean(getBridgeModule("Store")),
-
-        Http:
-          Boolean(getBridgeModule("Http")),
+        Http: Boolean(getHttpClient()),
+        http: Boolean(getHttpClient()),
+        apiClient: Boolean(getActiveApiClient()),
       },
 
       events:
@@ -5026,16 +4685,20 @@ export const AppCore = (() => {
 
       request:
         opts.deep === true
-          ? getSnapshotFrom(request)
+          ? getSnapshotFrom(getActiveRequest())
           : null,
 
       apiClient:
         opts.deep === true
-          ? getSnapshotFrom(apiClient)
+          ? getSnapshotFrom(getActiveApiClient())
           : null,
 
-      at:
-        safeIsoDate(),
+      http:
+        opts.deep === true
+          ? getSnapshotFrom(getHttpClient())
+          : null,
+
+      at: safeIsoDate(),
     };
   }
 
@@ -5045,8 +4708,7 @@ export const AppCore = (() => {
 
   const api = {
     CORE_VERSION,
-    version:
-      CORE_VERSION,
+    version: CORE_VERSION,
 
     config,
     state,
@@ -5061,8 +4723,7 @@ export const AppCore = (() => {
     modules,
     hooks,
 
-    request,
-    apiClient,
+    services: {},
 
     init,
     rebootCore,
@@ -5099,9 +4760,13 @@ export const AppCore = (() => {
     setShowToast,
     showToast,
 
+    installHttpBridge,
+    getHttpClient,
+    getActiveRequest,
+    getActiveApiClient,
+
     getSnapshot,
-    getDebugSnapshot:
-      getSnapshot,
+    getDebugSnapshot: getSnapshot,
 
     getUserDisplayName,
     getUserUsername,
@@ -5111,143 +4776,159 @@ export const AppCore = (() => {
 
   try {
     Object.defineProperties(api, {
-      Router: {
-        enumerable:
-          false,
-        configurable:
-          false,
+      request: {
+        enumerable: true,
+        configurable: false,
         get() {
-          return getBridgeModule("Router");
+          return getActiveRequest();
         },
         set(value) {
-          registerBridgeModule(
-            "Router",
-            value
-          );
+          if (isFunction(value)) {
+            requestBridge = value;
+          }
         },
       },
 
-      router: {
-        enumerable:
-          false,
-        configurable:
-          false,
+      apiClient: {
+        enumerable: true,
+        configurable: false,
         get() {
-          return getBridgeModule("router");
+          return getActiveApiClient();
         },
         set(value) {
-          registerBridgeModule(
-            "router",
-            value
-          );
-        },
-      },
+          if (value) {
+            const client = createHttpCompatClient(value);
 
-      Auth: {
-        enumerable:
-          false,
-        configurable:
-          false,
-        get() {
-          return getBridgeModule("Auth");
-        },
-        set(value) {
-          registerBridgeModule(
-            "Auth",
-            value
-          );
-        },
-      },
+            httpBridge = client;
+            apiClientBridge = client;
 
-      auth: {
-        enumerable:
-          false,
-        configurable:
-          false,
-        get() {
-          return getBridgeModule("auth");
-        },
-        set(value) {
-          registerBridgeModule(
-            "auth",
-            value
-          );
-        },
-      },
+            if (isFunction(client.request)) {
+              try {
+                requestBridge = client.request.bind(client);
+              } catch {
+                requestBridge = client.request;
+              }
+            }
 
-      Store: {
-        enumerable:
-          false,
-        configurable:
-          false,
-        get() {
-          return getBridgeModule("Store");
-        },
-        set(value) {
-          registerBridgeModule(
-            "Store",
-            value
-          );
-        },
-      },
-
-      store: {
-        enumerable:
-          false,
-        configurable:
-          false,
-        get() {
-          return getBridgeModule("store");
-        },
-        set(value) {
-          registerBridgeModule(
-            "store",
-            value
-          );
+            registerHttpAliases(client);
+          }
         },
       },
 
       Http: {
-        enumerable:
-          false,
-        configurable:
-          false,
+        enumerable: false,
+        configurable: false,
         get() {
-          return getBridgeModule("Http");
+          return getHttpClient();
         },
         set(value) {
-          registerBridgeModule(
-            "Http",
-            value
-          );
+          if (value) {
+            const client = createHttpCompatClient(value);
+
+            httpBridge = client;
+            apiClientBridge = client;
+
+            registerHttpAliases(client);
+          }
         },
       },
 
       http: {
-        enumerable:
-          false,
-        configurable:
-          false,
+        enumerable: false,
+        configurable: false,
         get() {
-          return getBridgeModule("http");
+          return getHttpClient();
         },
         set(value) {
-          registerBridgeModule(
-            "http",
-            value
-          );
+          if (value) {
+            const client = createHttpCompatClient(value);
+
+            httpBridge = client;
+            apiClientBridge = client;
+
+            registerHttpAliases(client);
+          }
+        },
+      },
+
+      Router: {
+        enumerable: false,
+        configurable: false,
+        get() {
+          return getBridgeModule("Router");
+        },
+        set(value) {
+          registerBridgeModule("Router", value);
+        },
+      },
+
+      router: {
+        enumerable: false,
+        configurable: false,
+        get() {
+          return getBridgeModule("router");
+        },
+        set(value) {
+          registerBridgeModule("router", value);
+        },
+      },
+
+      Auth: {
+        enumerable: false,
+        configurable: false,
+        get() {
+          return getBridgeModule("Auth");
+        },
+        set(value) {
+          registerBridgeModule("Auth", value);
+        },
+      },
+
+      auth: {
+        enumerable: false,
+        configurable: false,
+        get() {
+          return getBridgeModule("auth");
+        },
+        set(value) {
+          registerBridgeModule("auth", value);
+        },
+      },
+
+      Store: {
+        enumerable: false,
+        configurable: false,
+        get() {
+          return getBridgeModule("Store");
+        },
+        set(value) {
+          registerBridgeModule("Store", value);
+        },
+      },
+
+      store: {
+        enumerable: false,
+        configurable: false,
+        get() {
+          return getBridgeModule("store");
+        },
+        set(value) {
+          registerBridgeModule("store", value);
         },
       },
     });
   } catch {}
 
   try {
-    if (isBrowser()) {
-      window.__ONION_CORE__ =
-        api;
+    installHttpBridge("core:bootstrap");
+  } catch (error) {
+    safeWarn("installHttpBridge() falló durante bootstrap.", error);
+  }
 
-      window.AppCore =
-        window.AppCore || api;
+  try {
+    if (isBrowser()) {
+      window.__ONION_CORE__ = api;
+      window.AppCore = window.AppCore || api;
     }
   } catch {}
 

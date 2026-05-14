@@ -23,6 +23,16 @@
    - Sin CSS inline.
    - Sin estilos inyectados.
    - Sin doble render inicial.
+
+   EXTREME MODE:
+   - Soporta aliases de activation/reset.
+   - Soporta hash-router: /#/login, /#/activate-account?token=...
+   - Soporta /@usuario/activate-account y /@usuario/reset-password/confirm.
+   - No degrada /@usuario/incidencias a /.
+   - Registry Router idempotente, sin app:module:duplicate.
+   - Eventos y snapshots sanitizados.
+   - State sync tolerante a Router legacy.
+   - Protección anti render stale.
 ========================================================= */
 
 import { AppCore as ImportedAppCore } from "../core/index.js";
@@ -47,95 +57,12 @@ import {
 } from "./constants.js";
 
 /* =========================================================
-   RUNTIME DEPENDENCIES
-========================================================= */
-
-let RuntimeAppCore = ImportedAppCore;
-let RuntimeRouter = ImportedRouter;
-let RuntimeAuth = ImportedAuth;
-
-function resolveRuntimeDeps(deps = {}) {
-  const safeDeps = ensureObject(deps);
-
-  RuntimeAppCore =
-    safeDeps.AppCore ||
-    safeDeps.core ||
-    RuntimeAppCore ||
-    ImportedAppCore;
-
-  RuntimeRouter =
-    safeDeps.Router ||
-    safeDeps.router ||
-    RuntimeRouter ||
-    ImportedRouter;
-
-  RuntimeAuth =
-    safeDeps.Auth ||
-    safeDeps.auth ||
-    RuntimeAuth ||
-    ImportedAuth;
-
-  return {
-    AppCore: RuntimeAppCore,
-    Router: RuntimeRouter,
-    Auth: RuntimeAuth,
-
-    applyPostRenderLoaderPolicy:
-      safeDeps.applyPostRenderLoaderPolicy ||
-      defaultApplyPostRenderLoaderPolicy,
-
-    hideLoader:
-      safeDeps.hideLoader,
-
-    getViewContainer:
-      safeDeps.getViewContainer,
-
-    setShellVisibility:
-      safeDeps.setShellVisibility,
-
-    updateShellVisibilityByRoute:
-      safeDeps.updateShellVisibilityByRoute,
-  };
-}
-
-/* =========================================================
-   STATE
-========================================================= */
-
-let configured = false;
-let bound = false;
-let firstRenderDone = false;
-let initialRenderPromise = null;
-let renderCycle = 0;
-
-const routerBootState = {
-  lastInitialPath: "",
-  lastInitialPublicPath: "",
-  lastInitialCanonicalPath: "",
-
-  lastRenderedPath: "",
-  lastRenderedPublicPath: "",
-
-  lastResolvedCanonicalPath: "",
-  lastResolvedPublicPath: "",
-
-  lastRenderAt: 0,
-  lastRenderOk: false,
-  lastRenderError: null,
-
-  lastProtectedRouteKey: "",
-  capturedInitialUrlAt: 0,
-  lastInitialCaptureSignature: "",
-
-  lastConfiguredAt: 0,
-  lastBoundAt: 0,
-};
-
-/* =========================================================
    CONSTANTS
 ========================================================= */
 
-const ROUTER_BOOTSTRAP_VERSION = "14.0.0";
+export const ROUTER_BOOTSTRAP_VERSION = "15.0.0-extreme-pro";
+
+const ROUTER_SOURCE = "app-router-bootstrap";
 
 const DEFAULT_ROUTE =
   APP_ROUTES?.home ||
@@ -145,17 +72,37 @@ const LOGIN_ROUTE =
   APP_ROUTES?.login ||
   "/login";
 
-const ACTIVATION_PATH = "/activate-account";
-const RESET_CONFIRM_PATH = "/reset-password/confirm";
+const ACTIVATION_PATHS = Object.freeze([
+  "/activate-account",
+  "/activate",
+  "/activation",
+  "/account/activate",
+  "/activate/first-user",
+]);
+
+const RESET_CONFIRM_PATHS = Object.freeze([
+  "/reset-password/confirm",
+  "/reset-password-confirm",
+  "/password-reset/confirm",
+  "/password-reset-confirm",
+  "/confirm-reset-password",
+]);
 
 const INITIAL_URL_KEY =
   APP_RUNTIME_KEYS?.initialUrl ||
   "__ONION_INITIAL_URL__";
 
+const BOOT_CONTEXT_KEY =
+  APP_RUNTIME_KEYS?.bootContext ||
+  "__ONION_BOOT_CONTEXT__";
+
 const FALLBACK_PROTECTED_ROUTES = Object.freeze([
   Object.freeze({
     key: "activation",
-    path: ACTIVATION_PATH,
+
+    path: "/activate-account",
+
+    paths: ACTIVATION_PATHS,
 
     windowKeys: Object.freeze([
       "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
@@ -180,7 +127,10 @@ const FALLBACK_PROTECTED_ROUTES = Object.freeze([
 
   Object.freeze({
     key: "resetConfirm",
-    path: RESET_CONFIRM_PATH,
+
+    path: "/reset-password/confirm",
+
+    paths: RESET_CONFIRM_PATHS,
 
     windowKeys: Object.freeze([
       "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
@@ -228,6 +178,10 @@ const GENERIC_SENSITIVE_PARAM_NAMES = Object.freeze([
   "two_factor_token",
   "mfaToken",
   "mfa_token",
+  "authorization",
+  "jwt",
+  "session",
+  "sid",
 ]);
 
 const ROUTER_BOOT_EVENTS = Object.freeze({
@@ -240,10 +194,117 @@ const ROUTER_BOOT_EVENTS = Object.freeze({
   initialRenderFallback: "app:router:initial-render:fallback",
   stateSynced: "app:router:state-synced",
   reset: "app:router:bootstrap:reset",
+  debugReady: "app:router:debug:ready",
 });
 
 const SENSITIVE_OBJECT_KEY_RE =
-  /token|secret|password|authorization|credential|jwt|bearer|otp|code/i;
+  /token|secret|password|authorization|credential|jwt|bearer|otp|code|session|refresh/i;
+
+const PUBLIC_USERNAME_RE = /^@[A-Za-z0-9._-]{1,80}$/;
+
+const EMIT_DEDUPE_MS = 80;
+const MAX_SANITIZE_DEPTH = 8;
+const MAX_SANITIZE_ARRAY = 120;
+
+/* =========================================================
+   RUNTIME DEPENDENCIES
+========================================================= */
+
+let RuntimeAppCore = ImportedAppCore;
+let RuntimeRouter = ImportedRouter;
+let RuntimeAuth = ImportedAuth;
+
+function resolveRuntimeDeps(deps = {}) {
+  const safeDeps = ensureObject(deps);
+
+  RuntimeAppCore =
+    safeDeps.AppCore ||
+    safeDeps.core ||
+    RuntimeAppCore ||
+    ImportedAppCore;
+
+  RuntimeRouter =
+    safeDeps.Router ||
+    safeDeps.router ||
+    RuntimeAppCore?.Router ||
+    RuntimeAppCore?.router ||
+    RuntimeAppCore?.modules?.get?.("Router") ||
+    RuntimeAppCore?.modules?.get?.("router") ||
+    RuntimeRouter ||
+    ImportedRouter;
+
+  RuntimeAuth =
+    safeDeps.Auth ||
+    safeDeps.auth ||
+    RuntimeAppCore?.Auth ||
+    RuntimeAppCore?.auth ||
+    RuntimeAppCore?.modules?.get?.("Auth") ||
+    RuntimeAppCore?.modules?.get?.("auth") ||
+    RuntimeAuth ||
+    ImportedAuth;
+
+  return {
+    AppCore: RuntimeAppCore,
+    Router: RuntimeRouter,
+    Auth: RuntimeAuth,
+
+    applyPostRenderLoaderPolicy:
+      safeDeps.applyPostRenderLoaderPolicy ||
+      defaultApplyPostRenderLoaderPolicy,
+
+    hideLoader:
+      safeDeps.hideLoader,
+
+    getViewContainer:
+      safeDeps.getViewContainer,
+
+    setShellVisibility:
+      safeDeps.setShellVisibility,
+
+    updateShellVisibilityByRoute:
+      safeDeps.updateShellVisibilityByRoute,
+  };
+}
+
+/* =========================================================
+   STATE
+========================================================= */
+
+let configured = false;
+let bound = false;
+let firstRenderDone = false;
+let initialRenderPromise = null;
+let renderCycle = 0;
+
+let lastEmitSignature = "";
+let lastEmitSignatureAt = 0;
+
+const routerRegistryConflicts = new Set();
+
+const routerBootState = {
+  lastInitialPath: "",
+  lastInitialPublicPath: "",
+  lastInitialCanonicalPath: "",
+
+  lastRenderedPath: "",
+  lastRenderedPublicPath: "",
+
+  lastResolvedCanonicalPath: "",
+  lastResolvedPublicPath: "",
+
+  lastRenderAt: 0,
+  lastRenderOk: false,
+  lastRenderError: null,
+
+  lastProtectedRouteKey: "",
+  capturedInitialUrlAt: 0,
+  lastInitialCaptureSignature: "",
+
+  lastConfiguredAt: 0,
+  lastBoundAt: 0,
+
+  registryExposedAt: 0,
+};
 
 /* =========================================================
    BASICS
@@ -261,6 +322,16 @@ function isObject(value) {
     value !== null &&
     typeof value === "object" &&
     !Array.isArray(value)
+  );
+}
+
+function isObjectLike(value) {
+  return (
+    value !== null &&
+    (
+      typeof value === "object" ||
+      typeof value === "function"
+    )
   );
 }
 
@@ -282,7 +353,10 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -309,6 +383,14 @@ function safeIsoDate(ms = Date.now()) {
   }
 }
 
+function safeNow() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
 function unique(values = []) {
   const result = [];
   const seen = new Set();
@@ -326,6 +408,49 @@ function unique(values = []) {
   }
 
   return result;
+}
+
+function isExtensibleTarget(value) {
+  try {
+    return (
+      isObjectLike(value) &&
+      Object.isExtensible(value)
+    );
+  } catch {}
+
+  return false;
+}
+
+function safeDefineValue(target, key, value) {
+  if (
+    !target ||
+    !key ||
+    !isExtensibleTarget(target)
+  ) {
+    return false;
+  }
+
+  try {
+    Object.defineProperty(
+      target,
+      key,
+      {
+        value,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+      }
+    );
+
+    return true;
+  } catch {}
+
+  try {
+    target[key] = value;
+    return true;
+  } catch {}
+
+  return false;
 }
 
 function safeCreateCustomEvent(name = "", detail = {}) {
@@ -536,6 +661,10 @@ function normalizePath(path = "/") {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
       const parsed = new URL(raw, getBaseOrigin());
 
+      if (parsed.origin !== getBaseOrigin()) {
+        return "/";
+      }
+
       if (
         parsed.hash &&
         isHashRouterPath(parsed.hash)
@@ -623,6 +752,10 @@ function getPathFromUrlLike(value = "") {
   try {
     const parsed = new URL(raw, getBaseOrigin());
 
+    if (parsed.origin !== getBaseOrigin()) {
+      return DEFAULT_ROUTE;
+    }
+
     if (
       parsed.hash &&
       isHashRouterPath(parsed.hash)
@@ -657,7 +790,7 @@ function shouldUsePath(value) {
 function isUsernameSegment(segment = "") {
   const raw = safeText(segment, "");
 
-  return /^@[A-Za-z0-9._-]{1,80}$/.test(raw);
+  return PUBLIC_USERNAME_RE.test(raw);
 }
 
 function getFirstPathSegment(pathname = "/") {
@@ -747,30 +880,64 @@ function normalizeProtectedRouteConfigs(configs = []) {
       .map((config) => {
         const item = ensureObject(config);
 
-        const rawPath =
-          item.path ||
-          item.route ||
-          item.canonicalPath ||
-          "";
+        const configuredPaths =
+          unique([
+            ...safeArray(item.paths),
+            item.path,
+            item.route,
+            item.canonicalPath,
+          ])
+            .map((path) => normalizePathnameOnly(path))
+            .filter((path) => path && path !== "/");
 
-        const path = normalizePathnameOnly(rawPath);
-
-        if (
-          !path ||
-          path === "/"
-        ) {
-          return null;
-        }
-
-        const key =
+        const detectedKey =
           safeText(
             item.key ||
               item.name ||
-              path
-                .replace(/^\/+/, "")
-                .replace(/[/-]/g, "_"),
+              configuredPaths[0]
+                ?.replace(/^\/+/, "")
+                ?.replace(/[/-]/g, "_"),
             ""
           );
+
+        let paths = configuredPaths;
+
+        if (detectedKey === "activation") {
+          paths = unique([
+            ...paths,
+            ...ACTIVATION_PATHS,
+          ]);
+        }
+
+        if (detectedKey === "resetConfirm") {
+          paths = unique([
+            ...paths,
+            ...RESET_CONFIRM_PATHS,
+          ]);
+        }
+
+        if (!paths.length) {
+          return null;
+        }
+
+        const primaryPath =
+          normalizePathnameOnly(
+            item.path ||
+              item.canonicalPath ||
+              (
+                detectedKey === "activation"
+                  ? "/activate-account"
+                  : detectedKey === "resetConfirm"
+                    ? "/reset-password/confirm"
+                    : paths[0]
+              )
+          );
+
+        const key =
+          detectedKey ||
+          primaryPath
+            .replace(/^\/+/, "")
+            .replace(/[/-]/g, "_");
 
         const windowKeys =
           unique([
@@ -778,6 +945,21 @@ function normalizeProtectedRouteConfigs(configs = []) {
             item.windowKey,
             item.initialWindowKey,
             item.runtimeKey,
+            ...(
+              key === "activation"
+                ? [
+                    "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+                  ]
+                : []
+            ),
+            ...(
+              key === "resetConfirm"
+                ? [
+                    "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+                    "__ONION_RESET_CONFIRM_INITIAL_URL__",
+                  ]
+                : []
+            ),
           ]);
 
         const tokenParamNames =
@@ -842,7 +1024,15 @@ function normalizeProtectedRouteConfigs(configs = []) {
           ...item,
 
           key,
-          path,
+          path: primaryPath,
+
+          paths:
+            Object.freeze(
+              unique([
+                primaryPath,
+                ...paths,
+              ])
+            ),
 
           windowKey:
             windowKeys[0] || "",
@@ -888,20 +1078,16 @@ function redactTokenInText(value = "") {
   let output = raw;
 
   for (const config of PROTECTED_ROUTES) {
-    const path = safeText(config?.path, "");
+    for (const path of safeArray(config?.paths)) {
+      const escapedPath = escapeRegExp(path);
 
-    if (!path) {
-      continue;
+      try {
+        output = output.replace(
+          new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
+          "$1/***"
+        );
+      } catch {}
     }
-
-    const escapedPath = escapeRegExp(path);
-
-    try {
-      output = output.replace(
-        new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
-        "$1/***"
-      );
-    } catch {}
 
     for (const name of config.tokenParamNames || []) {
       try {
@@ -996,7 +1182,7 @@ function isDomNodeLike(value) {
 }
 
 function sanitizePayload(value, depth = 0) {
-  if (depth > 8) {
+  if (depth > MAX_SANITIZE_DEPTH) {
     return "[MaxDepth]";
   }
 
@@ -1035,7 +1221,7 @@ function sanitizePayload(value, depth = 0) {
 
   if (Array.isArray(value)) {
     return value
-      .slice(0, 100)
+      .slice(0, MAX_SANITIZE_ARRAY)
       .map((item) =>
         sanitizePayload(item, depth + 1)
       );
@@ -1194,6 +1380,35 @@ function safeWindowDispatch(eventName, payload = {}) {
   return false;
 }
 
+function shouldDedupeEmit(eventName = "", payload = {}, force = false) {
+  if (force) {
+    return false;
+  }
+
+  const signature = [
+    safeText(eventName, ""),
+    safeText(payload?.protectedRouteKey, ""),
+    safeText(payload?.target || payload?.path || "", ""),
+    safeText(payload?.publicPath || "", ""),
+    payload?.ok === false ? "fail" : "ok",
+  ].join("|");
+
+  const now = safeNow();
+
+  if (
+    signature &&
+    signature === lastEmitSignature &&
+    now - lastEmitSignatureAt < EMIT_DEDUPE_MS
+  ) {
+    return true;
+  }
+
+  lastEmitSignature = signature;
+  lastEmitSignatureAt = now;
+
+  return false;
+}
+
 function safeEmit(eventName, payload = {}, options = {}) {
   const name = safeText(eventName, "");
 
@@ -1203,10 +1418,17 @@ function safeEmit(eventName, payload = {}, options = {}) {
 
   const opts = ensureObject(options);
 
+  if (
+    opts.dedupe !== false &&
+    shouldDedupeEmit(name, payload, opts.force === true)
+  ) {
+    return false;
+  }
+
   const cleanPayload =
     sanitizePayload({
       version: ROUTER_BOOTSTRAP_VERSION,
-      source: "app-router-bootstrap",
+      source: ROUTER_SOURCE,
       ...ensureObject(payload),
     });
 
@@ -1292,7 +1514,7 @@ function isRouteScrubbed(config = null) {
 ========================================================= */
 
 function matchesProtectedRoute(config, pathOrUrl = "") {
-  if (!config?.path) {
+  if (!config) {
     return false;
   }
 
@@ -1305,9 +1527,9 @@ function matchesProtectedRoute(config, pathOrUrl = "") {
   const cleanPath =
     getCleanPath(canonicalPath);
 
-  return (
-    cleanPath === config.path ||
-    cleanPath.startsWith(`${config.path}/`)
+  return safeArray(config.paths).some((path) =>
+    cleanPath === path ||
+    cleanPath.startsWith(`${path}/`)
   );
 }
 
@@ -1320,7 +1542,7 @@ function getProtectedRouteConfig(value = "") {
 }
 
 function getPathToken(config, value = "") {
-  if (!config?.path) {
+  if (!config) {
     return "";
   }
 
@@ -1333,23 +1555,27 @@ function getPathToken(config, value = "") {
   const cleanPath =
     getCleanPath(canonicalPath);
 
-  if (!cleanPath.startsWith(`${config.path}/`)) {
-    return "";
+  for (const path of safeArray(config.paths)) {
+    if (!cleanPath.startsWith(`${path}/`)) {
+      continue;
+    }
+
+    const token =
+      cleanPath
+        .slice(`${path}/`.length)
+        .split("/")[0];
+
+    try {
+      return safeText(
+        decodeURIComponent(token || ""),
+        ""
+      );
+    } catch {
+      return safeText(token, "");
+    }
   }
 
-  const token =
-    cleanPath
-      .slice(`${config.path}/`.length)
-      .split("/")[0];
-
-  try {
-    return safeText(
-      decodeURIComponent(token || ""),
-      ""
-    );
-  } catch {
-    return safeText(token, "");
-  }
+  return "";
 }
 
 function hasTokenInSearch(search = "", names = []) {
@@ -1390,6 +1616,10 @@ function hasProtectedTokenInUrlLike(config, value = "") {
 
   try {
     const parsed = new URL(raw, getBaseOrigin());
+
+    if (parsed.origin !== getBaseOrigin()) {
+      return false;
+    }
 
     if (
       hasTokenInSearch(
@@ -1507,6 +1737,21 @@ function getWindowValue(key = "") {
   }
 }
 
+function getWindowRawValue(key = "") {
+  if (
+    !isBrowser() ||
+    !key
+  ) {
+    return null;
+  }
+
+  try {
+    return window[key] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function setWindowValue(key = "", value = "", onlyIfMissing = false) {
   if (
     !isBrowser() ||
@@ -1524,6 +1769,29 @@ function setWindowValue(key = "", value = "", onlyIfMissing = false) {
     }
 
     window[key] = value;
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getBootContext() {
+  return ensureObject(getWindowRawValue(BOOT_CONTEXT_KEY));
+}
+
+function setBootContextPatch(patch = {}) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    const current = ensureObject(window[BOOT_CONTEXT_KEY]);
+
+    window[BOOT_CONTEXT_KEY] = {
+      ...current,
+      ...ensureObject(patch),
+    };
 
     return true;
   } catch {
@@ -1607,7 +1875,10 @@ function setCoreInitialUrl(href = "") {
       payload,
       {
         source:
-          "app-router-bootstrap:initial-url",
+          `${ROUTER_SOURCE}:initial-url`,
+        emit: false,
+        emitState: false,
+        silent: true,
       }
     );
   } catch {}
@@ -1703,6 +1974,8 @@ function getStateInitialUrlCandidates() {
   const state =
     ensureObject(RuntimeAppCore?.state);
 
+  const bootContext = getBootContext();
+
   const keys = [
     APP_STATE_KEYS?.bootProtectedInitialUrl,
     APP_STATE_KEYS?.bootActivationInitialUrl,
@@ -1714,8 +1987,14 @@ function getStateInitialUrlCandidates() {
     "bootResetPasswordConfirmInitialUrl",
   ].filter(Boolean);
 
-  return keys
-    .map((key) => safeText(state[key], ""))
+  return [
+    ...keys.map((key) => safeText(state[key], "")),
+    bootContext.protectedInitialUrl,
+    bootContext.activationInitialUrl,
+    bootContext.resetConfirmInitialUrl,
+    bootContext.initialUrl,
+  ]
+    .map((value) => safeText(value, ""))
     .filter(Boolean);
 }
 
@@ -1828,6 +2107,9 @@ function exposeInitialContextToCore(context = {}) {
     bootHasPublicToken:
       Boolean(data.hasToken),
 
+    bootHasProtectedToken:
+      Boolean(data.hasToken),
+
     bootProtectedRouteKey:
       data.key || "",
   };
@@ -1880,7 +2162,10 @@ function exposeInitialContextToCore(context = {}) {
       payload,
       {
         source:
-          "app-router-bootstrap:protected-initial-context",
+          `${ROUTER_SOURCE}:protected-initial-context`,
+        emit: false,
+        emitState: false,
+        silent: true,
       }
     );
   } catch {}
@@ -1896,6 +2181,46 @@ function exposeInitialContextToCore(context = {}) {
       );
     }
   } catch {}
+
+  setBootContextPatch({
+    protectedInitialUrl:
+      data.url || "",
+
+    protectedInitialPath:
+      data.path || "",
+
+    protectedInitialPublicPath:
+      data.publicPath || "",
+
+    isPublicTokenRoute:
+      Boolean(data.config),
+
+    hasPublicToken:
+      Boolean(data.hasToken),
+
+    protectedRouteKey:
+      data.key || "",
+
+    ...(data.key === "activation"
+      ? {
+          activationInitialUrl: data.url || "",
+          activationInitialPath: data.path || "",
+          activationInitialPublicPath: data.publicPath || "",
+          isActivation: Boolean(data.config),
+          hasActivationToken: Boolean(data.hasToken),
+        }
+      : {}),
+
+    ...(data.key === "resetConfirm"
+      ? {
+          resetConfirmInitialUrl: data.url || "",
+          resetConfirmInitialPath: data.path || "",
+          resetConfirmInitialPublicPath: data.publicPath || "",
+          isResetConfirm: Boolean(data.config),
+          hasResetToken: Boolean(data.hasToken),
+        }
+      : {}),
+  });
 
   return payload;
 }
@@ -1976,7 +2301,7 @@ function createRouteContext(input = "") {
       getBrowserHref(),
 
     source:
-      "app-router-bootstrap",
+      ROUTER_SOURCE,
   };
 }
 
@@ -2017,7 +2342,10 @@ function safeSetState(payload = {}) {
       cleanPayload,
       {
         source:
-          "app-router-bootstrap",
+          ROUTER_SOURCE,
+        emit: false,
+        emitState: false,
+        silent: true,
       }
     );
   } catch {}
@@ -2027,7 +2355,10 @@ function safeSetState(payload = {}) {
       cleanPayload,
       {
         source:
-          "app-router-bootstrap",
+          ROUTER_SOURCE,
+        emit: false,
+        emitState: false,
+        silent: true,
       }
     );
   } catch {}
@@ -2394,7 +2725,7 @@ function getRenderOptions(path = DEFAULT_ROUTE, meta = {}) {
         Boolean(routeContext.usernameScoped),
 
       source:
-        "app-router-bootstrap",
+        ROUTER_SOURCE,
     };
   }
 
@@ -2419,7 +2750,7 @@ function getRenderOptions(path = DEFAULT_ROUTE, meta = {}) {
       Boolean(routeContext.usernameScoped),
 
     source:
-      "app-router-bootstrap",
+      ROUTER_SOURCE,
   };
 }
 
@@ -2430,75 +2761,200 @@ function getRenderOptions(path = DEFAULT_ROUTE, meta = {}) {
 captureInitialBrowserUrl();
 
 /* =========================================================
-   CONFIGURE
+   ROUTER REGISTRY
 ========================================================= */
 
-function exposeRouterToCore() {
-  try {
-    RuntimeAppCore.Router = RuntimeRouter;
-  } catch {}
+function getRegisteredRouterModule(name = "") {
+  const cleanName = safeText(name, "");
+
+  if (!cleanName || !RuntimeAppCore) {
+    return null;
+  }
 
   try {
-    RuntimeAppCore.router = RuntimeRouter;
-  } catch {}
+    if (isFunction(RuntimeAppCore?.modules?.get)) {
+      const value = RuntimeAppCore.modules.get(cleanName);
 
-  try {
-    if (isFunction(RuntimeAppCore?.modules?.register)) {
-      RuntimeAppCore.modules.register(
-        "Router",
-        RuntimeRouter,
-        {
-          overwrite: true,
-          replace: true,
-          aliases: ["router"],
-          source: "app-router-bootstrap",
-        }
-      );
-
-      RuntimeAppCore.modules.register(
-        "router",
-        RuntimeRouter,
-        {
-          overwrite: true,
-          replace: true,
-          aliases: ["Router"],
-          source: "app-router-bootstrap",
-        }
-      );
+      if (value) {
+        return value;
+      }
     }
   } catch {}
 
   try {
-    if (isFunction(RuntimeAppCore?.modules?.set)) {
-      RuntimeAppCore.modules.set("Router", RuntimeRouter);
-      RuntimeAppCore.modules.set("router", RuntimeRouter);
+    if (RuntimeAppCore?.modules?.[cleanName]) {
+      return RuntimeAppCore.modules[cleanName];
+    }
+  } catch {}
+
+  try {
+    if (isFunction(RuntimeAppCore?.registry?.modules?.get)) {
+      const value = RuntimeAppCore.registry.modules.get(cleanName);
+
+      if (value) {
+        return value;
+      }
+    }
+  } catch {}
+
+  try {
+    if (RuntimeAppCore?.[cleanName]) {
+      return RuntimeAppCore[cleanName];
+    }
+  } catch {}
+
+  return null;
+}
+
+function markRouterRegistryConflict(name = "") {
+  const cleanName = safeText(name, "");
+
+  if (!cleanName || routerRegistryConflicts.has(cleanName)) {
+    return;
+  }
+
+  routerRegistryConflicts.add(cleanName);
+
+  safeWarn(
+    "Router registry conflict. Se conserva instancia existente.",
+    {
+      name: cleanName,
+    }
+  );
+}
+
+function exposeRouterAlias(alias = "") {
+  const cleanAlias = safeText(alias, "");
+
+  if (!RuntimeAppCore || !RuntimeRouter || !cleanAlias) {
+    return false;
+  }
+
+  const existing = getRegisteredRouterModule(cleanAlias);
+
+  if (existing && !Object.is(existing, RuntimeRouter)) {
+    markRouterRegistryConflict(cleanAlias);
+    return false;
+  }
+
+  let ok = false;
+
+  try {
+    if (isExtensibleTarget(RuntimeAppCore)) {
+      if (safeDefineValue(RuntimeAppCore, cleanAlias, RuntimeRouter)) {
+        ok = true;
+      }
     }
   } catch {}
 
   try {
     if (
-      RuntimeAppCore?.modules &&
-      typeof RuntimeAppCore.modules === "object" &&
-      !isFunction(RuntimeAppCore.modules.register) &&
-      !isFunction(RuntimeAppCore.modules.set)
+      RuntimeAppCore.modules &&
+      isExtensibleTarget(RuntimeAppCore.modules) &&
+      (!RuntimeAppCore.modules[cleanAlias] || Object.is(RuntimeAppCore.modules[cleanAlias], RuntimeRouter))
     ) {
-      RuntimeAppCore.modules.Router = RuntimeRouter;
-      RuntimeAppCore.modules.router = RuntimeRouter;
+      RuntimeAppCore.modules[cleanAlias] = RuntimeRouter;
+      ok = true;
+    }
+  } catch {}
+
+  try {
+    if (
+      isFunction(RuntimeAppCore?.modules?.set) &&
+      !getRegisteredRouterModule(cleanAlias)
+    ) {
+      const result = RuntimeAppCore.modules.set(
+        cleanAlias,
+        RuntimeRouter,
+        {
+          source: ROUTER_SOURCE,
+          alias: true,
+          canonical: "Router",
+          silent: true,
+          emit: false,
+        }
+      );
+
+      ok = result !== false || ok;
     }
   } catch {}
 
   try {
     if (
       RuntimeAppCore?.registry?.modules &&
-      isFunction(RuntimeAppCore.registry.modules.set)
+      isFunction(RuntimeAppCore.registry.modules.set) &&
+      !getRegisteredRouterModule(cleanAlias)
     ) {
-      RuntimeAppCore.registry.modules.set("Router", RuntimeRouter);
-      RuntimeAppCore.registry.modules.set("router", RuntimeRouter);
+      RuntimeAppCore.registry.modules.set(cleanAlias, RuntimeRouter);
+      ok = true;
     }
   } catch {}
 
+  return ok;
+}
+
+function exposeRouterToCore() {
+  if (!RuntimeAppCore || !RuntimeRouter) {
+    return false;
+  }
+
+  let ok = false;
+
+  const existingCanonical = getRegisteredRouterModule("Router");
+
+  if (existingCanonical && !Object.is(existingCanonical, RuntimeRouter)) {
+    markRouterRegistryConflict("Router");
+  } else {
+    try {
+      if (isFunction(RuntimeAppCore?.modules?.register) && !existingCanonical) {
+        const result = RuntimeAppCore.modules.register(
+          "Router",
+          RuntimeRouter,
+          {
+            aliases: ["router"],
+            overwrite: false,
+            replace: false,
+            idempotent: true,
+            source: ROUTER_SOURCE,
+          }
+        );
+
+        ok = result !== false;
+      }
+    } catch {}
+
+    try {
+      if (
+        !ok &&
+        isFunction(RuntimeAppCore?.modules?.set) &&
+        !getRegisteredRouterModule("Router")
+      ) {
+        const result = RuntimeAppCore.modules.set(
+          "Router",
+          RuntimeRouter,
+          {
+            source: ROUTER_SOURCE,
+            overwrite: false,
+            replace: false,
+          }
+        );
+
+        ok = result !== false;
+      }
+    } catch {}
+  }
+
+  exposeRouterAlias("Router");
+  exposeRouterAlias("router");
+
+  routerBootState.registryExposedAt = Date.now();
+
   return true;
 }
+
+/* =========================================================
+   CONFIGURE
+========================================================= */
 
 export function configureRouter(deps = {}) {
   resolveRuntimeDeps(deps);
@@ -2513,16 +2969,26 @@ export function configureRouter(deps = {}) {
 
   try {
     if (isFunction(RuntimeRouter?.configure)) {
-      const result =
-        RuntimeRouter.configure({
-          core: RuntimeAppCore,
-          AppCore: RuntimeAppCore,
+      let result;
 
-          auth: RuntimeAuth,
-          Auth: RuntimeAuth,
+      try {
+        result =
+          RuntimeRouter.configure({
+            core: RuntimeAppCore,
+            AppCore: RuntimeAppCore,
 
-          source: "app-router-bootstrap",
-        });
+            auth: RuntimeAuth,
+            Auth: RuntimeAuth,
+
+            source: ROUTER_SOURCE,
+          });
+      } catch {
+        result =
+          RuntimeRouter.configure(
+            RuntimeAppCore,
+            RuntimeAuth
+          );
+      }
 
       if (result === false) {
         configured = false;
@@ -2608,7 +3074,7 @@ export function bindRouter(deps = {}) {
       Boolean(protectedInitial.config),
 
     source:
-      "app-router-bootstrap",
+      ROUTER_SOURCE,
   };
 
   try {
@@ -3178,6 +3644,7 @@ export function resetRouterBootstrap(options = {}) {
   const {
     resetConfigured = false,
     resetBound = false,
+    clearInitialUrl = false,
   } = ensureObject(options);
 
   firstRenderDone = false;
@@ -3190,6 +3657,20 @@ export function resetRouterBootstrap(options = {}) {
 
   if (resetBound) {
     bound = false;
+  }
+
+  if (clearInitialUrl && isBrowser()) {
+    try {
+      window[INITIAL_URL_KEY] = "";
+    } catch {}
+
+    for (const config of PROTECTED_ROUTES) {
+      for (const key of safeArray(config.windowKeys)) {
+        try {
+          window[key] = "";
+        } catch {}
+      }
+    }
   }
 
   routerBootState.lastInitialPath = "";
@@ -3217,8 +3698,14 @@ export function resetRouterBootstrap(options = {}) {
       resetBound:
         Boolean(resetBound),
 
+      clearInitialUrl:
+        Boolean(clearInitialUrl),
+
       at:
         safeIsoDate(),
+    },
+    {
+      force: true,
     }
   );
 
@@ -3270,6 +3757,9 @@ export function getRouterBootstrapState() {
 
     initialUrl:
       getGlobalInitialUrl(),
+
+    bootContext:
+      getBootContext(),
 
     protectedInitialUrl:
       protectedInitial.url || "",
@@ -3358,18 +3848,96 @@ export function getRouterBootstrapState() {
         ? safeIsoDate(routerBootState.lastBoundAt)
         : "",
 
+    registryExposedAt:
+      routerBootState.registryExposedAt,
+
+    registryExposedAtIso:
+      routerBootState.registryExposedAt
+        ? safeIsoDate(routerBootState.registryExposedAt)
+        : "",
+
+    registryConflicts:
+      Array.from(routerRegistryConflicts),
+
     shouldProtectInitialHistory:
       shouldProtectInitialHistory(currentBrowserPath),
+
+    protectedRoutes:
+      PROTECTED_ROUTES.map((config) => ({
+        key: config.key,
+        path: config.path,
+        paths: [...config.paths],
+        windowKeys: [...config.windowKeys],
+      })),
 
     routerSnapshot,
   });
 }
+
+function exposeDebugApi() {
+  const api = {
+    version: ROUTER_BOOTSTRAP_VERSION,
+
+    configure:
+      configureRouter,
+
+    bind:
+      bindRouter,
+
+    renderInitial:
+      renderInitialRoute,
+
+    reset:
+      resetRouterBootstrap,
+
+    snapshot:
+      getRouterBootstrapState,
+  };
+
+  try {
+    if (isBrowser()) {
+      window.__ONION_APP_ROUTER_BOOTSTRAP__ = api;
+    }
+  } catch {}
+
+  try {
+    if (
+      RuntimeAppCore &&
+      typeof RuntimeAppCore === "object" &&
+      Object.isExtensible(RuntimeAppCore)
+    ) {
+      Object.defineProperty(
+        RuntimeAppCore,
+        "RouterBootstrap",
+        {
+          value: api,
+          configurable: true,
+          enumerable: false,
+          writable: true,
+        }
+      );
+    }
+  } catch {}
+
+  safeEmit(
+    ROUTER_BOOT_EVENTS.debugReady,
+    {
+      at: safeIsoDate(),
+    }
+  );
+
+  return api;
+}
+
+exposeDebugApi();
 
 /* =========================================================
    DEFAULT EXPORT
 ========================================================= */
 
 export default {
+  ROUTER_BOOTSTRAP_VERSION,
+
   configureRouter,
   bindRouter,
   renderInitialRoute,

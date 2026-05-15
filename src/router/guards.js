@@ -2,1245 +2,741 @@
    Onion SPA - Router Guards
    Archivo: src/router/guards.js
 
-   FINAL EXTREME SYSTEM · ROUTER GUARDS · AUTH / ROLES / REDIRECTS · 11/10
-   PUBLIC TECHNICAL ROUTES SAFE
-   GHOST AUTH BLOCKED
-   ROLE ALIASES HARDENED
-   REDIRECTS SAFE
-   USERNAME PUBLIC PATH SAFE
-   HASH ROUTER TOKEN ROUTES SAFE
-
-   RESPONSABILIDADES:
-   - resolver acceso a rutas
-   - guards auth / guest / roles
-   - redirects centralizados
-   - tolerancia config heterogénea
-   - salida estable para Router
-   - permitir rutas públicas técnicas aunque exista sesión
-   - no bloquear /activate-account, /reset-password, confirm reset
-   - no bloquear /activate-account/<token>
-   - no bloquear /reset-password/confirm/<token>
-   - bloquear vistas admin aunque el rol venga como alias
-   - evitar redirects agresivos durante transición de login
-   - evitar auth fantasma
-   - evitar open redirects
-   - exponer snapshot de diagnóstico seguro
-
-   HARDENING EXTREMO:
-   - rutas públicas por defecto
-   - normalización robusta de roles
-   - soporte meta.requiresAuth / guestOnly / roles
-   - soporte roles en user.role / user.rol / user.roles / permissions
-   - soporte flags isAdmin / admin / canManageUsers / canAccessUsers
-   - aliases admin/support/manager expandidos
-   - redirects consistentes
-   - prioridad clara entre public technical / guest / auth / roles
-   - compatibilidad route.public / route.private / meta.public
-   - fallback seguro si Auth falla
-   - bypass seguro para rutas públicas técnicas
-   - preserva redirect al mandar a login
-   - cero auth fantasma: token sin user no autentica
-   - cero auth fantasma: user sin token no autentica
-   - redirect interno seguro anti open-redirect
-   - soporte same-origin absolute URL
-   - soporte /@usuario/ruta sin degradar canonical
-   - soporte hash-router técnico
+   Router guards clean:
+   - Rutas públicas técnicas siempre permitidas.
+   - Auth real = token usable + user usable + activo.
+   - Sin ghost auth.
+   - Roles compatibles, pero contrato final simple: admin/user.
+   - Admin puede entrar en rutas con rol restringido.
+   - Redirects internos seguros.
+   - /@usuario/ruta y hash-router técnico seguros.
 ========================================================= */
 
 import {
   getRouteNames,
-  normalizeCanonicalPath,
+  normalizeCanonicalPath as normalizeCanonicalPathHelper,
   getDefaultHomeTarget,
   buildLoginUrl,
 } from "./helpers.js";
 
-/* =========================================================
-   CONSTANTS
-========================================================= */
+export const GUARDS_VERSION = "12.0.0-clean";
 
-export const GUARDS_VERSION =
-  "11.0.0";
+const LOGIN_PATH = "/login";
+const HOME_PATH = "/";
 
-const LOGIN_PATH =
-  "/login";
+const PUBLIC_TECHNICAL_ROUTES = new Set([
+  "/activate-account",
+  "/reset-password",
+  "/reset-password/confirm",
+  "/forgot-password",
+  "/recover-password",
+  "/password-reset",
+  "/password-reset/confirm",
+  "/2fa",
+  "/otp",
+  "/mfa",
+]);
 
-const HOME_PATH =
-  "/";
+const AUTH_GUEST_ROUTES = new Set([
+  "/login",
+  "/signin",
+  "/sign-in",
+  "/auth",
+  "/auth/login",
+]);
 
-const PUBLIC_TECHNICAL_ROUTES =
-  new Set([
-    "/activate-account",
+const TECHNICAL_PREFIXES = [
+  "/activate-account/",
+  "/reset-password/confirm/",
+  "/password-reset/confirm/",
+  "/2fa/",
+  "/otp/",
+  "/mfa/",
+];
 
-    "/reset-password",
-    "/reset-password/confirm",
+const ADMIN_ALIASES = new Set([
+  "admin",
+  "administrator",
+  "administrador",
+  "superadmin",
+  "super_admin",
+  "super-admin",
+  "superadministrador",
+  "super_administrador",
+  "super-administrador",
+  "owner",
+  "root",
+]);
 
-    "/forgot-password",
-    "/recover-password",
-    "/password-reset",
-  ]);
+const USER_ALIASES = new Set([
+  "user",
+  "usuario",
+  "client",
+  "cliente",
+  "customer",
+]);
 
-const PUBLIC_TECHNICAL_PREFIXES =
-  Object.freeze([
-    "/activate-account/",
-    "/reset-password/confirm/",
-  ]);
+const SUPPORT_ALIASES = new Set([
+  "support",
+  "soporte",
+  "agent",
+  "agente",
+  "helpdesk",
+  "operator",
+  "operador",
+  "technician",
+  "technical",
+  "tecnico",
+  "técnico",
+  "staff",
+]);
 
-const AUTH_ROUTE_PATHS =
-  new Set([
-    "/login",
-    "/signin",
-    "/sign-in",
-    "/auth",
-    "/auth/login",
-    "/2fa",
-    "/otp",
-  ]);
+const MANAGER_ALIASES = new Set([
+  "manager",
+  "gestor",
+  "gerente",
+  "lead",
+  "leader",
+  "team_lead",
+  "team-lead",
+  "supervisor",
+  "responsable",
+]);
 
-const AUTH_ROUTE_PREFIXES =
-  Object.freeze([
-    "/auth/",
-  ]);
+const TOKEN_KEYS = [
+  "token",
+  "accessToken",
+  "access_token",
+  "jwt",
+  "idToken",
+  "id_token",
+  "bearer",
+];
 
-const ADMIN_ROLE_KEYS =
-  new Set([
-    "admin",
-    "administrator",
-    "administrador",
+const USER_ID_KEYS = [
+  "id",
+  "userId",
+  "user_id",
+  "_id",
+  "uid",
+  "sub",
+  "username",
+  "userName",
+  "user_name",
+  "email",
+  "mail",
+  "phone",
+  "telefono",
+  "mobile",
+  "displayName",
+  "name",
+  "nombre",
+];
 
-    "superadmin",
-    "super_admin",
-    "super_administrador",
-    "super-administrador",
+const TOKEN_FALSE_VALUES = new Set([
+  "",
+  "null",
+  "undefined",
+  "false",
+  "true",
+  "none",
+  "nan",
+  "[object object]",
+  "{}",
+  "[]",
+]);
 
-    "owner",
-    "root",
-  ]);
+const SENSITIVE_QUERY_PARAMS = [
+  "token",
+  "activationToken",
+  "activateToken",
+  "resetToken",
+  "passwordResetToken",
+  "confirmToken",
+  "code",
+  "t",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "tempToken",
+  "temp_token",
+  "temporaryToken",
+  "temporary_token",
+  "twoFactorToken",
+  "two_factor_token",
+  "mfaToken",
+  "mfa_token",
+  "otpToken",
+  "otp_token",
+];
 
-const SUPPORT_ROLE_KEYS =
-  new Set([
-    "support",
-    "soporte",
-
-    "agent",
-    "agente",
-
-    "helpdesk",
-
-    "operator",
-    "operador",
-
-    "technician",
-    "tecnico",
-    "tecnica",
-  ]);
-
-const MANAGER_ROLE_KEYS =
-  new Set([
-    "manager",
-    "gestor",
-    "gerente",
-    "lead",
-    "leader",
-    "responsable",
-  ]);
-
-const ROLE_GROUPS =
-  Object.freeze({
-    admin:
-      ADMIN_ROLE_KEYS,
-
-    support:
-      SUPPORT_ROLE_KEYS,
-
-    manager:
-      MANAGER_ROLE_KEYS,
-  });
-
-const TOKEN_KEYS =
-  Object.freeze([
-    "token",
-    "accessToken",
-    "access_token",
-    "jwt",
-    "idToken",
-    "id_token",
-    "bearer",
-  ]);
-
-const USER_ID_KEYS =
-  Object.freeze([
-    "id",
-    "userId",
-    "user_id",
-    "_id",
-    "uid",
-    "sub",
-    "username",
-    "userName",
-    "user_name",
-    "email",
-    "mail",
-    "phone",
-    "telefono",
-    "mobile",
-  ]);
-
-const SENSITIVE_QUERY_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "resetToken",
-    "passwordResetToken",
-    "confirmToken",
-    "code",
-    "t",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
-  ]);
-
-export const GUARD_REASONS =
-  Object.freeze({
-    allow:
-      "allowed",
-
-    routeNotFound:
-      "route-not-found-delegated-to-router",
-
-    publicTechnical:
-      "public-technical-route",
-
-    alreadyAuthenticated:
-      "already-authenticated",
-
-    notAuthenticated:
-      "not-authenticated",
-
-    insufficientRole:
-      "insufficient-role",
-
-    loginTransition:
-      "login-transition-active",
-
-    ghostAuth:
-      "ghost-auth-blocked",
-  });
-
-/* =========================================================
-   SAFE HELPERS
-========================================================= */
+export const GUARD_REASONS = Object.freeze({
+  allow: "allowed",
+  routeNotFound: "route-not-found-delegated-to-router",
+  publicTechnical: "public-technical-route",
+  alreadyAuthenticated: "already-authenticated",
+  notAuthenticated: "not-authenticated",
+  insufficientRole: "insufficient-role",
+  loginTransition: "login-transition-active",
+  ghostAuth: "ghost-auth-blocked",
+});
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function isFunction(value) {
+function isFn(value) {
   return typeof value === "function";
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value).trim();
-
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
   return text || fallback;
 }
 
 function safeObject(value) {
-  return isObject(value)
-    ? value
-    : {};
-}
-
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return isObject(value) ? value : {};
 }
 
 function toArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return [];
-  }
-
+  if (Array.isArray(value)) return value;
+  if (value === null || value === undefined || value === "") return [];
   return [value];
 }
 
 function first(...values) {
   for (const value of values) {
-    if (
-      value === undefined ||
-      value === null
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && !value.trim()) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
     return value;
   }
 
   return null;
 }
 
-function safeBoolean(value, fallback = false) {
-  if (typeof value === "boolean") {
-    return value;
-  }
+function bool(value, fallback = false) {
+  if (typeof value === "boolean") return value;
 
   if (typeof value === "number") {
     if (value === 1) return true;
     if (value === 0) return false;
   }
 
-  if (typeof value === "string") {
-    const key =
-      value.trim().toLowerCase();
+  const text = safeText(value, "").toLowerCase();
 
-    if (
-      [
-        "true",
-        "1",
-        "yes",
-        "si",
-        "sí",
-        "ok",
-        "on",
-      ].includes(key)
-    ) {
-      return true;
-    }
+  if (["true", "1", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(text)) {
+    return true;
+  }
 
-    if (
-      [
-        "false",
-        "0",
-        "no",
-        "off",
-      ].includes(key)
-    ) {
-      return false;
-    }
+  if (["false", "0", "no", "off", "disabled", "inactive"].includes(text)) {
+    return false;
   }
 
   return fallback;
 }
 
 function unique(values = []) {
-  return Array.from(
-    new Set(
-      safeArray(values)
-        .map((value) => safeText(value, ""))
-        .filter(Boolean)
-    )
-  );
+  return [...new Set(values.flat(Infinity).map((item) => safeText(item, "")).filter(Boolean))];
 }
 
-function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
-    return window.location.origin;
-  }
-
+function baseOrigin() {
+  if (isBrowser() && window.location?.origin) return window.location.origin;
   return "http://localhost";
 }
 
 /* =========================================================
-   PATH / URL HELPERS
+   PATHS
 ========================================================= */
 
-function normalizePathnameOnly(pathname = "/") {
-  let value =
-    safeText(pathname, "/")
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
+function normalizePathname(pathname = "/") {
+  let value = safeText(pathname, "/")
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
-  if (!value) {
-    value = "/";
-  }
+  if (!value.startsWith("/")) value = `/${value}`;
 
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
-  }
+  const stack = [];
 
-  const segments =
-    value
-      .split("/")
-      .filter(Boolean);
-
-  const output = [];
-
-  for (const segment of segments) {
-    if (segment === ".") {
+  for (const part of value.split("/").filter(Boolean)) {
+    if (part === ".") continue;
+    if (part === "..") {
+      stack.pop();
       continue;
     }
 
-    if (segment === "..") {
-      output.pop();
-      continue;
-    }
-
-    output.push(segment);
+    stack.push(part);
   }
 
-  value =
-    `/${output.join("/")}`;
-
-  if (!value) {
-    value = "/";
-  }
-
-  if (value.length > 1) {
-    value =
-      value.replace(/\/+$/g, "") || "/";
-  }
-
-  return value;
-}
-
-function normalizeSearch(search = "") {
-  const value =
-    safeText(search, "");
-
-  if (!value) {
-    return "";
-  }
-
-  return value.startsWith("?")
-    ? value
-    : `?${value.replace(/^\?+/, "")}`;
-}
-
-function normalizeHash(hash = "") {
-  const value =
-    safeText(hash, "");
-
-  if (!value) {
-    return "";
-  }
-
-  return value.startsWith("#")
-    ? value
-    : `#${value.replace(/^#+/, "")}`;
+  value = `/${stack.join("/")}`;
+  return value.length > 1 ? value.replace(/\/+$/g, "") : value;
 }
 
 function isHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  return (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  );
+  const raw = safeText(value, "");
+  return raw.startsWith("#/") || raw.startsWith("#!");
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return "/";
-  }
-
-  if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/") || "/";
-  }
-
+  const raw = safeText(value, "");
+  if (!raw) return "/";
+  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
   return raw.replace(/^#\/?/, "/") || "/";
 }
 
 function splitPath(path = "/") {
-  const raw =
-    safeText(path, "/") || "/";
+  let raw = safeText(path, "/") || "/";
 
   if (isHashRouterPath(raw)) {
-    return splitPath(
-      normalizeHashRouterPath(raw)
-    );
+    raw = normalizeHashRouterPath(raw);
   }
 
-  let pathname =
-    raw;
+  let pathname = raw;
+  let search = "";
+  let hash = "";
 
-  let search =
-    "";
-
-  let hash =
-    "";
-
-  const hashIndex =
-    pathname.indexOf("#");
-
+  const hashIndex = pathname.indexOf("#");
   if (hashIndex >= 0) {
-    hash =
-      pathname.slice(hashIndex);
-
-    pathname =
-      pathname.slice(0, hashIndex) || "/";
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || "/";
   }
 
-  const searchIndex =
-    pathname.indexOf("?");
-
+  const searchIndex = pathname.indexOf("?");
   if (searchIndex >= 0) {
-    search =
-      pathname.slice(searchIndex);
-
-    pathname =
-      pathname.slice(0, searchIndex) || "/";
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || "/";
   }
 
   return {
-    pathname:
-      normalizePathnameOnly(pathname),
-    search:
-      normalizeSearch(search),
-    hash:
-      normalizeHash(hash),
+    pathname: normalizePathname(pathname),
+    search: search ? (search.startsWith("?") ? search : `?${search}`) : "",
+    hash: hash ? (hash.startsWith("#") ? hash : `#${hash}`) : "",
   };
 }
 
 function normalizeFullPath(path = "/") {
-  const raw =
-    safeText(path, "/") || "/";
+  let raw = safeText(path, "/") || "/";
 
   if (isHashRouterPath(raw)) {
-    return normalizeFullPath(
-      normalizeHashRouterPath(raw)
-    );
+    return normalizeFullPath(normalizeHashRouterPath(raw));
   }
 
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
     try {
-      const parsed =
-        new URL(
-          raw,
-          getBaseOrigin()
-        );
+      const parsed = new URL(raw, baseOrigin());
 
-      if (
-        parsed.hash &&
-        isHashRouterPath(parsed.hash)
-      ) {
-        return normalizeFullPath(
-          normalizeHashRouterPath(parsed.hash)
-        );
+      if (parsed.origin !== baseOrigin()) return "/";
+
+      if (parsed.hash && isHashRouterPath(parsed.hash)) {
+        return normalizeFullPath(normalizeHashRouterPath(parsed.hash));
       }
 
-      return normalizeFullPath(
-        `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
-      );
+      raw = `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`;
     } catch {
       return "/";
     }
   }
 
-  const {
-    pathname,
-    search,
-    hash,
-  } = splitPath(raw);
-
+  const { pathname, search, hash } = splitPath(raw);
   return `${pathname}${search}${hash}`;
 }
 
 function stripSearchAndHash(path = "/") {
-  const normalized =
-    normalizeFullPath(path || "/");
-
-  const clean =
-    normalized
-      .split("?")[0]
-      .split("#")[0] || "/";
-
-  return normalizePathnameOnly(clean);
+  return splitPath(normalizeFullPath(path)).pathname;
 }
 
-function stripPublicUsernamePrefix(path = "/") {
-  const {
-    pathname,
-    search,
-    hash,
-  } = splitPath(
-    normalizeFullPath(path || "/")
-  );
-
-  const clean =
-    pathname.replace(/^\/@[^/]+(?=\/|$)/i, "") ||
-    "/";
-
-  return `${normalizePathnameOnly(clean)}${search}${hash}`;
+function stripUsernamePrefix(path = "/") {
+  const { pathname, search, hash } = splitPath(normalizeFullPath(path));
+  const clean = pathname.replace(/^\/@[^/]+(?=\/|$)/i, "") || "/";
+  return `${normalizePathname(clean)}${search}${hash}`;
 }
 
 function normalizePublicPath(path = "/") {
-  const normalized =
-    normalizeFullPath(path || "/");
-
-  if (!normalized.startsWith("/")) {
-    return `/${normalized}`;
-  }
-
-  return normalized;
+  return normalizeFullPath(path || "/");
 }
 
-function safeCanonicalPath(AppCore = null, path = "/") {
-  const source =
-    stripPublicUsernamePrefix(path || "/");
+function normalizeCanonical(AppCore = null, path = "/") {
+  const source = stripUsernamePrefix(path);
 
   try {
-    const normalized =
-      normalizeCanonicalPath(
-        AppCore,
-        source
-      );
-
-    return stripSearchAndHash(
-      normalized || source || "/"
-    );
+    const normalized = normalizeCanonicalPathHelper(AppCore, source);
+    return stripSearchAndHash(normalized || source || "/");
   } catch {
-    return stripSearchAndHash(source);
+    return stripSearchAndHash(source || "/");
   }
 }
 
-function sameCanonicalPath(a = "/", b = "/") {
-  return (
-    stripSearchAndHash(a) ===
-    stripSearchAndHash(b)
-  );
+function sameCanonical(a = "/", b = "/") {
+  return stripSearchAndHash(a) === stripSearchAndHash(b);
+}
+
+function hasEncodedRedirectRisk(value = "") {
+  const raw = safeText(value, "");
+  const lower = raw.toLowerCase();
+
+  if (
+    lower.includes("%0d") ||
+    lower.includes("%0a") ||
+    lower.includes("%09") ||
+    lower.includes("%5c") ||
+    raw.includes("\\")
+  ) {
+    return true;
+  }
+
+  try {
+    const decoded = decodeURIComponent(raw).replace(/\\/g, "/").trim();
+
+    return Boolean(
+      decoded.startsWith("//") ||
+        /^[a-z][a-z0-9+.-]*:/i.test(decoded) ||
+        /[\r\n\t]/.test(decoded)
+    );
+  } catch {
+    return true;
+  }
 }
 
 function isSafeRelativePath(path = "") {
-  const raw =
-    safeText(path, "");
+  const raw = safeText(path, "");
 
-  if (!raw) return false;
-  if (!raw.startsWith("/")) return false;
-  if (raw.startsWith("//")) return false;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return false;
-  if (/[\r\n\t\\]/.test(raw)) return false;
-
-  return true;
+  return Boolean(
+    raw &&
+      raw.startsWith("/") &&
+      !raw.startsWith("//") &&
+      !/^[a-z][a-z0-9+.-]*:/i.test(raw) &&
+      !/[\r\n\t\\]/.test(raw) &&
+      !hasEncodedRedirectRisk(raw)
+  );
 }
 
 function normalizeRedirectCandidate(path = "") {
-  const raw =
-    safeText(path, "");
+  const raw = safeText(path, "");
 
-  if (!raw) {
-    return "";
-  }
-
-  if (raw.startsWith("//")) {
-    return "";
-  }
+  if (!raw || raw.startsWith("//")) return "";
 
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
     try {
-      const parsed =
-        new URL(
-          raw,
-          getBaseOrigin()
-        );
-
-      if (parsed.origin !== getBaseOrigin()) {
-        return "";
-      }
-
-      return normalizeFullPath(
-        `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
-      );
+      const parsed = new URL(raw, baseOrigin());
+      if (parsed.origin !== baseOrigin()) return "";
+      return normalizeFullPath(`${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`);
     } catch {
       return "";
     }
   }
 
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-    return "";
-  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return "";
 
   return normalizeFullPath(raw);
 }
 
-function sanitizeRedirectTarget(path = "", fallback = "") {
-  const candidate =
-    normalizeRedirectCandidate(path);
+function safeRedirect(path = "", fallback = "") {
+  const candidate = normalizeRedirectCandidate(path);
+  if (candidate && isSafeRelativePath(candidate)) return candidate;
 
-  if (
-    candidate &&
-    isSafeRelativePath(candidate)
-  ) {
-    return candidate;
-  }
-
-  const safeFallback =
-    normalizeRedirectCandidate(fallback);
-
-  if (
-    safeFallback &&
-    isSafeRelativePath(safeFallback)
-  ) {
-    return safeFallback;
-  }
+  const safeFallback = normalizeRedirectCandidate(fallback);
+  if (safeFallback && isSafeRelativePath(safeFallback)) return safeFallback;
 
   return "";
 }
 
-function redactTokenInText(value = "") {
-  let output =
-    safeText(value, "");
+function redact(value = "") {
+  let output = safeText(value, "");
 
-  if (!output) {
-    return "";
-  }
-
-  for (const name of SENSITIVE_QUERY_PARAM_NAMES) {
+  for (const name of SENSITIVE_QUERY_PARAMS) {
     try {
-      const escaped =
-        String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-      output =
-        output.replace(
-          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
-          "$1***"
-        );
+      const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      output = output.replace(new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"), "$1***");
     } catch {}
   }
 
   try {
-    output =
-      output.replace(
-        /(\/activate-account\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
-  } catch {}
-
-  try {
-    output =
-      output.replace(
-        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
-  } catch {}
-
-  try {
-    output =
-      output.replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      );
+    output = output
+      .replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***")
+      .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***")
+      .replace(/(\/password-reset\/confirm\/)([^/?#\s]+)/gi, "$1***")
+      .replace(/(\/(?:2fa|otp|mfa)\/)([^/?#\s]+)/gi, "$1***")
+      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
   } catch {}
 
   return output;
 }
 
 /* =========================================================
-   RUNTIME FLAGS
+   RUNTIME
 ========================================================= */
 
 function getRuntimeFlags(AppCore = null) {
-  const state =
-    safeObject(AppCore?.state);
+  const state = safeObject(AppCore?.state);
 
   return {
-    loginInProgress:
-      Boolean(
-        state.loginInProgress ||
-          state.authLoginInProgress ||
-          state.isLoggingIn ||
-          state.loggingIn
-      ),
-
-    loginNavigationHandled:
-      Boolean(
-        state.loginNavigationHandled ||
-          state.authLoginNavigationHandled
-      ),
-
-    bootNavigationHandled:
-      Boolean(
-        state.bootNavigationHandled
-      ),
-
-    initialRouteRendered:
-      Boolean(
-        state.initialRouteRendered
-      ),
-
-    restoring:
-      Boolean(
-        state.restoring ||
-          state.authRestoring ||
-          state.sessionRestoring ||
-          state.restoreInFlight ||
-          state.authRestoreInFlight
-      ),
-
-    booting:
-      Boolean(
-        state.booting ||
-          state.loading ||
-          state.bootPhase === "booting" ||
-          state.bootPhase === "restoring"
-      ),
+    loginInProgress: Boolean(state.loginInProgress || state.authLoginInProgress || state.isLoggingIn || state.loggingIn),
+    loginNavigationHandled: Boolean(state.loginNavigationHandled || state.authLoginNavigationHandled),
+    bootNavigationHandled: Boolean(state.bootNavigationHandled),
+    initialRouteRendered: Boolean(state.initialRouteRendered),
+    restoring: Boolean(state.restoring || state.authRestoring || state.sessionRestoring || state.restoreInFlight || state.authRestoreInFlight),
+    booting: Boolean(state.booting || state.loading || state.bootPhase === "booting" || state.bootPhase === "restoring"),
   };
 }
 
-function isLoginTransitionActive(AppCore = null) {
-  const flags =
-    getRuntimeFlags(AppCore);
-
-  return Boolean(
-    flags.loginInProgress ||
-      flags.loginNavigationHandled
-  );
+function loginTransitionActive(AppCore = null) {
+  const flags = getRuntimeFlags(AppCore);
+  return Boolean(flags.loginInProgress || flags.loginNavigationHandled);
 }
 
 /* =========================================================
-   ROLE NORMALIZATION
+   ROLES
 ========================================================= */
 
-function normalizeRole(value) {
+function normalizeRole(value = "") {
   return safeText(value, "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[\s-]+/g, "_")
     .replace(/[^a-z0-9_:.]/g, "")
-    .trim();
+    .replace(/^_+|_+$/g, "");
 }
 
-function normalizeRoleToken(value) {
-  if (isObject(value)) {
-    return normalizeRole(
-      first(
-        value.role,
-        value.rol,
-        value.name,
-        value.key,
-        value.id,
-        value.value,
-        value.authority,
-        value.permission,
-        ""
-      )
-    );
+function truthyKeys(value = {}) {
+  if (!isObject(value)) return [];
+
+  return Object.entries(value)
+    .filter(([, item]) => bool(item, false))
+    .map(([key]) => key);
+}
+
+function roleTokens(value) {
+  if (Array.isArray(value)) {
+    return value.flatMap(roleTokens);
   }
 
-  return normalizeRole(value);
+  if (isObject(value)) {
+    const explicit = first(value.role, value.rol, value.name, value.key, value.id, value.value, value.authority, value.permission);
+    return explicit ? [explicit, ...truthyKeys(value)] : truthyKeys(value);
+  }
+
+  if (typeof value === "string") {
+    return value.split(/[,\s|]+/g);
+  }
+
+  return toArray(value);
 }
 
 export function normalizeGuardRoles(value) {
-  if (typeof value === "string") {
-    return value
-      .split(/[,\s|]+/)
-      .map(normalizeRole)
-      .filter(Boolean);
-  }
-
-  return toArray(value)
-    .flat(Infinity)
-    .map(normalizeRoleToken)
-    .filter(Boolean);
+  return roleTokens(value).map(normalizeRole).filter(Boolean);
 }
 
-function isAdminRole(value = "") {
-  return ADMIN_ROLE_KEYS.has(
-    normalizeRole(value)
-  );
+function isAdminRole(role = "") {
+  return ADMIN_ALIASES.has(normalizeRole(role));
 }
 
-function isSupportRole(value = "") {
-  return SUPPORT_ROLE_KEYS.has(
-    normalizeRole(value)
-  );
+function isUserRole(role = "") {
+  return USER_ALIASES.has(normalizeRole(role));
 }
 
-function isManagerRole(value = "") {
-  return MANAGER_ROLE_KEYS.has(
-    normalizeRole(value)
-  );
+function isSupportRole(role = "") {
+  return SUPPORT_ALIASES.has(normalizeRole(role));
 }
 
-function expandRoleAliases(roles = []) {
-  const normalized =
-    normalizeGuardRoles(roles);
+function isManagerRole(role = "") {
+  return MANAGER_ALIASES.has(normalizeRole(role));
+}
 
-  const result =
-    new Set(normalized);
+function expandRoles(roles = []) {
+  const normalized = normalizeGuardRoles(roles);
+  const result = new Set(normalized);
 
   if (normalized.some(isAdminRole)) {
-    for (const role of ADMIN_ROLE_KEYS) {
-      result.add(role);
-    }
-
     result.add("admin");
+    ADMIN_ALIASES.forEach((role) => result.add(role));
+  }
+
+  if (normalized.some(isUserRole)) {
+    result.add("user");
+    USER_ALIASES.forEach((role) => result.add(role));
   }
 
   if (normalized.some(isSupportRole)) {
-    for (const role of SUPPORT_ROLE_KEYS) {
-      result.add(role);
-    }
-
     result.add("support");
+    SUPPORT_ALIASES.forEach((role) => result.add(role));
   }
 
   if (normalized.some(isManagerRole)) {
-    for (const role of MANAGER_ROLE_KEYS) {
-      result.add(role);
-    }
-
     result.add("manager");
+    MANAGER_ALIASES.forEach((role) => result.add(role));
   }
 
-  for (const role of normalized) {
-    const group =
-      ROLE_GROUPS[role];
+  return unique([...result]);
+}
 
-    if (group instanceof Set) {
-      for (const item of group) {
-        result.add(item);
-      }
-    }
-  }
+function canonicalRole(roles = []) {
+  const expanded = expandRoles(roles);
 
-  return unique(
-    Array.from(result)
-  );
+  if (expanded.some(isAdminRole)) return "admin";
+  if (expanded.some(isSupportRole)) return "support";
+  if (expanded.some(isManagerRole)) return "manager";
+  if (expanded.some(isUserRole)) return "user";
+
+  return expanded[0] || "";
 }
 
 /* =========================================================
    ROUTE META
 ========================================================= */
 
-function routeMeta(route) {
-  return isObject(route?.meta)
-    ? route.meta
-    : {};
+function metaOf(route) {
+  return isObject(route?.meta) ? route.meta : {};
 }
 
-function getRoutePath(route) {
-  return stripSearchAndHash(
-    first(
-      route?.path,
-      route?.canonicalPath,
-      "/"
-    )
-  );
+function routePath(route) {
+  return stripSearchAndHash(first(route?.path, route?.canonicalPath, "/"));
 }
 
-function isRouteExplicitlyPublic(route) {
-  const meta =
-    routeMeta(route);
+function isExplicitPublic(route) {
+  const meta = metaOf(route);
 
-  if (typeof route?.public === "boolean") {
-    return route.public;
-  }
+  if (typeof route?.public === "boolean") return route.public;
+  if (typeof meta.public === "boolean") return meta.public;
 
-  if (typeof meta.public === "boolean") {
-    return meta.public;
-  }
-
-  if (typeof route?.requiresAuth === "boolean") {
-    return route.requiresAuth === false;
-  }
-
-  if (typeof meta.requiresAuth === "boolean") {
-    return meta.requiresAuth === false;
-  }
+  if (typeof route?.requiresAuth === "boolean") return route.requiresAuth === false;
+  if (typeof meta.requiresAuth === "boolean") return meta.requiresAuth === false;
 
   return false;
 }
 
-function isRouteExplicitlyPrivate(route) {
-  const meta =
-    routeMeta(route);
+function isExplicitPrivate(route) {
+  const meta = metaOf(route);
 
-  if (typeof route?.requiresAuth === "boolean") {
-    return route.requiresAuth;
-  }
+  if (typeof route?.requiresAuth === "boolean") return route.requiresAuth;
+  if (typeof meta.requiresAuth === "boolean") return meta.requiresAuth;
 
-  if (typeof route?.private === "boolean") {
-    return route.private;
-  }
+  if (typeof route?.private === "boolean") return route.private;
+  if (typeof meta.private === "boolean") return meta.private;
 
-  if (typeof meta.requiresAuth === "boolean") {
-    return meta.requiresAuth;
-  }
-
-  if (typeof meta.private === "boolean") {
-    return meta.private;
-  }
+  if (route?.public === false || meta.public === false) return true;
 
   return false;
 }
 
-function getRouteRoles(route) {
-  const meta =
-    routeMeta(route);
+function routeRoles(route) {
+  const meta = metaOf(route);
 
-  const roleCandidates = [
+  const roles = [
     route?.role,
     route?.requiredRole,
     route?.requireRole,
     route?.allowedRole,
-
     meta.role,
     meta.requiredRole,
     meta.requireRole,
     meta.allowedRole,
+
+    ...toArray(route?.roles),
+    ...toArray(route?.allowRoles),
+    ...toArray(route?.allowedRoles),
+    ...toArray(route?.requiredRoles),
+    ...toArray(route?.requireRoles),
+
+    ...toArray(meta.roles),
+    ...toArray(meta.allowRoles),
+    ...toArray(meta.allowedRoles),
+    ...toArray(meta.requiredRoles),
+    ...toArray(meta.requireRoles),
   ];
 
-  const roleArrays = [
-    route?.roles,
-    route?.allowRoles,
-    route?.allowedRoles,
-    route?.requiredRoles,
-    route?.requireRoles,
-
-    meta.roles,
-    meta.allowRoles,
-    meta.allowedRoles,
-    meta.requiredRoles,
-    meta.requireRoles,
-  ];
-
-  const roles = [
-    ...roleCandidates,
-    ...roleArrays.flatMap((value) =>
-      toArray(value)
-    ),
-  ];
-
-  if (
-    safeBoolean(route?.admin, false) ||
-    safeBoolean(route?.requiresAdmin, false) ||
-    safeBoolean(meta.admin, false) ||
-    safeBoolean(meta.requiresAdmin, false)
-  ) {
+  if (bool(route?.admin, false) || bool(route?.requiresAdmin, false) || bool(meta.admin, false) || bool(meta.requiresAdmin, false)) {
     roles.push("admin");
   }
 
-  if (
-    safeBoolean(route?.support, false) ||
-    safeBoolean(route?.requiresSupport, false) ||
-    safeBoolean(meta.support, false) ||
-    safeBoolean(meta.requiresSupport, false)
-  ) {
+  if (bool(route?.user, false) || bool(route?.requiresUser, false) || bool(meta.user, false) || bool(meta.requiresUser, false)) {
+    roles.push("user");
+  }
+
+  if (bool(route?.support, false) || bool(route?.requiresSupport, false) || bool(meta.support, false) || bool(meta.requiresSupport, false)) {
     roles.push("support");
   }
 
-  if (
-    safeBoolean(route?.manager, false) ||
-    safeBoolean(route?.requiresManager, false) ||
-    safeBoolean(meta.manager, false) ||
-    safeBoolean(meta.requiresManager, false)
-  ) {
+  if (bool(route?.manager, false) || bool(route?.requiresManager, false) || bool(meta.manager, false) || bool(meta.requiresManager, false)) {
     roles.push("manager");
   }
 
-  return expandRoleAliases(roles);
+  return expandRoles(roles);
 }
 
 function routeRequiresAuth(route) {
-  if (isRouteExplicitlyPrivate(route)) {
-    return true;
-  }
+  if (!route) return false;
+  if (isExplicitPrivate(route)) return true;
+  if (routeRoles(route).length) return true;
+  if (isExplicitPublic(route)) return false;
 
-  if (getRouteRoles(route).length > 0) {
-    return true;
-  }
-
-  if (isRouteExplicitlyPublic(route)) {
-    return false;
-  }
-
-  /*
-    Política actual:
-    rutas públicas por defecto.
-    Las rutas privadas reales deben declarar requiresAuth/private
-    o roles.
-  */
   return false;
 }
 
 function routeGuestOnly(route, canonicalPath = "/") {
-  const meta =
-    routeMeta(route);
+  const meta = metaOf(route);
+  const clean = stripSearchAndHash(canonicalPath);
+  const path = routePath(route);
 
-  const routePath =
-    getRoutePath(route);
+  if (AUTH_GUEST_ROUTES.has(clean) || AUTH_GUEST_ROUTES.has(path)) return true;
 
-  const cleanCanonical =
-    stripSearchAndHash(canonicalPath);
-
-  if (
-    AUTH_ROUTE_PATHS.has(routePath) ||
-    AUTH_ROUTE_PATHS.has(cleanCanonical)
-  ) {
-    return true;
-  }
-
-  return Boolean(
-    route?.guestOnly ??
-      route?.publicOnly ??
-      meta.guestOnly ??
-      meta.publicOnly ??
-      false
-  );
+  return Boolean(route?.guestOnly || route?.publicOnly || meta.guestOnly || meta.publicOnly);
 }
 
 /* =========================================================
-   PUBLIC TECHNICAL ROUTES
+   PUBLIC TECHNICAL
 ========================================================= */
 
 function isPublicTechnicalPath(path = "/") {
-  const clean =
-    stripSearchAndHash(
-      stripPublicUsernamePrefix(path)
-    );
+  const clean = stripSearchAndHash(stripUsernamePrefix(path));
 
-  if (PUBLIC_TECHNICAL_ROUTES.has(clean)) {
-    return true;
-  }
+  if (PUBLIC_TECHNICAL_ROUTES.has(clean)) return true;
 
-  return PUBLIC_TECHNICAL_PREFIXES.some((prefix) =>
-    clean.startsWith(prefix)
-  );
+  return TECHNICAL_PREFIXES.some((prefix) => clean.startsWith(prefix));
 }
 
 function isAuthRoutePath(path = "/") {
-  const clean =
-    stripSearchAndHash(
-      stripPublicUsernamePrefix(path)
-    );
+  const clean = stripSearchAndHash(stripUsernamePrefix(path));
 
-  if (AUTH_ROUTE_PATHS.has(clean)) {
-    return true;
-  }
-
-  return AUTH_ROUTE_PREFIXES.some((prefix) =>
-    clean.startsWith(prefix)
-  );
+  if (AUTH_GUEST_ROUTES.has(clean)) return true;
+  return clean.startsWith("/auth/");
 }
 
 function isPublicTechnicalRoute(route, canonicalPath = "/", publicPath = null) {
-  const canonical =
-    stripSearchAndHash(canonicalPath);
-
-  const visible =
-    stripSearchAndHash(publicPath || canonicalPath);
-
-  const routePath =
-    getRoutePath(route);
-
-  if (
-    isPublicTechnicalPath(canonical) ||
-    isPublicTechnicalPath(visible) ||
-    isPublicTechnicalPath(routePath)
-  ) {
-    return true;
-  }
-
-  if (
-    route &&
-    isRouteExplicitlyPublic(route) &&
-    (
-      isPublicTechnicalPath(route.path) ||
-      isPublicTechnicalPath(route.canonicalPath)
-    )
-  ) {
-    return true;
-  }
-
-  return false;
+  return Boolean(
+    isPublicTechnicalPath(canonicalPath) ||
+      isPublicTechnicalPath(publicPath || canonicalPath) ||
+      isPublicTechnicalPath(routePath(route)) ||
+      (route && isExplicitPublic(route) && isPublicTechnicalPath(route.path || route.canonicalPath || ""))
+  );
 }
 
 /* =========================================================
-   AUTH / USER RESOLUTION
+   AUTH STATE
 ========================================================= */
 
-function getAuthUser(Auth = null) {
+function authUser(Auth = null) {
   try {
-    if (isFunction(Auth?.getUser)) {
-      return safeObject(Auth.getUser());
-    }
+    if (isFn(Auth?.getUser)) return safeObject(Auth.getUser());
   } catch {}
 
   try {
-    if (isFunction(Auth?.getCurrentUser)) {
-      return safeObject(Auth.getCurrentUser());
-    }
+    if (isFn(Auth?.getCurrentUser)) return safeObject(Auth.getCurrentUser());
   } catch {}
 
   try {
-    if (isFunction(Auth?.currentUser)) {
-      return safeObject(Auth.currentUser());
-    }
+    if (isFn(Auth?.currentUser)) return safeObject(Auth.currentUser());
   } catch {}
 
-  try {
-    if (Auth?.session?.user) {
-      return safeObject(Auth.session.user);
-    }
-  } catch {}
-
-  try {
-    if (Auth?.user) {
-      return safeObject(Auth.user);
-    }
-  } catch {}
-
-  return {};
+  return safeObject(Auth?.session?.user || Auth?.user || {});
 }
 
-function getCurrentUser(AppCore = null, Auth = null) {
+function currentUser(AppCore = null, Auth = null) {
   return safeObject(
     first(
       AppCore?.state?.user,
@@ -1248,37 +744,30 @@ function getCurrentUser(AppCore = null, Auth = null) {
       AppCore?.state?.sessionUser,
       AppCore?.state?.authUser,
       AppCore?.state?.session?.user,
-      getAuthUser(Auth)
+      authUser(Auth)
     )
   );
 }
 
-function getAuthToken(Auth = null) {
+function authToken(Auth = null) {
   try {
-    if (isFunction(Auth?.getToken)) {
-      return safeText(Auth.getToken(), "");
-    }
+    if (isFn(Auth?.getToken)) return safeText(Auth.getToken(), "");
   } catch {}
 
   try {
-    if (isFunction(Auth?.getAccessToken)) {
-      return safeText(Auth.getAccessToken(), "");
-    }
+    if (isFn(Auth?.getAccessToken)) return safeText(Auth.getAccessToken(), "");
   } catch {}
 
   try {
-    if (isFunction(Auth?.getAuthHeader)) {
-      const header =
-        safeText(Auth.getAuthHeader(), "");
+    if (isFn(Auth?.getAuthHeader)) {
+      const header = Auth.getAuthHeader();
 
-      const match =
-        header.match(/^Bearer\s+(.+)$/i);
-
-      if (match?.[1]) {
-        return safeText(match[1], "");
+      if (isObject(header)) {
+        const auth = header.Authorization || header.authorization || "";
+        return safeText(auth, "").replace(/^Bearer\s+/i, "").trim();
       }
 
-      return header;
+      return safeText(header, "").replace(/^Bearer\s+/i, "").trim();
     }
   } catch {}
 
@@ -1295,102 +784,126 @@ function getAuthToken(Auth = null) {
   );
 }
 
-function getCurrentToken(AppCore = null, Auth = null) {
-  const state =
-    safeObject(AppCore?.state);
+function currentToken(AppCore = null, Auth = null) {
+  const state = safeObject(AppCore?.state);
+  const session = safeObject(state.session);
 
-  const session =
-    safeObject(state.session);
-
-  const token =
+  return safeText(
     first(
       ...TOKEN_KEYS.map((key) => state[key]),
       ...TOKEN_KEYS.map((key) => session[key]),
-      getAuthToken(Auth)
-    );
-
-  return safeText(token, "");
+      authToken(Auth)
+    ),
+    ""
+  );
 }
 
-function hasUsableToken(token = "") {
-  const text =
-    safeText(token, "");
+function usableToken(token = "") {
+  let value = safeText(token, "").replace(/^Bearer\s+/i, "").trim();
 
-  if (!text) {
-    return false;
-  }
-
-  const lower =
-    text.toLowerCase();
-
-  if (
-    [
-      "null",
-      "undefined",
-      "false",
-      "true",
-      "nan",
-      "none",
-      "[object object]",
-    ].includes(lower)
-  ) {
-    return false;
-  }
-
-  if (/[\s\r\n\t]/.test(text)) {
-    return false;
-  }
+  if (!value) return false;
+  if (TOKEN_FALSE_VALUES.has(value.toLowerCase())) return false;
+  if (/[\s\r\n\t]/.test(value)) return false;
+  if (value.length > 8192) return false;
 
   return true;
 }
 
-function hasUsableUser(user = null) {
+function userActive(user = null) {
+  if (!isObject(user)) return false;
+
+  const status = normalizeRole(first(user.status, user.estado, user.state, user.accountStatus, user.account_status, ""));
+
   if (
-    !user ||
-    typeof user !== "object" ||
-    Array.isArray(user)
+    [
+      "disabled",
+      "blocked",
+      "deleted",
+      "archived",
+      "inactive",
+      "suspended",
+      "locked",
+      "banned",
+      "deactivated",
+      "revoked",
+      "bloqueado",
+      "eliminado",
+      "inactivo",
+      "suspendido",
+      "desactivado",
+    ].includes(status)
   ) {
     return false;
   }
 
-  return USER_ID_KEYS.some((key) =>
-    Boolean(
-      safeText(user?.[key], "")
-    )
+  return !(
+    user.active === false ||
+    user.enabled === false ||
+    user.disabled === true ||
+    user.is_active === false ||
+    user.isActive === false ||
+    user.is_enabled === false ||
+    user.isEnabled === false ||
+    user.blocked === true ||
+    user.locked === true ||
+    user.deleted === true ||
+    user.archived === true ||
+    user.suspended === true ||
+    user.banned === true ||
+    user.revoked === true
   );
 }
 
-function getUserRoleCandidates(AppCore = null, Auth = null) {
-  const user =
-    getCurrentUser(AppCore, Auth);
+function usableUser(user = null) {
+  return Boolean(
+    isObject(user) &&
+      userActive(user) &&
+      USER_ID_KEYS.some((key) => safeText(user?.[key], ""))
+  );
+}
 
-  const state =
-    safeObject(AppCore?.state);
+function authApiAuthenticated(Auth = null) {
+  try {
+    if (isFn(Auth?.isAuthenticated)) return Boolean(Auth.isAuthenticated());
+  } catch {}
 
-  const session =
-    safeObject(state.session);
+  return Boolean(Auth?.authenticated || Auth?.isAuth || Auth?.session?.authenticated);
+}
 
-  const rawUser =
-    safeObject(user?.raw);
+function isAuthenticated(AppCore = null, Auth = null) {
+  return Boolean(
+    usableToken(currentToken(AppCore, Auth)) &&
+      usableUser(currentUser(AppCore, Auth))
+  );
+}
 
-  const profile =
-    safeObject(user?.profile);
+function hasGhostAuth(AppCore = null, Auth = null) {
+  const appSaysAuth = Boolean(AppCore?.state?.authenticated || authApiAuthenticated(Auth));
 
-  const rawProfile =
-    safeObject(rawUser?.profile);
+  return Boolean(
+    appSaysAuth &&
+      (
+        !usableToken(currentToken(AppCore, Auth)) ||
+        !usableUser(currentUser(AppCore, Auth))
+      )
+  );
+}
 
-  const roleCandidates = [
+function roleCandidates(AppCore = null, Auth = null) {
+  const user = currentUser(AppCore, Auth);
+  const state = safeObject(AppCore?.state);
+  const session = safeObject(state.session);
+  const raw = safeObject(user.raw);
+  const profile = safeObject(user.profile);
+  const rawProfile = safeObject(raw.profile);
+
+  const roles = [
     state.role,
     state.rol,
     state.userRole,
-    state.type,
-    state.perfil,
-
     session.role,
     session.rol,
     session.userRole,
-    session.type,
-    session.perfil,
 
     user.role,
     user.rol,
@@ -1407,14 +920,14 @@ function getUserRoleCandidates(AppCore = null, Auth = null) {
     profile.type,
     profile.perfil,
 
-    rawUser.role,
-    rawUser.rol,
-    rawUser.userRole,
-    rawUser.user_role,
-    rawUser.type,
-    rawUser.userType,
-    rawUser.user_type,
-    rawUser.perfil,
+    raw.role,
+    raw.rol,
+    raw.userRole,
+    raw.user_role,
+    raw.type,
+    raw.userType,
+    raw.user_type,
+    raw.perfil,
 
     rawProfile.role,
     rawProfile.rol,
@@ -1425,78 +938,52 @@ function getUserRoleCandidates(AppCore = null, Auth = null) {
     Auth?.role,
     Auth?.rol,
     Auth?.userRole,
+
+    ...toArray(state.roles),
+    ...toArray(state.permissions),
+    ...toArray(state.scopes),
+
+    ...toArray(session.roles),
+    ...toArray(session.permissions),
+    ...toArray(session.scopes),
+
+    ...toArray(user.roles),
+    ...toArray(user.roleList),
+    ...toArray(user.role_list),
+    ...toArray(user.permissions),
+    ...toArray(user.permisos),
+    ...toArray(user.scopes),
+    ...toArray(user.groups),
+    ...toArray(user.authorities),
+
+    ...toArray(profile.roles),
+    ...toArray(profile.permissions),
+    ...toArray(profile.scopes),
+
+    ...toArray(raw.roles),
+    ...toArray(raw.permissions),
+    ...toArray(raw.scopes),
+
+    ...toArray(rawProfile.roles),
+    ...toArray(rawProfile.permissions),
+    ...toArray(rawProfile.scopes),
+
+    ...toArray(Auth?.roles),
+    ...toArray(Auth?.permissions),
+    ...toArray(Auth?.scopes),
   ];
 
   try {
-    if (isFunction(Auth?.getRole)) {
-      roleCandidates.push(
-        Auth.getRole()
-      );
-    }
+    if (isFn(Auth?.getRole)) roles.push(Auth.getRole());
   } catch {}
 
   try {
-    if (isFunction(Auth?.getCurrentRole)) {
-      roleCandidates.push(
-        Auth.getCurrentRole()
-      );
-    }
+    if (isFn(Auth?.getCurrentRole)) roles.push(Auth.getCurrentRole());
   } catch {}
 
-  const roleArrays = [
-    state.roles,
-    state.permissions,
-    state.scopes,
-    state.groups,
-    state.authorities,
-
-    session.roles,
-    session.permissions,
-    session.scopes,
-    session.groups,
-    session.authorities,
-
-    user.roles,
-    user.roleList,
-    user.role_list,
-    user.permissions,
-    user.scopes,
-    user.groups,
-    user.authorities,
-
-    profile.roles,
-    profile.permissions,
-    profile.scopes,
-    profile.groups,
-    profile.authorities,
-
-    rawUser.roles,
-    rawUser.roleList,
-    rawUser.role_list,
-    rawUser.permissions,
-    rawUser.scopes,
-    rawUser.groups,
-    rawUser.authorities,
-
-    rawProfile.roles,
-    rawProfile.permissions,
-    rawProfile.scopes,
-    rawProfile.groups,
-    rawProfile.authorities,
-
-    Auth?.roles,
-    Auth?.permissions,
-    Auth?.scopes,
-    Auth?.groups,
-    Auth?.authorities,
-  ];
-
-  const roles = [
-    ...roleCandidates,
-    ...roleArrays.flatMap((value) =>
-      toArray(value)
-    ),
-  ];
+  try {
+    if (isFn(Auth?.getRoles)) roles.push(...toArray(Auth.getRoles()));
+  } catch {}
 
   const adminFlag = [
     state.isAdmin,
@@ -1527,12 +1014,12 @@ function getUserRoleCandidates(AppCore = null, Auth = null) {
     profile.canManageUsers,
     profile.canAccessUsers,
 
-    rawUser.isAdmin,
-    rawUser.admin,
-    rawUser.isSuperAdmin,
-    rawUser.superAdmin,
-    rawUser.canManageUsers,
-    rawUser.canAccessUsers,
+    raw.isAdmin,
+    raw.admin,
+    raw.isSuperAdmin,
+    raw.superAdmin,
+    raw.canManageUsers,
+    raw.canAccessUsers,
 
     rawProfile.isAdmin,
     rawProfile.admin,
@@ -1540,180 +1027,78 @@ function getUserRoleCandidates(AppCore = null, Auth = null) {
     rawProfile.superAdmin,
     rawProfile.canManageUsers,
     rawProfile.canAccessUsers,
-  ].some((value) =>
-    safeBoolean(value, false)
-  );
+  ].some((value) => bool(value, false));
 
-  if (adminFlag) {
-    roles.push("admin");
-  }
+  if (adminFlag) roles.push("admin");
 
-  return expandRoleAliases(roles);
+  return expandRoles(roles);
 }
 
-function getUserRole(AppCore = null, Auth = null) {
-  const roles =
-    getUserRoleCandidates(AppCore, Auth);
-
-  if (roles.some(isAdminRole)) return "admin";
-  if (roles.some(isSupportRole)) return "support";
-  if (roles.some(isManagerRole)) return "manager";
-
-  return roles[0] || "";
+function currentRole(AppCore = null, Auth = null) {
+  return canonicalRole(roleCandidates(AppCore, Auth));
 }
 
-function hasAnyAllowedRole(AppCore = null, Auth = null, allowedRoles = []) {
-  const allowed =
-    expandRoleAliases(allowedRoles);
+function hasAllowedRole(AppCore = null, Auth = null, allowedRoles = []) {
+  const allowed = expandRoles(allowedRoles);
+  if (!allowed.length) return true;
 
-  if (!allowed.length) {
-    return true;
-  }
+  const userRoles = expandRoles(roleCandidates(AppCore, Auth));
 
-  const userRoles =
-    new Set(
-      expandRoleAliases(
-        getUserRoleCandidates(AppCore, Auth)
-      )
-    );
+  if (userRoles.some(isAdminRole)) return true;
 
-  return allowed.some((role) =>
-    userRoles.has(role)
-  );
-}
-
-function getAuthApiAuthenticated(Auth = null) {
-  try {
-    if (isFunction(Auth?.isAuthenticated)) {
-      return Boolean(
-        Auth.isAuthenticated()
-      );
-    }
-  } catch {}
-
-  return Boolean(
-    Auth?.authenticated ||
-      Auth?.isAuth ||
-      Auth?.session?.authenticated
-  );
-}
-
-function isAuthenticated(AppCore = null, Auth = null) {
-  const token =
-    getCurrentToken(AppCore, Auth);
-
-  const user =
-    getCurrentUser(AppCore, Auth);
-
-  /*
-    Regla anti-auth fantasma:
-    - token sin user NO autentica.
-    - user sin token NO autentica.
-  */
-  return Boolean(
-    hasUsableToken(token) &&
-      hasUsableUser(user)
-  );
-}
-
-function hasGhostAuth(AppCore = null, Auth = null) {
-  const token =
-    getCurrentToken(AppCore, Auth);
-
-  const user =
-    getCurrentUser(AppCore, Auth);
-
-  const appSaysAuth =
-    Boolean(
-      AppCore?.state?.authenticated ||
-        getAuthApiAuthenticated(Auth)
-    );
-
-  return Boolean(
-    appSaysAuth &&
-      (
-        !hasUsableToken(token) ||
-        !hasUsableUser(user)
-      )
-  );
+  const userRoleSet = new Set(userRoles);
+  return allowed.some((role) => userRoleSet.has(role));
 }
 
 /* =========================================================
    REDIRECTS
 ========================================================= */
 
-function getAuthenticatedRedirectTarget(AppCore, route, getRoute) {
-  const explicit =
-    safeText(
-      first(
-        route?.redirectAuthenticated,
-        route?.redirectIfAuth,
-        route?.meta?.redirectAuthenticated,
-        route?.meta?.redirectIfAuth,
-        ""
-      ),
+function authenticatedRedirectTarget(AppCore, route, getRoute) {
+  const explicit = safeText(
+    first(
+      route?.redirectAuthenticated,
+      route?.redirectIfAuth,
+      route?.meta?.redirectAuthenticated,
+      route?.meta?.redirectIfAuth,
       ""
-    );
+    ),
+    ""
+  );
 
   if (explicit) {
-    const sanitized =
-      sanitizeRedirectTarget(
-        explicit,
-        ""
-      );
+    const target = safeRedirect(explicit, "");
 
     if (
-      sanitized &&
-      !sameCanonicalPath(sanitized, LOGIN_PATH) &&
-      !isPublicTechnicalPath(sanitized) &&
-      !isAuthRoutePath(sanitized)
+      target &&
+      !sameCanonical(target, LOGIN_PATH) &&
+      !isPublicTechnicalPath(target) &&
+      !isAuthRoutePath(target)
     ) {
-      return sanitized;
+      return target;
     }
   }
 
-  const home =
-    getDefaultHomeTarget(
-      AppCore,
-      getRoute
-    );
-
-  return sanitizeRedirectTarget(
-    home,
-    HOME_PATH
-  ) || HOME_PATH;
+  const home = getDefaultHomeTarget(AppCore, getRoute);
+  return safeRedirect(home, HOME_PATH) || HOME_PATH;
 }
 
-function buildLoginRedirectTarget(AppCore, routeNames, publicPath = "/") {
-  const loginPath =
-    routeNames.LOGIN || LOGIN_PATH;
-
-  const cleanPublicPath =
-    normalizePublicPath(publicPath || HOME_PATH);
+function loginRedirectTarget(AppCore, routeNames = {}, publicPath = "/") {
+  const loginPath = routeNames.LOGIN || LOGIN_PATH;
+  const cleanPublicPath = normalizePublicPath(publicPath || HOME_PATH);
 
   if (
-    sameCanonicalPath(cleanPublicPath, loginPath) ||
+    sameCanonical(cleanPublicPath, loginPath) ||
     isPublicTechnicalPath(cleanPublicPath) ||
-    isAuthRoutePath(cleanPublicPath)
+    isAuthRoutePath(cleanPublicPath) ||
+    !isSafeRelativePath(cleanPublicPath)
   ) {
     return loginPath;
   }
 
-  if (!isSafeRelativePath(cleanPublicPath)) {
-    return loginPath;
-  }
-
   try {
-    const built =
-      buildLoginUrl(
-        AppCore,
-        cleanPublicPath
-      );
-
-    return sanitizeRedirectTarget(
-      built,
-      loginPath
-    ) || loginPath;
+    const built = buildLoginUrl(AppCore, cleanPublicPath);
+    return safeRedirect(built, loginPath) || loginPath;
   } catch {
     return `${loginPath}?redirect=${encodeURIComponent(cleanPublicPath)}`;
   }
@@ -1723,69 +1108,7 @@ function buildLoginRedirectTarget(AppCore, routeNames, publicPath = "/") {
    RESULTS
 ========================================================= */
 
-function buildAllowResult({
-  route,
-  canonicalPath,
-  publicPath = null,
-  getRoute,
-  details = {},
-} = {}) {
-  return {
-    allowed:
-      true,
-
-    reason:
-      null,
-
-    route:
-      route || null,
-
-    redirectTo:
-      null,
-
-    canonicalPath,
-    publicPath,
-
-    getRoute:
-      isFunction(getRoute)
-        ? getRoute
-        : null,
-
-    details:
-      safeObject(details),
-  };
-}
-
-function buildDenyResult({
-  reason,
-  route,
-  redirectTo = null,
-  canonicalPath,
-  publicPath = null,
-  details = {},
-} = {}) {
-  return {
-    allowed:
-      false,
-
-    reason:
-      reason || "blocked",
-
-    route:
-      route || null,
-
-    redirectTo:
-      redirectTo || null,
-
-    canonicalPath,
-    publicPath,
-
-    details:
-      safeObject(details),
-  };
-}
-
-function buildDecisionDetails({
+function details({
   AppCore,
   Auth,
   route,
@@ -1793,52 +1116,69 @@ function buildDecisionDetails({
   publicPath,
   extra = {},
 } = {}) {
-  const user =
-    getCurrentUser(AppCore, Auth);
-
-  const token =
-    getCurrentToken(AppCore, Auth);
-
-  const userRoles =
-    getUserRoleCandidates(AppCore, Auth);
+  const user = currentUser(AppCore, Auth);
+  const token = currentToken(AppCore, Auth);
+  const roles = roleCandidates(AppCore, Auth);
 
   return {
-    version:
-      GUARDS_VERSION,
+    version: GUARDS_VERSION,
 
-    routePath:
-      getRoutePath(route),
+    routePath: routePath(route),
 
-    canonicalPath:
-      redactTokenInText(canonicalPath || ""),
+    canonicalPath: redact(canonicalPath || ""),
+    publicPath: redact(publicPath || ""),
 
-    publicPath:
-      redactTokenInText(publicPath || ""),
+    logged: isAuthenticated(AppCore, Auth),
+    authApiAuthenticated: authApiAuthenticated(Auth),
+    ghostAuth: hasGhostAuth(AppCore, Auth),
 
-    logged:
-      isAuthenticated(AppCore, Auth),
+    hasToken: usableToken(token),
+    hasUser: usableUser(user),
 
-    authApiAuthenticated:
-      getAuthApiAuthenticated(Auth),
+    currentRole: canonicalRole(roles),
+    userRoles: roles,
 
-    ghostAuth:
-      hasGhostAuth(AppCore, Auth),
-
-    hasToken:
-      hasUsableToken(token),
-
-    hasUser:
-      hasUsableUser(user),
-
-    currentRole:
-      getUserRole(AppCore, Auth),
-
-    userRoles,
-
-    runtime:
-      getRuntimeFlags(AppCore),
+    runtime: getRuntimeFlags(AppCore),
 
     ...safeObject(extra),
+  };
+}
+
+function allowResult({
+  route,
+  canonicalPath,
+  publicPath,
+  getRoute,
+  details: info = {},
+} = {}) {
+  return {
+    allowed: true,
+    reason: null,
+    route: route || null,
+    redirectTo: null,
+    canonicalPath,
+    publicPath,
+    getRoute: isFn(getRoute) ? getRoute : null,
+    details: safeObject(info),
+  };
+}
+
+function denyResult({
+  reason,
+  route,
+  redirectTo = null,
+  canonicalPath,
+  publicPath,
+  details: info = {},
+} = {}) {
+  return {
+    allowed: false,
+    reason: reason || "blocked",
+    route: route || null,
+    redirectTo: redirectTo || null,
+    canonicalPath,
+    publicPath,
+    details: safeObject(info),
   };
 }
 
@@ -1854,348 +1194,174 @@ export function shouldAllowRoute({
   requestedPublicPath = null,
   getRoute,
 } = {}) {
-  const routeNames =
-    getRouteNames(AppCore);
+  const routeNames = safeObject(getRouteNames(AppCore));
 
-  const canonicalPath =
-    safeCanonicalPath(
-      AppCore,
-      requestedCanonicalPath
-    );
+  const canonicalPath = normalizeCanonical(AppCore, requestedCanonicalPath);
+  const publicPath = normalizePublicPath(requestedPublicPath || canonicalPath);
 
-  const publicPath =
-    normalizePublicPath(
-      requestedPublicPath ||
-        canonicalPath
-    );
-
-  /*
-    Ruta inexistente:
-    No bloquear aquí. El Router resuelve 404.
-  */
   if (!route) {
-    return buildAllowResult({
-      route:
-        null,
+    return allowResult({
+      route: null,
       canonicalPath,
       publicPath,
       getRoute,
-      details:
-        buildDecisionDetails({
-          AppCore,
-          Auth,
-          route:
-            null,
-          canonicalPath,
-          publicPath,
-          extra: {
-            reason:
-              GUARD_REASONS.routeNotFound,
-          },
-        }),
-    });
-  }
-
-  /*
-    Prioridad absoluta:
-    rutas públicas técnicas pasan siempre, incluso con sesión previa.
-  */
-  if (
-    isPublicTechnicalRoute(
-      route,
-      canonicalPath,
-      publicPath
-    )
-  ) {
-    return buildAllowResult({
-      route,
-      canonicalPath,
-      publicPath,
-      getRoute,
-      details:
-        buildDecisionDetails({
-          AppCore,
-          Auth,
-          route,
-          canonicalPath,
-          publicPath,
-          extra: {
-            reason:
-              GUARD_REASONS.publicTechnical,
-            publicTechnical:
-              true,
-          },
-        }),
-    });
-  }
-
-  const logged =
-    isAuthenticated(
-      AppCore,
-      Auth
-    );
-
-  const ghostAuth =
-    hasGhostAuth(
-      AppCore,
-      Auth
-    );
-
-  const currentRole =
-    getUserRole(
-      AppCore,
-      Auth
-    );
-
-  const userRoles =
-    getUserRoleCandidates(
-      AppCore,
-      Auth
-    );
-
-  const guestOnly =
-    routeGuestOnly(
-      route,
-      canonicalPath
-    );
-
-  const allowedRoles =
-    getRouteRoles(route);
-
-  const requiresAuth =
-    routeRequiresAuth(route);
-
-  /*
-    Guest-only:
-    normalmente /login.
-    Durante transición de login no forzamos redirect extra.
-  */
-  if (
-    guestOnly &&
-    logged
-  ) {
-    if (isLoginTransitionActive(AppCore)) {
-      return buildAllowResult({
-        route,
-        canonicalPath,
-        publicPath,
-        getRoute,
-        details:
-          buildDecisionDetails({
-            AppCore,
-            Auth,
-            route,
-            canonicalPath,
-            publicPath,
-            extra: {
-              reason:
-                GUARD_REASONS.loginTransition,
-              guestOnly,
-              logged,
-              loginTransitionActive:
-                true,
-              currentRole,
-              userRoles,
-            },
-          }),
-      });
-    }
-
-    return buildDenyResult({
-      reason:
-        GUARD_REASONS.alreadyAuthenticated,
-
-      route,
-
-      redirectTo:
-        getAuthenticatedRedirectTarget(
-          AppCore,
-          route,
-          getRoute
-        ) ||
-        routeNames.HOME ||
-        HOME_PATH,
-
-      canonicalPath,
-      publicPath,
-
-      details:
-        buildDecisionDetails({
-          AppCore,
-          Auth,
-          route,
-          canonicalPath,
-          publicPath,
-          extra: {
-            guestOnly,
-            currentRole,
-            userRoles,
-          },
-        }),
-    });
-  }
-
-  /*
-    Auth obligatoria.
-    Si hay ghost auth, se trata como no autenticado.
-  */
-  if (
-    requiresAuth &&
-    !logged
-  ) {
-    return buildDenyResult({
-      reason:
-        ghostAuth
-          ? GUARD_REASONS.ghostAuth
-          : GUARD_REASONS.notAuthenticated,
-
-      route,
-
-      redirectTo:
-        buildLoginRedirectTarget(
-          AppCore,
-          routeNames,
-          publicPath
-        ),
-
-      canonicalPath,
-      publicPath,
-
-      details:
-        buildDecisionDetails({
-          AppCore,
-          Auth,
-          route,
-          canonicalPath,
-          publicPath,
-          extra: {
-            requiresAuth,
-            allowedRoles,
-            ghostAuth,
-          },
-        }),
-    });
-  }
-
-  /*
-    Roles declarados implican auth.
-  */
-  if (
-    allowedRoles.length > 0 &&
-    !logged
-  ) {
-    return buildDenyResult({
-      reason:
-        ghostAuth
-          ? GUARD_REASONS.ghostAuth
-          : GUARD_REASONS.notAuthenticated,
-
-      route,
-
-      redirectTo:
-        buildLoginRedirectTarget(
-          AppCore,
-          routeNames,
-          publicPath
-        ),
-
-      canonicalPath,
-      publicPath,
-
-      details:
-        buildDecisionDetails({
-          AppCore,
-          Auth,
-          route,
-          canonicalPath,
-          publicPath,
-          extra: {
-            requiresAuth:
-              true,
-            allowedRoles,
-            ghostAuth,
-          },
-        }),
-    });
-  }
-
-  /*
-    Roles y sesión válida.
-    Candado real para rutas admin aunque el rol venga como alias.
-  */
-  if (
-    allowedRoles.length > 0 &&
-    logged
-  ) {
-    const hasAllowedRole =
-      hasAnyAllowedRole(
+      details: details({
         AppCore,
         Auth,
-        allowedRoles
-      );
-
-    if (!hasAllowedRole) {
-      const forbiddenRedirect =
-        sanitizeRedirectTarget(
-          route.redirectForbidden ||
-            route.meta?.redirectForbidden ||
-            "",
-          ""
-        );
-
-      return buildDenyResult({
-        reason:
-          GUARD_REASONS.insufficientRole,
-
-        route,
-
-        redirectTo:
-          forbiddenRedirect || null,
-
+        route: null,
         canonicalPath,
         publicPath,
-
-        details:
-          buildDecisionDetails({
-            AppCore,
-            Auth,
-            route,
-            canonicalPath,
-            publicPath,
-            extra: {
-              currentRole,
-              userRoles,
-              allowedRoles,
-            },
-          }),
-      });
-    }
+        extra: {
+          reason: GUARD_REASONS.routeNotFound,
+        },
+      }),
+    });
   }
 
-  return buildAllowResult({
-    route,
-    canonicalPath,
-    publicPath,
-    getRoute,
-    details:
-      buildDecisionDetails({
+  if (isPublicTechnicalRoute(route, canonicalPath, publicPath)) {
+    return allowResult({
+      route,
+      canonicalPath,
+      publicPath,
+      getRoute,
+      details: details({
         AppCore,
         Auth,
         route,
         canonicalPath,
         publicPath,
         extra: {
-          reason:
-            GUARD_REASONS.allow,
-          logged,
-          ghostAuth,
-          currentRole,
-          userRoles,
+          reason: GUARD_REASONS.publicTechnical,
+          publicTechnical: true,
+        },
+      }),
+    });
+  }
+
+  const logged = isAuthenticated(AppCore, Auth);
+  const ghost = hasGhostAuth(AppCore, Auth);
+  const guestOnly = routeGuestOnly(route, canonicalPath);
+  const allowedRoles = routeRoles(route);
+  const requiresAuth = routeRequiresAuth(route);
+  const roles = roleCandidates(AppCore, Auth);
+  const role = canonicalRole(roles);
+
+  if (guestOnly && logged) {
+    if (loginTransitionActive(AppCore)) {
+      return allowResult({
+        route,
+        canonicalPath,
+        publicPath,
+        getRoute,
+        details: details({
+          AppCore,
+          Auth,
+          route,
+          canonicalPath,
+          publicPath,
+          extra: {
+            reason: GUARD_REASONS.loginTransition,
+            guestOnly,
+            logged,
+            currentRole: role,
+            userRoles: roles,
+          },
+        }),
+      });
+    }
+
+    return denyResult({
+      reason: GUARD_REASONS.alreadyAuthenticated,
+      route,
+      redirectTo: authenticatedRedirectTarget(AppCore, route, getRoute) || routeNames.HOME || HOME_PATH,
+      canonicalPath,
+      publicPath,
+      details: details({
+        AppCore,
+        Auth,
+        route,
+        canonicalPath,
+        publicPath,
+        extra: {
           guestOnly,
-          requiresAuth,
+          currentRole: role,
+          userRoles: roles,
+        },
+      }),
+    });
+  }
+
+  if ((requiresAuth || allowedRoles.length > 0) && !logged) {
+    return denyResult({
+      reason: ghost ? GUARD_REASONS.ghostAuth : GUARD_REASONS.notAuthenticated,
+      route,
+      redirectTo: loginRedirectTarget(AppCore, routeNames, publicPath),
+      canonicalPath,
+      publicPath,
+      details: details({
+        AppCore,
+        Auth,
+        route,
+        canonicalPath,
+        publicPath,
+        extra: {
+          requiresAuth: true,
+          allowedRoles,
+          ghostAuth: ghost,
+        },
+      }),
+    });
+  }
+
+  if (allowedRoles.length > 0 && logged && !hasAllowedRole(AppCore, Auth, allowedRoles)) {
+    const forbiddenRedirect = safeRedirect(
+      route.redirectForbidden || route.meta?.redirectForbidden || "",
+      ""
+    );
+
+    return denyResult({
+      reason: GUARD_REASONS.insufficientRole,
+      route,
+      redirectTo: forbiddenRedirect || null,
+      canonicalPath,
+      publicPath,
+      details: details({
+        AppCore,
+        Auth,
+        route,
+        canonicalPath,
+        publicPath,
+        extra: {
+          currentRole: role,
+          userRoles: roles,
           allowedRoles,
         },
       }),
+    });
+  }
+
+  return allowResult({
+    route,
+    canonicalPath,
+    publicPath,
+    getRoute,
+    details: details({
+      AppCore,
+      Auth,
+      route,
+      canonicalPath,
+      publicPath,
+      extra: {
+        reason: GUARD_REASONS.allow,
+        logged,
+        ghostAuth: ghost,
+        currentRole: role,
+        userRoles: roles,
+        guestOnly,
+        requiresAuth,
+        allowedRoles,
+      },
+    }),
   });
 }
 
@@ -2211,151 +1377,65 @@ export function getGuardsSnapshot({
   requestedPublicPath = AppCore?.state?.publicPath || requestedCanonicalPath,
   getRoute = null,
 } = {}) {
-  const canonicalPath =
-    safeCanonicalPath(
-      AppCore,
-      requestedCanonicalPath
-    );
+  const canonicalPath = normalizeCanonical(AppCore, requestedCanonicalPath);
+  const publicPath = normalizePublicPath(requestedPublicPath || canonicalPath);
 
-  const publicPath =
-    normalizePublicPath(
-      requestedPublicPath ||
-        canonicalPath
-    );
+  const access = shouldAllowRoute({
+    AppCore,
+    Auth,
+    route,
+    requestedCanonicalPath: canonicalPath,
+    requestedPublicPath: publicPath,
+    getRoute,
+  });
 
-  const access =
-    shouldAllowRoute({
-      AppCore,
-      Auth,
-      route,
-      requestedCanonicalPath:
-        canonicalPath,
-      requestedPublicPath:
-        publicPath,
-      getRoute,
-    });
-
-  const user =
-    getCurrentUser(
-      AppCore,
-      Auth
-    );
-
-  const token =
-    getCurrentToken(
-      AppCore,
-      Auth
-    );
+  const user = currentUser(AppCore, Auth);
+  const token = currentToken(AppCore, Auth);
 
   return {
-    version:
-      GUARDS_VERSION,
+    version: GUARDS_VERSION,
 
-    canonicalPath:
-      redactTokenInText(canonicalPath),
+    canonicalPath: redact(canonicalPath),
+    publicPath: redact(publicPath),
 
-    publicPath:
-      redactTokenInText(publicPath),
-
-    route:
-      route
-        ? {
-            path:
-              route.path || null,
-            canonicalPath:
-              route.canonicalPath || null,
-            name:
-              route.name || null,
-            viewKey:
-              route.viewKey || null,
-            viewName:
-              route.viewName || null,
-            public:
-              route.public,
-            requiresAuth:
-              route.requiresAuth,
-            private:
-              route.private,
-            guestOnly:
-              route.guestOnly,
-            roles:
-              route.roles || [],
-            meta:
-              route.meta || null,
-          }
-        : null,
+    route: route
+      ? {
+          path: route.path || null,
+          canonicalPath: route.canonicalPath || null,
+          name: route.name || null,
+          viewKey: route.viewKey || null,
+          viewName: route.viewName || null,
+          public: route.public,
+          private: route.private,
+          requiresAuth: route.requiresAuth,
+          guestOnly: route.guestOnly,
+          roles: route.roles || [],
+          meta: route.meta || null,
+        }
+      : null,
 
     auth: {
-      logged:
-        isAuthenticated(
-          AppCore,
-          Auth
-        ),
-
-      ghostAuth:
-        hasGhostAuth(
-          AppCore,
-          Auth
-        ),
-
-      authApiAuthenticated:
-        getAuthApiAuthenticated(Auth),
-
-      hasToken:
-        hasUsableToken(token),
-
-      hasUser:
-        hasUsableUser(user),
-
-      currentRole:
-        getUserRole(
-          AppCore,
-          Auth
-        ),
-
-      userRoles:
-        getUserRoleCandidates(
-          AppCore,
-          Auth
-        ),
+      logged: isAuthenticated(AppCore, Auth),
+      ghostAuth: hasGhostAuth(AppCore, Auth),
+      authApiAuthenticated: authApiAuthenticated(Auth),
+      hasToken: usableToken(token),
+      hasUser: usableUser(user),
+      currentRole: currentRole(AppCore, Auth),
+      userRoles: roleCandidates(AppCore, Auth),
     },
 
     routeAccess: {
-      routeRequiresAuth:
-        route
-          ? routeRequiresAuth(route)
-          : false,
-
-      guestOnly:
-        route
-          ? routeGuestOnly(route, canonicalPath)
-          : false,
-
-      routeRoles:
-        route
-          ? getRouteRoles(route)
-          : [],
-
-      publicTechnical:
-        route
-          ? isPublicTechnicalRoute(
-              route,
-              canonicalPath,
-              publicPath
-            )
-          : false,
+      requiresAuth: route ? routeRequiresAuth(route) : false,
+      guestOnly: route ? routeGuestOnly(route, canonicalPath) : false,
+      roles: route ? routeRoles(route) : [],
+      publicTechnical: route ? isPublicTechnicalRoute(route, canonicalPath, publicPath) : false,
     },
 
-    runtime:
-      getRuntimeFlags(AppCore),
+    runtime: getRuntimeFlags(AppCore),
 
     access,
   };
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   GUARDS_VERSION,

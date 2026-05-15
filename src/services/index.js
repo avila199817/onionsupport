@@ -3,7 +3,7 @@
    Archivo: src/services/index.js
 
    ONION SUPPORT · HTTP SERVICE
-   CORE API CLIENT BRIDGE · AUTH SAFE · RETRY SAFE · LOADER SAFE · 16/10
+   CORE API CLIENT BRIDGE · AUTH SAFE · RETRY SAFE · LOADER SAFE · 17/10
 
    Responsabilidades:
    - Servicio HTTP público de la SPA.
@@ -13,39 +13,44 @@
    - Aplicar retry policy desde helpers.
    - Refrescar token automáticamente ante 401 privado.
    - Reintentar una sola vez tras refresh correcto.
-   - Hacer logout automático solo ante 401 persistente privado.
+   - Hacer logout automático sólo ante 401 persistente privado.
    - Evitar refresh/logout en endpoints públicos de auth.
-   - Evitar refresh/logout en activation/reset-password.
+   - Evitar refresh/logout en activation/reset-password/forgot-password/2FA/MFA/OTP.
+   - Mantener /api/auth/me, /auth/me, /api/me y /me como privados.
    - Balancear loader global sin dobles incrementos.
    - Soportar AbortController/signal.
    - Adjuntar bridge estable a AppCore.Http/AppCore.http y módulos.
    - Exponer snapshot de diagnóstico sin tokens reales.
-   - Soportar firmas:
-       Http.request(path, options)
-       Http.request(method, path, options)
-       Http.get(path, options)
-       Http.post(path, body, options)
-       Http.delete(path, options)
-       Http.delete(path, body, options)
+   - Evitar recursión si AppCore.apiClient/AppCore.request apuntan a este Http service.
+   - Propagar flags públicos duros hasta http.auth.js.
+   - No marcar _authRefreshAttempted antes de ejecutar refresh.
+
+   Firmas soportadas:
+   - Http.request(path, options)
+   - Http.request(method, path, options)
+   - Http.request({ method, path/url, ...options })
+   - Http.get(path, options)
+   - Http.post(path, body, options)
+   - Http.delete(path, options)
+   - Http.delete(path, body, options)
 
    HARDENING EXTREMO:
-   - init idempotente real y silencioso
-   - interceptores base registrados una sola vez
-   - bridge idempotente sin app:module:duplicate storm
-   - refresh lock para evitar refresh paralelo
-   - loader con pendingRequests balanceado por request real
-   - eventos lifecycle opt-in para no saturar CoreEvents
-   - eventos finales controlados y redactados
-   - cero tokens crudos en logs/eventos/snapshots
-   - compatible con AppCore congelado mediante accessors/modules
-   - sin doble refresh
-   - sin doble logout
-   - sin lógicas duplicadas
-   - no refresca en login/refresh/logout/activation/reset/2FA público
-   - /api/auth/me, /auth/me, /api/me y /me siguen siendo privados y pueden usar Authorization
-   - evita auto-logout si el error no pertenece a request privado autenticado
-   - evita leak de respuesta completa en eventos
-   - evita recursión si AppCore.apiClient/AppCore.request apuntan a este Http service
+   - init idempotente real y silencioso.
+   - interceptores base registrados una sola vez.
+   - bridge idempotente sin app:module:duplicate storm.
+   - refresh lock para evitar refresh paralelo.
+   - loader con pendingRequests balanceado por request real.
+   - eventos lifecycle opt-in para no saturar CoreEvents.
+   - eventos finales controlados y redactados.
+   - cero tokens crudos en logs/eventos/snapshots.
+   - compatible con AppCore congelado mediante accessors/modules.
+   - sin doble refresh.
+   - sin doble logout.
+   - no refresca en login/refresh/logout/activation/reset/2FA público.
+   - /api/auth/me, /auth/me, /api/me y /me siguen siendo privados.
+   - evita auto-logout si el error no pertenece a request privado autenticado.
+   - evita leak de respuesta completa en eventos.
+   - timeout por defecto finito para evitar submits congelados.
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -61,6 +66,7 @@ import {
   buildRequestSummary,
   buildDefaultRequestConfig,
   withSignal,
+  sanitizeData,
 } from "./http.helpers.js";
 
 import {
@@ -109,7 +115,7 @@ export const Http = (() => {
   ======================================================= */
 
   const SERVICE_VERSION =
-    "16.0.0";
+    "17.0.0";
 
   const SERVICE_NAME =
     "http";
@@ -126,8 +132,13 @@ export const Http = (() => {
   const DEFAULT_API_BASE =
     "https://api.onionit.net";
 
+  /*
+    Antes estaba en 0.
+    0 = si algo queda pending, el submit parece congelado.
+    Para descargas/subidas largas, pasar timeout explícito en options.
+  */
   const DEFAULT_REQUEST_TIMEOUT_MS =
-    0;
+    30000;
 
   const KNOWN_METHODS =
     Object.freeze([
@@ -237,31 +248,59 @@ export const Http = (() => {
       "two_factor_token",
       "mfaToken",
       "mfa_token",
+      "otpToken",
+      "otp_token",
       "jwt",
       "bearer",
       "auth",
       "authorization",
+      "password",
+      "newPassword",
+      "currentPassword",
     ]);
 
+  /*
+    /auth/me NO está aquí.
+    /api/auth/me, /auth/me, /api/me y /me son privados.
+  */
   const PUBLIC_AUTH_ENDPOINT_MARKERS =
     Object.freeze([
       "/auth/login",
-      "/auth/refresh",
+      "/auth/register",
+      "/auth/signup",
 
+      "/auth/refresh",
+      "/auth/token/refresh",
+      "/auth/renew",
+
+      "/auth/2fa",
       "/auth/2fa/login",
+      "/auth/2fa/verify",
+      "/auth/mfa",
       "/auth/mfa/login",
+      "/auth/mfa/verify",
+      "/auth/otp",
       "/auth/otp/login",
+      "/auth/otp/verify",
 
       "/auth/activate",
       "/auth/activate-account",
       "/auth/account/activate",
       "/auth/activation",
       "/auth/activate/first-user",
+      "/auth/activate/validate",
 
       "/auth/reset-password",
       "/auth/reset-password-request",
       "/auth/reset-password-confirm",
+      "/auth/reset-password/confirm",
+      "/auth/reset-password/validate",
+
       "/auth/password-reset",
+      "/auth/password-reset/request",
+      "/auth/password-reset/confirm",
+      "/auth/password-reset/validate",
+
       "/auth/forgot-password",
       "/auth/recover-password",
 
@@ -269,31 +308,47 @@ export const Http = (() => {
       "/auth/health",
     ]);
 
-  /*
-    Endpoints auth de control donde refrescar puede producir bucles.
-    /auth/me NO está aquí: sigue siendo privado.
-  */
   const AUTH_CONTROL_SKIP_REFRESH_MARKERS =
     Object.freeze([
       "/auth/login",
+      "/auth/register",
+      "/auth/signup",
+
       "/auth/refresh",
+      "/auth/token/refresh",
+      "/auth/renew",
+
       "/auth/logout",
       "/auth/logout-all",
 
+      "/auth/2fa",
       "/auth/2fa/login",
+      "/auth/2fa/verify",
+      "/auth/mfa",
       "/auth/mfa/login",
+      "/auth/mfa/verify",
+      "/auth/otp",
       "/auth/otp/login",
+      "/auth/otp/verify",
 
       "/auth/activate",
       "/auth/activate-account",
       "/auth/account/activate",
       "/auth/activation",
       "/auth/activate/first-user",
+      "/auth/activate/validate",
 
       "/auth/reset-password",
       "/auth/reset-password-request",
       "/auth/reset-password-confirm",
+      "/auth/reset-password/confirm",
+      "/auth/reset-password/validate",
+
       "/auth/password-reset",
+      "/auth/password-reset/request",
+      "/auth/password-reset/confirm",
+      "/auth/password-reset/validate",
+
       "/auth/forgot-password",
       "/auth/recover-password",
 
@@ -303,6 +358,7 @@ export const Http = (() => {
 
   const TECHNICAL_PUBLIC_SPA_PATHS =
     Object.freeze([
+      "/login",
       "/activate-account",
       "/reset-password",
       "/forgot-password",
@@ -371,12 +427,16 @@ export const Http = (() => {
       HTTP_CONFIG?.apiBase ||
       DEFAULT_API_BASE,
 
-    /*
-      Política de eventos:
-      - lifecycle = start/finalize/interceptor/initSkipped/bridgeAttached.
-      - final = success/error.
-      Por defecto lifecycle queda apagado para evitar storm.
-    */
+    timeout:
+      HTTP_CONFIG?.timeout ??
+      DEFAULT_REQUEST_TIMEOUT_MS,
+
+    autoRefreshOn401:
+      HTTP_CONFIG?.autoRefreshOn401 !== false,
+
+    autoLogoutOn401:
+      HTTP_CONFIG?.autoLogoutOn401 !== false,
+
     emitLifecycleEvents:
       HTTP_CONFIG?.emitLifecycleEvents === true,
 
@@ -584,52 +644,6 @@ export const Http = (() => {
       : fallback;
   }
 
-  function safeBool(value, fallback = false) {
-    if (value === true) return true;
-    if (value === false) return false;
-
-    if (typeof value === "number") {
-      if (value === 1) return true;
-      if (value === 0) return false;
-    }
-
-    if (typeof value === "string") {
-      const clean =
-        value.trim().toLowerCase();
-
-      if (
-        [
-          "true",
-          "1",
-          "yes",
-          "si",
-          "sí",
-          "ok",
-          "on",
-          "enabled",
-          "active",
-        ].includes(clean)
-      ) {
-        return true;
-      }
-
-      if (
-        [
-          "false",
-          "0",
-          "no",
-          "off",
-          "disabled",
-          "inactive",
-        ].includes(clean)
-      ) {
-        return false;
-      }
-    }
-
-    return Boolean(fallback);
-  }
-
   function nowMs() {
     try {
       return Date.now();
@@ -685,6 +699,19 @@ export const Http = (() => {
     return "http://localhost";
   }
 
+  function firstNonEmpty(...values) {
+    for (const value of values) {
+      const text =
+        safeText(value, "");
+
+      if (text) {
+        return text;
+      }
+    }
+
+    return "";
+  }
+
   function normalizeApiBase(value = "") {
     const raw =
       safeText(value, "");
@@ -720,10 +747,6 @@ export const Http = (() => {
           .replace(/\/+$/g, "") ||
         "/";
 
-      /*
-        apiBase debe ser origin-only cuando el path es /api.
-        Los endpoints ya llevan /api.
-      */
       if (
         pathname === "/" ||
         pathname === "/api"
@@ -882,7 +905,7 @@ export const Http = (() => {
     return Boolean(
       AppCore?.config?.diagnostics?.httpLifecycleEvents === true ||
         AppCore?.config?.debugHttpLifecycle === true ||
-        AppCore?.config?.debug === true && cfg.debugEvents === true
+        (AppCore?.config?.debug === true && cfg.debugEvents === true)
     );
   }
 
@@ -958,7 +981,9 @@ export const Http = (() => {
     try {
       AppCore?.events?.emit?.(
         name,
-        sanitizePayload(payload),
+        sanitizeData(
+          sanitizePayload(payload)
+        ),
         options
       );
 
@@ -1113,29 +1138,23 @@ export const Http = (() => {
     const compact =
       value.replace(/[-:.]/g, "_");
 
-    if (
-      [
-        "token",
-        "accesstoken",
-        "access_token",
-        "refreshtoken",
-        "refresh_token",
-        "idtoken",
-        "id_token",
-        "temptoken",
-        "temp_token",
-        "temporarytoken",
-        "temporary_token",
-        "sessionid",
-        "session_id",
-        "sessionuserid",
-        "session_user_id",
-      ].includes(compact)
-    ) {
-      return true;
-    }
-
-    return false;
+    return [
+      "token",
+      "accesstoken",
+      "access_token",
+      "refreshtoken",
+      "refresh_token",
+      "idtoken",
+      "id_token",
+      "temptoken",
+      "temp_token",
+      "temporarytoken",
+      "temporary_token",
+      "sessionid",
+      "session_id",
+      "sessionuserid",
+      "session_user_id",
+    ].includes(compact);
   }
 
   function isDomNodeLike(value) {
@@ -1354,6 +1373,26 @@ export const Http = (() => {
     };
   }
 
+  function getRequestPath(requestConfig = {}) {
+    const cfg =
+      safeObject(requestConfig);
+
+    return firstNonEmpty(
+      cfg.path,
+      cfg.url,
+      cfg.endpoint,
+      cfg.href,
+      cfg.input,
+      cfg.resource,
+      cfg.finalUrl,
+      cfg.originalUrl,
+      cfg.requestUrl,
+      cfg.redactedUrl,
+      cfg.route,
+      cfg.pathname
+    );
+  }
+
   function sanitizeRequestConfigForEvent(requestConfig = {}) {
     const cfg =
       safeObject(requestConfig);
@@ -1367,7 +1406,7 @@ export const Http = (() => {
 
       path:
         redactTokenInText(
-          safeText(cfg.path, "")
+          getRequestPath(cfg)
         ),
 
       url:
@@ -1380,6 +1419,12 @@ export const Http = (() => {
 
       public:
         cfg.public === true,
+
+      skipAuth:
+        cfg.skipAuth === true,
+
+      noAuthHeader:
+        cfg.noAuthHeader === true,
 
       useLoader:
         cfg.useLoader !== false,
@@ -1403,7 +1448,12 @@ export const Http = (() => {
         safeText(cfg.responseType, ""),
 
       skipAuthRefresh:
-        cfg._skipAuthRefresh === true,
+        cfg._skipAuthRefresh === true ||
+        cfg.skipAuthRefresh === true,
+
+      noAutoRefresh:
+        cfg.noAutoRefresh === true ||
+        cfg.autoRefresh === false,
 
       authRefreshAttempted:
         cfg._authRefreshAttempted === true,
@@ -1564,6 +1614,7 @@ export const Http = (() => {
       return safeLower(
         parsed.pathname || raw
       )
+        .replace(/\\/g, "/")
         .replace(/\/{2,}/g, "/")
         .replace(/\/$/, "") ||
         "/";
@@ -1575,9 +1626,25 @@ export const Http = (() => {
         .split("#")[0] ||
         raw
     )
+      .replace(/\\/g, "/")
       .replace(/\/{2,}/g, "/")
       .replace(/\/$/, "") ||
       "/";
+  }
+
+  function stripApiPrefix(path = "") {
+    const normalized =
+      normalizeEndpointPath(path);
+
+    if (normalized === "/api") {
+      return "/";
+    }
+
+    if (normalized.startsWith("/api/")) {
+      return normalized.slice(4) || "/";
+    }
+
+    return normalized;
   }
 
   function getComparableEndpointPaths(path = "") {
@@ -1585,11 +1652,7 @@ export const Http = (() => {
       normalizeEndpointPath(path);
 
     const withoutApi =
-      normalized.startsWith("/api/")
-        ? normalized.slice(4) || "/"
-        : normalized === "/api"
-          ? "/"
-          : normalized;
+      stripApiPrefix(normalized);
 
     return Array.from(
       new Set([
@@ -1599,7 +1662,7 @@ export const Http = (() => {
     );
   }
 
-  function endpointIncludes(path = "", markers = []) {
+  function endpointMatches(path = "", markers = []) {
     const candidates =
       getComparableEndpointPaths(path);
 
@@ -1617,8 +1680,7 @@ export const Http = (() => {
 
       return candidates.some((candidate) => (
         candidate === cleanMarker ||
-        candidate.endsWith(cleanMarker) ||
-        candidate.includes(cleanMarker)
+        candidate.startsWith(`${cleanMarker}/`)
       ));
     });
   }
@@ -1629,7 +1691,8 @@ export const Http = (() => {
 
     return candidates.some((candidate) => (
       PRIVATE_AUTH_ME_PATHS.includes(candidate) ||
-      candidate.endsWith("/auth/me")
+      candidate === "/auth/me" ||
+      candidate === "/api/auth/me"
     ));
   }
 
@@ -1638,7 +1701,7 @@ export const Http = (() => {
       return false;
     }
 
-    return endpointIncludes(
+    return endpointMatches(
       path,
       PUBLIC_AUTH_ENDPOINT_MARKERS
     );
@@ -1649,7 +1712,7 @@ export const Http = (() => {
       return false;
     }
 
-    return endpointIncludes(
+    return endpointMatches(
       path,
       AUTH_CONTROL_SKIP_REFRESH_MARKERS
     );
@@ -1694,6 +1757,14 @@ export const Http = (() => {
       }
     } catch {}
 
+    try {
+      if (isFunction(AppCore?.isPublicApiPath)) {
+        return Boolean(
+          AppCore.isPublicApiPath(path)
+        );
+      }
+    } catch {}
+
     return false;
   }
 
@@ -1713,34 +1784,45 @@ export const Http = (() => {
       safeObject(requestConfig);
 
     const path =
-      cfg.path ||
-      cfg.url ||
-      "";
+      getRequestPath(cfg);
 
     if (isAuthMeEndpoint(path)) {
       return {
         ...cfg,
 
         auth:
-          cfg.auth === false ? false : true,
+          cfg.auth === false
+            ? false
+            : true,
 
         public:
           false,
 
         skipAuth:
-          false,
+          cfg.auth === false
+            ? cfg.skipAuth === true
+            : false,
+
+        noAuthHeader:
+          cfg.auth === false
+            ? cfg.noAuthHeader === true
+            : false,
 
         _skipAuthRefresh:
-          cfg._skipAuthRefresh === true
-            ? true
-            : false,
+          cfg._skipAuthRefresh === true ||
+          cfg.skipAuthRefresh === true,
+
+        skipAuthRefresh:
+          cfg._skipAuthRefresh === true ||
+          cfg.skipAuthRefresh === true,
       };
     }
 
     const publicByFlag =
       cfg.public === true ||
       cfg.auth === false ||
-      cfg.skipAuth === true;
+      cfg.skipAuth === true ||
+      cfg.noAuthHeader === true;
 
     const publicByPath =
       isPublicEndpoint(path);
@@ -1764,8 +1846,31 @@ export const Http = (() => {
       skipAuth:
         true,
 
+      noAuthHeader:
+        true,
+
       _skipAuthRefresh:
         true,
+
+      skipAuthRefresh:
+        true,
+
+      noAutoRefresh:
+        true,
+
+      autoRefresh:
+        false,
+
+      /*
+        Importante:
+        login/reset/activation no pueden provocar logout automático
+        aunque backend devuelva 401.
+      */
+      noAutoLogout:
+        true,
+
+      autoLogout:
+        false,
     };
   }
 
@@ -1774,9 +1879,7 @@ export const Http = (() => {
       safeObject(requestConfig);
 
     const path =
-      cfg.path ||
-      cfg.url ||
-      "";
+      getRequestPath(cfg);
 
     if (cfg.auth === false) {
       return false;
@@ -1788,7 +1891,8 @@ export const Http = (() => {
 
     if (
       cfg.public === true ||
-      cfg.skipAuth === true
+      cfg.skipAuth === true ||
+      cfg.noAuthHeader === true
     ) {
       return false;
     }
@@ -1805,6 +1909,9 @@ export const Http = (() => {
   }
 
   function shouldAttemptAuthRefresh(error = null, requestConfig = {}) {
+    const cfg =
+      safeObject(requestConfig);
+
     if (config.autoRefreshOn401 === false) {
       return false;
     }
@@ -1813,23 +1920,57 @@ export const Http = (() => {
       return false;
     }
 
-    if (!isPrivateAuthenticatedRequest(requestConfig)) {
+    if (
+      error?.aborted === true ||
+      error?.name === "AbortError"
+    ) {
       return false;
     }
 
-    if (requestConfig?._skipAuthRefresh === true) {
+    if (
+      error?.timeout === true ||
+      error?.code === "TIMEOUT"
+    ) {
       return false;
     }
 
-    if (requestConfig?._authRefreshAttempted === true) {
+    if (
+      cfg.noAutoRefresh === true ||
+      cfg.autoRefresh === false
+    ) {
       return false;
     }
 
-    return true;
+    if (
+      cfg._skipAuthRefresh === true ||
+      cfg.skipAuthRefresh === true
+    ) {
+      return false;
+    }
+
+    if (cfg._authRefreshAttempted === true) {
+      return false;
+    }
+
+    if (normalizeMethod(cfg.method) === "OPTIONS") {
+      return false;
+    }
+
+    return isPrivateAuthenticatedRequest(cfg);
   }
 
   function shouldAutoLogout(error = null, requestConfig = {}) {
+    const cfg =
+      safeObject(requestConfig);
+
     if (config.autoLogoutOn401 === false) {
+      return false;
+    }
+
+    if (
+      cfg.noAutoLogout === true ||
+      cfg.autoLogout === false
+    ) {
       return false;
     }
 
@@ -1837,17 +1978,25 @@ export const Http = (() => {
       return false;
     }
 
-    if (!isPrivateAuthenticatedRequest(requestConfig)) {
+    if (
+      error?.aborted === true ||
+      error?.timeout === true ||
+      error?.name === "AbortError"
+    ) {
+      return false;
+    }
+
+    if (!isPrivateAuthenticatedRequest(cfg)) {
       return false;
     }
 
     const refreshFailed =
-      requestConfig?._authRefreshFailed === true;
+      cfg._authRefreshFailed === true;
 
     const persistentAfterRefresh =
-      requestConfig?._authRefreshAttempted === true &&
-      requestConfig?._authRefreshSucceeded === true &&
-      requestConfig?._skipAuthRefresh === true;
+      cfg._authRefreshAttempted === true &&
+      cfg._authRefreshSucceeded === true &&
+      cfg._skipAuthRefresh === true;
 
     if (
       !refreshFailed &&
@@ -1927,10 +2076,6 @@ export const Http = (() => {
       let aliasOk =
         false;
 
-      /*
-        Preferimos registry directo para bridges internos: evita eventos
-        app:module:duplicate/replaced innecesarios.
-      */
       try {
         AppCore?.registry?.modules?.set?.(
           moduleName,
@@ -2285,6 +2430,31 @@ export const Http = (() => {
   ======================================================= */
 
   function normalizeRequestArgs(arg1 = DEFAULT_METHOD, arg2 = "", arg3 = {}) {
+    if (isObject(arg1)) {
+      const opts =
+        safeObject(arg1);
+
+      return {
+        method:
+          normalizeMethod(
+            opts.method ||
+              DEFAULT_METHOD
+          ),
+
+        path:
+          firstNonEmpty(
+            opts.path,
+            opts.url,
+            opts.endpoint,
+            opts.href,
+            opts.resource
+          ),
+
+        options:
+          opts,
+      };
+    }
+
     if (
       typeof arg1 === "string" &&
       isKnownMethod(arg1) &&
@@ -2402,9 +2572,17 @@ export const Http = (() => {
           ),
 
         path:
-          base?.path ||
-          opts.path ||
-          path,
+          firstNonEmpty(
+            base?.path,
+            opts.path,
+            path
+          ),
+
+        url:
+          firstNonEmpty(
+            base?.url,
+            opts.url
+          ),
 
         timeout,
 
@@ -2459,8 +2637,11 @@ export const Http = (() => {
       );
 
     requestConfig.path =
-      requestConfig.path ||
-      path;
+      firstNonEmpty(
+        requestConfig.path,
+        requestConfig.url,
+        path
+      );
 
     requestConfig.apiBase =
       requestConfig.apiBase ||
@@ -2471,20 +2652,20 @@ export const Http = (() => {
         requestConfig.timeout
       );
 
-    if (isAuthMeEndpoint(requestConfig.path) && requestConfig.auth !== false) {
-      requestConfig.auth =
-        true;
-
+    if (isAuthMeEndpoint(requestConfig.path)) {
       requestConfig.public =
         false;
 
-      requestConfig.skipAuth =
-        false;
+      if (requestConfig.auth !== false) {
+        requestConfig.auth =
+          true;
 
-      requestConfig._skipAuthRefresh =
-        requestConfig._skipAuthRefresh === true
-          ? true
-          : false;
+        requestConfig.skipAuth =
+          false;
+
+        requestConfig.noAuthHeader =
+          false;
+      }
     }
 
     if (isBodylessMethod(requestConfig.method)) {
@@ -2531,11 +2712,19 @@ export const Http = (() => {
     const requestId =
       requestConfig.requestId;
 
+    /*
+      CRÍTICO:
+      NO poner _authRefreshAttempted:true antes de llamar a http.auth.js.
+      http.auth.js interpreta ese flag como "ya se intentó, saltar refresh".
+    */
     const refreshConfig =
       stampServiceIdentity({
         ...requestConfig,
 
         _authRefreshAttempted:
+          false,
+
+        _authRefreshInProgress:
           true,
       });
 
@@ -2594,9 +2783,15 @@ export const Http = (() => {
 
       const failedConfig =
         stampServiceIdentity({
-          ...refreshConfig,
+          ...requestConfig,
 
           _skipAuthRefresh:
+            true,
+
+          skipAuthRefresh:
+            true,
+
+          _authRefreshAttempted:
             true,
 
           _authRefreshFailed:
@@ -2648,25 +2843,44 @@ export const Http = (() => {
     }
 
     const replayConfig =
-      stampServiceIdentity(
-        normalizePublicRequestConfig({
-          ...refreshConfig,
+      stampServiceIdentity({
+        ...requestConfig,
 
-          requestId,
+        requestId,
 
-          _skipRetry:
-            true,
+        _skipRetry:
+          true,
 
-          _skipAuthRefresh:
-            true,
+        skipRetry:
+          true,
 
-          _authRefreshSucceeded:
-            true,
+        retry:
+          false,
 
-          _authRefreshFailed:
-            false,
-        })
-      );
+        retries:
+          0,
+
+        _skipAuthRefresh:
+          true,
+
+        skipAuthRefresh:
+          true,
+
+        noAutoRefresh:
+          true,
+
+        autoRefresh:
+          false,
+
+        _authRefreshAttempted:
+          true,
+
+        _authRefreshSucceeded:
+          true,
+
+        _authRefreshFailed:
+          false,
+      });
 
     state.replayCount += 1;
     state.lastReplayAt =
@@ -2786,7 +3000,7 @@ export const Http = (() => {
 
             path:
               redactTokenInText(
-                requestConfig?.path || ""
+                getRequestPath(requestConfig)
               ),
 
             error:
@@ -2814,7 +3028,7 @@ export const Http = (() => {
 
           path:
             redactTokenInText(
-              requestConfig?.path || ""
+              getRequestPath(requestConfig)
             ),
 
           error:
@@ -2847,7 +3061,7 @@ export const Http = (() => {
 
                   path:
                     redactTokenInText(
-                      requestConfig?.path || ""
+                      getRequestPath(requestConfig)
                     ),
                 }
               );
@@ -2950,7 +3164,7 @@ export const Http = (() => {
             ...buildRequestSummary(requestConfig),
 
             path:
-              redactTokenInText(requestConfig.path),
+              redactTokenInText(getRequestPath(requestConfig)),
           }
         );
       }
@@ -3009,7 +3223,7 @@ export const Http = (() => {
                     requestConfig.requestId,
 
                   path:
-                    redactTokenInText(requestConfig.path),
+                    redactTokenInText(getRequestPath(requestConfig)),
 
                   reason:
                     "not-eligible",
@@ -3065,7 +3279,7 @@ export const Http = (() => {
               requestConfig.method,
 
             path:
-              redactTokenInText(requestConfig.path),
+              redactTokenInText(getRequestPath(requestConfig)),
 
             durationMs:
               nowMs() - startedAt,
@@ -3092,7 +3306,7 @@ export const Http = (() => {
               requestConfig.method,
 
             path:
-              redactTokenInText(requestConfig.path),
+              redactTokenInText(getRequestPath(requestConfig)),
 
             durationMs:
               nowMs() - startedAt,
@@ -3168,7 +3382,7 @@ export const Http = (() => {
 
             path:
               redactTokenInText(
-                requestConfig?.path || path
+                getRequestPath(requestConfig || { path })
               ),
 
             durationMs:
@@ -3222,7 +3436,7 @@ export const Http = (() => {
 
             path:
               redactTokenInText(
-                requestConfig?.path || path
+                getRequestPath(requestConfig || { path })
               ),
 
             pendingRequests:
@@ -3327,6 +3541,10 @@ export const Http = (() => {
 
         rawBody:
           true,
+
+        timeout:
+          options.timeout ??
+          120000,
       }
     );
   }
@@ -3344,6 +3562,10 @@ export const Http = (() => {
 
         download:
           true,
+
+        timeout:
+          options.timeout ??
+          120000,
       }
     );
   }
@@ -3424,6 +3646,21 @@ export const Http = (() => {
       ) {
         headers.Accept =
           "application/json";
+      }
+
+      /*
+        Defensa extra:
+        si es público, no dejamos Authorization accidental.
+      */
+      if (
+        cfg.public === true ||
+        cfg.auth === false ||
+        cfg.noAuthHeader === true
+      ) {
+        try {
+          delete headers.Authorization;
+          delete headers.authorization;
+        } catch {}
       }
 
       return stampServiceIdentity({
@@ -3539,6 +3776,12 @@ export const Http = (() => {
         config.apiBase ||
           DEFAULT_API_BASE
       ) || DEFAULT_API_BASE;
+
+    config.timeout =
+      normalizeTimeout(
+        config.timeout ??
+          DEFAULT_REQUEST_TIMEOUT_MS
+      );
 
     safeEmit(
       EVENTS.configUpdated,
@@ -3788,6 +4031,15 @@ export const Http = (() => {
 
         technicalPublicSpaPaths:
           TECHNICAL_PUBLIC_SPA_PATHS,
+
+        strictEndpointMatching:
+          true,
+
+        publicRequestsDisableRefreshAndLogout:
+          true,
+
+        authRefreshAttemptedOnlyAfterRefresh:
+          true,
       },
 
       internals: {

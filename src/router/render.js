@@ -2,89 +2,16 @@
    Onion SPA - Router Render
    Archivo: src/router/render.js
 
-   FINAL EXTREME SYSTEM · RENDER HOST ISOLATED · RACE SAFE · EVENT SAFE · 15/10
-   PATCH · ROUTE STATE COMMIT BEFORE SUCCESS VIEW RENDER
-   PATCH · SIDEBAR ACTIVE ROUTE FIX
-   PATCH · CANONICAL/PUBLIC PAYLOAD HARDENED
-   PATCH · NO DOUBLE router:rendered WITH router/index.js
-   PATCH · TOKEN REDACTION SAFE
-   PATCH · CSP CLEAN / NO INLINE CSS / NO INNERHTML
-
-   RESPONSABILIDADES:
-   - renderizar vistas internas del router
-   - construir payloads de navegación
-   - emitir before-render / rendered solo cuando el flujo lo requiere
-   - preparar contextos de render
-   - flujos success / forbidden / 404 / login / runtime
-   - soportar route.render async
-   - reparar shell tras login / restore / navegación privada
-   - evitar que auth-screen deje el panel debajo del sidebar
-   - aislar cada render en un host propio para evitar carreras async
-   - impedir que renders antiguos reparen shell o pinten errores tardíos
-   - exponer contexto con renderId / signal / isStale / renderRoot
-   - crear fallbacks DOM-safe sin innerHTML ni style inline
-
-   HARDENING EXTREMO:
-   - guards browser / DOM total safe
-   - evita doble router:rendered en success / 404 / forbidden / login
-   - evita doble sync route/publicPath en success
-   - payloads estables y enriquecidos
-   - paso explícito de viewContainer y renderRoot al render
-   - compatibilidad función / objeto / adapters
-   - return explícito de view instance
-   - fallbacks seguros si falta render
-   - preserva username resuelto y slug público
-   - preserva query/hash públicos en render
-   - no destruye /activate-account?token=...
-   - no destruye /activate-account/<token>
-   - no destruye /reset-password/confirm?token=...
-   - no destruye /reset-password/confirm/<token>
-   - no resucita token tras scrubbedActivationToken
-   - no resucita token tras scrubbedResetToken / scrubbedResetPasswordToken
-   - soporte hash-router /#/activate-account?token=...
-   - soporte hash-router /#/reset-password/confirm?token=...
-   - soporte aliases legacy de reset initial url
-   - métricas internas por flujo
-   - cero throws accidentales
-
-   FIX REAL RACE CONDITIONS:
-   - cada navegación success crea un render host aislado
-   - route.render() recibe renderRoot en vez de tocar el root global
-   - async render antiguo queda en host desconectado si llega tarde
-   - async error antiguo se ignora
-   - reparación async solo corre si renderId sigue activo
-   - AbortController opcional para vistas que soporten ctx.signal
-
-   FIX UX / PERFORMANCE:
-   - success no bloquea navegación salvo route.awaitRender/renderMode=blocking
-   - pinta transición inmediata
-   - deja que la vista cargue datos en segundo plano
-   - evita sensación de sidebar congelado
-   - repara shell antes y después del render
-   - evita panel privado desplazado bajo sidebar tras login
-
-   FIX EVENT STORM:
-   - safeEmit() NO duplica AppCore.events + window
-   - router:shell:repair se deduplica por firma
-   - app:ui:repair-request NO se emite automáticamente desde cada shell repair
-   - render.js no fuerza repair UI global en cada fase interna
-
-   FIX ROUTE SCOPE:
-   - canonicalPath nunca conserva prefijo /@usuario
-   - publicPath puede conservar /@usuario
-   - helpers externos no pueden degradar /incidencias a /
-   - render host queda marcado con canonical/public/status/renderId
-   - async stale render no puede escribir ni reparar shell
-
-   FIX SIDEBAR ACTIVE:
-   - success hace commit real de AppCore.state.route/publicPath ANTES del render
-   - router/index.js emite router:rendered con canonical/public definitivos
-   - el sidebar ya no queda activo en la ruta anterior
+   Render host limpio:
+   - renderRoot aislado por navegación.
+   - state commit antes de render success.
+   - canonical/public path coherentes.
+   - sin innerHTML, sin CSS inline, sin event storm.
+   - no emite router:rendered en flujos internos.
 ========================================================= */
 
 import {
   getRouteNames,
-  escapeHtml,
   normalizeCanonicalPath,
   normalizePath,
   getSearchAndHash,
@@ -95,422 +22,479 @@ import {
   buildPublicPath,
   buildLoginUrl,
   getDefaultHomeTarget,
-  getResolvedPublicPath,
+  getProtectedInitialPublicPath,
+  redactTokenInText,
 } from "./helpers.js";
 
 /* =========================================================
-   CONSTANTS
+   VERSION / CONSTANTS
 ========================================================= */
 
-export const ROUTER_RENDER_VERSION =
-  "15.0.0";
+export const ROUTER_RENDER_VERSION = "16.0.0-clean";
 
-const ACTIVATION_PATH =
-  "/activate-account";
+const DEFAULT_ROUTE = "/";
+const SOURCE = "router.render";
 
-const RESET_CONFIRM_PATH =
-  "/reset-password/confirm";
+const RENDER_HOST_ATTR = "data-router-view-host";
+const RENDER_HOST_CLASS = "router-view-host";
 
-const RENDER_HOST_ATTR =
-  "data-router-view-host";
+const AUTH_CANONICAL_PATHS = new Set([
+  "/login",
+  "/signin",
+  "/sign-in",
+  "/forgot-password",
+  "/recover-password",
+  "/password-reset",
+  "/reset-password",
+  "/reset-password/confirm",
+  "/activate-account",
+  "/2fa",
+  "/otp",
+  "/mfa",
+]);
 
-const RENDER_HOST_CLASS =
-  "router-view-host";
-
-const RENDER_FALLBACK_CLASS =
-  "router-fallback-view";
-
-const RENDER_TRANSITION_CLASS =
-  "router-transition-view";
-
-const SHELL_REPAIR_EMIT_DEDUPE_MS =
-  24;
-
-const ACTIVATION_TOKEN_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "code",
-    "t",
-  ]);
-
-const RESET_TOKEN_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "resetToken",
-    "passwordResetToken",
-    "confirmToken",
-    "code",
-    "t",
-  ]);
-
-const AUTH_SCREEN_CANONICAL_PATHS =
-  new Set([
-    "/login",
-    "/forgot-password",
-    "/recover-password",
-    "/password-reset",
-    "/reset-password",
-    "/reset-password/confirm",
-    "/activate-account",
-    "/2fa",
-    "/otp",
-  ]);
-
-const PROTECTED_PUBLIC_TOKEN_ROUTES =
-  Object.freeze([
-    Object.freeze({
-      key:
-        "activation",
-
-      path:
-        ACTIVATION_PATH,
-
-      stateScrubFlags:
-        Object.freeze([
-          "scrubbedActivationToken",
-          "activationTokenScrubbed",
-          "scrubbedActivateAccountToken",
-        ]),
-
-      windowKeys:
-        Object.freeze([
-          "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-        ]),
-
-      tokenNames:
-        ACTIVATION_TOKEN_PARAM_NAMES,
-    }),
-
-    Object.freeze({
-      key:
-        "resetConfirm",
-
-      path:
-        RESET_CONFIRM_PATH,
-
-      stateScrubFlags:
-        Object.freeze([
-          "scrubbedResetToken",
-          "resetTokenScrubbed",
-          "scrubbedResetPasswordToken",
-          "scrubbedResetConfirmToken",
-          "scrubbedPasswordResetToken",
-        ]),
-
-      windowKeys:
-        Object.freeze([
-          "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-          "__ONION_RESET_CONFIRM_INITIAL_URL__",
-        ]),
-
-      tokenNames:
-        RESET_TOKEN_PARAM_NAMES,
-    }),
-  ]);
-
-const SENSITIVE_QUERY_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "resetToken",
-    "passwordResetToken",
-    "confirmToken",
-    "code",
-    "t",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
-  ]);
+const REPAIR_EVENT_DEDUPE_MS = 32;
 
 /* =========================================================
-   BASICS
+   BASIC HELPERS
 ========================================================= */
 
+let renderSeq = 0;
+let activeController = null;
+let lastRepairKey = "";
+let lastRepairAt = 0;
+
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isFunction(value) {
+function isFn(value) {
   return typeof value === "function";
 }
 
-function isPromiseLike(value) {
-  return Boolean(
-    value &&
-      (
-        typeof value === "object" ||
-        typeof value === "function"
-      ) &&
-      typeof value.then === "function"
-  );
+function isObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
 }
 
 function isNode(value) {
-  if (!value) {
-    return false;
-  }
-
   try {
-    return (
-      typeof Node !== "undefined" &&
-      value instanceof Node
-    );
+    return Boolean(typeof Node !== "undefined" && value instanceof Node);
   } catch {
-    return Boolean(
-      value &&
-        typeof value === "object" &&
-        typeof value.nodeType === "number"
-    );
+    return Boolean(value && typeof value.nodeType === "number");
   }
 }
 
-function nowMs() {
-  try {
-    if (
-      typeof performance !== "undefined" &&
-      typeof performance.now === "function"
-    ) {
-      return performance.now();
-    }
-  } catch {}
-
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
-}
-
-function nowEpochMs() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
+function isPromiseLike(value) {
+  return Boolean(value && (typeof value === "object" || typeof value === "function") && isFn(value.then));
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value).trim();
-
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
   return text || fallback;
 }
 
 function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-    ? value
-    : {};
+  return isObject(value) ? value : {};
 }
 
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
-}
-
-function firstResolved(...values) {
-  for (const value of values) {
-    if (
-      value === undefined ||
-      value === null
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-
-    return value;
+function nowMs() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
   }
-
-  return null;
 }
 
-function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
-    return window.location.origin;
+function perfMs() {
+  try {
+    return typeof performance !== "undefined" && isFn(performance.now)
+      ? performance.now()
+      : nowMs();
+  } catch {
+    return nowMs();
   }
-
-  return "http://localhost";
 }
 
 function afterPaint(callback) {
-  if (!isFunction(callback)) {
-    return;
-  }
+  if (!isFn(callback)) return;
 
   if (!isBrowser()) {
-    try {
-      callback();
-    } catch {}
-
+    try { callback(); } catch {}
     return;
   }
 
   try {
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
-        try {
-          callback();
-        } catch {}
+        try { callback(); } catch {}
       });
     });
-
     return;
   } catch {}
 
   try {
     window.setTimeout(() => {
-      try {
-        callback();
-      } catch {}
+      try { callback(); } catch {}
     }, 0);
   } catch {}
 }
 
 function microtask(callback) {
-  if (!isFunction(callback)) {
-    return;
-  }
+  if (!isFn(callback)) return;
 
   try {
-    if (typeof queueMicrotask === "function") {
-      queueMicrotask(() => {
-        try {
-          callback();
-        } catch {}
-      });
-
-      return;
-    }
+    queueMicrotask(() => {
+      try { callback(); } catch {}
+    });
+    return;
   } catch {}
 
   try {
     Promise.resolve().then(() => {
-      try {
-        callback();
-      } catch {}
+      try { callback(); } catch {}
     });
+  } catch {}
+}
 
-    return;
+function sanitize(value, depth = 0, seen = new WeakSet()) {
+  if (depth > 5) return "[MaxDepth]";
+
+  if (value === null || value === undefined) return value;
+
+  if (typeof value === "string") {
+    try {
+      return redactTokenInText(value);
+    } catch {
+      return value;
+    }
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "function") return "[Function]";
+
+  if (value instanceof Error) {
+    return {
+      name: value.name || "Error",
+      message: redactTokenInText(value.message || ""),
+      code: value.code || null,
+      status: value.status || value.statusCode || null,
+      stack: value.stack ? "[stack]" : null,
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 80).map((item) => sanitize(item, depth + 1, seen));
+  }
+
+  if (isObject(value)) {
+    try {
+      if (seen.has(value)) return "[Circular]";
+      seen.add(value);
+    } catch {}
+
+    const output = {};
+
+    for (const [key, item] of Object.entries(value).slice(0, 140)) {
+      if (/token|authorization|password|secret|credential|jwt|bearer|otp|totp|code/i.test(key)) {
+        output[key] = item ? "***" : item;
+        continue;
+      }
+
+      output[key] = sanitize(item, depth + 1, seen);
+    }
+
+    return output;
+  }
+
+  return String(value);
+}
+
+function emit(AppCore, eventName, payload = {}, options = {}) {
+  const name = safeText(eventName);
+  if (!name) return false;
+
+  const cleanPayload = sanitize({
+    source: SOURCE,
+    version: ROUTER_RENDER_VERSION,
+    at: new Date().toISOString(),
+    ...safeObject(payload),
+  });
+
+  let busAvailable = false;
+  let busEmitted = false;
+
+  try {
+    if (isFn(AppCore?.events?.emit)) {
+      busAvailable = true;
+      AppCore.events.emit(name, cleanPayload);
+      busEmitted = true;
+    }
+  } catch {}
+
+  if (options.window === true || (!busAvailable && isBrowser())) {
+    try {
+      window.dispatchEvent(
+        new CustomEvent(name, {
+          detail: cleanPayload,
+        })
+      );
+      return true;
+    } catch {}
+  }
+
+  return busEmitted;
+}
+
+function warn(AppCore, ...args) {
+  const clean = args.map((item) => sanitize(item));
+
+  try {
+    AppCore?.utils?.warn?.("[RouterRender]", ...clean);
   } catch {}
 
   try {
-    callback();
+    if (AppCore?.config?.debug) {
+      console.warn("[RouterRender]", ...clean);
+    }
+  } catch {}
+}
+
+function errorLog(AppCore, ...args) {
+  const clean = args.map((item) => sanitize(item));
+
+  try {
+    AppCore?.utils?.error?.("[RouterRender]", ...clean);
+  } catch {}
+
+  try {
+    console.error("[RouterRender]", ...clean);
   } catch {}
 }
 
 /* =========================================================
-   DOM SAFE HELPERS
+   PATH HELPERS
 ========================================================= */
 
-function createElement(tagName = "div", {
-  id = "",
-  className = "",
-  text = "",
-  attrs = {},
-  dataset = {},
-} = {}) {
-  const element =
-    document.createElement(tagName);
-
-  if (id) {
-    element.id =
-      id;
+function canonical(AppCore, path = DEFAULT_ROUTE) {
+  try {
+    return normalizeCanonicalPath(AppCore, path) || DEFAULT_ROUTE;
+  } catch {
+    return DEFAULT_ROUTE;
   }
-
-  if (className) {
-    element.className =
-      className;
-  }
-
-  if (
-    text !== null &&
-    text !== undefined &&
-    text !== ""
-  ) {
-    element.textContent =
-      String(text);
-  }
-
-  for (const [key, value] of Object.entries(safeObject(attrs))) {
-    setAttribute(
-      element,
-      key,
-      value
-    );
-  }
-
-  for (const [key, value] of Object.entries(safeObject(dataset))) {
-    setDataset(
-      element,
-      key,
-      value
-    );
-  }
-
-  return element;
 }
 
-function appendAll(parent, children = []) {
-  if (!parent) {
-    return parent;
+function publicPath(AppCore, path = DEFAULT_ROUTE) {
+  try {
+    return normalizePath(AppCore, path) || DEFAULT_ROUTE;
+  } catch {
+    return path || DEFAULT_ROUTE;
+  }
+}
+
+function stripSearchAndHash(path = DEFAULT_ROUTE) {
+  return (
+    safeText(path, DEFAULT_ROUTE)
+      .split("?")[0]
+      .split("#")[0] ||
+    DEFAULT_ROUTE
+  );
+}
+
+function suffixOf(path = "") {
+  try {
+    return getSearchAndHash(path || "") || "";
+  } catch {
+    const raw = safeText(path, "");
+    const queryIndex = raw.indexOf("?");
+    const hashIndex = raw.indexOf("#");
+
+    if (queryIndex >= 0) return raw.slice(queryIndex);
+    if (hashIndex >= 0) return raw.slice(hashIndex);
+
+    return "";
+  }
+}
+
+function sameCanonical(AppCore, a = DEFAULT_ROUTE, b = DEFAULT_ROUTE) {
+  return stripSearchAndHash(canonical(AppCore, a)) === stripSearchAndHash(canonical(AppCore, b));
+}
+
+function isUsernameScoped(path = "") {
+  return /^\/@[^/]+(?:\/|$)/i.test(safeText(path, ""));
+}
+
+function usernameFrom(AppCore, requestedUsername = null, path = "") {
+  return (
+    safeText(requestedUsername, "") ||
+    extractUsernameFromPath(AppCore, path || "") ||
+    getCurrentResolvedUsername(AppCore) ||
+    getCurrentUsername(AppCore) ||
+    AppCore?.state?.user?.username ||
+    AppCore?.state?.user?.slug ||
+    null
+  );
+}
+
+function protectedPublicPath(AppCore) {
+  try {
+    return getProtectedInitialPublicPath(AppCore) || "";
+  } catch {
+    return "";
+  }
+}
+
+function preservePublicContext(AppCore, candidate = DEFAULT_ROUTE) {
+  const cleanCandidate = publicPath(AppCore, candidate || DEFAULT_ROUTE);
+  const protectedPath = protectedPublicPath(AppCore);
+
+  if (protectedPath && sameCanonical(AppCore, protectedPath, cleanCandidate)) {
+    return protectedPath;
   }
 
-  for (const child of safeArray(children)) {
-    if (!child) {
-      continue;
-    }
+  const currentPublic = getCurrentPublicPath(AppCore);
 
+  if (
+    currentPublic &&
+    cleanCandidate &&
+    sameCanonical(AppCore, currentPublic, cleanCandidate)
+  ) {
+    const currentSuffix = suffixOf(currentPublic);
+    const candidateSuffix = suffixOf(cleanCandidate);
+
+    if (currentSuffix && !candidateSuffix) return currentPublic;
+    if (isUsernameScoped(currentPublic) && !isUsernameScoped(cleanCandidate)) return currentPublic;
+  }
+
+  return cleanCandidate;
+}
+
+function resolveRoutePaths({
+  AppCore,
+  getRoute,
+  route = null,
+  requestedPath = DEFAULT_ROUTE,
+  canonicalPath = DEFAULT_ROUTE,
+  publicPath: explicitPublicPath = "",
+  requestedUsername = null,
+} = {}) {
+  const canonicalPathClean = stripSearchAndHash(
+    canonical(AppCore, canonicalPath || route?.path || requestedPath || DEFAULT_ROUTE)
+  );
+
+  const requestedPublic = publicPath(
+    AppCore,
+    explicitPublicPath || requestedPath || canonicalPathClean || DEFAULT_ROUTE
+  );
+
+  const username = usernameFrom(AppCore, requestedUsername, requestedPublic);
+
+  let builtPublic = "";
+
+  try {
+    builtPublic =
+      buildPublicPath(
+        AppCore,
+        getRoute || (() => route),
+        `${canonicalPathClean}${suffixOf(requestedPublic)}`,
+        {
+          username,
+          resolvedUsername: username,
+          fromPath: requestedPublic,
+          publicPath: requestedPublic,
+          canonicalPath: canonicalPathClean,
+        }
+      ) || "";
+  } catch {
+    builtPublic = "";
+  }
+
+  const requestedCompatible =
+    requestedPublic &&
+    sameCanonical(AppCore, requestedPublic, canonicalPathClean) &&
+    (
+      isUsernameScoped(requestedPublic) ||
+      suffixOf(requestedPublic) ||
+      protectedPublicPath(AppCore)
+    );
+
+  const finalPublicPath = preservePublicContext(
+    AppCore,
+    requestedCompatible
+      ? requestedPublic
+      : builtPublic || requestedPublic || canonicalPathClean || DEFAULT_ROUTE
+  );
+
+  return {
+    canonicalPath: canonicalPathClean,
+    publicPath: finalPublicPath,
+    username,
+  };
+}
+
+/* =========================================================
+   DOM HELPERS
+========================================================= */
+
+function queryFirst(selectors = []) {
+  if (!isBrowser()) return null;
+
+  for (const selector of selectors) {
     try {
-      parent.appendChild(child);
+      const element = selector.startsWith("#")
+        ? document.getElementById(selector.slice(1))
+        : document.querySelector(selector);
+
+      if (element) return element;
     } catch {}
   }
 
-  return parent;
+  return null;
 }
 
-function emptyElement(element) {
-  if (!element) {
+function setDataset(element, key, value) {
+  if (!element || !key) return false;
+
+  try {
+    if (value === null || value === undefined || value === "") {
+      delete element.dataset[key];
+    } else {
+      element.dataset[key] = String(value);
+    }
+
+    return true;
+  } catch {
     return false;
   }
+}
+
+function setHidden(element, hidden = false) {
+  if (!element) return false;
+
+  try {
+    element.hidden = Boolean(hidden);
+  } catch {}
+
+  try {
+    element.setAttribute("aria-hidden", hidden ? "true" : "false");
+  } catch {}
+
+  return true;
+}
+
+function setBusy(element, busy = false) {
+  if (!element) return false;
+
+  try {
+    element.setAttribute("aria-busy", busy ? "true" : "false");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function empty(element) {
+  if (!element) return false;
 
   try {
     element.replaceChildren();
@@ -528,1948 +512,200 @@ function emptyElement(element) {
   }
 }
 
-function setAttribute(el, key, value) {
-  if (
-    !el ||
-    !key
-  ) {
-    return false;
-  }
-
-  try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
-      el.removeAttribute(key);
-      return true;
-    }
-
-    el.setAttribute(
-      key,
-      String(value)
-    );
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/* =========================================================
-   REDACTION / SAFE LOG PAYLOADS
-========================================================= */
-
-function redactTokenInText(value = "") {
-  let output =
-    safeText(value, "");
-
-  if (!output) {
-    return "";
-  }
-
-  try {
-    for (const name of SENSITIVE_QUERY_PARAM_NAMES) {
-      const escaped =
-        String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-      output =
-        output.replace(
-          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
-          "$1***"
-        );
-    }
-
-    output =
-      output.replace(
-        /(\/activate-account\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
-
-    output =
-      output.replace(
-        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
-
-    output =
-      output.replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      );
-  } catch {}
-
-  return output;
-}
-
-function redactPayload(value, depth = 0) {
-  if (depth > 4) {
-    return "[MaxDepth]";
-  }
-
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return value;
-  }
-
-  if (typeof value === "string") {
-    return redactTokenInText(value);
-  }
-
-  if (
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
-  if (value instanceof Error) {
-    return {
-      name:
-        value.name || "Error",
-      message:
-        redactTokenInText(value.message || ""),
-      code:
-        value.code || value.status || null,
-      stack:
-        redactTokenInText(value.stack || ""),
-    };
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) =>
-      redactPayload(
-        item,
-        depth + 1
-      )
-    );
-  }
-
-  if (
-    value &&
-    typeof value === "object"
-  ) {
-    const output =
-      {};
-
-    for (const [key, item] of Object.entries(value)) {
-      const cleanKey =
-        String(key).toLowerCase();
-
-      if (
-        cleanKey.includes("token") ||
-        cleanKey === "authorization" ||
-        cleanKey === "password" ||
-        cleanKey === "secret"
-      ) {
-        output[key] =
-          item ? "***" : item;
-        continue;
-      }
-
-      output[key] =
-        redactPayload(
-          item,
-          depth + 1
-        );
-    }
-
-    return output;
-  }
-
-  return value;
-}
-
-/* =========================================================
-   PATH HARDENING
-========================================================= */
-
-function normalizePathnameOnly(pathname = "/") {
-  let value =
-    String(pathname || "/")
-      .trim()
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
-
-  if (!value) {
-    value = "/";
-  }
-
-  if (!value.startsWith("/")) {
-    value =
-      `/${value}`;
-  }
-
-  if (value.length > 1) {
-    value =
-      value.replace(/\/+$/g, "") ||
-      "/";
-  }
-
-  return value;
-}
-
-function normalizeSearch(search = "") {
-  const value =
-    safeText(search, "");
-
-  if (!value) {
-    return "";
-  }
-
-  return value.startsWith("?")
-    ? value
-    : `?${value.replace(/^\?+/, "")}`;
-}
-
-function normalizeHash(hash = "") {
-  const value =
-    safeText(hash, "");
-
-  if (!value) {
-    return "";
-  }
-
-  return value.startsWith("#")
-    ? value
-    : `#${value.replace(/^#+/, "")}`;
-}
-
-function isHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  return (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  );
-}
-
-function normalizeHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return "/";
-  }
-
-  if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/") || "/";
-  }
-
-  return raw.replace(/^#\/?/, "/") || "/";
-}
-
-function splitFullPath(value = "/") {
-  const raw =
-    safeText(value, "/");
-
-  if (isHashRouterPath(raw)) {
-    return splitFullPath(
-      normalizeHashRouterPath(raw)
-    );
-  }
-
-  let pathname =
-    raw;
-
-  let search =
-    "";
-
-  let hash =
-    "";
-
-  const hashIndex =
-    pathname.indexOf("#");
-
-  if (hashIndex >= 0) {
-    hash =
-      pathname.slice(hashIndex);
-
-    pathname =
-      pathname.slice(0, hashIndex) ||
-      "/";
-  }
-
-  const searchIndex =
-    pathname.indexOf("?");
-
-  if (searchIndex >= 0) {
-    search =
-      pathname.slice(searchIndex);
-
-    pathname =
-      pathname.slice(0, searchIndex) ||
-      "/";
-  }
-
-  return {
-    pathname:
-      normalizePathnameOnly(pathname),
-    search:
-      normalizeSearch(search),
-    hash:
-      normalizeHash(hash),
-  };
-}
-
-function normalizeLocalFullPath(path = "/") {
-  const raw =
-    safeText(path, "/");
-
-  if (!raw) {
-    return "/";
-  }
-
-  if (isHashRouterPath(raw)) {
-    return normalizeLocalFullPath(
-      normalizeHashRouterPath(raw)
-    );
-  }
-
-  try {
-    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed =
-        new URL(
-          raw,
-          getBaseOrigin()
-        );
-
-      if (
-        parsed.hash &&
-        isHashRouterPath(parsed.hash)
-      ) {
-        return normalizeLocalFullPath(
-          normalizeHashRouterPath(parsed.hash)
-        );
-      }
-
-      return normalizeLocalFullPath(
-        `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
-      );
-    }
-  } catch {}
-
-  const {
-    pathname,
-    search,
-    hash,
-  } =
-    splitFullPath(raw);
-
-  return `${pathname}${search}${hash}`;
-}
-
-function stripSearchAndHash(path = "/") {
-  const normalized =
-    normalizeLocalFullPath(path || "/");
-
-  return (
-    normalized
-      .split("?")[0]
-      .split("#")[0] ||
-    "/"
-  );
-}
-
-function isPublicUsernameSegment(segment = "") {
-  const raw =
-    safeText(segment, "");
-
-  return /^@[A-Za-z0-9._-]{1,80}$/.test(raw);
-}
-
-function hasPublicUsernamePrefix(path = "") {
-  const clean =
-    stripSearchAndHash(path);
-
-  const first =
-    clean
-      .split("/")
-      .filter(Boolean)[0] ||
-    "";
-
-  return isPublicUsernameSegment(first);
-}
-
-function stripPublicUsernamePrefix(path = "/") {
-  const {
-    pathname,
-    search,
-    hash,
-  } =
-    splitFullPath(
-      normalizeLocalFullPath(path || "/")
-    );
-
-  const segments =
-    pathname
-      .split("/")
-      .filter(Boolean);
-
-  if (
-    segments.length > 0 &&
-    isPublicUsernameSegment(segments[0])
-  ) {
-    const rest =
-      segments
-        .slice(1)
-        .join("/");
-
-    const cleanPathname =
-      rest
-        ? normalizePathnameOnly(`/${rest}`)
-        : "/";
-
-    return `${cleanPathname}${search}${hash}`;
-  }
-
-  return `${pathname}${search}${hash}`;
-}
-
-function safeNormalizePublicPath(AppCore, path = "/") {
-  const local =
-    normalizeLocalFullPath(path || "/");
-
-  try {
-    const external =
-      normalizePath(
-        AppCore,
-        path || "/"
-      );
-
-    const normalizedExternal =
-      normalizeLocalFullPath(
-        external || local
-      );
-
-    if (
-      hasPublicUsernamePrefix(local) &&
-      !hasPublicUsernamePrefix(normalizedExternal) &&
-      stripSearchAndHash(normalizedExternal) === "/"
-    ) {
-      return local;
-    }
-
-    return normalizedExternal || local;
-  } catch {
-    return local;
-  }
-}
-
-function safeCanonicalPath(AppCore, path = "/") {
-  const localPublic =
-    normalizeLocalFullPath(path || "/");
-
-  const localCanonical =
-    normalizeLocalFullPath(
-      stripPublicUsernamePrefix(localPublic)
-    );
-
-  let externalCanonical =
-    "";
-
-  try {
-    externalCanonical =
-      normalizeCanonicalPath(
-        AppCore,
-        path || "/"
-      ) || "";
-  } catch {}
-
-  externalCanonical =
-    externalCanonical
-      ? normalizeLocalFullPath(
-          stripPublicUsernamePrefix(externalCanonical)
-        )
-      : "";
-
-  const localClean =
-    stripSearchAndHash(localCanonical);
-
-  const externalClean =
-    stripSearchAndHash(externalCanonical);
-
-  if (
-    hasPublicUsernamePrefix(localPublic) &&
-    (
-      !externalClean ||
-      externalClean === "/"
-    ) &&
-    localClean !== "/"
-  ) {
-    return localCanonical;
-  }
-
-  if (
-    externalClean &&
-    externalClean !== "/" &&
-    !hasPublicUsernamePrefix(externalCanonical)
-  ) {
-    return externalCanonical;
-  }
-
-  return localCanonical || externalCanonical || "/";
-}
-
-function sameCanonicalRoute(AppCore, a = "/", b = "/") {
-  return (
-    stripSearchAndHash(
-      safeCanonicalPath(AppCore, a || "/")
-    ) ===
-    stripSearchAndHash(
-      safeCanonicalPath(AppCore, b || "/")
-    )
-  );
-}
-
-function getSafeSearchAndHash(AppCore, path = "") {
-  try {
-    return getSearchAndHash(path || "") || "";
-  } catch {
-    const normalized =
-      normalizeLocalFullPath(path || "");
-
-    const queryIndex =
-      normalized.indexOf("?");
-
-    const hashIndex =
-      normalized.indexOf("#");
-
-    if (
-      queryIndex < 0 &&
-      hashIndex < 0
-    ) {
-      return "";
-    }
-
-    if (queryIndex >= 0) {
-      return normalized.slice(queryIndex);
-    }
-
-    return normalized.slice(hashIndex);
-  }
-}
-
-function pathFromUrlLike(AppCore, value = "") {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return "";
-  }
-
-  if (isHashRouterPath(raw)) {
-    return safeNormalizePublicPath(
-      AppCore,
-      normalizeHashRouterPath(raw)
-    );
-  }
-
-  try {
-    const parsed =
-      new URL(
-        raw,
-        getBaseOrigin()
-      );
-
-    if (
-      parsed.hash &&
-      isHashRouterPath(parsed.hash)
-    ) {
-      return safeNormalizePublicPath(
-        AppCore,
-        normalizeHashRouterPath(parsed.hash)
-      );
-    }
-
-    return safeNormalizePublicPath(
-      AppCore,
-      `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
-    );
-  } catch {
-    return safeNormalizePublicPath(
-      AppCore,
-      raw.startsWith("/") ? raw : `/${raw}`
-    );
-  }
-}
-
-function buildCanonicalSourceWithSuffix(
-  AppCore,
-  canonicalPath = "/",
-  requestedPath = "/"
-) {
-  const finalCanonical =
-    safeCanonicalPath(
-      AppCore,
-      canonicalPath ||
-        requestedPath ||
-        "/"
-    );
-
-  const normalizedRequested =
-    safeNormalizePublicPath(
-      AppCore,
-      requestedPath ||
-        canonicalPath ||
-        finalCanonical
-    );
-
-  const requestedSuffix =
-    getSafeSearchAndHash(
-      AppCore,
-      normalizedRequested
-    );
-
-  const canonicalSuffix =
-    getSafeSearchAndHash(
-      AppCore,
-      canonicalPath || ""
-    );
-
-  const suffix =
-    requestedSuffix ||
-    canonicalSuffix ||
-    "";
-
-  return safeCanonicalPath(
-    AppCore,
-    `${stripSearchAndHash(finalCanonical)}${suffix}`
-  );
-}
-
-/* =========================================================
-   SAFE OPS
-========================================================= */
-
-function safeEmit(AppCore, eventName, payload = {}, options = {}) {
-  const name =
-    safeText(eventName, "");
-
-  if (!name) {
-    return false;
-  }
-
-  const opts =
-    safeObject(options);
-
-  const finalPayload =
-    opts.redact === true
-      ? redactPayload(payload)
-      : payload;
-
-  let busAvailable =
-    false;
-
-  let busEmitted =
-    false;
-
-  try {
-    if (isFunction(AppCore?.events?.emit)) {
-      busAvailable =
-        true;
-
-      AppCore.events.emit(
-        name,
-        finalPayload
-      );
-
-      busEmitted =
-        true;
-    }
-  } catch {}
-
-  if (
-    opts.window === true ||
-    (!busAvailable && isBrowser())
-  ) {
+function el(tagName = "div", {
+  className = "",
+  text = "",
+  attrs = {},
+  dataset = {},
+} = {}) {
+  const node = document.createElement(tagName);
+
+  if (className) node.className = className;
+  if (text) node.textContent = text;
+
+  for (const [key, value] of Object.entries(safeObject(attrs))) {
     try {
-      window.dispatchEvent(
-        new CustomEvent(name, {
-          detail:
-            finalPayload,
-        })
-      );
-
-      return true;
+      if (value === null || value === undefined || value === "") {
+        node.removeAttribute(key);
+      } else {
+        node.setAttribute(key, String(value));
+      }
     } catch {}
   }
 
-  return busEmitted;
-}
-
-function safeWarn(AppCore, ...args) {
-  const safeArgs =
-    args.map((item) =>
-      redactPayload(item)
-    );
-
-  try {
-    AppCore?.utils?.warn?.(
-      "[RouterRender]",
-      ...safeArgs
-    );
-  } catch {}
-
-  try {
-    if (AppCore?.config?.debug) {
-      console.warn(
-        "[RouterRender]",
-        ...safeArgs
-      );
-    }
-  } catch {}
-}
-
-function safeError(AppCore, ...args) {
-  const safeArgs =
-    args.map((item) =>
-      redactPayload(item)
-    );
-
-  try {
-    AppCore?.utils?.error?.(
-      "[RouterRender]",
-      ...safeArgs
-    );
-  } catch {}
-
-  try {
-    console.error(
-      "[RouterRender]",
-      ...safeArgs
-    );
-  } catch {}
-}
-
-function safeLog(AppCore, ...args) {
-  const safeArgs =
-    args.map((item) =>
-      redactPayload(item)
-    );
-
-  try {
-    AppCore?.utils?.log?.(
-      "[RouterRender]",
-      ...safeArgs
-    );
-  } catch {}
-}
-
-function safeSetDocumentTitle(setDocumentTitle, title) {
-  try {
-    if (typeof setDocumentTitle === "function") {
-      setDocumentTitle(title);
-    }
-  } catch {}
-}
-
-function safeSetShellMode(setShellMode, route) {
-  try {
-    if (typeof setShellMode === "function") {
-      setShellMode(route);
-    }
-  } catch {}
-}
-
-function safeClearDynamicContainers(clearDynamicContainers) {
-  try {
-    if (typeof clearDynamicContainers === "function") {
-      clearDynamicContainers();
-    }
-  } catch {}
-}
-
-function safeSetActiveMenu(setActiveMenu, path) {
-  try {
-    if (typeof setActiveMenu === "function") {
-      setActiveMenu(path);
-    }
-  } catch {}
-}
-
-function safeUpdateHistory(updateHistory, payload = {}) {
-  try {
-    if (typeof updateHistory === "function") {
-      return updateHistory(payload);
-    }
-  } catch {}
-
-  return false;
-}
-
-/* =========================================================
-   FLOW METRICS
-========================================================= */
-
-function emitFlowMetric(AppCore, flow = "unknown", payload = {}) {
-  safeEmit(
-    AppCore,
-    "router:render:flow",
-    {
-      flow,
-      ...payload,
-    },
-    {
-      redact:
-        true,
-    }
-  );
-}
-
-/* =========================================================
-   VIEW CONTAINER / HOST ISOLATION
-========================================================= */
-
-export function getViewContainer(AppCore) {
-  if (!isBrowser()) {
-    return null;
+  for (const [key, value] of Object.entries(safeObject(dataset))) {
+    setDataset(node, key, value);
   }
 
+  return node;
+}
+
+function append(parent, children = []) {
+  if (!parent) return parent;
+
+  for (const child of children) {
+    if (!child) continue;
+
+    try {
+      parent.appendChild(child);
+    } catch {}
+  }
+
+  return parent;
+}
+
+export function getViewContainer(AppCore) {
+  if (!isBrowser()) return null;
+
   try {
-    if (
-      AppCore?.dom?.viewContainer &&
-      document.contains(AppCore.dom.viewContainer)
-    ) {
+    if (AppCore?.dom?.viewContainer && document.contains(AppCore.dom.viewContainer)) {
       return AppCore.dom.viewContainer;
     }
   } catch {}
 
-  const el =
-    document.getElementById("view-container") ||
-    document.querySelector("#view-container") ||
-    document.querySelector("[data-view-root]") ||
-    document.querySelector("[data-view-container='true']") ||
-    null;
-
-  try {
-    if (el && AppCore?.dom) {
-      AppCore.dom.viewContainer =
-        el;
-    }
-  } catch {}
-
-  return el;
-}
-
-function setDataset(el, key, value) {
-  if (
-    !el ||
-    !key
-  ) {
-    return false;
-  }
-
-  try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
-      delete el.dataset[key];
-      return true;
-    }
-
-    el.dataset[key] =
-      String(value);
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function createAbortControllerSafe() {
-  try {
-    if (typeof AbortController === "function") {
-      return new AbortController();
-    }
-  } catch {}
-
-  return null;
-}
-
-let successRenderSequence =
-  0;
-
-let activeRenderController =
-  null;
-
-let lastShellRepairEmitKey =
-  "";
-
-let lastShellRepairEmitAt =
-  0;
-
-function abortPreviousSuccessRender(reason = "new-render") {
-  try {
-    activeRenderController?.abort?.(reason);
-  } catch {}
-
-  activeRenderController =
-    null;
-}
-
-function beginSuccessRender() {
-  abortPreviousSuccessRender("superseded");
-
-  const renderId =
-    ++successRenderSequence;
-
-  const controller =
-    createAbortControllerSafe();
-
-  activeRenderController =
-    controller;
-
-  return {
-    renderId,
-    controller,
-    signal:
-      controller?.signal || null,
-  };
-}
-
-function isCurrentRender(AppCore, renderId, canonicalPath = "") {
-  if (renderId !== successRenderSequence) {
-    return false;
-  }
-
   const view =
-    getViewContainer(AppCore);
-
-  if (!view) {
-    return false;
-  }
-
-  const viewRenderId =
-    safeText(
-      view.dataset?.routerRenderId,
-      ""
-    );
-
-  if (
-    viewRenderId &&
-    viewRenderId !== String(renderId)
-  ) {
-    return false;
-  }
-
-  const expectedCanonical =
-    stripSearchAndHash(
-      safeText(canonicalPath, "")
-    );
-
-  if (expectedCanonical) {
-    const viewCanonical =
-      stripSearchAndHash(
-        safeText(
-          view.dataset?.routerCanonicalPath,
-          ""
-        )
-      );
-
-    if (
-      viewCanonical &&
-      viewCanonical !== expectedCanonical
-    ) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function markViewContainer({
-  AppCore,
-  view,
-  renderId,
-  route = null,
-  canonicalPath = "/",
-  publicPath = "/",
-  status = "pending",
-} = {}) {
-  if (!view) {
-    return false;
-  }
-
-  setDataset(view, "routerRenderId", renderId);
-  setDataset(view, "routerStatus", status);
-  setDataset(view, "routerCanonicalPath", canonicalPath);
-  setDataset(view, "routerPublicPath", publicPath);
-  setDataset(view, "routerRoute", route?.path || canonicalPath || "/");
-  setDataset(view, "routerRouteName", route?.name || "");
-  setDataset(view, "routerViewKey", route?.viewKey || "");
-  setDataset(view, "routerViewName", route?.viewName || "");
+    queryFirst([
+      "#view-container",
+      "[data-view-root]",
+      "[data-view-container='true']",
+      "[data-router-view]",
+    ]);
 
   try {
-    view.classList.add("router-view-root");
-    view.classList.toggle("is-rendering", status === "pending");
-    view.classList.toggle("is-ready", status === "ready");
-    view.classList.toggle("has-error", status === "error");
-  } catch {}
-
-  try {
-    if (AppCore?.dom) {
-      AppCore.dom.viewContainer =
-        view;
+    if (view && AppCore?.dom) {
+      AppCore.dom.viewContainer = view;
     }
   } catch {}
 
-  return true;
+  return view;
 }
 
-function markViewReady(AppCore, renderId, canonicalPath = "/") {
-  if (
-    renderId &&
-    !isCurrentRender(AppCore, renderId, canonicalPath)
-  ) {
-    return false;
-  }
-
-  const view =
-    getViewContainer(AppCore);
-
-  if (!view) {
-    return false;
-  }
-
-  setDataset(view, "routerStatus", "ready");
-
-  try {
-    view.classList.remove("is-rendering", "has-error");
-    view.classList.add("is-ready");
-  } catch {}
-
-  return true;
-}
-
-function markViewError(AppCore, renderId, canonicalPath = "/") {
-  if (
-    renderId &&
-    !isCurrentRender(AppCore, renderId, canonicalPath)
-  ) {
-    return false;
-  }
-
-  const view =
-    getViewContainer(AppCore);
-
-  if (!view) {
-    return false;
-  }
-
-  setDataset(view, "routerStatus", "error");
-
-  try {
-    view.classList.remove("is-rendering", "is-ready");
-    view.classList.add("has-error");
-  } catch {}
-
-  return true;
-}
-
-function prepareRenderHost({
-  AppCore,
-  route = null,
-  renderId,
-  canonicalPath = "/",
-  publicPath = "/",
-  mode = "success",
-} = {}) {
-  const view =
-    getViewContainer(AppCore);
-
-  if (!view) {
+function domSnapshot(AppCore) {
+  if (!isBrowser()) {
     return {
-      view:
-        null,
-      host:
-        null,
+      html: null,
+      body: null,
+      shell: null,
+      main: null,
+      appContent: null,
+      view: null,
+      sidebarMount: null,
+      topbarMount: null,
+      sidebar: null,
+      topbar: null,
+      tablehead: null,
+      tableheadContainer: null,
+      loader: null,
     };
   }
 
-  markViewContainer({
-    AppCore,
+  const view = getViewContainer(AppCore);
+
+  const dom = {
+    html: document.documentElement || null,
+    body: document.body || null,
+
+    shell:
+      AppCore?.dom?.appShell ||
+      AppCore?.dom?.shell ||
+      queryFirst(["#app-shell", "[data-app-shell='true']", "[data-app-shell]", ".app-shell", ".layout"]),
+
+    main:
+      AppCore?.dom?.mainContent ||
+      AppCore?.dom?.main ||
+      queryFirst(["#main-content", ".main-content", "main[role='main']", "main"]),
+
+    appContent:
+      AppCore?.dom?.appContent ||
+      queryFirst(["#app-content", "[data-app-content]"]),
+
     view,
-    renderId,
-    route,
-    canonicalPath,
-    publicPath,
-    status:
-      "pending",
+
+    sidebarMount:
+      AppCore?.dom?.sidebarMount ||
+      queryFirst(["#sidebar-mount", "[data-sidebar-mount]"]),
+
+    topbarMount:
+      AppCore?.dom?.topbarMount ||
+      queryFirst(["#topbar-mount", "[data-topbar-mount]"]),
+
+    sidebar:
+      AppCore?.dom?.sidebar ||
+      queryFirst(["#app-sidebar", "#sidebar", ".sidebar", "[data-sidebar-root]", "[data-sidebar]"]),
+
+    topbar:
+      AppCore?.dom?.topbar ||
+      queryFirst(["#app-topbar", "#topbar", ".topbar", "[data-topbar-root]", "[data-topbar]"]),
+
+    tablehead:
+      AppCore?.dom?.tablehead ||
+      queryFirst(["#table-head", ".table-head", "[data-tablehead]"]),
+
+    tableheadContainer:
+      AppCore?.dom?.tableheadContainer ||
+      queryFirst(["#tablehead-container", "[data-tablehead-container]"]),
+
+    loader:
+      AppCore?.dom?.loader ||
+      queryFirst(["#app-loader", "[data-app-loader='true']", "[data-app-loader]", ".app-loader"]),
+  };
+
+  try {
+    if (AppCore?.dom) {
+      AppCore.dom.appShell = dom.shell;
+      AppCore.dom.shell = dom.shell;
+      AppCore.dom.mainContent = dom.main;
+      AppCore.dom.main = dom.main;
+      AppCore.dom.appContent = dom.appContent;
+      AppCore.dom.viewContainer = dom.view;
+      AppCore.dom.sidebarMount = dom.sidebarMount;
+      AppCore.dom.topbarMount = dom.topbarMount;
+      AppCore.dom.sidebar = dom.sidebar;
+      AppCore.dom.topbar = dom.topbar;
+      AppCore.dom.tablehead = dom.tablehead;
+      AppCore.dom.tableheadContainer = dom.tableheadContainer;
+      AppCore.dom.loader = dom.loader;
+    }
+  } catch {}
+
+  return dom;
+}
+
+function hideLoader(AppCore, reason = "router-render") {
+  const { html, body, loader } = domSnapshot(AppCore);
+
+  try {
+    html?.classList?.remove?.("app-loading");
+    body?.classList?.remove?.("app-loading", "loading");
+  } catch {}
+
+  if (!loader) return false;
+
+  try {
+    loader.classList.remove("is-visible", "is-entering", "is-leaving", "app-loader--visible");
+    loader.classList.add("is-hidden", "has-hidden");
+    loader.setAttribute("aria-hidden", "true");
+    loader.setAttribute("aria-busy", "false");
+    loader.dataset.loaderVisible = "false";
+    loader.dataset.loaderState = "hidden";
+    loader.hidden = true;
+  } catch {}
+
+  emit(AppCore, "app:loader:hidden", {
+    reason,
   });
 
-  const host =
-    document.createElement("div");
-
-  host.className =
-    RENDER_HOST_CLASS;
-
-  host.setAttribute(RENDER_HOST_ATTR, "true");
-  host.setAttribute("data-router-render-id", String(renderId));
-  host.setAttribute("data-router-mode", mode);
-  host.setAttribute("data-router-route", route?.path || canonicalPath || "/");
-  host.setAttribute("data-router-route-name", route?.name || "");
-  host.setAttribute("data-router-view-key", route?.viewKey || "");
-  host.setAttribute("data-router-view-name", route?.viewName || "");
-  host.setAttribute("data-router-canonical-path", canonicalPath);
-  host.setAttribute("data-router-public-path", publicPath);
-
-  try {
-    view.replaceChildren(host);
-  } catch {
-    try {
-      emptyElement(view);
-      view.appendChild(host);
-    } catch {}
-  }
-
-  try {
-    if (AppCore?.dom) {
-      AppCore.dom.viewContainer =
-        view;
-
-      AppCore.dom.routerViewHost =
-        host;
-
-      AppCore.dom.viewHost =
-        host;
-    }
-  } catch {}
-
-  return {
-    view,
-    host,
-  };
-}
-
-function getCurrentRenderHost(AppCore) {
-  const view =
-    getViewContainer(AppCore);
-
-  if (!view) {
-    return null;
-  }
-
-  try {
-    return view.querySelector(`[${RENDER_HOST_ATTR}="true"]`);
-  } catch {
-    return null;
-  }
-}
-
-function adoptRenderedResult(target, result) {
-  if (!target) {
-    return result || null;
-  }
-
-  if (
-    result === null ||
-    result === undefined
-  ) {
-    return result || null;
-  }
-
-  if (typeof result === "string") {
-    const wrapper =
-      createElement("div", {
-        className:
-          "router-rendered-text",
-      });
-
-    wrapper.textContent =
-      result;
-
-    try {
-      target.replaceChildren(wrapper);
-    } catch {
-      try {
-        emptyElement(target);
-        target.appendChild(wrapper);
-      } catch {}
-    }
-
-    return wrapper;
-  }
-
-  if (!isNode(result)) {
-    return result;
-  }
-
-  if (result === target) {
-    return result;
-  }
-
-  try {
-    if (target.contains(result)) {
-      return result;
-    }
-  } catch {}
-
-  try {
-    target.replaceChildren(result);
-  } catch {
-    try {
-      emptyElement(target);
-      target.appendChild(result);
-    } catch {}
-  }
-
-  return result;
+  return true;
 }
 
 /* =========================================================
-   URL CONTEXT HELPERS
+   SHELL REPAIR
 ========================================================= */
 
-function getBrowserPublicPath(AppCore) {
-  if (!isBrowser()) {
-    return "";
-  }
-
-  try {
-    const pathname =
-      window.location.pathname || "/";
-
-    const search =
-      window.location.search || "";
-
-    const hash =
-      window.location.hash || "";
-
-    if (
-      hash &&
-      isHashRouterPath(hash)
-    ) {
-      return safeNormalizePublicPath(
-        AppCore,
-        normalizeHashRouterPath(hash)
-      );
-    }
-
-    return safeNormalizePublicPath(
-      AppCore,
-      `${pathname}${search}${hash}`
-    );
-  } catch {
-    return "";
-  }
-}
-
-function getRouteConfigByPath(path = "") {
-  const clean =
-    stripSearchAndHash(path);
-
-  return (
-    PROTECTED_PUBLIC_TOKEN_ROUTES.find((item) => {
-      return (
-        clean === item.path ||
-        clean.startsWith(`${item.path}/`)
-      );
-    }) || null
+function shellHiddenForRoute(AppCore, route = null, canonicalPath = DEFAULT_ROUTE) {
+  const routePath = stripSearchAndHash(
+    canonical(AppCore, canonicalPath || route?.path || DEFAULT_ROUTE)
   );
-}
-
-function getRouteConfigFromUrl(AppCore, pathOrUrl = "") {
-  const path =
-    pathFromUrlLike(
-      AppCore,
-      pathOrUrl
-    );
-
-  const canonical =
-    safeCanonicalPath(
-      AppCore,
-      path || "/"
-    );
-
-  return getRouteConfigByPath(canonical);
-}
-
-function isProtectedPublicTokenPath(AppCore, path = "") {
-  return Boolean(
-    getRouteConfigFromUrl(
-      AppCore,
-      path
-    )
-  );
-}
-
-function hasTokenInSearch(search = "", tokenNames = []) {
-  try {
-    const params =
-      new URLSearchParams(search || "");
-
-    return safeArray(tokenNames).some((name) => {
-      return Boolean(
-        safeText(
-          params.get(name),
-          ""
-        )
-      );
-    });
-  } catch {
-    return false;
-  }
-}
-
-function getPathToken(AppCore, pathOrUrl = "") {
-  const path =
-    pathFromUrlLike(
-      AppCore,
-      pathOrUrl
-    );
-
-  if (!path) {
-    return "";
-  }
-
-  const pathname =
-    stripSearchAndHash(
-      stripPublicUsernamePrefix(path)
-    );
-
-  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
-    if (!pathname.startsWith(`${config.path}/`)) {
-      continue;
-    }
-
-    const token =
-      pathname
-        .slice(`${config.path}/`.length)
-        .split("/")[0];
-
-    try {
-      return safeText(
-        decodeURIComponent(token || ""),
-        ""
-      );
-    } catch {
-      return safeText(token, "");
-    }
-  }
-
-  return "";
-}
-
-function hasProtectedToken(AppCore, pathOrUrl = "") {
-  const raw =
-    safeText(pathOrUrl, "");
-
-  if (!raw) {
-    return false;
-  }
-
-  const config =
-    getRouteConfigFromUrl(
-      AppCore,
-      raw
-    );
-
-  if (!config) {
-    return false;
-  }
-
-  if (getPathToken(AppCore, raw)) {
-    return true;
-  }
-
-  try {
-    const parsed =
-      new URL(
-        raw,
-        getBaseOrigin()
-      );
-
-    if (
-      hasTokenInSearch(
-        parsed.search,
-        config.tokenNames
-      )
-    ) {
-      return true;
-    }
-
-    if (
-      parsed.hash &&
-      isHashRouterPath(parsed.hash)
-    ) {
-      const hashPath =
-        normalizeHashRouterPath(parsed.hash);
-
-      if (getPathToken(AppCore, hashPath)) {
-        return true;
-      }
-
-      const hashParts =
-        splitFullPath(hashPath);
-
-      if (
-        hasTokenInSearch(
-          hashParts.search,
-          config.tokenNames
-        )
-      ) {
-        return true;
-      }
-    }
-
-    if (
-      parsed.hash &&
-      parsed.hash.includes("?")
-    ) {
-      const query =
-        parsed.hash
-          .split("?")
-          .slice(1)
-          .join("?");
-
-      return hasTokenInSearch(
-        query ? `?${query}` : "",
-        config.tokenNames
-      );
-    }
-
-    return false;
-  } catch {
-    const parts =
-      splitFullPath(raw);
-
-    if (
-      hasTokenInSearch(
-        parts.search,
-        config.tokenNames
-      )
-    ) {
-      return true;
-    }
-
-    if (
-      parts.hash &&
-      parts.hash.includes("?")
-    ) {
-      const query =
-        parts.hash
-          .split("?")
-          .slice(1)
-          .join("?");
-
-      return hasTokenInSearch(
-        query ? `?${query}` : "",
-        config.tokenNames
-      );
-    }
-
-    return false;
-  }
-}
-
-function isTokenScrubbedForConfig(config = null) {
-  if (
-    !isBrowser() ||
-    !config
-  ) {
-    return false;
-  }
-
-  const flags =
-    Array.isArray(config.stateScrubFlags)
-      ? config.stateScrubFlags
-      : [config.stateScrubFlag].filter(Boolean);
-
-  try {
-    return flags.some((flag) =>
-      Boolean(window.history?.state?.[flag])
-    );
-  } catch {
-    return false;
-  }
-}
-
-function getInitialUrl() {
-  if (!isBrowser()) {
-    return "";
-  }
-
-  return safeText(
-    window.__ONION_INITIAL_URL__,
-    ""
-  );
-}
-
-function getStoredInitialUrlsByConfig(config = null) {
-  if (
-    !isBrowser() ||
-    !config
-  ) {
-    return [];
-  }
-
-  const keys =
-    Array.isArray(config.windowKeys)
-      ? config.windowKeys
-      : [config.windowKey].filter(Boolean);
-
-  return keys
-    .map((key) => {
-      try {
-        return safeText(window[key], "");
-      } catch {
-        return "";
-      }
-    })
-    .filter(Boolean);
-}
-
-function setStoredInitialUrlByConfig(config = null, value = "") {
-  if (
-    !isBrowser() ||
-    !config ||
-    !value
-  ) {
-    return false;
-  }
-
-  const keys =
-    Array.isArray(config.windowKeys)
-      ? config.windowKeys
-      : [config.windowKey].filter(Boolean);
-
-  let wrote =
-    false;
-
-  for (const key of keys) {
-    try {
-      if (!window[key]) {
-        window[key] =
-          value;
-      }
-
-      wrote =
-        true;
-    } catch {}
-  }
-
-  return wrote;
-}
-
-function getActivationInitialUrl() {
-  if (!isBrowser()) {
-    return "";
-  }
-
-  return safeText(
-    window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__,
-    ""
-  );
-}
-
-function getResetConfirmInitialUrl() {
-  if (!isBrowser()) {
-    return "";
-  }
-
-  return safeText(
-    window.__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__ ||
-      window.__ONION_RESET_CONFIRM_INITIAL_URL__,
-    ""
-  );
-}
-
-function captureInitialUrl(AppCore) {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  try {
-    const href =
-      window.location.href;
-
-    if (!window.__ONION_INITIAL_URL__) {
-      window.__ONION_INITIAL_URL__ =
-        href;
-    }
-
-    const path =
-      pathFromUrlLike(
-        AppCore,
-        href
-      );
-
-    for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
-      const matchesRoute =
-        sameCanonicalRoute(
-          AppCore,
-          path,
-          config.path
-        );
-
-      if (
-        matchesRoute &&
-        hasProtectedToken(AppCore, href) &&
-        getStoredInitialUrlsByConfig(config).length === 0
-      ) {
-        setStoredInitialUrlByConfig(
-          config,
-          href
-        );
-      }
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function getProtectedPublicPath(AppCore) {
-  captureInitialUrl(AppCore);
-
-  const candidates =
-    [];
-
-  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
-    if (isTokenScrubbedForConfig(config)) {
-      continue;
-    }
-
-    candidates.push(
-      ...getStoredInitialUrlsByConfig(config)
-    );
-  }
-
-  const initialUrl =
-    getInitialUrl();
-
-  if (initialUrl) {
-    candidates.push(initialUrl);
-  }
-
-  const browserPath =
-    getBrowserPublicPath(AppCore);
-
-  if (browserPath) {
-    candidates.push(browserPath);
-  }
-
-  for (const candidate of candidates) {
-    const config =
-      getRouteConfigFromUrl(
-        AppCore,
-        candidate
-      );
-
-    if (!config) {
-      continue;
-    }
-
-    if (isTokenScrubbedForConfig(config)) {
-      continue;
-    }
-
-    if (!hasProtectedToken(AppCore, candidate)) {
-      continue;
-    }
-
-    return pathFromUrlLike(
-      AppCore,
-      candidate
-    );
-  }
-
-  return "";
-}
-
-function preservePublicContextForSameRoute(AppCore, candidatePath = "/") {
-  const candidate =
-    safeNormalizePublicPath(
-      AppCore,
-      candidatePath || "/"
-    );
-
-  const protectedPath =
-    getProtectedPublicPath(AppCore);
-
-  if (
-    protectedPath &&
-    isProtectedPublicTokenPath(AppCore, candidate) &&
-    sameCanonicalRoute(AppCore, protectedPath, candidate)
-  ) {
-    return protectedPath;
-  }
-
-  const browserPath =
-    getBrowserPublicPath(AppCore);
-
-  if (!browserPath) {
-    return candidate;
-  }
-
-  const candidateSuffix =
-    getSafeSearchAndHash(
-      AppCore,
-      candidate
-    );
-
-  const browserSuffix =
-    getSafeSearchAndHash(
-      AppCore,
-      browserPath
-    );
-
-  if (
-    browserSuffix &&
-    !candidateSuffix &&
-    sameCanonicalRoute(AppCore, browserPath, candidate)
-  ) {
-    return browserPath;
-  }
-
-  if (
-    hasPublicUsernamePrefix(browserPath) &&
-    !hasPublicUsernamePrefix(candidate) &&
-    sameCanonicalRoute(AppCore, browserPath, candidate)
-  ) {
-    return browserPath;
-  }
-
-  return candidate;
-}
-
-function preferRequestedPublicPathIfCompatible(
-  AppCore,
-  requestedPath = "",
-  builtPublicPath = "",
-  canonicalPath = "/"
-) {
-  const requested =
-    preservePublicContextForSameRoute(
-      AppCore,
-      requestedPath || ""
-    );
-
-  const built =
-    preservePublicContextForSameRoute(
-      AppCore,
-      builtPublicPath || ""
-    );
-
-  const canonical =
-    safeCanonicalPath(
-      AppCore,
-      canonicalPath ||
-        built ||
-        requested ||
-        "/"
-    );
-
-  if (
-    requested &&
-    hasPublicUsernamePrefix(requested) &&
-    sameCanonicalRoute(AppCore, requested, canonical)
-  ) {
-    return requested;
-  }
-
-  if (
-    requested &&
-    getSafeSearchAndHash(AppCore, requested) &&
-    sameCanonicalRoute(AppCore, requested, canonical)
-  ) {
-    return requested;
-  }
-
-  if (
-    built &&
-    hasPublicUsernamePrefix(built) &&
-    sameCanonicalRoute(AppCore, built, canonical)
-  ) {
-    return built;
-  }
-
-  return built || requested || canonical || "/";
-}
-
-/* =========================================================
-   SHELL / AUTH-SCREEN REPAIR
-========================================================= */
-
-function getShellElements(AppCore) {
-  if (!isBrowser()) {
-    return {
-      html:
-        null,
-      body:
-        null,
-      shell:
-        null,
-      main:
-        null,
-      appContent:
-        null,
-      view:
-        null,
-      sidebar:
-        null,
-      topbar:
-        null,
-      tablehead:
-        null,
-      tableheadContainer:
-        null,
-      loader:
-        null,
-    };
-  }
-
-  const html =
-    document.documentElement || null;
-
-  const body =
-    document.body || null;
-
-  const shell =
-    document.getElementById("app-shell") ||
-    document.querySelector("[data-app-shell='true']") ||
-    document.querySelector("[data-app-shell]") ||
-    document.querySelector(".app-shell") ||
-    document.querySelector(".layout") ||
-    null;
-
-  const main =
-    document.getElementById("main-content") ||
-    document.querySelector(".main-content") ||
-    document.querySelector("main[role='main']") ||
-    document.querySelector("main") ||
-    null;
-
-  const appContent =
-    document.getElementById("app-content") ||
-    document.querySelector("[data-app-content]") ||
-    null;
-
-  const view =
-    getViewContainer(AppCore);
-
-  const sidebar =
-    AppCore?.dom?.sidebar ||
-    document.querySelector("#app-sidebar") ||
-    document.querySelector(".sidebar") ||
-    document.querySelector("[data-sidebar-root]") ||
-    null;
-
-  const topbar =
-    AppCore?.dom?.topbar ||
-    document.querySelector("#app-topbar") ||
-    document.querySelector(".topbar") ||
-    document.querySelector("[data-topbar-root]") ||
-    null;
-
-  const tablehead =
-    document.getElementById("table-head") ||
-    document.querySelector(".table-head") ||
-    null;
-
-  const tableheadContainer =
-    AppCore?.dom?.tableheadContainer ||
-    document.getElementById("tablehead-container") ||
-    document.querySelector("[data-tablehead-container]") ||
-    null;
-
-  const loader =
-    AppCore?.dom?.loader ||
-    document.getElementById("app-loader") ||
-    document.querySelector(".app-loader") ||
-    document.querySelector("[data-app-loader='true']") ||
-    null;
-
-  try {
-    if (AppCore?.dom) {
-      AppCore.dom.appShell =
-        shell || AppCore.dom.appShell || null;
-
-      AppCore.dom.mainContent =
-        main || AppCore.dom.mainContent || null;
-
-      AppCore.dom.appContent =
-        appContent || AppCore.dom.appContent || null;
-
-      AppCore.dom.viewContainer =
-        view || AppCore.dom.viewContainer || null;
-
-      AppCore.dom.sidebar =
-        sidebar || AppCore.dom.sidebar || null;
-
-      AppCore.dom.topbar =
-        topbar || AppCore.dom.topbar || null;
-
-      AppCore.dom.tableheadContainer =
-        tableheadContainer || AppCore.dom.tableheadContainer || null;
-
-      AppCore.dom.loader =
-        loader || AppCore.dom.loader || null;
-    }
-  } catch {}
-
-  return {
-    html,
-    body,
-    shell,
-    main,
-    appContent,
-    view,
-    sidebar,
-    topbar,
-    tablehead,
-    tableheadContainer,
-    loader,
-  };
-}
-
-function setElementHidden(el, hidden = false) {
-  if (!el) {
-    return;
-  }
-
-  try {
-    el.hidden =
-      Boolean(hidden);
-  } catch {}
-
-  try {
-    el.setAttribute(
-      "aria-hidden",
-      hidden ? "true" : "false"
-    );
-  } catch {}
-}
-
-function setElementBusy(el, busy = false) {
-  if (!el) {
-    return;
-  }
-
-  try {
-    el.setAttribute(
-      "aria-busy",
-      busy ? "true" : "false"
-    );
-  } catch {}
-}
-
-function routeRequestsShellHidden(AppCore, route = null, canonicalPath = "/") {
-  const canonical =
-    stripSearchAndHash(
-      safeCanonicalPath(
-        AppCore,
-        canonicalPath || route?.path || "/"
-      )
-    );
 
   if (
     route?.shell === false ||
@@ -2486,211 +722,82 @@ function routeRequestsShellHidden(AppCore, route = null, canonicalPath = "/") {
     return true;
   }
 
-  return AUTH_SCREEN_CANONICAL_PATHS.has(canonical);
+  return AUTH_CANONICAL_PATHS.has(routePath);
 }
 
-function shouldUseAuthScreenClass(AppCore, route = null, canonicalPath = "/") {
-  const canonical =
-    stripSearchAndHash(
-      safeCanonicalPath(
-        AppCore,
-        canonicalPath || route?.path || "/"
-      )
-    );
-
-  if (
-    route?.layout === "auth" ||
-    route?.meta?.layout === "auth" ||
-    route?.authScreen === true ||
-    route?.meta?.authScreen === true
-  ) {
-    return true;
-  }
-
-  return AUTH_SCREEN_CANONICAL_PATHS.has(canonical);
-}
-
-function setCoreShellVisible(AppCore, visible = true) {
-  const patch =
-    {
-      shellVisible:
-        Boolean(visible),
-
-      chromeVisible:
-        Boolean(visible),
-
-      appShellVisible:
-        true,
-
-      routeShellHidden:
-        !Boolean(visible),
-
-      authScreen:
-        !Boolean(visible),
-    };
+function patchShellState(AppCore, visible = true) {
+  const patch = {
+    shellVisible: Boolean(visible),
+    chromeVisible: Boolean(visible),
+    appShellVisible: true,
+    routeShellHidden: !Boolean(visible),
+    shellHidden: !Boolean(visible),
+    authScreen: !Boolean(visible),
+    routeMode: visible ? "app" : "auth",
+  };
 
   try {
-    AppCore?.setState?.(patch);
+    AppCore?.setState?.(patch, {
+      source: SOURCE,
+      emit: false,
+      emitState: false,
+      emitDerived: false,
+      silent: true,
+    });
   } catch {}
 
   try {
-    if (AppCore?.state) {
-      Object.assign(
-        AppCore.state,
-        patch
-      );
-    }
+    if (AppCore?.state) Object.assign(AppCore.state, patch);
   } catch {}
-}
-
-function hideLoaderSafe(AppCore, reason = "router-render") {
-  const {
-    loader,
-    body,
-    html,
-  } =
-    getShellElements(AppCore);
-
-  try {
-    body?.classList?.remove?.("loading");
-    body?.classList?.remove?.("app-loading");
-    html?.classList?.remove?.("app-loading");
-  } catch {}
-
-  if (!loader) {
-    return false;
-  }
-
-  try {
-    loader.classList.remove(
-      "is-visible",
-      "is-leaving",
-      "app-loader--visible"
-    );
-
-    loader.classList.add(
-      "is-hidden",
-      "has-hidden"
-    );
-
-    loader.setAttribute(
-      "aria-hidden",
-      "true"
-    );
-
-    loader.setAttribute(
-      "aria-busy",
-      "false"
-    );
-
-    loader.dataset.loaderVisible =
-      "false";
-
-    loader.dataset.loaderState =
-      "hidden";
-
-    loader.hidden =
-      true;
-  } catch {}
-
-  safeEmit(
-    AppCore,
-    "app:loader:hidden",
-    {
-      reason,
-      source:
-        "router.render",
-    }
-  );
-
-  return true;
 }
 
 function emitShellRepair(AppCore, payload = {}) {
-  const key =
-    [
-      safeText(payload.phase, ""),
-      payload.shellHidden ? "hidden" : "visible",
-      safeText(payload.canonicalPath, ""),
-      safeText(payload.publicPath, ""),
-      payload.hasSidebar ? "sidebar" : "no-sidebar",
-      payload.hasTopbar ? "topbar" : "no-topbar",
-    ].join("|");
+  const key = [
+    payload.phase || "",
+    payload.shellHidden ? "hidden" : "visible",
+    payload.canonicalPath || "",
+    payload.publicPath || "",
+  ].join("|");
 
-  const current =
-    nowEpochMs();
+  const ts = nowMs();
 
-  if (
-    key === lastShellRepairEmitKey &&
-    current - lastShellRepairEmitAt < SHELL_REPAIR_EMIT_DEDUPE_MS
-  ) {
+  if (key === lastRepairKey && ts - lastRepairAt < REPAIR_EVENT_DEDUPE_MS) {
     return false;
   }
 
-  lastShellRepairEmitKey =
-    key;
+  lastRepairKey = key;
+  lastRepairAt = ts;
 
-  lastShellRepairEmitAt =
-    current;
-
-  return safeEmit(
-    AppCore,
-    "router:shell:repair",
-    payload
-  );
+  return emit(AppCore, "router:shell:repair", payload);
 }
 
-function applyRenderShellRepair({
+function repairShell({
   AppCore,
   route = null,
-  canonicalPath = "/",
-  publicPath = "/",
+  canonicalPath = DEFAULT_ROUTE,
+  publicPath: routePublicPath = DEFAULT_ROUTE,
   phase = "render",
-  hideLoader = false,
+  hideLoading = false,
   emitRepair = true,
-  emitUiRepairRequest = false,
 } = {}) {
   if (!isBrowser()) {
     return {
-      applied:
-        false,
-      shellHidden:
-        false,
-      reason:
-        "not-browser",
+      applied: false,
+      shellHidden: false,
+      reason: "not-browser",
     };
   }
 
-  const canonical =
-    stripSearchAndHash(
-      safeCanonicalPath(
-        AppCore,
-        canonicalPath || route?.path || "/"
-      )
-    );
+  const finalCanonical = stripSearchAndHash(
+    canonical(AppCore, canonicalPath || route?.path || DEFAULT_ROUTE)
+  );
 
-  const publicRoute =
-    preservePublicContextForSameRoute(
-      AppCore,
-      safeNormalizePublicPath(
-        AppCore,
-        publicPath || canonical || "/"
-      )
-    );
+  const finalPublic = preservePublicContext(
+    AppCore,
+    routePublicPath || finalCanonical
+  );
 
-  const shellHidden =
-    routeRequestsShellHidden(
-      AppCore,
-      route,
-      canonical
-    );
-
-  const useAuthScreen =
-    shouldUseAuthScreenClass(
-      AppCore,
-      route,
-      canonical
-    );
+  const shellHidden = shellHiddenForRoute(AppCore, route, finalCanonical);
 
   const {
     html,
@@ -2699,857 +806,496 @@ function applyRenderShellRepair({
     main,
     appContent,
     view,
+    sidebarMount,
+    topbarMount,
     sidebar,
     topbar,
     tablehead,
     tableheadContainer,
-  } =
-    getShellElements(AppCore);
+  } = domSnapshot(AppCore);
 
   if (!html || !body) {
     return {
-      applied:
-        false,
+      applied: false,
       shellHidden,
-      reason:
-        "missing-document",
+      reason: "missing-document",
     };
   }
 
   try {
-    html.classList.remove(
-      "app-booting",
-      "app-loading"
-    );
-
-    body.classList.remove(
-      "app-booting",
-      "app-loading",
-      "loading"
-    );
-
+    html.classList.remove("app-booting", "app-loading");
+    body.classList.remove("app-booting", "app-loading", "loading");
     html.classList.add("app-ready");
     body.classList.add("app-ready");
+
+    html.dataset.routeMode = shellHidden ? "auth" : "app";
+    body.dataset.routeMode = shellHidden ? "auth" : "app";
+    html.dataset.chrome = shellHidden ? "hidden" : "visible";
+    body.dataset.chrome = shellHidden ? "hidden" : "visible";
+    html.dataset.shell = "visible";
+    body.dataset.shell = "visible";
   } catch {}
-
-  setDataset(
-    html,
-    "routeMode",
-    shellHidden ? "auth" : "app"
-  );
-
-  setDataset(
-    body,
-    "routeMode",
-    shellHidden ? "auth" : "app"
-  );
-
-  setDataset(
-    html,
-    "chrome",
-    shellHidden ? "hidden" : "visible"
-  );
-
-  setDataset(
-    body,
-    "chrome",
-    shellHidden ? "hidden" : "visible"
-  );
 
   if (shellHidden) {
     try {
-      body.classList.add(
-        "route-shell-hidden",
-        "route-chrome-hidden",
-        "route-auth"
-      );
+      body.classList.add("auth-screen", "route-auth", "route-shell-hidden", "route-chrome-hidden");
+      body.classList.remove("route-app", "route-shell-visible", "route-chrome-visible", "sidebar-open", "sidebar-collapsed");
 
-      body.classList.remove(
-        "route-shell-visible",
-        "route-chrome-visible",
-        "route-app",
-        "login-no-scroll",
-        "sidebar-open",
-        "sidebar-collapsed",
-        "sidebar-transitioning",
-        "sidebar-tooltips-active"
-      );
-
-      html.classList.add(
-        "route-shell-hidden",
-        "route-chrome-hidden",
-        "route-auth"
-      );
-
-      html.classList.remove(
-        "route-shell-visible",
-        "route-chrome-visible",
-        "route-app"
-      );
-
-      if (useAuthScreen) {
-        body.classList.add("auth-screen");
-      } else {
-        body.classList.remove("auth-screen");
-      }
+      html.classList.add("route-auth", "route-shell-hidden", "route-chrome-hidden");
+      html.classList.remove("route-app", "route-shell-visible", "route-chrome-visible");
     } catch {}
 
-    setDataset(body, "shell", "visible");
-    setDataset(html, "shell", "visible");
+    for (const element of [shell, main, appContent, view]) {
+      setHidden(element, false);
+      setBusy(element, false);
+    }
+
+    for (const element of [sidebarMount, topbarMount, sidebar, topbar, tablehead, tableheadContainer]) {
+      setHidden(element, true);
+      setBusy(element, false);
+    }
+
     setDataset(shell, "shell", "visible");
     setDataset(shell, "chrome", "hidden");
     setDataset(shell, "routeMode", "auth");
 
-    setCoreShellVisible(AppCore, false);
-
-    setElementHidden(shell, false);
-    setElementHidden(main, false);
-    setElementHidden(appContent, false);
-    setElementHidden(view, false);
-
-    setElementHidden(sidebar, true);
-    setElementHidden(topbar, true);
-    setElementHidden(tablehead, true);
-
-    setElementBusy(shell, false);
-    setElementBusy(main, false);
-    setElementBusy(appContent, false);
-    setElementBusy(view, false);
+    patchShellState(AppCore, false);
   } else {
     try {
-      body.classList.remove(
-        "auth-screen",
-        "login-no-scroll",
-        "route-auth",
-        "route-shell-hidden",
-        "route-chrome-hidden"
-      );
+      body.classList.remove("auth-screen", "login-no-scroll", "route-auth", "route-shell-hidden", "route-chrome-hidden");
+      body.classList.add("route-app", "route-shell-visible", "route-chrome-visible");
 
-      body.classList.add(
-        "route-app",
-        "route-shell-visible",
-        "route-chrome-visible"
-      );
-
-      html.classList.remove(
-        "route-auth",
-        "route-shell-hidden",
-        "route-chrome-hidden"
-      );
-
-      html.classList.add(
-        "route-app",
-        "route-shell-visible",
-        "route-chrome-visible"
-      );
+      html.classList.remove("route-auth", "route-shell-hidden", "route-chrome-hidden");
+      html.classList.add("route-app", "route-shell-visible", "route-chrome-visible");
     } catch {}
 
-    setDataset(body, "shell", "visible");
-    setDataset(html, "shell", "visible");
+    for (const element of [shell, main, appContent, view, sidebarMount, topbarMount, sidebar, topbar]) {
+      setHidden(element, false);
+      setBusy(element, false);
+    }
+
+    const tableheadHasContent = Boolean(tableheadContainer && safeText(tableheadContainer.textContent, ""));
+    setHidden(tablehead, !tableheadHasContent);
+    setHidden(tableheadContainer, !tableheadHasContent);
+
     setDataset(shell, "shell", "visible");
     setDataset(shell, "chrome", "visible");
     setDataset(shell, "routeMode", "app");
 
-    setCoreShellVisible(AppCore, true);
-
-    setElementHidden(shell, false);
-    setElementHidden(main, false);
-    setElementHidden(appContent, false);
-    setElementHidden(view, false);
-    setElementHidden(sidebar, false);
-    setElementHidden(topbar, false);
-
-    const tableheadHasContent =
-      Boolean(
-        tableheadContainer &&
-          safeText(
-            tableheadContainer.textContent,
-            ""
-          )
-      );
-
-    if (tablehead) {
-      setElementHidden(
-        tablehead,
-        !tableheadHasContent
-      );
-    }
-
-    setElementBusy(shell, false);
-    setElementBusy(main, false);
-    setElementBusy(appContent, false);
-    setElementBusy(view, false);
-
-    try {
-      shell?.setAttribute?.("aria-hidden", "false");
-      main?.setAttribute?.("aria-hidden", "false");
-      appContent?.setAttribute?.("aria-hidden", "false");
-      view?.setAttribute?.("aria-hidden", "false");
-    } catch {}
+    patchShellState(AppCore, true);
   }
 
-  if (hideLoader || !shellHidden) {
-    hideLoaderSafe(
-      AppCore,
-      `router-render:${phase}`
-    );
+  if (hideLoading) {
+    hideLoader(AppCore, `router:${phase}`);
   }
 
-  const repairPayload =
-    {
-      phase,
-      shellHidden,
-      useAuthScreen,
-      canonicalPath:
-        canonical,
-      publicPath:
-        publicRoute,
-      routePath:
-        route?.path || null,
-      routeName:
-        route?.name || null,
-      viewKey:
-        route?.viewKey || null,
-      viewName:
-        route?.viewName || null,
-      hasSidebar:
-        Boolean(sidebar),
-      hasTopbar:
-        Boolean(topbar),
-      hasShell:
-        Boolean(shell),
-      source:
-        "router.render",
-    };
+  const payload = {
+    phase,
+    shellHidden,
+    canonicalPath: finalCanonical,
+    publicPath: finalPublic,
+    routePath: route?.path || null,
+    routeName: route?.name || null,
+    viewKey: route?.viewKey || null,
+    viewName: route?.viewName || null,
+    hasShell: Boolean(shell),
+    hasSidebar: Boolean(sidebar || sidebarMount),
+    hasTopbar: Boolean(topbar || topbarMount),
+  };
 
   if (emitRepair !== false) {
-    emitShellRepair(
-      AppCore,
-      repairPayload
-    );
-  }
-
-  if (emitUiRepairRequest === true) {
-    safeEmit(
-      AppCore,
-      "app:ui:repair-request",
-      repairPayload
-    );
+    emitShellRepair(AppCore, payload);
   }
 
   return {
-    applied:
-      true,
-    shellHidden,
-    useAuthScreen,
-    canonicalPath:
-      canonical,
-    publicPath:
-      publicRoute,
+    applied: true,
+    ...payload,
   };
 }
 
 /* =========================================================
-   RESOLVERS
+   HOST ISOLATION
 ========================================================= */
 
-function resolveUsernameForPayload(
-  AppCore,
-  requestedUsername = null,
-  publicPath = null
-) {
-  return (
-    safeText(requestedUsername) ||
-    extractUsernameFromPath(AppCore, publicPath || "") ||
-    getCurrentResolvedUsername(AppCore) ||
-    getCurrentUsername(AppCore) ||
-    AppCore?.state?.user?.username ||
-    AppCore?.state?.user?.slug ||
-    null
-  );
+function createAbortController() {
+  try {
+    return typeof AbortController === "function"
+      ? new AbortController()
+      : null;
+  } catch {
+    return null;
+  }
 }
 
-function resolvePublicPathForRoute({
+function abortActiveRender(reason = "superseded") {
+  try {
+    activeController?.abort?.(reason);
+  } catch {}
+
+  activeController = null;
+}
+
+function beginRender() {
+  abortActiveRender("superseded");
+
+  const renderId = ++renderSeq;
+  const controller = createAbortController();
+
+  activeController = controller;
+
+  return {
+    renderId,
+    controller,
+    signal: controller?.signal || null,
+  };
+}
+
+function currentRender(AppCore, renderId, canonicalPath = "") {
+  if (renderId !== renderSeq) return false;
+
+  const view = getViewContainer(AppCore);
+  if (!view) return false;
+
+  const viewRenderId = safeText(view.dataset?.routerRenderId, "");
+
+  if (viewRenderId && viewRenderId !== String(renderId)) return false;
+
+  const expectedCanonical = stripSearchAndHash(canonicalPath || "");
+  const viewCanonical = stripSearchAndHash(view.dataset?.routerCanonicalPath || "");
+
+  return !expectedCanonical || !viewCanonical || expectedCanonical === viewCanonical;
+}
+
+function markView({
   AppCore,
-  getRoute,
-  canonicalPath = "/",
-  requestedPath = "/",
-  requestedUsername = null,
+  view,
+  renderId,
   route = null,
+  canonicalPath = DEFAULT_ROUTE,
+  publicPath = DEFAULT_ROUTE,
+  status = "pending",
 } = {}) {
-  const sourceForPublic =
-    buildCanonicalSourceWithSuffix(
-      AppCore,
-      canonicalPath,
-      requestedPath
-    );
+  if (!view) return false;
 
-  const finalCanonical =
-    stripSearchAndHash(
-      safeCanonicalPath(
-        AppCore,
-        sourceForPublic
-      )
-    );
-
-  const normalizedRequested =
-    safeNormalizePublicPath(
-      AppCore,
-      requestedPath ||
-        sourceForPublic ||
-        finalCanonical
-    );
-
-  const username =
-    resolveUsernameForPayload(
-      AppCore,
-      requestedUsername,
-      normalizedRequested || sourceForPublic
-    );
-
-  let built =
-    "";
+  setDataset(view, "routerRenderId", renderId);
+  setDataset(view, "routerStatus", status);
+  setDataset(view, "routerCanonicalPath", canonicalPath);
+  setDataset(view, "routerPublicPath", publicPath);
+  setDataset(view, "routerRoute", route?.path || canonicalPath);
+  setDataset(view, "routerRouteName", route?.name || "");
+  setDataset(view, "routerViewKey", route?.viewKey || "");
+  setDataset(view, "routerViewName", route?.viewName || "");
 
   try {
-    built =
-      buildPublicPath(
-        AppCore,
-        getRoute || (() => route),
-        sourceForPublic,
-        {
-          username,
-          resolvedUsername:
-            username,
-          fromPath:
-            normalizedRequested || sourceForPublic,
-          publicPath:
-            normalizedRequested || sourceForPublic,
-          canonicalPath:
-            finalCanonical,
-        }
-      ) || "";
-  } catch {
-    built = "";
+    view.classList.add("router-view-root");
+    view.classList.toggle("is-rendering", status === "pending");
+    view.classList.toggle("is-ready", status === "ready");
+    view.classList.toggle("has-error", status === "error");
+  } catch {}
+
+  try {
+    if (AppCore?.dom) AppCore.dom.viewContainer = view;
+  } catch {}
+
+  return true;
+}
+
+function prepareHost({
+  AppCore,
+  route = null,
+  renderId,
+  canonicalPath = DEFAULT_ROUTE,
+  publicPath = DEFAULT_ROUTE,
+  mode = "success",
+} = {}) {
+  const view = getViewContainer(AppCore);
+
+  if (!view) {
+    return {
+      view: null,
+      host: null,
+    };
   }
 
-  built =
-    built
-      ? safeNormalizePublicPath(AppCore, built)
-      : "";
+  markView({
+    AppCore,
+    view,
+    renderId,
+    route,
+    canonicalPath,
+    publicPath,
+    status: "pending",
+  });
 
-  const preferredPublic =
-    preferRequestedPublicPathIfCompatible(
-      AppCore,
-      normalizedRequested,
-      built ||
-        sourceForPublic ||
-        normalizedRequested ||
-        finalCanonical,
-      finalCanonical
-    );
+  const host = el("div", {
+    className: RENDER_HOST_CLASS,
+    attrs: {
+      [RENDER_HOST_ATTR]: "true",
+      "data-router-render-id": renderId,
+      "data-router-mode": mode,
+      "data-router-route": route?.path || canonicalPath,
+      "data-router-route-name": route?.name || "",
+      "data-router-view-key": route?.viewKey || "",
+      "data-router-view-name": route?.viewName || "",
+      "data-router-canonical-path": canonicalPath,
+      "data-router-public-path": publicPath,
+    },
+  });
 
-  const finalPublic =
-    preservePublicContextForSameRoute(
-      AppCore,
-      preferredPublic ||
-        built ||
-        sourceForPublic ||
-        normalizedRequested ||
-        finalCanonical
-    );
+  try {
+    view.replaceChildren(host);
+  } catch {
+    empty(view);
+    try { view.appendChild(host); } catch {}
+  }
+
+  try {
+    if (AppCore?.dom) {
+      AppCore.dom.routerViewHost = host;
+      AppCore.dom.viewHost = host;
+    }
+  } catch {}
 
   return {
-    canonicalPath:
-      finalCanonical,
-    publicPath:
-      finalPublic,
-    username:
-      username || null,
+    view,
+    host,
   };
 }
 
-function resolveRouteRenderer(route = null) {
-  if (isFunction(route?.render)) {
-    return {
-      source:
-        "route.render",
-      render:
-        route.render,
-      thisArg:
-        route,
-    };
+function currentHost(AppCore) {
+  const view = getViewContainer(AppCore);
+  if (!view) return null;
+
+  try {
+    return view.querySelector(`[${RENDER_HOST_ATTR}="true"]`);
+  } catch {
+    return null;
+  }
+}
+
+function markReady(AppCore, renderId, canonicalPath = DEFAULT_ROUTE) {
+  if (renderId && !currentRender(AppCore, renderId, canonicalPath)) return false;
+
+  const view = getViewContainer(AppCore);
+  if (!view) return false;
+
+  markView({
+    AppCore,
+    view,
+    renderId,
+    canonicalPath,
+    publicPath: view.dataset?.routerPublicPath || canonicalPath,
+    status: "ready",
+  });
+
+  return true;
+}
+
+function markError(AppCore, renderId, canonicalPath = DEFAULT_ROUTE) {
+  if (renderId && !currentRender(AppCore, renderId, canonicalPath)) return false;
+
+  const view = getViewContainer(AppCore);
+  if (!view) return false;
+
+  markView({
+    AppCore,
+    view,
+    renderId,
+    canonicalPath,
+    publicPath: view.dataset?.routerPublicPath || canonicalPath,
+    status: "error",
+  });
+
+  return true;
+}
+
+function adoptResult(target, result) {
+  if (!target || result === null || result === undefined) return result || null;
+
+  if (typeof result === "string") {
+    const wrapper = el("div", {
+      className: "router-rendered-text",
+      text: result,
+    });
+
+    try {
+      target.replaceChildren(wrapper);
+    } catch {
+      empty(target);
+      try { target.appendChild(wrapper); } catch {}
+    }
+
+    return wrapper;
   }
 
-  if (isFunction(route?.view)) {
-    return {
-      source:
-        "route.view",
-      render:
-        route.view,
-      thisArg:
-        route,
-    };
+  if (!isNode(result)) return result;
+  if (result === target) return result;
+
+  try {
+    if (target.contains(result)) return result;
+  } catch {}
+
+  try {
+    target.replaceChildren(result);
+  } catch {
+    empty(target);
+    try { target.appendChild(result); } catch {}
   }
 
-  if (isFunction(route?.component)) {
-    return {
-      source:
-        "route.component",
-      render:
-        route.component,
-      thisArg:
-        route,
-    };
-  }
-
-  if (isFunction(route?.handler)) {
-    return {
-      source:
-        "route.handler",
-      render:
-        route.handler,
-      thisArg:
-        route,
-    };
-  }
-
-  if (isFunction(route?.component?.render)) {
-    return {
-      source:
-        "route.component.render",
-      render:
-        route.component.render,
-      thisArg:
-        route.component,
-    };
-  }
-
-  if (isFunction(route?.view?.render)) {
-    return {
-      source:
-        "route.view.render",
-      render:
-        route.view.render,
-      thisArg:
-        route.view,
-    };
-  }
-
-  if (isFunction(route?.adapter?.render)) {
-    return {
-      source:
-        "route.adapter.render",
-      render:
-        route.adapter.render,
-      thisArg:
-        route.adapter,
-    };
-  }
-
-  return {
-    source:
-      "",
-    render:
-      null,
-    thisArg:
-      null,
-  };
+  return result;
 }
 
 /* =========================================================
-   PAYLOADS
+   PAYLOADS / STATE
 ========================================================= */
 
 export function buildRenderPayload({
   AppCore = null,
-
-  path = null,
-  requestedPath = null,
-  canonicalPath = null,
-  publicPath = null,
+  path = "",
+  requestedPath = "",
+  canonicalPath = "",
+  publicPath: routePublicPath = "",
   username = null,
-
   route = null,
-
   found = false,
   forbidden = false,
   redirectedFrom = null,
-
   options = null,
   renderId = null,
-
   flow = "",
   status = "",
 } = {}) {
-  const routePathRaw =
-    route?.path || null;
-
-  const rawRequestedPath =
-    safeText(
-      firstResolved(
-        requestedPath,
-        path,
-        publicPath,
-        canonicalPath,
-        routePathRaw,
-        getBrowserPublicPath(AppCore),
-        AppCore?.state?.publicPath,
-        AppCore?.state?.route,
-        "/"
-      ),
-      "/"
-    );
-
-  const canonicalInput =
-    safeText(
-      firstResolved(
-        canonicalPath,
-        routePathRaw,
-        rawRequestedPath,
-        "/"
-      ),
-      "/"
-    );
-
-  const canonicalWithSuffix =
-    buildCanonicalSourceWithSuffix(
-      AppCore,
-      canonicalInput,
-      rawRequestedPath
-    );
-
-  const finalCanonicalPath =
-    stripSearchAndHash(
-      safeCanonicalPath(
-        AppCore,
-        canonicalWithSuffix || canonicalInput || "/"
-      )
-    );
-
-  const publicInput =
-    safeText(
-      firstResolved(
-        publicPath,
-        path,
-        requestedPath,
-        rawRequestedPath,
-        canonicalWithSuffix,
-        finalCanonicalPath,
-        "/"
-      ),
-      "/"
-    );
-
-  const normalizedPublicPath =
-    safeNormalizePublicPath(
-      AppCore,
-      publicInput
-    );
-
-  const preferredPublicPath =
-    preferRequestedPublicPathIfCompatible(
-      AppCore,
-      rawRequestedPath,
-      normalizedPublicPath ||
-        canonicalWithSuffix ||
-        finalCanonicalPath,
-      finalCanonicalPath
-    );
-
-  const finalPublicPath =
-    preservePublicContextForSameRoute(
-      AppCore,
-      preferredPublicPath ||
-        normalizedPublicPath ||
-        finalCanonicalPath ||
-        "/"
-    );
-
-  const finalUsername =
-    safeText(username, "") ||
-    resolveUsernameForPayload(
-      AppCore,
-      null,
-      finalPublicPath
-    ) ||
-    null;
-
-  const finalRoutePath =
-    routePathRaw
-      ? stripSearchAndHash(
-          safeCanonicalPath(
-            AppCore,
-            routePathRaw
-          )
-        )
-      : finalCanonicalPath;
+  const resolved = resolveRoutePaths({
+    AppCore,
+    route,
+    requestedPath: requestedPath || path || routePublicPath || canonicalPath || route?.path || DEFAULT_ROUTE,
+    canonicalPath: canonicalPath || route?.path || requestedPath || path || DEFAULT_ROUTE,
+    publicPath: routePublicPath || path || requestedPath || "",
+    requestedUsername: username,
+  });
 
   return {
-    path:
-      finalPublicPath,
+    path: resolved.publicPath,
+    requestedPath: requestedPath || path || resolved.publicPath,
+    canonicalPath: resolved.canonicalPath,
+    publicPath: resolved.publicPath,
+    username: resolved.username || username || null,
 
-    requestedPath:
-      rawRequestedPath,
+    route: route || null,
+    routePath: route?.path || resolved.canonicalPath,
+    routeName: route?.name || null,
+    viewKey: route?.viewKey || null,
+    viewName: route?.viewName || null,
 
-    canonicalPath:
-      finalCanonicalPath,
+    found: Boolean(found),
+    forbidden: Boolean(forbidden),
+    redirectedFrom: redirectedFrom || null,
 
-    publicPath:
-      finalPublicPath,
+    options: options || null,
+    renderId: renderId || null,
+    flow: flow || null,
+    status: status || null,
 
-    username:
-      finalUsername,
-
-    route:
-      route || null,
-
-    routePath:
-      finalRoutePath,
-
-    routeName:
-      route?.name || null,
-
-    viewKey:
-      route?.viewKey || null,
-
-    viewName:
-      route?.viewName || null,
-
-    found:
-      Boolean(found),
-
-    forbidden:
-      Boolean(forbidden),
-
-    redirectedFrom:
-      redirectedFrom || null,
-
-    options:
-      options || null,
-
-    renderId:
-      renderId || null,
-
-    flow:
-      safeText(flow, "") || null,
-
-    status:
-      safeText(status, "") || null,
-
-    ts:
-      Date.now(),
+    ts: nowMs(),
   };
 }
 
 export function emitBeforeRender(AppCore, payload = {}) {
-  const finalPayload =
-    buildRenderPayload({
-      AppCore,
-      ...safeObject(payload),
-      flow:
-        payload?.flow || "before-render",
-    });
-
-  safeEmit(
+  const finalPayload = buildRenderPayload({
     AppCore,
-    "router:before-render",
-    finalPayload,
-    {
-      redact:
-        true,
-    }
-  );
+    ...safeObject(payload),
+    flow: payload?.flow || "before-render",
+  });
+
+  emit(AppCore, "router:before-render", finalPayload);
 
   return finalPayload;
 }
 
 export function emitRendered(AppCore, payload = {}) {
-  const finalPayload =
-    buildRenderPayload({
-      AppCore,
-      ...safeObject(payload),
-      flow:
-        payload?.flow || "rendered",
-    });
-
-  safeEmit(
+  const finalPayload = buildRenderPayload({
     AppCore,
-    "router:rendered",
-    finalPayload,
-    {
-      redact:
-        true,
-    }
-  );
+    ...safeObject(payload),
+    flow: payload?.flow || "rendered",
+  });
+
+  emit(AppCore, "router:rendered", finalPayload);
 
   return finalPayload;
 }
 
-/* =========================================================
-   STATE SYNC
-========================================================= */
+export function syncRouteState(AppCore, canonicalPath = DEFAULT_ROUTE, routePublicPath = null) {
+  const finalCanonical = stripSearchAndHash(canonical(AppCore, canonicalPath || DEFAULT_ROUTE));
+  const finalPublic = preservePublicContext(AppCore, routePublicPath || finalCanonical);
+  const username = usernameFrom(AppCore, null, finalPublic);
 
-export function syncRouteState(
-  AppCore,
-  canonicalPath = "/",
-  publicPath = null
-) {
-  const finalCanonical =
-    stripSearchAndHash(
-      safeCanonicalPath(
-        AppCore,
-        canonicalPath || "/"
-      )
-    );
+  try { AppCore?.setRoute?.(finalCanonical); } catch {}
+  try { AppCore?.setPublicPath?.(finalPublic); } catch {}
 
-  const candidatePublic =
-    safeNormalizePublicPath(
-      AppCore,
-      publicPath || finalCanonical
-    );
-
-  const finalPublic =
-    preservePublicContextForSameRoute(
-      AppCore,
-      candidatePublic
-    );
-
-  const username =
-    resolveUsernameForPayload(
-      AppCore,
-      null,
-      finalPublic
-    );
+  const patch = {
+    route: finalCanonical,
+    canonicalPath: finalCanonical,
+    publicPath: finalPublic,
+    currentResolvedUsername: username,
+  };
 
   try {
-    AppCore?.setRoute?.(
-      finalCanonical
-    );
-  } catch {}
-
-  try {
-    AppCore?.setPublicPath?.(
-      finalPublic
-    );
-  } catch {}
-
-  try {
-    AppCore?.setState?.({
-      route:
-        finalCanonical,
-      canonicalPath:
-        finalCanonical,
-      publicPath:
-        finalPublic,
-      currentResolvedUsername:
-        username,
+    AppCore?.setState?.(patch, {
+      source: SOURCE,
+      emit: false,
+      emitState: false,
+      emitDerived: false,
+      silent: true,
     });
   } catch {}
 
   try {
-    if (AppCore?.state) {
-      AppCore.state.route =
-        finalCanonical;
-
-      AppCore.state.canonicalPath =
-        finalCanonical;
-
-      AppCore.state.publicPath =
-        finalPublic;
-
-      AppCore.state.currentResolvedUsername =
-        username;
-    }
+    if (AppCore?.state) Object.assign(AppCore.state, patch);
   } catch {}
 
   return {
-    canonicalPath:
-      finalCanonical,
-    publicPath:
-      finalPublic,
+    canonicalPath: finalCanonical,
+    publicPath: finalPublic,
     username,
   };
 }
 
-function syncRouteStateFromPayload(AppCore, payload = {}) {
-  const normalized =
-    buildRenderPayload({
-      AppCore,
-      ...safeObject(payload),
-    });
+function commitState(AppCore, payload = {}) {
+  const built = buildRenderPayload({
+    AppCore,
+    ...safeObject(payload),
+  });
 
-  const synced =
-    syncRouteState(
-      AppCore,
-      normalized.canonicalPath,
-      normalized.publicPath
-    );
+  const synced = syncRouteState(AppCore, built.canonicalPath, built.publicPath);
 
   return buildRenderPayload({
     AppCore,
-    ...normalized,
-
-    path:
-      synced.publicPath,
-
-    canonicalPath:
-      synced.canonicalPath,
-
-    publicPath:
-      synced.publicPath,
-
-    username:
-      synced.username ||
-      normalized.username,
+    ...built,
+    canonicalPath: synced.canonicalPath,
+    publicPath: synced.publicPath,
+    username: synced.username || built.username,
   });
 }
 
-function commitRouteStateOnly(AppCore, payload = {}) {
-  return syncRouteStateFromPayload(
-    AppCore,
-    payload
-  );
-}
-
-export function applyResolvedRouteState(
-  AppCore,
-  canonicalPath,
-  fallbackPublicPath
-) {
-  const protectedPublicPath =
-    getProtectedPublicPath(AppCore);
-
-  const resolvedFallback =
-    getResolvedPublicPath(fallbackPublicPath) ||
-    fallbackPublicPath ||
-    canonicalPath ||
-    "/";
-
-  const publicPath =
-    protectedPublicPath ||
-    preservePublicContextForSameRoute(
-      AppCore,
-      resolvedFallback
-    );
-
+export function applyResolvedRouteState(AppCore, canonicalPath, fallbackPublicPath) {
   return syncRouteState(
     AppCore,
     canonicalPath,
-    publicPath
+    protectedPublicPath(AppCore) || fallbackPublicPath || canonicalPath || DEFAULT_ROUTE
   );
 }
 
 /* =========================================================
-   CONTEXT
+   CONTEXT / RENDERER
 ========================================================= */
 
 export function buildRouteRenderContext({
   AppCore,
   route = null,
-  requestedPath = "/",
-  canonicalPath = "/",
+  requestedPath = DEFAULT_ROUTE,
+  canonicalPath = DEFAULT_ROUTE,
   requestedUsername = null,
-  publicPath = null,
+  publicPath: routePublicPath = null,
   redirectedFrom = null,
   found = true,
   forbidden = false,
@@ -3558,213 +1304,143 @@ export function buildRouteRenderContext({
   renderRoot = null,
   viewContainer = null,
 } = {}) {
-  const finalPublicPath =
-    preservePublicContextForSameRoute(
-      AppCore,
-      publicPath ||
-        requestedPath ||
-        canonicalPath ||
-        "/"
-    );
+  const resolved = resolveRoutePaths({
+    AppCore,
+    route,
+    requestedPath: routePublicPath || requestedPath,
+    canonicalPath,
+    publicPath: routePublicPath || requestedPath,
+    requestedUsername,
+  });
 
-  const finalCanonicalPath =
-    stripSearchAndHash(
-      safeCanonicalPath(
-        AppCore,
-        canonicalPath ||
-          finalPublicPath
-      )
-    );
-
-  const username =
-    resolveUsernameForPayload(
-      AppCore,
-      requestedUsername,
-      finalPublicPath
-    );
-
-  const rootView =
-    viewContainer ||
-    getViewContainer(AppCore);
-
-  const host =
-    renderRoot ||
-    getCurrentRenderHost(AppCore) ||
-    rootView;
+  const rootView = viewContainer || getViewContainer(AppCore);
+  const host = renderRoot || currentHost(AppCore) || rootView;
 
   return Object.freeze({
     AppCore,
     route,
 
-    path:
-      finalPublicPath,
-    requestedPath:
-      finalPublicPath,
-    canonicalPath:
-      finalCanonicalPath,
-    publicPath:
-      finalPublicPath,
+    path: resolved.publicPath,
+    requestedPath: resolved.publicPath,
+    canonicalPath: resolved.canonicalPath,
+    publicPath: resolved.publicPath,
 
-    username,
-    requestedUsername:
-      username,
+    username: resolved.username,
+    requestedUsername: resolved.username,
 
     redirectedFrom,
 
-    found:
-      Boolean(found),
-    forbidden:
-      Boolean(forbidden),
+    found: Boolean(found),
+    forbidden: Boolean(forbidden),
 
     renderId,
     signal,
 
-    viewContainer:
-      rootView,
-    renderRoot:
-      host,
-    renderHost:
-      host,
+    viewContainer: rootView,
+    renderRoot: host,
+    renderHost: host,
 
-    routePath:
-      route?.path || finalCanonicalPath,
-    routeName:
-      route?.name || null,
-    viewKey:
-      route?.viewKey || null,
-    viewName:
-      route?.viewName || null,
-
-    isStale: () =>
-      renderId
-        ? !isCurrentRender(AppCore, renderId, finalCanonicalPath)
-        : false,
+    routePath: route?.path || resolved.canonicalPath,
+    routeName: route?.name || null,
+    viewKey: route?.viewKey || null,
+    viewName: route?.viewName || null,
 
     isCurrent: () =>
       renderId
-        ? isCurrentRender(AppCore, renderId, finalCanonicalPath)
+        ? currentRender(AppCore, renderId, resolved.canonicalPath)
         : true,
+
+    isStale: () =>
+      renderId
+        ? !currentRender(AppCore, renderId, resolved.canonicalPath)
+        : false,
   });
 }
 
-/* =========================================================
-   ROUTE EXECUTION
-========================================================= */
+function routeRenderer(route = null) {
+  if (isFn(route?.render)) return { render: route.render, thisArg: route, source: "route.render" };
+  if (isFn(route?.view)) return { render: route.view, thisArg: route, source: "route.view" };
+  if (isFn(route?.component)) return { render: route.component, thisArg: route, source: "route.component" };
+  if (isFn(route?.handler)) return { render: route.handler, thisArg: route, source: "route.handler" };
+  if (isFn(route?.component?.render)) return { render: route.component.render, thisArg: route.component, source: "route.component.render" };
+  if (isFn(route?.view?.render)) return { render: route.view.render, thisArg: route.view, source: "route.view.render" };
+  if (isFn(route?.adapter?.render)) return { render: route.adapter.render, thisArg: route.adapter, source: "route.adapter.render" };
 
-function runRouteRender(
-  AppCore,
-  route,
-  renderTarget,
-  context
-) {
-  if (!renderTarget) {
-    safeWarn(
-      AppCore,
-      "viewContainer/renderRoot ausente."
-    );
+  return {
+    render: null,
+    thisArg: null,
+    source: "",
+  };
+}
 
-    return null;
-  }
+function runRenderer(AppCore, route, target, context) {
+  const renderer = routeRenderer(route);
 
-  const renderer =
-    resolveRouteRenderer(route);
+  if (!target || !isFn(renderer.render)) return null;
 
-  if (!isFunction(renderer.render)) {
-    safeWarn(
-      AppCore,
-      "ruta sin render compatible:",
-      route?.path
-    );
-
-    return null;
-  }
+  const ctx = {
+    ...context,
+    rendererSource: renderer.source,
+  };
 
   try {
     if (renderer.render.length >= 2) {
-      return renderer.render.call(
-        renderer.thisArg || route,
-        renderTarget,
-        {
-          ...context,
-          rendererSource:
-            renderer.source,
-        }
-      );
+      return renderer.render.call(renderer.thisArg || route, target, ctx);
     }
 
     if (renderer.render.length === 1) {
-      return renderer.render.call(
-        renderer.thisArg || route,
-        {
-          ...context,
-          rendererSource:
-            renderer.source,
-        }
-      );
+      return renderer.render.call(renderer.thisArg || route, ctx);
     }
 
-    return renderer.render.call(
-      renderer.thisArg || route,
-      renderTarget,
-      {
-        ...context,
-        rendererSource:
-          renderer.source,
-      }
-    );
+    return renderer.render.call(renderer.thisArg || route, target, ctx);
   } catch (error) {
     return Promise.reject(error);
   }
 }
 
-function createDeferredViewInstance({
+function shouldAwaitRouteRender(AppCore, route = null) {
+  if (route?.awaitRender === true || route?.renderMode === "blocking" || route?.blockingRender === true) {
+    return true;
+  }
+
+  if (route?.awaitRender === false || route?.renderMode === "non-blocking" || route?.nonBlockingRender === true) {
+    return false;
+  }
+
+  return Boolean(
+    AppCore?.config?.routerAwaitRouteRender === true ||
+      AppCore?.config?.awaitRouteRender === true
+  );
+}
+
+function deferredView({
   AppCore,
   renderId,
   canonicalPath,
 } = {}) {
-  let current =
-    null;
-
-  let destroyed =
-    false;
+  let current = null;
+  let destroyed = false;
 
   return {
-    set(view) {
-      current =
-        view || null;
+    set(value) {
+      current = value || null;
 
-      if (
-        destroyed &&
-        current &&
-        typeof current.destroy === "function"
-      ) {
-        try {
-          current.destroy();
-        } catch {}
+      if (destroyed && current && isFn(current.destroy)) {
+        try { current.destroy(); } catch {}
       }
     },
 
     destroy() {
-      destroyed =
-        true;
+      destroyed = true;
 
-      if (
-        current &&
-        typeof current.destroy === "function"
-      ) {
-        try {
-          current.destroy();
-        } catch {}
+      if (current && isFn(current.destroy)) {
+        try { current.destroy(); } catch {}
       }
 
-      current =
-        null;
+      current = null;
 
-      if (
-        renderId &&
-        isCurrentRender(AppCore, renderId, canonicalPath)
-      ) {
-        abortPreviousSuccessRender("view-destroyed");
+      if (renderId && currentRender(AppCore, renderId, canonicalPath)) {
+        abortActiveRender("view-destroyed");
       }
     },
 
@@ -3775,19 +1451,10 @@ function createDeferredViewInstance({
 }
 
 /* =========================================================
-   DOM SAFE FALLBACK VIEWS
+   FALLBACK VIEWS
 ========================================================= */
 
-function getInternalViewTarget(AppCore, target = null) {
-  return (
-    target ||
-    getCurrentRenderHost(AppCore) ||
-    getViewContainer(AppCore)
-  );
-}
-
-function createPanelFallback({
-  AppCore,
+function panelFallback({
   kind = "generic",
   eyebrow = "",
   title = "",
@@ -3795,139 +1462,89 @@ function createPanelFallback({
   meta = [],
   action = null,
 } = {}) {
-  const section =
-    createElement("section", {
-      className:
-        `content-wrapper ${RENDER_FALLBACK_CLASS} router-fallback-view--${kind}`,
-      dataset: {
-        routerFallback:
-          kind,
-      },
-    });
+  const section = el("section", {
+    className: `content-wrapper router-fallback-view router-fallback-view--${kind}`,
+    dataset: {
+      routerFallback: kind,
+    },
+  });
 
-  const card =
-    createElement("div", {
-      className:
-        "panel-block router-fallback-card",
-    });
+  const card = el("div", {
+    className: "panel-block router-fallback-card",
+  });
 
-  const inner =
-    createElement("div", {
-      className:
-        "router-fallback-card__inner",
-    });
+  const inner = el("div", {
+    className: "router-fallback-card__inner",
+  });
 
-  const header =
-    createElement("div", {
-      className:
-        "router-fallback-card__header",
-    });
-
-  const nodes =
-    [];
+  const header = el("div", {
+    className: "router-fallback-card__header",
+  });
 
   if (eyebrow) {
-    nodes.push(
-      createElement("p", {
-        className:
-          "router-fallback-card__eyebrow",
-        text:
-          eyebrow,
+    header.appendChild(
+      el("p", {
+        className: "router-fallback-card__eyebrow",
+        text: eyebrow,
       })
     );
   }
 
-  nodes.push(
-    createElement("h2", {
-      className:
-        "router-fallback-card__title",
-      text:
-        title || "Vista",
+  header.appendChild(
+    el("h2", {
+      className: "router-fallback-card__title",
+      text: title || "Vista",
     })
   );
 
   if (message) {
-    nodes.push(
-      createElement("p", {
-        className:
-          "router-fallback-card__message",
-        text:
-          message,
+    header.appendChild(
+      el("p", {
+        className: "router-fallback-card__message",
+        text: message,
       })
     );
   }
 
-  appendAll(
-    header,
-    nodes
-  );
+  inner.appendChild(header);
 
-  const metaBox =
-    createElement("div", {
-      className:
-        "router-fallback-card__meta",
+  if (meta.length) {
+    const metaBox = el("div", {
+      className: "router-fallback-card__meta",
     });
 
-  for (const item of safeArray(meta)) {
-    const row =
-      createElement("div", {
-        className:
-          "router-fallback-card__meta-row",
+    for (const item of meta) {
+      const row = el("div", {
+        className: "router-fallback-card__meta-row",
       });
 
-    const label =
-      createElement("strong", {
-        text:
-          item?.label || "",
-      });
+      append(row, [
+        el("strong", { text: item?.label || "" }),
+        el("span", { text: item?.value || "—" }),
+      ]);
 
-    const value =
-      createElement("span", {
-        text:
-          item?.value || "—",
-      });
+      metaBox.appendChild(row);
+    }
 
-    appendAll(
-      row,
-      [
-        label,
-        value,
-      ]
-    );
-
-    metaBox.appendChild(row);
+    inner.appendChild(metaBox);
   }
 
-  appendAll(
-    inner,
-    [
-      header,
-      metaBox,
-    ]
-  );
-
   if (action?.href && action?.text) {
-    const actions =
-      createElement("div", {
-        className:
-          "router-fallback-card__actions",
-      });
+    const actions = el("div", {
+      className: "router-fallback-card__actions",
+    });
 
-    const link =
-      createElement("a", {
-        className:
-          "ui-btn ui-btn-primary router-fallback-card__action",
-        text:
-          action.text,
+    actions.appendChild(
+      el("a", {
+        className: "ui-btn ui-btn-primary router-fallback-card__action",
+        text: action.text,
         attrs: {
-          href:
-            action.href,
-          "data-spa":
-            "",
+          href: action.href,
+          "data-spa": "",
         },
-      });
+      })
+    );
 
-    actions.appendChild(link);
     inner.appendChild(actions);
   }
 
@@ -3937,460 +1554,210 @@ function createPanelFallback({
   return section;
 }
 
-export function renderGenericView(AppCore, route, target = null) {
-  const view =
-    getInternalViewTarget(
-      AppCore,
-      target
-    );
-
-  if (!view) {
-    return null;
-  }
-
-  const canonical =
-    AppCore?.state?.route ||
-    route?.path ||
-    "/";
-
-  const publicPath =
-    getCurrentPublicPath(AppCore);
-
-  const username =
-    getCurrentResolvedUsername(AppCore);
-
-  const node =
-    createPanelFallback({
-      AppCore,
-      kind:
-        "generic",
-      eyebrow:
-        "Router",
-      title:
-        route?.title || "Vista",
-      message:
-        "Vista conectada al router.",
-      meta: [
-        {
-          label:
-            "Canonical:",
-          value:
-            canonical,
-        },
-        {
-          label:
-            "Public:",
-          value:
-            redactTokenInText(publicPath),
-        },
-        {
-          label:
-            "User:",
-          value:
-            username || "—",
-        },
-      ],
-    });
+function paint(target, node) {
+  if (!target || !node) return null;
 
   try {
-    view.replaceChildren(node);
+    target.replaceChildren(node);
   } catch {
-    emptyElement(view);
-    view.appendChild(node);
+    empty(target);
+    try { target.appendChild(node); } catch {}
   }
 
   return node;
+}
+
+export function renderGenericView(AppCore, route, target = null) {
+  const root = target || currentHost(AppCore) || getViewContainer(AppCore);
+  if (!root) return null;
+
+  return paint(
+    root,
+    panelFallback({
+      kind: "generic",
+      eyebrow: "Router",
+      title: route?.title || route?.name || "Vista",
+      message: "Vista conectada al router.",
+      meta: [
+        {
+          label: "Ruta:",
+          value: route?.path || AppCore?.state?.route || DEFAULT_ROUTE,
+        },
+      ],
+    })
+  );
 }
 
 export function renderForbiddenView(AppCore, getRoute) {
-  const view =
-    getViewContainer(AppCore);
+  const root = getViewContainer(AppCore);
+  if (!root) return null;
 
-  if (!view) {
-    return null;
-  }
-
-  const href =
-    getDefaultHomeTarget(
-      AppCore,
-      getRoute
-    );
-
-  const node =
-    createPanelFallback({
-      AppCore,
-      kind:
-        "forbidden",
-      eyebrow:
-        "403",
-      title:
-        "Acceso denegado",
-      message:
-        "No tienes permisos para acceder.",
+  return paint(
+    root,
+    panelFallback({
+      kind: "forbidden",
+      eyebrow: "403",
+      title: "Acceso denegado",
+      message: "No tienes permisos para acceder.",
       action: {
-        href,
-        text:
-          "Volver",
+        href: getDefaultHomeTarget(AppCore, getRoute),
+        text: "Volver",
       },
-    });
-
-  try {
-    view.replaceChildren(node);
-  } catch {
-    emptyElement(view);
-    view.appendChild(node);
-  }
-
-  return node;
+    })
+  );
 }
 
 export function renderNotFoundView(AppCore, requestedPath, getRoute) {
-  const view =
-    getViewContainer(AppCore);
+  const root = getViewContainer(AppCore);
+  if (!root) return null;
 
-  if (!view) {
-    return null;
-  }
-
-  const href =
-    getDefaultHomeTarget(
-      AppCore,
-      getRoute
-    );
-
-  const node =
-    createPanelFallback({
-      AppCore,
-      kind:
-        "not-found",
-      eyebrow:
-        "404",
-      title:
-        "Ruta no encontrada",
-      message:
-        "No se ha podido resolver la ruta solicitada.",
+  return paint(
+    root,
+    panelFallback({
+      kind: "not-found",
+      eyebrow: "404",
+      title: "Ruta no encontrada",
+      message: "No se ha podido resolver la ruta solicitada.",
       meta: [
         {
-          label:
-            "Ruta:",
-          value:
-            redactTokenInText(requestedPath || "—"),
+          label: "Ruta:",
+          value: redactTokenInText(requestedPath || "—"),
         },
       ],
       action: {
-        href,
-        text:
-          "Inicio",
+        href: getDefaultHomeTarget(AppCore, getRoute),
+        text: "Inicio",
       },
-    });
-
-  try {
-    view.replaceChildren(node);
-  } catch {
-    emptyElement(view);
-    view.appendChild(node);
-  }
-
-  return node;
+    })
+  );
 }
 
 export function renderRuntimeErrorView(AppCore, error, getRoute) {
-  const view =
-    getViewContainer(AppCore);
+  const root = getViewContainer(AppCore);
+  if (!root) return null;
 
-  if (!view) {
-    return null;
-  }
-
-  const href =
-    getDefaultHomeTarget(
-      AppCore,
-      getRoute
-    );
-
-  const node =
-    createPanelFallback({
-      AppCore,
-      kind:
-        "runtime-error",
-      eyebrow:
-        "Router error",
-      title:
-        "Error de navegación",
-      message:
-        redactTokenInText(error?.message || "Error inesperado"),
+  return paint(
+    root,
+    panelFallback({
+      kind: "runtime-error",
+      eyebrow: "Router error",
+      title: "Error de navegación",
+      message: redactTokenInText(error?.message || "Error inesperado."),
       action: {
-        href,
-        text:
-          "Recuperar",
+        href: getDefaultHomeTarget(AppCore, getRoute),
+        text: "Recuperar",
       },
-    });
+    })
+  );
+}
 
-  try {
-    view.replaceChildren(node);
-  } catch {
-    emptyElement(view);
-    view.appendChild(node);
+function transitionView(AppCore, route = null, target = null) {
+  const root = target || currentHost(AppCore) || getViewContainer(AppCore);
+  if (!root) return null;
+
+  if (route?.transitionView === false || route?.skipTransitionView === true) {
+    return root;
   }
 
-  return node;
+  return paint(
+    root,
+    panelFallback({
+      kind: "transition",
+      eyebrow: "Onion",
+      title: route?.title || route?.label || "Cargando vista",
+      message: "Preparando contenido...",
+    })
+  );
 }
 
 /* =========================================================
-   SUCCESS RENDER CONTROL
+   FLOW HELPERS
 ========================================================= */
 
-function shouldAwaitRouteRender(AppCore, route = null) {
-  if (
-    route?.awaitRender === true ||
-    route?.renderMode === "blocking" ||
-    route?.blockingRender === true
-  ) {
-    return true;
-  }
-
-  if (
-    route?.awaitRender === false ||
-    route?.renderMode === "non-blocking" ||
-    route?.nonBlockingRender === true
-  ) {
-    return false;
-  }
-
-  return Boolean(
-    AppCore?.config?.routerAwaitRouteRender === true ||
-      AppCore?.config?.awaitRouteRender === true
-  );
-}
-
-function renderRouteTransitionView(
-  AppCore,
-  route = null,
-  target = null
-) {
-  const view =
-    target ||
-    getCurrentRenderHost(AppCore) ||
-    getViewContainer(AppCore);
-
-  if (!view) {
-    return null;
-  }
-
-  if (
-    route?.transitionView === false ||
-    route?.skipTransitionView === true
-  ) {
-    return view;
-  }
-
-  const section =
-    createElement("section", {
-      className:
-        `content-wrapper ${RENDER_TRANSITION_CLASS}`,
-      attrs: {
-        "aria-live":
-          "polite",
-      },
-      dataset: {
-        routerTransition:
-          "true",
-      },
-    });
-
-  const card =
-    createElement("div", {
-      className:
-        "panel-block router-transition-card",
-    });
-
-  const inner =
-    createElement("div", {
-      className:
-        "router-transition-card__inner",
-    });
-
-  const icon =
-    createElement("div", {
-      className:
-        "router-transition-card__icon",
-      attrs: {
-        "aria-hidden":
-          "true",
-      },
-    });
-
-  const content =
-    createElement("div", {
-      className:
-        "router-transition-card__content",
-    });
-
-  const title =
-    createElement("h2", {
-      className:
-        "router-transition-card__title",
-      text:
-        route?.title ||
-        route?.label ||
-        "Cargando vista",
-    });
-
-  const message =
-    createElement("p", {
-      className:
-        "router-transition-card__message",
-      text:
-        "Preparando contenido...",
-    });
-
-  const skeleton =
-    createElement("div", {
-      className:
-        "router-transition-card__skeleton",
-      attrs: {
-        "aria-hidden":
-          "true",
-      },
-    });
-
-  appendAll(
-    skeleton,
-    [
-      createElement("span", {
-        className:
-          "router-transition-card__skeleton-line",
-      }),
-      createElement("span", {
-        className:
-          "router-transition-card__skeleton-line router-transition-card__skeleton-line--medium",
-      }),
-      createElement("span", {
-        className:
-          "router-transition-card__skeleton-line router-transition-card__skeleton-line--short",
-      }),
-    ]
-  );
-
-  appendAll(
-    content,
-    [
-      title,
-      message,
-      skeleton,
-    ]
-  );
-
-  appendAll(
-    inner,
-    [
-      icon,
-      content,
-    ]
-  );
-
-  card.appendChild(inner);
-  section.appendChild(card);
-
+function setDocumentTitle(fn, title) {
   try {
-    view.replaceChildren(section);
-  } catch {
-    emptyElement(view);
-    view.appendChild(section);
-  }
-
-  return section;
+    if (isFn(fn)) fn(title);
+  } catch {}
 }
 
-function handleAsyncRouteRenderFailure({
+function setShellMode(fn, route) {
+  try {
+    if (isFn(fn)) fn(route);
+  } catch {}
+}
+
+function clearDynamic(fn) {
+  try {
+    if (isFn(fn)) fn();
+  } catch {}
+}
+
+function setActiveMenu(fn, path) {
+  try {
+    if (isFn(fn)) fn(path);
+  } catch {}
+}
+
+function updateHistory(fn, payload = {}) {
+  try {
+    if (isFn(fn)) return fn(payload);
+  } catch {}
+
+  return false;
+}
+
+function flowMetric(AppCore, flow, payload = {}) {
+  emit(AppCore, "router:render:flow", {
+    flow,
+    ...payload,
+  });
+}
+
+function asyncRenderError({
   AppCore,
   error,
   route,
   requestedPath,
   canonicalPath,
   publicPath,
-  requestedUsername,
+  username,
   getRoute,
   renderId,
 } = {}) {
-  if (
-    renderId &&
-    !isCurrentRender(
-      AppCore,
-      renderId,
-      canonicalPath
-    )
-  ) {
-    return;
-  }
+  if (renderId && !currentRender(AppCore, renderId, canonicalPath)) return;
 
-  safeError(
-    AppCore,
-    "async route render error",
-    error
-  );
+  errorLog(AppCore, "async route render error", error);
 
-  safeEmit(
-    AppCore,
-    "router:render:error",
-    {
-      error,
-      message:
-        safeText(
-          error?.message,
-          "Error de navegación"
-        ),
-      route:
-        route || null,
-      routePath:
-        route?.path || null,
-      routeName:
-        route?.name || null,
-      viewKey:
-        route?.viewKey || null,
-      viewName:
-        route?.viewName || null,
-      requestedPath,
-      canonicalPath,
-      publicPath,
-      username:
-        requestedUsername || null,
-      renderId,
-      ts:
-        Date.now(),
-    },
-    {
-      redact:
-        true,
-    }
-  );
+  markError(AppCore, renderId, canonicalPath);
 
-  markViewError(
-    AppCore,
-    renderId,
-    canonicalPath
-  );
+  renderRuntimeErrorView(AppCore, error, getRoute);
 
-  renderRuntimeErrorView(
-    AppCore,
-    error,
-    getRoute
-  );
-
-  applyRenderShellRepair({
+  repairShell({
     AppCore,
     route,
     canonicalPath,
     publicPath,
-    phase:
-      "async-error",
-    hideLoader:
-      true,
+    phase: "async-error",
+    hideLoading: true,
+  });
+
+  emit(AppCore, "router:render:error", {
+    error,
+    message: error?.message || "Error de navegación",
+    routePath: route?.path || null,
+    routeName: route?.name || null,
+    viewKey: route?.viewKey || null,
+    viewName: route?.viewName || null,
+    requestedPath,
+    canonicalPath,
+    publicPath,
+    username,
+    renderId,
   });
 }
 
 /* =========================================================
-   FLOWS
+   MAIN FLOWS
 ========================================================= */
 
 export async function renderRouteSuccess({
@@ -4399,1030 +1766,421 @@ export async function renderRouteSuccess({
   requestedPath,
   canonicalPath,
   requestedUsername,
-  setShellMode,
-  setDocumentTitle,
+  setShellMode: setShellModeFn,
+  setDocumentTitle: setDocumentTitleFn,
   getRoute,
 } = {}) {
-  const startedAt =
-    nowMs();
+  const startedAt = perfMs();
+  const { renderId, signal } = beginRender();
 
-  const {
-    renderId,
-    signal,
-  } =
-    beginSuccessRender();
-
-  const resolvedRaw =
-    resolvePublicPathForRoute({
-      AppCore,
-      getRoute,
-      route,
-      canonicalPath,
-      requestedPath,
-      requestedUsername,
-    });
-
-  const lifecycleState =
-    commitRouteStateOnly(
-      AppCore,
-      {
-        path:
-          resolvedRaw.publicPath,
-
-        requestedPath:
-          requestedPath ||
-          resolvedRaw.publicPath,
-
-        canonicalPath:
-          resolvedRaw.canonicalPath,
-
-        publicPath:
-          resolvedRaw.publicPath,
-
-        username:
-          resolvedRaw.username,
-
-        route,
-        found:
-          true,
-        forbidden:
-          false,
-        renderId,
-
-        flow:
-          "success",
-
-        status:
-          "state-committed",
-
-        options: {
-          requestedUsername:
-            requestedUsername || null,
-        },
-      }
-    );
-
-  const resolved =
-    {
-      canonicalPath:
-        lifecycleState.canonicalPath,
-
-      publicPath:
-        lifecycleState.publicPath,
-
-      username:
-        lifecycleState.username ||
-        resolvedRaw.username ||
-        null,
-    };
-
-  safeEmit(
+  const resolved = resolveRoutePaths({
     AppCore,
-    "router:render:state-committed",
-    {
-      path:
-        resolved.publicPath,
-      requestedPath:
-        requestedPath || resolved.publicPath,
-      canonicalPath:
-        resolved.canonicalPath,
-      publicPath:
-        resolved.publicPath,
-      username:
-        resolved.username,
-      route:
-        route || null,
-      routePath:
-        route?.path || null,
-      routeName:
-        route?.name || null,
-      viewKey:
-        route?.viewKey || null,
-      viewName:
-        route?.viewName || null,
-      renderId,
-      source:
-        "router.render",
-    },
-    {
-      redact:
-        true,
-    }
-  );
-
-  applyRenderShellRepair({
-    AppCore,
+    getRoute,
     route,
-    canonicalPath:
-      resolved.canonicalPath,
-    publicPath:
-      resolved.publicPath,
-    phase:
-      "before-success-render",
-    hideLoader:
-      false,
+    requestedPath,
+    canonicalPath,
+    requestedUsername,
   });
 
-  safeSetShellMode(
-    setShellMode,
-    route
-  );
+  const committed = commitState(AppCore, {
+    requestedPath: requestedPath || resolved.publicPath,
+    canonicalPath: resolved.canonicalPath,
+    publicPath: resolved.publicPath,
+    username: resolved.username,
+    route,
+    found: true,
+    forbidden: false,
+    renderId,
+    flow: "success",
+    status: "state-committed",
+  });
 
-  safeSetDocumentTitle(
-    setDocumentTitle,
-    route?.title ||
-      AppCore?.config?.appName ||
-      "Onion"
-  );
+  emit(AppCore, "router:render:state-committed", committed);
 
-  const {
-    view,
-    host,
-  } =
-    prepareRenderHost({
-      AppCore,
-      route,
-      renderId,
-      canonicalPath:
-        resolved.canonicalPath,
-      publicPath:
-        resolved.publicPath,
-      mode:
-        "success",
-    });
+  repairShell({
+    AppCore,
+    route,
+    canonicalPath: committed.canonicalPath,
+    publicPath: committed.publicPath,
+    phase: "before-success-render",
+    hideLoading: false,
+  });
 
-  const ctx =
-    buildRouteRenderContext({
-      AppCore,
-      route,
+  setShellMode(setShellModeFn, route);
+  setDocumentTitle(setDocumentTitleFn, route?.title || AppCore?.config?.appName || "Onion");
 
-      requestedPath:
-        resolved.publicPath,
+  const { view, host } = prepareHost({
+    AppCore,
+    route,
+    renderId,
+    canonicalPath: committed.canonicalPath,
+    publicPath: committed.publicPath,
+    mode: "success",
+  });
 
-      canonicalPath:
-        resolved.canonicalPath,
+  const ctx = buildRouteRenderContext({
+    AppCore,
+    route,
+    requestedPath: committed.publicPath,
+    canonicalPath: committed.canonicalPath,
+    requestedUsername: committed.username,
+    publicPath: committed.publicPath,
+    renderId,
+    signal,
+    viewContainer: view,
+    renderRoot: host,
+  });
 
-      requestedUsername:
-        resolved.username,
+  const renderer = routeRenderer(route);
+  const awaitRender = shouldAwaitRouteRender(AppCore, route);
 
-      publicPath:
-        resolved.publicPath,
+  let viewInstance = null;
+  let asyncDispatched = false;
 
-      renderId,
-      signal,
+  if (isFn(renderer.render)) {
+    if (!awaitRender) {
+      transitionView(AppCore, route, host);
+    }
 
-      viewContainer:
-        view,
+    const result = runRenderer(AppCore, route, host || view, ctx);
 
-      renderRoot:
-        host,
-    });
+    if (awaitRender) {
+      viewInstance = await Promise.resolve(result);
 
-  const shouldBlock =
-    shouldAwaitRouteRender(
-      AppCore,
-      route
-    );
-
-  let viewInstance =
-    null;
-
-  const renderer =
-    resolveRouteRenderer(route);
-
-  let asyncDispatched =
-    false;
-
-  if (isFunction(renderer.render)) {
-    const transitionView =
-      shouldBlock
-        ? null
-        : renderRouteTransitionView(
-            AppCore,
-            route,
-            host
-          );
-
-    const result =
-      runRouteRender(
-        AppCore,
-        route,
-        host || ctx.viewContainer,
-        ctx
-      );
-
-    if (shouldBlock) {
-      viewInstance =
-        await Promise.resolve(result);
-
-      if (
-        !isCurrentRender(
-          AppCore,
-          renderId,
-          resolved.canonicalPath
-        )
-      ) {
-        try {
-          viewInstance?.destroy?.();
-        } catch {}
-
+      if (!currentRender(AppCore, renderId, committed.canonicalPath)) {
+        try { viewInstance?.destroy?.(); } catch {}
         return null;
       }
 
-      adoptRenderedResult(
-        host || ctx.viewContainer,
-        viewInstance
-      );
+      adoptResult(host || view, viewInstance);
+      markReady(AppCore, renderId, committed.canonicalPath);
 
-      markViewReady(
-        AppCore,
-        renderId,
-        resolved.canonicalPath
-      );
-
-      applyRenderShellRepair({
+      repairShell({
         AppCore,
         route,
-        canonicalPath:
-          resolved.canonicalPath,
-        publicPath:
-          resolved.publicPath,
-        phase:
-          "after-blocking-render",
-        hideLoader:
-          true,
+        canonicalPath: committed.canonicalPath,
+        publicPath: committed.publicPath,
+        phase: "after-blocking-render",
+        hideLoading: true,
       });
     } else if (isPromiseLike(result)) {
-      asyncDispatched =
-        true;
+      asyncDispatched = true;
 
-      const deferredView =
-        createDeferredViewInstance({
-          AppCore,
-          renderId,
-          canonicalPath:
-            resolved.canonicalPath,
-        });
+      const deferred = deferredView({
+        AppCore,
+        renderId,
+        canonicalPath: committed.canonicalPath,
+      });
 
       result
-        .then((resolvedView) => {
-          if (
-            !isCurrentRender(
-              AppCore,
-              renderId,
-              resolved.canonicalPath
-            )
-          ) {
-            try {
-              resolvedView?.destroy?.();
-            } catch {}
-
+        .then((asyncView) => {
+          if (!currentRender(AppCore, renderId, committed.canonicalPath)) {
+            try { asyncView?.destroy?.(); } catch {}
             return;
           }
 
-          deferredView.set(
-            resolvedView
-          );
+          deferred.set(asyncView);
+          adoptResult(host || view, asyncView);
+          markReady(AppCore, renderId, committed.canonicalPath);
 
-          adoptRenderedResult(
-            host || ctx.viewContainer,
-            resolvedView
-          );
-
-          markViewReady(
-            AppCore,
-            renderId,
-            resolved.canonicalPath
-          );
-
-          applyRenderShellRepair({
+          repairShell({
             AppCore,
             route,
-            canonicalPath:
-              resolved.canonicalPath,
-            publicPath:
-              resolved.publicPath,
-            phase:
-              "async-complete",
-            hideLoader:
-              true,
+            canonicalPath: committed.canonicalPath,
+            publicPath: committed.publicPath,
+            phase: "async-complete",
+            hideLoading: true,
           });
 
           afterPaint(() => {
-            if (
-              !isCurrentRender(
-                AppCore,
-                renderId,
-                resolved.canonicalPath
-              )
-            ) {
-              return;
-            }
+            if (!currentRender(AppCore, renderId, committed.canonicalPath)) return;
 
-            applyRenderShellRepair({
+            repairShell({
               AppCore,
               route,
-              canonicalPath:
-                resolved.canonicalPath,
-              publicPath:
-                resolved.publicPath,
-              phase:
-                "async-complete-after-paint",
-              hideLoader:
-                true,
+              canonicalPath: committed.canonicalPath,
+              publicPath: committed.publicPath,
+              phase: "async-complete-after-paint",
+              hideLoading: true,
             });
           });
 
-          safeEmit(
-            AppCore,
-            "router:render:async-complete",
-            {
-              path:
-                resolved.publicPath,
-
-              requestedPath:
-                requestedPath ||
-                resolved.publicPath,
-
-              route:
-                route?.path || null,
-
-              routePath:
-                route?.path || null,
-
-              routeName:
-                route?.name || null,
-
-              viewKey:
-                route?.viewKey || null,
-
-              viewName:
-                route?.viewName || null,
-
-              canonicalPath:
-                resolved.canonicalPath,
-
-              publicPath:
-                resolved.publicPath,
-
-              username:
-                resolved.username,
-
-              hasView:
-                Boolean(resolvedView),
-
-              renderId,
-
-              durationMs:
-                Math.round(
-                  nowMs() - startedAt
-                ),
-            },
-            {
-              redact:
-                true,
-            }
-          );
+          emit(AppCore, "router:render:async-complete", {
+            ...committed,
+            hasView: Boolean(asyncView),
+            durationMs: Math.round(perfMs() - startedAt),
+          });
         })
         .catch((error) => {
-          handleAsyncRouteRenderFailure({
+          asyncRenderError({
             AppCore,
             error,
             route,
-            requestedPath:
-              requestedPath ||
-              resolved.publicPath,
-            canonicalPath:
-              resolved.canonicalPath,
-            publicPath:
-              resolved.publicPath,
-            requestedUsername:
-              resolved.username,
+            requestedPath: requestedPath || committed.publicPath,
+            canonicalPath: committed.canonicalPath,
+            publicPath: committed.publicPath,
+            username: committed.username,
             getRoute,
             renderId,
           });
         });
 
-      viewInstance =
-        deferredView ||
-        transitionView ||
-        host ||
-        ctx.viewContainer ||
-        null;
+      viewInstance = deferred;
 
       microtask(() => {
-        if (
-          !isCurrentRender(
-            AppCore,
-            renderId,
-            resolved.canonicalPath
-          )
-        ) {
-          return;
-        }
+        if (!currentRender(AppCore, renderId, committed.canonicalPath)) return;
 
-        applyRenderShellRepair({
+        repairShell({
           AppCore,
           route,
-          canonicalPath:
-            resolved.canonicalPath,
-          publicPath:
-            resolved.publicPath,
-          phase:
-            "after-non-blocking-dispatch",
-          hideLoader:
-            true,
+          canonicalPath: committed.canonicalPath,
+          publicPath: committed.publicPath,
+          phase: "after-non-blocking-dispatch",
+          hideLoading: true,
         });
       });
     } else {
-      viewInstance =
-        result ||
-        transitionView ||
-        host ||
-        ctx.viewContainer ||
-        null;
+      viewInstance = result || host || view || null;
 
-      if (
-        !isCurrentRender(
-          AppCore,
-          renderId,
-          resolved.canonicalPath
-        )
-      ) {
-        try {
-          viewInstance?.destroy?.();
-        } catch {}
-
+      if (!currentRender(AppCore, renderId, committed.canonicalPath)) {
+        try { viewInstance?.destroy?.(); } catch {}
         return null;
       }
 
-      adoptRenderedResult(
-        host || ctx.viewContainer,
-        viewInstance
-      );
+      adoptResult(host || view, viewInstance);
+      markReady(AppCore, renderId, committed.canonicalPath);
 
-      markViewReady(
-        AppCore,
-        renderId,
-        resolved.canonicalPath
-      );
-
-      applyRenderShellRepair({
+      repairShell({
         AppCore,
         route,
-        canonicalPath:
-          resolved.canonicalPath,
-        publicPath:
-          resolved.publicPath,
-        phase:
-          "after-sync-render",
-        hideLoader:
-          true,
+        canonicalPath: committed.canonicalPath,
+        publicPath: committed.publicPath,
+        phase: "after-sync-render",
+        hideLoading: true,
       });
     }
   } else {
-    viewInstance =
-      renderGenericView(
-        AppCore,
-        route,
-        host || ctx.viewContainer
-      );
+    viewInstance = renderGenericView(AppCore, route, host || view);
 
-    markViewReady(
-      AppCore,
-      renderId,
-      resolved.canonicalPath
-    );
+    markReady(AppCore, renderId, committed.canonicalPath);
 
-    applyRenderShellRepair({
+    repairShell({
       AppCore,
       route,
-      canonicalPath:
-        resolved.canonicalPath,
-      publicPath:
-        resolved.publicPath,
-      phase:
-        "after-generic-render",
-      hideLoader:
-        true,
+      canonicalPath: committed.canonicalPath,
+      publicPath: committed.publicPath,
+      phase: "after-generic-render",
+      hideLoading: true,
     });
   }
 
   afterPaint(() => {
-    if (
-      !isCurrentRender(
-        AppCore,
-        renderId,
-        resolved.canonicalPath
-      )
-    ) {
-      return;
-    }
+    if (!currentRender(AppCore, renderId, committed.canonicalPath)) return;
 
-    applyRenderShellRepair({
+    repairShell({
       AppCore,
       route,
-      canonicalPath:
-        resolved.canonicalPath,
-      publicPath:
-        resolved.publicPath,
-      phase:
-        "success-after-paint",
-      hideLoader:
-        true,
+      canonicalPath: committed.canonicalPath,
+      publicPath: committed.publicPath,
+      phase: "success-after-paint",
+      hideLoading: true,
     });
   });
 
-  emitFlowMetric(
-    AppCore,
-    "success",
-    {
-      path:
-        resolved.publicPath,
-
-      requestedPath:
-        requestedPath ||
-        resolved.publicPath,
-
-      route:
-        route?.path || null,
-
-      routeName:
-        route?.name || null,
-
-      viewKey:
-        route?.viewKey || null,
-
-      viewName:
-        route?.viewName || null,
-
-      canonicalPath:
-        resolved.canonicalPath,
-
-      publicPath:
-        resolved.publicPath,
-
-      username:
-        resolved.username,
-
-      renderMode:
-        shouldBlock ? "blocking" : "non-blocking",
-
-      rendererSource:
-        renderer.source || null,
-
-      asyncDispatched:
-        Boolean(asyncDispatched),
-
-      renderId,
-
-      durationMs:
-        Math.round(
-          nowMs() - startedAt
-        ),
-    }
-  );
-
-  safeLog(
-    AppCore,
-    "success",
-    {
-      route:
-        route?.path || null,
-
-      routeName:
-        route?.name || null,
-
-      viewKey:
-        route?.viewKey || null,
-
-      viewName:
-        route?.viewName || null,
-
-      canonicalPath:
-        resolved.canonicalPath,
-
-      publicPath:
-        resolved.publicPath,
-
-      username:
-        resolved.username,
-
-      renderMode:
-        shouldBlock ? "blocking" : "non-blocking",
-
-      rendererSource:
-        renderer.source || null,
-
-      asyncDispatched:
-        Boolean(asyncDispatched),
-
-      renderId,
-    }
-  );
+  flowMetric(AppCore, "success", {
+    ...committed,
+    renderMode: awaitRender ? "blocking" : "non-blocking",
+    rendererSource: renderer.source || null,
+    asyncDispatched,
+    durationMs: Math.round(perfMs() - startedAt),
+  });
 
   return viewInstance || null;
 }
 
 export function renderRouteForbidden(args = {}) {
-  const startedAt =
-    nowMs();
+  const startedAt = perfMs();
 
-  abortPreviousSuccessRender("forbidden");
+  abortActiveRender("forbidden");
 
-  safeSetShellMode(
-    args.setShellMode,
-    args.route || null
-  );
+  setShellMode(args.setShellMode, args.route || null);
+  setDocumentTitle(args.setDocumentTitle, "Acceso denegado");
 
-  safeSetDocumentTitle(
-    args.setDocumentTitle,
-    "Acceso denegado"
-  );
+  renderForbiddenView(args.AppCore, args.getRoute);
 
-  renderForbiddenView(
-    args.AppCore,
-    args.getRoute
-  );
-
-  applyRenderShellRepair({
-    AppCore:
-      args.AppCore,
-    route:
-      args.route || null,
-    canonicalPath:
-      args.canonicalPath || args.requestedPath || "/",
-    publicPath:
-      args.requestedPath || args.canonicalPath || "/",
-    phase:
-      "forbidden",
-    hideLoader:
-      true,
+  repairShell({
+    AppCore: args.AppCore,
+    route: args.route || null,
+    canonicalPath: args.canonicalPath || args.requestedPath || DEFAULT_ROUTE,
+    publicPath: args.requestedPath || args.canonicalPath || DEFAULT_ROUTE,
+    phase: "forbidden",
+    hideLoading: true,
   });
 
-  emitFlowMetric(
-    args.AppCore,
-    "forbidden",
-    {
-      canonicalPath:
-        args.canonicalPath || args.requestedPath || "/",
-      publicPath:
-        args.requestedPath || args.canonicalPath || "/",
-      durationMs:
-        Math.round(
-          nowMs() - startedAt
-        ),
-    }
-  );
+  flowMetric(args.AppCore, "forbidden", {
+    canonicalPath: args.canonicalPath || args.requestedPath || DEFAULT_ROUTE,
+    publicPath: args.requestedPath || args.canonicalPath || DEFAULT_ROUTE,
+    durationMs: Math.round(perfMs() - startedAt),
+  });
 
   return null;
 }
 
 export function renderRouteNotFound(args = {}) {
-  const startedAt =
-    nowMs();
+  const startedAt = perfMs();
 
-  abortPreviousSuccessRender("not-found");
+  abortActiveRender("not-found");
 
-  safeSetShellMode(
-    args.setShellMode,
-    args.route || null
-  );
+  setShellMode(args.setShellMode, args.route || null);
+  setDocumentTitle(args.setDocumentTitle, "404");
 
-  safeSetDocumentTitle(
-    args.setDocumentTitle,
-    "404"
-  );
+  renderNotFoundView(args.AppCore, args.requestedPath, args.getRoute);
 
-  renderNotFoundView(
-    args.AppCore,
-    args.requestedPath,
-    args.getRoute
-  );
-
-  applyRenderShellRepair({
-    AppCore:
-      args.AppCore,
-    route:
-      args.route || null,
-    canonicalPath:
-      args.canonicalPath || args.requestedPath || "/",
-    publicPath:
-      args.requestedPath || args.canonicalPath || "/",
-    phase:
-      "not-found",
-    hideLoader:
-      true,
+  repairShell({
+    AppCore: args.AppCore,
+    route: args.route || null,
+    canonicalPath: args.canonicalPath || args.requestedPath || DEFAULT_ROUTE,
+    publicPath: args.requestedPath || args.canonicalPath || DEFAULT_ROUTE,
+    phase: "not-found",
+    hideLoading: true,
   });
 
-  emitFlowMetric(
-    args.AppCore,
-    "not-found",
-    {
-      canonicalPath:
-        args.canonicalPath || args.requestedPath || "/",
-      publicPath:
-        args.requestedPath || args.canonicalPath || "/",
-      durationMs:
-        Math.round(
-          nowMs() - startedAt
-        ),
-    }
-  );
+  flowMetric(args.AppCore, "not-found", {
+    canonicalPath: args.canonicalPath || args.requestedPath || DEFAULT_ROUTE,
+    publicPath: args.requestedPath || args.canonicalPath || DEFAULT_ROUTE,
+    durationMs: Math.round(perfMs() - startedAt),
+  });
 
   return null;
 }
 
 export async function renderLoginRedirect(args = {}) {
-  const startedAt =
-    nowMs();
+  const startedAt = perfMs();
 
-  abortPreviousSuccessRender("login-redirect");
+  abortActiveRender("login-redirect");
 
-  const routeNames =
-    getRouteNames(args.AppCore);
+  const names = getRouteNames(args.AppCore);
+  const loginPath = names.LOGIN || "/login";
 
   const loginUrl =
     safeText(args.redirectTo, "") ||
     buildLoginUrl(
       args.AppCore,
-      args.requestedPath ||
-        args.publicPath ||
-        args.canonicalPath
+      args.publicPath || args.requestedPath || args.canonicalPath || DEFAULT_ROUTE
     );
 
-  const route =
-    args.getRoute?.(
-      routeNames.LOGIN
-    );
+  const route = args.getRoute?.(loginPath) || null;
+  const finalPublic = publicPath(args.AppCore, loginUrl || loginPath);
 
-  const publicPath =
-    safeNormalizePublicPath(
-      args.AppCore,
-      loginUrl || routeNames.LOGIN
-    );
+  clearDynamic(args.clearDynamicContainers);
+  setActiveMenu(args.setActiveMenu, loginPath);
+  setShellMode(args.setShellMode, route);
+  setDocumentTitle(args.setDocumentTitle, route?.title || "Login");
 
-  safeClearDynamicContainers(
-    args.clearDynamicContainers
-  );
-
-  safeSetActiveMenu(
-    args.setActiveMenu,
-    routeNames.LOGIN
-  );
-
-  safeSetShellMode(
-    args.setShellMode,
-    route
-  );
-
-  safeSetDocumentTitle(
-    args.setDocumentTitle,
-    route?.title || "Login"
-  );
-
-  safeUpdateHistory(
-    args.updateHistory,
-    {
-      AppCore:
-        args.AppCore,
-      getRoute:
-        args.getRoute,
-      pathname:
-        publicPath,
-      options: {
-        replaceState:
-          true,
-        redirectedFrom:
-          args.publicPath ||
-          args.requestedPath ||
-          args.canonicalPath ||
-          null,
-        source:
-          "guard:not-authenticated",
-      },
-    }
-  );
-
-  syncRouteState(
-    args.AppCore,
-    routeNames.LOGIN,
-    publicPath
-  );
-
-  applyRenderShellRepair({
-    AppCore:
-      args.AppCore,
-    route,
-    canonicalPath:
-      routeNames.LOGIN,
-    publicPath,
-    phase:
-      "login-redirect-before-render",
-    hideLoader:
-      false,
+  updateHistory(args.updateHistory, {
+    AppCore: args.AppCore,
+    getRoute: args.getRoute,
+    pathname: finalPublic,
+    options: {
+      replaceState: true,
+      redirectedFrom: args.publicPath || args.requestedPath || args.canonicalPath || null,
+      source: "guard:not-authenticated",
+    },
   });
 
-  const {
+  syncRouteState(args.AppCore, loginPath, finalPublic);
+
+  repairShell({
+    AppCore: args.AppCore,
+    route,
+    canonicalPath: loginPath,
+    publicPath: finalPublic,
+    phase: "login-redirect-before-render",
+    hideLoading: false,
+  });
+
+  const { renderId, signal } = beginRender();
+
+  const { view, host } = prepareHost({
+    AppCore: args.AppCore,
+    route,
+    renderId,
+    canonicalPath: loginPath,
+    publicPath: finalPublic,
+    mode: "login",
+  });
+
+  const ctx = buildRouteRenderContext({
+    AppCore: args.AppCore,
+    route,
+    requestedPath: finalPublic,
+    canonicalPath: loginPath,
+    publicPath: finalPublic,
+    redirectedFrom: args.publicPath || args.requestedPath || args.canonicalPath || null,
     renderId,
     signal,
-  } =
-    beginSuccessRender();
-
-  safeEmit(
-    args.AppCore,
-    "router:render:login-state-committed",
-    {
-      path:
-        publicPath,
-      requestedPath:
-        publicPath,
-      canonicalPath:
-        routeNames.LOGIN,
-      publicPath,
-      route,
-      found:
-        Boolean(route),
-      forbidden:
-        false,
-      redirectedFrom:
-        args.publicPath ||
-        args.requestedPath ||
-        args.canonicalPath ||
-        null,
-      renderId,
-      source:
-        "router.render",
-    },
-    {
-      redact:
-        true,
-    }
-  );
-
-  const {
-    view,
-    host,
-  } =
-    prepareRenderHost({
-      AppCore:
-        args.AppCore,
-      route,
-      renderId,
-      canonicalPath:
-        routeNames.LOGIN,
-      publicPath,
-      mode:
-        "login",
-    });
-
-  const ctx =
-    buildRouteRenderContext({
-      AppCore:
-        args.AppCore,
-      route,
-      requestedPath:
-        publicPath,
-      canonicalPath:
-        routeNames.LOGIN,
-      publicPath,
-      redirectedFrom:
-        args.publicPath ||
-        args.requestedPath ||
-        args.canonicalPath ||
-        null,
-      renderId,
-      signal,
-      viewContainer:
-        view,
-      renderRoot:
-        host,
-    });
-
-  const renderer =
-    resolveRouteRenderer(route);
-
-  if (isFunction(renderer.render)) {
-    const result =
-      runRouteRender(
-        args.AppCore,
-        route,
-        host || getViewContainer(args.AppCore),
-        ctx
-      );
-
-    const resolvedResult =
-      await Promise.resolve(result);
-
-    if (
-      isCurrentRender(
-        args.AppCore,
-        renderId,
-        routeNames.LOGIN
-      )
-    ) {
-      adoptRenderedResult(
-        host || getViewContainer(args.AppCore),
-        resolvedResult
-      );
-    }
-  } else if (host) {
-    renderGenericView(
-      args.AppCore,
-      route,
-      host
-    );
-  }
-
-  applyRenderShellRepair({
-    AppCore:
-      args.AppCore,
-    route,
-    canonicalPath:
-      routeNames.LOGIN,
-    publicPath,
-    phase:
-      "login-redirect-after-render",
-    hideLoader:
-      true,
+    viewContainer: view,
+    renderRoot: host,
   });
 
-  markViewReady(
-    args.AppCore,
-    renderId,
-    routeNames.LOGIN
-  );
+  const renderer = routeRenderer(route);
 
-  emitFlowMetric(
-    args.AppCore,
-    "login-redirect",
-    {
-      renderId,
-      durationMs:
-        Math.round(
-          nowMs() - startedAt
-        ),
+  if (isFn(renderer.render)) {
+    const result = await Promise.resolve(
+      runRenderer(args.AppCore, route, host || view, ctx)
+    );
+
+    if (currentRender(args.AppCore, renderId, loginPath)) {
+      adoptResult(host || view, result);
     }
-  );
+  } else {
+    renderGenericView(args.AppCore, route, host || view);
+  }
+
+  markReady(args.AppCore, renderId, loginPath);
+
+  repairShell({
+    AppCore: args.AppCore,
+    route,
+    canonicalPath: loginPath,
+    publicPath: finalPublic,
+    phase: "login-redirect-after-render",
+    hideLoading: true,
+  });
+
+  flowMetric(args.AppCore, "login-redirect", {
+    renderId,
+    durationMs: Math.round(perfMs() - startedAt),
+  });
 
   return null;
 }
 
 export function renderRouteRuntimeError(args = {}) {
-  const startedAt =
-    nowMs();
+  const startedAt = perfMs();
 
-  abortPreviousSuccessRender("runtime-error");
+  abortActiveRender("runtime-error");
 
-  safeSetShellMode(
-    args.setShellMode,
-    args.route || null
-  );
+  setShellMode(args.setShellMode, args.route || null);
+  setDocumentTitle(args.setDocumentTitle, "Error de navegación");
 
-  safeSetDocumentTitle(
-    args.setDocumentTitle,
-    "Error de navegación"
-  );
+  renderRuntimeErrorView(args.AppCore, args.error, args.getRoute);
 
-  renderRuntimeErrorView(
-    args.AppCore,
-    args.error,
-    args.getRoute
-  );
-
-  applyRenderShellRepair({
-    AppCore:
-      args.AppCore,
-    route:
-      args.route || null,
-    canonicalPath:
-      args.canonicalPath || args.requestedPath || "/",
-    publicPath:
-      args.requestedPath || args.canonicalPath || "/",
-    phase:
-      "runtime-error",
-    hideLoader:
-      true,
+  repairShell({
+    AppCore: args.AppCore,
+    route: args.route || null,
+    canonicalPath: args.canonicalPath || args.requestedPath || DEFAULT_ROUTE,
+    publicPath: args.requestedPath || args.canonicalPath || DEFAULT_ROUTE,
+    phase: "runtime-error",
+    hideLoading: true,
   });
 
-  emitFlowMetric(
-    args.AppCore,
-    "runtime-error",
-    {
-      error:
-        safeText(args.error?.message),
-      durationMs:
-        Math.round(
-          nowMs() - startedAt
-        ),
-    }
-  );
+  flowMetric(args.AppCore, "runtime-error", {
+    error: args.error?.message || "Error",
+    durationMs: Math.round(perfMs() - startedAt),
+  });
 
-  safeError(
-    args.AppCore,
-    "runtime-error",
-    args.error
-  );
+  errorLog(args.AppCore, "runtime-error", args.error);
 
   return null;
 }
@@ -5432,195 +2190,62 @@ export function renderRouteRuntimeError(args = {}) {
 ========================================================= */
 
 export function getRenderSnapshot(AppCore) {
-  const {
-    body,
-    html,
-    shell,
-    main,
-    appContent,
-    view,
-    sidebar,
-    topbar,
-    tablehead,
-    loader,
-  } =
-    getShellElements(AppCore);
+  const dom = domSnapshot(AppCore);
+  const host = currentHost(AppCore);
+  const currentPublic = getCurrentPublicPath(AppCore);
 
-  const host =
-    getCurrentRenderHost(AppCore);
+  return sanitize({
+    version: ROUTER_RENDER_VERSION,
 
-  const browserPublicPath =
-    getBrowserPublicPath(AppCore);
+    currentPublicPath: currentPublic,
+    currentCanonicalPath: canonical(AppCore, AppCore?.state?.route || currentPublic || DEFAULT_ROUTE),
+    protectedPublicPath: protectedPublicPath(AppCore),
 
-  return redactPayload({
-    version:
-      ROUTER_RENDER_VERSION,
+    renderSeq,
+    activeRenderAborted: Boolean(activeController?.signal?.aborted),
 
-    browserPublicPath,
-
-    browserCanonicalPath:
-      safeCanonicalPath(
-        AppCore,
-        browserPublicPath || "/"
-      ),
-
-    currentPublicPath:
-      getCurrentPublicPath(AppCore),
-
-    currentCanonicalPath:
-      safeCanonicalPath(
-        AppCore,
-        AppCore?.state?.route || browserPublicPath || "/"
-      ),
-
-    protectedPublicPath:
-      getProtectedPublicPath(AppCore),
-
-    initialUrl:
-      getInitialUrl(),
-
-    activationInitialUrl:
-      getActivationInitialUrl(),
-
-    resetConfirmInitialUrl:
-      getResetConfirmInitialUrl(),
-
-    activationTokenScrubbed:
-      isBrowser()
-        ? Boolean(
-            window.history?.state?.scrubbedActivationToken ||
-              window.history?.state?.activationTokenScrubbed ||
-              window.history?.state?.scrubbedActivateAccountToken
-          )
-        : false,
-
-    resetTokenScrubbed:
-      isBrowser()
-        ? Boolean(
-            window.history?.state?.scrubbedResetToken ||
-              window.history?.state?.resetTokenScrubbed ||
-              window.history?.state?.scrubbedResetPasswordToken ||
-              window.history?.state?.scrubbedResetConfirmToken ||
-              window.history?.state?.scrubbedPasswordResetToken
-          )
-        : false,
-
-    successRenderSequence,
-
-    activeRenderAborted:
-      Boolean(activeRenderController?.signal?.aborted),
-
-    lastShellRepairEmitKey,
-    lastShellRepairEmitAt,
+    lastRepairKey,
+    lastRepairAt,
 
     dom: {
-      bodyClasses:
-        body?.className || "",
+      bodyClasses: dom.body?.className || "",
+      htmlClasses: dom.html?.className || "",
 
-      htmlClasses:
-        html?.className || "",
+      bodyShell: dom.body?.dataset?.shell || null,
+      htmlShell: dom.html?.dataset?.shell || null,
 
-      bodyShell:
-        body?.dataset?.shell || null,
+      bodyChrome: dom.body?.dataset?.chrome || null,
+      htmlChrome: dom.html?.dataset?.chrome || null,
 
-      htmlShell:
-        html?.dataset?.shell || null,
+      bodyRouteMode: dom.body?.dataset?.routeMode || null,
+      htmlRouteMode: dom.html?.dataset?.routeMode || null,
 
-      bodyChrome:
-        body?.dataset?.chrome || null,
+      hasShell: Boolean(dom.shell),
+      hasMain: Boolean(dom.main),
+      hasAppContent: Boolean(dom.appContent),
+      hasView: Boolean(dom.view),
+      hasRenderHost: Boolean(host),
+      hasSidebar: Boolean(dom.sidebar || dom.sidebarMount),
+      hasTopbar: Boolean(dom.topbar || dom.topbarMount),
+      hasTablehead: Boolean(dom.tablehead),
+      hasLoader: Boolean(dom.loader),
 
-      htmlChrome:
-        html?.dataset?.chrome || null,
+      viewRenderId: dom.view?.dataset?.routerRenderId || null,
+      viewStatus: dom.view?.dataset?.routerStatus || null,
+      viewCanonicalPath: dom.view?.dataset?.routerCanonicalPath || null,
+      viewPublicPath: dom.view?.dataset?.routerPublicPath || null,
+      viewRoute: dom.view?.dataset?.routerRoute || null,
+      viewRouteName: dom.view?.dataset?.routerRouteName || null,
+      viewKey: dom.view?.dataset?.routerViewKey || null,
+      viewName: dom.view?.dataset?.routerViewName || null,
 
-      bodyRouteMode:
-        body?.dataset?.routeMode || null,
-
-      htmlRouteMode:
-        html?.dataset?.routeMode || null,
-
-      hasShell:
-        Boolean(shell),
-
-      hasMain:
-        Boolean(main),
-
-      hasAppContent:
-        Boolean(appContent),
-
-      hasView:
-        Boolean(view),
-
-      hasRenderHost:
-        Boolean(host),
-
-      hasSidebar:
-        Boolean(sidebar),
-
-      hasTopbar:
-        Boolean(topbar),
-
-      hasTablehead:
-        Boolean(tablehead),
-
-      hasLoader:
-        Boolean(loader),
-
-      shellHidden:
-        Boolean(shell?.hidden),
-
-      sidebarHidden:
-        Boolean(sidebar?.hidden),
-
-      topbarHidden:
-        Boolean(topbar?.hidden),
-
-      loaderHidden:
-        Boolean(loader?.hidden),
-
-      viewRenderId:
-        view?.dataset?.routerRenderId || null,
-
-      viewStatus:
-        view?.dataset?.routerStatus || null,
-
-      viewCanonicalPath:
-        view?.dataset?.routerCanonicalPath || null,
-
-      viewPublicPath:
-        view?.dataset?.routerPublicPath || null,
-
-      viewRoute:
-        view?.dataset?.routerRoute || null,
-
-      viewRouteName:
-        view?.dataset?.routerRouteName || null,
-
-      viewKey:
-        view?.dataset?.routerViewKey || null,
-
-      viewName:
-        view?.dataset?.routerViewName || null,
-
-      hostRenderId:
-        host?.getAttribute?.("data-router-render-id") || null,
-
-      hostCanonicalPath:
-        host?.getAttribute?.("data-router-canonical-path") || null,
-
-      hostPublicPath:
-        host?.getAttribute?.("data-router-public-path") || null,
-
-      hostRoute:
-        host?.getAttribute?.("data-router-route") || null,
-
-      hostRouteName:
-        host?.getAttribute?.("data-router-route-name") || null,
-
-      hostViewKey:
-        host?.getAttribute?.("data-router-view-key") || null,
-
-      hostViewName:
-        host?.getAttribute?.("data-router-view-name") || null,
+      hostRenderId: host?.getAttribute?.("data-router-render-id") || null,
+      hostCanonicalPath: host?.getAttribute?.("data-router-canonical-path") || null,
+      hostPublicPath: host?.getAttribute?.("data-router-public-path") || null,
+      hostRoute: host?.getAttribute?.("data-router-route") || null,
+      hostRouteName: host?.getAttribute?.("data-router-route-name") || null,
+      hostViewKey: host?.getAttribute?.("data-router-view-key") || null,
+      hostViewName: host?.getAttribute?.("data-router-view-name") || null,
     },
   });
 }

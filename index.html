@@ -18,37 +18,33 @@
 >
 <head>
   <!-- =========================================================
-       ONION SUPPORT — SPA SHELL
+       ONION SUPPORT — SPA ENTRY SHELL
        Archivo: /index.html
 
-       SHELL FÍSICO · PRIVATE SPA · CSP CLEAN · 16/10
-
-       CONTRATO:
-       - Shell físico privado de la SPA.
+       Contrato:
+       - Puerta física de entrada de la SPA.
        - Sin JS inline.
        - Sin CSS inline.
-       - Sin Google Fonts ni assets externos.
-       - Tema inicial resuelto por /src/preboot/theme.js antes del CSS.
-       - CSS centralizado en /src/css/app.css.
-       - JS centralizado en /src/main.js.
-       - /src/main.js es el único entrypoint físico.
-       - /src/app/index.js NO autoarranca.
-       - Router renderiza exclusivamente en #view-container.
-       - Sidebar monta en #sidebar-mount.
-       - Topbar monta en #topbar-mount.
-       - Loader inicial estático, controlado después por /src/app/loader.js.
-       - Preparado para CSP estricta mediante staticwebapp.config.json.
+       - Sin llamadas API.
+       - Sin lógica auth.
+       - Sin lógica router.
+       - Sin assets externos.
+       - Tema inicial: /src/preboot/theme.js
+       - CSS global: /src/css/app.css
+       - JS entrypoint: /src/main.js
+       - Vista SPA: #view-container
+       - Sidebar: #sidebar-mount
+       - Topbar: #topbar-mount
   ========================================================= -->
 
-  <!-- =========================
-       META BASE
-  ========================= -->
   <meta charset="UTF-8">
 
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1.0, viewport-fit=cover"
   >
+
+  <base href="/">
 
   <title>Onion Support</title>
 
@@ -67,9 +63,6 @@
     content="Onion Support · Panel privado SaaS de soporte, incidencias, facturación y gestión interna."
   >
 
-  <!-- =========================
-       PRIVACY / INDEXING
-  ========================= -->
   <meta
     name="robots"
     content="noindex, nofollow, noarchive, noimageindex, nosnippet"
@@ -95,9 +88,6 @@
     content="telephone=no, date=no, address=no, email=no"
   >
 
-  <!-- =========================
-       THEME / BROWSER CHROME
-  ========================= -->
   <meta
     name="color-scheme"
     content="dark light"
@@ -129,14 +119,6 @@
     content="black-translucent"
   >
 
-  <!-- =========================
-       BASE SPA
-  ========================= -->
-  <base href="/">
-
-  <!-- =========================
-       ICONS / MANIFEST
-  ========================= -->
   <link
     rel="icon"
     href="/src/media/img/favicon_black_circle.png?v=5"
@@ -159,9 +141,6 @@
     href="/site.webmanifest?v=5"
   >
 
-  <!-- =========================
-       PERFORMANCE · LOCAL ASSETS ONLY
-  ========================= -->
   <link
     rel="preload"
     href="/src/media/img/favicon_white.png?v=5"
@@ -183,24 +162,14 @@
     href="/src/main.js"
   >
 
-  <!-- =========================
-       THEME PREBOOT
-       Debe ejecutarse antes de aplicar /src/css/app.css.
-       Archivo externo local. Sin JS inline.
-  ========================= -->
+  <!-- Tema inicial antes del CSS para evitar parpadeo. -->
   <script src="/src/preboot/theme.js"></script>
 
-  <!-- =========================
-       CSS ENTRYPOINT
-  ========================= -->
   <link
     rel="stylesheet"
     href="/src/css/app.css"
   >
 
-  <!-- =========================
-       NOSCRIPT CSS
-  ========================= -->
   <noscript>
     <link
       rel="stylesheet"
@@ -223,9 +192,6 @@
   data-shell-state="booting"
   data-chrome="hidden"
 >
-  <!-- =========================================================
-       ACCESSIBILITY
-  ========================================================= -->
   <a
     class="sr-only sr-only-focusable app-skip-link"
     href="#main-content"
@@ -234,9 +200,6 @@
     Saltar al contenido principal
   </a>
 
-  <!-- =========================================================
-       STATIC BOOT LOADER
-  ========================================================= -->
   <div
     id="app-loader"
     class="app-loader is-visible"
@@ -339,9 +302,6 @@
     </div>
   </div>
 
-  <!-- =========================================================
-       NOSCRIPT FALLBACK
-  ========================================================= -->
   <noscript>
     <div
       id="noscript-root"
@@ -367,9 +327,6 @@
     </div>
   </noscript>
 
-  <!-- =========================================================
-       APP SHELL
-  ========================================================= -->
   <div
     id="app-shell"
     class="layout app-shell"
@@ -382,9 +339,6 @@
     aria-busy="true"
     aria-hidden="true"
   >
-    <!-- =========================
-         SIDEBAR MOUNT
-    ========================= -->
     <div
       id="sidebar-mount"
       data-sidebar-mount="true"
@@ -396,9 +350,6 @@
       aria-hidden="true"
     ></div>
 
-    <!-- =========================
-         TOPBAR MOUNT
-    ========================= -->
     <div
       id="topbar-mount"
       data-topbar-mount="true"
@@ -410,9 +361,6 @@
       aria-hidden="true"
     ></div>
 
-    <!-- =========================
-         MAIN CONTENT
-    ========================= -->
     <main
       id="main-content"
       class="main-content"
@@ -427,9 +375,6 @@
       data-chrome="hidden"
       data-route-mode="boot"
     >
-      <!-- =========================
-           TABLEHEAD SLOT
-      ========================= -->
       <div
         id="table-head"
         class="table-head"
@@ -447,9 +392,6 @@
         ></div>
       </div>
 
-      <!-- =========================
-           ROUTER VIEW
-      ========================= -->
       <div
         id="app-content"
         data-app-content="true"
@@ -474,10 +416,6 @@
     </main>
   </div>
 
-  <!-- =========================
-       APP ENTRYPOINT
-       Único script de arranque físico.
-  ========================= -->
   <script
     type="module"
     src="/src/main.js"

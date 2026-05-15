@@ -3,20 +3,22 @@
    Archivo: src/services/http.auth.js
 
    ONION SUPPORT · HTTP AUTH
-   AUTO REFRESH 401 · SINGLE FLIGHT · PUBLIC ENDPOINT SAFE · 16/10
+   AUTO REFRESH 401 · SINGLE FLIGHT · PUBLIC ENDPOINT SAFE · 17/10
 
    Responsabilidades:
    - Resolver auto refresh ante respuestas 401 privadas.
    - Evitar refresh duplicados concurrentes.
    - Excluir endpoints auth de control del auto refresh.
    - Excluir endpoints públicos técnicos del auto refresh.
-   - Excluir requests public/auth:false.
+   - Excluir requests public/auth:false/skipAuthRefresh/noAutoRefresh.
    - Mantener /api/auth/me, /auth/me, /api/me y /me como endpoints privados.
    - No hacer logout aquí.
    - Devolver true/false limpio al HTTP Service.
    - Mantener stats de refresh para diagnóstico.
    - Evitar recursión con el propio HTTP service.
-   - Fallback directo fetch contra /api/auth/refresh si Auth no refresca.
+   - Fallback directo fetch contra /api/auth/refresh sólo con contexto real.
+   - Timeout real para fallback directo.
+   - No usar restoreSession como método de refresh.
 
    Contrato:
    runAutoRefreshIfNeeded({
@@ -37,11 +39,14 @@
    - /api/auth/me, /auth/me, /api/me y /me NO son públicos.
    - No refrescar endpoints públicos técnicos.
    - No refrescar requests public/auth:false.
+   - No refrescar si skipAuthRefresh/noAutoRefresh/autoRefresh:false.
    - Serializar refresh concurrente.
    - Rate-limit opcional.
-   - Soporte Auth.refreshSession / refresh / refreshToken / restoreSession.
+   - Soporte Auth.refreshSession / refresh / refreshToken.
+   - NO usar Auth.restoreSession aquí.
    - Soporte refresh que devuelve boolean, token_only o payload completo.
    - Fallback fetch directo si Auth no está disponible o devuelve falso.
+   - Fallback directo sólo si hay refresh context real o cookie refresh explícita.
    - Aplica payload de sesión si el refresh devuelve token/user/session.
    - Valida access token usable tras refresh antes de replay.
    - Eventos internos opt-in para evitar storms.
@@ -62,7 +67,7 @@ import {
 ========================================================= */
 
 export const HTTP_AUTH_VERSION =
-  "16.0.0";
+  "17.0.0";
 
 const LOG_PREFIX =
   "[HTTP Auth]";
@@ -75,6 +80,9 @@ const DEFAULT_API_ORIGIN =
 
 const DEFAULT_REFRESH_ENDPOINT =
   "/api/auth/refresh";
+
+const DEFAULT_DIRECT_REFRESH_TIMEOUT_MS =
+  8000;
 
 const EVENTS =
   Object.freeze({
@@ -116,6 +124,9 @@ const EVENTS =
 
     directError:
       "http:auto-refresh:direct:error",
+
+    directSkipped:
+      "http:auto-refresh:direct:skipped",
   });
 
 const BAD_TOKEN_VALUES =
@@ -135,12 +146,18 @@ const BAD_TOKEN_VALUES =
     "''",
   ]);
 
+/*
+  IMPORTANTE:
+  - restoreSession NO debe estar aquí.
+  - restoreSession puede validar /me, navegar, reparar sesión, emitir eventos,
+    tocar router o rehidratar storage.
+  - En auto-refresh 401 sólo queremos refresh explícito.
+*/
 const REFRESH_METHOD_CANDIDATES =
   Object.freeze([
     "refreshSession",
     "refresh",
     "refreshToken",
-    "restoreSession",
   ]);
 
 const AUTH_ME_ENDPOINTS =
@@ -154,16 +171,23 @@ const AUTH_ME_ENDPOINTS =
 const AUTH_REFRESH_CONTROL_MARKERS =
   Object.freeze([
     "/auth/login",
+    "/auth/register",
+    "/auth/signup",
+
     "/auth/refresh",
     "/auth/token/refresh",
     "/auth/renew",
+
     "/auth/logout",
     "/auth/logout-all",
 
+    "/auth/2fa",
     "/auth/2fa/login",
     "/auth/2fa/verify",
+    "/auth/mfa",
     "/auth/mfa/login",
     "/auth/mfa/verify",
+    "/auth/otp",
     "/auth/otp/login",
     "/auth/otp/verify",
 
@@ -179,10 +203,12 @@ const AUTH_REFRESH_CONTROL_MARKERS =
     "/auth/reset-password-confirm",
     "/auth/reset-password/confirm",
     "/auth/reset-password/validate",
+
     "/auth/password-reset",
     "/auth/password-reset/request",
     "/auth/password-reset/confirm",
     "/auth/password-reset/validate",
+
     "/auth/forgot-password",
     "/auth/recover-password",
 
@@ -193,14 +219,20 @@ const AUTH_REFRESH_CONTROL_MARKERS =
 const PUBLIC_AUTH_ENDPOINT_MARKERS =
   Object.freeze([
     "/auth/login",
+    "/auth/register",
+    "/auth/signup",
+
     "/auth/refresh",
     "/auth/token/refresh",
     "/auth/renew",
 
+    "/auth/2fa",
     "/auth/2fa/login",
     "/auth/2fa/verify",
+    "/auth/mfa",
     "/auth/mfa/login",
     "/auth/mfa/verify",
+    "/auth/otp",
     "/auth/otp/login",
     "/auth/otp/verify",
 
@@ -216,10 +248,12 @@ const PUBLIC_AUTH_ENDPOINT_MARKERS =
     "/auth/reset-password-confirm",
     "/auth/reset-password/confirm",
     "/auth/reset-password/validate",
+
     "/auth/password-reset",
     "/auth/password-reset/request",
     "/auth/password-reset/confirm",
     "/auth/password-reset/validate",
+
     "/auth/forgot-password",
     "/auth/recover-password",
 
@@ -229,6 +263,7 @@ const PUBLIC_AUTH_ENDPOINT_MARKERS =
 
 const TECHNICAL_PUBLIC_ROUTES =
   Object.freeze([
+    "/login",
     "/activate-account",
     "/reset-password",
     "/forgot-password",
@@ -416,6 +451,43 @@ function unique(values = []) {
   ];
 }
 
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text =
+      safeText(value, "");
+
+    if (text) {
+      return text;
+    }
+  }
+
+  return "";
+}
+
+/* =========================================================
+   REQUEST PATH RESOLUTION
+========================================================= */
+
+function getRequestPath(requestConfig = {}) {
+  const cfg =
+    safeObject(requestConfig);
+
+  return firstNonEmpty(
+    cfg.path,
+    cfg.url,
+    cfg.endpoint,
+    cfg.href,
+    cfg.input,
+    cfg.resource,
+    cfg.finalUrl,
+    cfg.originalUrl,
+    cfg.requestUrl,
+    cfg.redactedUrl,
+    cfg.route,
+    cfg.pathname
+  );
+}
+
 /* =========================================================
    EVENT POLICY
 ========================================================= */
@@ -428,7 +500,7 @@ function getDiagnostics(AppCore = null) {
   }
 }
 
-function shouldEmitAuthEvent(AppCore = null, config = {}, requestConfig = {}, eventName = "") {
+function shouldEmitAuthEvent(AppCore = null, config = {}, requestConfig = {}) {
   const cfg =
     safeObject(config);
 
@@ -545,12 +617,10 @@ function getComparableEndpointPaths(path = "") {
   const withoutApi =
     stripApiPrefix(normalized);
 
-  return Array.from(
-    new Set([
-      normalized,
-      withoutApi,
-    ].filter(Boolean))
-  );
+  return unique([
+    normalized,
+    withoutApi,
+  ]);
 }
 
 function endpointMatches(path = "", markers = []) {
@@ -571,8 +641,7 @@ function endpointMatches(path = "", markers = []) {
 
     return candidates.some((candidate) => (
       candidate === cleanMarker ||
-      candidate.endsWith(cleanMarker) ||
-      candidate.includes(cleanMarker)
+      candidate.startsWith(`${cleanMarker}/`)
     ));
   });
 }
@@ -583,7 +652,8 @@ export function isAuthMeEndpoint(path = "") {
 
   return candidates.some((candidate) =>
     AUTH_ME_ENDPOINTS.includes(candidate) ||
-    candidate.endsWith("/auth/me")
+    candidate === "/auth/me" ||
+    candidate === "/api/auth/me"
   );
 }
 
@@ -702,29 +772,6 @@ function hasUsableToken(token = "") {
   return true;
 }
 
-function firstNonEmpty(...values) {
-  for (const value of values) {
-    const text =
-      safeText(value, "");
-
-    if (text) {
-      return text;
-    }
-  }
-
-  return "";
-}
-
-function firstObject(...values) {
-  for (const value of values) {
-    if (isObject(value)) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
 function hasUsableUser(user = null) {
   const source =
     safeObject(user, null);
@@ -802,7 +849,7 @@ function safeEmit(AppCore, config, requestConfig, eventName = "", payload = {}) 
     return false;
   }
 
-  if (!shouldEmitAuthEvent(AppCore, config, requestConfig, name)) {
+  if (!shouldEmitAuthEvent(AppCore, config, requestConfig)) {
     return false;
   }
 
@@ -889,10 +936,12 @@ function normalizeErrorForEvent(error = null) {
       error?.code || null,
 
     aborted:
-      error?.aborted === true,
+      error?.aborted === true ||
+      error?.name === "AbortError",
 
     timeout:
-      error?.timeout === true,
+      error?.timeout === true ||
+      error?.code === "TIMEOUT",
 
     url:
       safeRedact(error?.url || ""),
@@ -919,9 +968,7 @@ function sanitizeRequestContext(requestConfig = {}) {
 
     path:
       safeRedact(
-        cfg.path ||
-          cfg.url ||
-          ""
+        getRequestPath(cfg)
       ),
 
     public:
@@ -930,8 +977,16 @@ function sanitizeRequestContext(requestConfig = {}) {
     auth:
       cfg.auth !== false,
 
+    skipAuth:
+      cfg.skipAuth === true,
+
     skipAuthRefresh:
-      cfg._skipAuthRefresh === true,
+      cfg._skipAuthRefresh === true ||
+      cfg.skipAuthRefresh === true,
+
+    noAutoRefresh:
+      cfg.noAutoRefresh === true ||
+      cfg.autoRefresh === false,
 
     authRefreshAttempted:
       cfg._authRefreshAttempted === true,
@@ -980,6 +1035,9 @@ function createRefreshStats() {
     directFailures:
       0,
 
+    directSkipped:
+      0,
+
     lastAttemptAt:
       0,
 
@@ -1007,7 +1065,13 @@ function createRefreshStats() {
     lastDirectFailureAt:
       0,
 
+    lastDirectSkipAt:
+      0,
+
     lastSkipReason:
+      "",
+
+    lastDirectSkipReason:
       "",
 
     lastError:
@@ -1177,6 +1241,35 @@ function markApplied(root, AppCore, config, requestConfig, context, extra = {}) 
   );
 
   return true;
+}
+
+function markDirectSkipped(root, AppCore, config, requestConfig, context, reason) {
+  const stats =
+    root.refreshStats;
+
+  stats.directSkipped =
+    safeNumber(stats.directSkipped, 0) + 1;
+
+  stats.lastDirectSkipAt =
+    nowMs();
+
+  stats.lastDirectSkipReason =
+    safeText(reason, "unknown");
+
+  safeEmit(
+    AppCore,
+    config,
+    requestConfig,
+    EVENTS.directSkipped,
+    {
+      ...context,
+
+      reason:
+        stats.lastDirectSkipReason,
+    }
+  );
+
+  return false;
 }
 
 /* =========================================================
@@ -1414,15 +1507,37 @@ function hasRefreshContext(AppCore, Auth) {
   );
 }
 
-function hasRefreshCapability(AppCore, Auth) {
-  /*
-    Permitimos refresh por cookie HttpOnly aunque no haya refresh token visible.
-    Si no hay Auth ni fetch, se bloqueará después.
-  */
+function allowsCookieRefresh(config = {}) {
+  const cfg =
+    safeObject(config);
+
   return Boolean(
-    hasRefreshContext(AppCore, Auth) ||
-      hasUsableAccessToken(AppCore, Auth) ||
-      isBrowser()
+    cfg.enableHttpOnlyRefreshCookie === true ||
+      cfg.enableCookieRefreshFallback === true ||
+      cfg.auth?.enableHttpOnlyRefreshCookie === true ||
+      cfg.auth?.enableCookieRefreshFallback === true
+  );
+}
+
+function hasRefreshCapability(AppCore, Auth, config = {}) {
+  if (hasRefreshContext(AppCore, Auth)) {
+    return true;
+  }
+
+  /*
+    No asumir refresh por estar en navegador.
+    Sólo se permite cookie HttpOnly si está declarado explícitamente.
+  */
+  if (allowsCookieRefresh(config)) {
+    return isBrowser();
+  }
+
+  return false;
+}
+
+function hasRefreshMethod(Auth) {
+  return REFRESH_METHOD_CANDIDATES.some((methodName) =>
+    isFn(Auth?.[methodName])
   );
 }
 
@@ -2113,6 +2228,25 @@ function buildDirectRefreshBody(AppCore = null, Auth = null) {
   return body;
 }
 
+function canUseDirectRefreshFallback(AppCore, Auth, config = {}) {
+  const cfg =
+    safeObject(config);
+
+  if (cfg.disableDirectRefreshFallback === true) {
+    return false;
+  }
+
+  if (hasRefreshContext(AppCore, Auth)) {
+    return true;
+  }
+
+  if (allowsCookieRefresh(cfg)) {
+    return isBrowser();
+  }
+
+  return false;
+}
+
 async function directRefreshFetch({
   AppCore,
   Auth,
@@ -2121,18 +2255,32 @@ async function directRefreshFetch({
   root,
   context,
 }) {
+  const cfg =
+    safeObject(config);
+
   if (
     !isBrowser() ||
     typeof fetch !== "function"
   ) {
-    return false;
+    return markDirectSkipped(
+      root,
+      AppCore,
+      cfg,
+      requestConfig,
+      context,
+      "fetch-unavailable"
+    );
   }
 
-  const cfg =
-    safeObject(config);
-
-  if (cfg.disableDirectRefreshFallback === true) {
-    return false;
+  if (!canUseDirectRefreshFallback(AppCore, Auth, cfg)) {
+    return markDirectSkipped(
+      root,
+      AppCore,
+      cfg,
+      requestConfig,
+      context,
+      "missing-direct-refresh-context"
+    );
   }
 
   const stats =
@@ -2157,6 +2305,30 @@ async function directRefreshFetch({
       Auth
     );
 
+  const timeoutMs =
+    Math.max(
+      1000,
+      safeNumber(
+        cfg.directRefreshTimeoutMs ||
+          cfg.auth?.directRefreshTimeoutMs,
+        DEFAULT_DIRECT_REFRESH_TIMEOUT_MS
+      )
+    );
+
+  const controller =
+    typeof AbortController !== "undefined"
+      ? new AbortController()
+      : null;
+
+  const timeoutId =
+    controller
+      ? setTimeout(() => {
+          try {
+            controller.abort();
+          } catch {}
+        }, timeoutMs)
+      : null;
+
   safeEmit(
     AppCore,
     cfg,
@@ -2167,6 +2339,8 @@ async function directRefreshFetch({
 
       url:
         safeRedact(url),
+
+      timeoutMs,
 
       hasRefreshToken:
         Boolean(body.refreshToken),
@@ -2195,6 +2369,9 @@ async function directRefreshFetch({
 
           mode:
             "cors",
+
+          signal:
+            controller?.signal,
 
           headers:
             {
@@ -2248,6 +2425,7 @@ async function directRefreshFetch({
         new Error(
           safeText(
             payload?.message ||
+              payload?.error?.message ||
               payload?.error ||
               response.statusText,
             `HTTP ${response.status}`
@@ -2262,6 +2440,7 @@ async function directRefreshFetch({
 
       error.code =
         payload?.code ||
+        payload?.error?.code ||
         payload?.error ||
         "DIRECT_REFRESH_ERROR";
 
@@ -2301,6 +2480,28 @@ async function directRefreshFetch({
     stats.lastDirectFailureAt =
       nowMs();
 
+    const normalized =
+      normalizeErrorForEvent({
+        ...safeObject(error),
+        name:
+          error?.name,
+        message:
+          error?.name === "AbortError"
+            ? `Direct refresh timeout tras ${timeoutMs}ms.`
+            : error?.message,
+        status:
+          error?.status,
+        code:
+          error?.name === "AbortError"
+            ? "DIRECT_REFRESH_TIMEOUT"
+            : error?.code,
+        timeout:
+          error?.name === "AbortError",
+        aborted:
+          error?.name === "AbortError",
+        url,
+      });
+
     safeEmit(
       AppCore,
       cfg,
@@ -2310,11 +2511,17 @@ async function directRefreshFetch({
         ...context,
 
         error:
-          normalizeErrorForEvent(error),
+          normalized,
       }
     );
 
     return false;
+  } finally {
+    if (timeoutId) {
+      try {
+        clearTimeout(timeoutId);
+      } catch {}
+    }
   }
 }
 
@@ -2388,6 +2595,9 @@ function buildRefreshArgs({
       false,
 
     _skipRetry:
+      true,
+
+    skipRetry:
       true,
 
     retry:
@@ -2483,12 +2693,6 @@ async function callRefreshSession({
   return false;
 }
 
-function hasRefreshMethod(Auth) {
-  return REFRESH_METHOD_CANDIDATES.some((methodName) =>
-    isFn(Auth?.[methodName])
-  );
-}
-
 /* =========================================================
    SKIP RULES
 ========================================================= */
@@ -2510,6 +2714,12 @@ function shouldSkipRefresh({
   context,
   root,
 }) {
+  const cfg =
+    safeObject(config);
+
+  const req =
+    safeObject(requestConfig);
+
   const status =
     safeNumber(
       error?.status ||
@@ -2517,12 +2727,12 @@ function shouldSkipRefresh({
       0
     );
 
-  if (config?.autoRefreshOn401 === false) {
+  if (cfg.autoRefreshOn401 === false) {
     return markSkipped(
       root,
       AppCore,
-      config,
-      requestConfig,
+      cfg,
+      req,
       context,
       "auto-refresh-disabled"
     );
@@ -2532,8 +2742,8 @@ function shouldSkipRefresh({
     return markSkipped(
       root,
       AppCore,
-      config,
-      requestConfig,
+      cfg,
+      req,
       context,
       "status-not-401"
     );
@@ -2541,85 +2751,115 @@ function shouldSkipRefresh({
 
   if (
     error?.aborted === true ||
-    isRequestSignalAborted(requestConfig)
+    error?.name === "AbortError" ||
+    isRequestSignalAborted(req)
   ) {
     return markSkipped(
       root,
       AppCore,
-      config,
-      requestConfig,
+      cfg,
+      req,
       context,
       "request-aborted"
     );
   }
 
-  if (error?.timeout === true) {
+  if (
+    error?.timeout === true ||
+    error?.code === "TIMEOUT"
+  ) {
     return markSkipped(
       root,
       AppCore,
-      config,
-      requestConfig,
+      cfg,
+      req,
       context,
       "request-timeout"
     );
   }
 
-  if (requestConfig?.public === true) {
+  if (req.public === true) {
     return markSkipped(
       root,
       AppCore,
-      config,
-      requestConfig,
+      cfg,
+      req,
       context,
       "public-request"
     );
   }
 
-  if (requestConfig?.auth === false) {
+  if (req.auth === false) {
     return markSkipped(
       root,
       AppCore,
-      config,
-      requestConfig,
+      cfg,
+      req,
       context,
       "auth-disabled-request"
     );
   }
 
-  if (requestConfig?._skipAuthRefresh === true) {
+  if (req.skipAuth === true) {
     return markSkipped(
       root,
       AppCore,
-      config,
-      requestConfig,
+      cfg,
+      req,
+      context,
+      "skip-auth-request"
+    );
+  }
+
+  if (
+    req._skipAuthRefresh === true ||
+    req.skipAuthRefresh === true
+  ) {
+    return markSkipped(
+      root,
+      AppCore,
+      cfg,
+      req,
       context,
       "skip-auth-refresh-flag"
     );
   }
 
-  if (requestConfig?._authRefreshAttempted === true) {
+  if (
+    req.noAutoRefresh === true ||
+    req.autoRefresh === false
+  ) {
     return markSkipped(
       root,
       AppCore,
-      config,
-      requestConfig,
+      cfg,
+      req,
+      context,
+      "auto-refresh-disabled-request"
+    );
+  }
+
+  if (req._authRefreshAttempted === true) {
+    return markSkipped(
+      root,
+      AppCore,
+      cfg,
+      req,
       context,
       "auth-refresh-already-attempted"
     );
   }
 
   const path =
-    requestConfig?.path ||
-    requestConfig?.url ||
-    "";
+    getRequestPath(req);
 
   if (!isAuthMeEndpoint(path)) {
     if (isAuthRefreshControlEndpoint(path)) {
       return markSkipped(
         root,
         AppCore,
-        config,
-        requestConfig,
+        cfg,
+        req,
         context,
         "auth-control-endpoint"
       );
@@ -2629,8 +2869,8 @@ function shouldSkipRefresh({
       return markSkipped(
         root,
         AppCore,
-        config,
-        requestConfig,
+        cfg,
+        req,
         context,
         "public-auth-endpoint"
       );
@@ -2641,8 +2881,8 @@ function shouldSkipRefresh({
     return markSkipped(
       root,
       AppCore,
-      config,
-      requestConfig,
+      cfg,
+      req,
       context,
       "technical-public-route"
     );
@@ -2652,8 +2892,8 @@ function shouldSkipRefresh({
     return markSkipped(
       root,
       AppCore,
-      config,
-      requestConfig,
+      cfg,
+      req,
       context,
       "public-endpoint"
     );
@@ -2661,24 +2901,24 @@ function shouldSkipRefresh({
 
   if (
     !hasRefreshMethod(Auth) &&
-    config?.disableDirectRefreshFallback === true
+    cfg.disableDirectRefreshFallback === true
   ) {
     return markSkipped(
       root,
       AppCore,
-      config,
-      requestConfig,
+      cfg,
+      req,
       context,
       "refresh-method-missing"
     );
   }
 
-  if (!hasRefreshCapability(AppCore, Auth)) {
+  if (!hasRefreshCapability(AppCore, Auth, cfg)) {
     return markSkipped(
       root,
       AppCore,
-      config,
-      requestConfig,
+      cfg,
+      req,
       context,
       "missing-refresh-capability"
     );
@@ -2700,6 +2940,9 @@ async function executeRefresh({
   root,
   context,
 }) {
+  const cfg =
+    safeObject(config);
+
   let refreshResult =
     false;
 
@@ -2718,6 +2961,7 @@ async function executeRefresh({
     } catch (errorFromAuth) {
       authRefreshError =
         errorFromAuth;
+
       refreshResult =
         false;
     }
@@ -2730,20 +2974,33 @@ async function executeRefresh({
   /*
     Fallback directo:
     - evita bucle si Auth.refreshSession pasa por Http Service de forma incorrecta.
-    - usa fetch nativo directo contra api.onionit.net.
+    - usa fetch nativo directo.
+    - sólo se permite con refresh context real o cookie refresh explícita.
   */
-  const directResult =
-    await directRefreshFetch({
-      AppCore,
-      Auth,
-      config,
-      requestConfig,
-      root,
-      context,
-    });
+  if (canUseDirectRefreshFallback(AppCore, Auth, cfg)) {
+    const directResult =
+      await directRefreshFetch({
+        AppCore,
+        Auth,
+        config:
+          cfg,
+        requestConfig,
+        root,
+        context,
+      });
 
-  if (isRefreshResultPositive(directResult)) {
-    return directResult;
+    if (isRefreshResultPositive(directResult)) {
+      return directResult;
+    }
+  } else {
+    markDirectSkipped(
+      root,
+      AppCore,
+      cfg,
+      requestConfig,
+      context,
+      "direct-refresh-not-allowed"
+    );
   }
 
   if (authRefreshError) {
@@ -3132,6 +3389,15 @@ export function getHttpAuthSnapshot(state) {
 
       technicalPublicRoutes:
         TECHNICAL_PUBLIC_ROUTES,
+
+      refreshMethods:
+        REFRESH_METHOD_CANDIDATES,
+
+      restoreSessionExcluded:
+        true,
+
+      browserDoesNotImplyRefreshCapability:
+        true,
     },
 
     refreshStats: {
@@ -3180,6 +3446,11 @@ export function getHttpAuthSnapshot(state) {
       lastDirectFailureAtIso:
         root.refreshStats.lastDirectFailureAt
           ? isoNow(root.refreshStats.lastDirectFailureAt)
+          : "",
+
+      lastDirectSkipAtIso:
+        root.refreshStats.lastDirectSkipAt
+          ? isoNow(root.refreshStats.lastDirectSkipAt)
           : "",
 
       lastError:

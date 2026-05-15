@@ -3,7 +3,7 @@
    Archivo: src/services/http.request.js
 
    ONION SUPPORT · HTTP REQUEST ENGINE
-   BASE EXECUTION · RETRY ENGINE · ABORT SAFE · TOKEN SAFE · 15/10
+   BASE EXECUTION · RETRY ENGINE · ABORT SAFE · TOKEN SAFE · 16/10
 
    Responsabilidades:
    - Ejecutar requests base contra AppCore.apiClient / AppCore.request.
@@ -36,6 +36,8 @@
    - No doble /api si apiBase ya trae /api.
    - No exponer headers/body sensibles en eventos.
    - Evita recursión si AppCore.apiClient/AppCore.request apuntan al Http service.
+   - No emite objetos raw/response/request completos.
+   - Eventos y snapshots pasan por sanitizeData circular-safe.
 ========================================================= */
 
 import {
@@ -46,6 +48,7 @@ import {
   isTimeoutError,
   redactHttpValue,
   headersToPlainObject,
+  normalizeHeaders,
   sanitizeHeaders,
   sanitizeData,
 } from "./http.helpers.js";
@@ -59,7 +62,7 @@ import {
 ========================================================= */
 
 export const HTTP_REQUEST_ENGINE_VERSION =
-  "15.0.0";
+  "16.0.0";
 
 /* =========================================================
    MODULE STATE
@@ -77,6 +80,9 @@ const DEFAULT_METHOD =
 
 const DEFAULT_RESPONSE_TYPE =
   "auto";
+
+const DEFAULT_API_BASE =
+  "https://api.onionit.net";
 
 const BODYLESS_METHODS =
   Object.freeze([
@@ -166,6 +172,12 @@ function safeObject(value, fallback = {}) {
   return isObject(value)
     ? value
     : fallback;
+}
+
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 function safeText(value, fallback = "") {
@@ -259,7 +271,8 @@ function normalizePath(path = "") {
     raw.replace(/\\/g, "/");
 
   if (!output.startsWith("/")) {
-    output = `/${output}`;
+    output =
+      `/${output}`;
   }
 
   output =
@@ -275,6 +288,51 @@ function normalizePath(path = "") {
   }
 
   return output;
+}
+
+function normalizeApiBase(base = "") {
+  const raw =
+    safeText(base, "");
+
+  if (
+    !raw ||
+    raw === "/"
+  ) {
+    return "";
+  }
+
+  if (
+    raw === "/api" ||
+    raw === "api"
+  ) {
+    return "";
+  }
+
+  if (!isAbsoluteUrl(raw)) {
+    return raw.replace(/\/+$/g, "");
+  }
+
+  try {
+    const parsed =
+      new URL(raw);
+
+    const origin =
+      parsed.origin.replace(/\/+$/g, "");
+
+    const pathname =
+      normalizePath(parsed.pathname || "/");
+
+    if (
+      pathname === "/" ||
+      pathname === "/api"
+    ) {
+      return origin;
+    }
+
+    return `${origin}${pathname}`.replace(/\/+$/g, "");
+  } catch {
+    return "";
+  }
 }
 
 function getUrlPathname(value = "") {
@@ -314,8 +372,7 @@ function joinUrl(base = "", path = "") {
     normalizePath(cleanPath);
 
   const cleanBase =
-    safeText(base, "")
-      .replace(/\/+$/g, "");
+    normalizeApiBase(base);
 
   if (!cleanBase) {
     return normalizedPath;
@@ -353,19 +410,110 @@ function joinUrl(base = "", path = "") {
   return `${cleanBase}/${normalizedPath.replace(/^\/+/g, "")}`;
 }
 
+function getFetchFunction() {
+  try {
+    if (
+      typeof globalThis !== "undefined" &&
+      isFunction(globalThis.fetch)
+    ) {
+      return globalThis.fetch.bind(globalThis);
+    }
+  } catch {}
+
+  try {
+    if (
+      typeof window !== "undefined" &&
+      isFunction(window.fetch)
+    ) {
+      return window.fetch.bind(window);
+    }
+  } catch {}
+
+  return null;
+}
+
+/* =========================================================
+   RECURSION GUARDS
+========================================================= */
+
+function functionEquals(a, b) {
+  if (!a || !b) {
+    return false;
+  }
+
+  try {
+    return a === b;
+  } catch {
+    return false;
+  }
+}
+
 function looksLikeHttpService(candidate = null) {
   return Boolean(
     candidate &&
       typeof candidate === "object" &&
       (
+        candidate.__ONION_HTTP_SERVICE__ === true ||
         candidate.SERVICE_NAME === "http" ||
         candidate.SERVICE_VERSION ||
+        candidate.HTTP_SERVICE_VERSION ||
         candidate.events?.requestStart === "http:request:start"
       ) &&
       isFunction(candidate.request) &&
-      isFunction(candidate.get) &&
-      isFunction(candidate.post)
+      (
+        isFunction(candidate.get) ||
+        isFunction(candidate.post)
+      )
   );
+}
+
+function isForbiddenEngineCandidate(candidate = null, requestConfig = {}) {
+  if (!candidate) {
+    return true;
+  }
+
+  const cfg =
+    safeObject(requestConfig);
+
+  const serviceRefs = [
+    cfg.service,
+    cfg.httpService,
+    cfg.Http,
+    cfg.http,
+    cfg.client,
+    cfg.serviceClient,
+  ].filter(Boolean);
+
+  if (serviceRefs.some((item) => item === candidate)) {
+    return true;
+  }
+
+  if (
+    isFunction(candidate) &&
+    (
+      functionEquals(candidate, cfg.serviceRequest) ||
+      functionEquals(candidate, cfg.httpRequest) ||
+      functionEquals(candidate, cfg.request)
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    isObject(candidate) &&
+    (
+      functionEquals(candidate.request, cfg.serviceRequest) ||
+      functionEquals(candidate.request, cfg.httpRequest)
+    )
+  ) {
+    return true;
+  }
+
+  if (looksLikeHttpService(candidate)) {
+    return true;
+  }
+
+  return false;
 }
 
 /* =========================================================
@@ -483,14 +631,18 @@ function buildAbortError(signal, requestConfig = {}, message = "Request aborted"
 
 function abortSignalAny(signals = []) {
   const validSignals =
-    signals.filter(hasAbortSignal);
+    safeArray(signals)
+      .filter(hasAbortSignal);
 
   if (!validSignals.length) {
     return null;
   }
 
   try {
-    if (typeof AbortSignal !== "undefined" && isFunction(AbortSignal.any)) {
+    if (
+      typeof AbortSignal !== "undefined" &&
+      isFunction(AbortSignal.any)
+    ) {
       return AbortSignal.any(validSignals);
     }
   } catch {}
@@ -556,10 +708,12 @@ function abortSignalAny(signals = []) {
       );
 
       cleanups.push(() => {
-        signal.removeEventListener(
-          "abort",
-          handler
-        );
+        try {
+          signal.removeEventListener(
+            "abort",
+            handler
+          );
+        } catch {}
       });
     } catch {}
   }
@@ -717,7 +871,10 @@ function safeWarn(AppCore, ...args) {
   } catch {}
 
   try {
-    if (AppCore?.config?.debug || AppCore?.config?.debugHttpRequestEngine) {
+    if (
+      AppCore?.config?.debug ||
+      AppCore?.config?.debugHttpRequestEngine
+    ) {
       console.warn(
         "[HTTP Request]",
         ...safeArgs
@@ -784,32 +941,6 @@ function sanitizeErrorForEvent(error = null) {
 
     elapsedMs:
       error.elapsedMs || null,
-
-    requestConfig:
-      error.requestConfig
-        ? {
-            requestId:
-              error.requestConfig.requestId || null,
-
-            method:
-              error.requestConfig.method || null,
-
-            path:
-              safeRedact(error.requestConfig.path || ""),
-
-            url:
-              safeRedact(error.requestConfig.url || ""),
-
-            headers:
-              sanitizeHeaders(error.requestConfig.headers || {}),
-
-            auth:
-              error.requestConfig.auth !== false,
-
-            public:
-              error.requestConfig.public === true,
-          }
-        : null,
   });
 }
 
@@ -1077,12 +1208,45 @@ function appendQuery(url = "", query = null) {
   return `${url}${url.includes("?") ? "&" : "?"}${queryString}`;
 }
 
+function resolveApiBase(AppCore, requestConfig = {}) {
+  const cfg =
+    safeObject(requestConfig);
+
+  const fromConfig =
+    safeText(
+      cfg.apiBase ||
+        AppCore?.config?.apiBase ||
+        AppCore?.config?.apiOrigin ||
+        AppCore?.config?.apiUrl ||
+        AppCore?.config?.api?.base ||
+        AppCore?.config?.api?.baseUrl ||
+        AppCore?.config?.api?.origin ||
+        "",
+      ""
+    );
+
+  const normalized =
+    normalizeApiBase(fromConfig);
+
+  if (normalized) {
+    return normalized;
+  }
+
+  return DEFAULT_API_BASE;
+}
+
 function resolveRequestUrl(AppCore, requestConfig = {}) {
   const cfg =
     safeObject(requestConfig);
 
   const explicitUrl =
     safeText(cfg.url, "");
+
+  const base =
+    resolveApiBase(
+      AppCore,
+      cfg
+    );
 
   if (explicitUrl) {
     if (isAbsoluteUrl(explicitUrl)) {
@@ -1094,7 +1258,7 @@ function resolveRequestUrl(AppCore, requestConfig = {}) {
 
     return appendQuery(
       joinUrl(
-        safeText(AppCore?.config?.apiBase || "", ""),
+        base,
         explicitUrl
       ),
       cfg.query
@@ -1117,34 +1281,23 @@ function resolveRequestUrl(AppCore, requestConfig = {}) {
 
   try {
     if (isFunction(AppCore?.utils?.buildUrl)) {
-      return appendQuery(
-        AppCore.utils.buildUrl(path),
-        cfg.query
-      );
+      const built =
+        AppCore.utils.buildUrl(path);
+
+      if (safeText(built, "")) {
+        return appendQuery(
+          built,
+          cfg.query
+        );
+      }
     }
   } catch {}
 
-  let base =
-    "";
-
-  try {
-    base =
-      safeText(
-        cfg.apiBase ||
-          AppCore?.config?.apiBase ||
-          AppCore?.config?.apiBaseUrl ||
-          AppCore?.config?.baseURL ||
-          AppCore?.config?.baseUrl ||
-          "",
-        ""
-      );
-  } catch {
-    base =
-      "";
-  }
-
   return appendQuery(
-    joinUrl(base, path),
+    joinUrl(
+      base,
+      path
+    ),
     cfg.query
   );
 }
@@ -1180,6 +1333,17 @@ function isArrayBufferLike(value) {
     return (
       typeof ArrayBuffer !== "undefined" &&
       value instanceof ArrayBuffer
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isArrayBufferViewLike(value) {
+  try {
+    return (
+      typeof ArrayBuffer !== "undefined" &&
+      ArrayBuffer.isView?.(value)
     );
   } catch {
     return false;
@@ -1246,10 +1410,17 @@ function prepareFallbackBodyAndHeaders(requestConfig = {}) {
     safeObject(requestConfig);
 
   const headers =
-    headersToPlainObject(cfg.headers || {});
+    normalizeHeaders(
+      cfg.headers || {}
+    );
 
   const method =
     safeUpper(cfg.method, DEFAULT_METHOD);
+
+  if (!hasHeader(headers, "Accept")) {
+    headers.Accept =
+      "application/json";
+  }
 
   if (BODYLESS_METHODS.includes(method)) {
     deleteHeader(
@@ -1297,6 +1468,11 @@ function prepareFallbackBodyAndHeaders(requestConfig = {}) {
       "Content-Type"
     );
 
+    deleteHeader(
+      headers,
+      "content-type"
+    );
+
     return {
       body,
       headers,
@@ -1320,6 +1496,7 @@ function prepareFallbackBodyAndHeaders(requestConfig = {}) {
     cfg.upload === true ||
     isBlobLike(body) ||
     isArrayBufferLike(body) ||
+    isArrayBufferViewLike(body) ||
     isReadableStreamLike(body) ||
     typeof body === "string"
   ) {
@@ -1381,11 +1558,14 @@ async function parseFallbackResponse(response, requestConfig = {}) {
   const cfg =
     safeObject(requestConfig);
 
-  const responseType =
+  const rawResponseType =
     safeText(
       cfg.responseType,
       DEFAULT_RESPONSE_TYPE
-    ).toLowerCase();
+    );
+
+  const responseType =
+    rawResponseType.toLowerCase();
 
   if (
     responseType === "response" ||
@@ -1410,10 +1590,7 @@ async function parseFallbackResponse(response, requestConfig = {}) {
       : response.arrayBuffer();
   }
 
-  if (
-    responseType === "arraybuffer" ||
-    responseType === "arrayBuffer"
-  ) {
+  if (responseType === "arraybuffer") {
     return response.arrayBuffer();
   }
 
@@ -1619,6 +1796,9 @@ function buildCoreRequestOptions(requestConfig = {}) {
     public:
       cfg.public === true,
 
+    skipAuth:
+      cfg.skipAuth === true,
+
     timeout:
       cfg.timeout,
 
@@ -1630,6 +1810,9 @@ function buildCoreRequestOptions(requestConfig = {}) {
 
     upload:
       cfg.upload === true,
+
+    download:
+      cfg.download === true,
 
     responseType:
       cfg.responseType || DEFAULT_RESPONSE_TYPE,
@@ -1683,6 +1866,12 @@ function buildCoreRequestOptions(requestConfig = {}) {
     retry:
       false,
 
+    retryUnsafe:
+      false,
+
+    retryUnsafeMethods:
+      false,
+
     _skipRetry:
       true,
 
@@ -1701,14 +1890,103 @@ function getRequestTarget(requestConfig = {}) {
   );
 }
 
+async function executeViaMethodClient(client, requestConfig = {}) {
+  const cfg =
+    safeObject(requestConfig);
+
+  const method =
+    safeUpper(cfg.method, DEFAULT_METHOD);
+
+  const target =
+    getRequestTarget(cfg);
+
+  const options =
+    buildCoreRequestOptions(cfg);
+
+  if (
+    method === "GET" &&
+    isFunction(client.get)
+  ) {
+    return client.get(target, options);
+  }
+
+  if (
+    method === "HEAD" &&
+    isFunction(client.head)
+  ) {
+    return client.head(target, options);
+  }
+
+  if (
+    method === "OPTIONS" &&
+    isFunction(client.options)
+  ) {
+    return client.options(target, options);
+  }
+
+  if (
+    method === "POST" &&
+    isFunction(client.post)
+  ) {
+    return client.post(
+      target,
+      options.body,
+      options
+    );
+  }
+
+  if (
+    method === "PUT" &&
+    isFunction(client.put)
+  ) {
+    return client.put(
+      target,
+      options.body,
+      options
+    );
+  }
+
+  if (
+    method === "PATCH" &&
+    isFunction(client.patch)
+  ) {
+    return client.patch(
+      target,
+      options.body,
+      options
+    );
+  }
+
+  if (
+    method === "DELETE" &&
+    isFunction(client.delete)
+  ) {
+    return client.delete(
+      target,
+      options
+    );
+  }
+
+  if (
+    method === "DELETE" &&
+    isFunction(client.del)
+  ) {
+    return client.del(
+      target,
+      options
+    );
+  }
+
+  return undefined;
+}
+
 async function executeViaApiClient(AppCore, requestConfig = {}) {
   const apiClient =
     AppCore?.apiClient;
 
   if (
     !apiClient ||
-    !isFunction(apiClient.request) ||
-    looksLikeHttpService(apiClient)
+    isForbiddenEngineCandidate(apiClient, requestConfig)
   ) {
     return {
       available:
@@ -1728,25 +2006,54 @@ async function executeViaApiClient(AppCore, requestConfig = {}) {
   const options =
     buildCoreRequestOptions(cfg);
 
-  const result =
-    await apiClient.request(
-      target,
-      options
+  if (isFunction(apiClient.request)) {
+    const result =
+      await apiClient.request(
+        target,
+        options
+      );
+
+    return {
+      available:
+        true,
+
+      value:
+        result,
+    };
+  }
+
+  const viaMethod =
+    await executeViaMethodClient(
+      apiClient,
+      cfg
     );
+
+  if (viaMethod !== undefined) {
+    return {
+      available:
+        true,
+
+      value:
+        viaMethod,
+    };
+  }
 
   return {
     available:
-      true,
+      false,
 
     value:
-      result,
+      null,
   };
 }
 
 async function executeViaCoreRequest(AppCore, requestConfig = {}) {
+  const requestFn =
+    AppCore?.request;
+
   if (
-    !isFunction(AppCore?.request) ||
-    AppCore?.request === requestConfig?.serviceRequest
+    !isFunction(requestFn) ||
+    isForbiddenEngineCandidate(requestFn, requestConfig)
   ) {
     return {
       available:
@@ -1764,7 +2071,7 @@ async function executeViaCoreRequest(AppCore, requestConfig = {}) {
     getRequestTarget(cfg);
 
   const result =
-    await AppCore.request(
+    await requestFn(
       target,
       buildCoreRequestOptions(cfg)
     );
@@ -1773,13 +2080,16 @@ async function executeViaCoreRequest(AppCore, requestConfig = {}) {
     available:
       true,
 
-      value:
-        result,
-    };
+    value:
+      result,
+  };
 }
 
 async function executeViaFetch(AppCore, requestConfig = {}) {
-  if (typeof fetch !== "function") {
+  const fetchFn =
+    getFetchFunction();
+
+  if (!fetchFn) {
     return {
       available:
         false,
@@ -1864,7 +2174,7 @@ async function executeViaFetch(AppCore, requestConfig = {}) {
     }
 
     const response =
-      await fetch(
+      await fetchFn(
         url,
         init
       );
@@ -1903,7 +2213,10 @@ async function executeViaFetch(AppCore, requestConfig = {}) {
     };
   } catch (error) {
     const timeoutAborted =
-      Boolean(timeout.fired === true || timeout.signal?.aborted);
+      Boolean(
+        timeout.fired === true ||
+          timeout.signal?.aborted
+      );
 
     const manualAborted =
       Boolean(
@@ -1925,7 +2238,10 @@ async function executeViaFetch(AppCore, requestConfig = {}) {
       );
     }
 
-    if (manualAborted || isAbortError(error)) {
+    if (
+      manualAborted ||
+      isAbortError(error)
+    ) {
       throw buildEngineError(
         error,
         cfg,
@@ -2038,40 +2354,7 @@ function isRetryBudgetExceeded(startedAt, maxElapsedMs = 0) {
    RETRY DELAY
 ========================================================= */
 
-async function waitForRetry(AppCore, waitMs = 0, signal = null, requestConfig = {}) {
-  const ms =
-    Math.max(
-      0,
-      safeNumber(waitMs, 0)
-    );
-
-  if (isSignalAborted(signal)) {
-    throw buildAbortError(
-      signal,
-      requestConfig,
-      "Request aborted before retry delay"
-    );
-  }
-
-  if (ms <= 0) {
-    return true;
-  }
-
-  if (isFunction(delay)) {
-    return delay(
-      AppCore,
-      ms,
-      signal,
-      {
-        source:
-          "http.request:retry-delay",
-
-        requestId:
-          requestConfig?.requestId || null,
-      }
-    );
-  }
-
+function fallbackDelay(ms = 0, signal = null, requestConfig = {}) {
   return new Promise((resolve, reject) => {
     let settled =
       false;
@@ -2117,6 +2400,11 @@ async function waitForRetry(AppCore, waitMs = 0, signal = null, requestConfig = 
     };
 
     try {
+      if (isSignalAborted(signal)) {
+        onAbort();
+        return;
+      }
+
       timer =
         setTimeout(() => {
           if (settled) {
@@ -2128,7 +2416,7 @@ async function waitForRetry(AppCore, waitMs = 0, signal = null, requestConfig = 
 
           cleanup();
           resolve(true);
-        }, ms);
+        }, Math.max(0, safeNumber(ms, 0)));
 
       signal?.addEventListener?.(
         "abort",
@@ -2146,6 +2434,89 @@ async function waitForRetry(AppCore, waitMs = 0, signal = null, requestConfig = 
       reject(error);
     }
   });
+}
+
+async function waitForRetry(AppCore, waitMs = 0, signal = null, requestConfig = {}) {
+  const ms =
+    Math.max(
+      0,
+      safeNumber(waitMs, 0)
+    );
+
+  if (isSignalAborted(signal)) {
+    throw buildAbortError(
+      signal,
+      requestConfig,
+      "Request aborted before retry delay"
+    );
+  }
+
+  if (ms <= 0) {
+    return true;
+  }
+
+  if (isFunction(delay)) {
+    const meta = {
+      source:
+        "http.request:retry-delay",
+
+      requestId:
+        requestConfig?.requestId || null,
+    };
+
+    const attempts = [
+      () => delay(
+        AppCore,
+        ms,
+        signal,
+        meta
+      ),
+
+      () => delay(
+        ms,
+        signal,
+        meta
+      ),
+
+      () => delay(
+        ms
+      ),
+    ];
+
+    for (const attempt of attempts) {
+      try {
+        const result =
+          await attempt();
+
+        if (isSignalAborted(signal)) {
+          throw buildAbortError(
+            signal,
+            requestConfig,
+            "Request aborted after runtime retry delay"
+          );
+        }
+
+        return result ?? true;
+      } catch (error) {
+        if (
+          isSignalAborted(signal) ||
+          isAbortError(error)
+        ) {
+          throw buildAbortError(
+            signal,
+            requestConfig,
+            "Request aborted during retry delay"
+          );
+        }
+      }
+    }
+  }
+
+  return fallbackDelay(
+    ms,
+    signal,
+    requestConfig
+  );
 }
 
 /* =========================================================
@@ -2321,6 +2692,7 @@ export async function executeWithRetry({
       if (isTimeoutError(lastError)) {
         lastError.timeout =
           true;
+
         lastError.aborted =
           false;
       }
@@ -2613,6 +2985,7 @@ export async function executeWithRetry({
   if (isTimeoutError(lastError)) {
     lastError.timeout =
       true;
+
     lastError.aborted =
       false;
   }
@@ -2634,9 +3007,9 @@ export async function executeWithRetry({
       method:
         cfg.method || DEFAULT_METHOD,
       path:
-        cfg.path || "",
+        safeRedact(cfg.path || ""),
       url:
-        cfg.url || "",
+        safeRedact(cfg.url || ""),
       headers:
         sanitizeHeaders(cfg.headers || {}),
       auth:
@@ -2679,6 +3052,29 @@ export function getHttpRequestEngineSnapshot() {
       HTTP_REQUEST_ENGINE_VERSION,
 
     requestSeq,
+
+    policy: {
+      fallbackApiBase:
+        DEFAULT_API_BASE,
+
+      noRefresh:
+        true,
+
+      noLogout:
+        true,
+
+      noLoader:
+        true,
+
+      noInterceptors:
+        true,
+
+      recursionGuard:
+        true,
+    },
+
+    at:
+      isoNow(),
   };
 }
 

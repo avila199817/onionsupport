@@ -41,7 +41,7 @@ export const WARMUP_VERSION = "15.0.0-extreme-pro";
 const WARMUP_LABEL = "[AppWarmup]";
 
 const DEFAULT_LANG = "es";
-const DEFAULT_THEME = "light";
+const DEFAULT_THEME = "dark";
 const DEFAULT_ROUTE = "/";
 
 const WARMUP_WARNING_DEDUPE_MS = 1200;
@@ -132,6 +132,15 @@ const RESET_REQUEST_PATHS = Object.freeze([
   "/request-reset-password",
 ]);
 
+const MFA_TECHNICAL_PATHS = Object.freeze([
+  "/2fa",
+  "/otp",
+  "/mfa",
+  "/2fa/login",
+  "/otp/login",
+  "/mfa/login",
+]);
+
 const AUTH_LIKE_PATHS = Object.freeze([
   "/login",
   "/signin",
@@ -143,11 +152,13 @@ const AUTH_LIKE_PATHS = Object.freeze([
   ...RESET_REQUEST_PATHS,
   ...RESET_CONFIRM_PATHS,
   ...ACTIVATION_PATHS,
+  ...MFA_TECHNICAL_PATHS,
 ]);
 
 const AUTH_LIKE_PREFIXES = Object.freeze([
   ...ACTIVATION_PATHS.map((path) => `${path}/`),
   ...RESET_CONFIRM_PATHS.map((path) => `${path}/`),
+  ...MFA_TECHNICAL_PATHS.map((path) => `${path}/`),
 ]);
 
 const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
@@ -552,9 +563,7 @@ function normalizeDeps(first = {}, second = {}) {
 ========================================================= */
 
 function getModuleFromRegistry(AppCore, names = []) {
-  const modules = AppCore?.modules;
-
-  if (!modules) {
+  if (!AppCore) {
     return null;
   }
 
@@ -563,31 +572,35 @@ function getModuleFromRegistry(AppCore, names = []) {
       .map((name) => safeText(name, ""))
       .filter(Boolean);
 
-  for (const key of keys) {
-    try {
-      if (
-        isFunction(modules.get) &&
-        modules.get(key)
-      ) {
-        return modules.get(key);
-      }
-    } catch {}
+  const modules = AppCore?.modules;
 
-    try {
-      if (
-        isFunction(modules.has) &&
-        modules.has(key) &&
-        isFunction(modules.get)
-      ) {
-        return modules.get(key);
-      }
-    } catch {}
+  if (modules) {
+    for (const key of keys) {
+      try {
+        if (
+          isFunction(modules.get) &&
+          modules.get(key)
+        ) {
+          return modules.get(key);
+        }
+      } catch {}
 
-    try {
-      if (modules[key]) {
-        return modules[key];
-      }
-    } catch {}
+      try {
+        if (
+          isFunction(modules.has) &&
+          modules.has(key) &&
+          isFunction(modules.get)
+        ) {
+          return modules.get(key);
+        }
+      } catch {}
+
+      try {
+        if (modules[key]) {
+          return modules[key];
+        }
+      } catch {}
+    }
   }
 
   try {
@@ -595,17 +608,21 @@ function getModuleFromRegistry(AppCore, names = []) {
 
     if (registryModules) {
       for (const key of keys) {
-        if (isFunction(registryModules.get)) {
-          const value = registryModules.get(key);
+        try {
+          if (isFunction(registryModules.get)) {
+            const value = registryModules.get(key);
 
-          if (value) {
-            return value;
+            if (value) {
+              return value;
+            }
           }
-        }
+        } catch {}
 
-        if (registryModules[key]) {
-          return registryModules[key];
-        }
+        try {
+          if (registryModules[key]) {
+            return registryModules[key];
+          }
+        } catch {}
       }
     }
   } catch {}
@@ -3571,7 +3588,7 @@ function buildWarmupWarnings(snapshot = {}) {
     - AppCore.state.lang existe
     - state.i18nInitialized está activo
     - documentElement.lang existe
-    - I18n se resuelve desde AppCore/modules
+    - I18n se resuelve desde AppCore/modules/registry
   */
   if (
     !snapshot.i18n?.present &&

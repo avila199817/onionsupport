@@ -3,7 +3,7 @@
    Archivo: src/services/http.helpers.js
 
    ONION SUPPORT · HTTP HELPERS
-   PURE HELPERS · RETRY SAFE · ERROR SAFE · TOKEN SAFE · 16/10
+   PURE HELPERS · RETRY SAFE · ERROR SAFE · TOKEN SAFE · 17/10
 
    RESPONSABILIDADES:
    - Config base del servicio HTTP.
@@ -24,22 +24,25 @@
    - Sin exposición de tokens en logs/summaries/errors.
    - Compatibilidad con /api/auth y /auth.
    - /api/auth/me, /auth/me, /api/me y /me NO son públicos.
-   - Activation/reset tratados como públicos.
-   - Retry solo seguro por defecto.
-   - Retry unsafe solo si el caller lo pide.
+   - Login/activation/reset/forgot/2FA/MFA/OTP tratados como públicos.
+   - Requests públicos auth salen sin Authorization.
+   - Requests públicos auth no disparan refresh/logout.
+   - Retry sólo seguro por defecto.
+   - Retry unsafe sólo si el caller lo pide.
+   - Retry 401 bloqueado por defecto: lo gestiona Http Service con refresh.
+   - Retry auth público bloqueado por defecto.
+   - Retry timeout sólo con retryTimeout:true.
    - Retry-After compatible con segundos y fecha HTTP.
    - AbortController browser-safe/server-safe.
    - Headers normalizados desde Object, Headers o arrays.
    - Error.raw no enumerable.
    - Snapshots y summaries redactados.
    - Eventos HTTP low-level apagados por defecto desde config.
-
-   FIX CRÍTICO 16/10:
    - sanitizeData() con WeakSet anti-circular.
    - sanitizeData() con límite real de profundidad, claves, arrays y strings.
    - sanitizeData() no intenta recorrer Response/Request/Headers/FormData/Blob.
-   - sanitizeRequestConfig() ya NO hace spread completo del requestConfig.
-   - normalizeError() ya NO arrastra objetos raw/response/request gigantes.
+   - sanitizeRequestConfig() no hace spread completo del requestConfig.
+   - normalizeError() no arrastra objetos raw/response/request gigantes.
    - Redacción con regex cacheadas para evitar rebuild masivo en loops.
 ========================================================= */
 
@@ -72,8 +75,17 @@ export const HTTP_CONFIG = Object.freeze({
   retryOnLocked:
     false,
 
+  retry401:
+    false,
+
+  retryTimeout:
+    false,
+
+  retryPublicAuth:
+    false,
+
   timeout:
-    15_000,
+    30_000,
 
   autoRefreshOn401:
     true,
@@ -166,7 +178,7 @@ export const HTTP_CONFIG = Object.freeze({
 ========================================================= */
 
 export const HTTP_HELPERS_VERSION =
-  "16.0.0";
+  "17.0.0";
 
 const DEFAULT_METHOD =
   "GET";
@@ -225,6 +237,7 @@ const SENSITIVE_QUERY_NAMES =
     "activation_token",
     "activate_token",
     "resetToken",
+    "reset_token",
     "passwordResetToken",
     "password_reset_token",
     "confirmToken",
@@ -232,6 +245,7 @@ const SENSITIVE_QUERY_NAMES =
     "code",
     "otp",
     "totp",
+    "pin",
     "t",
     "access_token",
     "refresh_token",
@@ -244,10 +258,15 @@ const SENSITIVE_QUERY_NAMES =
     "two_factor_token",
     "mfaToken",
     "mfa_token",
+    "otpToken",
+    "otp_token",
     "jwt",
     "bearer",
     "auth",
     "authorization",
+    "password",
+    "newPassword",
+    "currentPassword",
   ]);
 
 const SENSITIVE_HEADER_PARTS =
@@ -274,7 +293,10 @@ const SENSITIVE_HEADER_PARTS =
   ]);
 
 const SENSITIVE_OBJECT_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
+  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|totp|mfa|2fa|csrf|xsrf/i;
+
+const SENSITIVE_FORM_CODE_KEY_RE =
+  /^(code|pin|verificationCode|verification_code|securityCode|security_code)$/i;
 
 const HEAVY_OBJECT_KEY_RE =
   /^(raw|response|request|requestInit|fetchInit|controller|abortController|signal|stack|source|target|currentTarget|nativeEvent|event|promise|reader|stream)$/i;
@@ -290,95 +312,158 @@ const AUTH_ME_ENDPOINTS =
 const AUTH_ENDPOINT_MARKERS =
   Object.freeze([
     "/auth/login",
+    "/auth/register",
+    "/auth/signup",
+
     "/auth/logout",
     "/auth/logout-all",
+
     "/auth/me",
     "/auth/session",
     "/auth/refresh",
+    "/auth/token/refresh",
+    "/auth/renew",
 
     "/auth/2fa",
     "/auth/2fa/login",
+    "/auth/2fa/verify",
     "/auth/mfa",
     "/auth/mfa/login",
+    "/auth/mfa/verify",
     "/auth/otp",
     "/auth/otp/login",
+    "/auth/otp/verify",
 
     "/auth/activate",
     "/auth/activate-account",
     "/auth/account/activate",
     "/auth/activation",
     "/auth/activate/first-user",
+    "/auth/activate/validate",
 
     "/auth/reset-password",
     "/auth/reset-password-request",
     "/auth/reset-password-confirm",
+    "/auth/reset-password/confirm",
+    "/auth/reset-password/validate",
+
     "/auth/password-reset",
+    "/auth/password-reset/request",
+    "/auth/password-reset/confirm",
+    "/auth/password-reset/validate",
+
     "/auth/forgot-password",
     "/auth/recover-password",
 
     "/auth/_health",
+    "/auth/health",
   ]);
 
 const PUBLIC_AUTH_ENDPOINT_MARKERS =
   Object.freeze([
     "/auth/login",
-    "/auth/refresh",
+    "/auth/register",
+    "/auth/signup",
 
+    "/auth/refresh",
+    "/auth/token/refresh",
+    "/auth/renew",
+
+    "/auth/2fa",
     "/auth/2fa/login",
+    "/auth/2fa/verify",
+    "/auth/mfa",
     "/auth/mfa/login",
+    "/auth/mfa/verify",
+    "/auth/otp",
     "/auth/otp/login",
+    "/auth/otp/verify",
 
     "/auth/activate",
     "/auth/activate-account",
     "/auth/account/activate",
     "/auth/activation",
     "/auth/activate/first-user",
+    "/auth/activate/validate",
 
     "/auth/reset-password",
     "/auth/reset-password-request",
     "/auth/reset-password-confirm",
+    "/auth/reset-password/confirm",
+    "/auth/reset-password/validate",
+
     "/auth/password-reset",
+    "/auth/password-reset/request",
+    "/auth/password-reset/confirm",
+    "/auth/password-reset/validate",
+
     "/auth/forgot-password",
     "/auth/recover-password",
 
     "/auth/_health",
+    "/auth/health",
   ]);
 
 const AUTH_CONTROL_SKIP_REFRESH_MARKERS =
   Object.freeze([
     "/auth/login",
+    "/auth/register",
+    "/auth/signup",
+
     "/auth/refresh",
+    "/auth/token/refresh",
+    "/auth/renew",
+
     "/auth/logout",
     "/auth/logout-all",
 
+    "/auth/2fa",
     "/auth/2fa/login",
+    "/auth/2fa/verify",
+    "/auth/mfa",
     "/auth/mfa/login",
+    "/auth/mfa/verify",
+    "/auth/otp",
     "/auth/otp/login",
+    "/auth/otp/verify",
 
     "/auth/activate",
     "/auth/activate-account",
     "/auth/account/activate",
     "/auth/activation",
     "/auth/activate/first-user",
+    "/auth/activate/validate",
 
     "/auth/reset-password",
     "/auth/reset-password-request",
     "/auth/reset-password-confirm",
+    "/auth/reset-password/confirm",
+    "/auth/reset-password/validate",
+
     "/auth/password-reset",
+    "/auth/password-reset/request",
+    "/auth/password-reset/confirm",
+    "/auth/password-reset/validate",
+
     "/auth/forgot-password",
     "/auth/recover-password",
 
     "/auth/_health",
+    "/auth/health",
   ]);
 
 const TECHNICAL_PUBLIC_ROUTES =
   Object.freeze([
+    "/login",
     "/activate-account",
     "/reset-password",
     "/forgot-password",
     "/recover-password",
     "/password-reset",
     "/reset-password/confirm",
+    "/2fa",
+    "/otp",
+    "/mfa",
   ]);
 
 const DEFAULT_RETRYABLE_STATUSES =
@@ -598,6 +683,30 @@ export function isBodylessMethod(method = DEFAULT_METHOD) {
   );
 }
 
+function hasOwn(obj, key) {
+  try {
+    return Object.prototype.hasOwnProperty.call(
+      obj,
+      key
+    );
+  } catch {
+    return false;
+  }
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text =
+      safeText(value, "");
+
+    if (text) {
+      return text;
+    }
+  }
+
+  return "";
+}
+
 /* =========================================================
    STRING / REDACTION INTERNALS
 ========================================================= */
@@ -645,6 +754,38 @@ function previewString(value = "", maxLength = MAX_SANITIZE_STRING_LENGTH) {
   }
 
   return `${text.slice(0, maxLength)}…[truncated:${text.length}]`;
+}
+
+function isSensitiveObjectKey(key = "", parentHint = "") {
+  const cleanKey =
+    safeText(key, "");
+
+  if (!cleanKey) {
+    return false;
+  }
+
+  if (SENSITIVE_OBJECT_KEY_RE.test(cleanKey)) {
+    return true;
+  }
+
+  if (!SENSITIVE_FORM_CODE_KEY_RE.test(cleanKey)) {
+    return false;
+  }
+
+  const parent =
+    safeLower(parentHint, "");
+
+  return Boolean(
+    parent.includes("query") ||
+      parent.includes("params") ||
+      parent.includes("body") ||
+      parent.includes("payload") ||
+      parent.includes("form") ||
+      parent.includes("auth") ||
+      parent.includes("otp") ||
+      parent.includes("mfa") ||
+      parent.includes("2fa")
+  );
 }
 
 /* =========================================================
@@ -871,7 +1012,9 @@ function sanitizeSpecialObject(value, depth, keyHint, seen) {
 
       for (const [paramKey, paramValue] of value.entries()) {
         output[paramKey] =
-          SENSITIVE_OBJECT_KEY_RE.test(paramKey)
+          SENSITIVE_QUERY_NAMES
+            .map((item) => item.toLowerCase())
+            .includes(String(paramKey).toLowerCase())
             ? "***"
             : redactHttpValue(paramValue);
       }
@@ -1061,7 +1204,7 @@ function sanitizeDataInternal(value, depth = 0, keyHint = "", seen = new WeakSet
 
   if (
     cleanKeyHint &&
-    SENSITIVE_OBJECT_KEY_RE.test(cleanKeyHint)
+    isSensitiveObjectKey(cleanKeyHint, "")
   ) {
     return value
       ? "***"
@@ -1118,16 +1261,25 @@ function sanitizeDataInternal(value, depth = 0, keyHint = "", seen = new WeakSet
   }
 
   if (Array.isArray(value)) {
-    return value
-      .slice(0, MAX_SANITIZE_ARRAY_ITEMS)
-      .map((item) =>
-        sanitizeDataInternal(
-          item,
-          depth + 1,
-          cleanKeyHint,
-          seen
-        )
+    const output =
+      value
+        .slice(0, MAX_SANITIZE_ARRAY_ITEMS)
+        .map((item) =>
+          sanitizeDataInternal(
+            item,
+            depth + 1,
+            cleanKeyHint,
+            seen
+          )
+        );
+
+    if (value.length > MAX_SANITIZE_ARRAY_ITEMS) {
+      output.push(
+        `[truncated:${value.length - MAX_SANITIZE_ARRAY_ITEMS}]`
       );
+    }
+
+    return output;
   }
 
   if (isAnyObject(value)) {
@@ -1138,7 +1290,7 @@ function sanitizeDataInternal(value, depth = 0, keyHint = "", seen = new WeakSet
         .slice(0, MAX_SANITIZE_OBJECT_KEYS);
 
     for (const [key, item] of entries) {
-      if (SENSITIVE_OBJECT_KEY_RE.test(key)) {
+      if (isSensitiveObjectKey(key, cleanKeyHint)) {
         output[key] =
           item ? "***" : item;
 
@@ -1269,7 +1421,7 @@ export function headersToPlainObject(headers = {}) {
         if (key) {
           output[key] =
             item[1];
-        }
+          }
       }
     }
 
@@ -1421,184 +1573,6 @@ export function sanitizeHeaders(headers = {}) {
       sensitive && value
         ? "***"
         : sanitizeData(value, 0, key);
-  }
-
-  return output;
-}
-
-/* =========================================================
-   REQUEST CONFIG SANITIZE
-========================================================= */
-
-export function sanitizeRequestConfig(requestConfig = {}) {
-  const cfg =
-    safeObject(requestConfig);
-
-  const output = {
-    requestId:
-      cfg.requestId || null,
-
-    method:
-      normalizeMethod(cfg.method || DEFAULT_METHOD),
-
-    path:
-      redactHttpValue(cfg.path || ""),
-
-    url:
-      redactHttpValue(cfg.url || ""),
-
-    apiBase:
-      redactHttpValue(cfg.apiBase || ""),
-
-    headers:
-      sanitizeHeaders(cfg.headers || {}),
-
-    query:
-      sanitizeData(cfg.query ?? cfg.params ?? null, 0, "query"),
-
-    params:
-      sanitizeData(cfg.params ?? null, 0, "params"),
-
-    body:
-      sanitizeData(cfg.body ?? null, 0, "body"),
-
-    auth:
-      cfg.auth !== false,
-
-    public:
-      cfg.public === true,
-
-    skipAuth:
-      cfg.skipAuth === true,
-
-    credentials:
-      safeText(cfg.credentials, ""),
-
-    useLoader:
-      shouldToggleGlobalLoader(cfg),
-
-    silent:
-      cfg.silent === true,
-
-    background:
-      cfg.background === true,
-
-    responseType:
-      safeText(cfg.responseType, "auto"),
-
-    timeout:
-      cfg.timeout ?? null,
-
-    raw:
-      cfg.raw === true,
-
-    rawBody:
-      cfg.rawBody === true,
-
-    upload:
-      cfg.upload === true,
-
-    download:
-      cfg.download === true,
-
-    retries:
-      cfg.retries ?? null,
-
-    retry:
-      cfg.retry !== false,
-
-    retryUnsafe:
-      cfg.retryUnsafe === true,
-
-    retryUnsafeMethods:
-      cfg.retryUnsafeMethods === true,
-
-    retryStrategy:
-      safeText(cfg.retryStrategy, ""),
-
-    retryDelay:
-      cfg.retryDelay ?? null,
-
-    retryJitter:
-      cfg.retryJitter ?? null,
-
-    retryMaxDelay:
-      cfg.retryMaxDelay ?? null,
-
-    retryOnStatuses:
-      Array.isArray(cfg.retryOnStatuses)
-        ? cfg.retryOnStatuses.slice(0, 20)
-        : null,
-
-    retryOnConflict:
-      cfg.retryOnConflict === true,
-
-    retryOnLocked:
-      cfg.retryOnLocked === true,
-
-    maxElapsedMs:
-      cfg.maxElapsedMs || 0,
-
-    signal:
-      cfg.signal
-        ? "[AbortSignal]"
-        : null,
-
-    meta:
-      sanitizeData(cfg.meta || null, 0, "meta"),
-
-    startedAt:
-      cfg.startedAt || cfg._startedAt || 0,
-
-    skipRetry:
-      cfg._skipRetry === true,
-
-    skipAuthRefresh:
-      cfg._skipAuthRefresh === true,
-
-    authRefreshAttempted:
-      cfg._authRefreshAttempted === true,
-
-    authRefreshSucceeded:
-      cfg._authRefreshSucceeded === true,
-
-    authRefreshFailed:
-      cfg._authRefreshFailed === true,
-
-    emitEvents:
-      cfg.emitEvents !== false,
-
-    emitFinalEvents:
-      cfg.emitFinalEvents !== false,
-
-    emitLifecycleEvents:
-      cfg.emitLifecycleEvents === true,
-
-    emitRuntimeEvents:
-      cfg.emitRuntimeEvents === true,
-
-    emitAuthRefreshEvents:
-      cfg.emitAuthRefreshEvents === true,
-
-    emitRequestEngineEvents:
-      cfg.emitRequestEngineEvents === true,
-  };
-
-  if (SENSITIVE_OBJECT_KEY_RE.test("token")) {
-    output.token =
-      cfg.token ? "***" : null;
-
-    output.accessToken =
-      cfg.accessToken ? "***" : null;
-
-    output.access_token =
-      cfg.access_token ? "***" : null;
-
-    output.refreshToken =
-      cfg.refreshToken ? "***" : null;
-
-    output.refresh_token =
-      cfg.refresh_token ? "***" : null;
   }
 
   return output;
@@ -1770,7 +1744,7 @@ export function isPublicEndpoint(path = "") {
 }
 
 /* =========================================================
-   LOG FLAGS
+   REQUEST CONFIG SANITIZE
 ========================================================= */
 
 export function shouldToggleGlobalLoader(requestConfig = {}) {
@@ -1786,6 +1760,221 @@ export function shouldToggleGlobalLoader(requestConfig = {}) {
 
   return true;
 }
+
+export function sanitizeRequestConfig(requestConfig = {}) {
+  const cfg =
+    safeObject(requestConfig);
+
+  const path =
+    firstNonEmpty(
+      cfg.path,
+      cfg.url,
+      cfg.endpoint,
+      cfg.href,
+      cfg.resource
+    );
+
+  return {
+    requestId:
+      cfg.requestId || null,
+
+    method:
+      normalizeMethod(cfg.method || DEFAULT_METHOD),
+
+    path:
+      redactHttpValue(path || ""),
+
+    url:
+      redactHttpValue(cfg.url || ""),
+
+    apiBase:
+      redactHttpValue(cfg.apiBase || ""),
+
+    headers:
+      sanitizeHeaders(cfg.headers || {}),
+
+    query:
+      sanitizeData(cfg.query ?? null, 0, "query"),
+
+    params:
+      sanitizeData(cfg.params ?? null, 0, "params"),
+
+    body:
+      sanitizeData(cfg.body ?? null, 0, "body"),
+
+    auth:
+      cfg.auth !== false,
+
+    public:
+      cfg.public === true,
+
+    skipAuth:
+      cfg.skipAuth === true,
+
+    noAuthHeader:
+      cfg.noAuthHeader === true,
+
+    credentials:
+      safeText(cfg.credentials, ""),
+
+    useLoader:
+      shouldToggleGlobalLoader(cfg),
+
+    silent:
+      cfg.silent === true,
+
+    background:
+      cfg.background === true,
+
+    responseType:
+      safeText(cfg.responseType, "auto"),
+
+    timeout:
+      cfg.timeout ?? null,
+
+    raw:
+      cfg.raw === true,
+
+    rawBody:
+      cfg.rawBody === true,
+
+    upload:
+      cfg.upload === true,
+
+    download:
+      cfg.download === true,
+
+    retries:
+      cfg.retries ?? null,
+
+    retry:
+      cfg.retry !== false,
+
+    retryUnsafe:
+      cfg.retryUnsafe === true,
+
+    retryUnsafeMethods:
+      cfg.retryUnsafeMethods === true,
+
+    retry401:
+      cfg.retry401 === true,
+
+    retryTimeout:
+      cfg.retryTimeout === true,
+
+    retryPublicAuth:
+      cfg.retryPublicAuth === true,
+
+    retryStrategy:
+      safeText(cfg.retryStrategy, ""),
+
+    retryDelay:
+      cfg.retryDelay ?? null,
+
+    retryJitter:
+      cfg.retryJitter ?? null,
+
+    retryMaxDelay:
+      cfg.retryMaxDelay ?? null,
+
+    retryOnStatuses:
+      Array.isArray(cfg.retryOnStatuses)
+        ? cfg.retryOnStatuses.slice(0, 20)
+        : null,
+
+    retryOnConflict:
+      cfg.retryOnConflict === true,
+
+    retryOnLocked:
+      cfg.retryOnLocked === true,
+
+    maxElapsedMs:
+      cfg.maxElapsedMs || 0,
+
+    signal:
+      cfg.signal
+        ? "[AbortSignal]"
+        : null,
+
+    meta:
+      sanitizeData(cfg.meta || null, 0, "meta"),
+
+    startedAt:
+      cfg.startedAt || cfg._startedAt || 0,
+
+    skipRetry:
+      cfg._skipRetry === true ||
+      cfg.skipRetry === true,
+
+    skipAuthRefresh:
+      cfg._skipAuthRefresh === true ||
+      cfg.skipAuthRefresh === true,
+
+    noAutoRefresh:
+      cfg.noAutoRefresh === true ||
+      cfg.autoRefresh === false,
+
+    autoRefresh:
+      cfg.autoRefresh === false
+        ? false
+        : undefined,
+
+    noAutoLogout:
+      cfg.noAutoLogout === true ||
+      cfg.autoLogout === false,
+
+    autoLogout:
+      cfg.autoLogout === false
+        ? false
+        : undefined,
+
+    authRefreshAttempted:
+      cfg._authRefreshAttempted === true,
+
+    authRefreshSucceeded:
+      cfg._authRefreshSucceeded === true,
+
+    authRefreshFailed:
+      cfg._authRefreshFailed === true,
+
+    emitEvents:
+      cfg.emitEvents !== false,
+
+    emitFinalEvents:
+      cfg.emitFinalEvents !== false,
+
+    emitLifecycleEvents:
+      cfg.emitLifecycleEvents === true,
+
+    emitRuntimeEvents:
+      cfg.emitRuntimeEvents === true,
+
+    emitAuthRefreshEvents:
+      cfg.emitAuthRefreshEvents === true,
+
+    emitRequestEngineEvents:
+      cfg.emitRequestEngineEvents === true,
+
+    token:
+      cfg.token ? "***" : null,
+
+    accessToken:
+      cfg.accessToken ? "***" : null,
+
+    access_token:
+      cfg.access_token ? "***" : null,
+
+    refreshToken:
+      cfg.refreshToken ? "***" : null,
+
+    refresh_token:
+      cfg.refresh_token ? "***" : null,
+  };
+}
+
+/* =========================================================
+   LOG FLAGS
+========================================================= */
 
 export function shouldLogRequests(config, AppCore) {
   return Boolean(
@@ -1909,8 +2098,20 @@ export function createTimeoutSignal(ms = 0) {
         timeoutState.fired =
           true;
 
+        const timeoutError =
+          new Error("Request timeout");
+
+        timeoutError.name =
+          "TimeoutError";
+
+        timeoutError.code =
+          "REQUEST_TIMEOUT";
+
+        timeoutError.timeout =
+          true;
+
         try {
-          controller.abort("timeout");
+          controller.abort(timeoutError);
         } catch {
           try {
             controller.abort();
@@ -2001,10 +2202,12 @@ export function mergeSignals(signals = []) {
       );
 
       cleanups.push(() => {
-        signal.removeEventListener(
-          "abort",
-          onAbort
-        );
+        try {
+          signal.removeEventListener(
+            "abort",
+            onAbort
+          );
+        } catch {}
       });
     } catch {}
   }
@@ -2076,6 +2279,13 @@ export function isRetryableStatus(status = 0, options = {}) {
   }
 
   if (
+    numericStatus === 401 &&
+    options.retry401 !== true
+  ) {
+    return false;
+  }
+
+  if (
     numericStatus === 409 &&
     options.retryOnConflict === true
   ) {
@@ -2112,7 +2322,7 @@ export function isRetryableError(error, options = {}) {
   }
 
   if (timeout) {
-    return true;
+    return options.retryTimeout === true;
   }
 
   const status =
@@ -2305,6 +2515,25 @@ export function buildRetryDelay(config, requestConfig = {}, attempt = 0, error =
     : delay;
 }
 
+function isLikelyPublicAuthRequest(requestConfig = {}) {
+  const req =
+    safeObject(requestConfig);
+
+  if (req.public !== true) {
+    return false;
+  }
+
+  return isPublicAuthEndpoint(
+    firstNonEmpty(
+      req.path,
+      req.url,
+      req.endpoint,
+      req.href,
+      req.resource
+    )
+  );
+}
+
 export function shouldRetry(config, error, requestConfig = {}, attempt = 0) {
   const cfg = {
     ...HTTP_CONFIG,
@@ -2318,7 +2547,10 @@ export function shouldRetry(config, error, requestConfig = {}, attempt = 0) {
     return false;
   }
 
-  if (req._skipRetry === true) {
+  if (
+    req._skipRetry === true ||
+    req.skipRetry === true
+  ) {
     return false;
   }
 
@@ -2335,10 +2567,45 @@ export function shouldRetry(config, error, requestConfig = {}, attempt = 0) {
     return false;
   }
 
+  if (
+    timeout &&
+    req.retryTimeout !== true &&
+    cfg.retryTimeout !== true
+  ) {
+    return false;
+  }
+
+  const status =
+    safeNumber(
+      error?.status ??
+        error?.response?.status,
+      0
+    );
+
+  if (
+    status === 401 &&
+    req.retry401 !== true &&
+    cfg.retry401 !== true
+  ) {
+    return false;
+  }
+
+  if (
+    isLikelyPublicAuthRequest(req) &&
+    req.retryPublicAuth !== true &&
+    cfg.retryPublicAuth !== true
+  ) {
+    return false;
+  }
+
   const maxRetries =
     Number.isFinite(Number(req.retries))
       ? Number(req.retries)
       : safeNumber(cfg.retries, HTTP_CONFIG.retries);
+
+  if (maxRetries <= 0) {
+    return false;
+  }
 
   if (attempt >= maxRetries) {
     return false;
@@ -2361,13 +2628,6 @@ export function shouldRetry(config, error, requestConfig = {}, attempt = 0) {
   ) {
     return false;
   }
-
-  const status =
-    safeNumber(
-      error?.status ??
-        error?.response?.status,
-      0
-    );
 
   const retryOnStatuses =
     Array.isArray(req.retryOnStatuses)
@@ -2405,6 +2665,14 @@ export function shouldRetry(config, error, requestConfig = {}, attempt = 0) {
     retryOnLocked:
       req.retryOnLocked ??
       cfg.retryOnLocked,
+
+    retry401:
+      req.retry401 ??
+      cfg.retry401,
+
+    retryTimeout:
+      req.retryTimeout ??
+      cfg.retryTimeout,
   });
 }
 
@@ -2435,9 +2703,17 @@ function extractErrorMessage(error, fallback = DEFAULT_ERROR_MESSAGE) {
   const data =
     extractErrorData(error);
 
+  const nestedError =
+    isObject(data?.error)
+      ? data.error
+      : null;
+
   return (
     safeText(data?.message, "") ||
     safeText(data?.mensaje, "") ||
+    safeText(nestedError?.message, "") ||
+    safeText(nestedError?.mensaje, "") ||
+    safeText(nestedError?.detail, "") ||
     safeText(data?.error, "") ||
     safeText(data?.detail, "") ||
     safeText(data?.title, "") ||
@@ -2536,8 +2812,11 @@ export function normalizeError(error, requestConfig = null) {
       url:
         redactHttpValue(error.url || ""),
 
+      path:
+        redactHttpValue(error.path || requestConfig?.path || ""),
+
       redactedUrl:
-        redactHttpValue(error.redactedUrl || error.url || ""),
+        redactHttpValue(error.redactedUrl || error.url || error.path || ""),
 
       method:
         normalizeMethod(error.method || requestConfig?.method || DEFAULT_METHOD),
@@ -2564,10 +2843,12 @@ export function normalizeError(error, requestConfig = null) {
         error.retryable === true,
 
       public:
-        error.public === true,
+        error.public === true ||
+        requestConfig?.public === true,
 
       auth:
-        error.auth !== false,
+        error.auth !== false &&
+        requestConfig?.auth !== false,
 
       at:
         error.at || isoNow(),
@@ -2601,15 +2882,17 @@ export function normalizeError(error, requestConfig = null) {
         DEFAULT_METHOD
     );
 
-  const url =
-    redactHttpValue(
-      error?.redactedUrl ||
-        error?.url ||
-        error?.path ||
-        requestConfig?.url ||
-        requestConfig?.path ||
-        ""
+  const rawUrl =
+    firstNonEmpty(
+      error?.redactedUrl,
+      error?.url,
+      error?.path,
+      requestConfig?.url,
+      requestConfig?.path
     );
+
+  const url =
+    redactHttpValue(rawUrl);
 
   const data =
     extractErrorData(error);
@@ -2651,6 +2934,13 @@ export function normalizeError(error, requestConfig = null) {
 
     url,
 
+    path:
+      redactHttpValue(
+        error?.path ||
+          requestConfig?.path ||
+          ""
+      ),
+
     redactedUrl:
       url,
 
@@ -2678,6 +2968,12 @@ export function normalizeError(error, requestConfig = null) {
 
         retryOnLocked:
           requestConfig?.retryOnLocked,
+
+        retry401:
+          requestConfig?.retry401,
+
+        retryTimeout:
+          requestConfig?.retryTimeout,
       }),
 
     public:
@@ -2704,6 +3000,15 @@ export function buildRequestSummary(requestConfig = {}) {
   const cfg =
     safeObject(requestConfig);
 
+  const path =
+    firstNonEmpty(
+      cfg.path,
+      cfg.url,
+      cfg.endpoint,
+      cfg.href,
+      cfg.resource
+    );
+
   return {
     requestId:
       cfg.requestId || null,
@@ -2712,18 +3017,22 @@ export function buildRequestSummary(requestConfig = {}) {
       normalizeMethod(cfg.method || DEFAULT_METHOD),
 
     path:
-      redactHttpValue(
-        cfg.path || cfg.url || ""
-      ) || null,
+      redactHttpValue(path) || null,
 
     query:
-      sanitizeData(cfg.query || null),
+      sanitizeData(cfg.query || null, 0, "query"),
 
     auth:
       cfg.auth !== false,
 
     public:
       cfg.public === true,
+
+    skipAuth:
+      cfg.skipAuth === true,
+
+    noAuthHeader:
+      cfg.noAuthHeader === true,
 
     retries:
       cfg.retries ?? null,
@@ -2755,10 +3064,20 @@ export function buildRequestSummary(requestConfig = {}) {
       cfg.download === true,
 
     skipRetry:
-      cfg._skipRetry === true,
+      cfg._skipRetry === true ||
+      cfg.skipRetry === true,
 
     skipAuthRefresh:
-      cfg._skipAuthRefresh === true,
+      cfg._skipAuthRefresh === true ||
+      cfg.skipAuthRefresh === true,
+
+    noAutoRefresh:
+      cfg.noAutoRefresh === true ||
+      cfg.autoRefresh === false,
+
+    noAutoLogout:
+      cfg.noAutoLogout === true ||
+      cfg.autoLogout === false,
   };
 }
 
@@ -2777,6 +3096,15 @@ export function buildAttemptPayload({
     error
       ? normalizeError(error, cfg)
       : null;
+
+  const path =
+    firstNonEmpty(
+      cfg.path,
+      cfg.url,
+      cfg.endpoint,
+      cfg.href,
+      cfg.resource
+    );
 
   return {
     phase:
@@ -2798,7 +3126,7 @@ export function buildAttemptPayload({
       normalizeMethod(cfg.method || DEFAULT_METHOD),
 
     path:
-      redactHttpValue(cfg.path || cfg.url || ""),
+      redactHttpValue(path),
 
     auth:
       cfg.auth !== false,
@@ -2855,8 +3183,11 @@ function resolveApiBase(config = {}, AppCore = null, options = {}) {
     safeText(config.apiBase, "") ||
     safeText(config.baseUrl, "") ||
     safeText(AppCore?.config?.apiBase, "") ||
+    safeText(AppCore?.config?.apiOrigin, "") ||
+    safeText(AppCore?.config?.apiUrl, "") ||
     safeText(AppCore?.config?.api?.baseUrl, "") ||
     safeText(AppCore?.config?.api?.base, "") ||
+    safeText(AppCore?.config?.api?.origin, "") ||
     ""
   );
 }
@@ -2873,6 +3204,7 @@ function shouldDefaultPublic(path = "", options = {}) {
     opts.public === true ||
       opts.auth === false ||
       opts.skipAuth === true ||
+      opts.noAuthHeader === true ||
       isPublicEndpoint(path)
   );
 }
@@ -2925,14 +3257,17 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
       ""
     );
 
+  const authMeEndpoint =
+    isAuthMeEndpoint(finalPath);
+
   const publicEndpoint =
     shouldDefaultPublic(
       finalPath,
       opts
     );
 
-  const authMeEndpoint =
-    isAuthMeEndpoint(finalPath);
+  const publicAuthEndpoint =
+    isPublicAuthEndpoint(finalPath);
 
   const defaultTimeout =
     resolveDefaultTimeout(
@@ -2982,6 +3317,9 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
     skipAuth:
       publicEndpoint,
 
+    noAuthHeader:
+      publicEndpoint,
+
     timeout:
       defaultTimeout,
 
@@ -3015,18 +3353,31 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
       defaultUseLoader,
 
     retries:
-      safeNumber(
-        cfg.retries,
-        HTTP_CONFIG.retries
-      ),
+      publicAuthEndpoint
+        ? 0
+        : safeNumber(
+            cfg.retries,
+            HTTP_CONFIG.retries
+          ),
 
     retry:
-      true,
+      publicAuthEndpoint
+        ? false
+        : true,
 
     retryUnsafe:
       false,
 
     retryUnsafeMethods:
+      false,
+
+    retry401:
+      false,
+
+    retryTimeout:
+      false,
+
+    retryPublicAuth:
       false,
 
     retryStrategy:
@@ -3101,8 +3452,30 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
     _skipRetry:
       false,
 
+    skipRetry:
+      false,
+
     _skipAuthRefresh:
       publicEndpoint,
+
+    skipAuthRefresh:
+      publicEndpoint,
+
+    noAutoRefresh:
+      publicEndpoint,
+
+    autoRefresh:
+      publicEndpoint
+        ? false
+        : undefined,
+
+    noAutoLogout:
+      publicEndpoint,
+
+    autoLogout:
+      publicEndpoint
+        ? false
+        : undefined,
 
     _authRefreshAttempted:
       false,
@@ -3128,6 +3501,9 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
   const mergedAuthMe =
     isAuthMeEndpoint(mergedPath);
 
+  const mergedPublicAuth =
+    isPublicAuthEndpoint(mergedPath);
+
   const mergedPublic =
     mergedAuthMe
       ? false
@@ -3146,14 +3522,47 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
       : merged.auth === false ||
         merged.public === true ||
         merged.skipAuth === true ||
+        merged.noAuthHeader === true ||
         mergedPublic
           ? false
           : merged.auth ?? defaultAuth;
+
+  const publicLike =
+    Boolean(
+      !mergedAuthMe &&
+        (
+          mergedPublic ||
+          mergedAuth === false ||
+          merged.skipAuth === true ||
+          merged.noAuthHeader === true
+        )
+    );
+
+  const explicitRetry =
+    hasOwn(opts, "retry") ||
+    hasOwn(merged, "retry");
+
+  const explicitRetries =
+    hasOwn(opts, "retries") ||
+    hasOwn(merged, "retries");
 
   const headers =
     normalizeHeaders(
       merged.headers
     );
+
+  const finalRetry =
+    mergedPublicAuth && !explicitRetry
+      ? false
+      : merged.retry !== false;
+
+  const finalRetries =
+    mergedPublicAuth && !explicitRetries
+      ? 0
+      : safeNumber(
+          merged.retries,
+          safeNumber(cfg.retries, HTTP_CONFIG.retries)
+        );
 
   const finalRequestConfig = {
     ...merged,
@@ -3196,19 +3605,25 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
       ),
 
     retries:
-      safeNumber(
-        merged.retries,
-        safeNumber(cfg.retries, HTTP_CONFIG.retries)
-      ),
+      finalRetries,
 
     retry:
-      merged.retry !== false,
+      finalRetry,
 
     retryUnsafe:
       merged.retryUnsafe === true,
 
     retryUnsafeMethods:
       merged.retryUnsafeMethods === true,
+
+    retry401:
+      merged.retry401 === true,
+
+    retryTimeout:
+      merged.retryTimeout === true,
+
+    retryPublicAuth:
+      merged.retryPublicAuth === true,
 
     retryStrategy:
       safeText(
@@ -3262,7 +3677,14 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
       mergedPublic,
 
     skipAuth:
-      mergedPublic || mergedAuth === false,
+      mergedAuthMe
+        ? false
+        : publicLike,
+
+    noAuthHeader:
+      mergedAuthMe
+        ? false
+        : publicLike,
 
     auth:
       mergedAuth,
@@ -3300,16 +3722,74 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
       merged.emitRequestEngineEvents === true,
 
     _skipRetry:
-      merged._skipRetry === true,
+      merged._skipRetry === true ||
+      merged.skipRetry === true,
+
+    skipRetry:
+      merged._skipRetry === true ||
+      merged.skipRetry === true,
 
     _skipAuthRefresh:
       mergedAuthMe
-        ? merged._skipAuthRefresh === true
+        ? (
+            merged._skipAuthRefresh === true ||
+            merged.skipAuthRefresh === true
+          )
         : (
             merged._skipAuthRefresh === true ||
-            mergedPublic ||
-            mergedAuth === false
+            merged.skipAuthRefresh === true ||
+            publicLike
           ),
+
+    skipAuthRefresh:
+      mergedAuthMe
+        ? (
+            merged._skipAuthRefresh === true ||
+            merged.skipAuthRefresh === true
+          )
+        : (
+            merged._skipAuthRefresh === true ||
+            merged.skipAuthRefresh === true ||
+            publicLike
+          ),
+
+    noAutoRefresh:
+      mergedAuthMe
+        ? (
+            merged.noAutoRefresh === true ||
+            merged.autoRefresh === false
+          )
+        : (
+            merged.noAutoRefresh === true ||
+            merged.autoRefresh === false ||
+            publicLike
+          ),
+
+    autoRefresh:
+      !mergedAuthMe && publicLike
+        ? false
+        : merged.autoRefresh === false
+          ? false
+          : undefined,
+
+    noAutoLogout:
+      mergedAuthMe
+        ? (
+            merged.noAutoLogout === true ||
+            merged.autoLogout === false
+          )
+        : (
+            merged.noAutoLogout === true ||
+            merged.autoLogout === false ||
+            publicLike
+          ),
+
+    autoLogout:
+      !mergedAuthMe && publicLike
+        ? false
+        : merged.autoLogout === false
+          ? false
+          : undefined,
 
     _authRefreshAttempted:
       merged._authRefreshAttempted === true,
@@ -3333,7 +3813,7 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
 ========================================================= */
 
 export function getHttpHelpersSnapshot() {
-  return {
+  return sanitizeData({
     version:
       HTTP_HELPERS_VERSION,
 
@@ -3391,6 +3871,18 @@ export function getHttpHelpersSnapshot() {
 
       technicalPublicRoutes:
         [...TECHNICAL_PUBLIC_ROUTES],
+
+      strictEndpointMatching:
+        true,
+
+      publicAuthDisablesRefresh:
+        true,
+
+      publicAuthDisablesLogout:
+        true,
+
+      publicAuthDisablesRetryByDefault:
+        true,
     },
 
     sanitize:
@@ -3420,11 +3912,20 @@ export function getHttpHelpersSnapshot() {
 
       retryableStatuses:
         [...DEFAULT_RETRYABLE_STATUSES],
+
+      retry401Default:
+        false,
+
+      retryTimeoutDefault:
+        false,
+
+      retryPublicAuthDefault:
+        false,
     },
 
     at:
       isoNow(),
-  };
+  });
 }
 
 /* =========================================================

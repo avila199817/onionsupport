@@ -3,7 +3,7 @@
    Archivo: src/views/login/login.template.js
 
    AUTH TEMPLATE · CSP CLEAN · NO CSS INLINE · NO STYLE TAGS
-   FINAL PRO SYSTEM · TOKEN PRO SYSTEM · 15/10
+   FINAL PRO SYSTEM · TOKEN PRO SYSTEM · 16/10
 
    RESPONSABILIDADES:
    - generar el HTML del login alineado con /src/css/auth/login.css
@@ -36,7 +36,7 @@ import { renderPasswordField } from "../../shared/password-field/index.js";
 ========================================================= */
 
 const TEMPLATE_VERSION =
-  "15.0.0-final-extreme";
+  "16.0.0-extreme-pro";
 
 const DEFAULT_APP_NAME =
   "Onion Support";
@@ -118,11 +118,14 @@ function isSafeRelativePath(value = "") {
     return false;
   }
 
+  const lower =
+    raw.toLowerCase();
+
   if (
-    raw.toLowerCase().includes("%0d") ||
-    raw.toLowerCase().includes("%0a") ||
-    raw.toLowerCase().includes("%09") ||
-    raw.toLowerCase().includes("%5c") ||
+    lower.includes("%0d") ||
+    lower.includes("%0a") ||
+    lower.includes("%09") ||
+    lower.includes("%5c") ||
     raw.includes("\\")
   ) {
     return false;
@@ -167,7 +170,8 @@ function normalizeInternalHref(value = "", fallback = SAFE_INTERNAL_HREF_FALLBAC
 
   return raw
     .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/") || cleanFallback;
+    .replace(/\/{2,}/g, "/") ||
+    cleanFallback;
 }
 
 function isSafeAssetSrc(value = "") {
@@ -203,20 +207,7 @@ function isSafeAssetSrc(value = "") {
     return true;
   }
 
-  try {
-    const parsed =
-      new URL(
-        raw,
-        "http://localhost"
-      );
-
-    return [
-      "http:",
-      "https:",
-    ].includes(parsed.protocol);
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 function normalizeAssetSrc(value = "", fallback = "") {
@@ -237,6 +228,19 @@ function normalizeIdentifierForValue(value = "") {
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
     .slice(0, 180);
+}
+
+function normalizeSignalList(value = []) {
+  const custom =
+    safeArray(value)
+      .map((item) =>
+        safeText(item, "")
+      )
+      .filter(Boolean);
+
+  return custom.length
+    ? custom
+    : [...DEFAULT_SIGNALS];
 }
 
 /* =========================================================
@@ -339,17 +343,8 @@ function renderLeftPanel({
   heroText = "",
   bullets = [],
 } = {}) {
-  const customSignals =
-    safeArray(bullets)
-      .map((item) =>
-        safeText(item, "")
-      )
-      .filter(Boolean);
-
   const finalSignals =
-    customSignals.length
-      ? customSignals
-      : [...DEFAULT_SIGNALS];
+    normalizeSignalList(bullets);
 
   const cleanHeroText =
     safeText(heroText, "");
@@ -388,138 +383,198 @@ function renderLeftPanel({
 }
 
 /* =========================================================
+   FIELD ERROR
+========================================================= */
+
+function renderFieldError({
+  id = "",
+  field = "",
+} = {}) {
+  const finalId =
+    safeText(id, "");
+
+  const finalField =
+    safeText(field, "");
+
+  return `
+    <p
+      ${finalId ? `id="${escapeAttr(finalId)}"` : ""}
+      class="login-field-error"
+      data-error-for="${escapeAttr(finalField)}"
+      data-login-error-for="${escapeAttr(finalField)}"
+      aria-live="polite"
+      aria-atomic="true"
+      hidden
+    ></p>
+  `;
+}
+
+/* =========================================================
    PASSWORD FIELD
 ========================================================= */
 
-function renderPasswordFallback() {
+function renderPasswordFallbackControl() {
+  return `
+    <div class="password-wrapper" data-password-wrapper="true">
+      <input
+        class="input-text"
+        id="loginPassword"
+        name="password"
+        type="password"
+        autocomplete="current-password"
+        placeholder="Contraseña"
+        aria-label="Contraseña"
+        data-login-password="true"
+        data-password-input="true"
+        required
+      />
+
+      <button
+        class="password-toggle"
+        id="togglePassword"
+        type="button"
+        aria-label="Mostrar contraseña"
+        aria-pressed="false"
+        data-password-toggle="true"
+        data-login-password-toggle="true"
+        data-show-label="Mostrar contraseña"
+        data-hide-label="Ocultar contraseña"
+      >
+        <span
+          class="password-toggle-icon"
+          data-password-toggle-icon="true"
+          aria-hidden="true"
+        ></span>
+      </button>
+    </div>
+
+    <div
+      class="password-caps"
+      id="loginCapsIndicator"
+      data-password-caps="true"
+      data-login-caps="true"
+      aria-live="polite"
+      hidden
+    >
+      Bloq Mayús
+    </div>
+  `;
+}
+
+function renderPasswordSharedControl() {
+  try {
+    if (typeof renderPasswordField !== "function") {
+      return "";
+    }
+
+    const html =
+      renderPasswordField({
+        escapeHtml,
+
+        fieldId:
+          "loginPasswordField",
+
+        inputId:
+          "loginPassword",
+
+        id:
+          "loginPassword",
+
+        fieldName:
+          "password",
+
+        name:
+          "password",
+
+        placeholder:
+          "Contraseña",
+
+        ariaLabel:
+          "Contraseña",
+
+        autocomplete:
+          "current-password",
+
+        fieldClass:
+          "password-field login-password-field",
+
+        rootClass:
+          "password-field login-password-field",
+
+        fieldDataName:
+          "password",
+
+        dataField:
+          "password",
+
+        wrapperClass:
+          "password-wrapper",
+
+        inputClass:
+          "input-text",
+
+        toggleId:
+          "togglePassword",
+
+        toggleClass:
+          "password-toggle",
+
+        capsId:
+          "loginCapsIndicator",
+
+        required:
+          true,
+
+        showCapsIndicator:
+          true,
+
+        capsLabel:
+          "Bloq Mayús",
+
+        toggleLabelShow:
+          "Mostrar contraseña",
+
+        toggleLabelHide:
+          "Ocultar contraseña",
+
+        dataAttrs: {
+          loginPassword:
+            "true",
+        },
+      });
+
+    return typeof html === "string" && hasText(html)
+      ? html
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+function renderLoginPasswordField() {
+  const shared =
+    renderPasswordSharedControl();
+
   return `
     <div
       class="login-field"
       data-field="password"
       data-login-field="password"
-      data-password-field="true"
+      data-login-password-field="true"
     >
-      <div class="password-wrapper" data-password-wrapper="true">
-        <input
-          class="input-text"
-          id="loginPassword"
-          name="password"
-          type="password"
-          autocomplete="current-password"
-          placeholder="Contraseña"
-          aria-label="Contraseña"
-          data-password-input="true"
-          required
-        />
+      ${
+        shared ||
+        renderPasswordFallbackControl()
+      }
 
-        <button
-          class="password-toggle"
-          id="togglePassword"
-          type="button"
-          aria-label="Mostrar contraseña"
-          aria-pressed="false"
-          data-password-toggle="true"
-          data-show-label="Mostrar contraseña"
-          data-hide-label="Ocultar contraseña"
-        >
-          <span class="password-toggle-icon" aria-hidden="true"></span>
-        </button>
-      </div>
-
-      <div
-        class="password-caps"
-        id="loginCapsIndicator"
-        data-password-caps="true"
-        aria-live="polite"
-        hidden
-      >
-        Bloq Mayús
-      </div>
+      ${renderFieldError({
+        id:
+          "loginPasswordError",
+        field:
+          "password",
+      })}
     </div>
   `;
-}
-
-function renderLoginPasswordField() {
-  try {
-    if (typeof renderPasswordField === "function") {
-      const html =
-        renderPasswordField({
-          escapeHtml,
-
-          fieldId:
-            "loginPassword",
-
-          inputId:
-            "loginPassword",
-
-          id:
-            "loginPassword",
-
-          fieldName:
-            "password",
-
-          name:
-            "password",
-
-          placeholder:
-            "Contraseña",
-
-          ariaLabel:
-            "Contraseña",
-
-          autocomplete:
-            "current-password",
-
-          fieldClass:
-            "login-field",
-
-          rootClass:
-            "login-field",
-
-          fieldDataName:
-            "password",
-
-          dataField:
-            "password",
-
-          wrapperClass:
-            "password-wrapper",
-
-          inputClass:
-            "input-text",
-
-          toggleId:
-            "togglePassword",
-
-          toggleClass:
-            "password-toggle",
-
-          capsId:
-            "loginCapsIndicator",
-
-          required:
-            true,
-
-          showCapsIndicator:
-            true,
-
-          capsLabel:
-            "Bloq Mayús",
-
-          toggleLabelShow:
-            "Mostrar contraseña",
-
-          toggleLabelHide:
-            "Ocultar contraseña",
-        });
-
-      if (hasText(html)) {
-        return html;
-      }
-    }
-  } catch {}
-
-  return renderPasswordFallback();
 }
 
 /* =========================================================
@@ -636,6 +691,7 @@ function renderForm({
                       type="button"
                       aria-label="${escapeAttr(finalThemeToggleLabel)}"
                       data-login-theme-toggle="true"
+                      data-theme-toggle="true"
                     >
                       ${renderThemeIcon()}
                     </button>
@@ -659,27 +715,38 @@ function renderForm({
             class="login-form"
             id="loginForm"
             data-login-form="true"
+            data-auth-form="login"
             aria-describedby="loginDescription loginError"
             novalidate
           >
             <div
               class="login-field"
-              data-field="email"
+              data-field="identifier"
               data-login-field="identifier"
             >
               <input
                 class="input-text"
-                id="loginEmail"
+                id="loginIdentifier"
                 name="identifier"
                 type="text"
                 autocomplete="username"
-                inputmode="email"
+                inputmode="text"
+                autocapitalize="none"
+                spellcheck="false"
                 placeholder="Usuario o email"
                 value="${escapeAttr(finalIdentifier)}"
                 aria-label="Usuario o email"
+                aria-describedby="loginIdentifierError"
                 data-login-identifier="true"
                 required
               />
+
+              ${renderFieldError({
+                id:
+                  "loginIdentifierError",
+                field:
+                  "identifier",
+              })}
             </div>
 
             ${renderLoginPasswordField()}
@@ -707,12 +774,13 @@ function renderForm({
             </div>
 
             <div
-              class="login-error"
+              class="login-error is-empty"
               id="loginError"
-              role="alert"
               aria-live="polite"
               aria-atomic="true"
               data-login-error="true"
+              data-form-error="true"
+              hidden
             ></div>
 
             <button
@@ -721,7 +789,10 @@ function renderForm({
               type="submit"
               data-login-submit="true"
             >
-              <span class="login-submit-text">
+              <span
+                class="login-submit-text"
+                data-login-submit-text="true"
+              >
                 ${escapeHtml(finalSubmitLabel)}
               </span>
             </button>
@@ -732,7 +803,8 @@ function renderForm({
                 href="${escapeAttr(finalForgotHref)}"
                 id="forgotPasswordLink"
                 data-spa
-                data-login-forgot-link="true"
+                data-forgot-password-link="true"
+                data-login-forgot-password="true"
               >
                 ${escapeHtml(finalForgotLabel)}
               </a>
@@ -762,7 +834,9 @@ export function getLoginTemplate(options = {}) {
   return `
     <section
       class="login-view"
+      id="loginView"
       data-view="login"
+      data-view-name="login"
       data-login-view="true"
       data-template-version="${escapeAttr(TEMPLATE_VERSION)}"
     >

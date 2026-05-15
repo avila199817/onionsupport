@@ -104,6 +104,7 @@
         "X-Robots-Tag": "noindex, nofollow"
       }
     },
+
     {
       "route": "/",
       "rewrite": "/index.html",
@@ -132,6 +133,7 @@
         "X-Robots-Tag": "noindex, nofollow"
       }
     },
+
     {
       "route": "/es",
       "statusCode": 404,
@@ -148,8 +150,9 @@
         "X-Robots-Tag": "noindex, nofollow"
       }
     },
+
     {
-      "route": "/login*",
+      "route": "/login",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -159,7 +162,7 @@
       }
     },
     {
-      "route": "/logout*",
+      "route": "/login/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -169,7 +172,7 @@
       }
     },
     {
-      "route": "/signin*",
+      "route": "/logout",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -179,7 +182,7 @@
       }
     },
     {
-      "route": "/sign-in*",
+      "route": "/logout/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -189,7 +192,7 @@
       }
     },
     {
-      "route": "/register*",
+      "route": "/signin",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -199,7 +202,7 @@
       }
     },
     {
-      "route": "/signup*",
+      "route": "/signin/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -209,7 +212,7 @@
       }
     },
     {
-      "route": "/sign-up*",
+      "route": "/sign-in",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -219,7 +222,7 @@
       }
     },
     {
-      "route": "/activate-account*",
+      "route": "/sign-in/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -229,7 +232,7 @@
       }
     },
     {
-      "route": "/activate*",
+      "route": "/register",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -239,7 +242,7 @@
       }
     },
     {
-      "route": "/activation*",
+      "route": "/register/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -249,7 +252,7 @@
       }
     },
     {
-      "route": "/account/activate*",
+      "route": "/signup",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -259,7 +262,7 @@
       }
     },
     {
-      "route": "/reset-password*",
+      "route": "/signup/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -269,7 +272,7 @@
       }
     },
     {
-      "route": "/reset-password-confirm*",
+      "route": "/sign-up",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -279,7 +282,18 @@
       }
     },
     {
-      "route": "/forgot-password*",
+      "route": "/sign-up/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+
+    {
+      "route": "/activate-account",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -289,7 +303,7 @@
       }
     },
     {
-      "route": "/recover-password*",
+      "route": "/activate-account/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -299,7 +313,7 @@
       }
     },
     {
-      "route": "/password-reset*",
+      "route": "/activation",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -309,7 +323,7 @@
       }
     },
     {
-      "route": "/password-reset-confirm*",
+      "route": "/activation/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -319,7 +333,7 @@
       }
     },
     {
-      "route": "/confirm-reset-password*",
+      "route": "/account/activate",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -329,7 +343,7 @@
       }
     },
     {
-      "route": "/2fa*",
+      "route": "/account/activate/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -339,7 +353,7 @@
       }
     },
     {
-      "route": "/otp*",
+      "route": "/activate/first-user",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -349,7 +363,7 @@
       }
     },
     {
-      "route": "/mfa*",
+      "route": "/activate/first-user/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -359,7 +373,7 @@
       }
     },
     {
-      "route": "/incidencias*",
+      "route": "/activate",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -369,7 +383,18 @@
       }
     },
     {
-      "route": "/tickets*",
+      "route": "/activate/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+
+    {
+      "route": "/reset-password/confirm",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -379,7 +404,7 @@
       }
     },
     {
-      "route": "/facturas*",
+      "route": "/reset-password/confirm/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -389,7 +414,7 @@
       }
     },
     {
-      "route": "/invoices*",
+      "route": "/reset-password-confirm",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -399,7 +424,7 @@
       }
     },
     {
-      "route": "/usuarios*",
+      "route": "/reset-password-confirm/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -409,7 +434,7 @@
       }
     },
     {
-      "route": "/users*",
+      "route": "/reset-password/request",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -419,7 +444,7 @@
       }
     },
     {
-      "route": "/clientes*",
+      "route": "/reset-password/request/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -429,7 +454,7 @@
       }
     },
     {
-      "route": "/clients*",
+      "route": "/reset-password-request",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -439,7 +464,7 @@
       }
     },
     {
-      "route": "/hardware*",
+      "route": "/reset-password-request/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -449,7 +474,7 @@
       }
     },
     {
-      "route": "/cuenta*",
+      "route": "/reset-password",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -459,7 +484,18 @@
       }
     },
     {
-      "route": "/account*",
+      "route": "/reset-password/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+
+    {
+      "route": "/password-reset/confirm",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -469,7 +505,7 @@
       }
     },
     {
-      "route": "/ajustes*",
+      "route": "/password-reset/confirm/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -479,7 +515,7 @@
       }
     },
     {
-      "route": "/settings*",
+      "route": "/password-reset-confirm",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -489,7 +525,7 @@
       }
     },
     {
-      "route": "/servidor*",
+      "route": "/password-reset-confirm/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -499,7 +535,480 @@
       }
     },
     {
-      "route": "/server*",
+      "route": "/password-reset/request",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/password-reset/request/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/password-reset",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/password-reset/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+
+    {
+      "route": "/forgot-password",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/forgot-password/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/recover-password",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/recover-password/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/request-reset-password",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/request-reset-password/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/confirm-reset-password",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/confirm-reset-password/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+
+    {
+      "route": "/2fa",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/2fa/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/otp",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/otp/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/mfa",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/mfa/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+
+    {
+      "route": "/incidencias",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/incidencias/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/tickets",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/tickets/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/facturas",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/facturas/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/invoices",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/invoices/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/usuarios",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/usuarios/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/users",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/users/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/clientes",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/clientes/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/clients",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/clients/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/hardware",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/hardware/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/cuenta",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/cuenta/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/account",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/account/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/ajustes",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/ajustes/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/settings",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/settings/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/servidor",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/servidor/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/server",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/server/*",
       "rewrite": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -518,6 +1027,7 @@
         "X-Robots-Tag": "noindex, nofollow"
       }
     },
+
     {
       "route": "/src/media/*",
       "headers": {

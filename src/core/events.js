@@ -2,71 +2,42 @@
    Onion SPA - Core Events
    Archivo: src/core/events.js
 
-   ONION SUPPORT · CORE EVENTS
-   EVENT BUS · DOM/MEMORY · FIREBREAK SAFE · 17/10
-
-   Responsabilidades:
-   - centralizar el event bus del Core
-   - emitir CustomEvent sobre document/window/custom target
-   - registrar listeners persistentes o once
-   - desacoplar módulos a través de eventos
-   - funcionar con fallback in-memory si no hay DOM
-   - exponer snapshot debug del bus
-
-   Candados:
-   - cero throws accidentales desde handlers
-   - compatible browser/server
-   - listeners idempotentes
-   - off seguro por handler original, wrapped handler o disposer
-   - once robusto sin depender de once nativo
-   - soporte document/window/custom target
-   - fallback memory
-   - wildcard "*" sólo diagnóstico en memoria
-   - métricas internas emit/on/off/error/drop
-   - payload estable en event.detail
-   - captura errores async de handlers con .catch()
-   - protección contra recursión / event storms
-   - firebreak HTTP/noisy events sin llenar consola
-   - snapshots redacted sin tokens/secrets
+   CORE EVENTS · CLEAN BUS
+   - Event bus único.
+   - DOM CustomEvent en browser.
+   - Fallback memory en server/no DOM.
+   - once/off idempotente.
+   - Wildcard "*" sólo memory/debug.
+   - Firebreak simple anti storms.
+   - Snapshots sin secretos.
 ========================================================= */
 
 import {
-  isBrowser,
+  isBrowser as helperIsBrowser,
   normalizeListenerOptions,
 } from "./helpers.js";
 
-/* =========================================================
-   CONSTANTS
-========================================================= */
-
-const EVENTS_VERSION = "17.0.0";
+export const EVENTS_VERSION = "18.0.0-clean";
+export const WILDCARD_EVENT = "*";
 
 const DEFAULT_TARGET = "document";
-const WILDCARD_EVENT = "*";
 
-const MAX_RECENT_EVENTS = 120;
-const MAX_SYNC_EMIT_DEPTH = 12;
+const MAX_RECENT_EVENTS = 80;
+const MAX_SYNC_DEPTH = 10;
 
 const RATE_WINDOW_MS = 1000;
+const MAX_ABSOLUTE_EMITS = 4000;
+const MAX_NORMAL_EMITS = 900;
+const MAX_NORMAL_EVENT_EMITS = 180;
+const MAX_LOW_EMITS = 1200;
+const MAX_LOW_EVENT_EMITS = 240;
+const MAX_CRITICAL_EMITS = 2500;
+const MAX_CRITICAL_EVENT_EMITS = 720;
 
-const MAX_EMITS_PER_WINDOW = 900;
-const MAX_EMITS_PER_EVENT_PER_WINDOW = 180;
+const DROP_WARNING_MS = 2000;
+const DROP_WARNING_EVENT_MS = 7000;
 
-const MAX_LOW_PRIORITY_EMITS_PER_WINDOW = 1200;
-const MAX_LOW_PRIORITY_EMITS_PER_EVENT_PER_WINDOW = 240;
-
-const MAX_CRITICAL_EMITS_PER_WINDOW = 2500;
-const MAX_CRITICAL_EMITS_PER_EVENT_PER_WINDOW = 720;
-
-const MAX_ABSOLUTE_EMITS_PER_WINDOW = 5000;
-
-const DROP_WARNING_INTERVAL_MS = 1600;
-const DROP_WARNING_PER_EVENT_INTERVAL_MS = 7000;
-const NOISY_RECENT_SAMPLE_MS = 220;
-
-const GLOBAL_DROP_GUARD_KEY = "__ONION_CORE_EVENTS_DROP_GUARD__";
-
-const CRITICAL_EVENT_NAMES = new Set([
+const CRITICAL_NAMES = new Set([
   "app:ready",
   "app:boot:start",
   "app:boot:ready",
@@ -79,59 +50,37 @@ const CRITICAL_EVENT_NAMES = new Set([
   "app:core:reboot",
 
   "app:state:change",
-  "app:state:patched",
-
   "app:route:change",
   "app:public-path:change",
-
   "app:user:change",
-  "app:token:change",
   "app:auth:change",
 
-  "app:session:state",
   "app:session:applied",
   "app:session:loaded",
   "app:session:restored",
   "app:session:cleared",
 
-  "app:loading:change",
-  "app:error",
-
-  "app:lang:change",
-  "app:theme:change",
-
   "router:before-render",
   "router:rendered",
-  "router:render:async-complete",
-  "router:navigation:complete",
-  "router:bound",
-  "router:error",
+  "router:render:error",
 
   "auth:login:success",
-  "auth:logout",
   "auth:logout:success",
   "auth:session:restored",
   "auth:session:cleared",
-  "auth:restore:error",
-
-  "app:request:error",
-  "http:request:error",
 ]);
 
-const CRITICAL_EVENT_PREFIXES = Object.freeze([
+const CRITICAL_PREFIXES = [
   "router:",
   "auth:",
   "app:core:",
   "app:session:",
-]);
+];
 
-const LOW_PRIORITY_EVENT_NAMES = new Set([
+const LOW_NAMES = new Set([
   "app:ui:ready",
   "app:ui:repair",
   "app:ui:repair-request",
-  "app:ui:init:start",
-  "app:ui:init:success",
-  "app:ui:init:error",
 
   "app:module:registered",
   "app:module:replaced",
@@ -156,7 +105,7 @@ const LOW_PRIORITY_EVENT_NAMES = new Set([
   "app:pending:change",
 ]);
 
-const LOW_PRIORITY_EVENT_PREFIXES = Object.freeze([
+const LOW_PREFIXES = [
   "sidebar:",
   "topbar:",
   "toast:",
@@ -165,124 +114,65 @@ const LOW_PRIORITY_EVENT_PREFIXES = Object.freeze([
 
   "app:user-ui:",
   "app:ui:",
-  "app:ui:module:",
-  "app:ui:toast-bridge:",
-  "app:boot:loader:",
-
   "app:module:",
   "app:http:",
   "app:request:",
+  "app:pending:",
 
   "http:",
   "network:",
   "app:network:",
   "core:network:",
-]);
+];
 
 const SILENT_DROP_NAMES = new Set([
   "app:module:duplicate",
-
   "http:request:start",
   "http:request:attempt",
   "http:pending:change",
-
   "app:request:start",
   "app:request:attempt",
   "app:pending:change",
 ]);
 
-const SILENT_DROP_PREFIXES = Object.freeze([
+const SILENT_DROP_PREFIXES = [
   "sidebar:indicator:",
   "sidebar:active:",
   "sidebar:visual:",
   "topbar:visual:",
   "tooltip:position:",
-
   "http:request:",
   "http:pending:",
   "app:request:",
   "app:pending:",
-]);
+];
 
 const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
 
-const TOKENISH_TEXT_RE =
+const TOKENISH_RE =
   /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)[^&#\s]+/i;
 
 /* =========================================================
    BASICS
 ========================================================= */
 
-function localIsBrowser() {
+function browser() {
   try {
-    if (typeof isBrowser === "function") {
-      return Boolean(isBrowser());
+    if (typeof helperIsBrowser === "function") {
+      return Boolean(helperIsBrowser());
     }
   } catch {}
 
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function getGlobalObject() {
-  try {
-    if (typeof globalThis !== "undefined") {
-      return globalThis;
-    }
-  } catch {}
-
-  try {
-    if (typeof window !== "undefined") {
-      return window;
-    }
-  } catch {}
-
-  return null;
-}
-
-function getGlobalDropGuard() {
-  const root = getGlobalObject();
-
-  if (!root) {
-    return {
-      lastWarningAt: 0,
-      lastByKey: new Map(),
-      suppressed: 0,
-    };
-  }
-
-  try {
-    if (!root[GLOBAL_DROP_GUARD_KEY]) {
-      Object.defineProperty(root, GLOBAL_DROP_GUARD_KEY, {
-        value: {
-          lastWarningAt: 0,
-          lastByKey: new Map(),
-          suppressed: 0,
-        },
-        configurable: true,
-        enumerable: false,
-        writable: true,
-      });
-    }
-
-    return root[GLOBAL_DROP_GUARD_KEY];
-  } catch {}
-
-  return {
-    lastWarningAt: 0,
-    lastByKey: new Map(),
-    suppressed: 0,
-  };
-}
-
-function isFunction(value) {
+function fn(value) {
   return typeof value === "function";
 }
 
-function isObject(value) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
+function plainObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 
   try {
     const proto = Object.getPrototypeOf(value);
@@ -292,21 +182,18 @@ function isObject(value) {
   }
 }
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
-
-  const text = String(value).trim();
-  return text || fallback;
+function text(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const out = String(value).trim();
+  return out || fallback;
 }
 
-function safeNumber(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
+function number(value, fallback = 0) {
+  const out = Number(value);
+  return Number.isFinite(out) ? out : fallback;
 }
 
-function safeNow() {
+function now() {
   try {
     return Date.now();
   } catch {
@@ -314,7 +201,7 @@ function safeNow() {
   }
 }
 
-function safeIsoDate(ms = safeNow()) {
+function iso(ms = now()) {
   try {
     return new Date(ms).toISOString();
   } catch {
@@ -322,382 +209,74 @@ function safeIsoDate(ms = safeNow()) {
   }
 }
 
-function safeWarn(...args) {
-  try {
-    console.warn("[CoreEvents]", ...args);
-  } catch {}
-}
-
-function createNoopOff() {
+function noopOff() {
   return () => false;
 }
 
-function normalizeEventName(name = "") {
-  return safeText(name, "");
-}
-
-function normalizeOptions(options = false) {
-  try {
-    if (typeof normalizeListenerOptions === "function") {
-      const normalized = normalizeListenerOptions(options);
-
-      if (normalized === true || normalized === false || isObject(normalized)) {
-        return normalized;
-      }
-    }
-  } catch {}
-
-  if (options === true) {
-    return { capture: true };
-  }
-
-  if (options === false || options === null || options === undefined) {
-    return false;
-  }
-
-  if (isObject(options)) {
-    return { ...options };
-  }
-
-  return false;
-}
-
-function getOptionsObject(options = false) {
-  const normalized = normalizeOptions(options);
-  return isObject(normalized) ? normalized : {};
-}
-
-function getOptionsTarget(options = false) {
-  const opts = getOptionsObject(options);
-  return opts.target || null;
-}
-
-function normalizeDomOptions(options = false) {
-  const normalized = normalizeOptions(options);
-
-  if (normalized === true) {
-    return { capture: true };
-  }
-
-  if (normalized === false || normalized === null || normalized === undefined) {
-    return false;
-  }
-
-  if (!isObject(normalized)) {
-    return false;
-  }
-
-  const finalOptions = {
-    capture: Boolean(normalized.capture),
-    passive: Boolean(normalized.passive),
-  };
-
-  if (normalized.signal) {
-    finalOptions.signal = normalized.signal;
-  }
-
-  return finalOptions;
-}
-
-function wantsOnce(options = false) {
-  const opts = getOptionsObject(options);
-  return opts.once === true;
-}
-
-function withoutOnce(options = false) {
-  if (!isObject(options)) {
-    return options;
-  }
-
-  const { once, ...rest } = options;
-  return rest;
-}
-
-function wantsFirebreakBypass(options = false) {
-  const opts = getOptionsObject(options);
-  return opts.bypassFirebreak === true;
-}
-
-function wantsWindowMirror(options = false, defaultValue = false) {
-  const opts = getOptionsObject(options);
-
-  if (typeof opts.mirrorToWindow === "boolean") {
-    return opts.mirrorToWindow;
-  }
-
-  return Boolean(defaultValue);
-}
-
-function isEventTargetLike(target) {
-  return Boolean(
-    target &&
-      isFunction(target.addEventListener) &&
-      isFunction(target.removeEventListener) &&
-      isFunction(target.dispatchEvent)
-  );
-}
-
-function getDefaultTarget() {
-  if (!localIsBrowser()) {
-    return null;
-  }
-
-  try {
-    return document || null;
-  } catch {
-    return null;
-  }
-}
-
-function getWindowTarget() {
-  if (!localIsBrowser()) {
-    return null;
-  }
-
-  try {
-    return window || null;
-  } catch {
-    return null;
-  }
-}
-
-function resolveTarget(target = DEFAULT_TARGET) {
-  if (isEventTargetLike(target)) {
-    return target;
-  }
-
-  const key = safeText(target, DEFAULT_TARGET).toLowerCase();
-
-  if (key === "window") {
-    return getWindowTarget();
-  }
-
-  if (key === "document") {
-    return getDefaultTarget();
-  }
-
-  return getDefaultTarget();
-}
-
-function createCustomEvent(name, detail = {}) {
-  try {
-    if (typeof CustomEvent === "function") {
-      return new CustomEvent(name, {
-        detail,
-        bubbles: false,
-        cancelable: false,
-        composed: false,
-      });
-    }
-  } catch {}
-
-  try {
-    if (!localIsBrowser()) {
-      return null;
-    }
-
-    const event = document.createEvent("CustomEvent");
-    event.initCustomEvent(name, false, false, detail);
-
-    return event;
-  } catch {
-    return null;
-  }
-}
-
-/* =========================================================
-   EVENT CLASSIFICATION
-========================================================= */
-
 function startsWithAny(value = "", prefixes = []) {
-  const text = safeText(value, "");
-  return prefixes.some((prefix) => text.startsWith(prefix));
+  const clean = text(value, "");
+  return prefixes.some((prefix) => clean.startsWith(prefix));
 }
 
-function isCriticalEvent(name = "") {
-  const eventName = normalizeEventName(name);
+function eventClass(name = "") {
+  const clean = text(name, "");
 
-  return Boolean(
-    CRITICAL_EVENT_NAMES.has(eventName) ||
-    startsWithAny(eventName, CRITICAL_EVENT_PREFIXES)
-  );
-}
-
-function isLowPriorityEvent(name = "") {
-  const eventName = normalizeEventName(name);
-
-  return Boolean(
-    LOW_PRIORITY_EVENT_NAMES.has(eventName) ||
-    startsWithAny(eventName, LOW_PRIORITY_EVENT_PREFIXES)
-  );
-}
-
-function isSilentDropEvent(name = "") {
-  const eventName = normalizeEventName(name);
-
-  return Boolean(
-    SILENT_DROP_NAMES.has(eventName) ||
-    startsWithAny(eventName, SILENT_DROP_PREFIXES)
-  );
-}
-
-function getEventClass(name = "") {
-  const eventName = normalizeEventName(name);
-
-  if (isCriticalEvent(eventName)) {
+  if (CRITICAL_NAMES.has(clean) || startsWithAny(clean, CRITICAL_PREFIXES)) {
     return "critical";
   }
 
-  if (isLowPriorityEvent(eventName)) {
-    return "low-priority";
+  if (LOW_NAMES.has(clean) || startsWithAny(clean, LOW_PREFIXES)) {
+    return "low";
   }
 
   return "normal";
 }
 
-/* =========================================================
-   IDS / DEDUPE
-========================================================= */
+function silentDrop(name = "") {
+  const clean = text(name, "");
 
-const handlerIds = new WeakMap();
-const targetIds = new WeakMap();
-
-let nextHandlerId = 1;
-let nextTargetId = 1;
-
-function getHandlerId(handler) {
-  if (!isFunction(handler)) {
-    return "handler:none";
-  }
-
-  try {
-    if (!handlerIds.has(handler)) {
-      handlerIds.set(handler, nextHandlerId++);
-    }
-
-    return `handler:${handlerIds.get(handler)}`;
-  } catch {
-    return "handler:unknown";
-  }
+  return (
+    SILENT_DROP_NAMES.has(clean) ||
+    startsWithAny(clean, SILENT_DROP_PREFIXES)
+  );
 }
-
-function getTargetKey(target = DEFAULT_TARGET) {
-  if (typeof target === "string") {
-    return `target:${safeText(target, DEFAULT_TARGET).toLowerCase()}`;
-  }
-
-  if (!target) {
-    return `target:${DEFAULT_TARGET}`;
-  }
-
-  try {
-    if (!targetIds.has(target)) {
-      targetIds.set(target, nextTargetId++);
-    }
-
-    return `target:${targetIds.get(target)}`;
-  } catch {
-    return "target:unknown";
-  }
-}
-
-function normalizeOptionsForKey(options = false) {
-  const normalized = normalizeDomOptions(options);
-
-  if (normalized === true) {
-    return "capture:true|passive:false|signal:false";
-  }
-
-  if (normalized === false || normalized === null || normalized === undefined) {
-    return "capture:false|passive:false|signal:false";
-  }
-
-  if (isObject(normalized)) {
-    return [
-      `capture:${Boolean(normalized.capture)}`,
-      `passive:${Boolean(normalized.passive)}`,
-      `signal:${Boolean(normalized.signal)}`,
-    ].join("|");
-  }
-
-  return String(normalized);
-}
-
-function makeListenerKey({
-  name = "",
-  handler = null,
-  options = false,
-  targetRef = DEFAULT_TARGET,
-} = {}) {
-  return [
-    getTargetKey(targetRef),
-    normalizeEventName(name),
-    getHandlerId(handler),
-    normalizeOptionsForKey(options),
-  ].join("::");
-}
-
-/* =========================================================
-   REDACTION / PREVIEW
-========================================================= */
 
 function redactString(value = "") {
-  const text = safeText(value, "");
+  const raw = text(value, "");
 
-  if (!text) {
-    return text;
-  }
+  if (!raw) return raw;
 
   try {
-    return text
+    return raw
       .replace(/(bearer\s+)([a-z0-9._~+/=-]+)/gi, "$1***")
       .replace(
         /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)([^&#\s]+)/gi,
         "$1***"
       )
-      .replace(/([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)/gi, "***");
+      .replace(/[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+/gi, "***");
   } catch {
-    return TOKENISH_TEXT_RE.test(text) ? "***" : text;
+    return TOKENISH_RE.test(raw) ? "***" : raw;
   }
 }
 
-function shouldRedactKey(key = "") {
-  return SENSITIVE_KEY_RE.test(safeText(key, ""));
-}
-
-function safePreview(value, depth = 0, keyHint = "") {
-  if (shouldRedactKey(keyHint)) {
-    return value ? "***" : null;
+function preview(value, depth = 0, keyHint = "") {
+  if (SENSITIVE_KEY_RE.test(text(keyHint, ""))) {
+    return value ? "***" : value;
   }
 
-  if (depth > 2) {
-    return "[depth-limit]";
-  }
+  if (depth > 3) return "[MaxDepth]";
 
-  if (value === null || value === undefined) {
-    return value;
-  }
+  if (value === null || value === undefined) return value;
 
-  if (typeof value === "string") {
-    return redactString(value);
-  }
-
-  if (typeof value === "number" || typeof value === "boolean") {
-    return value;
-  }
-
-  if (typeof value === "bigint") {
-    return String(value);
-  }
-
-  if (typeof value === "function") {
-    return "[function]";
-  }
+  if (typeof value === "string") return redactString(value);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return "[Function]";
 
   if (value instanceof Error) {
     return {
       name: value.name || "Error",
-      message: redactString(safeText(value.message, "Error")),
+      message: redactString(value.message || ""),
       stack: value.stack ? "[stack]" : "",
     };
   }
@@ -711,43 +290,258 @@ function safePreview(value, depth = 0, keyHint = "") {
   }
 
   if (Array.isArray(value)) {
-    return value
-      .slice(0, 12)
-      .map((item) => safePreview(item, depth + 1, keyHint));
+    return value.slice(0, 20).map((item) => preview(item, depth + 1, keyHint));
   }
 
-  if (isObject(value)) {
-    const output = {};
+  if (plainObject(value)) {
+    const out = {};
 
-    for (const [key, item] of Object.entries(value).slice(0, 30)) {
-      output[key] = shouldRedactKey(key)
-        ? item ? "***" : null
-        : safePreview(item, depth + 1, key);
+    for (const [key, item] of Object.entries(value).slice(0, 50)) {
+      out[key] = preview(item, depth + 1, key);
     }
 
-    return output;
+    return out;
   }
 
   try {
     return redactString(String(value));
   } catch {
-    return "[unserializable]";
+    return "[Unserializable]";
   }
 }
 
-function mergePreviewWithReason(reason = "", detail = {}) {
-  const preview = safePreview(detail);
+function warn(...args) {
+  try {
+    console.warn("[CoreEvents]", ...args.map((item) => preview(item)));
+  } catch {}
+}
 
-  if (isObject(preview)) {
-    return {
-      reason,
-      ...preview,
-    };
+/* =========================================================
+   TARGETS / OPTIONS
+========================================================= */
+
+function eventTargetLike(target) {
+  return Boolean(
+    target &&
+      fn(target.addEventListener) &&
+      fn(target.removeEventListener) &&
+      fn(target.dispatchEvent)
+  );
+}
+
+function defaultTarget() {
+  if (!browser()) return null;
+
+  try {
+    return document || null;
+  } catch {
+    return null;
+  }
+}
+
+function windowTarget() {
+  if (!browser()) return null;
+
+  try {
+    return window || null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveTarget(target = DEFAULT_TARGET) {
+  if (eventTargetLike(target)) return target;
+
+  const key = text(target, DEFAULT_TARGET).toLowerCase();
+
+  if (key === "window") return windowTarget();
+  if (key === "document") return defaultTarget();
+
+  return defaultTarget();
+}
+
+function normalizeOptions(options = false) {
+  try {
+    if (typeof normalizeListenerOptions === "function") {
+      const normalized = normalizeListenerOptions(options);
+
+      if (
+        normalized === true ||
+        normalized === false ||
+        plainObject(normalized)
+      ) {
+        return normalized;
+      }
+    }
+  } catch {}
+
+  if (options === true) return { capture: true };
+  if (options === false || options === null || options === undefined) return false;
+
+  return plainObject(options) ? { ...options } : false;
+}
+
+function optionsObject(options = false) {
+  const normalized = normalizeOptions(options);
+  return plainObject(normalized) ? normalized : {};
+}
+
+function wantsOnce(options = false) {
+  return optionsObject(options).once === true;
+}
+
+function wantsBypass(options = false) {
+  return optionsObject(options).bypassFirebreak === true;
+}
+
+function wantsMirror(options = false, fallback = false) {
+  const value = optionsObject(options).mirrorToWindow;
+
+  return typeof value === "boolean"
+    ? value
+    : Boolean(fallback);
+}
+
+function targetFromOptions(options = false) {
+  return optionsObject(options).target || null;
+}
+
+function domOptions(options = false) {
+  const normalized = normalizeOptions(options);
+
+  if (normalized === true) return { capture: true };
+  if (!plainObject(normalized)) return false;
+
+  const out = {
+    capture: Boolean(normalized.capture),
+    passive: Boolean(normalized.passive),
+  };
+
+  if (normalized.signal) out.signal = normalized.signal;
+
+  return out;
+}
+
+function removeOnceOption(options = false) {
+  if (!plainObject(options)) return options;
+
+  const { once, ...rest } = options;
+  return rest;
+}
+
+/* =========================================================
+   IDS / KEYS
+========================================================= */
+
+const handlerIds = new WeakMap();
+const targetIds = new WeakMap();
+
+let nextHandlerId = 1;
+let nextTargetId = 1;
+
+function handlerId(handler) {
+  if (!fn(handler)) return "handler:none";
+
+  try {
+    if (!handlerIds.has(handler)) {
+      handlerIds.set(handler, nextHandlerId++);
+    }
+
+    return `handler:${handlerIds.get(handler)}`;
+  } catch {
+    return "handler:unknown";
+  }
+}
+
+function targetKey(target = DEFAULT_TARGET) {
+  if (typeof target === "string") {
+    return `target:${text(target, DEFAULT_TARGET).toLowerCase()}`;
   }
 
+  if (!target) return `target:${DEFAULT_TARGET}`;
+
+  try {
+    if (!targetIds.has(target)) {
+      targetIds.set(target, nextTargetId++);
+    }
+
+    return `target:${targetIds.get(target)}`;
+  } catch {
+    return "target:unknown";
+  }
+}
+
+function optionsKey(options = false) {
+  const normalized = domOptions(options);
+
+  if (!plainObject(normalized)) {
+    return "capture:false|passive:false|signal:false";
+  }
+
+  return [
+    `capture:${Boolean(normalized.capture)}`,
+    `passive:${Boolean(normalized.passive)}`,
+    `signal:${Boolean(normalized.signal)}`,
+  ].join("|");
+}
+
+function listenerKey({
+  name = "",
+  handler = null,
+  options = false,
+  targetRef = DEFAULT_TARGET,
+} = {}) {
+  return [
+    targetKey(targetRef),
+    text(name, ""),
+    handlerId(handler),
+    optionsKey(options),
+  ].join("::");
+}
+
+/* =========================================================
+   CUSTOM EVENT
+========================================================= */
+
+function createEvent(name = "", detail = {}) {
+  try {
+    if (typeof CustomEvent === "function") {
+      return new CustomEvent(name, {
+        detail,
+        bubbles: false,
+        cancelable: false,
+        composed: false,
+      });
+    }
+  } catch {}
+
+  try {
+    if (!browser()) return null;
+
+    const event = document.createEvent("CustomEvent");
+    event.initCustomEvent(name, false, false, detail);
+
+    return event;
+  } catch {
+    return null;
+  }
+}
+
+function memoryEvent(name = "", detail = {}, target = null) {
   return {
-    reason,
-    detail: preview,
+    type: text(name, ""),
+    detail,
+    payload: detail,
+    target,
+    currentTarget: target,
+    defaultPrevented: false,
+
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+
+    stopPropagation() {},
+    stopImmediatePropagation() {},
   };
 }
 
@@ -760,44 +554,45 @@ export function createEvents({
   mirrorToWindow = false,
 
   maxRecentEvents = MAX_RECENT_EVENTS,
-  maxSyncEmitDepth = MAX_SYNC_EMIT_DEPTH,
 
-  maxEmitsPerWindow = MAX_EMITS_PER_WINDOW,
-  maxEmitsPerEventPerWindow = MAX_EMITS_PER_EVENT_PER_WINDOW,
-
-  maxLowPriorityEmitsPerWindow = MAX_LOW_PRIORITY_EMITS_PER_WINDOW,
-  maxLowPriorityEmitsPerEventPerWindow = MAX_LOW_PRIORITY_EMITS_PER_EVENT_PER_WINDOW,
-
-  maxCriticalEmitsPerWindow = MAX_CRITICAL_EMITS_PER_WINDOW,
-  maxCriticalEmitsPerEventPerWindow = MAX_CRITICAL_EMITS_PER_EVENT_PER_WINDOW,
-
-  maxAbsoluteEmitsPerWindow = MAX_ABSOLUTE_EMITS_PER_WINDOW,
+  maxSyncEmitDepth = MAX_SYNC_DEPTH,
 
   rateWindowMs = RATE_WINDOW_MS,
+
+  maxAbsoluteEmitsPerWindow = MAX_ABSOLUTE_EMITS,
+
+  maxEmitsPerWindow = MAX_NORMAL_EMITS,
+  maxEmitsPerEventPerWindow = MAX_NORMAL_EVENT_EMITS,
+
+  maxLowPriorityEmitsPerWindow = MAX_LOW_EMITS,
+  maxLowPriorityEmitsPerEventPerWindow = MAX_LOW_EVENT_EMITS,
+
+  maxCriticalEmitsPerWindow = MAX_CRITICAL_EMITS,
+  maxCriticalEmitsPerEventPerWindow = MAX_CRITICAL_EVENT_EMITS,
 } = {}) {
-  const memoryListeners = new Map();
-  const activeListeners = new Map();
-  const recentEvents = [];
+  const memory = new Map();
+  const active = new Map();
+  const recent = [];
 
-  const emitDepthByName = new Map();
-  const eventRateMap = new Map();
-  const recentSampleMap = new Map();
-  const dropRateMap = new Map();
+  const depthByName = new Map();
+  const eventRate = new Map();
+  const dropRate = new Map();
 
-  let rateWindowStartedAt = safeNow();
+  let windowStartedAt = now();
 
-  let normalEmitsInWindow = 0;
-  let lowPriorityEmitsInWindow = 0;
-  let criticalEmitsInWindow = 0;
-  let absoluteEmitsInWindow = 0;
+  let absoluteCount = 0;
+  let normalCount = 0;
+  let lowCount = 0;
+  let criticalCount = 0;
 
   let lastDropWarningAt = 0;
+  const lastDropWarningByKey = new Map();
 
   const state = {
     version: EVENTS_VERSION,
 
-    target: typeof target === "string" ? safeText(target, DEFAULT_TARGET) : "custom",
-    browser: localIsBrowser(),
+    target: typeof target === "string" ? target : "custom",
+    browser: browser(),
 
     emitCount: 0,
     onCount: 0,
@@ -816,49 +611,22 @@ export function createEvents({
     lastDroppedEvent: null,
   };
 
-  function shouldSampleRecent(type = "event", name = "") {
-    const eventName = normalizeEventName(name);
+  function pushRecent(type = "event", name = "", detail = {}) {
+    const atMs = now();
 
-    if (type !== "emit") {
-      return true;
-    }
-
-    if (isCriticalEvent(eventName) || !isLowPriorityEvent(eventName)) {
-      return true;
-    }
-
-    const current = safeNow();
-    const last = safeNumber(recentSampleMap.get(eventName), 0);
-
-    if (current - last < NOISY_RECENT_SAMPLE_MS) {
-      return false;
-    }
-
-    recentSampleMap.set(eventName, current);
-
-    return true;
-  }
-
-  function pushRecentEvent(type = "event", name = "", detail = {}) {
-    if (!shouldSampleRecent(type, name)) {
-      return;
-    }
-
-    const atMs = safeNow();
-
-    recentEvents.unshift({
-      type: safeText(type, "event"),
-      name: safeText(name, ""),
-      className: getEventClass(name),
-      detail: safePreview(detail),
-      at: safeIsoDate(atMs),
+    recent.unshift({
+      type,
+      name,
+      className: eventClass(name),
+      detail: preview(detail),
+      at: iso(atMs),
       atMs,
     });
 
-    const limit = Math.max(1, safeNumber(maxRecentEvents, MAX_RECENT_EVENTS));
+    const limit = Math.max(1, number(maxRecentEvents, MAX_RECENT_EVENTS));
 
-    if (recentEvents.length > limit) {
-      recentEvents.splice(limit);
+    if (recent.length > limit) {
+      recent.splice(limit);
     }
   }
 
@@ -866,175 +634,138 @@ export function createEvents({
     state.errorCount += 1;
 
     state.lastError = {
-      source: safeText(source, "events"),
-      name: safeText(name, ""),
-      message: redactString(safeText(error?.message || error, "Event bus error.")),
+      source: text(source, "events"),
+      name: text(name, ""),
+      message: redactString(text(error?.message || error, "Event bus error.")),
       stack: error?.stack ? "[stack]" : "",
-      at: safeIsoDate(),
+      at: iso(),
     };
 
-    pushRecentEvent("error", name, {
-      source,
-      message: state.lastError.message,
-    });
+    pushRecent("error", name, state.lastError);
 
-    safeWarn(state.lastError.message, {
+    warn(state.lastError.message, {
       source,
       name,
-      error: safePreview(error),
     });
   }
 
-  function shouldWarnDrop(name = "", reason = "") {
-    const eventName = normalizeEventName(name);
+  function resetWindowIfNeeded() {
+    const current = now();
+    const windowMs = Math.max(100, number(rateWindowMs, RATE_WINDOW_MS));
 
-    if (isSilentDropEvent(eventName)) {
+    if (current - windowStartedAt <= windowMs) return;
+
+    windowStartedAt = current;
+
+    absoluteCount = 0;
+    normalCount = 0;
+    lowCount = 0;
+    criticalCount = 0;
+
+    eventRate.clear();
+    dropRate.clear();
+  }
+
+  function warnDrop(name = "", reason = "") {
+    if (silentDrop(name)) {
       state.silentDropCount += 1;
       return false;
     }
 
-    const guard = getGlobalDropGuard();
-    const current = safeNow();
+    const current = now();
+    const key = `${name}:${reason}`;
 
-    const key = `${eventName}:${safeText(reason, "")}`;
-    const lastByKey = safeNumber(guard.lastByKey?.get?.(key), 0);
-
-    if (current - lastByKey < DROP_WARNING_PER_EVENT_INTERVAL_MS) {
-      guard.suppressed = safeNumber(guard.suppressed, 0) + 1;
+    if (current - number(lastDropWarningAt, 0) < DROP_WARNING_MS) {
       return false;
     }
 
-    const localLast = safeNumber(lastDropWarningAt, 0);
-    const globalLast = safeNumber(guard.lastWarningAt, 0);
-
-    if (
-      current - localLast < DROP_WARNING_INTERVAL_MS ||
-      current - globalLast < DROP_WARNING_INTERVAL_MS
-    ) {
-      guard.suppressed = safeNumber(guard.suppressed, 0) + 1;
+    if (current - number(lastDropWarningByKey.get(key), 0) < DROP_WARNING_EVENT_MS) {
       return false;
     }
 
     lastDropWarningAt = current;
-    guard.lastWarningAt = current;
-
-    try {
-      guard.lastByKey.set(key, current);
-    } catch {}
+    lastDropWarningByKey.set(key, current);
 
     return true;
   }
 
   function recordDrop(name = "", reason = "", detail = {}) {
-    const eventName = normalizeEventName(name);
-
     state.dropCount += 1;
 
-    const dropKey = `${eventName}:${safeText(reason, "")}`;
-
-    dropRateMap.set(
-      dropKey,
-      safeNumber(dropRateMap.get(dropKey), 0) + 1
-    );
+    const key = `${name}:${reason}`;
+    dropRate.set(key, number(dropRate.get(key), 0) + 1);
 
     state.lastDroppedEvent = {
-      name: eventName,
-      reason: safeText(reason, ""),
-      className: getEventClass(eventName),
-      at: safeIsoDate(),
+      name,
+      reason,
+      className: eventClass(name),
+      at: iso(),
     };
 
-    pushRecentEvent(
-      "drop",
-      eventName,
-      mergePreviewWithReason(reason, detail)
-    );
-
-    if (!shouldWarnDrop(eventName, reason)) {
-      return;
-    }
-
-    safeWarn(`Evento bloqueado por firebreak: ${eventName}`, {
+    pushRecent("drop", name, {
       reason,
-      className: getEventClass(eventName),
-      detail: safePreview(detail),
+      ...preview(detail),
     });
+
+    if (warnDrop(name, reason)) {
+      warn(`Evento bloqueado por firebreak: ${name}`, {
+        reason,
+        className: eventClass(name),
+        detail: preview(detail),
+      });
+    }
   }
 
-  function resetRateWindowIfNeeded() {
-    const current = safeNow();
-    const windowMs = Math.max(100, safeNumber(rateWindowMs, RATE_WINDOW_MS));
+  function allowEmit(name = "", options = false) {
+    const eventName = text(name, "");
+    if (!eventName) return false;
 
-    if (current - rateWindowStartedAt <= windowMs) {
-      return;
-    }
+    if (wantsBypass(options)) return true;
 
-    rateWindowStartedAt = current;
+    resetWindowIfNeeded();
 
-    normalEmitsInWindow = 0;
-    lowPriorityEmitsInWindow = 0;
-    criticalEmitsInWindow = 0;
-    absoluteEmitsInWindow = 0;
+    const depth = number(depthByName.get(eventName), 0);
 
-    eventRateMap.clear();
-    recentSampleMap.clear();
-    dropRateMap.clear();
-  }
-
-  function shouldAllowEmit(eventName = "", options = {}) {
-    const name = normalizeEventName(eventName);
-
-    if (!name) {
-      return false;
-    }
-
-    if (wantsFirebreakBypass(options)) {
-      return true;
-    }
-
-    resetRateWindowIfNeeded();
-
-    const eventClass = getEventClass(name);
-    const currentDepth = safeNumber(emitDepthByName.get(name), 0);
-
-    if (currentDepth >= safeNumber(maxSyncEmitDepth, MAX_SYNC_EMIT_DEPTH)) {
-      recordDrop(name, "max-sync-depth", {
-        currentDepth,
+    if (depth >= number(maxSyncEmitDepth, MAX_SYNC_DEPTH)) {
+      recordDrop(eventName, "max-sync-depth", {
+        depth,
         maxSyncEmitDepth,
       });
 
       return false;
     }
 
-    absoluteEmitsInWindow += 1;
+    absoluteCount += 1;
 
-    if (absoluteEmitsInWindow > safeNumber(maxAbsoluteEmitsPerWindow, MAX_ABSOLUTE_EMITS_PER_WINDOW)) {
-      recordDrop(name, "max-absolute-rate", {
-        absoluteEmitsInWindow,
+    if (absoluteCount > number(maxAbsoluteEmitsPerWindow, MAX_ABSOLUTE_EMITS)) {
+      recordDrop(eventName, "max-absolute-rate", {
+        absoluteCount,
         maxAbsoluteEmitsPerWindow,
       });
 
       return false;
     }
 
-    const currentEventCount = safeNumber(eventRateMap.get(name), 0) + 1;
-    eventRateMap.set(name, currentEventCount);
+    const currentEventRate = number(eventRate.get(eventName), 0) + 1;
+    eventRate.set(eventName, currentEventRate);
 
-    if (eventClass === "critical") {
-      criticalEmitsInWindow += 1;
+    const cls = eventClass(eventName);
 
-      if (criticalEmitsInWindow > safeNumber(maxCriticalEmitsPerWindow, MAX_CRITICAL_EMITS_PER_WINDOW)) {
-        recordDrop(name, "max-critical-total-rate", {
-          criticalEmitsInWindow,
+    if (cls === "critical") {
+      criticalCount += 1;
+
+      if (criticalCount > number(maxCriticalEmitsPerWindow, MAX_CRITICAL_EMITS)) {
+        recordDrop(eventName, "max-critical-total-rate", {
+          criticalCount,
           maxCriticalEmitsPerWindow,
         });
 
         return false;
       }
 
-      if (currentEventCount > safeNumber(maxCriticalEmitsPerEventPerWindow, MAX_CRITICAL_EMITS_PER_EVENT_PER_WINDOW)) {
-        recordDrop(name, "max-critical-event-rate", {
-          currentEventCount,
+      if (currentEventRate > number(maxCriticalEmitsPerEventPerWindow, MAX_CRITICAL_EVENT_EMITS)) {
+        recordDrop(eventName, "max-critical-event-rate", {
+          currentEventRate,
           maxCriticalEmitsPerEventPerWindow,
         });
 
@@ -1044,21 +775,21 @@ export function createEvents({
       return true;
     }
 
-    if (eventClass === "low-priority") {
-      lowPriorityEmitsInWindow += 1;
+    if (cls === "low") {
+      lowCount += 1;
 
-      if (lowPriorityEmitsInWindow > safeNumber(maxLowPriorityEmitsPerWindow, MAX_LOW_PRIORITY_EMITS_PER_WINDOW)) {
-        recordDrop(name, "max-low-priority-rate", {
-          lowPriorityEmitsInWindow,
+      if (lowCount > number(maxLowPriorityEmitsPerWindow, MAX_LOW_EMITS)) {
+        recordDrop(eventName, "max-low-priority-rate", {
+          lowCount,
           maxLowPriorityEmitsPerWindow,
         });
 
         return false;
       }
 
-      if (currentEventCount > safeNumber(maxLowPriorityEmitsPerEventPerWindow, MAX_LOW_PRIORITY_EMITS_PER_EVENT_PER_WINDOW)) {
-        recordDrop(name, "max-low-priority-event-rate", {
-          currentEventCount,
+      if (currentEventRate > number(maxLowPriorityEmitsPerEventPerWindow, MAX_LOW_EVENT_EMITS)) {
+        recordDrop(eventName, "max-low-priority-event-rate", {
+          currentEventRate,
           maxLowPriorityEmitsPerEventPerWindow,
         });
 
@@ -1068,20 +799,20 @@ export function createEvents({
       return true;
     }
 
-    normalEmitsInWindow += 1;
+    normalCount += 1;
 
-    if (normalEmitsInWindow > safeNumber(maxEmitsPerWindow, MAX_EMITS_PER_WINDOW)) {
-      recordDrop(name, "max-total-rate", {
-        normalEmitsInWindow,
+    if (normalCount > number(maxEmitsPerWindow, MAX_NORMAL_EMITS)) {
+      recordDrop(eventName, "max-normal-total-rate", {
+        normalCount,
         maxEmitsPerWindow,
       });
 
       return false;
     }
 
-    if (currentEventCount > safeNumber(maxEmitsPerEventPerWindow, MAX_EMITS_PER_EVENT_PER_WINDOW)) {
-      recordDrop(name, "max-event-rate", {
-        currentEventCount,
+    if (currentEventRate > number(maxEmitsPerEventPerWindow, MAX_NORMAL_EVENT_EMITS)) {
+      recordDrop(eventName, "max-normal-event-rate", {
+        currentEventRate,
         maxEmitsPerEventPerWindow,
       });
 
@@ -1091,276 +822,182 @@ export function createEvents({
     return true;
   }
 
-  function beginEmit(eventName = "") {
-    const name = normalizeEventName(eventName);
-    const currentDepth = safeNumber(emitDepthByName.get(name), 0);
-
-    emitDepthByName.set(name, currentDepth + 1);
+  function begin(name = "") {
+    const eventName = text(name, "");
+    depthByName.set(eventName, number(depthByName.get(eventName), 0) + 1);
   }
 
-  function endEmit(eventName = "") {
-    const name = normalizeEventName(eventName);
-    const currentDepth = safeNumber(emitDepthByName.get(name), 0);
+  function end(name = "") {
+    const eventName = text(name, "");
+    const depth = number(depthByName.get(eventName), 0);
 
-    if (currentDepth <= 1) {
-      emitDepthByName.delete(name);
+    if (depth <= 1) {
+      depthByName.delete(eventName);
       return;
     }
 
-    emitDepthByName.set(name, currentDepth - 1);
+    depthByName.set(eventName, depth - 1);
   }
 
   function getMemorySet(name = "") {
-    const eventName = normalizeEventName(name);
+    const eventName = text(name, "");
+    if (!eventName) return null;
 
-    if (!eventName) {
-      return null;
+    if (!memory.has(eventName)) {
+      memory.set(eventName, new Set());
     }
 
-    if (!memoryListeners.has(eventName)) {
-      memoryListeners.set(eventName, new Set());
-    }
-
-    return memoryListeners.get(eventName);
+    return memory.get(eventName);
   }
 
-  function makeEventLike(name = "", detail = {}, targetRef = null) {
-    return {
-      type: normalizeEventName(name),
-      detail,
-      payload: detail,
-      target: targetRef,
-      currentTarget: targetRef,
-      defaultPrevented: false,
-
-      preventDefault() {
-        this.defaultPrevented = true;
-      },
-
-      stopPropagation() {},
-      stopImmediatePropagation() {},
-    };
-  }
-
-  function callHandlerSafely({
-    handler,
-    event,
-    eventName = "",
-    source = "handler",
-  } = {}) {
-    if (!isFunction(handler)) {
-      return false;
-    }
+  function callHandler(handler, event, name = "", source = "handler") {
+    if (!fn(handler)) return false;
 
     try {
       const result = handler(event);
 
-      if (result && typeof result === "object" && isFunction(result.catch)) {
+      if (result && typeof result === "object" && fn(result.catch)) {
         result.catch((error) => {
-          recordError(`${source}:async`, error, eventName);
+          recordError(`${source}:async`, error, name);
         });
       }
 
       return true;
     } catch (error) {
-      recordError(source, error, eventName);
+      recordError(source, error, name);
       return false;
     }
   }
 
-  function callWildcardSafely({
-    handler,
-    eventName = "",
-    payload = {},
-    event = null,
-  } = {}) {
-    if (!isFunction(handler)) {
-      return false;
-    }
+  function callWildcard(handler, name = "", payload = {}, event = null) {
+    if (!fn(handler)) return false;
 
     try {
-      const result = handler(eventName, payload, event);
+      const result = handler(name, payload, event);
 
-      if (result && typeof result === "object" && isFunction(result.catch)) {
+      if (result && typeof result === "object" && fn(result.catch)) {
         result.catch((error) => {
-          recordError("wildcard-handler:async", error, eventName);
+          recordError("wildcard:async", error, name);
         });
       }
 
       return true;
     } catch (error) {
-      recordError("wildcard-handler", error, eventName);
+      recordError("wildcard", error, name);
       return false;
     }
   }
 
-  function emitMemory(name = "", detail = {}) {
-    const eventName = normalizeEventName(name);
-    const set = memoryListeners.get(eventName);
+  function emitMemory(name = "", payload = {}) {
+    const eventName = text(name, "");
+    const set = memory.get(eventName);
 
-    if (!set || !set.size) {
-      return false;
-    }
+    if (!set || !set.size) return false;
 
-    const eventLike = makeEventLike(eventName, detail, null);
+    const event = memoryEvent(eventName, payload, null);
 
     for (const record of Array.from(set)) {
-      callHandlerSafely({
-        handler: record.handler,
-        event: eventLike,
-        eventName,
-        source: "memory-handler",
-      });
+      callHandler(record.handler, event, eventName, "memory");
     }
 
     return true;
   }
 
-  function emitWildcardMemory(name = "", detail = {}, event = null) {
-    const eventName = normalizeEventName(name);
-    const set = memoryListeners.get(WILDCARD_EVENT);
+  function emitWildcard(name = "", payload = {}, event = null) {
+    const set = memory.get(WILDCARD_EVENT);
 
-    if (!set || !set.size) {
-      return false;
-    }
+    if (!set || !set.size) return false;
 
     state.wildcardEmitCount += 1;
 
-    const eventLike = event || makeEventLike(eventName, detail, null);
+    const eventLike = event || memoryEvent(name, payload, null);
 
     for (const record of Array.from(set)) {
-      callWildcardSafely({
-        handler: record.handler,
-        eventName,
-        payload: detail,
-        event: eventLike,
-      });
+      callWildcard(record.handler, name, payload, eventLike);
     }
 
     return true;
   }
 
-  function dispatchDomEvent({
-    eventName = "",
-    payload = {},
-    domTarget = null,
-    source = "dom-dispatch",
-    wildcard = true,
-  } = {}) {
-    if (!localIsBrowser() || !isEventTargetLike(domTarget)) {
-      return false;
-    }
+  function dispatchDom(name = "", payload = {}, targetRef = null, wildcard = true) {
+    if (!browser() || !eventTargetLike(targetRef)) return false;
 
     try {
-      const event = createCustomEvent(eventName, payload);
+      const event = createEvent(name, payload);
+      if (!event) return false;
 
-      if (!event) {
-        return false;
-      }
-
-      const result = domTarget.dispatchEvent(event);
+      const ok = targetRef.dispatchEvent(event);
 
       if (wildcard) {
-        emitWildcardMemory(eventName, payload, event);
+        emitWildcard(name, payload, event);
       }
 
-      return Boolean(result);
+      return Boolean(ok);
     } catch (error) {
-      recordError(source, error, eventName);
+      recordError("dom-dispatch", error, name);
       return false;
     }
   }
 
-  function emit(name, detail = {}, options = {}) {
-    const eventName = normalizeEventName(name);
+  function emit(name, detail = {}, options = false) {
+    const eventName = text(name, "");
 
-    if (!eventName) {
-      return false;
-    }
-
-    if (!shouldAllowEmit(eventName, options)) {
-      return false;
-    }
+    if (!eventName) return false;
+    if (!allowEmit(eventName, options)) return false;
 
     const payload = detail === undefined ? {} : detail;
 
     state.emitCount += 1;
     state.lastEvent = eventName;
-    state.lastEventAt = safeNow();
+    state.lastEventAt = now();
 
-    pushRecentEvent("emit", eventName, payload);
-    beginEmit(eventName);
+    pushRecent("emit", eventName, payload);
+    begin(eventName);
 
     try {
-      const optionsTarget = getOptionsTarget(options);
-      const domTarget = resolveTarget(optionsTarget || target);
-
+      const eventTarget = resolveTarget(targetFromOptions(options) || target);
       let emitted = false;
 
-      if (localIsBrowser() && isEventTargetLike(domTarget)) {
-        emitted = dispatchDomEvent({
-          eventName,
-          payload,
-          domTarget,
-          source: "dom-dispatch",
-          wildcard: true,
-        });
+      if (browser() && eventTargetLike(eventTarget)) {
+        emitted = dispatchDom(eventName, payload, eventTarget, true);
 
-        if (wantsWindowMirror(options, mirrorToWindow) && domTarget !== getWindowTarget()) {
-          dispatchDomEvent({
-            eventName,
-            payload,
-            domTarget: getWindowTarget(),
-            source: "window-mirror",
-            wildcard: false,
-          });
+        if (wantsMirror(options, mirrorToWindow) && eventTarget !== windowTarget()) {
+          dispatchDom(eventName, payload, windowTarget(), false);
         }
       } else {
         emitted = emitMemory(eventName, payload);
-        emitWildcardMemory(eventName, payload, null);
+        emitWildcard(eventName, payload, null);
       }
 
       return emitted;
     } finally {
-      endEmit(eventName);
+      end(eventName);
     }
   }
 
-  function makeSafeDomHandler(eventName, handler) {
-    return function safeDomHandler(event) {
-      return callHandlerSafely({
-        handler,
-        event,
-        eventName,
-        source: "dom-handler",
-      });
+  function safeDomHandler(name, handler) {
+    return function onDomEvent(event) {
+      return callHandler(handler, event, name, "dom");
     };
   }
 
-  function registerRecord(record) {
-    if (!record?.key) {
-      return false;
-    }
+  function register(record) {
+    if (!record?.key) return false;
 
-    activeListeners.set(record.key, record);
+    active.set(record.key, record);
     return true;
   }
 
-  function attachSignalCleanup(record, signal) {
-    if (!record || !signal || !isFunction(signal.addEventListener)) {
-      return;
-    }
-
-    if (signal.aborted) {
-      return;
-    }
+  function attachAbortCleanup(record, signal) {
+    if (!record || !signal || !fn(signal.addEventListener)) return;
+    if (signal.aborted) return;
 
     const onAbort = () => {
       try {
-        activeListeners.delete(record.key);
+        active.delete(record.key);
       } catch {}
 
-      pushRecentEvent("off:signal-abort", record.name, {
+      pushRecent("off:signal", record.name, {
         key: record.key,
       });
     };
@@ -1377,64 +1014,60 @@ export function createEvents({
   }
 
   function on(name, handler, options = false) {
-    const eventName = normalizeEventName(name);
+    const eventName = text(name, "");
 
-    if (!eventName || !isFunction(handler)) {
-      return createNoopOff();
-    }
+    if (!eventName || !fn(handler)) return noopOff();
 
     if (wantsOnce(options)) {
-      return once(eventName, handler, withoutOnce(options));
+      return once(eventName, handler, removeOnceOption(options));
     }
 
-    const finalOptions = normalizeDomOptions(options);
-    const optionsTarget = getOptionsTarget(options);
+    const finalOptions = domOptions(options);
+    const targetOption = targetFromOptions(options);
 
     const targetRef =
       eventName === WILDCARD_EVENT
         ? "memory"
-        : optionsTarget || target;
+        : targetOption || target;
 
     const domTarget =
       eventName === WILDCARD_EVENT
         ? null
         : resolveTarget(targetRef);
 
-    const key = makeListenerKey({
+    const key = listenerKey({
       name: eventName,
       handler,
       options: finalOptions,
       targetRef,
     });
 
-    if (activeListeners.has(key)) {
-      return activeListeners.get(key)?.off || createNoopOff();
+    if (active.has(key)) {
+      return active.get(key)?.off || noopOff();
     }
 
     state.onCount += 1;
 
-    let off = createNoopOff();
+    let off = noopOff();
     let actualHandler = handler;
     let memoryRecord = null;
 
     if (
       eventName !== WILDCARD_EVENT &&
-      localIsBrowser() &&
-      isEventTargetLike(domTarget)
+      browser() &&
+      eventTargetLike(domTarget)
     ) {
-      actualHandler = makeSafeDomHandler(eventName, handler);
+      actualHandler = safeDomHandler(eventName, handler);
 
       try {
         domTarget.addEventListener(eventName, actualHandler, finalOptions);
       } catch (error) {
         recordError("dom-add", error, eventName);
-        return createNoopOff();
+        return noopOff();
       }
 
       off = () => {
-        if (!activeListeners.has(key)) {
-          return false;
-        }
+        if (!active.has(key)) return false;
 
         try {
           domTarget.removeEventListener(eventName, actualHandler, finalOptions);
@@ -1442,17 +1075,17 @@ export function createEvents({
           recordError("dom-remove", error, eventName);
         }
 
-        const record = activeListeners.get(key);
+        const record = active.get(key);
 
         try {
           record?.signalCleanup?.();
         } catch {}
 
-        activeListeners.delete(key);
+        active.delete(key);
 
         state.offCount += 1;
 
-        pushRecentEvent("off", eventName, {
+        pushRecent("off", eventName, {
           key,
         });
 
@@ -1460,10 +1093,7 @@ export function createEvents({
       };
     } else {
       const set = getMemorySet(eventName);
-
-      if (!set) {
-        return createNoopOff();
-      }
+      if (!set) return noopOff();
 
       memoryRecord = {
         key,
@@ -1474,19 +1104,17 @@ export function createEvents({
       set.add(memoryRecord);
 
       off = () => {
-        if (!activeListeners.has(key)) {
-          return false;
-        }
+        if (!active.has(key)) return false;
 
         try {
           set.delete(memoryRecord);
         } catch {}
 
-        activeListeners.delete(key);
+        active.delete(key);
 
         state.offCount += 1;
 
-        pushRecentEvent("off", eventName, {
+        pushRecent("off", eventName, {
           key,
         });
 
@@ -1505,41 +1133,39 @@ export function createEvents({
       options: finalOptions,
       once: false,
 
-      target: getTargetKey(targetRef),
+      target: targetKey(targetRef),
       targetRef,
       targetName: typeof targetRef === "string" ? targetRef : "custom",
 
       off,
       signalCleanup: null,
 
-      createdAt: safeIsoDate(),
+      createdAt: iso(),
     };
 
-    registerRecord(record);
+    register(record);
 
     if (memoryRecord) {
       memoryRecord.record = record;
     }
 
-    if (isObject(finalOptions) && finalOptions.signal) {
-      attachSignalCleanup(record, finalOptions.signal);
+    if (plainObject(finalOptions) && finalOptions.signal) {
+      attachAbortCleanup(record, finalOptions.signal);
     }
 
-    pushRecentEvent("on", eventName, {
+    pushRecent("on", eventName, {
       key,
     });
 
     return off;
   }
 
-  function findActiveRecordsByOriginalHandler(name, handler) {
-    const eventName = normalizeEventName(name);
+  function findByOriginal(name = "", handler = null) {
+    const eventName = text(name, "");
     const matches = [];
 
-    for (const record of activeListeners.values()) {
-      if (eventName && record.name !== eventName) {
-        continue;
-      }
+    for (const record of active.values()) {
+      if (eventName && record.name !== eventName) continue;
 
       if (
         record.handler === handler ||
@@ -1555,160 +1181,150 @@ export function createEvents({
   }
 
   function off(name, handler, options = false) {
-    const eventName = normalizeEventName(name);
-
-    if (!eventName || !isFunction(handler)) {
-      return false;
+    if (fn(name) && !handler) {
+      try {
+        return name() !== false;
+      } catch (error) {
+        recordError("off:disposer", error, "");
+        return false;
+      }
     }
 
-    const finalOptions = normalizeDomOptions(options);
-    const optionsTarget = getOptionsTarget(options);
+    const eventName = text(name, "");
+
+    if (!eventName || !fn(handler)) return false;
+
+    const finalOptions = domOptions(options);
+    const targetOption = targetFromOptions(options);
 
     const targetRef =
       eventName === WILDCARD_EVENT
         ? "memory"
-        : optionsTarget || target;
+        : targetOption || target;
 
-    const key = makeListenerKey({
+    const key = listenerKey({
       name: eventName,
       handler,
       options: finalOptions,
       targetRef,
     });
 
-    const record = activeListeners.get(key);
+    const record = active.get(key);
 
-    if (record && isFunction(record.off)) {
+    if (record && fn(record.off)) {
       return record.off();
     }
 
-    const matchingRecords = findActiveRecordsByOriginalHandler(eventName, handler);
+    const matches = findByOriginal(eventName, handler);
 
-    if (matchingRecords.length) {
-      let removed = false;
+    if (!matches.length) return false;
 
-      for (const item of matchingRecords) {
-        try {
-          removed = Boolean(item.off?.()) || removed;
-        } catch (error) {
-          recordError("off:matched", error, eventName);
-        }
+    let removed = false;
+
+    for (const item of matches) {
+      try {
+        removed = Boolean(item.off?.()) || removed;
+      } catch (error) {
+        recordError("off:matched", error, eventName);
       }
-
-      return removed;
     }
 
-    return false;
+    return removed;
   }
 
   function once(name, handler, options = false) {
-    const eventName = normalizeEventName(name);
+    const eventName = text(name, "");
 
-    if (!eventName || !isFunction(handler)) {
-      return createNoopOff();
-    }
+    if (!eventName || !fn(handler)) return noopOff();
 
     state.onceCount += 1;
 
-    let dispose = null;
-    let called = false;
+    let disposed = false;
+    let dispose = noopOff();
 
-    const cleanOptions = withoutOnce(options);
+    const wrapped = (...args) => {
+      if (disposed) return;
 
-    const wrappedOnce = (...args) => {
-      if (called) {
-        return;
-      }
-
-      called = true;
+      disposed = true;
 
       try {
-        dispose?.();
+        dispose();
       } catch {}
 
       if (eventName === WILDCARD_EVENT) {
         try {
           const result = handler(...args);
 
-          if (result && typeof result === "object" && isFunction(result.catch)) {
+          if (result && typeof result === "object" && fn(result.catch)) {
             result.catch((error) => {
-              recordError("once-wildcard-handler:async", error, eventName);
+              recordError("once-wildcard:async", error, eventName);
             });
           }
         } catch (error) {
-          recordError("once-wildcard-handler", error, eventName);
+          recordError("once-wildcard", error, eventName);
         }
 
         return;
       }
 
-      callHandlerSafely({
-        handler,
-        event: args[0],
-        eventName,
-        source: "once-handler",
-      });
+      callHandler(handler, args[0], eventName, "once");
     };
 
-    dispose = on(eventName, wrappedOnce, cleanOptions);
+    dispose = on(eventName, wrapped, removeOnceOption(options));
 
-    const finalOptions = normalizeDomOptions(cleanOptions);
-    const optionsTarget = getOptionsTarget(cleanOptions);
+    const finalOptions = domOptions(removeOnceOption(options));
+    const targetOption = targetFromOptions(removeOnceOption(options));
 
     const targetRef =
       eventName === WILDCARD_EVENT
         ? "memory"
-        : optionsTarget || target;
+        : targetOption || target;
 
-    const wrappedKey = makeListenerKey({
+    const key = listenerKey({
       name: eventName,
-      handler: wrappedOnce,
+      handler: wrapped,
       options: finalOptions,
       targetRef,
     });
 
-    const record = activeListeners.get(wrappedKey);
+    const record = active.get(key);
 
     if (record) {
       record.once = true;
       record.originalHandler = handler;
-      record.onceWrapper = wrappedOnce;
+      record.onceWrapper = wrapped;
     }
 
-    pushRecentEvent("once", eventName, {
-      key: wrappedKey,
+    pushRecent("once", eventName, {
+      key,
     });
 
     return dispose;
   }
 
   function clear(name = "") {
-    const eventName = normalizeEventName(name);
+    const eventName = text(name, "");
     let count = 0;
 
-    for (const record of Array.from(activeListeners.values())) {
-      if (eventName && record.name !== eventName) {
-        continue;
-      }
+    for (const record of Array.from(active.values())) {
+      if (eventName && record.name !== eventName) continue;
 
       try {
-        if (record.off?.()) {
-          count += 1;
-        }
+        if (record.off?.()) count += 1;
       } catch (error) {
         recordError("clear", error, record.name);
       }
     }
 
     if (eventName) {
-      memoryListeners.delete(eventName);
+      memory.delete(eventName);
     } else {
-      memoryListeners.clear();
+      memory.clear();
     }
 
     state.clearCount += 1;
 
-    pushRecentEvent("clear", eventName || WILDCARD_EVENT, {
+    pushRecent("clear", eventName || WILDCARD_EVENT, {
       count,
     });
 
@@ -1716,46 +1332,39 @@ export function createEvents({
   }
 
   function listenerCount(name = "") {
-    const eventName = normalizeEventName(name);
+    const eventName = text(name, "");
 
-    if (!eventName) {
-      return activeListeners.size;
-    }
+    if (!eventName) return active.size;
 
     let count = 0;
 
-    for (const record of activeListeners.values()) {
-      if (record.name === eventName) {
-        count += 1;
-      }
+    for (const record of active.values()) {
+      if (record.name === eventName) count += 1;
     }
 
     return count;
   }
 
   function names() {
-    const set = new Set();
+    const out = new Set();
 
-    for (const record of activeListeners.values()) {
-      if (record.name) {
-        set.add(record.name);
-      }
+    for (const record of active.values()) {
+      if (record.name) out.add(record.name);
     }
 
-    for (const key of memoryListeners.keys()) {
-      set.add(key);
+    for (const key of memory.keys()) {
+      out.add(key);
     }
 
-    return Array.from(set);
+    return Array.from(out);
   }
 
   function getSnapshot() {
-    const globalGuard = getGlobalDropGuard();
-
     return {
       version: state.version,
+
       target: state.target,
-      browser: localIsBrowser(),
+      browser: browser(),
 
       emitCount: state.emitCount,
       onCount: state.onCount,
@@ -1768,9 +1377,9 @@ export function createEvents({
       wildcardEmitCount: state.wildcardEmitCount,
 
       lastEvent: state.lastEvent,
-      lastEventClass: getEventClass(state.lastEvent),
+      lastEventClass: eventClass(state.lastEvent),
       lastEventAt: state.lastEventAt,
-      lastEventAtIso: state.lastEventAt ? safeIsoDate(state.lastEventAt) : "",
+      lastEventAtIso: state.lastEventAt ? iso(state.lastEventAt) : "",
 
       lastError: state.lastError,
       lastDroppedEvent: state.lastDroppedEvent,
@@ -1778,73 +1387,54 @@ export function createEvents({
       listenerCount: listenerCount(),
       eventNames: names(),
 
-      globalDropGuard: {
-        suppressed: safeNumber(globalGuard.suppressed, 0),
-        lastWarningAt: safeNumber(globalGuard.lastWarningAt, 0),
-        lastWarningAtIso: globalGuard.lastWarningAt
-          ? safeIsoDate(globalGuard.lastWarningAt)
-          : "",
-      },
-
-      firebreaks: {
-        maxSyncEmitDepth,
+      firebreak: {
         rateWindowMs,
+        maxSyncEmitDepth,
 
-        maxEmitsPerWindow,
-        maxEmitsPerEventPerWindow,
+        absoluteCount,
+        normalCount,
+        lowCount,
+        criticalCount,
 
-        maxLowPriorityEmitsPerWindow,
-        maxLowPriorityEmitsPerEventPerWindow,
-
-        maxCriticalEmitsPerWindow,
-        maxCriticalEmitsPerEventPerWindow,
-
-        maxAbsoluteEmitsPerWindow,
-
-        currentNormalEmitsInWindow: normalEmitsInWindow,
-        currentLowPriorityEmitsInWindow: lowPriorityEmitsInWindow,
-        currentCriticalEmitsInWindow: criticalEmitsInWindow,
-        currentAbsoluteEmitsInWindow: absoluteEmitsInWindow,
-
-        currentEventRates: Object.fromEntries(eventRateMap.entries()),
-        currentDropRates: Object.fromEntries(dropRateMap.entries()),
-        currentEmitDepth: Object.fromEntries(emitDepthByName.entries()),
+        eventRate: Object.fromEntries(eventRate.entries()),
+        dropRate: Object.fromEntries(dropRate.entries()),
+        depthByName: Object.fromEntries(depthByName.entries()),
       },
 
-      listeners: Array.from(activeListeners.values()).map((record) => ({
+      listeners: Array.from(active.values()).map((record) => ({
         key: record.key,
         name: record.name,
-        className: getEventClass(record.name),
+        className: eventClass(record.name),
         once: Boolean(record.once),
         target: record.target,
         targetName: record.targetName,
         createdAt: record.createdAt,
       })),
 
-      recent: recentEvents.map((item) => ({ ...item })),
+      recent: recent.map((item) => ({ ...item })),
     };
   }
 
   function reset() {
     clear();
 
-    memoryListeners.clear();
-    activeListeners.clear();
-    recentEvents.splice(0);
+    memory.clear();
+    active.clear();
+    recent.splice(0);
 
-    emitDepthByName.clear();
-    eventRateMap.clear();
-    recentSampleMap.clear();
-    dropRateMap.clear();
+    depthByName.clear();
+    eventRate.clear();
+    dropRate.clear();
 
-    rateWindowStartedAt = safeNow();
+    windowStartedAt = now();
 
-    normalEmitsInWindow = 0;
-    lowPriorityEmitsInWindow = 0;
-    criticalEmitsInWindow = 0;
-    absoluteEmitsInWindow = 0;
+    absoluteCount = 0;
+    normalCount = 0;
+    lowCount = 0;
+    criticalCount = 0;
 
     lastDropWarningAt = 0;
+    lastDropWarningByKey.clear();
 
     state.emitCount = 0;
     state.onCount = 0;
@@ -1883,6 +1473,7 @@ export function createEvents({
     removeAllListeners: clear,
 
     listenerCount,
+
     names,
     eventNames: names,
 
@@ -1893,11 +1484,6 @@ export function createEvents({
     reset,
   };
 }
-
-export {
-  EVENTS_VERSION,
-  WILDCARD_EVENT,
-};
 
 export default {
   EVENTS_VERSION,

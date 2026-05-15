@@ -3,7 +3,7 @@
    Archivo: src/services/http.auth.js
 
    ONION SUPPORT · HTTP AUTH
-   AUTO REFRESH 401 · SINGLE FLIGHT · PUBLIC ENDPOINT SAFE · 15/10
+   AUTO REFRESH 401 · SINGLE FLIGHT · PUBLIC ENDPOINT SAFE · 16/10
 
    Responsabilidades:
    - Resolver auto refresh ante respuestas 401 privadas.
@@ -15,6 +15,8 @@
    - No hacer logout aquí.
    - Devolver true/false limpio al HTTP Service.
    - Mantener stats de refresh para diagnóstico.
+   - Evitar recursión con el propio HTTP service.
+   - Fallback directo fetch contra /api/auth/refresh si Auth no refresca.
 
    Contrato:
    runAutoRefreshIfNeeded({
@@ -39,6 +41,7 @@
    - Rate-limit opcional.
    - Soporte Auth.refreshSession / refresh / refreshToken / restoreSession.
    - Soporte refresh que devuelve boolean, token_only o payload completo.
+   - Fallback fetch directo si Auth no está disponible o devuelve falso.
    - Aplica payload de sesión si el refresh devuelve token/user/session.
    - Valida access token usable tras refresh antes de replay.
    - Eventos internos opt-in para evitar storms.
@@ -59,13 +62,19 @@ import {
 ========================================================= */
 
 export const HTTP_AUTH_VERSION =
-  "15.0.0";
+  "16.0.0";
 
 const LOG_PREFIX =
   "[HTTP Auth]";
 
 const DEFAULT_REFRESH_REASON =
   "http-auto-refresh";
+
+const DEFAULT_API_ORIGIN =
+  "https://api.onionit.net";
+
+const DEFAULT_REFRESH_ENDPOINT =
+  "/api/auth/refresh";
 
 const EVENTS =
   Object.freeze({
@@ -98,6 +107,15 @@ const EVENTS =
 
     applied:
       "http:auto-refresh:applied",
+
+    directStart:
+      "http:auto-refresh:direct:start",
+
+    directSuccess:
+      "http:auto-refresh:direct:success",
+
+    directError:
+      "http:auto-refresh:direct:error",
   });
 
 const BAD_TOKEN_VALUES =
@@ -137,52 +155,76 @@ const AUTH_REFRESH_CONTROL_MARKERS =
   Object.freeze([
     "/auth/login",
     "/auth/refresh",
+    "/auth/token/refresh",
+    "/auth/renew",
     "/auth/logout",
     "/auth/logout-all",
 
     "/auth/2fa/login",
+    "/auth/2fa/verify",
     "/auth/mfa/login",
+    "/auth/mfa/verify",
     "/auth/otp/login",
+    "/auth/otp/verify",
 
     "/auth/activate",
     "/auth/activate-account",
     "/auth/account/activate",
     "/auth/activation",
     "/auth/activate/first-user",
+    "/auth/activate/validate",
 
     "/auth/reset-password",
     "/auth/reset-password-request",
     "/auth/reset-password-confirm",
+    "/auth/reset-password/confirm",
+    "/auth/reset-password/validate",
     "/auth/password-reset",
+    "/auth/password-reset/request",
+    "/auth/password-reset/confirm",
+    "/auth/password-reset/validate",
     "/auth/forgot-password",
     "/auth/recover-password",
 
     "/auth/_health",
+    "/auth/health",
   ]);
 
 const PUBLIC_AUTH_ENDPOINT_MARKERS =
   Object.freeze([
     "/auth/login",
     "/auth/refresh",
+    "/auth/token/refresh",
+    "/auth/renew",
 
     "/auth/2fa/login",
+    "/auth/2fa/verify",
     "/auth/mfa/login",
+    "/auth/mfa/verify",
     "/auth/otp/login",
+    "/auth/otp/verify",
 
     "/auth/activate",
     "/auth/activate-account",
     "/auth/account/activate",
     "/auth/activation",
     "/auth/activate/first-user",
+    "/auth/activate/validate",
 
     "/auth/reset-password",
     "/auth/reset-password-request",
     "/auth/reset-password-confirm",
+    "/auth/reset-password/confirm",
+    "/auth/reset-password/validate",
     "/auth/password-reset",
+    "/auth/password-reset/request",
+    "/auth/password-reset/confirm",
+    "/auth/password-reset/validate",
     "/auth/forgot-password",
     "/auth/recover-password",
 
     "/auth/_health",
+    "/auth/health",
   ]);
 
 const TECHNICAL_PUBLIC_ROUTES =
@@ -193,6 +235,67 @@ const TECHNICAL_PUBLIC_ROUTES =
     "/recover-password",
     "/password-reset",
     "/reset-password/confirm",
+    "/2fa",
+    "/otp",
+    "/mfa",
+  ]);
+
+const TOKEN_KEYS =
+  Object.freeze([
+    "token",
+    "accessToken",
+    "access_token",
+    "authToken",
+    "auth_token",
+    "jwt",
+    "bearer",
+    "idToken",
+    "id_token",
+  ]);
+
+const REFRESH_TOKEN_KEYS =
+  Object.freeze([
+    "refreshToken",
+    "refresh_token",
+  ]);
+
+const USER_KEYS =
+  Object.freeze([
+    "user",
+    "usuario",
+    "me",
+    "account",
+    "profile",
+    "currentUser",
+    "current_user",
+    "authUser",
+    "auth_user",
+    "sessionUser",
+    "session_user",
+  ]);
+
+const SESSION_KEYS =
+  Object.freeze([
+    "session",
+    "sessionData",
+    "session_data",
+    "authSession",
+    "auth_session",
+  ]);
+
+const OBJECT_WALK_KEYS =
+  Object.freeze([
+    "data",
+    "payload",
+    "result",
+    "body",
+    "response",
+    "auth",
+    "authData",
+    "auth_data",
+    "session",
+    "sessionData",
+    "session_data",
   ]);
 
 /* =========================================================
@@ -211,18 +314,18 @@ const fallbackRefreshState = {
    BASICS
 ========================================================= */
 
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
+
 function isObject(value) {
   return (
     value !== null &&
     typeof value === "object" &&
     !Array.isArray(value)
-  );
-}
-
-function isAnyObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object"
   );
 }
 
@@ -298,6 +401,19 @@ function safeRedact(value = "") {
   } catch {
     return safeText(value, "");
   }
+}
+
+function unique(values = []) {
+  return [
+    ...new Set(
+      safeArray(values)
+        .flat(Infinity)
+        .map((item) =>
+          safeText(item, "")
+        )
+        .filter(Boolean)
+    ),
+  ];
 }
 
 /* =========================================================
@@ -386,6 +502,7 @@ export function normalizeEndpointPath(path = "") {
       safeLower(
         parsed.pathname || raw
       )
+        .replace(/\\/g, "/")
         .replace(/\/{2,}/g, "/")
         .replace(/\/$/, "");
 
@@ -399,6 +516,7 @@ export function normalizeEndpointPath(path = "") {
         .split("#")[0] ||
         raw
     )
+      .replace(/\\/g, "/")
       .replace(/\/{2,}/g, "/")
       .replace(/\/$/, "");
 
@@ -853,6 +971,15 @@ function createRefreshStats() {
     applied:
       0,
 
+    directAttempts:
+      0,
+
+    directSuccesses:
+      0,
+
+    directFailures:
+      0,
+
     lastAttemptAt:
       0,
 
@@ -869,6 +996,15 @@ function createRefreshStats() {
       0,
 
     lastAppliedAt:
+      0,
+
+    lastDirectAttemptAt:
+      0,
+
+    lastDirectSuccessAt:
+      0,
+
+    lastDirectFailureAt:
       0,
 
     lastSkipReason:
@@ -1105,7 +1241,10 @@ function getStateToken(AppCore) {
     state.access_token,
     state.session?.token,
     state.session?.accessToken,
-    state.session?.access_token
+    state.session?.access_token,
+    state.sessionData?.token,
+    state.sessionData?.accessToken,
+    state.sessionData?.access_token
   );
 }
 
@@ -1176,7 +1315,9 @@ function getRefreshTokenCandidate(AppCore, Auth) {
     state.refreshToken,
     state.refresh_token,
     state.session?.refreshToken,
-    state.session?.refresh_token
+    state.session?.refresh_token,
+    state.sessionData?.refreshToken,
+    state.sessionData?.refresh_token
   );
 }
 
@@ -1199,7 +1340,9 @@ function getSessionIdCandidate(AppCore, Auth) {
     state.sessionId,
     state.session_id,
     state.session?.sessionId,
-    state.session?.session_id
+    state.session?.session_id,
+    state.sessionData?.sessionId,
+    state.sessionData?.session_id
   );
 }
 
@@ -1223,6 +1366,8 @@ function getSessionUserIdCandidate(AppCore, Auth) {
     state.session_user_id,
     state.session?.sessionUserId,
     state.session?.session_user_id,
+    state.sessionData?.sessionUserId,
+    state.sessionData?.session_user_id,
     state.user?.userId,
     state.user?.id
   );
@@ -1270,15 +1415,111 @@ function hasRefreshContext(AppCore, Auth) {
 }
 
 function hasRefreshCapability(AppCore, Auth) {
+  /*
+    Permitimos refresh por cookie HttpOnly aunque no haya refresh token visible.
+    Si no hay Auth ni fetch, se bloqueará después.
+  */
   return Boolean(
     hasRefreshContext(AppCore, Auth) ||
-      hasUsableAccessToken(AppCore, Auth)
+      hasUsableAccessToken(AppCore, Auth) ||
+      isBrowser()
   );
 }
 
 /* =========================================================
    REFRESH PAYLOAD EXTRACTION
 ========================================================= */
+
+function collectObjects(value = null) {
+  const output =
+    [];
+
+  const seen =
+    new WeakSet();
+
+  const queue =
+    [value];
+
+  let guard =
+    0;
+
+  while (
+    queue.length &&
+    guard < 140
+  ) {
+    guard += 1;
+
+    const current =
+      queue.shift();
+
+    if (
+      !current ||
+      typeof current !== "object"
+    ) {
+      continue;
+    }
+
+    try {
+      if (seen.has(current)) {
+        continue;
+      }
+
+      seen.add(current);
+    } catch {}
+
+    output.push(current);
+
+    for (const key of OBJECT_WALK_KEYS) {
+      const child =
+        current[key];
+
+      if (
+        child &&
+        typeof child === "object"
+      ) {
+        queue.push(child);
+      }
+    }
+
+    try {
+      if (
+        current.response?.data &&
+        typeof current.response.data === "object"
+      ) {
+        queue.push(current.response.data);
+      }
+    } catch {}
+  }
+
+  return output;
+}
+
+function pickTextFromObjects(objects = [], keys = []) {
+  for (const object of safeArray(objects)) {
+    for (const key of safeArray(keys)) {
+      const value =
+        safeText(object?.[key], "");
+
+      if (value) {
+        return value;
+      }
+    }
+  }
+
+  return "";
+}
+
+function pickObjectFromObjects(objects = [], keys = []) {
+  for (const object of safeArray(objects)) {
+    for (const key of safeArray(keys)) {
+      if (isObject(object?.[key])) {
+        return object[key];
+      }
+    }
+  }
+
+  return null;
+}
 
 function extractSessionPayload(value = null) {
   if (!value) {
@@ -1288,259 +1529,86 @@ function extractSessionPayload(value = null) {
   const root =
     safeObject(value);
 
-  const data =
-    safeObject(root.data);
-
-  const payload =
-    safeObject(root.payload);
-
-  const result =
-    safeObject(root.result);
-
-  const session =
-    safeObject(root.session);
-
-  const sessionData =
-    safeObject(root.sessionData);
-
-  const dataSession =
-    safeObject(data.session);
-
-  const dataSessionData =
-    safeObject(data.sessionData);
-
-  const payloadSession =
-    safeObject(payload.session);
-
-  const payloadSessionData =
-    safeObject(payload.sessionData);
-
-  const auth =
-    safeObject(root.auth);
-
-  const dataAuth =
-    safeObject(data.auth);
+  const objects =
+    collectObjects(root);
 
   const user =
-    firstObject(
-      root.user,
-      root.usuario,
-      root.me,
-      root.account,
-      root.profile,
+    pickObjectFromObjects(
+      objects,
+      USER_KEYS
+    );
 
-      session.user,
-      session.usuario,
-      session.me,
-      session.account,
-      session.profile,
-
-      sessionData.user,
-      sessionData.usuario,
-      sessionData.me,
-      sessionData.account,
-      sessionData.profile,
-
-      data.user,
-      data.usuario,
-      data.me,
-      data.account,
-      data.profile,
-
-      dataSession.user,
-      dataSession.usuario,
-      dataSession.me,
-      dataSession.account,
-      dataSession.profile,
-
-      dataSessionData.user,
-      dataSessionData.usuario,
-      dataSessionData.me,
-      dataSessionData.account,
-      dataSessionData.profile,
-
-      payload.user,
-      payload.usuario,
-      payload.me,
-      payload.account,
-      payload.profile,
-
-      payloadSession.user,
-      payloadSession.usuario,
-      payloadSession.me,
-      payloadSession.account,
-      payloadSession.profile,
-
-      payloadSessionData.user,
-      payloadSessionData.usuario,
-      payloadSessionData.me,
-      payloadSessionData.account,
-      payloadSessionData.profile,
-
-      result.user,
-      result.usuario,
-      result.me,
-      result.account,
-      result.profile,
-
-      auth.user,
-      auth.usuario,
-      auth.me,
-      dataAuth.user,
-      dataAuth.usuario,
-      dataAuth.me
+  const sessionObject =
+    pickObjectFromObjects(
+      objects,
+      SESSION_KEYS
     );
 
   return {
     token:
-      firstNonEmpty(
-        root.token,
-        root.accessToken,
-        root.access_token,
-        root.jwt,
-        root.bearer,
-
-        session.token,
-        session.accessToken,
-        session.access_token,
-        session.jwt,
-        session.bearer,
-
-        sessionData.token,
-        sessionData.accessToken,
-        sessionData.access_token,
-
-        data.token,
-        data.accessToken,
-        data.access_token,
-        data.jwt,
-        data.bearer,
-
-        dataSession.token,
-        dataSession.accessToken,
-        dataSession.access_token,
-        dataSession.jwt,
-        dataSession.bearer,
-
-        dataSessionData.token,
-        dataSessionData.accessToken,
-        dataSessionData.access_token,
-
-        payload.token,
-        payload.accessToken,
-        payload.access_token,
-        payload.jwt,
-        payload.bearer,
-
-        payloadSession.token,
-        payloadSession.accessToken,
-        payloadSession.access_token,
-        payloadSession.jwt,
-        payloadSession.bearer,
-
-        payloadSessionData.token,
-        payloadSessionData.accessToken,
-        payloadSessionData.access_token,
-
-        result.token,
-        result.accessToken,
-        result.access_token,
-
-        auth.token,
-        auth.accessToken,
-        auth.access_token,
-        dataAuth.token,
-        dataAuth.accessToken,
-        dataAuth.access_token
+      pickTextFromObjects(
+        objects,
+        TOKEN_KEYS
       ),
 
     refreshToken:
-      firstNonEmpty(
-        root.refreshToken,
-        root.refresh_token,
-        session.refreshToken,
-        session.refresh_token,
-        sessionData.refreshToken,
-        sessionData.refresh_token,
-        data.refreshToken,
-        data.refresh_token,
-        dataSession.refreshToken,
-        dataSession.refresh_token,
-        payload.refreshToken,
-        payload.refresh_token,
-        payloadSession.refreshToken,
-        payloadSession.refresh_token,
-        result.refreshToken,
-        result.refresh_token,
-        auth.refreshToken,
-        auth.refresh_token,
-        dataAuth.refreshToken,
-        dataAuth.refresh_token
+      pickTextFromObjects(
+        objects,
+        REFRESH_TOKEN_KEYS
       ),
 
     sessionId:
       firstNonEmpty(
-        root.sessionId,
-        root.session_id,
-        session.sessionId,
-        session.session_id,
-        session.id,
-        sessionData.sessionId,
-        sessionData.session_id,
-        sessionData.id,
-        data.sessionId,
-        data.session_id,
-        dataSession.sessionId,
-        dataSession.session_id,
-        dataSession.id,
-        payload.sessionId,
-        payload.session_id,
-        payloadSession.sessionId,
-        payloadSession.session_id
+        pickTextFromObjects(
+          objects,
+          [
+            "sessionId",
+            "session_id",
+            "sid",
+          ]
+        ),
+        sessionObject?.sessionId,
+        sessionObject?.session_id,
+        sessionObject?.sid,
+        sessionObject?.id
       ),
 
     sessionUserId:
       firstNonEmpty(
-        root.sessionUserId,
-        root.session_user_id,
-        root.userId,
-        root.user_id,
-        session.sessionUserId,
-        session.session_user_id,
-        session.userId,
-        session.user_id,
-        sessionData.sessionUserId,
-        sessionData.session_user_id,
-        sessionData.userId,
-        sessionData.user_id,
-        data.sessionUserId,
-        data.session_user_id,
-        data.userId,
-        data.user_id,
-        dataSession.sessionUserId,
-        dataSession.session_user_id,
-        payload.sessionUserId,
-        payload.session_user_id,
-        payload.userId,
-        payload.user_id,
-        payloadSession.sessionUserId,
-        payloadSession.session_user_id
+        pickTextFromObjects(
+          objects,
+          [
+            "sessionUserId",
+            "session_user_id",
+            "userId",
+            "user_id",
+            "uid",
+            "sub",
+          ]
+        ),
+        sessionObject?.sessionUserId,
+        sessionObject?.session_user_id,
+        sessionObject?.userId,
+        sessionObject?.user_id
       ),
 
     user:
       user || null,
+
+    session:
+      sessionObject || null,
 
     mode:
       safeText(
         root.mode ||
           root.type ||
           root.status ||
-          data.mode ||
-          data.type ||
-          payload.mode ||
-          payload.type ||
-          result.mode ||
-          result.type ||
+          root.data?.mode ||
+          root.data?.type ||
+          root.payload?.mode ||
+          root.payload?.type ||
+          root.result?.mode ||
+          root.result?.type ||
           "",
         ""
       ),
@@ -1582,6 +1650,14 @@ function isRefreshResultPositive(result) {
     root.authenticated === true
   ) {
     return true;
+  }
+
+  if (
+    root.ok === false ||
+    root.success === false ||
+    root.error
+  ) {
+    return false;
   }
 
   const payload =
@@ -1701,7 +1777,8 @@ async function applyRefreshPayloadIfNeeded({
         payload.user ||
         payload.refreshToken ||
         payload.sessionId ||
-        payload.sessionUserId
+        payload.sessionUserId ||
+        payload.session
     );
 
   if (!hasSessionData) {
@@ -1718,16 +1795,37 @@ async function applyRefreshPayloadIfNeeded({
     accessToken:
       payload.token || undefined,
 
+    access_token:
+      payload.token || undefined,
+
     refreshToken:
+      payload.refreshToken || undefined,
+
+    refresh_token:
       payload.refreshToken || undefined,
 
     sessionId:
       payload.sessionId || undefined,
 
+    session_id:
+      payload.sessionId || undefined,
+
     sessionUserId:
       payload.sessionUserId || undefined,
 
+    session_user_id:
+      payload.sessionUserId || undefined,
+
+    session:
+      payload.session || undefined,
+
+    sessionData:
+      payload.session || undefined,
+
     user:
+      payload.user || undefined,
+
+    usuario:
       payload.user || undefined,
   };
 
@@ -1741,11 +1839,23 @@ async function applyRefreshPayloadIfNeeded({
     preserveExistingUser:
       !payload.user,
 
+    allowTokenOnly:
+      true,
+
     skipNavigation:
       true,
 
     skipPostRestoreNavigation:
       true,
+
+    silent:
+      true,
+
+    emit:
+      false,
+
+    emitRepair:
+      false,
   };
 
   applied =
@@ -1765,6 +1875,8 @@ async function applyRefreshPayloadIfNeeded({
             {
               source:
                 "http.auth",
+              silent:
+                true,
             }
           );
 
@@ -1783,6 +1895,8 @@ async function applyRefreshPayloadIfNeeded({
             {
               source:
                 "http.auth",
+              silent:
+                true,
             }
           );
 
@@ -1801,6 +1915,8 @@ async function applyRefreshPayloadIfNeeded({
             {
               source:
                 "http.auth",
+              silent:
+                true,
             }
           );
 
@@ -1843,6 +1959,366 @@ async function applyRefreshPayloadIfNeeded({
 }
 
 /* =========================================================
+   DIRECT REFRESH FETCH FALLBACK
+========================================================= */
+
+function normalizeApiOrigin(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return DEFAULT_API_ORIGIN;
+  }
+
+  try {
+    const parsed =
+      new URL(raw);
+
+    const origin =
+      parsed.origin.replace(/\/+$/g, "");
+
+    const pathname =
+      (parsed.pathname || "/")
+        .replace(/\/+$/g, "") ||
+      "/";
+
+    if (
+      pathname === "/" ||
+      pathname === "/api"
+    ) {
+      return origin;
+    }
+
+    return `${origin}${pathname}`;
+  } catch {
+    return DEFAULT_API_ORIGIN;
+  }
+}
+
+function resolveApiOrigin(AppCore = null, config = {}) {
+  return normalizeApiOrigin(
+    config?.apiBase ||
+      config?.apiOrigin ||
+      config?.apiUrl ||
+      AppCore?.config?.apiBase ||
+      AppCore?.config?.apiOrigin ||
+      AppCore?.config?.apiUrl ||
+      AppCore?.config?.api?.base ||
+      AppCore?.config?.api?.baseUrl ||
+      DEFAULT_API_ORIGIN
+  );
+}
+
+function resolveRefreshEndpoint(AppCore = null, Auth = null) {
+  const endpoint =
+    safeText(
+      Auth?.AUTH_ENDPOINTS?.refresh ||
+        Auth?.AUTH_CONSTANTS?.endpoints?.refresh ||
+        AppCore?.config?.auth?.endpoints?.refresh ||
+        AppCore?.config?.auth?.refreshEndpoint ||
+        DEFAULT_REFRESH_ENDPOINT,
+      DEFAULT_REFRESH_ENDPOINT
+    );
+
+  if (/^https?:\/\//i.test(endpoint)) {
+    return endpoint;
+  }
+
+  if (endpoint.startsWith("/api/")) {
+    return endpoint;
+  }
+
+  if (endpoint.startsWith("/auth/")) {
+    return `/api${endpoint}`;
+  }
+
+  if (endpoint.startsWith("/")) {
+    return `/api/auth${endpoint}`;
+  }
+
+  return `/api/auth/${endpoint}`;
+}
+
+function buildDirectRefreshUrl(AppCore = null, Auth = null, config = {}) {
+  const endpoint =
+    resolveRefreshEndpoint(
+      AppCore,
+      Auth
+    );
+
+  if (/^https?:\/\//i.test(endpoint)) {
+    return endpoint;
+  }
+
+  const origin =
+    resolveApiOrigin(
+      AppCore,
+      config
+    );
+
+  return `${origin}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+}
+
+function buildDirectRefreshBody(AppCore = null, Auth = null) {
+  const refreshToken =
+    getRefreshTokenCandidate(
+      AppCore,
+      Auth
+    );
+
+  const sessionId =
+    getSessionIdCandidate(
+      AppCore,
+      Auth
+    );
+
+  const sessionUserId =
+    getSessionUserIdCandidate(
+      AppCore,
+      Auth
+    );
+
+  const body = {};
+
+  if (hasUsableToken(refreshToken)) {
+    body.refreshToken =
+      refreshToken;
+
+    body.refresh_token =
+      refreshToken;
+  }
+
+  if (sessionId) {
+    body.sessionId =
+      sessionId;
+
+    body.session_id =
+      sessionId;
+  }
+
+  if (sessionUserId) {
+    body.sessionUserId =
+      sessionUserId;
+
+    body.session_user_id =
+      sessionUserId;
+
+    body.userId =
+      sessionUserId;
+
+    body.user_id =
+      sessionUserId;
+  }
+
+  return body;
+}
+
+async function directRefreshFetch({
+  AppCore,
+  Auth,
+  config,
+  requestConfig,
+  root,
+  context,
+}) {
+  if (
+    !isBrowser() ||
+    typeof fetch !== "function"
+  ) {
+    return false;
+  }
+
+  const cfg =
+    safeObject(config);
+
+  if (cfg.disableDirectRefreshFallback === true) {
+    return false;
+  }
+
+  const stats =
+    root.refreshStats;
+
+  stats.directAttempts =
+    safeNumber(stats.directAttempts, 0) + 1;
+
+  stats.lastDirectAttemptAt =
+    nowMs();
+
+  const url =
+    buildDirectRefreshUrl(
+      AppCore,
+      Auth,
+      cfg
+    );
+
+  const body =
+    buildDirectRefreshBody(
+      AppCore,
+      Auth
+    );
+
+  safeEmit(
+    AppCore,
+    cfg,
+    requestConfig,
+    EVENTS.directStart,
+    {
+      ...context,
+
+      url:
+        safeRedact(url),
+
+      hasRefreshToken:
+        Boolean(body.refreshToken),
+
+      hasSessionId:
+        Boolean(body.sessionId),
+
+      hasSessionUserId:
+        Boolean(body.sessionUserId),
+    }
+  );
+
+  try {
+    const response =
+      await fetch(
+        url,
+        {
+          method:
+            "POST",
+
+          credentials:
+            "include",
+
+          cache:
+            "no-store",
+
+          mode:
+            "cors",
+
+          headers:
+            {
+              Accept:
+                "application/json",
+
+              "Content-Type":
+                "application/json",
+
+              "X-Onion-Client":
+                "onion-spa",
+
+              "X-Onion-HTTP-Auth-Version":
+                HTTP_AUTH_VERSION,
+
+              "X-Request-Id":
+                requestConfig?.requestId ||
+                `refresh_${nowMs()}`,
+            },
+
+          body:
+            Object.keys(body).length
+              ? JSON.stringify(body)
+              : undefined,
+        }
+      );
+
+    const text =
+      await response.text()
+        .catch(() => "");
+
+    let payload =
+      null;
+
+    if (text) {
+      try {
+        payload =
+          JSON.parse(text);
+      } catch {
+        payload =
+          {
+            ok:
+              response.ok,
+            text,
+          };
+      }
+    }
+
+    if (!response.ok) {
+      const error =
+        new Error(
+          safeText(
+            payload?.message ||
+              payload?.error ||
+              response.statusText,
+            `HTTP ${response.status}`
+          )
+        );
+
+      error.name =
+        "DirectRefreshError";
+
+      error.status =
+        response.status;
+
+      error.code =
+        payload?.code ||
+        payload?.error ||
+        "DIRECT_REFRESH_ERROR";
+
+      error.data =
+        payload;
+
+      throw error;
+    }
+
+    stats.directSuccesses =
+      safeNumber(stats.directSuccesses, 0) + 1;
+
+    stats.lastDirectSuccessAt =
+      nowMs();
+
+    safeEmit(
+      AppCore,
+      cfg,
+      requestConfig,
+      EVENTS.directSuccess,
+      {
+        ...context,
+
+        hasPayload:
+          Boolean(payload),
+
+        status:
+          response.status,
+      }
+    );
+
+    return payload || true;
+  } catch (error) {
+    stats.directFailures =
+      safeNumber(stats.directFailures, 0) + 1;
+
+    stats.lastDirectFailureAt =
+      nowMs();
+
+    safeEmit(
+      AppCore,
+      cfg,
+      requestConfig,
+      EVENTS.directError,
+      {
+        ...context,
+
+        error:
+          normalizeErrorForEvent(error),
+      }
+    );
+
+    return false;
+  }
+}
+
+/* =========================================================
    REFRESH CALL
 ========================================================= */
 
@@ -1881,6 +2357,63 @@ function buildRefreshArgs({
 
     AppCore,
 
+    /*
+      Flags críticos para evitar recursión por Http Service.
+    */
+    auth:
+      false,
+
+    public:
+      true,
+
+    skipAuth:
+      true,
+
+    noAuthHeader:
+      true,
+
+    _skipAuthRefresh:
+      true,
+
+    skipAuthRefresh:
+      true,
+
+    noAutoRefresh:
+      true,
+
+    autoRefresh:
+      false,
+
+    autoLogout:
+      false,
+
+    _skipRetry:
+      true,
+
+    retry:
+      false,
+
+    retries:
+      0,
+
+    useLoader:
+      false,
+
+    noLoader:
+      true,
+
+    background:
+      true,
+
+    emitEvents:
+      false,
+
+    emitFinalEvents:
+      false,
+
+    emitLifecycleEvents:
+      false,
+
     skipNavigation:
       true,
 
@@ -1889,6 +2422,12 @@ function buildRefreshArgs({
 
     preserveRoute:
       true,
+
+    preserveCurrentRoute:
+      true,
+
+    directRefreshFallback:
+      false,
   };
 }
 
@@ -2120,7 +2659,10 @@ function shouldSkipRefresh({
     );
   }
 
-  if (!hasRefreshMethod(Auth)) {
+  if (
+    !hasRefreshMethod(Auth) &&
+    config?.disableDirectRefreshFallback === true
+  ) {
     return markSkipped(
       root,
       AppCore,
@@ -2143,6 +2685,72 @@ function shouldSkipRefresh({
   }
 
   return null;
+}
+
+/* =========================================================
+   REFRESH EXECUTION
+========================================================= */
+
+async function executeRefresh({
+  AppCore,
+  Auth,
+  config,
+  requestConfig,
+  error,
+  root,
+  context,
+}) {
+  let refreshResult =
+    false;
+
+  let authRefreshError =
+    null;
+
+  if (hasRefreshMethod(Auth)) {
+    try {
+      refreshResult =
+        await callRefreshSession({
+          Auth,
+          AppCore,
+          requestConfig,
+          error,
+        });
+    } catch (errorFromAuth) {
+      authRefreshError =
+        errorFromAuth;
+      refreshResult =
+        false;
+    }
+  }
+
+  if (isRefreshResultPositive(refreshResult)) {
+    return refreshResult;
+  }
+
+  /*
+    Fallback directo:
+    - evita bucle si Auth.refreshSession pasa por Http Service de forma incorrecta.
+    - usa fetch nativo directo contra api.onionit.net.
+  */
+  const directResult =
+    await directRefreshFetch({
+      AppCore,
+      Auth,
+      config,
+      requestConfig,
+      root,
+      context,
+    });
+
+  if (isRefreshResultPositive(directResult)) {
+    return directResult;
+  }
+
+  if (authRefreshError) {
+    throw authRefreshError;
+  }
+
+  return false;
 }
 
 /* =========================================================
@@ -2353,12 +2961,16 @@ export async function runAutoRefreshIfNeeded({
     root.refreshPromise =
       Promise.resolve()
         .then(() =>
-          callRefreshSession({
-            Auth,
+          executeRefresh({
             AppCore,
+            Auth,
+            config:
+              cfg,
             requestConfig:
               req,
             error,
+            root,
+            context,
           })
         )
         .finally(() => {
@@ -2553,6 +3165,21 @@ export function getHttpAuthSnapshot(state) {
       lastAppliedAtIso:
         root.refreshStats.lastAppliedAt
           ? isoNow(root.refreshStats.lastAppliedAt)
+          : "",
+
+      lastDirectAttemptAtIso:
+        root.refreshStats.lastDirectAttemptAt
+          ? isoNow(root.refreshStats.lastDirectAttemptAt)
+          : "",
+
+      lastDirectSuccessAtIso:
+        root.refreshStats.lastDirectSuccessAt
+          ? isoNow(root.refreshStats.lastDirectSuccessAt)
+          : "",
+
+      lastDirectFailureAtIso:
+        root.refreshStats.lastDirectFailureAt
+          ? isoNow(root.refreshStats.lastDirectFailureAt)
           : "",
 
       lastError:

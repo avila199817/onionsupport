@@ -3,7 +3,7 @@
    Archivo: /src/app/index.js
 
    ONION SUPPORT · APP BOOTSTRAP
-   PRIVATE SPA · ROUTER SAFE · TOKEN ROUTES SAFE · 10/10
+   PRIVATE SPA · ROUTER SAFE · TOKEN ROUTES SAFE · 16/10
 
    RESPONSABILIDADES:
    - Bootstrap lógico de Onion SPA.
@@ -16,6 +16,7 @@
    - Emitir app:ready una sola vez.
    - Montar SidebarUI/TopbarUI una sola vez.
    - Sin autoarranque: /src/main.js es el único dueño del arranque físico.
+   - Respetar window.__ONION_DISABLE_AUTO_BOOT__.
    - Sin CSS inline.
    - Sin estilos inyectados.
    - Sin montajes duplicados.
@@ -31,7 +32,7 @@
    - UI firebreak contra eventos recursivos.
    - Throttle para reparación UI y sync de usuario.
    - Loader con mínimo visible + failsafe.
-   - Sanitización profunda de logs/eventos.
+   - Sanitización profunda de logs/eventos circular-safe.
    - Eventos de diagnóstico sin exponer tokens.
    - Tolerancia a módulos legacy/faltantes.
 ========================================================= */
@@ -133,8 +134,14 @@ import {
    CONSTANTS
 ========================================================= */
 
-const APP_BOOTSTRAP_VERSION = "15.0.0-extreme-pro";
+const APP_BOOTSTRAP_VERSION = "16.0.0-extreme-pro";
 const BOOT_SOURCE = "app:index";
+
+const DISABLE_AUTO_BOOT_KEY =
+  "__ONION_DISABLE_AUTO_BOOT__";
+
+const MAIN_BOOT_CONTEXT_KEY =
+  "__ONION_MAIN_BOOT_CONTEXT__";
 
 const DEFAULT_SCOPE =
   APP_SCOPES?.boot ||
@@ -254,15 +261,25 @@ const BOOT_STEP_MAX_DURATION_MS =
 const UI_REASON_MAX_LENGTH = 180;
 const SANITIZE_MAX_DEPTH = 7;
 const SANITIZE_MAX_ARRAY = 100;
+const SANITIZE_MAX_KEYS = 140;
 
 const FALLBACK_PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
   Object.freeze({
-    key: "activation",
-    path: "/activate-account",
+    key:
+      "activation",
 
-    windowKeys: Object.freeze([
-      "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-    ]),
+    path:
+      "/activate-account",
+
+    paths:
+      Object.freeze([
+        "/activate-account",
+      ]),
+
+    windowKeys:
+      Object.freeze([
+        "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+      ]),
 
     stateUrlKey:
       APP_STATE_KEYS?.bootActivationInitialUrl ||
@@ -284,37 +301,53 @@ const FALLBACK_PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
       APP_STATE_KEYS?.bootHasActivationToken ||
       "bootHasActivationToken",
 
-    scrubbedStateKeys: Object.freeze([
-      "scrubbedActivationToken",
-      "activationTokenScrubbed",
-      "scrubbedActivateAccountToken",
-    ]),
+    scrubbedStateKeys:
+      Object.freeze([
+        "scrubbedActivationToken",
+        "activationTokenScrubbed",
+        "scrubbedActivateAccountToken",
+      ]),
 
-    scrubbedHistoryKeys: Object.freeze([
-      "scrubbedActivationToken",
-      "activationTokenScrubbed",
-      "scrubbedActivateAccountToken",
-      "scrubbedPublicTokenRoute",
-      "scrubbedTokenRoute",
-    ]),
+    scrubbedHistoryKeys:
+      Object.freeze([
+        "scrubbedActivationToken",
+        "activationTokenScrubbed",
+        "scrubbedActivateAccountToken",
+        "scrubbedPublicTokenRoute",
+        "scrubbedTokenRoute",
+      ]),
 
-    tokenParamNames: Object.freeze([
-      "token",
-      "activationToken",
-      "activateToken",
-      "code",
-      "t",
-    ]),
+    tokenParamNames:
+      Object.freeze([
+        "token",
+        "activationToken",
+        "activateToken",
+        "activation_token",
+        "activate_token",
+        "code",
+        "t",
+      ]),
   }),
 
   Object.freeze({
-    key: "resetConfirm",
-    path: "/reset-password/confirm",
+    key:
+      "resetConfirm",
 
-    windowKeys: Object.freeze([
-      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-      "__ONION_RESET_CONFIRM_INITIAL_URL__",
-    ]),
+    path:
+      "/reset-password/confirm",
+
+    paths:
+      Object.freeze([
+        "/reset-password/confirm",
+        "/password-reset/confirm",
+      ]),
+
+    windowKeys:
+      Object.freeze([
+        "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+        "__ONION_RESET_CONFIRM_INITIAL_URL__",
+        "__ONION_PASSWORD_RESET_CONFIRM_INITIAL_URL__",
+      ]),
 
     stateUrlKey:
       APP_STATE_KEYS?.bootResetConfirmInitialUrl ||
@@ -336,30 +369,36 @@ const FALLBACK_PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
       APP_STATE_KEYS?.bootHasResetToken ||
       "bootHasResetToken",
 
-    scrubbedStateKeys: Object.freeze([
-      "scrubbedResetToken",
-      "resetTokenScrubbed",
-      "scrubbedResetConfirmToken",
-      "scrubbedPasswordResetToken",
-    ]),
+    scrubbedStateKeys:
+      Object.freeze([
+        "scrubbedResetToken",
+        "resetTokenScrubbed",
+        "scrubbedResetConfirmToken",
+        "scrubbedPasswordResetToken",
+      ]),
 
-    scrubbedHistoryKeys: Object.freeze([
-      "scrubbedResetToken",
-      "resetTokenScrubbed",
-      "scrubbedResetConfirmToken",
-      "scrubbedPasswordResetToken",
-      "scrubbedPublicTokenRoute",
-      "scrubbedTokenRoute",
-    ]),
+    scrubbedHistoryKeys:
+      Object.freeze([
+        "scrubbedResetToken",
+        "resetTokenScrubbed",
+        "scrubbedResetConfirmToken",
+        "scrubbedPasswordResetToken",
+        "scrubbedPublicTokenRoute",
+        "scrubbedTokenRoute",
+      ]),
 
-    tokenParamNames: Object.freeze([
-      "token",
-      "resetToken",
-      "passwordResetToken",
-      "confirmToken",
-      "code",
-      "t",
-    ]),
+    tokenParamNames:
+      Object.freeze([
+        "token",
+        "resetToken",
+        "passwordResetToken",
+        "reset_token",
+        "password_reset_token",
+        "confirmToken",
+        "confirm_token",
+        "code",
+        "t",
+      ]),
   }),
 ]);
 
@@ -387,11 +426,18 @@ const SENSITIVE_PARAM_NAMES =
         "token",
         "activationToken",
         "activateToken",
+        "activation_token",
+        "activate_token",
         "resetToken",
+        "reset_token",
         "passwordResetToken",
+        "password_reset_token",
         "confirmToken",
+        "confirm_token",
         "code",
         "t",
+        "otp",
+        "totp",
         "access_token",
         "refresh_token",
         "id_token",
@@ -425,6 +471,13 @@ function isObject(value) {
     value !== null &&
     typeof value === "object" &&
     !Array.isArray(value)
+  );
+}
+
+function isAnyObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object"
   );
 }
 
@@ -586,12 +639,39 @@ function normalizeProtectedPublicTokenRoutes(routes = []) {
         const key = safeText(source.key, "");
         const fallback = defaultsByKey.get(key) || {};
 
-        const path = normalizePathnameOnly(
-          source.path ||
+        const rawPaths =
+          safeArray(
+            source.paths?.length
+              ? source.paths
+              : fallback.paths?.length
+                ? fallback.paths
+                : [
+                    source.path ||
+                    fallback.path ||
+                    DEFAULT_ROUTE ||
+                    "/",
+                  ]
+          );
+
+        const paths =
+          rawPaths
+            .map((routePath) =>
+              normalizePathnameOnly(
+                routePath ||
+                DEFAULT_ROUTE ||
+                "/"
+              )
+            )
+            .filter(Boolean);
+
+        const path =
+          normalizePathnameOnly(
+            source.path ||
             fallback.path ||
+            paths[0] ||
             DEFAULT_ROUTE ||
             "/"
-        );
+          );
 
         return Object.freeze({
           ...fallback,
@@ -600,25 +680,71 @@ function normalizeProtectedPublicTokenRoutes(routes = []) {
           key,
           path,
 
-          windowKeys: Object.freeze(
-            safeArray(source.windowKeys?.length ? source.windowKeys : fallback.windowKeys)
-          ),
+          paths:
+            Object.freeze(
+              Array.from(
+                new Set([
+                  path,
+                  ...paths,
+                ])
+              )
+            ),
 
-          scrubbedStateKeys: Object.freeze(
-            safeArray(source.scrubbedStateKeys?.length ? source.scrubbedStateKeys : fallback.scrubbedStateKeys)
-          ),
+          windowKeys:
+            Object.freeze(
+              safeArray(
+                source.windowKeys?.length
+                  ? source.windowKeys
+                  : fallback.windowKeys
+              )
+            ),
 
-          scrubbedHistoryKeys: Object.freeze(
-            safeArray(source.scrubbedHistoryKeys?.length ? source.scrubbedHistoryKeys : fallback.scrubbedHistoryKeys)
-          ),
+          scrubbedStateKeys:
+            Object.freeze(
+              safeArray(
+                source.scrubbedStateKeys?.length
+                  ? source.scrubbedStateKeys
+                  : fallback.scrubbedStateKeys
+              )
+            ),
 
-          tokenParamNames: Object.freeze(
-            safeArray(source.tokenParamNames?.length ? source.tokenParamNames : fallback.tokenParamNames)
-          ),
+          scrubbedHistoryKeys:
+            Object.freeze(
+              safeArray(
+                source.scrubbedHistoryKeys?.length
+                  ? source.scrubbedHistoryKeys
+                  : fallback.scrubbedHistoryKeys
+              )
+            ),
+
+          tokenParamNames:
+            Object.freeze(
+              safeArray(
+                source.tokenParamNames?.length
+                  ? source.tokenParamNames
+                  : fallback.tokenParamNames
+              )
+            ),
         });
       })
       .filter((item) => item.key && item.path)
   );
+}
+
+/* =========================================================
+   AUTO BOOT GUARD
+========================================================= */
+
+function isAutoBootDisabled() {
+  if (!isBrowser()) {
+    return true;
+  }
+
+  try {
+    return window[DISABLE_AUTO_BOOT_KEY] === true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -634,6 +760,27 @@ function isHashRouterPath(value = "") {
   );
 }
 
+function stripScopedUserPrefix(pathname = DEFAULT_ROUTE || "/") {
+  const value =
+    safeText(pathname, DEFAULT_ROUTE || "/");
+
+  if (!value.startsWith("/@")) {
+    return value;
+  }
+
+  const parts =
+    value.split("/");
+
+  if (
+    parts.length >= 3 &&
+    parts[1]?.startsWith("@")
+  ) {
+    return `/${parts.slice(2).join("/")}` || DEFAULT_ROUTE || "/";
+  }
+
+  return value;
+}
+
 function normalizePathnameOnly(pathname = DEFAULT_ROUTE || "/") {
   let value =
     safeText(pathname, DEFAULT_ROUTE || "/")
@@ -647,6 +794,9 @@ function normalizePathnameOnly(pathname = DEFAULT_ROUTE || "/") {
   if (!value.startsWith("/")) {
     value = `/${value}`;
   }
+
+  value =
+    stripScopedUserPrefix(value);
 
   if (
     value.length > 1 &&
@@ -908,17 +1058,19 @@ function redactTokenInText(value = "") {
   }
 
   for (const config of PUBLIC_TOKEN_ROUTES) {
-    try {
-      const escapedPath =
-        safeText(config.path, "").replace(/\//g, "\\/");
+    for (const routePath of safeArray(config.paths || [config.path])) {
+      try {
+        const escapedPath =
+          safeText(routePath, "").replace(/\//g, "\\/");
 
-      if (escapedPath) {
-        output = output.replace(
-          new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
-          "$1/***"
-        );
-      }
-    } catch {}
+        if (escapedPath) {
+          output = output.replace(
+            new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
+            "$1/***"
+          );
+        }
+      } catch {}
+    }
   }
 
   try {
@@ -932,6 +1084,13 @@ function redactTokenInText(value = "") {
     output = output.replace(
       /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
       "$1$2***"
+    );
+  } catch {}
+
+  try {
+    output = output.replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
     );
   } catch {}
 
@@ -960,7 +1119,15 @@ function isDomNodeLike(value) {
   return false;
 }
 
-function sanitizePayload(value, depth = 0) {
+function sanitizePayload(value, depth = 0, seen = null) {
+  if (!seen) {
+    try {
+      seen = new WeakSet();
+    } catch {
+      seen = null;
+    }
+  }
+
   if (depth > SANITIZE_MAX_DEPTH) {
     return "[MaxDepth]";
   }
@@ -976,6 +1143,10 @@ function sanitizePayload(value, depth = 0) {
     typeof value === "boolean"
   ) {
     return value;
+  }
+
+  if (typeof value === "bigint") {
+    return String(value);
   }
 
   if (typeof value === "function") {
@@ -994,11 +1165,24 @@ function sanitizePayload(value, depth = 0) {
     };
   }
 
+  if (isAnyObject(value)) {
+    try {
+      if (
+        seen &&
+        seen.has(value)
+      ) {
+        return "[Circular]";
+      }
+
+      seen?.add?.(value);
+    } catch {}
+  }
+
   if (Array.isArray(value)) {
     return value
       .slice(0, SANITIZE_MAX_ARRAY)
       .map((item) =>
-        sanitizePayload(item, depth + 1)
+        sanitizePayload(item, depth + 1, seen)
       );
   }
 
@@ -1017,7 +1201,11 @@ function sanitizePayload(value, depth = 0) {
   if (isObject(value)) {
     const output = {};
 
-    for (const [key, item] of Object.entries(value)) {
+    const entries =
+      Object.entries(value)
+        .slice(0, SANITIZE_MAX_KEYS);
+
+    for (const [key, item] of entries) {
       if (
         /token|secret|password|authorization|credential|session|jwt/i.test(key) &&
         item
@@ -1026,7 +1214,7 @@ function sanitizePayload(value, depth = 0) {
         continue;
       }
 
-      output[key] = sanitizePayload(item, depth + 1);
+      output[key] = sanitizePayload(item, depth + 1, seen);
     }
 
     return output;
@@ -1177,9 +1365,16 @@ function matchesRouteConfig(config, pathOrUrl = "") {
   const path = pathFromUrlLike(pathOrUrl);
   const clean = stripSearchAndHash(path);
 
-  return (
-    clean === config.path ||
-    clean.startsWith(`${config.path}/`)
+  const paths =
+    safeArray(config.paths?.length ? config.paths : [config.path])
+      .map((item) =>
+        normalizePathnameOnly(item)
+      )
+      .filter(Boolean);
+
+  return paths.some((routePath) =>
+    clean === routePath ||
+    clean.startsWith(`${routePath}/`)
   );
 }
 
@@ -1199,23 +1394,34 @@ function getPathToken(config = null, value = "") {
   const path = pathFromUrlLike(value);
   const clean = stripSearchAndHash(path);
 
-  if (!clean.startsWith(`${config.path}/`)) {
-    return "";
+  const paths =
+    safeArray(config.paths?.length ? config.paths : [config.path])
+      .map((item) =>
+        normalizePathnameOnly(item)
+      )
+      .filter(Boolean);
+
+  for (const routePath of paths) {
+    if (!clean.startsWith(`${routePath}/`)) {
+      continue;
+    }
+
+    const token =
+      clean
+        .slice(`${routePath}/`.length)
+        .split("/")[0];
+
+    try {
+      return safeText(
+        decodeURIComponent(token || ""),
+        ""
+      );
+    } catch {
+      return safeText(token, "");
+    }
   }
 
-  const token =
-    clean
-      .slice(`${config.path}/`.length)
-      .split("/")[0];
-
-  try {
-    return safeText(
-      decodeURIComponent(token || ""),
-      ""
-    );
-  } catch {
-    return safeText(token, "");
-  }
+  return "";
 }
 
 function hasTokenInSearch(search = "", names = []) {
@@ -1384,13 +1590,32 @@ function resolveProtectedInitialContext(href = "") {
       ? bootContextRaw
       : {};
 
+  const mainBootContextRaw =
+    getWindowRawValue(MAIN_BOOT_CONTEXT_KEY);
+
+  const mainBootContext =
+    isObject(mainBootContextRaw)
+      ? mainBootContextRaw
+      : {};
+
   const candidates = [
     href,
     getInitialUrl(),
+
     bootContext.protectedInitialUrl,
+    bootContext.protectedInitialPublicPath,
+    bootContext.mainInitialUrl,
+    bootContext.mainInitialPublicPath,
     bootContext.activationInitialUrl,
     bootContext.resetConfirmInitialUrl,
+
+    mainBootContext.initialUrl,
+    mainBootContext.href,
+    mainBootContext.protectedInitialPublicPath,
+    mainBootContext.publicPath,
+
     getBrowserPublicPath(),
+
     ...PUBLIC_TOKEN_ROUTES.flatMap((config) =>
       getStoredInitialUrls(config)
     ),
@@ -1439,6 +1664,41 @@ function resolveProtectedInitialContext(href = "") {
   };
 }
 
+function primeInitialUrlFromMainContext(mainContext = {}) {
+  const ctx = safeObject(mainContext);
+
+  const candidate =
+    safeText(
+      ctx.initialUrl ||
+        ctx.href ||
+        ctx.url ||
+        ctx.mainInitialUrl ||
+        "",
+      ""
+    );
+
+  if (!candidate) {
+    return false;
+  }
+
+  setInitialUrl(candidate);
+
+  for (const config of PUBLIC_TOKEN_ROUTES) {
+    try {
+      if (
+        !isTokenRouteScrubbed(config) &&
+        matchesRouteConfig(config, candidate) &&
+        hasRouteToken(config, candidate) &&
+        getStoredInitialUrls(config).length === 0
+      ) {
+        setStoredInitialUrl(config, candidate);
+      }
+    } catch {}
+  }
+
+  return true;
+}
+
 function captureInitialUrl() {
   if (!isBrowser()) {
     return {
@@ -1464,6 +1724,13 @@ function captureInitialUrl() {
       isResetConfirm: false,
       hasResetToken: false,
     };
+  }
+
+  const mainBootContextRaw =
+    getWindowRawValue(MAIN_BOOT_CONTEXT_KEY);
+
+  if (isObject(mainBootContextRaw)) {
+    primeInitialUrlFromMainContext(mainBootContextRaw);
   }
 
   const href = getBrowserHref();
@@ -1630,40 +1897,6 @@ function captureInitialUrl() {
   );
 
   return context;
-}
-
-function primeInitialUrlFromMainContext(mainContext = {}) {
-  const ctx = safeObject(mainContext);
-
-  const candidate =
-    safeText(
-      ctx.initialUrl ||
-        ctx.href ||
-        ctx.url ||
-        "",
-      ""
-    );
-
-  if (!candidate) {
-    return false;
-  }
-
-  setInitialUrl(candidate);
-
-  for (const config of PUBLIC_TOKEN_ROUTES) {
-    try {
-      if (
-        !isTokenRouteScrubbed(config) &&
-        matchesRouteConfig(config, candidate) &&
-        hasRouteToken(config, candidate) &&
-        getStoredInitialUrls(config).length === 0
-      ) {
-        setStoredInitialUrl(config, candidate);
-      }
-    } catch {}
-  }
-
-  return true;
 }
 
 function sanitizeBootContextForLog(context = {}) {
@@ -2419,6 +2652,31 @@ export const App = (() => {
     }
 
     if (registered) {
+      for (const alias of cleanAliases) {
+        try {
+          if (
+            AppCore?.registry?.modules?.set &&
+            !AppCore.registry.modules.get?.(alias)
+          ) {
+            AppCore.registry.modules.set(
+              alias,
+              value
+            );
+          }
+        } catch {}
+
+        try {
+          if (
+            AppCore?.modules &&
+            typeof AppCore.modules === "object" &&
+            Object.isExtensible(AppCore.modules) &&
+            !AppCore.modules[alias]
+          ) {
+            AppCore.modules[alias] = value;
+          }
+        } catch {}
+      }
+
       bridgeRegistryCache.set(cleanName, {
         value,
         aliases: cleanAliases,
@@ -4566,7 +4824,7 @@ export const App = (() => {
       return state.restorePromise;
     }
 
-    state.restorePromise =
+    const promise =
       restoreSessionInBackground({
         AppCore,
         Auth,
@@ -4585,8 +4843,11 @@ export const App = (() => {
           Boolean(skipPostRestoreNavigation),
       });
 
+    state.restorePromise =
+      promise;
+
     try {
-      const result = await state.restorePromise;
+      const result = await promise;
 
       if (!isStale(cycleId)) {
         repairUISystems(
@@ -4631,7 +4892,7 @@ export const App = (() => {
 
       throw error;
     } finally {
-      if (!isStale(cycleId)) {
+      if (state.restorePromise === promise) {
         state.restorePromise = null;
       }
     }
@@ -4851,8 +5112,6 @@ export const App = (() => {
       }
     );
 
-    bindRouterBlock("public-token-first");
-
     startPublicTokenRestoreAfterInitialRender(cycleId);
 
     return true;
@@ -4929,8 +5188,6 @@ export const App = (() => {
       );
     }
 
-    bindRouterBlock("after-initial-route");
-
     return true;
   }
 
@@ -4954,6 +5211,8 @@ export const App = (() => {
           cycleId,
           bootUrlContext:
             sanitizeBootContextForLog(firstContext),
+          autoBootDisabled:
+            isAutoBootDisabled(),
         }
       );
 
@@ -5038,6 +5297,14 @@ export const App = (() => {
       await runBootStep(
         "configure-router",
         () => configureRouterBlock(),
+        {
+          cycleId,
+        }
+      );
+
+      await runBootStep(
+        "bind-router",
+        () => bindRouterBlock("boot"),
         {
           cycleId,
         }
@@ -5351,6 +5618,9 @@ export const App = (() => {
       ...state,
 
       version: APP_BOOTSTRAP_VERSION,
+
+      autoBootDisabled:
+        isAutoBootDisabled(),
 
       bootUrlContext:
         sanitizeBootContextForLog(context),

@@ -3,9 +3,9 @@
    Archivo: src/services/http.helpers.js
 
    ONION SUPPORT · HTTP HELPERS
-   PURE HELPERS · RETRY SAFE · ERROR SAFE · TOKEN SAFE · 15/10
+   PURE HELPERS · RETRY SAFE · ERROR SAFE · TOKEN SAFE · 16/10
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - Config base del servicio HTTP.
    - Helpers puros de request / retry / error.
    - Detección de endpoints auth.
@@ -33,6 +33,14 @@
    - Error.raw no enumerable.
    - Snapshots y summaries redactados.
    - Eventos HTTP low-level apagados por defecto desde config.
+
+   FIX CRÍTICO 16/10:
+   - sanitizeData() con WeakSet anti-circular.
+   - sanitizeData() con límite real de profundidad, claves, arrays y strings.
+   - sanitizeData() no intenta recorrer Response/Request/Headers/FormData/Blob.
+   - sanitizeRequestConfig() ya NO hace spread completo del requestConfig.
+   - normalizeError() ya NO arrastra objetos raw/response/request gigantes.
+   - Redacción con regex cacheadas para evitar rebuild masivo en loops.
 ========================================================= */
 
 /* =========================================================
@@ -91,8 +99,12 @@ export const HTTP_CONFIG = Object.freeze({
   defaultAuth:
     true,
 
+  /*
+    Backend real cross-origin:
+    https://api.onionit.net
+  */
   defaultCredentials:
-    "same-origin",
+    "include",
 
   defaultResponseType:
     "auto",
@@ -154,7 +166,7 @@ export const HTTP_CONFIG = Object.freeze({
 ========================================================= */
 
 export const HTTP_HELPERS_VERSION =
-  "15.0.0";
+  "16.0.0";
 
 const DEFAULT_METHOD =
   "GET";
@@ -164,6 +176,21 @@ const DEFAULT_ERROR_MESSAGE =
 
 const LOCAL_ORIGIN =
   "http://localhost";
+
+const MAX_SANITIZE_DEPTH =
+  5;
+
+const MAX_SANITIZE_ARRAY_ITEMS =
+  50;
+
+const MAX_SANITIZE_OBJECT_KEYS =
+  80;
+
+const MAX_SANITIZE_STRING_LENGTH =
+  4_000;
+
+const MAX_REDACT_INPUT_LENGTH =
+  12_000;
 
 const KNOWN_METHODS =
   Object.freeze([
@@ -195,10 +222,16 @@ const SENSITIVE_QUERY_NAMES =
     "token",
     "activationToken",
     "activateToken",
+    "activation_token",
+    "activate_token",
     "resetToken",
     "passwordResetToken",
+    "password_reset_token",
     "confirmToken",
+    "confirm_token",
     "code",
+    "otp",
+    "totp",
     "t",
     "access_token",
     "refresh_token",
@@ -242,6 +275,9 @@ const SENSITIVE_HEADER_PARTS =
 
 const SENSITIVE_OBJECT_KEY_RE =
   /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
+
+const HEAVY_OBJECT_KEY_RE =
+  /^(raw|response|request|requestInit|fetchInit|controller|abortController|signal|stack|source|target|currentTarget|nativeEvent|event|promise|reader|stream)$/i;
 
 const AUTH_ME_ENDPOINTS =
   Object.freeze([
@@ -426,8 +462,10 @@ export function safeText(value, fallback = "") {
 }
 
 export function safeLower(value = "", fallback = "") {
-  return safeText(value, fallback)
-    .toLowerCase();
+  return safeText(
+    value,
+    fallback
+  ).toLowerCase();
 }
 
 export function safeNumber(value, fallback = 0) {
@@ -526,7 +564,10 @@ export function sleep(ms = 0) {
     try {
       setTimeout(
         resolve,
-        Math.max(0, safeNumber(ms, 0))
+        Math.max(
+          0,
+          safeNumber(ms, 0)
+        )
       );
     } catch {
       resolve();
@@ -554,6 +595,623 @@ export function isKnownMethod(method = "") {
 export function isBodylessMethod(method = DEFAULT_METHOD) {
   return BODYLESS_METHODS.includes(
     normalizeMethod(method)
+  );
+}
+
+/* =========================================================
+   STRING / REDACTION INTERNALS
+========================================================= */
+
+let redactionQueryRulesCache =
+  null;
+
+function getRedactionQueryRules() {
+  if (redactionQueryRulesCache) {
+    return redactionQueryRulesCache;
+  }
+
+  redactionQueryRulesCache =
+    SENSITIVE_QUERY_NAMES.map((name) => {
+      try {
+        return new RegExp(
+          `([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`,
+          "gi"
+        );
+      } catch {
+        return null;
+      }
+    }).filter(Boolean);
+
+  return redactionQueryRulesCache;
+}
+
+function trimForRedaction(value = "") {
+  const text =
+    String(value ?? "");
+
+  if (text.length <= MAX_REDACT_INPUT_LENGTH) {
+    return text;
+  }
+
+  return `${text.slice(0, MAX_REDACT_INPUT_LENGTH)}…[truncated:${text.length}]`;
+}
+
+function previewString(value = "", maxLength = MAX_SANITIZE_STRING_LENGTH) {
+  const text =
+    String(value ?? "");
+
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.slice(0, maxLength)}…[truncated:${text.length}]`;
+}
+
+/* =========================================================
+   SANITIZE / REDACT
+========================================================= */
+
+export function redactHttpValue(value = "") {
+  let output =
+    trimForRedaction(value).trim();
+
+  if (!output) {
+    return "";
+  }
+
+  for (const rule of getRedactionQueryRules()) {
+    try {
+      output =
+        output.replace(
+          rule,
+          "$1***"
+        );
+    } catch {}
+  }
+
+  try {
+    output =
+      output.replace(
+        /(\/activate-account\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
+  } catch {}
+
+  try {
+    output =
+      output.replace(
+        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
+  } catch {}
+
+  try {
+    output =
+      output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
+  } catch {}
+
+  try {
+    output =
+      output.replace(
+        /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
+        "$1$2***"
+      );
+  } catch {}
+
+  try {
+    output =
+      output.replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
+      );
+  } catch {}
+
+  return output;
+}
+
+function isDomNodeLike(value) {
+  if (
+    !value ||
+    typeof value !== "object"
+  ) {
+    return false;
+  }
+
+  try {
+    return Boolean(
+      typeof Node !== "undefined" &&
+        value instanceof Node
+    );
+  } catch {}
+
+  try {
+    return Boolean(
+      value.nodeType &&
+        value.nodeName
+    );
+  } catch {}
+
+  return false;
+}
+
+function getObjectTag(value) {
+  try {
+    return Object.prototype.toString.call(value);
+  } catch {
+    return "";
+  }
+}
+
+function isArrayBufferLike(value) {
+  try {
+    return (
+      typeof ArrayBuffer !== "undefined" &&
+      (
+        value instanceof ArrayBuffer ||
+        ArrayBuffer.isView?.(value)
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeSpecialObject(value, depth, keyHint, seen) {
+  if (!value) {
+    return value;
+  }
+
+  if (isDomNodeLike(value)) {
+    return {
+      type:
+        "DOMNode",
+
+      node:
+        safeText(value.nodeName, "Node"),
+
+      id:
+        safeText(value.id, ""),
+
+      className:
+        safeText(
+          value.className?.baseVal ||
+            value.className,
+          ""
+        ),
+    };
+  }
+
+  try {
+    if (
+      typeof Headers !== "undefined" &&
+      value instanceof Headers
+    ) {
+      return sanitizeHeaders(value);
+    }
+  } catch {}
+
+  try {
+    if (
+      typeof Request !== "undefined" &&
+      value instanceof Request
+    ) {
+      return {
+        type:
+          "Request",
+
+        method:
+          safeText(value.method, ""),
+
+        url:
+          redactHttpValue(value.url || ""),
+
+        credentials:
+          safeText(value.credentials, ""),
+
+        cache:
+          safeText(value.cache, ""),
+
+        mode:
+          safeText(value.mode, ""),
+
+        headers:
+          sanitizeHeaders(value.headers),
+      };
+    }
+  } catch {}
+
+  try {
+    if (
+      typeof Response !== "undefined" &&
+      value instanceof Response
+    ) {
+      return {
+        type:
+          "Response",
+
+        status:
+          value.status || 0,
+
+        ok:
+          Boolean(value.ok),
+
+        statusText:
+          safeText(value.statusText, ""),
+
+        url:
+          redactHttpValue(value.url || ""),
+
+        redirected:
+          Boolean(value.redirected),
+
+        headers:
+          sanitizeHeaders(value.headers),
+      };
+    }
+  } catch {}
+
+  try {
+    if (
+      typeof URL !== "undefined" &&
+      value instanceof URL
+    ) {
+      return redactHttpValue(value.toString());
+    }
+  } catch {}
+
+  try {
+    if (
+      typeof URLSearchParams !== "undefined" &&
+      value instanceof URLSearchParams
+    ) {
+      const output = {};
+
+      for (const [paramKey, paramValue] of value.entries()) {
+        output[paramKey] =
+          SENSITIVE_OBJECT_KEY_RE.test(paramKey)
+            ? "***"
+            : redactHttpValue(paramValue);
+      }
+
+      return output;
+    }
+  } catch {}
+
+  try {
+    if (
+      typeof AbortSignal !== "undefined" &&
+      value instanceof AbortSignal
+    ) {
+      return {
+        type:
+          "AbortSignal",
+
+        aborted:
+          Boolean(value.aborted),
+
+        reason:
+          value.aborted
+            ? safeText(value.reason, "")
+            : null,
+      };
+    }
+  } catch {}
+
+  try {
+    if (
+      typeof FormData !== "undefined" &&
+      value instanceof FormData
+    ) {
+      const keys = [];
+
+      try {
+        for (const key of value.keys()) {
+          keys.push(key);
+        }
+      } catch {}
+
+      return {
+        type:
+          "FormData",
+
+        keys:
+          keys.slice(0, 30),
+      };
+    }
+  } catch {}
+
+  try {
+    if (
+      typeof Blob !== "undefined" &&
+      value instanceof Blob
+    ) {
+      return {
+        type:
+          value.constructor?.name || "Blob",
+
+        mime:
+          safeText(value.type, ""),
+
+        size:
+          safeNumber(value.size, 0),
+      };
+    }
+  } catch {}
+
+  if (isArrayBufferLike(value)) {
+    return {
+      type:
+        value.constructor?.name || "ArrayBuffer",
+
+      byteLength:
+        safeNumber(value.byteLength, 0),
+    };
+  }
+
+  try {
+    if (
+      typeof ReadableStream !== "undefined" &&
+      value instanceof ReadableStream
+    ) {
+      return "[ReadableStream]";
+    }
+  } catch {}
+
+  if (value instanceof Date) {
+    try {
+      return value.toISOString();
+    } catch {
+      return String(value);
+    }
+  }
+
+  if (value instanceof RegExp) {
+    return String(value);
+  }
+
+  if (value instanceof Error) {
+    const output = {
+      name:
+        safeText(value.name, "Error"),
+
+      message:
+        redactHttpValue(value.message || ""),
+
+      code:
+        value.code || null,
+
+      status:
+        value.status ||
+        value.statusCode ||
+        value.response?.status ||
+        null,
+
+      statusText:
+        value.statusText ||
+        value.response?.statusText ||
+        null,
+
+      timeout:
+        Boolean(value.timeout),
+
+      aborted:
+        Boolean(value.aborted),
+
+      stack:
+        value.stack ? "[stack]" : null,
+    };
+
+    if (value.data !== undefined) {
+      output.data =
+        sanitizeDataInternal(
+          value.data,
+          depth + 1,
+          "data",
+          seen
+        );
+    }
+
+    if (value.body !== undefined) {
+      output.body =
+        sanitizeDataInternal(
+          value.body,
+          depth + 1,
+          "body",
+          seen
+        );
+    }
+
+    if (value.headers !== undefined) {
+      output.headers =
+        sanitizeHeaders(value.headers);
+    }
+
+    if (value.url) {
+      output.url =
+        redactHttpValue(value.url);
+    }
+
+    if (value.requestId) {
+      output.requestId =
+        safeText(value.requestId, "");
+    }
+
+    return output;
+  }
+
+  const tag =
+    getObjectTag(value);
+
+  if (
+    tag === "[object Promise]" ||
+    isFn(value.then)
+  ) {
+    return "[Promise]";
+  }
+
+  return null;
+}
+
+function sanitizeDataInternal(value, depth = 0, keyHint = "", seen = new WeakSet()) {
+  const cleanKeyHint =
+    safeText(keyHint, "");
+
+  if (
+    cleanKeyHint &&
+    SENSITIVE_OBJECT_KEY_RE.test(cleanKeyHint)
+  ) {
+    return value
+      ? "***"
+      : null;
+  }
+
+  if (depth > MAX_SANITIZE_DEPTH) {
+    return "[MaxDepth]";
+  }
+
+  if (typeof value === "string") {
+    return previewString(
+      redactHttpValue(value)
+    );
+  }
+
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "bigint") {
+    return String(value);
+  }
+
+  if (typeof value === "function") {
+    return "[Function]";
+  }
+
+  if (isAnyObject(value)) {
+    try {
+      if (seen.has(value)) {
+        return "[Circular]";
+      }
+
+      seen.add(value);
+    } catch {}
+  }
+
+  const special =
+    sanitizeSpecialObject(
+      value,
+      depth,
+      cleanKeyHint,
+      seen
+    );
+
+  if (special !== null) {
+    return special;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, MAX_SANITIZE_ARRAY_ITEMS)
+      .map((item) =>
+        sanitizeDataInternal(
+          item,
+          depth + 1,
+          cleanKeyHint,
+          seen
+        )
+      );
+  }
+
+  if (isAnyObject(value)) {
+    const output = {};
+
+    const entries =
+      Object.entries(value)
+        .slice(0, MAX_SANITIZE_OBJECT_KEYS);
+
+    for (const [key, item] of entries) {
+      if (SENSITIVE_OBJECT_KEY_RE.test(key)) {
+        output[key] =
+          item ? "***" : item;
+
+        continue;
+      }
+
+      if (HEAVY_OBJECT_KEY_RE.test(key)) {
+        output[key] =
+          item
+            ? `[${key}]`
+            : item;
+
+        continue;
+      }
+
+      output[key] =
+        sanitizeDataInternal(
+          item,
+          depth + 1,
+          key,
+          seen
+        );
+    }
+
+    const totalKeys =
+      Object.keys(value).length;
+
+    if (totalKeys > MAX_SANITIZE_OBJECT_KEYS) {
+      output.__truncatedKeys =
+        totalKeys - MAX_SANITIZE_OBJECT_KEYS;
+    }
+
+    return output;
+  }
+
+  return previewString(
+    redactHttpValue(String(value))
+  );
+}
+
+export function sanitizeData(value, depth = 0, keyHint = "", seenArg = null) {
+  let finalKeyHint =
+    keyHint;
+
+  let seen =
+    seenArg;
+
+  try {
+    if (
+      typeof WeakSet !== "undefined" &&
+      keyHint instanceof WeakSet
+    ) {
+      seen =
+        keyHint;
+
+      finalKeyHint =
+        "";
+    }
+  } catch {}
+
+  if (
+    !seen ||
+    typeof seen !== "object"
+  ) {
+    seen =
+      new WeakSet();
+  }
+
+  return sanitizeDataInternal(
+    value,
+    depth,
+    finalKeyHint,
+    seen
   );
 }
 
@@ -769,221 +1427,19 @@ export function sanitizeHeaders(headers = {}) {
 }
 
 /* =========================================================
-   SANITIZE / REDACT
+   REQUEST CONFIG SANITIZE
 ========================================================= */
-
-export function redactHttpValue(value = "") {
-  let output =
-    safeText(value, "");
-
-  if (!output) {
-    return "";
-  }
-
-  for (const name of SENSITIVE_QUERY_NAMES) {
-    try {
-      output =
-        output.replace(
-          new RegExp(
-            `([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`,
-            "gi"
-          ),
-          "$1***"
-        );
-    } catch {}
-  }
-
-  try {
-    output =
-      output.replace(
-        /(\/activate-account\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
-  } catch {}
-
-  try {
-    output =
-      output.replace(
-        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
-  } catch {}
-
-  try {
-    output =
-      output.replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      );
-  } catch {}
-
-  try {
-    output =
-      output.replace(
-        /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
-        "$1$2***"
-      );
-  } catch {}
-
-  try {
-    output =
-      output.replace(
-        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-        "***"
-      );
-  } catch {}
-
-  return output;
-}
-
-function isDomNodeLike(value) {
-  if (
-    !value ||
-    typeof value !== "object"
-  ) {
-    return false;
-  }
-
-  try {
-    return Boolean(
-      typeof Node !== "undefined" &&
-        value instanceof Node
-    );
-  } catch {}
-
-  try {
-    return Boolean(
-      value.nodeType &&
-        value.nodeName
-    );
-  } catch {}
-
-  return false;
-}
-
-export function sanitizeData(value, depth = 0, keyHint = "") {
-  if (
-    SENSITIVE_OBJECT_KEY_RE.test(
-      safeText(keyHint, "")
-    )
-  ) {
-    return value
-      ? "***"
-      : null;
-  }
-
-  if (depth > 6) {
-    return "[MaxDepth]";
-  }
-
-  if (typeof value === "string") {
-    return redactHttpValue(value);
-  }
-
-  if (
-    value === null ||
-    value === undefined ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
-  if (typeof value === "bigint") {
-    return String(value);
-  }
-
-  if (typeof value === "function") {
-    return "[Function]";
-  }
-
-  if (isDomNodeLike(value)) {
-    return {
-      node:
-        safeText(value.nodeName, "Node"),
-
-      id:
-        safeText(value.id, ""),
-
-      className:
-        safeText(
-          value.className?.baseVal ||
-            value.className,
-          ""
-        ),
-    };
-  }
-
-  if (typeof Headers !== "undefined") {
-    try {
-      if (value instanceof Headers) {
-        return sanitizeHeaders(value);
-      }
-    } catch {}
-  }
-
-  if (value instanceof Error) {
-    return {
-      name:
-        safeText(value.name, "Error"),
-
-      message:
-        redactHttpValue(value.message || ""),
-
-      code:
-        value.code || null,
-
-      status:
-        value.status || value.statusCode || null,
-
-      stack:
-        value.stack ? "[stack]" : null,
-    };
-  }
-
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, 80)
-      .map((item) =>
-        sanitizeData(
-          item,
-          depth + 1,
-          keyHint
-        )
-      );
-  }
-
-  if (isAnyObject(value)) {
-    const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 100)) {
-      if (SENSITIVE_OBJECT_KEY_RE.test(key)) {
-        output[key] =
-          item ? "***" : item;
-
-        continue;
-      }
-
-      output[key] =
-        sanitizeData(
-          item,
-          depth + 1,
-          key
-        );
-    }
-
-    return output;
-  }
-
-  return redactHttpValue(String(value));
-}
 
 export function sanitizeRequestConfig(requestConfig = {}) {
   const cfg =
     safeObject(requestConfig);
 
-  const sanitized = {
-    ...cfg,
+  const output = {
+    requestId:
+      cfg.requestId || null,
+
+    method:
+      normalizeMethod(cfg.method || DEFAULT_METHOD),
 
     path:
       redactHttpValue(cfg.path || ""),
@@ -991,44 +1447,161 @@ export function sanitizeRequestConfig(requestConfig = {}) {
     url:
       redactHttpValue(cfg.url || ""),
 
-    headers:
-      sanitizeHeaders(cfg.headers),
+    apiBase:
+      redactHttpValue(cfg.apiBase || ""),
 
-    body:
-      sanitizeData(cfg.body),
+    headers:
+      sanitizeHeaders(cfg.headers || {}),
 
     query:
-      sanitizeData(cfg.query),
+      sanitizeData(cfg.query ?? cfg.params ?? null, 0, "query"),
 
     params:
-      sanitizeData(cfg.params),
+      sanitizeData(cfg.params ?? null, 0, "params"),
 
-    token:
-      cfg.token ? "***" : null,
+    body:
+      sanitizeData(cfg.body ?? null, 0, "body"),
 
-    accessToken:
-      cfg.accessToken ? "***" : null,
+    auth:
+      cfg.auth !== false,
 
-    access_token:
-      cfg.access_token ? "***" : null,
+    public:
+      cfg.public === true,
 
-    refreshToken:
-      cfg.refreshToken ? "***" : null,
+    skipAuth:
+      cfg.skipAuth === true,
 
-    refresh_token:
-      cfg.refresh_token ? "***" : null,
+    credentials:
+      safeText(cfg.credentials, ""),
+
+    useLoader:
+      shouldToggleGlobalLoader(cfg),
+
+    silent:
+      cfg.silent === true,
+
+    background:
+      cfg.background === true,
+
+    responseType:
+      safeText(cfg.responseType, "auto"),
+
+    timeout:
+      cfg.timeout ?? null,
+
+    raw:
+      cfg.raw === true,
+
+    rawBody:
+      cfg.rawBody === true,
+
+    upload:
+      cfg.upload === true,
+
+    download:
+      cfg.download === true,
+
+    retries:
+      cfg.retries ?? null,
+
+    retry:
+      cfg.retry !== false,
+
+    retryUnsafe:
+      cfg.retryUnsafe === true,
+
+    retryUnsafeMethods:
+      cfg.retryUnsafeMethods === true,
+
+    retryStrategy:
+      safeText(cfg.retryStrategy, ""),
+
+    retryDelay:
+      cfg.retryDelay ?? null,
+
+    retryJitter:
+      cfg.retryJitter ?? null,
+
+    retryMaxDelay:
+      cfg.retryMaxDelay ?? null,
+
+    retryOnStatuses:
+      Array.isArray(cfg.retryOnStatuses)
+        ? cfg.retryOnStatuses.slice(0, 20)
+        : null,
+
+    retryOnConflict:
+      cfg.retryOnConflict === true,
+
+    retryOnLocked:
+      cfg.retryOnLocked === true,
+
+    maxElapsedMs:
+      cfg.maxElapsedMs || 0,
 
     signal:
       cfg.signal
         ? "[AbortSignal]"
         : null,
+
+    meta:
+      sanitizeData(cfg.meta || null, 0, "meta"),
+
+    startedAt:
+      cfg.startedAt || cfg._startedAt || 0,
+
+    skipRetry:
+      cfg._skipRetry === true,
+
+    skipAuthRefresh:
+      cfg._skipAuthRefresh === true,
+
+    authRefreshAttempted:
+      cfg._authRefreshAttempted === true,
+
+    authRefreshSucceeded:
+      cfg._authRefreshSucceeded === true,
+
+    authRefreshFailed:
+      cfg._authRefreshFailed === true,
+
+    emitEvents:
+      cfg.emitEvents !== false,
+
+    emitFinalEvents:
+      cfg.emitFinalEvents !== false,
+
+    emitLifecycleEvents:
+      cfg.emitLifecycleEvents === true,
+
+    emitRuntimeEvents:
+      cfg.emitRuntimeEvents === true,
+
+    emitAuthRefreshEvents:
+      cfg.emitAuthRefreshEvents === true,
+
+    emitRequestEngineEvents:
+      cfg.emitRequestEngineEvents === true,
   };
 
-  delete sanitized.rawToken;
-  delete sanitized.authorization;
-  delete sanitized.Authorization;
+  if (SENSITIVE_OBJECT_KEY_RE.test("token")) {
+    output.token =
+      cfg.token ? "***" : null;
 
-  return sanitized;
+    output.accessToken =
+      cfg.accessToken ? "***" : null;
+
+    output.access_token =
+      cfg.access_token ? "***" : null;
+
+    output.refreshToken =
+      cfg.refreshToken ? "***" : null;
+
+    output.refresh_token =
+      cfg.refresh_token ? "***" : null;
+  }
+
+  return output;
 }
 
 /* =========================================================
@@ -1115,9 +1688,7 @@ export function endpointMatches(path = "", markers = []) {
 
     return paths.some((candidate) =>
       candidate === cleanMarker ||
-      candidate.startsWith(`${cleanMarker}/`) ||
-      candidate.endsWith(cleanMarker) ||
-      candidate.includes(cleanMarker)
+      candidate.startsWith(`${cleanMarker}/`)
     );
   });
 }
@@ -1127,8 +1698,12 @@ export function isAuthMeEndpoint(path = "") {
     getComparableEndpointPaths(path);
 
   return paths.some((candidate) =>
-    AUTH_ME_ENDPOINTS.includes(candidate) ||
-    candidate.endsWith("/auth/me")
+    AUTH_ME_ENDPOINTS.some((endpoint) =>
+      candidate === endpoint ||
+      candidate.startsWith(`${endpoint}/`)
+    ) ||
+    candidate === "/auth/me" ||
+    candidate.startsWith("/auth/me/")
   );
 }
 
@@ -1174,8 +1749,7 @@ export function isTechnicalPublicRoute(path = "") {
 
     return paths.some((candidate) =>
       candidate === clean ||
-      candidate.startsWith(`${clean}/`) ||
-      candidate.endsWith(clean)
+      candidate.startsWith(`${clean}/`)
     );
   });
 }
@@ -1516,7 +2090,10 @@ export function isRetryableStatus(status = 0, options = {}) {
   }
 
   return DEFAULT_RETRYABLE_STATUSES.includes(numericStatus) ||
-    (numericStatus >= 500 && numericStatus <= 599);
+    (
+      numericStatus >= 500 &&
+      numericStatus <= 599
+    );
 }
 
 export function isRetryableError(error, options = {}) {
@@ -1899,6 +2476,9 @@ function defineRawError(target, raw) {
 
         configurable:
           true,
+
+        writable:
+          false,
       }
     );
   } catch {
@@ -1933,12 +2513,25 @@ export function normalizeError(error, requestConfig = null) {
           );
 
     const normalizedAgain = {
-      ...error,
+      name:
+        "HttpErrorNormalized",
 
       message:
         redactHttpValue(
           safeText(error.message, DEFAULT_ERROR_MESSAGE)
         ),
+
+      status:
+        safeNumber(error.status, 0),
+
+      statusText:
+        redactHttpValue(error.statusText || ""),
+
+      data:
+        sanitizeData(error.data || null),
+
+      headers:
+        sanitizeHeaders(error.headers || {}),
 
       url:
         redactHttpValue(error.url || ""),
@@ -1946,11 +2539,16 @@ export function normalizeError(error, requestConfig = null) {
       redactedUrl:
         redactHttpValue(error.redactedUrl || error.url || ""),
 
-      data:
-        sanitizeData(error.data || null),
+      method:
+        normalizeMethod(error.method || requestConfig?.method || DEFAULT_METHOD),
 
-      headers:
-        sanitizeHeaders(error.headers || {}),
+      code:
+        error.code || null,
+
+      requestId:
+        error.requestId ||
+        requestConfig?.requestId ||
+        null,
 
       requestConfig:
         sanitizeRequestConfig(
@@ -1960,8 +2558,16 @@ export function normalizeError(error, requestConfig = null) {
         ),
 
       aborted,
-
       timeout,
+
+      retryable:
+        error.retryable === true,
+
+      public:
+        error.public === true,
+
+      auth:
+        error.auth !== false,
 
       at:
         error.at || isoNow(),
@@ -2034,7 +2640,8 @@ export function normalizeError(error, requestConfig = null) {
 
     status,
 
-    statusText,
+    statusText:
+      redactHttpValue(statusText),
 
     data:
       sanitizeData(data),
@@ -2155,6 +2762,73 @@ export function buildRequestSummary(requestConfig = {}) {
   };
 }
 
+export function buildAttemptPayload({
+  requestConfig = {},
+  attempt = 0,
+  retries = 0,
+  error = null,
+  delayMs = 0,
+  phase = "attempt",
+} = {}) {
+  const cfg =
+    safeObject(requestConfig);
+
+  const normalizedError =
+    error
+      ? normalizeError(error, cfg)
+      : null;
+
+  return {
+    phase:
+      safeText(phase, "attempt"),
+
+    requestId:
+      cfg.requestId || null,
+
+    attempt:
+      safeNumber(attempt, 0),
+
+    retries:
+      safeNumber(retries, 0),
+
+    delayMs:
+      safeNumber(delayMs, 0),
+
+    method:
+      normalizeMethod(cfg.method || DEFAULT_METHOD),
+
+    path:
+      redactHttpValue(cfg.path || cfg.url || ""),
+
+    auth:
+      cfg.auth !== false,
+
+    public:
+      cfg.public === true,
+
+    status:
+      normalizedError?.status || 0,
+
+    code:
+      normalizedError?.code || null,
+
+    message:
+      normalizedError?.message || "",
+
+    timeout:
+      Boolean(normalizedError?.timeout),
+
+    aborted:
+      Boolean(normalizedError?.aborted),
+
+    retryable:
+      Boolean(normalizedError?.retryable),
+
+    at:
+      isoNow(),
+  };
+}
+
 function resolveDefaultTimeout(baseConfig = {}, AppCore = null) {
   const fromCore =
     safeNumber(
@@ -2204,7 +2878,10 @@ function shouldDefaultPublic(path = "", options = {}) {
 }
 
 function normalizeRetryStatuses(value) {
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return null;
   }
 
@@ -2459,11 +3136,13 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
           merged
         );
 
+  /*
+    /api/auth/me, /auth/me, /api/me y /me son SIEMPRE privados.
+    No permitimos que public/auth:false los deje sin Authorization.
+  */
   const mergedAuth =
     mergedAuthMe
-      ? merged.auth === false
-        ? false
-        : true
+      ? true
       : merged.auth === false ||
         merged.public === true ||
         merged.skipAuth === true ||
@@ -2714,6 +3393,24 @@ export function getHttpHelpersSnapshot() {
         [...TECHNICAL_PUBLIC_ROUTES],
     },
 
+    sanitize:
+      {
+        maxDepth:
+          MAX_SANITIZE_DEPTH,
+
+        maxArrayItems:
+          MAX_SANITIZE_ARRAY_ITEMS,
+
+        maxObjectKeys:
+          MAX_SANITIZE_OBJECT_KEYS,
+
+        maxStringLength:
+          MAX_SANITIZE_STRING_LENGTH,
+
+        circularSafe:
+          true,
+      },
+
     retry: {
       idempotentMethods:
         [...IDEMPOTENT_METHODS],
@@ -2804,6 +3501,7 @@ export default {
 
   normalizeError,
   buildRequestSummary,
+  buildAttemptPayload,
   buildDefaultRequestConfig,
 
   getHttpHelpersSnapshot,

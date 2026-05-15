@@ -1646,6 +1646,9 @@ function renderLoginView(container, deps = {}) {
   let loadingToastActive =
     false;
 
+  let submitWatchdogTimer =
+    null;
+
   let navigationCleanup =
     null;
 
@@ -1753,6 +1756,53 @@ function renderLoginView(container, deps = {}) {
       false;
   }
 
+  function stopSubmitWatchdog() {
+    if (!submitWatchdogTimer) {
+      return;
+    }
+
+    try {
+      clearTimeout(submitWatchdogTimer);
+    } catch {}
+
+    submitWatchdogTimer =
+      null;
+  }
+
+  function startSubmitWatchdog(timeoutMs = GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS) {
+    stopSubmitWatchdog();
+
+    const watchdogMs =
+      Math.max(
+        5_000,
+        Number(timeoutMs || 0) +
+          GLOBAL_LOGIN_SUBMIT_STALE_GRACE_MS
+      );
+
+    submitWatchdogTimer =
+      setTimeout(() => {
+        submitWatchdogTimer =
+          null;
+
+        if (!mounted || !isStillOnLoginRoute()) {
+          return;
+        }
+
+        isLeavingLogin =
+          false;
+
+        closeLoadingToast();
+        forceClearGlobalLoginSubmit("view-watchdog");
+        resetSubmittingVisualState();
+
+        safeToastCall(
+          toast,
+          "error",
+          "Se recuperó el formulario tras un bloqueo del login. Inténtalo de nuevo."
+        );
+      }, watchdogMs);
+  }
+
   function resetSubmittingVisualState() {
     isSubmitting =
       false;
@@ -1805,6 +1855,7 @@ function renderLoginView(container, deps = {}) {
         mounted =
           false;
 
+        stopSubmitWatchdog();
         closeLoadingToast();
 
         setFormSubmittingFlag(
@@ -1951,6 +2002,12 @@ function renderLoginView(container, deps = {}) {
 
         const loginOptions =
           buildLoginExecutorOptions(deps);
+
+        startSubmitWatchdog(
+          loginOptions.timeoutMs ||
+            loginOptions.loginTimeoutMs ||
+            GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS
+        );
 
         /*
           Firebreak global:
@@ -2116,6 +2173,7 @@ function renderLoginView(container, deps = {}) {
           error
         );
       } finally {
+        stopSubmitWatchdog();
         closeLoadingToast();
 
         /*
@@ -2178,6 +2236,7 @@ function renderLoginView(container, deps = {}) {
       mounted =
         false;
 
+      stopSubmitWatchdog();
       closeLoadingToast();
 
       setFormSubmittingFlag(

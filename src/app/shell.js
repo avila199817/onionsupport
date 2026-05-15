@@ -38,6 +38,7 @@
    - TOKEN_PARAM_NAMES se declara antes de TOKEN_ROUTE_CONFIGS.
    - Evita ReferenceError por TDZ:
      Cannot access 'TOKEN_PARAM_NAMES' before initialization.
+     
 ========================================================= */
 
 import {

@@ -1,33 +1,13 @@
 /* =========================================================
    Onion SPA - Auth Storage
-   Archivo: src/features/auth/storage.js
+   Archivo: /src/features/auth/storage.js
 
-   AUTH STORAGE · FINAL EXTREME PRO SYSTEM · 15/10
-
-   RESPONSABILIDADES:
-   - centralizar storage auth
-   - persistir refresh token / temp token / access token
-   - persistir contexto refresh: sessionId + sessionUserId
-   - leer claves modernas y legacy de forma segura
-   - limpiar sólo claves auth conocidas
-   - no tocar rutas públicas técnicas
-   - no tocar window.__ONION_INITIAL_URL__
-   - no tocar window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__
-   - no tocar window.__ONION_RESET_CONFIRM_INITIAL_URL__
-   - no hacer localStorage.clear()
-   - no hacer sessionStorage.clear()
-
-   HARDENING:
-   - browser guard total
-   - AppCore.storage + localStorage + sessionStorage + memoria
-   - fallback memoria si Web Storage no está disponible
-   - lectura legacy: snake_case / camelCase / dot / colon / prefijo onion
-   - valores corruptos descartados: null/undefined/false/{}/[]
-   - JSON-string values compatibles
-   - tokens nunca se truncan: se invalidan si exceden límite
-   - session values sí se normalizan por longitud controlada
-   - snapshots sin tokens/session ids reales
-   - hasRefreshContext = refreshToken OR sessionId+sessionUserId
+   Responsabilidad:
+   - Guardar y leer tokens/sesión de auth.
+   - Mantener compatibilidad con claves legacy.
+   - No tocar rutas públicas técnicas.
+   - No limpiar storage completo.
+   - No exponer tokens reales en snapshots.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -38,540 +18,343 @@ import {
   AUTH_CONSTANTS,
 } from "./constants.js";
 
-import {
-  normalizeSessionValue,
-} from "./helpers.js";
-
 /* =========================================================
-   VERSION / CONSTANTS
+   VERSION
 ========================================================= */
 
-export const AUTH_STORAGE_VERSION =
-  "15.0.0";
+export const AUTH_STORAGE_VERSION = "v1-simple-auth-storage";
 
-const DEFAULT_PREFIX =
-  "onion";
+/* =========================================================
+   CONFIG
+========================================================= */
 
-const DEFAULT_SESSION_VALUE_MAX =
-  200;
+const DEFAULT_PREFIX = "onion";
+const DEFAULT_TOKEN_MAX_LENGTH = 8192;
+const DEFAULT_TEXT_MAX_LENGTH = 300;
 
-const DEFAULT_TEXT_VALUE_MAX =
-  2048;
+const memoryStorage = new Map();
 
-const DEFAULT_TOKEN_MAX =
-  8192;
+let lastStorageError = null;
 
-const WEB_STORAGE_PROBE_PREFIX =
-  "__onion_auth_storage_probe__";
+/* =========================================================
+   KEYS
+========================================================= */
 
-const AUTH_STORAGE_EVENTS =
-  Object.freeze({
-    write:
-      "auth:storage:write",
+const DEFAULT_KEYS = Object.freeze({
+  accessToken: "accessToken",
+  token: "token",
+  refreshToken: "refreshToken",
+  tempToken: "tempToken",
 
-    remove:
-      "auth:storage:remove",
+  sessionId: "sessionId",
+  sessionUserId: "sessionUserId",
+  userId: "userId",
 
-    cleared:
-      "auth:storage:cleared",
+  userSlug: "userSlug",
+  userName: "userName",
+  username: "username",
+  role: "role",
 
-    sessionContext:
-      "auth:storage:session-context",
+  lastUsername: "lastUsername",
+  lastLoginIdentifier: "lastLoginIdentifier",
+  lastResetIdentifier: "lastResetIdentifier",
 
-    auxSession:
-      "auth:storage:aux-session",
+  redirectAfterLogin: "redirectAfterLogin",
+  postLoginTarget: "postLoginTarget",
+});
 
-    repair:
-      "auth:storage:repair",
+const CORRUPT_VALUES = new Set([
+  "",
+  "undefined",
+  "null",
+  "false",
+  "true",
+  "nan",
+  "none",
+  "{}",
+  "[]",
+  "[object object]",
+  "\"\"",
+  "''",
+  "\"undefined\"",
+  "\"null\"",
+  "\"false\"",
+  "\"true\"",
+]);
 
-    error:
-      "auth:storage:error",
-  });
-
-const CORRUPTED_VALUES =
-  new Set([
-    "",
-    "undefined",
-    "null",
-    "\"undefined\"",
-    "\"null\"",
-    "false",
-    "\"false\"",
-    "true",
-    "\"true\"",
-    "nan",
-    "none",
-    "{}",
-    "[]",
-    "[object object]",
-    "\"\"",
-    "''",
-  ]);
-
-const TOKEN_PICK_KEYS =
-  Object.freeze([
-    "token",
+const SLOT_ALIASES = Object.freeze({
+  accessToken: [
     "accessToken",
     "access_token",
+    "token",
     "authToken",
     "auth_token",
     "jwt",
     "idToken",
     "id_token",
-    "bearer",
+    "auth.accessToken",
+    "auth.access_token",
+    "auth.token",
+    "session.accessToken",
+    "session.access_token",
+    "session.token",
+    "onion:accessToken",
+    "onion:access_token",
+    "onion:token",
+    "onion.accessToken",
+    "onion.access_token",
+    "onion.token",
+    "onion_access_token",
+    "onion_token",
+  ],
 
+  refreshToken: [
     "refreshToken",
     "refresh_token",
+    "auth.refreshToken",
+    "auth.refresh_token",
+    "session.refreshToken",
+    "session.refresh_token",
+    "onion:refreshToken",
+    "onion:refresh_token",
+    "onion.refreshToken",
+    "onion.refresh_token",
+    "onion_refresh_token",
+  ],
 
+  tempToken: [
     "tempToken",
     "temp_token",
     "temporaryToken",
     "temporary_token",
-    "challengeToken",
-    "challenge_token",
     "twoFactorToken",
     "two_factor_token",
     "mfaToken",
     "mfa_token",
+    "challengeToken",
+    "challenge_token",
+    "auth.tempToken",
+    "auth.temp_token",
+    "onion:tempToken",
+    "onion:temp_token",
+    "onion.tempToken",
+    "onion.temp_token",
+    "onion_temp_token",
+    "onion_mfa_token",
+    "onion_two_factor_token",
+  ],
 
-    "value",
-    "raw",
-    "data",
-  ]);
-
-const SESSION_ID_PICK_KEYS =
-  Object.freeze([
+  sessionId: [
     "sessionId",
     "session_id",
     "sid",
-    "id",
-    "value",
-    "raw",
-    "data",
-  ]);
+    "auth.sessionId",
+    "auth.session_id",
+    "session.id",
+    "session.sessionId",
+    "session.session_id",
+    "onion:sessionId",
+    "onion:session_id",
+    "onion.sessionId",
+    "onion.session_id",
+    "onion_session_id",
+  ],
 
-const SESSION_USER_ID_PICK_KEYS =
-  Object.freeze([
+  sessionUserId: [
     "sessionUserId",
     "session_user_id",
     "userId",
     "user_id",
     "uid",
     "sub",
-    "id",
-    "_id",
-    "email",
-    "mail",
-    "username",
+    "auth.sessionUserId",
+    "auth.session_user_id",
+    "session.userId",
+    "session.user_id",
+    "onion:sessionUserId",
+    "onion:session_user_id",
+    "onion:userId",
+    "onion:user_id",
+    "onion.sessionUserId",
+    "onion.session_user_id",
+    "onion.userId",
+    "onion.user_id",
+    "onion_session_user_id",
+    "onion_user_id",
+  ],
+
+  userSlug: [
+    "userSlug",
+    "user_slug",
+    "slug",
+    "onion:userSlug",
+    "onion:user_slug",
+    "onion_user_slug",
+  ],
+
+  userName: [
     "userName",
     "user_name",
-    "phone",
-    "telefono",
-    "mobile",
-    "value",
-    "raw",
-    "data",
-  ]);
+    "username",
+    "lastUsername",
+    "last_username",
+    "onion:userName",
+    "onion:user_name",
+    "onion:username",
+    "onion_user_name",
+    "onion_username",
+  ],
 
-const TEXT_VALUE_PICK_KEYS =
-  Object.freeze([
-    "value",
-    "raw",
-    "text",
-    "data",
-  ]);
+  role: [
+    "role",
+    "rol",
+    "userRole",
+    "user_role",
+    "auth.role",
+    "session.role",
+    "onion:role",
+    "onion.role",
+    "onion_role",
+  ],
 
-const PROTECTED_RUNTIME_KEYS =
-  Object.freeze([
-    "__ONION_INITIAL_URL__",
-    "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-    "__ONION_RESET_CONFIRM_INITIAL_URL__",
-    "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-  ]);
+  lastUsername: [
+    "lastUsername",
+    "last_username",
+    "onion:lastUsername",
+    "onion:last_username",
+    "onion_last_username",
+  ],
+
+  lastLoginIdentifier: [
+    "lastLoginIdentifier",
+    "last_login_identifier",
+    "loginIdentifier",
+    "login_identifier",
+    "onion:lastLoginIdentifier",
+    "onion:last_login_identifier",
+    "onion_last_login_identifier",
+  ],
+
+  lastResetIdentifier: [
+    "lastResetIdentifier",
+    "last_reset_identifier",
+    "resetIdentifier",
+    "reset_identifier",
+    "onion:lastResetIdentifier",
+    "onion:last_reset_identifier",
+    "onion_last_reset_identifier",
+  ],
+
+  redirectAfterLogin: [
+    "redirectAfterLogin",
+    "redirect_after_login",
+    "postLoginTarget",
+    "post_login_target",
+    "auth.redirectAfterLogin",
+    "onion:redirectAfterLogin",
+    "onion:redirect_after_login",
+    "onion:postLoginTarget",
+    "onion:post_login_target",
+    "onion_redirect_after_login",
+    "onion_post_login_target",
+  ],
+});
+
+const TOKEN_PICK_KEYS = Object.freeze([
+  "token",
+  "accessToken",
+  "access_token",
+  "refreshToken",
+  "refresh_token",
+  "tempToken",
+  "temp_token",
+  "temporaryToken",
+  "temporary_token",
+  "twoFactorToken",
+  "two_factor_token",
+  "mfaToken",
+  "mfa_token",
+  "value",
+  "raw",
+  "data",
+]);
+
+const SESSION_ID_PICK_KEYS = Object.freeze([
+  "sessionId",
+  "session_id",
+  "sid",
+  "id",
+  "value",
+  "raw",
+  "data",
+]);
+
+const SESSION_USER_ID_PICK_KEYS = Object.freeze([
+  "sessionUserId",
+  "session_user_id",
+  "userId",
+  "user_id",
+  "uid",
+  "sub",
+  "id",
+  "email",
+  "username",
+  "userName",
+  "user_name",
+  "value",
+  "raw",
+  "data",
+]);
+
+const TEXT_PICK_KEYS = Object.freeze([
+  "value",
+  "raw",
+  "text",
+  "data",
+]);
 
 /* =========================================================
-   MEMORY FALLBACK
-========================================================= */
-
-const memoryStorage =
-  new Map();
-
-let lastStorageError =
-  null;
-
-const webStorageAvailability = {
-  localStorage:
-    undefined,
-
-  sessionStorage:
-    undefined,
-};
-
-/* =========================================================
-   BASICS
+   BASIC HELPERS
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isPlainObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function isAnyObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object"
-  );
-}
-
-function isFunction(value) {
-  return typeof value === "function";
+function safeObject(value) {
+  return isObject(value) ? value : {};
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
-  const text =
-    String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
 
-function safeBool(value, fallback = false) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-
-  if (typeof value === "string") {
-    const key =
-      value.trim().toLowerCase();
-
-    if (
-      [
-        "true",
-        "1",
-        "yes",
-        "si",
-        "sí",
-        "ok",
-        "on",
-        "enabled",
-        "active",
-      ].includes(key)
-    ) {
-      return true;
-    }
-
-    if (
-      [
-        "false",
-        "0",
-        "no",
-        "off",
-        "disabled",
-        "inactive",
-      ].includes(key)
-    ) {
-      return false;
-    }
-  }
-
-  return Boolean(fallback);
-}
-
 function safeNumber(value, fallback = 0) {
-  const number =
-    Number(value);
-
-  return Number.isFinite(number)
-    ? number
-    : fallback;
-}
-
-function safeObject(value) {
-  return isPlainObject(value)
-    ? value
-    : {};
-}
-
-function safeArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return [];
-  }
-
-  return [value];
-}
-
-function hasOwn(obj, key) {
-  return Boolean(
-    obj &&
-      typeof obj === "object" &&
-      Object.prototype.hasOwnProperty.call(
-        obj,
-        key
-      )
-  );
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function unique(values = []) {
   return Array.from(
     new Set(
-      safeArray(values)
+      values
         .flat(Infinity)
-        .map((item) =>
-          safeText(item, "")
-        )
+        .map((item) => safeText(item, ""))
         .filter(Boolean)
     )
   );
 }
-
-function safeIsoNow() {
-  try {
-    return new Date().toISOString();
-  } catch {
-    return "";
-  }
-}
-
-function safeWarn(...args) {
-  try {
-    AppCore?.utils?.warn?.(
-      "[AuthStorage]",
-      ...args
-    );
-  } catch {}
-
-  try {
-    if (AppCore?.config?.debug) {
-      console.warn(
-        "[AuthStorage]",
-        ...args
-      );
-    }
-  } catch {}
-}
-
-/* =========================================================
-   SANITIZE / EVENTS
-========================================================= */
-
-function redactString(value = "") {
-  return safeText(value, "")
-    .replace(
-      /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token|temporaryToken|temporary_token|twoFactorToken|two_factor_token|mfaToken|mfa_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(
-      /(\/activate-account\/)([^/?#\s]+)/gi,
-      "$1***"
-    )
-    .replace(
-      /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-      "$1***"
-    )
-    .replace(
-      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-      "$1***"
-    )
-    .replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    );
-}
-
-function sanitizePayload(value, depth = 0, keyHint = "") {
-  const lowerKey =
-    safeText(keyHint, "").toLowerCase();
-
-  if (
-    /token|authorization|secret|password|credential|cookie|jwt|bearer|refresh|access|otp|mfa|2fa|code/i.test(lowerKey)
-  ) {
-    return value
-      ? "***"
-      : value;
-  }
-
-  if (depth > 5) {
-    return "[MaxDepth]";
-  }
-
-  if (typeof value === "string") {
-    return redactString(value);
-  }
-
-  if (
-    value === null ||
-    value === undefined ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
-  if (typeof value === "bigint") {
-    return String(value);
-  }
-
-  if (typeof value === "function") {
-    return "[Function]";
-  }
-
-  if (value instanceof Error) {
-    return {
-      name:
-        value.name || "Error",
-
-      message:
-        redactString(value.message || ""),
-
-      code:
-        value.code || null,
-
-      status:
-        value.status || value.statusCode || null,
-    };
-  }
-
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, 80)
-      .map((item) =>
-        sanitizePayload(
-          item,
-          depth + 1,
-          keyHint
-        )
-      );
-  }
-
-  if (isAnyObject(value)) {
-    const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 100)) {
-      output[key] =
-        sanitizePayload(
-          item,
-          depth + 1,
-          key
-        );
-    }
-
-    return output;
-  }
-
-  return redactString(String(value));
-}
-
-function sanitizeMeta(meta = {}) {
-  return sanitizePayload(
-    safeObject(meta)
-  );
-}
-
-function safeEmit(eventName, payload = {}, options = {}) {
-  const name =
-    safeText(eventName, "");
-
-  if (!name) {
-    return false;
-  }
-
-  if (
-    options?.emit === false ||
-    options?.silent === true
-  ) {
-    return false;
-  }
-
-  try {
-    AppCore?.events?.emit?.(
-      name,
-      sanitizePayload({
-        source:
-          "auth.storage",
-
-        version:
-          AUTH_STORAGE_VERSION,
-
-        at:
-          safeIsoNow(),
-
-        ...safeObject(payload),
-      })
-    );
-
-    return true;
-  } catch {}
-
-  return false;
-}
-
-function recordStorageError(source = "storage", error = null, meta = {}) {
-  lastStorageError =
-    error || null;
-
-  const payload = {
-    source:
-      safeText(source, "storage"),
-
-    message:
-      safeText(
-        error?.message || error,
-        "Storage error."
-      ),
-
-    name:
-      safeText(
-        error?.name,
-        "StorageError"
-      ),
-
-    meta:
-      sanitizeMeta(meta),
-
-    at:
-      safeIsoNow(),
-  };
-
-  safeEmit(
-    AUTH_STORAGE_EVENTS.error,
-    payload
-  );
-
-  return payload;
-}
-
-/* =========================================================
-   CONFIG
-========================================================= */
 
 function getPrefix() {
   return safeText(
@@ -579,191 +362,66 @@ function getPrefix() {
       AppCore?.config?.appKey ||
       DEFAULT_PREFIX,
     DEFAULT_PREFIX
-  )
-    .replace(/^:+|:+$/g, "") ||
-    DEFAULT_PREFIX;
+  ).replace(/^[:._-]+|[:._-]+$/g, "") || DEFAULT_PREFIX;
 }
 
-function getSessionValueMaxLen() {
-  return (
-    safeNumber(
-      AUTH_CONSTANTS?.sessionValueMaxLength,
-      DEFAULT_SESSION_VALUE_MAX
-    ) || DEFAULT_SESSION_VALUE_MAX
-  );
-}
-
-function getTextValueMaxLen() {
-  return (
-    safeNumber(
-      AUTH_CONSTANTS?.textValueMaxLength,
-      DEFAULT_TEXT_VALUE_MAX
-    ) || DEFAULT_TEXT_VALUE_MAX
-  );
-}
-
-function getTokenMaxLen() {
-  return (
-    safeNumber(
-      AUTH_CONSTANTS?.tokenMaxLength,
-      DEFAULT_TOKEN_MAX
-    ) || DEFAULT_TOKEN_MAX
-  );
-}
-
-function getStorageKeys() {
+function getKeys() {
   return {
-    refreshToken:
-      safeText(
-        AUTH_STORAGE_KEYS?.refreshToken,
-        "refreshToken"
-      ),
-
-    tempToken:
-      safeText(
-        AUTH_STORAGE_KEYS?.tempToken,
-        "tempToken"
-      ),
-
-    accessToken:
-      safeText(
-        AUTH_STORAGE_KEYS?.accessToken,
-        "accessToken"
-      ),
-
-    token:
-      safeText(
-        AUTH_STORAGE_KEYS?.token,
-        "token"
-      ),
-
-    sessionId:
-      safeText(
-        AUTH_STORAGE_KEYS?.sessionId,
-        "sessionId"
-      ),
-
-    sessionUserId:
-      safeText(
-        AUTH_STORAGE_KEYS?.sessionUserId,
-        "sessionUserId"
-      ),
-
-    userId:
-      safeText(
-        AUTH_STORAGE_KEYS?.userId,
-        "userId"
-      ),
-
-    userSlug:
-      safeText(
-        AUTH_STORAGE_KEYS?.userSlug,
-        "userSlug"
-      ),
-
-    userName:
-      safeText(
-        AUTH_STORAGE_KEYS?.userName,
-        "userName"
-      ),
-
-    username:
-      safeText(
-        AUTH_STORAGE_KEYS?.username,
-        "username"
-      ),
-
-    role:
-      safeText(
-        AUTH_STORAGE_KEYS?.role,
-        "role"
-      ),
-
-    roles:
-      safeText(
-        AUTH_STORAGE_KEYS?.roles,
-        "roles"
-      ),
-
-    lastUsername:
-      safeText(
-        AUTH_STORAGE_KEYS?.lastUsername,
-        "lastUsername"
-      ),
-
-    lastLoginIdentifier:
-      safeText(
-        AUTH_STORAGE_KEYS?.lastLoginIdentifier,
-        "lastLoginIdentifier"
-      ),
-
-    lastResetIdentifier:
-      safeText(
-        AUTH_STORAGE_KEYS?.lastResetIdentifier,
-        "lastResetIdentifier"
-      ),
-
-    redirectAfterLogin:
-      safeText(
-        AUTH_STORAGE_KEYS?.redirectAfterLogin,
-        "redirectAfterLogin"
-      ),
-
-    postLoginTarget:
-      safeText(
-        AUTH_STORAGE_KEYS?.postLoginTarget,
-        "postLoginTarget"
-      ),
+    ...DEFAULT_KEYS,
+    ...safeObject(AUTH_STORAGE_KEYS),
   };
 }
 
+function getTokenMaxLength() {
+  return safeNumber(
+    AUTH_CONSTANTS?.tokenMaxLength,
+    DEFAULT_TOKEN_MAX_LENGTH
+  );
+}
+
+function getTextMaxLength() {
+  return safeNumber(
+    AUTH_CONSTANTS?.textValueMaxLength,
+    DEFAULT_TEXT_MAX_LENGTH
+  );
+}
+
+function getSessionMaxLength() {
+  return safeNumber(
+    AUTH_CONSTANTS?.sessionValueMaxLength,
+    DEFAULT_TEXT_MAX_LENGTH
+  );
+}
+
+function normalizeRole(value = "") {
+  const role = safeText(value, "").toLowerCase();
+
+  if (!role) return "";
+  if (role === "admin") return "admin";
+
+  return "user";
+}
+
+function isCorrupt(value = "") {
+  return CORRUPT_VALUES.has(safeText(value, "").toLowerCase());
+}
+
+function redactOpaque(value = "") {
+  const text = safeText(value, "");
+
+  if (!text) return null;
+  if (text.length <= 8) return "***";
+
+  return `${text.slice(0, 3)}***${text.slice(-3)}`;
+}
+
+function recordStorageError(error) {
+  lastStorageError = error || null;
+}
+
 /* =========================================================
-   KEY NORMALIZATION
+   KEY HELPERS
 ========================================================= */
-
-function buildKey(key = "") {
-  const cleanKey =
-    safeText(key, "");
-
-  if (!cleanKey) {
-    return "";
-  }
-
-  const prefix =
-    getPrefix();
-
-  if (
-    cleanKey.startsWith(`${prefix}:`) ||
-    cleanKey.startsWith(`${prefix}_`) ||
-    cleanKey.startsWith(`${prefix}.`)
-  ) {
-    return cleanKey;
-  }
-
-  return `${prefix}:${cleanKey}`;
-}
-
-function stripKnownPrefix(key = "") {
-  const cleanKey =
-    safeText(key, "");
-
-  const prefix =
-    getPrefix();
-
-  if (cleanKey.startsWith(`${prefix}:`)) {
-    return cleanKey.slice(prefix.length + 1);
-  }
-
-  if (cleanKey.startsWith(`${prefix}_`)) {
-    return cleanKey.slice(prefix.length + 1);
-  }
-
-  if (cleanKey.startsWith(`${prefix}.`)) {
-    return cleanKey.slice(prefix.length + 1);
-  }
-
-  return cleanKey;
-}
 
 function camelToSnake(value = "") {
   return safeText(value, "")
@@ -773,334 +431,96 @@ function camelToSnake(value = "") {
 }
 
 function snakeToCamel(value = "") {
-  return safeText(value, "")
-    .replace(/[_-]([a-z0-9])/g, (_, char) =>
-      String(char || "").toUpperCase()
-    );
+  return safeText(value, "").replace(/[_-]([a-z0-9])/g, (_, char) =>
+    String(char || "").toUpperCase()
+  );
 }
 
-function dotted(value = "") {
-  return safeText(value, "")
-    .replace(/:/g, ".")
-    .replace(/_/g, ".");
+function stripPrefix(key = "") {
+  const clean = safeText(key, "");
+  const prefix = getPrefix();
+
+  if (clean.startsWith(`${prefix}:`)) return clean.slice(prefix.length + 1);
+  if (clean.startsWith(`${prefix}.`)) return clean.slice(prefix.length + 1);
+  if (clean.startsWith(`${prefix}_`)) return clean.slice(prefix.length + 1);
+
+  return clean;
 }
 
-function coloned(value = "") {
-  return safeText(value, "")
-    .replace(/\./g, ":");
+function canonicalKey(key = "") {
+  const clean = stripPrefix(key);
+  const prefix = getPrefix();
+
+  return clean ? `${prefix}:${clean}` : "";
 }
 
-function underscored(value = "") {
-  return safeText(value, "")
-    .replace(/[:.]/g, "_");
-}
+function keyVariants(key = "") {
+  const clean = safeText(key, "");
 
-function getKeyCandidates(key = "") {
-  const cleanKey =
-    safeText(key, "");
+  if (!clean) return [];
 
-  if (!cleanKey) {
-    return [];
-  }
-
-  const prefix =
-    getPrefix();
-
-  const stripped =
-    stripKnownPrefix(cleanKey);
-
-  const snake =
-    camelToSnake(stripped);
-
-  const camel =
-    snakeToCamel(stripped);
-
-  const dot =
-    dotted(stripped);
-
-  const colon =
-    coloned(stripped);
-
-  const underscore =
-    underscored(stripped);
+  const stripped = stripPrefix(clean);
+  const snake = camelToSnake(stripped);
+  const camel = snakeToCamel(stripped);
+  const prefix = getPrefix();
 
   return unique([
-    cleanKey,
+    clean,
     stripped,
-
     snake,
     camel,
-    dot,
-    colon,
-    underscore,
 
     `${prefix}:${stripped}`,
     `${prefix}:${snake}`,
     `${prefix}:${camel}`,
-    `${prefix}:${dot}`,
-    `${prefix}:${colon}`,
-    `${prefix}:${underscore}`,
 
     `${prefix}.${stripped}`,
     `${prefix}.${snake}`,
     `${prefix}.${camel}`,
-    `${prefix}.${dot}`,
-    `${prefix}.${underscore}`,
 
     `${prefix}_${stripped}`,
     `${prefix}_${snake}`,
     `${prefix}_${camel}`,
-    `${prefix}_${underscore}`,
 
-    cleanKey.replace(/:/g, "."),
-    cleanKey.replace(/\./g, ":"),
-    cleanKey.replace(/[:.]/g, "_"),
+    clean.replace(/[:.]/g, "_"),
+    clean.replace(/_/g, ":"),
+    clean.replace(/_/g, "."),
   ]);
 }
 
-function getLegacyValue(key = "") {
-  const legacy =
-    AUTH_LEGACY_STORAGE_KEYS || {};
-
-  const clean =
-    safeText(key, "");
-
-  if (!clean) {
-    return "";
-  }
-
-  return safeText(
-    legacy[clean],
-    ""
-  );
+function legacyKey(name = "") {
+  const legacy = safeObject(AUTH_LEGACY_STORAGE_KEYS);
+  return safeText(legacy[name], "");
 }
 
-function getSlotKeys(slot = "") {
-  const keys =
-    getStorageKeys();
+function slotKeys(slot = "") {
+  const keys = getKeys();
+  const base = [];
+
+  if (keys[slot]) base.push(keys[slot]);
+  if (slot === "accessToken") base.push(keys.token);
+  if (slot === "sessionUserId") base.push(keys.userId);
+  if (slot === "userName") base.push(keys.username);
+  if (slot === "redirectAfterLogin") base.push(keys.postLoginTarget);
+
+  base.push(legacyKey(slot));
+  base.push(...(SLOT_ALIASES[slot] || []));
+
+  return unique(base);
+}
+
+function writeSlotKeys(slot = "") {
+  const keys = getKeys();
 
   const map = {
-    refreshToken: [
-      keys.refreshToken,
-      getLegacyValue("refreshToken"),
-      "refreshToken",
-      "refresh_token",
-      "auth.refreshToken",
-      "auth.refresh_token",
-      "session.refreshToken",
-      "session.refresh_token",
-      "onion_refresh_token",
-      "onion:refreshToken",
-      "onion:refresh_token",
-      "onion.refreshToken",
-      "onion.refresh_token",
-    ],
-
-    tempToken: [
-      keys.tempToken,
-      getLegacyValue("tempToken"),
-      getLegacyValue("temporaryToken"),
-      getLegacyValue("twoFactorToken"),
-      getLegacyValue("mfaToken"),
-      "tempToken",
-      "temp_token",
-      "temporaryToken",
-      "temporary_token",
-      "challengeToken",
-      "challenge_token",
-      "twoFactorToken",
-      "two_factor_token",
-      "mfaToken",
-      "mfa_token",
-      "auth.tempToken",
-      "auth.temp_token",
-      "onion_temp_token",
-      "onion_temporary_token",
-      "onion_two_factor_token",
-      "onion_mfa_token",
-      "onion:tempToken",
-      "onion:temp_token",
-      "onion.tempToken",
-      "onion.temp_token",
-    ],
-
     accessToken: [
       keys.accessToken,
       keys.token,
-      getLegacyValue("token"),
-      getLegacyValue("accessToken"),
       "accessToken",
       "access_token",
       "token",
-      "authToken",
-      "auth_token",
-      "jwt",
-      "idToken",
-      "id_token",
-      "auth.accessToken",
-      "auth.access_token",
-      "auth.token",
-      "session.accessToken",
-      "session.access_token",
-      "session.token",
-      "onion_token",
-      "onion_access_token",
-      "auth_token",
-      "onion:token",
-      "onion:accessToken",
-      "onion:access_token",
-      "onion.token",
-      "onion.accessToken",
-      "onion.access_token",
     ],
 
-    sessionId: [
-      keys.sessionId,
-      getLegacyValue("sessionId"),
-      "sessionId",
-      "session_id",
-      "sid",
-      "auth.sessionId",
-      "auth.session_id",
-      "session.id",
-      "session.sessionId",
-      "session.session_id",
-      "onion_session_id",
-      "onion:sessionId",
-      "onion:session_id",
-      "onion.sessionId",
-      "onion.session_id",
-    ],
-
-    sessionUserId: [
-      keys.sessionUserId,
-      keys.userId,
-      getLegacyValue("sessionUserId"),
-      getLegacyValue("userId"),
-      "sessionUserId",
-      "session_user_id",
-      "userId",
-      "user_id",
-      "uid",
-      "auth.sessionUserId",
-      "auth.session_user_id",
-      "session.userId",
-      "session.user_id",
-      "onion_session_user_id",
-      "onion_user_id",
-      "onion:sessionUserId",
-      "onion:session_user_id",
-      "onion:userId",
-      "onion:user_id",
-      "onion.sessionUserId",
-      "onion.session_user_id",
-      "onion.userId",
-      "onion.user_id",
-    ],
-
-    userSlug: [
-      keys.userSlug,
-      getLegacyValue("userSlug"),
-      "userSlug",
-      "user_slug",
-      "slug",
-      "onion_user_slug",
-      "onion:userSlug",
-      "onion:user_slug",
-    ],
-
-    userName: [
-      keys.userName,
-      keys.username,
-      getLegacyValue("userName"),
-      "userName",
-      "user_name",
-      "username",
-      "lastUsername",
-      "last_username",
-      "onion_user_name",
-      "onion_username",
-      "onion:userName",
-      "onion:user_name",
-      "onion:username",
-    ],
-
-    role: [
-      keys.role,
-      getLegacyValue("role"),
-      "role",
-      "rol",
-      "userRole",
-      "user_role",
-      "auth.role",
-      "session.role",
-      "onion_role",
-      "onion:role",
-      "onion.role",
-    ],
-
-    lastUsername: [
-      keys.lastUsername,
-      "lastUsername",
-      "last_username",
-      "username",
-      "onion_last_username",
-      "onion:lastUsername",
-      "onion:last_username",
-    ],
-
-    lastLoginIdentifier: [
-      keys.lastLoginIdentifier,
-      "lastLoginIdentifier",
-      "last_login_identifier",
-      "loginIdentifier",
-      "login_identifier",
-      "onion_last_login_identifier",
-      "onion:lastLoginIdentifier",
-      "onion:last_login_identifier",
-    ],
-
-    lastResetIdentifier: [
-      keys.lastResetIdentifier,
-      "lastResetIdentifier",
-      "last_reset_identifier",
-      "resetIdentifier",
-      "reset_identifier",
-      "onion_last_reset_identifier",
-      "onion:lastResetIdentifier",
-      "onion:last_reset_identifier",
-    ],
-
-    redirectAfterLogin: [
-      keys.redirectAfterLogin,
-      keys.postLoginTarget,
-      "redirectAfterLogin",
-      "redirect_after_login",
-      "postLoginTarget",
-      "post_login_target",
-      "auth.redirectAfterLogin",
-      "onion_redirect_after_login",
-      "onion_post_login_target",
-      "onion:redirectAfterLogin",
-      "onion:redirect_after_login",
-      "onion:postLoginTarget",
-      "onion:post_login_target",
-    ],
-  };
-
-  return unique(
-    map[slot] || [
-      keys[slot],
-      slot,
-    ]
-  );
-}
-
-function getWriteSlotKeys(slot = "") {
-  const keys =
-    getStorageKeys();
-
-  const map = {
     refreshToken: [
       keys.refreshToken,
       "refreshToken",
@@ -1111,14 +531,6 @@ function getWriteSlotKeys(slot = "") {
       keys.tempToken,
       "tempToken",
       "temp_token",
-    ],
-
-    accessToken: [
-      keys.accessToken,
-      keys.token,
-      "accessToken",
-      "access_token",
-      "token",
     ],
 
     sessionId: [
@@ -1137,365 +549,383 @@ function getWriteSlotKeys(slot = "") {
     ],
   };
 
-  return unique(
-    map[slot] || [
-      keys[slot],
-      slot,
-    ]
-  );
+  return unique(map[slot] || [keys[slot], slot]);
 }
 
-function getKnownAuthKeys() {
-  const keys =
-    getStorageKeys();
+function allClearKeys() {
+  const keys = getKeys();
 
   return unique([
     ...Object.values(keys),
 
-    ...getSlotKeys("refreshToken"),
-    ...getSlotKeys("tempToken"),
-    ...getSlotKeys("accessToken"),
-    ...getSlotKeys("sessionId"),
-    ...getSlotKeys("sessionUserId"),
-    ...getSlotKeys("userSlug"),
-    ...getSlotKeys("userName"),
-    ...getSlotKeys("role"),
-    ...getSlotKeys("lastUsername"),
-    ...getSlotKeys("lastLoginIdentifier"),
-    ...getSlotKeys("lastResetIdentifier"),
-    ...getSlotKeys("redirectAfterLogin"),
-  ]);
-}
+    ...Object.values(safeObject(AUTH_LEGACY_STORAGE_KEYS)),
 
-function getCoreAuthStorageKeys() {
-  return unique([
-    AppCore?.config?.storageKeys?.token,
-    AppCore?.config?.storageKeys?.accessToken,
-    AppCore?.config?.storageKeys?.access_token,
-    AppCore?.config?.storageKeys?.user,
-    AppCore?.config?.storageKeys?.refreshToken,
-    AppCore?.config?.storageKeys?.refresh_token,
-    AppCore?.config?.storageKeys?.tempToken,
-    AppCore?.config?.storageKeys?.temp_token,
-    AppCore?.config?.storageKeys?.sessionId,
-    AppCore?.config?.storageKeys?.sessionUserId,
-    AppCore?.config?.storageKeys?.role,
+    ...slotKeys("accessToken"),
+    ...slotKeys("refreshToken"),
+    ...slotKeys("tempToken"),
+    ...slotKeys("sessionId"),
+    ...slotKeys("sessionUserId"),
+    ...slotKeys("userSlug"),
+    ...slotKeys("userName"),
+    ...slotKeys("role"),
+    ...slotKeys("lastUsername"),
+    ...slotKeys("lastLoginIdentifier"),
+    ...slotKeys("lastResetIdentifier"),
+    ...slotKeys("redirectAfterLogin"),
 
-    "token",
-    "accessToken",
-    "access_token",
     "user",
     "currentUser",
     "authUser",
     "sessionUser",
-    "refreshToken",
-    "refresh_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "challengeToken",
-    "challenge_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
     "session",
     "sessionData",
-    "sessionId",
-    "session_id",
-    "sessionUserId",
-    "session_user_id",
-    "role",
-    "rol",
-    "userRole",
-    "user_role",
-  ]);
-}
-
-function getLegacyAuthKeys() {
-  const legacyValues =
-    AUTH_LEGACY_STORAGE_KEYS &&
-    typeof AUTH_LEGACY_STORAGE_KEYS === "object"
-      ? Object.values(AUTH_LEGACY_STORAGE_KEYS)
-      : [];
-
-  return unique([
-    ...legacyValues,
-
-    "onion_token",
-    "onion_access_token",
-    "onion_refresh_token",
-    "onion_temp_token",
-    "onion_temporary_token",
-    "onion_two_factor_token",
-    "onion_mfa_token",
-    "onion_session_id",
-    "onion_session_user_id",
-    "onion_user",
-    "onion_user_id",
-    "onion_user_name",
-    "onion_user_slug",
-    "onion_role",
-
-    "onion:token",
-    "onion:accessToken",
-    "onion:access_token",
-    "onion:refreshToken",
-    "onion:refresh_token",
-    "onion:tempToken",
-    "onion:temp_token",
+    "auth.session",
+    "auth.user",
+    "onion:user",
     "onion:session",
     "onion:sessionData",
-    "onion:sessionId",
-    "onion:session_id",
-    "onion:sessionUserId",
-    "onion:session_user_id",
-    "onion:user",
-    "onion:userId",
-    "onion:user_id",
-    "onion:userName",
-    "onion:user_name",
-    "onion:userSlug",
-    "onion:user_slug",
-    "onion:role",
-
-    "onion.token",
-    "onion.accessToken",
-    "onion.access_token",
-    "onion.refreshToken",
-    "onion.refresh_token",
-    "onion.tempToken",
-    "onion.temp_token",
-    "onion.session",
-    "onion.sessionData",
-    "onion.sessionId",
-    "onion.session_id",
-    "onion.sessionUserId",
-    "onion.session_user_id",
-    "onion.user",
-    "onion.role",
-
-    "auth_token",
-    "authToken",
-    "access_token",
-    "accessToken",
-    "refresh_token",
-    "refreshToken",
-    "temp_token",
-    "tempToken",
-    "temporary_token",
-    "temporaryToken",
-    "challenge_token",
-    "challengeToken",
-    "two_factor_token",
-    "twoFactorToken",
-    "mfa_token",
-    "mfaToken",
-
-    "token",
-    "accessToken",
-    "access_token",
-    "session",
-    "sessionData",
-    "session_id",
-    "sessionId",
-    "session_user_id",
-    "sessionUserId",
-    "user",
-    "currentUser",
-    "authUser",
-    "sessionUser",
-    "user_id",
-    "userId",
-    "user_name",
-    "userName",
-    "user_slug",
-    "userSlug",
-    "role",
-    "rol",
-    "userRole",
-    "user_role",
-
-    "auth.token",
-    "auth.accessToken",
-    "auth.access_token",
-    "auth.refreshToken",
-    "auth.refresh_token",
-    "auth.tempToken",
-    "auth.temp_token",
-    "auth.session",
-    "auth.sessionData",
-    "auth.sessionId",
-    "auth.session_id",
-    "auth.sessionUserId",
-    "auth.session_user_id",
-    "auth.user",
-    "auth.role",
-
-    "session.token",
-    "session.accessToken",
-    "session.access_token",
-    "session.refreshToken",
-    "session.refresh_token",
-    "session.user",
-    "session.role",
-  ]);
-}
-
-function getAllAuthClearKeys() {
-  return unique([
-    ...getKnownAuthKeys(),
-    ...getCoreAuthStorageKeys(),
-    ...getLegacyAuthKeys(),
+    "onion_user",
+    "onion_session",
   ]);
 }
 
 /* =========================================================
-   VALUE NORMALIZATION
+   STORAGE ADAPTERS
 ========================================================= */
 
-function isCorruptedValue(value) {
-  const text =
-    safeText(value, "").toLowerCase();
+function getAppStorage() {
+  const storage = AppCore?.storage;
 
-  return CORRUPTED_VALUES.has(text);
+  if (!storage || typeof storage !== "object") return null;
+
+  if (
+    typeof storage.get === "function" ||
+    typeof storage.getRaw === "function" ||
+    typeof storage.set === "function" ||
+    typeof storage.setRaw === "function" ||
+    typeof storage.remove === "function" ||
+    typeof storage.delete === "function" ||
+    typeof storage.del === "function"
+  ) {
+    return storage;
+  }
+
+  return null;
 }
 
-function pickFromObject(obj = {}, preferredKeys = [], depth = 0) {
-  if (
-    !isPlainObject(obj) ||
-    depth > 4
-  ) {
-    return "";
+function getWebStorage(kind = "localStorage") {
+  if (!isBrowser()) return null;
+
+  try {
+    const storage = window[kind];
+    const testKey = `__onion_auth_probe_${kind}`;
+
+    storage.setItem(testKey, "1");
+    storage.removeItem(testKey);
+
+    return storage;
+  } catch (error) {
+    recordStorageError(error);
+    return null;
   }
+}
 
-  for (const key of preferredKeys) {
-    if (!hasOwn(obj, key)) {
-      continue;
-    }
+function readAppStorage(key = "") {
+  const storage = getAppStorage();
 
-    const value =
-      obj[key];
+  if (!storage) return "";
 
-    if (
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "boolean"
-    ) {
-      const text =
-        safeText(value, "");
-
-      if (text) {
-        return text;
+  for (const variant of keyVariants(key)) {
+    try {
+      if (typeof storage.getRaw === "function") {
+        const value = storage.getRaw(variant, "");
+        if (value) return value;
       }
+    } catch (error) {
+      recordStorageError(error);
     }
 
-    if (isPlainObject(value)) {
-      const nested =
-        pickFromObject(
-          value,
-          preferredKeys,
-          depth + 1
-        );
-
-      if (nested) {
-        return nested;
+    try {
+      if (typeof storage.get === "function") {
+        const value = storage.get(variant, "");
+        if (value) return value;
       }
-    }
-  }
-
-  for (const key of TEXT_VALUE_PICK_KEYS) {
-    if (!hasOwn(obj, key)) {
-      continue;
-    }
-
-    const value =
-      obj[key];
-
-    if (
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "boolean"
-    ) {
-      const text =
-        safeText(value, "");
-
-      if (text) {
-        return text;
-      }
-    }
-
-    if (isPlainObject(value)) {
-      const nested =
-        pickFromObject(
-          value,
-          preferredKeys,
-          depth + 1
-        );
-
-      if (nested) {
-        return nested;
-      }
+    } catch (error) {
+      recordStorageError(error);
     }
   }
 
   return "";
 }
 
-function safeJsonUnwrap(value, preferredKeys = []) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return "";
-  }
+function writeAppStorage(key = "", value = "") {
+  const storage = getAppStorage();
+  const clean = stripPrefix(key);
 
-  if (
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return safeText(value, "");
-  }
+  if (!storage || !clean || !value) return false;
 
-  if (isPlainObject(value)) {
-    return pickFromObject(
-      value,
-      preferredKeys
-    );
-  }
-
-  if (typeof value !== "string") {
-    return "";
-  }
-
-  const raw =
-    value.trim();
-
-  if (
-    !raw ||
-    isCorruptedValue(raw)
-  ) {
-    return "";
+  try {
+    if (typeof storage.setRaw === "function") {
+      storage.setRaw(clean, value);
+      return true;
+    }
+  } catch (error) {
+    recordStorageError(error);
   }
 
   try {
-    const parsed =
-      JSON.parse(raw);
+    if (typeof storage.set === "function") {
+      storage.set(clean, value);
+      return true;
+    }
+  } catch (error) {
+    recordStorageError(error);
+  }
 
-    if (
-      typeof parsed === "string" ||
-      typeof parsed === "number" ||
-      typeof parsed === "boolean"
-    ) {
+  return false;
+}
+
+function removeAppStorage(key = "") {
+  const storage = getAppStorage();
+
+  if (!storage) return false;
+
+  let removed = false;
+
+  for (const variant of keyVariants(key)) {
+    try {
+      if (typeof storage.remove === "function") {
+        storage.remove(variant);
+        removed = true;
+      }
+    } catch (error) {
+      recordStorageError(error);
+    }
+
+    try {
+      if (typeof storage.delete === "function") {
+        storage.delete(variant);
+        removed = true;
+      }
+    } catch (error) {
+      recordStorageError(error);
+    }
+
+    try {
+      if (typeof storage.del === "function") {
+        storage.del(variant);
+        removed = true;
+      }
+    } catch (error) {
+      recordStorageError(error);
+    }
+  }
+
+  return removed;
+}
+
+function readWebStorage(storage, key = "") {
+  if (!storage) return "";
+
+  for (const variant of keyVariants(key)) {
+    try {
+      const value = storage.getItem(variant);
+      if (value) return value;
+    } catch (error) {
+      recordStorageError(error);
+    }
+  }
+
+  return "";
+}
+
+function writeWebStorage(storage, key = "", value = "") {
+  if (!storage || !key || !value) return false;
+
+  try {
+    storage.setItem(canonicalKey(key), value);
+    return true;
+  } catch (error) {
+    recordStorageError(error);
+    return false;
+  }
+}
+
+function removeWebStorage(storage, key = "") {
+  if (!storage) return false;
+
+  let removed = false;
+
+  for (const variant of keyVariants(key)) {
+    try {
+      storage.removeItem(variant);
+      removed = true;
+    } catch (error) {
+      recordStorageError(error);
+    }
+  }
+
+  return removed;
+}
+
+function readMemory(key = "") {
+  for (const variant of keyVariants(key)) {
+    if (memoryStorage.has(variant)) {
+      return memoryStorage.get(variant);
+    }
+  }
+
+  return "";
+}
+
+function writeMemory(key = "", value = "") {
+  const finalKey = canonicalKey(key);
+
+  if (!finalKey || !value) return false;
+
+  memoryStorage.set(finalKey, value);
+
+  return true;
+}
+
+function removeMemory(key = "") {
+  let removed = false;
+
+  for (const variant of keyVariants(key)) {
+    if (memoryStorage.delete(variant)) {
+      removed = true;
+    }
+  }
+
+  return removed;
+}
+
+/* =========================================================
+   RAW OPERATIONS
+========================================================= */
+
+function readRaw(key = "") {
+  if (!key) return "";
+
+  return (
+    readAppStorage(key) ||
+    readWebStorage(getWebStorage("localStorage"), key) ||
+    readWebStorage(getWebStorage("sessionStorage"), key) ||
+    readMemory(key) ||
+    ""
+  );
+}
+
+function writeRaw(key = "", value = "", options = {}) {
+  const cleanValue = safeText(value, "");
+
+  if (!key) return false;
+
+  if (!cleanValue) {
+    return removeRaw(key);
+  }
+
+  const opts = safeObject(options);
+
+  const appOk = opts.appStorage === false ? false : writeAppStorage(key, cleanValue);
+  const localOk = opts.sessionOnly === true ? false : writeWebStorage(getWebStorage("localStorage"), key, cleanValue);
+  const sessionOk = opts.localOnly === true ? false : writeWebStorage(getWebStorage("sessionStorage"), key, cleanValue);
+  const memoryOk = opts.memory === false ? false : writeMemory(key, cleanValue);
+
+  return Boolean(appOk || localOk || sessionOk || memoryOk);
+}
+
+function writeMany(keys = [], value = "", options = {}) {
+  const cleanValue = safeText(value, "");
+
+  let ok = false;
+
+  for (const key of unique(keys)) {
+    ok = writeRaw(key, cleanValue, options) || ok;
+  }
+
+  return ok;
+}
+
+function removeRaw(key = "") {
+  if (!key) return false;
+
+  return Boolean(
+    removeAppStorage(key) ||
+      removeWebStorage(getWebStorage("localStorage"), key) ||
+      removeWebStorage(getWebStorage("sessionStorage"), key) ||
+      removeMemory(key)
+  );
+}
+
+function removeMany(keys = []) {
+  let ok = false;
+
+  for (const key of unique(keys)) {
+    ok = removeRaw(key) || ok;
+  }
+
+  return ok;
+}
+
+function readFirst(keys = []) {
+  for (const key of unique(keys)) {
+    const value = readRaw(key);
+
+    if (value) return value;
+  }
+
+  return "";
+}
+
+/* =========================================================
+   VALUE NORMALIZATION
+========================================================= */
+
+function pickFromObject(objectValue = {}, pickKeys = [], depth = 0) {
+  if (!isObject(objectValue) || depth > 4) return "";
+
+  for (const key of pickKeys) {
+    const value = objectValue[key];
+
+    if (typeof value === "string" || typeof value === "number") {
+      const text = safeText(value, "");
+      if (text) return text;
+    }
+
+    if (isObject(value)) {
+      const nested = pickFromObject(value, pickKeys, depth + 1);
+      if (nested) return nested;
+    }
+  }
+
+  return "";
+}
+
+function unwrapValue(value = "", pickKeys = TEXT_PICK_KEYS) {
+  if (value === null || value === undefined) return "";
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return safeText(value, "");
+  }
+
+  if (isObject(value)) {
+    return pickFromObject(value, pickKeys);
+  }
+
+  const raw = safeText(value, "");
+
+  if (!raw || isCorrupt(raw)) return "";
+
+  try {
+    const parsed = JSON.parse(raw);
+
+    if (typeof parsed === "string" || typeof parsed === "number") {
       return safeText(parsed, "");
     }
 
-    if (isPlainObject(parsed)) {
-      return pickFromObject(
-        parsed,
-        preferredKeys
-      );
+    if (isObject(parsed)) {
+      return pickFromObject(parsed, pickKeys);
     }
 
     return "";
@@ -1504,1133 +934,156 @@ function safeJsonUnwrap(value, preferredKeys = []) {
   }
 }
 
-function normalizeStoredValue(value = "", maxLen = getSessionValueMaxLen()) {
-  const unwrapped =
-    safeJsonUnwrap(
-      value,
-      TEXT_VALUE_PICK_KEYS
-    );
+function normalizeText(value = "", maxLength = getTextMaxLength(), pickKeys = TEXT_PICK_KEYS) {
+  const raw = unwrapValue(value, pickKeys);
 
-  if (isCorruptedValue(unwrapped)) {
-    return "";
-  }
+  if (!raw || isCorrupt(raw)) return "";
 
-  const limit =
-    Math.max(
-      1,
-      safeNumber(
-        maxLen,
-        getSessionValueMaxLen()
-      )
-    );
-
-  try {
-    return (
-      normalizeSessionValue(
-        unwrapped,
-        limit
-      ) || ""
-    );
-  } catch {
-    return safeText(unwrapped, "").slice(
-      0,
-      limit
-    );
-  }
+  return safeText(raw, "").slice(0, maxLength);
 }
 
-function normalizeStoredToken(value = "") {
-  const unwrapped =
-    safeJsonUnwrap(
-      value,
-      TOKEN_PICK_KEYS
-    );
+function normalizeToken(value = "") {
+  let token = unwrapValue(value, TOKEN_PICK_KEYS);
 
-  if (isCorruptedValue(unwrapped)) {
-    return "";
-  }
+  if (!token || isCorrupt(token)) return "";
 
-  let token =
-    safeText(unwrapped, "");
+  token = token.replace(/^Bearer\s+/i, "").trim();
 
-  if (/^bearer\s+/i.test(token)) {
-    token =
-      token.replace(/^bearer\s+/i, "")
-        .trim();
-  }
+  if (!token || /\s/.test(token)) return "";
 
-  if (
-    !token ||
-    isCorruptedValue(token) ||
-    /[\r\n\t\s]/.test(token)
-  ) {
-    return "";
-  }
+  const maxLength = getTokenMaxLength();
 
-  const max =
-    getTokenMaxLen();
-
-  /*
-    Regla dura:
-    Tokens no se truncan. Si exceden, se descartan.
-  */
-  if (
-    max > 0 &&
-    token.length > max
-  ) {
+  if (maxLength > 0 && token.length > maxLength) {
     return "";
   }
 
   return token;
 }
 
-function normalizeStoredSessionId(value = "") {
-  const unwrapped =
-    safeJsonUnwrap(
-      value,
-      SESSION_ID_PICK_KEYS
-    );
-
-  return normalizeStoredValue(
-    unwrapped,
-    getSessionValueMaxLen()
-  );
+function normalizeSessionId(value = "") {
+  return normalizeText(value, getSessionMaxLength(), SESSION_ID_PICK_KEYS);
 }
 
-function normalizeStoredSessionUserId(value = "") {
-  const unwrapped =
-    safeJsonUnwrap(
-      value,
-      SESSION_USER_ID_PICK_KEYS
-    );
-
-  return normalizeStoredValue(
-    unwrapped,
-    getSessionValueMaxLen()
-  );
-}
-
-function normalizeStoredText(value = "") {
-  return normalizeStoredValue(
-    value,
-    getTextValueMaxLen()
-  );
+function normalizeSessionUserId(value = "") {
+  return normalizeText(value, getSessionMaxLength(), SESSION_USER_ID_PICK_KEYS);
 }
 
 function normalizeSessionData(sessionData = null, user = null) {
-  const raw =
-    safeObject(sessionData);
+  const data = safeObject(sessionData);
+  const session = safeObject(data.session || data.sessionData);
+  const auth = safeObject(data.auth);
+  const authSession = safeObject(auth.session || auth.sessionData);
 
-  const nestedSession =
-    safeObject(raw.session);
+  const safeUser = safeObject(
+    user ||
+      data.user ||
+      data.usuario ||
+      data.me ||
+      data.account ||
+      auth.user ||
+      auth.usuario
+  );
 
-  const safeUser =
-    safeObject(user);
+  const sessionId = normalizeSessionId(
+    data.sessionId ||
+      data.session_id ||
+      data.sid ||
+      session.sessionId ||
+      session.session_id ||
+      session.sid ||
+      session.id ||
+      authSession.sessionId ||
+      authSession.session_id ||
+      authSession.sid ||
+      authSession.id ||
+      ""
+  );
 
-  const rawUser =
-    safeObject(raw.user || raw.usuario);
-
-  const sessionId =
-    normalizeStoredSessionId(
-      raw.sessionId ??
-        raw.session_id ??
-        raw.sid ??
-        raw.id ??
-        nestedSession.sessionId ??
-        nestedSession.session_id ??
-        nestedSession.sid ??
-        nestedSession.id ??
-        ""
-    );
-
-  const userId =
-    normalizeStoredSessionUserId(
-      raw.sessionUserId ??
-        raw.session_user_id ??
-        raw.userId ??
-        raw.user_id ??
-        raw.uid ??
-        raw.sub ??
-        nestedSession.sessionUserId ??
-        nestedSession.session_user_id ??
-        nestedSession.userId ??
-        nestedSession.user_id ??
-        nestedSession.uid ??
-        nestedSession.sub ??
-        rawUser.userId ??
-        rawUser.user_id ??
-        rawUser.id ??
-        rawUser._id ??
-        rawUser.uid ??
-        rawUser.sub ??
-        rawUser.email ??
-        rawUser.username ??
-        rawUser.userName ??
-        safeUser.userId ??
-        safeUser.user_id ??
-        safeUser.id ??
-        safeUser._id ??
-        safeUser.uid ??
-        safeUser.sub ??
-        safeUser.email ??
-        safeUser.username ??
-        safeUser.userName ??
-        ""
-    );
+  const sessionUserId = normalizeSessionUserId(
+    data.sessionUserId ||
+      data.session_user_id ||
+      data.userId ||
+      data.user_id ||
+      data.uid ||
+      session.userId ||
+      session.user_id ||
+      session.uid ||
+      authSession.userId ||
+      authSession.user_id ||
+      authSession.uid ||
+      safeUser.userId ||
+      safeUser.user_id ||
+      safeUser.id ||
+      safeUser.uid ||
+      safeUser.sub ||
+      safeUser.email ||
+      safeUser.username ||
+      ""
+  );
 
   return {
-    sessionId:
-      sessionId || "",
-
-    userId:
-      userId || "",
-
-    sessionUserId:
-      userId || "",
+    sessionId,
+    userId: sessionUserId,
+    sessionUserId,
   };
-}
-
-function redactOpaque(value = "") {
-  const text =
-    safeText(value, "");
-
-  if (!text) {
-    return null;
-  }
-
-  if (text.length <= 8) {
-    return "***";
-  }
-
-  return `${text.slice(0, 3)}***${text.slice(-3)}`;
-}
-
-/* =========================================================
-   STORAGE ADAPTERS
-========================================================= */
-
-function getStorageApi() {
-  try {
-    const storage =
-      AppCore?.storage || null;
-
-    if (
-      storage &&
-      (
-        isFunction(storage.get) ||
-        isFunction(storage.getRaw) ||
-        isFunction(storage.set) ||
-        isFunction(storage.setRaw) ||
-        isFunction(storage.remove) ||
-        isFunction(storage.delete) ||
-        isFunction(storage.del)
-      )
-    ) {
-      return storage;
-    }
-  } catch {}
-
-  return null;
-}
-
-function canUseWebStorage(kind = "localStorage") {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  if (webStorageAvailability[kind] !== undefined) {
-    return Boolean(webStorageAvailability[kind]);
-  }
-
-  try {
-    const storage =
-      window?.[kind];
-
-    if (!storage) {
-      webStorageAvailability[kind] =
-        false;
-
-      return false;
-    }
-
-    const key =
-      `${WEB_STORAGE_PROBE_PREFIX}${kind}`;
-
-    storage.setItem(
-      key,
-      "1"
-    );
-
-    storage.removeItem(key);
-
-    webStorageAvailability[kind] =
-      true;
-
-    return true;
-  } catch (error) {
-    lastStorageError =
-      error;
-
-    webStorageAvailability[kind] =
-      false;
-
-    return false;
-  }
-}
-
-function getLocalStorage() {
-  if (!canUseWebStorage("localStorage")) {
-    return null;
-  }
-
-  try {
-    return window.localStorage;
-  } catch (error) {
-    lastStorageError =
-      error;
-
-    return null;
-  }
-}
-
-function getSessionStorage() {
-  if (!canUseWebStorage("sessionStorage")) {
-    return null;
-  }
-
-  try {
-    return window.sessionStorage;
-  } catch (error) {
-    lastStorageError =
-      error;
-
-    return null;
-  }
-}
-
-/* =========================================================
-   APPCORE STORAGE
-========================================================= */
-
-function readFromAppStorage(key, fallback = "", preferredKeys = []) {
-  const storage =
-    getStorageApi();
-
-  if (!storage) {
-    return fallback;
-  }
-
-  const candidates =
-    getKeyCandidates(key);
-
-  for (const candidate of candidates) {
-    try {
-      if (isFunction(storage.getRaw)) {
-        const raw =
-          storage.getRaw(
-            candidate,
-            ""
-          );
-
-        const text =
-          safeJsonUnwrap(
-            raw,
-            preferredKeys
-          );
-
-        if (text) {
-          return text;
-        }
-      }
-    } catch (error) {
-      lastStorageError =
-        error;
-    }
-
-    try {
-      if (isFunction(storage.get)) {
-        const value =
-          storage.get(
-            candidate,
-            ""
-          );
-
-        const text =
-          safeJsonUnwrap(
-            value,
-            preferredKeys
-          );
-
-        if (text) {
-          return text;
-        }
-      }
-    } catch (error) {
-      lastStorageError =
-        error;
-    }
-  }
-
-  return fallback;
-}
-
-function writeToAppStorage(key, value) {
-  const storage =
-    getStorageApi();
-
-  if (!storage) {
-    return false;
-  }
-
-  const cleanKey =
-    stripKnownPrefix(key);
-
-  const finalValue =
-    safeText(value, "");
-
-  if (
-    !cleanKey ||
-    !finalValue
-  ) {
-    return false;
-  }
-
-  try {
-    if (isFunction(storage.setRaw)) {
-      storage.setRaw(
-        cleanKey,
-        finalValue
-      );
-
-      return true;
-    }
-  } catch (error) {
-    lastStorageError =
-      error;
-  }
-
-  try {
-    if (isFunction(storage.set)) {
-      storage.set(
-        cleanKey,
-        finalValue
-      );
-
-      return true;
-    }
-  } catch (error) {
-    lastStorageError =
-      error;
-
-    safeWarn(
-      "AppCore.storage.set() falló.",
-      {
-        key:
-          cleanKey,
-        error,
-      }
-    );
-  }
-
-  return false;
-}
-
-function removeFromAppStorage(key) {
-  const storage =
-    getStorageApi();
-
-  if (!storage) {
-    return false;
-  }
-
-  const candidates =
-    getKeyCandidates(key);
-
-  let removed =
-    false;
-
-  for (const candidate of candidates) {
-    try {
-      if (isFunction(storage.remove)) {
-        storage.remove(candidate);
-        removed = true;
-      }
-    } catch (error) {
-      lastStorageError =
-        error;
-    }
-
-    try {
-      if (isFunction(storage.delete)) {
-        storage.delete(candidate);
-        removed = true;
-      }
-    } catch (error) {
-      lastStorageError =
-        error;
-    }
-
-    try {
-      if (isFunction(storage.del)) {
-        storage.del(candidate);
-        removed = true;
-      }
-    } catch (error) {
-      lastStorageError =
-        error;
-    }
-
-    try {
-      if (isFunction(storage.setRaw)) {
-        storage.setRaw(
-          candidate,
-          ""
-        );
-
-        removed = true;
-      }
-    } catch {}
-
-    try {
-      if (isFunction(storage.set)) {
-        storage.set(
-          candidate,
-          null
-        );
-
-        removed = true;
-      }
-    } catch {}
-  }
-
-  return removed;
-}
-
-/* =========================================================
-   WEB STORAGE
-========================================================= */
-
-function readFromWebStorage(storage, key, fallback = "", preferredKeys = []) {
-  if (!storage) {
-    return fallback;
-  }
-
-  const candidates =
-    getKeyCandidates(key);
-
-  for (const candidate of candidates) {
-    try {
-      const value =
-        storage.getItem(candidate);
-
-      const text =
-        safeJsonUnwrap(
-          value,
-          preferredKeys
-        );
-
-      if (text) {
-        return text;
-      }
-    } catch (error) {
-      lastStorageError =
-        error;
-    }
-  }
-
-  return fallback;
-}
-
-function writeToWebStorage(storage, key, value) {
-  if (!storage) {
-    return false;
-  }
-
-  const cleanKey =
-    stripKnownPrefix(key);
-
-  const finalKey =
-    buildKey(cleanKey);
-
-  const finalValue =
-    safeText(value, "");
-
-  if (
-    !finalKey ||
-    !finalValue
-  ) {
-    return false;
-  }
-
-  try {
-    storage.setItem(
-      finalKey,
-      finalValue
-    );
-
-    return true;
-  } catch (error) {
-    lastStorageError =
-      error;
-
-    safeWarn(
-      "webStorage.setItem() falló.",
-      {
-        key:
-          finalKey,
-        error,
-      }
-    );
-
-    return false;
-  }
-}
-
-function removeFromWebStorage(storage, key) {
-  if (!storage) {
-    return false;
-  }
-
-  const candidates =
-    getKeyCandidates(key);
-
-  let removed =
-    false;
-
-  for (const candidate of candidates) {
-    try {
-      storage.removeItem(candidate);
-      removed = true;
-    } catch (error) {
-      lastStorageError =
-        error;
-    }
-  }
-
-  return removed;
-}
-
-/* =========================================================
-   MEMORY STORAGE
-========================================================= */
-
-function readFromMemory(key, fallback = "", preferredKeys = []) {
-  const candidates =
-    getKeyCandidates(key);
-
-  for (const candidate of candidates) {
-    if (!memoryStorage.has(candidate)) {
-      continue;
-    }
-
-    const value =
-      memoryStorage.get(candidate);
-
-    const text =
-      safeJsonUnwrap(
-        value,
-        preferredKeys
-      );
-
-    if (text) {
-      return text;
-    }
-  }
-
-  return fallback;
-}
-
-function writeToMemory(key, value) {
-  const cleanKey =
-    stripKnownPrefix(key);
-
-  const finalKey =
-    buildKey(cleanKey);
-
-  const finalValue =
-    safeText(value, "");
-
-  if (
-    !finalKey ||
-    !finalValue
-  ) {
-    return false;
-  }
-
-  memoryStorage.set(
-    finalKey,
-    finalValue
-  );
-
-  return true;
-}
-
-function removeFromMemory(key) {
-  const candidates =
-    getKeyCandidates(key);
-
-  let removed =
-    false;
-
-  for (const candidate of candidates) {
-    if (memoryStorage.delete(candidate)) {
-      removed = true;
-    }
-  }
-
-  return removed;
-}
-
-/* =========================================================
-   RAW READ / WRITE / REMOVE
-========================================================= */
-
-function readRaw(key, fallback = "", preferredKeys = []) {
-  const cleanKey =
-    safeText(key, "");
-
-  if (!cleanKey) {
-    return fallback;
-  }
-
-  const fromAppStorage =
-    readFromAppStorage(
-      cleanKey,
-      "",
-      preferredKeys
-    );
-
-  if (fromAppStorage) {
-    return fromAppStorage;
-  }
-
-  const fromLocalStorage =
-    readFromWebStorage(
-      getLocalStorage(),
-      cleanKey,
-      "",
-      preferredKeys
-    );
-
-  if (fromLocalStorage) {
-    return fromLocalStorage;
-  }
-
-  const fromSessionStorage =
-    readFromWebStorage(
-      getSessionStorage(),
-      cleanKey,
-      "",
-      preferredKeys
-    );
-
-  if (fromSessionStorage) {
-    return fromSessionStorage;
-  }
-
-  const fromMemory =
-    readFromMemory(
-      cleanKey,
-      "",
-      preferredKeys
-    );
-
-  if (fromMemory) {
-    return fromMemory;
-  }
-
-  return fallback;
-}
-
-function readFirst(keys = [], fallback = "", preferredKeys = []) {
-  for (const key of unique(keys)) {
-    const value =
-      readRaw(
-        key,
-        "",
-        preferredKeys
-      );
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return fallback;
-}
-
-function writeRaw(key, value, options = {}) {
-  const cleanKey =
-    safeText(key, "");
-
-  if (!cleanKey) {
-    return false;
-  }
-
-  const finalValue =
-    safeText(value, "");
-
-  if (!finalValue) {
-    return removeRaw(
-      cleanKey,
-      {
-        emit:
-          options.emit,
-        silent:
-          options.silent,
-      }
-    );
-  }
-
-  const opts =
-    safeObject(options);
-
-  const {
-    sessionOnly = false,
-    localOnly = false,
-    appStorage = true,
-    localStorage = true,
-    sessionStorage = true,
-    memory = true,
-  } = opts;
-
-  const appOk =
-    appStorage !== false &&
-    !sessionOnly
-      ? writeToAppStorage(
-          cleanKey,
-          finalValue
-        )
-      : false;
-
-  const localOk =
-    localStorage !== false &&
-    !sessionOnly
-      ? writeToWebStorage(
-          getLocalStorage(),
-          cleanKey,
-          finalValue
-        )
-      : false;
-
-  const sessionOk =
-    sessionStorage !== false &&
-    !localOnly
-      ? writeToWebStorage(
-          getSessionStorage(),
-          cleanKey,
-          finalValue
-        )
-      : false;
-
-  const memoryOk =
-    memory !== false
-      ? writeToMemory(
-          cleanKey,
-          finalValue
-        )
-      : false;
-
-  const ok =
-    Boolean(
-      appOk ||
-        localOk ||
-        sessionOk ||
-        memoryOk
-    );
-
-  safeEmit(
-    AUTH_STORAGE_EVENTS.write,
-    {
-      key:
-        stripKnownPrefix(cleanKey),
-
-      ok,
-
-      targets: {
-        appStorage:
-          Boolean(appOk),
-
-        localStorage:
-          Boolean(localOk),
-
-        sessionStorage:
-          Boolean(sessionOk),
-
-        memory:
-          Boolean(memoryOk),
-      },
-    },
-    opts
-  );
-
-  return ok;
-}
-
-function writeRawMany(keys = [], value, options = {}) {
-  const cleanValue =
-    safeText(value, "");
-
-  if (!cleanValue) {
-    let removed =
-      false;
-
-    for (const key of unique(keys)) {
-      removed =
-        removeRaw(
-          key,
-          {
-            emit:
-              false,
-          }
-        ) || removed;
-    }
-
-    return removed;
-  }
-
-  let ok =
-    false;
-
-  for (const key of unique(keys)) {
-    ok =
-      writeRaw(
-        key,
-        cleanValue,
-        options
-      ) || ok;
-  }
-
-  return ok;
-}
-
-function removeRaw(key, options = {}) {
-  const cleanKey =
-    safeText(key, "");
-
-  if (!cleanKey) {
-    return false;
-  }
-
-  const appOk =
-    removeFromAppStorage(cleanKey);
-
-  const localOk =
-    removeFromWebStorage(
-      getLocalStorage(),
-      cleanKey
-    );
-
-  const sessionOk =
-    removeFromWebStorage(
-      getSessionStorage(),
-      cleanKey
-    );
-
-  const memoryOk =
-    removeFromMemory(cleanKey);
-
-  const ok =
-    Boolean(
-      appOk ||
-        localOk ||
-        sessionOk ||
-        memoryOk
-    );
-
-  safeEmit(
-    AUTH_STORAGE_EVENTS.remove,
-    {
-      key:
-        stripKnownPrefix(cleanKey),
-
-      ok,
-
-      targets: {
-        appStorage:
-          Boolean(appOk),
-
-        localStorage:
-          Boolean(localOk),
-
-        sessionStorage:
-          Boolean(sessionOk),
-
-        memory:
-          Boolean(memoryOk),
-      },
-    },
-    options
-  );
-
-  return ok;
-}
-
-function writeNullable(key, value, options = {}) {
-  const finalValue =
-    safeText(value, "");
-
-  if (!finalValue) {
-    removeRaw(
-      key,
-      {
-        ...options,
-        emit:
-          options.emit === true,
-      }
-    );
-
-    return false;
-  }
-
-  return writeRaw(
-    key,
-    finalValue,
-    options
-  );
-}
-
-function clearSlot(slot = "") {
-  const keys =
-    getSlotKeys(slot);
-
-  let removed =
-    false;
-
-  for (const key of keys) {
-    removed =
-      removeRaw(
-        key,
-        {
-          emit:
-            false,
-          silent:
-            true,
-        }
-      ) || removed;
-  }
-
-  return removed;
 }
 
 /* =========================================================
    TOKENS
 ========================================================= */
 
-export function persistRefreshToken(token = null) {
-  const normalized =
-    normalizeStoredToken(token);
-
-  if (!normalized) {
-    return clearSlot("refreshToken");
-  }
-
-  return writeRawMany(
-    getWriteSlotKeys("refreshToken"),
-    normalized,
-    {
-      localOnly:
-        false,
-
-      sessionOnly:
-        false,
-    }
-  );
-}
-
-export function getStoredRefreshToken() {
-  return normalizeStoredToken(
-    readFirst(
-      getSlotKeys("refreshToken"),
-      "",
-      TOKEN_PICK_KEYS
-    )
-  );
-}
-
-export function hasRefreshToken() {
-  return Boolean(
-    getStoredRefreshToken()
-  );
-}
-
-export function persistTempToken(token = null) {
-  const normalized =
-    normalizeStoredToken(token);
-
-  if (!normalized) {
-    return clearSlot("tempToken");
-  }
-
-  return writeRawMany(
-    getWriteSlotKeys("tempToken"),
-    normalized,
-    {
-      localOnly:
-        false,
-
-      sessionOnly:
-        false,
-    }
-  );
-}
-
-export function getStoredTempToken() {
-  return normalizeStoredToken(
-    readFirst(
-      getSlotKeys("tempToken"),
-      "",
-      TOKEN_PICK_KEYS
-    )
-  );
-}
-
-export function hasTempToken() {
-  return Boolean(
-    getStoredTempToken()
-  );
-}
-
 export function persistAccessToken(token = null) {
-  const normalized =
-    normalizeStoredToken(token);
+  const value = normalizeToken(token);
 
-  if (!normalized) {
-    return clearSlot("accessToken");
+  if (!value) {
+    return removeMany(slotKeys("accessToken"));
   }
 
-  /*
-    Compat crítica:
-    Core puede mirar `token`, Auth puede mirar `access_token`.
-    Se persisten ambas claves lógicas, sin duplicar valor corrupto.
-  */
-  return writeRawMany(
-    getWriteSlotKeys("accessToken"),
-    normalized,
-    {
-      localOnly:
-        false,
-
-      sessionOnly:
-        false,
-    }
-  );
+  return writeMany(writeSlotKeys("accessToken"), value);
 }
 
 export function getStoredAccessToken() {
-  return normalizeStoredToken(
-    readFirst(
-      getSlotKeys("accessToken"),
-      "",
-      TOKEN_PICK_KEYS
-    )
-  );
+  return normalizeToken(readFirst(slotKeys("accessToken")));
 }
 
 export function hasAccessToken() {
-  return Boolean(
-    getStoredAccessToken()
-  );
+  return Boolean(getStoredAccessToken());
+}
+
+export function persistRefreshToken(token = null) {
+  const value = normalizeToken(token);
+
+  if (!value) {
+    return removeMany(slotKeys("refreshToken"));
+  }
+
+  return writeMany(writeSlotKeys("refreshToken"), value);
+}
+
+export function getStoredRefreshToken() {
+  return normalizeToken(readFirst(slotKeys("refreshToken")));
+}
+
+export function hasRefreshToken() {
+  return Boolean(getStoredRefreshToken());
+}
+
+export function persistTempToken(token = null) {
+  const value = normalizeToken(token);
+
+  if (!value) {
+    return removeMany(slotKeys("tempToken"));
+  }
+
+  return writeMany(writeSlotKeys("tempToken"), value);
+}
+
+export function getStoredTempToken() {
+  return normalizeToken(readFirst(slotKeys("tempToken")));
+}
+
+export function hasTempToken() {
+  return Boolean(getStoredTempToken());
 }
 
 /* =========================================================
@@ -2638,299 +1091,107 @@ export function hasAccessToken() {
 ========================================================= */
 
 export function persistSessionContext(sessionData = null, user = null) {
-  const {
-    sessionId,
-    userId,
-  } =
-    normalizeSessionData(
-      sessionData,
-      user
-    );
+  const context = normalizeSessionData(sessionData, user);
 
-  if (sessionId) {
-    writeRawMany(
-      getWriteSlotKeys("sessionId"),
-      sessionId,
-      {
-        emit:
-          false,
-      }
-    );
+  if (context.sessionId) {
+    writeMany(writeSlotKeys("sessionId"), context.sessionId);
   } else {
-    clearSlot("sessionId");
+    removeMany(slotKeys("sessionId"));
   }
 
-  if (userId) {
-    writeRawMany(
-      getWriteSlotKeys("sessionUserId"),
-      userId,
-      {
-        emit:
-          false,
-      }
-    );
+  if (context.sessionUserId) {
+    writeMany(writeSlotKeys("sessionUserId"), context.sessionUserId);
   } else {
-    clearSlot("sessionUserId");
+    removeMany(slotKeys("sessionUserId"));
   }
-
-  safeEmit(
-    AUTH_STORAGE_EVENTS.sessionContext,
-    {
-      hasSessionId:
-        Boolean(sessionId),
-
-      hasUserId:
-        Boolean(userId),
-    }
-  );
 
   return {
-    sessionId:
-      sessionId || null,
-
-    userId:
-      userId || null,
-
-    sessionUserId:
-      userId || null,
+    sessionId: context.sessionId || null,
+    session_id: context.sessionId || null,
+    userId: context.sessionUserId || null,
+    user_id: context.sessionUserId || null,
+    sessionUserId: context.sessionUserId || null,
+    session_user_id: context.sessionUserId || null,
   };
 }
 
 export function persistAuxSessionData(user = null) {
-  const keys =
-    getStorageKeys();
+  const safeUser = safeObject(user);
+  const keys = getKeys();
 
-  const safeUser =
-    safeObject(user);
-
-  const userId =
-    normalizeStoredSessionUserId(
-      safeUser.userId ??
-        safeUser.user_id ??
-        safeUser.id ??
-        safeUser._id ??
-        safeUser.uid ??
-        safeUser.sub ??
-        safeUser.email ??
-        safeUser.mail ??
-        safeUser.username ??
-        safeUser.userName ??
-        safeUser.user_name ??
-        ""
-    );
-
-  const username =
-    normalizeStoredValue(
-      safeUser.username ??
-        safeUser.userName ??
-        safeUser.user_name ??
-        safeUser.email ??
-        safeUser.mail ??
-        safeUser.name ??
-        safeUser.nombre ??
-        "",
-      getSessionValueMaxLen()
-    );
-
-  const slug =
-    normalizeStoredValue(
-      safeUser.slug ??
-        safeUser.usernameLower ??
-        safeUser.username_lower ??
-        safeUser.username ??
-        safeUser.userName ??
-        safeUser.user_name ??
-        safeUser.email ??
-        "",
-      getSessionValueMaxLen()
-    );
-
-  const role =
-    normalizeStoredValue(
-      safeUser.role ??
-        safeUser.rol ??
-        safeUser.userRole ??
-        safeUser.user_role ??
-        "",
-      getSessionValueMaxLen()
-    );
-
-  if (userId) {
-    writeRawMany(
-      getWriteSlotKeys("sessionUserId"),
-      userId,
-      {
-        emit:
-          false,
-      }
-    );
-  } else {
-    clearSlot("sessionUserId");
-  }
-
-  if (username) {
-    writeRaw(
-      keys.userName,
-      username,
-      {
-        emit:
-          false,
-      }
-    );
-
-    writeRaw(
-      keys.username,
-      username,
-      {
-        emit:
-          false,
-      }
-    );
-
-    writeRaw(
-      keys.lastUsername,
-      username,
-      {
-        emit:
-          false,
-      }
-    );
-  } else {
-    removeRaw(
-      keys.userName,
-      {
-        emit:
-          false,
-      }
-    );
-
-    removeRaw(
-      keys.username,
-      {
-        emit:
-          false,
-      }
-    );
-  }
-
-  if (slug) {
-    writeRaw(
-      keys.userSlug,
-      slug,
-      {
-        emit:
-          false,
-      }
-    );
-  } else {
-    removeRaw(
-      keys.userSlug,
-      {
-        emit:
-          false,
-        }
-    );
-  }
-
-  if (role) {
-    writeRaw(
-      keys.role,
-      role,
-      {
-        emit:
-          false,
-      }
-    );
-  } else {
-    removeRaw(
-      keys.role,
-      {
-        emit:
-          false,
-      }
-    );
-  }
-
-  safeEmit(
-    AUTH_STORAGE_EVENTS.auxSession,
-    {
-      hasUserId:
-        Boolean(userId),
-
-      hasUsername:
-        Boolean(username),
-
-      hasSlug:
-        Boolean(slug),
-
-      hasRole:
-        Boolean(role),
-    }
+  const userId = normalizeSessionUserId(
+    safeUser.userId ||
+      safeUser.user_id ||
+      safeUser.id ||
+      safeUser.uid ||
+      safeUser.sub ||
+      safeUser.email ||
+      safeUser.username ||
+      ""
   );
+
+  const username = normalizeText(
+    safeUser.username ||
+      safeUser.userName ||
+      safeUser.user_name ||
+      safeUser.email ||
+      safeUser.name ||
+      safeUser.nombre ||
+      ""
+  );
+
+  const slug = normalizeText(
+    safeUser.slug ||
+      safeUser.usernameLower ||
+      safeUser.username_lower ||
+      safeUser.username ||
+      safeUser.email ||
+      ""
+  );
+
+  const role = normalizeRole(safeUser.role || safeUser.rol || "");
+
+  if (userId) writeMany(writeSlotKeys("sessionUserId"), userId);
+  if (username) {
+    writeRaw(keys.userName, username);
+    writeRaw(keys.username, username);
+    writeRaw(keys.lastUsername, username);
+  }
+
+  if (slug) writeRaw(keys.userSlug, slug);
+  if (role) writeRaw(keys.role, role);
 
   return true;
 }
 
 export function getStoredSessionId() {
-  return normalizeStoredSessionId(
-    readFirst(
-      getSlotKeys("sessionId"),
-      "",
-      SESSION_ID_PICK_KEYS
-    )
-  );
+  return normalizeSessionId(readFirst(slotKeys("sessionId")));
 }
 
 export function getStoredSessionUserId() {
-  return normalizeStoredSessionUserId(
-    readFirst(
-      getSlotKeys("sessionUserId"),
-      "",
-      SESSION_USER_ID_PICK_KEYS
-    )
-  );
+  return normalizeSessionUserId(readFirst(slotKeys("sessionUserId")));
 }
 
 export function getStoredSessionContext() {
-  const sessionId =
-    getStoredSessionId();
-
-  const sessionUserId =
-    getStoredSessionUserId();
+  const sessionId = getStoredSessionId();
+  const sessionUserId = getStoredSessionUserId();
 
   return {
-    sessionId:
-      sessionId || null,
-
-    session_id:
-      sessionId || null,
-
-    userId:
-      sessionUserId || null,
-
-    user_id:
-      sessionUserId || null,
-
-    sessionUserId:
-      sessionUserId || null,
-
-    session_user_id:
-      sessionUserId || null,
+    sessionId: sessionId || null,
+    session_id: sessionId || null,
+    userId: sessionUserId || null,
+    user_id: sessionUserId || null,
+    sessionUserId: sessionUserId || null,
+    session_user_id: sessionUserId || null,
   };
 }
 
 export function hasSessionContext() {
-  return Boolean(
-    getStoredSessionId() &&
-      getStoredSessionUserId()
-  );
+  return Boolean(getStoredSessionId() && getStoredSessionUserId());
 }
 
 export function hasRefreshContext() {
-  return Boolean(
-    getStoredRefreshToken() ||
-      hasSessionContext()
-  );
+  return Boolean(getStoredRefreshToken() || hasSessionContext());
 }
 
 export function hasCompleteRefreshContext() {
@@ -2942,387 +1203,184 @@ export function hasCompleteRefreshContext() {
 }
 
 /* =========================================================
-   AUX READERS / WRITERS
+   AUX VALUES
 ========================================================= */
 
 export function getStoredUserSlug() {
-  return normalizeStoredValue(
-    readFirst(
-      getSlotKeys("userSlug"),
-      "",
-      TEXT_VALUE_PICK_KEYS
-    ),
-    getSessionValueMaxLen()
-  );
+  return normalizeText(readFirst(slotKeys("userSlug")));
 }
 
 export function getStoredUserName() {
-  return normalizeStoredValue(
-    readFirst(
-      getSlotKeys("userName"),
-      "",
-      TEXT_VALUE_PICK_KEYS
-    ),
-    getSessionValueMaxLen()
-  );
+  return normalizeText(readFirst(slotKeys("userName")));
 }
 
 export function getStoredRole() {
-  return normalizeStoredValue(
-    readFirst(
-      getSlotKeys("role"),
-      "",
-      TEXT_VALUE_PICK_KEYS
-    ),
-    getSessionValueMaxLen()
-  );
+  return normalizeRole(readFirst(slotKeys("role")));
 }
 
 export function getStoredLastUsername() {
-  return normalizeStoredValue(
-    readFirst(
-      getSlotKeys("lastUsername"),
-      "",
-      TEXT_VALUE_PICK_KEYS
-    ),
-    getSessionValueMaxLen()
-  );
+  return normalizeText(readFirst(slotKeys("lastUsername")));
 }
 
 export function persistLastLoginIdentifier(value = null) {
-  const keys =
-    getStorageKeys();
+  const normalized = normalizeText(value);
+  const keys = getKeys();
 
-  return writeNullable(
-    keys.lastLoginIdentifier,
-    normalizeStoredText(value)
-  );
+  if (!normalized) return removeRaw(keys.lastLoginIdentifier);
+
+  return writeRaw(keys.lastLoginIdentifier, normalized);
 }
 
 export function getStoredLastLoginIdentifier() {
-  return normalizeStoredText(
-    readFirst(
-      getSlotKeys("lastLoginIdentifier"),
-      "",
-      TEXT_VALUE_PICK_KEYS
-    )
-  );
+  return normalizeText(readFirst(slotKeys("lastLoginIdentifier")));
 }
 
 export function persistLastResetIdentifier(value = null) {
-  const keys =
-    getStorageKeys();
+  const normalized = normalizeText(value);
+  const keys = getKeys();
 
-  return writeNullable(
-    keys.lastResetIdentifier,
-    normalizeStoredText(value)
-  );
+  if (!normalized) return removeRaw(keys.lastResetIdentifier);
+
+  return writeRaw(keys.lastResetIdentifier, normalized);
 }
 
 export function getStoredLastResetIdentifier() {
-  return normalizeStoredText(
-    readFirst(
-      getSlotKeys("lastResetIdentifier"),
-      "",
-      TEXT_VALUE_PICK_KEYS
-    )
-  );
+  return normalizeText(readFirst(slotKeys("lastResetIdentifier")));
 }
 
 export function persistRedirectAfterLogin(value = null) {
-  const keys =
-    getStorageKeys();
+  const normalized = normalizeText(value, 1000);
+  const keys = getKeys();
 
-  return writeNullable(
-    keys.redirectAfterLogin,
-    normalizeStoredText(value)
-  );
+  if (!normalized) return removeStoredRedirectAfterLogin();
+
+  return writeRaw(keys.redirectAfterLogin, normalized);
 }
 
 export function getStoredRedirectAfterLogin() {
-  return normalizeStoredText(
-    readFirst(
-      getSlotKeys("redirectAfterLogin"),
-      "",
-      TEXT_VALUE_PICK_KEYS
-    )
-  );
+  return normalizeText(readFirst(slotKeys("redirectAfterLogin")), 1000);
 }
 
 export function removeStoredRedirectAfterLogin() {
-  return clearSlot("redirectAfterLogin");
+  return removeMany(slotKeys("redirectAfterLogin"));
 }
 
 /* =========================================================
-   REPAIR
+   REPAIR / CLEAR
 ========================================================= */
 
 export function repairCorruptedAuthStorage() {
-  const keys =
-    getAllAuthClearKeys();
+  let removed = 0;
 
-  let removed =
-    0;
+  for (const key of allClearKeys()) {
+    const raw = readRaw(key);
 
-  for (const key of keys) {
-    const raw =
-      readRaw(
-        key,
-        "",
-        TEXT_VALUE_PICK_KEYS
-      );
+    if (!raw) continue;
 
-    if (
-      raw &&
-      !isCorruptedValue(raw)
-    ) {
-      continue;
-    }
+    const unwrapped = unwrapValue(raw, TEXT_PICK_KEYS);
 
-    if (
-      removeRaw(
-        key,
-        {
-          emit:
-            false,
-          silent:
-            true,
-        }
-      )
-    ) {
-      removed += 1;
+    if (isCorrupt(unwrapped)) {
+      if (removeRaw(key)) removed += 1;
     }
   }
 
-  safeEmit(
-    AUTH_STORAGE_EVENTS.repair,
-    {
-      removed,
-    }
-  );
-
   return {
-    ok:
-      true,
-
+    ok: true,
     removed,
   };
 }
 
-/* =========================================================
-   CLEAR
-========================================================= */
-
 export function clearAuthStorage(options = {}) {
-  const opts =
-    safeObject(options);
+  const opts = safeObject(options);
+  const includeLegacy = opts.includeLegacy !== false;
 
-  const silent =
-    opts.silent !== undefined
-      ? safeBool(
-          opts.silent,
-          true
-        )
-      : true;
-
-  const includeLegacy =
-    opts.includeLegacy !== undefined
-      ? safeBool(
-          opts.includeLegacy,
-          true
-        )
-      : true;
-
-  const keys =
-    includeLegacy
-      ? getAllAuthClearKeys()
-      : getKnownAuthKeys();
-
-  let removed =
-    0;
+  const keys = includeLegacy
+    ? allClearKeys()
+    : unique([
+        ...Object.values(getKeys()),
+        ...slotKeys("accessToken"),
+        ...slotKeys("refreshToken"),
+        ...slotKeys("tempToken"),
+        ...slotKeys("sessionId"),
+        ...slotKeys("sessionUserId"),
+      ]);
 
   for (const key of keys) {
-    if (
-      removeRaw(
-        key,
-        {
-          emit:
-            false,
-          silent:
-            true,
-        }
-      )
-    ) {
-      removed += 1;
-    }
+    removeRaw(key);
   }
 
   /*
-    Deliberadamente NO se hace:
-      - localStorage.clear()
-      - sessionStorage.clear()
+    Nunca hacer:
+    - localStorage.clear()
+    - sessionStorage.clear()
 
-    Deliberadamente NO se toca:
-      - lang
-      - theme
-      - sidebarOpen
-      - route
-      - publicPath
-      - lastRoute
-      - lastPublicPath
-      - window.__ONION_INITIAL_URL__
-      - window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__
-      - window.__ONION_RESET_CONFIRM_INITIAL_URL__
+    Nunca tocar:
+    - rutas públicas técnicas
+    - theme/lang
+    - window.__ONION_INITIAL_URL__
+    - window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__
+    - window.__ONION_RESET_CONFIRM_INITIAL_URL__
   */
-
-  if (!silent) {
-    safeEmit(
-      AUTH_STORAGE_EVENTS.cleared,
-      {
-        removed,
-        includeLegacy:
-          Boolean(includeLegacy),
-      }
-    );
-  }
 
   return true;
 }
 
 /* =========================================================
-   DEBUG
+   SNAPSHOT
 ========================================================= */
 
 export function getAuthStorageSnapshot() {
-  const keys =
-    getStorageKeys();
-
-  const refreshToken =
-    getStoredRefreshToken();
-
-  const tempToken =
-    getStoredTempToken();
-
-  const accessToken =
-    getStoredAccessToken();
-
-  const sessionId =
-    getStoredSessionId();
-
-  const sessionUserId =
-    getStoredSessionUserId();
+  const accessToken = getStoredAccessToken();
+  const refreshToken = getStoredRefreshToken();
+  const tempToken = getStoredTempToken();
+  const sessionId = getStoredSessionId();
+  const sessionUserId = getStoredSessionUserId();
 
   return {
-    version:
-      AUTH_STORAGE_VERSION,
+    version: AUTH_STORAGE_VERSION,
 
-    keys,
+    prefix: getPrefix(),
+    keys: getKeys(),
 
-    prefix:
-      getPrefix(),
+    hasAppStorage: Boolean(getAppStorage()),
+    hasLocalStorage: Boolean(getWebStorage("localStorage")),
+    hasSessionStorage: Boolean(getWebStorage("sessionStorage")),
+    memoryFallbackSize: memoryStorage.size,
 
-    clearableKeys:
-      getAllAuthClearKeys(),
+    hasAccessToken: Boolean(accessToken),
+    accessTokenPreview: redactOpaque(accessToken),
 
-    protectedRuntimeKeys:
-      PROTECTED_RUNTIME_KEYS,
+    hasRefreshToken: Boolean(refreshToken),
+    refreshTokenPreview: redactOpaque(refreshToken),
 
-    hasAppStorage:
-      Boolean(getStorageApi()),
+    hasTempToken: Boolean(tempToken),
+    tempTokenPreview: redactOpaque(tempToken),
 
-    hasLocalStorage:
-      Boolean(getLocalStorage()),
+    hasSessionId: Boolean(sessionId),
+    sessionId: sessionId ? "***" : null,
+    sessionIdPreview: redactOpaque(sessionId),
 
-    hasSessionStorage:
-      Boolean(getSessionStorage()),
+    hasSessionUserId: Boolean(sessionUserId),
+    sessionUserId: sessionUserId ? "***" : null,
+    sessionUserIdPreview: redactOpaque(sessionUserId),
 
-    memoryFallbackSize:
-      memoryStorage.size,
+    hasSessionContext: hasSessionContext(),
+    hasRefreshContext: hasRefreshContext(),
+    hasCompleteRefreshContext: hasCompleteRefreshContext(),
 
-    hasRefreshToken:
-      Boolean(refreshToken),
+    userSlug: getStoredUserSlug() || null,
+    userName: getStoredUserName() || null,
+    role: getStoredRole() || null,
+    lastUsername: getStoredLastUsername() || null,
 
-    refreshTokenPreview:
-      refreshToken
-        ? redactOpaque(refreshToken)
-        : null,
+    lastStorageError: lastStorageError
+      ? {
+          name: lastStorageError.name || "StorageError",
+          message: lastStorageError.message || String(lastStorageError),
+        }
+      : null,
 
-    hasTempToken:
-      Boolean(tempToken),
-
-    tempTokenPreview:
-      tempToken
-        ? redactOpaque(tempToken)
-        : null,
-
-    hasAccessToken:
-      Boolean(accessToken),
-
-    accessTokenPreview:
-      accessToken
-        ? redactOpaque(accessToken)
-        : null,
-
-    hasSessionId:
-      Boolean(sessionId),
-
-    sessionId:
-      sessionId
-        ? "***"
-        : null,
-
-    sessionIdPreview:
-      sessionId
-        ? redactOpaque(sessionId)
-        : null,
-
-    hasSessionUserId:
-      Boolean(sessionUserId),
-
-    sessionUserId:
-      sessionUserId
-        ? "***"
-        : null,
-
-    sessionUserIdPreview:
-      sessionUserId
-        ? redactOpaque(sessionUserId)
-        : null,
-
-    userSlug:
-      getStoredUserSlug() || null,
-
-    userName:
-      getStoredUserName() || null,
-
-    role:
-      getStoredRole() || null,
-
-    lastUsername:
-      getStoredLastUsername() || null,
-
-    hasSessionContext:
-      hasSessionContext(),
-
-    hasRefreshContext:
-      hasRefreshContext(),
-
-    hasCompleteRefreshContext:
-      hasCompleteRefreshContext(),
-
-    lastStorageError:
-      lastStorageError
-        ? {
-            name:
-              lastStorageError.name || "StorageError",
-
-            message:
-              lastStorageError.message || String(lastStorageError),
-          }
-        : null,
-
-    at:
-      safeIsoNow(),
+    at: new Date().toISOString(),
   };
 }
 
@@ -3333,6 +1391,10 @@ export function getAuthStorageSnapshot() {
 export default {
   AUTH_STORAGE_VERSION,
 
+  persistAccessToken,
+  getStoredAccessToken,
+  hasAccessToken,
+
   persistRefreshToken,
   getStoredRefreshToken,
   hasRefreshToken,
@@ -3340,10 +1402,6 @@ export default {
   persistTempToken,
   getStoredTempToken,
   hasTempToken,
-
-  persistAccessToken,
-  getStoredAccessToken,
-  hasAccessToken,
 
   persistSessionContext,
   persistAuxSessionData,
@@ -3372,7 +1430,7 @@ export default {
   removeStoredRedirectAfterLogin,
 
   repairCorruptedAuthStorage,
-
   clearAuthStorage,
+
   getAuthStorageSnapshot,
 };

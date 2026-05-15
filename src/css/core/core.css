@@ -2,32 +2,68 @@
    ONION SUPPORT — CORE SYSTEM
    Archivo: /src/css/core/core.css
 
-   FINAL EXTREME SYSTEM · APPLE STYLE · PRO SAAS PANEL · 10/10
+   FINAL CORE SYSTEM · PRIVATE SPA · PRO SAAS PANEL
+   TYPOGRAPHY · ACCESSIBILITY · HELPERS · FATAL UX
 
-   ARQUITECTURA:
+   Arquitectura:
    - reset.css     = normalización base
    - variables.css = tokens base / dark
-   - light.css     = overrides [data-theme="light"]
+   - light.css     = overrides light
+   - core.css      = tipografía, accesibilidad, helpers, fatal UX
    - layout.css    = shell, stacking, scroll principal, mounts
    - ui.css        = componentes visuales
-   - core.css      = tipografía global, accesibilidad, helpers, fatal boot/error UX
 
-   REGLAS:
+   Reglas:
    - Sin :root.
    - Sin [data-theme="light"].
    - Sin paletas locales duplicadas.
    - Sin controlar layout principal.
+   - Sin offsets de sidebar/topbar/main.
    - Sin invadir componentes.
    - Sin transition global salvaje.
    - Sin Google Fonts.
    - Sin CSS inline.
    - Sin estilos inyectados por JS.
 
-   NOTA:
+   Nota:
    - .main-content, #app-content, topbar/sidebar offsets y scroll principal
      pertenecen a layout.css.
-   - Este archivo sólo define comportamiento base, utilities y estados UX.
+   - Este archivo sólo define base visual, helpers y estados UX globales.
 ========================================================= */
+
+
+/* =========================================================
+   DOCUMENT VISUAL FOUNDATION
+========================================================= */
+
+html {
+  background: var(--body-fallback);
+  color: var(--text);
+
+  font-family: var(--font-family);
+  font-size: var(--font-base);
+  line-height: var(--line-normal);
+
+  accent-color: var(--accent);
+
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--body-bg);
+  color: var(--text);
+
+  font-family: var(--font-family);
+  font-size: var(--font-base);
+  line-height: var(--line-normal);
+
+  isolation: isolate;
+}
+
+::selection {
+  background: var(--selection-bg);
+  color: var(--selection-text);
+}
 
 
 /* =========================================================
@@ -239,7 +275,7 @@ svg:not([fill]) {
 
 
 /* =========================================================
-   FORM BASE — NON INVASIVE
+   FORM BASE · NON INVASIVE
 ========================================================= */
 
 input,
@@ -273,7 +309,7 @@ label {
 
 
 /* =========================================================
-   BUTTON BASE — NON DESTRUCTIVE
+   BUTTON BASE · NON DESTRUCTIVE
 ========================================================= */
 
 button {
@@ -344,14 +380,16 @@ a:hover {
   outline: none;
 }
 
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-summary:focus-visible,
-[role="button"]:focus-visible,
-[tabindex]:focus-visible {
+:where(
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  summary,
+  [role="button"],
+  [tabindex]
+):focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
@@ -366,22 +404,21 @@ summary:focus-visible,
 
 
 /* =========================================================
-   SHARED TRANSITIONS — SCOPED / SAFE
+   SHARED TRANSITIONS · SCOPED / SAFE
 ========================================================= */
 
-button,
-a,
-input,
-select,
-textarea,
-summary,
-.interactive,
-.interactive-soft,
-.interactive-flat,
-.menu-item,
-.search-result,
-.dropdown-item,
-.nav-item {
+:where(
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  summary,
+  [role="button"],
+  .interactive,
+  .interactive-soft,
+  .interactive-flat
+) {
   transition:
     background-color var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard),
@@ -1107,6 +1144,7 @@ a.disabled,
 
 /* =========================================================
    Z-INDEX UTILITIES
+   Sólo utilidades explícitas. El stacking real del shell vive en layout.css.
 ========================================================= */
 
 .z-base {
@@ -1189,7 +1227,7 @@ summary {
 
 /* =========================================================
    BOOT ERROR VIEW
-   Usado por src/app/errors.js
+   Usado por src/app/errors.js.
 ========================================================= */
 
 .boot-error-view {
@@ -1433,7 +1471,7 @@ summary {
 
 /* =========================================================
    FATAL BOOT VIEW
-   Usado por src/main.js
+   Usado por src/main.js.
 ========================================================= */
 
 .fatal-boot {
@@ -1583,6 +1621,12 @@ summary {
   box-shadow: var(--btn-primary-shadow);
 
   cursor: pointer;
+
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-out);
 }
 
 .fatal-boot-button:hover {

@@ -2,40 +2,38 @@
    ONION SUPPORT — LAYOUT SYSTEM
    Archivo: /src/css/core/layout.css
 
-   FINAL EXTREME SYSTEM · APPLE STYLE · PRO SAAS PANEL · 10/10
+   FINAL LAYOUT SYSTEM · PRIVATE SPA · PRO SAAS PANEL
+   SHELL · STACKING · SCROLL · MOUNTS · RESPONSIVE
 
-   ARQUITECTURA:
+   Arquitectura:
    - variables.css = tokens base / dark.
-   - light.css     = overrides [data-theme="light"].
+   - light.css     = overrides light.
+   - reset.css     = normalización base.
+   - core.css      = tipografía, helpers, accesibilidad, fatal UX.
    - layout.css    = layout, stacking, scroll, shell y responsive.
-   - topbar.css    = topbar + search command palette.
    - sidebar.css   = sidebar.
+   - topbar.css    = topbar + search command palette.
 
-   REGLAS:
+   Reglas:
    - Sin :root.
    - Sin [data-theme="light"].
    - Sin paletas locales duplicadas.
+   - Sin reset global duplicado.
    - Sin z-index plano para todos los hijos.
    - Sidebar/topbar tienen mounts propios.
    - Main queda por debajo de sidebar/topbar.
+   - .main-content es el scroll container real.
    - El scroll NO empieza debajo/por detrás del topbar.
-   - Tooltips/dropdowns no quedan tapados por vistas/hero.
-   - Layout NO controla el search.
+   - #app-content sólo compensa tablehead dinámico.
+   - Layout NO controla search.
    - Layout NO pinta glass de búsqueda.
    - Layout NO toca body::before/body::after para search.
    - Todo lo relacionado con search vive en topbar.css.
-
-   FIX PRINCIPAL:
-   - .main-content es el scroll container real.
-   - .main-content empieza debajo del topbar.
-   - #app-content sólo compensa tablehead si existe.
-   - El scrollbar ya no se mete debajo del topbar.
-   - El search no recibe desplazamientos desde layout.css.
 ========================================================= */
 
 
 /* =========================================================
-   RESET / BASE DOCUMENT
+   DOCUMENT / BODY LAYOUT CONTRACT
 ========================================================= */
 
 html,
@@ -44,12 +42,6 @@ body {
   min-inline-size: 320px;
   min-block-size: 100%;
   block-size: 100%;
-}
-
-html {
-  scroll-behavior: smooth;
-  -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
 }
 
 body {
@@ -61,25 +53,7 @@ body {
   --layout-sidebar-tooltip-safe-z: calc(var(--z-tooltip) + 20);
   --layout-loader-z: var(--z-loader);
 
-  margin: 0;
-
   overflow: hidden;
-
-  background-color: var(--main-bg);
-  background-image: var(--body-bg);
-  color: var(--text);
-
-  font-family: var(--font-family);
-  font-size: var(--font-base);
-  line-height: var(--line-normal);
-  font-weight: var(--weight-regular);
-
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
-  accent-color: var(--accent);
-  -webkit-tap-highlight-color: transparent;
 }
 
 body.loading,
@@ -87,45 +61,6 @@ body.app-loading,
 body.app-booting {
   overflow: hidden;
   overscroll-behavior: none;
-}
-
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
-
-img,
-svg,
-video,
-canvas {
-  display: block;
-  max-inline-size: 100%;
-}
-
-img {
-  block-size: auto;
-}
-
-button,
-input,
-textarea,
-select {
-  font: inherit;
-}
-
-button {
-  color: inherit;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-::selection {
-  background: var(--selection-bg);
-  color: var(--selection-text);
 }
 
 
@@ -146,29 +81,33 @@ a {
   min-inline-size: 0;
 
   min-block-size: 100vh;
+  min-block-size: 100svh;
   min-block-size: 100dvh;
+
   block-size: 100vh;
+  block-size: 100svh;
   block-size: 100dvh;
 
-  color: var(--text);
+  overflow: hidden;
 
   background:
     var(--gradient-overlay),
     var(--app-noise),
     var(--body-bg);
 
+  color: var(--text);
+
   transition:
     background var(--duration-slow) var(--ease-standard),
     color var(--duration-normal) var(--ease-standard),
     opacity var(--duration-normal) var(--ease-standard),
     visibility var(--duration-normal) var(--ease-standard);
-
-  overflow: hidden;
 }
 
 .layout::before,
 .app-shell::before {
   content: "";
+
   position: absolute;
   inset: 0;
   z-index: var(--layout-bg-z);
@@ -201,7 +140,7 @@ a {
 
 
 /* =========================================================
-   MOUNT LAYERS — SIDEBAR / TOPBAR
+   MOUNT LAYERS · SIDEBAR / TOPBAR
 ========================================================= */
 
 #sidebar-mount,
@@ -215,9 +154,10 @@ a {
 
   z-index: var(--layout-sidebar-mount-z);
 
+  overflow: visible;
+
   pointer-events: none;
 
-  overflow: visible;
   contain: none;
   isolation: isolate;
 }
@@ -251,9 +191,10 @@ a {
 
   z-index: var(--layout-topbar-mount-z);
 
+  overflow: visible;
+
   pointer-events: none;
 
-  overflow: visible;
   contain: none;
   isolation: isolate;
 
@@ -266,25 +207,12 @@ a {
   pointer-events: auto;
 }
 
-body.sidebar-collapsed #topbar-mount,
-body.sidebar-collapsed [data-topbar-mount] {
-  inset-inline-start: var(--sidebar-collapsed);
+body.sidebar-collapsed {
+  --app-sidebar-current-width: var(--sidebar-collapsed);
 }
 
-body.sidebar-open #topbar-mount,
-body.sidebar-open [data-topbar-mount] {
-  inset-inline-start: var(--sidebar-width);
-}
-
-body.route-shell-hidden #topbar-mount,
-body.route-shell-hidden [data-topbar-mount],
-html[data-route-mode="auth"] #topbar-mount,
-html[data-route-mode="auth"] [data-topbar-mount],
-body[data-route-mode="auth"] #topbar-mount,
-body[data-route-mode="auth"] [data-topbar-mount],
-body.auth-screen #topbar-mount,
-body.auth-screen [data-topbar-mount] {
-  inset-inline-start: 0;
+body.sidebar-open {
+  --app-sidebar-current-width: var(--sidebar-width);
 }
 
 
@@ -292,10 +220,19 @@ body.auth-screen [data-topbar-mount] {
    BOOT / READY STATES
 ========================================================= */
 
+#app-shell {
+  transition:
+    opacity var(--duration-normal) var(--ease-standard),
+    visibility var(--duration-normal) var(--ease-standard);
+}
+
 html.app-booting #app-shell,
 html.app-loading #app-shell,
 body.app-booting #app-shell,
 body.app-loading #app-shell,
+html[data-app-state="booting"] #app-shell,
+body[data-app-state="booting"] #app-shell,
+#app-shell[aria-hidden="true"],
 #app-shell[data-shell="booting"],
 #app-shell[data-shell-state="booting"],
 #app-shell[data-shell-interactive="false"][aria-busy="true"] {
@@ -307,18 +244,14 @@ body.app-loading #app-shell,
 html.app-ready #app-shell,
 body.app-ready #app-shell,
 html[data-app-state="ready"] #app-shell,
+body[data-app-state="ready"] #app-shell,
+#app-shell[aria-hidden="false"],
 #app-shell[data-shell="ready"],
 #app-shell[data-shell-state="ready"],
 #app-shell[data-shell-interactive="true"] {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-}
-
-#app-shell {
-  transition:
-    opacity var(--duration-normal) var(--ease-standard),
-    visibility var(--duration-normal) var(--ease-standard);
 }
 
 #app-shell[aria-busy="true"] {
@@ -343,38 +276,67 @@ body[data-route-mode="auth"] {
   --app-offset-tablehead: 0px;
 }
 
+body.route-shell-hidden #sidebar-mount,
+body.route-shell-hidden [data-sidebar-mount],
+body.route-shell-hidden #topbar-mount,
+body.route-shell-hidden [data-topbar-mount],
+body.route-shell-hidden .sidebar,
+body.route-shell-hidden .topbar,
+body.auth-screen #sidebar-mount,
+body.auth-screen [data-sidebar-mount],
+body.auth-screen #topbar-mount,
+body.auth-screen [data-topbar-mount],
+body.auth-screen .sidebar,
+body.auth-screen .topbar,
+html[data-route-mode="auth"] #sidebar-mount,
+html[data-route-mode="auth"] [data-sidebar-mount],
+html[data-route-mode="auth"] #topbar-mount,
+html[data-route-mode="auth"] [data-topbar-mount],
+html[data-route-mode="auth"] .sidebar,
+html[data-route-mode="auth"] .topbar,
+body[data-route-mode="auth"] #sidebar-mount,
+body[data-route-mode="auth"] [data-sidebar-mount],
+body[data-route-mode="auth"] #topbar-mount,
+body[data-route-mode="auth"] [data-topbar-mount],
+body[data-route-mode="auth"] .sidebar,
+body[data-route-mode="auth"] .topbar {
+  display: none !important;
+}
+
 body.route-shell-hidden .main-content,
+body.auth-screen .main-content,
 html[data-route-mode="auth"] .main-content,
-body[data-route-mode="auth"] .main-content,
-body.auth-screen .main-content {
+body[data-route-mode="auth"] .main-content {
   inset-block-start: 0;
   inset-inline-start: 0;
   inset-inline-end: 0;
   inset-block-end: 0;
 
-  margin-inline-start: 0;
+  margin: 0;
 
   inline-size: 100%;
   max-inline-size: 100%;
 
   block-size: 100vh;
+  block-size: 100svh;
   block-size: 100dvh;
 
   min-block-size: 100vh;
+  min-block-size: 100svh;
   min-block-size: 100dvh;
 }
 
 body.route-shell-hidden .table-head,
+body.auth-screen .table-head,
 html[data-route-mode="auth"] .table-head,
-body[data-route-mode="auth"] .table-head,
-body.auth-screen .table-head {
+body[data-route-mode="auth"] .table-head {
   display: none !important;
 }
 
 body.route-shell-hidden #app-content,
+body.auth-screen #app-content,
 html[data-route-mode="auth"] #app-content,
-body[data-route-mode="auth"] #app-content,
-body.auth-screen #app-content {
+body[data-route-mode="auth"] #app-content {
   padding-block-start: 0;
 }
 
@@ -413,9 +375,10 @@ body.auth-screen #app-content {
 
 /* =========================================================
    MAIN CONTENT AREA
-   FIX:
-   - Scroll container empieza debajo del topbar.
-   - Scrollbar no queda tapado por topbar.
+   Contract:
+   - Scroll container real.
+   - Empieza debajo del topbar.
+   - El scrollbar no queda tapado por topbar.
    - No contiene lógica de search.
 ========================================================= */
 
@@ -432,21 +395,15 @@ body.auth-screen #app-content {
   display: flex;
   flex-direction: column;
 
+  inline-size: auto;
+  max-inline-size: none;
+
   min-inline-size: 0;
   min-block-size: 0;
 
-  inline-size: auto;
-  max-inline-size: none;
   block-size: auto;
 
   margin: 0;
-
-  background: transparent;
-  color: var(--text);
-
-  transition:
-    inset-inline-start var(--duration-slow) var(--ease-emphasis),
-    opacity var(--duration-normal) var(--ease-standard);
 
   overflow-y: auto;
   overflow-x: hidden;
@@ -454,9 +411,16 @@ body.auth-screen #app-content {
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 
+  background: transparent;
+  color: var(--text);
+
   scrollbar-width: thin;
   scrollbar-gutter: stable;
   scrollbar-color: var(--scrollbar-thumb) transparent;
+
+  transition:
+    inset-inline-start var(--duration-slow) var(--ease-emphasis),
+    opacity var(--duration-normal) var(--ease-standard);
 }
 
 .main-content::-webkit-scrollbar {
@@ -471,6 +435,7 @@ body.auth-screen #app-content {
 .main-content::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: var(--radius-pill);
+
   background: var(--scrollbar-thumb);
   background-clip: padding-box;
 }
@@ -480,19 +445,11 @@ body.auth-screen #app-content {
   background-clip: padding-box;
 }
 
-body.sidebar-collapsed {
-  --app-sidebar-current-width: var(--sidebar-collapsed);
-}
-
-body.sidebar-open {
-  --app-sidebar-current-width: var(--sidebar-width);
-}
-
 
 /* =========================================================
    APP CONTENT ROOT
-   FIX:
-   - Ya NO compensa topbar.
+   Contract:
+   - No compensa topbar.
    - Sólo compensa tablehead dinámico.
 ========================================================= */
 
@@ -504,11 +461,11 @@ body.sidebar-open {
   flex-direction: column;
   flex: 1 1 auto;
 
+  inline-size: 100%;
   min-inline-size: 0;
   min-block-size: 100%;
 
   padding-block-start: var(--app-offset-tablehead);
-
   padding-inline-end: var(--app-safe-right);
   padding-block-end: var(--app-safe-bottom);
   padding-inline-start: var(--app-safe-left);
@@ -518,6 +475,7 @@ body.sidebar-open {
 
 #app-content::before {
   content: "";
+
   position: absolute;
   inset: 0;
   z-index: 0;
@@ -564,6 +522,10 @@ body.sidebar-open {
 
   padding-inline: var(--content-padding-inline);
 
+  overflow: visible;
+
+  border-block-end: 1px solid var(--panel-border);
+
   background:
     linear-gradient(
       180deg,
@@ -571,8 +533,6 @@ body.sidebar-open {
       transparent 68%
     ),
     var(--panel-bg);
-
-  border-block-end: 1px solid var(--panel-border);
 
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 97%),
@@ -589,12 +549,11 @@ body.sidebar-open {
     border-color var(--duration-normal) var(--ease-standard),
     box-shadow var(--duration-normal) var(--ease-standard),
     opacity var(--duration-fast) var(--ease-standard);
-
-  overflow: visible;
 }
 
 .table-head::before {
   content: "";
+
   position: absolute;
   inset: 0;
 
@@ -697,7 +656,7 @@ body.app-ready #view-container {
   min-inline-size: 0;
   min-block-size: 0;
 
-  padding: var(--space-md);
+  padding: var(--content-padding-block) var(--content-padding-inline);
   gap: var(--space-md);
 
   background: transparent;
@@ -739,15 +698,20 @@ body.app-ready #view-container {
   min-inline-size: 0;
   min-block-size: 0;
 
-  opacity: 0;
-  transform: translateY(6px);
+  opacity: 1;
+  transform: none;
 
   transition:
     opacity .20s var(--ease-emphasis),
     transform .20s var(--ease-emphasis);
 
   backface-visibility: hidden;
-  will-change: opacity, transform;
+}
+
+.panel-content[data-animate="enter"]:not(.ready),
+.panel-content.is-entering {
+  opacity: 0;
+  transform: translateY(6px);
 }
 
 .panel-content.ready {
@@ -851,6 +815,7 @@ body.app-ready #view-container {
 .table-container::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: var(--radius-pill);
+
   background: var(--scrollbar-thumb);
   background-clip: padding-box;
 }
@@ -1024,7 +989,7 @@ body.app-ready #view-container {
 
 
 /* =========================================================
-   SURFACE HELPERS
+   SURFACE PRIMITIVES
 ========================================================= */
 
 .panel-surface,
@@ -1054,6 +1019,7 @@ body.app-ready #view-container {
 .panel-surface::before,
 .card-surface::before {
   content: "";
+
   position: absolute;
   inset: 0;
 
@@ -1174,54 +1140,6 @@ body.app-ready #view-container {
   display: none !important;
 }
 
-.visually-hidden,
-.sr-only {
-  position: absolute !important;
-
-  inline-size: 1px !important;
-  block-size: 1px !important;
-
-  padding: 0 !important;
-  margin: -1px !important;
-
-  overflow: hidden !important;
-
-  clip: rect(0 0 0 0) !important;
-  white-space: nowrap !important;
-
-  border: 0 !important;
-}
-
-.sr-only-focusable:focus,
-.sr-only-focusable:focus-visible,
-.app-skip-link:focus,
-.app-skip-link:focus-visible {
-  position: fixed !important;
-  inset-block-start: calc(var(--app-safe-top) + 10px);
-  inset-inline-start: calc(var(--app-safe-left) + 10px);
-
-  z-index: calc(var(--z-loader) + 1);
-
-  inline-size: auto !important;
-  block-size: auto !important;
-
-  padding: 10px 14px !important;
-  margin: 0 !important;
-
-  overflow: visible !important;
-
-  clip: auto !important;
-  white-space: normal !important;
-
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-
-  background: var(--surface-elevated-strong);
-  color: var(--text-strong);
-
-  box-shadow: var(--shadow-lg);
-}
-
 
 /* =========================================================
    AUTH / FULLSCREEN LOGIN MODE
@@ -1238,9 +1156,11 @@ body.auth-screen {
 body.auth-screen .layout,
 body.auth-screen .app-shell {
   min-block-size: 100vh;
+  min-block-size: 100svh;
   min-block-size: 100dvh;
 
   block-size: 100vh;
+  block-size: 100svh;
   block-size: 100dvh;
 
   background:
@@ -1260,9 +1180,11 @@ body.auth-screen .main-content {
   max-inline-size: 100%;
 
   min-block-size: 100vh;
+  min-block-size: 100svh;
   min-block-size: 100dvh;
 
   block-size: 100vh;
+  block-size: 100svh;
   block-size: 100dvh;
 
   overflow-y: auto;
@@ -1271,6 +1193,7 @@ body.auth-screen .main-content {
 
 body.auth-screen #app-content {
   min-block-size: 100vh;
+  min-block-size: 100svh;
   min-block-size: 100dvh;
 
   padding: 0;
@@ -1278,21 +1201,11 @@ body.auth-screen #app-content {
   overflow: visible;
 }
 
-body.auth-screen .sidebar,
-body.auth-screen .topbar,
-body.auth-screen .table-head,
-body.auth-screen #tablehead-container,
-body.auth-screen #sidebar-mount,
-body.auth-screen [data-sidebar-mount],
-body.auth-screen #topbar-mount,
-body.auth-screen [data-topbar-mount] {
-  display: none !important;
-}
-
 body.auth-screen #view-container {
   inline-size: 100%;
 
   min-block-size: 100vh;
+  min-block-size: 100svh;
   min-block-size: 100dvh;
 
   overflow: visible;
@@ -1302,6 +1215,7 @@ body.auth-screen .content-wrapper {
   inline-size: 100%;
 
   min-block-size: 100vh;
+  min-block-size: 100svh;
   min-block-size: 100dvh;
 
   padding: 0;
@@ -1315,6 +1229,7 @@ body.auth-screen .content-wrapper {
 
 .noscript-layout {
   min-block-size: 100vh;
+  min-block-size: 100svh;
   min-block-size: 100dvh;
 
   block-size: auto;
@@ -1341,13 +1256,15 @@ body.auth-screen .content-wrapper {
 
 .noscript-box p {
   margin: 0;
+
   color: var(--text-muted);
+
   line-height: var(--line-relaxed);
 }
 
 
 /* =========================================================
-   RESPONSIVE — DESKTOP DOWN
+   RESPONSIVE · DESKTOP DOWN
 ========================================================= */
 
 @media (max-width: 1280px) {
@@ -1358,7 +1275,7 @@ body.auth-screen .content-wrapper {
 
 
 /* =========================================================
-   RESPONSIVE — LARGE TABLET
+   RESPONSIVE · LARGE TABLET
 ========================================================= */
 
 @media (max-width: 1080px) {
@@ -1373,7 +1290,7 @@ body.auth-screen .content-wrapper {
 
 
 /* =========================================================
-   RESPONSIVE — TABLET
+   RESPONSIVE · TABLET
 ========================================================= */
 
 @media (max-width: 900px) {
@@ -1430,13 +1347,14 @@ body.auth-screen .content-wrapper {
   body.auth-screen #view-container,
   body.auth-screen .content-wrapper {
     min-block-size: 100vh;
+    min-block-size: 100svh;
     min-block-size: 100dvh;
   }
 }
 
 
 /* =========================================================
-   RESPONSIVE — MOBILE
+   RESPONSIVE · MOBILE
 ========================================================= */
 
 @media (max-width: 640px) {
@@ -1482,7 +1400,7 @@ body.auth-screen .content-wrapper {
 
 
 /* =========================================================
-   RESPONSIVE — SMALL MOBILE
+   RESPONSIVE · SMALL MOBILE
 ========================================================= */
 
 @media (max-width: 420px) {
@@ -1514,10 +1432,6 @@ body.auth-screen .content-wrapper {
 ========================================================= */
 
 @media (prefers-reduced-motion: reduce) {
-  html {
-    scroll-behavior: auto;
-  }
-
   .layout,
   .app-shell,
   .main-content,
@@ -1532,7 +1446,9 @@ body.auth-screen .content-wrapper {
     transition: none !important;
   }
 
-  .panel-content {
+  .panel-content,
+  .panel-content[data-animate="enter"]:not(.ready),
+  .panel-content.is-entering {
     opacity: 1 !important;
     transform: none !important;
   }
@@ -1576,6 +1492,7 @@ body.auth-screen .content-wrapper {
 @media print {
   body {
     overflow: visible;
+
     background: #ffffff !important;
     color: #000000 !important;
   }

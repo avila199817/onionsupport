@@ -2,23 +2,25 @@
    Onion SPA - Login DOM
    Archivo: src/views/login/login.dom.js
 
-   LOGIN DOM · FINAL EXTREME PRO SYSTEM · 15/10
+   LOGIN DOM · CORE/AUTH SAFE · NO FREEZE · 16/10
 
    RESPONSABILIDADES:
-   - resolver refs del DOM del login
-   - encapsular estados visuales del formulario
-   - aplicar y limpiar errores
-   - controlar loading UI sin innerHTML
-   - integrar opcionalmente el sistema compartido password-field
-   - gestionar focus inicial
-   - soportar usuario, email o teléfono como identificador
-   - evitar doble binding accidental de submit/listeners
-   - no duplicar el bind del password-field desde getLoginRefs()
+   - Resolver refs del DOM del login.
+   - Encapsular estados visuales del formulario.
+   - Aplicar y limpiar errores.
+   - Controlar loading UI sin innerHTML.
+   - Integrar opcionalmente el sistema compartido password-field.
+   - Gestionar focus inicial.
+   - Soportar usuario, email o teléfono como identificador.
+   - Evitar doble binding accidental de submit/listeners.
+   - Evitar formulario congelado si una promesa externa falla.
+   - No duplicar el bind del password-field desde getLoginRefs().
 
    REGLAS:
    - getLoginRefs() NO bindea password-field.
    - El bind compartido vive en index.js o en bindLoginPasswordFields().
    - setLoginLoading() no usa innerHTML.
+   - setLoginLoading(false) limpia flags visuales de submit.
    - Password no se trimea al leer el formulario.
    - Submit/input/theme listeners devuelven cleanup idempotente.
 ========================================================= */
@@ -32,7 +34,7 @@ import {
 ========================================================= */
 
 export const LOGIN_DOM_VERSION =
-  "15.0.0-final-extreme";
+  "16.0.0-extreme-pro";
 
 const LOGIN_DOM_SOURCE =
   "login.dom";
@@ -52,24 +54,24 @@ const DEFAULT_HIDE_PASSWORD_LABEL =
 const SELECTORS =
   Object.freeze({
     root:
-      [
+      Object.freeze([
         ".login-view",
         "[data-login-view='true']",
         "[data-login-view]",
         "#loginView",
-      ],
+      ]),
 
     form:
-      [
+      Object.freeze([
         "#loginForm",
         "[data-login-form='true']",
         "[data-login-form]",
         "form[data-auth-form='login']",
         "form",
-      ],
+      ]),
 
     identifier:
-      [
+      Object.freeze([
         "#loginIdentifier",
         "#loginEmail",
         "[name='identifier']",
@@ -81,10 +83,10 @@ const SELECTORS =
         "[data-login-identifier]",
         "input[type='email']",
         "input[autocomplete='username']",
-      ],
+      ]),
 
     password:
-      [
+      Object.freeze([
         "#loginPassword",
         "[name='password']",
         "[data-login-password='true']",
@@ -93,107 +95,116 @@ const SELECTORS =
         "[data-password-input]",
         "input[type='password']",
         "input[autocomplete='current-password']",
-      ],
+      ]),
 
     remember:
-      [
+      Object.freeze([
         "#loginRemember",
         "[name='remember']",
         "[name='rememberMe']",
         "[name='remember_me']",
         "[data-login-remember='true']",
         "[data-login-remember]",
-      ],
+      ]),
 
     errorBox:
-      [
+      Object.freeze([
         "#loginError",
         "[data-login-error='true']",
         "[data-login-error]",
         "[data-form-error]",
         ".login-error",
-      ],
+      ]),
 
     submit:
-      [
+      Object.freeze([
         "#loginSubmit",
         "[data-login-submit='true']",
         "[data-login-submit]",
         "button[type='submit']",
-      ],
+      ]),
 
     themeToggle:
-      [
+      Object.freeze([
         "#loginThemeToggle",
         "[data-login-theme-toggle='true']",
         "[data-login-theme-toggle]",
         "[data-theme-toggle='true']",
         "[data-theme-toggle]",
-      ],
+      ]),
 
     passwordToggle:
-      [
+      Object.freeze([
         "#togglePassword",
         "#loginPasswordToggle",
         "[data-password-toggle='true']",
         "[data-password-toggle]",
         "[data-login-password-toggle='true']",
         "[data-login-password-toggle]",
-      ],
+      ]),
 
     capsIndicator:
-      [
+      Object.freeze([
         "#loginCapsIndicator",
         "[data-password-caps='true']",
         "[data-password-caps]",
         "[data-login-caps='true']",
         "[data-login-caps]",
-      ],
+      ]),
 
     forgotPasswordLink:
-      [
+      Object.freeze([
         "#forgotPasswordLink",
         "[data-forgot-password-link='true']",
         "[data-forgot-password-link]",
         "[data-login-forgot-password]",
-      ],
+      ]),
 
     fieldIdentifier:
-      [
+      Object.freeze([
         "[data-field='identifier']",
         "[data-field='email']",
         "[data-login-field='identifier']",
         "[data-login-field='email']",
-      ],
+      ]),
 
     fieldPassword:
-      [
+      Object.freeze([
         "[data-field='password']",
         "[data-login-field='password']",
-      ],
+      ]),
 
     errorIdentifier:
-      [
+      Object.freeze([
         "[data-error-for='identifier']",
         "[data-error-for='email']",
         "[data-login-error-for='identifier']",
         "[data-login-error-for='email']",
-      ],
+      ]),
 
     errorPassword:
-      [
+      Object.freeze([
         "[data-error-for='password']",
         "[data-login-error-for='password']",
-      ],
+      ]),
 
     submitText:
-      [
+      Object.freeze([
         ".login-submit-text",
         "[data-login-submit-text]",
-      ],
+      ]),
   });
 
+const DISABLED_MEMORY_KEY =
+  "loginPrevDisabled";
+
+const TABINDEX_MEMORY_KEY =
+  "loginPrevTabIndex";
+
 const SUBMIT_BINDINGS =
+  new WeakMap();
+
+const THEME_TOGGLE_BINDINGS =
   new WeakMap();
 
 const PASSWORD_TOGGLE_BINDINGS =
@@ -215,14 +226,6 @@ function isBrowser() {
 
 function isFn(value) {
   return typeof value === "function";
-}
-
-function isPlainObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
 }
 
 function safeArray(value) {
@@ -254,45 +257,6 @@ function toRawValue(value, fallback = "") {
   }
 
   return String(value);
-}
-
-function safeBool(value, fallback = false) {
-  if (value === true) return true;
-  if (value === false) return false;
-  if (value === 1) return true;
-  if (value === 0) return false;
-
-  if (typeof value === "string") {
-    const clean =
-      value.trim().toLowerCase();
-
-    if (
-      [
-        "true",
-        "1",
-        "yes",
-        "si",
-        "sí",
-        "ok",
-        "on",
-      ].includes(clean)
-    ) {
-      return true;
-    }
-
-    if (
-      [
-        "false",
-        "0",
-        "no",
-        "off",
-      ].includes(clean)
-    ) {
-      return false;
-    }
-  }
-
-  return Boolean(fallback);
 }
 
 function safeNowIso() {
@@ -476,50 +440,6 @@ function toggleClass(node, className, enabled) {
   }
 }
 
-function addClass(node, ...classes) {
-  if (!node) {
-    return false;
-  }
-
-  const clean =
-    classes
-      .map((item) => toText(item, ""))
-      .filter(Boolean);
-
-  if (!clean.length) {
-    return false;
-  }
-
-  try {
-    node.classList.add(...clean);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function removeClass(node, ...classes) {
-  if (!node) {
-    return false;
-  }
-
-  const clean =
-    classes
-      .map((item) => toText(item, ""))
-      .filter(Boolean);
-
-  if (!clean.length) {
-    return false;
-  }
-
-  try {
-    node.classList.remove(...clean);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function setText(node, value = "") {
   if (!node) {
     return false;
@@ -665,6 +585,62 @@ function safeSelect(node) {
     return true;
   } catch {
     return false;
+  }
+}
+
+function setDisabledWithMemory(node, disabled = false, {
+  forceEnable = false,
+} = {}) {
+  if (!node) {
+    return false;
+  }
+
+  const shouldDisable =
+    Boolean(disabled);
+
+  try {
+    if (shouldDisable) {
+      if (
+        node.dataset &&
+        node.dataset[DISABLED_MEMORY_KEY] === undefined
+      ) {
+        node.dataset[DISABLED_MEMORY_KEY] =
+          node.disabled ? "true" : "false";
+      }
+
+      node.disabled =
+        true;
+
+      return true;
+    }
+
+    const previous =
+      node.dataset?.[DISABLED_MEMORY_KEY];
+
+    if (forceEnable) {
+      node.disabled =
+        false;
+    } else if (previous === "true") {
+      node.disabled =
+        true;
+    } else {
+      node.disabled =
+        false;
+    }
+
+    if (node.dataset) {
+      delete node.dataset[DISABLED_MEMORY_KEY];
+    }
+
+    return true;
+  } catch {
+    try {
+      node.disabled =
+        shouldDisable;
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -816,6 +792,18 @@ export function getLoginRefs(container) {
       SELECTORS.capsIndicator
     );
 
+  const fieldIdentifier =
+    queryFirst(
+      scope,
+      SELECTORS.fieldIdentifier
+    );
+
+  const errorIdentifier =
+    queryFirst(
+      scope,
+      SELECTORS.errorIdentifier
+    );
+
   const refs = {
     container:
       safeContainer,
@@ -866,16 +854,9 @@ export function getLoginRefs(container) {
       ),
 
     fieldEmail:
-      queryFirst(
-        scope,
-        SELECTORS.fieldIdentifier
-      ),
+      fieldIdentifier,
 
-    fieldIdentifier:
-      queryFirst(
-        scope,
-        SELECTORS.fieldIdentifier
-      ),
+    fieldIdentifier,
 
     fieldPassword:
       queryFirst(
@@ -883,17 +864,10 @@ export function getLoginRefs(container) {
         SELECTORS.fieldPassword
       ),
 
-    errorIdentifier:
-      queryFirst(
-        scope,
-        SELECTORS.errorIdentifier
-      ),
+    errorIdentifier,
 
     errorEmail:
-      queryFirst(
-        scope,
-        SELECTORS.errorIdentifier
-      ),
+      errorIdentifier,
 
     errorPassword:
       queryFirst(
@@ -907,10 +881,6 @@ export function getLoginRefs(container) {
         SELECTORS.submitText
       ),
 
-    /*
-      Compatibilidad:
-      getLoginRefs NO bindea shared password-field.
-    */
     passwordFieldBindings:
       [],
 
@@ -935,6 +905,28 @@ export function getLoginRefs(container) {
         "loginDomVersion",
         LOGIN_DOM_VERSION
       );
+
+      setDataset(
+        form,
+        "loginDomSource",
+        LOGIN_DOM_SOURCE
+      );
+    }
+  } catch {}
+
+  try {
+    if (refs.submitButton) {
+      if (!refs.submitButton.getAttribute("type")) {
+        refs.submitButton.setAttribute("type", "submit");
+      }
+
+      if (!refs.submitButton.dataset.originalLabel) {
+        refs.submitButton.dataset.originalLabel =
+          toText(
+            refs.submitButton.textContent,
+            DEFAULT_SUBMIT_LABEL
+          );
+      }
     }
   } catch {}
 
@@ -1114,10 +1106,15 @@ export function clearLoginErrors(refs = {}) {
     refs.errorEmail
   );
 
-  clearFieldError(
-    refs.fieldIdentifier,
-    refs.errorIdentifier
-  );
+  if (
+    refs.fieldIdentifier &&
+    refs.fieldIdentifier !== refs.fieldEmail
+  ) {
+    clearFieldError(
+      refs.fieldIdentifier,
+      refs.errorIdentifier
+    );
+  }
 
   clearFieldError(
     refs.fieldPassword,
@@ -1129,10 +1126,15 @@ export function clearLoginErrors(refs = {}) {
     false
   );
 
-  setInputInvalid(
-    refs.identifierInput,
-    false
-  );
+  if (
+    refs.identifierInput &&
+    refs.identifierInput !== refs.emailInput
+  ) {
+    setInputInvalid(
+      refs.identifierInput,
+      false
+    );
+  }
 
   setInputInvalid(
     refs.passwordInput,
@@ -1208,11 +1210,16 @@ export function applyLoginErrors(refs = {}, errors = {}, options = {}) {
     refs.errorEmail
   );
 
-  setFieldError(
-    refs.fieldIdentifier,
-    identifierError,
-    refs.errorIdentifier
-  );
+  if (
+    refs.fieldIdentifier &&
+    refs.fieldIdentifier !== refs.fieldEmail
+  ) {
+    setFieldError(
+      refs.fieldIdentifier,
+      identifierError,
+      refs.errorIdentifier
+    );
+  }
 
   setFieldError(
     refs.fieldPassword,
@@ -1225,10 +1232,15 @@ export function applyLoginErrors(refs = {}, errors = {}, options = {}) {
     Boolean(identifierError)
   );
 
-  setInputInvalid(
-    refs.identifierInput,
-    Boolean(identifierError)
-  );
+  if (
+    refs.identifierInput &&
+    refs.identifierInput !== refs.emailInput
+  ) {
+    setInputInvalid(
+      refs.identifierInput,
+      Boolean(identifierError)
+    );
+  }
 
   setInputInvalid(
     refs.passwordInput,
@@ -1313,6 +1325,12 @@ function createSubmitSpinner() {
       "aria-hidden",
       "true"
     );
+
+    setDataset(
+      spinner,
+      "loginSpinner",
+      "true"
+    );
   }
 
   return spinner;
@@ -1336,15 +1354,53 @@ function createSubmitText(text = "") {
   return label;
 }
 
+function getOriginalSubmitLabel(button, fallback = DEFAULT_SUBMIT_LABEL) {
+  if (!button) {
+    return fallback;
+  }
+
+  try {
+    const existing =
+      toText(
+        button.dataset?.originalLabel,
+        ""
+      );
+
+    if (existing) {
+      return existing;
+    }
+
+    const current =
+      toText(
+        button.textContent,
+        fallback
+      );
+
+    button.dataset.originalLabel =
+      current || fallback;
+
+    return current || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function renderSubmitButton(button, loading = false, labels = {}) {
   if (!button) {
     return false;
   }
 
+  const originalLabel =
+    getOriginalSubmitLabel(
+      button,
+      DEFAULT_SUBMIT_LABEL
+    );
+
   const submitLabel =
     toText(
       labels.submitLabel,
-      DEFAULT_SUBMIT_LABEL
+      originalLabel ||
+        DEFAULT_SUBMIT_LABEL
     );
 
   const loadingLabel =
@@ -1356,18 +1412,26 @@ function renderSubmitButton(button, loading = false, labels = {}) {
   const isLoading =
     Boolean(loading);
 
-  button.disabled =
-    isLoading;
+  try {
+    button.disabled =
+      isLoading;
+  } catch {}
 
   setDataset(
     button,
     "loading",
-    String(isLoading)
+    isLoading ? "true" : null
   );
 
   setAttr(
     button,
     "aria-busy",
+    isLoading ? "true" : "false"
+  );
+
+  setAttr(
+    button,
+    "aria-disabled",
     isLoading ? "true" : "false"
   );
 
@@ -1422,8 +1486,11 @@ function setLinkDisabled(link, disabled = false) {
 
   if (isDisabled) {
     try {
-      if (!link.dataset.prevTabIndex) {
-        link.dataset.prevTabIndex =
+      if (
+        link.dataset &&
+        link.dataset[TABINDEX_MEMORY_KEY] === undefined
+      ) {
+        link.dataset[TABINDEX_MEMORY_KEY] =
           String(link.tabIndex);
       }
 
@@ -1433,7 +1500,7 @@ function setLinkDisabled(link, disabled = false) {
   } else {
     try {
       const previous =
-        link.dataset.prevTabIndex;
+        link.dataset?.[TABINDEX_MEMORY_KEY];
 
       if (
         previous !== undefined &&
@@ -1446,9 +1513,32 @@ function setLinkDisabled(link, disabled = false) {
         link.removeAttribute("tabindex");
       }
 
-      delete link.dataset.prevTabIndex;
+      if (link.dataset) {
+        delete link.dataset[TABINDEX_MEMORY_KEY];
+      }
     } catch {}
   }
+
+  return true;
+}
+
+function clearSubmitFlags(form) {
+  if (!form) {
+    return false;
+  }
+
+  try {
+    delete form.dataset.submitting;
+    delete form.dataset.loginSubmitting;
+    delete form.dataset.loginSubmitLocked;
+    delete form.dataset.busy;
+  } catch {}
+
+  setAttr(
+    form,
+    "aria-busy",
+    "false"
+  );
 
   return true;
 }
@@ -1460,7 +1550,7 @@ export function setLoginLoading(refs = {}, loading = false, options = {}) {
   const submitLabel =
     toText(
       options.submitLabel,
-      DEFAULT_SUBMIT_LABEL
+      ""
     );
 
   const loadingLabel =
@@ -1526,47 +1616,79 @@ export function setLoginLoading(refs = {}, loading = false, options = {}) {
     if (isLoading) {
       form.dataset.submitting =
         "true";
+
+      form.dataset.loginSubmitting =
+        "1";
+
+      form.dataset.loginSubmitLocked =
+        "true";
     } else {
-      delete form.dataset.submitting;
+      clearSubmitFlags(form);
     }
   }
 
-  if (emailInput) {
-    emailInput.disabled =
-      isLoading;
-  }
+  setDisabledWithMemory(
+    emailInput,
+    isLoading,
+    {
+      forceEnable:
+        !isLoading,
+    }
+  );
 
   if (
     identifierInput &&
     identifierInput !== emailInput
   ) {
-    identifierInput.disabled =
-      isLoading;
+    setDisabledWithMemory(
+      identifierInput,
+      isLoading,
+      {
+        forceEnable:
+          !isLoading,
+      }
+    );
   }
 
-  /*
-    Por defecto no deshabilitamos password/toggle para no romper el
-    componente visual shared durante submit. Puede forzarse por opción.
-  */
   if (passwordInput) {
-    passwordInput.disabled =
-      disablePassword ? isLoading : false;
+    setDisabledWithMemory(
+      passwordInput,
+      disablePassword ? isLoading : false,
+      {
+        forceEnable:
+          !isLoading || !disablePassword,
+      }
+    );
   }
 
   if (togglePasswordButton) {
-    togglePasswordButton.disabled =
-      disablePassword ? isLoading : false;
+    setDisabledWithMemory(
+      togglePasswordButton,
+      disablePassword ? isLoading : false,
+      {
+        forceEnable:
+          !isLoading || !disablePassword,
+      }
+    );
   }
 
-  if (rememberInput) {
-    rememberInput.disabled =
-      isLoading;
-  }
+  setDisabledWithMemory(
+    rememberInput,
+    isLoading,
+    {
+      forceEnable:
+        !isLoading,
+    }
+  );
 
-  if (themeToggleButton) {
-    themeToggleButton.disabled =
-      isLoading;
-  }
+  setDisabledWithMemory(
+    themeToggleButton,
+    isLoading,
+    {
+      forceEnable:
+        !isLoading,
+    }
+  );
 
   setLinkDisabled(
     forgotPasswordLink,
@@ -1581,6 +1703,50 @@ export function setLoginLoading(refs = {}, loading = false, options = {}) {
       loadingLabel,
     }
   );
+
+  return true;
+}
+
+export function unlockLoginForm(refs = {}, options = {}) {
+  setLoginLoading(
+    refs,
+    false,
+    {
+      submitLabel:
+        options.submitLabel,
+      loadingLabel:
+        options.loadingLabel,
+    }
+  );
+
+  clearSubmitFlags(
+    refs.form
+  );
+
+  try {
+    if (refs.submitButton) {
+      refs.submitButton.disabled =
+        false;
+
+      setAttr(
+        refs.submitButton,
+        "aria-disabled",
+        "false"
+      );
+
+      setAttr(
+        refs.submitButton,
+        "aria-busy",
+        "false"
+      );
+
+      setDataset(
+        refs.submitButton,
+        "loading",
+        null
+      );
+    }
+  } catch {}
 
   return true;
 }
@@ -1793,6 +1959,10 @@ export function readLoginFormState(refs = {}) {
   return {
     identifier,
 
+    /*
+      Compat legacy:
+      Algunos helpers/backends antiguos leen email aunque el usuario escriba username.
+    */
     email:
       email || identifier.toLowerCase(),
 
@@ -1808,10 +1978,6 @@ export function readLoginFormState(refs = {}) {
     telefono:
       phone,
 
-    /*
-      Importante:
-      No se trimea la contraseña.
-    */
     password:
       toRawValue(
         refs?.passwordInput?.value,
@@ -1921,6 +2087,14 @@ export function bindLoginInputClearers(refs = {}, handler = null) {
         handler
       )
     );
+
+    unbinders.push(
+      bindDomEvent(
+        node,
+        "change",
+        handler
+      )
+    );
   }
 
   return composeUnbinders(unbinders);
@@ -1949,6 +2123,13 @@ export function bindPasswordToggle(refs = {}, handler = null) {
             event?.preventDefault?.();
           } catch {}
 
+          if (
+            button.disabled ||
+            button.getAttribute("aria-disabled") === "true"
+          ) {
+            return;
+          }
+
           togglePasswordVisibility(refs);
 
           safeFocus(
@@ -1960,7 +2141,7 @@ export function bindPasswordToggle(refs = {}, handler = null) {
           );
         };
 
-  const dispose =
+  const disposeEvent =
     bindDomEvent(
       button,
       "click",
@@ -1970,7 +2151,7 @@ export function bindPasswordToggle(refs = {}, handler = null) {
   const binding = {
     dispose() {
       try {
-        dispose();
+        disposeEvent();
       } catch {}
 
       PASSWORD_TOGGLE_BINDINGS.delete(button);
@@ -1996,6 +2177,15 @@ export function bindThemeToggle(refs = {}, handler = null) {
     return noop;
   }
 
+  const existing =
+    THEME_TOGGLE_BINDINGS.get(button);
+
+  if (existing) {
+    try {
+      existing.dispose();
+    } catch {}
+  }
+
   const wrapped =
     (event) => {
       try {
@@ -2012,111 +2202,207 @@ export function bindThemeToggle(refs = {}, handler = null) {
       handler(event);
     };
 
-  return bindDomEvent(
+  const disposeEvent =
+    bindDomEvent(
+      button,
+      "click",
+      wrapped
+    );
+
+  const binding = {
+    dispose() {
+      try {
+        disposeEvent();
+      } catch {}
+
+      if (THEME_TOGGLE_BINDINGS.get(button) === binding) {
+        THEME_TOGGLE_BINDINGS.delete(button);
+      }
+    },
+  };
+
+  THEME_TOGGLE_BINDINGS.set(
     button,
-    "click",
-    wrapped
+    binding
   );
+
+  return binding.dispose;
 }
 
 export function bindLoginSubmit(refs = {}, handler = null) {
   const form =
     refs.form;
 
+  const button =
+    refs.submitButton;
+
+  const target =
+    form ||
+    button ||
+    null;
+
   if (
-    !form ||
+    !target ||
     !isFn(handler)
   ) {
     return noop;
   }
 
-  let map =
-    SUBMIT_BINDINGS.get(form);
+  const existing =
+    SUBMIT_BINDINGS.get(target);
 
-  if (!map) {
-    map =
-      new Map();
-
-    SUBMIT_BINDINGS.set(
-      form,
-      map
-    );
+  /*
+    Single-binding real:
+    si por remount/hot reload queda un submit anterior en el mismo nodo,
+    se elimina antes de montar el nuevo.
+  */
+  if (existing) {
+    try {
+      existing.dispose();
+    } catch {}
   }
 
-  if (map.has(handler)) {
-    const existing =
-      map.get(handler);
+  let disposed =
+    false;
 
-    existing.count += 1;
-
-    return () => {
-      existing.count -= 1;
-
-      if (existing.count <= 0) {
-        existing.dispose();
-      }
-    };
-  }
+  let inFlight =
+    false;
 
   const wrapped =
     (event) => {
+      if (disposed) {
+        return undefined;
+      }
+
       try {
         event?.preventDefault?.();
       } catch {}
 
-      return handler(event);
+      if (inFlight) {
+        return undefined;
+      }
+
+      inFlight =
+        true;
+
+      let result;
+
+      try {
+        result =
+          handler(event);
+      } catch (error) {
+        inFlight =
+          false;
+
+        throw error;
+      }
+
+      Promise.resolve(result)
+        .catch(noop)
+        .finally(() => {
+          inFlight =
+            false;
+        });
+
+      return result;
     };
 
-  const unbind =
-    bindDomEvent(
-      form,
-      "submit",
-      wrapped
+  const unbinders =
+    [];
+
+  if (form) {
+    unbinders.push(
+      bindDomEvent(
+        form,
+        "submit",
+        wrapped
+      )
     );
+  } else if (button) {
+    unbinders.push(
+      bindDomEvent(
+        button,
+        "click",
+        wrapped
+      )
+    );
+  }
 
   const binding = {
-    count:
-      1,
-
     dispose() {
-      try {
-        unbind();
-      } catch {}
+      if (disposed) {
+        return;
+      }
 
-      try {
-        map.delete(handler);
+      disposed =
+        true;
 
-        if (map.size === 0) {
-          SUBMIT_BINDINGS.delete(form);
-        }
-      } catch {}
+      inFlight =
+        false;
+
+      for (const unbind of unbinders.splice(0)) {
+        try {
+          unbind();
+        } catch {}
+      }
+
+      if (SUBMIT_BINDINGS.get(target) === binding) {
+        SUBMIT_BINDINGS.delete(target);
+      }
+
+      if (form) {
+        setDataset(
+          form,
+          "loginSubmitBound",
+          null
+        );
+
+        setDataset(
+          form,
+          "loginSubmitBindingAt",
+          null
+        );
+      }
+    },
+
+    getSnapshot() {
+      return {
+        disposed,
+        inFlight,
+        target:
+          form ? "form" : "button",
+        at:
+          safeNowIso(),
+      };
     },
   };
 
-  map.set(
-    handler,
+  SUBMIT_BINDINGS.set(
+    target,
     binding
   );
 
-  setDataset(
-    form,
-    "loginSubmitBound",
-    "true"
-  );
+  if (form) {
+    setDataset(
+      form,
+      "loginSubmitBound",
+      "true"
+    );
 
-  setDataset(
-    form,
-    "loginDomSource",
-    LOGIN_DOM_SOURCE
-  );
+    setDataset(
+      form,
+      "loginDomSource",
+      LOGIN_DOM_SOURCE
+    );
 
-  return () => {
-    binding.count -= 1;
+    setDataset(
+      form,
+      "loginSubmitBindingAt",
+      safeNowIso()
+    );
+  }
 
-    if (binding.count <= 0) {
-      binding.dispose();
-    }
-  };
+  return binding.dispose;
 }
 
 /* =========================================================
@@ -2176,6 +2462,12 @@ function getNodeSnapshot(node) {
         ""
       ),
 
+    ariaDisabled:
+      toText(
+        node.getAttribute?.("aria-disabled"),
+        ""
+      ),
+
     dataset: {
       loading:
         node.dataset?.loading || "",
@@ -2183,13 +2475,32 @@ function getNodeSnapshot(node) {
       submitting:
         node.dataset?.submitting || "",
 
+      loginSubmitting:
+        node.dataset?.loginSubmitting || "",
+
+      loginSubmitLocked:
+        node.dataset?.loginSubmitLocked || "",
+
       invalid:
         node.dataset?.invalid || "",
+
+      loginSubmitBound:
+        node.dataset?.loginSubmitBound || "",
     },
   };
 }
 
 export function getLoginDomSnapshot(refs = {}) {
+  const formOrButton =
+    refs.form ||
+    refs.submitButton ||
+    null;
+
+  const submitBinding =
+    formOrButton
+      ? SUBMIT_BINDINGS.get(formOrButton)
+      : null;
+
   return {
     version:
       LOGIN_DOM_VERSION,
@@ -2224,6 +2535,12 @@ export function getLoginDomSnapshot(refs = {}) {
     togglePasswordButton:
       getNodeSnapshot(refs.togglePasswordButton),
 
+    hasSubmitBinding:
+      Boolean(submitBinding),
+
+    submitBinding:
+      submitBinding?.getSnapshot?.() || null,
+
     hasSharedPasswordBindings:
       Boolean(
         refs.passwordFieldBindings?.length
@@ -2256,6 +2573,7 @@ export default {
   setGlobalLoginError,
 
   setLoginLoading,
+  unlockLoginForm,
 
   getPasswordVisibilityState,
   setPasswordVisibility,

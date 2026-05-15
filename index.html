@@ -7,16 +7,23 @@
   data-theme-mode="system"
   data-theme-source="initial"
   data-app-state="booting"
+  data-app-loading="true"
+  data-app-booting="true"
+  data-app-ready="false"
   data-route-mode="boot"
+  data-shell="visible"
   data-shell-state="booting"
-  class="app-booting"
+  data-chrome="hidden"
+  class="app-booting app-loading"
 >
 <head>
   <!-- =========================================================
        ONION SUPPORT — SPA SHELL
        Archivo: /index.html
 
-       Contrato:
+       SHELL FÍSICO · PRIVATE SPA · CSP CLEAN · 16/10
+
+       CONTRATO:
        - Shell físico privado de la SPA.
        - Sin JS inline.
        - Sin CSS inline.
@@ -24,10 +31,12 @@
        - Tema inicial resuelto por /src/preboot/theme.js antes del CSS.
        - CSS centralizado en /src/css/app.css.
        - JS centralizado en /src/main.js.
+       - /src/main.js es el único entrypoint físico.
+       - /src/app/index.js NO autoarranca.
        - Router renderiza exclusivamente en #view-container.
        - Sidebar monta en #sidebar-mount.
        - Topbar monta en #topbar-mount.
-       - Loader inicial estático, controlado después por la app.
+       - Loader inicial estático, controlado después por /src/app/loader.js.
        - Preparado para CSP estricta mediante staticwebapp.config.json.
   ========================================================= -->
 
@@ -177,6 +186,7 @@
   <!-- =========================
        THEME PREBOOT
        Debe ejecutarse antes de aplicar /src/css/app.css.
+       Archivo externo local. Sin JS inline.
   ========================= -->
   <script src="/src/preboot/theme.js"></script>
 
@@ -205,9 +215,13 @@
   data-app-name="Onion Support"
   data-density="default"
   data-app-loading="true"
+  data-app-booting="true"
+  data-app-ready="false"
   data-authenticated="false"
   data-route-mode="boot"
+  data-shell="visible"
   data-shell-state="booting"
+  data-chrome="hidden"
 >
   <!-- =========================================================
        ACCESSIBILITY
@@ -261,6 +275,7 @@
           decoding="async"
           fetchpriority="high"
           draggable="false"
+          data-loader-logo-dark="true"
         >
 
         <img
@@ -273,6 +288,7 @@
           decoding="async"
           fetchpriority="low"
           draggable="false"
+          data-loader-logo-light="true"
         >
 
         <div
@@ -284,10 +300,14 @@
         </div>
       </div>
 
-      <div class="app-loader__copy">
+      <div
+        class="app-loader__copy"
+        data-loader-copy="true"
+      >
         <strong
           id="app-loader-title"
           class="app-loader__title"
+          data-loader-title="true"
         >
           Onion Support
         </strong>
@@ -295,6 +315,7 @@
         <span
           id="app-loader-text"
           class="app-loader__text"
+          data-loader-text="true"
         >
           Cargando sesión...
         </span>
@@ -302,6 +323,7 @@
         <small
           id="app-loader-subtext"
           class="app-loader__subtext"
+          data-loader-subtext="true"
         >
           Preparando panel seguro
         </small>
@@ -310,6 +332,7 @@
       <div
         class="app-loader__bar"
         aria-hidden="true"
+        data-loader-bar="true"
       >
         <span class="app-loader__bar-fill"></span>
       </div>
@@ -320,7 +343,11 @@
        NOSCRIPT FALLBACK
   ========================================================= -->
   <noscript>
-    <div class="layout noscript-layout">
+    <div
+      id="noscript-root"
+      class="layout noscript-layout"
+      data-noscript-root="true"
+    >
       <main
         class="main-content noscript-main"
         role="main"
@@ -347,8 +374,10 @@
     id="app-shell"
     class="layout app-shell"
     data-app-shell="true"
-    data-shell="booting"
+    data-shell="visible"
+    data-shell-state="booting"
     data-shell-interactive="false"
+    data-chrome="hidden"
     data-route-mode="boot"
     aria-busy="true"
     aria-hidden="true"
@@ -359,6 +388,11 @@
     <div
       id="sidebar-mount"
       data-sidebar-mount="true"
+      data-shell="visible"
+      data-shell-state="booting"
+      data-chrome="hidden"
+      data-route-mode="boot"
+      hidden
       aria-hidden="true"
     ></div>
 
@@ -368,6 +402,11 @@
     <div
       id="topbar-mount"
       data-topbar-mount="true"
+      data-shell="visible"
+      data-shell-state="booting"
+      data-chrome="hidden"
+      data-route-mode="boot"
+      hidden
       aria-hidden="true"
     ></div>
 
@@ -381,7 +420,11 @@
       aria-label="Contenido principal"
       tabindex="-1"
       aria-busy="true"
+      aria-hidden="false"
       data-main-content="true"
+      data-shell="visible"
+      data-shell-state="booting"
+      data-chrome="hidden"
       data-route-mode="boot"
     >
       <!-- =========================
@@ -391,6 +434,10 @@
         id="table-head"
         class="table-head"
         data-tablehead="true"
+        data-shell="visible"
+        data-shell-state="booting"
+        data-chrome="hidden"
+        data-route-mode="boot"
         hidden
         aria-hidden="true"
       >
@@ -406,12 +453,22 @@
       <div
         id="app-content"
         data-app-content="true"
+        data-shell="visible"
+        data-shell-state="booting"
+        data-route-mode="boot"
+        aria-busy="true"
       >
         <div
           id="view-container"
           data-view-root="true"
           data-router-view="true"
+          data-view-container="true"
+          data-shell="visible"
+          data-shell-state="booting"
+          data-route-mode="boot"
+          tabindex="-1"
           aria-busy="true"
+          aria-hidden="false"
         ></div>
       </div>
     </main>
@@ -419,6 +476,7 @@
 
   <!-- =========================
        APP ENTRYPOINT
+       Único script de arranque físico.
   ========================= -->
   <script
     type="module"

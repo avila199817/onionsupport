@@ -2,53 +2,15 @@
    Onion SPA - Password Reset
    Archivo: src/features/auth/password-reset.js
 
-   AUTH PASSWORD RESET · FINAL EXTREME PRO SYSTEM · GOD MODE v16
+   AUTH PASSWORD RESET · SIMPLE · PUBLIC SAFE · BACKEND ALIGNED
 
-   RESPONSABILIDADES:
-   - Resolver identificador de recuperación.
-   - Normalizar payload de reset-password-request.
-   - Construir body robusto compatible con backends legacy.
-   - Ejecutar petición recovery vía Http/AppCore/apiClient/fetch.
-   - Normalizar respuestas y errores.
-   - Soportar cooldown / rate-limit sin romper UX.
-   - Nunca asumir success por defecto si backend no lo declara.
-   - Endurecer URLs / timeout / payload / redirects.
-   - Soportar confirmación de nueva contraseña.
-   - Soportar validación opcional de token reset.
-   - API pública estable para Auth module.
-
-   HARDENING EXTREMO:
-   - Transporte compatible con AppCore.http, AppCore.Http, services.http,
-     AppCore.apiClient, AppCore.request y fetch.
-   - Request pública dura:
-       · public:true
-       · auth:false
-       · skipAuth:true
-       · noAuthHeader:true
-       · _skipAuthRefresh:true
-       · skipAuthRefresh:true
-       · noAutoRefresh:true
-       · autoRefresh:false
-       · noAutoLogout:true
-       · autoLogout:false
-       · retry:false
-       · retries:0
-       · _skipRetry:true
-       · skipRetry:true
-   - Timeout real en fetch.
-   - Redirects anti open-redirect.
-   - Token/password/identifier con límites.
-   - Tokens/passwords NO se truncan silenciosamente.
-   - Respuestas nested: data / payload / result / body / response.data.
-   - Status textual robusto: status/statusText/state.
-   - Rate-limit: 429 / Retry-After / retryAfter / cooldownSeconds.
-   - Errores normalizados sin throws hacia la UI pública.
-   - Confirm password estricto.
-   - Eventos sin tokens ni passwords reales.
-   - No toca sesión auth ni rutas públicas técnicas.
-   - No llama refresh.
+   Reglas:
+   - Request público duro: sin Authorization, sin refresh, sin logout.
+   - No toca sesión auth.
+   - No toca rutas públicas técnicas.
    - No asume éxito por HTTP 200 si backend no declara ok/success/accepted/valid/completed.
-   - Default export callable + métodos públicos colgados.
+   - Tokens y passwords no se truncan: se validan.
+   - Default export callable + métodos públicos.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -77,202 +39,151 @@ import {
 } from "./storage.js";
 
 /* =========================================================
-   VERSION
+   META
 ========================================================= */
 
-export const PASSWORD_RESET_MODULE_VERSION =
-  "password-reset.16.0.0";
+export const PASSWORD_RESET_MODULE_VERSION = "17.0.0-simple-clean";
+
+const SOURCE = "auth.password-reset";
+const API_ORIGIN = "https://api.onionit.net";
+
+const DEFAULT_REQUEST_ENDPOINT = "/api/auth/reset-password-request";
+const DEFAULT_CONFIRM_ENDPOINT = "/api/auth/reset-password-confirm";
+const DEFAULT_VALIDATE_ENDPOINT = "/api/auth/reset-password/validate";
+
+const DEFAULT_LOGIN_REDIRECT = "/login";
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+const SUCCESS_STATUS_TEXTS = new Set([
+  "ok",
+  "success",
+  "succeeded",
+  "accepted",
+  "valid",
+  "sent",
+  "email_sent",
+  "reset_sent",
+  "password_reset_sent",
+  "password_updated",
+  "password_changed",
+  "completed",
+  "done",
+]);
+
+const SUCCESS_CODES = new Set([
+  "OK",
+  "SUCCESS",
+  "RESET_SENT",
+  "PASSWORD_RESET_SENT",
+  "EMAIL_SENT",
+  "TOKEN_VALID",
+  "RESET_TOKEN_VALID",
+  "PASSWORD_UPDATED",
+  "PASSWORD_CHANGED",
+  "PASSWORD_RESET_COMPLETED",
+]);
+
+const FAILURE_STATUS_TEXTS = new Set([
+  "error",
+  "failed",
+  "failure",
+  "invalid",
+  "unauthorized",
+  "forbidden",
+  "expired",
+  "rate_limited",
+  "too_many_requests",
+]);
+
+const FAILURE_CODES = new Set([
+  "INVALID_TOKEN",
+  "TOKEN_INVALID",
+  "TOKEN_EXPIRED",
+  "RESET_TOKEN_EXPIRED",
+  "RESET_TOKEN_INVALID",
+  "PASSWORD_RESET_TOKEN_INVALID",
+  "PASSWORD_RESET_TOKEN_EXPIRED",
+  "INVALID_IDENTIFIER",
+  "MISSING_IDENTIFIER",
+  "MISSING_TOKEN",
+  "MISSING_PASSWORD",
+  "PASSWORD_MISMATCH",
+  "RATE_LIMITED",
+  "TOO_MANY_REQUESTS",
+  "UNAUTHORIZED",
+  "FORBIDDEN",
+]);
+
+const NEXT_ENDPOINT_STATUSES = new Set([404, 405, 410, 501]);
+
+const BAD_TEXT_VALUES = new Set([
+  "",
+  "undefined",
+  "null",
+  "false",
+  "true",
+  "nan",
+  "[object object]",
+  "{}",
+  "[]",
+  "\"undefined\"",
+  "\"null\"",
+  "\"false\"",
+  "\"true\"",
+]);
+
+const PASSWORD_FIELD_NAMES = new Set([
+  "password",
+  "newPassword",
+  "new_password",
+  "confirmPassword",
+  "passwordConfirmation",
+  "password_confirmation",
+  "repeatPassword",
+  "repeat_password",
+]);
+
+const TOKEN_FIELD_NAMES = new Set([
+  "token",
+  "code",
+  "t",
+  "resetToken",
+  "reset_token",
+  "reset_code",
+  "passwordResetToken",
+  "password_reset_token",
+  "confirmToken",
+  "confirm_token",
+]);
+
+const AUTH_HEADER_NAMES = new Set([
+  "authorization",
+  "x-auth-token",
+  "x-access-token",
+  "x-refresh-token",
+]);
 
 /* =========================================================
-   CONSTANTS
-========================================================= */
-
-const MODULE_SOURCE =
-  "auth.password-reset";
-
-const BACKEND_ORIGIN =
-  "https://api.onionit.net";
-
-const DEFAULT_REQUEST_ENDPOINT =
-  "/api/auth/reset-password-request";
-
-const DEFAULT_CONFIRM_ENDPOINT =
-  "/api/auth/reset-password-confirm";
-
-const DEFAULT_VALIDATE_ENDPOINT =
-  "/api/auth/reset-password/validate";
-
-const DEFAULT_LOGIN_REDIRECT =
-  "/login";
-
-const LOCAL_ORIGIN =
-  "http://localhost";
-
-const DEFAULT_TIMEOUT_MS =
-  30_000;
-
-const SUCCESS_STATUS_TEXTS =
-  Object.freeze([
-    "ok",
-    "success",
-    "succeeded",
-    "accepted",
-    "valid",
-    "sent",
-    "email_sent",
-    "reset_sent",
-    "password_reset_sent",
-    "password_updated",
-    "password_changed",
-    "completed",
-    "done",
-  ]);
-
-const SUCCESS_CODES =
-  Object.freeze([
-    "OK",
-    "SUCCESS",
-    "RESET_SENT",
-    "PASSWORD_RESET_SENT",
-    "EMAIL_SENT",
-    "TOKEN_VALID",
-    "RESET_TOKEN_VALID",
-    "PASSWORD_UPDATED",
-    "PASSWORD_CHANGED",
-    "PASSWORD_RESET_COMPLETED",
-  ]);
-
-const FAILURE_STATUS_TEXTS =
-  Object.freeze([
-    "error",
-    "failed",
-    "failure",
-    "invalid",
-    "unauthorized",
-    "forbidden",
-    "expired",
-    "rate_limited",
-    "too_many_requests",
-  ]);
-
-const FAILURE_CODES =
-  Object.freeze([
-    "INVALID_TOKEN",
-    "TOKEN_INVALID",
-    "TOKEN_EXPIRED",
-    "RESET_TOKEN_EXPIRED",
-    "RESET_TOKEN_INVALID",
-    "PASSWORD_RESET_TOKEN_INVALID",
-    "PASSWORD_RESET_TOKEN_EXPIRED",
-    "INVALID_IDENTIFIER",
-    "MISSING_IDENTIFIER",
-    "MISSING_TOKEN",
-    "MISSING_PASSWORD",
-    "PASSWORD_MISMATCH",
-    "RATE_LIMITED",
-    "TOO_MANY_REQUESTS",
-    "UNAUTHORIZED",
-    "FORBIDDEN",
-  ]);
-
-const CORRUPTED_TEXT_VALUES =
-  Object.freeze([
-    "undefined",
-    "null",
-    "false",
-    "true",
-    "nan",
-    "[object object]",
-    "{}",
-    "[]",
-    "\"undefined\"",
-    "\"null\"",
-    "\"false\"",
-    "\"true\"",
-  ]);
-
-const PASSWORD_FIELD_NAMES =
-  Object.freeze([
-    "password",
-    "newPassword",
-    "new_password",
-    "confirmPassword",
-    "passwordConfirmation",
-    "password_confirmation",
-    "repeatPassword",
-    "repeat_password",
-  ]);
-
-const TOKEN_FIELD_NAMES =
-  Object.freeze([
-    "token",
-    "code",
-    "t",
-    "resetToken",
-    "reset_token",
-    "reset_code",
-    "passwordResetToken",
-    "password_reset_token",
-    "confirmToken",
-    "confirm_token",
-  ]);
-
-const AUTH_HEADER_NAMES =
-  Object.freeze([
-    "authorization",
-    "x-auth-token",
-    "x-access-token",
-    "x-refresh-token",
-  ]);
-
-const FALLBACK_NEXT_ENDPOINT_STATUSES =
-  new Set([
-    404,
-    405,
-    410,
-    501,
-  ]);
-
-/* =========================================================
-   RUNTIME STATE
+   RUNTIME
 ========================================================= */
 
 const runtime = {
-  requestInFlight:
-    null,
+  requestInFlight: null,
+  confirmInFlight: null,
+  validateInFlight: null,
 
-  confirmInFlight:
-    null,
+  lastRequestAt: 0,
+  lastConfirmAt: 0,
+  lastValidateAt: 0,
 
-  validateInFlight:
-    null,
+  requestCount: 0,
+  confirmCount: 0,
+  validateCount: 0,
 
-  lastRequestAt:
-    0,
+  cooldownUntil: 0,
 
-  lastConfirmAt:
-    0,
-
-  lastValidateAt:
-    0,
-
-  requestCount:
-    0,
-
-  confirmCount:
-    0,
-
-  validateCount:
-    0,
-
-  cooldownUntil:
-    0,
-
-  lastError:
-    null,
-
-  lastResult:
-    null,
+  lastError: null,
+  lastResult: null,
 };
 
 /* =========================================================
@@ -280,10 +191,68 @@ const runtime = {
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function safeObject(value) {
+  return isObject(value) ? value : {};
+}
+
+function safeArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value === null || value === undefined) return [];
+  return [value];
+}
+
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+
+  const text = String(value).trim();
+
+  return text || fallback;
+}
+
+function safeNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function clampNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
+  const number = safeNumber(value, min);
+  return Math.min(Math.max(number, min), max);
+}
+
+function pickFirst(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    return value;
+  }
+
+  return null;
+}
+
+function pickFirstText(...values) {
+  return safeText(pickFirst(...values), "");
+}
+
+function unique(values = []) {
+  return [
+    ...new Set(
+      safeArray(values)
+        .flat(Infinity)
+        .map((item) => safeText(item))
+        .filter(Boolean)
+    ),
+  ];
 }
 
 function nowMs() {
@@ -302,330 +271,129 @@ function isoNow(ms = nowMs()) {
   }
 }
 
-function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value).trim();
-
-  return text || fallback;
-}
-
-function safeNumber(value, fallback = 0) {
-  const numeric =
-    Number(value);
-
-  return Number.isFinite(numeric)
-    ? numeric
-    : fallback;
-}
-
-function clampNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
-  const numeric =
-    safeNumber(value, min);
-
-  return Math.min(
-    Math.max(numeric, min),
-    max
-  );
-}
-
-function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
-}
-
-function safeObject(value) {
-  return isObject(value)
-    ? value
-    : {};
-}
-
-function safeArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return [];
-  }
-
-  return [value];
-}
-
-function isFunction(value) {
-  return typeof value === "function";
-}
-
 function isAbsoluteUrl(value = "") {
-  return /^https?:\/\//i.test(
-    String(value || "")
-  );
+  return /^https?:\/\//i.test(String(value || ""));
 }
 
-function isCorruptedTextValue(value = "") {
-  const text =
-    safeText(value, "")
-      .toLowerCase();
-
-  return (
-    !text ||
-    CORRUPTED_TEXT_VALUES.includes(text)
-  );
+function isBadText(value = "") {
+  return BAD_TEXT_VALUES.has(safeText(value).toLowerCase());
 }
 
-function pickFirst(...values) {
-  for (const value of values) {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    return value;
-  }
-
-  return null;
-}
-
-function pickFirstText(...values) {
-  return safeText(
-    pickFirst(...values),
-    ""
-  );
-}
-
-function safeClone(value, fallback = null) {
+function cloneSafe(value, fallback = null) {
   try {
-    if (typeof structuredClone === "function") {
-      return structuredClone(value);
-    }
+    if (typeof structuredClone === "function") return structuredClone(value);
   } catch {}
 
   try {
-    return JSON.parse(
-      JSON.stringify(value)
-    );
+    return JSON.parse(JSON.stringify(value));
   } catch {
     return fallback;
   }
 }
 
-function unique(values = []) {
-  return Array.from(
-    new Set(
-      safeArray(values)
-        .flat(Infinity)
-        .map((item) =>
-          safeText(item, "")
-        )
-        .filter(Boolean)
-    )
-  );
-}
-
 /* =========================================================
-   EVENT SAFETY
+   EVENTS / REDACTION
 ========================================================= */
 
-function redactSafe(value = "") {
+function redact(value = "") {
   try {
     return redactTokenInText(value);
   } catch {
-    return safeText(value, "")
-      .replace(
-        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
-        "$1***"
-      )
-      .replace(
-        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-        "$1***"
-      )
-      .replace(
-        /(\/password-reset\/confirm\/)([^/?#\s]+)/gi,
-        "$1***"
-      )
-      .replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      );
+    return safeText(value)
+      .replace(/([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi, "$1***")
+      .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***")
+      .replace(/(\/password-reset\/confirm\/)([^/?#\s]+)/gi, "$1***")
+      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
   }
 }
 
-function sanitizeEventPayload(payload = {}, depth = 0) {
-  if (depth > 6) {
-    return "[MaxDepth]";
+function sanitizeEventPayload(value, depth = 0, keyHint = "") {
+  const key = safeText(keyHint).toLowerCase();
+
+  if (
+    key.includes("token") ||
+    key.includes("password") ||
+    key.includes("authorization") ||
+    key.includes("secret") ||
+    key === "code" ||
+    key === "t" ||
+    key === "otp" ||
+    key === "totp"
+  ) {
+    return value ? "***" : value;
   }
 
-  if (Array.isArray(payload)) {
-    return payload.map((item) =>
-      sanitizeEventPayload(
-        item,
-        depth + 1
-      )
-    );
+  if (depth > 5) return "[MaxDepth]";
+
+  if (typeof value === "string") return redact(value);
+
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
   }
 
-  if (!isObject(payload)) {
-    return typeof payload === "string"
-      ? redactSafe(payload)
-      : payload;
+  if (Array.isArray(value)) {
+    return value.slice(0, 80).map((item) => sanitizeEventPayload(item, depth + 1, keyHint));
   }
+
+  if (!isObject(value)) return String(value);
 
   const output = {};
 
-  for (const [key, value] of Object.entries(payload)) {
-    const lower =
-      safeText(key, "")
-        .toLowerCase();
-
-    if (
-      lower.includes("token") ||
-      lower.includes("password") ||
-      lower.includes("authorization") ||
-      lower.includes("secret") ||
-      lower === "code" ||
-      lower === "otp" ||
-      lower === "totp" ||
-      lower === "t"
-    ) {
-      output[key] =
-        value ? "***" : value;
-      continue;
-    }
-
-    if (
-      lower.includes("url") ||
-      lower.includes("path") ||
-      lower.includes("redirect") ||
-      lower.includes("endpoint")
-    ) {
-      output[key] =
-        typeof value === "string"
-          ? redactSafe(value)
-          : sanitizeEventPayload(
-              value,
-              depth + 1
-            );
-      continue;
-    }
-
-    output[key] =
-      sanitizeEventPayload(
-        value,
-        depth + 1
-      );
+  for (const [childKey, childValue] of Object.entries(value).slice(0, 100)) {
+    output[childKey] = sanitizeEventPayload(childValue, depth + 1, childKey);
   }
 
   return output;
 }
 
-function safeEmit(eventName, payload = {}, options = {}) {
-  const cleanEvent =
-    safeText(eventName, "");
+function emit(eventName, payload = {}, options = {}) {
+  const name = safeText(eventName);
 
-  if (!cleanEvent) {
-    return false;
-  }
+  if (!name) return false;
+  if (options.emit === false || options.emitEvents === false || options.silentEvents === true) return false;
 
-  if (
-    options.emit === false ||
-    options.emitEvents === false ||
-    options.silentEvents === true
-  ) {
-    return false;
-  }
-
-  const cleanPayload =
-    sanitizeEventPayload({
-      source:
-        MODULE_SOURCE,
-      version:
-        PASSWORD_RESET_MODULE_VERSION,
-      at:
-        isoNow(),
-      ...safeObject(payload),
-    });
-
-  let emitted =
-    false;
+  const detail = sanitizeEventPayload({
+    source: SOURCE,
+    version: PASSWORD_RESET_MODULE_VERSION,
+    at: isoNow(),
+    ...safeObject(payload),
+  });
 
   try {
-    AppCore?.events?.emit?.(
-      cleanEvent,
-      cleanPayload
-    );
-
-    emitted =
-      true;
+    AppCore?.events?.emit?.(name, detail);
+    return true;
   } catch {}
 
   try {
-    if (
-      isBrowser() &&
-      !emitted
-    ) {
-      document.dispatchEvent(
-        new CustomEvent(cleanEvent, {
-          detail:
-            cleanPayload,
-          bubbles:
-            false,
-          cancelable:
-            false,
-        })
-      );
-
-      emitted =
-        true;
+    if (isBrowser()) {
+      document.dispatchEvent(new CustomEvent(name, { detail }));
+      return true;
     }
   } catch {}
 
-  return emitted;
+  return false;
 }
 
-function safeWarn(...args) {
+function warn(...args) {
   try {
-    AppCore?.utils?.warn?.(
-      "[PasswordReset]",
-      ...args
-    );
+    AppCore?.utils?.warn?.("[PasswordReset]", ...args);
   } catch {}
 
   try {
-    if (AppCore?.config?.debug) {
-      console.warn(
-        "[PasswordReset]",
-        ...args
-      );
-    }
+    if (AppCore?.config?.debug) console.warn("[PasswordReset]", ...args);
   } catch {}
 }
 
 /* =========================================================
-   LIMITS
+   LIMITS / CONFIG
 ========================================================= */
 
-function getResetIdentifierMaxLength() {
+function getIdentifierMaxLength() {
   return clampNumber(
     AUTH_CONSTANTS?.resetIdentifierMaxLength ??
       AUTH_CONSTANTS?.identifierMaxLength ??
@@ -635,7 +403,7 @@ function getResetIdentifierMaxLength() {
   );
 }
 
-function getResetTokenMinLength() {
+function getTokenMinLength() {
   return clampNumber(
     AUTH_CONSTANTS?.resetTokenMinLength ??
       AUTH_CONSTANTS?.tokenMinLength ??
@@ -645,17 +413,17 @@ function getResetTokenMinLength() {
   );
 }
 
-function getResetTokenMaxLength() {
+function getTokenMaxLength() {
   return clampNumber(
     AUTH_CONSTANTS?.resetTokenMaxLength ??
       AUTH_CONSTANTS?.tokenMaxLength ??
       8192,
-    getResetTokenMinLength(),
+    getTokenMinLength(),
     32768
   );
 }
 
-function getResetPasswordMinLength() {
+function getPasswordMinLength() {
   return clampNumber(
     AUTH_CONSTANTS?.resetPasswordMinLength ??
       AUTH_CONSTANTS?.passwordMinLength ??
@@ -665,41 +433,26 @@ function getResetPasswordMinLength() {
   );
 }
 
-function getResetPasswordMaxLength() {
+function getPasswordMaxLength() {
   return clampNumber(
     AUTH_CONSTANTS?.resetPasswordMaxLength ??
       AUTH_CONSTANTS?.passwordMaxLength ??
       1024,
-    getResetPasswordMinLength(),
+    getPasswordMinLength(),
     8192
   );
 }
 
-function getRequestTimeout(options = {}) {
-  const explicit =
-    options?.timeout ??
-    options?.timeoutMs ??
-    options?.passwordResetTimeoutMs;
+function getTimeoutMs(options = {}) {
+  const explicit = options.timeout ?? options.timeoutMs ?? options.passwordResetTimeoutMs;
 
   if (explicit !== undefined) {
-    return clampNumber(
-      explicit,
-      1000,
-      120000
-    );
+    return clampNumber(explicit, 1000, 120000);
   }
 
   try {
-    const fromConstants =
-      getAuthPublicTimeoutMs?.();
-
-    if (fromConstants) {
-      return clampNumber(
-        fromConstants,
-        1000,
-        120000
-      );
-    }
+    const fromConstants = getAuthPublicTimeoutMs?.();
+    if (fromConstants) return clampNumber(fromConstants, 1000, 120000);
   } catch {}
 
   return clampNumber(
@@ -715,42 +468,41 @@ function getRequestTimeout(options = {}) {
 
 function getDefaultCooldownSeconds() {
   return clampNumber(
-    AUTH_CONSTANTS?.resetCooldownDefaultSeconds ??
-      60,
+    AUTH_CONSTANTS?.resetCooldownDefaultSeconds ?? 60,
     0,
     3600
   );
 }
 
 /* =========================================================
-   DEFAULT MESSAGES
+   MESSAGES
 ========================================================= */
 
-function getDefaultSuccessMessage() {
+function defaultRequestSuccessMessage() {
   return "Si el identificador existe, te enviaremos las instrucciones para restablecer la contraseña.";
 }
 
-function getDefaultErrorMessage() {
+function defaultRequestErrorMessage() {
   return "No se pudo iniciar la recuperación de acceso.";
 }
 
-function getDefaultConfirmSuccessMessage() {
+function defaultConfirmSuccessMessage() {
   return "La contraseña se ha actualizado correctamente.";
 }
 
-function getDefaultConfirmErrorMessage() {
+function defaultConfirmErrorMessage() {
   return "No se pudo restablecer la contraseña.";
 }
 
-function getDefaultValidateSuccessMessage() {
+function defaultValidateSuccessMessage() {
   return "El token de recuperación es válido.";
 }
 
-function getDefaultValidateErrorMessage() {
+function defaultValidateErrorMessage() {
   return "El token de recuperación no es válido.";
 }
 
-function getRateLimitMessage() {
+function rateLimitMessage() {
   return "Espera un momento antes de volver a intentarlo.";
 }
 
@@ -759,70 +511,47 @@ function getRateLimitMessage() {
 ========================================================= */
 
 function firstEndpoint(candidates = [], fallback = "") {
-  for (const candidate of candidates) {
-    const value =
-      safeText(candidate, "");
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return fallback;
+  return safeText(candidates.find((item) => safeText(item)), fallback);
 }
 
 function getConfiguredRequestEndpoint() {
-  return firstEndpoint(
-    [
-      isFunction(getRequestPasswordResetEndpointFromConstants)
-        ? getRequestPasswordResetEndpointFromConstants()
-        : "",
-      AUTH_ENDPOINTS?.requestPasswordReset,
-      AUTH_ENDPOINTS?.resetPasswordRequest,
-      AUTH_ENDPOINTS?.forgotPassword,
-      AUTH_ENDPOINTS?.recoverPassword,
-      AUTH_ENDPOINTS?.recover,
-      AUTH_ENDPOINTS?.forgot,
-      AUTH_ENDPOINTS?.passwordResetRequest,
-      DEFAULT_REQUEST_ENDPOINT,
-    ],
-    DEFAULT_REQUEST_ENDPOINT
-  );
+  return firstEndpoint([
+    isFunction(getRequestPasswordResetEndpointFromConstants)
+      ? getRequestPasswordResetEndpointFromConstants()
+      : "",
+    AUTH_ENDPOINTS?.requestPasswordReset,
+    AUTH_ENDPOINTS?.resetPasswordRequest,
+    AUTH_ENDPOINTS?.forgotPassword,
+    AUTH_ENDPOINTS?.recoverPassword,
+    AUTH_ENDPOINTS?.passwordResetRequest,
+    DEFAULT_REQUEST_ENDPOINT,
+  ], DEFAULT_REQUEST_ENDPOINT);
 }
 
 function getConfiguredConfirmEndpoint() {
-  return firstEndpoint(
-    [
-      isFunction(getConfirmPasswordResetEndpointFromConstants)
-        ? getConfirmPasswordResetEndpointFromConstants()
-        : "",
-      AUTH_ENDPOINTS?.confirmResetPassword,
-      AUTH_ENDPOINTS?.confirmPasswordReset,
-      AUTH_ENDPOINTS?.resetPasswordConfirm,
-      AUTH_ENDPOINTS?.passwordResetConfirm,
-      AUTH_ENDPOINTS?.resetPasswordUpdate,
-      AUTH_ENDPOINTS?.resetPasswordFinalize,
-      AUTH_ENDPOINTS?.changeForgottenPassword,
-      DEFAULT_CONFIRM_ENDPOINT,
-    ],
-    DEFAULT_CONFIRM_ENDPOINT
-  );
+  return firstEndpoint([
+    isFunction(getConfirmPasswordResetEndpointFromConstants)
+      ? getConfirmPasswordResetEndpointFromConstants()
+      : "",
+    AUTH_ENDPOINTS?.confirmResetPassword,
+    AUTH_ENDPOINTS?.confirmPasswordReset,
+    AUTH_ENDPOINTS?.resetPasswordConfirm,
+    AUTH_ENDPOINTS?.passwordResetConfirm,
+    DEFAULT_CONFIRM_ENDPOINT,
+  ], DEFAULT_CONFIRM_ENDPOINT);
 }
 
 function getConfiguredValidateEndpoint() {
-  return firstEndpoint(
-    [
-      isFunction(getValidateResetTokenEndpointFromConstants)
-        ? getValidateResetTokenEndpointFromConstants()
-        : "",
-      AUTH_ENDPOINTS?.validateResetToken,
-      AUTH_ENDPOINTS?.resetPasswordValidate,
-      AUTH_ENDPOINTS?.validatePasswordReset,
-      AUTH_ENDPOINTS?.passwordResetValidate,
-      DEFAULT_VALIDATE_ENDPOINT,
-    ],
-    DEFAULT_VALIDATE_ENDPOINT
-  );
+  return firstEndpoint([
+    isFunction(getValidateResetTokenEndpointFromConstants)
+      ? getValidateResetTokenEndpointFromConstants()
+      : "",
+    AUTH_ENDPOINTS?.validateResetToken,
+    AUTH_ENDPOINTS?.resetPasswordValidate,
+    AUTH_ENDPOINTS?.validatePasswordReset,
+    AUTH_ENDPOINTS?.passwordResetValidate,
+    DEFAULT_VALIDATE_ENDPOINT,
+  ], DEFAULT_VALIDATE_ENDPOINT);
 }
 
 function endpointCandidatesFor(type = "request") {
@@ -887,191 +616,66 @@ export function getValidateResetTokenEndpoint() {
 }
 
 /* =========================================================
-   REDIRECT SAFETY
+   REDIRECT / TOKEN
 ========================================================= */
-
-function normalizeRelativePath(path = "") {
-  let value =
-    safeText(path, "");
-
-  if (!value) {
-    return "";
-  }
-
-  if (value.startsWith("//")) {
-    return "";
-  }
-
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
-    return "";
-  }
-
-  if (/[\r\n\t]/.test(value)) {
-    return "";
-  }
-
-  if (
-    value.toLowerCase().includes("%0d") ||
-    value.toLowerCase().includes("%0a") ||
-    value.toLowerCase().includes("%09") ||
-    value.toLowerCase().includes("%5c") ||
-    value.includes("\\")
-  ) {
-    return "";
-  }
-
-  try {
-    const decoded =
-      decodeURIComponent(value)
-        .replace(/\\/g, "/");
-
-    if (
-      decoded.startsWith("//") ||
-      /^[a-z][a-z0-9+.-]*:/i.test(decoded) ||
-      /[\r\n\t]/.test(decoded)
-    ) {
-      return "";
-    }
-  } catch {
-    return "";
-  }
-
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
-  }
-
-  value =
-    value
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
-
-  return value || "";
-}
 
 function sanitizeRedirect(value = "", fallback = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value);
 
-  if (!raw) {
-    return fallback;
-  }
-
-  if (isAbsoluteUrl(raw)) {
-    try {
-      const parsed =
-        new URL(raw);
-
-      if (
-        isBrowser() &&
-        parsed.origin === window.location.origin
-      ) {
-        return normalizeRelativePath(
-          `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
-        ) || fallback;
-      }
-
-      return fallback;
-    } catch {
-      return fallback;
-    }
-  }
+  if (!raw) return fallback;
+  if (raw.startsWith("//")) return fallback;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallback;
+  if (/[\r\n\t\\]/.test(raw)) return fallback;
 
   try {
-    return sanitizeRedirectPath(
-      raw,
-      fallback || ""
-    );
+    return sanitizeRedirectPath(raw, fallback || "") || fallback;
   } catch {
-    return normalizeRelativePath(raw) || fallback;
+    let path = raw;
+
+    if (!path.startsWith("/")) path = `/${path}`;
+    path = path.replace(/\/{2,}/g, "/");
+
+    return path || fallback;
   }
 }
 
-/* =========================================================
-   PATH / TOKEN RESOLUTION
-========================================================= */
-
 function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
-    return window.location.origin;
-  }
-
-  return LOCAL_ORIGIN;
+  if (isBrowser() && window.location?.origin) return window.location.origin;
+  return "http://localhost";
 }
 
 function isHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  return (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  );
+  const raw = safeText(value);
+  return raw.startsWith("#/") || raw.startsWith("#!");
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "/");
 
-  if (!raw) {
-    return "/";
-  }
-
-  if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/") || "/";
-  }
-
+  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
   return raw.replace(/^#\/?/, "/") || "/";
 }
 
 function normalizePathnameOnly(pathname = "/") {
-  let value =
-    safeText(pathname, "/")
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
+  let value = safeText(pathname, "/")
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
-  if (!value) {
-    value = "/";
-  }
+  if (!value.startsWith("/")) value = `/${value}`;
+  if (value.length > 1) value = value.replace(/\/+$/g, "") || "/";
 
-  if (!value.startsWith("/")) {
-    value =
-      `/${value}`;
-  }
-
-  if (
-    value.length > 1 &&
-    value.endsWith("/")
-  ) {
-    value =
-      value.replace(/\/+$/g, "") ||
-      "/";
-  }
-
-  return value;
+  return value || "/";
 }
 
 function getCurrentPath() {
-  if (!isBrowser()) {
-    return "";
-  }
+  if (!isBrowser()) return "";
 
   try {
-    const pathname =
-      window.location.pathname || "/";
+    const pathname = window.location.pathname || "/";
+    const search = window.location.search || "";
+    const hash = window.location.hash || "";
 
-    const search =
-      window.location.search || "";
-
-    const hash =
-      window.location.hash || "";
-
-    if (
-      hash &&
-      isHashRouterPath(hash)
-    ) {
+    if (hash && isHashRouterPath(hash)) {
       return normalizeHashRouterPath(hash);
     }
 
@@ -1082,82 +686,40 @@ function getCurrentPath() {
 }
 
 function getTokenParamNames(type = "reset") {
-  const names =
-    AUTH_TOKEN_PARAM_NAMES?.[type];
-
-  if (Array.isArray(names)) {
-    return names;
-  }
-
-  return [
-    "token",
-    "resetToken",
-    "passwordResetToken",
-    "confirmToken",
-    "code",
-    "t",
-  ];
+  const names = AUTH_TOKEN_PARAM_NAMES?.[type];
+  return Array.isArray(names)
+    ? names
+    : ["token", "resetToken", "passwordResetToken", "confirmToken", "code", "t"];
 }
 
 function normalizeResetToken(value = "") {
-  let raw =
-    safeText(value, "");
+  let token = safeText(value);
 
-  if (
-    !raw ||
-    isCorruptedTextValue(raw)
-  ) {
-    return "";
+  if (!token || isBadText(token)) return "";
+
+  if (/^bearer\s+/i.test(token)) {
+    token = token.replace(/^bearer\s+/i, "").trim();
   }
 
-  if (/^bearer\s+/i.test(raw)) {
-    raw =
-      raw.replace(/^bearer\s+/i, "")
-        .trim();
-  }
-
-  if (
-    !raw ||
-    /[\r\n\t\s]/.test(raw) ||
-    raw.length > getResetTokenMaxLength()
-  ) {
-    return "";
-  }
+  if (/[\r\n\t\s]/.test(token)) return "";
+  if (token.length > getTokenMaxLength()) return "";
 
   try {
-    const helperValue =
-      helperNormalizeTokenValue(raw);
-
-    const normalized =
-      safeText(helperValue, "");
-
-    if (
-      !normalized ||
-      normalized.length > getResetTokenMaxLength()
-    ) {
-      return "";
-    }
-
+    const normalized = safeText(helperNormalizeTokenValue(token));
+    if (!normalized || normalized.length > getTokenMaxLength()) return "";
     return normalized;
   } catch {
-    return raw;
+    return token;
   }
 }
 
 function extractTokenFromSearch(search = "", names = getTokenParamNames("reset")) {
   try {
-    const params =
-      new URLSearchParams(search || "");
+    const params = new URLSearchParams(search || "");
 
     for (const name of names) {
-      const token =
-        normalizeResetToken(
-          params.get(name)
-        );
-
-      if (token) {
-        return token;
-      }
+      const token = normalizeResetToken(params.get(name));
+      if (token) return token;
     }
   } catch {}
 
@@ -1165,56 +727,26 @@ function extractTokenFromSearch(search = "", names = getTokenParamNames("reset")
 }
 
 function extractTokenFromPath(path = "") {
-  const raw =
-    safeText(path, "");
-
-  if (!raw) {
-    return "";
-  }
-
-  let pathname =
-    "";
+  let pathname = "";
 
   try {
-    const parsed =
-      new URL(
-        raw,
-        getBaseOrigin()
-      );
-
-    pathname =
-      normalizePathnameOnly(
-        parsed.pathname || "/"
-      );
+    const parsed = new URL(path, getBaseOrigin());
+    pathname = normalizePathnameOnly(parsed.pathname || "/");
   } catch {
-    pathname =
-      normalizePathnameOnly(
-        raw
-          .split("?")[0]
-          .split("#")[0] ||
-          "/"
-      );
+    pathname = normalizePathnameOnly(
+      safeText(path).split("?")[0].split("#")[0] || "/"
+    );
   }
 
-  const markers = [
-    "/reset-password/confirm/",
-    "/password-reset/confirm/",
-  ];
+  for (const marker of ["/reset-password/confirm/", "/password-reset/confirm/"]) {
+    if (!pathname.startsWith(marker)) continue;
 
-  for (const marker of markers) {
-    if (pathname.startsWith(marker)) {
-      const token =
-        pathname
-          .slice(marker.length)
-          .split("/")[0];
+    const token = pathname.slice(marker.length).split("/")[0];
 
-      try {
-        return normalizeResetToken(
-          decodeURIComponent(token || "")
-        ) || "";
-      } catch {
-        return normalizeResetToken(token) || "";
-      }
+    try {
+      return normalizeResetToken(decodeURIComponent(token || "")) || "";
+    } catch {
+      return normalizeResetToken(token) || "";
     }
   }
 
@@ -1222,115 +754,44 @@ function extractTokenFromPath(path = "") {
 }
 
 function extractResetTokenFromUrl(pathOrUrl = getCurrentPath()) {
-  const raw =
-    safeText(pathOrUrl, "");
+  const raw = safeText(pathOrUrl);
+  if (!raw) return "";
 
-  if (!raw) {
-    return "";
-  }
+  const value = isHashRouterPath(raw) ? normalizeHashRouterPath(raw) : raw;
 
-  const normalizedRaw =
-    isHashRouterPath(raw)
-      ? normalizeHashRouterPath(raw)
-      : raw;
-
-  const pathToken =
-    extractTokenFromPath(normalizedRaw);
-
-  if (pathToken) {
-    return pathToken;
-  }
+  const pathToken = extractTokenFromPath(value);
+  if (pathToken) return pathToken;
 
   try {
-    const parsed =
-      new URL(
-        normalizedRaw,
-        getBaseOrigin()
-      );
+    const parsed = new URL(value, getBaseOrigin());
 
-    const fromSearch =
-      extractTokenFromSearch(
-        parsed.search,
-        getTokenParamNames("reset")
-      );
+    const fromSearch = extractTokenFromSearch(parsed.search);
+    if (fromSearch) return fromSearch;
 
-    if (fromSearch) {
-      return fromSearch;
-    }
+    if (parsed.hash && isHashRouterPath(parsed.hash)) {
+      const hashPath = normalizeHashRouterPath(parsed.hash);
 
-    if (
-      parsed.hash &&
-      isHashRouterPath(parsed.hash)
-    ) {
-      const hashPath =
-        normalizeHashRouterPath(parsed.hash);
+      const fromHashPath = extractTokenFromPath(hashPath);
+      if (fromHashPath) return fromHashPath;
 
-      const hashPathToken =
-        extractTokenFromPath(hashPath);
-
-      if (hashPathToken) {
-        return hashPathToken;
-      }
-
-      const hashQuery =
-        hashPath.includes("?")
-          ? hashPath
-              .split("?")
-              .slice(1)
-              .join("?")
-          : "";
-
-      const fromHashRouterQuery =
-        extractTokenFromSearch(
-          hashQuery ? `?${hashQuery}` : "",
-          getTokenParamNames("reset")
-        );
-
-      if (fromHashRouterQuery) {
-        return fromHashRouterQuery;
-      }
-    }
-
-    if (
-      parsed.hash &&
-      parsed.hash.includes("?")
-    ) {
-      const query =
-        parsed.hash
-          .split("?")
-          .slice(1)
-          .join("?");
-
-      const fromHash =
-        extractTokenFromSearch(
-          query ? `?${query}` : "",
-          getTokenParamNames("reset")
-        );
-
-      if (fromHash) {
-        return fromHash;
-      }
-    }
-  } catch {
-    const query =
-      normalizedRaw.includes("?")
-        ? normalizedRaw
-            .split("?")
-            .slice(1)
-            .join("?")
-            .split("#")[0]
+      const hashQuery = hashPath.includes("?")
+        ? hashPath.split("?").slice(1).join("?")
         : "";
 
-    if (query) {
-      const fromQuery =
-        extractTokenFromSearch(
-          `?${query}`,
-          getTokenParamNames("reset")
-        );
+      const fromHashQuery = extractTokenFromSearch(hashQuery ? `?${hashQuery}` : "");
+      if (fromHashQuery) return fromHashQuery;
+    }
 
-      if (fromQuery) {
-        return fromQuery;
-      }
+    if (parsed.hash && parsed.hash.includes("?")) {
+      const query = parsed.hash.split("?").slice(1).join("?");
+      const fromHash = extractTokenFromSearch(query ? `?${query}` : "");
+      if (fromHash) return fromHash;
+    }
+  } catch {
+    if (value.includes("?")) {
+      const query = value.split("?").slice(1).join("?").split("#")[0];
+      const fromQuery = extractTokenFromSearch(query ? `?${query}` : "");
+      if (fromQuery) return fromQuery;
     }
   }
 
@@ -1338,33 +799,24 @@ function extractResetTokenFromUrl(pathOrUrl = getCurrentPath()) {
 }
 
 /* =========================================================
-   IDENTIFIER / TOKEN / PASSWORD
+   PAYLOAD NORMALIZATION
 ========================================================= */
 
 function looksLikeEmail(value = "") {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-    safeText(value)
-  );
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(safeText(value));
 }
 
 function looksLikePhone(value = "") {
-  const clean =
-    safeText(value)
-      .replace(/[^\d+]/g, "");
-
+  const clean = safeText(value).replace(/[^\d+]/g, "");
   return /^\+?\d{6,20}$/.test(clean);
 }
 
 function normalizeEmail(value = "") {
-  return safeText(value)
-    .toLowerCase()
-    .slice(0, 254);
+  return safeText(value).toLowerCase().slice(0, 254);
 }
 
 function normalizePhone(value = "") {
-  return safeText(value)
-    .replace(/[^\d+]/g, "")
-    .slice(0, 32);
+  return safeText(value).replace(/[^\d+]/g, "").slice(0, 32);
 }
 
 function normalizeUsername(value = "") {
@@ -1379,110 +831,70 @@ function normalizeUsername(value = "") {
 }
 
 function normalizeIdentifier(value = "") {
-  const raw =
-    safeText(value)
-      .normalize("NFKC")
-      .replace(/\s+/g, " ");
+  const raw = safeText(value)
+    .normalize("NFKC")
+    .replace(/\s+/g, " ");
 
-  if (isCorruptedTextValue(raw)) {
-    return "";
-  }
+  if (isBadText(raw)) return "";
 
-  /*
-    No truncamos silenciosamente. Conservamos max+1 para que
-    validateRequestPayload pueda detectar exceso.
-  */
-  return raw.slice(
-    0,
-    getResetIdentifierMaxLength() + 1
-  );
+  return raw.slice(0, getIdentifierMaxLength() + 1);
 }
 
-function normalizePasswordValue(value = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return "";
-  }
-
-  /*
-    No trim y no truncate:
-    una contraseña demasiado larga debe fallar validación,
-    no mutarse silenciosamente antes de enviarla.
-  */
+function normalizePassword(value = "") {
+  if (value === null || value === undefined) return "";
   return String(value);
 }
 
 export function resolveResetPasswordIdentifier(payload = {}) {
   return safeText(
-    payload?.identifier ??
-      payload?.login ??
-      payload?.email ??
-      payload?.username ??
-      payload?.user ??
-      payload?.phone ??
-      payload?.telefono ??
-      payload?.mobile ??
+    payload.identifier ??
+      payload.login ??
+      payload.email ??
+      payload.username ??
+      payload.user ??
+      payload.phone ??
+      payload.telefono ??
+      payload.mobile ??
       ""
   );
 }
 
 export function resolveResetPasswordToken(payload = {}) {
   return normalizeResetToken(
-    payload?.token ??
-      payload?.code ??
-      payload?.resetToken ??
-      payload?.reset_token ??
-      payload?.reset_code ??
-      payload?.passwordResetToken ??
-      payload?.password_reset_token ??
-      payload?.confirmToken ??
-      payload?.confirm_token ??
-      payload?.t ??
+    payload.token ??
+      payload.code ??
+      payload.resetToken ??
+      payload.reset_token ??
+      payload.reset_code ??
+      payload.passwordResetToken ??
+      payload.password_reset_token ??
+      payload.confirmToken ??
+      payload.confirm_token ??
+      payload.t ??
       extractResetTokenFromUrl()
   );
 }
 
 export function normalizeResetPasswordPayload(payload = {}) {
-  const identifier =
-    normalizeIdentifier(
-      resolveResetPasswordIdentifier(payload)
-    );
+  const identifier = normalizeIdentifier(resolveResetPasswordIdentifier(payload));
 
-  const email =
-    looksLikeEmail(identifier)
-      ? normalizeEmail(identifier)
-      : "";
+  const email = looksLikeEmail(identifier) ? normalizeEmail(identifier) : "";
+  const phone = !email && looksLikePhone(identifier) ? normalizePhone(identifier) : "";
+  const username = !email && !phone ? normalizeUsername(identifier) : "";
 
-  const phone =
-    !email && looksLikePhone(identifier)
-      ? normalizePhone(identifier)
-      : "";
+  const redirect = sanitizeRedirect(
+    payload.redirect ?? payload.redirectTo ?? payload.returnTo ?? "",
+    ""
+  );
 
-  const username =
-    !email && !phone
-      ? normalizeUsername(identifier)
-      : "";
-
-  const redirect =
-    sanitizeRedirect(
-      payload?.redirect ??
-        payload?.redirectTo ??
-        payload?.returnTo ??
-        "",
-      ""
-    );
-
-  const lang =
-    safeText(
-      payload?.lang ??
-        payload?.language ??
-        AppCore?.state?.lang ??
-        AppCore?.config?.defaultLang ??
-        "es",
-      "es"
-    ).slice(0, 8);
+  const lang = safeText(
+    payload.lang ??
+      payload.language ??
+      AppCore?.state?.lang ??
+      AppCore?.config?.defaultLang ??
+      "es",
+    "es"
+  ).slice(0, 8);
 
   return {
     identifier,
@@ -1495,285 +907,164 @@ export function normalizeResetPasswordPayload(payload = {}) {
 }
 
 export function normalizeConfirmResetPasswordPayload(payload = {}) {
-  const token =
-    resolveResetPasswordToken(payload);
-
-  const password =
-    normalizePasswordValue(
-      payload?.password ??
-        payload?.newPassword ??
-        payload?.new_password ??
-        ""
-    );
-
-  const confirmPassword =
-    normalizePasswordValue(
-      payload?.confirmPassword ??
-        payload?.passwordConfirmation ??
-        payload?.password_confirmation ??
-        payload?.repeatPassword ??
-        payload?.repeat_password ??
-        ""
-    );
-
-  const redirect =
-    sanitizeRedirect(
-      payload?.redirect ??
-        payload?.redirectTo ??
-        payload?.returnTo ??
-        DEFAULT_LOGIN_REDIRECT,
-      DEFAULT_LOGIN_REDIRECT
-    );
-
   return {
-    token,
-    password,
-    confirmPassword,
-    redirect,
+    token: resolveResetPasswordToken(payload),
+
+    password: normalizePassword(
+      payload.password ??
+        payload.newPassword ??
+        payload.new_password ??
+        ""
+    ),
+
+    confirmPassword: normalizePassword(
+      payload.confirmPassword ??
+        payload.passwordConfirmation ??
+        payload.password_confirmation ??
+        payload.repeatPassword ??
+        payload.repeat_password ??
+        ""
+    ),
+
+    redirect: sanitizeRedirect(
+      payload.redirect ?? payload.redirectTo ?? payload.returnTo ?? DEFAULT_LOGIN_REDIRECT,
+      DEFAULT_LOGIN_REDIRECT
+    ),
   };
 }
 
 export function normalizeValidateResetTokenPayload(payload = {}) {
-  const token =
-    resolveResetPasswordToken(payload);
-
   return {
-    token,
+    token: resolveResetPasswordToken(payload),
   };
 }
 
-export const normalizeValidateResetPasswordTokenPayload =
-  normalizeValidateResetTokenPayload;
+export const normalizeValidateResetPasswordTokenPayload = normalizeValidateResetTokenPayload;
 
-/* =========================================================
-   REQUEST BODY
-========================================================= */
-
-function stripEmptyValues(obj = {}) {
+function stripEmpty(obj = {}) {
   const output = {};
 
-  for (const [key, value] of Object.entries(obj || {})) {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
-      continue;
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== null && value !== undefined && value !== "") {
+      output[key] = value;
     }
-
-    output[key] = value;
   }
 
   return output;
 }
 
 export function buildResetPasswordRequestBody(payload = {}) {
-  const normalized =
-    normalizeResetPasswordPayload(payload);
+  const normalized = normalizeResetPasswordPayload(payload);
 
-  return stripEmptyValues({
-    identifier:
-      normalized.identifier,
+  return stripEmpty({
+    identifier: normalized.identifier,
+    login: normalized.identifier,
 
-    email:
-      normalized.email,
+    email: normalized.email,
 
-    username:
-      normalized.username,
+    username: normalized.username,
+    user: normalized.username,
 
-    user:
-      normalized.username,
+    phone: normalized.phone,
+    telefono: normalized.phone,
 
-    login:
-      normalized.identifier,
+    redirect: normalized.redirect,
+    redirectTo: normalized.redirect,
+    returnTo: normalized.redirect,
 
-    phone:
-      normalized.phone,
-
-    telefono:
-      normalized.phone,
-
-    redirect:
-      normalized.redirect,
-
-    redirectTo:
-      normalized.redirect,
-
-    returnTo:
-      normalized.redirect,
-
-    lang:
-      normalized.lang,
-
-    language:
-      normalized.lang,
+    lang: normalized.lang,
+    language: normalized.lang,
   });
 }
 
 export function buildConfirmResetPasswordBody(payload = {}) {
-  const normalized =
-    normalizeConfirmResetPasswordPayload(payload);
+  const normalized = normalizeConfirmResetPasswordPayload(payload);
 
-  return stripEmptyValues({
-    token:
-      normalized.token,
+  return stripEmpty({
+    token: normalized.token,
+    code: normalized.token,
+    t: normalized.token,
+    resetToken: normalized.token,
+    reset_token: normalized.token,
+    reset_code: normalized.token,
+    passwordResetToken: normalized.token,
+    password_reset_token: normalized.token,
+    confirmToken: normalized.token,
+    confirm_token: normalized.token,
 
-    code:
-      normalized.token,
+    password: normalized.password,
+    newPassword: normalized.password,
+    new_password: normalized.password,
 
-    t:
-      normalized.token,
+    confirmPassword: normalized.confirmPassword,
+    passwordConfirmation: normalized.confirmPassword,
+    password_confirmation: normalized.confirmPassword,
+    repeatPassword: normalized.confirmPassword,
+    repeat_password: normalized.confirmPassword,
 
-    resetToken:
-      normalized.token,
-
-    reset_token:
-      normalized.token,
-
-    reset_code:
-      normalized.token,
-
-    passwordResetToken:
-      normalized.token,
-
-    password_reset_token:
-      normalized.token,
-
-    confirmToken:
-      normalized.token,
-
-    confirm_token:
-      normalized.token,
-
-    password:
-      normalized.password,
-
-    newPassword:
-      normalized.password,
-
-    new_password:
-      normalized.password,
-
-    confirmPassword:
-      normalized.confirmPassword,
-
-    passwordConfirmation:
-      normalized.confirmPassword,
-
-    password_confirmation:
-      normalized.confirmPassword,
-
-    repeatPassword:
-      normalized.confirmPassword,
-
-    repeat_password:
-      normalized.confirmPassword,
-
-    redirect:
-      normalized.redirect,
-
-    redirectTo:
-      normalized.redirect,
-
-    returnTo:
-      normalized.redirect,
+    redirect: normalized.redirect,
+    redirectTo: normalized.redirect,
+    returnTo: normalized.redirect,
   });
 }
 
 export function buildValidateResetTokenBody(payload = {}) {
-  const normalized =
-    normalizeValidateResetTokenPayload(payload);
+  const normalized = normalizeValidateResetTokenPayload(payload);
 
-  return stripEmptyValues({
-    token:
-      normalized.token,
-
-    code:
-      normalized.token,
-
-    t:
-      normalized.token,
-
-    resetToken:
-      normalized.token,
-
-    reset_token:
-      normalized.token,
-
-    passwordResetToken:
-      normalized.token,
-
-    password_reset_token:
-      normalized.token,
-
-    confirmToken:
-      normalized.token,
-
-    confirm_token:
-      normalized.token,
+  return stripEmpty({
+    token: normalized.token,
+    code: normalized.token,
+    t: normalized.token,
+    resetToken: normalized.token,
+    reset_token: normalized.token,
+    passwordResetToken: normalized.token,
+    password_reset_token: normalized.token,
+    confirmToken: normalized.token,
+    confirm_token: normalized.token,
   });
 }
 
-export const buildValidateResetPasswordTokenBody =
-  buildValidateResetTokenBody;
+export const buildValidateResetPasswordTokenBody = buildValidateResetTokenBody;
 
 /* =========================================================
-   RESPONSE NODE
+   RESPONSE NORMALIZATION
 ========================================================= */
-
-function getNode(input = {}) {
-  const root =
-    safeObject(input);
-
-  const data =
-    safeObject(root.data);
-
-  const payload =
-    safeObject(root.payload);
-
-  const result =
-    safeObject(root.result);
-
-  const body =
-    safeObject(root.body);
-
-  const responseNode =
-    safeObject(root.response);
-
-  const responseData =
-    safeObject(responseNode.data);
-
-  const meta =
-    safeObject(root.meta);
-
-  return {
-    root,
-    data,
-    payload,
-    result,
-    body,
-    responseNode,
-    responseData,
-    meta,
-  };
-}
 
 function nodeList(input = {}) {
-  const nodes =
-    getNode(input);
+  const root = safeObject(input);
+  const response = safeObject(root.response);
 
-  return Object.values(nodes)
-    .filter(isObject);
+  return [
+    root,
+    safeObject(root.data),
+    safeObject(root.payload),
+    safeObject(root.result),
+    safeObject(root.body),
+    response,
+    safeObject(response.data),
+    safeObject(root.meta),
+  ].filter((node) => Object.keys(node).length > 0);
 }
 
-/* =========================================================
-   RESPONSE RESOLUTION
-========================================================= */
+function pickPrimitive(nodes = [], keys = []) {
+  for (const node of nodes) {
+    for (const key of keys) {
+      const value = node?.[key];
+
+      if (
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean"
+      ) {
+        if (safeText(value)) return value;
+      }
+    }
+  }
+
+  return "";
+}
 
 function resolveExplicitOk(input = {}) {
-  const nodes =
-    nodeList(input);
-
   const keys = [
     "ok",
     "success",
@@ -1794,11 +1085,9 @@ function resolveExplicitOk(input = {}) {
     "password_changed",
   ];
 
-  for (const node of nodes) {
+  for (const node of nodeList(input)) {
     for (const key of keys) {
-      if (typeof node[key] === "boolean") {
-        return node[key];
-      }
+      if (typeof node[key] === "boolean") return node[key];
     }
   }
 
@@ -1806,325 +1095,109 @@ function resolveExplicitOk(input = {}) {
 }
 
 function resolveStatus(input = {}) {
-  const nodes =
-    nodeList(input);
-
-  for (const node of nodes) {
-    const status =
-      pickFirst(
-        node.status,
-        node.statusCode,
-        node.status_code
-      );
-
-    if (
-      status !== null &&
-      status !== undefined &&
-      status !== ""
-    ) {
-      return safeNumber(status, 0);
-    }
-  }
-
-  return 0;
-}
-
-function normalizeStatusText(value = "") {
-  const text =
-    safeText(value, "")
-      .toLowerCase()
-      .trim();
-
-  if (!text) {
-    return "";
-  }
-
-  const numeric =
-    Number(text);
-
-  if (Number.isFinite(numeric)) {
-    return "";
-  }
-
-  return text;
+  const value = pickPrimitive(nodeList(input), ["status", "statusCode", "status_code"]);
+  return safeNumber(value, 0);
 }
 
 function resolveStatusText(input = {}) {
-  const nodes =
-    nodeList(input);
+  const raw = pickPrimitive(nodeList(input), ["statusText", "status_text", "state", "status", "result", "type"]);
+  const text = safeText(raw).toLowerCase();
 
-  for (const node of nodes) {
-    const candidates = [
-      node.statusText,
-      node.status_text,
-      node.state,
-      node.status,
-      node.result,
-      node.type,
-    ];
-
-    for (const candidate of candidates) {
-      const text =
-        normalizeStatusText(candidate);
-
-      if (text) {
-        return text;
-      }
-    }
-  }
-
-  return "";
+  if (!text || Number.isFinite(Number(text))) return "";
+  return text;
 }
 
 function resolveCode(input = {}) {
-  const nodes =
-    nodeList(input);
-
-  for (const node of nodes) {
-    const code =
-      pickFirstText(
-        node.code,
-        node.errorCode,
-        node.error_code,
-        node.error
-      );
-
-    if (code) {
-      return code;
-    }
-  }
-
-  return "";
-}
-
-function parseRetryAfterToSeconds(value = "") {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return 0;
-  }
-
-  const numeric =
-    Number(raw);
-
-  if (Number.isFinite(numeric)) {
-    return Math.max(
-      0,
-      Math.ceil(numeric)
-    );
-  }
-
-  const dateMs =
-    Date.parse(raw);
-
-  if (Number.isFinite(dateMs)) {
-    return Math.max(
-      0,
-      Math.ceil((dateMs - Date.now()) / 1000)
-    );
-  }
-
-  return 0;
-}
-
-function resolveRetryAfter(input = {}) {
-  const nodes =
-    nodeList(input);
-
-  for (const node of nodes) {
-    const retryAfter =
-      safeNumber(
-        pickFirst(
-          node.retryAfter,
-          node.retry_after,
-          node.cooldownSeconds,
-          node.cooldown_seconds,
-          node.rateLimitSeconds,
-          node.rate_limit_seconds
-        ),
-        0
-      );
-
-    if (retryAfter > 0) {
-      return retryAfter;
-    }
-  }
-
-  return 0;
+  return safeText(
+    pickPrimitive(nodeList(input), ["code", "errorCode", "error_code", "error"])
+  );
 }
 
 function resolveMessage(input = {}, fallback = "") {
-  const nodes =
-    nodeList(input);
+  const nodes = nodeList(input);
 
   for (const node of nodes) {
-    const nestedError =
-      safeObject(node.error);
+    const error = safeObject(node.error);
 
-    const message =
-      pickFirstText(
-        node.message,
-        node.mensaje,
-        nestedError.message,
-        nestedError.mensaje,
-        nestedError.detail,
-        node.detail,
-        node.description,
-        typeof node.error === "string"
-          ? node.error
-          : "",
-        node.title,
-        node.reason,
-        node.msg
-      );
+    const message = pickFirstText(
+      node.message,
+      node.mensaje,
+      error.message,
+      error.mensaje,
+      error.detail,
+      node.detail,
+      node.description,
+      typeof node.error === "string" ? node.error : "",
+      node.title,
+      node.reason,
+      node.msg
+    );
 
-    if (message) {
-      return message;
-    }
+    if (message) return message;
   }
 
   return fallback;
 }
 
 function resolveRedirectTo(input = {}, fallback = "") {
-  const nodes =
-    nodeList(input);
+  const raw = pickPrimitive(nodeList(input), [
+    "redirectTo",
+    "redirect_to",
+    "redirect",
+    "next",
+    "nextPath",
+    "next_path",
+    "returnTo",
+    "return_to",
+  ]);
 
-  for (const node of nodes) {
-    const redirect =
-      sanitizeRedirect(
-        pickFirstText(
-          node.redirectTo,
-          node.redirect_to,
-          node.redirect,
-          node.next,
-          node.nextPath,
-          node.next_path,
-          node.returnTo,
-          node.return_to
-        ),
-        ""
-      );
-
-    if (redirect) {
-      return redirect;
-    }
-  }
-
-  return fallback;
+  return sanitizeRedirect(raw, fallback);
 }
 
 function resolveEmailMasked(input = {}) {
-  const nodes =
-    nodeList(input);
-
-  for (const node of nodes) {
-    const emailMasked =
-      pickFirstText(
-        node.emailMasked,
-        node.maskedEmail,
-        node.masked_email
-      );
-
-    if (emailMasked) {
-      return emailMasked;
-    }
-  }
-
-  return "";
-}
-
-function isExplicitFailure(input = {}) {
-  const explicitOk =
-    resolveExplicitOk(input);
-
-  if (explicitOk === false) {
-    return true;
-  }
-
-  const status =
-    resolveStatus(input);
-
-  if (
-    Number.isFinite(status) &&
-    status >= 400
-  ) {
-    return true;
-  }
-
-  const statusText =
-    resolveStatusText(input);
-
-  if (
-    statusText &&
-    FAILURE_STATUS_TEXTS.includes(statusText)
-  ) {
-    return true;
-  }
-
-  const code =
-    resolveCode(input)
-      .toUpperCase();
-
-  if (
-    code &&
-    FAILURE_CODES.includes(code)
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-function isDeclaredSuccess(input = {}) {
-  const explicitOk =
-    resolveExplicitOk(input);
-
-  if (explicitOk === true) {
-    return true;
-  }
-
-  if (explicitOk === false) {
-    return false;
-  }
-
-  const code =
-    resolveCode(input)
-      .toUpperCase();
-
-  if (
-    code &&
-    SUCCESS_CODES.includes(code)
-  ) {
-    return true;
-  }
-
-  const statusText =
-    resolveStatusText(input);
-
-  return Boolean(
-    statusText &&
-      SUCCESS_STATUS_TEXTS.includes(statusText)
+  return safeText(
+    pickPrimitive(nodeList(input), ["emailMasked", "maskedEmail", "masked_email"])
   );
 }
 
+function parseRetryAfterToSeconds(value = "") {
+  const raw = safeText(value);
+
+  if (!raw) return 0;
+
+  const numeric = Number(raw);
+
+  if (Number.isFinite(numeric)) {
+    return Math.max(0, Math.ceil(numeric));
+  }
+
+  const dateMs = Date.parse(raw);
+
+  if (Number.isFinite(dateMs)) {
+    return Math.max(0, Math.ceil((dateMs - Date.now()) / 1000));
+  }
+
+  return 0;
+}
+
+function resolveRetryAfter(input = {}) {
+  const value = pickPrimitive(nodeList(input), [
+    "retryAfter",
+    "retry_after",
+    "cooldownSeconds",
+    "cooldown_seconds",
+    "rateLimitSeconds",
+    "rate_limit_seconds",
+  ]);
+
+  return Math.max(0, safeNumber(value, 0));
+}
+
 function isCooldownResponse(input = {}) {
-  const status =
-    resolveStatus(input);
-
-  const retryAfter =
-    resolveRetryAfter(input);
-
-  const code =
-    resolveCode(input)
-      .toUpperCase();
-
-  const statusText =
-    resolveStatusText(input);
-
-  const nodes =
-    nodeList(input);
+  const status = resolveStatus(input);
+  const retryAfter = resolveRetryAfter(input);
+  const code = resolveCode(input).toUpperCase();
+  const statusText = resolveStatusText(input);
 
   return Boolean(
     status === 429 ||
@@ -2133,184 +1206,142 @@ function isCooldownResponse(input = {}) {
       code === "TOO_MANY_REQUESTS" ||
       statusText === "rate_limited" ||
       statusText === "too_many_requests" ||
-      nodes.some((node) =>
+      nodeList(input).some((node) => (
         node.cooldown === true ||
         node.rateLimited === true ||
         node.rate_limited === true
-      )
+      ))
   );
 }
 
-/* =========================================================
-   RESPONSE NORMALIZATION
-========================================================= */
+function isExplicitFailure(input = {}) {
+  const explicitOk = resolveExplicitOk(input);
 
-function buildBaseNormalizedResponse({
-  input = {},
+  if (explicitOk === false) return true;
+
+  const status = resolveStatus(input);
+  if (Number.isFinite(status) && status >= 400) return true;
+
+  const statusText = resolveStatusText(input);
+  if (statusText && FAILURE_STATUS_TEXTS.has(statusText)) return true;
+
+  const code = resolveCode(input).toUpperCase();
+  if (code && FAILURE_CODES.has(code)) return true;
+
+  return false;
+}
+
+function isDeclaredSuccess(input = {}) {
+  const explicitOk = resolveExplicitOk(input);
+
+  if (explicitOk === true) return true;
+  if (explicitOk === false) return false;
+
+  const code = resolveCode(input).toUpperCase();
+  if (code && SUCCESS_CODES.has(code)) return true;
+
+  const statusText = resolveStatusText(input);
+  return Boolean(statusText && SUCCESS_STATUS_TEXTS.has(statusText));
+}
+
+function normalizeBaseResponse(input = {}, {
   successMessage = "",
   errorMessage = "",
   redirectFallback = "",
 } = {}) {
-  const cooldown =
-    isCooldownResponse(input);
+  const cooldown = isCooldownResponse(input);
+  const retryAfter = resolveRetryAfter(input);
+  const explicitFailure = isExplicitFailure(input);
 
-  const retryAfter =
-    resolveRetryAfter(input);
-
-  const explicitFailure =
-    isExplicitFailure(input);
-
-  /*
-    Regla estricta:
-    - HTTP 200/202/204 sin ok/success/valid/accepted/completed NO es éxito.
-    - status/statusText/state declarativo tipo "success" sí cuenta como éxito.
-  */
-  const ok =
-    explicitFailure
-      ? false
-      : isDeclaredSuccess(input);
-
-  const message =
-    resolveMessage(
-      input,
-      ok
-        ? successMessage
-        : cooldown
-          ? getRateLimitMessage()
-          : errorMessage
-    );
+  const ok = explicitFailure ? false : isDeclaredSuccess(input);
 
   return {
-    raw:
-      input,
+    raw: input,
 
     ok,
-    success:
-      ok,
-    error:
-      !ok,
+    success: ok,
+    error: !ok,
 
-    status:
-      resolveStatus(input),
-
-    statusText:
-      resolveStatusText(input) || null,
-
-    code:
-      resolveCode(input) || null,
+    status: resolveStatus(input),
+    statusText: resolveStatusText(input) || null,
+    code: resolveCode(input) || null,
 
     explicitFailure,
 
     cooldown,
-    rateLimited:
-      cooldown,
+    rateLimited: cooldown,
 
     retryAfter,
-    cooldownSeconds:
-      retryAfter,
+    cooldownSeconds: retryAfter,
 
-    message,
+    message: resolveMessage(
+      input,
+      ok
+        ? successMessage
+        : cooldown
+          ? rateLimitMessage()
+          : errorMessage
+    ),
 
-    redirectTo:
-      resolveRedirectTo(
-        input,
-        redirectFallback
-      ),
+    redirectTo: resolveRedirectTo(input, redirectFallback),
+    emailMasked: resolveEmailMasked(input),
 
-    emailMasked:
-      resolveEmailMasked(input),
-
-    at:
-      isoNow(),
+    at: isoNow(),
   };
 }
 
 export function normalizeResetPasswordResponse(input = {}) {
-  return buildBaseNormalizedResponse({
-    input,
-    successMessage:
-      getDefaultSuccessMessage(),
-    errorMessage:
-      getDefaultErrorMessage(),
-    redirectFallback:
-      "",
+  return normalizeBaseResponse(input, {
+    successMessage: defaultRequestSuccessMessage(),
+    errorMessage: defaultRequestErrorMessage(),
+    redirectFallback: "",
   });
 }
 
 export function normalizeConfirmResetPasswordResponse(input = {}) {
-  const normalized =
-    buildBaseNormalizedResponse({
-      input,
-      successMessage:
-        getDefaultConfirmSuccessMessage(),
-      errorMessage:
-        getDefaultConfirmErrorMessage(),
-      redirectFallback:
-        DEFAULT_LOGIN_REDIRECT,
-    });
+  const normalized = normalizeBaseResponse(input, {
+    successMessage: defaultConfirmSuccessMessage(),
+    errorMessage: defaultConfirmErrorMessage(),
+    redirectFallback: DEFAULT_LOGIN_REDIRECT,
+  });
 
   return {
     ...normalized,
-
-    redirectTo:
-      normalized.redirectTo ||
-      DEFAULT_LOGIN_REDIRECT,
+    redirectTo: normalized.redirectTo || DEFAULT_LOGIN_REDIRECT,
   };
 }
 
 export function normalizeValidateResetTokenResponse(input = {}) {
-  return buildBaseNormalizedResponse({
-    input,
-    successMessage:
-      getDefaultValidateSuccessMessage(),
-    errorMessage:
-      getDefaultValidateErrorMessage(),
-    redirectFallback:
-      "",
+  return normalizeBaseResponse(input, {
+    successMessage: defaultValidateSuccessMessage(),
+    errorMessage: defaultValidateErrorMessage(),
+    redirectFallback: "",
   });
 }
 
-export const normalizeValidateResetPasswordTokenResponse =
-  normalizeValidateResetTokenResponse;
+export const normalizeValidateResetPasswordTokenResponse = normalizeValidateResetTokenResponse;
 
 /* =========================================================
-   URL RESOLUTION
+   URL / TRANSPORT
 ========================================================= */
 
 function normalizeApiBase(value = "") {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return BACKEND_ORIGIN;
-  }
+  const raw = safeText(value, API_ORIGIN);
 
   if (!isAbsoluteUrl(raw)) {
     return raw.replace(/\/+$/g, "");
   }
 
   try {
-    const parsed =
-      new URL(raw);
+    const parsed = new URL(raw);
+    const origin = parsed.origin.replace(/\/+$/g, "");
+    const pathname = (parsed.pathname || "/").replace(/\/+$/g, "") || "/";
 
-    const origin =
-      parsed.origin.replace(/\/+$/g, "");
-
-    const pathname =
-      (parsed.pathname || "/")
-        .replace(/\/+$/g, "") ||
-      "/";
-
-    if (
-      pathname === "/" ||
-      pathname === "/api"
-    ) {
-      return origin;
-    }
+    if (pathname === "/" || pathname === "/api") return origin;
 
     return `${origin}${pathname}`.replace(/\/+$/g, "");
   } catch {
-    return BACKEND_ORIGIN;
+    return API_ORIGIN;
   }
 }
 
@@ -2322,168 +1353,307 @@ function resolveApiBase() {
       AppCore?.config?.api?.base ||
       AppCore?.config?.api?.baseUrl ||
       AppCore?.config?.api?.origin ||
-      BACKEND_ORIGIN
+      API_ORIGIN
   );
 }
 
 function buildFinalUrl(endpoint = "") {
-  const clean =
-    safeText(endpoint, "");
+  const clean = safeText(endpoint, DEFAULT_REQUEST_ENDPOINT);
 
-  if (!clean) {
-    return DEFAULT_REQUEST_ENDPOINT;
-  }
+  if (isAbsoluteUrl(clean)) return clean;
 
-  if (isAbsoluteUrl(clean)) {
-    return clean;
-  }
+  const base = resolveApiBase().replace(/\/+$/g, "");
 
-  const base =
-    resolveApiBase()
-      .replace(/\/+$/g, "");
+  let path = clean.startsWith("/") ? clean : `/${clean}`;
 
-  let path =
-    clean.startsWith("/")
-      ? clean
-      : `/${clean}`;
-
-  if (
-    base.endsWith("/api") &&
-    path.startsWith("/api/")
-  ) {
-    path =
-      path.slice(4);
+  if (base.endsWith("/api") && path.startsWith("/api/")) {
+    path = path.slice(4);
   }
 
   return `${base}${path}`;
 }
 
-/* =========================================================
-   ERROR NORMALIZATION
-========================================================= */
+function stripAuthHeaders(headers = {}) {
+  const output = { ...safeObject(headers) };
 
-function normalizeTransportError(
-  error = null,
-  fallbackMessage = getDefaultErrorMessage()
-) {
-  const status =
-    safeNumber(
-      error?.status ??
-        error?.statusCode ??
-        error?.response?.status ??
-        error?.data?.status ??
-        error?.response?.data?.status ??
-        0,
-      0
-    );
+  for (const key of Object.keys(output)) {
+    if (AUTH_HEADER_NAMES.has(String(key).toLowerCase())) {
+      delete output[key];
+    }
+  }
 
-  const retryAfter =
-    Math.max(
-      0,
-      safeNumber(
-        error?.retryAfter ??
-          error?.retry_after ??
-          error?.cooldownSeconds ??
-          error?.cooldown_seconds ??
-          error?.data?.retryAfter ??
-          error?.data?.retry_after ??
-          error?.data?.cooldownSeconds ??
-          error?.data?.cooldown_seconds ??
-          error?.response?.data?.retryAfter ??
-          error?.response?.data?.retry_after ??
-          error?.response?.data?.cooldownSeconds ??
-          error?.response?.data?.cooldown_seconds ??
-          0,
-        0
-      )
-    );
+  return output;
+}
 
-  const message =
-    safeText(
-      error?.data?.message ??
-        error?.data?.mensaje ??
-        error?.data?.error?.message ??
-        error?.data?.error ??
-        error?.response?.data?.message ??
-        error?.response?.data?.mensaje ??
-        error?.response?.data?.error?.message ??
-        error?.response?.data?.error ??
-        error?.message,
-      status === 429 || retryAfter > 0
-        ? getRateLimitMessage()
-        : fallbackMessage
-    );
+function buildRequestOptions(options = {}) {
+  let publicOptions = {};
+
+  try {
+    publicOptions = getPublicAuthRequestOptions?.() || {};
+  } catch {}
+
+  const timeout = getTimeoutMs(options);
 
   return {
-    ok:
-      false,
-    success:
-      false,
-    error:
-      true,
+    ...publicOptions,
+    ...safeObject(options),
 
-    status,
+    method: "POST",
 
-    statusText:
-      error?.statusText || null,
+    public: true,
+    auth: false,
+    skipAuth: true,
+    noAuthHeader: true,
 
-    code:
-      error?.code ||
-      error?.data?.code ||
-      error?.response?.data?.code ||
-      null,
+    _skipAuthRefresh: true,
+    skipAuthRefresh: true,
+    noAutoRefresh: true,
+    autoRefresh: false,
 
-    retryAfter,
-    cooldownSeconds:
-      retryAfter,
+    noAutoLogout: true,
+    autoLogout: false,
 
-    cooldown:
-      status === 429 || retryAfter > 0,
+    retry: false,
+    retries: 0,
+    _skipRetry: true,
+    skipRetry: true,
 
-    rateLimited:
-      status === 429 || retryAfter > 0,
+    silent: true,
+    storeError: false,
+    dedupe: false,
 
-    timeout:
-      error?.timeout === true ||
-      String(error?.name || "")
-        .toLowerCase()
-        .includes("timeout") ||
-      String(error?.code || "")
-        .toLowerCase()
-        .includes("timeout"),
+    timeout,
+    timeoutMs: timeout,
 
-    aborted:
-      error?.aborted === true ||
-      String(error?.name || "") === "AbortError",
+    useLoader: options.useLoader !== false,
+    credentials: options.credentials || "include",
 
-    message,
-
-    data:
-      error?.data ||
-      error?.response?.data ||
-      null,
-
-    raw:
-      error || null,
+    headers: stripAuthHeaders({
+      "X-Onion-Auth-Flow": "password-reset",
+      "X-Request-Source": SOURCE,
+      ...safeObject(options.headers),
+    }),
   };
 }
 
-function rememberError(type = "unknown", error = null) {
-  runtime.lastError = {
-    type,
-    message:
-      safeText(error?.message, ""),
-    status:
-      error?.status || 0,
-    code:
-      error?.code || null,
-    timeout:
-      error?.timeout === true,
-    aborted:
-      error?.aborted === true,
-    at:
-      isoNow(),
-  };
+function getHttpService() {
+  return (
+    AppCore?.Http ||
+    AppCore?.http ||
+    AppCore?.services?.Http ||
+    AppCore?.services?.http ||
+    null
+  );
+}
+
+async function requestWithHttp(endpoint, body, options = {}) {
+  const http = getHttpService();
+
+  if (!http) return null;
+
+  const requestOptions = buildRequestOptions(options);
+
+  if (isFunction(http.post)) {
+    return http.post(endpoint, body, requestOptions);
+  }
+
+  if (isFunction(http.request)) {
+    try {
+      return await http.request("POST", endpoint, {
+        ...requestOptions,
+        body,
+      });
+    } catch (error) {
+      if (getErrorStatus(error)) throw error;
+
+      return http.request(endpoint, {
+        ...requestOptions,
+        method: "POST",
+        body,
+      });
+    }
+  }
+
+  return null;
+}
+
+async function requestWithApiClient(endpoint, body, options = {}) {
+  const client = AppCore?.apiClient;
+
+  if (!client) return null;
+
+  const requestOptions = buildRequestOptions(options);
+
+  if (isFunction(client.post)) {
+    return client.post(endpoint, body, requestOptions);
+  }
+
+  if (isFunction(client.request)) {
+    try {
+      return await client.request(endpoint, {
+        ...requestOptions,
+        method: "POST",
+        body,
+      });
+    } catch (error) {
+      if (getErrorStatus(error)) throw error;
+
+      return client.request("POST", endpoint, {
+        ...requestOptions,
+        body,
+      });
+    }
+  }
+
+  return null;
+}
+
+async function requestWithAppCore(endpoint, body, options = {}) {
+  if (!isFunction(AppCore?.request)) return null;
+
+  const requestOptions = buildRequestOptions(options);
+
+  try {
+    return await AppCore.request(endpoint, {
+      ...requestOptions,
+      method: "POST",
+      body,
+    });
+  } catch (error) {
+    if (getErrorStatus(error)) throw error;
+
+    return AppCore.request("POST", endpoint, {
+      ...requestOptions,
+      body,
+    });
+  }
+}
+
+function createTimeoutError() {
+  const error = new Error("Password reset timeout");
+  error.name = "TimeoutError";
+  error.code = "REQUEST_TIMEOUT";
+  error.timeout = true;
+  return error;
+}
+
+async function parseFetchBody(response) {
+  const contentType = safeText(response?.headers?.get?.("content-type")).toLowerCase();
+
+  try {
+    if (contentType.includes("application/json")) {
+      return await response.json();
+    }
+
+    const text = await response.text();
+
+    if (!text) return {};
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { message: text };
+    }
+  } catch {
+    return {};
+  }
+}
+
+async function requestWithFetch(endpoint, body, options = {}) {
+  if (typeof fetch !== "function") {
+    const error = new Error("Fetch API no disponible.");
+    error.status = 500;
+    error.code = "FETCH_MISSING";
+    throw error;
+  }
+
+  const requestOptions = buildRequestOptions(options);
+  const timeout = requestOptions.timeout;
+  const url = buildFinalUrl(endpoint);
+
+  const controller = typeof AbortController !== "undefined"
+    ? new AbortController()
+    : null;
+
+  let timedOut = false;
+
+  const timer = controller
+    ? setTimeout(() => {
+        timedOut = true;
+
+        try {
+          controller.abort(createTimeoutError());
+        } catch {
+          controller.abort();
+        }
+      }, timeout)
+    : null;
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: stripAuthHeaders({
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...requestOptions.headers,
+      }),
+      credentials: requestOptions.credentials || "include",
+      cache: "no-store",
+      mode: "cors",
+      signal: requestOptions.signal || controller?.signal || undefined,
+      body: JSON.stringify(body || {}),
+    });
+
+    const payload = safeObject(await parseFetchBody(response));
+
+    const retryAfterHeader = parseRetryAfterToSeconds(response.headers?.get?.("retry-after") || "");
+
+    const enriched = {
+      ...payload,
+      status: payload.status ?? payload.statusCode ?? response.status,
+      statusCode: payload.statusCode ?? payload.status ?? response.status,
+      retryAfter:
+        payload.retryAfter ??
+        payload.retry_after ??
+        payload.cooldownSeconds ??
+        retryAfterHeader,
+    };
+
+    if (!response.ok) {
+      const error = new Error(resolveMessage(enriched, response.statusText || defaultRequestErrorMessage()));
+
+      error.status = response.status;
+      error.statusText = response.statusText;
+      error.data = enriched;
+      error.retryAfter = enriched.retryAfter || 0;
+
+      throw error;
+    }
+
+    return enriched;
+  } catch (error) {
+    if (timedOut) {
+      error.timeout = true;
+      error.aborted = false;
+      error.code = error.code || "REQUEST_TIMEOUT";
+    }
+
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function executeRequest(endpoint, body, options = {}) {
+  for (const transport of [requestWithHttp, requestWithApiClient, requestWithAppCore]) {
+    const result = await transport(endpoint, body, options);
+
+    if (result !== null && result !== undefined) {
+      return result;
+    }
+  }
+
+  return requestWithFetch(endpoint, body, options);
 }
 
 function getErrorStatus(error = null) {
@@ -2499,725 +1669,20 @@ function getErrorStatus(error = null) {
 }
 
 function shouldTryNextEndpoint(error = null) {
-  return FALLBACK_NEXT_ENDPOINT_STATUSES.has(
-    getErrorStatus(error)
-  );
+  return NEXT_ENDPOINT_STATUSES.has(getErrorStatus(error));
 }
 
-/* =========================================================
-   ABORT / FETCH WITH TIMEOUT
-========================================================= */
+async function executeWithCandidates(candidates = [], body = {}, options = {}) {
+  let lastError = null;
 
-function hasAbortSignal(value = null) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      "aborted" in value &&
-      isFunction(value.addEventListener)
-  );
-}
-
-function createAbortError(message = "Request aborted") {
-  try {
-    if (typeof DOMException !== "undefined") {
-      const error =
-        new DOMException(
-          message,
-          "AbortError"
-        );
-
-      try {
-        error.aborted =
-          true;
-      } catch {}
-
-      return error;
-    }
-  } catch {}
-
-  const error =
-    new Error(message);
-
-  error.name =
-    "AbortError";
-  error.aborted =
-    true;
-
-  return error;
-}
-
-function createTimeoutError(message = "Request timeout") {
-  const error =
-    new Error(message);
-
-  error.name =
-    "TimeoutError";
-  error.code =
-    "REQUEST_TIMEOUT";
-  error.timeout =
-    true;
-
-  return error;
-}
-
-function mergeAbortSignals(signals = []) {
-  const validSignals =
-    safeArray(signals)
-      .filter(hasAbortSignal);
-
-  if (!validSignals.length) {
-    return null;
-  }
-
-  try {
-    if (
-      typeof AbortSignal !== "undefined" &&
-      isFunction(AbortSignal.any)
-    ) {
-      return AbortSignal.any(validSignals);
-    }
-  } catch {}
-
-  if (validSignals.length === 1) {
-    return validSignals[0];
-  }
-
-  if (typeof AbortController === "undefined") {
-    return validSignals[0];
-  }
-
-  const controller =
-    new AbortController();
-
-  const cleanups =
-    [];
-
-  function cleanup() {
-    for (const dispose of cleanups.splice(0)) {
-      try {
-        dispose();
-      } catch {}
-    }
-  }
-
-  function abortFrom(signal) {
-    if (controller.signal.aborted) {
-      return;
-    }
-
+  for (const endpoint of unique(candidates)) {
     try {
-      controller.abort(
-        signal.reason ||
-          createAbortError()
-      );
-    } catch {
-      try {
-        controller.abort();
-      } catch {}
-    } finally {
-      cleanup();
-    }
-  }
-
-  for (const signal of validSignals) {
-    if (signal.aborted) {
-      abortFrom(signal);
-      break;
-    }
-
-    const handler =
-      () => abortFrom(signal);
-
-    try {
-      signal.addEventListener(
-        "abort",
-        handler,
-        {
-          once:
-            true,
-        }
-      );
-
-      cleanups.push(() => {
-        try {
-          signal.removeEventListener(
-            "abort",
-            handler
-          );
-        } catch {}
+      return await executeRequest(endpoint, body, {
+        ...safeObject(options),
+        endpoint,
       });
-    } catch {}
-  }
-
-  return controller.signal;
-}
-
-/* =========================================================
-   FETCH WITH TIMEOUT
-========================================================= */
-
-async function parseFetchBody(httpResponse) {
-  const contentType =
-    safeText(
-      httpResponse?.headers?.get?.("content-type"),
-      ""
-    ).toLowerCase();
-
-  try {
-    if (contentType.includes("application/json")) {
-      return await httpResponse.json();
-    }
-
-    const text =
-      await httpResponse.text();
-
-    if (!text) {
-      return {};
-    }
-
-    try {
-      return JSON.parse(text);
-    } catch {
-      return {
-        message:
-          text,
-      };
-    }
-  } catch {
-    return {};
-  }
-}
-
-function stripAuthHeaders(headers = {}) {
-  const output = {
-    ...safeObject(headers),
-  };
-
-  for (const key of Object.keys(output)) {
-    if (AUTH_HEADER_NAMES.includes(String(key).toLowerCase())) {
-      delete output[key];
-    }
-  }
-
-  return output;
-}
-
-async function fetchJsonWithTimeout(
-  url,
-  body,
-  timeoutMs = getRequestTimeout(),
-  externalSignal = null,
-  extraHeaders = {}
-) {
-  if (typeof fetch !== "function") {
-    const error =
-      new Error("Fetch API no disponible.");
-
-    error.status =
-      500;
-    error.code =
-      "FETCH_MISSING";
-
-    throw error;
-  }
-
-  if (externalSignal?.aborted) {
-    throw createAbortError(
-      "Request aborted before password reset fetch."
-    );
-  }
-
-  const controller =
-    typeof AbortController !== "undefined"
-      ? new AbortController()
-      : null;
-
-  let timeoutTriggered =
-    false;
-
-  const timer =
-    controller
-      ? setTimeout(() => {
-          timeoutTriggered =
-            true;
-
-          try {
-            controller.abort(
-              createTimeoutError("Password reset timeout")
-            );
-          } catch {
-            try {
-              controller.abort();
-            } catch {}
-          }
-        }, timeoutMs)
-      : null;
-
-  const signal =
-    mergeAbortSignals([
-      controller?.signal,
-      externalSignal,
-    ]);
-
-  try {
-    const httpResponse =
-      await fetch(url, {
-        method:
-          "POST",
-
-        headers:
-          stripAuthHeaders({
-            "Content-Type":
-              "application/json",
-
-            Accept:
-              "application/json",
-
-            "X-Onion-Auth-Flow":
-              "password-reset",
-
-            "X-Request-Source":
-              MODULE_SOURCE,
-
-            ...safeObject(extraHeaders),
-          }),
-
-        credentials:
-          "omit",
-
-        cache:
-          "no-store",
-
-        mode:
-          "cors",
-
-        body:
-          JSON.stringify(body),
-
-        signal:
-          signal || undefined,
-      });
-
-    const payload =
-      safeObject(
-        await parseFetchBody(httpResponse)
-      );
-
-    const retryAfterHeader =
-      parseRetryAfterToSeconds(
-        httpResponse.headers?.get?.("retry-after") || ""
-      );
-
-    const enrichedPayload = {
-      ...payload,
-
-      status:
-        payload.status ??
-        payload.statusCode ??
-        httpResponse.status,
-
-      statusCode:
-        payload.statusCode ??
-        payload.status ??
-        httpResponse.status,
-
-      retryAfter:
-        payload.retryAfter ??
-        payload.retry_after ??
-        payload.cooldownSeconds ??
-        retryAfterHeader,
-    };
-
-    if (!httpResponse.ok) {
-      const error =
-        new Error(
-          resolveMessage(
-            enrichedPayload,
-            httpResponse.statusText || getDefaultErrorMessage()
-          )
-        );
-
-      error.status =
-        httpResponse.status;
-      error.statusText =
-        httpResponse.statusText;
-      error.data =
-        enrichedPayload;
-      error.retryAfter =
-        enrichedPayload.retryAfter || 0;
-
-      throw error;
-    }
-
-    return enrichedPayload;
-  } catch (error) {
-    if (timeoutTriggered) {
-      try {
-        error.timeout =
-          true;
-        error.aborted =
-          false;
-        error.code =
-          error.code || "REQUEST_TIMEOUT";
-      } catch {}
-    }
-
-    throw error;
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
-}
-
-/* =========================================================
-   TRANSPORTS
-========================================================= */
-
-function buildRequestOptions(options = {}) {
-  const opts =
-    safeObject(options);
-
-  let publicOptions = {};
-
-  try {
-    publicOptions =
-      getPublicAuthRequestOptions?.() ||
-      {};
-  } catch {
-    publicOptions = {};
-  }
-
-  const timeout =
-    getRequestTimeout(opts);
-
-  return {
-    ...publicOptions,
-    ...opts,
-
-    method:
-      "POST",
-
-    public:
-      true,
-
-    auth:
-      false,
-
-    skipAuth:
-      true,
-
-    noAuthHeader:
-      true,
-
-    silent:
-      true,
-
-    storeError:
-      false,
-
-    dedupe:
-      false,
-
-    _skipAuthRefresh:
-      true,
-
-    skipAuthRefresh:
-      true,
-
-    noAutoRefresh:
-      true,
-
-    autoRefresh:
-      false,
-
-    noAutoLogout:
-      true,
-
-    autoLogout:
-      false,
-
-    retry:
-      false,
-
-    retries:
-      0,
-
-    _skipRetry:
-      true,
-
-    skipRetry:
-      true,
-
-    timeout,
-    timeoutMs:
-      timeout,
-
-    useLoader:
-      opts.useLoader !== false,
-
-    credentials:
-      opts.credentials ||
-      "include",
-
-    headers:
-      stripAuthHeaders({
-        "X-Onion-Auth-Flow":
-          "password-reset",
-
-        "X-Request-Source":
-          MODULE_SOURCE,
-
-        ...safeObject(opts.headers),
-      }),
-  };
-}
-
-function getHttpService() {
-  return (
-    AppCore?.http ||
-    AppCore?.Http ||
-    AppCore?.services?.http ||
-    AppCore?.services?.Http ||
-    null
-  );
-}
-
-async function requestWithHttpService(endpoint, body, options = {}) {
-  const http =
-    getHttpService();
-
-  if (!http) {
-    return null;
-  }
-
-  const requestOptions =
-    buildRequestOptions(options);
-
-  if (isFunction(http.post)) {
-    return http.post(
-      endpoint,
-      body,
-      requestOptions
-    );
-  }
-
-  if (isFunction(http.request)) {
-    try {
-      return await http.request(
-        "POST",
-        endpoint,
-        {
-          ...requestOptions,
-          body,
-        }
-      );
     } catch (error) {
-      if (
-        error?.status ||
-        error?.response?.status ||
-        error?.data?.status
-      ) {
-        throw error;
-      }
-
-      try {
-        return await http.request(
-          endpoint,
-          {
-            ...requestOptions,
-            method:
-              "POST",
-            body,
-          }
-        );
-      } catch {
-        throw error;
-      }
-    }
-  }
-
-  return null;
-}
-
-async function requestWithApiClient(endpoint, body, options = {}) {
-  const apiClient =
-    AppCore?.apiClient || null;
-
-  if (!apiClient) {
-    return null;
-  }
-
-  const requestOptions =
-    buildRequestOptions(options);
-
-  if (isFunction(apiClient.post)) {
-    return apiClient.post(
-      endpoint,
-      body,
-      requestOptions
-    );
-  }
-
-  if (isFunction(apiClient.request)) {
-    try {
-      return await apiClient.request(
-        endpoint,
-        {
-          ...requestOptions,
-          method:
-            "POST",
-          body,
-        }
-      );
-    } catch (error) {
-      /*
-        Compat legacy controlada:
-        sólo reintenta firma method/path si el primer intento parece
-        un error de firma, no un error HTTP normal.
-      */
-      if (
-        error?.status ||
-        error?.response?.status ||
-        error?.data?.status
-      ) {
-        throw error;
-      }
-
-      try {
-        return await apiClient.request(
-          "POST",
-          endpoint,
-          {
-            ...requestOptions,
-            body,
-          }
-        );
-      } catch {
-        throw error;
-      }
-    }
-  }
-
-  return null;
-}
-
-async function requestWithAppCoreRequest(endpoint, body, options = {}) {
-  if (!isFunction(AppCore?.request)) {
-    return null;
-  }
-
-  const requestOptions =
-    buildRequestOptions(options);
-
-  try {
-    return await AppCore.request(
-      endpoint,
-      {
-        ...requestOptions,
-        method:
-          "POST",
-        body,
-      }
-    );
-  } catch (error) {
-    if (
-      error?.status ||
-      error?.response?.status ||
-      error?.data?.status
-    ) {
-      throw error;
-    }
-
-    try {
-      return await AppCore.request(
-        "POST",
-        endpoint,
-        {
-          ...requestOptions,
-          body,
-        }
-      );
-    } catch {
-      throw error;
-    }
-  }
-}
-
-async function requestWithFetch(endpoint, body, options = {}) {
-  const requestOptions =
-    buildRequestOptions(options);
-
-  const url =
-    buildFinalUrl(endpoint);
-
-  return fetchJsonWithTimeout(
-    url,
-    body,
-    requestOptions.timeout,
-    requestOptions.signal || null,
-    requestOptions.headers
-  );
-}
-
-async function executePasswordResetRequest(endpoint, body, options = {}) {
-  /*
-    Preferimos Http Service porque ya está blindado con:
-    public/auth:false/noAuthHeader/noRefresh/noLogout/noRetry.
-  */
-  const transports = [
-    requestWithHttpService,
-    requestWithApiClient,
-    requestWithAppCoreRequest,
-  ];
-
-  for (const transport of transports) {
-    const result =
-      await transport(
-        endpoint,
-        body,
-        options
-      );
-
-    if (
-      result !== null &&
-      result !== undefined
-    ) {
-      return result;
-    }
-  }
-
-  return requestWithFetch(
-    endpoint,
-    body,
-    options
-  );
-}
-
-async function executePasswordResetRequestWithCandidates(
-  candidates = [],
-  body = {},
-  options = {}
-) {
-  const endpoints =
-    unique(candidates);
-
-  let lastError =
-    null;
-
-  for (const endpoint of endpoints) {
-    try {
-      return await executePasswordResetRequest(
-        endpoint,
-        body,
-        {
-          ...safeObject(options),
-          endpoint,
-        }
-      );
-    } catch (error) {
-      lastError =
-        error;
+      lastError = error;
 
       if (!shouldTryNextEndpoint(error)) {
         throw error;
@@ -3225,266 +1690,106 @@ async function executePasswordResetRequestWithCandidates(
     }
   }
 
-  throw lastError ||
-    new Error("No hay endpoint password-reset disponible.");
+  throw lastError || new Error("No hay endpoint password-reset disponible.");
 }
 
 /* =========================================================
-   COOLDOWN
+   ERRORS
 ========================================================= */
 
-function getCooldownStorageKey() {
-  return safeText(
-    AUTH_STORAGE_KEYS?.resetCooldownUntil,
-    "reset_cooldown_until"
-  );
-}
+function normalizeTransportError(error = null, fallbackMessage = defaultRequestErrorMessage()) {
+  const status = getErrorStatus(error);
 
-function readCooldownFromStorage() {
-  try {
-    const key =
-      getCooldownStorageKey();
-
-    const value =
-      AppCore?.storage?.getRaw?.(key) ??
-      AppCore?.storage?.get?.(key) ??
-      "";
-
-    return safeNumber(value, 0);
-  } catch {
-    return 0;
-  }
-}
-
-function writeCooldownToStorage(untilMs = 0) {
-  try {
-    const key =
-      getCooldownStorageKey();
-
-    if (untilMs > 0) {
-      AppCore?.storage?.setRaw?.(
-        key,
-        String(untilMs)
-      );
-
-      AppCore?.storage?.set?.(
-        key,
-        String(untilMs)
-      );
-    } else {
-      AppCore?.storage?.remove?.(key);
-    }
-  } catch {}
-}
-
-function getCooldownUntil() {
-  return Math.max(
-    safeNumber(runtime.cooldownUntil, 0),
-    readCooldownFromStorage()
-  );
-}
-
-function getRemainingCooldownSeconds() {
-  const remainingMs =
-    getCooldownUntil() - nowMs();
-
-  return Math.max(
+  const retryAfter = Math.max(
     0,
-    Math.ceil(remainingMs / 1000)
+    safeNumber(
+      error?.retryAfter ??
+        error?.retry_after ??
+        error?.cooldownSeconds ??
+        error?.cooldown_seconds ??
+        error?.data?.retryAfter ??
+        error?.data?.retry_after ??
+        error?.data?.cooldownSeconds ??
+        error?.data?.cooldown_seconds ??
+        error?.response?.data?.retryAfter ??
+        error?.response?.data?.retry_after ??
+        error?.response?.data?.cooldownSeconds ??
+        error?.response?.data?.cooldown_seconds ??
+        0,
+      0
+    )
   );
-}
-
-function setCooldown(seconds = 0) {
-  const finalSeconds =
-    clampNumber(
-      seconds || getDefaultCooldownSeconds(),
-      0,
-      3600
-    );
-
-  if (finalSeconds <= 0) {
-    runtime.cooldownUntil = 0;
-    writeCooldownToStorage(0);
-    return 0;
-  }
-
-  const until =
-    nowMs() + finalSeconds * 1000;
-
-  runtime.cooldownUntil =
-    until;
-
-  writeCooldownToStorage(until);
-
-  return finalSeconds;
-}
-
-export function clearPasswordResetCooldown() {
-  runtime.cooldownUntil =
-    0;
-
-  writeCooldownToStorage(0);
-
-  return true;
-}
-
-function buildCooldownResponse(message = getRateLimitMessage()) {
-  const retryAfter =
-    getRemainingCooldownSeconds();
 
   return {
-    ok:
-      false,
-    success:
-      false,
-    error:
-      true,
+    ok: false,
+    success: false,
+    error: true,
 
-    status:
-      429,
+    status,
+    statusText: error?.statusText || null,
 
     code:
-      "RATE_LIMITED",
-
-    cooldown:
-      true,
-
-    rateLimited:
-      true,
+      error?.code ||
+      error?.data?.code ||
+      error?.response?.data?.code ||
+      null,
 
     retryAfter,
+    cooldownSeconds: retryAfter,
+    cooldown: status === 429 || retryAfter > 0,
+    rateLimited: status === 429 || retryAfter > 0,
 
-    cooldownSeconds:
-      retryAfter,
+    timeout:
+      error?.timeout === true ||
+      String(error?.name || "").toLowerCase().includes("timeout") ||
+      String(error?.code || "").toLowerCase().includes("timeout"),
 
-    message,
+    aborted:
+      error?.aborted === true ||
+      String(error?.name || "") === "AbortError",
 
-    raw: {
-      ok:
-        false,
-      status:
-        429,
-      retryAfter,
-      message,
-    },
+    message:
+      error?.data?.message ||
+      error?.data?.mensaje ||
+      error?.data?.error?.message ||
+      error?.data?.error ||
+      error?.response?.data?.message ||
+      error?.response?.data?.mensaje ||
+      error?.response?.data?.error?.message ||
+      error?.response?.data?.error ||
+      error?.message ||
+      (status === 429 || retryAfter > 0 ? rateLimitMessage() : fallbackMessage),
 
-    at:
-      isoNow(),
+    data: error?.data || error?.response?.data || null,
+    raw: error || null,
   };
 }
 
-/* =========================================================
-   VALIDATION
-========================================================= */
-
-function validateRequestPayload(normalized = {}) {
-  if (!normalized.identifier) {
-    return "No se recibió identificador para recuperación de acceso.";
-  }
-
-  if (
-    normalized.identifier.length >
-    getResetIdentifierMaxLength()
-  ) {
-    return "El identificador es demasiado largo.";
-  }
-
-  return "";
+function rememberError(type = "unknown", error = null) {
+  runtime.lastError = {
+    type,
+    message: safeText(error?.message),
+    status: getErrorStatus(error),
+    code: error?.code || null,
+    timeout: error?.timeout === true,
+    aborted: error?.aborted === true,
+    at: isoNow(),
+  };
 }
-
-function validateConfirmPayload(normalized = {}) {
-  if (!normalized.token) {
-    return "No se recibió token de recuperación.";
-  }
-
-  if (
-    normalized.token.length <
-    getResetTokenMinLength()
-  ) {
-    return "El token de recuperación no es válido.";
-  }
-
-  if (!normalized.password) {
-    return "La nueva contraseña es obligatoria.";
-  }
-
-  if (
-    normalized.password.length <
-    getResetPasswordMinLength()
-  ) {
-    return `La contraseña debe tener al menos ${getResetPasswordMinLength()} caracteres.`;
-  }
-
-  if (
-    normalized.password.length >
-    getResetPasswordMaxLength()
-  ) {
-    return "La contraseña es demasiado larga.";
-  }
-
-  if (!normalized.confirmPassword) {
-    return "La confirmación de contraseña es obligatoria.";
-  }
-
-  if (
-    normalized.confirmPassword.length >
-    getResetPasswordMaxLength()
-  ) {
-    return "La confirmación de contraseña es demasiado larga.";
-  }
-
-  if (
-    normalized.password !==
-    normalized.confirmPassword
-  ) {
-    return "Las contraseñas no coinciden.";
-  }
-
-  return "";
-}
-
-function validateTokenPayload(normalized = {}) {
-  if (!normalized.token) {
-    return "No se recibió token de recuperación.";
-  }
-
-  if (
-    normalized.token.length <
-    getResetTokenMinLength()
-  ) {
-    return "El token de recuperación no es válido.";
-  }
-
-  return "";
-}
-
-/* =========================================================
-   RESULT BOOKKEEPING
-========================================================= */
 
 function rememberResult(type = "unknown", result = {}) {
   runtime.lastResult = {
     type,
-    ok:
-      Boolean(result?.ok),
-    status:
-      result?.status || 0,
-    statusText:
-      result?.statusText || null,
-    code:
-      result?.code || null,
-    cooldown:
-      Boolean(result?.cooldown),
-    retryAfter:
-      result?.retryAfter || 0,
-    at:
-      isoNow(),
+    ok: Boolean(result?.ok),
+    status: result?.status || 0,
+    statusText: result?.statusText || null,
+    code: result?.code || null,
+    cooldown: Boolean(result?.cooldown),
+    retryAfter: result?.retryAfter || 0,
+    at: isoNow(),
   };
 
-  if (
-    result?.cooldown &&
-    result?.retryAfter
-  ) {
+  if (result?.cooldown && result?.retryAfter) {
     setCooldown(result.retryAfter);
   }
 
@@ -3493,13 +1798,139 @@ function rememberResult(type = "unknown", result = {}) {
   }
 }
 
-function maybePersistResetIdentifier(identifier = "") {
-  const value =
-    safeText(identifier, "");
+/* =========================================================
+   COOLDOWN
+========================================================= */
 
-  if (!value) {
-    return false;
+function getCooldownStorageKey() {
+  return safeText(AUTH_STORAGE_KEYS?.resetCooldownUntil, "reset_cooldown_until");
+}
+
+function readCooldownFromStorage() {
+  try {
+    const key = getCooldownStorageKey();
+
+    return safeNumber(
+      AppCore?.storage?.getRaw?.(key) ??
+        AppCore?.storage?.get?.(key) ??
+        0,
+      0
+    );
+  } catch {
+    return 0;
   }
+}
+
+function writeCooldownToStorage(untilMs = 0) {
+  try {
+    const key = getCooldownStorageKey();
+
+    if (untilMs > 0) {
+      AppCore?.storage?.setRaw?.(key, String(untilMs));
+      AppCore?.storage?.set?.(key, String(untilMs));
+    } else {
+      AppCore?.storage?.remove?.(key);
+    }
+  } catch {}
+}
+
+function getCooldownUntil() {
+  return Math.max(runtime.cooldownUntil || 0, readCooldownFromStorage());
+}
+
+function getRemainingCooldownSeconds() {
+  return Math.max(0, Math.ceil((getCooldownUntil() - nowMs()) / 1000));
+}
+
+function setCooldown(seconds = 0) {
+  const value = clampNumber(seconds || getDefaultCooldownSeconds(), 0, 3600);
+
+  if (value <= 0) {
+    runtime.cooldownUntil = 0;
+    writeCooldownToStorage(0);
+    return 0;
+  }
+
+  const until = nowMs() + value * 1000;
+
+  runtime.cooldownUntil = until;
+  writeCooldownToStorage(until);
+
+  return value;
+}
+
+export function clearPasswordResetCooldown() {
+  runtime.cooldownUntil = 0;
+  writeCooldownToStorage(0);
+  return true;
+}
+
+function cooldownResponse() {
+  const retryAfter = getRemainingCooldownSeconds();
+
+  return {
+    ok: false,
+    success: false,
+    error: true,
+
+    status: 429,
+    code: "RATE_LIMITED",
+
+    cooldown: true,
+    rateLimited: true,
+
+    retryAfter,
+    cooldownSeconds: retryAfter,
+
+    message: rateLimitMessage(),
+
+    raw: {
+      ok: false,
+      status: 429,
+      retryAfter,
+      message: rateLimitMessage(),
+    },
+
+    at: isoNow(),
+  };
+}
+
+/* =========================================================
+   VALIDATION
+========================================================= */
+
+function validateRequestPayload(normalized = {}) {
+  if (!normalized.identifier) return "No se recibió identificador para recuperación de acceso.";
+  if (normalized.identifier.length > getIdentifierMaxLength()) return "El identificador es demasiado largo.";
+  return "";
+}
+
+function validateConfirmPayload(normalized = {}) {
+  if (!normalized.token) return "No se recibió token de recuperación.";
+  if (normalized.token.length < getTokenMinLength()) return "El token de recuperación no es válido.";
+
+  if (!normalized.password) return "La nueva contraseña es obligatoria.";
+  if (normalized.password.length < getPasswordMinLength()) return `La contraseña debe tener al menos ${getPasswordMinLength()} caracteres.`;
+  if (normalized.password.length > getPasswordMaxLength()) return "La contraseña es demasiado larga.";
+
+  if (!normalized.confirmPassword) return "La confirmación de contraseña es obligatoria.";
+  if (normalized.confirmPassword.length > getPasswordMaxLength()) return "La confirmación de contraseña es demasiado larga.";
+
+  if (normalized.password !== normalized.confirmPassword) return "Las contraseñas no coinciden.";
+
+  return "";
+}
+
+function validateTokenPayload(normalized = {}) {
+  if (!normalized.token) return "No se recibió token de recuperación.";
+  if (normalized.token.length < getTokenMinLength()) return "El token de recuperación no es válido.";
+  return "";
+}
+
+function maybePersistResetIdentifier(identifier = "") {
+  const value = safeText(identifier);
+
+  if (!value) return false;
 
   try {
     persistLastResetIdentifier(value);
@@ -3514,397 +1945,208 @@ function maybePersistResetIdentifier(identifier = "") {
 ========================================================= */
 
 export async function requestPasswordReset(payload = {}, options = {}) {
-  if (runtime.requestInFlight) {
-    return runtime.requestInFlight;
+  if (runtime.requestInFlight) return runtime.requestInFlight;
+
+  if (getRemainingCooldownSeconds() > 0) {
+    return normalizeResetPasswordResponse(cooldownResponse());
   }
 
-  const activeCooldown =
-    getRemainingCooldownSeconds();
-
-  if (activeCooldown > 0) {
-    return normalizeResetPasswordResponse(
-      buildCooldownResponse()
-    );
-  }
-
-  const normalized =
-    normalizeResetPasswordPayload(payload);
-
-  const validationError =
-    validateRequestPayload(normalized);
+  const normalized = normalizeResetPasswordPayload(payload);
+  const validationError = validateRequestPayload(normalized);
 
   if (validationError) {
     return normalizeResetPasswordResponse({
-      ok:
-        false,
-      status:
-        400,
-      message:
-        validationError,
+      ok: false,
+      status: 400,
+      message: validationError,
     });
   }
 
-  const endpoints =
-    endpointCandidatesFor("request");
-
-  const body =
-    buildResetPasswordRequestBody(normalized);
+  const body = buildResetPasswordRequestBody(normalized);
+  const endpoints = endpointCandidatesFor("request");
 
   runtime.requestCount += 1;
-  runtime.lastRequestAt =
-    nowMs();
+  runtime.lastRequestAt = nowMs();
 
-  maybePersistResetIdentifier(
-    normalized.identifier
-  );
+  maybePersistResetIdentifier(normalized.identifier);
 
-  safeEmit(
-    "auth:password-reset:request:start",
-    {
-      endpoints,
-      identifierType:
-        normalized.email
-          ? "email"
-          : normalized.phone
-            ? "phone"
-            : normalized.username
-              ? "username"
-              : "identifier",
-    },
-    options
-  );
+  emit("auth:password-reset:request:start", {
+    endpoints,
+    identifierType: normalized.email
+      ? "email"
+      : normalized.phone
+        ? "phone"
+        : normalized.username
+          ? "username"
+          : "identifier",
+  }, options);
 
-  runtime.requestInFlight =
-    (async () => {
-      try {
-        const raw =
-          await executePasswordResetRequestWithCandidates(
-            endpoints,
-            body,
-            buildRequestOptions(options)
-          );
+  runtime.requestInFlight = (async () => {
+    try {
+      const raw = await executeWithCandidates(endpoints, body, options);
+      const result = normalizeResetPasswordResponse(raw);
 
-        const normalizedResponse =
-          normalizeResetPasswordResponse(raw);
+      rememberResult("request", result);
 
-        rememberResult(
-          "request",
-          normalizedResponse
-        );
+      emit("auth:password-reset:request:complete", {
+        ok: result.ok,
+        status: result.status,
+        statusText: result.statusText,
+        cooldown: result.cooldown,
+        retryAfter: result.retryAfter,
+      }, options);
 
-        safeEmit(
-          "auth:password-reset:request:complete",
-          {
-            ok:
-              normalizedResponse.ok,
-            status:
-              normalizedResponse.status,
-            statusText:
-              normalizedResponse.statusText,
-            cooldown:
-              normalizedResponse.cooldown,
-            retryAfter:
-              normalizedResponse.retryAfter,
-          },
-          options
-        );
+      return result;
+    } catch (error) {
+      rememberError("request", error);
 
-        return normalizedResponse;
-      } catch (error) {
-        rememberError(
-          "request",
-          error
-        );
+      const result = normalizeResetPasswordResponse(
+        normalizeTransportError(error, defaultRequestErrorMessage())
+      );
 
-        const normalizedError =
-          normalizeTransportError(
-            error,
-            getDefaultErrorMessage()
-          );
+      rememberResult("request:error", result);
 
-        const normalizedResponse =
-          normalizeResetPasswordResponse(
-            normalizedError
-          );
+      emit("auth:password-reset:request:error", {
+        status: result.status,
+        statusText: result.statusText,
+        code: result.code,
+        cooldown: result.cooldown,
+        retryAfter: result.retryAfter,
+        message: result.message,
+      }, options);
 
-        rememberResult(
-          "request:error",
-          normalizedResponse
-        );
-
-        safeEmit(
-          "auth:password-reset:request:error",
-          {
-            status:
-              normalizedResponse.status,
-            statusText:
-              normalizedResponse.statusText,
-            code:
-              normalizedResponse.code,
-            cooldown:
-              normalizedResponse.cooldown,
-            retryAfter:
-              normalizedResponse.retryAfter,
-            message:
-              normalizedResponse.message,
-          },
-          options
-        );
-
-        return normalizedResponse;
-      } finally {
-        runtime.requestInFlight =
-          null;
-      }
-    })();
+      return result;
+    } finally {
+      runtime.requestInFlight = null;
+    }
+  })();
 
   return runtime.requestInFlight;
 }
 
 export async function confirmResetPassword(payload = {}, options = {}) {
-  if (runtime.confirmInFlight) {
-    return runtime.confirmInFlight;
-  }
+  if (runtime.confirmInFlight) return runtime.confirmInFlight;
 
-  const normalized =
-    normalizeConfirmResetPasswordPayload(payload);
-
-  const validationError =
-    validateConfirmPayload(normalized);
+  const normalized = normalizeConfirmResetPasswordPayload(payload);
+  const validationError = validateConfirmPayload(normalized);
 
   if (validationError) {
     return normalizeConfirmResetPasswordResponse({
-      ok:
-        false,
-      status:
-        400,
-      message:
-        validationError,
+      ok: false,
+      status: 400,
+      message: validationError,
     });
   }
 
-  const endpoints =
-    endpointCandidatesFor("confirm");
-
-  const body =
-    buildConfirmResetPasswordBody(normalized);
+  const body = buildConfirmResetPasswordBody(normalized);
+  const endpoints = endpointCandidatesFor("confirm");
 
   runtime.confirmCount += 1;
-  runtime.lastConfirmAt =
-    nowMs();
+  runtime.lastConfirmAt = nowMs();
 
-  safeEmit(
-    "auth:password-reset:confirm:start",
-    {
-      endpoints,
-    },
-    options
-  );
+  emit("auth:password-reset:confirm:start", { endpoints }, options);
 
-  runtime.confirmInFlight =
-    (async () => {
-      try {
-        const raw =
-          await executePasswordResetRequestWithCandidates(
-            endpoints,
-            body,
-            buildRequestOptions(options)
-          );
+  runtime.confirmInFlight = (async () => {
+    try {
+      const raw = await executeWithCandidates(endpoints, body, options);
+      const result = normalizeConfirmResetPasswordResponse(raw);
 
-        const normalizedResponse =
-          normalizeConfirmResetPasswordResponse(raw);
+      rememberResult("confirm", result);
 
-        rememberResult(
-          "confirm",
-          normalizedResponse
-        );
+      emit("auth:password-reset:confirm:complete", {
+        ok: result.ok,
+        status: result.status,
+        statusText: result.statusText,
+        cooldown: result.cooldown,
+        retryAfter: result.retryAfter,
+        redirectTo: result.redirectTo,
+      }, options);
 
-        safeEmit(
-          "auth:password-reset:confirm:complete",
-          {
-            ok:
-              normalizedResponse.ok,
-            status:
-              normalizedResponse.status,
-            statusText:
-              normalizedResponse.statusText,
-            cooldown:
-              normalizedResponse.cooldown,
-            retryAfter:
-              normalizedResponse.retryAfter,
-            redirectTo:
-              normalizedResponse.redirectTo,
-          },
-          options
-        );
+      return result;
+    } catch (error) {
+      rememberError("confirm", error);
 
-        return normalizedResponse;
-      } catch (error) {
-        rememberError(
-          "confirm",
-          error
-        );
+      const result = normalizeConfirmResetPasswordResponse(
+        normalizeTransportError(error, defaultConfirmErrorMessage())
+      );
 
-        const normalizedError =
-          normalizeTransportError(
-            error,
-            getDefaultConfirmErrorMessage()
-          );
+      rememberResult("confirm:error", result);
 
-        const normalizedResponse =
-          normalizeConfirmResetPasswordResponse(
-            normalizedError
-          );
+      emit("auth:password-reset:confirm:error", {
+        status: result.status,
+        statusText: result.statusText,
+        code: result.code,
+        cooldown: result.cooldown,
+        retryAfter: result.retryAfter,
+        message: result.message,
+      }, options);
 
-        rememberResult(
-          "confirm:error",
-          normalizedResponse
-        );
-
-        safeEmit(
-          "auth:password-reset:confirm:error",
-          {
-            status:
-              normalizedResponse.status,
-            statusText:
-              normalizedResponse.statusText,
-            code:
-              normalizedResponse.code,
-            cooldown:
-              normalizedResponse.cooldown,
-            retryAfter:
-              normalizedResponse.retryAfter,
-            message:
-              normalizedResponse.message,
-          },
-          options
-        );
-
-        return normalizedResponse;
-      } finally {
-        runtime.confirmInFlight =
-          null;
-      }
-    })();
+      return result;
+    } finally {
+      runtime.confirmInFlight = null;
+    }
+  })();
 
   return runtime.confirmInFlight;
 }
 
 export async function validateResetPasswordToken(payload = {}, options = {}) {
-  if (runtime.validateInFlight) {
-    return runtime.validateInFlight;
-  }
+  if (runtime.validateInFlight) return runtime.validateInFlight;
 
-  const normalized =
-    normalizeValidateResetTokenPayload(payload);
-
-  const validationError =
-    validateTokenPayload(normalized);
+  const normalized = normalizeValidateResetTokenPayload(payload);
+  const validationError = validateTokenPayload(normalized);
 
   if (validationError) {
     return normalizeValidateResetTokenResponse({
-      ok:
-        false,
-      status:
-        400,
-      message:
-        validationError,
+      ok: false,
+      status: 400,
+      message: validationError,
     });
   }
 
-  const endpoints =
-    endpointCandidatesFor("validate");
-
-  const body =
-    buildValidateResetTokenBody(normalized);
+  const body = buildValidateResetTokenBody(normalized);
+  const endpoints = endpointCandidatesFor("validate");
 
   runtime.validateCount += 1;
-  runtime.lastValidateAt =
-    nowMs();
+  runtime.lastValidateAt = nowMs();
 
-  safeEmit(
-    "auth:password-reset:validate:start",
-    {
-      endpoints,
-    },
-    options
-  );
+  emit("auth:password-reset:validate:start", { endpoints }, options);
 
-  runtime.validateInFlight =
-    (async () => {
-      try {
-        const raw =
-          await executePasswordResetRequestWithCandidates(
-            endpoints,
-            body,
-            buildRequestOptions(options)
-          );
+  runtime.validateInFlight = (async () => {
+    try {
+      const raw = await executeWithCandidates(endpoints, body, options);
+      const result = normalizeValidateResetTokenResponse(raw);
 
-        const normalizedResponse =
-          normalizeValidateResetTokenResponse(raw);
+      rememberResult("validate", result);
 
-        rememberResult(
-          "validate",
-          normalizedResponse
-        );
+      emit("auth:password-reset:validate:complete", {
+        ok: result.ok,
+        status: result.status,
+        statusText: result.statusText,
+      }, options);
 
-        safeEmit(
-          "auth:password-reset:validate:complete",
-          {
-            ok:
-              normalizedResponse.ok,
-            status:
-              normalizedResponse.status,
-            statusText:
-              normalizedResponse.statusText,
-          },
-          options
-        );
+      return result;
+    } catch (error) {
+      rememberError("validate", error);
 
-        return normalizedResponse;
-      } catch (error) {
-        rememberError(
-          "validate",
-          error
-        );
+      const result = normalizeValidateResetTokenResponse(
+        normalizeTransportError(error, defaultValidateErrorMessage())
+      );
 
-        const normalizedError =
-          normalizeTransportError(
-            error,
-            getDefaultValidateErrorMessage()
-          );
+      rememberResult("validate:error", result);
 
-        const normalizedResponse =
-          normalizeValidateResetTokenResponse(
-            normalizedError
-          );
+      emit("auth:password-reset:validate:error", {
+        status: result.status,
+        statusText: result.statusText,
+        code: result.code,
+        message: result.message,
+      }, options);
 
-        rememberResult(
-          "validate:error",
-          normalizedResponse
-        );
-
-        safeEmit(
-          "auth:password-reset:validate:error",
-          {
-            status:
-              normalizedResponse.status,
-            statusText:
-              normalizedResponse.statusText,
-            code:
-              normalizedResponse.code,
-            message:
-              normalizedResponse.message,
-          },
-          options
-        );
-
-        return normalizedResponse;
-      } finally {
-        runtime.validateInFlight =
-          null;
-      }
-    })();
+      return result;
+    } finally {
+      runtime.validateInFlight = null;
+    }
+  })();
 
   return runtime.validateInFlight;
 }
@@ -3913,89 +2155,20 @@ export async function validateResetPasswordToken(payload = {}, options = {}) {
    ALIASES
 ========================================================= */
 
-export async function resetPasswordRequest(payload = {}, options = {}) {
-  return requestPasswordReset(
-    payload,
-    options
-  );
-}
+export const resetPasswordRequest = requestPasswordReset;
+export const requestResetPassword = requestPasswordReset;
+export const passwordResetRequest = requestPasswordReset;
+export const forgotPassword = requestPasswordReset;
+export const recoverPassword = requestPasswordReset;
 
-export async function requestResetPassword(payload = {}, options = {}) {
-  return requestPasswordReset(
-    payload,
-    options
-  );
-}
+export const resetPasswordConfirm = confirmResetPassword;
+export const confirmPasswordReset = confirmResetPassword;
+export const passwordResetConfirm = confirmResetPassword;
 
-export async function passwordResetRequest(payload = {}, options = {}) {
-  return requestPasswordReset(
-    payload,
-    options
-  );
-}
-
-export async function forgotPassword(payload = {}, options = {}) {
-  return requestPasswordReset(
-    payload,
-    options
-  );
-}
-
-export async function recoverPassword(payload = {}, options = {}) {
-  return requestPasswordReset(
-    payload,
-    options
-  );
-}
-
-export async function resetPasswordConfirm(payload = {}, options = {}) {
-  return confirmResetPassword(
-    payload,
-    options
-  );
-}
-
-export async function confirmPasswordReset(payload = {}, options = {}) {
-  return confirmResetPassword(
-    payload,
-    options
-  );
-}
-
-export async function passwordResetConfirm(payload = {}, options = {}) {
-  return confirmResetPassword(
-    payload,
-    options
-  );
-}
-
-export async function validateResetToken(payload = {}, options = {}) {
-  return validateResetPasswordToken(
-    payload,
-    options
-  );
-}
-
-export async function resetPasswordValidate(payload = {}, options = {}) {
-  return validateResetPasswordToken(
-    payload,
-    options
-  );
-}
-
-export async function validatePasswordReset(payload = {}, options = {}) {
-  return validateResetPasswordToken(
-    payload,
-    options
-  );
-}
-
-export async function passwordResetValidate(payload = {}, options = {}) {
-  return validateResetPasswordToken(
-    payload,
-    options
-  );
-}
+export const validateResetToken = validateResetPasswordToken;
+export const resetPasswordValidate = validateResetPasswordToken;
+export const validatePasswordReset = validateResetPasswordToken;
+export const passwordResetValidate = validateResetPasswordToken;
 
 /* =========================================================
    DEBUG
@@ -4005,19 +2178,12 @@ function sanitizeBodyForSnapshot(body = {}) {
   const output = {};
 
   for (const [key, value] of Object.entries(body || {})) {
-    if (
-      PASSWORD_FIELD_NAMES.includes(key) ||
-      TOKEN_FIELD_NAMES.includes(key)
-    ) {
-      output[key] =
-        value ? "***" : value;
+    if (PASSWORD_FIELD_NAMES.has(key) || TOKEN_FIELD_NAMES.has(key)) {
+      output[key] = value ? "***" : value;
       continue;
     }
 
-    output[key] =
-      typeof value === "string"
-        ? redactSafe(value)
-        : value;
+    output[key] = typeof value === "string" ? redact(value) : value;
   }
 
   return output;
@@ -4025,166 +2191,78 @@ function sanitizeBodyForSnapshot(body = {}) {
 
 export function getPasswordResetSnapshot() {
   return {
-    version:
-      PASSWORD_RESET_MODULE_VERSION,
+    version: PASSWORD_RESET_MODULE_VERSION,
 
-    requestEndpoint:
-      getRequestPasswordResetEndpoint(),
+    requestEndpoint: getRequestPasswordResetEndpoint(),
+    requestEndpointCandidates: endpointCandidatesFor("request"),
 
-    requestEndpointCandidates:
-      endpointCandidatesFor("request"),
+    confirmEndpoint: getConfirmResetPasswordEndpoint(),
+    confirmEndpointCandidates: endpointCandidatesFor("confirm"),
 
-    confirmEndpoint:
-      getConfirmResetPasswordEndpoint(),
+    validateEndpoint: getValidateResetPasswordTokenEndpoint(),
+    validateEndpointCandidates: endpointCandidatesFor("validate"),
 
-    confirmEndpointCandidates:
-      endpointCandidatesFor("confirm"),
-
-    validateEndpoint:
-      getValidateResetPasswordTokenEndpoint(),
-
-    validateEndpointCandidates:
-      endpointCandidatesFor("validate"),
-
-    currentPath:
-      redactSafe(
-        getCurrentPath()
-      ),
-
-    hasResetTokenInCurrentUrl:
-      Boolean(
-        extractResetTokenFromUrl()
-      ),
+    currentPath: redact(getCurrentPath()),
+    hasResetTokenInCurrentUrl: Boolean(extractResetTokenFromUrl()),
 
     publicRequestPolicy: {
-      auth:
-        false,
-      public:
-        true,
-      skipAuth:
-        true,
-      noAuthHeader:
-        true,
-      skipAuthRefresh:
-        true,
-      noAutoRefresh:
-        true,
-      noAutoLogout:
-        true,
-      retry:
-        false,
-      retries:
-        0,
+      auth: false,
+      public: true,
+      skipAuth: true,
+      noAuthHeader: true,
+      skipAuthRefresh: true,
+      noAutoRefresh: true,
+      noAutoLogout: true,
+      retry: false,
+      retries: 0,
     },
 
     limits: {
-      identifierMaxLength:
-        getResetIdentifierMaxLength(),
-
-      tokenMinLength:
-        getResetTokenMinLength(),
-
-      tokenMaxLength:
-        getResetTokenMaxLength(),
-
-      passwordMinLength:
-        getResetPasswordMinLength(),
-
-      passwordMaxLength:
-        getResetPasswordMaxLength(),
-
-      timeout:
-        getRequestTimeout(),
-
-      defaultCooldownSeconds:
-        getDefaultCooldownSeconds(),
+      identifierMaxLength: getIdentifierMaxLength(),
+      tokenMinLength: getTokenMinLength(),
+      tokenMaxLength: getTokenMaxLength(),
+      passwordMinLength: getPasswordMinLength(),
+      passwordMaxLength: getPasswordMaxLength(),
+      timeout: getTimeoutMs(),
+      defaultCooldownSeconds: getDefaultCooldownSeconds(),
     },
 
     runtime: {
-      requestInFlight:
-        Boolean(runtime.requestInFlight),
+      requestInFlight: Boolean(runtime.requestInFlight),
+      confirmInFlight: Boolean(runtime.confirmInFlight),
+      validateInFlight: Boolean(runtime.validateInFlight),
 
-      confirmInFlight:
-        Boolean(runtime.confirmInFlight),
+      lastRequestAt: runtime.lastRequestAt,
+      lastConfirmAt: runtime.lastConfirmAt,
+      lastValidateAt: runtime.lastValidateAt,
 
-      validateInFlight:
-        Boolean(runtime.validateInFlight),
+      requestCount: runtime.requestCount,
+      confirmCount: runtime.confirmCount,
+      validateCount: runtime.validateCount,
 
-      lastRequestAt:
-        runtime.lastRequestAt,
+      cooldownUntil: getCooldownUntil(),
+      remainingCooldownSeconds: getRemainingCooldownSeconds(),
 
-      lastConfirmAt:
-        runtime.lastConfirmAt,
-
-      lastValidateAt:
-        runtime.lastValidateAt,
-
-      requestCount:
-        runtime.requestCount,
-
-      confirmCount:
-        runtime.confirmCount,
-
-      validateCount:
-        runtime.validateCount,
-
-      cooldownUntil:
-        getCooldownUntil(),
-
-      remainingCooldownSeconds:
-        getRemainingCooldownSeconds(),
-
-      lastError:
-        runtime.lastError
-          ? safeClone(runtime.lastError, null)
-          : null,
-
-      lastResult:
-        runtime.lastResult
-          ? safeClone(runtime.lastResult, null)
-          : null,
+      lastError: runtime.lastError ? cloneSafe(runtime.lastError, null) : null,
+      lastResult: runtime.lastResult ? cloneSafe(runtime.lastResult, null) : null,
     },
 
     transports: {
-      hasHttpService:
-        Boolean(
-          AppCore?.http ||
-          AppCore?.Http ||
-          AppCore?.services?.http ||
-          AppCore?.services?.Http
-        ),
-
-      hasApiClient:
-        Boolean(AppCore?.apiClient),
-
-      hasAppCoreRequest:
-        isFunction(AppCore?.request),
-
-      hasFetch:
-        typeof fetch === "function",
+      hasHttpService: Boolean(getHttpService()),
+      hasApiClient: Boolean(AppCore?.apiClient),
+      hasAppCoreRequest: isFunction(AppCore?.request),
+      hasFetch: typeof fetch === "function",
     },
 
-    at:
-      isoNow(),
+    at: isoNow(),
   };
 }
 
 export function getPasswordResetDebugPayload(payload = {}) {
   return {
-    request:
-      sanitizeBodyForSnapshot(
-        buildResetPasswordRequestBody(payload)
-      ),
-
-    confirm:
-      sanitizeBodyForSnapshot(
-        buildConfirmResetPasswordBody(payload)
-      ),
-
-    validate:
-      sanitizeBodyForSnapshot(
-        buildValidateResetTokenBody(payload)
-      ),
+    request: sanitizeBodyForSnapshot(buildResetPasswordRequestBody(payload)),
+    confirm: sanitizeBodyForSnapshot(buildConfirmResetPasswordBody(payload)),
+    validate: sanitizeBodyForSnapshot(buildValidateResetTokenBody(payload)),
   };
 }
 
@@ -4192,61 +2270,59 @@ export function getPasswordResetDebugPayload(payload = {}) {
    DEFAULT EXPORT
 ========================================================= */
 
-const PasswordReset =
-  Object.assign(
+const PasswordReset = Object.assign(
+  requestPasswordReset,
+  {
+    version: PASSWORD_RESET_MODULE_VERSION,
+
     requestPasswordReset,
-    {
-      version:
-        PASSWORD_RESET_MODULE_VERSION,
+    resetPasswordRequest,
+    requestResetPassword,
+    passwordResetRequest,
+    forgotPassword,
+    recoverPassword,
 
-      requestPasswordReset,
-      resetPasswordRequest,
-      requestResetPassword,
-      passwordResetRequest,
-      forgotPassword,
-      recoverPassword,
+    confirmResetPassword,
+    resetPasswordConfirm,
+    confirmPasswordReset,
+    passwordResetConfirm,
 
-      confirmResetPassword,
-      resetPasswordConfirm,
-      confirmPasswordReset,
-      passwordResetConfirm,
+    validateResetPasswordToken,
+    validateResetToken,
+    resetPasswordValidate,
+    validatePasswordReset,
+    passwordResetValidate,
 
-      validateResetPasswordToken,
-      validateResetToken,
-      resetPasswordValidate,
-      validatePasswordReset,
-      passwordResetValidate,
+    resolveResetPasswordIdentifier,
+    resolveResetPasswordToken,
 
-      resolveResetPasswordIdentifier,
-      resolveResetPasswordToken,
+    normalizeResetPasswordPayload,
+    normalizeConfirmResetPasswordPayload,
+    normalizeValidateResetTokenPayload,
+    normalizeValidateResetPasswordTokenPayload,
 
-      normalizeResetPasswordPayload,
-      normalizeConfirmResetPasswordPayload,
-      normalizeValidateResetTokenPayload,
-      normalizeValidateResetPasswordTokenPayload,
+    buildResetPasswordRequestBody,
+    buildConfirmResetPasswordBody,
+    buildValidateResetTokenBody,
+    buildValidateResetPasswordTokenBody,
 
-      buildResetPasswordRequestBody,
-      buildConfirmResetPasswordBody,
-      buildValidateResetTokenBody,
-      buildValidateResetPasswordTokenBody,
+    normalizeResetPasswordResponse,
+    normalizeConfirmResetPasswordResponse,
+    normalizeValidateResetTokenResponse,
+    normalizeValidateResetPasswordTokenResponse,
 
-      normalizeResetPasswordResponse,
-      normalizeConfirmResetPasswordResponse,
-      normalizeValidateResetTokenResponse,
-      normalizeValidateResetPasswordTokenResponse,
+    getRequestPasswordResetEndpoint,
+    getResetPasswordRequestEndpoint,
+    getConfirmResetPasswordEndpoint,
+    getConfirmPasswordResetEndpoint,
+    getValidateResetPasswordTokenEndpoint,
+    getValidateResetTokenEndpoint,
 
-      getRequestPasswordResetEndpoint,
-      getResetPasswordRequestEndpoint,
-      getConfirmResetPasswordEndpoint,
-      getConfirmPasswordResetEndpoint,
-      getValidateResetPasswordTokenEndpoint,
-      getValidateResetTokenEndpoint,
+    clearPasswordResetCooldown,
 
-      clearPasswordResetCooldown,
-
-      getPasswordResetSnapshot,
-      getPasswordResetDebugPayload,
-    }
-  );
+    getPasswordResetSnapshot,
+    getPasswordResetDebugPayload,
+  }
+);
 
 export default PasswordReset;

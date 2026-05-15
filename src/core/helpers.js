@@ -2,40 +2,18 @@
    Onion SPA - Core Helpers
    Archivo: src/core/helpers.js
 
-   ONION SUPPORT · CORE HELPERS
-   PATHS · USER · URL · REQUEST · TOKEN SAFE · 17/10
-
-   Responsabilidades:
-   - utilidades base del core
-   - normalización de paths, usernames, slugs y usuarios
-   - helpers de clonación / parse seguro
-   - helpers URL / headers / abort / timeout
-   - diagnóstico de red
-   - soporte robusto de avatar backend /me
-   - redacción segura de tokens para logs/snapshots
-   - soporte history-router, hash-router y hashbang
-   - construir URLs API sin doble /api
-   - impedir que /api/auth/me, /auth/me, /api/me o /me sean públicos
-   - reforzar backend canónico api.onionit.net en producción
-
-   Candados:
-   - normalizeCanonicalPath elimina /@usuario, query/hash y colapsa rutas token
-   - normalizePublicPath conserva /@usuario, query y hash
-   - buildUrl evita https://api.onionit.net/api/api/...
-   - buildUrl reescribe dominios frontend /api hacia backend canónico
-   - api.onionit.net permitido como backend canónico
-   - dominios frontend bloqueados como API base
-   - producción fuerza https://api.onionit.net
-   - cero throws accidentales
+   CORE HELPERS · CLEAN
+   - Paths públicos/canónicos.
+   - User/session helpers.
+   - URL/API builder.
+   - Token redaction.
+   - Abort/headers/network helpers.
+   - /api/auth/me siempre privado.
 ========================================================= */
 
 import { config } from "./config.js";
 
-/* =========================================================
-   CONSTANTS
-========================================================= */
-
-export const HELPERS_VERSION = "17.0.0";
+export const HELPERS_VERSION = "18.0.0-clean";
 
 const DEFAULT_ROUTE = "/";
 const LOCAL_ORIGIN = "http://localhost";
@@ -138,6 +116,8 @@ const TOKEN_PARAM_NAMES = Object.freeze([
   "two_factor_token",
   "mfaToken",
   "mfa_token",
+  "otpToken",
+  "otp_token",
   "code",
   "otp",
   "totp",
@@ -170,14 +150,19 @@ const BAD_TOKEN_VALUES = Object.freeze([
 const TECHNICAL_TOKEN_PATHS = Object.freeze([
   "/activate-account",
   "/reset-password/confirm",
-  "/password/reset",
-  "/auth/activate",
-  "/auth/reset",
+  "/password-reset/confirm",
+  "/2fa",
+  "/otp",
+  "/mfa",
 ]);
 
 const TOKEN_COLLAPSE_PATHS = Object.freeze([
   "/activate-account",
   "/reset-password/confirm",
+  "/password-reset/confirm",
+  "/2fa",
+  "/otp",
+  "/mfa",
 ]);
 
 const USER_IDENTITY_KEYS = Object.freeze([
@@ -234,9 +219,9 @@ const AUTH_ENVELOPE_KEYS = Object.freeze([
   "sessionData",
 ]);
 
-const MAX_SAFE_CLONE_DEPTH = 8;
-const MAX_SAFE_CLONE_ARRAY = 500;
-const MAX_SAFE_CLONE_KEYS = 300;
+const MAX_CLONE_DEPTH = 8;
+const MAX_CLONE_ARRAY = 500;
+const MAX_CLONE_KEYS = 300;
 
 const SAFE_USERNAME_MAX = 64;
 const SAFE_SLUG_MAX = 96;
@@ -251,7 +236,7 @@ const BEARER_RE =
   /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi;
 
 /* =========================================================
-   BASE
+   BASICS
 ========================================================= */
 
 export function isBrowser() {
@@ -259,9 +244,7 @@ export function isBrowser() {
 }
 
 export function isDocumentReady() {
-  if (!isBrowser()) {
-    return false;
-  }
+  if (!isBrowser()) return false;
 
   try {
     return document.readyState !== "loading";
@@ -312,9 +295,7 @@ export function isFunction(value) {
 }
 
 export function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
   const text = String(value).trim();
   return text || fallback;
@@ -362,18 +343,9 @@ export function safeObject(value, fallback = {}) {
 }
 
 function toArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (value instanceof Set) {
-    return Array.from(value);
-  }
-
-  if (value === null || value === undefined) {
-    return [];
-  }
-
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return Array.from(value);
+  if (value === null || value === undefined) return [];
   return [value];
 }
 
@@ -384,9 +356,7 @@ export function unique(values = []) {
   for (const value of toArray(values).flat(Infinity)) {
     const clean = safeText(value, "");
 
-    if (!clean || seen.has(clean)) {
-      continue;
-    }
+    if (!clean || seen.has(clean)) continue;
 
     seen.add(clean);
     output.push(clean);
@@ -399,9 +369,7 @@ export function firstNonEmpty(...values) {
   for (const value of values) {
     const text = safeText(value, "");
 
-    if (text) {
-      return text;
-    }
+    if (text) return text;
   }
 
   return "";
@@ -416,9 +384,7 @@ export function hasOwn(obj, key) {
 }
 
 export function isDomScope(scope) {
-  if (!isBrowser() || !scope) {
-    return false;
-  }
+  if (!isBrowser() || !scope) return false;
 
   try {
     return (
@@ -455,7 +421,10 @@ export function normalizeListenerOptions(options = false) {
 export function getStoragePrefix() {
   return (
     safeText(
-      config?.storagePrefix || config?.appKey || config?.appId || DEFAULT_STORAGE_PREFIX,
+      config?.storagePrefix ||
+        config?.appKey ||
+        config?.appId ||
+        DEFAULT_STORAGE_PREFIX,
       DEFAULT_STORAGE_PREFIX
     )
       .replace(/:+$/g, "")
@@ -467,9 +436,7 @@ export function buildStorageKey(key = "") {
   const prefix = getStoragePrefix();
   const cleanKey = safeText(key, "").replace(/^:+/g, "");
 
-  if (!cleanKey) {
-    return prefix;
-  }
+  if (!cleanKey) return prefix;
 
   if (
     cleanKey.startsWith(`${prefix}:`) ||
@@ -483,23 +450,13 @@ export function buildStorageKey(key = "") {
 }
 
 export function safeParse(value, fallback = null) {
-  if (value === undefined) {
-    return fallback;
-  }
-
-  if (value === null) {
-    return null;
-  }
-
-  if (typeof value === "object") {
-    return value;
-  }
+  if (value === undefined) return fallback;
+  if (value === null) return null;
+  if (typeof value === "object") return value;
 
   const raw = String(value).trim();
 
-  if (!raw) {
-    return fallback;
-  }
+  if (!raw) return fallback;
 
   if (["undefined", "nan", "[object object]"].includes(raw.toLowerCase())) {
     return fallback;
@@ -515,13 +472,8 @@ export function safeParse(value, fallback = null) {
 export function safeStringify(value, fallback = "") {
   try {
     return JSON.stringify(value, (_key, item) => {
-      if (typeof item === "bigint") {
-        return String(item);
-      }
-
-      if (item instanceof Error) {
-        return cloneError(item);
-      }
+      if (typeof item === "bigint") return String(item);
+      if (item instanceof Error) return cloneError(item);
 
       return item;
     });
@@ -531,23 +483,13 @@ export function safeStringify(value, fallback = "") {
 }
 
 function cloneDeepFallback(value, fallback = null, depth = 0, seen = new WeakMap()) {
-  if (value === undefined) {
-    return fallback;
-  }
+  if (value === undefined) return fallback;
+  if (value === null || typeof value !== "object") return value;
 
-  if (value === null || typeof value !== "object") {
-    return value;
-  }
-
-  if (depth > MAX_SAFE_CLONE_DEPTH) {
-    return "[depth-limit]";
-  }
+  if (depth > MAX_CLONE_DEPTH) return "[depth-limit]";
 
   try {
-    if (seen.has(value)) {
-      return "[circular]";
-    }
-
+    if (seen.has(value)) return "[circular]";
     seen.set(value, true);
   } catch {}
 
@@ -559,23 +501,18 @@ function cloneDeepFallback(value, fallback = null, depth = 0, seen = new WeakMap
     }
   }
 
-  if (value instanceof Error) {
-    return cloneError(value);
-  }
+  if (value instanceof Error) return cloneError(value);
 
   if (Array.isArray(value)) {
     return value
-      .slice(0, MAX_SAFE_CLONE_ARRAY)
+      .slice(0, MAX_CLONE_ARRAY)
       .map((item) => cloneDeepFallback(item, null, depth + 1, seen));
   }
 
   const output = {};
-  const entries = Object.entries(value).slice(0, MAX_SAFE_CLONE_KEYS);
 
-  for (const [key, item] of entries) {
-    if (typeof item === "function") {
-      continue;
-    }
+  for (const [key, item] of Object.entries(value).slice(0, MAX_CLONE_KEYS)) {
+    if (typeof item === "function") continue;
 
     output[key] = cloneDeepFallback(item, null, depth + 1, seen);
   }
@@ -584,13 +521,8 @@ function cloneDeepFallback(value, fallback = null, depth = 0, seen = new WeakMap
 }
 
 export function safeClone(value, fallback = null) {
-  if (value === undefined) {
-    return fallback;
-  }
-
-  if (value === null) {
-    return null;
-  }
+  if (value === undefined) return fallback;
+  if (value === null) return null;
 
   try {
     if (typeof structuredClone === "function") {
@@ -610,9 +542,7 @@ export function safeClone(value, fallback = null) {
 }
 
 export function cloneError(error = null) {
-  if (!error) {
-    return null;
-  }
+  if (!error) return null;
 
   if (error instanceof Error) {
     return {
@@ -645,7 +575,7 @@ export function cloneError(error = null) {
 }
 
 /* =========================================================
-   TOKEN REDACTION
+   REDACTION
 ========================================================= */
 
 function escapeRegExp(value = "") {
@@ -669,9 +599,7 @@ function getAllTokenParamNames() {
 export function redactTokenInText(value = "") {
   let output = safeText(value, "");
 
-  if (!output) {
-    return "";
-  }
+  if (!output) return "";
 
   for (const name of getAllTokenParamNames()) {
     try {
@@ -703,31 +631,16 @@ export function redactTokenInText(value = "") {
 }
 
 export function redactSensitiveObject(value, fallback = null, depth = 0, seen = new WeakMap()) {
-  if (value === undefined) {
-    return fallback;
-  }
+  if (value === undefined) return fallback;
+  if (value === null) return null;
 
-  if (value === null) {
-    return null;
-  }
+  if (typeof value === "string") return redactTokenInText(value);
+  if (typeof value !== "object") return value;
 
-  if (typeof value === "string") {
-    return redactTokenInText(value);
-  }
-
-  if (typeof value !== "object") {
-    return value;
-  }
-
-  if (depth > MAX_SAFE_CLONE_DEPTH) {
-    return "[depth-limit]";
-  }
+  if (depth > MAX_CLONE_DEPTH) return "[depth-limit]";
 
   try {
-    if (seen.has(value)) {
-      return "[circular]";
-    }
-
+    if (seen.has(value)) return "[circular]";
     seen.set(value, true);
   } catch {}
 
@@ -739,21 +652,19 @@ export function redactSensitiveObject(value, fallback = null, depth = 0, seen = 
     }
   }
 
-  if (value instanceof Error) {
-    return cloneError(value);
-  }
+  if (value instanceof Error) return cloneError(value);
 
   if (Array.isArray(value)) {
     return value
-      .slice(0, MAX_SAFE_CLONE_ARRAY)
+      .slice(0, MAX_CLONE_ARRAY)
       .map((item) => redactSensitiveObject(item, null, depth + 1, seen));
   }
 
   const output = {};
 
-  for (const [key, item] of Object.entries(value).slice(0, MAX_SAFE_CLONE_KEYS)) {
+  for (const [key, item] of Object.entries(value).slice(0, MAX_CLONE_KEYS)) {
     if (SENSITIVE_KEY_RE.test(key)) {
-      output[key] = "***";
+      output[key] = item ? "***" : item;
       continue;
     }
 
@@ -764,7 +675,7 @@ export function redactSensitiveObject(value, fallback = null, depth = 0, seen = 
 }
 
 /* =========================================================
-   PATH PARTS
+   PATHS
 ========================================================= */
 
 export function getBaseOrigin() {
@@ -782,15 +693,10 @@ export function isAbsoluteUrl(value = "") {
 function getOriginFromUrlLike(value = "") {
   const raw = safeText(value, "");
 
-  if (!raw) {
-    return "";
-  }
+  if (!raw) return "";
 
   try {
-    if (isAbsoluteUrl(raw)) {
-      return new URL(raw).origin;
-    }
-
+    if (isAbsoluteUrl(raw)) return new URL(raw).origin;
     return new URL(raw, getBaseOrigin()).origin;
   } catch {
     return "";
@@ -805,13 +711,8 @@ export function isHashRouterPath(value = "") {
 export function normalizeHashRouterPath(value = "") {
   const raw = safeText(value, "");
 
-  if (!raw) {
-    return DEFAULT_ROUTE;
-  }
-
-  if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
-  }
+  if (!raw) return DEFAULT_ROUTE;
+  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
 
   return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
 }
@@ -819,9 +720,7 @@ export function normalizeHashRouterPath(value = "") {
 export function normalizeSearch(search = "") {
   const raw = safeText(search, "");
 
-  if (!raw) {
-    return "";
-  }
+  if (!raw) return "";
 
   return raw.startsWith("?") ? raw : `?${raw.replace(/^\?+/, "")}`;
 }
@@ -829,9 +728,7 @@ export function normalizeSearch(search = "") {
 export function normalizeHash(hash = "") {
   const raw = safeText(hash, "");
 
-  if (!raw) {
-    return "";
-  }
+  if (!raw) return "";
 
   return raw.startsWith("#") ? raw : `#${raw.replace(/^#+/, "")}`;
 }
@@ -884,30 +781,23 @@ export function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
     .replace(/\\/g, "/")
     .replace(/\/{2,}/g, "/");
 
-  if (!value) {
-    value = DEFAULT_ROUTE;
-  }
+  if (!value) value = DEFAULT_ROUTE;
+  if (!value.startsWith("/")) value = `/${value}`;
 
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
-  }
-
-  const normalizedSegments = [];
+  const segments = [];
 
   for (const segment of value.split("/")) {
-    if (!segment || segment === ".") {
-      continue;
-    }
+    if (!segment || segment === ".") continue;
 
     if (segment === "..") {
-      normalizedSegments.pop();
+      segments.pop();
       continue;
     }
 
-    normalizedSegments.push(segment);
+    segments.push(segment);
   }
 
-  value = `/${normalizedSegments.join("/")}` || DEFAULT_ROUTE;
+  value = `/${segments.join("/")}` || DEFAULT_ROUTE;
 
   if (value.length > 1 && value.endsWith("/")) {
     value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
@@ -917,15 +807,11 @@ export function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
 }
 
 export function normalizePath(path = DEFAULT_ROUTE) {
-  if (path === null || path === undefined) {
-    return DEFAULT_ROUTE;
-  }
+  if (path === null || path === undefined) return DEFAULT_ROUTE;
 
   let raw = String(path).trim();
 
-  if (!raw) {
-    return DEFAULT_ROUTE;
-  }
+  if (!raw) return DEFAULT_ROUTE;
 
   if (isHashRouterPath(raw)) {
     return normalizePath(normalizeHashRouterPath(raw));
@@ -997,9 +883,7 @@ export function normalizePublicPath(path = DEFAULT_ROUTE) {
 export function sanitizeUsername(value = "") {
   let raw = String(value || "").normalize("NFKC").trim();
 
-  if (!raw) {
-    return "";
-  }
+  if (!raw) return "";
 
   raw = raw.replace(/^@+/, "");
 
@@ -1035,9 +919,7 @@ export function buildPublicPath(path = DEFAULT_ROUTE, username = "") {
   const publicPath = stripUsernamePrefix(normalizePath(path));
   const cleanUsername = sanitizeUsername(username);
 
-  if (!cleanUsername) {
-    return publicPath;
-  }
+  if (!cleanUsername) return publicPath;
 
   if (stripSearchAndHash(publicPath) === DEFAULT_ROUTE && !getSearchAndHash(publicPath)) {
     return `/@${cleanUsername}`;
@@ -1047,7 +929,7 @@ export function buildPublicPath(path = DEFAULT_ROUTE, username = "") {
 }
 
 /* =========================================================
-   API BASE / URL BUILD
+   API BASE / URL
 ========================================================= */
 
 function getCanonicalBackendOrigins() {
@@ -1082,7 +964,6 @@ function isForbiddenFrontendApiBase(value = "") {
 
 function isProductionEnv() {
   const env = safeLower(config?.env || config?.environment || "", "");
-
   return env === "production" || env === "prod";
 }
 
@@ -1143,9 +1024,7 @@ export function getSafeApiBase() {
 function getBasePathFromUrlLike(base = "") {
   const cleanBase = normalizeApiBase(base);
 
-  if (!cleanBase) {
-    return "";
-  }
+  if (!cleanBase) return "";
 
   try {
     if (isAbsoluteUrl(cleanBase)) {
@@ -1162,9 +1041,7 @@ function shouldAvoidDoubleBase(base = "", path = "") {
   const basePath = getBasePathFromUrlLike(base).replace(/^\/+/, "");
   const cleanPath = safeText(path, "").replace(/^\/+/, "");
 
-  if (!basePath || !cleanPath) {
-    return false;
-  }
+  if (!basePath || !cleanPath) return false;
 
   return cleanPath === basePath || cleanPath.startsWith(`${basePath}/`);
 }
@@ -1172,20 +1049,14 @@ function shouldAvoidDoubleBase(base = "", path = "") {
 export function joinUrl(base = "", path = "") {
   const rawPath = String(path || "").trim();
 
-  if (isAbsoluteUrl(rawPath)) {
-    return rawPath;
-  }
+  if (isAbsoluteUrl(rawPath)) return rawPath;
 
   const cleanBase = normalizeApiBase(base);
   const cleanPath = rawPath.replace(/^\/+/, "");
 
-  if (!cleanPath) {
-    return cleanBase || "/";
-  }
+  if (!cleanPath) return cleanBase || "/";
 
-  if (!cleanBase) {
-    return `/${cleanPath}`;
-  }
+  if (!cleanBase) return `/${cleanPath}`;
 
   if (shouldAvoidDoubleBase(cleanBase, cleanPath)) {
     if (isAbsoluteUrl(cleanBase)) {
@@ -1202,29 +1073,25 @@ export function joinUrl(base = "", path = "") {
 }
 
 function appendQueryToUrl(baseUrl = "", query = null) {
-  if (!query) {
-    return baseUrl;
-  }
+  if (!query) return baseUrl;
 
-  let queryEntries = [];
+  let entries = [];
 
   try {
     if (typeof URLSearchParams !== "undefined" && query instanceof URLSearchParams) {
-      queryEntries = Array.from(query.entries());
+      entries = Array.from(query.entries());
     } else if (Array.isArray(query)) {
-      queryEntries = query;
+      entries = query;
     } else if (isPlainObject(query)) {
-      queryEntries = Object.entries(query);
+      entries = Object.entries(query);
     }
   } catch {
-    queryEntries = [];
+    entries = [];
   }
 
-  if (!queryEntries.length) {
-    return baseUrl;
-  }
+  if (!entries.length) return baseUrl;
 
-  const wasAbsolute = isAbsoluteUrl(baseUrl);
+  const absolute = isAbsoluteUrl(baseUrl);
   let url;
 
   try {
@@ -1233,7 +1100,7 @@ function appendQueryToUrl(baseUrl = "", query = null) {
     return baseUrl;
   }
 
-  for (const [key, value] of queryEntries) {
+  for (const [key, value] of entries) {
     const cleanKey = safeText(key, "");
 
     if (!cleanKey || value === undefined || value === null || value === "") {
@@ -1263,9 +1130,7 @@ function appendQueryToUrl(baseUrl = "", query = null) {
     url.searchParams.set(cleanKey, String(value));
   }
 
-  if (wasAbsolute) {
-    return url.toString();
-  }
+  if (absolute) return url.toString();
 
   return `${url.pathname}${url.search}${url.hash}`;
 }
@@ -1273,9 +1138,7 @@ function appendQueryToUrl(baseUrl = "", query = null) {
 function rewriteForbiddenFrontendApiUrl(url = "") {
   const raw = safeText(url, "");
 
-  if (!raw || !isAbsoluteUrl(raw)) {
-    return raw;
-  }
+  if (!raw || !isAbsoluteUrl(raw)) return raw;
 
   try {
     const parsed = new URL(raw);
@@ -1307,7 +1170,7 @@ export function buildUrl(path = "", query = null) {
 }
 
 /* =========================================================
-   TOKEN / PUBLIC API
+   API PUBLIC / PRIVATE
 ========================================================= */
 
 export function stripBearerPrefix(token = "") {
@@ -1317,19 +1180,12 @@ export function stripBearerPrefix(token = "") {
 export function hasValidToken(token = null) {
   const value = stripBearerPrefix(token);
 
-  if (!value) {
-    return false;
-  }
+  if (!value) return false;
 
   const lower = value.toLowerCase();
 
-  if (BAD_TOKEN_VALUES.includes(lower)) {
-    return false;
-  }
-
-  if (/[\s\r\n\t]/.test(value)) {
-    return false;
-  }
+  if (BAD_TOKEN_VALUES.includes(lower)) return false;
+  if (/[\s\r\n\t]/.test(value)) return false;
 
   return true;
 }
@@ -1337,9 +1193,7 @@ export function hasValidToken(token = null) {
 function getApiBasePath() {
   const apiBase = getSafeApiBase();
 
-  if (!apiBase) {
-    return "";
-  }
+  if (!apiBase) return "";
 
   try {
     if (isAbsoluteUrl(apiBase)) {
@@ -1356,13 +1210,8 @@ function stripApiBasePrefix(path = DEFAULT_ROUTE) {
   const normalized = normalizeCanonicalPath(path);
   const apiBasePath = getApiBasePath();
 
-  if (!apiBasePath || apiBasePath === DEFAULT_ROUTE) {
-    return normalized;
-  }
-
-  if (normalized === apiBasePath) {
-    return DEFAULT_ROUTE;
-  }
+  if (!apiBasePath || apiBasePath === DEFAULT_ROUTE) return normalized;
+  if (normalized === apiBasePath) return DEFAULT_ROUTE;
 
   if (normalized.startsWith(`${apiBasePath}/`)) {
     return normalizeCanonicalPath(normalized.slice(apiBasePath.length) || DEFAULT_ROUTE);
@@ -1375,15 +1224,23 @@ function pathMatches(path = "", candidate = "") {
   const cleanPath = normalizeCanonicalPath(path);
   const cleanCandidate = normalizeCanonicalPath(candidate);
 
-  if (!cleanCandidate) {
-    return false;
-  }
+  if (!cleanCandidate) return false;
 
   if (cleanCandidate === DEFAULT_ROUTE) {
     return cleanPath === DEFAULT_ROUTE;
   }
 
   return cleanPath === cleanCandidate || cleanPath.startsWith(`${cleanCandidate}/`);
+}
+
+function isPrivateMePath(path = "") {
+  const normalized = normalizeCanonicalPath(path);
+  const withoutApiBase = stripApiBasePrefix(normalized);
+
+  return REQUIRED_PRIVATE_ME_PATHS.some((privatePath) => (
+    pathMatches(normalized, privatePath) ||
+    pathMatches(withoutApiBase, privatePath)
+  ));
 }
 
 function getConfiguredPublicApiPaths() {
@@ -1403,16 +1260,6 @@ function getConfiguredPrivateApiPaths() {
     ...REQUIRED_PRIVATE_ME_PATHS,
     ...safeArray(configured),
   ]);
-}
-
-function isPrivateMePath(path = "") {
-  const normalized = normalizeCanonicalPath(path);
-  const withoutApiBase = stripApiBasePrefix(normalized);
-
-  return REQUIRED_PRIVATE_ME_PATHS.some((privatePath) => (
-    pathMatches(normalized, privatePath) ||
-    pathMatches(withoutApiBase, privatePath)
-  ));
 }
 
 function isExplicitPrivateApiPath(path = "") {
@@ -1469,7 +1316,7 @@ export function isPrivateApiPath(path = "") {
 }
 
 /* =========================================================
-   USER NORMALIZATION
+   USER
 ========================================================= */
 
 function normalizeRoleKey(value = "") {
@@ -1485,33 +1332,34 @@ function normalizeRoleKey(value = "") {
 function normalizeRole(value = "") {
   const key = normalizeRoleKey(value);
 
-  if (!key) {
-    return "";
+  if (!key) return "user";
+
+  if (
+    [
+      "admin",
+      "administrator",
+      "administrador",
+      "superadmin",
+      "super_admin",
+      "super-admin",
+      "owner",
+      "root",
+    ].includes(key)
+  ) {
+    return "admin";
   }
 
-  const aliases = config?.auth?.roles || {};
-
-  for (const [alias, target] of Object.entries(aliases)) {
-    if (normalizeRoleKey(alias) === key) {
-      return normalizeRoleKey(target || key);
-    }
-  }
-
-  return key;
+  return "user";
 }
 
 function looksLikeAuthEnvelope(value = {}) {
-  if (!isPlainObject(value)) {
-    return false;
-  }
+  if (!isPlainObject(value)) return false;
 
   return AUTH_ENVELOPE_KEYS.some((key) => hasOwn(value, key));
 }
 
 function hasIdentityInObject(value = {}) {
-  if (!isPlainObject(value)) {
-    return false;
-  }
+  if (!isPlainObject(value)) return false;
 
   return USER_IDENTITY_KEYS.some((key) => Boolean(safeText(value[key], "")));
 }
@@ -1627,9 +1475,7 @@ function normalizeActive(user = {}) {
 function isSafeAvatarUrl(url = "") {
   const value = safeText(url, "");
 
-  if (!value) {
-    return false;
-  }
+  if (!value) return false;
 
   const lower = value.toLowerCase();
 
@@ -1642,25 +1488,15 @@ function isSafeAvatarUrl(url = "") {
     return false;
   }
 
-  if (lower.startsWith("data:image/svg")) {
-    return false;
-  }
+  if (lower.startsWith("data:image/svg")) return false;
 
   if (lower.startsWith("data:")) {
     return /^data:image\/(png|jpe?g|gif|webp|avif);base64,/i.test(value);
   }
 
-  if (lower.startsWith("blob:")) {
-    return true;
-  }
-
-  if (/^\/(?!\/)/.test(value)) {
-    return true;
-  }
-
-  if (/^\.\.?\//.test(value)) {
-    return true;
-  }
+  if (lower.startsWith("blob:")) return true;
+  if (/^\/(?!\/)/.test(value)) return true;
+  if (/^\.\.?\//.test(value)) return true;
 
   try {
     const parsed = new URL(value, getBaseOrigin());
@@ -1769,24 +1605,17 @@ function resolveAvatarCandidate(user = {}) {
 }
 
 function sanitizeUserPayloadForState(value = {}, depth = 0, seen = new WeakSet()) {
-  if (depth > 4 || !isPlainObject(value)) {
-    return {};
-  }
+  if (depth > 4 || !isPlainObject(value)) return {};
 
   try {
-    if (seen.has(value)) {
-      return {};
-    }
-
+    if (seen.has(value)) return {};
     seen.add(value);
   } catch {}
 
   const output = {};
 
   for (const [key, item] of Object.entries(value).slice(0, 160)) {
-    if (SENSITIVE_KEY_RE.test(key)) {
-      continue;
-    }
+    if (SENSITIVE_KEY_RE.test(key)) continue;
 
     if (Array.isArray(item)) {
       output[key] = item.slice(0, 120).map((entry) =>
@@ -1827,19 +1656,19 @@ export function normalizeUser(user = null) {
   const raw = isPlainObject(source.raw) ? source.raw : {};
 
   const id = firstNonEmpty(
-    source.id,
     source.userId,
     source.user_id,
+    source.id,
     source.uuid,
     source._id,
     source.uid,
     source.sub,
-    profile.id,
     profile.userId,
     profile.user_id,
-    raw.id,
+    profile.id,
     raw.userId,
     raw.user_id,
+    raw.id,
     raw.sub
   );
 
@@ -1855,24 +1684,24 @@ export function normalizeUser(user = null) {
   );
 
   const rawName = firstNonEmpty(
+    source.displayName,
+    source.display_name,
     source.name,
     source.nombre,
-    source.full_name,
     source.fullName,
-    source.display_name,
-    source.displayName,
+    source.full_name,
+    profile.displayName,
+    profile.display_name,
     profile.name,
     profile.nombre,
-    profile.full_name,
     profile.fullName,
-    profile.display_name,
-    profile.displayName,
+    profile.full_name,
+    raw.displayName,
+    raw.display_name,
     raw.name,
     raw.nombre,
-    raw.full_name,
     raw.fullName,
-    raw.display_name,
-    raw.displayName,
+    raw.full_name,
     source.username,
     email,
     id,
@@ -1941,7 +1770,7 @@ export function normalizeUser(user = null) {
     )
   );
 
-  if (!role && (source.isAdmin === true || source.admin === true)) {
+  if (source.isAdmin === true || source.admin === true) {
     role = "admin";
   }
 
@@ -2026,9 +1855,7 @@ export function normalizeUser(user = null) {
 export function isUsableUser(user = null) {
   const normalized = normalizeUser(user);
 
-  if (!normalized || normalized.active === false) {
-    return false;
-  }
+  if (!normalized || normalized.active === false) return false;
 
   return Boolean(
     firstNonEmpty(
@@ -2101,21 +1928,19 @@ export function getUserAvatarUrl(user = null) {
     source?.raw?.hasAvatar ??
     source?.raw?.has_avatar;
 
-  if (hasAvatar === false) {
-    return "";
-  }
+  if (hasAvatar === false) return "";
 
   return resolveAvatarCandidate(source || {});
 }
 
 export function getInitials(value = "") {
-  const text = typeof value === "object" ? getUserDisplayName(value) : safeText(value, "");
+  const source = typeof value === "object"
+    ? getUserDisplayName(value)
+    : safeText(value, "");
 
-  if (!text) {
-    return "";
-  }
+  if (!source) return "";
 
-  return text
+  return source
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
@@ -2125,13 +1950,11 @@ export function getInitials(value = "") {
 }
 
 /* =========================================================
-   LOCATION
+   LOCATION / HREF
 ========================================================= */
 
 export function getCurrentLocationPath() {
-  if (!isBrowser()) {
-    return DEFAULT_ROUTE;
-  }
+  if (!isBrowser()) return DEFAULT_ROUTE;
 
   try {
     const hash = window.location.hash || "";
@@ -2149,28 +1972,14 @@ export function getCurrentLocationPath() {
 }
 
 export function getCurrentLocationCanonicalPath() {
-  if (!isBrowser()) {
-    return DEFAULT_ROUTE;
-  }
+  if (!isBrowser()) return DEFAULT_ROUTE;
 
   try {
-    const hash = window.location.hash || "";
-
-    if (isHashRouterPath(hash)) {
-      return normalizeCanonicalPath(hash);
-    }
-
-    return normalizeCanonicalPath(
-      `${window.location.pathname || DEFAULT_ROUTE}${window.location.search || ""}${hash}`
-    );
+    return normalizeCanonicalPath(getCurrentLocationPath());
   } catch {
     return DEFAULT_ROUTE;
   }
 }
-
-/* =========================================================
-   HREF SAFETY
-========================================================= */
 
 export function isHashOnlyHref(href = "") {
   const value = safeText(href, "");
@@ -2180,9 +1989,7 @@ export function isHashOnlyHref(href = "") {
 export function isUnsafeHref(href = "") {
   const value = safeText(href, "");
 
-  if (!value) {
-    return true;
-  }
+  if (!value) return true;
 
   return /^(javascript|data|vbscript):/i.test(value);
 }
@@ -2190,17 +1997,10 @@ export function isUnsafeHref(href = "") {
 export function isExternalHref(href = "") {
   const value = safeText(href, "");
 
-  if (!value || isUnsafeHref(value)) {
-    return false;
-  }
+  if (!value || isUnsafeHref(value)) return false;
+  if (!isAbsoluteUrl(value)) return false;
 
-  if (!isAbsoluteUrl(value)) {
-    return false;
-  }
-
-  if (!isBrowser()) {
-    return true;
-  }
+  if (!isBrowser()) return true;
 
   try {
     return new URL(value).origin !== window.location.origin;
@@ -2217,9 +2017,7 @@ export async function runHookSeries(hooks = [], payload) {
   let current = payload;
 
   for (const hook of safeArray(hooks)) {
-    if (typeof hook !== "function") {
-      continue;
-    }
+    if (typeof hook !== "function") continue;
 
     try {
       const result = await hook(current);
@@ -2312,9 +2110,7 @@ export function normalizeHeaders(headers = {}) {
   return source.reduce((acc, [key, value]) => {
     const normalizedKey = String(key || "").trim();
 
-    if (!normalizedKey) {
-      return acc;
-    }
+    if (!normalizedKey) return acc;
 
     if (value !== undefined && value !== null && value !== "") {
       acc[normalizedKey] = value;
@@ -2327,13 +2123,8 @@ export function normalizeHeaders(headers = {}) {
 export function mergeAbortSignals(signals = []) {
   const validSignals = safeArray(signals).filter(Boolean);
 
-  if (!validSignals.length) {
-    return null;
-  }
-
-  if (validSignals.length === 1) {
-    return validSignals[0];
-  }
+  if (!validSignals.length) return null;
+  if (validSignals.length === 1) return validSignals[0];
 
   try {
     if (typeof AbortSignal !== "undefined" && typeof AbortSignal.any === "function") {
@@ -2359,9 +2150,7 @@ export function mergeAbortSignals(signals = []) {
   }
 
   function abortFrom(sourceSignal) {
-    if (controller.signal.aborted) {
-      return;
-    }
+    if (controller.signal.aborted) return;
 
     try {
       controller.abort(sourceSignal?.reason || "aborted");
@@ -2432,9 +2221,7 @@ export function isProbablyTimeoutError(error) {
 export function detectNetworkHints(url = "") {
   const hints = [];
 
-  if (!isBrowser()) {
-    return hints;
-  }
+  if (!isBrowser()) return hints;
 
   try {
     if (navigator.onLine === false) {
@@ -2444,29 +2231,27 @@ export function detectNetworkHints(url = "") {
 
   const rawUrl = safeText(url, "");
 
-  if (!rawUrl) {
-    return hints;
-  }
+  if (!rawUrl) return hints;
 
   try {
     const currentProtocol = window.location.protocol;
 
     if (/^https:\/\//i.test(rawUrl) && currentProtocol === "http:") {
-      hints.push("Hay mezcla de protocolos: frontend en HTTP y API en HTTPS.");
+      hints.push("Frontend HTTP contra API HTTPS.");
     }
 
     if (/^http:\/\//i.test(rawUrl) && currentProtocol === "https:") {
-      hints.push("Hay mezcla de protocolos: frontend en HTTPS y API en HTTP.");
+      hints.push("Frontend HTTPS contra API HTTP.");
     }
 
     const apiOrigin = new URL(rawUrl, window.location.origin).origin;
 
     if (apiOrigin && apiOrigin !== window.location.origin) {
-      hints.push("Petición cross-origin: revisa CORS y preflight OPTIONS.");
+      hints.push("Petición cross-origin: revisar CORS/preflight.");
     }
 
     if (getForbiddenFrontendApiOrigins().includes(apiOrigin)) {
-      hints.push("La petición apunta al dominio frontend. El backend canónico es https://api.onionit.net.");
+      hints.push("La petición apunta al dominio frontend. Backend canónico: https://api.onionit.net.");
     }
   } catch {}
 
@@ -2474,7 +2259,7 @@ export function detectNetworkHints(url = "") {
 }
 
 /* =========================================================
-   DEBUG SNAPSHOT
+   SNAPSHOT
 ========================================================= */
 
 export function getHelpersSnapshot() {

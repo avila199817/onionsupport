@@ -2,16 +2,17 @@
    ONION SUPPORT — RESET
    Archivo: /src/css/core/reset.css
 
-   CLEAN FOUNDATION · EXTREME LEVEL · PRO SAAS PANEL · 10/10
+   CLEAN FOUNDATION · PRIVATE SPA · PRO SAAS PANEL
+   NON VISUAL RESET · TABLE SAFE · CSP CLEAN
 
-   ARQUITECTURA:
+   Arquitectura:
    - reset.css     = normalización base no visual
    - variables.css = tokens
    - core.css      = tipografía, helpers, accesibilidad visual
    - layout.css    = shell, scroll, stacking, mounts
    - ui.css        = componentes
 
-   REGLAS:
+   Reglas:
    - Sin :root.
    - Sin [data-theme].
    - Sin paletas.
@@ -19,9 +20,9 @@
    - Sin scrollbars visuales globales.
    - Sin layout de app.
    - Sin decisiones visuales fuertes.
-   - Sin romper tablas reales.
-   - Sin convertir table/tr/td en block.
    - Sin estilos de componentes.
+   - Sin convertir table/tr/td en block.
+   - Sin romper tablas reales.
 ========================================================= */
 
 
@@ -37,7 +38,7 @@
 
 
 /* =========================================================
-   ROOT / DOCUMENT
+   DOCUMENT BASE
 ========================================================= */
 
 html {
@@ -63,6 +64,10 @@ body {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+main {
+  display: block;
 }
 
 body,
@@ -252,7 +257,7 @@ iframe {
 
 /* =========================================================
    TABLES
-   IMPORTANTE:
+   Importante:
    - No cambiar display de table/tr/td.
    - No convertir tablas en grids/bloques.
    - Las vistas definen su propia presentación.
@@ -326,6 +331,14 @@ button,
   cursor: pointer;
 }
 
+button::-moz-focus-inner,
+[type="button"]::-moz-focus-inner,
+[type="reset"]::-moz-focus-inner,
+[type="submit"]::-moz-focus-inner {
+  padding: 0;
+  border-style: none;
+}
+
 input,
 textarea,
 select {
@@ -334,11 +347,16 @@ select {
 }
 
 textarea {
+  overflow: auto;
   resize: vertical;
 }
 
 select {
   cursor: pointer;
+}
+
+optgroup {
+  font: inherit;
 }
 
 fieldset {
@@ -583,7 +601,7 @@ summary {
 
 /* =========================================================
    APP ROOT MIN-SIZE SAFETY
-   Sin posicionamiento. El layout vive en layout.css.
+   Sin posicionamiento. El layout real vive en layout.css.
 ========================================================= */
 
 #app,
@@ -597,6 +615,7 @@ summary {
 
 /* =========================================================
    FLEX / GRID CHILD SAFETY
+   Previene overflow accidental sin imponer layout visual.
 ========================================================= */
 
 :where(
@@ -645,7 +664,7 @@ select:-webkit-autofill:focus {
 
 /* =========================================================
    MOBILE TEXT SIZE / TAP POLISH
-   Evita zoom automático en iOS sin imponer diseño visual desktop.
+   Evita zoom automático en iOS sin imponer diseño desktop.
 ========================================================= */
 
 @media (hover: none) and (pointer: coarse) {

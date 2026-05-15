@@ -3,38 +3,26 @@
    Archivo: src/core/helpers.js
 
    ONION SUPPORT · CORE HELPERS
-   PATHS · USER · URL · REQUEST · TOKEN SAFE · 15/10
+   PATHS · USER · URL · REQUEST · TOKEN SAFE · 17/10
 
-   RESPONSABILIDADES:
+   Responsabilidades:
    - utilidades base del core
-   - normalización de paths, usernames y usuarios
+   - normalización de paths, usernames, slugs y usuarios
    - helpers de clonación / parse seguro
-   - helpers de URL / headers / abort / timeout
+   - helpers URL / headers / abort / timeout
    - diagnóstico de red
    - soporte robusto de avatar backend /me
    - redacción segura de tokens para logs/snapshots
-   - soporte hash-router y hashbang
+   - soporte history-router, hash-router y hashbang
    - construir URLs API sin doble /api
-   - impedir que /api/auth/me sea tratado como público
+   - impedir que /api/auth/me, /auth/me, /api/me o /me sean públicos
    - reforzar backend canónico api.onionit.net en producción
 
-   HARDENING EXTREMO:
-   - sanitize estricto de username
-   - paths robustos con query/hash
-   - canonical consistente SIN query/hash
-   - public path consistente CON query/hash
-   - public path conserva /@usuario
-   - soporte hash-router real: #/ruta y #!/ruta
-   - helpers seguros ante inputs raros
-   - preserve contexto público/canónico
-   - API base robusta sin doble /api
-   - detección public API compatible con /api prefix
-   - /me nunca es API pública
-   - normalización de usuario backend heterogéneo
-   - avatar robusto desde payload /me
-   - AbortController server/browser safe
-   - headers normalizados sin valores vacíos
-   - redacción de JWT, bearer y query tokens
+   Candados:
+   - normalizeCanonicalPath elimina /@usuario, query/hash y colapsa rutas token
+   - normalizePublicPath conserva /@usuario, query y hash
+   - buildUrl evita https://api.onionit.net/api/api/...
+   - buildUrl reescribe dominios frontend /api hacia backend canónico
    - api.onionit.net permitido como backend canónico
    - dominios frontend bloqueados como API base
    - producción fuerza https://api.onionit.net
@@ -47,246 +35,214 @@ import { config } from "./config.js";
    CONSTANTS
 ========================================================= */
 
-export const HELPERS_VERSION =
-  "15.1.0";
+export const HELPERS_VERSION = "17.0.0";
 
-const DEFAULT_ROUTE =
-  "/";
-
-const LOCAL_ORIGIN =
-  "http://localhost";
-
-const DEFAULT_STORAGE_PREFIX =
-  "onion";
+const DEFAULT_ROUTE = "/";
+const LOCAL_ORIGIN = "http://localhost";
+const DEFAULT_STORAGE_PREFIX = "onion";
 
 const CANONICAL_PRODUCTION_API_BASE =
-  config?.canonicalProductionApiBase ||
-  "https://api.onionit.net";
+  config?.canonicalProductionApiBase || "https://api.onionit.net";
 
-/*
-  IMPORTANTE:
-  api.onionit.net NO es forbidden.
-  Es el backend canónico.
-*/
-const FALLBACK_FORBIDDEN_FRONTEND_API_ORIGINS =
-  Object.freeze([
-    "https://onionsupport.com",
-    "https://www.onionsupport.com",
-    "http://onionsupport.com",
-    "http://www.onionsupport.com",
-  ]);
+const REQUIRED_PRIVATE_ME_PATHS = Object.freeze([
+  "/api/auth/me",
+  "/auth/me",
+  "/api/me",
+  "/me",
+]);
 
-const SAFE_USERNAME_MAX =
-  64;
+const FALLBACK_FORBIDDEN_FRONTEND_API_ORIGINS = Object.freeze([
+  "https://onionsupport.com",
+  "https://www.onionsupport.com",
+  "http://onionsupport.com",
+  "http://www.onionsupport.com",
+]);
 
-const SAFE_SLUG_MAX =
-  96;
+const FALLBACK_PUBLIC_API_PATHS = Object.freeze([
+  "/api/auth/login",
+  "/api/auth/refresh",
 
-const MAX_SAFE_CLONE_DEPTH =
-  8;
+  "/api/auth/reset-password-request",
+  "/api/auth/reset-password-confirm",
+  "/api/auth/reset-password/validate",
+  "/api/auth/reset-password/request",
+  "/api/auth/reset-password/confirm",
+  "/api/auth/password-reset/request",
+  "/api/auth/password-reset/confirm",
+  "/api/auth/password-reset/validate",
+  "/api/auth/forgot-password",
 
-const MAX_SAFE_CLONE_ARRAY =
-  500;
+  "/api/auth/activate",
+  "/api/auth/activate-account",
+  "/api/auth/activate/first-user",
+  "/api/auth/activate/validate",
 
-const MAX_SAFE_CLONE_KEYS =
-  300;
+  "/api/auth/2fa/login",
+  "/api/auth/2fa/request",
+  "/api/auth/2fa/resend",
+  "/api/auth/2fa/verify",
+  "/api/auth/mfa/login",
+  "/api/auth/mfa/request",
+  "/api/auth/mfa/resend",
+  "/api/auth/mfa/verify",
 
-const BAD_TOKEN_VALUES =
-  Object.freeze([
-    "",
-    "null",
-    "undefined",
-    "false",
-    "true",
-    "nan",
-    "none",
-    "empty",
-    "[object object]",
-    "{}",
-    "[]",
-    "\"\"",
-    "''",
-  ]);
+  "/api/auth/_health",
+  "/api/auth/health",
+  "/api/health",
+  "/api/health/ready",
+  "/api/health/live",
+  "/api/_health",
+  "/health",
+]);
 
-const TOKEN_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "activation_token",
-    "activate_token",
-    "resetToken",
-    "passwordResetToken",
-    "reset_token",
-    "password_reset_token",
-    "confirmToken",
-    "confirm_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
-    "code",
-    "otp",
-    "totp",
-    "t",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "jwt",
-    "bearer",
-    "auth",
-    "authorization",
-  ]);
+const FALLBACK_PRIVATE_API_PATHS = Object.freeze([
+  ...REQUIRED_PRIVATE_ME_PATHS,
 
-const TECHNICAL_TOKEN_PATHS =
-  Object.freeze([
-    "/activate-account",
-    "/reset-password/confirm",
-    "/password/reset",
-    "/auth/activate",
-    "/auth/reset",
-  ]);
+  "/api/auth/logout",
+  "/api/auth/logout-all",
+  "/api/auth/2fa/setup",
+  "/api/auth/2fa/confirm",
+  "/api/auth/2fa/disable",
+  "/api/auth/change-password",
 
-const TOKEN_COLLAPSE_PATHS =
-  Object.freeze([
-    "/activate-account",
-    "/reset-password/confirm",
-  ]);
+  "/api/tickets",
+  "/api/incidencias",
+  "/api/facturas",
+  "/api/invoices",
+  "/api/clientes",
+  "/api/clients",
+  "/api/users",
+  "/api/usuarios",
+  "/api/search",
+]);
 
-const DEFAULT_PUBLIC_API_PATHS =
-  Object.freeze([
-    "/auth/login",
-    "/auth/refresh",
-    "/auth/session/refresh",
-    "/auth/otp",
-    "/auth/otp/request",
-    "/auth/otp/verify",
-    "/auth/activate",
-    "/auth/activate-account",
-    "/auth/activate/first-user",
-    "/auth/reset",
-    "/auth/reset-password",
-    "/auth/password/reset",
-    "/auth/reset-password-request",
-    "/auth/reset-password-confirm",
-    "/auth/reset-password/validate",
-    "/auth/2fa/login",
-    "/auth/2fa/request",
-    "/auth/2fa/resend",
-    "/auth/mfa/login",
+const TOKEN_PARAM_NAMES = Object.freeze([
+  "token",
+  "activationToken",
+  "activateToken",
+  "activation_token",
+  "activate_token",
+  "resetToken",
+  "passwordResetToken",
+  "reset_token",
+  "password_reset_token",
+  "confirmToken",
+  "confirm_token",
+  "tempToken",
+  "temp_token",
+  "temporaryToken",
+  "temporary_token",
+  "challengeToken",
+  "challenge_token",
+  "twoFactorToken",
+  "two_factor_token",
+  "mfaToken",
+  "mfa_token",
+  "code",
+  "otp",
+  "totp",
+  "t",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "jwt",
+  "bearer",
+  "auth",
+  "authorization",
+]);
 
-    "/activate-account",
-    "/reset-password",
-    "/reset-password/confirm",
+const BAD_TOKEN_VALUES = Object.freeze([
+  "",
+  "null",
+  "undefined",
+  "false",
+  "true",
+  "nan",
+  "none",
+  "empty",
+  "[object object]",
+  "{}",
+  "[]",
+  "\"\"",
+  "''",
+]);
 
-    "/api/auth/login",
-    "/api/auth/refresh",
-    "/api/auth/session/refresh",
-    "/api/auth/otp",
-    "/api/auth/otp/request",
-    "/api/auth/otp/verify",
+const TECHNICAL_TOKEN_PATHS = Object.freeze([
+  "/activate-account",
+  "/reset-password/confirm",
+  "/password/reset",
+  "/auth/activate",
+  "/auth/reset",
+]);
 
-    /*
-      Canónico actual.
-    */
-    "/api/auth/activate",
+const TOKEN_COLLAPSE_PATHS = Object.freeze([
+  "/activate-account",
+  "/reset-password/confirm",
+]);
 
-    /*
-      Legacy compatible.
-    */
-    "/api/auth/activate-account",
+const USER_IDENTITY_KEYS = Object.freeze([
+  "id",
+  "userId",
+  "user_id",
+  "_id",
+  "uuid",
+  "uid",
+  "sub",
+  "username",
+  "userName",
+  "user_name",
+  "slug",
+  "email",
+  "mail",
+  "phone",
+  "telefono",
+  "mobile",
+  "cellphone",
+  "name",
+  "nombre",
+  "fullName",
+  "full_name",
+  "displayName",
+  "display_name",
+]);
 
-    "/api/auth/activate/first-user",
-    "/api/auth/activate/validate",
-    "/api/auth/reset",
-    "/api/auth/reset-password",
-    "/api/auth/password/reset",
-    "/api/auth/reset-password-request",
-    "/api/auth/reset-password-confirm",
-    "/api/auth/reset-password/confirm",
-    "/api/auth/reset-password/validate",
-    "/api/auth/password-reset/request",
-    "/api/auth/password-reset/confirm",
-    "/api/auth/password-reset/validate",
-    "/api/auth/forgot-password",
-    "/api/auth/2fa/login",
-    "/api/auth/2fa/request",
-    "/api/auth/2fa/resend",
-    "/api/auth/2fa/verify",
-    "/api/auth/mfa/login",
-    "/api/auth/mfa/verify",
-    "/api/auth/_health",
-    "/api/auth/health",
-    "/api/_health",
-    "/api/activate-account",
-    "/api/reset-password",
-    "/api/reset-password/confirm",
-    "/health",
-  ]);
+const AUTH_ENVELOPE_KEYS = Object.freeze([
+  "ok",
+  "success",
+  "authenticated",
+  "status",
+  "statusCode",
+  "status_code",
+  "error",
+  "errorCode",
+  "error_code",
+  "token",
+  "accessToken",
+  "access_token",
+  "refreshToken",
+  "refresh_token",
+  "tempToken",
+  "temp_token",
+  "data",
+  "payload",
+  "result",
+  "body",
+  "response",
+  "auth",
+  "authData",
+  "session",
+  "sessionData",
+]);
 
-const PRIVATE_API_PATHS =
-  Object.freeze([
-    "/api/auth/me",
-    "/api/me",
-    "/auth/me",
-    "/me",
-  ]);
+const MAX_SAFE_CLONE_DEPTH = 8;
+const MAX_SAFE_CLONE_ARRAY = 500;
+const MAX_SAFE_CLONE_KEYS = 300;
 
-const USER_IDENTITY_KEYS =
-  Object.freeze([
-    "id",
-    "userId",
-    "user_id",
-    "_id",
-    "uuid",
-    "uid",
-    "sub",
-    "username",
-    "userName",
-    "user_name",
-    "email",
-    "mail",
-    "phone",
-    "telefono",
-    "mobile",
-    "cellphone",
-  ]);
+const SAFE_USERNAME_MAX = 64;
+const SAFE_SLUG_MAX = 96;
 
-const AUTH_ENVELOPE_KEYS =
-  Object.freeze([
-    "ok",
-    "success",
-    "authenticated",
-    "status",
-    "statusCode",
-    "status_code",
-    "error",
-    "errorCode",
-    "error_code",
-    "token",
-    "accessToken",
-    "access_token",
-    "refreshToken",
-    "refresh_token",
-    "tempToken",
-    "temp_token",
-    "data",
-    "payload",
-    "result",
-    "body",
-    "response",
-    "auth",
-    "authData",
-    "session",
-    "sessionData",
-  ]);
-
-const SENSITIVE_USER_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|csrf|xsrf/i;
 
 const JWT_RE =
   /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
@@ -299,10 +255,7 @@ const BEARER_RE =
 ========================================================= */
 
 export function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 export function isDocumentReady() {
@@ -334,11 +287,16 @@ export function nowIso(ms = now()) {
 }
 
 export function isPlainObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  try {
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+  } catch {
+    return false;
+  }
 }
 
 export function isObject(value) {
@@ -346,10 +304,7 @@ export function isObject(value) {
 }
 
 export function isAnyObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object"
-  );
+  return value !== null && typeof value === "object";
 }
 
 export function isFunction(value) {
@@ -357,33 +312,21 @@ export function isFunction(value) {
 }
 
 export function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+  if (value === null || value === undefined) {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
-
+  const text = String(value).trim();
   return text || fallback;
 }
 
 export function safeLower(value, fallback = "") {
-  return safeText(
-    value,
-    fallback
-  ).toLowerCase();
+  return safeText(value, fallback).toLowerCase();
 }
 
 export function safeNumber(value, fallback = 0) {
-  const number =
-    Number(value);
-
-  return Number.isFinite(number)
-    ? number
-    : fallback;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 export function safeBool(value, fallback = false) {
@@ -396,35 +339,13 @@ export function safeBool(value, fallback = false) {
   }
 
   if (typeof value === "string") {
-    const clean =
-      value.trim().toLowerCase();
+    const clean = value.trim().toLowerCase();
 
-    if (
-      [
-        "true",
-        "1",
-        "yes",
-        "si",
-        "sí",
-        "ok",
-        "on",
-        "enabled",
-        "active",
-      ].includes(clean)
-    ) {
+    if (["true", "1", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(clean)) {
       return true;
     }
 
-    if (
-      [
-        "false",
-        "0",
-        "no",
-        "off",
-        "disabled",
-        "inactive",
-      ].includes(clean)
-    ) {
+    if (["false", "0", "no", "off", "disabled", "inactive"].includes(clean)) {
       return false;
     }
   }
@@ -433,40 +354,42 @@ export function safeBool(value, fallback = false) {
 }
 
 export function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return Array.isArray(value) ? value : [];
 }
 
 export function safeObject(value, fallback = {}) {
-  return isPlainObject(value)
-    ? value
-    : fallback;
+  return isPlainObject(value) ? value : fallback;
+}
+
+function toArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (value instanceof Set) {
+    return Array.from(value);
+  }
+
+  if (value === null || value === undefined) {
+    return [];
+  }
+
+  return [value];
 }
 
 export function unique(values = []) {
-  const input =
-    Array.isArray(values)
-      ? values
-      : [values];
+  const output = [];
+  const seen = new Set();
 
-  const output =
-    [];
+  for (const value of toArray(values).flat(Infinity)) {
+    const clean = safeText(value, "");
 
-  const seen =
-    new Set();
-
-  for (const value of input.flat(Infinity)) {
-    const clean =
-      safeText(value, "");
-
-    if (
-      clean &&
-      !seen.has(clean)
-    ) {
-      seen.add(clean);
-      output.push(clean);
+    if (!clean || seen.has(clean)) {
+      continue;
     }
+
+    seen.add(clean);
+    output.push(clean);
   }
 
   return output;
@@ -474,8 +397,7 @@ export function unique(values = []) {
 
 export function firstNonEmpty(...values) {
   for (const value of values) {
-    const text =
-      safeText(value, "");
+    const text = safeText(value, "");
 
     if (text) {
       return text;
@@ -487,10 +409,7 @@ export function firstNonEmpty(...values) {
 
 export function hasOwn(obj, key) {
   try {
-    return Object.prototype.hasOwnProperty.call(
-      obj,
-      key
-    );
+    return Object.prototype.hasOwnProperty.call(obj, key);
   } catch {
     return false;
   }
@@ -502,30 +421,12 @@ export function isDomScope(scope) {
   }
 
   try {
-    const hasElement =
-      typeof Element !== "undefined";
-
-    const hasDocument =
-      typeof Document !== "undefined";
-
-    const hasDocumentFragment =
-      typeof DocumentFragment !== "undefined";
-
     return (
       scope === document ||
       scope === window ||
-      (
-        hasElement &&
-        scope instanceof Element
-      ) ||
-      (
-        hasDocument &&
-        scope instanceof Document
-      ) ||
-      (
-        hasDocumentFragment &&
-        scope instanceof DocumentFragment
-      )
+      (typeof Element !== "undefined" && scope instanceof Element) ||
+      (typeof Document !== "undefined" && scope instanceof Document) ||
+      (typeof DocumentFragment !== "undefined" && scope instanceof DocumentFragment)
     );
   } catch {
     return false;
@@ -534,23 +435,16 @@ export function isDomScope(scope) {
 
 export function normalizeListenerOptions(options = false) {
   if (typeof options === "boolean") {
-    return {
-      capture:
-        options,
-    };
+    return { capture: options };
   }
 
   if (isPlainObject(options)) {
-    return {
-      ...options,
-    };
+    return { ...options };
   }
 
   return {
-    capture:
-      false,
-    passive:
-      false,
+    capture: false,
+    passive: false,
   };
 }
 
@@ -559,25 +453,19 @@ export function normalizeListenerOptions(options = false) {
 ========================================================= */
 
 export function getStoragePrefix() {
-  return safeText(
-    config?.storagePrefix ||
-      config?.appKey ||
-      config?.appId ||
-      DEFAULT_STORAGE_PREFIX,
-    DEFAULT_STORAGE_PREFIX
-  )
-    .replace(/:+$/g, "")
-    .replace(/^:+/g, "") ||
-    DEFAULT_STORAGE_PREFIX;
+  return (
+    safeText(
+      config?.storagePrefix || config?.appKey || config?.appId || DEFAULT_STORAGE_PREFIX,
+      DEFAULT_STORAGE_PREFIX
+    )
+      .replace(/:+$/g, "")
+      .replace(/^:+/g, "") || DEFAULT_STORAGE_PREFIX
+  );
 }
 
 export function buildStorageKey(key = "") {
-  const prefix =
-    getStoragePrefix();
-
-  const cleanKey =
-    safeText(key, "")
-      .replace(/^:+/g, "");
+  const prefix = getStoragePrefix();
+  const cleanKey = safeText(key, "").replace(/^:+/g, "");
 
   if (!cleanKey) {
     return prefix;
@@ -607,20 +495,13 @@ export function safeParse(value, fallback = null) {
     return value;
   }
 
-  const raw =
-    String(value).trim();
+  const raw = String(value).trim();
 
   if (!raw) {
     return fallback;
   }
 
-  if (
-    [
-      "undefined",
-      "nan",
-      "[object Object]",
-    ].includes(raw)
-  ) {
+  if (["undefined", "nan", "[object object]"].includes(raw.toLowerCase())) {
     return fallback;
   }
 
@@ -654,10 +535,7 @@ function cloneDeepFallback(value, fallback = null, depth = 0, seen = new WeakMap
     return fallback;
   }
 
-  if (
-    value === null ||
-    typeof value !== "object"
-  ) {
+  if (value === null || typeof value !== "object") {
     return value;
   }
 
@@ -688,30 +566,18 @@ function cloneDeepFallback(value, fallback = null, depth = 0, seen = new WeakMap
   if (Array.isArray(value)) {
     return value
       .slice(0, MAX_SAFE_CLONE_ARRAY)
-      .map((item) =>
-        cloneDeepFallback(
-          item,
-          null,
-          depth + 1,
-          seen
-        )
-      );
+      .map((item) => cloneDeepFallback(item, null, depth + 1, seen));
   }
 
   const output = {};
-
-  const entries =
-    Object.entries(value)
-      .slice(0, MAX_SAFE_CLONE_KEYS);
+  const entries = Object.entries(value).slice(0, MAX_SAFE_CLONE_KEYS);
 
   for (const [key, item] of entries) {
-    output[key] =
-      cloneDeepFallback(
-        item,
-        null,
-        depth + 1,
-        seen
-      );
+    if (typeof item === "function") {
+      continue;
+    }
+
+    output[key] = cloneDeepFallback(item, null, depth + 1, seen);
   }
 
   return output;
@@ -733,16 +599,11 @@ export function safeClone(value, fallback = null) {
   } catch {}
 
   try {
-    return JSON.parse(
-      safeStringify(value)
-    );
+    return JSON.parse(safeStringify(value));
   } catch {}
 
   try {
-    return cloneDeepFallback(
-      value,
-      fallback
-    );
+    return cloneDeepFallback(value, fallback);
   } catch {
     return fallback;
   }
@@ -755,71 +616,31 @@ export function cloneError(error = null) {
 
   if (error instanceof Error) {
     return {
-      name:
-        error.name || "Error",
-
-      message:
-        redactTokenInText(
-          error.message || ""
-        ),
-
-      stack:
-        error.stack ? "[stack]" : null,
-
-      code:
-        error.code || null,
-
-      status:
-        error.status || error.statusCode || null,
-
-      statusCode:
-        error.statusCode || error.status || null,
-
-      timeout:
-        Boolean(error.timeout),
-
-      aborted:
-        Boolean(error.aborted),
-
-      data:
-        safeClone(error.data, null),
-
-      body:
-        safeClone(error.body, null),
-
-      cause:
-        error.cause
-          ? redactTokenInText(
-              safeText(error.cause?.message || error.cause, "")
-            )
-          : null,
+      name: error.name || "Error",
+      message: redactTokenInText(error.message || ""),
+      stack: error.stack ? "[stack]" : null,
+      code: error.code || null,
+      status: error.status || error.statusCode || null,
+      statusCode: error.statusCode || error.status || null,
+      timeout: Boolean(error.timeout),
+      aborted: Boolean(error.aborted),
+      data: redactSensitiveObject(error.data, null),
+      body: redactSensitiveObject(error.body, null),
+      cause: error.cause
+        ? redactTokenInText(safeText(error.cause?.message || error.cause, ""))
+        : null,
     };
   }
 
   if (typeof error === "object") {
-    const cloned =
-      safeClone(
-        error,
-        {
-          message:
-            redactTokenInText(String(error)),
-        }
-      );
-
-    if (cloned?.message) {
-      cloned.message =
-        redactTokenInText(cloned.message);
-    }
-
-    return cloned;
+    return redactSensitiveObject(error, {
+      message: redactTokenInText(String(error)),
+    });
   }
 
   return {
-    name:
-      "Error",
-
-    message:
-      redactTokenInText(String(error)),
+    name: "Error",
+    message: redactTokenInText(String(error)),
   };
 }
 
@@ -828,15 +649,12 @@ export function cloneError(error = null) {
 ========================================================= */
 
 function escapeRegExp(value = "") {
-  return String(value)
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function getAllTokenParamNames() {
   try {
-    const fromConfig =
-      Object.values(config?.auth?.tokenParamNames || {})
-        .flat();
+    const fromConfig = Object.values(config?.auth?.tokenParamNames || {}).flat();
 
     return unique([
       ...TOKEN_PARAM_NAMES,
@@ -849,8 +667,7 @@ function getAllTokenParamNames() {
 }
 
 export function redactTokenInText(value = "") {
-  let output =
-    safeText(value, "");
+  let output = safeText(value, "");
 
   if (!output) {
     return "";
@@ -867,29 +684,81 @@ export function redactTokenInText(value = "") {
 
   for (const path of TECHNICAL_TOKEN_PATHS) {
     try {
-      const escapedPath =
-        escapeRegExp(path);
-
       output = output.replace(
-        new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
+        new RegExp(`(${escapeRegExp(path)})\\/([^/?#\\s]+)`, "gi"),
         "$1/***"
       );
     } catch {}
   }
 
   try {
-    output = output.replace(
-      BEARER_RE,
-      "$1***"
-    );
+    output = output.replace(BEARER_RE, "$1***");
   } catch {}
 
   try {
-    output = output.replace(
-      JWT_RE,
-      "***"
-    );
+    output = output.replace(JWT_RE, "***");
   } catch {}
+
+  return output;
+}
+
+export function redactSensitiveObject(value, fallback = null, depth = 0, seen = new WeakMap()) {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    return redactTokenInText(value);
+  }
+
+  if (typeof value !== "object") {
+    return value;
+  }
+
+  if (depth > MAX_SAFE_CLONE_DEPTH) {
+    return "[depth-limit]";
+  }
+
+  try {
+    if (seen.has(value)) {
+      return "[circular]";
+    }
+
+    seen.set(value, true);
+  } catch {}
+
+  if (value instanceof Date) {
+    try {
+      return value.toISOString();
+    } catch {
+      return String(value);
+    }
+  }
+
+  if (value instanceof Error) {
+    return cloneError(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, MAX_SAFE_CLONE_ARRAY)
+      .map((item) => redactSensitiveObject(item, null, depth + 1, seen));
+  }
+
+  const output = {};
+
+  for (const [key, item] of Object.entries(value).slice(0, MAX_SAFE_CLONE_KEYS)) {
+    if (SENSITIVE_KEY_RE.test(key)) {
+      output[key] = "***";
+      continue;
+    }
+
+    output[key] = redactSensitiveObject(item, null, depth + 1, seen);
+  }
 
   return output;
 }
@@ -899,10 +768,7 @@ export function redactTokenInText(value = "") {
 ========================================================= */
 
 export function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
+  if (isBrowser() && window.location?.origin) {
     return window.location.origin;
   }
 
@@ -910,24 +776,34 @@ export function getBaseOrigin() {
 }
 
 export function isAbsoluteUrl(value = "") {
-  return /^[a-z][a-z\d+.-]*:\/\//i.test(
-    safeText(value, "")
-  );
+  return /^[a-z][a-z\d+.-]*:\/\//i.test(safeText(value, ""));
+}
+
+function getOriginFromUrlLike(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    if (isAbsoluteUrl(raw)) {
+      return new URL(raw).origin;
+    }
+
+    return new URL(raw, getBaseOrigin()).origin;
+  } catch {
+    return "";
+  }
 }
 
 export function isHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  return (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  );
+  const raw = safeText(value, "");
+  return raw.startsWith("#/") || raw.startsWith("#!");
 }
 
 export function normalizeHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "");
 
   if (!raw) {
     return DEFAULT_ROUTE;
@@ -941,123 +817,194 @@ export function normalizeHashRouterPath(value = "") {
 }
 
 export function normalizeSearch(search = "") {
-  const raw =
-    safeText(search, "");
+  const raw = safeText(search, "");
 
   if (!raw) {
     return "";
   }
 
-  return raw.startsWith("?")
-    ? raw
-    : `?${raw.replace(/^\?+/, "")}`;
+  return raw.startsWith("?") ? raw : `?${raw.replace(/^\?+/, "")}`;
 }
 
 export function normalizeHash(hash = "") {
-  const raw =
-    safeText(hash, "");
+  const raw = safeText(hash, "");
 
   if (!raw) {
     return "";
   }
 
-  return raw.startsWith("#")
-    ? raw
-    : `#${raw.replace(/^#+/, "")}`;
+  return raw.startsWith("#") ? raw : `#${raw.replace(/^#+/, "")}`;
 }
 
 export function splitPathParts(path = DEFAULT_ROUTE) {
-  const raw =
-    safeText(path, DEFAULT_ROUTE) ||
-    DEFAULT_ROUTE;
+  const raw = safeText(path, DEFAULT_ROUTE) || DEFAULT_ROUTE;
 
   if (isHashRouterPath(raw)) {
-    return splitPathParts(
-      normalizeHashRouterPath(raw)
-    );
+    return splitPathParts(normalizeHashRouterPath(raw));
   }
 
-  let pathname =
-    raw;
+  let pathname = raw;
+  let search = "";
+  let hash = "";
 
-  let search =
-    "";
-
-  let hash =
-    "";
-
-  const hashIndex =
-    pathname.indexOf("#");
+  const hashIndex = pathname.indexOf("#");
 
   if (hashIndex >= 0) {
-    hash =
-      pathname.slice(hashIndex);
-
-    pathname =
-      pathname.slice(0, hashIndex) ||
-      DEFAULT_ROUTE;
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
   }
 
-  const searchIndex =
-    pathname.indexOf("?");
+  const searchIndex = pathname.indexOf("?");
 
   if (searchIndex >= 0) {
-    search =
-      pathname.slice(searchIndex);
-
-    pathname =
-      pathname.slice(0, searchIndex) ||
-      DEFAULT_ROUTE;
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
   }
 
   return {
     pathname,
-    search:
-      normalizeSearch(search),
-    hash:
-      normalizeHash(hash),
-    suffix:
-      `${normalizeSearch(search)}${normalizeHash(hash)}`,
+    search: normalizeSearch(search),
+    hash: normalizeHash(hash),
+    suffix: `${normalizeSearch(search)}${normalizeHash(hash)}`,
   };
 }
 
 export function stripSearchAndHash(path = DEFAULT_ROUTE) {
-  return (
-    splitPathParts(path).pathname ||
-    DEFAULT_ROUTE
-  );
+  return splitPathParts(path).pathname || DEFAULT_ROUTE;
 }
 
 export function getSearchAndHash(path = DEFAULT_ROUTE) {
-  const parts =
-    splitPathParts(path);
-
+  const parts = splitPathParts(path);
   return `${parts.search}${parts.hash}`;
 }
 
+export function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
+  let value = String(pathname || DEFAULT_ROUTE)
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!value) {
+    value = DEFAULT_ROUTE;
+  }
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  const normalizedSegments = [];
+
+  for (const segment of value.split("/")) {
+    if (!segment || segment === ".") {
+      continue;
+    }
+
+    if (segment === "..") {
+      normalizedSegments.pop();
+      continue;
+    }
+
+    normalizedSegments.push(segment);
+  }
+
+  value = `/${normalizedSegments.join("/")}` || DEFAULT_ROUTE;
+
+  if (value.length > 1 && value.endsWith("/")) {
+    value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
+  }
+
+  return value;
+}
+
+export function normalizePath(path = DEFAULT_ROUTE) {
+  if (path === null || path === undefined) {
+    return DEFAULT_ROUTE;
+  }
+
+  let raw = String(path).trim();
+
+  if (!raw) {
+    return DEFAULT_ROUTE;
+  }
+
+  if (isHashRouterPath(raw)) {
+    return normalizePath(normalizeHashRouterPath(raw));
+  }
+
+  try {
+    if (isAbsoluteUrl(raw)) {
+      const url = new URL(raw, getBaseOrigin());
+
+      if (url.hash && isHashRouterPath(url.hash)) {
+        return normalizePath(normalizeHashRouterPath(url.hash));
+      }
+
+      raw = `${url.pathname || DEFAULT_ROUTE}${url.search || ""}${url.hash || ""}`;
+    }
+  } catch {
+    return DEFAULT_ROUTE;
+  }
+
+  raw = raw.replace(/^[.][/]+/, "/");
+
+  const { pathname, search, hash } = splitPathParts(raw);
+
+  if (hash && isHashRouterPath(hash)) {
+    return normalizePath(normalizeHashRouterPath(hash));
+  }
+
+  return `${normalizePathnameOnly(pathname)}${search}${hash}`;
+}
+
+export function stripUsernamePrefix(path = DEFAULT_ROUTE) {
+  const normalized = normalizePath(path);
+  const pathOnly = stripSearchAndHash(normalized);
+  const suffix = getSearchAndHash(normalized);
+
+  const stripped = pathOnly.replace(/^\/@[^/]+(?=\/|$)/i, "") || DEFAULT_ROUTE;
+
+  return normalizePath(`${stripped}${suffix}`);
+}
+
+function collapseTechnicalTokenPath(pathOnly = DEFAULT_ROUTE) {
+  const clean = normalizePathnameOnly(pathOnly);
+
+  for (const base of TOKEN_COLLAPSE_PATHS) {
+    if (clean === base || clean.startsWith(`${base}/`)) {
+      return base;
+    }
+  }
+
+  return clean;
+}
+
+export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
+  const normalized = normalizePath(path);
+  const noSlug = stripUsernamePrefix(normalized);
+  const pathOnly = stripSearchAndHash(noSlug);
+
+  return collapseTechnicalTokenPath(pathOnly || DEFAULT_ROUTE);
+}
+
+export function normalizePublicPath(path = DEFAULT_ROUTE) {
+  return normalizePath(path);
+}
+
 /* =========================================================
-   USER / SLUG / PATH
+   USERNAME / SLUG
 ========================================================= */
 
 export function sanitizeUsername(value = "") {
-  let raw =
-    String(value || "")
-      .normalize("NFKC")
-      .trim();
+  let raw = String(value || "").normalize("NFKC").trim();
 
   if (!raw) {
     return "";
   }
 
-  raw =
-    raw.replace(/^@+/, "");
+  raw = raw.replace(/^@+/, "");
 
-  if (
-    raw.includes("@") &&
-    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(raw)
-  ) {
-    raw =
-      raw.split("@")[0] || raw;
+  if (raw.includes("@") && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(raw)) {
+    raw = raw.split("@")[0] || raw;
   }
 
   return raw
@@ -1084,44 +1031,81 @@ export function slugify(value = "") {
     .slice(0, SAFE_SLUG_MAX);
 }
 
-export function normalizeApiBase(base = "") {
-  const raw =
-    String(base || "")
-      .trim();
+export function buildPublicPath(path = DEFAULT_ROUTE, username = "") {
+  const publicPath = stripUsernamePrefix(normalizePath(path));
+  const cleanUsername = sanitizeUsername(username);
 
-  if (
-    !raw ||
-    raw === "/" ||
-    raw === "/api" ||
-    raw === "api"
-  ) {
+  if (!cleanUsername) {
+    return publicPath;
+  }
+
+  if (stripSearchAndHash(publicPath) === DEFAULT_ROUTE && !getSearchAndHash(publicPath)) {
+    return `/@${cleanUsername}`;
+  }
+
+  return normalizePath(`/@${cleanUsername}${publicPath}`);
+}
+
+/* =========================================================
+   API BASE / URL BUILD
+========================================================= */
+
+function getCanonicalBackendOrigins() {
+  return unique([
+    CANONICAL_PRODUCTION_API_BASE,
+    ...(config?.canonicalBackendApiOrigins || []),
+    ...(config?.api?.canonicalBackendOrigins || []),
+    ...(config?.security?.canonicalBackendApiOrigins || []),
+  ])
+    .map((origin) => getOriginFromUrlLike(origin))
+    .filter(Boolean);
+}
+
+function getForbiddenFrontendApiOrigins() {
+  const backendOrigins = getCanonicalBackendOrigins();
+
+  return unique([
+    ...FALLBACK_FORBIDDEN_FRONTEND_API_ORIGINS,
+    ...(config?.forbiddenFrontendApiOrigins || []),
+    ...(config?.api?.forbiddenFrontendOrigins || []),
+    ...(config?.security?.forbiddenFrontendApiOrigins || []),
+  ])
+    .map((origin) => getOriginFromUrlLike(origin))
+    .filter(Boolean)
+    .filter((origin) => !backendOrigins.includes(origin));
+}
+
+function isForbiddenFrontendApiBase(value = "") {
+  const origin = getOriginFromUrlLike(value);
+  return Boolean(origin && getForbiddenFrontendApiOrigins().includes(origin));
+}
+
+function isProductionEnv() {
+  const env = safeLower(config?.env || config?.environment || "", "");
+
+  return env === "production" || env === "prod";
+}
+
+export function normalizeApiBase(base = "") {
+  const raw = String(base || "").trim();
+
+  if (!raw || raw === "/" || raw === "/api" || raw === "api") {
     return "";
   }
 
   if (isAbsoluteUrl(raw)) {
     try {
-      const parsed =
-        new URL(raw);
+      const parsed = new URL(raw);
 
-      const origin =
-        parsed.origin.replace(/\/+$/g, "");
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return "";
+      }
 
-      const pathname =
-        normalizePathnameOnly(parsed.pathname || "/");
+      const origin = parsed.origin.replace(/\/+$/g, "");
+      const pathname = normalizePathnameOnly(parsed.pathname || "/");
+      const canonicalOrigins = getCanonicalBackendOrigins();
 
-      /*
-        apiBase debe ser origin-only cuando:
-        - path es /
-        - path es /api
-        - origen es api.onionit.net
-
-        Los endpoints ya incluyen /api.
-      */
-      if (
-        pathname === "/" ||
-        pathname === "/api" ||
-        origin === getOriginFromUrlLike(CANONICAL_PRODUCTION_API_BASE)
-      ) {
+      if (pathname === "/" || pathname === "/api" || canonicalOrigins.includes(origin)) {
         return origin;
       }
 
@@ -1131,322 +1115,25 @@ export function normalizeApiBase(base = "") {
     }
   }
 
-  return raw.replace(/\/+$/, "");
-}
-
-function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
-  let value =
-    String(pathname || DEFAULT_ROUTE)
-      .trim()
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
-
-  if (!value) {
-    value =
-      DEFAULT_ROUTE;
-  }
-
-  if (!value.startsWith("/")) {
-    value =
-      `/${value}`;
-  }
-
-  const segments =
-    value.split("/");
-
-  const normalizedSegments =
-    [];
-
-  for (const segment of segments) {
-    if (
-      !segment ||
-      segment === "."
-    ) {
-      continue;
-    }
-
-    if (segment === "..") {
-      normalizedSegments.pop();
-      continue;
-    }
-
-    normalizedSegments.push(segment);
-  }
-
-  value =
-    `/${normalizedSegments.join("/")}` ||
-    DEFAULT_ROUTE;
-
-  if (
-    value.length > 1 &&
-    value.endsWith("/")
-  ) {
-    value =
-      value.replace(/\/+$/g, "") ||
-      DEFAULT_ROUTE;
-  }
-
-  return value;
-}
-
-export function normalizePath(path = DEFAULT_ROUTE) {
-  if (
-    path === null ||
-    path === undefined
-  ) {
-    return DEFAULT_ROUTE;
-  }
-
-  let raw =
-    String(path).trim();
-
-  if (!raw) {
-    return DEFAULT_ROUTE;
-  }
-
-  if (isHashRouterPath(raw)) {
-    return normalizePath(
-      normalizeHashRouterPath(raw)
-    );
-  }
-
-  try {
-    if (isAbsoluteUrl(raw)) {
-      const url =
-        new URL(raw, getBaseOrigin());
-
-      if (
-        url.hash &&
-        isHashRouterPath(url.hash)
-      ) {
-        return normalizePath(
-          normalizeHashRouterPath(url.hash)
-        );
-      }
-
-      raw =
-        `${url.pathname || DEFAULT_ROUTE}${url.search || ""}${url.hash || ""}`;
-    }
-  } catch {
-    return DEFAULT_ROUTE;
-  }
-
-  raw =
-    raw.replace(/^[.][/]+/, "/");
-
-  const {
-    pathname,
-    search,
-    hash,
-  } =
-    splitPathParts(raw);
-
-  if (
-    hash &&
-    isHashRouterPath(hash)
-  ) {
-    return normalizePath(
-      normalizeHashRouterPath(hash)
-    );
-  }
-
-  const cleanPathname =
-    normalizePathnameOnly(pathname);
-
-  return `${cleanPathname}${search}${hash}`;
-}
-
-export function stripUsernamePrefix(path = DEFAULT_ROUTE) {
-  const normalized =
-    normalizePath(path);
-
-  const pathOnly =
-    stripSearchAndHash(normalized);
-
-  const suffix =
-    getSearchAndHash(normalized);
-
-  const stripped =
-    pathOnly.replace(
-      /^\/@[^/]+(?=\/|$)/i,
-      ""
-    ) || DEFAULT_ROUTE;
-
-  return normalizePath(
-    `${stripped}${suffix}`
-  );
-}
-
-function collapseTechnicalTokenPath(pathOnly = DEFAULT_ROUTE) {
-  const clean =
-    normalizePathnameOnly(pathOnly);
-
-  for (const base of TOKEN_COLLAPSE_PATHS) {
-    if (
-      clean === base ||
-      clean.startsWith(`${base}/`)
-    ) {
-      return base;
-    }
-  }
-
-  return clean;
-}
-
-export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
-  const normalized =
-    normalizePath(path);
-
-  const noSlug =
-    stripUsernamePrefix(normalized);
-
-  const pathOnly =
-    stripSearchAndHash(noSlug);
-
-  return collapseTechnicalTokenPath(
-    pathOnly || DEFAULT_ROUTE
-  );
-}
-
-export function normalizePublicPath(path = DEFAULT_ROUTE) {
-  /*
-    Public path = URL visible real.
-    Debe conservar /@usuario, query y hash.
-  */
-  return normalizePath(path);
-}
-
-export function buildPublicPath(path = DEFAULT_ROUTE, username = "") {
-  const publicPath =
-    stripUsernamePrefix(
-      normalizePath(path)
-    );
-
-  const cleanUsername =
-    sanitizeUsername(username);
-
-  if (!cleanUsername) {
-    return publicPath;
-  }
-
-  if (publicPath === DEFAULT_ROUTE) {
-    return `/@${cleanUsername}`;
-  }
-
-  return normalizePath(
-    `/@${cleanUsername}${publicPath}`
-  );
-}
-
-/* =========================================================
-   URL / REQUEST
-========================================================= */
-
-function getForbiddenFrontendApiOrigins() {
-  const rawOrigins = [
-    ...FALLBACK_FORBIDDEN_FRONTEND_API_ORIGINS,
-    ...(config?.forbiddenFrontendApiOrigins || []),
-    ...(config?.api?.forbiddenFrontendOrigins || []),
-    ...(config?.security?.forbiddenFrontendApiOrigins || []),
-  ];
-
-  const backendOrigins =
-    unique([
-      CANONICAL_PRODUCTION_API_BASE,
-      ...(config?.canonicalBackendApiOrigins || []),
-      ...(config?.api?.canonicalBackendOrigins || []),
-      ...(config?.security?.canonicalBackendApiOrigins || []),
-    ])
-      .map((origin) =>
-        getOriginFromUrlLike(origin)
-      )
-      .filter(Boolean);
-
-  return unique(
-    rawOrigins
-      .map((origin) =>
-        getOriginFromUrlLike(origin)
-      )
-      .filter(Boolean)
-  )
-    .filter((origin) =>
-      !backendOrigins.includes(origin)
-    );
-}
-
-function getOriginFromUrlLike(value = "") {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return "";
-  }
-
-  try {
-    if (isAbsoluteUrl(raw)) {
-      return new URL(raw).origin;
-    }
-
-    return new URL(raw, getBaseOrigin()).origin;
-  } catch {
-    return "";
-  }
-}
-
-function isForbiddenFrontendApiBase(value = "") {
-  const origin =
-    getOriginFromUrlLike(value);
-
-  if (!origin) {
-    return false;
-  }
-
-  return getForbiddenFrontendApiOrigins()
-    .includes(origin);
-}
-
-function isProductionEnv() {
-  const env =
-    safeLower(
-      config?.env ||
-        config?.environment ||
-        "",
-      ""
-    );
-
-  return (
-    env === "production" ||
-    env === "prod"
-  );
+  return raw.replace(/\/+$/g, "");
 }
 
 export function getSafeApiBase() {
-  const configuredBase =
-    normalizeApiBase(
-      config?.apiBase ||
-        config?.apiOrigin ||
-        config?.apiUrl ||
-        config?.api?.base ||
-        config?.api?.baseUrl ||
-        config?.api?.origin ||
-        ""
-    );
+  const configuredBase = normalizeApiBase(
+    config?.apiBase ||
+      config?.apiOrigin ||
+      config?.apiUrl ||
+      config?.api?.base ||
+      config?.api?.baseUrl ||
+      config?.api?.origin ||
+      ""
+  );
 
-  /*
-    Candado definitivo:
-    En producción el backend es SIEMPRE api.onionit.net.
-    No se permite same-origin ni dominios frontend ni otros hosts.
-  */
   if (isProductionEnv()) {
     return CANONICAL_PRODUCTION_API_BASE;
   }
 
-  if (
-    !configuredBase ||
-    configuredBase === "/api" ||
-    configuredBase === "api" ||
-    isForbiddenFrontendApiBase(configuredBase)
-  ) {
+  if (configuredBase && isForbiddenFrontendApiBase(configuredBase)) {
     return CANONICAL_PRODUCTION_API_BASE;
   }
 
@@ -1454,8 +1141,7 @@ export function getSafeApiBase() {
 }
 
 function getBasePathFromUrlLike(base = "") {
-  const cleanBase =
-    normalizeApiBase(base);
+  const cleanBase = normalizeApiBase(base);
 
   if (!cleanBase) {
     return "";
@@ -1463,9 +1149,7 @@ function getBasePathFromUrlLike(base = "") {
 
   try {
     if (isAbsoluteUrl(cleanBase)) {
-      return normalizePathnameOnly(
-        new URL(cleanBase, getBaseOrigin()).pathname || ""
-      );
+      return normalizePathnameOnly(new URL(cleanBase, getBaseOrigin()).pathname || "");
     }
 
     return normalizePathnameOnly(cleanBase);
@@ -1475,41 +1159,25 @@ function getBasePathFromUrlLike(base = "") {
 }
 
 function shouldAvoidDoubleBase(base = "", path = "") {
-  const basePath =
-    getBasePathFromUrlLike(base)
-      .replace(/^\/+/, "");
+  const basePath = getBasePathFromUrlLike(base).replace(/^\/+/, "");
+  const cleanPath = safeText(path, "").replace(/^\/+/, "");
 
-  const cleanPath =
-    safeText(path, "")
-      .replace(/^\/+/, "");
-
-  if (
-    !basePath ||
-    !cleanPath
-  ) {
+  if (!basePath || !cleanPath) {
     return false;
   }
 
-  return (
-    cleanPath === basePath ||
-    cleanPath.startsWith(`${basePath}/`)
-  );
+  return cleanPath === basePath || cleanPath.startsWith(`${basePath}/`);
 }
 
 export function joinUrl(base = "", path = "") {
-  const rawPath =
-    String(path || "")
-      .trim();
+  const rawPath = String(path || "").trim();
 
   if (isAbsoluteUrl(rawPath)) {
     return rawPath;
   }
 
-  const cleanBase =
-    normalizeApiBase(base);
-
-  const cleanPath =
-    rawPath.replace(/^\/+/, "");
+  const cleanBase = normalizeApiBase(base);
+  const cleanPath = rawPath.replace(/^\/+/, "");
 
   if (!cleanPath) {
     return cleanBase || "/";
@@ -1522,9 +1190,7 @@ export function joinUrl(base = "", path = "") {
   if (shouldAvoidDoubleBase(cleanBase, cleanPath)) {
     if (isAbsoluteUrl(cleanBase)) {
       try {
-        const parsed =
-          new URL(cleanBase, getBaseOrigin());
-
+        const parsed = new URL(cleanBase, getBaseOrigin());
         return `${parsed.origin}/${cleanPath}`;
       } catch {}
     }
@@ -1540,74 +1206,44 @@ function appendQueryToUrl(baseUrl = "", query = null) {
     return baseUrl;
   }
 
-  let queryEntries =
-    [];
+  let queryEntries = [];
 
   try {
-    if (
-      typeof URLSearchParams !== "undefined" &&
-      query instanceof URLSearchParams
-    ) {
-      queryEntries =
-        Array.from(query.entries());
+    if (typeof URLSearchParams !== "undefined" && query instanceof URLSearchParams) {
+      queryEntries = Array.from(query.entries());
     } else if (Array.isArray(query)) {
-      queryEntries =
-        query;
+      queryEntries = query;
     } else if (isPlainObject(query)) {
-      queryEntries =
-        Object.entries(query);
+      queryEntries = Object.entries(query);
     }
   } catch {
-    queryEntries =
-      [];
+    queryEntries = [];
   }
 
   if (!queryEntries.length) {
     return baseUrl;
   }
 
-  const wasAbsolute =
-    isAbsoluteUrl(baseUrl);
-
+  const wasAbsolute = isAbsoluteUrl(baseUrl);
   let url;
 
   try {
-    url =
-      new URL(
-        baseUrl,
-        getBaseOrigin()
-      );
+    url = new URL(baseUrl, getBaseOrigin());
   } catch {
     return baseUrl;
   }
 
   for (const [key, value] of queryEntries) {
-    const cleanKey =
-      safeText(key, "");
+    const cleanKey = safeText(key, "");
 
-    if (!cleanKey) {
-      continue;
-    }
-
-    if (
-      value === undefined ||
-      value === null ||
-      value === ""
-    ) {
+    if (!cleanKey || value === undefined || value === null || value === "") {
       continue;
     }
 
     if (Array.isArray(value)) {
       for (const item of value) {
-        if (
-          item !== undefined &&
-          item !== null &&
-          item !== ""
-        ) {
-          url.searchParams.append(
-            cleanKey,
-            String(item)
-          );
+        if (item !== undefined && item !== null && item !== "") {
+          url.searchParams.append(cleanKey, String(item));
         }
       }
 
@@ -1615,27 +1251,16 @@ function appendQueryToUrl(baseUrl = "", query = null) {
     }
 
     if (value instanceof Date) {
-      url.searchParams.set(
-        cleanKey,
-        value.toISOString()
-      );
-
+      url.searchParams.set(cleanKey, value.toISOString());
       continue;
     }
 
     if (typeof value === "object") {
-      url.searchParams.set(
-        cleanKey,
-        safeStringify(value, "{}")
-      );
-
+      url.searchParams.set(cleanKey, safeStringify(value, "{}"));
       continue;
     }
 
-    url.searchParams.set(
-      cleanKey,
-      String(value)
-    );
+    url.searchParams.set(cleanKey, String(value));
   }
 
   if (wasAbsolute) {
@@ -1646,35 +1271,21 @@ function appendQueryToUrl(baseUrl = "", query = null) {
 }
 
 function rewriteForbiddenFrontendApiUrl(url = "") {
-  const raw =
-    safeText(url, "");
+  const raw = safeText(url, "");
 
   if (!raw || !isAbsoluteUrl(raw)) {
     return raw;
   }
 
   try {
-    const parsed =
-      new URL(raw);
+    const parsed = new URL(raw);
 
-    const origin =
-      parsed.origin;
-
-    if (!getForbiddenFrontendApiOrigins().includes(origin)) {
+    if (!getForbiddenFrontendApiOrigins().includes(parsed.origin)) {
       return raw;
     }
 
-    /*
-      Sólo reescribimos URLs que parecen API.
-      Un enlace externo normal no se toca.
-    */
-    if (
-      parsed.pathname === "/api" ||
-      parsed.pathname.startsWith("/api/")
-    ) {
-      const backend =
-        new URL(CANONICAL_PRODUCTION_API_BASE);
-
+    if (parsed.pathname === "/api" || parsed.pathname.startsWith("/api/")) {
+      const backend = new URL(CANONICAL_PRODUCTION_API_BASE);
       return `${backend.origin}${parsed.pathname}${parsed.search}${parsed.hash}`;
     }
 
@@ -1685,24 +1296,14 @@ function rewriteForbiddenFrontendApiUrl(url = "") {
 }
 
 export function buildUrl(path = "", query = null) {
-  const rawPath =
-    String(path || "").trim();
+  const rawPath = String(path || "").trim();
+  const apiBase = getSafeApiBase();
 
-  const apiBase =
-    getSafeApiBase();
+  const baseUrl = isAbsoluteUrl(rawPath)
+    ? rewriteForbiddenFrontendApiUrl(rawPath)
+    : joinUrl(apiBase, rawPath);
 
-  const baseUrl =
-    isAbsoluteUrl(rawPath)
-      ? rewriteForbiddenFrontendApiUrl(rawPath)
-      : joinUrl(
-          apiBase,
-          rawPath
-        );
-
-  return appendQueryToUrl(
-    baseUrl,
-    query
-  );
+  return appendQueryToUrl(baseUrl, query);
 }
 
 /* =========================================================
@@ -1710,21 +1311,17 @@ export function buildUrl(path = "", query = null) {
 ========================================================= */
 
 export function stripBearerPrefix(token = "") {
-  return safeText(token, "")
-    .replace(/^Bearer\s+/i, "")
-    .trim();
+  return safeText(token, "").replace(/^Bearer\s+/i, "").trim();
 }
 
 export function hasValidToken(token = null) {
-  const value =
-    stripBearerPrefix(token);
+  const value = stripBearerPrefix(token);
 
   if (!value) {
     return false;
   }
 
-  const lower =
-    value.toLowerCase();
+  const lower = value.toLowerCase();
 
   if (BAD_TOKEN_VALUES.includes(lower)) {
     return false;
@@ -1738,8 +1335,7 @@ export function hasValidToken(token = null) {
 }
 
 function getApiBasePath() {
-  const apiBase =
-    getSafeApiBase();
+  const apiBase = getSafeApiBase();
 
   if (!apiBase) {
     return "";
@@ -1747,9 +1343,7 @@ function getApiBasePath() {
 
   try {
     if (isAbsoluteUrl(apiBase)) {
-      return normalizeCanonicalPath(
-        new URL(apiBase, getBaseOrigin()).pathname || ""
-      );
+      return normalizeCanonicalPath(new URL(apiBase, getBaseOrigin()).pathname || "");
     }
 
     return normalizeCanonicalPath(apiBase);
@@ -1759,16 +1353,10 @@ function getApiBasePath() {
 }
 
 function stripApiBasePrefix(path = DEFAULT_ROUTE) {
-  const normalized =
-    normalizeCanonicalPath(path);
+  const normalized = normalizeCanonicalPath(path);
+  const apiBasePath = getApiBasePath();
 
-  const apiBasePath =
-    getApiBasePath();
-
-  if (
-    !apiBasePath ||
-    apiBasePath === DEFAULT_ROUTE
-  ) {
+  if (!apiBasePath || apiBasePath === DEFAULT_ROUTE) {
     return normalized;
   }
 
@@ -1777,136 +1365,114 @@ function stripApiBasePrefix(path = DEFAULT_ROUTE) {
   }
 
   if (normalized.startsWith(`${apiBasePath}/`)) {
-    return normalizeCanonicalPath(
-      normalized.slice(apiBasePath.length) || DEFAULT_ROUTE
-    );
+    return normalizeCanonicalPath(normalized.slice(apiBasePath.length) || DEFAULT_ROUTE);
   }
 
   return normalized;
 }
 
+function pathMatches(path = "", candidate = "") {
+  const cleanPath = normalizeCanonicalPath(path);
+  const cleanCandidate = normalizeCanonicalPath(candidate);
+
+  if (!cleanCandidate) {
+    return false;
+  }
+
+  if (cleanCandidate === DEFAULT_ROUTE) {
+    return cleanPath === DEFAULT_ROUTE;
+  }
+
+  return cleanPath === cleanCandidate || cleanPath.startsWith(`${cleanCandidate}/`);
+}
+
 function getConfiguredPublicApiPaths() {
-  const configured =
-    config?.auth?.publicApiPaths ||
-    config?.publicApiPaths ||
-    [];
+  const configured = config?.auth?.publicApiPaths || config?.publicApiPaths || [];
 
   return unique([
-    ...DEFAULT_PUBLIC_API_PATHS,
+    ...FALLBACK_PUBLIC_API_PATHS,
     ...safeArray(configured),
-  ]);
+  ]).filter((path) => !isPrivateMePath(path));
 }
 
 function getConfiguredPrivateApiPaths() {
-  const configured =
-    config?.auth?.privateApiPaths ||
-    config?.privateApiPaths ||
-    [];
+  const configured = config?.auth?.privateApiPaths || config?.privateApiPaths || [];
 
   return unique([
-    ...PRIVATE_API_PATHS,
+    ...FALLBACK_PRIVATE_API_PATHS,
+    ...REQUIRED_PRIVATE_ME_PATHS,
     ...safeArray(configured),
   ]);
 }
 
+function isPrivateMePath(path = "") {
+  const normalized = normalizeCanonicalPath(path);
+  const withoutApiBase = stripApiBasePrefix(normalized);
+
+  return REQUIRED_PRIVATE_ME_PATHS.some((privatePath) => (
+    pathMatches(normalized, privatePath) ||
+    pathMatches(withoutApiBase, privatePath)
+  ));
+}
+
 function isExplicitPrivateApiPath(path = "") {
-  const normalized =
-    normalizeCanonicalPath(path);
+  const normalized = normalizeCanonicalPath(path);
+  const withoutApiBase = stripApiBasePrefix(normalized);
 
-  const withoutApiBase =
-    stripApiBasePrefix(normalized);
-
-  return PRIVATE_API_PATHS.some((privatePath) => {
-    const current =
-      normalizeCanonicalPath(privatePath);
+  return getConfiguredPrivateApiPaths().some((privatePath) => {
+    const current = normalizeCanonicalPath(privatePath);
+    const currentWithoutApiBase = stripApiBasePrefix(current);
 
     return (
-      normalized === current ||
-      withoutApiBase === current
+      pathMatches(normalized, current) ||
+      pathMatches(withoutApiBase, current) ||
+      pathMatches(normalized, currentWithoutApiBase) ||
+      pathMatches(withoutApiBase, currentWithoutApiBase)
     );
   });
 }
 
 export function isPublicApiPath(path = "") {
-  const normalized =
-    normalizeCanonicalPath(path);
+  const normalized = normalizeCanonicalPath(path);
+  const withoutApiBase = stripApiBasePrefix(normalized);
 
-  /*
-    Blindaje explícito:
-    /me nunca público. request.js debe inyectar Authorization.
-  */
-  if (isExplicitPrivateApiPath(normalized)) {
+  if (isPrivateMePath(normalized) || isPrivateMePath(withoutApiBase)) {
     return false;
   }
 
-  const withoutApiBase =
-    stripApiBasePrefix(normalized);
-
-  if (isExplicitPrivateApiPath(withoutApiBase)) {
+  if (isExplicitPrivateApiPath(normalized) || isExplicitPrivateApiPath(withoutApiBase)) {
     return false;
   }
 
-  const list =
-    getConfiguredPublicApiPaths();
-
-  return list.some((publicPath) => {
-    const current =
-      normalizeCanonicalPath(publicPath);
-
-    const currentWithoutApiBase =
-      stripApiBasePrefix(current);
+  return getConfiguredPublicApiPaths().some((publicPath) => {
+    const current = normalizeCanonicalPath(publicPath);
+    const currentWithoutApiBase = stripApiBasePrefix(current);
 
     return (
-      normalized === current ||
-      normalized.startsWith(`${current}/`) ||
-      withoutApiBase === current ||
-      withoutApiBase.startsWith(`${current}/`) ||
-      normalized === currentWithoutApiBase ||
-      normalized.startsWith(`${currentWithoutApiBase}/`)
+      pathMatches(normalized, current) ||
+      pathMatches(withoutApiBase, current) ||
+      pathMatches(normalized, currentWithoutApiBase) ||
+      pathMatches(withoutApiBase, currentWithoutApiBase)
     );
   });
 }
 
 export function isPrivateApiPath(path = "") {
-  const normalized =
-    normalizeCanonicalPath(path);
+  const normalized = normalizeCanonicalPath(path);
+  const withoutApiBase = stripApiBasePrefix(normalized);
 
-  const withoutApiBase =
-    stripApiBasePrefix(normalized);
-
-  if (
-    isExplicitPrivateApiPath(normalized) ||
-    isExplicitPrivateApiPath(withoutApiBase)
-  ) {
+  if (isPrivateMePath(normalized) || isPrivateMePath(withoutApiBase)) {
     return true;
   }
 
-  const list =
-    getConfiguredPrivateApiPaths();
-
-  return list.some((privatePath) => {
-    const current =
-      normalizeCanonicalPath(privatePath);
-
-    const currentWithoutApiBase =
-      stripApiBasePrefix(current);
-
-    return (
-      normalized === current ||
-      normalized.startsWith(`${current}/`) ||
-      withoutApiBase === current ||
-      withoutApiBase.startsWith(`${current}/`) ||
-      normalized === currentWithoutApiBase ||
-      normalized.startsWith(`${currentWithoutApiBase}/`)
-    );
-  });
+  return isExplicitPrivateApiPath(normalized) || isExplicitPrivateApiPath(withoutApiBase);
 }
 
 /* =========================================================
    USER NORMALIZATION
 ========================================================= */
 
-function normalizeRole(value = "") {
+function normalizeRoleKey(value = "") {
   return safeText(value, "")
     .toLowerCase()
     .normalize("NFD")
@@ -1916,14 +1482,30 @@ function normalizeRole(value = "") {
     .trim();
 }
 
+function normalizeRole(value = "") {
+  const key = normalizeRoleKey(value);
+
+  if (!key) {
+    return "";
+  }
+
+  const aliases = config?.auth?.roles || {};
+
+  for (const [alias, target] of Object.entries(aliases)) {
+    if (normalizeRoleKey(alias) === key) {
+      return normalizeRoleKey(target || key);
+    }
+  }
+
+  return key;
+}
+
 function looksLikeAuthEnvelope(value = {}) {
   if (!isPlainObject(value)) {
     return false;
   }
 
-  return AUTH_ENVELOPE_KEYS.some((key) =>
-    hasOwn(value, key)
-  );
+  return AUTH_ENVELOPE_KEYS.some((key) => hasOwn(value, key));
 }
 
 function hasIdentityInObject(value = {}) {
@@ -1931,47 +1513,11 @@ function hasIdentityInObject(value = {}) {
     return false;
   }
 
-  return USER_IDENTITY_KEYS.some((key) =>
-    Boolean(
-      safeText(value[key], "")
-    )
-  );
-}
-
-function hasNestedUserIdentity(value = {}) {
-  if (!isPlainObject(value)) {
-    return false;
-  }
-
-  const branches = [
-    value,
-    value.user,
-    value.usuario,
-    value.me,
-    value.account,
-    value.profile,
-    value.currentUser,
-    value.authUser,
-    value.sessionUser,
-    value.data?.user,
-    value.data?.usuario,
-    value.data?.me,
-    value.payload?.user,
-    value.payload?.me,
-    value.raw,
-    value.raw?.user,
-    value.raw?.profile,
-    value.raw?.account,
-  ];
-
-  return branches.some(hasIdentityInObject);
+  return USER_IDENTITY_KEYS.some((key) => Boolean(safeText(value[key], "")));
 }
 
 function unwrapUserPayload(payload = null) {
-  if (
-    !payload ||
-    typeof payload !== "object"
-  ) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return payload;
   }
 
@@ -1984,27 +1530,35 @@ function unwrapUserPayload(payload = null) {
     payload.currentUser,
     payload.authUser,
     payload.sessionUser,
+
     payload.data?.user,
     payload.data?.usuario,
     payload.data?.me,
+    payload.data?.account,
+    payload.data?.profile,
+
     payload.payload?.user,
     payload.payload?.usuario,
     payload.payload?.me,
+    payload.payload?.account,
+    payload.payload?.profile,
+
     payload.result?.user,
     payload.result?.usuario,
     payload.result?.me,
+
     payload.auth?.user,
     payload.auth?.usuario,
     payload.auth?.me,
+
     payload.session?.user,
     payload.sessionData?.user,
+    payload.response?.user,
+    payload.body?.user,
   ];
 
   for (const candidate of candidates) {
-    if (
-      isPlainObject(candidate) &&
-      hasNestedUserIdentity(candidate)
-    ) {
+    if (isPlainObject(candidate) && hasIdentityInObject(candidate)) {
       return candidate;
     }
   }
@@ -2013,16 +1567,15 @@ function unwrapUserPayload(payload = null) {
 }
 
 function normalizeActive(user = {}) {
-  const status =
-    safeText(
-      user.status ||
-        user.estado ||
-        user.state ||
-        user.accountStatus ||
-        user.account_status ||
-        "",
-      ""
-    ).toLowerCase();
+  const status = safeText(
+    user.status ||
+      user.estado ||
+      user.state ||
+      user.accountStatus ||
+      user.account_status ||
+      "",
+    ""
+  ).toLowerCase();
 
   if (
     [
@@ -2064,30 +1617,21 @@ function normalizeActive(user = {}) {
     user.enabled ??
     user.isEnabled;
 
-  if (
-    candidate === undefined ||
-    candidate === null ||
-    candidate === ""
-  ) {
+  if (candidate === undefined || candidate === null || candidate === "") {
     return true;
   }
 
-  return safeBool(
-    candidate,
-    true
-  );
+  return safeBool(candidate, true);
 }
 
 function isSafeAvatarUrl(url = "") {
-  const value =
-    safeText(url, "");
+  const value = safeText(url, "");
 
   if (!value) {
     return false;
   }
 
-  const lower =
-    value.toLowerCase();
+  const lower = value.toLowerCase();
 
   if (
     lower.startsWith("javascript:") ||
@@ -2098,9 +1642,6 @@ function isSafeAvatarUrl(url = "") {
     return false;
   }
 
-  /*
-    Bloqueo deliberado: SVG en data URL puede contener scripting.
-  */
   if (lower.startsWith("data:image/svg")) {
     return false;
   }
@@ -2122,148 +1663,113 @@ function isSafeAvatarUrl(url = "") {
   }
 
   try {
-    const parsed =
-      new URL(
-        value,
-        getBaseOrigin()
-      );
-
-    return [
-      "http:",
-      "https:",
-      "blob:",
-    ].includes(parsed.protocol);
+    const parsed = new URL(value, getBaseOrigin());
+    return ["http:", "https:", "blob:"].includes(parsed.protocol);
   } catch {
     return false;
   }
 }
 
 function resolveAvatarCandidate(user = {}) {
-  const profile =
-    isPlainObject(user.profile)
-      ? user.profile
-      : {};
+  const profile = isPlainObject(user.profile) ? user.profile : {};
+  const raw = isPlainObject(user.raw) ? user.raw : {};
+  const rawProfile = isPlainObject(raw.profile) ? raw.profile : {};
+  const meta = isPlainObject(user.meta) ? user.meta : {};
+  const settings = isPlainObject(user.settings) ? user.settings : {};
 
-  const raw =
-    isPlainObject(user.raw)
-      ? user.raw
-      : {};
+  const candidate = firstNonEmpty(
+    user.avatarUrl,
+    user.avatarURL,
+    user.avatar_url,
+    user.avatar,
+    user.photo,
+    user.photoUrl,
+    user.photoURL,
+    user.photo_url,
+    user.image,
+    user.imageUrl,
+    user.imageURL,
+    user.image_url,
+    user.profileImage,
+    user.profile_image,
+    user.picture,
+    user.pictureUrl,
+    user.pictureURL,
+    user.picture_url,
+    user.thumbnail,
+    user.thumbnailUrl,
+    user.thumbnail_url,
 
-  const rawProfile =
-    isPlainObject(raw.profile)
-      ? raw.profile
-      : {};
+    profile.avatarUrl,
+    profile.avatarURL,
+    profile.avatar_url,
+    profile.avatar,
+    profile.photo,
+    profile.photoUrl,
+    profile.photoURL,
+    profile.photo_url,
+    profile.image,
+    profile.imageUrl,
+    profile.imageURL,
+    profile.image_url,
+    profile.picture,
+    profile.pictureUrl,
+    profile.pictureURL,
+    profile.picture_url,
 
-  const meta =
-    isPlainObject(user.meta)
-      ? user.meta
-      : {};
+    meta.avatarUrl,
+    meta.avatarURL,
+    meta.avatar_url,
+    meta.avatar,
+    meta.picture,
+    meta.pictureUrl,
+    meta.pictureURL,
+    meta.picture_url,
 
-  const settings =
-    isPlainObject(user.settings)
-      ? user.settings
-      : {};
+    settings.avatarUrl,
+    settings.avatar_url,
+    settings.avatar,
 
-  const candidate =
-    firstNonEmpty(
-      user.avatarUrl,
-      user.avatarURL,
-      user.avatar_url,
-      user.avatar,
-      user.photo,
-      user.photoUrl,
-      user.photoURL,
-      user.photo_url,
-      user.image,
-      user.imageUrl,
-      user.imageURL,
-      user.image_url,
-      user.profileImage,
-      user.profile_image,
-      user.picture,
-      user.pictureUrl,
-      user.pictureURL,
-      user.picture_url,
-      user.thumbnail,
-      user.thumbnailUrl,
-      user.thumbnail_url,
+    raw.avatarUrl,
+    raw.avatarURL,
+    raw.avatar_url,
+    raw.avatar,
+    raw.photo,
+    raw.photoUrl,
+    raw.photoURL,
+    raw.photo_url,
+    raw.image,
+    raw.imageUrl,
+    raw.imageURL,
+    raw.image_url,
+    raw.picture,
+    raw.pictureUrl,
+    raw.pictureURL,
+    raw.picture_url,
 
-      profile.avatarUrl,
-      profile.avatarURL,
-      profile.avatar_url,
-      profile.avatar,
-      profile.photo,
-      profile.photoUrl,
-      profile.photoURL,
-      profile.photo_url,
-      profile.image,
-      profile.imageUrl,
-      profile.imageURL,
-      profile.image_url,
-      profile.picture,
-      profile.pictureUrl,
-      profile.pictureURL,
-      profile.picture_url,
+    rawProfile.avatarUrl,
+    rawProfile.avatarURL,
+    rawProfile.avatar_url,
+    rawProfile.avatar,
+    rawProfile.photo,
+    rawProfile.photoUrl,
+    rawProfile.photoURL,
+    rawProfile.photo_url,
+    rawProfile.image,
+    rawProfile.imageUrl,
+    rawProfile.imageURL,
+    rawProfile.image_url,
+    rawProfile.picture,
+    rawProfile.pictureUrl,
+    rawProfile.pictureURL,
+    rawProfile.picture_url
+  );
 
-      meta.avatarUrl,
-      meta.avatarURL,
-      meta.avatar_url,
-      meta.avatar,
-      meta.picture,
-      meta.pictureUrl,
-      meta.pictureURL,
-      meta.picture_url,
-
-      settings.avatarUrl,
-      settings.avatar_url,
-      settings.avatar,
-
-      raw.avatarUrl,
-      raw.avatarURL,
-      raw.avatar_url,
-      raw.avatar,
-      raw.photo,
-      raw.photoUrl,
-      raw.photoURL,
-      raw.photo_url,
-      raw.image,
-      raw.imageUrl,
-      raw.imageURL,
-      raw.image_url,
-      raw.picture,
-      raw.pictureUrl,
-      raw.pictureURL,
-      raw.picture_url,
-
-      rawProfile.avatarUrl,
-      rawProfile.avatarURL,
-      rawProfile.avatar_url,
-      rawProfile.avatar,
-      rawProfile.photo,
-      rawProfile.photoUrl,
-      rawProfile.photoURL,
-      rawProfile.photo_url,
-      rawProfile.image,
-      rawProfile.imageUrl,
-      rawProfile.imageURL,
-      rawProfile.image_url,
-      rawProfile.picture,
-      rawProfile.pictureUrl,
-      rawProfile.pictureURL,
-      rawProfile.picture_url
-    );
-
-  return isSafeAvatarUrl(candidate)
-    ? candidate
-    : "";
+  return isSafeAvatarUrl(candidate) ? candidate : "";
 }
 
 function sanitizeUserPayloadForState(value = {}, depth = 0, seen = new WeakSet()) {
-  if (depth > 4) {
-    return {};
-  }
-
-  if (!isPlainObject(value)) {
+  if (depth > 4 || !isPlainObject(value)) {
     return {};
   }
 
@@ -2278,200 +1784,171 @@ function sanitizeUserPayloadForState(value = {}, depth = 0, seen = new WeakSet()
   const output = {};
 
   for (const [key, item] of Object.entries(value).slice(0, 160)) {
-    if (SENSITIVE_USER_KEY_RE.test(key)) {
+    if (SENSITIVE_KEY_RE.test(key)) {
       continue;
     }
 
     if (Array.isArray(item)) {
-      output[key] =
-        item.slice(0, 120)
-          .map((entry) =>
-            isPlainObject(entry)
-              ? sanitizeUserPayloadForState(
-                  entry,
-                  depth + 1,
-                  seen
-                )
-              : entry
-          );
-
+      output[key] = item.slice(0, 120).map((entry) =>
+        isPlainObject(entry)
+          ? sanitizeUserPayloadForState(entry, depth + 1, seen)
+          : entry
+      );
       continue;
     }
 
     if (isPlainObject(item)) {
-      output[key] =
-        sanitizeUserPayloadForState(
-          item,
-          depth + 1,
-          seen
-        );
-
+      output[key] = sanitizeUserPayloadForState(item, depth + 1, seen);
       continue;
     }
 
-    output[key] =
-      item;
+    output[key] = item;
   }
 
   return output;
 }
 
 export function normalizeUser(user = null) {
-  const source =
-    unwrapUserPayload(user);
+  const source = unwrapUserPayload(user);
 
-  if (
-    !source ||
-    typeof source !== "object" ||
-    Array.isArray(source)
-  ) {
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
     return null;
   }
 
-  /*
-    Evita convertir envelopes auth completos en usuarios fantasma:
-      { ok:true, token:"...", data:{...} }
-  */
-  if (
-    looksLikeAuthEnvelope(source) &&
-    !hasNestedUserIdentity(source)
-  ) {
+  if (looksLikeAuthEnvelope(source) && !hasIdentityInObject(source)) {
     return null;
   }
 
-  if (!hasNestedUserIdentity(source)) {
+  if (!hasIdentityInObject(source)) {
     return null;
   }
 
-  const profile =
-    isPlainObject(source.profile)
-      ? source.profile
-      : {};
+  const profile = isPlainObject(source.profile) ? source.profile : {};
+  const raw = isPlainObject(source.raw) ? source.raw : {};
 
-  const raw =
-    isPlainObject(source.raw)
-      ? source.raw
-      : {};
+  const id = firstNonEmpty(
+    source.id,
+    source.userId,
+    source.user_id,
+    source.uuid,
+    source._id,
+    source.uid,
+    source.sub,
+    profile.id,
+    profile.userId,
+    profile.user_id,
+    raw.id,
+    raw.userId,
+    raw.user_id,
+    raw.sub
+  );
 
-  const id =
-    source.id ??
-    source.userId ??
-    source.user_id ??
-    source.uuid ??
-    source._id ??
-    source.uid ??
-    source.sub ??
-    profile.id ??
-    profile.userId ??
-    profile.user_id ??
-    raw.id ??
-    raw.userId ??
-    raw.user_id ??
-    raw.sub ??
-    null;
+  const email = firstNonEmpty(
+    source.email,
+    source.mail,
+    source.emailLower,
+    source.email_lower,
+    profile.email,
+    profile.mail,
+    raw.email,
+    raw.mail
+  );
 
-  const email =
+  const rawName = firstNonEmpty(
+    source.name,
+    source.nombre,
+    source.full_name,
+    source.fullName,
+    source.display_name,
+    source.displayName,
+    profile.name,
+    profile.nombre,
+    profile.full_name,
+    profile.fullName,
+    profile.display_name,
+    profile.displayName,
+    raw.name,
+    raw.nombre,
+    raw.full_name,
+    raw.fullName,
+    raw.display_name,
+    raw.displayName,
+    source.username,
+    email,
+    id,
+    "Usuario"
+  );
+
+  const username = sanitizeUsername(
     firstNonEmpty(
-      source.email,
-      source.mail,
-      source.emailLower,
-      source.email_lower,
-      profile.email,
-      profile.mail,
-      raw.email,
-      raw.mail
-    );
-
-  const rawName =
-    firstNonEmpty(
-      source.name,
-      source.nombre,
-      source.full_name,
-      source.fullName,
-      source.display_name,
-      source.displayName,
-      profile.name,
-      profile.nombre,
-      profile.full_name,
-      profile.fullName,
-      profile.display_name,
-      profile.displayName,
-      raw.name,
-      raw.nombre,
-      raw.full_name,
-      raw.fullName,
-      raw.display_name,
-      raw.displayName,
       source.username,
+      source.userName,
+      source.user_name,
+      source.nick,
+      source.alias,
+      source.login,
+      source.slug,
+      profile.username,
+      profile.userName,
+      profile.user_name,
+      profile.nick,
+      profile.alias,
+      profile.login,
+      profile.slug,
+      raw.username,
+      raw.userName,
+      raw.user_name,
+      raw.nick,
+      raw.alias,
+      raw.login,
+      raw.slug,
       email,
-      id,
-      "Usuario"
-    );
+      id
+    )
+  );
 
-  const username =
-    sanitizeUsername(
-      firstNonEmpty(
-        source.username,
-        source.userName,
-        source.user_name,
-        source.nick,
-        source.alias,
-        source.login,
-        source.slug,
-        profile.username,
-        profile.userName,
-        profile.user_name,
-        profile.nick,
-        profile.alias,
-        profile.login,
-        profile.slug,
-        raw.username,
-        raw.userName,
-        raw.user_name,
-        raw.nick,
-        raw.alias,
-        raw.login,
-        raw.slug,
-        email,
-        id
-      )
-    );
+  const slug = sanitizeUsername(
+    firstNonEmpty(
+      source.slug,
+      source.usernameSlug,
+      source.username_slug,
+      profile.slug,
+      raw.slug,
+      username,
+      slugify(rawName || "usuario")
+    )
+  );
 
-  const slug =
-    sanitizeUsername(
-      firstNonEmpty(
-        source.slug,
-        source.usernameSlug,
-        source.username_slug,
-        profile.slug,
-        raw.slug,
-        username,
-        slugify(rawName || "usuario")
-      )
-    );
+  let role = normalizeRole(
+    firstNonEmpty(
+      source.role,
+      source.rol,
+      source.userRole,
+      source.user_role,
+      source.type,
+      source.user_type,
+      source.userType,
+      source.perfil,
+      source.profileType,
+      profile.role,
+      profile.rol,
+      profile.userRole,
+      profile.user_role,
+      raw.role,
+      raw.rol,
+      raw.userRole,
+      raw.user_role
+    )
+  );
 
-  const role =
-    normalizeRole(
-      firstNonEmpty(
-        source.role,
-        source.rol,
-        source.userRole,
-        source.user_role,
-        source.type,
-        source.user_type,
-        source.userType,
-        source.perfil,
-        source.profileType,
-        profile.role,
-        profile.rol,
-        profile.userRole,
-        profile.user_role,
-        raw.role,
-        raw.rol,
-        raw.userRole,
-        raw.user_role
-      )
-    );
+  if (!role && (source.isAdmin === true || source.admin === true)) {
+    role = "admin";
+  }
+
+  const roles = unique([
+    ...(Array.isArray(source.roles) ? source.roles.map(normalizeRole) : []),
+    role,
+  ]).filter(Boolean);
 
   const hasAvatar =
     source.hasAvatar ??
@@ -2483,131 +1960,55 @@ export function normalizeUser(user = null) {
     raw.hasAvatar ??
     raw.has_avatar;
 
-  const avatar =
-    resolveAvatarCandidate(source);
-
-  const active =
-    normalizeActive(source);
-
-  const cleanSource =
-    sanitizeUserPayloadForState(source);
+  const avatar = resolveAvatarCandidate(source);
+  const active = normalizeActive(source);
+  const cleanSource = sanitizeUserPayloadForState(source);
 
   return {
     ...cleanSource,
 
-    id,
+    id: id || null,
 
-    userId:
-      source.userId ??
-      source.user_id ??
-      id,
-
-    user_id:
-      source.user_id ??
-      source.userId ??
-      id,
-
-    uid:
-      source.uid ??
-      id,
-
-    sub:
-      source.sub ??
-      id,
+    userId: firstNonEmpty(source.userId, source.user_id, id) || null,
+    user_id: firstNonEmpty(source.user_id, source.userId, id) || null,
+    uid: firstNonEmpty(source.uid, id) || null,
+    sub: firstNonEmpty(source.sub, id) || null,
 
     username,
-
-    usernameLower:
-      source.usernameLower ||
-      source.username_lower ||
-      username ||
-      null,
-
-    username_lower:
-      source.username_lower ||
-      source.usernameLower ||
-      username ||
-      null,
+    usernameLower: firstNonEmpty(source.usernameLower, source.username_lower, username) || null,
+    username_lower: firstNonEmpty(source.username_lower, source.usernameLower, username) || null,
 
     slug,
 
-    name:
-      rawName,
+    name: rawName,
+    nombre: source.nombre || rawName,
 
-    nombre:
-      source.nombre ||
-      rawName,
-
-    displayName:
-      firstNonEmpty(
-        source.displayName,
-        source.display_name,
-        profile.displayName,
-        profile.display_name,
-        raw.displayName,
-        raw.display_name,
-        rawName
-      ),
+    displayName: firstNonEmpty(
+      source.displayName,
+      source.display_name,
+      profile.displayName,
+      profile.display_name,
+      raw.displayName,
+      raw.display_name,
+      rawName
+    ),
 
     email,
-
-    emailLower:
-      firstNonEmpty(
-        source.emailLower,
-        source.email_lower,
-        email
-      ).toLowerCase(),
-
-    email_lower:
-      firstNonEmpty(
-        source.email_lower,
-        source.emailLower,
-        email
-      ).toLowerCase(),
+    emailLower: firstNonEmpty(source.emailLower, source.email_lower, email).toLowerCase(),
+    email_lower: firstNonEmpty(source.email_lower, source.emailLower, email).toLowerCase(),
 
     role,
+    rol: role,
+    roles,
 
-    rol:
-      role,
+    permissions: safeArray(source.permissions || source.permisos),
+    permisos: safeArray(source.permisos || source.permissions),
 
-    roles:
-      Array.isArray(source.roles)
-        ? source.roles
-        : role
-          ? [role]
-          : [],
+    avatar: hasAvatar === false ? null : avatar || null,
+    avatarUrl: hasAvatar === false ? null : avatar || null,
+    picture: hasAvatar === false ? null : avatar || null,
 
-    permissions:
-      safeArray(
-        source.permissions ||
-          source.permisos
-      ),
-
-    permisos:
-      safeArray(
-        source.permisos ||
-          source.permissions
-      ),
-
-    avatar:
-      hasAvatar === false
-        ? null
-        : avatar || null,
-
-    avatarUrl:
-      hasAvatar === false
-        ? null
-        : avatar || null,
-
-    picture:
-      hasAvatar === false
-        ? null
-        : avatar || null,
-
-    hasAvatar:
-      hasAvatar === undefined
-        ? Boolean(avatar)
-        : Boolean(hasAvatar),
+    hasAvatar: hasAvatar === undefined ? Boolean(avatar) : Boolean(hasAvatar),
 
     avatarUpdatedAt:
       source.avatarUpdatedAt ??
@@ -2622,9 +2023,26 @@ export function normalizeUser(user = null) {
   };
 }
 
+export function isUsableUser(user = null) {
+  const normalized = normalizeUser(user);
+
+  if (!normalized || normalized.active === false) {
+    return false;
+  }
+
+  return Boolean(
+    firstNonEmpty(
+      normalized.id,
+      normalized.userId,
+      normalized.user_id,
+      normalized.username,
+      normalized.email
+    )
+  );
+}
+
 export function getUserDisplayName(user = null) {
-  const source =
-    unwrapUserPayload(user);
+  const source = unwrapUserPayload(user);
 
   return firstNonEmpty(
     source?.displayName,
@@ -2646,8 +2064,7 @@ export function getUserDisplayName(user = null) {
 }
 
 export function getUserUsername(user = null) {
-  const source =
-    unwrapUserPayload(user);
+  const source = unwrapUserPayload(user);
 
   return sanitizeUsername(
     firstNonEmpty(
@@ -2674,8 +2091,7 @@ export function getUserUsername(user = null) {
 }
 
 export function getUserAvatarUrl(user = null) {
-  const source =
-    unwrapUserPayload(user);
+  const source = unwrapUserPayload(user);
 
   const hasAvatar =
     source?.hasAvatar ??
@@ -2693,10 +2109,7 @@ export function getUserAvatarUrl(user = null) {
 }
 
 export function getInitials(value = "") {
-  const text =
-    typeof value === "object"
-      ? getUserDisplayName(value)
-      : safeText(value, "");
+  const text = typeof value === "object" ? getUserDisplayName(value) : safeText(value, "");
 
   if (!text) {
     return "";
@@ -2706,9 +2119,7 @@ export function getInitials(value = "") {
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
-    .map((part) =>
-      part[0]?.toUpperCase() || ""
-    )
+    .map((part) => part[0]?.toUpperCase() || "")
     .join("")
     .slice(0, 2);
 }
@@ -2723,8 +2134,7 @@ export function getCurrentLocationPath() {
   }
 
   try {
-    const hash =
-      window.location.hash || "";
+    const hash = window.location.hash || "";
 
     if (isHashRouterPath(hash)) {
       return normalizePath(hash);
@@ -2744,8 +2154,7 @@ export function getCurrentLocationCanonicalPath() {
   }
 
   try {
-    const hash =
-      window.location.hash || "";
+    const hash = window.location.hash || "";
 
     if (isHashRouterPath(hash)) {
       return normalizeCanonicalPath(hash);
@@ -2764,18 +2173,12 @@ export function getCurrentLocationCanonicalPath() {
 ========================================================= */
 
 export function isHashOnlyHref(href = "") {
-  const value =
-    safeText(href, "");
-
-  return (
-    value.startsWith("#") &&
-    !isHashRouterPath(value)
-  );
+  const value = safeText(href, "");
+  return value.startsWith("#") && !isHashRouterPath(value);
 }
 
 export function isUnsafeHref(href = "") {
-  const value =
-    safeText(href, "");
+  const value = safeText(href, "");
 
   if (!value) {
     return true;
@@ -2785,8 +2188,7 @@ export function isUnsafeHref(href = "") {
 }
 
 export function isExternalHref(href = "") {
-  const value =
-    safeText(href, "");
+  const value = safeText(href, "");
 
   if (!value || isUnsafeHref(value)) {
     return false;
@@ -2812,8 +2214,7 @@ export function isExternalHref(href = "") {
 ========================================================= */
 
 export async function runHookSeries(hooks = [], payload) {
-  let current =
-    payload;
+  let current = payload;
 
   for (const hook of safeArray(hooks)) {
     if (typeof hook !== "function") {
@@ -2821,20 +2222,15 @@ export async function runHookSeries(hooks = [], payload) {
     }
 
     try {
-      const result =
-        await hook(current);
+      const result = await hook(current);
 
       if (result !== undefined) {
-        current =
-          result;
+        current = result;
       }
     } catch (error) {
       if (config?.debug) {
         try {
-          console.error(
-            `[${config?.appName || "Onion"}] Error ejecutando hook`,
-            error
-          );
+          console.error(`[${config?.appName || "Onion"}] Error ejecutando hook`, cloneError(error));
         } catch {}
       }
     }
@@ -2856,60 +2252,39 @@ export function getThemeColor(theme = config?.defaultTheme) {
 export function createAbortTimeout(ms = config?.requestTimeout) {
   if (typeof AbortController === "undefined") {
     return {
-      controller:
-        null,
-
-      timeoutId:
-        null,
-
-      signal:
-        null,
-
-      clear:
-        () => {},
+      controller: null,
+      timeoutId: null,
+      signal: null,
+      clear: () => {},
     };
   }
 
-  const controller =
-    new AbortController();
+  const controller = new AbortController();
+  const normalizedMs = Number(ms);
 
-  const normalizedMs =
-    Number(ms);
-
-  if (
-    !Number.isFinite(normalizedMs) ||
-    normalizedMs <= 0
-  ) {
+  if (!Number.isFinite(normalizedMs) || normalizedMs <= 0) {
     return {
       controller,
-      timeoutId:
-        null,
-
-      signal:
-        controller.signal,
-
-      clear:
-        () => {},
+      timeoutId: null,
+      signal: controller.signal,
+      clear: () => {},
     };
   }
 
-  const timeoutId =
-    setTimeout(() => {
+  const timeoutId = setTimeout(() => {
+    try {
+      controller.abort("timeout");
+    } catch {
       try {
-        controller.abort("timeout");
-      } catch {
-        try {
-          controller.abort();
-        } catch {}
-      }
-    }, normalizedMs);
+        controller.abort();
+      } catch {}
+    }
+  }, normalizedMs);
 
   return {
     controller,
     timeoutId,
-
-    signal:
-      controller.signal,
+    signal: controller.signal,
 
     clear() {
       try {
@@ -2920,43 +2295,29 @@ export function createAbortTimeout(ms = config?.requestTimeout) {
 }
 
 export function normalizeHeaders(headers = {}) {
-  let source =
-    [];
+  let source = [];
 
   try {
-    if (
-      typeof Headers !== "undefined" &&
-      headers instanceof Headers
-    ) {
-      source =
-        Array.from(headers.entries());
+    if (typeof Headers !== "undefined" && headers instanceof Headers) {
+      source = Array.from(headers.entries());
     } else if (Array.isArray(headers)) {
-      source =
-        headers;
+      source = headers;
     } else {
-      source =
-        Object.entries(headers || {});
+      source = Object.entries(headers || {});
     }
   } catch {
-    source =
-      [];
+    source = [];
   }
 
   return source.reduce((acc, [key, value]) => {
-    const normalizedKey =
-      String(key || "").trim();
+    const normalizedKey = String(key || "").trim();
 
     if (!normalizedKey) {
       return acc;
     }
 
-    if (
-      value !== undefined &&
-      value !== null &&
-      value !== ""
-    ) {
-      acc[normalizedKey] =
-        value;
+    if (value !== undefined && value !== null && value !== "") {
+      acc[normalizedKey] = value;
     }
 
     return acc;
@@ -2964,9 +2325,7 @@ export function normalizeHeaders(headers = {}) {
 }
 
 export function mergeAbortSignals(signals = []) {
-  const validSignals =
-    safeArray(signals)
-      .filter(Boolean);
+  const validSignals = safeArray(signals).filter(Boolean);
 
   if (!validSignals.length) {
     return null;
@@ -2977,10 +2336,7 @@ export function mergeAbortSignals(signals = []) {
   }
 
   try {
-    if (
-      typeof AbortSignal !== "undefined" &&
-      typeof AbortSignal.any === "function"
-    ) {
+    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.any === "function") {
       return AbortSignal.any(validSignals);
     }
   } catch {}
@@ -2989,11 +2345,8 @@ export function mergeAbortSignals(signals = []) {
     return validSignals[0] || null;
   }
 
-  const controller =
-    new AbortController();
-
-  const cleanups =
-    [];
+  const controller = new AbortController();
+  const cleanups = [];
 
   function teardown() {
     for (const cleanup of cleanups) {
@@ -3002,8 +2355,7 @@ export function mergeAbortSignals(signals = []) {
       } catch {}
     }
 
-    cleanups.length =
-      0;
+    cleanups.length = 0;
   }
 
   function abortFrom(sourceSignal) {
@@ -3012,9 +2364,7 @@ export function mergeAbortSignals(signals = []) {
     }
 
     try {
-      controller.abort(
-        sourceSignal?.reason || "aborted"
-      );
+      controller.abort(sourceSignal?.reason || "aborted");
     } catch {
       try {
         controller.abort();
@@ -3030,27 +2380,14 @@ export function mergeAbortSignals(signals = []) {
       continue;
     }
 
-    const onAbort =
-      () => {
-        abortFrom(signal);
-      };
+    const onAbort = () => abortFrom(signal);
 
     try {
-      signal.addEventListener(
-        "abort",
-        onAbort,
-        {
-          once:
-            true,
-        }
-      );
+      signal.addEventListener("abort", onAbort, { once: true });
 
       cleanups.push(() => {
         try {
-          signal.removeEventListener(
-            "abort",
-            onAbort
-          );
+          signal.removeEventListener("abort", onAbort);
         } catch {}
       });
     } catch {}
@@ -3060,48 +2397,40 @@ export function mergeAbortSignals(signals = []) {
 }
 
 export function isAbortError(error) {
-  const message =
-    String(error?.message || "")
-      .toLowerCase();
-
-  const name =
-    String(error?.name || "")
-      .toLowerCase();
+  const message = String(error?.message || "").toLowerCase();
+  const name = String(error?.name || "").toLowerCase();
+  const code = String(error?.code || "").toLowerCase();
 
   return (
     name === "aborterror" ||
-    error?.code === 20 ||
+    code === "20" ||
+    code === "abort_err" ||
     message.includes("aborted") ||
     message.includes("abort")
   );
 }
 
 export function isProbablyTimeoutError(error) {
-  const message =
-    String(error?.message || "")
-      .toLowerCase();
-
-  const raw =
-    String(error?.raw || "")
-      .toLowerCase();
-
-  const reason =
-    String(error?.reason || "")
-      .toLowerCase();
+  const message = String(error?.message || "").toLowerCase();
+  const name = String(error?.name || "").toLowerCase();
+  const code = String(error?.code || "").toLowerCase();
+  const raw = String(error?.raw || "").toLowerCase();
+  const reason = String(error?.reason || "").toLowerCase();
 
   return (
+    name === "timeouterror" ||
+    code === "etimedout" ||
+    code === "request_timeout" ||
+    code === "boot_timeout" ||
     message.includes("timeout") ||
     raw.includes("timeout") ||
     reason.includes("timeout") ||
-    error?.timeout === true ||
-    error?.code === "BOOT_TIMEOUT" ||
-    error?.code === "REQUEST_TIMEOUT"
+    error?.timeout === true
   );
 }
 
 export function detectNetworkHints(url = "") {
-  const hints =
-    [];
+  const hints = [];
 
   if (!isBrowser()) {
     return hints;
@@ -3109,60 +2438,35 @@ export function detectNetworkHints(url = "") {
 
   try {
     if (navigator.onLine === false) {
-      hints.push(
-        "El navegador parece estar offline."
-      );
+      hints.push("El navegador parece estar offline.");
     }
   } catch {}
 
-  const rawUrl =
-    safeText(url, "");
+  const rawUrl = safeText(url, "");
 
   if (!rawUrl) {
     return hints;
   }
 
   try {
-    const currentProtocol =
-      window.location.protocol;
+    const currentProtocol = window.location.protocol;
 
-    if (
-      /^https:\/\//i.test(rawUrl) &&
-      currentProtocol === "http:"
-    ) {
-      hints.push(
-        "Hay mezcla de protocolos: frontend en HTTP y API en HTTPS."
-      );
+    if (/^https:\/\//i.test(rawUrl) && currentProtocol === "http:") {
+      hints.push("Hay mezcla de protocolos: frontend en HTTP y API en HTTPS.");
     }
 
-    if (
-      /^http:\/\//i.test(rawUrl) &&
-      currentProtocol === "https:"
-    ) {
-      hints.push(
-        "Hay mezcla de protocolos: frontend en HTTPS y API en HTTP."
-      );
+    if (/^http:\/\//i.test(rawUrl) && currentProtocol === "https:") {
+      hints.push("Hay mezcla de protocolos: frontend en HTTPS y API en HTTP.");
     }
 
-    const apiOrigin =
-      new URL(
-        rawUrl,
-        window.location.origin
-      ).origin;
+    const apiOrigin = new URL(rawUrl, window.location.origin).origin;
 
-    if (
-      apiOrigin &&
-      apiOrigin !== window.location.origin
-    ) {
-      hints.push(
-        "Petición cross-origin: revisa CORS y preflight OPTIONS."
-      );
+    if (apiOrigin && apiOrigin !== window.location.origin) {
+      hints.push("Petición cross-origin: revisa CORS y preflight OPTIONS.");
     }
 
     if (getForbiddenFrontendApiOrigins().includes(apiOrigin)) {
-      hints.push(
-        "La petición apunta al dominio frontend. El backend canónico es https://api.onionit.net."
-      );
+      hints.push("La petición apunta al dominio frontend. El backend canónico es https://api.onionit.net.");
     }
   } catch {}
 
@@ -3175,55 +2479,28 @@ export function detectNetworkHints(url = "") {
 
 export function getHelpersSnapshot() {
   return {
-    version:
-      HELPERS_VERSION,
+    version: HELPERS_VERSION,
+    browser: isBrowser(),
+    documentReady: isDocumentReady(),
 
-    browser:
-      isBrowser(),
+    locationPath: redactTokenInText(getCurrentLocationPath()),
+    locationCanonicalPath: redactTokenInText(getCurrentLocationCanonicalPath()),
 
-    documentReady:
-      isDocumentReady(),
+    apiBase: getSafeApiBase(),
+    apiBasePath: getApiBasePath(),
+    canonicalProductionApiBase: CANONICAL_PRODUCTION_API_BASE,
+    canonicalBackendApiOrigins: getCanonicalBackendOrigins(),
+    forbiddenFrontendApiOrigins: getForbiddenFrontendApiOrigins(),
 
-    locationPath:
-      redactTokenInText(
-        getCurrentLocationPath()
-      ),
+    storagePrefix: getStoragePrefix(),
 
-    locationCanonicalPath:
-      redactTokenInText(
-        getCurrentLocationCanonicalPath()
-      ),
+    defaultLang: config?.defaultLang || "es",
+    defaultTheme: config?.defaultTheme || "dark",
 
-    apiBase:
-      getSafeApiBase(),
+    meIsPublic: isPublicApiPath("/api/auth/me"),
+    meIsPrivate: isPrivateApiPath("/api/auth/me"),
 
-    apiBasePath:
-      getApiBasePath(),
-
-    canonicalProductionApiBase:
-      CANONICAL_PRODUCTION_API_BASE,
-
-    forbiddenFrontendApiOrigins:
-      getForbiddenFrontendApiOrigins(),
-
-    storagePrefix:
-      getStoragePrefix(),
-
-    defaultLang:
-      config?.defaultLang || "es",
-
-    defaultTheme:
-      config?.defaultTheme || "dark",
-
-    meIsPublic:
-      isPublicApiPath("/api/auth/me"),
-
-    meIsPrivate:
-      isPrivateApiPath("/api/auth/me"),
-
-    activateEndpoint:
-      config?.auth?.endpoints?.activate ||
-      "/api/auth/activate",
+    activateEndpoint: config?.auth?.endpoints?.activate || "/api/auth/activate",
   };
 }
 
@@ -3265,6 +2542,7 @@ export default {
   cloneError,
 
   redactTokenInText,
+  redactSensitiveObject,
 
   getBaseOrigin,
   isAbsoluteUrl,
@@ -3275,6 +2553,7 @@ export default {
   splitPathParts,
   stripSearchAndHash,
   getSearchAndHash,
+  normalizePathnameOnly,
 
   sanitizeUsername,
   slugify,
@@ -3296,6 +2575,7 @@ export default {
   isPrivateApiPath,
 
   normalizeUser,
+  isUsableUser,
   getUserDisplayName,
   getUserUsername,
   getUserAvatarUrl,

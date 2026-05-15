@@ -2002,10 +2002,21 @@ function renderLoginView(container, deps = {}) {
 
         /*
           Si se inició salida de /login, no reactivamos el botón para evitar
-          parpadeo visual durante transición. Si navigate=false o falló antes
-          de salir, se restaura.
+          parpadeo visual durante transición.
+
+          Pero si la navegación falla y seguimos en /login,
+          debemos restaurar el estado del formulario para evitar
+          un bloqueo visual (submit deshabilitado infinito).
         */
-        if (!isLeavingLogin) {
+        const stillOnLogin =
+          isStillOnLoginRoute();
+
+        if (!isLeavingLogin || stillOnLogin) {
+          if (stillOnLogin) {
+            isLeavingLogin =
+              false;
+          }
+
           resetSubmittingVisualState();
         }
       }

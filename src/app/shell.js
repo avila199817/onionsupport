@@ -33,6 +33,11 @@
    - Loader no se oculta durante boot salvo force.
    - Eventos deduplicados y sanitizados.
    - Snapshot profundo para diagnóstico.
+
+   FIX:
+   - TOKEN_PARAM_NAMES se declara antes de TOKEN_ROUTE_CONFIGS.
+   - Evita ReferenceError por TDZ:
+     Cannot access 'TOKEN_PARAM_NAMES' before initialization.
 ========================================================= */
 
 import {
@@ -330,13 +335,11 @@ const AUTH_LIKE_PREFIXES =
     ])
   );
 
-const TOKEN_ROUTE_CONFIGS =
-  Object.freeze(
-    normalizeTokenRouteConfigs(
-      PROTECTED_PUBLIC_TOKEN_ROUTES
-    )
-  );
-
+/*
+  CRÍTICO:
+  Debe existir antes de TOKEN_ROUTE_CONFIGS, porque normalizeTokenRouteConfigs()
+  lo lee durante la evaluación del módulo.
+*/
 const TOKEN_PARAM_NAMES =
   Object.freeze([
     "token",
@@ -368,6 +371,13 @@ const TOKEN_PARAM_NAMES =
     "session",
     "sid",
   ]);
+
+const TOKEN_ROUTE_CONFIGS =
+  Object.freeze(
+    normalizeTokenRouteConfigs(
+      PROTECTED_PUBLIC_TOKEN_ROUTES
+    )
+  );
 
 const BOOT_BODY_CLASSES =
   Object.freeze([

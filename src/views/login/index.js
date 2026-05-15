@@ -2,24 +2,24 @@
    Onion SPA - Login View
    Archivo: src/views/login/index.js
 
-   LOGIN VIEW ORCHESTRATOR · FINAL EXTREME PRO SYSTEM · 15/10
+   LOGIN VIEW ORCHESTRATOR · CORE/AUTH/ROUTER SAFE · 16/10
 
    RESPONSABILIDADES:
-   - orquestar la vista de login
-   - renderizar template auth pro sin CSS inline
-   - conectar DOM, Auth, AppCore, Toast y password-field shared
-   - delegar sesión principal en Auth.login
-   - evitar doble navegación post-login
-   - evitar doble sync de sesión post-login
-   - evitar doble submit aunque la vista se monte dos veces
-   - evitar doble toast de éxito
-   - evitar toast loading huérfano si Router desmonta login durante Auth.login
-   - reducir parpadeos al salir de /login
-   - activar / limpiar modo auth-screen del body/html
-   - mantener cleanup de listeners
-   - exponer compatibilidad default + named export
-   - soportar login con usuario, email o teléfono
-   - conectar password-field compartido para eye / caps lock
+   - Orquestar la vista de login.
+   - Renderizar template auth pro sin CSS inline.
+   - Conectar DOM, Auth, AppCore, Toast y password-field shared.
+   - Delegar sesión principal en Auth.login.
+   - Evitar doble navegación post-login.
+   - Evitar doble sync de sesión post-login.
+   - Evitar doble submit aunque la vista se monte dos veces.
+   - Evitar toast loading huérfano si Router desmonta login durante Auth.login.
+   - Evitar formulario congelado si Auth.login / Router / navegación se cuelga.
+   - Reducir parpadeos al salir de /login.
+   - Activar / limpiar modo auth-screen del body/html.
+   - Mantener cleanup de listeners.
+   - Exponer compatibilidad default + named export.
+   - Soportar login con usuario, email o teléfono.
+   - Conectar password-field compartido para eye / caps lock.
 
    REGLAS:
    - Auth.login aplica sesión.
@@ -74,10 +74,13 @@ import {
 ========================================================= */
 
 export const LOGIN_VIEW_VERSION =
-  "15.0.0-final-extreme";
+  "16.0.0-extreme-pro";
 
 const LOGIN_SOURCE =
   "login.view";
+
+const LOGIN_SCOPE =
+  "view:login";
 
 const LOGIN_ROUTE =
   "/login";
@@ -87,6 +90,12 @@ const DEFAULT_HOME_ROUTE =
 
 const DEFAULT_2FA_ROUTE =
   "/2fa";
+
+const LOGIN_VIEW_INSTANCE_KEY =
+  "__ONION_LOGIN_VIEW_INSTANCE__";
+
+const LOGIN_VIEW_RUNTIME_KEY =
+  "__ONION_LOGIN_VIEW__";
 
 const LOGIN_SUCCESS_TOAST_DEDUPE_MS =
   1600;
@@ -100,8 +109,8 @@ const GLOBAL_LOGIN_SUBMIT_STALE_GRACE_MS =
 const LOGIN_NAVIGATION_TIMEOUT_MS =
   8_000;
 
-const LOGIN_VIEW_INSTANCE_KEY =
-  "__ONION_LOGIN_VIEW_INSTANCE__";
+const FORM_UNLOCK_WATCHDOG_EXTRA_MS =
+  2_500;
 
 const AUTH_SCREEN_CLASSES =
   Object.freeze([
@@ -118,6 +127,79 @@ const APP_SCREEN_CLASSES =
     "route-shell-visible",
     "route-chrome-visible",
   ]);
+
+const SENSITIVE_QUERY_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "activation_token",
+    "activate_token",
+    "resetToken",
+    "reset_token",
+    "passwordResetToken",
+    "password_reset_token",
+    "confirmToken",
+    "confirm_token",
+    "code",
+    "t",
+    "otp",
+    "totp",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
+    "authorization",
+    "jwt",
+    "session",
+    "sid",
+  ]);
+
+const LOGIN_EVENTS =
+  Object.freeze({
+    ready:
+      "auth:login:view:ready",
+
+    submitStart:
+      "auth:login:view:submit:start",
+
+    submitDone:
+      "auth:login:view:submit:done",
+
+    submitBlocked:
+      "auth:login:view:submit:blocked",
+
+    submitUnlocked:
+      "auth:login:view:submit:unlocked",
+
+    error:
+      "auth:login:view:error",
+
+    navigationStart:
+      "auth:login:view:navigation:start",
+
+    navigationDone:
+      "auth:login:view:navigation:done",
+
+    navigationError:
+      "auth:login:view:navigation:error",
+
+    authScreenCleared:
+      "auth:login:view:auth-screen-cleared",
+
+    destroyed:
+      "auth:login:view:destroyed",
+
+    debugReady:
+      "auth:login:view:debug-ready",
+  });
 
 /* =========================================================
    GLOBAL SUBMIT FIREBREAK
@@ -183,9 +265,6 @@ function clearStaleGlobalLoginSubmit(timeoutMs = GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS)
     return true;
   }
 
-  const now =
-    safeNow();
-
   const maxAge =
     Math.max(
       1_000,
@@ -193,7 +272,7 @@ function clearStaleGlobalLoginSubmit(timeoutMs = GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS)
         GLOBAL_LOGIN_SUBMIT_STALE_GRACE_MS
     );
 
-  if (now - startedAt > maxAge) {
+  if (safeNow() - startedAt > maxAge) {
     forceClearGlobalLoginSubmit("stale-timeout");
     return true;
   }
@@ -219,19 +298,34 @@ function runGlobalLoginSubmit(executor, fingerprint = "", options = {}) {
       ) || 0
     );
 
+  let timeoutId =
+    null;
+
   const workPromise =
     Promise.resolve()
       .then(() => executor());
 
-  const promise =
+  const timeoutPromise =
     timeoutMs > 0
+      ? new Promise((_, reject) => {
+          timeoutId =
+            setTimeout(() => {
+              const error =
+                new Error("LOGIN_SUBMIT_TIMEOUT");
+
+              error.code =
+                "LOGIN_SUBMIT_TIMEOUT";
+
+              reject(error);
+            }, timeoutMs);
+        })
+      : null;
+
+  const promise =
+    timeoutPromise
       ? Promise.race([
           workPromise,
-          new Promise((_, reject) => {
-            setTimeout(() => {
-              reject(new Error("LOGIN_SUBMIT_TIMEOUT"));
-            }, timeoutMs);
-          }),
+          timeoutPromise,
         ])
       : workPromise;
 
@@ -239,15 +333,21 @@ function runGlobalLoginSubmit(executor, fingerprint = "", options = {}) {
     promise;
 
   globalLoginSubmitFingerprint =
-    safeText(
-      fingerprint,
-      ""
-    );
+    safeText(fingerprint, "");
 
   globalLoginSubmitStartedAt =
     safeNow();
 
   const clear = () => {
+    if (timeoutId) {
+      try {
+        clearTimeout(timeoutId);
+      } catch {}
+
+      timeoutId =
+        null;
+    }
+
     if (globalLoginSubmitPromise === promise) {
       globalLoginSubmitPromise =
         null;
@@ -317,21 +417,104 @@ function safeNow() {
   }
 }
 
-function safeIsoNow() {
+function safeIsoNow(ms = safeNow()) {
   try {
-    return new Date().toISOString();
+    return new Date(ms).toISOString();
   } catch {
     return "";
   }
 }
 
 function safeRedact(value = "") {
-  try {
-    return AppCore?.utils?.redactTokenInText?.(value) ||
-      value;
-  } catch {
-    return safeText(value, "");
+  const text =
+    safeText(value, "");
+
+  if (!text) {
+    return "";
   }
+
+  try {
+    if (isFunction(AppCore?.utils?.redactTokenInText)) {
+      return AppCore.utils.redactTokenInText(text);
+    }
+  } catch {}
+
+  let output =
+    text;
+
+  for (const name of SENSITIVE_QUERY_PARAM_NAMES) {
+    try {
+      output =
+        output.replace(
+          new RegExp(`([?&#]${String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
+    } catch {}
+  }
+
+  try {
+    output =
+      output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
+  } catch {}
+
+  try {
+    output =
+      output.replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
+      );
+  } catch {}
+
+  return output;
+}
+
+function normalizeError(error = null) {
+  if (!error) {
+    return null;
+  }
+
+  const source =
+    error?.error ||
+    error?.reason ||
+    error;
+
+  return {
+    name:
+      safeText(
+        source?.name ||
+          source?.constructor?.name,
+        "Error"
+      ),
+
+    message:
+      safeRedact(
+        safeText(
+          source?.message ||
+            source?.reason ||
+            source,
+          "Error"
+        )
+      ),
+
+    status:
+      source?.status ||
+      source?.statusCode ||
+      source?.response?.status ||
+      source?.data?.status ||
+      0,
+
+    code:
+      source?.code ||
+      source?.data?.code ||
+      source?.response?.data?.code ||
+      null,
+
+    at:
+      safeIsoNow(),
+  };
 }
 
 function safeLog(...args) {
@@ -382,20 +565,51 @@ function safeEmit(eventName, payload = {}) {
     ...safeObject(payload),
     source:
       LOGIN_SOURCE,
+    version:
+      LOGIN_VIEW_VERSION,
     at:
       safeIsoNow(),
   };
 
-  try {
-    AppCore?.events?.emit?.(
-      name,
-      cleanPayload
-    );
+  let busAvailable =
+    false;
 
-    return true;
+  let emitted =
+    false;
+
+  try {
+    if (isFunction(AppCore?.events?.emit)) {
+      busAvailable =
+        true;
+
+      AppCore.events.emit(
+        name,
+        cleanPayload
+      );
+
+      emitted =
+        true;
+    }
   } catch {}
 
-  return false;
+  if (
+    !busAvailable &&
+    isBrowser()
+  ) {
+    try {
+      window.dispatchEvent(
+        new CustomEvent(name, {
+          detail:
+            cleanPayload,
+        })
+      );
+
+      emitted =
+        true;
+    } catch {}
+  }
+
+  return emitted;
 }
 
 /* =========================================================
@@ -404,7 +618,9 @@ function safeEmit(eventName, payload = {}) {
 
 function resolveToastApi(deps = {}) {
   const customToast =
-    deps.toast;
+    deps.toast ||
+    deps.Toast ||
+    null;
 
   if (
     customToast &&
@@ -505,11 +721,6 @@ function dismissLoginLoadingToast(
     "clearLoading"
   );
 
-  /*
-    Sólo hacemos dismiss global si sabemos que había loading activo
-    y el sistema Toast no dio ID estable. Así no matamos el toast success
-    en destroy post-login.
-  */
   if (
     loadingActive &&
     !hasId
@@ -525,30 +736,99 @@ function dismissLoginLoadingToast(
    EXECUTOR / AUTH HELPERS
 ========================================================= */
 
+function getModuleAuth() {
+  try {
+    return (
+      AppCore?.modules?.get?.("Auth") ||
+      AppCore?.modules?.get?.("auth") ||
+      AppCore?.Auth ||
+      AppCore?.auth ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
 function resolveLoginExecutor(deps = {}) {
   const moduleAuth =
-    (() => {
-      try {
-        return AppCore?.modules?.get?.("Auth") ||
-          AppCore?.modules?.get?.("auth") ||
-          null;
-      } catch {
-        return null;
-      }
-    })();
+    getModuleAuth();
 
   const candidates = [
-    deps.onSubmit,
-    deps.submitLogin,
-    deps.login,
-    Auth?.login,
-    moduleAuth?.login,
-    AppCore?.services?.auth?.login,
-    AppCore?.auth?.login,
+    {
+      fn:
+        deps.onSubmit,
+      owner:
+        deps,
+      source:
+        "deps.onSubmit",
+      custom:
+        true,
+    },
+    {
+      fn:
+        deps.submitLogin,
+      owner:
+        deps,
+      source:
+        "deps.submitLogin",
+      custom:
+        true,
+    },
+    {
+      fn:
+        deps.login,
+      owner:
+        deps,
+      source:
+        "deps.login",
+      custom:
+        true,
+    },
+    {
+      fn:
+        Auth?.login,
+      owner:
+        Auth,
+      source:
+        "Auth.login",
+      custom:
+        false,
+    },
+    {
+      fn:
+        moduleAuth?.login,
+      owner:
+        moduleAuth,
+      source:
+        "moduleAuth.login",
+      custom:
+        false,
+    },
+    {
+      fn:
+        AppCore?.services?.auth?.login,
+      owner:
+        AppCore?.services?.auth,
+      source:
+        "AppCore.services.auth.login",
+      custom:
+        true,
+    },
+    {
+      fn:
+        AppCore?.auth?.login,
+      owner:
+        AppCore?.auth,
+      source:
+        "AppCore.auth.login",
+      custom:
+        false,
+    },
   ];
 
   for (const candidate of candidates) {
-    if (isFunction(candidate)) {
+    if (isFunction(candidate.fn)) {
       return candidate;
     }
   }
@@ -556,7 +836,7 @@ function resolveLoginExecutor(deps = {}) {
   return null;
 }
 
-function isAuthLoginExecutor(executor, deps = {}) {
+function isAuthLoginExecutor(executorDescriptor, deps = {}) {
   if (
     deps.delegateNavigationToAuth === false ||
     deps.authLoginOwnsNavigation === false
@@ -564,20 +844,16 @@ function isAuthLoginExecutor(executor, deps = {}) {
     return false;
   }
 
-  if (
-    isFunction(executor) &&
-    isFunction(Auth?.login) &&
-    executor === Auth.login
-  ) {
-    return true;
-  }
+  const source =
+    safeText(
+      executorDescriptor?.source,
+      ""
+    );
 
-  return Boolean(
-    !deps.onSubmit &&
-      !deps.submitLogin &&
-      !deps.login &&
-      isFunction(Auth?.login) &&
-      executor === Auth.login
+  return (
+    source === "Auth.login" ||
+    source === "moduleAuth.login" ||
+    source === "AppCore.auth.login"
   );
 }
 
@@ -622,6 +898,88 @@ function buildLoginExecutorOptions(deps = {}) {
   };
 }
 
+function hasUsableUser(user = null) {
+  if (
+    !user ||
+    typeof user !== "object" ||
+    Array.isArray(user)
+  ) {
+    return false;
+  }
+
+  if (
+    user.active === false ||
+    user.disabled === true ||
+    user.deleted === true ||
+    user.blocked === true ||
+    user.suspended === true
+  ) {
+    return false;
+  }
+
+  return Boolean(
+    safeText(user.id, "") ||
+      safeText(user.userId, "") ||
+      safeText(user.user_id, "") ||
+      safeText(user._id, "") ||
+      safeText(user.uid, "") ||
+      safeText(user.sub, "") ||
+      safeText(user.username, "") ||
+      safeText(user.userName, "") ||
+      safeText(user.email, "") ||
+      safeText(user.mail, "") ||
+      safeText(user.phone, "") ||
+      safeText(user.telefono, "")
+  );
+}
+
+function getStateUser() {
+  const state =
+    safeObject(AppCore?.state);
+
+  return (
+    state.user ||
+    state.currentUser ||
+    state.sessionUser ||
+    state.authUser ||
+    state.me ||
+    state.account ||
+    state.profile ||
+    state.session?.user ||
+    state.auth?.user ||
+    null
+  );
+}
+
+function getStateToken() {
+  const state =
+    safeObject(AppCore?.state);
+
+  return safeText(
+    state.token ||
+      state.accessToken ||
+      state.access_token ||
+      state.auth?.token ||
+      state.auth?.accessToken ||
+      state.auth?.access_token ||
+      state.session?.token ||
+      state.session?.accessToken ||
+      state.session?.access_token ||
+      "",
+    ""
+  );
+}
+
+function hasUsableStateSession() {
+  const state =
+    safeObject(AppCore?.state);
+
+  return Boolean(
+    state.authenticated === true &&
+      hasUsableUser(getStateUser())
+  );
+}
+
 function isAuthenticatedResult(auth = {}) {
   if (
     !auth ||
@@ -646,23 +1004,37 @@ function isAuthenticatedResult(auth = {}) {
     auth.me ||
     auth.account ||
     auth.profile ||
+    getStateUser() ||
     null;
 
   if (
     auth.status === "authenticated" ||
     auth.authenticated === true
   ) {
-    return true;
+    return hasUsableUser(user) || hasUsableStateSession();
   }
 
-  /*
-    No auth fantasma:
-    success:true sin token+user no basta.
-  */
+  if (
+    auth.success === true ||
+    auth.ok === true
+  ) {
+    return Boolean(
+      hasUsableUser(user) ||
+        hasUsableStateSession() ||
+        (
+          token &&
+          hasUsableUser(user)
+        ) ||
+        (
+          getStateToken() &&
+          hasUsableUser(user)
+        )
+    );
+  }
+
   return Boolean(
-    auth.success === true &&
-      token &&
-      user
+    token &&
+      hasUsableUser(user)
   );
 }
 
@@ -679,6 +1051,18 @@ function isTwoFaResult(auth = {}) {
     status === "mfa_required" ||
     status === "two_factor_required" ||
     status === "otp_required"
+  );
+}
+
+function callLoginExecutor(executorDescriptor, payload, options) {
+  if (!executorDescriptor?.fn) {
+    throw new Error("LOGIN_EXECUTOR_MISSING");
+  }
+
+  return executorDescriptor.fn.call(
+    executorDescriptor.owner || null,
+    payload,
+    options
   );
 }
 
@@ -709,14 +1093,18 @@ function normalizePath(path = "/") {
     raw
       .replace(/\\/g, "/")
       .replace(/\/{2,}/g, "/")
-      .replace(/\/+$/g, "") || "/"
+      .replace(/\/+$/g, "") ||
+    "/"
   );
 }
 
 function stripSearchAndHash(path = "/") {
-  return normalizePath(path)
-    .split("?")[0]
-    .split("#")[0] || "/";
+  return (
+    normalizePath(path)
+      .split("?")[0]
+      .split("#")[0] ||
+    "/"
+  );
 }
 
 function isSafeInternalPath(path = "") {
@@ -777,13 +1165,18 @@ function isSafeInternalPath(path = "") {
 }
 
 function sanitizeNavigationPath(path = "/", fallback = DEFAULT_HOME_ROUTE) {
+  const raw =
+    safeText(path, fallback) ||
+    fallback;
+
   const candidate =
-    normalizePath(
-      safeText(path, fallback) ||
-        fallback
-    );
+    normalizePath(raw);
 
   if (!isSafeInternalPath(candidate)) {
+    return fallback;
+  }
+
+  if (isLoginRoute(candidate)) {
     return fallback;
   }
 
@@ -818,6 +1211,73 @@ function isStillOnLoginRoute() {
   return isLoginRoute(
     getBrowserPath()
   );
+}
+
+function getRedirectFromCurrentUrl() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  try {
+    const params =
+      new URLSearchParams(window.location.search || "");
+
+    const value =
+      params.get("redirect") ||
+      params.get("redirectTo") ||
+      params.get("returnTo") ||
+      params.get("next") ||
+      "";
+
+    if (!value) {
+      return "";
+    }
+
+    const decoded =
+      decodeURIComponent(value);
+
+    return sanitizeNavigationPath(
+      decoded,
+      ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+function resolveFinalLoginRedirect(auth = {}, deps = {}) {
+  const fromHelper =
+    safeText(
+      resolveLoginRedirect(auth, deps),
+      ""
+    );
+
+  if (
+    fromHelper &&
+    isSafeInternalPath(fromHelper) &&
+    !isLoginRoute(fromHelper)
+  ) {
+    return sanitizeNavigationPath(
+      fromHelper,
+      DEFAULT_HOME_ROUTE
+    );
+  }
+
+  const fromUrl =
+    getRedirectFromCurrentUrl();
+
+  if (
+    fromUrl &&
+    isSafeInternalPath(fromUrl) &&
+    !isLoginRoute(fromUrl)
+  ) {
+    return sanitizeNavigationPath(
+      fromUrl,
+      DEFAULT_HOME_ROUTE
+    );
+  }
+
+  return DEFAULT_HOME_ROUTE;
 }
 
 function getRouterCandidates() {
@@ -855,14 +1315,36 @@ function withTimeout(promiseLike, timeoutMs = 0, timeoutCode = "TIMEOUT") {
     return Promise.resolve(promiseLike);
   }
 
+  let timer =
+    null;
+
+  const timeoutPromise =
+    new Promise((_, reject) => {
+      timer =
+        setTimeout(() => {
+          const error =
+            new Error(timeoutCode);
+
+          error.code =
+            timeoutCode;
+
+          reject(error);
+        }, ms);
+    });
+
   return Promise.race([
     Promise.resolve(promiseLike),
-    new Promise((_, reject) => {
-      setTimeout(() => {
-        reject(new Error(timeoutCode));
-      }, ms);
-    }),
-  ]);
+    timeoutPromise,
+  ]).finally(() => {
+    if (timer) {
+      try {
+        clearTimeout(timer);
+      } catch {}
+
+      timer =
+        null;
+    }
+  });
 }
 
 async function navigateTo(path = "/", options = {}) {
@@ -871,6 +1353,9 @@ async function navigateTo(path = "/", options = {}) {
       path,
       DEFAULT_HOME_ROUTE
     );
+
+  const canonicalTarget =
+    stripSearchAndHash(target);
 
   const replaceState =
     options.replaceState !== false;
@@ -890,10 +1375,16 @@ async function navigateTo(path = "/", options = {}) {
       LOGIN_SOURCE,
     reason:
       options.reason || "login-view-navigation",
+    publicPath:
+      target,
+    requestedPath:
+      target,
+    canonicalPath:
+      canonicalTarget,
   };
 
   safeEmit(
-    "auth:login:view:navigation:start",
+    LOGIN_EVENTS.navigationStart,
     {
       target:
         safeRedact(target),
@@ -905,6 +1396,29 @@ async function navigateTo(path = "/", options = {}) {
 
   for (const router of getRouterCandidates()) {
     try {
+      if (isFunction(router.goAfterLogin)) {
+        await withTimeout(
+          router.goAfterLogin(
+            target,
+            routerOptions
+          ),
+          timeoutMs,
+          "LOGIN_NAVIGATE_TIMEOUT"
+        );
+
+        safeEmit(
+          LOGIN_EVENTS.navigationDone,
+          {
+            target:
+              safeRedact(target),
+            method:
+              "goAfterLogin",
+          }
+        );
+
+        return true;
+      }
+
       if (isFunction(router.navigate)) {
         await withTimeout(
           router.navigate(
@@ -913,6 +1427,16 @@ async function navigateTo(path = "/", options = {}) {
           ),
           timeoutMs,
           "LOGIN_NAVIGATE_TIMEOUT"
+        );
+
+        safeEmit(
+          LOGIN_EVENTS.navigationDone,
+          {
+            target:
+              safeRedact(target),
+            method:
+              "navigate",
+          }
         );
 
         return true;
@@ -928,6 +1452,16 @@ async function navigateTo(path = "/", options = {}) {
           "LOGIN_NAVIGATE_TIMEOUT"
         );
 
+        safeEmit(
+          LOGIN_EVENTS.navigationDone,
+          {
+            target:
+              safeRedact(target),
+            method:
+              "go",
+          }
+        );
+
         return true;
       }
 
@@ -941,23 +1475,44 @@ async function navigateTo(path = "/", options = {}) {
           "LOGIN_NAVIGATE_TIMEOUT"
         );
 
+        safeEmit(
+          LOGIN_EVENTS.navigationDone,
+          {
+            target:
+              safeRedact(target),
+            method:
+              "push",
+          }
+        );
+
         return true;
       }
 
       if (isFunction(router.render)) {
         await withTimeout(
           router.render(
-            target,
-              {
+            canonicalTarget,
+            {
               ...routerOptions,
-              publicPath:
-                target,
-              requestedPath:
-                target,
+              replaceState,
+              force:
+                true,
+              forceRender:
+                true,
             }
           ),
           timeoutMs,
           "LOGIN_NAVIGATE_TIMEOUT"
+        );
+
+        safeEmit(
+          LOGIN_EVENTS.navigationDone,
+          {
+            target:
+              safeRedact(target),
+            method:
+              "render",
+          }
         );
 
         return true;
@@ -965,14 +1520,32 @@ async function navigateTo(path = "/", options = {}) {
     } catch (error) {
       safeWarn(
         "Router navigation falló.",
-        error
+        normalizeError(error)
       );
     }
   }
 
   try {
     if (isFunction(AppCore?.navigate)) {
-      await withTimeout(AppCore.navigate(target), timeoutMs, "LOGIN_NAVIGATE_TIMEOUT");
+      await withTimeout(
+        AppCore.navigate(
+          target,
+          routerOptions
+        ),
+        timeoutMs,
+        "LOGIN_NAVIGATE_TIMEOUT"
+      );
+
+      safeEmit(
+        LOGIN_EVENTS.navigationDone,
+        {
+          target:
+            safeRedact(target),
+          method:
+            "AppCore.navigate",
+        }
+      );
+
       return true;
     }
   } catch {}
@@ -989,6 +1562,8 @@ async function navigateTo(path = "/", options = {}) {
             target,
           publicPath:
             target,
+          canonicalPath:
+            canonicalTarget,
           source:
             LOGIN_SOURCE,
         },
@@ -1008,6 +1583,16 @@ async function navigateTo(path = "/", options = {}) {
         } catch {}
       }
 
+      safeEmit(
+        LOGIN_EVENTS.navigationDone,
+        {
+          target:
+            safeRedact(target),
+          method:
+            "history.replaceState",
+        }
+      );
+
       return true;
     }
   } catch {}
@@ -1020,7 +1605,7 @@ async function navigateTo(path = "/", options = {}) {
   } catch {}
 
   safeEmit(
-    "auth:login:view:navigation:error",
+    LOGIN_EVENTS.navigationError,
     {
       target:
         safeRedact(target),
@@ -1059,6 +1644,16 @@ function enableAuthScreenMode() {
       "data-route-mode",
       "auth"
     );
+
+    document.body?.setAttribute?.(
+      "data-chrome",
+      "hidden"
+    );
+
+    document.body?.setAttribute?.(
+      "data-shell",
+      "visible"
+    );
   } catch {}
 
   try {
@@ -1076,6 +1671,16 @@ function enableAuthScreenMode() {
       "data-route-mode",
       "auth"
     );
+
+    document.documentElement?.setAttribute?.(
+      "data-chrome",
+      "hidden"
+    );
+
+    document.documentElement?.setAttribute?.(
+      "data-shell",
+      "visible"
+    );
   } catch {}
 
   return true;
@@ -1089,11 +1694,6 @@ function disableAuthScreenMode({
     return false;
   }
 
-  /*
-    Regla crítica:
-    no limpiamos auth-screen si seguimos realmente en /login,
-    salvo force explícito.
-  */
   if (
     !force &&
     isStillOnLoginRoute()
@@ -1118,6 +1718,11 @@ function disableAuthScreenMode({
       "data-route-mode",
       "app"
     );
+
+    document.body?.setAttribute?.(
+      "data-chrome",
+      "visible"
+    );
   } catch {}
 
   try {
@@ -1135,10 +1740,15 @@ function disableAuthScreenMode({
       "data-route-mode",
       "app"
     );
+
+    document.documentElement?.setAttribute?.(
+      "data-chrome",
+      "visible"
+    );
   } catch {}
 
   safeEmit(
-    "auth:login:view:auth-screen-cleared",
+    LOGIN_EVENTS.authScreenCleared,
     {
       reason,
       stillOnLogin:
@@ -1176,7 +1786,7 @@ function bindAppEvent(eventName, handler) {
         safeWarn(
           "event handler error",
           eventName,
-          error
+          normalizeError(error)
         );
       }
     };
@@ -1241,6 +1851,56 @@ function bindAppEvent(eventName, handler) {
         } catch {}
       };
     }
+  } catch {}
+
+  return () => {
+    disposed =
+      true;
+  };
+}
+
+function bindWindowEvent(eventName, handler) {
+  if (
+    !isBrowser() ||
+    !eventName ||
+    !isFunction(handler)
+  ) {
+    return () => {};
+  }
+
+  let disposed =
+    false;
+
+  const wrapped =
+    (event) => {
+      if (disposed) {
+        return;
+      }
+
+      try {
+        handler(event);
+      } catch {}
+    };
+
+  try {
+    window.addEventListener(
+      eventName,
+      wrapped,
+      false
+    );
+
+    return () => {
+      disposed =
+        true;
+
+      try {
+        window.removeEventListener(
+          eventName,
+          wrapped,
+          false
+        );
+      } catch {}
+    };
   } catch {}
 
   return () => {
@@ -1370,7 +2030,7 @@ function scheduleAuthScreenCleanupAfterNavigation() {
   );
 
   offFns.push(
-    bindAppEvent(
+    bindWindowEvent(
       "popstate",
       onRouteSignal("popstate")
     )
@@ -1398,10 +2058,6 @@ function scheduleAuthScreenCleanupAfterNavigation() {
     } catch {}
   }
 
-  /*
-    Freno anti fuga: si tras 1.5s seguimos en /login,
-    no se limpia auth-screen, pero sí se liberan listeners.
-  */
   try {
     timerIds.push(
       window.setTimeout(
@@ -1487,7 +2143,7 @@ function bindSharedPasswordFields(container = null) {
   } catch (error) {
     safeWarn(
       "password-field bind error",
-      error
+      normalizeError(error)
     );
 
     return [];
@@ -1552,9 +2208,28 @@ function toggleTheme() {
   return next;
 }
 
+function safeSetLoginLoading(refs, value = false, labels = {}) {
+  try {
+    setLoginLoading(
+      refs,
+      Boolean(value),
+      labels
+    );
+
+    return true;
+  } catch (error) {
+    safeWarn(
+      "setLoginLoading() falló.",
+      normalizeError(error)
+    );
+
+    return false;
+  }
+}
+
 function emitLoginViewReady(deps = {}) {
   safeEmit(
-    "auth:login:view:ready",
+    LOGIN_EVENTS.ready,
     {
       route:
         LOGIN_ROUTE,
@@ -1565,9 +2240,6 @@ function emitLoginViewReady(deps = {}) {
     }
   );
 
-  /*
-    Legacy opt-in. Router ya emite sus eventos finales.
-  */
   if (deps.emitLegacyRouteRendered === true) {
     safeEmit(
       "app:route:rendered",
@@ -1726,23 +2398,18 @@ function renderLoginView(container, deps = {}) {
     })
   );
 
-  /*
-    El template usa src/shared/password-field.
-    El binding correcto del ojo/CapsLock debe ser el shared.
-    No se usa un toggle local paralelo para evitar doble listener.
-  */
   const passwordBindings =
     bindSharedPasswordFields(container);
 
   const refs =
     getLoginRefs(container);
 
-  const executeLogin =
+  const executorDescriptor =
     resolveLoginExecutor(deps);
 
   const executorIsAuthLogin =
     isAuthLoginExecutor(
-      executeLogin,
+      executorDescriptor,
       deps
     );
 
@@ -1813,41 +2480,7 @@ function renderLoginView(container, deps = {}) {
       null;
   }
 
-  function startSubmitWatchdog(timeoutMs = GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS) {
-    stopSubmitWatchdog();
-
-    const watchdogMs =
-      Math.max(
-        5_000,
-        Number(timeoutMs || 0) +
-          GLOBAL_LOGIN_SUBMIT_STALE_GRACE_MS
-      );
-
-    submitWatchdogTimer =
-      setTimeout(() => {
-        submitWatchdogTimer =
-          null;
-
-        if (!mounted || !isStillOnLoginRoute()) {
-          return;
-        }
-
-        isLeavingLogin =
-          false;
-
-        closeLoadingToast();
-        forceClearGlobalLoginSubmit("view-watchdog");
-        resetSubmittingVisualState();
-
-        safeToastCall(
-          toast,
-          "error",
-          "Se recuperó el formulario tras un bloqueo del login. Inténtalo de nuevo."
-        );
-      }, watchdogMs);
-  }
-
-  function resetSubmittingVisualState() {
+  function resetSubmittingVisualState(reason = "reset") {
     isSubmitting =
       false;
 
@@ -1856,7 +2489,7 @@ function renderLoginView(container, deps = {}) {
     );
 
     if (mounted) {
-      setLoginLoading(
+      safeSetLoginLoading(
         refs,
         false,
         {
@@ -1865,6 +2498,53 @@ function renderLoginView(container, deps = {}) {
         }
       );
     }
+
+    safeEmit(
+      LOGIN_EVENTS.submitUnlocked,
+      {
+        reason,
+        stillOnLogin:
+          isStillOnLoginRoute(),
+      }
+    );
+  }
+
+  function startSubmitWatchdog(timeoutMs = GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS) {
+    stopSubmitWatchdog();
+
+    const watchdogMs =
+      Math.max(
+        5_000,
+        Number(timeoutMs || 0) +
+          FORM_UNLOCK_WATCHDOG_EXTRA_MS
+      );
+
+    submitWatchdogTimer =
+      setTimeout(() => {
+        submitWatchdogTimer =
+          null;
+
+        closeLoadingToast();
+        forceClearGlobalLoginSubmit("view-watchdog");
+
+        if (
+          mounted &&
+          isStillOnLoginRoute()
+        ) {
+          isLeavingLogin =
+            false;
+
+          resetSubmittingVisualState(
+            "watchdog"
+          );
+
+          safeToastCall(
+            toast,
+            "error",
+            "Se recuperó el formulario tras un bloqueo del login. Inténtalo de nuevo."
+          );
+        }
+      }, watchdogMs);
   }
 
   function beginLeavingLogin() {
@@ -1877,7 +2557,21 @@ function renderLoginView(container, deps = {}) {
     }
   }
 
-  if (!executeLogin) {
+  function unlockAfterNavigationFailure(reason = "navigation-failed") {
+    if (
+      mounted &&
+      isStillOnLoginRoute()
+    ) {
+      isLeavingLogin =
+        false;
+
+      resetSubmittingVisualState(
+        reason
+      );
+    }
+  }
+
+  if (!executorDescriptor) {
     const message =
       "No se encontró un executor de login.";
 
@@ -1895,6 +2589,9 @@ function renderLoginView(container, deps = {}) {
     emitLoginViewReady(deps);
 
     const failedInstance = {
+      version:
+        LOGIN_VIEW_VERSION,
+
       destroy(destroyOptions = {}) {
         mounted =
           false;
@@ -1925,6 +2622,10 @@ function renderLoginView(container, deps = {}) {
           container,
           failedInstance
         );
+      },
+
+      unlock(reason = "manual") {
+        resetSubmittingVisualState(reason);
       },
     };
 
@@ -1970,7 +2671,23 @@ function renderLoginView(container, deps = {}) {
         hasGlobalInFlight ||
         isFormSubmittingFlagged()
       ) {
-        if (hasGlobalInFlight && mounted) {
+        safeEmit(
+          LOGIN_EVENTS.submitBlocked,
+          {
+            isSubmitting,
+            isLeavingLogin,
+            hasGlobalInFlight,
+            formFlagged:
+              isFormSubmittingFlagged(),
+            globalFingerprint:
+              safeRedact(globalLoginSubmitFingerprint),
+          }
+        );
+
+        if (
+          hasGlobalInFlight &&
+          mounted
+        ) {
           safeToastCall(
             toast,
             "info",
@@ -1983,8 +2700,26 @@ function renderLoginView(container, deps = {}) {
 
       clearLoginErrors(refs);
 
-      const formState =
-        readLoginFormState(refs);
+      let formState =
+        {};
+
+      try {
+        formState =
+          readLoginFormState(refs);
+      } catch (error) {
+        safeError(
+          "readLoginFormState() falló.",
+          normalizeError(error)
+        );
+
+        safeToastCall(
+          toast,
+          "error",
+          "No se pudo leer el formulario."
+        );
+
+        return;
+      }
 
       const payload =
         createLoginPayload(formState);
@@ -2021,7 +2756,7 @@ function renderLoginView(container, deps = {}) {
           true
         );
 
-        setLoginLoading(
+        safeSetLoginLoading(
           refs,
           true,
           {
@@ -2047,30 +2782,41 @@ function renderLoginView(container, deps = {}) {
         const loginOptions =
           buildLoginExecutorOptions(deps);
 
-        startSubmitWatchdog(
+        const submitTimeoutMs =
           loginOptions.timeoutMs ||
-            loginOptions.loginTimeoutMs ||
-            GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS
+          loginOptions.loginTimeoutMs ||
+          deps.loginTimeoutMs ||
+          GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS;
+
+        startSubmitWatchdog(
+          submitTimeoutMs
         );
 
-        /*
-          Firebreak global:
-          aunque el submit esté bindeado dos veces,
-          sólo una llamada real a Auth.login puede estar activa.
-        */
+        safeEmit(
+          LOGIN_EVENTS.submitStart,
+          {
+            fingerprint:
+              safeRedact(fingerprint),
+            executor:
+              executorDescriptor.source,
+            executorIsAuthLogin,
+            navigate:
+              shouldNavigateAfterLogin(deps),
+          }
+        );
+
         const rawResult =
           await runGlobalLoginSubmit(
             () =>
-              executeLogin(
+              callLoginExecutor(
+                executorDescriptor,
                 payload,
                 loginOptions
               ),
             fingerprint,
             {
               timeoutMs:
-                loginOptions.timeoutMs ||
-                loginOptions.loginTimeoutMs ||
-                GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS,
+                submitTimeoutMs,
             }
           );
 
@@ -2079,11 +2825,6 @@ function renderLoginView(container, deps = {}) {
             rawResult
           );
 
-        /*
-          Crítico:
-          cerrar loading ANTES del guard mounted.
-          Si Router ya desmontó login, igualmente hay que matar el toast.
-        */
         closeLoadingToast();
 
         if (!mounted) {
@@ -2100,20 +2841,16 @@ function renderLoginView(container, deps = {}) {
           if (shouldNavigateAfterLogin(deps)) {
             beginLeavingLogin();
 
-            await Promise.resolve();
+            const redirectTo =
+              safeText(
+                resolveLoginRedirect(auth, deps),
+                ""
+              ) ||
+              DEFAULT_2FA_ROUTE;
 
-            if (
-              mounted &&
-              isStillOnLoginRoute()
-            ) {
-              const redirectTo =
-                resolveLoginRedirect(
-                  auth,
-                  deps
-                );
-
+            const navigated =
               await navigateTo(
-                redirectTo || DEFAULT_2FA_ROUTE,
+                redirectTo,
                 {
                   replaceState:
                     true,
@@ -2121,8 +2858,23 @@ function renderLoginView(container, deps = {}) {
                     "login-2fa",
                 }
               );
+
+            if (!navigated) {
+              unlockAfterNavigationFailure(
+                "2fa-navigation-failed"
+              );
             }
           }
+
+          safeEmit(
+            LOGIN_EVENTS.submitDone,
+            {
+              ok:
+                true,
+              twoFactor:
+                true,
+            }
+          );
 
           return;
         }
@@ -2131,12 +2883,15 @@ function renderLoginView(container, deps = {}) {
           throw rawResult;
         }
 
-        /*
-          Sólo para executors custom.
-          Auth.login estándar ya hizo applySession().
-        */
         if (!executorIsAuthLogin) {
-          syncSession(auth);
+          try {
+            syncSession(auth);
+          } catch (error) {
+            safeWarn(
+              "syncSession() custom executor falló.",
+              normalizeError(error)
+            );
+          }
         }
 
         showLoginSuccessToastOnce(
@@ -2148,35 +2903,55 @@ function renderLoginView(container, deps = {}) {
         if (shouldNavigateAfterLogin(deps)) {
           beginLeavingLogin();
 
-          await Promise.resolve();
-
           if (
             mounted &&
             isStillOnLoginRoute()
           ) {
             const redirectTo =
-              resolveLoginRedirect(
+              resolveFinalLoginRedirect(
                 auth,
                 deps
               );
 
-            await navigateTo(
-              redirectTo || DEFAULT_HOME_ROUTE,
-              {
-                replaceState:
-                  true,
-                reason:
-                  "login-success",
-              }
-            );
+            const navigated =
+              await navigateTo(
+                redirectTo || DEFAULT_HOME_ROUTE,
+                {
+                  replaceState:
+                    true,
+                  reason:
+                    "login-success",
+                }
+              );
+
+            if (!navigated) {
+              unlockAfterNavigationFailure(
+                "success-navigation-failed"
+              );
+            }
           }
         }
+
+        safeEmit(
+          LOGIN_EVENTS.submitDone,
+          {
+            ok:
+              true,
+            authenticated:
+              true,
+            navigated:
+              !isStillOnLoginRoute(),
+          }
+        );
       } catch (error) {
         closeLoadingToast();
 
+        const normalized =
+          normalizeError(error);
+
         const isSubmitTimeout =
-          safeText(error?.message, "") ===
-          "LOGIN_SUBMIT_TIMEOUT";
+          normalized?.message === "LOGIN_SUBMIT_TIMEOUT" ||
+          normalized?.code === "LOGIN_SUBMIT_TIMEOUT";
 
         const message =
           isSubmitTimeout
@@ -2195,49 +2970,37 @@ function renderLoginView(container, deps = {}) {
         );
 
         safeEmit(
-          "auth:login:view:error",
+          LOGIN_EVENTS.error,
           {
             message,
-            status:
-              error?.status ||
-              error?.statusCode ||
-              error?.response?.status ||
-              error?.data?.status ||
-              0,
-            code:
-              error?.code ||
-              error?.data?.code ||
-              error?.response?.data?.code ||
-              null,
+            error:
+              normalized,
           }
         );
 
         safeError(
           "login error",
-          error
+          normalized
         );
       } finally {
         stopSubmitWatchdog();
         closeLoadingToast();
 
-        /*
-          Si se inició salida de /login, no reactivamos el botón para evitar
-          parpadeo visual durante transición.
-
-          Pero si la navegación falla y seguimos en /login,
-          debemos restaurar el estado del formulario para evitar
-          un bloqueo visual (submit deshabilitado infinito).
-        */
         const stillOnLogin =
           isStillOnLoginRoute();
 
-        if (!isLeavingLogin || stillOnLogin) {
+        if (
+          !isLeavingLogin ||
+          stillOnLogin
+        ) {
           if (stillOnLogin) {
             isLeavingLogin =
               false;
           }
 
-          resetSubmittingVisualState();
+          resetSubmittingVisualState(
+            "finally"
+          );
         }
       }
     };
@@ -2295,10 +3058,6 @@ function renderLoginView(container, deps = {}) {
         passwordBindings
       );
 
-      /*
-        Si no estamos saliendo por navegación real, cancelamos el watcher.
-        Si sí estamos saliendo, dejamos que haga flush si la URL ya no es /login.
-      */
       if (wasLeavingLogin) {
         try {
           navigationCleanup?.flush?.(
@@ -2321,6 +3080,16 @@ function renderLoginView(container, deps = {}) {
         clearLoginInstance(
           container,
           instance
+        );
+
+        safeEmit(
+          LOGIN_EVENTS.destroyed,
+          {
+            preserveAuthScreen:
+              true,
+            remount:
+              destroyOptions.remount === true,
+          }
         );
 
         return;
@@ -2346,12 +3115,106 @@ function renderLoginView(container, deps = {}) {
         container,
         instance
       );
+
+      safeEmit(
+        LOGIN_EVENTS.destroyed,
+        {
+          preserveAuthScreen:
+            false,
+          wasLeavingLogin,
+        }
+      );
+    },
+
+    unlock(reason = "manual") {
+      closeLoadingToast();
+      forceClearGlobalLoginSubmit(reason);
+      resetSubmittingVisualState(reason);
+      return true;
+    },
+
+    getSnapshot() {
+      return {
+        version:
+          LOGIN_VIEW_VERSION,
+
+        source:
+          LOGIN_SOURCE,
+
+        scope:
+          LOGIN_SCOPE,
+
+        mounted:
+          Boolean(mounted),
+
+        isSubmitting:
+          Boolean(isSubmitting),
+
+        isLeavingLogin:
+          Boolean(isLeavingLogin),
+
+        loadingToastActive:
+          Boolean(loadingToastActive),
+
+        hasLoadingToastId:
+          Boolean(loadingToastId),
+
+        hasSubmitWatchdog:
+          Boolean(submitWatchdogTimer),
+
+        hasGlobalSubmit:
+          hasGlobalLoginSubmitInFlight(),
+
+        globalFingerprint:
+          safeRedact(globalLoginSubmitFingerprint),
+
+        globalStartedAt:
+          globalLoginSubmitStartedAt,
+
+        globalStartedAtIso:
+          globalLoginSubmitStartedAt
+            ? safeIsoNow(globalLoginSubmitStartedAt)
+            : "",
+
+        executor:
+          executorDescriptor?.source || "",
+
+        executorIsAuthLogin:
+          Boolean(executorIsAuthLogin),
+
+        currentPath:
+          getBrowserPath(),
+
+        stillOnLogin:
+          isStillOnLoginRoute(),
+
+        containerConnected:
+          Boolean(container?.isConnected),
+
+        at:
+          safeIsoNow(),
+      };
     },
   };
 
   storeLoginInstance(
     container,
     instance
+  );
+
+  try {
+    if (isBrowser()) {
+      window[LOGIN_VIEW_RUNTIME_KEY] =
+        instance;
+    }
+  } catch {}
+
+  safeEmit(
+    LOGIN_EVENTS.debugReady,
+    {
+      installed:
+        true,
+    }
   );
 
   return instance;
@@ -2361,8 +3224,25 @@ function renderLoginView(container, deps = {}) {
    EXPORTS
 ========================================================= */
 
+function initLoginView(container, deps = {}) {
+  return renderLoginView(
+    container,
+    deps
+  );
+}
+
+function mountLoginView(container, deps = {}) {
+  return renderLoginView(
+    container,
+    deps
+  );
+}
+
 export {
   renderLoginView as LoginView,
+  renderLoginView as render,
+  initLoginView as init,
+  mountLoginView as mount,
 };
 
 export default renderLoginView;

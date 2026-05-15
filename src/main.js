@@ -3,7 +3,7 @@
    Archivo: /src/main.js
 
    ONION SUPPORT · MAIN ENTRYPOINT
-   PRIVATE SPA · SINGLE BOOT OWNER · CSP CLEAN · EXTREME 14/10
+   PRIVATE SPA · SINGLE BOOT OWNER · CSP CLEAN · EXTREME 15/10
 
    RESPONSABILIDADES:
    - Ser el único entrypoint físico cargado por index.html.
@@ -13,7 +13,7 @@
    - Preservar rutas técnicas con token antes de cargar App.
    - Cargar App/AppCore mediante imports dinámicos controlados.
    - Invocar App.boot() una sola vez.
-   - Evitar doble arranque.
+   - Evitar doble arranque incluso con import/hot reload accidental.
    - Capturar errores fatales del arranque físico.
    - Exponer diagnóstico mínimo en window.OnionApp.main.
    - No montar UI de negocio.
@@ -32,8 +32,13 @@
    - src/app/loader.js gobierna el loader real.
    - src/app/index.js gobierna bootstrap, restore, router, UI y finalize.
 
-   FIX DIAGNÓSTICO:
-   - serializeMainError() evita que consola muestre error: {}.
+   FIXES 15/10:
+   - Single boot lock global con reutilización de promise existente.
+   - serializeMainError() evita error: {}.
+   - sanitizePayload() circular-safe con WeakSet.
+   - Preserva activate/reset/password-reset token routes antes del boot.
+   - Soporte hash-router #/ruta y #!/ruta.
+   - Soporte /@usuario/ruta sin destruir URL pública inicial.
    - window.__ONION_FATAL_ERROR__ conserva error serializado y rawError.
    - window.__ONION_LAST_WINDOW_ERROR__ conserva errores globales.
    - window.__ONION_LAST_REJECTION__ conserva unhandled rejections.
@@ -43,7 +48,7 @@
    CONSTANTS
 ========================================================= */
 
-const MAIN_VERSION = "14.1.0";
+const MAIN_VERSION = "15.0.0";
 
 const MAIN_SOURCE = "main";
 
@@ -59,6 +64,7 @@ const DEFAULT_ROUTE = "/";
 
 const ACTIVATION_PATH = "/activate-account";
 const RESET_CONFIRM_PATH = "/reset-password/confirm";
+const PASSWORD_RESET_CONFIRM_PATH = "/password-reset/confirm";
 
 const DEFAULT_FATAL_TITLE = "Error de arranque";
 const DEFAULT_FATAL_MESSAGE = "No se pudo iniciar Onion Support.";
@@ -70,6 +76,9 @@ const TOKEN_ROUTE_CONFIGS = Object.freeze([
   Object.freeze({
     key: "activation",
     path: ACTIVATION_PATH,
+    paths: Object.freeze([
+      ACTIVATION_PATH,
+    ]),
     windowKeys: Object.freeze([
       "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
     ]),
@@ -87,9 +96,14 @@ const TOKEN_ROUTE_CONFIGS = Object.freeze([
   Object.freeze({
     key: "resetConfirm",
     path: RESET_CONFIRM_PATH,
+    paths: Object.freeze([
+      RESET_CONFIRM_PATH,
+      PASSWORD_RESET_CONFIRM_PATH,
+    ]),
     windowKeys: Object.freeze([
       "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
       "__ONION_RESET_CONFIRM_INITIAL_URL__",
+      "__ONION_PASSWORD_RESET_CONFIRM_INITIAL_URL__",
     ]),
     tokenParamNames: Object.freeze([
       "token",
@@ -119,6 +133,8 @@ const SENSITIVE_PARAM_NAMES = Object.freeze([
   "confirm_token",
   "code",
   "t",
+  "otp",
+  "totp",
   "access_token",
   "refresh_token",
   "id_token",
@@ -213,6 +229,13 @@ function isObject(value) {
     value !== null &&
     typeof value === "object" &&
     !Array.isArray(value)
+  );
+}
+
+function isAnyObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object"
   );
 }
 
@@ -340,6 +363,12 @@ function redactSensitiveText(value = "") {
 
     output =
       output.replace(
+        /(\/password-reset\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
+
+    output =
+      output.replace(
         /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
         "$1***"
       );
@@ -360,6 +389,27 @@ function redactSensitiveText(value = "") {
   return output;
 }
 
+function stripScopedUserPrefix(pathname = DEFAULT_ROUTE) {
+  const value =
+    safeText(pathname, DEFAULT_ROUTE);
+
+  if (!value.startsWith("/@")) {
+    return value;
+  }
+
+  const parts =
+    value.split("/");
+
+  if (
+    parts.length >= 3 &&
+    parts[1]?.startsWith("@")
+  ) {
+    return `/${parts.slice(2).join("/")}` || DEFAULT_ROUTE;
+  }
+
+  return value;
+}
+
 function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
   let value =
     safeText(pathname, DEFAULT_ROUTE)
@@ -373,6 +423,9 @@ function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
   if (!value.startsWith("/")) {
     value = `/${value}`;
   }
+
+  value =
+    stripScopedUserPrefix(value);
 
   const segments =
     value
@@ -643,8 +696,24 @@ function hasTokenInSearch(search = "", names = []) {
   }
 }
 
+function getRoutePaths(config = null) {
+  const paths =
+    Array.isArray(config?.paths)
+      ? config.paths
+      : [config?.path];
+
+  return paths
+    .map((item) =>
+      normalizePathnameOnly(item || "")
+    )
+    .filter(Boolean);
+}
+
 function getPathToken(config = null, value = "") {
-  if (!config?.path) {
+  const paths =
+    getRoutePaths(config);
+
+  if (!paths.length) {
     return "";
   }
 
@@ -654,27 +723,34 @@ function getPathToken(config = null, value = "") {
   const clean =
     stripSearchAndHash(path);
 
-  if (!clean.startsWith(`${config.path}/`)) {
-    return "";
+  for (const routePath of paths) {
+    if (!clean.startsWith(`${routePath}/`)) {
+      continue;
+    }
+
+    const token =
+      clean
+        .slice(`${routePath}/`.length)
+        .split("/")[0];
+
+    try {
+      return safeText(
+        decodeURIComponent(token || ""),
+        ""
+      );
+    } catch {
+      return safeText(token, "");
+    }
   }
 
-  const token =
-    clean
-      .slice(`${config.path}/`.length)
-      .split("/")[0];
-
-  try {
-    return safeText(
-      decodeURIComponent(token || ""),
-      ""
-    );
-  } catch {
-    return safeText(token, "");
-  }
+  return "";
 }
 
 function matchesTokenRoute(config = null, value = "") {
-  if (!config?.path) {
+  const paths =
+    getRoutePaths(config);
+
+  if (!paths.length) {
     return false;
   }
 
@@ -684,9 +760,9 @@ function matchesTokenRoute(config = null, value = "") {
   const clean =
     stripSearchAndHash(path);
 
-  return (
-    clean === config.path ||
-    clean.startsWith(`${config.path}/`)
+  return paths.some((routePath) =>
+    clean === routePath ||
+    clean.startsWith(`${routePath}/`)
   );
 }
 
@@ -857,7 +933,15 @@ function getMatchedTokenRouteContext(href = "") {
    ERROR SERIALIZATION / PAYLOAD SANITIZE
 ========================================================= */
 
-function serializeMainError(error = null, depth = 0) {
+function serializeMainError(error = null, depth = 0, seen = null) {
+  if (!seen) {
+    try {
+      seen = new WeakSet();
+    } catch {
+      seen = null;
+    }
+  }
+
   if (depth > 4) {
     return {
       name:
@@ -892,6 +976,29 @@ function serializeMainError(error = null, depth = 0) {
     error?.error ||
     error;
 
+  if (
+    candidate &&
+    typeof candidate === "object" &&
+    seen
+  ) {
+    try {
+      if (seen.has(candidate)) {
+        return {
+          name:
+            "CircularError",
+
+          message:
+            "[Circular]",
+
+          stack:
+            "",
+        };
+      }
+
+      seen.add(candidate);
+    } catch {}
+  }
+
   if (candidate instanceof Error) {
     return {
       name:
@@ -925,7 +1032,7 @@ function serializeMainError(error = null, depth = 0) {
 
       cause:
         candidate.cause
-          ? serializeMainError(candidate.cause, depth + 1)
+          ? serializeMainError(candidate.cause, depth + 1, seen)
           : null,
     };
   }
@@ -1035,11 +1142,7 @@ function serializeMainError(error = null, depth = 0) {
 
   try {
     output.raw =
-      JSON.parse(
-        JSON.stringify(
-          sanitizePayload(candidate)
-        )
-      );
+      sanitizePayload(candidate);
   } catch {
     output.raw =
       redactSensitiveText(String(candidate));
@@ -1098,6 +1201,9 @@ function sanitizeBootContext(context = {}) {
     protectedRouteKey:
       safeText(ctx.protectedRouteKey, ""),
 
+    protectedInitialPublicPath:
+      redactSensitiveText(ctx.protectedInitialPublicPath || ""),
+
     isPublicTokenRoute:
       Boolean(ctx.isPublicTokenRoute),
 
@@ -1109,8 +1215,20 @@ function sanitizeBootContext(context = {}) {
   };
 }
 
-function sanitizePayload(payload = {}) {
-  if (!isObject(payload)) {
+function sanitizePayload(payload = {}, depth = 0, seen = null) {
+  if (!seen) {
+    try {
+      seen = new WeakSet();
+    } catch {
+      seen = null;
+    }
+  }
+
+  if (depth > 6) {
+    return "[MaxDepth]";
+  }
+
+  if (!isAnyObject(payload)) {
     if (payload instanceof Error) {
       return sanitizeError(payload);
     }
@@ -1122,9 +1240,32 @@ function sanitizePayload(payload = {}) {
     return payload;
   }
 
+  try {
+    if (
+      seen &&
+      seen.has(payload)
+    ) {
+      return "[Circular]";
+    }
+
+    seen?.add?.(payload);
+  } catch {}
+
+  if (payload instanceof Error) {
+    return sanitizeError(payload);
+  }
+
+  if (Array.isArray(payload)) {
+    return payload
+      .slice(0, 60)
+      .map((item) =>
+        sanitizePayload(item, depth + 1, seen)
+      );
+  }
+
   const clean = {};
 
-  for (const [key, value] of Object.entries(payload)) {
+  for (const [key, value] of Object.entries(payload).slice(0, 120)) {
     if (
       /token|secret|password|authorization|credential/i.test(key) &&
       value
@@ -1172,37 +1313,8 @@ function sanitizePayload(payload = {}) {
       continue;
     }
 
-    if (value instanceof Error) {
-      clean[key] =
-        sanitizeError(value);
-
-      continue;
-    }
-
-    if (Array.isArray(value)) {
-      clean[key] =
-        value
-          .slice(0, 60)
-          .map((item) =>
-            isObject(item)
-              ? sanitizePayload(item)
-              : typeof item === "string"
-                ? redactSensitiveText(item)
-                : item
-          );
-
-      continue;
-    }
-
-    if (isObject(value)) {
-      clean[key] =
-        sanitizePayload(value);
-
-      continue;
-    }
-
     clean[key] =
-      value;
+      sanitizePayload(value, depth + 1, seen);
   }
 
   return clean;
@@ -2320,6 +2432,7 @@ function bindReady(callback) {
 function resolveAppFromModule(moduleRef = {}) {
   return (
     moduleRef?.App ||
+    moduleRef?.default?.App ||
     moduleRef?.default ||
     null
   );
@@ -3143,6 +3256,16 @@ function getAppStateSafe() {
     }
   } catch {}
 
+  try {
+    if (isFunction(AppCore?.getState)) {
+      return AppCore.getState();
+    }
+  } catch {}
+
+  try {
+    return AppCore?.state || null;
+  } catch {}
+
   return null;
 }
 
@@ -3171,12 +3294,94 @@ function appStateLooksFailed(appState = null) {
 }
 
 /* =========================================================
+   GLOBAL BOOT LOCK
+========================================================= */
+
+function getExistingBootLock() {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    const lock =
+      window[BOOT_LOCK_KEY];
+
+    if (
+      lock &&
+      lock.source === MAIN_SOURCE &&
+      lock.promise &&
+      isFunction(lock.promise.then)
+    ) {
+      return lock;
+    }
+  } catch {}
+
+  return null;
+}
+
+function writeBootLock(promise, startedAt = nowMs()) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    window[BOOT_LOCK_KEY] = {
+      version:
+        MAIN_VERSION,
+      source:
+        MAIN_SOURCE,
+      promise,
+      startedAt,
+      updatedAt:
+        nowMs(),
+    };
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearBootLock(promise = null) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    const lock =
+      window[BOOT_LOCK_KEY];
+
+    if (
+      !lock ||
+      !promise ||
+      lock.promise === promise
+    ) {
+      delete window[BOOT_LOCK_KEY];
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+/* =========================================================
    BOOT
 ========================================================= */
 
 async function boot(options = {}) {
   const opts =
     safeObject(options);
+
+  const existingLock =
+    getExistingBootLock();
+
+  if (
+    existingLock &&
+    opts.force !== true &&
+    existingLock.promise !== state.bootPromise
+  ) {
+    return existingLock.promise;
+  }
 
   if (state.bootPromise) {
     return state.bootPromise;
@@ -3336,26 +3541,25 @@ async function boot(options = {}) {
         );
 
         throw normalizeBootError(error);
-      })
+      });
+
+  writeBootLock(
+    state.bootPromise,
+    state.startedAt
+  );
+
+  state.bootPromise =
+    state.bootPromise
       .finally(() => {
+        clearBootLock(state.bootPromise);
         state.bootPromise =
           null;
       });
 
-  try {
-    if (isBrowser()) {
-      window[BOOT_LOCK_KEY] = {
-        version:
-          MAIN_VERSION,
-        source:
-          MAIN_SOURCE,
-        promise:
-          state.bootPromise,
-        startedAt:
-          state.startedAt,
-      };
-    }
-  } catch {}
+  writeBootLock(
+    state.bootPromise,
+    state.startedAt
+  );
 
   return state.bootPromise;
 }
@@ -3363,6 +3567,16 @@ async function boot(options = {}) {
 function start(options = {}) {
   const opts =
     safeObject(options);
+
+  const existingLock =
+    getExistingBootLock();
+
+  if (
+    existingLock &&
+    opts.force !== true
+  ) {
+    return existingLock.promise;
+  }
 
   if (
     state.startPromise &&
@@ -3441,6 +3655,9 @@ function getMainSnapshot() {
 
     hasBootPromise:
       Boolean(state.bootPromise),
+
+    hasGlobalBootLock:
+      Boolean(getExistingBootLock()),
 
     startedAt:
       state.startedAt,
@@ -3620,6 +3837,7 @@ function exposeDebugBridge() {
 ========================================================= */
 
 disableLegacyAutoBoot();
+bindGlobalSafetyNet();
 captureInitialUrl("module-load");
 markDocumentBooting("module-load");
 exposeDebugBridge();

@@ -97,6 +97,9 @@ const GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS =
 const GLOBAL_LOGIN_SUBMIT_STALE_GRACE_MS =
   2_500;
 
+const LOGIN_NAVIGATION_TIMEOUT_MS =
+  8_000;
+
 const LOGIN_VIEW_INSTANCE_KEY =
   "__ONION_LOGIN_VIEW_INSTANCE__";
 
@@ -844,6 +847,24 @@ function getRouterCandidates() {
   return candidates.filter(Boolean);
 }
 
+function withTimeout(promiseLike, timeoutMs = 0, timeoutCode = "TIMEOUT") {
+  const ms =
+    Math.max(0, Number(timeoutMs || 0));
+
+  if (!ms) {
+    return Promise.resolve(promiseLike);
+  }
+
+  return Promise.race([
+    Promise.resolve(promiseLike),
+    new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(timeoutCode));
+      }, ms);
+    }),
+  ]);
+}
+
 async function navigateTo(path = "/", options = {}) {
   const target =
     sanitizeNavigationPath(
@@ -853,6 +874,13 @@ async function navigateTo(path = "/", options = {}) {
 
   const replaceState =
     options.replaceState !== false;
+
+  const timeoutMs =
+    Math.max(
+      1_000,
+      Number(options.timeoutMs || LOGIN_NAVIGATION_TIMEOUT_MS) ||
+        LOGIN_NAVIGATION_TIMEOUT_MS
+    );
 
   const routerOptions = {
     replaceState,
@@ -878,42 +906,58 @@ async function navigateTo(path = "/", options = {}) {
   for (const router of getRouterCandidates()) {
     try {
       if (isFunction(router.navigate)) {
-        await router.navigate(
-          target,
-          routerOptions
+        await withTimeout(
+          router.navigate(
+            target,
+            routerOptions
+          ),
+          timeoutMs,
+          "LOGIN_NAVIGATE_TIMEOUT"
         );
 
         return true;
       }
 
       if (isFunction(router.go)) {
-        await router.go(
-          target,
-          routerOptions
+        await withTimeout(
+          router.go(
+            target,
+            routerOptions
+          ),
+          timeoutMs,
+          "LOGIN_NAVIGATE_TIMEOUT"
         );
 
         return true;
       }
 
       if (isFunction(router.push)) {
-        await router.push(
-          target,
-          routerOptions
+        await withTimeout(
+          router.push(
+            target,
+            routerOptions
+          ),
+          timeoutMs,
+          "LOGIN_NAVIGATE_TIMEOUT"
         );
 
         return true;
       }
 
       if (isFunction(router.render)) {
-        await router.render(
-          target,
-          {
-            ...routerOptions,
-            publicPath:
-              target,
-            requestedPath:
-              target,
-          }
+        await withTimeout(
+          router.render(
+            target,
+              {
+              ...routerOptions,
+              publicPath:
+                target,
+              requestedPath:
+                target,
+            }
+          ),
+          timeoutMs,
+          "LOGIN_NAVIGATE_TIMEOUT"
         );
 
         return true;
@@ -928,7 +972,7 @@ async function navigateTo(path = "/", options = {}) {
 
   try {
     if (isFunction(AppCore?.navigate)) {
-      await AppCore.navigate(target);
+      await withTimeout(AppCore.navigate(target), timeoutMs, "LOGIN_NAVIGATE_TIMEOUT");
       return true;
     }
   } catch {}

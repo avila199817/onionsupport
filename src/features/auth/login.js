@@ -2,15 +2,28 @@
    Onion SPA - Auth Login
    Archivo: src/features/auth/login.js
 
-   EXTREME PRO SYSTEM · AUTH LOGIN · 15/10
+   EXTREME PRO SYSTEM · AUTH LOGIN · 16/10
    BACKEND ALIGNED · NO CSS · NO INLINE STYLE · NO AUTH FANTASMA
    NO EVENT DUPLICATION · COSMOS SESSION SAFE · 2FA SAFE
 
    RESPONSABILIDADES:
-   - preparar credenciales login
-   - construir payload robusto para backend heterogéneo
-   - ejecutar login contra API pública
-   - soportar backend Onion Auth:
+   - Preparar credenciales login.
+   - Construir payload robusto para backend heterogéneo.
+   - Ejecutar login contra API pública.
+   - Usar request pública dura:
+       · public:true
+       · auth:false
+       · skipAuth:true
+       · noAuthHeader:true
+       · _skipAuthRefresh:true
+       · skipAuthRefresh:true
+       · noAutoRefresh:true
+       · autoRefresh:false
+       · noAutoLogout:true
+       · autoLogout:false
+       · retry:false
+       · retries:0
+   - Soportar backend Onion Auth:
        · ok / success / authenticated
        · token / accessToken / access_token
        · refreshToken / refresh_token
@@ -21,21 +34,21 @@
        · cliente / client
        · routing
        · data / payload / result / body / response / auth
-   - soportar 2FA sin marcar authenticated
-   - aplicar sesión sólo con token + user válidos
-   - preservar sessionId/userId/expiresAt/tokenVersion para refresh
-   - navegación SPA consistente tras login real
-   - submit desde formularios HTML
-   - mutex real contra login concurrente
-   - limpiar sesión previa antes de login
-   - evitar usuario/token antiguos como fallback
-   - no emitir eventos de restore desde login
-   - no duplicar auth:login:success por defecto
-   - limpiar auth-screen tras login real
-   - reparar sidebar/topbar vía eventos de UI, sin CSS ni estilos inline
-   - blindar logs/eventos contra tokens, passwords y URLs sensibles
-   - fallback fetch si AppCore apiClient no está disponible
-   - backend fallback fijo a https://api.onionit.net
+   - Soportar 2FA/MFA/OTP sin marcar authenticated.
+   - Aplicar sesión sólo con token + user válidos.
+   - Preservar sessionId/userId/expiresAt/tokenVersion para refresh.
+   - Navegación SPA consistente tras login real.
+   - Submit desde formularios HTML.
+   - Mutex real contra login concurrente.
+   - Limpiar sesión previa antes de login.
+   - Evitar usuario/token antiguos como fallback.
+   - No emitir eventos restore desde login.
+   - No duplicar auth:login:success por defecto.
+   - Limpiar auth-screen tras login real.
+   - Reparar sidebar/topbar vía eventos de UI, sin CSS ni estilos inline.
+   - Blindar logs/eventos contra tokens, passwords y URLs sensibles.
+   - Fallback fetch si AppCore apiClient/Http no está disponible.
+   - Backend fallback fijo a https://api.onionit.net.
 
    CONTRATO DE EVENTOS:
    - login.js puede emitir:
@@ -71,6 +84,10 @@ import {
 import {
   AUTH_ENDPOINTS,
   AUTH_CONSTANTS,
+  getLoginEndpoint,
+  getLoginTimeoutMs,
+  getAuthPublicTimeoutMs,
+  getPublicAuthRequestOptions,
 } from "./constants.js";
 
 import {
@@ -91,7 +108,7 @@ import {
 ========================================================= */
 
 export const LOGIN_VERSION =
-  "15.0.0-extreme-pro-backend-aligned";
+  "16.0.0-extreme-pro-backend-aligned";
 
 let loginPromise =
   null;
@@ -177,6 +194,7 @@ const KNOWN_AUTH_STORAGE_KEYS =
     "onion_temporary_token",
     "onion_two_factor_token",
     "onion_mfa_token",
+    "onion_otp_token",
     "onion_session_id",
     "onion_session_user_id",
     "onion_user_id",
@@ -198,6 +216,8 @@ const KNOWN_AUTH_STORAGE_KEYS =
     "onion:two_factor_token",
     "onion:mfaToken",
     "onion:mfa_token",
+    "onion:otpToken",
+    "onion:otp_token",
     "onion:sessionId",
     "onion:session_id",
     "onion:sessionUserId",
@@ -234,6 +254,7 @@ const KNOWN_AUTH_STORAGE_KEYS =
     "temporary_token",
     "two_factor_token",
     "mfa_token",
+    "otp_token",
 
     "token",
     "accessToken",
@@ -466,6 +487,7 @@ const TWO_FACTOR_STATUSES =
     "two_factor_required",
     "totp_required",
     "otp_required",
+    "verification_required",
   ]);
 
 /* =========================================================
@@ -1065,27 +1087,74 @@ function normalizeAuthEndpoint(endpoint = "", fallback = "/api/auth/login") {
 }
 
 function resolveLoginEndpoint() {
-  return normalizeAuthEndpoint(
-    AUTH_ENDPOINTS?.login ||
-      AUTH_ENDPOINTS?.auth?.login ||
-      AppCore?.config?.auth?.endpoints?.login ||
-      "/api/auth/login",
-    "/api/auth/login"
-  );
+  try {
+    return normalizeAuthEndpoint(
+      getLoginEndpoint?.() ||
+        AUTH_ENDPOINTS?.login ||
+        AUTH_ENDPOINTS?.auth?.login ||
+        AppCore?.config?.auth?.endpoints?.login ||
+        "/api/auth/login",
+      "/api/auth/login"
+    );
+  } catch {
+    return normalizeAuthEndpoint(
+      AUTH_ENDPOINTS?.login ||
+        "/api/auth/login",
+      "/api/auth/login"
+    );
+  }
+}
+
+function normalizeApiBase(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return BACKEND_ORIGIN;
+  }
+
+  if (!/^https?:\/\//i.test(raw)) {
+    return raw.replace(/\/+$/g, "");
+  }
+
+  try {
+    const parsed =
+      new URL(raw);
+
+    const origin =
+      parsed.origin.replace(/\/+$/g, "");
+
+    const pathname =
+      (parsed.pathname || "/")
+        .replace(/\/+$/g, "") ||
+      "/";
+
+    if (
+      pathname === "/" ||
+      pathname === "/api"
+    ) {
+      return origin;
+    }
+
+    return `${origin}${pathname}`.replace(/\/+$/g, "");
+  } catch {
+    return BACKEND_ORIGIN;
+  }
 }
 
 function resolveApiBase() {
-  return safeText(
+  return normalizeApiBase(
     AppCore?.config?.apiBase ||
+      AppCore?.config?.apiOrigin ||
       AppCore?.config?.apiBaseUrl ||
       AppCore?.config?.api?.baseUrl ||
       AppCore?.config?.api?.base ||
+      AppCore?.config?.api?.origin ||
       AppCore?.config?.baseUrl ||
       AppCore?.config?.apiUrl ||
       AppCore?.config?.backendUrl ||
-      BACKEND_ORIGIN,
-    BACKEND_ORIGIN
-  ).replace(/\/+$/, "");
+      BACKEND_ORIGIN
+  );
 }
 
 function joinApiUrl(apiBase = "", endpoint = "") {
@@ -1097,7 +1166,7 @@ function joinApiUrl(apiBase = "", endpoint = "") {
   }
 
   const base =
-    safeText(apiBase, BACKEND_ORIGIN)
+    normalizeApiBase(apiBase)
       .replace(/\/+$/g, "");
 
   let normalizedEndpoint =
@@ -1123,19 +1192,51 @@ function resolveApiUrl(path = "") {
   );
 }
 
+function resolveLoginTimeout(options = {}) {
+  const opts =
+    safeObject(options);
+
+  const fromOptions =
+    opts.timeout ??
+    opts.timeoutMs ??
+    opts.loginTimeoutMs;
+
+  if (fromOptions !== undefined) {
+    return Math.max(
+      1000,
+      safeNumber(fromOptions, DEFAULT_LOGIN_TIMEOUT_MS)
+    );
+  }
+
+  try {
+    return Math.max(
+      1000,
+      safeNumber(
+        getLoginTimeoutMs?.() ||
+          getAuthPublicTimeoutMs?.(),
+        DEFAULT_LOGIN_TIMEOUT_MS
+      )
+    );
+  } catch {}
+
+  return Math.max(
+    1000,
+    safeNumber(
+      AUTH_CONSTANTS?.loginTimeoutMs ||
+        AUTH_CONSTANTS?.authPublicTimeoutMs ||
+        AUTH_CONSTANTS?.requestTimeout,
+      DEFAULT_LOGIN_TIMEOUT_MS
+    )
+  );
+}
+
 function createLoginAbortController(options = {}) {
   if (typeof AbortController !== "function") {
     return null;
   }
 
   const timeoutMs =
-    safeNumber(
-      options.timeoutMs ||
-        options.loginTimeoutMs ||
-        AUTH_CONSTANTS?.loginTimeoutMs ||
-        AUTH_CONSTANTS?.requestTimeout,
-      DEFAULT_LOGIN_TIMEOUT_MS
-    );
+    resolveLoginTimeout(options);
 
   const controller =
     new AbortController();
@@ -1146,8 +1247,11 @@ function createLoginAbortController(options = {}) {
   ) {
     return {
       controller,
+      signal:
+        controller.signal,
       timer:
         null,
+      timeoutMs,
     };
   }
 
@@ -1157,8 +1261,20 @@ function createLoginAbortController(options = {}) {
   try {
     timer =
       setTimeout(() => {
+        const error =
+          new Error("Login timeout");
+
+        error.name =
+          "TimeoutError";
+
+        error.code =
+          "LOGIN_TIMEOUT";
+
+        error.timeout =
+          true;
+
         try {
-          controller.abort("login-timeout");
+          controller.abort(error);
         } catch {
           try {
             controller.abort();
@@ -1169,7 +1285,10 @@ function createLoginAbortController(options = {}) {
 
   return {
     controller,
+    signal:
+      controller.signal,
     timer,
+    timeoutMs,
   };
 }
 
@@ -1185,6 +1304,52 @@ function clearLoginAbortController(abortCtx = null) {
   } catch {}
 
   return true;
+}
+
+function withMergedSignal(primarySignal = null, fallbackSignal = null) {
+  const signals =
+    [primarySignal, fallbackSignal]
+      .filter(Boolean);
+
+  if (!signals.length) {
+    return null;
+  }
+
+  if (signals.length === 1) {
+    return signals[0];
+  }
+
+  try {
+    if (
+      typeof AbortSignal !== "undefined" &&
+      isFunction(AbortSignal.any)
+    ) {
+      return AbortSignal.any(signals);
+    }
+  } catch {}
+
+  return primarySignal || fallbackSignal;
+}
+
+function stripAuthHeaders(headers = {}) {
+  const output = {
+    ...safeObject(headers),
+  };
+
+  for (const key of Object.keys(output)) {
+    if (
+      [
+        "authorization",
+        "x-auth-token",
+        "x-access-token",
+        "x-refresh-token",
+      ].includes(String(key).toLowerCase())
+    ) {
+      delete output[key];
+    }
+  }
+
+  return output;
 }
 
 async function readMaybeResponse(value) {
@@ -1213,6 +1378,7 @@ async function readMaybeResponse(value) {
       const message =
         extractMessage(payload) ||
         payload?.message ||
+        payload?.error?.message ||
         payload?.error ||
         `HTTP ${value.status}`;
 
@@ -1224,6 +1390,7 @@ async function readMaybeResponse(value) {
               value.status,
             code:
               payload?.code ||
+              payload?.error?.code ||
               payload?.error ||
               (
                 value.status === 401
@@ -1269,17 +1436,18 @@ async function nativeFetchPost(path, body = {}, options = {}) {
   const url =
     resolveApiUrl(path);
 
-  const headers = {
-    "Content-Type":
-      "application/json",
-    Accept:
-      "application/json",
-    "X-Onion-Auth-Flow":
-      "login",
-    "X-Request-Source":
-      LOGIN_SOURCE,
-    ...(safeObject(options.headers)),
-  };
+  const headers =
+    stripAuthHeaders({
+      "Content-Type":
+        "application/json",
+      Accept:
+        "application/json",
+      "X-Onion-Auth-Flow":
+        "login",
+      "X-Request-Source":
+        LOGIN_SOURCE,
+      ...(safeObject(options.headers)),
+    });
 
   const response =
     await fetch(url, {
@@ -1291,6 +1459,9 @@ async function nativeFetchPost(path, body = {}, options = {}) {
         DEFAULT_CREDENTIALS_MODE,
       cache:
         "no-store",
+      mode:
+        options.mode ||
+        "cors",
       signal:
         options.signal || undefined,
       body:
@@ -1298,6 +1469,108 @@ async function nativeFetchPost(path, body = {}, options = {}) {
     });
 
   return await readMaybeResponse(response);
+}
+
+function buildPublicLoginRequestOptions(options = {}, signal = null) {
+  const opts =
+    safeObject(options);
+
+  const timeoutMs =
+    resolveLoginTimeout(opts);
+
+  let publicOptions = {};
+
+  try {
+    publicOptions =
+      getPublicAuthRequestOptions?.() ||
+      {};
+  } catch {
+    publicOptions = {};
+  }
+
+  const headers =
+    stripAuthHeaders({
+      "X-Onion-Auth-Flow":
+        "login",
+      "X-Request-Source":
+        LOGIN_SOURCE,
+      ...safeObject(opts.headers),
+    });
+
+  return {
+    ...opts,
+    ...publicOptions,
+
+    public:
+      true,
+
+    auth:
+      false,
+
+    skipAuth:
+      true,
+
+    noAuthHeader:
+      true,
+
+    _skipAuthRefresh:
+      true,
+
+    skipAuthRefresh:
+      true,
+
+    noAutoRefresh:
+      true,
+
+    autoRefresh:
+      false,
+
+    noAutoLogout:
+      true,
+
+    autoLogout:
+      false,
+
+    retry:
+      false,
+
+    retries:
+      0,
+
+    _skipRetry:
+      true,
+
+    skipRetry:
+      true,
+
+    credentials:
+      opts.credentials ||
+      DEFAULT_CREDENTIALS_MODE,
+
+    silent:
+      opts.silent === true,
+
+    storeError:
+      false,
+
+    dedupe:
+      false,
+
+    useLoader:
+      opts.useLoader !== false,
+
+    timeout:
+      timeoutMs,
+
+    timeoutMs,
+
+    loginTimeoutMs:
+      timeoutMs,
+
+    signal,
+
+    headers,
+  };
 }
 
 async function apiPost(path, body = {}, options = {}) {
@@ -1308,40 +1581,16 @@ async function apiPost(path, body = {}, options = {}) {
     createLoginAbortController(options);
 
   const signal =
-    options.signal ||
-    abortCtx?.controller?.signal ||
-    null;
+    withMergedSignal(
+      options.signal,
+      abortCtx?.signal
+    );
 
-  const finalOptions = {
-    ...options,
-    signal,
-    auth:
-      false,
-    public:
-      true,
-    skipAuth:
-      true,
-    credentials:
-      options.credentials ||
-      DEFAULT_CREDENTIALS_MODE,
-    silent:
-      options.silent === true,
-    storeError:
-      false,
-    dedupe:
-      false,
-    _skipAuthRefresh:
-      true,
-    skipAuthRefresh:
-      true,
-    headers: {
-      "X-Onion-Auth-Flow":
-        "login",
-      "X-Request-Source":
-        LOGIN_SOURCE,
-      ...safeObject(options.headers),
-    },
-  };
+  const finalOptions =
+    buildPublicLoginRequestOptions(
+      options,
+      signal
+    );
 
   try {
     if (
@@ -1542,7 +1791,6 @@ function buildPopStateEvent() {
 
 /* =========================================================
    DOM / UI REPAIR
-   Sólo clases/atributos. Sin CSS ni estilos inline.
 ========================================================= */
 
 function setDocumentAuthFlags({
@@ -3605,7 +3853,7 @@ function extractAuthFields(raw = {}) {
       return (
         object?.ok === false ||
         object?.success === false ||
-        object?.authenticated === false && !requires2FA
+        (object?.authenticated === false && !requires2FA)
       );
     });
 
@@ -3864,32 +4112,56 @@ function normalizeThrownLoginError(error) {
       0
     );
 
+  const timeout =
+    error?.timeout === true ||
+    String(error?.name || "")
+      .toLowerCase()
+      .includes("timeout") ||
+    String(error?.code || "")
+      .toLowerCase()
+      .includes("timeout");
+
+  const aborted =
+    !timeout &&
+    (
+      error?.aborted === true ||
+      String(error?.name || "") === "AbortError"
+    );
+
   const code =
     safeText(
       error?.code ||
         error?.data?.code ||
         error?.response?.data?.code ||
         "",
-      status === 401
-        ? "UNAUTHORIZED"
-        : status === 403
-          ? "FORBIDDEN"
-          : status === 423
-            ? "ACCOUNT_TEMPORARILY_LOCKED"
-            : "LOGIN_FAILED"
+      timeout
+        ? "LOGIN_TIMEOUT"
+        : aborted
+          ? "LOGIN_ABORTED"
+          : status === 401
+            ? "UNAUTHORIZED"
+            : status === 403
+              ? "FORBIDDEN"
+              : status === 423
+                ? "ACCOUNT_TEMPORARILY_LOCKED"
+                : "LOGIN_FAILED"
     );
 
   const message =
-    extractMessage(error) ||
-    error?.response?.data?.message ||
-    error?.data?.message ||
-    "No se pudo iniciar sesión.";
+    timeout
+      ? "El inicio de sesión ha tardado demasiado."
+      : aborted
+        ? "El inicio de sesión fue cancelado."
+        : extractMessage(error) ||
+          error?.response?.data?.message ||
+          error?.data?.message ||
+          "No se pudo iniciar sesión.";
 
   return createAuthError(
     message,
     {
       status:
-        status || 500,
+        status || (timeout ? 408 : 500),
       code,
       raw:
         error,
@@ -3997,6 +4269,7 @@ function clearTempTokenSafe() {
     "onion_temporary_token",
     "onion_two_factor_token",
     "onion_mfa_token",
+    "onion_otp_token",
     "onion:tempToken",
     "onion:temp_token",
     "onion:temporaryToken",
@@ -4005,10 +4278,13 @@ function clearTempTokenSafe() {
     "onion:two_factor_token",
     "onion:mfaToken",
     "onion:mfa_token",
+    "onion:otpToken",
+    "onion:otp_token",
     "temp_token",
     "temporary_token",
     "two_factor_token",
     "mfa_token",
+    "otp_token",
   ]) {
     try {
       window.localStorage?.removeItem?.(key);
@@ -4037,6 +4313,12 @@ function clearAuthRuntimeState(reason = "login_cleanup", options = {}) {
         true,
       preserveRoute:
         true,
+      preserveInitialUrl:
+        true,
+      skipNavigation:
+        true,
+      skipPostRestoreNavigation:
+        true,
       route:
         getState().route ||
         getBrowserCanonicalPath(),
@@ -4051,6 +4333,8 @@ function clearAuthRuntimeState(reason = "login_cleanup", options = {}) {
           true,
         source:
           `${LOGIN_SOURCE}:fallback`,
+        skipNavigation:
+          true,
       });
     } catch {}
   }
@@ -4063,6 +4347,8 @@ function clearAuthRuntimeState(reason = "login_cleanup", options = {}) {
         reason,
         source:
           LOGIN_SOURCE,
+        skipNavigation:
+          true,
       });
     }
   } catch {}
@@ -4761,23 +5047,19 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
       endpoint,
       buildLoginRequestBody(credentials),
       {
-        auth:
-          false,
-        public:
-          true,
-        skipAuth:
-          true,
+        ...safeObject(options),
+
         silent:
           options.silentRequest === true,
-        storeError:
-          false,
-        _skipAuthRefresh:
-          true,
+
         useLoader:
           options.useLoader !== false,
-        timeoutMs:
+
+        timeout:
+          options.timeout ||
           options.timeoutMs ||
-          options.loginTimeoutMs,
+          options.loginTimeoutMs ||
+          resolveLoginTimeout(options),
       }
     );
 
@@ -5485,6 +5767,30 @@ export function getLoginSnapshot() {
           resolveLoginEndpoint()
         )
       ),
+
+    publicRequestPolicy: {
+      auth:
+        false,
+      public:
+        true,
+      skipAuth:
+        true,
+      noAuthHeader:
+        true,
+      skipAuthRefresh:
+        true,
+      noAutoRefresh:
+        true,
+      noAutoLogout:
+        true,
+      retry:
+        false,
+      retries:
+        0,
+    },
+
+    loginTimeoutMs:
+      resolveLoginTimeout(),
 
     loginRoute:
       getLoginRoute(),

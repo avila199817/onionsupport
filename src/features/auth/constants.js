@@ -3,34 +3,36 @@
    Archivo: src/features/auth/constants.js
 
    AUTH CONTRACT · ENTERPRISE HARDENED · NO APPCORE DEP
-   FINAL EXTREME SYSTEM · 15/10
+   FINAL EXTREME SYSTEM · 16/10
 
    RESPONSABILIDADES:
-   - centralizar endpoints auth
-   - centralizar endpoints de activación de cuenta
-   - centralizar endpoints password-reset request / confirm / validate
-   - centralizar endpoints 2FA/MFA
-   - centralizar claves storage auxiliar
-   - centralizar límites y constantes sesión
-   - centralizar rutas SPA públicas técnicas
-   - centralizar nombres de query params de tokens
-   - exponer aliases legacy sin romper compatibilidad
-   - exponer helpers públicos estables del módulo
-   - blindaje enterprise sin dependencia circular con AppCore
+   - Centralizar endpoints auth.
+   - Centralizar endpoints de activación de cuenta.
+   - Centralizar endpoints password-reset request / confirm / validate.
+   - Centralizar endpoints 2FA/MFA/OTP.
+   - Centralizar claves storage auxiliar.
+   - Centralizar límites y constantes sesión.
+   - Centralizar rutas SPA públicas técnicas.
+   - Centralizar nombres de query params de tokens.
+   - Exponer aliases legacy sin romper compatibilidad.
+   - Exponer helpers públicos estables del módulo.
+   - Blindaje enterprise sin dependencia circular con AppCore.
 
    HARDENING EXTREMO:
-   - deepFreeze real para objetos/arrays
-   - endpoints agrupados por intención
-   - endpoint candidates para fallback robusto
-   - rutas SPA técnicas públicas normalizadas
-   - soporte hash-router #/ruta y #!/ruta
-   - soporte tokens por query/path
-   - token param names centralizados
-   - límites numéricos normalizados
-   - helpers tolerantes y sin throws accidentales
-   - /api/auth/me, /auth/me y /me SIEMPRE privados
-   - snapshot debug seguro
-   - sin dependencia circular con AppCore
+   - deepFreeze real para objetos/arrays.
+   - Endpoints agrupados por intención.
+   - Endpoint candidates para fallback robusto.
+   - Rutas SPA técnicas públicas normalizadas.
+   - Soporte hash-router #/ruta y #!/ruta.
+   - Soporte tokens por query/path/hash.
+   - Token param names centralizados.
+   - Límites numéricos normalizados.
+   - Helpers tolerantes y sin throws accidentales.
+   - /api/auth/me, /auth/me, /api/me y /me SIEMPRE privados.
+   - Login/reset/activation/2FA/MFA/OTP SIEMPRE públicos.
+   - Opciones HTTP públicas centralizadas para evitar refresh/logout/retry.
+   - Snapshot debug seguro.
+   - Sin dependencia circular con AppCore.
 ========================================================= */
 
 /* =========================================================
@@ -38,7 +40,7 @@
 ========================================================= */
 
 export const AUTH_CONSTANTS_VERSION =
-  "15.0.0";
+  "16.0.0";
 
 /* =========================================================
    BASE HELPERS
@@ -241,6 +243,27 @@ function normalizeHashRouterPath(value = "") {
   return raw.replace(/^#\/?/, "/") || "/";
 }
 
+function stripScopedUserPrefix(path = "") {
+  const value =
+    safeText(path, "");
+
+  if (!value.startsWith("/@")) {
+    return value;
+  }
+
+  const parts =
+    value.split("/");
+
+  if (
+    parts.length >= 3 &&
+    parts[1]?.startsWith("@")
+  ) {
+    return `/${parts.slice(2).join("/")}` || "/";
+  }
+
+  return value;
+}
+
 function normalizePathnameOnly(pathname = "/") {
   let value =
     safeText(pathname, "/")
@@ -254,6 +277,9 @@ function normalizePathnameOnly(pathname = "/") {
   if (!value.startsWith("/")) {
     value = `/${value}`;
   }
+
+  value =
+    stripScopedUserPrefix(value);
 
   const segments =
     value.split("/");
@@ -435,6 +461,41 @@ function normalizeEndpointList(list = []) {
     .filter(Boolean);
 }
 
+function endpointMatch(path = "", endpoint = "") {
+  const normalized =
+    normalizeEndpointPath(path);
+
+  const cleanEndpoint =
+    normalizeEndpointPath(endpoint);
+
+  if (
+    !normalized ||
+    !cleanEndpoint
+  ) {
+    return false;
+  }
+
+  return (
+    normalized === cleanEndpoint ||
+    normalized.startsWith(`${cleanEndpoint}/`)
+  );
+}
+
+function endpointInList(path = "", list = []) {
+  const normalized =
+    normalizeEndpointPath(path);
+
+  if (!normalized) {
+    return false;
+  }
+
+  return normalizeEndpointList(list)
+    .some((endpoint) =>
+      normalized === endpoint ||
+      normalized.startsWith(`${endpoint}/`)
+    );
+}
+
 /* =========================================================
    ENDPOINTS BASE
 ========================================================= */
@@ -448,6 +509,9 @@ export const LOGOUT_ENDPOINT =
 export const ME_ENDPOINT =
   "/api/auth/me";
 
+export const ME_API_LEGACY_ENDPOINT =
+  "/api/me";
+
 export const ME_LEGACY_ENDPOINT =
   "/me";
 
@@ -457,8 +521,17 @@ export const ME_AUTH_LEGACY_ENDPOINT =
 export const REFRESH_ENDPOINT =
   "/api/auth/refresh";
 
+export const TOKEN_REFRESH_ENDPOINT =
+  "/api/auth/token/refresh";
+
+export const RENEW_ENDPOINT =
+  "/api/auth/renew";
+
 export const TWO_FACTOR_LOGIN_ENDPOINT =
   "/api/auth/2fa/login";
+
+export const TWO_FACTOR_VERIFY_ENDPOINT =
+  "/api/auth/2fa/verify";
 
 export const TWO_FACTOR_REQUEST_ENDPOINT =
   "/api/auth/2fa/request";
@@ -466,12 +539,39 @@ export const TWO_FACTOR_REQUEST_ENDPOINT =
 export const TWO_FACTOR_RESEND_ENDPOINT =
   "/api/auth/2fa/resend";
 
+export const MFA_LOGIN_ENDPOINT =
+  "/api/auth/mfa/login";
+
+export const MFA_VERIFY_ENDPOINT =
+  "/api/auth/mfa/verify";
+
+export const MFA_REQUEST_ENDPOINT =
+  "/api/auth/mfa/request";
+
+export const MFA_RESEND_ENDPOINT =
+  "/api/auth/mfa/resend";
+
+export const OTP_LOGIN_ENDPOINT =
+  "/api/auth/otp/login";
+
+export const OTP_VERIFY_ENDPOINT =
+  "/api/auth/otp/verify";
+
+export const OTP_REQUEST_ENDPOINT =
+  "/api/auth/otp/request";
+
+export const OTP_RESEND_ENDPOINT =
+  "/api/auth/otp/resend";
+
 export const HEALTH_ENDPOINT =
   "/api/auth/_health";
 
+export const HEALTH_LEGACY_ENDPOINT =
+  "/api/auth/health";
+
 /*
-  Canonical actual alineado con Core config.publicApiPaths.
-  Se mantiene /api/auth/activate-account como legacy candidate.
+  Activation API canónica alineada con Core config/Auth.
+  Legacy /api/auth/activate-account se mantiene como candidate.
 */
 export const ACTIVATE_ACCOUNT_ENDPOINT =
   "/api/auth/activate";
@@ -485,14 +585,36 @@ export const ACTIVATE_FIRST_USER_ENDPOINT =
 export const VALIDATE_ACTIVATION_TOKEN_ENDPOINT =
   "/api/auth/activate/validate";
 
+/*
+  Password reset:
+  Se preserva el contrato legacy actual y se añaden candidates modernos.
+*/
 export const REQUEST_RESET_ENDPOINT =
   "/api/auth/reset-password-request";
+
+export const FORGOT_PASSWORD_ENDPOINT =
+  "/api/auth/forgot-password";
+
+export const PASSWORD_RESET_REQUEST_ENDPOINT =
+  "/api/auth/password-reset/request";
+
+export const RESET_PASSWORD_REQUEST_ENDPOINT =
+  "/api/auth/reset-password/request";
 
 export const CONFIRM_RESET_ENDPOINT =
   "/api/auth/reset-password-confirm";
 
+export const RESET_PASSWORD_CONFIRM_ENDPOINT =
+  "/api/auth/reset-password/confirm";
+
+export const PASSWORD_RESET_CONFIRM_ENDPOINT =
+  "/api/auth/password-reset/confirm";
+
 export const VALIDATE_RESET_ENDPOINT =
   "/api/auth/reset-password/validate";
+
+export const PASSWORD_RESET_VALIDATE_ENDPOINT =
+  "/api/auth/password-reset/validate";
 
 /* =========================================================
    SPA PUBLIC TECHNICAL ROUTES
@@ -500,6 +622,7 @@ export const VALIDATE_RESET_ENDPOINT =
 
 export const AUTH_PUBLIC_TECHNICAL_ROUTES =
   deepFreeze([
+    "/login",
     "/activate-account",
     "/reset-password",
     "/reset-password/confirm",
@@ -513,6 +636,15 @@ export const AUTH_PUBLIC_TECHNICAL_ROUTES =
 
 export const AUTH_TECHNICAL_ROUTE_ALIASES =
   deepFreeze({
+    login:
+      "/login",
+
+    signIn:
+      "/login",
+
+    signin:
+      "/login",
+
     activate:
       "/activate-account",
 
@@ -628,11 +760,118 @@ export const AUTH_TOKEN_PARAM_NAMES =
       "two_factor_token",
       "mfaToken",
       "mfa_token",
+      "otpToken",
+      "otp_token",
       "code",
       "otp",
       "totp",
     ],
   });
+
+/* =========================================================
+   HTTP OPTIONS · PUBLIC / PRIVATE AUTH
+========================================================= */
+
+export const AUTH_PUBLIC_REQUEST_OPTIONS =
+  deepFreeze({
+    public:
+      true,
+
+    auth:
+      false,
+
+    skipAuth:
+      true,
+
+    noAuthHeader:
+      true,
+
+    _skipAuthRefresh:
+      true,
+
+    skipAuthRefresh:
+      true,
+
+    noAutoRefresh:
+      true,
+
+    autoRefresh:
+      false,
+
+    noAutoLogout:
+      true,
+
+    autoLogout:
+      false,
+
+    retry:
+      false,
+
+    retries:
+      0,
+  });
+
+export const AUTH_PRIVATE_REQUEST_OPTIONS =
+  deepFreeze({
+    public:
+      false,
+
+    auth:
+      true,
+
+    skipAuth:
+      false,
+
+    noAuthHeader:
+      false,
+  });
+
+export const AUTH_REFRESH_REQUEST_OPTIONS =
+  deepFreeze({
+    ...AUTH_PUBLIC_REQUEST_OPTIONS,
+
+    background:
+      true,
+
+    silent:
+      true,
+
+    useLoader:
+      false,
+
+    noLoader:
+      true,
+
+    emitEvents:
+      false,
+
+    emitLifecycleEvents:
+      false,
+
+    emitFinalEvents:
+      false,
+  });
+
+export function getPublicAuthRequestOptions(extra = {}) {
+  return {
+    ...AUTH_PUBLIC_REQUEST_OPTIONS,
+    ...(isObjectLike(extra) ? extra : {}),
+  };
+}
+
+export function getPrivateAuthRequestOptions(extra = {}) {
+  return {
+    ...AUTH_PRIVATE_REQUEST_OPTIONS,
+    ...(isObjectLike(extra) ? extra : {}),
+  };
+}
+
+export function getRefreshRequestOptions(extra = {}) {
+  return {
+    ...AUTH_REFRESH_REQUEST_OPTIONS,
+    ...(isObjectLike(extra) ? extra : {}),
+  };
+}
 
 /* =========================================================
    ENDPOINTS · ALIASES ESTABLES
@@ -684,12 +923,12 @@ export const AUTH_ENDPOINTS =
       REFRESH_ENDPOINT,
 
     tokenRefresh:
-      REFRESH_ENDPOINT,
+      TOKEN_REFRESH_ENDPOINT,
 
     renew:
-      REFRESH_ENDPOINT,
+      RENEW_ENDPOINT,
 
-    /* 2FA / MFA */
+    /* 2FA / MFA / OTP */
     twoFactorLogin:
       TWO_FACTOR_LOGIN_ENDPOINT,
 
@@ -697,16 +936,22 @@ export const AUTH_ENDPOINTS =
       TWO_FACTOR_LOGIN_ENDPOINT,
 
     mfaLogin:
-      TWO_FACTOR_LOGIN_ENDPOINT,
+      MFA_LOGIN_ENDPOINT,
+
+    otpLogin:
+      OTP_LOGIN_ENDPOINT,
 
     verify2FA:
-      TWO_FACTOR_LOGIN_ENDPOINT,
+      TWO_FACTOR_VERIFY_ENDPOINT,
 
     verifyMfa:
-      TWO_FACTOR_LOGIN_ENDPOINT,
+      MFA_VERIFY_ENDPOINT,
+
+    verifyOtp:
+      OTP_VERIFY_ENDPOINT,
 
     twoFactorVerify:
-      TWO_FACTOR_LOGIN_ENDPOINT,
+      TWO_FACTOR_VERIFY_ENDPOINT,
 
     requestTwoFactor:
       TWO_FACTOR_REQUEST_ENDPOINT,
@@ -721,7 +966,10 @@ export const AUTH_ENDPOINTS =
       TWO_FACTOR_REQUEST_ENDPOINT,
 
     requestMfa:
-      TWO_FACTOR_REQUEST_ENDPOINT,
+      MFA_REQUEST_ENDPOINT,
+
+    requestOtp:
+      OTP_REQUEST_ENDPOINT,
 
     resendTwoFactor:
       TWO_FACTOR_RESEND_ENDPOINT,
@@ -736,7 +984,10 @@ export const AUTH_ENDPOINTS =
       TWO_FACTOR_RESEND_ENDPOINT,
 
     resendMfa:
-      TWO_FACTOR_RESEND_ENDPOINT,
+      MFA_RESEND_ENDPOINT,
+
+    resendOtp:
+      OTP_RESEND_ENDPOINT,
 
     /* HEALTH */
     health:
@@ -808,7 +1059,7 @@ export const AUTH_ENDPOINTS =
       REQUEST_RESET_ENDPOINT,
 
     passwordResetRequest:
-      REQUEST_RESET_ENDPOINT,
+      PASSWORD_RESET_REQUEST_ENDPOINT,
 
     /* PASSWORD RESET CONFIRM */
     confirmPasswordReset:
@@ -821,7 +1072,7 @@ export const AUTH_ENDPOINTS =
       CONFIRM_RESET_ENDPOINT,
 
     passwordResetConfirm:
-      CONFIRM_RESET_ENDPOINT,
+      PASSWORD_RESET_CONFIRM_ENDPOINT,
 
     resetPasswordUpdate:
       CONFIRM_RESET_ENDPOINT,
@@ -846,7 +1097,7 @@ export const AUTH_ENDPOINTS =
       VALIDATE_RESET_ENDPOINT,
 
     passwordResetValidate:
-      VALIDATE_RESET_ENDPOINT,
+      PASSWORD_RESET_VALIDATE_ENDPOINT,
   });
 
 /* =========================================================
@@ -869,29 +1120,32 @@ export const AUTH_ENDPOINT_CANDIDATES =
       unique([
         ME_ENDPOINT,
         ME_AUTH_LEGACY_ENDPOINT,
+        ME_API_LEGACY_ENDPOINT,
         ME_LEGACY_ENDPOINT,
       ]),
 
     refresh:
       unique([
         REFRESH_ENDPOINT,
+        TOKEN_REFRESH_ENDPOINT,
+        RENEW_ENDPOINT,
       ]),
 
     twoFactorLogin:
       unique([
         TWO_FACTOR_LOGIN_ENDPOINT,
-        "/api/auth/mfa/login",
-        "/api/auth/otp/login",
-        "/api/auth/2fa/verify",
-        "/api/auth/mfa/verify",
-        "/api/auth/otp/verify",
+        MFA_LOGIN_ENDPOINT,
+        OTP_LOGIN_ENDPOINT,
+        TWO_FACTOR_VERIFY_ENDPOINT,
+        MFA_VERIFY_ENDPOINT,
+        OTP_VERIFY_ENDPOINT,
       ]),
 
     twoFactorRequest:
       unique([
         TWO_FACTOR_REQUEST_ENDPOINT,
-        "/api/auth/mfa/request",
-        "/api/auth/otp/request",
+        MFA_REQUEST_ENDPOINT,
+        OTP_REQUEST_ENDPOINT,
         "/api/auth/2fa/send",
         "/api/auth/mfa/send",
         "/api/auth/otp/send",
@@ -900,14 +1154,14 @@ export const AUTH_ENDPOINT_CANDIDATES =
     twoFactorResend:
       unique([
         TWO_FACTOR_RESEND_ENDPOINT,
-        "/api/auth/mfa/resend",
-        "/api/auth/otp/resend",
+        MFA_RESEND_ENDPOINT,
+        OTP_RESEND_ENDPOINT,
       ]),
 
     health:
       unique([
         HEALTH_ENDPOINT,
-        "/api/auth/health",
+        HEALTH_LEGACY_ENDPOINT,
         "/api/_health",
         "/health",
       ]),
@@ -933,24 +1187,23 @@ export const AUTH_ENDPOINT_CANDIDATES =
     requestPasswordReset:
       unique([
         REQUEST_RESET_ENDPOINT,
-        "/api/auth/forgot-password",
-        "/api/auth/password-reset/request",
-        "/api/auth/reset-password/request",
+        FORGOT_PASSWORD_ENDPOINT,
+        PASSWORD_RESET_REQUEST_ENDPOINT,
+        RESET_PASSWORD_REQUEST_ENDPOINT,
       ]),
 
     confirmPasswordReset:
       unique([
         CONFIRM_RESET_ENDPOINT,
-        "/api/auth/reset-password/confirm",
-        "/api/auth/password-reset/confirm",
+        RESET_PASSWORD_CONFIRM_ENDPOINT,
+        PASSWORD_RESET_CONFIRM_ENDPOINT,
       ]),
 
     validateResetToken:
       unique([
         VALIDATE_RESET_ENDPOINT,
         "/api/auth/reset-password-validate",
-        "/api/auth/reset-password/validate",
-        "/api/auth/password-reset/validate",
+        PASSWORD_RESET_VALIDATE_ENDPOINT,
       ]),
   });
 
@@ -962,6 +1215,7 @@ const PRIVATE_ME_ENDPOINTS =
   normalizeEndpointList([
     ME_ENDPOINT,
     ME_AUTH_LEGACY_ENDPOINT,
+    ME_API_LEGACY_ENDPOINT,
     ME_LEGACY_ENDPOINT,
   ]);
 
@@ -981,9 +1235,14 @@ export const AUTH_ENDPOINT_GROUPS =
       removePrivateMeEndpoints([
         AUTH_ENDPOINTS.login,
         AUTH_ENDPOINTS.refresh,
+        AUTH_ENDPOINTS.tokenRefresh,
+        AUTH_ENDPOINTS.renew,
+
         AUTH_ENDPOINTS.twoFactorLogin,
-        AUTH_ENDPOINTS.twoFactorRequest,
-        AUTH_ENDPOINTS.twoFactorResend,
+        AUTH_ENDPOINTS.twoFactorVerify,
+        AUTH_ENDPOINTS.requestTwoFactor,
+        AUTH_ENDPOINTS.resendTwoFactor,
+
         AUTH_ENDPOINTS.health,
 
         ...AUTH_ENDPOINT_CANDIDATES.health,
@@ -1009,11 +1268,16 @@ export const AUTH_ENDPOINT_GROUPS =
       removePrivateMeEndpoints([
         AUTH_ENDPOINTS.login,
         AUTH_ENDPOINTS.refresh,
+        AUTH_ENDPOINTS.tokenRefresh,
+        AUTH_ENDPOINTS.renew,
         AUTH_ENDPOINTS.logout,
-        AUTH_ENDPOINTS.twoFactorLogin,
-        AUTH_ENDPOINTS.twoFactorRequest,
-        AUTH_ENDPOINTS.twoFactorResend,
 
+        AUTH_ENDPOINTS.twoFactorLogin,
+        AUTH_ENDPOINTS.twoFactorVerify,
+        AUTH_ENDPOINTS.requestTwoFactor,
+        AUTH_ENDPOINTS.resendTwoFactor,
+
+        ...AUTH_ENDPOINT_CANDIDATES.refresh,
         ...AUTH_ENDPOINT_CANDIDATES.twoFactorLogin,
         ...AUTH_ENDPOINT_CANDIDATES.twoFactorRequest,
         ...AUTH_ENDPOINT_CANDIDATES.twoFactorResend,
@@ -1102,6 +1366,9 @@ export const AUTH_STORAGE_KEYS =
     mfaToken:
       "mfa_token",
 
+    otpToken:
+      "otp_token",
+
     /* SESSION */
     sessionId:
       "session_id",
@@ -1183,6 +1450,9 @@ export const AUTH_LEGACY_STORAGE_KEYS =
 
     mfaToken:
       "onion_mfa_token",
+
+    otpToken:
+      "onion_otp_token",
 
     sessionId:
       "onion_session_id",
@@ -1277,9 +1547,12 @@ export const AUTH_CONSTANTS =
 
     /* REQUEST */
     requestTimeout:
-      15000,
+      30000,
 
     loginTimeoutMs:
+      30000,
+
+    authPublicTimeoutMs:
       30000,
 
     /* ACTIVATION */
@@ -1457,10 +1730,16 @@ function resolveCandidateKey(key = "") {
     mfaLogin:
       "twoFactorLogin",
 
+    otpLogin:
+      "twoFactorLogin",
+
     verify2FA:
       "twoFactorLogin",
 
     verifyMfa:
+      "twoFactorLogin",
+
+    verifyOtp:
       "twoFactorLogin",
 
     twoFactorVerify:
@@ -1478,6 +1757,9 @@ function resolveCandidateKey(key = "") {
     requestMfa:
       "twoFactorRequest",
 
+    requestOtp:
+      "twoFactorRequest",
+
     resendTwoFactor:
       "twoFactorResend",
 
@@ -1488,6 +1770,9 @@ function resolveCandidateKey(key = "") {
       "twoFactorResend",
 
     resendMfa:
+      "twoFactorResend",
+
+    resendOtp:
       "twoFactorResend",
 
     activation:
@@ -1724,6 +2009,13 @@ export function getRefreshEndpoint() {
   );
 }
 
+export function getRefreshEndpointCandidates() {
+  return getAuthEndpointCandidates(
+    "refresh",
+    REFRESH_ENDPOINT
+  );
+}
+
 export function getTwoFactorLoginEndpoint() {
   return getAuthEndpoint(
     "twoFactorLogin",
@@ -1740,6 +2032,27 @@ export function getTwoFactorRequestEndpoint() {
 
 export function getTwoFactorResendEndpoint() {
   return getAuthEndpoint(
+    "twoFactorResend",
+    TWO_FACTOR_RESEND_ENDPOINT
+  );
+}
+
+export function getTwoFactorLoginEndpointCandidates() {
+  return getAuthEndpointCandidates(
+    "twoFactorLogin",
+    TWO_FACTOR_LOGIN_ENDPOINT
+  );
+}
+
+export function getTwoFactorRequestEndpointCandidates() {
+  return getAuthEndpointCandidates(
+    "twoFactorRequest",
+    TWO_FACTOR_REQUEST_ENDPOINT
+  );
+}
+
+export function getTwoFactorResendEndpointCandidates() {
+  return getAuthEndpointCandidates(
     "twoFactorResend",
     TWO_FACTOR_RESEND_ENDPOINT
   );
@@ -1812,6 +2125,14 @@ export function getRequestPasswordResetEndpoint() {
     "requestPasswordReset",
     REQUEST_RESET_ENDPOINT
   );
+}
+
+export function getForgotPasswordEndpoint() {
+  return getRequestPasswordResetEndpoint();
+}
+
+export function getRecoverPasswordEndpoint() {
+  return getRequestPasswordResetEndpoint();
 }
 
 export function getConfirmPasswordResetEndpoint() {
@@ -2021,7 +2342,7 @@ export function getSessionValueMaxLength() {
 
 export function getRequestTimeout() {
   return clampNumber(
-    getAuthConstant("requestTimeout", 15000),
+    getAuthConstant("requestTimeout", 30000),
     1000,
     120000
   );
@@ -2030,6 +2351,14 @@ export function getRequestTimeout() {
 export function getLoginTimeoutMs() {
   return clampNumber(
     getAuthConstant("loginTimeoutMs", 30000),
+    1000,
+    120000
+  );
+}
+
+export function getAuthPublicTimeoutMs() {
+  return clampNumber(
+    getAuthConstant("authPublicTimeoutMs", 30000),
     1000,
     120000
   );
@@ -2122,7 +2451,13 @@ export function isResetPasswordRoute(path = "") {
 
   return (
     normalized === "/reset-password" ||
-    normalized.startsWith("/reset-password/")
+    normalized.startsWith("/reset-password/") ||
+    normalized === "/password-reset" ||
+    normalized.startsWith("/password-reset/") ||
+    normalized === "/forgot-password" ||
+    normalized.startsWith("/forgot-password/") ||
+    normalized === "/recover-password" ||
+    normalized.startsWith("/recover-password/")
   );
 }
 
@@ -2132,7 +2467,9 @@ export function isResetPasswordConfirmRoute(path = "") {
 
   return (
     normalized === "/reset-password/confirm" ||
-    normalized.startsWith("/reset-password/confirm/")
+    normalized.startsWith("/reset-password/confirm/") ||
+    normalized === "/password-reset/confirm" ||
+    normalized.startsWith("/password-reset/confirm/")
   );
 }
 
@@ -2150,6 +2487,13 @@ export function isTwoFactorRoute(path = "") {
   );
 }
 
+export function isMeEndpoint(path = "") {
+  return endpointInList(
+    path,
+    PRIVATE_ME_ENDPOINTS
+  );
+}
+
 export function isAuthEndpoint(path = "") {
   const normalized =
     normalizeEndpointPath(path);
@@ -2158,56 +2502,35 @@ export function isAuthEndpoint(path = "") {
     return false;
   }
 
-  return Object.values(AUTH_ENDPOINTS).some((endpoint) => {
-    const cleanEndpoint =
-      normalizeEndpointPath(endpoint);
+  if (isMeEndpoint(normalized)) {
+    return true;
+  }
 
-    return normalized === cleanEndpoint;
-  });
+  return (
+    endpointInList(normalized, Object.values(AUTH_ENDPOINTS)) ||
+    endpointInList(normalized, AUTH_ENDPOINT_GROUPS.public) ||
+    endpointInList(normalized, AUTH_ENDPOINT_GROUPS.private) ||
+    endpointInList(normalized, AUTH_ENDPOINT_GROUPS.controlSkipRefresh)
+  );
 }
 
 export function isEndpointInGroup(path = "", group = []) {
-  const normalized =
-    normalizeEndpointPath(path);
-
-  if (!normalized) {
-    return false;
-  }
-
-  const rows =
-    Array.isArray(group)
-      ? group
-      : [];
-
-  return rows.some((endpoint) => {
-    const cleanEndpoint =
-      normalizeEndpointPath(endpoint);
-
-    return normalized === cleanEndpoint;
-  });
-}
-
-export function isMeEndpoint(path = "") {
-  const normalized =
-    normalizeEndpointPath(path);
-
-  if (!normalized) {
-    return false;
-  }
-
-  return PRIVATE_ME_ENDPOINTS.includes(normalized);
+  return endpointInList(
+    path,
+    group
+  );
 }
 
 export function isPublicAuthEndpoint(path = "") {
   /*
     Candado crítico:
-    /api/auth/me, /auth/me y /me nunca son públicos.
+    /api/auth/me, /auth/me, /api/me y /me nunca son públicos.
   */
   if (isMeEndpoint(path)) {
     return false;
   }
 
-  return isEndpointInGroup(
+  return endpointInList(
     path,
     AUTH_ENDPOINT_GROUPS.public
   );
@@ -2216,7 +2539,7 @@ export function isPublicAuthEndpoint(path = "") {
 export function isPrivateAuthEndpoint(path = "") {
   return (
     isMeEndpoint(path) ||
-    isEndpointInGroup(
+    endpointInList(
       path,
       AUTH_ENDPOINT_GROUPS.private
     )
@@ -2228,28 +2551,28 @@ export function isAuthControlSkipRefreshEndpoint(path = "") {
     return false;
   }
 
-  return isEndpointInGroup(
+  return endpointInList(
     path,
     AUTH_CONTROL_SKIP_REFRESH_PATHS
   );
 }
 
 export function isPasswordResetEndpoint(path = "") {
-  return isEndpointInGroup(
+  return endpointInList(
     path,
     AUTH_ENDPOINT_GROUPS.passwordReset
   );
 }
 
 export function isActivationEndpoint(path = "") {
-  return isEndpointInGroup(
+  return endpointInList(
     path,
     AUTH_ENDPOINT_GROUPS.activation
   );
 }
 
 export function isTwoFactorEndpoint(path = "") {
-  return isEndpointInGroup(
+  return endpointInList(
     path,
     AUTH_ENDPOINT_GROUPS.twoFactor
   );
@@ -2486,7 +2809,10 @@ export function hasResetToken(value = "") {
   const normalized =
     normalizeRoutePath(path);
 
-  if (normalized.startsWith("/reset-password/confirm/")) {
+  if (
+    normalized.startsWith("/reset-password/confirm/") ||
+    normalized.startsWith("/password-reset/confirm/")
+  ) {
     return true;
   }
 
@@ -2496,12 +2822,52 @@ export function hasResetToken(value = "") {
   );
 }
 
+export function hasTwoFactorToken(value = "") {
+  return hasTokenInUrl(
+    value,
+    "twoFactor"
+  );
+}
+
 /* =========================================================
    SNAPSHOT
 ========================================================= */
 
+function sanitizeSnapshotValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeSnapshotValue);
+  }
+
+  if (
+    value &&
+    typeof value === "object"
+  ) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      if (/token|password|secret|authorization/i.test(key)) {
+        output[key] =
+          Array.isArray(item)
+            ? [...item]
+            : item
+              ? "***"
+              : item;
+
+        continue;
+      }
+
+      output[key] =
+        sanitizeSnapshotValue(item);
+    }
+
+    return output;
+  }
+
+  return value;
+}
+
 export function getAuthConstantsSnapshot() {
-  return {
+  return sanitizeSnapshotValue({
     version:
       AUTH_CONSTANTS_VERSION,
 
@@ -2541,6 +2907,17 @@ export function getAuthConstantsSnapshot() {
     tokenParamNames:
       AUTH_TOKEN_PARAM_NAMES,
 
+    requestOptions: {
+      public:
+        AUTH_PUBLIC_REQUEST_OPTIONS,
+
+      private:
+        AUTH_PRIVATE_REQUEST_OPTIONS,
+
+      refresh:
+        AUTH_REFRESH_REQUEST_OPTIONS,
+    },
+
     failureCodes:
       AUTH_FAILURE_CODES,
 
@@ -2549,7 +2926,27 @@ export function getAuthConstantsSnapshot() {
 
     twoFactorStatuses:
       AUTH_2FA_STATUSES,
-  };
+
+    policy: {
+      meAlwaysPrivate:
+        true,
+
+      publicAuthNoRefresh:
+        true,
+
+      publicAuthNoLogout:
+        true,
+
+      publicAuthNoRetry:
+        true,
+
+      supportsHashRouter:
+        true,
+
+      supportsScopedUserPrefix:
+        true,
+    },
+  });
 }
 
 /* =========================================================
@@ -2562,15 +2959,28 @@ export default deepFreeze({
   LOGIN_ENDPOINT,
   LOGOUT_ENDPOINT,
   ME_ENDPOINT,
+  ME_API_LEGACY_ENDPOINT,
   ME_LEGACY_ENDPOINT,
   ME_AUTH_LEGACY_ENDPOINT,
   REFRESH_ENDPOINT,
+  TOKEN_REFRESH_ENDPOINT,
+  RENEW_ENDPOINT,
 
   TWO_FACTOR_LOGIN_ENDPOINT,
+  TWO_FACTOR_VERIFY_ENDPOINT,
   TWO_FACTOR_REQUEST_ENDPOINT,
   TWO_FACTOR_RESEND_ENDPOINT,
+  MFA_LOGIN_ENDPOINT,
+  MFA_VERIFY_ENDPOINT,
+  MFA_REQUEST_ENDPOINT,
+  MFA_RESEND_ENDPOINT,
+  OTP_LOGIN_ENDPOINT,
+  OTP_VERIFY_ENDPOINT,
+  OTP_REQUEST_ENDPOINT,
+  OTP_RESEND_ENDPOINT,
 
   HEALTH_ENDPOINT,
+  HEALTH_LEGACY_ENDPOINT,
 
   ACTIVATE_ACCOUNT_ENDPOINT,
   ACTIVATE_ACCOUNT_LEGACY_ENDPOINT,
@@ -2578,8 +2988,14 @@ export default deepFreeze({
   VALIDATE_ACTIVATION_TOKEN_ENDPOINT,
 
   REQUEST_RESET_ENDPOINT,
+  FORGOT_PASSWORD_ENDPOINT,
+  PASSWORD_RESET_REQUEST_ENDPOINT,
+  RESET_PASSWORD_REQUEST_ENDPOINT,
   CONFIRM_RESET_ENDPOINT,
+  RESET_PASSWORD_CONFIRM_ENDPOINT,
+  PASSWORD_RESET_CONFIRM_ENDPOINT,
   VALIDATE_RESET_ENDPOINT,
+  PASSWORD_RESET_VALIDATE_ENDPOINT,
 
   AUTH_ENDPOINTS,
   AUTH_ENDPOINT_CANDIDATES,
@@ -2600,6 +3016,10 @@ export default deepFreeze({
   AUTH_TECHNICAL_ROUTE_ALIASES,
   AUTH_TOKEN_PARAM_NAMES,
 
+  AUTH_PUBLIC_REQUEST_OPTIONS,
+  AUTH_PRIVATE_REQUEST_OPTIONS,
+  AUTH_REFRESH_REQUEST_OPTIONS,
+
   safeText,
   safeNumber,
   safeInt,
@@ -2609,6 +3029,10 @@ export default deepFreeze({
   pathFromUrlLike,
   normalizeEndpointPath,
   normalizeRoutePath,
+
+  getPublicAuthRequestOptions,
+  getPrivateAuthRequestOptions,
+  getRefreshRequestOptions,
 
   getAuthEndpoint,
   getAuthEndpointCandidates,
@@ -2621,9 +3045,15 @@ export default deepFreeze({
   getLogoutEndpoint,
   getMeEndpoint,
   getRefreshEndpoint,
+  getRefreshEndpointCandidates,
+
   getTwoFactorLoginEndpoint,
   getTwoFactorRequestEndpoint,
   getTwoFactorResendEndpoint,
+  getTwoFactorLoginEndpointCandidates,
+  getTwoFactorRequestEndpointCandidates,
+  getTwoFactorResendEndpointCandidates,
+
   getAuthHealthEndpoint,
 
   getActivateAccountEndpoint,
@@ -2636,6 +3066,8 @@ export default deepFreeze({
   getValidateActivationTokenEndpointCandidates,
 
   getRequestPasswordResetEndpoint,
+  getForgotPasswordEndpoint,
+  getRecoverPasswordEndpoint,
   getConfirmPasswordResetEndpoint,
   getConfirmResetPasswordEndpoint,
   getValidateResetTokenEndpoint,
@@ -2665,6 +3097,7 @@ export default deepFreeze({
 
   getRequestTimeout,
   getLoginTimeoutMs,
+  getAuthPublicTimeoutMs,
   getRefreshRetryCooldownMs,
   getMaxSequentialRefreshFailures,
   getLoginCooldownMs,
@@ -2700,6 +3133,7 @@ export default deepFreeze({
   hasTokenInUrl,
   hasActivationToken,
   hasResetToken,
+  hasTwoFactorToken,
 
   getAuthConstantsSnapshot,
 });

@@ -3,15 +3,15 @@
    Archivo: src/core/state.js
 
    ONION SUPPORT · CORE STATE
-   GLOBAL STATE · STRICT AUTH · ROUTE/PUBLIC PATH SAFE · 14/10
+   GLOBAL STATE · STRICT AUTH · ROUTE/PUBLIC PATH SAFE · 17/10
 
-   RESPONSABILIDADES:
+   Responsabilidades:
    - definir el estado global base del core
    - exponer snapshot seguro del estado
    - computar autenticación estricta
    - aplicar patches de estado normalizados
    - mantener route/publicPath consistentes
-   - preservar currentResolvedUsername cuando procede
+   - preservar currentResolvedUsername sólo con auth válida
    - evitar ghost auth
    - evitar eventos falsos de state change
    - normalizar red/network/ui/boot/session
@@ -19,29 +19,28 @@
    - mantener compatibilidad con AppCore.setState()
    - mantener aliases legacy setStateBase/getStateBase
 
-   HARDENING EXTREMO:
-   - estado inicial robusto
-   - route/publicPath siempre definidos
-   - currentResolvedUsername persistente si auth válida
-   - patches seguros e idempotentes
-   - auth derivada consistente
-   - token sin user NO autentica
-   - user sin token NO autentica
-   - canonical route sin query/hash
-   - publicPath con /@usuario/query/hash
+   Candados:
+   - route/canonicalPath siempre sin query/hash
+   - publicPath conserva /@usuario/query/hash
+   - token válido + usuario usable requerido para authenticated=true
+   - token sin user usable NO autentica
+   - user sin token usable NO autentica
+   - usuario inactivo/bloqueado NO autentica
    - snapshots sin token real por defecto
-   - patch de evento sin contaminación de estado completo
-   - updatedAt/stateChangeCount solo si hay cambios reales
-   - cero undefined setters
-   - cero throws accidentales salvo estado raíz inválido
-   - compatible con AppCore.setState() como emisor público
+   - updatedAt/stateChangeCount sólo si hay cambios reales
+   - undefined no escribe estado
+   - null limpia valores
+   - evento interno opt-in para diagnóstico
 ========================================================= */
+
+import { config } from "./config.js";
 
 import {
   cloneError,
   safeClone,
   normalizeUser,
   hasValidToken,
+  isUsableUser,
   sanitizeUsername,
   getCurrentLocationCanonicalPath,
   getCurrentLocationPath,
@@ -58,323 +57,264 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const STATE_VERSION =
-  "14.0.0";
+export const STATE_VERSION = "17.0.0";
 
-const DEFAULT_ROUTE =
-  "/";
+const DEFAULT_ROUTE = "/";
+const DEFAULT_LANG = "es";
+const DEFAULT_THEME = "dark";
 
-const DEFAULT_LANG =
-  "es";
+const VALID_THEMES = Object.freeze([
+  "dark",
+  "light",
+]);
 
-const DEFAULT_THEME =
-  "dark";
+const VALID_THEME_MODES = Object.freeze([
+  "dark",
+  "light",
+  "system",
+]);
 
-const VALID_THEMES =
-  Object.freeze([
-    "dark",
-    "light",
-  ]);
+const VALID_NETWORK_STATUSES = Object.freeze([
+  "online",
+  "offline",
+  "unknown",
+]);
 
-const VALID_THEME_MODES =
-  Object.freeze([
-    "dark",
-    "light",
-    "system",
-  ]);
+const VALID_LANG_RE = /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i;
 
-const VALID_NETWORK_STATUSES =
-  Object.freeze([
-    "online",
-    "offline",
-    "unknown",
-  ]);
+const BOOLEAN_KEYS = Object.freeze([
+  "initialized",
+  "booting",
+  "ready",
+  "appReady",
+  "appFatal",
+  "coreInitializing",
+  "coreReady",
+  "loading",
 
-const VALID_LANG_RE =
-  /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i;
+  "sidebarOpen",
+  "shellVisible",
+  "shellHidden",
+  "routeShellHidden",
+  "chromeVisible",
+  "appShellVisible",
+  "shellBusy",
+  "authScreen",
 
-const BOOLEAN_KEYS =
-  Object.freeze([
-    "initialized",
-    "booting",
-    "ready",
-    "appReady",
-    "appFatal",
-    "coreInitializing",
-    "coreReady",
-    "loading",
+  "hasError",
+  "authenticated",
+  "hasToken",
 
-    "sidebarOpen",
-    "shellVisible",
-    "shellHidden",
-    "routeShellHidden",
-    "chromeVisible",
-    "appShellVisible",
-    "shellBusy",
-    "authScreen",
+  "bootHasProtectedToken",
+  "bootIsPublicTokenRoute",
+  "bootIsActivation",
+  "bootHasActivationToken",
+  "bootIsResetConfirm",
+  "bootHasResetToken",
 
-    "hasError",
-    "authenticated",
-    "hasToken",
+  "initialRouteRendered",
+  "bootNavigationHandled",
+  "loginNavigationHandled",
+  "postRestoreNavigationSkipped",
+  "loginInProgress",
+  "twoFactorPending",
+  "restoring",
+  "authRestoring",
+  "sessionRestoring",
 
-    "online",
-    "offline",
-    "networkOnline",
-    "networkOffline",
+  "isAdmin",
+  "isSupport",
+  "isManager",
+  "isClient",
+]);
 
-    "bootHasProtectedToken",
-    "bootIsPublicTokenRoute",
-    "bootIsActivation",
-    "bootHasActivationToken",
-    "bootIsResetConfirm",
-    "bootHasResetToken",
+const NULLABLE_STRING_KEYS = Object.freeze([
+  "role",
+  "rol",
+  "userRole",
+  "username",
+  "currentResolvedUsername",
+  "resolvedUsername",
 
-    "initialRouteRendered",
-    "bootNavigationHandled",
-    "loginNavigationHandled",
-    "postRestoreNavigationSkipped",
-    "loginInProgress",
-    "twoFactorPending",
-    "restoring",
-    "authRestoring",
-    "sessionRestoring",
+  "lastRoute",
+  "lastPublicPath",
 
-    "isAdmin",
-    "isSupport",
-    "isManager",
-    "isClient",
-  ]);
+  "lastRequestAt",
+  "lastRequestUrl",
+  "lastRequestMethod",
 
-const NULLABLE_STRING_KEYS =
-  Object.freeze([
-    "role",
-    "rol",
-    "userRole",
-    "username",
-    "currentResolvedUsername",
-    "resolvedUsername",
+  "bootPhase",
+  "mainPhase",
+  "mainReason",
 
-    "lastRoute",
-    "lastPublicPath",
+  "routeMode",
+  "currentShellRoute",
+  "currentShellCanonicalPath",
 
-    "lastRequestAt",
-    "lastRequestUrl",
-    "lastRequestMethod",
+  "sessionId",
+  "sessionUserId",
 
-    "bootPhase",
-    "mainPhase",
-    "mainReason",
+  "bootInitialUrl",
+  "bootInitialPath",
+  "bootCanonicalPath",
+  "bootProtectedInitialUrl",
+  "bootProtectedInitialPath",
+  "bootProtectedInitialPublicPath",
+  "bootProtectedRouteKey",
+  "bootCapturedAt",
 
-    "routeMode",
-    "currentShellRoute",
-    "currentShellCanonicalPath",
+  "bootActivationInitialUrl",
+  "bootActivationInitialPath",
+  "bootActivationInitialPublicPath",
 
-    "sessionId",
-    "sessionUserId",
+  "bootResetConfirmInitialUrl",
+  "bootResetConfirmInitialPath",
+  "bootResetConfirmInitialPublicPath",
+]);
 
-    "bootInitialUrl",
-    "bootInitialPath",
-    "bootCanonicalPath",
-    "bootProtectedInitialUrl",
-    "bootProtectedInitialPath",
-    "bootProtectedInitialPublicPath",
-    "bootProtectedRouteKey",
-    "bootCapturedAt",
+const NUMERIC_KEYS = Object.freeze([
+  "coreInitCycle",
+  "lastRequestStatus",
+  "requestPending",
+  "stateChangeCount",
+]);
 
-    "bootActivationInitialUrl",
-    "bootActivationInitialPath",
-    "bootActivationInitialPublicPath",
+const TOKEN_ALIAS_KEYS = Object.freeze([
+  "token",
+  "accessToken",
+  "access_token",
+  "jwt",
+  "idToken",
+  "id_token",
+  "bearer",
+]);
 
-    "bootResetConfirmInitialUrl",
-    "bootResetConfirmInitialPath",
-    "bootResetConfirmInitialPublicPath",
-  ]);
+const USER_ALIAS_KEYS = Object.freeze([
+  "user",
+  "currentUser",
+  "authUser",
+  "sessionUser",
+]);
 
-const TOKEN_ALIAS_KEYS =
-  Object.freeze([
-    "token",
-    "accessToken",
-    "access_token",
-    "jwt",
-    "idToken",
-    "id_token",
-    "bearer",
-  ]);
+const SESSION_ALIAS_KEYS = Object.freeze([
+  "session",
+  "sessionData",
+]);
 
-const USER_ALIAS_KEYS =
-  Object.freeze([
-    "user",
-    "currentUser",
-    "authUser",
-    "sessionUser",
-  ]);
+const SENSITIVE_STATE_KEYS = Object.freeze([
+  "token",
+  "accessToken",
+  "access_token",
+  "refreshToken",
+  "refresh_token",
+  "idToken",
+  "id_token",
+  "tempToken",
+  "temp_token",
+  "temporaryToken",
+  "temporary_token",
+  "mfaToken",
+  "mfa_token",
+  "twoFactorToken",
+  "two_factor_token",
+  "sessionId",
+  "password",
+  "otp",
+  "code",
+  "authorization",
+  "authHeader",
+]);
 
-const SESSION_ALIAS_KEYS =
-  Object.freeze([
-    "session",
-    "sessionData",
-  ]);
+const REDACTABLE_PATH_KEYS = Object.freeze([
+  "route",
+  "canonicalPath",
+  "publicPath",
+  "lastRoute",
+  "lastPublicPath",
+  "lastRequestUrl",
 
-const SENSITIVE_STATE_KEYS =
-  Object.freeze([
-    "token",
-    "accessToken",
-    "access_token",
-    "refreshToken",
-    "refresh_token",
-    "idToken",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "mfaToken",
-    "mfa_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "password",
-    "otp",
-    "code",
-    "authorization",
-    "authHeader",
-  ]);
+  "bootInitialUrl",
+  "bootInitialPath",
+  "bootCanonicalPath",
+  "bootProtectedInitialUrl",
+  "bootProtectedInitialPath",
+  "bootProtectedInitialPublicPath",
+  "bootActivationInitialUrl",
+  "bootActivationInitialPath",
+  "bootActivationInitialPublicPath",
+  "bootResetConfirmInitialUrl",
+  "bootResetConfirmInitialPath",
+  "bootResetConfirmInitialPublicPath",
+]);
 
-const REDACTABLE_PATH_KEYS =
-  Object.freeze([
-    "route",
-    "canonicalPath",
-    "publicPath",
-    "lastRoute",
-    "lastPublicPath",
-    "lastRequestUrl",
+const INTERNAL_STATE_PATCH_EVENT = "app:state:patched";
 
-    "bootInitialUrl",
-    "bootInitialPath",
-    "bootCanonicalPath",
-    "bootProtectedInitialUrl",
-    "bootProtectedInitialPath",
-    "bootProtectedInitialPublicPath",
-    "bootActivationInitialUrl",
-    "bootActivationInitialPath",
-    "bootActivationInitialPublicPath",
-    "bootResetConfirmInitialUrl",
-    "bootResetConfirmInitialPath",
-    "bootResetConfirmInitialPublicPath",
-  ]);
+const ROLE_ALIASES = Object.freeze({
+  administrator: "admin",
+  administrador: "admin",
+  superadmin: "admin",
+  super_admin: "admin",
+  "super-admin": "admin",
+  owner: "admin",
+  root: "admin",
 
-const INTERNAL_STATE_PATCH_EVENT =
-  "app:state:patched";
+  soporte: "support",
+  tecnico: "support",
+  "técnico": "support",
+  technician: "support",
+  technical: "support",
+  agent: "support",
+  agente: "support",
+  staff: "support",
+  helpdesk: "support",
 
-const ROLE_ALIASES =
-  Object.freeze({
-    administrator:
-      "admin",
+  manager: "manager",
+  gestor: "manager",
+  gerente: "manager",
+  supervisor: "manager",
+  lead: "manager",
 
-    administrador:
-      "admin",
+  cliente: "client",
+  customer: "client",
 
-    superadmin:
-      "admin",
-
-    super_admin:
-      "admin",
-
-    "super-admin":
-      "admin",
-
-    owner:
-      "admin",
-
-    root:
-      "admin",
-
-    soporte:
-      "support",
-
-    tecnico:
-      "support",
-
-    "técnico":
-      "support",
-
-    technician:
-      "support",
-
-    agent:
-      "support",
-
-    agente:
-      "support",
-
-    helpdesk:
-      "support",
-
-    manager:
-      "manager",
-
-    gestor:
-      "manager",
-
-    gerente:
-      "manager",
-
-    supervisor:
-      "manager",
-
-    lead:
-      "manager",
-
-    cliente:
-      "client",
-
-    customer:
-      "client",
-
-    usuario:
-      "user",
-  });
+  usuario: "user",
+});
 
 /* =========================================================
    BASIC HELPERS
 ========================================================= */
 
 function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  try {
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+  } catch {
+    return false;
+  }
 }
 
 function isAnyObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object"
-  );
+  return value !== null && typeof value === "object";
 }
 
 function hasOwn(obj, key) {
   try {
-    return Object.prototype.hasOwnProperty.call(
-      obj,
-      key
-    );
+    return Object.prototype.hasOwnProperty.call(obj, key);
   } catch {
     return false;
   }
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+  if (value === null || value === undefined) {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
-
+  const text = String(value).trim();
   return text || fallback;
 }
 
@@ -383,12 +323,8 @@ function safeLower(value, fallback = "") {
 }
 
 function safeNumber(value, fallback = 0) {
-  const number =
-    Number(value);
-
-  return Number.isFinite(number)
-    ? number
-    : fallback;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function safeBool(value, fallback = false) {
@@ -401,35 +337,13 @@ function safeBool(value, fallback = false) {
   }
 
   if (typeof value === "string") {
-    const clean =
-      value.trim().toLowerCase();
+    const clean = value.trim().toLowerCase();
 
-    if (
-      [
-        "true",
-        "1",
-        "yes",
-        "si",
-        "sí",
-        "ok",
-        "on",
-        "enabled",
-        "active",
-      ].includes(clean)
-    ) {
+    if (["true", "1", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(clean)) {
       return true;
     }
 
-    if (
-      [
-        "false",
-        "0",
-        "no",
-        "off",
-        "disabled",
-        "inactive",
-      ].includes(clean)
-    ) {
+    if (["false", "0", "no", "off", "disabled", "inactive"].includes(clean)) {
       return false;
     }
   }
@@ -437,10 +351,24 @@ function safeBool(value, fallback = false) {
   return Boolean(fallback);
 }
 
+function toArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (value instanceof Set) {
+    return Array.from(value);
+  }
+
+  if (value === null || value === undefined) {
+    return [];
+  }
+
+  return [value];
+}
+
 function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return Array.isArray(value) ? value : [];
 }
 
 function safeIsoDate(ms = Date.now()) {
@@ -455,17 +383,15 @@ function unique(values = []) {
   const result = [];
   const seen = new Set();
 
-  for (const value of safeArray(values).flat(Infinity)) {
-    const clean =
-      safeText(value, "");
+  for (const value of toArray(values).flat(Infinity)) {
+    const clean = safeText(value, "");
 
-    if (
-      clean &&
-      !seen.has(clean)
-    ) {
-      seen.add(clean);
-      result.push(clean);
+    if (!clean || seen.has(clean)) {
+      continue;
     }
+
+    seen.add(clean);
+    result.push(clean);
   }
 
   return result;
@@ -473,8 +399,7 @@ function unique(values = []) {
 
 function safeCloneValue(value, fallback = null) {
   try {
-    const cloned =
-      safeClone(value);
+    const cloned = safeClone(value);
 
     if (cloned !== undefined) {
       return cloned;
@@ -482,31 +407,22 @@ function safeCloneValue(value, fallback = null) {
   } catch {}
 
   if (Array.isArray(value)) {
-    return value.map((item) =>
-      safeCloneValue(item, item)
-    );
+    return value.map((item) => safeCloneValue(item, item));
   }
 
   if (isObject(value)) {
     try {
-      return JSON.parse(
-        JSON.stringify(value)
-      );
+      return JSON.parse(JSON.stringify(value));
     } catch {
-      return {
-        ...value,
-      };
+      return { ...value };
     }
   }
 
-  return value === undefined
-    ? fallback
-    : value;
+  return value === undefined ? fallback : value;
 }
 
 function safeRedact(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "");
 
   if (!raw) {
     return "";
@@ -519,16 +435,22 @@ function safeRedact(value = "") {
   }
 }
 
+function stripBearerPrefix(token = "") {
+  return safeText(token, "").replace(/^Bearer\s+/i, "").trim();
+}
+
 function safeHasValidToken(token) {
   try {
-    return Boolean(
-      hasValidToken(token)
-    );
+    return Boolean(hasValidToken(token));
   } catch {
-    return Boolean(
-      safeText(token, "")
-    );
+    return Boolean(safeText(token, ""));
   }
+}
+
+function normalizeTokenValue(token) {
+  const clean = stripBearerPrefix(token);
+
+  return safeHasValidToken(clean) ? clean : null;
 }
 
 function safeNormalizeUser(user = null) {
@@ -539,8 +461,18 @@ function safeNormalizeUser(user = null) {
   try {
     return normalizeUser(user);
   } catch {
-    return user || null;
+    return isObject(user) ? user : null;
   }
+}
+
+function safeIsUsableUser(user = null) {
+  try {
+    if (typeof isUsableUser === "function") {
+      return Boolean(isUsableUser(user));
+    }
+  } catch {}
+
+  return hasUsableUser(user);
 }
 
 function safeGetUserUsername(user = null) {
@@ -569,9 +501,7 @@ function safeGetUserAvatarUrl(user = null) {
 
 function safeCanonicalPath(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
   try {
-    return normalizeCanonicalPath(
-      value || fallback || DEFAULT_ROUTE
-    );
+    return normalizeCanonicalPath(value || fallback || DEFAULT_ROUTE);
   } catch {
     return fallback || DEFAULT_ROUTE;
   }
@@ -579,15 +509,11 @@ function safeCanonicalPath(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
 
 function safePublicPath(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
   try {
-    return normalizePublicPath(
-      value || fallback || DEFAULT_ROUTE
-    );
+    return normalizePublicPath(value || fallback || DEFAULT_ROUTE);
   } catch {}
 
   try {
-    return normalizePath(
-      value || fallback || DEFAULT_ROUTE
-    );
+    return normalizePath(value || fallback || DEFAULT_ROUTE);
   } catch {
     return fallback || DEFAULT_ROUTE;
   }
@@ -595,10 +521,7 @@ function safePublicPath(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
 
 function safeLocationCanonicalPath() {
   try {
-    return safeCanonicalPath(
-      getCurrentLocationCanonicalPath(),
-      DEFAULT_ROUTE
-    );
+    return safeCanonicalPath(getCurrentLocationCanonicalPath(), DEFAULT_ROUTE);
   } catch {
     return DEFAULT_ROUTE;
   }
@@ -606,10 +529,7 @@ function safeLocationCanonicalPath() {
 
 function safeLocationPublicPath(fallback = DEFAULT_ROUTE) {
   try {
-    return safePublicPath(
-      getCurrentLocationPath(),
-      fallback
-    );
+    return safePublicPath(getCurrentLocationPath(), fallback);
   } catch {
     return fallback || DEFAULT_ROUTE;
   }
@@ -637,6 +557,10 @@ function sanitizeSnapshotDeep(value, depth = 0, seen = new WeakSet()) {
     return value;
   }
 
+  if (typeof value === "bigint") {
+    return String(value);
+  }
+
   if (typeof value === "function") {
     return "[Function]";
   }
@@ -648,13 +572,7 @@ function sanitizeSnapshotDeep(value, depth = 0, seen = new WeakSet()) {
   if (Array.isArray(value)) {
     return value
       .slice(0, 200)
-      .map((item) =>
-        sanitizeSnapshotDeep(
-          item,
-          depth + 1,
-          seen
-        )
-      );
+      .map((item) => sanitizeSnapshotDeep(item, depth + 1, seen));
   }
 
   if (isAnyObject(value)) {
@@ -669,20 +587,12 @@ function sanitizeSnapshotDeep(value, depth = 0, seen = new WeakSet()) {
     const output = {};
 
     for (const [key, item] of Object.entries(value)) {
-      if (
-        /token|secret|password|authorization|bearer|credential|otp|code/i.test(key)
-      ) {
-        output[key] =
-          item ? "***" : item;
+      if (/token|secret|password|authorization|bearer|credential|otp|code|session/i.test(key)) {
+        output[key] = item ? "***" : item;
         continue;
       }
 
-      output[key] =
-        sanitizeSnapshotDeep(
-          item,
-          depth + 1,
-          seen
-        );
+      output[key] = sanitizeSnapshotDeep(item, depth + 1, seen);
     }
 
     return output;
@@ -696,23 +606,12 @@ function sanitizeSnapshotDeep(value, depth = 0, seen = new WeakSet()) {
 ========================================================= */
 
 function normalizeTheme(theme = DEFAULT_THEME) {
-  const value =
-    safeLower(
-      theme,
-      DEFAULT_THEME
-    );
-
-  return VALID_THEMES.includes(value)
-    ? value
-    : DEFAULT_THEME;
+  const value = safeLower(theme, DEFAULT_THEME);
+  return VALID_THEMES.includes(value) ? value : DEFAULT_THEME;
 }
 
 function normalizeThemeMode(themeMode = "") {
-  const value =
-    safeLower(
-      themeMode,
-      ""
-    );
+  const value = safeLower(themeMode, "");
 
   if (!value) {
     return "";
@@ -732,37 +631,21 @@ function normalizeThemeMode(themeMode = "") {
     return "system";
   }
 
-  return VALID_THEME_MODES.includes(value)
-    ? value
-    : "";
+  return VALID_THEME_MODES.includes(value) ? value : "";
 }
 
 function normalizeLang(lang = DEFAULT_LANG) {
-  const value =
-    safeLower(
-      lang,
-      DEFAULT_LANG
-    );
-
-  return VALID_LANG_RE.test(value)
-    ? value
-    : DEFAULT_LANG;
+  const value = safeLower(lang, DEFAULT_LANG).replace(/_/g, "-");
+  return VALID_LANG_RE.test(value) ? value : DEFAULT_LANG;
 }
 
 function normalizeNetworkStatus(value = "") {
-  const clean =
-    safeLower(value, "");
-
-  return VALID_NETWORK_STATUSES.includes(clean)
-    ? clean
-    : "";
+  const clean = safeLower(value, "");
+  return VALID_NETWORK_STATUSES.includes(clean) ? clean : "";
 }
 
 function normalizeHttpMethod(value = "") {
-  const method =
-    safeText(value, "")
-      .toUpperCase();
-
+  const method = safeText(value, "").toUpperCase();
   return method || null;
 }
 
@@ -776,11 +659,8 @@ function normalizeError(value = null) {
   } catch {
     if (value instanceof Error) {
       return {
-        name:
-          value.name || "Error",
-
-        message:
-          safeRedact(value.message || "Error"),
+        name: value.name || "Error",
+        message: safeRedact(value.message || "Error"),
       };
     }
 
@@ -788,15 +668,30 @@ function normalizeError(value = null) {
   }
 }
 
+function normalizeRoleKey(value = "") {
+  return safeLower(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_:.]/g, "")
+    .replace(/^_+|_+$/g, "")
+    .trim();
+}
+
 function normalizeRole(value = "") {
-  const role =
-    safeLower(value, "")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[\s-]+/g, "_")
-      .replace(/[^a-z0-9_:.]/g, "")
-      .replace(/^_+|_+$/g, "")
-      .trim();
+  const role = normalizeRoleKey(value);
+
+  if (!role) {
+    return null;
+  }
+
+  const configuredAliases = config?.auth?.roles || {};
+
+  for (const [alias, target] of Object.entries(configuredAliases)) {
+    if (normalizeRoleKey(alias) === role) {
+      return normalizeRoleKey(target || role) || role;
+    }
+  }
 
   return ROLE_ALIASES[role] || role || null;
 }
@@ -834,8 +729,7 @@ function normalizeRoleList(value = []) {
       return;
     }
 
-    const role =
-      normalizeRole(item);
+    const role = normalizeRole(item);
 
     if (role) {
       roles.push(role);
@@ -849,71 +743,42 @@ function normalizeRoleList(value = []) {
 
 function resolveOnlineState() {
   try {
-    if (typeof navigator !== "undefined") {
+    if (typeof navigator !== "undefined" && typeof navigator.onLine === "boolean") {
       return navigator.onLine !== false;
     }
   } catch {}
 
-  return true;
+  return null;
 }
 
 function resolveNetworkPatchFromOnline(onlineValue) {
-  const online =
-    onlineValue === null
-      ? null
-      : Boolean(onlineValue);
-
-  const offline =
-    online === null
-      ? null
-      : !online;
+  const online = onlineValue === null ? null : Boolean(onlineValue);
+  const offline = online === null ? null : !online;
 
   return {
     online,
     offline,
-    networkOnline:
-      online,
-    networkOffline:
-      offline,
-    networkStatus:
-      online === null
-        ? "unknown"
-        : online
-          ? "online"
-          : "offline",
+    networkOnline: online,
+    networkOffline: offline,
+    networkStatus: online === null ? "unknown" : online ? "online" : "offline",
   };
 }
 
 function resolveNetworkPatchFromOffline(offlineValue) {
-  const offline =
-    offlineValue === null
-      ? null
-      : Boolean(offlineValue);
-
-  const online =
-    offline === null
-      ? null
-      : !offline;
+  const offline = offlineValue === null ? null : Boolean(offlineValue);
+  const online = offline === null ? null : !offline;
 
   return {
     online,
     offline,
-    networkOnline:
-      online,
-    networkOffline:
-      offline,
-    networkStatus:
-      online === null
-        ? "unknown"
-        : online
-          ? "online"
-          : "offline",
+    networkOnline: online,
+    networkOffline: offline,
+    networkStatus: online === null ? "unknown" : online ? "online" : "offline",
   };
 }
 
 function resolveNetworkPatchFromStatus(statusValue) {
-  const status =
-    normalizeNetworkStatus(statusValue);
+  const status = normalizeNetworkStatus(statusValue);
 
   if (status === "online") {
     return resolveNetworkPatchFromOnline(true);
@@ -931,58 +796,44 @@ function resolveNetworkPatchFromStatus(statusValue) {
 }
 
 function resolveRole(user = null, explicitRole = "") {
-  const normalized =
-    normalizeRole(
-      explicitRole ||
-        user?.role ||
-        user?.rol ||
-        user?.userRole ||
-        user?.user_role ||
-        user?.type ||
-        user?.userType ||
-        user?.user_type ||
-        user?.perfil ||
-        user?.profile?.role ||
-        user?.profile?.rol ||
-        user?.raw?.role ||
-        user?.raw?.rol ||
-        ""
-    );
+  const normalized = normalizeRole(
+    explicitRole ||
+      user?.role ||
+      user?.rol ||
+      user?.userRole ||
+      user?.user_role ||
+      user?.type ||
+      user?.userType ||
+      user?.user_type ||
+      user?.perfil ||
+      user?.profile?.role ||
+      user?.profile?.rol ||
+      user?.raw?.role ||
+      user?.raw?.rol ||
+      ""
+  );
 
   return normalized || null;
 }
 
 function resolveRoles(user = null, explicitRoles = []) {
-  const role =
-    resolveRole(user);
+  const role = resolveRole(user);
 
-  const roles =
-    normalizeRoleList([
-      explicitRoles,
-      user?.roles,
-      user?.roleList,
-      user?.role_list,
-      user?.permissions?.roles,
-      role,
-    ]);
+  const roles = normalizeRoleList([
+    explicitRoles,
+    user?.roles,
+    user?.roleList,
+    user?.role_list,
+    user?.permissions?.roles,
+    role,
+  ]);
 
-  return roles.length
-    ? roles
-    : role
-      ? [role]
-      : [];
+  return roles.length ? roles : role ? [role] : [];
 }
 
 function extractUsernameFromPublicPath(publicPath = DEFAULT_ROUTE) {
-  const match =
-    String(publicPath || "")
-      .match(/^\/@([^/]+)(?:\/|$)/i);
-
-  return (
-    sanitizeUsername(
-      match?.[1] || ""
-    ) || null
-  );
+  const match = String(publicPath || "").match(/^\/@([^/]+)(?:\/|$)/i);
+  return sanitizeUsername(match?.[1] || "") || null;
 }
 
 function resolveUsernameFromUser(user = null) {
@@ -1003,13 +854,9 @@ function resolveUsernameFromUser(user = null) {
 }
 
 function hasUsableUser(user = null) {
-  const normalized =
-    safeNormalizeUser(user);
+  const normalized = safeNormalizeUser(user);
 
-  if (
-    !normalized ||
-    typeof normalized !== "object"
-  ) {
+  if (!normalized || typeof normalized !== "object") {
     return false;
   }
 
@@ -1043,19 +890,18 @@ function isUserInactive(user = null) {
     return true;
   }
 
-  const status =
-    safeLower(
-      user.status ||
-        user.estado ||
-        user.state ||
-        user.accountStatus ||
-        user.account_status ||
-        "",
-      ""
-    )
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[\s-]+/g, "_");
+  const status = safeLower(
+    user.status ||
+      user.estado ||
+      user.state ||
+      user.accountStatus ||
+      user.account_status ||
+      "",
+    ""
+  )
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_");
 
   if (
     [
@@ -1103,46 +949,21 @@ function resolveCurrentResolvedUsername({
     return null;
   }
 
-  const fromPath =
-    extractUsernameFromPublicPath(
-      publicPath
-    );
+  const fromPath = extractUsernameFromPublicPath(publicPath);
+  const fromUser = resolveUsernameFromUser(user);
+  const fromPrevious = sanitizeUsername(previous || "") || null;
 
-  const fromUser =
-    resolveUsernameFromUser(user);
-
-  const fromPrevious =
-    sanitizeUsername(
-      previous || ""
-    ) || null;
-
-  return (
-    fromPath ||
-    fromUser ||
-    fromPrevious ||
-    null
-  );
+  return fromPath || fromUser || fromPrevious || null;
 }
 
 function roleFlags(roles = []) {
-  const roleSet =
-    new Set(
-      normalizeRoleList(roles)
-    );
+  const roleSet = new Set(normalizeRoleList(roles));
 
   return {
-    isAdmin:
-      roleSet.has("admin"),
-
-    isSupport:
-      roleSet.has("support") ||
-      roleSet.has("agent"),
-
-    isManager:
-      roleSet.has("manager"),
-
-    isClient:
-      roleSet.has("client"),
+    isAdmin: roleSet.has("admin"),
+    isSupport: roleSet.has("support") || roleSet.has("agent"),
+    isManager: roleSet.has("manager"),
+    isClient: roleSet.has("client"),
   };
 }
 
@@ -1153,19 +974,11 @@ function roleFlags(roles = []) {
 function sanitizePatchInput(patch = {}) {
   const output = {};
 
-  if (
-    !patch ||
-    typeof patch !== "object" ||
-    Array.isArray(patch)
-  ) {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
     return output;
   }
 
   for (const [key, value] of Object.entries(patch)) {
-    /*
-      undefined no escribe estado.
-      Para limpiar un valor se usa null.
-    */
     if (value !== undefined) {
       output[key] = value;
     }
@@ -1175,22 +988,13 @@ function sanitizePatchInput(patch = {}) {
 }
 
 function stableStringify(value, seen = new WeakSet()) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+  if (value === null || value === undefined) {
     return String(value);
   }
 
-  const type =
-    typeof value;
+  const type = typeof value;
 
-  if (
-    type === "string" ||
-    type === "number" ||
-    type === "boolean" ||
-    type === "bigint"
-  ) {
+  if (type === "string" || type === "number" || type === "boolean" || type === "bigint") {
     return `${type}:${String(value)}`;
   }
 
@@ -1207,9 +1011,7 @@ function stableStringify(value, seen = new WeakSet()) {
   }
 
   if (Array.isArray(value)) {
-    return `[${value.map((item) =>
-      stableStringify(item, seen)
-    ).join(",")}]`;
+    return `[${value.map((item) => stableStringify(item, seen)).join(",")}]`;
   }
 
   if (typeof value === "object") {
@@ -1219,12 +1021,9 @@ function stableStringify(value, seen = new WeakSet()) {
 
     seen.add(value);
 
-    const keys =
-      Object.keys(value).sort();
+    const keys = Object.keys(value).sort();
 
-    return `{${keys.map((key) =>
-      `${key}:${stableStringify(value[key], seen)}`
-    ).join("|")}}`;
+    return `{${keys.map((key) => `${key}:${stableStringify(value[key], seen)}`).join("|")}}`;
   }
 
   try {
@@ -1239,23 +1038,12 @@ function valuesEqual(previous, next) {
     return true;
   }
 
-  const previousIsObject =
-    previous !== null &&
-    typeof previous === "object";
+  const previousIsObject = previous !== null && typeof previous === "object";
+  const nextIsObject = next !== null && typeof next === "object";
 
-  const nextIsObject =
-    next !== null &&
-    typeof next === "object";
-
-  if (
-    previousIsObject ||
-    nextIsObject
-  ) {
+  if (previousIsObject || nextIsObject) {
     try {
-      return (
-        stableStringify(previous) ===
-        stableStringify(next)
-      );
+      return stableStringify(previous) === stableStringify(next);
     } catch {
       return false;
     }
@@ -1265,20 +1053,11 @@ function valuesEqual(previous, next) {
 }
 
 function getChangedKeys(state, patch = {}) {
-  return Object.keys(patch).filter((key) =>
-    !valuesEqual(
-      state?.[key],
-      patch[key]
-    )
-  );
+  return Object.keys(patch).filter((key) => !valuesEqual(state?.[key], patch[key]));
 }
 
 function compactChangedKeys(keys = []) {
-  return Array.from(
-    new Set(
-      keys.filter(Boolean)
-    )
-  );
+  return Array.from(new Set(keys.filter(Boolean)));
 }
 
 /* =========================================================
@@ -1286,23 +1065,14 @@ function compactChangedKeys(keys = []) {
 ========================================================= */
 
 export function computeAuthenticated(nextUser, nextToken) {
-  const normalizedUser =
-    safeNormalizeUser(nextUser);
+  const normalizedUser = safeNormalizeUser(nextUser);
+  const validToken = safeHasValidToken(nextToken);
 
-  const validToken =
-    safeHasValidToken(nextToken);
-
-  /*
-    Regla anti ghost-auth:
-    - token válido requerido
-    - usuario usable requerido
-    - usuario inactivo/bloqueado no autentica
-  */
   if (!validToken) {
     return false;
   }
 
-  if (!hasUsableUser(normalizedUser)) {
+  if (!safeIsUsableUser(normalizedUser)) {
     return false;
   }
 
@@ -1313,74 +1083,38 @@ export function computeAuthenticated(nextUser, nextToken) {
   return true;
 }
 
-function deriveAuthPatch({
-  state,
-  patch,
-} = {}) {
-  const nextUser =
-    hasOwn(patch, "user")
-      ? patch.user
-      : state.user;
+function deriveAuthPatch({ state, patch } = {}) {
+  const nextUser = hasOwn(patch, "user") ? patch.user : state.user;
+  const nextToken = hasOwn(patch, "token") ? patch.token : state.token;
 
-  const nextToken =
-    hasOwn(patch, "token")
-      ? patch.token
-      : state.token;
+  const authenticated = computeAuthenticated(nextUser, nextToken);
+  const hasToken = authenticated && safeHasValidToken(nextToken);
 
-  const authenticated =
-    computeAuthenticated(
-      nextUser,
-      nextToken
-    );
+  const roles = authenticated
+    ? resolveRoles(nextUser, hasOwn(patch, "roles") ? patch.roles : state.roles)
+    : [];
 
-  const hasToken =
-    safeHasValidToken(
-      nextToken
-    );
+  const role = authenticated
+    ? (
+        resolveRole(nextUser, hasOwn(patch, "role") ? patch.role : state.role) ||
+        roles[0] ||
+        null
+      )
+    : null;
 
-  const roles =
-    authenticated
-      ? resolveRoles(
-          nextUser,
-          hasOwn(patch, "roles")
-            ? patch.roles
-            : state.roles
-        )
-      : [];
-
-  const role =
-    authenticated
-      ? (
-          resolveRole(
-            nextUser,
-            hasOwn(patch, "role")
-              ? patch.role
-              : state.role
-          ) ||
-          roles[0] ||
-          null
-        )
-      : null;
-
-  const flags =
-    roleFlags(roles);
+  const flags = roleFlags(roles);
 
   return {
     authenticated,
     hasToken,
 
     role,
-    rol:
-      role,
-    userRole:
-      role,
+    rol: role,
+    userRole: role,
 
     roles,
 
-    username:
-      authenticated
-        ? resolveUsernameFromUser(nextUser)
-        : null,
+    username: authenticated ? resolveUsernameFromUser(nextUser) : null,
 
     ...flags,
   };
@@ -1391,30 +1125,24 @@ function deriveAuthPatch({
 ========================================================= */
 
 export function createInitialState(input = {}) {
-  const localConfig =
-    input?.config ||
-    input ||
-    {};
+  const localConfig = input?.config || input || config || {};
 
-  const route =
-    safeLocationCanonicalPath();
+  const route = safeLocationCanonicalPath();
+  const publicPath = safeLocationPublicPath(route);
 
-  const publicPath =
-    safeLocationPublicPath(route);
+  const lang = normalizeLang(
+    localConfig?.defaultLang ||
+      localConfig?.i18n?.defaultLang ||
+      localConfig?.lang ||
+      DEFAULT_LANG
+  );
 
-  const lang =
-    normalizeLang(
-      localConfig?.defaultLang ||
-        localConfig?.lang ||
-        DEFAULT_LANG
-    );
-
-  const theme =
-    normalizeTheme(
-      localConfig?.defaultTheme ||
-        localConfig?.theme ||
-        DEFAULT_THEME
-    );
+  const theme = normalizeTheme(
+    localConfig?.defaultTheme ||
+      localConfig?.ui?.defaultTheme ||
+      localConfig?.theme ||
+      DEFAULT_THEME
+  );
 
   const themeMode =
     normalizeThemeMode(
@@ -1424,328 +1152,150 @@ export function createInitialState(input = {}) {
         ""
     ) || null;
 
-  const online =
-    resolveOnlineState();
-
-  const createdAt =
-    safeIsoDate();
+  const online = resolveOnlineState();
+  const createdAt = safeIsoDate();
 
   return {
-    __version:
-      STATE_VERSION,
+    __version: STATE_VERSION,
 
-    initialized:
-      false,
+    initialized: false,
+    booting: false,
+    ready: false,
+    appReady: false,
+    appFatal: false,
 
-    booting:
-      false,
+    coreInitializing: false,
+    coreReady: false,
+    loading: true,
 
-    ready:
-      false,
+    bootPhase: null,
+    mainPhase: null,
+    mainReason: null,
+    mainUpdatedAt: null,
 
-    appReady:
-      false,
-
-    appFatal:
-      false,
-
-    coreInitializing:
-      false,
-
-    coreReady:
-      false,
-
-    loading:
-      true,
-
-    bootPhase:
-      null,
-
-    mainPhase:
-      null,
-
-    mainReason:
-      null,
-
-    mainUpdatedAt:
-      null,
-
-    coreInitCycle:
-      0,
-
-    coreVersion:
-      STATE_VERSION,
-
-    coreReadyAt:
-      null,
-
-    coreErrorAt:
-      null,
+    coreInitCycle: 0,
+    coreVersion: STATE_VERSION,
+    coreReadyAt: null,
+    coreErrorAt: null,
 
     route,
-    canonicalPath:
-      route,
+    canonicalPath: route,
     publicPath,
 
-    lastRoute:
-      null,
+    lastRoute: null,
+    lastPublicPath: null,
 
-    lastPublicPath:
-      null,
+    user: null,
+    currentUser: null,
+    authUser: null,
+    sessionUser: null,
 
-    user:
-      null,
+    token: null,
+    accessToken: null,
+    access_token: null,
 
-    currentUser:
-      null,
+    refreshToken: null,
+    refresh_token: null,
 
-    authUser:
-      null,
+    tempToken: null,
+    temp_token: null,
 
-    sessionUser:
-      null,
+    hasToken: false,
 
-    token:
-      null,
+    role: null,
+    rol: null,
+    userRole: null,
+    roles: [],
+    username: null,
 
-    accessToken:
-      null,
+    authenticated: false,
 
-    access_token:
-      null,
+    isAdmin: false,
+    isSupport: false,
+    isManager: false,
+    isClient: false,
 
-    refreshToken:
-      null,
+    currentResolvedUsername: null,
+    resolvedUsername: null,
 
-    refresh_token:
-      null,
-
-    tempToken:
-      null,
-
-    temp_token:
-      null,
-
-    hasToken:
-      false,
-
-    role:
-      null,
-
-    rol:
-      null,
-
-    userRole:
-      null,
-
-    roles:
-      [],
-
-    username:
-      null,
-
-    authenticated:
-      false,
-
-    isAdmin:
-      false,
-
-    isSupport:
-      false,
-
-    isManager:
-      false,
-
-    isClient:
-      false,
-
-    currentResolvedUsername:
-      null,
-
-    resolvedUsername:
-      null,
-
-    session:
-      null,
-
-    sessionData:
-      null,
-
-    sessionId:
-      null,
-
-    sessionUserId:
-      null,
+    session: null,
+    sessionData: null,
+    sessionId: null,
+    sessionUserId: null,
 
     lang,
     theme,
-
     themeMode,
 
-    sidebarOpen:
-      true,
+    sidebarOpen: true,
 
-    shellVisible:
-      true,
+    shellVisible: true,
+    shellHidden: false,
+    routeShellHidden: false,
+    chromeVisible: true,
+    appShellVisible: true,
+    shellBusy: false,
+    authScreen: false,
 
-    shellHidden:
-      false,
-
-    routeShellHidden:
-      false,
-
-    chromeVisible:
-      true,
-
-    appShellVisible:
-      true,
-
-    shellBusy:
-      false,
-
-    authScreen:
-      false,
-
-    routeMode:
-      "boot",
-
-    currentShellRoute:
-      null,
-
-    currentShellCanonicalPath:
-      null,
+    routeMode: "boot",
+    currentShellRoute: null,
+    currentShellCanonicalPath: null,
 
     online,
+    offline: online === null ? null : !online,
+    networkOnline: online,
+    networkOffline: online === null ? null : !online,
+    networkStatus: online === null ? "unknown" : online ? "online" : "offline",
 
-    offline:
-      !online,
+    lastError: null,
+    error: null,
+    hasError: false,
 
-    networkOnline:
-      online,
+    lastRequestAt: null,
+    lastRequestUrl: null,
+    lastRequestMethod: null,
+    lastRequestStatus: null,
+    requestPending: 0,
 
-    networkOffline:
-      !online,
+    bootInitialUrl: "",
+    bootInitialPath: "",
+    bootCanonicalPath: "",
 
-    networkStatus:
-      online ? "online" : "offline",
+    bootProtectedInitialUrl: "",
+    bootProtectedInitialPath: "",
+    bootProtectedInitialPublicPath: "",
+    bootProtectedRouteKey: "",
 
-    lastError:
-      null,
+    bootIsPublicTokenRoute: false,
+    bootHasProtectedToken: false,
+    bootCapturedAt: "",
 
-    error:
-      null,
+    bootIsActivation: false,
+    bootHasActivationToken: false,
+    bootActivationInitialUrl: "",
+    bootActivationInitialPath: "",
+    bootActivationInitialPublicPath: "",
 
-    hasError:
-      false,
+    bootIsResetConfirm: false,
+    bootHasResetToken: false,
+    bootResetConfirmInitialUrl: "",
+    bootResetConfirmInitialPath: "",
+    bootResetConfirmInitialPublicPath: "",
 
-    lastRequestAt:
-      null,
+    initialRouteRendered: false,
+    bootNavigationHandled: false,
+    loginNavigationHandled: false,
+    postRestoreNavigationSkipped: false,
 
-    lastRequestUrl:
-      null,
-
-    lastRequestMethod:
-      null,
-
-    lastRequestStatus:
-      null,
-
-    requestPending:
-      0,
-
-    bootInitialUrl:
-      "",
-
-    bootInitialPath:
-      "",
-
-    bootCanonicalPath:
-      "",
-
-    bootProtectedInitialUrl:
-      "",
-
-    bootProtectedInitialPath:
-      "",
-
-    bootProtectedInitialPublicPath:
-      "",
-
-    bootProtectedRouteKey:
-      "",
-
-    bootIsPublicTokenRoute:
-      false,
-
-    bootHasProtectedToken:
-      false,
-
-    bootCapturedAt:
-      "",
-
-    bootIsActivation:
-      false,
-
-    bootHasActivationToken:
-      false,
-
-    bootActivationInitialUrl:
-      "",
-
-    bootActivationInitialPath:
-      "",
-
-    bootActivationInitialPublicPath:
-      "",
-
-    bootIsResetConfirm:
-      false,
-
-    bootHasResetToken:
-      false,
-
-    bootResetConfirmInitialUrl:
-      "",
-
-    bootResetConfirmInitialPath:
-      "",
-
-    bootResetConfirmInitialPublicPath:
-      "",
-
-    initialRouteRendered:
-      false,
-
-    bootNavigationHandled:
-      false,
-
-    loginNavigationHandled:
-      false,
-
-    postRestoreNavigationSkipped:
-      false,
-
-    loginInProgress:
-      false,
-
-    twoFactorPending:
-      false,
-
-    restoring:
-      false,
-
-    authRestoring:
-      false,
-
-    sessionRestoring:
-      false,
+    loginInProgress: false,
+    twoFactorPending: false,
+    restoring: false,
+    authRestoring: false,
+    sessionRestoring: false,
 
     createdAt,
-    updatedAt:
-      createdAt,
-
-    stateChangeCount:
-      0,
+    updatedAt: createdAt,
+    stateChangeCount: 0,
   };
 }
 
@@ -1770,62 +1320,32 @@ function sanitizeSnapshotValue(key, value, options = {}) {
       return value || null;
     }
 
-    return value
-      ? "***"
-      : null;
+    return value ? "***" : null;
   }
 
   if (REDACTABLE_PATH_KEYS.includes(key)) {
     return safeRedact(value || "");
   }
 
-  if (
-    key === "error" ||
-    key === "lastError"
-  ) {
+  if (key === "error" || key === "lastError") {
     return normalizeError(value);
   }
 
-  if (
-    key === "user" ||
-    key === "currentUser" ||
-    key === "authUser" ||
-    key === "sessionUser"
-  ) {
-    return value
-      ? sanitizeSnapshotDeep(value)
-      : null;
+  if (USER_ALIAS_KEYS.includes(key)) {
+    return value ? sanitizeSnapshotDeep(value) : null;
   }
 
   return value;
 }
 
 export function cloneState(state, options = {}) {
-  const opts =
-    isObject(options)
-      ? options
-      : {};
-
-  const source =
-    state && typeof state === "object"
-      ? state
-      : {};
-
-  const raw =
-    safeCloneValue(
-      source,
-      {}
-    ) || {};
-
+  const opts = isObject(options) ? options : {};
+  const source = state && typeof state === "object" ? state : {};
+  const raw = safeCloneValue(source, {}) || {};
   const snapshot = {};
 
   for (const [key, value] of Object.entries(raw)) {
-    snapshot[key] =
-      sanitizeSnapshotValue(
-        key,
-        value,
-        opts
-      );
+    snapshot[key] = sanitizeSnapshotValue(key, value, opts);
   }
 
   const token =
@@ -1841,176 +1361,72 @@ export function cloneState(state, options = {}) {
     source.sessionUser ||
     null;
 
-  const authenticated =
-    computeAuthenticated(
-      user,
-      token
-    );
+  const authenticated = computeAuthenticated(user, token);
 
-  snapshot.__version =
-    source.__version || STATE_VERSION;
+  snapshot.__version = source.__version || STATE_VERSION;
 
-  snapshot.user =
-    user
-      ? sanitizeSnapshotDeep(user)
-      : null;
+  snapshot.user = user ? sanitizeSnapshotDeep(user) : null;
+  snapshot.currentUser = user ? sanitizeSnapshotDeep(user) : null;
+  snapshot.authUser = user ? sanitizeSnapshotDeep(user) : null;
+  snapshot.sessionUser = user ? sanitizeSnapshotDeep(user) : null;
 
-  snapshot.currentUser =
-    user
-      ? sanitizeSnapshotDeep(user)
-      : null;
+  snapshot.token = opts.includeToken === true || opts.unsafeIncludeToken === true ? token || null : null;
+  snapshot.accessToken = opts.includeToken === true || opts.unsafeIncludeToken === true ? token || null : null;
+  snapshot.access_token = opts.includeToken === true || opts.unsafeIncludeToken === true ? token || null : null;
 
-  snapshot.authUser =
-    user
-      ? sanitizeSnapshotDeep(user)
-      : null;
+  snapshot.hasToken = authenticated && safeHasValidToken(token);
+  snapshot.authenticated = authenticated;
 
-  snapshot.sessionUser =
-    user
-      ? sanitizeSnapshotDeep(user)
-      : null;
+  snapshot.lastError = normalizeError(source.lastError || source.error);
+  snapshot.error = normalizeError(source.error || source.lastError);
 
-  snapshot.token =
-    opts.includeToken === true ||
-    opts.unsafeIncludeToken === true
-      ? token || null
-      : null;
+  snapshot.route = safeCanonicalPath(source.route || DEFAULT_ROUTE);
+  snapshot.canonicalPath = safeCanonicalPath(source.canonicalPath || source.route || DEFAULT_ROUTE);
+  snapshot.publicPath = safeRedact(safePublicPath(source.publicPath || source.route || DEFAULT_ROUTE));
 
-  snapshot.accessToken =
-    opts.includeToken === true ||
-    opts.unsafeIncludeToken === true
-      ? token || null
-      : null;
+  snapshot.lastRoute = source.lastRoute ? safeCanonicalPath(source.lastRoute, DEFAULT_ROUTE) : null;
+  snapshot.lastPublicPath = source.lastPublicPath
+    ? safeRedact(safePublicPath(source.lastPublicPath, DEFAULT_ROUTE))
+    : null;
 
-  snapshot.access_token =
-    opts.includeToken === true ||
-    opts.unsafeIncludeToken === true
-      ? token || null
-      : null;
-
-  snapshot.hasToken =
-    Boolean(
-      safeHasValidToken(token)
-    );
-
-  snapshot.authenticated =
-    authenticated;
-
-  snapshot.lastError =
-    normalizeError(
-      source.lastError ||
-        source.error
-    );
-
-  snapshot.error =
-    normalizeError(
-      source.error ||
-        source.lastError
-    );
-
-  snapshot.route =
-    safeCanonicalPath(
-      source.route || DEFAULT_ROUTE
-    );
-
-  snapshot.canonicalPath =
-    safeCanonicalPath(
-      source.canonicalPath ||
-        source.route ||
-        DEFAULT_ROUTE
-    );
-
-  snapshot.publicPath =
-    safeRedact(
-      safePublicPath(
-        source.publicPath ||
-          source.route ||
-          DEFAULT_ROUTE
-      )
-    );
-
-  snapshot.lastRoute =
-    source.lastRoute
-      ? safeCanonicalPath(
-          source.lastRoute,
-          DEFAULT_ROUTE
-        )
-      : null;
-
-  snapshot.lastPublicPath =
-    source.lastPublicPath
-      ? safeRedact(
-          safePublicPath(
-            source.lastPublicPath,
-            DEFAULT_ROUTE
-          )
-        )
-      : null;
-
-  snapshot.lastRequestUrl =
-    safeRedact(
-      source.lastRequestUrl || ""
-    );
+  snapshot.lastRequestUrl = safeRedact(source.lastRequestUrl || "");
 
   return snapshot;
 }
 
 export function getState(state, options = {}) {
-  return cloneState(
-    state,
-    options
-  );
+  return cloneState(state, options);
 }
 
-export const getStateBase =
-  getState;
+export const getStateBase = getState;
 
 function clonePatchForEvent(patch = {}) {
-  const cloned =
-    safeCloneValue(
-      patch || {},
-      {}
-    ) || {};
+  const cloned = safeCloneValue(patch || {}, {}) || {};
 
   for (const key of SENSITIVE_STATE_KEYS) {
     if (hasOwn(cloned, key)) {
-      cloned[key] =
-        cloned[key]
-          ? "***"
-          : null;
+      cloned[key] = cloned[key] ? "***" : null;
     }
   }
 
   for (const key of REDACTABLE_PATH_KEYS) {
     if (hasOwn(cloned, key)) {
-      cloned[key] =
-        safeRedact(
-          cloned[key] || ""
-        );
+      cloned[key] = safeRedact(cloned[key] || "");
     }
   }
 
   for (const key of USER_ALIAS_KEYS) {
     if (hasOwn(cloned, key)) {
-      cloned[key] =
-        cloned[key]
-          ? sanitizeSnapshotDeep(cloned[key])
-          : null;
+      cloned[key] = cloned[key] ? sanitizeSnapshotDeep(cloned[key]) : null;
     }
   }
 
   if (hasOwn(cloned, "error")) {
-    cloned.error =
-      normalizeError(
-        cloned.error
-      );
+    cloned.error = normalizeError(cloned.error);
   }
 
   if (hasOwn(cloned, "lastError")) {
-    cloned.lastError =
-      normalizeError(
-        cloned.lastError
-      );
+    cloned.lastError = normalizeError(cloned.lastError);
   }
 
   return cloned;
@@ -2020,147 +1436,50 @@ function clonePatchForEvent(patch = {}) {
    PATCH NORMALIZATION
 ========================================================= */
 
-function normalizeTokenAliases(normalizedPatch) {
-  if (!hasOwn(normalizedPatch, "token")) {
-    for (const key of TOKEN_ALIAS_KEYS) {
-      if (
-        key !== "token" &&
-        hasOwn(normalizedPatch, key)
-      ) {
-        normalizedPatch.token =
-          normalizedPatch[key];
-
-        break;
-      }
-    }
-  }
-
-  if (hasOwn(normalizedPatch, "token")) {
-    const token =
-      safeHasValidToken(
-        normalizedPatch.token
-      )
-        ? String(
-            normalizedPatch.token
-          ).trim()
-        : null;
-
-    normalizedPatch.token =
-      token;
-
-    normalizedPatch.accessToken =
-      token;
-
-    normalizedPatch.access_token =
-      token;
-  }
-
-  return normalizedPatch;
-}
-
-function normalizeRefreshTokenAliases(normalizedPatch) {
-  if (
-    hasOwn(normalizedPatch, "refreshToken") &&
-    !hasOwn(normalizedPatch, "refresh_token")
-  ) {
-    normalizedPatch.refresh_token =
-      normalizedPatch.refreshToken || null;
-  }
-
-  if (
-    hasOwn(normalizedPatch, "refresh_token") &&
-    !hasOwn(normalizedPatch, "refreshToken")
-  ) {
-    normalizedPatch.refreshToken =
-      normalizedPatch.refresh_token || null;
-  }
-
-  return normalizedPatch;
-}
-
-function normalizeTempTokenAliases(normalizedPatch) {
-  if (
-    hasOwn(normalizedPatch, "tempToken") &&
-    !hasOwn(normalizedPatch, "temp_token")
-  ) {
-    normalizedPatch.temp_token =
-      normalizedPatch.tempToken || null;
-  }
-
-  if (
-    hasOwn(normalizedPatch, "temp_token") &&
-    !hasOwn(normalizedPatch, "tempToken")
-  ) {
-    normalizedPatch.tempToken =
-      normalizedPatch.temp_token || null;
-  }
-
-  return normalizedPatch;
-}
-
-function normalizeUserAliases(normalizedPatch) {
-  if (!hasOwn(normalizedPatch, "user")) {
-    for (const key of USER_ALIAS_KEYS) {
-      if (
-        key !== "user" &&
-        hasOwn(normalizedPatch, key)
-      ) {
-        normalizedPatch.user =
-          normalizedPatch[key];
-
-        break;
-      }
-    }
-  }
-
-  if (hasOwn(normalizedPatch, "user")) {
-    const user =
-      safeNormalizeUser(
-        normalizedPatch.user
-      );
-
-    normalizedPatch.user =
-      user;
-
-    normalizedPatch.currentUser =
-      user;
-
-    normalizedPatch.authUser =
-      user;
-
-    normalizedPatch.sessionUser =
-      user;
-  }
-
-  return normalizedPatch;
-}
-
 function normalizeSessionAliases(normalizedPatch) {
   if (!hasOwn(normalizedPatch, "session")) {
     for (const key of SESSION_ALIAS_KEYS) {
-      if (
-        key !== "session" &&
-        hasOwn(normalizedPatch, key)
-      ) {
-        normalizedPatch.session =
-          normalizedPatch[key];
-
+      if (key !== "session" && hasOwn(normalizedPatch, key)) {
+        normalizedPatch.session = normalizedPatch[key];
         break;
       }
     }
   }
 
   if (hasOwn(normalizedPatch, "session")) {
-    const session =
-      normalizedPatch.session || null;
+    const session = normalizedPatch.session || null;
 
-    normalizedPatch.session =
-      session;
-
-    normalizedPatch.sessionData =
-      session;
+    normalizedPatch.session = session;
+    normalizedPatch.sessionData = session;
 
     if (session && typeof session === "object") {
+      if (!hasOwn(normalizedPatch, "user")) {
+        normalizedPatch.user =
+          session.user ||
+          session.currentUser ||
+          session.authUser ||
+          session.sessionUser ||
+          session.data?.user ||
+          session.payload?.user ||
+          null;
+      }
+
+      if (!hasOwn(normalizedPatch, "token")) {
+        normalizedPatch.token =
+          session.token ||
+          session.accessToken ||
+          session.access_token ||
+          session.jwt ||
+          null;
+      }
+
+      if (!hasOwn(normalizedPatch, "refreshToken") && !hasOwn(normalizedPatch, "refresh_token")) {
+        normalizedPatch.refreshToken =
+          session.refreshToken ||
+          session.refresh_token ||
+          null;
+      }
+
       if (!hasOwn(normalizedPatch, "sessionId")) {
         normalizedPatch.sessionId =
           session.sessionId ||
@@ -2183,146 +1502,161 @@ function normalizeSessionAliases(normalizedPatch) {
   return normalizedPatch;
 }
 
+function normalizeTokenAliases(normalizedPatch) {
+  if (normalizedPatch.hasToken === false && !TOKEN_ALIAS_KEYS.some((key) => hasOwn(normalizedPatch, key))) {
+    normalizedPatch.token = null;
+  }
+
+  if (!hasOwn(normalizedPatch, "token")) {
+    for (const key of TOKEN_ALIAS_KEYS) {
+      if (key !== "token" && hasOwn(normalizedPatch, key)) {
+        normalizedPatch.token = normalizedPatch[key];
+        break;
+      }
+    }
+  }
+
+  if (hasOwn(normalizedPatch, "token")) {
+    const token = normalizeTokenValue(normalizedPatch.token);
+
+    normalizedPatch.token = token;
+    normalizedPatch.accessToken = token;
+    normalizedPatch.access_token = token;
+  }
+
+  return normalizedPatch;
+}
+
+function normalizeRefreshTokenAliases(normalizedPatch) {
+  if (hasOwn(normalizedPatch, "refreshToken") && !hasOwn(normalizedPatch, "refresh_token")) {
+    normalizedPatch.refresh_token = normalizeTokenValue(normalizedPatch.refreshToken);
+    normalizedPatch.refreshToken = normalizedPatch.refresh_token;
+  }
+
+  if (hasOwn(normalizedPatch, "refresh_token") && !hasOwn(normalizedPatch, "refreshToken")) {
+    normalizedPatch.refreshToken = normalizeTokenValue(normalizedPatch.refresh_token);
+    normalizedPatch.refresh_token = normalizedPatch.refreshToken;
+  }
+
+  return normalizedPatch;
+}
+
+function normalizeTempTokenAliases(normalizedPatch) {
+  if (hasOwn(normalizedPatch, "tempToken") && !hasOwn(normalizedPatch, "temp_token")) {
+    normalizedPatch.temp_token = normalizeTokenValue(normalizedPatch.tempToken);
+    normalizedPatch.tempToken = normalizedPatch.temp_token;
+  }
+
+  if (hasOwn(normalizedPatch, "temp_token") && !hasOwn(normalizedPatch, "tempToken")) {
+    normalizedPatch.tempToken = normalizeTokenValue(normalizedPatch.temp_token);
+    normalizedPatch.temp_token = normalizedPatch.tempToken;
+  }
+
+  return normalizedPatch;
+}
+
+function normalizeUserAliases(normalizedPatch) {
+  if (!hasOwn(normalizedPatch, "user")) {
+    for (const key of USER_ALIAS_KEYS) {
+      if (key !== "user" && hasOwn(normalizedPatch, key)) {
+        normalizedPatch.user = normalizedPatch[key];
+        break;
+      }
+    }
+  }
+
+  if (hasOwn(normalizedPatch, "user")) {
+    const user = safeNormalizeUser(normalizedPatch.user);
+
+    normalizedPatch.user = user;
+    normalizedPatch.currentUser = user;
+    normalizedPatch.authUser = user;
+    normalizedPatch.sessionUser = user;
+  }
+
+  return normalizedPatch;
+}
+
 function normalizeRoutePatch(state, normalizedPatch) {
   const routeWasProvided =
     hasOwn(normalizedPatch, "route") ||
     hasOwn(normalizedPatch, "canonicalPath");
 
-  const publicPathWasProvided =
-    hasOwn(normalizedPatch, "publicPath");
+  const publicPathWasProvided = hasOwn(normalizedPatch, "publicPath");
 
-  if (
-    !hasOwn(normalizedPatch, "route") &&
-    hasOwn(normalizedPatch, "canonicalPath")
-  ) {
-    normalizedPatch.route =
-      normalizedPatch.canonicalPath;
+  if (!hasOwn(normalizedPatch, "route") && hasOwn(normalizedPatch, "canonicalPath")) {
+    normalizedPatch.route = normalizedPatch.canonicalPath;
   }
 
   if (routeWasProvided) {
-    const nextRoute =
-      safeCanonicalPath(
-        normalizedPatch.route ||
-          normalizedPatch.canonicalPath,
-        state.route || DEFAULT_ROUTE
-      );
+    const nextRoute = safeCanonicalPath(
+      normalizedPatch.route || normalizedPatch.canonicalPath,
+      state.route || DEFAULT_ROUTE
+    );
 
-    if (
-      nextRoute !== state.route &&
-      !hasOwn(normalizedPatch, "lastRoute")
-    ) {
-      normalizedPatch.lastRoute =
-        state.route || null;
+    if (nextRoute !== state.route && !hasOwn(normalizedPatch, "lastRoute")) {
+      normalizedPatch.lastRoute = state.route || null;
     }
 
-    normalizedPatch.route =
-      nextRoute;
-
-    normalizedPatch.canonicalPath =
-      nextRoute;
+    normalizedPatch.route = nextRoute;
+    normalizedPatch.canonicalPath = nextRoute;
   }
 
   if (publicPathWasProvided) {
-    const nextPublicPath =
-      safePublicPath(
-        normalizedPatch.publicPath,
-        state.publicPath ||
-          state.route ||
-          DEFAULT_ROUTE
-      );
+    const nextPublicPath = safePublicPath(
+      normalizedPatch.publicPath,
+      state.publicPath || state.route || DEFAULT_ROUTE
+    );
 
-    if (
-      nextPublicPath !== state.publicPath &&
-      !hasOwn(normalizedPatch, "lastPublicPath")
-    ) {
-      normalizedPatch.lastPublicPath =
-        state.publicPath || null;
+    if (nextPublicPath !== state.publicPath && !hasOwn(normalizedPatch, "lastPublicPath")) {
+      normalizedPatch.lastPublicPath = state.publicPath || null;
     }
 
-    normalizedPatch.publicPath =
-      nextPublicPath;
+    normalizedPatch.publicPath = nextPublicPath;
   }
 
   if (hasOwn(normalizedPatch, "lastRoute")) {
-    normalizedPatch.lastRoute =
-      normalizedPatch.lastRoute
-        ? safeCanonicalPath(
-            normalizedPatch.lastRoute,
-            DEFAULT_ROUTE
-          )
-        : null;
+    normalizedPatch.lastRoute = normalizedPatch.lastRoute
+      ? safeCanonicalPath(normalizedPatch.lastRoute, DEFAULT_ROUTE)
+      : null;
   }
 
   if (hasOwn(normalizedPatch, "lastPublicPath")) {
-    normalizedPatch.lastPublicPath =
-      normalizedPatch.lastPublicPath
-        ? safePublicPath(
-            normalizedPatch.lastPublicPath,
-            DEFAULT_ROUTE
-          )
-        : null;
+    normalizedPatch.lastPublicPath = normalizedPatch.lastPublicPath
+      ? safePublicPath(normalizedPatch.lastPublicPath, DEFAULT_ROUTE)
+      : null;
   }
 
-  if (
-    routeWasProvided &&
-    !publicPathWasProvided
-  ) {
-    const currentPublicCanonical =
-      state.publicPath
-        ? safeCanonicalPath(
-            state.publicPath,
-            state.route || DEFAULT_ROUTE
-          )
-        : "";
+  if (routeWasProvided && !publicPathWasProvided) {
+    const currentPublicCanonical = state.publicPath
+      ? safeCanonicalPath(state.publicPath, state.route || DEFAULT_ROUTE)
+      : "";
 
-    const shouldPreserveCurrentPublic =
-      Boolean(
-        state.publicPath &&
-          currentPublicCanonical === normalizedPatch.route
-      );
+    const shouldPreserveCurrentPublic = Boolean(
+      state.publicPath &&
+        currentPublicCanonical === normalizedPatch.route
+    );
 
-    normalizedPatch.publicPath =
-      shouldPreserveCurrentPublic
-        ? safePublicPath(
-            state.publicPath,
-            normalizedPatch.route
-          )
-        : safePublicPath(
-            normalizedPatch.route,
-            normalizedPatch.route
-          );
+    normalizedPatch.publicPath = shouldPreserveCurrentPublic
+      ? safePublicPath(state.publicPath, normalizedPatch.route)
+      : safePublicPath(normalizedPatch.route, normalizedPatch.route);
   }
 
-  if (
-    publicPathWasProvided &&
-    !routeWasProvided
-  ) {
-    normalizedPatch.route =
-      safeCanonicalPath(
-        normalizedPatch.publicPath,
-        state.route || DEFAULT_ROUTE
-      );
-
-    normalizedPatch.canonicalPath =
-      normalizedPatch.route;
+  if (publicPathWasProvided && !routeWasProvided) {
+    normalizedPatch.route = safeCanonicalPath(normalizedPatch.publicPath, state.route || DEFAULT_ROUTE);
+    normalizedPatch.canonicalPath = normalizedPatch.route;
   }
 
   if (!normalizedPatch.route && !state.route) {
-    normalizedPatch.route =
-      DEFAULT_ROUTE;
-
-    normalizedPatch.canonicalPath =
-      DEFAULT_ROUTE;
+    normalizedPatch.route = DEFAULT_ROUTE;
+    normalizedPatch.canonicalPath = DEFAULT_ROUTE;
   }
 
   if (!normalizedPatch.publicPath && !state.publicPath) {
-    normalizedPatch.publicPath =
-      safePublicPath(
-        normalizedPatch.route ||
-          state.route ||
-          DEFAULT_ROUTE,
-        DEFAULT_ROUTE
-      );
+    normalizedPatch.publicPath = safePublicPath(
+      normalizedPatch.route || state.route || DEFAULT_ROUTE,
+      DEFAULT_ROUTE
+    );
   }
 
   return normalizedPatch;
@@ -2340,13 +1674,9 @@ function normalizeBootPatch(normalizedPatch) {
     "bootResetConfirmInitialPublicPath",
   ]) {
     if (hasOwn(normalizedPatch, key)) {
-      normalizedPatch[key] =
-        normalizedPatch[key]
-          ? safePublicPath(
-              normalizedPatch[key],
-              DEFAULT_ROUTE
-            )
-          : "";
+      normalizedPatch[key] = normalizedPatch[key]
+        ? safePublicPath(normalizedPatch[key], DEFAULT_ROUTE)
+        : "";
     }
   }
 
@@ -2357,11 +1687,7 @@ function normalizeBootPatch(normalizedPatch) {
     "bootResetConfirmInitialUrl",
   ]) {
     if (hasOwn(normalizedPatch, key)) {
-      normalizedPatch[key] =
-        safeText(
-          normalizedPatch[key],
-          ""
-        );
+      normalizedPatch[key] = safeText(normalizedPatch[key], "");
     }
   }
 
@@ -2374,88 +1700,24 @@ function normalizeBootPatch(normalizedPatch) {
     "bootHasProtectedToken",
   ]) {
     if (hasOwn(normalizedPatch, key)) {
-      normalizedPatch[key] =
-        Boolean(
-          normalizedPatch[key]
-        );
+      normalizedPatch[key] = Boolean(normalizedPatch[key]);
     }
   }
 
-  if (
-    hasOwn(normalizedPatch, "bootHasActivationToken") ||
-    hasOwn(normalizedPatch, "bootHasResetToken")
-  ) {
-    normalizedPatch.bootHasProtectedToken =
-      Boolean(
-        normalizedPatch.bootHasProtectedToken ||
-          normalizedPatch.bootHasActivationToken ||
-          normalizedPatch.bootHasResetToken
-      );
+  if (hasOwn(normalizedPatch, "bootHasActivationToken") || hasOwn(normalizedPatch, "bootHasResetToken")) {
+    normalizedPatch.bootHasProtectedToken = Boolean(
+      normalizedPatch.bootHasProtectedToken ||
+        normalizedPatch.bootHasActivationToken ||
+        normalizedPatch.bootHasResetToken
+    );
   }
 
-  if (
-    hasOwn(normalizedPatch, "bootIsActivation") ||
-    hasOwn(normalizedPatch, "bootIsResetConfirm")
-  ) {
-    normalizedPatch.bootIsPublicTokenRoute =
-      Boolean(
-        normalizedPatch.bootIsPublicTokenRoute ||
-          normalizedPatch.bootIsActivation ||
-          normalizedPatch.bootIsResetConfirm
-      );
-  }
-
-  return normalizedPatch;
-}
-
-function normalizePrimitivePatch(normalizedPatch) {
-  if (hasOwn(normalizedPatch, "theme")) {
-    normalizedPatch.theme =
-      normalizeTheme(
-        normalizedPatch.theme
-      );
-  }
-
-  if (hasOwn(normalizedPatch, "themeMode")) {
-    normalizedPatch.themeMode =
-      normalizeThemeMode(
-        normalizedPatch.themeMode
-      ) || null;
-  }
-
-  if (hasOwn(normalizedPatch, "lang")) {
-    normalizedPatch.lang =
-      normalizeLang(
-        normalizedPatch.lang
-      );
-  }
-
-  for (const key of BOOLEAN_KEYS) {
-    if (hasOwn(normalizedPatch, key)) {
-      normalizedPatch[key] =
-        Boolean(
-          normalizedPatch[key]
-        );
-    }
-  }
-
-  for (const key of NULLABLE_STRING_KEYS) {
-    if (hasOwn(normalizedPatch, key)) {
-      normalizedPatch[key] =
-        normalizedPatch[key] === null
-          ? null
-          : safeText(
-              normalizedPatch[key],
-              ""
-            ) || null;
-    }
-  }
-
-  if (hasOwn(normalizedPatch, "roles")) {
-    normalizedPatch.roles =
-      normalizeRoleList(
-        normalizedPatch.roles
-      );
+  if (hasOwn(normalizedPatch, "bootIsActivation") || hasOwn(normalizedPatch, "bootIsResetConfirm")) {
+    normalizedPatch.bootIsPublicTokenRoute = Boolean(
+      normalizedPatch.bootIsPublicTokenRoute ||
+        normalizedPatch.bootIsActivation ||
+        normalizedPatch.bootIsResetConfirm
+    );
   }
 
   return normalizedPatch;
@@ -2463,30 +1725,94 @@ function normalizePrimitivePatch(normalizedPatch) {
 
 function normalizeNetworkPatch(normalizedPatch) {
   if (hasOwn(normalizedPatch, "online")) {
-    Object.assign(
-      normalizedPatch,
-      resolveNetworkPatchFromOnline(
-        normalizedPatch.online
-      )
-    );
+    Object.assign(normalizedPatch, resolveNetworkPatchFromOnline(normalizedPatch.online));
   }
 
   if (hasOwn(normalizedPatch, "offline")) {
-    Object.assign(
-      normalizedPatch,
-      resolveNetworkPatchFromOffline(
-        normalizedPatch.offline
-      )
-    );
+    Object.assign(normalizedPatch, resolveNetworkPatchFromOffline(normalizedPatch.offline));
   }
 
   if (hasOwn(normalizedPatch, "networkStatus")) {
-    Object.assign(
-      normalizedPatch,
-      resolveNetworkPatchFromStatus(
-        normalizedPatch.networkStatus
-      )
-    );
+    Object.assign(normalizedPatch, resolveNetworkPatchFromStatus(normalizedPatch.networkStatus));
+  }
+
+  return normalizedPatch;
+}
+
+function normalizePrimitivePatch(normalizedPatch) {
+  if (hasOwn(normalizedPatch, "theme")) {
+    normalizedPatch.theme = normalizeTheme(normalizedPatch.theme);
+  }
+
+  if (hasOwn(normalizedPatch, "themeMode")) {
+    normalizedPatch.themeMode = normalizeThemeMode(normalizedPatch.themeMode) || null;
+  }
+
+  if (hasOwn(normalizedPatch, "lang")) {
+    normalizedPatch.lang = normalizeLang(normalizedPatch.lang);
+  }
+
+  for (const key of BOOLEAN_KEYS) {
+    if (hasOwn(normalizedPatch, key)) {
+      normalizedPatch[key] = Boolean(normalizedPatch[key]);
+    }
+  }
+
+  for (const key of NULLABLE_STRING_KEYS) {
+    if (hasOwn(normalizedPatch, key)) {
+      normalizedPatch[key] = normalizedPatch[key] === null
+        ? null
+        : safeText(normalizedPatch[key], "") || null;
+    }
+  }
+
+  for (const key of NUMERIC_KEYS) {
+    if (hasOwn(normalizedPatch, key)) {
+      const normalizedNumber = safeNumber(normalizedPatch[key], 0);
+      normalizedPatch[key] = key === "requestPending" ? Math.max(0, normalizedNumber) : normalizedNumber;
+    }
+  }
+
+  if (hasOwn(normalizedPatch, "roles")) {
+    normalizedPatch.roles = normalizeRoleList(normalizedPatch.roles);
+  }
+
+  if (hasOwn(normalizedPatch, "role")) {
+    normalizedPatch.role = normalizeRole(normalizedPatch.role);
+    normalizedPatch.rol = normalizedPatch.role;
+    normalizedPatch.userRole = normalizedPatch.role;
+  }
+
+  if (hasOwn(normalizedPatch, "rol")) {
+    normalizedPatch.role = normalizeRole(normalizedPatch.rol);
+    normalizedPatch.rol = normalizedPatch.role;
+    normalizedPatch.userRole = normalizedPatch.role;
+  }
+
+  if (hasOwn(normalizedPatch, "userRole")) {
+    normalizedPatch.role = normalizeRole(normalizedPatch.userRole);
+    normalizedPatch.rol = normalizedPatch.role;
+    normalizedPatch.userRole = normalizedPatch.role;
+  }
+
+  return normalizedPatch;
+}
+
+function normalizeShellPatch(normalizedPatch) {
+  if (hasOwn(normalizedPatch, "shellHidden") && !hasOwn(normalizedPatch, "shellVisible")) {
+    normalizedPatch.shellVisible = !Boolean(normalizedPatch.shellHidden);
+  }
+
+  if (hasOwn(normalizedPatch, "shellVisible") && !hasOwn(normalizedPatch, "shellHidden")) {
+    normalizedPatch.shellHidden = !Boolean(normalizedPatch.shellVisible);
+  }
+
+  if (hasOwn(normalizedPatch, "appShellVisible") && !hasOwn(normalizedPatch, "chromeVisible")) {
+    normalizedPatch.chromeVisible = Boolean(normalizedPatch.appShellVisible);
+  }
+
+  if (hasOwn(normalizedPatch, "chromeVisible") && !hasOwn(normalizedPatch, "appShellVisible")) {
+    normalizedPatch.appShellVisible = Boolean(normalizedPatch.chromeVisible);
   }
 
   return normalizedPatch;
@@ -2494,40 +1820,20 @@ function normalizeNetworkPatch(normalizedPatch) {
 
 function normalizeErrorPatch(normalizedPatch) {
   if (hasOwn(normalizedPatch, "error")) {
-    normalizedPatch.error =
-      normalizeError(
-        normalizedPatch.error
-      );
-
-    normalizedPatch.lastError =
-      normalizedPatch.error;
-
-    normalizedPatch.hasError =
-      Boolean(normalizedPatch.error);
+    normalizedPatch.error = normalizeError(normalizedPatch.error);
+    normalizedPatch.lastError = normalizedPatch.error;
+    normalizedPatch.hasError = Boolean(normalizedPatch.error);
   }
 
   if (hasOwn(normalizedPatch, "lastError")) {
-    normalizedPatch.lastError =
-      normalizeError(
-        normalizedPatch.lastError
-      );
-
-    normalizedPatch.error =
-      normalizedPatch.lastError;
-
-    normalizedPatch.hasError =
-      Boolean(normalizedPatch.lastError);
+    normalizedPatch.lastError = normalizeError(normalizedPatch.lastError);
+    normalizedPatch.error = normalizedPatch.lastError;
+    normalizedPatch.hasError = Boolean(normalizedPatch.lastError);
   }
 
-  if (
-    hasOwn(normalizedPatch, "hasError") &&
-    normalizedPatch.hasError === false
-  ) {
-    normalizedPatch.error =
-      null;
-
-    normalizedPatch.lastError =
-      null;
+  if (hasOwn(normalizedPatch, "hasError") && normalizedPatch.hasError === false) {
+    normalizedPatch.error = null;
+    normalizedPatch.lastError = null;
   }
 
   return normalizedPatch;
@@ -2535,42 +1841,20 @@ function normalizeErrorPatch(normalizedPatch) {
 
 function normalizeRequestPatch(normalizedPatch) {
   if (hasOwn(normalizedPatch, "lastRequestUrl")) {
-    normalizedPatch.lastRequestUrl =
-      safeText(
-        normalizedPatch.lastRequestUrl,
-        ""
-      ) || null;
+    normalizedPatch.lastRequestUrl = safeText(normalizedPatch.lastRequestUrl, "") || null;
   }
 
   if (hasOwn(normalizedPatch, "lastRequestMethod")) {
-    normalizedPatch.lastRequestMethod =
-      normalizeHttpMethod(
-        normalizedPatch.lastRequestMethod
-      );
+    normalizedPatch.lastRequestMethod = normalizeHttpMethod(normalizedPatch.lastRequestMethod);
   }
 
   if (hasOwn(normalizedPatch, "lastRequestStatus")) {
-    const status =
-      safeNumber(
-        normalizedPatch.lastRequestStatus,
-        0
-      );
-
-    normalizedPatch.lastRequestStatus =
-      status > 0
-        ? status
-        : null;
+    const status = safeNumber(normalizedPatch.lastRequestStatus, 0);
+    normalizedPatch.lastRequestStatus = status > 0 ? status : null;
   }
 
   if (hasOwn(normalizedPatch, "requestPending")) {
-    normalizedPatch.requestPending =
-      Math.max(
-        0,
-        safeNumber(
-          normalizedPatch.requestPending,
-          0
-        )
-      );
+    normalizedPatch.requestPending = Math.max(0, safeNumber(normalizedPatch.requestPending, 0));
   }
 
   return normalizedPatch;
@@ -2595,10 +1879,41 @@ function shouldRecomputeAuthFromPatch(normalizedPatch) {
   );
 }
 
+function clearStrictAuthFields(normalizedPatch) {
+  normalizedPatch.authenticated = false;
+  normalizedPatch.hasToken = false;
+
+  normalizedPatch.user = null;
+  normalizedPatch.currentUser = null;
+  normalizedPatch.authUser = null;
+  normalizedPatch.sessionUser = null;
+
+  normalizedPatch.token = null;
+  normalizedPatch.accessToken = null;
+  normalizedPatch.access_token = null;
+
+  normalizedPatch.role = null;
+  normalizedPatch.rol = null;
+  normalizedPatch.userRole = null;
+  normalizedPatch.roles = [];
+  normalizedPatch.username = null;
+
+  normalizedPatch.isAdmin = false;
+  normalizedPatch.isSupport = false;
+  normalizedPatch.isManager = false;
+  normalizedPatch.isClient = false;
+
+  normalizedPatch.currentResolvedUsername = null;
+  normalizedPatch.resolvedUsername = null;
+
+  return normalizedPatch;
+}
+
 function applyStrictAuthNormalization(state, normalizedPatch, options = {}) {
   const forceUnauthenticated =
     options?.forceUnauthenticated === true ||
-    normalizedPatch.authenticated === false;
+    normalizedPatch.authenticated === false ||
+    normalizedPatch.hasToken === false;
 
   const shouldRecomputeAuth =
     shouldRecomputeAuthFromPatch(normalizedPatch) ||
@@ -2608,198 +1923,57 @@ function applyStrictAuthNormalization(state, normalizedPatch, options = {}) {
     return normalizedPatch;
   }
 
-  const authPatch =
-    forceUnauthenticated
-      ? {
-          authenticated:
-            false,
+  if (forceUnauthenticated) {
+    return clearStrictAuthFields(normalizedPatch);
+  }
 
-          hasToken:
-            false,
+  const authPatch = deriveAuthPatch({
+    state,
+    patch: normalizedPatch,
+  });
 
-          role:
-            null,
-
-          rol:
-            null,
-
-          userRole:
-            null,
-
-          roles:
-            [],
-
-          username:
-            null,
-
-          isAdmin:
-            false,
-
-          isSupport:
-            false,
-
-          isManager:
-            false,
-
-          isClient:
-            false,
-        }
-      : deriveAuthPatch({
-          state,
-          patch:
-            normalizedPatch,
-        });
-
-  Object.assign(
-    normalizedPatch,
-    authPatch
-  );
+  Object.assign(normalizedPatch, authPatch);
 
   if (!authPatch.authenticated) {
-    normalizedPatch.user =
-      null;
-
-    normalizedPatch.currentUser =
-      null;
-
-    normalizedPatch.authUser =
-      null;
-
-    normalizedPatch.sessionUser =
-      null;
-
-    normalizedPatch.role =
-      null;
-
-    normalizedPatch.rol =
-      null;
-
-    normalizedPatch.userRole =
-      null;
-
-    normalizedPatch.roles =
-      [];
-
-    normalizedPatch.username =
-      null;
-
-    normalizedPatch.currentResolvedUsername =
-      null;
-
-    normalizedPatch.resolvedUsername =
-      null;
-
-    if (
-      forceUnauthenticated ||
-      !safeHasValidToken(normalizedPatch.token ?? state.token)
-    ) {
-      normalizedPatch.token =
-        null;
-
-      normalizedPatch.accessToken =
-        null;
-
-      normalizedPatch.access_token =
-        null;
-
-      normalizedPatch.hasToken =
-        false;
-    }
+    clearStrictAuthFields(normalizedPatch);
   }
 
   return normalizedPatch;
 }
 
 function normalizeStatePatch(state, patch = {}, options = {}) {
-  const normalizedPatch =
-    sanitizePatchInput(patch);
+  const normalizedPatch = sanitizePatchInput(patch);
 
-  normalizeTokenAliases(
-    normalizedPatch
-  );
+  normalizeSessionAliases(normalizedPatch);
+  normalizeTokenAliases(normalizedPatch);
+  normalizeRefreshTokenAliases(normalizedPatch);
+  normalizeTempTokenAliases(normalizedPatch);
+  normalizeUserAliases(normalizedPatch);
 
-  normalizeRefreshTokenAliases(
-    normalizedPatch
-  );
+  normalizeRoutePatch(state, normalizedPatch);
+  normalizeBootPatch(normalizedPatch);
 
-  normalizeTempTokenAliases(
-    normalizedPatch
-  );
+  normalizeNetworkPatch(normalizedPatch);
+  normalizePrimitivePatch(normalizedPatch);
+  normalizeShellPatch(normalizedPatch);
+  normalizeErrorPatch(normalizedPatch);
+  normalizeRequestPatch(normalizedPatch);
 
-  normalizeUserAliases(
-    normalizedPatch
-  );
+  applyStrictAuthNormalization(state, normalizedPatch, options);
 
-  normalizeSessionAliases(
-    normalizedPatch
-  );
+  const nextUserForUsername = hasOwn(normalizedPatch, "user") ? normalizedPatch.user : state.user;
+  const nextPublicPathForUsername = hasOwn(normalizedPatch, "publicPath") ? normalizedPatch.publicPath : state.publicPath;
+  const nextAuthenticated = hasOwn(normalizedPatch, "authenticated") ? normalizedPatch.authenticated : state.authenticated;
 
-  normalizeRoutePatch(
-    state,
-    normalizedPatch
-  );
+  const resolvedUsername = resolveCurrentResolvedUsername({
+    user: nextUserForUsername,
+    publicPath: nextPublicPathForUsername,
+    previous: state.currentResolvedUsername,
+    authenticated: nextAuthenticated,
+  });
 
-  normalizeBootPatch(
-    normalizedPatch
-  );
-
-  normalizePrimitivePatch(
-    normalizedPatch
-  );
-
-  normalizeNetworkPatch(
-    normalizedPatch
-  );
-
-  normalizeErrorPatch(
-    normalizedPatch
-  );
-
-  normalizeRequestPatch(
-    normalizedPatch
-  );
-
-  applyStrictAuthNormalization(
-    state,
-    normalizedPatch,
-    options
-  );
-
-  const nextUserForUsername =
-    hasOwn(normalizedPatch, "user")
-      ? normalizedPatch.user
-      : state.user;
-
-  const nextPublicPathForUsername =
-    hasOwn(normalizedPatch, "publicPath")
-      ? normalizedPatch.publicPath
-      : state.publicPath;
-
-  const nextAuthenticated =
-    hasOwn(normalizedPatch, "authenticated")
-      ? normalizedPatch.authenticated
-      : state.authenticated;
-
-  const resolvedUsername =
-    resolveCurrentResolvedUsername({
-      user:
-        nextUserForUsername,
-
-      publicPath:
-        nextPublicPathForUsername,
-
-      previous:
-        state.currentResolvedUsername,
-
-      authenticated:
-        nextAuthenticated,
-    });
-
-  normalizedPatch.currentResolvedUsername =
-    resolvedUsername;
-
-  normalizedPatch.resolvedUsername =
-    resolvedUsername;
+  normalizedPatch.currentResolvedUsername = resolvedUsername;
+  normalizedPatch.resolvedUsername = resolvedUsername;
 
   return normalizedPatch;
 }
@@ -2809,106 +1983,47 @@ function normalizeStatePatch(state, patch = {}, options = {}) {
 ========================================================= */
 
 export function setStateBase(state, patch = {}, options = {}) {
-  if (
-    !state ||
-    typeof state !== "object"
-  ) {
-    throw new Error(
-      "Core state inválido."
-    );
+  if (!state || typeof state !== "object") {
+    throw new Error("Core state inválido.");
   }
 
-  if (
-    !patch ||
-    typeof patch !== "object" ||
-    Array.isArray(patch)
-  ) {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
     return cloneState(state);
   }
 
-  const opts =
-    isObject(options)
-      ? options
-      : {};
+  const opts = isObject(options) ? options : {};
 
-  const normalizedPatch =
-    normalizeStatePatch(
-      state,
-      patch,
-      opts
-    );
+  const normalizedPatch = normalizeStatePatch(state, patch, opts);
+  const changedKeys = getChangedKeys(state, normalizedPatch);
 
-  const changedKeys =
-    getChangedKeys(
-      state,
-      normalizedPatch
-    );
-
-  /*
-    Si no hay cambios reales, no se toca updatedAt,
-    no se incrementa stateChangeCount y no se emite evento.
-  */
   if (!changedKeys.length) {
     return cloneState(state);
   }
 
-  const previousState =
-    cloneState(state);
+  const previousState = cloneState(state);
 
-  normalizedPatch.updatedAt =
-    safeIsoDate();
+  normalizedPatch.updatedAt = safeIsoDate();
+  normalizedPatch.stateChangeCount = safeNumber(state.stateChangeCount, 0) + 1;
 
-  normalizedPatch.stateChangeCount =
-    safeNumber(
-      state.stateChangeCount,
-      0
-    ) + 1;
+  const finalChangedKeys = compactChangedKeys([
+    ...changedKeys,
+    "updatedAt",
+    "stateChangeCount",
+  ]);
 
-  const finalChangedKeys =
-    compactChangedKeys([
-      ...changedKeys,
-      "updatedAt",
-      "stateChangeCount",
-    ]);
+  Object.assign(state, normalizedPatch);
 
-  Object.assign(
-    state,
-    normalizedPatch
-  );
+  const nextSnapshot = cloneState(state);
 
-  const nextSnapshot =
-    cloneState(state);
-
-  /*
-    AppCore.setState() debe ser el emisor público.
-    Este evento interno queda opt-in para diagnóstico y evita tormentas.
-  */
-  if (
-    opts.emitInternal === true &&
-    opts.silent !== true &&
-    opts.emit !== false
-  ) {
+  if (opts.emitInternal === true && opts.silent !== true && opts.emit !== false) {
     try {
-      opts.events?.emit?.(
-        INTERNAL_STATE_PATCH_EVENT,
-        {
-          state:
-            nextSnapshot,
-
-          patch:
-            clonePatchForEvent(
-              normalizedPatch
-            ),
-
-          previousState,
-
-          changedKeys:
-            finalChangedKeys,
-
-          source:
-            opts.source || "core:state",
-        }
-      );
+      opts.events?.emit?.(INTERNAL_STATE_PATCH_EVENT, {
+        state: nextSnapshot,
+        patch: clonePatchForEvent(normalizedPatch),
+        previousState,
+        changedKeys: finalChangedKeys,
+        source: opts.source || "core:state",
+      });
     } catch {}
   }
 
@@ -2921,18 +2036,10 @@ export function setState({
   patch = {},
   options = {},
 } = {}) {
-  return setStateBase(
-    state,
-    patch,
-    {
-      ...(
-        isObject(options)
-          ? options
-          : {}
-      ),
-      events,
-    }
-  );
+  return setStateBase(state, patch, {
+    ...(isObject(options) ? options : {}),
+    events,
+  });
 }
 
 /* =========================================================
@@ -2940,10 +2047,7 @@ export function setState({
 ========================================================= */
 
 export function getStateDebugSnapshot(state) {
-  const source =
-    state && typeof state === "object"
-      ? state
-      : {};
+  const source = state && typeof state === "object" ? state : {};
 
   const token =
     source.token ||
@@ -2958,338 +2062,123 @@ export function getStateDebugSnapshot(state) {
     source.sessionUser ||
     null;
 
-  const roles =
-    normalizeRoleList(
-      source.roles ||
-        user?.roles ||
-        []
-    );
-
-  const flags =
-    roleFlags(roles);
+  const roles = normalizeRoleList(source.roles || user?.roles || []);
+  const flags = roleFlags(roles);
 
   return {
-    version:
-      source.__version || STATE_VERSION,
+    version: source.__version || STATE_VERSION,
 
-    initialized:
-      Boolean(source.initialized),
+    initialized: Boolean(source.initialized),
+    booting: Boolean(source.booting),
+    ready: Boolean(source.ready),
+    appReady: Boolean(source.appReady),
+    appFatal: Boolean(source.appFatal),
 
-    booting:
-      Boolean(source.booting),
+    coreInitializing: Boolean(source.coreInitializing),
+    coreReady: Boolean(source.coreReady),
+    loading: Boolean(source.loading),
 
-    ready:
-      Boolean(source.ready),
+    bootPhase: source.bootPhase || "",
+    mainPhase: source.mainPhase || "",
+    mainReason: source.mainReason || "",
 
-    appReady:
-      Boolean(source.appReady),
+    coreInitCycle: safeNumber(source.coreInitCycle, 0),
 
-    appFatal:
-      Boolean(source.appFatal),
+    route: safeCanonicalPath(source.route || DEFAULT_ROUTE),
+    canonicalPath: safeCanonicalPath(source.canonicalPath || source.route || DEFAULT_ROUTE),
+    publicPath: safeRedact(safePublicPath(source.publicPath || source.route || DEFAULT_ROUTE)),
 
-    coreInitializing:
-      Boolean(source.coreInitializing),
+    lastRoute: source.lastRoute || null,
+    lastPublicPath: safeRedact(source.lastPublicPath || "") || null,
 
-    coreReady:
-      Boolean(source.coreReady),
+    authenticated: computeAuthenticated(user, token),
+    hasToken: computeAuthenticated(user, token) && safeHasValidToken(token),
+    hasUsableUser: hasUsableUser(user),
 
-    loading:
-      Boolean(source.loading),
-
-    bootPhase:
-      source.bootPhase || "",
-
-    mainPhase:
-      source.mainPhase || "",
-
-    mainReason:
-      source.mainReason || "",
-
-    coreInitCycle:
-      safeNumber(
-        source.coreInitCycle,
-        0
-      ),
-
-    route:
-      safeCanonicalPath(
-        source.route || DEFAULT_ROUTE
-      ),
-
-    canonicalPath:
-      safeCanonicalPath(
-        source.canonicalPath ||
-          source.route ||
-          DEFAULT_ROUTE
-      ),
-
-    publicPath:
-      safeRedact(
-        safePublicPath(
-          source.publicPath ||
-            source.route ||
-            DEFAULT_ROUTE
-        )
-      ),
-
-    lastRoute:
-      source.lastRoute || null,
-
-    lastPublicPath:
-      safeRedact(
-        source.lastPublicPath || ""
-      ) || null,
-
-    authenticated:
-      computeAuthenticated(
-        user,
-        token
-      ),
-
-    hasToken:
-      Boolean(
-        safeHasValidToken(token)
-      ),
-
-    hasUsableUser:
-      hasUsableUser(user),
-
-    role:
-      source.role || null,
-
+    role: source.role || null,
     roles,
 
-    username:
-      source.username || null,
+    username: source.username || null,
+    displayName: safeGetUserDisplayName(user),
+    avatarUrl: safeGetUserAvatarUrl(user),
 
-    displayName:
-      safeGetUserDisplayName(user),
+    currentResolvedUsername: source.currentResolvedUsername || null,
+    resolvedUsername: source.resolvedUsername || null,
 
-    avatarUrl:
-      safeGetUserAvatarUrl(user),
+    isAdmin: Boolean(source.isAdmin || flags.isAdmin),
+    isSupport: Boolean(source.isSupport || flags.isSupport),
+    isManager: Boolean(source.isManager || flags.isManager),
+    isClient: Boolean(source.isClient || flags.isClient),
 
-    currentResolvedUsername:
-      source.currentResolvedUsername || null,
+    lang: source.lang || DEFAULT_LANG,
+    theme: source.theme || DEFAULT_THEME,
+    themeMode: source.themeMode || null,
 
-    resolvedUsername:
-      source.resolvedUsername || null,
+    sidebarOpen: typeof source.sidebarOpen === "boolean" ? source.sidebarOpen : null,
 
-    isAdmin:
-      Boolean(source.isAdmin || flags.isAdmin),
+    shellVisible: typeof source.shellVisible === "boolean" ? source.shellVisible : null,
+    shellHidden: typeof source.shellHidden === "boolean" ? source.shellHidden : null,
+    routeShellHidden: typeof source.routeShellHidden === "boolean" ? source.routeShellHidden : null,
+    chromeVisible: typeof source.chromeVisible === "boolean" ? source.chromeVisible : null,
+    appShellVisible: typeof source.appShellVisible === "boolean" ? source.appShellVisible : null,
+    shellBusy: typeof source.shellBusy === "boolean" ? source.shellBusy : null,
+    authScreen: typeof source.authScreen === "boolean" ? source.authScreen : null,
 
-    isSupport:
-      Boolean(source.isSupport || flags.isSupport),
-
-    isManager:
-      Boolean(source.isManager || flags.isManager),
-
-    isClient:
-      Boolean(source.isClient || flags.isClient),
-
-    lang:
-      source.lang || DEFAULT_LANG,
-
-    theme:
-      source.theme || DEFAULT_THEME,
-
-    themeMode:
-      source.themeMode || null,
-
-    sidebarOpen:
-      typeof source.sidebarOpen === "boolean"
-        ? source.sidebarOpen
-        : null,
-
-    shellVisible:
-      typeof source.shellVisible === "boolean"
-        ? source.shellVisible
-        : null,
-
-    shellHidden:
-      typeof source.shellHidden === "boolean"
-        ? source.shellHidden
-        : null,
-
-    routeShellHidden:
-      typeof source.routeShellHidden === "boolean"
-        ? source.routeShellHidden
-        : null,
-
-    chromeVisible:
-      typeof source.chromeVisible === "boolean"
-        ? source.chromeVisible
-        : null,
-
-    appShellVisible:
-      typeof source.appShellVisible === "boolean"
-        ? source.appShellVisible
-        : null,
-
-    shellBusy:
-      typeof source.shellBusy === "boolean"
-        ? source.shellBusy
-        : null,
-
-    authScreen:
-      typeof source.authScreen === "boolean"
-        ? source.authScreen
-        : null,
-
-    routeMode:
-      source.routeMode || null,
+    routeMode: source.routeMode || null,
 
     session: {
-      hasSession:
-        Boolean(source.session || source.sessionData),
-
-      sessionId:
-        source.sessionId ? "***" : null,
-
-      sessionUserId:
-        source.sessionUserId ? "***" : null,
+      hasSession: Boolean(source.session || source.sessionData),
+      sessionId: source.sessionId ? "***" : null,
+      sessionUserId: source.sessionUserId || null,
     },
 
-    online:
-      source.online ?? null,
+    online: source.online ?? null,
+    offline: source.offline ?? null,
+    networkOnline: source.networkOnline ?? null,
+    networkOffline: source.networkOffline ?? null,
+    networkStatus: source.networkStatus || "",
 
-    offline:
-      source.offline ?? null,
+    hasError: Boolean(source.hasError),
+    error: normalizeError(source.error),
+    lastError: normalizeError(source.lastError),
 
-    networkOnline:
-      source.networkOnline ?? null,
-
-    networkOffline:
-      source.networkOffline ?? null,
-
-    networkStatus:
-      source.networkStatus || "",
-
-    hasError:
-      Boolean(source.hasError),
-
-    error:
-      normalizeError(source.error),
-
-    lastError:
-      normalizeError(source.lastError),
-
-    lastRequestAt:
-      source.lastRequestAt || null,
-
-    lastRequestUrl:
-      safeRedact(
-        source.lastRequestUrl || ""
-      ),
-
-    lastRequestMethod:
-      source.lastRequestMethod || null,
-
-    lastRequestStatus:
-      source.lastRequestStatus || null,
-
-    requestPending:
-      safeNumber(
-        source.requestPending,
-        0
-      ),
+    lastRequestAt: source.lastRequestAt || null,
+    lastRequestUrl: safeRedact(source.lastRequestUrl || ""),
+    lastRequestMethod: source.lastRequestMethod || null,
+    lastRequestStatus: source.lastRequestStatus || null,
+    requestPending: safeNumber(source.requestPending, 0),
 
     boot: {
-      bootInitialUrl:
-        safeRedact(
-          source.bootInitialUrl || ""
-        ),
+      bootInitialUrl: safeRedact(source.bootInitialUrl || ""),
+      bootInitialPath: safeRedact(source.bootInitialPath || ""),
+      bootCanonicalPath: safeRedact(source.bootCanonicalPath || ""),
 
-      bootInitialPath:
-        safeRedact(
-          source.bootInitialPath || ""
-        ),
+      bootProtectedInitialUrl: safeRedact(source.bootProtectedInitialUrl || ""),
+      bootProtectedInitialPath: safeRedact(source.bootProtectedInitialPath || ""),
+      bootProtectedInitialPublicPath: safeRedact(source.bootProtectedInitialPublicPath || ""),
+      bootProtectedRouteKey: source.bootProtectedRouteKey || "",
 
-      bootCanonicalPath:
-        safeRedact(
-          source.bootCanonicalPath || ""
-        ),
+      bootIsPublicTokenRoute: Boolean(source.bootIsPublicTokenRoute),
+      bootHasProtectedToken: Boolean(source.bootHasProtectedToken),
+      bootCapturedAt: source.bootCapturedAt || "",
 
-      bootProtectedInitialUrl:
-        safeRedact(
-          source.bootProtectedInitialUrl || ""
-        ),
+      bootIsActivation: Boolean(source.bootIsActivation),
+      bootHasActivationToken: Boolean(source.bootHasActivationToken),
+      bootActivationInitialUrl: safeRedact(source.bootActivationInitialUrl || ""),
+      bootActivationInitialPath: safeRedact(source.bootActivationInitialPath || ""),
+      bootActivationInitialPublicPath: safeRedact(source.bootActivationInitialPublicPath || ""),
 
-      bootProtectedInitialPath:
-        safeRedact(
-          source.bootProtectedInitialPath || ""
-        ),
-
-      bootProtectedInitialPublicPath:
-        safeRedact(
-          source.bootProtectedInitialPublicPath || ""
-        ),
-
-      bootProtectedRouteKey:
-        source.bootProtectedRouteKey || "",
-
-      bootIsPublicTokenRoute:
-        Boolean(source.bootIsPublicTokenRoute),
-
-      bootHasProtectedToken:
-        Boolean(source.bootHasProtectedToken),
-
-      bootCapturedAt:
-        source.bootCapturedAt || "",
-
-      bootIsActivation:
-        Boolean(source.bootIsActivation),
-
-      bootHasActivationToken:
-        Boolean(source.bootHasActivationToken),
-
-      bootActivationInitialUrl:
-        safeRedact(
-          source.bootActivationInitialUrl || ""
-        ),
-
-      bootActivationInitialPath:
-        safeRedact(
-          source.bootActivationInitialPath || ""
-        ),
-
-      bootActivationInitialPublicPath:
-        safeRedact(
-          source.bootActivationInitialPublicPath || ""
-        ),
-
-      bootIsResetConfirm:
-        Boolean(source.bootIsResetConfirm),
-
-      bootHasResetToken:
-        Boolean(source.bootHasResetToken),
-
-      bootResetConfirmInitialUrl:
-        safeRedact(
-          source.bootResetConfirmInitialUrl || ""
-        ),
-
-      bootResetConfirmInitialPath:
-        safeRedact(
-          source.bootResetConfirmInitialPath || ""
-        ),
-
-      bootResetConfirmInitialPublicPath:
-        safeRedact(
-          source.bootResetConfirmInitialPublicPath || ""
-        ),
+      bootIsResetConfirm: Boolean(source.bootIsResetConfirm),
+      bootHasResetToken: Boolean(source.bootHasResetToken),
+      bootResetConfirmInitialUrl: safeRedact(source.bootResetConfirmInitialUrl || ""),
+      bootResetConfirmInitialPath: safeRedact(source.bootResetConfirmInitialPath || ""),
+      bootResetConfirmInitialPublicPath: safeRedact(source.bootResetConfirmInitialPublicPath || ""),
     },
 
-    stateChangeCount:
-      safeNumber(
-        source.stateChangeCount,
-        0
-      ),
+    stateChangeCount: safeNumber(source.stateChangeCount, 0),
 
-    createdAt:
-      source.createdAt || "",
-
-    updatedAt:
-      source.updatedAt || "",
+    createdAt: source.createdAt || "",
+    updatedAt: source.updatedAt || "",
   };
 }
 

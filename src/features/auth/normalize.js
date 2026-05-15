@@ -2,32 +2,15 @@
    Onion SPA - Auth Normalize
    Archivo: src/features/auth/normalize.js
 
-   AUTH NORMALIZER · FINAL EXTREME PRO SYSTEM · 15/10
+   AUTH NORMALIZER · SIMPLE · BACKEND ALIGNED · NO GHOST AUTH
 
-   RESPONSABILIDADES:
-   - normalizar usuarios heterogéneos del backend
-   - normalizar payload de sesión
-   - extraer access token / refresh token / temp token
-   - validar respuestas de login / refresh / me
-   - detectar 2FA/MFA con variantes comunes
-   - normalizar avatar para sidebar/topbar
-   - preservar role / rol / roles / permissions / claims / flags
-   - evitar sesión fantasma sin token + user usable
-   - evitar tratar envelopes auth como usuarios
-   - soportar respuestas nested:
-     { ok, data, payload, result, body, response, session, auth, user, me, account }
-
-   HARDENING:
-   - admin / superadmin / administrator / owner / root => admin
-   - support / soporte / agent / technician / tecnico => support
-   - manager / gestor / lead / supervisor => manager
-   - client / cliente / user / usuario => client
-   - no fuerza darkMode:false si backend no lo envió explícitamente
-   - tokens no se truncan: se invalidan si exceden límite
-   - permisos como array, string u objeto boolean-map
-   - 2FA exige tempToken/challengeToken usable salvo override explícito
-   - snapshots sin tokens reales
-   - raw user saneado sin secretos
+   Contrato:
+   - Normaliza user/session/tokens desde respuestas heterogéneas.
+   - Solo roles canónicos del proyecto: admin / user.
+   - No marca authenticated sin token usable + user usable.
+   - 2FA/MFA exige tempToken salvo override explícito.
+   - No trata envelopes auth como usuarios.
+   - No trunca tokens: si exceden límite, se invalidan.
 ========================================================= */
 
 import {
@@ -43,341 +26,353 @@ import {
 } from "./constants.js";
 
 /* =========================================================
-   CONSTANTS
+   META / CONSTANTS
 ========================================================= */
 
-export const AUTH_NORMALIZE_VERSION =
-  "15.0.0";
+export const AUTH_NORMALIZE_VERSION = "17.0.0-simple-clean";
 
-const DEFAULT_TOKEN_MAX_LENGTH =
-  8192;
+const DEFAULT_TOKEN_MAX_LENGTH = 8192;
+const DEFAULT_SESSION_VALUE_MAX_LENGTH = 200;
+const RAW_MAX_DEPTH = 5;
+const RAW_MAX_KEYS = 140;
 
-const DEFAULT_SESSION_VALUE_MAX_LENGTH =
-  200;
+const ADMIN_ALIASES = new Set([
+  "admin",
+  "administrator",
+  "administrador",
+  "superadmin",
+  "super_admin",
+  "super_administrador",
+  "owner",
+  "root",
+]);
 
-const DEFAULT_RAW_SANITIZE_DEPTH =
-  5;
+const USER_ALIASES = new Set([
+  "user",
+  "usuario",
+  "client",
+  "cliente",
+  "customer",
+  "support",
+  "soporte",
+  "staff",
+  "agent",
+  "agente",
+  "helpdesk",
+  "operator",
+  "operador",
+  "tecnico",
+  "técnico",
+  "technician",
+  "technical",
+  "manager",
+  "gestor",
+  "gerente",
+  "lead",
+  "supervisor",
+]);
 
-const DEFAULT_RAW_SANITIZE_KEYS =
-  160;
+const FAILURE_CODES = new Set([
+  ...(Array.isArray(AUTH_FAILURE_CODE_LIST) ? AUTH_FAILURE_CODE_LIST : []),
 
-const ADMIN_ROLE_KEYS =
-  new Set([
-    "admin",
-    "administrator",
-    "administrador",
-    "superadmin",
-    "super_admin",
-    "super-administrador",
-    "super_administrador",
-    "owner",
-    "root",
-  ]);
+  "INVALID_CREDENTIALS",
+  "MISSING_CREDENTIALS",
+  "ACCOUNT_TEMPORARILY_LOCKED",
+  "ACCOUNT_LOCKED",
+  "ACCOUNT_DISABLED",
+  "USER_DISABLED",
+  "USER_NOT_AVAILABLE",
+  "USER_NOT_FOUND",
+  "UNAUTHORIZED",
+  "FORBIDDEN",
+  "TOKEN_INVALID",
+  "INVALID_TOKEN",
+  "TOKEN_EXPIRED",
+  "SESSION_EXPIRED",
+  "SESSION_REVOKED",
+  "SESSION_NOT_FOUND",
+  "INVALID_LOGIN_SESSION",
+  "LOGIN_FAILED",
+  "AUTH_FAILED",
+  "AUTH_RESTORE_FAILED",
+  "REFRESH_CONTEXT_MISSING",
+  "REFRESH_INVALID_SESSION",
+  "REFRESH_EMPTY_RESPONSE",
+  "REFRESH_USER_WITHOUT_TOKEN",
+  "REFRESH_UNUSABLE_RESPONSE",
+  "ME_INVALID_SESSION",
+  "ME_USER_MISSING",
+  "MISSING_2FA_TEMP_TOKEN",
+  "TOKEN_VERSION_MISMATCH",
+]);
 
-const SUPPORT_ROLE_KEYS =
-  new Set([
-    "support",
-    "soporte",
-    "agent",
-    "agente",
-    "helpdesk",
-    "operator",
-    "operador",
-    "tecnico",
-    "técnico",
-    "technician",
-    "technical",
-    "staff",
-  ]);
+const FAILURE_STATUSES = new Set([
+  "error",
+  "failed",
+  "failure",
+  "invalid",
+  "unauthorized",
+  "forbidden",
+  "expired",
+  "session_expired",
+  "token_expired",
+  "invalid_token",
+  "auth_failed",
+  "login_failed",
+  "not_authenticated",
+  "disabled",
+  "blocked",
+  "locked",
+  "revoked",
+]);
 
-const MANAGER_ROLE_KEYS =
-  new Set([
-    "manager",
-    "gestor",
-    "gerente",
-    "lead",
-    "team_lead",
-    "team-lead",
-    "supervisor",
-    "responsable",
-  ]);
+const SUCCESS_STATUSES = new Set([
+  ...(Array.isArray(AUTH_SUCCESS_STATUS_LIST) ? AUTH_SUCCESS_STATUS_LIST : []),
 
-const CLIENT_ROLE_KEYS =
-  new Set([
-    "client",
-    "cliente",
-    "customer",
-    "usuario",
-    "user",
-  ]);
+  "ok",
+  "success",
+  "successful",
+  "authenticated",
+  "active",
+  "valid",
+  "token_only",
+  "token-only",
+  "user_only",
+  "user-only",
+  "session",
+  "refreshed",
+]);
 
-const AUTH_FAILURE_CODES =
-  new Set([
-    ...(Array.isArray(AUTH_FAILURE_CODE_LIST)
-      ? AUTH_FAILURE_CODE_LIST
-      : []),
+const TWO_FACTOR_STATUSES = new Set([
+  ...(Array.isArray(AUTH_2FA_STATUS_LIST) ? AUTH_2FA_STATUS_LIST : []),
 
-    "INVALID_CREDENTIALS",
-    "MISSING_CREDENTIALS",
-    "ACCOUNT_TEMPORARILY_LOCKED",
-    "ACCOUNT_LOCKED",
-    "ACCOUNT_DISABLED",
-    "USER_DISABLED",
-    "USER_NOT_AVAILABLE",
-    "USER_NOT_FOUND",
-    "UNAUTHORIZED",
-    "FORBIDDEN",
-    "TOKEN_INVALID",
-    "INVALID_TOKEN",
-    "TOKEN_EXPIRED",
-    "SESSION_EXPIRED",
-    "SESSION_REVOKED",
-    "SESSION_NOT_FOUND",
-    "INVALID_LOGIN_SESSION",
-    "LOGIN_FAILED",
-    "AUTH_FAILED",
-    "AUTH_RESTORE_FAILED",
-    "REFRESH_CONTEXT_MISSING",
-    "REFRESH_INVALID_SESSION",
-    "REFRESH_EMPTY_RESPONSE",
-    "REFRESH_USER_WITHOUT_TOKEN",
-    "REFRESH_UNUSABLE_RESPONSE",
-    "ME_INVALID_SESSION",
-    "ME_USER_MISSING",
-    "MISSING_2FA_TEMP_TOKEN",
-    "BAD_CREDENTIALS",
-    "CREDENTIALS_INVALID",
-    "TOKEN_VERSION_MISMATCH",
-  ]);
+  "2fa_required",
+  "mfa_required",
+  "totp_required",
+  "otp_required",
+  "two_factor_required",
+  "verification_required",
+  "challenge_required",
+]);
 
-const AUTH_FAILURE_STATUS_KEYS =
-  new Set([
-    "error",
-    "failed",
-    "failure",
-    "invalid",
-    "unauthorized",
-    "forbidden",
-    "expired",
-    "session_expired",
-    "token_expired",
-    "invalid_token",
-    "auth_failed",
-    "login_failed",
-    "not_authenticated",
-    "disabled",
-    "blocked",
-    "locked",
-    "revoked",
-  ]);
+const TOKEN_KEYS = Object.freeze([
+  "token",
+  "accessToken",
+  "access_token",
+  "authToken",
+  "auth_token",
+  "jwt",
+  "idToken",
+  "id_token",
+  "bearer",
+]);
 
-const AUTH_SUCCESS_STATUS_KEYS =
-  new Set([
-    ...(Array.isArray(AUTH_SUCCESS_STATUS_LIST)
-      ? AUTH_SUCCESS_STATUS_LIST
-      : []),
+const REFRESH_TOKEN_KEYS = Object.freeze([
+  "refreshToken",
+  "refresh_token",
+]);
 
-    "ok",
-    "success",
-    "successful",
-    "authenticated",
-    "active",
-    "valid",
-    "token_only",
-    "token-only",
-    "user_only",
-    "user-only",
-    "session",
-    "refreshed",
-  ]);
+const TEMP_TOKEN_KEYS = Object.freeze([
+  "tempToken",
+  "temp_token",
+  "temporaryToken",
+  "temporary_token",
+  "challengeToken",
+  "challenge_token",
+  "twoFactorToken",
+  "two_factor_token",
+  "mfaToken",
+  "mfa_token",
+  "otpToken",
+  "otp_token",
+]);
 
-const TWO_FACTOR_STATUS_KEYS =
-  new Set([
-    ...(Array.isArray(AUTH_2FA_STATUS_LIST)
-      ? AUTH_2FA_STATUS_LIST
-      : []),
+const USER_KEYS = Object.freeze([
+  "user",
+  "usuario",
+  "me",
+  "account",
+  "profile",
+  "currentUser",
+  "current_user",
+]);
 
-    "2fa_required",
-    "mfa_required",
-    "totp_required",
-    "otp_required",
-    "two_factor_required",
-    "verification_required",
-    "challenge_required",
-  ]);
+const SESSION_KEYS = Object.freeze([
+  "session",
+  "sessionData",
+  "session_data",
+  "authSession",
+  "auth_session",
+]);
 
-const TOKEN_KEYS =
-  Object.freeze([
-    "token",
-    "accessToken",
-    "access_token",
-    "authToken",
-    "auth_token",
-    "jwt",
-    "idToken",
-    "id_token",
-    "bearer",
-  ]);
+const NESTED_KEYS = Object.freeze([
+  "data",
+  "payload",
+  "result",
+  "body",
+  "response",
+  "auth",
+  "authData",
+  "session",
+  "sessionData",
+  "meta",
+]);
 
-const REFRESH_TOKEN_KEYS =
-  Object.freeze([
-    "refreshToken",
-    "refresh_token",
-  ]);
+const USER_IDENTITY_KEYS = Object.freeze([
+  "id",
+  "userId",
+  "user_id",
+  "_id",
+  "uuid",
+  "uid",
+  "sub",
+  "username",
+  "userName",
+  "user_name",
+  "email",
+  "mail",
+  "phone",
+  "telefono",
+  "mobile",
+]);
 
-const TEMP_TOKEN_KEYS =
-  Object.freeze([
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "challengeToken",
-    "challenge_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
-    "otpToken",
-    "otp_token",
-  ]);
+const AUTH_ENVELOPE_KEYS = Object.freeze([
+  "ok",
+  "success",
+  "status",
+  "statusCode",
+  "status_code",
+  "error",
+  "errorCode",
+  "error_code",
+  "data",
+  "payload",
+  "result",
+  "body",
+  "response",
+  "session",
+  "sessionData",
+  "auth",
+  "authData",
+]);
 
-const TOKEN_FALSE_VALUES =
-  new Set([
-    "",
-    "null",
-    "undefined",
-    "false",
-    "true",
-    "none",
-    "nan",
-    "{}",
-    "[]",
-    "[object object]",
-    "\"\"",
-    "''",
-  ]);
+const TOKEN_FALSE_VALUES = new Set([
+  "",
+  "null",
+  "undefined",
+  "false",
+  "true",
+  "none",
+  "nan",
+  "{}",
+  "[]",
+  "[object object]",
+  "\"\"",
+  "''",
+]);
 
-const USER_IDENTITY_KEYS =
-  Object.freeze([
-    "id",
-    "userId",
-    "user_id",
-    "_id",
-    "uuid",
-    "uid",
-    "sub",
-    "username",
-    "userName",
-    "user_name",
-    "email",
-    "mail",
-    "phone",
-    "telefono",
-    "mobile",
-    "cellphone",
-  ]);
-
-const AUTH_ENVELOPE_KEYS =
-  Object.freeze([
-    "ok",
-    "success",
-    "status",
-    "statusCode",
-    "status_code",
-    "error",
-    "errorCode",
-    "error_code",
-    "data",
-    "payload",
-    "result",
-    "body",
-    "response",
-    "session",
-    "sessionData",
-    "auth",
-    "authData",
-  ]);
-
-const NESTED_OBJECT_KEYS =
-  Object.freeze([
-    "data",
-    "payload",
-    "result",
-    "body",
-    "response",
-    "auth",
-    "authData",
-    "session",
-    "sessionData",
-    "meta",
-  ]);
+const DISABLED_STATUS = new Set([
+  "disabled",
+  "inactive",
+  "deleted",
+  "blocked",
+  "suspended",
+  "banned",
+  "revoked",
+  "archived",
+  "desactivado",
+  "inactivo",
+  "eliminado",
+  "bloqueado",
+  "suspendido",
+]);
 
 const SENSITIVE_RAW_KEY_RE =
   /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
 
 /* =========================================================
-   BASIC HELPERS
+   BASICS
 ========================================================= */
 
-function normalizeString(value = "") {
-  return String(value ?? "").trim();
+function safeText(value = "", fallback = "") {
+  if (value === null || value === undefined) return fallback;
+
+  const text = String(value).trim();
+
+  return text || fallback;
 }
 
 function safeLower(value = "") {
-  return normalizeString(value).toLowerCase();
+  return safeText(value).toLowerCase();
 }
 
 function safeNumber(value, fallback = 0) {
-  const number =
-    Number(value);
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
 
-  return Number.isFinite(number)
-    ? number
-    : fallback;
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function safeObject(value) {
+  return isObject(value) ? value : {};
+}
+
+function toArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value === null || value === undefined) return [];
+  return [value];
+}
+
+function hasOwn(obj, key) {
+  return Boolean(
+    obj &&
+      typeof obj === "object" &&
+      Object.prototype.hasOwnProperty.call(obj, key)
+  );
+}
+
+function pickFirst(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
+
+    return value;
+  }
+
+  return null;
+}
+
+function unique(values = []) {
+  return [
+    ...new Set(
+      values
+        .flat(Infinity)
+        .map((item) => safeText(item))
+        .filter(Boolean)
+    ),
+  ];
 }
 
 function normalizeBoolean(value, fallback = false) {
-  if (typeof value === "boolean") {
-    return value;
-  }
+  if (typeof value === "boolean") return value;
 
   if (typeof value === "number") {
     if (value === 1) return true;
     if (value === 0) return false;
   }
 
-  if (typeof value === "string") {
-    const key =
-      value.trim().toLowerCase();
+  const key = safeLower(value);
 
-    if (
-      [
-        "1",
-        "true",
-        "yes",
-        "on",
-        "si",
-        "sí",
-        "ok",
-        "enabled",
-        "active",
-      ].includes(key)
-    ) {
-      return true;
-    }
+  if (["1", "true", "yes", "on", "si", "sí", "ok", "enabled", "active"].includes(key)) {
+    return true;
+  }
 
-    if (
-      [
-        "0",
-        "false",
-        "no",
-        "off",
-        "disabled",
-        "inactive",
-      ].includes(key)
-    ) {
-      return false;
-    }
+  if (["0", "false", "no", "off", "disabled", "inactive"].includes(key)) {
+    return false;
   }
 
   return Boolean(fallback);
@@ -387,169 +382,33 @@ function hasExplicitValue(value) {
   return !(
     value === undefined ||
     value === null ||
-    (
-      typeof value === "string" &&
-      value.trim() === ""
-    )
-  );
-}
-
-function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
-}
-
-function safeObject(value) {
-  return isObject(value)
-    ? value
-    : {};
-}
-
-function toArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return [];
-  }
-
-  return [value];
-}
-
-function pickFirst(...values) {
-  for (const value of values) {
-    if (
-      value === undefined ||
-      value === null
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-
-    if (
-      isObject(value) &&
-      Object.keys(value).length === 0
-    ) {
-      continue;
-    }
-
-    return value;
-  }
-
-  return null;
-}
-
-function pickFirstObject(...values) {
-  for (const value of values) {
-    if (isObject(value)) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
-function hasOwn(obj, key) {
-  return Boolean(
-    obj &&
-      typeof obj === "object" &&
-      Object.prototype.hasOwnProperty.call(
-        obj,
-        key
-      )
-  );
-}
-
-function unique(values = []) {
-  return Array.from(
-    new Set(
-      values
-        .flat(Infinity)
-        .map((item) =>
-          normalizeString(item)
-        )
-        .filter(Boolean)
-    )
-  );
-}
-
-function normalizeEmail(value = "") {
-  return safeLower(value);
-}
-
-function safeSessionValue(
-  value = "",
-  maxLength = DEFAULT_SESSION_VALUE_MAX_LENGTH
-) {
-  const text =
-    normalizeString(value);
-
-  if (!text) {
-    return "";
-  }
-
-  return text.slice(
-    0,
-    safeNumber(
-      maxLength,
-      DEFAULT_SESSION_VALUE_MAX_LENGTH
-    )
+    (typeof value === "string" && value.trim() === "")
   );
 }
 
 function getTokenMaxLength() {
-  return (
-    safeNumber(
-      AUTH_CONSTANTS?.tokenMaxLength,
-      DEFAULT_TOKEN_MAX_LENGTH
-    ) || DEFAULT_TOKEN_MAX_LENGTH
-  );
+  return safeNumber(AUTH_CONSTANTS?.tokenMaxLength, DEFAULT_TOKEN_MAX_LENGTH) || DEFAULT_TOKEN_MAX_LENGTH;
 }
 
 function getSessionValueMaxLength() {
-  return (
-    safeNumber(
-      AUTH_CONSTANTS?.sessionValueMaxLength,
-      DEFAULT_SESSION_VALUE_MAX_LENGTH
-    ) || DEFAULT_SESSION_VALUE_MAX_LENGTH
-  );
+  return safeNumber(AUTH_CONSTANTS?.sessionValueMaxLength, DEFAULT_SESSION_VALUE_MAX_LENGTH) || DEFAULT_SESSION_VALUE_MAX_LENGTH;
+}
+
+function safeSessionValue(value = "") {
+  const text = safeText(value);
+  if (!text) return "";
+
+  return text.slice(0, getSessionValueMaxLength());
 }
 
 /* =========================================================
    RAW SANITIZER
 ========================================================= */
 
-function sanitizeRawObject(value, depth = 0, seen = new WeakSet()) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return value;
-  }
+function sanitizeRaw(value, depth = 0, seen = new WeakSet()) {
+  if (value === null || value === undefined) return value;
 
-  if (depth > DEFAULT_RAW_SANITIZE_DEPTH) {
-    return "[depth-limit]";
-  }
+  if (depth > RAW_MAX_DEPTH) return "[depth-limit]";
 
   if (
     typeof value === "string" ||
@@ -559,67 +418,120 @@ function sanitizeRawObject(value, depth = 0, seen = new WeakSet()) {
     return value;
   }
 
-  if (typeof value === "bigint") {
-    return String(value);
-  }
-
-  if (typeof value === "function") {
-    return "[function]";
-  }
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return "[function]";
 
   if (Array.isArray(value)) {
-    return value
-      .slice(0, DEFAULT_RAW_SANITIZE_KEYS)
-      .map((item) =>
-        sanitizeRawObject(
-          item,
-          depth + 1,
-          seen
-        )
-      );
+    return value.slice(0, RAW_MAX_KEYS).map((item) => sanitizeRaw(item, depth + 1, seen));
   }
 
-  if (!isObject(value)) {
-    return value;
-  }
+  if (!isObject(value)) return value;
 
   try {
-    if (seen.has(value)) {
-      return "[circular]";
-    }
-
+    if (seen.has(value)) return "[circular]";
     seen.add(value);
   } catch {}
 
   const output = {};
 
-  for (const [key, item] of Object.entries(value).slice(0, DEFAULT_RAW_SANITIZE_KEYS)) {
-    if (SENSITIVE_RAW_KEY_RE.test(key)) {
-      output[key] =
-        item ? "***" : item;
-
-      continue;
-    }
-
-    output[key] =
-      sanitizeRawObject(
-        item,
-        depth + 1,
-        seen
-      );
+  for (const [key, item] of Object.entries(value).slice(0, RAW_MAX_KEYS)) {
+    output[key] = SENSITIVE_RAW_KEY_RE.test(key)
+      ? item
+        ? "***"
+        : item
+      : sanitizeRaw(item, depth + 1, seen);
   }
 
   return output;
 }
 
 /* =========================================================
-   TOKEN HELPERS
+   ROLE / PERMISSIONS
+========================================================= */
+
+function normalizeKey(value = "") {
+  return safeText(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_:.]/g, "")
+    .replace(/^_+|_+$/g, "");
+}
+
+function extractTrueKeys(map = {}) {
+  if (!isObject(map)) return [];
+
+  return Object.entries(map)
+    .filter(([, value]) => normalizeBoolean(value, false))
+    .map(([key]) => key);
+}
+
+export function normalizeRoleList(value) {
+  const raw = Array.isArray(value)
+    ? value.flat(Infinity)
+    : typeof value === "string"
+      ? value.split(/[,\s|]+/)
+      : isObject(value)
+        ? extractTrueKeys(value)
+        : toArray(value);
+
+  const keys = raw
+    .flatMap((item) => typeof item === "string" ? item.split(/[,\s|]+/) : [item])
+    .map(normalizeKey)
+    .filter(Boolean);
+
+  if (keys.some((role) => ADMIN_ALIASES.has(role))) {
+    return ["admin"];
+  }
+
+  if (keys.length) {
+    return ["user"];
+  }
+
+  return [];
+}
+
+export function expandRoleAliases(roles = []) {
+  return normalizeRoleList(roles);
+}
+
+function normalizeCanonicalRole(roles = []) {
+  const list = normalizeRoleList(roles);
+
+  return list.includes("admin") ? "admin" : "user";
+}
+
+function normalizePermissionList(value) {
+  if (Array.isArray(value)) {
+    return unique(
+      value.flat(Infinity).flatMap((item) => (
+        isObject(item)
+          ? extractTrueKeys(item)
+          : typeof item === "string"
+            ? item.split(/[,\s|]+/)
+            : [item]
+      ))
+    );
+  }
+
+  if (typeof value === "string") {
+    return unique(value.split(/[,\s|]+/));
+  }
+
+  if (isObject(value)) {
+    return unique(extractTrueKeys(value));
+  }
+
+  return unique(toArray(value));
+}
+
+/* =========================================================
+   TOKENS
 ========================================================= */
 
 function pickTokenFromObject(value = null) {
-  if (!isObject(value)) {
-    return null;
-  }
+  if (!isObject(value)) return null;
 
   for (const key of [
     ...TOKEN_KEYS,
@@ -629,617 +541,101 @@ function pickTokenFromObject(value = null) {
     "raw",
     "data",
   ]) {
-    if (!hasOwn(value, key)) {
-      continue;
-    }
+    const candidate = value[key];
 
-    const candidate =
-      value[key];
-
-    if (
-      typeof candidate === "string" ||
-      typeof candidate === "number"
-    ) {
-      const text =
-        normalizeString(candidate);
-
-      if (text) {
-        return text;
-      }
+    if (typeof candidate === "string" || typeof candidate === "number") {
+      const text = safeText(candidate);
+      if (text) return text;
     }
   }
 
   return null;
 }
 
-export function hasUsableToken(token = null) {
-  return Boolean(
-    normalizeTokenLike(token)
-  );
+export function normalizeTokenValue(value = null) {
+  if (value === null || value === undefined) return null;
+
+  let token = isObject(value) ? pickTokenFromObject(value) : value;
+
+  if (token === null || token === undefined) return null;
+
+  token = String(token).trim();
+
+  if (/^bearer\s+/i.test(token)) {
+    token = token.replace(/^bearer\s+/i, "").trim();
+  }
+
+  const lower = token.toLowerCase();
+
+  if (!token || TOKEN_FALSE_VALUES.has(lower) || /[\r\n\t\s]/.test(token)) {
+    return null;
+  }
+
+  const max = getTokenMaxLength();
+
+  if (max > 0 && token.length > max) {
+    return null;
+  }
+
+  return token;
 }
 
-function normalizeTokenLike(
-  value = null,
-  maxLength = getTokenMaxLength()
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return null;
-  }
-
-  let tokenValue =
-    value;
-
-  if (isObject(tokenValue)) {
-    tokenValue =
-      pickTokenFromObject(tokenValue);
-  }
-
-  if (
-    tokenValue === null ||
-    tokenValue === undefined
-  ) {
-    return null;
-  }
-
-  let normalized =
-    String(tokenValue).trim();
-
-  if (!normalized) {
-    return null;
-  }
-
-  if (/^bearer\s+/i.test(normalized)) {
-    normalized =
-      normalized.replace(/^bearer\s+/i, "")
-        .trim();
-  }
-
-  const lower =
-    normalized.toLowerCase();
-
-  if (
-    TOKEN_FALSE_VALUES.has(lower) ||
-    /[\r\n\t\s]/.test(normalized)
-  ) {
-    return null;
-  }
-
-  const limit =
-    safeNumber(
-      maxLength,
-      DEFAULT_TOKEN_MAX_LENGTH
-    );
-
-  /*
-    Regla dura:
-    Un token excedido se considera corrupto.
-    No se trunca.
-  */
-  if (
-    limit > 0 &&
-    normalized.length > limit
-  ) {
-    return null;
-  }
-
-  return normalized;
+export function hasUsableToken(token = null) {
+  return Boolean(normalizeTokenValue(token));
 }
 
 function redactToken(value = "") {
-  const text =
-    normalizeString(value);
+  const text = safeText(value);
 
-  if (!text) {
-    return "";
-  }
-
-  if (text.length <= 8) {
-    return "***";
-  }
+  if (!text) return "";
+  if (text.length <= 8) return "***";
 
   return `${text.slice(0, 4)}***${text.slice(-4)}`;
 }
 
 /* =========================================================
-   ROLE HELPERS
+   ENVELOPES / OBJECT WALK
 ========================================================= */
-
-function normalizeRoleKey(value = "") {
-  return normalizeString(value)
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^a-z0-9_:.]/g, "")
-    .replace(/^_+|_+$/g, "")
-    .trim();
-}
-
-function extractValuesFromObjectBooleanMap(value = {}) {
-  if (!isObject(value)) {
-    return [];
-  }
-
-  return Object.entries(value)
-    .filter(([, itemValue]) =>
-      itemValue === true ||
-      itemValue === 1 ||
-      itemValue === "true" ||
-      itemValue === "1" ||
-      itemValue === "yes" ||
-      itemValue === "si" ||
-      itemValue === "sí" ||
-      itemValue === "on"
-    )
-    .map(([key]) => key);
-}
-
-export function normalizeRoleList(value) {
-  if (Array.isArray(value)) {
-    return value
-      .flat(Infinity)
-      .flatMap((item) =>
-        isObject(item)
-          ? extractValuesFromObjectBooleanMap(item)
-          : [item]
-      )
-      .flatMap((item) =>
-        typeof item === "string"
-          ? item.split(/[,\s|]+/)
-          : [item]
-      )
-      .map(normalizeRoleKey)
-      .filter(Boolean);
-  }
-
-  if (typeof value === "string") {
-    return value
-      .split(/[,\s|]+/)
-      .map(normalizeRoleKey)
-      .filter(Boolean);
-  }
-
-  if (isObject(value)) {
-    return extractValuesFromObjectBooleanMap(value)
-      .map(normalizeRoleKey)
-      .filter(Boolean);
-  }
-
-  return toArray(value)
-    .flat(Infinity)
-    .map(normalizeRoleKey)
-    .filter(Boolean);
-}
-
-function isAdminRole(value = "") {
-  return ADMIN_ROLE_KEYS.has(
-    normalizeRoleKey(value)
-  );
-}
-
-function isSupportRole(value = "") {
-  return SUPPORT_ROLE_KEYS.has(
-    normalizeRoleKey(value)
-  );
-}
-
-function isManagerRole(value = "") {
-  return MANAGER_ROLE_KEYS.has(
-    normalizeRoleKey(value)
-  );
-}
-
-function isClientRole(value = "") {
-  return CLIENT_ROLE_KEYS.has(
-    normalizeRoleKey(value)
-  );
-}
-
-export function expandRoleAliases(roles = []) {
-  const normalized =
-    normalizeRoleList(roles);
-
-  const result =
-    new Set(normalized);
-
-  if (normalized.some(isAdminRole)) {
-    for (const role of ADMIN_ROLE_KEYS) {
-      result.add(role);
-    }
-
-    result.add("admin");
-  }
-
-  if (normalized.some(isSupportRole)) {
-    for (const role of SUPPORT_ROLE_KEYS) {
-      result.add(role);
-    }
-
-    result.add("support");
-  }
-
-  if (normalized.some(isManagerRole)) {
-    for (const role of MANAGER_ROLE_KEYS) {
-      result.add(role);
-    }
-
-    result.add("manager");
-  }
-
-  if (normalized.some(isClientRole)) {
-    for (const role of CLIENT_ROLE_KEYS) {
-      result.add(role);
-    }
-
-    result.add("client");
-  }
-
-  return unique(
-    Array.from(result)
-  );
-}
-
-function normalizeCanonicalRole(value = "client") {
-  const roles =
-    expandRoleAliases(value);
-
-  if (roles.some(isAdminRole)) {
-    return "admin";
-  }
-
-  if (roles.some(isSupportRole)) {
-    return "support";
-  }
-
-  if (roles.some(isManagerRole)) {
-    return "manager";
-  }
-
-  if (roles.some(isClientRole)) {
-    return "client";
-  }
-
-  return roles[0] || "client";
-}
-
-function normalizePermissionList(value) {
-  return normalizeRoleList(value);
-}
-
-function normalizeTheme(value = "") {
-  const theme =
-    safeLower(value);
-
-  if (theme === "light") {
-    return "light";
-  }
-
-  if (theme === "dark") {
-    return "dark";
-  }
-
-  return null;
-}
-
-/* =========================================================
-   AVATAR HELPERS
-========================================================= */
-
-function isSafeAvatarUrl(url = "") {
-  const value =
-    normalizeString(url);
-
-  if (!value) {
-    return false;
-  }
-
-  const lower =
-    value.toLowerCase();
-
-  if (
-    lower.startsWith("javascript:") ||
-    lower.startsWith("vbscript:") ||
-    lower.startsWith("data:text/html") ||
-    lower.startsWith("data:application/")
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-function getNestedRawUser(rawUser = {}) {
-  const user =
-    isObject(rawUser)
-      ? rawUser
-      : {};
-
-  return isObject(user.raw)
-    ? user.raw
-    : {};
-}
-
-function normalizeAvatarUrl(rawUser = null) {
-  if (!isObject(rawUser)) {
-    return null;
-  }
-
-  const raw =
-    getNestedRawUser(rawUser);
-
-  const profile =
-    safeObject(rawUser.profile);
-
-  const settings =
-    safeObject(rawUser.settings);
-
-  const preferences =
-    safeObject(rawUser.preferences);
-
-  const meta =
-    safeObject(rawUser.meta);
-
-  const rawProfile =
-    safeObject(raw.profile);
-
-  const rawSettings =
-    safeObject(raw.settings);
-
-  const rawPreferences =
-    safeObject(raw.preferences);
-
-  const rawMeta =
-    safeObject(raw.meta);
-
-  const hasAvatar =
-    pickFirst(
-      rawUser.hasAvatar,
-      rawUser.has_avatar,
-      rawUser.avatarEnabled,
-      rawUser.avatar_enabled,
-
-      profile.hasAvatar,
-      profile.has_avatar,
-      profile.avatarEnabled,
-      profile.avatar_enabled,
-
-      settings.hasAvatar,
-      settings.avatarEnabled,
-
-      preferences.hasAvatar,
-      preferences.avatarEnabled,
-
-      meta.hasAvatar,
-      meta.avatarEnabled,
-
-      raw.hasAvatar,
-      raw.has_avatar,
-      raw.avatarEnabled,
-      raw.avatar_enabled,
-
-      rawProfile.hasAvatar,
-      rawProfile.has_avatar,
-      rawProfile.avatarEnabled,
-      rawProfile.avatar_enabled,
-
-      rawSettings.hasAvatar,
-      rawSettings.avatarEnabled,
-
-      rawPreferences.hasAvatar,
-      rawPreferences.avatarEnabled,
-
-      rawMeta.hasAvatar,
-      rawMeta.avatarEnabled
-    );
-
-  const rawAvatar =
-    pickFirst(
-      rawUser.avatar,
-      rawUser.avatarUrl,
-      rawUser.avatar_url,
-      rawUser.photo,
-      rawUser.photoUrl,
-      rawUser.photo_url,
-      rawUser.image,
-      rawUser.imageUrl,
-      rawUser.image_url,
-      rawUser.profileImage,
-      rawUser.profile_image,
-      rawUser.picture,
-      rawUser.pictureUrl,
-      rawUser.picture_url,
-      rawUser.thumbnail,
-      rawUser.thumbnailUrl,
-      rawUser.thumbnail_url,
-
-      profile.avatar,
-      profile.avatarUrl,
-      profile.avatar_url,
-      profile.photo,
-      profile.photoUrl,
-      profile.photo_url,
-      profile.image,
-      profile.imageUrl,
-      profile.image_url,
-      profile.profileImage,
-      profile.profile_image,
-      profile.picture,
-      profile.pictureUrl,
-      profile.picture_url,
-      profile.thumbnail,
-      profile.thumbnailUrl,
-      profile.thumbnail_url,
-
-      settings.avatar,
-      settings.avatarUrl,
-      settings.avatar_url,
-      settings.photoUrl,
-      settings.photo_url,
-
-      preferences.avatar,
-      preferences.avatarUrl,
-      preferences.avatar_url,
-      preferences.photoUrl,
-      preferences.photo_url,
-
-      meta.avatar,
-      meta.avatarUrl,
-      meta.avatar_url,
-      meta.picture,
-      meta.pictureUrl,
-      meta.picture_url,
-
-      raw.avatar,
-      raw.avatarUrl,
-      raw.avatar_url,
-      raw.photo,
-      raw.photoUrl,
-      raw.photo_url,
-      raw.image,
-      raw.imageUrl,
-      raw.image_url,
-      raw.profileImage,
-      raw.profile_image,
-      raw.picture,
-      raw.pictureUrl,
-      raw.picture_url,
-      raw.thumbnail,
-      raw.thumbnailUrl,
-      raw.thumbnail_url,
-
-      rawProfile.avatar,
-      rawProfile.avatarUrl,
-      rawProfile.avatar_url,
-      rawProfile.photo,
-      rawProfile.photoUrl,
-      rawProfile.photo_url,
-      rawProfile.profileImage,
-      rawProfile.profile_image,
-      rawProfile.picture,
-      rawProfile.pictureUrl,
-      rawProfile.picture_url,
-
-      rawSettings.avatar,
-      rawSettings.avatarUrl,
-      rawSettings.avatar_url,
-
-      rawPreferences.avatar,
-      rawPreferences.avatarUrl,
-      rawPreferences.avatar_url,
-
-      rawMeta.avatar,
-      rawMeta.avatarUrl,
-      rawMeta.avatar_url,
-      rawMeta.picture,
-      rawMeta.pictureUrl,
-      rawMeta.picture_url
-    );
-
-  const avatar =
-    normalizeString(rawAvatar);
-
-  if (!avatar) {
-    return null;
-  }
-
-  if (
-    hasAvatar !== undefined &&
-    hasAvatar !== null &&
-    !normalizeBoolean(hasAvatar, false)
-  ) {
-    return null;
-  }
-
-  if (!isSafeAvatarUrl(avatar)) {
-    return null;
-  }
-
-  return avatar;
-}
-
-/* =========================================================
-   USER / ENVELOPE DETECTION
-========================================================= */
-
-function hasUsableUserIdentity(user = {}) {
-  if (!isObject(user)) {
-    return false;
-  }
-
-  return USER_IDENTITY_KEYS.some((key) =>
-    Boolean(
-      normalizeString(user[key])
-    )
-  );
-}
-
-function hasNestedUserIdentity(user = {}) {
-  if (!isObject(user)) {
-    return false;
-  }
-
-  const raw =
-    getNestedRawUser(user);
-
-  const profile =
-    safeObject(user.profile);
-
-  const account =
-    safeObject(user.account);
-
-  const rawProfile =
-    safeObject(raw.profile);
-
-  const rawAccount =
-    safeObject(raw.account);
-
-  return Boolean(
-    hasUsableUserIdentity(user) ||
-      hasUsableUserIdentity(profile) ||
-      hasUsableUserIdentity(account) ||
-      hasUsableUserIdentity(raw) ||
-      hasUsableUserIdentity(rawProfile) ||
-      hasUsableUserIdentity(rawAccount)
-  );
-}
 
 function hasTokenLikeKeys(value = {}) {
-  if (!isObject(value)) {
-    return false;
-  }
+  if (!isObject(value)) return false;
 
-  return Boolean(
-    TOKEN_KEYS.some((key) => hasOwn(value, key)) ||
-      REFRESH_TOKEN_KEYS.some((key) => hasOwn(value, key)) ||
-      TEMP_TOKEN_KEYS.some((key) => hasOwn(value, key))
-  );
+  return [
+    ...TOKEN_KEYS,
+    ...REFRESH_TOKEN_KEYS,
+    ...TEMP_TOKEN_KEYS,
+  ].some((key) => hasOwn(value, key));
 }
 
 export function isAuthEnvelope(value = {}) {
-  if (!isObject(value)) {
-    return false;
-  }
+  if (!isObject(value)) return false;
+
+  return AUTH_ENVELOPE_KEYS.some((key) => hasOwn(value, key)) || hasTokenLikeKeys(value);
+}
+
+function hasUsableUserIdentity(value = {}) {
+  if (!isObject(value)) return false;
+
+  return USER_IDENTITY_KEYS.some((key) => Boolean(safeText(value[key])));
+}
+
+function hasNestedUserIdentity(value = {}) {
+  if (!isObject(value)) return false;
 
   return Boolean(
-    AUTH_ENVELOPE_KEYS.some((key) =>
-      hasOwn(value, key)
-    ) ||
-      hasTokenLikeKeys(value)
+    hasUsableUserIdentity(value) ||
+      hasUsableUserIdentity(value.raw) ||
+      hasUsableUserIdentity(value.profile) ||
+      hasUsableUserIdentity(value.account) ||
+      hasUsableUserIdentity(value.raw?.profile) ||
+      hasUsableUserIdentity(value.raw?.account)
   );
 }
 
 function looksLikeUser(value = null) {
-  if (!isObject(value)) {
-    return false;
-  }
+  if (!isObject(value)) return false;
 
-  if (
-    isAuthEnvelope(value) &&
-    !hasNestedUserIdentity(value)
-  ) {
+  if (isAuthEnvelope(value) && !hasNestedUserIdentity(value)) {
     return false;
   }
 
@@ -1249,112 +645,41 @@ function looksLikeUser(value = null) {
       value.rol ||
       value.roles ||
       value.permissions ||
-      value.scopes ||
+      value.permisos ||
       value.claims ||
       value.profile ||
       value.account
   );
 }
 
-/* =========================================================
-   ENVELOPE HELPERS
-========================================================= */
-
-function unwrapAuthPayload(payload = null, depth = 0) {
-  if (
-    !payload ||
-    depth > 8 ||
-    !isObject(payload)
-  ) {
-    return payload;
-  }
-
-  if (
-    looksLikeUser(payload) &&
-    hasNestedUserIdentity(payload)
-  ) {
-    return payload;
-  }
-
-  const candidate =
-    pickFirstObject(
-      payload.data,
-      payload.payload,
-      payload.result,
-      payload.body,
-      payload.response?.data,
-      payload.response
-    );
-
-  if (
-    candidate &&
-    candidate !== payload
-  ) {
-    return unwrapAuthPayload(
-      candidate,
-      depth + 1
-    );
-  }
-
-  return payload;
-}
-
 function collectAuthObjects(payload = null) {
-  const output =
-    [];
+  const output = [];
+  const seen = new WeakSet();
+  const queue = [payload];
 
-  const seen =
-    new WeakSet();
+  let guard = 0;
 
-  const queue =
-    [payload];
-
-  let guard =
-    0;
-
-  while (
-    queue.length &&
-    guard < 100
-  ) {
+  while (queue.length && guard < 120) {
     guard += 1;
 
-    const current =
-      queue.shift();
+    const current = queue.shift();
 
-    if (!isObject(current)) {
-      continue;
-    }
+    if (!isObject(current)) continue;
 
     try {
-      if (seen.has(current)) {
-        continue;
-      }
-
+      if (seen.has(current)) continue;
       seen.add(current);
     } catch {}
 
     output.push(current);
 
-    for (const key of NESTED_OBJECT_KEYS) {
-      const nested =
-        current[key];
-
-      if (isObject(nested)) {
-        queue.push(nested);
-      }
+    for (const key of NESTED_KEYS) {
+      if (isObject(current[key])) queue.push(current[key]);
     }
 
-    if (isObject(current.response?.data)) {
-      queue.push(current.response.data);
-    }
-
-    if (isObject(current.auth?.data)) {
-      queue.push(current.auth.data);
-    }
-
-    if (isObject(current.session?.data)) {
-      queue.push(current.session.data);
-    }
+    if (isObject(current.response?.data)) queue.push(current.response.data);
+    if (isObject(current.auth?.data)) queue.push(current.auth.data);
+    if (isObject(current.session?.data)) queue.push(current.session.data);
   }
 
   return output;
@@ -1363,13 +688,10 @@ function collectAuthObjects(payload = null) {
 function pickValueFromObjects(objects = [], keys = []) {
   for (const object of objects) {
     for (const key of keys) {
-      if (
-        object &&
-        object[key] !== null &&
-        object[key] !== undefined &&
-        object[key] !== ""
-      ) {
-        return object[key];
+      const value = object?.[key];
+
+      if (value !== null && value !== undefined && value !== "") {
+        return value;
       }
     }
   }
@@ -1378,1708 +700,720 @@ function pickValueFromObjects(objects = [], keys = []) {
 }
 
 function pickTextFromObjects(objects = [], keys = []) {
-  return normalizeString(
-    pickValueFromObjects(
-      objects,
-      keys
-    ) || ""
-  );
+  for (const object of objects) {
+    for (const key of keys) {
+      const value = object?.[key];
+
+      if (
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean"
+      ) {
+        const text = safeText(value);
+        if (text) return text;
+      }
+    }
+  }
+
+  return "";
 }
 
-function getStatusValue(payload = null) {
-  const objects =
-    collectAuthObjects(payload);
+function pickObjectFromObjects(objects = [], keys = []) {
+  for (const object of objects) {
+    for (const key of keys) {
+      if (isObject(object?.[key])) {
+        return object[key];
+      }
+    }
+  }
 
+  return null;
+}
+
+function unwrapAuthPayload(payload = null, depth = 0) {
+  if (!isObject(payload) || depth > 8) return payload;
+
+  if (looksLikeUser(payload) && hasNestedUserIdentity(payload)) {
+    return payload;
+  }
+
+  const candidate = pickFirst(
+    payload.data,
+    payload.payload,
+    payload.result,
+    payload.body,
+    payload.response?.data,
+    payload.response
+  );
+
+  if (isObject(candidate) && candidate !== payload) {
+    return unwrapAuthPayload(candidate, depth + 1);
+  }
+
+  return payload;
+}
+
+/* =========================================================
+   RESPONSE STATUS
+========================================================= */
+
+function getStatusValue(payload = null) {
   return pickValueFromObjects(
-    objects,
-    [
-      "status",
-      "statusCode",
-      "status_code",
-      "state",
-      "estado",
-    ]
+    collectAuthObjects(payload),
+    ["status", "statusCode", "status_code", "state", "estado"]
   );
 }
 
 function getErrorCode(payload = null) {
-  const objects =
-    collectAuthObjects(payload);
-
   return pickTextFromObjects(
-    objects,
-    [
-      "code",
-      "errorCode",
-      "error_code",
-      "error",
-    ]
+    collectAuthObjects(payload),
+    ["code", "errorCode", "error_code", "error"]
   );
 }
 
 function getResponseMessage(payload = null) {
-  const objects =
-    collectAuthObjects(payload);
-
   return pickTextFromObjects(
-    objects,
-    [
-      "message",
-      "mensaje",
-      "errorMessage",
-      "error_message",
-      "detail",
-      "description",
-      "title",
-      "reason",
-      "msg",
-    ]
+    collectAuthObjects(payload),
+    ["message", "mensaje", "errorMessage", "error_message", "detail", "description", "title", "reason", "msg"]
   );
 }
 
 function isExplicitAuthFailure(payload = null) {
-  if (
-    !payload ||
-    !isObject(payload)
-  ) {
-    return false;
-  }
+  if (!isObject(payload)) return false;
 
-  const objects =
-    collectAuthObjects(payload);
+  const objects = collectAuthObjects(payload);
+  const statusValue = getStatusValue(payload);
+  const statusNumber = Number(statusValue || 0);
 
-  const statusValue =
-    getStatusValue(payload);
+  if (Number.isFinite(statusNumber) && statusNumber >= 400) return true;
 
-  const statusNumber =
-    Number(statusValue || 0);
+  const statusText = normalizeKey(statusValue || "");
 
-  if (
-    Number.isFinite(statusNumber) &&
-    statusNumber >= 400
-  ) {
+  if (statusText && FAILURE_STATUSES.has(statusText)) return true;
+
+  const code = getErrorCode(payload).toUpperCase();
+
+  if (code && FAILURE_CODES.has(code)) return true;
+
+  if (objects.some((object) => object?.ok === false || object?.success === false)) {
     return true;
   }
 
-  const statusText =
-    normalizeRoleKey(statusValue || "");
-
-  if (
-    statusText &&
-    AUTH_FAILURE_STATUS_KEYS.has(statusText)
-  ) {
-    return true;
-  }
-
-  const code =
-    getErrorCode(payload).toUpperCase();
-
-  if (
-    code &&
-    AUTH_FAILURE_CODES.has(code)
-  ) {
-    return true;
-  }
-
-  if (
-    objects.some((object) =>
-      object?.ok === false ||
-      object?.success === false
-    )
-  ) {
-    return true;
-  }
-
-  if (
-    statusText &&
-    AUTH_SUCCESS_STATUS_KEYS.has(statusText)
-  ) {
-    return false;
-  }
+  if (statusText && SUCCESS_STATUSES.has(statusText)) return false;
 
   return false;
 }
 
-function createAuthNormalizeError(
-  message = "La respuesta del API no contiene una sesión válida.",
-  {
-    status = 401,
-    code = "INVALID_LOGIN_SESSION",
-    response = null,
-  } = {}
-) {
-  const error =
-    new Error(message);
+function createNormalizeError(message = "La respuesta del API no contiene una sesión válida.", {
+  status = 401,
+  code = "INVALID_LOGIN_SESSION",
+  response = null,
+} = {}) {
+  const error = new Error(message);
 
-  error.name =
-    "AuthNormalizeError";
-
-  error.status =
-    status;
-
-  error.statusCode =
-    status;
-
-  error.code =
-    code;
-
-  error.data = {
-    code,
-    message,
-    status,
-  };
-
-  error.response =
-    response;
-
-  error.raw =
-    response;
+  error.name = "AuthNormalizeError";
+  error.status = status;
+  error.statusCode = status;
+  error.code = code;
+  error.data = { code, message, status };
+  error.response = response;
+  error.raw = response;
 
   return error;
-}
-
-/* =========================================================
-   ROLE / PERMISSION RESOLUTION
-========================================================= */
-
-function collectRoleCandidates(rawUser = {}) {
-  const user =
-    safeObject(rawUser);
-
-  const raw =
-    getNestedRawUser(user);
-
-  const profile =
-    safeObject(user.profile);
-
-  const permissionsNode =
-    safeObject(user.permissions);
-
-  const meta =
-    safeObject(user.meta);
-
-  const claims =
-    safeObject(user.claims);
-
-  const account =
-    safeObject(user.account);
-
-  const rawProfile =
-    safeObject(raw.profile);
-
-  const rawPermissions =
-    safeObject(raw.permissions);
-
-  const rawMeta =
-    safeObject(raw.meta);
-
-  const rawClaims =
-    safeObject(raw.claims);
-
-  const rawAccount =
-    safeObject(raw.account);
-
-  const roleCandidates = [
-    user.role,
-    user.rol,
-    user.userRole,
-    user.user_role,
-    user.type,
-    user.userType,
-    user.user_type,
-    user.perfil,
-
-    profile.role,
-    profile.rol,
-    profile.userRole,
-    profile.user_role,
-    profile.type,
-    profile.perfil,
-
-    account.role,
-    account.rol,
-    account.userRole,
-    account.user_role,
-    account.type,
-    account.perfil,
-
-    meta.role,
-    meta.rol,
-    meta.userRole,
-    meta.user_role,
-
-    claims.role,
-    claims.rol,
-    claims.userRole,
-    claims.user_role,
-    claims["custom:role"],
-    claims["https://onion/role"],
-
-    raw.role,
-    raw.rol,
-    raw.userRole,
-    raw.user_role,
-    raw.type,
-    raw.userType,
-    raw.user_type,
-    raw.perfil,
-
-    rawProfile.role,
-    rawProfile.rol,
-    rawProfile.userRole,
-    rawProfile.user_role,
-    rawProfile.type,
-    rawProfile.perfil,
-
-    rawAccount.role,
-    rawAccount.rol,
-    rawAccount.userRole,
-    rawAccount.user_role,
-    rawAccount.type,
-    rawAccount.perfil,
-
-    rawMeta.role,
-    rawMeta.rol,
-    rawMeta.userRole,
-    rawMeta.user_role,
-
-    rawClaims.role,
-    rawClaims.rol,
-    rawClaims.userRole,
-    rawClaims.user_role,
-    rawClaims["custom:role"],
-    rawClaims["https://onion/role"],
-  ];
-
-  const roleArrays = [
-    user.roles,
-    user.roleList,
-    user.role_list,
-    user.groups,
-    user.authorities,
-
-    profile.roles,
-    profile.groups,
-    profile.authorities,
-
-    account.roles,
-    account.groups,
-    account.authorities,
-
-    permissionsNode.roles,
-
-    meta.roles,
-    meta.groups,
-
-    claims.roles,
-    claims.groups,
-
-    raw.roles,
-    raw.roleList,
-    raw.role_list,
-    raw.groups,
-    raw.authorities,
-
-    rawProfile.roles,
-    rawProfile.groups,
-    rawProfile.authorities,
-
-    rawAccount.roles,
-    rawAccount.groups,
-    rawAccount.authorities,
-
-    rawPermissions.roles,
-
-    rawMeta.roles,
-    rawMeta.groups,
-
-    rawClaims.roles,
-    rawClaims.groups,
-  ];
-
-  const roles = [
-    ...roleCandidates,
-    ...roleArrays.flatMap((value) =>
-      toArray(value)
-    ),
-  ];
-
-  const adminFlag = [
-    user.isAdmin,
-    user.admin,
-    user.is_admin,
-    user.isSuperAdmin,
-    user.superAdmin,
-    user.is_super_admin,
-    user.canManageUsers,
-    user.can_manage_users,
-    user.canAccessUsers,
-    user.can_access_users,
-
-    profile.isAdmin,
-    profile.admin,
-    profile.isSuperAdmin,
-    profile.superAdmin,
-    profile.canManageUsers,
-    profile.canAccessUsers,
-
-    account.isAdmin,
-    account.admin,
-    account.isSuperAdmin,
-    account.superAdmin,
-    account.canManageUsers,
-    account.canAccessUsers,
-
-    meta.isAdmin,
-    meta.admin,
-    meta.isSuperAdmin,
-    meta.superAdmin,
-    meta.canManageUsers,
-    meta.canAccessUsers,
-
-    claims.isAdmin,
-    claims.admin,
-    claims.isSuperAdmin,
-    claims.superAdmin,
-    claims.canManageUsers,
-    claims.canAccessUsers,
-
-    raw.isAdmin,
-    raw.admin,
-    raw.is_admin,
-    raw.isSuperAdmin,
-    raw.superAdmin,
-    raw.is_super_admin,
-    raw.canManageUsers,
-    raw.can_manage_users,
-    raw.canAccessUsers,
-    raw.can_access_users,
-
-    rawProfile.isAdmin,
-    rawProfile.admin,
-    rawProfile.isSuperAdmin,
-    rawProfile.superAdmin,
-    rawProfile.canManageUsers,
-    rawProfile.canAccessUsers,
-
-    rawAccount.isAdmin,
-    rawAccount.admin,
-    rawAccount.isSuperAdmin,
-    rawAccount.superAdmin,
-    rawAccount.canManageUsers,
-    rawAccount.canAccessUsers,
-
-    rawMeta.isAdmin,
-    rawMeta.admin,
-    rawMeta.isSuperAdmin,
-    rawMeta.superAdmin,
-    rawMeta.canManageUsers,
-    rawMeta.canAccessUsers,
-
-    rawClaims.isAdmin,
-    rawClaims.admin,
-    rawClaims.isSuperAdmin,
-    rawClaims.superAdmin,
-    rawClaims.canManageUsers,
-    rawClaims.canAccessUsers,
-  ].some((value) =>
-    normalizeBoolean(
-      value,
-      false
-    )
-  );
-
-  if (adminFlag) {
-    roles.push("admin");
-  }
-
-  return expandRoleAliases(roles);
-}
-
-function collectPermissions(rawUser = {}) {
-  const user =
-    safeObject(rawUser);
-
-  const raw =
-    getNestedRawUser(user);
-
-  const profile =
-    safeObject(user.profile);
-
-  const meta =
-    safeObject(user.meta);
-
-  const claims =
-    safeObject(user.claims);
-
-  const permissionsNode =
-    safeObject(user.permissions);
-
-  const rawProfile =
-    safeObject(raw.profile);
-
-  const rawMeta =
-    safeObject(raw.meta);
-
-  const rawClaims =
-    safeObject(raw.claims);
-
-  const rawPermissions =
-    safeObject(raw.permissions);
-
-  return unique([
-    ...normalizePermissionList(user.permissions),
-    ...normalizePermissionList(user.permisos),
-    ...normalizePermissionList(user.scopes),
-    ...normalizePermissionList(user.authorities),
-
-    ...normalizePermissionList(profile.permissions),
-    ...normalizePermissionList(profile.permisos),
-    ...normalizePermissionList(profile.scopes),
-    ...normalizePermissionList(profile.authorities),
-
-    ...normalizePermissionList(meta.permissions),
-    ...normalizePermissionList(meta.permisos),
-    ...normalizePermissionList(meta.scopes),
-
-    ...normalizePermissionList(claims.permissions),
-    ...normalizePermissionList(claims.permisos),
-    ...normalizePermissionList(claims.scopes),
-
-    ...normalizePermissionList(permissionsNode.items),
-    ...normalizePermissionList(permissionsNode.list),
-    ...normalizePermissionList(permissionsNode.scopes),
-
-    ...normalizePermissionList(raw.permissions),
-    ...normalizePermissionList(raw.permisos),
-    ...normalizePermissionList(raw.scopes),
-    ...normalizePermissionList(raw.authorities),
-
-    ...normalizePermissionList(rawProfile.permissions),
-    ...normalizePermissionList(rawProfile.permisos),
-    ...normalizePermissionList(rawProfile.scopes),
-    ...normalizePermissionList(rawProfile.authorities),
-
-    ...normalizePermissionList(rawMeta.permissions),
-    ...normalizePermissionList(rawMeta.permisos),
-    ...normalizePermissionList(rawMeta.scopes),
-
-    ...normalizePermissionList(rawClaims.permissions),
-    ...normalizePermissionList(rawClaims.permisos),
-    ...normalizePermissionList(rawClaims.scopes),
-
-    ...normalizePermissionList(rawPermissions.items),
-    ...normalizePermissionList(rawPermissions.list),
-    ...normalizePermissionList(rawPermissions.scopes),
-  ]);
 }
 
 /* =========================================================
    USER
 ========================================================= */
 
+function getNodes(rawUser = {}) {
+  const user = safeObject(rawUser);
+  const raw = safeObject(user.raw);
+
+  return [
+    user,
+    safeObject(user.profile),
+    safeObject(user.account),
+    safeObject(user.preferences),
+    safeObject(user.settings),
+    safeObject(user.meta),
+    safeObject(user.claims),
+
+    raw,
+    safeObject(raw.profile),
+    safeObject(raw.account),
+    safeObject(raw.preferences),
+    safeObject(raw.settings),
+    safeObject(raw.meta),
+    safeObject(raw.claims),
+  ];
+}
+
+function pickFromNodes(nodes = [], keys = []) {
+  for (const node of nodes) {
+    for (const key of keys) {
+      const value = node?.[key];
+
+      if (value !== null && value !== undefined && value !== "") {
+        return value;
+      }
+    }
+  }
+
+  return null;
+}
+
+function collectRoles(rawUser = {}) {
+  const nodes = getNodes(rawUser);
+
+  const roleValues = [];
+
+  for (const node of nodes) {
+    roleValues.push(
+      node.role,
+      node.rol,
+      node.userRole,
+      node.user_role,
+      node.type,
+      node.tipo,
+      node.userType,
+      node.user_type,
+      node.perfil,
+      node["custom:role"],
+      node["https://onion/role"]
+    );
+
+    roleValues.push(
+      ...toArray(node.roles),
+      ...toArray(node.roleList),
+      ...toArray(node.role_list),
+      ...toArray(node.groups),
+      ...toArray(node.authorities)
+    );
+  }
+
+  const adminFlag = nodes.some((node) => (
+    normalizeBoolean(node.isAdmin, false) ||
+    normalizeBoolean(node.admin, false) ||
+    normalizeBoolean(node.is_admin, false) ||
+    normalizeBoolean(node.isSuperAdmin, false) ||
+    normalizeBoolean(node.superAdmin, false) ||
+    normalizeBoolean(node.is_super_admin, false) ||
+    normalizeBoolean(node.canManageUsers, false) ||
+    normalizeBoolean(node.can_manage_users, false) ||
+    normalizeBoolean(node.canAccessUsers, false) ||
+    normalizeBoolean(node.can_access_users, false)
+  ));
+
+  if (adminFlag) roleValues.push("admin");
+
+  const roles = normalizeRoleList(roleValues);
+
+  return roles.length ? roles : ["user"];
+}
+
+function collectPermissions(rawUser = {}) {
+  const nodes = getNodes(rawUser);
+  const permissions = [];
+
+  for (const node of nodes) {
+    permissions.push(
+      ...normalizePermissionList(node.permissions),
+      ...normalizePermissionList(node.permisos),
+      ...normalizePermissionList(node.scopes),
+      ...normalizePermissionList(node.scope),
+      ...normalizePermissionList(node.authorities),
+      ...normalizePermissionList(node.items),
+      ...normalizePermissionList(node.list)
+    );
+  }
+
+  return unique(permissions);
+}
+
+function isSafeAvatarUrl(url = "") {
+  const value = safeText(url);
+  const lower = value.toLowerCase();
+
+  if (!value) return false;
+
+  return !(
+    lower.startsWith("javascript:") ||
+    lower.startsWith("vbscript:") ||
+    lower.startsWith("data:text/html") ||
+    lower.startsWith("data:application/")
+  );
+}
+
+function normalizeAvatarUrl(rawUser = {}) {
+  const nodes = getNodes(rawUser);
+
+  const disabled = nodes.some((node) => (
+    hasOwn(node, "hasAvatar") && normalizeBoolean(node.hasAvatar, false) === false
+  ));
+
+  if (disabled) return null;
+
+  const avatar = safeText(
+    pickFromNodes(nodes, [
+      "avatar",
+      "avatarUrl",
+      "avatar_url",
+      "photo",
+      "photoUrl",
+      "photo_url",
+      "image",
+      "imageUrl",
+      "image_url",
+      "profileImage",
+      "profile_image",
+      "picture",
+      "pictureUrl",
+      "picture_url",
+      "thumbnail",
+      "thumbnailUrl",
+      "thumbnail_url",
+    ])
+  );
+
+  return avatar && isSafeAvatarUrl(avatar) ? avatar : null;
+}
+
+function normalizeTheme(value = "") {
+  const theme = safeLower(value);
+
+  if (theme === "light") return "light";
+  if (theme === "dark") return "dark";
+  if (theme === "system") return "system";
+
+  return null;
+}
+
+function hasExplicitDarkMode(nodes = []) {
+  return nodes.some((node) => (
+    hasOwn(node, "darkMode") ||
+    hasOwn(node, "dark_mode")
+  ));
+}
+
+function resolveDarkMode(nodes = []) {
+  for (const node of nodes) {
+    if (hasOwn(node, "darkMode")) return normalizeBoolean(node.darkMode, false);
+    if (hasOwn(node, "dark_mode")) return normalizeBoolean(node.dark_mode, false);
+  }
+
+  return null;
+}
+
+function isUserActive(nodes = []) {
+  const status = normalizeKey(
+    pickFromNodes(nodes, ["status", "estado", "state", "accountStatus", "account_status"]) || ""
+  );
+
+  if (DISABLED_STATUS.has(status)) return false;
+
+  const disabled = nodes.some((node) => (
+    node.disabled === true ||
+    node.isDisabled === true ||
+    node.deleted === true ||
+    node.isDeleted === true ||
+    node.blocked === true ||
+    node.isBlocked === true ||
+    node.banned === true ||
+    node.suspended === true ||
+    node.revoked === true ||
+    node.archived === true
+  ));
+
+  if (disabled) return false;
+
+  const activeValue = pickFromNodes(nodes, [
+    "active",
+    "is_active",
+    "isActive",
+    "enabled",
+    "isEnabled",
+  ]);
+
+  if (!hasExplicitValue(activeValue)) return true;
+
+  return normalizeBoolean(activeValue, true);
+}
+
 export function normalizeUser(rawUser = null) {
-  if (!isObject(rawUser)) {
+  if (!isObject(rawUser)) return null;
+
+  if (isAuthEnvelope(rawUser) && !hasNestedUserIdentity(rawUser)) {
     return null;
   }
 
-  /*
-    Protección:
-    No normalizamos un envelope auth completo como usuario:
-      { ok:true, token:"...", data:{...} }
-  */
-  if (
-    isAuthEnvelope(rawUser) &&
-    !hasNestedUserIdentity(rawUser)
-  ) {
-    return null;
-  }
-
-  /*
-    Protección adicional:
-    role/permissions sin identidad no son un usuario usable.
-  */
   if (!hasNestedUserIdentity(rawUser)) {
     return null;
   }
 
-  const raw =
-    getNestedRawUser(rawUser);
-
-  const profile =
-    safeObject(rawUser.profile);
-
-  const account =
-    safeObject(rawUser.account);
-
-  const preferences =
-    safeObject(rawUser.preferences);
-
-  const settings =
-    safeObject(rawUser.settings);
-
-  const meta =
-    safeObject(rawUser.meta);
-
-  const claims =
-    safeObject(rawUser.claims);
-
-  const rawProfile =
-    safeObject(raw.profile);
-
-  const rawAccount =
-    safeObject(raw.account);
-
-  const rawPreferences =
-    safeObject(raw.preferences);
-
-  const rawSettings =
-    safeObject(raw.settings);
-
-  const rawMeta =
-    safeObject(raw.meta);
-
-  const rawClaims =
-    safeObject(raw.claims);
-
-  const email =
-    normalizeEmail(
-      pickFirst(
-        rawUser.email,
-        rawUser.mail,
-        profile.email,
-        profile.mail,
-        account.email,
-        account.mail,
-        raw.email,
-        raw.mail,
-        rawProfile.email,
-        rawProfile.mail,
-        rawAccount.email,
-        rawAccount.mail,
-        ""
-      )
-    );
-
-  const phone =
-    pickFirst(
-      rawUser.phone,
-      rawUser.telefono,
-      rawUser.mobile,
-      rawUser.cellphone,
-
-      profile.phone,
-      profile.telefono,
-      profile.mobile,
-      profile.cellphone,
-
-      account.phone,
-      account.telefono,
-      account.mobile,
-      account.cellphone,
-
-      raw.phone,
-      raw.telefono,
-      raw.mobile,
-      raw.cellphone,
-
-      rawProfile.phone,
-      rawProfile.telefono,
-      rawProfile.mobile,
-      rawProfile.cellphone,
-
-      rawAccount.phone,
-      rawAccount.telefono,
-      rawAccount.mobile,
-      rawAccount.cellphone
-    );
-
-  const id =
-    pickFirst(
-      rawUser.id,
-      rawUser.userId,
-      rawUser.user_id,
-      rawUser.uuid,
-      rawUser.uid,
-      rawUser.sub,
-      rawUser._id,
-
-      profile.id,
-      profile.userId,
-      profile.user_id,
-      profile.uid,
-      profile.sub,
-
-      account.id,
-      account.userId,
-      account.user_id,
-      account.uid,
-      account.sub,
-
-      raw.id,
-      raw.userId,
-      raw.user_id,
-      raw.uuid,
-      raw.uid,
-      raw.sub,
-      raw._id,
-
-      rawProfile.id,
-      rawProfile.userId,
-      rawProfile.user_id,
-      rawProfile.uid,
-      rawProfile.sub,
-
-      rawAccount.id,
-      rawAccount.userId,
-      rawAccount.user_id,
-      rawAccount.uid,
-      rawAccount.sub
-    );
-
-  const userId =
-    pickFirst(
-      rawUser.userId,
-      rawUser.user_id,
-      rawUser.id,
-      rawUser.uuid,
-      rawUser.uid,
-      rawUser.sub,
-      rawUser._id,
-
-      profile.userId,
-      profile.user_id,
-      profile.id,
-      profile.uid,
-      profile.sub,
-
-      account.userId,
-      account.user_id,
-      account.id,
-      account.uid,
-      account.sub,
-
-      raw.userId,
-      raw.user_id,
-      raw.id,
-      raw.uuid,
-      raw.uid,
-      raw.sub,
-      raw._id,
-
-      rawProfile.userId,
-      rawProfile.user_id,
-      rawProfile.id,
-      rawProfile.uid,
-      rawProfile.sub,
-
-      rawAccount.userId,
-      rawAccount.user_id,
-      rawAccount.id,
-      rawAccount.uid,
-      rawAccount.sub
-    );
-
-  const rawUsername =
-    pickFirst(
-      rawUser.username,
-      rawUser.userName,
-      rawUser.user_name,
-      rawUser.nick,
-      rawUser.alias,
-      rawUser.login,
-      rawUser.slug,
-
-      profile.username,
-      profile.userName,
-      profile.user_name,
-      profile.nick,
-      profile.alias,
-      profile.login,
-      profile.slug,
-
-      account.username,
-      account.userName,
-      account.user_name,
-      account.login,
-      account.slug,
-
-      raw.username,
-      raw.userName,
-      raw.user_name,
-      raw.nick,
-      raw.alias,
-      raw.login,
-      raw.slug,
-
-      rawProfile.username,
-      rawProfile.userName,
-      rawProfile.user_name,
-      rawProfile.login,
-      rawProfile.slug,
-
-      rawAccount.username,
-      rawAccount.userName,
-      rawAccount.user_name,
-      rawAccount.login,
-      rawAccount.slug,
-
-      email ? email.split("@")[0] : "",
-      phone,
-      id,
-      userId
-    );
-
-  const username =
-    sanitizeUsername(
-      normalizeString(rawUsername)
-    );
-
-  const displayName =
-    normalizeString(
-      pickFirst(
-        rawUser.name,
-        rawUser.nombre,
-        rawUser.full_name,
-        rawUser.fullName,
-        rawUser.display_name,
-        rawUser.displayName,
-
-        profile.name,
-        profile.nombre,
-        profile.fullName,
-        profile.full_name,
-        profile.displayName,
-        profile.display_name,
-
-        account.name,
-        account.nombre,
-        account.fullName,
-        account.full_name,
-        account.displayName,
-        account.display_name,
-
-        raw.name,
-        raw.nombre,
-        raw.full_name,
-        raw.fullName,
-        raw.display_name,
-        raw.displayName,
-
-        rawProfile.name,
-        rawProfile.nombre,
-        rawProfile.fullName,
-        rawProfile.full_name,
-        rawProfile.displayName,
-        rawProfile.display_name,
-
-        rawAccount.name,
-        rawAccount.nombre,
-        rawAccount.fullName,
-        rawAccount.full_name,
-        rawAccount.displayName,
-        rawAccount.display_name,
-
-        username,
-        email,
-        phone,
-        id,
-        userId,
-        "Usuario"
-      )
-    );
-
-  const roles =
-    collectRoleCandidates(rawUser);
-
-  const role =
-    normalizeCanonicalRole(
-      roles.length
-        ? roles
-        : ["client"]
-    );
-
-  const permissions =
-    collectPermissions(rawUser);
-
-  const slug =
-    normalizeString(
-      pickFirst(
-        rawUser.slug,
-        profile.slug,
-        account.slug,
-        raw.slug,
-        rawProfile.slug,
-        rawAccount.slug,
-        slugify(
-          username ||
-            displayName ||
-            email ||
-            String(userId || id || "usuario")
-        )
-      )
-    );
-
-  const avatar =
-    normalizeAvatarUrl(rawUser);
-
-  const normalizedTheme =
-    normalizeTheme(
-      pickFirst(
-        rawUser.theme,
-        rawUser.mode,
-        rawUser.appearance,
-        preferences.theme,
-        preferences.mode,
-        preferences.appearance,
-        settings.theme,
-        settings.mode,
-        settings.appearance,
-        profile.theme,
-        account.theme,
-        meta.theme,
-        claims.theme,
-
-        raw.theme,
-        raw.mode,
-        raw.appearance,
-        rawPreferences.theme,
-        rawPreferences.mode,
-        rawPreferences.appearance,
-        rawSettings.theme,
-        rawSettings.mode,
-        rawSettings.appearance,
-        rawProfile.theme,
-        rawAccount.theme,
-        rawMeta.theme,
-        rawClaims.theme
-      )
-    );
-
-  const explicitDarkModeValue =
-    pickFirst(
-      hasOwn(rawUser, "darkMode") ? rawUser.darkMode : undefined,
-      hasOwn(rawUser, "dark_mode") ? rawUser.dark_mode : undefined,
-
-      hasOwn(preferences, "darkMode") ? preferences.darkMode : undefined,
-      hasOwn(preferences, "dark_mode") ? preferences.dark_mode : undefined,
-
-      hasOwn(settings, "darkMode") ? settings.darkMode : undefined,
-      hasOwn(settings, "dark_mode") ? settings.dark_mode : undefined,
-
-      hasOwn(profile, "darkMode") ? profile.darkMode : undefined,
-      hasOwn(profile, "dark_mode") ? profile.dark_mode : undefined,
-
-      hasOwn(account, "darkMode") ? account.darkMode : undefined,
-      hasOwn(account, "dark_mode") ? account.dark_mode : undefined,
-
-      hasOwn(raw, "darkMode") ? raw.darkMode : undefined,
-      hasOwn(raw, "dark_mode") ? raw.dark_mode : undefined,
-
-      hasOwn(rawPreferences, "darkMode") ? rawPreferences.darkMode : undefined,
-      hasOwn(rawPreferences, "dark_mode") ? rawPreferences.dark_mode : undefined,
-
-      hasOwn(rawSettings, "darkMode") ? rawSettings.darkMode : undefined,
-      hasOwn(rawSettings, "dark_mode") ? rawSettings.dark_mode : undefined,
-
-      hasOwn(rawProfile, "darkMode") ? rawProfile.darkMode : undefined,
-      hasOwn(rawProfile, "dark_mode") ? rawProfile.dark_mode : undefined,
-
-      hasOwn(rawAccount, "darkMode") ? rawAccount.darkMode : undefined,
-      hasOwn(rawAccount, "dark_mode") ? rawAccount.dark_mode : undefined
-    );
-
-  const hasExplicitDarkMode =
-    hasExplicitValue(explicitDarkModeValue);
-
-  const darkMode =
-    hasExplicitDarkMode
-      ? normalizeBoolean(
-          explicitDarkModeValue,
-          false
-        )
-      : null;
-
-  const lang =
-    normalizeString(
-      pickFirst(
-        rawUser.lang,
-        rawUser.language,
-        rawUser.locale,
-
-        preferences.lang,
-        preferences.language,
-        preferences.locale,
-
-        settings.lang,
-        settings.language,
-        settings.locale,
-
-        profile.lang,
-        profile.language,
-        profile.locale,
-
-        account.lang,
-        account.language,
-        account.locale,
-
-        raw.lang,
-        raw.language,
-        raw.locale,
-
-        rawPreferences.lang,
-        rawPreferences.language,
-        rawPreferences.locale,
-
-        rawSettings.lang,
-        rawSettings.language,
-        rawSettings.locale,
-
-        rawProfile.lang,
-        rawProfile.language,
-        rawProfile.locale,
-
-        rawAccount.lang,
-        rawAccount.language,
-        rawAccount.locale
-      ) || ""
-    );
-
-  const clienteId =
-    pickFirst(
-      rawUser.clienteId,
-      rawUser.clientId,
-      rawUser.cliente_id,
-      rawUser.customerId,
-      rawUser.customer_id,
-
-      profile.clienteId,
-      profile.clientId,
-      profile.cliente_id,
-      profile.customerId,
-      profile.customer_id,
-
-      account.clienteId,
-      account.clientId,
-      account.cliente_id,
-      account.customerId,
-      account.customer_id,
-
-      raw.clienteId,
-      raw.clientId,
-      raw.cliente_id,
-      raw.customerId,
-      raw.customer_id,
-
-      rawProfile.clienteId,
-      rawProfile.clientId,
-      rawProfile.cliente_id,
-      rawProfile.customerId,
-      rawProfile.customer_id,
-
-      rawAccount.clienteId,
-      rawAccount.clientId,
-      rawAccount.cliente_id,
-      rawAccount.customerId,
-      rawAccount.customer_id
-    );
-
-  const tokenVersion =
-    pickFirst(
-      rawUser.tokenVersion,
-      rawUser.token_version,
-      rawUser.tv,
-
-      profile.tokenVersion,
-      profile.token_version,
-      profile.tv,
-
-      account.tokenVersion,
-      account.token_version,
-      account.tv,
-
-      raw.tokenVersion,
-      raw.token_version,
-      raw.tv,
-
-      rawProfile.tokenVersion,
-      rawProfile.token_version,
-      rawProfile.tv,
-
-      rawAccount.tokenVersion,
-      rawAccount.token_version,
-      rawAccount.tv
-    );
-
-  const status =
-    normalizeRoleKey(
-      pickFirst(
-        rawUser.status,
-        rawUser.estado,
-        rawUser.state,
-        rawUser.accountStatus,
-        profile.status,
-        profile.estado,
-        account.status,
-        account.estado,
-        raw.status,
-        raw.estado,
-        rawProfile.status,
-        rawProfile.estado,
-        rawAccount.status,
-        rawAccount.estado,
-        ""
-      )
-    );
-
-  const statusDisabled =
-    [
-      "disabled",
-      "inactive",
-      "deleted",
-      "blocked",
-      "suspended",
-      "banned",
-      "revoked",
-    ].includes(status);
-
-  const explicitActiveValue =
-    pickFirst(
-      rawUser.active,
-      rawUser.is_active,
-      rawUser.isActive,
-      rawUser.enabled,
-
-      profile.active,
-      profile.isActive,
-      profile.is_active,
-      profile.enabled,
-
-      account.active,
-      account.isActive,
-      account.enabled,
-
-      raw.active,
-      raw.is_active,
-      raw.isActive,
-      raw.enabled,
-
-      rawProfile.active,
-      rawProfile.isActive,
-      rawProfile.is_active,
-      rawProfile.enabled,
-
-      rawAccount.active,
-      rawAccount.isActive,
-      rawAccount.enabled
-    );
-
-  const active =
-    statusDisabled
-      ? false
-      : normalizeBoolean(
-          explicitActiveValue,
-          true
-        );
-
-  const emailVerified =
-    normalizeBoolean(
-      pickFirst(
-        rawUser.emailVerified,
-        rawUser.email_verified,
-
-        profile.emailVerified,
-        profile.email_verified,
-
-        account.emailVerified,
-        account.email_verified,
-
-        raw.emailVerified,
-        raw.email_verified,
-
-        rawProfile.emailVerified,
-        rawProfile.email_verified,
-
-        rawAccount.emailVerified,
-        rawAccount.email_verified
-      ),
-      false
-    );
-
-  const twofaEnabled =
-    normalizeBoolean(
-      pickFirst(
-        rawUser.twofa_enabled,
-        rawUser.twofaEnabled,
-        rawUser.twoFactorEnabled,
-        rawUser.mfaEnabled,
-        rawUser.mfa_enabled,
-
-        profile.twofa_enabled,
-        profile.twofaEnabled,
-        profile.twoFactorEnabled,
-        profile.mfaEnabled,
-        profile.mfa_enabled,
-
-        account.twofa_enabled,
-        account.twofaEnabled,
-        account.twoFactorEnabled,
-        account.mfaEnabled,
-        account.mfa_enabled,
-
-        raw.twofa_enabled,
-        raw.twofaEnabled,
-        raw.twoFactorEnabled,
-        raw.mfaEnabled,
-        raw.mfa_enabled,
-
-        rawProfile.twofa_enabled,
-        rawProfile.twofaEnabled,
-        rawProfile.twoFactorEnabled,
-        rawProfile.mfaEnabled,
-        rawProfile.mfa_enabled,
-
-        rawAccount.twofa_enabled,
-        rawAccount.twofaEnabled,
-        rawAccount.twoFactorEnabled,
-        rawAccount.mfaEnabled,
-        rawAccount.mfa_enabled
-      ),
-      false
-    );
-
-  const cleanProfile =
-    sanitizeRawObject(profile, 0);
-
-  const cleanAccount =
-    sanitizeRawObject(account, 0);
-
-  const cleanMeta =
-    sanitizeRawObject(meta, 0);
-
-  const cleanClaims =
-    sanitizeRawObject(claims, 0);
+  const nodes = getNodes(rawUser);
+
+  const id = pickFromNodes(nodes, ["id", "userId", "user_id", "uuid", "uid", "sub", "_id"]);
+  const userId = pickFromNodes(nodes, ["userId", "user_id", "id", "uuid", "uid", "sub", "_id"]);
+
+  const email = safeLower(
+    pickFromNodes(nodes, ["email", "mail", "emailLower", "email_lower"]) || ""
+  );
+
+  const phone = pickFromNodes(nodes, ["phone", "telefono", "mobile", "cellphone"]);
+
+  const rawUsername = pickFirst(
+    pickFromNodes(nodes, ["username", "userName", "user_name", "nick", "alias", "login", "slug"]),
+    email ? email.split("@")[0] : "",
+    phone,
+    id,
+    userId
+  );
+
+  const username = sanitizeUsername(safeText(rawUsername));
+
+  const displayName = safeText(
+    pickFromNodes(nodes, [
+      "name",
+      "nombre",
+      "fullName",
+      "full_name",
+      "displayName",
+      "display_name",
+    ]) ||
+      username ||
+      email ||
+      phone ||
+      id ||
+      userId ||
+      "Usuario",
+    "Usuario"
+  );
+
+  const roles = collectRoles(rawUser);
+  const role = normalizeCanonicalRole(roles);
+
+  const permissions = collectPermissions(rawUser);
+
+  const slug = safeText(
+    pickFromNodes(nodes, ["slug"]) ||
+      slugify(username || displayName || email || String(userId || id || "usuario"))
+  );
+
+  const avatar = normalizeAvatarUrl(rawUser);
+
+  const theme = normalizeTheme(
+    pickFromNodes(nodes, ["theme", "mode", "appearance"]) || ""
+  );
+
+  const lang = safeText(
+    pickFromNodes(nodes, ["lang", "language", "locale"]) || ""
+  );
+
+  const clienteId = pickFromNodes(nodes, [
+    "clienteId",
+    "clientId",
+    "cliente_id",
+    "customerId",
+    "customer_id",
+  ]);
+
+  const tokenVersion = pickFromNodes(nodes, [
+    "tokenVersion",
+    "token_version",
+    "tv",
+  ]);
+
+  const emailVerified = normalizeBoolean(
+    pickFromNodes(nodes, ["emailVerified", "email_verified", "verified"]),
+    false
+  );
+
+  const twofaEnabled = normalizeBoolean(
+    pickFromNodes(nodes, [
+      "twofa_enabled",
+      "twofaEnabled",
+      "twoFactorEnabled",
+      "mfaEnabled",
+      "mfa_enabled",
+    ]),
+    false
+  );
+
+  const darkMode = hasExplicitDarkMode(nodes)
+    ? resolveDarkMode(nodes)
+    : null;
+
+  const active = isUserActive(nodes);
 
   return {
-    id:
-      id || userId || null,
-
-    userId:
-      userId || id || null,
-
-    user_id:
-      userId || id || null,
-
-    uid:
-      userId || id || null,
-
-    sub:
-      userId || id || null,
+    id: id || userId || null,
+    userId: userId || id || null,
+    user_id: userId || id || null,
+    uid: userId || id || null,
+    sub: userId || id || null,
 
     username,
-    userName:
-      username,
-    user_name:
-      username,
-
-    usernameLower:
-      username || null,
-
-    username_lower:
-      username || null,
+    userName: username,
+    user_name: username,
+    usernameLower: username || null,
+    username_lower: username || null,
 
     slug,
 
-    name:
-      displayName || "Usuario",
+    name: displayName,
+    nombre: displayName,
+    fullName: displayName,
+    displayName,
 
-    nombre:
-      displayName || "Usuario",
+    email,
+    emailLower: email,
+    email_lower: email,
 
-    fullName:
-      displayName || "Usuario",
-
-    displayName:
-      displayName || "Usuario",
-
-    email:
-      email || "",
-
-    emailLower:
-      email || "",
-
-    email_lower:
-      email || "",
-
-    phone:
-      phone || null,
-
-    telefono:
-      phone || null,
-
-    mobile:
-      phone || null,
+    phone: phone || null,
+    telefono: phone || null,
+    mobile: phone || null,
 
     role,
-    rol:
-      role,
-
+    rol: role,
     roles,
 
     permissions,
-    permisos:
-      permissions,
+    permisos: permissions,
 
-    isAdmin:
-      roles.some(isAdminRole),
+    isAdmin: role === "admin",
+    admin: role === "admin",
 
-    admin:
-      roles.some(isAdminRole),
+    isSupport: false,
+    isManager: false,
+    isClient: role === "user",
 
-    isSupport:
-      roles.some(isSupportRole),
+    clienteId: clienteId || null,
+    clientId: clienteId || null,
+    customerId: clienteId || null,
 
-    isManager:
-      roles.some(isManagerRole),
+    privacyMode: normalizeBoolean(
+      pickFromNodes(nodes, ["privacyMode", "privacy_mode"]),
+      false
+    ),
 
-    isClient:
-      roles.some(isClientRole),
-
-    clienteId:
-      clienteId || null,
-
-    clientId:
-      clienteId || null,
-
-    customerId:
-      clienteId || null,
-
-    privacyMode:
-      normalizeBoolean(
-        pickFirst(
-          rawUser.privacyMode,
-          rawUser.privacy_mode,
-          profile.privacyMode,
-          profile.privacy_mode,
-          account.privacyMode,
-          account.privacy_mode,
-          raw.privacyMode,
-          raw.privacy_mode,
-          rawProfile.privacyMode,
-          rawProfile.privacy_mode,
-          rawAccount.privacyMode,
-          rawAccount.privacy_mode
-        ),
-        false
-      ),
-
-    hasAvatar:
-      Boolean(avatar),
-
+    hasAvatar: Boolean(avatar),
     avatar,
-    avatarUrl:
-      avatar,
-
-    avatar_url:
-      avatar,
-
-    photoUrl:
-      avatar,
-
-    picture:
-      avatar,
+    avatarUrl: avatar,
+    avatar_url: avatar,
+    photoUrl: avatar,
+    picture: avatar,
 
     avatarUpdatedAt:
-      pickFirst(
-        rawUser.avatarUpdatedAt,
-        rawUser.avatar_updated_at,
-        profile.avatarUpdatedAt,
-        profile.avatar_updated_at,
-        account.avatarUpdatedAt,
-        account.avatar_updated_at,
-        raw.avatarUpdatedAt,
-        raw.avatar_updated_at,
-        rawProfile.avatarUpdatedAt,
-        rawProfile.avatar_updated_at,
-        rawAccount.avatarUpdatedAt,
-        rawAccount.avatar_updated_at
-      ) || null,
+      pickFromNodes(nodes, ["avatarUpdatedAt", "avatar_updated_at"]) || null,
 
     active,
+    status: safeText(pickFromNodes(nodes, ["status", "estado", "state"]) || "") || null,
 
-    status:
-      status || null,
-
-    /*
-      null = backend no lo especificó.
-      No usar false por defecto.
-    */
     darkMode,
+    theme,
+    mode: theme,
+    appearance: theme,
 
-    theme:
-      normalizedTheme || null,
-
-    mode:
-      normalizedTheme || null,
-
-    appearance:
-      normalizedTheme || null,
-
-    lang:
-      lang || null,
-
-    language:
-      lang || null,
-
-    locale:
-      lang || null,
+    lang: lang || null,
+    language: lang || null,
+    locale: lang || null,
 
     emailVerified,
 
-    twofa_enabled:
-      twofaEnabled,
-
+    twofa_enabled: twofaEnabled,
     twofaEnabled,
+    twoFactorEnabled: twofaEnabled,
+    mfaEnabled: twofaEnabled,
 
-    twoFactorEnabled:
-      twofaEnabled,
+    tokenVersion: tokenVersion ?? null,
+    token_version: tokenVersion ?? null,
+    tv: tokenVersion ?? null,
 
-    mfaEnabled:
-      twofaEnabled,
+    preferences: sanitizeRaw(safeObject(rawUser.preferences)) || {},
+    settings: sanitizeRaw(safeObject(rawUser.settings)) || {},
+    profile: sanitizeRaw(safeObject(rawUser.profile)) || {},
+    account: sanitizeRaw(safeObject(rawUser.account)) || {},
+    meta: sanitizeRaw(safeObject(rawUser.meta)) || {},
+    claims: sanitizeRaw(safeObject(rawUser.claims)) || {},
 
-    tokenVersion:
-      tokenVersion ?? null,
-
-    token_version:
-      tokenVersion ?? null,
-
-    tv:
-      tokenVersion ?? null,
-
-    preferences:
-      sanitizeRawObject(
-        preferences,
-        0
-      ) || {},
-
-    settings:
-      sanitizeRawObject(
-        settings,
-        0
-      ) || {},
-
-    profile:
-      cleanProfile || {},
-
-    account:
-      cleanAccount || {},
-
-    meta:
-      cleanMeta || {},
-
-    claims:
-      cleanClaims || {},
-
-    raw:
-      sanitizeRawObject(rawUser, 0),
+    raw: sanitizeRaw(rawUser),
   };
 }
 
 /* =========================================================
-   SESSION PAYLOAD
+   USER / SESSION EXTRACTORS
 ========================================================= */
 
-export function normalizeSessionPayload(payload = null) {
-  if (!isObject(payload)) {
-    return null;
+export function extractUser(payload = null) {
+  if (!payload) return null;
+
+  const objects = collectAuthObjects(payload);
+
+  for (const object of objects) {
+    const candidate = pickFirst(
+      ...USER_KEYS.map((key) => object?.[key])
+    );
+
+    if (looksLikeUser(candidate)) {
+      const normalized = normalizeUser(candidate);
+      if (normalized) return normalized;
+    }
   }
 
-  const objects =
-    collectAuthObjects(payload);
+  if (looksLikeUser(payload)) {
+    const normalized = normalizeUser(payload);
+    if (normalized) return normalized;
+  }
+
+  const unwrapped = unwrapAuthPayload(payload);
+
+  if (unwrapped && unwrapped !== payload) {
+    return extractUser(unwrapped);
+  }
+
+  return null;
+}
+
+export function normalizeSessionPayload(payload = null) {
+  if (!isObject(payload)) return null;
+
+  const objects = collectAuthObjects(payload);
 
   const sessionNode =
-    pickFirstObject(
-      ...objects.map((item) => item.session),
-      ...objects.map((item) => item.sessionData),
-      ...objects.map((item) => item.authSession),
-      ...objects.map((item) => item.auth_session)
-    ) || {};
+    pickObjectFromObjects(objects, SESSION_KEYS) || {};
 
-  const max =
-    getSessionValueMaxLength();
-
-  const sessionId =
-    safeSessionValue(
-      pickFirst(
-        sessionNode.sessionId,
-        sessionNode.session_id,
-        sessionNode.sid,
-        sessionNode.id,
-
-        pickValueFromObjects(
-          objects,
-          [
-            "sessionId",
-            "session_id",
-            "sid",
-          ]
-        )
-      ) || "",
-      max
-    );
-
-  const userCandidate =
-    extractUser(payload);
-
-  const userId =
-    safeSessionValue(
-      pickFirst(
-        sessionNode.sessionUserId,
-        sessionNode.session_user_id,
-        sessionNode.userId,
-        sessionNode.user_id,
-        sessionNode.uid,
-        sessionNode.sub,
-
-        pickValueFromObjects(
-          objects,
-          [
-            "sessionUserId",
-            "session_user_id",
-            "userId",
-            "user_id",
-            "uid",
-            "sub",
-          ]
-        ),
-
-        userCandidate?.userId,
-        userCandidate?.id,
-        userCandidate?.email
-      ) || "",
-      max
-    );
-
-  const expiresAt =
+  const sessionId = safeSessionValue(
     pickFirst(
-      sessionNode.expiresAt,
-      sessionNode.expires_at,
-      sessionNode.refreshExpiresAt,
-      sessionNode.refresh_expires_at,
-      sessionNode.exp,
+      sessionNode.sessionId,
+      sessionNode.session_id,
+      sessionNode.sid,
+      sessionNode.id,
+      pickValueFromObjects(objects, ["sessionId", "session_id", "sid"])
+    ) || ""
+  );
 
-      pickValueFromObjects(
-        objects,
-        [
-          "expiresAt",
-          "expires_at",
-          "refreshExpiresAt",
-          "refresh_expires_at",
-          "exp",
-          "expiration",
-          "expires",
-        ]
-      )
-    ) || null;
+  const user = extractUser(payload);
 
-  const tokenVersion =
+  const userId = safeSessionValue(
     pickFirst(
-      sessionNode.tokenVersion,
-      sessionNode.token_version,
-      sessionNode.tv,
+      sessionNode.sessionUserId,
+      sessionNode.session_user_id,
+      sessionNode.userId,
+      sessionNode.user_id,
+      sessionNode.uid,
+      sessionNode.sub,
+      pickValueFromObjects(objects, ["sessionUserId", "session_user_id", "userId", "user_id", "uid", "sub"]),
+      user?.userId,
+      user?.id,
+      user?.email
+    ) || ""
+  );
 
-      pickValueFromObjects(
-        objects,
-        [
-          "tokenVersion",
-          "token_version",
-          "tv",
-        ]
-      ),
+  const expiresAt = pickFirst(
+    sessionNode.expiresAt,
+    sessionNode.expires_at,
+    sessionNode.refreshExpiresAt,
+    sessionNode.refresh_expires_at,
+    sessionNode.exp,
+    pickValueFromObjects(objects, ["expiresAt", "expires_at", "refreshExpiresAt", "refresh_expires_at", "exp", "expiration", "expires"])
+  ) || null;
 
-      userCandidate?.tokenVersion,
-      userCandidate?.token_version,
-      userCandidate?.tv
-    ) ?? null;
+  const tokenVersion = pickFirst(
+    sessionNode.tokenVersion,
+    sessionNode.token_version,
+    sessionNode.tv,
+    pickValueFromObjects(objects, ["tokenVersion", "token_version", "tv"]),
+    user?.tokenVersion,
+    user?.token_version,
+    user?.tv
+  ) ?? null;
 
-  const hasSessionData =
-    Boolean(
-      sessionId ||
-        userId ||
-        expiresAt ||
-        tokenVersion !== null
-    );
-
-  if (!hasSessionData) {
+  if (!sessionId && !userId && !expiresAt && tokenVersion === null) {
     return null;
   }
 
   return {
-    id:
-      sessionId || null,
+    id: sessionId || null,
+    sessionId: sessionId || null,
+    session_id: sessionId || null,
+    sid: sessionId || null,
 
-    sessionId:
-      sessionId || null,
-
-    session_id:
-      sessionId || null,
-
-    sid:
-      sessionId || null,
-
-    userId:
-      userId || null,
-
-    user_id:
-      userId || null,
-
-    sessionUserId:
-      userId || null,
-
-    session_user_id:
-      userId || null,
+    userId: userId || null,
+    user_id: userId || null,
+    sessionUserId: userId || null,
+    session_user_id: userId || null,
 
     expiresAt,
+    expires_at: expiresAt,
 
-    expires_at:
-      expiresAt,
+    refreshExpiresAt: pickFirst(
+      sessionNode.refreshExpiresAt,
+      sessionNode.refresh_expires_at,
+      expiresAt
+    ) || null,
 
-    refreshExpiresAt:
-      pickFirst(
-        sessionNode.refreshExpiresAt,
-        sessionNode.refresh_expires_at,
-        expiresAt
-      ) || null,
+    refresh_expires_at: pickFirst(
+      sessionNode.refreshExpiresAt,
+      sessionNode.refresh_expires_at,
+      expiresAt
+    ) || null,
 
-    refresh_expires_at:
-      pickFirst(
-        sessionNode.refreshExpiresAt,
-        sessionNode.refresh_expires_at,
-        expiresAt
-      ) || null,
+    createdAt: pickFirst(
+      sessionNode.createdAt,
+      sessionNode.created_at,
+      pickValueFromObjects(objects, ["createdAt", "created_at"])
+    ) || null,
 
-    createdAt:
-      pickFirst(
-        sessionNode.createdAt,
-        sessionNode.created_at,
-        pickValueFromObjects(
-          objects,
-          [
-            "createdAt",
-            "created_at",
-          ]
-        )
-      ) || null,
+    lastActiveAt: pickFirst(
+      sessionNode.lastActiveAt,
+      sessionNode.last_active_at,
+      pickValueFromObjects(objects, ["lastActiveAt", "last_active_at"])
+    ) || null,
 
-    lastActiveAt:
-      pickFirst(
-        sessionNode.lastActiveAt,
-        sessionNode.last_active_at,
-        pickValueFromObjects(
-          objects,
-          [
-            "lastActiveAt",
-            "last_active_at",
-          ]
-        )
-      ) || null,
-
-    lastRefreshAt:
-      pickFirst(
-        sessionNode.lastRefreshAt,
-        sessionNode.last_refresh_at,
-        pickValueFromObjects(
-          objects,
-          [
-            "lastRefreshAt",
-            "last_refresh_at",
-          ]
-        )
-      ) || null,
+    lastRefreshAt: pickFirst(
+      sessionNode.lastRefreshAt,
+      sessionNode.last_refresh_at,
+      pickValueFromObjects(objects, ["lastRefreshAt", "last_refresh_at"])
+    ) || null,
 
     tokenVersion,
-    token_version:
-      tokenVersion,
-    tv:
-      tokenVersion,
+    token_version: tokenVersion,
+    tv: tokenVersion,
   };
 }
 
-/* =========================================================
-   TOKEN EXTRACTORS
-========================================================= */
-
 export function extractToken(payload = null) {
-  if (!payload) {
-    return null;
-  }
+  if (!payload) return null;
 
-  const objects =
-    collectAuthObjects(payload);
-
-  return normalizeTokenLike(
-    pickValueFromObjects(
-      objects,
-      TOKEN_KEYS
-    ),
-    getTokenMaxLength()
+  return normalizeTokenValue(
+    pickValueFromObjects(collectAuthObjects(payload), TOKEN_KEYS)
   );
 }
 
 export function extractRefreshToken(payload = null) {
-  if (!payload) {
-    return null;
-  }
+  if (!payload) return null;
 
-  const objects =
-    collectAuthObjects(payload);
-
-  return normalizeTokenLike(
-    pickValueFromObjects(
-      objects,
-      REFRESH_TOKEN_KEYS
-    ),
-    getTokenMaxLength()
+  return normalizeTokenValue(
+    pickValueFromObjects(collectAuthObjects(payload), REFRESH_TOKEN_KEYS)
   );
 }
 
 export function extractTempToken(payload = null) {
-  if (!payload) {
-    return null;
-  }
+  if (!payload) return null;
 
-  const objects =
-    collectAuthObjects(payload);
-
-  return normalizeTokenLike(
-    pickValueFromObjects(
-      objects,
-      TEMP_TOKEN_KEYS
-    ),
-    getTokenMaxLength()
+  return normalizeTokenValue(
+    pickValueFromObjects(collectAuthObjects(payload), TEMP_TOKEN_KEYS)
   );
 }
 
-/* =========================================================
-   2FA
-========================================================= */
-
 export function extractRequires2FA(payload = null) {
-  if (!payload) {
-    return false;
-  }
+  if (!payload) return false;
 
-  const objects =
-    collectAuthObjects(payload);
+  const objects = collectAuthObjects(payload);
+  const status = normalizeKey(getStatusValue(payload) || "");
 
-  const status =
-    normalizeRoleKey(
-      getStatusValue(payload) || ""
-    );
-
-  if (TWO_FACTOR_STATUS_KEYS.has(status)) {
-    return true;
-  }
+  if (TWO_FACTOR_STATUSES.has(status)) return true;
 
   const boolKeys = [
     "requires2FA",
@@ -3100,145 +1434,40 @@ export function extractRequires2FA(payload = null) {
     "challenge_required",
   ];
 
-  return objects.some((object) =>
-    boolKeys.some((key) =>
-      normalizeBoolean(
-        object?.[key],
-        false
-      )
-    )
-  );
+  return objects.some((object) => (
+    boolKeys.some((key) => normalizeBoolean(object?.[key], false))
+  ));
 }
 
 /* =========================================================
-   USER EXTRACTOR
-========================================================= */
-
-export function extractUser(payload = null) {
-  if (!payload) {
-    return null;
-  }
-
-  const objects =
-    collectAuthObjects(payload);
-
-  for (const object of objects) {
-    const direct =
-      pickFirstObject(
-        object.user,
-        object.usuario,
-        object.me,
-        object.profile,
-        object.account,
-        object.currentUser,
-        object.current_user
-      );
-
-    if (looksLikeUser(direct)) {
-      const normalized =
-        normalizeUser(direct);
-
-      if (normalized) {
-        return normalized;
-      }
-    }
-  }
-
-  /*
-    Respuesta /me directa:
-      { id, email, role, ... }
-  */
-  if (
-    looksLikeUser(payload) &&
-    (
-      !isAuthEnvelope(payload) ||
-      hasNestedUserIdentity(payload)
-    )
-  ) {
-    const normalized =
-      normalizeUser(payload);
-
-    if (normalized) {
-      return normalized;
-    }
-  }
-
-  const unwrapped =
-    unwrapAuthPayload(payload);
-
-  if (
-    unwrapped &&
-    unwrapped !== payload
-  ) {
-    return extractUser(unwrapped);
-  }
-
-  return null;
-}
-
-/* =========================================================
-   AUTH RESPONSE VALIDATION
+   AUTH VALIDATION
 ========================================================= */
 
 export function validateAuthResponse(response = null, options = {}) {
-  const opts =
-    isObject(options)
-      ? options
-      : {};
+  const opts = isObject(options) ? options : {};
 
   if (isExplicitAuthFailure(response)) {
-    const message =
-      getResponseMessage(response) ||
-      "No se pudo iniciar sesión.";
-
-    throw createAuthNormalizeError(
-      message,
+    throw createNormalizeError(
+      getResponseMessage(response) || "No se pudo iniciar sesión.",
       {
-        status:
-          Number(getStatusValue(response)) || 401,
-
-        code:
-          getErrorCode(response) ||
-          "INVALID_CREDENTIALS",
-
+        status: Number(getStatusValue(response)) || 401,
+        code: getErrorCode(response) || "INVALID_CREDENTIALS",
         response,
       }
     );
   }
 
-  const token =
-    extractToken(response);
+  const token = extractToken(response);
+  const refreshToken = extractRefreshToken(response);
+  const tempToken = extractTempToken(response);
+  const user = extractUser(response);
+  const sessionData = normalizeSessionPayload(response);
+  const requires2FA = extractRequires2FA(response);
 
-  const user =
-    extractUser(response);
+  const hasToken = Boolean(token);
+  const hasUser = hasUsableUserIdentity(user);
 
-  const refreshToken =
-    extractRefreshToken(response);
-
-  const requires2FA =
-    extractRequires2FA(response);
-
-  const tempToken =
-    extractTempToken(response);
-
-  const sessionData =
-    normalizeSessionPayload(response);
-
-  const hasToken =
-    Boolean(
-      normalizeString(token)
-    );
-
-  const hasUser =
-    hasUsableUserIdentity(user);
-
-  const mode =
-    normalizeRoleKey(
-      opts.mode ||
-        opts.flow ||
-        opts.type ||
-        "generic"
-    );
+  const mode = normalizeKey(opts.mode || opts.flow || opts.type || "generic");
 
   const requireAuthenticated =
     opts.requireAuthenticated === true ||
@@ -3256,264 +1485,132 @@ export function validateAuthResponse(response = null, options = {}) {
     mode === "me";
 
   if (requires2FA) {
-    if (
-      !tempToken &&
-      opts.allow2FAWithoutTempToken !== true
-    ) {
-      throw createAuthNormalizeError(
+    if (!tempToken && opts.allow2FAWithoutTempToken !== true) {
+      throw createNormalizeError(
         "Se requiere 2FA pero no se recibió token temporal.",
         {
-          status:
-            401,
-
-          code:
-            "MISSING_2FA_TEMP_TOKEN",
-
+          status: 401,
+          code: "MISSING_2FA_TEMP_TOKEN",
           response,
         }
       );
     }
 
     return {
-      ok:
-        true,
+      ok: true,
+      success: true,
+      authenticated: false,
+      status: "2fa_required",
 
-      success:
-        true,
+      token: null,
+      accessToken: null,
+      access_token: null,
 
-      authenticated:
-        false,
+      user: user || null,
 
-      status:
-        "2fa_required",
+      refreshToken: null,
+      refresh_token: null,
 
-      token:
-        null,
+      session: null,
+      sessionData: null,
 
-      accessToken:
-        null,
+      tempToken: tempToken || null,
+      temp_token: tempToken || null,
 
-      access_token:
-        null,
-
-      user:
-        user || null,
-
-      refreshToken:
-        null,
-
-      refresh_token:
-        null,
-
-      session:
-        null,
-
-      sessionData:
-        null,
-
-      tempToken:
-        tempToken || null,
-
-      temp_token:
-        tempToken || null,
-
-      requires2FA:
-        true,
-
+      requires2FA: true,
       response,
     };
   }
 
-  if (
-    hasToken &&
-    hasUser
-  ) {
+  if (hasToken && hasUser) {
     return {
-      ok:
-        true,
+      ok: true,
+      success: true,
+      authenticated: true,
+      status: "authenticated",
 
-      success:
-        true,
+      token,
+      accessToken: token,
+      access_token: token,
 
-      authenticated:
-        true,
+      user,
+      usuario: user,
+      me: user,
 
-      status:
-        "authenticated",
+      refreshToken: refreshToken || null,
+      refresh_token: refreshToken || null,
 
-      token:
-        token || null,
+      session: sessionData || null,
+      sessionData: sessionData || null,
 
-      accessToken:
-        token || null,
+      tempToken: null,
+      temp_token: null,
 
-      access_token:
-        token || null,
-
-      user:
-        user || null,
-
-      usuario:
-        user || null,
-
-      me:
-        user || null,
-
-      refreshToken:
-        refreshToken || null,
-
-      refresh_token:
-        refreshToken || null,
-
-      session:
-        sessionData || null,
-
-      sessionData:
-        sessionData || null,
-
-      tempToken:
-        null,
-
-      temp_token:
-        null,
-
-      requires2FA:
-        false,
-
+      requires2FA: false,
       response,
     };
   }
 
-  /*
-    Compatibilidad controlada:
-    - refresh puede devolver token_only.
-    - /me puede devolver user_only.
-    - ninguno de los dos marca authenticated.
-  */
-  if (
-    hasToken &&
-    !hasUser &&
-    !requireAuthenticated &&
-    !requireUser
-  ) {
+  if (hasToken && !hasUser && !requireAuthenticated && !requireUser) {
     return {
-      ok:
-        true,
+      ok: true,
+      success: true,
+      authenticated: false,
+      status: "token_only",
 
-      success:
-        true,
+      token,
+      accessToken: token,
+      access_token: token,
 
-      authenticated:
-        false,
+      user: null,
 
-      status:
-        "token_only",
+      refreshToken: refreshToken || null,
+      refresh_token: refreshToken || null,
 
-      token:
-        token || null,
+      session: sessionData || null,
+      sessionData: sessionData || null,
 
-      accessToken:
-        token || null,
+      tempToken: null,
+      temp_token: null,
 
-      access_token:
-        token || null,
-
-      user:
-        null,
-
-      refreshToken:
-        refreshToken || null,
-
-      refresh_token:
-        refreshToken || null,
-
-      session:
-        sessionData || null,
-
-      sessionData:
-        sessionData || null,
-
-      tempToken:
-        null,
-
-      temp_token:
-        null,
-
-      requires2FA:
-        false,
-
+      requires2FA: false,
       response,
     };
   }
 
-  if (
-    !hasToken &&
-    hasUser &&
-    !requireAuthenticated &&
-    !requireToken
-  ) {
+  if (!hasToken && hasUser && !requireAuthenticated && !requireToken) {
     return {
-      ok:
-        true,
+      ok: true,
+      success: true,
+      authenticated: false,
+      status: "user_only",
 
-      success:
-        true,
+      token: null,
+      accessToken: null,
+      access_token: null,
 
-      authenticated:
-        false,
+      user,
+      usuario: user,
+      me: user,
 
-      status:
-        "user_only",
+      refreshToken: refreshToken || null,
+      refresh_token: refreshToken || null,
 
-      token:
-        null,
+      session: sessionData || null,
+      sessionData: sessionData || null,
 
-      accessToken:
-        null,
+      tempToken: null,
+      temp_token: null,
 
-      access_token:
-        null,
-
-      user:
-        user || null,
-
-      usuario:
-        user || null,
-
-      me:
-        user || null,
-
-      refreshToken:
-        refreshToken || null,
-
-      refresh_token:
-        refreshToken || null,
-
-      session:
-        sessionData || null,
-
-      sessionData:
-        sessionData || null,
-
-      tempToken:
-        null,
-
-      temp_token:
-        null,
-
-      requires2FA:
-        false,
-
+      requires2FA: false,
       response,
     };
   }
 
-  throw createAuthNormalizeError(
+  throw createNormalizeError(
     "La respuesta del API no contiene una sesión válida.",
     {
-      status:
-        401,
-
+      status: 401,
       code:
         requireAuthenticated
           ? "INVALID_LOGIN_SESSION"
@@ -3522,110 +1619,54 @@ export function validateAuthResponse(response = null, options = {}) {
             : requireUser
               ? "USER_MISSING"
               : "INVALID_AUTH_RESPONSE",
-
       response,
     }
   );
 }
 
-/* =========================================================
-   NORMALIZED AUTH RESPONSE
-========================================================= */
-
 export function normalizeAuthResponse(response = null, options = {}) {
   try {
-    const validated =
-      validateAuthResponse(
-        response,
-        options
-      );
+    const validated = validateAuthResponse(response, options);
 
     return {
       ...validated,
-
-      error:
-        null,
-
-      valid:
-        true,
-
-      explicitFailure:
-        false,
-
-      code:
-        getErrorCode(response) || "",
-
-      message:
-        getResponseMessage(response) || "",
+      valid: true,
+      explicitFailure: false,
+      error: null,
+      code: getErrorCode(response) || "",
+      message: getResponseMessage(response) || "",
     };
   } catch (error) {
-    const tempToken =
-      extractTempToken(response);
+    const tempToken = extractTempToken(response);
 
     return {
-      ok:
-        false,
+      ok: false,
+      success: false,
+      authenticated: false,
 
-      success:
-        false,
+      status: error?.data?.status || error?.status || "invalid",
+      code: error?.code || error?.data?.code || getErrorCode(response) || "INVALID_LOGIN_SESSION",
+      message: error?.message || getResponseMessage(response) || "La respuesta del API no contiene una sesión válida.",
 
-      authenticated:
-        false,
+      token: null,
+      accessToken: null,
+      access_token: null,
 
-      status:
-        error?.data?.status ||
-        error?.status ||
-        "invalid",
+      user: extractUser(response),
 
-      code:
-        error?.code ||
-        error?.data?.code ||
-        getErrorCode(response) ||
-        "INVALID_LOGIN_SESSION",
+      refreshToken: null,
+      refresh_token: null,
 
-      message:
-        error?.message ||
-        getResponseMessage(response) ||
-        "La respuesta del API no contiene una sesión válida.",
+      session: null,
+      sessionData: null,
 
-      token:
-        null,
+      tempToken: tempToken || null,
+      temp_token: tempToken || null,
 
-      accessToken:
-        null,
+      requires2FA: extractRequires2FA(response),
 
-      access_token:
-        null,
-
-      user:
-        extractUser(response),
-
-      refreshToken:
-        null,
-
-      refresh_token:
-        null,
-
-      session:
-        null,
-
-      sessionData:
-        null,
-
-      tempToken:
-        tempToken || null,
-
-      temp_token:
-        tempToken || null,
-
-      requires2FA:
-        extractRequires2FA(response),
-
-      valid:
-        false,
-
-      explicitFailure:
-        isExplicitAuthFailure(response),
+      valid: false,
+      explicitFailure: isExplicitAuthFailure(response),
 
       error,
       response,
@@ -3633,143 +1674,67 @@ export function normalizeAuthResponse(response = null, options = {}) {
   }
 }
 
-/*
-  Alias público cómodo para módulos que esperen nombre de payload.
-*/
 export function normalizeAuthPayload(response = null, options = {}) {
-  return normalizeAuthResponse(
-    response,
-    options
-  );
+  return normalizeAuthResponse(response, options);
 }
 
 /* =========================================================
-   DEBUG SNAPSHOT
+   DEBUG
 ========================================================= */
 
 export function getAuthNormalizeSnapshot(response = null) {
-  const token =
-    extractToken(response);
-
-  const refreshToken =
-    extractRefreshToken(response);
-
-  const tempToken =
-    extractTempToken(response);
-
-  const user =
-    extractUser(response);
-
-  const normalized =
-    normalizeAuthResponse(
-      response,
-      {
-        allow2FAWithoutTempToken:
-          true,
-      }
-    );
+  const token = extractToken(response);
+  const refreshToken = extractRefreshToken(response);
+  const tempToken = extractTempToken(response);
+  const user = extractUser(response);
+  const normalized = normalizeAuthResponse(response, {
+    allow2FAWithoutTempToken: true,
+  });
 
   return {
-    version:
-      AUTH_NORMALIZE_VERSION,
+    version: AUTH_NORMALIZE_VERSION,
 
-    explicitFailure:
-      isExplicitAuthFailure(response),
+    explicitFailure: isExplicitAuthFailure(response),
 
-    status:
-      getStatusValue(response) || null,
+    status: getStatusValue(response) || null,
+    normalizedStatus: normalized.status || null,
 
-    normalizedStatus:
-      normalized.status || null,
+    code: getErrorCode(response) || null,
+    message: getResponseMessage(response) || null,
 
-    code:
-      getErrorCode(response) || null,
+    valid: Boolean(normalized.valid),
+    authenticated: Boolean(normalized.authenticated),
 
-    message:
-      getResponseMessage(response) || null,
+    hasToken: Boolean(token),
+    tokenPreview: token ? redactToken(token) : null,
 
-    valid:
-      Boolean(normalized.valid),
+    hasRefreshToken: Boolean(refreshToken),
+    refreshTokenPreview: refreshToken ? redactToken(refreshToken) : null,
 
-    authenticated:
-      Boolean(normalized.authenticated),
+    hasTempToken: Boolean(tempToken),
+    tempTokenPreview: tempToken ? redactToken(tempToken) : null,
 
-    hasToken:
-      Boolean(token),
+    requires2FA: extractRequires2FA(response),
 
-    tokenPreview:
-      token
-        ? redactToken(token)
-        : null,
+    hasUser: Boolean(user),
 
-    hasRefreshToken:
-      Boolean(refreshToken),
+    user: user
+      ? {
+          id: user.id || null,
+          userId: user.userId || null,
+          username: user.username || null,
+          email: user.email || null,
+          role: user.role || null,
+          roles: user.roles || [],
+          isAdmin: Boolean(user.isAdmin),
+          isClient: Boolean(user.isClient),
+          hasAvatar: Boolean(user.hasAvatar),
+          theme: user.theme || null,
+          darkMode: user.darkMode,
+        }
+      : null,
 
-    refreshTokenPreview:
-      refreshToken
-        ? redactToken(refreshToken)
-        : null,
-
-    hasTempToken:
-      Boolean(tempToken),
-
-    tempTokenPreview:
-      tempToken
-        ? redactToken(tempToken)
-        : null,
-
-    requires2FA:
-      extractRequires2FA(response),
-
-    hasUser:
-      Boolean(user),
-
-    user:
-      user
-        ? {
-            id:
-              user.id || null,
-
-            userId:
-              user.userId || null,
-
-            username:
-              user.username || null,
-
-            email:
-              user.email || null,
-
-            role:
-              user.role || null,
-
-            roles:
-              user.roles || [],
-
-            isAdmin:
-              Boolean(user.isAdmin),
-
-            isSupport:
-              Boolean(user.isSupport),
-
-            isManager:
-              Boolean(user.isManager),
-
-            isClient:
-              Boolean(user.isClient),
-
-            hasAvatar:
-              Boolean(user.hasAvatar),
-
-            theme:
-              user.theme || null,
-
-            darkMode:
-              user.darkMode,
-          }
-        : null,
-
-    sessionData:
-      normalizeSessionPayload(response),
+    sessionData: normalizeSessionPayload(response),
   };
 }
 
@@ -3786,6 +1751,7 @@ export default {
   normalizeRoleList,
   expandRoleAliases,
 
+  normalizeTokenValue,
   hasUsableToken,
   isAuthEnvelope,
 

@@ -2,9 +2,9 @@
    Onion SPA - Auth Login
    Archivo: src/features/auth/login.js
 
-   EXTREME PRO SYSTEM · AUTH LOGIN · 16/10
+   EXTREME PRO SYSTEM · AUTH LOGIN · 17/10
    BACKEND ALIGNED · NO CSS · NO INLINE STYLE · NO AUTH FANTASMA
-   NO EVENT DUPLICATION · COSMOS SESSION SAFE · 2FA SAFE
+   NO EVENT DUPLICATION · NO FREEZE · 2FA SAFE
 
    RESPONSABILIDADES:
    - Preparar credenciales login.
@@ -37,14 +37,17 @@
    - Soportar 2FA/MFA/OTP sin marcar authenticated.
    - Aplicar sesión sólo con token + user válidos.
    - Preservar sessionId/userId/expiresAt/tokenVersion para refresh.
-   - Navegación SPA consistente tras login real.
+   - Respetar skipNavigation / noRedirect cuando LoginView controla navegación.
+   - Navegación SPA consistente si Auth.login se usa directamente.
+   - Sin history.replaceState como fallback falso positivo.
+   - Fallback duro a location.assign si no hay Router real.
    - Submit desde formularios HTML.
    - Mutex real contra login concurrente.
    - Limpiar sesión previa antes de login.
    - Evitar usuario/token antiguos como fallback.
    - No emitir eventos restore desde login.
    - No duplicar auth:login:success por defecto.
-   - Limpiar auth-screen tras login real.
+   - Limpiar auth-screen sólo cuando Auth.login controla navegación.
    - Reparar sidebar/topbar vía eventos de UI, sin CSS ni estilos inline.
    - Blindar logs/eventos contra tokens, passwords y URLs sensibles.
    - Fallback fetch si AppCore apiClient/Http no está disponible.
@@ -70,7 +73,7 @@ import { AppCore } from "../../core/index.js";
 import {
   isBrowser,
   sanitizeUsername,
-  normalizePath,
+  normalizePath as normalizeAppPath,
   normalizeCanonicalPath,
   getCurrentCanonicalPath,
   isAuthRoute,
@@ -108,7 +111,7 @@ import {
 ========================================================= */
 
 export const LOGIN_VERSION =
-  "16.0.0-extreme-pro-backend-aligned";
+  "17.0.0-extreme-pro-no-freeze";
 
 let loginPromise =
   null;
@@ -183,6 +186,39 @@ const AUTH_FAILURE_CODES =
     "REFRESH_INVALID_SESSION",
     "TOKEN_VERSION_MISMATCH",
     "AUTH_RUNTIME_MISCONFIGURED",
+  ]);
+
+const AUTH_FAILURE_STATUSES =
+  new Set([
+    "error",
+    "failed",
+    "failure",
+    "invalid",
+    "unauthorized",
+    "forbidden",
+    "expired",
+    "auth_error",
+    "auth_failed",
+    "login_failed",
+    "not_authenticated",
+    "session_expired",
+    "token_expired",
+    "invalid_token",
+    "disabled",
+    "blocked",
+    "locked",
+    "revoked",
+  ]);
+
+const TWO_FACTOR_STATUSES =
+  new Set([
+    "2fa_required",
+    "mfa_required",
+    "two_factor_required",
+    "totp_required",
+    "otp_required",
+    "verification_required",
+    "challenge_required",
   ]);
 
 const KNOWN_AUTH_STORAGE_KEYS =
@@ -387,6 +423,8 @@ const STATUS_KEYS =
     "status",
     "statusCode",
     "status_code",
+    "state",
+    "estado",
   ]);
 
 const CODE_KEYS =
@@ -405,6 +443,10 @@ const MESSAGE_KEYS =
     "error_message",
     "detail",
     "description",
+    "title",
+    "reason",
+    "msg",
+    "error",
   ]);
 
 const REDIRECT_KEYS =
@@ -417,6 +459,7 @@ const REDIRECT_KEYS =
     "next_path",
     "returnTo",
     "return_to",
+    "target",
   ]);
 
 const SESSION_OBJECT_KEYS =
@@ -478,16 +521,28 @@ const TWO_FACTOR_BOOL_KEYS =
     "requires_mfa",
     "otpRequired",
     "otp_required",
+    "challengeRequired",
+    "challenge_required",
   ]);
 
-const TWO_FACTOR_STATUSES =
+const BAD_TOKEN_VALUES =
   new Set([
-    "2fa_required",
-    "mfa_required",
-    "two_factor_required",
-    "totp_required",
-    "otp_required",
-    "verification_required",
+    "",
+    "null",
+    "undefined",
+    "false",
+    "true",
+    "none",
+    "nan",
+    "empty",
+    "[object object]",
+    "{}",
+    "[]",
+    "\"\"",
+    "''",
+    "\"null\"",
+    "\"undefined\"",
+    "\"false\"",
   ]);
 
 /* =========================================================
@@ -509,6 +564,17 @@ function safeText(value, fallback = "") {
       .trim();
 
   return text || fallback;
+}
+
+function safeRawText(value, fallback = "") {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  return String(value);
 }
 
 function safeBool(value, fallback = false) {
@@ -591,16 +657,26 @@ function isFunction(value) {
 }
 
 function unique(values = []) {
-  return Array.from(
-    new Set(
-      safeArray(values)
-        .flat(Infinity)
-        .map((value) =>
-          safeText(value, "")
-        )
-        .filter(Boolean)
-    )
-  );
+  const output =
+    [];
+
+  const seen =
+    new Set();
+
+  for (const value of safeArray(values).flat(Infinity)) {
+    const text =
+      safeText(value, "");
+
+    if (
+      text &&
+      !seen.has(text)
+    ) {
+      seen.add(text);
+      output.push(text);
+    }
+  }
+
+  return output;
 }
 
 function pickFirstValue(...values) {
@@ -645,10 +721,7 @@ function wait(ms = 0) {
     try {
       setTimeout(
         resolve,
-        Math.max(
-          0,
-          safeNumber(ms, 0)
-        )
+        Math.max(0, safeNumber(ms, 0))
       );
     } catch {
       resolve();
@@ -730,6 +803,23 @@ function safeSetState(patch = {}, options = {}) {
   } catch {}
 
   try {
+    AppCore?.patchState?.(
+      cleanPatch,
+      {
+        source:
+          LOGIN_SOURCE,
+        emit:
+          false,
+        emitState:
+          false,
+        silent:
+          true,
+        ...safeObject(options),
+      }
+    );
+  } catch {}
+
+  try {
     if (
       AppCore?.state &&
       typeof AppCore.state === "object"
@@ -742,6 +832,77 @@ function safeSetState(patch = {}, options = {}) {
   } catch {}
 
   return getState();
+}
+
+function normalizeLocalPath(path = "/") {
+  const raw =
+    safeText(path, "/") || "/";
+
+  try {
+    const normalized =
+      normalizeAppPath(raw);
+
+    if (normalized) {
+      return normalized;
+    }
+  } catch {}
+
+  if (raw === "/") {
+    return "/";
+  }
+
+  let value =
+    raw
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+  if (!value.startsWith("/")) {
+    value =
+      `/${value}`;
+  }
+
+  if (
+    value.length > 1 &&
+    value.endsWith("/")
+  ) {
+    value =
+      value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value || "/";
+}
+
+function stripSearchAndHash(path = "/") {
+  const raw =
+    safeText(path, "/");
+
+  return (
+    normalizeLocalPath(raw)
+      .split("?")[0]
+      .split("#")[0] ||
+    "/"
+  );
+}
+
+function normalizeStatusKey(value = "") {
+  const raw =
+    safeText(value, "")
+      .toLowerCase();
+
+  if (!raw) {
+    return "";
+  }
+
+  if (Number.isFinite(Number(raw))) {
+    return "";
+  }
+
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_:.]/g, "")
+    .replace(/^_+|_+$/g, "");
 }
 
 function redactSafe(value = "") {
@@ -781,7 +942,10 @@ function redactIdentifier(value = "") {
   }
 
   if (text.includes("@")) {
-    const [local = "", domain = ""] =
+    const [
+      local = "",
+      domain = "",
+    ] =
       text.split("@");
 
     return `${local.slice(0, 2)}***@${domain || "***"}`;
@@ -1308,8 +1472,10 @@ function clearLoginAbortController(abortCtx = null) {
 
 function withMergedSignal(primarySignal = null, fallbackSignal = null) {
   const signals =
-    [primarySignal, fallbackSignal]
-      .filter(Boolean);
+    [
+      primarySignal,
+      fallbackSignal,
+    ].filter(Boolean);
 
   if (!signals.length) {
     return null;
@@ -1624,21 +1790,38 @@ async function apiPost(path, body = {}, options = {}) {
           );
 
         return await readMaybeResponse(result);
-      } catch (error) {
+      } catch (firstError) {
         try {
           const result =
             await apiClient.request(
-              "POST",
-              path,
               {
                 ...finalOptions,
+                method:
+                  "POST",
+                url:
+                  path,
+                path,
                 body,
               }
             );
 
           return await readMaybeResponse(result);
         } catch {
-          throw error;
+          try {
+            const result =
+              await apiClient.request(
+                "POST",
+                path,
+                {
+                  ...finalOptions,
+                  body,
+                }
+              );
+
+            return await readMaybeResponse(result);
+          } catch {
+            throw firstError;
+          }
         }
       }
     }
@@ -1661,24 +1844,12 @@ function normalizeCleanRoute(path = "/") {
   try {
     return configLikeRoute(
       normalizeCanonicalPath(
-        normalizePath(path || "/")
+        normalizeLocalPath(path || "/")
       )
     );
   } catch {
     return String(path || "/");
   }
-}
-
-function stripSearchAndHash(path = "/") {
-  const raw =
-    safeText(path, "/");
-
-  return normalizeCleanRoute(
-    raw
-      .split("?")[0]
-      .split("#")[0] ||
-      "/"
-  );
 }
 
 function isRouteDefaultRedirect(path = "") {
@@ -1735,7 +1906,7 @@ function getBrowserPath() {
   }
 
   try {
-    return normalizePath(
+    return normalizeLocalPath(
       `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
     );
   } catch {
@@ -1769,24 +1940,30 @@ function sameCanonicalPath(a = "/", b = "/") {
   }
 }
 
+function isLoginRoute(path = "") {
+  const clean =
+    stripSearchAndHash(path);
+
+  return (
+    clean === DEFAULT_LOGIN_PATH ||
+    clean === getLoginRoute() ||
+    clean.startsWith(`${DEFAULT_LOGIN_PATH}/`) ||
+    clean.startsWith(`${getLoginRoute()}/`)
+  );
+}
+
 function shouldNavigateAfterLogin(options = {}) {
   return !(
     options?.navigate === false ||
     options?.skipNavigate === true ||
-    options?.manualNavigate === true
+    options?.skipNavigation === true ||
+    options?.manualNavigate === true ||
+    options?.skipRedirect === true ||
+    options?.noRedirect === true ||
+    options?.skipPostLoginNavigation === true ||
+    options?.skipPostRestoreNavigation === true ||
+    options?.preserveCurrentRoute === true
   );
-}
-
-function buildPopStateEvent() {
-  try {
-    return new PopStateEvent("popstate");
-  } catch {
-    try {
-      return new Event("popstate");
-    } catch {
-      return null;
-    }
-  }
 }
 
 /* =========================================================
@@ -1867,6 +2044,21 @@ function clearAuthScreenDomState(reason = "login-success") {
       "data-authenticated",
       "true"
     );
+
+    document.body?.setAttribute?.(
+      "data-route-mode",
+      "app"
+    );
+
+    document.body?.setAttribute?.(
+      "data-chrome",
+      "visible"
+    );
+
+    document.body?.setAttribute?.(
+      "data-shell",
+      "visible"
+    );
   } catch {}
 
   try {
@@ -1885,6 +2077,21 @@ function clearAuthScreenDomState(reason = "login-success") {
     document.documentElement?.setAttribute?.(
       "data-authenticated",
       "true"
+    );
+
+    document.documentElement?.setAttribute?.(
+      "data-route-mode",
+      "app"
+    );
+
+    document.documentElement?.setAttribute?.(
+      "data-chrome",
+      "visible"
+    );
+
+    document.documentElement?.setAttribute?.(
+      "data-shell",
+      "visible"
     );
   } catch {}
 
@@ -2132,6 +2339,7 @@ async function resolveRouter() {
     if (
       candidate &&
       (
+        isFunction(candidate.goAfterLogin) ||
         isFunction(candidate.navigate) ||
         isFunction(candidate.go) ||
         isFunction(candidate.push) ||
@@ -2154,6 +2362,7 @@ async function resolveRouter() {
     if (
       router &&
       (
+        isFunction(router.goAfterLogin) ||
         isFunction(router.navigate) ||
         isFunction(router.go) ||
         isFunction(router.push) ||
@@ -2169,7 +2378,7 @@ async function resolveRouter() {
 
 function updateCoreRouteState(target = "/") {
   const cleanTarget =
-    normalizePath(
+    normalizeLocalPath(
       target || "/"
     ) || "/";
 
@@ -2220,28 +2429,103 @@ function updateCoreRouteState(target = "/") {
   };
 }
 
+function withNavigationTimeout(promiseLike, timeoutMs = 0) {
+  const ms =
+    Math.max(
+      1000,
+      safeNumber(timeoutMs, 8000)
+    );
+
+  let timer =
+    null;
+
+  const timeout =
+    new Promise((_, reject) => {
+      timer =
+        setTimeout(() => {
+          const error =
+            new Error("LOGIN_NAVIGATION_TIMEOUT");
+
+          error.code =
+            "LOGIN_NAVIGATION_TIMEOUT";
+
+          reject(error);
+        }, ms);
+    });
+
+  return Promise.race([
+    Promise.resolve(promiseLike),
+    timeout,
+  ]).finally(() => {
+    if (timer) {
+      try {
+        clearTimeout(timer);
+      } catch {}
+    }
+  });
+}
+
 async function callRouterNavigation(router, target, options = {}) {
   const targetCanonical =
     configLikeRoute(
       normalizeCanonicalPath(target)
     );
 
+  const commonOptions = {
+    replaceState:
+      options.replaceState !== false,
+    force:
+      true,
+    forceRender:
+      true,
+    source:
+      LOGIN_SOURCE,
+    reason:
+      options.reason || "login-navigation",
+    publicPath:
+      target,
+    requestedPath:
+      target,
+    canonicalPath:
+      targetCanonical,
+    preservePublicPath:
+      true,
+  };
+
+  const timeoutMs =
+    resolveLoginTimeout(options);
+
+  if (
+    router &&
+    isFunction(router.goAfterLogin)
+  ) {
+    await withNavigationTimeout(
+      router.goAfterLogin(
+        target,
+        commonOptions
+      ),
+      timeoutMs
+    );
+
+    return {
+      ok:
+        true,
+      method:
+        "goAfterLogin",
+    };
+  }
+
   if (
     router &&
     isFunction(router.navigate)
   ) {
-    const result =
+    await withNavigationTimeout(
       router.navigate(
         target,
-        options
-      );
-
-    if (
-      result &&
-      isFunction(result.then)
-    ) {
-      await result;
-    }
+        commonOptions
+      ),
+      timeoutMs
+    );
 
     return {
       ok:
@@ -2255,18 +2539,13 @@ async function callRouterNavigation(router, target, options = {}) {
     router &&
     isFunction(router.go)
   ) {
-    const result =
+    await withNavigationTimeout(
       router.go(
         target,
-        options
-      );
-
-    if (
-      result &&
-      isFunction(result.then)
-    ) {
-      await result;
-    }
+        commonOptions
+      ),
+      timeoutMs
+    );
 
     return {
       ok:
@@ -2280,18 +2559,13 @@ async function callRouterNavigation(router, target, options = {}) {
     router &&
     isFunction(router.push)
   ) {
-    const result =
+    await withNavigationTimeout(
       router.push(
         target,
-        options
-      );
-
-    if (
-      result &&
-      isFunction(result.then)
-    ) {
-      await result;
-    }
+        commonOptions
+      ),
+      timeoutMs
+    );
 
     return {
       ok:
@@ -2305,34 +2579,13 @@ async function callRouterNavigation(router, target, options = {}) {
     router &&
     isFunction(router.render)
   ) {
-    const result =
+    await withNavigationTimeout(
       router.render(
         targetCanonical,
-        {
-          ...options,
-          publicPath:
-            target,
-          requestedPath:
-            target,
-          canonicalPath:
-            targetCanonical,
-          preservePublicPath:
-            true,
-          replaceState:
-            options.replaceState !== false,
-          force:
-            true,
-          source:
-            LOGIN_SOURCE,
-        }
-      );
-
-    if (
-      result &&
-      isFunction(result.then)
-    ) {
-      await result;
-    }
+        commonOptions
+      ),
+      timeoutMs
+    );
 
     return {
       ok:
@@ -2350,14 +2603,33 @@ async function callRouterNavigation(router, target, options = {}) {
   };
 }
 
+function hardRedirectTo(target = DEFAULT_HOME_PATH) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  const finalTarget =
+    normalizeRedirectCandidate(target) ||
+    getHomeRoute();
+
+  try {
+    window.location.assign(finalTarget);
+    return true;
+  } catch {
+    try {
+      window.location.href =
+        finalTarget;
+
+      return true;
+    } catch {}
+  }
+
+  return false;
+}
+
 async function safeNavigate(path = "/", options = {}) {
   const target =
-    normalizePath(
-      safeText(
-        path,
-        getHomeRoute()
-      )
-    ) ||
+    normalizeRedirectCandidate(path) ||
     getHomeRoute();
 
   const current =
@@ -2433,11 +2705,12 @@ async function safeNavigate(path = "/", options = {}) {
           target,
           {
             replaceState,
-            force:
-              true,
-            source:
-              LOGIN_SOURCE,
+            force,
             reason,
+            timeout:
+              options.timeout,
+            timeoutMs:
+              options.timeoutMs,
           }
         );
 
@@ -2447,6 +2720,17 @@ async function safeNavigate(path = "/", options = {}) {
         clearAuthScreenDomState(
           `${reason}:${nav.method}`
         );
+
+        await wait(0);
+
+        if (
+          options.hardFallbackOnStaleLogin !== false &&
+          isBrowser() &&
+          isLoginRoute(getBrowserPath()) &&
+          !sameCanonicalPath(getBrowserCanonicalPath(), targetCanonical)
+        ) {
+          hardRedirectTo(target);
+        }
 
         const navResult = {
           ok:
@@ -2486,82 +2770,24 @@ async function safeNavigate(path = "/", options = {}) {
     }
   }
 
-  try {
-    if (
-      isBrowser() &&
-      typeof window.history?.replaceState === "function"
-    ) {
-      window.history.replaceState(
-        {
-          path:
-            target,
-          publicPath:
-            target,
-          canonicalPath:
-            targetCanonical,
-          source:
-            LOGIN_SOURCE,
-        },
-        "",
-        target
-      );
-
-      updateCoreRouteState(target);
-
-      clearAuthScreenDomState(
-        `${reason}:history`
-      );
-
-      const popStateEvent =
-        buildPopStateEvent();
-
-      if (popStateEvent) {
-        window.dispatchEvent(popStateEvent);
-      }
-
-      const navResult = {
-        ok:
-          true,
-        skipped:
-          false,
-        method:
-          "history",
-        reason:
-          "history",
-        target,
-      };
-
-      safeEmit(
-        "auth:login:navigation:complete",
-        navResult
-      );
-
-      return navResult;
-    }
-  } catch (error) {
-    safeWarn(
-      "history fallback falló.",
-      error
-    );
+  /*
+    Fallback real.
+    No usamos history.replaceState aquí porque cambia la URL
+    pero puede dejar la vista login pintada y provocar congelación visual.
+  */
+  if (hardRedirectTo(target)) {
+    return {
+      ok:
+        true,
+      skipped:
+        false,
+      method:
+        "location",
+      reason:
+        "location",
+      target,
+    };
   }
-
-  try {
-    if (isBrowser()) {
-      window.location.assign(target);
-
-      return {
-        ok:
-          true,
-        skipped:
-          false,
-        method:
-          "location",
-        reason:
-          "location",
-        target,
-      };
-    }
-  } catch {}
 
   const failed = {
     ok:
@@ -2645,10 +2871,11 @@ export function normalizeLoginPayload(credentials = {}) {
       .slice(0, maxIdentifier);
 
   const password =
-    String(
+    safeRawText(
       credentials.password ??
         credentials.pass ??
-        ""
+        "",
+      ""
     ).slice(0, maxPassword);
 
   return {
@@ -2769,7 +2996,7 @@ function normalizeRedirectCandidate(value = "") {
   } catch {
     try {
       candidate =
-        normalizePath(raw);
+        normalizeLocalPath(raw);
     } catch {
       candidate =
         "";
@@ -2921,7 +3148,7 @@ function collectAuthObjects(raw = {}) {
     [];
 
   const seen =
-    new Set();
+    new WeakSet();
 
   const queue =
     [raw];
@@ -2931,7 +3158,7 @@ function collectAuthObjects(raw = {}) {
 
   while (
     queue.length &&
-    guard < 160
+    guard < 180
   ) {
     guard += 1;
 
@@ -2939,13 +3166,19 @@ function collectAuthObjects(raw = {}) {
       queue.shift();
 
     if (
-      !isPlainObject(current) ||
-      seen.has(current)
+      !isPlainObject(current)
     ) {
       continue;
     }
 
-    seen.add(current);
+    try {
+      if (seen.has(current)) {
+        continue;
+      }
+
+      seen.add(current);
+    } catch {}
+
     output.push(current);
 
     for (const key of AUTH_OBJECT_KEYS) {
@@ -3077,36 +3310,49 @@ function validateAuthResponseSoft(response) {
   }
 }
 
-function hasUsableToken(token = "") {
-  const value =
-    safeText(token, "")
-      .replace(/^Bearer\s+/i, "")
-      .trim();
+function normalizeTokenValue(token = "") {
+  let value =
+    safeText(token, "");
 
   if (!value) {
-    return false;
+    return "";
   }
+
+  value =
+    value.replace(/^Bearer\s+/i, "")
+      .trim();
 
   const lower =
     value.toLowerCase();
 
   if (
-    [
-      "null",
-      "undefined",
-      "false",
-      "true",
-      "nan",
-      "none",
-      "[object object]",
-      "{}",
-      "[]",
-    ].includes(lower)
+    BAD_TOKEN_VALUES.has(lower) ||
+    /[\s\r\n\t]/.test(value)
   ) {
-    return false;
+    return "";
   }
 
-  if (/[\s\r\n\t]/.test(value)) {
+  const maxTokenLength =
+    safeNumber(
+      AUTH_CONSTANTS?.tokenMaxLength,
+      8192
+    );
+
+  if (
+    maxTokenLength > 0 &&
+    value.length > maxTokenLength
+  ) {
+    return "";
+  }
+
+  return value;
+}
+
+function hasUsableToken(token = "") {
+  const value =
+    normalizeTokenValue(token);
+
+  if (!value) {
     return false;
   }
 
@@ -3119,12 +3365,6 @@ function hasUsableToken(token = "") {
   } catch {}
 
   return true;
-}
-
-function stripBearer(token = "") {
-  return safeText(token, "")
-    .replace(/^Bearer\s+/i, "")
-    .trim();
 }
 
 function resolveAvatar(user = {}) {
@@ -3163,14 +3403,13 @@ function isUserActive(user = null) {
   }
 
   const status =
-    safeText(
+    normalizeStatusKey(
       user.status ||
         user.estado ||
         user.state ||
         user.accountStatus ||
-        "",
-      ""
-    ).toLowerCase();
+        ""
+    );
 
   if (
     [
@@ -3226,6 +3465,16 @@ function isUserActive(user = null) {
   );
 }
 
+function normalizeRole(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_:.]/g, "")
+    .replace(/^_+|_+$/g, "");
+}
+
 function normalizeUserForClient(user = {}) {
   if (!isPlainObject(user)) {
     return null;
@@ -3260,14 +3509,18 @@ function normalizeUserForClient(user = {}) {
     );
 
   const role =
-    pickFirstText(
-      user.role,
-      user.rol,
-      user.type,
-      user.tipo,
-      user.userType,
-      user.user_type,
-      "user"
+    normalizeRole(
+      pickFirstText(
+        user.role,
+        user.rol,
+        user.type,
+        user.tipo,
+        user.userRole,
+        user.user_role,
+        user.userType,
+        user.user_type,
+        "user"
+      )
     );
 
   const avatar =
@@ -3337,8 +3590,7 @@ function normalizeUserForClient(user = {}) {
       username ||
       null,
 
-    usernameLower:
-      usernameLower,
+    usernameLower,
 
     username_lower:
       user.username_lower ||
@@ -3400,6 +3652,7 @@ function normalizeUserForClient(user = {}) {
       "Usuario",
 
     role,
+
     rol:
       role,
 
@@ -3410,12 +3663,15 @@ function normalizeUserForClient(user = {}) {
       ]),
 
     permissions,
+
     permisos:
       permissions,
 
     avatar,
+
     avatarUrl:
       avatar,
+
     picture:
       avatar,
 
@@ -3529,18 +3785,22 @@ function normalizeCliente(cliente = null) {
 
   return {
     ...cliente,
+
     id:
       cliente.id ||
       clienteId ||
       null,
+
     clienteId:
       cliente.clienteId ||
       clienteId ||
       null,
+
     clientId:
       cliente.clientId ||
       clienteId ||
       null,
+
     active:
       cliente.active !== false,
   };
@@ -3682,22 +3942,28 @@ function extractAuthFields(raw = {}) {
   const objects =
     collectAuthObjects(raw);
 
-  const token =
-    pickTextFromObjects(
-      objects,
-      AUTH_TOKEN_KEYS
+  let token =
+    normalizeTokenValue(
+      pickTextFromObjects(
+        objects,
+        AUTH_TOKEN_KEYS
+      )
     );
 
   const refreshToken =
-    pickTextFromObjects(
-      objects,
-      REFRESH_TOKEN_KEYS
+    normalizeTokenValue(
+      pickTextFromObjects(
+        objects,
+        REFRESH_TOKEN_KEYS
+      )
     );
 
-  const tempToken =
-    pickTextFromObjects(
-      objects,
-      TEMP_TOKEN_KEYS
+  let tempToken =
+    normalizeTokenValue(
+      pickTextFromObjects(
+        objects,
+        TEMP_TOKEN_KEYS
+      )
     );
 
   const userRaw =
@@ -3730,11 +3996,13 @@ function extractAuthFields(raw = {}) {
     );
 
   const role =
-    pickFirstText(
-      pickTextFromObjects(objects, ROLE_KEYS),
-      user?.role,
-      user?.rol,
-      "user"
+    normalizeRole(
+      pickFirstText(
+        pickTextFromObjects(objects, ROLE_KEYS),
+        user?.role,
+        user?.rol,
+        "user"
+      )
     );
 
   const permissions =
@@ -3751,6 +4019,9 @@ function extractAuthFields(raw = {}) {
         STATUS_KEYS
       )
     );
+
+  const statusKey =
+    normalizeStatusKey(status);
 
   const code =
     pickTextFromObjects(
@@ -3819,17 +4090,31 @@ function extractAuthFields(raw = {}) {
       pickValueFromObjects(objects, TOKEN_VERSION_KEYS)
     );
 
-  const statusText =
-    safeText(status, "")
-      .toLowerCase();
-
-  const requires2FA =
+  let requires2FA =
     Boolean(tempToken) ||
     pickBoolFromObjects(
       objects,
       TWO_FACTOR_BOOL_KEYS
     ) ||
-    TWO_FACTOR_STATUSES.has(statusText);
+    TWO_FACTOR_STATUSES.has(statusKey);
+
+  if (
+    requires2FA &&
+    !tempToken &&
+    token &&
+    !hasUsableUser(user)
+  ) {
+    tempToken =
+      token;
+
+    token =
+      "";
+  }
+
+  if (requires2FA) {
+    token =
+      "";
+  }
 
   const statusNumber =
     Number(status || 0);
@@ -3848,6 +4133,12 @@ function extractAuthFields(raw = {}) {
       AUTH_FAILURE_CODES.has(codeUpper)
     );
 
+  const hasFailureStatus =
+    Boolean(
+      statusKey &&
+      AUTH_FAILURE_STATUSES.has(statusKey)
+    );
+
   const hasBooleanFailure =
     objects.some((object) => {
       return (
@@ -3862,6 +4153,7 @@ function extractAuthFields(raw = {}) {
     Boolean(
       hasStatusFailure ||
         hasCodeFailure ||
+        hasFailureStatus ||
         hasBooleanFailure
     );
 
@@ -3872,8 +4164,7 @@ function extractAuthFields(raw = {}) {
     hasUsableUser(user);
 
   return {
-    token:
-      stripBearer(token),
+    token,
     refreshToken,
     tempToken,
     user:
@@ -3886,6 +4177,7 @@ function extractAuthFields(raw = {}) {
     role,
     permissions,
     status,
+    statusKey,
     code,
     message,
     redirectTo,
@@ -3957,11 +4249,14 @@ function normalizeAuthPayload({
   return {
     raw:
       response,
+
     validated:
       validated || null,
+
     validationError,
 
     ok,
+
     success:
       ok,
 
@@ -3983,6 +4278,9 @@ function normalizeAuthPayload({
               : ""
       ),
 
+    statusKey:
+      fields.statusKey,
+
     code:
       safeText(fields.code, ""),
 
@@ -3990,18 +4288,30 @@ function normalizeAuthPayload({
       safeText(fields.message, ""),
 
     token:
-      safeText(fields.token, ""),
+      fields.token,
 
     accessToken:
-      safeText(fields.token, ""),
+      fields.token,
+
+    access_token:
+      fields.token,
 
     refreshToken:
-      safeText(fields.refreshToken, ""),
+      fields.refreshToken,
+
+    refresh_token:
+      fields.refreshToken,
 
     tempToken:
-      safeText(fields.tempToken, ""),
+      fields.tempToken,
+
+    temp_token:
+      fields.tempToken,
 
     user:
+      fields.user,
+
+    usuario:
       fields.user,
 
     cliente:
@@ -4019,7 +4329,13 @@ function normalizeAuthPayload({
     role:
       safeText(fields.role, "user"),
 
+    rol:
+      safeText(fields.role, "user"),
+
     permissions:
+      fields.permissions,
+
+    permisos:
       fields.permissions,
 
     sessionData:
@@ -4317,6 +4633,12 @@ function clearAuthRuntimeState(reason = "login_cleanup", options = {}) {
         true,
       skipNavigation:
         true,
+      skipNavigate:
+        true,
+      skipRedirect:
+        true,
+      noRedirect:
+        true,
       skipPostRestoreNavigation:
         true,
       route:
@@ -4335,29 +4657,15 @@ function clearAuthRuntimeState(reason = "login_cleanup", options = {}) {
           `${LOGIN_SOURCE}:fallback`,
         skipNavigation:
           true,
+        skipNavigate:
+          true,
+        skipRedirect:
+          true,
+        noRedirect:
+          true,
       });
     } catch {}
   }
-
-  try {
-    if (options.callCoreClear === true) {
-      AppCore?.clearSession?.({
-        silent:
-          true,
-        reason,
-        source:
-          LOGIN_SOURCE,
-        skipNavigation:
-          true,
-      });
-    }
-  } catch {}
-
-  try {
-    if (options.callSessionClear === true) {
-      AppCore?.session?.clear?.();
-    }
-  } catch {}
 
   safeSetState(
     {
@@ -4483,24 +4791,28 @@ function enforceAuthenticatedCoreState(snapshot = {}) {
     );
 
   const token =
-    stripBearer(
+    normalizeTokenValue(
       snapshot.token ||
-      snapshot.accessToken ||
-      snapshot.access_token ||
-      ""
+        snapshot.accessToken ||
+        snapshot.access_token ||
+        ""
     );
 
   const refreshToken =
-    snapshot.refreshToken ||
-    snapshot.refresh_token ||
-    "";
+    normalizeTokenValue(
+      snapshot.refreshToken ||
+        snapshot.refresh_token ||
+        ""
+    );
 
   const role =
-    snapshot.role ||
-    snapshot.rol ||
-    user?.role ||
-    user?.rol ||
-    "user";
+    normalizeRole(
+      snapshot.role ||
+        snapshot.rol ||
+        user?.role ||
+        user?.rol ||
+        "user"
+    );
 
   const cliente =
     normalizeCliente(
@@ -4564,11 +4876,13 @@ function enforceAuthenticatedCoreState(snapshot = {}) {
 
   const sessionAlias = {
     ...safeObject(session),
+
     sessionId,
     session_id:
       sessionId,
     sid:
       sessionId,
+
     userId:
       sessionUserId,
     user_id:
@@ -4576,30 +4890,38 @@ function enforceAuthenticatedCoreState(snapshot = {}) {
     sessionUserId,
     session_user_id:
       sessionUserId,
+
     user,
     usuario:
       user,
+
     role,
     rol:
       role,
     roles,
+
     permissions,
     permisos:
       permissions,
+
     token,
     accessToken:
       token,
     access_token:
       token,
+
     refreshToken:
       refreshToken || null,
     refresh_token:
       refreshToken || null,
+
     tokenVersion,
     tv:
       tokenVersion,
+
     authenticated:
       true,
+
     source:
       LOGIN_SOURCE,
   };
@@ -4692,6 +5014,7 @@ function enforceAuthenticatedCoreState(snapshot = {}) {
 
       lastLoginAt:
         isoNow(),
+
       lastAuthSource:
         "login",
     },
@@ -4724,6 +5047,61 @@ function enforceAuthenticatedCoreState(snapshot = {}) {
   };
 }
 
+function verifyCoreSession(token = "", user = null) {
+  const state =
+    getState();
+
+  const currentToken =
+    normalizeTokenValue(
+      state.token ||
+        state.accessToken ||
+        state.access_token ||
+        state.session?.token ||
+        state.session?.accessToken ||
+        state.session?.access_token ||
+        ""
+    );
+
+  const currentUser =
+    state.user ||
+    state.currentUser ||
+    state.authUser ||
+    state.sessionUser ||
+    state.session?.user ||
+    null;
+
+  const currentIdentity =
+    pickFirstText(
+      currentUser?.userId,
+      currentUser?.user_id,
+      currentUser?.id,
+      currentUser?.uid,
+      currentUser?.sub,
+      currentUser?.email,
+      currentUser?.username
+    );
+
+  const nextIdentity =
+    pickFirstText(
+      user?.userId,
+      user?.user_id,
+      user?.id,
+      user?.uid,
+      user?.sub,
+      user?.email,
+      user?.username
+    );
+
+  return Boolean(
+    state.authenticated === true &&
+      hasUsableToken(currentToken) &&
+      currentToken === normalizeTokenValue(token) &&
+      currentIdentity &&
+      nextIdentity &&
+      currentIdentity === nextIdentity
+  );
+}
+
 function applyAuthenticatedSession(authData = {}) {
   const sessionData =
     normalizeSessionData(
@@ -4735,7 +5113,7 @@ function applyAuthenticatedSession(authData = {}) {
     null;
 
   const token =
-    stripBearer(authData.token);
+    normalizeTokenValue(authData.token);
 
   const payload = {
     token,
@@ -4910,7 +5288,21 @@ function applyAuthenticatedSession(authData = {}) {
 
   try {
     snapshot =
-      applySession(payload);
+      applySession(
+        payload,
+        {
+          source:
+            LOGIN_SOURCE,
+          emit:
+            false,
+          emitState:
+            false,
+          silent:
+            true,
+          allowExplicitAuthenticated:
+            true,
+        }
+      );
   } catch (error) {
     safeWarn(
       "applySession falló.",
@@ -4928,10 +5320,10 @@ function applyAuthenticatedSession(authData = {}) {
   }
 
   snapshot.token =
-    stripBearer(
+    normalizeTokenValue(
       snapshot.token ||
-      snapshot.accessToken ||
-      token
+        snapshot.accessToken ||
+        token
     );
 
   snapshot.accessToken =
@@ -4939,10 +5331,12 @@ function applyAuthenticatedSession(authData = {}) {
     snapshot.token;
 
   snapshot.refreshToken =
-    snapshot.refreshToken ||
-    snapshot.refresh_token ||
-    authData.refreshToken ||
-    "";
+    normalizeTokenValue(
+      snapshot.refreshToken ||
+        snapshot.refresh_token ||
+        authData.refreshToken ||
+        ""
+    );
 
   snapshot.user =
     normalizeUserForClient(
@@ -4951,11 +5345,13 @@ function applyAuthenticatedSession(authData = {}) {
     );
 
   snapshot.role =
-    snapshot.role ||
-    authData.role ||
-    snapshot.user?.role ||
-    snapshot.user?.rol ||
-    "user";
+    normalizeRole(
+      snapshot.role ||
+        authData.role ||
+        snapshot.user?.role ||
+        snapshot.user?.rol ||
+        "user"
+    );
 
   snapshot.permissions =
     unique([
@@ -4979,8 +5375,8 @@ function applyAuthenticatedSession(authData = {}) {
   snapshot.cliente =
     normalizeCliente(
       snapshot.cliente ||
-      snapshot.client ||
-      authData.cliente
+        snapshot.client ||
+        authData.cliente
     );
 
   snapshot.client =
@@ -4998,9 +5394,25 @@ function applyAuthenticatedSession(authData = {}) {
     snapshot.user?.tokenVersion ??
     null;
 
-  enforceAuthenticatedCoreState(snapshot);
+  const enforced =
+    enforceAuthenticatedCoreState(snapshot);
 
-  return snapshot;
+  if (
+    !verifyCoreSession(
+      enforced.token,
+      enforced.user
+    )
+  ) {
+    enforceAuthenticatedCoreState({
+      ...snapshot,
+      ...enforced,
+    });
+  }
+
+  return {
+    ...snapshot,
+    ...enforced,
+  };
 }
 
 /* =========================================================
@@ -5104,32 +5516,6 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
         validation.ok,
     }
   );
-
-  if (
-    validation.error &&
-    !authData.requires2FA &&
-    !authData.authenticated
-  ) {
-    if (
-      authData.explicitFailure ||
-      authData.ok === false
-    ) {
-      throw createAuthError(
-        authData.message ||
-          extractMessage(validation.error) ||
-          "Credenciales incorrectas.",
-        {
-          status:
-            Number(authData.status) || 401,
-          code:
-            authData.code ||
-            "INVALID_CREDENTIALS",
-          raw:
-            response,
-        }
-      );
-    }
-  }
 
   if (
     authData.explicitFailure ||
@@ -5313,6 +5699,10 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
               options.forceNavigate === true,
             reason:
               "login-2fa",
+            timeout:
+              options.timeout,
+            timeoutMs:
+              options.timeoutMs,
           }
         );
     }
@@ -5356,9 +5746,23 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
     );
   }
 
-  clearAuthScreenDomState(
-    "login-session-applied"
-  );
+  const authLoginControlsNavigation =
+    shouldNavigateAfterLogin(options);
+
+  if (authLoginControlsNavigation) {
+    clearAuthScreenDomState(
+      "login-session-applied"
+    );
+  } else {
+    setDocumentAuthFlags({
+      authenticated:
+        true,
+      loading:
+        false,
+      ready:
+        true,
+    });
+  }
 
   emitLoginSessionCommitted(
     "login-session-applied",
@@ -5373,18 +5777,33 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
 
   await wait(0);
 
+  const trustedAuthRedirect =
+    options.trustAuthRedirect === true &&
+    authData.redirectTo &&
+    !isRouteDefaultRedirect(authData.redirectTo)
+      ? normalizeRedirectCandidate(authData.redirectTo)
+      : "";
+
+  const targetOptions = {
+    ...safeObject(options),
+  };
+
+  if (
+    trustedAuthRedirect &&
+    !targetOptions.redirectTo &&
+    !targetOptions.redirect &&
+    !targetOptions.target &&
+    !targetOptions.next &&
+    !targetOptions.returnTo
+  ) {
+    targetOptions.redirectTo =
+      trustedAuthRedirect;
+  }
+
   const redirectTo =
     getPostLoginTarget(
       snapshot.user,
-      {
-        ...options,
-        redirectTo:
-          authData.redirectTo ||
-          options.redirectTo ||
-          options.redirect ||
-          options.target ||
-          "",
-      }
+      targetOptions
     );
 
   const result = {
@@ -5495,7 +5914,7 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
     );
   }
 
-  if (shouldNavigateAfterLogin(options)) {
+  if (authLoginControlsNavigation) {
     result.navigation =
       await safeNavigate(
         redirectTo,
@@ -5506,22 +5925,32 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
             options.forceNavigate !== false,
           reason:
             "login-success",
+          timeout:
+            options.timeout,
+          timeoutMs:
+            options.timeoutMs,
+          hardFallbackOnStaleLogin:
+            options.hardFallbackOnStaleLogin !== false,
         }
       );
+
+    clearAuthScreenDomState(
+      "login-success-after-navigation"
+    );
   }
 
-  clearAuthScreenDomState(
-    "login-success-after-navigation"
-  );
-
   safeSyncUserUI(
-    "login-success-after-navigation"
+    authLoginControlsNavigation
+      ? "login-success-after-navigation"
+      : "login-success-session-only"
   );
 
   afterPaint(() => {
-    clearAuthScreenDomState(
-      "login-success-after-paint"
-    );
+    if (authLoginControlsNavigation) {
+      clearAuthScreenDomState(
+        "login-success-after-paint"
+      );
+    }
 
     safeSyncUserUI(
       "login-success-after-paint"
@@ -5542,6 +5971,8 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
         Boolean(result.refreshToken),
       tokenVersion:
         result.tokenVersion ?? null,
+      navigationControlledByAuth:
+        authLoginControlsNavigation,
     }
   );
 
@@ -5597,10 +6028,6 @@ export async function login(credentials = {}, options = {}) {
           "before_login",
           {
             emitCleared:
-              false,
-            callCoreClear:
-              false,
-            callSessionClear:
               false,
           }
         );
@@ -5897,6 +6324,12 @@ export function getLoginSnapshot() {
 
     twoFactorPending:
       Boolean(state.twoFactorPending),
+
+    navigationRespectsSkipFlags:
+      true,
+
+    noHistoryFallback:
+      true,
 
     at:
       isoNow(),

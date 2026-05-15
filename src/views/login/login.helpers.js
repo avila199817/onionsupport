@@ -2,33 +2,33 @@
    Onion SPA - Login Helpers
    Archivo: src/views/login/login.helpers.js
 
-   LOGIN HELPERS · FINAL EXTREME PRO SYSTEM · 15/10
+   LOGIN HELPERS · CORE/AUTH SAFE · NO GHOST AUTH · 16/10
 
    RESPONSABILIDADES:
-   - helpers puros del login
-   - validación de credenciales
-   - persistencia del identificador recordado
-   - normalización estricta de respuesta auth
-   - sincronización idempotente de sesión con AppCore real
-   - resolución segura de redirect post-login
-   - evitar redirect automático por rol hacia /usuarios
-   - evitar redirect automático por slug hacia /@usuario
-   - compatibilidad con login por usuario, email o teléfono
-   - tolerancia controlada a 2FA/MFA
-   - evitar doble emisión / doble sync innecesario
-   - evitar sesión autenticada sin token usable + usuario usable
-   - no mezclar payload nuevo con AppCore.state.user antiguo
+   - Helpers puros del login.
+   - Validación de credenciales.
+   - Persistencia del identificador recordado.
+   - Normalización estricta de respuesta auth.
+   - Sincronización idempotente de sesión con AppCore real.
+   - Resolución segura de redirect post-login.
+   - Evitar redirect automático por rol hacia /usuarios.
+   - Evitar redirect automático por slug hacia /@usuario.
+   - Compatibilidad con login por usuario, email o teléfono.
+   - Tolerancia controlada a 2FA/MFA.
+   - Evitar doble emisión / doble sync innecesario.
+   - Evitar sesión autenticada sin token usable + usuario usable.
+   - No mezclar payload nuevo con AppCore.state.user antiguo salvo match verificable.
 
    HARDENING:
-   - detecta ok:false / success:false / status >= 400
-   - soporta data / payload / result / body / response.data / auth / session
-   - token no se trunca: si es corrupto se invalida
-   - password no se trimea en payload final
-   - redirects internos anti open-redirect
-   - /login, reset, activation y 2FA no son destinos post-login normales
+   - Detecta ok:false / success:false / status >= 400.
+   - Soporta data / payload / result / body / response.data / auth / session.
+   - Token no se trunca: si es corrupto se invalida.
+   - Password no se trimea en payload final.
+   - Redirects internos anti open-redirect.
+   - /login, reset, activation y 2FA no son destinos post-login normales.
    - /usuarios, /clientes, /facturas, /incidencias, /servidor y /@slug
-     no se usan como redirect por defecto
-   - eventos/snapshots sin token real
+     no se usan como redirect por defecto.
+   - Eventos/snapshots sin token real.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -38,7 +38,7 @@ import { AppCore } from "../../core/index.js";
 ========================================================= */
 
 export const LOGIN_HELPERS_VERSION =
-  "15.0.0-final-extreme";
+  "16.0.0-extreme-pro";
 
 export const LOGIN_REMEMBER_KEY =
   "auth:last-identifier";
@@ -71,11 +71,20 @@ const AUTH_BLOCKED_REDIRECTS =
 
     "/reset-password",
     "/reset-password/confirm",
+    "/reset-password-confirm",
     "/forgot-password",
     "/recover-password",
     "/password-reset",
+    "/password-reset/request",
+    "/password-reset/confirm",
+    "/password-reset-confirm",
+    "/confirm-reset-password",
 
     "/activate-account",
+    "/activate",
+    "/activation",
+    "/account/activate",
+    "/activate/first-user",
 
     "/2fa",
     "/otp",
@@ -88,10 +97,16 @@ const AUTH_BLOCKED_REDIRECTS =
 const ROLE_DEFAULT_REDIRECTS =
   Object.freeze([
     "/usuarios",
+    "/users",
     "/clientes",
+    "/clients",
     "/facturas",
+    "/invoices",
     "/incidencias",
+    "/tickets",
     "/servidor",
+    "/server",
+    "/hardware",
   ]);
 
 const REMEMBER_IDENTIFIER_KEYS =
@@ -318,6 +333,7 @@ const TWO_FACTOR_STATUSES =
     "two_factor_required",
     "verification_required",
     "challenge_required",
+    "otp_required",
   ]);
 
 const SENSITIVE_KEY_RE =
@@ -496,16 +512,6 @@ function pickFirstText(...values) {
   return "";
 }
 
-function pickFirstObject(...values) {
-  for (const value of values) {
-    if (isPlainObject(value)) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
 function hasOwn(obj, key) {
   try {
     return Object.prototype.hasOwnProperty.call(
@@ -658,13 +664,10 @@ function getTokenMaxLength() {
 ========================================================= */
 
 export function normalizeIdentifier(value = "") {
-  const text =
-    safeText(value, "")
-      .normalize("NFKC")
-      .replace(/\s+/g, " ")
-      .slice(0, getIdentifierMaxLength() + 1);
-
-  return text;
+  return safeText(value, "")
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .slice(0, getIdentifierMaxLength() + 1);
 }
 
 export function isValidEmail(value = "") {
@@ -969,10 +972,16 @@ export function isAuthPath(path = "") {
     clean.startsWith("/login/") ||
     clean.startsWith("/logout/") ||
     clean.startsWith("/reset-password/") ||
+    clean.startsWith("/reset-password-confirm/") ||
     clean.startsWith("/forgot-password/") ||
     clean.startsWith("/recover-password/") ||
     clean.startsWith("/password-reset/") ||
+    clean.startsWith("/password-reset-confirm/") ||
+    clean.startsWith("/confirm-reset-password/") ||
     clean.startsWith("/activate-account/") ||
+    clean.startsWith("/activate/") ||
+    clean.startsWith("/activation/") ||
+    clean.startsWith("/account/activate/") ||
     clean.startsWith("/2fa/") ||
     clean.startsWith("/otp/") ||
     clean.startsWith("/mfa/")
@@ -1088,9 +1097,6 @@ function isRoleDefaultRedirect(path = "") {
     return true;
   }
 
-  /*
-    Evita default post-login tipo /@usuario.
-  */
   if (/^\/@[^/]+\/?$/i.test(clean)) {
     return true;
   }
@@ -1161,7 +1167,8 @@ export function getNamespacedKey(key = "") {
   const prefix =
     safeText(
       AppCore?.config?.storagePrefix ||
-        AppCore?.config?.appKey,
+        AppCore?.config?.appKey ||
+        AppCore?.config?.appId,
       "onion"
     ).replace(/^:+|:+$/g, "") || "onion";
 
@@ -1280,6 +1287,20 @@ export function readStorage(key, fallback = "") {
         }
       }
     } catch {}
+
+    try {
+      if (isFunction(storage?.getJson)) {
+        const value =
+          unwrapStoredText(
+            storage.getJson(candidate, null),
+            ""
+          );
+
+        if (value) {
+          return value;
+        }
+      }
+    } catch {}
   }
 
   if (!isBrowser()) {
@@ -1347,6 +1368,17 @@ export function writeStorage(key, value = "") {
   try {
     if (isFunction(storage?.set)) {
       storage.set(
+        cleanKey,
+        finalValue
+      );
+
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (isFunction(storage?.setJson)) {
+      storage.setJson(
         cleanKey,
         finalValue
       );
@@ -1439,9 +1471,6 @@ export function loadRememberedIdentifier() {
   );
 }
 
-/*
-  Compat legacy.
-*/
 export function loadRememberedEmail() {
   return loadRememberedIdentifier();
 }
@@ -1551,9 +1580,6 @@ export function createLoginPayload({
     telefono:
       finalPhone,
 
-    /*
-      No trim.
-    */
     password:
       safeRawText(password, ""),
 
@@ -1669,7 +1695,7 @@ function collectAuthObjects(payload = null) {
 
   while (
     queue.length &&
-    guard < 120
+    guard < 160
   ) {
     guard += 1;
 
@@ -1792,7 +1818,7 @@ function pickObjectFromObjects(objects = [], keys = []) {
 }
 
 /* =========================================================
-   TOKEN / STATUS EXTRACTION
+   TOKEN / CURRENT SESSION
 ========================================================= */
 
 function normalizeTokenValue(token = null) {
@@ -1830,9 +1856,6 @@ function normalizeTokenValue(token = null) {
   const max =
     getTokenMaxLength();
 
-  /*
-    Tokens no se truncan.
-  */
   if (
     max > 0 &&
     value.length > max
@@ -1842,6 +1865,67 @@ function normalizeTokenValue(token = null) {
 
   return value;
 }
+
+export function hasUsableToken(token = "") {
+  const value =
+    normalizeTokenValue(token);
+
+  if (!value) {
+    return false;
+  }
+
+  try {
+    if (isFunction(AppCore?.utils?.hasValidToken)) {
+      return Boolean(
+        AppCore.utils.hasValidToken(value)
+      );
+    }
+  } catch {}
+
+  return true;
+}
+
+function getCurrentToken() {
+  return normalizeTokenValue(
+    AppCore?.state?.token ||
+      AppCore?.state?.accessToken ||
+      AppCore?.state?.access_token ||
+      AppCore?.state?.auth?.token ||
+      AppCore?.state?.auth?.accessToken ||
+      AppCore?.state?.auth?.access_token ||
+      AppCore?.state?.session?.token ||
+      AppCore?.state?.session?.accessToken ||
+      AppCore?.state?.session?.access_token ||
+      ""
+  );
+}
+
+function getCurrentUser() {
+  return (
+    AppCore?.state?.user ||
+    AppCore?.state?.currentUser ||
+    AppCore?.state?.authUser ||
+    AppCore?.state?.sessionUser ||
+    AppCore?.state?.me ||
+    AppCore?.state?.account ||
+    AppCore?.state?.profile ||
+    AppCore?.state?.auth?.user ||
+    AppCore?.state?.session?.user ||
+    null
+  );
+}
+
+function getStateAuthenticated() {
+  return Boolean(
+    AppCore?.state?.authenticated === true ||
+      AppCore?.state?.auth?.authenticated === true ||
+      AppCore?.state?.session?.authenticated === true
+  );
+}
+
+/* =========================================================
+   TOKEN / STATUS EXTRACTION
+========================================================= */
 
 function extractToken(raw = {}) {
   return normalizeTokenValue(
@@ -1917,21 +2001,58 @@ function extractCode(raw = {}) {
 }
 
 function extractMessage(raw = {}) {
-  return pickTextFromObjects(
-    collectAuthObjects(raw),
-    [
-      "message",
-      "mensaje",
-      "errorMessage",
-      "error_message",
-      "detail",
-      "description",
-      "title",
-      "reason",
-      "msg",
-      "error",
-    ]
-  );
+  const objects =
+    collectAuthObjects(raw);
+
+  for (const object of objects) {
+    const value =
+      pickValueFromObjects(
+        [object],
+        [
+          "message",
+          "mensaje",
+          "errorMessage",
+          "error_message",
+          "detail",
+          "description",
+          "title",
+          "reason",
+          "msg",
+          "error",
+        ]
+      );
+
+    if (
+      typeof value === "string" ||
+      typeof value === "number"
+    ) {
+      const text =
+        safeText(value, "");
+
+      if (text && text !== "[object Object]") {
+        return text;
+      }
+    }
+
+    if (isPlainObject(value)) {
+      const text =
+        pickFirstText(
+          value.message,
+          value.mensaje,
+          value.detail,
+          value.description,
+          value.title,
+          value.code,
+          value.error
+        );
+
+      if (text) {
+        return text;
+      }
+    }
+  }
+
+  return "";
 }
 
 function extractRedirectTo(raw = {}) {
@@ -2097,6 +2218,85 @@ function normalizeRole(value = "") {
     .replace(/[\s-]+/g, "_")
     .replace(/[^a-z0-9_:.]/g, "")
     .replace(/^_+|_+$/g, "");
+}
+
+function isUserActive(user = null) {
+  if (!isPlainObject(user)) {
+    return false;
+  }
+
+  const status =
+    normalizeRole(
+      user.status ||
+        user.estado ||
+        user.state ||
+        user.accountStatus ||
+        user.account_status ||
+        ""
+    );
+
+  if (
+    [
+      "disabled",
+      "inactive",
+      "deleted",
+      "blocked",
+      "suspended",
+      "banned",
+      "archived",
+      "revoked",
+      "desactivado",
+      "inactivo",
+      "eliminado",
+      "bloqueado",
+      "suspendido",
+    ].includes(status)
+  ) {
+    return false;
+  }
+
+  if (
+    user.active === false ||
+    user.enabled === false ||
+    user.disabled === true ||
+    user.deleted === true ||
+    user.blocked === true ||
+    user.locked === true ||
+    user.suspended === true ||
+    user.banned === true ||
+    user.archived === true
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+export function hasUsableUser(user = {}) {
+  if (!isPlainObject(user)) {
+    return false;
+  }
+
+  if (!isUserActive(user)) {
+    return false;
+  }
+
+  return Boolean(
+    safeText(user.id, "") ||
+      safeText(user.userId, "") ||
+      safeText(user.user_id, "") ||
+      safeText(user._id, "") ||
+      safeText(user.uid, "") ||
+      safeText(user.sub, "") ||
+      safeText(user.username, "") ||
+      safeText(user.userName, "") ||
+      safeText(user.user_name, "") ||
+      safeText(user.email, "") ||
+      safeText(user.mail, "") ||
+      safeText(user.phone, "") ||
+      safeText(user.telefono, "") ||
+      safeText(user.mobile, "")
+  );
 }
 
 function fallbackNormalizeUser(user = {}) {
@@ -2388,85 +2588,6 @@ function extractRole(raw = {}, user = null) {
   );
 }
 
-function isUserActive(user = null) {
-  if (!isPlainObject(user)) {
-    return false;
-  }
-
-  const status =
-    normalizeRole(
-      user.status ||
-        user.estado ||
-        user.state ||
-        user.accountStatus ||
-        user.account_status ||
-        ""
-    );
-
-  if (
-    [
-      "disabled",
-      "inactive",
-      "deleted",
-      "blocked",
-      "suspended",
-      "banned",
-      "archived",
-      "revoked",
-      "desactivado",
-      "inactivo",
-      "eliminado",
-      "bloqueado",
-      "suspendido",
-    ].includes(status)
-  ) {
-    return false;
-  }
-
-  if (
-    user.active === false ||
-    user.enabled === false ||
-    user.disabled === true ||
-    user.deleted === true ||
-    user.blocked === true ||
-    user.locked === true ||
-    user.suspended === true ||
-    user.banned === true ||
-    user.archived === true
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-export function hasUsableUser(user = {}) {
-  if (!isPlainObject(user)) {
-    return false;
-  }
-
-  if (!isUserActive(user)) {
-    return false;
-  }
-
-  return Boolean(
-    safeText(user.id, "") ||
-      safeText(user.userId, "") ||
-      safeText(user.user_id, "") ||
-      safeText(user._id, "") ||
-      safeText(user.uid, "") ||
-      safeText(user.sub, "") ||
-      safeText(user.username, "") ||
-      safeText(user.userName, "") ||
-      safeText(user.user_name, "") ||
-      safeText(user.email, "") ||
-      safeText(user.mail, "") ||
-      safeText(user.phone, "") ||
-      safeText(user.telefono, "") ||
-      safeText(user.mobile, "")
-  );
-}
-
 export function getUserIdentity(user = {}) {
   if (!isPlainObject(user)) {
     return "";
@@ -2533,14 +2654,51 @@ function isExplicitAuthFailure(raw = {}) {
     return true;
   }
 
-  return objects.some((object) =>
-    object?.ok === false ||
-      object?.success === false ||
+  return objects.some((object) => {
+    if (object?.ok === false) {
+      return true;
+    }
+
+    if (object?.success === false) {
+      return true;
+    }
+
+    if (
       object?.authenticated === false &&
-        (
-          statusKey === "unauthorized" ||
-          statusKey === "auth_error"
-        )
+      (
+        statusKey === "unauthorized" ||
+        statusKey === "auth_error" ||
+        statusKey === "not_authenticated"
+      )
+    ) {
+      return true;
+    }
+
+    return false;
+  });
+}
+
+function rawDeclaresAuthSuccess(raw = {}) {
+  const objects =
+    collectAuthObjects(raw);
+
+  const statusKey =
+    normalizeStatusKey(
+      extractStatus(raw)
+    );
+
+  if (
+    statusKey &&
+    AUTH_SUCCESS_STATUSES.has(statusKey)
+  ) {
+    return true;
+  }
+
+  return objects.some((object) =>
+    object?.ok === true ||
+      object?.success === true ||
+      object?.authenticated === true ||
+      object?.status === true
   );
 }
 
@@ -2593,9 +2751,6 @@ function extractRequires2FA(raw = {}, {
     return true;
   }
 
-  /*
-    Si sólo hay tempToken y no hay sesión completa, estamos en challenge.
-  */
   return Boolean(
     tempToken &&
       !(
@@ -2605,23 +2760,107 @@ function extractRequires2FA(raw = {}, {
   );
 }
 
-export function hasUsableToken(token = "") {
-  const value =
-    normalizeTokenValue(token);
-
-  if (!value) {
-    return false;
+function fillFromAppliedCoreSession({
+  token = "",
+  user = null,
+  declaredSuccess = false,
+  explicitFailure = false,
+} = {}) {
+  if (
+    explicitFailure ||
+    !declaredSuccess
+  ) {
+    return {
+      token,
+      user,
+      usedCoreSession:
+        false,
+    };
   }
 
-  try {
-    if (isFunction(AppCore?.utils?.hasValidToken)) {
-      return Boolean(
-        AppCore.utils.hasValidToken(value)
-      );
-    }
-  } catch {}
+  const stateToken =
+    getCurrentToken();
 
-  return true;
+  const stateUser =
+    normalizeUserCandidate(
+      getCurrentUser()
+    );
+
+  const stateIdentity =
+    getUserIdentity(
+      stateUser || {}
+    );
+
+  const rawIdentity =
+    getUserIdentity(
+      user || {}
+    );
+
+  let finalToken =
+    token;
+
+  let finalUser =
+    user;
+
+  let usedCoreSession =
+    false;
+
+  /*
+    No mezcla peligrosa:
+    - token+user ausentes: acepta state sólo si AppCore ya está authenticated.
+    - token presente sin user: usa state.user sólo si el token coincide.
+    - user presente sin token: usa state.token sólo si la identidad coincide.
+  */
+  if (
+    !finalToken &&
+    !finalUser &&
+    getStateAuthenticated() &&
+    hasUsableToken(stateToken) &&
+    hasUsableUser(stateUser)
+  ) {
+    finalToken =
+      stateToken;
+
+    finalUser =
+      stateUser;
+
+    usedCoreSession =
+      true;
+  } else if (
+    finalToken &&
+    !finalUser &&
+    stateToken === finalToken &&
+    hasUsableUser(stateUser)
+  ) {
+    finalUser =
+      stateUser;
+
+    usedCoreSession =
+      true;
+  } else if (
+    finalUser &&
+    !finalToken &&
+    rawIdentity &&
+    stateIdentity &&
+    rawIdentity === stateIdentity &&
+    hasUsableToken(stateToken)
+  ) {
+    finalToken =
+      stateToken;
+
+    usedCoreSession =
+      true;
+  }
+
+  return {
+    token:
+      finalToken,
+
+    user:
+      finalUser,
+
+    usedCoreSession,
+  };
 }
 
 export function normalizeAuthResult(result = {}) {
@@ -2642,11 +2881,8 @@ export function normalizeAuthResult(result = {}) {
   let tempToken =
     extractTempToken(raw);
 
-  const user =
+  let user =
     extractUser(raw);
-
-  const role =
-    extractRole(raw, user);
 
   const message =
     extractMessage(raw);
@@ -2669,6 +2905,26 @@ export function normalizeAuthResult(result = {}) {
   const explicitFailure =
     isExplicitAuthFailure(raw);
 
+  const declaredSuccess =
+    rawDeclaresAuthSuccess(raw);
+
+  const coreFill =
+    fillFromAppliedCoreSession({
+      token,
+      user,
+      declaredSuccess,
+      explicitFailure,
+    });
+
+  token =
+    coreFill.token;
+
+  user =
+    coreFill.user;
+
+  const role =
+    extractRole(raw, user);
+
   let requires2FA =
     extractRequires2FA(
       raw,
@@ -2679,10 +2935,6 @@ export function normalizeAuthResult(result = {}) {
       }
     );
 
-  /*
-    Backends legacy pueden devolver el token temporal en `token`
-    cuando status=2fa_required. No lo tratamos como access token.
-  */
   if (
     requires2FA &&
     !tempToken &&
@@ -2728,7 +2980,7 @@ export function normalizeAuthResult(result = {}) {
   const statusKey =
     normalizeStatusKey(statusValue);
 
-  const declaredSuccess =
+  const declaredSuccessStatus =
     statusKey &&
     AUTH_SUCCESS_STATUSES.has(statusKey);
 
@@ -2753,9 +3005,11 @@ export function normalizeAuthResult(result = {}) {
               ? "token_only"
               : userOnly
                 ? "user_only"
-                : declaredSuccess
+                : declaredSuccessStatus
                   ? statusKey
-                  : ""
+                  : declaredSuccess
+                    ? "success_without_session"
+                    : ""
     );
 
   return {
@@ -2767,6 +3021,9 @@ export function normalizeAuthResult(result = {}) {
       ok,
 
     explicitFailure,
+
+    declaredSuccess:
+      Boolean(declaredSuccess),
 
     status:
       finalStatus,
@@ -2819,6 +3076,9 @@ export function normalizeAuthResult(result = {}) {
 
     tokenOnly,
     userOnly,
+
+    usedCoreSession:
+      Boolean(coreFill.usedCoreSession),
 
     navigationHandled:
       Boolean(navigationHandled),
@@ -2885,7 +3145,10 @@ export function resolveAuthErrorMessage(error) {
       ""
     );
 
-  if (backendMessage) {
+  if (
+    backendMessage &&
+    backendMessage !== "[object Object]"
+  ) {
     return redactText(backendMessage);
   }
 
@@ -2927,29 +3190,6 @@ export function resolveAuthErrorMessage(error) {
    SESSION SYNC
 ========================================================= */
 
-function getCurrentToken() {
-  return normalizeTokenValue(
-    AppCore?.state?.token ||
-      AppCore?.state?.accessToken ||
-      AppCore?.state?.access_token ||
-      AppCore?.state?.session?.token ||
-      AppCore?.state?.session?.accessToken ||
-      AppCore?.state?.session?.access_token ||
-      ""
-  );
-}
-
-function getCurrentUser() {
-  return (
-    AppCore?.state?.user ||
-    AppCore?.state?.currentUser ||
-    AppCore?.state?.authUser ||
-    AppCore?.state?.sessionUser ||
-    AppCore?.state?.session?.user ||
-    null
-  );
-}
-
 function isAlreadySyncedSession(token = "", user = null) {
   const currentToken =
     getCurrentToken();
@@ -2973,7 +3213,7 @@ function isAlreadySyncedSession(token = "", user = null) {
     );
 
   return Boolean(
-    AppCore?.state?.authenticated &&
+    getStateAuthenticated() &&
       currentIdentity &&
       nextIdentity &&
       currentIdentity === nextIdentity
@@ -3067,6 +3307,8 @@ function applyFallbackSession({
 
     role:
       role || user?.role || user?.rol || "",
+    rol:
+      role || user?.role || user?.rol || "",
     userRole:
       role || user?.role || user?.rol || "",
 
@@ -3112,6 +3354,9 @@ function applyFallbackSession({
             "login.helpers:fallback-session",
 
           allowExplicitAuthenticated:
+            true,
+
+          forceAuthenticated:
             true,
 
           emitDerived:
@@ -3191,6 +3436,8 @@ function commitSessionOnce({
           source,
           allowExplicitAuthenticated:
             true,
+          forceAuthenticated:
+            true,
         }
       );
 
@@ -3222,7 +3469,7 @@ function verifyCoreSession(token = "", user = null) {
     );
 
   return Boolean(
-    AppCore?.state?.authenticated &&
+    getStateAuthenticated() &&
       currentToken &&
       currentToken === token &&
       currentIdentity &&
@@ -3322,10 +3569,6 @@ export function syncSession(auth = {}, options = {}) {
         "login.helpers:syncSession",
     });
 
-    /*
-      Fallback de verificación:
-      sólo parchea si applySession no dejó el estado consistente.
-    */
     if (
       !verifyCoreSession(
         token,
@@ -3453,10 +3696,6 @@ export function resolveLoginRedirect(auth = {}, options = {}) {
   const home =
     getConfiguredHomePath();
 
-  /*
-    1. Redirect explícito del caller.
-       Se considera intención explícita, pero sigue pasando por anti open-redirect.
-  */
   const explicitRedirect =
     resolveExplicitRedirect(options);
 
@@ -3467,10 +3706,6 @@ export function resolveLoginRedirect(auth = {}, options = {}) {
     );
   }
 
-  /*
-    2. Redirect de URL: /login?redirect=/facturas
-       Es intención explícita del router/usuario; se permite si es interno seguro.
-  */
   const queryRedirect =
     getUrlRedirectParam();
 
@@ -3481,10 +3716,6 @@ export function resolveLoginRedirect(auth = {}, options = {}) {
     );
   }
 
-  /*
-    3. 2FA/MFA.
-       Aquí sí se permite una ruta auth técnica como /2fa.
-  */
   if (normalized.requires2FA) {
     const twoFactorPath =
       getConfiguredTwoFactorPath();
@@ -3502,11 +3733,6 @@ export function resolveLoginRedirect(auth = {}, options = {}) {
     );
   }
 
-  /*
-    4. Redirect de respuesta.
-       Por defecto NO confiamos en redirects del backend, porque suelen venir
-       de rol/slug y pueden mandar a /usuarios o /@usuario.
-  */
   const responseRedirect =
     resolveResponseRedirect(normalized);
 
@@ -3521,9 +3747,6 @@ export function resolveLoginRedirect(auth = {}, options = {}) {
     );
   }
 
-  /*
-    5. Default real.
-  */
   return home;
 }
 
@@ -3596,9 +3819,6 @@ export function persistRememberedIdentifier({
   return false;
 }
 
-/*
-  Compat legacy.
-*/
 export function persistRememberedEmail({
   identifier = "",
   email = "",
@@ -3672,6 +3892,9 @@ export function getLoginHelpersSnapshot(auth = null) {
             explicitFailure:
               normalized.explicitFailure,
 
+            declaredSuccess:
+              normalized.declaredSuccess,
+
             authenticated:
               normalized.authenticated,
 
@@ -3689,6 +3912,15 @@ export function getLoginHelpersSnapshot(auth = null) {
 
             hasUser:
               Boolean(normalized.user),
+
+            usedCoreSession:
+              Boolean(normalized.usedCoreSession),
+
+            tokenOnly:
+              Boolean(normalized.tokenOnly),
+
+            userOnly:
+              Boolean(normalized.userOnly),
 
             role:
               normalized.role || null,

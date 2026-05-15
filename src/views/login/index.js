@@ -91,6 +91,12 @@ const DEFAULT_2FA_ROUTE =
 const LOGIN_SUCCESS_TOAST_DEDUPE_MS =
   1600;
 
+const GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS =
+  45_000;
+
+const GLOBAL_LOGIN_SUBMIT_STALE_GRACE_MS =
+  2_500;
+
 const LOGIN_VIEW_INSTANCE_KEY =
   "__ONION_LOGIN_VIEW_INSTANCE__";
 
@@ -120,6 +126,9 @@ let globalLoginSubmitPromise =
 let globalLoginSubmitFingerprint =
   "";
 
+let globalLoginSubmitStartedAt =
+  0;
+
 let lastLoginSuccessToastAt =
   0;
 
@@ -142,14 +151,86 @@ function hasGlobalLoginSubmitInFlight() {
   return Boolean(globalLoginSubmitPromise);
 }
 
-function runGlobalLoginSubmit(executor, fingerprint = "") {
+function forceClearGlobalLoginSubmit(reason = "") {
+  globalLoginSubmitPromise =
+    null;
+
+  globalLoginSubmitFingerprint =
+    "";
+
+  globalLoginSubmitStartedAt =
+    0;
+
+  safeWarn(
+    "global login submit lock cleared",
+    reason || "unknown"
+  );
+}
+
+function clearStaleGlobalLoginSubmit(timeoutMs = GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS) {
+  if (!globalLoginSubmitPromise) {
+    return false;
+  }
+
+  const startedAt =
+    Number(globalLoginSubmitStartedAt) || 0;
+
+  if (startedAt <= 0) {
+    forceClearGlobalLoginSubmit("missing-start-time");
+    return true;
+  }
+
+  const now =
+    safeNow();
+
+  const maxAge =
+    Math.max(
+      1_000,
+      Number(timeoutMs || 0) +
+        GLOBAL_LOGIN_SUBMIT_STALE_GRACE_MS
+    );
+
+  if (now - startedAt > maxAge) {
+    forceClearGlobalLoginSubmit("stale-timeout");
+    return true;
+  }
+
+  return false;
+}
+
+function runGlobalLoginSubmit(executor, fingerprint = "", options = {}) {
+  clearStaleGlobalLoginSubmit(
+    options?.timeoutMs
+  );
+
   if (globalLoginSubmitPromise) {
     return globalLoginSubmitPromise;
   }
 
-  const promise =
+  const timeoutMs =
+    Math.max(
+      0,
+      Number(
+        options?.timeoutMs ||
+          GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS
+      ) || 0
+    );
+
+  const workPromise =
     Promise.resolve()
       .then(() => executor());
+
+  const promise =
+    timeoutMs > 0
+      ? Promise.race([
+          workPromise,
+          new Promise((_, reject) => {
+            setTimeout(() => {
+              reject(new Error("LOGIN_SUBMIT_TIMEOUT"));
+            }, timeoutMs);
+          }),
+        ])
+      : workPromise;
 
   globalLoginSubmitPromise =
     promise;
@@ -160,6 +241,9 @@ function runGlobalLoginSubmit(executor, fingerprint = "") {
       ""
     );
 
+  globalLoginSubmitStartedAt =
+    safeNow();
+
   const clear = () => {
     if (globalLoginSubmitPromise === promise) {
       globalLoginSubmitPromise =
@@ -167,6 +251,9 @@ function runGlobalLoginSubmit(executor, fingerprint = "") {
 
       globalLoginSubmitFingerprint =
         "";
+
+      globalLoginSubmitStartedAt =
+        0;
     }
   };
 
@@ -174,6 +261,12 @@ function runGlobalLoginSubmit(executor, fingerprint = "") {
     clear,
     clear
   );
+
+  if (timeoutMs > 0) {
+    setTimeout(() => {
+      clear();
+    }, timeoutMs + GLOBAL_LOGIN_SUBMIT_STALE_GRACE_MS);
+  }
 
   return promise;
 }
@@ -1771,12 +1864,25 @@ function renderLoginView(container, deps = {}) {
         event?.preventDefault?.();
       } catch {}
 
+      clearStaleGlobalLoginSubmit();
+
+      const hasGlobalInFlight =
+        hasGlobalLoginSubmitInFlight();
+
       if (
         isSubmitting ||
         isLeavingLogin ||
-        hasGlobalLoginSubmitInFlight() ||
+        hasGlobalInFlight ||
         isFormSubmittingFlagged()
       ) {
+        if (hasGlobalInFlight && mounted) {
+          safeToastCall(
+            toast,
+            "info",
+            "Ya hay un inicio de sesión en curso. Espera unos segundos y vuelve a intentar."
+          );
+        }
+
         return;
       }
 
@@ -1858,7 +1964,13 @@ function renderLoginView(container, deps = {}) {
                 payload,
                 loginOptions
               ),
-            fingerprint
+            fingerprint,
+            {
+              timeoutMs:
+                loginOptions.timeoutMs ||
+                loginOptions.loginTimeoutMs ||
+                GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS,
+            }
           );
 
         const auth =
@@ -1961,8 +2073,14 @@ function renderLoginView(container, deps = {}) {
       } catch (error) {
         closeLoadingToast();
 
+        const isSubmitTimeout =
+          safeText(error?.message, "") ===
+          "LOGIN_SUBMIT_TIMEOUT";
+
         const message =
-          resolveAuthErrorMessage(error);
+          isSubmitTimeout
+            ? "La solicitud tardó demasiado. Revisa tu conexión y vuelve a intentarlo."
+            : resolveAuthErrorMessage(error);
 
         setGlobalLoginError(
           refs,
@@ -2002,10 +2120,21 @@ function renderLoginView(container, deps = {}) {
 
         /*
           Si se inició salida de /login, no reactivamos el botón para evitar
-          parpadeo visual durante transición. Si navigate=false o falló antes
-          de salir, se restaura.
+          parpadeo visual durante transición.
+
+          Pero si la navegación falla y seguimos en /login,
+          debemos restaurar el estado del formulario para evitar
+          un bloqueo visual (submit deshabilitado infinito).
         */
-        if (!isLeavingLogin) {
+        const stillOnLogin =
+          isStillOnLoginRoute();
+
+        if (!isLeavingLogin || stillOnLogin) {
+          if (stillOnLogin) {
+            isLeavingLogin =
+              false;
+          }
+
           resetSubmittingVisualState();
         }
       }

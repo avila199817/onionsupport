@@ -3,18 +3,20 @@
    Archivo: src/services/http.request.js
 
    ONION SUPPORT · HTTP REQUEST ENGINE
-   BASE EXECUTION · RETRY ENGINE · ABORT SAFE · TOKEN SAFE · 16/10
+   BASE EXECUTION · RETRY ENGINE · ABORT SAFE · TOKEN SAFE · 17/10
 
    Responsabilidades:
-   - Ejecutar requests base contra AppCore.apiClient / AppCore.request.
+   - Ejecutar requests base contra AppCore.apiClient / AppCore.request / fetch.
    - Aplicar retry policy con backoff + jitter.
-   - Emitir eventos internos de intento/retry solo si diagnostics lo pide.
+   - Emitir eventos internos de intento/retry sólo si diagnostics lo pide.
    - Respetar AbortSignal antes, durante y después del retry delay.
    - Normalizar errores para el caller.
    - Evitar retry interno duplicado de AppCore.apiClient.
    - Construir fallback fetch si AppCore.apiClient no está disponible.
    - Serializar body JSON/FormData/raw correctamente en fallback.
    - Parsear respuesta fallback según responseType.
+   - Adjuntar Authorization sólo en fallback privado cuando proceda.
+   - Eliminar Authorization en requests públicas/auth:false/noAuthHeader.
    - No gestionar refresh token.
    - No gestionar logout.
    - No gestionar loader.
@@ -23,13 +25,16 @@
    HARDENING EXTREMO:
    - Single final error para caller.
    - Abort pre-attempt / during-delay / post-delay.
+   - Timeout real también para apiClient/AppCore.request si no respetan signal.
    - Retry budget por tiempo.
    - Eventos sin tokens reales.
    - Eventos internos opt-in para evitar firebreak storms.
    - AppCore parcial tolerado.
    - apiClient faltante con fallback controlado.
    - Retry-After vía helper.
-   - No retry si _skipRetry.
+   - No retry si _skipRetry/skipRetry/retry:false/retries:0.
+   - No retry interno de 401 salvo retry401:true explícito.
+   - No retry en auth público salvo retryPublicAuth:true explícito.
    - No retry si signal abortada.
    - Timeout distinguido de abort manual.
    - Fallback fetch con expectedStatuses.
@@ -62,7 +67,7 @@ import {
 ========================================================= */
 
 export const HTTP_REQUEST_ENGINE_VERSION =
-  "16.0.0";
+  "17.0.0";
 
 /* =========================================================
    MODULE STATE
@@ -116,6 +121,35 @@ const BINARY_CONTENT_TYPES =
     "image/",
     "audio/",
     "video/",
+  ]);
+
+const AUTH_HEADER_NAMES =
+  Object.freeze([
+    "Authorization",
+    "authorization",
+    "X-Auth-Token",
+    "x-auth-token",
+    "X-Access-Token",
+    "x-access-token",
+    "X-Refresh-Token",
+    "x-refresh-token",
+  ]);
+
+const BAD_TOKEN_VALUES =
+  Object.freeze([
+    "",
+    "null",
+    "undefined",
+    "false",
+    "true",
+    "nan",
+    "none",
+    "empty",
+    "[object object]",
+    "{}",
+    "[]",
+    "\"\"",
+    "''",
   ]);
 
 const REQUEST_EVENTS =
@@ -194,6 +228,11 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
+function safeLower(value = "", fallback = "") {
+  return safeText(value, fallback)
+    .toLowerCase();
+}
+
 function safeNumber(value, fallback = 0) {
   const number =
     Number(value);
@@ -236,6 +275,19 @@ function safeRedact(value = "") {
 function safeUpper(value = "", fallback = DEFAULT_METHOD) {
   return safeText(value, fallback)
     .toUpperCase();
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text =
+      safeText(value, "");
+
+    if (text) {
+      return text;
+    }
+  }
+
+  return "";
 }
 
 function getBaseOrigin() {
@@ -432,6 +484,258 @@ function getFetchFunction() {
   return null;
 }
 
+function getRequestPath(requestConfig = {}) {
+  const cfg =
+    safeObject(requestConfig);
+
+  return firstNonEmpty(
+    cfg.path,
+    cfg.url,
+    cfg.endpoint,
+    cfg.href,
+    cfg.input,
+    cfg.resource,
+    cfg.finalUrl,
+    cfg.originalUrl,
+    cfg.requestUrl,
+    cfg.redactedUrl,
+    cfg.route,
+    cfg.pathname
+  );
+}
+
+/* =========================================================
+   TOKEN HELPERS
+========================================================= */
+
+function stripBearer(token = "") {
+  return safeText(token, "")
+    .replace(/^Bearer\s+/i, "")
+    .trim();
+}
+
+function hasUsableToken(token = "") {
+  const value =
+    stripBearer(token);
+
+  if (!value) {
+    return false;
+  }
+
+  const lower =
+    value.toLowerCase();
+
+  if (BAD_TOKEN_VALUES.includes(lower)) {
+    return false;
+  }
+
+  if (/[\s\r\n\t]/.test(value)) {
+    return false;
+  }
+
+  return true;
+}
+
+function hasHeader(headers = {}, name = "") {
+  const target =
+    safeText(name, "").toLowerCase();
+
+  if (!target) {
+    return false;
+  }
+
+  const plain =
+    headersToPlainObject(headers);
+
+  return Object.keys(plain).some((key) =>
+    key.toLowerCase() === target
+  );
+}
+
+function getHeaderValue(headers = {}, name = "") {
+  const target =
+    safeText(name, "").toLowerCase();
+
+  if (!target) {
+    return "";
+  }
+
+  const plain =
+    headersToPlainObject(headers);
+
+  for (const [key, value] of Object.entries(plain)) {
+    if (key.toLowerCase() === target) {
+      return safeText(value, "");
+    }
+  }
+
+  return "";
+}
+
+function setHeader(headers = {}, name = "", value = "") {
+  const cleanName =
+    safeText(name, "");
+
+  if (!cleanName) {
+    return headers;
+  }
+
+  headers[cleanName] =
+    value;
+
+  return headers;
+}
+
+function deleteHeader(headers = {}, name = "") {
+  const target =
+    safeText(name, "").toLowerCase();
+
+  if (!target) {
+    return headers;
+  }
+
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === target) {
+      delete headers[key];
+    }
+  }
+
+  return headers;
+}
+
+function stripAuthHeaders(headers = {}) {
+  for (const name of AUTH_HEADER_NAMES) {
+    deleteHeader(
+      headers,
+      name
+    );
+  }
+
+  return headers;
+}
+
+function shouldStripAuthHeaders(requestConfig = {}) {
+  const cfg =
+    safeObject(requestConfig);
+
+  return Boolean(
+    cfg.public === true ||
+      cfg.auth === false ||
+      cfg.skipAuth === true ||
+      cfg.noAuthHeader === true
+  );
+}
+
+function getCoreState(AppCore) {
+  try {
+    if (isFunction(AppCore?.getState)) {
+      return AppCore.getState({
+        includeToken:
+          true,
+      });
+    }
+  } catch {}
+
+  try {
+    return AppCore?.state || {};
+  } catch {
+    return {};
+  }
+}
+
+function getAuthHeaderFromCore(AppCore) {
+  try {
+    if (isFunction(AppCore?.getAuthHeader)) {
+      const header =
+        AppCore.getAuthHeader();
+
+      if (
+        header &&
+        typeof header === "object"
+      ) {
+        return header;
+      }
+    }
+  } catch {}
+
+  try {
+    if (isFunction(AppCore?.auth?.getAuthHeader)) {
+      const header =
+        AppCore.auth.getAuthHeader();
+
+      if (
+        header &&
+        typeof header === "object"
+      ) {
+        return header;
+      }
+    }
+  } catch {}
+
+  return {};
+}
+
+function getStateToken(AppCore) {
+  const state =
+    getCoreState(AppCore);
+
+  return firstNonEmpty(
+    state.token,
+    state.accessToken,
+    state.access_token,
+    state.authToken,
+    state.auth_token,
+    state.session?.token,
+    state.session?.accessToken,
+    state.session?.access_token,
+    state.sessionData?.token,
+    state.sessionData?.accessToken,
+    state.sessionData?.access_token
+  );
+}
+
+function applyAuthHeaderPolicy(AppCore, headers = {}, requestConfig = {}) {
+  const cfg =
+    safeObject(requestConfig);
+
+  if (shouldStripAuthHeaders(cfg)) {
+    return stripAuthHeaders(headers);
+  }
+
+  if (hasHeader(headers, "Authorization")) {
+    return headers;
+  }
+
+  const coreHeader =
+    getAuthHeaderFromCore(AppCore);
+
+  const explicitAuthorization =
+    getHeaderValue(coreHeader, "Authorization");
+
+  if (explicitAuthorization) {
+    setHeader(
+      headers,
+      "Authorization",
+      explicitAuthorization
+    );
+
+    return headers;
+  }
+
+  const token =
+    getStateToken(AppCore);
+
+  if (hasUsableToken(token)) {
+    setHeader(
+      headers,
+      "Authorization",
+      `Bearer ${stripBearer(token)}`
+    );
+  }
+
+  return headers;
+}
+
 /* =========================================================
    RECURSION GUARDS
 ========================================================= */
@@ -455,7 +759,6 @@ function looksLikeHttpService(candidate = null) {
       (
         candidate.__ONION_HTTP_SERVICE__ === true ||
         candidate.SERVICE_NAME === "http" ||
-        candidate.SERVICE_VERSION ||
         candidate.HTTP_SERVICE_VERSION ||
         candidate.events?.requestStart === "http:request:start"
       ) &&
@@ -517,7 +820,7 @@ function isForbiddenEngineCandidate(candidate = null, requestConfig = {}) {
 }
 
 /* =========================================================
-   SIGNAL / ABORT
+   SIGNAL / ABORT / TIMEOUT
 ========================================================= */
 
 function hasAbortSignal(value) {
@@ -791,11 +1094,158 @@ function createTimeoutSignal(timeoutMs = 0) {
   return state;
 }
 
+async function runAbortableOperation(AppCore, executor, requestConfig = {}, label = "operation") {
+  const cfg =
+    safeObject(requestConfig);
+
+  const timeout =
+    createTimeoutSignal(cfg.timeout);
+
+  const signal =
+    abortSignalAny([
+      cfg.signal,
+      timeout.signal,
+    ]);
+
+  const operationConfig =
+    signal
+      ? {
+          ...cfg,
+          signal,
+        }
+      : cfg;
+
+  if (!signal) {
+    try {
+      return await executor(operationConfig);
+    } finally {
+      timeout.clear();
+    }
+  }
+
+  if (isSignalAborted(signal)) {
+    timeout.clear();
+
+    if (timeout.fired === true) {
+      throw buildEngineError(
+        createTimeoutErrorObject(`${label} timeout`),
+        cfg,
+        {
+          timeout:
+            true,
+
+          aborted:
+            false,
+        }
+      );
+    }
+
+    throw buildAbortError(
+      signal,
+      cfg,
+      `${label} aborted before execution`
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled =
+      false;
+
+    const cleanup = () => {
+      try {
+        signal.removeEventListener?.(
+          "abort",
+          onAbort
+        );
+      } catch {}
+
+      timeout.clear();
+    };
+
+    const onAbort = () => {
+      if (settled) {
+        return;
+      }
+
+      settled =
+        true;
+
+      cleanup();
+
+      if (timeout.fired === true) {
+        reject(
+          buildEngineError(
+            createTimeoutErrorObject(`${label} timeout`),
+            cfg,
+            {
+              timeout:
+                true,
+
+              aborted:
+                false,
+            }
+          )
+        );
+
+        return;
+      }
+
+      reject(
+        buildAbortError(
+          signal,
+          cfg,
+          `${label} aborted`
+        )
+      );
+    };
+
+    try {
+      signal.addEventListener?.(
+        "abort",
+        onAbort,
+        {
+          once:
+            true,
+        }
+      );
+    } catch {}
+
+    Promise.resolve()
+      .then(() =>
+        executor(operationConfig)
+      )
+      .then((value) => {
+        if (settled) {
+          return;
+        }
+
+        settled =
+          true;
+
+        cleanup();
+
+        resolve(value);
+      })
+      .catch((error) => {
+        if (settled) {
+          return;
+        }
+
+        settled =
+          true;
+
+        cleanup();
+
+        reject(error);
+      });
+  });
+}
+
 /* =========================================================
    EVENTS / LOGS
 ========================================================= */
 
-function shouldEmitEngineEvent(AppCore, requestConfig = {}, eventName = "") {
+function shouldEmitEngineEvent(AppCore, requestConfig = {}) {
   const cfg =
     safeObject(requestConfig);
 
@@ -834,7 +1284,7 @@ function safeEmit(AppCore, eventName = "", payload = {}, requestConfig = {}) {
     return false;
   }
 
-  if (!shouldEmitEngineEvent(AppCore, requestConfig, name)) {
+  if (!shouldEmitEngineEvent(AppCore, requestConfig)) {
     return false;
   }
 
@@ -956,9 +1406,7 @@ function buildAttemptPayload({
 
     path:
       safeRedact(
-        requestConfig?.path ||
-          requestConfig?.url ||
-          ""
+        getRequestPath(requestConfig)
       ),
 
     method:
@@ -1208,6 +1656,25 @@ function appendQuery(url = "", query = null) {
   return `${url}${url.includes("?") ? "&" : "?"}${queryString}`;
 }
 
+function mergeQueryAndParams(requestConfig = {}) {
+  const cfg =
+    safeObject(requestConfig);
+
+  if (
+    cfg.query &&
+    cfg.params &&
+    isObject(cfg.query) &&
+    isObject(cfg.params)
+  ) {
+    return {
+      ...cfg.params,
+      ...cfg.query,
+    };
+  }
+
+  return cfg.query ?? cfg.params ?? null;
+}
+
 function resolveApiBase(AppCore, requestConfig = {}) {
   const cfg =
     safeObject(requestConfig);
@@ -1242,6 +1709,9 @@ function resolveRequestUrl(AppCore, requestConfig = {}) {
   const explicitUrl =
     safeText(cfg.url, "");
 
+  const query =
+    mergeQueryAndParams(cfg);
+
   const base =
     resolveApiBase(
       AppCore,
@@ -1252,7 +1722,7 @@ function resolveRequestUrl(AppCore, requestConfig = {}) {
     if (isAbsoluteUrl(explicitUrl)) {
       return appendQuery(
         explicitUrl,
-        cfg.query
+        query
       );
     }
 
@@ -1261,7 +1731,7 @@ function resolveRequestUrl(AppCore, requestConfig = {}) {
         base,
         explicitUrl
       ),
-      cfg.query
+      query
     );
   }
 
@@ -1275,7 +1745,7 @@ function resolveRequestUrl(AppCore, requestConfig = {}) {
   if (isAbsoluteUrl(path)) {
     return appendQuery(
       path,
-      cfg.query
+      query
     );
   }
 
@@ -1287,7 +1757,7 @@ function resolveRequestUrl(AppCore, requestConfig = {}) {
       if (safeText(built, "")) {
         return appendQuery(
           built,
-          cfg.query
+          query
         );
       }
     }
@@ -1298,7 +1768,7 @@ function resolveRequestUrl(AppCore, requestConfig = {}) {
       base,
       path
     ),
-    cfg.query
+    query
   );
 }
 
@@ -1372,40 +1842,7 @@ function isReadableStreamLike(value) {
   }
 }
 
-function hasHeader(headers = {}, name = "") {
-  const target =
-    safeText(name, "").toLowerCase();
-
-  if (!target) {
-    return false;
-  }
-
-  const plain =
-    headersToPlainObject(headers);
-
-  return Object.keys(plain).some((key) =>
-    key.toLowerCase() === target
-  );
-}
-
-function deleteHeader(headers = {}, name = "") {
-  const target =
-    safeText(name, "").toLowerCase();
-
-  if (!target) {
-    return headers;
-  }
-
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === target) {
-      delete headers[key];
-    }
-  }
-
-  return headers;
-}
-
-function prepareFallbackBodyAndHeaders(requestConfig = {}) {
+function prepareFallbackBodyAndHeaders(AppCore, requestConfig = {}) {
   const cfg =
     safeObject(requestConfig);
 
@@ -1416,6 +1853,12 @@ function prepareFallbackBodyAndHeaders(requestConfig = {}) {
 
   const method =
     safeUpper(cfg.method, DEFAULT_METHOD);
+
+  applyAuthHeaderPolicy(
+    AppCore,
+    headers,
+    cfg
+  );
 
   if (!hasHeader(headers, "Accept")) {
     headers.Accept =
@@ -1627,7 +2070,7 @@ async function parseFallbackResponse(response, requestConfig = {}) {
     try {
       return JSON.parse(text);
     } catch {
-      return null;
+      return text;
     }
   }
 
@@ -1657,7 +2100,18 @@ async function parseFallbackResponse(response, requestConfig = {}) {
   }
 
   try {
-    return response.text();
+    const text =
+      await response.text();
+
+    if (!safeText(text, "")) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
   } catch {
     return null;
   }
@@ -1694,9 +2148,18 @@ function extractErrorMessageFromData(data = null, fallback = "") {
       ? data.errors
       : [];
 
+  const nestedError =
+    isObject(data.error)
+      ? data.error
+      : null;
+
   return (
     safeText(data.message, "") ||
     safeText(data.mensaje, "") ||
+    safeText(nestedError?.message, "") ||
+    safeText(nestedError?.mensaje, "") ||
+    safeText(nestedError?.detail, "") ||
+    safeText(nestedError?.code, "") ||
     safeText(data.error, "") ||
     safeText(data.detail, "") ||
     safeText(data.title, "") ||
@@ -1791,13 +2254,18 @@ function buildCoreRequestOptions(requestConfig = {}) {
 
     auth:
       cfg.auth !== false &&
-      cfg.public !== true,
+      cfg.public !== true &&
+      cfg.skipAuth !== true &&
+      cfg.noAuthHeader !== true,
 
     public:
       cfg.public === true,
 
     skipAuth:
       cfg.skipAuth === true,
+
+    noAuthHeader:
+      cfg.noAuthHeader === true,
 
     timeout:
       cfg.timeout,
@@ -1825,6 +2293,21 @@ function buildCoreRequestOptions(requestConfig = {}) {
 
     credentials:
       cfg.credentials,
+
+    cache:
+      cfg.cache,
+
+    mode:
+      cfg.mode,
+
+    redirect:
+      cfg.redirect,
+
+    referrerPolicy:
+      cfg.referrerPolicy,
+
+    keepalive:
+      cfg.keepalive,
 
     signal:
       cfg.signal,
@@ -1875,6 +2358,39 @@ function buildCoreRequestOptions(requestConfig = {}) {
     _skipRetry:
       true,
 
+    skipRetry:
+      true,
+
+    _skipAuthRefresh:
+      cfg._skipAuthRefresh === true ||
+      cfg.skipAuthRefresh === true,
+
+    skipAuthRefresh:
+      cfg._skipAuthRefresh === true ||
+      cfg.skipAuthRefresh === true,
+
+    noAutoRefresh:
+      cfg.noAutoRefresh === true ||
+      cfg.autoRefresh === false,
+
+    autoRefresh:
+      cfg.autoRefresh === false
+        ? false
+        : cfg.noAutoRefresh === true
+          ? false
+          : undefined,
+
+    noAutoLogout:
+      cfg.noAutoLogout === true ||
+      cfg.autoLogout === false,
+
+    autoLogout:
+      cfg.autoLogout === false
+        ? false
+        : cfg.noAutoLogout === true
+          ? false
+          : undefined,
+
     dedupe:
       cfg.dedupe !== false,
 
@@ -1884,10 +2400,7 @@ function buildCoreRequestOptions(requestConfig = {}) {
 }
 
 function getRequestTarget(requestConfig = {}) {
-  return (
-    safeText(requestConfig.path, "") ||
-    safeText(requestConfig.url, "")
-  );
+  return getRequestPath(requestConfig);
 }
 
 async function executeViaMethodClient(client, requestConfig = {}) {
@@ -1961,6 +2474,18 @@ async function executeViaMethodClient(client, requestConfig = {}) {
     method === "DELETE" &&
     isFunction(client.delete)
   ) {
+    if (
+      options.body !== null &&
+      options.body !== undefined &&
+      client.delete.length >= 3
+    ) {
+      return client.delete(
+        target,
+        options.body,
+        options
+      );
+    }
+
     return client.delete(
       target,
       options
@@ -1971,6 +2496,18 @@ async function executeViaMethodClient(client, requestConfig = {}) {
     method === "DELETE" &&
     isFunction(client.del)
   ) {
+    if (
+      options.body !== null &&
+      options.body !== undefined &&
+      client.del.length >= 3
+    ) {
+      return client.del(
+        target,
+        options.body,
+        options
+      );
+    }
+
     return client.del(
       target,
       options
@@ -1981,12 +2518,29 @@ async function executeViaMethodClient(client, requestConfig = {}) {
 }
 
 async function executeViaApiClient(AppCore, requestConfig = {}) {
+  const cfg =
+    safeObject(requestConfig);
+
+  if (
+    cfg.forceFetch === true ||
+    cfg.useFetchOnly === true ||
+    cfg.skipApiClient === true
+  ) {
+    return {
+      available:
+        false,
+
+      value:
+        null,
+    };
+  }
+
   const apiClient =
     AppCore?.apiClient;
 
   if (
     !apiClient ||
-    isForbiddenEngineCandidate(apiClient, requestConfig)
+    isForbiddenEngineCandidate(apiClient, cfg)
   ) {
     return {
       available:
@@ -1997,63 +2551,84 @@ async function executeViaApiClient(AppCore, requestConfig = {}) {
     };
   }
 
-  const cfg =
-    safeObject(requestConfig);
+  return runAbortableOperation(
+    AppCore,
+    async (operationConfig) => {
+      const target =
+        getRequestTarget(operationConfig);
 
-  const target =
-    getRequestTarget(cfg);
+      const options =
+        buildCoreRequestOptions(operationConfig);
 
-  const options =
-    buildCoreRequestOptions(cfg);
+      if (isFunction(apiClient.request)) {
+        const result =
+          await apiClient.request(
+            target,
+            options
+          );
 
-  if (isFunction(apiClient.request)) {
-    const result =
-      await apiClient.request(
-        target,
-        options
-      );
+        return {
+          available:
+            true,
 
-    return {
-      available:
-        true,
+          value:
+            result,
+        };
+      }
 
-      value:
-        result,
-    };
-  }
+      const viaMethod =
+        await executeViaMethodClient(
+          apiClient,
+          operationConfig
+        );
 
-  const viaMethod =
-    await executeViaMethodClient(
-      apiClient,
-      cfg
-    );
+      if (viaMethod !== undefined) {
+        return {
+          available:
+            true,
 
-  if (viaMethod !== undefined) {
-    return {
-      available:
-        true,
+          value:
+            viaMethod,
+        };
+      }
 
-      value:
-        viaMethod,
-    };
-  }
+      return {
+        available:
+          false,
 
-  return {
-    available:
-      false,
-
-    value:
-      null,
-  };
+        value:
+          null,
+      };
+    },
+    cfg,
+    "apiClient"
+  );
 }
 
 async function executeViaCoreRequest(AppCore, requestConfig = {}) {
+  const cfg =
+    safeObject(requestConfig);
+
+  if (
+    cfg.forceFetch === true ||
+    cfg.useFetchOnly === true ||
+    cfg.skipCoreRequest === true
+  ) {
+    return {
+      available:
+        false,
+
+      value:
+        null,
+    };
+  }
+
   const requestFn =
     AppCore?.request;
 
   if (
     !isFunction(requestFn) ||
-    isForbiddenEngineCandidate(requestFn, requestConfig)
+    isForbiddenEngineCandidate(requestFn, cfg)
   ) {
     return {
       available:
@@ -2064,25 +2639,29 @@ async function executeViaCoreRequest(AppCore, requestConfig = {}) {
     };
   }
 
-  const cfg =
-    safeObject(requestConfig);
+  return runAbortableOperation(
+    AppCore,
+    async (operationConfig) => {
+      const target =
+        getRequestTarget(operationConfig);
 
-  const target =
-    getRequestTarget(cfg);
+      const result =
+        await requestFn(
+          target,
+          buildCoreRequestOptions(operationConfig)
+        );
 
-  const result =
-    await requestFn(
-      target,
-      buildCoreRequestOptions(cfg)
-    );
+      return {
+        available:
+          true,
 
-  return {
-    available:
-      true,
-
-    value:
-      result,
-  };
+        value:
+          result,
+      };
+    },
+    cfg,
+    "coreRequest"
+  );
 }
 
 async function executeViaFetch(AppCore, requestConfig = {}) {
@@ -2122,7 +2701,10 @@ async function executeViaFetch(AppCore, requestConfig = {}) {
     ]);
 
   const prepared =
-    prepareFallbackBodyAndHeaders(cfg);
+    prepareFallbackBodyAndHeaders(
+      AppCore,
+      cfg
+    );
 
   try {
     const init = {
@@ -2215,7 +2797,10 @@ async function executeViaFetch(AppCore, requestConfig = {}) {
     const timeoutAborted =
       Boolean(
         timeout.fired === true ||
-          timeout.signal?.aborted
+          (
+            timeout.signal?.aborted === true &&
+            cfg.signal?.aborted !== true
+          )
       );
 
     const manualAborted =
@@ -2269,7 +2854,7 @@ export async function executeBaseRequest(AppCore, requestConfig = {}) {
   const cfg =
     safeObject(requestConfig);
 
-  if (!safeText(cfg.path || cfg.url, "")) {
+  if (!safeText(getRequestPath(cfg), "")) {
     throw buildInvalidPathError(cfg);
   }
 
@@ -2348,6 +2933,125 @@ function isRetryBudgetExceeded(startedAt, maxElapsedMs = 0) {
   }
 
   return nowMs() - startedAt >= budget;
+}
+
+/* =========================================================
+   RETRY POLICY FIREBREAK
+========================================================= */
+
+function isLikelyAuthPublicRequest(requestConfig = {}) {
+  const cfg =
+    safeObject(requestConfig);
+
+  const path =
+    safeLower(
+      getRequestPath(cfg),
+      ""
+    );
+
+  if (!path) {
+    return false;
+  }
+
+  if (
+    path.endsWith("/auth/me") ||
+    path.endsWith("/api/auth/me") ||
+    path === "/me" ||
+    path === "/api/me"
+  ) {
+    return false;
+  }
+
+  return Boolean(
+    cfg.public === true &&
+      (
+        path.includes("/auth/login") ||
+        path.includes("/auth/register") ||
+        path.includes("/auth/signup") ||
+        path.includes("/auth/refresh") ||
+        path.includes("/auth/activate") ||
+        path.includes("/auth/activate-account") ||
+        path.includes("/auth/reset-password") ||
+        path.includes("/auth/password-reset") ||
+        path.includes("/auth/forgot-password") ||
+        path.includes("/auth/recover-password") ||
+        path.includes("/auth/2fa") ||
+        path.includes("/auth/mfa") ||
+        path.includes("/auth/otp")
+      )
+  );
+}
+
+function getHardRetryStopReason(error = null, requestConfig = {}) {
+  const cfg =
+    safeObject(requestConfig);
+
+  const status =
+    safeNumber(
+      error?.status ||
+        error?.statusCode,
+      0
+    );
+
+  if (
+    cfg._skipRetry === true ||
+    cfg.skipRetry === true
+  ) {
+    return "skip-retry";
+  }
+
+  if (cfg.retry === false) {
+    return "retry-disabled";
+  }
+
+  if (safeNumber(cfg.retries, null) === 0) {
+    return "retries-zero";
+  }
+
+  if (
+    error?.aborted === true ||
+    isAbortError(error) ||
+    isSignalAborted(cfg.signal)
+  ) {
+    return "aborted";
+  }
+
+  if (
+    error?.timeout === true ||
+    isTimeoutError(error)
+  ) {
+    if (cfg.retryTimeout === true) {
+      return "";
+    }
+
+    return "timeout-not-retryable";
+  }
+
+  /*
+    401 lo gestiona Http Service con refresh.
+    El engine no debe gastar reintentos internos antes del refresh.
+  */
+  if (
+    status === 401 &&
+    cfg.retry401 !== true
+  ) {
+    return "401-managed-by-auth-refresh";
+  }
+
+  if (
+    safeUpper(cfg.method, DEFAULT_METHOD) === "OPTIONS"
+  ) {
+    return "options-no-retry";
+  }
+
+  if (
+    isLikelyAuthPublicRequest(cfg) &&
+    cfg.retryPublicAuth !== true
+  ) {
+    return "public-auth-no-retry";
+  }
+
+  return "";
 }
 
 /* =========================================================
@@ -2714,13 +3418,21 @@ export async function executeWithRetry({
         cfg
       );
 
-      const canRetry =
-        shouldRetry(
-          config,
+      const hardStopReason =
+        getHardRetryStopReason(
           lastError,
-          cfg,
-          attempt
+          cfg
         );
+
+      const canRetry =
+        hardStopReason
+          ? false
+          : shouldRetry(
+              config,
+              lastError,
+              cfg,
+              attempt
+            );
 
       if (!canRetry) {
         safeEmit(
@@ -2734,13 +3446,8 @@ export async function executeWithRetry({
             startedAt,
             extra: {
               reason:
-                cfg._skipRetry === true
-                  ? "skip-retry"
-                  : lastError.aborted
-                    ? "aborted"
-                    : lastError.timeout
-                      ? "timeout-not-retryable"
-                      : "not-retryable",
+                hardStopReason ||
+                "not-retryable",
 
               error:
                 sanitizeErrorForEvent(lastError),
@@ -2846,7 +3553,7 @@ export async function executeWithRetry({
             cfg.path,
 
           redactedPath:
-            safeRedact(cfg.path || cfg.url || ""),
+            safeRedact(getRequestPath(cfg)),
 
           method:
             cfg.method,
@@ -2998,24 +3705,44 @@ export async function executeWithRetry({
 
   lastError.path =
     safeRedact(
-      cfg.path || cfg.url || ""
+      getRequestPath(cfg)
     );
 
   lastError.requestConfig =
     lastError.requestConfig || {
       requestId,
+
       method:
         cfg.method || DEFAULT_METHOD,
+
       path:
         safeRedact(cfg.path || ""),
+
       url:
         safeRedact(cfg.url || ""),
+
       headers:
         sanitizeHeaders(cfg.headers || {}),
+
       auth:
         cfg.auth !== false,
+
       public:
         cfg.public === true,
+
+      skipAuth:
+        cfg.skipAuth === true,
+
+      noAuthHeader:
+        cfg.noAuthHeader === true,
+
+      skipRetry:
+        cfg._skipRetry === true ||
+        cfg.skipRetry === true,
+
+      skipAuthRefresh:
+        cfg._skipAuthRefresh === true ||
+        cfg.skipAuthRefresh === true,
     };
 
   safeEmit(
@@ -3025,7 +3752,7 @@ export async function executeWithRetry({
       requestId,
 
       path:
-        safeRedact(cfg.path || cfg.url || ""),
+        safeRedact(getRequestPath(cfg)),
 
       method:
         cfg.method || DEFAULT_METHOD,
@@ -3047,7 +3774,7 @@ export async function executeWithRetry({
 ========================================================= */
 
 export function getHttpRequestEngineSnapshot() {
-  return {
+  return sanitizeData({
     version:
       HTTP_REQUEST_ENGINE_VERSION,
 
@@ -3071,11 +3798,29 @@ export function getHttpRequestEngineSnapshot() {
 
       recursionGuard:
         true,
+
+      timeoutWrapsApiClient:
+        true,
+
+      stripsAuthOnPublicRequests:
+        true,
+
+      noInternal401Retry:
+        true,
+
+      noPublicAuthRetryByDefault:
+        true,
+
+      fallbackFetchCanAttachPrivateAuthHeader:
+        true,
+
+      doubleApiGuard:
+        true,
     },
 
     at:
       isoNow(),
-  };
+  });
 }
 
 /* =========================================================

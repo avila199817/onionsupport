@@ -2,38 +2,53 @@
    Onion SPA - Password Reset
    Archivo: src/features/auth/password-reset.js
 
-   AUTH PASSWORD RESET · FINAL EXTREME PRO SYSTEM · GOD MODE v15
+   AUTH PASSWORD RESET · FINAL EXTREME PRO SYSTEM · GOD MODE v16
 
    RESPONSABILIDADES:
-   - resolver identificador de recuperación
-   - normalizar payload de reset-password-request
-   - construir body robusto compatible con backends legacy
-   - ejecutar petición recovery vía AppCore / Http / apiClient / fetch
-   - normalizar respuestas y errores
-   - soportar cooldown / rate-limit sin romper UX
-   - nunca asumir success por defecto si backend no lo declara
-   - endurecer urls / timeout / payload / redirects
-   - soportar confirmación de nueva contraseña
-   - soportar validación opcional de token reset
-   - api pública estable para Auth module
+   - Resolver identificador de recuperación.
+   - Normalizar payload de reset-password-request.
+   - Construir body robusto compatible con backends legacy.
+   - Ejecutar petición recovery vía Http/AppCore/apiClient/fetch.
+   - Normalizar respuestas y errores.
+   - Soportar cooldown / rate-limit sin romper UX.
+   - Nunca asumir success por defecto si backend no lo declara.
+   - Endurecer URLs / timeout / payload / redirects.
+   - Soportar confirmación de nueva contraseña.
+   - Soportar validación opcional de token reset.
+   - API pública estable para Auth module.
 
    HARDENING EXTREMO:
-   - transporte compatible con AppCore.apiClient, AppCore.request,
-     AppCore.http, AppCore.Http, services.http y fetch
-   - timeout real en fetch
-   - redirects anti open-redirect
-   - token/password/identifier con límites
-   - tokens/passwords NO se truncan silenciosamente
-   - respuestas nested: data / payload / result / body / response.data
-   - status textual robusto: status/statusText/state
-   - rate-limit: 429 / Retry-After / retryAfter / cooldownSeconds
-   - errores normalizados sin throws hacia la UI pública
-   - confirm password estricto
-   - eventos sin tokens ni passwords reales
-   - no toca sesión auth ni rutas públicas técnicas
-   - no llama refresh
-   - no asume éxito por HTTP 200 si backend no declara ok/success/accepted/valid/completed
-   - default export callable + métodos públicos colgados
+   - Transporte compatible con AppCore.http, AppCore.Http, services.http,
+     AppCore.apiClient, AppCore.request y fetch.
+   - Request pública dura:
+       · public:true
+       · auth:false
+       · skipAuth:true
+       · noAuthHeader:true
+       · _skipAuthRefresh:true
+       · skipAuthRefresh:true
+       · noAutoRefresh:true
+       · autoRefresh:false
+       · noAutoLogout:true
+       · autoLogout:false
+       · retry:false
+       · retries:0
+       · _skipRetry:true
+       · skipRetry:true
+   - Timeout real en fetch.
+   - Redirects anti open-redirect.
+   - Token/password/identifier con límites.
+   - Tokens/passwords NO se truncan silenciosamente.
+   - Respuestas nested: data / payload / result / body / response.data.
+   - Status textual robusto: status/statusText/state.
+   - Rate-limit: 429 / Retry-After / retryAfter / cooldownSeconds.
+   - Errores normalizados sin throws hacia la UI pública.
+   - Confirm password estricto.
+   - Eventos sin tokens ni passwords reales.
+   - No toca sesión auth ni rutas públicas técnicas.
+   - No llama refresh.
+   - No asume éxito por HTTP 200 si backend no declara ok/success/accepted/valid/completed.
+   - Default export callable + métodos públicos colgados.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -44,6 +59,8 @@ import {
   AUTH_CONSTANTS,
   AUTH_STORAGE_KEYS,
   AUTH_TOKEN_PARAM_NAMES,
+  getPublicAuthRequestOptions,
+  getAuthPublicTimeoutMs,
   getRequestPasswordResetEndpoint as getRequestPasswordResetEndpointFromConstants,
   getConfirmPasswordResetEndpoint as getConfirmPasswordResetEndpointFromConstants,
   getValidateResetTokenEndpoint as getValidateResetTokenEndpointFromConstants,
@@ -64,11 +81,17 @@ import {
 ========================================================= */
 
 export const PASSWORD_RESET_MODULE_VERSION =
-  "password-reset.15.0.0";
+  "password-reset.16.0.0";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
+
+const MODULE_SOURCE =
+  "auth.password-reset";
+
+const BACKEND_ORIGIN =
+  "https://api.onionit.net";
 
 const DEFAULT_REQUEST_ENDPOINT =
   "/api/auth/reset-password-request";
@@ -86,7 +109,7 @@ const LOCAL_ORIGIN =
   "http://localhost";
 
 const DEFAULT_TIMEOUT_MS =
-  15000;
+  30_000;
 
 const SUCCESS_STATUS_TEXTS =
   Object.freeze([
@@ -158,6 +181,7 @@ const CORRUPTED_TEXT_VALUES =
     "null",
     "false",
     "true",
+    "nan",
     "[object object]",
     "{}",
     "[]",
@@ -193,35 +217,13 @@ const TOKEN_FIELD_NAMES =
     "confirm_token",
   ]);
 
-const REQUEST_METHOD_OPTIONS =
-  Object.freeze({
-    method:
-      "POST",
-
-    auth:
-      false,
-
-    public:
-      true,
-
-    skipAuth:
-      true,
-
-    silent:
-      true,
-
-    storeError:
-      false,
-
-    dedupe:
-      false,
-
-    _skipAuthRefresh:
-      true,
-
-    skipAuthRefresh:
-      true,
-  });
+const AUTH_HEADER_NAMES =
+  Object.freeze([
+    "authorization",
+    "x-auth-token",
+    "x-access-token",
+    "x-refresh-token",
+  ]);
 
 const FALLBACK_NEXT_ENDPOINT_STATUSES =
   new Set([
@@ -459,6 +461,10 @@ function redactSafe(value = "") {
         "$1***"
       )
       .replace(
+        /(\/password-reset\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      )
+      .replace(
         /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
         "$1***"
       );
@@ -533,7 +539,7 @@ function sanitizeEventPayload(payload = {}, depth = 0) {
   return output;
 }
 
-function safeEmit(eventName, payload = {}) {
+function safeEmit(eventName, payload = {}, options = {}) {
   const cleanEvent =
     safeText(eventName, "");
 
@@ -541,8 +547,24 @@ function safeEmit(eventName, payload = {}) {
     return false;
   }
 
+  if (
+    options.emit === false ||
+    options.emitEvents === false ||
+    options.silentEvents === true
+  ) {
+    return false;
+  }
+
   const cleanPayload =
-    sanitizeEventPayload(payload);
+    sanitizeEventPayload({
+      source:
+        MODULE_SOURCE,
+      version:
+        PASSWORD_RESET_MODULE_VERSION,
+      at:
+        isoNow(),
+      ...safeObject(payload),
+    });
 
   let emitted =
     false;
@@ -653,9 +675,36 @@ function getResetPasswordMaxLength() {
   );
 }
 
-function getRequestTimeout() {
+function getRequestTimeout(options = {}) {
+  const explicit =
+    options?.timeout ??
+    options?.timeoutMs ??
+    options?.passwordResetTimeoutMs;
+
+  if (explicit !== undefined) {
+    return clampNumber(
+      explicit,
+      1000,
+      120000
+    );
+  }
+
+  try {
+    const fromConstants =
+      getAuthPublicTimeoutMs?.();
+
+    if (fromConstants) {
+      return clampNumber(
+        fromConstants,
+        1000,
+        120000
+      );
+    }
+  } catch {}
+
   return clampNumber(
-    AUTH_CONSTANTS?.requestTimeout ??
+    AUTH_CONSTANTS?.authPublicTimeoutMs ??
+      AUTH_CONSTANTS?.requestTimeout ??
       AppCore?.config?.requestTimeout ??
       AppCore?.config?.api?.timeout ??
       DEFAULT_TIMEOUT_MS,
@@ -1147,21 +1196,25 @@ function extractTokenFromPath(path = "") {
       );
   }
 
-  const marker =
-    "/reset-password/confirm/";
+  const markers = [
+    "/reset-password/confirm/",
+    "/password-reset/confirm/",
+  ];
 
-  if (pathname.startsWith(marker)) {
-    const token =
-      pathname
-        .slice(marker.length)
-        .split("/")[0];
+  for (const marker of markers) {
+    if (pathname.startsWith(marker)) {
+      const token =
+        pathname
+          .slice(marker.length)
+          .split("/")[0];
 
-    try {
-      return normalizeResetToken(
-        decodeURIComponent(token || "")
-      ) || "";
-    } catch {
-      return normalizeResetToken(token) || "";
+      try {
+        return normalizeResetToken(
+          decodeURIComponent(token || "")
+        ) || "";
+      } catch {
+        return normalizeResetToken(token) || "";
+      }
     }
   }
 
@@ -1906,13 +1959,21 @@ function resolveMessage(input = {}, fallback = "") {
     nodeList(input);
 
   for (const node of nodes) {
+    const nestedError =
+      safeObject(node.error);
+
     const message =
       pickFirstText(
         node.message,
         node.mensaje,
+        nestedError.message,
+        nestedError.mensaje,
+        nestedError.detail,
         node.detail,
         node.description,
-        node.error,
+        typeof node.error === "string"
+          ? node.error
+          : "",
         node.title,
         node.reason,
         node.msg
@@ -2216,6 +2277,55 @@ export const normalizeValidateResetPasswordTokenResponse =
    URL RESOLUTION
 ========================================================= */
 
+function normalizeApiBase(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return BACKEND_ORIGIN;
+  }
+
+  if (!isAbsoluteUrl(raw)) {
+    return raw.replace(/\/+$/g, "");
+  }
+
+  try {
+    const parsed =
+      new URL(raw);
+
+    const origin =
+      parsed.origin.replace(/\/+$/g, "");
+
+    const pathname =
+      (parsed.pathname || "/")
+        .replace(/\/+$/g, "") ||
+      "/";
+
+    if (
+      pathname === "/" ||
+      pathname === "/api"
+    ) {
+      return origin;
+    }
+
+    return `${origin}${pathname}`.replace(/\/+$/g, "");
+  } catch {
+    return BACKEND_ORIGIN;
+  }
+}
+
+function resolveApiBase() {
+  return normalizeApiBase(
+    AppCore?.config?.apiBase ||
+      AppCore?.config?.apiOrigin ||
+      AppCore?.config?.apiUrl ||
+      AppCore?.config?.api?.base ||
+      AppCore?.config?.api?.baseUrl ||
+      AppCore?.config?.api?.origin ||
+      BACKEND_ORIGIN
+  );
+}
+
 function buildFinalUrl(endpoint = "") {
   const clean =
     safeText(endpoint, "");
@@ -2228,23 +2338,11 @@ function buildFinalUrl(endpoint = "") {
     return clean;
   }
 
-  const apiBase =
-    safeText(
-      AppCore?.config?.apiBase ||
-        AppCore?.config?.api?.baseUrl ||
-        AppCore?.config?.api?.base ||
-        "",
-      ""
-    );
-
-  if (!apiBase) {
-    return clean;
-  }
-
   const base =
-    apiBase.replace(/\/+$/g, "");
+    resolveApiBase()
+      .replace(/\/+$/g, "");
 
-  const path =
+  let path =
     clean.startsWith("/")
       ? clean
       : `/${clean}`;
@@ -2253,7 +2351,8 @@ function buildFinalUrl(endpoint = "") {
     base.endsWith("/api") &&
     path.startsWith("/api/")
   ) {
-    return `${base}${path.slice(4)}`;
+    path =
+      path.slice(4);
   }
 
   return `${base}${path}`;
@@ -2303,9 +2402,11 @@ function normalizeTransportError(
     safeText(
       error?.data?.message ??
         error?.data?.mensaje ??
+        error?.data?.error?.message ??
         error?.data?.error ??
         error?.response?.data?.message ??
         error?.response?.data?.mensaje ??
+        error?.response?.data?.error?.message ??
         error?.response?.data?.error ??
         error?.message,
       status === 429 || retryAfter > 0
@@ -2343,10 +2444,17 @@ function normalizeTransportError(
       status === 429 || retryAfter > 0,
 
     timeout:
-      error?.timeout === true,
+      error?.timeout === true ||
+      String(error?.name || "")
+        .toLowerCase()
+        .includes("timeout") ||
+      String(error?.code || "")
+        .toLowerCase()
+        .includes("timeout"),
 
     aborted:
-      error?.aborted === true,
+      error?.aborted === true ||
+      String(error?.name || "") === "AbortError",
 
     message,
 
@@ -2412,10 +2520,18 @@ function hasAbortSignal(value = null) {
 function createAbortError(message = "Request aborted") {
   try {
     if (typeof DOMException !== "undefined") {
-      return new DOMException(
-        message,
-        "AbortError"
-      );
+      const error =
+        new DOMException(
+          message,
+          "AbortError"
+        );
+
+      try {
+        error.aborted =
+          true;
+      } catch {}
+
+      return error;
     }
   } catch {}
 
@@ -2430,6 +2546,20 @@ function createAbortError(message = "Request aborted") {
   return error;
 }
 
+function createTimeoutError(message = "Request timeout") {
+  const error =
+    new Error(message);
+
+  error.name =
+    "TimeoutError";
+  error.code =
+    "REQUEST_TIMEOUT";
+  error.timeout =
+    true;
+
+  return error;
+}
+
 function mergeAbortSignals(signals = []) {
   const validSignals =
     safeArray(signals)
@@ -2438,6 +2568,15 @@ function mergeAbortSignals(signals = []) {
   if (!validSignals.length) {
     return null;
   }
+
+  try {
+    if (
+      typeof AbortSignal !== "undefined" &&
+      isFunction(AbortSignal.any)
+    ) {
+      return AbortSignal.any(validSignals);
+    }
+  } catch {}
 
   if (validSignals.length === 1) {
     return validSignals[0];
@@ -2549,11 +2688,26 @@ async function parseFetchBody(httpResponse) {
   }
 }
 
+function stripAuthHeaders(headers = {}) {
+  const output = {
+    ...safeObject(headers),
+  };
+
+  for (const key of Object.keys(output)) {
+    if (AUTH_HEADER_NAMES.includes(String(key).toLowerCase())) {
+      delete output[key];
+    }
+  }
+
+  return output;
+}
+
 async function fetchJsonWithTimeout(
   url,
   body,
   timeoutMs = getRequestTimeout(),
-  externalSignal = null
+  externalSignal = null,
+  extraHeaders = {}
 ) {
   if (typeof fetch !== "function") {
     const error =
@@ -2588,7 +2742,9 @@ async function fetchJsonWithTimeout(
             true;
 
           try {
-            controller.abort("password-reset-timeout");
+            controller.abort(
+              createTimeoutError("Password reset timeout")
+            );
           } catch {
             try {
               controller.abort();
@@ -2609,19 +2765,31 @@ async function fetchJsonWithTimeout(
         method:
           "POST",
 
-        headers: {
-          "Content-Type":
-            "application/json",
+        headers:
+          stripAuthHeaders({
+            "Content-Type":
+              "application/json",
 
-          Accept:
-            "application/json",
-        },
+            Accept:
+              "application/json",
+
+            "X-Onion-Auth-Flow":
+              "password-reset",
+
+            "X-Request-Source":
+              MODULE_SOURCE,
+
+            ...safeObject(extraHeaders),
+          }),
 
         credentials:
           "omit",
 
         cache:
           "no-store",
+
+        mode:
+          "cors",
 
         body:
           JSON.stringify(body),
@@ -2707,27 +2875,39 @@ async function fetchJsonWithTimeout(
 ========================================================= */
 
 function buildRequestOptions(options = {}) {
+  const opts =
+    safeObject(options);
+
+  let publicOptions = {};
+
+  try {
+    publicOptions =
+      getPublicAuthRequestOptions?.() ||
+      {};
+  } catch {
+    publicOptions = {};
+  }
+
+  const timeout =
+    getRequestTimeout(opts);
+
   return {
-    ...REQUEST_METHOD_OPTIONS,
+    ...publicOptions,
+    ...opts,
 
-    timeout:
-      getRequestTimeout(),
-
-    timeoutMs:
-      getRequestTimeout(),
-
-    useLoader:
-      options.useLoader !== false,
-
-    ...safeObject(options),
-
-    auth:
-      false,
+    method:
+      "POST",
 
     public:
       true,
 
+    auth:
+      false,
+
     skipAuth:
+      true,
+
+    noAuthHeader:
       true,
 
     silent:
@@ -2736,12 +2916,128 @@ function buildRequestOptions(options = {}) {
     storeError:
       false,
 
+    dedupe:
+      false,
+
     _skipAuthRefresh:
       true,
 
     skipAuthRefresh:
       true,
+
+    noAutoRefresh:
+      true,
+
+    autoRefresh:
+      false,
+
+    noAutoLogout:
+      true,
+
+    autoLogout:
+      false,
+
+    retry:
+      false,
+
+    retries:
+      0,
+
+    _skipRetry:
+      true,
+
+    skipRetry:
+      true,
+
+    timeout,
+    timeoutMs:
+      timeout,
+
+    useLoader:
+      opts.useLoader !== false,
+
+    credentials:
+      opts.credentials ||
+      "include",
+
+    headers:
+      stripAuthHeaders({
+        "X-Onion-Auth-Flow":
+          "password-reset",
+
+        "X-Request-Source":
+          MODULE_SOURCE,
+
+        ...safeObject(opts.headers),
+      }),
   };
+}
+
+function getHttpService() {
+  return (
+    AppCore?.http ||
+    AppCore?.Http ||
+    AppCore?.services?.http ||
+    AppCore?.services?.Http ||
+    null
+  );
+}
+
+async function requestWithHttpService(endpoint, body, options = {}) {
+  const http =
+    getHttpService();
+
+  if (!http) {
+    return null;
+  }
+
+  const requestOptions =
+    buildRequestOptions(options);
+
+  if (isFunction(http.post)) {
+    return http.post(
+      endpoint,
+      body,
+      requestOptions
+    );
+  }
+
+  if (isFunction(http.request)) {
+    try {
+      return await http.request(
+        "POST",
+        endpoint,
+        {
+          ...requestOptions,
+          body,
+        }
+      );
+    } catch (error) {
+      if (
+        error?.status ||
+        error?.response?.status ||
+        error?.data?.status
+      ) {
+        throw error;
+      }
+
+      try {
+        return await http.request(
+          endpoint,
+          {
+            ...requestOptions,
+            method:
+              "POST",
+            body,
+          }
+        );
+      } catch {
+        throw error;
+      }
+    }
+  }
+
+  return null;
 }
 
 async function requestWithApiClient(endpoint, body, options = {}) {
@@ -2848,84 +3144,31 @@ async function requestWithAppCoreRequest(endpoint, body, options = {}) {
   }
 }
 
-async function requestWithHttpService(endpoint, body, options = {}) {
-  const http =
-    AppCore?.http ||
-    AppCore?.Http ||
-    AppCore?.services?.http ||
-    AppCore?.services?.Http ||
-    null;
-
-  if (!http) {
-    return null;
-  }
-
+async function requestWithFetch(endpoint, body, options = {}) {
   const requestOptions =
     buildRequestOptions(options);
 
-  if (isFunction(http.post)) {
-    return http.post(
-      endpoint,
-      body,
-      requestOptions
-    );
-  }
-
-  if (isFunction(http.request)) {
-    try {
-      return await http.request(
-        "POST",
-        endpoint,
-        {
-          ...requestOptions,
-          body,
-        }
-      );
-    } catch (error) {
-      if (
-        error?.status ||
-        error?.response?.status ||
-        error?.data?.status
-      ) {
-        throw error;
-      }
-
-      try {
-        return await http.request(
-          endpoint,
-          {
-            ...requestOptions,
-            method:
-              "POST",
-            body,
-          }
-        );
-      } catch {
-        throw error;
-      }
-    }
-  }
-
-  return null;
-}
-
-async function requestWithFetch(endpoint, body, options = {}) {
   const url =
     buildFinalUrl(endpoint);
 
   return fetchJsonWithTimeout(
     url,
     body,
-    getRequestTimeout(),
-    options?.signal || null
+    requestOptions.timeout,
+    requestOptions.signal || null,
+    requestOptions.headers
   );
 }
 
 async function executePasswordResetRequest(endpoint, body, options = {}) {
+  /*
+    Preferimos Http Service porque ya está blindado con:
+    public/auth:false/noAuthHeader/noRefresh/noLogout/noRetry.
+  */
   const transports = [
+    requestWithHttpService,
     requestWithApiClient,
     requestWithAppCoreRequest,
-    requestWithHttpService,
   ];
 
   for (const transport of transports) {
@@ -3327,7 +3570,8 @@ export async function requestPasswordReset(payload = {}, options = {}) {
             : normalized.username
               ? "username"
               : "identifier",
-    }
+    },
+    options
   );
 
   runtime.requestInFlight =
@@ -3337,19 +3581,7 @@ export async function requestPasswordReset(payload = {}, options = {}) {
           await executePasswordResetRequestWithCandidates(
             endpoints,
             body,
-            {
-              ...safeObject(options),
-              _skipAuthRefresh:
-                true,
-              auth:
-                false,
-              public:
-                true,
-              silent:
-                true,
-              storeError:
-                false,
-            }
+            buildRequestOptions(options)
           );
 
         const normalizedResponse =
@@ -3373,7 +3605,8 @@ export async function requestPasswordReset(payload = {}, options = {}) {
               normalizedResponse.cooldown,
             retryAfter:
               normalizedResponse.retryAfter,
-          }
+          },
+          options
         );
 
         return normalizedResponse;
@@ -3414,7 +3647,8 @@ export async function requestPasswordReset(payload = {}, options = {}) {
               normalizedResponse.retryAfter,
             message:
               normalizedResponse.message,
-          }
+          },
+          options
         );
 
         return normalizedResponse;
@@ -3463,7 +3697,8 @@ export async function confirmResetPassword(payload = {}, options = {}) {
     "auth:password-reset:confirm:start",
     {
       endpoints,
-    }
+    },
+    options
   );
 
   runtime.confirmInFlight =
@@ -3473,19 +3708,7 @@ export async function confirmResetPassword(payload = {}, options = {}) {
           await executePasswordResetRequestWithCandidates(
             endpoints,
             body,
-            {
-              ...safeObject(options),
-              _skipAuthRefresh:
-                true,
-              auth:
-                false,
-              public:
-                true,
-              silent:
-                true,
-              storeError:
-                false,
-            }
+            buildRequestOptions(options)
           );
 
         const normalizedResponse =
@@ -3511,7 +3734,8 @@ export async function confirmResetPassword(payload = {}, options = {}) {
               normalizedResponse.retryAfter,
             redirectTo:
               normalizedResponse.redirectTo,
-          }
+          },
+          options
         );
 
         return normalizedResponse;
@@ -3552,7 +3776,8 @@ export async function confirmResetPassword(payload = {}, options = {}) {
               normalizedResponse.retryAfter,
             message:
               normalizedResponse.message,
-          }
+          },
+          options
         );
 
         return normalizedResponse;
@@ -3601,7 +3826,8 @@ export async function validateResetPasswordToken(payload = {}, options = {}) {
     "auth:password-reset:validate:start",
     {
       endpoints,
-    }
+    },
+    options
   );
 
   runtime.validateInFlight =
@@ -3611,19 +3837,7 @@ export async function validateResetPasswordToken(payload = {}, options = {}) {
           await executePasswordResetRequestWithCandidates(
             endpoints,
             body,
-            {
-              ...safeObject(options),
-              _skipAuthRefresh:
-                true,
-              auth:
-                false,
-              public:
-                true,
-              silent:
-                true,
-              storeError:
-                false,
-            }
+            buildRequestOptions(options)
           );
 
         const normalizedResponse =
@@ -3643,7 +3857,8 @@ export async function validateResetPasswordToken(payload = {}, options = {}) {
               normalizedResponse.status,
             statusText:
               normalizedResponse.statusText,
-          }
+          },
+          options
         );
 
         return normalizedResponse;
@@ -3680,7 +3895,8 @@ export async function validateResetPasswordToken(payload = {}, options = {}) {
               normalizedResponse.code,
             message:
               normalizedResponse.message,
-          }
+          },
+          options
         );
 
         return normalizedResponse;
@@ -3839,6 +4055,27 @@ export function getPasswordResetSnapshot() {
       Boolean(
         extractResetTokenFromUrl()
       ),
+
+    publicRequestPolicy: {
+      auth:
+        false,
+      public:
+        true,
+      skipAuth:
+        true,
+      noAuthHeader:
+        true,
+      skipAuthRefresh:
+        true,
+      noAutoRefresh:
+        true,
+      noAutoLogout:
+        true,
+      retry:
+        false,
+      retries:
+        0,
+    },
 
     limits: {
       identifierMaxLength:

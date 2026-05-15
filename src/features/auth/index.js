@@ -2,25 +2,36 @@
    Onion SPA - Auth / Session
    Archivo: src/features/auth/index.js
 
-   AUTH FACADE · SESSION ORCHESTRATOR · EXTREME 15/10
+   AUTH FACADE · SESSION ORCHESTRATOR · EXTREME 16/10
    BACKEND ALIGNED · API.ONIONIT.NET · ME SAFE · SIDEBAR USER SAFE
 
    RESPONSABILIDADES:
-   - punto de entrada público del módulo auth
-   - composición de login / logout / restore / refresh / me / guards
-   - integración robusta con AppCore.http / AppCore.apiClient / AppCore.request
-   - fallback fetch seguro contra https://api.onionit.net
-   - normalizar payload heterogéneo del backend Onion Auth
-   - aplicar sesión completa sólo con token + usuario usable
-   - permitir token_only refresh sin destruir usuario existente
-   - usar /api/auth/me como fuente real de usuario/avatar tras restore
-   - exponer Auth.getUser / getCurrentUser / getProfile / getAccount
-   - pintar sidebar/topbar vía AppCore.state + app:ui:repair-request
-   - preservar rutas públicas técnicas con token
-   - evitar auth fantasma
-   - evitar duplicidad de eventos canónicos
-   - no exponer tokens en snapshots/eventos
-   - bridge Auth idempotente y silencioso
+   - Punto de entrada público del módulo auth.
+   - Composición de login / logout / restore / refresh / me / guards.
+   - Integración robusta con AppCore.http / AppCore.apiClient / AppCore.request.
+   - Fallback fetch seguro contra https://api.onionit.net.
+   - Normalizar payload heterogéneo del backend Onion Auth.
+   - Aplicar sesión completa sólo con token + usuario usable.
+   - Permitir token_only refresh sin destruir usuario existente.
+   - Usar /api/auth/me como fuente real de usuario/avatar tras restore.
+   - Exponer Auth.getUser / getCurrentUser / getProfile / getAccount.
+   - Pintar sidebar/topbar vía AppCore.state + app:ui:repair-request.
+   - Preservar rutas públicas técnicas con token.
+   - Evitar auth fantasma.
+   - Evitar duplicidad de eventos canónicos.
+   - No exponer tokens en snapshots/eventos.
+   - Bridge Auth idempotente y silencioso.
+
+   HARDENING 16/10:
+   - /api/auth/me, /auth/me, /api/me y /me son privados.
+   - Activation/reset/2FA/password-reset son públicos técnicos.
+   - Restore nunca navega por sí mismo.
+   - Restore en ruta técnica preserva publicPath/search/hash.
+   - Login emite auth:login:success una sola vez desde facade.
+   - Password reset se delega sin auth/refresh/logout.
+   - fetchMeDirect usa auth:true y permite auto-refresh si Http lo gestiona.
+   - Fallback fetch sólo si core client falta o falla por firma, no por HTTP real.
+   - Sanitización circular-safe.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -126,7 +137,7 @@ import {
 ========================================================= */
 
 const AUTH_MODULE_VERSION =
-  "15.0.0-extreme-me-sidebar-safe";
+  "16.0.0-extreme-me-sidebar-safe";
 
 const AUTH_SOURCE =
   "Auth";
@@ -149,6 +160,17 @@ const RESET_PASSWORD_PATH =
 const RESET_CONFIRM_PATH =
   "/reset-password/confirm";
 
+const PASSWORD_RESET_CONFIRM_PATH =
+  "/password-reset/confirm";
+
+const PRIVATE_ME_ENDPOINTS =
+  Object.freeze([
+    "/me",
+    "/api/me",
+    "/auth/me",
+    "/api/auth/me",
+  ]);
+
 const PUBLIC_TECHNICAL_ROUTE_SET =
   new Set(
     [
@@ -162,6 +184,7 @@ const PUBLIC_TECHNICAL_ROUTE_SET =
       "/forgot-password",
       "/recover-password",
       "/password-reset",
+      PASSWORD_RESET_CONFIRM_PATH,
       "/2fa",
       "/otp",
       "/mfa",
@@ -373,6 +396,7 @@ const TWO_FACTOR_STATUSES =
     "mfa_required",
     "two_factor_required",
     "totp_required",
+    "otp_required",
   ]);
 
 const SENSITIVE_USER_KEYS =
@@ -415,9 +439,20 @@ const AUTH_ALWAYS_EMIT_EVENTS =
   new Set([
     "auth:login:start",
     "auth:login:success",
+    "auth:login:error",
+    "auth:login:2fa-required",
     "app:ui:repair-request",
     "app:ui:repair",
   ]);
+
+const MAX_SANITIZE_DEPTH =
+  7;
+
+const MAX_SANITIZE_ARRAY =
+  100;
+
+const MAX_SANITIZE_KEYS =
+  140;
 
 /* =========================================================
    BASIC HELPERS
@@ -484,6 +519,13 @@ function isPlainObject(value) {
     value !== null &&
     typeof value === "object" &&
     !Array.isArray(value)
+  );
+}
+
+function isAnyObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object"
   );
 }
 
@@ -692,7 +734,7 @@ function redactTokenInText(value = "") {
   try {
     output =
       output.replace(
-        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token)=)([^&#\s]+)/gi,
+        /([?&#](?:token|activationToken|activateToken|activation_token|activate_token|resetToken|reset_token|passwordResetToken|password_reset_token|confirmToken|confirm_token|code|t|otp|totp|access_token|refresh_token|id_token|tempToken|temp_token)=)([^&#\s]+)/gi,
         "$1***"
       );
 
@@ -705,6 +747,12 @@ function redactTokenInText(value = "") {
     output =
       output.replace(
         /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
+
+    output =
+      output.replace(
+        /(\/password-reset\/confirm\/)([^/?#\s]+)/gi,
         "$1***"
       );
 
@@ -764,63 +812,152 @@ function sanitizeRouteContext(context = {}) {
   };
 }
 
-function sanitizeEventPayload(payload = {}) {
-  if (!isPlainObject(payload)) {
+function sanitizeEventPayload(payload = {}, depth = 0, seen = null) {
+  if (!seen) {
+    try {
+      seen = new WeakSet();
+    } catch {
+      seen = null;
+    }
+  }
+
+  if (depth > MAX_SANITIZE_DEPTH) {
+    return "[MaxDepth]";
+  }
+
+  if (typeof payload === "string") {
+    return redactTokenInText(payload);
+  }
+
+  if (
+    payload === null ||
+    payload === undefined ||
+    typeof payload === "number" ||
+    typeof payload === "boolean"
+  ) {
     return payload;
   }
 
-  const output = {
-    ...payload,
-  };
+  if (typeof payload === "bigint") {
+    return String(payload);
+  }
 
-  for (const key of [
-    ...TOKEN_KEYS,
-    ...REFRESH_TOKEN_KEYS,
-    ...TEMP_TOKEN_KEYS,
-    "authorization",
-    "password",
-    "secret",
-    "otp",
-    "totp",
-    "code",
-  ]) {
-    if (key in output) {
+  if (typeof payload === "function") {
+    return "[Function]";
+  }
+
+  if (payload instanceof Error) {
+    return {
+      name:
+        safeText(payload.name, "Error"),
+
+      message:
+        redactTokenInText(payload.message || ""),
+
+      code:
+        payload.code || null,
+
+      status:
+        payload.status ||
+        payload.statusCode ||
+        payload.response?.status ||
+        null,
+
+      stack:
+        payload.stack ? "[stack]" : null,
+    };
+  }
+
+  if (isAnyObject(payload)) {
+    try {
+      if (
+        seen &&
+        seen.has(payload)
+      ) {
+        return "[Circular]";
+      }
+
+      seen?.add?.(payload);
+    } catch {}
+  }
+
+  if (Array.isArray(payload)) {
+    return payload
+      .slice(0, MAX_SANITIZE_ARRAY)
+      .map((item) =>
+        sanitizeEventPayload(item, depth + 1, seen)
+      );
+  }
+
+  if (isPlainObject(payload)) {
+    const output = {};
+
+    const entries =
+      Object.entries(payload)
+        .slice(0, MAX_SANITIZE_KEYS);
+
+    for (const [key, value] of entries) {
+      if (
+        [
+          ...TOKEN_KEYS,
+          ...REFRESH_TOKEN_KEYS,
+          ...TEMP_TOKEN_KEYS,
+          "authorization",
+          "password",
+          "secret",
+          "otp",
+          "totp",
+          "code",
+        ].includes(key)
+      ) {
+        output[key] =
+          value ? "***" : value;
+        continue;
+      }
+
+      if (key === "user") {
+        output[key] =
+          sanitizePublicUser(value);
+        continue;
+      }
+
+      if (
+        [
+          "path",
+          "publicPath",
+          "redirectTo",
+          "url",
+          "currentPath",
+          "currentCanonicalPath",
+          "endpoint",
+        ].includes(key) &&
+        typeof value === "string"
+      ) {
+        output[key] =
+          redactTokenInText(value);
+        continue;
+      }
+
+      if (key === "routeContext") {
+        output[key] =
+          sanitizeRouteContext(value);
+        continue;
+      }
+
+      if (key === "raw") {
+        output[key] =
+          undefined;
+        continue;
+      }
+
       output[key] =
-        null;
+        sanitizeEventPayload(value, depth + 1, seen);
     }
+
+    return output;
   }
 
-  if (output.user) {
-    output.user =
-      sanitizePublicUser(output.user);
-  }
-
-  for (const key of [
-    "path",
-    "publicPath",
-    "redirectTo",
-    "url",
-    "currentPath",
-    "currentCanonicalPath",
-    "endpoint",
-  ]) {
-    if (output[key]) {
-      output[key] =
-        redactTokenInText(output[key]);
-    }
-  }
-
-  if (output.routeContext) {
-    output.routeContext =
-      sanitizeRouteContext(output.routeContext);
-  }
-
-  if (output.raw) {
-    output.raw =
-      undefined;
-  }
-
-  return output;
+  return String(payload);
 }
 
 function shouldEmitAuthEvent(eventName = "", options = {}) {
@@ -957,8 +1094,59 @@ function createRuntimeErrorSnapshot(type, error) {
 }
 
 /* =========================================================
-   API CLIENT BRIDGE · CORE HTTP FIRST
+   ENDPOINT / API CLIENT BRIDGE
 ========================================================= */
+
+function normalizeEndpointPath(path = "") {
+  const raw =
+    safeText(path, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    const parsed =
+      new URL(
+        raw,
+        isBrowser()
+          ? window.location.origin
+          : "http://localhost"
+      );
+
+    return (
+      parsed.pathname ||
+      "/"
+    )
+      .replace(/\/{2,}/g, "/")
+      .replace(/\/+$/g, "") ||
+      "/";
+  } catch {}
+
+  return raw
+    .split("?")[0]
+    .split("#")[0]
+    .replace(/\/{2,}/g, "/")
+    .replace(/\/+$/g, "") ||
+    "/";
+}
+
+function isPrivateMeEndpoint(path = "") {
+  const normalized =
+    normalizeEndpointPath(path);
+
+  const withoutApi =
+    normalized.startsWith("/api/")
+      ? normalized.slice(4)
+      : normalized;
+
+  return PRIVATE_ME_ENDPOINTS.some((endpoint) =>
+    normalized === endpoint ||
+    withoutApi === endpoint ||
+    normalized.endsWith(endpoint) ||
+    withoutApi.endsWith(endpoint)
+  );
+}
 
 function resolveAuthEndpoint(name = "me", fallback = "/api/auth/me") {
   const fromConstants =
@@ -995,15 +1183,43 @@ function resolveApiBase() {
   const config =
     safeObject(AppCore?.config);
 
-  return safeText(
-    config.apiBase ||
-      config.apiUrl ||
-      config.baseUrl ||
-      config.backendUrl ||
-      config.publicApiOrigin ||
-      BACKEND_ORIGIN,
-    BACKEND_ORIGIN
-  ).replace(/\/+$/g, "");
+  const raw =
+    safeText(
+      config.apiBase ||
+        config.apiOrigin ||
+        config.apiUrl ||
+        config.baseUrl ||
+        config.backendUrl ||
+        config.publicApiOrigin ||
+        config.api?.base ||
+        config.api?.baseUrl ||
+        BACKEND_ORIGIN,
+      BACKEND_ORIGIN
+    );
+
+  try {
+    const parsed =
+      new URL(raw);
+
+    const origin =
+      parsed.origin.replace(/\/+$/g, "");
+
+    const pathname =
+      (parsed.pathname || "/")
+        .replace(/\/+$/g, "") ||
+      "/";
+
+    if (
+      pathname === "/" ||
+      pathname === "/api"
+    ) {
+      return origin;
+    }
+
+    return `${origin}${pathname}`.replace(/\/+$/g, "");
+  } catch {
+    return raw.replace(/\/+$/g, "") || BACKEND_ORIGIN;
+  }
 }
 
 function buildAbsoluteApiUrl(path = "") {
@@ -1086,7 +1302,11 @@ function buildAuthHeaders(options = {}) {
     ...(safeObject(opts.headers)),
   };
 
-  if (opts.auth === false || opts.skipAuth === true) {
+  if (
+    opts.auth === false ||
+    opts.skipAuth === true ||
+    opts.public === true
+  ) {
     return headers;
   }
 
@@ -1106,6 +1326,45 @@ function buildAuthHeaders(options = {}) {
   return headers;
 }
 
+function shouldFallbackAfterCoreError(error = null) {
+  if (!error) {
+    return true;
+  }
+
+  const status =
+    safeNumber(
+      error.status ||
+        error.statusCode ||
+        error.response?.status ||
+        error.data?.status,
+      0
+    );
+
+  if (status > 0) {
+    return false;
+  }
+
+  const name =
+    safeText(error.name, "");
+
+  if (name === "AbortError") {
+    return false;
+  }
+
+  const code =
+    safeText(error.code, "");
+
+  if (
+    code === "AUTH_API_ERROR" ||
+    code === "UNAUTHORIZED" ||
+    code === "FORBIDDEN"
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 async function requestWithCoreClient(method = "GET", path = "", body = undefined, options = {}) {
   const client =
     getCoreHttpClient();
@@ -1117,6 +1376,9 @@ async function requestWithCoreClient(method = "GET", path = "", body = undefined
   const upperMethod =
     safeText(method, "GET").toUpperCase();
 
+  const endpointPrivateMe =
+    isPrivateMeEndpoint(path);
+
   const opts = {
     ...safeObject(options),
 
@@ -1124,10 +1386,36 @@ async function requestWithCoreClient(method = "GET", path = "", body = undefined
       upperMethod,
 
     auth:
-      options.auth !== false,
+      options.auth === false
+        ? false
+        : true,
+
+    public:
+      endpointPrivateMe
+        ? false
+        : options.public === true,
+
+    skipAuth:
+      endpointPrivateMe
+        ? false
+        : options.skipAuth === true,
 
     headers:
-      buildAuthHeaders(options),
+      buildAuthHeaders({
+        ...safeObject(options),
+        auth:
+          options.auth === false
+            ? false
+            : true,
+        public:
+          endpointPrivateMe
+            ? false
+            : options.public === true,
+        skipAuth:
+          endpointPrivateMe
+            ? false
+            : options.skipAuth === true,
+      }),
 
     noStore:
       true,
@@ -1136,7 +1424,9 @@ async function requestWithCoreClient(method = "GET", path = "", body = undefined
       "no-store",
 
     _skipAuthRefresh:
-      options._skipAuthRefresh === true,
+      endpointPrivateMe
+        ? options._skipAuthRefresh === true
+        : options._skipAuthRefresh === true,
   };
 
   if (body !== undefined && body !== null) {
@@ -1205,14 +1495,14 @@ async function requestWithCoreClient(method = "GET", path = "", body = undefined
         opts
       );
     } catch (error) {
-      try {
-        return await client.request(
-          path,
-          opts
-        );
-      } catch {
+      if (!shouldFallbackAfterCoreError(error)) {
         throw error;
       }
+
+      return await client.request(
+        path,
+        opts
+      );
     }
   }
 
@@ -1240,8 +1530,25 @@ async function requestWithFetch(method = "GET", path = "", body = undefined, opt
   const url =
     buildAbsoluteApiUrl(path);
 
+  const endpointPrivateMe =
+    isPrivateMeEndpoint(path);
+
   const headers =
-    buildAuthHeaders(options);
+    buildAuthHeaders({
+      ...safeObject(options),
+      auth:
+        options.auth === false
+          ? false
+          : true,
+      public:
+        endpointPrivateMe
+          ? false
+          : options.public === true,
+      skipAuth:
+        endpointPrivateMe
+          ? false
+          : options.skipAuth === true,
+    });
 
   const hasBody =
     body !== undefined &&
@@ -1313,6 +1620,7 @@ async function requestWithFetch(method = "GET", path = "", body = undefined, opt
       new Error(
         safeText(
           payload?.message ||
+            payload?.error?.message ||
             payload?.error ||
             response.statusText,
           `HTTP ${response.status}`
@@ -1327,6 +1635,7 @@ async function requestWithFetch(method = "GET", path = "", body = undefined, opt
 
     error.code =
       payload?.code ||
+      payload?.error?.code ||
       payload?.error ||
       (
         response.status === 401
@@ -1359,7 +1668,7 @@ async function authApiRequest(method = "GET", path = "", body = undefined, optio
   } catch (coreError) {
     if (
       options.noFetchFallback === true ||
-      coreError?.name === "AbortError"
+      !shouldFallbackAfterCoreError(coreError)
     ) {
       throw coreError;
     }
@@ -1414,7 +1723,7 @@ function collectAuthObjects(raw = {}) {
     [];
 
   const seen =
-    new Set();
+    new WeakSet();
 
   const queue =
     [raw];
@@ -1424,21 +1733,25 @@ function collectAuthObjects(raw = {}) {
 
   while (
     queue.length &&
-    guard < 140
+    guard < 160
   ) {
     guard += 1;
 
     const current =
       queue.shift();
 
-    if (
-      !isPlainObject(current) ||
-      seen.has(current)
-    ) {
+    if (!isPlainObject(current)) {
       continue;
     }
 
-    seen.add(current);
+    try {
+      if (seen.has(current)) {
+        continue;
+      }
+
+      seen.add(current);
+    } catch {}
+
     output.push(current);
 
     for (const key of AUTH_OBJECT_KEYS) {
@@ -1464,6 +1777,10 @@ function collectAuthObjects(raw = {}) {
 
     if (isPlainObject(current.auth?.session)) {
       queue.push(current.auth.session);
+    }
+
+    if (isPlainObject(current.data?.data)) {
+      queue.push(current.data.data);
     }
   }
 
@@ -1529,7 +1846,9 @@ function pickBoolFromObjects(objects = [], keys = []) {
 
 function hasUsableToken(token = "") {
   const value =
-    safeText(token, "");
+    safeText(token, "")
+      .replace(/^Bearer\s+/i, "")
+      .trim();
 
   if (!value) {
     return false;
@@ -1547,6 +1866,8 @@ function hasUsableToken(token = "") {
       "nan",
       "none",
       "[object object]",
+      "{}",
+      "[]",
     ].includes(lower)
   ) {
     return false;
@@ -1704,27 +2025,6 @@ function normalizeUsername(value = "") {
     .toLowerCase();
 }
 
-function normalizeLoginUserForState(user = {}) {
-  const clean =
-    safeObject(user);
-
-  try {
-    const normalized =
-      normalizeUser?.(clean);
-
-    if (
-      normalized &&
-      hasUsableUser(normalized)
-    ) {
-      return normalizeFinalUser(normalized);
-    }
-  } catch {}
-
-  return hasUsableUser(clean)
-    ? normalizeFinalUser(clean)
-    : null;
-}
-
 function normalizeFinalUser(user = {}) {
   const source =
     safeObject(user);
@@ -1813,7 +2113,7 @@ function normalizeFinalUser(user = {}) {
     resolveAvatar(source);
 
   const preferences =
-    safeObject(source.preferences);
+    safeObject(source.preferences || source.preferencias);
 
   return {
     ...source,
@@ -1851,11 +2151,21 @@ function normalizeFinalUser(user = {}) {
       source.email_lower ||
       (email ? email.toLowerCase() : null),
 
+    email_lower:
+      source.email_lower ||
+      source.emailLower ||
+      (email ? email.toLowerCase() : null),
+
     username:
       username || null,
 
     userName:
       source.userName ||
+      username ||
+      null,
+
+    user_name:
+      source.user_name ||
       username ||
       null,
 
@@ -1969,6 +2279,27 @@ function normalizeFinalUser(user = {}) {
 
     preferences,
   };
+}
+
+function normalizeLoginUserForState(user = {}) {
+  const clean =
+    safeObject(user);
+
+  try {
+    const normalized =
+      normalizeUser?.(clean);
+
+    if (
+      normalized &&
+      hasUsableUser(normalized)
+    ) {
+      return normalizeFinalUser(normalized);
+    }
+  } catch {}
+
+  return hasUsableUser(clean)
+    ? normalizeFinalUser(clean)
+    : null;
 }
 
 function normalizeSessionContext(sessionInput = null, user = null, fallback = {}) {
@@ -2133,7 +2464,11 @@ function isExplicitFailureFromObjects(objects = []) {
   return objects.some((object) =>
     object?.ok === false ||
     object?.success === false ||
-    object?.authenticated === false && object?.code && object?.code !== "ME_OK"
+    (
+      object?.authenticated === false &&
+      object?.code &&
+      object?.code !== "ME_OK"
+    )
   );
 }
 
@@ -2361,12 +2696,12 @@ function normalizeAuthPayload(result = {}, options = {}) {
 
     token:
       hasToken
-        ? token
+        ? token.replace(/^Bearer\s+/i, "").trim()
         : "",
 
     accessToken:
       hasToken
-        ? token
+        ? token.replace(/^Bearer\s+/i, "").trim()
         : "",
 
     refreshToken:
@@ -2588,7 +2923,8 @@ function getResetConfirmInitialUrl() {
   try {
     return safeText(
       window.__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__ ||
-        window.__ONION_RESET_CONFIRM_INITIAL_URL__,
+        window.__ONION_RESET_CONFIRM_INITIAL_URL__ ||
+        window.__ONION_PASSWORD_RESET_CONFIRM_INITIAL_URL__,
       ""
     );
   } catch {
@@ -2689,9 +3025,9 @@ function isResetConfirmRoute(path = getBrowserPublicPathSafe()) {
     }
   } catch {}
 
-  return routeStartsWith(
-    path,
-    RESET_CONFIRM_PATH
+  return (
+    routeStartsWith(path, RESET_CONFIRM_PATH) ||
+    routeStartsWith(path, PASSWORD_RESET_CONFIRM_PATH)
   );
 }
 
@@ -2838,10 +3174,17 @@ function hasResetConfirmToken(value = getBrowserPublicPathSafe()) {
     }
   } catch {}
 
-  return hasTechnicalTokenInPathOrQuery(
-    value,
-    RESET_CONFIRM_PATH,
-    RESET_TOKEN_PARAM_NAMES
+  return (
+    hasTechnicalTokenInPathOrQuery(
+      value,
+      RESET_CONFIRM_PATH,
+      RESET_TOKEN_PARAM_NAMES
+    ) ||
+    hasTechnicalTokenInPathOrQuery(
+      value,
+      PASSWORD_RESET_CONFIRM_PATH,
+      RESET_TOKEN_PARAM_NAMES
+    )
   );
 }
 
@@ -2875,11 +3218,37 @@ function getCurrentRouteContext() {
   const resetConfirmInitialUrl =
     getResetConfirmInitialUrl();
 
+  const bootContext =
+    isPlainObject(
+      isBrowser()
+        ? window.__ONION_BOOT_CONTEXT__
+        : null
+    )
+      ? window.__ONION_BOOT_CONTEXT__
+      : {};
+
+  const mainBootContext =
+    isPlainObject(
+      isBrowser()
+        ? window.__ONION_MAIN_BOOT_CONTEXT__
+        : null
+    )
+      ? window.__ONION_MAIN_BOOT_CONTEXT__
+      : {};
+
   const candidates =
     [
       state.bootProtectedInitialUrl,
       state.bootActivationInitialUrl,
       state.bootResetConfirmInitialUrl,
+      bootContext.protectedInitialUrl,
+      bootContext.activationInitialUrl,
+      bootContext.resetConfirmInitialUrl,
+      bootContext.mainInitialUrl,
+      bootContext.mainInitialPublicPath,
+      mainBootContext.initialUrl,
+      mainBootContext.href,
+      mainBootContext.publicPath,
       activationInitialUrl,
       resetConfirmInitialUrl,
       state.bootInitialUrl,
@@ -3158,6 +3527,36 @@ function normalizeRestoreOptions(options = {}) {
           preserve
       ),
 
+    preservePublicPath:
+      Boolean(
+        baseOptions.preservePublicPath ||
+          preserve
+      ),
+
+    preserveSearch:
+      Boolean(
+        baseOptions.preserveSearch ||
+          preserve
+      ),
+
+    preserveHash:
+      Boolean(
+        baseOptions.preserveHash ||
+          preserve
+      ),
+
+    skipNavigation:
+      true,
+
+    skipRedirect:
+      true,
+
+    noRedirect:
+      true,
+
+    skipPostRestoreNavigation:
+      true,
+
     activationBoot:
       Boolean(
         baseOptions.activationBoot ||
@@ -3167,6 +3566,12 @@ function normalizeRestoreOptions(options = {}) {
     resetConfirmBoot:
       Boolean(
         baseOptions.resetConfirmBoot ||
+          routeContext.resetConfirmBoot
+      ),
+
+    resetPasswordConfirmBoot:
+      Boolean(
+        baseOptions.resetPasswordConfirmBoot ||
           routeContext.resetConfirmBoot
       ),
 
@@ -3727,6 +4132,26 @@ function reinforceCoreSession(sessionPayload = {}, options = {}) {
           user?.avatar ||
           null
         : null,
+
+    isAdmin:
+      hasUser
+        ? role === "admin"
+        : false,
+
+    isSupport:
+      hasUser
+        ? ["support", "soporte", "tecnico", "técnico"].includes(role)
+        : false,
+
+    isManager:
+      hasUser
+        ? role === "manager"
+        : false,
+
+    isClient:
+      hasUser
+        ? ["client", "cliente", "user"].includes(role)
+        : false,
   };
 
   try {
@@ -4109,6 +4534,8 @@ function clearAuthState(reason = "auth_clear", options = {}) {
         true,
       includeLegacy:
         true,
+      preserveRoute:
+        shouldPreserve,
     });
   } catch {}
 
@@ -4664,6 +5091,9 @@ async function fetchMeDirect(options = {}) {
       auth:
         true,
 
+      public:
+        false,
+
       skipAuth:
         false,
 
@@ -4895,10 +5325,13 @@ async function executeRestoreSession(runtimeSession, options = {}) {
     };
   }
 
+  const routeOptions =
+    normalizeRestoreOptions(options);
+
   const result =
     await restoreSessionCore(
       runtimeSession,
-      options
+      routeOptions
     );
 
   const normalized =
@@ -4942,7 +5375,7 @@ async function executeRestoreSession(runtimeSession, options = {}) {
           "Auth.restoreSession",
         reason:
           "auth-restore-session",
-          eventMode:
+        eventMode:
           "restore",
         emitRepair:
           true,
@@ -4954,7 +5387,7 @@ async function executeRestoreSession(runtimeSession, options = {}) {
 
   if (
     getCurrentTokenFromCore() &&
-    options.skipMeAfterRestore !== true
+    routeOptions.skipMeAfterRestore !== true
   ) {
     try {
       const meResult =
@@ -4962,7 +5395,7 @@ async function executeRestoreSession(runtimeSession, options = {}) {
           runtimeSession,
           {
             forceDirect:
-              options.forceDirectMe === true,
+              routeOptions.forceDirectMe === true,
           }
         );
 
@@ -4976,7 +5409,7 @@ async function executeRestoreSession(runtimeSession, options = {}) {
           meResult.ok !== false,
       };
     } catch (error) {
-      if (options.publicRoute === true) {
+      if (routeOptions.publicRoute === true) {
         return result;
       }
 
@@ -5814,7 +6247,7 @@ export const Auth = (() => {
     createInitialSessionState();
 
   /* =======================================================
-     USER GETTERS · CRITICAL FOR SIDEBAR
+     USER CRITICAL API
   ======================================================= */
 
   function getUser() {
@@ -6206,6 +6639,19 @@ export const Auth = (() => {
               normalized
             );
 
+            emit(
+              "auth:login:2fa-required",
+              {
+                authenticated:
+                  false,
+                requires2FA:
+                  true,
+                redirectTo:
+                  normalized.redirectTo ||
+                  DEFAULT_2FA_PATH,
+              }
+            );
+
             return {
               ...safeObject(result),
 
@@ -6381,12 +6827,14 @@ export const Auth = (() => {
           );
 
           emit(
-            "auth:runtime:login:error",
+            "auth:login:error",
             {
               durationMs:
                 nowMs() - startedAt,
               error:
                 session.lastError,
+              message:
+                safeExtractMessage(error),
             },
             options
           );
@@ -6518,7 +6966,7 @@ export const Auth = (() => {
     const currentUserValue =
       getUser();
 
-    return {
+    return sanitizeEventPayload({
       version:
         AUTH_MODULE_VERSION,
 
@@ -6535,6 +6983,9 @@ export const Auth = (() => {
               "me",
               "/api/auth/me"
             ),
+
+          mePrivate:
+            true,
         },
 
       endpoints:
@@ -6710,7 +7161,7 @@ export const Auth = (() => {
             ? "***"
             : null,
       },
-    };
+    });
   }
 
   /* =======================================================

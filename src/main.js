@@ -2,248 +2,41 @@
    Onion SPA - Entry Point
    Archivo: /src/main.js
 
-   ONION SUPPORT · MAIN ENTRYPOINT
-   PRIVATE SPA · SINGLE BOOT OWNER · CSP CLEAN · EXTREME 16/10
-
-   RESPONSABILIDADES:
+   Responsabilidad única:
    - Ser el único entrypoint físico cargado por index.html.
-   - Desactivar cualquier auto-boot legacy antes de importar src/app/index.js.
-   - Esperar DOM ready de forma segura.
-   - Capturar URL inicial mínima antes del boot lógico.
-   - Preservar rutas técnicas con token antes de cargar App.
-   - Cargar App/AppCore mediante imports dinámicos controlados.
-   - Invocar App.boot() una sola vez.
-   - Evitar doble arranque incluso con import/hot reload accidental.
-   - Capturar errores fatales del arranque físico.
-   - Exponer diagnóstico mínimo en window.OnionApp.main.
-   - No montar UI de negocio.
-   - No configurar Router/Auth/Store.
-   - No controlar el loader real salvo fallback fatal de emergencia.
-   - No contener CSS.
-   - No inyectar estilos.
-   - No duplicar lógica de src/app/index.js.
-   - No duplicar lógica de src/app/loader.js.
-
-   CONTRATO:
-   - index.html carga /src/main.js.
-   - src/app/index.js exporta App, pero NO debe autoarrancar.
-   - Si quedara auto-boot legacy, main.js fija __ONION_DISABLE_AUTO_BOOT__
-     antes del import dinámico.
-   - src/app/loader.js gobierna el loader real.
-   - src/app/index.js gobierna bootstrap, restore, router, UI y finalize.
-
-   HARDENING:
-   - Single boot lock global con reutilización de promise existente.
-   - serializeMainError() evita error: {}.
-   - sanitizePayload() circular-safe con WeakSet.
-   - Preserva activate/reset/password-reset token routes antes del boot.
-   - Soporte aliases activation/reset.
-   - Soporte hash-router #/ruta y #!/ruta.
-   - Soporte /@usuario/ruta sin destruir URL pública inicial.
-   - publicPath conserva /@usuario/query/hash.
-   - canonicalPath interno limpia /@usuario/query/hash sólo donde toca.
-   - window.__ONION_FATAL_ERROR__ conserva error serializado y rawError.
-   - window.__ONION_LAST_WINDOW_ERROR__ conserva errores globales.
-   - window.__ONION_LAST_REJECTION__ conserva unhandled rejections.
+   - Esperar DOM ready.
+   - Cargar /src/app/index.js.
+   - Ejecutar el boot lógico una sola vez.
+   - Capturar error fatal de arranque.
+   - No meter auth.
+   - No meter router.
+   - No meter API.
+   - No meter store.
+   - No meter vistas.
 ========================================================= */
 
-/* =========================================================
-   CONSTANTS
-========================================================= */
-
-const MAIN_VERSION = "16.0.0-extreme-pro";
-
-const MAIN_SOURCE = "main";
-
-const RUNTIME_KEY = "__ONION_MAIN__";
-const BOOT_LOCK_KEY = "__ONION_MAIN_BOOT_LOCK__";
-
-const INITIAL_URL_KEY = "__ONION_INITIAL_URL__";
-const MAIN_BOOT_CONTEXT_KEY = "__ONION_MAIN_BOOT_CONTEXT__";
-const APP_BOOT_CONTEXT_KEY = "__ONION_BOOT_CONTEXT__";
-
-const DISABLE_AUTO_BOOT_KEY = "__ONION_DISABLE_AUTO_BOOT__";
-
-const DEFAULT_ROUTE = "/";
-
-const ACTIVATION_PATH = "/activate-account";
-const RESET_CONFIRM_PATH = "/reset-password/confirm";
-const PASSWORD_RESET_CONFIRM_PATH = "/password-reset/confirm";
-
-const DEFAULT_FATAL_TITLE = "Error de arranque";
-const DEFAULT_FATAL_MESSAGE = "No se pudo iniciar Onion Support.";
-
+const MAIN_VERSION = "v1-simple-main";
 const APP_MODULE_PATH = "./app/index.js";
-const CORE_MODULE_PATH = "./core/index.js";
 
-const PUBLIC_USERNAME_RE = /^@[A-Za-z0-9._-]{1,80}$/;
+const BOOT_LOCK_KEY = "__ONION_MAIN_BOOT_LOCK__";
+const DISABLE_AUTO_BOOT_KEY = "__ONION_DISABLE_AUTO_BOOT__";
+const INITIAL_URL_KEY = "__ONION_INITIAL_URL__";
+const BOOT_CONTEXT_KEY = "__ONION_BOOT_CONTEXT__";
 
-const ACTIVATION_PATHS = Object.freeze([
-  "/activate-account",
-  "/activate",
-  "/activation",
-  "/account/activate",
-  "/activate/first-user",
-]);
+const DEFAULT_ERROR_TITLE = "Error de arranque";
+const DEFAULT_ERROR_MESSAGE = "No se pudo iniciar Onion Support.";
 
-const RESET_CONFIRM_PATHS = Object.freeze([
-  "/reset-password/confirm",
-  "/reset-password-confirm",
-  "/password-reset/confirm",
-  "/password-reset-confirm",
-  "/confirm-reset-password",
-]);
-
-const TOKEN_ROUTE_CONFIGS = Object.freeze([
-  Object.freeze({
-    key: "activation",
-    path: ACTIVATION_PATH,
-    paths: ACTIVATION_PATHS,
-
-    windowKeys: Object.freeze([
-      "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-    ]),
-
-    tokenParamNames: Object.freeze([
-      "token",
-      "activationToken",
-      "activateToken",
-      "activation_token",
-      "activate_token",
-      "code",
-      "t",
-    ]),
-  }),
-
-  Object.freeze({
-    key: "resetConfirm",
-    path: RESET_CONFIRM_PATH,
-    paths: RESET_CONFIRM_PATHS,
-
-    windowKeys: Object.freeze([
-      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-      "__ONION_RESET_CONFIRM_INITIAL_URL__",
-      "__ONION_PASSWORD_RESET_CONFIRM_INITIAL_URL__",
-    ]),
-
-    tokenParamNames: Object.freeze([
-      "token",
-      "resetToken",
-      "passwordResetToken",
-      "reset_token",
-      "password_reset_token",
-      "confirmToken",
-      "confirm_token",
-      "code",
-      "t",
-    ]),
-  }),
-]);
-
-const SENSITIVE_PARAM_NAMES = Object.freeze([
-  "token",
-  "activationToken",
-  "activateToken",
-  "activation_token",
-  "activate_token",
-  "resetToken",
-  "reset_token",
-  "passwordResetToken",
-  "password_reset_token",
-  "confirmToken",
-  "confirm_token",
-  "code",
-  "t",
-  "otp",
-  "totp",
-  "access_token",
-  "refresh_token",
-  "id_token",
-  "tempToken",
-  "temp_token",
-  "temporaryToken",
-  "temporary_token",
-  "twoFactorToken",
-  "two_factor_token",
-  "mfaToken",
-  "mfa_token",
-  "authorization",
-  "auth",
-  "jwt",
-  "session",
-  "sid",
-]);
-
-const MAIN_EVENTS = Object.freeze({
-  moduleLoaded: "main:module:loaded",
-  bridgeReady: "main:bridge:ready",
-
-  initialUrlCaptured: "main:initial-url:captured",
-
-  runtimeLoadStart: "main:runtime-load:start",
-  runtimeLoadReady: "main:runtime-load:ready",
-  runtimeLoadError: "main:runtime-load:error",
-
-  bootStart: "main:boot:start",
-  bootReady: "main:boot:ready",
-  bootError: "main:boot:error",
-
-  fatalRendered: "main:fatal:rendered",
-
-  globalError: "main:global:error",
-  unhandledRejection: "main:global:unhandled-rejection",
-});
-
-/* =========================================================
-   RUNTIME REFS
-========================================================= */
-
-let App = null;
-let AppCore = null;
-
-let runtimeLoadPromise = null;
-
-/* =========================================================
-   STATE
-========================================================= */
-
-const state = {
-  version: MAIN_VERSION,
-
-  started: false,
-  settled: false,
-  failed: false,
-
-  startPromise: null,
-  bootPromise: null,
-
-  runtimeLoaded: false,
-  runtimeLoadStartedAt: 0,
-  runtimeLoadSettledAt: 0,
-
-  startedAt: 0,
-  settledAt: 0,
-
-  readyBound: false,
-  readyCallbackCalled: false,
-
-  safetyNetBound: false,
-  fatalRendered: false,
-  debugBridgeExposed: false,
-
-  lastBootContext: null,
-  lastError: null,
-};
+let appModule = null;
+let bootPromise = null;
+let startedAt = 0;
+let failed = false;
 
 /* =========================================================
    BASIC HELPERS
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 function isFunction(value) {
@@ -251,1944 +44,40 @@ function isFunction(value) {
 }
 
 function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
-}
-
-function isAnyObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object"
-  );
-}
-
-function safeObject(value) {
-  return isObject(value)
-    ? value
-    : {};
-}
-
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
-  const text =
-    String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
 
-function safeNumber(value, fallback = 0) {
-  const number =
-    Number(value);
-
-  return Number.isFinite(number)
-    ? number
-    : fallback;
-}
-
-function nowMs() {
+function nowIso() {
   try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
-}
-
-function nowIso(ms = nowMs()) {
-  try {
-    return new Date(ms).toISOString();
+    return new Date().toISOString();
   } catch {
     return "";
   }
 }
 
-function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
-    return window.location.origin;
-  }
-
-  return "http://localhost";
-}
-
-/* =========================================================
-   LEGACY AUTO BOOT GUARD
-========================================================= */
-
-function disableLegacyAutoBoot() {
-  if (!isBrowser()) {
-    return false;
-  }
+function getRequestPath() {
+  if (!isBrowser()) return "/";
 
   try {
-    window[DISABLE_AUTO_BOOT_KEY] = true;
-    return true;
+    return `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
   } catch {
-    return false;
+    return "/";
   }
 }
 
-/* =========================================================
-   PATH / TOKEN HELPERS
-========================================================= */
-
-function escapeRegExp(value = "") {
-  return String(value).replace(
-    /[.*+?^${}()|[\]\\]/g,
-    "\\$&"
-  );
-}
-
-function redactSensitiveText(value = "") {
-  let output =
-    safeText(value, "");
-
-  if (!output) {
-    return "";
-  }
-
-  try {
-    for (const name of SENSITIVE_PARAM_NAMES) {
-      const escaped =
-        escapeRegExp(name);
-
-      output =
-        output.replace(
-          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
-          "$1***"
-        );
-    }
-
-    for (const config of TOKEN_ROUTE_CONFIGS) {
-      for (const routePath of safeArray(config.paths)) {
-        const escapedPath =
-          escapeRegExp(routePath);
-
-        output =
-          output.replace(
-            new RegExp(`(${escapedPath}\\/)([^/?#\\s]+)`, "gi"),
-            "$1***"
-          );
-      }
-    }
-
-    output =
-      output.replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      );
-
-    output =
-      output.replace(
-        /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
-        "$1$2***"
-      );
-
-    output =
-      output.replace(
-        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-        "***"
-      );
-  } catch {}
-
-  return output;
-}
-
-function stripScopedUserPrefixFromPathname(pathname = DEFAULT_ROUTE) {
-  const value =
-    safeText(pathname, DEFAULT_ROUTE);
-
-  if (!value.startsWith("/@")) {
-    return value;
-  }
-
-  const parts =
-    value.split("/");
-
-  if (
-    parts.length >= 3 &&
-    PUBLIC_USERNAME_RE.test(parts[1])
-  ) {
-    return `/${parts.slice(2).join("/")}` || DEFAULT_ROUTE;
-  }
-
-  return value;
-}
-
-function normalizePathnameOnly(pathname = DEFAULT_ROUTE, options = {}) {
-  const opts =
-    safeObject(options);
-
-  let value =
-    safeText(pathname, DEFAULT_ROUTE)
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
-
-  if (!value) {
-    value = DEFAULT_ROUTE;
-  }
-
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
-  }
-
-  const segments =
-    value
-      .split("/")
-      .filter(Boolean);
-
-  const cleanSegments = [];
-
-  for (const segment of segments) {
-    if (segment === ".") {
-      continue;
-    }
-
-    if (segment === "..") {
-      cleanSegments.pop();
-      continue;
-    }
-
-    cleanSegments.push(segment);
-  }
-
-  value =
-    `/${cleanSegments.join("/")}`;
-
-  if (!value) {
-    value = DEFAULT_ROUTE;
-  }
-
-  if (opts.stripUsername === true) {
-    value =
-      stripScopedUserPrefixFromPathname(value);
-  }
-
-  if (
-    value.length > 1 &&
-    value.endsWith("/")
-  ) {
-    value =
-      value.replace(/\/+$/g, "") ||
-      DEFAULT_ROUTE;
-  }
-
-  return value;
-}
-
-function normalizeSearch(search = "") {
-  const value =
-    safeText(search, "");
-
-  if (!value) {
-    return "";
-  }
-
-  return value.startsWith("?")
-    ? value
-    : `?${value.replace(/^\?+/, "")}`;
-}
-
-function normalizeHash(hash = "") {
-  const value =
-    safeText(hash, "");
-
-  if (!value) {
-    return "";
-  }
-
-  return value.startsWith("#")
-    ? value
-    : `#${value.replace(/^#+/, "")}`;
-}
-
-function isHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  return (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  );
-}
-
-function normalizeHashRouterPath(value = "", options = {}) {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return DEFAULT_ROUTE;
-  }
-
-  if (raw.startsWith("#!")) {
-    return normalizeLocalFullPath(
-      raw.replace(/^#!\/?/, "/"),
-      options
-    );
-  }
-
-  return normalizeLocalFullPath(
-    raw.replace(/^#\/?/, "/"),
-    options
-  );
-}
-
-function splitFullPath(path = DEFAULT_ROUTE, options = {}) {
-  const raw =
-    safeText(path, DEFAULT_ROUTE);
-
-  if (isHashRouterPath(raw)) {
-    return splitFullPath(
-      normalizeHashRouterPath(raw, options),
-      options
-    );
-  }
-
-  let pathname =
-    raw;
-
-  let search =
-    "";
-
-  let hash =
-    "";
-
-  const hashIndex =
-    pathname.indexOf("#");
-
-  if (hashIndex >= 0) {
-    hash =
-      pathname.slice(hashIndex);
-
-    pathname =
-      pathname.slice(0, hashIndex) ||
-      DEFAULT_ROUTE;
-  }
-
-  const searchIndex =
-    pathname.indexOf("?");
-
-  if (searchIndex >= 0) {
-    search =
-      pathname.slice(searchIndex);
-
-    pathname =
-      pathname.slice(0, searchIndex) ||
-      DEFAULT_ROUTE;
-  }
-
-  return {
-    pathname:
-      normalizePathnameOnly(pathname, options),
-
-    search:
-      normalizeSearch(search),
-
-    hash:
-      normalizeHash(hash),
-  };
-}
-
-function normalizeLocalFullPath(path = DEFAULT_ROUTE, options = {}) {
-  const raw =
-    safeText(path, DEFAULT_ROUTE);
-
-  if (!raw) {
-    return DEFAULT_ROUTE;
-  }
-
-  if (isHashRouterPath(raw)) {
-    return normalizeLocalFullPath(
-      normalizeHashRouterPath(raw, options),
-      options
-    );
-  }
-
-  try {
-    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed =
-        new URL(
-          raw,
-          getBaseOrigin()
-        );
-
-      if (
-        parsed.hash &&
-        isHashRouterPath(parsed.hash)
-      ) {
-        return normalizeLocalFullPath(
-          normalizeHashRouterPath(parsed.hash, options),
-          options
-        );
-      }
-
-      return normalizeLocalFullPath(
-        `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`,
-        options
-      );
-    }
-  } catch {}
-
-  const {
-    pathname,
-    search,
-    hash,
-  } =
-    splitFullPath(raw, options);
-
-  return `${pathname}${search}${hash}`;
-}
-
-function pathFromUrlLike(value = "", options = {}) {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return "";
-  }
-
-  if (isHashRouterPath(raw)) {
-    return normalizeLocalFullPath(
-      normalizeHashRouterPath(raw, options),
-      options
-    );
-  }
-
-  try {
-    const parsed =
-      new URL(
-        raw,
-        getBaseOrigin()
-      );
-
-    if (
-      parsed.hash &&
-      isHashRouterPath(parsed.hash)
-    ) {
-      return normalizeLocalFullPath(
-        normalizeHashRouterPath(parsed.hash, options),
-        options
-      );
-    }
-
-    return normalizeLocalFullPath(
-      `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`,
-      options
-    );
-  } catch {
-    return normalizeLocalFullPath(
-      raw.startsWith("/") ||
-      raw.startsWith("#")
-        ? raw
-        : `/${raw}`,
-      options
-    );
-  }
-}
-
-function stripSearchAndHash(path = DEFAULT_ROUTE, options = {}) {
-  const normalized =
-    normalizeLocalFullPath(path || DEFAULT_ROUTE, options);
-
-  return (
-    normalized
-      .split("?")[0]
-      .split("#")[0] ||
-    DEFAULT_ROUTE
-  );
-}
-
-function hasTokenInSearch(search = "", names = []) {
-  try {
-    const params =
-      new URLSearchParams(search || "");
-
-    return safeArray(names).some((name) =>
-      Boolean(
-        safeText(
-          params.get(name),
-          ""
-        )
-      )
-    );
-  } catch {
-    return false;
-  }
-}
-
-function getRoutePaths(config = null) {
-  const paths =
-    Array.isArray(config?.paths)
-      ? config.paths
-      : [config?.path];
-
-  return paths
-    .map((item) =>
-      normalizePathnameOnly(item || "", {
-        stripUsername:
-          true,
-      })
-    )
-    .filter(Boolean);
-}
-
-function getCanonicalCleanPath(value = "") {
-  return stripSearchAndHash(
-    pathFromUrlLike(value, {
-      stripUsername:
-        true,
-    }) ||
-      value ||
-      DEFAULT_ROUTE,
-    {
-      stripUsername:
-        true,
-    }
-  );
-}
-
-function getPathToken(config = null, value = "") {
-  const paths =
-    getRoutePaths(config);
-
-  if (!paths.length) {
-    return "";
-  }
-
-  const clean =
-    getCanonicalCleanPath(value);
-
-  for (const routePath of paths) {
-    if (!clean.startsWith(`${routePath}/`)) {
-      continue;
-    }
-
-    const token =
-      clean
-        .slice(`${routePath}/`.length)
-        .split("/")[0];
-
-    try {
-      return safeText(
-        decodeURIComponent(token || ""),
-        ""
-      );
-    } catch {
-      return safeText(token, "");
-    }
-  }
-
-  return "";
-}
-
-function matchesTokenRoute(config = null, value = "") {
-  const paths =
-    getRoutePaths(config);
-
-  if (!paths.length) {
-    return false;
-  }
-
-  const clean =
-    getCanonicalCleanPath(value);
-
-  return paths.some((routePath) =>
-    clean === routePath ||
-    clean.startsWith(`${routePath}/`)
-  );
-}
-
-function hasRouteToken(config = null, value = "") {
-  if (!config) {
-    return false;
-  }
-
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return false;
-  }
-
-  if (getPathToken(config, raw)) {
-    return true;
-  }
-
-  try {
-    const parsed =
-      new URL(
-        raw,
-        getBaseOrigin()
-      );
-
-    if (
-      hasTokenInSearch(
-        parsed.search,
-        config.tokenParamNames
-      )
-    ) {
-      return true;
-    }
-
-    if (
-      parsed.hash &&
-      isHashRouterPath(parsed.hash)
-    ) {
-      const hashPath =
-        normalizeHashRouterPath(parsed.hash);
-
-      if (getPathToken(config, hashPath)) {
-        return true;
-      }
-
-      const hashParts =
-        splitFullPath(hashPath);
-
-      if (
-        hasTokenInSearch(
-          hashParts.search,
-          config.tokenParamNames
-        )
-      ) {
-        return true;
-      }
-    }
-
-    if (
-      parsed.hash &&
-      parsed.hash.includes("?")
-    ) {
-      const query =
-        parsed.hash
-          .split("?")
-          .slice(1)
-          .join("?");
-
-      return hasTokenInSearch(
-        query ? `?${query}` : "",
-        config.tokenParamNames
-      );
-    }
-
-    return false;
-  } catch {
-    const normalized =
-      normalizeLocalFullPath(raw);
-
-    if (getPathToken(config, normalized)) {
-      return true;
-    }
-
-    const parts =
-      splitFullPath(normalized);
-
-    if (
-      hasTokenInSearch(
-        parts.search,
-        config.tokenParamNames
-      )
-    ) {
-      return true;
-    }
-
-    if (
-      parts.hash &&
-      parts.hash.includes("?")
-    ) {
-      const query =
-        parts.hash
-          .split("?")
-          .slice(1)
-          .join("?");
-
-      return hasTokenInSearch(
-        query ? `?${query}` : "",
-        config.tokenParamNames
-      );
-    }
-
-    return false;
-  }
-}
-
-function getMatchedTokenRouteContext(href = "") {
-  for (const config of TOKEN_ROUTE_CONFIGS) {
-    if (
-      matchesTokenRoute(config, href) &&
-      hasRouteToken(config, href)
-    ) {
-      const publicPath =
-        pathFromUrlLike(href, {
-          stripUsername:
-            false,
-        });
-
-      const canonicalPath =
-        getCanonicalCleanPath(publicPath || href);
-
-      return {
-        key:
-          config.key,
-
-        path:
-          canonicalPath,
-
-        canonicalPath,
-
-        publicPath,
-
-        hasToken:
-          true,
-
-        tokenInPath:
-          Boolean(getPathToken(config, href)),
-
-        config,
-      };
-    }
-  }
-
-  return {
-    key:
-      "",
-
-    path:
-      "",
-
-    canonicalPath:
-      "",
-
-    publicPath:
-      "",
-
-    hasToken:
-      false,
-
-    tokenInPath:
-      false,
-
-    config:
-      null,
-  };
-}
-
-/* =========================================================
-   ERROR SERIALIZATION / PAYLOAD SANITIZE
-========================================================= */
-
-function serializeMainError(error = null, depth = 0, seen = null) {
-  if (!seen) {
-    try {
-      seen = new WeakSet();
-    } catch {
-      seen = null;
-    }
-  }
-
-  if (depth > 4) {
-    return {
-      name:
-        "DepthLimitError",
-
-      message:
-        "Error depth limit reached.",
-
-      stack:
-        "",
-    };
-  }
-
-  if (!error) {
-    return {
-      name:
-        "UnknownError",
-
-      message:
-        "Error desconocido",
-
-      stack:
-        "",
-
-      rawType:
-        typeof error,
-    };
-  }
-
-  const candidate =
-    error?.reason ||
-    error?.error ||
-    error;
-
-  if (
-    candidate &&
-    typeof candidate === "object" &&
-    seen
-  ) {
-    try {
-      if (seen.has(candidate)) {
-        return {
-          name:
-            "CircularError",
-
-          message:
-            "[Circular]",
-
-          stack:
-            "",
-        };
-      }
-
-      seen.add(candidate);
-    } catch {}
-  }
-
-  if (candidate instanceof Error) {
-    return {
-      name:
-        safeText(candidate.name, "Error"),
-
-      message:
-        redactSensitiveText(
-          safeText(candidate.message, "")
-        ),
-
-      stack:
-        redactSensitiveText(
-          safeText(candidate.stack, "")
-        ),
-
-      code:
-        candidate.code || null,
-
-      status:
-        candidate.status ||
-        candidate.statusCode ||
-        candidate.response?.status ||
-        candidate.data?.status ||
-        null,
-
-      timeout:
-        Boolean(candidate.timeout),
-
-      aborted:
-        Boolean(candidate.aborted),
-
-      cause:
-        candidate.cause
-          ? serializeMainError(candidate.cause, depth + 1, seen)
-          : null,
-    };
-  }
-
-  if (typeof candidate === "string") {
-    return {
-      name:
-        "ThrownString",
-
-      message:
-        redactSensitiveText(candidate),
-
-      stack:
-        "",
-
-      rawType:
-        "string",
-    };
-  }
-
-  if (typeof candidate !== "object") {
-    return {
-      name:
-        "ThrownValue",
-
-      message:
-        redactSensitiveText(String(candidate)),
-
-      stack:
-        "",
-
-      rawType:
-        typeof candidate,
-    };
-  }
-
-  const output = {
-    name:
-      safeText(candidate.name, "ObjectError"),
-
-    message:
-      redactSensitiveText(
-        safeText(
-          candidate.message ||
-            candidate.reason ||
-            candidate.statusText,
-          ""
-        )
-      ),
-
-    stack:
-      redactSensitiveText(
-        safeText(candidate.stack, "")
-      ),
-
-    code:
-      candidate.code ||
-      candidate.errorCode ||
-      candidate.error_code ||
-      null,
-
-    status:
-      candidate.status ||
-      candidate.statusCode ||
-      candidate.status_code ||
-      candidate.response?.status ||
-      candidate.data?.status ||
-      null,
-
-    timeout:
-      Boolean(candidate.timeout),
-
-    aborted:
-      Boolean(candidate.aborted),
-
-    keys:
-      [],
-  };
-
-  try {
-    output.keys =
-      Object.keys(candidate).slice(0, 80);
-  } catch {
-    output.keys =
-      [];
-  }
-
-  try {
-    output.data =
-      candidate.data
-        ? sanitizePayload(candidate.data)
-        : null;
-  } catch {
-    output.data =
-      null;
-  }
-
-  try {
-    output.response =
-      candidate.response
-        ? sanitizePayload(candidate.response)
-        : null;
-  } catch {
-    output.response =
-      null;
-  }
-
-  try {
-    output.raw =
-      sanitizePayload(candidate);
-  } catch {
-    output.raw =
-      redactSensitiveText(String(candidate));
-  }
-
-  return output;
-}
-
-function sanitizeError(error = null) {
-  if (!error) {
-    return null;
-  }
-
-  return {
-    ...serializeMainError(error),
-
-    at:
-      nowIso(),
-  };
-}
-
-function sanitizeBootContext(context = {}) {
-  const ctx =
-    safeObject(context);
-
-  return {
-    version:
-      MAIN_VERSION,
-
-    source:
-      MAIN_SOURCE,
-
-    reason:
-      safeText(ctx.reason, ""),
-
-    href:
-      redactSensitiveText(ctx.href || ""),
-
-    initialUrl:
-      redactSensitiveText(ctx.initialUrl || ""),
-
-    pathname:
-      safeText(ctx.pathname, ""),
-
-    search:
-      ctx.search ? "***" : "",
-
-    hash:
-      ctx.hash
-        ? redactSensitiveText(ctx.hash)
-        : "",
-
-    publicPath:
-      redactSensitiveText(ctx.publicPath || ""),
-
-    protectedRouteKey:
-      safeText(ctx.protectedRouteKey, ""),
-
-    protectedInitialUrl:
-      redactSensitiveText(ctx.protectedInitialUrl || ""),
-
-    protectedInitialPath:
-      redactSensitiveText(ctx.protectedInitialPath || ""),
-
-    protectedInitialPublicPath:
-      redactSensitiveText(ctx.protectedInitialPublicPath || ""),
-
-    isPublicTokenRoute:
-      Boolean(ctx.isPublicTokenRoute),
-
-    hasPublicToken:
-      Boolean(ctx.hasPublicToken),
-
-    capturedAt:
-      safeText(ctx.capturedAt, ""),
-  };
-}
-
-function sanitizePayload(payload = {}, depth = 0, seen = null) {
-  if (!seen) {
-    try {
-      seen = new WeakSet();
-    } catch {
-      seen = null;
-    }
-  }
-
-  if (depth > 6) {
-    return "[MaxDepth]";
-  }
-
-  if (!isAnyObject(payload)) {
-    if (payload instanceof Error) {
-      return sanitizeError(payload);
-    }
-
-    if (typeof payload === "string") {
-      return redactSensitiveText(payload);
-    }
-
-    return payload;
-  }
-
-  try {
-    if (
-      seen &&
-      seen.has(payload)
-    ) {
-      return "[Circular]";
-    }
-
-    seen?.add?.(payload);
-  } catch {}
-
-  if (payload instanceof Error) {
-    return sanitizeError(payload);
-  }
-
-  if (Array.isArray(payload)) {
-    return payload
-      .slice(0, 60)
-      .map((item) =>
-        sanitizePayload(item, depth + 1, seen)
-      );
-  }
-
-  const clean = {};
-
-  for (const [key, value] of Object.entries(payload).slice(0, 120)) {
-    if (
-      /token|secret|password|authorization|credential/i.test(key) &&
-      value
-    ) {
-      clean[key] = "***";
-      continue;
-    }
-
-    if (
-      [
-        "href",
-        "url",
-        "path",
-        "route",
-        "publicPath",
-        "canonicalPath",
-        "initialUrl",
-        "redirectTo",
-        "filename",
-        "message",
-        "stack",
-      ].includes(key) &&
-      typeof value === "string"
-    ) {
-      clean[key] =
-        redactSensitiveText(value);
-
-      continue;
-    }
-
-    if (key === "error") {
-      clean[key] =
-        sanitizeError(value);
-
-      continue;
-    }
-
-    if (
-      key === "bootContext" &&
-      isObject(value)
-    ) {
-      clean[key] =
-        sanitizeBootContext(value);
-
-      continue;
-    }
-
-    clean[key] =
-      sanitizePayload(value, depth + 1, seen);
-  }
-
-  return clean;
-}
-
-/* =========================================================
-   LOG / EVENTS
-========================================================= */
-
-function safeLog(...args) {
-  const cleanArgs =
-    args.map((item) =>
-      sanitizePayload(item)
-    );
-
-  try {
-    AppCore?.utils?.log?.(
-      "[Main]",
-      ...cleanArgs
-    );
-
-    return;
-  } catch {}
-
-  try {
-    console.log(
-      "[Main]",
-      ...cleanArgs
-    );
-  } catch {}
-}
-
-function safeWarn(...args) {
-  const cleanArgs =
-    args.map((item) =>
-      sanitizePayload(item)
-    );
-
-  let coreLogged =
-    false;
-
-  try {
-    if (isFunction(AppCore?.utils?.warn)) {
-      AppCore.utils.warn(
-        "[Main]",
-        ...cleanArgs
-      );
-
-      coreLogged =
-        true;
-    }
-  } catch {
-    coreLogged =
-      false;
-  }
-
-  if (coreLogged) {
-    return;
-  }
-
-  try {
-    console.warn(
-      "[Main]",
-      ...cleanArgs
-    );
-  } catch {}
-}
-
-function safeError(...args) {
-  const cleanArgs =
-    args.map((item) =>
-      sanitizePayload(item)
-    );
-
-  let coreLogged =
-    false;
-
-  try {
-    if (isFunction(AppCore?.utils?.error)) {
-      AppCore.utils.error(
-        "[Main]",
-        ...cleanArgs
-      );
-
-      coreLogged =
-        true;
-    }
-  } catch {
-    coreLogged =
-      false;
-  }
-
-  if (coreLogged) {
-    return;
-  }
-
-  try {
-    console.error(
-      "[Main]",
-      ...cleanArgs
-    );
-  } catch {}
-}
-
-function safeCreateCustomEvent(name = "", detail = {}) {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  const eventName =
-    safeText(name, "");
-
-  if (!eventName) {
-    return null;
-  }
-
-  try {
-    if (typeof CustomEvent === "function") {
-      return new CustomEvent(
-        eventName,
-        {
-          detail,
-        }
-      );
-    }
-  } catch {}
-
-  try {
-    const event =
-      document.createEvent("CustomEvent");
-
-    event.initCustomEvent(
-      eventName,
-      false,
-      false,
-      detail
-    );
-
-    return event;
-  } catch {
-    return null;
-  }
-}
-
-function safeEmit(name = "", payload = {}, options = {}) {
-  const eventName =
-    safeText(name, "");
-
-  if (!eventName) {
-    return false;
-  }
-
-  const cleanPayload =
-    sanitizePayload({
-      source:
-        MAIN_SOURCE,
-
-      version:
-        MAIN_VERSION,
-
-      ...safeObject(payload),
-    });
-
-  const opts =
-    safeObject(options);
-
-  let busAvailable =
-    false;
-
-  let busEmitted =
-    false;
-
-  try {
-    if (isFunction(AppCore?.events?.emit)) {
-      busAvailable =
-        true;
-
-      AppCore.events.emit(
-        eventName,
-        cleanPayload
-      );
-
-      busEmitted =
-        true;
-    }
-  } catch {}
-
-  if (
-    opts.window === true ||
-    (!busAvailable && isBrowser())
-  ) {
-    try {
-      const event =
-        safeCreateCustomEvent(
-          eventName,
-          cleanPayload
-        );
-
-      if (event) {
-        window.dispatchEvent(event);
-        return true;
-      }
-    } catch {}
-  }
-
-  return busEmitted;
-}
-
-/* =========================================================
-   DOM HELPERS
-========================================================= */
-
-function getHtml() {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  try {
-    return document.documentElement || null;
-  } catch {
-    return null;
-  }
-}
-
-function getBody() {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  try {
-    return document.body || null;
-  } catch {
-    return null;
-  }
-}
-
-function byId(id = "") {
-  if (
-    !isBrowser() ||
-    !id
-  ) {
-    return null;
-  }
-
-  try {
-    return document.getElementById(id);
-  } catch {
-    return null;
-  }
-}
-
-function query(selector = "") {
-  if (
-    !isBrowser() ||
-    !selector
-  ) {
-    return null;
-  }
-
-  try {
-    return document.querySelector(selector);
-  } catch {
-    return null;
-  }
-}
-
-function setAttr(element, name, value) {
-  if (
-    !element ||
-    !name
-  ) {
-    return false;
-  }
-
-  try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
-      element.removeAttribute(name);
-    } else {
-      element.setAttribute(
-        name,
-        String(value)
-      );
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function setDataset(element, key, value) {
-  if (
-    !element ||
-    !key
-  ) {
-    return false;
-  }
-
-  try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
-      delete element.dataset[key];
-    } else {
-      element.dataset[key] =
-        String(value);
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function addClass(element, className) {
-  if (
-    !element ||
-    !className
-  ) {
-    return false;
-  }
-
-  try {
-    element.classList.add(className);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function removeClass(element, className) {
-  if (
-    !element ||
-    !className
-  ) {
-    return false;
-  }
-
-  try {
-    element.classList.remove(className);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function clearNode(node) {
-  if (!node) {
-    return false;
-  }
-
-  try {
-    node.replaceChildren();
-    return true;
-  } catch {}
-
-  try {
-    while (node.firstChild) {
-      node.removeChild(node.firstChild);
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function createElement(tagName = "div", {
-  id = "",
-  className = "",
-  text = "",
-  attrs = {},
-  dataset = {},
-} = {}) {
-  const element =
-    document.createElement(tagName);
-
-  if (id) {
-    element.id = id;
-  }
-
-  if (className) {
-    element.className = className;
-  }
-
-  if (text) {
-    element.textContent = text;
-  }
-
-  for (const [key, value] of Object.entries(safeObject(attrs))) {
-    setAttr(
-      element,
-      key,
-      value
-    );
-  }
-
-  for (const [key, value] of Object.entries(safeObject(dataset))) {
-    setDataset(
-      element,
-      key,
-      value
-    );
-  }
-
-  return element;
-}
-
-/* =========================================================
-   APP CORE STATE PATCH
-========================================================= */
-
-function patchCoreState(payload = {}) {
-  const patch =
-    safeObject(payload);
-
-  if (!Object.keys(patch).length) {
-    return false;
-  }
-
-  try {
-    AppCore?.setState?.(
-      patch,
-      {
-        source:
-          "main",
-        emit:
-          false,
-        emitState:
-          false,
-        silent:
-          true,
-      }
-    );
-
-    return true;
-  } catch {}
-
-  try {
-    AppCore?.patchState?.(
-      patch,
-      {
-        source:
-          "main",
-        emit:
-          false,
-        emitState:
-          false,
-        silent:
-          true,
-      }
-    );
-
-    return true;
-  } catch {}
-
-  try {
-    if (
-      AppCore?.state &&
-      typeof AppCore.state === "object"
-    ) {
-      Object.assign(
-        AppCore.state,
-        patch
-      );
-
-      return true;
-    }
-  } catch {}
-
-  return false;
-}
-
-/* =========================================================
-   DOCUMENT STATE
-========================================================= */
-
-function markDocumentBooting(reason = "main-booting") {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  const html =
-    getHtml();
-
-  const body =
-    getBody();
-
-  for (const element of [
-    html,
-    body,
-  ]) {
-    if (!element) {
-      continue;
-    }
-
-    removeClass(element, "app-ready");
-    removeClass(element, "app-fatal");
-    removeClass(element, "app-error");
-
-    addClass(element, "app-booting");
-    addClass(element, "app-loading");
-
-    setDataset(
-      element,
-      "appLoading",
-      "true"
-    );
-
-    setDataset(
-      element,
-      "appBooting",
-      "true"
-    );
-
-    setDataset(
-      element,
-      "appReady",
-      "false"
-    );
-
-    setDataset(
-      element,
-      "routeMode",
-      "boot"
-    );
-  }
-
-  if (html) {
-    setDataset(
-      html,
-      "appState",
-      "booting"
-    );
-
-    setDataset(
-      html,
-      "shellState",
-      "booting"
-    );
-  }
-
-  if (body) {
-    setDataset(
-      body,
-      "shellState",
-      "booting"
-    );
-
-    setDataset(
-      body,
-      "bootReason",
-      reason
-    );
-  }
-
-  patchCoreState({
-    mainReady:
-      false,
-
-    mainBooting:
-      true,
-
-    mainFatal:
-      false,
-
-    mainPhase:
-      "booting",
-
-    mainReason:
-      reason,
-
-    mainUpdatedAt:
-      nowIso(),
-  });
-
-  return true;
-}
-
-function markDocumentReady(reason = "main-ready") {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  const html =
-    getHtml();
-
-  const body =
-    getBody();
-
-  for (const element of [
-    html,
-    body,
-  ]) {
-    if (!element) {
-      continue;
-    }
-
-    removeClass(element, "app-booting");
-    removeClass(element, "app-loading");
-    removeClass(element, "app-fatal");
-    removeClass(element, "app-error");
-
-    addClass(element, "app-ready");
-
-    setDataset(
-      element,
-      "appLoading",
-      "false"
-    );
-
-    setDataset(
-      element,
-      "appBooting",
-      "false"
-    );
-
-    setDataset(
-      element,
-      "appReady",
-      "true"
-    );
-  }
-
-  if (html) {
-    setDataset(
-      html,
-      "appState",
-      "ready"
-    );
-
-    if (html.dataset.routeMode === "boot") {
-      setDataset(
-        html,
-        "routeMode",
-        "app"
-      );
-    }
-
-    setDataset(
-      html,
-      "shellState",
-      "ready"
-    );
-  }
-
-  if (body) {
-    if (body.dataset.routeMode === "boot") {
-      setDataset(
-        body,
-        "routeMode",
-        "app"
-      );
-    }
-
-    setDataset(
-      body,
-      "shellState",
-      "ready"
-    );
-
-    setDataset(
-      body,
-      "bootReason",
-      reason
-    );
-  }
-
-  patchCoreState({
-    mainReady:
-      true,
-
-    mainBooting:
-      false,
-
-    mainFatal:
-      false,
-
-    mainPhase:
-      "ready",
-
-    mainReason:
-      reason,
-
-    mainUpdatedAt:
-      nowIso(),
-  });
-
-  return true;
-}
-
-function markDocumentFatal(reason = "main-fatal") {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  const html =
-    getHtml();
-
-  const body =
-    getBody();
-
-  for (const element of [
-    html,
-    body,
-  ]) {
-    if (!element) {
-      continue;
-    }
-
-    removeClass(element, "app-booting");
-    removeClass(element, "app-loading");
-    removeClass(element, "app-ready");
-
-    addClass(element, "app-fatal");
-
-    setDataset(
-      element,
-      "appLoading",
-      "false"
-    );
-
-    setDataset(
-      element,
-      "appBooting",
-      "false"
-    );
-
-    setDataset(
-      element,
-      "appReady",
-      "false"
-    );
-
-    setDataset(
-      element,
-      "routeMode",
-      "fatal"
-    );
-  }
-
-  if (html) {
-    setDataset(
-      html,
-      "appState",
-      "fatal"
-    );
-
-    setDataset(
-      html,
-      "shellState",
-      "fatal"
-    );
-  }
-
-  if (body) {
-    setDataset(
-      body,
-      "shellState",
-      "fatal"
-    );
-
-    setDataset(
-      body,
-      "bootReason",
-      reason
-    );
-  }
-
-  patchCoreState({
-    mainReady:
-      false,
-
-    mainBooting:
-      false,
-
-    mainFatal:
-      true,
-
-    mainPhase:
-      "fatal",
-
-    mainReason:
-      reason,
-
-    mainUpdatedAt:
-      nowIso(),
-
-    mainLastError:
-      sanitizeError(state.lastError),
-  });
-
-  return true;
-}
-
-/* =========================================================
-   URL CAPTURE
-========================================================= */
-
-function getCurrentHref() {
-  if (!isBrowser()) {
-    return "";
-  }
+function getInitialUrl() {
+  if (!isBrowser()) return "";
 
   try {
     return window.location.href || "";
@@ -2197,305 +86,180 @@ function getCurrentHref() {
   }
 }
 
-function writeRuntimeValue(key = "", value = null, onlyIfMissing = false) {
-  if (
-    !isBrowser() ||
-    !key
-  ) {
-    return false;
-  }
+function redactUrl(value = "") {
+  let output = safeText(value, "");
+
+  if (!output) return "";
+
+  const sensitive = [
+    "token",
+    "code",
+    "t",
+    "otp",
+    "totp",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "tempToken",
+    "temp_token",
+    "mfaToken",
+    "mfa_token",
+    "twoFactorToken",
+    "two_factor_token",
+  ];
 
   try {
-    if (
-      onlyIfMissing &&
-      window[key]
-    ) {
-      return true;
+    for (const key of sensitive) {
+      output = output.replace(
+        new RegExp(`([?&#]${key}=)([^&#\\s]+)`, "gi"),
+        "$1***"
+      );
     }
 
-    window[key] = value;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function getRuntimeObject(key = "") {
-  if (
-    !isBrowser() ||
-    !key
-  ) {
-    return {};
-  }
-
-  try {
-    return isObject(window[key])
-      ? window[key]
-      : {};
-  } catch {
-    return {};
-  }
-}
-
-function preserveTokenRouteInitialUrls(href = "") {
-  if (
-    !isBrowser() ||
-    !href
-  ) {
-    return {
-      isPublicTokenRoute:
-        false,
-
-      hasPublicToken:
-        false,
-
-      protectedRouteKey:
-        "",
-
-      protectedInitialUrl:
-        "",
-
-      protectedInitialPath:
-        "",
-
-      protectedInitialPublicPath:
-        "",
-    };
-  }
-
-  const tokenContext =
-    getMatchedTokenRouteContext(href);
-
-  if (
-    !tokenContext.config ||
-    !tokenContext.hasToken
-  ) {
-    return {
-      isPublicTokenRoute:
-        false,
-
-      hasPublicToken:
-        false,
-
-      protectedRouteKey:
-        "",
-
-      protectedInitialUrl:
-        "",
-
-      protectedInitialPath:
-        "",
-
-      protectedInitialPublicPath:
-        "",
-    };
-  }
-
-  for (const key of tokenContext.config.windowKeys || []) {
-    writeRuntimeValue(
-      key,
-      href,
-      true
+    output = output.replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
     );
+  } catch {}
+
+  return output;
+}
+
+function serializeError(error) {
+  if (!error) {
+    return {
+      name: "UnknownError",
+      message: DEFAULT_ERROR_MESSAGE,
+    };
+  }
+
+  if (error instanceof Error) {
+    return {
+      name: safeText(error.name, "Error"),
+      message: safeText(error.message, DEFAULT_ERROR_MESSAGE),
+      stack: redactUrl(safeText(error.stack, "")),
+      code: error.code || null,
+      status: error.status || error.statusCode || null,
+    };
+  }
+
+  if (typeof error === "string") {
+    return {
+      name: "ThrownString",
+      message: safeText(error, DEFAULT_ERROR_MESSAGE),
+    };
+  }
+
+  if (isObject(error)) {
+    return {
+      name: safeText(error.name, "ObjectError"),
+      message: safeText(error.message || error.reason, DEFAULT_ERROR_MESSAGE),
+      code: error.code || null,
+      status: error.status || error.statusCode || null,
+    };
   }
 
   return {
-    isPublicTokenRoute:
-      true,
-
-    hasPublicToken:
-      true,
-
-    protectedRouteKey:
-      tokenContext.key,
-
-    protectedInitialUrl:
-      href,
-
-    protectedInitialPath:
-      tokenContext.path,
-
-    protectedInitialPublicPath:
-      tokenContext.publicPath,
-
-    ...(tokenContext.key === "activation"
-      ? {
-          isActivation:
-            true,
-          hasActivationToken:
-            true,
-          activationInitialUrl:
-            href,
-          activationInitialPath:
-            tokenContext.path,
-          activationInitialPublicPath:
-            tokenContext.publicPath,
-        }
-      : {}),
-
-    ...(tokenContext.key === "resetConfirm"
-      ? {
-          isResetConfirm:
-            true,
-          hasResetToken:
-            true,
-          resetConfirmInitialUrl:
-            href,
-          resetConfirmInitialPath:
-            tokenContext.path,
-          resetConfirmInitialPublicPath:
-            tokenContext.publicPath,
-        }
-      : {}),
+    name: "ThrownValue",
+    message: safeText(String(error), DEFAULT_ERROR_MESSAGE),
   };
 }
 
-function captureInitialUrl(reason = "main") {
-  if (!isBrowser()) {
-    return null;
+/* =========================================================
+   DOCUMENT STATE
+========================================================= */
+
+function setDataset(element, key, value) {
+  if (!element || !key) return;
+
+  try {
+    element.dataset[key] = String(value);
+  } catch {}
+}
+
+function addClass(element, className) {
+  if (!element || !className) return;
+
+  try {
+    element.classList.add(className);
+  } catch {}
+}
+
+function removeClass(element, className) {
+  if (!element || !className) return;
+
+  try {
+    element.classList.remove(className);
+  } catch {}
+}
+
+function markBooting() {
+  if (!isBrowser()) return;
+
+  const html = document.documentElement;
+  const body = document.body;
+
+  for (const element of [html, body]) {
+    if (!element) continue;
+
+    removeClass(element, "app-ready");
+    removeClass(element, "app-fatal");
+
+    addClass(element, "app-booting");
+    addClass(element, "app-loading");
+
+    setDataset(element, "appBooting", "true");
+    setDataset(element, "appLoading", "true");
+    setDataset(element, "appReady", "false");
+    setDataset(element, "mainReady", "false");
+    setDataset(element, "mainFailed", "false");
   }
 
-  const href =
-    getCurrentHref();
+  if (html) {
+    setDataset(html, "appState", "booting");
+  }
+}
 
-  const publicPath =
-    pathFromUrlLike(href, {
-      stripUsername:
-        false,
-    }) ||
-    DEFAULT_ROUTE;
+function markMainReady() {
+  if (!isBrowser()) return;
 
-  const canonicalPath =
-    getCanonicalCleanPath(publicPath);
+  const html = document.documentElement;
+  const body = document.body;
 
-  const tokenPatch =
-    preserveTokenRouteInitialUrls(href);
+  for (const element of [html, body]) {
+    if (!element) continue;
 
-  const context = {
-    version:
-      MAIN_VERSION,
+    setDataset(element, "mainReady", "true");
+    setDataset(element, "mainFailed", "false");
+  }
+}
 
-    source:
-      MAIN_SOURCE,
+function markFatal() {
+  if (!isBrowser()) return;
 
-    reason,
+  const html = document.documentElement;
+  const body = document.body;
 
-    href,
+  for (const element of [html, body]) {
+    if (!element) continue;
 
-    initialUrl:
-      href,
+    removeClass(element, "app-booting");
+    removeClass(element, "app-loading");
+    removeClass(element, "app-ready");
 
-    pathname:
-      window.location?.pathname || DEFAULT_ROUTE,
+    addClass(element, "app-fatal");
 
-    search:
-      window.location?.search || "",
+    setDataset(element, "appBooting", "false");
+    setDataset(element, "appLoading", "false");
+    setDataset(element, "appReady", "false");
+    setDataset(element, "mainReady", "false");
+    setDataset(element, "mainFailed", "true");
+    setDataset(element, "routeMode", "fatal");
+  }
 
-    hash:
-      window.location?.hash || "",
-
-    publicPath,
-
-    canonicalPath,
-
-    isPublicTokenRoute:
-      Boolean(tokenPatch.isPublicTokenRoute),
-
-    hasPublicToken:
-      Boolean(tokenPatch.hasPublicToken),
-
-    protectedRouteKey:
-      tokenPatch.protectedRouteKey || "",
-
-    protectedInitialUrl:
-      tokenPatch.protectedInitialUrl || "",
-
-    protectedInitialPath:
-      tokenPatch.protectedInitialPath || "",
-
-    protectedInitialPublicPath:
-      tokenPatch.protectedInitialPublicPath || "",
-
-    capturedAt:
-      nowIso(),
-  };
-
-  writeRuntimeValue(
-    INITIAL_URL_KEY,
-    href,
-    true
-  );
-
-  writeRuntimeValue(
-    MAIN_BOOT_CONTEXT_KEY,
-    context,
-    false
-  );
-
-  writeRuntimeValue(
-    APP_BOOT_CONTEXT_KEY,
-    {
-      ...getRuntimeObject(APP_BOOT_CONTEXT_KEY),
-
-      mainInitialUrl:
-        href,
-
-      mainInitialPublicPath:
-        publicPath,
-
-      mainInitialCanonicalPath:
-        canonicalPath,
-
-      mainCapturedAt:
-        context.capturedAt,
-
-      ...tokenPatch,
-    },
-    false
-  );
-
-  patchCoreState({
-    mainInitialUrl:
-      href,
-
-    mainInitialPath:
-      context.pathname,
-
-    mainInitialPublicPath:
-      publicPath,
-
-    mainInitialCanonicalPath:
-      canonicalPath,
-
-    mainInitialHash:
-      context.hash,
-
-    mainBootContextCapturedAt:
-      context.capturedAt,
-
-    mainIsPublicTokenRoute:
-      Boolean(tokenPatch.isPublicTokenRoute),
-
-    mainHasPublicToken:
-      Boolean(tokenPatch.hasPublicToken),
-
-    mainProtectedRouteKey:
-      tokenPatch.protectedRouteKey || "",
-  });
-
-  state.lastBootContext =
-    context;
-
-  safeEmit(
-    MAIN_EVENTS.initialUrlCaptured,
-    {
-      reason,
-      bootContext:
-        context,
-    }
-  );
-
-  return context;
+  if (html) {
+    setDataset(html, "appState", "fatal");
+  }
 }
 
 /* =========================================================
@@ -2503,1016 +267,265 @@ function captureInitialUrl(reason = "main") {
 ========================================================= */
 
 function waitForDomReady() {
-  if (!isBrowser()) {
+  if (!isBrowser()) return Promise.resolve();
+
+  if (
+    document.readyState === "interactive" ||
+    document.readyState === "complete"
+  ) {
     return Promise.resolve();
   }
 
-  try {
-    if (
-      document.readyState === "interactive" ||
-      document.readyState === "complete"
-    ) {
-      return Promise.resolve();
-    }
-
-    return new Promise((resolve) => {
-      const done = () => {
-        try {
-          document.removeEventListener(
-            "DOMContentLoaded",
-            done
-          );
-        } catch {}
-
-        resolve();
-      };
-
-      document.addEventListener(
-        "DOMContentLoaded",
-        done,
-        {
-          once:
-            true,
-        }
-      );
+  return new Promise((resolve) => {
+    document.addEventListener("DOMContentLoaded", resolve, {
+      once: true,
     });
-  } catch {
-    return Promise.resolve();
-  }
-}
-
-function bindReady(callback) {
-  if (state.readyBound) {
-    return false;
-  }
-
-  state.readyBound =
-    true;
-
-  const runOnce = () => {
-    if (state.readyCallbackCalled) {
-      return;
-    }
-
-    state.readyCallbackCalled =
-      true;
-
-    try {
-      callback();
-    } catch (error) {
-      void handleFatalError(
-        error,
-        "ready-callback"
-      );
-    }
-  };
-
-  void waitForDomReady()
-    .then(runOnce)
-    .catch((error) => {
-      void handleFatalError(
-        error,
-        "dom-ready"
-      );
-    });
-
-  return true;
-}
-
-/* =========================================================
-   RUNTIME MODULE LOADING
-========================================================= */
-
-function resolveAppFromModule(moduleRef = {}) {
-  return (
-    moduleRef?.App ||
-    moduleRef?.default?.App ||
-    moduleRef?.default ||
-    null
-  );
-}
-
-function resolveCoreFromModule(moduleRef = {}) {
-  return (
-    moduleRef?.AppCore ||
-    moduleRef?.default?.AppCore ||
-    moduleRef?.default ||
-    null
-  );
-}
-
-async function loadRuntimeModules() {
-  if (runtimeLoadPromise) {
-    return runtimeLoadPromise;
-  }
-
-  state.runtimeLoadStartedAt =
-    nowMs();
-
-  safeEmit(
-    MAIN_EVENTS.runtimeLoadStart,
-    {
-      at:
-        nowIso(state.runtimeLoadStartedAt),
-    }
-  );
-
-  runtimeLoadPromise =
-    (async () => {
-      try {
-        disableLegacyAutoBoot();
-
-        const [
-          appModule,
-          coreModule,
-        ] =
-          await Promise.all([
-            import(APP_MODULE_PATH),
-            import(CORE_MODULE_PATH),
-          ]);
-
-        App =
-          resolveAppFromModule(appModule);
-
-        AppCore =
-          resolveCoreFromModule(coreModule);
-
-        if (
-          !App ||
-          !isFunction(App.boot)
-        ) {
-          const error =
-            new Error("App.boot no está disponible.");
-
-          error.code =
-            "APP_BOOT_MISSING";
-
-          throw error;
-        }
-
-        state.runtimeLoaded =
-          true;
-
-        state.runtimeLoadSettledAt =
-          nowMs();
-
-        exposeDebugBridge();
-
-        safeEmit(
-          MAIN_EVENTS.runtimeLoadReady,
-          {
-            durationMs:
-              state.runtimeLoadSettledAt -
-              state.runtimeLoadStartedAt,
-
-            hasApp:
-              Boolean(App),
-
-            hasAppBoot:
-              Boolean(App?.boot),
-
-            hasAppCore:
-              Boolean(AppCore),
-          }
-        );
-
-        return {
-          App,
-          AppCore,
-        };
-      } catch (error) {
-        state.runtimeLoaded =
-          false;
-
-        state.runtimeLoadSettledAt =
-          nowMs();
-
-        state.lastError =
-          error;
-
-        safeEmit(
-          MAIN_EVENTS.runtimeLoadError,
-          {
-            durationMs:
-              state.runtimeLoadSettledAt -
-              state.runtimeLoadStartedAt,
-
-            error,
-          }
-        );
-
-        throw error;
-      }
-    })();
-
-  return runtimeLoadPromise;
-}
-
-/* =========================================================
-   FATAL VIEW / EMERGENCY LOADER CLEANUP
-========================================================= */
-
-function emergencyHideLoader() {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  const loader =
-    byId("app-loader") ||
-    query("[data-app-loader='true'],.app-loader");
-
-  if (!loader) {
-    return false;
-  }
-
-  try {
-    loader.hidden =
-      true;
-
-    setAttr(
-      loader,
-      "aria-hidden",
-      "true"
-    );
-
-    setAttr(
-      loader,
-      "aria-busy",
-      "false"
-    );
-
-    setDataset(
-      loader,
-      "loaderVisible",
-      "false"
-    );
-
-    setDataset(
-      loader,
-      "loaderState",
-      "hidden"
-    );
-
-    removeClass(loader, "is-visible");
-    removeClass(loader, "is-entering");
-    removeClass(loader, "is-leaving");
-    removeClass(loader, "loader-visible");
-
-    addClass(loader, "is-hidden");
-    addClass(loader, "has-hidden");
-    addClass(loader, "loader-hidden");
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function getFatalRoot() {
-  return (
-    byId("view-container") ||
-    byId("app-content") ||
-    byId("main-content") ||
-    byId("app-shell") ||
-    getBody()
-  );
-}
-
-function exposeFatalRoot(root) {
-  if (!root) {
-    return false;
-  }
-
-  try {
-    root.hidden =
-      false;
-
-    setAttr(
-      root,
-      "aria-hidden",
-      "false"
-    );
-
-    setAttr(
-      root,
-      "aria-busy",
-      "false"
-    );
-
-    let parent =
-      root.parentElement;
-
-    while (parent) {
-      parent.hidden =
-        false;
-
-      setAttr(
-        parent,
-        "aria-hidden",
-        "false"
-      );
-
-      parent =
-        parent.parentElement;
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function normalizeBootError(error = null) {
-  if (error instanceof Error) {
-    return error;
-  }
-
-  const normalized =
-    new Error(
-      safeText(
-        error?.message ||
-          error?.reason ||
-          error,
-        DEFAULT_FATAL_MESSAGE
-      )
-    );
-
-  try {
-    normalized.raw =
-      error;
-  } catch {}
-
-  return normalized;
-}
-
-function createActionButton({
-  action = "",
-  className = "ui-btn ui-btn-secondary",
-  text = "",
-} = {}) {
-  return createElement("button", {
-    className,
-    text,
-    attrs: {
-      type:
-        "button",
-    },
-    dataset: {
-      mainFatalAction:
-        action,
-    },
   });
 }
 
-function createReloadButton() {
-  const button =
-    createActionButton({
-      action:
-        "reload",
+/* =========================================================
+   BOOT CONTEXT
+========================================================= */
 
-      className:
-        "ui-btn ui-btn-primary",
-
-      text:
-        "Recargar",
-    });
+function disableLegacyAutoBoot() {
+  if (!isBrowser()) return;
 
   try {
-    button.addEventListener(
-      "click",
-      () => {
-        try {
-          window.location.reload();
-        } catch {}
-      },
-      {
-        once:
-          true,
-      }
-    );
+    window[DISABLE_AUTO_BOOT_KEY] = true;
   } catch {}
-
-  return button;
 }
 
-function createDetailsButton(error) {
-  const button =
-    createActionButton({
-      action:
-        "details",
+function captureBootContext() {
+  const context = {
+    source: "main",
+    version: MAIN_VERSION,
+    initialUrl: getInitialUrl(),
+    initialPath: getRequestPath(),
+    capturedAt: nowIso(),
+  };
 
-      className:
-        "ui-btn ui-btn-secondary",
-
-      text:
-        "Detalles",
-    });
+  if (!isBrowser()) return context;
 
   try {
-    button.addEventListener(
-      "click",
-      () => {
-        try {
-          console.group("[Onion Support] Boot error details");
-          console.error(error);
-          console.groupEnd();
-        } catch {}
-      }
-    );
+    window[INITIAL_URL_KEY] = context.initialUrl;
+    window[BOOT_CONTEXT_KEY] = {
+      ...(isObject(window[BOOT_CONTEXT_KEY]) ? window[BOOT_CONTEXT_KEY] : {}),
+      ...context,
+    };
   } catch {}
 
-  return button;
+  return context;
 }
 
-function buildFatalBootNode(error = null) {
-  const serialized =
-    serializeMainError(error);
+/* =========================================================
+   APP MODULE
+========================================================= */
 
-  const message =
-    redactSensitiveText(
-      safeText(
-        serialized.message ||
-          error?.message,
-        DEFAULT_FATAL_MESSAGE
-      )
-    );
+async function loadAppModule() {
+  if (appModule) return appModule;
 
-  const section =
-    createElement("section", {
-      className:
-        "content-wrapper boot-error-view",
-      attrs: {
-        role:
-          "alert",
-        "aria-live":
-          "assertive",
-        "aria-labelledby":
-          "main-fatal-title",
-      },
-      dataset: {
-        view:
-          "main-fatal-boot",
-        mainFatalBoot:
-          "true",
-      },
-    });
+  appModule = await import(APP_MODULE_PATH);
 
-  const card =
-    createElement("div", {
-      className:
-        "panel-block boot-error-card",
-      dataset: {
-        mainFatalBootCard:
-          "true",
-      },
-    });
+  return appModule;
+}
 
-  const inner =
-    createElement("div", {
-      className:
-        "boot-error-card__inner",
-    });
+function resolveBootFunction(moduleValue) {
+  if (!moduleValue) return null;
 
-  const icon =
-    createElement("div", {
-      className:
-        "boot-error-card__icon",
-      text:
-        "!",
-      attrs: {
-        "aria-hidden":
-          "true",
-      },
-    });
+  if (isFunction(moduleValue.bootApp)) return moduleValue.bootApp;
+  if (isFunction(moduleValue.boot)) return moduleValue.boot;
+  if (isFunction(moduleValue.start)) return moduleValue.start;
 
-  const header =
-    createElement("div", {
-      className:
-        "boot-error-card__header",
-    });
+  if (moduleValue.App && isFunction(moduleValue.App.boot)) {
+    return moduleValue.App.boot.bind(moduleValue.App);
+  }
 
-  const eyebrow =
-    createElement("p", {
-      className:
-        "boot-error-card__eyebrow",
-      text:
-        "Onion Support",
-    });
+  if (moduleValue.default && isFunction(moduleValue.default.boot)) {
+    return moduleValue.default.boot.bind(moduleValue.default);
+  }
 
-  const title =
-    createElement("h1", {
-      id:
-        "main-fatal-title",
-      className:
-        "boot-error-card__title",
-      text:
-        DEFAULT_FATAL_TITLE,
-    });
+  if (isFunction(moduleValue.default)) {
+    return moduleValue.default;
+  }
 
-  const paragraph =
-    createElement("p", {
-      className:
-        "boot-error-card__message",
-      text:
-        message,
-    });
+  return null;
+}
 
-  const hint =
-    createElement("p", {
-      className:
-        "boot-error-card__hint",
-      text:
-        "Recarga la página. Si el problema persiste, revisa window.__ONION_FATAL_ERROR__ en la consola.",
-    });
+/* =========================================================
+   FATAL FALLBACK
+========================================================= */
 
-  header.appendChild(eyebrow);
-  header.appendChild(title);
-  header.appendChild(paragraph);
-  header.appendChild(hint);
+function hideLoaderEmergency() {
+  if (!isBrowser()) return;
 
-  const meta =
-    createElement("div", {
-      className:
-        "boot-error-card__meta",
-      dataset: {
-        mainFatalBootMeta:
-          "true",
-      },
-    });
+  const loader =
+    document.getElementById("app-loader") ||
+    document.querySelector("[data-app-loader='true']");
 
-  const codeRow =
-    createElement("div", {
-      className:
-        "boot-error-card__meta-row",
-    });
+  if (!loader) return;
 
-  codeRow.appendChild(
-    createElement("strong", {
-      text:
-        "Código:",
-    })
+  try {
+    loader.hidden = true;
+    loader.setAttribute("aria-hidden", "true");
+    loader.setAttribute("aria-busy", "false");
+    loader.classList.remove("is-visible");
+    loader.classList.add("is-hidden");
+    loader.dataset.loaderVisible = "false";
+    loader.dataset.loaderState = "hidden";
+  } catch {}
+}
+
+function getFatalRoot() {
+  if (!isBrowser()) return null;
+
+  return (
+    document.getElementById("view-container") ||
+    document.getElementById("app-content") ||
+    document.getElementById("main-content") ||
+    document.body
   );
+}
 
-  codeRow.appendChild(
-    createElement("span", {
-      text:
-        safeText(
-          serialized.code ||
-            serialized.name,
-          "MAIN_BOOT_ERROR"
-        ),
-    })
-  );
+function clearNode(node) {
+  if (!node) return;
 
-  const dateRow =
-    createElement("div", {
-      className:
-        "boot-error-card__meta-row",
-    });
+  try {
+    node.replaceChildren();
+    return;
+  } catch {}
 
-  dateRow.appendChild(
-    createElement("strong", {
-      text:
-        "Fecha:",
-    })
-  );
+  try {
+    while (node.firstChild) {
+      node.removeChild(node.firstChild);
+    }
+  } catch {}
+}
 
-  dateRow.appendChild(
-    createElement("span", {
-      text:
-        nowIso(),
-    })
-  );
+function createFatalView(error) {
+  const data = serializeError(error);
 
-  meta.appendChild(codeRow);
-  meta.appendChild(dateRow);
+  const section = document.createElement("section");
+  section.className = "content-wrapper boot-error-view";
+  section.setAttribute("role", "alert");
+  section.setAttribute("aria-live", "assertive");
 
-  const actions =
-    createElement("div", {
-      className:
-        "boot-error-card__actions",
-    });
+  const card = document.createElement("div");
+  card.className = "panel-block boot-error-card";
 
-  const reloadButton =
-    createReloadButton();
+  const title = document.createElement("h1");
+  title.textContent = DEFAULT_ERROR_TITLE;
 
-  const detailsButton =
-    createDetailsButton(error);
+  const message = document.createElement("p");
+  message.textContent = data.message || DEFAULT_ERROR_MESSAGE;
 
-  actions.appendChild(reloadButton);
-  actions.appendChild(detailsButton);
+  const hint = document.createElement("p");
+  hint.textContent = "Recarga la página. Si el problema persiste, revisa la consola.";
 
-  inner.appendChild(icon);
-  inner.appendChild(header);
-  inner.appendChild(meta);
-  inner.appendChild(actions);
+  const reload = document.createElement("button");
+  reload.type = "button";
+  reload.className = "ui-btn ui-btn-primary";
+  reload.textContent = "Recargar";
 
-  card.appendChild(inner);
+  reload.addEventListener("click", () => {
+    try {
+      window.location.reload();
+    } catch {}
+  });
+
+  card.appendChild(title);
+  card.appendChild(message);
+  card.appendChild(hint);
+  card.appendChild(reload);
+
   section.appendChild(card);
 
-  return {
-    root:
-      section,
-
-    focusTarget:
-      reloadButton,
-  };
+  return section;
 }
 
-function renderFatalBootError(error = null) {
-  if (
-    !isBrowser() ||
-    state.fatalRendered
-  ) {
-    return false;
-  }
+function renderFatal(error) {
+  if (!isBrowser()) return;
 
-  state.fatalRendered =
-    true;
+  markFatal();
+  hideLoaderEmergency();
 
-  const normalizedError =
-    normalizeBootError(error);
+  const root = getFatalRoot();
 
-  state.lastError =
-    normalizedError;
+  if (!root) return;
 
-  markDocumentFatal("boot-error");
-  emergencyHideLoader();
+  try {
+    root.hidden = false;
+    root.setAttribute("aria-hidden", "false");
+    root.setAttribute("aria-busy", "false");
+  } catch {}
 
-  const root =
-    getFatalRoot();
-
-  if (!root) {
-    return false;
-  }
-
-  exposeFatalRoot(root);
   clearNode(root);
-
-  const {
-    root: node,
-    focusTarget,
-  } =
-    buildFatalBootNode(normalizedError);
-
-  root.appendChild(node);
-
-  try {
-    focusTarget?.focus?.();
-  } catch {}
-
-  safeEmit(
-    MAIN_EVENTS.fatalRendered,
-    {
-      message:
-        normalizedError.message,
-      error:
-        normalizedError,
-    }
-  );
-
-  return true;
+  root.appendChild(createFatalView(error));
 }
 
-async function handleFatalError(error = null, reason = "fatal") {
-  const normalizedError =
-    normalizeBootError(error);
+function handleFatal(error, reason = "boot") {
+  failed = true;
 
-  const serializedError =
-    serializeMainError(normalizedError);
-
-  state.failed =
-    true;
-
-  state.settled =
-    true;
-
-  state.settledAt =
-    nowMs();
-
-  state.lastError =
-    normalizedError;
+  const serialized = serializeError(error);
 
   try {
-    if (isBrowser()) {
-      window.__ONION_FATAL_ERROR__ = {
-        reason,
-        error:
-          serializedError,
-        rawError:
-          normalizedError,
-        bootContext:
-          sanitizeBootContext(state.lastBootContext || {}),
-        at:
-          nowIso(),
-      };
-    }
-  } catch {}
-
-  safeError(
-    "Fallo fatal en main.",
-    {
+    window.__ONION_FATAL_ERROR__ = {
       reason,
-      error:
-        serializedError,
-    }
-  );
-
-  try {
-    console.error(
-      "[Main] Error original:",
-      normalizedError
-    );
-  } catch {}
-
-  safeEmit(
-    MAIN_EVENTS.bootError,
-    {
-      reason,
-
-      durationMs:
-        state.startedAt && state.settledAt
-          ? state.settledAt - state.startedAt
-          : 0,
-
-      error:
-        normalizedError,
-
-      bootContext:
-        state.lastBootContext,
-    }
-  );
-
-  renderFatalBootError(
-    normalizedError
-  );
-
-  return normalizedError;
-}
-
-/* =========================================================
-   GLOBAL SAFETY NET
-========================================================= */
-
-function isResourceErrorEvent(event = null) {
-  try {
-    return Boolean(
-      event?.target &&
-        event.target !== window &&
-        (
-          event.target.src ||
-          event.target.href
-        )
-    );
-  } catch {
-    return false;
-  }
-}
-
-function bindGlobalSafetyNet() {
-  if (
-    !isBrowser() ||
-    state.safetyNetBound
-  ) {
-    return false;
-  }
-
-  state.safetyNetBound =
-    true;
-
-  try {
-    window.addEventListener(
-      "error",
-      (event) => {
-        if (isResourceErrorEvent(event)) {
-          safeEmit(
-            MAIN_EVENTS.globalError,
-            {
-              resource:
-                true,
-              message:
-                "Resource load error",
-              filename:
-                redactSensitiveText(
-                  event?.target?.src ||
-                    event?.target?.href ||
-                    ""
-                ),
-            }
-          );
-
-          return;
-        }
-
-        const error =
-          event?.error ||
-          event?.message ||
-          null;
-
-        try {
-          window.__ONION_LAST_WINDOW_ERROR__ = {
-            message:
-              event?.message || "Global error",
-            filename:
-              redactSensitiveText(event?.filename || ""),
-            lineno:
-              event?.lineno || 0,
-            colno:
-              event?.colno || 0,
-            error:
-              serializeMainError(error),
-            rawError:
-              error,
-            at:
-              nowIso(),
-          };
-        } catch {}
-
-        safeEmit(
-          MAIN_EVENTS.globalError,
-          {
-            message:
-              event?.message || "Global error",
-            filename:
-              redactSensitiveText(event?.filename || ""),
-            lineno:
-              event?.lineno || 0,
-            colno:
-              event?.colno || 0,
-            error,
-          }
-        );
-
-        if (!state.settled) {
-          void handleFatalError(
-            error,
-            "window.error"
-          );
-        }
-      },
-      true
-    );
-  } catch {}
-
-  try {
-    window.addEventListener(
-      "unhandledrejection",
-      (event) => {
-        const reason =
-          event?.reason || null;
-
-        try {
-          window.__ONION_LAST_REJECTION__ = {
-            reason:
-              serializeMainError(reason),
-            rawReason:
-              reason,
-            at:
-              nowIso(),
-          };
-        } catch {}
-
-        safeEmit(
-          MAIN_EVENTS.unhandledRejection,
-          {
-            message:
-              safeText(
-                reason?.message ||
-                  reason,
-                "Unhandled rejection"
-              ),
-            error:
-              reason,
-          }
-        );
-
-        if (!state.settled) {
-          void handleFatalError(
-            reason,
-            "unhandledrejection"
-          );
-        }
-      }
-    );
-  } catch {}
-
-  return true;
-}
-
-/* =========================================================
-   APP BOOT RESULT INSPECTION
-========================================================= */
-
-function getAppStateSafe() {
-  try {
-    if (isFunction(App?.getState)) {
-      return App.getState();
-    }
-  } catch {}
-
-  try {
-    if (isFunction(AppCore?.getState)) {
-      return AppCore.getState();
-    }
-  } catch {}
-
-  try {
-    return AppCore?.state || null;
-  } catch {}
-
-  return null;
-}
-
-function appStateLooksFailed(appState = null) {
-  const snapshot =
-    safeObject(appState);
-
-  return Boolean(
-    snapshot.failed === true ||
-      snapshot.fatal === true ||
-      snapshot.appFatal === true ||
-      snapshot.mainFatal === true ||
-      (
-        snapshot.booted === false &&
-        (
-          snapshot.lastBootErrorAt ||
-          snapshot.lastBootError ||
-          snapshot.bootPhase === "error" ||
-          snapshot.bootPhase === "fatal"
-        )
-      )
-  );
-}
-
-/* =========================================================
-   GLOBAL BOOT LOCK
-========================================================= */
-
-function getExistingBootLock() {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  try {
-    const lock =
-      window[BOOT_LOCK_KEY];
-
-    if (
-      lock &&
-      lock.source === MAIN_SOURCE &&
-      lock.promise &&
-      isFunction(lock.promise.then)
-    ) {
-      return lock;
-    }
-  } catch {}
-
-  return null;
-}
-
-function writeBootLock(promise, startedAt = nowMs()) {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  try {
-    window[BOOT_LOCK_KEY] = {
-      version:
-        MAIN_VERSION,
-      source:
-        MAIN_SOURCE,
-      promise,
-      startedAt,
-      updatedAt:
-        nowMs(),
+      error: serialized,
+      rawError: error,
+      at: nowIso(),
     };
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function clearBootLock(promise = null) {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  try {
-    const lock =
-      window[BOOT_LOCK_KEY];
-
-    if (
-      !lock ||
-      !promise ||
-      lock.promise === promise
-    ) {
-      delete window[BOOT_LOCK_KEY];
-      return true;
-    }
   } catch {}
 
-  return false;
+  try {
+    console.error("[Onion Main] Fatal boot error:", serialized);
+    console.error(error);
+  } catch {}
+
+  renderFatal(error);
+
+  return error;
+}
+
+/* =========================================================
+   SAFETY NET
+========================================================= */
+
+function bindGlobalErrors() {
+  if (!isBrowser()) return;
+
+  try {
+    window.addEventListener("error", (event) => {
+      try {
+        window.__ONION_LAST_WINDOW_ERROR__ = {
+          message: event.message || "Window error",
+          filename: redactUrl(event.filename || ""),
+          lineno: event.lineno || 0,
+          colno: event.colno || 0,
+          error: serializeError(event.error),
+          at: nowIso(),
+        };
+      } catch {}
+
+      if (!bootPromise || failed) return;
+
+      handleFatal(event.error || event.message, "window.error");
+    });
+  } catch {}
+
+  try {
+    window.addEventListener("unhandledrejection", (event) => {
+      try {
+        window.__ONION_LAST_REJECTION__ = {
+          reason: serializeError(event.reason),
+          at: nowIso(),
+        };
+      } catch {}
+
+      if (!bootPromise || failed) return;
+
+      handleFatal(event.reason, "unhandledrejection");
+    });
+  } catch {}
 }
 
 /* =========================================================
@@ -3520,495 +533,130 @@ function clearBootLock(promise = null) {
 ========================================================= */
 
 async function boot(options = {}) {
-  const opts =
-    safeObject(options);
-
-  const existingLock =
-    getExistingBootLock();
-
-  if (
-    existingLock &&
-    opts.force !== true &&
-    existingLock.promise !== state.bootPromise
-  ) {
-    return existingLock.promise;
+  if (bootPromise && options.force !== true) {
+    return bootPromise;
   }
 
-  if (state.bootPromise) {
-    return state.bootPromise;
+  if (isBrowser()) {
+    const existingLock = window[BOOT_LOCK_KEY];
+
+    if (
+      existingLock &&
+      existingLock.promise &&
+      isFunction(existingLock.promise.then) &&
+      options.force !== true
+    ) {
+      return existingLock.promise;
+    }
   }
 
-  if (
-    state.started &&
-    state.settled &&
-    !state.failed &&
-    opts.force !== true
-  ) {
-    return App;
-  }
-
-  state.started =
-    true;
-
-  state.settled =
-    false;
-
-  state.failed =
-    false;
-
-  state.fatalRendered =
-    false;
-
-  state.lastError =
-    null;
-
-  state.startedAt =
-    nowMs();
-
-  state.settledAt =
-    0;
+  startedAt = Date.now();
+  failed = false;
 
   disableLegacyAutoBoot();
+  markBooting();
 
-  const context =
-    captureInitialUrl("boot") ||
-    state.lastBootContext ||
-    {};
+  const bootContext = captureBootContext();
 
-  markDocumentBooting("main-boot");
+  bootPromise = (async () => {
+    await waitForDomReady();
 
-  safeEmit(
-    MAIN_EVENTS.bootStart,
-    {
-      bootContext:
-        context,
+    const moduleValue = await loadAppModule();
+    const bootFn = resolveBootFunction(moduleValue);
 
-      readyState:
-        isBrowser()
-          ? document.readyState
-          : "server",
+    if (!bootFn) {
+      throw new Error("No se encontró función de arranque en src/app/index.js.");
     }
-  );
 
-  const rawBootPromise =
-    Promise.resolve()
-      .then(async () => {
-        await loadRuntimeModules();
+    const result = await bootFn({
+      source: "main",
+      version: MAIN_VERSION,
+      bootContext,
+      startedAt,
+      ...options,
+    });
 
-        if (
-          !App ||
-          !isFunction(App.boot)
-        ) {
-          const error =
-            new Error("App.boot no está disponible.");
+    markMainReady();
 
-          error.code =
-            "APP_BOOT_MISSING";
-
-          throw error;
+    return result || moduleValue;
+  })()
+    .catch((error) => {
+      handleFatal(error, "boot");
+      throw error;
+    })
+    .finally(() => {
+      try {
+        if (window[BOOT_LOCK_KEY]?.promise === bootPromise) {
+          delete window[BOOT_LOCK_KEY];
         }
+      } catch {}
 
-        safeLog(
-          "Iniciando App.boot().",
-          {
-            bootContext:
-              context,
-          }
-        );
+      bootPromise = null;
+    });
 
-        const result =
-          await App.boot({
-            source:
-              MAIN_SOURCE,
+  try {
+    window[BOOT_LOCK_KEY] = {
+      source: "main",
+      version: MAIN_VERSION,
+      promise: bootPromise,
+      startedAt,
+    };
+  } catch {}
 
-            bootContext:
-              context,
-
-            ...opts,
-          });
-
-        const appState =
-          getAppStateSafe();
-
-        state.settled =
-          true;
-
-        state.failed =
-          appStateLooksFailed(appState);
-
-        state.settledAt =
-          nowMs();
-
-        if (state.failed) {
-          markDocumentFatal("main-app-boot-failed");
-        } else {
-          markDocumentReady("main-boot-complete");
-        }
-
-        safeEmit(
-          state.failed
-            ? MAIN_EVENTS.bootError
-            : MAIN_EVENTS.bootReady,
-          {
-            durationMs:
-              state.settledAt -
-              state.startedAt,
-
-            bootContext:
-              context,
-
-            appState:
-              appState || null,
-
-            failed:
-              state.failed,
-          }
-        );
-
-        if (state.failed) {
-          safeWarn(
-            "App.boot() resolvió con estado no listo.",
-            {
-              appState,
-            }
-          );
-        } else {
-          safeLog(
-            "Arranque completado.",
-            {
-              durationMs:
-                state.settledAt -
-                state.startedAt,
-            }
-          );
-        }
-
-        return result || App;
-      })
-      .catch(async (error) => {
-        await handleFatalError(
-          error,
-          "boot"
-        );
-
-        throw normalizeBootError(error);
-      });
-
-  writeBootLock(
-    rawBootPromise,
-    state.startedAt
-  );
-
-  state.bootPromise =
-    rawBootPromise
-      .finally(() => {
-        clearBootLock(state.bootPromise);
-        state.bootPromise =
-          null;
-      });
-
-  writeBootLock(
-    state.bootPromise,
-    state.startedAt
-  );
-
-  return state.bootPromise;
+  return bootPromise;
 }
 
 function start(options = {}) {
-  const opts =
-    safeObject(options);
-
-  const existingLock =
-    getExistingBootLock();
-
-  if (
-    existingLock &&
-    opts.force !== true
-  ) {
-    return existingLock.promise;
-  }
-
-  if (
-    state.startPromise &&
-    opts.force !== true
-  ) {
-    return state.startPromise;
-  }
-
-  if (
-    state.started &&
-    state.bootPromise &&
-    opts.force !== true
-  ) {
-    return state.bootPromise;
-  }
-
-  disableLegacyAutoBoot();
-  bindGlobalSafetyNet();
-
-  captureInitialUrl("start");
-  markDocumentBooting("main-start");
-
-  state.startPromise =
-    new Promise((resolve, reject) => {
-      bindReady(() => {
-        void boot(opts)
-          .then(resolve)
-          .catch((error) => {
-            reject(error);
-          });
-      });
-    });
-
-  state.startPromise
-    .catch(() => {})
-    .finally(() => {
-      state.startPromise =
-        null;
-    });
-
-  return state.startPromise;
+  bindGlobalErrors();
+  return boot(options);
 }
 
 /* =========================================================
-   SNAPSHOT / DEBUG
+   DEBUG BRIDGE
 ========================================================= */
 
-function getMainSnapshot() {
-  const html =
-    getHtml();
-
-  const body =
-    getBody();
-
-  const appState =
-    getAppStateSafe();
-
-  return sanitizePayload({
-    version:
-      MAIN_VERSION,
-
-    started:
-      state.started,
-
-    settled:
-      state.settled,
-
-    failed:
-      state.failed,
-
-    runtimeLoaded:
-      state.runtimeLoaded,
-
-    hasStartPromise:
-      Boolean(state.startPromise),
-
-    hasBootPromise:
-      Boolean(state.bootPromise),
-
-    hasGlobalBootLock:
-      Boolean(getExistingBootLock()),
-
-    startedAt:
-      state.startedAt,
-
-    startedAtIso:
-      state.startedAt
-        ? nowIso(state.startedAt)
-        : "",
-
-    settledAt:
-      state.settledAt,
-
-    settledAtIso:
-      state.settledAt
-        ? nowIso(state.settledAt)
-        : "",
-
-    durationMs:
-      state.startedAt && state.settledAt
-        ? state.settledAt - state.startedAt
-        : state.startedAt
-          ? nowMs() - state.startedAt
-          : 0,
-
-    runtimeLoadStartedAt:
-      state.runtimeLoadStartedAt,
-
-    runtimeLoadSettledAt:
-      state.runtimeLoadSettledAt,
-
-    readyBound:
-      state.readyBound,
-
-    readyCallbackCalled:
-      state.readyCallbackCalled,
-
-    safetyNetBound:
-      state.safetyNetBound,
-
-    fatalRendered:
-      state.fatalRendered,
-
-    debugBridgeExposed:
-      state.debugBridgeExposed,
-
-    hasApp:
-      Boolean(App),
-
-    hasAppBoot:
-      Boolean(App?.boot),
-
-    hasAppCore:
-      Boolean(AppCore),
-
-    documentReadyState:
-      isBrowser()
-        ? document.readyState
-        : "server",
-
-    htmlClassName:
-      html?.className || "",
-
-    bodyClassName:
-      body?.className || "",
-
-    htmlDataset: {
-      appState:
-        html?.dataset?.appState || "",
-
-      appLoading:
-        html?.dataset?.appLoading || "",
-
-      appBooting:
-        html?.dataset?.appBooting || "",
-
-      appReady:
-        html?.dataset?.appReady || "",
-
-      routeMode:
-        html?.dataset?.routeMode || "",
-
-      shellState:
-        html?.dataset?.shellState || "",
-
-      theme:
-        html?.dataset?.theme || "",
-
-      themeMode:
-        html?.dataset?.themeMode || "",
-    },
-
-    bodyDataset: {
-      appLoading:
-        body?.dataset?.appLoading || "",
-
-      authenticated:
-        body?.dataset?.authenticated || "",
-
-      routeMode:
-        body?.dataset?.routeMode || "",
-
-      shellState:
-        body?.dataset?.shellState || "",
-    },
-
-    bootContext:
-      state.lastBootContext,
-
-    lastError:
-      sanitizeError(state.lastError),
-
-    fatalGlobal:
-      isBrowser()
-        ? window.__ONION_FATAL_ERROR__ || null
-        : null,
-
-    appState,
-  });
+function getState() {
+  return {
+    version: MAIN_VERSION,
+    startedAt,
+    startedAtIso: startedAt ? new Date(startedAt).toISOString() : "",
+    failed,
+    hasBootPromise: Boolean(bootPromise),
+    appLoaded: Boolean(appModule),
+    initialUrl: redactUrl(getInitialUrl()),
+    initialPath: redactUrl(getRequestPath()),
+  };
 }
 
 function exposeDebugBridge() {
-  if (!isBrowser()) {
-    return false;
-  }
+  if (!isBrowser()) return;
 
   try {
-    window.OnionApp =
-      window.OnionApp || {};
-
+    window.OnionApp = window.OnionApp || {};
     window.OnionApp.main = {
-      version:
-        MAIN_VERSION,
-
+      version: MAIN_VERSION,
       start,
       boot,
-
-      loadRuntimeModules,
-
-      captureInitialUrl,
-
-      markDocumentBooting,
-      markDocumentReady,
-      markDocumentFatal,
-
-      getState:
-        getMainSnapshot,
-
-      getSnapshot:
-        getMainSnapshot,
+      getState,
     };
 
-    window[RUNTIME_KEY] =
-      window.OnionApp.main;
-
-    if (!state.debugBridgeExposed) {
-      state.debugBridgeExposed =
-        true;
-
-      safeEmit(
-        MAIN_EVENTS.bridgeReady,
-        {
-          version:
-            MAIN_VERSION,
-        }
-      );
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
+    window.__ONION_MAIN__ = window.OnionApp.main;
+  } catch {}
 }
 
 /* =========================================================
-   FIRST TICK
+   START
 ========================================================= */
 
 disableLegacyAutoBoot();
-bindGlobalSafetyNet();
-captureInitialUrl("module-load");
-markDocumentBooting("module-load");
+captureBootContext();
+markBooting();
+bindGlobalErrors();
 exposeDebugBridge();
 
-safeEmit(
-  MAIN_EVENTS.moduleLoaded,
-  {
-    version:
-      MAIN_VERSION,
-
-    readyState:
-      isBrowser()
-        ? document.readyState
-        : "server",
-  }
-);
-
-void start().catch(() => {
+start().catch(() => {
   /*
-    handleFatalError() ya deja la UX fatal preparada.
-    Se evita ruido adicional en consola por el autoarranque.
+    handleFatal() ya pinta el fallback.
   */
 });
 
@@ -4018,38 +666,14 @@ void start().catch(() => {
 
 export {
   MAIN_VERSION,
-
   start,
   boot,
-
-  loadRuntimeModules,
-
-  captureInitialUrl,
-
-  markDocumentBooting,
-  markDocumentReady,
-  markDocumentFatal,
-
-  getMainSnapshot,
+  getState,
 };
 
 export default {
-  MAIN_VERSION,
-
+  version: MAIN_VERSION,
   start,
   boot,
-
-  loadRuntimeModules,
-
-  captureInitialUrl,
-
-  markDocumentBooting,
-  markDocumentReady,
-  markDocumentFatal,
-
-  getState:
-    getMainSnapshot,
-
-  getSnapshot:
-    getMainSnapshot,
+  getState,
 };

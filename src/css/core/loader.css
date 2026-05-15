@@ -1,39 +1,44 @@
 /* =========================================================
    Onion SPA — Loader CSS
-   Archivo: src/css/core/loader.css
+   Archivo: /src/css/core/loader.css
 
    ONION SUPPORT · BOOT LOADER
-   REFRESH SAFE · APPLE STYLE · PRO SAAS · EXTREME 10/10
+   REFRESH SAFE · APPLE STYLE · PRO SAAS · TOKEN FIRST
 
-   ARQUITECTURA:
+   Arquitectura:
    - variables.css = Token Pro System / dark base.
-   - light.css     = overrides [data-theme="light"].
-   - loader.css    = estructura, estados y animaciones.
+   - light.css     = overrides light.
+   - layout.css    = shell / mounts / main scroll.
+   - loader.css    = loader, estados y animaciones.
 
-   REGLAS:
+   Reglas:
    - Sin :root global.
    - Sin bloque local de paleta light.
    - Sin duplicar sistema global.
+   - Sin controlar layout principal.
+   - Sin search.
+   - Sin body::before/body::after.
    - Todo consume tokens existentes con fallback defensivo.
-   - Theme switch solo para elegir logo.
-   - Compatible con markup nuevo app-loader__*.
+   - Theme switch sólo para elegir logo.
+   - Compatible con markup app-loader__*.
    - Compatible con markup legacy loader-*.
 
-   CONTRATO CON INDEX / THEME / JS:
+   Contrato:
    - index.html deja #app-loader visible desde refresh.
    - theme.js resuelve html[data-theme] antes de app.css.
-   - loader.js/main.js deben limpiar:
-     · html/body .app-booting
-     · html/body .app-loading
-     · body[data-app-loading="false"]
-     · #app-loader .is-hidden / .has-hidden
-     · #app-shell[data-shell="ready"]
-     · #app-shell[data-shell-interactive="true"]
+   - layout.css gobierna #app-shell.
+   - loader.js/main.js pueden usar:
+     · is-visible
+     · is-leaving
+     · is-hidden
+     · has-hidden
+     · data-loader-visible
+     · data-loader-state
+     · aria-hidden
 
-   FIX CRÍTICO LOGO:
-   - Durante boot, la fuente de verdad del tema es html[data-theme].
-   - body puede no existir cuando corre preboot/theme.js.
-   - body NO participa para decidir logo.
+   Logo:
+   - Fuente de verdad durante boot: html[data-theme].
+   - body[data-theme] no participa para evitar carreras.
    - dark  -> favicon_white.png
    - light -> favicon_black.png
 ========================================================= */
@@ -76,27 +81,20 @@ body[data-app-loading="false"] {
 
 
 /* =========================================================
-   SHELL ANTI FLICKER
+   SHELL ANTI FLICKER BRIDGE
+   Layout.css es la fuente de verdad del shell.
+   Aquí sólo se refuerzan estados de boot/ready para evitar flash.
 ========================================================= */
-
-#app-shell {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-
-  transition:
-    opacity var(--duration-normal, 180ms) var(--ease-standard, ease),
-    visibility var(--duration-normal, 180ms) var(--ease-standard, ease);
-}
 
 html.app-booting #app-shell,
 html.app-loading #app-shell,
 body.app-booting #app-shell,
 body.app-loading #app-shell,
+html[data-app-state="booting"] #app-shell,
+body[data-app-loading="true"] #app-shell,
 #app-shell[data-shell="booting"],
 #app-shell[data-shell-state="booting"],
-#app-shell[data-shell-interactive="false"],
-#app-shell[aria-busy="true"][aria-hidden="true"] {
+#app-shell[data-shell-interactive="false"][aria-busy="true"] {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -123,7 +121,10 @@ body[data-app-loading="false"] #app-shell[data-shell-interactive="true"],
   --loader-z: var(--z-loader, 2147483000);
 
   --loader-overlay-bg:
-    var(--gradient-overlay, linear-gradient(180deg, rgba(10, 12, 17, .96), rgba(10, 12, 17, .98))),
+    var(
+      --gradient-overlay,
+      linear-gradient(180deg, rgba(10,12,17,.96), rgba(10,12,17,.98))
+    ),
     var(--app-noise, none),
     var(--body-bg, var(--main-bg, #0a0c11));
 
@@ -145,26 +146,35 @@ body[data-app-loading="false"] #app-shell[data-shell-interactive="true"],
     );
 
   --loader-card-surface:
-    var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02))),
-    var(--card-bg, var(--surface-elevated, rgba(18, 22, 32, .88)));
+    var(
+      --glass-shine,
+      linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02))
+    ),
+    var(--card-bg, var(--surface-elevated, rgba(18,22,32,.88)));
 
   --loader-card-surface-strong:
     var(--panel-noise, none),
-    var(--surface-elevated-strong, var(--card-bg, rgba(18, 22, 32, .96)));
+    var(--surface-elevated-strong, var(--card-bg, rgba(18,22,32,.96)));
 
   --loader-card-border:
-    var(--card-border, color-mix(in srgb, var(--text-strong, #fff), transparent 88%));
+    var(
+      --card-border,
+      color-mix(in srgb, var(--text-strong, #fff), transparent 88%)
+    );
 
   --loader-card-border-strong:
-    var(--border-strong, color-mix(in srgb, var(--text-strong, #fff), transparent 78%));
+    var(
+      --border-strong,
+      color-mix(in srgb, var(--text-strong, #fff), transparent 78%)
+    );
 
   --loader-card-shadow:
-    var(--shadow-xl, 0 28px 90px rgba(0, 0, 0, .42)),
-    var(--shadow-inner, inset 0 1px 0 rgba(255, 255, 255, .08));
+    var(--shadow-xl, 0 28px 90px rgba(0,0,0,.42)),
+    var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.08));
 
   --loader-brand-shadow:
-    var(--shadow-md, 0 16px 44px rgba(0, 0, 0, .34)),
-    var(--shadow-inner, inset 0 1px 0 rgba(255, 255, 255, .08));
+    var(--shadow-md, 0 16px 44px rgba(0,0,0,.34)),
+    var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.08));
 
   --loader-brand-surface:
     linear-gradient(
@@ -172,10 +182,9 @@ body[data-app-loading="false"] #app-shell[data-shell-interactive="true"],
       color-mix(in srgb, var(--text-strong, #fff), transparent 92%),
       color-mix(in srgb, var(--text-strong, #fff), transparent 97%)
     ),
-    var(--surface-glass-strong, rgba(255, 255, 255, .08));
+    var(--surface-glass-strong, rgba(255,255,255,.08));
 
-  --loader-brand-core-surface:
-    var(--loader-card-surface-strong);
+  --loader-brand-core-surface: var(--loader-card-surface-strong);
 
   --loader-card-shine:
     linear-gradient(
@@ -226,34 +235,42 @@ body[data-app-loading="false"] #app-shell[data-shell-interactive="true"],
   display: grid;
   place-items: center;
 
-  inline-size: 100vw;
+  inline-size: 100%;
+  min-inline-size: 100vw;
+
   block-size: 100vh;
+  block-size: 100svh;
+  block-size: 100dvh;
+
   min-block-size: 100vh;
   min-block-size: 100svh;
   min-block-size: 100dvh;
 
   padding:
-    max(24px, env(safe-area-inset-top))
-    max(24px, env(safe-area-inset-right))
-    max(24px, env(safe-area-inset-bottom))
-    max(24px, env(safe-area-inset-left));
+    max(24px, var(--app-safe-top, 0px))
+    max(24px, var(--app-safe-right, 0px))
+    max(24px, var(--app-safe-bottom, 0px))
+    max(24px, var(--app-safe-left, 0px));
+
+  overflow: hidden;
 
   background: var(--loader-overlay-bg);
 
-  backdrop-filter: var(--loader-backdrop-blur, blur(20px));
-  -webkit-backdrop-filter: var(--loader-backdrop-blur, blur(20px));
+  color: var(--loader-text-main);
 
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
 
+  isolation: isolate;
+  contain: layout paint style;
+
+  backdrop-filter: var(--loader-backdrop-blur, blur(20px));
+  -webkit-backdrop-filter: var(--loader-backdrop-blur, blur(20px));
+
   transition:
     opacity var(--loader-fade-speed) var(--ease-standard, ease),
     visibility var(--loader-fade-speed) var(--ease-standard, ease);
-
-  isolation: isolate;
-  overflow: hidden;
-  contain: layout paint style;
 }
 
 
@@ -287,48 +304,39 @@ body.app-loading #app-loader {
 
 #app-loader[aria-hidden="true"],
 #app-loader.is-hidden,
-#app-loader.has-hidden,
 #app-loader[data-loader-visible="false"],
 #app-loader[data-loader-state="hidden"],
 .app-loader[aria-hidden="true"],
 .app-loader.is-hidden,
-.app-loader.has-hidden,
 .app-loader[data-loader-visible="false"],
-.app-loader[data-loader-state="hidden"],
-html.app-ready #app-loader.is-hidden,
-body.app-ready #app-loader.is-hidden {
+.app-loader[data-loader-state="hidden"] {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
 }
 
 /*
-   Hard-off de seguridad:
-   si la app ya está ready, el loader no debe seguir aplicando
-   el overlay oscuro por un atributo legacy olvidado.
+   Hard-off:
+   si la app está ready, el loader no debe seguir tapando
+   por un atributo legacy olvidado.
 */
 html.app-ready #app-loader:not([data-loader-force="true"]),
 body.app-ready #app-loader:not([data-loader-force="true"]),
 html[data-app-state="ready"] #app-loader:not([data-loader-force="true"]),
-body[data-app-loading="false"] #app-loader:not([data-loader-force="true"]) {
+body[data-app-loading="false"] #app-loader:not([data-loader-force="true"]),
+html.app-ready .app-loader:not([data-loader-force="true"]),
+body.app-ready .app-loader:not([data-loader-force="true"]),
+html[data-app-state="ready"] .app-loader:not([data-loader-force="true"]),
+body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
 }
 
 /*
-   reset.css puede traer [hidden]{display:none!important}.
-   Para permitir fade-out controlado por JS, hidden no destruye layout.
-   .has-hidden sí hace el corte final.
+   Corte final real.
+   No se redefine [hidden]; reset.css ya lo gestiona correctamente.
 */
-#app-loader[hidden],
-.app-loader[hidden] {
-  display: grid !important;
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-}
-
 #app-loader.has-hidden,
 .app-loader.has-hidden,
 #app-loader[data-loader-state="removed"],
@@ -347,9 +355,10 @@ body[data-app-loading="false"] #app-loader:not([data-loader-force="true"]) {
 .app-loader [data-loader-backdrop="true"] {
   position: absolute;
   inset: 0;
-  z-index: -1;
+  z-index: 0;
 
   background: var(--loader-overlay-aura);
+
   pointer-events: none;
 }
 
@@ -358,6 +367,7 @@ body[data-app-loading="false"] #app-loader:not([data-loader-force="true"]) {
 #app-loader [data-loader-backdrop="true"]::before,
 .app-loader [data-loader-backdrop="true"]::before {
   content: "";
+
   position: absolute;
   inset: -20%;
 
@@ -381,7 +391,7 @@ body[data-app-loading="false"] #app-loader:not([data-loader-force="true"]) {
 
 
 /* =========================================================
-   PANEL NUEVO + LEGACY
+   PANEL · NEW + LEGACY
 ========================================================= */
 
 #app-loader .app-loader__card,
@@ -389,7 +399,7 @@ body[data-app-loading="false"] #app-loader:not([data-loader-force="true"]) {
 .app-loader .app-loader__card,
 .app-loader .loader-card {
   position: relative;
-  z-index: 1;
+  z-index: 2;
 
   inline-size: var(--loader-card-width-final);
   min-inline-size: min(92vw, 280px);
@@ -401,16 +411,18 @@ body[data-app-loading="false"] #app-loader:not([data-loader-force="true"]) {
 
   padding: var(--loader-card-padding-final);
 
+  overflow: hidden;
+
   border: 1px solid var(--loader-card-border);
   border-radius: var(--loader-card-radius-final);
 
   background: var(--loader-card-surface);
+  color: var(--loader-text-main);
+
   box-shadow: var(--loader-card-shadow);
 
-  color: var(--loader-text-main);
   text-align: center;
 
-  overflow: hidden;
   isolation: isolate;
   contain: layout paint style;
 
@@ -431,6 +443,7 @@ body[data-app-loading="false"] #app-loader:not([data-loader-force="true"]) {
 .app-loader .app-loader__card::before,
 .app-loader .loader-card::before {
   content: "";
+
   position: absolute;
   inset: 0;
   z-index: 0;
@@ -447,6 +460,7 @@ body[data-app-loading="false"] #app-loader:not([data-loader-force="true"]) {
 .app-loader .app-loader__card::after,
 .app-loader .loader-card::after {
   content: "";
+
   position: absolute;
   inset-inline: 18px;
   inset-block-end: 0;
@@ -489,19 +503,21 @@ body[data-app-loading="false"] #app-loader:not([data-loader-force="true"]) {
   display: grid;
   place-items: center;
 
+  overflow: hidden;
+
   border: 1px solid color-mix(in srgb, var(--text-strong, #fff), transparent 94%);
   border-radius: var(--loader-logo-radius-final);
 
   background: var(--loader-brand-surface);
   box-shadow: var(--loader-brand-shadow);
 
-  overflow: hidden;
   isolation: isolate;
 }
 
 #app-loader .app-loader__brand::before,
 .app-loader .app-loader__brand::before {
   content: "";
+
   position: absolute;
   inset: -38%;
   z-index: 0;
@@ -528,6 +544,7 @@ body[data-app-loading="false"] #app-loader:not([data-loader-force="true"]) {
 #app-loader .app-loader__brand::after,
 .app-loader .app-loader__brand::after {
   content: "";
+
   position: absolute;
   inset: 2px;
   z-index: 1;
@@ -546,7 +563,9 @@ body[data-app-loading="false"] #app-loader:not([data-loader-force="true"]) {
 }
 
 #app-loader .app-loader__logo,
-.app-loader .app-loader__logo {
+.app-loader .app-loader__logo,
+#app-loader .loader-logo,
+.app-loader .loader-logo {
   position: relative;
   z-index: 3;
 
@@ -559,7 +578,7 @@ body[data-app-loading="false"] #app-loader:not([data-loader-force="true"]) {
 
   filter:
     drop-shadow(
-      0 8px 18px color-mix(in srgb, var(--shadow-color, rgba(0, 0, 0, .38)), transparent 42%)
+      0 8px 18px color-mix(in srgb, var(--text, #d8dee9), transparent 82%)
     );
 
   user-select: none;
@@ -568,15 +587,8 @@ body[data-app-loading="false"] #app-loader:not([data-loader-force="true"]) {
 
 
 /* =========================================================
-   LOADER LOGO THEME SWITCH
-
-   dark  -> favicon_white.png
-   light -> favicon_black.png
-
-   Fuente de verdad durante preboot:
-   - html[data-theme]
-   - html.theme-dark / html.theme-light como respaldo.
-   - body[data-theme] NO participa para evitar conflicto en boot.
+   LOGO THEME SWITCH
+   Fuente de verdad: html[data-theme] / html.theme-*
 ========================================================= */
 
 #app-loader .app-loader__logo--default,
@@ -632,14 +644,18 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 
   border-radius: var(--radius-lg, 14px);
 
-  color: var(--text-on-accent, #fff);
+  background:
+    var(
+      --gradient-accent,
+      linear-gradient(135deg, var(--accent, #7c5cff), var(--accent-3, #9b7cff))
+    );
+
+  color: var(--text-on-accent, #ffffff);
 
   font-size: 24px;
   font-weight: var(--weight-black, 900);
   line-height: 1;
   letter-spacing: -.05em;
-
-  background: var(--gradient-accent, linear-gradient(135deg, var(--accent, #7c5cff), var(--accent-3, #9b7cff)));
 
   opacity: .94;
 }
@@ -678,6 +694,7 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 .app-loader .loader-spinner::before,
 .app-loader .loader-spinner::after {
   content: "";
+
   position: absolute;
   inset: 0;
 
@@ -718,7 +735,10 @@ html.theme-dark .app-loader .app-loader__logo--dark {
       color-mix(in srgb, var(--text-on-accent, #fff), transparent 78%),
       transparent 62%
     ),
-    var(--gradient-accent, linear-gradient(135deg, var(--accent, #7c5cff), var(--accent-3, #9b7cff)));
+    var(
+      --gradient-accent,
+      linear-gradient(135deg, var(--accent, #7c5cff), var(--accent-3, #9b7cff))
+    );
 
   box-shadow:
     0 0 22px color-mix(in srgb, var(--text, #d8dee9), transparent 94%),
@@ -795,6 +815,7 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 #app-loader .loader-dots::after,
 .app-loader .loader-dots::after {
   content: "";
+
   display: inline-block;
 
   inline-size: 1.2em;
@@ -810,7 +831,7 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 
 
 /* =========================================================
-   PROGRESS BAR NUEVA + LEGACY
+   PROGRESS BAR · NEW + LEGACY
 ========================================================= */
 
 #app-loader .app-loader__bar,
@@ -825,9 +846,9 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 
   margin-block-start: 2px;
 
-  border-radius: var(--radius-pill, 999px);
-
   overflow: hidden;
+
+  border-radius: var(--radius-pill, 999px);
 
   background: var(--loader-progress-track);
 
@@ -981,10 +1002,10 @@ html[data-app-state="ready"] #app-shell {
     --loader-card-width-final: min(304px, calc(100vw - 32px));
 
     padding:
-      max(16px, env(safe-area-inset-top))
-      max(16px, env(safe-area-inset-right))
-      max(16px, env(safe-area-inset-bottom))
-      max(16px, env(safe-area-inset-left));
+      max(16px, var(--app-safe-top, 0px))
+      max(16px, var(--app-safe-right, 0px))
+      max(16px, var(--app-safe-bottom, 0px))
+      max(16px, var(--app-safe-left, 0px));
   }
 
   #app-loader .app-loader__card,
@@ -1094,7 +1115,9 @@ html[data-app-state="ready"] #app-shell {
   #app-loader .app-loader__card::before,
   #app-loader .app-loader__card::after,
   .app-loader .app-loader__card::before,
-  .app-loader .app-loader__card::after {
+  .app-loader .app-loader__card::after,
+  #app-loader .app-loader__backdrop,
+  .app-loader .app-loader__backdrop {
     display: none;
   }
 
@@ -1159,11 +1182,7 @@ html[data-app-state="ready"] #app-shell {
 
 @media (prefers-reduced-transparency: reduce) {
   #app-loader,
-  .app-loader {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-
+  .app-loader,
   #app-loader .app-loader__card,
   #app-loader .loader-card,
   .app-loader .app-loader__card,

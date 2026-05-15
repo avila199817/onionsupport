@@ -3,7 +3,7 @@
    Archivo: /src/preboot/theme.js
 
    ONION SUPPORT · PREBOOT THEME ENGINE
-   CSP CLEAN · ZERO DEPENDENCIES · TOKEN SYSTEM READY
+   CSP CLEAN · ZERO DEPENDENCIES · TOKEN SYSTEM READY · 13/10
 
    Responsabilidades:
    - Aplicar tema antes del primer paint.
@@ -29,6 +29,7 @@
    - Sin estilos inyectados.
    - Sin localStorage.clear().
    - Sin sessionStorage.clear().
+   - Sin borrar contenedores settings/user/preferences/profile/ui/account.
    - Sin throws accidentales.
 ========================================================= */
 
@@ -39,7 +40,7 @@
      CONSTANTS
   ========================================================= */
 
-  const VERSION = "12.0.0";
+  const VERSION = "13.0.0-extreme-pro";
 
   const DEFAULT_STORAGE_PREFIX = "onion";
   const DEFAULT_MODE = "system";
@@ -93,7 +94,7 @@
     "account",
   ]);
 
-  const LEGACY_THEME_KEYS = Object.freeze([
+  const LEGACY_DIRECT_THEME_KEYS = Object.freeze([
     "onion:themeMode",
     "onion:theme_mode",
     "onion:appearance",
@@ -125,7 +126,9 @@
     "color_mode",
     "mode",
     "theme",
+  ]);
 
+  const LEGACY_OBJECT_THEME_KEYS = Object.freeze([
     "onion:settings",
     "onion:user",
     "onion:preferences",
@@ -214,7 +217,7 @@
   let lastAppliedSignature = "";
 
   /* =========================================================
-     BASIC HELPERS
+     BASICS
   ========================================================= */
 
   function isBrowser() {
@@ -275,11 +278,15 @@
   }
 
   function hasOwn(objectValue, key = "") {
-    return Boolean(
-      objectValue &&
-      typeof objectValue === "object" &&
-      Object.prototype.hasOwnProperty.call(objectValue, key)
-    );
+    try {
+      return Boolean(
+        objectValue &&
+          typeof objectValue === "object" &&
+          Object.prototype.hasOwnProperty.call(objectValue, key)
+      );
+    } catch {
+      return false;
+    }
   }
 
   function unique(values = []) {
@@ -347,12 +354,12 @@
 
     return Boolean(
       !key ||
-      key === "undefined" ||
-      key === "null" ||
-      key === "nan" ||
-      key === "[object object]" ||
-      key === "\"\"" ||
-      key === "''"
+        key === "undefined" ||
+        key === "null" ||
+        key === "nan" ||
+        key === "[object object]" ||
+        key === "\"\"" ||
+        key === "''"
     );
   }
 
@@ -569,8 +576,8 @@
         storage.removeItem(testKey);
       } catch {
         /*
-          Algunos navegadores permiten getItem pero bloquean setItem.
-          Para preboot nos sirve lectura parcial.
+          Lectura parcial: si setItem está bloqueado pero getItem funciona,
+          preboot puede seguir leyendo sin romper el arranque.
         */
       }
 
@@ -772,14 +779,61 @@
   function getDirectStorageKeys() {
     return unique([
       ...buildStoragePlan(DIRECT_THEME_KEYS),
-      ...LEGACY_THEME_KEYS,
+      ...LEGACY_DIRECT_THEME_KEYS,
     ]);
   }
 
   function getObjectStorageKeys() {
     return unique([
       ...buildStoragePlan(OBJECT_THEME_KEYS),
-      ...OBJECT_THEME_KEYS,
+      ...LEGACY_OBJECT_THEME_KEYS,
+    ]);
+  }
+
+  function getClearableThemeKeys() {
+    /*
+      CRÍTICO:
+      Sólo claves directas de tema.
+      No borrar settings/user/preferences/profile/account/ui porque pueden
+      contener preferencias, sesión o datos no relacionados con tema.
+    */
+    const prefix = getStoragePrefix();
+
+    return unique([
+      ...buildStoragePlan(DIRECT_THEME_KEYS),
+      ...LEGACY_DIRECT_THEME_KEYS,
+
+      `${prefix}:theme`,
+      `${prefix}:themeMode`,
+      `${prefix}:theme_mode`,
+      `${prefix}:appearance`,
+      `${prefix}:colorMode`,
+      `${prefix}:color_mode`,
+      `${prefix}:mode`,
+
+      `${prefix}_theme`,
+      `${prefix}_themeMode`,
+      `${prefix}_theme_mode`,
+      `${prefix}_appearance`,
+      `${prefix}_colorMode`,
+      `${prefix}_color_mode`,
+      `${prefix}_mode`,
+
+      `${prefix}.theme`,
+      `${prefix}.themeMode`,
+      `${prefix}.theme_mode`,
+      `${prefix}.appearance`,
+      `${prefix}.colorMode`,
+      `${prefix}.color_mode`,
+      `${prefix}.mode`,
+
+      "theme",
+      "themeMode",
+      "theme_mode",
+      "appearance",
+      "colorMode",
+      "color_mode",
+      "mode",
     ]);
   }
 
@@ -1352,7 +1406,10 @@
     const runtime = resolveRuntimeDefaultThemeMode();
 
     if (isValidMode(runtime.mode)) {
-      return runtime;
+      return {
+        ...runtime,
+        exhausted: Boolean(stored.exhausted),
+      };
     }
 
     return {
@@ -1813,8 +1870,8 @@
 
       return Boolean(
         okTheme ||
-        okMode ||
-        okAppearance
+          okMode ||
+          okAppearance
       );
     } catch {
       return false;
@@ -1822,44 +1879,7 @@
   }
 
   function clearKnownThemeKeys() {
-    const prefix = getStoragePrefix();
-
-    const keys = unique([
-      ...buildStoragePlan(DIRECT_THEME_KEYS),
-      ...LEGACY_THEME_KEYS,
-
-      `${prefix}:theme`,
-      `${prefix}:themeMode`,
-      `${prefix}:theme_mode`,
-      `${prefix}:appearance`,
-      `${prefix}:colorMode`,
-      `${prefix}:color_mode`,
-      `${prefix}:mode`,
-
-      `${prefix}_theme`,
-      `${prefix}_themeMode`,
-      `${prefix}_theme_mode`,
-      `${prefix}_appearance`,
-      `${prefix}_colorMode`,
-      `${prefix}_color_mode`,
-      `${prefix}_mode`,
-
-      `${prefix}.theme`,
-      `${prefix}.themeMode`,
-      `${prefix}.theme_mode`,
-      `${prefix}.appearance`,
-      `${prefix}.colorMode`,
-      `${prefix}.color_mode`,
-      `${prefix}.mode`,
-
-      "theme",
-      "themeMode",
-      "theme_mode",
-      "appearance",
-      "colorMode",
-      "color_mode",
-      "mode",
-    ]);
+    const keys = getClearableThemeKeys();
 
     const local = getLocalStorage();
     const session = getSessionStorage();
@@ -2171,6 +2191,7 @@
       priority:
         runtime.priority ||
         PRIORITY.system,
+      exhausted: Boolean(runtime.exhausted),
     });
 
     return true;
@@ -2197,7 +2218,7 @@
 
             /*
               event.key === null puede venir de clear() externo.
-              No usamos clear(), pero sí reaccionamos de forma segura.
+              Este módulo no usa clear(), pero sí reacciona de forma segura.
             */
             if (
               event.key !== null &&

@@ -2,55 +2,16 @@
    Onion SPA - Core
    Archivo: src/core/index.js
 
-   ONION SUPPORT · CORE SINGLETON
-   GLOBAL CONFIG · STATE · EVENTS · STORAGE · REQUEST · HTTP · MODULES · 17/10
-
-   Responsabilidades:
-   - singleton global AppCore
-   - configuración global
-   - estado global robusto
-   - helpers enterprise
-   - cache DOM
-   - storage namespaced
-   - event bus
-   - cleanup scopes
-   - módulos
-   - hooks
-   - request.js como motor HTTP base
-   - http.js como facade HTTP única
-   - init idempotente real
-   - wrappers seguros de session/ui
-   - bridge global Toast
-   - snapshots de diagnóstico
-
-   Candados:
-   - no apiClient.js
-   - request.js = motor HTTP
-   - http.js = facade AppCore/API legacy
-   - index.js = ensamblador final
-   - cero undefined setters
-   - estado siempre vivo
-   - boot serializado
-   - compat total con router/auth/app bootstrap
-   - auth estricta alineada con computeAuthenticated()
-   - token sin user NO autentica, pero puede conservar hasToken para /me
+   CORE SINGLETON · CLEAN KERNEL
+   - AppCore único
+   - State / Events / Storage / Cleanup / Modules / Hooks
+   - request.js = motor base
+   - http.js = facade HTTP única
+   - Auth estricta: token + user activo
+   - token sin user conserva hasToken para /me, pero NO autentica
    - user sin token NO autentica
-   - fallback si factories parciales fallan
-   - no ReferenceError server-side
-   - API estable con bridges Router/Auth/Store/Http vía accessors
-   - snapshots públicos sin token crudo
-   - no duplicar eventos base de state/session
-   - applySession compatible con payloads heterogéneos
-   - clearSession bloquea auth fantasma
-   - createStorage recibe { utils, events }
-   - applySessionBase recibe storage real
-   - adaptadores setUser/setToken no envuelven mal payloads
-   - HTTP único conectado a src/core/http.js
-   - HTTP bridge idempotente
-   - aliases internos sin app:module:duplicate storm
-   - /api/auth/me siempre privado vía HTTP
-   - no localStorage.clear()
-   - no sessionStorage.clear()
+   - Bridges Router/Auth/Store/Http sin event storm
+   - Snapshots sin secretos
 ========================================================= */
 
 import { config } from "./config.js";
@@ -133,19 +94,11 @@ import {
   getNetworkSnapshot,
 } from "./network.js";
 
-/* =========================================================
-   SINGLETON
-========================================================= */
-
 export const AppCore = (() => {
   "use strict";
 
-  /* =======================================================
-     CONSTANTS
-  ======================================================= */
-
-  const CORE_VERSION = "17.0.0-http-single-owner";
-  const CORE_SOURCE = "core";
+  const VERSION = "18.0.0-clean-core";
+  const SOURCE = "core";
 
   const DEFAULT_APP_NAME = "Onion Support";
   const DEFAULT_STORAGE_PREFIX = "onion";
@@ -153,10 +106,10 @@ export const AppCore = (() => {
   const DEFAULT_THEME = "dark";
 
   const EVENTS = Object.freeze({
-    coreInitStart: "app:core:init:start",
-    coreReady: "app:core:ready",
-    coreInitError: "app:core:init:error",
-    coreReboot: "app:core:reboot",
+    initStart: "app:core:init:start",
+    ready: "app:core:ready",
+    initError: "app:core:init:error",
+    reboot: "app:core:reboot",
 
     stateChange: "app:state:change",
     authChange: "app:auth:change",
@@ -171,11 +124,10 @@ export const AppCore = (() => {
     moduleReplaced: "app:module:replaced",
 
     toastBridgeReady: "app:toast:bridge-ready",
-
     httpReady: "app:http:ready",
   });
 
-  const SENSITIVE_STATE_KEYS = Object.freeze([
+  const SENSITIVE_KEYS = Object.freeze([
     "token",
     "accessToken",
     "access_token",
@@ -197,49 +149,51 @@ export const AppCore = (() => {
     "authorization",
     "jwt",
     "bearer",
+    "secret",
   ]);
 
-  const SENSITIVE_PARAM_NAMES = Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "resetToken",
-    "passwordResetToken",
-    "confirmToken",
-    "code",
-    "t",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
-  ]);
-
-  const TOKEN_STATE_KEYS = Object.freeze([
+  const TOKEN_KEYS = Object.freeze([
     "token",
     "accessToken",
     "access_token",
+    "authToken",
+    "auth_token",
     "jwt",
     "bearer",
     "idToken",
     "id_token",
   ]);
 
-  const USER_STATE_KEYS = Object.freeze([
+  const REFRESH_TOKEN_KEYS = Object.freeze([
+    "refreshToken",
+    "refresh_token",
+  ]);
+
+  const TEMP_TOKEN_KEYS = Object.freeze([
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "challengeToken",
+    "challenge_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
+    "otpToken",
+    "otp_token",
+  ]);
+
+  const USER_KEYS = Object.freeze([
     "user",
-    "currentUser",
-    "sessionUser",
-    "authUser",
-    "account",
-    "profile",
     "usuario",
     "me",
+    "account",
+    "profile",
+    "currentUser",
+    "current_user",
+    "sessionUser",
+    "authUser",
   ]);
 
   const USER_ID_KEYS = Object.freeze([
@@ -248,6 +202,7 @@ export const AppCore = (() => {
     "user_id",
     "_id",
     "uid",
+    "uuid",
     "sub",
     "username",
     "userName",
@@ -257,25 +212,50 @@ export const AppCore = (() => {
     "phone",
     "telefono",
     "mobile",
+    "displayName",
+    "name",
+    "nombre",
   ]);
 
-  const BRIDGE_MODULE_ALIASES = Object.freeze({
-    Router: Object.freeze(["Router", "router"]),
-    Auth: Object.freeze(["Auth", "auth"]),
-    Store: Object.freeze(["Store", "store"]),
-    Http: Object.freeze(["Http", "http", "ApiClient", "apiClient", "api"]),
-  });
+  const SESSION_ID_KEYS = Object.freeze([
+    "sessionId",
+    "session_id",
+    "sid",
+  ]);
+
+  const SESSION_USER_ID_KEYS = Object.freeze([
+    "sessionUserId",
+    "session_user_id",
+    "userId",
+    "user_id",
+    "uid",
+    "sub",
+  ]);
+
+  const NESTED_KEYS = Object.freeze([
+    "data",
+    "payload",
+    "result",
+    "body",
+    "response",
+    "auth",
+    "authData",
+    "session",
+    "sessionData",
+    "account",
+    "profile",
+    "me",
+    "user",
+    "usuario",
+  ]);
 
   const BRIDGE_CANONICAL = Object.freeze({
     Router: "Router",
     router: "Router",
-
     Auth: "Auth",
     auth: "Auth",
-
     Store: "Store",
     store: "Store",
-
     Http: "Http",
     http: "Http",
     ApiClient: "Http",
@@ -283,548 +263,26 @@ export const AppCore = (() => {
     api: "Http",
   });
 
-  /* =======================================================
-     RUNTIME FLAGS
-  ======================================================= */
+  const BRIDGE_ALIASES = Object.freeze({
+    Router: Object.freeze(["Router", "router"]),
+    Auth: Object.freeze(["Auth", "auth"]),
+    Store: Object.freeze(["Store", "store"]),
+    Http: Object.freeze(["Http", "http", "ApiClient", "apiClient", "api"]),
+  });
 
-  let initPromise = null;
   let initialized = false;
+  let initPromise = null;
   let initCycle = 0;
 
-  let networkEventsBound = false;
-
+  let networkBound = false;
   let showToastBridge = null;
   let readyCallbacksFlushed = false;
 
-  let httpBridge = null;
   let requestBridge = null;
   let apiClientBridge = null;
-
-  let httpBridgeInstalled = false;
+  let httpBridge = null;
+  let httpInstalled = false;
   let httpReadyEmitted = false;
-
-  /* =======================================================
-     BASIC SAFE HELPERS
-  ======================================================= */
-
-  function isBrowser() {
-    return typeof window !== "undefined" && typeof document !== "undefined";
-  }
-
-  function isObject(value) {
-    return value !== null && typeof value === "object" && !Array.isArray(value);
-  }
-
-  function isAnyObject(value) {
-    return value !== null && typeof value === "object";
-  }
-
-  function ensureObject(value) {
-    return isObject(value) ? value : {};
-  }
-
-  function isObjectLike(value) {
-    return value !== null && (typeof value === "object" || typeof value === "function");
-  }
-
-  function canExtend(value) {
-    try {
-      return isObjectLike(value) && Object.isExtensible(value);
-    } catch {
-      return false;
-    }
-  }
-
-  function defineHiddenValue(target, key, value) {
-    if (!target || !key || !canExtend(target)) {
-      return false;
-    }
-
-    try {
-      Object.defineProperty(target, key, {
-        value,
-        configurable: true,
-        enumerable: false,
-        writable: true,
-      });
-
-      return true;
-    } catch {}
-
-    try {
-      target[key] = value;
-      return true;
-    } catch {}
-
-    return false;
-  }
-
-  function isFunction(value) {
-    return typeof value === "function";
-  }
-
-  function safeText(value, fallback = "") {
-    if (value === null || value === undefined) {
-      return fallback;
-    }
-
-    const text = String(value).trim();
-    return text || fallback;
-  }
-
-  function safeLower(value, fallback = "") {
-    return safeText(value, fallback).toLowerCase();
-  }
-
-  function safeBool(value, fallback = false) {
-    if (value === true) return true;
-    if (value === false) return false;
-
-    if (typeof value === "number") {
-      if (value === 1) return true;
-      if (value === 0) return false;
-    }
-
-    if (typeof value === "string") {
-      const clean = value.trim().toLowerCase();
-
-      if (["true", "1", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(clean)) {
-        return true;
-      }
-
-      if (["false", "0", "no", "off", "disabled", "inactive"].includes(clean)) {
-        return false;
-      }
-    }
-
-    return Boolean(fallback);
-  }
-
-  function safeNumber(value, fallback = 0) {
-    const number = Number(value);
-    return Number.isFinite(number) ? number : fallback;
-  }
-
-  function safeArray(value) {
-    return Array.isArray(value) ? value : [];
-  }
-
-  function toArray(value) {
-    if (Array.isArray(value)) return value;
-    if (value instanceof Set) return Array.from(value);
-    if (value === null || value === undefined) return [];
-    return [value];
-  }
-
-  function unique(values = []) {
-    return Array.from(
-      new Set(
-        toArray(values)
-          .flat(Infinity)
-          .map((item) => safeText(item, ""))
-          .filter(Boolean)
-      )
-    );
-  }
-
-  function safeNow() {
-    try {
-      return Date.now();
-    } catch {
-      return 0;
-    }
-  }
-
-  function safeIsoDate(ms = safeNow()) {
-    try {
-      return new Date(ms).toISOString();
-    } catch {
-      return "";
-    }
-  }
-
-  function safeOwn(object, key) {
-    try {
-      return Object.prototype.hasOwnProperty.call(object, key);
-    } catch {
-      return false;
-    }
-  }
-
-  function safeFactory(factory, fallback, ...args) {
-    try {
-      if (isFunction(factory)) {
-        const value = factory(...args);
-
-        if (value) {
-          return value;
-        }
-      }
-    } catch {}
-
-    return isFunction(fallback) ? fallback() : fallback;
-  }
-
-  function cloneSafe(value, fallback = null) {
-    try {
-      return safeClone(value, fallback);
-    } catch {}
-
-    try {
-      if (typeof structuredClone === "function") {
-        return structuredClone(value);
-      }
-    } catch {}
-
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch {
-      return fallback;
-    }
-  }
-
-  function getDebugEnabled() {
-    try {
-      return Boolean(
-        config?.debug ||
-          config?.dev ||
-          config?.environment === "development" ||
-          config?.env === "development"
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  function getAppName() {
-    return (
-      safeText(config?.appName, "") ||
-      safeText(config?.name, "") ||
-      DEFAULT_APP_NAME
-    );
-  }
-
-  function safeConsole(method = "log", ...args) {
-    try {
-      const fn = console?.[method] || console?.log;
-      fn?.(`[${getAppName()}]`, ...args);
-    } catch {}
-  }
-
-  function safeLog(...args) {
-    if (!getDebugEnabled()) return;
-    safeConsole("log", ...args);
-  }
-
-  function safeWarn(...args) {
-    if (!getDebugEnabled()) return;
-    safeConsole("warn", ...args);
-  }
-
-  function safeError(...args) {
-    safeConsole("error", ...args);
-  }
-
-  function first(...values) {
-    for (const value of values) {
-      if (value === undefined || value === null) continue;
-      if (typeof value === "string" && value.trim() === "") continue;
-      if (Array.isArray(value) && value.length === 0) continue;
-      if (isObject(value) && Object.keys(value).length === 0) continue;
-
-      return value;
-    }
-
-    return null;
-  }
-
-  /* =======================================================
-     TOKEN / ERROR SANITIZE
-  ======================================================= */
-
-  function escapeRegExp(value = "") {
-    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
-
-  function redactTokenInText(value = "") {
-    const raw = safeText(value, "");
-
-    if (!raw) return "";
-
-    let output = raw;
-
-    try {
-      for (const name of SENSITIVE_PARAM_NAMES) {
-        const escaped = escapeRegExp(name);
-
-        output = output.replace(
-          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
-          "$1***"
-        );
-      }
-
-      output = output
-        .replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***")
-        .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***")
-        .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-        .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
-    } catch {}
-
-    return output;
-  }
-
-  function sanitizeErrorForSnapshot(error = null) {
-    if (!error) return null;
-
-    const candidate = error?.reason || error?.error || error;
-
-    return {
-      name: safeText(candidate?.name, "Error"),
-      message: redactTokenInText(
-        safeText(
-          candidate?.message ||
-            candidate?.reason ||
-            candidate,
-          "Error"
-        )
-      ),
-      code: safeText(candidate?.code || candidate?.statusCode || "", ""),
-      status: safeNumber(candidate?.status, 0),
-      timeout: Boolean(candidate?.timeout),
-      aborted: Boolean(candidate?.aborted),
-      at: safeIsoDate(),
-    };
-  }
-
-  function sanitizeStateForSnapshot(inputState = {}) {
-    const source = isAnyObject(inputState) ? inputState : {};
-
-    let clean = {};
-
-    try {
-      clean = cloneSafe(source, {}) || {};
-    } catch {
-      clean = { ...source };
-    }
-
-    for (const key of SENSITIVE_STATE_KEYS) {
-      if (key in clean) {
-        clean[key] = clean[key] ? "***" : null;
-      }
-    }
-
-    for (const key of [
-      "bootInitialUrl",
-      "bootProtectedInitialUrl",
-      "bootActivationInitialUrl",
-      "bootResetConfirmInitialUrl",
-      "publicPath",
-      "route",
-      "lastRoute",
-      "lastPublicPath",
-      "lastRequestUrl",
-    ]) {
-      if (clean[key]) {
-        clean[key] = redactTokenInText(clean[key]);
-      }
-    }
-
-    if (clean.error) clean.error = sanitizeErrorForSnapshot(clean.error);
-    if (clean.lastError) clean.lastError = sanitizeErrorForSnapshot(clean.lastError);
-
-    return clean;
-  }
-
-  function getSnapshotFrom(ref, options = {}) {
-    if (!ref) return null;
-
-    try {
-      if (isFunction(ref.getSnapshot)) return ref.getSnapshot(options);
-    } catch {}
-
-    try {
-      if (isFunction(ref.getDebugSnapshot)) return ref.getDebugSnapshot(options);
-    } catch {}
-
-    try {
-      if (isFunction(ref.snapshot)) return ref.snapshot(options);
-    } catch {}
-
-    return null;
-  }
-
-  /* =======================================================
-     FALLBACK EVENTS
-  ======================================================= */
-
-  function createFallbackEvents() {
-    const listeners = new Map();
-
-    function getSet(name) {
-      const key = safeText(name, "");
-
-      if (!key) return null;
-
-      if (!listeners.has(key)) {
-        listeners.set(key, new Set());
-      }
-
-      return listeners.get(key);
-    }
-
-    function on(name, handler) {
-      const key = safeText(name, "");
-
-      if (!key || !isFunction(handler)) {
-        return () => false;
-      }
-
-      const set = getSet(key);
-
-      if (!set) return () => false;
-
-      set.add(handler);
-
-      return () => off(key, handler);
-    }
-
-    function once(name, handler) {
-      if (!name || !isFunction(handler)) {
-        return () => false;
-      }
-
-      let disposed = false;
-
-      const dispose = on(name, (...args) => {
-        if (disposed) return;
-
-        disposed = true;
-        dispose();
-
-        try {
-          handler(...args);
-        } catch (error) {
-          safeWarn("Fallback once handler error:", name, error);
-        }
-      });
-
-      return dispose;
-    }
-
-    function off(name, handler) {
-      const key = safeText(name, "");
-
-      if (!key) return false;
-
-      try {
-        if (!handler) {
-          listeners.delete(key);
-          return true;
-        }
-
-        listeners.get(key)?.delete(handler);
-
-        return true;
-      } catch {
-        return false;
-      }
-    }
-
-    function emit(name, payload = {}) {
-      const key = safeText(name, "");
-
-      if (!key) return false;
-
-      const handlers = Array.from(listeners.get(key) || []);
-      const wildcardHandlers = Array.from(listeners.get("*") || []);
-
-      if (!handlers.length && !wildcardHandlers.length) {
-        return false;
-      }
-
-      const eventLike = {
-        type: key,
-        detail: payload,
-        payload,
-      };
-
-      for (const handler of handlers) {
-        try {
-          handler(eventLike);
-        } catch (error) {
-          safeWarn("Fallback event handler error:", key, error);
-        }
-      }
-
-      for (const handler of wildcardHandlers) {
-        try {
-          handler(key, payload, eventLike);
-        } catch (error) {
-          safeWarn("Fallback wildcard handler error:", key, error);
-        }
-      }
-
-      return true;
-    }
-
-    function clear(name = "") {
-      const key = safeText(name, "");
-
-      if (key) {
-        listeners.delete(key);
-        return true;
-      }
-
-      listeners.clear();
-      return true;
-    }
-
-    function listenerCount(name = "") {
-      const key = safeText(name, "");
-
-      if (key) {
-        return listeners.get(key)?.size || 0;
-      }
-
-      let total = 0;
-
-      for (const set of listeners.values()) {
-        total += set.size;
-      }
-
-      return total;
-    }
-
-    function names() {
-      return Array.from(listeners.keys());
-    }
-
-    function getSnapshot() {
-      return {
-        fallback: true,
-        names: names(),
-        listenerCount: listenerCount(),
-      };
-    }
-
-    return {
-      on,
-      once,
-      off,
-      emit,
-      clear,
-      listenerCount,
-      names,
-
-      getSnapshot,
-      getDebugSnapshot: getSnapshot,
-      snapshot: getSnapshot,
-    };
-  }
-
-  /* =======================================================
-     ROOT REGISTRY / STATE
-  ======================================================= */
 
   const registry = {
     modules: new Map(),
@@ -838,52 +296,822 @@ export const AppCore = (() => {
     },
   };
 
-  const events = safeFactory(
-    createEvents,
-    createFallbackEvents,
-    {
-      maxRecentEvents: config?.diagnostics?.maxRecentEvents,
+  /* =======================================================
+     BASIC
+  ======================================================= */
+
+  function isBrowser() {
+    return typeof window !== "undefined" && typeof document !== "undefined";
+  }
+
+  function isFn(value) {
+    return typeof value === "function";
+  }
+
+  function isObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function isAnyObject(value) {
+    return value !== null && typeof value === "object";
+  }
+
+  function object(value) {
+    return isObject(value) ? value : {};
+  }
+
+  function text(value, fallback = "") {
+    if (value === null || value === undefined) return fallback;
+    const out = String(value).trim();
+    return out || fallback;
+  }
+
+  function lower(value, fallback = "") {
+    return text(value, fallback).toLowerCase();
+  }
+
+  function number(value, fallback = 0) {
+    const out = Number(value);
+    return Number.isFinite(out) ? out : fallback;
+  }
+
+  function bool(value, fallback = false) {
+    if (value === true || value === false) return value;
+
+    if (typeof value === "number") {
+      if (value === 1) return true;
+      if (value === 0) return false;
     }
-  );
 
-  const state = safeFactory(
-    createInitialState,
-    () => ({}),
-    {
-      config,
-    }
-  ) || {};
+    const clean = lower(value, "");
 
-  const dom = safeFactory(
-    createDomCache,
-    () => ({})
-  ) || {};
-
-  function emitEvent(name, payload = {}) {
-    const eventName = safeText(name, "");
-
-    if (!eventName) return false;
-
-    try {
-      events?.emit?.(eventName, payload);
+    if (["true", "1", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(clean)) {
       return true;
+    }
+
+    if (["false", "0", "no", "off", "disabled", "inactive"].includes(clean)) {
+      return false;
+    }
+
+    return Boolean(fallback);
+  }
+
+  function array(value) {
+    if (Array.isArray(value)) return value;
+    if (value instanceof Set) return [...value];
+    if (value === null || value === undefined) return [];
+    return [value];
+  }
+
+  function unique(values = []) {
+    return [...new Set(array(values).flat(Infinity).map((item) => text(item, "")).filter(Boolean))];
+  }
+
+  function now() {
+    try {
+      return Date.now();
+    } catch {
+      return 0;
+    }
+  }
+
+  function iso(ms = now()) {
+    try {
+      return new Date(ms).toISOString();
+    } catch {
+      return "";
+    }
+  }
+
+  function hasOwn(obj, key) {
+    try {
+      return Object.prototype.hasOwnProperty.call(obj, key);
+    } catch {
+      return false;
+    }
+  }
+
+  function clone(value, fallback = null) {
+    try {
+      return safeClone(value, fallback);
     } catch {}
 
-    return false;
+    try {
+      if (typeof structuredClone === "function") return structuredClone(value);
+    } catch {}
+
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch {
+      return fallback;
+    }
+  }
+
+  function debugEnabled() {
+    return Boolean(
+      config?.debug ||
+        config?.dev ||
+        config?.environment === "development" ||
+        config?.env === "development"
+    );
+  }
+
+  function appName() {
+    return text(config?.appName || config?.name, DEFAULT_APP_NAME);
+  }
+
+  function log(...args) {
+    if (!debugEnabled()) return;
+    try {
+      console.log(`[${appName()}]`, ...args);
+    } catch {}
+  }
+
+  function warn(...args) {
+    if (!debugEnabled()) return;
+    try {
+      console.warn(`[${appName()}]`, ...args);
+    } catch {}
+  }
+
+  function error(...args) {
+    try {
+      console.error(`[${appName()}]`, ...args);
+    } catch {}
+  }
+
+  function first(...values) {
+    for (const value of values) {
+      if (value === null || value === undefined) continue;
+      if (typeof value === "string" && value.trim() === "") continue;
+      if (Array.isArray(value) && value.length === 0) continue;
+      if (isObject(value) && Object.keys(value).length === 0) continue;
+      return value;
+    }
+
+    return null;
+  }
+
+  function safeFactory(factory, fallback, ...args) {
+    try {
+      if (isFn(factory)) {
+        const out = factory(...args);
+        if (out) return out;
+      }
+    } catch {}
+
+    return isFn(fallback) ? fallback() : fallback;
   }
 
   /* =======================================================
-     UTILS
+     REDACTION / SNAPSHOTS
   ======================================================= */
+
+  function escapeRegExp(value = "") {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function redact(value = "") {
+    let out = text(value, "");
+    if (!out) return "";
+
+    for (const name of [
+      "token",
+      "activationToken",
+      "activateToken",
+      "resetToken",
+      "passwordResetToken",
+      "confirmToken",
+      "code",
+      "t",
+      "access_token",
+      "refresh_token",
+      "id_token",
+      "tempToken",
+      "temp_token",
+      "temporaryToken",
+      "temporary_token",
+      "twoFactorToken",
+      "two_factor_token",
+      "mfaToken",
+      "mfa_token",
+      "otpToken",
+      "otp_token",
+    ]) {
+      try {
+        out = out.replace(
+          new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
+      } catch {}
+    }
+
+    try {
+      out = out
+        .replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***")
+        .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***")
+        .replace(/(\/password-reset\/confirm\/)([^/?#\s]+)/gi, "$1***")
+        .replace(/(\/(?:2fa|otp|mfa)\/)([^/?#\s]+)/gi, "$1***")
+        .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+        .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    } catch {}
+
+    return out;
+  }
+
+  function sanitizeError(err = null) {
+    if (!err) return null;
+
+    const source = err?.reason || err?.error || err;
+
+    return {
+      name: text(source?.name, "Error"),
+      message: redact(text(source?.message || source?.reason || source, "Error")),
+      code: text(source?.code || source?.data?.code || source?.response?.data?.code || "", ""),
+      status: number(source?.status || source?.statusCode || source?.response?.status, 0),
+      timeout: Boolean(source?.timeout),
+      aborted: Boolean(source?.aborted),
+      at: iso(),
+    };
+  }
+
+  function sanitizeState(input = {}) {
+    const clean = clone(input, {}) || {};
+
+    for (const key of SENSITIVE_KEYS) {
+      if (key in clean) clean[key] = clean[key] ? "***" : null;
+    }
+
+    for (const key of [
+      "route",
+      "publicPath",
+      "lastRoute",
+      "lastPublicPath",
+      "bootInitialUrl",
+      "bootProtectedInitialUrl",
+      "bootActivationInitialUrl",
+      "bootResetConfirmInitialUrl",
+      "lastRequestUrl",
+    ]) {
+      if (clean[key]) clean[key] = redact(clean[key]);
+    }
+
+    if (clean.error) clean.error = sanitizeError(clean.error);
+    if (clean.lastError) clean.lastError = sanitizeError(clean.lastError);
+
+    return clean;
+  }
+
+  function publicUser(user = null) {
+    if (!isObject(user)) return null;
+
+    return {
+      id: user.id || user.userId || user.user_id || user.uid || null,
+      userId: user.userId || user.user_id || user.id || user.uid || null,
+      username: user.username || user.userName || user.user_name || user.slug || null,
+      displayName: user.displayName || user.name || user.nombre || null,
+      role: user.role || user.rol || null,
+      hasAvatar: Boolean(user.avatar || user.avatarUrl || user.picture),
+    };
+  }
+
+  function snapshotFrom(ref, options = {}) {
+    if (!ref) return null;
+
+    try {
+      if (isFn(ref.getSnapshot)) return ref.getSnapshot(options);
+    } catch {}
+
+    try {
+      if (isFn(ref.getDebugSnapshot)) return ref.getDebugSnapshot(options);
+    } catch {}
+
+    try {
+      if (isFn(ref.snapshot)) return ref.snapshot(options);
+    } catch {}
+
+    return null;
+  }
+
+  /* =======================================================
+     FALLBACKS
+  ======================================================= */
+
+  function fallbackEvents() {
+    const map = new Map();
+
+    function setFor(name) {
+      const key = text(name, "");
+      if (!key) return null;
+      if (!map.has(key)) map.set(key, new Set());
+      return map.get(key);
+    }
+
+    function on(name, handler) {
+      const set = setFor(name);
+      if (!set || !isFn(handler)) return () => false;
+
+      set.add(handler);
+
+      return () => off(name, handler);
+    }
+
+    function once(name, handler) {
+      if (!isFn(handler)) return () => false;
+
+      let disposed = false;
+
+      const dispose = on(name, (...args) => {
+        if (disposed) return;
+        disposed = true;
+        dispose();
+        handler(...args);
+      });
+
+      return dispose;
+    }
+
+    function off(name, handler = null) {
+      const key = text(name, "");
+      if (!key) return false;
+
+      if (!handler) {
+        map.delete(key);
+        return true;
+      }
+
+      map.get(key)?.delete(handler);
+      return true;
+    }
+
+    function emit(name, payload = {}) {
+      const key = text(name, "");
+      if (!key) return false;
+
+      const handlers = [...(map.get(key) || [])];
+      const wildcard = [...(map.get("*") || [])];
+
+      for (const fn of handlers) {
+        try {
+          fn({ type: key, detail: payload, payload });
+        } catch (err) {
+          warn("event handler error", key, err);
+        }
+      }
+
+      for (const fn of wildcard) {
+        try {
+          fn(key, payload, { type: key, detail: payload, payload });
+        } catch (err) {
+          warn("event wildcard error", key, err);
+        }
+      }
+
+      return handlers.length + wildcard.length > 0;
+    }
+
+    function clear(name = "") {
+      const key = text(name, "");
+      if (key) map.delete(key);
+      else map.clear();
+      return true;
+    }
+
+    function getSnapshot() {
+      return {
+        fallback: true,
+        names: [...map.keys()],
+        listenerCount: [...map.values()].reduce((sum, set) => sum + set.size, 0),
+      };
+    }
+
+    return {
+      on,
+      once,
+      off,
+      emit,
+      clear,
+      getSnapshot,
+      getDebugSnapshot: getSnapshot,
+      snapshot: getSnapshot,
+    };
+  }
+
+  function fallbackStorage() {
+    const memory = new Map();
+    const prefix = text(config?.storagePrefix || config?.appKey, DEFAULT_STORAGE_PREFIX);
+
+    function key(name = "") {
+      const clean = text(name, "");
+      if (!clean) return `${prefix}:`;
+      if (clean.startsWith(`${prefix}:`) || clean.startsWith(`${prefix}.`) || clean.startsWith(`${prefix}_`)) return clean;
+      return `${prefix}:${clean}`;
+    }
+
+    function web(kind = "localStorage") {
+      if (!isBrowser()) return null;
+      try {
+        return window?.[kind] || null;
+      } catch {
+        return null;
+      }
+    }
+
+    function getRaw(name, fallback = null) {
+      const finalKey = key(name);
+
+      try {
+        const local = web("localStorage")?.getItem?.(finalKey);
+        if (local !== null && local !== undefined) return local;
+      } catch {}
+
+      try {
+        const session = web("sessionStorage")?.getItem?.(finalKey);
+        if (session !== null && session !== undefined) return session;
+      } catch {}
+
+      return memory.has(finalKey) ? memory.get(finalKey) : fallback;
+    }
+
+    function setRaw(name, value, options = {}) {
+      const finalKey = key(name);
+
+      if (value === null || value === undefined) return remove(name);
+
+      const raw = String(value);
+      memory.set(finalKey, raw);
+
+      try {
+        const target = options.session === true ? web("sessionStorage") : web("localStorage");
+        target?.setItem?.(finalKey, raw);
+      } catch {}
+
+      return true;
+    }
+
+    function parse(raw, fallback = null) {
+      if (raw === null || raw === undefined || raw === "") return fallback;
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return fallback;
+      }
+    }
+
+    function get(name, fallback = null) {
+      const raw = getRaw(name, undefined);
+      if (raw === undefined) return fallback;
+
+      const parsed = parse(raw, undefined);
+      return parsed === undefined ? raw : parsed;
+    }
+
+    function set(name, value, options = {}) {
+      try {
+        return setRaw(name, JSON.stringify(value), options);
+      } catch {
+        return setRaw(name, String(value ?? ""), options);
+      }
+    }
+
+    function remove(name) {
+      const finalKey = key(name);
+
+      memory.delete(finalKey);
+
+      try {
+        web("localStorage")?.removeItem?.(finalKey);
+      } catch {}
+
+      try {
+        web("sessionStorage")?.removeItem?.(finalKey);
+      } catch {}
+
+      return true;
+    }
+
+    function getSnapshot() {
+      return {
+        fallback: true,
+        prefix,
+        memoryKeys: [...memory.keys()].map(redact),
+      };
+    }
+
+    return {
+      prefix,
+      key,
+      normalizeKey: key,
+
+      getRaw,
+      setRaw,
+
+      get,
+      set,
+
+      getJson: (name, fallback = null) => parse(getRaw(name, null), fallback),
+      setJson: set,
+
+      remove,
+      del: remove,
+      delete: remove,
+
+      has: (name) => getRaw(name, undefined) !== undefined,
+      keys: () => [...memory.keys()],
+
+      getSnapshot,
+      getDebugSnapshot: getSnapshot,
+      snapshot: getSnapshot,
+    };
+  }
+
+  function fallbackCleanup() {
+    function scope(name = "global") {
+      const clean = text(name, "global");
+      if (!registry.scopes.has(clean)) registry.scopes.set(clean, new Set());
+      return clean;
+    }
+
+    function add(scopeName, disposer) {
+      if (!isFn(disposer)) return () => false;
+
+      const clean = scope(scopeName);
+      registry.scopes.get(clean).add(disposer);
+
+      return () => {
+        try {
+          disposer();
+        } catch {}
+
+        try {
+          registry.scopes.get(clean)?.delete(disposer);
+        } catch {}
+
+        return true;
+      };
+    }
+
+    function event(scopeName, target, eventName, handler, options = false) {
+      if (!target || !eventName || !isFn(handler)) return () => false;
+
+      try {
+        target.addEventListener(eventName, handler, options);
+        return add(scopeName, () => target.removeEventListener(eventName, handler, options));
+      } catch {
+        return () => false;
+      }
+    }
+
+    function timeout(scopeName, fn, ms = 0) {
+      if (!isFn(fn)) return () => false;
+
+      try {
+        const id = setTimeout(fn, Math.max(0, number(ms, 0)));
+        return add(scopeName, () => clearTimeout(id));
+      } catch {
+        return () => false;
+      }
+    }
+
+    function interval(scopeName, fn, ms = 0) {
+      if (!isFn(fn)) return () => false;
+
+      try {
+        const id = setInterval(fn, Math.max(0, number(ms, 0)));
+        return add(scopeName, () => clearInterval(id));
+      } catch {
+        return () => false;
+      }
+    }
+
+    function run(scopeName = "global") {
+      const clean = text(scopeName, "global");
+      const disposers = registry.scopes.get(clean);
+
+      if (!disposers) return true;
+
+      for (const dispose of [...disposers]) {
+        try {
+          dispose();
+        } catch {}
+      }
+
+      disposers.clear();
+      return true;
+    }
+
+    function clear(scopeName = "") {
+      const clean = text(scopeName, "");
+
+      if (clean) return run(clean);
+
+      for (const key of [...registry.scopes.keys()]) run(key);
+      registry.scopes.clear();
+
+      return true;
+    }
+
+    function getSnapshot() {
+      return {
+        fallback: true,
+        scopes: [...registry.scopes.entries()].map(([name, set]) => ({
+          name,
+          count: set.size,
+        })),
+      };
+    }
+
+    return {
+      scope: (name) => ({ name: scope(name) }),
+      ensureScope: (name) => ({ name: scope(name) }),
+      add,
+      on: event,
+      event,
+      timeout,
+      timer: timeout,
+      interval,
+      run,
+      dispose: run,
+      clear,
+      getSnapshot,
+      getDebugSnapshot: getSnapshot,
+      snapshot: getSnapshot,
+    };
+  }
+
+  function fallbackModules() {
+    function get(name) {
+      return registry.modules.get(text(name, "")) || null;
+    }
+
+    function register(name, value, options = {}) {
+      const key = text(name, "");
+      if (!key || !value) return false;
+
+      const previous = registry.modules.get(key);
+
+      if (previous && options.replace !== true && options.overwrite !== true) {
+        return previous;
+      }
+
+      registry.modules.set(key, value);
+
+      if (options.emit === true) {
+        emit(
+          previous ? EVENTS.moduleReplaced : EVENTS.moduleRegistered,
+          {
+            name: key,
+            replaced: Boolean(previous),
+            source: SOURCE,
+          }
+        );
+      }
+
+      return value;
+    }
+
+    function set(name, value, options = {}) {
+      return register(name, value, {
+        ...object(options),
+        replace: options.replace !== false,
+        overwrite: options.overwrite !== false,
+      });
+    }
+
+    function remove(name) {
+      return registry.modules.delete(text(name, ""));
+    }
+
+    function list() {
+      return [...registry.modules.keys()];
+    }
+
+    function getSnapshot() {
+      return {
+        fallback: true,
+        count: registry.modules.size,
+        modules: list(),
+      };
+    }
+
+    return {
+      has: (name) => registry.modules.has(text(name, "")),
+      get,
+      register,
+      set,
+      upsert: set,
+      remove,
+      delete: remove,
+      unregister: remove,
+      list,
+      names: list,
+      getSnapshot,
+      getDebugSnapshot: getSnapshot,
+      snapshot: getSnapshot,
+    };
+  }
+
+  function fallbackHooks() {
+    function listFor(name) {
+      const key = text(name, "");
+      if (!key) return null;
+      if (!Array.isArray(registry.hooks[key])) registry.hooks[key] = [];
+      return registry.hooks[key];
+    }
+
+    function add(name, handler) {
+      const list = listFor(name);
+      if (!list || !isFn(handler)) return () => false;
+
+      list.push(handler);
+
+      return () => {
+        const key = text(name, "");
+        registry.hooks[key] = array(registry.hooks[key]).filter((item) => item !== handler);
+        return true;
+      };
+    }
+
+    async function run(name, payload = {}) {
+      let current = payload;
+
+      for (const hook of array(registry.hooks[text(name, "")])) {
+        if (!isFn(hook)) continue;
+
+        try {
+          const next = await hook(current);
+          if (next !== undefined) current = next;
+        } catch (err) {
+          warn("hook error", name, err);
+        }
+      }
+
+      return current;
+    }
+
+    function clear(name = "") {
+      const key = text(name, "");
+
+      if (key) registry.hooks[key] = [];
+      else Object.keys(registry.hooks).forEach((hookName) => {
+        registry.hooks[hookName] = [];
+      });
+
+      return true;
+    }
+
+    function getSnapshot() {
+      return Object.fromEntries(
+        Object.entries(registry.hooks).map(([key, value]) => [
+          key,
+          Array.isArray(value) ? value.length : 0,
+        ])
+      );
+    }
+
+    return {
+      add,
+      on: add,
+      use: add,
+      register: add,
+      run,
+      runSeries: run,
+      get: (name) => array(registry.hooks[text(name, "")]),
+      clear,
+      getSnapshot,
+      getDebugSnapshot: getSnapshot,
+      snapshot: getSnapshot,
+    };
+  }
+
+  /* =======================================================
+     ROOT OBJECTS
+  ======================================================= */
+
+  const events = safeFactory(createEvents, fallbackEvents, {
+    maxRecentEvents: config?.diagnostics?.maxRecentEvents,
+  });
+
+  const state = safeFactory(createInitialState, () => ({}), { config }) || {};
+  const dom = safeFactory(createDomCache, () => ({})) || {};
+
+  function emit(name, payload = {}) {
+    const eventName = text(name, "");
+    if (!eventName) return false;
+
+    try {
+      events.emit(eventName, payload);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   const utils = {
     qs(selector, scope = null) {
       if (!isBrowser()) return null;
-
-      const root = scope || document;
-
       try {
-        return root?.querySelector?.(selector) || null;
+        return (scope || document).querySelector(selector);
       } catch {
         return null;
       }
@@ -891,11 +1119,8 @@ export const AppCore = (() => {
 
     qsa(selector, scope = null) {
       if (!isBrowser()) return [];
-
-      const root = scope || document;
-
       try {
-        return Array.from(root?.querySelectorAll?.(selector) || []);
+        return [...((scope || document).querySelectorAll(selector) || [])];
       } catch {
         return [];
       }
@@ -903,7 +1128,6 @@ export const AppCore = (() => {
 
     byId(id = "") {
       if (!isBrowser()) return null;
-
       try {
         return document.getElementById(id);
       } catch {
@@ -911,17 +1135,15 @@ export const AppCore = (() => {
       }
     },
 
-    on(target, ev, fn, opts = false) {
-      if (!target || !ev || !isFunction(fn)) {
-        return () => false;
-      }
+    on(target, eventName, handler, options = false) {
+      if (!target || !eventName || !isFn(handler)) return () => false;
 
       try {
-        target.addEventListener(ev, fn, opts);
+        target.addEventListener(eventName, handler, options);
 
         return () => {
           try {
-            target.removeEventListener(ev, fn, opts);
+            target.removeEventListener(eventName, handler, options);
             return true;
           } catch {
             return false;
@@ -932,64 +1154,51 @@ export const AppCore = (() => {
       }
     },
 
-    off(target, ev, fn, opts = false) {
+    off(target, eventName, handler, options = false) {
       try {
-        target?.removeEventListener?.(ev, fn, opts);
+        target?.removeEventListener?.(eventName, handler, options);
       } catch {}
     },
 
     sleep(ms = 0) {
-      return new Promise((resolve) => {
-        try {
-          setTimeout(resolve, Math.max(0, safeNumber(ms, 0)));
-        } catch {
-          resolve();
-        }
-      });
+      return new Promise((resolve) => setTimeout(resolve, Math.max(0, number(ms, 0))));
     },
 
     nextTick(fn) {
-      return Promise.resolve().then(() => {
-        if (isFunction(fn)) return fn();
-        return undefined;
-      });
+      return Promise.resolve().then(() => (isFn(fn) ? fn() : undefined));
     },
 
     afterPaint(fn) {
+      if (!isFn(fn)) return;
+
       if (!isBrowser()) {
         try {
-          fn?.();
+          fn();
         } catch {}
         return;
       }
 
       try {
-        window.requestAnimationFrame(() => {
-          window.requestAnimationFrame(() => {
-            try {
-              fn?.();
-            } catch {}
-          });
-        });
-
-        return;
-      } catch {}
-
-      try {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          try {
+            fn();
+          } catch {}
+        }));
+      } catch {
         setTimeout(() => {
           try {
-            fn?.();
+            fn();
           } catch {}
         }, 0);
-      } catch {}
+      }
     },
 
-    log: safeLog,
-    warn: safeWarn,
-    error: safeError,
-    emit: emitEvent,
+    log,
+    warn,
+    error,
+    emit,
 
-    safeClone: cloneSafe,
+    safeClone: clone,
     cloneError,
 
     joinUrl,
@@ -1010,754 +1219,137 @@ export const AppCore = (() => {
     getInitials,
     isPublicApiPath,
 
-    redactTokenInText,
-    sanitizeErrorForSnapshot,
-    sanitizeStateForSnapshot,
+    redactTokenInText: redact,
+    sanitizeErrorForSnapshot: sanitizeError,
+    sanitizeStateForSnapshot: sanitizeState,
 
-    safeText,
-    safeLower,
-    safeBool,
-    safeNumber,
-    safeArray,
-    safeObject: ensureObject,
+    safeText: text,
+    safeLower: lower,
+    safeBool: bool,
+    safeNumber: number,
+    safeArray: array,
+    safeObject: object,
 
     isObject,
-    isFunction,
+    isFunction: isFn,
 
-    now: safeNow,
-    nowIso: safeIsoDate,
+    now,
+    nowIso: iso,
   };
 
-  /* =======================================================
-     FALLBACK CLEANUP
-  ======================================================= */
+  const cleanup = safeFactory(createCleanup, fallbackCleanup, {
+    registry,
+    events,
+    utils,
+  });
 
-  function createFallbackCleanup() {
-    function ensureScope(name = "global") {
-      const scopeName = safeText(name, "global");
+  const storage = safeFactory(createStorage, fallbackStorage, {
+    utils,
+    events,
+  });
 
-      if (!registry.scopes.has(scopeName)) {
-        registry.scopes.set(scopeName, new Set());
-      }
+  const modules = safeFactory(createModules, fallbackModules, {
+    registry,
+    events,
+    utils,
+  });
 
-      return { name: scopeName };
-    }
-
-    function add(scopeName, disposer) {
-      if (!isFunction(disposer)) return createNoopDisposer();
-
-      const scope = ensureScope(scopeName).name;
-      registry.scopes.get(scope).add(disposer);
-
-      return () => {
-        try {
-          disposer();
-        } catch {}
-
-        try {
-          registry.scopes.get(scope)?.delete(disposer);
-        } catch {}
-
-        return true;
-      };
-    }
-
-    function event(scopeName, targetOrName, eventNameOrHandler, handlerOrOptions, maybeOptions) {
-      const scope = ensureScope(scopeName).name;
-
-      let target = null;
-      let eventName = "";
-      let handler = null;
-      let options = false;
-
-      if (targetOrName && isFunction(targetOrName.addEventListener)) {
-        target = targetOrName;
-        eventName = safeText(eventNameOrHandler, "");
-        handler = handlerOrOptions;
-        options = maybeOptions || false;
-      } else if (typeof targetOrName === "string" && isBrowser()) {
-        if (targetOrName === "window") target = window;
-        else if (targetOrName === "document") target = document;
-        else if (targetOrName === "body") target = document.body;
-        else if (targetOrName === "html") target = document.documentElement;
-
-        if (target && typeof eventNameOrHandler === "string") {
-          eventName = safeText(eventNameOrHandler, "");
-          handler = handlerOrOptions;
-          options = maybeOptions || false;
-        } else {
-          target = window;
-          eventName = safeText(targetOrName, "");
-          handler = eventNameOrHandler;
-          options = handlerOrOptions || false;
-        }
-      }
-
-      if (!target || !eventName || !isFunction(handler)) {
-        return () => false;
-      }
-
-      try {
-        target.addEventListener(eventName, handler, options);
-
-        return add(scope, () => {
-          try {
-            target.removeEventListener(eventName, handler, options);
-          } catch {}
-        });
-      } catch {
-        return () => false;
-      }
-    }
-
-    function timeout(scopeName, callback, delay = 0) {
-      if (!isFunction(callback)) return createNoopDisposer();
-
-      try {
-        const id = setTimeout(callback, Math.max(0, safeNumber(delay, 0)));
-
-        return add(scopeName, () => {
-          try {
-            clearTimeout(id);
-          } catch {}
-        });
-      } catch {
-        return createNoopDisposer();
-      }
-    }
-
-    function interval(scopeName, callback, delay = 0) {
-      if (!isFunction(callback)) return createNoopDisposer();
-
-      try {
-        const id = setInterval(callback, Math.max(0, safeNumber(delay, 0)));
-
-        return add(scopeName, () => {
-          try {
-            clearInterval(id);
-          } catch {}
-        });
-      } catch {
-        return createNoopDisposer();
-      }
-    }
-
-    function run(scopeName = "global") {
-      const scope = safeText(scopeName, "global");
-      const disposers = registry.scopes.get(scope);
-
-      if (!disposers) return true;
-
-      for (const dispose of Array.from(disposers)) {
-        try {
-          dispose();
-        } catch {}
-      }
-
-      disposers.clear();
-
-      return true;
-    }
-
-    function clear(scopeName = "") {
-      if (scopeName) return run(scopeName);
-
-      for (const key of Array.from(registry.scopes.keys())) {
-        run(key);
-      }
-
-      registry.scopes.clear();
-
-      return true;
-    }
-
-    function createNoopDisposer() {
-      return () => false;
-    }
-
-    function getSnapshot() {
-      return {
-        fallback: true,
-        scopeCount: registry.scopes.size,
-        scopes: Array.from(registry.scopes.entries()).map(([name, disposers]) => ({
-          name,
-          count: disposers?.size || 0,
-        })),
-      };
-    }
-
-    return {
-      scope: ensureScope,
-      ensureScope,
-
-      add,
-
-      on: event,
-      event,
-      bus: event,
-
-      timeout,
-      timer: timeout,
-      interval,
-
-      run,
-      clear,
-      dispose: run,
-
-      getSnapshot,
-      getDebugSnapshot: getSnapshot,
-      snapshot: getSnapshot,
-    };
-  }
+  const hooks = safeFactory(createHooks, fallbackHooks, {
+    registry,
+    events,
+    utils,
+  });
 
   /* =======================================================
-     FALLBACK STORAGE
+     AUTH DERIVATION
   ======================================================= */
 
-  function createFallbackStorage() {
-    const memory = new Map();
-
-    const prefix = safeText(
-      config?.storagePrefix ||
-        config?.appKey ||
-        DEFAULT_STORAGE_PREFIX,
-      DEFAULT_STORAGE_PREFIX
-    );
-
-    function normalizeKey(name = "") {
-      const clean = safeText(name, "");
-
-      if (!clean) return `${prefix}:`;
-
-      if (
-        clean.startsWith(`${prefix}:`) ||
-        clean.startsWith(`${prefix}.`) ||
-        clean.startsWith(`${prefix}_`)
-      ) {
-        return clean;
-      }
-
-      return `${prefix}:${clean}`;
-    }
-
-    function getStorage(kind = "localStorage") {
-      if (!isBrowser()) return null;
-
-      try {
-        return window?.[kind] || null;
-      } catch {
-        return null;
-      }
-    }
-
-    function getRaw(name, fallback = null) {
-      const finalKey = normalizeKey(name);
-
-      try {
-        const localValue = getStorage("localStorage")?.getItem?.(finalKey);
-
-        if (localValue !== null && localValue !== undefined) {
-          return localValue;
-        }
-      } catch {}
-
-      try {
-        const sessionValue = getStorage("sessionStorage")?.getItem?.(finalKey);
-
-        if (sessionValue !== null && sessionValue !== undefined) {
-          return sessionValue;
-        }
-      } catch {}
-
-      return memory.has(finalKey) ? memory.get(finalKey) : fallback;
-    }
-
-    function setRaw(name, value, options = {}) {
-      const finalKey = normalizeKey(name);
-
-      if (value === null || value === undefined) {
-        return remove(name);
-      }
-
-      const raw = String(value);
-      memory.set(finalKey, raw);
-
-      const target = options?.session === true
-        ? getStorage("sessionStorage")
-        : getStorage("localStorage");
-
-      try {
-        target?.setItem?.(finalKey, raw);
-      } catch {}
-
-      return true;
-    }
-
-    function parseJson(raw, fallback = null) {
-      if (raw === null || raw === undefined || raw === "") return fallback;
-
-      try {
-        return JSON.parse(raw);
-      } catch {
-        return fallback;
-      }
-    }
-
-    function get(name, fallback = null) {
-      const raw = getRaw(name, undefined);
-
-      if (raw === undefined) return fallback;
-
-      const parsed = parseJson(raw, undefined);
-
-      return parsed === undefined ? raw : parsed;
-    }
-
-    function set(name, value, options = {}) {
-      try {
-        return setRaw(name, JSON.stringify(value), options);
-      } catch {
-        return setRaw(name, String(value ?? ""), options);
-      }
-    }
-
-    function getJson(name, fallback = null) {
-      return parseJson(getRaw(name, null), fallback);
-    }
-
-    function setJson(name, value, options = {}) {
-      return set(name, value, options);
-    }
-
-    function remove(name) {
-      const finalKey = normalizeKey(name);
-
-      memory.delete(finalKey);
-
-      try {
-        getStorage("localStorage")?.removeItem?.(finalKey);
-      } catch {}
-
-      try {
-        getStorage("sessionStorage")?.removeItem?.(finalKey);
-      } catch {}
-
-      return true;
-    }
-
-    function has(name) {
-      const value = getRaw(name, undefined);
-      return value !== undefined;
-    }
-
-    function keys() {
-      return Array.from(memory.keys());
-    }
-
-    function getSnapshot() {
-      return {
-        fallback: true,
-        prefix,
-        memoryKeys: keys().map((key) => redactTokenInText(key)),
-      };
-    }
-
-    return {
-      prefix,
-      key: normalizeKey,
-      normalizeKey,
-
-      getRaw,
-      setRaw,
-
-      get,
-      set,
-
-      getJson,
-      setJson,
-
-      remove,
-      del: remove,
-      delete: remove,
-
-      has,
-      keys,
-
-      getSnapshot,
-      getDebugSnapshot: getSnapshot,
-      snapshot: getSnapshot,
-    };
+  function stripBearer(value = "") {
+    return text(value, "").replace(/^Bearer\s+/i, "").trim();
   }
 
-  /* =======================================================
-     FACTORIES
-  ======================================================= */
+  function validToken(value = "") {
+    const token = stripBearer(value);
 
-  const cleanup = safeFactory(
-    createCleanup,
-    createFallbackCleanup,
-    {
-      registry,
-      events,
-      utils,
-    }
-  );
+    if (!token) return false;
 
-  const storage = safeFactory(
-    createStorage,
-    createFallbackStorage,
-    {
-      utils,
-      events,
-    }
-  );
+    const bad = new Set([
+      "null",
+      "undefined",
+      "false",
+      "true",
+      "nan",
+      "none",
+      "[object object]",
+      "{}",
+      "[]",
+    ]);
 
-  function createFallbackModules() {
-    function canonical(name = "") {
-      return safeText(name, "");
-    }
-
-    function has(name) {
-      return registry.modules.has(canonical(name));
-    }
-
-    function get(name) {
-      return registry.modules.get(canonical(name)) || null;
-    }
-
-    function register(name, moduleRef, options = {}) {
-      const key = canonical(name);
-
-      if (!key || !moduleRef) return false;
-
-      const exists = registry.modules.has(key);
-
-      if (exists && options?.replace !== true && options?.overwrite !== true) {
-        return registry.modules.get(key);
-      }
-
-      registry.modules.set(key, moduleRef);
-
-      if (options?.emit === true) {
-        emitEvent(
-          exists ? EVENTS.moduleReplaced : EVENTS.moduleRegistered,
-          {
-            name: key,
-            replaced: exists,
-            source: CORE_SOURCE,
-          }
-        );
-      }
-
-      return moduleRef;
-    }
-
-    function set(name, moduleRef, options = {}) {
-      return register(name, moduleRef, {
-        ...ensureObject(options),
-        replace: options?.replace !== false,
-        overwrite: options?.overwrite !== false,
-      });
-    }
-
-    function remove(name) {
-      return registry.modules.delete(canonical(name));
-    }
-
-    function list() {
-      return Array.from(registry.modules.keys());
-    }
-
-    function getSnapshot() {
-      return {
-        fallback: true,
-        count: registry.modules.size,
-        modules: list(),
-      };
-    }
-
-    return {
-      has,
-      get,
-      register,
-      set,
-      upsert: set,
-
-      remove,
-      delete: remove,
-      unregister: remove,
-
-      list,
-      names: list,
-
-      getSnapshot,
-      getDebugSnapshot: getSnapshot,
-      snapshot: getSnapshot,
-    };
-  }
-
-  function createFallbackHooks() {
-    function ensureHookList(name = "") {
-      const key = safeText(name, "");
-
-      if (!key) return null;
-
-      if (!Array.isArray(registry.hooks[key])) {
-        registry.hooks[key] = [];
-      }
-
-      return registry.hooks[key];
-    }
-
-    function add(name, handler) {
-      const list = ensureHookList(name);
-
-      if (!list || !isFunction(handler)) {
-        return () => false;
-      }
-
-      list.push(handler);
-
-      return () => {
-        const key = safeText(name, "");
-        registry.hooks[key] = safeArray(registry.hooks[key]).filter((item) => item !== handler);
-        return true;
-      };
-    }
-
-    async function run(name, payload = {}) {
-      const list = safeArray(registry.hooks[safeText(name, "")]);
-
-      let current = payload;
-
-      for (const hook of list) {
-        if (!isFunction(hook)) continue;
-
-        try {
-          const next = await hook(current);
-
-          if (next !== undefined) {
-            current = next;
-          }
-        } catch (error) {
-          safeWarn("Hook error:", name, error);
-        }
-      }
-
-      return current;
-    }
-
-    function get(name) {
-      return safeArray(registry.hooks[safeText(name, "")]);
-    }
-
-    function clear(name = "") {
-      const key = safeText(name, "");
-
-      if (key) {
-        registry.hooks[key] = [];
-        return true;
-      }
-
-      Object.keys(registry.hooks).forEach((hookName) => {
-        registry.hooks[hookName] = [];
-      });
-
-      return true;
-    }
-
-    function getSnapshot() {
-      return Object.fromEntries(
-        Object.entries(registry.hooks || {}).map(([key, value]) => [
-          key,
-          Array.isArray(value) ? value.length : 0,
-        ])
-      );
-    }
-
-    return {
-      add,
-      on: add,
-      use: add,
-      register: add,
-
-      run,
-      runSeries: run,
-
-      get,
-      clear,
-
-      getSnapshot,
-      getDebugSnapshot: getSnapshot,
-      snapshot: getSnapshot,
-    };
-  }
-
-  const modules = safeFactory(
-    createModules,
-    createFallbackModules,
-    {
-      registry,
-      events,
-      utils,
-    }
-  );
-
-  const hooks = safeFactory(
-    createHooks,
-    createFallbackHooks,
-    {
-      registry,
-      events,
-      utils,
-    }
-  );
-
-  /* =======================================================
-     STATE HELPERS
-  ======================================================= */
-
-  function ensureState() {
-    return state && typeof state === "object" ? state : {};
-  }
-
-  function stripBearer(token = "") {
-    return safeText(token, "").replace(/^Bearer\s+/i, "").trim();
-  }
-
-  function hasTokenValue(token) {
-    const text = stripBearer(token);
-
-    if (!text) return false;
-
-    const lower = text.toLowerCase();
-
-    if (
-      [
-        "null",
-        "undefined",
-        "false",
-        "true",
-        "nan",
-        "none",
-        "[object object]",
-        "{}",
-        "[]",
-      ].includes(lower)
-    ) {
-      return false;
-    }
-
-    if (/[\s\r\n\t]/.test(text)) {
-      return false;
-    }
+    if (bad.has(token.toLowerCase())) return false;
+    if (/[\s\r\n\t]/.test(token)) return false;
 
     try {
-      return Boolean(hasValidToken(text));
+      return Boolean(hasValidToken(token));
+    } catch {
+      return true;
+    }
+  }
+
+  function normalizeUserSafe(value = null) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+
+    try {
+      const normalized = normalizeUser(value);
+      if (usableUser(normalized)) return normalized;
     } catch {}
 
-    return true;
+    return usableUser(value) ? value : null;
   }
 
-  function getNestedObject(value = {}) {
-    return isObject(value) ? value : {};
-  }
-
-  function firstToken(...values) {
-    for (const value of values) {
-      if (hasTokenValue(value)) {
-        return stripBearer(value);
-      }
-    }
-
-    return null;
-  }
-
-  function hasUsableUser(user = null) {
-    if (!user || typeof user !== "object" || Array.isArray(user)) {
-      return false;
-    }
+  function usableUser(value = null) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 
     if (
-      user.active === false ||
-      user.disabled === true ||
-      user.deleted === true ||
-      user.isDisabled === true ||
-      user.isDeleted === true
+      value.active === false ||
+      value.enabled === false ||
+      value.disabled === true ||
+      value.deleted === true ||
+      value.archived === true ||
+      value.blocked === true ||
+      value.suspended === true ||
+      value.banned === true ||
+      value.revoked === true
     ) {
       return false;
     }
 
-    const status = safeLower(
-      user.status ||
-        user.estado ||
-        user.state ||
-        "",
-      ""
-    );
+    const status = lower(value.status || value.estado || value.state || value.accountStatus || "", "");
 
-    if (
-      [
-        "disabled",
-        "inactive",
-        "deleted",
-        "blocked",
-        "suspended",
-        "banned",
-        "desactivado",
-        "inactivo",
-        "eliminado",
-        "bloqueado",
-        "suspendido",
-      ].includes(status)
-    ) {
+    if ([
+      "disabled",
+      "inactive",
+      "deleted",
+      "archived",
+      "blocked",
+      "suspended",
+      "banned",
+      "revoked",
+      "desactivado",
+      "inactivo",
+      "eliminado",
+      "archivado",
+      "bloqueado",
+      "suspendido",
+    ].includes(status)) {
       return false;
     }
 
-    return USER_ID_KEYS.some((key) => Boolean(safeText(user?.[key], "")));
+    return USER_ID_KEYS.some((key) => Boolean(text(value?.[key], "")));
   }
 
-  function firstUser(...values) {
-    for (const value of values) {
-      if (hasUsableUser(value)) return value;
-
-      try {
-        const normalized = value ? normalizeUser(value) : null;
-
-        if (hasUsableUser(normalized)) {
-          return normalized;
-        }
-      } catch {}
-    }
-
-    return null;
-  }
-
-  function getStateToken(root = ensureState()) {
-    const session = getNestedObject(root.session);
-    const sessionData = getNestedObject(root.sessionData);
-
-    return firstToken(
-      ...TOKEN_STATE_KEYS.map((key) => root[key]),
-      ...TOKEN_STATE_KEYS.map((key) => session[key]),
-      ...TOKEN_STATE_KEYS.map((key) => sessionData[key])
-    );
-  }
-
-  function getStateUser(root = ensureState()) {
-    const session = getNestedObject(root.session);
-    const sessionData = getNestedObject(root.sessionData);
-
-    return firstUser(
-      ...USER_STATE_KEYS.map((key) => root[key]),
-      ...USER_STATE_KEYS.map((key) => session[key]),
-      ...USER_STATE_KEYS.map((key) => sessionData[key])
-    );
-  }
-
-  function normalizeRoleValue(user = null, explicitRole = "") {
-    return safeText(
-      explicitRole ||
+  function roleOf(user = null, explicit = "") {
+    const raw = lower(
+      explicit ||
         user?.role ||
         user?.rol ||
         user?.userRole ||
@@ -1771,26 +1363,67 @@ export const AppCore = (() => {
         user?.raw?.rol ||
         "",
       ""
-    ).toLowerCase() || null;
+    )
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[\s-]+/g, "_")
+      .replace(/[^a-z0-9_:.]/g, "");
+
+    if ([
+      "admin",
+      "administrator",
+      "administrador",
+      "superadmin",
+      "super_admin",
+      "owner",
+      "root",
+    ].includes(raw)) {
+      return "admin";
+    }
+
+    return "user";
   }
 
-  function resolveRolesValue(user = null, role = null) {
-    return unique([
-      role,
-      ...safeArray(user?.roles),
-    ]).filter(Boolean);
+  function tokenFrom(root = state) {
+    const session = object(root.session);
+    const sessionData = object(root.sessionData);
+
+    for (const value of [
+      ...TOKEN_KEYS.map((key) => root[key]),
+      ...TOKEN_KEYS.map((key) => session[key]),
+      ...TOKEN_KEYS.map((key) => sessionData[key]),
+    ]) {
+      if (validToken(value)) return stripBearer(value);
+    }
+
+    return null;
   }
 
-  function resolveUsernameValue(user = null) {
-    return safeText(
+  function userFrom(root = state) {
+    const session = object(root.session);
+    const sessionData = object(root.sessionData);
+
+    for (const value of [
+      ...USER_KEYS.map((key) => root[key]),
+      ...USER_KEYS.map((key) => session[key]),
+      ...USER_KEYS.map((key) => sessionData[key]),
+    ]) {
+      const user = normalizeUserSafe(value);
+      if (user) return user;
+    }
+
+    return null;
+  }
+
+  function usernameOf(user = null) {
+    return text(
       getUserUsername(user) ||
         user?.username ||
         user?.userName ||
         user?.user_name ||
-        user?.nick ||
-        user?.alias ||
+        user?.usernameLower ||
+        user?.username_lower ||
         user?.slug ||
-        user?.login ||
         user?.email ||
         user?.mail ||
         user?.name ||
@@ -1799,185 +1432,152 @@ export const AppCore = (() => {
     ) || null;
   }
 
-  function resolveCurrentUsernameValue(root) {
-    if (!root?.authenticated) return null;
+  function clearAuthFields(root = state) {
+    Object.assign(root, {
+      token: null,
+      accessToken: null,
+      access_token: null,
 
-    const fromPrevious =
-      sanitizeUsername(root.currentResolvedUsername || root.resolvedUsername || "") || null;
+      user: null,
+      currentUser: null,
+      sessionUser: null,
+      authUser: null,
+      account: null,
+      profile: null,
 
-    const fromUser =
-      sanitizeUsername(
-        getUserUsername(root.user) ||
-          root.user?.username ||
-          root.user?.userName ||
-          root.user?.user_name ||
-          root.user?.nick ||
-          root.user?.alias ||
-          root.user?.login ||
-          root.user?.slug ||
-          root.user?.email ||
-          root.user?.mail ||
-          ""
-      ) || null;
+      authenticated: false,
+      hasToken: false,
 
-    return fromPrevious || fromUser || null;
+      role: null,
+      rol: null,
+      userRole: null,
+      roles: [],
+
+      username: null,
+      currentResolvedUsername: null,
+      resolvedUsername: null,
+
+      isAdmin: false,
+      isUser: false,
+      isClient: false,
+      isSupport: false,
+      isManager: false,
+    });
+
+    return root;
   }
 
-  function computeAuthValue(root, options = {}) {
-    const opts = ensureObject(options);
+  function tokenOnly(root = state, token = null) {
+    Object.assign(root, {
+      token,
+      accessToken: token,
+      access_token: token,
 
-    if (opts.forceUnauthenticated === true) {
-      return false;
+      user: null,
+      currentUser: null,
+      sessionUser: null,
+      authUser: null,
+      account: null,
+      profile: null,
+
+      authenticated: false,
+      hasToken: Boolean(token),
+
+      role: null,
+      rol: null,
+      userRole: null,
+      roles: [],
+
+      username: null,
+      currentResolvedUsername: null,
+      resolvedUsername: null,
+
+      isAdmin: false,
+      isUser: false,
+      isClient: false,
+      isSupport: false,
+      isManager: false,
+    });
+
+    return root;
+  }
+
+  function syncAuth(options = {}) {
+    if (options.forceUnauthenticated === true) {
+      return clearAuthFields(state);
     }
 
-    const token = getStateToken(root);
-    const user = getStateUser(root);
+    const token = tokenFrom(state);
 
-    if (!hasTokenValue(token) || !hasUsableUser(user)) {
-      return false;
+    if (!token) {
+      return clearAuthFields(state);
     }
+
+    const user = userFrom(state);
+
+    if (!user) {
+      return tokenOnly(state, token);
+    }
+
+    let authenticated = false;
 
     try {
-      return Boolean(computeAuthenticated(user, token));
-    } catch {}
-
-    return true;
-  }
-
-  function clearStrictAuthFields(root) {
-    root.token = null;
-    root.accessToken = null;
-    root.access_token = null;
-
-    root.user = null;
-    root.currentUser = null;
-    root.sessionUser = null;
-    root.authUser = null;
-
-    root.authenticated = false;
-    root.hasToken = false;
-
-    root.role = null;
-    root.rol = null;
-    root.userRole = null;
-    root.roles = [];
-
-    root.username = null;
-    root.currentResolvedUsername = null;
-    root.resolvedUsername = null;
-
-    root.isAdmin = false;
-    root.isSupport = false;
-    root.isManager = false;
-    root.isClient = false;
-
-    return root;
-  }
-
-  function setUnauthenticatedWithToken(root, token = null) {
-    root.token = token;
-    root.accessToken = token;
-    root.access_token = token;
-
-    root.user = null;
-    root.currentUser = null;
-    root.sessionUser = null;
-    root.authUser = null;
-
-    root.authenticated = false;
-    root.hasToken = Boolean(token);
-
-    root.role = null;
-    root.rol = null;
-    root.userRole = null;
-    root.roles = [];
-
-    root.username = null;
-    root.currentResolvedUsername = null;
-    root.resolvedUsername = null;
-
-    root.isAdmin = false;
-    root.isSupport = false;
-    root.isManager = false;
-    root.isClient = false;
-
-    return root;
-  }
-
-  function syncDerivedAuthState(options = {}) {
-    const root = ensureState();
-
-    if (options?.forceUnauthenticated === true) {
-      return clearStrictAuthFields(root);
+      authenticated = Boolean(computeAuthenticated(user, token));
+    } catch {
+      authenticated = true;
     }
-
-    const token = getStateToken(root);
-    const user = getStateUser(root);
-
-    const tokenValid = hasTokenValue(token);
-    const userValid = hasUsableUser(user);
-
-    if (!tokenValid) {
-      return clearStrictAuthFields(root);
-    }
-
-    if (!userValid) {
-      return setUnauthenticatedWithToken(root, token);
-    }
-
-    const authenticated = computeAuthValue(
-      {
-        ...root,
-        token,
-        user,
-      },
-      options
-    );
 
     if (!authenticated) {
-      return setUnauthenticatedWithToken(root, token);
+      return tokenOnly(state, token);
     }
 
-    const role = normalizeRoleValue(user, root.role);
-    const roles = resolveRolesValue(user, role);
+    const role = roleOf(user, state.role);
+    const roles = [role];
 
-    root.token = token;
-    root.accessToken = token;
-    root.access_token = token;
+    Object.assign(state, {
+      token,
+      accessToken: token,
+      access_token: token,
 
-    root.user = user;
-    root.currentUser = user;
-    root.sessionUser = user;
-    root.authUser = user;
+      user,
+      currentUser: user,
+      sessionUser: user,
+      authUser: user,
+      account: user,
+      profile: user,
 
-    root.authenticated = true;
-    root.hasToken = true;
+      authenticated: true,
+      hasToken: true,
 
-    root.role = role;
-    root.rol = role;
-    root.userRole = role;
-    root.roles = roles;
+      role,
+      rol: role,
+      userRole: role,
+      roles,
 
-    root.username = resolveUsernameValue(user);
-    root.currentResolvedUsername = resolveCurrentUsernameValue(root);
-    root.resolvedUsername = root.currentResolvedUsername || null;
+      username: usernameOf(user),
+      currentResolvedUsername:
+        sanitizeUsername(state.currentResolvedUsername || state.resolvedUsername || "") ||
+        sanitizeUsername(usernameOf(user) || "") ||
+        null,
+      resolvedUsername: state.currentResolvedUsername || null,
 
-    root.isAdmin = roles.includes("admin");
-    root.isSupport = roles.includes("support") || roles.includes("agent");
-    root.isManager = roles.includes("manager");
-    root.isClient = roles.includes("client");
+      isAdmin: role === "admin",
+      isUser: role === "user",
+      isClient: role === "user",
+      isSupport: false,
+      isManager: false,
+    });
 
-    return root;
+    return state;
   }
 
-  function selectStateMarkers(root = {}) {
+  function marker(root = state) {
     return {
       authenticated: Boolean(root.authenticated),
       hasToken: Boolean(root.hasToken),
-      user: root.user || null,
+      userId: root.user?.userId || root.user?.id || null,
       username: root.username || null,
       role: root.role || null,
-      currentResolvedUsername: root.currentResolvedUsername || null,
       route: root.route || "/",
       publicPath: root.publicPath || "/",
       lang: root.lang || DEFAULT_LANG,
@@ -1985,189 +1585,89 @@ export const AppCore = (() => {
     };
   }
 
-  function sameMarkerValue(a, b) {
-    if (a === b) return true;
-
-    if (isAnyObject(a) || isAnyObject(b)) {
-      try {
-        return JSON.stringify(a) === JSON.stringify(b);
-      } catch {
-        return false;
-      }
-    }
-
-    return false;
-  }
-
   function markerChanged(before = {}, after = {}, keys = []) {
-    return safeArray(keys).some((key) => !sameMarkerValue(before[key], after[key]));
+    return keys.some((key) => before[key] !== after[key]);
   }
 
-  function clonePublicState({ safe = false } = {}) {
-    let snapshot = null;
+  function emitDerived(before = {}, after = {}, patch = {}, options = {}) {
+    if (options.emit === false) return false;
 
-    try {
-      snapshot = cloneState(ensureState());
-    } catch {}
+    const source = text(options.source, "core:setState");
+    const changedKeys = Object.keys(object(patch));
 
-    if (!snapshot) {
-      try {
-        snapshot = cloneSafe(ensureState(), {});
-      } catch {}
-    }
-
-    if (!snapshot) {
-      snapshot = { ...ensureState() };
-    }
-
-    return safe ? sanitizeStateForSnapshot(snapshot) : snapshot;
-  }
-
-  function emitDerivedStateChanges(before = {}, after = {}, patch = {}, options = {}) {
-    const opts = ensureObject(options);
-
-    if (opts.emit === false) return false;
-
-    const changedKeys = Object.keys(ensureObject(patch));
-
-    if (opts.emitState === true && changedKeys.length > 0) {
-      emitEvent(EVENTS.stateChange, {
+    if (options.emitState === true && changedKeys.length) {
+      emit(EVENTS.stateChange, {
         changedKeys,
-        state: sanitizeStateForSnapshot(after),
-        previous: sanitizeStateForSnapshot(before),
-        source: safeText(opts.source, "core:setState"),
+        state: sanitizeState(state),
+        source,
       });
     }
 
-    if (
-      opts.emitDerived === true &&
-      markerChanged(before, after, ["authenticated", "hasToken", "role"])
-    ) {
-      emitEvent(EVENTS.authChange, {
+    if (options.emitDerived !== true) return false;
+
+    if (markerChanged(before, after, ["authenticated", "hasToken", "role"])) {
+      emit(EVENTS.authChange, {
         authenticated: Boolean(after.authenticated),
         hasToken: Boolean(after.hasToken),
         role: after.role || null,
         username: after.username || null,
-        previousAuthenticated: Boolean(before.authenticated),
-        source: safeText(opts.source, "core:setState"),
+        source,
       });
     }
 
-    if (
-      opts.emitDerived === true &&
-      markerChanged(before, after, ["user", "username", "currentResolvedUsername", "role"])
-    ) {
-      emitEvent(EVENTS.userChange, {
+    if (markerChanged(before, after, ["userId", "username", "role"])) {
+      emit(EVENTS.userChange, {
         authenticated: Boolean(after.authenticated),
-        user: after.authenticated ? after.user || null : null,
+        user: state.authenticated ? publicUser(state.user) : null,
         username: after.username || null,
-        currentResolvedUsername: after.currentResolvedUsername || null,
         role: after.role || null,
-        source: safeText(opts.source, "core:setState"),
+        source,
       });
     }
 
-    if (opts.emitDerived === true && markerChanged(before, after, ["route"])) {
-      emitEvent(EVENTS.routeChange, {
+    if (markerChanged(before, after, ["route"])) {
+      emit(EVENTS.routeChange, {
         route: after.route || "/",
         previousRoute: before.route || "/",
         publicPath: after.publicPath || "/",
-        source: safeText(opts.source, "core:setState"),
+        source,
       });
     }
 
-    if (opts.emitDerived === true && markerChanged(before, after, ["publicPath"])) {
-      emitEvent(EVENTS.publicPathChange, {
+    if (markerChanged(before, after, ["publicPath"])) {
+      emit(EVENTS.publicPathChange, {
         publicPath: after.publicPath || "/",
         previousPublicPath: before.publicPath || "/",
         route: after.route || "/",
-        source: safeText(opts.source, "core:setState"),
+        source,
       });
     }
 
     return true;
   }
 
-  async function runInitHooks(type, payload = {}) {
-    const key = safeText(type, "");
-
-    if (!key) return payload;
-
-    try {
-      if (isFunction(hooks?.runSeries)) {
-        return await hooks.runSeries(key, payload);
-      }
-
-      if (isFunction(hooks?.run)) {
-        return await hooks.run(key, payload);
-      }
-    } catch (error) {
-      safeWarn("hooks.run() falló.", key, error);
-    }
-
-    const list = registry?.hooks?.[key];
-
-    if (!Array.isArray(list) || !list.length) {
-      return payload;
-    }
-
-    let current = payload;
-
-    for (const hook of list) {
-      if (!isFunction(hook)) continue;
-
-      try {
-        const next = await hook(current);
-
-        if (next !== undefined) {
-          current = next;
-        }
-      } catch (error) {
-        safeWarn("Hook error:", key, error);
-      }
-    }
-
-    return current;
-  }
-
   /* =======================================================
-     BASE ADAPTERS
+     STATE API
   ======================================================= */
 
-  function callSetStateBase(root, patch, options = {}) {
-    const opts = ensureObject(options);
-
+  function applyBaseSetState(root, patch, options = {}) {
     const attempts = [
-      () => stateSetState({
-        state: root,
-        events,
-        patch,
-        options: opts,
-      }),
-
-      () => stateSetStateBase(root, patch, {
-        ...opts,
-        events,
-      }),
+      () => stateSetState({ state: root, events, patch, options }),
+      () => stateSetStateBase(root, patch, { ...options, events }),
     ];
-
-    let lastError = null;
 
     for (const attempt of attempts) {
       try {
         attempt();
         return true;
-      } catch (error) {
-        lastError = error;
-      }
+      } catch {}
     }
 
-    if (lastError) throw lastError;
-
+    Object.assign(root, patch);
     return false;
   }
 
-  function callGetStateBase(root) {
+  function getStateBaseCompat(root) {
     const attempts = [
       () => stateGetState(root),
       () => stateGetStateBase(root),
@@ -2176,69 +1676,49 @@ export const AppCore = (() => {
 
     for (const attempt of attempts) {
       try {
-        const value = attempt();
-
-        if (value) return value;
+        const out = attempt();
+        if (out) return out;
       } catch {}
     }
 
     return null;
   }
 
-  /* =======================================================
-     STATE API
-  ======================================================= */
-
-  function setState(patch = {}, options = {}) {
-    const root = ensureState();
-
-    const cleanPatch =
-      patch &&
-      typeof patch === "object" &&
-      !Array.isArray(patch)
-        ? patch
-        : {};
-
-    const opts = ensureObject(options);
-    const before = selectStateMarkers(root);
-
-    let baseSucceeded = false;
+  function publicState(options = {}) {
+    let out = null;
 
     try {
-      baseSucceeded = callSetStateBase(root, cleanPatch, opts);
-    } catch (error) {
-      try {
-        Object.assign(root, cleanPatch);
-      } catch {}
+      out = cloneState(state);
+    } catch {}
 
-      safeWarn("setStateBase falló; aplicado fallback.", error);
-    }
+    if (!out) out = clone(state, { ...state }) || { ...state };
 
-    syncDerivedAuthState({
+    return options.safe ? sanitizeState(out) : out;
+  }
+
+  function setState(patch = {}, options = {}) {
+    const cleanPatch = isObject(patch) ? patch : {};
+    const opts = object(options);
+
+    const before = marker(state);
+
+    applyBaseSetState(state, cleanPatch, opts);
+
+    syncAuth({
       forceUnauthenticated: opts.forceUnauthenticated === true,
     });
 
-    const after = selectStateMarkers(root);
+    const after = marker(state);
 
-    emitDerivedStateChanges(before, after, cleanPatch, {
-      ...opts,
-      emitState: baseSucceeded ? opts.emitState === true : opts.emitState !== false,
-      emitDerived: opts.emitDerived === true || (!baseSucceeded && opts.emitDerived !== false),
-    });
+    emitDerived(before, after, cleanPatch, opts);
 
-    return clonePublicState();
+    return publicState();
   }
 
   function getState(options = {}) {
-    syncDerivedAuthState();
-
-    const opts = ensureObject(options);
-
-    const snapshot =
-      callGetStateBase(ensureState()) ||
-      clonePublicState();
-
-    return opts.safe ? sanitizeStateForSnapshot(snapshot) : snapshot;
+    syncAuth();
+    const out = getStateBaseCompat(state) || publicState();
+    return options.safe ? sanitizeState(out) : out;
   }
 
   function patchState(patch = {}, options = {}) {
@@ -2246,63 +1726,59 @@ export const AppCore = (() => {
   }
 
   function isAuthenticated() {
-    syncDerivedAuthState();
+    syncAuth();
     return Boolean(state.authenticated);
   }
 
   function getCurrentUser() {
-    syncDerivedAuthState();
+    syncAuth();
     return state.user || null;
   }
 
   function getCurrentRole() {
-    syncDerivedAuthState();
+    syncAuth();
     return state.role || null;
   }
 
   function hasRole(roleOrRoles = []) {
-    const roles = Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles];
-    const current = safeLower(getCurrentRole(), "");
-
-    return roles.some((role) => safeLower(role, "") === current);
+    const roles = array(roleOrRoles).map((item) => roleOf({ role: item }));
+    return roles.includes(getCurrentRole());
   }
 
   function getAuthHeader() {
-    syncDerivedAuthState();
+    syncAuth();
 
-    const token = safeText(state.token, "");
-
-    if (!token) return {};
-
-    const headerName = safeText(config?.auth?.tokenHeader, "Authorization");
-    const bearerPrefix = safeText(config?.auth?.bearerPrefix, "Bearer");
+    if (!state.token) return {};
 
     return {
-      [headerName]: `${bearerPrefix} ${token}`,
+      [text(config?.auth?.tokenHeader, "Authorization")]:
+        `${text(config?.auth?.bearerPrefix, "Bearer")} ${state.token}`,
     };
   }
 
   /* =======================================================
-     UI API
+     UI
   ======================================================= */
 
-  function setDocumentTitle(title = config.appName) {
+  function setDocumentTitle(title = getAppName()) {
+    const finalTitle = text(title, getAppName());
+
     try {
       return setDocumentTitleBase({
         dom,
         events,
-        title: safeText(title, getAppName()),
+        title: finalTitle,
       });
-    } catch {
-      if (isBrowser()) {
-        try {
-          document.title = safeText(title, getAppName());
-          return document.title;
-        } catch {}
-      }
-    }
+    } catch {}
 
-    return false;
+    if (!isBrowser()) return false;
+
+    try {
+      document.title = finalTitle;
+      return document.title;
+    } catch {
+      return false;
+    }
   }
 
   function clearDynamicContainers(options = {}) {
@@ -2310,11 +1786,11 @@ export const AppCore = (() => {
       return clearDynamicContainersBase({
         dom,
         events,
-        ...ensureObject(options),
+        ...object(options),
       });
-    } catch {}
-
-    return false;
+    } catch {
+      return false;
+    }
   }
 
   function syncUserUI(options = {}) {
@@ -2323,139 +1799,107 @@ export const AppCore = (() => {
         state,
         dom,
         events,
-        ...ensureObject(options),
+        ...object(options),
       });
-    } catch (error) {
-      safeWarn("syncUserUIBase falló.", error);
+    } catch (err) {
+      warn("syncUserUI failed", err);
       return false;
     }
   }
 
   function setShowToast(fn) {
-    if (!isFunction(fn)) return false;
+    if (!isFn(fn)) return false;
 
     showToastBridge = fn;
 
-    emitEvent(EVENTS.toastBridgeReady, {
+    emit(EVENTS.toastBridgeReady, {
       ready: true,
-      at: safeIsoDate(),
-      source: CORE_SOURCE,
+      at: iso(),
+      source: SOURCE,
     });
 
     return true;
   }
 
   function showToast(message = "", type = "info", options = {}) {
-    if (!isFunction(showToastBridge)) return null;
+    if (!isFn(showToastBridge)) return null;
 
     try {
       return showToastBridge(message, type, options);
-    } catch (error) {
-      safeWarn("showToast bridge falló.", error);
+    } catch (err) {
+      warn("toast bridge failed", err);
       return null;
     }
   }
 
   /* =======================================================
-     SESSION PAYLOAD EXTRACTION
+     SESSION EXTRACTION
   ======================================================= */
 
   function collectObjects(value, depth = 0, seen = new WeakSet()) {
-    if (depth > 7 || !value || typeof value !== "object") {
-      return [];
-    }
+    if (depth > 8 || !value || typeof value !== "object") return [];
 
     try {
       if (seen.has(value)) return [];
       seen.add(value);
     } catch {}
 
-    const output = [value];
+    const out = [value];
 
-    for (const key of [
-      "data",
-      "payload",
-      "result",
-      "body",
-      "response",
-      "auth",
-      "authData",
-      "session",
-      "sessionData",
-      "account",
-      "profile",
-      "me",
-      "user",
-      "usuario",
-    ]) {
-      const child = value[key];
-
-      if (child && typeof child === "object") {
-        output.push(...collectObjects(child, depth + 1, seen));
+    for (const key of NESTED_KEYS) {
+      if (value[key] && typeof value[key] === "object") {
+        out.push(...collectObjects(value[key], depth + 1, seen));
       }
     }
 
-    return output;
+    if (value.response?.data && typeof value.response.data === "object") {
+      out.push(...collectObjects(value.response.data, depth + 1, seen));
+    }
+
+    return out;
   }
 
-  function pickTokenFromObjects(objects = [], keys = []) {
-    for (const object of safeArray(objects)) {
+  function pickToken(objects = [], keys = []) {
+    for (const obj of array(objects)) {
       for (const key of keys) {
-        const value = object?.[key];
-
-        if (hasTokenValue(value)) {
-          return stripBearer(value);
-        }
+        if (validToken(obj?.[key])) return stripBearer(obj[key]);
       }
     }
 
     return null;
   }
 
-  function pickUserFromObjects(objects = [], keys = []) {
-    for (const object of safeArray(objects)) {
-      for (const key of keys) {
-        const value = object?.[key];
-
-        if (hasUsableUser(value)) {
-          return value;
-        }
-
-        try {
-          const normalized = value ? normalizeUser(value) : null;
-
-          if (hasUsableUser(normalized)) {
-            return normalized;
-          }
-        } catch {}
+  function pickUser(objects = []) {
+    for (const obj of array(objects)) {
+      for (const key of USER_KEYS) {
+        const user = normalizeUserSafe(obj?.[key]);
+        if (user) return user;
       }
     }
 
-    for (const object of safeArray(objects)) {
-      if (hasUsableUser(object)) {
-        return object;
-      }
-
-      try {
-        const normalized = object ? normalizeUser(object) : null;
-
-        if (hasUsableUser(normalized)) {
-          return normalized;
-        }
-      } catch {}
+    for (const obj of array(objects)) {
+      const user = normalizeUserSafe(obj);
+      if (user) return user;
     }
 
     return null;
   }
 
-  function pickTextFromObjects(objects = [], keys = []) {
-    for (const object of safeArray(objects)) {
+  function pickText(objects = [], keys = []) {
+    for (const obj of array(objects)) {
       for (const key of keys) {
-        const value = safeText(object?.[key], "");
+        const value = text(obj?.[key], "");
+        if (value) return value;
+      }
+    }
 
-        if (value) {
-          return value;
-        }
+    return null;
+  }
+
+  function pickObject(objects = [], keys = []) {
+    for (const obj of array(objects)) {
+      for (const key of keys) {
+        if (isObject(obj?.[key])) return obj[key];
       }
     }
 
@@ -2463,64 +1907,24 @@ export const AppCore = (() => {
   }
 
   function extractSessionPayload(payload = {}) {
-    const source = ensureObject(payload);
+    const source = object(payload);
     const objects = collectObjects(source);
 
-    const user = pickUserFromObjects(objects, [
-      "user",
-      "usuario",
-      "me",
-      "account",
-      "profile",
-      "currentUser",
-      "sessionUser",
-      "authUser",
-    ]);
-
-    const token = pickTokenFromObjects(objects, [
-      "token",
-      "accessToken",
-      "access_token",
-      "jwt",
-      "bearer",
-      "authToken",
-      "auth_token",
-    ]);
-
-    const refreshToken = pickTokenFromObjects(objects, [
-      "refreshToken",
-      "refresh_token",
-    ]);
-
-    const tempToken = pickTokenFromObjects(objects, [
-      "tempToken",
-      "temp_token",
-      "temporaryToken",
-      "temporary_token",
-      "twoFactorToken",
-      "two_factor_token",
-      "mfaToken",
-      "mfa_token",
-    ]);
-
     return {
-      user: user || null,
-      token: token || null,
-      refreshToken,
-      tempToken,
+      raw: source,
 
-      sessionId: pickTextFromObjects(objects, [
-        "sessionId",
-        "session_id",
-        "sid",
-      ]),
+      token: pickToken(objects, TOKEN_KEYS),
+      refreshToken: pickToken(objects, REFRESH_TOKEN_KEYS),
+      tempToken: pickToken(objects, TEMP_TOKEN_KEYS),
 
-      sessionUserId: pickTextFromObjects(objects, [
-        "sessionUserId",
-        "session_user_id",
-        "userId",
-        "user_id",
-      ]),
+      user: pickUser(objects),
+
+      session:
+        pickObject(objects, ["session", "sessionData", "authSession", "auth_session"]) ||
+        null,
+
+      sessionId: pickText(objects, SESSION_ID_KEYS),
+      sessionUserId: pickText(objects, SESSION_USER_ID_KEYS),
 
       route:
         source.route ||
@@ -2547,26 +1951,24 @@ export const AppCore = (() => {
         setState,
         events,
         route,
-        options: ensureObject(options),
+        options: object(options),
       });
-    } catch (error) {
-      const cleanRoute = normalizeCanonicalPath(route || "/");
+    } catch {}
 
-      setState(
-        {
-          route: cleanRoute,
-          canonicalPath: cleanRoute,
-        },
-        {
-          source: "core:setRoute:fallback",
-          emitDerived: true,
-        }
-      );
+    const clean = normalizeCanonicalPath(route || "/");
 
-      safeWarn("setRouteBase falló; aplicado fallback.", error);
+    setState(
+      {
+        route: clean,
+        canonicalPath: clean,
+      },
+      {
+        source: "core:setRoute:fallback",
+        emitDerived: true,
+      }
+    );
 
-      return cleanRoute;
-    }
+    return clean;
   }
 
   function setPublicPath(path = "/", options = {}) {
@@ -2577,140 +1979,126 @@ export const AppCore = (() => {
         setState,
         events,
         path,
-        options: ensureObject(options),
+        options: object(options),
       });
-    } catch (error) {
-      const cleanPath = normalizePath(path || "/");
-      const cleanRoute = normalizeCanonicalPath(cleanPath);
+    } catch {}
 
-      setState(
-        {
-          publicPath: cleanPath,
-          route: cleanRoute,
-          canonicalPath: cleanRoute,
-        },
-        {
-          source: "core:setPublicPath:fallback",
-          emitDerived: true,
-        }
-      );
+    const publicPath = normalizePath(path || "/");
+    const route = normalizeCanonicalPath(publicPath);
 
-      safeWarn("setPublicPathBase falló; aplicado fallback.", error);
+    setState(
+      {
+        publicPath,
+        route,
+        canonicalPath: route,
+      },
+      {
+        source: "core:setPublicPath:fallback",
+        emitDerived: true,
+      }
+    );
 
-      return cleanPath;
-    }
+    return publicPath;
   }
 
   function setUser(user = null, options = {}) {
-    let result = null;
-
     try {
-      result = setUserBase({
+      const out = setUserBase({
         state,
         storage,
         events,
         setState,
         syncUserUI,
         user,
-        options: ensureObject(options),
+        options: object(options),
       });
-    } catch (error) {
-      setState(
-        {
-          user: user ? normalizeUser(user) : null,
-        },
-        {
-          source: "core:setUser:fallback",
-          forceUnauthenticated: !user && !state.token,
-          emitDerived: true,
-        }
-      );
 
-      safeWarn("setUserBase falló; aplicado fallback.", error);
+      syncAuth({
+        forceUnauthenticated: !user && !state.token,
+      });
 
-      result = state.user;
-    }
+      return out;
+    } catch {}
 
-    syncDerivedAuthState({
-      forceUnauthenticated: !user && !state.token,
-    });
+    setState(
+      {
+        user: user ? normalizeUserSafe(user) : null,
+      },
+      {
+        source: "core:setUser:fallback",
+        forceUnauthenticated: !user && !state.token,
+        emitDerived: true,
+      }
+    );
 
-    return result;
+    return state.user;
   }
 
   function setToken(token = null, options = {}) {
-    let result = null;
+    const cleanToken = validToken(token) ? stripBearer(token) : null;
 
     try {
-      result = setTokenBase({
+      const out = setTokenBase({
         state,
         storage,
         events,
         setState,
-        token,
-        options: ensureObject(options),
+        token: cleanToken,
+        options: object(options),
       });
-    } catch (error) {
-      const cleanToken = hasTokenValue(token) ? stripBearer(token) : null;
 
-      setState(
-        {
-          token: cleanToken,
-          accessToken: cleanToken,
-          access_token: cleanToken,
-        },
-        {
-          source: "core:setToken:fallback",
-          forceUnauthenticated: !cleanToken,
-          emitDerived: true,
-        }
-      );
+      syncAuth({
+        forceUnauthenticated: !cleanToken,
+      });
 
-      safeWarn("setTokenBase falló; aplicado fallback.", error);
+      return out;
+    } catch {}
 
-      result = state.token;
-    }
+    setState(
+      {
+        token: cleanToken,
+        accessToken: cleanToken,
+        access_token: cleanToken,
+      },
+      {
+        source: "core:setToken:fallback",
+        forceUnauthenticated: !cleanToken,
+        emitDerived: true,
+      }
+    );
 
-    syncDerivedAuthState({
-      forceUnauthenticated: !token,
-    });
-
-    return result;
+    return state.token;
   }
 
-  function adaptSessionSetterValue(value, key) {
-    if (value && typeof value === "object" && safeOwn(value, key)) {
-      return value[key];
-    }
-
+  function adaptSetter(value, key) {
+    if (isObject(value) && hasOwn(value, key)) return value[key];
     return value;
   }
 
-  function applySession(session = {}, options = {}) {
-    const payload = ensureObject(session);
-    const opts = ensureObject(options);
-    const extracted = extractSessionPayload(payload);
+  function applySession(sessionPayload = {}, options = {}) {
+    const opts = object(options);
+    const extracted = extractSessionPayload(sessionPayload);
 
     const token =
-      safeOwn(payload, "token") ||
-      safeOwn(payload, "accessToken") ||
-      safeOwn(payload, "access_token") ||
+      hasOwn(sessionPayload, "token") ||
+      hasOwn(sessionPayload, "accessToken") ||
+      hasOwn(sessionPayload, "access_token") ||
       extracted.token
         ? extracted.token
-        : undefined;
+        : tokenFrom(state);
 
     const user =
-      safeOwn(payload, "user") ||
-      safeOwn(payload, "usuario") ||
-      safeOwn(payload, "me") ||
-      safeOwn(payload, "account") ||
-      safeOwn(payload, "profile") ||
+      hasOwn(sessionPayload, "user") ||
+      hasOwn(sessionPayload, "usuario") ||
+      hasOwn(sessionPayload, "me") ||
+      hasOwn(sessionPayload, "account") ||
+      hasOwn(sessionPayload, "profile") ||
       extracted.user
         ? extracted.user
-        : undefined;
+        : userFrom(state);
 
     let result = null;
-    let baseSucceeded = false;
+    let baseOk = false;
 
     try {
       result = applySessionBase({
@@ -2719,20 +2107,14 @@ export const AppCore = (() => {
         events,
 
         setUser: (value) =>
-          setUser(
-            adaptSessionSetterValue(value, "user"),
-            {
-              source: "core:applySession:setUser",
-            }
-          ),
+          setUser(adaptSetter(value, "user"), {
+            source: "core:applySession:setUser",
+          }),
 
         setToken: (value) =>
-          setToken(
-            adaptSessionSetterValue(value, "token"),
-            {
-              source: "core:applySession:setToken",
-            }
-          ),
+          setToken(adaptSetter(value, "token"), {
+            source: "core:applySession:setToken",
+          }),
 
         setState,
 
@@ -2742,6 +2124,7 @@ export const AppCore = (() => {
         refreshToken: extracted.refreshToken,
         tempToken: extracted.tempToken,
 
+        session: extracted.session,
         sessionId: extracted.sessionId,
         sessionUserId: extracted.sessionUserId,
 
@@ -2751,51 +2134,58 @@ export const AppCore = (() => {
         options: opts,
       });
 
-      baseSucceeded = true;
-    } catch (error) {
+      baseOk = true;
+    } catch {}
+
+    if (!baseOk) {
       if (token !== undefined) {
-        setToken(token, {
-          source: "core:applySession:fallback-token",
-        });
+        state.token = validToken(token) ? stripBearer(token) : null;
+        state.accessToken = state.token;
+        state.access_token = state.token;
       }
 
       if (user !== undefined) {
-        setUser(user, {
-          source: "core:applySession:fallback-user",
-        });
+        state.user = normalizeUserSafe(user);
       }
 
-      if (extracted.route) {
-        setRoute(extracted.route, {
-          source: "core:applySession:fallback-route",
-        });
+      if (extracted.refreshToken) {
+        state.refreshToken = extracted.refreshToken;
+        state.refresh_token = extracted.refreshToken;
       }
 
-      if (extracted.publicPath) {
-        setPublicPath(extracted.publicPath, {
-          source: "core:applySession:fallback-public-path",
-        });
+      if (extracted.session || extracted.sessionId || extracted.sessionUserId) {
+        state.session = {
+          ...object(extracted.session),
+          sessionId: extracted.sessionId || extracted.session?.sessionId || null,
+          session_id: extracted.sessionId || extracted.session?.session_id || null,
+          userId: extracted.sessionUserId || extracted.session?.userId || null,
+          user_id: extracted.sessionUserId || extracted.session?.user_id || null,
+        };
+
+        state.sessionData = state.session;
       }
 
-      safeWarn("applySessionBase falló; aplicado fallback.", error);
+      if (extracted.route) setRoute(extracted.route, { source: "core:applySession:fallback-route" });
+      if (extracted.publicPath) setPublicPath(extracted.publicPath, { source: "core:applySession:fallback-public-path" });
 
       result = {
         token: state.token,
         user: state.user,
+        session: state.session || null,
       };
     }
 
-    syncDerivedAuthState({
+    syncAuth({
       forceUnauthenticated: token === null,
     });
 
-    if (!baseSucceeded && opts.emit !== false) {
-      emitEvent(EVENTS.sessionApplied, {
+    if (opts.emit === true || !baseOk) {
+      emit(EVENTS.sessionApplied, {
         authenticated: Boolean(state.authenticated),
         hasToken: Boolean(state.hasToken),
-        username: state.username || null,
-        currentResolvedUsername: state.currentResolvedUsername || null,
-        source: safeText(opts.source, "core:applySession:fallback"),
+        user: publicUser(state.user),
+        role: state.role || null,
+        source: text(opts.source, baseOk ? "core:applySession" : "core:applySession:fallback"),
       });
     }
 
@@ -2803,10 +2193,10 @@ export const AppCore = (() => {
   }
 
   function clearSession(options = {}) {
-    const opts = ensureObject(options);
+    const opts = object(options);
 
     let result = null;
-    let baseSucceeded = false;
+    let baseOk = false;
 
     try {
       result = clearSessionBase({
@@ -2819,37 +2209,25 @@ export const AppCore = (() => {
         options: opts,
       });
 
-      baseSucceeded = true;
-    } catch (error) {
+      baseOk = true;
+    } catch {}
+
+    clearAuthFields(state);
+
+    state.refreshToken = null;
+    state.refresh_token = null;
+    state.idToken = null;
+    state.id_token = null;
+    state.tempToken = null;
+    state.temp_token = null;
+    state.session = null;
+    state.sessionData = null;
+    state.sessionId = null;
+    state.sessionUserId = null;
+
+    if (!baseOk) {
       setState(
-        {
-          token: null,
-          accessToken: null,
-          access_token: null,
-          refreshToken: null,
-          refresh_token: null,
-          idToken: null,
-          id_token: null,
-          tempToken: null,
-          temp_token: null,
-
-          user: null,
-          currentUser: null,
-          sessionUser: null,
-          authUser: null,
-
-          authenticated: false,
-          hasToken: false,
-
-          role: null,
-          rol: null,
-          userRole: null,
-          roles: [],
-
-          username: null,
-          currentResolvedUsername: null,
-          resolvedUsername: null,
-        },
+        {},
         {
           source: "core:clearSession:fallback",
           forceUnauthenticated: true,
@@ -2857,19 +2235,13 @@ export const AppCore = (() => {
         }
       );
 
-      safeWarn("clearSessionBase falló; aplicado fallback.", error);
-
       result = true;
     }
 
-    syncDerivedAuthState({
-      forceUnauthenticated: true,
-    });
-
-    if (!baseSucceeded && opts.emit !== false) {
-      emitEvent(EVENTS.sessionCleared, {
+    if (opts.emit === true || !baseOk) {
+      emit(EVENTS.sessionCleared, {
         silent: Boolean(opts.silent),
-        source: safeText(opts.source, "core:clearSession:fallback"),
+        source: text(opts.source, baseOk ? "core:clearSession" : "core:clearSession:fallback"),
       });
     }
 
@@ -2886,18 +2258,16 @@ export const AppCore = (() => {
         theme,
         themeMode,
       });
-    } catch {
-      const cleanTheme = safeText(theme, DEFAULT_THEME).toLowerCase() === "light"
-        ? "light"
-        : DEFAULT_THEME;
+    } catch {}
 
-      setState(
-        { theme: cleanTheme },
-        { source: "core:setTheme:fallback" }
-      );
+    const clean = lower(theme, DEFAULT_THEME) === "light" ? "light" : DEFAULT_THEME;
 
-      return cleanTheme;
-    }
+    setState(
+      { theme: clean },
+      { source: "core:setTheme:fallback" }
+    );
+
+    return clean;
   }
 
   function setLang(lang) {
@@ -2909,25 +2279,25 @@ export const AppCore = (() => {
         setState,
         lang,
       });
-    } catch {
-      const cleanLang = safeText(lang, DEFAULT_LANG).toLowerCase();
+    } catch {}
 
-      setState(
-        { lang: cleanLang },
-        { source: "core:setLang:fallback" }
-      );
+    const clean = lower(lang, DEFAULT_LANG);
 
-      try {
-        if (isBrowser()) document.documentElement.lang = cleanLang;
-      } catch {}
+    setState(
+      { lang: clean },
+      { source: "core:setLang:fallback" }
+    );
 
-      emitEvent("app:lang:change", {
-        lang: cleanLang,
-        source: "core:setLang:fallback",
-      });
+    try {
+      if (isBrowser()) document.documentElement.lang = clean;
+    } catch {}
 
-      return cleanLang;
-    }
+    emit("app:lang:change", {
+      lang: clean,
+      source: "core:setLang:fallback",
+    });
+
+    return clean;
   }
 
   function setSidebarOpen(value) {
@@ -2939,16 +2309,16 @@ export const AppCore = (() => {
         setState,
         value,
       });
-    } catch {
-      const next = Boolean(value);
+    } catch {}
 
-      setState(
-        { sidebarOpen: next },
-        { source: "core:setSidebarOpen:fallback" }
-      );
+    const next = Boolean(value);
 
-      return next;
-    }
+    setState(
+      { sidebarOpen: next },
+      { source: "core:setSidebarOpen:fallback" }
+    );
+
+    return next;
   }
 
   function setLoading(value) {
@@ -2959,109 +2329,135 @@ export const AppCore = (() => {
         setState,
         value,
       });
-    } catch {
-      const next = Boolean(value);
+    } catch {}
 
-      setState(
-        { loading: next },
-        { source: "core:setLoading:fallback" }
-      );
+    const next = Boolean(value);
 
-      return next;
-    }
+    setState(
+      { loading: next },
+      { source: "core:setLoading:fallback" }
+    );
+
+    return next;
   }
 
-  function setError(error = null) {
+  function setError(err = null) {
     try {
       return setErrorBase({
         events,
         setState,
         cloneError,
-        error,
+        error: err,
       });
-    } catch {
-      const normalized = error ? cloneError(error) : null;
+    } catch {}
 
-      setState(
-        {
-          error: normalized,
-          lastError: normalized,
-          hasError: Boolean(normalized),
-        },
-        {
-          source: "core:setError:fallback",
-        }
-      );
+    const normalized = err ? cloneError(err) : null;
 
-      return normalized;
-    }
+    setState(
+      {
+        error: normalized,
+        lastError: normalized,
+        hasError: Boolean(normalized),
+      },
+      { source: "core:setError:fallback" }
+    );
+
+    return normalized;
   }
 
   /* =======================================================
-     REQUEST
+     REQUEST / HTTP
   ======================================================= */
 
-  function createFallbackRequest() {
-    return async function fallbackRequest(url, options = {}) {
-      if (!isBrowser() || !isFunction(fetch)) {
-        throw new Error("Fetch API no disponible.");
-      }
+  async function fallbackRequest(url, options = {}) {
+    if (!isBrowser() || !isFn(fetch)) {
+      throw new Error("Fetch API no disponible.");
+    }
 
-      const response = await fetch(url, options);
-      const contentType = response.headers?.get?.("content-type") || "";
+    const opts = { ...object(options) };
+    const method = text(opts.method, "GET").toUpperCase();
 
-      let body = null;
-
-      if (contentType.includes("application/json")) {
-        try {
-          body = await response.json();
-        } catch {
-          body = null;
-        }
-      } else {
-        try {
-          body = await response.text();
-        } catch {
-          body = "";
-        }
-      }
-
-      if (!response.ok) {
-        const error = new Error(
-          safeText(
-            body?.message ||
-              body?.error ||
-              response.statusText,
-            `HTTP ${response.status}`
-          )
-        );
-
-        error.status = response.status;
-        error.response = response;
-        error.body = body;
-
-        throw error;
-      }
-
-      return body;
+    const headers = {
+      Accept: "application/json",
+      ...object(opts.headers),
     };
+
+    const hasBody =
+      opts.body !== undefined &&
+      opts.body !== null &&
+      method !== "GET" &&
+      method !== "HEAD";
+
+    let body = opts.body;
+
+    if (
+      hasBody &&
+      typeof FormData !== "undefined" &&
+      !(body instanceof FormData) &&
+      typeof body !== "string"
+    ) {
+      headers["Content-Type"] = headers["Content-Type"] || headers["content-type"] || "application/json";
+      body = JSON.stringify(body);
+    }
+
+    const response = await fetch(url, {
+      ...opts,
+      method,
+      headers,
+      credentials: opts.credentials || "include",
+      cache: opts.cache || "no-store",
+      body: hasBody ? body : undefined,
+    });
+
+    const contentType = response.headers?.get?.("content-type") || "";
+
+    let payload = null;
+
+    if (contentType.includes("application/json")) {
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+    } else {
+      try {
+        payload = await response.text();
+      } catch {
+        payload = "";
+      }
+    }
+
+    if (!response.ok) {
+      const err = new Error(
+        text(
+          payload?.message ||
+            payload?.error?.message ||
+            payload?.error ||
+            response.statusText,
+          `HTTP ${response.status}`
+        )
+      );
+
+      err.status = response.status;
+      err.response = response;
+      err.data = payload;
+      throw err;
+    }
+
+    return payload;
   }
 
-  const baseRequest = safeFactory(
-    createRequest,
-    createFallbackRequest,
-    {
-      state,
-      events,
-      setError,
-      utils,
-      registry,
-      hooks,
-    }
-  );
+  const baseRequest = safeFactory(createRequest, () => fallbackRequest, {
+    state,
+    events,
+    setError,
+    utils,
+    registry,
+    hooks,
+  });
 
-  function createFallbackApiClient(req) {
-    const call = isFunction(req) ? req : createFallbackRequest();
+  function fallbackApiClient(req) {
+    const call = isFn(req) ? req : fallbackRequest;
 
     return {
       request: call,
@@ -3112,177 +2508,26 @@ export const AppCore = (() => {
 
   const baseApiClient = safeFactory(
     createApiClient,
-    () => createFallbackApiClient(baseRequest),
+    () => fallbackApiClient(baseRequest),
     baseRequest
   );
 
   requestBridge = baseRequest;
   apiClientBridge = baseApiClient;
 
-  /* =======================================================
-     MODULE BRIDGES
-  ======================================================= */
-
-  function getCanonicalBridgeName(name = "") {
-    const clean = safeText(name, "");
-
-    return BRIDGE_CANONICAL[clean] || clean;
-  }
-
-  function getUniqueBridgeAliases(name = "") {
-    const canonical = getCanonicalBridgeName(name);
-    const rawAliases = BRIDGE_MODULE_ALIASES[canonical] || [canonical];
-
-    const output = [];
-    const seen = new Set();
-
-    for (const alias of rawAliases) {
-      const clean = safeText(alias, "");
-
-      if (!clean || seen.has(clean)) continue;
-
-      seen.add(clean);
-      output.push(clean);
-    }
-
-    return output;
-  }
-
-  function getModuleSilently(name = "") {
-    try {
-      return modules?.get?.(name) || null;
-    } catch {}
-
-    try {
-      return registry.modules.get(name) || null;
-    } catch {}
-
-    return null;
-  }
-
-  function registerBridgeModule(name = "", value = null, options = {}) {
-    const canonical = getCanonicalBridgeName(name);
-    const aliases = getUniqueBridgeAliases(canonical);
-    const opts = ensureObject(options);
-
-    if (!canonical || !aliases.length || !value) {
-      return false;
-    }
-
-    const current = getModuleSilently(canonical);
-
-    const allAliasesCurrent = aliases.every((aliasName) => {
-      try {
-        return getModuleSilently(aliasName) === value || modules?.get?.(aliasName) === value;
-      } catch {
-        return registry.modules.get(aliasName) === value;
-      }
-    });
-
-    if (current === value && allAliasesCurrent) {
-      return true;
-    }
-
-    try {
-      if (isFunction(modules?.register)) {
-        modules.register(canonical, value, {
-          overwrite: true,
-          replace: true,
-          overwriteAliases: true,
-          aliases,
-          source: safeText(opts.source, "core:index:bridge"),
-          silent: opts.emit !== true,
-        });
-
-        return true;
-      }
-    } catch {}
-
-    let changed = false;
-
-    for (const alias of aliases) {
-      try {
-        const previous = registry.modules.get(alias);
-
-        if (previous === value) continue;
-
-        registry.modules.set(alias, value);
-        changed = true;
-
-        if (opts.emit === true) {
-          emitEvent(
-            previous ? EVENTS.moduleReplaced : EVENTS.moduleRegistered,
-            {
-              name: alias,
-              replaced: Boolean(previous),
-              source: safeText(opts.source, CORE_SOURCE),
-            }
-          );
-        }
-      } catch {}
-    }
-
-    return changed || true;
-  }
-
-  function getBridgeModule(name = "") {
-    const canonical = getCanonicalBridgeName(name);
-    const aliases = getUniqueBridgeAliases(canonical);
-
-    for (const alias of aliases) {
-      try {
-        const value = modules?.get?.(alias) || registry.modules.get(alias);
-
-        if (value) return value;
-      } catch {}
-    }
-
-    return null;
-  }
-
-  /* =======================================================
-     HTTP BRIDGE · CORE HTTP CONNECTOR
-  ======================================================= */
-
-  function getHttpExport(name = "") {
-    try {
-      return CoreHttpModule?.[name];
-    } catch {
-      return null;
-    }
-  }
-
-  function getDefaultHttpExport() {
-    try {
-      return CoreHttpModule?.default || null;
-    } catch {
-      return null;
-    }
-  }
-
-  function getAuthEndpoint(name = "", fallback = "") {
-    const cleanName = safeText(name, "");
-
-    const authConfig = ensureObject(config?.auth);
-    const apiConfig = ensureObject(config?.api);
-
-    const endpoints = ensureObject(
-      authConfig.endpoints ||
-        apiConfig.endpoints
-    );
+  function authEndpoint(name = "", fallback = "") {
+    const endpointMap = object(config?.auth?.endpoints || config?.api?.endpoints);
 
     return (
-      safeText(endpoints?.[cleanName], "") ||
-      safeText(authConfig?.[`${cleanName}Endpoint`], "") ||
-      safeText(apiConfig?.[`${cleanName}Endpoint`], "") ||
+      text(endpointMap[name], "") ||
+      text(config?.auth?.[`${name}Endpoint`], "") ||
+      text(config?.api?.[`${name}Endpoint`], "") ||
       fallback
     );
   }
 
-  function setHttpMember(target, key = "", value = null) {
-    if (!target || !key || value === null || value === undefined) {
-      return false;
-    }
+  function setMember(target, key, value) {
+    if (!target || !key || value === undefined || value === null) return false;
 
     try {
       if (target[key] === undefined || target[key] === null) {
@@ -3292,14 +2537,20 @@ export const AppCore = (() => {
     } catch {}
 
     try {
-      defineHiddenValue(target, key, value);
+      Object.defineProperty(target, key, {
+        value,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+      });
+
       return true;
     } catch {}
 
     return false;
   }
 
-  function createHttpCompatClient(candidate = null) {
+  function compatHttpClient(candidate = null) {
     const source =
       candidate &&
       (typeof candidate === "object" || typeof candidate === "function")
@@ -3309,193 +2560,200 @@ export const AppCore = (() => {
     let client = source;
 
     try {
-      if (!Object.isExtensible(client) || Array.isArray(client)) {
-        client = {};
-      }
+      if (!Object.isExtensible(client) || Array.isArray(client)) client = {};
     } catch {
       client = {};
     }
 
-    const requestFn = isFunction(source.request)
+    const requestFn = isFn(source.request)
       ? source.request.bind(source)
-      : isFunction(source)
+      : isFn(source)
         ? source
-        : isFunction(requestBridge)
+        : isFn(requestBridge)
           ? requestBridge
           : baseRequest;
 
-    setHttpMember(client, "request", requestFn);
+    setMember(client, "request", requestFn);
 
-    if (!isFunction(client.get)) {
-      setHttpMember(client, "get", (url, options = {}) =>
-        requestFn(url, {
-          ...options,
-          method: "GET",
-        })
-      );
-    }
+    setMember(client, "get", client.get || ((url, options = {}) =>
+      requestFn(url, {
+        ...options,
+        method: "GET",
+      })
+    ));
 
-    if (!isFunction(client.post)) {
-      setHttpMember(client, "post", (url, body = undefined, options = {}) =>
-        requestFn(url, {
-          ...options,
-          method: "POST",
-          body,
-        })
-      );
-    }
+    setMember(client, "post", client.post || ((url, body = undefined, options = {}) =>
+      requestFn(url, {
+        ...options,
+        method: "POST",
+        body,
+      })
+    ));
 
-    if (!isFunction(client.put)) {
-      setHttpMember(client, "put", (url, body = undefined, options = {}) =>
-        requestFn(url, {
-          ...options,
-          method: "PUT",
-          body,
-        })
-      );
-    }
+    setMember(client, "put", client.put || ((url, body = undefined, options = {}) =>
+      requestFn(url, {
+        ...options,
+        method: "PUT",
+        body,
+      })
+    ));
 
-    if (!isFunction(client.patch)) {
-      setHttpMember(client, "patch", (url, body = undefined, options = {}) =>
-        requestFn(url, {
-          ...options,
-          method: "PATCH",
-          body,
-        })
-      );
-    }
+    setMember(client, "patch", client.patch || ((url, body = undefined, options = {}) =>
+      requestFn(url, {
+        ...options,
+        method: "PATCH",
+        body,
+      })
+    ));
 
-    if (!isFunction(client.delete)) {
-      setHttpMember(client, "delete", (url, bodyOrOptions = {}, maybeOptions = undefined) => {
-        if (maybeOptions !== undefined) {
-          return requestFn(url, {
-            ...ensureObject(maybeOptions),
-            method: "DELETE",
-            body: bodyOrOptions,
-          });
+    setMember(client, "delete", client.delete || ((url, options = {}) =>
+      requestFn(url, {
+        ...options,
+        method: "DELETE",
+      })
+    ));
+
+    setMember(client, "del", client.del || ((url, options = {}) =>
+      client.delete(url, options)
+    ));
+
+    setMember(client, "login", client.login || ((body = {}, options = {}) =>
+      client.post(
+        authEndpoint("login", "/api/auth/login"),
+        body,
+        {
+          public: true,
+          auth: false,
+          skipAuth: true,
+          _skipAuthRefresh: true,
+          skipAuthRefresh: true,
+          ...object(options),
         }
+      )
+    ));
 
-        return requestFn(url, {
-          ...ensureObject(bodyOrOptions),
-          method: "DELETE",
-        });
-      });
-    }
+    setMember(client, "refresh", client.refresh || ((body = {}, options = {}) =>
+      client.post(
+        authEndpoint("refresh", "/api/auth/refresh"),
+        body,
+        {
+          public: true,
+          auth: false,
+          skipAuth: true,
+          _skipAuthRefresh: true,
+          skipAuthRefresh: true,
+          noAutoLogout: true,
+          ...object(options),
+        }
+      )
+    ));
 
-    if (!isFunction(client.del)) {
-      setHttpMember(client, "del", (url, bodyOrOptions = {}, maybeOptions = undefined) =>
-        client.delete(url, bodyOrOptions, maybeOptions)
-      );
-    }
+    setMember(client, "me", client.me || ((options = {}) =>
+      client.get(
+        authEndpoint("me", "/api/auth/me"),
+        {
+          auth: true,
+          public: false,
+          skipAuth: false,
+          noCache: true,
+          cache: "no-store",
+          ...object(options),
+        }
+      )
+    ));
 
-    if (!isFunction(client.login)) {
-      setHttpMember(client, "login", (body = {}, options = {}) =>
-        client.post(
-          getAuthEndpoint("login", "/api/auth/login"),
-          body,
-          {
-            public: true,
-            auth: false,
-            skipAuth: true,
-            ...ensureObject(options),
-          }
-        )
-      );
-    }
+    setMember(client, "logout", client.logout || ((body = {}, options = {}) =>
+      client.post(
+        authEndpoint("logout", "/api/auth/logout"),
+        body,
+        {
+          auth: true,
+          public: false,
+          skipAuth: false,
+          noCache: true,
+          _skipAuthRefresh: true,
+          skipAuthRefresh: true,
+          ...object(options),
+        }
+      )
+    ));
 
-    if (!isFunction(client.refresh)) {
-      setHttpMember(client, "refresh", (body = {}, options = {}) =>
-        client.post(
-          getAuthEndpoint("refresh", "/api/auth/refresh"),
-          body,
-          {
-            public: true,
-            auth: false,
-            skipAuth: true,
-            _skipAuthRefresh: true,
-            ...ensureObject(options),
-          }
-        )
-      );
-    }
+    setMember(client, "getSnapshot", client.getSnapshot || (() => ({
+      version: text(client.version || client.HTTP_VERSION || client.CORE_HTTP_VERSION, "core-http-bridge"),
+      installed: true,
+      hasRequest: isFn(client.request),
+      hasGet: isFn(client.get),
+      hasPost: isFn(client.post),
+      hasMe: isFn(client.me),
+      source: "core:index:http",
+      at: iso(),
+    })));
 
-    if (!isFunction(client.me)) {
-      setHttpMember(client, "me", (options = {}) =>
-        client.get(
-          getAuthEndpoint("me", "/api/auth/me"),
-          {
-            auth: true,
-            public: false,
-            skipAuth: false,
-            noCache: true,
-            cache: "no-store",
-            ...ensureObject(options),
-          }
-        )
-      );
-    }
-
-    if (!isFunction(client.logout)) {
-      setHttpMember(client, "logout", (body = {}, options = {}) =>
-        client.post(
-          getAuthEndpoint("logout", "/api/auth/logout"),
-          body,
-          {
-            auth: true,
-            noCache: true,
-            _skipAuthRefresh: true,
-            skipAuthRefresh: true,
-            ...ensureObject(options),
-          }
-        )
-      );
-    }
-
-    if (!isFunction(client.getSnapshot)) {
-      setHttpMember(client, "getSnapshot", () => ({
-        version: safeText(
-          client.version ||
-            client.HTTP_VERSION ||
-            client.CORE_HTTP_VERSION,
-          "core-http-bridge"
-        ),
-        installed: true,
-        hasRequest: isFunction(client.request),
-        hasGet: isFunction(client.get),
-        hasPost: isFunction(client.post),
-        hasMe: isFunction(client.me),
-        source: "core:index:http-bridge",
-        at: safeIsoDate(),
-      }));
-    }
-
-    if (!isFunction(client.snapshot)) {
-      setHttpMember(client, "snapshot", client.getSnapshot);
-    }
+    setMember(client, "getDebugSnapshot", client.getDebugSnapshot || client.getSnapshot);
+    setMember(client, "snapshot", client.snapshot || client.getSnapshot);
 
     return client;
   }
 
-  function callHttpInstaller(installer, context = {}) {
-    if (!isFunction(installer)) return null;
+  function httpExport(name = "") {
+    try {
+      return CoreHttpModule?.[name] || null;
+    } catch {
+      return null;
+    }
+  }
 
-    const attempts = [
-      () => installer(api, context),
-      () => installer(api, context.options || {}),
-      () => installer({
-        AppCore: api,
-        core: api,
-        ...context,
-      }),
-      () => installer(context),
-      () => installer(api),
-    ];
+  function defaultHttpExport() {
+    try {
+      return CoreHttpModule?.default || null;
+    } catch {
+      return null;
+    }
+  }
 
-    for (const attempt of attempts) {
+  function registerBridge(name = "", value = null, options = {}) {
+    const canonical = BRIDGE_CANONICAL[text(name, "")] || text(name, "");
+    const aliases = BRIDGE_ALIASES[canonical] || [canonical];
+
+    if (!canonical || !value) return false;
+
+    let changed = false;
+
+    for (const alias of aliases) {
+      const previous = getBridge(alias);
+
+      if (previous === value) continue;
+
       try {
-        const result = attempt();
+        modules?.register?.(alias, value, {
+          overwrite: true,
+          replace: true,
+          source: text(options.source, "core:bridge"),
+          emit: false,
+          silent: true,
+        });
 
-        if (result) return result;
+        changed = true;
+        continue;
+      } catch {}
+
+      try {
+        registry.modules.set(alias, value);
+        changed = true;
+      } catch {}
+    }
+
+    return changed || true;
+  }
+
+  function getBridge(name = "") {
+    const canonical = BRIDGE_CANONICAL[text(name, "")] || text(name, "");
+    const aliases = BRIDGE_ALIASES[canonical] || [canonical];
+
+    for (const alias of aliases) {
+      try {
+        const value = modules?.get?.(alias) || registry.modules.get(alias);
+        if (value) return value;
       } catch {}
     }
 
@@ -3504,67 +2762,48 @@ export const AppCore = (() => {
 
   function resolveHttpCandidate(context = {}) {
     const installers = [
-      getHttpExport("installHttp"),
-      getHttpExport("installCoreHttp"),
-      getHttpExport("install"),
-    ].filter(isFunction);
+      httpExport("installHttp"),
+      httpExport("installCoreHttp"),
+      httpExport("install"),
+    ].filter(isFn);
 
-    const defaultExport = getDefaultHttpExport();
+    const defaultExport = defaultHttpExport();
 
-    if (isFunction(defaultExport)) {
-      installers.push(defaultExport);
-    }
+    if (isFn(defaultExport)) installers.push(defaultExport);
 
-    for (const installer of installers) {
-      const installed = callHttpInstaller(installer, context);
+    for (const install of installers) {
+      const attempts = [
+        () => install(api, context),
+        () => install({ AppCore: api, core: api, ...context }),
+        () => install(context),
+        () => install(api),
+      ];
 
-      if (installed) return installed;
+      for (const attempt of attempts) {
+        try {
+          const out = attempt();
+          if (out) return out;
+        } catch {}
+      }
 
-      const fromBridge = getBridgeModule("Http");
-
-      if (fromBridge) return fromBridge;
+      const bridged = getBridge("Http");
+      if (bridged) return bridged;
     }
 
     return (
-      getHttpExport("Http") ||
-      getHttpExport("http") ||
-      getHttpExport("apiClient") ||
-      getHttpExport("client") ||
-      (
-        defaultExport &&
-        typeof defaultExport === "object"
-          ? defaultExport
-          : null
-      )
+      httpExport("Http") ||
+      httpExport("http") ||
+      httpExport("apiClient") ||
+      httpExport("client") ||
+      (defaultExport && typeof defaultExport === "object" ? defaultExport : null)
     );
   }
 
-  function ensureServicesBag() {
-    try {
-      if (!api.services || typeof api.services !== "object") {
-        api.services = {};
-      }
-
-      return api.services;
-    } catch {
-      return null;
-    }
-  }
-
-  function registerHttpAliases(client = null) {
-    if (!client) return false;
-
-    return registerBridgeModule("Http", client, {
-      source: "core:index:http",
-      emit: false,
-    });
-  }
-
   function installHttpBridge(reason = "core:http:install", options = {}) {
-    const opts = ensureObject(options);
+    const opts = object(options);
 
-    if (httpBridgeInstalled && httpBridge && opts.force !== true) {
-      registerHttpAliases(httpBridge);
+    if (httpInstalled && httpBridge && opts.force !== true) {
+      registerBridge("Http", httpBridge, { source: "core:http:existing" });
       return httpBridge;
     }
 
@@ -3603,26 +2842,24 @@ export const AppCore = (() => {
 
       source: "core:index",
       reason,
-
       options: opts,
     };
 
+    const previous = httpBridge;
     const candidate = resolveHttpCandidate(context);
 
-    const client = createHttpCompatClient(
+    const client = compatHttpClient(
       candidate ||
         httpBridge ||
         apiClientBridge ||
         baseApiClient
     );
 
-    const previousHttpBridge = httpBridge;
-
     httpBridge = client;
     apiClientBridge = client;
-    httpBridgeInstalled = true;
+    httpInstalled = true;
 
-    if (isFunction(client.request)) {
+    if (isFn(client.request)) {
       try {
         requestBridge = client.request.bind(client);
       } catch {
@@ -3630,30 +2867,28 @@ export const AppCore = (() => {
       }
     }
 
-    registerHttpAliases(client);
+    registerBridge("Http", client, {
+      source: "core:http",
+    });
 
-    const services = ensureServicesBag();
+    try {
+      api.services.http = client;
+      api.services.Http = client;
+      api.services.api = client;
+      api.services.apiClient = client;
+    } catch {}
 
-    if (services) {
-      try {
-        services.http = client;
-        services.Http = client;
-        services.api = client;
-        services.apiClient = client;
-      } catch {}
-    }
-
-    if (!httpReadyEmitted || previousHttpBridge !== client || opts.force === true) {
+    if (!httpReadyEmitted || previous !== client || opts.force === true) {
       httpReadyEmitted = true;
 
-      emitEvent(EVENTS.httpReady, {
+      emit(EVENTS.httpReady, {
         installed: true,
         reason,
-        hasRequest: isFunction(client.request),
-        hasGet: isFunction(client.get),
-        hasPost: isFunction(client.post),
-        hasMe: isFunction(client.me),
-        source: "core:index",
+        hasRequest: isFn(client.request),
+        hasGet: isFn(client.get),
+        hasPost: isFn(client.post),
+        hasMe: isFn(client.me),
+        source: SOURCE,
       });
     }
 
@@ -3661,18 +2896,13 @@ export const AppCore = (() => {
   }
 
   function getHttpClient() {
-    return (
-      httpBridge ||
-      getBridgeModule("Http") ||
-      apiClientBridge ||
-      baseApiClient
-    );
+    return httpBridge || getBridge("Http") || apiClientBridge || baseApiClient;
   }
 
   function getActiveRequest() {
     const client = getHttpClient();
 
-    if (isFunction(client?.request)) {
+    if (isFn(client?.request)) {
       try {
         return client.request.bind(client);
       } catch {
@@ -3688,17 +2918,17 @@ export const AppCore = (() => {
   }
 
   /* =======================================================
-     READY
+     READY / INIT
   ======================================================= */
 
   function ready(fn) {
-    if (!isFunction(fn)) return () => false;
+    if (!isFn(fn)) return () => false;
 
     if (!isBrowser()) {
       try {
         fn();
-      } catch (error) {
-        safeError("ready() server callback error:", error);
+      } catch (err) {
+        error("ready callback error", err);
       }
 
       return () => false;
@@ -3709,14 +2939,13 @@ export const AppCore = (() => {
 
       const handler = () => {
         if (disposed) return;
-
         disposed = true;
         readyCallbacksFlushed = true;
 
         try {
           fn();
-        } catch (error) {
-          safeError("ready() callback error:", error);
+        } catch (err) {
+          error("ready callback error", err);
         }
       };
 
@@ -3737,158 +2966,94 @@ export const AppCore = (() => {
       }
     }
 
+    readyCallbacksFlushed = true;
+
     try {
-      readyCallbacksFlushed = true;
       fn();
-    } catch (error) {
-      safeError("ready() callback error:", error);
+    } catch (err) {
+      error("ready callback error", err);
     }
 
     return () => true;
   }
 
-  /* =======================================================
-     INIT HELPERS
-  ======================================================= */
+  async function runHooks(name, payload = {}) {
+    try {
+      if (isFn(hooks?.runSeries)) return await hooks.runSeries(name, payload);
+      if (isFn(hooks?.run)) return await hooks.run(name, payload);
+    } catch (err) {
+      warn("hooks failed", name, err);
+    }
 
-  function markCoreBooting(cycleId) {
-    setState(
-      {
-        booting: true,
-        ready: false,
-        initialized: false,
-        coreInitializing: true,
-        coreInitCycle: cycleId,
-        coreVersion: CORE_VERSION,
-      },
-      {
-        source: "core:init:booting",
+    let current = payload;
+
+    for (const hook of array(registry.hooks?.[name])) {
+      if (!isFn(hook)) continue;
+
+      try {
+        const next = await hook(current);
+        if (next !== undefined) current = next;
+      } catch (err) {
+        warn("hook failed", name, err);
       }
-    );
-  }
+    }
 
-  function markCoreReady(cycleId) {
-    setState(
-      {
-        initialized: true,
-        booting: false,
-        ready: true,
-        coreInitializing: false,
-        coreReady: true,
-        coreInitCycle: cycleId,
-        coreVersion: CORE_VERSION,
-        coreReadyAt: safeIsoDate(),
-      },
-      {
-        source: "core:init:ready",
-      }
-    );
-  }
-
-  function markCoreError(error, cycleId) {
-    setState(
-      {
-        initialized: false,
-        ready: false,
-        booting: false,
-        coreInitializing: false,
-        coreReady: false,
-        coreInitCycle: cycleId,
-        coreVersion: CORE_VERSION,
-        coreErrorAt: safeIsoDate(),
-      },
-      {
-        source: "core:init:error",
-      }
-    );
-
-    setError(error);
+    return current;
   }
 
   function safeCacheDom() {
     try {
-      cacheDom({
-        dom,
-        utils,
-        events,
-      });
-
+      cacheDom({ dom, utils, events });
       return true;
-    } catch (error) {
-      safeWarn("cacheDom() falló.", error);
+    } catch (err) {
+      warn("cacheDom failed", err);
       return false;
     }
   }
 
-  function safeValidateRequiredDom() {
+  function safeValidateDom() {
     try {
-      validateRequiredDom({
-        dom,
-        utils,
-        events,
-      });
-
+      validateRequiredDom({ dom, utils, events });
       return true;
-    } catch (error) {
-      safeWarn("validateRequiredDom() falló.", error);
+    } catch (err) {
+      warn("validateRequiredDom failed", err);
       return false;
     }
   }
 
   function safeLoadPreferences() {
     try {
-      loadPreferences({
-        state,
-        storage,
-        dom,
-        events,
-        setState,
-      });
-
+      loadPreferences({ state, storage, dom, events, setState });
       return true;
-    } catch (error) {
-      safeWarn("loadPreferences() falló.", error);
+    } catch (err) {
+      warn("loadPreferences failed", err);
       return false;
     }
   }
 
   function safeLoadSession() {
     try {
-      loadSession({
-        state,
-        storage,
-        dom,
-        events,
-        setState,
-      });
-
+      loadSession({ state, storage, dom, events, setState });
       return true;
-    } catch (error) {
-      safeWarn("loadSession() falló.", error);
+    } catch (err) {
+      warn("loadSession failed", err);
       return false;
     }
   }
 
   function safeSyncBaseUI() {
     try {
-      syncBaseUI({
-        setDocumentTitle,
-        syncUserUI,
-      });
-
+      syncBaseUI({ setDocumentTitle, syncUserUI });
       return true;
-    } catch (error) {
-      safeWarn("syncBaseUI() falló.", error);
+    } catch (err) {
+      warn("syncBaseUI failed", err);
       return false;
     }
   }
 
-  function safeBindNetworkEvents() {
-    if (networkEventsBound) return true;
-
-    if (config?.featureFlags?.enableNetworkEvents === false) {
-      return false;
-    }
+  function bindNetworkSafe() {
+    if (networkBound) return true;
+    if (config?.featureFlags?.enableNetworkEvents === false) return false;
 
     try {
       bindNetworkEvents({
@@ -3899,35 +3064,40 @@ export const AppCore = (() => {
         setState,
       });
 
-      networkEventsBound = true;
-
+      networkBound = true;
       return true;
-    } catch (error) {
-      safeWarn("bindNetworkEvents() falló.", error);
+    } catch (err) {
+      warn("network bind failed", err);
       return false;
     }
   }
-
-  /* =======================================================
-     INIT
-  ======================================================= */
 
   async function doInit() {
     const cycleId = ++initCycle;
 
     try {
-      markCoreBooting(cycleId);
+      setState(
+        {
+          booting: true,
+          ready: false,
+          initialized: false,
+          coreInitializing: true,
+          coreInitCycle: cycleId,
+          coreVersion: VERSION,
+        },
+        { source: "core:init:start" }
+      );
 
       installHttpBridge("core:init:before-hooks");
 
-      emitEvent(EVENTS.coreInitStart, {
+      emit(EVENTS.initStart, {
         cycleId,
-        version: CORE_VERSION,
-        state: clonePublicState({ safe: true }),
-        source: CORE_SOURCE,
+        version: VERSION,
+        state: sanitizeState(state),
+        source: SOURCE,
       });
 
-      await runInitHooks("beforeInit", {
+      await runHooks("beforeInit", {
         state,
         dom,
         config,
@@ -3937,34 +3107,44 @@ export const AppCore = (() => {
         cleanup,
         modules,
         hooks,
-
         request: getActiveRequest(),
         apiClient: getActiveApiClient(),
         http: getHttpClient(),
         Http: getHttpClient(),
-
         cycleId,
-        version: CORE_VERSION,
+        version: VERSION,
       });
 
       safeCacheDom();
-      safeValidateRequiredDom();
+      safeValidateDom();
 
       safeLoadPreferences();
       safeLoadSession();
 
-      syncDerivedAuthState();
+      syncAuth();
 
       safeSyncBaseUI();
-      safeBindNetworkEvents();
+      bindNetworkSafe();
 
       installHttpBridge("core:init:after-session");
 
       initialized = true;
 
-      markCoreReady(cycleId);
+      setState(
+        {
+          initialized: true,
+          booting: false,
+          ready: true,
+          coreInitializing: false,
+          coreReady: true,
+          coreInitCycle: cycleId,
+          coreVersion: VERSION,
+          coreReadyAt: iso(),
+        },
+        { source: "core:init:ready" }
+      );
 
-      await runInitHooks("afterInit", {
+      await runHooks("afterInit", {
         state,
         dom,
         config,
@@ -3974,86 +3154,90 @@ export const AppCore = (() => {
         cleanup,
         modules,
         hooks,
-
         request: getActiveRequest(),
         apiClient: getActiveApiClient(),
         http: getHttpClient(),
         Http: getHttpClient(),
-
         cycleId,
-        version: CORE_VERSION,
+        version: VERSION,
       });
 
-      emitEvent(EVENTS.coreReady, {
+      emit(EVENTS.ready, {
         cycleId,
-        version: CORE_VERSION,
-        state: clonePublicState({ safe: true }),
-        source: CORE_SOURCE,
+        version: VERSION,
+        state: sanitizeState(state),
+        source: SOURCE,
       });
 
-      safeLog("Core ready.", {
+      log("Core ready", {
         cycleId,
         authenticated: Boolean(state.authenticated),
         hasToken: Boolean(state.hasToken),
         route: state.route || "/",
-        publicPath: redactTokenInText(state.publicPath || "/"),
+        publicPath: redact(state.publicPath || "/"),
         lang: state.lang || DEFAULT_LANG,
         theme: state.theme || DEFAULT_THEME,
         hasHttp: Boolean(getHttpClient()),
       });
 
       return api;
-    } catch (error) {
+    } catch (err) {
       initialized = false;
 
-      markCoreError(error, cycleId);
+      setState(
+        {
+          initialized: false,
+          ready: false,
+          booting: false,
+          coreInitializing: false,
+          coreReady: false,
+          coreInitCycle: cycleId,
+          coreVersion: VERSION,
+          coreErrorAt: iso(),
+        },
+        { source: "core:init:error" }
+      );
 
-      emitEvent(EVENTS.coreInitError, {
+      setError(err);
+
+      emit(EVENTS.initError, {
         cycleId,
-        version: CORE_VERSION,
-        error: sanitizeErrorForSnapshot(error),
-        source: CORE_SOURCE,
+        version: VERSION,
+        error: sanitizeError(err),
+        source: SOURCE,
       });
 
-      throw error;
+      throw err;
     } finally {
       initPromise = null;
     }
   }
 
-  async function init(options = {}) {
-    const opts = ensureObject(options);
+  function init(options = {}) {
+    const opts = object(options);
 
     if (!opts.force && (initialized || state.initialized)) {
-      syncDerivedAuthState();
-      installHttpBridge("core:init:already-initialized");
-
-      return api;
+      syncAuth();
+      installHttpBridge("core:init:already-ready");
+      return Promise.resolve(api);
     }
 
-    if (initPromise) {
-      return initPromise;
-    }
+    if (initPromise) return initPromise;
 
     initPromise = doInit();
-
     return initPromise;
   }
 
   function rebootCore(options = {}) {
     try {
-      unbindNetworkEvents({
-        cleanup,
-        events,
-        utils,
-      });
+      unbindNetworkEvents({ cleanup, events, utils });
     } catch {}
 
     initialized = false;
     initPromise = null;
-    networkEventsBound = false;
+    networkBound = false;
 
-    httpBridgeInstalled = false;
+    httpInstalled = false;
     httpReadyEmitted = false;
 
     setState(
@@ -4064,18 +3248,16 @@ export const AppCore = (() => {
         coreReady: false,
         coreInitializing: false,
       },
-      {
-        source: "core:reboot",
-      }
+      { source: "core:reboot" }
     );
 
-    emitEvent(EVENTS.coreReboot, {
-      at: safeIsoDate(),
-      source: CORE_SOURCE,
+    emit(EVENTS.reboot, {
+      at: iso(),
+      source: SOURCE,
     });
 
     return init({
-      ...ensureObject(options),
+      ...object(options),
       force: true,
     });
   }
@@ -4085,20 +3267,20 @@ export const AppCore = (() => {
   ======================================================= */
 
   function getSnapshot(options = {}) {
-    syncDerivedAuthState();
+    syncAuth();
 
-    const opts = ensureObject(options);
+    const deep = options.deep === true;
 
     return {
-      appName: getAppName(),
-      version: CORE_VERSION,
-      debug: getDebugEnabled(),
+      appName: appName(),
+      version: VERSION,
+      debug: debugEnabled(),
 
       initialized: Boolean(initialized || state.initialized),
       initInFlight: Boolean(initPromise),
       initCycle,
 
-      networkEventsBound: Boolean(networkEventsBound),
+      networkEventsBound: Boolean(networkBound),
       readyCallbacksFlushed: Boolean(readyCallbacksFlushed),
 
       state: {
@@ -4110,12 +3292,13 @@ export const AppCore = (() => {
         authenticated: Boolean(state.authenticated),
         hasToken: Boolean(state.hasToken),
 
+        user: publicUser(state.user),
         role: state.role || null,
         username: state.username || null,
         currentResolvedUsername: state.currentResolvedUsername || null,
 
-        route: redactTokenInText(state.route || "/"),
-        publicPath: redactTokenInText(state.publicPath || "/"),
+        route: redact(state.route || "/"),
+        publicPath: redact(state.publicPath || "/"),
 
         theme: state.theme || DEFAULT_THEME,
         lang: state.lang || DEFAULT_LANG,
@@ -4124,17 +3307,17 @@ export const AppCore = (() => {
       },
 
       dom: {
+        hasShell: Boolean(dom.appShell || dom.shell),
         hasViewContainer: Boolean(dom.viewContainer),
         hasSidebar: Boolean(dom.sidebar),
         hasTopbar: Boolean(dom.topbar),
         hasLoader: Boolean(dom.loader),
-        hasShell: Boolean(dom.appShell || dom.shell),
       },
 
       registry: {
-        moduleCount: registry.modules?.size || 0,
-        modules: Array.from(registry.modules?.keys?.() || []),
-        scopeCount: registry.scopes?.size || 0,
+        moduleCount: registry.modules.size,
+        modules: [...registry.modules.keys()],
+        scopeCount: registry.scopes.size,
         hookCounts: Object.fromEntries(
           Object.entries(registry.hooks || {}).map(([key, value]) => [
             key,
@@ -4146,34 +3329,35 @@ export const AppCore = (() => {
       bridges: {
         toast: Boolean(showToastBridge),
 
-        Router: Boolean(getBridgeModule("Router")),
-        Auth: Boolean(getBridgeModule("Auth")),
-        Store: Boolean(getBridgeModule("Store")),
+        Router: Boolean(getBridge("Router")),
+        Auth: Boolean(getBridge("Auth")),
+        Store: Boolean(getBridge("Store")),
 
         Http: Boolean(getHttpClient()),
-        http: Boolean(getHttpClient()),
         apiClient: Boolean(getActiveApiClient()),
 
-        httpBridgeInstalled: Boolean(httpBridgeInstalled),
+        httpInstalled: Boolean(httpInstalled),
         httpReadyEmitted: Boolean(httpReadyEmitted),
       },
 
-      events: opts.deep === true ? getSnapshotFrom(events) : null,
-      cleanup: opts.deep === true ? getSnapshotFrom(cleanup) : null,
-      storage: opts.deep === true ? getSnapshotFrom(storage) : null,
-      modules: opts.deep === true ? getSnapshotFrom(modules) : null,
-      hooks: opts.deep === true ? getSnapshotFrom(hooks) : null,
+      events: deep ? snapshotFrom(events) : null,
+      cleanup: deep ? snapshotFrom(cleanup) : null,
+      storage: deep ? snapshotFrom(storage) : null,
+      modules: deep ? snapshotFrom(modules) : null,
+      hooks: deep ? snapshotFrom(hooks) : null,
 
-      request: opts.deep === true ? getSnapshotFrom(getActiveRequest()) : null,
-      apiClient: opts.deep === true ? getSnapshotFrom(getActiveApiClient()) : null,
-      http: opts.deep === true ? getSnapshotFrom(getHttpClient()) : null,
+      request: deep ? snapshotFrom(getActiveRequest()) : null,
+      apiClient: deep ? snapshotFrom(getActiveApiClient()) : null,
+      http: deep ? snapshotFrom(getHttpClient()) : null,
 
-      network: opts.deep === true
-        ? getNetworkSnapshot({ state })
-        : null,
+      network: deep ? getNetworkSnapshot({ state }) : null,
 
-      at: safeIsoDate(),
+      at: iso(),
     };
+  }
+
+  function getAppName() {
+    return appName();
   }
 
   /* =======================================================
@@ -4181,13 +3365,12 @@ export const AppCore = (() => {
   ======================================================= */
 
   const api = {
-    CORE_VERSION,
-    version: CORE_VERSION,
+    CORE_VERSION: VERSION,
+    version: VERSION,
 
     config,
     state,
     dom,
-
     registry,
 
     utils,
@@ -4261,9 +3444,7 @@ export const AppCore = (() => {
           return getActiveRequest();
         },
         set(value) {
-          if (isFunction(value)) {
-            requestBridge = value;
-          }
+          if (isFn(value)) requestBridge = value;
         },
       },
 
@@ -4274,23 +3455,23 @@ export const AppCore = (() => {
           return getActiveApiClient();
         },
         set(value) {
-          if (value) {
-            const client = createHttpCompatClient(value);
+          if (!value) return;
 
-            httpBridge = client;
-            apiClientBridge = client;
-            httpBridgeInstalled = true;
+          const client = compatHttpClient(value);
 
-            if (isFunction(client.request)) {
-              try {
-                requestBridge = client.request.bind(client);
-              } catch {
-                requestBridge = client.request;
-              }
+          httpBridge = client;
+          apiClientBridge = client;
+          httpInstalled = true;
+
+          if (isFn(client.request)) {
+            try {
+              requestBridge = client.request.bind(client);
+            } catch {
+              requestBridge = client.request;
             }
-
-            registerHttpAliases(client);
           }
+
+          registerBridge("Http", client, { source: "core:set:apiClient" });
         },
       },
 
@@ -4301,15 +3482,15 @@ export const AppCore = (() => {
           return getHttpClient();
         },
         set(value) {
-          if (value) {
-            const client = createHttpCompatClient(value);
+          if (!value) return;
 
-            httpBridge = client;
-            apiClientBridge = client;
-            httpBridgeInstalled = true;
+          const client = compatHttpClient(value);
 
-            registerHttpAliases(client);
-          }
+          httpBridge = client;
+          apiClientBridge = client;
+          httpInstalled = true;
+
+          registerBridge("Http", client, { source: "core:set:Http" });
         },
       },
 
@@ -4320,15 +3501,15 @@ export const AppCore = (() => {
           return getHttpClient();
         },
         set(value) {
-          if (value) {
-            const client = createHttpCompatClient(value);
+          if (!value) return;
 
-            httpBridge = client;
-            apiClientBridge = client;
-            httpBridgeInstalled = true;
+          const client = compatHttpClient(value);
 
-            registerHttpAliases(client);
-          }
+          httpBridge = client;
+          apiClientBridge = client;
+          httpInstalled = true;
+
+          registerBridge("Http", client, { source: "core:set:http" });
         },
       },
 
@@ -4336,10 +3517,10 @@ export const AppCore = (() => {
         enumerable: false,
         configurable: false,
         get() {
-          return getBridgeModule("Router");
+          return getBridge("Router");
         },
         set(value) {
-          registerBridgeModule("Router", value);
+          registerBridge("Router", value, { source: "core:set:Router" });
         },
       },
 
@@ -4347,10 +3528,10 @@ export const AppCore = (() => {
         enumerable: false,
         configurable: false,
         get() {
-          return getBridgeModule("Router");
+          return getBridge("Router");
         },
         set(value) {
-          registerBridgeModule("Router", value);
+          registerBridge("Router", value, { source: "core:set:router" });
         },
       },
 
@@ -4358,10 +3539,10 @@ export const AppCore = (() => {
         enumerable: false,
         configurable: false,
         get() {
-          return getBridgeModule("Auth");
+          return getBridge("Auth");
         },
         set(value) {
-          registerBridgeModule("Auth", value);
+          registerBridge("Auth", value, { source: "core:set:Auth" });
         },
       },
 
@@ -4369,10 +3550,10 @@ export const AppCore = (() => {
         enumerable: false,
         configurable: false,
         get() {
-          return getBridgeModule("Auth");
+          return getBridge("Auth");
         },
         set(value) {
-          registerBridgeModule("Auth", value);
+          registerBridge("Auth", value, { source: "core:set:auth" });
         },
       },
 
@@ -4380,10 +3561,10 @@ export const AppCore = (() => {
         enumerable: false,
         configurable: false,
         get() {
-          return getBridgeModule("Store");
+          return getBridge("Store");
         },
         set(value) {
-          registerBridgeModule("Store", value);
+          registerBridge("Store", value, { source: "core:set:Store" });
         },
       },
 
@@ -4391,10 +3572,10 @@ export const AppCore = (() => {
         enumerable: false,
         configurable: false,
         get() {
-          return getBridgeModule("Store");
+          return getBridge("Store");
         },
         set(value) {
-          registerBridgeModule("Store", value);
+          registerBridge("Store", value, { source: "core:set:store" });
         },
       },
     });
@@ -4402,19 +3583,13 @@ export const AppCore = (() => {
 
   try {
     installHttpBridge("core:bootstrap");
-  } catch (error) {
-    safeWarn("installHttpBridge() falló durante bootstrap.", error);
+  } catch (err) {
+    warn("installHttpBridge bootstrap failed", err);
   }
 
   try {
     if (isBrowser()) {
       window.__ONION_CORE__ = api;
-
-      /*
-        Intencionado:
-        si hay una referencia AppCore vieja de hot reload o bundle previo,
-        se sustituye por el singleton actual para evitar bridges stale.
-      */
       window.AppCore = api;
     }
   } catch {}
@@ -4427,4 +3602,3 @@ export const AppCore = (() => {
 })();
 
 export default AppCore;
-                     

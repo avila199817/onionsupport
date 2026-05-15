@@ -2,18 +2,20 @@
    Onion SPA - Login View
    Archivo: src/views/login/index.js
 
-   LOGIN VIEW ORCHESTRATOR · CORE/AUTH/ROUTER SAFE · 16/10
+   LOGIN VIEW ORCHESTRATOR · CORE/AUTH/ROUTER SAFE · 16.1/10
 
    RESPONSABILIDADES:
    - Orquestar la vista de login.
    - Renderizar template auth pro sin CSS inline.
    - Conectar DOM, Auth, AppCore, Toast y password-field shared.
-   - Delegar sesión principal en Auth.login.
+   - Delegar validación/sesión principal en Auth.login.
+   - LoginView controla la navegación post-login por defecto.
    - Evitar doble navegación post-login.
    - Evitar doble sync de sesión post-login.
    - Evitar doble submit aunque la vista se monte dos veces.
    - Evitar toast loading huérfano si Router desmonta login durante Auth.login.
    - Evitar formulario congelado si Auth.login / Router / navegación se cuelga.
+   - Evitar fallback history.replaceState falso-positivo que deja login pintado.
    - Reducir parpadeos al salir de /login.
    - Activar / limpiar modo auth-screen del body/html.
    - Mantener cleanup de listeners.
@@ -74,7 +76,7 @@ import {
 ========================================================= */
 
 export const LOGIN_VIEW_VERSION =
-  "16.0.0-extreme-pro";
+  "16.1.0-extreme-pro";
 
 const LOGIN_SOURCE =
   "login.view";
@@ -111,6 +113,9 @@ const LOGIN_NAVIGATION_TIMEOUT_MS =
 
 const FORM_UNLOCK_WATCHDOG_EXTRA_MS =
   2_500;
+
+const POST_NAVIGATION_RENDER_FAILSAFE_MS =
+  1_250;
 
 const AUTH_SCREEN_CLASSES =
   Object.freeze([
@@ -191,6 +196,9 @@ const LOGIN_EVENTS =
     navigationError:
       "auth:login:view:navigation:error",
 
+    navigationFailsafe:
+      "auth:login:view:navigation:failsafe",
+
     authScreenCleared:
       "auth:login:view:auth-screen-cleared",
 
@@ -228,6 +236,7 @@ function buildLoginFingerprint(payload = {}) {
         "",
       ""
     ).toLowerCase(),
+
     payload.remember ? "1" : "0",
   ].join("|");
 }
@@ -425,6 +434,11 @@ function safeIsoNow(ms = safeNow()) {
   }
 }
 
+function escapeRegExp(value = "") {
+  return String(value)
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function safeRedact(value = "") {
   const text =
     safeText(value, "");
@@ -446,7 +460,7 @@ function safeRedact(value = "") {
     try {
       output =
         output.replace(
-          new RegExp(`([?&#]${String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=)([^&#\\s]+)`, "gi"),
+          new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi"),
           "$1***"
         );
     } catch {}
@@ -563,10 +577,13 @@ function safeEmit(eventName, payload = {}) {
 
   const cleanPayload = {
     ...safeObject(payload),
+
     source:
       LOGIN_SOURCE,
+
     version:
       LOGIN_VIEW_VERSION,
+
     at:
       safeIsoNow(),
   };
@@ -765,6 +782,7 @@ function resolveLoginExecutor(deps = {}) {
       custom:
         true,
     },
+
     {
       fn:
         deps.submitLogin,
@@ -775,6 +793,7 @@ function resolveLoginExecutor(deps = {}) {
       custom:
         true,
     },
+
     {
       fn:
         deps.login,
@@ -785,6 +804,7 @@ function resolveLoginExecutor(deps = {}) {
       custom:
         true,
     },
+
     {
       fn:
         Auth?.login,
@@ -795,6 +815,7 @@ function resolveLoginExecutor(deps = {}) {
       custom:
         false,
     },
+
     {
       fn:
         moduleAuth?.login,
@@ -805,6 +826,7 @@ function resolveLoginExecutor(deps = {}) {
       custom:
         false,
     },
+
     {
       fn:
         AppCore?.services?.auth?.login,
@@ -815,6 +837,7 @@ function resolveLoginExecutor(deps = {}) {
       custom:
         true,
     },
+
     {
       fn:
         AppCore?.auth?.login,
@@ -865,12 +888,40 @@ function shouldNavigateAfterLogin(deps = {}) {
   );
 }
 
-function buildLoginExecutorOptions(deps = {}) {
-  const navigate =
+function shouldExecutorOwnNavigation(deps = {}, executorDescriptor = null) {
+  if (!shouldNavigateAfterLogin(deps)) {
+    return false;
+  }
+
+  if (
+    deps.authLoginOwnsNavigation === true ||
+    deps.delegateNavigationToAuth === true ||
+    deps.executorOwnsNavigation === true
+  ) {
+    return true;
+  }
+
+  /*
+    Regla final:
+    por defecto, Auth.login NO navega. Aplica sesión y LoginView decide.
+    Esto evita el congelado por doble navegación / promesas de Router colgadas.
+  */
+  return false;
+}
+
+function buildLoginExecutorOptions(deps = {}, executorDescriptor = null) {
+  const executorOwnsNavigation =
+    shouldExecutorOwnNavigation(
+      deps,
+      executorDescriptor
+    );
+
+  const viewWillNavigate =
     shouldNavigateAfterLogin(deps);
 
   return {
-    navigate,
+    navigate:
+      executorOwnsNavigation,
 
     redirectTo:
       deps.redirectTo,
@@ -885,7 +936,31 @@ function buildLoginExecutorOptions(deps = {}) {
       deps.manualNavigate,
 
     skipNavigate:
-      deps.skipNavigate,
+      !executorOwnsNavigation,
+
+    skipNavigation:
+      !executorOwnsNavigation,
+
+    skipRedirect:
+      !executorOwnsNavigation,
+
+    noRedirect:
+      !executorOwnsNavigation,
+
+    skipPostLoginNavigation:
+      !executorOwnsNavigation,
+
+    skipPostRestoreNavigation:
+      true,
+
+    preserveCurrentRoute:
+      true,
+
+    preserveRoute:
+      true,
+
+    preservePublicPath:
+      true,
 
     source:
       LOGIN_SOURCE,
@@ -895,6 +970,8 @@ function buildLoginExecutorOptions(deps = {}) {
 
     useLoader:
       deps.useLoader !== false,
+
+    viewWillNavigate,
   };
 }
 
@@ -981,10 +1058,21 @@ function hasUsableStateSession() {
 }
 
 function isAuthenticatedResult(auth = {}) {
+  if (!auth) {
+    return false;
+  }
+
+  if (auth.requires2FA === true) {
+    return false;
+  }
+
+  if (auth.explicitFailure === true) {
+    return false;
+  }
+
   if (
-    !auth ||
-    auth.ok === false ||
-    auth.requires2FA === true
+    auth.ok === false &&
+    !hasUsableStateSession()
   ) {
     return false;
   }
@@ -994,6 +1082,7 @@ function isAuthenticatedResult(auth = {}) {
       auth.token ||
         auth.accessToken ||
         auth.access_token ||
+        getStateToken() ||
         "",
       ""
     );
@@ -1023,10 +1112,6 @@ function isAuthenticatedResult(auth = {}) {
         hasUsableStateSession() ||
         (
           token &&
-          hasUsableUser(user)
-        ) ||
-        (
-          getStateToken() &&
           hasUsableUser(user)
         )
     );
@@ -1164,6 +1249,16 @@ function isSafeInternalPath(path = "") {
   return true;
 }
 
+function isLoginRoute(path = "") {
+  const clean =
+    stripSearchAndHash(path);
+
+  return (
+    clean === LOGIN_ROUTE ||
+    clean.startsWith(`${LOGIN_ROUTE}/`)
+  );
+}
+
 function sanitizeNavigationPath(path = "/", fallback = DEFAULT_HOME_ROUTE) {
   const raw =
     safeText(path, fallback) ||
@@ -1171,6 +1266,10 @@ function sanitizeNavigationPath(path = "/", fallback = DEFAULT_HOME_ROUTE) {
 
   const candidate =
     normalizePath(raw);
+
+  if (!candidate) {
+    return fallback;
+  }
 
   if (!isSafeInternalPath(candidate)) {
     return fallback;
@@ -1181,16 +1280,6 @@ function sanitizeNavigationPath(path = "/", fallback = DEFAULT_HOME_ROUTE) {
   }
 
   return candidate;
-}
-
-function isLoginRoute(path = "") {
-  const clean =
-    stripSearchAndHash(path);
-
-  return (
-    clean === LOGIN_ROUTE ||
-    clean.startsWith(`${LOGIN_ROUTE}/`)
-  );
 }
 
 function getBrowserPath() {
@@ -1220,7 +1309,9 @@ function getRedirectFromCurrentUrl() {
 
   try {
     const params =
-      new URLSearchParams(window.location.search || "");
+      new URLSearchParams(
+        window.location.search || ""
+      );
 
     const value =
       params.get("redirect") ||
@@ -1233,11 +1324,8 @@ function getRedirectFromCurrentUrl() {
       return "";
     }
 
-    const decoded =
-      decodeURIComponent(value);
-
     return sanitizeNavigationPath(
-      decoded,
+      value,
       ""
     );
   } catch {
@@ -1347,6 +1435,32 @@ function withTimeout(promiseLike, timeoutMs = 0, timeoutCode = "TIMEOUT") {
   });
 }
 
+function hardRedirectTo(target = DEFAULT_HOME_ROUTE) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  const finalTarget =
+    sanitizeNavigationPath(
+      target,
+      DEFAULT_HOME_ROUTE
+    );
+
+  try {
+    window.location.assign(finalTarget);
+    return true;
+  } catch {
+    try {
+      window.location.href =
+        finalTarget;
+
+      return true;
+    } catch {}
+  }
+
+  return false;
+}
+
 async function navigateTo(path = "/", options = {}) {
   const target =
     sanitizeNavigationPath(
@@ -1369,16 +1483,22 @@ async function navigateTo(path = "/", options = {}) {
 
   const routerOptions = {
     replaceState,
+
     force:
       options.force === true,
+
     source:
       LOGIN_SOURCE,
+
     reason:
       options.reason || "login-view-navigation",
+
     publicPath:
       target,
+
     requestedPath:
       target,
+
     canonicalPath:
       canonicalTarget,
   };
@@ -1548,61 +1668,31 @@ async function navigateTo(path = "/", options = {}) {
 
       return true;
     }
-  } catch {}
+  } catch (error) {
+    safeWarn(
+      "AppCore.navigate falló.",
+      normalizeError(error)
+    );
+  }
 
-  try {
-    if (
-      isBrowser() &&
-      window.history &&
-      isFunction(window.history.replaceState)
-    ) {
-      window.history.replaceState(
-        {
-          path:
-            target,
-          publicPath:
-            target,
-          canonicalPath:
-            canonicalTarget,
-          source:
-            LOGIN_SOURCE,
-        },
-        "",
-        target
-      );
-
-      try {
-        window.dispatchEvent(
-          new PopStateEvent("popstate")
-        );
-      } catch {
-        try {
-          window.dispatchEvent(
-            new Event("popstate")
-          );
-        } catch {}
+  /*
+    No usamos history.replaceState como fallback:
+    puede cambiar la URL a "/" pero dejar el login pintado y el botón bloqueado.
+    Si el Router no responde, hacemos hard redirect.
+  */
+  if (hardRedirectTo(target)) {
+    safeEmit(
+      LOGIN_EVENTS.navigationDone,
+      {
+        target:
+          safeRedact(target),
+        method:
+          "window.location.assign",
       }
+    );
 
-      safeEmit(
-        LOGIN_EVENTS.navigationDone,
-        {
-          target:
-            safeRedact(target),
-          method:
-            "history.replaceState",
-        }
-      );
-
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (isBrowser()) {
-      window.location.assign(target);
-      return true;
-    }
-  } catch {}
+    return true;
+  }
 
   safeEmit(
     LOGIN_EVENTS.navigationError,
@@ -2368,6 +2458,9 @@ function renderLoginView(container, deps = {}) {
   let navigationCleanup =
     null;
 
+  let navigationFailsafeTimer =
+    null;
+
   enableAuthScreenMode();
 
   const toast =
@@ -2426,6 +2519,72 @@ function renderLoginView(container, deps = {}) {
       ""
     ) ||
     "Accediendo...";
+
+  function containerStillShowsLogin() {
+    try {
+      return Boolean(
+        container?.isConnected &&
+          container.querySelector?.(
+            "[data-login-view='true'],.login-view"
+          )
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function clearNavigationFailsafe() {
+    if (!navigationFailsafeTimer) {
+      return;
+    }
+
+    try {
+      clearTimeout(navigationFailsafeTimer);
+    } catch {}
+
+    navigationFailsafeTimer =
+      null;
+  }
+
+  function scheduleNavigationRenderFailsafe(target = DEFAULT_HOME_ROUTE, reason = "post-navigation") {
+    clearNavigationFailsafe();
+
+    if (!isBrowser()) {
+      return false;
+    }
+
+    navigationFailsafeTimer =
+      window.setTimeout(() => {
+        navigationFailsafeTimer =
+          null;
+
+        if (!mounted) {
+          return;
+        }
+
+        if (
+          !isStillOnLoginRoute() &&
+          containerStillShowsLogin()
+        ) {
+          safeEmit(
+            LOGIN_EVENTS.navigationFailsafe,
+            {
+              reason,
+              target:
+                safeRedact(target),
+              stillOnLogin:
+                false,
+              loginStillMounted:
+                true,
+            }
+          );
+
+          hardRedirectTo(target);
+        }
+      }, POST_NAVIGATION_RENDER_FAILSAFE_MS);
+
+    return true;
+  }
 
   function setFormSubmittingFlag(value = false) {
     try {
@@ -2597,6 +2756,7 @@ function renderLoginView(container, deps = {}) {
           false;
 
         stopSubmitWatchdog();
+        clearNavigationFailsafe();
         closeLoadingToast();
 
         setFormSubmittingFlag(
@@ -2625,7 +2785,10 @@ function renderLoginView(container, deps = {}) {
       },
 
       unlock(reason = "manual") {
+        closeLoadingToast();
+        forceClearGlobalLoginSubmit(reason);
         resetSubmittingVisualState(reason);
+        return true;
       },
     };
 
@@ -2780,7 +2943,10 @@ function renderLoginView(container, deps = {}) {
           );
 
         const loginOptions =
-          buildLoginExecutorOptions(deps);
+          buildLoginExecutorOptions(
+            deps,
+            executorDescriptor
+          );
 
         const submitTimeoutMs =
           loginOptions.timeoutMs ||
@@ -2800,7 +2966,12 @@ function renderLoginView(container, deps = {}) {
             executor:
               executorDescriptor.source,
             executorIsAuthLogin,
-            navigate:
+            executorOwnsNavigation:
+              shouldExecutorOwnNavigation(
+                deps,
+                executorDescriptor
+              ),
+            viewWillNavigate:
               shouldNavigateAfterLogin(deps),
           }
         );
@@ -2859,7 +3030,12 @@ function renderLoginView(container, deps = {}) {
                 }
               );
 
-            if (!navigated) {
+            if (navigated) {
+              scheduleNavigationRenderFailsafe(
+                redirectTo,
+                "login-2fa"
+              );
+            } else {
               unlockAfterNavigationFailure(
                 "2fa-navigation-failed"
               );
@@ -2924,7 +3100,12 @@ function renderLoginView(container, deps = {}) {
                 }
               );
 
-            if (!navigated) {
+            if (navigated) {
+              scheduleNavigationRenderFailsafe(
+                redirectTo || DEFAULT_HOME_ROUTE,
+                "login-success"
+              );
+            } else {
               unlockAfterNavigationFailure(
                 "success-navigation-failed"
               );
@@ -3044,6 +3225,7 @@ function renderLoginView(container, deps = {}) {
         false;
 
       stopSubmitWatchdog();
+      clearNavigationFailsafe();
       closeLoadingToast();
 
       setFormSubmittingFlag(
@@ -3128,6 +3310,8 @@ function renderLoginView(container, deps = {}) {
 
     unlock(reason = "manual") {
       closeLoadingToast();
+      stopSubmitWatchdog();
+      clearNavigationFailsafe();
       forceClearGlobalLoginSubmit(reason);
       resetSubmittingVisualState(reason);
       return true;
@@ -3162,6 +3346,9 @@ function renderLoginView(container, deps = {}) {
         hasSubmitWatchdog:
           Boolean(submitWatchdogTimer),
 
+        hasNavigationFailsafe:
+          Boolean(navigationFailsafeTimer),
+
         hasGlobalSubmit:
           hasGlobalLoginSubmitInFlight(),
 
@@ -3182,6 +3369,12 @@ function renderLoginView(container, deps = {}) {
         executorIsAuthLogin:
           Boolean(executorIsAuthLogin),
 
+        executorOwnsNavigation:
+          shouldExecutorOwnNavigation(
+            deps,
+            executorDescriptor
+          ),
+
         currentPath:
           getBrowserPath(),
 
@@ -3190,6 +3383,18 @@ function renderLoginView(container, deps = {}) {
 
         containerConnected:
           Boolean(container?.isConnected),
+
+        loginStillRendered:
+          containerStillShowsLogin(),
+
+        stateAuthenticated:
+          Boolean(AppCore?.state?.authenticated),
+
+        hasStateUser:
+          hasUsableUser(getStateUser()),
+
+        hasStateToken:
+          Boolean(getStateToken()),
 
         at:
           safeIsoNow(),

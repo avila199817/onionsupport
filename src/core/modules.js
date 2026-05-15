@@ -3,7 +3,7 @@
    Archivo: src/core/modules.js
 
    ONION SUPPORT · CORE MODULES
-   MODULE REGISTRY · ALIASES · DISPOSE SAFE · 13/10
+   MODULE REGISTRY · ALIASES · DISPOSE SAFE · 17/10
 
    Responsabilidades:
    - registrar módulos en el core
@@ -14,12 +14,15 @@
    - tolerar registry parcial
    - evitar duplicados accidentales
 
-   HARDENING EXTREMO:
+   Candados:
    - cero throws por defecto
    - modo strict opcional
    - registry.modules siempre Map
+   - registry.moduleAliases siempre Map
+   - registry.moduleMeta siempre Map
+   - registry.moduleNameIndex siempre Map
    - aliases case-insensitive
-   - names index case-insensitive
+   - índice de nombres case-insensitive
    - register idempotente
    - set/upsert con overwrite explícito
    - unregister seguro con dispose opcional
@@ -35,91 +38,76 @@
    CONSTANTS
 ========================================================= */
 
-const MODULES_VERSION =
-  "13.0.0";
+const MODULES_VERSION = "17.0.0";
 
-const MAX_RECENT_EVENTS =
-  60;
+const MAX_RECENT_EVENTS = 60;
 
-const DEFAULT_DISPOSE_METHODS =
-  Object.freeze([
-    "destroy",
-    "dispose",
-    "unmount",
-    "stop",
-    "teardown",
-    "cleanup",
-  ]);
+const DEFAULT_DISPOSE_METHODS = Object.freeze([
+  "destroy",
+  "dispose",
+  "unmount",
+  "stop",
+  "teardown",
+  "cleanup",
+]);
 
-const MODULE_EVENTS =
-  Object.freeze({
-    ready:
-      "app:modules:ready",
+const MODULE_EVENTS = Object.freeze({
+  ready: "app:modules:ready",
 
-    registered:
-      "app:module:registered",
+  registered: "app:module:registered",
+  duplicate: "app:module:duplicate",
+  overwritten: "app:module:overwritten",
 
-    duplicate:
-      "app:module:duplicate",
+  alias: "app:module:alias",
+  aliasConflict: "app:module:alias-conflict",
 
-    overwritten:
-      "app:module:overwritten",
+  unregistered: "app:module:unregistered",
+  disposed: "app:module:disposed",
+  disposeError: "app:module:dispose-error",
 
-    alias:
-      "app:module:alias",
+  cleared: "app:modules:cleared",
+  error: "app:modules:error",
+});
 
-    aliasConflict:
-      "app:module:alias-conflict",
+const MODULE_NAME_CONTROL_RE = /[\u0000-\u001f\u007f]/g;
 
-    unregistered:
-      "app:module:unregistered",
+const RESERVED_META_KEYS = Object.freeze([
+  "name",
+  "moduleName",
+  "key",
+  "id",
+  "instance",
+  "module",
+  "value",
+  "ref",
+  "options",
+]);
 
-    disposed:
-      "app:module:disposed",
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
 
-    disposeError:
-      "app:module:dispose-error",
-
-    cleared:
-      "app:modules:cleared",
-
-    error:
-      "app:modules:error",
-  });
-
-const MODULE_NAME_CONTROL_RE =
-  /[\u0000-\u001f\u007f]/g;
-
-const RESERVED_META_KEYS =
-  Object.freeze([
-    "name",
-    "moduleName",
-    "key",
-    "id",
-    "instance",
-    "module",
-    "value",
-    "ref",
-    "options",
-  ]);
+const TOKENISH_TEXT_RE =
+  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)[^&#\s]+/i;
 
 /* =========================================================
    BASICS
 ========================================================= */
 
 function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object"
-  );
+  return value !== null && typeof value === "object";
 }
 
 function isPlainObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  try {
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+  } catch {
+    return false;
+  }
 }
 
 function isFunction(value) {
@@ -127,25 +115,26 @@ function isFunction(value) {
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+  if (value === null || value === undefined) {
     return fallback;
   }
 
-  const text =
-    String(value)
-      .replace(MODULE_NAME_CONTROL_RE, "")
-      .trim();
+  const text = String(value)
+    .replace(MODULE_NAME_CONTROL_RE, "")
+    .trim();
 
   return text || fallback;
 }
 
 function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return Array.isArray(value) ? value : [];
+}
+
+function toArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return Array.from(value);
+  if (value === null || value === undefined) return [];
+  return [value];
 }
 
 function safeNow() {
@@ -165,12 +154,8 @@ function safeIsoDate(ms = safeNow()) {
 }
 
 function safeNumber(value, fallback = 0) {
-  const number =
-    Number(value);
-
-  return Number.isFinite(number)
-    ? number
-    : fallback;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function safeClone(value, fallback = null) {
@@ -189,71 +174,144 @@ function safeClone(value, fallback = null) {
   } catch {}
 
   try {
-    return JSON.parse(
-      JSON.stringify(value)
-    );
+    return JSON.parse(JSON.stringify(value));
   } catch {
     return fallback;
   }
 }
 
+function redactText(value = "") {
+  const text = safeText(value, "");
+
+  if (!text) {
+    return "";
+  }
+
+  try {
+    return text
+      .replace(/(bearer\s+)([a-z0-9._~+/=-]+)/gi, "$1***")
+      .replace(
+        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)([^&#\s]+)/gi,
+        "$1***"
+      )
+      .replace(/([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)/gi, "***");
+  } catch {
+    return TOKENISH_TEXT_RE.test(text) ? "***" : text;
+  }
+}
+
+function sanitizeForSnapshot(value, depth = 0, keyHint = "") {
+  if (depth > 5) {
+    return "[depth-limit]";
+  }
+
+  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) {
+    return value ? "***" : null;
+  }
+
+  if (typeof value === "string") {
+    return redactText(value);
+  }
+
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "bigint") {
+    return String(value);
+  }
+
+  if (typeof value === "function") {
+    return "[function]";
+  }
+
+  if (value instanceof Error) {
+    return {
+      name: value.name || "Error",
+      message: redactText(value.message || ""),
+      stack: value.stack ? "[stack]" : "",
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 80)
+      .map((item) => sanitizeForSnapshot(item, depth + 1, keyHint));
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value).slice(0, 120)) {
+      output[key] = sanitizeForSnapshot(item, depth + 1, key);
+    }
+
+    return output;
+  }
+
+  try {
+    return redactText(String(value));
+  } catch {
+    return "[unserializable]";
+  }
+}
+
 function safeEmit(events, name, payload = {}) {
-  const eventName =
-    safeText(name, "");
+  const eventName = safeText(name, "");
 
   if (!eventName) {
     return false;
   }
 
-  try {
-    events?.emit?.(
-      eventName,
-      payload
-    );
+  const cleanPayload = sanitizeForSnapshot(payload);
 
-    return true;
+  try {
+    if (isFunction(events?.emit)) {
+      events.emit(eventName, cleanPayload);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (isFunction(events?.dispatch)) {
+      events.dispatch(eventName, cleanPayload);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (isFunction(events?.trigger)) {
+      events.trigger(eventName, cleanPayload);
+      return true;
+    }
   } catch {}
 
   return false;
 }
 
 function safeWarn(utils, ...args) {
-  let done =
-    false;
+  const cleanArgs = args.map((item) => sanitizeForSnapshot(item));
 
   try {
     if (isFunction(utils?.warn)) {
-      utils.warn(
-        "[Modules]",
-        ...args
-      );
-
-      done =
-        true;
+      utils.warn("[Modules]", ...cleanArgs);
+      return;
     }
-  } catch {
-    done =
-      false;
-  }
-
-  if (done) {
-    return;
-  }
+  } catch {}
 
   try {
-    console.warn(
-      "[Modules]",
-      ...args
-    );
+    console.warn("[Modules]", ...cleanArgs);
   } catch {}
 }
 
 function safeLog(utils, ...args) {
   try {
-    utils?.log?.(
-      "[Modules]",
-      ...args
-    );
+    utils?.log?.("[Modules]", ...args.map((item) => sanitizeForSnapshot(item)));
   } catch {}
 }
 
@@ -262,16 +320,12 @@ function ensureMap(value) {
     return value;
   }
 
-  const map =
-    new Map();
+  const map = new Map();
 
   if (isPlainObject(value)) {
     try {
       for (const [key, item] of Object.entries(value)) {
-        map.set(
-          key,
-          item
-        );
+        map.set(key, item);
       }
     } catch {}
   }
@@ -288,8 +342,7 @@ function normalizeName(name = "") {
 }
 
 function normalizeLookupKey(value = "") {
-  return safeText(value, "")
-    .toLowerCase();
+  return safeText(value, "").toLowerCase();
 }
 
 function normalizeAlias(alias = "") {
@@ -297,22 +350,15 @@ function normalizeAlias(alias = "") {
 }
 
 function collectAliasValues(input, output = []) {
-  if (Array.isArray(input)) {
-    for (const item of input) {
-      collectAliasValues(
-        item,
-        output
-      );
+  if (Array.isArray(input) || input instanceof Set) {
+    for (const item of Array.from(input)) {
+      collectAliasValues(item, output);
     }
 
     return output;
   }
 
-  if (
-    input !== null &&
-    input !== undefined &&
-    input !== ""
-  ) {
+  if (input !== null && input !== undefined && input !== "") {
     output.push(input);
   }
 
@@ -330,22 +376,15 @@ function uniqueAliases(values = []) {
 }
 
 function collectDisposeMethodValues(input, output = []) {
-  if (Array.isArray(input)) {
-    for (const item of input) {
-      collectDisposeMethodValues(
-        item,
-        output
-      );
+  if (Array.isArray(input) || input instanceof Set) {
+    for (const item of Array.from(input)) {
+      collectDisposeMethodValues(item, output);
     }
 
     return output;
   }
 
-  if (
-    input !== null &&
-    input !== undefined &&
-    input !== ""
-  ) {
+  if (input !== null && input !== undefined && input !== "") {
     output.push(input);
   }
 
@@ -353,11 +392,8 @@ function collectDisposeMethodValues(input, output = []) {
 }
 
 function uniqueDisposeMethods(values = []) {
-  const output =
-    [];
-
-  const seen =
-    new Set();
+  const output = [];
+  const seen = new Set();
 
   for (const value of collectDisposeMethodValues(values)) {
     if (typeof value === "symbol") {
@@ -369,13 +405,9 @@ function uniqueDisposeMethods(values = []) {
       continue;
     }
 
-    const method =
-      safeText(value, "");
+    const method = safeText(value, "");
 
-    if (
-      method &&
-      !seen.has(method)
-    ) {
+    if (method && !seen.has(method)) {
       seen.add(method);
       output.push(method);
     }
@@ -387,7 +419,8 @@ function uniqueDisposeMethods(values = []) {
 function normalizeTags(values = []) {
   return Array.from(
     new Set(
-      safeArray(values)
+      toArray(values)
+        .flat(Infinity)
         .map((tag) => safeText(tag, ""))
         .filter(Boolean)
     )
@@ -395,16 +428,10 @@ function normalizeTags(values = []) {
 }
 
 function pickCustomMeta(options = {}) {
-  const opts =
-    isPlainObject(options)
-      ? options
-      : {};
+  const opts = isPlainObject(options) ? options : {};
 
   if (isPlainObject(opts.meta)) {
-    return safeClone(
-      opts.meta,
-      {}
-    );
+    return sanitizeForSnapshot(opts.meta);
   }
 
   const custom = {};
@@ -431,26 +458,16 @@ function pickCustomMeta(options = {}) {
       continue;
     }
 
-    custom[key] =
-      safeClone(
-        value,
-        value
-      );
+    custom[key] = sanitizeForSnapshot(value);
   }
 
-  return Object.keys(custom).length
-    ? custom
-    : null;
+  return Object.keys(custom).length ? custom : null;
 }
 
 function getInstanceValue(instance, key, fallback = undefined) {
   try {
-    const value =
-      instance?.[key];
-
-    return value === undefined
-      ? fallback
-      : value;
+    const value = instance?.[key];
+    return value === undefined ? fallback : value;
   } catch {
     return fallback;
   }
@@ -497,74 +514,39 @@ function isDisposable(instance) {
     return false;
   }
 
-  if (
-    getSymbolDisposeMethod(instance) ||
-    getSymbolAsyncDisposeMethod(instance)
-  ) {
+  if (getSymbolDisposeMethod(instance) || getSymbolAsyncDisposeMethod(instance)) {
     return true;
   }
 
-  return DEFAULT_DISPOSE_METHODS.some((method) =>
-    hasMethod(instance, method)
-  );
+  return DEFAULT_DISPOSE_METHODS.some((method) => hasMethod(instance, method));
 }
 
 function getCapabilities(instance) {
   return {
-    hasInit:
-      hasMethod(instance, "init"),
+    hasInit: hasMethod(instance, "init"),
+    hasBoot: hasMethod(instance, "boot"),
+    hasStart: hasMethod(instance, "start"),
+    hasStop: hasMethod(instance, "stop"),
 
-    hasBoot:
-      hasMethod(instance, "boot"),
+    hasMount: hasMethod(instance, "mount"),
+    hasUnmount: hasMethod(instance, "unmount"),
 
-    hasStart:
-      hasMethod(instance, "start"),
+    hasRender: hasMethod(instance, "render"),
 
-    hasStop:
-      hasMethod(instance, "stop"),
+    hasDestroy: hasMethod(instance, "destroy"),
+    hasDispose: hasMethod(instance, "dispose"),
+    hasTeardown: hasMethod(instance, "teardown"),
+    hasCleanup: hasMethod(instance, "cleanup"),
 
-    hasMount:
-      hasMethod(instance, "mount"),
-
-    hasUnmount:
-      hasMethod(instance, "unmount"),
-
-    hasRender:
-      hasMethod(instance, "render"),
-
-    hasDestroy:
-      hasMethod(instance, "destroy"),
-
-    hasDispose:
-      hasMethod(instance, "dispose"),
-
-    hasTeardown:
-      hasMethod(instance, "teardown"),
-
-    hasCleanup:
-      hasMethod(instance, "cleanup"),
-
-    disposable:
-      isDisposable(instance),
+    disposable: isDisposable(instance),
   };
 }
 
 function getInstanceType(instance) {
-  if (instance === null) {
-    return "null";
-  }
-
-  if (instance === undefined) {
-    return "undefined";
-  }
-
-  if (Array.isArray(instance)) {
-    return "array";
-  }
-
-  if (isFunction(instance)) {
-    return "function";
-  }
+  if (instance === null) return "null";
+  if (instance === undefined) return "undefined";
+  if (Array.isArray(instance)) return "array";
+  if (isFunction(instance)) return "function";
 
   return typeof instance;
 }
@@ -574,12 +556,8 @@ function getInstanceType(instance) {
 ========================================================= */
 
 function normalizeRegisterArgs(name, instance, options = {}) {
-  if (
-    isPlainObject(name) &&
-    instance === undefined
-  ) {
-    const source =
-      name;
+  if (isPlainObject(name) && instance === undefined) {
+    const source = name;
 
     return {
       name:
@@ -596,21 +574,17 @@ function normalizeRegisterArgs(name, instance, options = {}) {
         source.ref ??
         null,
 
-      options:
-        {
-          ...source,
-          ...(isPlainObject(source.options) ? source.options : {}),
-        },
+      options: {
+        ...source,
+        ...(isPlainObject(source.options) ? source.options : {}),
+      },
     };
   }
 
   return {
     name,
     instance,
-    options:
-      isPlainObject(options)
-        ? options
-        : {},
+    options: isPlainObject(options) ? options : {},
   };
 }
 
@@ -624,96 +598,45 @@ export function createModules({
   utils,
   strict = false,
 } = {}) {
-  const finalRegistry =
-    isObject(registry)
-      ? registry
-      : {};
+  const finalRegistry = isObject(registry) ? registry : {};
 
-  finalRegistry.modules =
-    ensureMap(
-      finalRegistry.modules
-    );
+  finalRegistry.modules = ensureMap(finalRegistry.modules);
+  finalRegistry.moduleAliases = ensureMap(finalRegistry.moduleAliases);
+  finalRegistry.moduleMeta = ensureMap(finalRegistry.moduleMeta);
+  finalRegistry.moduleNameIndex = ensureMap(finalRegistry.moduleNameIndex);
 
-  finalRegistry.moduleAliases =
-    ensureMap(
-      finalRegistry.moduleAliases
-    );
-
-  finalRegistry.moduleMeta =
-    ensureMap(
-      finalRegistry.moduleMeta
-    );
-
-  finalRegistry.moduleNameIndex =
-    ensureMap(
-      finalRegistry.moduleNameIndex
-    );
-
-  const recent =
-    [];
+  const recent = [];
 
   const state = {
-    version:
-      MODULES_VERSION,
+    version: MODULES_VERSION,
 
-    registerCount:
-      0,
+    registerCount: 0,
+    duplicateCount: 0,
+    overwriteCount: 0,
+    unregisterCount: 0,
 
-    duplicateCount:
-      0,
+    aliasCount: 0,
+    aliasConflictCount: 0,
 
-    overwriteCount:
-      0,
+    disposeCount: 0,
+    disposeErrorCount: 0,
 
-    unregisterCount:
-      0,
+    clearCount: 0,
+    errorCount: 0,
 
-    aliasCount:
-      0,
-
-    aliasConflictCount:
-      0,
-
-    disposeCount:
-      0,
-
-    clearCount:
-      0,
-
-    errorCount:
-      0,
-
-    lastRegistered:
-      "",
-
-    lastDuplicate:
-      "",
-
-    lastOverwritten:
-      "",
-
-    lastUnregistered:
-      "",
-
-    lastDisposed:
-      "",
-
-    lastError:
-      null,
+    lastRegistered: "",
+    lastDuplicate: "",
+    lastOverwritten: "",
+    lastUnregistered: "",
+    lastDisposed: "",
+    lastError: null,
   };
 
   function pushRecent(type = "event", payload = {}) {
     recent.unshift({
-      type:
-        safeText(type, "event"),
-
-      ...safeClone(
-        payload,
-        {}
-      ),
-
-      at:
-        safeIsoDate(),
+      type: safeText(type, "event"),
+      ...sanitizeForSnapshot(payload),
+      at: safeIsoDate(),
     });
 
     if (recent.length > MAX_RECENT_EVENTS) {
@@ -722,59 +645,34 @@ export function createModules({
   }
 
   function isStrict(options = {}) {
-    return Boolean(
-      strict ||
-      options?.strict === true
-    );
+    return Boolean(strict || options?.strict === true);
   }
 
   function fail(message = "Modules error.", extra = {}, options = {}) {
     const payload = {
-      message:
-        safeText(message, "Modules error."),
-
-      ...safeClone(extra, {}),
-
-      at:
-        safeIsoDate(),
+      message: safeText(message, "Modules error."),
+      ...sanitizeForSnapshot(extra),
+      at: safeIsoDate(),
     };
 
     state.errorCount += 1;
+    state.lastError = payload;
 
-    state.lastError =
-      payload;
-
-    pushRecent(
-      "error",
-      payload
-    );
-
-    safeEmit(
-      events,
-      MODULE_EVENTS.error,
-      payload
-    );
+    pushRecent("error", payload);
+    safeEmit(events, MODULE_EVENTS.error, payload);
 
     if (isStrict(options)) {
-      const error =
-        new Error(payload.message);
+      const error = new Error(payload.message);
 
       try {
-        error.code =
-          extra?.code || "MODULES_ERROR";
-
-        error.details =
-          payload;
+        error.code = extra?.code || "MODULES_ERROR";
+        error.details = payload;
       } catch {}
 
       throw error;
     }
 
-    safeWarn(
-      utils,
-      payload.message,
-      extra
-    );
+    safeWarn(utils, payload.message, extra);
 
     return false;
   }
@@ -783,25 +681,40 @@ export function createModules({
     finalRegistry.moduleNameIndex.clear();
 
     for (const name of finalRegistry.modules.keys()) {
-      const cleanName =
-        normalizeName(name);
+      const cleanName = normalizeName(name);
 
       if (cleanName) {
-        finalRegistry.moduleNameIndex.set(
-          normalizeLookupKey(cleanName),
-          cleanName
-        );
+        finalRegistry.moduleNameIndex.set(normalizeLookupKey(cleanName), cleanName);
       }
     }
 
     return finalRegistry.moduleNameIndex;
   }
 
+  function normalizeExistingAliases() {
+    const nextAliases = new Map();
+
+    for (const [rawAlias, rawTarget] of finalRegistry.moduleAliases.entries()) {
+      const aliasName = normalizeAlias(rawAlias);
+      const targetName = normalizeName(rawTarget);
+
+      if (!aliasName || !targetName) {
+        continue;
+      }
+
+      nextAliases.set(aliasName, targetName);
+    }
+
+    finalRegistry.moduleAliases = nextAliases;
+
+    return finalRegistry.moduleAliases;
+  }
+
+  normalizeExistingAliases();
   rebuildNameIndex();
 
   function resolveName(nameOrAlias = "") {
-    const cleanName =
-      normalizeName(nameOrAlias);
+    const cleanName = normalizeName(nameOrAlias);
 
     if (!cleanName) {
       return "";
@@ -811,26 +724,17 @@ export function createModules({
       return cleanName;
     }
 
-    const lookup =
-      normalizeLookupKey(cleanName);
+    const lookup = normalizeLookupKey(cleanName);
 
-    const byNameIndex =
-      finalRegistry.moduleNameIndex.get(lookup);
+    const byNameIndex = finalRegistry.moduleNameIndex.get(lookup);
 
-    if (
-      byNameIndex &&
-      finalRegistry.modules.has(byNameIndex)
-    ) {
+    if (byNameIndex && finalRegistry.modules.has(byNameIndex)) {
       return byNameIndex;
     }
 
-    const byAlias =
-      finalRegistry.moduleAliases.get(lookup);
+    const byAlias = finalRegistry.moduleAliases.get(lookup);
 
-    if (
-      byAlias &&
-      finalRegistry.modules.has(byAlias)
-    ) {
+    if (byAlias && finalRegistry.modules.has(byAlias)) {
       return byAlias;
     }
 
@@ -838,141 +742,86 @@ export function createModules({
   }
 
   function getExistingMeta(name = "") {
-    const cleanName =
-      normalizeName(name);
-
-    return (
-      finalRegistry.moduleMeta.get(cleanName) ||
-      null
-    );
+    const cleanName = normalizeName(name);
+    return finalRegistry.moduleMeta.get(cleanName) || null;
   }
 
   function buildMeta(name, instance, options = {}, previousMeta = null) {
-    const cleanName =
-      normalizeName(name);
+    const cleanName = normalizeName(name);
+    const opts = isPlainObject(options) ? options : {};
+    const nowMs = safeNow();
 
-    const opts =
-      isPlainObject(options)
-        ? options
-        : {};
+    const instanceName = getInstanceValue(instance, "name", "");
+    const instanceModuleName = getInstanceValue(instance, "moduleName", "");
+    const instanceId = getInstanceValue(instance, "id", "");
 
-    const nowMs =
-      safeNow();
+    const aliases = uniqueAliases([
+      cleanName,
+      opts.alias,
+      opts.aliases,
+      instanceName,
+      instanceModuleName,
+      instanceId,
+    ]);
 
-    const instanceName =
-      getInstanceValue(instance, "name", "");
-
-    const instanceModuleName =
-      getInstanceValue(instance, "moduleName", "");
-
-    const instanceId =
-      getInstanceValue(instance, "id", "");
-
-    const aliases =
-      uniqueAliases([
-        cleanName,
-        opts.alias,
-        opts.aliases,
-        instanceName,
-        instanceModuleName,
-        instanceId,
-      ]);
-
-    const previousCreatedAtMs =
-      safeNumber(
-        previousMeta?.createdAtMs,
-        0
-      );
-
-    const createdAtMs =
-      previousCreatedAtMs > 0
-        ? previousCreatedAtMs
-        : nowMs;
-
-    const capabilities =
-      getCapabilities(instance);
+    const previousCreatedAtMs = safeNumber(previousMeta?.createdAtMs, 0);
+    const createdAtMs = previousCreatedAtMs > 0 ? previousCreatedAtMs : nowMs;
+    const capabilities = getCapabilities(instance);
 
     return {
-      name:
-        cleanName,
+      name: cleanName,
 
       aliases,
 
-      label:
-        safeText(
-          opts.label ||
-            getInstanceValue(instance, "label", "") ||
-            getInstanceValue(instance, "displayName", ""),
-          cleanName
-        ),
+      label: safeText(
+        opts.label ||
+          getInstanceValue(instance, "label", "") ||
+          getInstanceValue(instance, "displayName", ""),
+        cleanName
+      ),
 
-      version:
-        safeText(
-          opts.version ||
-            getInstanceValue(instance, "version", ""),
-          ""
-        ),
+      version: safeText(
+        opts.version ||
+          getInstanceValue(instance, "version", ""),
+        ""
+      ),
 
-      description:
-        safeText(
-          opts.description ||
-            getInstanceValue(instance, "description", ""),
-          ""
-        ),
+      description: safeText(
+        opts.description ||
+          getInstanceValue(instance, "description", ""),
+        ""
+      ),
 
-      tags:
-        normalizeTags(opts.tags),
+      tags: normalizeTags(opts.tags),
 
-      source:
-        safeText(
-          opts.source,
-          "core"
-        ),
+      source: safeText(opts.source, "core"),
 
-      type:
-        getInstanceType(instance),
-
+      type: getInstanceType(instance),
       capabilities,
+      disposable: Boolean(capabilities.disposable),
 
-      disposable:
-        Boolean(capabilities.disposable),
-
-      createdAt:
-        previousMeta?.createdAt ||
-        safeIsoDate(createdAtMs),
-
+      createdAt: previousMeta?.createdAt || safeIsoDate(createdAtMs),
       createdAtMs,
 
-      updatedAt:
-        safeIsoDate(nowMs),
+      updatedAt: safeIsoDate(nowMs),
+      updatedAtMs: nowMs,
 
-      updatedAtMs:
-        nowMs,
+      registerCount: safeNumber(previousMeta?.registerCount, 0) + 1,
 
-      registerCount:
-        safeNumber(
-          previousMeta?.registerCount,
-          0
-        ) + 1,
+      overwritten: Boolean(opts.overwritten),
 
-      overwritten:
-        Boolean(opts.overwritten),
-
-      custom:
-        pickCustomMeta(opts),
+      custom: pickCustomMeta(opts),
     };
   }
 
   function removeAliasesFor(name = "") {
-    const cleanName =
-      normalizeName(name);
+    const cleanName = normalizeName(name);
 
     if (!cleanName) {
       return 0;
     }
 
-    let removed =
-      0;
+    let removed = 0;
 
     for (const [aliasName, target] of Array.from(finalRegistry.moduleAliases.entries())) {
       if (target === cleanName) {
@@ -985,99 +834,58 @@ export function createModules({
   }
 
   function wouldAliasCollideWithModuleName(aliasName = "", targetName = "") {
-    const existingModuleName =
-      finalRegistry.moduleNameIndex.get(aliasName);
+    const existingModuleName = finalRegistry.moduleNameIndex.get(aliasName);
 
-    return Boolean(
-      existingModuleName &&
-      existingModuleName !== targetName
-    );
+    return Boolean(existingModuleName && existingModuleName !== targetName);
   }
 
   function setAliases(name, aliases = [], options = {}) {
-    const cleanName =
-      normalizeName(name);
+    const cleanName = normalizeName(name);
 
     if (!cleanName) {
       return [];
     }
 
-    const opts =
-      isPlainObject(options)
-        ? options
-        : {};
-
-    const normalized =
-      uniqueAliases(aliases);
-
-    const accepted =
-      [];
+    const opts = isPlainObject(options) ? options : {};
+    const normalized = uniqueAliases(aliases);
+    const accepted = [];
 
     for (const aliasName of normalized) {
-      const currentTarget =
-        finalRegistry.moduleAliases.get(aliasName);
+      const currentTarget = finalRegistry.moduleAliases.get(aliasName);
 
-      const aliasHitsOtherModuleName =
-        wouldAliasCollideWithModuleName(
-          aliasName,
-          cleanName
-        );
-
-      const hasConflict =
-        Boolean(
-          (
-            currentTarget &&
-            currentTarget !== cleanName
-          ) ||
-          aliasHitsOtherModuleName
-        );
-
-      if (
-        hasConflict &&
-        opts.overwriteAliases !== true
-      ) {
-        state.aliasConflictCount += 1;
-
-        const payload = {
-          alias:
-            aliasName,
-
-          target:
-            currentTarget ||
-            finalRegistry.moduleNameIndex.get(aliasName) ||
-            "",
-
-          attemptedTarget:
-            cleanName,
-
-          reason:
-            aliasHitsOtherModuleName
-              ? "module-name-collision"
-              : "alias-target-collision",
-
-          at:
-            safeIsoDate(),
-        };
-
-        pushRecent(
-          "alias-conflict",
-          payload
-        );
-
-        safeEmit(
-          events,
-          MODULE_EVENTS.aliasConflict,
-          payload
-        );
-
-        continue;
-      }
-
-      finalRegistry.moduleAliases.set(
+      const aliasHitsOtherModuleName = wouldAliasCollideWithModuleName(
         aliasName,
         cleanName
       );
 
+      const hasConflict = Boolean(
+        (currentTarget && currentTarget !== cleanName) ||
+          aliasHitsOtherModuleName
+      );
+
+      if (hasConflict && opts.overwriteAliases !== true) {
+        state.aliasConflictCount += 1;
+
+        const payload = {
+          alias: aliasName,
+          target:
+            currentTarget ||
+            finalRegistry.moduleNameIndex.get(aliasName) ||
+            "",
+          attemptedTarget: cleanName,
+          reason: aliasHitsOtherModuleName
+            ? "module-name-collision"
+            : "alias-target-collision",
+          at: safeIsoDate(),
+        };
+
+        pushRecent("alias-conflict", payload);
+        safeEmit(events, MODULE_EVENTS.aliasConflict, payload);
+
+        continue;
+      }
+
+      finalRegistry.moduleAliases.set(aliasName, cleanName);
       accepted.push(aliasName);
     }
 
@@ -1085,485 +893,264 @@ export function createModules({
   }
 
   function get(nameOrAlias = "") {
-    const resolved =
-      resolveName(nameOrAlias);
+    const resolved = resolveName(nameOrAlias);
 
     if (!resolved) {
       return null;
     }
 
-    return (
-      finalRegistry.modules.get(resolved) ||
-      null
-    );
+    return finalRegistry.modules.get(resolved) || null;
   }
 
   function has(nameOrAlias = "") {
-    const resolved =
-      resolveName(nameOrAlias);
-
-    return Boolean(
-      resolved &&
-      finalRegistry.modules.has(resolved)
-    );
+    const resolved = resolveName(nameOrAlias);
+    return Boolean(resolved && finalRegistry.modules.has(resolved));
   }
 
   function getMeta(nameOrAlias = "") {
-    const resolved =
-      resolveName(nameOrAlias);
+    const resolved = resolveName(nameOrAlias);
 
     if (!resolved) {
       return null;
     }
 
-    const meta =
-      finalRegistry.moduleMeta.get(resolved);
+    const meta = finalRegistry.moduleMeta.get(resolved);
 
-    return meta
-      ? safeClone(meta, meta)
-      : null;
+    return meta ? sanitizeForSnapshot(meta) : null;
   }
 
   function register(rawName, rawInstance, rawOptions = {}) {
-    const args =
-      normalizeRegisterArgs(
-        rawName,
-        rawInstance,
-        rawOptions
-      );
-
-    const cleanName =
-      normalizeName(args.name);
-
-    const instance =
-      args.instance;
-
-    const opts =
-      isPlainObject(args.options)
-        ? args.options
-        : {};
+    const args = normalizeRegisterArgs(rawName, rawInstance, rawOptions);
+    const cleanName = normalizeName(args.name);
+    const instance = args.instance;
+    const opts = isPlainObject(args.options) ? args.options : {};
 
     if (!cleanName) {
       return fail(
         "modules.register(name, instance) requiere un nombre.",
         {
-          code:
-            "MODULE_NAME_REQUIRED",
-
-          name:
-            args.name,
+          code: "MODULE_NAME_REQUIRED",
+          name: args.name,
         },
         opts
       );
     }
 
-    if (
-      instance === null ||
-      instance === undefined
-    ) {
+    if (instance === null || instance === undefined) {
       return fail(
         "modules.register(name, instance) requiere una instancia.",
         {
-          code:
-            "MODULE_INSTANCE_REQUIRED",
-
-          name:
-            cleanName,
+          code: "MODULE_INSTANCE_REQUIRED",
+          name: cleanName,
         },
         opts
       );
     }
 
-    const resolvedExisting =
-      resolveName(cleanName);
+    const resolvedExisting = resolveName(cleanName);
+    const exists = finalRegistry.modules.has(resolvedExisting);
+    const targetName = exists ? resolvedExisting : cleanName;
 
-    const exists =
-      finalRegistry.modules.has(resolvedExisting);
+    const previous = exists ? finalRegistry.modules.get(targetName) : null;
+    const sameInstance = exists && previous === instance;
 
-    const targetName =
-      exists
-        ? resolvedExisting
-        : cleanName;
+    const overwrite = opts.overwrite === true || opts.replace === true;
 
-    const previous =
-      exists
-        ? finalRegistry.modules.get(targetName)
-        : null;
-
-    const sameInstance =
-      exists &&
-      previous === instance;
-
-    const overwrite =
-      opts.overwrite === true ||
-      opts.replace === true;
-
-    if (
-      exists &&
-      sameInstance
-    ) {
+    if (exists && sameInstance) {
       const previousMeta =
-        getExistingMeta(targetName);
+        getExistingMeta(targetName) ||
+        buildMeta(targetName, instance, {}, null);
 
-      const mergedAliases =
-        uniqueAliases([
-          previousMeta?.aliases || [],
-          targetName,
-          cleanName,
-          opts.alias,
-          opts.aliases,
-        ]);
+      const mergedAliases = uniqueAliases([
+        previousMeta?.aliases || [],
+        targetName,
+        cleanName,
+        opts.alias,
+        opts.aliases,
+      ]);
 
-      const acceptedAliases =
-        setAliases(
-          targetName,
-          mergedAliases,
-          opts
-        );
-
-      const nowMs =
-        safeNow();
+      const acceptedAliases = setAliases(targetName, mergedAliases, opts);
+      const nowMs = safeNow();
 
       const meta = {
         ...previousMeta,
-
-        aliases:
-          acceptedAliases.length
-            ? acceptedAliases
-            : previousMeta?.aliases || [],
-
-        updatedAtMs:
-          nowMs,
-
-        updatedAt:
-          safeIsoDate(nowMs),
-
-        registerCount:
-          safeNumber(previousMeta?.registerCount, 1),
+        aliases: acceptedAliases.length ? acceptedAliases : previousMeta?.aliases || [],
+        updatedAtMs: nowMs,
+        updatedAt: safeIsoDate(nowMs),
+        registerCount: safeNumber(previousMeta?.registerCount, 1),
       };
 
-      finalRegistry.moduleMeta.set(
-        targetName,
-        meta
-      );
+      finalRegistry.moduleMeta.set(targetName, meta);
 
       state.duplicateCount += 1;
-      state.lastDuplicate =
-        targetName;
+      state.lastDuplicate = targetName;
 
       const payload = {
-        name:
-          targetName,
-
-        requestedName:
-          cleanName,
-
-        aliases:
-          meta.aliases || [],
-
-        sameInstance:
-          true,
-
-        overwritten:
-          false,
-
-        meta:
-          safeClone(meta, {}),
+        name: targetName,
+        requestedName: cleanName,
+        aliases: meta.aliases || [],
+        sameInstance: true,
+        overwritten: false,
+        meta: sanitizeForSnapshot(meta),
       };
 
-      pushRecent(
-        "duplicate",
-        payload
-      );
-
-      safeEmit(
-        events,
-        MODULE_EVENTS.duplicate,
-        payload
-      );
+      pushRecent("duplicate", payload);
+      safeEmit(events, MODULE_EVENTS.duplicate, payload);
 
       return previous;
     }
 
-    if (
-      exists &&
-      !overwrite
-    ) {
+    if (exists && !overwrite) {
       state.duplicateCount += 1;
-      state.lastDuplicate =
-        targetName;
+      state.lastDuplicate = targetName;
 
-      const meta =
-        getExistingMeta(targetName);
+      const meta = getExistingMeta(targetName);
 
       const payload = {
-        name:
-          targetName,
-
-        requestedName:
-          cleanName,
-
-        sameInstance:
-          false,
-
-        overwritten:
-          false,
-
-        meta:
-          safeClone(meta, null),
+        name: targetName,
+        requestedName: cleanName,
+        sameInstance: false,
+        overwritten: false,
+        meta: meta ? sanitizeForSnapshot(meta) : null,
       };
 
-      pushRecent(
-        "duplicate-blocked",
-        payload
-      );
-
-      safeEmit(
-        events,
-        MODULE_EVENTS.duplicate,
-        payload
-      );
+      pushRecent("duplicate-blocked", payload);
+      safeEmit(events, MODULE_EVENTS.duplicate, payload);
 
       return previous;
     }
 
-    if (
-      exists &&
-      overwrite &&
-      opts.disposePrevious === true
-    ) {
+    if (exists && overwrite && opts.disposePrevious === true) {
       callDispose(
         previous,
         {
-          name:
-            targetName,
-
-          reason:
-            "overwrite",
-
-          next:
-            cleanName,
+          name: targetName,
+          reason: "overwrite",
+          next: cleanName,
         },
         opts
       );
     }
 
-    finalRegistry.modules.set(
-      targetName,
-      instance
-    );
-
-    finalRegistry.moduleNameIndex.set(
-      normalizeLookupKey(targetName),
-      targetName
-    );
+    finalRegistry.modules.set(targetName, instance);
+    finalRegistry.moduleNameIndex.set(normalizeLookupKey(targetName), targetName);
 
     removeAliasesFor(targetName);
 
-    const previousMeta =
-      getExistingMeta(targetName);
+    const previousMeta = getExistingMeta(targetName);
 
-    const meta =
-      buildMeta(
-        targetName,
-        instance,
-        {
-          ...opts,
-          overwritten:
-            exists,
-        },
-        previousMeta
-      );
-
-    meta.aliases =
-      setAliases(
-        targetName,
-        meta.aliases,
-        opts
-      );
-
-    finalRegistry.moduleMeta.set(
+    const meta = buildMeta(
       targetName,
-      meta
+      instance,
+      {
+        ...opts,
+        overwritten: exists,
+      },
+      previousMeta
     );
 
+    meta.aliases = setAliases(targetName, meta.aliases, opts);
+
+    finalRegistry.moduleMeta.set(targetName, meta);
+
     state.registerCount += 1;
-    state.lastRegistered =
-      targetName;
+    state.lastRegistered = targetName;
 
     if (exists) {
       state.overwriteCount += 1;
-      state.lastOverwritten =
-        targetName;
+      state.lastOverwritten = targetName;
     }
 
     const payload = {
-      name:
-        targetName,
-
-      requestedName:
-        cleanName,
-
-      aliases:
-        meta.aliases,
-
-      overwritten:
-        Boolean(exists),
-
-      previousType:
-        getInstanceType(previous),
-
-      type:
-        getInstanceType(instance),
-
-      meta:
-        safeClone(meta, {}),
+      name: targetName,
+      requestedName: cleanName,
+      aliases: meta.aliases,
+      overwritten: Boolean(exists),
+      previousType: getInstanceType(previous),
+      type: getInstanceType(instance),
+      meta: sanitizeForSnapshot(meta),
     };
 
-    pushRecent(
-      exists ? "overwritten" : "registered",
-      payload
-    );
+    pushRecent(exists ? "overwritten" : "registered", payload);
 
     safeEmit(
       events,
-      exists
-        ? MODULE_EVENTS.overwritten
-        : MODULE_EVENTS.registered,
+      exists ? MODULE_EVENTS.overwritten : MODULE_EVENTS.registered,
       payload
     );
 
     /*
-      Compat con listeners legacy que solo escuchan app:module:registered.
+      Compat con listeners legacy que sólo escuchan app:module:registered.
     */
     if (exists) {
-      safeEmit(
-        events,
-        MODULE_EVENTS.registered,
-        {
-          ...payload,
-          legacy:
-            true,
-        }
-      );
+      safeEmit(events, MODULE_EVENTS.registered, {
+        ...payload,
+        legacy: true,
+      });
     }
 
     return instance;
   }
 
   function set(name, instance, options = {}) {
-    return register(
-      name,
-      instance,
-      {
-        ...(isPlainObject(options) ? options : {}),
-        overwrite:
-          true,
-      }
-    );
+    return register(name, instance, {
+      ...(isPlainObject(options) ? options : {}),
+      overwrite: true,
+    });
   }
 
   function upsert(name, instance, options = {}) {
-    return set(
-      name,
-      instance,
-      options
-    );
+    return set(name, instance, options);
   }
 
   function alias(nameOrAlias, aliases = [], options = {}) {
-    const resolved =
-      resolveName(nameOrAlias);
+    const resolved = resolveName(nameOrAlias);
+    const opts = isPlainObject(options) ? options : {};
 
-    const opts =
-      isPlainObject(options)
-        ? options
-        : {};
-
-    if (
-      !resolved ||
-      !finalRegistry.modules.has(resolved)
-    ) {
+    if (!resolved || !finalRegistry.modules.has(resolved)) {
       return fail(
         "No se pueden añadir aliases a un módulo inexistente.",
         {
-          code:
-            "MODULE_ALIAS_TARGET_MISSING",
-
-          name:
-            nameOrAlias,
+          code: "MODULE_ALIAS_TARGET_MISSING",
+          name: nameOrAlias,
         },
         opts
       );
     }
 
-    const instance =
-      finalRegistry.modules.get(resolved);
+    const instance = finalRegistry.modules.get(resolved);
 
     const previousMeta =
       getExistingMeta(resolved) ||
-      buildMeta(
-        resolved,
-        instance
-      );
+      buildMeta(resolved, instance);
 
-    const merged =
-      uniqueAliases([
-        previousMeta.aliases,
-        aliases,
-      ]);
+    const merged = uniqueAliases([
+      previousMeta.aliases,
+      aliases,
+    ]);
 
-    const accepted =
-      setAliases(
-        resolved,
-        merged,
-        opts
-      );
-
-    const nowMs =
-      safeNow();
+    const accepted = setAliases(resolved, merged, opts);
+    const nowMs = safeNow();
 
     const meta = {
       ...previousMeta,
-
-      aliases:
-        accepted,
-
-      updatedAt:
-        safeIsoDate(nowMs),
-
-      updatedAtMs:
-        nowMs,
+      aliases: accepted,
+      updatedAt: safeIsoDate(nowMs),
+      updatedAtMs: nowMs,
     };
 
-    finalRegistry.moduleMeta.set(
-      resolved,
-      meta
-    );
+    finalRegistry.moduleMeta.set(resolved, meta);
 
     state.aliasCount += 1;
 
     const payload = {
-      name:
-        resolved,
-
-      aliases:
-        accepted,
-
-      at:
-        meta.updatedAt,
+      name: resolved,
+      aliases: accepted,
+      at: meta.updatedAt,
     };
 
-    pushRecent(
-      "alias",
-      payload
-    );
-
-    safeEmit(
-      events,
-      MODULE_EVENTS.alias,
-      payload
-    );
+    pushRecent("alias", payload);
+    safeEmit(events, MODULE_EVENTS.alias, payload);
 
     return true;
   }
@@ -1571,132 +1158,74 @@ export function createModules({
   function callDispose(instance, context = {}, options = {}) {
     if (!instance) {
       return {
-        ok:
-          false,
-
-        method:
-          "",
-
-        missing:
-          true,
+        ok: false,
+        method: "",
+        missing: true,
       };
     }
 
-    const opts =
-      isPlainObject(options)
-        ? options
-        : {};
+    const opts = isPlainObject(options) ? options : {};
 
-    const methods =
-      uniqueDisposeMethods([
-        opts.disposeMethod,
-        opts.disposeMethods,
-        DEFAULT_DISPOSE_METHODS,
-      ]);
+    const methods = uniqueDisposeMethods([
+      opts.disposeMethod,
+      opts.disposeMethods,
+      DEFAULT_DISPOSE_METHODS,
+    ]);
 
-    const symbolAsyncDispose =
-      getSymbolAsyncDisposeMethod(instance);
+    const symbolAsyncDispose = getSymbolAsyncDisposeMethod(instance);
+    const symbolDispose = getSymbolDisposeMethod(instance);
 
-    const symbolDispose =
-      getSymbolDisposeMethod(instance);
-
-    const candidates =
-      [
-        symbolAsyncDispose,
-        symbolDispose,
-        ...methods,
-      ].filter(Boolean);
+    const candidates = [
+      symbolAsyncDispose,
+      symbolDispose,
+      ...methods,
+    ].filter(Boolean);
 
     for (const method of candidates) {
-      let disposeFn =
-        null;
+      let disposeFn = null;
 
       try {
-        disposeFn =
-          typeof method === "symbol"
-            ? instance?.[method]
-            : instance?.[method];
+        disposeFn = typeof method === "symbol"
+          ? instance?.[method]
+          : instance?.[method];
       } catch {
-        disposeFn =
-          null;
+        disposeFn = null;
       }
 
       if (!isFunction(disposeFn)) {
         continue;
       }
 
-      const methodName =
-        typeof method === "symbol"
-          ? String(method)
-          : method;
+      const methodName = typeof method === "symbol" ? String(method) : method;
 
       try {
-        const result =
-          disposeFn.call(
-            instance,
-            context
-          );
+        const result = disposeFn.call(instance, context);
 
         state.disposeCount += 1;
 
         const payload = {
-          name:
-            context?.name || "",
-
-          reason:
-            context?.reason || "",
-
-          method:
-            methodName,
-
-          async:
-            Boolean(
-              result &&
-              typeof result === "object" &&
-              isFunction(result.then)
-            ),
-
-          at:
-            safeIsoDate(),
+          name: context?.name || "",
+          reason: context?.reason || "",
+          method: methodName,
+          async: Boolean(result && typeof result === "object" && isFunction(result.then)),
+          at: safeIsoDate(),
         };
 
-        state.lastDisposed =
-          payload.name || state.lastDisposed;
+        state.lastDisposed = payload.name || state.lastDisposed;
 
-        pushRecent(
-          "disposed",
-          payload
-        );
+        pushRecent("disposed", payload);
+        safeEmit(events, MODULE_EVENTS.disposed, payload);
 
-        safeEmit(
-          events,
-          MODULE_EVENTS.disposed,
-          payload
-        );
-
-        if (
-          result &&
-          typeof result === "object" &&
-          isFunction(result.catch)
-        ) {
+        if (result && typeof result === "object" && isFunction(result.catch)) {
           result.catch((error) => {
             state.errorCount += 1;
+            state.disposeErrorCount += 1;
 
             state.lastError = {
-              message:
-                safeText(
-                  error?.message || error,
-                  "Module async dispose error."
-                ),
-
-              name:
-                context?.name || "",
-
-              method:
-                methodName,
-
-              at:
-                safeIsoDate(),
+              message: safeText(error?.message || error, "Module async dispose error."),
+              name: context?.name || "",
+              method: methodName,
+              at: safeIsoDate(),
             };
 
             safeWarn(
@@ -1705,50 +1234,29 @@ export function createModules({
               error
             );
 
-            safeEmit(
-              events,
-              MODULE_EVENTS.disposeError,
-              {
-                ...state.lastError,
-              }
-            );
+            safeEmit(events, MODULE_EVENTS.disposeError, {
+              ...state.lastError,
+            });
           });
         }
 
         return {
-          ok:
-            true,
-
-          method:
-            methodName,
-
-          async:
-            payload.async,
+          ok: true,
+          method: methodName,
+          async: payload.async,
         };
       } catch (error) {
         state.errorCount += 1;
+        state.disposeErrorCount += 1;
 
         state.lastError = {
-          message:
-            safeText(
-              error?.message || error,
-              "Module dispose error."
-            ),
-
-          name:
-            context?.name || "",
-
-          method:
-            methodName,
-
-          at:
-            safeIsoDate(),
+          message: safeText(error?.message || error, "Module dispose error."),
+          name: context?.name || "",
+          method: methodName,
+          at: safeIsoDate(),
         };
 
-        pushRecent(
-          "dispose-error",
-          state.lastError
-        );
+        pushRecent("dispose-error", state.lastError);
 
         safeWarn(
           utils,
@@ -1756,178 +1264,102 @@ export function createModules({
           error
         );
 
-        safeEmit(
-          events,
-          MODULE_EVENTS.disposeError,
-          {
-            ...state.lastError,
-          }
-        );
+        safeEmit(events, MODULE_EVENTS.disposeError, {
+          ...state.lastError,
+        });
 
         return {
-          ok:
-            false,
-
-          method:
-            methodName,
-
-          error:
-            state.lastError,
+          ok: false,
+          method: methodName,
+          error: state.lastError,
         };
       }
     }
 
     return {
-      ok:
-        false,
-
-      method:
-        "",
-
-      missing:
-        false,
+      ok: false,
+      method: "",
+      missing: false,
     };
   }
 
   function disposeModule(nameOrAlias = "", options = {}) {
-    const resolved =
-      resolveName(nameOrAlias);
+    const resolved = resolveName(nameOrAlias);
 
-    if (
-      !resolved ||
-      !finalRegistry.modules.has(resolved)
-    ) {
+    if (!resolved || !finalRegistry.modules.has(resolved)) {
       return false;
     }
 
-    const instance =
-      finalRegistry.modules.get(resolved);
+    const instance = finalRegistry.modules.get(resolved);
 
-    const result =
-      callDispose(
-        instance,
-        {
-          name:
-            resolved,
-
-          reason:
-            options?.reason || "disposeModule",
-        },
-        options
-      );
+    const result = callDispose(
+      instance,
+      {
+        name: resolved,
+        reason: options?.reason || "disposeModule",
+      },
+      options
+    );
 
     return result.ok === true;
   }
 
   function unregister(nameOrAlias, options = {}) {
-    const resolved =
-      resolveName(nameOrAlias);
+    const resolved = resolveName(nameOrAlias);
+    const opts = isPlainObject(options) ? options : {};
 
-    const opts =
-      isPlainObject(options)
-        ? options
-        : {};
-
-    if (
-      !resolved ||
-      !finalRegistry.modules.has(resolved)
-    ) {
+    if (!resolved || !finalRegistry.modules.has(resolved)) {
       return false;
     }
 
-    const instance =
-      finalRegistry.modules.get(resolved);
+    const instance = finalRegistry.modules.get(resolved);
+    const meta = getExistingMeta(resolved);
 
-    const meta =
-      getExistingMeta(resolved);
-
-    let disposeResult =
-      null;
+    let disposeResult = null;
 
     if (opts.dispose === true) {
-      disposeResult =
-        callDispose(
-          instance,
-          {
-            name:
-              resolved,
-
-            reason:
-              opts.reason || "unregister",
-          },
-          opts
-        );
+      disposeResult = callDispose(
+        instance,
+        {
+          name: resolved,
+          reason: opts.reason || "unregister",
+        },
+        opts
+      );
     }
 
     finalRegistry.modules.delete(resolved);
     finalRegistry.moduleMeta.delete(resolved);
-    finalRegistry.moduleNameIndex.delete(
-      normalizeLookupKey(resolved)
-    );
+    finalRegistry.moduleNameIndex.delete(normalizeLookupKey(resolved));
 
     removeAliasesFor(resolved);
 
     state.unregisterCount += 1;
-    state.lastUnregistered =
-      resolved;
+    state.lastUnregistered = resolved;
 
     const payload = {
-      name:
-        resolved,
-
-      type:
-        getInstanceType(instance),
-
-      disposed:
-        Boolean(opts.dispose),
-
-      disposeResult:
-        disposeResult
-          ? safeClone(disposeResult, disposeResult)
-          : null,
-
-      meta:
-        safeClone(meta, null),
-
-      at:
-        safeIsoDate(),
+      name: resolved,
+      type: getInstanceType(instance),
+      disposed: Boolean(opts.dispose),
+      disposeResult: disposeResult ? sanitizeForSnapshot(disposeResult) : null,
+      meta: meta ? sanitizeForSnapshot(meta) : null,
+      at: safeIsoDate(),
     };
 
-    pushRecent(
-      "unregistered",
-      payload
-    );
-
-    safeEmit(
-      events,
-      MODULE_EVENTS.unregistered,
-      payload
-    );
+    pushRecent("unregistered", payload);
+    safeEmit(events, MODULE_EVENTS.unregistered, payload);
 
     return true;
   }
 
   function clear(options = {}) {
-    const opts =
-      isPlainObject(options)
-        ? options
-        : {};
+    const opts = isPlainObject(options) ? options : {};
+    const names = Array.from(finalRegistry.modules.keys());
 
-    const names =
-      Array.from(
-        finalRegistry.modules.keys()
-      );
-
-    let removed =
-      0;
+    let removed = 0;
 
     for (const name of names) {
-      if (
-        unregister(
-          name,
-          opts
-        )
-      ) {
+      if (unregister(name, opts)) {
         removed += 1;
       }
     }
@@ -1940,32 +1372,18 @@ export function createModules({
 
     const payload = {
       removed,
-
-      dispose:
-        Boolean(opts.dispose),
-
-      at:
-        safeIsoDate(),
+      dispose: Boolean(opts.dispose),
+      at: safeIsoDate(),
     };
 
-    pushRecent(
-      "cleared",
-      payload
-    );
-
-    safeEmit(
-      events,
-      MODULE_EVENTS.cleared,
-      payload
-    );
+    pushRecent("cleared", payload);
+    safeEmit(events, MODULE_EVENTS.cleared, payload);
 
     return removed;
   }
 
   function list() {
-    return Array.from(
-      finalRegistry.modules.keys()
-    );
+    return Array.from(finalRegistry.modules.keys());
   }
 
   function names() {
@@ -1973,32 +1391,22 @@ export function createModules({
   }
 
   function aliases() {
-    return Array.from(
-      finalRegistry.moduleAliases.keys()
-    );
+    return Array.from(finalRegistry.moduleAliases.keys());
   }
 
   function aliasEntries() {
-    return Array.from(
-      finalRegistry.moduleAliases.entries()
-    ).map(([aliasName, target]) => ({
-      alias:
-        aliasName,
-
+    return Array.from(finalRegistry.moduleAliases.entries()).map(([aliasName, target]) => ({
+      alias: aliasName,
       target,
     }));
   }
 
   function entries() {
-    return Array.from(
-      finalRegistry.modules.entries()
-    );
+    return Array.from(finalRegistry.modules.entries());
   }
 
   function values() {
-    return Array.from(
-      finalRegistry.modules.values()
-    );
+    return Array.from(finalRegistry.modules.values());
   }
 
   function count() {
@@ -2012,32 +1420,17 @@ export function createModules({
 
     for (const [name, instance] of finalRegistry.modules.entries()) {
       try {
-        callback(
-          instance,
-          name,
-          getMeta(name)
-        );
+        callback(instance, name, getMeta(name));
       } catch (error) {
         state.errorCount += 1;
 
         state.lastError = {
-          message:
-            safeText(
-              error?.message || error,
-              "modules.forEach error."
-            ),
-
+          message: safeText(error?.message || error, "modules.forEach error."),
           name,
-
-          at:
-            safeIsoDate(),
+          at: safeIsoDate(),
         };
 
-        safeWarn(
-          utils,
-          `Error en modules.forEach("${name}")`,
-          error
-        );
+        safeWarn(utils, `Error en modules.forEach("${name}")`, error);
       }
     }
 
@@ -2049,39 +1442,21 @@ export function createModules({
       return [];
     }
 
-    const output =
-      [];
+    const output = [];
 
     for (const [name, instance] of finalRegistry.modules.entries()) {
       try {
-        output.push(
-          callback(
-            instance,
-            name,
-            getMeta(name)
-          )
-        );
+        output.push(callback(instance, name, getMeta(name)));
       } catch (error) {
         state.errorCount += 1;
 
         state.lastError = {
-          message:
-            safeText(
-              error?.message || error,
-              "modules.map error."
-            ),
-
+          message: safeText(error?.message || error, "modules.map error."),
           name,
-
-          at:
-            safeIsoDate(),
+          at: safeIsoDate(),
         };
 
-        safeWarn(
-          utils,
-          `Error en modules.map("${name}")`,
-          error
-        );
+        safeWarn(utils, `Error en modules.map("${name}")`, error);
       }
     }
 
@@ -2093,28 +1468,16 @@ export function createModules({
       return [];
     }
 
-    const output =
-      [];
+    const output = [];
 
     for (const [name, instance] of finalRegistry.modules.entries()) {
       try {
-        if (
-          callback(
-            instance,
-            name,
-            getMeta(name)
-          )
-        ) {
+        if (callback(instance, name, getMeta(name))) {
           output.push(instance);
         }
       } catch (error) {
         state.errorCount += 1;
-
-        safeWarn(
-          utils,
-          `Error en modules.filter("${name}")`,
-          error
-        );
+        safeWarn(utils, `Error en modules.filter("${name}")`, error);
       }
     }
 
@@ -2128,23 +1491,12 @@ export function createModules({
 
     for (const [name, instance] of finalRegistry.modules.entries()) {
       try {
-        if (
-          callback(
-            instance,
-            name,
-            getMeta(name)
-          )
-        ) {
+        if (callback(instance, name, getMeta(name))) {
           return instance;
         }
       } catch (error) {
         state.errorCount += 1;
-
-        safeWarn(
-          utils,
-          `Error en modules.find("${name}")`,
-          error
-        );
+        safeWarn(utils, `Error en modules.find("${name}")`, error);
       }
     }
 
@@ -2152,247 +1504,121 @@ export function createModules({
   }
 
   function toObject() {
-    const output =
-      {};
+    const output = {};
 
     for (const [name, instance] of finalRegistry.modules.entries()) {
-      output[name] =
-        instance;
+      output[name] = instance;
     }
 
     return output;
   }
 
   function getModuleSnapshot(name = "") {
-    const resolved =
-      resolveName(name);
+    const resolved = resolveName(name);
 
-    if (
-      !resolved ||
-      !finalRegistry.modules.has(resolved)
-    ) {
+    if (!resolved || !finalRegistry.modules.has(resolved)) {
       return null;
     }
 
-    const instance =
-      finalRegistry.modules.get(resolved);
+    const instance = finalRegistry.modules.get(resolved);
 
     const meta =
       finalRegistry.moduleMeta.get(resolved) ||
-      buildMeta(
-        resolved,
-        instance
-      );
+      buildMeta(resolved, instance);
 
-    const capabilities =
-      getCapabilities(instance);
+    const capabilities = getCapabilities(instance);
 
     return {
-      name:
-        resolved,
-
-      label:
-        meta.label || resolved,
-
-      aliases:
-        meta.aliases || [],
-
-      version:
-        meta.version || "",
-
-      description:
-        meta.description || "",
-
-      tags:
-        meta.tags || [],
-
-      source:
-        meta.source || "",
-
-      type:
-        getInstanceType(instance),
-
-      disposable:
-        Boolean(capabilities.disposable),
-
+      name: resolved,
+      label: meta.label || resolved,
+      aliases: meta.aliases || [],
+      version: meta.version || "",
+      description: meta.description || "",
+      tags: meta.tags || [],
+      source: meta.source || "",
+      type: getInstanceType(instance),
+      disposable: Boolean(capabilities.disposable),
       capabilities,
-
-      custom:
-        safeClone(
-          meta.custom,
-          null
-        ),
-
-      createdAt:
-        meta.createdAt || "",
-
-      updatedAt:
-        meta.updatedAt || "",
-
-      registerCount:
-        safeNumber(
-          meta.registerCount,
-          0
-        ),
-
-      overwritten:
-        Boolean(meta.overwritten),
+      custom: meta.custom ? sanitizeForSnapshot(meta.custom) : null,
+      createdAt: meta.createdAt || "",
+      updatedAt: meta.updatedAt || "",
+      registerCount: safeNumber(meta.registerCount, 0),
+      overwritten: Boolean(meta.overwritten),
     };
   }
 
   function getSnapshot(options = {}) {
-    const opts =
-      isPlainObject(options)
-        ? options
-        : {};
-
-    const moduleNames =
-      list();
+    const opts = isPlainObject(options) ? options : {};
+    const moduleNames = list();
 
     return {
-      version:
-        MODULES_VERSION,
+      version: MODULES_VERSION,
 
-      count:
-        count(),
+      count: count(),
 
-      names:
-        moduleNames,
+      names: moduleNames,
+      aliases: aliasEntries(),
 
-      aliases:
-        aliasEntries(),
-
-      modules:
-        moduleNames.map((name) =>
-          getModuleSnapshot(name)
-        ),
+      modules: moduleNames.map((name) => getModuleSnapshot(name)),
 
       stats: {
-        registerCount:
-          state.registerCount,
-
-        duplicateCount:
-          state.duplicateCount,
-
-        overwriteCount:
-          state.overwriteCount,
-
-        unregisterCount:
-          state.unregisterCount,
-
-        aliasCount:
-          state.aliasCount,
-
-        aliasConflictCount:
-          state.aliasConflictCount,
-
-        disposeCount:
-          state.disposeCount,
-
-        clearCount:
-          state.clearCount,
-
-        errorCount:
-          state.errorCount,
-
-        lastRegistered:
-          state.lastRegistered,
-
-        lastDuplicate:
-          state.lastDuplicate,
-
-        lastOverwritten:
-          state.lastOverwritten,
-
-        lastUnregistered:
-          state.lastUnregistered,
-
-        lastDisposed:
-          state.lastDisposed,
-
-        lastError:
-          safeClone(
-            state.lastError,
-            null
-          ),
+        registerCount: state.registerCount,
+        duplicateCount: state.duplicateCount,
+        overwriteCount: state.overwriteCount,
+        unregisterCount: state.unregisterCount,
+        aliasCount: state.aliasCount,
+        aliasConflictCount: state.aliasConflictCount,
+        disposeCount: state.disposeCount,
+        disposeErrorCount: state.disposeErrorCount,
+        clearCount: state.clearCount,
+        errorCount: state.errorCount,
+        lastRegistered: state.lastRegistered,
+        lastDuplicate: state.lastDuplicate,
+        lastOverwritten: state.lastOverwritten,
+        lastUnregistered: state.lastUnregistered,
+        lastDisposed: state.lastDisposed,
+        lastError: state.lastError ? sanitizeForSnapshot(state.lastError) : null,
       },
 
-      recent:
-        opts.includeRecent === false
-          ? []
-          : recent.map((item) => ({
-              ...item,
-            })),
+      recent: opts.includeRecent === false
+        ? []
+        : recent.map((item) => ({ ...item })),
 
-      at:
-        safeIsoDate(),
+      at: safeIsoDate(),
     };
   }
 
   function reset(options = {}) {
-    const removed =
-      clear(options);
+    const removed = clear(options);
 
-    state.registerCount =
-      0;
-
-    state.duplicateCount =
-      0;
-
-    state.overwriteCount =
-      0;
-
-    state.unregisterCount =
-      0;
-
-    state.aliasCount =
-      0;
-
-    state.aliasConflictCount =
-      0;
-
-    state.disposeCount =
-      0;
-
-    state.clearCount =
-      0;
-
-    state.errorCount =
-      0;
-
-    state.lastRegistered =
-      "";
-
-    state.lastDuplicate =
-      "";
-
-    state.lastOverwritten =
-      "";
-
-    state.lastUnregistered =
-      "";
-
-    state.lastDisposed =
-      "";
-
-    state.lastError =
-      null;
+    state.registerCount = 0;
+    state.duplicateCount = 0;
+    state.overwriteCount = 0;
+    state.unregisterCount = 0;
+    state.aliasCount = 0;
+    state.aliasConflictCount = 0;
+    state.disposeCount = 0;
+    state.disposeErrorCount = 0;
+    state.clearCount = 0;
+    state.errorCount = 0;
+    state.lastRegistered = "";
+    state.lastDuplicate = "";
+    state.lastOverwritten = "";
+    state.lastUnregistered = "";
+    state.lastDisposed = "";
+    state.lastError = null;
 
     recent.splice(0);
 
     return {
       removed,
-      snapshot:
-        getSnapshot(),
+      snapshot: getSnapshot(),
     };
   }
 
   const api = {
-    version:
-      MODULES_VERSION,
-
-    events:
-      MODULE_EVENTS,
+    version: MODULES_VERSION,
+    events: MODULE_EVENTS,
 
     register,
 
@@ -2403,17 +1629,14 @@ export function createModules({
 
     get,
 
-    resolve:
-      resolveName,
+    resolve: resolveName,
+    resolveName,
 
     require(nameOrAlias = "") {
-      const instance =
-        get(nameOrAlias);
+      const instance = get(nameOrAlias);
 
       if (!instance && strict) {
-        throw new Error(
-          `Módulo no registrado: ${nameOrAlias}`
-        );
+        throw new Error(`Módulo no registrado: ${nameOrAlias}`);
       }
 
       return instance;
@@ -2422,17 +1645,15 @@ export function createModules({
     has,
 
     getMeta,
+    meta: getMeta,
 
     getModuleSnapshot,
 
     unregister,
-    delete:
-      unregister,
-    remove:
-      unregister,
+    delete: unregister,
+    remove: unregister,
 
-    dispose:
-      disposeModule,
+    dispose: disposeModule,
     disposeModule,
 
     clear,
@@ -2456,35 +1677,20 @@ export function createModules({
     toObject,
 
     getSnapshot,
-    getDebugSnapshot:
-      getSnapshot,
+    getDebugSnapshot: getSnapshot,
+    snapshot: getSnapshot,
   };
 
-  safeEmit(
-    events,
-    MODULE_EVENTS.ready,
-    {
-      version:
-        MODULES_VERSION,
+  safeEmit(events, MODULE_EVENTS.ready, {
+    version: MODULES_VERSION,
+    count: count(),
+    at: safeIsoDate(),
+  });
 
-      count:
-        count(),
-
-      at:
-        safeIsoDate(),
-    }
-  );
-
-  safeLog(
-    utils,
-    "Modules ready.",
-    {
-      version:
-        MODULES_VERSION,
-      count:
-        count(),
-    }
-  );
+  safeLog(utils, "Modules ready.", {
+    version: MODULES_VERSION,
+    count: count(),
+  });
 
   return api;
 }

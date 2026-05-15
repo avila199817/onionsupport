@@ -3,9 +3,9 @@
    Archivo: src/core/ui.js
 
    ONION SUPPORT · CORE UI
-   GLOBAL UI HELPERS · USER VISUAL SYNC · AVATAR SAFE · 15/10
+   GLOBAL UI HELPERS · USER VISUAL SYNC · AVATAR SAFE · 16/10
 
-   RESPONSABILIDADES:
+   Responsabilidades:
    - helpers UI globales del Core
    - sincronizar título documento
    - limpiar contenedores dinámicos shell
@@ -13,18 +13,16 @@
    - refresco reactivo con i18n
    - pintar avatar robusto en sidebar/topbar sin romper fallback
 
-   FIX CRÍTICO:
+   Candados:
    - no destruir la estructura DOM del avatar del sidebar
    - respetar #sidebarAvatarImage y #sidebarAvatarFallback
    - soportar avatarRoot como contenedor o como <img>
    - si falta root, resolverlo desde imagen/fallback existentes
-   - evitar innerHTML/textContent sobre el root del avatar
+   - evitar innerHTML/textContent sobre root del avatar
    - evitar title nativo en avatar/nombre
    - no forzar ni borrar data-tooltip custom
    - no pintar usuario fantasma si state.authenticated=false
    - no emitir avatarUrl sensible/SAS en eventos
-
-   HARDENING EXTREMO:
    - no duplicar nodos avatar
    - fallback consistente
    - title reactivo robusto
@@ -53,307 +51,242 @@ import {
    CONSTANTS
 ========================================================= */
 
-const UI_VERSION =
-  "15.0.0-avatar-safe";
+const UI_VERSION = "16.0.0-avatar-safe";
 
-const DEFAULT_USER_NAME =
-  "Usuario";
+const DEFAULT_USER_NAME = "Usuario";
+const DEFAULT_AVATAR_TEXT = "ON";
+const DEFAULT_TITLE = "Onion Support";
 
-const DEFAULT_AVATAR_TEXT =
-  "ON";
+const USER_UI_EVENT = "app:user-ui:sync";
+const TITLE_EVENT = "app:title:change";
+const DYNAMIC_CLEARED_EVENT = "app:dynamic:cleared";
+const AVATAR_LOAD_EVENT = "app:user-ui:avatar-load";
+const AVATAR_ERROR_EVENT = "app:user-ui:avatar-error";
+const AVATAR_FALLBACK_EVENT = "app:user-ui:avatar-fallback";
+const USER_RECACHE_EVENT = "app:user-ui:recache";
+const USER_DEFERRED_SYNC_EVENT = "app:user-ui:deferred-sync";
 
-const DEFAULT_TITLE =
-  "Onion Support";
+const AVATAR_RENDER_TOKENS = new WeakMap();
 
-const USER_UI_EVENT =
-  "app:user-ui:sync";
+let deferredUserSyncScheduled = false;
 
-const TITLE_EVENT =
-  "app:title:change";
+const SIDEBAR_SCOPE_SELECTORS = Object.freeze([
+  "#sidebar",
+  "#app-sidebar",
+  "#sidebar-mount",
+  "[data-sidebar-root]",
+  "[data-sidebar]",
+  "[data-sidebar-mount]",
+  ".sidebar",
+  ".app-sidebar",
+]);
 
-const DYNAMIC_CLEARED_EVENT =
-  "app:dynamic:cleared";
+const TOPBAR_SCOPE_SELECTORS = Object.freeze([
+  "#topbar",
+  "#app-topbar",
+  "#topbar-mount",
+  "[data-topbar-root]",
+  "[data-topbar]",
+  "[data-topbar-mount]",
+  ".topbar",
+  ".app-topbar",
+]);
 
-const AVATAR_LOAD_EVENT =
-  "app:user-ui:avatar-load";
+const AVATAR_SELECTORS = Object.freeze({
+  sidebarRoot: Object.freeze([
+    "#sidebar-avatar",
+    "#sidebarAvatar",
+    "[data-sidebar-avatar='true']",
+    "[data-sidebar-avatar]",
+    "[data-user-avatar='sidebar']",
+    ".sidebar-avatar",
+    ".sidebar-user-avatar",
+  ]),
 
-const AVATAR_ERROR_EVENT =
-  "app:user-ui:avatar-error";
+  topbarRoot: Object.freeze([
+    "#topbar-avatar",
+    "#topbarAvatar",
+    "[data-topbar-avatar='true']",
+    "[data-topbar-avatar]",
+    "[data-user-avatar='topbar']",
+    "[data-user-avatar-topbar]",
+    ".topbar-avatar",
+    ".topbar-user-avatar",
+  ]),
 
-const AVATAR_FALLBACK_EVENT =
-  "app:user-ui:avatar-fallback";
+  sidebarImage: Object.freeze([
+    "#sidebarAvatarImage",
+    "#sidebar-avatar-image",
+    "img[data-sidebar-avatar-image='true']",
+    "img[data-sidebar-avatar-image]",
+    "img[data-avatar-image='sidebar']",
+    ".sidebar-avatar img",
+    ".sidebar-avatar__image",
+    ".sidebar-user-avatar img",
+  ]),
 
-const USER_RECACHE_EVENT =
-  "app:user-ui:recache";
+  topbarImage: Object.freeze([
+    "#topbarAvatarImage",
+    "#topbar-avatar-image",
+    "img[data-topbar-avatar-image='true']",
+    "img[data-topbar-avatar-image]",
+    "img[data-avatar-image='topbar']",
+    ".topbar-avatar img",
+    ".topbar-avatar__image",
+    ".topbar-user-avatar img",
+  ]),
 
-const USER_DEFERRED_SYNC_EVENT =
-  "app:user-ui:deferred-sync";
+  sidebarFallback: Object.freeze([
+    "#sidebarAvatarFallback",
+    "#sidebar-avatar-fallback",
+    "[data-sidebar-avatar-fallback='true']",
+    "[data-sidebar-avatar-fallback]",
+    "[data-avatar-fallback='sidebar']",
+    ".sidebar-avatar-fallback",
+    ".sidebar-avatar__fallback",
+    ".sidebar-user-avatar-fallback",
+  ]),
 
-const AVATAR_RENDER_TOKENS =
-  new WeakMap();
+  topbarFallback: Object.freeze([
+    "#topbarAvatarFallback",
+    "#topbar-avatar-fallback",
+    "[data-topbar-avatar-fallback='true']",
+    "[data-topbar-avatar-fallback]",
+    "[data-avatar-fallback='topbar']",
+    ".topbar-avatar-fallback",
+    ".topbar-avatar__fallback",
+    ".topbar-user-avatar-fallback",
+  ]),
+});
 
-let deferredUserSyncScheduled =
-  false;
+const USER_NAME_SELECTORS = Object.freeze([
+  "#sidebar-name",
+  "#sidebarName",
+  "[data-sidebar-name='true']",
+  "[data-sidebar-name]",
+  "[data-user-name='sidebar']",
+  ".sidebar-name",
+  ".sidebar-user-name",
+]);
 
-const SIDEBAR_SCOPE_SELECTORS =
-  Object.freeze([
-    "#sidebar",
-    "#app-sidebar",
-    "#sidebar-mount",
-    "[data-sidebar]",
-    "[data-sidebar-mount]",
-    ".sidebar",
-    ".app-sidebar",
-  ]);
+const USER_EMAIL_SELECTORS = Object.freeze([
+  "#sidebar-email",
+  "#sidebarEmail",
+  "[data-sidebar-email='true']",
+  "[data-sidebar-email]",
+  "[data-user-email='sidebar']",
+  ".sidebar-email",
+  ".sidebar-user-email",
+]);
 
-const TOPBAR_SCOPE_SELECTORS =
-  Object.freeze([
-    "#topbar",
-    "#app-topbar",
-    "#topbar-mount",
-    "[data-topbar]",
-    "[data-topbar-mount]",
-    ".topbar",
-    ".app-topbar",
-  ]);
+const USER_ROLE_SELECTORS = Object.freeze([
+  "#sidebar-role",
+  "#sidebarRole",
+  "[data-sidebar-role='true']",
+  "[data-sidebar-role]",
+  "[data-user-role='sidebar']",
+  ".sidebar-role",
+  ".sidebar-user-role",
+]);
 
-const AVATAR_SELECTORS =
-  Object.freeze({
-    sidebarRoot:
-      Object.freeze([
-        "#sidebar-avatar",
-        "#sidebarAvatar",
-        "[data-sidebar-avatar='true']",
-        "[data-sidebar-avatar]",
-        "[data-user-avatar='sidebar']",
-        "[data-user-avatar]",
-        ".sidebar-avatar",
-        ".user-avatar",
-      ]),
+const TOPBAR_USER_NAME_SELECTORS = Object.freeze([
+  "#topbar-user-name",
+  "#topbarUserName",
+  "[data-topbar-user-name='true']",
+  "[data-topbar-user-name]",
+  "[data-user-name='topbar']",
+  "[data-user-name-topbar]",
+  ".topbar-user-name",
+]);
 
-    topbarRoot:
-      Object.freeze([
-        "#topbar-avatar",
-        "#topbarAvatar",
-        "[data-topbar-avatar='true']",
-        "[data-topbar-avatar]",
-        "[data-user-avatar='topbar']",
-        "[data-user-avatar-topbar]",
-        ".topbar-avatar",
-      ]),
+const USER_TOGGLE_SELECTORS = Object.freeze([
+  "#userToggle",
+  "#user-toggle",
+  "[data-user-toggle='true']",
+  "[data-user-toggle]",
+  "[data-user-menu-toggle]",
+]);
 
-    sidebarImage:
-      Object.freeze([
-        "#sidebarAvatarImage",
-        "img[data-sidebar-avatar-image='true']",
-        "[data-sidebar-avatar-image]",
-        "img[data-avatar-image='sidebar']",
-        ".sidebar-avatar img",
-        ".sidebar-avatar__image",
-        ".avatar-image",
-        "img[data-avatar-image='true']",
-        "[data-avatar-image]",
-        "img",
-      ]),
+const USER_DROPDOWN_SELECTORS = Object.freeze([
+  "#userDropdown",
+  "#user-dropdown",
+  "[data-user-dropdown='true']",
+  "[data-user-dropdown]",
+  "[data-user-menu]",
+]);
 
-    topbarImage:
-      Object.freeze([
-        "#topbarAvatarImage",
-        "img[data-topbar-avatar-image='true']",
-        "[data-topbar-avatar-image]",
-        "img[data-avatar-image='topbar']",
-        ".topbar-avatar img",
-        ".topbar-avatar__image",
-        ".avatar-image",
-        "img[data-avatar-image='true']",
-        "[data-avatar-image]",
-        "img",
-      ]),
+const LOGOUT_SELECTORS = Object.freeze([
+  "#logoutBtn",
+  "#logout-button",
+  "#logout-btn",
+  "[data-logout-button='true']",
+  "[data-logout-button]",
+  "[data-logout]",
+  "[data-action='logout']",
+]);
 
-    sidebarFallback:
-      Object.freeze([
-        "#sidebarAvatarFallback",
-        "[data-sidebar-avatar-fallback='true']",
-        "[data-sidebar-avatar-fallback]",
-        "[data-avatar-fallback='sidebar']",
-        ".sidebar-avatar-fallback",
-        ".sidebar-avatar__fallback",
-        ".avatar-fallback",
-        "[data-avatar-fallback='true']",
-        "[data-avatar-fallback]",
-      ]),
+const TOPBAR_TITLE_SELECTORS = Object.freeze([
+  "#topbar-title",
+  "[data-topbar-title='true']",
+  "[data-topbar-title]",
+  ".topbar-title",
+]);
 
-    topbarFallback:
-      Object.freeze([
-        "#topbarAvatarFallback",
-        "[data-topbar-avatar-fallback='true']",
-        "[data-topbar-avatar-fallback]",
-        "[data-avatar-fallback='topbar']",
-        ".topbar-avatar-fallback",
-        ".topbar-avatar__fallback",
-        ".avatar-fallback",
-        "[data-avatar-fallback='true']",
-        "[data-avatar-fallback]",
-      ]),
-  });
+const DYNAMIC_CONTAINER_SELECTORS = Object.freeze({
+  topbarViewContainer: Object.freeze([
+    "#topbarview-container",
+    "#topbar-view-container",
+    "[data-topbar-view-container='true']",
+    "[data-topbar-view-container]",
+    ".topbar-view-container",
+  ]),
 
-const USER_NAME_SELECTORS =
-  Object.freeze([
-    "#sidebar-name",
-    "#sidebarName",
-    "[data-sidebar-name='true']",
-    "[data-sidebar-name]",
-    "[data-user-name='sidebar']",
-    "[data-user-name]",
-    ".sidebar-name",
-    ".user-name",
-  ]);
+  tableheadContainer: Object.freeze([
+    "#tablehead-container",
+    "#table-head-container",
+    "[data-tablehead-container='true']",
+    "[data-tablehead-container]",
+    "[data-table-head-container]",
+    ".tablehead-container",
+  ]),
 
-const TOPBAR_USER_NAME_SELECTORS =
-  Object.freeze([
-    "#topbar-user-name",
-    "#topbarUserName",
-    "[data-topbar-user-name='true']",
-    "[data-topbar-user-name]",
-    "[data-user-name='topbar']",
-    "[data-user-name-topbar]",
-    ".topbar-user-name",
-  ]);
+  tablehead: Object.freeze([
+    "#table-head",
+    "#tablehead",
+    ".table-head",
+    ".tablehead",
+    "[data-tablehead]",
+    "[data-table-head]",
+  ]),
 
-const USER_TOGGLE_SELECTORS =
-  Object.freeze([
-    "#userToggle",
-    "#user-toggle",
-    "[data-user-toggle='true']",
-    "[data-user-toggle]",
-    "[data-user-menu-toggle]",
-  ]);
-
-const USER_DROPDOWN_SELECTORS =
-  Object.freeze([
-    "#userDropdown",
-    "#user-dropdown",
-    "[data-user-dropdown='true']",
-    "[data-user-dropdown]",
-    "[data-user-menu]",
-  ]);
-
-const LOGOUT_SELECTORS =
-  Object.freeze([
-    "#logoutBtn",
-    "#logout-button",
-    "#logout-btn",
-    "[data-logout-button='true']",
-    "[data-logout-button]",
-    "[data-logout]",
-    "[data-action='logout']",
-  ]);
-
-const TOPBAR_TITLE_SELECTORS =
-  Object.freeze([
-    "#topbar-title",
-    "[data-topbar-title='true']",
-    "[data-topbar-title]",
-    ".topbar-title",
-  ]);
-
-const DYNAMIC_CONTAINER_SELECTORS =
-  Object.freeze({
-    topbarViewContainer:
-      Object.freeze([
-        "#topbarview-container",
-        "#topbar-view-container",
-        "[data-topbar-view-container='true']",
-        "[data-topbar-view-container]",
-        ".topbar-view-container",
-      ]),
-
-    tableheadContainer:
-      Object.freeze([
-        "#tablehead-container",
-        "#table-head-container",
-        "[data-tablehead-container='true']",
-        "[data-tablehead-container]",
-        "[data-table-head-container]",
-        ".tablehead-container",
-      ]),
-
-    tablehead:
-      Object.freeze([
-        "#table-head",
-        "#tablehead",
-        ".table-head",
-        ".tablehead",
-        "[data-tablehead]",
-        "[data-table-head]",
-      ]),
-
-    viewContainer:
-      Object.freeze([
-        "#view-container",
-        "#router-view",
-        "#app-view",
-        "[data-view-root]",
-        "[data-view-container='true']",
-        "[data-view-container]",
-        "[data-router-view]",
-        "[data-router-outlet]",
-        ".view-container",
-        ".router-view",
-      ]),
-  });
-
-const USER_NODE_MAP =
-  Object.freeze({
-    sidebarName:
-      USER_NAME_SELECTORS,
-
-    sidebarAvatar:
-      AVATAR_SELECTORS.sidebarRoot,
-
-    topbarUserName:
-      TOPBAR_USER_NAME_SELECTORS,
-
-    topbarAvatar:
-      AVATAR_SELECTORS.topbarRoot,
-
-    userToggle:
-      USER_TOGGLE_SELECTORS,
-
-    userDropdown:
-      USER_DROPDOWN_SELECTORS,
-
-    logoutBtn:
-      LOGOUT_SELECTORS,
-
-    topbarTitle:
-      TOPBAR_TITLE_SELECTORS,
-  });
+  viewContainer: Object.freeze([
+    "#view-container",
+    "#router-view",
+    "#app-view",
+    "[data-view-root]",
+    "[data-view-container='true']",
+    "[data-view-container]",
+    "[data-router-view]",
+    "[data-router-outlet]",
+    ".view-container",
+    ".router-view",
+  ]),
+});
 
 /* =========================================================
    BASICS
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object"
-  );
+  return value !== null && typeof value === "object";
 }
 
 function isPlainObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function isFunction(value) {
@@ -361,23 +294,37 @@ function isFunction(value) {
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
-  const text =
-    String(value).trim();
+  const text = String(value).trim();
 
   return text || fallback;
 }
 
 function safeObject(value, fallback = {}) {
-  return isPlainObject(value)
-    ? value
-    : fallback;
+  return isPlainObject(value) ? value : fallback;
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function toArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return Array.from(value);
+  if (value === null || value === undefined) return [];
+  return [value];
+}
+
+function unique(values = []) {
+  return Array.from(
+    new Set(
+      toArray(values)
+        .flat(Infinity)
+        .map((item) => safeText(item, ""))
+        .filter(Boolean)
+    )
+  );
 }
 
 function safeBool(value, fallback = false) {
@@ -387,42 +334,13 @@ function safeBool(value, fallback = false) {
   if (value === 0) return false;
 
   if (typeof value === "string") {
-    const clean =
-      value.trim().toLowerCase();
+    const clean = value.trim().toLowerCase();
 
-    if (
-      [
-        "true",
-        "1",
-        "yes",
-        "si",
-        "sí",
-        "ok",
-        "on",
-      ].includes(clean)
-    ) {
-      return true;
-    }
-
-    if (
-      [
-        "false",
-        "0",
-        "no",
-        "off",
-      ].includes(clean)
-    ) {
-      return false;
-    }
+    if (["true", "1", "yes", "si", "sí", "ok", "on"].includes(clean)) return true;
+    if (["false", "0", "no", "off"].includes(clean)) return false;
   }
 
   return Boolean(fallback);
-}
-
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
 }
 
 function safeNowIso() {
@@ -441,84 +359,52 @@ function safeRedact(value = "") {
   }
 }
 
-function sanitizeEventPayload(value, depth = 0, keyHint = "") {
-  if (depth > 4) {
-    return "[depth-limit]";
-  }
+function shouldRedactPayloadKey(keyHint = "") {
+  const key = safeText(keyHint, "");
 
-  if (
-    /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|avatarUrl|avatar_url|signedUrl|signed_url|sas|blobUrl|downloadUrl|viewUrl/i.test(
-      safeText(keyHint, "")
-    )
-  ) {
+  if (!key) return false;
+
+  if (/^has[A-Z].*Url$/.test(key)) return false;
+  if (/^has[A-Z]/.test(key)) return false;
+  if (/^is[A-Z]/.test(key)) return false;
+  if (/^can[A-Z]/.test(key)) return false;
+
+  return /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|avatarUrl|avatar_url|signedUrl|signed_url|sas|blobUrl|downloadUrl|viewUrl/i.test(key);
+}
+
+function sanitizeEventPayload(value, depth = 0, keyHint = "") {
+  if (depth > 4) return "[depth-limit]";
+
+  if (shouldRedactPayloadKey(keyHint)) {
     return value ? "***" : null;
   }
 
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return value;
-  }
+  if (value === null || value === undefined) return value;
 
-  if (typeof value === "string") {
-    return safeRedact(value);
-  }
-
-  if (
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
-  if (typeof value === "bigint") {
-    return String(value);
-  }
-
-  if (typeof value === "function") {
-    return "[function]";
-  }
+  if (typeof value === "string") return safeRedact(value);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return "[function]";
 
   if (value instanceof Error) {
     return {
-      name:
-        value.name || "Error",
-
-      message:
-        safeRedact(
-          value.message || "Error"
-        ),
-
-      stack:
-        value.stack
-          ? "[stack]"
-          : null,
+      name: value.name || "Error",
+      message: safeRedact(value.message || "Error"),
+      stack: value.stack ? "[stack]" : null,
     };
   }
 
   if (Array.isArray(value)) {
-    return value
-      .slice(0, 80)
-      .map((item) =>
-        sanitizeEventPayload(
-          item,
-          depth + 1,
-          keyHint
-        )
-      );
+    return value.slice(0, 80).map((item) =>
+      sanitizeEventPayload(item, depth + 1, keyHint)
+    );
   }
 
   if (isPlainObject(value)) {
     const output = {};
 
     for (const [key, item] of Object.entries(value).slice(0, 120)) {
-      output[key] =
-        sanitizeEventPayload(
-          item,
-          depth + 1,
-          key
-        );
+      output[key] = sanitizeEventPayload(item, depth + 1, key);
     }
 
     return output;
@@ -532,19 +418,12 @@ function sanitizeEventPayload(value, depth = 0, keyHint = "") {
 }
 
 function safeEmit(events, eventName, payload = {}) {
-  const name =
-    safeText(eventName, "");
+  const name = safeText(eventName, "");
 
-  if (!name) {
-    return false;
-  }
+  if (!name) return false;
 
   try {
-    events?.emit?.(
-      name,
-      sanitizeEventPayload(payload)
-    );
-
+    events?.emit?.(name, sanitizeEventPayload(payload));
     return true;
   } catch {}
 
@@ -552,18 +431,12 @@ function safeEmit(events, eventName, payload = {}) {
 }
 
 function safeSetText(el, value = "") {
-  if (!el) {
-    return false;
-  }
+  if (!el) return false;
 
   try {
-    const next =
-      safeText(value, "");
+    const next = safeText(value, "");
 
-    if (el.textContent !== next) {
-      el.textContent =
-        next;
-    }
+    if (el.textContent !== next) el.textContent = next;
 
     return true;
   } catch {}
@@ -572,27 +445,13 @@ function safeSetText(el, value = "") {
 }
 
 function safeSetAttr(el, name, value) {
-  if (
-    !el ||
-    !name
-  ) {
-    return false;
-  }
+  if (!el || !name) return false;
 
   try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
+    if (value === null || value === undefined || value === "") {
       el.removeAttribute(name);
-    } else if (
-      el.getAttribute(name) !== String(value)
-    ) {
-      el.setAttribute(
-        name,
-        String(value)
-      );
+    } else if (el.getAttribute(name) !== String(value)) {
+      el.setAttribute(name, String(value));
     }
 
     return true;
@@ -602,12 +461,7 @@ function safeSetAttr(el, name, value) {
 }
 
 function safeRemoveAttr(el, name) {
-  if (
-    !el ||
-    !name
-  ) {
-    return false;
-  }
+  if (!el || !name) return false;
 
   try {
     el.removeAttribute(name);
@@ -618,63 +472,10 @@ function safeRemoveAttr(el, name) {
 }
 
 function safeToggleClass(el, className, force) {
-  if (
-    !el ||
-    !className
-  ) {
-    return false;
-  }
+  if (!el || !className) return false;
 
   try {
-    el.classList.toggle(
-      className,
-      Boolean(force)
-    );
-
-    return true;
-  } catch {}
-
-  return false;
-}
-
-function safeClassAdd(el, ...classes) {
-  if (!el) {
-    return false;
-  }
-
-  const clean =
-    classes
-      .map((item) => safeText(item, ""))
-      .filter(Boolean);
-
-  if (!clean.length) {
-    return false;
-  }
-
-  try {
-    el.classList.add(...clean);
-    return true;
-  } catch {}
-
-  return false;
-}
-
-function safeClassRemove(el, ...classes) {
-  if (!el) {
-    return false;
-  }
-
-  const clean =
-    classes
-      .map((item) => safeText(item, ""))
-      .filter(Boolean);
-
-  if (!clean.length) {
-    return false;
-  }
-
-  try {
-    el.classList.remove(...clean);
+    el.classList.toggle(className, Boolean(force));
     return true;
   } catch {}
 
@@ -682,25 +483,13 @@ function safeClassRemove(el, ...classes) {
 }
 
 function safeDatasetSet(el, key, value) {
-  if (
-    !el ||
-    !key
-  ) {
-    return false;
-  }
+  if (!el || !key) return false;
 
   try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
+    if (value === null || value === undefined || value === "") {
       delete el.dataset[key];
-    } else if (
-      el.dataset[key] !== String(value)
-    ) {
-      el.dataset[key] =
-        String(value);
+    } else if (el.dataset[key] !== String(value)) {
+      el.dataset[key] = String(value);
     }
 
     return true;
@@ -710,9 +499,7 @@ function safeDatasetSet(el, key, value) {
 }
 
 function isConnected(el) {
-  if (!el) {
-    return false;
-  }
+  if (!el) return false;
 
   try {
     if (
@@ -739,44 +526,25 @@ function isConnected(el) {
 }
 
 function queryFirst(selectors = [], root = null) {
-  if (!isBrowser()) {
-    return null;
-  }
+  if (!isBrowser()) return null;
 
-  const scope =
-    root || document;
+  const scope = root || document;
 
-  for (const selector of safeArray(selectors)) {
-    const cleanSelector =
-      safeText(selector, "");
+  for (const selector of toArray(selectors)) {
+    const cleanSelector = safeText(selector, "");
 
-    if (!cleanSelector) {
-      continue;
-    }
+    if (!cleanSelector) continue;
 
     try {
-      if (
-        cleanSelector.startsWith("#") &&
-        scope === document
-      ) {
-        const foundById =
-          document.getElementById(
-            cleanSelector.slice(1)
-          );
+      if (cleanSelector.startsWith("#") && scope === document) {
+        const foundById = document.getElementById(cleanSelector.slice(1));
 
-        if (foundById) {
-          return foundById;
-        }
+        if (foundById) return foundById;
       }
 
-      const found =
-        scope.querySelector?.(
-          cleanSelector
-        );
+      const found = scope.querySelector?.(cleanSelector);
 
-      if (found) {
-        return found;
-      }
+      if (found) return found;
     } catch {}
   }
 
@@ -784,36 +552,21 @@ function queryFirst(selectors = [], root = null) {
 }
 
 function queryAll(selectors = [], root = null) {
-  if (!isBrowser()) {
-    return [];
-  }
+  if (!isBrowser()) return [];
 
-  const scope =
-    root || document;
+  const scope = root || document;
+  const output = [];
 
-  const output =
-    [];
+  for (const selector of toArray(selectors)) {
+    const cleanSelector = safeText(selector, "");
 
-  for (const selector of safeArray(selectors)) {
-    const cleanSelector =
-      safeText(selector, "");
-
-    if (!cleanSelector) {
-      continue;
-    }
+    if (!cleanSelector) continue;
 
     try {
-      const nodes =
-        Array.from(
-          scope.querySelectorAll?.(
-            cleanSelector
-          ) || []
-        );
+      const nodes = Array.from(scope.querySelectorAll?.(cleanSelector) || []);
 
       for (const node of nodes) {
-        if (!output.includes(node)) {
-          output.push(node);
-        }
+        if (!output.includes(node)) output.push(node);
       }
     } catch {}
   }
@@ -822,32 +575,21 @@ function queryAll(selectors = [], root = null) {
 }
 
 function queryFirstInScopes(selectors = [], scopes = []) {
-  for (const scope of safeArray(scopes)) {
-    if (!scope || !isConnected(scope)) {
-      continue;
-    }
+  for (const scope of toArray(scopes)) {
+    if (!scope || !isConnected(scope)) continue;
 
-    const found =
-      queryFirst(
-        selectors,
-        scope
-      );
+    const found = queryFirst(selectors, scope);
 
-    if (found) {
-      return found;
-    }
+    if (found) return found;
   }
 
   return queryFirst(selectors);
 }
 
 function getScopeNodes(dom, kind = "sidebar") {
-  if (!isBrowser()) {
-    return [];
-  }
+  if (!isBrowser()) return [];
 
-  const nodes =
-    [];
+  const nodes = [];
 
   if (kind === "sidebar") {
     nodes.push(
@@ -873,34 +615,18 @@ function getScopeNodes(dom, kind = "sidebar") {
 }
 
 function resolveDomNode(dom, key, selectors = [], root = null) {
-  const cached =
-    dom?.[key] || null;
+  const cached = dom?.[key] || null;
 
-  if (
-    cached &&
-    isConnected(cached)
-  ) {
-    return cached;
-  }
+  if (cached && isConnected(cached)) return cached;
 
-  const found =
-    root
-      ? queryFirst(
-          selectors,
-          root
-        )
-      : queryFirst(
-          selectors
-        );
+  const found = root
+    ? queryFirst(selectors, root)
+    : queryFirst(selectors);
 
   try {
-    if (
-      found &&
-      dom &&
-      key
-    ) {
-      dom[key] =
-        found;
+    if (found && dom && key) {
+      dom[key] = found;
+      dom[`${key}El`] = found;
     }
   } catch {}
 
@@ -908,39 +634,20 @@ function resolveDomNode(dom, key, selectors = [], root = null) {
 }
 
 function resolveScopedDomNode(dom, key, selectors = [], kind = "") {
-  const cached =
-    dom?.[key] || null;
+  const cached = dom?.[key] || null;
 
-  if (
-    cached &&
-    isConnected(cached)
-  ) {
-    return cached;
-  }
+  if (cached && isConnected(cached)) return cached;
 
-  const scopes =
-    kind
-      ? getScopeNodes(dom, kind)
-      : [];
+  const scopes = kind ? getScopeNodes(dom, kind) : [];
 
-  const found =
-    scopes.length
-      ? queryFirstInScopes(
-          selectors,
-          scopes
-        )
-      : queryFirst(selectors);
+  const found = scopes.length
+    ? queryFirstInScopes(selectors, scopes)
+    : queryFirst(selectors);
 
   try {
-    if (
-      found &&
-      dom &&
-      key
-    ) {
-      dom[key] =
-        found;
-      dom[`${key}El`] =
-        found;
+    if (found && dom && key) {
+      dom[key] = found;
+      dom[`${key}El`] = found;
     }
   } catch {}
 
@@ -949,39 +656,24 @@ function resolveScopedDomNode(dom, key, selectors = [], kind = "") {
 
 function isImageElement(el) {
   try {
-    return safeText(
-      el?.tagName,
-      ""
-    ).toLowerCase() === "img";
+    return safeText(el?.tagName, "").toLowerCase() === "img";
   } catch {
     return false;
   }
 }
 
 function removeNativeTooltip(el) {
-  /*
-    Regla Onion:
-    - eliminar title nativo
-    - NO tocar data-tooltip custom
-  */
-  safeRemoveAttr(
-    el,
-    "title"
-  );
-
+  safeRemoveAttr(el, "title");
   return true;
 }
 
 function nextFrame(callback) {
-  if (!isFunction(callback)) {
-    return;
-  }
+  if (!isFunction(callback)) return;
 
   if (!isBrowser()) {
     try {
       callback();
     } catch {}
-
     return;
   }
 
@@ -991,7 +683,6 @@ function nextFrame(callback) {
         callback();
       } catch {}
     });
-
     return;
   } catch {}
 
@@ -1005,29 +696,18 @@ function nextFrame(callback) {
 }
 
 function getConfigValue(path = "", fallback = undefined) {
-  const parts =
-    safeText(path, "")
-      .split(".")
-      .filter(Boolean);
+  const parts = safeText(path, "")
+    .split(".")
+    .filter(Boolean);
 
-  let current =
-    config;
+  let current = config;
 
   for (const part of parts) {
-    if (
-      !current ||
-      current[part] === undefined
-    ) {
-      return fallback;
-    }
-
-    current =
-      current[part];
+    if (!current || current[part] === undefined) return fallback;
+    current = current[part];
   }
 
-  return current === undefined
-    ? fallback
-    : current;
+  return current === undefined ? fallback : current;
 }
 
 /* =========================================================
@@ -1071,9 +751,7 @@ function safeGetInitials(value = "") {
 ========================================================= */
 
 function getI18nFromRuntime() {
-  if (!isBrowser()) {
-    return null;
-  }
+  if (!isBrowser()) return null;
 
   try {
     return (
@@ -1089,29 +767,16 @@ function getI18nFromRuntime() {
 }
 
 function safeTranslate(key, params = {}, fallback = "") {
-  const cleanKey =
-    safeText(key, "");
+  const cleanKey = safeText(key, "");
+  const cleanFallback = safeText(fallback, cleanKey);
 
-  const cleanFallback =
-    safeText(fallback, cleanKey);
-
-  if (!cleanKey) {
-    return cleanFallback;
-  }
+  if (!cleanKey) return cleanFallback;
 
   try {
-    const runtimeI18n =
-      getI18nFromRuntime();
+    const runtimeI18n = getI18nFromRuntime();
 
     if (isFunction(runtimeI18n?.t)) {
-      return (
-        runtimeI18n.t(
-          cleanKey,
-          params,
-          cleanFallback
-        ) ||
-        cleanFallback
-      );
+      return runtimeI18n.t(cleanKey, params, cleanFallback) || cleanFallback;
     }
   } catch {}
 
@@ -1126,8 +791,7 @@ function normalizeTitleArgs(input = {}, maybeExtra = {}) {
   if (typeof input === "string") {
     return {
       ...safeObject(maybeExtra),
-      title:
-        input,
+      title: input,
     };
   }
 
@@ -1149,8 +813,7 @@ function normalizeSyncArgs(input = {}) {
   }
 
   return {
-    state:
-      input,
+    state: input,
   };
 }
 
@@ -1159,20 +822,13 @@ function normalizeSyncArgs(input = {}) {
 ========================================================= */
 
 function normalizeTitle(value = "", fallback = config.appName || DEFAULT_TITLE) {
-  return safeText(
-    value,
-    fallback
-  )
+  return safeText(value, fallback)
     .replace(/\s+/g, " ")
     .slice(0, 160);
 }
 
 export function setDocumentTitle(input = {}, maybeExtra = {}) {
-  const args =
-    normalizeTitleArgs(
-      input,
-      maybeExtra
-    );
+  const args = normalizeTitleArgs(input, maybeExtra);
 
   const {
     dom,
@@ -1185,118 +841,56 @@ export function setDocumentTitle(input = {}, maybeExtra = {}) {
     topbarTitle = "",
     topbarTitleKey = "",
     topbarTitleParams = {},
-  } =
-    args;
+  } = args;
 
-  const baseTitle =
-    normalizeTitle(
-      title,
-      config.appName || DEFAULT_TITLE
-    );
+  const baseTitle = normalizeTitle(title, config.appName || DEFAULT_TITLE);
 
-  let finalTitle =
-    baseTitle;
+  let finalTitle = baseTitle;
 
   if (titleKey) {
-    finalTitle =
-      normalizeTitle(
-        safeTranslate(
-          titleKey,
-          titleParams,
-          baseTitle
-        ),
-        baseTitle
-      );
+    finalTitle = normalizeTitle(
+      safeTranslate(titleKey, titleParams, baseTitle),
+      baseTitle
+    );
   }
 
-  const cleanSuffix =
-    normalizeTitle(
-      suffix,
-      ""
-    );
+  const cleanSuffix = normalizeTitle(suffix, "");
 
-  if (
-    cleanSuffix &&
-    !finalTitle.includes(cleanSuffix)
-  ) {
-    finalTitle =
-      `${finalTitle} · ${cleanSuffix}`;
+  if (cleanSuffix && !finalTitle.includes(cleanSuffix)) {
+    finalTitle = `${finalTitle} · ${cleanSuffix}`;
   }
 
   if (isBrowser()) {
     try {
-      document.title =
-        finalTitle;
+      document.title = finalTitle;
     } catch {}
   }
 
   const topbarTitleNode =
     dom?.topbarTitle ||
-    resolveScopedDomNode(
-      dom,
-      "topbarTitle",
-      TOPBAR_TITLE_SELECTORS,
-      "topbar"
-    );
+    resolveScopedDomNode(dom, "topbarTitle", TOPBAR_TITLE_SELECTORS, "topbar");
 
-  let finalTopbarTitle =
-    normalizeTitle(
-      topbarTitle,
-      baseTitle
-    );
+  let finalTopbarTitle = normalizeTitle(topbarTitle, baseTitle);
 
   if (topbarTitleKey) {
-    finalTopbarTitle =
-      normalizeTitle(
-        safeTranslate(
-          topbarTitleKey,
-          topbarTitleParams,
-          finalTopbarTitle
-        ),
-        finalTopbarTitle
-      );
-  }
-
-  if (
-    updateTopbar !== false &&
-    topbarTitleNode
-  ) {
-    safeSetText(
-      topbarTitleNode,
+    finalTopbarTitle = normalizeTitle(
+      safeTranslate(topbarTitleKey, topbarTitleParams, finalTopbarTitle),
       finalTopbarTitle
     );
-
-    safeDatasetSet(
-      topbarTitleNode,
-      "titleSynced",
-      "true"
-    );
-
-    safeDatasetSet(
-      topbarTitleNode,
-      "titleUpdatedAt",
-      safeNowIso()
-    );
-
-    removeNativeTooltip(
-      topbarTitleNode
-    );
   }
 
-  safeEmit(
-    events,
-    TITLE_EVENT,
-    {
-      title:
-        finalTitle,
+  if (updateTopbar !== false && topbarTitleNode) {
+    safeSetText(topbarTitleNode, finalTopbarTitle);
+    safeDatasetSet(topbarTitleNode, "titleSynced", "true");
+    safeDatasetSet(topbarTitleNode, "titleUpdatedAt", safeNowIso());
+    removeNativeTooltip(topbarTitleNode);
+  }
 
-      topbarTitle:
-        finalTopbarTitle,
-
-      at:
-        safeNowIso(),
-    }
-  );
+  safeEmit(events, TITLE_EVENT, {
+    title: finalTitle,
+    topbarTitle: finalTopbarTitle,
+    at: safeNowIso(),
+  });
 
   return finalTitle;
 }
@@ -1306,9 +900,7 @@ export function setDocumentTitle(input = {}, maybeExtra = {}) {
 ========================================================= */
 
 function clearElement(el) {
-  if (!el) {
-    return false;
-  }
+  if (!el) return false;
 
   try {
     el.replaceChildren();
@@ -1316,10 +908,7 @@ function clearElement(el) {
   } catch {}
 
   try {
-    while (el.firstChild) {
-      el.removeChild(el.firstChild);
-    }
-
+    while (el.firstChild) el.removeChild(el.firstChild);
     return true;
   } catch {}
 
@@ -1327,17 +916,12 @@ function clearElement(el) {
 }
 
 function resolveDynamicContainer(dom, key = "") {
-  const selectors =
-    DYNAMIC_CONTAINER_SELECTORS[key] || [];
+  const selectors = DYNAMIC_CONTAINER_SELECTORS[key] || [];
 
   return (
     dom?.[key] ||
     dom?.[`${key}El`] ||
-    resolveDomNode(
-      dom,
-      key,
-      selectors
-    )
+    resolveDomNode(dom, key, selectors)
   );
 }
 
@@ -1350,52 +934,21 @@ export function clearDynamicContainers({
   resetTableheadVisibility = true,
   extraKeys = [],
 } = {}) {
-  const cleared =
-    [];
+  const cleared = [];
+  const keys = [];
 
-  const keys =
-    [];
-
-  if (includeTopbar !== false) {
-    keys.push(
-      "topbarViewContainer"
-    );
-  }
-
-  if (includeTablehead !== false) {
-    keys.push(
-      "tableheadContainer"
-    );
-  }
-
-  if (includeView === true) {
-    keys.push(
-      "viewContainer"
-    );
-  }
+  if (includeTopbar !== false) keys.push("topbarViewContainer");
+  if (includeTablehead !== false) keys.push("tableheadContainer");
+  if (includeView === true) keys.push("viewContainer");
 
   for (const key of safeArray(extraKeys)) {
-    if (
-      key &&
-      !keys.includes(key)
-    ) {
-      keys.push(key);
-    }
+    if (key && !keys.includes(key)) keys.push(key);
   }
 
   for (const key of keys) {
-    const node =
-      resolveDynamicContainer(
-        dom,
-        key
-      );
+    const node = resolveDynamicContainer(dom, key);
 
-    if (
-      node &&
-      clearElement(node)
-    ) {
-      cleared.push(key);
-    }
+    if (node && clearElement(node)) cleared.push(key);
   }
 
   if (
@@ -1409,48 +962,24 @@ export function clearDynamicContainers({
       dom?.tablehead ||
       dom?.tableHead ||
       dom?.tableheadEl ||
-      resolveDynamicContainer(
-        dom,
-        "tablehead"
-      );
+      resolveDynamicContainer(dom, "tablehead");
 
     if (tablehead) {
       try {
-        tablehead.hidden =
-          true;
+        tablehead.hidden = true;
       } catch {}
 
-      safeSetAttr(
-        tablehead,
-        "aria-hidden",
-        "true"
-      );
-
-      safeDatasetSet(
-        tablehead,
-        "visible",
-        "false"
-      );
-
-      safeDatasetSet(
-        tablehead,
-        "tableheadState",
-        "empty"
-      );
+      safeSetAttr(tablehead, "aria-hidden", "true");
+      safeDatasetSet(tablehead, "visible", "false");
+      safeDatasetSet(tablehead, "tableheadState", "empty");
     }
   }
 
-  safeEmit(
-    events,
-    DYNAMIC_CLEARED_EVENT,
-    {
-      cleared,
-      includeView:
-        Boolean(includeView),
-      at:
-        safeNowIso(),
-    }
-  );
+  safeEmit(events, DYNAMIC_CLEARED_EVENT, {
+    cleared,
+    includeView: Boolean(includeView),
+    at: safeNowIso(),
+  });
 
   return true;
 }
@@ -1460,47 +989,27 @@ export function clearDynamicContainers({
 ========================================================= */
 
 function isValidAvatarUrl(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "");
 
-  if (!raw) {
-    return false;
-  }
+  if (!raw) return false;
 
-  if (/^(javascript|vbscript):/i.test(raw)) {
-    return false;
-  }
+  if (/^(javascript|vbscript):/i.test(raw)) return false;
 
   if (/^data:/i.test(raw)) {
     return /^data:image\/(png|jpe?g|gif|webp|avif);base64,/i.test(raw);
   }
 
-  if (/^blob:/i.test(raw)) {
-    return true;
-  }
-
-  if (/^\/(?!\/)/.test(raw)) {
-    return true;
-  }
-
-  if (/^\.\.?\//.test(raw)) {
-    return true;
-  }
+  if (/^blob:/i.test(raw)) return true;
+  if (/^\/(?!\/)/.test(raw)) return true;
+  if (/^\.\.?\//.test(raw)) return true;
 
   try {
-    const url =
-      new URL(
-        raw,
-        isBrowser()
-          ? window.location.origin
-          : "http://localhost"
-      );
+    const url = new URL(
+      raw,
+      isBrowser() ? window.location.origin : "http://localhost"
+    );
 
-    return [
-      "http:",
-      "https:",
-      "blob:",
-    ].includes(url.protocol);
+    return ["http:", "https:", "blob:"].includes(url.protocol);
   } catch {
     return false;
   }
@@ -1511,169 +1020,109 @@ function isValidAvatarUrl(value = "") {
 ========================================================= */
 
 function normalizeAvatarText(value = "") {
-  const text =
-    safeText(value, DEFAULT_AVATAR_TEXT)
-      .replace(/[^a-zA-Z0-9]/g, "")
-      .slice(0, 2)
-      .toUpperCase();
+  const text = safeText(value, DEFAULT_AVATAR_TEXT)
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, 2)
+    .toUpperCase();
 
   return text || DEFAULT_AVATAR_TEXT;
 }
 
 function getAvatarSelectors(idPrefix = "sidebar") {
-  const prefix =
-    safeText(idPrefix, "sidebar")
-      .toLowerCase();
+  const prefix = safeText(idPrefix, "sidebar").toLowerCase();
 
   if (prefix === "topbar") {
     return {
-      root:
-        AVATAR_SELECTORS.topbarRoot,
-      image:
-        AVATAR_SELECTORS.topbarImage,
-      fallback:
-        AVATAR_SELECTORS.topbarFallback,
-      kind:
-        "topbar",
+      root: AVATAR_SELECTORS.topbarRoot,
+      image: AVATAR_SELECTORS.topbarImage,
+      fallback: AVATAR_SELECTORS.topbarFallback,
+      kind: "topbar",
     };
   }
 
   return {
-    root:
-      AVATAR_SELECTORS.sidebarRoot,
-    image:
-      AVATAR_SELECTORS.sidebarImage,
-    fallback:
-      AVATAR_SELECTORS.sidebarFallback,
-    kind:
-      "sidebar",
+    root: AVATAR_SELECTORS.sidebarRoot,
+    image: AVATAR_SELECTORS.sidebarImage,
+    fallback: AVATAR_SELECTORS.sidebarFallback,
+    kind: "sidebar",
   };
+}
+
+function getAvatarSearchRoot(avatarRoot) {
+  if (!avatarRoot) return null;
+
+  if (isImageElement(avatarRoot)) {
+    return avatarRoot.parentElement || null;
+  }
+
+  return avatarRoot;
 }
 
 function getAvatarNodes(avatarRoot, idPrefix = "sidebar") {
   if (!avatarRoot) {
     return {
-      imgEl:
-        null,
-
-      fallbackEl:
-        null,
+      imgEl: null,
+      fallbackEl: null,
     };
   }
+
+  const selectors = getAvatarSelectors(idPrefix);
 
   if (isImageElement(avatarRoot)) {
-    return {
-      imgEl:
-        avatarRoot,
+    const parent = getAvatarSearchRoot(avatarRoot);
 
-      fallbackEl:
-        null,
+    return {
+      imgEl: avatarRoot,
+      fallbackEl: parent ? queryFirst(selectors.fallback, parent) : null,
     };
   }
 
-  const selectors =
-    getAvatarSelectors(idPrefix);
-
-  const imgEl =
-    queryFirst(
-      selectors.image,
-      avatarRoot
-    );
-
-  const fallbackEl =
-    queryFirst(
-      selectors.fallback,
-      avatarRoot
-    );
-
   return {
-    imgEl,
-    fallbackEl,
+    imgEl: queryFirst(selectors.image, avatarRoot),
+    fallbackEl: queryFirst(selectors.fallback, avatarRoot),
   };
 }
 
 function resolveAvatarRoot(dom, key, idPrefix = "sidebar") {
-  const cached =
-    dom?.[key] || null;
+  const cached = dom?.[key] || null;
 
-  if (
-    cached &&
-    isConnected(cached)
-  ) {
-    return cached;
-  }
+  if (cached && isConnected(cached)) return cached;
 
-  const selectors =
-    getAvatarSelectors(idPrefix);
+  const selectors = getAvatarSelectors(idPrefix);
+  const scopes = getScopeNodes(dom, selectors.kind);
 
-  const scopes =
-    getScopeNodes(
-      dom,
-      selectors.kind
-    );
-
-  let root =
-    scopes.length
-      ? queryFirstInScopes(
-          selectors.root,
-          scopes
-        )
-      : queryFirst(
-          selectors.root
-        );
+  let root = scopes.length
+    ? queryFirstInScopes(selectors.root, scopes)
+    : queryFirst(selectors.root);
 
   if (!root) {
-    const image =
-      scopes.length
-        ? queryFirstInScopes(
-            selectors.image,
-            scopes
-          )
-        : queryFirst(
-            selectors.image
-          );
+    const image = scopes.length
+      ? queryFirstInScopes(selectors.image, scopes)
+      : queryFirst(selectors.image);
 
-    const fallback =
-      scopes.length
-        ? queryFirstInScopes(
-            selectors.fallback,
-            scopes
-          )
-        : queryFirst(
-            selectors.fallback
-          );
+    const fallback = scopes.length
+      ? queryFirstInScopes(selectors.fallback, scopes)
+      : queryFirst(selectors.fallback);
 
     if (
       image?.parentElement &&
       fallback?.parentElement &&
       image.parentElement === fallback.parentElement
     ) {
-      root =
-        image.parentElement;
+      root = image.parentElement;
     } else if (image?.parentElement) {
-      root =
-        image.parentElement;
+      root = image.parentElement;
     } else if (fallback?.parentElement) {
-      root =
-        fallback.parentElement;
+      root = fallback.parentElement;
     } else {
-      root =
-        image ||
-        fallback ||
-        null;
+      root = image || fallback || null;
     }
   }
 
   try {
-    if (
-      root &&
-      dom &&
-      key
-    ) {
-      dom[key] =
-        root;
-      dom[`${key}El`] =
-        root;
+    if (root && dom && key) {
+      dom[key] = root;
+      dom[`${key}El`] = root;
     }
   } catch {}
 
@@ -1681,27 +1130,19 @@ function resolveAvatarRoot(dom, key, idPrefix = "sidebar") {
 }
 
 function getNextAvatarRenderToken(avatarRoot) {
-  if (!avatarRoot) {
-    return "";
-  }
+  if (!avatarRoot) return "";
 
-  const next =
-    `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const next = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
   try {
-    AVATAR_RENDER_TOKENS.set(
-      avatarRoot,
-      next
-    );
+    AVATAR_RENDER_TOKENS.set(avatarRoot, next);
   } catch {}
 
   return next;
 }
 
 function isCurrentAvatarRenderToken(avatarRoot, token) {
-  if (!avatarRoot) {
-    return false;
-  }
+  if (!avatarRoot) return false;
 
   try {
     return AVATAR_RENDER_TOKENS.get(avatarRoot) === token;
@@ -1711,94 +1152,47 @@ function isCurrentAvatarRenderToken(avatarRoot, token) {
 }
 
 function ensureAvatarImageNode(avatarRoot, idPrefix = "sidebar") {
-  if (
-    !avatarRoot ||
-    !isBrowser()
-  ) {
-    return null;
-  }
+  if (!avatarRoot || !isBrowser()) return null;
 
   if (isImageElement(avatarRoot)) {
-    safeDatasetSet(
-      avatarRoot,
-      "avatarImage",
-      "true"
-    );
-
+    safeDatasetSet(avatarRoot, "avatarImage", "true");
     return avatarRoot;
   }
 
-  const { imgEl } =
-    getAvatarNodes(
-      avatarRoot,
-      idPrefix
-    );
+  const { imgEl } = getAvatarNodes(avatarRoot, idPrefix);
 
   if (imgEl) {
-    safeDatasetSet(
-      imgEl,
-      "avatarImage",
-      "true"
-    );
-
+    safeDatasetSet(imgEl, "avatarImage", "true");
     return imgEl;
   }
 
-  let created =
-    null;
+  let created = null;
 
   try {
-    created =
-      document.createElement("img");
+    created = document.createElement("img");
   } catch {
     return null;
   }
 
-  if (!created.id) {
-    created.id =
-      idPrefix === "topbar"
-        ? "topbarAvatarImage"
-        : "sidebarAvatarImage";
-  }
+  created.id = idPrefix === "topbar"
+    ? "topbarAvatarImage"
+    : "sidebarAvatarImage";
 
-  created.className =
-    safeText(
-      created.className,
-      "avatar-image"
-    );
+  created.className = "avatar-image";
 
-  safeDatasetSet(
-    created,
-    "avatarImage",
-    "true"
-  );
+  safeDatasetSet(created, "avatarImage", "true");
 
   try {
-    created.loading =
-      "eager";
-
-    created.decoding =
-      "async";
-
-    created.draggable =
-      false;
-
-    created.referrerPolicy =
-      "no-referrer";
+    created.loading = "eager";
+    created.decoding = "async";
+    created.draggable = false;
+    created.referrerPolicy = "no-referrer";
   } catch {}
 
-  created.hidden =
-    true;
+  created.hidden = true;
 
-  safeSetAttr(
-    created,
-    "aria-hidden",
-    "true"
-  );
-
-  removeNativeTooltip(
-    created
-  );
+  safeSetAttr(created, "aria-hidden", "true");
+  removeNativeTooltip(created);
 
   try {
     avatarRoot.appendChild(created);
@@ -1808,92 +1202,76 @@ function ensureAvatarImageNode(avatarRoot, idPrefix = "sidebar") {
 }
 
 function ensureAvatarFallbackNode(avatarRoot, avatarText = DEFAULT_AVATAR_TEXT, idPrefix = "sidebar") {
-  if (
-    !avatarRoot ||
-    !isBrowser()
-  ) {
-    return null;
-  }
+  if (!avatarRoot || !isBrowser()) return null;
+
+  const selectors = getAvatarSelectors(idPrefix);
+  const cleanText = normalizeAvatarText(avatarText);
 
   if (isImageElement(avatarRoot)) {
-    return null;
-  }
+    const parent = avatarRoot.parentElement;
 
-  const { fallbackEl } =
-    getAvatarNodes(
-      avatarRoot,
-      idPrefix
-    );
+    if (!parent) return null;
 
-  if (fallbackEl) {
-    safeDatasetSet(
-      fallbackEl,
-      "avatarFallback",
-      "true"
-    );
+    let fallback = queryFirst(selectors.fallback, parent);
 
-    if (
-      !safeText(
-        fallbackEl.textContent,
-        ""
-      )
-    ) {
-      safeSetText(
-        fallbackEl,
-        avatarText
-      );
+    if (fallback) {
+      safeDatasetSet(fallback, "avatarFallback", "true");
+      safeSetText(fallback, cleanText);
+      removeNativeTooltip(fallback);
+      return fallback;
     }
 
-    removeNativeTooltip(
-      fallbackEl
-    );
+    try {
+      fallback = document.createElement("span");
+    } catch {
+      return null;
+    }
 
+    fallback.id = idPrefix === "topbar"
+      ? "topbarAvatarFallback"
+      : "sidebarAvatarFallback";
+
+    fallback.className = "avatar-fallback";
+
+    safeDatasetSet(fallback, "avatarFallback", "true");
+    safeSetAttr(fallback, "aria-hidden", "true");
+    safeSetText(fallback, cleanText);
+    removeNativeTooltip(fallback);
+
+    try {
+      parent.appendChild(fallback);
+    } catch {}
+
+    return fallback;
+  }
+
+  const { fallbackEl } = getAvatarNodes(avatarRoot, idPrefix);
+
+  if (fallbackEl) {
+    safeDatasetSet(fallbackEl, "avatarFallback", "true");
+    safeSetText(fallbackEl, cleanText);
+    removeNativeTooltip(fallbackEl);
     return fallbackEl;
   }
 
-  let created =
-    null;
+  let created = null;
 
   try {
-    created =
-      document.createElement("span");
+    created = document.createElement("span");
   } catch {
     return null;
   }
 
-  if (!created.id) {
-    created.id =
-      idPrefix === "topbar"
-        ? "topbarAvatarFallback"
-        : "sidebarAvatarFallback";
-  }
+  created.id = idPrefix === "topbar"
+    ? "topbarAvatarFallback"
+    : "sidebarAvatarFallback";
 
-  created.className =
-    safeText(
-      created.className,
-      "avatar-fallback"
-    );
+  created.className = "avatar-fallback";
 
-  safeDatasetSet(
-    created,
-    "avatarFallback",
-    "true"
-  );
-
-  safeSetAttr(
-    created,
-    "aria-hidden",
-    "true"
-  );
-
-  safeSetText(
-    created,
-    avatarText
-  );
-
-  removeNativeTooltip(
-    created
-  );
+  safeDatasetSet(created, "avatarFallback", "true");
+  safeSetAttr(created, "aria-hidden", "true");
+  safeSetText(created, cleanText);
+  removeNativeTooltip(created);
 
   try {
     avatarRoot.appendChild(created);
@@ -1903,44 +1281,32 @@ function ensureAvatarFallbackNode(avatarRoot, avatarText = DEFAULT_AVATAR_TEXT, 
 }
 
 function cleanupDuplicateAvatarNodes(avatarRoot, idPrefix = "sidebar") {
-  if (
-    !avatarRoot ||
-    isImageElement(avatarRoot)
-  ) {
-    return false;
-  }
+  if (!avatarRoot) return false;
 
-  const selectors =
-    getAvatarSelectors(idPrefix);
+  const selectors = getAvatarSelectors(idPrefix);
+  const searchRoot = getAvatarSearchRoot(avatarRoot);
 
-  const images =
-    queryAll(
-      selectors.image,
-      avatarRoot
-    );
+  if (!searchRoot) return false;
 
-  const fallbacks =
-    queryAll(
-      selectors.fallback,
-      avatarRoot
-    );
+  const images = isImageElement(avatarRoot)
+    ? [avatarRoot]
+    : queryAll(selectors.image, searchRoot);
 
-  let changed =
-    false;
+  const fallbacks = queryAll(selectors.fallback, searchRoot);
+
+  let changed = false;
 
   images.slice(1).forEach((node) => {
     try {
       node.remove();
-      changed =
-        true;
+      changed = true;
     } catch {}
   });
 
   fallbacks.slice(1).forEach((node) => {
     try {
       node.remove();
-      changed =
-        true;
+      changed = true;
     } catch {}
   });
 
@@ -1954,74 +1320,28 @@ function setAvatarRootMeta(avatarRoot, {
   authenticated = false,
   mode = "",
 } = {}) {
-  if (!avatarRoot) {
-    return;
-  }
+  if (!avatarRoot) return;
 
-  safeSetAttr(
-    avatarRoot,
-    "aria-label",
-    avatarAlt
-  );
+  safeSetAttr(avatarRoot, "aria-label", avatarAlt);
+  safeDatasetSet(avatarRoot, "displayName", displayName);
+  safeDatasetSet(avatarRoot, "username", username);
+  safeDatasetSet(avatarRoot, "authenticated", authenticated ? "true" : "false");
 
-  safeDatasetSet(
-    avatarRoot,
-    "displayName",
-    displayName
-  );
+  if (mode) safeDatasetSet(avatarRoot, "avatarMode", mode);
 
-  safeDatasetSet(
-    avatarRoot,
-    "username",
-    username
-  );
-
-  safeDatasetSet(
-    avatarRoot,
-    "authenticated",
-    authenticated ? "true" : "false"
-  );
-
-  if (mode) {
-    safeDatasetSet(
-      avatarRoot,
-      "avatarMode",
-      mode
-    );
-  }
-
-  removeNativeTooltip(
-    avatarRoot
-  );
+  removeNativeTooltip(avatarRoot);
 }
 
 function emitAvatarEvent(events, eventName, payload = {}) {
-  return safeEmit(
-    events,
-    eventName,
-    {
-      mode:
-        payload.mode || null,
-
-      reason:
-        payload.reason || null,
-
-      displayName:
-        payload.displayName || null,
-
-      username:
-        payload.username || null,
-
-      authenticated:
-        Boolean(payload.authenticated),
-
-      hasAvatarUrl:
-        Boolean(payload.hasAvatarUrl),
-
-      at:
-        safeNowIso(),
-    }
-  );
+  return safeEmit(events, eventName, {
+    mode: payload.mode || null,
+    reason: payload.reason || null,
+    displayName: payload.displayName || null,
+    username: payload.username || null,
+    authenticated: Boolean(payload.authenticated),
+    hasAvatarUrl: Boolean(payload.hasAvatarUrl),
+    at: safeNowIso(),
+  });
 }
 
 function renderAvatarFallback(
@@ -2037,147 +1357,76 @@ function renderAvatarFallback(
     reason = "fallback",
   } = {}
 ) {
-  if (!avatarRoot) {
-    return false;
-  }
+  if (!avatarRoot) return false;
 
-  const renderToken =
-    getNextAvatarRenderToken(
-      avatarRoot
-    );
+  const renderToken = getNextAvatarRenderToken(avatarRoot);
+  const cleanAvatarText = normalizeAvatarText(avatarText);
 
-  const cleanAvatarText =
-    normalizeAvatarText(
-      avatarText
-    );
+  cleanupDuplicateAvatarNodes(avatarRoot, idPrefix);
 
-  cleanupDuplicateAvatarNodes(
-    avatarRoot,
-    idPrefix
-  );
-
-  const imgEl =
-    ensureAvatarImageNode(
-      avatarRoot,
-      idPrefix
-    );
-
-  const fallbackEl =
-    ensureAvatarFallbackNode(
-      avatarRoot,
-      cleanAvatarText,
-      idPrefix
-    );
+  const imgEl = ensureAvatarImageNode(avatarRoot, idPrefix);
+  const fallbackEl = ensureAvatarFallbackNode(avatarRoot, cleanAvatarText, idPrefix);
 
   if (imgEl) {
     try {
-      imgEl.onload =
-        null;
-
-      imgEl.onerror =
-        null;
-
-      imgEl.hidden =
-        true;
-
+      imgEl.onload = null;
+      imgEl.onerror = null;
+      imgEl.hidden = true;
       imgEl.removeAttribute("src");
-
-      imgEl.alt =
-        avatarAlt;
+      imgEl.alt = avatarAlt;
     } catch {}
 
-    safeSetAttr(
-      imgEl,
-      "aria-hidden",
-      "true"
-    );
-
-    removeNativeTooltip(
-      imgEl
-    );
+    safeSetAttr(imgEl, "aria-hidden", "true");
+    safeDatasetSet(imgEl, "avatarState", reason);
+    removeNativeTooltip(imgEl);
   }
 
   if (fallbackEl) {
     try {
-      fallbackEl.hidden =
-        false;
+      fallbackEl.hidden = false;
     } catch {}
 
-    safeSetAttr(
-      fallbackEl,
-      "aria-hidden",
-      "false"
-    );
+    safeSetAttr(fallbackEl, "aria-hidden", "false");
+    safeSetText(fallbackEl, cleanAvatarText);
+    safeDatasetSet(fallbackEl, "avatarState", reason);
+    removeNativeTooltip(fallbackEl);
+  } else if (isImageElement(avatarRoot)) {
+    try {
+      avatarRoot.hidden = false;
+    } catch {}
 
-    safeSetText(
-      fallbackEl,
-      cleanAvatarText
-    );
-
-    removeNativeTooltip(
-      fallbackEl
-    );
+    safeSetAttr(avatarRoot, "aria-hidden", "false");
+    safeSetAttr(avatarRoot, "alt", avatarAlt);
   }
 
-  if (!isImageElement(avatarRoot)) {
-    safeToggleClass(
-      avatarRoot,
-      "has-image",
-      false
-    );
+  const visualRoot = isImageElement(avatarRoot)
+    ? avatarRoot.parentElement || avatarRoot
+    : avatarRoot;
 
-    safeToggleClass(
-      avatarRoot,
-      "has-fallback",
-      true
-    );
+  safeToggleClass(visualRoot, "has-image", false);
+  safeToggleClass(visualRoot, "has-fallback", true);
+  safeToggleClass(visualRoot, "is-loading", false);
 
-    safeToggleClass(
-      avatarRoot,
-      "is-loading",
-      false
-    );
-  }
+  setAvatarRootMeta(visualRoot, {
+    avatarAlt,
+    displayName,
+    username,
+    authenticated,
+    mode: "fallback",
+  });
 
-  setAvatarRootMeta(
-    avatarRoot,
-    {
-      avatarAlt,
+  safeDatasetSet(visualRoot, "avatarState", reason);
+  safeDatasetSet(visualRoot, "avatarText", cleanAvatarText);
+
+  if (isCurrentAvatarRenderToken(avatarRoot, renderToken)) {
+    emitAvatarEvent(events, AVATAR_FALLBACK_EVENT, {
+      mode: "fallback",
+      reason,
       displayName,
       username,
       authenticated,
-      mode:
-        "fallback",
-    }
-  );
-
-  safeDatasetSet(
-    avatarRoot,
-    "avatarState",
-    reason
-  );
-
-  if (
-    isCurrentAvatarRenderToken(
-      avatarRoot,
-      renderToken
-    )
-  ) {
-    emitAvatarEvent(
-      events,
-      AVATAR_FALLBACK_EVENT,
-      {
-        mode:
-          "fallback",
-
-        reason,
-        displayName,
-        username,
-        authenticated,
-        hasAvatarUrl:
-          false,
-      }
-    );
+      hasAvatarUrl: false,
+    });
   }
 
   return true;
@@ -2197,90 +1446,51 @@ function applyAvatarImageVisible({
   if (
     !avatarRoot ||
     !imgEl ||
-    !isCurrentAvatarRenderToken(
-      avatarRoot,
-      renderToken
-    )
+    !isCurrentAvatarRenderToken(avatarRoot, renderToken)
   ) {
     return false;
   }
 
   try {
-    imgEl.hidden =
-      false;
+    imgEl.hidden = false;
   } catch {}
 
-  safeSetAttr(
-    imgEl,
-    "aria-hidden",
-    "false"
-  );
+  safeSetAttr(imgEl, "aria-hidden", "false");
+  safeSetAttr(imgEl, "alt", avatarAlt);
 
   if (fallbackEl) {
     try {
-      fallbackEl.hidden =
-        true;
+      fallbackEl.hidden = true;
     } catch {}
 
-    safeSetAttr(
-      fallbackEl,
-      "aria-hidden",
-      "true"
-    );
+    safeSetAttr(fallbackEl, "aria-hidden", "true");
   }
 
-  if (!isImageElement(avatarRoot)) {
-    safeToggleClass(
-      avatarRoot,
-      "has-image",
-      true
-    );
+  const visualRoot = isImageElement(avatarRoot)
+    ? avatarRoot.parentElement || avatarRoot
+    : avatarRoot;
 
-    safeToggleClass(
-      avatarRoot,
-      "has-fallback",
-      false
-    );
+  safeToggleClass(visualRoot, "has-image", true);
+  safeToggleClass(visualRoot, "has-fallback", false);
+  safeToggleClass(visualRoot, "is-loading", false);
 
-    safeToggleClass(
-      avatarRoot,
-      "is-loading",
-      false
-    );
-  }
+  setAvatarRootMeta(visualRoot, {
+    avatarAlt,
+    displayName,
+    username,
+    authenticated,
+    mode: "image",
+  });
 
-  setAvatarRootMeta(
-    avatarRoot,
-    {
-      avatarAlt,
-      displayName,
-      username,
-      authenticated,
-      mode:
-        "image",
-    }
-  );
+  safeDatasetSet(visualRoot, "avatarState", "loaded");
 
-  safeDatasetSet(
-    avatarRoot,
-    "avatarState",
-    "loaded"
-  );
-
-  emitAvatarEvent(
-    events,
-    AVATAR_LOAD_EVENT,
-    {
-      mode:
-        "image",
-
-      displayName,
-      username,
-      authenticated,
-      hasAvatarUrl:
-        true,
-    }
-  );
+  emitAvatarEvent(events, AVATAR_LOAD_EVENT, {
+    mode: "image",
+    displayName,
+    username,
+    authenticated,
+    hasAvatarUrl: true,
+  });
 
   return true;
 }
@@ -2298,238 +1508,136 @@ function renderAvatarImage(
     events = null,
   } = {}
 ) {
-  if (!avatarRoot) {
-    return false;
-  }
+  if (!avatarRoot) return false;
 
-  const safeUrl =
-    safeText(avatarUrl, "");
+  const safeUrl = safeText(avatarUrl, "");
 
   if (!isValidAvatarUrl(safeUrl)) {
-    return renderAvatarFallback(
-      avatarRoot,
-      {
-        avatarText,
-        avatarAlt,
-        displayName,
-        username,
-        authenticated,
-        idPrefix,
-        events,
-        reason:
-          "invalid-url",
-      }
-    );
-  }
-
-  cleanupDuplicateAvatarNodes(
-    avatarRoot,
-    idPrefix
-  );
-
-  const renderToken =
-    getNextAvatarRenderToken(
-      avatarRoot
-    );
-
-  const cleanAvatarText =
-    normalizeAvatarText(
-      avatarText
-    );
-
-  const imgEl =
-    ensureAvatarImageNode(
-      avatarRoot,
-      idPrefix
-    );
-
-  const fallbackEl =
-    ensureAvatarFallbackNode(
-      avatarRoot,
-      cleanAvatarText,
-      idPrefix
-    );
-
-  if (!imgEl) {
-    return renderAvatarFallback(
-      avatarRoot,
-      {
-        avatarText:
-          cleanAvatarText,
-        avatarAlt,
-        displayName,
-        username,
-        authenticated,
-        idPrefix,
-        events,
-        reason:
-          "missing-image-node",
-      }
-    );
-  }
-
-  if (!isImageElement(avatarRoot)) {
-    safeToggleClass(
-      avatarRoot,
-      "is-loading",
-      true
-    );
-  }
-
-  safeDatasetSet(
-    avatarRoot,
-    "avatarState",
-    "loading"
-  );
-
-  safeDatasetSet(
-    avatarRoot,
-    "avatarMode",
-    "image"
-  );
-
-  setAvatarRootMeta(
-    avatarRoot,
-    {
+    return renderAvatarFallback(avatarRoot, {
+      avatarText,
       avatarAlt,
       displayName,
       username,
       authenticated,
-      mode:
-        "image",
-    }
-  );
+      idPrefix,
+      events,
+      reason: "invalid-url",
+    });
+  }
+
+  cleanupDuplicateAvatarNodes(avatarRoot, idPrefix);
+
+  const renderToken = getNextAvatarRenderToken(avatarRoot);
+  const cleanAvatarText = normalizeAvatarText(avatarText);
+
+  const imgEl = ensureAvatarImageNode(avatarRoot, idPrefix);
+  const fallbackEl = ensureAvatarFallbackNode(avatarRoot, cleanAvatarText, idPrefix);
+
+  if (!imgEl) {
+    return renderAvatarFallback(avatarRoot, {
+      avatarText: cleanAvatarText,
+      avatarAlt,
+      displayName,
+      username,
+      authenticated,
+      idPrefix,
+      events,
+      reason: "missing-image-node",
+    });
+  }
+
+  const visualRoot = isImageElement(avatarRoot)
+    ? avatarRoot.parentElement || avatarRoot
+    : avatarRoot;
+
+  safeToggleClass(visualRoot, "is-loading", true);
+  safeDatasetSet(visualRoot, "avatarState", "loading");
+  safeDatasetSet(visualRoot, "avatarMode", "image");
+
+  setAvatarRootMeta(visualRoot, {
+    avatarAlt,
+    displayName,
+    username,
+    authenticated,
+    mode: "image",
+  });
 
   if (fallbackEl) {
     try {
-      fallbackEl.hidden =
-        false;
+      fallbackEl.hidden = false;
     } catch {}
 
-    safeSetAttr(
-      fallbackEl,
-      "aria-hidden",
-      "false"
-    );
-
-    safeSetText(
-      fallbackEl,
-      cleanAvatarText
-    );
+    safeSetAttr(fallbackEl, "aria-hidden", "false");
+    safeSetText(fallbackEl, cleanAvatarText);
   }
 
   try {
-    imgEl.loading =
-      "eager";
+    imgEl.loading = "eager";
+    imgEl.decoding = "async";
+    imgEl.draggable = false;
+    imgEl.referrerPolicy = "no-referrer";
+    imgEl.alt = avatarAlt;
+    imgEl.hidden = true;
 
-    imgEl.decoding =
-      "async";
+    safeSetAttr(imgEl, "aria-hidden", "true");
 
-    imgEl.draggable =
-      false;
+    imgEl.onload = () => {
+      applyAvatarImageVisible({
+        avatarRoot,
+        imgEl,
+        fallbackEl,
+        avatarAlt,
+        displayName,
+        username,
+        authenticated,
+        events,
+        renderToken,
+      });
+    };
 
-    imgEl.referrerPolicy =
-      "no-referrer";
+    imgEl.onerror = () => {
+      if (!isCurrentAvatarRenderToken(avatarRoot, renderToken)) return;
 
-    imgEl.alt =
-      avatarAlt;
+      emitAvatarEvent(events, AVATAR_ERROR_EVENT, {
+        displayName,
+        username,
+        authenticated,
+        hasAvatarUrl: true,
+      });
 
-    imgEl.hidden =
-      true;
-
-    safeSetAttr(
-      imgEl,
-      "aria-hidden",
-      "true"
-    );
-
-    imgEl.onload =
-      () => {
-        applyAvatarImageVisible({
-          avatarRoot,
-          imgEl,
-          fallbackEl,
-          avatarAlt,
-          displayName,
-          username,
-          authenticated,
-          events,
-          renderToken,
-        });
-      };
-
-    imgEl.onerror =
-      () => {
-        if (
-          !isCurrentAvatarRenderToken(
-            avatarRoot,
-            renderToken
-          )
-        ) {
-          return;
-        }
-
-        emitAvatarEvent(
-          events,
-          AVATAR_ERROR_EVENT,
-          {
-            displayName,
-            username,
-            authenticated,
-            hasAvatarUrl:
-              true,
-          }
-        );
-
-        renderAvatarFallback(
-          avatarRoot,
-          {
-            avatarText:
-              cleanAvatarText,
-            avatarAlt,
-            displayName,
-            username,
-            authenticated,
-            idPrefix,
-            events,
-            reason:
-              "image-error",
-          }
-        );
-      };
-
-    if (imgEl.src !== safeUrl) {
-      imgEl.src =
-        safeUrl;
-    }
-  } catch {
-    return renderAvatarFallback(
-      avatarRoot,
-      {
-        avatarText:
-          cleanAvatarText,
+      renderAvatarFallback(avatarRoot, {
+        avatarText: cleanAvatarText,
         avatarAlt,
         displayName,
         username,
         authenticated,
         idPrefix,
         events,
-        reason:
-          "render-error",
-      }
-    );
+        reason: "image-error",
+      });
+    };
+
+    if (imgEl.src !== safeUrl) {
+      imgEl.src = safeUrl;
+    }
+  } catch {
+    return renderAvatarFallback(avatarRoot, {
+      avatarText: cleanAvatarText,
+      avatarAlt,
+      displayName,
+      username,
+      authenticated,
+      idPrefix,
+      events,
+      reason: "render-error",
+    });
   }
 
-  removeNativeTooltip(
-    imgEl
-  );
+  removeNativeTooltip(imgEl);
 
   nextFrame(() => {
     try {
-      if (
-        imgEl.complete &&
-        imgEl.naturalWidth > 0
-      ) {
+      if (imgEl.complete && imgEl.naturalWidth > 0) {
         applyAvatarImageVisible({
           avatarRoot,
           imgEl,
@@ -2562,19 +1670,16 @@ function normalizeStatus(value = "") {
 }
 
 function hasRealUser(user = null) {
-  if (!user || !isObject(user)) {
-    return false;
-  }
+  if (!user || !isObject(user)) return false;
 
-  const status =
-    normalizeStatus(
-      user.status ??
+  const status = normalizeStatus(
+    user.status ??
       user.estado ??
       user.state ??
       user.accountStatus ??
       user.account_status ??
       ""
-    );
+  );
 
   if (
     [
@@ -2628,11 +1733,9 @@ function hasRealUser(user = null) {
 }
 
 function resolveUserUiData(state = {}) {
-  const root =
-    safeObject(state);
+  const root = safeObject(state);
 
-  const authenticated =
-    Boolean(root.authenticated);
+  const authenticated = Boolean(root.authenticated);
 
   const candidateUser =
     root.user ||
@@ -2643,62 +1746,55 @@ function resolveUserUiData(state = {}) {
     root.sessionData?.user ||
     null;
 
-  const user =
-    authenticated && hasRealUser(candidateUser)
-      ? candidateUser
-      : null;
+  const user = authenticated && hasRealUser(candidateUser)
+    ? candidateUser
+    : null;
 
-  const displayName =
-    authenticated && user
-      ? safeGetUserDisplayName(user) || DEFAULT_USER_NAME
-      : DEFAULT_USER_NAME;
+  const displayName = authenticated && user
+    ? safeGetUserDisplayName(user) || DEFAULT_USER_NAME
+    : DEFAULT_USER_NAME;
 
-  const username =
-    authenticated && user
-      ? safeGetUserUsername(user) || ""
-      : "";
+  const username = authenticated && user
+    ? safeGetUserUsername(user) || ""
+    : "";
 
-  const role =
-    authenticated && user
-      ? safeText(
-          root.role ||
-            root.userRole ||
-            user?.role ||
-            user?.rol ||
-            "",
-          ""
-        )
-      : "";
+  const email = authenticated && user
+    ? safeText(user.email || user.mail || "", "")
+    : "";
 
-  const avatarUrl =
-    authenticated && user
-      ? safeGetUserAvatarUrl(user)
-      : "";
+  const role = authenticated && user
+    ? safeText(
+        root.role ||
+          root.userRole ||
+          user?.role ||
+          user?.rol ||
+          "",
+        ""
+      )
+    : "";
 
-  const avatarText =
-    normalizeAvatarText(
-      safeGetInitials(displayName) ||
+  const avatarUrl = authenticated && user
+    ? safeGetUserAvatarUrl(user)
+    : "";
+
+  const avatarText = normalizeAvatarText(
+    safeGetInitials(displayName) ||
       (
         username
           ? username.slice(0, 2).toUpperCase()
           : DEFAULT_AVATAR_TEXT
       )
-    );
+  );
 
-  const avatarAlt =
-    `${safeTranslate(
-      "common.user",
-      {},
-      "Usuario"
-    )} ${displayName}`;
+  const avatarAlt = `${safeTranslate("common.user", {}, "Usuario")} ${displayName}`;
 
   return {
     user,
     authenticated,
-    hasUser:
-      Boolean(user),
+    hasUser: Boolean(user),
     displayName,
     username,
+    email,
     role,
     avatarUrl,
     avatarText,
@@ -2716,36 +1812,39 @@ function syncTextUserNode(node, {
   role,
   authenticated,
 } = {}) {
-  if (!node) {
-    return false;
-  }
+  if (!node) return false;
 
-  safeSetText(
-    node,
-    displayName
-  );
+  safeSetText(node, displayName);
+  safeDatasetSet(node, "username", username);
+  safeDatasetSet(node, "role", role);
+  safeDatasetSet(node, "authenticated", authenticated ? "true" : "false");
+  removeNativeTooltip(node);
 
-  safeDatasetSet(
-    node,
-    "username",
-    username
-  );
+  return true;
+}
 
-  safeDatasetSet(
-    node,
-    "role",
-    role
-  );
+function syncEmailNode(node, {
+  email,
+  authenticated,
+} = {}) {
+  if (!node) return false;
 
-  safeDatasetSet(
-    node,
-    "authenticated",
-    authenticated ? "true" : "false"
-  );
+  safeSetText(node, authenticated ? email || "" : "");
+  safeDatasetSet(node, "authenticated", authenticated ? "true" : "false");
+  removeNativeTooltip(node);
 
-  removeNativeTooltip(
-    node
-  );
+  return true;
+}
+
+function syncRoleNode(node, {
+  role,
+  authenticated,
+} = {}) {
+  if (!node) return false;
+
+  safeSetText(node, authenticated ? role || "" : "");
+  safeDatasetSet(node, "authenticated", authenticated ? "true" : "false");
+  removeNativeTooltip(node);
 
   return true;
 }
@@ -2753,46 +1852,39 @@ function syncTextUserNode(node, {
 function syncSidebarName(dom, data = {}) {
   const sidebarName =
     dom?.sidebarName ||
-    resolveScopedDomNode(
-      dom,
-      "sidebarName",
-      USER_NAME_SELECTORS,
-      "sidebar"
-    );
+    resolveScopedDomNode(dom, "sidebarName", USER_NAME_SELECTORS, "sidebar");
 
-  return syncTextUserNode(
-    sidebarName,
-    data
-  );
+  return syncTextUserNode(sidebarName, data);
+}
+
+function syncSidebarEmail(dom, data = {}) {
+  const sidebarEmail =
+    dom?.sidebarEmail ||
+    resolveScopedDomNode(dom, "sidebarEmail", USER_EMAIL_SELECTORS, "sidebar");
+
+  return syncEmailNode(sidebarEmail, data);
+}
+
+function syncSidebarRole(dom, data = {}) {
+  const sidebarRole =
+    dom?.sidebarRole ||
+    resolveScopedDomNode(dom, "sidebarRole", USER_ROLE_SELECTORS, "sidebar");
+
+  return syncRoleNode(sidebarRole, data);
 }
 
 function syncTopbarUserName(dom, data = {}) {
   const topbarUserName =
     dom?.topbarUserName ||
-    resolveScopedDomNode(
-      dom,
-      "topbarUserName",
-      TOPBAR_USER_NAME_SELECTORS,
-      "topbar"
-    );
+    resolveScopedDomNode(dom, "topbarUserName", TOPBAR_USER_NAME_SELECTORS, "topbar");
 
-  return syncTextUserNode(
-    topbarUserName,
-    data
-  );
+  return syncTextUserNode(topbarUserName, data);
 }
 
 function syncAvatarRoot(dom, key, idPrefix, data, events = null) {
-  const avatarRoot =
-    resolveAvatarRoot(
-      dom,
-      key,
-      idPrefix
-    );
+  const avatarRoot = resolveAvatarRoot(dom, key, idPrefix);
 
-  if (!avatarRoot) {
-    return false;
-  }
+  if (!avatarRoot) return false;
 
   const {
     avatarUrl,
@@ -2801,116 +1893,55 @@ function syncAvatarRoot(dom, key, idPrefix, data, events = null) {
     displayName,
     username,
     authenticated,
-  } =
-    data;
+  } = data;
 
   if (!avatarUrl) {
-    return renderAvatarFallback(
-      avatarRoot,
-      {
-        avatarText,
-        avatarAlt,
-        displayName,
-        username,
-        authenticated,
-        idPrefix,
-        events,
-        reason:
-          authenticated
-            ? "no-avatar-url"
-            : "unauthenticated",
-      }
-    );
-  }
-
-  return renderAvatarImage(
-    avatarRoot,
-    {
-      avatarUrl,
+    return renderAvatarFallback(avatarRoot, {
+      avatarText,
       avatarAlt,
       displayName,
-      avatarText,
       username,
       authenticated,
       idPrefix,
       events,
-    }
-  );
+      reason: authenticated ? "no-avatar-url" : "unauthenticated",
+    });
+  }
+
+  return renderAvatarImage(avatarRoot, {
+    avatarUrl,
+    avatarAlt,
+    displayName,
+    avatarText,
+    username,
+    authenticated,
+    idPrefix,
+    events,
+  });
 }
 
 function syncSidebarAvatar(dom, data, events = null) {
-  return syncAvatarRoot(
-    dom,
-    "sidebarAvatar",
-    "sidebar",
-    data,
-    events
-  );
+  return syncAvatarRoot(dom, "sidebarAvatar", "sidebar", data, events);
 }
 
 function syncTopbarAvatar(dom, data, events = null) {
-  return syncAvatarRoot(
-    dom,
-    "topbarAvatar",
-    "topbar",
-    data,
-    events
-  );
+  return syncAvatarRoot(dom, "topbarAvatar", "topbar", data, events);
 }
 
 function syncUserToggle(dom, data) {
   const toggle =
     dom?.userToggle ||
-    resolveScopedDomNode(
-      dom,
-      "userToggle",
-      USER_TOGGLE_SELECTORS,
-      "sidebar"
-    ) ||
-    resolveScopedDomNode(
-      dom,
-      "userToggle",
-      USER_TOGGLE_SELECTORS,
-      "topbar"
-    );
+    resolveScopedDomNode(dom, "userToggle", USER_TOGGLE_SELECTORS, "sidebar") ||
+    resolveScopedDomNode(dom, "userToggle", USER_TOGGLE_SELECTORS, "topbar");
 
-  if (!toggle) {
-    return false;
-  }
+  if (!toggle) return false;
 
-  safeSetAttr(
-    toggle,
-    "aria-label",
-    data.displayName
-  );
-
-  safeDatasetSet(
-    toggle,
-    "username",
-    data.username
-  );
-
-  safeDatasetSet(
-    toggle,
-    "role",
-    data.role
-  );
-
-  safeDatasetSet(
-    toggle,
-    "authenticated",
-    data.authenticated ? "true" : "false"
-  );
-
-  safeSetAttr(
-    toggle,
-    "aria-haspopup",
-    "menu"
-  );
-
-  removeNativeTooltip(
-    toggle
-  );
+  safeSetAttr(toggle, "aria-label", data.displayName);
+  safeDatasetSet(toggle, "username", data.username);
+  safeDatasetSet(toggle, "role", data.role);
+  safeDatasetSet(toggle, "authenticated", data.authenticated ? "true" : "false");
+  safeSetAttr(toggle, "aria-haspopup", "menu");
+  removeNativeTooltip(toggle);
 
   return true;
 }
@@ -2918,40 +1949,14 @@ function syncUserToggle(dom, data) {
 function syncUserDropdown(dom, data) {
   const dropdown =
     dom?.userDropdown ||
-    resolveScopedDomNode(
-      dom,
-      "userDropdown",
-      USER_DROPDOWN_SELECTORS,
-      "sidebar"
-    ) ||
-    resolveScopedDomNode(
-      dom,
-      "userDropdown",
-      USER_DROPDOWN_SELECTORS,
-      "topbar"
-    );
+    resolveScopedDomNode(dom, "userDropdown", USER_DROPDOWN_SELECTORS, "sidebar") ||
+    resolveScopedDomNode(dom, "userDropdown", USER_DROPDOWN_SELECTORS, "topbar");
 
-  if (!dropdown) {
-    return false;
-  }
+  if (!dropdown) return false;
 
-  safeDatasetSet(
-    dropdown,
-    "username",
-    data.username
-  );
-
-  safeDatasetSet(
-    dropdown,
-    "role",
-    data.role
-  );
-
-  safeDatasetSet(
-    dropdown,
-    "authenticated",
-    data.authenticated ? "true" : "false"
-  );
+  safeDatasetSet(dropdown, "username", data.username);
+  safeDatasetSet(dropdown, "role", data.role);
+  safeDatasetSet(dropdown, "authenticated", data.authenticated ? "true" : "false");
 
   return true;
 }
@@ -2959,32 +1964,13 @@ function syncUserDropdown(dom, data) {
 function syncLogoutButton(dom, data) {
   const logoutBtn =
     dom?.logoutBtn ||
-    resolveScopedDomNode(
-      dom,
-      "logoutBtn",
-      LOGOUT_SELECTORS,
-      "sidebar"
-    ) ||
-    resolveScopedDomNode(
-      dom,
-      "logoutBtn",
-      LOGOUT_SELECTORS,
-      "topbar"
-    );
+    resolveScopedDomNode(dom, "logoutBtn", LOGOUT_SELECTORS, "sidebar") ||
+    resolveScopedDomNode(dom, "logoutBtn", LOGOUT_SELECTORS, "topbar");
 
-  if (!logoutBtn) {
-    return false;
-  }
+  if (!logoutBtn) return false;
 
-  safeDatasetSet(
-    logoutBtn,
-    "authenticated",
-    data.authenticated ? "true" : "false"
-  );
-
-  removeNativeTooltip(
-    logoutBtn
-  );
+  safeDatasetSet(logoutBtn, "authenticated", data.authenticated ? "true" : "false");
+  removeNativeTooltip(logoutBtn);
 
   return true;
 }
@@ -2994,120 +1980,57 @@ function syncLogoutButton(dom, data) {
 ========================================================= */
 
 export function recacheUserNodes(dom, events = null) {
-  if (!dom) {
-    return {};
-  }
+  if (!dom) return {};
 
-  const result =
-    {};
+  const result = {};
 
-  result.sidebarName =
-    Boolean(
-      resolveScopedDomNode(
-        dom,
-        "sidebarName",
-        USER_NAME_SELECTORS,
-        "sidebar"
-      )
-    );
-
-  result.sidebarAvatar =
-    Boolean(
-      resolveAvatarRoot(
-        dom,
-        "sidebarAvatar",
-        "sidebar"
-      )
-    );
-
-  result.topbarUserName =
-    Boolean(
-      resolveScopedDomNode(
-        dom,
-        "topbarUserName",
-        TOPBAR_USER_NAME_SELECTORS,
-        "topbar"
-      )
-    );
-
-  result.topbarAvatar =
-    Boolean(
-      resolveAvatarRoot(
-        dom,
-        "topbarAvatar",
-        "topbar"
-      )
-    );
-
-  result.userToggle =
-    Boolean(
-      resolveScopedDomNode(
-        dom,
-        "userToggle",
-        USER_TOGGLE_SELECTORS,
-        "sidebar"
-      ) ||
-      resolveScopedDomNode(
-        dom,
-        "userToggle",
-        USER_TOGGLE_SELECTORS,
-        "topbar"
-      )
-    );
-
-  result.userDropdown =
-    Boolean(
-      resolveScopedDomNode(
-        dom,
-        "userDropdown",
-        USER_DROPDOWN_SELECTORS,
-        "sidebar"
-      ) ||
-      resolveScopedDomNode(
-        dom,
-        "userDropdown",
-        USER_DROPDOWN_SELECTORS,
-        "topbar"
-      )
-    );
-
-  result.logoutBtn =
-    Boolean(
-      resolveScopedDomNode(
-        dom,
-        "logoutBtn",
-        LOGOUT_SELECTORS,
-        "sidebar"
-      ) ||
-      resolveScopedDomNode(
-        dom,
-        "logoutBtn",
-        LOGOUT_SELECTORS,
-        "topbar"
-      )
-    );
-
-  result.topbarTitle =
-    Boolean(
-      resolveScopedDomNode(
-        dom,
-        "topbarTitle",
-        TOPBAR_TITLE_SELECTORS,
-        "topbar"
-      )
-    );
-
-  safeEmit(
-    events,
-    USER_RECACHE_EVENT,
-    {
-      nodes:
-        result,
-
-      at:
-        safeNowIso(),
-    }
+  result.sidebarName = Boolean(
+    resolveScopedDomNode(dom, "sidebarName", USER_NAME_SELECTORS, "sidebar")
   );
+
+  result.sidebarEmail = Boolean(
+    resolveScopedDomNode(dom, "sidebarEmail", USER_EMAIL_SELECTORS, "sidebar")
+  );
+
+  result.sidebarRole = Boolean(
+    resolveScopedDomNode(dom, "sidebarRole", USER_ROLE_SELECTORS, "sidebar")
+  );
+
+  result.sidebarAvatar = Boolean(
+    resolveAvatarRoot(dom, "sidebarAvatar", "sidebar")
+  );
+
+  result.topbarUserName = Boolean(
+    resolveScopedDomNode(dom, "topbarUserName", TOPBAR_USER_NAME_SELECTORS, "topbar")
+  );
+
+  result.topbarAvatar = Boolean(
+    resolveAvatarRoot(dom, "topbarAvatar", "topbar")
+  );
+
+  result.userToggle = Boolean(
+    resolveScopedDomNode(dom, "userToggle", USER_TOGGLE_SELECTORS, "sidebar") ||
+      resolveScopedDomNode(dom, "userToggle", USER_TOGGLE_SELECTORS, "topbar")
+  );
+
+  result.userDropdown = Boolean(
+    resolveScopedDomNode(dom, "userDropdown", USER_DROPDOWN_SELECTORS, "sidebar") ||
+      resolveScopedDomNode(dom, "userDropdown", USER_DROPDOWN_SELECTORS, "topbar")
+  );
+
+  result.logoutBtn = Boolean(
+    resolveScopedDomNode(dom, "logoutBtn", LOGOUT_SELECTORS, "sidebar") ||
+      resolveScopedDomNode(dom, "logoutBtn", LOGOUT_SELECTORS, "topbar")
+  );
+
+  result.topbarTitle = Boolean(
+    resolveScopedDomNode(dom, "topbarTitle", TOPBAR_TITLE_SELECTORS, "topbar")
+  );
+
+  safeEmit(events, USER_RECACHE_EVENT, {
+    nodes: result,
+    at: safeNowIso(),
+  });
 
   return result;
 }
@@ -3123,39 +2046,25 @@ function shouldScheduleDeferredSync(synced = {}) {
 }
 
 function scheduleDeferredUserSync(args = {}) {
-  if (
-    deferredUserSyncScheduled ||
-    !isBrowser()
-  ) {
+  if (deferredUserSyncScheduled || !isBrowser()) {
     return false;
   }
 
-  deferredUserSyncScheduled =
-    true;
+  deferredUserSyncScheduled = true;
 
   nextFrame(() => {
-    deferredUserSyncScheduled =
-      false;
+    deferredUserSyncScheduled = false;
 
-    safeEmit(
-      args.events,
-      USER_DEFERRED_SYNC_EVENT,
-      {
-        reason:
-          "nodes-mounted-late",
-
-        at:
-          safeNowIso(),
-      }
-    );
+    safeEmit(args.events, USER_DEFERRED_SYNC_EVENT, {
+      reason: "nodes-mounted-late",
+      at: safeNowIso(),
+    });
 
     try {
       syncUserUI({
         ...args,
-        recache:
-          true,
-        deferIfMissing:
-          false,
+        recache: true,
+        deferIfMissing: false,
       });
     } catch {}
   });
@@ -3168,8 +2077,7 @@ function scheduleDeferredUserSync(args = {}) {
 ========================================================= */
 
 export function syncUserUI(input = {}) {
-  const args =
-    normalizeSyncArgs(input);
+  const args = normalizeSyncArgs(input);
 
   const {
     state,
@@ -3177,108 +2085,47 @@ export function syncUserUI(input = {}) {
     events,
     recache = true,
     deferIfMissing = true,
-  } =
-    args;
+  } = args;
 
   if (recache !== false) {
-    recacheUserNodes(
-      dom,
-      events
-    );
+    recacheUserNodes(dom, events);
   }
 
-  const data =
-    resolveUserUiData(state);
+  const data = resolveUserUiData(state);
 
   const synced = {
-    sidebarName:
-      syncSidebarName(
-        dom,
-        data
-      ),
+    sidebarName: syncSidebarName(dom, data),
+    sidebarEmail: syncSidebarEmail(dom, data),
+    sidebarRole: syncSidebarRole(dom, data),
 
-    sidebarAvatar:
-      syncSidebarAvatar(
-        dom,
-        data,
-        events
-      ),
+    sidebarAvatar: syncSidebarAvatar(dom, data, events),
 
-    topbarUserName:
-      syncTopbarUserName(
-        dom,
-        data
-      ),
+    topbarUserName: syncTopbarUserName(dom, data),
+    topbarAvatar: syncTopbarAvatar(dom, data, events),
 
-    topbarAvatar:
-      syncTopbarAvatar(
-        dom,
-        data,
-        events
-      ),
-
-    userToggle:
-      syncUserToggle(
-        dom,
-        data
-      ),
-
-    userDropdown:
-      syncUserDropdown(
-        dom,
-        data
-      ),
-
-    logoutBtn:
-      syncLogoutButton(
-        dom,
-        data
-      ),
+    userToggle: syncUserToggle(dom, data),
+    userDropdown: syncUserDropdown(dom, data),
+    logoutBtn: syncLogoutButton(dom, data),
   };
 
-  if (
-    deferIfMissing !== false &&
-    shouldScheduleDeferredSync(synced)
-  ) {
+  if (deferIfMissing !== false && shouldScheduleDeferredSync(synced)) {
     scheduleDeferredUserSync(args);
   }
 
   const payload = {
-    displayName:
-      data.displayName,
-
-    username:
-      data.username || null,
-
-    role:
-      data.role || null,
-
-    authenticated:
-      data.authenticated,
-
-    hasUser:
-      data.hasUser,
-
-    avatarText:
-      data.avatarText,
-
-    hasAvatarUrl:
-      Boolean(data.avatarUrl),
-
+    displayName: data.displayName,
+    username: data.username || null,
+    role: data.role || null,
+    authenticated: data.authenticated,
+    hasUser: data.hasUser,
+    avatarText: data.avatarText,
+    hasAvatarUrl: Boolean(data.avatarUrl),
     synced,
-
-    version:
-      UI_VERSION,
-
-    at:
-      safeNowIso(),
+    version: UI_VERSION,
+    at: safeNowIso(),
   };
 
-  safeEmit(
-    events,
-    USER_UI_EVENT,
-    payload
-  );
+  safeEmit(events, USER_UI_EVENT, payload);
 
   return payload;
 }
@@ -3290,115 +2137,46 @@ export function syncUserUI(input = {}) {
 function getElementState(el) {
   if (!el) {
     return {
-      exists:
-        false,
+      exists: false,
     };
   }
 
-  let className =
-    "";
+  let className = "";
 
   try {
-    className =
-      typeof el.className === "string"
-        ? el.className
-        : el.className?.baseVal || "";
+    className = typeof el.className === "string"
+      ? el.className
+      : el.className?.baseVal || "";
   } catch {}
 
   return {
-    exists:
-      true,
-
-    connected:
-      isConnected(el),
-
-    tag:
-      safeText(
-        el.tagName,
-        ""
-      ).toLowerCase(),
-
-    id:
-      safeText(
-        el.id,
-        ""
-      ),
-
-    className:
-      safeText(
-        className,
-        ""
-      ),
-
-    hidden:
-      Boolean(el.hidden),
-
-    ariaHidden:
-      safeText(
-        el.getAttribute?.("aria-hidden"),
-        ""
-      ),
-
-    ariaBusy:
-      safeText(
-        el.getAttribute?.("aria-busy"),
-        ""
-      ),
-
-    text:
-      safeText(
-        el.textContent,
-        ""
-      ).slice(0, 80),
-
+    exists: true,
+    connected: isConnected(el),
+    tag: safeText(el.tagName, "").toLowerCase(),
+    id: safeText(el.id, ""),
+    className: safeText(className, ""),
+    hidden: Boolean(el.hidden),
+    ariaHidden: safeText(el.getAttribute?.("aria-hidden"), ""),
+    ariaBusy: safeText(el.getAttribute?.("aria-busy"), ""),
+    text: safeText(el.textContent, "").slice(0, 80),
     dataset: {
-      avatarMode:
-        el.dataset?.avatarMode || "",
-
-      avatarState:
-        el.dataset?.avatarState || "",
-
-      authenticated:
-        el.dataset?.authenticated || "",
-
-      username:
-        el.dataset?.username || "",
+      avatarMode: el.dataset?.avatarMode || "",
+      avatarState: el.dataset?.avatarState || "",
+      authenticated: el.dataset?.authenticated || "",
+      username: el.dataset?.username || "",
     },
   };
 }
 
 function getAvatarSnapshot(root, idPrefix = "sidebar") {
-  const avatarNodes =
-    getAvatarNodes(
-      root,
-      idPrefix
-    );
+  const avatarNodes = getAvatarNodes(root, idPrefix);
 
   return {
-    root:
-      getElementState(root),
-
-    image:
-      getElementState(
-        avatarNodes.imgEl
-      ),
-
-    fallback:
-      getElementState(
-        avatarNodes.fallbackEl
-      ),
-
-    mode:
-      safeText(
-        root?.dataset?.avatarMode,
-        ""
-      ),
-
-    state:
-      safeText(
-        root?.dataset?.avatarState,
-        ""
-      ),
+    root: getElementState(root),
+    image: getElementState(avatarNodes.imgEl),
+    fallback: getElementState(avatarNodes.fallbackEl),
+    mode: safeText(root?.dataset?.avatarMode, ""),
+    state: safeText(root?.dataset?.avatarState, ""),
   };
 }
 
@@ -3406,125 +2184,64 @@ export function getUiSnapshot({
   state,
   dom,
 } = {}) {
-  const data =
-    resolveUserUiData(state);
+  const data = resolveUserUiData(state);
 
   const sidebarAvatarRoot =
     dom?.sidebarAvatar ||
-    resolveAvatarRoot(
-      dom,
-      "sidebarAvatar",
-      "sidebar"
-    );
+    resolveAvatarRoot(dom, "sidebarAvatar", "sidebar");
 
   const topbarAvatarRoot =
     dom?.topbarAvatar ||
-    resolveAvatarRoot(
-      dom,
-      "topbarAvatar",
-      "topbar"
-    );
+    resolveAvatarRoot(dom, "topbarAvatar", "topbar");
 
   return {
-    version:
-      UI_VERSION,
+    version: UI_VERSION,
 
-    title:
-      isBrowser()
-        ? safeText(document.title, "")
-        : "",
+    title: isBrowser()
+      ? safeText(document.title, "")
+      : "",
 
     config: {
-      appName:
-        safeText(config?.appName, DEFAULT_TITLE),
-
-      defaultLang:
-        safeText(config?.defaultLang, "es"),
-
-      defaultTheme:
-        safeText(config?.defaultTheme, "dark"),
-
-      syncUserUIOnAuthChange:
-        safeBool(
-          getConfigValue(
-            "ui.syncUserUIOnAuthChange",
-            true
-          ),
-          true
-        ),
+      appName: safeText(config?.appName, DEFAULT_TITLE),
+      defaultLang: safeText(config?.defaultLang, "es"),
+      defaultTheme: safeText(config?.defaultTheme, "dark"),
+      syncUserUIOnAuthChange: safeBool(
+        getConfigValue("ui.syncUserUIOnAuthChange", true),
+        true
+      ),
     },
 
     user: {
-      authenticated:
-        data.authenticated,
-
-      hasUser:
-        data.hasUser,
-
-      displayName:
-        data.displayName,
-
-      username:
-        data.username || null,
-
-      role:
-        data.role || null,
-
-      avatarText:
-        data.avatarText,
-
-      hasAvatarUrl:
-        Boolean(data.avatarUrl),
+      authenticated: data.authenticated,
+      hasUser: data.hasUser,
+      displayName: data.displayName,
+      username: data.username || null,
+      role: data.role || null,
+      avatarText: data.avatarText,
+      hasAvatarUrl: Boolean(data.avatarUrl),
     },
 
     dom: {
-      hasTopbarTitle:
-        Boolean(dom?.topbarTitle),
-
-      hasSidebarName:
-        Boolean(dom?.sidebarName),
-
-      hasSidebarAvatar:
-        Boolean(dom?.sidebarAvatar),
-
-      hasTopbarUserName:
-        Boolean(dom?.topbarUserName),
-
-      hasTopbarAvatar:
-        Boolean(dom?.topbarAvatar),
-
-      hasUserToggle:
-        Boolean(dom?.userToggle),
-
-      hasUserDropdown:
-        Boolean(dom?.userDropdown),
-
-      hasLogoutBtn:
-        Boolean(dom?.logoutBtn),
-
-      hasTopbarViewContainer:
-        Boolean(dom?.topbarViewContainer),
-
-      hasTableheadContainer:
-        Boolean(dom?.tableheadContainer),
+      hasTopbarTitle: Boolean(dom?.topbarTitle),
+      hasSidebarName: Boolean(dom?.sidebarName),
+      hasSidebarEmail: Boolean(dom?.sidebarEmail),
+      hasSidebarRole: Boolean(dom?.sidebarRole),
+      hasSidebarAvatar: Boolean(dom?.sidebarAvatar),
+      hasTopbarUserName: Boolean(dom?.topbarUserName),
+      hasTopbarAvatar: Boolean(dom?.topbarAvatar),
+      hasUserToggle: Boolean(dom?.userToggle),
+      hasUserDropdown: Boolean(dom?.userDropdown),
+      hasLogoutBtn: Boolean(dom?.logoutBtn),
+      hasTopbarViewContainer: Boolean(dom?.topbarViewContainer),
+      hasTableheadContainer: Boolean(dom?.tableheadContainer),
     },
 
     avatar: {
-      sidebar:
-        getAvatarSnapshot(
-          sidebarAvatarRoot,
-          "sidebar"
-        ),
-
-      topbar:
-        getAvatarSnapshot(
-          topbarAvatarRoot,
-          "topbar"
-        ),
+      sidebar: getAvatarSnapshot(sidebarAvatarRoot, "sidebar"),
+      topbar: getAvatarSnapshot(topbarAvatarRoot, "topbar"),
     },
 
-    at:
-      safeNowIso(),
+    at: safeNowIso(),
   };
 }
 
@@ -3537,6 +2254,9 @@ export {
   USER_UI_EVENT,
   TITLE_EVENT,
   DYNAMIC_CLEARED_EVENT,
+  AVATAR_LOAD_EVENT,
+  AVATAR_ERROR_EVENT,
+  AVATAR_FALLBACK_EVENT,
 };
 
 export default {

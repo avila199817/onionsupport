@@ -3,36 +3,29 @@
    Archivo: /src/css/tokens/variables.css
 
    DESIGN TOKENS · DARK BASE · TOKEN PRO SYSTEM
-   APPLE STYLE · PRO SAAS PANEL · SPA POWER · GOD MODE
-   FINAL EXTREME 10/10
+   PRIVATE SPA · CSP CLEAN · NO EXTERNAL FONTS
 
-   OBJETIVO:
-   - Tokens base globales.
-   - Dark theme por defecto.
-   - Sin [data-theme="light"].
-   - Sin overrides light.
-   - Light theme debe vivir en /src/css/tokens/light.css.
-   - Sidebar, topbar, cards, tablas, inputs, loader, modal.
-   - Sistema centralizado para evitar :root locales.
-   - Compatible con tokens legacy usados por módulos existentes.
-   - Compatible con CSP estricta:
-     · sin Google Fonts
-     · sin @import externo
-     · sin CSS inline
-     · sin estilos inyectados por JS
+   Contrato:
+   - Este archivo es la fuente de verdad visual base/dark.
+   - No contiene overrides [data-theme="light"].
+   - Light theme vive exclusivamente en /src/css/tokens/light.css.
+   - Componentes y vistas consumen tokens; no redefinen sistema global.
+   - Sin @import.
+   - Sin Google Fonts.
+   - Sin @font-face remoto.
+   - Sin CSS inline.
+   - Sin estilos inyectados desde JS.
 
-   REGLA:
-   - variables.css = base / dark / aliases / estructura global.
-   - light.css     = overrides [data-theme="light"].
-   - component.css = consume tokens, no redefine sistema global.
-
-   TOPBAR SEARCH CONTRACT:
-   - El search NO cambia de alto al abrir.
-   - El search NO baja al abrir.
-   - El search se centra y se alarga desde topbar.css.
-   - El dropdown usa el mismo ancho visual del search.
-   - El glass se pinta sólo sobre .main-content.
-   - Sidebar/topbar quedan nítidos.
+   Orden lógico:
+   1. Identidad / fuente / escala
+   2. Layout / z-index / spacing / radius
+   3. Color system dark
+   4. Surfaces / borders / text / status
+   5. Components tokens
+   6. Shell / sidebar / topbar
+   7. Tables / views / auth / loader
+   8. Compatibility aliases
+   9. Density / route / responsive / accessibility
 ========================================================= */
 
 
@@ -98,7 +91,9 @@
 
 
   /* =========================================================
-     BREAKPOINTS
+     BREAKPOINT TOKENS
+     Nota: custom properties no sustituyen directamente media queries,
+     pero documentan el sistema responsive global.
   ========================================================= */
   --breakpoint-xs: 390px;
   --breakpoint-sm: 640px;
@@ -158,11 +153,13 @@
   --app-sidebar-current-width: var(--sidebar-width);
 
   --app-offset: calc(
-    var(--topbar-height) + var(--tablehead-height)
+    var(--topbar-height) +
+    var(--tablehead-height)
   );
 
   --app-offset-topbar: calc(
-    var(--topbar-height) + var(--app-safe-top)
+    var(--topbar-height) +
+    var(--app-safe-top)
   );
 
   --app-offset-tablehead: 0px;
@@ -279,7 +276,6 @@
   --accent-border-strong: rgba(113,113,122,.42);
   --accent-glow: rgba(63,63,70,.20);
   --accent-glow-strong: rgba(63,63,70,.30);
-
   --accent-contrast: #ffffff;
 
   --brand: var(--accent);
@@ -451,6 +447,7 @@
   --error-hover: #dc2626;
   --error-soft: rgba(239,68,68,.14);
   --error-bg: rgba(239,68,68,.10);
+  --error-strong: var(--error);
 
   --danger: var(--error);
   --danger-hover: var(--error-hover);
@@ -675,6 +672,44 @@
 
 
   /* =========================================================
+     SHELL TOKENS
+  ========================================================= */
+  --shell-blur: var(--blur-lg);
+  --shell-border: var(--border-soft);
+
+  --shell-surface:
+    linear-gradient(180deg, rgba(255,255,255,.016), rgba(255,255,255,.006)),
+    transparent;
+
+  --shell-transition:
+    opacity var(--duration-normal) var(--ease-standard),
+    visibility var(--duration-normal) var(--ease-standard),
+    transform var(--duration-normal) var(--ease-standard);
+
+  --shell-auth-max-width: 1180px;
+  --shell-auth-padding: clamp(18px, 3vw, 42px);
+
+  --shell-app-bg: var(--body-bg);
+  --shell-app-color: var(--text);
+
+  --shell-main-padding-inline: var(--content-padding-inline);
+  --shell-main-padding-block: var(--content-padding-block);
+
+  --shell-content-radius: var(--view-radius);
+  --shell-content-max: var(--content-max);
+
+  --shell-route-auth-bg:
+    radial-gradient(circle at 18% 14%, color-mix(in srgb, var(--accent), transparent 88%), transparent 30%),
+    radial-gradient(circle at 82% 18%, color-mix(in srgb, var(--info), transparent 90%), transparent 30%),
+    var(--body-bg);
+
+  --shell-route-app-bg: var(--body-bg);
+
+  --shell-busy-opacity: .72;
+  --shell-disabled-opacity: .48;
+
+
+  /* =========================================================
      SIDEBAR SYSTEM · DARK BASE
   ========================================================= */
   --sidebar-bg:
@@ -732,7 +767,8 @@
 
   --sidebar-icon-size: calc(18px * var(--ui-scale));
   --sidebar-icon-offset: calc(
-    var(--sidebar-item-padding-x) + (var(--sidebar-icon-size) / 2)
+    var(--sidebar-item-padding-x) +
+    (var(--sidebar-icon-size) / 2)
   );
 
   --sidebar-item-font-size: var(--font-md);
@@ -843,9 +879,9 @@
   --topbar-title-weight: var(--weight-bold);
   --topbar-subtitle-size: var(--font-xs);
 
-  --topbar-search-height: 46px;
+  --topbar-search-height: calc(46px * var(--ui-scale));
   --topbar-search-max-width: calc(560px * var(--ui-scale));
-  --topbar-search-radius: 999px;
+  --topbar-search-radius: var(--radius-pill);
 
   --topbar-search-bg: rgba(255,255,255,.032);
   --topbar-search-bg-hover: rgba(255,255,255,.046);
@@ -865,7 +901,14 @@
 
   /* =========================================================
      TOPBAR SEARCH · COMMAND PALETTE TOKENS
-     Glass sólo sobre contenido. Sidebar/topbar quedan nítidos.
+
+     Contrato:
+     - El search no cambia de alto al abrir.
+     - El search no baja al abrir.
+     - El search se centra/alarga desde topbar.css.
+     - El dropdown usa el ancho visual del search.
+     - El glass sólo se pinta sobre .main-content.
+     - Sidebar/topbar quedan nítidos.
   ========================================================= */
   --topbar-search-glass-z: var(--z-search-glass);
   --topbar-search-texture-z: var(--z-search-texture);
@@ -1072,44 +1115,6 @@
 
 
   /* =========================================================
-     SHELL TOKENS
-  ========================================================= */
-  --shell-blur: var(--blur-lg);
-  --shell-border: var(--border-soft);
-
-  --shell-surface:
-    linear-gradient(180deg, rgba(255,255,255,.016), rgba(255,255,255,.006)),
-    transparent;
-
-  --shell-transition:
-    opacity var(--duration-normal) var(--ease-standard),
-    visibility var(--duration-normal) var(--ease-standard),
-    transform var(--duration-normal) var(--ease-standard);
-
-  --shell-auth-max-width: 1180px;
-  --shell-auth-padding: clamp(18px, 3vw, 42px);
-
-  --shell-app-bg: var(--body-bg);
-  --shell-app-color: var(--text);
-
-  --shell-main-padding-inline: var(--content-padding-inline);
-  --shell-main-padding-block: var(--content-padding-block);
-
-  --shell-content-radius: var(--view-radius);
-  --shell-content-max: var(--content-max);
-
-  --shell-route-auth-bg:
-    radial-gradient(circle at 18% 14%, color-mix(in srgb, var(--accent), transparent 88%), transparent 30%),
-    radial-gradient(circle at 82% 18%, color-mix(in srgb, var(--info), transparent 90%), transparent 30%),
-    var(--body-bg);
-
-  --shell-route-app-bg: var(--body-bg);
-
-  --shell-busy-opacity: .72;
-  --shell-disabled-opacity: .48;
-
-
-  /* =========================================================
      TOAST TOKENS
   ========================================================= */
   --ui-toast-top: calc(16px * var(--ui-scale));
@@ -1151,7 +1156,7 @@
   --loader-logo-radius: 18px;
 
   --loader-progress-height: 7px;
-  --loader-progress-radius: 999px;
+  --loader-progress-radius: var(--radius-pill);
 
   --loader-title-size: 18px;
   --loader-text-size: 13px;
@@ -1339,7 +1344,6 @@
 
   /* =========================================================
      ASSET TOKENS
-     No usar favicon.ico como fuente visual principal.
   ========================================================= */
   --asset-favicon: url("/src/media/img/favicon_black_circle.png");
   --asset-logo-support: url("/src/media/img/favicon_support.png");
@@ -1352,7 +1356,11 @@
 
 
   /* =========================================================
-     INCIDENCIAS MODAL · EXTREME TOKENS
+     INCIDENCIAS DETAIL / MODAL TOKENS
+     Compatibilidad temporal:
+     - Se mantienen aquí para no romper módulos existentes.
+     - No seguir ampliando tokens de vista en variables.css.
+     - Nuevas especializaciones deben vivir en views/incidencias/*.css.
   ========================================================= */
   --incidencias-modal-width: min(1160px, calc(100vw - 40px));
   --incidencias-modal-max-height: 92vh;
@@ -1495,12 +1503,15 @@
 
 /* =========================================================
    DENSITY PRESETS
+   Scope controlado:
+   - html/body únicamente.
+   - No usar selector genérico [data-density] para evitar contaminación
+     desde componentes/vistas.
 ========================================================= */
 
 :root[data-density="compact"],
 html[data-density="compact"],
-body[data-density="compact"],
-[data-density="compact"] {
+body[data-density="compact"] {
   --ui-scale: var(--density-ui-scale-compact);
   --density-factor: var(--density-compact-factor);
   --content-padding: calc(20px * var(--ui-scale));
@@ -1511,20 +1522,17 @@ body[data-density="compact"],
 
 :root[data-density="normal"],
 :root[data-density="default"],
-html[data-density="default"],
-body[data-density="default"],
 html[data-density="normal"],
+html[data-density="default"],
 body[data-density="normal"],
-[data-density="default"],
-[data-density="normal"] {
+body[data-density="default"] {
   --ui-scale: var(--density-ui-scale-default);
   --density-factor: var(--density-normal-factor);
 }
 
 :root[data-density="comfortable"],
 html[data-density="comfortable"],
-body[data-density="comfortable"],
-[data-density="comfortable"] {
+body[data-density="comfortable"] {
   --ui-scale: var(--density-ui-scale-comfortable);
   --density-factor: var(--density-comfortable-factor);
   --content-padding: calc(26px * var(--ui-scale));
@@ -1536,19 +1544,20 @@ body[data-density="comfortable"],
 
 /* =========================================================
    ROUTE MODE TOKENS
+   Scope controlado:
+   - html/body únicamente.
+   - Las vistas no deben redefinir el modo global.
 ========================================================= */
 
 html[data-route-mode="auth"],
-body[data-route-mode="auth"],
-[data-route-mode="auth"] {
+body[data-route-mode="auth"] {
   --app-sidebar-current-width: 0px;
   --content-padding-inline: var(--shell-auth-padding);
   --content-padding-block: var(--shell-auth-padding);
 }
 
 html[data-route-mode="app"],
-body[data-route-mode="app"],
-[data-route-mode="app"] {
+body[data-route-mode="app"] {
   --content-padding-inline: var(--content-padding);
   --content-padding-block: var(--space-md);
 }
@@ -1563,7 +1572,7 @@ body[data-route-mode="app"],
     --topbar-search-command-width: min(680px, calc(100vw - 28px));
     --topbar-search-palette-width: var(--topbar-search-command-width);
 
-    --incidencias-modal-width: min(100vw - 24px, 1160px);
+    --incidencias-modal-width: min(calc(100vw - 24px), 1160px);
     --incidencias-modal-thumb-width: 82px;
     --incidencias-modal-thumb-height: 68px;
   }
@@ -1581,11 +1590,12 @@ body[data-route-mode="app"],
     --app-sidebar-current-width: 0px;
 
     --topbar-height: calc(52px * var(--ui-scale));
-    --topbar-search-height: 42px;
+    --topbar-search-height: calc(42px * var(--ui-scale));
     --tablehead-height: 0px;
 
     --topbar-search-command-width: calc(100vw - 24px);
     --topbar-search-palette-width: var(--topbar-search-command-width);
+
     --topbar-search-command-offset-top:
       calc(
         var(--topbar-safe-top) +
@@ -1608,8 +1618,8 @@ body[data-route-mode="app"],
     --panel-radius: calc(16px * var(--ui-scale));
     --card-radius: calc(16px * var(--ui-scale));
 
-    --modal-width-md: min(100vw - 24px, 640px);
-    --modal-width-lg: min(100vw - 24px, 860px);
+    --modal-width-md: min(calc(100vw - 24px), 640px);
+    --modal-width-lg: min(calc(100vw - 24px), 860px);
     --modal-padding: var(--space-lg);
 
     --loader-card-width: min(304px, calc(100vw - 32px));
@@ -1621,7 +1631,7 @@ body[data-route-mode="app"],
 
 @media (max-width: 720px) {
   :root {
-    --incidencias-modal-width: min(100vw - 20px, 1160px);
+    --incidencias-modal-width: min(calc(100vw - 20px), 1160px);
     --incidencias-modal-padding: var(--space-md);
     --incidencias-modal-avatar-size: 58px;
     --incidencias-modal-avatar-radius: 17px;
@@ -1637,9 +1647,10 @@ body[data-route-mode="app"],
 
 @media (max-width: 640px) {
   :root {
-    --topbar-search-height: 40px;
+    --topbar-search-height: calc(40px * var(--ui-scale));
     --topbar-search-command-width: calc(100vw - 20px);
     --topbar-search-palette-width: var(--topbar-search-command-width);
+
     --topbar-search-command-offset-top:
       calc(
         var(--topbar-safe-top) +
@@ -1654,11 +1665,12 @@ body[data-route-mode="app"],
     --density-factor: .90;
 
     --content-padding: var(--space-sm);
-    --sidebar-mobile-width: min(92vw, 300px);
+    --sidebar-mobile-width: var(--sidebar-mobile-width-xs);
 
-    --topbar-search-height: 40px;
+    --topbar-search-height: calc(40px * var(--ui-scale));
     --topbar-search-command-width: calc(100vw - 16px);
     --topbar-search-palette-width: var(--topbar-search-command-width);
+
     --topbar-search-command-offset-top:
       calc(
         var(--topbar-safe-top) +
@@ -1668,7 +1680,7 @@ body[data-route-mode="app"],
     --font-4xl: calc(28px * var(--ui-scale));
     --font-5xl: calc(34px * var(--ui-scale));
 
-    --incidencias-modal-width: min(100vw - 16px, 1160px);
+    --incidencias-modal-width: min(calc(100vw - 16px), 1160px);
     --incidencias-modal-thumb-width: 64px;
     --incidencias-modal-thumb-height: 58px;
     --incidencias-modal-body-gap: var(--space-md);
@@ -1728,6 +1740,12 @@ body[data-route-mode="app"],
     --duration-normal: 1ms;
     --duration-slow: 1ms;
     --duration-xslow: 1ms;
+
+    --loader-duration-fade: 1ms;
+    --loader-duration-bar: 1ms;
+    --loader-duration-orbit: 1ms;
+
+    --skeleton-animation: none;
   }
 }
 

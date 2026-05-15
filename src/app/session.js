@@ -422,10 +422,11 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const text =
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return text || fallback;
 }
@@ -876,11 +877,48 @@ function stripPublicUsernamePrefixFromPath(path = "/") {
   return clean;
 }
 
+function canonicalizeTechnicalAlias(pathname = "/") {
+  const clean =
+    normalizePathnameOnly(pathname || "/");
+
+  for (const alias of ACTIVATION_ALIAS_PATHS) {
+    if (
+      clean === alias ||
+      clean.startsWith(`${alias}/`)
+    ) {
+      const rest =
+        clean.slice(alias.length);
+
+      return normalizePathnameOnly(
+        `${ACTIVATION_PATH}${rest}`
+      );
+    }
+  }
+
+  for (const alias of RESET_CONFIRM_ALIAS_PATHS) {
+    if (
+      clean === alias ||
+      clean.startsWith(`${alias}/`)
+    ) {
+      const rest =
+        clean.slice(alias.length);
+
+      return normalizePathnameOnly(
+        `${RESET_CONFIRM_PATH}${rest}`
+      );
+    }
+  }
+
+  return clean;
+}
+
 function getCanonicalFromAnyPath(path = "/") {
-  return stripPublicUsernamePrefixFromPath(
-    pathFromUrlLike(path) ||
-      path ||
-      "/"
+  return canonicalizeTechnicalAlias(
+    stripPublicUsernamePrefixFromPath(
+      pathFromUrlLike(path) ||
+        path ||
+        "/"
+    )
   );
 }
 
@@ -3531,8 +3569,8 @@ function normalizeTargetPath(path = "/") {
 
 function samePath(a = "/", b = "/") {
   return (
-    stripSearchAndHash(a) ===
-    stripSearchAndHash(b)
+    normalizeCanonicalCandidate(a || "/") ===
+    normalizeCanonicalCandidate(b || "/")
   );
 }
 

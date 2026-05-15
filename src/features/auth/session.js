@@ -2,25 +2,26 @@
    Onion SPA - Auth Session
    Archivo: src/features/auth/session.js
 
-   AUTH SESSION · EXTREME PRO SYSTEM · 15/10
-   TOKEN + USER STRICT · SESSION CONTEXT LOCKED
+   AUTH SESSION · EXTREME PRO SYSTEM · 17/10
+   TOKEN + USER STRICT · SESSION CONTEXT LOCKED · NO GHOST AUTH
 
    RESPONSABILIDADES:
-   - aplicar sesión autenticada sobre AppCore
-   - limpiar sesión local, storage core, storage auxiliar y legacy
-   - exponer helpers auth de estado / rol / permisos
-   - construir snapshots consistentes para restore/debug
-   - exponer Authorization header sin exigir user cargado
-   - endurecer sync con AppCore.state
-   - evitar estados auth fantasma
-   - preservar route/publicPath en rutas públicas técnicas
-   - no romper /activate-account?token=...
-   - no romper /activate-account/<token>
-   - no romper /reset-password/confirm?token=...
-   - no romper /reset-password/confirm/<token>
-   - normalizar roles admin/superadmin/owner/root/support/manager/client
-   - no emitir eventos restore desde login
-   - normalizar contrato backend Onion Auth:
+   - Aplicar sesión autenticada sobre AppCore.
+   - Limpiar sesión local, storage core, storage auxiliar y legacy.
+   - Exponer helpers auth de estado / rol / permisos.
+   - Construir snapshots consistentes para restore/debug.
+   - Exponer Authorization header sin exigir user cargado.
+   - Endurecer sync con AppCore.state.
+   - Evitar estados auth fantasma.
+   - Preservar route/publicPath en rutas públicas técnicas.
+   - No romper /activate-account?token=...
+   - No romper /activate-account/<token>
+   - No romper /reset-password/confirm?token=...
+   - No romper /reset-password/confirm/<token>
+   - Soportar /@usuario/ruta en rutas públicas técnicas.
+   - Normalizar roles admin/superadmin/owner/root/support/manager/client.
+   - No emitir eventos restore desde login.
+   - Normalizar contrato backend Onion Auth:
        · token / accessToken / access_token
        · refreshToken / refresh_token
        · session / sessionData
@@ -28,23 +29,24 @@
        · userId / user_id
        · user / usuario / me / account / profile
        · data / payload / result / body / response / auth
-   - mantener session y sessionData como alias controlados al MISMO contexto canónico
-   - evitar duplicidades raras de estado
-   - preservar avatar/preferencias/idioma/tema del usuario
+   - Mantener session y sessionData como alias controlados al MISMO contexto.
+   - Evitar duplicidades raras de estado.
+   - Preservar avatar/preferencias/idioma/tema del usuario.
 
-   HARDENING EXTREMO:
-   - authenticated sólo true con token usable + user usable + user activo
-   - token/user desacoplados sin corrupción
-   - token explícito sin user explícito NO reutiliza usuario viejo por defecto
-   - token_only permitido como hasToken=true pero authenticated=false
-   - clearSessionLocal limpia token/user/role/session/accessToken/currentUser
-   - clearSessionLocal limpia storage legacy adicional
-   - preservación fuerte de rutas públicas técnicas
-   - eventos públicos sin tokens reales
-   - sync UI seguro
-   - roles alias coherentes
-   - snapshots útiles para restore/debug
-   - cero throws accidentales en operaciones laterales
+   HARDENING:
+   - authenticated sólo true con token usable + user usable + user activo.
+   - token/user desacoplados sin corrupción.
+   - token explícito sin user explícito NO reutiliza usuario viejo por defecto.
+   - token_only permitido como hasToken=true pero authenticated=false.
+   - user_only permitido como authenticated=false.
+   - clearSessionLocal limpia token/user/role/session/accessToken/currentUser.
+   - clearSessionLocal limpia storage legacy adicional.
+   - preservación fuerte de rutas públicas técnicas.
+   - eventos públicos sin tokens reales.
+   - sync UI seguro.
+   - roles alias coherentes.
+   - snapshots útiles para restore/debug.
+   - cero throws accidentales en operaciones laterales.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -75,7 +77,7 @@ import {
 ========================================================= */
 
 export const AUTH_SESSION_VERSION =
-  "15.0.0";
+  "17.0.0-extreme-pro";
 
 const SESSION_SOURCE =
   "auth.session";
@@ -83,20 +85,48 @@ const SESSION_SOURCE =
 const DEFAULT_ROUTE =
   "/";
 
-const ACTIVATION_PATH =
-  "/activate-account";
+const ACTIVATION_PATHS =
+  Object.freeze([
+    "/activate-account",
+    "/activate",
+    "/activation",
+    "/account/activate",
+    "/activate/first-user",
+  ]);
 
-const RESET_CONFIRM_PATH =
-  "/reset-password/confirm";
+const RESET_CONFIRM_PATHS =
+  Object.freeze([
+    "/reset-password/confirm",
+    "/reset-password-confirm",
+    "/password-reset/confirm",
+    "/password-reset-confirm",
+    "/confirm-reset-password",
+  ]);
 
 const PUBLIC_TECHNICAL_ROUTES =
   Object.freeze([
     "/activate-account",
+    "/activate",
+    "/activation",
+    "/account/activate",
+    "/activate/first-user",
+
     "/reset-password",
     "/reset-password/confirm",
+    "/reset-password-confirm",
+
     "/forgot-password",
     "/recover-password",
+
     "/password-reset",
+    "/password-reset/confirm",
+    "/password-reset-confirm",
+
+    "/confirm-reset-password",
+
+    "/2fa",
+    "/otp",
+    "/mfa",
   ]);
 
 const ADMIN_ROLE_KEYS =
@@ -216,6 +246,7 @@ const LEGACY_AUTH_STORAGE_KEYS =
     "temporary_token",
     "two_factor_token",
     "mfa_token",
+    "otp_token",
 
     "token",
     "accessToken",
@@ -269,6 +300,8 @@ const TEMP_TOKEN_KEYS =
     "two_factor_token",
     "mfaToken",
     "mfa_token",
+    "otpToken",
+    "otp_token",
   ]);
 
 const USER_KEYS =
@@ -280,12 +313,17 @@ const USER_KEYS =
     "profile",
     "currentUser",
     "current_user",
+    "authUser",
+    "auth_user",
+    "sessionUser",
+    "session_user",
   ]);
 
 const SESSION_KEYS =
   Object.freeze([
     "session",
     "sessionData",
+    "session_data",
     "authSession",
     "auth_session",
   ]);
@@ -316,6 +354,14 @@ const SESSION_EXPIRES_KEYS =
     "refresh_expires_at",
     "expiration",
     "expires",
+    "exp",
+  ]);
+
+const TOKEN_VERSION_KEYS =
+  Object.freeze([
+    "tokenVersion",
+    "token_version",
+    "tv",
   ]);
 
 const ROLE_KEYS =
@@ -328,6 +374,16 @@ const ROLE_KEYS =
     "tipo",
     "userType",
     "user_type",
+    "perfil",
+  ]);
+
+const PERMISSION_KEYS =
+  Object.freeze([
+    "permissions",
+    "permisos",
+    "scopes",
+    "scope",
+    "authorities",
   ]);
 
 const ROOT_OBJECT_KEYS =
@@ -339,6 +395,27 @@ const ROOT_OBJECT_KEYS =
     "response",
     "auth",
     "authData",
+    "auth_data",
+  ]);
+
+const BAD_TOKEN_VALUES =
+  new Set([
+    "",
+    "null",
+    "undefined",
+    "false",
+    "true",
+    "nan",
+    "none",
+    "empty",
+    "[object object]",
+    "{}",
+    "[]",
+    "\"\"",
+    "''",
+    "\"null\"",
+    "\"undefined\"",
+    "\"false\"",
   ]);
 
 const SESSION_EVENTS =
@@ -399,6 +476,16 @@ function isPlainObject(value) {
   );
 }
 
+function isObjectLike(value) {
+  return (
+    value !== null &&
+    (
+      typeof value === "object" ||
+      typeof value === "function"
+    )
+  );
+}
+
 function isFunction(value) {
   return typeof value === "function";
 }
@@ -412,9 +499,23 @@ function safeText(value, fallback = "") {
   }
 
   const text =
-    String(value).trim();
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return text || fallback;
+}
+
+function safeRawText(value, fallback = "") {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  return String(value);
 }
 
 function safeBool(value, fallback = false) {
@@ -528,16 +629,26 @@ function firstText(...values) {
 }
 
 function unique(values = []) {
-  return Array.from(
-    new Set(
-      safeArray(values)
-        .flat(Infinity)
-        .map((item) =>
-          safeText(item, "")
-        )
-        .filter(Boolean)
-    )
-  );
+  const output =
+    [];
+
+  const seen =
+    new Set();
+
+  for (const value of safeArray(values).flat(Infinity)) {
+    const text =
+      safeText(value, "");
+
+    if (
+      text &&
+      !seen.has(text)
+    ) {
+      seen.add(text);
+      output.push(text);
+    }
+  }
+
+  return output;
 }
 
 function nowMs() {
@@ -603,17 +714,50 @@ function safeWarn(...args) {
 }
 
 function safeSetState(patch = {}, options = {}) {
-  const safePatch =
+  const cleanPatch =
     isPlainObject(patch)
       ? patch
       : {};
 
   try {
     AppCore?.setState?.(
-      safePatch,
+      cleanPatch,
       {
         source:
           options.source || SESSION_SOURCE,
+
+        emit:
+          options.emit === true,
+
+        emitState:
+          options.emitState === true,
+
+        emitDerived:
+          options.emitDerived === true,
+
+        silent:
+          options.silent !== false,
+
+        ...options,
+      }
+    );
+  } catch {}
+
+  try {
+    AppCore?.patchState?.(
+      cleanPatch,
+      {
+        source:
+          options.source || SESSION_SOURCE,
+
+        emit:
+          options.emit === true,
+
+        emitState:
+          options.emitState === true,
+
+        silent:
+          options.silent !== false,
 
         ...options,
       }
@@ -622,17 +766,56 @@ function safeSetState(patch = {}, options = {}) {
 
   /*
     Reafirmación directa intencionada:
-    algunos normalizadores globales pueden marcar auth=true con token solo.
-    Esta capa Auth es la autoridad final para evitar ghost auth.
+    AppCore puede derivar auth por token; Auth Session es la autoridad
+    para bloquear auth fantasma.
   */
   try {
     Object.assign(
       ensureCoreState(),
-      safePatch
+      cleanPatch
     );
   } catch {}
 
   return ensureCoreState();
+}
+
+function safeDefineValue(target, key, value) {
+  if (
+    !key ||
+    !isObjectLike(target)
+  ) {
+    return false;
+  }
+
+  try {
+    if (!Object.isExtensible(target)) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+
+  try {
+    Object.defineProperty(
+      target,
+      key,
+      {
+        value,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+      }
+    );
+
+    return true;
+  } catch {}
+
+  try {
+    target[key] = value;
+    return true;
+  } catch {}
+
+  return false;
 }
 
 /* =========================================================
@@ -645,7 +828,7 @@ function safeRedact(value = "") {
   } catch {
     return safeText(value, "")
       .replace(
-        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
+        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token|mfaToken|mfa_token|session|sid)=)([^&#\s]+)/gi,
         "$1***"
       )
       .replace(
@@ -800,17 +983,20 @@ function buildTokenSafePayload(payload = {}) {
     output.error = {
       name:
         output.error.name || "Error",
+
       message:
         safeRedact(
           output.error.message ||
             extractMessage(output.error) ||
             "Error"
         ),
+
       status:
         output.error.status ||
         output.error.statusCode ||
         output.error.response?.status ||
         null,
+
       code:
         output.error.code ||
         output.error.data?.code ||
@@ -854,35 +1040,66 @@ function safeEmit(eventName, payload = {}, options = {}) {
       ...safeObject(payload),
     });
 
+  let busAvailable =
+    false;
+
+  let busEmitted =
+    false;
+
   try {
     if (isFunction(AppCore?.events?.emit)) {
+      busAvailable =
+        true;
+
       AppCore.events.emit(
         name,
         cleanPayload
       );
 
-      return true;
+      busEmitted =
+        true;
     }
   } catch {}
 
-  try {
-    if (isBrowser()) {
-      document.dispatchEvent(
-        new CustomEvent(name, {
-          detail:
-            cleanPayload,
-          bubbles:
-            false,
-          cancelable:
-            false,
-        })
-      );
+  /*
+    Anti event-storm:
+    si existe bus interno, no duplicamos en window/document.
+  */
+  if (
+    opts.window === true ||
+    (!busAvailable && isBrowser())
+  ) {
+    try {
+      const event =
+        new CustomEvent(
+          name,
+          {
+            detail:
+              cleanPayload,
+            bubbles:
+              false,
+            cancelable:
+              false,
+          }
+        );
 
+      window.dispatchEvent(event);
       return true;
-    }
-  } catch {}
+    } catch {
+      try {
+        document.dispatchEvent(
+          new CustomEvent(name, {
+            detail:
+              cleanPayload,
+          })
+        );
 
-  return false;
+        return true;
+      } catch {}
+    }
+  }
+
+  return busEmitted;
 }
 
 function inferEventMode({
@@ -905,6 +1122,7 @@ function inferEventMode({
       "refresh",
       "me",
       "token_only",
+      "user_only",
     ].includes(explicit)
   ) {
     return explicit;
@@ -946,7 +1164,7 @@ function collectPayloadObjects(raw = {}) {
     [];
 
   const seen =
-    new Set();
+    new WeakSet();
 
   const queue =
     [raw];
@@ -956,21 +1174,25 @@ function collectPayloadObjects(raw = {}) {
 
   while (
     queue.length &&
-    guard < 120
+    guard < 180
   ) {
     guard += 1;
 
     const current =
       queue.shift();
 
-    if (
-      !isPlainObject(current) ||
-      seen.has(current)
-    ) {
+    if (!isPlainObject(current)) {
       continue;
     }
 
-    seen.add(current);
+    try {
+      if (seen.has(current)) {
+        continue;
+      }
+
+      seen.add(current);
+    } catch {}
+
     output.push(current);
 
     for (const key of ROOT_OBJECT_KEYS) {
@@ -1055,8 +1277,60 @@ function pickObjectFromObjects(objects = [], keys = []) {
   return null;
 }
 
+function pickArrayFromObjects(objects = [], keys = []) {
+  for (const object of objects) {
+    for (const key of keys) {
+      const value =
+        object?.[key];
+
+      if (Array.isArray(value)) {
+        return value;
+      }
+
+      if (
+        typeof value === "string" &&
+        value
+      ) {
+        return value
+          .split(/[,\s|]+/g)
+          .map((item) =>
+            item.trim()
+          )
+          .filter(Boolean);
+      }
+    }
+  }
+
+  return [];
+}
+
+function looksLikeUserObject(value = {}) {
+  if (!isPlainObject(value)) {
+    return false;
+  }
+
+  return Boolean(
+    safeText(value.id, "") ||
+      safeText(value.userId, "") ||
+      safeText(value.user_id, "") ||
+      safeText(value._id, "") ||
+      safeText(value.uid, "") ||
+      safeText(value.sub, "") ||
+      safeText(value.username, "") ||
+      safeText(value.userName, "") ||
+      safeText(value.user_name, "") ||
+      safeText(value.email, "") ||
+      safeText(value.mail, "") ||
+      safeText(value.phone, "") ||
+      safeText(value.telefono, "") ||
+      safeText(value.displayName, "") ||
+      safeText(value.name, "") ||
+      safeText(value.nombre, "")
+  );
+}
+
 /* =========================================================
-   USER / TOKEN VALIDATION
+   TOKEN / USER VALIDATION
 ========================================================= */
 
 function stripBearer(token = "") {
@@ -1065,34 +1339,46 @@ function stripBearer(token = "") {
     .trim();
 }
 
-function hasUsableToken(token = "") {
-  const value =
-    stripBearer(token);
+function normalizeTokenValue(token = "") {
+  let value =
+    safeText(token, "");
 
   if (!value) {
-    return false;
+    return "";
   }
+
+  value =
+    stripBearer(value);
 
   const lower =
     value.toLowerCase();
 
   if (
-    [
-      "null",
-      "undefined",
-      "false",
-      "true",
-      "nan",
-      "none",
-      "[object object]",
-      "{}",
-      "[]",
-    ].includes(lower)
+    BAD_TOKEN_VALUES.has(lower) ||
+    /[\s\r\n\t]/.test(value)
   ) {
-    return false;
+    return "";
   }
 
-  if (/[\s\r\n\t]/.test(value)) {
+  const maxTokenLength =
+    Number(AppCore?.config?.auth?.tokenMaxLength || 8192);
+
+  if (
+    Number.isFinite(maxTokenLength) &&
+    maxTokenLength > 0 &&
+    value.length > maxTokenLength
+  ) {
+    return "";
+  }
+
+  return value;
+}
+
+function hasUsableToken(token = "") {
+  const value =
+    normalizeTokenValue(token);
+
+  if (!value) {
     return false;
   }
 
@@ -1113,14 +1399,14 @@ function isUserActive(user = null) {
   }
 
   const status =
-    safeText(
+    normalizeRole(
       user.status ||
         user.estado ||
         user.state ||
         user.accountStatus ||
-        "",
-      ""
-    ).toLowerCase();
+        user.account_status ||
+        ""
+    );
 
   if (
     [
@@ -1131,6 +1417,7 @@ function isUserActive(user = null) {
       "suspended",
       "banned",
       "revoked",
+      "archived",
       "desactivado",
       "inactivo",
       "eliminado",
@@ -1150,7 +1437,8 @@ function isUserActive(user = null) {
     user.isBlocked === true ||
     user.banned === true ||
     user.suspended === true ||
-    user.revoked === true
+    user.revoked === true ||
+    user.archived === true
   ) {
     return false;
   }
@@ -1295,46 +1583,81 @@ function normalizeIncomingUser(user = null) {
     return null;
   }
 
+  const profile =
+    safeObject(base.profile);
+
+  const raw =
+    safeObject(base.raw);
+
+  const preferences =
+    safeObject(
+      base.preferences ||
+        base.preferencias ||
+        raw.preferences ||
+        raw.preferencias ||
+        {}
+    );
+
   const userId =
-    first(
+    firstText(
       base.userId,
       base.user_id,
       base.uid,
       base.sub,
       base.id,
-      base._id
+      base._id,
+      profile.userId,
+      profile.id,
+      raw.userId,
+      raw.user_id,
+      raw.sub,
+      raw.id
     );
 
   const username =
-    first(
+    firstText(
       base.username,
       base.userName,
       base.user_name,
       base.usernameLower,
       base.username_lower,
-      base.slug
+      base.slug,
+      profile.username,
+      profile.slug,
+      raw.username,
+      raw.userName,
+      raw.user_name,
+      raw.slug
     );
 
   const email =
-    first(
+    firstText(
       base.email,
       base.mail,
       base.emailLower,
-      base.email_lower
+      base.email_lower,
+      profile.email,
+      profile.mail,
+      raw.email,
+      raw.mail
     );
 
-  const avatar =
-    resolveAvatar(base);
-
   const role =
-    first(
+    firstText(
       base.role,
       base.rol,
       base.userRole,
       base.user_role,
       base.type,
-      base.tipo
+      base.tipo,
+      profile.role,
+      profile.rol,
+      raw.role,
+      raw.rol
     );
+
+  const avatar =
+    resolveAvatar(base);
 
   const normalizedUsername =
     safeText(
@@ -1344,8 +1667,13 @@ function normalizeIncomingUser(user = null) {
       ""
     ) || null;
 
-  const preferences =
-    safeObject(base.preferences);
+  const permissions =
+    unique([
+      ...safeArray(base.permissions),
+      ...safeArray(base.permisos),
+      ...safeArray(raw.permissions),
+      ...safeArray(raw.permisos),
+    ]);
 
   return {
     ...base,
@@ -1405,6 +1733,11 @@ function normalizeIncomingUser(user = null) {
       email ||
       null,
 
+    mail:
+      base.mail ||
+      email ||
+      null,
+
     emailLower:
       base.emailLower ||
       base.email_lower ||
@@ -1459,15 +1792,16 @@ function normalizeIncomingUser(user = null) {
       role ||
       "user",
 
-    permissions:
-      safeArray(base.permissions || base.permisos),
+    permissions,
 
     permisos:
-      safeArray(base.permisos || base.permissions),
+      permissions,
 
     avatar,
+
     avatarUrl:
       avatar,
+
     picture:
       avatar,
 
@@ -1478,17 +1812,25 @@ function normalizeIncomingUser(user = null) {
 
     theme:
       base.theme ||
+      base.mode ||
+      base.appearance ||
       preferences.theme ||
+      preferences.mode ||
+      preferences.appearance ||
       null,
 
     mode:
       base.mode ||
       preferences.mode ||
+      base.theme ||
+      preferences.theme ||
       null,
 
     appearance:
       base.appearance ||
       preferences.appearance ||
+      base.theme ||
+      preferences.theme ||
       null,
 
     lang:
@@ -1496,6 +1838,8 @@ function normalizeIncomingUser(user = null) {
       preferences.lang ||
       base.language ||
       preferences.language ||
+      base.locale ||
+      preferences.locale ||
       null,
 
     language:
@@ -1923,12 +2267,24 @@ function normalizeSessionContext(sessionInput = null, user = null, fallback = {}
       ""
     );
 
+  const tokenVersion =
+    first(
+      ...TOKEN_VERSION_KEYS.map((key) =>
+        source[key]
+      ),
+      fallbackObj.tokenVersion,
+      user?.tokenVersion,
+      user?.token_version,
+      user?.tv
+    );
+
   const hasAny =
     Object.keys(source).length > 0 ||
     Boolean(
       sessionId ||
         sessionUserId ||
-        expiresAt
+        expiresAt ||
+        tokenVersion !== null
     );
 
   if (!hasAny) {
@@ -1953,6 +2309,11 @@ function normalizeSessionContext(sessionInput = null, user = null, fallback = {}
     session_id:
       source.session_id ||
       source.sessionId ||
+      source.sid ||
+      sessionId ||
+      null,
+
+    sid:
       source.sid ||
       sessionId ||
       null,
@@ -1998,6 +2359,20 @@ function normalizeSessionContext(sessionInput = null, user = null, fallback = {}
       source.expires_at ||
       expiresAt ||
       null,
+
+    tokenVersion:
+      tokenVersion !== null &&
+      tokenVersion !== undefined &&
+      tokenVersion !== ""
+        ? tokenVersion
+        : null,
+
+    tv:
+      tokenVersion !== null &&
+      tokenVersion !== undefined &&
+      tokenVersion !== ""
+        ? tokenVersion
+        : null,
   };
 }
 
@@ -2027,6 +2402,11 @@ function extractSessionInput(payload = {}) {
     pickObjectFromObjects(
       objects,
       USER_KEYS
+    ) ||
+    (
+      looksLikeUserObject(payload)
+        ? payload
+        : null
     );
 
   const user =
@@ -2037,6 +2417,16 @@ function extractSessionInput(payload = {}) {
       objects,
       ROLE_KEYS
     );
+
+  const permissions =
+    unique([
+      ...pickArrayFromObjects(
+        objects,
+        PERMISSION_KEYS
+      ),
+      ...safeArray(user?.permissions),
+      ...safeArray(user?.permisos),
+    ]);
 
   const sessionRaw =
     pickObjectFromObjects(
@@ -2068,12 +2458,24 @@ function extractSessionInput(payload = {}) {
       SESSION_EXPIRES_KEYS
     );
 
+  const tokenVersion =
+    first(
+      pickValueFromObjects(
+        objects,
+        TOKEN_VERSION_KEYS
+      ),
+      user?.tokenVersion,
+      user?.token_version,
+      user?.tv
+    );
+
   const fallbackSession = {
     sessionId,
     userId:
       sessionUserId,
     sessionUserId,
     expiresAt,
+    tokenVersion,
   };
 
   const session =
@@ -2084,11 +2486,19 @@ function extractSessionInput(payload = {}) {
     );
 
   return {
-    token,
-    refreshToken,
-    tempToken,
+    token:
+      normalizeTokenValue(token),
+
+    refreshToken:
+      normalizeTokenValue(refreshToken),
+
+    tempToken:
+      normalizeTokenValue(tempToken),
+
     user,
     role,
+    permissions,
+
     session,
 
     sessionId:
@@ -2102,6 +2512,13 @@ function extractSessionInput(payload = {}) {
       sessionUserId ||
       "",
 
+    tokenVersion:
+      tokenVersion !== null &&
+      tokenVersion !== undefined &&
+      tokenVersion !== ""
+        ? tokenVersion
+        : null,
+
     flags: {
       tokenProvided:
         payloadHasAnyKey(
@@ -2113,7 +2530,8 @@ function extractSessionInput(payload = {}) {
         payloadHasAnyKey(
           objects,
           USER_KEYS
-        ),
+        ) ||
+        looksLikeUserObject(payload),
 
       refreshTokenProvided:
         payloadHasAnyKey(
@@ -2150,8 +2568,7 @@ function extractSessionInput(payload = {}) {
 
 function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
   let value =
-    String(pathname || DEFAULT_ROUTE)
-      .trim()
+    safeText(pathname, DEFAULT_ROUTE)
       .replace(/\\/g, "/")
       .replace(/\/{2,}/g, "/");
 
@@ -2165,6 +2582,30 @@ function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
       `/${value}`;
   }
 
+  const parts =
+    value
+      .split("/")
+      .filter(Boolean);
+
+  const output =
+    [];
+
+  for (const part of parts) {
+    if (part === ".") {
+      continue;
+    }
+
+    if (part === "..") {
+      output.pop();
+      continue;
+    }
+
+    output.push(part);
+  }
+
+  value =
+    `/${output.join("/")}` || DEFAULT_ROUTE;
+
   if (
     value.length > 1 &&
     value.endsWith("/")
@@ -2177,21 +2618,9 @@ function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
   return value;
 }
 
-function stripSearchAndHash(path = DEFAULT_ROUTE) {
-  const raw =
-    safeText(path, DEFAULT_ROUTE);
-
-  return normalizePathnameOnly(
-    raw
-      .split("?")[0]
-      .split("#")[0] ||
-      DEFAULT_ROUTE
-  );
-}
-
 function isHashRouterPath(value = "") {
   const raw =
-    String(value || "").trim();
+    safeText(value, "");
 
   return (
     raw.startsWith("#/") ||
@@ -2201,7 +2630,7 @@ function isHashRouterPath(value = "") {
 
 function normalizeHashRouterPath(value = "") {
   const raw =
-    String(value || "").trim();
+    safeText(value, "");
 
   if (!raw) {
     return DEFAULT_ROUTE;
@@ -2212,6 +2641,91 @@ function normalizeHashRouterPath(value = "") {
   }
 
   return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
+}
+
+function splitFullPath(path = DEFAULT_ROUTE) {
+  const raw =
+    safeText(path, DEFAULT_ROUTE);
+
+  if (isHashRouterPath(raw)) {
+    return splitFullPath(
+      normalizeHashRouterPath(raw)
+    );
+  }
+
+  let pathname =
+    raw;
+
+  let search =
+    "";
+
+  let hash =
+    "";
+
+  const hashIndex =
+    pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash =
+      pathname.slice(hashIndex);
+
+    pathname =
+      pathname.slice(0, hashIndex) ||
+      DEFAULT_ROUTE;
+  }
+
+  const searchIndex =
+    pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search =
+      pathname.slice(searchIndex);
+
+    pathname =
+      pathname.slice(0, searchIndex) ||
+      DEFAULT_ROUTE;
+  }
+
+  return {
+    pathname:
+      normalizePathnameOnly(pathname),
+
+    search,
+    hash,
+  };
+}
+
+function stripPublicUsernamePrefix(pathname = DEFAULT_ROUTE) {
+  const clean =
+    normalizePathnameOnly(pathname);
+
+  const parts =
+    clean
+      .split("/")
+      .filter(Boolean);
+
+  if (
+    parts.length &&
+    /^@[A-Za-z0-9._-]{1,80}$/.test(parts[0])
+  ) {
+    const rest =
+      parts.slice(1).join("/");
+
+    return rest
+      ? normalizePathnameOnly(`/${rest}`)
+      : DEFAULT_ROUTE;
+  }
+
+  return clean;
+}
+
+function getCanonicalRoutePath(path = DEFAULT_ROUTE) {
+  const {
+    pathname,
+  } =
+    splitFullPath(path || DEFAULT_ROUTE);
+
+  return stripPublicUsernamePrefix(pathname);
 }
 
 function getBrowserPublicPath() {
@@ -2244,7 +2758,7 @@ function getBrowserPublicPath() {
 
 function isPublicTechnicalRoute(path = DEFAULT_ROUTE) {
   const clean =
-    stripSearchAndHash(path);
+    getCanonicalRoutePath(path);
 
   return PUBLIC_TECHNICAL_ROUTES.some((candidate) => {
     if (clean === candidate) {
@@ -2257,13 +2771,17 @@ function isPublicTechnicalRoute(path = DEFAULT_ROUTE) {
 
 function isProtectedPublicTokenRoute(path = DEFAULT_ROUTE) {
   const clean =
-    stripSearchAndHash(path);
+    getCanonicalRoutePath(path);
 
   return (
-    clean === ACTIVATION_PATH ||
-    clean.startsWith(`${ACTIVATION_PATH}/`) ||
-    clean === RESET_CONFIRM_PATH ||
-    clean.startsWith(`${RESET_CONFIRM_PATH}/`)
+    ACTIVATION_PATHS.some((candidate) =>
+      clean === candidate ||
+      clean.startsWith(`${candidate}/`)
+    ) ||
+    RESET_CONFIRM_PATHS.some((candidate) =>
+      clean === candidate ||
+      clean.startsWith(`${candidate}/`)
+    )
   );
 }
 
@@ -2273,7 +2791,8 @@ function shouldPreserveRoute(options = {}) {
     options.preserveCurrentRoute === true ||
     options.publicRoute === true ||
     options.activationBoot === true ||
-    options.resetConfirmBoot === true
+    options.resetConfirmBoot === true ||
+    options.preserveInitialUrl === true
   ) {
     return true;
   }
@@ -2293,7 +2812,7 @@ function shouldPreserveRoute(options = {}) {
     safeText(
       options.route ||
         state.route ||
-        stripSearchAndHash(publicPath),
+        getCanonicalRoutePath(publicPath),
       ""
     );
 
@@ -2321,7 +2840,7 @@ function captureRouteContext(options = {}) {
   const route =
     safeText(options.route, "") ||
     safeText(state.route, "") ||
-    stripSearchAndHash(publicPath) ||
+    getCanonicalRoutePath(publicPath) ||
     DEFAULT_ROUTE;
 
   return {
@@ -2333,7 +2852,7 @@ function captureRouteContext(options = {}) {
       }),
 
     route:
-      stripSearchAndHash(
+      getCanonicalRoutePath(
         route ||
           publicPath ||
           DEFAULT_ROUTE
@@ -2366,7 +2885,7 @@ function restoreRouteContext(context = {}) {
   }
 
   const route =
-    stripSearchAndHash(
+    getCanonicalRoutePath(
       context.route ||
         context.publicPath ||
         DEFAULT_ROUTE
@@ -2388,6 +2907,8 @@ function restoreRouteContext(context = {}) {
 
   safeSetState({
     route,
+    canonicalPath:
+      route,
     publicPath,
 
     lastRoute:
@@ -2440,22 +2961,45 @@ function getCoreStorageKey(name = "") {
   );
 }
 
+function storageRemove(key = "") {
+  const finalKey =
+    safeText(key, "");
+
+  if (!finalKey) {
+    return false;
+  }
+
+  let removed =
+    false;
+
+  try {
+    AppCore?.storage?.remove?.(finalKey);
+    removed = true;
+  } catch {}
+
+  try {
+    AppCore?.storage?.delete?.(finalKey);
+    removed = true;
+  } catch {}
+
+  try {
+    AppCore?.storage?.del?.(finalKey);
+    removed = true;
+  } catch {}
+
+  return removed;
+}
+
 function readCoreStoredToken() {
-  const tokenKey =
-    getCoreStorageKey("token");
-
-  const accessTokenKey =
-    getCoreStorageKey("accessToken");
-
-  const candidates = [
-    tokenKey,
-    accessTokenKey,
+  const candidates = unique([
+    getCoreStorageKey("token"),
+    getCoreStorageKey("accessToken"),
     "token",
     "accessToken",
     "access_token",
-  ];
+  ]);
 
-  for (const key of unique(candidates)) {
+  for (const key of candidates) {
     try {
       const value =
         AppCore?.storage?.getRaw?.(
@@ -2468,7 +3012,7 @@ function readCoreStoredToken() {
         );
 
       if (hasUsableToken(value)) {
-        return stripBearer(value);
+        return normalizeTokenValue(value);
       }
     } catch {}
   }
@@ -2479,7 +3023,7 @@ function readCoreStoredToken() {
 function writeCoreTokenStorage(token = null) {
   const cleanToken =
     hasUsableToken(token)
-      ? stripBearer(token)
+      ? normalizeTokenValue(token)
       : null;
 
   const tokenKeys = unique([
@@ -2505,7 +3049,7 @@ function writeCoreTokenStorage(token = null) {
           );
         }
       } else {
-        AppCore?.storage?.remove?.(key);
+        storageRemove(key);
       }
     } catch {}
   }
@@ -2529,7 +3073,11 @@ function writeCoreUserStorage(user = null) {
         finalUser
       );
     } else {
-      AppCore?.storage?.remove?.(userKey);
+      storageRemove(userKey);
+      storageRemove("user");
+      storageRemove("currentUser");
+      storageRemove("authUser");
+      storageRemove("sessionUser");
     }
   } catch {}
 
@@ -2548,11 +3096,11 @@ function writeCoreSessionStorage(session = null) {
     "sessionId",
     "sessionUserId",
   ]) {
-    try {
-      AppCore?.storage?.remove?.(
-        getCoreStorageKey(name)
-      );
-    } catch {}
+    storageRemove(
+      getCoreStorageKey(name)
+    );
+
+    storageRemove(name);
   }
 
   if (finalSession) {
@@ -2636,15 +3184,11 @@ function clearCoreAuthStorage() {
   ];
 
   for (const name of keys) {
-    try {
-      AppCore?.storage?.remove?.(
-        getCoreStorageKey(name)
-      );
-    } catch {}
+    storageRemove(
+      getCoreStorageKey(name)
+    );
 
-    try {
-      AppCore?.storage?.remove?.(name);
-    } catch {}
+    storageRemove(name);
   }
 
   return true;
@@ -2755,10 +3299,12 @@ function buildDerivedAuthState(state = ensureCoreState()) {
 
   return {
     authenticated,
+
     token:
       hasUsableToken(token)
-        ? stripBearer(token)
+        ? normalizeTokenValue(token)
         : "",
+
     user,
     session,
     role,
@@ -2840,6 +3386,12 @@ function syncDerivedState() {
     state.sessionUser =
       derived.user;
 
+    state.account =
+      derived.user;
+
+    state.profile =
+      derived.user;
+
     state.currentResolvedUsername =
       derived.user.slug ||
       derived.user.usernameLower ||
@@ -2880,6 +3432,12 @@ function syncDerivedState() {
       null;
 
     state.sessionUser =
+      null;
+
+    state.account =
+      null;
+
+    state.profile =
       null;
 
     state.currentResolvedUsername =
@@ -3017,7 +3575,7 @@ function resolveThemeFromUser(user = null) {
   }
 
   const explicitTheme =
-    String(
+    safeText(
       user.theme ??
         user.mode ??
         user.appearance ??
@@ -3028,19 +3586,19 @@ function resolveThemeFromUser(user = null) {
         user?.raw?.theme ??
         user?.raw?.preferences?.theme ??
         user?.raw?.settings?.theme ??
-        ""
-    )
-      .trim()
-      .toLowerCase();
+        "",
+      ""
+    ).toLowerCase();
 
   if (
     explicitTheme === "light" ||
-    explicitTheme === "dark"
+    explicitTheme === "dark" ||
+    explicitTheme === "system"
   ) {
     return explicitTheme;
   }
 
-  const candidates = [
+  const darkCandidates = [
     user.darkMode,
     user.dark_mode,
     user?.raw?.darkMode,
@@ -3071,7 +3629,7 @@ function resolveThemeFromUser(user = null) {
 
   if (hasExplicitDarkMode) {
     const darkValue =
-      candidates.find((item) =>
+      darkCandidates.find((item) =>
         typeof item === "boolean"
       );
 
@@ -3117,13 +3675,34 @@ function applyThemeFromUser(user = null) {
 
   if (
     theme !== "light" &&
-    theme !== "dark"
+    theme !== "dark" &&
+    theme !== "system"
   ) {
     return null;
   }
 
   try {
     AppCore?.setTheme?.(theme);
+  } catch {}
+
+  try {
+    AppCore?.changeTheme?.(theme);
+  } catch {}
+
+  try {
+    if (isBrowser() && window.__ONION_THEME__?.set) {
+      window.__ONION_THEME__.set(
+        theme,
+        {
+          source:
+            "auth-session:user",
+          persist:
+            true,
+          emit:
+            true,
+        }
+      );
+    }
   } catch {}
 
   try {
@@ -3159,6 +3738,15 @@ function applyLangFromUser(user = null) {
 
   try {
     AppCore?.setLang?.(lang);
+  } catch {}
+
+  try {
+    AppCore?.changeLanguage?.(lang, {
+      source:
+        `${SESSION_SOURCE}:lang`,
+      rerender:
+        false,
+    });
   } catch {}
 
   try {
@@ -3206,8 +3794,8 @@ function getCurrentStateSnapshotBase() {
   const authenticated =
     Boolean(
       hasUsableToken(token) &&
-      hasUsableUser(user) &&
-      state.authenticated === true
+        hasUsableUser(user) &&
+        state.authenticated === true
     );
 
   return {
@@ -3215,14 +3803,14 @@ function getCurrentStateSnapshotBase() {
 
     token:
       hasUsableToken(token)
-        ? stripBearer(token)
+        ? normalizeTokenValue(token)
         : null,
 
     accessToken:
       hasUsableToken(token)
         ? state.accessToken ||
           state.access_token ||
-          stripBearer(token)
+          normalizeTokenValue(token)
         : null,
 
     user:
@@ -3526,6 +4114,10 @@ function emitSessionAppliedEvents(after = {}, before = null, options = {}) {
     options
   );
 
+  /*
+    Importante:
+    desde login NO emitimos restore.
+  */
   if (mode === "restore") {
     safeEmit(
       SESSION_EVENTS.restored,
@@ -3695,13 +4287,19 @@ function safePersistAuxSessionData(user) {
    APPLY SESSION
 ========================================================= */
 
-export function applySession(payload = {}) {
+export function applySession(payload = {}, options = {}) {
+  const input =
+    {
+      ...safeObject(payload),
+      ...safeObject(options),
+    };
+
   const startedAt =
     nowMs();
 
   const source =
     safeText(
-      payload?.source,
+      input.source,
       SESSION_SOURCE
     ) ||
     SESSION_SOURCE;
@@ -3710,14 +4308,14 @@ export function applySession(payload = {}) {
     inferEventMode({
       source,
       eventMode:
-        payload?.eventMode,
+        input.eventMode,
       emitRestoreEvents:
-        payload?.emitRestoreEvents,
+        input.emitRestoreEvents,
     });
 
   const silent =
     safeBool(
-      payload?.silent,
+      input.silent,
       false
     ) ||
     mode === "silent";
@@ -3725,9 +4323,9 @@ export function applySession(payload = {}) {
   const eventOptions = {
     silent,
     emit:
-      payload?.emit,
+      input.emit,
     emitEvents:
-      payload?.emitEvents,
+      input.emitEvents,
   };
 
   const before =
@@ -3741,7 +4339,7 @@ export function applySession(payload = {}) {
     ensureCoreState();
 
   const extracted =
-    extractSessionInput(payload);
+    extractSessionInput(input);
 
   const tokenProvided =
     Boolean(extracted.flags.tokenProvided);
@@ -3759,7 +4357,7 @@ export function applySession(payload = {}) {
     Boolean(extracted.flags.sessionProvided);
 
   const preserveExistingUser =
-    payload?.preserveExistingUser === true;
+    input.preserveExistingUser === true;
 
   const effectiveToken =
     firstText(
@@ -3785,6 +4383,10 @@ export function applySession(payload = {}) {
     tokenProvided &&
     preserveExistingUser !== true
   ) {
+    /*
+      Regla anti auth fantasma:
+      token nuevo explícito sin user explícito no reutiliza usuario viejo.
+    */
     effectiveUser =
       null;
   } else {
@@ -3796,8 +4398,8 @@ export function applySession(payload = {}) {
     normalizeSessionContext(
       sessionProvided
         ? extracted.session
-        : payload?.sessionData ||
-          payload?.session ||
+        : input.sessionData ||
+          input.session ||
           state.session ||
           state.sessionData ||
           null,
@@ -3805,15 +4407,22 @@ export function applySession(payload = {}) {
       {
         sessionId:
           extracted.sessionId ||
-          payload?.sessionId ||
-          payload?.session_id ||
+          input.sessionId ||
+          input.session_id ||
           state.sessionId,
 
         sessionUserId:
           extracted.sessionUserId ||
-          payload?.sessionUserId ||
-          payload?.session_user_id ||
+          input.sessionUserId ||
+          input.session_user_id ||
           state.sessionUserId,
+
+        tokenVersion:
+          extracted.tokenVersion ||
+          input.tokenVersion ||
+          input.token_version ||
+          input.tv ||
+          state.tokenVersion,
       }
     );
 
@@ -3823,15 +4432,20 @@ export function applySession(payload = {}) {
   const usableUser =
     hasUsableUser(effectiveUser);
 
+  const explicitAuthenticatedFalse =
+    input.authenticated === false ||
+    input.ok === false ||
+    input.success === false;
+
   const nextAuthenticated =
-    payload?.authenticated === false
+    explicitAuthenticatedFalse
       ? false
       : usableToken && usableUser;
 
   const explicitRole =
     firstText(
-      payload?.role,
-      payload?.rol,
+      input.role,
+      input.rol,
       extracted.role
     );
 
@@ -3896,8 +4510,8 @@ export function applySession(payload = {}) {
     firstText(
       effectiveSession?.sessionId,
       effectiveSession?.id,
-      payload?.sessionId,
-      payload?.session_id,
+      input.sessionId,
+      input.session_id,
       getStoredSessionId(),
       state.sessionId,
       state.session?.sessionId
@@ -3908,13 +4522,27 @@ export function applySession(payload = {}) {
       effectiveSession?.sessionUserId,
       effectiveSession?.userId,
       effectiveSession?.user_id,
-      payload?.sessionUserId,
-      payload?.session_user_id,
+      input.sessionUserId,
+      input.session_user_id,
       getUserIdentity(effectiveUser),
       getStoredSessionUserId(),
       state.sessionUserId,
       state.session?.sessionUserId,
       state.session?.userId
+    );
+
+  const tokenVersion =
+    first(
+      input.tokenVersion,
+      input.token_version,
+      input.tv,
+      extracted.tokenVersion,
+      effectiveSession?.tokenVersion,
+      effectiveSession?.tv,
+      effectiveUser?.tokenVersion,
+      effectiveUser?.token_version,
+      effectiveUser?.tv,
+      state.tokenVersion
     );
 
   const canonicalSession =
@@ -3951,6 +4579,22 @@ export function applySession(payload = {}) {
             effectiveSession.user_id ||
             sessionUserId ||
             null,
+
+          tokenVersion:
+            tokenVersion !== null &&
+            tokenVersion !== undefined &&
+            tokenVersion !== ""
+              ? tokenVersion
+              : effectiveSession.tokenVersion ||
+                null,
+
+          tv:
+            tokenVersion !== null &&
+            tokenVersion !== undefined &&
+            tokenVersion !== ""
+              ? tokenVersion
+              : effectiveSession.tv ||
+                null,
         }
       : null;
 
@@ -3963,6 +4607,8 @@ export function applySession(payload = {}) {
     writeCoreSessionStorage(
       canonicalSession
     );
+  } else if (!nextAuthenticated) {
+    writeCoreSessionStorage(null);
   }
 
   if (nextAuthenticated) {
@@ -3983,6 +4629,16 @@ export function applySession(payload = {}) {
     tempTokenProvided &&
     hasUsableToken(extracted.tempToken);
 
+  const normalizedToken =
+    usableToken
+      ? normalizeTokenValue(effectiveToken)
+      : "";
+
+  const refreshToken =
+    refreshTokenProvided
+      ? normalizeTokenValue(extracted.refreshToken)
+      : getStoredRefreshToken() || "";
+
   const resolvedUsername =
     nextAuthenticated
       ? effectiveUser?.slug ||
@@ -3991,29 +4647,29 @@ export function applySession(payload = {}) {
         null
       : null;
 
+  /*
+    Alias canónico:
+    session y sessionData SIEMPRE reciben exactamente la misma referencia.
+  */
   const sessionAlias =
     nextAuthenticated
       ? {
           ...(canonicalSession || {}),
 
           token:
-            stripBearer(effectiveToken),
+            normalizedToken,
 
           accessToken:
-            stripBearer(effectiveToken),
+            normalizedToken,
 
           access_token:
-            stripBearer(effectiveToken),
+            normalizedToken,
 
           refreshToken:
-            extracted.refreshToken ||
-            getStoredRefreshToken() ||
-            "",
+            refreshToken || null,
 
           refresh_token:
-            extracted.refreshToken ||
-            getStoredRefreshToken() ||
-            "",
+            refreshToken || null,
 
           user:
             effectiveUser,
@@ -4030,6 +4686,20 @@ export function applySession(payload = {}) {
           roles:
             nextRoles,
 
+          permissions:
+            unique([
+              ...safeArray(extracted.permissions),
+              ...safeArray(effectiveUser?.permissions),
+              ...safeArray(effectiveUser?.permisos),
+            ]),
+
+          permisos:
+            unique([
+              ...safeArray(extracted.permissions),
+              ...safeArray(effectiveUser?.permissions),
+              ...safeArray(effectiveUser?.permisos),
+            ]),
+
           authenticated:
             true,
 
@@ -4037,20 +4707,39 @@ export function applySession(payload = {}) {
         }
       : canonicalSession;
 
+  const permissions =
+    nextAuthenticated
+      ? unique([
+          ...safeArray(extracted.permissions),
+          ...safeArray(effectiveUser?.permissions),
+          ...safeArray(effectiveUser?.permisos),
+        ])
+      : [];
+
   const nextPatch = {
     token:
       usableToken
-        ? stripBearer(effectiveToken)
+        ? normalizedToken
         : null,
 
     accessToken:
       usableToken
-        ? stripBearer(effectiveToken)
+        ? normalizedToken
         : null,
 
     access_token:
       usableToken
-        ? stripBearer(effectiveToken)
+        ? normalizedToken
+        : null,
+
+    refreshToken:
+      nextAuthenticated && refreshToken
+        ? refreshToken
+        : null,
+
+    refresh_token:
+      nextAuthenticated && refreshToken
+        ? refreshToken
         : null,
 
     user:
@@ -4095,6 +4784,11 @@ export function applySession(payload = {}) {
     roles:
       nextRoles,
 
+    permissions,
+
+    permisos:
+      permissions,
+
     authenticated:
       nextAuthenticated,
 
@@ -4127,10 +4821,16 @@ export function applySession(payload = {}) {
         ? sessionUserId || null
         : null,
 
-    /*
-      Alias controlados:
-      session y sessionData apuntan exactamente al mismo objeto.
-    */
+    tokenVersion:
+      nextAuthenticated
+        ? tokenVersion ?? null
+        : null,
+
+    tv:
+      nextAuthenticated
+        ? tokenVersion ?? null
+        : null,
+
     session:
       sessionAlias,
 
@@ -4189,6 +4889,10 @@ export function applySession(payload = {}) {
     }
   );
 
+  /*
+    Reafirmación final.
+    Si token_only, syncDerivedState mantiene hasToken=true pero authenticated=false.
+  */
   syncDerivedState();
   safeSyncUserUI();
 
@@ -4207,7 +4911,11 @@ export function applySession(payload = {}) {
       reason:
         nextAuthenticated
           ? "apply"
-          : "apply:partial",
+          : usableToken
+            ? "apply:token_only"
+            : usableUser
+              ? "apply:user_only"
+              : "apply:partial",
       before,
       after,
       durationMs:
@@ -4225,7 +4933,7 @@ export function applySession(payload = {}) {
           eventMode:
             mode,
           emitRestoreEvents:
-            payload?.emitRestoreEvents,
+            input.emitRestoreEvents,
           ...eventOptions,
         }
       );
@@ -4236,7 +4944,11 @@ export function applySession(payload = {}) {
         {
           source,
           eventMode:
-            mode,
+            usableToken
+              ? "token_only"
+              : usableUser
+                ? "user_only"
+                : mode,
           ...eventOptions,
         }
       );
@@ -4303,6 +5015,14 @@ export function clearSessionLocal(options = {}) {
           true,
         source:
           `${SESSION_SOURCE}:core-clear`,
+        skipNavigation:
+          true,
+        skipNavigate:
+          true,
+        skipRedirect:
+          true,
+        noRedirect:
+          true,
       });
     }
   } catch (error) {
@@ -4419,6 +5139,25 @@ export function isAuthenticated() {
   );
 }
 
+export function getCurrentUser() {
+  syncDerivedState();
+
+  return getBestStateUser(
+    ensureCoreState()
+  );
+}
+
+export function getCurrentToken() {
+  const token =
+    getBestStateToken(
+      ensureCoreState()
+    );
+
+  return hasUsableToken(token)
+    ? normalizeTokenValue(token)
+    : "";
+}
+
 export function getCurrentRole() {
   syncDerivedState();
 
@@ -4509,21 +5248,8 @@ export function requireRole(...roles) {
 ========================================================= */
 
 export function getAuthHeader() {
-  const state =
-    ensureCoreState();
-
   const token =
-    firstText(
-      state.token,
-      state.accessToken,
-      state.access_token,
-      state.session?.token,
-      state.session?.accessToken,
-      state.session?.access_token,
-      state.sessionData?.token,
-      state.sessionData?.accessToken,
-      readCoreStoredToken()
-    );
+    getCurrentToken();
 
   if (!hasUsableToken(token)) {
     return {};
@@ -4543,7 +5269,7 @@ export function getAuthHeader() {
 
   return {
     [headerName]:
-      `${prefix} ${stripBearer(token)}`,
+      `${prefix} ${normalizeTokenValue(token)}`,
   };
 }
 
@@ -4691,6 +5417,58 @@ export function buildAuthErrorPayload(error) {
 }
 
 /* =========================================================
+   OPTIONAL DEBUG BRIDGE
+========================================================= */
+
+export function exposeSessionDebugApi() {
+  const api = {
+    version:
+      AUTH_SESSION_VERSION,
+
+    snapshot:
+      getSessionDebugSnapshot,
+
+    getSnapshot:
+      getSessionDebugSnapshot,
+
+    isAuthenticated,
+
+    getCurrentUser,
+    getCurrentToken,
+    getCurrentRole,
+    getCurrentRoles,
+
+    hasRole,
+    requireRole,
+
+    getAuthHeader,
+
+    clear:
+      clearSessionLocal,
+
+    apply:
+      applySession,
+  };
+
+  try {
+    if (isBrowser()) {
+      window.__ONION_AUTH_SESSION__ =
+        api;
+    }
+  } catch {}
+
+  try {
+    safeDefineValue(
+      AppCore,
+      "AuthSession",
+      api
+    );
+  } catch {}
+
+  return api;
+}
+
+/* =========================================================
    DEFAULT EXPORT
 ========================================================= */
 
@@ -4702,6 +5480,9 @@ export default {
   buildSessionSnapshot,
 
   isAuthenticated,
+
+  getCurrentUser,
+  getCurrentToken,
 
   getCurrentRole,
   getCurrentRoles,
@@ -4718,4 +5499,5 @@ export default {
 
   getSessionDebugSnapshot,
   buildAuthErrorPayload,
+  exposeSessionDebugApi,
 };

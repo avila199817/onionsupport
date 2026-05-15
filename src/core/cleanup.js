@@ -2,57 +2,31 @@
    Onion SPA - Core Cleanup
    Archivo: src/core/cleanup.js
 
-   ONION SUPPORT · CORE CLEANUP
-   SCOPED DISPOSERS · DOM/BUS/TIMERS/OBSERVERS · 17/10
-
-   Responsabilidades:
-   - gestionar scopes de cleanup del Core
-   - registrar listeners DOM por scope
-   - registrar listeners de event bus por scope
-   - registrar cleaners/disposers manuales por scope
-   - limpiar recursos de forma segura e idempotente
-   - soportar firmas legacy y modernas
-   - evitar duplicados dentro del mismo scope
-   - limpiar timers, raf, idle callbacks, observers y abort controllers
-   - exponer snapshots de diagnóstico redacted
-
-   Candados:
-   - cleanup idempotente real
-   - tolerancia total si faltan registry/events/utils
-   - soporte DOM: cleanup.on(scope, target, event, handler, options)
-   - soporte DOM: cleanup.event(scope, target, event, handler, options)
-   - soporte DOM target string: "window" / "document" / "body" / "html"
-   - soporte bus: cleanup.event(scope, eventName, handler, options)
-   - soporte manual: cleanup.add(scope, disposer, label)
-   - soporte timers: timeout / interval
-   - soporte frame callbacks: raf / animationFrame / idle
-   - soporte observer.disconnect()
-   - soporte AbortController.abort(reason)
-   - dedupe DOM por target/event/handler/options
-   - dedupe bus por event/handler/options
-   - once manual robusto para DOM y bus
-   - wrappers defensivos contra errores sync/async
-   - auto-unregister de recursos one-shot ejecutados
-   - aliases: clear/dispose/run/runAll/off
-   - cero throws accidentales
+   CLEANUP KERNEL · SCOPED DISPOSERS
+   - DOM events
+   - Event bus
+   - Manual disposers
+   - Timers / RAF / Idle
+   - Observers / AbortController
+   - Dedupe por scope
+   - Idempotente
+   - Snapshots sin secretos
 ========================================================= */
 
-const CLEANUP_VERSION = "17.0.0";
+export const CLEANUP_VERSION = "18.0.0-clean";
+export const DEFAULT_SCOPE = "global";
 
-const DEFAULT_SCOPE = "global";
-const DEFAULT_MANUAL_LABEL = "manual";
-
-const CLEANUP_EVENTS = Object.freeze({
+export const CLEANUP_EVENTS = Object.freeze({
   ready: "cleanup:ready",
+  added: "cleanup:record:added",
+  skipped: "cleanup:record:skipped",
   disposed: "cleanup:disposed",
-  error: "cleanup:error",
   scopeRun: "cleanup:scope:run",
   allRun: "cleanup:all:run",
-  recordAdded: "cleanup:record:added",
-  recordSkipped: "cleanup:record:skipped",
+  error: "cleanup:error",
 });
 
-const SPECIAL_DOM_TARGETS = Object.freeze([
+const SPECIAL_TARGETS = new Set([
   "window",
   "document",
   "body",
@@ -64,21 +38,27 @@ const SPECIAL_DOM_TARGETS = Object.freeze([
 const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
 
-const TOKENISH_TEXT_RE =
-  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)[^&#\s]+/i;
+const TOKEN_TEXT_RE =
+  /(Bearer\s+)[A-Za-z0-9._~+/=-]+|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|tempToken|temp_token|code|t)=)[^&#\s]+/gi;
 
 /* =========================================================
    BASICS
 ========================================================= */
 
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function isFn(value) {
+  return typeof value === "function";
+}
+
 function isObject(value) {
-  return value !== null && typeof value === "object";
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function isPlainObject(value) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
+  if (!isObject(value)) return false;
 
   try {
     const proto = Object.getPrototypeOf(value);
@@ -88,28 +68,28 @@ function isPlainObject(value) {
   }
 }
 
-function isFunction(value) {
-  return typeof value === "function";
+function text(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const out = String(value).trim();
+  return out || fallback;
 }
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
-
-  const text = String(value).trim();
-  return text || fallback;
+function lower(value, fallback = "") {
+  return text(value, fallback).toLowerCase();
 }
 
-function safeLower(value, fallback = "") {
-  return safeText(value, fallback).toLowerCase();
+function number(value, fallback = 0) {
+  const out = Number(value);
+  return Number.isFinite(out) ? out : fallback;
 }
 
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+function array(value) {
+  if (Array.isArray(value)) return value;
+  if (value === null || value === undefined) return [];
+  return [value];
 }
 
-function safeNow() {
+function now() {
   try {
     return Date.now();
   } catch {
@@ -117,7 +97,7 @@ function safeNow() {
   }
 }
 
-function safeIsoDate(ms = safeNow()) {
+function iso(ms = now()) {
   try {
     return new Date(ms).toISOString();
   } catch {
@@ -125,43 +105,49 @@ function safeIsoDate(ms = safeNow()) {
   }
 }
 
-function safeNumber(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
+function noop() {
+  return false;
 }
 
-function redactText(value = "") {
-  const text = safeText(value, "");
+function createNoopDisposer() {
+  try {
+    noop.__cleanupNoop = true;
+  } catch {}
 
-  if (!text) {
-    return "";
-  }
+  return noop;
+}
+
+function ensureMap(value) {
+  return value instanceof Map ? value : new Map();
+}
+
+/* =========================================================
+   REDACTION
+========================================================= */
+
+function redact(value = "") {
+  const raw = text(value, "");
+  if (!raw) return "";
 
   try {
-    return text
-      .replace(/(bearer\s+)([a-z0-9._~+/=-]+)/gi, "$1***")
-      .replace(
-        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)([^&#\s]+)/gi,
-        "$1***"
-      )
-      .replace(/([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)/gi, "***");
+    return raw.replace(TOKEN_TEXT_RE, (match, bearerPrefix, queryPrefix) => {
+      if (bearerPrefix) return `${bearerPrefix}***`;
+      if (queryPrefix) return `${queryPrefix}***`;
+      return "***";
+    });
   } catch {
-    return TOKENISH_TEXT_RE.test(text) ? "***" : text;
+    return raw;
   }
 }
 
-function sanitizeForSnapshot(value, depth = 0, keyHint = "") {
-  if (depth > 4) {
-    return "[MaxDepth]";
-  }
+function sanitize(value, depth = 0, keyHint = "", seen = new WeakSet()) {
+  if (depth > 5) return "[MaxDepth]";
 
-  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) {
+  if (SENSITIVE_KEY_RE.test(text(keyHint, ""))) {
     return value ? "***" : value;
   }
 
-  if (typeof value === "string") {
-    return redactText(value);
-  }
+  if (typeof value === "string") return redact(value);
 
   if (
     value === null ||
@@ -172,92 +158,68 @@ function sanitizeForSnapshot(value, depth = 0, keyHint = "") {
     return value;
   }
 
-  if (typeof value === "bigint") {
-    return String(value);
-  }
-
-  if (typeof value === "function") {
-    return "[Function]";
-  }
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return "[Function]";
 
   if (value instanceof Error) {
     return {
       name: value.name || "Error",
-      message: redactText(value.message || ""),
+      message: redact(value.message || ""),
       stack: value.stack ? "[stack]" : "",
     };
   }
 
   if (Array.isArray(value)) {
-    return value
-      .slice(0, 50)
-      .map((item) => sanitizeForSnapshot(item, depth + 1, keyHint));
+    return value.slice(0, 60).map((item) =>
+      sanitize(item, depth + 1, keyHint, seen)
+    );
   }
 
-  if (isPlainObject(value)) {
-    const output = {};
+  if (isObject(value)) {
+    try {
+      if (seen.has(value)) return "[Circular]";
+      seen.add(value);
+    } catch {}
 
-    for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = sanitizeForSnapshot(item, depth + 1, key);
+    const out = {};
+
+    for (const [key, item] of Object.entries(value).slice(0, 100)) {
+      out[key] = sanitize(item, depth + 1, key, seen);
     }
 
-    return output;
+    return out;
   }
 
   try {
-    return redactText(String(value));
+    return redact(String(value));
   } catch {
     return "[Unserializable]";
   }
 }
 
-function safeWarn(utils, ...args) {
-  const cleanArgs = args.map((item) => sanitizeForSnapshot(item));
+function emit(events, name, payload = {}) {
+  const eventName = text(name, "");
+  if (!eventName) return false;
+
+  const safePayload = sanitize(payload);
 
   try {
-    if (isFunction(utils?.warn)) {
-      utils.warn("[Cleanup]", ...cleanArgs);
-      return;
-    }
-  } catch {}
-
-  try {
-    console.warn("[Cleanup]", ...cleanArgs);
-  } catch {}
-}
-
-function safeLog(utils, ...args) {
-  try {
-    utils?.log?.("[Cleanup]", ...args.map((item) => sanitizeForSnapshot(item)));
-  } catch {}
-}
-
-function safeEmit(events, name, payload = {}) {
-  const eventName = safeText(name, "");
-
-  if (!eventName) {
-    return false;
-  }
-
-  const cleanPayload = sanitizeForSnapshot(payload);
-
-  try {
-    if (isFunction(events?.emit)) {
-      events.emit(eventName, cleanPayload);
+    if (isFn(events?.emit)) {
+      events.emit(eventName, safePayload);
       return true;
     }
   } catch {}
 
   try {
-    if (isFunction(events?.dispatch)) {
-      events.dispatch(eventName, cleanPayload);
+    if (isFn(events?.dispatch)) {
+      events.dispatch(eventName, safePayload);
       return true;
     }
   } catch {}
 
   try {
-    if (isFunction(events?.trigger)) {
-      events.trigger(eventName, cleanPayload);
+    if (isFn(events?.trigger)) {
+      events.trigger(eventName, safePayload);
       return true;
     }
   } catch {}
@@ -265,116 +227,95 @@ function safeEmit(events, name, payload = {}) {
   return false;
 }
 
-function ensureMap(value) {
-  return value instanceof Map ? value : new Map();
-}
-
-function createNoopDisposer() {
-  const noop = () => false;
+function warn(utils, ...args) {
+  const safeArgs = args.map((item) => sanitize(item));
 
   try {
-    noop.__cleanupNoop = true;
+    if (isFn(utils?.warn)) {
+      utils.warn("[Cleanup]", ...safeArgs);
+      return;
+    }
   } catch {}
 
-  return noop;
+  try {
+    console.warn("[Cleanup]", ...safeArgs);
+  } catch {}
 }
 
 /* =========================================================
-   ENV HELPERS
+   ENV TARGETS
 ========================================================= */
 
 function getWindow() {
   try {
-    if (typeof window !== "undefined") {
-      return window;
-    }
-  } catch {}
-
-  return null;
+    return typeof window !== "undefined" ? window : null;
+  } catch {
+    return null;
+  }
 }
 
 function getDocument() {
   try {
-    if (typeof document !== "undefined") {
-      return document;
-    }
-  } catch {}
+    return typeof document !== "undefined" ? document : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveSpecialTarget(name = "") {
+  const key = lower(name, "");
+
+  if (key === "window") return getWindow();
+  if (key === "document") return getDocument();
+  if (key === "body") return getDocument()?.body || null;
+  if (key === "html" || key === "documentelement" || key === "document-element") {
+    return getDocument()?.documentElement || null;
+  }
 
   return null;
 }
 
-function getBody() {
-  try {
-    return getDocument()?.body || null;
-  } catch {
-    return null;
-  }
+function isSpecialTarget(name = "") {
+  return SPECIAL_TARGETS.has(lower(name, ""));
 }
 
-function getHtml() {
-  try {
-    return getDocument()?.documentElement || null;
-  } catch {
-    return null;
-  }
-}
-
-function isEventTargetLike(target) {
+function isEventTarget(value) {
   return Boolean(
-    target &&
-      isFunction(target.addEventListener) &&
-      isFunction(target.removeEventListener)
+    value &&
+      isFn(value.addEventListener) &&
+      isFn(value.removeEventListener)
   );
 }
 
-function isAbortControllerLike(value) {
-  return Boolean(value && isFunction(value.abort) && value.signal);
-}
-
-function isObserverLike(value) {
-  return Boolean(value && isFunction(value.disconnect));
-}
-
-function isSpecialDomTargetName(value = "") {
-  return SPECIAL_DOM_TARGETS.includes(safeLower(value));
-}
-
-function resolveSpecialTarget(value) {
-  const key = safeLower(value);
-
-  if (key === "window") {
-    return getWindow();
-  }
-
-  if (key === "document") {
-    return getDocument();
-  }
-
-  if (key === "body") {
-    return getBody();
-  }
-
-  if (key === "html" || key === "documentelement" || key === "document-element") {
-    return getHtml();
-  }
-
-  return null;
-}
-
-function resolveEventTarget(target) {
-  if (isEventTargetLike(target)) {
-    return target;
-  }
+function resolveTarget(target) {
+  if (isEventTarget(target)) return target;
 
   if (typeof target === "string") {
-    return resolveSpecialTarget(target);
+    const special = resolveSpecialTarget(target);
+    if (special) return special;
+
+    if (isBrowser()) {
+      try {
+        return document.querySelector(target);
+      } catch {
+        return null;
+      }
+    }
   }
 
   return null;
+}
+
+function isObserver(value) {
+  return Boolean(value && isFn(value.disconnect));
+}
+
+function isAbortController(value) {
+  return Boolean(value && isFn(value.abort) && value.signal);
 }
 
 /* =========================================================
-   IDS FOR DEDUPE
+   IDS / KEYS
 ========================================================= */
 
 const targetIds = new WeakMap();
@@ -384,340 +325,192 @@ let nextTargetId = 1;
 let nextHandlerId = 1;
 let nextResourceId = 1;
 
-function getTargetId(target) {
-  if (typeof target === "string") {
-    return `target:${safeLower(target, "string")}`;
-  }
+function targetId(target) {
+  if (typeof target === "string") return `str:${lower(target, "target")}`;
 
   if (!target || (typeof target !== "object" && typeof target !== "function")) {
-    return "target:none";
+    return "none";
   }
 
   try {
-    if (!targetIds.has(target)) {
-      targetIds.set(target, nextTargetId++);
-    }
-
-    return `target:${targetIds.get(target)}`;
+    if (!targetIds.has(target)) targetIds.set(target, nextTargetId++);
+    return `obj:${targetIds.get(target)}`;
   } catch {
-    return "target:unknown";
+    return "unknown";
   }
 }
 
-function getHandlerId(handler) {
-  if (!isFunction(handler)) {
-    return "handler:none";
-  }
+function handlerId(handler) {
+  if (!isFn(handler)) return "none";
 
   try {
-    if (!handlerIds.has(handler)) {
-      handlerIds.set(handler, nextHandlerId++);
-    }
-
-    return `handler:${handlerIds.get(handler)}`;
+    if (!handlerIds.has(handler)) handlerIds.set(handler, nextHandlerId++);
+    return `fn:${handlerIds.get(handler)}`;
   } catch {
-    return "handler:unknown";
+    return "unknown";
   }
 }
 
-function createResourceId(type = "resource") {
-  const id = `${safeText(type, "resource")}:${nextResourceId}`;
+function resourceId(type = "resource") {
+  const id = `${type}:${nextResourceId}`;
   nextResourceId += 1;
   return id;
 }
 
-/* =========================================================
-   OPTIONS NORMALIZATION
-========================================================= */
-
-function wantsOnce(options = false) {
-  return Boolean(isPlainObject(options) && options.once === true);
-}
-
-function normalizeDomOptions(options = false) {
-  if (options === true) {
-    return { capture: true };
-  }
-
-  if (options === false || options === undefined || options === null) {
-    return false;
-  }
+function optionsKey(options = false) {
+  if (options === true) return "capture:true|once:false|passive:false|signal:false";
+  if (!options) return "capture:false|once:false|passive:false|signal:false";
 
   if (isPlainObject(options)) {
-    const finalOptions = {
-      capture: Boolean(options.capture),
-      passive: Boolean(options.passive),
-    };
-
-    if (options.signal) {
-      finalOptions.signal = options.signal;
-    }
-
-    return finalOptions;
-  }
-
-  return false;
-}
-
-function normalizeBusOptions(options = false) {
-  if (!isPlainObject(options)) {
-    return options;
-  }
-
-  const { once, target, ...rest } = options;
-  return rest;
-}
-
-function normalizeOptionsForKey(options = false) {
-  if (options === true) {
-    return "capture:true|once:false|passive:false|signal:false|target:default";
-  }
-
-  if (options === false || options === undefined || options === null) {
-    return "capture:false|once:false|passive:false|signal:false|target:default";
-  }
-
-  if (isPlainObject(options)) {
-    const target = options.target
-      ? typeof options.target === "string"
-        ? `target:${safeLower(options.target, "custom")}`
-        : getTargetId(options.target)
-      : "target:default";
-
     return [
       `capture:${Boolean(options.capture)}`,
       `once:${Boolean(options.once)}`,
       `passive:${Boolean(options.passive)}`,
       `signal:${Boolean(options.signal)}`,
-      target,
     ].join("|");
   }
 
   return String(options);
 }
 
-function makeDomKey(target, eventName, handler, options) {
+function domKey(target, eventName, handler, options) {
   return [
     "dom",
-    getTargetId(target),
-    safeText(eventName, ""),
-    getHandlerId(handler),
-    normalizeOptionsForKey(options),
+    targetId(target),
+    text(eventName, ""),
+    handlerId(handler),
+    optionsKey(options),
   ].join("::");
 }
 
-function makeBusKey(eventName, handler, options = false) {
+function busKey(eventName, handler, options) {
   return [
     "bus",
-    safeText(eventName, ""),
-    getHandlerId(handler),
-    normalizeOptionsForKey(options),
+    text(eventName, ""),
+    handlerId(handler),
+    optionsKey(options),
   ].join("::");
 }
 
-function makeManualKey(disposer, label = DEFAULT_MANUAL_LABEL) {
+function manualKey(disposer, label = "manual") {
   return [
     "manual",
-    getHandlerId(disposer),
-    safeText(label, DEFAULT_MANUAL_LABEL),
+    handlerId(disposer),
+    text(label, "manual"),
   ].join("::");
 }
 
-function makeResourceKey(type = "resource", id = "", label = "") {
+function resourceKey(type = "resource", label = "") {
   return [
-    safeText(type, "resource"),
-    safeText(id, createResourceId(type)),
-    safeText(label, ""),
+    type,
+    resourceId(type),
+    text(label, ""),
   ].join("::");
 }
 
 /* =========================================================
-   SCOPE NORMALIZATION
+   OPTIONS
 ========================================================= */
 
-function createScopeRecord(name = DEFAULT_SCOPE) {
-  const createdAtMs = safeNow();
+function wantsOnce(options = false) {
+  return Boolean(isPlainObject(options) && options.once === true);
+}
+
+function domOptions(options = false) {
+  if (options === true) return { capture: true };
+  if (!options) return false;
+
+  if (!isPlainObject(options)) return false;
+
+  const out = {
+    capture: Boolean(options.capture),
+    passive: Boolean(options.passive),
+  };
+
+  if (options.signal) out.signal = options.signal;
+
+  return out;
+}
+
+function busOptions(options = false) {
+  if (!isPlainObject(options)) return options;
+
+  const { once, target, ...rest } = options;
+  return rest;
+}
+
+/* =========================================================
+   SCOPE
+========================================================= */
+
+function scopeName(value = DEFAULT_SCOPE) {
+  return text(value, DEFAULT_SCOPE);
+}
+
+function createScope(name = DEFAULT_SCOPE) {
+  const atMs = now();
 
   return {
-    name: safeText(name, DEFAULT_SCOPE),
-
-    listeners: [],
-    cleaners: [],
-    disposers: [],
-
-    keys: new Set(),
+    name: scopeName(name),
     records: new Map(),
-
     running: false,
     disposed: false,
 
-    createdAt: safeIsoDate(createdAtMs),
-    createdAtMs,
+    createdAt: iso(atMs),
+    createdAtMs: atMs,
 
     lastRunAt: "",
     lastRunAtMs: 0,
 
-    runCount: 0,
-    disposedCount: 0,
-    failedCount: 0,
     addedCount: 0,
     skippedCount: 0,
-    manualDisposeCount: 0,
+    disposedCount: 0,
+    failedCount: 0,
+    runCount: 0,
   };
 }
 
-function normalizeScopeRecord(scope, name = DEFAULT_SCOPE) {
-  if (
-    scope &&
-    isObject(scope) &&
-    Array.isArray(scope.listeners) &&
-    Array.isArray(scope.cleaners)
-  ) {
-    if (!Array.isArray(scope.disposers)) scope.disposers = [];
-    if (!(scope.keys instanceof Set)) scope.keys = new Set();
-    if (!(scope.records instanceof Map)) scope.records = new Map();
-
-    scope.name = safeText(scope.name, name || DEFAULT_SCOPE);
-    scope.running = Boolean(scope.running);
-    scope.disposed = Boolean(scope.disposed);
-    scope.createdAt = safeText(scope.createdAt, safeIsoDate());
-    scope.createdAtMs = safeNumber(scope.createdAtMs, safeNow());
-    scope.lastRunAt = safeText(scope.lastRunAt, "");
-    scope.lastRunAtMs = safeNumber(scope.lastRunAtMs, 0);
-    scope.runCount = safeNumber(scope.runCount, 0);
-    scope.disposedCount = safeNumber(scope.disposedCount, 0);
-    scope.failedCount = safeNumber(scope.failedCount, 0);
-    scope.addedCount = safeNumber(scope.addedCount, scope.records.size);
-    scope.skippedCount = safeNumber(scope.skippedCount, 0);
-    scope.manualDisposeCount = safeNumber(scope.manualDisposeCount, 0);
-
-    return scope;
+function normalizeScope(value, name = DEFAULT_SCOPE) {
+  if (isObject(value) && value.records instanceof Map) {
+    value.name = scopeName(value.name || name);
+    value.running = Boolean(value.running);
+    value.disposed = Boolean(value.disposed);
+    value.addedCount = number(value.addedCount, value.records.size);
+    value.skippedCount = number(value.skippedCount, 0);
+    value.disposedCount = number(value.disposedCount, 0);
+    value.failedCount = number(value.failedCount, 0);
+    value.runCount = number(value.runCount, 0);
+    value.createdAt = text(value.createdAt, iso());
+    value.createdAtMs = number(value.createdAtMs, now());
+    value.lastRunAt = text(value.lastRunAt, "");
+    value.lastRunAtMs = number(value.lastRunAtMs, 0);
+    return value;
   }
 
-  if (scope instanceof Set) {
-    const record = createScopeRecord(name);
+  if (value instanceof Set) {
+    const scope = createScope(name);
 
-    for (const disposer of Array.from(scope)) {
-      if (!isFunction(disposer)) {
-        continue;
-      }
+    for (const disposer of value) {
+      if (!isFn(disposer)) continue;
 
-      const key = makeManualKey(disposer, "legacy-set");
+      const key = manualKey(disposer, "legacy-set");
 
-      const wrapped = () => {
-        try {
-          disposer();
-          return true;
-        } catch {
-          return false;
-        }
-      };
-
-      record.keys.add(key);
-      record.records.set(key, {
+      scope.records.set(key, {
         key,
         type: "manual",
         label: "legacy-set",
-        disposer: wrapped,
-        dispose: disposer,
-        createdAt: safeIsoDate(),
-        createdAtMs: safeNow(),
         disposed: false,
+        createdAt: iso(),
+        createdAtMs: now(),
+        dispose: disposer,
       });
-
-      record.cleaners.push(wrapped);
-      record.disposers.push(wrapped);
     }
 
-    record.addedCount = record.records.size;
-    return record;
+    scope.addedCount = scope.records.size;
+    return scope;
   }
 
-  return createScopeRecord(name);
-}
-
-function normalizeScopeName(value = DEFAULT_SCOPE) {
-  if (value === null || value === undefined || value === "") {
-    return DEFAULT_SCOPE;
-  }
-
-  if (typeof value === "string") {
-    return safeText(value, DEFAULT_SCOPE);
-  }
-
-  return DEFAULT_SCOPE;
-}
-
-/* =========================================================
-   ARG NORMALIZATION
-========================================================= */
-
-function normalizeAddArgs(args = []) {
-  const first = args[0];
-  const second = args[1];
-  const third = args[2];
-
-  if (isPlainObject(first) && isFunction(first.disposer)) {
-    return {
-      scopeName: normalizeScopeName(first.scope || first.scopeName || DEFAULT_SCOPE),
-      disposer: first.disposer,
-      label: safeText(first.label, DEFAULT_MANUAL_LABEL),
-    };
-  }
-
-  if (isFunction(first)) {
-    return {
-      scopeName: DEFAULT_SCOPE,
-      disposer: first,
-      label: safeText(second, DEFAULT_MANUAL_LABEL),
-    };
-  }
-
-  if (typeof first === "string" && isFunction(second)) {
-    return {
-      scopeName: normalizeScopeName(first),
-      disposer: second,
-      label: safeText(third, DEFAULT_MANUAL_LABEL),
-    };
-  }
-
-  if (typeof first === "string" && typeof second === "string" && isFunction(third)) {
-    return {
-      scopeName: normalizeScopeName(first),
-      disposer: third,
-      label: safeText(second, DEFAULT_MANUAL_LABEL),
-    };
-  }
-
-  if (isPlainObject(second) && isFunction(second.disposer)) {
-    return {
-      scopeName: normalizeScopeName(first),
-      disposer: second.disposer,
-      label: safeText(second.label || third, DEFAULT_MANUAL_LABEL),
-    };
-  }
-
-  return {
-    scopeName: normalizeScopeName(first),
-    disposer: second,
-    label: safeText(third, DEFAULT_MANUAL_LABEL),
-  };
-}
-
-function normalizeTimerArgs(fnOrDelay, delayOrFn, label = "") {
-  let fn = fnOrDelay;
-  let delay = delayOrFn;
-
-  if (typeof fnOrDelay === "number" && isFunction(delayOrFn)) {
-    fn = delayOrFn;
-    delay = fnOrDelay;
-  }
-
-  return {
-    fn,
-    delay: Math.max(0, safeNumber(delay, 0)),
-    label: safeText(label, "timer"),
-  };
+  return createScope(name);
 }
 
 /* =========================================================
@@ -725,449 +518,342 @@ function normalizeTimerArgs(fnOrDelay, delayOrFn, label = "") {
 ========================================================= */
 
 export function createCleanup(input = {}) {
-  const hasDepsShape =
+  const deps =
     isPlainObject(input) &&
     (
       Object.prototype.hasOwnProperty.call(input, "registry") ||
       Object.prototype.hasOwnProperty.call(input, "events") ||
       Object.prototype.hasOwnProperty.call(input, "bus") ||
-      Object.prototype.hasOwnProperty.call(input, "utils") ||
-      Object.prototype.hasOwnProperty.call(input, "logger")
-    );
-
-  const deps = hasDepsShape
-    ? input
-    : {
-        registry: isObject(input) ? input : {},
-      };
+      Object.prototype.hasOwnProperty.call(input, "utils")
+    )
+      ? input
+      : { registry: isObject(input) ? input : {} };
 
   const registry = isObject(deps.registry) ? deps.registry : {};
   const events = deps.events || deps.bus || registry.events || registry.bus || null;
-  const utils = deps.utils || deps.logger || registry.utils || registry.logger || null;
+  const utils = deps.utils || registry.utils || null;
 
   registry.scopes = ensureMap(registry.scopes);
 
-  function reportError({
-    scope,
-    key = "",
-    type = "cleanup",
-    label = "",
-    error,
-    source = "cleanup",
-  } = {}) {
-    const payload = {
-      scope: scope?.name || "",
-      key: redactText(key || ""),
-      type: safeText(type, "cleanup"),
-      label: redactText(label || ""),
-      source: safeText(source, "cleanup"),
-      message: redactText(safeText(error?.message || error, "Cleanup error.")),
-      name: safeText(error?.name, "Error"),
-      at: safeIsoDate(),
-    };
-
-    safeWarn(
-      utils,
-      `Error limpiando "${payload.label || payload.type}" en scope "${payload.scope || DEFAULT_SCOPE}".`,
-      error
-    );
-
-    safeEmit(events, CLEANUP_EVENTS.error, payload);
-
-    return payload;
-  }
-
   function ensureScope(name = DEFAULT_SCOPE) {
-    const scopeName = normalizeScopeName(name);
-    const existing = registry.scopes.get(scopeName);
-    const normalized = normalizeScopeRecord(existing, scopeName);
+    const clean = scopeName(name);
+    const current = registry.scopes.get(clean);
+    const normalized = normalizeScope(current, clean);
 
-    if (existing !== normalized) {
-      registry.scopes.set(scopeName, normalized);
+    if (current !== normalized) {
+      registry.scopes.set(clean, normalized);
     }
 
     return normalized;
   }
 
   function hasScope(name = DEFAULT_SCOPE) {
-    return registry.scopes.has(normalizeScopeName(name));
+    return registry.scopes.has(scopeName(name));
   }
 
   function getScope(name = DEFAULT_SCOPE) {
     return ensureScope(name);
   }
 
-  function removeRecordFromScope(scope, key = "") {
-    if (!scope || !key) {
-      return false;
-    }
+  function reportError(scope, record, err, source = "cleanup") {
+    scope.failedCount += 1;
 
-    const record = scope.records?.get?.(key);
+    const payload = {
+      scope: scope?.name || "",
+      key: redact(record?.key || ""),
+      type: record?.type || "cleanup",
+      label: redact(record?.label || ""),
+      source,
+      name: err?.name || "Error",
+      message: redact(err?.message || String(err)),
+      at: iso(),
+    };
 
-    if (!record) {
-      return false;
-    }
+    warn(utils, "cleanup error", payload);
+    emit(events, CLEANUP_EVENTS.error, payload);
 
-    const disposer = record.disposer;
+    return payload;
+  }
 
-    try {
-      scope.records.delete(key);
-    } catch {}
-
-    try {
-      scope.keys?.delete?.(key);
-    } catch {}
-
-    scope.listeners = safeArray(scope.listeners).filter((item) => item !== disposer);
-    scope.cleaners = safeArray(scope.cleaners).filter((item) => item !== disposer);
-    scope.disposers = safeArray(scope.disposers).filter((item) => item !== disposer);
-
+  function removeRecord(scope, key) {
+    if (!scope?.records?.has?.(key)) return false;
+    scope.records.delete(key);
     return true;
   }
 
-  function disposeRecordInternal(scope, key = "", reason = "manual") {
-    if (!scope || !key) {
-      return { ran: false, ok: false, failed: false, missing: true };
-    }
-
-    const record = scope.records?.get?.(key);
+  function disposeRecord(scope, key, reason = "manual") {
+    const record = scope?.records?.get?.(key);
 
     if (!record) {
-      return { ran: false, ok: false, failed: false, missing: true };
+      return { ran: false, ok: false, missing: true };
     }
 
     if (record.disposed === true) {
-      removeRecordFromScope(scope, key);
-      return { ran: false, ok: false, failed: false, disposed: true };
+      removeRecord(scope, key);
+      return { ran: false, ok: false, disposed: true };
     }
 
     record.disposed = true;
-    record.disposedAt = safeIsoDate();
-    record.disposedReason = safeText(reason, "manual");
+    record.disposedAt = iso();
+    record.reason = reason;
 
     try {
-      const result = isFunction(record.dispose) ? record.dispose() : undefined;
+      const result = record.dispose?.();
 
-      if (result && typeof result === "object" && isFunction(result.catch)) {
-        result.catch((error) => {
-          reportError({
-            scope,
-            key,
-            type: record.type,
-            label: record.label,
-            error,
-            source: `${record.type}:async`,
-          });
-        });
+      if (result && typeof result === "object" && isFn(result.catch)) {
+        result.catch((err) => reportError(scope, record, err, `${record.type}:async`));
       }
 
-      safeEmit(events, CLEANUP_EVENTS.disposed, {
-        scope: scope?.name || "",
-        key: redactText(key),
-        type: record.type || "manual",
-        label: redactText(record.label || ""),
-        reason: record.disposedReason,
+      scope.disposedCount += 1;
+      removeRecord(scope, key);
+
+      emit(events, CLEANUP_EVENTS.disposed, {
+        scope: scope.name,
+        key: redact(key),
+        type: record.type,
+        label: redact(record.label || ""),
+        reason,
         at: record.disposedAt,
       });
 
-      removeRecordFromScope(scope, key);
-
-      return { ran: true, ok: true, failed: false };
-    } catch (error) {
-      reportError({
-        scope,
-        key,
-        type: record.type,
-        label: record.label,
-        error,
-        source: record.type || "cleanup",
-      });
-
-      removeRecordFromScope(scope, key);
-
+      return { ran: true, ok: true };
+    } catch (err) {
+      reportError(scope, record, err, record.type);
+      removeRecord(scope, key);
       return { ran: true, ok: false, failed: true };
     }
   }
 
-  function pushRecord(scope, key, recordInput = {}) {
-    if (!scope || !key || !isFunction(recordInput.dispose)) {
+  function addRecord(scope, key, recordInput = {}) {
+    if (!scope || !key || !isFn(recordInput.dispose)) {
       return createNoopDisposer();
     }
 
-    if (scope.keys.has(key)) {
+    if (scope.records.has(key)) {
       const existing = scope.records.get(key);
+      scope.skippedCount += 1;
 
-      scope.skippedCount = safeNumber(scope.skippedCount, 0) + 1;
-
-      safeEmit(events, CLEANUP_EVENTS.recordSkipped, {
+      emit(events, CLEANUP_EVENTS.skipped, {
         scope: scope.name,
-        key: redactText(key),
-        type: existing?.type || recordInput.type || "unknown",
-        label: redactText(existing?.label || recordInput.label || ""),
+        key: redact(key),
+        type: existing?.type || recordInput.type || "",
+        label: redact(existing?.label || recordInput.label || ""),
         reason: "duplicate",
-        at: safeIsoDate(),
+        at: iso(),
       });
 
-      return isFunction(existing?.disposer)
-        ? existing.disposer
-        : createNoopDisposer();
+      return existing?.disposer || createNoopDisposer();
     }
 
-    const publicDisposer = () => {
-      const result = disposeRecordInternal(scope, key, "manual");
-
-      if (result.ran) {
-        scope.manualDisposeCount = safeNumber(scope.manualDisposeCount, 0) + 1;
-      }
-
-      return result.ok === true;
-    };
+    const disposer = () => disposeRecord(scope, key, "manual").ok === true;
 
     try {
-      publicDisposer.__cleanupWrapped = true;
-      publicDisposer.__cleanupType = safeText(recordInput.type, "manual");
-      publicDisposer.__cleanupKey = key;
-      publicDisposer.__cleanupLabel = safeText(recordInput.label, "");
-      publicDisposer.__cleanupScope = scope?.name || "";
+      disposer.__cleanup = true;
+      disposer.__cleanupKey = key;
+      disposer.__cleanupScope = scope.name;
+      disposer.__cleanupType = recordInput.type || "manual";
     } catch {}
 
-    const createdAtMs = safeNow();
+    const atMs = now();
 
     const record = {
       key,
-      type: safeText(recordInput.type, "manual"),
-      label: safeText(recordInput.label, ""),
-      eventName: safeText(recordInput.eventName, ""),
-      targetType: safeText(recordInput.targetType, ""),
-      createdAt: safeIsoDate(createdAtMs),
-      createdAtMs,
+      type: text(recordInput.type, "manual"),
+      label: text(recordInput.label, ""),
+      eventName: text(recordInput.eventName, ""),
+      targetType: text(recordInput.targetType, ""),
+      createdAt: iso(atMs),
+      createdAtMs: atMs,
       disposed: false,
-      disposedAt: "",
-      disposedReason: "",
       dispose: recordInput.dispose,
-      disposer: publicDisposer,
+      disposer,
     };
 
-    scope.keys.add(key);
     scope.records.set(key, record);
-
-    if (record.type === "dom") {
-      scope.listeners.push(publicDisposer);
-    } else {
-      scope.cleaners.push(publicDisposer);
-    }
-
-    scope.disposers.push(publicDisposer);
+    scope.addedCount += 1;
     scope.disposed = false;
-    scope.addedCount = safeNumber(scope.addedCount, 0) + 1;
 
-    safeEmit(events, CLEANUP_EVENTS.recordAdded, {
+    emit(events, CLEANUP_EVENTS.added, {
       scope: scope.name,
-      key: redactText(key),
+      key: redact(key),
       type: record.type,
-      label: redactText(record.label),
-      eventName: redactText(record.eventName),
+      label: redact(record.label),
+      eventName: redact(record.eventName),
       targetType: record.targetType,
       at: record.createdAt,
     });
 
-    return publicDisposer;
+    return disposer;
   }
 
-  function callHandlerSafely({
-    scope,
-    key = "",
-    type = "handler",
-    label = "",
-    handler,
-    thisArg = null,
-    args = [],
-  } = {}) {
-    if (!isFunction(handler)) {
-      return false;
-    }
+  function callHandler(scope, record, handler, thisArg, args = []) {
+    if (!isFn(handler)) return false;
 
     try {
-      const result = handler.apply(thisArg, safeArray(args));
+      const result = handler.apply(thisArg, args);
 
-      if (result && typeof result === "object" && isFunction(result.catch)) {
-        result.catch((error) => {
-          reportError({
-            scope,
-            key,
-            type,
-            label,
-            error,
-            source: `${type}:async-handler`,
-          });
-        });
+      if (result && typeof result === "object" && isFn(result.catch)) {
+        result.catch((err) => reportError(scope, record, err, `${record?.type || "handler"}:async`));
       }
 
       return true;
-    } catch (error) {
-      reportError({
-        scope,
-        key,
-        type,
-        label,
-        error,
-        source: `${type}:handler`,
-      });
-
+    } catch (err) {
+      reportError(scope, record, err, `${record?.type || "handler"}:handler`);
       return false;
     }
   }
 
-  function registerDomListener(
-    scopeName = DEFAULT_SCOPE,
-    target,
-    eventName,
-    handler,
-    options = false
-  ) {
-    const scope = ensureScope(scopeName);
-    const finalTarget = resolveEventTarget(target);
-    const cleanEvent = safeText(eventName, "");
+  /* =======================================================
+     REGISTRATION
+  ======================================================= */
 
-    if (!isEventTargetLike(finalTarget) || !cleanEvent || !isFunction(handler)) {
-      return createNoopDisposer();
+  function add(...args) {
+    let finalScope = DEFAULT_SCOPE;
+    let disposer = null;
+    let label = "manual";
+
+    if (isPlainObject(args[0]) && isFn(args[0].disposer)) {
+      finalScope = scopeName(args[0].scope || args[0].scopeName || DEFAULT_SCOPE);
+      disposer = args[0].disposer;
+      label = text(args[0].label, "manual");
+    } else if (isFn(args[0])) {
+      disposer = args[0];
+      label = text(args[1], "manual");
+    } else {
+      finalScope = scopeName(args[0]);
+      disposer = args[1];
+      label = text(args[2], "manual");
     }
 
-    const key = makeDomKey(finalTarget, cleanEvent, handler, options);
+    if (!isFn(disposer)) return createNoopDisposer();
 
-    if (scope.keys.has(key)) {
-      const existing = scope.records.get(key);
+    const scope = ensureScope(finalScope);
+    const key = manualKey(disposer, label);
 
-      return isFunction(existing?.disposer)
-        ? existing.disposer
-        : createNoopDisposer();
+    return addRecord(scope, key, {
+      type: "manual",
+      label,
+      targetType: "manual",
+      dispose: disposer,
+    });
+  }
+
+  function registerDom(scopeInput, targetInput, eventName, handler, options = false) {
+    const scope = ensureScope(scopeInput);
+    const target = resolveTarget(targetInput);
+    const event = text(eventName, "");
+
+    if (!target || !event || !isFn(handler)) return createNoopDisposer();
+
+    const key = domKey(target, event, handler, options);
+
+    if (scope.records.has(key)) {
+      scope.skippedCount += 1;
+      return scope.records.get(key)?.disposer || createNoopDisposer();
     }
 
     const once = wantsOnce(options);
-    const domOptions = normalizeDomOptions(options);
+    const finalOptions = domOptions(options);
 
     let publicDisposer = null;
 
-    const wrappedHandler = function cleanupDomHandler(eventObject) {
+    const recordRef = {
+      key,
+      type: "dom",
+      label: event,
+    };
+
+    const wrapped = function cleanupDomHandler(eventObject) {
       if (once) {
         try {
           publicDisposer?.();
         } catch {}
       }
 
-      return callHandlerSafely({
-        scope,
-        key,
-        type: "dom",
-        label: cleanEvent,
-        handler,
-        thisArg: this,
-        args: [eventObject],
-      });
+      return callHandler(scope, recordRef, handler, this, [eventObject]);
     };
 
     try {
-      finalTarget.addEventListener(cleanEvent, wrappedHandler, domOptions);
-    } catch (error) {
-      reportError({
-        scope,
-        key,
-        type: "dom",
-        label: cleanEvent,
-        error,
-        source: "dom:addEventListener",
-      });
-
+      target.addEventListener(event, wrapped, finalOptions);
+    } catch (err) {
+      reportError(scope, recordRef, err, "dom:addEventListener");
       return createNoopDisposer();
     }
 
-    publicDisposer = pushRecord(scope, key, {
+    publicDisposer = addRecord(scope, key, {
       type: "dom",
-      label: cleanEvent,
-      eventName: cleanEvent,
-      targetType: finalTarget?.constructor?.name || typeof finalTarget,
-      dispose: () => {
-        finalTarget.removeEventListener(cleanEvent, wrappedHandler, domOptions);
-      },
+      label: event,
+      eventName: event,
+      targetType: target?.constructor?.name || typeof target,
+      dispose: () => target.removeEventListener(event, wrapped, finalOptions),
     });
+
+    if (isPlainObject(options) && options.signal && isFn(options.signal.addEventListener)) {
+      try {
+        options.signal.addEventListener("abort", () => publicDisposer?.(), { once: true });
+      } catch {}
+    }
 
     return publicDisposer;
   }
 
-  function registerBusListener(scopeName = DEFAULT_SCOPE, eventName, handler, options = false) {
-    const scope = ensureScope(scopeName);
-    const cleanEvent = safeText(eventName, "");
+  function registerBus(scopeInput, eventName, handler, options = false) {
+    const scope = ensureScope(scopeInput);
+    const event = text(eventName, "");
 
-    if (!cleanEvent || !isFunction(handler)) {
+    if (!event || !isFn(handler) || !isFn(events?.on)) {
       return createNoopDisposer();
     }
 
-    if (!isFunction(events?.on)) {
-      return createNoopDisposer();
-    }
+    const key = busKey(event, handler, options);
 
-    const key = makeBusKey(cleanEvent, handler, options);
-
-    if (scope.keys.has(key)) {
-      const existing = scope.records.get(key);
-
-      return isFunction(existing?.disposer)
-        ? existing.disposer
-        : createNoopDisposer();
+    if (scope.records.has(key)) {
+      scope.skippedCount += 1;
+      return scope.records.get(key)?.disposer || createNoopDisposer();
     }
 
     const once = wantsOnce(options);
-    const busOptions = normalizeBusOptions(options);
+    const finalOptions = busOptions(options);
 
     let publicDisposer = null;
 
-    const wrappedHandler = function cleanupBusHandler(eventObject) {
+    const recordRef = {
+      key,
+      type: "bus",
+      label: event,
+    };
+
+    const wrapped = function cleanupBusHandler(payload) {
       if (once) {
         try {
           publicDisposer?.();
         } catch {}
       }
 
-      return callHandlerSafely({
-        scope,
-        key,
-        type: "bus",
-        label: cleanEvent,
-        handler,
-        thisArg: this,
-        args: [eventObject],
-      });
+      return callHandler(scope, recordRef, handler, this, [payload]);
     };
 
     let offBus = null;
 
     try {
-      offBus = events.on(cleanEvent, wrappedHandler, busOptions);
-    } catch (error) {
-      reportError({
-        scope,
-        key,
-        type: "bus",
-        label: cleanEvent,
-        error,
-        source: "bus:on",
-      });
-
+      offBus = events.on(event, wrapped, finalOptions);
+    } catch (err) {
+      reportError(scope, recordRef, err, "bus:on");
       return createNoopDisposer();
     }
 
-    if (!isFunction(offBus)) {
+    if (!isFn(offBus)) {
       offBus = () => {
         try {
-          events?.off?.(cleanEvent, wrappedHandler, busOptions);
+          events?.off?.(event, wrapped, finalOptions);
         } catch {}
       };
     }
 
-    publicDisposer = pushRecord(scope, key, {
+    publicDisposer = addRecord(scope, key, {
       type: "bus",
-      label: cleanEvent,
-      eventName: cleanEvent,
+      label: event,
+      eventName: event,
       targetType: "event-bus",
       dispose: offBus,
     });
@@ -1175,386 +861,282 @@ export function createCleanup(input = {}) {
     return publicDisposer;
   }
 
-  function add(...args) {
-    const normalized = normalizeAddArgs(args);
-    const scope = ensureScope(normalized.scopeName);
-
-    if (!isFunction(normalized.disposer)) {
-      return createNoopDisposer();
-    }
-
-    const key = makeManualKey(normalized.disposer, normalized.label);
-
-    if (scope.keys.has(key)) {
-      const existing = scope.records.get(key);
-
-      return isFunction(existing?.disposer)
-        ? existing.disposer
-        : createNoopDisposer();
-    }
-
-    return pushRecord(scope, key, {
-      type: "manual",
-      label: normalized.label,
-      targetType: "manual",
-      dispose: normalized.disposer,
-    });
-  }
-
-  function on(scopeName = DEFAULT_SCOPE, target, eventName, handler, options = false) {
-    /*
-      Principal:
-        cleanup.on(scope, target, event, handler, options)
-
-      Legacy DOM:
-        cleanup.on(target, event, handler, options)
-    */
-
-    if (
-      (
-        isEventTargetLike(scopeName) ||
-        (typeof scopeName === "string" && isSpecialDomTargetName(scopeName))
-      ) &&
-      typeof target === "string" &&
-      isFunction(eventName)
-    ) {
-      return registerDomListener(
-        DEFAULT_SCOPE,
-        scopeName,
-        target,
-        eventName,
-        handler || false
-      );
-    }
-
-    return registerDomListener(scopeName, target, eventName, handler, options);
-  }
-
-  function event(scopeName = DEFAULT_SCOPE, targetOrName, eventNameOrHandler, handlerOrOptions, maybeOptions) {
+  function on(...args) {
     /*
       DOM:
-        cleanup.event(scope, window, "resize", handler, options)
-        cleanup.event(scope, "window", "resize", handler, options)
+        on(scope, target, event, handler, options)
+        on(target, event, handler, options)
 
       Bus:
-        cleanup.event(scope, "app:ready", handler, options)
-
-      Legacy:
-        cleanup.event("app:ready", handler, options)
-        cleanup.event("window", "resize", handler, options)
+        on(scope, eventName, handler, options)
+        on(eventName, handler, options)
     */
 
     if (
-      typeof scopeName === "string" &&
-      isSpecialDomTargetName(scopeName) &&
-      typeof targetOrName === "string" &&
-      isFunction(eventNameOrHandler)
-    ) {
-      return registerDomListener(
-        DEFAULT_SCOPE,
-        scopeName,
-        targetOrName,
-        eventNameOrHandler,
-        handlerOrOptions || false
-      );
-    }
-
-    if (typeof scopeName === "string" && isFunction(targetOrName)) {
-      return registerBusListener(
-        DEFAULT_SCOPE,
-        scopeName,
-        targetOrName,
-        eventNameOrHandler || false
-      );
-    }
-
-    const looksLikeDomSignature =
-      isEventTargetLike(targetOrName) ||
       (
-        typeof targetOrName === "string" &&
-        isSpecialDomTargetName(targetOrName) &&
-        typeof eventNameOrHandler === "string" &&
-        isFunction(handlerOrOptions)
-      );
-
-    if (looksLikeDomSignature) {
-      return registerDomListener(
-        scopeName,
-        targetOrName,
-        eventNameOrHandler,
-        handlerOrOptions,
-        maybeOptions || false
-      );
+        isEventTarget(args[0]) ||
+        (typeof args[0] === "string" && isSpecialTarget(args[0]))
+      ) &&
+      typeof args[1] === "string" &&
+      isFn(args[2])
+    ) {
+      return registerDom(DEFAULT_SCOPE, args[0], args[1], args[2], args[3]);
     }
 
-    return registerBusListener(
-      scopeName,
-      targetOrName,
-      eventNameOrHandler,
-      handlerOrOptions || false
-    );
-  }
-
-  function bus(scopeName = DEFAULT_SCOPE, eventName, handler, options = false) {
-    if (typeof scopeName === "string" && isFunction(eventName)) {
-      return registerBusListener(
-        DEFAULT_SCOPE,
-        scopeName,
-        eventName,
-        handler || false
-      );
+    if (typeof args[0] === "string" && isFn(args[1])) {
+      return registerBus(DEFAULT_SCOPE, args[0], args[1], args[2]);
     }
 
-    return registerBusListener(scopeName, eventName, handler, options);
-  }
-
-  function windowEvent(scopeName = DEFAULT_SCOPE, eventName, handler, options = false) {
-    return registerDomListener(scopeName, "window", eventName, handler, options);
-  }
-
-  function documentEvent(scopeName = DEFAULT_SCOPE, eventName, handler, options = false) {
-    return registerDomListener(scopeName, "document", eventName, handler, options);
-  }
-
-  function timeout(scopeName = DEFAULT_SCOPE, fnOrDelay, delayOrFn = 0, label = "timeout") {
-    if (isFunction(scopeName) || typeof scopeName === "number") {
-      return timeout(DEFAULT_SCOPE, scopeName, fnOrDelay, delayOrFn || "timeout");
+    if (
+      typeof args[0] === "string" &&
+      typeof args[1] === "string" &&
+      isFn(args[2])
+    ) {
+      return registerBus(args[0], args[1], args[2], args[3]);
     }
 
-    const args = normalizeTimerArgs(fnOrDelay, delayOrFn, label);
+    return registerDom(args[0], args[1], args[2], args[3], args[4]);
+  }
 
-    if (!isFunction(args.fn)) {
-      return createNoopDisposer();
+  function event(...args) {
+    /*
+      DOM:
+        event(scope, window, "resize", handler, options)
+        event(scope, "window", "resize", handler, options)
+
+      Bus:
+        event(scope, "app:ready", handler, options)
+        event("app:ready", handler, options)
+    */
+
+    if (
+      (
+        isEventTarget(args[0]) ||
+        (typeof args[0] === "string" && isSpecialTarget(args[0]))
+      ) &&
+      typeof args[1] === "string" &&
+      isFn(args[2])
+    ) {
+      return registerDom(DEFAULT_SCOPE, args[0], args[1], args[2], args[3]);
     }
 
-    const scope = ensureScope(scopeName);
-    let key = "";
+    if (typeof args[0] === "string" && isFn(args[1])) {
+      return registerBus(DEFAULT_SCOPE, args[0], args[1], args[2]);
+    }
+
+    if (
+      isEventTarget(args[1]) ||
+      (
+        typeof args[1] === "string" &&
+        (
+          isSpecialTarget(args[1]) ||
+          (
+            typeof args[2] === "string" &&
+            isFn(args[3])
+          )
+        )
+      )
+    ) {
+      return registerDom(args[0], args[1], args[2], args[3], args[4]);
+    }
+
+    return registerBus(args[0], args[1], args[2], args[3]);
+  }
+
+  function bus(...args) {
+    if (typeof args[0] === "string" && isFn(args[1])) {
+      return registerBus(DEFAULT_SCOPE, args[0], args[1], args[2]);
+    }
+
+    return registerBus(args[0], args[1], args[2], args[3]);
+  }
+
+  function windowEvent(scopeInput = DEFAULT_SCOPE, eventName, handler, options = false) {
+    return registerDom(scopeInput, "window", eventName, handler, options);
+  }
+
+  function documentEvent(scopeInput = DEFAULT_SCOPE, eventName, handler, options = false) {
+    return registerDom(scopeInput, "document", eventName, handler, options);
+  }
+
+  /* =======================================================
+     TIMERS / RESOURCES
+  ======================================================= */
+
+  function normalizeTimerArgs(scopeInput, fnOrDelay, delayOrFn, label = "timer") {
+    if (isFn(scopeInput) || typeof scopeInput === "number") {
+      return {
+        scope: DEFAULT_SCOPE,
+        fn: isFn(scopeInput) ? scopeInput : delayOrFn,
+        delay: isFn(scopeInput) ? delayOrFn : scopeInput,
+        label: isFn(scopeInput) ? delayOrFn || label : label,
+      };
+    }
+
+    if (typeof fnOrDelay === "number" && isFn(delayOrFn)) {
+      return {
+        scope: scopeInput,
+        fn: delayOrFn,
+        delay: fnOrDelay,
+        label,
+      };
+    }
+
+    return {
+      scope: scopeInput,
+      fn: fnOrDelay,
+      delay: delayOrFn,
+      label,
+    };
+  }
+
+  function timeout(scopeInput = DEFAULT_SCOPE, fnOrDelay, delayOrFn = 0, label = "timeout") {
+    const args = normalizeTimerArgs(scopeInput, fnOrDelay, delayOrFn, label);
+
+    if (!isFn(args.fn)) return createNoopDisposer();
+
+    const scope = ensureScope(args.scope);
+    const key = resourceKey("timeout", args.label);
 
     const timerId = setTimeout(() => {
-      callHandlerSafely({
-        scope,
-        key,
-        type: "timeout",
-        label: args.label,
-        handler: args.fn,
-        thisArg: null,
-        args: [],
-      });
+      const record = scope.records.get(key);
+      callHandler(scope, record, args.fn, null, []);
+      disposeRecord(scope, key, "timeout-fired");
+    }, Math.max(0, number(args.delay, 0)));
 
-      if (key) {
-        disposeRecordInternal(scope, key, "timeout-fired");
-      }
-    }, args.delay);
-
-    key = makeResourceKey("timeout", createResourceId("timeout"), args.label);
-
-    return pushRecord(scope, key, {
+    return addRecord(scope, key, {
       type: "timeout",
-      label: args.label,
+      label: text(args.label, "timeout"),
       targetType: "timer",
-      dispose: () => {
-        clearTimeout(timerId);
-      },
+      dispose: () => clearTimeout(timerId),
     });
   }
 
-  function interval(scopeName = DEFAULT_SCOPE, fnOrDelay, delayOrFn = 0, label = "interval") {
-    if (isFunction(scopeName) || typeof scopeName === "number") {
-      return interval(DEFAULT_SCOPE, scopeName, fnOrDelay, delayOrFn || "interval");
-    }
+  function interval(scopeInput = DEFAULT_SCOPE, fnOrDelay, delayOrFn = 0, label = "interval") {
+    const args = normalizeTimerArgs(scopeInput, fnOrDelay, delayOrFn, label);
 
-    const args = normalizeTimerArgs(fnOrDelay, delayOrFn, label);
+    if (!isFn(args.fn)) return createNoopDisposer();
 
-    if (!isFunction(args.fn)) {
-      return createNoopDisposer();
-    }
-
-    const scope = ensureScope(scopeName);
-    const key = makeResourceKey("interval", createResourceId("interval"), args.label);
+    const scope = ensureScope(args.scope);
+    const key = resourceKey("interval", args.label);
 
     const timerId = setInterval(() => {
-      callHandlerSafely({
-        scope,
-        key,
-        type: "interval",
-        label: args.label,
-        handler: args.fn,
-        thisArg: null,
-        args: [],
-      });
-    }, args.delay);
+      const record = scope.records.get(key);
+      callHandler(scope, record, args.fn, null, []);
+    }, Math.max(0, number(args.delay, 0)));
 
-    return pushRecord(scope, key, {
+    return addRecord(scope, key, {
       type: "interval",
-      label: args.label,
+      label: text(args.label, "interval"),
       targetType: "timer",
-      dispose: () => {
-        clearInterval(timerId);
-      },
+      dispose: () => clearInterval(timerId),
     });
   }
 
-  function raf(scopeName = DEFAULT_SCOPE, fn, label = "raf") {
-    if (isFunction(scopeName)) {
-      return raf(DEFAULT_SCOPE, scopeName, fn || "raf");
+  function raf(scopeInput = DEFAULT_SCOPE, fn = null, label = "raf") {
+    if (isFn(scopeInput)) {
+      return raf(DEFAULT_SCOPE, scopeInput, fn || "raf");
     }
+
+    if (!isFn(fn)) return createNoopDisposer();
 
     const win = getWindow();
 
-    if (!win || !isFunction(win.requestAnimationFrame)) {
-      return timeout(scopeName, fn, 0, label);
+    if (!win || !isFn(win.requestAnimationFrame)) {
+      return timeout(scopeInput, fn, 0, label);
     }
 
-    if (!isFunction(fn)) {
-      return createNoopDisposer();
-    }
+    const scope = ensureScope(scopeInput);
+    const key = resourceKey("raf", label);
 
-    const scope = ensureScope(scopeName);
-    let key = "";
-
-    const frameId = win.requestAnimationFrame((time) => {
-      callHandlerSafely({
-        scope,
-        key,
-        type: "raf",
-        label,
-        handler: fn,
-        thisArg: null,
-        args: [time],
-      });
-
-      if (key) {
-        disposeRecordInternal(scope, key, "raf-fired");
-      }
+    const id = win.requestAnimationFrame((time) => {
+      const record = scope.records.get(key);
+      callHandler(scope, record, fn, null, [time]);
+      disposeRecord(scope, key, "raf-fired");
     });
 
-    key = makeResourceKey("raf", createResourceId("raf"), label);
-
-    return pushRecord(scope, key, {
+    return addRecord(scope, key, {
       type: "raf",
-      label,
+      label: text(label, "raf"),
       targetType: "animation-frame",
-      dispose: () => {
-        try {
-          win.cancelAnimationFrame(frameId);
-        } catch {}
-      },
+      dispose: () => win.cancelAnimationFrame(id),
     });
   }
 
-  function idle(scopeName = DEFAULT_SCOPE, fn, options = {}, label = "idle") {
-    if (isFunction(scopeName)) {
-      return idle(DEFAULT_SCOPE, scopeName, fn || {}, options || "idle");
+  function idle(scopeInput = DEFAULT_SCOPE, fn = null, options = {}, label = "idle") {
+    if (isFn(scopeInput)) {
+      return idle(DEFAULT_SCOPE, scopeInput, fn || {}, options || "idle");
     }
+
+    if (!isFn(fn)) return createNoopDisposer();
 
     const win = getWindow();
 
-    if (!win || !isFunction(win.requestIdleCallback)) {
-      return timeout(scopeName, fn, 0, label);
+    if (!win || !isFn(win.requestIdleCallback)) {
+      return timeout(scopeInput, fn, 0, label);
     }
 
-    if (!isFunction(fn)) {
-      return createNoopDisposer();
-    }
+    const scope = ensureScope(scopeInput);
+    const key = resourceKey("idle", label);
 
-    const scope = ensureScope(scopeName);
-    let key = "";
-
-    const idleId = win.requestIdleCallback((deadline) => {
-      callHandlerSafely({
-        scope,
-        key,
-        type: "idle",
-        label,
-        handler: fn,
-        thisArg: null,
-        args: [deadline],
-      });
-
-      if (key) {
-        disposeRecordInternal(scope, key, "idle-fired");
-      }
+    const id = win.requestIdleCallback((deadline) => {
+      const record = scope.records.get(key);
+      callHandler(scope, record, fn, null, [deadline]);
+      disposeRecord(scope, key, "idle-fired");
     }, isPlainObject(options) ? options : {});
 
-    key = makeResourceKey("idle", createResourceId("idle"), label);
-
-    return pushRecord(scope, key, {
+    return addRecord(scope, key, {
       type: "idle",
-      label,
+      label: text(label, "idle"),
       targetType: "idle-callback",
-      dispose: () => {
-        try {
-          win.cancelIdleCallback(idleId);
-        } catch {}
-      },
+      dispose: () => win.cancelIdleCallback(id),
     });
   }
 
-  function observer(scopeName = DEFAULT_SCOPE, observerRef, label = "observer") {
-    if (isObserverLike(scopeName)) {
-      return observer(DEFAULT_SCOPE, scopeName, observerRef || "observer");
+  function observer(scopeInput = DEFAULT_SCOPE, observerRef = null, label = "observer") {
+    if (isObserver(scopeInput)) {
+      return observer(DEFAULT_SCOPE, scopeInput, observerRef || "observer");
     }
 
-    const scope = ensureScope(scopeName);
+    if (!isObserver(observerRef)) return createNoopDisposer();
 
-    if (!isObserverLike(observerRef)) {
-      return createNoopDisposer();
-    }
+    const scope = ensureScope(scopeInput);
+    const key = [
+      "observer",
+      targetId(observerRef),
+      text(label, "observer"),
+    ].join("::");
 
-    const key = makeResourceKey("observer", getTargetId(observerRef), label);
-
-    if (scope.keys.has(key)) {
-      const existing = scope.records.get(key);
-
-      return isFunction(existing?.disposer)
-        ? existing.disposer
-        : createNoopDisposer();
-    }
-
-    return pushRecord(scope, key, {
+    return addRecord(scope, key, {
       type: "observer",
-      label,
+      label: text(label, "observer"),
       targetType: observerRef?.constructor?.name || "observer",
-      dispose: () => {
-        observerRef.disconnect();
-      },
+      dispose: () => observerRef.disconnect(),
     });
   }
 
   function abortController(
-    scopeName = DEFAULT_SCOPE,
-    controller,
+    scopeInput = DEFAULT_SCOPE,
+    controller = null,
     label = "abort-controller",
     reason = "cleanup"
   ) {
-    if (isAbortControllerLike(scopeName)) {
-      return abortController(
-        DEFAULT_SCOPE,
-        scopeName,
-        controller || "abort-controller",
-        label || "cleanup"
-      );
+    if (isAbortController(scopeInput)) {
+      return abortController(DEFAULT_SCOPE, scopeInput, controller || "abort-controller", label || "cleanup");
     }
 
-    const scope = ensureScope(scopeName);
+    if (!isAbortController(controller)) return createNoopDisposer();
 
-    if (!isAbortControllerLike(controller)) {
-      return createNoopDisposer();
-    }
+    const scope = ensureScope(scopeInput);
+    const key = [
+      "abort",
+      targetId(controller),
+      text(label, "abort-controller"),
+    ].join("::");
 
-    const key = makeResourceKey("abort", getTargetId(controller), label);
-
-    if (scope.keys.has(key)) {
-      const existing = scope.records.get(key);
-
-      return isFunction(existing?.disposer)
-        ? existing.disposer
-        : createNoopDisposer();
-    }
-
-    return pushRecord(scope, key, {
+    return addRecord(scope, key, {
       type: "abort",
-      label,
+      label: text(label, "abort-controller"),
       targetType: "AbortController",
       dispose: () => {
         try {
@@ -1568,188 +1150,132 @@ export function createCleanup(input = {}) {
     });
   }
 
-  function off(scopeName = DEFAULT_SCOPE, keyOrDisposer = "") {
-    if (isFunction(scopeName)) {
-      try {
-        const result = scopeName();
-        return result !== false;
-      } catch (error) {
-        reportError({
-          scope: null,
-          key: "",
-          type: "manual",
-          label: "direct-disposer",
-          error,
-          source: "off:function",
-        });
+  /* =======================================================
+     DISPOSE
+  ======================================================= */
 
+  function off(scopeInput = DEFAULT_SCOPE, keyOrDisposer = "") {
+    if (isFn(scopeInput)) {
+      try {
+        return scopeInput() !== false;
+      } catch (err) {
+        warn(utils, "direct disposer failed", err);
         return false;
       }
     }
 
-    const scopeNameFinal = normalizeScopeName(scopeName);
-    const scope = registry.scopes.get(scopeNameFinal);
+    const scope = registry.scopes.get(scopeName(scopeInput));
+    if (!scope) return false;
 
-    if (!scope) {
-      return false;
-    }
-
-    if (isFunction(keyOrDisposer)) {
+    if (isFn(keyOrDisposer)) {
       try {
-        const result = keyOrDisposer();
-        return result !== false;
-      } catch (error) {
-        reportError({
-          scope,
-          key: "",
-          type: "manual",
-          label: "direct-disposer",
-          error,
-          source: "off:function",
-        });
-
+        return keyOrDisposer() !== false;
+      } catch (err) {
+        warn(utils, "direct disposer failed", err);
         return false;
       }
     }
 
-    const key = safeText(keyOrDisposer, "");
+    const key = text(keyOrDisposer, "");
+    if (!key) return false;
 
-    if (!key) {
-      return false;
-    }
-
-    const result = disposeRecordInternal(scope, key, "off");
-    return result.ok === true;
+    return disposeRecord(scope, key, "off").ok === true;
   }
 
-  function run(scopeName = DEFAULT_SCOPE, options = {}) {
-    const cleanScopeName = normalizeScopeName(scopeName);
-    const scope = registry.scopes.get(cleanScopeName);
-    const opts = isPlainObject(options) ? options : {};
+  function run(scopeInput = DEFAULT_SCOPE, options = {}) {
+    const cleanScope = scopeName(scopeInput);
+    const scope = registry.scopes.get(cleanScope);
 
     if (!scope) {
       return {
-        scope: cleanScopeName,
+        scope: cleanScope,
+        missing: true,
         disposed: 0,
         failed: 0,
         durationMs: 0,
-        deleted: false,
-        missing: true,
-        running: false,
-        at: safeIsoDate(),
+        at: iso(),
       };
     }
 
     if (scope.running) {
       return {
-        scope: cleanScopeName,
+        scope: cleanScope,
+        running: true,
         disposed: 0,
         failed: 0,
         durationMs: 0,
-        deleted: false,
-        missing: false,
-        running: true,
-        at: safeIsoDate(),
+        at: iso(),
       };
     }
 
     scope.running = true;
 
-    const startedAtMs = safeNow();
-
+    const startedAt = now();
     let disposed = 0;
     let failed = 0;
 
     try {
-      const keys = Array.from(scope.records instanceof Map ? scope.records.keys() : []);
+      for (const key of [...scope.records.keys()]) {
+        const result = disposeRecord(scope, key, "scope-run");
 
-      for (const key of keys) {
-        const result = disposeRecordInternal(scope, key, "scope-run");
-
-        if (result.ran && result.ok) {
-          disposed += 1;
-        } else if (result.ran && result.failed) {
-          failed += 1;
-        }
+        if (result.ran && result.ok) disposed += 1;
+        if (result.ran && result.failed) failed += 1;
       }
     } finally {
-      scope.listeners = [];
-      scope.cleaners = [];
-      scope.disposers = [];
-
-      try {
-        scope.keys?.clear?.();
-      } catch {}
-
-      try {
-        scope.records?.clear?.();
-      } catch {}
-
       scope.running = false;
       scope.disposed = true;
-
-      scope.lastRunAtMs = safeNow();
-      scope.lastRunAt = safeIsoDate(scope.lastRunAtMs);
-
-      scope.runCount = safeNumber(scope.runCount, 0) + 1;
-      scope.disposedCount = safeNumber(scope.disposedCount, 0) + disposed;
-      scope.failedCount = safeNumber(scope.failedCount, 0) + failed;
+      scope.lastRunAtMs = now();
+      scope.lastRunAt = iso(scope.lastRunAtMs);
+      scope.runCount += 1;
     }
 
     const payload = {
-      scope: cleanScopeName,
+      scope: cleanScope,
+      missing: false,
       disposed,
       failed,
-      durationMs: Math.max(0, safeNumber(scope.lastRunAtMs - startedAtMs, 0)),
-      deleted: opts.deleteScope !== false,
-      missing: false,
-      running: false,
+      durationMs: Math.max(0, scope.lastRunAtMs - startedAt),
+      deleted: options.deleteScope !== false,
       at: scope.lastRunAt,
     };
 
-    safeEmit(events, CLEANUP_EVENTS.scopeRun, payload);
+    emit(events, CLEANUP_EVENTS.scopeRun, payload);
 
-    if (opts.deleteScope !== false) {
-      registry.scopes.delete(cleanScopeName);
+    if (options.deleteScope !== false) {
+      registry.scopes.delete(cleanScope);
     } else {
-      registry.scopes.set(cleanScopeName, scope);
+      registry.scopes.set(cleanScope, scope);
     }
 
     return payload;
   }
 
-  function clear(scopeName = DEFAULT_SCOPE) {
-    return run(scopeName);
-  }
-
-  function dispose(scopeName = DEFAULT_SCOPE) {
-    return run(scopeName);
-  }
-
-  function reset(scopeName = DEFAULT_SCOPE) {
-    return run(scopeName, {
-      deleteScope: false,
-    });
-  }
-
   function runAll(options = {}) {
-    const names = Array.from(registry.scopes.keys());
-    const results = [];
-
-    for (const scopeName of names) {
-      results.push(run(scopeName, options));
-    }
+    const names = [...registry.scopes.keys()];
+    const results = names.map((name) => run(name, options));
 
     const payload = {
       count: results.length,
-      disposed: results.reduce((total, item) => total + safeNumber(item?.disposed, 0), 0),
-      failed: results.reduce((total, item) => total + safeNumber(item?.failed, 0), 0),
-      at: safeIsoDate(),
+      disposed: results.reduce((total, item) => total + number(item.disposed, 0), 0),
+      failed: results.reduce((total, item) => total + number(item.failed, 0), 0),
+      at: iso(),
     };
 
-    safeEmit(events, CLEANUP_EVENTS.allRun, payload);
+    emit(events, CLEANUP_EVENTS.allRun, payload);
 
     return results;
+  }
+
+  function clear(scopeInput = DEFAULT_SCOPE) {
+    return run(scopeInput);
+  }
+
+  function dispose(scopeInput = DEFAULT_SCOPE) {
+    return run(scopeInput);
+  }
+
+  function reset(scopeInput = DEFAULT_SCOPE) {
+    return run(scopeInput, { deleteScope: false });
   }
 
   function clearAll() {
@@ -1761,109 +1287,85 @@ export function createCleanup(input = {}) {
   }
 
   function resetAll() {
-    return runAll({
-      deleteScope: false,
-    });
+    return runAll({ deleteScope: false });
   }
 
-  function getScopeSnapshot(scopeName = DEFAULT_SCOPE) {
-    const cleanScopeName = normalizeScopeName(scopeName);
-    const scope = registry.scopes.get(cleanScopeName);
+  /* =======================================================
+     SNAPSHOT
+  ======================================================= */
+
+  function getScopeSnapshot(scopeInput = DEFAULT_SCOPE) {
+    const cleanScope = scopeName(scopeInput);
+    const scope = registry.scopes.get(cleanScope);
 
     if (!scope) {
       return {
         exists: false,
-        name: cleanScopeName,
+        name: cleanScope,
       };
     }
 
-    const records = scope.records instanceof Map
-      ? Array.from(scope.records.values())
-      : [];
+    const records = [...scope.records.values()];
 
     return {
       exists: true,
-      name: scope.name || cleanScopeName,
-
-      listenerCount: safeArray(scope.listeners).length,
-      cleanerCount: safeArray(scope.cleaners).length,
-      disposerCount: safeArray(scope.disposers).length,
-      keyCount: scope.keys?.size || 0,
-      recordCount: records.length,
+      name: scope.name,
 
       running: Boolean(scope.running),
       disposed: Boolean(scope.disposed),
 
-      createdAt: scope.createdAt || "",
-      createdAtMs: safeNumber(scope.createdAtMs, 0),
+      createdAt: scope.createdAt,
+      lastRunAt: scope.lastRunAt,
 
-      lastRunAt: scope.lastRunAt || "",
-      lastRunAtMs: safeNumber(scope.lastRunAtMs, 0),
+      recordCount: records.length,
 
-      runCount: safeNumber(scope.runCount, 0),
-      disposedCount: safeNumber(scope.disposedCount, 0),
-      failedCount: safeNumber(scope.failedCount, 0),
-      addedCount: safeNumber(scope.addedCount, 0),
-      skippedCount: safeNumber(scope.skippedCount, 0),
-      manualDisposeCount: safeNumber(scope.manualDisposeCount, 0),
+      addedCount: scope.addedCount,
+      skippedCount: scope.skippedCount,
+      disposedCount: scope.disposedCount,
+      failedCount: scope.failedCount,
+      runCount: scope.runCount,
 
       records: records.map((record) => ({
-        key: redactText(record.key),
+        key: redact(record.key),
         type: record.type,
-        label: redactText(record.label),
-        eventName: redactText(record.eventName),
+        label: redact(record.label),
+        eventName: redact(record.eventName),
         targetType: record.targetType,
         disposed: Boolean(record.disposed),
         createdAt: record.createdAt,
-        disposedAt: record.disposedAt || "",
       })),
     };
   }
 
   function getSnapshot() {
-    const names = Array.from(registry.scopes.keys());
-    const scopes = names.map((name) => getScopeSnapshot(name));
+    const names = [...registry.scopes.keys()];
+    const scopes = names.map(getScopeSnapshot);
 
     return {
       version: CLEANUP_VERSION,
 
-      scopeCount: names.length,
-
-      totalListeners: scopes.reduce((total, item) => total + safeNumber(item.listenerCount, 0), 0),
-      totalCleaners: scopes.reduce((total, item) => total + safeNumber(item.cleanerCount, 0), 0),
-      totalDisposers: scopes.reduce((total, item) => total + safeNumber(item.disposerCount, 0), 0),
-      totalRecords: scopes.reduce((total, item) => total + safeNumber(item.recordCount, 0), 0),
+      scopeCount: scopes.length,
+      totalRecords: scopes.reduce((total, item) => total + number(item.recordCount, 0), 0),
+      totalDisposed: scopes.reduce((total, item) => total + number(item.disposedCount, 0), 0),
+      totalFailed: scopes.reduce((total, item) => total + number(item.failedCount, 0), 0),
 
       scopes,
 
-      at: safeIsoDate(),
+      at: iso(),
     };
   }
 
-  function size(scopeName = "") {
-    const cleanScope = safeText(scopeName, "");
+  function size(scopeInput = "") {
+    const cleanScope = text(scopeInput, "");
 
     if (cleanScope) {
-      const scope = registry.scopes.get(cleanScope);
-
-      if (!scope) {
-        return 0;
-      }
-
-      return (
-        safeArray(scope.listeners).length +
-        safeArray(scope.cleaners).length +
-        safeArray(scope.disposers).length
-      );
+      return registry.scopes.get(cleanScope)?.records?.size || 0;
     }
 
     let total = 0;
 
     for (const scope of registry.scopes.values()) {
-      total +=
-        safeArray(scope.listeners).length +
-        safeArray(scope.cleaners).length +
-        safeArray(scope.disposers).length;
+      total += scope.records?.size || 0;
     }
 
     return total;
@@ -1874,23 +1376,22 @@ export function createCleanup(input = {}) {
     events: CLEANUP_EVENTS,
 
     scope(name = DEFAULT_SCOPE) {
-      const scopeName = normalizeScopeName(name);
-      ensureScope(scopeName);
-      return scopeName;
+      ensureScope(name);
+      return scopeName(name);
     },
 
     ensureScope,
     getScope,
     hasScope,
 
+    add,
+    off,
+
     on,
     event,
     bus,
     windowEvent,
     documentEvent,
-
-    add,
-    off,
 
     timeout,
     interval,
@@ -1902,6 +1403,7 @@ export function createCleanup(input = {}) {
     idleCallback: idle,
 
     observer,
+
     abortController,
     abort: abortController,
 
@@ -1923,23 +1425,13 @@ export function createCleanup(input = {}) {
     snapshot: getSnapshot,
   };
 
-  safeEmit(events, CLEANUP_EVENTS.ready, {
+  emit(events, CLEANUP_EVENTS.ready, {
     version: CLEANUP_VERSION,
-    at: safeIsoDate(),
-  });
-
-  safeLog(utils, "Cleanup ready.", {
-    version: CLEANUP_VERSION,
+    at: iso(),
   });
 
   return api;
 }
-
-export {
-  CLEANUP_VERSION,
-  DEFAULT_SCOPE,
-  CLEANUP_EVENTS,
-};
 
 export default {
   CLEANUP_VERSION,

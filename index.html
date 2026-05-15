@@ -13,50 +13,22 @@
 >
 <head>
   <!-- =========================================================
-       ONION SUPPORT — INDEX / SPA SHELL
+       ONION SUPPORT — SPA SHELL
        Archivo: /index.html
 
-       PRO SAAS PANEL · PRIVATE SPA · ENTERPRISE BOOT SHELL
-       CSP READY · ZERO INLINE JS/CSS · NO EXTERNAL FONTS
-       TOKEN PRO SYSTEM · THEME PREBOOT · STATIC LOADER
-       FINAL EXTREME 10/10
-
-       OBJETIVOS:
-       - Shell SPA privado, no landing pública.
-       - Sin scripts inline.
+       Contrato:
+       - Shell físico privado de la SPA.
+       - Sin JS inline.
        - Sin CSS inline.
-       - Sin Google Fonts / fonts.gstatic / dependencias externas.
-       - CSS centralizado desde /src/css/app.css.
-       - variables.css como Token Pro System / fuente de verdad.
+       - Sin Google Fonts ni assets externos.
        - Tema inicial resuelto por /src/preboot/theme.js antes del CSS.
-       - Loader estático visible desde refresh.
-       - Loader controlado después por JS.
-       - Sidebar y topbar montados por JS.
-       - Tablehead dinámico preparado.
-       - Restore de sesión sin flash visual.
-       - URLs SPA resueltas por Azure Static Web Apps.
-       - Panel privado no indexable.
-       - PWA coherente mediante /site.webmanifest.
-       - Favicon principal: favicon_black_circle.png.
-       - Preparado para CSP estricta vía headers.
-
-       CONTRATO DE BOOT:
-       - index.html declara estructura y estado mínimo inicial.
-       - theme.js decide el tema real: dark/light/system/storage.
-       - main.js arranca la aplicación.
-       - loader.js oculta el loader y limpia estados app-booting/app-loading.
-       - Router renderiza en #view-container.
-       - SidebarUI monta en #sidebar-mount.
-       - TopbarUI monta en #topbar-mount.
-
-       IMPORTANTE:
-       - El tema inicial vive en <html>.
-       - <body> no nace con data-theme ni theme-dark/theme-light.
-       - No hardcodear clases theme-dark/theme-light en index.html.
-       - theme.js puede sincronizar <body> cuando document.body exista.
-       - loader.css debe decidir logos mediante html[data-theme].
-       - La CSP real debe aplicarse desde headers, por ejemplo:
-         staticwebapp.config.json en Azure Static Web Apps.
+       - CSS centralizado en /src/css/app.css.
+       - JS centralizado en /src/main.js.
+       - Router renderiza exclusivamente en #view-container.
+       - Sidebar monta en #sidebar-mount.
+       - Topbar monta en #topbar-mount.
+       - Loader inicial estático, controlado después por la app.
+       - Preparado para CSP estricta mediante staticwebapp.config.json.
   ========================================================= -->
 
   <!-- =========================
@@ -88,7 +60,6 @@
 
   <!-- =========================
        PRIVACY / INDEXING
-       App privada: no indexar panel, auth ni rutas SPA.
   ========================= -->
   <meta
     name="robots"
@@ -117,7 +88,6 @@
 
   <!-- =========================
        THEME / BROWSER CHROME
-       theme.js/runtime pueden actualizar theme-color.
   ========================= -->
   <meta
     name="color-scheme"
@@ -152,27 +122,11 @@
 
   <!-- =========================
        BASE SPA
-       Correcto para Azure Static Web Apps sirviendo desde raíz.
   ========================= -->
   <base href="/">
 
   <!-- =========================
-       FAVICON / APP ICONS
-
-       Set principal Onion Support:
-       - favicon_support.png
-       - favicon_white.png
-       - favicon_black_circle.png
-       - favicon_black.png
-
-       Favicon principal deseado:
-       - /src/media/img/favicon_black_circle.png
-
-       IMPORTANTE:
-       - No usar favicon_support.png como rel="icon".
-       - No apuntar a favicon.svg.
-       - ?v=5 rompe caché agresiva del navegador.
-       - El loader NO usa este icono; el loader usa white/black según tema.
+       ICONS / MANIFEST
   ========================= -->
   <link
     rel="icon"
@@ -191,26 +145,14 @@
     href="/src/media/img/favicon_black_circle.png?v=5"
   >
 
-  <!-- =========================
-       PWA MANIFEST
-
-       El repo contiene /site.webmanifest.
-       El manifest debe declarar PNG/ICO reales.
-       No declarar favicon.svg.
-       Recomendado: usar favicon_black_circle.png también en manifest.
-  ========================= -->
   <link
     rel="manifest"
     href="/site.webmanifest?v=5"
   >
 
   <!-- =========================
-       PERFORMANCE · APP ASSETS
-       Sin preconnect/dns-prefetch a Google Fonts.
-       Sin fuentes externas.
+       PERFORMANCE · LOCAL ASSETS ONLY
   ========================= -->
-
-  <!-- Loader inicial para tema dark / fondo oscuro -->
   <link
     rel="preload"
     href="/src/media/img/favicon_white.png?v=5"
@@ -219,7 +161,6 @@
     fetchpriority="high"
   >
 
-  <!-- Loader inicial para tema light / fondo claro -->
   <link
     rel="preload"
     href="/src/media/img/favicon_black.png?v=5"
@@ -228,47 +169,19 @@
     fetchpriority="low"
   >
 
-  <!-- Entrada principal SPA -->
   <link
     rel="modulepreload"
     href="/src/main.js"
   >
 
   <!-- =========================
-       PREBOOT THEME
-       CSP READY:
-       - script externo
-       - síncrono
-       - antes del CSS final
-       - actualiza html[data-theme]
-       - evita flash dark/light incorrecto
-
-       /src/preboot/theme.js debe ser JS puro:
-       - sin <script>
-       - sin HTML
-       - sin CSS inline
+       THEME PREBOOT
+       Debe ejecutarse antes de aplicar /src/css/app.css.
   ========================= -->
   <script src="/src/preboot/theme.js"></script>
 
   <!-- =========================
        CSS ENTRYPOINT
-       /src/css/app.css importa:
-       - tokens/variables.css
-       - tokens/light.css
-       - core/reset.css
-       - core/core.css
-       - core/layout.css
-       - core/loader.css
-       - layout/sidebar.css
-       - layout/topbar.css
-       - components/ui.css
-       - views/*.css
-       - auth/login.css
-
-       IMPORTANTE:
-       - No meter <style> inline.
-       - No meter CSS dinámico desde JS salvo fallback extremo.
-       - Las vistas viven en /src/css/views/.
   ========================= -->
   <link
     rel="stylesheet"
@@ -276,10 +189,7 @@
   >
 
   <!-- =========================
-       NOSCRIPT CSS EXTERNO
-       CSP READY:
-       - sin <style> inline
-       - separado porque solo aplica sin JS
+       NOSCRIPT CSS
   ========================= -->
   <noscript>
     <link
@@ -300,11 +210,7 @@
   data-shell-state="booting"
 >
   <!-- =========================================================
-       ACCESSIBILITY · SKIP LINK
-       Requiere soporte global para:
-       - .sr-only
-       - .sr-only-focusable
-       - .app-skip-link
+       ACCESSIBILITY
   ========================================================= -->
   <a
     class="sr-only sr-only-focusable app-skip-link"
@@ -315,20 +221,7 @@
   </a>
 
   <!-- =========================================================
-       BOOT LOADER ESTÁTICO
-       - Visible desde refresh antes de JS.
-       - Controlado después por src/app/loader.js / main.js.
-       - Sin inline script.
-       - Sin inline style.
-       - Logos dependientes de html[data-theme].
-       - Accesible mediante role="status".
-       - Ocultación esperada por JS:
-         · remove html/body app-booting/app-loading
-         · data-app-loading="false"
-         · data-loader-visible="false"
-         · data-loader-state="hidden"
-         · aria-busy="false"
-         · aria-hidden="true"
+       STATIC BOOT LOADER
   ========================================================= -->
   <div
     id="app-loader"
@@ -425,9 +318,6 @@
 
   <!-- =========================================================
        NOSCRIPT FALLBACK
-       Si JS está desactivado, noscript.css debe:
-       - ocultar el loader si procede
-       - mostrar layout noscript usable
   ========================================================= -->
   <noscript>
     <div class="layout noscript-layout">
@@ -451,13 +341,7 @@
   </noscript>
 
   <!-- =========================================================
-       APP LAYOUT
-       - Sidebar montado por JS.
-       - Topbar montado por JS.
-       - Tablehead dinámico preparado.
-       - View root estable para Router.
-       - Loader inicial ya existe y lo controla JS.
-       - Shell no interactivo durante boot.
+       APP SHELL
   ========================================================= -->
   <div
     id="app-shell"
@@ -501,7 +385,7 @@
       data-route-mode="boot"
     >
       <!-- =========================
-           TABLEHEAD DYNAMIC SLOT
+           TABLEHEAD SLOT
       ========================= -->
       <div
         id="table-head"
@@ -517,7 +401,7 @@
       </div>
 
       <!-- =========================
-           VIEW ROOT
+           ROUTER VIEW
       ========================= -->
       <div
         id="app-content"
@@ -534,10 +418,7 @@
   </div>
 
   <!-- =========================
-       APP ENTRY
-       CSP READY:
-       - módulo externo
-       - sin inline bootstrap
+       APP ENTRYPOINT
   ========================= -->
   <script
     type="module"

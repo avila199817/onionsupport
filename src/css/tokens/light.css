@@ -2,47 +2,41 @@
    ONION SUPPORT — LIGHT THEME
    Archivo: /src/css/tokens/light.css
 
-   PREMIUM WHITE UI · APPLE STYLE · PRO SAAS PANEL · GOD MODE
-   TOKEN PRO SYSTEM · LIGHT OVERRIDES ONLY · FINAL EXTREME 10/10
+   PREMIUM WHITE UI · APPLE STYLE · PRO SAAS PANEL
+   TOKEN PRO SYSTEM · LIGHT OVERRIDES ONLY · CSP CLEAN
 
-   IMPORTANTE:
-   - Este archivo se carga DESPUÉS de variables.css.
-   - Aquí SOLO viven overrides [data-theme="light"].
-   - variables.css mantiene el dark/base.
-   - Los componentes consumen tokens, no redefinen sistema global.
-   - No usar :root aquí.
+   Contrato:
+   - Este archivo se carga después de variables.css.
+   - Aquí sólo viven overrides del tema light.
+   - No usar :root.
    - No usar Google Fonts.
+   - No usar @import.
    - No usar CSS inline.
    - No usar estilos inyectados por JS.
-   - No definir estructura de componentes/vistas aquí.
+   - No definir estructura de componentes/vistas.
+   - Los componentes consumen tokens; no redefinen sistema global.
 
-   OBJETIVO:
-   - White UI premium.
-   - Contraste limpio.
-   - Capas flotantes claras.
-   - Dropdown sidebar visible y elegante.
-   - Sombras tipo Apple/SaaS.
-   - Topbar/sidebar integrados.
-   - Cards e inputs más nítidos.
-   - Tablas limpias y legibles.
-   - Loader coherente con tema claro.
-   - Modal/Drawer/Toast premium.
-   - Search Command Palette con glass sólo sobre vista/contenido.
+   Scope:
+   - html[data-theme="light"] cubre el primer paint.
+   - body[data-theme="light"] cubre sincronización runtime.
+   - No usar selector genérico [data-theme="light"] para evitar
+     mini-temas accidentales dentro de vistas/componentes.
 
-   TOPBAR SEARCH CONTRACT:
-   - El search NO cambia de alto al abrir.
-   - El search NO baja al abrir.
+   Topbar Search Contract:
+   - El search no cambia de alto al abrir.
+   - El search no baja al abrir.
    - El search se centra desde topbar.css.
    - El dropdown usa el mismo ancho visual del search.
    - El glass afecta sólo a .main-content.
 ========================================================= */
 
-[data-theme="light"] {
+html[data-theme="light"],
+body[data-theme="light"] {
   color-scheme: light;
 
 
   /* =========================================================
-     BRAND SYSTEM
+     BRAND SYSTEM · LIGHT
   ========================================================= */
   --accent: #6f59d9;
   --accent-hover: #624acb;
@@ -62,7 +56,6 @@
   --accent-border-strong: rgba(111,89,217,.36);
   --accent-glow: rgba(111,89,217,.105);
   --accent-glow-strong: rgba(111,89,217,.17);
-
   --accent-contrast: #ffffff;
 
   --brand: var(--accent);
@@ -86,7 +79,7 @@
 
 
   /* =========================================================
-     TEXT SYSTEM
+     TEXT SYSTEM · LIGHT
   ========================================================= */
   --text: #172033;
   --text-strong: #07111f;
@@ -112,7 +105,7 @@
 
 
   /* =========================================================
-     BASE / BACKDROP
+     BACKGROUND / ATMOSPHERE · LIGHT
   ========================================================= */
   --main-bg: #f3f6fa;
   --main-bg-2: #edf2f7;
@@ -157,7 +150,7 @@
 
 
   /* =========================================================
-     SURFACE SYSTEM
+     SURFACE SYSTEM · LIGHT
   ========================================================= */
   --surface-0: #f3f6fa;
   --surface-1: #f8fafc;
@@ -214,7 +207,7 @@
 
 
   /* =========================================================
-     BORDER SYSTEM
+     BORDER SYSTEM · LIGHT
   ========================================================= */
   --border-soft: rgba(23,32,51,.055);
   --border-default: rgba(23,32,51,.095);
@@ -231,7 +224,7 @@
 
 
   /* =========================================================
-     STATUS SYSTEM
+     STATUS SYSTEM · LIGHT
   ========================================================= */
   --success: #1f9d68;
   --success-hover: #157a4f;
@@ -249,6 +242,7 @@
   --error-hover: #b52a39;
   --error-soft: rgba(216,60,77,.12);
   --error-bg: rgba(216,60,77,.09);
+  --error-strong: var(--error);
 
   --danger: var(--error);
   --danger-hover: var(--error-hover);
@@ -279,7 +273,59 @@
 
 
   /* =========================================================
-     CARD / PANEL / BLOCK
+     SHADOW SYSTEM · LIGHT
+  ========================================================= */
+  --shadow-xs: 0 2px 8px rgba(15,23,42,.035);
+  --shadow-sm: 0 6px 16px rgba(15,23,42,.050);
+  --shadow-md: 0 10px 24px rgba(15,23,42,.070);
+  --shadow-lg: 0 18px 40px rgba(15,23,42,.100);
+  --shadow-xl: 0 28px 64px rgba(15,23,42,.120);
+
+  --shadow-soft: 0 8px 18px rgba(15,23,42,.050);
+  --shadow-strong: 0 20px 44px rgba(15,23,42,.105);
+
+  --shadow-dropdown:
+    0 28px 64px rgba(15,23,42,.140),
+    0 12px 24px rgba(15,23,42,.075),
+    0 2px 8px rgba(15,23,42,.045);
+
+  --shadow-modal: var(--shadow-xl);
+
+  --shadow-glow:
+    0 0 0 1px rgba(255,255,255,.44),
+    0 16px 38px rgba(111,89,217,.062);
+
+  --shadow-glow-cyan:
+    0 0 0 1px rgba(255,255,255,.46),
+    0 16px 36px rgba(59,130,166,.052);
+
+  --shadow-inner:
+    inset 0 1px 0 rgba(255,255,255,.72);
+
+
+  /* =========================================================
+     FOCUS / SELECTION · LIGHT
+  ========================================================= */
+  --focus-ring:
+    0 0 0 4px rgba(111,89,217,.105);
+
+  --focus-ring-strong:
+    0 0 0 4px rgba(111,89,217,.165);
+
+  --selection-bg: rgba(111,89,217,.16);
+  --selection-text: #111827;
+
+
+  /* =========================================================
+     SCROLLBAR · LIGHT
+  ========================================================= */
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(23,32,51,.12);
+  --scrollbar-thumb-hover: rgba(23,32,51,.20);
+
+
+  /* =========================================================
+     CARD / PANEL / BLOCK · LIGHT
   ========================================================= */
   --card-bg:
     radial-gradient(circle at 0% 0%, rgba(111,89,217,.030), transparent 28%),
@@ -324,7 +370,7 @@
 
 
   /* =========================================================
-     INPUT SYSTEM
+     INPUT SYSTEM · LIGHT
   ========================================================= */
   --input-height: calc(46px * var(--ui-scale));
   --input-height-sm: calc(38px * var(--ui-scale));
@@ -361,7 +407,7 @@
 
 
   /* =========================================================
-     BUTTON SYSTEM
+     BUTTON SYSTEM · LIGHT
   ========================================================= */
   --btn-height: calc(44px * var(--ui-scale));
   --btn-height-sm: calc(36px * var(--ui-scale));
@@ -422,7 +468,21 @@
 
 
   /* =========================================================
-     SIDEBAR · PREMIUM WHITE GLASS
+     SHELL · LIGHT
+  ========================================================= */
+  --shell-app-bg: var(--body-bg);
+  --shell-app-color: var(--text);
+
+  --shell-route-auth-bg:
+    radial-gradient(circle at 18% 14%, rgba(111,89,217,.105), transparent 30%),
+    radial-gradient(circle at 82% 18%, rgba(59,130,166,.080), transparent 30%),
+    var(--body-bg);
+
+  --shell-route-app-bg: var(--body-bg);
+
+
+  /* =========================================================
+     SIDEBAR · LIGHT
   ========================================================= */
   --sidebar-bg:
     linear-gradient(180deg, rgba(255,255,255,.810), rgba(248,250,252,.740)),
@@ -476,7 +536,7 @@
 
 
   /* =========================================================
-     SIDEBAR USER DROPDOWN · LIGHT CONTRAST FIX · GOD MODE
+     SIDEBAR USER DROPDOWN · LIGHT
   ========================================================= */
   --sidebar-dropdown-bg:
     radial-gradient(circle at 12% 0%, rgba(111,89,217,.092), transparent 34%),
@@ -511,7 +571,7 @@
 
 
   /* =========================================================
-     TOPBAR · PREMIUM WHITE GLASS
+     TOPBAR · LIGHT
   ========================================================= */
   --topbar-bg:
     linear-gradient(180deg, rgba(255,255,255,.800), rgba(248,250,252,.700)),
@@ -538,6 +598,7 @@
 
   --topbar-search-result-bg: var(--dropdown-bg);
   --topbar-search-result-border: rgba(23,32,51,.105);
+
   --topbar-search-result-shadow:
     0 34px 82px rgba(15,23,42,.145),
     0 14px 30px rgba(15,23,42,.080),
@@ -546,7 +607,6 @@
 
   /* =========================================================
      TOPBAR SEARCH COMMAND PALETTE · LIGHT
-     Sólo tokens. No estructura.
   ========================================================= */
   --topbar-search-glass-bg:
     linear-gradient(
@@ -598,13 +658,12 @@
 
   --topbar-search-palette-radius: var(--radius-2xl);
   --topbar-search-palette-padding: 8px;
-  --topbar-search-palette-scrollbar-size: 6px;
-
+  --topbar-search-palette-scrollbar-size: var(--scrollbar-size-sm);
   --topbar-search-muted-opacity: .34;
 
 
   /* =========================================================
-     TABLES / DATA UI
+     TABLE / DATA UI · LIGHT
   ========================================================= */
   --table-bg: transparent;
   --table-head-bg: rgba(23,32,51,.022);
@@ -627,7 +686,7 @@
 
 
   /* =========================================================
-     KPI COLORS
+     KPI COLORS · LIGHT
   ========================================================= */
   --color-iva: #c07a16;
   --color-iva-glow: rgba(192,122,22,.16);
@@ -646,7 +705,7 @@
 
 
   /* =========================================================
-     AVATAR / BADGES / CHIPS
+     AVATAR / BADGES / CHIPS · LIGHT
   ========================================================= */
   --avatar-bg:
     linear-gradient(180deg, #7c6ae6 0%, #6f59d9 100%);
@@ -671,60 +730,7 @@
 
 
   /* =========================================================
-     SHADOW SYSTEM
-  ========================================================= */
-  --shadow-xs: 0 2px 8px rgba(15,23,42,.035);
-  --shadow-sm: 0 6px 16px rgba(15,23,42,.050);
-  --shadow-md: 0 10px 24px rgba(15,23,42,.070);
-  --shadow-lg: 0 18px 40px rgba(15,23,42,.100);
-  --shadow-xl: 0 28px 64px rgba(15,23,42,.120);
-
-  --shadow-soft: 0 8px 18px rgba(15,23,42,.050);
-  --shadow-strong: 0 20px 44px rgba(15,23,42,.105);
-
-  --shadow-dropdown:
-    0 28px 64px rgba(15,23,42,.140),
-    0 12px 24px rgba(15,23,42,.075),
-    0 2px 8px rgba(15,23,42,.045);
-
-  --shadow-modal: var(--shadow-xl);
-
-  --shadow-glow:
-    0 0 0 1px rgba(255,255,255,.44),
-    0 16px 38px rgba(111,89,217,.062);
-
-  --shadow-glow-cyan:
-    0 0 0 1px rgba(255,255,255,.46),
-    0 16px 36px rgba(59,130,166,.052);
-
-  --shadow-inner:
-    inset 0 1px 0 rgba(255,255,255,.72);
-
-
-  /* =========================================================
-     FOCUS / ACCESSIBILITY
-  ========================================================= */
-  --focus-ring:
-    0 0 0 4px rgba(111,89,217,.105);
-
-  --focus-ring-strong:
-    0 0 0 4px rgba(111,89,217,.165);
-
-  --selection-bg: rgba(111,89,217,.16);
-  --selection-text: #111827;
-
-
-  /* =========================================================
-     SCROLLBAR
-  ========================================================= */
-  --scrollbar-size: 10px;
-  --scrollbar-track: transparent;
-  --scrollbar-thumb: rgba(23,32,51,.12);
-  --scrollbar-thumb-hover: rgba(23,32,51,.20);
-
-
-  /* =========================================================
-     AUTH / LOGIN
+     AUTH / LOGIN · LIGHT
   ========================================================= */
   --auth-card-bg:
     radial-gradient(circle at 0% 0%, rgba(111,89,217,.050), transparent 32%),
@@ -745,21 +751,7 @@
 
 
   /* =========================================================
-     SHELL
-  ========================================================= */
-  --shell-app-bg: var(--body-bg);
-  --shell-app-color: var(--text);
-
-  --shell-route-auth-bg:
-    radial-gradient(circle at 18% 14%, rgba(111,89,217,.105), transparent 30%),
-    radial-gradient(circle at 82% 18%, rgba(59,130,166,.080), transparent 30%),
-    var(--body-bg);
-
-  --shell-route-app-bg: var(--body-bg);
-
-
-  /* =========================================================
-     LOADER
+     LOADER · LIGHT
   ========================================================= */
   --loader-bg: rgba(243,246,250,.92);
   --loader-text: var(--text);
@@ -782,7 +774,7 @@
 
 
   /* =========================================================
-     SKELETON / STATES
+     SKELETON / STATES · LIGHT
   ========================================================= */
   --skeleton-bg: rgba(23,32,51,.055);
   --skeleton-bg-strong: rgba(23,32,51,.075);
@@ -810,24 +802,14 @@
 
 
   /* =========================================================
-     MODAL / DRAWER / OVERLAY
+     MODAL / DRAWER / OVERLAY · LIGHT
   ========================================================= */
   --overlay-bg: rgba(15,23,42,.28);
   --overlay-blur: blur(10px);
 
-  --modal-bg:
-    radial-gradient(circle at 0% 0%, rgba(111,89,217,.050), transparent 30%),
-    linear-gradient(180deg, rgba(255,255,255,.970), rgba(248,250,252,.955)),
-    #ffffff;
-
-  --drawer-bg:
-    radial-gradient(circle at 0% 0%, rgba(111,89,217,.050), transparent 30%),
-    linear-gradient(180deg, rgba(255,255,255,.970), rgba(248,250,252,.955)),
-    #ffffff;
-
 
   /* =========================================================
-     CHARTS
+     CHARTS · LIGHT
   ========================================================= */
   --chart-1: var(--accent);
   --chart-2: var(--info);
@@ -844,7 +826,7 @@
 
 
   /* =========================================================
-     APP STATUS
+     APP STATUS · LIGHT
   ========================================================= */
   --status-online: var(--success);
   --status-online-bg: var(--success-bg);
@@ -867,6 +849,7 @@
      ASSETS · LIGHT
   ========================================================= */
   --asset-favicon: url("/src/media/img/favicon_black_circle.png");
+  --asset-logo-support: url("/src/media/img/favicon_support.png");
   --asset-logo-dark: url("/src/media/img/favicon_white.png");
   --asset-logo-light: url("/src/media/img/favicon_black.png");
   --asset-logo-circle: url("/src/media/img/favicon_black_circle.png");
@@ -876,7 +859,8 @@
 
 
   /* =========================================================
-     INCIDENCIAS MODAL · LIGHT OVERRIDES
+     INCIDENCIAS DETAIL / MODAL · LIGHT COMPAT
+     Sólo overrides de tokens ya existentes en variables.css.
   ========================================================= */
   --incidencias-modal-overlay-bg: rgba(15,23,42,.28);
 
@@ -947,18 +931,20 @@
 
 /* =========================================================
    RESPONSIVE TOKEN OVERRIDES · LIGHT SEARCH
-   Sólo tokens; sin estructura.
+   Sólo tokens. Sin estructura.
 ========================================================= */
 
 @media (max-width: 980px) {
-  [data-theme="light"] {
+  html[data-theme="light"],
+  body[data-theme="light"] {
     --topbar-search-command-width: min(680px, calc(100vw - 28px));
     --topbar-search-palette-width: var(--topbar-search-command-width);
   }
 }
 
 @media (max-width: 768px) {
-  [data-theme="light"] {
+  html[data-theme="light"],
+  body[data-theme="light"] {
     --topbar-search-command-width: calc(100vw - 24px);
     --topbar-search-palette-width: var(--topbar-search-command-width);
 
@@ -983,14 +969,16 @@
 }
 
 @media (max-width: 640px) {
-  [data-theme="light"] {
+  html[data-theme="light"],
+  body[data-theme="light"] {
     --topbar-search-command-width: calc(100vw - 20px);
     --topbar-search-palette-width: var(--topbar-search-command-width);
   }
 }
 
 @media (max-width: 420px) {
-  [data-theme="light"] {
+  html[data-theme="light"],
+  body[data-theme="light"] {
     --topbar-search-command-width: calc(100vw - 16px);
     --topbar-search-palette-width: var(--topbar-search-command-width);
   }
@@ -1002,7 +990,8 @@
 ========================================================= */
 
 @media (prefers-contrast: more) {
-  [data-theme="light"] {
+  html[data-theme="light"],
+  body[data-theme="light"] {
     --text-muted: rgba(7,17,31,.78);
     --text-dim: rgba(7,17,31,.62);
     --text-faint: rgba(7,17,31,.46);
@@ -1033,7 +1022,8 @@
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  [data-theme="light"] {
+  html[data-theme="light"],
+  body[data-theme="light"] {
     --surface-glass: var(--surface-2);
     --surface-glass-strong: var(--surface-2);
 

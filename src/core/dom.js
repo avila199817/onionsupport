@@ -3,9 +3,9 @@
    Archivo: src/core/dom.js
 
    ONION SUPPORT · CORE DOM CACHE
-   SHELL CACHE · LATE UI NODES · SAFE VALIDATION · 14/10
+   SHELL CACHE · LATE UI NODES · SAFE VALIDATION · 17/10
 
-   RESPONSABILIDADES:
+   Responsabilidades:
    - centralizar cache de nodos shell SPA
    - validar nodos mínimos del layout
    - resolver referencias reutilizables
@@ -17,7 +17,7 @@
    - mantener aliases estables para Router / Core / UI
    - permitir diagnóstico tardío de SidebarUI / TopbarUI
 
-   HARDENING EXTREMO:
+   Candados:
    - cache idempotente
    - aliases legacy/fallbacks robustos
    - validación estructural clara
@@ -31,13 +31,7 @@
    - compatible con #app-shell / #main-content / #view-container
    - compatible con nodos UI montados tarde por SidebarUI/TopbarUI
 
-   FIX BOOT / UI DINÁMICA:
-   - sidebar/topbar NO son required durante Core.init()
-   - sidebar/topbar reales son deferred UI nodes porque los monta JS
-   - sidebarMount/topbarMount sí son nodos estáticos recomendados
-   - validateRequiredDom() permite includeDeferred:true para diagnóstico tardío
-
-   CONTRATO CON index.html:
+   Contrato shell:
    - #app-loader
    - #app-shell
    - #sidebar-mount
@@ -53,465 +47,538 @@
    CONSTANTS
 ========================================================= */
 
-export const DOM_VERSION =
-  "14.0.0";
+export const DOM_VERSION = "17.0.0";
 
-export const REQUIRED_KEYS =
-  Object.freeze([
-    "body",
-    "mainContent",
-    "viewContainer",
-  ]);
+export const REQUIRED_KEYS = Object.freeze([
+  "body",
+  "mainContent",
+  "viewContainer",
+]);
 
-export const RECOMMENDED_KEYS =
-  Object.freeze([
-    "html",
-    "appShell",
-    "appContent",
-    "loader",
-    "sidebarMount",
-    "topbarMount",
-  ]);
+export const RECOMMENDED_KEYS = Object.freeze([
+  "html",
+  "appShell",
+  "appContent",
+  "loader",
+  "sidebarMount",
+  "topbarMount",
+]);
 
-export const DEFERRED_UI_KEYS =
-  Object.freeze([
-    "sidebar",
-    "topbar",
+export const DEFERRED_UI_KEYS = Object.freeze([
+  "sidebar",
+  "topbar",
 
-    "sidebarMenu",
-    "sidebarRecents",
-    "sidebarFooter",
+  "sidebarMenu",
+  "sidebarRecents",
+  "sidebarFooter",
 
-    "topbarTitle",
-    "topbarViewContainer",
-    "topbarActions",
+  "topbarTitle",
+  "topbarViewContainer",
+  "topbarActions",
 
-    "userToggle",
-    "userDropdown",
-    "logoutBtn",
+  "userToggle",
+  "userDropdown",
+  "logoutBtn",
 
-    "sidebarAvatar",
-    "sidebarAvatarImage",
-    "sidebarAvatarFallback",
-    "sidebarName",
-    "sidebarEmail",
-    "sidebarRole",
+  "sidebarAvatar",
+  "sidebarAvatarImage",
+  "sidebarAvatarFallback",
+  "sidebarName",
+  "sidebarEmail",
+  "sidebarRole",
 
-    "sidebarToggle",
-    "sidebarMobileToggle",
+  "sidebarToggle",
+  "sidebarMobileToggle",
 
-    "searchInput",
-    "searchResults",
-  ]);
+  "searchInput",
+  "searchResults",
+]);
 
-export const OPTIONAL_KEYS =
-  Object.freeze([
-    "appRoot",
-    "layout",
-    "shell",
+export const OPTIONAL_KEYS = Object.freeze([
+  "appRoot",
+  "layout",
+  "shell",
+  "main",
+  "appMain",
+  "viewRoot",
+  "routerView",
+
+  "skipLink",
+  "themeColorMeta",
+  "metaThemeColor",
+  "colorSchemeMeta",
+  "tileColorMeta",
+
+  "tablehead",
+  "tableHead",
+  "tableheadContainer",
+  "tableHeadContainer",
+
+  "toastRoot",
+  "modalRoot",
+  "overlayRoot",
+  "tooltipRoot",
+  "drawerRoot",
+  "portalRoot",
+  "liveRegion",
+]);
+
+export const DOM_SELECTORS = Object.freeze({
+  skipLink: [
+    ".app-skip-link",
+    "[data-skip-link='true']",
+    "[data-skip-link]",
+    "a[href='#main-content']",
+    "a[href='#view-container']",
+  ],
+
+  themeColorMeta: [
+    'meta[name="theme-color"]',
+    "meta[data-onion-theme-color='true']",
+    "meta[data-theme-color]",
+  ],
+
+  metaThemeColor: [
+    'meta[name="theme-color"]',
+    "meta[data-onion-theme-color='true']",
+    "meta[data-theme-color]",
+  ],
+
+  colorSchemeMeta: [
+    'meta[name="color-scheme"]',
+    "meta[data-onion-color-scheme='true']",
+  ],
+
+  tileColorMeta: [
+    'meta[name="msapplication-TileColor"]',
+    "meta[data-onion-tile-color='true']",
+  ],
+
+  appRoot: [
+    "#app",
+    "#root",
+    "#app-root",
+    "[data-app-root]",
+    "[data-onion-root]",
+  ],
+
+  layout: [
+    "#app-layout",
+    ".app-layout",
+    ".layout",
+    "[data-app-layout='true']",
+    "[data-app-layout]",
+    "#app-shell",
+    "[data-app-shell]",
+    "#app",
+    "#root",
+  ],
+
+  appShell: [
+    "#app-shell",
+    "[data-app-shell='true']",
+    "[data-app-shell]",
+    ".app-shell",
+    ".shell",
+  ],
+
+  shell: [
+    "#app-shell",
+    "[data-app-shell='true']",
+    "[data-app-shell]",
+    ".app-shell",
+    ".shell",
+  ],
+
+  sidebarMount: [
+    "#sidebar-mount",
+    "[data-sidebar-mount='true']",
+    "[data-sidebar-mount]",
+  ],
+
+  topbarMount: [
+    "#topbar-mount",
+    "[data-topbar-mount='true']",
+    "[data-topbar-mount]",
+  ],
+
+  mainContent: [
+    "#main-content",
+    "#app-main",
+    "main#main-content",
+    "main.main-content",
+    ".main-content",
+    "[data-main-content='true']",
+    "[data-main-content]",
+    "[data-app-main]",
     "main",
-    "viewRoot",
-    "routerView",
+  ],
 
-    "skipLink",
-    "themeColorMeta",
-    "colorSchemeMeta",
-    "tileColorMeta",
+  main: [
+    "#main-content",
+    "#app-main",
+    "main#main-content",
+    "main.main-content",
+    ".main-content",
+    "[data-main-content='true']",
+    "[data-main-content]",
+    "[data-app-main]",
+    "main",
+  ],
 
-    "tablehead",
-    "tableHead",
-    "tableheadContainer",
-    "tableHeadContainer",
+  appMain: [
+    "#app-main",
+    "#main-content",
+    "[data-app-main]",
+    "[data-main-content]",
+    "main",
+  ],
 
-    "toastRoot",
-    "modalRoot",
-    "overlayRoot",
-    "tooltipRoot",
-    "drawerRoot",
-    "portalRoot",
-    "liveRegion",
-  ]);
+  appContent: [
+    "#app-content",
+    "[data-app-content='true']",
+    "[data-app-content]",
+    ".app-content",
+  ],
 
-export const DOM_SELECTORS =
-  Object.freeze({
-    skipLink: [
-      ".app-skip-link",
-      "[data-skip-link='true']",
-      "[data-skip-link]",
-      "a[href='#main-content']",
-      "a[href='#view-container']",
-    ],
+  viewContainer: [
+    "#view-container",
+    "#router-view",
+    "#app-view",
+    "[data-view-root='true']",
+    "[data-view-root]",
+    "[data-view-container='true']",
+    "[data-view-container]",
+    "[data-router-view='true']",
+    "[data-router-view]",
+    "[data-router-outlet]",
+    ".view-container",
+    ".router-view",
+  ],
 
-    themeColorMeta: [
-      'meta[name="theme-color"]',
-      "meta[data-onion-theme-color='true']",
-      "meta[data-theme-color]",
-    ],
+  viewRoot: [
+    "#view-container",
+    "#router-view",
+    "#app-view",
+    "[data-view-root='true']",
+    "[data-view-root]",
+    "[data-view-container='true']",
+    "[data-view-container]",
+    "[data-router-view='true']",
+    "[data-router-view]",
+    "[data-router-outlet]",
+    ".view-container",
+    ".router-view",
+  ],
 
-    colorSchemeMeta: [
-      'meta[name="color-scheme"]',
-      "meta[data-onion-color-scheme='true']",
-    ],
+  routerView: [
+    "#view-container",
+    "#router-view",
+    "#app-view",
+    "[data-router-view='true']",
+    "[data-router-view]",
+    "[data-router-outlet]",
+    "[data-view-container]",
+    ".router-view",
+    ".view-container",
+  ],
 
-    tileColorMeta: [
-      'meta[name="msapplication-TileColor"]',
-      "meta[data-onion-tile-color='true']",
-    ],
+  loader: [
+    "#app-loader",
+    "#loader",
+    "[data-app-loader='true']",
+    "[data-app-loader]",
+    "[data-loader-root]",
+    ".app-loader",
+    ".loader-root",
+  ],
 
-    appRoot: [
-      "#app",
-      "#root",
-      "#app-root",
-      "[data-app-root]",
-      "[data-onion-root]",
-    ],
+  appLoader: [
+    "#app-loader",
+    "#loader",
+    "[data-app-loader='true']",
+    "[data-app-loader]",
+    "[data-loader-root]",
+    ".app-loader",
+    ".loader-root",
+  ],
 
-    layout: [
-      "#app-layout",
-      ".app-layout",
-      ".layout",
-      "[data-app-layout='true']",
-      "[data-app-layout]",
-      "#app-shell",
-      "[data-app-shell]",
-      "#app",
-      "#root",
-    ],
+  sidebar: [
+    "#app-sidebar",
+    "#sidebar",
+    "aside#app-sidebar",
+    "aside.sidebar",
+    ".sidebar",
+    "[data-sidebar-root='true']",
+    "[data-sidebar-root]",
+    "[data-sidebar='true']",
+    "[data-sidebar]",
+  ],
 
-    appShell: [
-      "#app-shell",
-      "[data-app-shell='true']",
-      "[data-app-shell]",
-      ".app-shell",
-      ".shell",
-    ],
+  sidebarMenu: [
+    "#sidebar-menu",
+    ".sidebar-menu",
+    "[data-sidebar-menu='true']",
+    "[data-sidebar-menu]",
+    "[data-sidebar-nav]",
+    "nav[data-sidebar-menu]",
+  ],
 
-    sidebarMount: [
-      "#sidebar-mount",
-      "[data-sidebar-mount='true']",
-      "[data-sidebar-mount]",
-    ],
+  sidebarRecents: [
+    "#sidebar-recents",
+    "[data-sidebar-recents='true']",
+    "[data-sidebar-recents]",
+    ".sidebar-recents",
+  ],
 
-    topbarMount: [
-      "#topbar-mount",
-      "[data-topbar-mount='true']",
-      "[data-topbar-mount]",
-    ],
+  sidebarFooter: [
+    "#sidebar-footer",
+    "[data-sidebar-footer='true']",
+    "[data-sidebar-footer]",
+    ".sidebar-footer",
+  ],
 
-    mainContent: [
-      "#main-content",
-      "#app-main",
-      "main#main-content",
-      "main.main-content",
-      ".main-content",
-      "[data-main-content='true']",
-      "[data-main-content]",
-      "[data-app-main]",
-      "main",
-    ],
+  topbar: [
+    "#app-topbar",
+    "#topbar",
+    "header#app-topbar",
+    "header.topbar",
+    ".topbar",
+    "[data-topbar-root='true']",
+    "[data-topbar-root]",
+    "[data-topbar='true']",
+    "[data-topbar]",
+  ],
 
-    appContent: [
-      "#app-content",
-      "[data-app-content='true']",
-      "[data-app-content]",
-      ".app-content",
-    ],
+  topbarTitle: [
+    "#topbar-title",
+    "[data-topbar-title='true']",
+    "[data-topbar-title]",
+    ".topbar-title",
+  ],
 
-    viewContainer: [
-      "#view-container",
-      "#router-view",
-      "#app-view",
-      "[data-view-root='true']",
-      "[data-view-root]",
-      "[data-view-container='true']",
-      "[data-view-container]",
-      "[data-router-view='true']",
-      "[data-router-view]",
-      "[data-router-outlet]",
-      ".view-container",
-      ".router-view",
-    ],
+  topbarViewContainer: [
+    "#topbarview-container",
+    "#topbar-view-container",
+    "[data-topbar-view-container='true']",
+    "[data-topbar-view-container]",
+    ".topbar-view-container",
+  ],
 
-    loader: [
-      "#app-loader",
-      "#loader",
-      "[data-app-loader='true']",
-      "[data-app-loader]",
-      "[data-loader-root]",
-      ".app-loader",
-      ".loader-root",
-    ],
+  topbarActions: [
+    "#topbar-actions",
+    "[data-topbar-actions='true']",
+    "[data-topbar-actions]",
+    ".topbar-actions",
+  ],
 
-    sidebar: [
-      "#app-sidebar",
-      "#sidebar",
-      "aside#app-sidebar",
-      "aside.sidebar",
-      ".sidebar",
-      "[data-sidebar-root='true']",
-      "[data-sidebar-root]",
-      "[data-sidebar='true']",
-      "[data-sidebar]",
-    ],
+  tablehead: [
+    "#table-head",
+    "#tablehead",
+    ".table-head",
+    ".tablehead",
+    "[data-tablehead='true']",
+    "[data-tablehead]",
+    "[data-table-head]",
+  ],
 
-    sidebarMenu: [
-      "#sidebar-menu",
-      ".sidebar-menu",
-      "[data-sidebar-menu='true']",
-      "[data-sidebar-menu]",
-      "[data-sidebar-nav]",
-      "nav[data-sidebar-menu]",
-    ],
+  tableHead: [
+    "#table-head",
+    "#tablehead",
+    ".table-head",
+    ".tablehead",
+    "[data-tablehead='true']",
+    "[data-tablehead]",
+    "[data-table-head]",
+  ],
 
-    sidebarRecents: [
-      "#sidebar-recents",
-      "[data-sidebar-recents='true']",
-      "[data-sidebar-recents]",
-      ".sidebar-recents",
-    ],
+  tableheadContainer: [
+    "#tablehead-container",
+    "#table-head-container",
+    "[data-tablehead-container='true']",
+    "[data-tablehead-container]",
+    "[data-table-head-container]",
+    ".tablehead-container",
+  ],
 
-    sidebarFooter: [
-      "#sidebar-footer",
-      "[data-sidebar-footer='true']",
-      "[data-sidebar-footer]",
-      ".sidebar-footer",
-    ],
+  tableHeadContainer: [
+    "#tablehead-container",
+    "#table-head-container",
+    "[data-tablehead-container='true']",
+    "[data-tablehead-container]",
+    "[data-table-head-container]",
+    ".tablehead-container",
+  ],
 
-    topbar: [
-      "#app-topbar",
-      "#topbar",
-      "header#app-topbar",
-      "header.topbar",
-      ".topbar",
-      "[data-topbar-root='true']",
-      "[data-topbar-root]",
-      "[data-topbar='true']",
-      "[data-topbar]",
-    ],
+  searchInput: [
+    "#topbar-search",
+    "#search-input",
+    "[data-topbar-search='true']",
+    "[data-topbar-search]",
+    "[data-search-input]",
+    "input[type='search']",
+  ],
 
-    topbarTitle: [
-      "#topbar-title",
-      "[data-topbar-title='true']",
-      "[data-topbar-title]",
-      ".topbar-title",
-    ],
+  searchResults: [
+    "#topbar-search-results",
+    "#search-results",
+    "[data-topbar-search-results='true']",
+    "[data-topbar-search-results]",
+    "[data-search-results]",
+  ],
 
-    topbarViewContainer: [
-      "#topbarview-container",
-      "#topbar-view-container",
-      "[data-topbar-view-container='true']",
-      "[data-topbar-view-container]",
-      ".topbar-view-container",
-    ],
+  userToggle: [
+    "#userToggle",
+    "#user-toggle",
+    "[data-user-toggle='true']",
+    "[data-user-toggle]",
+    "[data-user-menu-toggle]",
+  ],
 
-    topbarActions: [
-      "#topbar-actions",
-      "[data-topbar-actions='true']",
-      "[data-topbar-actions]",
-      ".topbar-actions",
-    ],
+  userDropdown: [
+    "#userDropdown",
+    "#user-dropdown",
+    "[data-user-dropdown='true']",
+    "[data-user-dropdown]",
+    "[data-user-menu]",
+  ],
 
-    tablehead: [
-      "#table-head",
-      "#tablehead",
-      ".table-head",
-      ".tablehead",
-      "[data-tablehead='true']",
-      "[data-tablehead]",
-      "[data-table-head]",
-    ],
+  logoutBtn: [
+    "#logoutBtn",
+    "#logout-button",
+    "#logout-btn",
+    "[data-logout-button='true']",
+    "[data-logout-button]",
+    "[data-logout]",
+    "[data-action='logout']",
+  ],
 
-    tableheadContainer: [
-      "#tablehead-container",
-      "#table-head-container",
-      "[data-tablehead-container='true']",
-      "[data-tablehead-container]",
-      "[data-table-head-container]",
-      ".tablehead-container",
-    ],
+  sidebarToggle: [
+    "#toggleSidebar",
+    "#sidebar-toggle",
+    "[data-sidebar-toggle='true']",
+    "[data-sidebar-toggle]",
+    "[data-action='toggle-sidebar']",
+  ],
 
-    searchInput: [
-      "#topbar-search",
-      "#search-input",
-      "[data-topbar-search='true']",
-      "[data-topbar-search]",
-      "[data-search-input]",
-      "input[type='search']",
-    ],
+  sidebarMobileToggle: [
+    "#toggleSidebarMobile",
+    "#sidebar-mobile-toggle",
+    "[data-sidebar-mobile-toggle='true']",
+    "[data-sidebar-mobile-toggle]",
+    "[data-action='toggle-sidebar-mobile']",
+  ],
 
-    searchResults: [
-      "#topbar-search-results",
-      "#search-results",
-      "[data-topbar-search-results='true']",
-      "[data-topbar-search-results]",
-      "[data-search-results]",
-    ],
+  sidebarAvatar: [
+    "#sidebar-avatar",
+    "#sidebarAvatar",
+    "[data-sidebar-avatar='true']",
+    "[data-sidebar-avatar]",
+    "[data-user-avatar]",
+  ],
 
-    userToggle: [
-      "#userToggle",
-      "#user-toggle",
-      "[data-user-toggle='true']",
-      "[data-user-toggle]",
-      "[data-user-menu-toggle]",
-    ],
+  sidebarAvatarImage: [
+    "#sidebarAvatarImage",
+    "#sidebar-avatar-image",
+    "[data-sidebar-avatar-image='true']",
+    "[data-sidebar-avatar-image]",
+    "[data-user-avatar-image]",
+    "#sidebar-avatar img",
+    "[data-sidebar-avatar] img",
+  ],
 
-    userDropdown: [
-      "#userDropdown",
-      "#user-dropdown",
-      "[data-user-dropdown='true']",
-      "[data-user-dropdown]",
-      "[data-user-menu]",
-    ],
+  sidebarAvatarFallback: [
+    "#sidebarAvatarFallback",
+    "#sidebar-avatar-fallback",
+    "[data-sidebar-avatar-fallback='true']",
+    "[data-sidebar-avatar-fallback]",
+    "[data-user-avatar-fallback]",
+  ],
 
-    logoutBtn: [
-      "#logoutBtn",
-      "#logout-button",
-      "#logout-btn",
-      "[data-logout-button='true']",
-      "[data-logout-button]",
-      "[data-logout]",
-      "[data-action='logout']",
-    ],
+  sidebarName: [
+    "#sidebar-name",
+    "#sidebarName",
+    "[data-sidebar-name='true']",
+    "[data-sidebar-name]",
+    "[data-user-name]",
+  ],
 
-    sidebarToggle: [
-      "#toggleSidebar",
-      "#sidebar-toggle",
-      "[data-sidebar-toggle='true']",
-      "[data-sidebar-toggle]",
-      "[data-action='toggle-sidebar']",
-    ],
+  sidebarEmail: [
+    "#sidebar-email",
+    "#sidebarEmail",
+    "[data-sidebar-email='true']",
+    "[data-sidebar-email]",
+    "[data-user-email]",
+  ],
 
-    sidebarMobileToggle: [
-      "#toggleSidebarMobile",
-      "#sidebar-mobile-toggle",
-      "[data-sidebar-mobile-toggle='true']",
-      "[data-sidebar-mobile-toggle]",
-      "[data-action='toggle-sidebar-mobile']",
-    ],
+  sidebarRole: [
+    "#sidebar-role",
+    "#sidebarRole",
+    "[data-sidebar-role='true']",
+    "[data-sidebar-role]",
+    "[data-user-role]",
+  ],
 
-    sidebarAvatar: [
-      "#sidebar-avatar",
-      "#sidebarAvatar",
-      "[data-sidebar-avatar='true']",
-      "[data-sidebar-avatar]",
-      "[data-user-avatar]",
-    ],
+  toastRoot: [
+    "#toast-root",
+    "#toast-container",
+    "[data-toast-root]",
+    "[data-toast-container]",
+    ".toast-container",
+  ],
 
-    sidebarAvatarImage: [
-      "#sidebarAvatarImage",
-      "#sidebar-avatar-image",
-      "[data-sidebar-avatar-image='true']",
-      "[data-sidebar-avatar-image]",
-      "[data-user-avatar-image]",
-      "#sidebar-avatar img",
-      "[data-sidebar-avatar] img",
-    ],
+  modalRoot: [
+    "#modal-root",
+    "[data-modal-root]",
+    ".modal-root",
+  ],
 
-    sidebarAvatarFallback: [
-      "#sidebarAvatarFallback",
-      "#sidebar-avatar-fallback",
-      "[data-sidebar-avatar-fallback='true']",
-      "[data-sidebar-avatar-fallback]",
-      "[data-user-avatar-fallback]",
-    ],
+  overlayRoot: [
+    "#overlay-root",
+    "[data-overlay-root]",
+    ".overlay-root",
+  ],
 
-    sidebarName: [
-      "#sidebar-name",
-      "#sidebarName",
-      "[data-sidebar-name='true']",
-      "[data-sidebar-name]",
-      "[data-user-name]",
-    ],
+  tooltipRoot: [
+    "#tooltip-root",
+    "[data-tooltip-root]",
+    ".tooltip-root",
+  ],
 
-    sidebarEmail: [
-      "#sidebar-email",
-      "#sidebarEmail",
-      "[data-sidebar-email='true']",
-      "[data-sidebar-email]",
-      "[data-user-email]",
-    ],
+  drawerRoot: [
+    "#drawer-root",
+    "[data-drawer-root]",
+    ".drawer-root",
+  ],
 
-    sidebarRole: [
-      "#sidebar-role",
-      "#sidebarRole",
-      "[data-sidebar-role='true']",
-      "[data-sidebar-role]",
-      "[data-user-role]",
-    ],
+  portalRoot: [
+    "#portal-root",
+    "[data-portal-root]",
+    ".portal-root",
+  ],
 
-    toastRoot: [
-      "#toast-root",
-      "#toast-container",
-      "[data-toast-root]",
-      "[data-toast-container]",
-      ".toast-container",
-    ],
+  liveRegion: [
+    "#app-live-region",
+    "[data-live-region]",
+    "[aria-live='polite']",
+    "[aria-live='assertive']",
+  ],
+});
 
-    modalRoot: [
-      "#modal-root",
-      "[data-modal-root]",
-      ".modal-root",
-    ],
-
-    overlayRoot: [
-      "#overlay-root",
-      "[data-overlay-root]",
-      ".overlay-root",
-    ],
-
-    tooltipRoot: [
-      "#tooltip-root",
-      "[data-tooltip-root]",
-      ".tooltip-root",
-    ],
-
-    drawerRoot: [
-      "#drawer-root",
-      "[data-drawer-root]",
-      ".drawer-root",
-    ],
-
-    portalRoot: [
-      "#portal-root",
-      "[data-portal-root]",
-      ".portal-root",
-    ],
-
-    liveRegion: [
-      "#app-live-region",
-      "[data-live-region]",
-      "[aria-live='polite']",
-      "[aria-live='assertive']",
-    ],
-  });
-
-export const DOM_EVENTS =
-  Object.freeze({
-    cached:
-      "app:core:dom:cached",
-
-    valid:
-      "app:core:dom:valid",
-
-    invalid:
-      "app:core:dom:invalid",
-
-    refreshedStale:
-      "app:core:dom:refreshed-stale",
-
-    cleared:
-      "app:core:dom:cleared",
-  });
+export const DOM_EVENTS = Object.freeze({
+  cached: "app:core:dom:cached",
+  valid: "app:core:dom:valid",
+  invalid: "app:core:dom:invalid",
+  refreshedStale: "app:core:dom:refreshed-stale",
+  cleared: "app:core:dom:cleared",
+});
 
 /* =========================================================
    BASICS
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 function isFunction(value) {
@@ -519,46 +586,34 @@ function isFunction(value) {
 }
 
 function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+  if (value === null || value === undefined) {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
+  const text = String(value).trim();
 
   return text || fallback;
 }
 
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+function toArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return Array.from(value);
+  if (value === null || value === undefined) return [];
+  return [value];
 }
 
-function safeObject(value) {
-  return isObject(value)
-    ? value
-    : {};
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 function safeNumber(value, fallback = 0) {
-  const number =
-    Number(value);
+  const number = Number(value);
 
-  return Number.isFinite(number)
-    ? number
-    : fallback;
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function safeIsoDate(ms = Date.now()) {
@@ -572,11 +627,9 @@ function safeIsoDate(ms = Date.now()) {
 function uniqueList(values = []) {
   return Array.from(
     new Set(
-      safeArray(values)
+      toArray(values)
         .flat(Infinity)
-        .map((value) =>
-          safeText(value, "")
-        )
+        .map((value) => safeText(value, ""))
         .filter(Boolean)
     )
   );
@@ -584,36 +637,29 @@ function uniqueList(values = []) {
 
 function safeWarn(utils, ...args) {
   try {
-    utils?.warn?.(
-      "[CoreDOM]",
-      ...args
-    );
-
-    return;
+    if (isFunction(utils?.warn)) {
+      utils.warn("[CoreDOM]", ...args);
+      return;
+    }
   } catch {}
 
   try {
-    if (utils?.debug !== false) {
-      console.warn(
-        "[CoreDOM]",
-        ...args
-      );
+    if (utils?.debug === true) {
+      console.warn("[CoreDOM]", ...args);
     }
   } catch {}
 }
 
 function safeLog(utils, ...args) {
   try {
-    utils?.log?.(
-      "[CoreDOM]",
-      ...args
-    );
+    if (isFunction(utils?.log)) {
+      utils.log("[CoreDOM]", ...args);
+    }
   } catch {}
 }
 
 function safeEmit(events, name, payload = {}) {
-  const eventName =
-    safeText(name, "");
+  const eventName = safeText(name, "");
 
   if (!eventName) {
     return false;
@@ -621,11 +667,7 @@ function safeEmit(events, name, payload = {}) {
 
   try {
     if (isFunction(events?.emit)) {
-      events.emit(
-        eventName,
-        payload
-      );
-
+      events.emit(eventName, payload);
       return true;
     }
   } catch {}
@@ -637,32 +679,40 @@ function safeEmit(events, name, payload = {}) {
    QUERY HELPERS
 ========================================================= */
 
+function getDocumentRoot() {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    return document;
+  } catch {
+    return null;
+  }
+}
+
 function getRoot(root = null) {
   if (!isBrowser()) {
     return null;
   }
 
-  return root || document;
+  return root || getDocumentRoot();
 }
 
 function safeQs(utils, selector, root = null) {
-  if (
-    !isBrowser() ||
-    !selector
-  ) {
+  if (!isBrowser() || !selector) {
     return null;
   }
 
-  const scope =
-    getRoot(root);
+  const scope = getRoot(root);
+
+  if (!scope) {
+    return null;
+  }
 
   try {
     if (isFunction(utils?.qs)) {
-      const found =
-        utils.qs(
-          selector,
-          scope
-        );
+      const found = utils.qs(selector, scope);
 
       if (found) {
         return found;
@@ -671,34 +721,26 @@ function safeQs(utils, selector, root = null) {
   } catch {}
 
   try {
-    return (
-      scope?.querySelector?.(
-        selector
-      ) || null
-    );
+    return scope?.querySelector?.(selector) || null;
   } catch {
     return null;
   }
 }
 
 function safeQsa(utils, selector, root = null) {
-  if (
-    !isBrowser() ||
-    !selector
-  ) {
+  if (!isBrowser() || !selector) {
     return [];
   }
 
-  const scope =
-    getRoot(root);
+  const scope = getRoot(root);
+
+  if (!scope) {
+    return [];
+  }
 
   try {
     if (isFunction(utils?.qsa)) {
-      const found =
-        utils.qsa(
-          selector,
-          scope
-        );
+      const found = utils.qsa(selector, scope);
 
       if (Array.isArray(found)) {
         return found;
@@ -711,34 +753,15 @@ function safeQsa(utils, selector, root = null) {
   } catch {}
 
   try {
-    return Array.from(
-      scope?.querySelectorAll?.(
-        selector
-      ) || []
-    );
+    return Array.from(scope?.querySelectorAll?.(selector) || []);
   } catch {
     return [];
   }
 }
 
-function firstMatch(values = []) {
-  for (const value of values) {
-    if (value) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
 function queryFirst(utils, selectors = [], root = null) {
-  for (const selector of safeArray(selectors)) {
-    const node =
-      safeQs(
-        utils,
-        selector,
-        root
-      );
+  for (const selector of toArray(selectors)) {
+    const node = safeQs(utils, selector, root);
 
     if (node) {
       return node;
@@ -751,19 +774,11 @@ function queryFirst(utils, selectors = [], root = null) {
 function queryAllCandidates(utils, selectors = [], root = null) {
   const output = [];
 
-  for (const selector of safeArray(selectors)) {
-    const nodes =
-      safeQsa(
-        utils,
-        selector,
-        root
-      );
+  for (const selector of toArray(selectors)) {
+    const nodes = safeQsa(utils, selector, root);
 
     for (const node of nodes) {
-      if (
-        node &&
-        !output.includes(node)
-      ) {
+      if (node && !output.includes(node)) {
         output.push(node);
       }
     }
@@ -772,12 +787,8 @@ function queryAllCandidates(utils, selectors = [], root = null) {
   return output;
 }
 
-function isNodeConnected(node) {
-  if (!node) {
-    return false;
-  }
-
-  if (!isBrowser()) {
+export function isNodeConnected(node) {
+  if (!node || !isBrowser()) {
     return false;
   }
 
@@ -808,10 +819,99 @@ function shouldReuseNode(node, force = false) {
     return false;
   }
 
-  return Boolean(
-    node &&
-      isNodeConnected(node)
-  );
+  return Boolean(node && isNodeConnected(node));
+}
+
+function pushRoot(output, root) {
+  if (!root) {
+    return;
+  }
+
+  if (!output.includes(root)) {
+    output.push(root);
+  }
+}
+
+function getScopedRootsForKey(dom, key, root = null) {
+  const roots = [];
+
+  pushRoot(roots, root);
+
+  const sidebarKeys = [
+    "sidebar",
+    "sidebarMenu",
+    "sidebarRecents",
+    "sidebarFooter",
+    "sidebarToggle",
+    "sidebarMobileToggle",
+    "sidebarAvatar",
+    "sidebarAvatarImage",
+    "sidebarAvatarFallback",
+    "sidebarName",
+    "sidebarEmail",
+    "sidebarRole",
+    "userToggle",
+    "userDropdown",
+    "logoutBtn",
+  ];
+
+  const topbarKeys = [
+    "topbar",
+    "topbarTitle",
+    "topbarViewContainer",
+    "topbarActions",
+    "searchInput",
+    "searchResults",
+  ];
+
+  const viewKeys = [
+    "main",
+    "appMain",
+    "mainContent",
+    "appContent",
+    "viewContainer",
+    "viewRoot",
+    "routerView",
+    "tablehead",
+    "tableHead",
+    "tableheadContainer",
+    "tableHeadContainer",
+  ];
+
+  if (sidebarKeys.includes(key)) {
+    if (key !== "sidebar") pushRoot(roots, dom?.sidebar);
+    pushRoot(roots, dom?.sidebarMount);
+    pushRoot(roots, dom?.appShell);
+  }
+
+  if (topbarKeys.includes(key)) {
+    if (key !== "topbar") pushRoot(roots, dom?.topbar);
+    pushRoot(roots, dom?.topbarMount);
+    pushRoot(roots, dom?.appShell);
+  }
+
+  if (viewKeys.includes(key)) {
+    if (!["main", "mainContent"].includes(key)) pushRoot(roots, dom?.mainContent);
+    pushRoot(roots, dom?.appContent);
+    pushRoot(roots, dom?.appShell);
+  }
+
+  pushRoot(roots, dom?.appShell);
+  pushRoot(roots, getDocumentRoot());
+
+  return roots;
+}
+
+function queryFirstInRoots(utils, selectors = [], roots = []) {
+  for (const root of toArray(roots)) {
+    const node = queryFirst(utils, selectors, root);
+
+    if (node) {
+      return node;
+    }
+  }
+
+  return null;
 }
 
 function resolveNode({
@@ -822,48 +922,24 @@ function resolveNode({
   root,
   force = false,
 }) {
-  const current =
-    dom?.[key] || null;
+  const current = dom?.[key] || null;
 
-  if (
-    shouldReuseNode(
-      current,
-      force
-    )
-  ) {
+  if (shouldReuseNode(current, force)) {
     return current;
   }
 
-  return queryFirst(
-    utils,
-    selectors,
-    root
-  );
+  const roots = getScopedRootsForKey(dom, key, root);
+
+  return queryFirstInRoots(utils, selectors, roots);
 }
 
 function safeSet(dom, key, value) {
-  if (
-    !dom ||
-    !key
-  ) {
+  if (!dom || !key) {
     return false;
   }
 
   try {
-    dom[key] =
-      value || null;
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function setAlias(dom, alias, sourceKey) {
-  try {
-    dom[alias] =
-      dom[sourceKey] || null;
-
+    dom[key] = value || null;
     return true;
   } catch {
     return false;
@@ -872,9 +948,7 @@ function setAlias(dom, alias, sourceKey) {
 
 function setValueAlias(dom, alias, value) {
   try {
-    dom[alias] =
-      value || null;
-
+    dom[alias] = value || null;
     return true;
   } catch {
     return false;
@@ -887,192 +961,90 @@ function setValueAlias(dom, alias, value) {
 
 export function createDomCache() {
   return {
-    version:
-      DOM_VERSION,
+    version: DOM_VERSION,
 
-    cachedAt:
-      "",
+    cachedAt: "",
+    cachedAtMs: 0,
+    cacheCount: 0,
 
-    cachedAtMs:
-      0,
+    html: null,
+    body: null,
 
-    cacheCount:
-      0,
+    skipLink: null,
 
-    html:
-      null,
+    themeColorMeta: null,
+    metaThemeColor: null,
+    colorSchemeMeta: null,
+    tileColorMeta: null,
 
-    body:
-      null,
+    appRoot: null,
+    layout: null,
 
-    skipLink:
-      null,
+    shell: null,
+    appShell: null,
 
-    themeColorMeta:
-      null,
+    loader: null,
+    appLoader: null,
 
-    colorSchemeMeta:
-      null,
+    sidebarMount: null,
+    topbarMount: null,
 
-    tileColorMeta:
-      null,
+    sidebar: null,
+    sidebarMenu: null,
+    sidebarRecents: null,
+    sidebarFooter: null,
 
-    appRoot:
-      null,
+    main: null,
+    appMain: null,
+    mainContent: null,
+    appContent: null,
 
-    layout:
-      null,
+    viewContainer: null,
+    viewRoot: null,
+    routerView: null,
 
-    shell:
-      null,
+    topbar: null,
+    topbarTitle: null,
+    topbarViewContainer: null,
+    topbarActions: null,
 
-    appShell:
-      null,
+    tablehead: null,
+    tableHead: null,
+    tableheadContainer: null,
+    tableHeadContainer: null,
 
-    loader:
-      null,
+    searchInput: null,
+    searchResults: null,
 
-    appLoader:
-      null,
+    userToggle: null,
+    userDropdown: null,
+    logoutBtn: null,
 
-    sidebarMount:
-      null,
+    sidebarToggle: null,
+    sidebarMobileToggle: null,
 
-    topbarMount:
-      null,
+    sidebarAvatar: null,
+    sidebarAvatarImage: null,
+    sidebarAvatarFallback: null,
+    sidebarName: null,
+    sidebarEmail: null,
+    sidebarRole: null,
 
-    sidebar:
-      null,
-
-    sidebarMenu:
-      null,
-
-    sidebarRecents:
-      null,
-
-    sidebarFooter:
-      null,
-
-    main:
-      null,
-
-    mainContent:
-      null,
-
-    appContent:
-      null,
-
-    viewContainer:
-      null,
-
-    viewRoot:
-      null,
-
-    routerView:
-      null,
-
-    topbar:
-      null,
-
-    topbarTitle:
-      null,
-
-    topbarViewContainer:
-      null,
-
-    topbarActions:
-      null,
-
-    tablehead:
-      null,
-
-    tableHead:
-      null,
-
-    tableheadContainer:
-      null,
-
-    tableHeadContainer:
-      null,
-
-    searchInput:
-      null,
-
-    searchResults:
-      null,
-
-    userToggle:
-      null,
-
-    userDropdown:
-      null,
-
-    logoutBtn:
-      null,
-
-    sidebarToggle:
-      null,
-
-    sidebarMobileToggle:
-      null,
-
-    sidebarAvatar:
-      null,
-
-    sidebarAvatarImage:
-      null,
-
-    sidebarAvatarFallback:
-      null,
-
-    sidebarName:
-      null,
-
-    sidebarEmail:
-      null,
-
-    sidebarRole:
-      null,
-
-    toastRoot:
-      null,
-
-    modalRoot:
-      null,
-
-    overlayRoot:
-      null,
-
-    tooltipRoot:
-      null,
-
-    drawerRoot:
-      null,
-
-    portalRoot:
-      null,
-
-    liveRegion:
-      null,
+    toastRoot: null,
+    modalRoot: null,
+    overlayRoot: null,
+    tooltipRoot: null,
+    drawerRoot: null,
+    portalRoot: null,
+    liveRegion: null,
 
     validation: {
-      ok:
-        false,
-
-      missing:
-        [],
-
-      recommendedMissing:
-        [],
-
-      deferredMissing:
-        [],
-
-      optionalMissing:
-        [],
-
-      warnings:
-        [],
+      ok: false,
+      missing: [],
+      recommendedMissing: [],
+      deferredMissing: [],
+      optionalMissing: [],
+      warnings: [],
     },
   };
 }
@@ -1086,90 +1058,35 @@ function applyAliases(dom) {
     return false;
   }
 
-  if (!dom.shell && dom.appShell) {
-    setAlias(
-      dom,
-      "shell",
-      "appShell"
-    );
+  if (!dom.shell && dom.appShell) setValueAlias(dom, "shell", dom.appShell);
+  if (!dom.appShell && dom.shell) setValueAlias(dom, "appShell", dom.shell);
+
+  if (!dom.appLoader && dom.loader) setValueAlias(dom, "appLoader", dom.loader);
+  if (!dom.loader && dom.appLoader) setValueAlias(dom, "loader", dom.appLoader);
+
+  if (!dom.metaThemeColor && dom.themeColorMeta) {
+    setValueAlias(dom, "metaThemeColor", dom.themeColorMeta);
   }
 
-  if (!dom.appShell && dom.shell) {
-    setValueAlias(
-      dom,
-      "appShell",
-      dom.shell
-    );
+  if (!dom.themeColorMeta && dom.metaThemeColor) {
+    setValueAlias(dom, "themeColorMeta", dom.metaThemeColor);
   }
 
-  if (!dom.appLoader && dom.loader) {
-    setAlias(
-      dom,
-      "appLoader",
-      "loader"
-    );
-  }
+  if (!dom.main && dom.mainContent) setValueAlias(dom, "main", dom.mainContent);
+  if (!dom.mainContent && dom.main) setValueAlias(dom, "mainContent", dom.main);
 
-  if (!dom.loader && dom.appLoader) {
-    setValueAlias(
-      dom,
-      "loader",
-      dom.appLoader
-    );
-  }
+  if (!dom.appMain && dom.mainContent) setValueAlias(dom, "appMain", dom.mainContent);
+  if (!dom.mainContent && dom.appMain) setValueAlias(dom, "mainContent", dom.appMain);
 
-  if (!dom.main && dom.mainContent) {
-    setAlias(
-      dom,
-      "main",
-      "mainContent"
-    );
-  }
+  if (!dom.viewRoot && dom.viewContainer) setValueAlias(dom, "viewRoot", dom.viewContainer);
+  if (!dom.routerView && dom.viewContainer) setValueAlias(dom, "routerView", dom.viewContainer);
 
-  if (!dom.mainContent && dom.main) {
-    setValueAlias(
-      dom,
-      "mainContent",
-      dom.main
-    );
-  }
-
-  if (!dom.viewRoot && dom.viewContainer) {
-    setAlias(
-      dom,
-      "viewRoot",
-      "viewContainer"
-    );
-  }
-
-  if (!dom.routerView && dom.viewContainer) {
-    setAlias(
-      dom,
-      "routerView",
-      "viewContainer"
-    );
-  }
-
-  if (!dom.viewContainer && dom.viewRoot) {
-    setValueAlias(
-      dom,
-      "viewContainer",
-      dom.viewRoot
-    );
-  }
-
-  if (!dom.viewContainer && dom.routerView) {
-    setValueAlias(
-      dom,
-      "viewContainer",
-      dom.routerView
-    );
-  }
+  if (!dom.viewContainer && dom.viewRoot) setValueAlias(dom, "viewContainer", dom.viewRoot);
+  if (!dom.viewContainer && dom.routerView) setValueAlias(dom, "viewContainer", dom.routerView);
 
   if (!dom.appContent && dom.viewContainer) {
     try {
-      const parent =
-        dom.viewContainer.parentElement;
+      const parent = dom.viewContainer.parentElement;
 
       if (
         parent &&
@@ -1179,69 +1096,31 @@ function applyAliases(dom) {
           parent.classList?.contains?.("app-content")
         )
       ) {
-        setValueAlias(
-          dom,
-          "appContent",
-          parent
-        );
+        setValueAlias(dom, "appContent", parent);
       }
     } catch {}
   }
 
-  if (!dom.layout && dom.appShell) {
-    setValueAlias(
-      dom,
-      "layout",
-      dom.appShell
-    );
-  }
+  if (!dom.layout && dom.appShell) setValueAlias(dom, "layout", dom.appShell);
 
-  if (!dom.tableHead && dom.tablehead) {
-    setAlias(
-      dom,
-      "tableHead",
-      "tablehead"
-    );
-  }
-
-  if (!dom.tablehead && dom.tableHead) {
-    setValueAlias(
-      dom,
-      "tablehead",
-      dom.tableHead
-    );
-  }
+  if (!dom.tableHead && dom.tablehead) setValueAlias(dom, "tableHead", dom.tablehead);
+  if (!dom.tablehead && dom.tableHead) setValueAlias(dom, "tablehead", dom.tableHead);
 
   if (!dom.tableHeadContainer && dom.tableheadContainer) {
-    setAlias(
-      dom,
-      "tableHeadContainer",
-      "tableheadContainer"
-    );
+    setValueAlias(dom, "tableHeadContainer", dom.tableheadContainer);
   }
 
   if (!dom.tableheadContainer && dom.tableHeadContainer) {
-    setValueAlias(
-      dom,
-      "tableheadContainer",
-      dom.tableHeadContainer
-    );
+    setValueAlias(dom, "tableheadContainer", dom.tableHeadContainer);
   }
 
   if (!dom.sidebarAvatarImage && dom.sidebarAvatar) {
     try {
-      const img =
-        dom.sidebarAvatar.matches?.("img")
-          ? dom.sidebarAvatar
-          : dom.sidebarAvatar.querySelector?.("img");
+      const img = dom.sidebarAvatar.matches?.("img")
+        ? dom.sidebarAvatar
+        : dom.sidebarAvatar.querySelector?.("img");
 
-      if (img) {
-        setValueAlias(
-          dom,
-          "sidebarAvatarImage",
-          img
-        );
-      }
+      if (img) setValueAlias(dom, "sidebarAvatarImage", img);
     } catch {}
   }
 
@@ -1263,22 +1142,16 @@ export function cacheDom({
     return dom;
   }
 
-  const startedAt =
-    Date.now();
+  const startedAt = Date.now();
 
-  safeSet(
-    dom,
-    "html",
-    document.documentElement || null
-  );
-
-  safeSet(
-    dom,
-    "body",
-    document.body || null
-  );
+  safeSet(dom, "html", document.documentElement || null);
+  safeSet(dom, "body", document.body || null);
 
   for (const [key, selectors] of Object.entries(DOM_SELECTORS)) {
+    if (key === "html" || key === "body") {
+      continue;
+    }
+
     safeSet(
       dom,
       key,
@@ -1291,38 +1164,24 @@ export function cacheDom({
         force,
       })
     );
+
+    applyAliases(dom);
   }
 
   applyAliases(dom);
 
-  const cachedAtMs =
-    Date.now();
+  const cachedAtMs = Date.now();
 
   try {
-    dom.cachedAtMs =
-      cachedAtMs;
-
-    dom.cachedAt =
-      safeIsoDate(cachedAtMs);
-
-    dom.cacheCount =
-      safeNumber(
-        dom.cacheCount,
-        0
-      ) + 1;
+    dom.cachedAtMs = cachedAtMs;
+    dom.cachedAt = safeIsoDate(cachedAtMs);
+    dom.cacheCount = safeNumber(dom.cacheCount, 0) + 1;
   } catch {}
 
-  safeEmit(
-    events,
-    DOM_EVENTS.cached,
-    {
-      durationMs:
-        cachedAtMs - startedAt,
-
-      snapshot:
-        getDomSnapshot(dom),
-    }
-  );
+  safeEmit(events, DOM_EVENTS.cached, {
+    durationMs: cachedAtMs - startedAt,
+    snapshot: getDomSnapshot(dom),
+  });
 
   return dom;
 }
@@ -1338,26 +1197,17 @@ function buildNodeList({
   optional = OPTIONAL_KEYS,
 } = {}) {
   return {
-    required:
-      uniqueList(required),
-
-    recommended:
-      uniqueList(recommended),
-
-    deferred:
-      uniqueList(deferred),
-
-    optional:
-      uniqueList(optional),
+    required: uniqueList(required),
+    recommended: uniqueList(recommended),
+    deferred: uniqueList(deferred),
+    optional: uniqueList(optional),
   };
 }
 
 function missingKeys(dom, keys = []) {
-  return safeArray(keys)
+  return toArray(keys)
     .filter((key) => !dom?.[key])
-    .map((key) =>
-      safeText(key, "")
-    )
+    .map((key) => safeText(key, ""))
     .filter(Boolean);
 }
 
@@ -1373,192 +1223,89 @@ function buildValidationWarnings({
 
   if (missing.includes("body")) {
     warnings.push({
-      code:
-        "BODY_MISSING",
-
-      level:
-        "error",
-
-      message:
-        "Falta document.body. El Core se ha ejecutado antes de que el DOM esté listo.",
+      code: "BODY_MISSING",
+      level: "error",
+      message: "Falta document.body. El Core se ha ejecutado antes de que el DOM esté listo.",
     });
   }
 
   if (missing.includes("viewContainer")) {
     warnings.push({
-      code:
-        "VIEW_CONTAINER_MISSING",
-
-      level:
-        "error",
-
-      message:
-        "Falta #view-container o equivalente. El Router no tendrá destino claro para pintar vistas.",
+      code: "VIEW_CONTAINER_MISSING",
+      level: "error",
+      message: "Falta #view-container o equivalente. El Router no tendrá destino claro para pintar vistas.",
     });
   }
 
   if (missing.includes("mainContent")) {
     warnings.push({
-      code:
-        "MAIN_CONTENT_MISSING",
-
-      level:
-        "error",
-
-      message:
-        "Falta #main-content o equivalente. El layout principal queda incompleto.",
+      code: "MAIN_CONTENT_MISSING",
+      level: "error",
+      message: "Falta #main-content o equivalente. El layout principal queda incompleto.",
     });
   }
 
   if (recommendedMissing.includes("loader")) {
     warnings.push({
-      code:
-        "LOADER_MISSING",
-
-      level:
-        "warning",
-
-      message:
-        "No se encontró #app-loader. loader.js deberá crear fallback si aplica.",
+      code: "LOADER_MISSING",
+      level: "warning",
+      message: "No se encontró #app-loader. loader.js deberá crear fallback si aplica.",
     });
   }
 
   if (recommendedMissing.includes("appShell")) {
     warnings.push({
-      code:
-        "APP_SHELL_MISSING",
-
-      level:
-        "warning",
-
-      message:
-        "No se encontró #app-shell. El shell puede funcionar, pero shell.js tendrá menos control visual.",
+      code: "APP_SHELL_MISSING",
+      level: "warning",
+      message: "No se encontró #app-shell. El shell puede funcionar, pero shell.js tendrá menos control visual.",
     });
   }
 
   if (recommendedMissing.includes("appContent")) {
     warnings.push({
-      code:
-        "APP_CONTENT_MISSING",
-
-      level:
-        "warning",
-
-      message:
-        "No se encontró #app-content. El Router puede pintar en #view-container, pero el shell queda menos estructurado.",
+      code: "APP_CONTENT_MISSING",
+      level: "warning",
+      message: "No se encontró #app-content. El Router puede pintar en #view-container, pero el shell queda menos estructurado.",
     });
   }
 
   if (recommendedMissing.includes("sidebarMount")) {
     warnings.push({
-      code:
-        "SIDEBAR_MOUNT_MISSING",
-
-      level:
-        "warning",
-
-      message:
-        "No se encontró #sidebar-mount. SidebarUI puede necesitar crear o localizar un mount alternativo.",
+      code: "SIDEBAR_MOUNT_MISSING",
+      level: "warning",
+      message: "No se encontró #sidebar-mount. SidebarUI puede necesitar crear o localizar un mount alternativo.",
     });
   }
 
   if (recommendedMissing.includes("topbarMount")) {
     warnings.push({
-      code:
-        "TOPBAR_MOUNT_MISSING",
-
-      level:
-        "warning",
-
-      message:
-        "No se encontró #topbar-mount. TopbarUI puede necesitar crear o localizar un mount alternativo.",
+      code: "TOPBAR_MOUNT_MISSING",
+      level: "warning",
+      message: "No se encontró #topbar-mount. TopbarUI puede necesitar crear o localizar un mount alternativo.",
     });
   }
 
-  if (
-    dom?.mainContent &&
-    dom?.viewContainer &&
-    dom.mainContent === dom.viewContainer
-  ) {
+  if (dom?.mainContent && dom?.viewContainer && dom.mainContent === dom.viewContainer) {
     warnings.push({
-      code:
-        "MAIN_AND_VIEW_SAME_NODE",
-
-      level:
-        "warning",
-
-      message:
-        "mainContent y viewContainer apuntan al mismo nodo. Es válido, pero el Router podría reemplazar demasiado layout si no hay contenedor interno.",
+      code: "MAIN_AND_VIEW_SAME_NODE",
+      level: "warning",
+      message: "mainContent y viewContainer apuntan al mismo nodo. Es válido, pero el Router podría reemplazar demasiado layout si no hay contenedor interno.",
     });
   }
 
-  if (
-    includeDeferred &&
-    warnDeferred &&
-    deferredMissing.includes("sidebar")
-  ) {
+  if (includeDeferred && warnDeferred && deferredMissing.includes("sidebar")) {
     warnings.push({
-      code:
-        "SIDEBAR_DEFERRED_MISSING",
-
-      level:
-        "info",
-
-      message:
-        "No se encontró sidebar real. Es correcto durante el boot inicial si SidebarUI lo monta dinámicamente.",
+      code: "SIDEBAR_DEFERRED_MISSING",
+      level: "info",
+      message: "No se encontró sidebar real. Es correcto durante el boot inicial si SidebarUI lo monta dinámicamente.",
     });
   }
 
-  if (
-    includeDeferred &&
-    warnDeferred &&
-    deferredMissing.includes("topbar")
-  ) {
+  if (includeDeferred && warnDeferred && deferredMissing.includes("topbar")) {
     warnings.push({
-      code:
-        "TOPBAR_DEFERRED_MISSING",
-
-      level:
-        "info",
-
-      message:
-        "No se encontró topbar real. Es correcto durante el boot inicial si TopbarUI lo monta dinámicamente.",
-    });
-  }
-
-  if (
-    dom?.sidebar &&
-    !dom?.sidebarMenu &&
-    includeDeferred &&
-    warnDeferred
-  ) {
-    warnings.push({
-      code:
-        "SIDEBAR_MENU_DEFERRED_MISSING",
-
-      level:
-        "info",
-
-      message:
-        "Existe sidebar pero no sidebarMenu. Puede ser correcto si el menú se monta en una fase posterior.",
-    });
-  }
-
-  if (
-    dom?.topbar &&
-    !dom?.topbarTitle &&
-    includeDeferred &&
-    warnDeferred
-  ) {
-    warnings.push({
-      code:
-        "TOPBAR_TITLE_DEFERRED_MISSING",
-
-      level:
-        "info",
-
-      message:
-        "Existe topbar pero no topbarTitle. Puede ser correcto si el título se monta en una fase posterior.",
+      code: "TOPBAR_DEFERRED_MISSING",
+      level: "info",
+      message: "No se encontró topbar real. Es correcto durante el boot inicial si TopbarUI lo monta dinámicamente.",
     });
   }
 
@@ -1574,82 +1321,45 @@ function buildValidation({
   includeDeferred = false,
   warnDeferred = false,
 } = {}) {
-  const lists =
-    buildNodeList({
-      required,
-      recommended,
-      deferred,
-      optional,
-    });
+  const lists = buildNodeList({
+    required,
+    recommended,
+    deferred,
+    optional,
+  });
 
-  const missing =
-    missingKeys(
-      dom,
-      lists.required
-    );
+  const missing = missingKeys(dom, lists.required);
+  const recommendedMissing = missingKeys(dom, lists.recommended);
 
-  const recommendedMissing =
-    missingKeys(
-      dom,
-      lists.recommended
-    );
+  const deferredMissing = includeDeferred
+    ? missingKeys(dom, lists.deferred)
+    : [];
 
-  const deferredMissing =
-    includeDeferred
-      ? missingKeys(
-          dom,
-          lists.deferred
-        )
-      : [];
+  const optionalMissing = missingKeys(dom, lists.optional);
 
-  const optionalMissing =
-    missingKeys(
-      dom,
-      lists.optional
-    );
-
-  const warnings =
-    buildValidationWarnings({
-      dom,
-      missing,
-      recommendedMissing,
-      deferredMissing,
-      includeDeferred,
-      warnDeferred,
-    });
+  const warnings = buildValidationWarnings({
+    dom,
+    missing,
+    recommendedMissing,
+    deferredMissing,
+    includeDeferred,
+    warnDeferred,
+  });
 
   return {
-    ok:
-      missing.length === 0,
-
+    ok: missing.length === 0,
     missing,
-
     recommendedMissing,
-
     deferredMissing,
-
     optionalMissing,
-
     warnings,
-
     meta: {
-      requiredKeys:
-        lists.required,
-
-      recommendedKeys:
-        lists.recommended,
-
-      deferredUiKeys:
-        lists.deferred,
-
-      optionalKeys:
-        lists.optional,
-
-      includeDeferred:
-        Boolean(includeDeferred),
-
-      warnDeferred:
-        Boolean(warnDeferred),
+      requiredKeys: lists.required,
+      recommendedKeys: lists.recommended,
+      deferredUiKeys: lists.deferred,
+      optionalKeys: lists.optional,
+      includeDeferred: Boolean(includeDeferred),
+      warnDeferred: Boolean(warnDeferred),
     },
   };
 }
@@ -1668,94 +1378,55 @@ export function validateRequiredDom({
   log = true,
   logRecommended = false,
 } = {}) {
-  const validation =
-    buildValidation({
-      dom,
-      required,
-      recommended,
-      deferred,
-      optional,
-      includeDeferred,
-      warnDeferred,
-    });
+  const validation = buildValidation({
+    dom,
+    required,
+    recommended,
+    deferred,
+    optional,
+    includeDeferred,
+    warnDeferred,
+  });
 
   try {
-    if (dom) {
-      dom.validation =
-        validation;
-    }
+    if (dom) dom.validation = validation;
   } catch {}
 
-  if (
-    log &&
-    validation.missing.length > 0
-  ) {
-    safeWarn(
-      utils,
-      "Faltan nodos requeridos del layout:",
-      validation.missing
-    );
+  if (log && validation.missing.length > 0) {
+    safeWarn(utils, "Faltan nodos requeridos del layout:", validation.missing);
   }
 
-  /*
-    Por defecto NO gritamos recommended missing durante Core.init().
-    Son útiles en snapshot/diagnóstico, pero no deben ensuciar boot.
-  */
-  if (
-    log &&
-    logRecommended &&
-    validation.recommendedMissing.length > 0
-  ) {
-    safeWarn(
-      utils,
-      "Faltan nodos recomendados del layout:",
-      validation.recommendedMissing
-    );
+  if (log && logRecommended && validation.recommendedMissing.length > 0) {
+    safeWarn(utils, "Faltan nodos recomendados del layout:", validation.recommendedMissing);
   }
 
-  if (
-    log &&
-    includeDeferred &&
-    warnDeferred &&
-    validation.deferredMissing.length > 0
-  ) {
-    safeLog(
-      utils,
-      "Nodos UI diferidos aún no montados:",
-      validation.deferredMissing
-    );
+  if (log && includeDeferred && warnDeferred && validation.deferredMissing.length > 0) {
+    safeLog(utils, "Nodos UI diferidos aún no montados:", validation.deferredMissing);
   }
 
   if (emit) {
     safeEmit(
       events,
-      validation.ok
-        ? DOM_EVENTS.valid
-        : DOM_EVENTS.invalid,
+      validation.ok ? DOM_EVENTS.valid : DOM_EVENTS.invalid,
       {
         validation,
-        snapshot:
-          getDomSnapshot(dom),
+        snapshot: getDomSnapshot(dom),
       }
     );
   }
 
   /*
-    Compatibilidad legacy:
-    AppCore.safeValidateRequiredDom() puede esperar array de missing.
+    Compat legacy:
+    Core.safeValidateRequiredDom() puede esperar array de missing.
   */
   return validation.missing;
 }
 
 export function validateRequiredDomDetailed(options = {}) {
-  const validation =
-    buildValidation(options);
+  const validation = buildValidation(options);
 
   try {
-    if (options?.dom) {
-      options.dom.validation =
-        validation;
-    }
+    if (options?.dom) options.dom.validation = validation;
   } catch {}
 
   return validation;
@@ -1766,20 +1437,15 @@ export function validateRequiredDomDetailed(options = {}) {
 ========================================================= */
 
 export function getDomNode(dom, key = "", fallback = null) {
-  const cleanKey =
-    safeText(key, "");
+  const cleanKey = safeText(key, "");
 
   if (!cleanKey) {
     return fallback;
   }
 
-  const node =
-    dom?.[cleanKey] || null;
+  const node = dom?.[cleanKey] || null;
 
-  if (
-    node &&
-    isNodeConnected(node)
-  ) {
+  if (node && isNodeConnected(node)) {
     return node;
   }
 
@@ -1787,18 +1453,13 @@ export function getDomNode(dom, key = "", fallback = null) {
 }
 
 export function setDomNode(dom, key = "", node = null) {
-  const cleanKey =
-    safeText(key, "");
+  const cleanKey = safeText(key, "");
 
   if (!cleanKey) {
     return false;
   }
 
-  return safeSet(
-    dom,
-    cleanKey,
-    node
-  );
+  return safeSet(dom, cleanKey, node);
 }
 
 export function refreshDomNode({
@@ -1808,35 +1469,22 @@ export function refreshDomNode({
   root = null,
   force = true,
 } = {}) {
-  const cleanKey =
-    safeText(key, "");
+  const cleanKey = safeText(key, "");
 
-  if (
-    !dom ||
-    !cleanKey ||
-    !DOM_SELECTORS[cleanKey]
-  ) {
+  if (!dom || !cleanKey || !DOM_SELECTORS[cleanKey]) {
     return null;
   }
 
-  const node =
-    resolveNode({
-      dom,
-      key:
-        cleanKey,
-      utils,
-      selectors:
-        DOM_SELECTORS[cleanKey],
-      root,
-      force,
-    });
-
-  safeSet(
+  const node = resolveNode({
     dom,
-    cleanKey,
-    node
-  );
+    key: cleanKey,
+    utils,
+    selectors: DOM_SELECTORS[cleanKey],
+    root,
+    force,
+  });
 
+  safeSet(dom, cleanKey, node);
   applyAliases(dom);
 
   return node;
@@ -1851,15 +1499,14 @@ export function refreshDomNodes({
 } = {}) {
   const result = {};
 
-  for (const key of safeArray(keys)) {
-    result[key] =
-      refreshDomNode({
-        dom,
-        utils,
-        key,
-        root,
-        force,
-      });
+  for (const key of toArray(keys)) {
+    result[key] = refreshDomNode({
+      dom,
+      utils,
+      key,
+      root,
+      force,
+    });
   }
 
   return result;
@@ -1874,8 +1521,7 @@ export function refreshDeferredDomNodes({
   return refreshDomNodes({
     dom,
     utils,
-    keys:
-      DEFERRED_UI_KEYS,
+    keys: DEFERRED_UI_KEYS,
     root,
     force,
   });
@@ -1935,26 +1581,20 @@ export function ensureFreshDom({
     return dom;
   }
 
-  const finalKeys =
-    safeArray(keys).length
-      ? safeArray(keys)
-      : uniqueList([
-          ...REQUIRED_KEYS,
-          ...RECOMMENDED_KEYS,
-          ...DEFERRED_UI_KEYS,
-          ...OPTIONAL_KEYS,
-        ]);
+  const finalKeys = toArray(keys).length
+    ? toArray(keys)
+    : uniqueList([
+        ...REQUIRED_KEYS,
+        ...RECOMMENDED_KEYS,
+        ...DEFERRED_UI_KEYS,
+        ...OPTIONAL_KEYS,
+      ]);
 
-  const staleKeys =
-    finalKeys.filter((key) => {
-      const node =
-        dom?.[key];
+  const staleKeys = finalKeys.filter((key) => {
+    const node = dom?.[key];
 
-      return (
-        node &&
-        !isNodeConnected(node)
-      );
-    });
+    return node && !isNodeConnected(node);
+  });
 
   if (!staleKeys.length) {
     return dom;
@@ -1963,23 +1603,15 @@ export function ensureFreshDom({
   refreshDomNodes({
     dom,
     utils,
-    keys:
-      staleKeys,
+    keys: staleKeys,
     root,
-    force:
-      true,
+    force: true,
   });
 
-  safeEmit(
-    events,
-    DOM_EVENTS.refreshedStale,
-    {
-      keys:
-        staleKeys,
-      snapshot:
-        getDomSnapshot(dom),
-    }
-  );
+  safeEmit(events, DOM_EVENTS.refreshedStale, {
+    keys: staleKeys,
+    snapshot: getDomSnapshot(dom),
+  });
 
   return dom;
 }
@@ -1990,62 +1622,34 @@ export function clearDomCache(dom, events = null) {
   }
 
   for (const key of Object.keys(dom)) {
-    if (
-      key === "version" ||
-      key === "cacheCount"
-    ) {
+    if (key === "version" || key === "cacheCount") {
       continue;
     }
 
     if (key === "validation") {
-      dom.validation =
-        {
-          ok:
-            false,
-
-          missing:
-            [],
-
-          recommendedMissing:
-            [],
-
-          deferredMissing:
-            [],
-
-          optionalMissing:
-            [],
-
-          warnings:
-            [],
-        };
+      dom.validation = {
+        ok: false,
+        missing: [],
+        recommendedMissing: [],
+        deferredMissing: [],
+        optionalMissing: [],
+        warnings: [],
+      };
 
       continue;
     }
 
-    if (
-      key === "cachedAt" ||
-      key === "cachedAtMs"
-    ) {
-      dom[key] =
-        key === "cachedAt"
-          ? ""
-          : 0;
-
+    if (key === "cachedAt" || key === "cachedAtMs") {
+      dom[key] = key === "cachedAt" ? "" : 0;
       continue;
     }
 
-    dom[key] =
-      null;
+    dom[key] = null;
   }
 
-  safeEmit(
-    events,
-    DOM_EVENTS.cleared,
-    {
-      at:
-        safeIsoDate(),
-    }
-  );
+  safeEmit(events, DOM_EVENTS.cleared, {
+    at: safeIsoDate(),
+  });
 
   return true;
 }
@@ -2058,9 +1662,7 @@ export function getHtml(dom = {}) {
   return getDomNode(
     dom,
     "html",
-    isBrowser()
-      ? document.documentElement
-      : null
+    isBrowser() ? document.documentElement : null
   );
 }
 
@@ -2068,9 +1670,7 @@ export function getBody(dom = {}) {
   return getDomNode(
     dom,
     "body",
-    isBrowser()
-      ? document.body
-      : null
+    isBrowser() ? document.body : null
   );
 }
 
@@ -2078,11 +1678,7 @@ export function getAppShell(dom = {}) {
   return getDomNode(
     dom,
     "appShell",
-    getDomNode(
-      dom,
-      "shell",
-      null
-    )
+    getDomNode(dom, "shell", null)
   );
 }
 
@@ -2090,11 +1686,7 @@ export function getMainContent(dom = {}) {
   return getDomNode(
     dom,
     "mainContent",
-    getDomNode(
-      dom,
-      "main",
-      null
-    )
+    getDomNode(dom, "main", null)
   );
 }
 
@@ -2105,49 +1697,29 @@ export function getViewContainer(dom = {}) {
     getDomNode(
       dom,
       "viewRoot",
-      getDomNode(
-        dom,
-        "routerView",
-        null
-      )
+      getDomNode(dom, "routerView", null)
     )
   );
 }
 
 export function getAppContent(dom = {}) {
-  return getDomNode(
-    dom,
-    "appContent",
-    null
-  );
+  return getDomNode(dom, "appContent", null);
 }
 
 export function getLoader(dom = {}) {
   return getDomNode(
     dom,
     "loader",
-    getDomNode(
-      dom,
-      "appLoader",
-      null
-    )
+    getDomNode(dom, "appLoader", null)
   );
 }
 
 export function getSidebarMount(dom = {}) {
-  return getDomNode(
-    dom,
-    "sidebarMount",
-    null
-  );
+  return getDomNode(dom, "sidebarMount", null);
 }
 
 export function getTopbarMount(dom = {}) {
-  return getDomNode(
-    dom,
-    "topbarMount",
-    null
-  );
+  return getDomNode(dom, "topbarMount", null);
 }
 
 /* =========================================================
@@ -2157,247 +1729,161 @@ export function getTopbarMount(dom = {}) {
 function getElementSnapshot(el) {
   if (!el) {
     return {
-      exists:
-        false,
+      exists: false,
     };
   }
 
   let className = "";
 
   try {
-    className =
-      typeof el.className === "string"
-        ? el.className
-        : safeText(
-            el.className?.baseVal,
-            ""
-          );
+    className = typeof el.className === "string"
+      ? el.className
+      : safeText(el.className?.baseVal, "");
   } catch {}
 
   let dataset = {};
 
   try {
-    dataset =
-      {
-        ...el.dataset,
-      };
+    dataset = { ...el.dataset };
   } catch {
-    dataset =
-      {};
+    dataset = {};
   }
 
   let text = "";
 
   try {
-    text =
-      safeText(
-        el.textContent,
-        ""
-      );
+    text = safeText(el.textContent, "");
   } catch {}
 
   let tag = "";
 
   try {
-    tag =
-      safeText(
-        el.tagName,
-        ""
-      ).toLowerCase();
+    tag = safeText(el.tagName, "").toLowerCase();
   } catch {}
 
   let nodeName = "";
 
   try {
-    nodeName =
-      safeText(
-        el.nodeName,
-        ""
-      );
+    nodeName = safeText(el.nodeName, "");
   } catch {}
 
   return {
-    exists:
-      true,
+    exists: true,
 
     tag,
-
     nodeName,
 
-    id:
-      safeText(
-        el.id,
-        ""
-      ),
-
+    id: safeText(el.id, ""),
     className,
 
-    role:
-      safeText(
-        el.getAttribute?.("role"),
-        ""
-      ),
+    role: safeText(el.getAttribute?.("role"), ""),
 
-    hidden:
-      Boolean(el.hidden),
+    hidden: Boolean(el.hidden),
+    connected: isNodeConnected(el),
 
-    connected:
-      isNodeConnected(el),
+    ariaHidden: safeText(el.getAttribute?.("aria-hidden"), ""),
+    ariaBusy: safeText(el.getAttribute?.("aria-busy"), ""),
+    ariaExpanded: safeText(el.getAttribute?.("aria-expanded"), ""),
 
-    ariaHidden:
-      safeText(
-        el.getAttribute?.("aria-hidden"),
-        ""
-      ),
+    dataRouteMode: safeText(el.getAttribute?.("data-route-mode"), ""),
+    dataShell: safeText(el.getAttribute?.("data-shell"), ""),
+    dataShellState: safeText(el.getAttribute?.("data-shell-state"), ""),
+    dataLoaderState: safeText(el.getAttribute?.("data-loader-state"), ""),
+    dataLoaderVisible: safeText(el.getAttribute?.("data-loader-visible"), ""),
 
-    ariaBusy:
-      safeText(
-        el.getAttribute?.("aria-busy"),
-        ""
-      ),
+    childCount: safeNumber(el.children?.length, 0),
 
-    ariaExpanded:
-      safeText(
-        el.getAttribute?.("aria-expanded"),
-        ""
-      ),
+    hasText: Boolean(text),
+    textPreview: text ? text.slice(0, 80) : "",
 
-    dataRouteMode:
-      safeText(
-        el.getAttribute?.("data-route-mode"),
-        ""
-      ),
-
-    dataShell:
-      safeText(
-        el.getAttribute?.("data-shell"),
-        ""
-      ),
-
-    dataShellState:
-      safeText(
-        el.getAttribute?.("data-shell-state"),
-        ""
-      ),
-
-    dataLoaderState:
-      safeText(
-        el.getAttribute?.("data-loader-state"),
-        ""
-      ),
-
-    dataLoaderVisible:
-      safeText(
-        el.getAttribute?.("data-loader-visible"),
-        ""
-      ),
-
-    childCount:
-      safeNumber(
-        el.children?.length,
-        0
-      ),
-
-    hasText:
-      Boolean(text),
-
-    textPreview:
-      text
-        ? text.slice(0, 80)
-        : "",
-
-    datasetKeys:
-      Object.keys(dataset),
+    datasetKeys: Object.keys(dataset),
   };
 }
 
 function buildExistsMap(dom = {}) {
-  const keys =
-    uniqueList([
-      ...REQUIRED_KEYS,
-      ...RECOMMENDED_KEYS,
-      ...DEFERRED_UI_KEYS,
-      ...OPTIONAL_KEYS,
-      "shell",
-      "appLoader",
-      "viewRoot",
-      "routerView",
-    ]);
+  const keys = uniqueList([
+    ...REQUIRED_KEYS,
+    ...RECOMMENDED_KEYS,
+    ...DEFERRED_UI_KEYS,
+    ...OPTIONAL_KEYS,
+    "shell",
+    "appLoader",
+    "appMain",
+    "viewRoot",
+    "routerView",
+  ]);
 
   const output = {};
 
   for (const key of keys) {
-    output[key] =
-      Boolean(dom?.[key]);
+    output[key] = Boolean(dom?.[key]);
   }
 
   return output;
 }
 
 function buildNodeSnapshots(dom = {}) {
-  const keys =
-    uniqueList([
-      "html",
-      "body",
-      "skipLink",
-      "themeColorMeta",
-      "colorSchemeMeta",
-      "tileColorMeta",
-      "appRoot",
-      "layout",
-      "shell",
-      "appShell",
-      "loader",
-      "appLoader",
-      "sidebarMount",
-      "topbarMount",
-      "sidebar",
-      "sidebarMenu",
-      "sidebarRecents",
-      "sidebarFooter",
-      "main",
-      "mainContent",
-      "appContent",
-      "viewContainer",
-      "viewRoot",
-      "routerView",
-      "topbar",
-      "topbarTitle",
-      "topbarViewContainer",
-      "topbarActions",
-      "tablehead",
-      "tableHead",
-      "tableheadContainer",
-      "tableHeadContainer",
-      "searchInput",
-      "searchResults",
-      "userToggle",
-      "userDropdown",
-      "logoutBtn",
-      "sidebarToggle",
-      "sidebarMobileToggle",
-      "sidebarAvatar",
-      "sidebarAvatarImage",
-      "sidebarAvatarFallback",
-      "sidebarName",
-      "sidebarEmail",
-      "sidebarRole",
-      "toastRoot",
-      "modalRoot",
-      "overlayRoot",
-      "tooltipRoot",
-      "drawerRoot",
-      "portalRoot",
-      "liveRegion",
-    ]);
+  const keys = uniqueList([
+    "html",
+    "body",
+    "skipLink",
+    "themeColorMeta",
+    "metaThemeColor",
+    "colorSchemeMeta",
+    "tileColorMeta",
+    "appRoot",
+    "layout",
+    "shell",
+    "appShell",
+    "loader",
+    "appLoader",
+    "sidebarMount",
+    "topbarMount",
+    "sidebar",
+    "sidebarMenu",
+    "sidebarRecents",
+    "sidebarFooter",
+    "main",
+    "appMain",
+    "mainContent",
+    "appContent",
+    "viewContainer",
+    "viewRoot",
+    "routerView",
+    "topbar",
+    "topbarTitle",
+    "topbarViewContainer",
+    "topbarActions",
+    "tablehead",
+    "tableHead",
+    "tableheadContainer",
+    "tableHeadContainer",
+    "searchInput",
+    "searchResults",
+    "userToggle",
+    "userDropdown",
+    "logoutBtn",
+    "sidebarToggle",
+    "sidebarMobileToggle",
+    "sidebarAvatar",
+    "sidebarAvatarImage",
+    "sidebarAvatarFallback",
+    "sidebarName",
+    "sidebarEmail",
+    "sidebarRole",
+    "toastRoot",
+    "modalRoot",
+    "overlayRoot",
+    "tooltipRoot",
+    "drawerRoot",
+    "portalRoot",
+    "liveRegion",
+  ]);
 
   const output = {};
 
   for (const key of keys) {
-    output[key] =
-      getElementSnapshot(
-        dom?.[key]
-      );
+    output[key] = getElementSnapshot(dom?.[key]);
   }
 
   return output;
@@ -2405,62 +1891,40 @@ function buildNodeSnapshots(dom = {}) {
 
 export function getDomSnapshot(dom = {}) {
   return {
-    version:
-      dom?.version || DOM_VERSION,
+    version: dom?.version || DOM_VERSION,
 
-    cachedAt:
-      dom?.cachedAt || "",
+    cachedAt: dom?.cachedAt || "",
+    cachedAtMs: dom?.cachedAtMs || 0,
+    cacheCount: safeNumber(dom?.cacheCount, 0),
 
-    cachedAtMs:
-      dom?.cachedAtMs || 0,
+    browser: isBrowser(),
 
-    cacheCount:
-      safeNumber(
-        dom?.cacheCount,
-        0
-      ),
-
-    browser:
-      isBrowser(),
-
-    validation:
-      dom?.validation || null,
+    validation: dom?.validation || null,
 
     groups: {
-      required:
-        REQUIRED_KEYS.map((key) => ({
-          key,
-          exists:
-            Boolean(dom?.[key]),
-        })),
+      required: REQUIRED_KEYS.map((key) => ({
+        key,
+        exists: Boolean(dom?.[key]),
+      })),
 
-      recommended:
-        RECOMMENDED_KEYS.map((key) => ({
-          key,
-          exists:
-            Boolean(dom?.[key]),
-        })),
+      recommended: RECOMMENDED_KEYS.map((key) => ({
+        key,
+        exists: Boolean(dom?.[key]),
+      })),
 
-      deferred:
-        DEFERRED_UI_KEYS.map((key) => ({
-          key,
-          exists:
-            Boolean(dom?.[key]),
-        })),
+      deferred: DEFERRED_UI_KEYS.map((key) => ({
+        key,
+        exists: Boolean(dom?.[key]),
+      })),
 
-      optional:
-        OPTIONAL_KEYS.map((key) => ({
-          key,
-          exists:
-            Boolean(dom?.[key]),
-        })),
+      optional: OPTIONAL_KEYS.map((key) => ({
+        key,
+        exists: Boolean(dom?.[key]),
+      })),
     },
 
-    nodes:
-      buildNodeSnapshots(dom),
-
-    exists:
-      buildExistsMap(dom),
+    nodes: buildNodeSnapshots(dom),
+    exists: buildExistsMap(dom),
   };
 }
 
@@ -2473,35 +1937,17 @@ export function findDomCandidates({
   key = "",
   root = null,
 } = {}) {
-  const cleanKey =
-    safeText(key, "");
+  const cleanKey = safeText(key, "");
+  const selectors = DOM_SELECTORS[cleanKey] || [];
 
-  const selectors =
-    DOM_SELECTORS[cleanKey] || [];
-
-  return selectors.map((selector) => {
-    const nodes =
-      safeQsa(
-        utils,
-        selector,
-        root
-      );
+  return toArray(selectors).map((selector) => {
+    const nodes = safeQsa(utils, selector, root);
 
     return {
       selector,
-
-      count:
-        nodes.length,
-
-      first:
-        getElementSnapshot(
-          nodes[0] || null
-        ),
-
-      candidates:
-        nodes.slice(0, 8).map((node) =>
-          getElementSnapshot(node)
-        ),
+      count: nodes.length,
+      first: getElementSnapshot(nodes[0] || null),
+      candidates: nodes.slice(0, 8).map((node) => getElementSnapshot(node)),
     };
   });
 }
@@ -2513,48 +1959,33 @@ export function findAllDomCandidates({
   const output = {};
 
   for (const key of Object.keys(DOM_SELECTORS)) {
-    output[key] =
-      findDomCandidates({
-        utils,
-        key,
-        root,
-      });
+    output[key] = findDomCandidates({
+      utils,
+      key,
+      root,
+    });
   }
 
   return output;
 }
 
 export function getDomValidationSnapshot(dom = {}) {
-  const validation =
-    buildValidation({
-      dom,
-      includeDeferred:
-        true,
-      warnDeferred:
-        false,
-    });
+  const validation = buildValidation({
+    dom,
+    includeDeferred: true,
+    warnDeferred: false,
+  });
 
   return {
-    ok:
-      validation.ok,
+    ok: validation.ok,
 
-    missing:
-      validation.missing,
+    missing: validation.missing,
+    recommendedMissing: validation.recommendedMissing,
+    deferredMissing: validation.deferredMissing,
+    optionalMissing: validation.optionalMissing,
+    warnings: validation.warnings,
 
-    recommendedMissing:
-      validation.recommendedMissing,
-
-    deferredMissing:
-      validation.deferredMissing,
-
-    optionalMissing:
-      validation.optionalMissing,
-
-    warnings:
-      validation.warnings,
-
-    exists:
-      getDomSnapshot(dom).exists,
+    exists: getDomSnapshot(dom).exists,
   };
 }
 
@@ -2566,6 +1997,7 @@ export default {
   DOM_VERSION,
   DOM_EVENTS,
   DOM_SELECTORS,
+
   REQUIRED_KEYS,
   RECOMMENDED_KEYS,
   DEFERRED_UI_KEYS,
@@ -2576,6 +2008,8 @@ export default {
 
   validateRequiredDom,
   validateRequiredDomDetailed,
+
+  isNodeConnected,
 
   getDomNode,
   setDomNode,

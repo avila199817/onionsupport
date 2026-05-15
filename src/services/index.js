@@ -3,7 +3,7 @@
    Archivo: src/services/index.js
 
    ONION SUPPORT · HTTP SERVICE
-   CORE API CLIENT BRIDGE · AUTH SAFE · RETRY SAFE · LOADER SAFE · 15/10
+   CORE API CLIENT BRIDGE · AUTH SAFE · RETRY SAFE · LOADER SAFE · 16/10
 
    Responsabilidades:
    - Servicio HTTP público de la SPA.
@@ -42,9 +42,10 @@
    - sin doble logout
    - sin lógicas duplicadas
    - no refresca en login/refresh/logout/activation/reset/2FA público
-   - /api/auth/me, /auth/me y /me siguen siendo privados y pueden usar Authorization
+   - /api/auth/me, /auth/me, /api/me y /me siguen siendo privados y pueden usar Authorization
    - evita auto-logout si el error no pertenece a request privado autenticado
    - evita leak de respuesta completa en eventos
+   - evita recursión si AppCore.apiClient/AppCore.request apuntan a este Http service
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -108,16 +109,22 @@ export const Http = (() => {
   ======================================================= */
 
   const SERVICE_VERSION =
-    "15.0.0";
+    "16.0.0";
 
   const SERVICE_NAME =
     "http";
+
+  const SERVICE_ID =
+    "onion:http-service";
 
   const LOG_PREFIX =
     "[Http]";
 
   const DEFAULT_METHOD =
     "GET";
+
+  const DEFAULT_API_BASE =
+    "https://api.onionit.net";
 
   const DEFAULT_REQUEST_TIMEOUT_MS =
     0;
@@ -259,6 +266,7 @@ export const Http = (() => {
       "/auth/recover-password",
 
       "/auth/_health",
+      "/auth/health",
     ]);
 
   /*
@@ -290,6 +298,7 @@ export const Http = (() => {
       "/auth/recover-password",
 
       "/auth/_health",
+      "/auth/health",
     ]);
 
   const TECHNICAL_PUBLIC_SPA_PATHS =
@@ -300,6 +309,9 @@ export const Http = (() => {
       "/recover-password",
       "/password-reset",
       "/reset-password/confirm",
+      "/2fa",
+      "/otp",
+      "/mfa",
     ]);
 
   const PRIVATE_AUTH_ME_PATHS =
@@ -354,6 +366,10 @@ export const Http = (() => {
 
   const config = {
     ...HTTP_CONFIG,
+
+    apiBase:
+      HTTP_CONFIG?.apiBase ||
+      DEFAULT_API_BASE,
 
     /*
       Política de eventos:
@@ -591,6 +607,7 @@ export const Http = (() => {
           "ok",
           "on",
           "enabled",
+          "active",
         ].includes(clean)
       ) {
         return true;
@@ -603,6 +620,7 @@ export const Http = (() => {
           "no",
           "off",
           "disabled",
+          "inactive",
         ].includes(clean)
       ) {
         return false;
@@ -667,16 +685,169 @@ export const Http = (() => {
     return "http://localhost";
   }
 
+  function normalizeApiBase(value = "") {
+    const raw =
+      safeText(value, "");
+
+    if (
+      !raw ||
+      raw === "/"
+    ) {
+      return "";
+    }
+
+    if (
+      raw === "/api" ||
+      raw === "api"
+    ) {
+      return "";
+    }
+
+    if (!/^https?:\/\//i.test(raw)) {
+      return raw.replace(/\/+$/g, "");
+    }
+
+    try {
+      const parsed =
+        new URL(raw);
+
+      const origin =
+        parsed.origin.replace(/\/+$/g, "");
+
+      const pathname =
+        (parsed.pathname || "/")
+          .replace(/\/{2,}/g, "/")
+          .replace(/\/+$/g, "") ||
+        "/";
+
+      /*
+        apiBase debe ser origin-only cuando el path es /api.
+        Los endpoints ya llevan /api.
+      */
+      if (
+        pathname === "/" ||
+        pathname === "/api"
+      ) {
+        return origin;
+      }
+
+      return `${origin}${pathname}`.replace(/\/+$/g, "");
+    } catch {
+      return "";
+    }
+  }
+
   function getCoreApiBase() {
-    return (
+    const base =
       safeText(AppCore?.config?.apiBase, "") ||
+      safeText(AppCore?.config?.apiOrigin, "") ||
+      safeText(AppCore?.config?.apiUrl, "") ||
       safeText(AppCore?.config?.api?.baseUrl, "") ||
       safeText(AppCore?.config?.api?.base, "") ||
+      safeText(AppCore?.config?.api?.origin, "") ||
       safeText(config.apiBase, "") ||
       safeText(config.baseUrl, "") ||
-      ""
-    );
+      DEFAULT_API_BASE;
+
+    return normalizeApiBase(base) ||
+      DEFAULT_API_BASE;
   }
+
+  function defineHiddenValue(target, key, value) {
+    if (
+      !target ||
+      !key
+    ) {
+      return false;
+    }
+
+    try {
+      Object.defineProperty(
+        target,
+        key,
+        {
+          value,
+          configurable:
+            true,
+          enumerable:
+            false,
+          writable:
+            true,
+        }
+      );
+
+      return true;
+    } catch {}
+
+    try {
+      target[key] =
+        value;
+
+      return true;
+    } catch {}
+
+    return false;
+  }
+
+  function stampServiceIdentity(requestConfig = {}) {
+    if (!requestConfig || typeof requestConfig !== "object") {
+      return requestConfig;
+    }
+
+    defineHiddenValue(
+      requestConfig,
+      "__ONION_HTTP_SERVICE_ID__",
+      SERVICE_ID
+    );
+
+    defineHiddenValue(
+      requestConfig,
+      "__ONION_HTTP_SERVICE__",
+      api
+    );
+
+    defineHiddenValue(
+      requestConfig,
+      "httpService",
+      api
+    );
+
+    defineHiddenValue(
+      requestConfig,
+      "service",
+      api
+    );
+
+    defineHiddenValue(
+      requestConfig,
+      "serviceClient",
+      api
+    );
+
+    defineHiddenValue(
+      requestConfig,
+      "client",
+      api
+    );
+
+    defineHiddenValue(
+      requestConfig,
+      "serviceRequest",
+      request
+    );
+
+    defineHiddenValue(
+      requestConfig,
+      "httpRequest",
+      request
+    );
+
+    return requestConfig;
+  }
+
+  /* =======================================================
+     EVENT POLICY
+  ======================================================= */
 
   function shouldEmitLifecycleEvent(requestConfig = {}, type = "") {
     const cfg =
@@ -928,7 +1099,7 @@ export const Http = (() => {
     }
 
     if (
-      /password|secret|authorization|credential|cookie|bearer|jwt|otp|mfa|2fa/i.test(value)
+      /password|secret|authorization|credential|cookie|bearer|jwt|otp|mfa|2fa|csrf|xsrf/i.test(value)
     ) {
       return true;
     }
@@ -938,6 +1109,9 @@ export const Http = (() => {
     ) {
       return true;
     }
+
+    const compact =
+      value.replace(/[-:.]/g, "_");
 
     if (
       [
@@ -956,7 +1130,7 @@ export const Http = (() => {
         "session_id",
         "sessionuserid",
         "session_user_id",
-      ].includes(value.replace(/[-:.]/g, "_"))
+      ].includes(compact)
     ) {
       return true;
     }
@@ -989,7 +1163,7 @@ export const Http = (() => {
     return false;
   }
 
-  function sanitizePayload(value, depth = 0, keyHint = "") {
+  function sanitizePayload(value, depth = 0, keyHint = "", seen = new WeakSet()) {
     if (isSensitiveObjectKey(keyHint)) {
       return value
         ? "***"
@@ -1064,12 +1238,21 @@ export const Http = (() => {
           sanitizePayload(
             item,
             depth + 1,
-            keyHint
+            keyHint,
+            seen
           )
         );
     }
 
     if (isAnyObject(value)) {
+      try {
+        if (seen.has(value)) {
+          return "[Circular]";
+        }
+
+        seen.add(value);
+      } catch {}
+
       const output = {};
 
       for (const [key, item] of Object.entries(value).slice(0, 100)) {
@@ -1081,7 +1264,8 @@ export const Http = (() => {
             : sanitizePayload(
                 item,
                 depth + 1,
-                key
+                key,
+                seen
               );
       }
 
@@ -1381,7 +1565,8 @@ export const Http = (() => {
         parsed.pathname || raw
       )
         .replace(/\/{2,}/g, "/")
-        .replace(/\/$/, "") || "/";
+        .replace(/\/$/, "") ||
+        "/";
     } catch {}
 
     return safeLower(
@@ -1391,7 +1576,8 @@ export const Http = (() => {
         raw
     )
       .replace(/\/{2,}/g, "/")
-      .replace(/\/$/, "") || "/";
+      .replace(/\/$/, "") ||
+      "/";
   }
 
   function getComparableEndpointPaths(path = "") {
@@ -1600,7 +1786,10 @@ export const Http = (() => {
       return true;
     }
 
-    if (cfg.public === true || cfg.skipAuth === true) {
+    if (
+      cfg.public === true ||
+      cfg.skipAuth === true
+    ) {
       return false;
     }
 
@@ -1721,7 +1910,7 @@ export const Http = (() => {
         ])
       );
 
-    let ok =
+    let changed =
       false;
 
     for (const moduleName of names) {
@@ -1729,11 +1918,14 @@ export const Http = (() => {
         getRegisteredModule(moduleName);
 
       if (current === value) {
-        ok =
+        changed =
           true;
 
         continue;
       }
+
+      let aliasOk =
+        false;
 
       /*
         Preferimos registry directo para bridges internos: evita eventos
@@ -1745,11 +1937,11 @@ export const Http = (() => {
           value
         );
 
-        ok =
+        aliasOk =
           true;
       } catch {}
 
-      if (!ok) {
+      if (!aliasOk) {
         try {
           const result =
             AppCore?.modules?.register?.(
@@ -1771,14 +1963,17 @@ export const Http = (() => {
             );
 
           if (result !== false) {
-            ok =
+            aliasOk =
               true;
           }
         } catch {}
       }
+
+      changed =
+        changed || aliasOk;
     }
 
-    return ok;
+    return changed;
   }
 
   function bridgeLooksAttached() {
@@ -1836,6 +2031,12 @@ export const Http = (() => {
         AppCore.services.http =
           api;
 
+        AppCore.services.api =
+          api;
+
+        AppCore.services.apiClient =
+          api;
+
         attached =
           true;
       }
@@ -1850,6 +2051,8 @@ export const Http = (() => {
           "HTTP",
           "httpService",
           "HttpService",
+          "ApiClient",
+          "apiClient",
           SERVICE_NAME,
         ]
       )
@@ -2214,7 +2417,9 @@ export const Http = (() => {
           "http.service",
       });
 
-    return finalConfig;
+    return stampServiceIdentity(
+      finalConfig
+    );
   }
 
   async function prepareRequestConfig(method = "GET", path = "", options = {}) {
@@ -2261,6 +2466,11 @@ export const Http = (() => {
       requestConfig.apiBase ||
       getCoreApiBase();
 
+    requestConfig.timeout =
+      normalizeTimeout(
+        requestConfig.timeout
+      );
+
     if (isAuthMeEndpoint(requestConfig.path) && requestConfig.auth !== false) {
       requestConfig.auth =
         true;
@@ -2270,13 +2480,20 @@ export const Http = (() => {
 
       requestConfig.skipAuth =
         false;
+
+      requestConfig._skipAuthRefresh =
+        requestConfig._skipAuthRefresh === true
+          ? true
+          : false;
     }
 
     if (isBodylessMethod(requestConfig.method)) {
       delete requestConfig.body;
     }
 
-    return requestConfig;
+    return stampServiceIdentity(
+      requestConfig
+    );
   }
 
   /* =======================================================
@@ -2314,12 +2531,13 @@ export const Http = (() => {
     const requestId =
       requestConfig.requestId;
 
-    const refreshConfig = {
-      ...requestConfig,
+    const refreshConfig =
+      stampServiceIdentity({
+        ...requestConfig,
 
-      _authRefreshAttempted:
-        true,
-    };
+        _authRefreshAttempted:
+          true,
+      });
 
     state.refreshAttemptCount += 1;
     state.lastRefreshAt =
@@ -2374,18 +2592,19 @@ export const Http = (() => {
     if (!refreshed) {
       state.refreshFailureCount += 1;
 
-      const failedConfig = {
-        ...refreshConfig,
+      const failedConfig =
+        stampServiceIdentity({
+          ...refreshConfig,
 
-        _skipAuthRefresh:
-          true,
+          _skipAuthRefresh:
+            true,
 
-        _authRefreshFailed:
-          true,
+          _authRefreshFailed:
+            true,
 
-        _authRefreshSucceeded:
-          false,
-      };
+          _authRefreshSucceeded:
+            false,
+        });
 
       if (shouldEmitServiceEvent("refresh", failedConfig)) {
         safeEmit(
@@ -2429,23 +2648,25 @@ export const Http = (() => {
     }
 
     const replayConfig =
-      normalizePublicRequestConfig({
-        ...refreshConfig,
+      stampServiceIdentity(
+        normalizePublicRequestConfig({
+          ...refreshConfig,
 
-        requestId,
+          requestId,
 
-        _skipRetry:
-          true,
+          _skipRetry:
+            true,
 
-        _skipAuthRefresh:
-          true,
+          _skipAuthRefresh:
+            true,
 
-        _authRefreshSucceeded:
-          true,
+          _authRefreshSucceeded:
+            true,
 
-        _authRefreshFailed:
-          false,
-      });
+          _authRefreshFailed:
+            false,
+        })
+      );
 
     state.replayCount += 1;
     state.lastReplayAt =
@@ -3205,10 +3426,10 @@ export const Http = (() => {
           "application/json";
       }
 
-      return {
+      return stampServiceIdentity({
         ...cfg,
         headers,
-      };
+      });
     });
 
     useResponse((response) => {
@@ -3313,6 +3534,12 @@ export const Http = (() => {
       patch
     );
 
+    config.apiBase =
+      normalizeApiBase(
+        config.apiBase ||
+          DEFAULT_API_BASE
+      ) || DEFAULT_API_BASE;
+
     safeEmit(
       EVENTS.configUpdated,
       {
@@ -3354,6 +3581,9 @@ export const Http = (() => {
   function getConfig() {
     return sanitizePayload({
       ...config,
+
+      apiBase:
+        getCoreApiBase(),
     });
   }
 
@@ -3365,6 +3595,9 @@ export const Http = (() => {
     return sanitizePayload({
       service:
         SERVICE_NAME,
+
+      serviceId:
+        SERVICE_ID,
 
       version:
         SERVICE_VERSION,
@@ -3521,6 +3754,15 @@ export const Http = (() => {
 
         hasAuth:
           Boolean(Auth),
+
+        selfAsHttp:
+          Boolean(AppCore?.http === api || AppCore?.Http === api),
+
+        selfAsApiClient:
+          Boolean(AppCore?.apiClient === api),
+
+        selfAsRequest:
+          Boolean(AppCore?.request === request),
       },
 
       auth: {
@@ -3641,11 +3883,19 @@ export const Http = (() => {
   ======================================================= */
 
   const api = {
+    __ONION_HTTP_SERVICE__:
+      true,
+
+    __ONION_HTTP_SERVICE_ID__:
+      SERVICE_ID,
+
     SERVICE_VERSION,
     version:
       SERVICE_VERSION,
 
     SERVICE_NAME,
+    serviceName:
+      SERVICE_NAME,
 
     init,
 

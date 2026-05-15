@@ -65,132 +65,155 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const APP_EVENTS_VERSION = "15.0.0-extreme-pro";
+export const APP_EVENTS_VERSION =
+  "15.1.0-extreme-pro-no-storm";
 
-const EVENTS_SOURCE = "app:events";
+const EVENTS_SOURCE =
+  "app:events";
 
 const DEFAULT_SCOPE =
   APP_SCOPES?.events ||
   APP_SCOPE ||
   "app:events";
 
-const DEFAULT_ROUTE = "/";
+const DEFAULT_ROUTE =
+  "/";
 
-const TOAST_DEDUPE_MS = 1200;
-const LANG_RERENDER_DEDUPE_MS = 250;
-const ROUTER_RENDER_SYNC_DEDUPE_MS = 40;
-const UI_SYNC_DEDUPE_MS = 80;
-const THEME_SYNC_DEDUPE_MS = 120;
-const EVENT_EMIT_DEDUPE_MS = 80;
+const TOAST_DEDUPE_MS =
+  1200;
 
-const MAX_SANITIZE_DEPTH = 7;
-const MAX_SANITIZE_ARRAY = 100;
-const MAX_RECENT_EVENTS = 80;
+const LANG_RERENDER_DEDUPE_MS =
+  250;
 
-const EVENT_NAMES = Object.freeze({
-  appReady:
-    APP_EVENTS?.ready ||
-    "app:ready",
+const ROUTER_RENDER_SYNC_DEDUPE_MS =
+  40;
 
-  appUiReady:
-    APP_EVENTS?.uiReady ||
-    "app:ui:ready",
+const UI_SYNC_DEDUPE_MS =
+  80;
 
-  appUiRepair:
-    APP_EVENTS?.uiRepair ||
-    "app:ui:repair",
+const THEME_SYNC_DEDUPE_MS =
+  120;
 
-  appUiRepairRequest:
-    APP_EVENTS?.uiRepairRequest ||
-    "app:ui:repair-request",
+const EVENT_EMIT_DEDUPE_MS =
+  80;
 
-  appUserChange:
-    APP_EVENTS?.userChange ||
-    "app:user:change",
+const MAX_SANITIZE_DEPTH =
+  7;
 
-  /*
-    Referencia legacy.
-    AppEvents NO emite este evento.
-    Lo emite src/app/ui.js o el coordinador superior.
-  */
-  appUserUiSync:
-    APP_EVENTS?.userUiSync ||
-    "app:user-ui:sync",
+const MAX_SANITIZE_ARRAY =
+  100;
 
-  appEventsUiSynced:
-    "app:events:ui-synced",
+const MAX_RECENT_EVENTS =
+  80;
 
-  appRouteSynced:
-    APP_EVENTS?.routeSynced ||
-    "app:events:route-synced",
+const EVENT_NAMES =
+  Object.freeze({
+    appReady:
+      APP_EVENTS?.ready ||
+      "app:ready",
 
-  appSessionRestored:
-    APP_EVENTS?.sessionRestored ||
-    "app:session:restored",
+    appUiReady:
+      APP_EVENTS?.uiReady ||
+      "app:ui:ready",
 
-  appSessionCleared:
-    APP_EVENTS?.sessionCleared ||
-    "app:session:cleared",
+    appUiRepair:
+      APP_EVENTS?.uiRepair ||
+      "app:ui:repair",
 
-  appLangChange:
-    APP_EVENTS?.langChange ||
-    "app:lang:change",
+    appUiRepairRequest:
+      APP_EVENTS?.uiRepairRequest ||
+      "app:ui:repair-request",
 
-  appRouteChange:
-    APP_EVENTS?.routeChange ||
-    "app:route:change",
+    appUserChange:
+      APP_EVENTS?.userChange ||
+      "app:user:change",
 
-  appThemeChange:
-    APP_EVENTS?.themeChange ||
-    "app:theme:change",
+    /*
+      Referencia legacy.
+      AppEvents NO emite este evento.
+      Lo emite src/app/ui.js o el coordinador superior.
+    */
+    appUserUiSync:
+      APP_EVENTS?.userUiSync ||
+      "app:user-ui:sync",
 
-  onionThemeChange:
-    "onion:theme:change",
+    appEventsUiSynced:
+      "app:events:ui-synced",
 
-  legacyThemeChange:
-    "theme:change",
+    appRouteSynced:
+      APP_EVENTS?.routeSynced ||
+      "app:events:route-synced",
 
-  appEventsReady:
-    "app:events:ready",
+    appSessionRestored:
+      APP_EVENTS?.sessionRestored ||
+      "app:session:restored",
 
-  appEventsBound:
-    "app:events:bound",
+    appSessionCleared:
+      APP_EVENTS?.sessionCleared ||
+      "app:session:cleared",
 
-  appEventsUnbound:
-    "app:events:unbound",
+    appLangChange:
+      APP_EVENTS?.langChange ||
+      "app:lang:change",
 
-  appEventsError:
-    APP_EVENTS?.error ||
-    "app:events:error",
+    appRouteChange:
+      APP_EVENTS?.routeChange ||
+      "app:route:change",
 
-  authSessionRestored:
-    AUTH_EVENTS?.sessionRestored ||
-    "auth:session:restored",
+    appThemeChange:
+      APP_EVENTS?.themeChange ||
+      "app:theme:change",
 
-  authLoginSuccess:
-    AUTH_EVENTS?.loginSuccess ||
-    "auth:login:success",
+    onionThemeChange:
+      "onion:theme:change",
 
-  authLogout:
-    AUTH_EVENTS?.logout ||
-    "auth:logout",
+    legacyThemeChange:
+      "theme:change",
 
-  authLogoutSuccess:
-    AUTH_EVENTS?.logoutSuccess ||
-    "auth:logout:success",
+    appEventsReady:
+      "app:events:ready",
 
-  routerRendered:
-    ROUTER_EVENTS?.rendered ||
-    "router:rendered",
+    appEventsBound:
+      "app:events:bound",
 
-  routerAsyncComplete:
-    ROUTER_EVENTS?.asyncComplete ||
-    "router:render:async-complete",
+    appEventsUnbound:
+      "app:events:unbound",
 
-  routerShellState:
-    ROUTER_EVENTS?.shellState ||
-    "router:shell:state",
-});
+    /*
+      Deliberadamente NO usa APP_EVENTS.error si apunta a app:error.
+      Así evitamos bucles con error handlers globales.
+    */
+    appEventsError:
+      "app:events:error",
+
+    authSessionRestored:
+      AUTH_EVENTS?.sessionRestored ||
+      "auth:session:restored",
+
+    authLoginSuccess:
+      AUTH_EVENTS?.loginSuccess ||
+      "auth:login:success",
+
+    authLogout:
+      AUTH_EVENTS?.logout ||
+      "auth:logout",
+
+    authLogoutSuccess:
+      AUTH_EVENTS?.logoutSuccess ||
+      "auth:logout:success",
+
+    routerRendered:
+      ROUTER_EVENTS?.rendered ||
+      "router:rendered",
+
+    routerAsyncComplete:
+      ROUTER_EVENTS?.asyncComplete ||
+      "router:render:async-complete",
+
+    routerShellState:
+      ROUTER_EVENTS?.shellState ||
+      "router:shell:state",
+  });
 
 /*
   Métodos permitidos.
@@ -204,129 +227,175 @@ const EVENT_NAMES = Object.freeze({
   - mount
   - start
 */
-const SIDEBAR_LIGHT_USER_METHODS = Object.freeze([
-  "renderUser",
-  "refreshUser",
-  "updateUser",
-  "syncUser",
-]);
+const SIDEBAR_LIGHT_USER_METHODS =
+  Object.freeze([
+    "renderUser",
+    "refreshUser",
+    "updateUser",
+    "syncUser",
+  ]);
 
-const SIDEBAR_LIGHT_VISUAL_METHODS = Object.freeze([
-  "applyRoleVisibility",
-  "syncRouteAndIndicator",
-  "syncIndicator",
-  "updateToggleLabel",
-]);
+const SIDEBAR_LIGHT_VISUAL_METHODS =
+  Object.freeze([
+    "applyRoleVisibility",
+    "syncRouteAndIndicator",
+    "syncIndicator",
+    "updateToggleLabel",
+  ]);
 
-const SIDEBAR_LIGHT_FALLBACK_METHODS = Object.freeze([
-  "refresh",
-  "sync",
-]);
+const SIDEBAR_LIGHT_FALLBACK_METHODS =
+  Object.freeze([
+    "refresh",
+    "sync",
+  ]);
 
-const TOPBAR_LIGHT_USER_METHODS = Object.freeze([
-  "renderUser",
-  "refreshUser",
-  "updateUser",
-  "syncUser",
-]);
+const TOPBAR_LIGHT_USER_METHODS =
+  Object.freeze([
+    "renderUser",
+    "refreshUser",
+    "updateUser",
+    "syncUser",
+  ]);
 
-const TOPBAR_LIGHT_VISUAL_METHODS = Object.freeze([
-  "syncRoute",
-  "updateRoute",
-  "syncBreadcrumb",
-  "updateBreadcrumb",
-]);
+const TOPBAR_LIGHT_VISUAL_METHODS =
+  Object.freeze([
+    "syncRoute",
+    "updateRoute",
+    "syncBreadcrumb",
+    "updateBreadcrumb",
+  ]);
 
-const TOPBAR_LIGHT_FALLBACK_METHODS = Object.freeze([
-  "refresh",
-  "sync",
-]);
+const TOPBAR_LIGHT_FALLBACK_METHODS =
+  Object.freeze([
+    "refresh",
+    "sync",
+  ]);
 
-const SENSITIVE_QUERY_PARAM_NAMES = Object.freeze([
-  "token",
-  "activationToken",
-  "activateToken",
-  "resetToken",
-  "passwordResetToken",
-  "confirmToken",
-  "code",
-  "t",
-  "access_token",
-  "refresh_token",
-  "id_token",
-  "tempToken",
-  "temp_token",
-  "temporaryToken",
-  "temporary_token",
-  "twoFactorToken",
-  "two_factor_token",
-  "mfaToken",
-  "mfa_token",
-  "authorization",
-  "jwt",
-  "session",
-  "sid",
-]);
+const SENSITIVE_QUERY_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
+    "code",
+    "t",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
+    "authorization",
+    "jwt",
+    "session",
+    "sid",
+  ]);
 
-const TOKEN_ROUTE_PATHS = Object.freeze([
-  "/activate-account",
-  "/activate",
-  "/activation",
-  "/account/activate",
-  "/activate/first-user",
-  "/reset-password/confirm",
-  "/reset-password-confirm",
-  "/password-reset/confirm",
-  "/password-reset-confirm",
-]);
+const TOKEN_ROUTE_PATHS =
+  Object.freeze([
+    "/activate-account",
+    "/activate",
+    "/activation",
+    "/account/activate",
+    "/activate/first-user",
+    "/reset-password/confirm",
+    "/reset-password-confirm",
+    "/password-reset/confirm",
+    "/password-reset-confirm",
+  ]);
 
 const SENSITIVE_OBJECT_KEY_RE =
   /token|secret|password|authorization|credential|jwt|bearer|otp|code|session|refresh/i;
 
-const PUBLIC_USERNAME_RE = /^@[A-Za-z0-9._-]{1,80}$/;
+const PUBLIC_USERNAME_RE =
+  /^@[A-Za-z0-9._-]{1,80}$/;
 
 /* =========================================================
    INTERNAL STATE
 ========================================================= */
 
-let eventsBound = false;
-let eventsBindingInFlight = false;
-let boundScope = "";
+let eventsBound =
+  false;
 
-let langChangeInFlight = false;
-let lastLangRenderAt = 0;
+let eventsBindingInFlight =
+  false;
 
-let lastRouterRenderedKey = "";
-let lastRouterRenderedAt = 0;
+let boundScope =
+  "";
 
-let lastToastKey = "";
-let lastToastAt = 0;
+let langChangeInFlight =
+  false;
 
-let lastUiSyncKey = "";
-let lastUiSyncAt = 0;
+let lastLangRenderAt =
+  0;
 
-let lastThemeSyncKey = "";
-let lastThemeSyncAt = 0;
+let lastRouterRenderedKey =
+  "";
 
-let lastEmitKey = "";
-let lastEmitAt = 0;
+let lastRouterRenderedAt =
+  0;
 
-let debugApiInstalled = false;
+let lastToastKey =
+  "";
 
-const boundDisposers = [];
-const boundEventKeys = new Set();
+let lastToastAt =
+  0;
+
+let lastUiSyncKey =
+  "";
+
+let lastUiSyncAt =
+  0;
+
+let lastThemeSyncKey =
+  "";
+
+let lastThemeSyncAt =
+  0;
+
+let lastEmitKey =
+  "";
+
+let lastEmitAt =
+  0;
+
+let debugApiInstalled =
+  false;
+
+const boundDisposers =
+  [];
+
+const boundEventKeys =
+  new Set();
 
 const eventState = {
-  totalHandled: 0,
-  totalErrors: 0,
+  totalHandled:
+    0,
 
-  lastEvent: "",
-  lastEventAt: 0,
+  totalErrors:
+    0,
 
-  lastError: null,
+  lastEvent:
+    "",
 
-  boundEvents: [],
-  recent: [],
+  lastEventAt:
+    0,
+
+  lastError:
+    null,
+
+  boundEvents:
+    [],
+
+  recent:
+    [],
 };
 
 /* =========================================================
@@ -348,10 +417,11 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const text =
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return text || fallback;
 }
@@ -407,11 +477,15 @@ function safeIsoDate(ms = safeNow()) {
 }
 
 function unique(values = []) {
-  const output = [];
-  const seen = new Set();
+  const output =
+    [];
+
+  const seen =
+    new Set();
 
   for (const value of safeArray(values)) {
-    const clean = safeText(value, "");
+    const clean =
+      safeText(value, "");
 
     if (
       clean &&
@@ -451,9 +525,12 @@ function safeDefineValue(target, key, value) {
       key,
       {
         value,
-        configurable: true,
-        enumerable: false,
-        writable: true,
+        configurable:
+          true,
+        enumerable:
+          false,
+        writable:
+          true,
       }
     );
 
@@ -461,7 +538,9 @@ function safeDefineValue(target, key, value) {
   } catch {}
 
   try {
-    target[key] = value;
+    target[key] =
+      value;
+
     return true;
   } catch {}
 
@@ -469,7 +548,8 @@ function safeDefineValue(target, key, value) {
 }
 
 function getEventPayload(eventOrPayload = {}) {
-  const raw = eventOrPayload || {};
+  const raw =
+    eventOrPayload || {};
 
   if (
     raw &&
@@ -493,7 +573,8 @@ function getEventPayload(eventOrPayload = {}) {
 }
 
 function createHandledPayload(eventName = "", payload = {}) {
-  const atMs = safeNow();
+  const atMs =
+    safeNow();
 
   return {
     event:
@@ -521,7 +602,8 @@ function escapeRegExp(value = "") {
 }
 
 function redactSensitiveText(value = "") {
-  let output = safeText(value, "");
+  let output =
+    safeText(value, "");
 
   if (!output) {
     return "";
@@ -529,42 +611,51 @@ function redactSensitiveText(value = "") {
 
   try {
     for (const name of SENSITIVE_QUERY_PARAM_NAMES) {
-      const escaped = escapeRegExp(name);
+      const escaped =
+        escapeRegExp(name);
 
-      output = output.replace(
-        new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
-        "$1***"
-      );
+      output =
+        output.replace(
+          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
     }
 
     for (const path of TOKEN_ROUTE_PATHS) {
-      output = output.replace(
-        new RegExp(`(${escapeRegExp(path)}\\/)([^/?#\\s]+)`, "gi"),
-        "$1***"
-      );
+      output =
+        output.replace(
+          new RegExp(`(${escapeRegExp(path)}\\/)([^/?#\\s]+)`, "gi"),
+          "$1***"
+        );
     }
 
-    output = output.replace(
-      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-      "$1***"
-    );
+    output =
+      output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
 
-    output = output.replace(
-      /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
-      "$1$2***"
-    );
+    output =
+      output.replace(
+        /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
+        "$1$2***"
+      );
 
-    output = output.replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    );
+    output =
+      output.replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
+      );
   } catch {}
 
   return output;
 }
 
 function isDomNodeLike(value) {
-  if (!value || typeof value !== "object") {
+  if (
+    !value ||
+    typeof value !== "object"
+  ) {
     return false;
   }
 
@@ -592,9 +683,14 @@ function normalizeError(error = null) {
 
   if (typeof error === "string") {
     return {
-      name: "AppEventsError",
-      message: redactSensitiveText(error),
-      code: "APP_EVENTS_ERROR",
+      name:
+        "AppEventsError",
+
+      message:
+        redactSensitiveText(error),
+
+      code:
+        "APP_EVENTS_ERROR",
     };
   }
 
@@ -686,26 +782,36 @@ function sanitizePayload(value, depth = 0) {
     return value
       .slice(0, MAX_SANITIZE_ARRAY)
       .map((item) =>
-        sanitizePayload(item, depth + 1)
+        sanitizePayload(
+          item,
+          depth + 1
+        )
       );
   }
 
   if (value instanceof Map) {
     return {
-      type: "Map",
-      size: value.size,
+      type:
+        "Map",
+
+      size:
+        value.size,
     };
   }
 
   if (value instanceof Set) {
     return {
-      type: "Set",
-      size: value.size,
+      type:
+        "Set",
+
+      size:
+        value.size,
     };
   }
 
   if (isObject(value)) {
-    const output = {};
+    const output =
+      {};
 
     for (const [key, item] of Object.entries(value)) {
       if (SENSITIVE_OBJECT_KEY_RE.test(key)) {
@@ -715,9 +821,11 @@ function sanitizePayload(value, depth = 0) {
           item === "" ||
           typeof item === "boolean"
         ) {
-          output[key] = item;
+          output[key] =
+            item;
         } else {
-          output[key] = "***";
+          output[key] =
+            "***";
         }
 
         continue;
@@ -753,12 +861,19 @@ function safeLog(AppCore, ...args) {
     );
 
   try {
-    AppCore?.utils?.log?.("[AppEvents]", ...safeArgs);
+    AppCore?.utils?.log?.(
+      "[AppEvents]",
+      ...safeArgs
+    );
+
     return;
   } catch {}
 
   try {
-    console.log("[AppEvents]", ...safeArgs);
+    console.log(
+      "[AppEvents]",
+      ...safeArgs
+    );
   } catch {}
 }
 
@@ -768,15 +883,22 @@ function safeWarn(AppCore, ...args) {
       sanitizePayload(item)
     );
 
-  let emittedByCore = false;
+  let emittedByCore =
+    false;
 
   try {
     if (isFunction(AppCore?.utils?.warn)) {
-      AppCore.utils.warn("[AppEvents]", ...safeArgs);
-      emittedByCore = true;
+      AppCore.utils.warn(
+        "[AppEvents]",
+        ...safeArgs
+      );
+
+      emittedByCore =
+        true;
     }
   } catch {
-    emittedByCore = false;
+    emittedByCore =
+      false;
   }
 
   if (emittedByCore) {
@@ -784,7 +906,10 @@ function safeWarn(AppCore, ...args) {
   }
 
   try {
-    console.warn("[AppEvents]", ...safeArgs);
+    console.warn(
+      "[AppEvents]",
+      ...safeArgs
+    );
   } catch {}
 }
 
@@ -794,15 +919,22 @@ function safeError(AppCore, ...args) {
       sanitizePayload(item)
     );
 
-  let emittedByCore = false;
+  let emittedByCore =
+    false;
 
   try {
     if (isFunction(AppCore?.utils?.error)) {
-      AppCore.utils.error("[AppEvents]", ...safeArgs);
-      emittedByCore = true;
+      AppCore.utils.error(
+        "[AppEvents]",
+        ...safeArgs
+      );
+
+      emittedByCore =
+        true;
     }
   } catch {
-    emittedByCore = false;
+    emittedByCore =
+      false;
   }
 
   if (emittedByCore) {
@@ -810,7 +942,10 @@ function safeError(AppCore, ...args) {
   }
 
   try {
-    console.error("[AppEvents]", ...safeArgs);
+    console.error(
+      "[AppEvents]",
+      ...safeArgs
+    );
   } catch {}
 }
 
@@ -824,14 +959,16 @@ function safeCreateCustomEvent(eventName, payload = {}) {
       return new CustomEvent(
         eventName,
         {
-          detail: payload,
+          detail:
+            payload,
         }
       );
     }
   } catch {}
 
   try {
-    const event = document.createEvent("CustomEvent");
+    const event =
+      document.createEvent("CustomEvent");
 
     event.initCustomEvent(
       eventName,
@@ -878,15 +1015,17 @@ function shouldDedupeEmit(eventName = "", payload = {}, force = false) {
     return false;
   }
 
-  const key = [
-    safeText(eventName, ""),
-    safeText(payload?.reason || payload?.phase || "", ""),
-    safeText(payload?.route || payload?.canonicalPath || "", ""),
-    safeText(payload?.publicPath || "", ""),
-    payload?.ok === false ? "fail" : "ok",
-  ].join("|");
+  const key =
+    [
+      safeText(eventName, ""),
+      safeText(payload?.reason || payload?.phase || "", ""),
+      safeText(payload?.route || payload?.canonicalPath || "", ""),
+      safeText(payload?.publicPath || "", ""),
+      payload?.ok === false ? "fail" : "ok",
+    ].join("|");
 
-  const now = safeNow();
+  const now =
+    safeNow();
 
   if (
     key === lastEmitKey &&
@@ -895,48 +1034,66 @@ function shouldDedupeEmit(eventName = "", payload = {}, force = false) {
     return true;
   }
 
-  lastEmitKey = key;
-  lastEmitAt = now;
+  lastEmitKey =
+    key;
+
+  lastEmitAt =
+    now;
 
   return false;
 }
 
 function safeEmit(AppCore, eventName, payload = {}, options = {}) {
-  const cleanEventName = safeText(eventName, "");
+  const cleanEventName =
+    safeText(eventName, "");
 
   if (!cleanEventName) {
     return false;
   }
 
-  const opts = ensureObject(options);
+  const opts =
+    ensureObject(options);
 
   if (
     opts.dedupe !== false &&
-    shouldDedupeEmit(cleanEventName, payload, opts.force === true)
+    shouldDedupeEmit(
+      cleanEventName,
+      payload,
+      opts.force === true
+    )
   ) {
     return false;
   }
 
   const cleanPayload =
     sanitizePayload({
-      version: APP_EVENTS_VERSION,
-      source: EVENTS_SOURCE,
+      version:
+        APP_EVENTS_VERSION,
+
+      source:
+        EVENTS_SOURCE,
+
       ...ensureObject(payload),
     });
 
-  let busAvailable = false;
-  let busEmitted = false;
+  let busAvailable =
+    false;
+
+  let busEmitted =
+    false;
 
   try {
     if (isFunction(AppCore?.events?.emit)) {
-      busAvailable = true;
+      busAvailable =
+        true;
 
       AppCore.events.emit(
         cleanEventName,
         cleanPayload
       );
 
-      busEmitted = true;
+      busEmitted =
+        true;
     }
   } catch (error) {
     safeWarn(
@@ -967,7 +1124,8 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
 }
 
 function pushRecent(event = {}) {
-  const data = sanitizePayload(event);
+  const data =
+    sanitizePayload(event);
 
   eventState.recent.unshift(data);
 
@@ -1016,10 +1174,17 @@ function recordError(AppCore, eventName = "", error = null) {
   };
 
   pushRecent({
-    event: "error",
-    payload: eventState.lastError,
-    at: safeIsoDate(),
-    atMs: safeNow(),
+    event:
+      "error",
+
+    payload:
+      eventState.lastError,
+
+    at:
+      safeIsoDate(),
+
+    atMs:
+      safeNow(),
   });
 
   safeError(
@@ -1067,7 +1232,8 @@ function getAuthStatus(Auth) {
 ========================================================= */
 
 function assignStateDirectly(AppCore, patch = {}) {
-  const cleanPatch = ensureObject(patch);
+  const cleanPatch =
+    ensureObject(patch);
 
   try {
     if (
@@ -1087,7 +1253,8 @@ function assignStateDirectly(AppCore, patch = {}) {
 }
 
 function setStateSilent(AppCore, patch = {}) {
-  const cleanPatch = ensureObject(patch);
+  const cleanPatch =
+    ensureObject(patch);
 
   /*
     CRÍTICO:
@@ -1103,10 +1270,17 @@ function setStateSilent(AppCore, patch = {}) {
       AppCore.setState(
         cleanPatch,
         {
-          emit: false,
-          emitState: false,
-          silent: true,
-          source: "app:events:silent-state-sync",
+          emit:
+            false,
+
+          emitState:
+            false,
+
+          silent:
+            true,
+
+          source:
+            "app:events:silent-state-sync",
         }
       );
 
@@ -1122,7 +1296,8 @@ function setStateSilent(AppCore, patch = {}) {
 ========================================================= */
 
 function normalizeToastType(type = "info") {
-  const clean = safeText(type, "info").toLowerCase();
+  const clean =
+    safeText(type, "info").toLowerCase();
 
   if (clean === "warn") {
     return "warning";
@@ -1132,8 +1307,11 @@ function normalizeToastType(type = "info") {
 }
 
 function safeToast(Toast, type, message, options = {}) {
-  const cleanType = normalizeToastType(type);
-  const cleanMessage = safeText(message, "");
+  const cleanType =
+    normalizeToastType(type);
+
+  const cleanMessage =
+    safeText(message, "");
 
   if (!cleanMessage) {
     return null;
@@ -1141,32 +1319,58 @@ function safeToast(Toast, type, message, options = {}) {
 
   const payload = {
     ...ensureObject(options),
-    type: cleanType,
-    message: cleanMessage,
+
+    type:
+      cleanType,
+
+    message:
+      cleanMessage,
   };
 
+  const typedMethods =
+    cleanType === "warning"
+      ? [
+          "warning",
+          "warn",
+          "warningToast",
+        ]
+      : [
+          cleanType,
+          `${cleanType}Toast`,
+        ];
+
+  for (const methodName of typedMethods) {
+    try {
+      if (isFunction(Toast?.[methodName])) {
+        return Toast[methodName](
+          cleanMessage,
+          payload
+        );
+      }
+    } catch {}
+  }
+
   try {
-    if (isFunction(Toast?.[cleanType])) {
-      return Toast[cleanType](
+    if (isFunction(Toast?.showToast)) {
+      return Toast.showToast(
         cleanMessage,
+        cleanType,
         payload
       );
     }
+  } catch {}
 
-    if (
-      cleanType === "warning" &&
-      isFunction(Toast?.warn)
-    ) {
-      return Toast.warn(
-        cleanMessage,
-        payload
-      );
-    }
-
+  try {
     if (isFunction(Toast?.show)) {
-      return Toast.show(payload);
+      return Toast.show(
+        cleanMessage,
+        cleanType,
+        payload
+      );
     }
+  } catch {}
 
+  try {
     if (isFunction(Toast?.notify)) {
       return Toast.notify(payload);
     }
@@ -1182,14 +1386,20 @@ function toastOnce(
   options = {},
   dedupeMs = TOAST_DEDUPE_MS
 ) {
-  const cleanType = normalizeToastType(type);
-  const cleanMessage = safeText(message, "");
-  const title = safeText(options?.title, "");
+  const cleanType =
+    normalizeToastType(type);
+
+  const cleanMessage =
+    safeText(message, "");
+
+  const title =
+    safeText(options?.title, "");
 
   const key =
     redactSensitiveText(`${cleanType}:${title}:${cleanMessage}`);
 
-  const current = safeNow();
+  const current =
+    safeNow();
 
   if (
     key === lastToastKey &&
@@ -1198,8 +1408,11 @@ function toastOnce(
     return null;
   }
 
-  lastToastKey = key;
-  lastToastAt = current;
+  lastToastKey =
+    key;
+
+  lastToastAt =
+    current;
 
   return safeToast(
     Toast,
@@ -1220,7 +1433,8 @@ function normalizeLang(value = "", fallback = "es") {
       .replace(/_/g, "-")
       .trim();
 
-  const first = raw.split("-")[0] || raw;
+  const first =
+    raw.split("-")[0] || raw;
 
   if (
     first === "spa" ||
@@ -1250,7 +1464,8 @@ function normalizeLang(value = "", fallback = "es") {
 }
 
 function safeSetDocumentLang(lang = "es") {
-  const cleanLang = normalizeLang(lang, "es");
+  const cleanLang =
+    normalizeLang(lang, "es");
 
   if (!isBrowser()) {
     return false;
@@ -1262,7 +1477,8 @@ function safeSetDocumentLang(lang = "es") {
       cleanLang
     );
 
-    document.documentElement.lang = cleanLang;
+    document.documentElement.lang =
+      cleanLang;
 
     return true;
   } catch {}
@@ -1286,7 +1502,8 @@ function resolveLang(AppCore, I18n, payload = {}) {
 }
 
 function setI18nLangSoft(I18n, lang = "es") {
-  const cleanLang = normalizeLang(lang, "es");
+  const cleanLang =
+    normalizeLang(lang, "es");
 
   const methods = [
     "setLang",
@@ -1303,8 +1520,11 @@ function setI18nLangSoft(I18n, lang = "es") {
           I18n[methodName](
             cleanLang,
             {
-              silent: true,
-              source: EVENTS_SOURCE,
+              silent:
+                true,
+
+              source:
+                EVENTS_SOURCE,
             }
           );
 
@@ -1325,7 +1545,9 @@ function setI18nLangSoft(I18n, lang = "es") {
       I18n &&
       typeof I18n === "object"
     ) {
-      I18n.lang = cleanLang;
+      I18n.lang =
+        cleanLang;
+
       return true;
     }
   } catch {}
@@ -1351,7 +1573,8 @@ async function safeRerenderCurrentRoute({
   rerenderCurrentRoute,
   reason = "lang-change",
 } = {}) {
-  const current = safeNow();
+  const current =
+    safeNow();
 
   if (
     current - lastLangRenderAt <
@@ -1360,7 +1583,8 @@ async function safeRerenderCurrentRoute({
     return false;
   }
 
-  lastLangRenderAt = current;
+  lastLangRenderAt =
+    current;
 
   try {
     if (isFunction(rerenderCurrentRoute)) {
@@ -1369,7 +1593,8 @@ async function safeRerenderCurrentRoute({
           AppCore,
           Router,
           reason,
-          source: EVENTS_SOURCE,
+          source:
+            EVENTS_SOURCE,
         })
       );
 
@@ -1404,8 +1629,10 @@ async function safeRerenderCurrentRoute({
       await Promise.resolve(
         Router.rerenderCurrentRoute({
           reason,
-          source: EVENTS_SOURCE,
-          force: true,
+          source:
+            EVENTS_SOURCE,
+          force:
+            true,
         })
       );
 
@@ -1425,15 +1652,27 @@ async function safeRerenderCurrentRoute({
         Router.render(
           canonicalPath,
           {
-            force: true,
+            force:
+              true,
+
             reason,
-            source: EVENTS_SOURCE,
-            preservePublicPath: true,
+            source:
+              EVENTS_SOURCE,
+
+            preservePublicPath:
+              true,
+
             publicPath,
             canonicalPath,
-            i18nRerender: true,
-            skipHistory: true,
-            replaceState: false,
+
+            i18nRerender:
+              true,
+
+            skipHistory:
+              true,
+
+            replaceState:
+              false,
           }
         )
       );
@@ -1454,12 +1693,21 @@ async function safeRerenderCurrentRoute({
         Router.navigate(
           publicPath,
           {
-            replaceState: true,
-            force: true,
+            replaceState:
+              true,
+
+            force:
+              true,
+
             reason,
-            source: EVENTS_SOURCE,
-            preservePublicPath: true,
-            i18nRerender: true,
+            source:
+              EVENTS_SOURCE,
+
+            preservePublicPath:
+              true,
+
+            i18nRerender:
+              true,
           }
         )
       );
@@ -1493,7 +1741,8 @@ function getBaseOrigin() {
 }
 
 function isHashRouterPath(value = "") {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   return (
     raw.startsWith("#/") ||
@@ -1508,14 +1757,17 @@ function normalizePathnameOnly(pathname = "/") {
       .replace(/\/{2,}/g, "/");
 
   if (!value) {
-    value = "/";
+    value =
+      "/";
   }
 
   if (!value.startsWith("/")) {
-    value = `/${value}`;
+    value =
+      `/${value}`;
   }
 
-  const output = [];
+  const output =
+    [];
 
   for (const segment of value.split("/").filter(Boolean)) {
     if (segment === ".") {
@@ -1530,24 +1782,28 @@ function normalizePathnameOnly(pathname = "/") {
     output.push(segment);
   }
 
-  value = `/${output.join("/")}`;
+  value =
+    `/${output.join("/")}`;
 
   if (!value) {
-    value = "/";
+    value =
+      "/";
   }
 
   if (
     value.length > 1 &&
     value.endsWith("/")
   ) {
-    value = value.replace(/\/+$/g, "") || "/";
+    value =
+      value.replace(/\/+$/g, "") || "/";
   }
 
   return value;
 }
 
 function normalizeSearch(search = "") {
-  const value = safeText(search, "");
+  const value =
+    safeText(search, "");
 
   if (!value) {
     return "";
@@ -1559,7 +1815,8 @@ function normalizeSearch(search = "") {
 }
 
 function normalizeHash(hash = "") {
-  const value = safeText(hash, "");
+  const value =
+    safeText(hash, "");
 
   if (!value) {
     return "";
@@ -1570,8 +1827,28 @@ function normalizeHash(hash = "") {
     : `#${value.replace(/^#+/, "")}`;
 }
 
+function normalizeHashRouterPath(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return normalizeLocalFullPath(
+      raw.replace(/^#!\/?/, "/")
+    );
+  }
+
+  return normalizeLocalFullPath(
+    raw.replace(/^#\/?/, "/")
+  );
+}
+
 function splitLocalFullPath(value = "/") {
-  const raw = safeText(value, "/");
+  const raw =
+    safeText(value, "/");
 
   if (isHashRouterPath(raw)) {
     return splitLocalFullPath(
@@ -1579,22 +1856,35 @@ function splitLocalFullPath(value = "/") {
     );
   }
 
-  let pathname = raw;
-  let search = "";
-  let hash = "";
+  let pathname =
+    raw;
 
-  const hashIndex = pathname.indexOf("#");
+  let search =
+    "";
+
+  let hash =
+    "";
+
+  const hashIndex =
+    pathname.indexOf("#");
 
   if (hashIndex >= 0) {
-    hash = pathname.slice(hashIndex);
-    pathname = pathname.slice(0, hashIndex) || "/";
+    hash =
+      pathname.slice(hashIndex);
+
+    pathname =
+      pathname.slice(0, hashIndex) || "/";
   }
 
-  const searchIndex = pathname.indexOf("?");
+  const searchIndex =
+    pathname.indexOf("?");
 
   if (searchIndex >= 0) {
-    search = pathname.slice(searchIndex);
-    pathname = pathname.slice(0, searchIndex) || "/";
+    search =
+      pathname.slice(searchIndex);
+
+    pathname =
+      pathname.slice(0, searchIndex) || "/";
   }
 
   return {
@@ -1610,7 +1900,8 @@ function splitLocalFullPath(value = "/") {
 }
 
 function normalizeLocalFullPath(path = "/") {
-  const raw = safeText(path, "/");
+  const raw =
+    safeText(path, "/");
 
   if (!raw) {
     return "/";
@@ -1622,7 +1913,11 @@ function normalizeLocalFullPath(path = "/") {
 
   try {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed = new URL(raw, getBaseOrigin());
+      const parsed =
+        new URL(
+          raw,
+          getBaseOrigin()
+        );
 
       if (parsed.origin !== getBaseOrigin()) {
         return "/";
@@ -1645,27 +1940,10 @@ function normalizeLocalFullPath(path = "/") {
     pathname,
     search,
     hash,
-  } = splitLocalFullPath(raw);
+  } =
+    splitLocalFullPath(raw);
 
   return `${pathname}${search}${hash}`;
-}
-
-function normalizeHashRouterPath(value = "") {
-  const raw = safeText(value, "");
-
-  if (!raw) {
-    return "/";
-  }
-
-  if (raw.startsWith("#!")) {
-    return normalizeLocalFullPath(
-      raw.replace(/^#!\/?/, "/")
-    );
-  }
-
-  return normalizeLocalFullPath(
-    raw.replace(/^#\/?/, "/")
-  );
 }
 
 function localNormalizePublicPath(path = "/") {
@@ -1704,13 +1982,15 @@ function localNormalizeCanonicalPath(path = "/") {
 
   const {
     pathname,
-  } = splitLocalFullPath(publicPath);
+  } =
+    splitLocalFullPath(publicPath);
 
   return stripPublicUsernamePrefix(pathname) || "/";
 }
 
 function normalizePublicSafe(AppCore, path = "/") {
-  const raw = safeText(path, "/") || "/";
+  const raw =
+    safeText(path, "/") || "/";
 
   try {
     const value =
@@ -1728,7 +2008,8 @@ function normalizePublicSafe(AppCore, path = "/") {
 }
 
 function normalizeCanonicalSafe(AppCore, path = "/") {
-  const raw = safeText(path, "/") || "/";
+  const raw =
+    safeText(path, "/") || "/";
 
   try {
     const value =
@@ -1756,9 +2037,25 @@ function callRouterGetter(Router, methodName = "") {
 }
 
 function resolvePublicPath(AppCore, Router, payload = {}) {
-  const data = ensureObject(payload);
-  const route = ensureObject(data.route);
-  const resolved = ensureObject(data.resolved);
+  const data =
+    ensureObject(payload);
+
+  const route =
+    ensureObject(data.route);
+
+  const resolved =
+    ensureObject(data.resolved);
+
+  let helperPublic =
+    "";
+
+  try {
+    helperPublic =
+      safeText(
+        getCurrentPublicPath?.(AppCore, Router),
+        ""
+      );
+  } catch {}
 
   const candidate =
     safeText(data.publicPath, "") ||
@@ -1772,7 +2069,7 @@ function resolvePublicPath(AppCore, Router, payload = {}) {
     safeText(resolved.publicPath, "") ||
     safeText(AppCore?.state?.publicPath, "") ||
     safeText(callRouterGetter(Router, "getCurrentPublicPath"), "") ||
-    safeText(getCurrentPublicPath?.(AppCore, Router), "") ||
+    helperPublic ||
     "/";
 
   return normalizePublicSafe(
@@ -1782,9 +2079,25 @@ function resolvePublicPath(AppCore, Router, payload = {}) {
 }
 
 function resolveCanonicalPath(AppCore, Router, payload = {}) {
-  const data = ensureObject(payload);
-  const route = ensureObject(data.route);
-  const resolved = ensureObject(data.resolved);
+  const data =
+    ensureObject(payload);
+
+  const route =
+    ensureObject(data.route);
+
+  const resolved =
+    ensureObject(data.resolved);
+
+  let helperCanonical =
+    "";
+
+  try {
+    helperCanonical =
+      safeText(
+        getCurrentCanonicalPath?.(AppCore, Router),
+        ""
+      );
+  } catch {}
 
   const candidate =
     safeText(data.canonicalPath, "") ||
@@ -1792,7 +2105,7 @@ function resolveCanonicalPath(AppCore, Router, payload = {}) {
     safeText(route.canonicalPath, "") ||
     safeText(resolved.canonicalPath, "") ||
     safeText(callRouterGetter(Router, "getCurrentCanonicalPath"), "") ||
-    safeText(getCurrentCanonicalPath?.(AppCore, Router), "") ||
+    helperCanonical ||
     safeText(AppCore?.state?.route, "") ||
     safeText(route.path, "") ||
     safeText(data.path, "") ||
@@ -1839,26 +2152,40 @@ function safePatchRouteState(AppCore, {
     !publicChanged
   ) {
     return {
-      changed: false,
-      routeChanged: false,
-      publicChanged: false,
-      route: cleanRoute,
-      publicPath: cleanPublicPath,
+      changed:
+        false,
+
+      routeChanged:
+        false,
+
+      publicChanged:
+        false,
+
+      route:
+        cleanRoute,
+
+      publicPath:
+        cleanPublicPath,
     };
   }
 
-  const patch = {};
+  const patch =
+    {};
 
   if (
     routeChanged ||
     canonicalChanged
   ) {
-    patch.route = cleanRoute;
-    patch.canonicalPath = cleanRoute;
+    patch.route =
+      cleanRoute;
+
+    patch.canonicalPath =
+      cleanRoute;
   }
 
   if (publicChanged) {
-    patch.publicPath = cleanPublicPath;
+    patch.publicPath =
+      cleanPublicPath;
   }
 
   setStateSilent(
@@ -1867,11 +2194,18 @@ function safePatchRouteState(AppCore, {
   );
 
   return {
-    changed: true,
-    routeChanged: Boolean(routeChanged || canonicalChanged),
+    changed:
+      true,
+
+    routeChanged:
+      Boolean(routeChanged || canonicalChanged),
+
     publicChanged,
-    route: cleanRoute,
-    publicPath: cleanPublicPath,
+    route:
+      cleanRoute,
+
+    publicPath:
+      cleanPublicPath,
   };
 }
 
@@ -1908,7 +2242,8 @@ function safeApplyPostRenderLoaderPolicy({
 }
 
 function shouldSkipRouterRenderedSync(route = "/", publicPath = "/") {
-  const current = safeNow();
+  const current =
+    safeNow();
 
   const key =
     `${redactSensitiveText(route)}|${redactSensitiveText(publicPath)}`;
@@ -1921,8 +2256,11 @@ function shouldSkipRouterRenderedSync(route = "/", publicPath = "/") {
     return true;
   }
 
-  lastRouterRenderedKey = key;
-  lastRouterRenderedAt = current;
+  lastRouterRenderedKey =
+    key;
+
+  lastRouterRenderedAt =
+    current;
 
   return false;
 }
@@ -1934,13 +2272,17 @@ function shouldSkipRouterRenderedSync(route = "/", publicPath = "/") {
 function callFirstUiMethod(target, methodNames = [], context = {}) {
   if (!target) {
     return {
-      called: false,
-      method: "",
+      called:
+        false,
+
+      method:
+        "",
     };
   }
 
   for (const methodName of safeArray(methodNames)) {
-    const fn = target?.[methodName];
+    const fn =
+      target?.[methodName];
 
     if (!isFunction(fn)) {
       continue;
@@ -1954,8 +2296,11 @@ function callFirstUiMethod(target, methodNames = [], context = {}) {
       );
 
       return {
-        called: true,
-        method: methodName,
+        called:
+          true,
+
+        method:
+          methodName,
       };
     } catch {}
 
@@ -1966,8 +2311,11 @@ function callFirstUiMethod(target, methodNames = [], context = {}) {
       );
 
       return {
-        called: true,
-        method: methodName,
+        called:
+          true,
+
+        method:
+          methodName,
       };
     } catch {}
 
@@ -1975,36 +2323,47 @@ function callFirstUiMethod(target, methodNames = [], context = {}) {
       fn.call(target);
 
       return {
-        called: true,
-        method: methodName,
+        called:
+          true,
+
+        method:
+          methodName,
       };
     } catch {}
   }
 
   return {
-    called: false,
-    method: "",
+    called:
+      false,
+
+    method:
+      "",
   };
 }
 
 function callAllUiMethods(target, methodNames = [], context = {}) {
-  const methods = [];
+  const methods =
+    [];
 
   if (!target) {
     return {
-      called: false,
+      called:
+        false,
+
       methods,
     };
   }
 
   for (const methodName of safeArray(methodNames)) {
-    const fn = target?.[methodName];
+    const fn =
+      target?.[methodName];
 
     if (!isFunction(fn)) {
       continue;
     }
 
-    let called = false;
+    let called =
+      false;
 
     try {
       fn.call(
@@ -2013,7 +2372,8 @@ function callAllUiMethods(target, methodNames = [], context = {}) {
         context
       );
 
-      called = true;
+      called =
+        true;
     } catch {
       try {
         fn.call(
@@ -2021,11 +2381,13 @@ function callAllUiMethods(target, methodNames = [], context = {}) {
           context
         );
 
-        called = true;
+        called =
+          true;
       } catch {
         try {
           fn.call(target);
-          called = true;
+          called =
+            true;
         } catch {}
       }
     }
@@ -2036,7 +2398,9 @@ function callAllUiMethods(target, methodNames = [], context = {}) {
   }
 
   return {
-    called: methods.length > 0,
+    called:
+      methods.length > 0,
+
     methods,
   };
 }
@@ -2057,8 +2421,11 @@ function syncSidebarLight(SidebarUI, context = {}) {
     );
 
   let fallback = {
-    called: false,
-    method: "",
+    called:
+      false,
+
+    method:
+      "",
   };
 
   if (
@@ -2108,8 +2475,11 @@ function syncTopbarLight(TopbarUI, context = {}) {
     );
 
   let fallback = {
-    called: false,
-    method: "",
+    called:
+      false,
+
+    method:
+      "",
   };
 
   if (
@@ -2159,7 +2529,8 @@ function shouldSkipUiSync(context = {}, force = false) {
     return false;
   }
 
-  const current = safeNow();
+  const current =
+    safeNow();
 
   const key =
     redactSensitiveText(
@@ -2173,8 +2544,11 @@ function shouldSkipUiSync(context = {}, force = false) {
     return true;
   }
 
-  lastUiSyncKey = key;
-  lastUiSyncAt = current;
+  lastUiSyncKey =
+    key;
+
+  lastUiSyncAt =
+    current;
 
   return false;
 }
@@ -2234,7 +2608,6 @@ async function safeSyncUI({
 
     route,
     publicPath,
-
     user,
 
     role:
@@ -2250,21 +2623,24 @@ async function safeSyncUI({
       ),
   };
 
-  if (
-    shouldSkipUiSync(context, force)
-  ) {
+  if (shouldSkipUiSync(context, force)) {
     return true;
   }
 
-  let ok = false;
-  let usedInjectedSync = false;
+  let ok =
+    false;
+
+  let usedInjectedSync =
+    false;
 
   let sidebarResult = {
-    ok: false,
+    ok:
+      false,
   };
 
   let topbarResult = {
-    ok: false,
+    ok:
+      false,
   };
 
   /*
@@ -2276,14 +2652,23 @@ async function safeSyncUI({
       await Promise.resolve(
         syncUserUI({
           ...context,
-          rebind: false,
-          hardRepair: false,
-          force: true,
+
+          rebind:
+            false,
+
+          hardRepair:
+            false,
+
+          force:
+            true,
         })
       );
 
-      usedInjectedSync = true;
-      ok = true;
+      usedInjectedSync =
+        true;
+
+      ok =
+        true;
     } catch (error) {
       safeWarn(
         AppCore,
@@ -2321,7 +2706,8 @@ async function safeSyncUI({
       AppCore,
       EVENT_NAMES.appEventsUiSynced,
       {
-        source: EVENTS_SOURCE,
+        source:
+          EVENTS_SOURCE,
 
         reason:
           context.reason,
@@ -2358,7 +2744,8 @@ function safeRequestUiRepair(AppCore, reason = "event", payload = {}) {
     NO se usa automáticamente desde router:rendered.
   */
   const detail = {
-    source: EVENTS_SOURCE,
+    source:
+      EVENTS_SOURCE,
 
     reason:
       safeText(reason, "event"),
@@ -2366,10 +2753,14 @@ function safeRequestUiRepair(AppCore, reason = "event", payload = {}) {
     payload:
       ensureObject(payload),
 
-    hardRepair: false,
-    rebind: false,
+    hardRepair:
+      false,
 
-    at: safeIsoDate(),
+    rebind:
+      false,
+
+    at:
+      safeIsoDate(),
   };
 
   safeEmit(
@@ -2391,8 +2782,41 @@ function rememberDisposer(disposer) {
   }
 }
 
+function normalizeDisposer(candidate) {
+  if (isFunction(candidate)) {
+    return candidate;
+  }
+
+  if (isFunction(candidate?.dispose)) {
+    return () => {
+      try {
+        candidate.dispose();
+      } catch {}
+    };
+  }
+
+  if (isFunction(candidate?.off)) {
+    return () => {
+      try {
+        candidate.off();
+      } catch {}
+    };
+  }
+
+  if (isFunction(candidate?.remove)) {
+    return () => {
+      try {
+        candidate.remove();
+      } catch {}
+    };
+  }
+
+  return null;
+}
+
 function rememberBoundEvent(eventName = "") {
-  const clean = safeText(eventName, "");
+  const clean =
+    safeText(eventName, "");
 
   if (
     clean &&
@@ -2410,7 +2834,8 @@ function makeBoundKey(eventName = "", label = "") {
 }
 
 function bindViaBus(AppCore, eventName, handler) {
-  const bus = AppCore?.events;
+  const bus =
+    AppCore?.events;
 
   if (
     !bus ||
@@ -2426,8 +2851,11 @@ function bindViaBus(AppCore, eventName, handler) {
         handler
       );
 
-    if (isFunction(maybeOff)) {
-      rememberDisposer(maybeOff);
+    const normalizedDisposer =
+      normalizeDisposer(maybeOff);
+
+    if (normalizedDisposer) {
+      rememberDisposer(normalizedDisposer);
     } else if (isFunction(bus.off)) {
       rememberDisposer(() => {
         try {
@@ -2485,7 +2913,8 @@ function bindAppEvent({
   windowFallback = true,
   options = false,
 }) {
-  const cleanEventName = safeText(eventName, "");
+  const cleanEventName =
+    safeText(eventName, "");
 
   const cleanLabel =
     safeText(label, cleanEventName || "event");
@@ -2507,34 +2936,40 @@ function bindAppEvent({
     return false;
   }
 
-  const wrappedHandler = async (eventOrPayload = {}) => {
-    const payload =
-      getEventPayload(eventOrPayload);
+  const wrappedHandler =
+    async (eventOrPayload = {}) => {
+      const payload =
+        getEventPayload(eventOrPayload);
 
-    recordHandled(
-      cleanEventName,
-      payload
-    );
-
-    try {
-      await Promise.resolve(
-        handler(
-          payload,
-          {
-            eventName: cleanEventName,
-            label: cleanLabel,
-            raw: eventOrPayload,
-          }
-        )
-      );
-    } catch (error) {
-      recordError(
-        AppCore,
+      recordHandled(
         cleanEventName,
-        error
+        payload
       );
-    }
-  };
+
+      try {
+        await Promise.resolve(
+          handler(
+            payload,
+            {
+              eventName:
+                cleanEventName,
+
+              label:
+                cleanLabel,
+
+              raw:
+                eventOrPayload,
+            }
+          )
+        );
+      } catch (error) {
+        recordError(
+          AppCore,
+          cleanEventName,
+          error
+        );
+      }
+    };
 
   /*
     NO usamos AppCore.cleanup.event aquí.
@@ -2576,14 +3011,18 @@ function bindUniqueEventNames({
   windowFallback = true,
   options = false,
 }) {
-  let count = 0;
+  let count =
+    0;
 
   for (const eventName of unique(eventNames)) {
     if (
       bindAppEvent({
         AppCore,
         eventName,
-        label: `${label}:${eventName}`,
+
+        label:
+          `${label}:${eventName}`,
+
         handler,
         windowFallback,
         options,
@@ -2603,11 +3042,14 @@ function bindUniqueEventNames({
 function bindUserEvents(context) {
   const {
     AppCore,
-  } = context;
+  } =
+    context;
 
   bindUniqueEventNames({
     AppCore,
-    label: "user-sync",
+    label:
+      "user-sync",
+
     eventNames: [
       EVENT_NAMES.appUserChange,
       EVENT_NAMES.appSessionRestored,
@@ -2616,17 +3058,21 @@ function bindUserEvents(context) {
       EVENT_NAMES.appUiReady,
       EVENT_NAMES.appReady,
     ],
-    handler: async (payload, meta) => {
-      await safeSyncUI({
-        ...context,
-        reason:
-          meta?.eventName ||
-          payload?.reason ||
-          payload?.source ||
-          "user-sync",
-        payload,
-      });
-    },
+
+    handler:
+      async (payload, meta) => {
+        await safeSyncUI({
+          ...context,
+
+          reason:
+            meta?.eventName ||
+            payload?.reason ||
+            payload?.source ||
+            "user-sync",
+
+          payload,
+        });
+      },
   });
 }
 
@@ -2637,92 +3083,111 @@ function bindLanguageEvents(context) {
     Toast,
     Router,
     rerenderCurrentRoute,
-  } = context;
+  } =
+    context;
 
   bindAppEvent({
     AppCore,
-    eventName: EVENT_NAMES.appLangChange,
-    label: "lang-change",
-    handler: async (payload) => {
-      const lang =
-        resolveLang(
-          AppCore,
+    eventName:
+      EVENT_NAMES.appLangChange,
+
+    label:
+      "lang-change",
+
+    handler:
+      async (payload) => {
+        const lang =
+          resolveLang(
+            AppCore,
+            I18n,
+            payload
+          );
+
+        safeSetDocumentLang(lang);
+
+        setI18nLangSoft(
           I18n,
-          payload
+          lang
         );
 
-      safeSetDocumentLang(lang);
+        setStateSilent(
+          AppCore,
+          {
+            lang,
+            language:
+              lang,
+            locale:
+              lang,
+          }
+        );
 
-      setI18nLangSoft(
-        I18n,
-        lang
-      );
+        if (
+          langChangeInFlight ||
+          !shouldEventsRerenderOnLangChange(payload)
+        ) {
+          if (payload?.toast === true) {
+            toastOnce(
+              Toast,
+              "success",
+              "Idioma actualizado",
+              {
+                title:
+                  "Idioma",
 
-      setStateSilent(
-        AppCore,
-        {
-          lang,
-          language: lang,
-          locale: lang,
+                duration:
+                  2200,
+              }
+            );
+          }
+
+          return;
         }
-      );
 
-      if (
-        langChangeInFlight ||
-        !shouldEventsRerenderOnLangChange(payload)
-      ) {
+        langChangeInFlight =
+          true;
+
+        try {
+          await safeRerenderCurrentRoute({
+            AppCore,
+            Router,
+            rerenderCurrentRoute,
+            reason:
+              "app:lang:change:events-rerender",
+          });
+        } finally {
+          langChangeInFlight =
+            false;
+        }
+
         if (payload?.toast === true) {
           toastOnce(
             Toast,
             "success",
             "Idioma actualizado",
             {
-              title: "Idioma",
-              duration: 2200,
+              title:
+                "Idioma",
+
+              duration:
+                2200,
             }
           );
         }
-
-        return;
-      }
-
-      langChangeInFlight = true;
-
-      try {
-        await safeRerenderCurrentRoute({
-          AppCore,
-          Router,
-          rerenderCurrentRoute,
-          reason: "app:lang:change:events-rerender",
-        });
-      } finally {
-        langChangeInFlight = false;
-      }
-
-      if (payload?.toast === true) {
-        toastOnce(
-          Toast,
-          "success",
-          "Idioma actualizado",
-          {
-            title: "Idioma",
-            duration: 2200,
-          }
-        );
-      }
-    },
+      },
   });
 }
 
 function shouldSkipThemeSync(payload = {}) {
-  const key = [
-    safeText(payload?.theme, ""),
-    safeText(payload?.mode, ""),
-    safeText(payload?.appearance, ""),
-    safeText(payload?.value, ""),
-  ].join("|");
+  const key =
+    [
+      safeText(payload?.theme, ""),
+      safeText(payload?.mode, ""),
+      safeText(payload?.appearance, ""),
+      safeText(payload?.value, ""),
+    ].join("|");
 
-  const current = safeNow();
+  const current =
+    safeNow();
 
   if (
     key &&
@@ -2732,8 +3197,11 @@ function shouldSkipThemeSync(payload = {}) {
     return true;
   }
 
-  lastThemeSyncKey = key;
-  lastThemeSyncAt = current;
+  lastThemeSyncKey =
+    key;
+
+  lastThemeSyncAt =
+    current;
 
   return false;
 }
@@ -2741,49 +3209,60 @@ function shouldSkipThemeSync(payload = {}) {
 function bindThemeEvents(context) {
   const {
     AppCore,
-  } = context;
+  } =
+    context;
 
   bindUniqueEventNames({
     AppCore,
-    label: "theme-sync",
+    label:
+      "theme-sync",
+
     eventNames: [
       EVENT_NAMES.appThemeChange,
       EVENT_NAMES.onionThemeChange,
       EVENT_NAMES.legacyThemeChange,
     ],
-    handler: async (payload) => {
-      if (shouldSkipThemeSync(payload)) {
-        return;
-      }
 
-      const theme =
-        safeText(
-          payload?.theme ||
-            payload?.mode ||
-            payload?.appearance ||
-            payload?.value ||
-            "",
-          ""
-        );
+    handler:
+      async (payload) => {
+        if (shouldSkipThemeSync(payload)) {
+          return;
+        }
 
-      if (theme) {
-        setStateSilent(
-          AppCore,
-          {
-            theme,
-            mode: payload?.mode || theme,
-            appearance: payload?.appearance || payload?.mode || theme,
-          }
-        );
-      }
+        const theme =
+          safeText(
+            payload?.theme ||
+              payload?.mode ||
+              payload?.appearance ||
+              payload?.value ||
+              "",
+            ""
+          );
 
-      await safeSyncUI({
-        ...context,
-        reason: "theme-change",
-        payload,
-        force: true,
-      });
-    },
+        if (theme) {
+          setStateSilent(
+            AppCore,
+            {
+              theme,
+              mode:
+                payload?.mode || theme,
+              appearance:
+                payload?.appearance ||
+                payload?.mode ||
+                theme,
+            }
+          );
+        }
+
+        await safeSyncUI({
+          ...context,
+          reason:
+            "theme-change",
+          payload,
+          force:
+            true,
+        });
+      },
   });
 }
 
@@ -2791,92 +3270,133 @@ function bindAuthEvents(context) {
   const {
     AppCore,
     Toast,
-  } = context;
+  } =
+    context;
 
   bindAppEvent({
     AppCore,
-    eventName: EVENT_NAMES.authLoginSuccess,
-    label: "auth-login-success",
-    handler: async (payload) => {
-      await safeSyncUI({
-        ...context,
-        reason: "auth:login:success",
-        payload,
-        force: true,
-      });
+    eventName:
+      EVENT_NAMES.authLoginSuccess,
 
-      toastOnce(
-        Toast,
-        "success",
-        "Sesión iniciada correctamente.",
-        {
-          title: "Bienvenido",
-          duration: 2600,
-        }
-      );
-    },
+    label:
+      "auth-login-success",
+
+    handler:
+      async (payload) => {
+        await safeSyncUI({
+          ...context,
+
+          reason:
+            "auth:login:success",
+
+          payload,
+          force:
+            true,
+        });
+
+        toastOnce(
+          Toast,
+          "success",
+          "Sesión iniciada correctamente.",
+          {
+            title:
+              "Bienvenido",
+
+            duration:
+              2600,
+          }
+        );
+      },
   });
 
   bindAppEvent({
     AppCore,
-    eventName: EVENT_NAMES.authLogoutSuccess,
-    label: "auth-logout-success",
-    handler: async (payload) => {
-      await safeSyncUI({
-        ...context,
-        reason: "auth:logout:success",
-        payload,
-        force: true,
-      });
+    eventName:
+      EVENT_NAMES.authLogoutSuccess,
 
-      toastOnce(
-        Toast,
-        "info",
-        "Sesión cerrada correctamente.",
-        {
-          title: "Sesión finalizada",
-          duration: 2600,
-        }
-      );
-    },
+    label:
+      "auth-logout-success",
+
+    handler:
+      async (payload) => {
+        await safeSyncUI({
+          ...context,
+
+          reason:
+            "auth:logout:success",
+
+          payload,
+          force:
+            true,
+        });
+
+        toastOnce(
+          Toast,
+          "info",
+          "Sesión cerrada correctamente.",
+          {
+            title:
+              "Sesión finalizada",
+
+            duration:
+              2600,
+          }
+        );
+      },
   });
 
   bindAppEvent({
     AppCore,
-    eventName: EVENT_NAMES.authLogout,
-    label: "auth-logout",
-    handler: async (payload) => {
-      await safeSyncUI({
-        ...context,
-        reason: "auth:logout",
-        payload,
-        force: true,
-      });
-    },
+    eventName:
+      EVENT_NAMES.authLogout,
+
+    label:
+      "auth-logout",
+
+    handler:
+      async (payload) => {
+        await safeSyncUI({
+          ...context,
+
+          reason:
+            "auth:logout",
+
+          payload,
+          force:
+            true,
+        });
+      },
   });
 }
 
 function bindRouteChangeEvents(context) {
   const {
     AppCore,
-  } = context;
+  } =
+    context;
 
   bindAppEvent({
     AppCore,
-    eventName: EVENT_NAMES.appRouteChange,
-    label: "app-route-change-light-sync",
-    handler: async (payload) => {
-      /*
-        Esto viene de AppCore/Router.
-        No lo emitimos desde AppEvents.
-        Sólo hacemos sync visual ligero.
-      */
-      await safeSyncUI({
-        ...context,
-        reason: "app:route:change",
-        payload,
-      });
-    },
+    eventName:
+      EVENT_NAMES.appRouteChange,
+
+    label:
+      "app-route-change-light-sync",
+
+    handler:
+      async (payload) => {
+        /*
+          Esto viene de AppCore/Router.
+          No lo emitimos desde AppEvents.
+          Sólo hacemos sync visual ligero.
+        */
+        await safeSyncUI({
+          ...context,
+          reason:
+            "app:route:change",
+          payload,
+        });
+      },
   });
 }
 
@@ -2885,100 +3405,11 @@ function bindRouterEvents(context) {
     AppCore,
     Router,
     applyPostRenderLoaderPolicy,
-  } = context;
+  } =
+    context;
 
-  const onRouterRendered = (payload = {}) => {
-    const publicPath =
-      resolvePublicPath(
-        AppCore,
-        Router,
-        payload
-      );
-
-    const canonicalPath =
-      resolveCanonicalPath(
-        AppCore,
-        Router,
-        payload
-      );
-
-    if (
-      shouldSkipRouterRenderedSync(
-        canonicalPath,
-        publicPath
-      )
-    ) {
-      return;
-    }
-
-    const routePatch =
-      safePatchRouteState(
-        AppCore,
-        {
-          route: canonicalPath,
-          publicPath,
-        }
-      );
-
-    const loaderPolicyApplied =
-      safeApplyPostRenderLoaderPolicy({
-        AppCore,
-        Router,
-        applyPostRenderLoaderPolicy,
-        payload,
-      });
-
-    /*
-      Importante:
-      NO safeSyncUI aquí.
-      NO app:ui:repair-request aquí.
-      NO app:route:change aquí.
-    */
-    safeEmit(
-      AppCore,
-      EVENT_NAMES.appRouteSynced,
-      {
-        source: EVENTS_SOURCE,
-
-        reason:
-          payload?.phase ||
-          payload?.reason ||
-          "router:rendered",
-
-        route:
-          redactSensitiveText(canonicalPath),
-
-        publicPath:
-          redactSensitiveText(publicPath),
-
-        routeChanged:
-          Boolean(routePatch.routeChanged),
-
-        publicChanged:
-          Boolean(routePatch.publicChanged),
-
-        changed:
-          Boolean(routePatch.changed),
-
-        loaderPolicyApplied,
-
-        silent: true,
-      }
-    );
-  };
-
-  bindAppEvent({
-    AppCore,
-    eventName: EVENT_NAMES.routerRendered,
-    label: "router-rendered-state-loader-sync",
-    handler: onRouterRendered,
-  });
-
-  bindAppEvent({
-    AppCore,
-    eventName: EVENT_NAMES.routerAsyncComplete,
-    label: "router-async-complete-telemetry",
-    handler: (payload) => {
+  const onRouterRendered =
+    (payload = {}) => {
       const publicPath =
         resolvePublicPath(
           AppCore,
@@ -2993,17 +3424,51 @@ function bindRouterEvents(context) {
           payload
         );
 
+      if (
+        shouldSkipRouterRenderedSync(
+          canonicalPath,
+          publicPath
+        )
+      ) {
+        return;
+      }
+
+      const routePatch =
+        safePatchRouteState(
+          AppCore,
+          {
+            route:
+              canonicalPath,
+
+            publicPath,
+          }
+        );
+
+      const loaderPolicyApplied =
+        safeApplyPostRenderLoaderPolicy({
+          AppCore,
+          Router,
+          applyPostRenderLoaderPolicy,
+          payload,
+        });
+
       /*
-        Async complete sólo telemetría.
-        No reparamos UI ni shell aquí.
+        Importante:
+        NO safeSyncUI aquí.
+        NO app:ui:repair-request aquí.
+        NO app:route:change aquí.
       */
       safeEmit(
         AppCore,
         EVENT_NAMES.appRouteSynced,
         {
-          source: EVENTS_SOURCE,
+          source:
+            EVENTS_SOURCE,
 
-          reason: "router:render:async-complete",
+          reason:
+            payload?.phase ||
+            payload?.reason ||
+            "router:rendered",
 
           route:
             redactSensitiveText(canonicalPath),
@@ -3011,25 +3476,104 @@ function bindRouterEvents(context) {
           publicPath:
             redactSensitiveText(publicPath),
 
-          silent: true,
+          routeChanged:
+            Boolean(routePatch.routeChanged),
+
+          publicChanged:
+            Boolean(routePatch.publicChanged),
+
+          changed:
+            Boolean(routePatch.changed),
+
+          loaderPolicyApplied,
+
+          silent:
+            true,
         }
       );
-    },
+    };
+
+  bindAppEvent({
+    AppCore,
+    eventName:
+      EVENT_NAMES.routerRendered,
+
+    label:
+      "router-rendered-state-loader-sync",
+
+    handler:
+      onRouterRendered,
   });
 
   bindAppEvent({
     AppCore,
-    eventName: EVENT_NAMES.routerShellState,
-    label: "router-shell-state-noop",
-    handler: () => {
-      /*
-        NOOP intencionado.
+    eventName:
+      EVENT_NAMES.routerAsyncComplete,
 
-        router:shell:state puede venir de Router.repairShell().
-        Si aquí sincronizamos UI, reentramos en:
-          shell state -> sync UI -> repair shell -> shell state...
-      */
-    },
+    label:
+      "router-async-complete-telemetry",
+
+    handler:
+      (payload) => {
+        const publicPath =
+          resolvePublicPath(
+            AppCore,
+            Router,
+            payload
+          );
+
+        const canonicalPath =
+          resolveCanonicalPath(
+            AppCore,
+            Router,
+            payload
+          );
+
+        /*
+          Async complete sólo telemetría.
+          No reparamos UI ni shell aquí.
+        */
+        safeEmit(
+          AppCore,
+          EVENT_NAMES.appRouteSynced,
+          {
+            source:
+              EVENTS_SOURCE,
+
+            reason:
+              "router:render:async-complete",
+
+            route:
+              redactSensitiveText(canonicalPath),
+
+            publicPath:
+              redactSensitiveText(publicPath),
+
+            silent:
+              true,
+          }
+        );
+      },
+  });
+
+  bindAppEvent({
+    AppCore,
+    eventName:
+      EVENT_NAMES.routerShellState,
+
+    label:
+      "router-shell-state-noop",
+
+    handler:
+      () => {
+        /*
+          NOOP intencionado.
+
+          router:shell:state puede venir de Router.repairShell().
+          Si aquí sincronizamos UI, reentramos en:
+            shell state -> sync UI -> repair shell -> shell state...
+        */
+      },
   });
 }
 
@@ -3050,7 +3594,8 @@ function exposeDebugApi(AppCore = null) {
   }
 
   const api = {
-    version: APP_EVENTS_VERSION,
+    version:
+      APP_EVENTS_VERSION,
 
     getSnapshot:
       getAppEventsSnapshot,
@@ -3073,30 +3618,21 @@ function exposeDebugApi(AppCore = null) {
 
   try {
     if (isBrowser()) {
-      window.__ONION_APP_EVENTS__ = api;
+      window.__ONION_APP_EVENTS__ =
+        api;
     }
   } catch {}
 
   try {
-    if (
-      AppCore &&
-      typeof AppCore === "object" &&
-      Object.isExtensible(AppCore)
-    ) {
-      Object.defineProperty(
-        AppCore,
-        "AppEvents",
-        {
-          value: api,
-          configurable: true,
-          enumerable: false,
-          writable: true,
-        }
-      );
-    }
+    safeDefineValue(
+      AppCore,
+      "AppEvents",
+      api
+    );
   } catch {}
 
-  debugApiInstalled = true;
+  debugApiInstalled =
+    true;
 
   return api;
 }
@@ -3138,7 +3674,8 @@ export function bindAppEvents({
     return true;
   }
 
-  eventsBindingInFlight = true;
+  eventsBindingInFlight =
+    true;
 
   const finalScope =
     safeText(scope, DEFAULT_SCOPE);
@@ -3173,8 +3710,11 @@ export function bindAppEvents({
     bindRouteChangeEvents(context);
     bindRouterEvents(context);
 
-    eventsBound = true;
-    boundScope = finalScope;
+    eventsBound =
+      true;
+
+    boundScope =
+      finalScope;
 
     exposeDebugApi(AppCore);
 
@@ -3182,10 +3722,17 @@ export function bindAppEvents({
       AppCore,
       EVENT_NAMES.appEventsBound,
       {
-        version: APP_EVENTS_VERSION,
-        scope: boundScope,
-        at: safeIsoDate(),
-        boundEvents: [...eventState.boundEvents],
+        version:
+          APP_EVENTS_VERSION,
+
+        scope:
+          boundScope,
+
+        at:
+          safeIsoDate(),
+
+        boundEvents:
+          [...eventState.boundEvents],
       }
     );
 
@@ -3199,8 +3746,11 @@ export function bindAppEvents({
       AppCore,
       "App events ready.",
       {
-        scope: boundScope,
-        boundEvents: [...eventState.boundEvents],
+        scope:
+          boundScope,
+
+        boundEvents:
+          [...eventState.boundEvents],
       }
     );
   } catch (error) {
@@ -3212,8 +3762,11 @@ export function bindAppEvents({
 
     boundEventKeys.clear();
 
-    eventsBound = false;
-    boundScope = "";
+    eventsBound =
+      false;
+
+    boundScope =
+      "";
 
     recordError(
       AppCore,
@@ -3223,7 +3776,8 @@ export function bindAppEvents({
 
     return false;
   } finally {
-    eventsBindingInFlight = false;
+    eventsBindingInFlight =
+      false;
   }
 
   return true;
@@ -3238,20 +3792,30 @@ export function unbindAppEvents(AppCore = null) {
 
   boundEventKeys.clear();
 
-  eventsBound = false;
-  boundScope = "";
+  eventsBound =
+    false;
 
-  langChangeInFlight = false;
-  eventsBindingInFlight = false;
+  boundScope =
+    "";
 
-  eventState.boundEvents = [];
+  langChangeInFlight =
+    false;
+
+  eventsBindingInFlight =
+    false;
+
+  eventState.boundEvents =
+    [];
 
   safeEmit(
     AppCore,
     EVENT_NAMES.appEventsUnbound,
     {
-      version: APP_EVENTS_VERSION,
-      at: safeIsoDate(),
+      version:
+        APP_EVENTS_VERSION,
+
+      at:
+        safeIsoDate(),
     }
   );
 
@@ -3265,7 +3829,8 @@ export function unbindAppEvents(AppCore = null) {
 
 export function getAppEventsSnapshot() {
   return sanitizePayload({
-    version: APP_EVENTS_VERSION,
+    version:
+      APP_EVENTS_VERSION,
 
     eventsBound:
       Boolean(eventsBound),
@@ -3373,32 +3938,59 @@ export function getAppEventsSnapshot() {
 }
 
 export function resetAppEventsState() {
-  langChangeInFlight = false;
-  lastLangRenderAt = 0;
+  langChangeInFlight =
+    false;
 
-  lastRouterRenderedKey = "";
-  lastRouterRenderedAt = 0;
+  lastLangRenderAt =
+    0;
 
-  lastToastKey = "";
-  lastToastAt = 0;
+  lastRouterRenderedKey =
+    "";
 
-  lastUiSyncKey = "";
-  lastUiSyncAt = 0;
+  lastRouterRenderedAt =
+    0;
 
-  lastThemeSyncKey = "";
-  lastThemeSyncAt = 0;
+  lastToastKey =
+    "";
 
-  lastEmitKey = "";
-  lastEmitAt = 0;
+  lastToastAt =
+    0;
 
-  eventState.totalHandled = 0;
-  eventState.totalErrors = 0;
+  lastUiSyncKey =
+    "";
 
-  eventState.lastEvent = "";
-  eventState.lastEventAt = 0;
+  lastUiSyncAt =
+    0;
 
-  eventState.lastError = null;
-  eventState.recent = [];
+  lastThemeSyncKey =
+    "";
+
+  lastThemeSyncAt =
+    0;
+
+  lastEmitKey =
+    "";
+
+  lastEmitAt =
+    0;
+
+  eventState.totalHandled =
+    0;
+
+  eventState.totalErrors =
+    0;
+
+  eventState.lastEvent =
+    "";
+
+  eventState.lastEventAt =
+    0;
+
+  eventState.lastError =
+    null;
+
+  eventState.recent =
+    [];
 
   return getAppEventsSnapshot();
 }

@@ -98,63 +98,75 @@ const BOOT_CONTEXT_KEY =
 
 const FALLBACK_PROTECTED_ROUTES = Object.freeze([
   Object.freeze({
-    key: "activation",
+    key:
+      "activation",
 
-    path: "/activate-account",
+    path:
+      "/activate-account",
 
-    paths: ACTIVATION_PATHS,
+    paths:
+      ACTIVATION_PATHS,
 
-    windowKeys: Object.freeze([
-      "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-    ]),
+    windowKeys:
+      Object.freeze([
+        "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+      ]),
 
-    scrubbedHistoryFlags: Object.freeze([
-      "scrubbedActivationToken",
-      "activationTokenScrubbed",
-      "scrubbedActivateAccountToken",
-      "scrubbedPublicTokenRoute",
-      "scrubbedTokenRoute",
-    ]),
+    scrubbedHistoryFlags:
+      Object.freeze([
+        "scrubbedActivationToken",
+        "activationTokenScrubbed",
+        "scrubbedActivateAccountToken",
+        "scrubbedPublicTokenRoute",
+        "scrubbedTokenRoute",
+      ]),
 
-    tokenParamNames: Object.freeze([
-      "token",
-      "activationToken",
-      "activateToken",
-      "code",
-      "t",
-    ]),
+    tokenParamNames:
+      Object.freeze([
+        "token",
+        "activationToken",
+        "activateToken",
+        "code",
+        "t",
+      ]),
   }),
 
   Object.freeze({
-    key: "resetConfirm",
+    key:
+      "resetConfirm",
 
-    path: "/reset-password/confirm",
+    path:
+      "/reset-password/confirm",
 
-    paths: RESET_CONFIRM_PATHS,
+    paths:
+      RESET_CONFIRM_PATHS,
 
-    windowKeys: Object.freeze([
-      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-      "__ONION_RESET_CONFIRM_INITIAL_URL__",
-    ]),
+    windowKeys:
+      Object.freeze([
+        "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+        "__ONION_RESET_CONFIRM_INITIAL_URL__",
+      ]),
 
-    scrubbedHistoryFlags: Object.freeze([
-      "scrubbedResetToken",
-      "resetTokenScrubbed",
-      "scrubbedResetConfirmToken",
-      "scrubbedPasswordResetToken",
-      "scrubbedResetPasswordToken",
-      "scrubbedPublicTokenRoute",
-      "scrubbedTokenRoute",
-    ]),
+    scrubbedHistoryFlags:
+      Object.freeze([
+        "scrubbedResetToken",
+        "resetTokenScrubbed",
+        "scrubbedResetConfirmToken",
+        "scrubbedPasswordResetToken",
+        "scrubbedResetPasswordToken",
+        "scrubbedPublicTokenRoute",
+        "scrubbedTokenRoute",
+      ]),
 
-    tokenParamNames: Object.freeze([
-      "token",
-      "resetToken",
-      "passwordResetToken",
-      "confirmToken",
-      "code",
-      "t",
-    ]),
+    tokenParamNames:
+      Object.freeze([
+        "token",
+        "resetToken",
+        "passwordResetToken",
+        "confirmToken",
+        "code",
+        "t",
+      ]),
   }),
 ]);
 
@@ -185,37 +197,68 @@ const GENERIC_SENSITIVE_PARAM_NAMES = Object.freeze([
 ]);
 
 const ROUTER_BOOT_EVENTS = Object.freeze({
-  configured: "app:router:configured",
-  bound: "app:router:bound",
-  initialUrlCaptured: "app:router:initial-url:captured",
-  initialRenderStart: "app:router:initial-render:start",
-  initialRenderDone: "app:router:initial-render:done",
-  initialRenderError: "app:router:initial-render:error",
-  initialRenderFallback: "app:router:initial-render:fallback",
-  stateSynced: "app:router:state-synced",
-  reset: "app:router:bootstrap:reset",
-  debugReady: "app:router:debug:ready",
+  configured:
+    "app:router:configured",
+
+  bound:
+    "app:router:bound",
+
+  initialUrlCaptured:
+    "app:router:initial-url:captured",
+
+  initialRenderStart:
+    "app:router:initial-render:start",
+
+  initialRenderDone:
+    "app:router:initial-render:done",
+
+  initialRenderError:
+    "app:router:initial-render:error",
+
+  initialRenderFallback:
+    "app:router:initial-render:fallback",
+
+  stateSynced:
+    "app:router:state-synced",
+
+  reset:
+    "app:router:bootstrap:reset",
+
+  debugReady:
+    "app:router:debug:ready",
 });
 
 const SENSITIVE_OBJECT_KEY_RE =
   /token|secret|password|authorization|credential|jwt|bearer|otp|code|session|refresh/i;
 
-const PUBLIC_USERNAME_RE = /^@[A-Za-z0-9._-]{1,80}$/;
+const PUBLIC_USERNAME_RE =
+  /^@[A-Za-z0-9._-]{1,80}$/;
 
-const EMIT_DEDUPE_MS = 80;
-const MAX_SANITIZE_DEPTH = 8;
-const MAX_SANITIZE_ARRAY = 120;
+const EMIT_DEDUPE_MS =
+  80;
+
+const MAX_SANITIZE_DEPTH =
+  8;
+
+const MAX_SANITIZE_ARRAY =
+  120;
 
 /* =========================================================
    RUNTIME DEPENDENCIES
 ========================================================= */
 
-let RuntimeAppCore = ImportedAppCore;
-let RuntimeRouter = ImportedRouter;
-let RuntimeAuth = ImportedAuth;
+let RuntimeAppCore =
+  ImportedAppCore;
+
+let RuntimeRouter =
+  ImportedRouter;
+
+let RuntimeAuth =
+  ImportedAuth;
 
 function resolveRuntimeDeps(deps = {}) {
-  const safeDeps = ensureObject(deps);
+  const safeDeps =
+    ensureObject(deps);
 
   RuntimeAppCore =
     safeDeps.AppCore ||
@@ -244,9 +287,14 @@ function resolveRuntimeDeps(deps = {}) {
     ImportedAuth;
 
   return {
-    AppCore: RuntimeAppCore,
-    Router: RuntimeRouter,
-    Auth: RuntimeAuth,
+    AppCore:
+      RuntimeAppCore,
+
+    Router:
+      RuntimeRouter,
+
+    Auth:
+      RuntimeAuth,
 
     applyPostRenderLoaderPolicy:
       safeDeps.applyPostRenderLoaderPolicy ||
@@ -270,40 +318,78 @@ function resolveRuntimeDeps(deps = {}) {
    STATE
 ========================================================= */
 
-let configured = false;
-let bound = false;
-let firstRenderDone = false;
-let initialRenderPromise = null;
-let renderCycle = 0;
+let configured =
+  false;
 
-let lastEmitSignature = "";
-let lastEmitSignatureAt = 0;
+let bound =
+  false;
 
-const routerRegistryConflicts = new Set();
+let firstRenderDone =
+  false;
+
+let initialRenderPromise =
+  null;
+
+let renderCycle =
+  0;
+
+let lastEmitSignature =
+  "";
+
+let lastEmitSignatureAt =
+  0;
+
+const routerRegistryConflicts =
+  new Set();
 
 const routerBootState = {
-  lastInitialPath: "",
-  lastInitialPublicPath: "",
-  lastInitialCanonicalPath: "",
+  lastInitialPath:
+    "",
 
-  lastRenderedPath: "",
-  lastRenderedPublicPath: "",
+  lastInitialPublicPath:
+    "",
 
-  lastResolvedCanonicalPath: "",
-  lastResolvedPublicPath: "",
+  lastInitialCanonicalPath:
+    "",
 
-  lastRenderAt: 0,
-  lastRenderOk: false,
-  lastRenderError: null,
+  lastRenderedPath:
+    "",
 
-  lastProtectedRouteKey: "",
-  capturedInitialUrlAt: 0,
-  lastInitialCaptureSignature: "",
+  lastRenderedPublicPath:
+    "",
 
-  lastConfiguredAt: 0,
-  lastBoundAt: 0,
+  lastResolvedCanonicalPath:
+    "",
 
-  registryExposedAt: 0,
+  lastResolvedPublicPath:
+    "",
+
+  lastRenderAt:
+    0,
+
+  lastRenderOk:
+    false,
+
+  lastRenderError:
+    null,
+
+  lastProtectedRouteKey:
+    "",
+
+  capturedInitialUrlAt:
+    0,
+
+  lastInitialCaptureSignature:
+    "",
+
+  lastConfiguredAt:
+    0,
+
+  lastBoundAt:
+    0,
+
+  registryExposedAt:
+    0,
 };
 
 /* =========================================================
@@ -353,16 +439,18 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const text =
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return text || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
-  const number = Number(value);
+  const number =
+    Number(value);
 
   return Number.isFinite(number)
     ? number
@@ -392,11 +480,15 @@ function safeNow() {
 }
 
 function unique(values = []) {
-  const result = [];
-  const seen = new Set();
+  const result =
+    [];
+
+  const seen =
+    new Set();
 
   for (const value of safeArray(values)) {
-    const text = safeText(value, "");
+    const text =
+      safeText(value, "");
 
     if (
       text &&
@@ -436,9 +528,12 @@ function safeDefineValue(target, key, value) {
       key,
       {
         value,
-        configurable: true,
-        enumerable: false,
-        writable: true,
+        configurable:
+          true,
+        enumerable:
+          false,
+        writable:
+          true,
       }
     );
 
@@ -446,7 +541,9 @@ function safeDefineValue(target, key, value) {
   } catch {}
 
   try {
-    target[key] = value;
+    target[key] =
+      value;
+
     return true;
   } catch {}
 
@@ -458,7 +555,8 @@ function safeCreateCustomEvent(name = "", detail = {}) {
     return null;
   }
 
-  const eventName = safeText(name, "");
+  const eventName =
+    safeText(name, "");
 
   if (!eventName) {
     return null;
@@ -476,7 +574,8 @@ function safeCreateCustomEvent(name = "", detail = {}) {
   } catch {}
 
   try {
-    const event = document.createEvent("CustomEvent");
+    const event =
+      document.createEvent("CustomEvent");
 
     event.initCustomEvent(
       eventName,
@@ -513,11 +612,13 @@ function normalizePathnameOnly(pathname = "/") {
       .replace(/\/{2,}/g, "/");
 
   if (!value) {
-    value = "/";
+    value =
+      "/";
   }
 
   if (!value.startsWith("/")) {
-    value = `/${value}`;
+    value =
+      `/${value}`;
   }
 
   const segments =
@@ -525,7 +626,8 @@ function normalizePathnameOnly(pathname = "/") {
       .split("/")
       .filter(Boolean);
 
-  const output = [];
+  const output =
+    [];
 
   for (const segment of segments) {
     if (segment === ".") {
@@ -540,24 +642,29 @@ function normalizePathnameOnly(pathname = "/") {
     output.push(segment);
   }
 
-  value = `/${output.join("/")}`;
+  value =
+    `/${output.join("/")}`;
 
   if (!value) {
-    value = "/";
+    value =
+      "/";
   }
 
   if (
     value.length > 1 &&
     value.endsWith("/")
   ) {
-    value = value.replace(/\/+$/g, "") || "/";
+    value =
+      value.replace(/\/+$/g, "") ||
+      "/";
   }
 
   return value;
 }
 
 function normalizeSearch(search = "") {
-  const value = safeText(search, "");
+  const value =
+    safeText(search, "");
 
   if (!value) {
     return "";
@@ -569,7 +676,8 @@ function normalizeSearch(search = "") {
 }
 
 function normalizeHash(hash = "") {
-  const value = safeText(hash, "");
+  const value =
+    safeText(hash, "");
 
   if (!value) {
     return "";
@@ -581,7 +689,8 @@ function normalizeHash(hash = "") {
 }
 
 function isHashRouterPath(value = "") {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   return (
     raw.startsWith("#/") ||
@@ -590,7 +699,8 @@ function isHashRouterPath(value = "") {
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return "/";
@@ -608,7 +718,8 @@ function normalizeHashRouterPath(value = "") {
 }
 
 function splitPath(value = "/") {
-  const raw = safeText(value, "/");
+  const raw =
+    safeText(value, "/");
 
   if (isHashRouterPath(raw)) {
     return splitPath(
@@ -616,22 +727,37 @@ function splitPath(value = "/") {
     );
   }
 
-  let pathname = raw;
-  let search = "";
-  let hash = "";
+  let pathname =
+    raw;
 
-  const hashIndex = pathname.indexOf("#");
+  let search =
+    "";
+
+  let hash =
+    "";
+
+  const hashIndex =
+    pathname.indexOf("#");
 
   if (hashIndex >= 0) {
-    hash = pathname.slice(hashIndex);
-    pathname = pathname.slice(0, hashIndex) || "/";
+    hash =
+      pathname.slice(hashIndex);
+
+    pathname =
+      pathname.slice(0, hashIndex) ||
+      "/";
   }
 
-  const searchIndex = pathname.indexOf("?");
+  const searchIndex =
+    pathname.indexOf("?");
 
   if (searchIndex >= 0) {
-    search = pathname.slice(searchIndex);
-    pathname = pathname.slice(0, searchIndex) || "/";
+    search =
+      pathname.slice(searchIndex);
+
+    pathname =
+      pathname.slice(0, searchIndex) ||
+      "/";
   }
 
   return {
@@ -647,7 +773,8 @@ function splitPath(value = "/") {
 }
 
 function normalizePath(path = "/") {
-  const raw = safeText(path, "/");
+  const raw =
+    safeText(path, "/");
 
   if (!raw) {
     return "/";
@@ -659,7 +786,11 @@ function normalizePath(path = "/") {
 
   try {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed = new URL(raw, getBaseOrigin());
+      const parsed =
+        new URL(
+          raw,
+          getBaseOrigin()
+        );
 
       if (parsed.origin !== getBaseOrigin()) {
         return "/";
@@ -682,7 +813,8 @@ function normalizePath(path = "/") {
     pathname,
     search,
     hash,
-  } = splitPath(raw);
+  } =
+    splitPath(raw);
 
   return `${pathname}${search}${hash}`;
 }
@@ -715,13 +847,16 @@ function getBrowserPath() {
 
   try {
     const pathname =
-      window.location.pathname || DEFAULT_ROUTE;
+      window.location.pathname ||
+      DEFAULT_ROUTE;
 
     const search =
-      window.location.search || "";
+      window.location.search ||
+      "";
 
     const hash =
-      window.location.hash || "";
+      window.location.hash ||
+      "";
 
     if (
       hash &&
@@ -739,7 +874,8 @@ function getBrowserPath() {
 }
 
 function getPathFromUrlLike(value = "") {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return "";
@@ -750,7 +886,11 @@ function getPathFromUrlLike(value = "") {
   }
 
   try {
-    const parsed = new URL(raw, getBaseOrigin());
+    const parsed =
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
 
     if (parsed.origin !== getBaseOrigin()) {
       return DEFAULT_ROUTE;
@@ -788,13 +928,15 @@ function shouldUsePath(value) {
 ========================================================= */
 
 function isUsernameSegment(segment = "") {
-  const raw = safeText(segment, "");
+  const raw =
+    safeText(segment, "");
 
   return PUBLIC_USERNAME_RE.test(raw);
 }
 
 function getFirstPathSegment(pathname = "/") {
-  const clean = normalizePathnameOnly(pathname);
+  const clean =
+    normalizePathnameOnly(pathname);
 
   const segments =
     clean
@@ -816,7 +958,8 @@ function isUsernameScopedPublicPath(path = "") {
 }
 
 function stripUsernamePrefixFromPathname(pathname = "/") {
-  const clean = normalizePathnameOnly(pathname);
+  const clean =
+    normalizePathnameOnly(pathname);
 
   const segments =
     clean
@@ -827,11 +970,35 @@ function stripUsernamePrefixFromPathname(pathname = "/") {
     segments.length > 0 &&
     isUsernameSegment(segments[0])
   ) {
-    const rest = segments.slice(1).join("/");
+    const rest =
+      segments.slice(1).join("/");
 
     return rest
       ? normalizePathnameOnly(`/${rest}`)
       : "/";
+  }
+
+  return clean;
+}
+
+function canonicalizeProtectedAliasPath(pathname = DEFAULT_ROUTE) {
+  const clean =
+    normalizePathnameOnly(pathname || DEFAULT_ROUTE);
+
+  for (const config of PROTECTED_ROUTES) {
+    for (const routePath of safeArray(config.paths)) {
+      if (
+        clean === routePath ||
+        clean.startsWith(`${routePath}/`)
+      ) {
+        const rest =
+          clean.slice(routePath.length);
+
+        return normalizePathnameOnly(
+          `${config.path}${rest}`
+        );
+      }
+    }
   }
 
   return clean;
@@ -843,16 +1010,20 @@ function toCanonicalPath(path = DEFAULT_ROUTE) {
 
   const {
     pathname,
-    search,
-    hash,
-  } = splitPath(normalized);
+  } =
+    splitPath(normalized);
 
-  const canonicalPathname =
+  const withoutUsername =
     stripUsernamePrefixFromPathname(pathname);
 
-  return normalizePath(
-    `${canonicalPathname}${search}${hash}`
-  );
+  /*
+    canonicalPath:
+    - sin /@usuario
+    - sin query
+    - sin hash
+    - aliases técnicos colapsados
+  */
+  return canonicalizeProtectedAliasPath(withoutUsername);
 }
 
 function toPublicPath(path = DEFAULT_ROUTE) {
@@ -878,17 +1049,24 @@ function normalizeProtectedRouteConfigs(configs = []) {
   return Object.freeze(
     safeArray(configs)
       .map((config) => {
-        const item = ensureObject(config);
+        const item =
+          ensureObject(config);
 
         const configuredPaths =
           unique([
             ...safeArray(item.paths),
+            ...safeArray(item.aliases),
             item.path,
             item.route,
             item.canonicalPath,
           ])
-            .map((path) => normalizePathnameOnly(path))
-            .filter((path) => path && path !== "/");
+            .map((path) =>
+              normalizePathnameOnly(path)
+            )
+            .filter((path) =>
+              path &&
+              path !== "/"
+            );
 
         const detectedKey =
           safeText(
@@ -900,20 +1078,23 @@ function normalizeProtectedRouteConfigs(configs = []) {
             ""
           );
 
-        let paths = configuredPaths;
+        let paths =
+          configuredPaths;
 
         if (detectedKey === "activation") {
-          paths = unique([
-            ...paths,
-            ...ACTIVATION_PATHS,
-          ]);
+          paths =
+            unique([
+              ...paths,
+              ...ACTIVATION_PATHS,
+            ]);
         }
 
         if (detectedKey === "resetConfirm") {
-          paths = unique([
-            ...paths,
-            ...RESET_CONFIRM_PATHS,
-          ]);
+          paths =
+            unique([
+              ...paths,
+              ...RESET_CONFIRM_PATHS,
+            ]);
         }
 
         if (!paths.length) {
@@ -993,6 +1174,8 @@ function normalizeProtectedRouteConfigs(configs = []) {
         const scrubbedHistoryFlags =
           unique([
             ...safeArray(item.scrubbedHistoryFlags),
+            ...safeArray(item.scrubbedHistoryKeys),
+            ...safeArray(item.scrubbedStateKeys),
             item.scrubbedHistoryFlag,
             ...(
               key === "activation"
@@ -1024,7 +1207,8 @@ function normalizeProtectedRouteConfigs(configs = []) {
           ...item,
 
           key,
-          path: primaryPath,
+          path:
+            primaryPath,
 
           paths:
             Object.freeze(
@@ -1069,61 +1253,71 @@ function escapeRegExp(value = "") {
 }
 
 function redactTokenInText(value = "") {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return "";
   }
 
-  let output = raw;
+  let output =
+    raw;
 
   for (const config of PROTECTED_ROUTES) {
     for (const path of safeArray(config?.paths)) {
-      const escapedPath = escapeRegExp(path);
+      const escapedPath =
+        escapeRegExp(path);
 
       try {
-        output = output.replace(
-          new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
-          "$1/***"
-        );
+        output =
+          output.replace(
+            new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
+            "$1/***"
+          );
       } catch {}
     }
 
     for (const name of config.tokenParamNames || []) {
       try {
-        const escapedName = escapeRegExp(name);
+        const escapedName =
+          escapeRegExp(name);
 
-        output = output.replace(
-          new RegExp(`([?&#]${escapedName}=)([^&#\\s]+)`, "gi"),
-          "$1***"
-        );
+        output =
+          output.replace(
+            new RegExp(`([?&#]${escapedName}=)([^&#\\s]+)`, "gi"),
+            "$1***"
+          );
       } catch {}
     }
   }
 
   for (const name of GENERIC_SENSITIVE_PARAM_NAMES) {
     try {
-      const escapedName = escapeRegExp(name);
+      const escapedName =
+        escapeRegExp(name);
 
-      output = output.replace(
-        new RegExp(`([?&#]${escapedName}=)([^&#\\s]+)`, "gi"),
-        "$1***"
-      );
+      output =
+        output.replace(
+          new RegExp(`([?&#]${escapedName}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
     } catch {}
   }
 
   try {
-    output = output.replace(
-      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-      "$1***"
-    );
+    output =
+      output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
   } catch {}
 
   try {
-    output = output.replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    );
+    output =
+      output.replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
+      );
   } catch {}
 
   return output;
@@ -1205,13 +1399,18 @@ function sanitizePayload(value, depth = 0) {
 
   if (isDomNodeLike(value)) {
     return {
-      node: safeText(value.nodeName, "Node"),
-      id: safeText(value.id, ""),
-      className: safeText(
-        value.className?.baseVal ||
-          value.className,
-        ""
-      ),
+      node:
+        safeText(value.nodeName, "Node"),
+
+      id:
+        safeText(value.id, ""),
+
+      className:
+        safeText(
+          value.className?.baseVal ||
+            value.className,
+          ""
+        ),
     };
   }
 
@@ -1223,12 +1422,16 @@ function sanitizePayload(value, depth = 0) {
     return value
       .slice(0, MAX_SANITIZE_ARRAY)
       .map((item) =>
-        sanitizePayload(item, depth + 1)
+        sanitizePayload(
+          item,
+          depth + 1
+        )
       );
   }
 
   if (isObject(value)) {
-    const output = {};
+    const output =
+      {};
 
     for (const [key, item] of Object.entries(value)) {
       if (SENSITIVE_OBJECT_KEY_RE.test(key)) {
@@ -1238,9 +1441,11 @@ function sanitizePayload(value, depth = 0) {
           item === "" ||
           typeof item === "boolean"
         ) {
-          output[key] = item;
+          output[key] =
+            item;
         } else {
-          output[key] = "***";
+          output[key] =
+            "***";
         }
 
         continue;
@@ -1296,7 +1501,8 @@ function safeWarn(...args) {
       sanitizePayload(item)
     );
 
-  let coreLogged = false;
+  let coreLogged =
+    false;
 
   try {
     if (isFunction(RuntimeAppCore?.utils?.warn)) {
@@ -1305,10 +1511,12 @@ function safeWarn(...args) {
         ...cleanArgs
       );
 
-      coreLogged = true;
+      coreLogged =
+        true;
     }
   } catch {
-    coreLogged = false;
+    coreLogged =
+      false;
   }
 
   if (coreLogged) {
@@ -1329,7 +1537,8 @@ function safeError(...args) {
       sanitizePayload(item)
     );
 
-  let coreLogged = false;
+  let coreLogged =
+    false;
 
   try {
     if (isFunction(RuntimeAppCore?.utils?.error)) {
@@ -1338,10 +1547,12 @@ function safeError(...args) {
         ...cleanArgs
       );
 
-      coreLogged = true;
+      coreLogged =
+        true;
     }
   } catch {
-    coreLogged = false;
+    coreLogged =
+      false;
   }
 
   if (coreLogged) {
@@ -1393,7 +1604,8 @@ function shouldDedupeEmit(eventName = "", payload = {}, force = false) {
     payload?.ok === false ? "fail" : "ok",
   ].join("|");
 
-  const now = safeNow();
+  const now =
+    safeNow();
 
   if (
     signature &&
@@ -1403,20 +1615,25 @@ function shouldDedupeEmit(eventName = "", payload = {}, force = false) {
     return true;
   }
 
-  lastEmitSignature = signature;
-  lastEmitSignatureAt = now;
+  lastEmitSignature =
+    signature;
+
+  lastEmitSignatureAt =
+    now;
 
   return false;
 }
 
 function safeEmit(eventName, payload = {}, options = {}) {
-  const name = safeText(eventName, "");
+  const name =
+    safeText(eventName, "");
 
   if (!name) {
     return false;
   }
 
-  const opts = ensureObject(options);
+  const opts =
+    ensureObject(options);
 
   if (
     opts.dedupe !== false &&
@@ -1427,24 +1644,33 @@ function safeEmit(eventName, payload = {}, options = {}) {
 
   const cleanPayload =
     sanitizePayload({
-      version: ROUTER_BOOTSTRAP_VERSION,
-      source: ROUTER_SOURCE,
+      version:
+        ROUTER_BOOTSTRAP_VERSION,
+
+      source:
+        ROUTER_SOURCE,
+
       ...ensureObject(payload),
     });
 
-  let busAvailable = false;
-  let busEmitted = false;
+  let busAvailable =
+    false;
+
+  let busEmitted =
+    false;
 
   try {
     if (isFunction(RuntimeAppCore?.events?.emit)) {
-      busAvailable = true;
+      busAvailable =
+        true;
 
       RuntimeAppCore.events.emit(
         name,
         cleanPayload
       );
 
-      busEmitted = true;
+      busEmitted =
+        true;
     }
   } catch {}
 
@@ -1482,7 +1708,8 @@ function isRouteScrubbed(config = null) {
     return false;
   }
 
-  const historyState = getHistoryState();
+  const historyState =
+    getHistoryState();
 
   for (const flag of safeArray(config.scrubbedHistoryFlags)) {
     if (!historyState[flag]) {
@@ -1536,7 +1763,10 @@ function matchesProtectedRoute(config, pathOrUrl = "") {
 function getProtectedRouteConfig(value = "") {
   return (
     PROTECTED_ROUTES.find((config) =>
-      matchesProtectedRoute(config, value)
+      matchesProtectedRoute(
+        config,
+        value
+      )
     ) || null
   );
 }
@@ -1571,7 +1801,10 @@ function getPathToken(config, value = "") {
         ""
       );
     } catch {
-      return safeText(token, "");
+      return safeText(
+        token,
+        ""
+      );
     }
   }
 
@@ -1580,7 +1813,8 @@ function getPathToken(config, value = "") {
 
 function hasTokenInSearch(search = "", names = []) {
   try {
-    const params = new URLSearchParams(search || "");
+    const params =
+      new URLSearchParams(search || "");
 
     return safeArray(names).some((name) =>
       Boolean(
@@ -1604,7 +1838,8 @@ function hasProtectedTokenInUrlLike(config, value = "") {
     return false;
   }
 
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return false;
@@ -1615,7 +1850,11 @@ function hasProtectedTokenInUrlLike(config, value = "") {
   }
 
   try {
-    const parsed = new URL(raw, getBaseOrigin());
+    const parsed =
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
 
     if (parsed.origin !== getBaseOrigin()) {
       return false;
@@ -1672,7 +1911,8 @@ function hasProtectedTokenInUrlLike(config, value = "") {
 
     return false;
   } catch {
-    const parts = splitPath(raw);
+    const parts =
+      splitPath(raw);
 
     if (
       hasTokenInSearch(
@@ -1704,7 +1944,8 @@ function hasProtectedTokenInUrlLike(config, value = "") {
 }
 
 function isProtectedPublicTokenPath(path = "") {
-  const config = getProtectedRouteConfig(path);
+  const config =
+    getProtectedRouteConfig(path);
 
   return Boolean(
     config &&
@@ -1768,7 +2009,8 @@ function setWindowValue(key = "", value = "", onlyIfMissing = false) {
       return true;
     }
 
-    window[key] = value;
+    window[key] =
+      value;
 
     return true;
   } catch {
@@ -1777,7 +2019,9 @@ function setWindowValue(key = "", value = "", onlyIfMissing = false) {
 }
 
 function getBootContext() {
-  return ensureObject(getWindowRawValue(BOOT_CONTEXT_KEY));
+  return ensureObject(
+    getWindowRawValue(BOOT_CONTEXT_KEY)
+  );
 }
 
 function setBootContextPatch(patch = {}) {
@@ -1786,12 +2030,14 @@ function setBootContextPatch(patch = {}) {
   }
 
   try {
-    const current = ensureObject(window[BOOT_CONTEXT_KEY]);
+    const current =
+      ensureObject(window[BOOT_CONTEXT_KEY]);
 
-    window[BOOT_CONTEXT_KEY] = {
-      ...current,
-      ...ensureObject(patch),
-    };
+    window[BOOT_CONTEXT_KEY] =
+      {
+        ...current,
+        ...ensureObject(patch),
+      };
 
     return true;
   } catch {
@@ -1806,7 +2052,8 @@ function getStoredInitialUrl(config) {
       : [config?.windowKey].filter(Boolean);
 
   for (const key of keys) {
-    const value = getWindowValue(key);
+    const value =
+      getWindowValue(key);
 
     if (value) {
       return value;
@@ -1822,7 +2069,8 @@ function setStoredInitialUrl(config, value = "") {
       ? config.windowKeys
       : [config?.windowKey].filter(Boolean);
 
-  let wrote = false;
+  let wrote =
+    false;
 
   for (const key of keys) {
     if (
@@ -1832,7 +2080,8 @@ function setStoredInitialUrl(config, value = "") {
         true
       )
     ) {
-      wrote = true;
+      wrote =
+        true;
     }
   }
 
@@ -1853,21 +2102,29 @@ function setGlobalInitialUrl(value = "") {
 
 function getProtectedStoredUrls() {
   return PROTECTED_ROUTES
-    .filter((config) => !isRouteScrubbed(config))
-    .map((config) => getStoredInitialUrl(config))
+    .filter((config) =>
+      !isRouteScrubbed(config)
+    )
+    .map((config) =>
+      getStoredInitialUrl(config)
+    )
     .filter(Boolean);
 }
 
 function setCoreInitialUrl(href = "") {
-  const cleanHref = safeText(href, "");
+  const cleanHref =
+    safeText(href, "");
 
   if (!cleanHref) {
     return false;
   }
 
   const payload = {
-    bootInitialUrl: cleanHref,
-    bootInitialPath: getPathFromUrlLike(cleanHref),
+    bootInitialUrl:
+      cleanHref,
+
+    bootInitialPath:
+      getPathFromUrlLike(cleanHref),
   };
 
   try {
@@ -1876,9 +2133,12 @@ function setCoreInitialUrl(href = "") {
       {
         source:
           `${ROUTER_SOURCE}:initial-url`,
-        emit: false,
-        emitState: false,
-        silent: true,
+        emit:
+          false,
+        emitState:
+          false,
+        silent:
+          true,
       }
     );
   } catch {}
@@ -1904,7 +2164,8 @@ function captureInitialBrowserUrl() {
   }
 
   try {
-    const href = getBrowserHref();
+    const href =
+      getBrowserHref();
 
     if (!href) {
       return false;
@@ -1913,8 +2174,11 @@ function captureInitialBrowserUrl() {
     setGlobalInitialUrl(href);
     setCoreInitialUrl(href);
 
-    let protectedCaptured = false;
-    let protectedRouteKey = "";
+    let protectedCaptured =
+      false;
+
+    let protectedRouteKey =
+      "";
 
     for (const config of PROTECTED_ROUTES) {
       if (isRouteScrubbed(config)) {
@@ -1931,8 +2195,11 @@ function captureInitialBrowserUrl() {
           href
         );
 
-        protectedCaptured = true;
-        protectedRouteKey = config.key || "";
+        protectedCaptured =
+          true;
+
+        protectedRouteKey =
+          config.key || "";
       }
     }
 
@@ -1956,6 +2223,7 @@ function captureInitialBrowserUrl() {
             redactTokenInText(href),
 
           protectedCaptured,
+
           protectedRouteKey,
 
           at:
@@ -1974,7 +2242,8 @@ function getStateInitialUrlCandidates() {
   const state =
     ensureObject(RuntimeAppCore?.state);
 
-  const bootContext = getBootContext();
+  const bootContext =
+    getBootContext();
 
   const keys = [
     APP_STATE_KEYS?.bootProtectedInitialUrl,
@@ -1988,20 +2257,25 @@ function getStateInitialUrlCandidates() {
   ].filter(Boolean);
 
   return [
-    ...keys.map((key) => safeText(state[key], "")),
+    ...keys.map((key) =>
+      safeText(state[key], "")
+    ),
     bootContext.protectedInitialUrl,
     bootContext.activationInitialUrl,
     bootContext.resetConfirmInitialUrl,
     bootContext.initialUrl,
   ]
-    .map((value) => safeText(value, ""))
+    .map((value) =>
+      safeText(value, "")
+    )
     .filter(Boolean);
 }
 
 function resolveProtectedInitialContext(value = "") {
   captureInitialBrowserUrl();
 
-  const explicit = safeText(value, "");
+  const explicit =
+    safeText(value, "");
 
   const candidates = [
     explicit,
@@ -2011,11 +2285,14 @@ function resolveProtectedInitialContext(value = "") {
     getBrowserHref(),
     getBrowserPath(),
   ]
-    .map((candidate) => safeText(candidate, ""))
+    .map((candidate) =>
+      safeText(candidate, "")
+    )
     .filter(Boolean);
 
   for (const candidate of candidates) {
-    const config = getProtectedRouteConfig(candidate);
+    const config =
+      getProtectedRouteConfig(candidate);
 
     if (!config) {
       continue;
@@ -2073,23 +2350,47 @@ function resolveProtectedInitialContext(value = "") {
   }
 
   return {
-    config: null,
-    key: "",
-    path: "",
-    publicPath: "",
-    canonicalPath: "",
-    cleanPath: "",
-    cleanPublicPath: "",
-    url: "",
-    hasToken: false,
-    redactedPath: "",
-    redactedPublicPath: "",
-    redactedUrl: "",
+    config:
+      null,
+
+    key:
+      "",
+
+    path:
+      "",
+
+    publicPath:
+      "",
+
+    canonicalPath:
+      "",
+
+    cleanPath:
+      "",
+
+    cleanPublicPath:
+      "",
+
+    url:
+      "",
+
+    hasToken:
+      false,
+
+    redactedPath:
+      "",
+
+    redactedPublicPath:
+      "",
+
+    redactedUrl:
+      "",
   };
 }
 
 function exposeInitialContextToCore(context = {}) {
-  const data = ensureObject(context);
+  const data =
+    ensureObject(context);
 
   const payload = {
     bootProtectedInitialUrl:
@@ -2163,9 +2464,12 @@ function exposeInitialContextToCore(context = {}) {
       {
         source:
           `${ROUTER_SOURCE}:protected-initial-context`,
-        emit: false,
-        emitState: false,
-        silent: true,
+        emit:
+          false,
+        emitState:
+          false,
+        silent:
+          true,
       }
     );
   } catch {}
@@ -2203,21 +2507,31 @@ function exposeInitialContextToCore(context = {}) {
 
     ...(data.key === "activation"
       ? {
-          activationInitialUrl: data.url || "",
-          activationInitialPath: data.path || "",
-          activationInitialPublicPath: data.publicPath || "",
-          isActivation: Boolean(data.config),
-          hasActivationToken: Boolean(data.hasToken),
+          activationInitialUrl:
+            data.url || "",
+          activationInitialPath:
+            data.path || "",
+          activationInitialPublicPath:
+            data.publicPath || "",
+          isActivation:
+            Boolean(data.config),
+          hasActivationToken:
+            Boolean(data.hasToken),
         }
       : {}),
 
     ...(data.key === "resetConfirm"
       ? {
-          resetConfirmInitialUrl: data.url || "",
-          resetConfirmInitialPath: data.path || "",
-          resetConfirmInitialPublicPath: data.publicPath || "",
-          isResetConfirm: Boolean(data.config),
-          hasResetToken: Boolean(data.hasToken),
+          resetConfirmInitialUrl:
+            data.url || "",
+          resetConfirmInitialPath:
+            data.path || "",
+          resetConfirmInitialPublicPath:
+            data.publicPath || "",
+          isResetConfirm:
+            Boolean(data.config),
+          hasResetToken:
+            Boolean(data.hasToken),
         }
       : {}),
   });
@@ -2244,11 +2558,15 @@ function shouldProtectInitialHistory(path = "/") {
 ========================================================= */
 
 function createRouteContext(input = "") {
-  const browserPath = getBrowserPath();
+  const browserPath =
+    getBrowserPath();
 
   const helperPublicPath = (() => {
     try {
-      return getCurrentPublicPath(RuntimeAppCore, RuntimeRouter);
+      return getCurrentPublicPath(
+        RuntimeAppCore,
+        RuntimeRouter
+      );
     } catch {
       return "";
     }
@@ -2256,7 +2574,10 @@ function createRouteContext(input = "") {
 
   const helperCurrentPath = (() => {
     try {
-      return getCurrentPath(RuntimeAppCore, RuntimeRouter);
+      return getCurrentPath(
+        RuntimeAppCore,
+        RuntimeRouter
+      );
     } catch {
       return "";
     }
@@ -2335,7 +2656,8 @@ function getSafeInitialPath() {
 ========================================================= */
 
 function safeSetState(payload = {}) {
-  const cleanPayload = ensureObject(payload);
+  const cleanPayload =
+    ensureObject(payload);
 
   try {
     RuntimeAppCore?.setState?.(
@@ -2343,9 +2665,12 @@ function safeSetState(payload = {}) {
       {
         source:
           ROUTER_SOURCE,
-        emit: false,
-        emitState: false,
-        silent: true,
+        emit:
+          false,
+        emitState:
+          false,
+        silent:
+          true,
       }
     );
   } catch {}
@@ -2356,9 +2681,12 @@ function safeSetState(payload = {}) {
       {
         source:
           ROUTER_SOURCE,
-        emit: false,
-        emitState: false,
-        silent: true,
+        emit:
+          false,
+        emitState:
+          false,
+        silent:
+          true,
       }
     );
   } catch {}
@@ -2381,12 +2709,27 @@ function safeSetRoute(route = DEFAULT_ROUTE) {
     toCanonicalPath(route || DEFAULT_ROUTE);
 
   try {
-    RuntimeAppCore?.setRoute?.(cleanRoute);
+    RuntimeAppCore?.setRoute?.(
+      cleanRoute,
+      {
+        source:
+          ROUTER_SOURCE,
+        emit:
+          false,
+        emitState:
+          false,
+        silent:
+          true,
+      }
+    );
   } catch {}
 
   safeSetState({
-    route: cleanRoute,
-    canonicalPath: cleanRoute,
+    route:
+      cleanRoute,
+
+    canonicalPath:
+      cleanRoute,
   });
 
   return cleanRoute;
@@ -2397,11 +2740,24 @@ function safeSetPublicPath(publicPath = DEFAULT_ROUTE) {
     toPublicPath(publicPath || DEFAULT_ROUTE);
 
   try {
-    RuntimeAppCore?.setPublicPath?.(cleanPublicPath);
+    RuntimeAppCore?.setPublicPath?.(
+      cleanPublicPath,
+      {
+        source:
+          ROUTER_SOURCE,
+        emit:
+          false,
+        emitState:
+          false,
+        silent:
+          true,
+      }
+    );
   } catch {}
 
   safeSetState({
-    publicPath: cleanPublicPath,
+    publicPath:
+      cleanPublicPath,
   });
 
   return cleanPublicPath;
@@ -2410,8 +2766,14 @@ function safeSetPublicPath(publicPath = DEFAULT_ROUTE) {
 function getRouterStateCanonicalPath() {
   try {
     return normalizePath(
-      getCurrentCanonicalPath(RuntimeAppCore, RuntimeRouter) ||
-        getCurrentPath(RuntimeAppCore, RuntimeRouter) ||
+      getCurrentCanonicalPath(
+        RuntimeAppCore,
+        RuntimeRouter
+      ) ||
+        getCurrentPath(
+          RuntimeAppCore,
+          RuntimeRouter
+        ) ||
         ""
     );
   } catch {
@@ -2422,7 +2784,10 @@ function getRouterStateCanonicalPath() {
 function getRouterStatePublicPath() {
   try {
     return normalizePath(
-      getCurrentPublicPath(RuntimeAppCore, RuntimeRouter) ||
+      getCurrentPublicPath(
+        RuntimeAppCore,
+        RuntimeRouter
+      ) ||
         ""
     );
   } catch {
@@ -2431,7 +2796,8 @@ function getRouterStatePublicPath() {
 }
 
 function shouldTrustRouterResolvedCanonical(routerPath = "", expectedPath = "", meta = {}) {
-  const safeMeta = ensureObject(meta);
+  const safeMeta =
+    ensureObject(meta);
 
   if (safeMeta.protectedRoute === true) {
     return pathsAreSameCleanPath(
@@ -2440,8 +2806,11 @@ function shouldTrustRouterResolvedCanonical(routerPath = "", expectedPath = "", 
     );
   }
 
-  const routerClean = getCleanPath(routerPath);
-  const expectedClean = getCleanPath(expectedPath);
+  const routerClean =
+    getCleanPath(routerPath);
+
+  const expectedClean =
+    getCleanPath(expectedPath);
 
   if (!routerClean) {
     return false;
@@ -2477,7 +2846,8 @@ function resolvePublicPathForSync({
   routerPublicPath,
   routerCanonicalPath,
 }) {
-  const context = ensureObject(routeContext);
+  const context =
+    ensureObject(routeContext);
 
   const expectedPublicPath =
     normalizePath(
@@ -2519,7 +2889,8 @@ function resolvePublicPathForSync({
 }
 
 function syncResolvedRouteState(fallbackPath = DEFAULT_ROUTE, meta = {}) {
-  const safeMeta = ensureObject(meta);
+  const safeMeta =
+    ensureObject(meta);
 
   const routeContext =
     safeMeta.routeContext ||
@@ -2612,11 +2983,16 @@ function syncResolvedRouteState(fallbackPath = DEFAULT_ROUTE, meta = {}) {
     }
   }
 
-  const route = safeSetRoute(resolvedCanonicalPath);
-  const publicPath = safeSetPublicPath(resolvedPublicPath);
+  const route =
+    safeSetRoute(resolvedCanonicalPath);
+
+  const publicPath =
+    safeSetPublicPath(resolvedPublicPath);
 
   const payload = {
-    canonicalPath: route,
+    canonicalPath:
+      route,
+
     publicPath,
 
     protectedRouteKey:
@@ -2635,8 +3011,11 @@ function syncResolvedRouteState(fallbackPath = DEFAULT_ROUTE, meta = {}) {
       Boolean(routeContext.usernameScoped),
   };
 
-  routerBootState.lastResolvedCanonicalPath = route;
-  routerBootState.lastResolvedPublicPath = publicPath;
+  routerBootState.lastResolvedCanonicalPath =
+    route;
+
+  routerBootState.lastResolvedPublicPath =
+    publicPath;
 
   safeEmit(
     ROUTER_BOOT_EVENTS.stateSynced,
@@ -2647,7 +3026,8 @@ function syncResolvedRouteState(fallbackPath = DEFAULT_ROUTE, meta = {}) {
 }
 
 function markInitialRenderDone(value = true) {
-  firstRenderDone = Boolean(value);
+  firstRenderDone =
+    Boolean(value);
 
   safeSetState({
     initialRouteRendered:
@@ -2660,7 +3040,8 @@ function markInitialRenderDone(value = true) {
 ========================================================= */
 
 function getRenderOptions(path = DEFAULT_ROUTE, meta = {}) {
-  const safeMeta = ensureObject(meta);
+  const safeMeta =
+    ensureObject(meta);
 
   const routeContext =
     safeMeta.routeContext ||
@@ -2694,29 +3075,45 @@ function getRenderOptions(path = DEFAULT_ROUTE, meta = {}) {
     protectedContext.hasToken
   ) {
     return {
-      skipHistory: true,
+      skipHistory:
+        true,
 
-      preservePath: true,
-      preserveUrl: true,
-      preserveSearch: true,
-      preserveHash: true,
-      preservePublicPath: true,
+      preservePath:
+        true,
+      preserveUrl:
+        true,
+      preserveSearch:
+        true,
+      preserveHash:
+        true,
+      preservePublicPath:
+        true,
 
-      replaceState: false,
+      replaceState:
+        false,
 
-      force: true,
-      forceRender: true,
-      initialRender: true,
+      force:
+        true,
+      forceRender:
+        true,
+      initialRender:
+        true,
 
-      protectedInitialUrl: true,
-      protectedRouteKey: protectedContext.key || "",
-      protectedInitialPath: protectedContext.path || "",
-      protectedInitialPublicPath: protectedContext.publicPath || "",
-      protectedInitialUrlValue: protectedContext.url || "",
+      protectedInitialUrl:
+        true,
+      protectedRouteKey:
+        protectedContext.key || "",
+      protectedInitialPath:
+        protectedContext.path || "",
+      protectedInitialPublicPath:
+        protectedContext.publicPath || "",
+      protectedInitialUrlValue:
+        protectedContext.url || "",
 
       canonicalPath,
       publicPath,
-      requestedPath: publicPath,
+      requestedPath:
+        publicPath,
 
       browserPath:
         routeContext.browserPath || "",
@@ -2730,18 +3127,25 @@ function getRenderOptions(path = DEFAULT_ROUTE, meta = {}) {
   }
 
   return {
-    replaceState: true,
+    replaceState:
+      true,
 
-    force: true,
-    forceRender: true,
-    initialRender: true,
+    force:
+      true,
+    forceRender:
+      true,
+    initialRender:
+      true,
 
-    preserveUrl: true,
-    preservePublicPath: true,
+    preserveUrl:
+      true,
+    preservePublicPath:
+      true,
 
     canonicalPath,
     publicPath,
-    requestedPath: publicPath,
+    requestedPath:
+      publicPath,
 
     browserPath:
       routeContext.browserPath || "",
@@ -2765,7 +3169,8 @@ captureInitialBrowserUrl();
 ========================================================= */
 
 function getRegisteredRouterModule(name = "") {
-  const cleanName = safeText(name, "");
+  const cleanName =
+    safeText(name, "");
 
   if (!cleanName || !RuntimeAppCore) {
     return null;
@@ -2773,7 +3178,8 @@ function getRegisteredRouterModule(name = "") {
 
   try {
     if (isFunction(RuntimeAppCore?.modules?.get)) {
-      const value = RuntimeAppCore.modules.get(cleanName);
+      const value =
+        RuntimeAppCore.modules.get(cleanName);
 
       if (value) {
         return value;
@@ -2789,7 +3195,8 @@ function getRegisteredRouterModule(name = "") {
 
   try {
     if (isFunction(RuntimeAppCore?.registry?.modules?.get)) {
-      const value = RuntimeAppCore.registry.modules.get(cleanName);
+      const value =
+        RuntimeAppCore.registry.modules.get(cleanName);
 
       if (value) {
         return value;
@@ -2807,7 +3214,8 @@ function getRegisteredRouterModule(name = "") {
 }
 
 function markRouterRegistryConflict(name = "") {
-  const cleanName = safeText(name, "");
+  const cleanName =
+    safeText(name, "");
 
   if (!cleanName || routerRegistryConflicts.has(cleanName)) {
     return;
@@ -2818,31 +3226,42 @@ function markRouterRegistryConflict(name = "") {
   safeWarn(
     "Router registry conflict. Se conserva instancia existente.",
     {
-      name: cleanName,
+      name:
+        cleanName,
     }
   );
 }
 
 function exposeRouterAlias(alias = "") {
-  const cleanAlias = safeText(alias, "");
+  const cleanAlias =
+    safeText(alias, "");
 
   if (!RuntimeAppCore || !RuntimeRouter || !cleanAlias) {
     return false;
   }
 
-  const existing = getRegisteredRouterModule(cleanAlias);
+  const existing =
+    getRegisteredRouterModule(cleanAlias);
 
   if (existing && !Object.is(existing, RuntimeRouter)) {
     markRouterRegistryConflict(cleanAlias);
     return false;
   }
 
-  let ok = false;
+  let ok =
+    false;
 
   try {
     if (isExtensibleTarget(RuntimeAppCore)) {
-      if (safeDefineValue(RuntimeAppCore, cleanAlias, RuntimeRouter)) {
-        ok = true;
+      if (
+        safeDefineValue(
+          RuntimeAppCore,
+          cleanAlias,
+          RuntimeRouter
+        )
+      ) {
+        ok =
+          true;
       }
     }
   } catch {}
@@ -2851,10 +3270,16 @@ function exposeRouterAlias(alias = "") {
     if (
       RuntimeAppCore.modules &&
       isExtensibleTarget(RuntimeAppCore.modules) &&
-      (!RuntimeAppCore.modules[cleanAlias] || Object.is(RuntimeAppCore.modules[cleanAlias], RuntimeRouter))
+      (
+        !RuntimeAppCore.modules[cleanAlias] ||
+        Object.is(RuntimeAppCore.modules[cleanAlias], RuntimeRouter)
+      )
     ) {
-      RuntimeAppCore.modules[cleanAlias] = RuntimeRouter;
-      ok = true;
+      RuntimeAppCore.modules[cleanAlias] =
+        RuntimeRouter;
+
+      ok =
+        true;
     }
   } catch {}
 
@@ -2863,19 +3288,26 @@ function exposeRouterAlias(alias = "") {
       isFunction(RuntimeAppCore?.modules?.set) &&
       !getRegisteredRouterModule(cleanAlias)
     ) {
-      const result = RuntimeAppCore.modules.set(
-        cleanAlias,
-        RuntimeRouter,
-        {
-          source: ROUTER_SOURCE,
-          alias: true,
-          canonical: "Router",
-          silent: true,
-          emit: false,
-        }
-      );
+      const result =
+        RuntimeAppCore.modules.set(
+          cleanAlias,
+          RuntimeRouter,
+          {
+            source:
+              ROUTER_SOURCE,
+            alias:
+              true,
+            canonical:
+              "Router",
+            silent:
+              true,
+            emit:
+              false,
+          }
+        );
 
-      ok = result !== false || ok;
+      ok =
+        result !== false || ok;
     }
   } catch {}
 
@@ -2885,8 +3317,13 @@ function exposeRouterAlias(alias = "") {
       isFunction(RuntimeAppCore.registry.modules.set) &&
       !getRegisteredRouterModule(cleanAlias)
     ) {
-      RuntimeAppCore.registry.modules.set(cleanAlias, RuntimeRouter);
-      ok = true;
+      RuntimeAppCore.registry.modules.set(
+        cleanAlias,
+        RuntimeRouter
+      );
+
+      ok =
+        true;
     }
   } catch {}
 
@@ -2898,28 +3335,40 @@ function exposeRouterToCore() {
     return false;
   }
 
-  let ok = false;
+  let ok =
+    false;
 
-  const existingCanonical = getRegisteredRouterModule("Router");
+  const existingCanonical =
+    getRegisteredRouterModule("Router");
 
   if (existingCanonical && !Object.is(existingCanonical, RuntimeRouter)) {
     markRouterRegistryConflict("Router");
   } else {
     try {
-      if (isFunction(RuntimeAppCore?.modules?.register) && !existingCanonical) {
-        const result = RuntimeAppCore.modules.register(
-          "Router",
-          RuntimeRouter,
-          {
-            aliases: ["router"],
-            overwrite: false,
-            replace: false,
-            idempotent: true,
-            source: ROUTER_SOURCE,
-          }
-        );
+      if (
+        isFunction(RuntimeAppCore?.modules?.register) &&
+        !existingCanonical
+      ) {
+        const result =
+          RuntimeAppCore.modules.register(
+            "Router",
+            RuntimeRouter,
+            {
+              aliases:
+                ["router"],
+              overwrite:
+                false,
+              replace:
+                false,
+              idempotent:
+                true,
+              source:
+                ROUTER_SOURCE,
+            }
+          );
 
-        ok = result !== false;
+        ok =
+          result !== false;
       }
     } catch {}
 
@@ -2929,17 +3378,22 @@ function exposeRouterToCore() {
         isFunction(RuntimeAppCore?.modules?.set) &&
         !getRegisteredRouterModule("Router")
       ) {
-        const result = RuntimeAppCore.modules.set(
-          "Router",
-          RuntimeRouter,
-          {
-            source: ROUTER_SOURCE,
-            overwrite: false,
-            replace: false,
-          }
-        );
+        const result =
+          RuntimeAppCore.modules.set(
+            "Router",
+            RuntimeRouter,
+            {
+              source:
+                ROUTER_SOURCE,
+              overwrite:
+                false,
+              replace:
+                false,
+            }
+          );
 
-        ok = result !== false;
+        ok =
+          result !== false;
       }
     } catch {}
   }
@@ -2947,7 +3401,8 @@ function exposeRouterToCore() {
   exposeRouterAlias("Router");
   exposeRouterAlias("router");
 
-  routerBootState.registryExposedAt = Date.now();
+  routerBootState.registryExposedAt =
+    Date.now();
 
   return true;
 }
@@ -2974,13 +3429,18 @@ export function configureRouter(deps = {}) {
       try {
         result =
           RuntimeRouter.configure({
-            core: RuntimeAppCore,
-            AppCore: RuntimeAppCore,
+            core:
+              RuntimeAppCore,
+            AppCore:
+              RuntimeAppCore,
 
-            auth: RuntimeAuth,
-            Auth: RuntimeAuth,
+            auth:
+              RuntimeAuth,
+            Auth:
+              RuntimeAuth,
 
-            source: ROUTER_SOURCE,
+            source:
+              ROUTER_SOURCE,
           });
       } catch {
         result =
@@ -2991,26 +3451,36 @@ export function configureRouter(deps = {}) {
       }
 
       if (result === false) {
-        configured = false;
+        configured =
+          false;
+
         return false;
       }
     }
 
-    configured = true;
-    routerBootState.lastConfiguredAt = Date.now();
+    configured =
+      true;
+
+    routerBootState.lastConfiguredAt =
+      Date.now();
 
     safeEmit(
       ROUTER_BOOT_EVENTS.configured,
       {
-        configured: true,
-        at: safeIsoDate(routerBootState.lastConfiguredAt),
+        configured:
+          true,
+        at:
+          safeIsoDate(routerBootState.lastConfiguredAt),
       }
     );
 
     safeLog("Router configurado.");
   } catch (error) {
-    configured = false;
-    routerBootState.lastRenderError = normalizeError(error);
+    configured =
+      false;
+
+    routerBootState.lastRenderError =
+      normalizeError(error);
 
     safeError(
       "Error configurando Router:",
@@ -3034,7 +3504,8 @@ export function bindRouter(deps = {}) {
   captureInitialBrowserUrl();
 
   if (!configured) {
-    const configuredNow = configureRouter(deps);
+    const configuredNow =
+      configureRouter(deps);
 
     if (configuredNow === false) {
       return false;
@@ -3049,11 +3520,15 @@ export function bindRouter(deps = {}) {
     resolveProtectedInitialContext();
 
   const bindContext = {
-    core: RuntimeAppCore,
-    AppCore: RuntimeAppCore,
+    core:
+      RuntimeAppCore,
+    AppCore:
+      RuntimeAppCore,
 
-    auth: RuntimeAuth,
-    Auth: RuntimeAuth,
+    auth:
+      RuntimeAuth,
+    Auth:
+      RuntimeAuth,
 
     initialRenderDone:
       Boolean(firstRenderDone),
@@ -3082,24 +3557,32 @@ export function bindRouter(deps = {}) {
       let result;
 
       try {
-        result = RuntimeRouter.bind(bindContext);
+        result =
+          RuntimeRouter.bind(bindContext);
       } catch {
-        result = RuntimeRouter.bind();
+        result =
+          RuntimeRouter.bind();
       }
 
       if (result === false) {
-        bound = false;
+        bound =
+          false;
+
         return false;
       }
     }
 
-    bound = true;
-    routerBootState.lastBoundAt = Date.now();
+    bound =
+      true;
+
+    routerBootState.lastBoundAt =
+      Date.now();
 
     safeEmit(
       ROUTER_BOOT_EVENTS.bound,
       {
-        bound: true,
+        bound:
+          true,
 
         initialRenderDone:
           Boolean(firstRenderDone),
@@ -3129,8 +3612,11 @@ export function bindRouter(deps = {}) {
       }
     );
   } catch (error) {
-    bound = false;
-    routerBootState.lastRenderError = normalizeError(error);
+    bound =
+      false;
+
+    routerBootState.lastRenderError =
+      normalizeError(error);
 
     safeError(
       "Error bind Router:",
@@ -3148,8 +3634,11 @@ export function bindRouter(deps = {}) {
 ========================================================= */
 
 async function runInitialRender(path = DEFAULT_ROUTE, cycleId = 0, meta = {}, deps = {}) {
-  const safeMeta = ensureObject(meta);
-  const runtime = resolveRuntimeDeps(deps);
+  const safeMeta =
+    ensureObject(meta);
+
+  const runtime =
+    resolveRuntimeDeps(deps);
 
   const routeContext =
     safeMeta.routeContext ||
@@ -3184,24 +3673,33 @@ async function runInitialRender(path = DEFAULT_ROUTE, cycleId = 0, meta = {}, de
       {
         routeContext: {
           ...routeContext,
-          canonicalPath: target,
+          canonicalPath:
+            target,
           publicPath,
         },
         protectedContext,
       }
     );
 
-  routerBootState.lastInitialPath = target;
-  routerBootState.lastInitialCanonicalPath = target;
-  routerBootState.lastInitialPublicPath = publicPath;
-  routerBootState.lastProtectedRouteKey = protectedContext.key || "";
+  routerBootState.lastInitialPath =
+    target;
+
+  routerBootState.lastInitialCanonicalPath =
+    target;
+
+  routerBootState.lastInitialPublicPath =
+    publicPath;
+
+  routerBootState.lastProtectedRouteKey =
+    protectedContext.key || "";
 
   safeEmit(
     ROUTER_BOOT_EVENTS.initialRenderStart,
     {
       target,
       publicPath,
-      canonicalPath: target,
+      canonicalPath:
+        target,
 
       options:
         sanitizeRenderOptions(options),
@@ -3229,7 +3727,8 @@ async function runInitialRender(path = DEFAULT_ROUTE, cycleId = 0, meta = {}, de
       {
         routeContext: {
           ...routeContext,
-          canonicalPath: target,
+          canonicalPath:
+            target,
           publicPath,
         },
         protectedContext,
@@ -3238,12 +3737,17 @@ async function runInitialRender(path = DEFAULT_ROUTE, cycleId = 0, meta = {}, de
 
     try {
       runtime.applyPostRenderLoaderPolicy?.({
-        AppCore: RuntimeAppCore,
-        Router: RuntimeRouter,
-        hideLoader: runtime.hideLoader,
-        path: target,
+        AppCore:
+          RuntimeAppCore,
+        Router:
+          RuntimeRouter,
+        hideLoader:
+          runtime.hideLoader,
+        path:
+          target,
         publicPath,
-        reason: "router-render-missing",
+        reason:
+          "router-render-missing",
       });
     } catch {}
 
@@ -3269,7 +3773,8 @@ async function runInitialRender(path = DEFAULT_ROUTE, cycleId = 0, meta = {}, de
       "Render inicial stale omitido.",
       {
         cycleId,
-        activeCycle: renderCycle,
+        activeCycle:
+          renderCycle,
       }
     );
 
@@ -3282,7 +3787,8 @@ async function runInitialRender(path = DEFAULT_ROUTE, cycleId = 0, meta = {}, de
       {
         routeContext: {
           ...routeContext,
-          canonicalPath: target,
+          canonicalPath:
+            target,
           publicPath,
         },
         protectedContext,
@@ -3291,12 +3797,17 @@ async function runInitialRender(path = DEFAULT_ROUTE, cycleId = 0, meta = {}, de
 
   try {
     runtime.applyPostRenderLoaderPolicy?.({
-      AppCore: RuntimeAppCore,
-      Router: RuntimeRouter,
-      hideLoader: runtime.hideLoader,
-      path: target,
+      AppCore:
+        RuntimeAppCore,
+      Router:
+        RuntimeRouter,
+      hideLoader:
+        runtime.hideLoader,
+      path:
+        target,
       publicPath,
-      reason: "initial-render",
+      reason:
+        "initial-render",
     });
   } catch (error) {
     safeWarn(
@@ -3307,20 +3818,31 @@ async function runInitialRender(path = DEFAULT_ROUTE, cycleId = 0, meta = {}, de
 
   markInitialRenderDone(true);
 
-  routerBootState.lastRenderedPath = target;
-  routerBootState.lastRenderedPublicPath = publicPath;
-  routerBootState.lastRenderAt = Date.now();
-  routerBootState.lastRenderOk = true;
-  routerBootState.lastRenderError = null;
+  routerBootState.lastRenderedPath =
+    target;
+
+  routerBootState.lastRenderedPublicPath =
+    publicPath;
+
+  routerBootState.lastRenderAt =
+    Date.now();
+
+  routerBootState.lastRenderOk =
+    true;
+
+  routerBootState.lastRenderError =
+    null;
 
   safeEmit(
     ROUTER_BOOT_EVENTS.initialRenderDone,
     {
-      ok: true,
+      ok:
+        true,
 
       target,
       publicPath,
-      canonicalPath: target,
+      canonicalPath:
+        target,
 
       resolved: {
         canonicalPath:
@@ -3348,8 +3870,10 @@ async function runInitialRender(path = DEFAULT_ROUTE, cycleId = 0, meta = {}, de
     {
       target,
       publicPath,
-      canonicalPath: target,
-      options: sanitizeRenderOptions(options),
+      canonicalPath:
+        target,
+      options:
+        sanitizeRenderOptions(options),
       resolved,
     }
   );
@@ -3363,19 +3887,16 @@ async function runInitialRender(path = DEFAULT_ROUTE, cycleId = 0, meta = {}, de
 
 export async function renderInitialRoute(deps = {}) {
   /*
-    Orden correcto desde src/app/index.js:
-    1. configureRouter()
-    2. renderInitialRoute()
-    3. bindRouter()
-
-    NO llamar bindRouter() aquí.
+    No llamar bindRouter() aquí.
+    El dueño del orden de boot es src/app/index.js.
   */
 
   resolveRuntimeDeps(deps);
   captureInitialBrowserUrl();
 
   if (!configured) {
-    const configuredNow = configureRouter(deps);
+    const configuredNow =
+      configureRouter(deps);
 
     if (configuredNow === false) {
       return false;
@@ -3404,7 +3925,8 @@ export async function renderInitialRoute(deps = {}) {
     return initialRenderPromise;
   }
 
-  const cycleId = ++renderCycle;
+  const cycleId =
+    ++renderCycle;
 
   initialRenderPromise =
     (async () => {
@@ -3456,7 +3978,8 @@ export async function renderInitialRoute(deps = {}) {
           {
             path,
             publicPath,
-            canonicalPath: path,
+            canonicalPath:
+              path,
 
             protectedInitialUrl:
               Boolean(protectedContext.config),
@@ -3487,7 +4010,8 @@ export async function renderInitialRoute(deps = {}) {
             "Ruta pública con @usuario habría caído a HOME. Se bloquea fallback incorrecto.",
             {
               publicPath,
-              canonicalPath: path,
+              canonicalPath:
+                path,
             }
           );
         }
@@ -3507,15 +4031,19 @@ export async function renderInitialRoute(deps = {}) {
 
         return Boolean(ok);
       } catch (error) {
-        routerBootState.lastRenderOk = false;
-        routerBootState.lastRenderError = normalizeError(error);
+        routerBootState.lastRenderOk =
+          false;
+
+        routerBootState.lastRenderError =
+          normalizeError(error);
 
         safeEmit(
           ROUTER_BOOT_EVENTS.initialRenderError,
           {
             path,
             publicPath,
-            canonicalPath: path,
+            canonicalPath:
+              path,
 
             protectedInitialUrl:
               Boolean(protectedContext.config),
@@ -3536,7 +4064,8 @@ export async function renderInitialRoute(deps = {}) {
           {
             path,
             publicPath,
-            canonicalPath: path,
+            canonicalPath:
+              path,
 
             protectedInitialUrl:
               Boolean(protectedContext.config),
@@ -3573,10 +4102,13 @@ export async function renderInitialRoute(deps = {}) {
           safeEmit(
             ROUTER_BOOT_EVENTS.initialRenderFallback,
             {
-              from: path,
-              fromPublicPath: publicPath,
+              from:
+                path,
+              fromPublicPath:
+                publicPath,
 
-              to: fallback,
+              to:
+                fallback,
 
               protectedInitialUrl:
                 Boolean(protectedContext.config),
@@ -3616,8 +4148,11 @@ export async function renderInitialRoute(deps = {}) {
 
           return Boolean(ok);
         } catch (fatal) {
-          routerBootState.lastRenderOk = false;
-          routerBootState.lastRenderError = normalizeError(fatal);
+          routerBootState.lastRenderOk =
+            false;
+
+          routerBootState.lastRenderError =
+            normalizeError(fatal);
 
           safeError(
             "Render inicial fatal:",
@@ -3629,7 +4164,8 @@ export async function renderInitialRoute(deps = {}) {
           return false;
         }
       } finally {
-        initialRenderPromise = null;
+        initialRenderPromise =
+          null;
       }
     })();
 
@@ -3645,48 +4181,80 @@ export function resetRouterBootstrap(options = {}) {
     resetConfigured = false,
     resetBound = false,
     clearInitialUrl = false,
-  } = ensureObject(options);
+  } =
+    ensureObject(options);
 
-  firstRenderDone = false;
-  initialRenderPromise = null;
-  renderCycle = 0;
+  firstRenderDone =
+    false;
+
+  initialRenderPromise =
+    null;
+
+  renderCycle =
+    0;
 
   if (resetConfigured) {
-    configured = false;
+    configured =
+      false;
   }
 
   if (resetBound) {
-    bound = false;
+    bound =
+      false;
   }
 
   if (clearInitialUrl && isBrowser()) {
     try {
-      window[INITIAL_URL_KEY] = "";
+      window[INITIAL_URL_KEY] =
+        "";
     } catch {}
 
     for (const config of PROTECTED_ROUTES) {
       for (const key of safeArray(config.windowKeys)) {
         try {
-          window[key] = "";
+          window[key] =
+            "";
         } catch {}
       }
     }
   }
 
-  routerBootState.lastInitialPath = "";
-  routerBootState.lastInitialPublicPath = "";
-  routerBootState.lastInitialCanonicalPath = "";
-  routerBootState.lastRenderedPath = "";
-  routerBootState.lastRenderedPublicPath = "";
-  routerBootState.lastResolvedCanonicalPath = "";
-  routerBootState.lastResolvedPublicPath = "";
-  routerBootState.lastRenderAt = 0;
-  routerBootState.lastRenderOk = false;
-  routerBootState.lastRenderError = null;
-  routerBootState.lastProtectedRouteKey = "";
+  routerBootState.lastInitialPath =
+    "";
+
+  routerBootState.lastInitialPublicPath =
+    "";
+
+  routerBootState.lastInitialCanonicalPath =
+    "";
+
+  routerBootState.lastRenderedPath =
+    "";
+
+  routerBootState.lastRenderedPublicPath =
+    "";
+
+  routerBootState.lastResolvedCanonicalPath =
+    "";
+
+  routerBootState.lastResolvedPublicPath =
+    "";
+
+  routerBootState.lastRenderAt =
+    0;
+
+  routerBootState.lastRenderOk =
+    false;
+
+  routerBootState.lastRenderError =
+    null;
+
+  routerBootState.lastProtectedRouteKey =
+    "";
 
   safeSetState({
-    initialRouteRendered: false,
+    initialRouteRendered:
+      false,
   });
 
   safeEmit(
@@ -3705,7 +4273,8 @@ export function resetRouterBootstrap(options = {}) {
         safeIsoDate(),
     },
     {
-      force: true,
+      force:
+        true,
     }
   );
 
@@ -3716,7 +4285,8 @@ export function getRouterBootstrapState() {
   const protectedInitial =
     resolveProtectedInitialContext();
 
-  let routerSnapshot = null;
+  let routerSnapshot =
+    null;
 
   try {
     routerSnapshot =
@@ -3726,7 +4296,9 @@ export function getRouterBootstrapState() {
       null;
   } catch {}
 
-  const currentBrowserPath = getBrowserPath();
+  const currentBrowserPath =
+    getBrowserPath();
+
   const currentBrowserCanonicalPath =
     toCanonicalPath(currentBrowserPath);
 
@@ -3864,10 +4436,14 @@ export function getRouterBootstrapState() {
 
     protectedRoutes:
       PROTECTED_ROUTES.map((config) => ({
-        key: config.key,
-        path: config.path,
-        paths: [...config.paths],
-        windowKeys: [...config.windowKeys],
+        key:
+          config.key,
+        path:
+          config.path,
+        paths:
+          [...config.paths],
+        windowKeys:
+          [...config.windowKeys],
       })),
 
     routerSnapshot,
@@ -3876,7 +4452,8 @@ export function getRouterBootstrapState() {
 
 function exposeDebugApi() {
   const api = {
-    version: ROUTER_BOOTSTRAP_VERSION,
+    version:
+      ROUTER_BOOTSTRAP_VERSION,
 
     configure:
       configureRouter,
@@ -3896,7 +4473,8 @@ function exposeDebugApi() {
 
   try {
     if (isBrowser()) {
-      window.__ONION_APP_ROUTER_BOOTSTRAP__ = api;
+      window.__ONION_APP_ROUTER_BOOTSTRAP__ =
+        api;
     }
   } catch {}
 
@@ -3910,10 +4488,14 @@ function exposeDebugApi() {
         RuntimeAppCore,
         "RouterBootstrap",
         {
-          value: api,
-          configurable: true,
-          enumerable: false,
-          writable: true,
+          value:
+            api,
+          configurable:
+            true,
+          enumerable:
+            false,
+          writable:
+            true,
         }
       );
     }
@@ -3922,7 +4504,8 @@ function exposeDebugApi() {
   safeEmit(
     ROUTER_BOOT_EVENTS.debugReady,
     {
-      at: safeIsoDate(),
+      at:
+        safeIsoDate(),
     }
   );
 

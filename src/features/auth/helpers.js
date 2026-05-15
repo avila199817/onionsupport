@@ -2,37 +2,17 @@
    Onion SPA - Auth Helpers
    Archivo: src/features/auth/helpers.js
 
-   AUTH HELPERS · FINAL EXTREME PRO SYSTEM · GOD MODE v15
-   ROUTE SAFE · TOKEN SAFE · HASH ROUTER SAFE · NO GHOST AUTH
+   AUTH HELPERS · SIMPLE CLEAN · ROUTE SAFE · TOKEN SAFE
 
-   RESPONSABILIDADES:
-   - helpers base auth
-   - normalización de paths públicos/canónicos
-   - saneado username / slug / tokens / session values
-   - extracción segura de mensajes de error
-   - detección rutas auth
-   - detección rutas públicas técnicas
-   - validación de redirects internos
-   - soporte hash-router /#/...
-   - soporte hashbang #!/...
-   - canonical sin query/hash
-   - publicPath con query/hash y contexto público
-   - strip seguro de /@username
-   - redacción de tokens en logs/eventos
-   - payloads públicos sin secretos
-
-   HARDENING:
-   - tolerancia total a AppCore parcial
-   - unicode safe
-   - anti open redirect
-   - no localStorage.clear
-   - no rompe /activate-account?token=...
-   - no rompe /activate-account/<token>
-   - no rompe /reset-password/confirm?token=...
-   - no rompe /reset-password/confirm/<token>
-   - tokens no se truncan: se invalidan si exceden límite
-   - session values se limitan de forma controlada
-   - cero throws accidentales
+   Contrato:
+   - Helpers pequeños para auth.
+   - Path público conserva query/hash.
+   - Path canónico elimina query/hash y /@usuario.
+   - Rutas técnicas con token no se rompen.
+   - Tokens no se truncan: si exceden límite, se invalidan.
+   - Session values sí se limitan.
+   - Redacción segura para logs/eventos.
+   - Sin tocar storage.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -44,184 +24,184 @@ import {
 } from "./constants.js";
 
 /* =========================================================
-   CONSTANTS
+   META / CONSTANTS
 ========================================================= */
 
-export const AUTH_HELPERS_VERSION =
-  "15.0.0";
+export const AUTH_HELPERS_VERSION = "17.0.0-simple-clean";
 
-const DEFAULT_ROUTE =
-  "/";
+const DEFAULT_ROUTE = "/";
+const LOCAL_ORIGIN = "http://localhost";
 
-const LOCAL_ORIGIN =
-  "http://localhost";
+const DEFAULT_USERNAME_MAX = 80;
+const DEFAULT_SLUG_MAX = 160;
+const DEFAULT_TOKEN_MAX = 8192;
+const DEFAULT_SESSION_VALUE_MAX = 200;
+const SESSION_VALUE_ABSOLUTE_MAX = 2048;
+const URL_MAX = 4096;
+const SANITIZE_MAX_DEPTH = 5;
 
-const SAFE_USERNAME_FALLBACK_MAX =
-  80;
+const BAD_TEXT = new Set([
+  "",
+  "undefined",
+  "null",
+  "false",
+  "true",
+  "none",
+  "nan",
+  "[object object]",
+  "{}",
+  "[]",
+  "\"undefined\"",
+  "\"null\"",
+  "\"false\"",
+  "\"true\"",
+  "\"\"",
+  "''",
+]);
 
-const SAFE_SLUG_MAX =
-  160;
+const AUTH_ROUTES = Object.freeze([
+  "/login",
+  "/signin",
+  "/sign-in",
+  "/auth",
+  "/auth/login",
 
-const SAFE_TOKEN_FALLBACK_MAX =
-  8192;
+  "/forgot-password",
+  "/recover",
+  "/recover-password",
 
-const SAFE_SESSION_VALUE_FALLBACK_MAX =
-  200;
+  "/reset-password",
+  "/reset-password/confirm",
+  "/reset-password-confirm",
 
-const SAFE_SESSION_VALUE_ABSOLUTE_MAX =
-  2048;
+  "/password-reset",
+  "/password-reset/confirm",
+  "/password-reset-confirm",
 
-const SAFE_URL_MAX =
-  4096;
+  "/confirm-reset-password",
 
-const MAX_SANITIZE_DEPTH =
-  5;
+  "/activate-account",
+  "/activate",
+  "/activation",
+  "/account/activate",
+  "/activate/first-user",
 
-const AUTH_ROUTE_CANDIDATES =
-  Object.freeze([
-    "/login",
-    "/signin",
-    "/sign-in",
-    "/auth",
-    "/auth/login",
-    "/forgot-password",
-    "/reset-password",
-    "/reset-password/confirm",
-    "/recover",
-    "/recover-password",
-    "/password-reset",
-    "/activate-account",
-    "/2fa",
-    "/otp",
-    "/mfa",
-  ]);
+  "/2fa",
+  "/otp",
+  "/mfa",
+]);
 
-const DEFAULT_PUBLIC_TECHNICAL_ROUTES =
-  Object.freeze([
-    "/activate-account",
-    "/reset-password",
-    "/reset-password/confirm",
-    "/forgot-password",
-    "/recover-password",
-    "/password-reset",
-    "/2fa",
-    "/otp",
-    "/mfa",
-  ]);
+const DEFAULT_PUBLIC_ROUTES = Object.freeze([
+  "/activate-account",
+  "/activate",
+  "/activation",
+  "/account/activate",
+  "/activate/first-user",
 
-const CORRUPTED_TEXT_VALUES =
-  new Set([
-    "",
-    "undefined",
-    "null",
-    "false",
-    "true",
-    "none",
-    "nan",
-    "[object object]",
-    "{}",
-    "[]",
-    "\"undefined\"",
-    "\"null\"",
-    "\"false\"",
-    "\"true\"",
-    "\"\"",
-    "''",
-  ]);
+  "/reset-password",
+  "/reset-password/confirm",
+  "/reset-password-confirm",
 
-const TECHNICAL_TOKEN_PATHS =
-  Object.freeze([
-    "/activate-account",
-    "/reset-password/confirm",
-  ]);
+  "/password-reset",
+  "/password-reset/confirm",
+  "/password-reset-confirm",
 
-const TECHNICAL_CANONICAL_COLLAPSE =
-  Object.freeze([
-    Object.freeze({
-      base:
-        "/activate-account",
+  "/confirm-reset-password",
 
-      canonical:
-        "/activate-account",
-    }),
+  "/forgot-password",
+  "/recover-password",
 
-    Object.freeze({
-      base:
-        "/reset-password/confirm",
+  "/2fa",
+  "/otp",
+  "/mfa",
+]);
 
-      canonical:
-        "/reset-password/confirm",
-    }),
-  ]);
+const ACTIVATION_BASES = Object.freeze([
+  "/activate/first-user",
+  "/account/activate",
+  "/activate-account",
+  "/activation",
+  "/activate",
+]);
 
-const FALLBACK_TOKEN_PARAM_NAMES =
-  Object.freeze({
-    generic:
-      Object.freeze([
-        "token",
-        "code",
-        "t",
-      ]),
+const RESET_CONFIRM_BASES = Object.freeze([
+  "/reset-password/confirm",
+  "/password-reset/confirm",
+  "/reset-password-confirm",
+  "/password-reset-confirm",
+  "/confirm-reset-password",
+]);
 
-    activation:
-      Object.freeze([
-        "token",
-        "activationToken",
-        "activateToken",
-        "activation_token",
-        "activate_token",
-        "code",
-        "t",
-      ]),
+const CANONICAL_COLLAPSE = Object.freeze([
+  ...ACTIVATION_BASES.map((base) => ({
+    base,
+    canonical: "/activate-account",
+  })),
 
-    reset:
-      Object.freeze([
-        "token",
-        "resetToken",
-        "passwordResetToken",
-        "confirmToken",
-        "reset_token",
-        "password_reset_token",
-        "confirm_token",
-        "code",
-        "t",
-      ]),
+  ...RESET_CONFIRM_BASES.map((base) => ({
+    base,
+    canonical: "/reset-password/confirm",
+  })),
+]);
 
-    auth:
-      Object.freeze([
-        "token",
-        "accessToken",
-        "access_token",
-        "refreshToken",
-        "refresh_token",
-        "idToken",
-        "id_token",
-        "authToken",
-        "auth_token",
-        "jwt",
-        "bearer",
-      ]),
+const FALLBACK_TOKEN_NAMES = Object.freeze({
+  generic: Object.freeze(["token", "code", "t"]),
 
-    twoFactor:
-      Object.freeze([
-        "tempToken",
-        "temp_token",
-        "temporaryToken",
-        "temporary_token",
-        "challengeToken",
-        "challenge_token",
-        "twoFactorToken",
-        "two_factor_token",
-        "mfaToken",
-        "mfa_token",
-        "code",
-        "otp",
-        "totp",
-        "t",
-      ]),
-  });
+  activation: Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "activation_token",
+    "activate_token",
+    "code",
+    "t",
+  ]),
 
-const SENSITIVE_PAYLOAD_KEY_RE =
+  reset: Object.freeze([
+    "token",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
+    "reset_token",
+    "password_reset_token",
+    "confirm_token",
+    "code",
+    "t",
+  ]),
+
+  auth: Object.freeze([
+    "token",
+    "accessToken",
+    "access_token",
+    "refreshToken",
+    "refresh_token",
+    "idToken",
+    "id_token",
+    "authToken",
+    "auth_token",
+    "jwt",
+    "bearer",
+  ]),
+
+  twoFactor: Object.freeze([
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "challengeToken",
+    "challenge_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
+    "code",
+    "otp",
+    "totp",
+    "t",
+  ]),
+});
+
+const SENSITIVE_KEY_RE =
   /token|authorization|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|cookie|csrf|xsrf/i;
 
 const JWT_RE =
@@ -235,53 +215,31 @@ const BEARER_RE =
 ========================================================= */
 
 export function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 export function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+  if (value === null || value === undefined) {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
+  const text = String(value).trim();
 
   return text || fallback;
 }
 
 export function safeNumber(value, fallback = 0) {
-  const numeric =
-    Number(value);
+  const n = Number(value);
 
-  return Number.isFinite(numeric)
-    ? numeric
-    : fallback;
+  return Number.isFinite(n) ? n : fallback;
 }
 
 export function safeInt(value, fallback = 0) {
-  return Math.trunc(
-    safeNumber(value, fallback)
-  );
+  return Math.trunc(safeNumber(value, fallback));
 }
 
-export function clampNumber(
-  value,
-  min = 0,
-  max = Number.MAX_SAFE_INTEGER
-) {
-  const numeric =
-    safeNumber(value, min);
-
-  return Math.min(
-    Math.max(numeric, min),
-    max
-  );
+export function clampNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
+  return Math.min(Math.max(safeNumber(value, min), min), max);
 }
 
 export function safeBool(value, fallback = false) {
@@ -294,36 +252,13 @@ export function safeBool(value, fallback = false) {
     if (value === 0) return false;
   }
 
-  const text =
-    safeText(value, "")
-      .toLowerCase();
+  const text = safeText(value).toLowerCase();
 
-  if (
-    [
-      "true",
-      "1",
-      "yes",
-      "si",
-      "sí",
-      "ok",
-      "on",
-      "enabled",
-      "active",
-    ].includes(text)
-  ) {
+  if (["true", "1", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(text)) {
     return true;
   }
 
-  if (
-    [
-      "false",
-      "0",
-      "no",
-      "off",
-      "disabled",
-      "inactive",
-    ].includes(text)
-  ) {
+  if (["false", "0", "no", "off", "disabled", "inactive"].includes(text)) {
     return false;
   }
 
@@ -331,11 +266,7 @@ export function safeBool(value, fallback = false) {
 }
 
 export function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 export function isPlainObject(value) {
@@ -347,33 +278,19 @@ export function isFn(value) {
 }
 
 export function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return Array.isArray(value) ? value : [];
 }
 
 export function toArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return [];
-  }
-
+  if (Array.isArray(value)) return value;
+  if (value === null || value === undefined) return [];
   return [value];
 }
 
 export function safeClone(value, fallback = null) {
   try {
     if (typeof AppCore?.utils?.safeClone === "function") {
-      return AppCore.utils.safeClone(
-        value,
-        fallback
-      );
+      return AppCore.utils.safeClone(value, fallback);
     }
   } catch {}
 
@@ -384,105 +301,53 @@ export function safeClone(value, fallback = null) {
   } catch {}
 
   try {
-    return JSON.parse(
-      JSON.stringify(value)
-    );
+    return JSON.parse(JSON.stringify(value));
   } catch {
-    return fallback === undefined
-      ? value
-      : fallback;
+    return fallback === undefined ? value : fallback;
   }
 }
 
 function safeObject(value) {
-  return isObject(value)
-    ? value
-    : {};
+  return isObject(value) ? value : {};
 }
 
 function safeLower(value = "") {
-  return safeText(value, "")
-    .toLowerCase();
-}
-
-function isCorruptedTextValue(value = "") {
-  const text =
-    safeLower(value);
-
-  return CORRUPTED_TEXT_VALUES.has(text);
+  return safeText(value).toLowerCase();
 }
 
 function unique(values = []) {
-  const input =
-    Array.isArray(values)
-      ? values
-      : [values];
-
-  return Array.from(
-    new Set(
-      input
+  return [
+    ...new Set(
+      toArray(values)
         .flat(Infinity)
-        .map((value) =>
-          safeText(value, "")
-        )
+        .map((item) => safeText(item))
         .filter(Boolean)
-    )
-  );
+    ),
+  ];
 }
 
 function escapeRegExp(value = "") {
-  return safeText(value, "")
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return safeText(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function isBadText(value = "") {
+  return BAD_TEXT.has(safeLower(value));
+}
+
+function limitUrl(value = "") {
+  return safeText(value).slice(0, URL_MAX);
 }
 
 /* =========================================================
    APPCORE DELEGATES
 ========================================================= */
 
-function coreNormalizePath(value) {
+function callCoreUtil(name, value) {
   try {
-    if (typeof AppCore?.utils?.normalizePath === "function") {
-      return AppCore.utils.normalizePath(value);
-    }
-  } catch {}
+    const fn = AppCore?.utils?.[name];
 
-  return null;
-}
-
-function coreNormalizeCanonicalPath(value) {
-  try {
-    if (typeof AppCore?.utils?.normalizeCanonicalPath === "function") {
-      return AppCore.utils.normalizeCanonicalPath(value);
-    }
-  } catch {}
-
-  return null;
-}
-
-function coreNormalizePublicPath(value) {
-  try {
-    if (typeof AppCore?.utils?.normalizePublicPath === "function") {
-      return AppCore.utils.normalizePublicPath(value);
-    }
-  } catch {}
-
-  return null;
-}
-
-function coreSanitizeUsername(value) {
-  try {
-    if (typeof AppCore?.utils?.sanitizeUsername === "function") {
-      return AppCore.utils.sanitizeUsername(value);
-    }
-  } catch {}
-
-  return null;
-}
-
-function coreSlugify(value) {
-  try {
-    if (typeof AppCore?.utils?.slugify === "function") {
-      return AppCore.utils.slugify(value);
+    if (typeof fn === "function") {
+      return fn(value);
     }
   } catch {}
 
@@ -490,215 +355,131 @@ function coreSlugify(value) {
 }
 
 /* =========================================================
-   URL / PATH BASICS
+   URL / PATH
 ========================================================= */
 
 function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
+  if (isBrowser() && window.location?.origin) {
     return window.location.origin;
   }
 
   return LOCAL_ORIGIN;
 }
 
-function limitUrlLike(value = "") {
-  return safeText(value, "")
-    .slice(0, SAFE_URL_MAX);
-}
-
 export function isHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value);
 
-  return (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  );
+  return raw.startsWith("#/") || raw.startsWith("#!");
 }
 
 export function normalizeHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value);
 
-  if (!raw) {
-    return DEFAULT_ROUTE;
-  }
+  if (!raw) return DEFAULT_ROUTE;
 
   if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/") ||
-      DEFAULT_ROUTE;
+    return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
   }
 
-  return raw.replace(/^#\/?/, "/") ||
-    DEFAULT_ROUTE;
+  return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
 }
 
 function normalizeSearch(search = "") {
-  const value =
-    safeText(search, "");
+  const value = safeText(search);
 
-  if (!value) {
-    return "";
-  }
+  if (!value) return "";
 
-  return value.startsWith("?")
-    ? value
-    : `?${value.replace(/^\?+/, "")}`;
+  return value.startsWith("?") ? value : `?${value.replace(/^\?+/, "")}`;
 }
 
 function normalizeHash(hash = "") {
-  const value =
-    safeText(hash, "");
+  const value = safeText(hash);
 
-  if (!value) {
-    return "";
-  }
+  if (!value) return "";
 
-  return value.startsWith("#")
-    ? value
-    : `#${value.replace(/^#+/, "")}`;
+  return value.startsWith("#") ? value : `#${value.replace(/^#+/, "")}`;
 }
 
 export function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
-  let value =
-    String(pathname || DEFAULT_ROUTE)
-      .trim()
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
-
-  if (!value) {
-    value =
-      DEFAULT_ROUTE;
-  }
+  let value = safeText(pathname, DEFAULT_ROUTE)
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
   if (!value.startsWith("/")) {
-    value =
-      `/${value}`;
+    value = `/${value}`;
   }
 
-  const normalizedSegments =
-    [];
+  const segments = [];
 
   for (const segment of value.split("/")) {
-    if (
-      !segment ||
-      segment === "."
-    ) {
-      continue;
-    }
+    if (!segment || segment === ".") continue;
 
     if (segment === "..") {
-      normalizedSegments.pop();
+      segments.pop();
       continue;
     }
 
-    normalizedSegments.push(segment);
+    segments.push(segment);
   }
 
-  value =
-    `/${normalizedSegments.join("/")}` ||
-    DEFAULT_ROUTE;
+  value = `/${segments.join("/")}` || DEFAULT_ROUTE;
 
-  if (
-    value.length > 1 &&
-    value.endsWith("/")
-  ) {
-    value =
-      value.replace(/\/+$/g, "") ||
-      DEFAULT_ROUTE;
+  if (value.length > 1 && value.endsWith("/")) {
+    value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
   }
 
   return value;
 }
 
 export function splitPath(path = DEFAULT_ROUTE) {
-  const raw =
-    limitUrlLike(path) ||
-    DEFAULT_ROUTE;
+  const raw = limitUrl(path) || DEFAULT_ROUTE;
 
   if (isHashRouterPath(raw)) {
-    return splitPath(
-      normalizeHashRouterPath(raw)
-    );
+    return splitPath(normalizeHashRouterPath(raw));
   }
 
-  let pathname =
-    raw;
+  let pathname = raw;
+  let search = "";
+  let hash = "";
 
-  let search =
-    "";
-
-  let hash =
-    "";
-
-  const hashIndex =
-    pathname.indexOf("#");
+  const hashIndex = pathname.indexOf("#");
 
   if (hashIndex >= 0) {
-    hash =
-      pathname.slice(hashIndex);
-
-    pathname =
-      pathname.slice(0, hashIndex) ||
-      DEFAULT_ROUTE;
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
   }
 
-  const searchIndex =
-    pathname.indexOf("?");
+  const searchIndex = pathname.indexOf("?");
 
   if (searchIndex >= 0) {
-    search =
-      pathname.slice(searchIndex);
-
-    pathname =
-      pathname.slice(0, searchIndex) ||
-      DEFAULT_ROUTE;
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
   }
 
+  const cleanSearch = normalizeSearch(search);
+  const cleanHash = normalizeHash(hash);
+
   return {
-    pathname:
-      normalizePathnameOnly(pathname),
-
-    search:
-      normalizeSearch(search),
-
-    hash:
-      normalizeHash(hash),
-
-    suffix:
-      `${normalizeSearch(search)}${normalizeHash(hash)}`,
+    pathname: normalizePathnameOnly(pathname),
+    search: cleanSearch,
+    hash: cleanHash,
+    suffix: `${cleanSearch}${cleanHash}`,
   };
 }
 
 export function fallbackNormalizePath(value = DEFAULT_ROUTE) {
-  const raw =
-    limitUrlLike(value) ||
-    DEFAULT_ROUTE;
+  const raw = limitUrl(value) || DEFAULT_ROUTE;
 
   if (isHashRouterPath(raw)) {
-    return fallbackNormalizePath(
-      normalizeHashRouterPath(raw)
-    );
+    return fallbackNormalizePath(normalizeHashRouterPath(raw));
   }
 
   try {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed =
-        new URL(
-          raw,
-          getBaseOrigin()
-        );
+      const parsed = new URL(raw, getBaseOrigin());
 
-      if (
-        parsed.hash &&
-        isHashRouterPath(parsed.hash)
-      ) {
-        return fallbackNormalizePath(
-          normalizeHashRouterPath(parsed.hash)
-        );
+      if (parsed.hash && isHashRouterPath(parsed.hash)) {
+        return fallbackNormalizePath(normalizeHashRouterPath(parsed.hash));
       }
 
       return fallbackNormalizePath(
@@ -707,71 +488,36 @@ export function fallbackNormalizePath(value = DEFAULT_ROUTE) {
     }
   } catch {}
 
-  const {
-    pathname,
-    search,
-    hash,
-  } =
-    splitPath(raw);
+  const { pathname, search, hash } = splitPath(raw);
 
   return `${pathname}${search}${hash}`;
 }
 
 export function stripSearchAndHash(path = DEFAULT_ROUTE) {
-  const {
-    pathname,
-  } =
-    splitPath(
-      fallbackNormalizePath(path)
-    );
-
-  return pathname || DEFAULT_ROUTE;
+  return splitPath(fallbackNormalizePath(path)).pathname || DEFAULT_ROUTE;
 }
 
 export function getSearchAndHash(path = DEFAULT_ROUTE) {
-  const {
-    search,
-    hash,
-  } =
-    splitPath(
-      fallbackNormalizePath(path)
-    );
+  const { search, hash } = splitPath(fallbackNormalizePath(path));
 
-  return `${search || ""}${hash || ""}`;
+  return `${search}${hash}`;
 }
 
 export function stripUsernamePrefix(path = DEFAULT_ROUTE) {
-  const normalized =
-    fallbackNormalizePath(path);
+  const normalized = fallbackNormalizePath(path);
+  const { pathname, search, hash } = splitPath(normalized);
 
-  const {
-    pathname,
-    search,
-    hash,
-  } =
-    splitPath(normalized);
+  const stripped = pathname.replace(/^\/@[^/]+(?=\/|$)/i, "") || DEFAULT_ROUTE;
 
-  const stripped =
-    pathname.replace(
-      /^\/@[^/]+(?=\/|$)/i,
-      ""
-    ) || DEFAULT_ROUTE;
-
-  return fallbackNormalizePath(
-    `${normalizePathnameOnly(stripped)}${search}${hash}`
-  );
+  return fallbackNormalizePath(`${normalizePathnameOnly(stripped)}${search}${hash}`);
 }
 
-function collapseTechnicalCanonical(pathname = DEFAULT_ROUTE) {
-  const clean =
-    normalizePathnameOnly(pathname);
+function collapseCanonical(pathname = DEFAULT_ROUTE) {
+  const clean = normalizePathnameOnly(pathname);
 
-  for (const item of TECHNICAL_CANONICAL_COLLAPSE) {
-    if (
-      clean === item.base ||
-      clean.startsWith(`${item.base}/`)
-    ) {
-      return item.canonical;
+  for (const rule of CANONICAL_COLLAPSE) {
+    if (clean === rule.base || clean.startsWith(`${rule.base}/`)) {
+      return rule.canonical;
     }
   }
 
@@ -779,130 +525,71 @@ function collapseTechnicalCanonical(pathname = DEFAULT_ROUTE) {
 }
 
 export function normalizePath(path = DEFAULT_ROUTE) {
-  const raw =
-    limitUrlLike(path) ||
-    DEFAULT_ROUTE;
+  const raw = limitUrl(path) || DEFAULT_ROUTE;
+  const fallback = fallbackNormalizePath(raw);
 
-  const fallback =
-    fallbackNormalizePath(raw);
-
-  /*
-    Si trae query/hash, no delegamos a AppCore.
-    Algunos normalizadores globales podrían perder ?token=...
-  */
-  if (
-    raw.includes("?") ||
-    raw.includes("#")
-  ) {
+  if (raw.includes("?") || raw.includes("#")) {
     return fallback;
   }
 
   const delegated =
-    coreNormalizePath(raw);
+    callCoreUtil("normalizePath", raw) ||
+    null;
 
-  return delegated
-    ? fallbackNormalizePath(delegated)
-    : fallback;
+  return delegated ? fallbackNormalizePath(delegated) : fallback;
 }
 
-/*
-  Public path:
-  - conserva query/hash
-  - conserva /@usuario cuando existe
-  - NO colapsa rutas técnicas con token
-*/
 export function normalizePublicPath(path = DEFAULT_ROUTE) {
-  const raw =
-    limitUrlLike(path) ||
-    DEFAULT_ROUTE;
+  const raw = limitUrl(path) || DEFAULT_ROUTE;
+  const fallback = fallbackNormalizePath(raw);
 
-  const fallback =
-    fallbackNormalizePath(raw);
-
-  if (
-    raw.includes("?") ||
-    raw.includes("#") ||
-    raw.startsWith("/@")
-  ) {
+  if (raw.includes("?") || raw.includes("#") || raw.startsWith("/@")) {
     return fallback;
   }
 
   const delegated =
-    coreNormalizePublicPath(raw) ||
-    coreNormalizePath(raw);
+    callCoreUtil("normalizePublicPath", raw) ||
+    callCoreUtil("normalizePath", raw) ||
+    null;
 
-  return delegated
-    ? fallbackNormalizePath(delegated)
-    : fallback;
+  return delegated ? fallbackNormalizePath(delegated) : fallback;
 }
 
-/*
-  Canonical:
-  - elimina /@usuario
-  - elimina query/hash
-  - colapsa tokens técnicos de path a su ruta base
-*/
 export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
-  const raw =
-    limitUrlLike(path) ||
-    DEFAULT_ROUTE;
+  const raw = limitUrl(path) || DEFAULT_ROUTE;
 
-  const fallback =
-    collapseTechnicalCanonical(
-      stripSearchAndHash(
-        stripUsernamePrefix(raw)
-      )
-    );
+  const fallback = collapseCanonical(
+    stripSearchAndHash(stripUsernamePrefix(raw))
+  );
 
-  if (
-    raw.includes("?") ||
-    raw.includes("#") ||
-    raw.startsWith("/@")
-  ) {
+  if (raw.includes("?") || raw.includes("#") || raw.startsWith("/@")) {
     return fallback;
   }
 
   const delegated =
-    coreNormalizeCanonicalPath(raw) ||
-    coreNormalizePath(raw);
+    callCoreUtil("normalizeCanonicalPath", raw) ||
+    callCoreUtil("normalizePath", raw) ||
+    null;
 
   return delegated
-    ? collapseTechnicalCanonical(
-        stripSearchAndHash(
-          stripUsernamePrefix(delegated)
-        )
-      )
+    ? collapseCanonical(stripSearchAndHash(stripUsernamePrefix(delegated)))
     : fallback;
 }
 
 export function pathFromUrlLike(value = "") {
-  const raw =
-    limitUrlLike(value);
+  const raw = limitUrl(value);
 
-  if (!raw) {
-    return "";
-  }
+  if (!raw) return "";
 
   if (isHashRouterPath(raw)) {
-    return fallbackNormalizePath(
-      normalizeHashRouterPath(raw)
-    );
+    return fallbackNormalizePath(normalizeHashRouterPath(raw));
   }
 
   try {
-    const parsed =
-      new URL(
-        raw,
-        getBaseOrigin()
-      );
+    const parsed = new URL(raw, getBaseOrigin());
 
-    if (
-      parsed.hash &&
-      isHashRouterPath(parsed.hash)
-    ) {
-      return fallbackNormalizePath(
-        normalizeHashRouterPath(parsed.hash)
-      );
+    if (parsed.hash && isHashRouterPath(parsed.hash)) {
+      return fallbackNormalizePath(normalizeHashRouterPath(parsed.hash));
     }
 
     return fallbackNormalizePath(
@@ -919,51 +606,26 @@ export function pathFromUrlLike(value = "") {
 
 export function getCurrentPublicPath() {
   if (!isBrowser()) {
-    return normalizePublicPath(
-      AppCore?.state?.publicPath ||
-        AppCore?.state?.route ||
-        DEFAULT_ROUTE
-    );
+    return normalizePublicPath(AppCore?.state?.publicPath || AppCore?.state?.route || DEFAULT_ROUTE);
   }
 
   try {
-    const pathname =
-      window.location.pathname ||
-      DEFAULT_ROUTE;
+    const pathname = window.location.pathname || DEFAULT_ROUTE;
+    const search = window.location.search || "";
+    const hash = window.location.hash || "";
 
-    const search =
-      window.location.search ||
-      "";
-
-    const hash =
-      window.location.hash ||
-      "";
-
-    if (
-      hash &&
-      isHashRouterPath(hash)
-    ) {
-      return normalizePublicPath(
-        normalizeHashRouterPath(hash)
-      );
+    if (hash && isHashRouterPath(hash)) {
+      return normalizePublicPath(normalizeHashRouterPath(hash));
     }
 
-    return normalizePublicPath(
-      `${pathname}${search}${hash}`
-    );
+    return normalizePublicPath(`${pathname}${search}${hash}`);
   } catch {
-    return normalizePublicPath(
-      AppCore?.state?.publicPath ||
-        AppCore?.state?.route ||
-        DEFAULT_ROUTE
-    );
+    return normalizePublicPath(AppCore?.state?.publicPath || AppCore?.state?.route || DEFAULT_ROUTE);
   }
 }
 
 export function getCurrentCanonicalPath() {
-  return normalizeCanonicalPath(
-    getCurrentPublicPath()
-  );
+  return normalizeCanonicalPath(getCurrentPublicPath());
 }
 
 export function configLikeRoute(path = DEFAULT_ROUTE) {
@@ -971,70 +633,46 @@ export function configLikeRoute(path = DEFAULT_ROUTE) {
 }
 
 /* =========================================================
-   ROUTE DETECTION
+   ROUTES
 ========================================================= */
 
 function routeStartsWith(path = DEFAULT_ROUTE, candidate = DEFAULT_ROUTE) {
-  const cleanPath =
-    normalizeCanonicalPath(path)
-      .toLowerCase();
+  const cleanPath = normalizeCanonicalPath(path).toLowerCase();
+  const cleanCandidate = normalizeCanonicalPath(candidate).toLowerCase();
 
-  const cleanCandidate =
-    normalizeCanonicalPath(candidate)
-      .toLowerCase();
-
-  return (
-    cleanPath === cleanCandidate ||
-    cleanPath.startsWith(`${cleanCandidate}/`)
-  );
+  return cleanPath === cleanCandidate || cleanPath.startsWith(`${cleanCandidate}/`);
 }
 
-export function isAuthRoute(
-  pathname = isBrowser()
-    ? window.location.pathname
-    : DEFAULT_ROUTE
-) {
-  return AUTH_ROUTE_CANDIDATES.some((candidate) =>
-    routeStartsWith(
-      pathname,
-      candidate
-    )
-  );
+export function isAuthRoute(path = isBrowser() ? window.location.pathname : DEFAULT_ROUTE) {
+  return AUTH_ROUTES.some((route) => routeStartsWith(path, route));
 }
 
 export function isPublicTechnicalRoute(path = getCurrentPublicPath()) {
-  const routes =
-    Array.isArray(AUTH_PUBLIC_TECHNICAL_ROUTES)
-      ? AUTH_PUBLIC_TECHNICAL_ROUTES
-      : DEFAULT_PUBLIC_TECHNICAL_ROUTES;
+  const configured = Array.isArray(AUTH_PUBLIC_TECHNICAL_ROUTES)
+    ? AUTH_PUBLIC_TECHNICAL_ROUTES
+    : [];
 
-  return routes.some((route) =>
-    routeStartsWith(
-      path,
-      route
-    )
-  );
+  const routes = unique([
+    ...DEFAULT_PUBLIC_ROUTES,
+    ...configured,
+  ]);
+
+  return routes.some((route) => routeStartsWith(path, route));
 }
 
 export function isActivationRoute(path = getCurrentPublicPath()) {
-  return routeStartsWith(
-    path,
-    "/activate-account"
-  );
+  return ACTIVATION_BASES.some((route) => routeStartsWith(path, route));
 }
 
 export function isResetPasswordRoute(path = getCurrentPublicPath()) {
-  return routeStartsWith(
-    path,
-    "/reset-password"
+  return (
+    routeStartsWith(path, "/reset-password") ||
+    routeStartsWith(path, "/password-reset")
   );
 }
 
 export function isResetPasswordConfirmRoute(path = getCurrentPublicPath()) {
-  return routeStartsWith(
-    path,
-    "/reset-password/confirm"
-  );
+  return RESET_CONFIRM_BASES.some((route) => routeStartsWith(path, route));
 }
 
 export function isForgotPasswordRoute(path = getCurrentPublicPath()) {
@@ -1058,32 +696,24 @@ export function isTwoFactorRoute(path = getCurrentPublicPath()) {
    REDIRECT SAFETY
 ========================================================= */
 
-function hasEncodedOpenRedirectRisk(path = "") {
-  const raw =
-    safeText(path, "");
+function hasEncodedRedirectRisk(path = "") {
+  const raw = safeText(path);
+  const lower = raw.toLowerCase();
 
-  if (!raw) {
-    return true;
-  }
-
-  const lower =
-    raw.toLowerCase();
+  if (!raw) return true;
 
   if (
     lower.includes("%0d") ||
     lower.includes("%0a") ||
     lower.includes("%09") ||
-    lower.includes("\\") ||
-    lower.includes("%5c")
+    lower.includes("%5c") ||
+    raw.includes("\\")
   ) {
     return true;
   }
 
   try {
-    const decoded =
-      decodeURIComponent(raw)
-        .trim()
-        .replace(/\\/g, "/");
+    const decoded = decodeURIComponent(raw).trim().replace(/\\/g, "/");
 
     if (
       decoded.startsWith("//") ||
@@ -1100,63 +730,36 @@ function hasEncodedOpenRedirectRisk(path = "") {
 }
 
 export function isSafeRelativePath(path = "") {
-  const raw =
-    limitUrlLike(path);
+  const raw = limitUrl(path);
 
-  if (!raw) {
-    return false;
-  }
-
-  if (!raw.startsWith("/")) {
-    return false;
-  }
-
-  if (raw.startsWith("//")) {
-    return false;
-  }
-
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-    return false;
-  }
-
-  if (/[\r\n\t]/.test(raw)) {
-    return false;
-  }
-
-  if (hasEncodedOpenRedirectRisk(raw)) {
-    return false;
-  }
-
-  return true;
+  return Boolean(
+    raw &&
+      raw.startsWith("/") &&
+      !raw.startsWith("//") &&
+      !/^[a-z][a-z0-9+.-]*:/i.test(raw) &&
+      !/[\r\n\t]/.test(raw) &&
+      !hasEncodedRedirectRisk(raw)
+  );
 }
 
-export function sanitizeRedirectPath(
-  path = DEFAULT_ROUTE,
-  fallback = DEFAULT_ROUTE
-) {
-  const raw =
-    limitUrlLike(path);
+export function sanitizeRedirectPath(path = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
+  const fallbackPath = isSafeRelativePath(fallback)
+    ? normalizePublicPath(fallback)
+    : DEFAULT_ROUTE;
 
-  const fallbackPath =
-    isSafeRelativePath(fallback)
-      ? normalizePublicPath(fallback)
-      : DEFAULT_ROUTE;
+  const raw = limitUrl(path);
 
   if (!isSafeRelativePath(raw)) {
     return fallbackPath;
   }
 
-  const candidate =
-    normalizePublicPath(raw);
+  const candidate = normalizePublicPath(raw);
 
   if (!isSafeRelativePath(candidate)) {
     return fallbackPath;
   }
 
-  if (
-    isAuthRoute(candidate) &&
-    !isPublicTechnicalRoute(candidate)
-  ) {
+  if (isAuthRoute(candidate) && !isPublicTechnicalRoute(candidate)) {
     return fallbackPath;
   }
 
@@ -1164,12 +767,7 @@ export function sanitizeRedirectPath(
 }
 
 export function buildSafeRedirectParam(path = DEFAULT_ROUTE) {
-  return encodeURIComponent(
-    sanitizeRedirectPath(
-      path,
-      DEFAULT_ROUTE
-    )
-  );
+  return encodeURIComponent(sanitizeRedirectPath(path, DEFAULT_ROUTE));
 }
 
 /* =========================================================
@@ -1177,35 +775,27 @@ export function buildSafeRedirectParam(path = DEFAULT_ROUTE) {
 ========================================================= */
 
 export function sanitizeUsername(value = "") {
-  const delegated =
-    coreSanitizeUsername(value);
+  const delegated = callCoreUtil("sanitizeUsername", value);
 
   if (delegated) {
-    return delegated;
+    return safeText(delegated);
   }
 
-  const max =
-    clampNumber(
-      AUTH_CONSTANTS?.usernameMaxLength ??
-        AUTH_CONSTANTS?.identifierMaxLength ??
-        SAFE_USERNAME_FALLBACK_MAX,
-      1,
-      160
-    );
+  const max = clampNumber(
+    AUTH_CONSTANTS?.usernameMaxLength ||
+      AUTH_CONSTANTS?.identifierMaxLength ||
+      DEFAULT_USERNAME_MAX,
+    1,
+    160
+  );
 
-  let raw =
-    String(value || "")
-      .normalize("NFKC")
-      .trim()
-      .replace(/^@+/, "");
+  let raw = String(value || "")
+    .normalize("NFKC")
+    .trim()
+    .replace(/^@+/, "");
 
-  if (
-    raw.includes("@") &&
-    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(raw)
-  ) {
-    raw =
-      raw.split("@")[0] ||
-      raw;
+  if (raw.includes("@") && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(raw)) {
+    raw = raw.split("@")[0] || raw;
   }
 
   return raw
@@ -1220,11 +810,10 @@ export function sanitizeUsername(value = "") {
 }
 
 export function slugify(value = "") {
-  const delegated =
-    coreSlugify(value);
+  const delegated = callCoreUtil("slugify", value);
 
   if (delegated) {
-    return delegated;
+    return safeText(delegated);
   }
 
   return String(value || "")
@@ -1236,36 +825,23 @@ export function slugify(value = "") {
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/-{2,}/g, "-")
     .replace(/^[._-]+|[._-]+$/g, "")
-    .slice(0, SAFE_SLUG_MAX);
+    .slice(0, DEFAULT_SLUG_MAX);
 }
 
 /* =========================================================
    TOKENS / SESSION VALUES
 ========================================================= */
 
-function getTokenMaxLength(maxLength = AUTH_CONSTANTS?.tokenMaxLength) {
-  return clampNumber(
-    maxLength ?? SAFE_TOKEN_FALLBACK_MAX,
-    1,
-    32768
-  ) || SAFE_TOKEN_FALLBACK_MAX;
+function tokenMax(maxLength = AUTH_CONSTANTS?.tokenMaxLength) {
+  return clampNumber(maxLength || DEFAULT_TOKEN_MAX, 1, 32768);
 }
 
-function getSessionMaxLength(maxLength = AUTH_CONSTANTS?.sessionValueMaxLength) {
-  return clampNumber(
-    maxLength ?? SAFE_SESSION_VALUE_FALLBACK_MAX,
-    1,
-    SAFE_SESSION_VALUE_ABSOLUTE_MAX
-  ) || SAFE_SESSION_VALUE_FALLBACK_MAX;
+function sessionMax(maxLength = AUTH_CONSTANTS?.sessionValueMaxLength) {
+  return clampNumber(maxLength || DEFAULT_SESSION_VALUE_MAX, 1, SESSION_VALUE_ABSOLUTE_MAX);
 }
 
-function unwrapTokenCandidate(value = null) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return null;
-  }
+function unwrapToken(value = null) {
+  if (value === null || value === undefined) return null;
 
   if (isObject(value)) {
     for (const key of [
@@ -1280,11 +856,7 @@ function unwrapTokenCandidate(value = null) {
       "raw",
       "data",
     ]) {
-      if (
-        value[key] !== null &&
-        value[key] !== undefined &&
-        value[key] !== ""
-      ) {
+      if (value[key] !== null && value[key] !== undefined && value[key] !== "") {
         return value[key];
       }
     }
@@ -1295,172 +867,127 @@ function unwrapTokenCandidate(value = null) {
   return value;
 }
 
-export function normalizeTokenValue(
-  token = null,
-  maxLength = AUTH_CONSTANTS?.tokenMaxLength
-) {
-  const candidate =
-    unwrapTokenCandidate(token);
+export function normalizeTokenValue(token = null, maxLength = AUTH_CONSTANTS?.tokenMaxLength) {
+  const candidate = unwrapToken(token);
 
-  if (
-    candidate === null ||
-    candidate === undefined
-  ) {
+  if (candidate === null || candidate === undefined) {
     return null;
   }
 
-  let normalized =
-    String(candidate)
-      .normalize("NFKC")
-      .trim();
+  let value = String(candidate).normalize("NFKC").trim();
 
-  if (/^bearer\s+/i.test(normalized)) {
-    normalized =
-      normalized.replace(/^bearer\s+/i, "")
-        .trim();
+  if (/^bearer\s+/i.test(value)) {
+    value = value.replace(/^bearer\s+/i, "").trim();
   }
 
-  if (
-    !normalized ||
-    isCorruptedTextValue(normalized)
-  ) {
+  if (!value || isBadText(value) || /[\r\n\t\s]/.test(value)) {
     return null;
   }
 
-  /*
-    Tokens no se mutan ni se truncan.
-    Whitespace interno => corrupto.
-  */
-  if (/[\r\n\t\s]/.test(normalized)) {
+  if (value.length > tokenMax(maxLength)) {
     return null;
   }
 
-  if (normalized.length > getTokenMaxLength(maxLength)) {
-    return null;
-  }
-
-  return normalized;
+  return value;
 }
 
-export function normalizeSessionValue(
-  value = null,
-  maxLength = AUTH_CONSTANTS?.sessionValueMaxLength
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+export function normalizeSessionValue(value = null, maxLength = AUTH_CONSTANTS?.sessionValueMaxLength) {
+  if (value === null || value === undefined) {
     return null;
   }
 
-  const normalized =
-    String(value)
-      .normalize("NFKC")
-      .trim()
-      .replace(/[\r\n\t]/g, "");
+  const normalized = String(value)
+    .normalize("NFKC")
+    .trim()
+    .replace(/[\r\n\t]/g, "");
 
-  if (
-    !normalized ||
-    isCorruptedTextValue(normalized)
-  ) {
+  if (!normalized || isBadText(normalized)) {
     return null;
   }
 
-  return normalized.slice(
-    0,
-    getSessionMaxLength(maxLength)
-  );
+  return normalized.slice(0, sessionMax(maxLength));
 }
 
 export function hasValidToken(token = AppCore?.state?.token) {
-  return Boolean(
-    normalizeTokenValue(token)
-  );
+  return Boolean(normalizeTokenValue(token));
+}
+
+/* =========================================================
+   TOKEN PARAMS / EXTRACTORS
+========================================================= */
+
+function constantTokenNames(type = "generic") {
+  if (Array.isArray(AUTH_TOKEN_PARAM_NAMES)) {
+    return AUTH_TOKEN_PARAM_NAMES;
+  }
+
+  if (AUTH_TOKEN_PARAM_NAMES && Array.isArray(AUTH_TOKEN_PARAM_NAMES[type])) {
+    return AUTH_TOKEN_PARAM_NAMES[type];
+  }
+
+  return [];
 }
 
 export function getAuthTokenParamNames(type = "generic") {
-  const cleanType =
-    safeText(type, "generic");
+  const cleanType = safeText(type, "generic");
 
-  const fromConstants =
-    AUTH_TOKEN_PARAM_NAMES?.[cleanType];
-
-  if (
-    Array.isArray(fromConstants) &&
-    fromConstants.length
-  ) {
-    return [...fromConstants];
-  }
-
-  return [
-    ...(FALLBACK_TOKEN_PARAM_NAMES[cleanType] ||
-      FALLBACK_TOKEN_PARAM_NAMES.generic),
-  ];
+  return unique([
+    ...constantTokenNames(cleanType),
+    ...(FALLBACK_TOKEN_NAMES[cleanType] || FALLBACK_TOKEN_NAMES.generic),
+  ]);
 }
 
 export function getAllAuthTokenParamNames() {
-  try {
-    return unique([
-      ...Object.values(FALLBACK_TOKEN_PARAM_NAMES).flat(),
-      ...Object.values(AUTH_TOKEN_PARAM_NAMES || {}).flat(),
-    ]);
-  } catch {
-    return unique(
-      Object.values(FALLBACK_TOKEN_PARAM_NAMES).flat()
-    );
+  const constantNames = [];
+
+  if (Array.isArray(AUTH_TOKEN_PARAM_NAMES)) {
+    constantNames.push(...AUTH_TOKEN_PARAM_NAMES);
+  } else if (AUTH_TOKEN_PARAM_NAMES && typeof AUTH_TOKEN_PARAM_NAMES === "object") {
+    for (const value of Object.values(AUTH_TOKEN_PARAM_NAMES)) {
+      if (Array.isArray(value)) constantNames.push(...value);
+    }
   }
+
+  return unique([
+    ...Object.values(FALLBACK_TOKEN_NAMES).flat(),
+    ...constantNames,
+  ]);
 }
 
 export function hasTokenInSearch(search = "", names = []) {
-  const finalNames =
-    Array.isArray(names) && names.length
-      ? names
-      : getAuthTokenParamNames("generic");
+  const finalNames = Array.isArray(names) && names.length
+    ? names
+    : getAuthTokenParamNames("generic");
 
   try {
-    const params =
-      new URLSearchParams(
-        safeText(search, "").startsWith("?")
-          ? search
-          : `?${search}`
-      );
-
-    return finalNames.some((name) =>
-      Boolean(
-        safeText(
-          params.get(name),
-          ""
-        )
-      )
+    const params = new URLSearchParams(
+      safeText(search).startsWith("?")
+        ? search
+        : `?${search}`
     );
+
+    return finalNames.some((name) => Boolean(safeText(params.get(name))));
   } catch {
     return false;
   }
 }
 
 export function extractTokenFromSearch(search = "", names = []) {
-  const finalNames =
-    Array.isArray(names) && names.length
-      ? names
-      : getAuthTokenParamNames("generic");
+  const finalNames = Array.isArray(names) && names.length
+    ? names
+    : getAuthTokenParamNames("generic");
 
   try {
-    const params =
-      new URLSearchParams(
-        safeText(search, "").startsWith("?")
-          ? search
-          : `?${search}`
-      );
+    const params = new URLSearchParams(
+      safeText(search).startsWith("?")
+        ? search
+        : `?${search}`
+    );
 
     for (const name of finalNames) {
-      const value =
-        normalizeTokenValue(
-          params.get(name)
-        );
+      const token = normalizeTokenValue(params.get(name));
 
-      if (value) {
-        return value;
-      }
+      if (token) return token;
     }
   } catch {}
 
@@ -1468,185 +995,101 @@ export function extractTokenFromSearch(search = "", names = []) {
 }
 
 export function extractPathToken(path = "", basePath = "") {
-  const normalized =
-    normalizePublicPath(path);
+  const pathname = stripSearchAndHash(stripUsernamePrefix(normalizePublicPath(path)));
+  const base = normalizeCanonicalPath(basePath);
 
-  const pathname =
-    stripSearchAndHash(
-      stripUsernamePrefix(normalized)
-    );
-
-  const base =
-    normalizeCanonicalPath(basePath);
-
-  if (
-    !base ||
-    !pathname.startsWith(`${base}/`)
-  ) {
+  if (!base || !pathname.startsWith(`${base}/`)) {
     return null;
   }
 
-  const token =
-    pathname
-      .slice(`${base}/`.length)
-      .split("/")[0];
+  const rawToken = pathname.slice(`${base}/`.length).split("/")[0];
 
   try {
-    return normalizeTokenValue(
-      decodeURIComponent(token || "")
-    );
+    return normalizeTokenValue(decodeURIComponent(rawToken || ""));
   } catch {
-    return normalizeTokenValue(token);
+    return normalizeTokenValue(rawToken);
   }
+}
+
+function extractPathTokenFromBases(path = "", bases = []) {
+  const sortedBases = [...bases].sort((a, b) => b.length - a.length);
+
+  for (const base of sortedBases) {
+    const token = extractPathToken(path, base);
+
+    if (token) return token;
+  }
+
+  return null;
 }
 
 function extractTokenFromHashQuery(hash = "", names = []) {
-  const cleanHash =
-    safeText(hash, "");
+  const value = safeText(hash);
 
-  if (
-    !cleanHash ||
-    !cleanHash.includes("?")
-  ) {
+  if (!value || !value.includes("?")) {
     return null;
   }
 
-  const query =
-    cleanHash
-      .split("?")
-      .slice(1)
-      .join("?");
+  const query = value.split("?").slice(1).join("?");
 
-  return extractTokenFromSearch(
-    query ? `?${query}` : "",
-    names
-  );
+  return extractTokenFromSearch(query ? `?${query}` : "", names);
 }
 
 export function extractActivationToken(pathOrUrl = getCurrentPublicPath()) {
-  const path =
-    pathFromUrlLike(pathOrUrl);
+  const path = pathFromUrlLike(pathOrUrl);
 
-  const pathToken =
-    extractPathToken(
-      path,
-      "/activate-account"
-    );
+  const pathToken = extractPathTokenFromBases(path, ACTIVATION_BASES);
+  if (pathToken) return pathToken;
 
-  if (pathToken) {
-    return pathToken;
-  }
+  const { search, hash } = splitPath(path);
 
-  const {
-    search,
-    hash,
-  } =
-    splitPath(path);
-
-  const fromSearch =
-    extractTokenFromSearch(
-      search,
-      getAuthTokenParamNames("activation")
-    );
-
-  if (fromSearch) {
-    return fromSearch;
-  }
-
-  return extractTokenFromHashQuery(
-    hash,
-    getAuthTokenParamNames("activation")
+  return (
+    extractTokenFromSearch(search, getAuthTokenParamNames("activation")) ||
+    extractTokenFromHashQuery(hash, getAuthTokenParamNames("activation"))
   );
 }
 
 export function extractResetToken(pathOrUrl = getCurrentPublicPath()) {
-  const path =
-    pathFromUrlLike(pathOrUrl);
+  const path = pathFromUrlLike(pathOrUrl);
 
-  const pathToken =
-    extractPathToken(
-      path,
-      "/reset-password/confirm"
-    );
+  const pathToken = extractPathTokenFromBases(path, RESET_CONFIRM_BASES);
+  if (pathToken) return pathToken;
 
-  if (pathToken) {
-    return pathToken;
-  }
+  const { search, hash } = splitPath(path);
 
-  const {
-    search,
-    hash,
-  } =
-    splitPath(path);
-
-  const fromSearch =
-    extractTokenFromSearch(
-      search,
-      getAuthTokenParamNames("reset")
-    );
-
-  if (fromSearch) {
-    return fromSearch;
-  }
-
-  return extractTokenFromHashQuery(
-    hash,
-    getAuthTokenParamNames("reset")
+  return (
+    extractTokenFromSearch(search, getAuthTokenParamNames("reset")) ||
+    extractTokenFromHashQuery(hash, getAuthTokenParamNames("reset"))
   );
 }
 
 export function hasTokenInUrl(pathOrUrl = "", type = "generic") {
-  const path =
-    pathFromUrlLike(pathOrUrl);
+  const path = pathFromUrlLike(pathOrUrl);
 
-  if (!path) {
-    return false;
-  }
+  if (!path) return false;
 
-  const {
-    search,
-    hash,
-  } =
-    splitPath(path);
+  const { search, hash } = splitPath(path);
+  const names = getAuthTokenParamNames(type);
 
-  if (
-    hasTokenInSearch(
-      search,
-      getAuthTokenParamNames(type)
-    )
-  ) {
+  if (hasTokenInSearch(search, names)) {
     return true;
   }
 
-  if (
-    hash &&
-    hash.includes("?")
-  ) {
-    const query =
-      hash
-        .split("?")
-        .slice(1)
-        .join("?");
+  if (hash && hash.includes("?")) {
+    const query = hash.split("?").slice(1).join("?");
 
-    return hasTokenInSearch(
-      query ? `?${query}` : "",
-      getAuthTokenParamNames(type)
-    );
+    return hasTokenInSearch(query ? `?${query}` : "", names);
   }
 
   return false;
 }
 
 export function hasActivationToken(pathOrUrl = getCurrentPublicPath()) {
-  return Boolean(
-    extractActivationToken(pathOrUrl)
-  );
+  return Boolean(extractActivationToken(pathOrUrl));
 }
 
 export function hasResetToken(pathOrUrl = getCurrentPublicPath()) {
-  return Boolean(
-    extractResetToken(pathOrUrl)
-  );
+  return Boolean(extractResetToken(pathOrUrl));
 }
 
 /* =========================================================
@@ -1654,19 +1097,12 @@ export function hasResetToken(pathOrUrl = getCurrentPublicPath()) {
 ========================================================= */
 
 function redactQueryTokens(value = "") {
-  let output =
-    safeText(value, "");
+  let output = safeText(value);
 
-  const names =
-    getAllAuthTokenParamNames();
-
-  for (const name of names) {
-    const escapedName =
-      escapeRegExp(name);
-
+  for (const name of getAllAuthTokenParamNames()) {
     try {
       output = output.replace(
-        new RegExp(`([?&#]${escapedName}=)([^&#\\s]+)`, "gi"),
+        new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi"),
         "$1***"
       );
     } catch {}
@@ -1676,36 +1112,33 @@ function redactQueryTokens(value = "") {
 }
 
 function redactJsonTokenFields(value = "") {
-  let output =
-    safeText(value, "");
+  let output = safeText(value);
 
-  const names =
-    unique([
-      ...getAllAuthTokenParamNames(),
-      "authorization",
-      "password",
-      "secret",
-      "otp",
-      "totp",
-      "cookie",
-      "csrf",
-      "xsrf",
-    ]);
+  const names = unique([
+    ...getAllAuthTokenParamNames(),
+    "authorization",
+    "password",
+    "secret",
+    "otp",
+    "totp",
+    "cookie",
+    "csrf",
+    "xsrf",
+  ]);
 
   for (const name of names) {
-    const escapedName =
-      escapeRegExp(name);
+    const escaped = escapeRegExp(name);
 
     try {
       output = output.replace(
-        new RegExp(`("${escapedName}"\\s*:\\s*")([^"]+)(")`, "gi"),
+        new RegExp(`("${escaped}"\\s*:\\s*")([^"]+)(")`, "gi"),
         "$1***$3"
       );
     } catch {}
 
     try {
       output = output.replace(
-        new RegExp(`('${escapedName}'\\s*:\\s*')([^']+)(')`, "gi"),
+        new RegExp(`('${escaped}'\\s*:\\s*')([^']+)(')`, "gi"),
         "$1***$3"
       );
     } catch {}
@@ -1714,17 +1147,13 @@ function redactJsonTokenFields(value = "") {
   return output;
 }
 
-function redactTechnicalPathTokens(value = "") {
-  let output =
-    safeText(value, "");
+function redactPathTokens(value = "") {
+  let output = safeText(value);
 
-  for (const path of TECHNICAL_TOKEN_PATHS) {
-    const escapedPath =
-      escapeRegExp(path);
-
+  for (const base of [...ACTIVATION_BASES, ...RESET_CONFIRM_BASES]) {
     try {
       output = output.replace(
-        new RegExp(`(${escapedPath}/)([^/?#\\s]+)`, "gi"),
+        new RegExp(`(${escapeRegExp(base)}/)([^/?#\\s]+)`, "gi"),
         "$1***"
       );
     } catch {}
@@ -1734,43 +1163,27 @@ function redactTechnicalPathTokens(value = "") {
 }
 
 export function redactTokenInText(value = "") {
-  let output =
-    safeText(value, "");
+  let output = safeText(value);
 
-  if (!output) {
-    return "";
-  }
+  if (!output) return "";
 
-  output =
-    redactQueryTokens(output);
-
-  output =
-    redactTechnicalPathTokens(output);
-
-  output =
-    redactJsonTokenFields(output);
+  output = redactQueryTokens(output);
+  output = redactPathTokens(output);
+  output = redactJsonTokenFields(output);
 
   try {
-    output =
-      output.replace(
-        BEARER_RE,
-        "$1***"
-      );
+    output = output.replace(BEARER_RE, "$1***");
   } catch {}
 
   try {
-    output =
-      output.replace(
-        JWT_RE,
-        "***"
-      );
+    output = output.replace(JWT_RE, "***");
   } catch {}
 
   return output;
 }
 
 /* =========================================================
-   ERROR HELPERS
+   ERRORS
 ========================================================= */
 
 export function extractMessage(error) {
@@ -1779,10 +1192,7 @@ export function extractMessage(error) {
   }
 
   if (typeof error === "string") {
-    return safeText(
-      redactTokenInText(error),
-      "Error de autenticación"
-    );
+    return redactTokenInText(error) || "Error de autenticación";
   }
 
   const firstArrayError =
@@ -1797,9 +1207,7 @@ export function extractMessage(error) {
   const candidates = [
     firstArrayError?.message,
     firstArrayError?.detail,
-    typeof firstArrayError === "string"
-      ? firstArrayError
-      : "",
+    typeof firstArrayError === "string" ? firstArrayError : "",
 
     error?.data?.message,
     error?.data?.mensaje,
@@ -1835,8 +1243,7 @@ export function extractMessage(error) {
   ];
 
   for (const item of candidates) {
-    const text =
-      safeText(item, "");
+    const text = safeText(item);
 
     if (text) {
       return redactTokenInText(text);
@@ -1849,42 +1256,23 @@ export function extractMessage(error) {
 export function buildErrorPayload(error) {
   return {
     error,
-    message:
-      extractMessage(error),
+    message: extractMessage(error),
   };
 }
 
 export function buildSafeErrorPayload(error) {
   return {
-    message:
-      extractMessage(error),
-
-    name:
-      error?.name || "Error",
-
-    status:
-      error?.status ||
-      error?.statusCode ||
-      error?.response?.status ||
-      error?.data?.status ||
-      0,
-
-    code:
-      error?.code ||
-      error?.data?.code ||
-      error?.response?.data?.code ||
-      null,
-
-    timeout:
-      error?.timeout === true,
-
-    aborted:
-      error?.aborted === true,
+    message: extractMessage(error),
+    name: error?.name || "Error",
+    status: error?.status || error?.statusCode || error?.response?.status || error?.data?.status || 0,
+    code: error?.code || error?.data?.code || error?.response?.data?.code || null,
+    timeout: error?.timeout === true,
+    aborted: error?.aborted === true,
   };
 }
 
 /* =========================================================
-   PAYLOAD HELPERS
+   PAYLOAD
 ========================================================= */
 
 export function compactPayload(payload = {}) {
@@ -1892,43 +1280,31 @@ export function compactPayload(payload = {}) {
     return {};
   }
 
-  return Object.entries(payload).reduce(
-    (acc, [key, value]) => {
-      if (
-        value === undefined ||
-        value === null ||
-        value === ""
-      ) {
-        return acc;
-      }
+  const output = {};
 
-      acc[key] = value;
-      return acc;
-    },
-    {}
-  );
+  for (const [key, value] of Object.entries(payload)) {
+    if (value === undefined || value === null || value === "") continue;
+    output[key] = value;
+  }
+
+  return output;
 }
 
 export function sanitizeAuthPayload(payload = {}, depth = 0, seen = new WeakSet()) {
-  if (depth > MAX_SANITIZE_DEPTH) {
+  if (depth > SANITIZE_MAX_DEPTH) {
     return "[MaxDepth]";
   }
 
-  if (
-    payload === null ||
-    payload === undefined
-  ) {
+  if (payload === null || payload === undefined) {
     return payload;
   }
 
+  if (payload instanceof Error) {
+    return buildSafeErrorPayload(payload);
+  }
+
   if (Array.isArray(payload)) {
-    return payload.map((item) =>
-      sanitizeAuthPayload(
-        item,
-        depth + 1,
-        seen
-      )
-    );
+    return payload.map((item) => sanitizeAuthPayload(item, depth + 1, seen));
   }
 
   if (!isObject(payload)) {
@@ -1937,37 +1313,20 @@ export function sanitizeAuthPayload(payload = {}, depth = 0, seen = new WeakSet(
       : payload;
   }
 
-  if (payload instanceof Error) {
-    return buildSafeErrorPayload(payload);
-  }
-
   try {
-    if (seen.has(payload)) {
-      return "[Circular]";
-    }
-
+    if (seen.has(payload)) return "[Circular]";
     seen.add(payload);
   } catch {}
 
   const output = {};
 
-  for (const [key, value] of Object.entries(payload)) {
-    const lower =
-      safeLower(key);
-
-    if (SENSITIVE_PAYLOAD_KEY_RE.test(lower)) {
-      output[key] =
-        value ? "***" : value;
-
+  for (const [key, value] of Object.entries(payload).slice(0, 120)) {
+    if (SENSITIVE_KEY_RE.test(key)) {
+      output[key] = value ? "***" : value;
       continue;
     }
 
-    output[key] =
-      sanitizeAuthPayload(
-        value,
-        depth + 1,
-        seen
-      );
+    output[key] = sanitizeAuthPayload(value, depth + 1, seen);
   }
 
   return output;
@@ -1978,54 +1337,30 @@ export function sanitizeAuthPayload(payload = {}, depth = 0, seen = new WeakSet(
 ========================================================= */
 
 export function getAuthHelpersSnapshot() {
-  const publicPath =
-    getCurrentPublicPath();
+  const publicPath = getCurrentPublicPath();
 
   return {
-    version:
-      AUTH_HELPERS_VERSION,
+    version: AUTH_HELPERS_VERSION,
 
-    publicPath:
-      redactTokenInText(publicPath),
+    publicPath: redactTokenInText(publicPath),
+    canonicalPath: normalizeCanonicalPath(publicPath),
 
-    canonicalPath:
-      normalizeCanonicalPath(publicPath),
+    isAuthRoute: isAuthRoute(publicPath),
+    isPublicTechnicalRoute: isPublicTechnicalRoute(publicPath),
 
-    isAuthRoute:
-      isAuthRoute(publicPath),
+    isActivationRoute: isActivationRoute(publicPath),
+    isResetPasswordRoute: isResetPasswordRoute(publicPath),
+    isResetPasswordConfirmRoute: isResetPasswordConfirmRoute(publicPath),
+    isForgotPasswordRoute: isForgotPasswordRoute(publicPath),
+    isTwoFactorRoute: isTwoFactorRoute(publicPath),
 
-    isPublicTechnicalRoute:
-      isPublicTechnicalRoute(publicPath),
+    hasActivationToken: hasActivationToken(publicPath),
+    hasResetToken: hasResetToken(publicPath),
 
-    isActivationRoute:
-      isActivationRoute(publicPath),
+    hasAppCore: Boolean(AppCore),
+    hasCoreUtils: Boolean(AppCore?.utils),
 
-    isResetPasswordRoute:
-      isResetPasswordRoute(publicPath),
-
-    isResetPasswordConfirmRoute:
-      isResetPasswordConfirmRoute(publicPath),
-
-    isForgotPasswordRoute:
-      isForgotPasswordRoute(publicPath),
-
-    isTwoFactorRoute:
-      isTwoFactorRoute(publicPath),
-
-    hasActivationToken:
-      hasActivationToken(publicPath),
-
-    hasResetToken:
-      hasResetToken(publicPath),
-
-    hasAppCore:
-      Boolean(AppCore),
-
-    hasCoreUtils:
-      Boolean(AppCore?.utils),
-
-    at:
-      new Date().toISOString(),
+    at: new Date().toISOString(),
   };
 }
 

@@ -6,7 +6,6 @@
       "/api/*",
       "/.auth/*",
       "/robots.txt",
-      "/sitemap.xml",
       "/BingSiteAuth.xml",
       "/manifest.json",
       "/site.webmanifest",
@@ -129,13 +128,6 @@
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "Pragma": "no-cache",
         "Expires": "0",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/src/media/*",
-      "headers": {
-        "Cache-Control": "public, max-age=31536000, immutable",
         "X-Robots-Tag": "noindex, nofollow"
       }
     },

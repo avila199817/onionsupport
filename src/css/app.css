@@ -1,83 +1,47 @@
+@charset "UTF-8";
+
 /* =========================================================
    ONION SUPPORT — APP.CSS
    Archivo: /src/css/app.css
 
    CSS ENTRYPOINT · TOKEN PRO SYSTEM · PRIVATE SPA
-   FINAL PRO SYSTEM · CSP CLEAN · CASCADE LAYERS · 10/10
+   CSP CLEAN · CASCADE LAYERS · ZERO INLINE SYSTEM
 
-   RESPONSABILIDADES:
-   - Punto único de entrada CSS de Onion Support.
-   - Controlar el orden de cascada mediante @layer.
-   - Cargar tokens antes que reset/core/layout/componentes/vistas.
-   - Mantener CSP limpio:
-     · sin CSS inline
-     · sin estilos inyectados por JS
-     · sin Google Fonts
-     · sin @import externos
-
+   Responsabilidades:
+   - Ser el único punto de entrada CSS de la SPA.
+   - Controlar el orden global de cascada mediante @layer.
+   - Cargar tokens antes de reset/core/layout/componentes/vistas/auth.
    - Mantener variables.css como fuente de verdad visual.
    - Mantener light.css sólo como overrides [data-theme="light"].
-   - Evitar tokens :root locales en vistas/componentes salvo necesidad real.
-   - Evitar que vistas contaminen otras vistas.
-   - Mantener templates JS sin renderStyles(), sin <style> y sin style="".
+   - Evitar estilos inline, estilos inyectados por JS y fuentes externas.
+   - Evitar que vistas/componentes contaminen scopes ajenos.
 
-   ESTRUCTURA ACTUAL:
-   - Tokens:
-     · /src/css/tokens/variables.css
-     · /src/css/tokens/light.css
-
-   - Core:
-     · /src/css/core/reset.css
-     · /src/css/core/layout.css
-     · /src/css/core/core.css
-     · /src/css/core/loader.css
-
-   - Layout:
-     · /src/css/layout/sidebar.css
-     · /src/css/layout/topbar.css
-
-   - Components:
-     · /src/css/components/ui.css
-
-   - Views:
-     · /src/css/views/home/index.css
-
-     · /src/css/views/facturas/index.css
-     · /src/css/views/facturas/create.css
-     · /src/css/views/facturas/detail.css
-
-     · /src/css/views/incidencias/index.css
-     · /src/css/views/incidencias/create.css
-     · /src/css/views/incidencias/detail.css
-
-     · /src/css/views/cuenta/index.css
-
-     · /src/css/views/usuarios/index.css
-     · /src/css/views/usuarios/create.css
-
-     · /src/css/views/clientes/index.css
-     · /src/css/views/clientes/create.css
-
-     · /src/css/views/ajustes/index.css
-     · /src/css/views/servidor/index.css
-
-   - Auth:
-     · /src/css/auth/login.css
-
-   ORDEN DE CASCADA:
-   tokens < reset < core < layout < components < views < auth
+   Reglas:
+   - Sin declaraciones CSS directas en este archivo.
+   - Sin @import externos.
+   - Sin Google Fonts.
+   - Sin @font-face remoto.
+   - Sin :root local aquí.
+   - Sin capas nuevas sin documentar.
+   - Sin imports duplicados.
 ========================================================= */
 
 
 /* =========================================================
    CASCADE LAYERS
    Orden de menor a mayor prioridad:
-   tokens < reset < core < layout < components < views < auth
 
-   IMPORTANTE:
-   - Mantener esta declaración antes de todos los imports.
-   - No declarar capas nuevas sin motivo.
-   - Si se añade una capa nueva, documentar su posición.
+   tokens
+   reset
+   core
+   layout
+   components
+   views
+   auth
+
+   Importante:
+   - Esta declaración debe ir antes de todos los imports.
+   - Los @import deben mantenerse antes de cualquier regla CSS real.
 ========================================================= */
 
 @layer tokens, reset, core, layout, components, views, auth;
@@ -85,26 +49,16 @@
 
 /* =========================================================
    TOKENS · DESIGN SYSTEM
-   Fuente de verdad visual del sistema.
 
    variables.css:
-   - Token Pro System base.
-   - Tema dark/base.
-   - Layout tokens.
-   - UI tokens.
-   - Table/data tokens.
-   - Modal/drawer/tabs/toast/skeleton/status tokens.
-   - Tokens específicos de vistas si son globales.
+   - Fuente de verdad del Token Pro System.
+   - Base visual dark/default.
+   - Tokens globales de layout, UI, tablas, estados y vistas.
 
    light.css:
    - Sólo overrides [data-theme="light"].
-   - No redefinir arquitectura global.
-   - No duplicar variables base innecesariamente.
-
-   PROHIBIDO:
-   - Google Fonts.
-   - @font-face externo no local.
-   - :root locales en componentes para tokens globales.
+   - No debe declarar :root.
+   - No debe definir estructura de componentes/vistas.
 ========================================================= */
 
 @import url("./tokens/variables.css") layer(tokens);
@@ -112,44 +66,51 @@
 
 
 /* =========================================================
-   CORE
-   Reset, estructura base, shell, loader y reglas globales.
+   RESET
 
    reset.css:
    - Normalización base.
-   - No debe convertir table/tr/td en bloques.
-   - No debe romper tablas reales.
+   - Box model.
+   - Formularios.
+   - Media.
+   - Tablas reales sin romper table/tr/td.
+========================================================= */
+
+@import url("./core/reset.css") layer(reset);
+
+
+/* =========================================================
+   CORE
+
+   core.css:
+   - Documento base.
+   - Tipografía desde tokens.
+   - Helpers globales.
+   - Accesibilidad.
+   - Estados transversales mínimos.
 
    layout.css:
    - Shell principal.
    - Scroll global.
-   - Offsets sidebar/topbar/tablehead.
+   - Offsets de sidebar/topbar/tablehead.
    - Main content.
    - App content.
    - View root.
-   - Estados auth/shell-hidden/ready.
-
-   core.css:
-   - Base global de documento.
-   - Tipografía desde tokens.
-   - Helpers globales no estructurales.
+   - Estados boot/ready/auth/shell.
 
    loader.css:
-   - Loader técnico de boot.
+   - Loader inicial de boot.
    - Estados app-loading/app-ready.
-   - No define paleta local.
    - Consume tokens globales.
 ========================================================= */
 
-@import url("./core/reset.css") layer(reset);
-@import url("./core/layout.css") layer(core);
 @import url("./core/core.css") layer(core);
+@import url("./core/layout.css") layer(core);
 @import url("./core/loader.css") layer(core);
 
 
 /* =========================================================
    LAYOUT · PRIVATE APP CHROME
-   Chrome privado de la SPA.
 
    sidebar.css:
    - Sidebar desktop/mobile.
@@ -160,15 +121,14 @@
 
    topbar.css:
    - Topbar privada.
-   - Search/global actions.
-   - User/avatar/status.
-   - Integración con tablehead.
+   - Buscador global.
+   - Acciones globales.
+   - Integración con tablehead y contenido.
 
-   REGLAS:
-   - Consumir tokens globales.
-   - No crear :root local.
+   Reglas:
+   - No crear tokens globales nuevos aquí.
    - No contaminar vistas.
-   - No forzar layout de tablas/vistas.
+   - No forzar layout interno de tablas/vistas.
 ========================================================= */
 
 @import url("./layout/sidebar.css") layer(layout);
@@ -177,7 +137,6 @@
 
 /* =========================================================
    COMPONENTS · GLOBAL UI
-   Componentes reutilizables.
 
    ui.css:
    - Botones.
@@ -192,10 +151,10 @@
    - Pagination/toolbar.
    - Empty/error/loading/skeleton states.
 
-   REGLAS:
-   - Componentes globales, no vistas concretas.
-   - Las vistas sólo especializan dentro de su scope.
-   - No meter colores hardcoded si existe token.
+   Reglas:
+   - Sólo componentes reutilizables.
+   - Las vistas especializan dentro de su scope.
+   - Sin colores hardcoded si existe token.
 ========================================================= */
 
 @import url("./components/ui.css") layer(components);
@@ -203,23 +162,6 @@
 
 /* =========================================================
    VIEWS · HOME
-   Vista principal Home/Dashboard.
-
-   Contenido esperado:
-   - Hero role-aware user/admin.
-   - KPIs/stats.
-   - Widgets.
-   - Accesos rápidos.
-   - Actividad reciente.
-   - Tabla/resumen de incidencias.
-   - Loading/empty/error states.
-   - Responsive.
-   - Light/dark token aligned.
-
-   REGLAS:
-   - CSS fuera de home.template.js.
-   - Template emite clases/atributos.
-   - Sin CSS inline.
 ========================================================= */
 
 @import url("./views/home/index.css") layer(views);
@@ -227,17 +169,11 @@
 
 /* =========================================================
    VIEWS · FACTURAS
-   Orden interno:
-   1. index.css  → vista principal: hero, stats, filtros, tabla
-   2. create.css → modal creación de factura
-   3. detail.css → modal detalle de factura
 
-   REGLAS:
-   - Vista principal antes que modales.
-   - Modales pueden especializar overlay/panel/body lock.
-   - No usar renderStyles().
-   - No usar style="".
-   - No inyectar CSS desde JS.
+   Orden:
+   1. index.css
+   2. create.css
+   3. detail.css
 ========================================================= */
 
 @import url("./views/facturas/index.css") layer(views);
@@ -247,27 +183,11 @@
 
 /* =========================================================
    VIEWS · INCIDENCIAS
-   Orden interno:
-   1. index.css   → vista principal de incidencias
-   2. create.css  → modal creación de incidencia
-   3. detail.css  → modal detalle de incidencia
 
-   Vista principal:
-   - Hero.
-   - Stats.
-   - Filtros.
-   - Búsqueda.
-   - Tabla real blindada.
-   - Estados loading/empty/error.
-   - Paginación.
-   - Responsive.
-   - Light/dark token aligned.
-
-   REGLAS:
-   - CSS fuera del template JS.
-   - Template emite clases/atributos.
-   - Sin CSS inline.
-   - Sin estilos inyectados por JS.
+   Orden:
+   1. index.css
+   2. create.css
+   3. detail.css
 ========================================================= */
 
 @import url("./views/incidencias/index.css") layer(views);
@@ -277,26 +197,6 @@
 
 /* =========================================================
    VIEWS · CUENTA
-   Vista Cuenta / Ajustes personales.
-
-   Contenido esperado:
-   - Header premium de cuenta.
-   - Identidad.
-   - Apariencia.
-   - Idioma.
-   - Privacidad.
-   - Seguridad.
-   - Actividad.
-   - Avatar real + fallback.
-   - Loading/empty/error states.
-   - Responsive.
-   - Light/dark token aligned.
-
-   REGLAS:
-   - CSS fuera de cuenta.template.js.
-   - No usar renderStyles().
-   - No usar style="".
-   - No contaminar vistas admin.
 ========================================================= */
 
 @import url("./views/cuenta/index.css") layer(views);
@@ -304,31 +204,10 @@
 
 /* =========================================================
    VIEWS · USUARIOS
-   Vista Usuarios / Administración de accesos.
 
-   Orden interno:
-   1. index.css  → vista principal
-   2. create.css → creación/edición si aplica
-
-   Contenido esperado:
-   - Hero premium.
-   - Stats admin.
-   - Filtros.
-   - Búsqueda.
-   - Tabla real blindada.
-   - Paginación visual.
-   - Acciones de fila.
-   - Avatar real + fallback.
-   - Estados loading/empty/error.
-   - Acceso restringido.
-   - Responsive.
-   - Light/dark token aligned.
-
-   REGLAS:
-   - CSS fuera de usuarios.table.template.js.
-   - No usar renderStyles().
-   - No usar style="".
-   - Template emite clases/atributos.
+   Orden:
+   1. index.css
+   2. create.css
 ========================================================= */
 
 @import url("./views/usuarios/index.css") layer(views);
@@ -337,32 +216,10 @@
 
 /* =========================================================
    VIEWS · CLIENTES
-   Vista Clientes / Administración de cartera.
 
-   Orden interno:
-   1. index.css  → vista principal
-   2. create.css → creación/edición si aplica
-
-   Contenido esperado:
-   - Hero premium.
-   - Stats admin.
-   - Filtros.
-   - Búsqueda.
-   - Tabla real blindada.
-   - Paginación visual.
-   - Acciones de fila.
-   - Avatar real + fallback.
-   - Chips de estado/nivel.
-   - Estados loading/empty/error.
-   - Acceso restringido si aplica.
-   - Responsive.
-   - Light/dark token aligned.
-
-   REGLAS:
-   - CSS fuera de clientes.table.template.js.
-   - No usar renderStyles().
-   - No usar style="".
-   - Template emite clases/atributos.
+   Orden:
+   1. index.css
+   2. create.css
 ========================================================= */
 
 @import url("./views/clientes/index.css") layer(views);
@@ -371,28 +228,6 @@
 
 /* =========================================================
    VIEWS · AJUSTES
-   Vista Ajustes / Configuración.
-
-   Estado de proyecto:
-   - Router/backend legacy de ajustes puede no estar activo.
-   - El CSS se mantiene porque la vista frontend puede existir
-     como pantalla futura/provisional.
-
-   Contenido esperado:
-   - Header premium.
-   - Cards de configuración.
-   - Grid responsive.
-   - Estados loading/empty/error.
-   - Acciones de ajuste.
-   - Compatibilidad con template provisional.
-   - Guards contra CSS inline heredado.
-   - Light/dark token aligned.
-
-   REGLAS:
-   - CSS fuera de ajustes.table.template.js.
-   - No usar renderStyles().
-   - No usar style="".
-   - Template emite clases/atributos.
 ========================================================= */
 
 @import url("./views/ajustes/index.css") layer(views);
@@ -400,53 +235,22 @@
 
 /* =========================================================
    VIEWS · SERVIDOR
-   Vista Servidor / Observabilidad técnica.
-
-   Estado de proyecto:
-   - Router/backend legacy de servidor/dashboard puede no estar activo.
-   - El CSS se mantiene si la vista técnica frontend existe
-     o se conserva como módulo futuro.
-
-   Contenido esperado:
-   - Hero premium de observabilidad.
-   - Stats técnicos.
-   - Dashboard de servicios.
-   - Cards de servicios.
-   - Sidebar técnico.
-   - Toolbar/paginación.
-   - Acciones de servicio.
-   - Loading/skeleton.
-   - Empty/error states.
-   - Refresh overlay sólo en dashboard.
-   - Live status.
-   - Responsive.
-   - Light/dark token aligned.
-
-   REGLAS:
-   - CSS fuera de server.template.js.
-   - No usar renderStyles().
-   - No usar style="".
-   - Template emite clases/atributos.
 ========================================================= */
 
 @import url("./views/servidor/index.css") layer(views);
 
 
 /* =========================================================
-   AUTH / PUBLIC TECHNICAL VIEWS
-   Login y pantallas públicas/técnicas.
+   AUTH · PUBLIC / TECHNICAL SCREENS
 
    login.css:
    - Login.
-   - Auth screen.
-   - Reset/activation si comparten layout auth.
+   - Auth shell.
+   - Activation/reset screens si comparten layout auth.
    - Shell hidden/auth route behavior.
 
-   REGLAS:
-   - Auth va al final por prioridad visual.
-   - body.auth-screen puede necesitar prioridad superior.
-   - No usar Google Fonts.
-   - No usar inline styles.
+   Auth va al final porque necesita prioridad visual superior
+   frente al shell privado.
 ========================================================= */
 
 @import url("./auth/login.css") layer(auth);

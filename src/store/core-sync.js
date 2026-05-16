@@ -2,32 +2,12 @@
    Onion SPA - Store Core Sync
    Archivo: src/store/core-sync.js
 
-   ONION SUPPORT · STORE CORE SYNC
-   APPCORE EVENT BRIDGE · ROUTER/AUTH/UI SYNC · 14/10
-
-   Responsabilidades:
-   - enlazar Store con AppCore mediante event bus
-   - hidratar slices reactivos desde eventos globales
-   - mantener session/ui/router sincronizados
-   - evitar listeners duplicados
-   - cleanup seguro de suscripciones
-   - tolerar payload directo o CustomEvent.detail
-   - sincronizar auth/session/router/ui sin estados fantasma
-   - no romper si AppCore llega parcial
-
-   HARDENING EXTREMO:
-   - listeners envueltos con try/catch
-   - unbind idempotente
-   - fallback DOM events si AppCore.events no existe
-   - soporte payload directo AppCore.events.emit(payload)
-   - soporte payload DOM CustomEvent({ detail })
-   - soporte payload envelope: { state }, { data }, { payload }, { auth }, { session }
-   - sync robusto app/session/ui/router
-   - evita perder false/null válidos
-   - no fuerza sesión autenticada sin token + user usable
-   - no ensucia rutas técnicas con token
-   - no duplica listeners si Store.init() se llama dos veces
-   - compatible con Store actions actuales
+   Store ↔ AppCore bridge limpio:
+   - Un solo binding idempotente.
+   - Store sigue a Core/Auth/Router/UI.
+   - Token + user obligatorios para authenticated=true.
+   - Rutas técnicas preservadas vía publicPath.
+   - Sin event storms.
 ========================================================= */
 
 import { isBrowser } from "./helpers.js";
@@ -41,138 +21,165 @@ import {
    VERSION
 ========================================================= */
 
-export const STORE_CORE_SYNC_VERSION =
-  "14.0.0";
+export const STORE_CORE_SYNC_VERSION = "15.0.0-clean";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-const SYNC_SCOPE =
-  "store:core-sync";
+const SYNC_SCOPE = "store:core-sync";
 
-const DEFAULT_ROUTE =
-  "/";
+const DEFAULT_ROUTE = "/";
+const DEFAULT_THEME = "dark";
+const DEFAULT_LANG = "es";
 
-const DEFAULT_THEME =
-  "dark";
+const BAD_TOKEN_VALUES = Object.freeze([
+  "",
+  "null",
+  "undefined",
+  "false",
+  "true",
+  "nan",
+  "none",
+  "empty",
+  "[object object]",
+  "{}",
+  "[]",
+  "\"\"",
+  "''",
+]);
 
-const DEFAULT_LANG =
-  "es";
+const USER_ID_KEYS = Object.freeze([
+  "id",
+  "userId",
+  "user_id",
+  "_id",
+  "uid",
+  "sub",
+  "username",
+  "userName",
+  "user_name",
+  "email",
+  "mail",
+  "phone",
+  "telefono",
+  "mobile",
+]);
 
-const BAD_TOKEN_VALUES =
-  Object.freeze([
-    "",
-    "null",
-    "undefined",
-    "false",
-    "true",
-    "nan",
-    "none",
-    "empty",
-    "[object object]",
-    "{}",
-    "[]",
-    "\"\"",
-    "''",
-  ]);
+const STATE_EVENTS = Object.freeze([
+  "app:state:change",
+  "app:state:patched",
+]);
 
-const USER_ID_KEYS =
-  Object.freeze([
-    "id",
-    "userId",
-    "user_id",
-    "_id",
-    "uid",
-    "sub",
-    "username",
-    "userName",
-    "user_name",
-    "email",
-    "mail",
-    "phone",
-    "telefono",
-    "mobile",
-  ]);
+const BOOT_READY_EVENTS = Object.freeze([
+  "app:core:ready",
+  "app:ready",
+  "app:boot:ready",
+  "app:boot:complete",
+  "main:ready",
+]);
 
-const ROUTE_EVENT_NAMES =
-  Object.freeze([
-    "app:route:change",
-    "app:public-path:change",
-    "router:before-render",
-    "router:rendered",
-    "router:navigation:complete",
-    "router:render:async-complete",
-  ]);
+const BOOTING_EVENTS = Object.freeze([
+  "app:boot:start",
+  "main:booting",
+]);
 
-const SESSION_APPLY_EVENT_NAMES =
-  Object.freeze([
-    "app:session:applied",
-    "auth:session:applied",
-    "auth:login:session-committed",
+const BOOT_ERROR_EVENTS = Object.freeze([
+  "app:boot:error",
+  "main:boot:error",
+]);
 
-    "auth:session:restored",
-    "app:session:restored",
+const ROUTE_EVENTS = Object.freeze([
+  "app:route:change",
+  "app:public-path:change",
+  "router:before-render",
+  "router:rendered",
+  "router:navigation:complete",
+  "router:render:async-complete",
+]);
 
-    "auth:refresh:success",
-    "app:auth:ready",
+const ROUTE_LOADING_EVENTS = new Set([
+  "router:before-render",
+]);
 
-    "app:auth:change",
-    "auth:change",
+const ROUTE_DONE_EVENTS = new Set([
+  "router:rendered",
+  "router:navigation:complete",
+  "router:render:async-complete",
+]);
 
-    "auth:login:success",
+const SESSION_APPLY_EVENTS = Object.freeze([
+  "app:session:applied",
+  "app:session:loaded",
+  "app:session:restored",
 
-    "app:user:change",
-    "app:user:updated",
-  ]);
+  "auth:session:applied",
+  "auth:session:restored",
+  "auth:login:success",
+  "auth:login:session-committed",
+  "auth:refresh:success",
 
-const SESSION_CLEAR_EVENT_NAMES =
-  Object.freeze([
-    "app:session:cleared",
-    "auth:session:cleared",
-    "auth:logout",
-    "auth:logout:success",
-  ]);
+  "app:auth:ready",
+  "app:auth:change",
+  "auth:change",
 
-const UI_EVENT_NAMES =
-  Object.freeze([
-    "app:theme:change",
-    "onion:theme:change",
-    "theme:change",
+  "app:user:change",
+  "app:user:updated",
+]);
 
-    "app:lang:change",
-    "app:sidebar:change",
-    "app:title:change",
-    "app:loading:change",
+const SESSION_CLEAR_EVENTS = Object.freeze([
+  "app:session:cleared",
+  "auth:session:cleared",
+  "auth:logout",
+  "auth:logout:success",
+]);
 
-    "app:error",
-    "app:error:clear",
-  ]);
+const THEME_EVENTS = Object.freeze([
+  "app:theme:change",
+  "onion:theme:change",
+  "theme:change",
+]);
 
-const BOOT_EVENT_NAMES =
-  Object.freeze([
-    "app:core:ready",
-    "app:ready",
-    "app:boot:ready",
-    "app:boot:error",
+const LANG_EVENTS = Object.freeze([
+  "app:lang:change",
+]);
 
-    "main:ready",
-    "main:booting",
-    "main:boot:error",
-  ]);
+const SIDEBAR_EVENTS = Object.freeze([
+  "app:sidebar:change",
+]);
 
-const AUTH_FLOW_EVENT_NAMES =
-  Object.freeze([
-    "auth:login:start",
-    "auth:login:error",
+const TITLE_EVENTS = Object.freeze([
+  "app:title:change",
+]);
 
-    "auth:restore:start",
-    "auth:restore:success",
-    "auth:restore:error",
+const LOADING_EVENTS = Object.freeze([
+  "app:loading:change",
+]);
 
-    "auth:refresh:start",
-    "auth:refresh:error",
-  ]);
+const ERROR_EVENTS = Object.freeze([
+  "app:error",
+]);
+
+const CLEAR_ERROR_EVENTS = Object.freeze([
+  "app:error:clear",
+]);
+
+const AUTH_START_EVENTS = Object.freeze([
+  "auth:login:start",
+  "auth:restore:start",
+  "auth:refresh:start",
+]);
+
+const AUTH_ERROR_EVENTS = Object.freeze([
+  "auth:login:error",
+  "auth:restore:error",
+  "auth:refresh:error",
+]);
+
+const SHELL_EVENTS = Object.freeze([
+  "router:shell:state",
+  "router:shell:change",
+]);
 
 /* =========================================================
    BASICS
@@ -183,48 +190,29 @@ function isFn(value) {
 }
 
 function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function safeObject(value, fallback = {}) {
-  return isObject(value)
-    ? value
-    : fallback;
+  return isObject(value) ? value : fallback;
 }
 
 function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return Array.isArray(value) ? value : [];
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value).trim();
-
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
   return text || fallback;
 }
 
 function safeLower(value, fallback = "") {
-  return safeText(value, fallback)
-    .toLowerCase();
+  return safeText(value, fallback).toLowerCase();
 }
 
 function safeBool(value, fallback = false) {
-  if (typeof value === "boolean") {
-    return value;
-  }
+  if (typeof value === "boolean") return value;
 
   if (typeof value === "number") {
     if (value === 1) return true;
@@ -232,36 +220,13 @@ function safeBool(value, fallback = false) {
   }
 
   if (typeof value === "string") {
-    const key =
-      value.trim().toLowerCase();
+    const key = value.trim().toLowerCase();
 
-    if (
-      [
-        "true",
-        "1",
-        "yes",
-        "si",
-        "sí",
-        "on",
-        "open",
-        "enabled",
-        "active",
-      ].includes(key)
-    ) {
+    if (["true", "1", "yes", "si", "sí", "on", "open", "enabled", "active"].includes(key)) {
       return true;
     }
 
-    if (
-      [
-        "false",
-        "0",
-        "no",
-        "off",
-        "closed",
-        "disabled",
-        "inactive",
-      ].includes(key)
-    ) {
+    if (["false", "0", "no", "off", "closed", "disabled", "inactive"].includes(key)) {
       return false;
     }
   }
@@ -274,10 +239,7 @@ function hasOwn(object, key) {
     return Boolean(
       object &&
         typeof object === "object" &&
-        Object.prototype.hasOwnProperty.call(
-          object,
-          key
-        )
+        Object.prototype.hasOwnProperty.call(object, key)
     );
   } catch {
     return false;
@@ -286,9 +248,7 @@ function hasOwn(object, key) {
 
 function pickDefined(...values) {
   for (const value of values) {
-    if (value !== undefined) {
-      return value;
-    }
+    if (value !== undefined) return value;
   }
 
   return undefined;
@@ -296,26 +256,9 @@ function pickDefined(...values) {
 
 function pickNonEmpty(...values) {
   for (const value of values) {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
 
     return value;
   }
@@ -325,12 +268,9 @@ function pickNonEmpty(...values) {
 
 function pickText(...values) {
   for (const value of values) {
-    const text =
-      safeText(value, "");
+    const text = safeText(value, "");
 
-    if (text) {
-      return text;
-    }
+    if (text) return text;
   }
 
   return "";
@@ -345,136 +285,59 @@ function safeIsoDate(ms = Date.now()) {
 }
 
 /* =========================================================
-   LOGGING
+   LOG / EMIT
 ========================================================= */
 
 function safeWarn(AppCore, ...args) {
-  let logged =
-    false;
-
   try {
-    if (isFn(AppCore?.utils?.warn)) {
-      AppCore.utils.warn(
-        "[StoreCoreSync]",
-        ...args
-      );
-
-      logged =
-        true;
-    }
-  } catch {
-    logged =
-      false;
-  }
-
-  if (logged) {
+    AppCore?.utils?.warn?.("[StoreCoreSync]", ...args);
     return;
-  }
-
-  try {
-    console.warn(
-      "[StoreCoreSync]",
-      ...args
-    );
   } catch {}
-}
-
-function safeError(AppCore, ...args) {
-  let logged =
-    false;
 
   try {
-    if (isFn(AppCore?.utils?.error)) {
-      AppCore.utils.error(
-        "[StoreCoreSync]",
-        ...args
-      );
-
-      logged =
-        true;
+    if (AppCore?.config?.debug) {
+      console.warn("[StoreCoreSync]", ...args);
     }
-  } catch {
-    logged =
-      false;
-  }
-
-  if (logged) {
-    return;
-  }
-
-  try {
-    console.error(
-      "[StoreCoreSync]",
-      ...args
-    );
   } catch {}
 }
 
 function safeEmit(AppCore, eventName, payload = {}) {
-  const name =
-    safeText(eventName, "");
-
-  if (!name) {
-    return false;
-  }
+  const name = safeText(eventName, "");
+  if (!name) return false;
 
   try {
-    AppCore?.events?.emit?.(
-      name,
-      payload
-    );
-
+    AppCore?.events?.emit?.(name, payload);
     return true;
-  } catch {}
-
-  return false;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
-   TOKEN / USER SAFETY
+   TOKEN / USER
 ========================================================= */
 
-function stripBearerPrefix(token = "") {
-  return safeText(token, "")
-    .replace(/^Bearer\s+/i, "")
-    .trim();
+function stripBearer(token = "") {
+  return safeText(token, "").replace(/^Bearer\s+/i, "").trim();
 }
 
 function hasUsableToken(token = "") {
-  const value =
-    stripBearerPrefix(token);
+  const value = stripBearer(token);
 
-  if (!value) {
-    return false;
-  }
-
-  const lower =
-    value.toLowerCase();
-
-  if (BAD_TOKEN_VALUES.includes(lower)) {
-    return false;
-  }
-
-  if (/[\s\r\n\t]/.test(value)) {
-    return false;
-  }
+  if (!value) return false;
+  if (BAD_TOKEN_VALUES.includes(value.toLowerCase())) return false;
+  if (/[\s\r\n\t]/.test(value)) return false;
 
   return true;
 }
 
 function normalizeToken(token = null) {
-  const value =
-    stripBearerPrefix(token);
-
-  return hasUsableToken(value)
-    ? value
-    : null;
+  const value = stripBearer(token);
+  return hasUsableToken(value) ? value : null;
 }
 
 function hasUsableUser(user = null) {
-  if (!isObject(user)) {
-    return false;
-  }
+  if (!isObject(user)) return false;
 
   if (
     user.active === false ||
@@ -488,15 +351,14 @@ function hasUsableUser(user = null) {
     return false;
   }
 
-  const status =
-    safeLower(
-      user.status ||
-        user.estado ||
-        user.state ||
-        user.accountStatus ||
-        "",
-      ""
-    );
+  const status = safeLower(
+    user.status ||
+      user.estado ||
+      user.state ||
+      user.accountStatus ||
+      "",
+    ""
+  );
 
   if (
     [
@@ -517,11 +379,7 @@ function hasUsableUser(user = null) {
     return false;
   }
 
-  return USER_ID_KEYS.some((key) =>
-    Boolean(
-      safeText(user?.[key], "")
-    )
-  );
+  return USER_ID_KEYS.some((key) => Boolean(safeText(user?.[key], "")));
 }
 
 function normalizeRole(value = "") {
@@ -535,12 +393,11 @@ function normalizeRole(value = "") {
 }
 
 function normalizeRoles(value) {
-  const list =
-    Array.isArray(value)
-      ? value.flat(Infinity)
-      : value === null || value === undefined
-        ? []
-        : [value];
+  const list = Array.isArray(value)
+    ? value.flat(Infinity)
+    : value === null || value === undefined
+      ? []
+      : [value];
 
   return Array.from(
     new Set(
@@ -551,19 +408,14 @@ function normalizeRoles(value) {
   );
 }
 
-function collectRoles(user = null, explicitRole = null, explicitRoles = null) {
-  const source =
-    safeObject(user);
+function collectRoles(user = null, role = null, roles = null) {
+  const source = safeObject(user);
+  const profile = safeObject(source.profile);
+  const raw = safeObject(source.raw);
 
-  const raw =
-    safeObject(source.raw);
-
-  const profile =
-    safeObject(source.profile);
-
-  const roles = [
-    explicitRole,
-    explicitRoles,
+  const list = [
+    role,
+    roles,
 
     source.role,
     source.rol,
@@ -603,59 +455,41 @@ function collectRoles(user = null, explicitRole = null, explicitRoles = null) {
     raw.isAdmin === true ||
     raw.admin === true
   ) {
-    roles.push("admin");
+    list.push("admin");
   }
 
-  return normalizeRoles(
-    roles.flat(Infinity)
-  );
+  return normalizeRoles(list.flat(Infinity));
 }
 
-function resolvePrimaryRole(user = null, role = null, roles = null) {
-  const normalizedRole =
-    normalizeRole(role);
+function primaryRole(user = null, explicitRole = null, explicitRoles = null) {
+  const role = normalizeRole(explicitRole);
 
-  if (normalizedRole) {
-    return normalizedRole;
-  }
+  if (role) return role;
 
-  const list =
-    collectRoles(
-      user,
-      role,
-      roles
-    );
-
-  return list[0] || null;
+  return collectRoles(user, explicitRole, explicitRoles)[0] || null;
 }
 
 /* =========================================================
-   EVENT PAYLOAD
+   PAYLOAD UNWRAP
 ========================================================= */
 
 function unwrapDetail(eventOrPayload = {}) {
-  const payload =
-    eventOrPayload;
-
   if (
-    payload &&
-    typeof payload === "object" &&
-    hasOwn(payload, "detail") &&
-    payload.detail !== undefined
+    eventOrPayload &&
+    typeof eventOrPayload === "object" &&
+    hasOwn(eventOrPayload, "detail") &&
+    eventOrPayload.detail !== undefined
   ) {
-    return payload.detail;
+    return eventOrPayload.detail;
   }
 
-  return payload;
+  return eventOrPayload;
 }
 
 function unwrapPayload(eventOrPayload = {}) {
-  const payload =
-    unwrapDetail(eventOrPayload);
+  const payload = unwrapDetail(eventOrPayload);
 
-  if (!isObject(payload)) {
-    return {};
-  }
+  if (!isObject(payload)) return {};
 
   if (
     isObject(payload.payload) &&
@@ -671,24 +505,15 @@ function unwrapPayload(eventOrPayload = {}) {
   return payload;
 }
 
-function resolveEventPayload(eventOrPayload = {}) {
-  return safeObject(
-    unwrapPayload(eventOrPayload)
-  );
+function eventPayload(eventOrPayload = {}) {
+  return safeObject(unwrapPayload(eventOrPayload));
 }
 
-function resolveStatePayload(eventOrPayload = {}) {
-  const payload =
-    resolveEventPayload(eventOrPayload);
-
-  const data =
-    safeObject(payload.data);
-
-  const auth =
-    safeObject(payload.auth);
-
-  const session =
-    safeObject(payload.session);
+function statePayload(eventOrPayload = {}) {
+  const payload = eventPayload(eventOrPayload);
+  const data = safeObject(payload.data);
+  const auth = safeObject(payload.auth);
+  const session = safeObject(payload.session);
 
   return safeObject(
     payload.state ||
@@ -704,97 +529,57 @@ function resolveStatePayload(eventOrPayload = {}) {
   );
 }
 
-function resolveNestedData(payload = {}) {
-  const root =
-    safeObject(payload);
+function nested(payload = {}) {
+  const root = safeObject(payload);
 
   return {
     root,
-
-    data:
-      safeObject(root.data),
-
-    payload:
-      safeObject(root.payload),
-
-    auth:
-      safeObject(root.auth),
-
-    session:
-      safeObject(root.session),
-
-    user:
-      safeObject(root.user),
-
-    usuario:
-      safeObject(root.usuario),
-
-    me:
-      safeObject(root.me),
-
-    account:
-      safeObject(root.account),
-
-    profile:
-      safeObject(root.profile),
+    data: safeObject(root.data),
+    payload: safeObject(root.payload),
+    auth: safeObject(root.auth),
+    session: safeObject(root.session),
+    user: safeObject(root.user),
+    usuario: safeObject(root.usuario),
+    me: safeObject(root.me),
+    account: safeObject(root.account),
+    profile: safeObject(root.profile),
   };
 }
 
 /* =========================================================
-   CORE / STORE ACCESS
+   STATE HELPERS
 ========================================================= */
 
-function getCoreState(AppCore) {
-  return safeObject(
-    AppCore?.state
-  );
+function coreState(AppCore) {
+  return safeObject(AppCore?.state);
 }
 
-function getStoreAppState(state) {
-  return safeObject(
-    state?.app
-  );
+function appState(state) {
+  return safeObject(state?.app);
 }
 
-function getStoreSessionState(state) {
-  return safeObject(
-    state?.session
-  );
+function sessionState(state) {
+  return safeObject(state?.session);
 }
 
-function getStoreUiState(state) {
-  return safeObject(
-    state?.ui
-  );
+function uiState(state) {
+  return safeObject(state?.ui);
 }
 
 /* =========================================================
-   BROWSER PATH FALLBACKS
+   PATHS
 ========================================================= */
 
 function normalizePath(path = DEFAULT_ROUTE) {
-  let value =
-    safeText(path, DEFAULT_ROUTE)
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
+  let value = safeText(path, DEFAULT_ROUTE)
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
-  if (!value) {
-    value =
-      DEFAULT_ROUTE;
-  }
+  if (!value) value = DEFAULT_ROUTE;
+  if (!value.startsWith("/")) value = `/${value}`;
 
-  if (!value.startsWith("/")) {
-    value =
-      `/${value}`;
-  }
-
-  if (
-    value.length > 1 &&
-    value.endsWith("/")
-  ) {
-    value =
-      value.replace(/\/+$/g, "") ||
-      DEFAULT_ROUTE;
+  if (value.length > 1 && value.endsWith("/")) {
+    value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
   }
 
   return value;
@@ -809,34 +594,21 @@ function stripSearchAndHash(path = DEFAULT_ROUTE) {
   );
 }
 
-function getBrowserPathname() {
-  if (!isBrowser()) {
-    return DEFAULT_ROUTE;
-  }
+function browserPathname() {
+  if (!isBrowser()) return DEFAULT_ROUTE;
 
   try {
-    return normalizePath(
-      window.location.pathname ||
-        DEFAULT_ROUTE
-    );
+    return normalizePath(window.location.pathname || DEFAULT_ROUTE);
   } catch {
     return DEFAULT_ROUTE;
   }
 }
 
-function getBrowserPublicPath() {
-  if (!isBrowser()) {
-    return DEFAULT_ROUTE;
-  }
+function browserPublicPath() {
+  if (!isBrowser()) return DEFAULT_ROUTE;
 
   try {
-    return `${
-      window.location.pathname || DEFAULT_ROUTE
-    }${
-      window.location.search || ""
-    }${
-      window.location.hash || ""
-    }`;
+    return `${window.location.pathname || DEFAULT_ROUTE}${window.location.search || ""}${window.location.hash || ""}`;
   } catch {
     return DEFAULT_ROUTE;
   }
@@ -851,243 +623,199 @@ function buildAppPatch({
   state,
   source = {},
 } = {}) {
-  const core =
-    getCoreState(AppCore);
+  const core = coreState(AppCore);
+  const app = appState(state);
 
-  const app =
-    getStoreAppState(state);
+  const route = pickText(
+    source.canonicalPath,
+    source.route,
+    source.currentRoute,
+    source.path,
+    core.canonicalPath,
+    core.route,
+    app.route,
+    browserPathname(),
+    DEFAULT_ROUTE
+  );
 
-  const route =
-    pickText(
-      source.canonicalPath,
-      source.route,
-      source.currentRoute,
-      source.path,
-      core.canonicalPath,
-      core.route,
-      app.route,
-      getBrowserPathname(),
-      DEFAULT_ROUTE
-    );
-
-  const publicPath =
-    pickText(
-      source.publicPath,
-      source.currentPublicPath,
-      source.requestedPath,
-      source.href,
-      source.url,
-      source.path,
-      core.publicPath,
-      app.publicPath,
-      getBrowserPublicPath(),
-      route,
-      DEFAULT_ROUTE
-    );
+  const publicPath = pickText(
+    source.publicPath,
+    source.currentPublicPath,
+    source.requestedPath,
+    source.href,
+    source.url,
+    source.path,
+    core.publicPath,
+    app.publicPath,
+    browserPublicPath(),
+    route,
+    DEFAULT_ROUTE
+  );
 
   return {
-    route:
-      normalizePath(
-        stripSearchAndHash(route || DEFAULT_ROUTE)
-      ),
+    route: normalizePath(stripSearchAndHash(route || DEFAULT_ROUTE)),
+    publicPath: safeText(publicPath, route || DEFAULT_ROUTE),
 
-    publicPath:
-      safeText(
-        publicPath,
-        route || DEFAULT_ROUTE
-      ),
+    loading: pickDefined(
+      source.loading,
+      source.isLoading,
+      core.loading,
+      app.loading,
+      false
+    ),
 
-    loading:
-      pickDefined(
-        source.loading,
-        source.isLoading,
-        core.loading,
-        app.loading,
-        false
-      ),
+    initialized: pickDefined(
+      source.initialized,
+      core.initialized,
+      app.initialized,
+      false
+    ),
 
-    initialized:
-      pickDefined(
-        source.initialized,
-        core.initialized,
-        app.initialized,
-        false
-      ),
+    booting: pickDefined(
+      source.booting,
+      core.booting,
+      app.booting,
+      false
+    ),
 
-    booting:
-      pickDefined(
-        source.booting,
-        core.booting,
-        app.booting,
-        false
-      ),
+    ready: pickDefined(
+      source.ready,
+      core.ready,
+      app.ready,
+      false
+    ),
 
-    ready:
-      pickDefined(
-        source.ready,
-        core.ready,
-        app.ready,
-        false
-      ),
+    booted: pickDefined(
+      source.booted,
+      source.appReady,
+      core.booted,
+      core.appReady,
+      app.booted,
+      false
+    ),
 
-    booted:
-      pickDefined(
-        source.booted,
-        source.appReady,
-        core.booted,
-        core.appReady,
-        app.booted,
-        false
-      ),
-
-    lastError:
-      pickDefined(
-        source.lastError,
-        source.error,
-        core.lastError,
-        core.error,
-        app.lastError,
-        null
-      ),
+    lastError: pickDefined(
+      source.lastError,
+      source.error,
+      core.lastError,
+      core.error,
+      app.lastError,
+      null
+    ),
   };
 }
 
-function resolveUserFromPayload(payload = {}, core = {}, session = {}) {
-  const nested =
-    resolveNestedData(payload);
+function pickUser(payload = {}, core = {}, session = {}) {
+  const x = nested(payload);
+  const dataSession = safeObject(x.data.session);
+  const dataAuth = safeObject(x.data.auth);
+  const payloadSession = safeObject(x.payload.session);
+  const payloadAuth = safeObject(x.payload.auth);
+  const coreSession = safeObject(core.session);
 
-  const dataSession =
-    safeObject(nested.data.session);
+  const user = pickNonEmpty(
+    x.root.user,
+    x.root.usuario,
+    x.root.me,
+    x.root.account,
+    x.root.profile,
+    x.root.currentUser,
+    x.root.sessionUser,
+    x.root.authUser,
 
-  const dataAuth =
-    safeObject(nested.data.auth);
+    x.session.user,
+    x.session.usuario,
+    x.session.me,
+    x.session.account,
+    x.session.profile,
 
-  const payloadSession =
-    safeObject(nested.payload.session);
+    x.auth.user,
+    x.auth.usuario,
+    x.auth.me,
+    x.auth.account,
+    x.auth.profile,
 
-  const payloadAuth =
-    safeObject(nested.payload.auth);
+    x.data.user,
+    x.data.usuario,
+    x.data.me,
+    x.data.account,
+    x.data.profile,
 
-  const coreSession =
-    safeObject(core.session);
+    dataSession.user,
+    dataSession.usuario,
+    dataSession.me,
+    dataSession.account,
+    dataSession.profile,
 
-  const user =
-    pickNonEmpty(
-      nested.root.user,
-      nested.root.usuario,
-      nested.root.me,
-      nested.root.account,
-      nested.root.profile,
-      nested.root.currentUser,
-      nested.root.sessionUser,
-      nested.root.authUser,
+    dataAuth.user,
+    dataAuth.usuario,
+    dataAuth.me,
+    dataAuth.account,
+    dataAuth.profile,
 
-      nested.session.user,
-      nested.session.usuario,
-      nested.session.me,
-      nested.session.account,
-      nested.session.profile,
+    x.payload.user,
+    x.payload.usuario,
+    x.payload.me,
+    x.payload.account,
+    x.payload.profile,
 
-      nested.auth.user,
-      nested.auth.usuario,
-      nested.auth.me,
-      nested.auth.account,
-      nested.auth.profile,
+    payloadSession.user,
+    payloadSession.usuario,
+    payloadSession.me,
+    payloadSession.account,
+    payloadSession.profile,
 
-      nested.data.user,
-      nested.data.usuario,
-      nested.data.me,
-      nested.data.account,
-      nested.data.profile,
+    payloadAuth.user,
+    payloadAuth.usuario,
+    payloadAuth.me,
+    payloadAuth.account,
+    payloadAuth.profile,
 
-      dataSession.user,
-      dataSession.usuario,
-      dataSession.me,
-      dataSession.account,
-      dataSession.profile,
+    core.user,
+    core.currentUser,
+    core.sessionUser,
+    core.authUser,
+    coreSession.user,
 
-      dataAuth.user,
-      dataAuth.usuario,
-      dataAuth.me,
-      dataAuth.account,
-      dataAuth.profile,
+    session.user
+  );
 
-      nested.payload.user,
-      nested.payload.usuario,
-      nested.payload.me,
-      nested.payload.account,
-      nested.payload.profile,
-
-      payloadSession.user,
-      payloadSession.usuario,
-      payloadSession.me,
-      payloadSession.account,
-      payloadSession.profile,
-
-      payloadAuth.user,
-      payloadAuth.usuario,
-      payloadAuth.me,
-      payloadAuth.account,
-      payloadAuth.profile,
-
-      core.user,
-      core.currentUser,
-      core.sessionUser,
-      core.authUser,
-      coreSession.user,
-
-      session.user
-    );
-
-  return hasUsableUser(user)
-    ? user
-    : null;
+  return hasUsableUser(user) ? user : null;
 }
 
-function resolveTokenFromPayload(payload = {}, core = {}, session = {}) {
-  const nested =
-    resolveNestedData(payload);
-
-  const dataSession =
-    safeObject(nested.data.session);
-
-  const dataAuth =
-    safeObject(nested.data.auth);
-
-  const payloadSession =
-    safeObject(nested.payload.session);
-
-  const payloadAuth =
-    safeObject(nested.payload.auth);
-
-  const coreSession =
-    safeObject(core.session);
+function pickToken(payload = {}, core = {}, session = {}) {
+  const x = nested(payload);
+  const dataSession = safeObject(x.data.session);
+  const dataAuth = safeObject(x.data.auth);
+  const payloadSession = safeObject(x.payload.session);
+  const payloadAuth = safeObject(x.payload.auth);
+  const coreSession = safeObject(core.session);
 
   return normalizeToken(
     pickNonEmpty(
-      nested.root.token,
-      nested.root.accessToken,
-      nested.root.access_token,
-      nested.root.jwt,
-      nested.root.bearer,
+      x.root.token,
+      x.root.accessToken,
+      x.root.access_token,
+      x.root.jwt,
+      x.root.bearer,
 
-      nested.session.token,
-      nested.session.accessToken,
-      nested.session.access_token,
-      nested.session.jwt,
-      nested.session.bearer,
+      x.session.token,
+      x.session.accessToken,
+      x.session.access_token,
+      x.session.jwt,
+      x.session.bearer,
 
-      nested.auth.token,
-      nested.auth.accessToken,
-      nested.auth.access_token,
-      nested.auth.jwt,
-      nested.auth.bearer,
+      x.auth.token,
+      x.auth.accessToken,
+      x.auth.access_token,
+      x.auth.jwt,
+      x.auth.bearer,
 
-      nested.data.token,
-      nested.data.accessToken,
-      nested.data.access_token,
-      nested.data.jwt,
-      nested.data.bearer,
+      x.data.token,
+      x.data.accessToken,
+      x.data.access_token,
+      x.data.jwt,
+      x.data.bearer,
 
       dataSession.token,
       dataSession.accessToken,
@@ -1101,11 +829,11 @@ function resolveTokenFromPayload(payload = {}, core = {}, session = {}) {
       dataAuth.jwt,
       dataAuth.bearer,
 
-      nested.payload.token,
-      nested.payload.accessToken,
-      nested.payload.access_token,
-      nested.payload.jwt,
-      nested.payload.bearer,
+      x.payload.token,
+      x.payload.accessToken,
+      x.payload.access_token,
+      x.payload.jwt,
+      x.payload.bearer,
 
       payloadSession.token,
       payloadSession.accessToken,
@@ -1122,6 +850,7 @@ function resolveTokenFromPayload(payload = {}, core = {}, session = {}) {
       core.token,
       core.accessToken,
       core.access_token,
+
       coreSession.token,
       coreSession.accessToken,
       coreSession.access_token,
@@ -1132,38 +861,27 @@ function resolveTokenFromPayload(payload = {}, core = {}, session = {}) {
   );
 }
 
-function resolveRefreshTokenFromPayload(payload = {}, core = {}, session = {}) {
-  const nested =
-    resolveNestedData(payload);
-
-  const dataSession =
-    safeObject(nested.data.session);
-
-  const dataAuth =
-    safeObject(nested.data.auth);
-
-  const payloadSession =
-    safeObject(nested.payload.session);
-
-  const payloadAuth =
-    safeObject(nested.payload.auth);
-
-  const coreSession =
-    safeObject(core.session);
+function pickRefreshToken(payload = {}, core = {}, session = {}) {
+  const x = nested(payload);
+  const dataSession = safeObject(x.data.session);
+  const dataAuth = safeObject(x.data.auth);
+  const payloadSession = safeObject(x.payload.session);
+  const payloadAuth = safeObject(x.payload.auth);
+  const coreSession = safeObject(core.session);
 
   return normalizeToken(
     pickNonEmpty(
-      nested.root.refreshToken,
-      nested.root.refresh_token,
+      x.root.refreshToken,
+      x.root.refresh_token,
 
-      nested.session.refreshToken,
-      nested.session.refresh_token,
+      x.session.refreshToken,
+      x.session.refresh_token,
 
-      nested.auth.refreshToken,
-      nested.auth.refresh_token,
+      x.auth.refreshToken,
+      x.auth.refresh_token,
 
-      nested.data.refreshToken,
-      nested.data.refresh_token,
+      x.data.refreshToken,
+      x.data.refresh_token,
 
       dataSession.refreshToken,
       dataSession.refresh_token,
@@ -1171,8 +889,8 @@ function resolveRefreshTokenFromPayload(payload = {}, core = {}, session = {}) {
       dataAuth.refreshToken,
       dataAuth.refresh_token,
 
-      nested.payload.refreshToken,
-      nested.payload.refresh_token,
+      x.payload.refreshToken,
+      x.payload.refresh_token,
 
       payloadSession.refreshToken,
       payloadSession.refresh_token,
@@ -1190,37 +908,30 @@ function resolveRefreshTokenFromPayload(payload = {}, core = {}, session = {}) {
   );
 }
 
-function resolveSessionIdFromPayload(payload = {}, core = {}, session = {}) {
-  const nested =
-    resolveNestedData(payload);
-
-  const dataSession =
-    safeObject(nested.data.session);
-
-  const payloadSession =
-    safeObject(nested.payload.session);
-
-  const coreSession =
-    safeObject(core.session);
+function pickSessionId(payload = {}, core = {}, session = {}) {
+  const x = nested(payload);
+  const dataSession = safeObject(x.data.session);
+  const payloadSession = safeObject(x.payload.session);
+  const coreSession = safeObject(core.session);
 
   return safeText(
     pickNonEmpty(
-      nested.root.sessionId,
-      nested.root.session_id,
+      x.root.sessionId,
+      x.root.session_id,
 
-      nested.session.sessionId,
-      nested.session.session_id,
-      nested.session.id,
+      x.session.sessionId,
+      x.session.session_id,
+      x.session.id,
 
-      nested.data.sessionId,
-      nested.data.session_id,
+      x.data.sessionId,
+      x.data.session_id,
 
       dataSession.sessionId,
       dataSession.session_id,
       dataSession.id,
 
-      nested.payload.sessionId,
-      nested.payload.session_id,
+      x.payload.sessionId,
+      x.payload.session_id,
 
       payloadSession.sessionId,
       payloadSession.session_id,
@@ -1238,45 +949,38 @@ function resolveSessionIdFromPayload(payload = {}, core = {}, session = {}) {
   ) || null;
 }
 
-function resolveSessionUserIdFromPayload(payload = {}, core = {}, session = {}, user = null) {
-  const nested =
-    resolveNestedData(payload);
-
-  const dataSession =
-    safeObject(nested.data.session);
-
-  const payloadSession =
-    safeObject(nested.payload.session);
-
-  const coreSession =
-    safeObject(core.session);
+function pickSessionUserId(payload = {}, core = {}, session = {}, user = null) {
+  const x = nested(payload);
+  const dataSession = safeObject(x.data.session);
+  const payloadSession = safeObject(x.payload.session);
+  const coreSession = safeObject(core.session);
 
   return safeText(
     pickNonEmpty(
-      nested.root.sessionUserId,
-      nested.root.session_user_id,
-      nested.root.userId,
-      nested.root.user_id,
+      x.root.sessionUserId,
+      x.root.session_user_id,
+      x.root.userId,
+      x.root.user_id,
 
-      nested.session.sessionUserId,
-      nested.session.session_user_id,
-      nested.session.userId,
-      nested.session.user_id,
+      x.session.sessionUserId,
+      x.session.session_user_id,
+      x.session.userId,
+      x.session.user_id,
 
-      nested.data.sessionUserId,
-      nested.data.session_user_id,
-      nested.data.userId,
-      nested.data.user_id,
+      x.data.sessionUserId,
+      x.data.session_user_id,
+      x.data.userId,
+      x.data.user_id,
 
       dataSession.sessionUserId,
       dataSession.session_user_id,
       dataSession.userId,
       dataSession.user_id,
 
-      nested.payload.sessionUserId,
-      nested.payload.session_user_id,
-      nested.payload.userId,
-      nested.payload.user_id,
+      x.payload.sessionUserId,
+      x.payload.session_user_id,
+      x.payload.userId,
+      x.payload.user_id,
 
       payloadSession.sessionUserId,
       payloadSession.session_user_id,
@@ -1305,40 +1009,26 @@ function resolveSessionUserIdFromPayload(payload = {}, core = {}, session = {}, 
   ) || null;
 }
 
-function resolveAuthenticatedSignal(payload = {}, core = {}, session = {}) {
-  const nested =
-    resolveNestedData(payload);
-
-  const dataSession =
-    safeObject(nested.data.session);
-
-  const dataAuth =
-    safeObject(nested.data.auth);
-
-  const payloadSession =
-    safeObject(nested.payload.session);
-
-  const payloadAuth =
-    safeObject(nested.payload.auth);
-
-  const coreSession =
-    safeObject(core.session);
+function pickAuthenticatedSignal(payload = {}, core = {}, session = {}) {
+  const x = nested(payload);
+  const dataSession = safeObject(x.data.session);
+  const dataAuth = safeObject(x.data.auth);
+  const payloadSession = safeObject(x.payload.session);
+  const payloadAuth = safeObject(x.payload.auth);
+  const coreSession = safeObject(core.session);
 
   return pickDefined(
-    nested.root.authenticated,
-    nested.root.isAuthenticated,
-    nested.root.ok && nested.root.status === "authenticated"
-      ? true
-      : undefined,
+    x.root.authenticated,
+    x.root.isAuthenticated,
 
-    nested.session.authenticated,
-    nested.session.isAuthenticated,
+    x.session.authenticated,
+    x.session.isAuthenticated,
 
-    nested.auth.authenticated,
-    nested.auth.isAuthenticated,
+    x.auth.authenticated,
+    x.auth.isAuthenticated,
 
-    nested.data.authenticated,
-    nested.data.isAuthenticated,
+    x.data.authenticated,
+    x.data.isAuthenticated,
 
     dataSession.authenticated,
     dataSession.isAuthenticated,
@@ -1346,8 +1036,8 @@ function resolveAuthenticatedSignal(payload = {}, core = {}, session = {}) {
     dataAuth.authenticated,
     dataAuth.isAuthenticated,
 
-    nested.payload.authenticated,
-    nested.payload.isAuthenticated,
+    x.payload.authenticated,
+    x.payload.isAuthenticated,
 
     payloadSession.authenticated,
     payloadSession.isAuthenticated,
@@ -1370,142 +1060,73 @@ function buildSessionPatch({
   state,
   source = {},
 } = {}) {
-  const core =
-    getCoreState(AppCore);
+  const core = coreState(AppCore);
+  const session = sessionState(state);
 
-  const session =
-    getStoreSessionState(state);
+  const user = pickUser(source, core, session);
+  const token = pickToken(source, core, session);
+  const refreshToken = pickRefreshToken(source, core, session);
+  const sessionId = pickSessionId(source, core, session);
+  const sessionUserId = pickSessionUserId(source, core, session, user);
 
-  const user =
-    resolveUserFromPayload(
-      source,
-      core,
-      session
-    );
+  const roleInput = pickDefined(
+    source.role,
+    source.rol,
+    safeObject(source.session).role,
+    safeObject(source.session).rol,
+    core.role,
+    core.rol,
+    safeObject(core.session).role,
+    safeObject(core.session).rol,
+    session.role,
+    user?.role,
+    user?.rol,
+    null
+  );
 
-  const token =
-    resolveTokenFromPayload(
-      source,
-      core,
-      session
-    );
+  const rolesInput = pickDefined(
+    source.roles,
+    safeObject(source.session).roles,
+    core.roles,
+    safeObject(core.session).roles,
+    session.roles,
+    user?.roles,
+    null
+  );
 
-  const refreshToken =
-    resolveRefreshTokenFromPayload(
-      source,
-      core,
-      session
-    );
-
-  const sessionId =
-    resolveSessionIdFromPayload(
-      source,
-      core,
-      session
-    );
-
-  const sessionUserId =
-    resolveSessionUserIdFromPayload(
-      source,
-      core,
-      session,
-      user
-    );
-
-  const explicitRole =
-    pickDefined(
-      source.role,
-      source.rol,
-      safeObject(source.session).role,
-      safeObject(source.session).rol,
-      core.role,
-      core.rol,
-      safeObject(core.session).role,
-      safeObject(core.session).rol,
-      session.role,
-      user?.role,
-      user?.rol,
-      null
-    );
-
-  const explicitRoles =
-    pickDefined(
-      source.roles,
-      safeObject(source.session).roles,
-      core.roles,
-      safeObject(core.session).roles,
-      session.roles,
-      user?.roles,
-      null
-    );
-
-  const authSignal =
-    resolveAuthenticatedSignal(
-      source,
-      core,
-      session
-    );
+  const authSignal = safeBool(pickAuthenticatedSignal(source, core, session), false);
 
   const authenticated =
-    safeBool(authSignal, false) &&
+    authSignal &&
     hasUsableToken(token) &&
     hasUsableUser(user);
 
-  const role =
-    authenticated
-      ? resolvePrimaryRole(
-          user,
-          explicitRole,
-          explicitRoles
-        )
-      : null;
+  const role = authenticated
+    ? primaryRole(user, roleInput, rolesInput)
+    : null;
 
-  const roles =
-    authenticated
-      ? collectRoles(
-          user,
-          role,
-          explicitRoles
-        )
-      : [];
+  const roles = authenticated
+    ? collectRoles(user, role, rolesInput)
+    : [];
 
   return {
     authenticated,
+    hasToken: Boolean(token),
 
-    token:
-      authenticated
-        ? token
-        : null,
+    token: authenticated ? token : null,
+    accessToken: authenticated ? token : null,
 
-    accessToken:
-      authenticated
-        ? token
-        : null,
+    refreshToken: refreshToken || null,
 
-    refreshToken:
-      refreshToken || null,
-
-    user:
-      authenticated
-        ? user
-        : null,
+    user: authenticated ? user : null,
 
     role,
     roles,
 
-    sessionId:
-      sessionId || null,
+    sessionId: sessionId || null,
+    sessionUserId: sessionUserId || null,
 
-    sessionUserId:
-      sessionUserId || null,
-
-    isAdmin:
-      roles.includes("admin") ||
-      roles.includes("administrator") ||
-      roles.includes("administrador") ||
-      roles.includes("superadmin") ||
-      roles.includes("owner") ||
-      roles.includes("root"),
+    isAdmin: roles.includes("admin"),
   };
 }
 
@@ -1514,67 +1135,53 @@ function buildUiPatch({
   state,
   source = {},
 } = {}) {
-  const core =
-    getCoreState(AppCore);
+  const core = coreState(AppCore);
+  const ui = uiState(state);
 
-  const ui =
-    getStoreUiState(state);
+  const theme = pickDefined(
+    source.theme,
+    source.mode,
+    source.resolvedTheme,
+    core.theme,
+    ui.theme,
+    DEFAULT_THEME
+  );
 
-  const theme =
-    pickDefined(
-      source.theme,
-      source.mode,
-      source.resolvedTheme,
-      core.theme,
-      ui.theme,
-      DEFAULT_THEME
-    );
+  const lang = pickDefined(
+    source.lang,
+    source.locale,
+    core.lang,
+    ui.lang,
+    DEFAULT_LANG
+  );
 
-  const lang =
-    pickDefined(
-      source.lang,
-      source.locale,
-      core.lang,
-      ui.lang,
-      DEFAULT_LANG
-    );
-
-  const sidebarOpen =
-    pickDefined(
-      source.sidebarOpen,
-      source.open,
-      core.sidebarOpen,
-      ui.sidebarOpen,
-      true
-    );
+  const sidebarOpen = pickDefined(
+    source.sidebarOpen,
+    source.open,
+    core.sidebarOpen,
+    ui.sidebarOpen,
+    true
+  );
 
   return {
     theme,
 
-    themePreference:
-      pickDefined(
-        source.themePreference,
-        source.themeMode,
-        source.appearance,
-        core.themePreference,
-        core.themeMode,
-        ui.themePreference,
-        theme
-      ),
+    themePreference: pickDefined(
+      source.themePreference,
+      source.themeMode,
+      source.appearance,
+      core.themePreference,
+      core.themeMode,
+      ui.themePreference,
+      theme
+    ),
 
     lang,
 
-    sidebarOpen:
-      safeBool(
-        sidebarOpen,
-        true
-      ),
+    sidebarOpen: safeBool(sidebarOpen, true),
 
-    pageTitle:
-      safeTitle(AppCore),
-
-    topbarTitle:
-      safeTopbarTitle(AppCore),
+    pageTitle: safeTitle(AppCore),
+    topbarTitle: safeTopbarTitle(AppCore),
   };
 }
 
@@ -1584,49 +1191,399 @@ function syncFromCore({
   patch,
   source = {},
 } = {}) {
-  if (!isFn(patch)) {
-    return false;
-  }
+  if (!isFn(patch)) return false;
 
   patch({
-    app:
-      buildAppPatch({
-        AppCore,
-        state,
-        source,
-      }),
+    app: buildAppPatch({
+      AppCore,
+      state,
+      source,
+    }),
 
-    session:
-      buildSessionPatch({
-        AppCore,
-        state,
-        source,
-      }),
+    session: buildSessionPatch({
+      AppCore,
+      state,
+      source,
+    }),
 
-    ui:
-      buildUiPatch({
-        AppCore,
-        state,
-        source,
-      }),
+    ui: buildUiPatch({
+      AppCore,
+      state,
+      source,
+    }),
   });
 
   return true;
 }
 
 /* =========================================================
-   UNSUBSCRIBE
+   ACTION HELPERS
 ========================================================= */
 
-function safeOff(fn, AppCore) {
+function callAction(fn, ...args) {
   try {
-    fn?.();
+    if (isFn(fn)) {
+      fn(...args);
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function patchSession({
+  actions,
+  patch,
+  session,
+} = {}) {
+  if (callAction(actions?.setSession, session)) return true;
+
+  if (isFn(patch)) {
+    patch({ session });
+    return true;
+  }
+
+  return false;
+}
+
+function clearSession({
+  actions,
+  patch,
+} = {}) {
+  const clean = {
+    authenticated: false,
+    hasToken: false,
+
+    token: null,
+    accessToken: null,
+    refreshToken: null,
+
+    user: null,
+
+    role: null,
+    roles: [],
+
+    sessionId: null,
+    sessionUserId: null,
+
+    isAdmin: false,
+  };
+
+  if (callAction(actions?.clearSession)) return true;
+
+  if (isFn(patch)) {
+    patch({ session: clean });
+    return true;
+  }
+
+  return false;
+}
+
+/* =========================================================
+   EVENT HANDLERS
+========================================================= */
+
+function handleStateEvent({
+  AppCore,
+  state,
+  patch,
+  event,
+} = {}) {
+  syncFromCore({
+    AppCore,
+    state,
+    patch,
+    source: statePayload(event),
+  });
+}
+
+function handleBootReady({
+  AppCore,
+  state,
+  actions,
+  patch,
+} = {}) {
+  callAction(actions?.hydrateFromCore);
+
+  syncFromCore({
+    AppCore,
+    state,
+    patch,
+    source: coreState(AppCore),
+  });
+
+  callAction(actions?.setInitialized, true);
+  callAction(actions?.markReady, true);
+  callAction(actions?.markBooted, true);
+  callAction(actions?.setBooting, false);
+  callAction(actions?.setLoading, false);
+}
+
+function handleBooting({ actions } = {}) {
+  callAction(actions?.setBooting, true);
+  callAction(actions?.setLoading, true);
+  callAction(actions?.markReady, false);
+}
+
+function handleBootError({
+  actions,
+  event,
+} = {}) {
+  const payload = eventPayload(event);
+
+  callAction(actions?.setBooting, false);
+  callAction(actions?.setLoading, false);
+  callAction(actions?.markReady, false);
+  callAction(actions?.setError, payload.error || payload.message || null);
+}
+
+function handleRouteEvent({
+  AppCore,
+  state,
+  actions,
+  event,
+  eventName = "",
+} = {}) {
+  const payload = eventPayload(event);
+  const core = coreState(AppCore);
+
+  const route = pickText(
+    payload.canonicalPath,
+    payload.route,
+    payload.currentRoute,
+    payload.path,
+    core.canonicalPath,
+    core.route,
+    state?.app?.route,
+    browserPathname(),
+    DEFAULT_ROUTE
+  );
+
+  const publicPath = pickText(
+    payload.publicPath,
+    payload.currentPublicPath,
+    payload.requestedPath,
+    payload.href,
+    payload.url,
+    payload.path,
+    core.publicPath,
+    state?.app?.publicPath,
+    browserPublicPath(),
+    route,
+    DEFAULT_ROUTE
+  );
+
+  callAction(actions?.setRoute, route || DEFAULT_ROUTE);
+  callAction(actions?.setPublicPath, publicPath || route || DEFAULT_ROUTE);
+
+  if (ROUTE_LOADING_EVENTS.has(eventName)) {
+    callAction(actions?.setLoading, true);
+  }
+
+  if (ROUTE_DONE_EVENTS.has(eventName)) {
+    callAction(actions?.setLoading, false);
+  }
+
+  callAction(actions?.setPageTitle, safeTitle(AppCore));
+  callAction(actions?.setTopbarTitle, safeTopbarTitle(AppCore));
+}
+
+function handleSessionEvent({
+  AppCore,
+  state,
+  actions,
+  patch,
+  event,
+} = {}) {
+  const session = buildSessionPatch({
+    AppCore,
+    state,
+    source: eventPayload(event),
+  });
+
+  patchSession({
+    actions,
+    patch,
+    session,
+  });
+}
+
+function handleThemeEvent({
+  AppCore,
+  state,
+  actions,
+  event,
+} = {}) {
+  const payload = eventPayload(event);
+
+  callAction(
+    actions?.setTheme,
+    pickDefined(
+      payload.theme,
+      payload.resolvedTheme,
+      payload.mode,
+      coreState(AppCore).theme,
+      state?.ui?.theme,
+      DEFAULT_THEME
+    )
+  );
+}
+
+function handleLangEvent({
+  AppCore,
+  state,
+  actions,
+  event,
+} = {}) {
+  const payload = eventPayload(event);
+
+  callAction(
+    actions?.setLang,
+    pickDefined(
+      payload.lang,
+      payload.locale,
+      coreState(AppCore).lang,
+      state?.ui?.lang,
+      DEFAULT_LANG
+    )
+  );
+}
+
+function handleSidebarEvent({
+  AppCore,
+  state,
+  actions,
+  event,
+} = {}) {
+  const payload = eventPayload(event);
+
+  callAction(
+    actions?.setSidebarOpen,
+    safeBool(
+      pickDefined(
+        payload.open,
+        payload.sidebarOpen,
+        coreState(AppCore).sidebarOpen,
+        state?.ui?.sidebarOpen,
+        true
+      ),
+      true
+    )
+  );
+}
+
+function handleTitleEvent({
+  AppCore,
+  actions,
+  event,
+} = {}) {
+  const payload = eventPayload(event);
+
+  callAction(actions?.setPageTitle, payload.title || safeTitle(AppCore));
+  callAction(actions?.setTopbarTitle, payload.topbarTitle || safeTopbarTitle(AppCore));
+}
+
+function handleLoadingEvent({
+  actions,
+  event,
+} = {}) {
+  const payload = eventPayload(event);
+
+  callAction(
+    actions?.setLoading,
+    safeBool(
+      pickDefined(payload.loading, payload.isLoading, false),
+      false
+    )
+  );
+}
+
+function handleErrorEvent({
+  actions,
+  event,
+} = {}) {
+  const payload = eventPayload(event);
+
+  callAction(actions?.setError, payload.error || payload.message || null);
+}
+
+function handleAuthStart({
+  actions,
+  eventName = "",
+} = {}) {
+  callAction(actions?.setLoading, true);
+
+  if (eventName.includes("login")) {
+    callAction(actions?.setFlag, "loginInProgress", true);
+  }
+
+  if (eventName.includes("restore")) {
+    callAction(actions?.setFlag, "restoreInProgress", true);
+  }
+
+  if (eventName.includes("refresh")) {
+    callAction(actions?.setFlag, "refreshInProgress", true);
+  }
+}
+
+function handleAuthError({
+  actions,
+  patch,
+  event,
+  eventName = "",
+} = {}) {
+  const payload = eventPayload(event);
+
+  callAction(actions?.setLoading, false);
+
+  if (eventName.includes("login")) {
+    callAction(actions?.setFlag, "loginInProgress", false);
+
+    clearSession({
+      actions,
+      patch,
+    });
+  }
+
+  if (eventName.includes("restore")) {
+    callAction(actions?.setFlag, "restoreInProgress", false);
+  }
+
+  if (eventName.includes("refresh")) {
+    callAction(actions?.setFlag, "refreshInProgress", false);
+  }
+
+  callAction(actions?.setError, payload.error || payload.message || null);
+}
+
+function handleShellEvent({
+  actions,
+  event,
+} = {}) {
+  const payload = eventPayload(event);
+
+  if (hasOwn(payload, "shellHidden")) {
+    callAction(actions?.setFlag, "shellHidden", Boolean(payload.shellHidden));
+  }
+
+  if (hasOwn(payload, "chromeVisible")) {
+    callAction(actions?.setFlag, "chromeVisible", Boolean(payload.chromeVisible));
+  }
+
+  if (hasOwn(payload, "authScreen")) {
+    callAction(actions?.setFlag, "authScreen", Boolean(payload.authScreen));
+  }
+}
+
+/* =========================================================
+   SUBSCRIBE
+========================================================= */
+
+function safeOff(off, AppCore) {
+  try {
+    off?.();
   } catch (error) {
-    safeWarn(
-      AppCore,
-      "No se pudo limpiar listener del Store.",
-      error
-    );
+    safeWarn(AppCore, "No se pudo limpiar listener del Store.", error);
   }
 }
 
@@ -1637,34 +1594,20 @@ function normalizeUnsubscriber({
   rawOff,
   usedWindow = false,
 } = {}) {
-  if (isFn(rawOff)) {
-    return rawOff;
-  }
+  if (isFn(rawOff)) return rawOff;
 
-  if (
-    !usedWindow &&
-    isFn(AppCore?.events?.off)
-  ) {
+  if (!usedWindow && isFn(AppCore?.events?.off)) {
     return () => {
       try {
-        AppCore.events.off(
-          eventName,
-          handler
-        );
+        AppCore.events.off(eventName, handler);
       } catch {}
     };
   }
 
-  if (
-    usedWindow &&
-    isBrowser()
-  ) {
+  if (usedWindow && isBrowser()) {
     return () => {
       try {
-        window.removeEventListener(
-          eventName,
-          handler
-        );
+        window.removeEventListener(eventName, handler);
       } catch {}
     };
   }
@@ -1673,17 +1616,10 @@ function normalizeUnsubscriber({
 }
 
 function pushUnsubscriber(coreUnsubscribers, off) {
-  if (
-    Array.isArray(coreUnsubscribers) &&
-    isFn(off)
-  ) {
+  if (Array.isArray(coreUnsubscribers) && isFn(off)) {
     coreUnsubscribers.push(off);
   }
 }
-
-/* =========================================================
-   API · ADD EVENT
-========================================================= */
 
 export function addCoreEvent({
   AppCore,
@@ -1691,26 +1627,15 @@ export function addCoreEvent({
   eventName,
   handler,
 }) {
-  const cleanEventName =
-    safeText(eventName, "");
+  const name = safeText(eventName, "");
 
-  if (
-    !cleanEventName ||
-    !isFn(handler)
-  ) {
-    return () => {};
-  }
+  if (!name || !isFn(handler)) return () => {};
 
-  const wrappedHandler = (...args) => {
+  const wrapped = (...args) => {
     try {
       return handler(...args);
     } catch (error) {
-      safeWarn(
-        AppCore,
-        `Error en listener "${cleanEventName}".`,
-        error
-      );
-
+      safeWarn(AppCore, `Error en listener "${name}".`, error);
       return undefined;
     }
   };
@@ -1718,346 +1643,46 @@ export function addCoreEvent({
   let rawOff = null;
   let usedWindow = false;
 
-  if (isFn(AppCore?.events?.on)) {
+  try {
+    if (isFn(AppCore?.cleanup?.event)) {
+      rawOff = AppCore.cleanup.event(SYNC_SCOPE, name, wrapped);
+    }
+  } catch {}
+
+  if (!rawOff && isFn(AppCore?.events?.on)) {
     try {
-      rawOff =
-        AppCore.events.on(
-          cleanEventName,
-          wrappedHandler
-        );
+      rawOff = AppCore.events.on(name, wrapped);
     } catch (error) {
-      safeWarn(
-        AppCore,
-        `No se pudo registrar listener AppCore "${cleanEventName}".`,
-        error
-      );
+      safeWarn(AppCore, `No se pudo registrar listener AppCore "${name}".`, error);
     }
   }
 
-  if (
-    !rawOff &&
-    isBrowser()
-  ) {
+  if (!rawOff && isBrowser()) {
     try {
-      window.addEventListener(
-        cleanEventName,
-        wrappedHandler
-      );
-
-      usedWindow =
-        true;
+      window.addEventListener(name, wrapped);
+      usedWindow = true;
     } catch (error) {
-      safeWarn(
-        AppCore,
-        `No se pudo registrar listener window "${cleanEventName}".`,
-        error
-      );
+      safeWarn(AppCore, `No se pudo registrar listener window "${name}".`, error);
     }
   }
 
-  const off =
-    normalizeUnsubscriber({
-      AppCore,
-      eventName:
-        cleanEventName,
-      handler:
-        wrappedHandler,
-      rawOff,
-      usedWindow,
-    });
+  const off = normalizeUnsubscriber({
+    AppCore,
+    eventName: name,
+    handler: wrapped,
+    rawOff,
+    usedWindow,
+  });
 
-  pushUnsubscriber(
-    coreUnsubscribers,
-    off
-  );
+  pushUnsubscriber(coreUnsubscribers, off);
 
   return off;
 }
 
-/* =========================================================
-   API · UNBIND
-========================================================= */
-
-export function unbindCoreEvents({
+function bindMany({
   AppCore,
   coreUnsubscribers,
-} = {}) {
-  while (
-    Array.isArray(coreUnsubscribers) &&
-    coreUnsubscribers.length
-  ) {
-    const off =
-      coreUnsubscribers.pop();
-
-    safeOff(
-      off,
-      AppCore
-    );
-  }
-
-  return true;
-}
-
-/* =========================================================
-   ROUTER SYNC
-========================================================= */
-
-function syncRouteEvent({
-  AppCore,
-  state,
-  actions,
-  event,
-  loading = null,
-} = {}) {
-  const payload =
-    resolveEventPayload(event);
-
-  const core =
-    getCoreState(AppCore);
-
-  const route =
-    pickText(
-      payload.canonicalPath,
-      payload.route,
-      payload.currentRoute,
-      payload.path,
-      core.canonicalPath,
-      core.route,
-      state?.app?.route,
-      getBrowserPathname(),
-      DEFAULT_ROUTE
-    );
-
-  const publicPath =
-    pickText(
-      payload.publicPath,
-      payload.currentPublicPath,
-      payload.requestedPath,
-      payload.href,
-      payload.url,
-      payload.path,
-      core.publicPath,
-      state?.app?.publicPath,
-      getBrowserPublicPath(),
-      route,
-      DEFAULT_ROUTE
-    );
-
-  actions.setRoute?.(
-    route || DEFAULT_ROUTE
-  );
-
-  actions.setPublicPath?.(
-    publicPath || route || DEFAULT_ROUTE
-  );
-
-  if (loading !== null) {
-    actions.setLoading?.(
-      Boolean(loading)
-    );
-  }
-
-  actions.setPageTitle?.(
-    safeTitle(AppCore)
-  );
-
-  return true;
-}
-
-/* =========================================================
-   SESSION SYNC
-========================================================= */
-
-function syncSessionEvent({
-  AppCore,
-  state,
-  actions,
-  patch,
-  event,
-} = {}) {
-  const payload =
-    resolveEventPayload(event);
-
-  const sessionPatch =
-    buildSessionPatch({
-      AppCore,
-      state,
-      source:
-        payload,
-    });
-
-  if (isFn(actions?.setSession)) {
-    actions.setSession(sessionPatch);
-    return true;
-  }
-
-  if (isFn(patch)) {
-    patch({
-      session:
-        sessionPatch,
-    });
-
-    return true;
-  }
-
-  return false;
-}
-
-function clearSessionEvent({
-  actions,
-  patch,
-} = {}) {
-  if (isFn(actions?.clearSession)) {
-    actions.clearSession();
-    return true;
-  }
-
-  if (isFn(patch)) {
-    patch({
-      session: {
-        authenticated:
-          false,
-
-        token:
-          null,
-
-        accessToken:
-          null,
-
-        refreshToken:
-          null,
-
-        user:
-          null,
-
-        role:
-          null,
-
-        roles:
-          [],
-
-        sessionId:
-          null,
-
-        sessionUserId:
-          null,
-
-        isAdmin:
-          false,
-      },
-    });
-
-    return true;
-  }
-
-  return false;
-}
-
-/* =========================================================
-   UI SYNC
-========================================================= */
-
-function syncThemeEvent({
-  AppCore,
-  state,
-  actions,
-  event,
-} = {}) {
-  const payload =
-    resolveEventPayload(event);
-
-  actions.setTheme?.(
-    pickDefined(
-      payload.theme,
-      payload.resolvedTheme,
-      payload.mode,
-      getCoreState(AppCore).theme,
-      state?.ui?.theme,
-      DEFAULT_THEME
-    )
-  );
-
-  return true;
-}
-
-function syncLangEvent({
-  AppCore,
-  state,
-  actions,
-  event,
-} = {}) {
-  const payload =
-    resolveEventPayload(event);
-
-  actions.setLang?.(
-    pickDefined(
-      payload.lang,
-      payload.locale,
-      getCoreState(AppCore).lang,
-      state?.ui?.lang,
-      DEFAULT_LANG
-    )
-  );
-
-  return true;
-}
-
-function syncSidebarEvent({
-  AppCore,
-  state,
-  actions,
-  event,
-} = {}) {
-  const payload =
-    resolveEventPayload(event);
-
-  actions.setSidebarOpen?.(
-    safeBool(
-      pickDefined(
-        payload.open,
-        payload.sidebarOpen,
-        getCoreState(AppCore).sidebarOpen,
-        state?.ui?.sidebarOpen,
-        true
-      ),
-      true
-    )
-  );
-
-  return true;
-}
-
-function syncTitleEvent({
-  AppCore,
-  actions,
-  event,
-} = {}) {
-  const payload =
-    resolveEventPayload(event);
-
-  actions.setPageTitle?.(
-    payload.title ||
-      safeTitle(AppCore)
-  );
-
-  if (isFn(actions?.setTopbarTitle)) {
-    actions.setTopbarTitle(
-      payload.topbarTitle ||
-        safeTopbarTitle(AppCore)
-    );
-  }
-
-  return true;
-}
-
-/* =========================================================
-   BIND HELPERS
-========================================================= */
-
-function bindEventList({
-  AppCore,
-  coreUnsubscribers,
-  eventNames = [],
+  eventNames,
   handler,
 }) {
   for (const eventName of safeArray(eventNames)) {
@@ -2065,42 +1690,26 @@ function bindEventList({
       AppCore,
       coreUnsubscribers,
       eventName,
-      handler,
+      handler: (event) => handler(event, eventName),
     });
   }
 }
 
-function markStoreReady(actions) {
-  actions.hydrateFromCore?.();
-  actions.setInitialized?.(true);
-  actions.markReady?.(true);
-  actions.markBooted?.(true);
-  actions.setBooting?.(false);
-  actions.setLoading?.(false);
+/* =========================================================
+   UNBIND
+========================================================= */
 
-  return true;
-}
+export function unbindCoreEvents({
+  AppCore,
+  coreUnsubscribers,
+} = {}) {
+  while (Array.isArray(coreUnsubscribers) && coreUnsubscribers.length) {
+    safeOff(coreUnsubscribers.pop(), AppCore);
+  }
 
-function markStoreBooting(actions) {
-  actions.setBooting?.(true);
-  actions.setLoading?.(true);
-  actions.markReady?.(false);
-
-  return true;
-}
-
-function markStoreBootError(actions, event) {
-  const payload =
-    resolveEventPayload(event);
-
-  actions.setBooting?.(false);
-  actions.setLoading?.(false);
-  actions.markReady?.(false);
-  actions.setError?.(
-    payload.error ||
-      payload.message ||
-      null
-  );
+  try {
+    AppCore?.cleanup?.run?.(SYNC_SCOPE);
+  } catch {}
 
   return true;
 }
@@ -2116,320 +1725,90 @@ export function bindCoreEvents({
   actions,
   patch,
 } = {}) {
-  if (
-    !AppCore ||
-    !state ||
-    !actions ||
-    !isFn(patch)
-  ) {
+  if (!AppCore || !state || !actions || !isFn(patch)) {
     return false;
   }
 
-  /*
-    Evita doble binding si Store.init() se llama dos veces.
-  */
-  if (
-    Array.isArray(coreUnsubscribers) &&
-    coreUnsubscribers.length
-  ) {
+  if (Array.isArray(coreUnsubscribers) && coreUnsubscribers.length) {
     return true;
   }
 
-  safeEmit(
-    AppCore,
-    "store:core-sync:binding",
-    {
-      version:
-        STORE_CORE_SYNC_VERSION,
+  safeEmit(AppCore, "store:core-sync:binding", {
+    version: STORE_CORE_SYNC_VERSION,
+    scope: SYNC_SCOPE,
+    at: safeIsoDate(),
+  });
 
-      scope:
-        SYNC_SCOPE,
-
-      at:
-        safeIsoDate(),
-    }
-  );
-
-  /* =========================================
-     STATE CHANGE · MASTER SYNC
-  ========================================= */
-
-  addCoreEvent({
+  bindMany({
     AppCore,
     coreUnsubscribers,
-    eventName:
-      "app:state:change",
+    eventNames: STATE_EVENTS,
     handler: (event) => {
-      syncFromCore({
+      handleStateEvent({
         AppCore,
         state,
         patch,
-        source:
-          resolveStatePayload(event),
+        event,
       });
     },
   });
 
-  addCoreEvent({
+  bindMany({
     AppCore,
     coreUnsubscribers,
-    eventName:
-      "app:state:patched",
-    handler: (event) => {
-      const payload =
-        resolveEventPayload(event);
-
-      syncFromCore({
+    eventNames: BOOT_READY_EVENTS,
+    handler: () => {
+      handleBootReady({
         AppCore,
         state,
+        actions,
         patch,
-        source:
-          resolveStatePayload(
-            payload.state ||
-              payload
-          ),
       });
     },
   });
 
-  /* =========================================
-     CORE READY / BOOT
-  ========================================= */
-
-  addCoreEvent({
+  bindMany({
     AppCore,
     coreUnsubscribers,
-    eventName:
-      "app:core:ready",
+    eventNames: BOOTING_EVENTS,
     handler: () => {
-      markStoreReady(actions);
+      handleBooting({ actions });
     },
   });
 
-  addCoreEvent({
+  bindMany({
     AppCore,
     coreUnsubscribers,
-    eventName:
-      "app:ready",
-    handler: () => {
-      actions.markReady?.(true);
-      actions.setBooting?.(false);
-      actions.setLoading?.(false);
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "app:boot:ready",
-    handler: () => {
-      actions.markReady?.(true);
-      actions.markBooted?.(true);
-      actions.setBooting?.(false);
-      actions.setLoading?.(false);
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "app:boot:error",
+    eventNames: BOOT_ERROR_EVENTS,
     handler: (event) => {
-      markStoreBootError(
+      handleBootError({
         actions,
-        event
-      );
+        event,
+      });
     },
   });
 
-  addCoreEvent({
+  bindMany({
     AppCore,
     coreUnsubscribers,
-    eventName:
-      "main:ready",
-    handler: () => {
-      markStoreReady(actions);
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "main:booting",
-    handler: () => {
-      markStoreBooting(actions);
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "main:boot:error",
-    handler: (event) => {
-      markStoreBootError(
-        actions,
-        event
-      );
-    },
-  });
-
-  /* =========================================
-     UI
-  ========================================= */
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "app:theme:change",
-    handler: (event) => {
-      syncThemeEvent({
+    eventNames: ROUTE_EVENTS,
+    handler: (event, eventName) => {
+      handleRouteEvent({
         AppCore,
         state,
         actions,
         event,
+        eventName,
       });
     },
   });
 
-  addCoreEvent({
+  bindMany({
     AppCore,
     coreUnsubscribers,
-    eventName:
-      "onion:theme:change",
+    eventNames: SESSION_APPLY_EVENTS,
     handler: (event) => {
-      syncThemeEvent({
-        AppCore,
-        state,
-        actions,
-        event,
-      });
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "theme:change",
-    handler: (event) => {
-      syncThemeEvent({
-        AppCore,
-        state,
-        actions,
-        event,
-      });
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "app:lang:change",
-    handler: (event) => {
-      syncLangEvent({
-        AppCore,
-        state,
-        actions,
-        event,
-      });
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "app:sidebar:change",
-    handler: (event) => {
-      syncSidebarEvent({
-        AppCore,
-        state,
-        actions,
-        event,
-      });
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "app:title:change",
-    handler: (event) => {
-      syncTitleEvent({
-        AppCore,
-        actions,
-        event,
-      });
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "app:loading:change",
-    handler: (event) => {
-      const payload =
-        resolveEventPayload(event);
-
-      actions.setLoading?.(
-        safeBool(
-          pickDefined(
-            payload.loading,
-            payload.isLoading,
-            false
-          ),
-          false
-        )
-      );
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "app:error",
-    handler: (event) => {
-      const payload =
-        resolveEventPayload(event);
-
-      actions.setError?.(
-        payload.error ||
-          payload.message ||
-          null
-      );
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "app:error:clear",
-    handler: () => {
-      actions.clearError?.();
-    },
-  });
-
-  /* =========================================
-     AUTH / SESSION
-  ========================================= */
-
-  bindEventList({
-    AppCore,
-    coreUnsubscribers,
-    eventNames:
-      SESSION_APPLY_EVENT_NAMES,
-    handler: (event) => {
-      syncSessionEvent({
+      handleSessionEvent({
         AppCore,
         state,
         actions,
@@ -2439,359 +1818,159 @@ export function bindCoreEvents({
     },
   });
 
-  bindEventList({
+  bindMany({
     AppCore,
     coreUnsubscribers,
-    eventNames:
-      SESSION_CLEAR_EVENT_NAMES,
+    eventNames: SESSION_CLEAR_EVENTS,
     handler: () => {
-      clearSessionEvent({
+      clearSession({
         actions,
         patch,
       });
     },
   });
 
-  addCoreEvent({
+  bindMany({
     AppCore,
     coreUnsubscribers,
-    eventName:
-      "auth:login:start",
-    handler: () => {
-      actions.setLoading?.(true);
-      actions.setFlag?.(
-        "loginInProgress",
-        true
-      );
+    eventNames: THEME_EVENTS,
+    handler: (event) => {
+      handleThemeEvent({
+        AppCore,
+        state,
+        actions,
+        event,
+      });
     },
   });
 
-  addCoreEvent({
+  bindMany({
     AppCore,
     coreUnsubscribers,
-    eventName:
-      "auth:login:error",
+    eventNames: LANG_EVENTS,
     handler: (event) => {
-      const payload =
-        resolveEventPayload(event);
+      handleLangEvent({
+        AppCore,
+        state,
+        actions,
+        event,
+      });
+    },
+  });
 
-      actions.setLoading?.(false);
-      actions.setFlag?.(
-        "loginInProgress",
-        false
-      );
+  bindMany({
+    AppCore,
+    coreUnsubscribers,
+    eventNames: SIDEBAR_EVENTS,
+    handler: (event) => {
+      handleSidebarEvent({
+        AppCore,
+        state,
+        actions,
+        event,
+      });
+    },
+  });
 
-      actions.setError?.(
-        payload.error ||
-          payload.message ||
-          null
-      );
+  bindMany({
+    AppCore,
+    coreUnsubscribers,
+    eventNames: TITLE_EVENTS,
+    handler: (event) => {
+      handleTitleEvent({
+        AppCore,
+        actions,
+        event,
+      });
+    },
+  });
 
-      clearSessionEvent({
+  bindMany({
+    AppCore,
+    coreUnsubscribers,
+    eventNames: LOADING_EVENTS,
+    handler: (event) => {
+      handleLoadingEvent({
+        actions,
+        event,
+      });
+    },
+  });
+
+  bindMany({
+    AppCore,
+    coreUnsubscribers,
+    eventNames: ERROR_EVENTS,
+    handler: (event) => {
+      handleErrorEvent({
+        actions,
+        event,
+      });
+    },
+  });
+
+  bindMany({
+    AppCore,
+    coreUnsubscribers,
+    eventNames: CLEAR_ERROR_EVENTS,
+    handler: () => {
+      callAction(actions?.clearError);
+    },
+  });
+
+  bindMany({
+    AppCore,
+    coreUnsubscribers,
+    eventNames: AUTH_START_EVENTS,
+    handler: (_event, eventName) => {
+      handleAuthStart({
+        actions,
+        eventName,
+      });
+    },
+  });
+
+  bindMany({
+    AppCore,
+    coreUnsubscribers,
+    eventNames: AUTH_ERROR_EVENTS,
+    handler: (event, eventName) => {
+      handleAuthError({
         actions,
         patch,
-      });
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "auth:restore:start",
-    handler: () => {
-      actions.setFlag?.(
-        "restoreInProgress",
-        true
-      );
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "auth:restore:success",
-    handler: (event) => {
-      actions.setFlag?.(
-        "restoreInProgress",
-        false
-      );
-
-      syncSessionEvent({
-        AppCore,
-        state,
-        actions,
-        patch,
         event,
+        eventName,
       });
     },
   });
 
-  addCoreEvent({
+  bindMany({
     AppCore,
     coreUnsubscribers,
-    eventName:
-      "auth:restore:error",
+    eventNames: SHELL_EVENTS,
     handler: (event) => {
-      const payload =
-        resolveEventPayload(event);
-
-      actions.setFlag?.(
-        "restoreInProgress",
-        false
-      );
-
-      actions.setError?.(
-        payload.error ||
-          payload.message ||
-          null
-      );
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "auth:refresh:start",
-    handler: () => {
-      actions.setFlag?.(
-        "refreshInProgress",
-        true
-      );
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "auth:refresh:error",
-    handler: (event) => {
-      const payload =
-        resolveEventPayload(event);
-
-      actions.setFlag?.(
-        "refreshInProgress",
-        false
-      );
-
-      actions.setError?.(
-        payload.error ||
-          payload.message ||
-          null
-      );
-    },
-  });
-
-  /* =========================================
-     ROUTER
-  ========================================= */
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "app:route:change",
-    handler: (event) => {
-      syncRouteEvent({
-        AppCore,
-        state,
+      handleShellEvent({
         actions,
         event,
       });
     },
   });
 
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "app:public-path:change",
-    handler: (event) => {
-      syncRouteEvent({
-        AppCore,
-        state,
-        actions,
-        event,
-      });
+  safeEmit(AppCore, "store:core-sync:bound", {
+    version: STORE_CORE_SYNC_VERSION,
+    scope: SYNC_SCOPE,
+    listeners: Array.isArray(coreUnsubscribers) ? coreUnsubscribers.length : 0,
+    groups: {
+      state: STATE_EVENTS.length,
+      boot: BOOT_READY_EVENTS.length + BOOTING_EVENTS.length + BOOT_ERROR_EVENTS.length,
+      route: ROUTE_EVENTS.length,
+      session: SESSION_APPLY_EVENTS.length + SESSION_CLEAR_EVENTS.length,
+      ui: THEME_EVENTS.length + LANG_EVENTS.length + SIDEBAR_EVENTS.length + TITLE_EVENTS.length,
+      auth: AUTH_START_EVENTS.length + AUTH_ERROR_EVENTS.length,
+      shell: SHELL_EVENTS.length,
     },
+    at: safeIsoDate(),
   });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "router:before-render",
-    handler: (event) => {
-      syncRouteEvent({
-        AppCore,
-        state,
-        actions,
-        event,
-        loading:
-          true,
-      });
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "router:rendered",
-    handler: (event) => {
-      syncRouteEvent({
-        AppCore,
-        state,
-        actions,
-        event,
-        loading:
-          false,
-      });
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "router:navigation:complete",
-    handler: (event) => {
-      syncRouteEvent({
-        AppCore,
-        state,
-        actions,
-        event,
-        loading:
-          false,
-      });
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "router:render:async-complete",
-    handler: (event) => {
-      syncRouteEvent({
-        AppCore,
-        state,
-        actions,
-        event,
-        loading:
-          false,
-      });
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "router:render:error",
-    handler: (event) => {
-      const payload =
-        resolveEventPayload(event);
-
-      actions.setLoading?.(false);
-
-      actions.setError?.(
-        payload.error ||
-          payload.message ||
-          null
-      );
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "router:error",
-    handler: (event) => {
-      const payload =
-        resolveEventPayload(event);
-
-      actions.setLoading?.(false);
-
-      actions.setError?.(
-        payload.error ||
-          payload.message ||
-          null
-      );
-    },
-  });
-
-  addCoreEvent({
-    AppCore,
-    coreUnsubscribers,
-    eventName:
-      "router:shell:state",
-    handler: (event) => {
-      const payload =
-        resolveEventPayload(event);
-
-      if (hasOwn(payload, "shellHidden")) {
-        actions.setFlag?.(
-          "shellHidden",
-          Boolean(payload.shellHidden)
-        );
-      }
-
-      if (hasOwn(payload, "chromeVisible")) {
-        actions.setFlag?.(
-          "chromeVisible",
-          Boolean(payload.chromeVisible)
-        );
-      }
-
-      if (hasOwn(payload, "authScreen")) {
-        actions.setFlag?.(
-          "authScreen",
-          Boolean(payload.authScreen)
-        );
-      }
-    },
-  });
-
-  safeEmit(
-    AppCore,
-    "store:core-sync:bound",
-    {
-      version:
-        STORE_CORE_SYNC_VERSION,
-
-      scope:
-        SYNC_SCOPE,
-
-      listeners:
-        Array.isArray(coreUnsubscribers)
-          ? coreUnsubscribers.length
-          : 0,
-
-      groups: {
-        boot:
-          BOOT_EVENT_NAMES.length,
-
-        ui:
-          UI_EVENT_NAMES.length,
-
-        auth:
-          AUTH_FLOW_EVENT_NAMES.length +
-          SESSION_APPLY_EVENT_NAMES.length +
-          SESSION_CLEAR_EVENT_NAMES.length,
-
-        route:
-          ROUTE_EVENT_NAMES.length,
-      },
-
-      at:
-        safeIsoDate(),
-    }
-  );
 
   return true;
 }

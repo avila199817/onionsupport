@@ -2,183 +2,124 @@
    Onion SPA - Store Selectors
    Archivo: src/store/selectors.js
 
-   ONION SUPPORT · STORE SELECTORS
-   SEMANTIC READ MODEL · STRICT AUTH · ROLE SAFE · 14/10
-
-   Responsabilidades:
-   - exponer selectores semánticos del store
-   - leer estado derivado app / session / ui
-   - leer colecciones de forma segura
-   - devolver datos desacoplados mediante clone
-   - centralizar lecturas frecuentes
-   - evitar estados auth fantasma
-   - normalizar roles / permisos
-   - soportar aliases admin/support/manager/client/user
-   - tolerar slices parciales durante boot
-   - blindaje enterprise sin throws accidentales
-   - no filtrar tokens en snapshots públicos
-   - compatibilidad con colecciones heterogéneas
-   - compatibilidad con AppCore parcial durante arranque
-
-   HARDENING EXTREMO:
-   - authenticated estricto = token usable + usuario usable + usuario activo
-   - token() disponible para uso interno controlado
-   - sessionSnapshot() no expone token crudo
-   - authHeader() construye Authorization sólo si hay token usable
-   - roles/permissions normalizados sin acentos
-   - selectors sin dependencia de this para evitar rotura al destructurar métodos
-   - colecciones siempre clonadas salvo collectionRaw()
-   - entity lookup por aliases id/userId/ticketId/clienteId/facturaId
-   - snapshots seguros y estables
+   Selectors limpios:
+   - auth estricta = token usable + user activo usable
+   - roles reales: admin / user
+   - snapshots sin token crudo por defecto
+   - colecciones clonadas salvo collectionRaw()
+   - compatible con state por slices y state plano
 ========================================================= */
 
 import {
   deepClone,
+  deepEqual,
+  getByPath,
   isFunction,
+  safeArray,
+  safeNumber,
+  safeObject,
+  safeText,
+  unique,
 } from "./helpers.js";
 
 import {
   ensureCollectionKey,
 } from "./collections.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const STORE_SELECTORS_VERSION =
-  "14.0.0";
+export const STORE_SELECTORS_VERSION = "15.0.0-clean";
 
 /* =========================================================
-   ROLE CONSTANTS
+   CONSTANTS
 ========================================================= */
 
-const ADMIN_ROLE_KEYS =
-  new Set([
-    "admin",
-    "administrator",
-    "administrador",
-    "superadmin",
-    "super_admin",
-    "super_administrador",
-    "owner",
-    "root",
-  ]);
+const BAD_TOKEN_VALUES = new Set([
+  "",
+  "null",
+  "undefined",
+  "false",
+  "true",
+  "nan",
+  "none",
+  "empty",
+  "[object object]",
+  "{}",
+  "[]",
+  "\"\"",
+  "''",
+]);
 
-const SUPPORT_ROLE_KEYS =
-  new Set([
-    "support",
-    "soporte",
-    "agent",
-    "agente",
-    "helpdesk",
-    "operator",
-    "operador",
-    "technician",
-    "technical",
-    "tecnico",
-    "tecnica",
-    "técnico",
-    "técnica",
-    "it_support",
-    "support_agent",
-    "service_desk",
-  ]);
+const DISABLED_STATUS = new Set([
+  "disabled",
+  "inactive",
+  "deleted",
+  "blocked",
+  "suspended",
+  "banned",
+  "revoked",
+  "deactivated",
+  "desactivado",
+  "inactivo",
+  "eliminado",
+  "bloqueado",
+  "suspendido",
+  "baneado",
+  "revocado",
+]);
 
-const MANAGER_ROLE_KEYS =
-  new Set([
-    "manager",
-    "gestor",
-    "gerente",
-    "lead",
-    "team_lead",
-    "supervisor",
-    "responsable",
-  ]);
+const ADMIN_ALIASES = new Set([
+  "admin",
+  "administrator",
+  "administrador",
+  "superadmin",
+  "super_admin",
+  "super-administrador",
+  "super_administrador",
+  "owner",
+  "root",
+]);
 
-const CLIENT_ROLE_KEYS =
-  new Set([
-    "client",
-    "cliente",
-    "customer",
-    "account",
-    "particular",
-    "empresa",
-  ]);
+const USER_ALIASES = new Set([
+  "user",
+  "usuario",
+  "member",
+  "miembro",
+  "client",
+  "cliente",
+  "customer",
+  "account",
+  "particular",
+  "empresa",
+]);
 
-const USER_ROLE_KEYS =
-  new Set([
-    "user",
-    "usuario",
-    "member",
-    "miembro",
-  ]);
+const ENTITY_ID_KEYS = Object.freeze([
+  "id",
+  "_id",
+  "uuid",
 
-const DISABLED_STATUS_KEYS =
-  new Set([
-    "disabled",
-    "inactive",
-    "deleted",
-    "blocked",
-    "suspended",
-    "banned",
-    "revoked",
-    "deactivated",
-    "desactivado",
-    "inactivo",
-    "eliminado",
-    "bloqueado",
-    "suspendido",
-    "baneado",
-    "revocado",
-  ]);
+  "userId",
+  "user_id",
+  "uid",
+  "sub",
 
-const BAD_TOKEN_VALUES =
-  new Set([
-    "",
-    "null",
-    "undefined",
-    "false",
-    "true",
-    "nan",
-    "none",
-    "empty",
-    "[object object]",
-    "{}",
-    "[]",
-    "\"\"",
-    "''",
-  ]);
+  "ticketId",
+  "ticket_id",
+  "incidenciaId",
+  "incidencia_id",
 
-const ENTITY_ID_KEYS =
-  Object.freeze([
-    "id",
-    "_id",
-    "uuid",
+  "clienteId",
+  "cliente_id",
+  "clientId",
+  "client_id",
+  "customerId",
+  "customer_id",
 
-    "userId",
-    "user_id",
-    "uid",
-    "sub",
-
-    "ticketId",
-    "ticket_id",
-    "incidenciaId",
-    "incidencia_id",
-
-    "clienteId",
-    "cliente_id",
-    "clientId",
-    "client_id",
-    "customerId",
-    "customer_id",
-
-    "facturaId",
-    "factura_id",
-    "invoiceId",
-    "invoice_id",
-    "numeroFacturaLegal",
-    "numero_factura_legal",
-  ]);
+  "facturaId",
+  "factura_id",
+  "invoiceId",
+  "invoice_id",
+  "numeroFacturaLegal",
+  "numero_factura_legal",
+]);
 
 const SENSITIVE_TOKEN_RE =
   /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|tempToken|temp_token|code|t)=)[^&#\s]+/gi;
@@ -187,113 +128,36 @@ const SENSITIVE_TOKEN_RE =
    BASICS
 ========================================================= */
 
-function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value).trim();
-
-  return text || fallback;
-}
-
-function safeLower(value, fallback = "") {
-  return safeText(value, fallback)
-    .toLowerCase();
-}
-
-function safeNumber(value, fallback = 0) {
-  const number =
-    Number(value);
-
-  return Number.isFinite(number)
-    ? number
-    : fallback;
-}
-
-function safeObject(value, fallback = {}) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-    ? value
-    : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
-}
-
-function toArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return [];
-  }
-
-  return [value];
-}
-
-function clone(value) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return value;
-  }
+function clone(value, fallback = null) {
+  if (value === undefined) return fallback;
+  if (value === null) return null;
 
   try {
     return deepClone(value);
   } catch {}
 
   try {
-    if (typeof structuredClone === "function") {
-      return structuredClone(value);
-    }
+    if (typeof structuredClone === "function") return structuredClone(value);
   } catch {}
 
   try {
-    return JSON.parse(
-      JSON.stringify(value)
-    );
+    return JSON.parse(JSON.stringify(value));
   } catch {
-    return value;
+    return fallback === null ? value : fallback;
   }
+}
+
+function toArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value === null || value === undefined) return [];
+  return [value];
 }
 
 function first(...values) {
   for (const value of values) {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
     return value;
   }
 
@@ -302,33 +166,13 @@ function first(...values) {
 
 function hasOwn(obj, key) {
   try {
-    return Boolean(
-      obj &&
-        typeof obj === "object" &&
-        Object.prototype.hasOwnProperty.call(
-          obj,
-          key
-        )
-    );
+    return Object.prototype.hasOwnProperty.call(obj, key);
   } catch {
     return false;
   }
 }
 
-function unique(values = []) {
-  return Array.from(
-    new Set(
-      safeArray(values)
-        .flat(Infinity)
-        .map((item) =>
-          safeText(item, "")
-        )
-        .filter(Boolean)
-    )
-  );
-}
-
-function safeNowIso() {
+function nowIso() {
   try {
     return new Date().toISOString();
   } catch {
@@ -337,126 +181,77 @@ function safeNowIso() {
 }
 
 function redactTokenInText(value = "") {
-  const text =
-    safeText(value, "");
-
-  if (!text) {
-    return "";
-  }
+  const text = safeText(value, "");
+  if (!text) return "";
 
   try {
-    return text.replace(
-      SENSITIVE_TOKEN_RE,
-      (match) => {
-        if (/^bearer\s+/i.test(match)) {
-          return "Bearer ***";
-        }
-
-        if (/^[?&#]/.test(match)) {
-          return match.replace(/=.+$/g, "=***");
-        }
-
-        return "***";
-      }
-    );
+    return text.replace(SENSITIVE_TOKEN_RE, (match) => {
+      if (/^bearer\s+/i.test(match)) return "Bearer ***";
+      if (/^[?&#]/.test(match)) return match.replace(/=.+$/g, "=***");
+      return "***";
+    });
   } catch {
     return text;
   }
 }
 
-/* =========================================================
-   STATE SLICES
-========================================================= */
-
-function getAppSlice(state) {
-  return safeObject(
-    state?.app
-  );
-}
-
-function getSessionSlice(state) {
-  return safeObject(
-    state?.session
-  );
-}
-
-function getUiSlice(state) {
-  return safeObject(
-    state?.ui
-  );
-}
-
-function getEntitiesSlice(state) {
-  return safeObject(
-    state?.entities
-  );
-}
-
-function getFlagsSlice(state) {
-  return safeObject(
-    state?.flags
-  );
-}
-
-function getMetaSlice(state) {
-  return safeObject(
-    state?.meta
-  );
-}
-
-/* =========================================================
-   TOKEN / USER
-========================================================= */
-
-function stripBearerPrefix(token = "") {
-  return safeText(token, "")
-    .replace(/^Bearer\s+/i, "")
-    .trim();
+function stripBearer(token = "") {
+  return safeText(token, "").replace(/^Bearer\s+/i, "").trim();
 }
 
 function hasUsableToken(token = "") {
-  const value =
-    stripBearerPrefix(token);
+  const value = stripBearer(token);
+  if (!value) return false;
 
-  if (!value) {
-    return false;
-  }
-
-  const lower =
-    value.toLowerCase();
-
-  if (BAD_TOKEN_VALUES.has(lower)) {
-    return false;
-  }
-
-  if (/[\s\r\n\t]/.test(value)) {
-    return false;
-  }
+  if (BAD_TOKEN_VALUES.has(value.toLowerCase())) return false;
+  if (/[\s\r\n\t]/.test(value)) return false;
 
   return true;
 }
 
+/* =========================================================
+   USER / ROLE
+========================================================= */
+
+function lowerKey(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_:.]/g, "")
+    .trim();
+}
+
+function normalizeRole(value = "") {
+  const key = lowerKey(value);
+
+  if (ADMIN_ALIASES.has(key)) return "admin";
+  if (USER_ALIASES.has(key)) return "user";
+
+  return "";
+}
+
+function normalizePermission(value = "") {
+  return lowerKey(value);
+}
+
 function isDisabledUser(user = null) {
-  const current =
-    safeObject(user);
+  const current = safeObject(user);
 
-  const status =
-    safeLower(
-      first(
-        current.status,
-        current.estado,
-        current.state,
-        current.accountStatus,
-        current.account_status,
-        current.raw?.status,
-        current.raw?.estado
-      ),
-      ""
-    );
+  const status = lowerKey(
+    first(
+      current.status,
+      current.estado,
+      current.state,
+      current.accountStatus,
+      current.account_status,
+      current.raw?.status,
+      current.raw?.estado
+    ) || ""
+  );
 
-  if (DISABLED_STATUS_KEYS.has(status)) {
-    return true;
-  }
+  if (DISABLED_STATUS.has(status)) return true;
 
   return Boolean(
     current.active === false ||
@@ -479,12 +274,9 @@ function isDisabledUser(user = null) {
 }
 
 function hasUsableUser(user = null) {
-  const current =
-    safeObject(user);
+  const current = safeObject(user);
 
-  if (!current || isDisabledUser(current)) {
-    return false;
-  }
+  if (!current || isDisabledUser(current)) return false;
 
   return Boolean(
     safeText(current.id, "") ||
@@ -504,8 +296,35 @@ function hasUsableUser(user = null) {
   );
 }
 
-function getTokenFromSession(session = {}) {
-  return stripBearerPrefix(
+function getSessionUser(session = {}, rootState = {}) {
+  const user = first(
+    session.user,
+    session.usuario,
+    session.currentUser,
+    session.authUser,
+    session.sessionUser,
+    session.account,
+    session.profile,
+    session.me,
+    session.auth?.user,
+    session.auth?.usuario,
+    session.auth?.me,
+
+    rootState.user,
+    rootState.usuario,
+    rootState.currentUser,
+    rootState.authUser,
+    rootState.sessionUser,
+    rootState.account,
+    rootState.profile,
+    rootState.me
+  );
+
+  return hasUsableUser(user) ? safeObject(user) : null;
+}
+
+function getSessionToken(session = {}, rootState = {}) {
+  return stripBearer(
     first(
       session.token,
       session.accessToken,
@@ -514,35 +333,19 @@ function getTokenFromSession(session = {}) {
       session.bearer,
       session.auth?.token,
       session.auth?.accessToken,
-      session.auth?.access_token
+      session.auth?.access_token,
+
+      rootState.token,
+      rootState.accessToken,
+      rootState.access_token,
+      rootState.jwt,
+      rootState.bearer
     ) || ""
   );
 }
 
-function getUserFromSession(session = {}) {
-  const user =
-    first(
-      session.user,
-      session.usuario,
-      session.currentUser,
-      session.authUser,
-      session.sessionUser,
-      session.account,
-      session.profile,
-      session.me,
-      session.auth?.user,
-      session.auth?.usuario,
-      session.auth?.me
-    );
-
-  return hasUsableUser(user)
-    ? safeObject(user)
-    : null;
-}
-
 function getUserIdentity(user = null) {
-  const current =
-    safeObject(user);
+  const current = safeObject(user);
 
   return (
     safeText(current.userId, "") ||
@@ -562,9 +365,22 @@ function getUserIdentity(user = null) {
   );
 }
 
+function getUserId(user = null) {
+  const current = safeObject(user);
+
+  return (
+    safeText(current.userId, "") ||
+    safeText(current.user_id, "") ||
+    safeText(current.id, "") ||
+    safeText(current._id, "") ||
+    safeText(current.uid, "") ||
+    safeText(current.sub, "") ||
+    null
+  );
+}
+
 function getUserUsername(user = null) {
-  const current =
-    safeObject(user);
+  const current = safeObject(user);
 
   return (
     safeText(current.username, "") ||
@@ -581,14 +397,9 @@ function getUserUsername(user = null) {
 }
 
 function getUserDisplayName(user = null) {
-  const current =
-    safeObject(user);
-
-  const profile =
-    safeObject(current.profile);
-
-  const raw =
-    safeObject(current.raw);
+  const current = safeObject(user);
+  const profile = safeObject(current.profile);
+  const raw = safeObject(current.raw);
 
   return (
     safeText(current.displayName, "") ||
@@ -618,18 +429,34 @@ function getUserDisplayName(user = null) {
   );
 }
 
+function isSafeAvatarUrl(url = "") {
+  const value = safeText(url, "");
+  if (!value) return false;
+
+  const lower = value.toLowerCase();
+
+  if (
+    lower.startsWith("javascript:") ||
+    lower.startsWith("vbscript:") ||
+    lower.startsWith("data:text/html") ||
+    lower.startsWith("data:application/") ||
+    lower.startsWith("data:image/svg")
+  ) {
+    return false;
+  }
+
+  if (lower.startsWith("data:")) {
+    return /^data:image\/(png|jpe?g|gif|webp|avif);base64,/i.test(value);
+  }
+
+  return true;
+}
+
 function getUserAvatar(user = null) {
-  const current =
-    safeObject(user);
-
-  const profile =
-    safeObject(current.profile);
-
-  const raw =
-    safeObject(current.raw);
-
-  const rawProfile =
-    safeObject(raw.profile);
+  const current = safeObject(user);
+  const profile = safeObject(current.profile);
+  const raw = safeObject(current.raw);
+  const rawProfile = safeObject(raw.profile);
 
   const hasAvatar =
     current.hasAvatar ??
@@ -639,11 +466,9 @@ function getUserAvatar(user = null) {
     raw.hasAvatar ??
     raw.has_avatar;
 
-  if (hasAvatar === false) {
-    return "";
-  }
+  if (hasAvatar === false) return "";
 
-  return (
+  const avatar =
     safeText(current.avatarUrl, "") ||
     safeText(current.avatarURL, "") ||
     safeText(current.avatar_url, "") ||
@@ -698,162 +523,29 @@ function getUserAvatar(user = null) {
     safeText(rawProfile.avatarUrl, "") ||
     safeText(rawProfile.avatar_url, "") ||
     safeText(rawProfile.avatar, "") ||
-    ""
-  );
+    "";
+
+  return isSafeAvatarUrl(avatar) ? avatar : "";
 }
 
-/* =========================================================
-   ROLE NORMALIZATION
-========================================================= */
+function collectRoles(user = null, session = {}, rootState = {}) {
+  const current = safeObject(user);
+  const profile = safeObject(current.profile);
+  const raw = safeObject(current.raw);
 
-function normalizeRole(value = "") {
-  return safeText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^a-z0-9_:.]/g, "")
-    .trim();
-}
+  const roles = [
+    rootState.role,
+    rootState.rol,
+    rootState.userRole,
+    rootState.user_role,
+    rootState.roles,
 
-function normalizeRoles(value) {
-  return toArray(value)
-    .flat(Infinity)
-    .map(normalizeRole)
-    .filter(Boolean);
-}
+    session.role,
+    session.rol,
+    session.userRole,
+    session.user_role,
+    session.roles,
 
-function isAdminRole(value = "") {
-  return ADMIN_ROLE_KEYS.has(
-    normalizeRole(value)
-  );
-}
-
-function isSupportRole(value = "") {
-  return SUPPORT_ROLE_KEYS.has(
-    normalizeRole(value)
-  );
-}
-
-function isManagerRole(value = "") {
-  return MANAGER_ROLE_KEYS.has(
-    normalizeRole(value)
-  );
-}
-
-function isClientRole(value = "") {
-  return CLIENT_ROLE_KEYS.has(
-    normalizeRole(value)
-  );
-}
-
-function isUserRole(value = "") {
-  return USER_ROLE_KEYS.has(
-    normalizeRole(value)
-  );
-}
-
-function expandRoleAliases(roles = []) {
-  const normalized =
-    normalizeRoles(roles);
-
-  const result =
-    new Set(normalized);
-
-  if (normalized.some(isAdminRole)) {
-    for (const role of ADMIN_ROLE_KEYS) {
-      result.add(role);
-    }
-
-    result.add("admin");
-  }
-
-  if (normalized.some(isSupportRole)) {
-    for (const role of SUPPORT_ROLE_KEYS) {
-      result.add(role);
-    }
-
-    result.add("support");
-    result.add("agent");
-  }
-
-  if (normalized.some(isManagerRole)) {
-    for (const role of MANAGER_ROLE_KEYS) {
-      result.add(role);
-    }
-
-    result.add("manager");
-  }
-
-  if (normalized.some(isClientRole)) {
-    for (const role of CLIENT_ROLE_KEYS) {
-      result.add(role);
-    }
-
-    result.add("client");
-    result.add("cliente");
-  }
-
-  if (normalized.some(isUserRole)) {
-    for (const role of USER_ROLE_KEYS) {
-      result.add(role);
-    }
-
-    result.add("user");
-    result.add("usuario");
-  }
-
-  return Array.from(result)
-    .filter(Boolean);
-}
-
-function resolveCanonicalRole(roles = []) {
-  const expanded =
-    expandRoleAliases(roles);
-
-  if (expanded.some(isAdminRole)) {
-    return "admin";
-  }
-
-  if (expanded.some(isSupportRole)) {
-    return "support";
-  }
-
-  if (expanded.some(isManagerRole)) {
-    return "manager";
-  }
-
-  if (expanded.some(isClientRole)) {
-    return "client";
-  }
-
-  if (expanded.some(isUserRole)) {
-    return "user";
-  }
-
-  return expanded[0] || null;
-}
-
-function collectRolesFromUser(user = null) {
-  const current =
-    safeObject(user);
-
-  const raw =
-    safeObject(current.raw);
-
-  const profile =
-    safeObject(current.profile);
-
-  const meta =
-    safeObject(current.meta);
-
-  const claims =
-    safeObject(current.claims);
-
-  const account =
-    safeObject(current.account);
-
-  const roleCandidates = [
     current.role,
     current.rol,
     current.userRole,
@@ -862,6 +554,7 @@ function collectRolesFromUser(user = null) {
     current.userType,
     current.user_type,
     current.perfil,
+    current.roles,
 
     profile.role,
     profile.rol,
@@ -869,21 +562,7 @@ function collectRolesFromUser(user = null) {
     profile.user_role,
     profile.type,
     profile.perfil,
-
-    account.role,
-    account.rol,
-    account.userRole,
-    account.type,
-
-    meta.role,
-    meta.rol,
-    meta.userRole,
-
-    claims.role,
-    claims.rol,
-    claims.userRole,
-    claims["custom:role"],
-    claims["https://onion/role"],
+    profile.roles,
 
     raw.role,
     raw.rol,
@@ -893,396 +572,156 @@ function collectRolesFromUser(user = null) {
     raw.userType,
     raw.user_type,
     raw.perfil,
+    raw.roles,
 
     raw?.profile?.role,
     raw?.profile?.rol,
     raw?.profile?.userRole,
-    raw?.profile?.type,
-
-    raw?.meta?.role,
-    raw?.meta?.rol,
-
-    raw?.claims?.role,
-    raw?.claims?.rol,
-    raw?.claims?.["custom:role"],
-    raw?.claims?.["https://onion/role"],
-  ];
-
-  const roleArrays = [
-    current.roles,
-    current.roleList,
-    current.role_list,
-    current.permissions,
-    current.scopes,
-    current.groups,
-    current.authorities,
-
-    profile.roles,
-    profile.permissions,
-    profile.scopes,
-    profile.groups,
-    profile.authorities,
-
-    account.roles,
-    account.permissions,
-    account.scopes,
-    account.groups,
-
-    meta.roles,
-    meta.permissions,
-    meta.scopes,
-    meta.groups,
-
-    claims.roles,
-    claims.permissions,
-    claims.scopes,
-    claims.groups,
-
-    raw.roles,
-    raw.roleList,
-    raw.role_list,
-    raw.permissions,
-    raw.scopes,
-    raw.groups,
-    raw.authorities,
-
     raw?.profile?.roles,
-    raw?.profile?.permissions,
-    raw?.profile?.scopes,
+  ]
+    .flat(Infinity)
+    .map(normalizeRole)
+    .filter(Boolean);
 
-    raw?.meta?.roles,
-    raw?.meta?.permissions,
-    raw?.meta?.scopes,
+  const adminFlag = [
+    current.isAdmin,
+    current.admin,
+    current.isSuperAdmin,
+    current.superAdmin,
+    current.canManageUsers,
+    current.canAccessUsers,
+    profile.isAdmin,
+    profile.admin,
+    raw.isAdmin,
+    raw.admin,
+    rootState.isAdmin,
+    rootState.admin,
+    session.isAdmin,
+    session.admin,
+  ].some((value) => value === true);
 
-    raw?.claims?.roles,
-    raw?.claims?.permissions,
-    raw?.claims?.scopes,
-  ];
+  if (adminFlag) roles.push("admin");
 
-  const roles = [
-    ...roleCandidates,
-    ...roleArrays.flatMap((value) =>
-      toArray(value)
-    ),
-  ];
-
-  const adminFlag =
-    [
-      current.isAdmin,
-      current.admin,
-      current.isSuperAdmin,
-      current.superAdmin,
-      current.is_super_admin,
-      current.canManageUsers,
-      current.can_manage_users,
-      current.canAccessUsers,
-      current.can_access_users,
-
-      profile.isAdmin,
-      profile.admin,
-      profile.isSuperAdmin,
-      profile.superAdmin,
-      profile.canManageUsers,
-      profile.canAccessUsers,
-
-      account.isAdmin,
-      account.admin,
-      account.isSuperAdmin,
-      account.superAdmin,
-
-      meta.isAdmin,
-      meta.admin,
-      meta.isSuperAdmin,
-      meta.superAdmin,
-      meta.canManageUsers,
-      meta.canAccessUsers,
-
-      claims.isAdmin,
-      claims.admin,
-      claims.isSuperAdmin,
-      claims.superAdmin,
-      claims.canManageUsers,
-      claims.canAccessUsers,
-
-      raw.isAdmin,
-      raw.admin,
-      raw.isSuperAdmin,
-      raw.superAdmin,
-      raw.canManageUsers,
-      raw.canAccessUsers,
-
-      raw?.profile?.isAdmin,
-      raw?.profile?.admin,
-      raw?.profile?.isSuperAdmin,
-      raw?.profile?.superAdmin,
-
-      raw?.meta?.isAdmin,
-      raw?.meta?.admin,
-
-      raw?.claims?.isAdmin,
-      raw?.claims?.admin,
-    ].some((value) => value === true);
-
-  const supportFlag =
-    [
-      current.isSupport,
-      current.support,
-      current.isAgent,
-      current.agent,
-      current.isTechnician,
-      current.technician,
-      current.tecnico,
-      current.técnico,
-
-      profile.isSupport,
-      profile.support,
-      profile.isAgent,
-      profile.agent,
-
-      meta.isSupport,
-      meta.support,
-      meta.isAgent,
-      meta.agent,
-
-      raw.isSupport,
-      raw.support,
-      raw.isAgent,
-      raw.agent,
-      raw.isTechnician,
-      raw.technician,
-    ].some((value) => value === true);
-
-  if (adminFlag) {
-    roles.push("admin");
-  }
-
-  if (supportFlag) {
-    roles.push("support");
-  }
-
-  return expandRoleAliases(roles);
+  const finalRoles = unique(roles);
+  return finalRoles.length ? finalRoles : ["user"];
 }
 
-function collectSessionRoles(session = {}) {
-  const user =
-    getUserFromSession(session);
-
-  return expandRoleAliases([
-    session.role,
-    session.rol,
-    session.userRole,
-    session.user_role,
-    session.roles,
-    session.permissions,
-    session.scopes,
-    ...collectRolesFromUser(user),
-  ]);
-}
-
-function collectPermissionsFromUser(user = null) {
-  const current =
-    safeObject(user);
-
-  const raw =
-    safeObject(current.raw);
-
-  const profile =
-    safeObject(current.profile);
-
-  const meta =
-    safeObject(current.meta);
-
-  const claims =
-    safeObject(current.claims);
-
-  const account =
-    safeObject(current.account);
+function collectPermissions(user = null, session = {}, rootState = {}) {
+  const current = safeObject(user);
+  const profile = safeObject(current.profile);
+  const raw = safeObject(current.raw);
 
   return unique([
-    ...normalizeRoles(current.permissions),
-    ...normalizeRoles(current.permisos),
-    ...normalizeRoles(current.scopes),
-    ...normalizeRoles(current.authorities),
-    ...normalizeRoles(current.claims),
+    rootState.permissions,
+    rootState.permisos,
+    rootState.scopes,
 
-    ...normalizeRoles(profile.permissions),
-    ...normalizeRoles(profile.permisos),
-    ...normalizeRoles(profile.scopes),
-    ...normalizeRoles(profile.authorities),
+    session.permissions,
+    session.permisos,
+    session.scopes,
 
-    ...normalizeRoles(account.permissions),
-    ...normalizeRoles(account.permisos),
-    ...normalizeRoles(account.scopes),
+    current.permissions,
+    current.permisos,
+    current.scopes,
+    current.authorities,
 
-    ...normalizeRoles(meta.permissions),
-    ...normalizeRoles(meta.permisos),
-    ...normalizeRoles(meta.scopes),
+    profile.permissions,
+    profile.permisos,
+    profile.scopes,
+    profile.authorities,
 
-    ...normalizeRoles(claims.permissions),
-    ...normalizeRoles(claims.permisos),
-    ...normalizeRoles(claims.scopes),
+    raw.permissions,
+    raw.permisos,
+    raw.scopes,
+    raw.authorities,
 
-    ...normalizeRoles(raw.permissions),
-    ...normalizeRoles(raw.permisos),
-    ...normalizeRoles(raw.scopes),
-    ...normalizeRoles(raw.authorities),
+    raw?.profile?.permissions,
+    raw?.profile?.permisos,
+    raw?.profile?.scopes,
+  ]
+    .flat(Infinity)
+    .map(normalizePermission)
+    .filter(Boolean));
+}
 
-    ...normalizeRoles(raw?.profile?.permissions),
-    ...normalizeRoles(raw?.profile?.permisos),
-    ...normalizeRoles(raw?.profile?.scopes),
-
-    ...normalizeRoles(raw?.meta?.permissions),
-    ...normalizeRoles(raw?.meta?.permisos),
-    ...normalizeRoles(raw?.meta?.scopes),
-
-    ...normalizeRoles(raw?.claims?.permissions),
-    ...normalizeRoles(raw?.claims?.permisos),
-    ...normalizeRoles(raw?.claims?.scopes),
-  ]);
+function canonicalRole(roles = []) {
+  return roles.includes("admin") ? "admin" : "user";
 }
 
 /* =========================================================
-   UI NORMALIZATION
+   UI
 ========================================================= */
 
 function normalizeTheme(value = "") {
-  const theme =
-    safeLower(value, "");
+  const theme = safeText(value, "").toLowerCase();
 
-  if (theme === "light") {
-    return "light";
-  }
-
-  if (theme === "dark") {
-    return "dark";
-  }
-
-  if (theme === "system") {
-    return "system";
-  }
+  if (theme === "light") return "light";
+  if (theme === "dark") return "dark";
+  if (theme === "system") return "system";
 
   return "";
 }
 
-function getSystemThemeFallback() {
+function systemTheme() {
   try {
-    if (
-      typeof window !== "undefined" &&
-      typeof window.matchMedia === "function"
-    ) {
-      return window.matchMedia(
-        "(prefers-color-scheme: dark)"
-      ).matches
-        ? "dark"
-        : "light";
+    if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
     }
   } catch {}
 
-  return "light";
+  return "dark";
 }
 
 function normalizeLang(value = "") {
-  const lang =
-    safeLower(value, "")
-      .replace(/_/g, "-");
+  const lang = safeText(value, "").toLowerCase().replace(/_/g, "-");
+  if (!lang) return "";
 
-  if (!lang) {
-    return "";
-  }
+  const base = lang.split("-")[0];
 
-  const firstPart =
-    lang.split("-")[0];
+  if (["spa", "spanish", "castellano", "español"].includes(base)) return "es";
+  if (["eng", "english"].includes(base)) return "en";
+  if (["cat", "catalan", "català", "catalán"].includes(base)) return "ca";
 
-  if (
-    firstPart === "spa" ||
-    firstPart === "spanish" ||
-    firstPart === "castellano"
-  ) {
-    return "es";
-  }
-
-  if (
-    firstPart === "eng" ||
-    firstPart === "english"
-  ) {
-    return "en";
-  }
-
-  if (
-    firstPart === "cat" ||
-    firstPart === "catalan" ||
-    firstPart === "català" ||
-    firstPart === "catalán"
-  ) {
-    return "ca";
-  }
-
-  return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(lang)
-    ? lang
-    : "";
+  return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(lang) ? lang : "";
 }
 
 /* =========================================================
-   COLLECTION HELPERS
+   COLLECTIONS
 ========================================================= */
 
 function safeEnsureCollectionKey(state, key) {
-  const rawKey =
-    safeText(key, "");
-
-  if (!rawKey) {
-    return "";
-  }
+  const raw = safeText(key, "");
+  if (!raw) return "";
 
   try {
-    return ensureCollectionKey(
-      state,
-      rawKey
-    );
+    return ensureCollectionKey(state, raw);
   } catch {
-    return rawKey;
+    return raw;
   }
 }
 
 function getEntityId(entity = null) {
-  const item =
-    safeObject(entity);
+  const item = safeObject(entity);
 
   for (const key of ENTITY_ID_KEYS) {
-    const value =
-      safeText(item?.[key], "");
-
-    if (value) {
-      return value;
-    }
+    const value = safeText(item?.[key], "");
+    if (value) return value;
   }
 
   return "";
 }
 
-function compareEntityId(entity = null, id = "") {
-  const target =
-    safeText(id, "");
+function sameEntityId(entity = null, id = "") {
+  const target = safeText(id, "");
+  if (!target) return false;
 
-  if (!target) {
-    return false;
-  }
+  const item = safeObject(entity);
 
-  const item =
-    safeObject(entity);
-
-  return ENTITY_ID_KEYS.some((key) =>
-    safeText(item?.[key], "") === target
-  );
+  return ENTITY_ID_KEYS.some((key) => safeText(item?.[key], "") === target);
 }
 
-function normalizeCollectionValue(value) {
-  if (Array.isArray(value)) {
-    return value.map((item) =>
-      clone(item)
-    );
-  }
-
+function cloneCollection(value) {
+  if (Array.isArray(value)) return value.map((item) => clone(item));
   return clone(value);
 }
 
@@ -1294,248 +733,106 @@ export function createSelectors({
   AppCore,
   state,
 } = {}) {
-  const rootState =
-    state || {};
+  const rootState = state || {};
+
+  function root() {
+    return safeObject(rootState);
+  }
 
   function app() {
-    return getAppSlice(rootState);
+    return safeObject(root().app);
   }
 
   function session() {
-    return getSessionSlice(rootState);
+    const slice = safeObject(root().session);
+
+    return {
+      ...slice,
+
+      token: slice.token ?? root().token ?? null,
+      accessToken: slice.accessToken ?? root().accessToken ?? root().access_token ?? null,
+      access_token: slice.access_token ?? slice.accessToken ?? root().access_token ?? root().accessToken ?? null,
+
+      user: slice.user ?? root().user ?? root().currentUser ?? root().authUser ?? root().sessionUser ?? null,
+      usuario: slice.usuario ?? root().usuario ?? null,
+
+      role: slice.role ?? root().role ?? root().rol ?? root().userRole ?? null,
+      roles: slice.roles ?? root().roles ?? [],
+      permissions: slice.permissions ?? root().permissions ?? root().permisos ?? [],
+    };
   }
 
   function ui() {
-    return getUiSlice(rootState);
+    return {
+      ...safeObject(root().ui),
+
+      theme: root().ui?.theme ?? root().theme ?? null,
+      themeMode: root().ui?.themeMode ?? root().themeMode ?? root().appearance ?? null,
+      lang: root().ui?.lang ?? root().lang ?? root().language ?? null,
+      sidebarOpen: root().ui?.sidebarOpen ?? root().sidebarOpen ?? false,
+    };
   }
 
   function entities() {
-    return getEntitiesSlice(rootState);
+    return safeObject(root().entities || root().collections);
   }
 
   function flags() {
-    return getFlagsSlice(rootState);
+    return safeObject(root().flags);
   }
 
   function meta() {
-    return getMetaSlice(rootState);
+    return safeObject(root().meta);
   }
 
-  function cloneUser() {
-    const user =
-      getUserFromSession(session());
-
-    return hasUsableUser(user)
-      ? clone(user)
-      : null;
+  function tokenValue() {
+    return getSessionToken(session(), root());
   }
 
-  function currentTokenValue() {
-    return getTokenFromSession(
-      session()
-    );
+  function userValue() {
+    return getSessionUser(session(), root());
   }
 
-  function authenticatedStrict() {
-    const currentSession =
-      session();
-
-    const token =
-      currentTokenValue();
-
-    const user =
-      getUserFromSession(
-        currentSession
-      );
-
+  function authenticated() {
     return Boolean(
-      currentSession.authenticated === true &&
-        hasUsableToken(token) &&
-        hasUsableUser(user)
+      (session().authenticated === true || root().authenticated === true) &&
+        hasUsableToken(tokenValue()) &&
+        hasUsableUser(userValue())
     );
   }
 
-  function currentRolesValue() {
-    if (!authenticatedStrict()) {
-      return [];
-    }
-
-    return collectSessionRoles(
-      session()
-    );
+  function rolesValue() {
+    if (!authenticated()) return [];
+    return collectRoles(userValue(), session(), root());
   }
 
-  function currentRoleValue() {
-    if (!authenticatedStrict()) {
-      return null;
-    }
-
-    return resolveCanonicalRole(
-      currentRolesValue()
-    );
+  function roleValue() {
+    if (!authenticated()) return null;
+    return canonicalRole(rolesValue());
   }
 
-  function currentPermissionsValue() {
-    if (!authenticatedStrict()) {
-      return [];
-    }
-
-    return collectPermissionsFromUser(
-      getUserFromSession(
-        session()
-      )
-    );
+  function permissionsValue() {
+    if (!authenticated()) return [];
+    return collectPermissions(userValue(), session(), root());
   }
 
-  function hasRoleSelector(...roles) {
-    if (!authenticatedStrict()) {
-      return false;
-    }
+  function collectionRaw(key) {
+    const finalKey = safeEnsureCollectionKey(root(), key);
+    if (!finalKey) return undefined;
 
-    const allowed =
-      expandRoleAliases(
-        roles.flat()
-      );
+    if (hasOwn(entities(), finalKey)) return entities()[finalKey];
+    if (hasOwn(root(), finalKey)) return root()[finalKey];
+    if (hasOwn(safeObject(root().collections), finalKey)) return root().collections[finalKey];
 
-    if (!allowed.length) {
-      return true;
-    }
-
-    const current =
-      new Set(
-        currentRolesValue()
-      );
-
-    return allowed.some((role) =>
-      current.has(role)
-    );
+    return undefined;
   }
 
-  function hasAllRolesSelector(roles = []) {
-    if (!authenticatedStrict()) {
-      return false;
-    }
-
-    const required =
-      expandRoleAliases(
-        toArray(roles).flat()
-      );
-
-    if (!required.length) {
-      return true;
-    }
-
-    const current =
-      new Set(
-        currentRolesValue()
-      );
-
-    return required.every((role) =>
-      current.has(role)
-    );
+  function collectionListRaw(key) {
+    const value = collectionRaw(key);
+    return Array.isArray(value) ? value : [];
   }
 
-  function hasPermissionSelector(...permissions) {
-    if (!authenticatedStrict()) {
-      return false;
-    }
-
-    const required =
-      normalizeRoles(
-        permissions.flat()
-      );
-
-    if (!required.length) {
-      return true;
-    }
-
-    const current =
-      new Set(
-        currentPermissionsValue()
-      );
-
-    return required.some((permission) =>
-      current.has(permission)
-    );
-  }
-
-  function getCollectionRaw(key) {
-    const finalKey =
-      safeEnsureCollectionKey(
-        rootState,
-        key
-      );
-
-    if (!finalKey) {
-      return undefined;
-    }
-
-    return entities()[finalKey];
-  }
-
-  function getCollection(key) {
-    return normalizeCollectionValue(
-      getCollectionRaw(key)
-    );
-  }
-
-  function getCollectionList(key) {
-    const value =
-      getCollectionRaw(key);
-
-    return Array.isArray(value)
-      ? value
-      : [];
-  }
-
-  function currentThemeValue() {
-    const fromState =
-      normalizeTheme(
-        ui().theme
-      );
-
-    const fromCore =
-      normalizeTheme(
-        AppCore?.state?.theme
-      );
-
-    const fromConfig =
-      normalizeTheme(
-        AppCore?.config?.defaultTheme
-      );
-
-    const resolved =
-      fromState ||
-      fromCore ||
-      fromConfig ||
-      getSystemThemeFallback();
-
-    return resolved === "system"
-      ? getSystemThemeFallback()
-      : resolved;
-  }
-
-  function currentThemePreferenceValue() {
-    return (
-      normalizeTheme(ui().themePreference) ||
-      normalizeTheme(ui().themeMode) ||
-      normalizeTheme(AppCore?.state?.themeMode) ||
-      normalizeTheme(AppCore?.state?.appearance) ||
-      normalizeTheme(AppCore?.config?.defaultTheme) ||
-      "system"
-    );
-  }
-
-  function currentLangValue() {
-    return (
-      normalizeLang(ui().lang) ||
-      normalizeLang(AppCore?.state?.lang) ||
-      normalizeLang(AppCore?.config?.defaultLang) ||
-      "es"
-    );
-  }
-
-  function getAppName() {
+  function appName() {
     return (
       safeText(AppCore?.config?.appName, "") ||
       safeText(AppCore?.config?.name, "") ||
@@ -1549,109 +846,66 @@ export function createSelectors({
     ===================================== */
 
     isReady() {
-      const current =
-        app();
-
       return Boolean(
-        current.ready &&
-          current.booted
+        app().ready ||
+          app().booted ||
+          root().ready ||
+          root().booted
       );
     },
 
     isInitialized() {
-      return Boolean(
-        app().initialized
-      );
+      return Boolean(app().initialized || root().initialized);
     },
 
     isBooting() {
-      return Boolean(
-        app().booting
-      );
+      return Boolean(app().booting || root().booting);
     },
 
     isLoading() {
-      return Boolean(
-        app().loading
-      );
+      return Boolean(app().loading || root().loading);
     },
 
     isFatal() {
-      return Boolean(
-        app().fatal ||
-          app().appFatal
-      );
+      return Boolean(app().fatal || app().appFatal || root().fatal || root().appFatal);
     },
 
     lastError() {
-      const error =
-        app().lastError ||
-        app().error ||
-        null;
-
-      return error
-        ? clone(error)
-        : null;
+      const error = app().lastError || app().error || root().lastError || root().error || null;
+      return error ? clone(error) : null;
     },
 
     currentRoute() {
-      return (
-        safeText(
-          app().route,
-          "/"
-        ) || "/"
-      );
+      return safeText(app().route || root().route, "/") || "/";
     },
 
     currentCanonicalPath() {
-      return (
-        safeText(
-          app().canonicalPath,
-          ""
-        ) ||
-        selectors.currentRoute()
-      );
+      return safeText(app().canonicalPath || root().canonicalPath || root().route, selectors.currentRoute());
     },
 
     currentPublicPath() {
-      return (
-        safeText(
-          app().publicPath,
-          ""
-        ) ||
-        selectors.currentRoute()
-      );
+      return safeText(app().publicPath || root().publicPath || root().route, selectors.currentRoute());
     },
 
     routeSnapshot() {
       return {
-        route:
-          selectors.currentRoute(),
-
-        canonicalPath:
-          selectors.currentCanonicalPath(),
-
-        publicPath:
-          redactTokenInText(
-            selectors.currentPublicPath()
-          ),
+        route: selectors.currentRoute(),
+        canonicalPath: selectors.currentCanonicalPath(),
+        publicPath: redactTokenInText(selectors.currentPublicPath()),
       };
     },
 
     appSnapshot() {
       return {
-        ...clone(app()),
-
-        route:
-          selectors.currentRoute(),
-
-        canonicalPath:
-          selectors.currentCanonicalPath(),
-
-        publicPath:
-          redactTokenInText(
-            selectors.currentPublicPath()
-          ),
+        ...clone(app(), {}),
+        initialized: selectors.isInitialized(),
+        ready: selectors.isReady(),
+        booting: selectors.isBooting(),
+        loading: selectors.isLoading(),
+        fatal: selectors.isFatal(),
+        route: selectors.currentRoute(),
+        canonicalPath: selectors.currentCanonicalPath(),
+        publicPath: redactTokenInText(selectors.currentPublicPath()),
       };
     },
 
@@ -1660,295 +914,198 @@ export function createSelectors({
     ===================================== */
 
     isAuthenticated() {
-      return authenticatedStrict();
+      return authenticated();
     },
 
     hasToken() {
-      return hasUsableToken(
-        currentTokenValue()
-      );
+      return hasUsableToken(tokenValue());
     },
 
     hasUser() {
-      return hasUsableUser(
-        getUserFromSession(
-          session()
-        )
-      );
+      return hasUsableUser(userValue());
     },
 
     currentUser() {
-      return cloneUser();
+      return authenticated() ? clone(userValue()) : null;
     },
 
     currentUserRaw() {
-      return getUserFromSession(
-        session()
-      );
+      return authenticated() ? userValue() : null;
     },
 
     currentUserIdentity() {
-      return getUserIdentity(
-        getUserFromSession(
-          session()
-        )
-      ) || null;
+      return authenticated() ? getUserIdentity(userValue()) || null : null;
     },
 
     currentUserId() {
-      const user =
-        getUserFromSession(
-          session()
-        );
-
-      return (
-        safeText(user?.userId, "") ||
-        safeText(user?.user_id, "") ||
-        safeText(user?.id, "") ||
-        safeText(user?._id, "") ||
-        safeText(user?.uid, "") ||
-        null
-      );
+      return authenticated() ? getUserId(userValue()) : null;
     },
 
     currentUsername() {
-      const user =
-        getUserFromSession(
-          session()
-        );
-
-      return getUserUsername(user) || null;
+      return authenticated() ? getUserUsername(userValue()) || null : null;
     },
 
     currentDisplayName() {
-      const user =
-        getUserFromSession(
-          session()
-        );
-
-      return hasUsableUser(user)
-        ? getUserDisplayName(user)
-        : null;
+      return authenticated() ? getUserDisplayName(userValue()) : null;
     },
 
     currentAvatar() {
-      const user =
-        getUserFromSession(
-          session()
-        );
-
-      const avatar =
-        getUserAvatar(user);
-
-      return avatar || null;
+      return authenticated() ? getUserAvatar(userValue()) || null : null;
     },
 
     currentRole() {
-      return currentRoleValue();
+      return roleValue();
     },
 
     currentRoles() {
-      return [
-        ...currentRolesValue(),
-      ];
+      return [...rolesValue()];
     },
 
     currentPermissions() {
-      return [
-        ...currentPermissionsValue(),
-      ];
+      return [...permissionsValue()];
     },
 
     isAdmin() {
-      return currentRolesValue()
-        .some(isAdminRole);
-    },
-
-    isSupport() {
-      return currentRolesValue()
-        .some(isSupportRole);
-    },
-
-    isManager() {
-      return currentRolesValue()
-        .some(isManagerRole);
-    },
-
-    isClient() {
-      return currentRolesValue()
-        .some(isClientRole);
+      return roleValue() === "admin";
     },
 
     isUser() {
-      return currentRolesValue()
-        .some(isUserRole);
+      return roleValue() === "user";
+    },
+
+    /*
+      Compat legacy. El sistema real sólo usa admin/user.
+    */
+    isSupport() {
+      return false;
+    },
+
+    isManager() {
+      return false;
+    },
+
+    isClient() {
+      return false;
     },
 
     hasRole(...roles) {
-      return hasRoleSelector(
-        ...roles
-      );
+      if (!authenticated()) return false;
+
+      const requested = roles
+        .flat(Infinity)
+        .map(normalizeRole)
+        .filter(Boolean);
+
+      if (!requested.length) return true;
+
+      const current = new Set(rolesValue());
+
+      return requested.some((role) => current.has(role));
     },
 
     hasAnyRole(roles = []) {
-      return hasRoleSelector(
-        ...toArray(roles).flat()
-      );
+      return selectors.hasRole(...toArray(roles).flat(Infinity));
     },
 
     hasAllRoles(roles = []) {
-      return hasAllRolesSelector(
-        roles
-      );
+      if (!authenticated()) return false;
+
+      const requested = toArray(roles)
+        .flat(Infinity)
+        .map(normalizeRole)
+        .filter(Boolean);
+
+      if (!requested.length) return true;
+
+      const current = new Set(rolesValue());
+
+      return requested.every((role) => current.has(role));
     },
 
     hasPermission(...permissions) {
-      return hasPermissionSelector(
-        ...permissions
-      );
+      if (!authenticated()) return false;
+
+      const requested = permissions
+        .flat(Infinity)
+        .map(normalizePermission)
+        .filter(Boolean);
+
+      if (!requested.length) return true;
+
+      const current = new Set(permissionsValue());
+
+      return requested.some((permission) => current.has(permission));
     },
 
     hasAnyPermission(permissions = []) {
-      return hasPermissionSelector(
-        ...toArray(permissions).flat()
-      );
+      return selectors.hasPermission(...toArray(permissions).flat(Infinity));
     },
 
     hasAllPermissions(permissions = []) {
-      if (!authenticatedStrict()) {
-        return false;
-      }
+      if (!authenticated()) return false;
 
-      const required =
-        normalizeRoles(
-          toArray(permissions).flat()
-        );
+      const requested = toArray(permissions)
+        .flat(Infinity)
+        .map(normalizePermission)
+        .filter(Boolean);
 
-      if (!required.length) {
-        return true;
-      }
+      if (!requested.length) return true;
 
-      const current =
-        new Set(
-          currentPermissionsValue()
-        );
+      const current = new Set(permissionsValue());
 
-      return required.every((permission) =>
-        current.has(permission)
-      );
+      return requested.every((permission) => current.has(permission));
     },
 
     token() {
-      const token =
-        currentTokenValue();
-
-      return hasUsableToken(token)
-        ? token
-        : null;
+      const token = tokenValue();
+      return hasUsableToken(token) ? token : null;
     },
 
     authHeader() {
-      const token =
-        selectors.token();
+      const token = selectors.token();
 
-      const headerName =
-        safeText(
-          AppCore?.config?.auth?.tokenHeader,
-          "Authorization"
-        );
+      if (!token) return {};
 
-      const bearerPrefix =
-        safeText(
-          AppCore?.config?.auth?.bearerPrefix,
-          "Bearer"
-        );
+      const headerName = safeText(AppCore?.config?.auth?.tokenHeader, "Authorization");
+      const bearerPrefix = safeText(AppCore?.config?.auth?.bearerPrefix, "Bearer");
 
-      return token
-        ? {
-            [headerName]: `${bearerPrefix} ${token}`,
-          }
-        : {};
+      return {
+        [headerName]: `${bearerPrefix} ${token}`,
+      };
     },
 
     sessionSnapshot(options = {}) {
-      const opts =
-        safeObject(options);
-
-      const rawToken =
-        selectors.token();
-
-      const exposeToken =
-        opts.includeToken === true;
+      const opts = safeObject(options);
+      const token = selectors.token();
 
       return {
-        version:
-          STORE_SELECTORS_VERSION,
+        version: STORE_SELECTORS_VERSION,
 
-        authenticated:
-          authenticatedStrict(),
+        authenticated: authenticated(),
+        hasToken: Boolean(token),
 
-        hasToken:
-          Boolean(rawToken),
+        token: opts.includeToken === true ? token : null,
+        accessToken: opts.includeToken === true ? token : null,
 
-        token:
-          exposeToken
-            ? rawToken
-            : null,
+        user: selectors.currentUser(),
+        userIdentity: selectors.currentUserIdentity(),
+        userId: selectors.currentUserId(),
+        username: selectors.currentUsername(),
+        displayName: selectors.currentDisplayName(),
+        avatar: selectors.currentAvatar(),
 
-        accessToken:
-          exposeToken
-            ? rawToken
-            : null,
+        role: roleValue(),
+        roles: rolesValue(),
+        permissions: permissionsValue(),
 
-        user:
-          cloneUser(),
+        isAdmin: selectors.isAdmin(),
+        isUser: selectors.isUser(),
+        isSupport: false,
+        isManager: false,
+        isClient: false,
 
-        role:
-          currentRoleValue(),
-
-        roles:
-          currentRolesValue(),
-
-        permissions:
-          currentPermissionsValue(),
-
-        isAdmin:
-          selectors.isAdmin(),
-
-        isSupport:
-          selectors.isSupport(),
-
-        isManager:
-          selectors.isManager(),
-
-        isClient:
-          selectors.isClient(),
-
-        isUser:
-          selectors.isUser(),
-
-        userIdentity:
-          selectors.currentUserIdentity(),
-
-        userId:
-          selectors.currentUserId(),
-
-        username:
-          selectors.currentUsername(),
-
-        displayName:
-          selectors.currentDisplayName(),
-
-        avatar:
-          selectors.currentAvatar(),
-
-        raw:
-          opts.includeRaw === true
-            ? clone(session())
-            : null,
-
-        at:
-          safeNowIso(),
+        raw: opts.includeRaw === true ? clone(session(), {}) : null,
+        at: nowIso(),
       };
     },
 
@@ -1957,45 +1114,45 @@ export function createSelectors({
     ===================================== */
 
     currentTheme() {
-      return currentThemeValue();
+      const resolved =
+        normalizeTheme(ui().theme) ||
+        normalizeTheme(AppCore?.state?.theme) ||
+        normalizeTheme(AppCore?.config?.defaultTheme) ||
+        "dark";
+
+      return resolved === "system" ? systemTheme() : resolved;
     },
 
     themePreference() {
-      return currentThemePreferenceValue();
+      return (
+        normalizeTheme(ui().themePreference) ||
+        normalizeTheme(ui().themeMode) ||
+        normalizeTheme(AppCore?.state?.themeMode) ||
+        normalizeTheme(AppCore?.state?.appearance) ||
+        normalizeTheme(AppCore?.config?.defaultTheme) ||
+        "system"
+      );
     },
 
     currentLang() {
-      return currentLangValue();
+      return (
+        normalizeLang(ui().lang) ||
+        normalizeLang(AppCore?.state?.lang) ||
+        normalizeLang(AppCore?.config?.defaultLang) ||
+        "es"
+      );
     },
 
     isSidebarOpen() {
-      return Boolean(
-        ui().sidebarOpen
-      );
+      return Boolean(ui().sidebarOpen);
     },
 
     pageTitle() {
-      return (
-        safeText(
-          ui().pageTitle,
-          ""
-        ) ||
-        getAppName()
-      );
+      return safeText(ui().pageTitle || root().pageTitle, appName());
     },
 
     topbarTitle() {
-      return (
-        safeText(
-          ui().topbarTitle,
-          ""
-        ) ||
-        safeText(
-          ui().pageTitle,
-          ""
-        ) ||
-        getAppName()
-      );
+      return safeText(ui().topbarTitle || ui().pageTitle || root().topbarTitle || root().pageTitle, appName());
     },
 
     density() {
@@ -2008,35 +1165,17 @@ export function createSelectors({
     },
 
     uiSnapshot(options = {}) {
-      const opts =
-        safeObject(options);
+      const opts = safeObject(options);
 
       return {
-        theme:
-          selectors.currentTheme(),
-
-        themePreference:
-          selectors.themePreference(),
-
-        lang:
-          selectors.currentLang(),
-
-        sidebarOpen:
-          selectors.isSidebarOpen(),
-
-        density:
-          selectors.density(),
-
-        pageTitle:
-          selectors.pageTitle(),
-
-        topbarTitle:
-          selectors.topbarTitle(),
-
-        raw:
-          opts.includeRaw === true
-            ? clone(ui())
-            : null,
+        theme: selectors.currentTheme(),
+        themePreference: selectors.themePreference(),
+        lang: selectors.currentLang(),
+        sidebarOpen: selectors.isSidebarOpen(),
+        density: selectors.density(),
+        pageTitle: selectors.pageTitle(),
+        topbarTitle: selectors.topbarTitle(),
+        raw: opts.includeRaw === true ? clone(ui(), {}) : null,
       };
     },
 
@@ -2045,80 +1184,48 @@ export function createSelectors({
     ===================================== */
 
     flag(key, fallback = false) {
-      const name =
-        safeText(key, "");
-
-      if (!name) {
-        return fallback;
-      }
-
-      if (!hasOwn(flags(), name)) {
-        return fallback;
-      }
-
-      return Boolean(
-        flags()[name]
-      );
+      const name = safeText(key, "");
+      if (!name) return fallback;
+      if (!hasOwn(flags(), name)) return fallback;
+      return Boolean(flags()[name]);
     },
 
     flags() {
-      return clone(flags());
+      return clone(flags(), {});
     },
 
     isHydrating() {
-      return selectors.flag(
-        "hydrating",
-        false
-      );
+      return selectors.flag("hydrating", false);
     },
 
     isFetching(key = "") {
-      const clean =
-        safeText(key, "");
+      const clean = safeText(key, "");
+      if (!clean) return false;
 
-      if (!clean) {
-        return false;
-      }
-
-      const direct =
-        `fetching${clean[0]?.toUpperCase() || ""}${clean.slice(1)}`;
-
-      return selectors.flag(
-        direct,
-        false
-      );
+      const flagName = `fetching${clean[0]?.toUpperCase() || ""}${clean.slice(1)}`;
+      return selectors.flag(flagName, false);
     },
 
     /* =====================================
-       ENTITIES
+       ENTITIES / COLLECTIONS
     ===================================== */
 
     collection(key) {
-      return getCollection(key);
+      return cloneCollection(collectionRaw(key));
     },
 
     collectionRaw(key) {
-      return getCollectionRaw(key);
+      return collectionRaw(key);
     },
 
     collectionList(key) {
-      return getCollectionList(key)
-        .map((item) =>
-          clone(item)
-        );
+      return collectionListRaw(key).map((item) => clone(item));
     },
 
     count(key) {
-      const value =
-        getCollectionRaw(key);
-
-      if (Array.isArray(value)) {
-        return value.length;
-      }
-
-      return value
-        ? 1
-        : 0;
+      const value = collectionRaw(key);
+      if (Array.isArray(value)) return value.length;
+      return value ? 1 : 0;
     },
 
     isEmpty(key) {
@@ -2126,140 +1233,69 @@ export function createSelectors({
     },
 
     first(key) {
-      const value =
-        getCollectionRaw(key);
+      const value = collectionRaw(key);
 
       if (Array.isArray(value)) {
-        return value.length
-          ? clone(value[0])
-          : null;
+        return value.length ? clone(value[0]) : null;
       }
 
-      return value
-        ? clone(value)
-        : null;
+      return value ? clone(value) : null;
     },
 
     last(key) {
-      const value =
-        getCollectionRaw(key);
+      const value = collectionRaw(key);
 
       if (Array.isArray(value)) {
-        return value.length
-          ? clone(value[value.length - 1])
-          : null;
+        return value.length ? clone(value[value.length - 1]) : null;
       }
 
-      return value
-        ? clone(value)
-        : null;
+      return value ? clone(value) : null;
     },
 
     find(key, predicate) {
-      const list =
-        getCollectionRaw(key);
+      const list = collectionListRaw(key);
 
-      if (
-        !Array.isArray(list) ||
-        !isFunction(predicate)
-      ) {
-        return null;
-      }
+      if (!Array.isArray(list) || !isFunction(predicate)) return null;
 
       for (let index = 0; index < list.length; index += 1) {
-        const item =
-          list[index];
-
-        let matched =
-          false;
+        const item = list[index];
 
         try {
-          matched =
-            Boolean(
-              predicate(
-                clone(item),
-                index,
-                clone(list)
-              )
-            );
-        } catch {
-          matched =
-            false;
-        }
-
-        if (matched) {
-          return clone(item);
-        }
+          if (predicate(clone(item), index, clone(list, []))) {
+            return clone(item);
+          }
+        } catch {}
       }
 
       return null;
     },
 
     filter(key, predicate) {
-      const list =
-        getCollectionRaw(key);
+      const list = collectionListRaw(key);
 
-      if (
-        !Array.isArray(list) ||
-        !isFunction(predicate)
-      ) {
-        return [];
-      }
+      if (!Array.isArray(list) || !isFunction(predicate)) return [];
 
-      const output =
-        [];
+      const output = [];
 
-      for (let index = 0; index < list.length; index += 1) {
-        const item =
-          list[index];
-
-        let matched =
-          false;
-
+      list.forEach((item, index) => {
         try {
-          matched =
-            Boolean(
-              predicate(
-                clone(item),
-                index,
-                clone(list)
-              )
-            );
-        } catch {
-          matched =
-            false;
-        }
-
-        if (matched) {
-          output.push(
-            clone(item)
-          );
-        }
-      }
+          if (predicate(clone(item), index, clone(list, []))) {
+            output.push(clone(item));
+          }
+        } catch {}
+      });
 
       return output;
     },
 
     map(key, mapper) {
-      const list =
-        getCollectionRaw(key);
+      const list = collectionListRaw(key);
 
-      if (
-        !Array.isArray(list) ||
-        !isFunction(mapper)
-      ) {
-        return [];
-      }
+      if (!Array.isArray(list) || !isFunction(mapper)) return [];
 
-      return list.map((entry, index) => {
+      return list.map((item, index) => {
         try {
-          return clone(
-            mapper(
-              clone(entry),
-              index,
-              clone(list)
-            )
-          );
+          return clone(mapper(clone(item), index, clone(list, [])));
         } catch {
           return null;
         }
@@ -2267,123 +1303,75 @@ export function createSelectors({
     },
 
     byId(key, id) {
-      const targetId =
-        safeText(id, "");
+      const targetId = safeText(id, "");
+      if (!targetId) return null;
 
-      if (!targetId) {
-        return null;
-      }
-
-      return selectors.find(
-        key,
-        (item) =>
-          compareEntityId(
-            item,
-            targetId
-          )
-      );
+      return selectors.find(key, (item) => sameEntityId(item, targetId));
     },
 
     ids(key) {
-      const list =
-        getCollectionRaw(key);
+      const value = collectionRaw(key);
 
-      if (!Array.isArray(list)) {
-        const id =
-          getEntityId(list);
-
-        return id
-          ? [id]
-          : [];
+      if (!Array.isArray(value)) {
+        const id = getEntityId(value);
+        return id ? [id] : [];
       }
 
-      return list
-        .map(getEntityId)
-        .filter(Boolean);
+      return value.map(getEntityId).filter(Boolean);
     },
 
     entityMap(key) {
-      const list =
-        getCollectionRaw(key);
+      const value = collectionRaw(key);
+      const map = new Map();
 
-      const map =
-        new Map();
-
-      if (!Array.isArray(list)) {
-        const id =
-          getEntityId(list);
-
-        if (id) {
-          map.set(
-            id,
-            clone(list)
-          );
-        }
-
+      if (!Array.isArray(value)) {
+        const id = getEntityId(value);
+        if (id) map.set(id, clone(value));
         return map;
       }
 
-      for (const item of list) {
-        const id =
-          getEntityId(item);
-
-        if (id) {
-          map.set(
-            id,
-            clone(item)
-          );
-        }
-      }
+      value.forEach((item) => {
+        const id = getEntityId(item);
+        if (id) map.set(id, clone(item));
+      });
 
       return map;
     },
 
     entitiesSnapshot() {
-      return clone(
-        entities()
-      );
+      return clone(entities(), {});
+    },
+
+    get(path, fallback = undefined) {
+      return clone(getByPath(root(), path, fallback), fallback);
     },
 
     incidencias() {
-      return selectors.collectionList(
-        "incidencias"
-      );
+      return selectors.collectionList("incidencias");
     },
 
     tickets() {
-      return selectors.collectionList(
-        "incidencias"
-      );
+      return selectors.collectionList("incidencias");
     },
 
     facturas() {
-      return selectors.collectionList(
-        "facturas"
-      );
+      return selectors.collectionList("facturas");
     },
 
     usuarios() {
-      return selectors.collectionList(
-        "usuarios"
-      );
+      return selectors.collectionList("usuarios");
     },
 
     clientes() {
-      return selectors.collectionList(
-        "clientes"
-      );
+      return selectors.collectionList("clientes");
     },
 
     recientes() {
-      return selectors.collectionList(
-        "recientes"
-      );
+      return selectors.collectionList("recientes");
     },
 
     dashboard() {
-      return clone(
-        entities().dashboard || null
-      );
+      return clone(entities().dashboard || root().dashboard || null);
     },
 
     /* =====================================
@@ -2391,34 +1379,23 @@ export function createSelectors({
     ===================================== */
 
     meta() {
-      return clone(meta());
+      return clone(meta(), {});
     },
 
     hydrated() {
-      return Boolean(
-        meta().hydrated
-      );
+      return Boolean(meta().hydrated || root().hydrated);
     },
 
     revision() {
-      return safeNumber(
-        meta().revision,
-        0
-      );
+      return safeNumber(meta().revision ?? root().revision, 0);
     },
 
     createdAt() {
-      return (
-        meta().createdAt ||
-        null
-      );
+      return meta().createdAt || root().createdAt || null;
     },
 
     updatedAt() {
-      return (
-        meta().updatedAt ||
-        null
-      );
+      return meta().updatedAt || root().updatedAt || null;
     },
 
     /* =====================================
@@ -2426,44 +1403,40 @@ export function createSelectors({
     ===================================== */
 
     snapshot(options = {}) {
-      const opts =
-        safeObject(options);
+      const opts = safeObject(options);
 
       return {
-        version:
-          STORE_SELECTORS_VERSION,
+        version: STORE_SELECTORS_VERSION,
 
-        app:
-          selectors.appSnapshot(),
+        app: selectors.appSnapshot(),
 
-        session:
-          selectors.sessionSnapshot({
-            includeToken:
-              opts.includeToken === true,
-            includeRaw:
-              opts.includeRawSession === true,
-          }),
+        session: selectors.sessionSnapshot({
+          includeToken: opts.includeToken === true,
+          includeRaw: opts.includeRawSession === true,
+        }),
 
-        ui:
-          selectors.uiSnapshot({
-            includeRaw:
-              opts.includeRawUi === true,
-          }),
+        ui: selectors.uiSnapshot({
+          includeRaw: opts.includeRawUi === true,
+        }),
 
-        flags:
-          clone(flags()),
+        flags: selectors.flags(),
 
-        entities:
-          opts.includeEntities === false
-            ? null
-            : clone(entities()),
+        entities: opts.includeEntities === false
+          ? null
+          : clone(entities(), {}),
 
-        meta:
-          clone(meta()),
+        meta: selectors.meta(),
 
-        at:
-          safeNowIso(),
+        at: nowIso(),
       };
+    },
+
+    getSnapshot(options = {}) {
+      return selectors.snapshot(options);
+    },
+
+    getDebugSnapshot(options = {}) {
+      return selectors.snapshot(options);
     },
   };
 

@@ -2,7 +2,7 @@
    Onion SPA - Store State
    Archivo: src/store/state.js
 
-   Store State limpio:
+   STORE STATE · SIMPLE
    - El Store NO es dueño de auth, router ni HTTP.
    - AppCore sigue siendo fuente de sesión/ruta/config.
    - Store sólo mantiene snapshot ligero + datos de dominio.
@@ -16,15 +16,7 @@ import {
   normalizeCollection,
 } from "./helpers.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const STORE_STATE_VERSION = "15.0.0-clean";
-
-/* =========================================================
-   CONSTANTS
-========================================================= */
+export const STORE_STATE_VERSION = "16.0.0-simple";
 
 const APP_NAME_FALLBACK = "Onion Support";
 const DEFAULT_ROUTE = "/";
@@ -64,7 +56,7 @@ const FETCH_FLAG_KEYS = Object.freeze([
   "Search",
 ]);
 
-const TOKEN_BAD_VALUES = Object.freeze([
+const BAD_TOKEN_VALUES = Object.freeze([
   "",
   "null",
   "undefined",
@@ -109,6 +101,7 @@ const INACTIVE_STATUSES = Object.freeze([
   "eliminado",
   "bloqueado",
   "suspendido",
+  "archivado",
 ]);
 
 const ADMIN_ALIASES = Object.freeze([
@@ -131,8 +124,8 @@ const SENSITIVE_KEY_RE =
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
-  const text = String(value).trim();
-  return text || fallback;
+  const output = String(value).trim();
+  return output || fallback;
 }
 
 function safeLower(value, fallback = "") {
@@ -140,30 +133,19 @@ function safeLower(value, fallback = "") {
 }
 
 function safeNumber(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
+  const output = Number(value);
+  return Number.isFinite(output) ? output : fallback;
 }
 
 function safeBool(value, fallback = false) {
-  if (value === true) return true;
-  if (value === false) return false;
+  if (value === true || value === false) return value;
+  if (value === 1 || value === "1") return true;
+  if (value === 0 || value === "0") return false;
 
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
+  const clean = safeLower(value, "");
 
-  if (typeof value === "string") {
-    const clean = value.trim().toLowerCase();
-
-    if (["true", "1", "yes", "si", "sí", "ok", "on", "active", "enabled"].includes(clean)) {
-      return true;
-    }
-
-    if (["false", "0", "no", "off", "inactive", "disabled"].includes(clean)) {
-      return false;
-    }
-  }
+  if (["true", "yes", "si", "sí", "ok", "on", "active", "enabled"].includes(clean)) return true;
+  if (["false", "no", "off", "inactive", "disabled"].includes(clean)) return false;
 
   return Boolean(fallback);
 }
@@ -177,7 +159,10 @@ function safeObject(value, fallback = {}) {
 }
 
 function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return [...value];
+  if (value === null || value === undefined) return [];
+  return [value];
 }
 
 function isFunction(value) {
@@ -225,25 +210,30 @@ function first(...values) {
   return null;
 }
 
+function flatten(values = []) {
+  const output = [];
+
+  for (const value of safeArray(values)) {
+    if (Array.isArray(value)) output.push(...flatten(value));
+    else if (value instanceof Set) output.push(...flatten([...value]));
+    else if (typeof value === "string") output.push(...value.split(/[,\s|]+/g));
+    else if (value !== null && value !== undefined) output.push(value);
+  }
+
+  return output;
+}
+
 function unique(values = []) {
-  return Array.from(
-    new Set(
-      safeArray(values)
-        .flat(Infinity)
-        .map((item) => safeText(item, ""))
-        .filter(Boolean)
-    )
-  );
+  return [...new Set(flatten(values).map((item) => safeText(item, "")).filter(Boolean))];
 }
 
 function toCollection(value) {
   try {
-    return normalizeCollection(value);
+    const normalized = normalizeCollection(value);
+    return Array.isArray(normalized) ? normalized.slice() : [];
   } catch {}
 
-  return Array.isArray(value)
-    ? value.slice()
-    : [];
+  return Array.isArray(value) ? value.slice() : [];
 }
 
 /* =========================================================
@@ -268,12 +258,7 @@ function coreUtils(AppCore) {
 
 function appName(AppCore) {
   const config = coreConfig(AppCore);
-
-  return (
-    safeText(config.appName, "") ||
-    safeText(config.name, "") ||
-    APP_NAME_FALLBACK
-  );
+  return safeText(config.appName, "") || safeText(config.name, "") || APP_NAME_FALLBACK;
 }
 
 /* =========================================================
@@ -281,17 +266,15 @@ function appName(AppCore) {
 ========================================================= */
 
 function isHashRouterPath(value = "") {
-  const text = safeText(value, "");
-  return text.startsWith("#/") || text.startsWith("#!");
+  const output = safeText(value, "");
+  return output.startsWith("#/") || output.startsWith("#!");
 }
 
 function normalizeHashRouterPath(value = "") {
-  const text = safeText(value, "");
-
-  if (!text) return DEFAULT_ROUTE;
-  if (text.startsWith("#!")) return text.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
-
-  return text.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
+  const output = safeText(value, "");
+  if (!output) return DEFAULT_ROUTE;
+  if (output.startsWith("#!")) return output.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
+  return output.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
 }
 
 function normalizePathname(pathname = DEFAULT_ROUTE) {
@@ -301,46 +284,34 @@ function normalizePathname(pathname = DEFAULT_ROUTE) {
 
   if (!value.startsWith("/")) value = `/${value}`;
 
-  const out = [];
+  const parts = [];
 
   for (const part of value.split("/").filter(Boolean)) {
     if (part === ".") continue;
-
-    if (part === "..") {
-      out.pop();
-      continue;
-    }
-
-    out.push(part);
+    if (part === "..") parts.pop();
+    else parts.push(part);
   }
 
-  value = `/${out.join("/")}`;
-
-  return value.length > 1
-    ? value.replace(/\/+$/g, "") || DEFAULT_ROUTE
-    : value || DEFAULT_ROUTE;
+  value = `/${parts.join("/")}`;
+  return value.length > 1 ? value.replace(/\/+$/g, "") || DEFAULT_ROUTE : value || DEFAULT_ROUTE;
 }
 
 function splitPath(value = DEFAULT_ROUTE) {
   let raw = safeText(value, DEFAULT_ROUTE);
 
-  if (isHashRouterPath(raw)) {
-    raw = normalizeHashRouterPath(raw);
-  }
+  if (isHashRouterPath(raw)) raw = normalizeHashRouterPath(raw);
 
   let pathname = raw;
   let search = "";
   let hash = "";
 
   const hashIndex = pathname.indexOf("#");
-
   if (hashIndex >= 0) {
     hash = pathname.slice(hashIndex);
     pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
   }
 
   const searchIndex = pathname.indexOf("?");
-
   if (searchIndex >= 0) {
     search = pathname.slice(searchIndex);
     pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
@@ -356,9 +327,7 @@ function splitPath(value = DEFAULT_ROUTE) {
 function normalizePublicPath(path = DEFAULT_ROUTE) {
   const raw = safeText(path, DEFAULT_ROUTE);
 
-  if (isHashRouterPath(raw)) {
-    return normalizePublicPath(normalizeHashRouterPath(raw));
-  }
+  if (isHashRouterPath(raw)) return normalizePublicPath(normalizeHashRouterPath(raw));
 
   try {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
@@ -368,9 +337,7 @@ function normalizePublicPath(path = DEFAULT_ROUTE) {
         return normalizePublicPath(normalizeHashRouterPath(parsed.hash));
       }
 
-      return normalizePublicPath(
-        `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`
-      );
+      return normalizePublicPath(`${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`);
     }
   } catch {}
 
@@ -381,22 +348,30 @@ function normalizePublicPath(path = DEFAULT_ROUTE) {
 function stripUsernamePrefix(path = DEFAULT_ROUTE) {
   const parts = splitPath(normalizePublicPath(path));
   const clean = parts.pathname.replace(/^\/@[^/]+(?=\/|$)/i, "") || DEFAULT_ROUTE;
-
   return `${normalizePathname(clean)}${parts.search}${parts.hash}`;
 }
 
-function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
-  const clean = splitPath(stripUsernamePrefix(path)).pathname;
+function collapseTechnicalPath(pathname = DEFAULT_ROUTE) {
+  const clean = normalizePathname(pathname);
 
-  if (clean === "/activate-account" || clean.startsWith("/activate-account/")) {
+  if (clean === "/activate" || clean.startsWith("/activate/") || clean === "/activation" || clean.startsWith("/activation/") || clean === "/activate-account" || clean.startsWith("/activate-account/")) {
     return "/activate-account";
   }
 
-  if (clean === "/reset-password/confirm" || clean.startsWith("/reset-password/confirm/")) {
+  if (clean === "/password-reset/confirm" || clean.startsWith("/password-reset/confirm/") || clean === "/reset-password/confirm" || clean.startsWith("/reset-password/confirm/")) {
     return "/reset-password/confirm";
   }
 
+  for (const base of ["/2fa", "/otp", "/mfa"]) {
+    if (clean === base || clean.startsWith(`${base}/`)) return base;
+  }
+
   return clean || DEFAULT_ROUTE;
+}
+
+function normalizeCanonical(path = DEFAULT_ROUTE) {
+  const clean = splitPath(stripUsernamePrefix(path)).pathname;
+  return collapseTechnicalPath(clean);
 }
 
 function browserPublicPath() {
@@ -404,14 +379,8 @@ function browserPublicPath() {
 
   try {
     const hash = window.location.hash || "";
-
-    if (isHashRouterPath(hash)) {
-      return normalizePublicPath(hash);
-    }
-
-    return normalizePublicPath(
-      `${window.location.pathname || DEFAULT_ROUTE}${window.location.search || ""}${hash}`
-    );
+    if (isHashRouterPath(hash)) return normalizePublicPath(hash);
+    return normalizePublicPath(`${window.location.pathname || DEFAULT_ROUTE}${window.location.search || ""}${hash}`);
   } catch {
     return DEFAULT_ROUTE;
   }
@@ -432,18 +401,14 @@ function resolveRoute(AppCore) {
   let publicPath = normalizePublicPath(rawPublicPath);
 
   try {
-    if (isFunction(utils.normalizePath)) {
-      publicPath = normalizePublicPath(utils.normalizePath(publicPath) || publicPath);
-    }
+    if (isFunction(utils.normalizePath)) publicPath = normalizePublicPath(utils.normalizePath(publicPath) || publicPath);
   } catch {}
 
-  let canonicalPath = normalizeCanonicalPath(
-    first(state.canonicalPath, state.route, publicPath, DEFAULT_ROUTE)
-  );
+  let canonicalPath = normalizeCanonical(first(state.canonicalPath, state.route, publicPath, DEFAULT_ROUTE));
 
   try {
     if (isFunction(utils.normalizeCanonicalPath)) {
-      canonicalPath = normalizeCanonicalPath(utils.normalizeCanonicalPath(publicPath) || canonicalPath);
+      canonicalPath = normalizeCanonical(utils.normalizeCanonicalPath(publicPath) || canonicalPath);
     }
   } catch {}
 
@@ -464,11 +429,9 @@ function stripBearer(token = "") {
 
 function hasUsableToken(token = "") {
   const value = stripBearer(token);
-
   if (!value) return false;
-  if (TOKEN_BAD_VALUES.includes(value.toLowerCase())) return false;
+  if (BAD_TOKEN_VALUES.includes(value.toLowerCase())) return false;
   if (/[\s\r\n\t]/.test(value)) return false;
-
   return true;
 }
 
@@ -477,30 +440,25 @@ function readCoreToken(AppCore) {
   const session = safeObject(state.session);
   const sessionData = safeObject(state.sessionData);
 
-  let token = stripBearer(
-    first(
-      state.token,
-      state.accessToken,
-      state.access_token,
-      state.jwt,
-      state.bearer,
-
-      session.token,
-      session.accessToken,
-      session.access_token,
-      session.jwt,
-      session.bearer,
-
-      sessionData.token,
-      sessionData.accessToken,
-      sessionData.access_token
-    ) || ""
-  );
+  let token = stripBearer(first(
+    state.token,
+    state.accessToken,
+    state.access_token,
+    state.jwt,
+    state.bearer,
+    session.token,
+    session.accessToken,
+    session.access_token,
+    session.jwt,
+    session.bearer,
+    sessionData.token,
+    sessionData.accessToken,
+    sessionData.access_token
+  ) || "");
 
   try {
     const header = AppCore?.getAuthHeader?.() || {};
-    const auth = header.Authorization || header.authorization || "";
-    token = token || stripBearer(auth);
+    token = token || stripBearer(header.Authorization || header.authorization || "");
   } catch {}
 
   return hasUsableToken(token) ? token : "";
@@ -511,6 +469,7 @@ function isInactiveUser(user = {}) {
 
   if (
     current.active === false ||
+    current.enabled === false ||
     current.disabled === true ||
     current.isDisabled === true ||
     current.deleted === true ||
@@ -518,18 +477,14 @@ function isInactiveUser(user = {}) {
     current.blocked === true ||
     current.isBlocked === true ||
     current.suspended === true ||
-    current.revoked === true
+    current.revoked === true ||
+    current.archived === true
   ) {
     return true;
   }
 
   const status = safeLower(
-    current.status ||
-      current.estado ||
-      current.state ||
-      current.accountStatus ||
-      current.account_status ||
-      ""
+    current.status || current.estado || current.state || current.accountStatus || current.account_status || ""
   );
 
   return INACTIVE_STATUSES.includes(status);
@@ -537,10 +492,8 @@ function isInactiveUser(user = {}) {
 
 function hasUsableUser(user = null) {
   const current = safeObject(user);
-
   if (!Object.keys(current).length) return false;
   if (isInactiveUser(current)) return false;
-
   return USER_ID_KEYS.some((key) => Boolean(safeText(current[key], "")));
 }
 
@@ -552,18 +505,13 @@ function normalizeRole(value = "") {
     .replace(/[^a-z0-9_:.]/g, "")
     .trim();
 
-  if (!role) return "";
   if (ADMIN_ALIASES.includes(role)) return ROLE_ADMIN;
-
-  return ROLE_USER;
+  return role ? ROLE_USER : "";
 }
 
 function normalizeRoles(values = []) {
-  const roles = unique(safeArray(values).flat(Infinity).map(normalizeRole)).filter(Boolean);
-
-  if (roles.includes(ROLE_ADMIN)) return [ROLE_ADMIN];
-
-  return roles.length ? [ROLE_USER] : [];
+  const roles = unique(flatten(values).map(normalizeRole)).filter(Boolean);
+  return roles.includes(ROLE_ADMIN) ? [ROLE_ADMIN] : roles.length ? [ROLE_USER] : [];
 }
 
 function readCoreUser(AppCore) {
@@ -580,7 +528,6 @@ function readCoreUser(AppCore) {
     state.profile,
     state.usuario,
     state.me,
-
     session.user,
     session.currentUser,
     session.authUser,
@@ -589,7 +536,6 @@ function readCoreUser(AppCore) {
     session.profile,
     session.usuario,
     session.me,
-
     sessionData.user,
     sessionData.usuario,
     sessionData.me
@@ -653,12 +599,7 @@ function avatarOf(user = null) {
   const current = safeObject(user);
   const profile = safeObject(current.profile);
 
-  if (
-    current.hasAvatar === false ||
-    current.has_avatar === false ||
-    profile.hasAvatar === false ||
-    profile.has_avatar === false
-  ) {
+  if (current.hasAvatar === false || current.has_avatar === false || profile.hasAvatar === false || profile.has_avatar === false) {
     return "";
   }
 
@@ -680,7 +621,6 @@ function avatarOf(user = null) {
       current.imageURL,
       current.image_url,
       current.image,
-
       profile.avatarUrl,
       profile.avatarURL,
       profile.avatar_url,
@@ -695,34 +635,42 @@ function avatarOf(user = null) {
 
 function userIdOf(user = null) {
   const current = safeObject(user);
+  return safeText(first(current.id, current.userId, current.user_id, current._id, current.uid, current.sub), "");
+}
 
-  return safeText(
-    first(
-      current.id,
-      current.userId,
-      current.user_id,
-      current._id,
-      current.uid,
-      current.sub
-    ),
-    ""
-  );
+function sanitizeObject(value, depth = 0, keyHint = "") {
+  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) return undefined;
+  if (depth > 5) return "[depth-limit]";
+  if (value === null || value === undefined) return value;
+  if (["string", "number", "boolean"].includes(typeof value)) return value;
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return undefined;
+  if (Array.isArray(value)) return value.slice(0, 120).map((item) => sanitizeObject(item, depth + 1, keyHint));
+
+  if (typeof value === "object") {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value).slice(0, 160)) {
+      const clean = sanitizeObject(item, depth + 1, key);
+      if (clean !== undefined) output[key] = clean;
+    }
+
+    return output;
+  }
+
+  return String(value);
 }
 
 function publicUserSnapshot(user = null) {
   if (!hasUsableUser(user)) return null;
 
-  const current = clone(user, {}) || {};
+  const current = sanitizeObject(clone(user, {}) || {}) || {};
   const id = userIdOf(current);
   const displayName = displayNameOf(current);
   const username = usernameOf(current);
   const avatarUrl = avatarOf(current);
-
-  for (const key of Object.keys(current)) {
-    if (SENSITIVE_KEY_RE.test(key)) {
-      delete current[key];
-    }
-  }
+  const roles = normalizeRoles([current.roles, current.role, current.rol]);
+  const role = roles.includes(ROLE_ADMIN) ? ROLE_ADMIN : ROLE_USER;
 
   return {
     ...current,
@@ -739,6 +687,10 @@ function publicUserSnapshot(user = null) {
 
     email: current.email || current.mail || null,
 
+    role,
+    rol: role,
+    roles: [role],
+
     avatar: avatarUrl || null,
     avatarUrl: avatarUrl || null,
     picture: avatarUrl || null,
@@ -750,13 +702,10 @@ function publicUserSnapshot(user = null) {
 
 function resolveSession(AppCore) {
   const state = coreState(AppCore);
-
   const token = readCoreToken(AppCore);
   const user = readCoreUser(AppCore);
-
   const hasToken = hasUsableToken(token);
   const hasUser = hasUsableUser(user);
-
   const authenticated = Boolean(state.authenticated === true && hasToken && hasUser);
 
   if (!authenticated) {
@@ -775,39 +724,23 @@ function resolveSession(AppCore) {
   }
 
   const publicUser = publicUserSnapshot(user);
-
-  const roles = normalizeRoles([
-    state.roles,
-    publicUser?.roles,
-    state.role,
-    state.rol,
-    publicUser?.role,
-    publicUser?.rol,
-  ]);
-
-  const role = roles.includes(ROLE_ADMIN)
-    ? ROLE_ADMIN
-    : ROLE_USER;
+  const roles = normalizeRoles([state.roles, publicUser?.roles, state.role, state.rol, publicUser?.role, publicUser?.rol]);
+  const role = roles.includes(ROLE_ADMIN) ? ROLE_ADMIN : ROLE_USER;
 
   return {
     authenticated: true,
     hasToken: true,
-
     user: publicUser,
-
     role,
     roles: [role],
-
     username: safeText(state.username, "") || usernameOf(publicUser) || null,
     displayName: displayNameOf(publicUser),
     avatarUrl: avatarOf(publicUser) || null,
-
     currentResolvedUsername:
       safeText(state.currentResolvedUsername, "") ||
       safeText(state.resolvedUsername, "") ||
       usernameOf(publicUser) ||
       null,
-
     isAdmin: role === ROLE_ADMIN,
   };
 }
@@ -818,11 +751,9 @@ function resolveSession(AppCore) {
 
 function normalizeTheme(value = "") {
   const theme = safeLower(value, "");
-
   if (theme === "light") return "light";
   if (theme === "dark") return "dark";
   if (theme === "system") return "system";
-
   return "";
 }
 
@@ -830,9 +761,7 @@ function systemTheme() {
   if (!isBrowser()) return DEFAULT_THEME;
 
   try {
-    return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches
-      ? "dark"
-      : "light";
+    return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
   } catch {
     return DEFAULT_THEME;
   }
@@ -884,28 +813,19 @@ function resolveThemePreference(AppCore) {
 
 function resolveTheme(AppCore) {
   const preference = resolveThemePreference(AppCore);
-
-  if (preference === "system") {
-    return documentTheme() || systemTheme();
-  }
-
-  return normalizeTheme(preference) || documentTheme() || systemTheme();
+  return preference === "system" ? documentTheme() || systemTheme() : normalizeTheme(preference) || documentTheme() || systemTheme();
 }
 
 function normalizeLang(value = "") {
   const lang = safeLower(value, "").replace(/_/g, "-");
-
   if (!lang) return "";
 
   const firstPart = lang.split("-")[0];
-
   if (["spa", "spanish", "castellano", "español"].includes(firstPart)) return "es";
   if (["eng", "english"].includes(firstPart)) return "en";
   if (["cat", "catalan", "català", "catalán"].includes(firstPart)) return "ca";
 
-  return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(lang)
-    ? lang
-    : "";
+  return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(lang) ? lang : "";
 }
 
 function resolveLang(AppCore) {
@@ -915,6 +835,7 @@ function resolveLang(AppCore) {
   return (
     normalizeLang(state.lang) ||
     normalizeLang(state.language) ||
+    normalizeLang(state.locale) ||
     normalizeLang(config.defaultLang) ||
     normalizeLang(config.i18n?.defaultLang) ||
     DEFAULT_LANG
@@ -935,11 +856,7 @@ export function safeTitle(AppCore) {
 
 export function safeTopbarTitle(AppCore) {
   const dom = coreDom(AppCore);
-
-  const candidates = [
-    dom.topbarTitle?.textContent,
-    dom.topbarViewTitle?.textContent,
-  ];
+  const candidates = [dom.topbarTitle?.textContent, dom.topbarViewTitle?.textContent];
 
   if (isBrowser()) {
     try {
@@ -968,7 +885,6 @@ function buildAppSlice(AppCore) {
     initialized: Boolean(state.initialized),
     booting: Boolean(state.booting || state.coreInitializing),
     loading: Boolean(state.loading),
-
     fatal: Boolean(state.appFatal || state.fatal),
 
     route: route.route,
@@ -977,7 +893,6 @@ function buildAppSlice(AppCore) {
 
     lastRoute: state.lastRoute || null,
     lastPublicPath: state.lastPublicPath || null,
-
     routeMode: state.routeMode || "boot",
 
     lastError: clone(state.lastError || state.error || null, null),
@@ -991,10 +906,6 @@ function buildSessionSlice(AppCore) {
     authenticated: session.authenticated,
     hasToken: session.hasToken,
 
-    /*
-      Compatibilidad de shape:
-      el Store NO guarda token real.
-    */
     token: null,
     accessToken: null,
 
@@ -1009,12 +920,15 @@ function buildSessionSlice(AppCore) {
     currentResolvedUsername: session.currentResolvedUsername,
 
     isAdmin: session.isAdmin,
+    isUser: session.role === ROLE_USER,
+    isClient: false,
+    isSupport: false,
+    isManager: false,
   };
 }
 
 function buildUiSlice(AppCore) {
   const state = coreState(AppCore);
-
   const themePreference = resolveThemePreference(AppCore);
   const theme = resolveTheme(AppCore);
   const lang = resolveLang(AppCore);
@@ -1028,24 +942,12 @@ function buildUiSlice(AppCore) {
     language: lang,
     locale: lang,
 
-    sidebarOpen:
-      state.sidebarOpen !== undefined
-        ? Boolean(state.sidebarOpen)
-        : true,
-
-    shellVisible:
-      state.shellVisible !== undefined
-        ? Boolean(state.shellVisible)
-        : true,
-
-    chromeVisible:
-      state.chromeVisible !== undefined
-        ? Boolean(state.chromeVisible)
-        : true,
+    sidebarOpen: state.sidebarOpen !== undefined ? Boolean(state.sidebarOpen) : true,
+    shellVisible: state.shellVisible !== undefined ? Boolean(state.shellVisible) : true,
+    chromeVisible: state.chromeVisible !== undefined ? Boolean(state.chromeVisible) : true,
 
     authScreen: Boolean(state.authScreen),
     routeMode: state.routeMode || "boot",
-
     density: state.density || "default",
 
     pageTitle: safeTitle(AppCore),
@@ -1053,10 +955,9 @@ function buildUiSlice(AppCore) {
   };
 }
 
-function createByIdMap() {
-  return Object.fromEntries(
-    INDEXED_RESOURCE_KEYS.map((key) => [key, {}])
-  );
+function createByIdMap(seed = {}) {
+  const source = safeObject(seed);
+  return Object.fromEntries(INDEXED_RESOURCE_KEYS.map((key) => [key, safeObject(source[key], {})]));
 }
 
 function buildEntitiesSlice(seed = {}) {
@@ -1082,10 +983,7 @@ function buildEntitiesSlice(seed = {}) {
       meta: clone(source.search?.meta || {}, {}),
     },
 
-    byId: {
-      ...createByIdMap(),
-      ...clone(source.byId || {}, {}),
-    },
+    byId: createByIdMap(source.byId || {}),
   };
 }
 
@@ -1095,15 +993,12 @@ function buildFlagsSlice(seed = {}) {
   const flags = {
     hydrating: Boolean(source.hydrating),
     hydrated: Boolean(source.hydrated),
-
     syncingCore: Boolean(source.syncingCore),
     refreshing: Boolean(source.refreshing),
     saving: Boolean(source.saving),
   };
 
-  for (const key of FETCH_FLAG_KEYS) {
-    flags[`fetching${key}`] = Boolean(source[`fetching${key}`]);
-  }
+  for (const key of FETCH_FLAG_KEYS) flags[`fetching${key}`] = Boolean(source[`fetching${key}`]);
 
   return flags;
 }
@@ -1111,22 +1006,17 @@ function buildFlagsSlice(seed = {}) {
 function buildMetaSlice(seed = {}) {
   const source = safeObject(seed);
   const createdAt = safeNumber(source.createdAt, nowMs());
+  const updatedAt = safeNumber(source.updatedAt, createdAt);
 
   return {
     version: STORE_STATE_VERSION,
-
     hydrated: Boolean(source.hydrated),
-
     revision: safeNumber(source.revision, 0),
-
     createdAt,
     createdAtIso: source.createdAtIso || nowIso(createdAt),
-
-    updatedAt: safeNumber(source.updatedAt, createdAt),
-    updatedAtIso: source.updatedAtIso || nowIso(source.updatedAt || createdAt),
-
+    updatedAt,
+    updatedAtIso: source.updatedAtIso || nowIso(updatedAt),
     source: source.source || "store:state",
-
     resourceKeys: [...RESOURCE_KEYS],
     indexedResourceKeys: [...INDEXED_RESOURCE_KEYS],
   };
@@ -1154,9 +1044,7 @@ export function buildInitialState(AppCore = null) {
 export function touchMeta(state, extra = {}) {
   if (!state || typeof state !== "object") return false;
 
-  if (!isObject(state.meta)) {
-    state.meta = {};
-  }
+  if (!isObject(state.meta)) state.meta = {};
 
   const timestamp = nowMs();
 
@@ -1165,9 +1053,7 @@ export function touchMeta(state, extra = {}) {
   state.meta.updatedAtIso = nowIso(timestamp);
   state.meta.revision = safeNumber(state.meta.revision, 0) + 1;
 
-  if (isObject(extra)) {
-    Object.assign(state.meta, clone(extra, {}));
-  }
+  if (isObject(extra)) Object.assign(state.meta, clone(extra, {}));
 
   return true;
 }
@@ -1176,40 +1062,26 @@ export function touchMeta(state, extra = {}) {
    SNAPSHOTS
 ========================================================= */
 
-function sanitizeValue(value, keyHint = "", depth = 0) {
+function sanitizeValue(value, keyHint = "", depth = 0, seen = new WeakSet()) {
   if (depth > 8) return "[depth-limit]";
-
-  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) {
-    return value ? "***" : null;
-  }
-
+  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) return value ? "***" : null;
   if (value === null || value === undefined) return value;
+  if (["string", "number", "boolean"].includes(typeof value)) return value;
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return "[function]";
 
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
-  if (typeof value === "bigint") {
-    return String(value);
-  }
-
-  if (typeof value === "function") {
-    return "[function]";
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => sanitizeValue(item, keyHint, depth + 1));
-  }
+  if (Array.isArray(value)) return value.map((item) => sanitizeValue(item, keyHint, depth + 1, seen));
 
   if (value && typeof value === "object") {
+    try {
+      if (seen.has(value)) return "[circular]";
+      seen.add(value);
+    } catch {}
+
     const output = {};
 
     for (const [key, item] of Object.entries(value)) {
-      output[key] = sanitizeValue(item, key, depth + 1);
+      output[key] = sanitizeValue(item, key, depth + 1, seen);
     }
 
     return output;
@@ -1233,17 +1105,9 @@ export function shallowCloneRoot(state = {}) {
 
     session: {
       ...safeObject(source.session),
-
-      /*
-        Nunca devolver token real desde el Store.
-      */
       token: null,
       accessToken: null,
-
-      user: source.session?.user
-        ? clone(source.session.user, null)
-        : null,
-
+      user: source.session?.user ? clone(source.session.user, null) : null,
       roles: safeArray(source.session?.roles).slice(),
     },
 
@@ -1267,18 +1131,11 @@ export function buildSafeSnapshot(state = {}) {
   return sanitizeValue(shallowCloneRoot(state));
 }
 
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
-
 export default {
   STORE_STATE_VERSION,
-
   safeTitle,
   safeTopbarTitle,
-
   touchMeta,
-
   buildInitialState,
   shallowCloneRoot,
   buildSafeSnapshot,

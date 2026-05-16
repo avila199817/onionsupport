@@ -1,45 +1,13 @@
 /* =========================================================
    Onion SPA - App Events
-   Archivo: /src/app/events.js
+   Archivo: src/app/events.js
 
-   ONION SUPPORT · APP EVENTS
-   EVENT BUS · NO STORM · NO REBIND · ROUTER/AUTH/LANG SYNC · 10/10
-
-   RESPONSABILIDADES:
-   - Bindear eventos internos de la app.
-   - Sincronizar UI ligera ante cambios de usuario/sesión/auth.
-   - Sincronizar idioma ante app:lang:change sin doble rerender.
-   - Coordinar router:rendered con route/publicPath/loader.
-   - Deduplicar toasts repetidos.
-   - Emitir telemetría ligera de lifecycle.
-   - Tolerar AppCore parcial o cleanup incompleto.
-   - Exponer snapshot de diagnóstico.
-
-   REGLAS CRÍTICAS:
-   - NO usa AppCore.cleanup.event para eventos globales de app.
-   - NO emite AppCore.events + window a la vez.
-   - NO llama SidebarUI.repair().
-   - NO llama SidebarUI.rebind().
-   - NO llama SidebarUI.bindEvents().
-   - NO llama TopbarUI.rebind().
-   - NO dispara app:ui:repair-request desde router:rendered.
-   - NO emite app:user-ui:sync desde AppEvents.
-   - NO emite app:route:change desde router:rendered.
-   - router:rendered solo sincroniza state route/publicPath + loader.
-   - router:shell:state es NOOP para evitar bucles.
-   - app:lang:change no rerenderiza salvo flag explícito.
-   - Sin CSS inline.
-   - Sin estilos inyectados.
-
-   EXTREME MODE:
-   - Binding idempotente por evento + label.
-   - Window fallback sólo si no hay bus interno.
-   - Redacción fuerte de tokens path/query/hash/JWT/Bearer.
-   - Soporte hash-router y /@usuario para normalización local.
-   - State sync silencioso y directo para no crear route-change loops.
-   - UI sync ligera, deduplicada y sin rebind.
-   - Router rendered sin UI sync automática.
-   - Debug API en window.__ONION_APP_EVENTS__ y AppCore.AppEvents.
+   App events simple:
+   - bindings internos de app
+   - sync ligera de UI
+   - router:rendered solo sincroniza route/publicPath + loader
+   - app:lang:change no rerenderiza salvo flag explícito
+   - sin event storm / sin rebind / sin repair automático
 ========================================================= */
 
 import {
@@ -62,340 +30,188 @@ import {
 } from "./constants.js";
 
 /* =========================================================
+   VERSION
+========================================================= */
+
+export const APP_EVENTS_VERSION = "18.0.0-clean";
+
+/* =========================================================
    CONSTANTS
 ========================================================= */
 
-export const APP_EVENTS_VERSION =
-  "15.1.0-extreme-pro-no-storm";
-
-const EVENTS_SOURCE =
-  "app:events";
+const SOURCE = "app:events";
+const DEFAULT_ROUTE = "/";
 
 const DEFAULT_SCOPE =
   APP_SCOPES?.events ||
   APP_SCOPE ||
   "app:events";
 
-const DEFAULT_ROUTE =
-  "/";
+const TOAST_DEDUPE_MS = 1200;
+const UI_SYNC_DEDUPE_MS = 80;
+const ROUTER_SYNC_DEDUPE_MS = 40;
+const LANG_RERENDER_DEDUPE_MS = 250;
+const THEME_SYNC_DEDUPE_MS = 120;
+const EMIT_DEDUPE_MS = 80;
 
-const TOAST_DEDUPE_MS =
-  1200;
+const MAX_RECENT = 80;
+const MAX_SANITIZE_DEPTH = 6;
+const MAX_SANITIZE_ARRAY = 100;
 
-const LANG_RERENDER_DEDUPE_MS =
-  250;
+const EVENT_NAMES = Object.freeze({
+  appReady: APP_EVENTS?.ready || "app:ready",
+  appUiReady: APP_EVENTS?.uiReady || "app:ui:ready",
+  appUiRepairRequest: APP_EVENTS?.uiRepairRequest || "app:ui:repair-request",
 
-const ROUTER_RENDER_SYNC_DEDUPE_MS =
-  40;
+  appUserChange: APP_EVENTS?.userChange || "app:user:change",
+  appUserUiSync: APP_EVENTS?.userUiSync || "app:user-ui:sync",
 
-const UI_SYNC_DEDUPE_MS =
-  80;
+  appEventsReady: "app:events:ready",
+  appEventsBound: "app:events:bound",
+  appEventsUnbound: "app:events:unbound",
+  appEventsError: "app:events:error",
+  appEventsUiSynced: "app:events:ui-synced",
 
-const THEME_SYNC_DEDUPE_MS =
-  120;
+  appRouteSynced: APP_EVENTS?.routeSynced || "app:events:route-synced",
+  appRouteChange: APP_EVENTS?.routeChange || "app:route:change",
 
-const EVENT_EMIT_DEDUPE_MS =
-  80;
+  appSessionRestored: APP_EVENTS?.sessionRestored || "app:session:restored",
+  appSessionCleared: APP_EVENTS?.sessionCleared || "app:session:cleared",
 
-const MAX_SANITIZE_DEPTH =
-  7;
+  appLangChange: APP_EVENTS?.langChange || "app:lang:change",
+  appThemeChange: APP_EVENTS?.themeChange || "app:theme:change",
+  onionThemeChange: "onion:theme:change",
+  legacyThemeChange: "theme:change",
 
-const MAX_SANITIZE_ARRAY =
-  100;
+  authSessionRestored: AUTH_EVENTS?.sessionRestored || "auth:session:restored",
+  authLoginSuccess: AUTH_EVENTS?.loginSuccess || "auth:login:success",
+  authLogout: AUTH_EVENTS?.logout || "auth:logout",
+  authLogoutSuccess: AUTH_EVENTS?.logoutSuccess || "auth:logout:success",
 
-const MAX_RECENT_EVENTS =
-  80;
+  routerRendered: ROUTER_EVENTS?.rendered || "router:rendered",
+  routerAsyncComplete: ROUTER_EVENTS?.asyncComplete || "router:render:async-complete",
+  routerShellState: ROUTER_EVENTS?.shellState || "router:shell:state",
+});
 
-const EVENT_NAMES =
-  Object.freeze({
-    appReady:
-      APP_EVENTS?.ready ||
-      "app:ready",
+const SIDEBAR_USER_METHODS = Object.freeze([
+  "renderUser",
+  "refreshUser",
+  "updateUser",
+  "syncUser",
+]);
 
-    appUiReady:
-      APP_EVENTS?.uiReady ||
-      "app:ui:ready",
+const SIDEBAR_VISUAL_METHODS = Object.freeze([
+  "applyRoleVisibility",
+  "syncRouteAndIndicator",
+  "syncIndicator",
+  "updateToggleLabel",
+]);
 
-    appUiRepair:
-      APP_EVENTS?.uiRepair ||
-      "app:ui:repair",
+const SIDEBAR_FALLBACK_METHODS = Object.freeze([
+  "refresh",
+  "sync",
+]);
 
-    appUiRepairRequest:
-      APP_EVENTS?.uiRepairRequest ||
-      "app:ui:repair-request",
+const TOPBAR_USER_METHODS = Object.freeze([
+  "renderUser",
+  "refreshUser",
+  "updateUser",
+  "syncUser",
+]);
 
-    appUserChange:
-      APP_EVENTS?.userChange ||
-      "app:user:change",
+const TOPBAR_VISUAL_METHODS = Object.freeze([
+  "syncRoute",
+  "updateRoute",
+  "syncBreadcrumb",
+  "updateBreadcrumb",
+]);
 
-    /*
-      Referencia legacy.
-      AppEvents NO emite este evento.
-      Lo emite src/app/ui.js o el coordinador superior.
-    */
-    appUserUiSync:
-      APP_EVENTS?.userUiSync ||
-      "app:user-ui:sync",
+const TOPBAR_FALLBACK_METHODS = Object.freeze([
+  "refresh",
+  "sync",
+]);
 
-    appEventsUiSynced:
-      "app:events:ui-synced",
+const SENSITIVE_PARAMS = Object.freeze([
+  "token",
+  "activationToken",
+  "activateToken",
+  "resetToken",
+  "passwordResetToken",
+  "confirmToken",
+  "code",
+  "t",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "tempToken",
+  "temp_token",
+  "temporaryToken",
+  "temporary_token",
+  "twoFactorToken",
+  "two_factor_token",
+  "mfaToken",
+  "mfa_token",
+  "authorization",
+  "jwt",
+  "session",
+  "sid",
+]);
 
-    appRouteSynced:
-      APP_EVENTS?.routeSynced ||
-      "app:events:route-synced",
+const TOKEN_PATHS = Object.freeze([
+  "/activate-account",
+  "/activate",
+  "/activation",
+  "/account/activate",
+  "/activate/first-user",
+  "/reset-password/confirm",
+  "/reset-password-confirm",
+  "/password-reset/confirm",
+  "/password-reset-confirm",
+]);
 
-    appSessionRestored:
-      APP_EVENTS?.sessionRestored ||
-      "app:session:restored",
-
-    appSessionCleared:
-      APP_EVENTS?.sessionCleared ||
-      "app:session:cleared",
-
-    appLangChange:
-      APP_EVENTS?.langChange ||
-      "app:lang:change",
-
-    appRouteChange:
-      APP_EVENTS?.routeChange ||
-      "app:route:change",
-
-    appThemeChange:
-      APP_EVENTS?.themeChange ||
-      "app:theme:change",
-
-    onionThemeChange:
-      "onion:theme:change",
-
-    legacyThemeChange:
-      "theme:change",
-
-    appEventsReady:
-      "app:events:ready",
-
-    appEventsBound:
-      "app:events:bound",
-
-    appEventsUnbound:
-      "app:events:unbound",
-
-    /*
-      Deliberadamente NO usa APP_EVENTS.error si apunta a app:error.
-      Así evitamos bucles con error handlers globales.
-    */
-    appEventsError:
-      "app:events:error",
-
-    authSessionRestored:
-      AUTH_EVENTS?.sessionRestored ||
-      "auth:session:restored",
-
-    authLoginSuccess:
-      AUTH_EVENTS?.loginSuccess ||
-      "auth:login:success",
-
-    authLogout:
-      AUTH_EVENTS?.logout ||
-      "auth:logout",
-
-    authLogoutSuccess:
-      AUTH_EVENTS?.logoutSuccess ||
-      "auth:logout:success",
-
-    routerRendered:
-      ROUTER_EVENTS?.rendered ||
-      "router:rendered",
-
-    routerAsyncComplete:
-      ROUTER_EVENTS?.asyncComplete ||
-      "router:render:async-complete",
-
-    routerShellState:
-      ROUTER_EVENTS?.shellState ||
-      "router:shell:state",
-  });
-
-/*
-  Métodos permitidos.
-  Prohibidos aquí:
-  - repair
-  - rebind
-  - bindEvents
-  - rebindEvents
-  - init
-  - boot
-  - mount
-  - start
-*/
-const SIDEBAR_LIGHT_USER_METHODS =
-  Object.freeze([
-    "renderUser",
-    "refreshUser",
-    "updateUser",
-    "syncUser",
-  ]);
-
-const SIDEBAR_LIGHT_VISUAL_METHODS =
-  Object.freeze([
-    "applyRoleVisibility",
-    "syncRouteAndIndicator",
-    "syncIndicator",
-    "updateToggleLabel",
-  ]);
-
-const SIDEBAR_LIGHT_FALLBACK_METHODS =
-  Object.freeze([
-    "refresh",
-    "sync",
-  ]);
-
-const TOPBAR_LIGHT_USER_METHODS =
-  Object.freeze([
-    "renderUser",
-    "refreshUser",
-    "updateUser",
-    "syncUser",
-  ]);
-
-const TOPBAR_LIGHT_VISUAL_METHODS =
-  Object.freeze([
-    "syncRoute",
-    "updateRoute",
-    "syncBreadcrumb",
-    "updateBreadcrumb",
-  ]);
-
-const TOPBAR_LIGHT_FALLBACK_METHODS =
-  Object.freeze([
-    "refresh",
-    "sync",
-  ]);
-
-const SENSITIVE_QUERY_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "resetToken",
-    "passwordResetToken",
-    "confirmToken",
-    "code",
-    "t",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
-    "authorization",
-    "jwt",
-    "session",
-    "sid",
-  ]);
-
-const TOKEN_ROUTE_PATHS =
-  Object.freeze([
-    "/activate-account",
-    "/activate",
-    "/activation",
-    "/account/activate",
-    "/activate/first-user",
-    "/reset-password/confirm",
-    "/reset-password-confirm",
-    "/password-reset/confirm",
-    "/password-reset-confirm",
-  ]);
-
-const SENSITIVE_OBJECT_KEY_RE =
-  /token|secret|password|authorization|credential|jwt|bearer|otp|code|session|refresh/i;
-
-const PUBLIC_USERNAME_RE =
-  /^@[A-Za-z0-9._-]{1,80}$/;
+const USERNAME_SEGMENT_RE = /^@[A-Za-z0-9._-]{1,80}$/;
+const SENSITIVE_KEY_RE = /token|secret|password|authorization|credential|jwt|bearer|otp|code|session|refresh|access/i;
 
 /* =========================================================
-   INTERNAL STATE
+   STATE
 ========================================================= */
 
-let eventsBound =
-  false;
+let bound = false;
+let binding = false;
+let boundScope = "";
 
-let eventsBindingInFlight =
-  false;
+let langChangeInFlight = false;
 
-let boundScope =
-  "";
+let lastLangRenderAt = 0;
 
-let langChangeInFlight =
-  false;
+let lastRouterKey = "";
+let lastRouterAt = 0;
 
-let lastLangRenderAt =
-  0;
+let lastToastKey = "";
+let lastToastAt = 0;
 
-let lastRouterRenderedKey =
-  "";
+let lastUiKey = "";
+let lastUiAt = 0;
 
-let lastRouterRenderedAt =
-  0;
+let lastThemeKey = "";
+let lastThemeAt = 0;
 
-let lastToastKey =
-  "";
+let lastEmitKey = "";
+let lastEmitAt = 0;
 
-let lastToastAt =
-  0;
+let debugApiInstalled = false;
 
-let lastUiSyncKey =
-  "";
-
-let lastUiSyncAt =
-  0;
-
-let lastThemeSyncKey =
-  "";
-
-let lastThemeSyncAt =
-  0;
-
-let lastEmitKey =
-  "";
-
-let lastEmitAt =
-  0;
-
-let debugApiInstalled =
-  false;
-
-const boundDisposers =
-  [];
-
-const boundEventKeys =
-  new Set();
+const disposers = [];
+const boundKeys = new Set();
 
 const eventState = {
-  totalHandled:
-    0,
-
-  totalErrors:
-    0,
-
-  lastEvent:
-    "",
-
-  lastEventAt:
-    0,
-
-  lastError:
-    null,
-
-  boundEvents:
-    [],
-
-  recent:
-    [],
+  totalHandled: 0,
+  totalErrors: 0,
+  lastEvent: "",
+  lastEventAt: 0,
+  lastError: null,
+  boundEvents: [],
+  recent: [],
 };
 
 /* =========================================================
@@ -403,64 +219,41 @@ const eventState = {
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function isFn(value) {
+  return typeof value === "function";
+}
+
+function isObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isObjectLike(value) {
+  return value !== null && (typeof value === "object" || typeof value === "function");
+}
+
+function safeObject(value) {
+  return isObject(value) ? value : {};
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
-  const text =
-    String(value)
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
 
-function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
-}
-
-function isObjectLike(value) {
-  return (
-    value !== null &&
-    (
-      typeof value === "object" ||
-      typeof value === "function"
-    )
-  );
-}
-
-function ensureObject(value) {
-  return isObject(value)
-    ? value
-    : {};
-}
-
-function isFunction(value) {
-  return typeof value === "function";
-}
-
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
-}
-
-function safeNow() {
+function now() {
   try {
     return Date.now();
   } catch {
@@ -468,7 +261,7 @@ function safeNow() {
   }
 }
 
-function safeIsoDate(ms = safeNow()) {
+function iso(ms = now()) {
   try {
     return new Date(ms).toISOString();
   } catch {
@@ -477,117 +270,50 @@ function safeIsoDate(ms = safeNow()) {
 }
 
 function unique(values = []) {
-  const output =
-    [];
-
-  const seen =
-    new Set();
-
-  for (const value of safeArray(values)) {
-    const clean =
-      safeText(value, "");
-
-    if (
-      clean &&
-      !seen.has(clean)
-    ) {
-      seen.add(clean);
-      output.push(clean);
-    }
-  }
-
-  return output;
+  return Array.from(
+    new Set(
+      safeArray(values)
+        .map((item) => safeText(item, ""))
+        .filter(Boolean)
+    )
+  );
 }
 
-function isExtensibleTarget(value) {
+function canDefine(value) {
   try {
-    return (
-      isObjectLike(value) &&
-      Object.isExtensible(value)
-    );
-  } catch {}
-
-  return false;
-}
-
-function safeDefineValue(target, key, value) {
-  if (
-    !target ||
-    !key ||
-    !isExtensibleTarget(target)
-  ) {
+    return isObjectLike(value) && Object.isExtensible(value);
+  } catch {
     return false;
   }
+}
+
+function defineHidden(target, key, value) {
+  if (!target || !key || !canDefine(target)) return false;
 
   try {
-    Object.defineProperty(
-      target,
-      key,
-      {
-        value,
-        configurable:
-          true,
-        enumerable:
-          false,
-        writable:
-          true,
-      }
-    );
+    Object.defineProperty(target, key, {
+      value,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+    });
 
     return true;
   } catch {}
 
   try {
-    target[key] =
-      value;
-
+    target[key] = value;
     return true;
   } catch {}
 
   return false;
 }
 
-function getEventPayload(eventOrPayload = {}) {
-  const raw =
-    eventOrPayload || {};
-
-  if (
-    raw &&
-    typeof raw === "object" &&
-    "detail" in raw &&
-    raw.detail !== undefined
-  ) {
-    return ensureObject(raw.detail);
-  }
-
-  if (
-    raw &&
-    typeof raw === "object" &&
-    "payload" in raw &&
-    raw.payload !== undefined
-  ) {
-    return ensureObject(raw.payload);
-  }
-
-  return ensureObject(raw);
-}
-
-function createHandledPayload(eventName = "", payload = {}) {
-  const atMs =
-    safeNow();
-
-  return {
-    event:
-      safeText(eventName, "event"),
-
-    payload:
-      ensureObject(payload),
-
-    at:
-      safeIsoDate(atMs),
-
-    atMs,
-  };
+function getPayload(eventOrPayload = {}) {
+  if (isObject(eventOrPayload?.detail)) return eventOrPayload.detail;
+  if (isObject(eventOrPayload?.payload)) return eventOrPayload.payload;
+  if (isObject(eventOrPayload)) return eventOrPayload;
+  return {};
 }
 
 /* =========================================================
@@ -595,656 +321,541 @@ function createHandledPayload(eventName = "", payload = {}) {
 ========================================================= */
 
 function escapeRegExp(value = "") {
-  return String(value).replace(
-    /[.*+?^${}()|[\]\\]/g,
-    "\\$&"
-  );
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function redactSensitiveText(value = "") {
-  let output =
-    safeText(value, "");
+function redact(value = "") {
+  let output = safeText(value, "");
 
-  if (!output) {
-    return "";
+  if (!output) return "";
+
+  for (const name of SENSITIVE_PARAMS) {
+    try {
+      output = output.replace(
+        new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi"),
+        "$1***"
+      );
+    } catch {}
+  }
+
+  for (const path of TOKEN_PATHS) {
+    try {
+      output = output.replace(
+        new RegExp(`(${escapeRegExp(path)}\\/)([^/?#\\s]+)`, "gi"),
+        "$1***"
+      );
+    } catch {}
   }
 
   try {
-    for (const name of SENSITIVE_QUERY_PARAM_NAMES) {
-      const escaped =
-        escapeRegExp(name);
-
-      output =
-        output.replace(
-          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
-          "$1***"
-        );
-    }
-
-    for (const path of TOKEN_ROUTE_PATHS) {
-      output =
-        output.replace(
-          new RegExp(`(${escapeRegExp(path)}\\/)([^/?#\\s]+)`, "gi"),
-          "$1***"
-        );
-    }
-
-    output =
-      output.replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      );
-
-    output =
-      output.replace(
-        /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
-        "$1$2***"
-      );
-
-    output =
-      output.replace(
-        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-        "***"
-      );
+    output = output
+      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+      .replace(/(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi, "$1$2***")
+      .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
   } catch {}
 
   return output;
 }
 
 function isDomNodeLike(value) {
-  if (
-    !value ||
-    typeof value !== "object"
-  ) {
-    return false;
-  }
+  if (!value || typeof value !== "object") return false;
 
   try {
-    return Boolean(
-      typeof Node !== "undefined" &&
-        value instanceof Node
-    );
+    return typeof Node !== "undefined" && value instanceof Node;
   } catch {}
 
   try {
-    return Boolean(
-      value.nodeType &&
-        value.nodeName
-    );
+    return Boolean(value.nodeType && value.nodeName);
   } catch {}
 
   return false;
 }
 
 function normalizeError(error = null) {
-  if (!error) {
-    return null;
-  }
+  if (!error) return null;
 
-  if (typeof error === "string") {
+  const candidate = error?.error || error?.reason || error;
+
+  if (typeof candidate === "string") {
     return {
-      name:
-        "AppEventsError",
-
-      message:
-        redactSensitiveText(error),
-
-      code:
-        "APP_EVENTS_ERROR",
+      name: "AppEventsError",
+      message: redact(candidate),
+      code: "APP_EVENTS_ERROR",
     };
   }
 
-  const object =
-    ensureObject(
-      error?.error ||
-        error?.reason ||
-        error
-    );
-
-  const payload = {
-    name:
-      safeText(
-        object.name,
-        "AppEventsError"
-      ),
-
-    message:
-      redactSensitiveText(
-        safeText(
-          object.message || error,
-          "Error en App Events."
-        )
-      ),
-
-    code:
-      safeText(
-        object.code ||
-          object.status ||
-          object.statusCode,
-        "APP_EVENTS_ERROR"
-      ),
+  return {
+    name: safeText(candidate?.name, "AppEventsError"),
+    message: redact(
+      safeText(candidate?.message || candidate, "Error en App Events.")
+    ),
+    code: safeText(
+      candidate?.code || candidate?.status || candidate?.statusCode,
+      "APP_EVENTS_ERROR"
+    ),
+    stack: candidate?.stack ? "[stack]" : "",
   };
-
-  if (object.stack) {
-    payload.stack =
-      redactSensitiveText(
-        safeText(object.stack, "")
-      );
-  }
-
-  return payload;
 }
 
-function sanitizePayload(value, depth = 0) {
-  if (depth > MAX_SANITIZE_DEPTH) {
-    return "[MaxDepth]";
-  }
+function sanitize(value, depth = 0, seen = new WeakSet()) {
+  if (depth > MAX_SANITIZE_DEPTH) return "[MaxDepth]";
 
-  if (typeof value === "string") {
-    return redactSensitiveText(value);
-  }
+  if (typeof value === "string") return redact(value);
+  if (value === null || value === undefined) return value;
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return "[Function]";
 
-  if (
-    value === null ||
-    value === undefined ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
-  if (typeof value === "function") {
-    return "[Function]";
-  }
+  if (value instanceof Error) return normalizeError(value);
 
   if (isDomNodeLike(value)) {
     return {
-      node:
-        safeText(value.nodeName, "Node"),
-
-      id:
-        safeText(value.id, ""),
-
-      className:
-        safeText(
-          value.className?.baseVal ||
-            value.className,
-          ""
-        ),
+      node: safeText(value.nodeName, "Node"),
+      id: safeText(value.id, ""),
+      className: safeText(value.className?.baseVal || value.className, ""),
     };
-  }
-
-  if (value instanceof Error) {
-    return normalizeError(value);
   }
 
   if (Array.isArray(value)) {
     return value
       .slice(0, MAX_SANITIZE_ARRAY)
-      .map((item) =>
-        sanitizePayload(
-          item,
-          depth + 1
-        )
-      );
+      .map((item) => sanitize(item, depth + 1, seen));
   }
 
-  if (value instanceof Map) {
-    return {
-      type:
-        "Map",
-
-      size:
-        value.size,
-    };
-  }
-
-  if (value instanceof Set) {
-    return {
-      type:
-        "Set",
-
-      size:
-        value.size,
-    };
-  }
+  if (value instanceof Map) return { type: "Map", size: value.size };
+  if (value instanceof Set) return { type: "Set", size: value.size };
 
   if (isObject(value)) {
-    const output =
-      {};
+    try {
+      if (seen.has(value)) return "[Circular]";
+      seen.add(value);
+    } catch {}
 
-    for (const [key, item] of Object.entries(value)) {
-      if (SENSITIVE_OBJECT_KEY_RE.test(key)) {
-        if (
-          item === null ||
-          item === undefined ||
-          item === "" ||
-          typeof item === "boolean"
-        ) {
-          output[key] =
-            item;
-        } else {
-          output[key] =
-            "***";
-        }
+    const output = {};
 
-        continue;
-      }
-
-      output[key] =
-        sanitizePayload(
-          item,
-          depth + 1
-        );
+    for (const [key, item] of Object.entries(value).slice(0, 120)) {
+      output[key] = SENSITIVE_KEY_RE.test(key)
+        ? item ? "***" : item
+        : sanitize(item, depth + 1, seen);
     }
 
     return output;
   }
 
-  return String(value);
-}
-
-function redactKey(value = "") {
-  return redactSensitiveText(
-    safeText(value, "")
-  );
+  return redact(String(value));
 }
 
 /* =========================================================
    LOG / EMIT
 ========================================================= */
 
-function safeLog(AppCore, ...args) {
-  const safeArgs =
-    args.map((item) =>
-      sanitizePayload(item)
-    );
-
+function log(AppCore, ...args) {
   try {
-    AppCore?.utils?.log?.(
-      "[AppEvents]",
-      ...safeArgs
-    );
+    AppCore?.utils?.log?.("[AppEvents]", ...args.map((item) => sanitize(item)));
+  } catch {}
+}
 
+function warn(AppCore, ...args) {
+  try {
+    AppCore?.utils?.warn?.("[AppEvents]", ...args.map((item) => sanitize(item)));
     return;
   } catch {}
 
   try {
-    console.log(
-      "[AppEvents]",
-      ...safeArgs
-    );
+    console.warn("[AppEvents]", ...args.map((item) => sanitize(item)));
   } catch {}
 }
 
-function safeWarn(AppCore, ...args) {
-  const safeArgs =
-    args.map((item) =>
-      sanitizePayload(item)
-    );
-
-  let emittedByCore =
-    false;
-
+function errorLog(AppCore, ...args) {
   try {
-    if (isFunction(AppCore?.utils?.warn)) {
-      AppCore.utils.warn(
-        "[AppEvents]",
-        ...safeArgs
-      );
-
-      emittedByCore =
-        true;
-    }
-  } catch {
-    emittedByCore =
-      false;
-  }
-
-  if (emittedByCore) {
+    AppCore?.utils?.error?.("[AppEvents]", ...args.map((item) => sanitize(item)));
     return;
-  }
+  } catch {}
 
   try {
-    console.warn(
-      "[AppEvents]",
-      ...safeArgs
-    );
+    console.error("[AppEvents]", ...args.map((item) => sanitize(item)));
   } catch {}
 }
 
-function safeError(AppCore, ...args) {
-  const safeArgs =
-    args.map((item) =>
-      sanitizePayload(item)
-    );
-
-  let emittedByCore =
-    false;
-
-  try {
-    if (isFunction(AppCore?.utils?.error)) {
-      AppCore.utils.error(
-        "[AppEvents]",
-        ...safeArgs
-      );
-
-      emittedByCore =
-        true;
-    }
-  } catch {
-    emittedByCore =
-      false;
-  }
-
-  if (emittedByCore) {
-    return;
-  }
-
-  try {
-    console.error(
-      "[AppEvents]",
-      ...safeArgs
-    );
-  } catch {}
-}
-
-function safeCreateCustomEvent(eventName, payload = {}) {
-  if (!isBrowser()) {
-    return null;
-  }
+function createCustomEvent(eventName, payload = {}) {
+  if (!isBrowser()) return null;
 
   try {
     if (typeof CustomEvent === "function") {
-      return new CustomEvent(
-        eventName,
-        {
-          detail:
-            payload,
-        }
-      );
+      return new CustomEvent(eventName, { detail: payload });
     }
   } catch {}
 
   try {
-    const event =
-      document.createEvent("CustomEvent");
-
-    event.initCustomEvent(
-      eventName,
-      false,
-      false,
-      payload
-    );
-
+    const event = document.createEvent("CustomEvent");
+    event.initCustomEvent(eventName, false, false, payload);
     return event;
   } catch {
     return null;
   }
 }
 
-function safeWindowDispatch(eventName, payload = {}) {
-  if (
-    !isBrowser() ||
-    !eventName
-  ) {
-    return false;
-  }
+function emitWindow(eventName, payload = {}) {
+  if (!isBrowser() || !eventName) return false;
 
   try {
-    const event =
-      safeCreateCustomEvent(
-        eventName,
-        payload
-      );
-
-    if (!event) {
-      return false;
-    }
+    const event = createCustomEvent(eventName, payload);
+    if (!event) return false;
 
     window.dispatchEvent(event);
-
     return true;
-  } catch {}
-
-  return false;
+  } catch {
+    return false;
+  }
 }
 
 function shouldDedupeEmit(eventName = "", payload = {}, force = false) {
-  if (force) {
-    return false;
-  }
+  if (force) return false;
 
-  const key =
-    [
-      safeText(eventName, ""),
-      safeText(payload?.reason || payload?.phase || "", ""),
-      safeText(payload?.route || payload?.canonicalPath || "", ""),
-      safeText(payload?.publicPath || "", ""),
-      payload?.ok === false ? "fail" : "ok",
-    ].join("|");
+  const key = [
+    eventName,
+    payload?.reason || payload?.phase || "",
+    payload?.route || payload?.canonicalPath || "",
+    payload?.publicPath || "",
+    payload?.ok === false ? "fail" : "ok",
+  ]
+    .map((item) => safeText(item, ""))
+    .join("|");
 
-  const now =
-    safeNow();
+  const stamp = now();
 
-  if (
-    key === lastEmitKey &&
-    now - lastEmitAt < EVENT_EMIT_DEDUPE_MS
-  ) {
+  if (key === lastEmitKey && stamp - lastEmitAt < EMIT_DEDUPE_MS) {
     return true;
   }
 
-  lastEmitKey =
-    key;
-
-  lastEmitAt =
-    now;
+  lastEmitKey = key;
+  lastEmitAt = stamp;
 
   return false;
 }
 
-function safeEmit(AppCore, eventName, payload = {}, options = {}) {
-  const cleanEventName =
-    safeText(eventName, "");
+function emit(AppCore, eventName, payload = {}, options = {}) {
+  const cleanName = safeText(eventName, "");
+  if (!cleanName) return false;
 
-  if (!cleanEventName) {
+  const opts = safeObject(options);
+
+  if (opts.dedupe !== false && shouldDedupeEmit(cleanName, payload, opts.force === true)) {
     return false;
   }
 
-  const opts =
-    ensureObject(options);
+  const detail = sanitize({
+    version: APP_EVENTS_VERSION,
+    source: SOURCE,
+    ...safeObject(payload),
+  });
 
-  if (
-    opts.dedupe !== false &&
-    shouldDedupeEmit(
-      cleanEventName,
-      payload,
-      opts.force === true
-    )
-  ) {
-    return false;
-  }
-
-  const cleanPayload =
-    sanitizePayload({
-      version:
-        APP_EVENTS_VERSION,
-
-      source:
-        EVENTS_SOURCE,
-
-      ...ensureObject(payload),
-    });
-
-  let busAvailable =
-    false;
-
-  let busEmitted =
-    false;
+  let busAvailable = false;
+  let busEmitted = false;
 
   try {
-    if (isFunction(AppCore?.events?.emit)) {
-      busAvailable =
-        true;
-
-      AppCore.events.emit(
-        cleanEventName,
-        cleanPayload
-      );
-
-      busEmitted =
-        true;
+    if (isFn(AppCore?.events?.emit)) {
+      busAvailable = true;
+      AppCore.events.emit(cleanName, detail);
+      busEmitted = true;
     }
   } catch (error) {
-    safeWarn(
-      AppCore,
-      `AppCore.events.emit("${cleanEventName}") falló.`,
-      error
-    );
+    warn(AppCore, `AppCore.events.emit("${cleanName}") falló.`, error);
   }
 
-  /*
-    Anti-storm:
-    si hay bus interno, NO duplicamos en window.
-  */
-  if (
-    opts.window === true ||
-    (!busAvailable && isBrowser())
-  ) {
-    return (
-      safeWindowDispatch(
-        cleanEventName,
-        cleanPayload
-      ) ||
-      busEmitted
-    );
+  if (opts.window === true || (!busAvailable && isBrowser())) {
+    return emitWindow(cleanName, detail) || busEmitted;
   }
 
   return busEmitted;
 }
 
+/* =========================================================
+   DIAGNOSTICS
+========================================================= */
+
 function pushRecent(event = {}) {
-  const data =
-    sanitizePayload(event);
+  eventState.recent.unshift(sanitize(event));
 
-  eventState.recent.unshift(data);
-
-  if (eventState.recent.length > MAX_RECENT_EVENTS) {
-    eventState.recent =
-      eventState.recent.slice(0, MAX_RECENT_EVENTS);
+  if (eventState.recent.length > MAX_RECENT) {
+    eventState.recent = eventState.recent.slice(0, MAX_RECENT);
   }
 }
 
 function recordHandled(eventName = "", payload = {}) {
+  const atMs = now();
+
   eventState.totalHandled += 1;
   eventState.lastEvent = safeText(eventName, "");
-  eventState.lastEventAt = safeNow();
+  eventState.lastEventAt = atMs;
 
-  const handled =
-    createHandledPayload(
-      eventName,
-      payload
-    );
-
-  pushRecent(handled);
-
-  return handled;
+  pushRecent({
+    event: eventState.lastEvent,
+    payload: safeObject(payload),
+    at: iso(atMs),
+    atMs,
+  });
 }
 
 function recordError(AppCore, eventName = "", error = null) {
   eventState.totalErrors += 1;
 
   eventState.lastError = {
-    event:
-      safeText(eventName, ""),
-
-    error:
-      normalizeError(error),
-
-    message:
-      redactSensitiveText(
-        safeText(
-          error?.message || error,
-          "Error en App Events."
-        )
-      ),
-
-    at:
-      safeIsoDate(),
+    event: safeText(eventName, ""),
+    error: normalizeError(error),
+    message: redact(safeText(error?.message || error, "Error en App Events.")),
+    at: iso(),
   };
 
   pushRecent({
-    event:
-      "error",
-
-    payload:
-      eventState.lastError,
-
-    at:
-      safeIsoDate(),
-
-    atMs:
-      safeNow(),
+    event: "error",
+    payload: eventState.lastError,
+    at: iso(),
+    atMs: now(),
   });
 
-  safeError(
-    AppCore,
-    `Error procesando evento ${eventName || "desconocido"}.`,
-    error
-  );
+  errorLog(AppCore, `Error procesando evento ${eventName || "desconocido"}.`, error);
 
-  safeEmit(
-    AppCore,
-    EVENT_NAMES.appEventsError,
-    eventState.lastError
-  );
+  emit(AppCore, EVENT_NAMES.appEventsError, eventState.lastError);
 }
 
 /* =========================================================
-   AUTH SAFE READ
+   PATH HELPERS
 ========================================================= */
 
-function getAuthUser(Auth) {
-  try {
-    return (
-      Auth?.getUser?.() ||
-      Auth?.getCurrentUser?.() ||
-      Auth?.user ||
-      null
-    );
-  } catch {}
-
-  return null;
+function baseOrigin() {
+  if (isBrowser() && window.location?.origin) return window.location.origin;
+  return "http://localhost";
 }
 
-function getAuthStatus(Auth) {
-  try {
-    if (isFunction(Auth?.isAuthenticated)) {
-      return Boolean(Auth.isAuthenticated());
+function isHashRouterPath(value = "") {
+  const text = safeText(value, "");
+  return text.startsWith("#/") || text.startsWith("#!");
+}
+
+function normalizeHashRouterPath(value = "") {
+  const text = safeText(value, "");
+
+  if (!text) return "/";
+  if (text.startsWith("#!")) return text.replace(/^#!\/?/, "/") || "/";
+  return text.replace(/^#\/?/, "/") || "/";
+}
+
+function normalizePathname(pathname = "/") {
+  let value = safeText(pathname, "/")
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!value.startsWith("/")) value = `/${value}`;
+
+  const stack = [];
+
+  for (const segment of value.split("/").filter(Boolean)) {
+    if (segment === ".") continue;
+
+    if (segment === "..") {
+      stack.pop();
+      continue;
     }
+
+    stack.push(segment);
+  }
+
+  value = `/${stack.join("/")}`;
+  return value.length > 1 ? value.replace(/\/+$/g, "") : value;
+}
+
+function splitPath(value = "/") {
+  let raw = safeText(value, "/");
+
+  if (isHashRouterPath(raw)) {
+    raw = normalizeHashRouterPath(raw);
+  }
+
+  try {
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
+      const parsed = new URL(raw, baseOrigin());
+
+      if (parsed.origin !== baseOrigin()) {
+        raw = "/";
+      } else if (parsed.hash && isHashRouterPath(parsed.hash)) {
+        raw = normalizeHashRouterPath(parsed.hash);
+      } else {
+        raw = `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`;
+      }
+    }
+  } catch {
+    raw = "/";
+  }
+
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || "/";
+  }
+
+  const searchIndex = pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || "/";
+  }
+
+  return {
+    pathname: normalizePathname(pathname),
+    search: search ? (search.startsWith("?") ? search : `?${search}`) : "",
+    hash: hash ? (hash.startsWith("#") ? hash : `#${hash}`) : "",
+  };
+}
+
+function localPublicPath(path = "/") {
+  const parts = splitPath(path);
+  return `${parts.pathname}${parts.search}${parts.hash}`;
+}
+
+function stripUsername(pathname = "/") {
+  const segments = normalizePathname(pathname).split("/").filter(Boolean);
+
+  if (segments.length && USERNAME_SEGMENT_RE.test(segments[0])) {
+    const rest = segments.slice(1).join("/");
+    return rest ? normalizePathname(`/${rest}`) : "/";
+  }
+
+  return normalizePathname(pathname);
+}
+
+function localCanonicalPath(path = "/") {
+  return stripUsername(splitPath(localPublicPath(path)).pathname);
+}
+
+function callPathHelper(fn, AppCore, path = "/") {
+  if (!isFn(fn)) return "";
+
+  const attempts = [
+    () => fn(AppCore, path),
+    () => fn(path),
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      const value = attempt();
+      if (value) return value;
+    } catch {}
+  }
+
+  return "";
+}
+
+function normalizePublicSafe(AppCore, path = "/") {
+  return (
+    callPathHelper(normalizePublicPath, AppCore, path) ||
+    localPublicPath(path)
+  );
+}
+
+function normalizeCanonicalSafe(AppCore, path = "/") {
+  const local = localCanonicalPath(path);
+  const helper = callPathHelper(normalizeCanonicalPath, AppCore, path);
+
+  if (helper) {
+    const cleanHelper = localCanonicalPath(helper);
+
+    if (cleanHelper === "/" && local !== "/" && USERNAME_SEGMENT_RE.test(splitPath(path).pathname.split("/").filter(Boolean)[0] || "")) {
+      return local;
+    }
+
+    return cleanHelper;
+  }
+
+  return local;
+}
+
+function callGetter(fn, AppCore, Router) {
+  if (!isFn(fn)) return "";
+
+  const attempts = [
+    () => fn(AppCore, Router),
+    () => fn(AppCore),
+    () => fn(),
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      const value = attempt();
+      if (value) return value;
+    } catch {}
+  }
+
+  return "";
+}
+
+function routerGetter(Router, method = "") {
+  try {
+    if (isFn(Router?.[method])) return Router[method]();
   } catch {}
 
-  return Boolean(Auth?.authenticated);
+  return "";
+}
+
+function resolvePublicPath(AppCore, Router, payload = {}) {
+  const data = safeObject(payload);
+  const route = safeObject(data.route);
+  const resolved = safeObject(data.resolved);
+
+  const candidate =
+    data.publicPath ||
+    data.currentPublicPath ||
+    data.requestedPath ||
+    data.href ||
+    data.to ||
+    data.path ||
+    route.publicPath ||
+    route.path ||
+    resolved.publicPath ||
+    AppCore?.state?.publicPath ||
+    routerGetter(Router, "getCurrentPublicPath") ||
+    callGetter(getCurrentPublicPath, AppCore, Router) ||
+    "/";
+
+  return normalizePublicSafe(AppCore, candidate);
+}
+
+function resolveCanonicalPath(AppCore, Router, payload = {}) {
+  const data = safeObject(payload);
+  const route = safeObject(data.route);
+  const resolved = safeObject(data.resolved);
+
+  const candidate =
+    data.canonicalPath ||
+    data.currentCanonicalPath ||
+    route.canonicalPath ||
+    resolved.canonicalPath ||
+    routerGetter(Router, "getCurrentCanonicalPath") ||
+    callGetter(getCurrentCanonicalPath, AppCore, Router) ||
+    AppCore?.state?.route ||
+    route.path ||
+    data.path ||
+    resolvePublicPath(AppCore, Router, data) ||
+    "/";
+
+  return normalizeCanonicalSafe(AppCore, candidate);
 }
 
 /* =========================================================
    STATE
 ========================================================= */
 
-function assignStateDirectly(AppCore, patch = {}) {
-  const cleanPatch =
-    ensureObject(patch);
+function assignState(AppCore, patch = {}) {
+  const cleanPatch = safeObject(patch);
 
   try {
-    if (
-      AppCore?.state &&
-      typeof AppCore.state === "object"
-    ) {
-      Object.assign(
-        AppCore.state,
-        cleanPatch
-      );
-
+    if (AppCore?.state && typeof AppCore.state === "object") {
+      Object.assign(AppCore.state, cleanPatch);
       return true;
     }
   } catch {}
@@ -1253,1307 +864,263 @@ function assignStateDirectly(AppCore, patch = {}) {
 }
 
 function setStateSilent(AppCore, patch = {}) {
-  const cleanPatch =
-    ensureObject(patch);
+  const cleanPatch = safeObject(patch);
 
   /*
-    CRÍTICO:
-    AppEvents no debe inducir app:route:change desde router:rendered.
-    Preferimos mutación directa de state.
+    Intencionado:
+    AppEvents no debe provocar app:route:change desde router:rendered.
   */
-  if (assignStateDirectly(AppCore, cleanPatch)) {
-    return true;
-  }
+  if (assignState(AppCore, cleanPatch)) return true;
 
   try {
-    if (isFunction(AppCore?.setState)) {
-      AppCore.setState(
-        cleanPatch,
-        {
-          emit:
-            false,
+    AppCore?.setState?.(cleanPatch, {
+      emit: false,
+      emitState: false,
+      silent: true,
+      source: "app:events:silent-state-sync",
+    });
 
-          emitState:
-            false,
-
-          silent:
-            true,
-
-          source:
-            "app:events:silent-state-sync",
-        }
-      );
-
-      return true;
-    }
+    return true;
   } catch {}
 
   return false;
 }
 
-/* =========================================================
-   TOAST
-========================================================= */
+function patchRouteState(AppCore, {
+  route = "/",
+  publicPath = "/",
+} = {}) {
+  const cleanRoute = normalizeCanonicalSafe(AppCore, route);
+  const cleanPublic = normalizePublicSafe(AppCore, publicPath);
 
-function normalizeToastType(type = "info") {
-  const clean =
-    safeText(type, "info").toLowerCase();
+  const current = safeObject(AppCore?.state);
 
-  if (clean === "warn") {
-    return "warning";
+  const routeChanged =
+    safeText(current.route, "") !== cleanRoute ||
+    safeText(current.canonicalPath, "") !== cleanRoute;
+
+  const publicChanged =
+    safeText(current.publicPath, "") !== cleanPublic;
+
+  if (!routeChanged && !publicChanged) {
+    return {
+      changed: false,
+      routeChanged: false,
+      publicChanged: false,
+      route: cleanRoute,
+      publicPath: cleanPublic,
+    };
   }
 
-  return clean || "info";
+  const patch = {};
+
+  if (routeChanged) {
+    patch.route = cleanRoute;
+    patch.canonicalPath = cleanRoute;
+  }
+
+  if (publicChanged) {
+    patch.publicPath = cleanPublic;
+  }
+
+  setStateSilent(AppCore, patch);
+
+  return {
+    changed: true,
+    routeChanged,
+    publicChanged,
+    route: cleanRoute,
+    publicPath: cleanPublic,
+  };
 }
 
-function safeToast(Toast, type, message, options = {}) {
-  const cleanType =
-    normalizeToastType(type);
+/* =========================================================
+   AUTH / TOAST
+========================================================= */
 
-  const cleanMessage =
-    safeText(message, "");
-
-  if (!cleanMessage) {
+function getAuthUser(Auth) {
+  try {
+    return Auth?.getUser?.() || Auth?.getCurrentUser?.() || Auth?.user || null;
+  } catch {
     return null;
   }
+}
+
+function getAuthStatus(Auth) {
+  try {
+    if (isFn(Auth?.isAuthenticated)) return Boolean(Auth.isAuthenticated());
+  } catch {}
+
+  return Boolean(Auth?.authenticated);
+}
+
+function normalizeToastType(type = "info") {
+  const clean = safeText(type, "info").toLowerCase();
+  return clean === "warn" ? "warning" : clean || "info";
+}
+
+function safeToast(Toast, AppCore, type, message, options = {}) {
+  const cleanType = normalizeToastType(type);
+  const cleanMessage = safeText(message, "");
+
+  if (!cleanMessage) return null;
 
   const payload = {
-    ...ensureObject(options),
-
-    type:
-      cleanType,
-
-    message:
-      cleanMessage,
+    ...safeObject(options),
+    type: cleanType,
+    message: cleanMessage,
   };
 
-  const typedMethods =
-    cleanType === "warning"
-      ? [
-          "warning",
-          "warn",
-          "warningToast",
-        ]
-      : [
-          cleanType,
-          `${cleanType}Toast`,
-        ];
+  const typedMethods = cleanType === "warning"
+    ? ["warning", "warn", "warningToast"]
+    : [cleanType, `${cleanType}Toast`];
 
-  for (const methodName of typedMethods) {
+  for (const method of typedMethods) {
     try {
-      if (isFunction(Toast?.[methodName])) {
-        return Toast[methodName](
-          cleanMessage,
-          payload
-        );
-      }
+      if (isFn(Toast?.[method])) return Toast[method](cleanMessage, payload);
     } catch {}
   }
 
-  try {
-    if (isFunction(Toast?.showToast)) {
-      return Toast.showToast(
-        cleanMessage,
-        cleanType,
-        payload
-      );
-    }
-  } catch {}
+  const attempts = [
+    () => Toast?.showToast?.(cleanMessage, cleanType, payload),
+    () => Toast?.show?.(cleanMessage, cleanType, payload),
+    () => Toast?.notify?.(payload),
+    () => AppCore?.showToast?.(cleanMessage, cleanType, payload),
+  ];
 
-  try {
-    if (isFunction(Toast?.show)) {
-      return Toast.show(
-        cleanMessage,
-        cleanType,
-        payload
-      );
-    }
-  } catch {}
-
-  try {
-    if (isFunction(Toast?.notify)) {
-      return Toast.notify(payload);
-    }
-  } catch {}
+  for (const attempt of attempts) {
+    try {
+      const result = attempt();
+      if (result !== undefined && result !== null) return result;
+    } catch {}
+  }
 
   return null;
 }
 
-function toastOnce(
-  Toast,
-  type,
-  message,
-  options = {},
-  dedupeMs = TOAST_DEDUPE_MS
-) {
-  const cleanType =
-    normalizeToastType(type);
+function toastOnce(Toast, AppCore, type, message, options = {}, dedupeMs = TOAST_DEDUPE_MS) {
+  const key = redact(`${normalizeToastType(type)}:${options?.title || ""}:${message || ""}`);
+  const stamp = now();
 
-  const cleanMessage =
-    safeText(message, "");
-
-  const title =
-    safeText(options?.title, "");
-
-  const key =
-    redactSensitiveText(`${cleanType}:${title}:${cleanMessage}`);
-
-  const current =
-    safeNow();
-
-  if (
-    key === lastToastKey &&
-    current - lastToastAt < dedupeMs
-  ) {
+  if (key === lastToastKey && stamp - lastToastAt < dedupeMs) {
     return null;
   }
 
-  lastToastKey =
-    key;
+  lastToastKey = key;
+  lastToastAt = stamp;
 
-  lastToastAt =
-    current;
-
-  return safeToast(
-    Toast,
-    cleanType,
-    cleanMessage,
-    options
-  );
+  return safeToast(Toast, AppCore, type, message, options);
 }
 
 /* =========================================================
-   LANGUAGE
+   UI LIGHT SYNC
 ========================================================= */
 
-function normalizeLang(value = "", fallback = "es") {
-  const raw =
-    safeText(value, fallback)
-      .toLowerCase()
-      .replace(/_/g, "-")
-      .trim();
+function callUiMethod(target, methodName, context = {}) {
+  const fn = target?.[methodName];
 
-  const first =
-    raw.split("-")[0] || raw;
+  if (!isFn(fn)) return false;
 
-  if (
-    first === "spa" ||
-    first === "spanish" ||
-    first === "castellano"
-  ) {
-    return "es";
-  }
-
-  if (
-    first === "eng" ||
-    first === "english"
-  ) {
-    return "en";
-  }
-
-  if (
-    first === "cat" ||
-    first === "catalan" ||
-    first === "català" ||
-    first === "catalán"
-  ) {
-    return "ca";
-  }
-
-  return first || fallback;
-}
-
-function safeSetDocumentLang(lang = "es") {
-  const cleanLang =
-    normalizeLang(lang, "es");
-
-  if (!isBrowser()) {
-    return false;
-  }
-
-  try {
-    document.documentElement.setAttribute(
-      "lang",
-      cleanLang
-    );
-
-    document.documentElement.lang =
-      cleanLang;
-
-    return true;
-  } catch {}
-
-  return false;
-}
-
-function resolveLang(AppCore, I18n, payload = {}) {
-  return normalizeLang(
-    safeText(payload?.lang, "") ||
-      safeText(payload?.language, "") ||
-      safeText(payload?.locale, "") ||
-      safeText(I18n?.getLang?.(), "") ||
-      safeText(I18n?.getLanguage?.(), "") ||
-      safeText(I18n?.lang, "") ||
-      safeText(I18n?.language, "") ||
-      safeText(AppCore?.state?.lang, "") ||
-      "es",
-    "es"
-  );
-}
-
-function setI18nLangSoft(I18n, lang = "es") {
-  const cleanLang =
-    normalizeLang(lang, "es");
-
-  const methods = [
-    "setLang",
-    "setLanguage",
-    "changeLang",
-    "changeLanguage",
-    "use",
+  const attempts = [
+    () => fn.call(target, context.reason || context, context),
+    () => fn.call(target, context),
+    () => fn.call(target),
   ];
 
-  for (const methodName of methods) {
+  for (const attempt of attempts) {
     try {
-      if (isFunction(I18n?.[methodName])) {
-        const result =
-          I18n[methodName](
-            cleanLang,
-            {
-              silent:
-                true,
-
-              source:
-                EVENTS_SOURCE,
-            }
-          );
-
-        if (
-          result &&
-          isFunction(result.catch)
-        ) {
-          result.catch(() => {});
-        }
-
-        return true;
-      }
+      attempt();
+      return true;
     } catch {}
   }
 
-  try {
-    if (
-      I18n &&
-      typeof I18n === "object"
-    ) {
-      I18n.lang =
-        cleanLang;
-
-      return true;
-    }
-  } catch {}
-
   return false;
 }
 
-function shouldEventsRerenderOnLangChange(payload = {}) {
-  /*
-    src/app/i18n.js es el controlador principal de rerender por idioma.
-    AppEvents sólo rerenderiza si se pide explícitamente.
-  */
-  return Boolean(
-    payload?.rerenderByEvents === true ||
-      payload?.appEventsRerender === true ||
-      payload?.forceEventsRerender === true
-  );
-}
-
-async function safeRerenderCurrentRoute({
-  AppCore,
-  Router,
-  rerenderCurrentRoute,
-  reason = "lang-change",
-} = {}) {
-  const current =
-    safeNow();
-
-  if (
-    current - lastLangRenderAt <
-    LANG_RERENDER_DEDUPE_MS
-  ) {
-    return false;
-  }
-
-  lastLangRenderAt =
-    current;
-
-  try {
-    if (isFunction(rerenderCurrentRoute)) {
-      await Promise.resolve(
-        rerenderCurrentRoute({
-          AppCore,
-          Router,
-          reason,
-          source:
-            EVENTS_SOURCE,
-        })
-      );
-
-      return true;
+function callFirst(target, methods = [], context = {}) {
+  for (const method of safeArray(methods)) {
+    if (callUiMethod(target, method, context)) {
+      return method;
     }
-  } catch (error) {
-    safeWarn(
-      AppCore,
-      "rerenderCurrentRoute() inyectado falló.",
-      error
-    );
   }
-
-  const publicPath =
-    resolvePublicPath(
-      AppCore,
-      Router,
-      {}
-    );
-
-  const canonicalPath =
-    resolveCanonicalPath(
-      AppCore,
-      Router,
-      {
-        publicPath,
-      }
-    );
-
-  try {
-    if (isFunction(Router?.rerenderCurrentRoute)) {
-      await Promise.resolve(
-        Router.rerenderCurrentRoute({
-          reason,
-          source:
-            EVENTS_SOURCE,
-          force:
-            true,
-        })
-      );
-
-      return true;
-    }
-  } catch (error) {
-    safeWarn(
-      AppCore,
-      "Router.rerenderCurrentRoute() falló.",
-      error
-    );
-  }
-
-  try {
-    if (isFunction(Router?.render)) {
-      await Promise.resolve(
-        Router.render(
-          canonicalPath,
-          {
-            force:
-              true,
-
-            reason,
-            source:
-              EVENTS_SOURCE,
-
-            preservePublicPath:
-              true,
-
-            publicPath,
-            canonicalPath,
-
-            i18nRerender:
-              true,
-
-            skipHistory:
-              true,
-
-            replaceState:
-              false,
-          }
-        )
-      );
-
-      return true;
-    }
-  } catch (error) {
-    safeWarn(
-      AppCore,
-      "Router.render() falló durante cambio de idioma.",
-      error
-    );
-  }
-
-  try {
-    if (isFunction(Router?.navigate)) {
-      await Promise.resolve(
-        Router.navigate(
-          publicPath,
-          {
-            replaceState:
-              true,
-
-            force:
-              true,
-
-            reason,
-            source:
-              EVENTS_SOURCE,
-
-            preservePublicPath:
-              true,
-
-            i18nRerender:
-              true,
-          }
-        )
-      );
-
-      return true;
-    }
-  } catch (error) {
-    safeWarn(
-      AppCore,
-      "Router.navigate() falló durante cambio de idioma.",
-      error
-    );
-  }
-
-  return false;
-}
-
-/* =========================================================
-   PATH / ROUTER
-========================================================= */
-
-function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
-    return window.location.origin;
-  }
-
-  return "http://localhost";
-}
-
-function isHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  return (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  );
-}
-
-function normalizePathnameOnly(pathname = "/") {
-  let value =
-    safeText(pathname, "/")
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
-
-  if (!value) {
-    value =
-      "/";
-  }
-
-  if (!value.startsWith("/")) {
-    value =
-      `/${value}`;
-  }
-
-  const output =
-    [];
-
-  for (const segment of value.split("/").filter(Boolean)) {
-    if (segment === ".") {
-      continue;
-    }
-
-    if (segment === "..") {
-      output.pop();
-      continue;
-    }
-
-    output.push(segment);
-  }
-
-  value =
-    `/${output.join("/")}`;
-
-  if (!value) {
-    value =
-      "/";
-  }
-
-  if (
-    value.length > 1 &&
-    value.endsWith("/")
-  ) {
-    value =
-      value.replace(/\/+$/g, "") || "/";
-  }
-
-  return value;
-}
-
-function normalizeSearch(search = "") {
-  const value =
-    safeText(search, "");
-
-  if (!value) {
-    return "";
-  }
-
-  return value.startsWith("?")
-    ? value
-    : `?${value.replace(/^\?+/, "")}`;
-}
-
-function normalizeHash(hash = "") {
-  const value =
-    safeText(hash, "");
-
-  if (!value) {
-    return "";
-  }
-
-  return value.startsWith("#")
-    ? value
-    : `#${value.replace(/^#+/, "")}`;
-}
-
-function normalizeHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return "/";
-  }
-
-  if (raw.startsWith("#!")) {
-    return normalizeLocalFullPath(
-      raw.replace(/^#!\/?/, "/")
-    );
-  }
-
-  return normalizeLocalFullPath(
-    raw.replace(/^#\/?/, "/")
-  );
-}
-
-function splitLocalFullPath(value = "/") {
-  const raw =
-    safeText(value, "/");
-
-  if (isHashRouterPath(raw)) {
-    return splitLocalFullPath(
-      normalizeHashRouterPath(raw)
-    );
-  }
-
-  let pathname =
-    raw;
-
-  let search =
-    "";
-
-  let hash =
-    "";
-
-  const hashIndex =
-    pathname.indexOf("#");
-
-  if (hashIndex >= 0) {
-    hash =
-      pathname.slice(hashIndex);
-
-    pathname =
-      pathname.slice(0, hashIndex) || "/";
-  }
-
-  const searchIndex =
-    pathname.indexOf("?");
-
-  if (searchIndex >= 0) {
-    search =
-      pathname.slice(searchIndex);
-
-    pathname =
-      pathname.slice(0, searchIndex) || "/";
-  }
-
-  return {
-    pathname:
-      normalizePathnameOnly(pathname),
-
-    search:
-      normalizeSearch(search),
-
-    hash:
-      normalizeHash(hash),
-  };
-}
-
-function normalizeLocalFullPath(path = "/") {
-  const raw =
-    safeText(path, "/");
-
-  if (!raw) {
-    return "/";
-  }
-
-  if (isHashRouterPath(raw)) {
-    return normalizeHashRouterPath(raw);
-  }
-
-  try {
-    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed =
-        new URL(
-          raw,
-          getBaseOrigin()
-        );
-
-      if (parsed.origin !== getBaseOrigin()) {
-        return "/";
-      }
-
-      if (
-        parsed.hash &&
-        isHashRouterPath(parsed.hash)
-      ) {
-        return normalizeHashRouterPath(parsed.hash);
-      }
-
-      return normalizeLocalFullPath(
-        `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
-      );
-    }
-  } catch {}
-
-  const {
-    pathname,
-    search,
-    hash,
-  } =
-    splitLocalFullPath(raw);
-
-  return `${pathname}${search}${hash}`;
-}
-
-function localNormalizePublicPath(path = "/") {
-  return normalizeLocalFullPath(path || "/");
-}
-
-function stripPublicUsernamePrefix(pathname = "/") {
-  const clean =
-    normalizePathnameOnly(pathname || "/");
-
-  const segments =
-    clean
-      .split("/")
-      .filter(Boolean);
-
-  if (
-    segments.length > 0 &&
-    PUBLIC_USERNAME_RE.test(segments[0])
-  ) {
-    const rest =
-      segments
-        .slice(1)
-        .join("/");
-
-    return rest
-      ? normalizePathnameOnly(`/${rest}`)
-      : "/";
-  }
-
-  return clean;
-}
-
-function localNormalizeCanonicalPath(path = "/") {
-  const publicPath =
-    localNormalizePublicPath(path);
-
-  const {
-    pathname,
-  } =
-    splitLocalFullPath(publicPath);
-
-  return stripPublicUsernamePrefix(pathname) || "/";
-}
-
-function normalizePublicSafe(AppCore, path = "/") {
-  const raw =
-    safeText(path, "/") || "/";
-
-  try {
-    const value =
-      normalizePublicPath(
-        AppCore,
-        raw
-      );
-
-    if (value) {
-      return value;
-    }
-  } catch {}
-
-  return localNormalizePublicPath(raw);
-}
-
-function normalizeCanonicalSafe(AppCore, path = "/") {
-  const raw =
-    safeText(path, "/") || "/";
-
-  try {
-    const value =
-      normalizeCanonicalPath(
-        AppCore,
-        raw
-      );
-
-    if (value) {
-      return value;
-    }
-  } catch {}
-
-  return localNormalizeCanonicalPath(raw);
-}
-
-function callRouterGetter(Router, methodName = "") {
-  try {
-    if (isFunction(Router?.[methodName])) {
-      return Router[methodName]();
-    }
-  } catch {}
 
   return "";
 }
 
-function resolvePublicPath(AppCore, Router, payload = {}) {
-  const data =
-    ensureObject(payload);
-
-  const route =
-    ensureObject(data.route);
-
-  const resolved =
-    ensureObject(data.resolved);
-
-  let helperPublic =
-    "";
-
-  try {
-    helperPublic =
-      safeText(
-        getCurrentPublicPath?.(AppCore, Router),
-        ""
-      );
-  } catch {}
-
-  const candidate =
-    safeText(data.publicPath, "") ||
-    safeText(data.currentPublicPath, "") ||
-    safeText(data.requestedPath, "") ||
-    safeText(data.href, "") ||
-    safeText(data.to, "") ||
-    safeText(data.path, "") ||
-    safeText(route.publicPath, "") ||
-    safeText(route.path, "") ||
-    safeText(resolved.publicPath, "") ||
-    safeText(AppCore?.state?.publicPath, "") ||
-    safeText(callRouterGetter(Router, "getCurrentPublicPath"), "") ||
-    helperPublic ||
-    "/";
-
-  return normalizePublicSafe(
-    AppCore,
-    candidate
-  );
-}
-
-function resolveCanonicalPath(AppCore, Router, payload = {}) {
-  const data =
-    ensureObject(payload);
-
-  const route =
-    ensureObject(data.route);
-
-  const resolved =
-    ensureObject(data.resolved);
-
-  let helperCanonical =
-    "";
-
-  try {
-    helperCanonical =
-      safeText(
-        getCurrentCanonicalPath?.(AppCore, Router),
-        ""
-      );
-  } catch {}
-
-  const candidate =
-    safeText(data.canonicalPath, "") ||
-    safeText(data.currentCanonicalPath, "") ||
-    safeText(route.canonicalPath, "") ||
-    safeText(resolved.canonicalPath, "") ||
-    safeText(callRouterGetter(Router, "getCurrentCanonicalPath"), "") ||
-    helperCanonical ||
-    safeText(AppCore?.state?.route, "") ||
-    safeText(route.path, "") ||
-    safeText(data.path, "") ||
-    resolvePublicPath(AppCore, Router, data) ||
-    "/";
-
-  return normalizeCanonicalSafe(
-    AppCore,
-    candidate
-  );
-}
-
-function safePatchRouteState(AppCore, {
-  route = "/",
-  publicPath = "/",
-} = {}) {
-  const cleanRoute =
-    normalizeCanonicalSafe(
-      AppCore,
-      route
-    );
-
-  const cleanPublicPath =
-    normalizePublicSafe(
-      AppCore,
-      publicPath
-    );
-
-  const state =
-    ensureObject(AppCore?.state);
-
-  const routeChanged =
-    safeText(state.route, "") !== cleanRoute;
-
-  const canonicalChanged =
-    safeText(state.canonicalPath, "") !== cleanRoute;
-
-  const publicChanged =
-    safeText(state.publicPath, "") !== cleanPublicPath;
-
-  if (
-    !routeChanged &&
-    !canonicalChanged &&
-    !publicChanged
-  ) {
-    return {
-      changed:
-        false,
-
-      routeChanged:
-        false,
-
-      publicChanged:
-        false,
-
-      route:
-        cleanRoute,
-
-      publicPath:
-        cleanPublicPath,
-    };
-  }
-
-  const patch =
-    {};
-
-  if (
-    routeChanged ||
-    canonicalChanged
-  ) {
-    patch.route =
-      cleanRoute;
-
-    patch.canonicalPath =
-      cleanRoute;
-  }
-
-  if (publicChanged) {
-    patch.publicPath =
-      cleanPublicPath;
-  }
-
-  setStateSilent(
-    AppCore,
-    patch
-  );
-
-  return {
-    changed:
-      true,
-
-    routeChanged:
-      Boolean(routeChanged || canonicalChanged),
-
-    publicChanged,
-    route:
-      cleanRoute,
-
-    publicPath:
-      cleanPublicPath,
-  };
-}
-
-function safeApplyPostRenderLoaderPolicy({
-  AppCore,
-  Router,
-  applyPostRenderLoaderPolicy,
-  payload = {},
-} = {}) {
-  const fn =
-    isFunction(applyPostRenderLoaderPolicy)
-      ? applyPostRenderLoaderPolicy
-      : applyPostRenderLoaderPolicyBase;
-
-  try {
-    if (isFunction(fn)) {
-      fn({
-        AppCore,
-        Router,
-        ...ensureObject(payload),
-      });
-
-      return true;
-    }
-  } catch (error) {
-    safeWarn(
-      AppCore,
-      "applyPostRenderLoaderPolicy() falló.",
-      error
-    );
-  }
-
-  return false;
-}
-
-function shouldSkipRouterRenderedSync(route = "/", publicPath = "/") {
-  const current =
-    safeNow();
-
-  const key =
-    `${redactSensitiveText(route)}|${redactSensitiveText(publicPath)}`;
-
-  if (
-    key === lastRouterRenderedKey &&
-    current - lastRouterRenderedAt <
-      ROUTER_RENDER_SYNC_DEDUPE_MS
-  ) {
-    return true;
-  }
-
-  lastRouterRenderedKey =
-    key;
-
-  lastRouterRenderedAt =
-    current;
-
-  return false;
-}
-
-/* =========================================================
-   UI SYNC LIGHT
-========================================================= */
-
-function callFirstUiMethod(target, methodNames = [], context = {}) {
-  if (!target) {
-    return {
-      called:
-        false,
-
-      method:
-        "",
-    };
-  }
-
-  for (const methodName of safeArray(methodNames)) {
-    const fn =
-      target?.[methodName];
-
-    if (!isFunction(fn)) {
-      continue;
-    }
-
-    try {
-      fn.call(
-        target,
-        context.reason || context,
-        context
-      );
-
-      return {
-        called:
-          true,
-
-        method:
-          methodName,
-      };
-    } catch {}
-
-    try {
-      fn.call(
-        target,
-        context
-      );
-
-      return {
-        called:
-          true,
-
-        method:
-          methodName,
-      };
-    } catch {}
-
-    try {
-      fn.call(target);
-
-      return {
-        called:
-          true,
-
-        method:
-          methodName,
-      };
-    } catch {}
-  }
-
-  return {
-    called:
-      false,
-
-    method:
-      "",
-  };
-}
-
-function callAllUiMethods(target, methodNames = [], context = {}) {
-  const methods =
-    [];
-
-  if (!target) {
-    return {
-      called:
-        false,
-
-      methods,
-    };
-  }
-
-  for (const methodName of safeArray(methodNames)) {
-    const fn =
-      target?.[methodName];
-
-    if (!isFunction(fn)) {
-      continue;
-    }
-
-    let called =
-      false;
-
-    try {
-      fn.call(
-        target,
-        context.reason || context,
-        context
-      );
-
-      called =
-        true;
-    } catch {
-      try {
-        fn.call(
-          target,
-          context
-        );
-
-        called =
-          true;
-      } catch {
-        try {
-          fn.call(target);
-          called =
-            true;
-        } catch {}
-      }
-    }
-
-    if (called) {
-      methods.push(methodName);
+function callAll(target, methods = [], context = {}) {
+  const used = [];
+
+  for (const method of safeArray(methods)) {
+    if (callUiMethod(target, method, context)) {
+      used.push(method);
     }
   }
 
-  return {
-    called:
-      methods.length > 0,
+  return used;
+}
 
-    methods,
+function syncSidebar(SidebarUI, context = {}) {
+  const user = callFirst(SidebarUI, SIDEBAR_USER_METHODS, context);
+  const visual = callAll(SidebarUI, SIDEBAR_VISUAL_METHODS, context);
+
+  const fallback = !user && !visual.length
+    ? callFirst(SidebarUI, SIDEBAR_FALLBACK_METHODS, context)
+    : "";
+
+  return {
+    ok: Boolean(user || visual.length || fallback),
+    user,
+    visual,
+    fallback,
   };
 }
 
-function syncSidebarLight(SidebarUI, context = {}) {
-  const user =
-    callFirstUiMethod(
-      SidebarUI,
-      SIDEBAR_LIGHT_USER_METHODS,
-      context
-    );
+function syncTopbar(TopbarUI, context = {}) {
+  const user = callFirst(TopbarUI, TOPBAR_USER_METHODS, context);
+  const visual = callAll(TopbarUI, TOPBAR_VISUAL_METHODS, context);
 
-  const visual =
-    callAllUiMethods(
-      SidebarUI,
-      SIDEBAR_LIGHT_VISUAL_METHODS,
-      context
-    );
-
-  let fallback = {
-    called:
-      false,
-
-    method:
-      "",
-  };
-
-  if (
-    !user.called &&
-    !visual.called
-  ) {
-    fallback =
-      callFirstUiMethod(
-        SidebarUI,
-        SIDEBAR_LIGHT_FALLBACK_METHODS,
-        context
-      );
-  }
+  const fallback = !user && !visual.length
+    ? callFirst(TopbarUI, TOPBAR_FALLBACK_METHODS, context)
+    : "";
 
   return {
-    ok:
-      Boolean(
-        user.called ||
-          visual.called ||
-          fallback.called
-      ),
-
-    user:
-      user.method,
-
-    visual:
-      visual.methods,
-
-    fallback:
-      fallback.method,
+    ok: Boolean(user || visual.length || fallback),
+    user,
+    visual,
+    fallback,
   };
 }
 
-function syncTopbarLight(TopbarUI, context = {}) {
-  const user =
-    callFirstUiMethod(
-      TopbarUI,
-      TOPBAR_LIGHT_USER_METHODS,
-      context
-    );
-
-  const visual =
-    callAllUiMethods(
-      TopbarUI,
-      TOPBAR_LIGHT_VISUAL_METHODS,
-      context
-    );
-
-  let fallback = {
-    called:
-      false,
-
-    method:
-      "",
-  };
-
-  if (
-    !user.called &&
-    !visual.called
-  ) {
-    fallback =
-      callFirstUiMethod(
-        TopbarUI,
-        TOPBAR_LIGHT_FALLBACK_METHODS,
-        context
-      );
-  }
-
-  return {
-    ok:
-      Boolean(
-        user.called ||
-          visual.called ||
-          fallback.called
-      ),
-
-    user:
-      user.method,
-
-    visual:
-      visual.methods,
-
-    fallback:
-      fallback.method,
-  };
-}
-
-function getUiSyncDedupeKey(context = {}) {
+function uiDedupeKey(context = {}) {
   return [
-    safeText(context.route, "/"),
-    safeText(context.publicPath, "/"),
-    Boolean(context.authenticated) ? "auth" : "anon",
-    safeText(context.user?.id || context.user?.userId || "", ""),
-    safeText(context.user?.username || context.user?.email || "", ""),
-    safeText(context.user?.role || context.user?.rol || context.role || "", ""),
-  ].join("|");
+    context.route || "/",
+    context.publicPath || "/",
+    context.authenticated ? "auth" : "anon",
+    context.user?.id || context.user?.userId || "",
+    context.user?.username || context.user?.email || "",
+    context.user?.role || context.user?.rol || context.role || "",
+  ]
+    .map((item) => safeText(item, ""))
+    .join("|");
 }
 
 function shouldSkipUiSync(context = {}, force = false) {
-  if (force === true) {
-    return false;
-  }
+  if (force) return false;
 
-  const current =
-    safeNow();
+  const key = redact(uiDedupeKey(context));
+  const stamp = now();
 
-  const key =
-    redactSensitiveText(
-      getUiSyncDedupeKey(context)
-    );
-
-  if (
-    key === lastUiSyncKey &&
-    current - lastUiSyncAt < UI_SYNC_DEDUPE_MS
-  ) {
+  if (key === lastUiKey && stamp - lastUiAt < UI_SYNC_DEDUPE_MS) {
     return true;
   }
 
-  lastUiSyncKey =
-    key;
-
-  lastUiSyncAt =
-    current;
+  lastUiKey = key;
+  lastUiAt = stamp;
 
   return false;
 }
 
-async function safeSyncUI({
+async function syncUiLight({
   AppCore,
   Auth,
   Router,
@@ -2562,25 +1129,16 @@ async function safeSyncUI({
   TopbarUI,
   Toast,
   I18n,
+
   syncUserUI,
+
   reason = "sync-ui",
   payload = {},
-  emit = true,
+  emitResult = true,
   force = false,
 } = {}) {
-  const publicPath =
-    resolvePublicPath(
-      AppCore,
-      Router,
-      payload
-    );
-
-  const route =
-    resolveCanonicalPath(
-      AppCore,
-      Router,
-      payload
-    );
+  const publicPath = resolvePublicPath(AppCore, Router, payload);
+  const route = resolveCanonicalPath(AppCore, Router, payload);
 
   const user =
     AppCore?.state?.user ||
@@ -2600,194 +1158,306 @@ async function safeSyncUI({
     Toast,
     I18n,
 
-    reason:
-      safeText(reason, "sync-ui"),
-
-    payload:
-      ensureObject(payload),
+    reason: safeText(reason, "sync-ui"),
+    payload: safeObject(payload),
 
     route,
     publicPath,
     user,
 
-    role:
-      AppCore?.state?.role ||
-      user?.role ||
-      user?.rol ||
-      null,
+    role: AppCore?.state?.role || user?.role || user?.rol || null,
+    authenticated: Boolean(AppCore?.state?.authenticated || getAuthStatus(Auth)),
 
-    authenticated:
-      Boolean(
-        AppCore?.state?.authenticated ||
-          getAuthStatus(Auth)
-      ),
+    rebind: false,
+    hardRepair: false,
   };
 
-  if (shouldSkipUiSync(context, force)) {
-    return true;
-  }
+  if (shouldSkipUiSync(context, force)) return true;
 
-  let ok =
-    false;
+  let injected = false;
+  let ok = false;
 
-  let usedInjectedSync =
-    false;
+  let sidebar = { ok: false };
+  let topbar = { ok: false };
 
-  let sidebarResult = {
-    ok:
-      false,
-  };
-
-  let topbarResult = {
-    ok:
-      false,
-  };
-
-  /*
-    Firma moderna. Una sola llamada.
-    AppEvents no emite app:user-ui:sync directamente.
-  */
-  if (isFunction(syncUserUI)) {
+  if (isFn(syncUserUI)) {
     try {
       await Promise.resolve(
         syncUserUI({
           ...context,
-
-          rebind:
-            false,
-
-          hardRepair:
-            false,
-
-          force:
-            true,
+          force: true,
         })
       );
 
-      usedInjectedSync =
-        true;
-
-      ok =
-        true;
+      injected = true;
+      ok = true;
     } catch (error) {
-      safeWarn(
-        AppCore,
-        "syncUserUI() inyectado falló.",
-        error
-      );
+      warn(AppCore, "syncUserUI() inyectado falló.", error);
     }
   }
 
-  /*
-    Fallback ligero directo si no se inyecta syncUserUI.
-  */
-  if (!usedInjectedSync) {
-    sidebarResult =
-      syncSidebarLight(
-        SidebarUI,
-        context
-      );
-
-    topbarResult =
-      syncTopbarLight(
-        TopbarUI,
-        context
-      );
-
-    ok =
-      Boolean(
-        sidebarResult.ok ||
-          topbarResult.ok
-      );
+  if (!injected) {
+    sidebar = syncSidebar(SidebarUI, context);
+    topbar = syncTopbar(TopbarUI, context);
+    ok = Boolean(sidebar.ok || topbar.ok);
   }
 
-  if (emit) {
-    safeEmit(
-      AppCore,
-      EVENT_NAMES.appEventsUiSynced,
-      {
-        source:
-          EVENTS_SOURCE,
-
-        reason:
-          context.reason,
-
-        route:
-          redactSensitiveText(context.route),
-
-        publicPath:
-          redactSensitiveText(context.publicPath),
-
-        authenticated:
-          context.authenticated,
-
-        injected:
-          usedInjectedSync,
-
-        sidebar:
-          sidebarResult,
-
-        topbar:
-          topbarResult,
-
-        ok,
-      }
-    );
+  if (emitResult) {
+    emit(AppCore, EVENT_NAMES.appEventsUiSynced, {
+      reason: context.reason,
+      route,
+      publicPath,
+      authenticated: context.authenticated,
+      injected,
+      sidebar,
+      topbar,
+      ok,
+    });
   }
 
   return ok;
 }
 
-function safeRequestUiRepair(AppCore, reason = "event", payload = {}) {
-  /*
-    API pública por compatibilidad.
-    NO se usa automáticamente desde router:rendered.
-  */
+function requestUiRepair(AppCore, reason = "event", payload = {}) {
   const detail = {
-    source:
-      EVENTS_SOURCE,
-
-    reason:
-      safeText(reason, "event"),
-
-    payload:
-      ensureObject(payload),
-
-    hardRepair:
-      false,
-
-    rebind:
-      false,
-
-    at:
-      safeIsoDate(),
+    source: SOURCE,
+    reason: safeText(reason, "event"),
+    payload: safeObject(payload),
+    hardRepair: false,
+    rebind: false,
+    at: iso(),
   };
 
-  safeEmit(
-    AppCore,
-    EVENT_NAMES.appUiRepairRequest,
-    detail
-  );
-
+  emit(AppCore, EVENT_NAMES.appUiRepairRequest, detail);
   return detail;
 }
 
 /* =========================================================
-   BINDING HELPERS
+   LANGUAGE / THEME
 ========================================================= */
 
-function rememberDisposer(disposer) {
-  if (isFunction(disposer)) {
-    boundDisposers.push(disposer);
+function normalizeLang(value = "", fallback = "es") {
+  const raw = safeText(value, fallback).toLowerCase().replace(/_/g, "-");
+  const first = raw.split("-")[0] || raw;
+
+  if (["spa", "spanish", "castellano"].includes(first)) return "es";
+  if (["eng", "english"].includes(first)) return "en";
+  if (["cat", "catalan", "català", "catalán"].includes(first)) return "ca";
+
+  return first || fallback;
+}
+
+function setDocumentLang(lang = "es") {
+  if (!isBrowser()) return false;
+
+  const cleanLang = normalizeLang(lang, "es");
+
+  try {
+    document.documentElement.setAttribute("lang", cleanLang);
+    document.documentElement.lang = cleanLang;
+    return true;
+  } catch {
+    return false;
   }
 }
 
-function normalizeDisposer(candidate) {
-  if (isFunction(candidate)) {
-    return candidate;
+function resolveLang(AppCore, I18n, payload = {}) {
+  return normalizeLang(
+    payload.lang ||
+      payload.language ||
+      payload.locale ||
+      I18n?.getLang?.() ||
+      I18n?.getLanguage?.() ||
+      I18n?.lang ||
+      I18n?.language ||
+      AppCore?.state?.lang ||
+      "es",
+    "es"
+  );
+}
+
+function setI18nLang(I18n, lang = "es") {
+  const cleanLang = normalizeLang(lang, "es");
+
+  for (const method of ["setLang", "setLanguage", "changeLang", "changeLanguage", "use"]) {
+    try {
+      if (isFn(I18n?.[method])) {
+        const result = I18n[method](cleanLang, {
+          silent: true,
+          source: SOURCE,
+        });
+
+        if (result && isFn(result.catch)) result.catch(() => {});
+        return true;
+      }
+    } catch {}
   }
 
-  if (isFunction(candidate?.dispose)) {
+  try {
+    if (I18n && typeof I18n === "object") {
+      I18n.lang = cleanLang;
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function shouldRerenderOnLang(payload = {}) {
+  return Boolean(
+    payload.rerenderByEvents === true ||
+      payload.appEventsRerender === true ||
+      payload.forceEventsRerender === true
+  );
+}
+
+async function rerenderCurrentRoute({
+  AppCore,
+  Router,
+  rerenderCurrentRoute: injected,
+  reason = "lang-change",
+} = {}) {
+  const stamp = now();
+
+  if (stamp - lastLangRenderAt < LANG_RERENDER_DEDUPE_MS) return false;
+
+  lastLangRenderAt = stamp;
+
+  try {
+    if (isFn(injected)) {
+      await Promise.resolve(
+        injected({
+          AppCore,
+          Router,
+          reason,
+          source: SOURCE,
+        })
+      );
+
+      return true;
+    }
+  } catch (error) {
+    warn(AppCore, "rerenderCurrentRoute() inyectado falló.", error);
+  }
+
+  const publicPath = resolvePublicPath(AppCore, Router, {});
+  const canonicalPath = resolveCanonicalPath(AppCore, Router, { publicPath });
+
+  try {
+    if (isFn(Router?.rerenderCurrentRoute)) {
+      await Promise.resolve(
+        Router.rerenderCurrentRoute({
+          reason,
+          source: SOURCE,
+          force: true,
+        })
+      );
+
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (isFn(Router?.render)) {
+      await Promise.resolve(
+        Router.render(canonicalPath, {
+          force: true,
+          reason,
+          source: SOURCE,
+          preservePublicPath: true,
+          publicPath,
+          canonicalPath,
+          i18nRerender: true,
+          skipHistory: true,
+          replaceState: false,
+        })
+      );
+
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (isFn(Router?.navigate)) {
+      await Promise.resolve(
+        Router.navigate(publicPath, {
+          replaceState: true,
+          force: true,
+          reason,
+          source: SOURCE,
+          preservePublicPath: true,
+          i18nRerender: true,
+        })
+      );
+
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function shouldSkipTheme(payload = {}) {
+  const key = [
+    payload.theme || "",
+    payload.mode || "",
+    payload.appearance || "",
+    payload.value || "",
+  ]
+    .map((item) => safeText(item, ""))
+    .join("|");
+
+  const stamp = now();
+
+  if (key && key === lastThemeKey && stamp - lastThemeAt < THEME_SYNC_DEDUPE_MS) {
+    return true;
+  }
+
+  lastThemeKey = key;
+  lastThemeAt = stamp;
+
+  return false;
+}
+
+/* =========================================================
+   LOADER POLICY
+========================================================= */
+
+function applyLoaderPolicy({
+  AppCore,
+  Router,
+  applyPostRenderLoaderPolicy,
+  payload = {},
+} = {}) {
+  const fn = isFn(applyPostRenderLoaderPolicy)
+    ? applyPostRenderLoaderPolicy
+    : applyPostRenderLoaderPolicyBase;
+
+  try {
+    if (isFn(fn)) {
+      fn({
+        AppCore,
+        Router,
+        ...safeObject(payload),
+      });
+
+      return true;
+    }
+  } catch (error) {
+    warn(AppCore, "applyPostRenderLoaderPolicy() falló.", error);
+  }
+
+  return false;
+}
+
+/* =========================================================
+   BIND HELPERS
+========================================================= */
+
+function normalizeDisposer(candidate) {
+  if (isFn(candidate)) return candidate;
+
+  if (isFn(candidate?.dispose)) {
     return () => {
       try {
         candidate.dispose();
@@ -2795,7 +1465,7 @@ function normalizeDisposer(candidate) {
     };
   }
 
-  if (isFunction(candidate?.off)) {
+  if (isFn(candidate?.off)) {
     return () => {
       try {
         candidate.off();
@@ -2803,7 +1473,7 @@ function normalizeDisposer(candidate) {
     };
   }
 
-  if (isFunction(candidate?.remove)) {
+  if (isFn(candidate?.remove)) {
     return () => {
       try {
         candidate.remove();
@@ -2814,98 +1484,64 @@ function normalizeDisposer(candidate) {
   return null;
 }
 
-function rememberBoundEvent(eventName = "") {
-  const clean =
-    safeText(eventName, "");
+function rememberDisposer(disposer) {
+  if (isFn(disposer)) disposers.push(disposer);
+}
 
-  if (
-    clean &&
-    !eventState.boundEvents.includes(clean)
-  ) {
+function rememberEvent(eventName = "") {
+  const clean = safeText(eventName, "");
+
+  if (clean && !eventState.boundEvents.includes(clean)) {
     eventState.boundEvents.push(clean);
   }
 }
 
-function makeBoundKey(eventName = "", label = "") {
-  return [
-    safeText(eventName, ""),
-    safeText(label, "default"),
-  ].join("::");
-}
-
 function bindViaBus(AppCore, eventName, handler) {
-  const bus =
-    AppCore?.events;
+  const bus = AppCore?.events;
 
-  if (
-    !bus ||
-    !isFunction(bus.on)
-  ) {
-    return false;
-  }
+  if (!isFn(bus?.on)) return false;
 
   try {
-    const maybeOff =
-      bus.on(
-        eventName,
-        handler
-      );
+    const off = bus.on(eventName, handler);
+    const disposer = normalizeDisposer(off);
 
-    const normalizedDisposer =
-      normalizeDisposer(maybeOff);
-
-    if (normalizedDisposer) {
-      rememberDisposer(normalizedDisposer);
-    } else if (isFunction(bus.off)) {
+    if (disposer) {
+      rememberDisposer(disposer);
+    } else if (isFn(bus.off)) {
       rememberDisposer(() => {
         try {
-          bus.off(
-            eventName,
-            handler
-          );
+          bus.off(eventName, handler);
         } catch {}
       });
     }
 
-    rememberBoundEvent(eventName);
-
+    rememberEvent(eventName);
     return true;
-  } catch {}
-
-  return false;
+  } catch {
+    return false;
+  }
 }
 
 function bindViaWindow(eventName, handler, options = false) {
-  if (!isBrowser()) {
-    return false;
-  }
+  if (!isBrowser()) return false;
 
   try {
-    window.addEventListener(
-      eventName,
-      handler,
-      options
-    );
+    window.addEventListener(eventName, handler, options);
 
     rememberDisposer(() => {
       try {
-        window.removeEventListener(
-          eventName,
-          handler,
-          options
-        );
+        window.removeEventListener(eventName, handler, options);
       } catch {}
     });
 
-    rememberBoundEvent(eventName);
-
+    rememberEvent(eventName);
     return true;
-  } catch {}
-
-  return false;
+  } catch {
+    return false;
+  }
 }
 
-function bindAppEvent({
+function bindEvent({
   AppCore,
   eventName,
   label = "",
@@ -2913,97 +1549,47 @@ function bindAppEvent({
   windowFallback = true,
   options = false,
 }) {
-  const cleanEventName =
-    safeText(eventName, "");
+  const cleanName = safeText(eventName, "");
+  const cleanLabel = safeText(label, cleanName || "event");
 
-  const cleanLabel =
-    safeText(label, cleanEventName || "event");
+  if (!cleanName || !isFn(handler)) return false;
 
-  if (
-    !cleanEventName ||
-    !isFunction(handler)
-  ) {
-    return false;
-  }
+  const key = `${cleanName}::${cleanLabel}`;
 
-  const boundKey =
-    makeBoundKey(
-      cleanEventName,
-      cleanLabel
-    );
+  if (boundKeys.has(key)) return false;
 
-  if (boundEventKeys.has(boundKey)) {
-    return false;
-  }
+  const wrapped = (eventOrPayload = {}) => {
+    const payload = getPayload(eventOrPayload);
 
-  const wrappedHandler =
-    async (eventOrPayload = {}) => {
-      const payload =
-        getEventPayload(eventOrPayload);
+    recordHandled(cleanName, payload);
 
-      recordHandled(
-        cleanEventName,
-        payload
-      );
+    Promise.resolve(
+      handler(payload, {
+        eventName: cleanName,
+        label: cleanLabel,
+        raw: eventOrPayload,
+      })
+    ).catch((error) => {
+      recordError(AppCore, cleanName, error);
+    });
+  };
 
-      try {
-        await Promise.resolve(
-          handler(
-            payload,
-            {
-              eventName:
-                cleanEventName,
+  const busBound = bindViaBus(AppCore, cleanName, wrapped);
 
-              label:
-                cleanLabel,
-
-              raw:
-                eventOrPayload,
-            }
-          )
-        );
-      } catch (error) {
-        recordError(
-          AppCore,
-          cleanEventName,
-          error
-        );
-      }
-    };
-
-  /*
-    NO usamos AppCore.cleanup.event aquí.
-    Bus interno primero.
-    Window sólo si no hay bus.
-  */
-  const boundToBus =
-    bindViaBus(
-      AppCore,
-      cleanEventName,
-      wrappedHandler
-    );
-
-  if (boundToBus) {
-    boundEventKeys.add(boundKey);
+  if (busBound) {
+    boundKeys.add(key);
     return true;
   }
 
-  if (
-    windowFallback &&
-    bindViaWindow(
-      cleanEventName,
-      wrappedHandler,
-      options
-    )
-  ) {
-    boundEventKeys.add(boundKey);
+  if (windowFallback && bindViaWindow(cleanName, wrapped, options)) {
+    boundKeys.add(key);
     return true;
   }
 
   return false;
 }
 
-function bindUniqueEventNames({
+function bindMany({
   AppCore,
   eventNames = [],
   label = "",
@@ -3011,18 +1597,14 @@ function bindUniqueEventNames({
   windowFallback = true,
   options = false,
 }) {
-  let count =
-    0;
+  let count = 0;
 
   for (const eventName of unique(eventNames)) {
     if (
-      bindAppEvent({
+      bindEvent({
         AppCore,
         eventName,
-
-        label:
-          `${label}:${eventName}`,
-
+        label: `${label}:${eventName}`,
         handler,
         windowFallback,
         options,
@@ -3036,20 +1618,15 @@ function bindUniqueEventNames({
 }
 
 /* =========================================================
-   EVENT HANDLERS
+   HANDLERS
 ========================================================= */
 
 function bindUserEvents(context) {
-  const {
-    AppCore,
-  } =
-    context;
+  const { AppCore } = context;
 
-  bindUniqueEventNames({
+  bindMany({
     AppCore,
-    label:
-      "user-sync",
-
+    label: "user-sync",
     eventNames: [
       EVENT_NAMES.appUserChange,
       EVENT_NAMES.appSessionRestored,
@@ -3058,21 +1635,12 @@ function bindUserEvents(context) {
       EVENT_NAMES.appUiReady,
       EVENT_NAMES.appReady,
     ],
-
-    handler:
-      async (payload, meta) => {
-        await safeSyncUI({
-          ...context,
-
-          reason:
-            meta?.eventName ||
-            payload?.reason ||
-            payload?.source ||
-            "user-sync",
-
-          payload,
-        });
-      },
+    handler: (payload, meta) =>
+      syncUiLight({
+        ...context,
+        reason: meta.eventName || payload.reason || payload.source || "user-sync",
+        payload,
+      }),
   });
 }
 
@@ -3082,322 +1650,170 @@ function bindLanguageEvents(context) {
     I18n,
     Toast,
     Router,
-    rerenderCurrentRoute,
-  } =
-    context;
+    rerenderCurrentRoute: injectedRerender,
+  } = context;
 
-  bindAppEvent({
+  bindEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.appLangChange,
+    eventName: EVENT_NAMES.appLangChange,
+    label: "lang-change",
+    handler: async (payload) => {
+      const lang = resolveLang(AppCore, I18n, payload);
 
-    label:
-      "lang-change",
+      setDocumentLang(lang);
+      setI18nLang(I18n, lang);
 
-    handler:
-      async (payload) => {
-        const lang =
-          resolveLang(
-            AppCore,
-            I18n,
-            payload
-          );
+      setStateSilent(AppCore, {
+        lang,
+        language: lang,
+        locale: lang,
+      });
 
-        safeSetDocumentLang(lang);
-
-        setI18nLangSoft(
-          I18n,
-          lang
-        );
-
-        setStateSilent(
-          AppCore,
-          {
-            lang,
-            language:
-              lang,
-            locale:
-              lang,
-          }
-        );
-
-        if (
-          langChangeInFlight ||
-          !shouldEventsRerenderOnLangChange(payload)
-        ) {
-          if (payload?.toast === true) {
-            toastOnce(
-              Toast,
-              "success",
-              "Idioma actualizado",
-              {
-                title:
-                  "Idioma",
-
-                duration:
-                  2200,
-              }
-            );
-          }
-
-          return;
-        }
-
-        langChangeInFlight =
-          true;
+      if (shouldRerenderOnLang(payload) && !langChangeInFlight) {
+        langChangeInFlight = true;
 
         try {
-          await safeRerenderCurrentRoute({
+          await rerenderCurrentRoute({
             AppCore,
             Router,
-            rerenderCurrentRoute,
-            reason:
-              "app:lang:change:events-rerender",
+            rerenderCurrentRoute: injectedRerender,
+            reason: "app:lang:change:events-rerender",
           });
         } finally {
-          langChangeInFlight =
-            false;
+          langChangeInFlight = false;
         }
+      }
 
-        if (payload?.toast === true) {
-          toastOnce(
-            Toast,
-            "success",
-            "Idioma actualizado",
-            {
-              title:
-                "Idioma",
-
-              duration:
-                2200,
-            }
-          );
-        }
-      },
+      if (payload.toast === true) {
+        toastOnce(Toast, AppCore, "success", "Idioma actualizado", {
+          title: "Idioma",
+          duration: 2200,
+        });
+      }
+    },
   });
 }
 
-function shouldSkipThemeSync(payload = {}) {
-  const key =
-    [
-      safeText(payload?.theme, ""),
-      safeText(payload?.mode, ""),
-      safeText(payload?.appearance, ""),
-      safeText(payload?.value, ""),
-    ].join("|");
-
-  const current =
-    safeNow();
-
-  if (
-    key &&
-    key === lastThemeSyncKey &&
-    current - lastThemeSyncAt < THEME_SYNC_DEDUPE_MS
-  ) {
-    return true;
-  }
-
-  lastThemeSyncKey =
-    key;
-
-  lastThemeSyncAt =
-    current;
-
-  return false;
-}
-
 function bindThemeEvents(context) {
-  const {
-    AppCore,
-  } =
-    context;
+  const { AppCore } = context;
 
-  bindUniqueEventNames({
+  bindMany({
     AppCore,
-    label:
-      "theme-sync",
-
+    label: "theme-sync",
     eventNames: [
       EVENT_NAMES.appThemeChange,
       EVENT_NAMES.onionThemeChange,
       EVENT_NAMES.legacyThemeChange,
     ],
+    handler: async (payload) => {
+      if (shouldSkipTheme(payload)) return;
 
-    handler:
-      async (payload) => {
-        if (shouldSkipThemeSync(payload)) {
-          return;
-        }
+      const theme = safeText(
+        payload.theme || payload.mode || payload.appearance || payload.value || "",
+        ""
+      );
 
-        const theme =
-          safeText(
-            payload?.theme ||
-              payload?.mode ||
-              payload?.appearance ||
-              payload?.value ||
-              "",
-            ""
-          );
-
-        if (theme) {
-          setStateSilent(
-            AppCore,
-            {
-              theme,
-              mode:
-                payload?.mode || theme,
-              appearance:
-                payload?.appearance ||
-                payload?.mode ||
-                theme,
-            }
-          );
-        }
-
-        await safeSyncUI({
-          ...context,
-          reason:
-            "theme-change",
-          payload,
-          force:
-            true,
+      if (theme) {
+        setStateSilent(AppCore, {
+          theme,
+          mode: payload.mode || theme,
+          appearance: payload.appearance || payload.mode || theme,
         });
-      },
+      }
+
+      await syncUiLight({
+        ...context,
+        reason: "theme-change",
+        payload,
+        force: true,
+      });
+    },
   });
 }
 
 function bindAuthEvents(context) {
-  const {
+  const { AppCore, Toast } = context;
+
+  bindEvent({
     AppCore,
-    Toast,
-  } =
-    context;
+    eventName: EVENT_NAMES.authLoginSuccess,
+    label: "auth-login-success",
+    handler: async (payload) => {
+      await syncUiLight({
+        ...context,
+        reason: "auth:login:success",
+        payload,
+        force: true,
+      });
 
-  bindAppEvent({
-    AppCore,
-    eventName:
-      EVENT_NAMES.authLoginSuccess,
-
-    label:
-      "auth-login-success",
-
-    handler:
-      async (payload) => {
-        await safeSyncUI({
-          ...context,
-
-          reason:
-            "auth:login:success",
-
-          payload,
-          force:
-            true,
-        });
-
-        toastOnce(
-          Toast,
-          "success",
-          "Sesión iniciada correctamente.",
-          {
-            title:
-              "Bienvenido",
-
-            duration:
-              2600,
-          }
-        );
-      },
+      toastOnce(Toast, AppCore, "success", "Sesión iniciada correctamente.", {
+        title: "Bienvenido",
+        duration: 2600,
+      });
+    },
   });
 
-  bindAppEvent({
+  bindEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.authLogoutSuccess,
+    eventName: EVENT_NAMES.authLogoutSuccess,
+    label: "auth-logout-success",
+    handler: async (payload) => {
+      await syncUiLight({
+        ...context,
+        reason: "auth:logout:success",
+        payload,
+        force: true,
+      });
 
-    label:
-      "auth-logout-success",
-
-    handler:
-      async (payload) => {
-        await safeSyncUI({
-          ...context,
-
-          reason:
-            "auth:logout:success",
-
-          payload,
-          force:
-            true,
-        });
-
-        toastOnce(
-          Toast,
-          "info",
-          "Sesión cerrada correctamente.",
-          {
-            title:
-              "Sesión finalizada",
-
-            duration:
-              2600,
-          }
-        );
-      },
+      toastOnce(Toast, AppCore, "info", "Sesión cerrada correctamente.", {
+        title: "Sesión finalizada",
+        duration: 2600,
+      });
+    },
   });
 
-  bindAppEvent({
+  bindEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.authLogout,
-
-    label:
-      "auth-logout",
-
-    handler:
-      async (payload) => {
-        await safeSyncUI({
-          ...context,
-
-          reason:
-            "auth:logout",
-
-          payload,
-          force:
-            true,
-        });
-      },
+    eventName: EVENT_NAMES.authLogout,
+    label: "auth-logout",
+    handler: (payload) =>
+      syncUiLight({
+        ...context,
+        reason: "auth:logout",
+        payload,
+        force: true,
+      }),
   });
 }
 
 function bindRouteChangeEvents(context) {
-  const {
+  const { AppCore } = context;
+
+  bindEvent({
     AppCore,
-  } =
-    context;
-
-  bindAppEvent({
-    AppCore,
-    eventName:
-      EVENT_NAMES.appRouteChange,
-
-    label:
-      "app-route-change-light-sync",
-
-    handler:
-      async (payload) => {
-        /*
-          Esto viene de AppCore/Router.
-          No lo emitimos desde AppEvents.
-          Sólo hacemos sync visual ligero.
-        */
-        await safeSyncUI({
-          ...context,
-          reason:
-            "app:route:change",
-          payload,
-        });
-      },
+    eventName: EVENT_NAMES.appRouteChange,
+    label: "app-route-change-light-sync",
+    handler: (payload) =>
+      syncUiLight({
+        ...context,
+        reason: "app:route:change",
+        payload,
+      }),
   });
+}
+
+function shouldSkipRouterSync(route = "/", publicPath = "/") {
+  const key = `${redact(route)}|${redact(publicPath)}`;
+  const stamp = now();
+
+  if (key === lastRouterKey && stamp - lastRouterAt < ROUTER_SYNC_DEDUPE_MS) {
+    return true;
+  }
+
+  lastRouterKey = key;
+  lastRouterAt = stamp;
+
+  return false;
 }
 
 function bindRouterEvents(context) {
@@ -3405,175 +1821,76 @@ function bindRouterEvents(context) {
     AppCore,
     Router,
     applyPostRenderLoaderPolicy,
-  } =
-    context;
+  } = context;
 
-  const onRouterRendered =
-    (payload = {}) => {
-      const publicPath =
-        resolvePublicPath(
-          AppCore,
-          Router,
-          payload
-        );
+  bindEvent({
+    AppCore,
+    eventName: EVENT_NAMES.routerRendered,
+    label: "router-rendered-state-loader-sync",
+    handler: (payload) => {
+      const publicPath = resolvePublicPath(AppCore, Router, payload);
+      const canonicalPath = resolveCanonicalPath(AppCore, Router, payload);
 
-      const canonicalPath =
-        resolveCanonicalPath(
-          AppCore,
-          Router,
-          payload
-        );
+      if (shouldSkipRouterSync(canonicalPath, publicPath)) return;
 
-      if (
-        shouldSkipRouterRenderedSync(
-          canonicalPath,
-          publicPath
-        )
-      ) {
-        return;
-      }
+      const routePatch = patchRouteState(AppCore, {
+        route: canonicalPath,
+        publicPath,
+      });
 
-      const routePatch =
-        safePatchRouteState(
-          AppCore,
-          {
-            route:
-              canonicalPath,
-
-            publicPath,
-          }
-        );
-
-      const loaderPolicyApplied =
-        safeApplyPostRenderLoaderPolicy({
-          AppCore,
-          Router,
-          applyPostRenderLoaderPolicy,
-          payload,
-        });
+      const loaderPolicyApplied = applyLoaderPolicy({
+        AppCore,
+        Router,
+        applyPostRenderLoaderPolicy,
+        payload,
+      });
 
       /*
-        Importante:
-        NO safeSyncUI aquí.
-        NO app:ui:repair-request aquí.
-        NO app:route:change aquí.
+        CRÍTICO:
+        No sync UI aquí.
+        No app:ui:repair-request aquí.
+        No app:route:change aquí.
       */
-      safeEmit(
-        AppCore,
-        EVENT_NAMES.appRouteSynced,
-        {
-          source:
-            EVENTS_SOURCE,
-
-          reason:
-            payload?.phase ||
-            payload?.reason ||
-            "router:rendered",
-
-          route:
-            redactSensitiveText(canonicalPath),
-
-          publicPath:
-            redactSensitiveText(publicPath),
-
-          routeChanged:
-            Boolean(routePatch.routeChanged),
-
-          publicChanged:
-            Boolean(routePatch.publicChanged),
-
-          changed:
-            Boolean(routePatch.changed),
-
-          loaderPolicyApplied,
-
-          silent:
-            true,
-        }
-      );
-    };
-
-  bindAppEvent({
-    AppCore,
-    eventName:
-      EVENT_NAMES.routerRendered,
-
-    label:
-      "router-rendered-state-loader-sync",
-
-    handler:
-      onRouterRendered,
+      emit(AppCore, EVENT_NAMES.appRouteSynced, {
+        reason: payload.phase || payload.reason || "router:rendered",
+        route: canonicalPath,
+        publicPath,
+        routeChanged: Boolean(routePatch.routeChanged),
+        publicChanged: Boolean(routePatch.publicChanged),
+        changed: Boolean(routePatch.changed),
+        loaderPolicyApplied,
+        silent: true,
+      });
+    },
   });
 
-  bindAppEvent({
+  bindEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.routerAsyncComplete,
+    eventName: EVENT_NAMES.routerAsyncComplete,
+    label: "router-async-complete-telemetry",
+    handler: (payload) => {
+      const publicPath = resolvePublicPath(AppCore, Router, payload);
+      const canonicalPath = resolveCanonicalPath(AppCore, Router, payload);
 
-    label:
-      "router-async-complete-telemetry",
-
-    handler:
-      (payload) => {
-        const publicPath =
-          resolvePublicPath(
-            AppCore,
-            Router,
-            payload
-          );
-
-        const canonicalPath =
-          resolveCanonicalPath(
-            AppCore,
-            Router,
-            payload
-          );
-
-        /*
-          Async complete sólo telemetría.
-          No reparamos UI ni shell aquí.
-        */
-        safeEmit(
-          AppCore,
-          EVENT_NAMES.appRouteSynced,
-          {
-            source:
-              EVENTS_SOURCE,
-
-            reason:
-              "router:render:async-complete",
-
-            route:
-              redactSensitiveText(canonicalPath),
-
-            publicPath:
-              redactSensitiveText(publicPath),
-
-            silent:
-              true,
-          }
-        );
-      },
+      emit(AppCore, EVENT_NAMES.appRouteSynced, {
+        reason: "router:render:async-complete",
+        route: canonicalPath,
+        publicPath,
+        silent: true,
+      });
+    },
   });
 
-  bindAppEvent({
+  bindEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.routerShellState,
-
-    label:
-      "router-shell-state-noop",
-
-    handler:
-      () => {
-        /*
-          NOOP intencionado.
-
-          router:shell:state puede venir de Router.repairShell().
-          Si aquí sincronizamos UI, reentramos en:
-            shell state -> sync UI -> repair shell -> shell state...
-        */
-      },
+    eventName: EVENT_NAMES.routerShellState,
+    label: "router-shell-state-noop",
+    handler: () => {
+      /*
+        NOOP intencionado:
+        evita bucle shell -> UI -> repair -> shell.
+      */
+    },
   });
 }
 
@@ -3584,55 +1901,35 @@ function bindRouterEvents(context) {
 function exposeDebugApi(AppCore = null) {
   if (debugApiInstalled) {
     try {
-      if (
-        isBrowser() &&
-        window.__ONION_APP_EVENTS__
-      ) {
+      if (isBrowser() && window.__ONION_APP_EVENTS__) {
         return window.__ONION_APP_EVENTS__;
       }
     } catch {}
   }
 
   const api = {
-    version:
-      APP_EVENTS_VERSION,
+    version: APP_EVENTS_VERSION,
 
-    getSnapshot:
-      getAppEventsSnapshot,
+    getSnapshot: getAppEventsSnapshot,
+    reset: resetAppEventsState,
 
-    reset:
-      resetAppEventsState,
+    unbind: () => unbindAppEvents(AppCore),
 
-    unbind:
-      () =>
-        unbindAppEvents(AppCore),
-
-    requestUiRepair:
-      (reason = "debug", payload = {}) =>
-        safeRequestUiRepair(
-          AppCore,
-          reason,
-          payload
-        ),
+    requestUiRepair: (reason = "debug", payload = {}) =>
+      requestUiRepair(AppCore, reason, payload),
   };
 
   try {
     if (isBrowser()) {
-      window.__ONION_APP_EVENTS__ =
-        api;
+      window.__ONION_APP_EVENTS__ = api;
     }
   } catch {}
 
   try {
-    safeDefineValue(
-      AppCore,
-      "AppEvents",
-      api
-    );
+    defineHidden(AppCore, "AppEvents", api);
   } catch {}
 
-  debugApiInstalled =
-    true;
+  debugApiInstalled = true;
 
   return api;
 }
@@ -3657,28 +1954,19 @@ export function bindAppEvents({
   rerenderCurrentRoute,
   applyPostRenderLoaderPolicy,
 } = {}) {
-  if (eventsBound) {
-    return true;
-  }
+  if (bound) return true;
 
-  if (eventsBindingInFlight) {
-    safeWarn(
-      AppCore,
-      "bindAppEvents omitido: binding ya en curso.",
-      {
-        scope:
-          safeText(scope, DEFAULT_SCOPE),
-      }
-    );
+  if (binding) {
+    warn(AppCore, "bindAppEvents omitido: binding ya en curso.", {
+      scope: safeText(scope, DEFAULT_SCOPE),
+    });
 
     return true;
   }
 
-  eventsBindingInFlight =
-    true;
+  binding = true;
 
-  const finalScope =
-    safeText(scope, DEFAULT_SCOPE);
+  const finalScope = safeText(scope, DEFAULT_SCOPE);
 
   const context = {
     AppCore,
@@ -3690,16 +1978,14 @@ export function bindAppEvents({
     Toast,
     I18n,
 
-    scope:
-      finalScope,
+    scope: finalScope,
 
     syncUserUI,
     rerenderCurrentRoute,
 
-    applyPostRenderLoaderPolicy:
-      isFunction(applyPostRenderLoaderPolicy)
-        ? applyPostRenderLoaderPolicy
-        : applyPostRenderLoaderPolicyBase,
+    applyPostRenderLoaderPolicy: isFn(applyPostRenderLoaderPolicy)
+      ? applyPostRenderLoaderPolicy
+      : applyPostRenderLoaderPolicyBase,
   };
 
   try {
@@ -3710,287 +1996,147 @@ export function bindAppEvents({
     bindRouteChangeEvents(context);
     bindRouterEvents(context);
 
-    eventsBound =
-      true;
-
-    boundScope =
-      finalScope;
+    bound = true;
+    boundScope = finalScope;
 
     exposeDebugApi(AppCore);
 
-    safeEmit(
-      AppCore,
-      EVENT_NAMES.appEventsBound,
-      {
-        version:
-          APP_EVENTS_VERSION,
+    emit(AppCore, EVENT_NAMES.appEventsBound, {
+      scope: boundScope,
+      at: iso(),
+      boundEvents: [...eventState.boundEvents],
+    });
 
-        scope:
-          boundScope,
+    emit(AppCore, EVENT_NAMES.appEventsReady, getAppEventsSnapshot());
 
-        at:
-          safeIsoDate(),
+    log(AppCore, "App events ready.", {
+      scope: boundScope,
+      boundEvents: [...eventState.boundEvents],
+    });
 
-        boundEvents:
-          [...eventState.boundEvents],
-      }
-    );
-
-    safeEmit(
-      AppCore,
-      EVENT_NAMES.appEventsReady,
-      getAppEventsSnapshot()
-    );
-
-    safeLog(
-      AppCore,
-      "App events ready.",
-      {
-        scope:
-          boundScope,
-
-        boundEvents:
-          [...eventState.boundEvents],
-      }
-    );
+    return true;
   } catch (error) {
-    for (const dispose of boundDisposers.splice(0)) {
+    for (const dispose of disposers.splice(0)) {
       try {
         dispose();
       } catch {}
     }
 
-    boundEventKeys.clear();
+    boundKeys.clear();
 
-    eventsBound =
-      false;
+    bound = false;
+    boundScope = "";
 
-    boundScope =
-      "";
-
-    recordError(
-      AppCore,
-      EVENT_NAMES.appEventsError,
-      error
-    );
+    recordError(AppCore, EVENT_NAMES.appEventsError, error);
 
     return false;
   } finally {
-    eventsBindingInFlight =
-      false;
+    binding = false;
   }
-
-  return true;
 }
 
 export function unbindAppEvents(AppCore = null) {
-  for (const dispose of boundDisposers.splice(0)) {
+  for (const dispose of disposers.splice(0)) {
     try {
       dispose();
     } catch {}
   }
 
-  boundEventKeys.clear();
+  boundKeys.clear();
 
-  eventsBound =
-    false;
+  bound = false;
+  binding = false;
+  boundScope = "";
 
-  boundScope =
-    "";
+  langChangeInFlight = false;
+  eventState.boundEvents = [];
 
-  langChangeInFlight =
-    false;
+  emit(AppCore, EVENT_NAMES.appEventsUnbound, {
+    at: iso(),
+  });
 
-  eventsBindingInFlight =
-    false;
-
-  eventState.boundEvents =
-    [];
-
-  safeEmit(
-    AppCore,
-    EVENT_NAMES.appEventsUnbound,
-    {
-      version:
-        APP_EVENTS_VERSION,
-
-      at:
-        safeIsoDate(),
-    }
-  );
-
-  safeLog(
-    AppCore,
-    "App events unbound."
-  );
+  log(AppCore, "App events unbound.");
 
   return true;
 }
 
 export function getAppEventsSnapshot() {
-  return sanitizePayload({
-    version:
-      APP_EVENTS_VERSION,
+  return sanitize({
+    version: APP_EVENTS_VERSION,
 
-    eventsBound:
-      Boolean(eventsBound),
-
-    eventsBindingInFlight:
-      Boolean(eventsBindingInFlight),
-
+    bound: Boolean(bound),
+    binding: Boolean(binding),
     boundScope,
 
-    boundEvents:
-      [...eventState.boundEvents],
+    boundEvents: [...eventState.boundEvents],
+    boundKeys: Array.from(boundKeys),
+    disposers: disposers.length,
 
-    boundEventKeys:
-      Array.from(boundEventKeys),
-
-    boundDisposers:
-      boundDisposers.length,
-
-    langChangeInFlight:
-      Boolean(langChangeInFlight),
+    langChangeInFlight: Boolean(langChangeInFlight),
 
     lastLangRenderAt,
+    lastLangRenderAtIso: lastLangRenderAt ? iso(lastLangRenderAt) : "",
 
-    lastLangRenderAtIso:
-      lastLangRenderAt
-        ? safeIsoDate(lastLangRenderAt)
-        : "",
+    lastRouterKey: redact(lastRouterKey),
+    lastRouterAt,
+    lastRouterAtIso: lastRouterAt ? iso(lastRouterAt) : "",
 
-    lastRouterRenderedKey:
-      redactKey(lastRouterRenderedKey),
-
-    lastRouterRenderedAt,
-
-    lastRouterRenderedAtIso:
-      lastRouterRenderedAt
-        ? safeIsoDate(lastRouterRenderedAt)
-        : "",
-
-    lastToastKey:
-      redactKey(lastToastKey),
-
+    lastToastKey: redact(lastToastKey),
     lastToastAt,
+    lastToastAtIso: lastToastAt ? iso(lastToastAt) : "",
 
-    lastToastAtIso:
-      lastToastAt
-        ? safeIsoDate(lastToastAt)
-        : "",
+    lastUiKey: redact(lastUiKey),
+    lastUiAt,
+    lastUiAtIso: lastUiAt ? iso(lastUiAt) : "",
 
-    lastUiSyncKey:
-      redactKey(lastUiSyncKey),
+    lastThemeKey: redact(lastThemeKey),
+    lastThemeAt,
+    lastThemeAtIso: lastThemeAt ? iso(lastThemeAt) : "",
 
-    lastUiSyncAt,
-
-    lastUiSyncAtIso:
-      lastUiSyncAt
-        ? safeIsoDate(lastUiSyncAt)
-        : "",
-
-    lastThemeSyncKey:
-      redactKey(lastThemeSyncKey),
-
-    lastThemeSyncAt,
-
-    lastThemeSyncAtIso:
-      lastThemeSyncAt
-        ? safeIsoDate(lastThemeSyncAt)
-        : "",
-
-    lastEmitKey:
-      redactKey(lastEmitKey),
-
+    lastEmitKey: redact(lastEmitKey),
     lastEmitAt,
+    lastEmitAtIso: lastEmitAt ? iso(lastEmitAt) : "",
 
-    lastEmitAtIso:
-      lastEmitAt
-        ? safeIsoDate(lastEmitAt)
-        : "",
+    totalHandled: eventState.totalHandled,
+    totalErrors: eventState.totalErrors,
 
-    totalHandled:
-      eventState.totalHandled,
+    lastEvent: eventState.lastEvent,
+    lastEventAt: eventState.lastEventAt,
+    lastEventAtIso: eventState.lastEventAt ? iso(eventState.lastEventAt) : "",
 
-    totalErrors:
-      eventState.totalErrors,
+    lastError: eventState.lastError,
+    recent: eventState.recent.slice(0, MAX_RECENT),
 
-    lastEvent:
-      eventState.lastEvent,
-
-    lastEventAt:
-      eventState.lastEventAt,
-
-    lastEventAtIso:
-      eventState.lastEventAt
-        ? safeIsoDate(eventState.lastEventAt)
-        : "",
-
-    lastError:
-      eventState.lastError,
-
-    recent:
-      eventState.recent.slice(0, MAX_RECENT_EVENTS),
-
-    debugApiInstalled:
-      Boolean(debugApiInstalled),
+    debugApiInstalled: Boolean(debugApiInstalled),
   });
 }
 
 export function resetAppEventsState() {
-  langChangeInFlight =
-    false;
+  langChangeInFlight = false;
 
-  lastLangRenderAt =
-    0;
+  lastLangRenderAt = 0;
 
-  lastRouterRenderedKey =
-    "";
+  lastRouterKey = "";
+  lastRouterAt = 0;
 
-  lastRouterRenderedAt =
-    0;
+  lastToastKey = "";
+  lastToastAt = 0;
 
-  lastToastKey =
-    "";
+  lastUiKey = "";
+  lastUiAt = 0;
 
-  lastToastAt =
-    0;
+  lastThemeKey = "";
+  lastThemeAt = 0;
 
-  lastUiSyncKey =
-    "";
+  lastEmitKey = "";
+  lastEmitAt = 0;
 
-  lastUiSyncAt =
-    0;
-
-  lastThemeSyncKey =
-    "";
-
-  lastThemeSyncAt =
-    0;
-
-  lastEmitKey =
-    "";
-
-  lastEmitAt =
-    0;
-
-  eventState.totalHandled =
-    0;
-
-  eventState.totalErrors =
-    0;
-
-  eventState.lastEvent =
-    "";
-
-  eventState.lastEventAt =
-    0;
-
-  eventState.lastError =
-    null;
-
-  eventState.recent =
-    [];
+  eventState.totalHandled = 0;
+  eventState.totalErrors = 0;
+  eventState.lastEvent = "";
+  eventState.lastEventAt = 0;
+  eventState.lastError = null;
+  eventState.recent = [];
 
   return getAppEventsSnapshot();
 }
@@ -4008,6 +2154,5 @@ export default {
   getAppEventsSnapshot,
   resetAppEventsState,
 
-  requestUiRepair:
-    safeRequestUiRepair,
+  requestUiRepair,
 };

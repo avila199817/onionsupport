@@ -1,71 +1,63 @@
 /* =========================================================
    Onion SPA - Entry Point
-   Archivo: /src/main.js
+   Archivo: src/main.js
 
-   Responsabilidad única:
-   - Ser el único entrypoint físico cargado por index.html.
-   - Capturar URL inicial.
-   - Bloquear auto-boot legacy.
-   - Cargar /src/app/index.js.
-   - Ejecutar App.boot() una sola vez.
-   - Capturar error fatal de arranque.
-   - No meter auth/router/API/store/vistas.
+   MAIN · FINAL SIMPLE
+   - Único entrypoint cargado por index.html
+   - Captura URL inicial antes del boot
+   - Desactiva auto-boot legacy
+   - Importa app/index.js
+   - Ejecuta App.boot() una sola vez
+   - Fallback fatal mínimo si el boot no llega a app/errors.js
+   - Sin Auth, Router, Services, Store, Toast, vistas, fetch ni storage
 ========================================================= */
 
-const MAIN_VERSION = "v2-fast-main";
+export const MAIN_VERSION = "20.0.0-final";
+
 const APP_MODULE_PATH = "./app/index.js";
 
+const MAIN_DEBUG_KEY = "__ONION_MAIN__";
 const BOOT_LOCK_KEY = "__ONION_MAIN_BOOT_LOCK__";
 const DISABLE_AUTO_BOOT_KEY = "__ONION_DISABLE_AUTO_BOOT__";
 const INITIAL_URL_KEY = "__ONION_INITIAL_URL__";
 const BOOT_CONTEXT_KEY = "__ONION_BOOT_CONTEXT__";
-
+const MAIN_BOOT_CONTEXT_KEY = "__ONION_MAIN_BOOT_CONTEXT__";
 const FATAL_ERROR_KEY = "__ONION_FATAL_ERROR__";
-const MAIN_DEBUG_KEY = "__ONION_MAIN__";
 
+const DEFAULT_ROUTE = "/";
 const DEFAULT_ERROR_TITLE = "Error de arranque";
 const DEFAULT_ERROR_MESSAGE = "No se pudo iniciar Onion Support.";
 
 let appModule = null;
 let appModulePromise = null;
 let bootPromise = null;
-
 let startedAt = 0;
 let failed = false;
-let errorsBound = false;
 
 /* =========================================================
-   BASIC HELPERS
+   BASICS
 ========================================================= */
 
-function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
+const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
+const isFn = (value) => typeof value === "function";
+const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+function object(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
 }
 
-function isFn(value) {
-  return typeof value === "function";
-}
-
-function isObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function safeObject(value) {
-  return isObject(value) ? value : {};
-}
-
-function safeText(value, fallback = "") {
+function text(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
 
-  const text = String(value)
+  const output = String(value)
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  return text || fallback;
+  return output || fallback;
 }
 
-function nowMs() {
+function now() {
   try {
     return Date.now();
   } catch {
@@ -73,7 +65,7 @@ function nowMs() {
   }
 }
 
-function nowIso(ms = nowMs()) {
+function iso(ms = now()) {
   try {
     return new Date(ms).toISOString();
   } catch {
@@ -92,12 +84,13 @@ function currentHref() {
 }
 
 function currentPath() {
-  if (!isBrowser()) return "/";
+  if (!isBrowser()) return DEFAULT_ROUTE;
 
   try {
-    return `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
+    const { pathname, search, hash } = window.location;
+    return `${pathname || DEFAULT_ROUTE}${search || ""}${hash || ""}`;
   } catch {
-    return "/";
+    return DEFAULT_ROUTE;
   }
 }
 
@@ -109,9 +102,8 @@ function escapeRegExp(value = "") {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function redactUrl(value = "") {
-  let output = safeText(value, "");
-
+function redact(value = "") {
+  let output = text(value, "");
   if (!output) return "";
 
   const sensitive = [
@@ -136,20 +128,22 @@ function redactUrl(value = "") {
     "two_factor_token",
     "authorization",
     "jwt",
+    "session",
     "sid",
   ];
 
   for (const key of sensitive) {
     try {
-      output = output.replace(
-        new RegExp(`([?&#]${escapeRegExp(key)}=)([^&#\\s]+)`, "gi"),
-        "$1***"
-      );
+      output = output.replace(new RegExp(`([?&#]${escapeRegExp(key)}=)([^&#\\s]+)`, "gi"), "$1***");
     } catch {}
   }
 
   try {
     output = output
+      .replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***")
+      .replace(/(\/activate\/)([^/?#\s]+)/gi, "$1***")
+      .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***")
+      .replace(/(\/password-reset\/confirm\/)([^/?#\s]+)/gi, "$1***")
       .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
       .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
   } catch {}
@@ -159,49 +153,86 @@ function redactUrl(value = "") {
 
 function serializeError(error) {
   if (!error) {
-    return {
-      name: "UnknownError",
-      message: DEFAULT_ERROR_MESSAGE,
-    };
+    return { name: "UnknownError", message: DEFAULT_ERROR_MESSAGE };
   }
 
   if (error instanceof Error) {
     return {
-      name: safeText(error.name, "Error"),
-      message: redactUrl(safeText(error.message, DEFAULT_ERROR_MESSAGE)),
-      stack: error.stack ? "[stack]" : "",
+      name: text(error.name, "Error"),
+      message: redact(text(error.message, DEFAULT_ERROR_MESSAGE)),
       code: error.code || null,
       status: error.status || error.statusCode || null,
+      stack: error.stack ? "[stack]" : "",
     };
   }
 
   if (typeof error === "string") {
-    return {
-      name: "ThrownString",
-      message: redactUrl(safeText(error, DEFAULT_ERROR_MESSAGE)),
-    };
+    return { name: "ThrownString", message: redact(text(error, DEFAULT_ERROR_MESSAGE)) };
   }
 
   if (isObject(error)) {
     return {
-      name: safeText(error.name, "ObjectError"),
-      message: redactUrl(safeText(error.message || error.reason, DEFAULT_ERROR_MESSAGE)),
-      code: error.code || null,
-      status: error.status || error.statusCode || null,
+      name: text(error.name, "ObjectError"),
+      message: redact(text(error.message || error.reason, DEFAULT_ERROR_MESSAGE)),
+      code: error.code || error.status || error.statusCode || null,
     };
   }
 
-  return {
-    name: "ThrownValue",
-    message: redactUrl(String(error)),
-  };
+  return { name: "ThrownValue", message: redact(String(error)) };
 }
 
 /* =========================================================
-   DOCUMENT STATE
+   BOOT CONTEXT
 ========================================================= */
 
-function setDataset(element, key, value) {
+function disableLegacyAutoBoot() {
+  if (!isBrowser()) return false;
+
+  try {
+    window[DISABLE_AUTO_BOOT_KEY] = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function captureBootContext() {
+  const context = {
+    source: "main",
+    version: MAIN_VERSION,
+    initialUrl: currentHref(),
+    initialPath: currentPath(),
+    capturedAt: iso(),
+  };
+
+  if (!isBrowser()) return context;
+
+  try {
+    if (!window[INITIAL_URL_KEY]) window[INITIAL_URL_KEY] = context.initialUrl;
+
+    window[BOOT_CONTEXT_KEY] = {
+      ...object(window[BOOT_CONTEXT_KEY]),
+      ...context,
+    };
+
+    window[MAIN_BOOT_CONTEXT_KEY] = {
+      ...object(window[MAIN_BOOT_CONTEXT_KEY]),
+      ...context,
+      href: context.initialUrl,
+      publicPath: context.initialPath,
+      mainInitialUrl: context.initialUrl,
+      mainInitialPublicPath: context.initialPath,
+    };
+  } catch {}
+
+  return context;
+}
+
+/* =========================================================
+   DOCUMENT MARKERS
+========================================================= */
+
+function setData(element, key, value) {
   if (!element || !key) return false;
 
   try {
@@ -237,41 +268,33 @@ function removeClass(element, className) {
 function markBooting() {
   if (!isBrowser()) return false;
 
-  const html = document.documentElement;
-  const body = document.body;
-
-  for (const element of [html, body]) {
+  for (const element of [document.documentElement, document.body]) {
     if (!element) continue;
 
     removeClass(element, "app-ready");
     removeClass(element, "app-fatal");
-
     addClass(element, "app-booting");
     addClass(element, "app-loading");
 
-    setDataset(element, "appBooting", "true");
-    setDataset(element, "appLoading", "true");
-    setDataset(element, "appReady", "false");
-    setDataset(element, "mainReady", "false");
-    setDataset(element, "mainFailed", "false");
+    setData(element, "appBooting", "true");
+    setData(element, "appLoading", "true");
+    setData(element, "appReady", "false");
+    setData(element, "mainReady", "false");
+    setData(element, "mainFailed", "false");
   }
 
-  setDataset(html, "appState", "booting");
-
+  setData(document.documentElement, "appState", "booting");
   return true;
 }
 
 function markMainReady() {
   if (!isBrowser()) return false;
 
-  const html = document.documentElement;
-  const body = document.body;
-
-  for (const element of [html, body]) {
+  for (const element of [document.documentElement, document.body]) {
     if (!element) continue;
 
-    setDataset(element, "mainReady", "true");
-    setDataset(element, "mainFailed", "false");
+    setData(element, "mainReady", "true");
+    setData(element, "mainFailed", "false");
   }
 
   return true;
@@ -280,69 +303,24 @@ function markMainReady() {
 function markFatal() {
   if (!isBrowser()) return false;
 
-  const html = document.documentElement;
-  const body = document.body;
-
-  for (const element of [html, body]) {
+  for (const element of [document.documentElement, document.body]) {
     if (!element) continue;
 
     removeClass(element, "app-booting");
     removeClass(element, "app-loading");
     removeClass(element, "app-ready");
-
     addClass(element, "app-fatal");
 
-    setDataset(element, "appBooting", "false");
-    setDataset(element, "appLoading", "false");
-    setDataset(element, "appReady", "false");
-    setDataset(element, "mainReady", "false");
-    setDataset(element, "mainFailed", "true");
-    setDataset(element, "routeMode", "fatal");
+    setData(element, "appBooting", "false");
+    setData(element, "appLoading", "false");
+    setData(element, "appReady", "false");
+    setData(element, "mainReady", "false");
+    setData(element, "mainFailed", "true");
+    setData(element, "routeMode", "fatal");
   }
 
-  setDataset(html, "appState", "fatal");
-
+  setData(document.documentElement, "appState", "fatal");
   return true;
-}
-
-/* =========================================================
-   BOOT CONTEXT
-========================================================= */
-
-function disableLegacyAutoBoot() {
-  if (!isBrowser()) return false;
-
-  try {
-    window[DISABLE_AUTO_BOOT_KEY] = true;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function captureBootContext() {
-  const context = {
-    source: "main",
-    version: MAIN_VERSION,
-    initialUrl: currentHref(),
-    initialPath: currentPath(),
-    capturedAt: nowIso(),
-  };
-
-  if (!isBrowser()) return context;
-
-  try {
-    if (!window[INITIAL_URL_KEY]) {
-      window[INITIAL_URL_KEY] = context.initialUrl;
-    }
-
-    window[BOOT_CONTEXT_KEY] = {
-      ...(isObject(window[BOOT_CONTEXT_KEY]) ? window[BOOT_CONTEXT_KEY] : {}),
-      ...context,
-    };
-  } catch {}
-
-  return context;
 }
 
 /* =========================================================
@@ -372,18 +350,9 @@ function resolveBootFunction(moduleValue) {
   if (isFn(moduleValue.bootApp)) return moduleValue.bootApp;
   if (isFn(moduleValue.boot)) return moduleValue.boot;
   if (isFn(moduleValue.start)) return moduleValue.start;
-
-  if (moduleValue.App && isFn(moduleValue.App.boot)) {
-    return moduleValue.App.boot.bind(moduleValue.App);
-  }
-
-  if (moduleValue.default && isFn(moduleValue.default.boot)) {
-    return moduleValue.default.boot.bind(moduleValue.default);
-  }
-
-  if (isFn(moduleValue.default)) {
-    return moduleValue.default;
-  }
+  if (moduleValue.App && isFn(moduleValue.App.boot)) return moduleValue.App.boot.bind(moduleValue.App);
+  if (moduleValue.default && isFn(moduleValue.default.boot)) return moduleValue.default.boot.bind(moduleValue.default);
+  if (isFn(moduleValue.default)) return moduleValue.default;
 
   return null;
 }
@@ -393,9 +362,9 @@ function exposeLoadedApp(moduleValue, result) {
 
   try {
     window.OnionApp = window.OnionApp || {};
-    window.OnionApp.app = result || moduleValue?.App || moduleValue?.default || null;
-    window.OnionApp.module = moduleValue || null;
     window.OnionApp.main = api;
+    window.OnionApp.module = moduleValue || null;
+    window.OnionApp.app = result || moduleValue?.App || moduleValue?.default || null;
     return true;
   } catch {
     return false;
@@ -406,21 +375,18 @@ function exposeLoadedApp(moduleValue, result) {
    FATAL FALLBACK
 ========================================================= */
 
-function hideLoaderEmergency() {
+function hideLoaderFallback() {
   if (!isBrowser()) return false;
 
-  const loader =
-    document.getElementById("app-loader") ||
-    document.querySelector("[data-app-loader='true']");
-
+  const loader = document.getElementById("app-loader") || document.querySelector("[data-app-loader],.app-loader");
   if (!loader) return false;
 
   try {
     loader.hidden = true;
     loader.setAttribute("aria-hidden", "true");
     loader.setAttribute("aria-busy", "false");
-    loader.classList.remove("is-visible");
-    loader.classList.add("is-hidden");
+    loader.classList.remove("is-visible", "is-entering", "is-leaving");
+    loader.classList.add("is-hidden", "has-hidden", "loader-hidden");
     loader.dataset.loaderVisible = "false";
     loader.dataset.loaderState = "hidden";
     return true;
@@ -441,7 +407,7 @@ function getFatalRoot() {
   );
 }
 
-function clearNode(node) {
+function empty(node) {
   if (!node) return false;
 
   try {
@@ -450,10 +416,7 @@ function clearNode(node) {
   } catch {}
 
   try {
-    while (node.firstChild) {
-      node.removeChild(node.firstChild);
-    }
-
+    while (node.firstChild) node.removeChild(node.firstChild);
     return true;
   } catch {
     return false;
@@ -484,18 +447,13 @@ function createFatalView(error) {
   reload.type = "button";
   reload.className = "ui-btn ui-btn-primary";
   reload.textContent = "Recargar";
-
   reload.addEventListener("click", () => {
     try {
       window.location.reload();
     } catch {}
   });
 
-  card.appendChild(title);
-  card.appendChild(message);
-  card.appendChild(hint);
-  card.appendChild(reload);
-
+  card.append(title, message, hint, reload);
   section.appendChild(card);
 
   return section;
@@ -505,10 +463,9 @@ function renderFatal(error) {
   if (!isBrowser()) return false;
 
   markFatal();
-  hideLoaderEmergency();
+  hideLoaderFallback();
 
   const root = getFatalRoot();
-
   if (!root) return false;
 
   try {
@@ -517,7 +474,7 @@ function renderFatal(error) {
     root.setAttribute("aria-busy", "false");
   } catch {}
 
-  clearNode(root);
+  empty(root);
   root.appendChild(createFatalView(error));
 
   return true;
@@ -530,12 +487,7 @@ function handleFatal(error, reason = "boot") {
 
   if (isBrowser()) {
     try {
-      window[FATAL_ERROR_KEY] = {
-        reason,
-        error: serialized,
-        rawError: error,
-        at: nowIso(),
-      };
+      window[FATAL_ERROR_KEY] = { reason, error: serialized, at: iso() };
     } catch {}
   }
 
@@ -545,85 +497,29 @@ function handleFatal(error, reason = "boot") {
   } catch {}
 
   renderFatal(error);
-
   return error;
 }
 
 /* =========================================================
-   SAFETY NET
+   BOOT LOCK
 ========================================================= */
 
-function bindGlobalErrors() {
-  if (!isBrowser() || errorsBound) return false;
-
-  errorsBound = true;
-
-  try {
-    window.addEventListener("error", (event) => {
-      try {
-        window.__ONION_LAST_WINDOW_ERROR__ = {
-          message: event.message || "Window error",
-          filename: redactUrl(event.filename || ""),
-          lineno: event.lineno || 0,
-          colno: event.colno || 0,
-          error: serializeError(event.error),
-          at: nowIso(),
-        };
-      } catch {}
-
-      if (!bootPromise || failed) return;
-
-      handleFatal(event.error || event.message, "window.error");
-    });
-  } catch {}
-
-  try {
-    window.addEventListener("unhandledrejection", (event) => {
-      try {
-        window.__ONION_LAST_REJECTION__ = {
-          reason: serializeError(event.reason),
-          at: nowIso(),
-        };
-      } catch {}
-
-      if (!bootPromise || failed) return;
-
-      handleFatal(event.reason, "unhandledrejection");
-    });
-  } catch {}
-
-  return true;
-}
-
-/* =========================================================
-   BOOT
-========================================================= */
-
-function getExternalBootLock() {
+function externalBootLock() {
   if (!isBrowser()) return null;
 
   try {
     const lock = window[BOOT_LOCK_KEY];
-
-    if (lock?.promise && isFn(lock.promise.then)) {
-      return lock;
-    }
-  } catch {}
-
-  return null;
+    return lock?.promise && isFn(lock.promise.then) ? lock : null;
+  } catch {
+    return null;
+  }
 }
 
 function setBootLock(promise) {
   if (!isBrowser() || !promise) return false;
 
   try {
-    window[BOOT_LOCK_KEY] = {
-      source: "main",
-      version: MAIN_VERSION,
-      promise,
-      startedAt,
-    };
-
+    window[BOOT_LOCK_KEY] = { source: "main", version: MAIN_VERSION, promise, startedAt };
     return true;
   } catch {
     return false;
@@ -643,8 +539,12 @@ function clearBootLock(promise) {
   return false;
 }
 
+/* =========================================================
+   BOOT
+========================================================= */
+
 async function runBoot(options = {}) {
-  startedAt = nowMs();
+  startedAt = now();
   failed = false;
 
   disableLegacyAutoBoot();
@@ -656,13 +556,11 @@ async function runBoot(options = {}) {
   const moduleValue = await loadAppModule();
   const bootFn = resolveBootFunction(moduleValue);
 
-  if (!bootFn) {
-    throw new Error("No se encontró función de arranque en src/app/index.js.");
-  }
+  if (!bootFn) throw new Error("No se encontró función de arranque en src/app/index.js.");
 
   const result = await bootFn({
-    ...safeObject(options),
-    source: safeText(options.source, "main"),
+    ...object(options),
+    source: text(options.source, "main"),
     version: MAIN_VERSION,
     bootContext,
     startedAt,
@@ -674,18 +572,13 @@ async function runBoot(options = {}) {
   return result || moduleValue;
 }
 
-function boot(options = {}) {
-  const opts = safeObject(options);
+export function boot(options = {}) {
+  const opts = object(options);
 
-  if (bootPromise && opts.force !== true) {
-    return bootPromise;
-  }
+  if (bootPromise && opts.force !== true) return bootPromise;
 
-  const externalLock = getExternalBootLock();
-
-  if (externalLock && opts.force !== true) {
-    return externalLock.promise;
-  }
+  const lock = externalBootLock();
+  if (lock && opts.force !== true) return lock.promise;
 
   const promise = runBoot(opts)
     .catch((error) => {
@@ -694,10 +587,7 @@ function boot(options = {}) {
     })
     .finally(() => {
       clearBootLock(promise);
-
-      if (bootPromise === promise) {
-        bootPromise = null;
-      }
+      if (bootPromise === promise) bootPromise = null;
     });
 
   bootPromise = promise;
@@ -706,32 +596,28 @@ function boot(options = {}) {
   return promise;
 }
 
-function start(options = {}) {
-  bindGlobalErrors();
+export function start(options = {}) {
   return boot(options);
+}
+
+export function getState() {
+  return {
+    version: MAIN_VERSION,
+    startedAt,
+    startedAtIso: startedAt ? iso(startedAt) : "",
+    failed,
+    hasBootPromise: Boolean(bootPromise),
+    appLoaded: Boolean(appModule),
+    initialUrl: redact(currentHref()),
+    initialPath: redact(currentPath()),
+  };
 }
 
 /* =========================================================
    DEBUG BRIDGE
 ========================================================= */
 
-function getState() {
-  return {
-    version: MAIN_VERSION,
-
-    startedAt,
-    startedAtIso: startedAt ? nowIso(startedAt) : "",
-
-    failed,
-    hasBootPromise: Boolean(bootPromise),
-    appLoaded: Boolean(appModule),
-
-    initialUrl: redactUrl(currentHref()),
-    initialPath: redactUrl(currentPath()),
-  };
-}
-
-const api = {
+export const api = {
   version: MAIN_VERSION,
   start,
   boot,
@@ -757,24 +643,10 @@ function exposeDebugBridge() {
 
 disableLegacyAutoBoot();
 captureBootContext();
-bindGlobalErrors();
 exposeDebugBridge();
 
 start().catch(() => {
-  /*
-    handleFatal() ya pinta fallback.
-  */
+  /* handleFatal() ya pintó fallback. */
 });
-
-/* =========================================================
-   EXPORTS
-========================================================= */
-
-export {
-  MAIN_VERSION,
-  start,
-  boot,
-  getState,
-};
 
 export default api;

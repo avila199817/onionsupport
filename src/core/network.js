@@ -2,90 +2,48 @@
    Onion SPA - Core Network
    Archivo: src/core/network.js
 
-   ONION SUPPORT · CORE NETWORK
-   CONNECTIVITY EVENTS · STATE SYNC · CLEANUP SAFE · 17/10
-
-   Responsabilidades:
-   - bind de eventos de conectividad del navegador
-   - sincronizar estado online/offline/unknown
-   - emitir eventos de red del core
-   - registrar diagnóstico básico de conectividad
-   - evitar listeners duplicados
-   - exponer snapshot de red
-
-   Candados:
-   - idempotencia total
-   - browser/server safe
-   - cleanup scope estable
-   - fallback si cleanup no existe
-   - soporte navigator.connection
-   - soporte connection.onchange legacy
-   - eventos online/offline/visibility/focus/pageshow/pagehide
-   - estado online inicial sincronizado
-   - contexto activo actualizable sin rebinder innecesario
-   - handlers no capturan estado obsoleto tras reboot
-   - setState opcional si se inyecta
-   - mutación directa segura si no hay setState
-   - no convierte unknown en offline por accidente
-   - eventos con rate mínimo para señales ruidosas
-   - cero throws accidentales
+   CORE NETWORK · CLEAN
+   - Bind idempotente de conectividad
+   - State sync seguro online/offline/unknown
+   - Cleanup compatible
+   - Sin event storm
 ========================================================= */
 
 import { isBrowser } from "./helpers.js";
 
-/* =========================================================
-   CONSTANTS
-========================================================= */
+export const NETWORK_VERSION = "18.0.0-clean";
+export const NETWORK_SCOPE = "core:network";
 
-const NETWORK_VERSION = "17.0.0";
-const NETWORK_SCOPE = "core:network";
-
-const MIN_PASSIVE_SYNC_INTERVAL_MS = 350;
-const MAX_RECENT_EVENTS = 48;
-
-const NETWORK_EVENTS = Object.freeze({
+export const NETWORK_EVENTS = Object.freeze({
   change: "app:network:change",
   online: "app:network:online",
   offline: "app:network:offline",
-
   state: "core:network:state",
   bound: "core:network:bound",
   unbound: "core:network:unbound",
-
   visibility: "core:network:visibility",
   focus: "core:network:focus",
   pageShow: "core:network:pageshow",
   pageHide: "core:network:pagehide",
   connection: "core:network:connection",
-
   error: "core:network:error",
 });
 
+const MIN_PASSIVE_SYNC_MS = 350;
+const MAX_RECENT = 36;
+
 const PASSIVE_REASONS = new Set([
+  "manual",
   "focus",
   "pageshow",
   "visibilitychange",
   "already-bound",
-  "manual",
   "refresh-context",
   "snapshot",
 ]);
 
-const HARD_REASONS = new Set([
-  "online",
-  "offline",
-  "connection-change",
-  "bind",
-  "force",
-  "server",
-]);
-
 const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
-
-/* =========================================================
-   MODULE STATE
-========================================================= */
 
 let bound = false;
 let bindingId = 0;
@@ -93,17 +51,15 @@ let bindingId = 0;
 let lastOnline = null;
 let lastStatus = "unknown";
 let lastReason = "";
-
-let lastChangeAt = 0;
 let lastSyncAt = 0;
-
+let lastChangeAt = 0;
 let lastVisibilityState = null;
 let lastHidden = null;
-
 let lastConnectionFingerprint = "";
 let lastError = null;
 
-const recentEvents = [];
+const manualDisposers = new Set();
+const recent = [];
 
 const stats = {
   bind: 0,
@@ -120,12 +76,9 @@ const stats = {
   connection: 0,
   throttled: 0,
   errors: 0,
-  manualDisposers: 0,
 };
 
-const manualDisposers = new Set();
-
-const activeContext = {
+const active = {
   state: null,
   events: null,
   cleanup: null,
@@ -135,14 +88,19 @@ const activeContext = {
 };
 
 /* =========================================================
-   HELPERS
+   BASICS
 ========================================================= */
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
+function isFn(value) {
+  return typeof value === "function";
+}
 
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
   const text = String(value).trim();
   return text || fallback;
 }
@@ -152,36 +110,7 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
-function isFunction(value) {
-  return typeof value === "function";
-}
-
-function isObject(value) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-
-  try {
-    const proto = Object.getPrototypeOf(value);
-    return proto === Object.prototype || proto === null;
-  } catch {
-    return false;
-  }
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-
-function safeIsoDate(ms = Date.now()) {
-  try {
-    return new Date(ms).toISOString();
-  } catch {
-    return "";
-  }
-}
-
-function safeNow() {
+function now() {
   try {
     return Date.now();
   } catch {
@@ -189,11 +118,17 @@ function safeNow() {
   }
 }
 
-function safeClone(value, fallback = null) {
+function iso(ms = now()) {
   try {
-    if (typeof structuredClone === "function") {
-      return structuredClone(value);
-    }
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
+  }
+}
+
+function clone(value, fallback = null) {
+  try {
+    if (typeof structuredClone === "function") return structuredClone(value);
   } catch {}
 
   try {
@@ -203,13 +138,11 @@ function safeClone(value, fallback = null) {
   }
 }
 
-function sanitizePayload(value, depth = 0, keyHint = "") {
-  if (depth > 4) {
-    return "[depth-limit]";
-  }
+function sanitize(value, depth = 0, keyHint = "") {
+  if (depth > 4) return "[depth-limit]";
 
   if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) {
-    return value ? "***" : null;
+    return value ? "***" : value;
   }
 
   if (
@@ -221,17 +154,9 @@ function sanitizePayload(value, depth = 0, keyHint = "") {
     return value;
   }
 
-  if (typeof value === "string") {
-    return value.slice(0, 500);
-  }
-
-  if (typeof value === "bigint") {
-    return String(value);
-  }
-
-  if (typeof value === "function") {
-    return "[function]";
-  }
+  if (typeof value === "string") return value.slice(0, 500);
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return "[function]";
 
   if (value instanceof Error) {
     return {
@@ -242,16 +167,14 @@ function sanitizePayload(value, depth = 0, keyHint = "") {
   }
 
   if (Array.isArray(value)) {
-    return value
-      .slice(0, 40)
-      .map((item) => sanitizePayload(item, depth + 1, keyHint));
+    return value.slice(0, 40).map((item) => sanitize(item, depth + 1, keyHint));
   }
 
   if (isObject(value)) {
     const output = {};
 
     for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = sanitizePayload(item, depth + 1, key);
+      output[key] = sanitize(item, depth + 1, key);
     }
 
     return output;
@@ -264,32 +187,34 @@ function sanitizePayload(value, depth = 0, keyHint = "") {
   }
 }
 
-function safeEmit(events, name, payload = {}) {
+function emit(events, name, payload = {}) {
   const eventName = safeText(name, "");
+  if (!eventName) return false;
 
-  if (!eventName) {
-    return false;
-  }
-
-  const cleanPayload = sanitizePayload(payload);
+  const clean = sanitize({
+    version: NETWORK_VERSION,
+    source: "core.network",
+    at: iso(),
+    ...payload,
+  });
 
   try {
-    if (isFunction(events?.emit)) {
-      events.emit(eventName, cleanPayload);
+    if (isFn(events?.emit)) {
+      events.emit(eventName, clean);
       return true;
     }
   } catch {}
 
   try {
-    if (isFunction(events?.dispatch)) {
-      events.dispatch(eventName, cleanPayload);
+    if (isFn(events?.dispatch)) {
+      events.dispatch(eventName, clean);
       return true;
     }
   } catch {}
 
   try {
-    if (isFunction(events?.trigger)) {
-      events.trigger(eventName, cleanPayload);
+    if (isFn(events?.trigger)) {
+      events.trigger(eventName, clean);
       return true;
     }
   } catch {}
@@ -297,68 +222,57 @@ function safeEmit(events, name, payload = {}) {
   return false;
 }
 
-function safeLog(utils, ...args) {
-  try {
-    utils?.log?.("[Network]", ...args.map((item) => sanitizePayload(item)));
-  } catch {}
-}
-
-function safeWarn(utils, ...args) {
-  let emitted = false;
-  const cleanArgs = args.map((item) => sanitizePayload(item));
+function warn(utils, ...args) {
+  const clean = args.map((item) => sanitize(item));
 
   try {
-    if (isFunction(utils?.warn)) {
-      utils.warn("[Network]", ...cleanArgs);
-      emitted = true;
+    if (isFn(utils?.warn)) {
+      utils.warn("[Network]", ...clean);
+      return;
     }
-  } catch {
-    emitted = false;
-  }
-
-  if (emitted) {
-    return;
-  }
+  } catch {}
 
   try {
-    console.warn("[Network]", ...cleanArgs);
+    if (utils?.debug === true) console.warn("[Network]", ...clean);
   } catch {}
 }
 
-function pushRecent(type = "event", payload = {}) {
-  const atMs = safeNow();
+function log(utils, ...args) {
+  try {
+    utils?.log?.("[Network]", ...args.map((item) => sanitize(item)));
+  } catch {}
+}
 
-  recentEvents.unshift({
-    type: safeText(type, "event"),
-    ...sanitizePayload(payload),
-    at: safeIsoDate(atMs),
+function record(type = "event", payload = {}) {
+  const atMs = now();
+
+  recent.unshift({
+    type,
+    ...sanitize(payload),
+    at: iso(atMs),
     atMs,
   });
 
-  if (recentEvents.length > MAX_RECENT_EVENTS) {
-    recentEvents.splice(MAX_RECENT_EVENTS);
-  }
+  if (recent.length > MAX_RECENT) recent.splice(MAX_RECENT);
 }
 
-function safeError(utils, events, error, source = "network") {
+function recordError(error, source = "network") {
   const payload = {
-    source: safeText(source, "network"),
-    message: safeText(error?.message || error, "Network error."),
+    source,
     name: safeText(error?.name, "Error"),
-    at: safeIsoDate(),
+    message: safeText(error?.message || error, "Network error."),
+    at: iso(),
   };
 
   lastError = payload;
   stats.errors += 1;
-
-  pushRecent("error", payload);
+  record("error", payload);
 
   try {
-    utils?.error?.("[Network]", payload.message, error);
+    active.utils?.error?.("[Network]", payload.message, error);
   } catch {}
 
-  safeEmit(events, NETWORK_EVENTS.error, payload);
-
+  emit(active.events, NETWORK_EVENTS.error, payload);
   return payload;
 }
 
@@ -366,44 +280,31 @@ function safeError(utils, events, error, source = "network") {
    BROWSER SIGNALS
 ========================================================= */
 
-function getNavigatorOnline(fallback = null) {
-  if (!isBrowser()) {
-    return fallback;
-  }
-
-  try {
-    if (typeof navigator.onLine === "boolean") {
-      return navigator.onLine;
-    }
-  } catch {}
-
-  return fallback;
-}
-
-function getOnlineFallbackFromReason(reason = "") {
-  const cleanReason = safeText(reason, "");
-
-  if (cleanReason === "online") {
-    return true;
-  }
-
-  if (cleanReason === "offline") {
-    return false;
-  }
-
+function fallbackOnlineFromReason(reason = "") {
+  const clean = safeText(reason, "");
+  if (clean === "online") return true;
+  if (clean === "offline") return false;
   return null;
 }
 
-function onlineToStatus(online = null) {
+function getNavigatorOnline(reason = "") {
+  if (!isBrowser()) return null;
+
+  try {
+    if (typeof navigator.onLine === "boolean") return navigator.onLine;
+  } catch {}
+
+  return fallbackOnlineFromReason(reason);
+}
+
+function statusFromOnline(online = null) {
   if (online === true) return "online";
   if (online === false) return "offline";
   return "unknown";
 }
 
 function getVisibilityState() {
-  if (!isBrowser()) {
-    return null;
-  }
+  if (!isBrowser()) return null;
 
   try {
     return document.visibilityState || null;
@@ -412,10 +313,8 @@ function getVisibilityState() {
   }
 }
 
-function getDocumentHidden() {
-  if (!isBrowser()) {
-    return null;
-  }
+function getHidden() {
+  if (!isBrowser()) return null;
 
   try {
     return typeof document.hidden === "boolean" ? document.hidden : null;
@@ -425,43 +324,33 @@ function getDocumentHidden() {
 }
 
 function getConnection() {
-  if (!isBrowser()) {
-    return null;
-  }
+  if (!isBrowser()) return null;
 
   try {
-    return (
-      navigator.connection ||
-      navigator.mozConnection ||
-      navigator.webkitConnection ||
-      null
-    );
+    return navigator.connection || navigator.mozConnection || navigator.webkitConnection || null;
   } catch {
     return null;
   }
 }
 
-function normalizeConnectionValue(value) {
+function numeric(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
 
-function getConnectionSnapshot() {
+function connectionSnapshot() {
   const connection = getConnection();
-
-  if (!connection) {
-    return null;
-  }
+  if (!connection) return null;
 
   try {
     return {
       effectiveType: connection.effectiveType || null,
       type: connection.type || null,
-      downlink: normalizeConnectionValue(connection.downlink),
-      downlinkMax: normalizeConnectionValue(connection.downlinkMax),
-      rtt: normalizeConnectionValue(connection.rtt),
+      downlink: numeric(connection.downlink),
+      downlinkMax: numeric(connection.downlinkMax),
+      rtt: numeric(connection.rtt),
       saveData: typeof connection.saveData === "boolean" ? connection.saveData : null,
-      supportsChangeEvent: isFunction(connection.addEventListener),
+      supportsChangeEvent: isFn(connection.addEventListener),
       supportsOnChange: "onchange" in connection,
     };
   } catch {
@@ -469,96 +358,53 @@ function getConnectionSnapshot() {
   }
 }
 
-function connectionFingerprint(connection = null) {
-  if (!connection) {
-    return "";
-  }
+function fingerprint(connection = connectionSnapshot()) {
+  if (!connection) return "";
 
-  try {
-    return [
-      connection.effectiveType || "",
-      connection.type || "",
-      connection.downlink ?? "",
-      connection.downlinkMax ?? "",
-      connection.rtt ?? "",
-      connection.saveData ?? "",
-    ].join("|");
-  } catch {
-    return "";
-  }
+  return [
+    connection.effectiveType || "",
+    connection.type || "",
+    connection.downlink ?? "",
+    connection.downlinkMax ?? "",
+    connection.rtt ?? "",
+    connection.saveData ?? "",
+  ].join("|");
 }
 
-function getBrowserNetworkSnapshot() {
+function browserSnapshot() {
   const online = getNavigatorOnline();
 
   return {
     browser: isBrowser(),
     online,
-    status: onlineToStatus(online),
+    offline: online === null ? null : !online,
+    status: statusFromOnline(online),
     visibilityState: getVisibilityState(),
-    hidden: getDocumentHidden(),
-    connection: getConnectionSnapshot(),
-    at: safeIsoDate(),
+    hidden: getHidden(),
+    connection: connectionSnapshot(),
+    at: iso(),
   };
 }
 
 /* =========================================================
-   ACTIVE CONTEXT
+   CONTEXT / STATE
 ========================================================= */
 
-function updateActiveContext({
-  state,
-  events,
-  cleanup,
-  utils,
-  setState,
-  scope = NETWORK_SCOPE,
-} = {}) {
-  if (state !== undefined) activeContext.state = state || null;
-  if (events !== undefined) activeContext.events = events || null;
-  if (cleanup !== undefined) activeContext.cleanup = cleanup || null;
-  if (utils !== undefined) activeContext.utils = utils || null;
+function updateContext(context = {}) {
+  if (Object.prototype.hasOwnProperty.call(context, "state")) active.state = context.state || null;
+  if (Object.prototype.hasOwnProperty.call(context, "events")) active.events = context.events || null;
+  if (Object.prototype.hasOwnProperty.call(context, "cleanup")) active.cleanup = context.cleanup || null;
+  if (Object.prototype.hasOwnProperty.call(context, "utils")) active.utils = context.utils || null;
+  if (Object.prototype.hasOwnProperty.call(context, "setState")) active.setState = isFn(context.setState) ? context.setState : null;
+  if (context.scope) active.scope = safeText(context.scope, NETWORK_SCOPE);
 
-  if (setState !== undefined) {
-    activeContext.setState = isFunction(setState) ? setState : null;
-  }
-
-  activeContext.scope = safeText(scope, activeContext.scope || NETWORK_SCOPE);
-
-  return activeContext;
+  return active;
 }
 
-function getActiveContext() {
-  return activeContext;
-}
-
-export function refreshNetworkContext(context = {}) {
-  updateActiveContext(context);
-
-  return syncNetworkState({
-    state: activeContext.state,
-    events: activeContext.events,
-    utils: activeContext.utils,
-    setState: activeContext.setState,
-    reason: "refresh-context",
-    emit: context.emit === true,
-    force: context.force === true,
-    source: "refreshNetworkContext",
-  });
-}
-
-/* =========================================================
-   STATE PATCH
-========================================================= */
-
-function buildStatePatch({
-  online,
-  reason = "sync",
-  changed = false,
-} = {}) {
-  const atMs = safeNow();
-  const status = onlineToStatus(online);
-  const connection = getConnectionSnapshot();
+function buildPatch({ online, reason = "sync", changed = false } = {}) {
+  const atMs = now();
+  const status = statusFromOnline(online);
+  const connection = connectionSnapshot();
 
   const patch = {
     networkStatus: status,
@@ -573,15 +419,15 @@ function buildStatePatch({
     networkSaveData: connection?.saveData ?? null,
 
     networkVisibilityState: getVisibilityState(),
-    networkHidden: getDocumentHidden(),
+    networkHidden: getHidden(),
 
     lastNetworkReason: safeText(reason, "sync"),
-    lastNetworkSyncAt: safeIsoDate(atMs),
+    lastNetworkSyncAt: iso(atMs),
     lastNetworkSyncAtMs: atMs,
   };
 
   if (changed) {
-    patch.lastNetworkChangeAt = safeIsoDate(atMs);
+    patch.lastNetworkChangeAt = iso(atMs);
     patch.lastNetworkChangeAtMs = atMs;
   }
 
@@ -600,47 +446,20 @@ function buildStatePatch({
   return patch;
 }
 
-function removeUndefinedKeys(object = {}) {
-  const output = {};
+function writeState(state, patch = {}, setState = null) {
+  if (!state || typeof state !== "object") return false;
 
-  for (const [key, value] of Object.entries(object || {})) {
-    if (value !== undefined) {
-      output[key] = value;
-    }
-  }
+  const unknown = patch.online === null || patch.networkOnline === null;
 
-  return output;
-}
-
-function patchHasUnknownOnline(patch = {}) {
-  return (
-    patch.online === null ||
-    patch.offline === null ||
-    patch.networkOnline === null ||
-    patch.networkOffline === null
-  );
-}
-
-function writeNetworkState(state, patch = {}, setState = null) {
-  if (!state || typeof state !== "object") {
-    return false;
-  }
-
-  const cleanPatch = removeUndefinedKeys(patch);
-
-  /*
-    Si online es unknown, evitamos setState porque normalizadores legacy
-    podrían convertir null en false. Mutación directa controlada.
-  */
-  if (isFunction(setState) && !patchHasUnknownOnline(cleanPatch)) {
+  if (isFn(setState) && !unknown) {
     try {
-      setState(cleanPatch, {
+      setState(patch, {
         source: "core:network",
         emitDerived: false,
       });
 
       try {
-        Object.assign(state, cleanPatch);
+        Object.assign(state, patch);
       } catch {}
 
       return true;
@@ -648,26 +467,17 @@ function writeNetworkState(state, patch = {}, setState = null) {
   }
 
   try {
-    Object.assign(state, cleanPatch);
+    Object.assign(state, patch);
     return true;
-  } catch {}
-
-  return false;
+  } catch {
+    return false;
+  }
 }
 
-function buildPayload({
-  state,
-  online,
-  reason = "sync",
-  changed = false,
-  throttled = false,
-  source = "network",
-} = {}) {
-  const status = onlineToStatus(online);
+function buildPayload({ online, reason = "sync", changed = false, throttled = false, source = "network" } = {}) {
+  const status = statusFromOnline(online);
 
   return {
-    version: NETWORK_VERSION,
-
     online,
     offline: online === null ? null : !online,
     status,
@@ -682,319 +492,34 @@ function buildPayload({
     bindingId,
 
     visibilityState: getVisibilityState(),
-    hidden: getDocumentHidden(),
-    connection: getConnectionSnapshot(),
+    hidden: getHidden(),
+    connection: connectionSnapshot(),
 
-    stateOnline: state?.online ?? null,
-    stateOffline: state?.offline ?? null,
-    stateStatus: state?.networkStatus || "",
-
-    at: safeIsoDate(),
+    stateOnline: active.state?.online ?? null,
+    stateOffline: active.state?.offline ?? null,
+    stateStatus: active.state?.networkStatus || "",
   };
 }
 
-function emitNetworkState({
-  state,
-  events,
-  utils,
-  online,
-  reason = "sync",
-  changed = false,
-  throttled = false,
-  silent = false,
-  source = "network",
-} = {}) {
-  const payload = buildPayload({
-    state,
-    online,
-    reason,
-    changed,
-    throttled,
-    source,
-  });
-
-  if (!silent) {
-    safeEmit(events, NETWORK_EVENTS.state, payload);
-
-    if (changed) {
-      stats.changed += 1;
-
-      safeEmit(events, NETWORK_EVENTS.change, payload);
-
-      if (online === true) {
-        stats.online += 1;
-        safeEmit(events, NETWORK_EVENTS.online, payload);
-        safeLog(utils, "Conectividad recuperada.", payload);
-      } else if (online === false) {
-        stats.offline += 1;
-        safeEmit(events, NETWORK_EVENTS.offline, payload);
-        safeWarn(utils, "El navegador está offline.", payload);
-      } else {
-        stats.unknown += 1;
-      }
-    }
-  }
-
-  pushRecent(changed ? "change" : throttled ? "throttled" : "state", payload);
-
-  return payload;
-}
-
-function shouldThrottlePassiveSync({
-  reason = "",
-  force = false,
-  nextOnline = null,
-  nextStatus = "unknown",
-  nextVisibilityState = null,
-  nextHidden = null,
-  nextConnectionFingerprint = "",
-} = {}) {
-  if (force) {
-    return false;
-  }
-
-  const cleanReason = safeText(reason, "");
-
-  if (HARD_REASONS.has(cleanReason)) {
-    return false;
-  }
+function shouldThrottle({ reason, force, online, status, visibilityState, hidden, connectionFp } = {}) {
+  if (force) return false;
+  if (!PASSIVE_REASONS.has(safeText(reason, ""))) return false;
 
   if (
-    nextOnline !== lastOnline ||
-    nextStatus !== lastStatus ||
-    nextVisibilityState !== lastVisibilityState ||
-    nextHidden !== lastHidden ||
-    nextConnectionFingerprint !== lastConnectionFingerprint
+    online !== lastOnline ||
+    status !== lastStatus ||
+    visibilityState !== lastVisibilityState ||
+    hidden !== lastHidden ||
+    connectionFp !== lastConnectionFingerprint
   ) {
     return false;
   }
 
-  if (!PASSIVE_REASONS.has(cleanReason)) {
-    return false;
-  }
-
-  const current = safeNow();
-
-  return lastSyncAt > 0 && current - lastSyncAt < MIN_PASSIVE_SYNC_INTERVAL_MS;
+  return lastSyncAt > 0 && now() - lastSyncAt < MIN_PASSIVE_SYNC_MS;
 }
 
 /* =========================================================
-   MANUAL DISPOSERS
-========================================================= */
-
-function addManualDisposer(disposer) {
-  if (isFunction(disposer)) {
-    manualDisposers.add(disposer);
-    stats.manualDisposers = manualDisposers.size;
-  }
-
-  return disposer;
-}
-
-function removeManualDisposer(disposer) {
-  try {
-    manualDisposers.delete(disposer);
-    stats.manualDisposers = manualDisposers.size;
-  } catch {}
-}
-
-function clearManualDisposers() {
-  for (const dispose of Array.from(manualDisposers)) {
-    try {
-      dispose();
-    } catch {}
-  }
-
-  manualDisposers.clear();
-  stats.manualDisposers = 0;
-}
-
-function normalizeDisposer(candidate) {
-  if (isFunction(candidate)) {
-    return candidate;
-  }
-
-  if (isFunction(candidate?.dispose)) {
-    return () => {
-      try {
-        candidate.dispose();
-        return true;
-      } catch {
-        return false;
-      }
-    };
-  }
-
-  if (isFunction(candidate?.off)) {
-    return () => {
-      try {
-        candidate.off();
-        return true;
-      } catch {
-        return false;
-      }
-    };
-  }
-
-  if (isFunction(candidate?.remove)) {
-    return () => {
-      try {
-        candidate.remove();
-        return true;
-      } catch {
-        return false;
-      }
-    };
-  }
-
-  return null;
-}
-
-/* =========================================================
-   BIND HELPERS
-========================================================= */
-
-function ensureCleanupScope(cleanup, scope = NETWORK_SCOPE) {
-  try {
-    if (isFunction(cleanup?.ensureScope)) {
-      cleanup.ensureScope(scope);
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (isFunction(cleanup?.scope)) {
-      cleanup.scope(scope);
-      return true;
-    }
-  } catch {}
-
-  return false;
-}
-
-function bindDomEvent({
-  cleanup,
-  scope = NETWORK_SCOPE,
-  target,
-  eventName,
-  handler,
-  options = false,
-} = {}) {
-  if (!target || !eventName || !isFunction(handler)) {
-    return () => false;
-  }
-
-  try {
-    if (isFunction(cleanup?.event)) {
-      const maybeDispose = cleanup.event(scope, target, eventName, handler, options);
-      const disposer = normalizeDisposer(maybeDispose);
-
-      if (disposer) {
-        addManualDisposer(disposer);
-        return disposer;
-      }
-
-      if (maybeDispose === true) {
-        return () => true;
-      }
-    }
-  } catch {}
-
-  try {
-    if (isFunction(cleanup?.on)) {
-      const maybeDispose = cleanup.on(scope, target, eventName, handler, options);
-      const disposer = normalizeDisposer(maybeDispose);
-
-      if (disposer) {
-        addManualDisposer(disposer);
-        return disposer;
-      }
-
-      if (maybeDispose === true) {
-        return () => true;
-      }
-    }
-  } catch {}
-
-  try {
-    target.addEventListener(eventName, handler, options);
-
-    const off = () => {
-      try {
-        target.removeEventListener(eventName, handler, options);
-        removeManualDisposer(off);
-        return true;
-      } catch {
-        return false;
-      }
-    };
-
-    addManualDisposer(off);
-
-    return off;
-  } catch {}
-
-  return () => false;
-}
-
-function bindConnectionChange({
-  cleanup,
-  scope,
-  connection,
-  handler,
-} = {}) {
-  if (!connection || !isFunction(handler)) {
-    return () => false;
-  }
-
-  if (isFunction(connection.addEventListener)) {
-    return bindDomEvent({
-      cleanup,
-      scope,
-      target: connection,
-      eventName: "change",
-      handler,
-    });
-  }
-
-  try {
-    const previous = connection.onchange;
-
-    const wrapped = function networkConnectionOnChange(event) {
-      try {
-        if (isFunction(previous)) {
-          previous.call(this, event);
-        }
-      } catch {}
-
-      handler(event);
-    };
-
-    connection.onchange = wrapped;
-
-    const off = () => {
-      try {
-        if (connection.onchange === wrapped) {
-          connection.onchange = previous || null;
-        }
-
-        removeManualDisposer(off);
-        return true;
-      } catch {
-        return false;
-      }
-    };
-
-    addManualDisposer(off);
-
-    return off;
-  } catch {}
-
-  return () => false;
-}
-
-/* =========================================================
-   STATE SYNC
+   SYNC
 ========================================================= */
 
 export function syncNetworkState({
@@ -1003,264 +528,356 @@ export function syncNetworkState({
   utils,
   setState,
   reason = "sync",
-  emit = true,
+  emit: shouldEmit = true,
   force = false,
   source = "network",
 } = {}) {
-  const ctx = updateActiveContext({
-    state,
-    events,
-    utils,
-    setState,
-  });
+  updateContext({ state, events, utils, setState });
 
-  const fallbackOnline = getOnlineFallbackFromReason(reason);
-  const online = getNavigatorOnline(fallbackOnline);
-  const status = onlineToStatus(online);
-
+  const online = getNavigatorOnline(reason);
+  const status = statusFromOnline(online);
   const visibilityState = getVisibilityState();
-  const hidden = getDocumentHidden();
+  const hidden = getHidden();
+  const connectionFp = fingerprint();
 
-  const connection = getConnectionSnapshot();
-  const currentConnectionFingerprint = connectionFingerprint(connection);
-
-  if (
-    shouldThrottlePassiveSync({
-      reason,
-      force,
-      nextOnline: online,
-      nextStatus: status,
-      nextVisibilityState: visibilityState,
-      nextHidden: hidden,
-      nextConnectionFingerprint: currentConnectionFingerprint,
-    })
-  ) {
+  if (shouldThrottle({ reason, force, online, status, visibilityState, hidden, connectionFp })) {
     stats.throttled += 1;
 
-    return emitNetworkState({
-      state: ctx.state,
-      events: ctx.events,
-      utils: ctx.utils,
+    const payload = buildPayload({
       online: lastOnline,
       reason: `${safeText(reason, "sync")}:throttled`,
-      changed: false,
       throttled: true,
-      silent: emit === false,
       source,
     });
+
+    if (shouldEmit) emit(active.events, NETWORK_EVENTS.state, payload);
+    record("throttled", payload);
+
+    return payload;
   }
 
-  /*
-    force sólo evita throttling. No marca cambio falso.
-  */
-  const changed =
-    lastOnline !== online ||
-    lastStatus !== status;
+  const changed = lastStatus !== status || lastOnline !== online;
+  const patch = buildPatch({ online, reason, changed });
 
-  const patch = buildStatePatch({
-    online,
-    reason,
-    changed,
-  });
-
-  writeNetworkState(ctx.state, patch, ctx.setState);
+  writeState(active.state, patch, active.setState);
 
   lastOnline = online;
   lastStatus = status;
   lastReason = safeText(reason, "sync");
-  lastSyncAt = safeNow();
-
+  lastSyncAt = now();
   lastVisibilityState = visibilityState;
   lastHidden = hidden;
-  lastConnectionFingerprint = currentConnectionFingerprint;
+  lastConnectionFingerprint = connectionFp;
 
   stats.sync += 1;
 
   if (changed) {
     lastChangeAt = lastSyncAt;
+    stats.changed += 1;
   }
 
-  return emitNetworkState({
-    state: ctx.state,
-    events: ctx.events,
-    utils: ctx.utils,
-    online,
-    reason,
-    changed,
-    silent: emit === false,
-    source,
+  const payload = buildPayload({ online, reason, changed, source });
+
+  if (shouldEmit) {
+    emit(active.events, NETWORK_EVENTS.state, payload);
+
+    if (changed) {
+      emit(active.events, NETWORK_EVENTS.change, payload);
+
+      if (online === true) {
+        stats.online += 1;
+        emit(active.events, NETWORK_EVENTS.online, payload);
+        log(active.utils, "Conectividad recuperada.", payload);
+      } else if (online === false) {
+        stats.offline += 1;
+        emit(active.events, NETWORK_EVENTS.offline, payload);
+        warn(active.utils, "El navegador está offline.", payload);
+      } else {
+        stats.unknown += 1;
+      }
+    }
+  }
+
+  record(changed ? "change" : "state", payload);
+  return payload;
+}
+
+export function refreshNetworkContext(context = {}) {
+  updateContext(context);
+
+  return syncNetworkState({
+    state: active.state,
+    events: active.events,
+    utils: active.utils,
+    setState: active.setState,
+    reason: "refresh-context",
+    emit: context.emit === true,
+    force: context.force === true,
+    source: "refreshNetworkContext",
   });
 }
 
 /* =========================================================
-   EVENT HANDLERS
+   DISPOSERS / BINDING
+========================================================= */
+
+function normalizeDisposer(candidate) {
+  if (isFn(candidate)) return candidate;
+  if (isFn(candidate?.dispose)) return () => candidate.dispose();
+  if (isFn(candidate?.off)) return () => candidate.off();
+  if (isFn(candidate?.remove)) return () => candidate.remove();
+  return null;
+}
+
+function addManualDisposer(disposer) {
+  if (isFn(disposer)) manualDisposers.add(disposer);
+  return disposer;
+}
+
+function clearManualDisposers() {
+  for (const dispose of Array.from(manualDisposers)) {
+    try {
+      dispose?.();
+    } catch {}
+  }
+
+  manualDisposers.clear();
+}
+
+function ensureCleanupScope(cleanup, scope = NETWORK_SCOPE) {
+  try {
+    if (isFn(cleanup?.ensureScope)) return Boolean(cleanup.ensureScope(scope));
+  } catch {}
+
+  try {
+    if (isFn(cleanup?.scope)) return Boolean(cleanup.scope(scope));
+  } catch {}
+
+  return false;
+}
+
+function bindDom({ cleanup, scope, target, eventName, handler, options = { passive: true } } = {}) {
+  if (!target || !eventName || !isFn(handler)) return () => false;
+
+  try {
+    if (isFn(cleanup?.event)) {
+      const maybe = cleanup.event(scope, target, eventName, handler, options);
+      const dispose = normalizeDisposer(maybe);
+      if (dispose) return dispose;
+    }
+  } catch {}
+
+  try {
+    if (isFn(cleanup?.on)) {
+      const maybe = cleanup.on(scope, target, eventName, handler, options);
+      const dispose = normalizeDisposer(maybe);
+      if (dispose) return dispose;
+    }
+  } catch {}
+
+  try {
+    target.addEventListener(eventName, handler, options);
+
+    const dispose = () => {
+      try {
+        target.removeEventListener(eventName, handler, options);
+        manualDisposers.delete(dispose);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    addManualDisposer(dispose);
+    return dispose;
+  } catch (error) {
+    recordError(error, `bind:${eventName}`);
+    return () => false;
+  }
+}
+
+function bindConnection(cleanup, scope) {
+  const connection = getConnection();
+  if (!connection) return () => false;
+
+  if (isFn(connection.addEventListener)) {
+    return bindDom({
+      cleanup,
+      scope,
+      target: connection,
+      eventName: "change",
+      handler: handleConnectionChange,
+    });
+  }
+
+  try {
+    const previous = connection.onchange;
+
+    const wrapped = function wrappedConnectionChange(event) {
+      try {
+        if (isFn(previous)) previous.call(this, event);
+      } catch {}
+
+      handleConnectionChange(event);
+    };
+
+    connection.onchange = wrapped;
+
+    const dispose = () => {
+      try {
+        if (connection.onchange === wrapped) connection.onchange = previous || null;
+        manualDisposers.delete(dispose);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    addManualDisposer(dispose);
+    return dispose;
+  } catch (error) {
+    recordError(error, "bind:connection-onchange");
+    return () => false;
+  }
+}
+
+/* =========================================================
+   HANDLERS
 ========================================================= */
 
 function handleOnline() {
-  const ctx = getActiveContext();
-
   syncNetworkState({
-    state: ctx.state,
-    events: ctx.events,
-    utils: ctx.utils,
-    setState: ctx.setState,
+    state: active.state,
+    events: active.events,
+    utils: active.utils,
+    setState: active.setState,
     reason: "online",
     emit: true,
-    force: false,
     source: "window:online",
   });
 }
 
 function handleOffline() {
-  const ctx = getActiveContext();
-
   syncNetworkState({
-    state: ctx.state,
-    events: ctx.events,
-    utils: ctx.utils,
-    setState: ctx.setState,
+    state: active.state,
+    events: active.events,
+    utils: active.utils,
+    setState: active.setState,
     reason: "offline",
     emit: true,
-    force: false,
     source: "window:offline",
   });
 }
 
 function handleVisibilityChange() {
-  const ctx = getActiveContext();
-  const nextVisibility = getVisibilityState();
-  const changed = lastVisibilityState !== nextVisibility;
+  const before = lastVisibilityState;
 
   const payload = syncNetworkState({
-    state: ctx.state,
-    events: ctx.events,
-    utils: ctx.utils,
-    setState: ctx.setState,
+    state: active.state,
+    events: active.events,
+    utils: active.utils,
+    setState: active.setState,
     reason: "visibilitychange",
     emit: true,
-    force: false,
     source: "document:visibilitychange",
   });
 
-  if (changed && payload?.throttled !== true) {
+  if (payload?.throttled === true) return;
+
+  const next = getVisibilityState();
+
+  if (before !== next) {
     stats.visibility += 1;
-
-    const finalPayload = {
-      ...payload,
-      visibilityState: nextVisibility,
-    };
-
-    safeEmit(ctx.events, NETWORK_EVENTS.visibility, finalPayload);
-    pushRecent("visibility", finalPayload);
+    const eventPayload = { ...payload, visibilityState: next };
+    emit(active.events, NETWORK_EVENTS.visibility, eventPayload);
+    record("visibility", eventPayload);
   }
 }
 
 function handleFocus() {
-  const ctx = getActiveContext();
-
   const payload = syncNetworkState({
-    state: ctx.state,
-    events: ctx.events,
-    utils: ctx.utils,
-    setState: ctx.setState,
+    state: active.state,
+    events: active.events,
+    utils: active.utils,
+    setState: active.setState,
     reason: "focus",
     emit: true,
-    force: false,
     source: "window:focus",
   });
 
-  if (payload?.throttled === true) {
-    return;
-  }
+  if (payload?.throttled === true) return;
 
   stats.focus += 1;
-  safeEmit(ctx.events, NETWORK_EVENTS.focus, payload);
-  pushRecent("focus", payload);
+  emit(active.events, NETWORK_EVENTS.focus, payload);
+  record("focus", payload);
 }
 
 function handlePageShow(event = null) {
-  const ctx = getActiveContext();
-
   const payload = syncNetworkState({
-    state: ctx.state,
-    events: ctx.events,
-    utils: ctx.utils,
-    setState: ctx.setState,
+    state: active.state,
+    events: active.events,
+    utils: active.utils,
+    setState: active.setState,
     reason: "pageshow",
     emit: true,
-    force: false,
     source: "window:pageshow",
   });
 
-  if (payload?.throttled === true) {
-    return;
-  }
+  if (payload?.throttled === true) return;
 
   stats.pageShow += 1;
 
-  const finalPayload = {
+  const eventPayload = {
     ...payload,
     persisted: Boolean(event?.persisted),
   };
 
-  safeEmit(ctx.events, NETWORK_EVENTS.pageShow, finalPayload);
-  pushRecent("pageshow", finalPayload);
+  emit(active.events, NETWORK_EVENTS.pageShow, eventPayload);
+  record("pageshow", eventPayload);
 }
 
 function handlePageHide(event = null) {
-  const ctx = getActiveContext();
-
   stats.pageHide += 1;
 
-  const payload = buildPayload({
-    state: ctx.state,
-    online: lastOnline,
-    reason: "pagehide",
-    changed: false,
-    source: "window:pagehide",
-  });
-
-  const finalPayload = {
-    ...payload,
+  const payload = {
+    ...buildPayload({
+      online: lastOnline,
+      reason: "pagehide",
+      changed: false,
+      source: "window:pagehide",
+    }),
     persisted: Boolean(event?.persisted),
   };
 
-  safeEmit(ctx.events, NETWORK_EVENTS.pageHide, finalPayload);
-  pushRecent("pagehide", finalPayload);
+  emit(active.events, NETWORK_EVENTS.pageHide, payload);
+  record("pagehide", payload);
 }
 
 function handleConnectionChange() {
-  const ctx = getActiveContext();
-
-  const connection = getConnectionSnapshot();
-  const fingerprint = connectionFingerprint(connection);
-  const changed = fingerprint !== lastConnectionFingerprint;
+  const before = lastConnectionFingerprint;
 
   const payload = syncNetworkState({
-    state: ctx.state,
-    events: ctx.events,
-    utils: ctx.utils,
-    setState: ctx.setState,
+    state: active.state,
+    events: active.events,
+    utils: active.utils,
+    setState: active.setState,
     reason: "connection-change",
-    emit: changed,
-    force: false,
+    emit: before !== fingerprint(),
     source: "navigator:connection",
   });
 
-  if (payload?.throttled === true) {
-    return;
-  }
+  if (payload?.throttled === true) return;
 
   stats.connection += 1;
 
-  const finalPayload = {
+  const eventPayload = {
     ...payload,
-    changed,
-    connection,
+    changed: before !== fingerprint(),
+    connection: connectionSnapshot(),
   };
 
-  safeEmit(ctx.events, NETWORK_EVENTS.connection, finalPayload);
-  pushRecent("connection", finalPayload);
+  emit(active.events, NETWORK_EVENTS.connection, eventPayload);
+  record("connection", eventPayload);
 }
 
 /* =========================================================
@@ -1276,45 +893,31 @@ export function bindNetworkEvents({
   scope = NETWORK_SCOPE,
   force = false,
 } = {}) {
-  const previousContext = { ...activeContext };
+  const previous = { ...active };
 
-  updateActiveContext({
-    state,
-    events,
-    cleanup,
-    utils,
-    setState,
-    scope,
-  });
+  updateContext({ state, events, cleanup, utils, setState, scope });
 
   if (!isBrowser()) {
-    const patch = buildStatePatch({
+    const patch = buildPatch({
       online: null,
       reason: "server",
       changed: false,
     });
 
-    writeNetworkState(state, patch, setState);
-
-    pushRecent("server", {
-      version: NETWORK_VERSION,
-      status: "unknown",
-      reason: "server",
-      at: safeIsoDate(),
-    });
+    writeState(active.state, patch, active.setState);
+    record("server", { status: "unknown" });
 
     return false;
   }
 
   if (bound && !force) {
     syncNetworkState({
-      state,
-      events,
-      utils,
-      setState,
+      state: active.state,
+      events: active.events,
+      utils: active.utils,
+      setState: active.setState,
       reason: "already-bound",
       emit: false,
-      force: false,
       source: "bindNetworkEvents",
     });
 
@@ -1323,103 +926,39 @@ export function bindNetworkEvents({
 
   if (bound && force) {
     unbindNetworkEvents({
-      cleanup: previousContext.cleanup || cleanup,
-      events: previousContext.events || events,
-      utils: previousContext.utils || utils,
-      scope: previousContext.scope || scope,
+      cleanup: previous.cleanup || cleanup,
+      events: previous.events || events,
+      utils: previous.utils || utils,
+      scope: previous.scope || scope,
     });
 
-    updateActiveContext({
-      state,
-      events,
-      cleanup,
-      utils,
-      setState,
-      scope,
-    });
+    updateContext({ state, events, cleanup, utils, setState, scope });
   }
 
   try {
     ensureCleanupScope(cleanup, scope);
 
-    bindDomEvent({
-      cleanup,
-      scope,
-      target: window,
-      eventName: "online",
-      handler: handleOnline,
-      options: { passive: true },
-    });
-
-    bindDomEvent({
-      cleanup,
-      scope,
-      target: window,
-      eventName: "offline",
-      handler: handleOffline,
-      options: { passive: true },
-    });
-
-    bindDomEvent({
-      cleanup,
-      scope,
-      target: document,
-      eventName: "visibilitychange",
-      handler: handleVisibilityChange,
-      options: { passive: true },
-    });
-
-    bindDomEvent({
-      cleanup,
-      scope,
-      target: window,
-      eventName: "focus",
-      handler: handleFocus,
-      options: { passive: true },
-    });
-
-    bindDomEvent({
-      cleanup,
-      scope,
-      target: window,
-      eventName: "pageshow",
-      handler: handlePageShow,
-      options: { passive: true },
-    });
-
-    bindDomEvent({
-      cleanup,
-      scope,
-      target: window,
-      eventName: "pagehide",
-      handler: handlePageHide,
-      options: { passive: true },
-    });
-
-    const connection = getConnection();
-
-    if (connection) {
-      bindConnectionChange({
-        cleanup,
-        scope,
-        connection,
-        handler: handleConnectionChange,
-      });
-    }
+    bindDom({ cleanup, scope, target: window, eventName: "online", handler: handleOnline });
+    bindDom({ cleanup, scope, target: window, eventName: "offline", handler: handleOffline });
+    bindDom({ cleanup, scope, target: document, eventName: "visibilitychange", handler: handleVisibilityChange });
+    bindDom({ cleanup, scope, target: window, eventName: "focus", handler: handleFocus });
+    bindDom({ cleanup, scope, target: window, eventName: "pageshow", handler: handlePageShow });
+    bindDom({ cleanup, scope, target: window, eventName: "pagehide", handler: handlePageHide });
+    bindConnection(cleanup, scope);
 
     bound = true;
     bindingId += 1;
     stats.bind += 1;
 
     lastVisibilityState = getVisibilityState();
-    lastHidden = getDocumentHidden();
-    lastConnectionFingerprint = connectionFingerprint(getConnectionSnapshot());
+    lastHidden = getHidden();
+    lastConnectionFingerprint = fingerprint();
 
     const payload = syncNetworkState({
-      state,
-      events,
-      utils,
-      setState,
+      state: active.state,
+      events: active.events,
+      utils: active.utils,
+      setState: active.setState,
       reason: "bind",
       emit: false,
       force: true,
@@ -1430,42 +969,32 @@ export function bindNetworkEvents({
       ...payload,
       scope,
       bindingId,
-      hasConnectionApi: Boolean(connection),
+      hasConnectionApi: Boolean(getConnection()),
     };
 
-    safeEmit(events, NETWORK_EVENTS.bound, boundPayload);
-    pushRecent("bound", boundPayload);
-
-    safeLog(utils, "Network events activos.", boundPayload);
+    emit(active.events, NETWORK_EVENTS.bound, boundPayload);
+    record("bound", boundPayload);
+    log(active.utils, "Network events activos.", boundPayload);
 
     return true;
   } catch (error) {
-    safeError(utils, events, error, "bindNetworkEvents");
+    recordError(error, "bindNetworkEvents");
     return false;
   }
 }
 
-export function unbindNetworkEvents({
-  cleanup,
-  events,
-  utils,
-  scope = NETWORK_SCOPE,
-} = {}) {
-  const finalCleanup = cleanup || activeContext.cleanup;
-  const finalEvents = events || activeContext.events;
-  const finalUtils = utils || activeContext.utils;
-  const finalScope = safeText(scope || activeContext.scope, NETWORK_SCOPE);
+export function unbindNetworkEvents({ cleanup, events, utils, scope = NETWORK_SCOPE } = {}) {
+  const finalCleanup = cleanup || active.cleanup;
+  const finalEvents = events || active.events;
+  const finalUtils = utils || active.utils;
+  const finalScope = safeText(scope || active.scope, NETWORK_SCOPE);
 
   try {
-    if (isFunction(finalCleanup?.run)) {
-      finalCleanup.run(finalScope);
-    } else if (isFunction(finalCleanup?.clear)) {
-      finalCleanup.clear(finalScope);
-    } else if (isFunction(finalCleanup?.dispose)) {
-      finalCleanup.dispose(finalScope);
-    }
+    if (isFn(finalCleanup?.run)) finalCleanup.run(finalScope);
+    else if (isFn(finalCleanup?.clear)) finalCleanup.clear(finalScope);
+    else if (isFn(finalCleanup?.dispose)) finalCleanup.dispose(finalScope);
   } catch (error) {
-    safeError(finalUtils, finalEvents, error, "unbindNetworkEvents:cleanup");
+    recordError(error, "unbindNetworkEvents:cleanup");
   }
 
   clearManualDisposers();
@@ -1474,16 +1003,13 @@ export function unbindNetworkEvents({
   stats.unbind += 1;
 
   const payload = {
-    version: NETWORK_VERSION,
     scope: finalScope,
     bindingId,
-    at: safeIsoDate(),
   };
 
-  safeEmit(finalEvents, NETWORK_EVENTS.unbound, payload);
-  pushRecent("unbound", payload);
-
-  safeLog(finalUtils, "Network events desactivados.");
+  emit(finalEvents, NETWORK_EVENTS.unbound, payload);
+  record("unbound", payload);
+  log(finalUtils, "Network events desactivados.");
 
   return true;
 }
@@ -1501,57 +1027,49 @@ export function isNetworkOffline() {
 }
 
 export function getNetworkStatus() {
-  return onlineToStatus(getNavigatorOnline());
+  return statusFromOnline(getNavigatorOnline());
 }
 
 /* =========================================================
    SNAPSHOT
 ========================================================= */
 
-export function getNetworkSnapshot({
-  state,
-  includeRecent = true,
-} = {}) {
-  const sourceState = state || activeContext.state;
+export function getNetworkSnapshot({ state, includeRecent = true } = {}) {
+  const sourceState = state || active.state;
   const currentOnline = getNavigatorOnline();
-  const connection = getConnectionSnapshot();
+  const connection = connectionSnapshot();
 
-  return {
+  return sanitize({
     version: NETWORK_VERSION,
-
     bound: Boolean(bound),
     bindingId,
 
     online: currentOnline,
     offline: currentOnline === null ? null : !currentOnline,
-    status: onlineToStatus(currentOnline),
+    status: statusFromOnline(currentOnline),
     known: currentOnline === true || currentOnline === false,
 
     lastOnline,
     lastStatus,
     lastReason,
-
     lastSyncAt,
-    lastSyncAtIso: lastSyncAt ? safeIsoDate(lastSyncAt) : "",
-
+    lastSyncAtIso: lastSyncAt ? iso(lastSyncAt) : "",
     lastChangeAt,
-    lastChangeAtIso: lastChangeAt ? safeIsoDate(lastChangeAt) : "",
-
+    lastChangeAtIso: lastChangeAt ? iso(lastChangeAt) : "",
     lastVisibilityState,
     lastHidden,
-
     lastConnectionFingerprint,
-    currentConnectionFingerprint: connectionFingerprint(connection),
+    currentConnectionFingerprint: fingerprint(connection),
 
+    activeScope: active.scope,
     manualDisposerCount: manualDisposers.size,
-    activeScope: activeContext.scope,
 
     activeContext: {
-      hasState: Boolean(activeContext.state),
-      hasEvents: Boolean(activeContext.events),
-      hasCleanup: Boolean(activeContext.cleanup),
-      hasUtils: Boolean(activeContext.utils),
-      hasSetState: Boolean(activeContext.setState),
+      hasState: Boolean(active.state),
+      hasEvents: Boolean(active.events),
+      hasCleanup: Boolean(active.cleanup),
+      hasUtils: Boolean(active.utils),
+      hasSetState: Boolean(active.setState),
     },
 
     stats: {
@@ -1566,14 +1084,11 @@ export function getNetworkSnapshot({
       networkOffline: sourceState?.networkOffline ?? null,
       networkKnown: sourceState?.networkKnown ?? null,
       networkStatus: sourceState?.networkStatus || "",
-
       lastNetworkReason: sourceState?.lastNetworkReason || "",
       lastNetworkSyncAt: sourceState?.lastNetworkSyncAt || "",
       lastNetworkChangeAt: sourceState?.lastNetworkChangeAt || "",
-
       visibilityState: sourceState?.networkVisibilityState || "",
       hidden: sourceState?.networkHidden ?? null,
-
       connection: sourceState?.networkConnection || null,
       effectiveType: sourceState?.networkEffectiveType || null,
       connectionType: sourceState?.networkType || null,
@@ -1583,27 +1098,12 @@ export function getNetworkSnapshot({
       saveData: sourceState?.networkSaveData ?? null,
     },
 
-    browser: getBrowserNetworkSnapshot(),
-
-    recent: includeRecent === false
-      ? []
-      : recentEvents.map((item) => ({ ...item })),
-
-    lastError: lastError ? safeClone(lastError, null) : null,
-
-    at: safeIsoDate(),
-  };
+    browser: browserSnapshot(),
+    recent: includeRecent === false ? [] : recent.map((item) => ({ ...item })),
+    lastError: lastError ? clone(lastError, null) : null,
+    at: iso(),
+  });
 }
-
-/* =========================================================
-   EXPORT
-========================================================= */
-
-export {
-  NETWORK_VERSION,
-  NETWORK_SCOPE,
-  NETWORK_EVENTS,
-};
 
 export default {
   NETWORK_VERSION,

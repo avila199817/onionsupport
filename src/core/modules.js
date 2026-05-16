@@ -2,47 +2,18 @@
    Onion SPA - Core Modules
    Archivo: src/core/modules.js
 
-   ONION SUPPORT · CORE MODULES
-   MODULE REGISTRY · ALIASES · DISPOSE SAFE · 17/10
-
-   Responsabilidades:
-   - registrar módulos en el core
-   - consultar módulos registrados
-   - listar aliases disponibles
-   - desregistrar módulos de forma segura
-   - soportar metadatos, aliases y snapshots
-   - tolerar registry parcial
-   - evitar duplicados accidentales
-
-   Candados:
-   - cero throws por defecto
-   - modo strict opcional
-   - registry.modules siempre Map
-   - registry.moduleAliases siempre Map
-   - registry.moduleMeta siempre Map
-   - registry.moduleNameIndex siempre Map
-   - aliases case-insensitive
-   - índice de nombres case-insensitive
-   - register idempotente
+   CORE MODULES · CLEAN
+   - Registry único de módulos
+   - Aliases case-insensitive
+   - Register idempotente
    - set/upsert con overwrite explícito
-   - unregister seguro con dispose opcional
-   - dispose defensivo sync/async
-   - dispose methods case-sensitive
-   - alias collision controlado
-   - eventos consistentes
-   - snapshots sin exponer instancias completas
-   - compat total con AppCore.modules.register/get/list
+   - dispose seguro
+   - snapshots sin instancias ni secretos
 ========================================================= */
 
-/* =========================================================
-   CONSTANTS
-========================================================= */
+export const MODULES_VERSION = "18.0.0-clean";
 
-const MODULES_VERSION = "17.0.0";
-
-const MAX_RECENT_EVENTS = 60;
-
-const DEFAULT_DISPOSE_METHODS = Object.freeze([
+export const DEFAULT_DISPOSE_METHODS = Object.freeze([
   "destroy",
   "dispose",
   "unmount",
@@ -51,27 +22,26 @@ const DEFAULT_DISPOSE_METHODS = Object.freeze([
   "cleanup",
 ]);
 
-const MODULE_EVENTS = Object.freeze({
+export const MODULE_EVENTS = Object.freeze({
   ready: "app:modules:ready",
-
   registered: "app:module:registered",
   duplicate: "app:module:duplicate",
   overwritten: "app:module:overwritten",
-
   alias: "app:module:alias",
   aliasConflict: "app:module:alias-conflict",
-
   unregistered: "app:module:unregistered",
   disposed: "app:module:disposed",
   disposeError: "app:module:dispose-error",
-
   cleared: "app:modules:cleared",
   error: "app:modules:error",
 });
 
-const MODULE_NAME_CONTROL_RE = /[\u0000-\u001f\u007f]/g;
+const MAX_RECENT = 40;
+const CONTROL_RE = /[\u0000-\u001f\u007f]/g;
+const SENSITIVE_KEY_RE = /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
+const TOKENISH_RE = /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)[^&#\s]+/gi;
 
-const RESERVED_META_KEYS = Object.freeze([
+const META_RESERVED = new Set([
   "name",
   "moduleName",
   "key",
@@ -81,26 +51,34 @@ const RESERVED_META_KEYS = Object.freeze([
   "value",
   "ref",
   "options",
+  "alias",
+  "aliases",
+  "overwrite",
+  "replace",
+  "strict",
+  "silent",
+  "emit",
+  "emitDuplicate",
+  "emitDuplicates",
+  "dispose",
+  "disposePrevious",
+  "disposeMethod",
+  "disposeMethods",
+  "overwriteAliases",
+  "source",
+  "label",
+  "version",
+  "description",
+  "tags",
+  "meta",
 ]);
-
-const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
-
-const TOKENISH_TEXT_RE =
-  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)[^&#\s]+/i;
 
 /* =========================================================
    BASICS
 ========================================================= */
 
-function isObject(value) {
-  return value !== null && typeof value === "object";
-}
-
 function isPlainObject(value) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 
   try {
     const proto = Object.getPrototypeOf(value);
@@ -110,19 +88,18 @@ function isPlainObject(value) {
   }
 }
 
+function isObject(value) {
+  return value !== null && typeof value === "object";
+}
+
 function isFunction(value) {
   return typeof value === "function";
 }
 
 function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
-  const text = String(value)
-    .replace(MODULE_NAME_CONTROL_RE, "")
-    .trim();
-
+  const text = String(value).replace(CONTROL_RE, "").trim();
   return text || fallback;
 }
 
@@ -137,7 +114,7 @@ function toArray(value) {
   return [value];
 }
 
-function safeNow() {
+function now() {
   try {
     return Date.now();
   } catch {
@@ -145,7 +122,7 @@ function safeNow() {
   }
 }
 
-function safeIsoDate(ms = safeNow()) {
+function iso(ms = now()) {
   try {
     return new Date(ms).toISOString();
   } catch {
@@ -158,60 +135,64 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
-function safeClone(value, fallback = null) {
-  if (value === undefined) {
-    return fallback;
-  }
-
-  if (value === null) {
-    return null;
-  }
-
-  try {
-    if (typeof structuredClone === "function") {
-      return structuredClone(value);
-    }
-  } catch {}
-
-  try {
-    return JSON.parse(JSON.stringify(value));
-  } catch {
-    return fallback;
-  }
+function uniqueText(values = []) {
+  return [
+    ...new Set(
+      toArray(values)
+        .flat(Infinity)
+        .map((item) => safeText(item, ""))
+        .filter(Boolean)
+    ),
+  ];
 }
+
+function ensureMap(value) {
+  if (value instanceof Map) return value;
+
+  const map = new Map();
+
+  if (isPlainObject(value)) {
+    try {
+      for (const [key, item] of Object.entries(value)) {
+        map.set(key, item);
+      }
+    } catch {}
+  }
+
+  return map;
+}
+
+/* =========================================================
+   REDACTION
+========================================================= */
 
 function redactText(value = "") {
   const text = safeText(value, "");
-
-  if (!text) {
-    return "";
-  }
+  if (!text) return "";
 
   try {
     return text
+      .replace(TOKENISH_RE, (_match, bearer, jwt, queryPrefix) => {
+        if (bearer) return bearer.replace(/(bearer\s+).+/i, "$1***");
+        if (queryPrefix) return `${queryPrefix}***`;
+        if (jwt) return "***";
+        return "***";
+      })
       .replace(/(bearer\s+)([a-z0-9._~+/=-]+)/gi, "$1***")
-      .replace(
-        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)([^&#\s]+)/gi,
-        "$1***"
-      )
       .replace(/([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)/gi, "***");
   } catch {
-    return TOKENISH_TEXT_RE.test(text) ? "***" : text;
+    return text;
   }
 }
 
-function sanitizeForSnapshot(value, depth = 0, keyHint = "") {
-  if (depth > 5) {
-    return "[depth-limit]";
-  }
+function sanitize(value, depth = 0, keyHint = "", seen = new WeakSet()) {
+  if (depth > 5) return "[depth-limit]";
 
   if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) {
-    return value ? "***" : null;
+    return value ? "***" : value;
   }
 
-  if (typeof value === "string") {
-    return redactText(value);
-  }
+  if (typeof value === "string") return redactText(value);
 
   if (
     value === null ||
@@ -222,13 +203,8 @@ function sanitizeForSnapshot(value, depth = 0, keyHint = "") {
     return value;
   }
 
-  if (typeof value === "bigint") {
-    return String(value);
-  }
-
-  if (typeof value === "function") {
-    return "[function]";
-  }
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return "[function]";
 
   if (value instanceof Error) {
     return {
@@ -239,36 +215,37 @@ function sanitizeForSnapshot(value, depth = 0, keyHint = "") {
   }
 
   if (Array.isArray(value)) {
-    return value
-      .slice(0, 80)
-      .map((item) => sanitizeForSnapshot(item, depth + 1, keyHint));
+    return value.slice(0, 80).map((item) => sanitize(item, depth + 1, keyHint, seen));
   }
 
   if (isObject(value)) {
+    try {
+      if (seen.has(value)) return "[circular]";
+      seen.add(value);
+    } catch {}
+
     const output = {};
 
     for (const [key, item] of Object.entries(value).slice(0, 120)) {
-      output[key] = sanitizeForSnapshot(item, depth + 1, key);
+      output[key] = sanitize(item, depth + 1, key, seen);
     }
 
     return output;
   }
 
-  try {
-    return redactText(String(value));
-  } catch {
-    return "[unserializable]";
-  }
+  return redactText(String(value));
 }
 
-function safeEmit(events, name, payload = {}) {
+function emit(events, name, payload = {}, options = {}) {
   const eventName = safeText(name, "");
+  if (!eventName || options.silent === true || options.emit === false) return false;
 
-  if (!eventName) {
-    return false;
-  }
-
-  const cleanPayload = sanitizeForSnapshot(payload);
+  const cleanPayload = sanitize({
+    version: MODULES_VERSION,
+    source: "core.modules",
+    at: iso(),
+    ...payload,
+  });
 
   try {
     if (isFunction(events?.emit)) {
@@ -294,43 +271,25 @@ function safeEmit(events, name, payload = {}) {
   return false;
 }
 
-function safeWarn(utils, ...args) {
-  const cleanArgs = args.map((item) => sanitizeForSnapshot(item));
+function warn(utils, ...args) {
+  const clean = args.map((item) => sanitize(item));
 
   try {
     if (isFunction(utils?.warn)) {
-      utils.warn("[Modules]", ...cleanArgs);
+      utils.warn("[Modules]", ...clean);
       return;
     }
   } catch {}
 
   try {
-    console.warn("[Modules]", ...cleanArgs);
+    if (utils?.debug === true) console.warn("[Modules]", ...clean);
   } catch {}
 }
 
-function safeLog(utils, ...args) {
+function log(utils, ...args) {
   try {
-    utils?.log?.("[Modules]", ...args.map((item) => sanitizeForSnapshot(item)));
+    utils?.log?.("[Modules]", ...args.map((item) => sanitize(item)));
   } catch {}
-}
-
-function ensureMap(value) {
-  if (value instanceof Map) {
-    return value;
-  }
-
-  const map = new Map();
-
-  if (isPlainObject(value)) {
-    try {
-      for (const [key, item] of Object.entries(value)) {
-        map.set(key, item);
-      }
-    } catch {}
-  }
-
-  return map;
 }
 
 /* =========================================================
@@ -341,61 +300,42 @@ function normalizeName(name = "") {
   return safeText(name, "");
 }
 
-function normalizeLookupKey(value = "") {
+function lookupKey(value = "") {
   return safeText(value, "").toLowerCase();
 }
 
-function normalizeAlias(alias = "") {
-  return normalizeLookupKey(alias);
+function normalizeAlias(value = "") {
+  return lookupKey(value);
 }
 
-function collectAliasValues(input, output = []) {
-  if (Array.isArray(input) || input instanceof Set) {
-    for (const item of Array.from(input)) {
-      collectAliasValues(item, output);
-    }
-
+function flattenValues(value, output = []) {
+  if (Array.isArray(value) || value instanceof Set) {
+    for (const item of Array.from(value)) flattenValues(item, output);
     return output;
   }
 
-  if (input !== null && input !== undefined && input !== "") {
-    output.push(input);
+  if (value !== null && value !== undefined && value !== "") {
+    output.push(value);
   }
 
   return output;
 }
 
 function uniqueAliases(values = []) {
-  return Array.from(
-    new Set(
-      collectAliasValues(values)
-        .map((value) => normalizeAlias(value))
+  return [
+    ...new Set(
+      flattenValues(values)
+        .map(normalizeAlias)
         .filter(Boolean)
-    )
-  );
-}
-
-function collectDisposeMethodValues(input, output = []) {
-  if (Array.isArray(input) || input instanceof Set) {
-    for (const item of Array.from(input)) {
-      collectDisposeMethodValues(item, output);
-    }
-
-    return output;
-  }
-
-  if (input !== null && input !== undefined && input !== "") {
-    output.push(input);
-  }
-
-  return output;
+    ),
+  ];
 }
 
 function uniqueDisposeMethods(values = []) {
   const output = [];
   const seen = new Set();
 
-  for (const value of collectDisposeMethodValues(values)) {
+  for (const value of flattenValues(values)) {
     if (typeof value === "symbol") {
       if (!seen.has(value)) {
         seen.add(value);
@@ -417,54 +357,10 @@ function uniqueDisposeMethods(values = []) {
 }
 
 function normalizeTags(values = []) {
-  return Array.from(
-    new Set(
-      toArray(values)
-        .flat(Infinity)
-        .map((tag) => safeText(tag, ""))
-        .filter(Boolean)
-    )
-  );
+  return uniqueText(values);
 }
 
-function pickCustomMeta(options = {}) {
-  const opts = isPlainObject(options) ? options : {};
-
-  if (isPlainObject(opts.meta)) {
-    return sanitizeForSnapshot(opts.meta);
-  }
-
-  const custom = {};
-
-  for (const [key, value] of Object.entries(opts)) {
-    if (
-      RESERVED_META_KEYS.includes(key) ||
-      key === "aliases" ||
-      key === "alias" ||
-      key === "overwrite" ||
-      key === "replace" ||
-      key === "strict" ||
-      key === "dispose" ||
-      key === "disposePrevious" ||
-      key === "disposeMethod" ||
-      key === "disposeMethods" ||
-      key === "overwriteAliases" ||
-      key === "source" ||
-      key === "label" ||
-      key === "version" ||
-      key === "description" ||
-      key === "tags"
-    ) {
-      continue;
-    }
-
-    custom[key] = sanitizeForSnapshot(value);
-  }
-
-  return Object.keys(custom).length ? custom : null;
-}
-
-function getInstanceValue(instance, key, fallback = undefined) {
+function getInstanceValue(instance, key, fallback = "") {
   try {
     const value = instance?.[key];
     return value === undefined ? fallback : value;
@@ -473,7 +369,7 @@ function getInstanceValue(instance, key, fallback = undefined) {
   }
 }
 
-function hasMethod(instance, method = "") {
+function hasMethod(instance, method) {
   try {
     return isFunction(instance?.[method]);
   } catch {
@@ -481,99 +377,54 @@ function hasMethod(instance, method = "") {
   }
 }
 
-function getSymbolDisposeMethod(instance) {
+function symbolDispose(instance, async = false) {
   try {
-    if (
-      typeof Symbol !== "undefined" &&
-      Symbol.dispose &&
-      isFunction(instance?.[Symbol.dispose])
-    ) {
-      return Symbol.dispose;
-    }
-  } catch {}
-
-  return null;
-}
-
-function getSymbolAsyncDisposeMethod(instance) {
-  try {
-    if (
-      typeof Symbol !== "undefined" &&
-      Symbol.asyncDispose &&
-      isFunction(instance?.[Symbol.asyncDispose])
-    ) {
-      return Symbol.asyncDispose;
-    }
-  } catch {}
-
-  return null;
+    const key = async ? Symbol.asyncDispose : Symbol.dispose;
+    return key && isFunction(instance?.[key]) ? key : null;
+  } catch {
+    return null;
+  }
 }
 
 function isDisposable(instance) {
-  if (!instance) {
-    return false;
-  }
-
-  if (getSymbolDisposeMethod(instance) || getSymbolAsyncDisposeMethod(instance)) {
-    return true;
-  }
+  if (!instance) return false;
+  if (symbolDispose(instance, true) || symbolDispose(instance, false)) return true;
 
   return DEFAULT_DISPOSE_METHODS.some((method) => hasMethod(instance, method));
 }
 
-function getCapabilities(instance) {
+function capabilities(instance) {
   return {
     hasInit: hasMethod(instance, "init"),
     hasBoot: hasMethod(instance, "boot"),
     hasStart: hasMethod(instance, "start"),
     hasStop: hasMethod(instance, "stop"),
-
     hasMount: hasMethod(instance, "mount"),
     hasUnmount: hasMethod(instance, "unmount"),
-
     hasRender: hasMethod(instance, "render"),
-
     hasDestroy: hasMethod(instance, "destroy"),
     hasDispose: hasMethod(instance, "dispose"),
     hasTeardown: hasMethod(instance, "teardown"),
     hasCleanup: hasMethod(instance, "cleanup"),
-
     disposable: isDisposable(instance),
   };
 }
 
-function getInstanceType(instance) {
+function instanceType(instance) {
   if (instance === null) return "null";
   if (instance === undefined) return "undefined";
   if (Array.isArray(instance)) return "array";
   if (isFunction(instance)) return "function";
-
   return typeof instance;
 }
-
-/* =========================================================
-   REGISTER ARGS
-========================================================= */
 
 function normalizeRegisterArgs(name, instance, options = {}) {
   if (isPlainObject(name) && instance === undefined) {
     const source = name;
 
     return {
-      name:
-        source.name ||
-        source.moduleName ||
-        source.key ||
-        source.id ||
-        "",
-
-      instance:
-        source.instance ??
-        source.module ??
-        source.value ??
-        source.ref ??
-        null,
-
+      name: source.name || source.moduleName || source.key || source.id || "",
+      instance: source.instance ?? source.module ?? source.value ?? source.ref ?? null,
       options: {
         ...source,
         ...(isPlainObject(source.options) ? source.options : {}),
@@ -588,42 +439,49 @@ function normalizeRegisterArgs(name, instance, options = {}) {
   };
 }
 
+function customMeta(options = {}) {
+  const opts = isPlainObject(options) ? options : {};
+
+  if (isPlainObject(opts.meta)) return sanitize(opts.meta);
+
+  const output = {};
+
+  for (const [key, value] of Object.entries(opts)) {
+    if (META_RESERVED.has(key)) continue;
+    output[key] = sanitize(value, 0, key);
+  }
+
+  return Object.keys(output).length ? output : null;
+}
+
 /* =========================================================
    FACTORY
 ========================================================= */
 
-export function createModules({
-  registry,
-  events,
-  utils,
-  strict = false,
-} = {}) {
-  const finalRegistry = isObject(registry) ? registry : {};
+export function createModules(input = {}) {
+  const registry = isObject(input.registry) ? input.registry : {};
+  const events = input.events || input.bus || registry.events || registry.bus || null;
+  const utils = input.utils || input.logger || registry.utils || registry.logger || null;
+  const strict = input.strict === true;
 
-  finalRegistry.modules = ensureMap(finalRegistry.modules);
-  finalRegistry.moduleAliases = ensureMap(finalRegistry.moduleAliases);
-  finalRegistry.moduleMeta = ensureMap(finalRegistry.moduleMeta);
-  finalRegistry.moduleNameIndex = ensureMap(finalRegistry.moduleNameIndex);
+  registry.modules = ensureMap(registry.modules);
+  registry.moduleAliases = ensureMap(registry.moduleAliases);
+  registry.moduleMeta = ensureMap(registry.moduleMeta);
+  registry.moduleNameIndex = ensureMap(registry.moduleNameIndex);
 
   const recent = [];
 
   const state = {
-    version: MODULES_VERSION,
-
     registerCount: 0,
     duplicateCount: 0,
     overwriteCount: 0,
     unregisterCount: 0,
-
     aliasCount: 0,
     aliasConflictCount: 0,
-
     disposeCount: 0,
     disposeErrorCount: 0,
-
     clearCount: 0,
     errorCount: 0,
-
     lastRegistered: "",
     lastDuplicate: "",
     lastOverwritten: "",
@@ -632,36 +490,30 @@ export function createModules({
     lastError: null,
   };
 
-  function pushRecent(type = "event", payload = {}) {
+  function pushRecent(type, payload = {}) {
     recent.unshift({
-      type: safeText(type, "event"),
-      ...sanitizeForSnapshot(payload),
-      at: safeIsoDate(),
+      type,
+      ...sanitize(payload),
+      at: iso(),
     });
 
-    if (recent.length > MAX_RECENT_EVENTS) {
-      recent.splice(MAX_RECENT_EVENTS);
-    }
+    if (recent.length > MAX_RECENT) recent.splice(MAX_RECENT);
   }
 
-  function isStrict(options = {}) {
-    return Boolean(strict || options?.strict === true);
-  }
-
-  function fail(message = "Modules error.", extra = {}, options = {}) {
+  function fail(message, extra = {}, options = {}) {
     const payload = {
       message: safeText(message, "Modules error."),
-      ...sanitizeForSnapshot(extra),
-      at: safeIsoDate(),
+      ...sanitize(extra),
+      at: iso(),
     };
 
     state.errorCount += 1;
     state.lastError = payload;
 
     pushRecent("error", payload);
-    safeEmit(events, MODULE_EVENTS.error, payload);
+    emit(events, MODULE_EVENTS.error, payload, options);
 
-    if (isStrict(options)) {
+    if (strict || options.strict === true) {
       const error = new Error(payload.message);
 
       try {
@@ -672,160 +524,67 @@ export function createModules({
       throw error;
     }
 
-    safeWarn(utils, payload.message, extra);
-
+    warn(utils, payload.message, extra);
     return false;
   }
 
   function rebuildNameIndex() {
-    finalRegistry.moduleNameIndex.clear();
+    registry.moduleNameIndex.clear();
 
-    for (const name of finalRegistry.modules.keys()) {
-      const cleanName = normalizeName(name);
-
-      if (cleanName) {
-        finalRegistry.moduleNameIndex.set(normalizeLookupKey(cleanName), cleanName);
-      }
+    for (const name of registry.modules.keys()) {
+      const clean = normalizeName(name);
+      if (clean) registry.moduleNameIndex.set(lookupKey(clean), clean);
     }
 
-    return finalRegistry.moduleNameIndex;
+    return registry.moduleNameIndex;
   }
 
-  function normalizeExistingAliases() {
-    const nextAliases = new Map();
+  function normalizeAliasMap() {
+    const next = new Map();
 
-    for (const [rawAlias, rawTarget] of finalRegistry.moduleAliases.entries()) {
-      const aliasName = normalizeAlias(rawAlias);
-      const targetName = normalizeName(rawTarget);
+    for (const [rawAlias, rawTarget] of registry.moduleAliases.entries()) {
+      const alias = normalizeAlias(rawAlias);
+      const target = normalizeName(rawTarget);
 
-      if (!aliasName || !targetName) {
-        continue;
-      }
-
-      nextAliases.set(aliasName, targetName);
+      if (alias && target) next.set(alias, target);
     }
 
-    finalRegistry.moduleAliases = nextAliases;
-
-    return finalRegistry.moduleAliases;
+    registry.moduleAliases = next;
+    return registry.moduleAliases;
   }
 
-  normalizeExistingAliases();
+  normalizeAliasMap();
   rebuildNameIndex();
 
   function resolveName(nameOrAlias = "") {
-    const cleanName = normalizeName(nameOrAlias);
+    const clean = normalizeName(nameOrAlias);
+    if (!clean) return "";
 
-    if (!cleanName) {
-      return "";
-    }
+    if (registry.modules.has(clean)) return clean;
 
-    if (finalRegistry.modules.has(cleanName)) {
-      return cleanName;
-    }
+    const lower = lookupKey(clean);
+    const byName = registry.moduleNameIndex.get(lower);
 
-    const lookup = normalizeLookupKey(cleanName);
+    if (byName && registry.modules.has(byName)) return byName;
 
-    const byNameIndex = finalRegistry.moduleNameIndex.get(lookup);
+    const byAlias = registry.moduleAliases.get(lower);
 
-    if (byNameIndex && finalRegistry.modules.has(byNameIndex)) {
-      return byNameIndex;
-    }
+    if (byAlias && registry.modules.has(byAlias)) return byAlias;
 
-    const byAlias = finalRegistry.moduleAliases.get(lookup);
-
-    if (byAlias && finalRegistry.modules.has(byAlias)) {
-      return byAlias;
-    }
-
-    return cleanName;
+    return clean;
   }
 
-  function getExistingMeta(name = "") {
-    const cleanName = normalizeName(name);
-    return finalRegistry.moduleMeta.get(cleanName) || null;
-  }
-
-  function buildMeta(name, instance, options = {}, previousMeta = null) {
-    const cleanName = normalizeName(name);
-    const opts = isPlainObject(options) ? options : {};
-    const nowMs = safeNow();
-
-    const instanceName = getInstanceValue(instance, "name", "");
-    const instanceModuleName = getInstanceValue(instance, "moduleName", "");
-    const instanceId = getInstanceValue(instance, "id", "");
-
-    const aliases = uniqueAliases([
-      cleanName,
-      opts.alias,
-      opts.aliases,
-      instanceName,
-      instanceModuleName,
-      instanceId,
-    ]);
-
-    const previousCreatedAtMs = safeNumber(previousMeta?.createdAtMs, 0);
-    const createdAtMs = previousCreatedAtMs > 0 ? previousCreatedAtMs : nowMs;
-    const capabilities = getCapabilities(instance);
-
-    return {
-      name: cleanName,
-
-      aliases,
-
-      label: safeText(
-        opts.label ||
-          getInstanceValue(instance, "label", "") ||
-          getInstanceValue(instance, "displayName", ""),
-        cleanName
-      ),
-
-      version: safeText(
-        opts.version ||
-          getInstanceValue(instance, "version", ""),
-        ""
-      ),
-
-      description: safeText(
-        opts.description ||
-          getInstanceValue(instance, "description", ""),
-        ""
-      ),
-
-      tags: normalizeTags(opts.tags),
-
-      source: safeText(opts.source, "core"),
-
-      type: getInstanceType(instance),
-      capabilities,
-      disposable: Boolean(capabilities.disposable),
-
-      createdAt: previousMeta?.createdAt || safeIsoDate(createdAtMs),
-      createdAtMs,
-
-      updatedAt: safeIsoDate(nowMs),
-      updatedAtMs: nowMs,
-
-      registerCount: safeNumber(previousMeta?.registerCount, 0) + 1,
-
-      overwritten: Boolean(opts.overwritten),
-
-      custom: pickCustomMeta(opts),
-    };
+  function getExistingMeta(name) {
+    return registry.moduleMeta.get(name) || null;
   }
 
   function removeAliasesFor(name = "") {
-    const cleanName = normalizeName(name);
-
-    if (!cleanName) {
-      return 0;
-    }
-
+    const clean = normalizeName(name);
     let removed = 0;
 
-    for (const [aliasName, target] of Array.from(finalRegistry.moduleAliases.entries())) {
-      if (target === cleanName) {
-        finalRegistry.moduleAliases.delete(aliasName);
+    for (const [aliasName, target] of Array.from(registry.moduleAliases.entries())) {
+      if (target === clean) {
+        registry.moduleAliases.delete(aliasName);
         removed += 1;
       }
     }
@@ -833,59 +592,85 @@ export function createModules({
     return removed;
   }
 
-  function wouldAliasCollideWithModuleName(aliasName = "", targetName = "") {
-    const existingModuleName = finalRegistry.moduleNameIndex.get(aliasName);
+  function buildMeta(name, instance, options = {}, previous = null) {
+    const cleanName = normalizeName(name);
+    const opts = isPlainObject(options) ? options : {};
+    const stamp = now();
+    const createdAtMs = safeNumber(previous?.createdAtMs, 0) || stamp;
 
-    return Boolean(existingModuleName && existingModuleName !== targetName);
+    const aliases = uniqueAliases([
+      cleanName,
+      opts.alias,
+      opts.aliases,
+      getInstanceValue(instance, "name", ""),
+      getInstanceValue(instance, "moduleName", ""),
+      getInstanceValue(instance, "id", ""),
+    ]);
+
+    const caps = capabilities(instance);
+
+    return {
+      name: cleanName,
+      aliases,
+      label: safeText(
+        opts.label ||
+          getInstanceValue(instance, "label", "") ||
+          getInstanceValue(instance, "displayName", ""),
+        cleanName
+      ),
+      version: safeText(opts.version || getInstanceValue(instance, "version", ""), ""),
+      description: safeText(opts.description || getInstanceValue(instance, "description", ""), ""),
+      tags: normalizeTags(opts.tags),
+      source: safeText(opts.source, "core"),
+      type: instanceType(instance),
+      capabilities: caps,
+      disposable: Boolean(caps.disposable),
+      createdAt: previous?.createdAt || iso(createdAtMs),
+      createdAtMs,
+      updatedAt: iso(stamp),
+      updatedAtMs: stamp,
+      registerCount: safeNumber(previous?.registerCount, 0) + 1,
+      overwritten: Boolean(opts.overwritten),
+      custom: customMeta(opts),
+    };
+  }
+
+  function wouldAliasCollide(aliasName, targetName) {
+    const moduleName = registry.moduleNameIndex.get(aliasName);
+    return Boolean(moduleName && moduleName !== targetName);
   }
 
   function setAliases(name, aliases = [], options = {}) {
     const cleanName = normalizeName(name);
-
-    if (!cleanName) {
-      return [];
-    }
-
-    const opts = isPlainObject(options) ? options : {};
-    const normalized = uniqueAliases(aliases);
     const accepted = [];
+    const opts = isPlainObject(options) ? options : {};
 
-    for (const aliasName of normalized) {
-      const currentTarget = finalRegistry.moduleAliases.get(aliasName);
+    if (!cleanName) return accepted;
 
-      const aliasHitsOtherModuleName = wouldAliasCollideWithModuleName(
-        aliasName,
-        cleanName
-      );
+    for (const aliasName of uniqueAliases(aliases)) {
+      const currentTarget = registry.moduleAliases.get(aliasName);
+      const collision = (currentTarget && currentTarget !== cleanName) || wouldAliasCollide(aliasName, cleanName);
 
-      const hasConflict = Boolean(
-        (currentTarget && currentTarget !== cleanName) ||
-          aliasHitsOtherModuleName
-      );
-
-      if (hasConflict && opts.overwriteAliases !== true) {
+      if (collision && opts.overwriteAliases !== true) {
         state.aliasConflictCount += 1;
 
         const payload = {
           alias: aliasName,
-          target:
-            currentTarget ||
-            finalRegistry.moduleNameIndex.get(aliasName) ||
-            "",
+          target: currentTarget || registry.moduleNameIndex.get(aliasName) || "",
           attemptedTarget: cleanName,
-          reason: aliasHitsOtherModuleName
-            ? "module-name-collision"
-            : "alias-target-collision",
-          at: safeIsoDate(),
+          reason: currentTarget ? "alias-target-collision" : "module-name-collision",
         };
 
         pushRecent("alias-conflict", payload);
-        safeEmit(events, MODULE_EVENTS.aliasConflict, payload);
+        emit(events, MODULE_EVENTS.aliasConflict, payload, opts);
 
         continue;
       }
 
-      finalRegistry.moduleAliases.set(aliasName, cleanName);
+      if (registry.moduleAliases.get(aliasName) !== cleanName) {
+        registry.moduleAliases.set(aliasName, cleanName);
+      }
+
       accepted.push(aliasName);
     }
 
@@ -894,108 +679,76 @@ export function createModules({
 
   function get(nameOrAlias = "") {
     const resolved = resolveName(nameOrAlias);
-
-    if (!resolved) {
-      return null;
-    }
-
-    return finalRegistry.modules.get(resolved) || null;
+    return resolved ? registry.modules.get(resolved) || null : null;
   }
 
   function has(nameOrAlias = "") {
     const resolved = resolveName(nameOrAlias);
-    return Boolean(resolved && finalRegistry.modules.has(resolved));
+    return Boolean(resolved && registry.modules.has(resolved));
   }
 
   function getMeta(nameOrAlias = "") {
     const resolved = resolveName(nameOrAlias);
+    const meta = resolved ? registry.moduleMeta.get(resolved) : null;
 
-    if (!resolved) {
-      return null;
-    }
-
-    const meta = finalRegistry.moduleMeta.get(resolved);
-
-    return meta ? sanitizeForSnapshot(meta) : null;
+    return meta ? sanitize(meta) : null;
   }
 
   function register(rawName, rawInstance, rawOptions = {}) {
     const args = normalizeRegisterArgs(rawName, rawInstance, rawOptions);
     const cleanName = normalizeName(args.name);
     const instance = args.instance;
-    const opts = isPlainObject(args.options) ? args.options : {};
+    const options = isPlainObject(args.options) ? args.options : {};
 
     if (!cleanName) {
-      return fail(
-        "modules.register(name, instance) requiere un nombre.",
-        {
-          code: "MODULE_NAME_REQUIRED",
-          name: args.name,
-        },
-        opts
-      );
+      return fail("modules.register(name, instance) requiere un nombre.", {
+        code: "MODULE_NAME_REQUIRED",
+      }, options);
     }
 
     if (instance === null || instance === undefined) {
-      return fail(
-        "modules.register(name, instance) requiere una instancia.",
-        {
-          code: "MODULE_INSTANCE_REQUIRED",
-          name: cleanName,
-        },
-        opts
-      );
+      return fail("modules.register(name, instance) requiere una instancia.", {
+        code: "MODULE_INSTANCE_REQUIRED",
+        name: cleanName,
+      }, options);
     }
 
     const resolvedExisting = resolveName(cleanName);
-    const exists = finalRegistry.modules.has(resolvedExisting);
+    const exists = registry.modules.has(resolvedExisting);
     const targetName = exists ? resolvedExisting : cleanName;
-
-    const previous = exists ? finalRegistry.modules.get(targetName) : null;
-    const sameInstance = exists && previous === instance;
-
-    const overwrite = opts.overwrite === true || opts.replace === true;
+    const previous = exists ? registry.modules.get(targetName) : null;
+    const sameInstance = previous === instance;
+    const overwrite = options.overwrite === true || options.replace === true;
 
     if (exists && sameInstance) {
-      const previousMeta =
-        getExistingMeta(targetName) ||
-        buildMeta(targetName, instance, {}, null);
-
-      const mergedAliases = uniqueAliases([
-        previousMeta?.aliases || [],
-        targetName,
-        cleanName,
-        opts.alias,
-        opts.aliases,
-      ]);
-
-      const acceptedAliases = setAliases(targetName, mergedAliases, opts);
-      const nowMs = safeNow();
+      const previousMeta = getExistingMeta(targetName) || buildMeta(targetName, instance);
+      const aliases = setAliases(targetName, [previousMeta.aliases, targetName, cleanName, options.alias, options.aliases], options);
+      const stamp = now();
 
       const meta = {
         ...previousMeta,
-        aliases: acceptedAliases.length ? acceptedAliases : previousMeta?.aliases || [],
-        updatedAtMs: nowMs,
-        updatedAt: safeIsoDate(nowMs),
-        registerCount: safeNumber(previousMeta?.registerCount, 1),
+        aliases: aliases.length ? aliases : previousMeta.aliases || [],
+        updatedAt: iso(stamp),
+        updatedAtMs: stamp,
       };
 
-      finalRegistry.moduleMeta.set(targetName, meta);
+      registry.moduleMeta.set(targetName, meta);
 
       state.duplicateCount += 1;
       state.lastDuplicate = targetName;
 
-      const payload = {
-        name: targetName,
-        requestedName: cleanName,
-        aliases: meta.aliases || [],
-        sameInstance: true,
-        overwritten: false,
-        meta: sanitizeForSnapshot(meta),
-      };
+      if (options.emitDuplicate === true || options.emitDuplicates === true) {
+        const payload = {
+          name: targetName,
+          requestedName: cleanName,
+          sameInstance: true,
+          aliases: meta.aliases,
+          meta,
+        };
 
-      pushRecent("duplicate", payload);
-      safeEmit(events, MODULE_EVENTS.duplicate, payload);
+        pushRecent("duplicate", payload);
+        emit(events, MODULE_EVENTS.duplicate, payload, options);
+      }
 
       return previous;
     }
@@ -1004,54 +757,40 @@ export function createModules({
       state.duplicateCount += 1;
       state.lastDuplicate = targetName;
 
-      const meta = getExistingMeta(targetName);
+      if (options.emitDuplicate === true || options.emitDuplicates === true) {
+        const payload = {
+          name: targetName,
+          requestedName: cleanName,
+          sameInstance: false,
+          meta: getExistingMeta(targetName),
+        };
 
-      const payload = {
-        name: targetName,
-        requestedName: cleanName,
-        sameInstance: false,
-        overwritten: false,
-        meta: meta ? sanitizeForSnapshot(meta) : null,
-      };
-
-      pushRecent("duplicate-blocked", payload);
-      safeEmit(events, MODULE_EVENTS.duplicate, payload);
+        pushRecent("duplicate-blocked", payload);
+        emit(events, MODULE_EVENTS.duplicate, payload, options);
+      }
 
       return previous;
     }
 
-    if (exists && overwrite && opts.disposePrevious === true) {
-      callDispose(
-        previous,
-        {
-          name: targetName,
-          reason: "overwrite",
-          next: cleanName,
-        },
-        opts
-      );
+    if (exists && overwrite && options.disposePrevious === true) {
+      callDispose(previous, {
+        name: targetName,
+        reason: "overwrite",
+        next: cleanName,
+      }, options);
     }
 
-    finalRegistry.modules.set(targetName, instance);
-    finalRegistry.moduleNameIndex.set(normalizeLookupKey(targetName), targetName);
-
+    registry.modules.set(targetName, instance);
+    registry.moduleNameIndex.set(lookupKey(targetName), targetName);
     removeAliasesFor(targetName);
 
-    const previousMeta = getExistingMeta(targetName);
+    const meta = buildMeta(targetName, instance, {
+      ...options,
+      overwritten: exists,
+    }, getExistingMeta(targetName));
 
-    const meta = buildMeta(
-      targetName,
-      instance,
-      {
-        ...opts,
-        overwritten: exists,
-      },
-      previousMeta
-    );
-
-    meta.aliases = setAliases(targetName, meta.aliases, opts);
-
-    finalRegistry.moduleMeta.set(targetName, meta);
+    meta.aliases = setAliases(targetName, meta.aliases, options);
+    registry.moduleMeta.set(targetName, meta);
 
     state.registerCount += 1;
     state.lastRegistered = targetName;
@@ -1065,29 +804,20 @@ export function createModules({
       name: targetName,
       requestedName: cleanName,
       aliases: meta.aliases,
-      overwritten: Boolean(exists),
-      previousType: getInstanceType(previous),
-      type: getInstanceType(instance),
-      meta: sanitizeForSnapshot(meta),
+      overwritten: exists,
+      type: instanceType(instance),
+      previousType: instanceType(previous),
+      meta,
     };
 
     pushRecent(exists ? "overwritten" : "registered", payload);
 
-    safeEmit(
+    emit(
       events,
       exists ? MODULE_EVENTS.overwritten : MODULE_EVENTS.registered,
-      payload
+      payload,
+      options
     );
-
-    /*
-      Compat con listeners legacy que sólo escuchan app:module:registered.
-    */
-    if (exists) {
-      safeEmit(events, MODULE_EVENTS.registered, {
-        ...payload,
-        legacy: true,
-      });
-    }
 
     return instance;
   }
@@ -1103,54 +833,39 @@ export function createModules({
     return set(name, instance, options);
   }
 
-  function alias(nameOrAlias, aliases = [], options = {}) {
+  function alias(nameOrAlias = "", aliases = [], options = {}) {
     const resolved = resolveName(nameOrAlias);
     const opts = isPlainObject(options) ? options : {};
 
-    if (!resolved || !finalRegistry.modules.has(resolved)) {
-      return fail(
-        "No se pueden añadir aliases a un módulo inexistente.",
-        {
-          code: "MODULE_ALIAS_TARGET_MISSING",
-          name: nameOrAlias,
-        },
-        opts
-      );
+    if (!resolved || !registry.modules.has(resolved)) {
+      return fail("No se pueden añadir aliases a un módulo inexistente.", {
+        code: "MODULE_ALIAS_TARGET_MISSING",
+        name: nameOrAlias,
+      }, opts);
     }
 
-    const instance = finalRegistry.modules.get(resolved);
-
-    const previousMeta =
-      getExistingMeta(resolved) ||
-      buildMeta(resolved, instance);
-
-    const merged = uniqueAliases([
-      previousMeta.aliases,
-      aliases,
-    ]);
-
-    const accepted = setAliases(resolved, merged, opts);
-    const nowMs = safeNow();
+    const instance = registry.modules.get(resolved);
+    const previousMeta = getExistingMeta(resolved) || buildMeta(resolved, instance);
+    const accepted = setAliases(resolved, [previousMeta.aliases, aliases], opts);
+    const stamp = now();
 
     const meta = {
       ...previousMeta,
-      aliases: accepted,
-      updatedAt: safeIsoDate(nowMs),
-      updatedAtMs: nowMs,
+      aliases: accepted.length ? accepted : previousMeta.aliases || [],
+      updatedAt: iso(stamp),
+      updatedAtMs: stamp,
     };
 
-    finalRegistry.moduleMeta.set(resolved, meta);
-
+    registry.moduleMeta.set(resolved, meta);
     state.aliasCount += 1;
 
     const payload = {
       name: resolved,
-      aliases: accepted,
-      at: meta.updatedAt,
+      aliases: meta.aliases,
     };
 
     pushRecent("alias", payload);
-    safeEmit(events, MODULE_EVENTS.alias, payload);
+    emit(events, MODULE_EVENTS.alias, payload, opts);
 
     return true;
   }
@@ -1164,109 +879,78 @@ export function createModules({
       };
     }
 
-    const opts = isPlainObject(options) ? options : {};
-
     const methods = uniqueDisposeMethods([
-      opts.disposeMethod,
-      opts.disposeMethods,
+      symbolDispose(instance, true),
+      symbolDispose(instance, false),
+      options.disposeMethod,
+      options.disposeMethods,
       DEFAULT_DISPOSE_METHODS,
-    ]);
+    ]).filter(Boolean);
 
-    const symbolAsyncDispose = getSymbolAsyncDisposeMethod(instance);
-    const symbolDispose = getSymbolDisposeMethod(instance);
-
-    const candidates = [
-      symbolAsyncDispose,
-      symbolDispose,
-      ...methods,
-    ].filter(Boolean);
-
-    for (const method of candidates) {
-      let disposeFn = null;
+    for (const method of methods) {
+      let fn = null;
 
       try {
-        disposeFn = typeof method === "symbol"
-          ? instance?.[method]
-          : instance?.[method];
+        fn = instance?.[method];
       } catch {
-        disposeFn = null;
+        fn = null;
       }
 
-      if (!isFunction(disposeFn)) {
-        continue;
-      }
+      if (!isFunction(fn)) continue;
 
       const methodName = typeof method === "symbol" ? String(method) : method;
 
       try {
-        const result = disposeFn.call(instance, context);
+        const result = fn.call(instance, context);
+        const async = Boolean(result && typeof result === "object" && isFunction(result.then));
 
         state.disposeCount += 1;
+        state.lastDisposed = context?.name || state.lastDisposed;
 
         const payload = {
           name: context?.name || "",
           reason: context?.reason || "",
           method: methodName,
-          async: Boolean(result && typeof result === "object" && isFunction(result.then)),
-          at: safeIsoDate(),
+          async,
         };
 
-        state.lastDisposed = payload.name || state.lastDisposed;
-
         pushRecent("disposed", payload);
-        safeEmit(events, MODULE_EVENTS.disposed, payload);
+        emit(events, MODULE_EVENTS.disposed, payload, options);
 
-        if (result && typeof result === "object" && isFunction(result.catch)) {
+        if (async) {
           result.catch((error) => {
             state.errorCount += 1;
             state.disposeErrorCount += 1;
-
             state.lastError = {
               message: safeText(error?.message || error, "Module async dispose error."),
               name: context?.name || "",
               method: methodName,
-              at: safeIsoDate(),
+              at: iso(),
             };
 
-            safeWarn(
-              utils,
-              `Error async ejecutando ${methodName}() del módulo "${context?.name || ""}".`,
-              error
-            );
-
-            safeEmit(events, MODULE_EVENTS.disposeError, {
-              ...state.lastError,
-            });
+            warn(utils, `Error async ejecutando ${methodName}() del módulo "${context?.name || ""}".`, error);
+            emit(events, MODULE_EVENTS.disposeError, state.lastError, options);
           });
         }
 
         return {
           ok: true,
           method: methodName,
-          async: payload.async,
+          async,
         };
       } catch (error) {
         state.errorCount += 1;
         state.disposeErrorCount += 1;
-
         state.lastError = {
           message: safeText(error?.message || error, "Module dispose error."),
           name: context?.name || "",
           method: methodName,
-          at: safeIsoDate(),
+          at: iso(),
         };
 
         pushRecent("dispose-error", state.lastError);
-
-        safeWarn(
-          utils,
-          `Error ejecutando ${methodName}() del módulo "${context?.name || ""}".`,
-          error
-        );
-
-        safeEmit(events, MODULE_EVENTS.disposeError, {
-          ...state.lastError,
-        });
+        warn(utils, `Error ejecutando ${methodName}() del módulo "${context?.name || ""}".`, error);
+        emit(events, MODULE_EVENTS.disposeError, state.lastError, options);
 
         return {
           ok: false,
@@ -1286,52 +970,36 @@ export function createModules({
   function disposeModule(nameOrAlias = "", options = {}) {
     const resolved = resolveName(nameOrAlias);
 
-    if (!resolved || !finalRegistry.modules.has(resolved)) {
-      return false;
-    }
+    if (!resolved || !registry.modules.has(resolved)) return false;
 
-    const instance = finalRegistry.modules.get(resolved);
-
-    const result = callDispose(
-      instance,
-      {
-        name: resolved,
-        reason: options?.reason || "disposeModule",
-      },
-      options
-    );
+    const result = callDispose(registry.modules.get(resolved), {
+      name: resolved,
+      reason: options.reason || "disposeModule",
+    }, options);
 
     return result.ok === true;
   }
 
-  function unregister(nameOrAlias, options = {}) {
+  function unregister(nameOrAlias = "", options = {}) {
     const resolved = resolveName(nameOrAlias);
     const opts = isPlainObject(options) ? options : {};
 
-    if (!resolved || !finalRegistry.modules.has(resolved)) {
-      return false;
-    }
+    if (!resolved || !registry.modules.has(resolved)) return false;
 
-    const instance = finalRegistry.modules.get(resolved);
+    const instance = registry.modules.get(resolved);
     const meta = getExistingMeta(resolved);
-
     let disposeResult = null;
 
     if (opts.dispose === true) {
-      disposeResult = callDispose(
-        instance,
-        {
-          name: resolved,
-          reason: opts.reason || "unregister",
-        },
-        opts
-      );
+      disposeResult = callDispose(instance, {
+        name: resolved,
+        reason: opts.reason || "unregister",
+      }, opts);
     }
 
-    finalRegistry.modules.delete(resolved);
-    finalRegistry.moduleMeta.delete(resolved);
-    finalRegistry.moduleNameIndex.delete(normalizeLookupKey(resolved));
-
+    registry.modules.delete(resolved);
+    registry.moduleMeta.delete(resolved);
+    registry.moduleNameIndex.delete(lookupKey(resolved));
     removeAliasesFor(resolved);
 
     state.unregisterCount += 1;
@@ -1339,98 +1007,84 @@ export function createModules({
 
     const payload = {
       name: resolved,
-      type: getInstanceType(instance),
+      type: instanceType(instance),
       disposed: Boolean(opts.dispose),
-      disposeResult: disposeResult ? sanitizeForSnapshot(disposeResult) : null,
-      meta: meta ? sanitizeForSnapshot(meta) : null,
-      at: safeIsoDate(),
+      disposeResult,
+      meta,
     };
 
     pushRecent("unregistered", payload);
-    safeEmit(events, MODULE_EVENTS.unregistered, payload);
+    emit(events, MODULE_EVENTS.unregistered, payload, opts);
 
     return true;
   }
 
   function clear(options = {}) {
-    const opts = isPlainObject(options) ? options : {};
-    const names = Array.from(finalRegistry.modules.keys());
-
+    const names = Array.from(registry.modules.keys());
     let removed = 0;
 
     for (const name of names) {
-      if (unregister(name, opts)) {
-        removed += 1;
-      }
+      if (unregister(name, options)) removed += 1;
     }
 
-    finalRegistry.moduleAliases.clear();
-    finalRegistry.moduleMeta.clear();
-    finalRegistry.moduleNameIndex.clear();
+    registry.moduleAliases.clear();
+    registry.moduleMeta.clear();
+    registry.moduleNameIndex.clear();
 
     state.clearCount += 1;
 
     const payload = {
       removed,
-      dispose: Boolean(opts.dispose),
-      at: safeIsoDate(),
+      dispose: Boolean(options.dispose),
     };
 
     pushRecent("cleared", payload);
-    safeEmit(events, MODULE_EVENTS.cleared, payload);
+    emit(events, MODULE_EVENTS.cleared, payload, options);
 
     return removed;
   }
 
   function list() {
-    return Array.from(finalRegistry.modules.keys());
-  }
-
-  function names() {
-    return list();
+    return Array.from(registry.modules.keys());
   }
 
   function aliases() {
-    return Array.from(finalRegistry.moduleAliases.keys());
+    return Array.from(registry.moduleAliases.keys());
   }
 
   function aliasEntries() {
-    return Array.from(finalRegistry.moduleAliases.entries()).map(([aliasName, target]) => ({
+    return Array.from(registry.moduleAliases.entries()).map(([aliasName, target]) => ({
       alias: aliasName,
       target,
     }));
   }
 
   function entries() {
-    return Array.from(finalRegistry.modules.entries());
+    return Array.from(registry.modules.entries());
   }
 
   function values() {
-    return Array.from(finalRegistry.modules.values());
+    return Array.from(registry.modules.values());
   }
 
   function count() {
-    return finalRegistry.modules.size;
+    return registry.modules.size;
   }
 
   function forEach(callback) {
-    if (!isFunction(callback)) {
-      return false;
-    }
+    if (!isFunction(callback)) return false;
 
-    for (const [name, instance] of finalRegistry.modules.entries()) {
+    for (const [name, instance] of registry.modules.entries()) {
       try {
         callback(instance, name, getMeta(name));
       } catch (error) {
         state.errorCount += 1;
-
         state.lastError = {
           message: safeText(error?.message || error, "modules.forEach error."),
           name,
-          at: safeIsoDate(),
+          at: iso(),
         };
-
-        safeWarn(utils, `Error en modules.forEach("${name}")`, error);
+        warn(utils, `Error en modules.forEach("${name}")`, error);
       }
     }
 
@@ -1438,65 +1092,38 @@ export function createModules({
   }
 
   function map(callback) {
-    if (!isFunction(callback)) {
-      return [];
-    }
+    if (!isFunction(callback)) return [];
 
     const output = [];
 
-    for (const [name, instance] of finalRegistry.modules.entries()) {
-      try {
-        output.push(callback(instance, name, getMeta(name)));
-      } catch (error) {
-        state.errorCount += 1;
-
-        state.lastError = {
-          message: safeText(error?.message || error, "modules.map error."),
-          name,
-          at: safeIsoDate(),
-        };
-
-        safeWarn(utils, `Error en modules.map("${name}")`, error);
-      }
-    }
+    forEach((instance, name, meta) => {
+      output.push(callback(instance, name, meta));
+    });
 
     return output;
   }
 
   function filter(callback) {
-    if (!isFunction(callback)) {
-      return [];
-    }
+    if (!isFunction(callback)) return [];
 
     const output = [];
 
-    for (const [name, instance] of finalRegistry.modules.entries()) {
-      try {
-        if (callback(instance, name, getMeta(name))) {
-          output.push(instance);
-        }
-      } catch (error) {
-        state.errorCount += 1;
-        safeWarn(utils, `Error en modules.filter("${name}")`, error);
-      }
-    }
+    forEach((instance, name, meta) => {
+      if (callback(instance, name, meta)) output.push(instance);
+    });
 
     return output;
   }
 
   function find(callback) {
-    if (!isFunction(callback)) {
-      return null;
-    }
+    if (!isFunction(callback)) return null;
 
-    for (const [name, instance] of finalRegistry.modules.entries()) {
+    for (const [name, instance] of registry.modules.entries()) {
       try {
-        if (callback(instance, name, getMeta(name))) {
-          return instance;
-        }
+        if (callback(instance, name, getMeta(name))) return instance;
       } catch (error) {
         state.errorCount += 1;
-        safeWarn(utils, `Error en modules.find("${name}")`, error);
+        warn(utils, `Error en modules.find("${name}")`, error);
       }
     }
 
@@ -1504,31 +1131,19 @@ export function createModules({
   }
 
   function toObject() {
-    const output = {};
-
-    for (const [name, instance] of finalRegistry.modules.entries()) {
-      output[name] = instance;
-    }
-
-    return output;
+    return Object.fromEntries(registry.modules.entries());
   }
 
-  function getModuleSnapshot(name = "") {
-    const resolved = resolveName(name);
+  function getModuleSnapshot(nameOrAlias = "") {
+    const resolved = resolveName(nameOrAlias);
 
-    if (!resolved || !finalRegistry.modules.has(resolved)) {
-      return null;
-    }
+    if (!resolved || !registry.modules.has(resolved)) return null;
 
-    const instance = finalRegistry.modules.get(resolved);
+    const instance = registry.modules.get(resolved);
+    const meta = registry.moduleMeta.get(resolved) || buildMeta(resolved, instance);
+    const caps = capabilities(instance);
 
-    const meta =
-      finalRegistry.moduleMeta.get(resolved) ||
-      buildMeta(resolved, instance);
-
-    const capabilities = getCapabilities(instance);
-
-    return {
+    return sanitize({
       name: resolved,
       label: meta.label || resolved,
       aliases: meta.aliases || [],
@@ -1536,77 +1151,43 @@ export function createModules({
       description: meta.description || "",
       tags: meta.tags || [],
       source: meta.source || "",
-      type: getInstanceType(instance),
-      disposable: Boolean(capabilities.disposable),
-      capabilities,
-      custom: meta.custom ? sanitizeForSnapshot(meta.custom) : null,
+      type: instanceType(instance),
+      disposable: Boolean(caps.disposable),
+      capabilities: caps,
+      custom: meta.custom || null,
       createdAt: meta.createdAt || "",
       updatedAt: meta.updatedAt || "",
       registerCount: safeNumber(meta.registerCount, 0),
       overwritten: Boolean(meta.overwritten),
-    };
+    });
   }
 
   function getSnapshot(options = {}) {
+    const names = list();
     const opts = isPlainObject(options) ? options : {};
-    const moduleNames = list();
 
-    return {
+    return sanitize({
       version: MODULES_VERSION,
-
       count: count(),
-
-      names: moduleNames,
+      names,
       aliases: aliasEntries(),
-
-      modules: moduleNames.map((name) => getModuleSnapshot(name)),
-
+      modules: names.map((name) => getModuleSnapshot(name)),
       stats: {
-        registerCount: state.registerCount,
-        duplicateCount: state.duplicateCount,
-        overwriteCount: state.overwriteCount,
-        unregisterCount: state.unregisterCount,
-        aliasCount: state.aliasCount,
-        aliasConflictCount: state.aliasConflictCount,
-        disposeCount: state.disposeCount,
-        disposeErrorCount: state.disposeErrorCount,
-        clearCount: state.clearCount,
-        errorCount: state.errorCount,
-        lastRegistered: state.lastRegistered,
-        lastDuplicate: state.lastDuplicate,
-        lastOverwritten: state.lastOverwritten,
-        lastUnregistered: state.lastUnregistered,
-        lastDisposed: state.lastDisposed,
-        lastError: state.lastError ? sanitizeForSnapshot(state.lastError) : null,
+        ...state,
       },
-
-      recent: opts.includeRecent === false
-        ? []
-        : recent.map((item) => ({ ...item })),
-
-      at: safeIsoDate(),
-    };
+      recent: opts.includeRecent === false ? [] : recent.map((item) => ({ ...item })),
+      at: iso(),
+    });
   }
 
   function reset(options = {}) {
     const removed = clear(options);
 
-    state.registerCount = 0;
-    state.duplicateCount = 0;
-    state.overwriteCount = 0;
-    state.unregisterCount = 0;
-    state.aliasCount = 0;
-    state.aliasConflictCount = 0;
-    state.disposeCount = 0;
-    state.disposeErrorCount = 0;
-    state.clearCount = 0;
-    state.errorCount = 0;
-    state.lastRegistered = "";
-    state.lastDuplicate = "";
-    state.lastOverwritten = "";
-    state.lastUnregistered = "";
-    state.lastDisposed = "";
-    state.lastError = null;
+    for (const key of Object.keys(state)) {
+      if (typeof state[key] === "number") state[key] = 0;
+      else if (key === "lastError") state[key] = null;
+      else state[key] = "";
+    }
 
     recent.splice(0);
 
@@ -1621,17 +1202,11 @@ export function createModules({
     events: MODULE_EVENTS,
 
     register,
-
     set,
     upsert,
-
     alias,
 
     get,
-
-    resolve: resolveName,
-    resolveName,
-
     require(nameOrAlias = "") {
       const instance = get(nameOrAlias);
 
@@ -1641,12 +1216,13 @@ export function createModules({
 
       return instance;
     },
-
     has,
+
+    resolve: resolveName,
+    resolveName,
 
     getMeta,
     meta: getMeta,
-
     getModuleSnapshot,
 
     unregister,
@@ -1660,11 +1236,9 @@ export function createModules({
     reset,
 
     list,
-    names,
-
+    names: list,
     aliases,
     aliasEntries,
-
     entries,
     values,
     count,
@@ -1673,7 +1247,6 @@ export function createModules({
     map,
     filter,
     find,
-
     toObject,
 
     getSnapshot,
@@ -1681,25 +1254,17 @@ export function createModules({
     snapshot: getSnapshot,
   };
 
-  safeEmit(events, MODULE_EVENTS.ready, {
-    version: MODULES_VERSION,
+  emit(events, MODULE_EVENTS.ready, {
     count: count(),
-    at: safeIsoDate(),
-  });
+  }, input);
 
-  safeLog(utils, "Modules ready.", {
+  log(utils, "Modules ready.", {
     version: MODULES_VERSION,
     count: count(),
   });
 
   return api;
 }
-
-export {
-  MODULES_VERSION,
-  DEFAULT_DISPOSE_METHODS,
-  MODULE_EVENTS,
-};
 
 export default {
   MODULES_VERSION,

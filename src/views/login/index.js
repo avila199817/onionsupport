@@ -2,46 +2,24 @@
    Onion SPA - Login View
    Archivo: src/views/login/index.js
 
-   LOGIN VIEW ORCHESTRATOR · CORE/AUTH/ROUTER SAFE · 16.1/10
-
-   RESPONSABILIDADES:
-   - Orquestar la vista de login.
-   - Renderizar template auth pro sin CSS inline.
-   - Conectar DOM, Auth, AppCore, Toast y password-field shared.
-   - Delegar validación/sesión principal en Auth.login.
-   - LoginView controla la navegación post-login por defecto.
-   - Evitar doble navegación post-login.
-   - Evitar doble sync de sesión post-login.
-   - Evitar doble submit aunque la vista se monte dos veces.
-   - Evitar toast loading huérfano si Router desmonta login durante Auth.login.
-   - Evitar formulario congelado si Auth.login / Router / navegación se cuelga.
-   - Evitar fallback history.replaceState falso-positivo que deja login pintado.
-   - Reducir parpadeos al salir de /login.
-   - Activar / limpiar modo auth-screen del body/html.
-   - Mantener cleanup de listeners.
-   - Exponer compatibilidad default + named export.
-   - Soportar login con usuario, email o teléfono.
-   - Conectar password-field compartido para eye / caps lock.
-
-   REGLAS:
-   - Auth.login aplica sesión.
-   - Esta vista NO vuelve a llamar syncSession() si usa Auth.login.
-   - Esta vista SÍ navega si después de Auth.login seguimos en /login.
-   - Si deps.navigate === false, NO navega ni Auth ni la vista.
-   - La navegación queda protegida por isStillOnLoginRoute().
-   - El auth-screen se limpia sólo al salir realmente de /login.
-   - El submit queda protegido a nivel local + global.
-   - El toast loading se cierra incluso si mounted=false.
-   - No se emite app:route:rendered por defecto para no duplicar Router.
+   Login View limpio:
+   - renderiza template
+   - conecta DOM helpers
+   - llama Auth.login o executor custom
+   - Auth.login aplica sesión; la vista sólo navega si sigue en /login
+   - custom executor puede usar syncSession()
+   - anti doble submit local/global
+   - toast loading siempre se cierra
+   - auth-screen controlado sin event storm
+   - sin HTTP directo
+   - sin Store paralelo
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import { Auth } from "../../features/auth/index.js";
-import Toast from "../../ui/toast/index.js";
+import ToastBridge from "../../ui/toast/toast.bridge.js";
 
-import {
-  bindPasswordFieldsInScope,
-} from "../../shared/password-field/index.js";
+import getLoginTemplate from "./login.template.js";
 
 import {
   loadRememberedIdentifier,
@@ -53,10 +31,11 @@ import {
   persistRememberedIdentifier,
   syncSession,
   resolveLoginRedirect,
+  shouldRedirectAfterLogin,
+  hasUsableToken,
+  hasUsableUser,
   safeText,
 } from "./login.helpers.js";
-
-import getLoginTemplate from "./login.template.js";
 
 import {
   getLoginRefs,
@@ -64,168 +43,943 @@ import {
   applyLoginErrors,
   setGlobalLoginError,
   setLoginLoading,
+  unlockLoginForm,
   focusLoginPrimaryField,
   readLoginFormState,
   bindLoginInputClearers,
   bindThemeToggle,
   bindLoginSubmit,
+  bindLoginPasswordFields,
+  destroyLoginPasswordFields,
+  getLoginDomSnapshot,
 } from "./login.dom.js";
 
 /* =========================================================
    VERSION / CONSTANTS
 ========================================================= */
 
-export const LOGIN_VIEW_VERSION =
-  "16.1.0-extreme-pro";
+export const LOGIN_VIEW_VERSION = "17.0.0-clean";
 
-const LOGIN_SOURCE =
-  "login.view";
+const SOURCE = "login.view";
+const LOGIN_ROUTE = "/login";
+const DEFAULT_HOME = "/";
+const DEFAULT_2FA = "/2fa";
 
-const LOGIN_SCOPE =
-  "view:login";
+const INSTANCE_KEY = "__ONION_LOGIN_VIEW_INSTANCE__";
+const RUNTIME_KEY = "__ONION_LOGIN_VIEW__";
 
-const LOGIN_ROUTE =
-  "/login";
+const GLOBAL_SUBMIT_TIMEOUT_MS = 45_000;
+const GLOBAL_SUBMIT_GRACE_MS = 2_500;
+const NAVIGATION_TIMEOUT_MS = 8_000;
+const POST_NAV_FAILSAFE_MS = 1_250;
+const SUCCESS_TOAST_DEDUPE_MS = 1_600;
 
-const DEFAULT_HOME_ROUTE =
-  "/";
+const AUTH_CLASSES = Object.freeze([
+  "auth-screen",
+  "login-no-scroll",
+  "route-auth",
+  "route-shell-hidden",
+  "route-chrome-hidden",
+]);
 
-const DEFAULT_2FA_ROUTE =
-  "/2fa";
+const APP_CLASSES = Object.freeze([
+  "route-app",
+  "route-shell-visible",
+  "route-chrome-visible",
+]);
 
-const LOGIN_VIEW_INSTANCE_KEY =
-  "__ONION_LOGIN_VIEW_INSTANCE__";
+const LOADING_CLASSES = Object.freeze([
+  "loading",
+  "app-loading",
+  "app-booting",
+  "is-loading",
+  "is-booting",
+]);
 
-const LOGIN_VIEW_RUNTIME_KEY =
-  "__ONION_LOGIN_VIEW__";
+const AUTH_PATHS = new Set([
+  "/login",
+  "/logout",
+  "/activate-account",
+  "/activate",
+  "/activation",
+  "/reset-password",
+  "/reset-password/confirm",
+  "/forgot-password",
+  "/recover-password",
+  "/password-reset",
+  "/password-reset/confirm",
+  "/2fa",
+  "/otp",
+  "/mfa",
+  "/403",
+  "/404",
+]);
 
-const LOGIN_SUCCESS_TOAST_DEDUPE_MS =
-  1600;
-
-const GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS =
-  45_000;
-
-const GLOBAL_LOGIN_SUBMIT_STALE_GRACE_MS =
-  2_500;
-
-const LOGIN_NAVIGATION_TIMEOUT_MS =
-  8_000;
-
-const FORM_UNLOCK_WATCHDOG_EXTRA_MS =
-  2_500;
-
-const POST_NAVIGATION_RENDER_FAILSAFE_MS =
-  1_250;
-
-const AUTH_SCREEN_CLASSES =
-  Object.freeze([
-    "auth-screen",
-    "login-no-scroll",
-    "route-auth",
-    "route-shell-hidden",
-    "route-chrome-hidden",
-  ]);
-
-const APP_SCREEN_CLASSES =
-  Object.freeze([
-    "route-app",
-    "route-shell-visible",
-    "route-chrome-visible",
-  ]);
-
-const SENSITIVE_QUERY_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "activation_token",
-    "activate_token",
-    "resetToken",
-    "reset_token",
-    "passwordResetToken",
-    "password_reset_token",
-    "confirmToken",
-    "confirm_token",
-    "code",
-    "t",
-    "otp",
-    "totp",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
-    "authorization",
-    "jwt",
-    "session",
-    "sid",
-  ]);
-
-const LOGIN_EVENTS =
-  Object.freeze({
-    ready:
-      "auth:login:view:ready",
-
-    submitStart:
-      "auth:login:view:submit:start",
-
-    submitDone:
-      "auth:login:view:submit:done",
-
-    submitBlocked:
-      "auth:login:view:submit:blocked",
-
-    submitUnlocked:
-      "auth:login:view:submit:unlocked",
-
-    error:
-      "auth:login:view:error",
-
-    navigationStart:
-      "auth:login:view:navigation:start",
-
-    navigationDone:
-      "auth:login:view:navigation:done",
-
-    navigationError:
-      "auth:login:view:navigation:error",
-
-    navigationFailsafe:
-      "auth:login:view:navigation:failsafe",
-
-    authScreenCleared:
-      "auth:login:view:auth-screen-cleared",
-
-    destroyed:
-      "auth:login:view:destroyed",
-
-    debugReady:
-      "auth:login:view:debug-ready",
-  });
+const EVENTS = Object.freeze({
+  ready: "auth:login:view:ready",
+  submitStart: "auth:login:view:submit:start",
+  submitDone: "auth:login:view:submit:done",
+  submitBlocked: "auth:login:view:submit:blocked",
+  submitUnlocked: "auth:login:view:submit:unlocked",
+  error: "auth:login:view:error",
+  navigationStart: "auth:login:view:navigation:start",
+  navigationDone: "auth:login:view:navigation:done",
+  navigationError: "auth:login:view:navigation:error",
+  navigationFailsafe: "auth:login:view:navigation:failsafe",
+  authScreenCleared: "auth:login:view:auth-screen-cleared",
+  destroyed: "auth:login:view:destroyed",
+  debugReady: "auth:login:view:debug-ready",
+});
 
 /* =========================================================
-   GLOBAL SUBMIT FIREBREAK
+   RUNTIME
 ========================================================= */
 
-let globalLoginSubmitPromise =
-  null;
+let globalSubmitPromise = null;
+let globalSubmitFingerprint = "";
+let globalSubmitStartedAt = 0;
+let lastSuccessToastAt = 0;
+let lastInstance = null;
 
-let globalLoginSubmitFingerprint =
-  "";
+/* =========================================================
+   BASICS
+========================================================= */
 
-let globalLoginSubmitStartedAt =
-  0;
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
 
-let lastLoginSuccessToastAt =
-  0;
+function isFn(value) {
+  return typeof value === "function";
+}
 
-function buildLoginFingerprint(payload = {}) {
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function safeObject(value) {
+  return isObject(value) ? value : {};
+}
+
+function now() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+function iso(ms = now()) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
+  }
+}
+
+function normalizeError(error = null) {
+  if (!error) return null;
+
+  const source = error?.error || error?.reason || error;
+
+  return {
+    name: safeText(source?.name || source?.constructor?.name, "Error"),
+    message: safeText(source?.message || source?.reason || source, "Error"),
+    code: source?.code || source?.data?.code || source?.response?.data?.code || null,
+    status: source?.status || source?.statusCode || source?.response?.status || 0,
+    at: iso(),
+  };
+}
+
+function log(...args) {
+  try {
+    AppCore?.utils?.log?.("[LoginView]", ...args);
+  } catch {}
+}
+
+function warn(...args) {
+  try {
+    AppCore?.utils?.warn?.("[LoginView]", ...args);
+  } catch {}
+}
+
+function errorLog(...args) {
+  try {
+    AppCore?.utils?.error?.("[LoginView]", ...args);
+    return;
+  } catch {}
+
+  try {
+    if (AppCore?.config?.debug) console.error("[LoginView]", ...args);
+  } catch {}
+}
+
+function emit(eventName, payload = {}) {
+  const name = safeText(eventName, "");
+  if (!name) return false;
+
+  const detail = {
+    source: SOURCE,
+    version: LOGIN_VIEW_VERSION,
+    at: iso(),
+    ...safeObject(payload),
+  };
+
+  let hasBus = false;
+  let emitted = false;
+
+  try {
+    if (isFn(AppCore?.events?.emit)) {
+      hasBus = true;
+      AppCore.events.emit(name, detail);
+      emitted = true;
+    }
+  } catch {}
+
+  if (!hasBus && isBrowser()) {
+    try {
+      window.dispatchEvent(new CustomEvent(name, { detail }));
+      emitted = true;
+    } catch {}
+  }
+
+  return emitted;
+}
+
+function withTimeout(work, timeoutMs = 0, code = "TIMEOUT") {
+  const ms = Math.max(0, Number(timeoutMs || 0));
+
+  if (!ms) return Promise.resolve(work);
+
+  let timer = null;
+
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(code);
+      error.code = code;
+      reject(error);
+    }, ms);
+  });
+
+  return Promise.race([Promise.resolve(work), timeout]).finally(() => {
+    if (timer) {
+      try {
+        clearTimeout(timer);
+      } catch {}
+    }
+
+    timer = null;
+  });
+}
+
+/* =========================================================
+   PATH / ROUTER
+========================================================= */
+
+function isHashRouterPath(value = "") {
+  const text = safeText(value, "");
+  return text.startsWith("#/") || text.startsWith("#!");
+}
+
+function normalizeHashRouterPath(value = "") {
+  const text = safeText(value, "");
+  if (!text) return "/";
+
+  if (text.startsWith("#!")) return text.replace(/^#!\/?/, "/") || "/";
+  return text.replace(/^#\/?/, "/") || "/";
+}
+
+function normalizePathname(value = "/") {
+  let path = safeText(value, "/")
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!path.startsWith("/")) path = `/${path}`;
+
+  const out = [];
+
+  for (const part of path.split("/").filter(Boolean)) {
+    if (part === ".") continue;
+
+    if (part === "..") {
+      out.pop();
+      continue;
+    }
+
+    out.push(part);
+  }
+
+  path = `/${out.join("/")}`;
+  return path.length > 1 ? path.replace(/\/+$/g, "") : path;
+}
+
+function normalizePath(value = "/") {
+  let raw = safeText(value, "/") || "/";
+
+  if (isHashRouterPath(raw)) {
+    raw = normalizeHashRouterPath(raw);
+  }
+
+  try {
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
+      const url = new URL(raw, window.location?.origin || "http://localhost");
+
+      if (url.hash && isHashRouterPath(url.hash)) {
+        return normalizePath(url.hash);
+      }
+
+      raw = `${url.pathname || "/"}${url.search || ""}${url.hash || ""}`;
+    }
+  } catch {
+    return "/";
+  }
+
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || "/";
+  }
+
+  const searchIndex = pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || "/";
+  }
+
+  return `${normalizePathname(pathname)}${search}${hash}`;
+}
+
+function stripSearchHash(path = "/") {
+  return normalizePath(path).split("?")[0].split("#")[0] || "/";
+}
+
+function stripUsernamePrefix(path = "/") {
+  const normalized = normalizePath(path);
+  const pathOnly = stripSearchHash(normalized);
+  const suffix = normalized.slice(pathOnly.length);
+  const clean = pathOnly.replace(/^\/@[^/]+(?=\/|$)/i, "") || "/";
+
+  return normalizePath(`${clean}${suffix}`);
+}
+
+function currentPath() {
+  if (!isBrowser()) return "/";
+
+  try {
+    const hash = window.location.hash || "";
+
+    if (isHashRouterPath(hash)) return normalizePath(hash);
+
+    return normalizePath(
+      `${window.location.pathname || "/"}${window.location.search || ""}${hash}`
+    );
+  } catch {
+    return "/";
+  }
+}
+
+function currentCanonicalPath() {
+  return stripSearchHash(stripUsernamePrefix(currentPath()));
+}
+
+function isLoginRoute(path = currentPath()) {
+  const clean = stripSearchHash(stripUsernamePrefix(path));
+  return clean === LOGIN_ROUTE || clean.startsWith(`${LOGIN_ROUTE}/`);
+}
+
+function hasOpenRedirectRisk(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return true;
+  if (!raw.startsWith("/")) return true;
+  if (raw.startsWith("//")) return true;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return true;
+  if (/[\r\n\t\\]/.test(raw)) return true;
+
+  const lower = raw.toLowerCase();
+
+  if (
+    lower.includes("%0d") ||
+    lower.includes("%0a") ||
+    lower.includes("%09") ||
+    lower.includes("%5c")
+  ) {
+    return true;
+  }
+
+  try {
+    const decoded = decodeURIComponent(raw).trim().replace(/\\/g, "/");
+
+    return (
+      decoded.startsWith("//") ||
+      /^[a-z][a-z0-9+.-]*:/i.test(decoded) ||
+      /[\r\n\t]/.test(decoded)
+    );
+  } catch {
+    return true;
+  }
+}
+
+function isAuthPath(path = "") {
+  const clean = stripSearchHash(stripUsernamePrefix(path)).toLowerCase();
+
+  if (AUTH_PATHS.has(clean)) return true;
+
+  return (
+    clean.startsWith("/login/") ||
+    clean.startsWith("/logout/") ||
+    clean.startsWith("/activate-account/") ||
+    clean.startsWith("/activate/") ||
+    clean.startsWith("/activation/") ||
+    clean.startsWith("/reset-password/") ||
+    clean.startsWith("/forgot-password/") ||
+    clean.startsWith("/recover-password/") ||
+    clean.startsWith("/password-reset/") ||
+    clean.startsWith("/2fa/") ||
+    clean.startsWith("/otp/") ||
+    clean.startsWith("/mfa/")
+  );
+}
+
+function safeInternalPath(path = "", fallback = DEFAULT_HOME, options = {}) {
+  const candidate = normalizePath(path || "");
+
+  if (!candidate || hasOpenRedirectRisk(candidate)) {
+    return normalizePath(fallback || DEFAULT_HOME);
+  }
+
+  if (options.allowAuth !== true && isAuthPath(candidate)) {
+    return normalizePath(fallback || DEFAULT_HOME);
+  }
+
+  return candidate;
+}
+
+function configuredHome() {
+  const candidate = normalizePath(
+    AppCore?.config?.routes?.home ||
+      AppCore?.config?.auth?.homeRoute ||
+      AppCore?.config?.auth?.postLoginFallback ||
+      DEFAULT_HOME
+  );
+
+  return safeInternalPath(candidate, DEFAULT_HOME);
+}
+
+function getRouter() {
+  try {
+    return (
+      AppCore?.Router ||
+      AppCore?.router ||
+      AppCore?.modules?.get?.("Router") ||
+      AppCore?.modules?.get?.("router") ||
+      (isBrowser() ? window.__ONION_ROUTER__ || window.Router : null) ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function navigateTo(path = "/", options = {}) {
+  const target = safeInternalPath(path, configuredHome(), {
+    allowAuth: options.allowAuth === true,
+  });
+
+  const router = getRouter();
+
+  const routerOptions = {
+    replaceState: options.replaceState !== false,
+    force: true,
+    forceRender: true,
+    source: SOURCE,
+    fromLogin: true,
+    reason: options.reason || "login-navigation",
+    publicPath: target,
+    requestedPath: target,
+    canonicalPath: stripSearchHash(stripUsernamePrefix(target)),
+  };
+
+  emit(EVENTS.navigationStart, {
+    target,
+    method: router ? "router" : "hard-redirect",
+  });
+
+  try {
+    if (router?.navigate) {
+      await withTimeout(
+        router.navigate(target, routerOptions),
+        NAVIGATION_TIMEOUT_MS,
+        "LOGIN_NAVIGATION_TIMEOUT"
+      );
+
+      emit(EVENTS.navigationDone, { target, method: "router.navigate" });
+      return true;
+    }
+
+    if (router?.replace) {
+      await withTimeout(
+        router.replace(target, routerOptions),
+        NAVIGATION_TIMEOUT_MS,
+        "LOGIN_NAVIGATION_TIMEOUT"
+      );
+
+      emit(EVENTS.navigationDone, { target, method: "router.replace" });
+      return true;
+    }
+
+    if (router?.goAfterLogin) {
+      await withTimeout(
+        router.goAfterLogin(target, routerOptions),
+        NAVIGATION_TIMEOUT_MS,
+        "LOGIN_NAVIGATION_TIMEOUT"
+      );
+
+      emit(EVENTS.navigationDone, { target, method: "router.goAfterLogin" });
+      return true;
+    }
+
+    if (router?.render) {
+      await withTimeout(
+        router.render(target, {
+          ...routerOptions,
+          skipHistory: false,
+        }),
+        NAVIGATION_TIMEOUT_MS,
+        "LOGIN_NAVIGATION_TIMEOUT"
+      );
+
+      emit(EVENTS.navigationDone, { target, method: "router.render" });
+      return true;
+    }
+  } catch (error) {
+    warn("router navigation failed", normalizeError(error));
+  }
+
+  try {
+    if (AppCore?.navigate) {
+      await withTimeout(
+        AppCore.navigate(target, routerOptions),
+        NAVIGATION_TIMEOUT_MS,
+        "LOGIN_NAVIGATION_TIMEOUT"
+      );
+
+      emit(EVENTS.navigationDone, { target, method: "AppCore.navigate" });
+      return true;
+    }
+  } catch (error) {
+    warn("AppCore.navigate failed", normalizeError(error));
+  }
+
+  if (!isBrowser()) return false;
+
+  try {
+    window.location.assign(target);
+    emit(EVENTS.navigationDone, { target, method: "window.location.assign" });
+    return true;
+  } catch {
+    try {
+      window.location.href = target;
+      emit(EVENTS.navigationDone, { target, method: "window.location.href" });
+      return true;
+    } catch {}
+  }
+
+  emit(EVENTS.navigationError, {
+    target,
+    reason: "navigation-failed",
+  });
+
+  return false;
+}
+
+function scheduleNavigationFailsafe(container, target = DEFAULT_HOME) {
+  if (!isBrowser()) return () => {};
+
+  let timer = window.setTimeout(() => {
+    timer = null;
+
+    if (isLoginRoute()) return;
+
+    const loginStillRendered = Boolean(
+      container?.isConnected &&
+        container.querySelector?.("[data-login-view],.login-view")
+    );
+
+    if (!loginStillRendered) return;
+
+    emit(EVENTS.navigationFailsafe, {
+      target,
+      loginStillRendered,
+    });
+
+    try {
+      window.location.assign(target);
+    } catch {}
+  }, POST_NAV_FAILSAFE_MS);
+
+  return () => {
+    if (!timer) return;
+
+    try {
+      window.clearTimeout(timer);
+    } catch {}
+
+    timer = null;
+  };
+}
+
+/* =========================================================
+   AUTH SCREEN
+========================================================= */
+
+function setClassList(node, add = [], remove = []) {
+  if (!node) return false;
+
+  try {
+    node.classList.add(...add);
+    node.classList.remove(...remove);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setDataset(node, data = {}) {
+  if (!node) return false;
+
+  try {
+    for (const [key, value] of Object.entries(data)) {
+      if (value === null || value === undefined || value === "") {
+        delete node.dataset[key];
+      } else {
+        node.dataset[key] = String(value);
+      }
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setHidden(node, hidden = false) {
+  if (!node) return false;
+
+  try {
+    node.hidden = Boolean(hidden);
+    node.setAttribute("aria-hidden", hidden ? "true" : "false");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function query(selector = "") {
+  if (!isBrowser() || !selector) return null;
+
+  try {
+    return document.querySelector(selector);
+  } catch {
+    return null;
+  }
+}
+
+function getShellNodes() {
+  if (!isBrowser()) return {};
+
+  return {
+    html: document.documentElement,
+    body: document.body,
+
+    shell:
+      AppCore?.dom?.appShell ||
+      AppCore?.dom?.shell ||
+      query("#app-shell,[data-app-shell],.app-shell"),
+
+    main:
+      AppCore?.dom?.mainContent ||
+      AppCore?.dom?.main ||
+      query("#main-content,[data-main-content],main"),
+
+    appContent:
+      AppCore?.dom?.appContent ||
+      query("#app-content,[data-app-content]"),
+
+    view:
+      AppCore?.dom?.viewContainer ||
+      query("#view-container,[data-view-root],[data-router-view]"),
+
+    sidebar:
+      AppCore?.dom?.sidebar ||
+      query("#app-sidebar,#sidebar,[data-sidebar-root],.sidebar"),
+
+    topbar:
+      AppCore?.dom?.topbar ||
+      query("#app-topbar,#topbar,[data-topbar-root],.topbar"),
+
+    sidebarMount:
+      AppCore?.dom?.sidebarMount ||
+      query("#sidebar-mount,[data-sidebar-mount]"),
+
+    topbarMount:
+      AppCore?.dom?.topbarMount ||
+      query("#topbar-mount,[data-topbar-mount]"),
+
+    tablehead:
+      AppCore?.dom?.tablehead ||
+      query("#table-head,[data-tablehead],.table-head"),
+
+    tableheadContainer:
+      AppCore?.dom?.tableheadContainer ||
+      query("#tablehead-container,[data-tablehead-container]"),
+
+    loader:
+      AppCore?.dom?.loader ||
+      query("#app-loader,[data-app-loader],.app-loader"),
+  };
+}
+
+function enableAuthScreen() {
+  if (!isBrowser()) return false;
+
+  const nodes = getShellNodes();
+
+  setClassList(nodes.body, AUTH_CLASSES, APP_CLASSES);
+  setClassList(nodes.html, ["route-auth", "route-shell-hidden", "route-chrome-hidden"], APP_CLASSES);
+
+  setDataset(nodes.body, {
+    authScreen: "true",
+    routeMode: "auth",
+    chrome: "hidden",
+    shell: "visible",
+    appLoading: "false",
+  });
+
+  setDataset(nodes.html, {
+    routeMode: "auth",
+    chrome: "hidden",
+    shell: "visible",
+    appLoading: "false",
+  });
+
+  for (const node of [nodes.shell, nodes.main, nodes.appContent, nodes.view]) {
+    setHidden(node, false);
+    setDataset(node, {
+      routeMode: "auth",
+      chrome: "hidden",
+      shell: "visible",
+    });
+  }
+
+  for (const node of [
+    nodes.sidebar,
+    nodes.topbar,
+    nodes.sidebarMount,
+    nodes.topbarMount,
+    nodes.tablehead,
+    nodes.tableheadContainer,
+  ]) {
+    setHidden(node, true);
+  }
+
+  hideLoader();
+
+  try {
+    AppCore?.setState?.(
+      {
+        shellVisible: false,
+        chromeVisible: false,
+        appShellVisible: true,
+        routeShellHidden: true,
+        shellHidden: true,
+        authScreen: true,
+        routeMode: "auth",
+      },
+      {
+        source: SOURCE,
+        emit: false,
+        emitState: false,
+        silent: true,
+      }
+    );
+  } catch {}
+
+  return true;
+}
+
+function disableAuthScreen({ force = false, reason = "cleanup" } = {}) {
+  if (!isBrowser()) return false;
+  if (!force && isLoginRoute()) return false;
+
+  const nodes = getShellNodes();
+
+  setClassList(nodes.body, APP_CLASSES, AUTH_CLASSES);
+  setClassList(nodes.html, APP_CLASSES, ["route-auth", "route-shell-hidden", "route-chrome-hidden"]);
+
+  setDataset(nodes.body, {
+    authScreen: null,
+    routeMode: "app",
+    chrome: "visible",
+  });
+
+  setDataset(nodes.html, {
+    routeMode: "app",
+    chrome: "visible",
+  });
+
+  for (const node of [
+    nodes.sidebar,
+    nodes.topbar,
+    nodes.sidebarMount,
+    nodes.topbarMount,
+  ]) {
+    setHidden(node, false);
+  }
+
+  try {
+    AppCore?.setState?.(
+      {
+        shellVisible: true,
+        chromeVisible: true,
+        appShellVisible: true,
+        routeShellHidden: false,
+        shellHidden: false,
+        authScreen: false,
+        routeMode: "app",
+      },
+      {
+        source: SOURCE,
+        emit: false,
+        emitState: false,
+        silent: true,
+      }
+    );
+  } catch {}
+
+  emit(EVENTS.authScreenCleared, {
+    reason,
+    stillOnLogin: isLoginRoute(),
+  });
+
+  return true;
+}
+
+function hideLoader() {
+  const nodes = getShellNodes();
+
+  for (const root of [nodes.html, nodes.body]) {
+    if (!root) continue;
+
+    try {
+      root.classList.remove(...LOADING_CLASSES);
+      root.dataset.appLoading = "false";
+    } catch {}
+  }
+
+  if (nodes.loader) {
+    setHidden(nodes.loader, true);
+
+    try {
+      nodes.loader.classList.remove("is-visible", "is-entering", "is-leaving", "app-loader--visible");
+      nodes.loader.classList.add("is-hidden", "has-hidden");
+      nodes.loader.dataset.loaderVisible = "false";
+      nodes.loader.dataset.loaderState = "hidden";
+      nodes.loader.setAttribute("aria-busy", "false");
+    } catch {}
+  }
+
+  try {
+    AppCore?.setLoading?.(false);
+  } catch {}
+
+  return true;
+}
+
+function scheduleAuthScreenCleanup() {
+  if (!isBrowser()) {
+    return {
+      flush: () => false,
+      cancel: () => {},
+    };
+  }
+
+  const timers = [];
+  const disposers = [];
+
+  let disposed = false;
+
+  function cleanup(reason = "navigation") {
+    if (disposed) return false;
+    if (isLoginRoute()) return false;
+
+    disableAuthScreen({
+      force: true,
+      reason,
+    });
+
+    cancel();
+    return true;
+  }
+
+  function cancel() {
+    disposed = true;
+
+    while (timers.length) {
+      try {
+        window.clearTimeout(timers.pop());
+      } catch {}
+    }
+
+    while (disposers.length) {
+      try {
+        disposers.pop()?.();
+      } catch {}
+    }
+  }
+
+  function onEvent(eventName, reason) {
+    const handler = () => cleanup(reason);
+
+    try {
+      AppCore?.events?.on?.(eventName, handler);
+      disposers.push(() => AppCore?.events?.off?.(eventName, handler));
+      return;
+    } catch {}
+
+    try {
+      window.addEventListener(eventName, handler);
+      disposers.push(() => window.removeEventListener(eventName, handler));
+    } catch {}
+  }
+
+  onEvent("router:rendered", "router:rendered");
+  onEvent("router:navigation:complete", "router:navigation:complete");
+  onEvent("popstate", "popstate");
+
+  [0, 80, 180, 360, 720, 1200].forEach((delay) => {
+    timers.push(window.setTimeout(() => cleanup(`timer:${delay}`), delay));
+  });
+
+  timers.push(window.setTimeout(cancel, 1500));
+
+  return {
+    flush: cleanup,
+    cancel,
+  };
+}
+
+/* =========================================================
+   GLOBAL SUBMIT LOCK
+========================================================= */
+
+function fingerprint(payload = {}) {
   return [
     safeText(
       payload.identifier ||
@@ -236,524 +990,60 @@ function buildLoginFingerprint(payload = {}) {
         "",
       ""
     ).toLowerCase(),
-
-    payload.remember ? "1" : "0",
+    payload.remember || payload.rememberMe ? "1" : "0",
   ].join("|");
 }
 
-function hasGlobalLoginSubmitInFlight() {
-  return Boolean(globalLoginSubmitPromise);
+function clearGlobalSubmit(reason = "") {
+  globalSubmitPromise = null;
+  globalSubmitFingerprint = "";
+  globalSubmitStartedAt = 0;
+
+  if (reason) log("global submit lock cleared", reason);
 }
 
-function forceClearGlobalLoginSubmit(reason = "") {
-  globalLoginSubmitPromise =
-    null;
+function clearStaleGlobalSubmit() {
+  if (!globalSubmitPromise) return false;
 
-  globalLoginSubmitFingerprint =
-    "";
+  const started = Number(globalSubmitStartedAt) || 0;
 
-  globalLoginSubmitStartedAt =
-    0;
-
-  safeWarn(
-    "global login submit lock cleared",
-    reason || "unknown"
-  );
-}
-
-function clearStaleGlobalLoginSubmit(timeoutMs = GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS) {
-  if (!globalLoginSubmitPromise) {
-    return false;
-  }
-
-  const startedAt =
-    Number(globalLoginSubmitStartedAt) || 0;
-
-  if (startedAt <= 0) {
-    forceClearGlobalLoginSubmit("missing-start-time");
-    return true;
-  }
-
-  const maxAge =
-    Math.max(
-      1_000,
-      Number(timeoutMs || 0) +
-        GLOBAL_LOGIN_SUBMIT_STALE_GRACE_MS
-    );
-
-  if (safeNow() - startedAt > maxAge) {
-    forceClearGlobalLoginSubmit("stale-timeout");
+  if (!started || now() - started > GLOBAL_SUBMIT_TIMEOUT_MS + GLOBAL_SUBMIT_GRACE_MS) {
+    clearGlobalSubmit("stale");
     return true;
   }
 
   return false;
 }
 
-function runGlobalLoginSubmit(executor, fingerprint = "", options = {}) {
-  clearStaleGlobalLoginSubmit(
-    options?.timeoutMs
-  );
+function hasGlobalSubmit() {
+  clearStaleGlobalSubmit();
+  return Boolean(globalSubmitPromise);
+}
 
-  if (globalLoginSubmitPromise) {
-    return globalLoginSubmitPromise;
-  }
+function runGlobalSubmit(work, submitFingerprint = "") {
+  clearStaleGlobalSubmit();
 
-  const timeoutMs =
-    Math.max(
-      0,
-      Number(
-        options?.timeoutMs ||
-          GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS
-      ) || 0
-    );
+  if (globalSubmitPromise) return globalSubmitPromise;
 
-  let timeoutId =
-    null;
+  globalSubmitStartedAt = now();
+  globalSubmitFingerprint = safeText(submitFingerprint, "");
 
-  const workPromise =
-    Promise.resolve()
-      .then(() => executor());
+  globalSubmitPromise = withTimeout(
+    Promise.resolve().then(work),
+    GLOBAL_SUBMIT_TIMEOUT_MS,
+    "LOGIN_SUBMIT_TIMEOUT"
+  ).finally(() => {
+    clearGlobalSubmit();
+  });
 
-  const timeoutPromise =
-    timeoutMs > 0
-      ? new Promise((_, reject) => {
-          timeoutId =
-            setTimeout(() => {
-              const error =
-                new Error("LOGIN_SUBMIT_TIMEOUT");
-
-              error.code =
-                "LOGIN_SUBMIT_TIMEOUT";
-
-              reject(error);
-            }, timeoutMs);
-        })
-      : null;
-
-  const promise =
-    timeoutPromise
-      ? Promise.race([
-          workPromise,
-          timeoutPromise,
-        ])
-      : workPromise;
-
-  globalLoginSubmitPromise =
-    promise;
-
-  globalLoginSubmitFingerprint =
-    safeText(fingerprint, "");
-
-  globalLoginSubmitStartedAt =
-    safeNow();
-
-  const clear = () => {
-    if (timeoutId) {
-      try {
-        clearTimeout(timeoutId);
-      } catch {}
-
-      timeoutId =
-        null;
-    }
-
-    if (globalLoginSubmitPromise === promise) {
-      globalLoginSubmitPromise =
-        null;
-
-      globalLoginSubmitFingerprint =
-        "";
-
-      globalLoginSubmitStartedAt =
-        0;
-    }
-  };
-
-  promise.then(
-    clear,
-    clear
-  );
-
-  if (timeoutMs > 0) {
-    setTimeout(() => {
-      clear();
-    }, timeoutMs + GLOBAL_LOGIN_SUBMIT_STALE_GRACE_MS);
-  }
-
-  return promise;
+  return globalSubmitPromise;
 }
 
 /* =========================================================
-   BASIC HELPERS
+   AUTH EXECUTOR
 ========================================================= */
 
-function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
-}
-
-function isFunction(value) {
-  return typeof value === "function";
-}
-
-function isPlainObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
-}
-
-function safeObject(value, fallback = {}) {
-  return isPlainObject(value)
-    ? value
-    : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
-}
-
-function safeNow() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
-}
-
-function safeIsoNow(ms = safeNow()) {
-  try {
-    return new Date(ms).toISOString();
-  } catch {
-    return "";
-  }
-}
-
-function escapeRegExp(value = "") {
-  return String(value)
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function safeRedact(value = "") {
-  const text =
-    safeText(value, "");
-
-  if (!text) {
-    return "";
-  }
-
-  try {
-    if (isFunction(AppCore?.utils?.redactTokenInText)) {
-      return AppCore.utils.redactTokenInText(text);
-    }
-  } catch {}
-
-  let output =
-    text;
-
-  for (const name of SENSITIVE_QUERY_PARAM_NAMES) {
-    try {
-      output =
-        output.replace(
-          new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi"),
-          "$1***"
-        );
-    } catch {}
-  }
-
-  try {
-    output =
-      output.replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      );
-  } catch {}
-
-  try {
-    output =
-      output.replace(
-        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-        "***"
-      );
-  } catch {}
-
-  return output;
-}
-
-function normalizeError(error = null) {
-  if (!error) {
-    return null;
-  }
-
-  const source =
-    error?.error ||
-    error?.reason ||
-    error;
-
-  return {
-    name:
-      safeText(
-        source?.name ||
-          source?.constructor?.name,
-        "Error"
-      ),
-
-    message:
-      safeRedact(
-        safeText(
-          source?.message ||
-            source?.reason ||
-            source,
-          "Error"
-        )
-      ),
-
-    status:
-      source?.status ||
-      source?.statusCode ||
-      source?.response?.status ||
-      source?.data?.status ||
-      0,
-
-    code:
-      source?.code ||
-      source?.data?.code ||
-      source?.response?.data?.code ||
-      null,
-
-    at:
-      safeIsoNow(),
-  };
-}
-
-function safeLog(...args) {
-  try {
-    AppCore?.utils?.log?.(
-      "[LoginView]",
-      ...args
-    );
-  } catch {}
-}
-
-function safeWarn(...args) {
-  try {
-    AppCore?.utils?.warn?.(
-      "[LoginView]",
-      ...args
-    );
-  } catch {}
-}
-
-function safeError(...args) {
-  try {
-    AppCore?.utils?.error?.(
-      "[LoginView]",
-      ...args
-    );
-  } catch {}
-
-  try {
-    if (AppCore?.config?.debug) {
-      console.error(
-        "[LoginView]",
-        ...args
-      );
-    }
-  } catch {}
-}
-
-function safeEmit(eventName, payload = {}) {
-  const name =
-    safeText(eventName, "");
-
-  if (!name) {
-    return false;
-  }
-
-  const cleanPayload = {
-    ...safeObject(payload),
-
-    source:
-      LOGIN_SOURCE,
-
-    version:
-      LOGIN_VIEW_VERSION,
-
-    at:
-      safeIsoNow(),
-  };
-
-  let busAvailable =
-    false;
-
-  let emitted =
-    false;
-
-  try {
-    if (isFunction(AppCore?.events?.emit)) {
-      busAvailable =
-        true;
-
-      AppCore.events.emit(
-        name,
-        cleanPayload
-      );
-
-      emitted =
-        true;
-    }
-  } catch {}
-
-  if (
-    !busAvailable &&
-    isBrowser()
-  ) {
-    try {
-      window.dispatchEvent(
-        new CustomEvent(name, {
-          detail:
-            cleanPayload,
-        })
-      );
-
-      emitted =
-        true;
-    } catch {}
-  }
-
-  return emitted;
-}
-
-/* =========================================================
-   TOAST HELPERS
-========================================================= */
-
-function resolveToastApi(deps = {}) {
-  const customToast =
-    deps.toast ||
-    deps.Toast ||
-    null;
-
-  if (
-    customToast &&
-    typeof customToast === "object"
-  ) {
-    return customToast;
-  }
-
-  return Toast;
-}
-
-function safeToastCall(toast, method, ...args) {
-  try {
-    if (isFunction(toast?.[method])) {
-      return toast[method](...args);
-    }
-  } catch {}
-
-  return null;
-}
-
-function showToastInfo(toast, message = "") {
-  return (
-    safeToastCall(
-      toast,
-      "info",
-      message
-    ) ||
-    safeToastCall(
-      toast,
-      "success",
-      message
-    )
-  );
-}
-
-function showLoginSuccessToastOnce(toast, message = "") {
-  const current =
-    safeNow();
-
-  if (
-    current - lastLoginSuccessToastAt <
-    LOGIN_SUCCESS_TOAST_DEDUPE_MS
-  ) {
-    return null;
-  }
-
-  lastLoginSuccessToastAt =
-    current;
-
-  return safeToastCall(
-    toast,
-    "success",
-    message ||
-      "Sesión iniciada correctamente."
-  );
-}
-
-function dismissLoginLoadingToast(
-  toast,
-  loadingToastId = null,
-  {
-    loadingActive = false,
-  } = {}
-) {
-  const hasId =
-    loadingToastId !== null &&
-    loadingToastId !== undefined &&
-    loadingToastId !== "";
-
-  if (hasId) {
-    safeToastCall(
-      toast,
-      "dismiss",
-      loadingToastId
-    );
-
-    safeToastCall(
-      toast,
-      "remove",
-      loadingToastId
-    );
-
-    safeToastCall(
-      toast,
-      "close",
-      loadingToastId
-    );
-  }
-
-  safeToastCall(
-    toast,
-    "dismissLoading"
-  );
-
-  safeToastCall(
-    toast,
-    "clearLoading"
-  );
-
-  if (
-    loadingActive &&
-    !hasId
-  ) {
-    safeToastCall(
-      toast,
-      "dismiss"
-    );
-  }
-}
-
-/* =========================================================
-   EXECUTOR / AUTH HELPERS
-========================================================= */
-
-function getModuleAuth() {
+function moduleAuth() {
   try {
     return (
       AppCore?.modules?.get?.("Auth") ||
@@ -768,1605 +1058,159 @@ function getModuleAuth() {
 }
 
 function resolveLoginExecutor(deps = {}) {
-  const moduleAuth =
-    getModuleAuth();
+  const authModule = moduleAuth();
 
   const candidates = [
     {
-      fn:
-        deps.onSubmit,
-      owner:
-        deps,
-      source:
-        "deps.onSubmit",
-      custom:
-        true,
+      fn: deps.onSubmit,
+      owner: deps,
+      source: "deps.onSubmit",
+      custom: true,
     },
-
     {
-      fn:
-        deps.submitLogin,
-      owner:
-        deps,
-      source:
-        "deps.submitLogin",
-      custom:
-        true,
+      fn: deps.submitLogin,
+      owner: deps,
+      source: "deps.submitLogin",
+      custom: true,
     },
-
     {
-      fn:
-        deps.login,
-      owner:
-        deps,
-      source:
-        "deps.login",
-      custom:
-        true,
+      fn: deps.login,
+      owner: deps,
+      source: "deps.login",
+      custom: true,
     },
-
     {
-      fn:
-        Auth?.login,
-      owner:
-        Auth,
-      source:
-        "Auth.login",
-      custom:
-        false,
+      fn: Auth?.login,
+      owner: Auth,
+      source: "Auth.login",
+      custom: false,
     },
-
     {
-      fn:
-        moduleAuth?.login,
-      owner:
-        moduleAuth,
-      source:
-        "moduleAuth.login",
-      custom:
-        false,
-    },
-
-    {
-      fn:
-        AppCore?.services?.auth?.login,
-      owner:
-        AppCore?.services?.auth,
-      source:
-        "AppCore.services.auth.login",
-      custom:
-        true,
-    },
-
-    {
-      fn:
-        AppCore?.auth?.login,
-      owner:
-        AppCore?.auth,
-      source:
-        "AppCore.auth.login",
-      custom:
-        false,
+      fn: authModule?.login,
+      owner: authModule,
+      source: "moduleAuth.login",
+      custom: false,
     },
   ];
 
-  for (const candidate of candidates) {
-    if (isFunction(candidate.fn)) {
-      return candidate;
-    }
-  }
-
-  return null;
+  return candidates.find((item) => isFn(item.fn)) || null;
 }
 
-function isAuthLoginExecutor(executorDescriptor, deps = {}) {
-  if (
-    deps.delegateNavigationToAuth === false ||
-    deps.authLoginOwnsNavigation === false
-  ) {
-    return false;
-  }
-
-  const source =
-    safeText(
-      executorDescriptor?.source,
-      ""
-    );
-
-  return (
-    source === "Auth.login" ||
-    source === "moduleAuth.login" ||
-    source === "AppCore.auth.login"
-  );
-}
-
-function shouldNavigateAfterLogin(deps = {}) {
-  return !(
-    deps.navigate === false ||
-    deps.skipNavigate === true ||
-    deps.manualNavigate === true
-  );
-}
-
-function shouldExecutorOwnNavigation(deps = {}, executorDescriptor = null) {
-  if (!shouldNavigateAfterLogin(deps)) {
-    return false;
-  }
-
-  if (
-    deps.authLoginOwnsNavigation === true ||
-    deps.delegateNavigationToAuth === true ||
-    deps.executorOwnsNavigation === true
-  ) {
-    return true;
-  }
-
-  /*
-    Regla final:
-    por defecto, Auth.login NO navega. Aplica sesión y LoginView decide.
-    Esto evita el congelado por doble navegación / promesas de Router colgadas.
-  */
-  return false;
-}
-
-function buildLoginExecutorOptions(deps = {}, executorDescriptor = null) {
-  const executorOwnsNavigation =
-    shouldExecutorOwnNavigation(
-      deps,
-      executorDescriptor
-    );
-
-  const viewWillNavigate =
-    shouldNavigateAfterLogin(deps);
-
+function buildLoginOptions(deps = {}) {
   return {
-    navigate:
-      executorOwnsNavigation,
+    source: SOURCE,
 
-    redirectTo:
-      deps.redirectTo,
+    /*
+      La vista decide navegación por defecto.
+      Auth.login sólo debe aplicar sesión.
+    */
+    navigate: false,
+    skipNavigate: true,
+    skipNavigation: true,
+    skipRedirect: true,
+    noRedirect: true,
+    skipPostLoginNavigation: true,
+    skipPostRestoreNavigation: true,
 
-    redirect:
-      deps.redirect,
+    preserveCurrentRoute: true,
+    preserveRoute: true,
+    preservePublicPath: true,
 
-    target:
-      deps.target,
+    emitLoginSuccessEvent: deps.emitLoginSuccessEvent === true,
 
-    manualNavigate:
-      deps.manualNavigate,
-
-    skipNavigate:
-      !executorOwnsNavigation,
-
-    skipNavigation:
-      !executorOwnsNavigation,
-
-    skipRedirect:
-      !executorOwnsNavigation,
-
-    noRedirect:
-      !executorOwnsNavigation,
-
-    skipPostLoginNavigation:
-      !executorOwnsNavigation,
-
-    skipPostRestoreNavigation:
-      true,
-
-    preserveCurrentRoute:
-      true,
-
-    preserveRoute:
-      true,
-
-    preservePublicPath:
-      true,
-
-    source:
-      LOGIN_SOURCE,
-
-    emitLoginSuccessEvent:
-      deps.emitLoginSuccessEvent === true,
-
-    useLoader:
-      deps.useLoader !== false,
-
-    viewWillNavigate,
+    redirectTo: deps.redirectTo,
+    redirect: deps.redirect,
+    target: deps.target,
   };
 }
 
-function hasUsableUser(user = null) {
-  if (
-    !user ||
-    typeof user !== "object" ||
-    Array.isArray(user)
-  ) {
-    return false;
-  }
-
-  if (
-    user.active === false ||
-    user.disabled === true ||
-    user.deleted === true ||
-    user.blocked === true ||
-    user.suspended === true
-  ) {
-    return false;
-  }
-
-  return Boolean(
-    safeText(user.id, "") ||
-      safeText(user.userId, "") ||
-      safeText(user.user_id, "") ||
-      safeText(user._id, "") ||
-      safeText(user.uid, "") ||
-      safeText(user.sub, "") ||
-      safeText(user.username, "") ||
-      safeText(user.userName, "") ||
-      safeText(user.email, "") ||
-      safeText(user.mail, "") ||
-      safeText(user.phone, "") ||
-      safeText(user.telefono, "")
-  );
-}
-
-function getStateUser() {
-  const state =
-    safeObject(AppCore?.state);
-
-  return (
-    state.user ||
-    state.currentUser ||
-    state.sessionUser ||
-    state.authUser ||
-    state.me ||
-    state.account ||
-    state.profile ||
-    state.session?.user ||
-    state.auth?.user ||
-    null
-  );
-}
-
-function getStateToken() {
-  const state =
-    safeObject(AppCore?.state);
-
+function stateToken() {
   return safeText(
-    state.token ||
-      state.accessToken ||
-      state.access_token ||
-      state.auth?.token ||
-      state.auth?.accessToken ||
-      state.auth?.access_token ||
-      state.session?.token ||
-      state.session?.accessToken ||
-      state.session?.access_token ||
+    AppCore?.state?.token ||
+      AppCore?.state?.accessToken ||
+      AppCore?.state?.access_token ||
+      AppCore?.state?.session?.token ||
+      AppCore?.state?.session?.accessToken ||
       "",
     ""
   );
 }
 
-function hasUsableStateSession() {
-  const state =
-    safeObject(AppCore?.state);
-
-  return Boolean(
-    state.authenticated === true &&
-      hasUsableUser(getStateUser())
-  );
-}
-
-function isAuthenticatedResult(auth = {}) {
-  if (!auth) {
-    return false;
-  }
-
-  if (auth.requires2FA === true) {
-    return false;
-  }
-
-  if (auth.explicitFailure === true) {
-    return false;
-  }
-
-  if (
-    auth.ok === false &&
-    !hasUsableStateSession()
-  ) {
-    return false;
-  }
-
-  const token =
-    safeText(
-      auth.token ||
-        auth.accessToken ||
-        auth.access_token ||
-        getStateToken() ||
-        "",
-      ""
-    );
-
-  const user =
-    auth.user ||
-    auth.usuario ||
-    auth.me ||
-    auth.account ||
-    auth.profile ||
-    getStateUser() ||
-    null;
-
-  if (
-    auth.status === "authenticated" ||
-    auth.authenticated === true
-  ) {
-    return hasUsableUser(user) || hasUsableStateSession();
-  }
-
-  if (
-    auth.success === true ||
-    auth.ok === true
-  ) {
-    return Boolean(
-      hasUsableUser(user) ||
-        hasUsableStateSession() ||
-        (
-          token &&
-          hasUsableUser(user)
-        )
-    );
-  }
-
-  return Boolean(
-    token &&
-      hasUsableUser(user)
-  );
-}
-
-function isTwoFaResult(auth = {}) {
-  const status =
-    safeText(
-      auth?.status,
-      ""
-    ).toLowerCase();
-
+function stateUser() {
   return (
-    auth?.requires2FA === true ||
-    status === "2fa_required" ||
-    status === "mfa_required" ||
-    status === "two_factor_required" ||
-    status === "otp_required"
+    AppCore?.state?.user ||
+    AppCore?.state?.currentUser ||
+    AppCore?.state?.authUser ||
+    AppCore?.state?.sessionUser ||
+    AppCore?.state?.session?.user ||
+    null
   );
 }
 
-function callLoginExecutor(executorDescriptor, payload, options) {
-  if (!executorDescriptor?.fn) {
-    throw new Error("LOGIN_EXECUTOR_MISSING");
-  }
+function buildCoreAuthResult() {
+  const token = stateToken();
+  const user = stateUser();
 
-  return executorDescriptor.fn.call(
-    executorDescriptor.owner || null,
-    payload,
-    options
-  );
-}
+  if (!hasUsableToken(token) || !hasUsableUser(user)) return null;
 
-/* =========================================================
-   ROUTE / NAVIGATION HELPERS
-========================================================= */
-
-function normalizePath(path = "/") {
-  const raw =
-    safeText(path, "/") || "/";
-
-  try {
-    if (isFunction(AppCore?.utils?.normalizePath)) {
-      const normalized =
-        AppCore.utils.normalizePath(raw);
-
-      if (normalized) {
-        return normalized;
-      }
-    }
-  } catch {}
-
-  if (raw === "/") {
-    return "/";
-  }
-
-  return (
-    raw
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/")
-      .replace(/\/+$/g, "") ||
-    "/"
-  );
-}
-
-function stripSearchAndHash(path = "/") {
-  return (
-    normalizePath(path)
-      .split("?")[0]
-      .split("#")[0] ||
-    "/"
-  );
-}
-
-function isSafeInternalPath(path = "") {
-  const value =
-    safeText(path, "");
-
-  if (!value) {
-    return false;
-  }
-
-  if (!value.startsWith("/")) {
-    return false;
-  }
-
-  if (value.startsWith("//")) {
-    return false;
-  }
-
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
-    return false;
-  }
-
-  if (/[\r\n\t]/.test(value)) {
-    return false;
-  }
-
-  const lower =
-    value.toLowerCase();
-
-  if (
-    lower.includes("%0d") ||
-    lower.includes("%0a") ||
-    lower.includes("%09") ||
-    lower.includes("%5c") ||
-    value.includes("\\")
-  ) {
-    return false;
-  }
-
-  try {
-    const decoded =
-      decodeURIComponent(value)
-        .trim()
-        .replace(/\\/g, "/");
-
-    if (
-      decoded.startsWith("//") ||
-      /^[a-z][a-z0-9+.-]*:/i.test(decoded) ||
-      /[\r\n\t]/.test(decoded)
-    ) {
-      return false;
-    }
-  } catch {
-    return false;
-  }
-
-  return true;
-}
-
-function isLoginRoute(path = "") {
-  const clean =
-    stripSearchAndHash(path);
-
-  return (
-    clean === LOGIN_ROUTE ||
-    clean.startsWith(`${LOGIN_ROUTE}/`)
-  );
-}
-
-function sanitizeNavigationPath(path = "/", fallback = DEFAULT_HOME_ROUTE) {
-  const raw =
-    safeText(path, fallback) ||
-    fallback;
-
-  const candidate =
-    normalizePath(raw);
-
-  if (!candidate) {
-    return fallback;
-  }
-
-  if (!isSafeInternalPath(candidate)) {
-    return fallback;
-  }
-
-  if (isLoginRoute(candidate)) {
-    return fallback;
-  }
-
-  return candidate;
-}
-
-function getBrowserPath() {
-  if (!isBrowser()) {
-    return DEFAULT_HOME_ROUTE;
-  }
-
-  try {
-    return normalizePath(
-      `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
-    );
-  } catch {
-    return DEFAULT_HOME_ROUTE;
-  }
-}
-
-function isStillOnLoginRoute() {
-  return isLoginRoute(
-    getBrowserPath()
-  );
-}
-
-function getRedirectFromCurrentUrl() {
-  if (!isBrowser()) {
-    return "";
-  }
-
-  try {
-    const params =
-      new URLSearchParams(
-        window.location.search || ""
-      );
-
-    const value =
-      params.get("redirect") ||
-      params.get("redirectTo") ||
-      params.get("returnTo") ||
-      params.get("next") ||
-      "";
-
-    if (!value) {
-      return "";
-    }
-
-    return sanitizeNavigationPath(
-      value,
-      ""
-    );
-  } catch {
-    return "";
-  }
-}
-
-function resolveFinalLoginRedirect(auth = {}, deps = {}) {
-  const fromHelper =
-    safeText(
-      resolveLoginRedirect(auth, deps),
-      ""
-    );
-
-  if (
-    fromHelper &&
-    isSafeInternalPath(fromHelper) &&
-    !isLoginRoute(fromHelper)
-  ) {
-    return sanitizeNavigationPath(
-      fromHelper,
-      DEFAULT_HOME_ROUTE
-    );
-  }
-
-  const fromUrl =
-    getRedirectFromCurrentUrl();
-
-  if (
-    fromUrl &&
-    isSafeInternalPath(fromUrl) &&
-    !isLoginRoute(fromUrl)
-  ) {
-    return sanitizeNavigationPath(
-      fromUrl,
-      DEFAULT_HOME_ROUTE
-    );
-  }
-
-  return DEFAULT_HOME_ROUTE;
-}
-
-function getRouterCandidates() {
-  const candidates =
-    [];
-
-  try {
-    candidates.push(
-      AppCore?.Router,
-      AppCore?.router,
-      AppCore?.modules?.get?.("Router"),
-      AppCore?.modules?.get?.("router")
-    );
-  } catch {}
-
-  try {
-    if (isBrowser()) {
-      candidates.push(
-        window.Router,
-        window.AppRouter,
-        window.AppCore?.Router,
-        window.AppCore?.router
-      );
-    }
-  } catch {}
-
-  return candidates.filter(Boolean);
-}
-
-function withTimeout(promiseLike, timeoutMs = 0, timeoutCode = "TIMEOUT") {
-  const ms =
-    Math.max(0, Number(timeoutMs || 0));
-
-  if (!ms) {
-    return Promise.resolve(promiseLike);
-  }
-
-  let timer =
-    null;
-
-  const timeoutPromise =
-    new Promise((_, reject) => {
-      timer =
-        setTimeout(() => {
-          const error =
-            new Error(timeoutCode);
-
-          error.code =
-            timeoutCode;
-
-          reject(error);
-        }, ms);
-    });
-
-  return Promise.race([
-    Promise.resolve(promiseLike),
-    timeoutPromise,
-  ]).finally(() => {
-    if (timer) {
-      try {
-        clearTimeout(timer);
-      } catch {}
-
-      timer =
-        null;
-    }
+  return normalizeAuthResult({
+    ok: true,
+    success: true,
+    authenticated: true,
+    token,
+    accessToken: token,
+    user,
+    usuario: user,
+    source: "core-state",
   });
 }
 
-function hardRedirectTo(target = DEFAULT_HOME_ROUTE) {
-  if (!isBrowser()) {
-    return false;
+function normalizeLoginResult(rawResult = null) {
+  const normalized = normalizeAuthResult(rawResult || {});
+
+  if (normalized.authenticated || normalized.requires2FA || normalized.explicitFailure) {
+    return normalized;
   }
 
-  const finalTarget =
-    sanitizeNavigationPath(
-      target,
-      DEFAULT_HOME_ROUTE
-    );
-
-  try {
-    window.location.assign(finalTarget);
-    return true;
-  } catch {
-    try {
-      window.location.href =
-        finalTarget;
-
-      return true;
-    } catch {}
-  }
-
-  return false;
+  const fromCore = buildCoreAuthResult();
+  return fromCore || normalized;
 }
 
-async function navigateTo(path = "/", options = {}) {
-  const target =
-    sanitizeNavigationPath(
-      path,
-      DEFAULT_HOME_ROUTE
-    );
+function isAuthenticatedResult(auth = {}) {
+  if (!auth || auth.requires2FA || auth.explicitFailure) return false;
 
-  const canonicalTarget =
-    stripSearchAndHash(target);
+  if (auth.authenticated === true) return true;
 
-  const replaceState =
-    options.replaceState !== false;
-
-  const timeoutMs =
-    Math.max(
-      1_000,
-      Number(options.timeoutMs || LOGIN_NAVIGATION_TIMEOUT_MS) ||
-        LOGIN_NAVIGATION_TIMEOUT_MS
-    );
-
-  const routerOptions = {
-    replaceState,
-
-    force:
-      options.force === true,
-
-    source:
-      LOGIN_SOURCE,
-
-    reason:
-      options.reason || "login-view-navigation",
-
-    publicPath:
-      target,
-
-    requestedPath:
-      target,
-
-    canonicalPath:
-      canonicalTarget,
-  };
-
-  safeEmit(
-    LOGIN_EVENTS.navigationStart,
-    {
-      target:
-        safeRedact(target),
-      replaceState,
-      reason:
-        routerOptions.reason,
-    }
-  );
-
-  for (const router of getRouterCandidates()) {
-    try {
-      if (isFunction(router.goAfterLogin)) {
-        await withTimeout(
-          router.goAfterLogin(
-            target,
-            routerOptions
-          ),
-          timeoutMs,
-          "LOGIN_NAVIGATE_TIMEOUT"
-        );
-
-        safeEmit(
-          LOGIN_EVENTS.navigationDone,
-          {
-            target:
-              safeRedact(target),
-            method:
-              "goAfterLogin",
-          }
-        );
-
-        return true;
-      }
-
-      if (isFunction(router.navigate)) {
-        await withTimeout(
-          router.navigate(
-            target,
-            routerOptions
-          ),
-          timeoutMs,
-          "LOGIN_NAVIGATE_TIMEOUT"
-        );
-
-        safeEmit(
-          LOGIN_EVENTS.navigationDone,
-          {
-            target:
-              safeRedact(target),
-            method:
-              "navigate",
-          }
-        );
-
-        return true;
-      }
-
-      if (isFunction(router.go)) {
-        await withTimeout(
-          router.go(
-            target,
-            routerOptions
-          ),
-          timeoutMs,
-          "LOGIN_NAVIGATE_TIMEOUT"
-        );
-
-        safeEmit(
-          LOGIN_EVENTS.navigationDone,
-          {
-            target:
-              safeRedact(target),
-            method:
-              "go",
-          }
-        );
-
-        return true;
-      }
-
-      if (isFunction(router.push)) {
-        await withTimeout(
-          router.push(
-            target,
-            routerOptions
-          ),
-          timeoutMs,
-          "LOGIN_NAVIGATE_TIMEOUT"
-        );
-
-        safeEmit(
-          LOGIN_EVENTS.navigationDone,
-          {
-            target:
-              safeRedact(target),
-            method:
-              "push",
-          }
-        );
-
-        return true;
-      }
-
-      if (isFunction(router.render)) {
-        await withTimeout(
-          router.render(
-            canonicalTarget,
-            {
-              ...routerOptions,
-              replaceState,
-              force:
-                true,
-              forceRender:
-                true,
-            }
-          ),
-          timeoutMs,
-          "LOGIN_NAVIGATE_TIMEOUT"
-        );
-
-        safeEmit(
-          LOGIN_EVENTS.navigationDone,
-          {
-            target:
-              safeRedact(target),
-            method:
-              "render",
-          }
-        );
-
-        return true;
-      }
-    } catch (error) {
-      safeWarn(
-        "Router navigation falló.",
-        normalizeError(error)
-      );
-    }
-  }
-
-  try {
-    if (isFunction(AppCore?.navigate)) {
-      await withTimeout(
-        AppCore.navigate(
-          target,
-          routerOptions
-        ),
-        timeoutMs,
-        "LOGIN_NAVIGATE_TIMEOUT"
-      );
-
-      safeEmit(
-        LOGIN_EVENTS.navigationDone,
-        {
-          target:
-            safeRedact(target),
-          method:
-            "AppCore.navigate",
-        }
-      );
-
-      return true;
-    }
-  } catch (error) {
-    safeWarn(
-      "AppCore.navigate falló.",
-      normalizeError(error)
-    );
-  }
-
-  /*
-    No usamos history.replaceState como fallback:
-    puede cambiar la URL a "/" pero dejar el login pintado y el botón bloqueado.
-    Si el Router no responde, hacemos hard redirect.
-  */
-  if (hardRedirectTo(target)) {
-    safeEmit(
-      LOGIN_EVENTS.navigationDone,
-      {
-        target:
-          safeRedact(target),
-        method:
-          "window.location.assign",
-      }
-    );
-
-    return true;
-  }
-
-  safeEmit(
-    LOGIN_EVENTS.navigationError,
-    {
-      target:
-        safeRedact(target),
-      reason:
-        "navigation-failed",
-    }
-  );
-
-  return false;
-}
-
-/* =========================================================
-   AUTH SCREEN MODE
-========================================================= */
-
-function enableAuthScreenMode() {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  try {
-    document.body?.classList?.add?.(
-      ...AUTH_SCREEN_CLASSES
-    );
-
-    document.body?.classList?.remove?.(
-      ...APP_SCREEN_CLASSES
-    );
-
-    document.body?.setAttribute?.(
-      "data-auth-screen",
-      "true"
-    );
-
-    document.body?.setAttribute?.(
-      "data-route-mode",
-      "auth"
-    );
-
-    document.body?.setAttribute?.(
-      "data-chrome",
-      "hidden"
-    );
-
-    document.body?.setAttribute?.(
-      "data-shell",
-      "visible"
-    );
-  } catch {}
-
-  try {
-    document.documentElement?.classList?.add?.(
-      "route-auth",
-      "route-shell-hidden",
-      "route-chrome-hidden"
-    );
-
-    document.documentElement?.classList?.remove?.(
-      ...APP_SCREEN_CLASSES
-    );
-
-    document.documentElement?.setAttribute?.(
-      "data-route-mode",
-      "auth"
-    );
-
-    document.documentElement?.setAttribute?.(
-      "data-chrome",
-      "hidden"
-    );
-
-    document.documentElement?.setAttribute?.(
-      "data-shell",
-      "visible"
-    );
-  } catch {}
-
-  return true;
-}
-
-function disableAuthScreenMode({
-  force = false,
-  reason = "cleanup",
-} = {}) {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  if (
-    !force &&
-    isStillOnLoginRoute()
-  ) {
-    return false;
-  }
-
-  try {
-    document.body?.classList?.remove?.(
-      ...AUTH_SCREEN_CLASSES
-    );
-
-    document.body?.classList?.add?.(
-      ...APP_SCREEN_CLASSES
-    );
-
-    document.body?.removeAttribute?.(
-      "data-auth-screen"
-    );
-
-    document.body?.setAttribute?.(
-      "data-route-mode",
-      "app"
-    );
-
-    document.body?.setAttribute?.(
-      "data-chrome",
-      "visible"
-    );
-  } catch {}
-
-  try {
-    document.documentElement?.classList?.remove?.(
-      "route-auth",
-      "route-shell-hidden",
-      "route-chrome-hidden"
-    );
-
-    document.documentElement?.classList?.add?.(
-      ...APP_SCREEN_CLASSES
-    );
-
-    document.documentElement?.setAttribute?.(
-      "data-route-mode",
-      "app"
-    );
-
-    document.documentElement?.setAttribute?.(
-      "data-chrome",
-      "visible"
-    );
-  } catch {}
-
-  safeEmit(
-    LOGIN_EVENTS.authScreenCleared,
-    {
-      reason,
-      stillOnLogin:
-        isStillOnLoginRoute(),
-    }
-  );
-
-  return true;
-}
-
-/* =========================================================
-   EVENTS / CLEANUP
-========================================================= */
-
-function bindAppEvent(eventName, handler) {
-  if (
-    !eventName ||
-    !isFunction(handler)
-  ) {
-    return () => {};
-  }
-
-  let disposed =
-    false;
-
-  const wrapped =
-    (...args) => {
-      if (disposed) {
-        return;
-      }
-
-      try {
-        handler(...args);
-      } catch (error) {
-        safeWarn(
-          "event handler error",
-          eventName,
-          normalizeError(error)
-        );
-      }
-    };
-
-  try {
-    if (isFunction(AppCore?.events?.on)) {
-      const maybeOff =
-        AppCore.events.on(
-          eventName,
-          wrapped
-        );
-
-      if (isFunction(maybeOff)) {
-        return () => {
-          disposed =
-            true;
-
-          try {
-            maybeOff();
-          } catch {}
-        };
-      }
-
-      return () => {
-        disposed =
-          true;
-
-        try {
-          AppCore.events.off?.(
-            eventName,
-            wrapped
-          );
-        } catch {}
-      };
-    }
-  } catch {}
-
-  try {
-    if (
-      isBrowser() &&
-      isFunction(window.addEventListener)
-    ) {
-      const listener =
-        (event) => wrapped(event);
-
-      window.addEventListener(
-        eventName,
-        listener,
-        false
-      );
-
-      return () => {
-        disposed =
-          true;
-
-        try {
-          window.removeEventListener(
-            eventName,
-            listener,
-            false
-          );
-        } catch {}
-      };
-    }
-  } catch {}
-
-  return () => {
-    disposed =
-      true;
-  };
-}
-
-function bindWindowEvent(eventName, handler) {
-  if (
-    !isBrowser() ||
-    !eventName ||
-    !isFunction(handler)
-  ) {
-    return () => {};
-  }
-
-  let disposed =
-    false;
-
-  const wrapped =
-    (event) => {
-      if (disposed) {
-        return;
-      }
-
-      try {
-        handler(event);
-      } catch {}
-    };
-
-  try {
-    window.addEventListener(
-      eventName,
-      wrapped,
-      false
-    );
-
-    return () => {
-      disposed =
-        true;
-
-      try {
-        window.removeEventListener(
-          eventName,
-          wrapped,
-          false
-        );
-      } catch {}
-    };
-  } catch {}
-
-  return () => {
-    disposed =
-      true;
-  };
-}
-
-function safeUnbind(unbind) {
-  try {
-    if (isFunction(unbind)) {
-      unbind();
-    }
-  } catch {}
-}
-
-function cleanupPasswordBindings(bindings = []) {
-  for (const binding of safeArray(bindings)) {
-    try {
-      if (isFunction(binding)) {
-        binding();
-        continue;
-      }
-
-      if (isFunction(binding?.destroy)) {
-        binding.destroy();
-        continue;
-      }
-
-      if (isFunction(binding?.unbind)) {
-        binding.unbind();
-        continue;
-      }
-
-      if (isFunction(binding?.off)) {
-        binding.off();
-      }
-    } catch {}
-  }
-}
-
-function scheduleAuthScreenCleanupAfterNavigation() {
-  if (!isBrowser()) {
-    return {
-      flush:
-        () => false,
-      cancel:
-        () => {},
-    };
-  }
-
-  let disposed =
-    false;
-
-  const offFns =
-    [];
-
-  const timerIds =
-    [];
-
-  function clearTimers() {
-    for (const id of timerIds.splice(0)) {
-      try {
-        window.clearTimeout(id);
-      } catch {}
-    }
-  }
-
-  function clearEvents() {
-    for (const off of offFns.splice(0)) {
-      safeUnbind(off);
-    }
-  }
-
-  function dispose() {
-    disposed =
-      true;
-
-    clearTimers();
-    clearEvents();
-  }
-
-  function tryCleanup(reason = "navigation") {
-    if (disposed) {
-      return false;
-    }
-
-    if (isStillOnLoginRoute()) {
-      return false;
-    }
-
-    disableAuthScreenMode({
-      force:
-        true,
-      reason,
-    });
-
-    dispose();
-
-    return true;
-  }
-
-  const onRouteSignal =
-    (reason) => () => {
-      tryCleanup(reason);
-    };
-
-  offFns.push(
-    bindAppEvent(
-      "router:before-render",
-      onRouteSignal("router:before-render")
-    )
-  );
-
-  offFns.push(
-    bindAppEvent(
-      "router:rendered",
-      onRouteSignal("router:rendered")
-    )
-  );
-
-  offFns.push(
-    bindAppEvent(
-      "router:navigation:complete",
-      onRouteSignal("router:navigation:complete")
-    )
-  );
-
-  offFns.push(
-    bindWindowEvent(
-      "popstate",
-      onRouteSignal("popstate")
-    )
-  );
-
-  for (const delay of [
-    0,
-    80,
-    180,
-    360,
-    720,
-    1200,
-  ]) {
-    try {
-      timerIds.push(
-        window.setTimeout(
-          () => {
-            tryCleanup(
-              `timer:${delay}`
-            );
-          },
-          delay
-        )
-      );
-    } catch {}
-  }
-
-  try {
-    timerIds.push(
-      window.setTimeout(
-        dispose,
-        1500
-      )
-    );
-  } catch {}
-
-  return {
-    flush:
-      tryCleanup,
-
-    cancel:
-      dispose,
-  };
-}
-
-/* =========================================================
-   TEMPLATE / PASSWORD FIELD
-========================================================= */
-
-function renderTemplateIntoContainer(container, html = "") {
-  const markup =
-    safeText(html, "");
-
-  if (!isBrowser()) {
-    try {
-      container.innerHTML =
-        markup;
-    } catch {}
-
-    return true;
-  }
-
-  try {
-    const template =
-      document.createElement("template");
-
-    template.innerHTML =
-      markup;
-
-    container.replaceChildren(
-      template.content.cloneNode(true)
-    );
-
-    return true;
-  } catch {
-    try {
-      container.innerHTML =
-        markup;
-
-      return true;
-    } catch {}
-  }
-
-  return false;
-}
-
-function bindSharedPasswordFields(container = null) {
-  try {
-    const scope =
-      container ||
-      (
-        isBrowser()
-          ? document
-          : null
-      );
-
-    const bindings =
-      bindPasswordFieldsInScope(scope);
-
-    safeLog(
-      "password fields bound:",
-      Array.isArray(bindings)
-        ? bindings.length
-        : 0
-    );
-
-    return Array.isArray(bindings)
-      ? bindings
-      : [];
-  } catch (error) {
-    safeWarn(
-      "password-field bind error",
-      normalizeError(error)
-    );
-
-    return [];
-  }
-}
-
-/* =========================================================
-   UI HELPERS
-========================================================= */
-
-function resolveAppName() {
-  return (
-    safeText(
-      AppCore?.config?.appName,
-      ""
-    ) ||
-    "Onion Support"
+  return Boolean(
+    hasUsableToken(auth.token || auth.accessToken || auth.access_token || stateToken()) &&
+      hasUsableUser(auth.user || auth.usuario || stateUser())
   );
 }
 
-function resolveForgotPasswordHref(deps = {}) {
-  return (
-    safeText(
-      deps?.forgotPasswordHref,
-      ""
-    ) ||
-    AppCore?.config?.routes?.forgotPassword ||
-    "/forgot-password"
+function is2FAResult(auth = {}) {
+  const status = safeText(auth?.status, "").toLowerCase();
+
+  return Boolean(
+    auth?.requires2FA === true ||
+      status === "2fa_required" ||
+      status === "mfa_required" ||
+      status === "two_factor_required" ||
+      status === "otp_required"
   );
-}
-
-function toggleTheme() {
-  if (!isBrowser()) {
-    return "dark";
-  }
-
-  const current =
-    safeText(
-      AppCore?.state?.theme ||
-        document.documentElement.getAttribute("data-theme") ||
-        AppCore?.config?.defaultTheme ||
-        "dark",
-      "dark"
-    ).toLowerCase();
-
-  const next =
-    current === "light"
-      ? "dark"
-      : "light";
-
-  try {
-    AppCore?.setTheme?.(next);
-  } catch {
-    try {
-      document.documentElement.setAttribute(
-        "data-theme",
-        next
-      );
-    } catch {}
-  }
-
-  return next;
-}
-
-function safeSetLoginLoading(refs, value = false, labels = {}) {
-  try {
-    setLoginLoading(
-      refs,
-      Boolean(value),
-      labels
-    );
-
-    return true;
-  } catch (error) {
-    safeWarn(
-      "setLoginLoading() falló.",
-      normalizeError(error)
-    );
-
-    return false;
-  }
-}
-
-function emitLoginViewReady(deps = {}) {
-  safeEmit(
-    LOGIN_EVENTS.ready,
-    {
-      route:
-        LOGIN_ROUTE,
-      view:
-        "login",
-      version:
-        LOGIN_VIEW_VERSION,
-    }
-  );
-
-  if (deps.emitLegacyRouteRendered === true) {
-    safeEmit(
-      "app:route:rendered",
-      {
-        route:
-          LOGIN_ROUTE,
-        view:
-          "login",
-        legacy:
-          true,
-      }
-    );
-  }
 }
 
 /* =========================================================
    INSTANCE MANAGEMENT
 ========================================================= */
 
-function destroyPreviousLoginInstance(container) {
-  if (!container) {
-    return false;
-  }
-
+function destroyPrevious(container) {
   try {
-    const previous =
-      container[LOGIN_VIEW_INSTANCE_KEY];
+    const previous = container?.[INSTANCE_KEY];
 
-    if (
-      previous &&
-      isFunction(previous.destroy)
-    ) {
+    if (previous?.destroy) {
       previous.destroy({
-        remount:
-          true,
-        preserveAuthScreen:
-          true,
+        remount: true,
+        preserveAuthScreen: true,
       });
 
       return true;
@@ -2376,1078 +1220,661 @@ function destroyPreviousLoginInstance(container) {
   return false;
 }
 
-function storeLoginInstance(container, instance) {
-  if (
-    !container ||
-    !instance
-  ) {
-    return false;
-  }
+function storeInstance(container, instance) {
+  if (!container || !instance) return false;
 
   try {
-    Object.defineProperty(
-      container,
-      LOGIN_VIEW_INSTANCE_KEY,
-      {
-        value:
-          instance,
-        configurable:
-          true,
-        enumerable:
-          false,
-        writable:
-          true,
-      }
-    );
-
-    return true;
+    Object.defineProperty(container, INSTANCE_KEY, {
+      value: instance,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+    });
   } catch {
     try {
-      container[LOGIN_VIEW_INSTANCE_KEY] =
-        instance;
-
-      return true;
+      container[INSTANCE_KEY] = instance;
     } catch {}
   }
 
-  return false;
-}
+  lastInstance = instance;
 
-function clearLoginInstance(container, instance) {
   try {
-    if (
-      container &&
-      container[LOGIN_VIEW_INSTANCE_KEY] === instance
-    ) {
-      delete container[LOGIN_VIEW_INSTANCE_KEY];
+    if (isBrowser()) {
+      window[RUNTIME_KEY] = instance;
     }
   } catch {}
+
+  return true;
+}
+
+function clearInstance(container, instance) {
+  try {
+    if (container?.[INSTANCE_KEY] === instance) {
+      delete container[INSTANCE_KEY];
+    }
+  } catch {}
+
+  if (lastInstance === instance) {
+    lastInstance = null;
+  }
+
+  return true;
 }
 
 /* =========================================================
-   VIEW
+   TEMPLATE
 ========================================================= */
 
-function renderLoginView(container, deps = {}) {
-  if (!container) {
-    throw new Error(
-      "[LoginView] container es obligatorio."
-    );
+function renderTemplate(container, html = "") {
+  const markup = safeText(html, "");
+
+  if (!isBrowser()) {
+    try {
+      container.innerHTML = markup;
+    } catch {}
+
+    return true;
   }
 
-  destroyPreviousLoginInstance(container);
+  try {
+    const template = document.createElement("template");
+    template.innerHTML = markup;
 
-  let mounted =
-    true;
+    container.replaceChildren(template.content.cloneNode(true));
+    return true;
+  } catch {
+    try {
+      container.innerHTML = markup;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
 
-  let isSubmitting =
-    false;
+function appName() {
+  return safeText(AppCore?.config?.appName, "Onion Support");
+}
 
-  let isLeavingLogin =
-    false;
-
-  let loadingToastId =
-    null;
-
-  let loadingToastActive =
-    false;
-
-  let submitWatchdogTimer =
-    null;
-
-  let navigationCleanup =
-    null;
-
-  let navigationFailsafeTimer =
-    null;
-
-  enableAuthScreenMode();
-
-  const toast =
-    resolveToastApi(deps);
-
-  safeToastCall(
-    toast,
-    "init"
+function forgotHref(deps = {}) {
+  return (
+    safeText(deps.forgotPasswordHref, "") ||
+    safeText(AppCore?.config?.routes?.forgotPassword, "") ||
+    "/forgot-password"
   );
+}
 
-  const rememberedIdentifier =
-    loadRememberedIdentifier();
+/* =========================================================
+   VIEW RENDER
+========================================================= */
 
-  const appName =
-    resolveAppName();
+export function renderLoginView(container, deps = {}) {
+  if (!container) {
+    throw new Error("[LoginView] container requerido.");
+  }
 
-  const forgotPasswordHref =
-    resolveForgotPasswordHref(deps);
+  destroyPrevious(container);
 
-  renderTemplateIntoContainer(
+  let mounted = true;
+  let submitting = false;
+  let leavingLogin = false;
+
+  let loadingToastId = null;
+  let submitWatchdog = null;
+  let navigationFailsafe = null;
+  let authCleanup = null;
+
+  enableAuthScreen();
+
+  const toast = ToastBridge.of(deps.toast || deps.Toast || deps.toastProvider || null);
+
+  try {
+    toast.init?.();
+  } catch {}
+
+  const rememberedIdentifier = loadRememberedIdentifier();
+
+  renderTemplate(
     container,
     getLoginTemplate({
-      appName,
-      identifier:
-        rememberedIdentifier,
-      forgotPasswordHref,
+      appName: appName(),
+      identifier: rememberedIdentifier,
+      forgotPasswordHref: forgotHref(deps),
       ...safeObject(deps),
     })
   );
 
-  const passwordBindings =
-    bindSharedPasswordFields(container);
+  const refs = getLoginRefs(container);
+  const passwordBindings = bindLoginPasswordFields(container);
 
-  const refs =
-    getLoginRefs(container);
+  const submitLabel = safeText(deps.submitLabel, "Entrar al panel");
+  const loadingLabel = safeText(deps.loadingLabel, "Accediendo...");
 
-  const executorDescriptor =
-    resolveLoginExecutor(deps);
+  const executor = resolveLoginExecutor(deps);
 
-  const executorIsAuthLogin =
-    isAuthLoginExecutor(
-      executorDescriptor,
-      deps
-    );
-
-  const submitLabel =
-    safeText(
-      deps.submitLabel,
-      ""
-    ) ||
-    "Entrar al panel";
-
-  const loadingLabel =
-    safeText(
-      deps.loadingLabel,
-      ""
-    ) ||
-    "Accediendo...";
-
-  function containerStillShowsLogin() {
-    try {
-      return Boolean(
-        container?.isConnected &&
-          container.querySelector?.(
-            "[data-login-view='true'],.login-view"
-          )
-      );
-    } catch {
-      return false;
+  function closeLoadingToast() {
+    if (loadingToastId !== null && loadingToastId !== undefined && loadingToastId !== "") {
+      try {
+        toast.dismiss(loadingToastId);
+      } catch {}
     }
+
+    loadingToastId = null;
   }
 
-  function clearNavigationFailsafe() {
-    if (!navigationFailsafeTimer) {
-      return;
-    }
+  function stopWatchdog() {
+    if (!submitWatchdog) return;
 
     try {
-      clearTimeout(navigationFailsafeTimer);
+      clearTimeout(submitWatchdog);
     } catch {}
 
-    navigationFailsafeTimer =
-      null;
+    submitWatchdog = null;
   }
 
-  function scheduleNavigationRenderFailsafe(target = DEFAULT_HOME_ROUTE, reason = "post-navigation") {
-    clearNavigationFailsafe();
+  function startWatchdog() {
+    stopWatchdog();
 
-    if (!isBrowser()) {
-      return false;
+    submitWatchdog = setTimeout(() => {
+      submitWatchdog = null;
+      closeLoadingToast();
+      clearGlobalSubmit("watchdog");
+
+      if (mounted && isLoginRoute()) {
+        submitting = false;
+        leavingLogin = false;
+        unlockLoginForm(refs, { submitLabel, loadingLabel });
+
+        emit(EVENTS.submitUnlocked, {
+          reason: "watchdog",
+        });
+
+        try {
+          toast.error("Se recuperó el formulario. Inténtalo de nuevo.");
+        } catch {}
+      }
+    }, GLOBAL_SUBMIT_TIMEOUT_MS + GLOBAL_SUBMIT_GRACE_MS);
+  }
+
+  function setSubmitting(value = false) {
+    submitting = Boolean(value);
+
+    try {
+      if (refs.form?.dataset) {
+        if (submitting) refs.form.dataset.loginSubmitting = "1";
+        else delete refs.form.dataset.loginSubmitting;
+      }
+    } catch {}
+
+    setLoginLoading(refs, submitting, {
+      submitLabel,
+      loadingLabel,
+    });
+  }
+
+  function unlock(reason = "manual") {
+    closeLoadingToast();
+    stopWatchdog();
+    clearGlobalSubmit(reason);
+
+    submitting = false;
+
+    if (mounted) {
+      unlockLoginForm(refs, {
+        submitLabel,
+        loadingLabel,
+      });
     }
 
-    navigationFailsafeTimer =
-      window.setTimeout(() => {
-        navigationFailsafeTimer =
-          null;
-
-        if (!mounted) {
-          return;
-        }
-
-        if (
-          !isStillOnLoginRoute() &&
-          containerStillShowsLogin()
-        ) {
-          safeEmit(
-            LOGIN_EVENTS.navigationFailsafe,
-            {
-              reason,
-              target:
-                safeRedact(target),
-              stillOnLogin:
-                false,
-              loginStillMounted:
-                true,
-            }
-          );
-
-          hardRedirectTo(target);
-        }
-      }, POST_NAVIGATION_RENDER_FAILSAFE_MS);
+    emit(EVENTS.submitUnlocked, {
+      reason,
+    });
 
     return true;
   }
 
-  function setFormSubmittingFlag(value = false) {
-    try {
-      if (!refs?.form?.dataset) {
-        return;
-      }
-
-      if (value) {
-        refs.form.dataset.loginSubmitting =
-          "1";
-      } else {
-        delete refs.form.dataset.loginSubmitting;
-      }
-    } catch {}
-  }
-
-  function isFormSubmittingFlagged() {
-    try {
-      return refs?.form?.dataset?.loginSubmitting === "1";
-    } catch {
+  async function navigateAfter(auth = {}) {
+    if (deps.navigate === false || deps.skipNavigate === true || deps.manualNavigate === true) {
       return false;
     }
-  }
 
-  function closeLoadingToast() {
-    dismissLoginLoadingToast(
-      toast,
-      loadingToastId,
+    if (!shouldRedirectAfterLogin(auth, deps)) {
+      return false;
+    }
+
+    if (!isLoginRoute()) {
+      return false;
+    }
+
+    const target = safeInternalPath(
+      resolveLoginRedirect(auth, deps) || configuredHome(),
+      configuredHome(),
       {
-        loadingActive:
-          loadingToastActive,
+        allowAuth: auth.requires2FA === true,
       }
     );
 
-    loadingToastId =
-      null;
+    leavingLogin = true;
 
-    loadingToastActive =
-      false;
+    if (!authCleanup) {
+      authCleanup = scheduleAuthScreenCleanup();
+    }
+
+    const ok = await navigateTo(target, {
+      replaceState: true,
+      reason: auth.requires2FA ? "login-2fa" : "login-success",
+      allowAuth: auth.requires2FA === true,
+    });
+
+    if (ok) {
+      navigationFailsafe = scheduleNavigationFailsafe(container, target);
+      return true;
+    }
+
+    leavingLogin = false;
+
+    if (mounted && isLoginRoute()) {
+      unlock("navigation-failed");
+    }
+
+    return false;
   }
 
-  function stopSubmitWatchdog() {
-    if (!submitWatchdogTimer) {
+  async function handleSubmit(event) {
+    try {
+      event?.preventDefault?.();
+    } catch {}
+
+    clearStaleGlobalSubmit();
+
+    if (submitting || leavingLogin || hasGlobalSubmit() || refs.form?.dataset?.loginSubmitting === "1") {
+      emit(EVENTS.submitBlocked, {
+        submitting,
+        leavingLogin,
+        hasGlobalSubmit: hasGlobalSubmit(),
+        fingerprint: globalSubmitFingerprint,
+      });
+
+      try {
+        toast.info("Ya hay un inicio de sesión en curso.");
+      } catch {}
+
       return;
     }
 
-    try {
-      clearTimeout(submitWatchdogTimer);
-    } catch {}
+    clearLoginErrors(refs);
 
-    submitWatchdogTimer =
-      null;
-  }
+    const formState = readLoginFormState(refs);
+    const payload = createLoginPayload(formState);
+    const validationErrors = validateLoginPayload(payload);
 
-  function resetSubmittingVisualState(reason = "reset") {
-    isSubmitting =
-      false;
+    if (Object.keys(validationErrors).length > 0) {
+      applyLoginErrors(refs, validationErrors);
 
-    setFormSubmittingFlag(
-      false
-    );
-
-    if (mounted) {
-      safeSetLoginLoading(
-        refs,
-        false,
-        {
-          submitLabel,
-          loadingLabel,
-        }
-      );
-    }
-
-    safeEmit(
-      LOGIN_EVENTS.submitUnlocked,
-      {
-        reason,
-        stillOnLogin:
-          isStillOnLoginRoute(),
-      }
-    );
-  }
-
-  function startSubmitWatchdog(timeoutMs = GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS) {
-    stopSubmitWatchdog();
-
-    const watchdogMs =
-      Math.max(
-        5_000,
-        Number(timeoutMs || 0) +
-          FORM_UNLOCK_WATCHDOG_EXTRA_MS
-      );
-
-    submitWatchdogTimer =
-      setTimeout(() => {
-        submitWatchdogTimer =
-          null;
-
-        closeLoadingToast();
-        forceClearGlobalLoginSubmit("view-watchdog");
-
-        if (
-          mounted &&
-          isStillOnLoginRoute()
-        ) {
-          isLeavingLogin =
-            false;
-
-          resetSubmittingVisualState(
-            "watchdog"
-          );
-
-          safeToastCall(
-            toast,
-            "error",
-            "Se recuperó el formulario tras un bloqueo del login. Inténtalo de nuevo."
-          );
-        }
-      }, watchdogMs);
-  }
-
-  function beginLeavingLogin() {
-    isLeavingLogin =
-      true;
-
-    if (!navigationCleanup) {
-      navigationCleanup =
-        scheduleAuthScreenCleanupAfterNavigation();
-    }
-  }
-
-  function unlockAfterNavigationFailure(reason = "navigation-failed") {
-    if (
-      mounted &&
-      isStillOnLoginRoute()
-    ) {
-      isLeavingLogin =
-        false;
-
-      resetSubmittingVisualState(
-        reason
-      );
-    }
-  }
-
-  if (!executorDescriptor) {
-    const message =
-      "No se encontró un executor de login.";
-
-    setGlobalLoginError(
-      refs,
-      message
-    );
-
-    safeToastCall(
-      toast,
-      "error",
-      message
-    );
-
-    emitLoginViewReady(deps);
-
-    const failedInstance = {
-      version:
-        LOGIN_VIEW_VERSION,
-
-      destroy(destroyOptions = {}) {
-        mounted =
-          false;
-
-        stopSubmitWatchdog();
-        clearNavigationFailsafe();
-        closeLoadingToast();
-
-        setFormSubmittingFlag(
-          false
-        );
-
-        cleanupPasswordBindings(
-          passwordBindings
-        );
-
-        if (
-          destroyOptions.preserveAuthScreen !== true
-        ) {
-          disableAuthScreenMode({
-            force:
-              true,
-            reason:
-              "destroy-no-executor",
-          });
-        }
-
-        clearLoginInstance(
-          container,
-          failedInstance
-        );
-      },
-
-      unlock(reason = "manual") {
-        closeLoadingToast();
-        forceClearGlobalLoginSubmit(reason);
-        resetSubmittingVisualState(reason);
-        return true;
-      },
-    };
-
-    storeLoginInstance(
-      container,
-      failedInstance
-    );
-
-    return failedInstance;
-  }
-
-  const onClearErrors =
-    () => {
-      clearLoginErrors(refs);
-    };
-
-  const onThemeToggle =
-    () => {
-      const next =
-        toggleTheme();
-
-      safeToastCall(
-        toast,
-        "info",
-        `Tema ${next} activado.`
-      );
-    };
-
-  const onSubmit =
-    async (event) => {
       try {
-        event?.preventDefault?.();
+        toast.error(getFirstLoginError(validationErrors) || "Revisa el formulario.");
       } catch {}
 
-      clearStaleGlobalLoginSubmit();
-
-      const hasGlobalInFlight =
-        hasGlobalLoginSubmitInFlight();
-
-      if (
-        isSubmitting ||
-        isLeavingLogin ||
-        hasGlobalInFlight ||
-        isFormSubmittingFlagged()
-      ) {
-        safeEmit(
-          LOGIN_EVENTS.submitBlocked,
-          {
-            isSubmitting,
-            isLeavingLogin,
-            hasGlobalInFlight,
-            formFlagged:
-              isFormSubmittingFlagged(),
-            globalFingerprint:
-              safeRedact(globalLoginSubmitFingerprint),
-          }
-        );
-
-        if (
-          hasGlobalInFlight &&
-          mounted
-        ) {
-          safeToastCall(
-            toast,
-            "info",
-            "Ya hay un inicio de sesión en curso. Espera unos segundos y vuelve a intentar."
-          );
-        }
-
-        return;
-      }
-
-      clearLoginErrors(refs);
-
-      let formState =
-        {};
-
-      try {
-        formState =
-          readLoginFormState(refs);
-      } catch (error) {
-        safeError(
-          "readLoginFormState() falló.",
-          normalizeError(error)
-        );
-
-        safeToastCall(
-          toast,
-          "error",
-          "No se pudo leer el formulario."
-        );
-
-        return;
-      }
-
-      const payload =
-        createLoginPayload(formState);
-
-      const errors =
-        validateLoginPayload(payload);
-
-      if (Object.keys(errors).length > 0) {
-        applyLoginErrors(
-          refs,
-          errors
-        );
-
-        safeToastCall(
-          toast,
-          "error",
-          getFirstLoginError(errors) ||
-            "Revisa el formulario."
-        );
-
-        return;
-      }
-
-      persistRememberedIdentifier(payload);
-
-      const fingerprint =
-        buildLoginFingerprint(payload);
-
-      try {
-        isSubmitting =
-          true;
-
-        setFormSubmittingFlag(
-          true
-        );
-
-        safeSetLoginLoading(
-          refs,
-          true,
-          {
-            submitLabel,
-            loadingLabel,
-          }
-        );
-
-        loadingToastActive =
-          true;
-
-        loadingToastId =
-          safeToastCall(
-            toast,
-            "loading",
-            "Validando credenciales...",
-            {
-              persist:
-                true,
-            }
-          );
-
-        const loginOptions =
-          buildLoginExecutorOptions(
-            deps,
-            executorDescriptor
-          );
-
-        const submitTimeoutMs =
-          loginOptions.timeoutMs ||
-          loginOptions.loginTimeoutMs ||
-          deps.loginTimeoutMs ||
-          GLOBAL_LOGIN_SUBMIT_TIMEOUT_MS;
-
-        startSubmitWatchdog(
-          submitTimeoutMs
-        );
-
-        safeEmit(
-          LOGIN_EVENTS.submitStart,
-          {
-            fingerprint:
-              safeRedact(fingerprint),
-            executor:
-              executorDescriptor.source,
-            executorIsAuthLogin,
-            executorOwnsNavigation:
-              shouldExecutorOwnNavigation(
-                deps,
-                executorDescriptor
-              ),
-            viewWillNavigate:
-              shouldNavigateAfterLogin(deps),
-          }
-        );
-
-        const rawResult =
-          await runGlobalLoginSubmit(
-            () =>
-              callLoginExecutor(
-                executorDescriptor,
-                payload,
-                loginOptions
-              ),
-            fingerprint,
-            {
-              timeoutMs:
-                submitTimeoutMs,
-            }
-          );
-
-        const auth =
-          normalizeAuthResult(
-            rawResult
-          );
-
-        closeLoadingToast();
-
-        if (!mounted) {
-          return;
-        }
-
-        if (isTwoFaResult(auth)) {
-          showToastInfo(
-            toast,
-            auth.message ||
-              "Verificación adicional requerida."
-          );
-
-          if (shouldNavigateAfterLogin(deps)) {
-            beginLeavingLogin();
-
-            const redirectTo =
-              safeText(
-                resolveLoginRedirect(auth, deps),
-                ""
-              ) ||
-              DEFAULT_2FA_ROUTE;
-
-            const navigated =
-              await navigateTo(
-                redirectTo,
-                {
-                  replaceState:
-                    true,
-                  reason:
-                    "login-2fa",
-                }
-              );
-
-            if (navigated) {
-              scheduleNavigationRenderFailsafe(
-                redirectTo,
-                "login-2fa"
-              );
-            } else {
-              unlockAfterNavigationFailure(
-                "2fa-navigation-failed"
-              );
-            }
-          }
-
-          safeEmit(
-            LOGIN_EVENTS.submitDone,
-            {
-              ok:
-                true,
-              twoFactor:
-                true,
-            }
-          );
-
-          return;
-        }
-
-        if (!isAuthenticatedResult(auth)) {
-          throw rawResult;
-        }
-
-        if (!executorIsAuthLogin) {
-          try {
-            syncSession(auth);
-          } catch (error) {
-            safeWarn(
-              "syncSession() custom executor falló.",
-              normalizeError(error)
-            );
-          }
-        }
-
-        showLoginSuccessToastOnce(
-          toast,
-          auth.message ||
-            "Sesión iniciada correctamente."
-        );
-
-        if (shouldNavigateAfterLogin(deps)) {
-          beginLeavingLogin();
-
-          if (
-            mounted &&
-            isStillOnLoginRoute()
-          ) {
-            const redirectTo =
-              resolveFinalLoginRedirect(
-                auth,
-                deps
-              );
-
-            const navigated =
-              await navigateTo(
-                redirectTo || DEFAULT_HOME_ROUTE,
-                {
-                  replaceState:
-                    true,
-                  reason:
-                    "login-success",
-                }
-              );
-
-            if (navigated) {
-              scheduleNavigationRenderFailsafe(
-                redirectTo || DEFAULT_HOME_ROUTE,
-                "login-success"
-              );
-            } else {
-              unlockAfterNavigationFailure(
-                "success-navigation-failed"
-              );
-            }
-          }
-        }
-
-        safeEmit(
-          LOGIN_EVENTS.submitDone,
-          {
-            ok:
-              true,
-            authenticated:
-              true,
-            navigated:
-              !isStillOnLoginRoute(),
-          }
-        );
-      } catch (error) {
-        closeLoadingToast();
-
-        const normalized =
-          normalizeError(error);
-
-        const isSubmitTimeout =
-          normalized?.message === "LOGIN_SUBMIT_TIMEOUT" ||
-          normalized?.code === "LOGIN_SUBMIT_TIMEOUT";
-
-        const message =
-          isSubmitTimeout
-            ? "La solicitud tardó demasiado. Revisa tu conexión y vuelve a intentarlo."
-            : resolveAuthErrorMessage(error);
-
-        setGlobalLoginError(
-          refs,
-          message
-        );
-
-        safeToastCall(
-          toast,
-          "error",
-          message
-        );
-
-        safeEmit(
-          LOGIN_EVENTS.error,
-          {
-            message,
-            error:
-              normalized,
-          }
-        );
-
-        safeError(
-          "login error",
-          normalized
-        );
-      } finally {
-        stopSubmitWatchdog();
-        closeLoadingToast();
-
-        const stillOnLogin =
-          isStillOnLoginRoute();
-
-        if (
-          !isLeavingLogin ||
-          stillOnLogin
-        ) {
-          if (stillOnLogin) {
-            isLeavingLogin =
-              false;
-          }
-
-          resetSubmittingVisualState(
-            "finally"
-          );
-        }
-      }
-    };
-
-  const unbindInputs =
-    bindLoginInputClearers(
-      refs,
-      onClearErrors
-    );
-
-  const unbindTheme =
-    bindThemeToggle(
-      refs,
-      onThemeToggle
-    );
-
-  const unbindSubmit =
-    bindLoginSubmit(
-      refs,
-      onSubmit
-    );
-
-  focusLoginPrimaryField(
-    refs,
-    {
-      rememberedIdentifier,
+      return;
     }
-  );
 
-  emitLoginViewReady(deps);
+    if (!executor) {
+      const message = "No se encontró el módulo de autenticación.";
+      setGlobalLoginError(refs, message);
+
+      try {
+        toast.error(message);
+      } catch {}
+
+      return;
+    }
+
+    persistRememberedIdentifier(payload);
+
+    const submitFingerprint = fingerprint(payload);
+
+    try {
+      setSubmitting(true);
+      startWatchdog();
+
+      loadingToastId = toast.loading?.("Validando credenciales...", {
+        id: "login:loading",
+        persist: true,
+        dedupeMs: 0,
+      });
+
+      emit(EVENTS.submitStart, {
+        executor: executor.source,
+        customExecutor: executor.custom,
+        fingerprint: submitFingerprint,
+      });
+
+      const rawResult = await runGlobalSubmit(
+        () => executor.fn.call(executor.owner || null, payload, buildLoginOptions(deps)),
+        submitFingerprint
+      );
+
+      const auth = normalizeLoginResult(rawResult);
+
+      closeLoadingToast();
+
+      if (!mounted) return;
+
+      if (is2FAResult(auth)) {
+        try {
+          toast.info(auth.message || "Verificación adicional requerida.");
+        } catch {}
+
+        await navigateAfter({
+          ...auth,
+          requires2FA: true,
+          redirectTo: auth.redirectTo || DEFAULT_2FA,
+        });
+
+        emit(EVENTS.submitDone, {
+          ok: true,
+          twoFactor: true,
+        });
+
+        return;
+      }
+
+      if (!isAuthenticatedResult(auth)) {
+        throw rawResult || new Error("INVALID_LOGIN_RESULT");
+      }
+
+      if (executor.custom === true) {
+        syncSession(auth, {
+          source: SOURCE,
+        });
+      }
+
+      const current = now();
+
+      if (current - lastSuccessToastAt > SUCCESS_TOAST_DEDUPE_MS) {
+        lastSuccessToastAt = current;
+
+        try {
+          toast.success(auth.message || "Sesión iniciada correctamente.");
+        } catch {}
+      }
+
+      await navigateAfter(auth);
+
+      emit(EVENTS.submitDone, {
+        ok: true,
+        authenticated: true,
+        navigated: !isLoginRoute(),
+      });
+    } catch (error) {
+      closeLoadingToast();
+
+      const normalized = normalizeError(error);
+
+      const message =
+        normalized?.code === "LOGIN_SUBMIT_TIMEOUT" ||
+        normalized?.message === "LOGIN_SUBMIT_TIMEOUT"
+          ? "La solicitud tardó demasiado. Revisa tu conexión y vuelve a intentarlo."
+          : resolveAuthErrorMessage(error);
+
+      setGlobalLoginError(refs, message);
+
+      try {
+        toast.error(message);
+      } catch {}
+
+      emit(EVENTS.error, {
+        message,
+        error: normalized,
+      });
+
+      errorLog("login error", normalized);
+    } finally {
+      stopWatchdog();
+      closeLoadingToast();
+
+      if (!leavingLogin || isLoginRoute()) {
+        leavingLogin = false;
+        unlock("finally");
+      }
+    }
+  }
+
+  function toggleTheme() {
+    const current = safeText(
+      AppCore?.state?.theme ||
+        document.documentElement?.dataset?.theme ||
+        AppCore?.config?.defaultTheme ||
+        "dark",
+      "dark"
+    ).toLowerCase();
+
+    const next = current === "light" ? "dark" : "light";
+
+    try {
+      AppCore?.setTheme?.(next);
+    } catch {
+      try {
+        document.documentElement.dataset.theme = next;
+      } catch {}
+    }
+
+    try {
+      toast.info(`Tema ${next} activado.`);
+    } catch {}
+  }
+
+  const unbindInputClearers = bindLoginInputClearers(refs, () => clearLoginErrors(refs));
+  const unbindTheme = bindThemeToggle(refs, toggleTheme);
+  const unbindSubmit = bindLoginSubmit(refs, handleSubmit);
+
+  focusLoginPrimaryField(refs, {
+    rememberedIdentifier,
+  });
+
+  hideLoader();
+
+  emit(EVENTS.ready, {
+    route: LOGIN_ROUTE,
+    view: "login",
+    executor: executor?.source || null,
+  });
 
   const instance = {
-    version:
-      LOGIN_VIEW_VERSION,
+    version: LOGIN_VIEW_VERSION,
 
-    destroy(destroyOptions = {}) {
-      const wasLeavingLogin =
-        isLeavingLogin;
+    destroy(options = {}) {
+      mounted = false;
 
-      mounted =
-        false;
+      stopWatchdog();
 
-      stopSubmitWatchdog();
-      clearNavigationFailsafe();
-      closeLoadingToast();
-
-      setFormSubmittingFlag(
-        false
-      );
-
-      safeUnbind(unbindInputs);
-      safeUnbind(unbindTheme);
-      safeUnbind(unbindSubmit);
-
-      cleanupPasswordBindings(
-        passwordBindings
-      );
-
-      if (wasLeavingLogin) {
+      if (navigationFailsafe) {
         try {
-          navigationCleanup?.flush?.(
-            "destroy-after-leaving"
-          );
+          navigationFailsafe();
         } catch {}
-      } else {
-        try {
-          navigationCleanup?.cancel?.();
-        } catch {}
+
+        navigationFailsafe = null;
       }
 
-      navigationCleanup =
-        null;
+      closeLoadingToast();
 
-      if (
-        destroyOptions.preserveAuthScreen === true ||
-        destroyOptions.remount === true
-      ) {
-        clearLoginInstance(
-          container,
-          instance
-        );
+      try {
+        unbindInputClearers?.();
+      } catch {}
 
-        safeEmit(
-          LOGIN_EVENTS.destroyed,
-          {
-            preserveAuthScreen:
-              true,
-            remount:
-              destroyOptions.remount === true,
+      try {
+        unbindTheme?.();
+      } catch {}
+
+      try {
+        unbindSubmit?.();
+      } catch {}
+
+      try {
+        destroyLoginPasswordFields(container);
+      } catch {
+        try {
+          for (const binding of passwordBindings || []) {
+            if (isFn(binding)) binding();
+            else if (binding?.destroy) binding.destroy();
+            else if (binding?.unbind) binding.unbind();
+            else if (binding?.dispose) binding.dispose();
           }
-        );
-
-        return;
+        } catch {}
       }
 
-      if (wasLeavingLogin) {
-        disableAuthScreenMode({
-          force:
-            !isStillOnLoginRoute(),
-          reason:
-            "destroy-leaving-login",
-        });
-      } else {
-        disableAuthScreenMode({
-          force:
-            true,
-          reason:
-            "destroy-login-view",
-        });
-      }
-
-      clearLoginInstance(
-        container,
-        instance
-      );
-
-      safeEmit(
-        LOGIN_EVENTS.destroyed,
-        {
-          preserveAuthScreen:
-            false,
-          wasLeavingLogin,
+      if (authCleanup) {
+        if (leavingLogin) {
+          try {
+            authCleanup.flush?.("destroy-leaving-login");
+          } catch {}
+        } else {
+          try {
+            authCleanup.cancel?.();
+          } catch {}
         }
-      );
+
+        authCleanup = null;
+      }
+
+      if (options.preserveAuthScreen !== true && options.remount !== true) {
+        disableAuthScreen({
+          force: !isLoginRoute(),
+          reason: "destroy-login-view",
+        });
+      }
+
+      clearInstance(container, instance);
+
+      emit(EVENTS.destroyed, {
+        remount: options.remount === true,
+        preserveAuthScreen: options.preserveAuthScreen === true,
+        leavingLogin,
+      });
     },
 
-    unlock(reason = "manual") {
-      closeLoadingToast();
-      stopSubmitWatchdog();
-      clearNavigationFailsafe();
-      forceClearGlobalLoginSubmit(reason);
-      resetSubmittingVisualState(reason);
-      return true;
-    },
+    unlock,
 
     getSnapshot() {
       return {
-        version:
-          LOGIN_VIEW_VERSION,
+        version: LOGIN_VIEW_VERSION,
+        source: SOURCE,
 
-        source:
-          LOGIN_SOURCE,
+        mounted: Boolean(mounted),
+        submitting: Boolean(submitting),
+        leavingLogin: Boolean(leavingLogin),
 
-        scope:
-          LOGIN_SCOPE,
+        currentPath: currentPath(),
+        currentCanonicalPath: currentCanonicalPath(),
+        stillOnLogin: isLoginRoute(),
 
-        mounted:
-          Boolean(mounted),
+        hasGlobalSubmit: hasGlobalSubmit(),
+        globalSubmitFingerprint,
+        globalSubmitStartedAt,
+        globalSubmitStartedAtIso: globalSubmitStartedAt ? iso(globalSubmitStartedAt) : "",
 
-        isSubmitting:
-          Boolean(isSubmitting),
+        hasLoadingToast: Boolean(loadingToastId),
+        hasSubmitWatchdog: Boolean(submitWatchdog),
+        hasNavigationFailsafe: Boolean(navigationFailsafe),
 
-        isLeavingLogin:
-          Boolean(isLeavingLogin),
+        executor: executor?.source || null,
+        customExecutor: executor?.custom === true,
 
-        loadingToastActive:
-          Boolean(loadingToastActive),
+        authenticated: Boolean(AppCore?.state?.authenticated),
+        hasStateToken: Boolean(stateToken()),
+        hasStateUser: hasUsableUser(stateUser()),
 
-        hasLoadingToastId:
-          Boolean(loadingToastId),
+        dom: getLoginDomSnapshot(refs),
 
-        hasSubmitWatchdog:
-          Boolean(submitWatchdogTimer),
-
-        hasNavigationFailsafe:
-          Boolean(navigationFailsafeTimer),
-
-        hasGlobalSubmit:
-          hasGlobalLoginSubmitInFlight(),
-
-        globalFingerprint:
-          safeRedact(globalLoginSubmitFingerprint),
-
-        globalStartedAt:
-          globalLoginSubmitStartedAt,
-
-        globalStartedAtIso:
-          globalLoginSubmitStartedAt
-            ? safeIsoNow(globalLoginSubmitStartedAt)
-            : "",
-
-        executor:
-          executorDescriptor?.source || "",
-
-        executorIsAuthLogin:
-          Boolean(executorIsAuthLogin),
-
-        executorOwnsNavigation:
-          shouldExecutorOwnNavigation(
-            deps,
-            executorDescriptor
-          ),
-
-        currentPath:
-          getBrowserPath(),
-
-        stillOnLogin:
-          isStillOnLoginRoute(),
-
-        containerConnected:
-          Boolean(container?.isConnected),
-
-        loginStillRendered:
-          containerStillShowsLogin(),
-
-        stateAuthenticated:
-          Boolean(AppCore?.state?.authenticated),
-
-        hasStateUser:
-          hasUsableUser(getStateUser()),
-
-        hasStateToken:
-          Boolean(getStateToken()),
-
-        at:
-          safeIsoNow(),
+        at: iso(),
       };
+    },
+
+    getDebugSnapshot() {
+      return this.getSnapshot();
     },
   };
 
-  storeLoginInstance(
-    container,
-    instance
-  );
+  storeInstance(container, instance);
 
-  try {
-    if (isBrowser()) {
-      window[LOGIN_VIEW_RUNTIME_KEY] =
-        instance;
-    }
-  } catch {}
+  emit(EVENTS.debugReady, {
+    installed: true,
+  });
 
-  safeEmit(
-    LOGIN_EVENTS.debugReady,
-    {
-      installed:
-        true,
-    }
-  );
+  log("ready", {
+    executor: executor?.source || null,
+  });
 
   return instance;
 }
 
 /* =========================================================
-   EXPORTS
+   COMPAT EXPORTS
 ========================================================= */
 
-function initLoginView(container, deps = {}) {
-  return renderLoginView(
-    container,
-    deps
-  );
+function init(container, deps = {}) {
+  return renderLoginView(container, deps);
 }
 
-function mountLoginView(container, deps = {}) {
-  return renderLoginView(
-    container,
-    deps
-  );
+function mount(container, deps = {}) {
+  return renderLoginView(container, deps);
 }
+
+function destroy(options = {}) {
+  if (lastInstance?.destroy) {
+    lastInstance.destroy(options);
+    return true;
+  }
+
+  return false;
+}
+
+function getSnapshot() {
+  if (lastInstance?.getSnapshot) {
+    return lastInstance.getSnapshot();
+  }
+
+  return {
+    version: LOGIN_VIEW_VERSION,
+    source: SOURCE,
+    mounted: false,
+    currentPath: isBrowser() ? currentPath() : "",
+    currentCanonicalPath: isBrowser() ? currentCanonicalPath() : "",
+    stillOnLogin: isBrowser() ? isLoginRoute() : false,
+    hasGlobalSubmit: hasGlobalSubmit(),
+    at: iso(),
+  };
+}
+
+export const LoginView = Object.assign(
+  function LoginViewCompat(container, deps = {}) {
+    return renderLoginView(container, deps);
+  },
+  {
+    version: LOGIN_VIEW_VERSION,
+
+    render: renderLoginView,
+    init,
+    mount,
+    destroy,
+
+    getSnapshot,
+    getDebugSnapshot: getSnapshot,
+  }
+);
+
+try {
+  if (isBrowser()) {
+    window[RUNTIME_KEY] = LoginView;
+  }
+} catch {}
 
 export {
-  renderLoginView as LoginView,
   renderLoginView as render,
-  initLoginView as init,
-  mountLoginView as mount,
+  init,
+  mount,
+  destroy,
+  getSnapshot,
 };
 
-export default renderLoginView;
+export default LoginView;

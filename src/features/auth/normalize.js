@@ -2,15 +2,12 @@
    Onion SPA - Auth Normalize
    Archivo: src/features/auth/normalize.js
 
-   AUTH NORMALIZER · SIMPLE · BACKEND ALIGNED · NO GHOST AUTH
-
-   Contrato:
-   - Normaliza user/session/tokens desde respuestas heterogéneas.
-   - Solo roles canónicos del proyecto: admin / user.
-   - No marca authenticated sin token usable + user usable.
-   - 2FA/MFA exige tempToken salvo override explícito.
-   - No trata envelopes auth como usuarios.
-   - No trunca tokens: si exceden límite, se invalidan.
+   AUTH NORMALIZE · FINAL SIMPLE
+   - Normalizador puro de Auth
+   - Sin CoreHttp, storage, session, Router, Toast ni side effects
+   - token + user usable = authenticated
+   - token-only/user-only no autentican
+   - Roles reales: admin / user
 ========================================================= */
 
 import {
@@ -29,12 +26,13 @@ import {
    META / CONSTANTS
 ========================================================= */
 
-export const AUTH_NORMALIZE_VERSION = "17.0.0-simple-clean";
+export const AUTH_NORMALIZE_VERSION = "20.0.0-final";
 
 const DEFAULT_TOKEN_MAX_LENGTH = 8192;
 const DEFAULT_SESSION_VALUE_MAX_LENGTH = 200;
-const RAW_MAX_DEPTH = 5;
-const RAW_MAX_KEYS = 140;
+const MAX_WALK = 80;
+const MAX_SANITIZE_DEPTH = 4;
+const MAX_SANITIZE_KEYS = 80;
 
 const ADMIN_ALIASES = new Set([
   "admin",
@@ -42,7 +40,6 @@ const ADMIN_ALIASES = new Set([
   "administrador",
   "superadmin",
   "super_admin",
-  "super_administrador",
   "owner",
   "root",
 ]);
@@ -53,35 +50,15 @@ const USER_ALIASES = new Set([
   "client",
   "cliente",
   "customer",
-  "support",
-  "soporte",
-  "staff",
-  "agent",
-  "agente",
-  "helpdesk",
-  "operator",
-  "operador",
-  "tecnico",
-  "técnico",
-  "technician",
-  "technical",
-  "manager",
-  "gestor",
-  "gerente",
-  "lead",
-  "supervisor",
 ]);
 
 const FAILURE_CODES = new Set([
   ...(Array.isArray(AUTH_FAILURE_CODE_LIST) ? AUTH_FAILURE_CODE_LIST : []),
-
   "INVALID_CREDENTIALS",
   "MISSING_CREDENTIALS",
-  "ACCOUNT_TEMPORARILY_LOCKED",
   "ACCOUNT_LOCKED",
   "ACCOUNT_DISABLED",
   "USER_DISABLED",
-  "USER_NOT_AVAILABLE",
   "USER_NOT_FOUND",
   "UNAUTHORIZED",
   "FORBIDDEN",
@@ -97,9 +74,6 @@ const FAILURE_CODES = new Set([
   "AUTH_RESTORE_FAILED",
   "REFRESH_CONTEXT_MISSING",
   "REFRESH_INVALID_SESSION",
-  "REFRESH_EMPTY_RESPONSE",
-  "REFRESH_USER_WITHOUT_TOKEN",
-  "REFRESH_UNUSABLE_RESPONSE",
   "ME_INVALID_SESSION",
   "ME_USER_MISSING",
   "MISSING_2FA_TEMP_TOKEN",
@@ -128,7 +102,6 @@ const FAILURE_STATUSES = new Set([
 
 const SUCCESS_STATUSES = new Set([
   ...(Array.isArray(AUTH_SUCCESS_STATUS_LIST) ? AUTH_SUCCESS_STATUS_LIST : []),
-
   "ok",
   "success",
   "successful",
@@ -145,7 +118,6 @@ const SUCCESS_STATUSES = new Set([
 
 const TWO_FACTOR_STATUSES = new Set([
   ...(Array.isArray(AUTH_2FA_STATUS_LIST) ? AUTH_2FA_STATUS_LIST : []),
-
   "2fa_required",
   "mfa_required",
   "totp_required",
@@ -215,7 +187,6 @@ const NESTED_KEYS = Object.freeze([
   "authData",
   "session",
   "sessionData",
-  "meta",
 ]);
 
 const USER_IDENTITY_KEYS = Object.freeze([
@@ -297,7 +268,10 @@ const SENSITIVE_RAW_KEY_RE =
 function safeText(value = "", fallback = "") {
   if (value === null || value === undefined) return fallback;
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -326,20 +300,15 @@ function toArray(value) {
 }
 
 function hasOwn(obj, key) {
-  return Boolean(
-    obj &&
-      typeof obj === "object" &&
-      Object.prototype.hasOwnProperty.call(obj, key)
-  );
+  return Boolean(obj && typeof obj === "object" && Object.prototype.hasOwnProperty.call(obj, key));
 }
 
-function pickFirst(...values) {
+function first(...values) {
   for (const value of values) {
     if (value === null || value === undefined) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
     if (isObject(value) && Object.keys(value).length === 0) continue;
-
     return value;
   }
 
@@ -349,9 +318,9 @@ function pickFirst(...values) {
 function unique(values = []) {
   return [
     ...new Set(
-      values
+      toArray(values)
         .flat(Infinity)
-        .map((item) => safeText(item))
+        .map((item) => safeText(item, ""))
         .filter(Boolean)
     ),
   ];
@@ -359,31 +328,18 @@ function unique(values = []) {
 
 function normalizeBoolean(value, fallback = false) {
   if (typeof value === "boolean") return value;
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
+  if (value === 1) return true;
+  if (value === 0) return false;
 
   const key = safeLower(value);
-
-  if (["1", "true", "yes", "on", "si", "sí", "ok", "enabled", "active"].includes(key)) {
-    return true;
-  }
-
-  if (["0", "false", "no", "off", "disabled", "inactive"].includes(key)) {
-    return false;
-  }
+  if (["1", "true", "yes", "on", "si", "sí", "ok", "enabled", "active"].includes(key)) return true;
+  if (["0", "false", "no", "off", "disabled", "inactive"].includes(key)) return false;
 
   return Boolean(fallback);
 }
 
 function hasExplicitValue(value) {
-  return !(
-    value === undefined ||
-    value === null ||
-    (typeof value === "string" && value.trim() === "")
-  );
+  return !(value === undefined || value === null || (typeof value === "string" && value.trim() === ""));
 }
 
 function getTokenMaxLength() {
@@ -395,10 +351,8 @@ function getSessionValueMaxLength() {
 }
 
 function safeSessionValue(value = "") {
-  const text = safeText(value);
-  if (!text) return "";
-
-  return text.slice(0, getSessionValueMaxLength());
+  const text = safeText(value, "");
+  return text ? text.slice(0, getSessionValueMaxLength()) : "";
 }
 
 /* =========================================================
@@ -407,24 +361,12 @@ function safeSessionValue(value = "") {
 
 function sanitizeRaw(value, depth = 0, seen = new WeakSet()) {
   if (value === null || value === undefined) return value;
-
-  if (depth > RAW_MAX_DEPTH) return "[depth-limit]";
-
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
+  if (depth > MAX_SANITIZE_DEPTH) return "[depth-limit]";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "bigint") return String(value);
   if (typeof value === "function") return "[function]";
 
-  if (Array.isArray(value)) {
-    return value.slice(0, RAW_MAX_KEYS).map((item) => sanitizeRaw(item, depth + 1, seen));
-  }
-
+  if (Array.isArray(value)) return value.slice(0, MAX_SANITIZE_KEYS).map((item) => sanitizeRaw(item, depth + 1, seen));
   if (!isObject(value)) return value;
 
   try {
@@ -434,23 +376,19 @@ function sanitizeRaw(value, depth = 0, seen = new WeakSet()) {
 
   const output = {};
 
-  for (const [key, item] of Object.entries(value).slice(0, RAW_MAX_KEYS)) {
-    output[key] = SENSITIVE_RAW_KEY_RE.test(key)
-      ? item
-        ? "***"
-        : item
-      : sanitizeRaw(item, depth + 1, seen);
+  for (const [key, item] of Object.entries(value).slice(0, MAX_SANITIZE_KEYS)) {
+    output[key] = SENSITIVE_RAW_KEY_RE.test(key) ? (item ? "***" : item) : sanitizeRaw(item, depth + 1, seen);
   }
 
   return output;
 }
 
 /* =========================================================
-   ROLE / PERMISSIONS
+   ROLES / PERMISSIONS
 ========================================================= */
 
 function normalizeKey(value = "") {
-  return safeText(value)
+  return safeText(value, "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -461,10 +399,7 @@ function normalizeKey(value = "") {
 
 function extractTrueKeys(map = {}) {
   if (!isObject(map)) return [];
-
-  return Object.entries(map)
-    .filter(([, value]) => normalizeBoolean(value, false))
-    .map(([key]) => key);
+  return Object.entries(map).filter(([, value]) => normalizeBoolean(value, false)).map(([key]) => key);
 }
 
 export function normalizeRoleList(value) {
@@ -477,17 +412,13 @@ export function normalizeRoleList(value) {
         : toArray(value);
 
   const keys = raw
-    .flatMap((item) => typeof item === "string" ? item.split(/[,\s|]+/) : [item])
+    .flatMap((item) => (typeof item === "string" ? item.split(/[,\s|]+/) : [item]))
     .map(normalizeKey)
     .filter(Boolean);
 
-  if (keys.some((role) => ADMIN_ALIASES.has(role))) {
-    return ["admin"];
-  }
-
-  if (keys.length) {
-    return ["user"];
-  }
+  if (keys.some((role) => ADMIN_ALIASES.has(role))) return ["admin"];
+  if (keys.some((role) => USER_ALIASES.has(role))) return ["user"];
+  if (keys.length) return ["user"];
 
   return [];
 }
@@ -497,31 +428,16 @@ export function expandRoleAliases(roles = []) {
 }
 
 function normalizeCanonicalRole(roles = []) {
-  const list = normalizeRoleList(roles);
-
-  return list.includes("admin") ? "admin" : "user";
+  return normalizeRoleList(roles).includes("admin") ? "admin" : "user";
 }
 
 function normalizePermissionList(value) {
   if (Array.isArray(value)) {
-    return unique(
-      value.flat(Infinity).flatMap((item) => (
-        isObject(item)
-          ? extractTrueKeys(item)
-          : typeof item === "string"
-            ? item.split(/[,\s|]+/)
-            : [item]
-      ))
-    );
+    return unique(value.flat(Infinity).flatMap((item) => (isObject(item) ? extractTrueKeys(item) : typeof item === "string" ? item.split(/[,\s|]+/) : [item])));
   }
 
-  if (typeof value === "string") {
-    return unique(value.split(/[,\s|]+/));
-  }
-
-  if (isObject(value)) {
-    return unique(extractTrueKeys(value));
-  }
+  if (typeof value === "string") return unique(value.split(/[,\s|]+/));
+  if (isObject(value)) return unique(extractTrueKeys(value));
 
   return unique(toArray(value));
 }
@@ -533,18 +449,10 @@ function normalizePermissionList(value) {
 function pickTokenFromObject(value = null) {
   if (!isObject(value)) return null;
 
-  for (const key of [
-    ...TOKEN_KEYS,
-    ...REFRESH_TOKEN_KEYS,
-    ...TEMP_TOKEN_KEYS,
-    "value",
-    "raw",
-    "data",
-  ]) {
+  for (const key of [...TOKEN_KEYS, ...REFRESH_TOKEN_KEYS, ...TEMP_TOKEN_KEYS, "value", "raw", "data"]) {
     const candidate = value[key];
-
     if (typeof candidate === "string" || typeof candidate === "number") {
-      const text = safeText(candidate);
+      const text = safeText(candidate, "");
       if (text) return text;
     }
   }
@@ -556,26 +464,14 @@ export function normalizeTokenValue(value = null) {
   if (value === null || value === undefined) return null;
 
   let token = isObject(value) ? pickTokenFromObject(value) : value;
-
   if (token === null || token === undefined) return null;
 
-  token = String(token).trim();
+  token = String(token).trim().replace(/^bearer\s+/i, "").trim();
 
-  if (/^bearer\s+/i.test(token)) {
-    token = token.replace(/^bearer\s+/i, "").trim();
-  }
-
-  const lower = token.toLowerCase();
-
-  if (!token || TOKEN_FALSE_VALUES.has(lower) || /[\r\n\t\s]/.test(token)) {
-    return null;
-  }
+  if (!token || TOKEN_FALSE_VALUES.has(token.toLowerCase()) || /[\r\n\t\s]/.test(token)) return null;
 
   const max = getTokenMaxLength();
-
-  if (max > 0 && token.length > max) {
-    return null;
-  }
+  if (max > 0 && token.length > max) return null;
 
   return token;
 }
@@ -585,11 +481,9 @@ export function hasUsableToken(token = null) {
 }
 
 function redactToken(value = "") {
-  const text = safeText(value);
-
+  const text = safeText(value, "");
   if (!text) return "";
   if (text.length <= 8) return "***";
-
   return `${text.slice(0, 4)}***${text.slice(-4)}`;
 }
 
@@ -599,45 +493,32 @@ function redactToken(value = "") {
 
 function hasTokenLikeKeys(value = {}) {
   if (!isObject(value)) return false;
-
-  return [
-    ...TOKEN_KEYS,
-    ...REFRESH_TOKEN_KEYS,
-    ...TEMP_TOKEN_KEYS,
-  ].some((key) => hasOwn(value, key));
+  return [...TOKEN_KEYS, ...REFRESH_TOKEN_KEYS, ...TEMP_TOKEN_KEYS].some((key) => hasOwn(value, key));
 }
 
 export function isAuthEnvelope(value = {}) {
   if (!isObject(value)) return false;
-
   return AUTH_ENVELOPE_KEYS.some((key) => hasOwn(value, key)) || hasTokenLikeKeys(value);
 }
 
 function hasUsableUserIdentity(value = {}) {
   if (!isObject(value)) return false;
-
-  return USER_IDENTITY_KEYS.some((key) => Boolean(safeText(value[key])));
+  return USER_IDENTITY_KEYS.some((key) => Boolean(safeText(value[key], "")));
 }
 
 function hasNestedUserIdentity(value = {}) {
   if (!isObject(value)) return false;
-
   return Boolean(
     hasUsableUserIdentity(value) ||
       hasUsableUserIdentity(value.raw) ||
       hasUsableUserIdentity(value.profile) ||
-      hasUsableUserIdentity(value.account) ||
-      hasUsableUserIdentity(value.raw?.profile) ||
-      hasUsableUserIdentity(value.raw?.account)
+      hasUsableUserIdentity(value.account)
   );
 }
 
 function looksLikeUser(value = null) {
   if (!isObject(value)) return false;
-
-  if (isAuthEnvelope(value) && !hasNestedUserIdentity(value)) {
-    return false;
-  }
+  if (isAuthEnvelope(value) && !hasNestedUserIdentity(value)) return false;
 
   return Boolean(
     hasNestedUserIdentity(value) ||
@@ -657,13 +538,8 @@ function collectAuthObjects(payload = null) {
   const seen = new WeakSet();
   const queue = [payload];
 
-  let guard = 0;
-
-  while (queue.length && guard < 120) {
-    guard += 1;
-
+  while (queue.length && output.length < MAX_WALK) {
     const current = queue.shift();
-
     if (!isObject(current)) continue;
 
     try {
@@ -678,8 +554,6 @@ function collectAuthObjects(payload = null) {
     }
 
     if (isObject(current.response?.data)) queue.push(current.response.data);
-    if (isObject(current.auth?.data)) queue.push(current.auth.data);
-    if (isObject(current.session?.data)) queue.push(current.session.data);
   }
 
   return output;
@@ -689,10 +563,7 @@ function pickValueFromObjects(objects = [], keys = []) {
   for (const object of objects) {
     for (const key of keys) {
       const value = object?.[key];
-
-      if (value !== null && value !== undefined && value !== "") {
-        return value;
-      }
+      if (value !== null && value !== undefined && value !== "") return value;
     }
   }
 
@@ -700,30 +571,14 @@ function pickValueFromObjects(objects = [], keys = []) {
 }
 
 function pickTextFromObjects(objects = [], keys = []) {
-  for (const object of objects) {
-    for (const key of keys) {
-      const value = object?.[key];
-
-      if (
-        typeof value === "string" ||
-        typeof value === "number" ||
-        typeof value === "boolean"
-      ) {
-        const text = safeText(value);
-        if (text) return text;
-      }
-    }
-  }
-
-  return "";
+  const value = pickValueFromObjects(objects, keys);
+  return safeText(value, "");
 }
 
 function pickObjectFromObjects(objects = [], keys = []) {
   for (const object of objects) {
     for (const key of keys) {
-      if (isObject(object?.[key])) {
-        return object[key];
-      }
+      if (isObject(object?.[key])) return object[key];
     }
   }
 
@@ -732,23 +587,10 @@ function pickObjectFromObjects(objects = [], keys = []) {
 
 function unwrapAuthPayload(payload = null, depth = 0) {
   if (!isObject(payload) || depth > 8) return payload;
+  if (looksLikeUser(payload) && hasNestedUserIdentity(payload)) return payload;
 
-  if (looksLikeUser(payload) && hasNestedUserIdentity(payload)) {
-    return payload;
-  }
-
-  const candidate = pickFirst(
-    payload.data,
-    payload.payload,
-    payload.result,
-    payload.body,
-    payload.response?.data,
-    payload.response
-  );
-
-  if (isObject(candidate) && candidate !== payload) {
-    return unwrapAuthPayload(candidate, depth + 1);
-  }
+  const candidate = first(payload.data, payload.payload, payload.result, payload.body, payload.response?.data, payload.response);
+  if (isObject(candidate) && candidate !== payload) return unwrapAuthPayload(candidate, depth + 1);
 
   return payload;
 }
@@ -758,24 +600,15 @@ function unwrapAuthPayload(payload = null, depth = 0) {
 ========================================================= */
 
 function getStatusValue(payload = null) {
-  return pickValueFromObjects(
-    collectAuthObjects(payload),
-    ["status", "statusCode", "status_code", "state", "estado"]
-  );
+  return pickValueFromObjects(collectAuthObjects(payload), ["status", "statusCode", "status_code", "state", "estado"]);
 }
 
 function getErrorCode(payload = null) {
-  return pickTextFromObjects(
-    collectAuthObjects(payload),
-    ["code", "errorCode", "error_code", "error"]
-  );
+  return pickTextFromObjects(collectAuthObjects(payload), ["code", "errorCode", "error_code", "error"]);
 }
 
 function getResponseMessage(payload = null) {
-  return pickTextFromObjects(
-    collectAuthObjects(payload),
-    ["message", "mensaje", "errorMessage", "error_message", "detail", "description", "title", "reason", "msg"]
-  );
+  return pickTextFromObjects(collectAuthObjects(payload), ["message", "mensaje", "errorMessage", "error_message", "detail", "description", "title", "reason", "msg"]);
 }
 
 function isExplicitAuthFailure(payload = null) {
@@ -788,27 +621,18 @@ function isExplicitAuthFailure(payload = null) {
   if (Number.isFinite(statusNumber) && statusNumber >= 400) return true;
 
   const statusText = normalizeKey(statusValue || "");
-
   if (statusText && FAILURE_STATUSES.has(statusText)) return true;
 
   const code = getErrorCode(payload).toUpperCase();
-
   if (code && FAILURE_CODES.has(code)) return true;
 
-  if (objects.some((object) => object?.ok === false || object?.success === false)) {
-    return true;
-  }
-
+  if (objects.some((object) => object?.ok === false || object?.success === false)) return true;
   if (statusText && SUCCESS_STATUSES.has(statusText)) return false;
 
   return false;
 }
 
-function createNormalizeError(message = "La respuesta del API no contiene una sesión válida.", {
-  status = 401,
-  code = "INVALID_LOGIN_SESSION",
-  response = null,
-} = {}) {
+function createNormalizeError(message = "La respuesta del API no contiene una sesión válida.", { status = 401, code = "INVALID_LOGIN_SESSION", response = null } = {}) {
   const error = new Error(message);
 
   error.name = "AuthNormalizeError";
@@ -838,7 +662,6 @@ function getNodes(rawUser = {}) {
     safeObject(user.settings),
     safeObject(user.meta),
     safeObject(user.claims),
-
     raw,
     safeObject(raw.profile),
     safeObject(raw.account),
@@ -853,10 +676,7 @@ function pickFromNodes(nodes = [], keys = []) {
   for (const node of nodes) {
     for (const key of keys) {
       const value = node?.[key];
-
-      if (value !== null && value !== undefined && value !== "") {
-        return value;
-      }
+      if (value !== null && value !== undefined && value !== "") return value;
     }
   }
 
@@ -865,11 +685,10 @@ function pickFromNodes(nodes = [], keys = []) {
 
 function collectRoles(rawUser = {}) {
   const nodes = getNodes(rawUser);
-
-  const roleValues = [];
+  const values = [];
 
   for (const node of nodes) {
-    roleValues.push(
+    values.push(
       node.role,
       node.rol,
       node.userRole,
@@ -880,10 +699,7 @@ function collectRoles(rawUser = {}) {
       node.user_type,
       node.perfil,
       node["custom:role"],
-      node["https://onion/role"]
-    );
-
-    roleValues.push(
+      node["https://onion/role"],
       ...toArray(node.roles),
       ...toArray(node.roleList),
       ...toArray(node.role_list),
@@ -892,23 +708,11 @@ function collectRoles(rawUser = {}) {
     );
   }
 
-  const adminFlag = nodes.some((node) => (
-    normalizeBoolean(node.isAdmin, false) ||
-    normalizeBoolean(node.admin, false) ||
-    normalizeBoolean(node.is_admin, false) ||
-    normalizeBoolean(node.isSuperAdmin, false) ||
-    normalizeBoolean(node.superAdmin, false) ||
-    normalizeBoolean(node.is_super_admin, false) ||
-    normalizeBoolean(node.canManageUsers, false) ||
-    normalizeBoolean(node.can_manage_users, false) ||
-    normalizeBoolean(node.canAccessUsers, false) ||
-    normalizeBoolean(node.can_access_users, false)
-  ));
+  if (nodes.some((node) => normalizeBoolean(node.isAdmin, false) || normalizeBoolean(node.admin, false) || normalizeBoolean(node.is_admin, false) || normalizeBoolean(node.isSuperAdmin, false) || normalizeBoolean(node.superAdmin, false))) {
+    values.push("admin");
+  }
 
-  if (adminFlag) roleValues.push("admin");
-
-  const roles = normalizeRoleList(roleValues);
-
+  const roles = normalizeRoleList(values);
   return roles.length ? roles : ["user"];
 }
 
@@ -922,9 +726,7 @@ function collectPermissions(rawUser = {}) {
       ...normalizePermissionList(node.permisos),
       ...normalizePermissionList(node.scopes),
       ...normalizePermissionList(node.scope),
-      ...normalizePermissionList(node.authorities),
-      ...normalizePermissionList(node.items),
-      ...normalizePermissionList(node.list)
+      ...normalizePermissionList(node.authorities)
     );
   }
 
@@ -932,48 +734,21 @@ function collectPermissions(rawUser = {}) {
 }
 
 function isSafeAvatarUrl(url = "") {
-  const value = safeText(url);
+  const value = safeText(url, "");
   const lower = value.toLowerCase();
 
   if (!value) return false;
-
-  return !(
-    lower.startsWith("javascript:") ||
-    lower.startsWith("vbscript:") ||
-    lower.startsWith("data:text/html") ||
-    lower.startsWith("data:application/")
-  );
+  return !(lower.startsWith("javascript:") || lower.startsWith("vbscript:") || lower.startsWith("data:text/html") || lower.startsWith("data:application/"));
 }
 
 function normalizeAvatarUrl(rawUser = {}) {
   const nodes = getNodes(rawUser);
-
-  const disabled = nodes.some((node) => (
-    hasOwn(node, "hasAvatar") && normalizeBoolean(node.hasAvatar, false) === false
-  ));
-
+  const disabled = nodes.some((node) => hasOwn(node, "hasAvatar") && normalizeBoolean(node.hasAvatar, false) === false);
   if (disabled) return null;
 
   const avatar = safeText(
-    pickFromNodes(nodes, [
-      "avatar",
-      "avatarUrl",
-      "avatar_url",
-      "photo",
-      "photoUrl",
-      "photo_url",
-      "image",
-      "imageUrl",
-      "image_url",
-      "profileImage",
-      "profile_image",
-      "picture",
-      "pictureUrl",
-      "picture_url",
-      "thumbnail",
-      "thumbnailUrl",
-      "thumbnail_url",
-    ])
+    pickFromNodes(nodes, ["avatar", "avatarUrl", "avatar_url", "photo", "photoUrl", "photo_url", "image", "imageUrl", "image_url", "profileImage", "profile_image", "picture", "pictureUrl", "picture_url", "thumbnail", "thumbnailUrl", "thumbnail_url"]),
+    ""
   );
 
   return avatar && isSafeAvatarUrl(avatar) ? avatar : null;
@@ -981,19 +756,8 @@ function normalizeAvatarUrl(rawUser = {}) {
 
 function normalizeTheme(value = "") {
   const theme = safeLower(value);
-
-  if (theme === "light") return "light";
-  if (theme === "dark") return "dark";
-  if (theme === "system") return "system";
-
+  if (["light", "dark", "system"].includes(theme)) return theme;
   return null;
-}
-
-function hasExplicitDarkMode(nodes = []) {
-  return nodes.some((node) => (
-    hasOwn(node, "darkMode") ||
-    hasOwn(node, "dark_mode")
-  ));
 }
 
 function resolveDarkMode(nodes = []) {
@@ -1006,144 +770,42 @@ function resolveDarkMode(nodes = []) {
 }
 
 function isUserActive(nodes = []) {
-  const status = normalizeKey(
-    pickFromNodes(nodes, ["status", "estado", "state", "accountStatus", "account_status"]) || ""
-  );
-
+  const status = normalizeKey(pickFromNodes(nodes, ["status", "estado", "state", "accountStatus", "account_status"]) || "");
   if (DISABLED_STATUS.has(status)) return false;
 
-  const disabled = nodes.some((node) => (
-    node.disabled === true ||
-    node.isDisabled === true ||
-    node.deleted === true ||
-    node.isDeleted === true ||
-    node.blocked === true ||
-    node.isBlocked === true ||
-    node.banned === true ||
-    node.suspended === true ||
-    node.revoked === true ||
-    node.archived === true
-  ));
-
+  const disabled = nodes.some((node) => node.disabled === true || node.isDisabled === true || node.deleted === true || node.isDeleted === true || node.blocked === true || node.isBlocked === true || node.banned === true || node.suspended === true || node.revoked === true || node.archived === true);
   if (disabled) return false;
 
-  const activeValue = pickFromNodes(nodes, [
-    "active",
-    "is_active",
-    "isActive",
-    "enabled",
-    "isEnabled",
-  ]);
-
-  if (!hasExplicitValue(activeValue)) return true;
-
-  return normalizeBoolean(activeValue, true);
+  const activeValue = pickFromNodes(nodes, ["active", "is_active", "isActive", "enabled", "isEnabled"]);
+  return hasExplicitValue(activeValue) ? normalizeBoolean(activeValue, true) : true;
 }
 
 export function normalizeUser(rawUser = null) {
   if (!isObject(rawUser)) return null;
-
-  if (isAuthEnvelope(rawUser) && !hasNestedUserIdentity(rawUser)) {
-    return null;
-  }
-
-  if (!hasNestedUserIdentity(rawUser)) {
-    return null;
-  }
+  if (isAuthEnvelope(rawUser) && !hasNestedUserIdentity(rawUser)) return null;
+  if (!hasNestedUserIdentity(rawUser)) return null;
 
   const nodes = getNodes(rawUser);
 
   const id = pickFromNodes(nodes, ["id", "userId", "user_id", "uuid", "uid", "sub", "_id"]);
   const userId = pickFromNodes(nodes, ["userId", "user_id", "id", "uuid", "uid", "sub", "_id"]);
-
-  const email = safeLower(
-    pickFromNodes(nodes, ["email", "mail", "emailLower", "email_lower"]) || ""
-  );
-
+  const email = safeLower(pickFromNodes(nodes, ["email", "mail", "emailLower", "email_lower"]) || "");
   const phone = pickFromNodes(nodes, ["phone", "telefono", "mobile", "cellphone"]);
-
-  const rawUsername = pickFirst(
-    pickFromNodes(nodes, ["username", "userName", "user_name", "nick", "alias", "login", "slug"]),
-    email ? email.split("@")[0] : "",
-    phone,
-    id,
-    userId
-  );
-
-  const username = sanitizeUsername(safeText(rawUsername));
-
-  const displayName = safeText(
-    pickFromNodes(nodes, [
-      "name",
-      "nombre",
-      "fullName",
-      "full_name",
-      "displayName",
-      "display_name",
-    ]) ||
-      username ||
-      email ||
-      phone ||
-      id ||
-      userId ||
-      "Usuario",
-    "Usuario"
-  );
-
+  const rawUsername = first(pickFromNodes(nodes, ["username", "userName", "user_name", "nick", "alias", "login", "slug"]), email ? email.split("@")[0] : "", phone, id, userId);
+  const username = sanitizeUsername(safeText(rawUsername, ""));
+  const displayName = safeText(pickFromNodes(nodes, ["name", "nombre", "fullName", "full_name", "displayName", "display_name"]) || username || email || phone || id || userId || "Usuario", "Usuario");
   const roles = collectRoles(rawUser);
   const role = normalizeCanonicalRole(roles);
-
   const permissions = collectPermissions(rawUser);
-
-  const slug = safeText(
-    pickFromNodes(nodes, ["slug"]) ||
-      slugify(username || displayName || email || String(userId || id || "usuario"))
-  );
-
+  const slug = safeText(pickFromNodes(nodes, ["slug"]) || slugify(username || displayName || email || String(userId || id || "usuario")), "usuario");
   const avatar = normalizeAvatarUrl(rawUser);
-
-  const theme = normalizeTheme(
-    pickFromNodes(nodes, ["theme", "mode", "appearance"]) || ""
-  );
-
-  const lang = safeText(
-    pickFromNodes(nodes, ["lang", "language", "locale"]) || ""
-  );
-
-  const clienteId = pickFromNodes(nodes, [
-    "clienteId",
-    "clientId",
-    "cliente_id",
-    "customerId",
-    "customer_id",
-  ]);
-
-  const tokenVersion = pickFromNodes(nodes, [
-    "tokenVersion",
-    "token_version",
-    "tv",
-  ]);
-
-  const emailVerified = normalizeBoolean(
-    pickFromNodes(nodes, ["emailVerified", "email_verified", "verified"]),
-    false
-  );
-
-  const twofaEnabled = normalizeBoolean(
-    pickFromNodes(nodes, [
-      "twofa_enabled",
-      "twofaEnabled",
-      "twoFactorEnabled",
-      "mfaEnabled",
-      "mfa_enabled",
-    ]),
-    false
-  );
-
-  const darkMode = hasExplicitDarkMode(nodes)
-    ? resolveDarkMode(nodes)
-    : null;
-
+  const theme = normalizeTheme(pickFromNodes(nodes, ["theme", "mode", "appearance"]) || "");
+  const lang = safeText(pickFromNodes(nodes, ["lang", "language", "locale"]) || "");
+  const clienteId = pickFromNodes(nodes, ["clienteId", "clientId", "cliente_id", "customerId", "customer_id"]);
+  const tokenVersion = pickFromNodes(nodes, ["tokenVersion", "token_version", "tv"]);
+  const emailVerified = normalizeBoolean(pickFromNodes(nodes, ["emailVerified", "email_verified", "verified"]), false);
+  const twofaEnabled = normalizeBoolean(pickFromNodes(nodes, ["twofa_enabled", "twofaEnabled", "twoFactorEnabled", "mfaEnabled", "mfa_enabled"]), false);
+  const darkMode = resolveDarkMode(nodes);
   const active = isUserActive(nodes);
 
   return {
@@ -1158,7 +820,6 @@ export function normalizeUser(rawUser = null) {
     user_name: username,
     usernameLower: username || null,
     username_lower: username || null,
-
     slug,
 
     name: displayName,
@@ -1183,19 +844,15 @@ export function normalizeUser(rawUser = null) {
 
     isAdmin: role === "admin",
     admin: role === "admin",
-
     isSupport: false,
     isManager: false,
-    isClient: role === "user",
+    isClient: false,
 
     clienteId: clienteId || null,
     clientId: clienteId || null,
     customerId: clienteId || null,
 
-    privacyMode: normalizeBoolean(
-      pickFromNodes(nodes, ["privacyMode", "privacy_mode"]),
-      false
-    ),
+    privacyMode: normalizeBoolean(pickFromNodes(nodes, ["privacyMode", "privacy_mode"]), false),
 
     hasAvatar: Boolean(avatar),
     avatar,
@@ -1203,9 +860,7 @@ export function normalizeUser(rawUser = null) {
     avatar_url: avatar,
     photoUrl: avatar,
     picture: avatar,
-
-    avatarUpdatedAt:
-      pickFromNodes(nodes, ["avatarUpdatedAt", "avatar_updated_at"]) || null,
+    avatarUpdatedAt: pickFromNodes(nodes, ["avatarUpdatedAt", "avatar_updated_at"]) || null,
 
     active,
     status: safeText(pickFromNodes(nodes, ["status", "estado", "state"]) || "") || null,
@@ -1220,7 +875,6 @@ export function normalizeUser(rawUser = null) {
     locale: lang || null,
 
     emailVerified,
-
     twofa_enabled: twofaEnabled,
     twofaEnabled,
     twoFactorEnabled: twofaEnabled,
@@ -1236,7 +890,6 @@ export function normalizeUser(rawUser = null) {
     account: sanitizeRaw(safeObject(rawUser.account)) || {},
     meta: sanitizeRaw(safeObject(rawUser.meta)) || {},
     claims: sanitizeRaw(safeObject(rawUser.claims)) || {},
-
     raw: sanitizeRaw(rawUser),
   };
 }
@@ -1251,9 +904,7 @@ export function extractUser(payload = null) {
   const objects = collectAuthObjects(payload);
 
   for (const object of objects) {
-    const candidate = pickFirst(
-      ...USER_KEYS.map((key) => object?.[key])
-    );
+    const candidate = first(...USER_KEYS.map((key) => object?.[key]));
 
     if (looksLikeUser(candidate)) {
       const normalized = normalizeUser(candidate);
@@ -1267,10 +918,7 @@ export function extractUser(payload = null) {
   }
 
   const unwrapped = unwrapAuthPayload(payload);
-
-  if (unwrapped && unwrapped !== payload) {
-    return extractUser(unwrapped);
-  }
+  if (unwrapped && unwrapped !== payload) return extractUser(unwrapped);
 
   return null;
 }
@@ -1279,104 +927,32 @@ export function normalizeSessionPayload(payload = null) {
   if (!isObject(payload)) return null;
 
   const objects = collectAuthObjects(payload);
-
-  const sessionNode =
-    pickObjectFromObjects(objects, SESSION_KEYS) || {};
-
-  const sessionId = safeSessionValue(
-    pickFirst(
-      sessionNode.sessionId,
-      sessionNode.session_id,
-      sessionNode.sid,
-      sessionNode.id,
-      pickValueFromObjects(objects, ["sessionId", "session_id", "sid"])
-    ) || ""
-  );
-
+  const sessionNode = pickObjectFromObjects(objects, SESSION_KEYS) || {};
   const user = extractUser(payload);
 
-  const userId = safeSessionValue(
-    pickFirst(
-      sessionNode.sessionUserId,
-      sessionNode.session_user_id,
-      sessionNode.userId,
-      sessionNode.user_id,
-      sessionNode.uid,
-      sessionNode.sub,
-      pickValueFromObjects(objects, ["sessionUserId", "session_user_id", "userId", "user_id", "uid", "sub"]),
-      user?.userId,
-      user?.id,
-      user?.email
-    ) || ""
-  );
+  const sessionId = safeSessionValue(first(sessionNode.sessionId, sessionNode.session_id, sessionNode.sid, sessionNode.id, pickValueFromObjects(objects, ["sessionId", "session_id", "sid"])) || "");
+  const userId = safeSessionValue(first(sessionNode.sessionUserId, sessionNode.session_user_id, sessionNode.userId, sessionNode.user_id, sessionNode.uid, sessionNode.sub, pickValueFromObjects(objects, ["sessionUserId", "session_user_id", "userId", "user_id", "uid", "sub"]), user?.userId, user?.id, user?.email) || "");
+  const expiresAt = first(sessionNode.expiresAt, sessionNode.expires_at, sessionNode.refreshExpiresAt, sessionNode.refresh_expires_at, sessionNode.exp, pickValueFromObjects(objects, ["expiresAt", "expires_at", "refreshExpiresAt", "refresh_expires_at", "exp", "expiration", "expires"])) || null;
+  const tokenVersion = first(sessionNode.tokenVersion, sessionNode.token_version, sessionNode.tv, pickValueFromObjects(objects, ["tokenVersion", "token_version", "tv"]), user?.tokenVersion, user?.token_version, user?.tv) ?? null;
 
-  const expiresAt = pickFirst(
-    sessionNode.expiresAt,
-    sessionNode.expires_at,
-    sessionNode.refreshExpiresAt,
-    sessionNode.refresh_expires_at,
-    sessionNode.exp,
-    pickValueFromObjects(objects, ["expiresAt", "expires_at", "refreshExpiresAt", "refresh_expires_at", "exp", "expiration", "expires"])
-  ) || null;
-
-  const tokenVersion = pickFirst(
-    sessionNode.tokenVersion,
-    sessionNode.token_version,
-    sessionNode.tv,
-    pickValueFromObjects(objects, ["tokenVersion", "token_version", "tv"]),
-    user?.tokenVersion,
-    user?.token_version,
-    user?.tv
-  ) ?? null;
-
-  if (!sessionId && !userId && !expiresAt && tokenVersion === null) {
-    return null;
-  }
+  if (!sessionId && !userId && !expiresAt && tokenVersion === null) return null;
 
   return {
     id: sessionId || null,
     sessionId: sessionId || null,
     session_id: sessionId || null,
     sid: sessionId || null,
-
     userId: userId || null,
     user_id: userId || null,
     sessionUserId: userId || null,
     session_user_id: userId || null,
-
     expiresAt,
     expires_at: expiresAt,
-
-    refreshExpiresAt: pickFirst(
-      sessionNode.refreshExpiresAt,
-      sessionNode.refresh_expires_at,
-      expiresAt
-    ) || null,
-
-    refresh_expires_at: pickFirst(
-      sessionNode.refreshExpiresAt,
-      sessionNode.refresh_expires_at,
-      expiresAt
-    ) || null,
-
-    createdAt: pickFirst(
-      sessionNode.createdAt,
-      sessionNode.created_at,
-      pickValueFromObjects(objects, ["createdAt", "created_at"])
-    ) || null,
-
-    lastActiveAt: pickFirst(
-      sessionNode.lastActiveAt,
-      sessionNode.last_active_at,
-      pickValueFromObjects(objects, ["lastActiveAt", "last_active_at"])
-    ) || null,
-
-    lastRefreshAt: pickFirst(
-      sessionNode.lastRefreshAt,
-      sessionNode.last_refresh_at,
-      pickValueFromObjects(objects, ["lastRefreshAt", "last_refresh_at"])
-    ) || null,
-
+    refreshExpiresAt: first(sessionNode.refreshExpiresAt, sessionNode.refresh_expires_at, expiresAt) || null,
+    refresh_expires_at: first(sessionNode.refreshExpiresAt, sessionNode.refresh_expires_at, expiresAt) || null,
+    createdAt: first(sessionNode.createdAt, sessionNode.created_at, pickValueFromObjects(objects, ["createdAt", "created_at"])) || null,
+    lastActiveAt: first(sessionNode.lastActiveAt, sessionNode.last_active_at, pickValueFromObjects(objects, ["lastActiveAt", "last_active_at"])) || null,
+    lastRefreshAt: first(sessionNode.lastRefreshAt, sessionNode.last_refresh_at, pickValueFromObjects(objects, ["lastRefreshAt", "last_refresh_at"])) || null,
     tokenVersion,
     token_version: tokenVersion,
     tv: tokenVersion,
@@ -1385,26 +961,17 @@ export function normalizeSessionPayload(payload = null) {
 
 export function extractToken(payload = null) {
   if (!payload) return null;
-
-  return normalizeTokenValue(
-    pickValueFromObjects(collectAuthObjects(payload), TOKEN_KEYS)
-  );
+  return normalizeTokenValue(pickValueFromObjects(collectAuthObjects(payload), TOKEN_KEYS));
 }
 
 export function extractRefreshToken(payload = null) {
   if (!payload) return null;
-
-  return normalizeTokenValue(
-    pickValueFromObjects(collectAuthObjects(payload), REFRESH_TOKEN_KEYS)
-  );
+  return normalizeTokenValue(pickValueFromObjects(collectAuthObjects(payload), REFRESH_TOKEN_KEYS));
 }
 
 export function extractTempToken(payload = null) {
   if (!payload) return null;
-
-  return normalizeTokenValue(
-    pickValueFromObjects(collectAuthObjects(payload), TEMP_TOKEN_KEYS)
-  );
+  return normalizeTokenValue(pickValueFromObjects(collectAuthObjects(payload), TEMP_TOKEN_KEYS));
 }
 
 export function extractRequires2FA(payload = null) {
@@ -1434,9 +1001,7 @@ export function extractRequires2FA(payload = null) {
     "challenge_required",
   ];
 
-  return objects.some((object) => (
-    boolKeys.some((key) => normalizeBoolean(object?.[key], false))
-  ));
+  return objects.some((object) => boolKeys.some((key) => normalizeBoolean(object?.[key], false)));
 }
 
 /* =========================================================
@@ -1447,14 +1012,11 @@ export function validateAuthResponse(response = null, options = {}) {
   const opts = isObject(options) ? options : {};
 
   if (isExplicitAuthFailure(response)) {
-    throw createNormalizeError(
-      getResponseMessage(response) || "No se pudo iniciar sesión.",
-      {
-        status: Number(getStatusValue(response)) || 401,
-        code: getErrorCode(response) || "INVALID_CREDENTIALS",
-        response,
-      }
-    );
+    throw createNormalizeError(getResponseMessage(response) || "No se pudo iniciar sesión.", {
+      status: Number(getStatusValue(response)) || 401,
+      code: getErrorCode(response) || "INVALID_CREDENTIALS",
+      response,
+    });
   }
 
   const token = extractToken(response);
@@ -1465,35 +1027,20 @@ export function validateAuthResponse(response = null, options = {}) {
   const requires2FA = extractRequires2FA(response);
 
   const hasToken = Boolean(token);
-  const hasUser = hasUsableUserIdentity(user);
-
+  const hasUser = Boolean(user && user.active !== false);
   const mode = normalizeKey(opts.mode || opts.flow || opts.type || "generic");
 
-  const requireAuthenticated =
-    opts.requireAuthenticated === true ||
-    mode === "login" ||
-    mode === "authenticate";
-
-  const requireToken =
-    opts.requireToken === true ||
-    mode === "login" ||
-    mode === "refresh";
-
-  const requireUser =
-    opts.requireUser === true ||
-    mode === "login" ||
-    mode === "me";
+  const requireAuthenticated = opts.requireAuthenticated === true || mode === "login" || mode === "authenticate";
+  const requireToken = opts.requireToken === true || mode === "login" || mode === "refresh";
+  const requireUser = opts.requireUser === true || mode === "login" || mode === "me";
 
   if (requires2FA) {
     if (!tempToken && opts.allow2FAWithoutTempToken !== true) {
-      throw createNormalizeError(
-        "Se requiere 2FA pero no se recibió token temporal.",
-        {
-          status: 401,
-          code: "MISSING_2FA_TEMP_TOKEN",
-          response,
-        }
-      );
+      throw createNormalizeError("Se requiere 2FA pero no se recibió token temporal.", {
+        status: 401,
+        code: "MISSING_2FA_TEMP_TOKEN",
+        response,
+      });
     }
 
     return {
@@ -1501,22 +1048,16 @@ export function validateAuthResponse(response = null, options = {}) {
       success: true,
       authenticated: false,
       status: "2fa_required",
-
       token: null,
       accessToken: null,
       access_token: null,
-
       user: user || null,
-
       refreshToken: null,
       refresh_token: null,
-
       session: null,
       sessionData: null,
-
       tempToken: tempToken || null,
       temp_token: tempToken || null,
-
       requires2FA: true,
       response,
     };
@@ -1528,24 +1069,18 @@ export function validateAuthResponse(response = null, options = {}) {
       success: true,
       authenticated: true,
       status: "authenticated",
-
       token,
       accessToken: token,
       access_token: token,
-
       user,
       usuario: user,
       me: user,
-
       refreshToken: refreshToken || null,
       refresh_token: refreshToken || null,
-
       session: sessionData || null,
       sessionData: sessionData || null,
-
       tempToken: null,
       temp_token: null,
-
       requires2FA: false,
       response,
     };
@@ -1557,22 +1092,16 @@ export function validateAuthResponse(response = null, options = {}) {
       success: true,
       authenticated: false,
       status: "token_only",
-
       token,
       accessToken: token,
       access_token: token,
-
       user: null,
-
       refreshToken: refreshToken || null,
       refresh_token: refreshToken || null,
-
       session: sessionData || null,
       sessionData: sessionData || null,
-
       tempToken: null,
       temp_token: null,
-
       requires2FA: false,
       response,
     };
@@ -1584,44 +1113,28 @@ export function validateAuthResponse(response = null, options = {}) {
       success: true,
       authenticated: false,
       status: "user_only",
-
       token: null,
       accessToken: null,
       access_token: null,
-
       user,
       usuario: user,
       me: user,
-
       refreshToken: refreshToken || null,
       refresh_token: refreshToken || null,
-
       session: sessionData || null,
       sessionData: sessionData || null,
-
       tempToken: null,
       temp_token: null,
-
       requires2FA: false,
       response,
     };
   }
 
-  throw createNormalizeError(
-    "La respuesta del API no contiene una sesión válida.",
-    {
-      status: 401,
-      code:
-        requireAuthenticated
-          ? "INVALID_LOGIN_SESSION"
-          : requireToken
-            ? "TOKEN_MISSING"
-            : requireUser
-              ? "USER_MISSING"
-              : "INVALID_AUTH_RESPONSE",
-      response,
-    }
-  );
+  throw createNormalizeError("La respuesta del API no contiene una sesión válida.", {
+    status: 401,
+    code: requireAuthenticated ? "INVALID_LOGIN_SESSION" : requireToken ? "TOKEN_MISSING" : requireUser ? "USER_MISSING" : "INVALID_AUTH_RESPONSE",
+    response,
+  });
 }
 
 export function normalizeAuthResponse(response = null, options = {}) {
@@ -1643,31 +1156,22 @@ export function normalizeAuthResponse(response = null, options = {}) {
       ok: false,
       success: false,
       authenticated: false,
-
       status: error?.data?.status || error?.status || "invalid",
       code: error?.code || error?.data?.code || getErrorCode(response) || "INVALID_LOGIN_SESSION",
       message: error?.message || getResponseMessage(response) || "La respuesta del API no contiene una sesión válida.",
-
       token: null,
       accessToken: null,
       access_token: null,
-
       user: extractUser(response),
-
       refreshToken: null,
       refresh_token: null,
-
       session: null,
       sessionData: null,
-
       tempToken: tempToken || null,
       temp_token: tempToken || null,
-
       requires2FA: extractRequires2FA(response),
-
       valid: false,
       explicitFailure: isExplicitAuthFailure(response),
-
       error,
       response,
     };
@@ -1687,37 +1191,25 @@ export function getAuthNormalizeSnapshot(response = null) {
   const refreshToken = extractRefreshToken(response);
   const tempToken = extractTempToken(response);
   const user = extractUser(response);
-  const normalized = normalizeAuthResponse(response, {
-    allow2FAWithoutTempToken: true,
-  });
+  const normalized = normalizeAuthResponse(response, { allow2FAWithoutTempToken: true });
 
   return {
     version: AUTH_NORMALIZE_VERSION,
-
     explicitFailure: isExplicitAuthFailure(response),
-
     status: getStatusValue(response) || null,
     normalizedStatus: normalized.status || null,
-
     code: getErrorCode(response) || null,
     message: getResponseMessage(response) || null,
-
     valid: Boolean(normalized.valid),
     authenticated: Boolean(normalized.authenticated),
-
     hasToken: Boolean(token),
     tokenPreview: token ? redactToken(token) : null,
-
     hasRefreshToken: Boolean(refreshToken),
     refreshTokenPreview: refreshToken ? redactToken(refreshToken) : null,
-
     hasTempToken: Boolean(tempToken),
     tempTokenPreview: tempToken ? redactToken(tempToken) : null,
-
     requires2FA: extractRequires2FA(response),
-
     hasUser: Boolean(user),
-
     user: user
       ? {
           id: user.id || null,
@@ -1727,14 +1219,21 @@ export function getAuthNormalizeSnapshot(response = null) {
           role: user.role || null,
           roles: user.roles || [],
           isAdmin: Boolean(user.isAdmin),
-          isClient: Boolean(user.isClient),
           hasAvatar: Boolean(user.hasAvatar),
           theme: user.theme || null,
           darkMode: user.darkMode,
         }
       : null,
-
     sessionData: normalizeSessionPayload(response),
+    policy: {
+      pureNormalizer: true,
+      ownFetch: false,
+      ownStorage: false,
+      ownSession: false,
+      ownRouter: false,
+      ownToast: false,
+      roles: ["admin", "user"],
+    },
   };
 }
 

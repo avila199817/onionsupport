@@ -2,7 +2,7 @@
    Onion SPA - HTTP Service
    Archivo: src/services/index.js
 
-   HTTP SERVICE · FINAL SIMPLE
+   HTTP SERVICE · SIMPLE
    - Fachada fina de compatibilidad para Services
    - Delega ejecución en src/core/http.js
    - Backend real: https://api.onionit.net
@@ -14,18 +14,13 @@
 import { AppCore } from "../core/index.js";
 import CoreHttp from "../core/http.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const HTTP_SERVICE_VERSION = "20.0.0-final";
+export const HTTP_SERVICE_VERSION = "21.0.0-simple";
 
 const SERVICE_NAME = "http";
 const SERVICE_SOURCE = "services/index.js";
 const DEFAULT_API_BASE = "https://api.onionit.net";
 const DEFAULT_TIMEOUT_MS = 30000;
 const UPLOAD_TIMEOUT_MS = 120000;
-
 const AUTH_ME_CANONICAL = "/api/auth/me";
 
 const PUBLIC_AUTH_RE = /^\/?(?:api\/)?auth\/(?:login|refresh|token\/refresh|renew|2fa(?:\/|$)|mfa(?:\/|$)|otp(?:\/|$)|activate(?:\/|$)|activate-account(?:\/|$)|activation(?:\/|$)|account\/activate(?:\/|$)|reset-password(?:\/|$)|reset-password-request|reset-password-confirm|forgot-password|recover-password|password-reset(?:\/|$)|_health|health)(?:\/|$)/i;
@@ -145,27 +140,20 @@ function safeObject(value, fallback = {}) {
   return isPlainObject(value) ? value : fallback;
 }
 
-function safeArray(value) {
-  if (Array.isArray(value)) return value;
-  if (value instanceof Set) return Array.from(value);
-  if (value === null || value === undefined) return [];
-  return [value];
-}
-
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
 
-  const text = String(value)
+  const output = String(value)
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  return text || fallback;
+  return output || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
+  const output = Number(value);
+  return Number.isFinite(output) ? output : fallback;
 }
 
 function safeUpper(value = "", fallback = "GET") {
@@ -197,9 +185,8 @@ function nextRequestId() {
   return `svc_req_${requestSeq}_${now()}`;
 }
 
-function redact(value = "") {
+export function redact(value = "") {
   let output = safeText(value, "");
-
   if (!output) return "";
 
   try {
@@ -249,11 +236,9 @@ function sanitize(value, depth = 0, keyHint = "", seen = new WeakSet()) {
     } catch {}
 
     const output = {};
-
     for (const [key, item] of Object.entries(value).slice(0, 80)) {
       output[key] = sanitize(item, depth + 1, key, seen);
     }
-
     return output;
   }
 
@@ -283,9 +268,7 @@ function safeWarn(...args) {
 function normalizeOrigin(value = "") {
   const raw = safeText(value, DEFAULT_API_BASE).replace(/\/+$/g, "");
 
-  if (!raw || raw === "/" || raw === "/api" || raw === "api") {
-    return DEFAULT_API_BASE;
-  }
+  if (!raw || raw === "/" || raw === "/api" || raw === "api") return DEFAULT_API_BASE;
 
   try {
     const url = new URL(raw);
@@ -298,24 +281,6 @@ function normalizeOrigin(value = "") {
 function syncCoreOrigin(origin = DEFAULT_API_BASE) {
   try {
     CoreHttp?.setOrigin?.(origin);
-  } catch {}
-
-  const App = getAppCore();
-
-  try {
-    if (App?.config && typeof App.config === "object") {
-      App.config.apiBase = origin;
-      App.config.apiOrigin = origin;
-      App.config.apiUrl = origin;
-
-      if (!App.config.api || typeof App.config.api !== "object") {
-        App.config.api = {};
-      }
-
-      App.config.api.base = origin;
-      App.config.api.baseUrl = origin;
-      App.config.api.origin = origin;
-    }
   } catch {}
 }
 
@@ -335,16 +300,9 @@ export function configure(patch = {}) {
   serviceConfig.apiOrigin = origin;
   serviceConfig.apiUrl = origin;
 
-  serviceConfig.timeout = safeNumber(
-    next.timeout ?? next.timeoutMs ?? serviceConfig.timeout,
-    DEFAULT_TIMEOUT_MS
-  );
-
+  serviceConfig.timeout = safeNumber(next.timeout ?? next.timeoutMs ?? serviceConfig.timeout, DEFAULT_TIMEOUT_MS);
   serviceConfig.timeoutMs = serviceConfig.timeout;
-
-  serviceConfig.defaultResponseType =
-    safeText(next.defaultResponseType || next.responseType, serviceConfig.defaultResponseType) || "auto";
-
+  serviceConfig.defaultResponseType = safeText(next.defaultResponseType || next.responseType, serviceConfig.defaultResponseType) || "auto";
   serviceConfig.debug = next.debug === true || serviceConfig.debug === true;
 
   syncCoreOrigin(origin);
@@ -367,13 +325,8 @@ export function getConfig() {
 
 export function buildUrl(path = "/", query = null) {
   try {
-    if (isFn(CoreHttp?.buildApiUrl)) {
-      return CoreHttp.buildApiUrl(path, { query });
-    }
-
-    if (isFn(CoreHttp?.buildUrl)) {
-      return CoreHttp.buildUrl(path, { query });
-    }
+    if (isFn(CoreHttp?.buildApiUrl)) return CoreHttp.buildApiUrl(path, { query });
+    if (isFn(CoreHttp?.buildUrl)) return CoreHttp.buildUrl(path, { query });
   } catch {}
 
   try {
@@ -391,8 +344,6 @@ export function buildUrl(path = "/", query = null) {
     return safeText(path, "/");
   }
 }
-
-export { redact };
 
 /* =========================================================
    PATH / REQUEST NORMALIZATION
@@ -414,24 +365,15 @@ function normalizePath(path = "/") {
 
   if (/^https?:\/\//i.test(raw)) return raw;
   if (AUTH_ME_RE.test(raw.replace(/^\/+/, ""))) return AUTH_ME_CANONICAL;
-
   if (!raw.startsWith("/")) return `/${raw}`;
+
   return raw.replace(/\/{2,}/g, "/") || "/";
 }
 
 function normalizeOptions(options = {}) {
   const opts = safeObject(options);
-
-  const body = opts.body !== undefined
-    ? opts.body
-    : opts.data !== undefined
-      ? opts.data
-      : opts.payload;
-
-  const timeout = safeNumber(
-    opts.timeout ?? opts.timeoutMs ?? serviceConfig.timeout,
-    DEFAULT_TIMEOUT_MS
-  );
+  const body = opts.body !== undefined ? opts.body : opts.data !== undefined ? opts.data : opts.payload;
+  const timeout = safeNumber(opts.timeout ?? opts.timeoutMs ?? serviceConfig.timeout, DEFAULT_TIMEOUT_MS);
 
   const normalized = {
     ...opts,
@@ -461,11 +403,7 @@ function normalizeRequestArgs(arg1 = "/", arg2 = {}, arg3 = {}) {
     };
   }
 
-  if (
-    typeof arg1 === "string" &&
-    /^[A-Z]+$/i.test(arg1) &&
-    typeof arg2 === "string"
-  ) {
+  if (typeof arg1 === "string" && /^[A-Z]+$/i.test(arg1) && typeof arg2 === "string") {
     return {
       path: normalizePath(arg2),
       options: normalizeOptions({
@@ -688,9 +626,7 @@ export function del(path, bodyOrOptions = {}, maybeOptions = undefined) {
     return request("DELETE", path, safeObject(bodyOrOptions));
   }
 
-  return request("DELETE", path, {
-    body: bodyOrOptions,
-  });
+  return request("DELETE", path, { body: bodyOrOptions });
 }
 
 export function raw(path, requestOptions = {}) {
@@ -789,7 +725,7 @@ export function logoutLocal() {
 /* =========================================================
    INTERCEPTOR COMPAT API
    - Compatibilidad superficial.
-   - No se ejecutan aquí: la ejecución real vive en Core HTTP/hooks.
+   - La ejecución real vive en Core HTTP/hooks.
 ========================================================= */
 
 function addInterceptor(type = "request", handler = null, interceptorOptions = {}) {
@@ -810,9 +746,7 @@ function addInterceptor(type = "request", handler = null, interceptorOptions = {
 }
 
 function findInterceptor(ref, type = "") {
-  const groups = type && interceptors[type]
-    ? [interceptors[type]]
-    : Object.values(interceptors);
+  const groups = type && interceptors[type] ? [interceptors[type]] : Object.values(interceptors);
 
   for (const group of groups) {
     const item = group.find((entry) => entry.id === ref || entry === ref);
@@ -836,10 +770,7 @@ export function useError(handler, interceptorOptions = {}) {
 
 export function ejectInterceptor(ref, type = "") {
   let removed = false;
-
-  const groups = type && interceptors[type]
-    ? [interceptors[type]]
-    : Object.values(interceptors);
+  const groups = type && interceptors[type] ? [interceptors[type]] : Object.values(interceptors);
 
   for (const group of groups) {
     const index = group.findIndex((entry) => entry.id === ref || entry === ref);
@@ -894,9 +825,7 @@ export function attachToAppCore(AppCoreRef = getAppCore()) {
   activeAppCore = App;
 
   try {
-    if (!App.services || typeof App.services !== "object") {
-      App.services = {};
-    }
+    if (!App.services || typeof App.services !== "object") App.services = {};
 
     App.services.http = Http;
     App.services.Http = Http;
@@ -931,10 +860,7 @@ export function attachToAppCore(AppCoreRef = getAppCore()) {
     if (isBrowser()) {
       window.__ONION_HTTP_SERVICE__ = Http;
       window.__ONION_API_ORIGIN__ = serviceConfig.apiBase;
-
-      if (!window.__ONION_HTTP__) {
-        window.__ONION_HTTP__ = CoreHttp || Http;
-      }
+      if (!window.__ONION_HTTP__) window.__ONION_HTTP__ = CoreHttp || Http;
     }
   } catch {}
 
@@ -945,6 +871,13 @@ export function attachToAppCore(AppCoreRef = getAppCore()) {
 }
 
 export function init(patch = {}) {
+  const hasPatch = isPlainObject(patch) && Object.keys(patch).length > 0;
+
+  if (serviceState.initialized && !hasPatch) {
+    attachToAppCore(getAppCore());
+    return Http;
+  }
+
   configure(patch);
 
   try {
@@ -967,9 +900,7 @@ export function install(AppCoreRef = AppCore, installOptions = {}) {
 }
 
 export function resetRuntime(resetOptions = {}) {
-  if (resetOptions.clearInterceptors === true) {
-    clearInterceptors();
-  }
+  if (resetOptions.clearInterceptors === true) clearInterceptors();
 
   serviceState.total = 0;
   serviceState.success = 0;

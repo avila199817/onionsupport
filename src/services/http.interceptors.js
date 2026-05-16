@@ -2,33 +2,22 @@
    Onion SPA - HTTP Interceptors
    Archivo: src/services/http.interceptors.js
 
-   Interceptors HTTP:
-   - request / response / error
-   - prioridad descendente + FIFO estable
-   - fail-open por defecto
-   - timeout opcional por interceptor
-   - once / eject / enable / disable
-   - snapshot seguro sin tokens
+   HTTP INTERCEPTORS · FINAL SIMPLE
+   - Hooks opcionales request / response / error
+   - Registro, ejecución ordenada, enable/disable/eject/clear
+   - Sin fetch, retry, refresh, Auth, Router, Toast, storage ni sesión
+   - Snapshot seguro sin handlers ni tokens
 ========================================================= */
-
-import { isFn } from "./http.helpers.js";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-export const INTERCEPTORS_VERSION = "18.0.0-clean";
+export const INTERCEPTORS_VERSION = "20.0.0-final";
 
-const TYPES = Object.freeze([
-  "request",
-  "response",
-  "error",
-]);
-
+const TYPES = Object.freeze(["request", "response", "error"]);
 const DEFAULT_TYPE = "request";
-const DEFAULT_TIMEOUT_MS = 0;
-const MAX_RECENT = 60;
-const MAX_BUCKET_SIZE = 250;
+const MAX_RECENT = 30;
 
 const SENSITIVE_KEY_RE =
   /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
@@ -37,17 +26,18 @@ const TOKENISH_TEXT_RE =
   /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)[^&#\s]+/gi;
 
 let seq = 0;
+let orderSeq = 0;
 
 /* =========================================================
    BASICS
 ========================================================= */
 
-function isObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+function isFn(value) {
+  return typeof value === "function";
 }
 
-function isAnyObject(value) {
-  return value !== null && typeof value === "object";
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function safeObject(value, fallback = {}) {
@@ -55,12 +45,20 @@ function safeObject(value, fallback = {}) {
 }
 
 function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return Array.from(value);
+  if (value === null || value === undefined) return [];
+  return [value];
 }
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
-  const text = String(value).trim();
+
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return text || fallback;
 }
 
@@ -110,8 +108,8 @@ function nextId(type = DEFAULT_TYPE) {
 }
 
 function nextOrder() {
-  seq += 1;
-  return seq;
+  orderSeq += 1;
+  return orderSeq;
 }
 
 function noopDisposer() {
@@ -119,12 +117,11 @@ function noopDisposer() {
 }
 
 /* =========================================================
-   SAFE SNAPSHOT
+   SANITIZE
 ========================================================= */
 
 function redactText(value = "") {
   const raw = safeText(value, "");
-
   if (!raw) return "";
 
   try {
@@ -136,40 +133,6 @@ function redactText(value = "") {
   } catch {
     return raw;
   }
-}
-
-function sanitizeValue(value, depth = 0, keyHint = "") {
-  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) {
-    return value ? "***" : null;
-  }
-
-  if (depth > 4) return "[depth-limit]";
-
-  if (value === null || value === undefined) return value;
-  if (typeof value === "string") return redactText(value);
-  if (typeof value === "number" || typeof value === "boolean") return value;
-  if (typeof value === "bigint") return String(value);
-  if (typeof value === "function") return "[function]";
-
-  if (value instanceof Error) return sanitizeError(value);
-
-  if (Array.isArray(value)) {
-    return value.slice(0, 40).map((item) => sanitizeValue(item, depth + 1, keyHint));
-  }
-
-  if (isAnyObject(value)) {
-    const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 60)) {
-      output[key] = SENSITIVE_KEY_RE.test(key)
-        ? item ? "***" : null
-        : sanitizeValue(item, depth + 1, key);
-    }
-
-    return output;
-  }
-
-  return redactText(String(value));
 }
 
 function sanitizeError(error = null) {
@@ -186,6 +149,39 @@ function sanitizeError(error = null) {
   };
 }
 
+function sanitizeValue(value, depth = 0, keyHint = "", seen = new WeakSet()) {
+  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) return value ? "***" : null;
+  if (depth > 4) return "[depth-limit]";
+
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") return redactText(value);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return "[function]";
+  if (value instanceof Error) return sanitizeError(value);
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 40).map((item) => sanitizeValue(item, depth + 1, keyHint, seen));
+  }
+
+  if (value && typeof value === "object") {
+    try {
+      if (seen.has(value)) return "[circular]";
+      seen.add(value);
+    } catch {}
+
+    const output = {};
+
+    for (const [key, item] of Object.entries(value).slice(0, 60)) {
+      output[key] = sanitizeValue(item, depth + 1, key, seen);
+    }
+
+    return output;
+  }
+
+  return redactText(String(value));
+}
+
 /* =========================================================
    STATE
 ========================================================= */
@@ -194,24 +190,19 @@ function createMeta() {
   return {
     version: INTERCEPTORS_VERSION,
     createdAt: isoNow(),
-
     registered: 0,
     replaced: 0,
     duplicates: 0,
     ejected: 0,
     cleared: 0,
-
     executed: 0,
     failed: 0,
-    timedOut: 0,
     skipped: 0,
     onceRemoved: 0,
     rejectedRegisters: 0,
-
     lastRunAt: "",
     lastRunType: "",
     lastError: null,
-
     recent: [],
   };
 }
@@ -226,9 +217,7 @@ export function createInterceptorsState() {
 }
 
 function ensureState(interceptors) {
-  const state = isObject(interceptors)
-    ? interceptors
-    : createInterceptorsState();
+  const state = isObject(interceptors) ? interceptors : createInterceptorsState();
 
   for (const type of TYPES) {
     if (!Array.isArray(state[type])) state[type] = [];
@@ -243,7 +232,6 @@ function ensureState(interceptors) {
   }
 
   if (!Array.isArray(state.meta.recent)) state.meta.recent = [];
-
   state.meta.version = INTERCEPTORS_VERSION;
 
   return state;
@@ -254,7 +242,6 @@ function bucketOf(interceptors, type = DEFAULT_TYPE) {
   const cleanType = assertType(type);
 
   if (!Array.isArray(state[cleanType])) state[cleanType] = [];
-
   return state[cleanType];
 }
 
@@ -285,53 +272,23 @@ function touchRun(interceptors, type = "") {
 
 function recordSkipped(interceptors, type = "") {
   const state = ensureState(interceptors);
-
   state.meta.skipped = safeInt(state.meta.skipped) + 1;
-
-  pushRecent(state, {
-    event: "skipped",
-    type,
-  });
-
+  pushRecent(state, { event: "skipped", type });
   return true;
 }
 
-function recordRegisterRejected(interceptors, type = "", reason = "") {
-  const state = ensureState(interceptors);
-
-  state.meta.rejectedRegisters = safeInt(state.meta.rejectedRegisters) + 1;
-
-  pushRecent(state, {
-    event: "register:rejected",
-    type,
-    reason,
-  });
-
-  return false;
-}
-
-function recordError(interceptors, type, entry, error, timedOut = false) {
+function recordError(interceptors, type, entry, error) {
   const state = ensureState(interceptors);
 
   state.meta.failed = safeInt(state.meta.failed) + 1;
-
-  if (timedOut) {
-    state.meta.timedOut = safeInt(state.meta.timedOut) + 1;
-  }
-
   state.meta.lastError = {
     type: safeText(type, ""),
     interceptorId: safeText(entry?.id, ""),
     interceptorName: safeText(entry?.name, ""),
     ...sanitizeError(error),
-    timedOut: Boolean(timedOut),
   };
 
-  pushRecent(state, {
-    event: "error",
-    ...state.meta.lastError,
-  });
-
+  pushRecent(state, { event: "error", ...state.meta.lastError });
   return state.meta.lastError;
 }
 
@@ -347,22 +304,17 @@ function normalizeEntry(candidate, index = 0, type = DEFAULT_TYPE) {
       id: `legacy_${cleanType}_${index}`,
       name: candidate.name || `legacy_${cleanType}_${index}`,
       handler: candidate,
-
       priority: 0,
-      timeoutMs: DEFAULT_TIMEOUT_MS,
       failOpen: true,
       once: false,
       enabled: true,
       order: index,
-
       createdAt: "",
       runCount: 0,
       errorCount: 0,
-      timeoutCount: 0,
       lastRunAt: "",
       lastDurationMs: 0,
       lastError: null,
-
       tags: [],
       meta: null,
       ref: candidate,
@@ -374,22 +326,17 @@ function normalizeEntry(candidate, index = 0, type = DEFAULT_TYPE) {
       id: safeText(candidate.id, `itc_${cleanType}_${candidate.order || index}`),
       name: safeText(candidate.name, candidate.handler.name || `interceptor_${cleanType}_${index}`),
       handler: candidate.handler,
-
       priority: safeNumber(candidate.priority, 0),
-      timeoutMs: safeInt(candidate.timeoutMs ?? candidate.timeout, DEFAULT_TIMEOUT_MS),
       failOpen: candidate.failClosed === true ? false : candidate.failOpen !== false,
       once: candidate.once === true,
       enabled: candidate.enabled !== false,
       order: safeNumber(candidate.order, index),
-
       createdAt: candidate.createdAt || "",
       runCount: safeInt(candidate.runCount, 0),
       errorCount: safeInt(candidate.errorCount, 0),
-      timeoutCount: safeInt(candidate.timeoutCount, 0),
       lastRunAt: candidate.lastRunAt || "",
       lastDurationMs: safeInt(candidate.lastDurationMs, 0),
       lastError: candidate.lastError || null,
-
       tags: safeArray(candidate.tags),
       meta: isObject(candidate.meta) ? sanitizeValue(candidate.meta) : null,
       ref: candidate.ref || candidate,
@@ -399,31 +346,7 @@ function normalizeEntry(candidate, index = 0, type = DEFAULT_TYPE) {
   return null;
 }
 
-function normalizeRegistration(handlerOrEntry, options = {}) {
-  if (isFn(handlerOrEntry)) {
-    return {
-      handler: handlerOrEntry,
-      options: safeObject(options),
-    };
-  }
-
-  if (isObject(handlerOrEntry) && isFn(handlerOrEntry.handler)) {
-    return {
-      handler: handlerOrEntry.handler,
-      options: {
-        ...handlerOrEntry,
-        ...safeObject(options),
-      },
-    };
-  }
-
-  return {
-    handler: null,
-    options: safeObject(options),
-  };
-}
-
-function sortedSnapshot(bucket = [], type = DEFAULT_TYPE) {
+function sortedEnabled(bucket = [], type = DEFAULT_TYPE) {
   return bucket
     .map((entry, index) => normalizeEntry(entry, index, type))
     .filter(Boolean)
@@ -448,13 +371,12 @@ function findIndex(bucket = [], ref) {
 function patchRuntime(bucket = [], entry, patch = {}) {
   if (!Array.isArray(bucket) || !entry?.id) return false;
 
-  const target = bucket.find((item) => {
-    if (item === entry.ref) return true;
-    if (item?.id === entry.id) return true;
-    if (item?.handler === entry.handler) return true;
-    if (item?.ref === entry.ref) return true;
-    return false;
-  });
+  const target = bucket.find((item) => (
+    item === entry.ref ||
+    item?.id === entry.id ||
+    item?.handler === entry.handler ||
+    item?.ref === entry.ref
+  ));
 
   if (target && isObject(target)) {
     Object.assign(target, patch);
@@ -468,21 +390,31 @@ function patchRuntime(bucket = [], entry, patch = {}) {
    REGISTER / EJECT
 ========================================================= */
 
+function normalizeRegistration(handlerOrEntry, options = {}) {
+  if (isFn(handlerOrEntry)) {
+    return { handler: handlerOrEntry, options: safeObject(options) };
+  }
+
+  if (isObject(handlerOrEntry) && isFn(handlerOrEntry.handler)) {
+    return {
+      handler: handlerOrEntry.handler,
+      options: { ...handlerOrEntry, ...safeObject(options) },
+    };
+  }
+
+  return { handler: null, options: safeObject(options) };
+}
+
 function registerInterceptor(interceptors, type, handlerOrEntry, options = {}) {
   const cleanType = assertType(type);
   const state = ensureState(interceptors);
   const bucket = bucketOf(state, cleanType);
-
   const { handler, options: opts } = normalizeRegistration(handlerOrEntry, options);
 
   if (!isFn(handler)) {
-    recordRegisterRejected(state, cleanType, "handler-missing");
+    state.meta.rejectedRegisters = safeInt(state.meta.rejectedRegisters) + 1;
+    pushRecent(state, { event: "register:rejected", type: cleanType, reason: "handler-missing" });
     throw new Error(`use${cleanType[0].toUpperCase()}${cleanType.slice(1)}(fn) requiere una función`);
-  }
-
-  if (bucket.length >= MAX_BUCKET_SIZE && opts.force !== true) {
-    recordRegisterRejected(state, cleanType, "max-bucket-size");
-    throw new Error(`Demasiados interceptores registrados para ${cleanType}.`);
   }
 
   const id = safeText(opts.id, "") || nextId(cleanType);
@@ -490,13 +422,7 @@ function registerInterceptor(interceptors, type, handlerOrEntry, options = {}) {
 
   if (existingIndex >= 0 && opts.replace !== true && opts.overwrite !== true) {
     state.meta.duplicates = safeInt(state.meta.duplicates) + 1;
-
-    pushRecent(state, {
-      event: "duplicate",
-      type: cleanType,
-      id,
-    });
-
+    pushRecent(state, { event: "duplicate", type: cleanType, id });
     return noopDisposer;
   }
 
@@ -509,22 +435,17 @@ function registerInterceptor(interceptors, type, handlerOrEntry, options = {}) {
     id,
     name: safeText(opts.name, handler.name || id),
     handler,
-
     priority: safeNumber(opts.priority, 0),
-    timeoutMs: safeInt(opts.timeoutMs ?? opts.timeout, DEFAULT_TIMEOUT_MS),
     failOpen: opts.failClosed === true ? false : opts.failOpen !== false,
     once: opts.once === true,
     enabled: opts.enabled !== false,
     order: nextOrder(),
-
     createdAt: isoNow(),
     runCount: 0,
     errorCount: 0,
-    timeoutCount: 0,
     lastRunAt: "",
     lastDurationMs: 0,
     lastError: null,
-
     tags: safeArray(opts.tags),
     meta: isObject(opts.meta) ? sanitizeValue(opts.meta) : null,
     ref: handler,
@@ -533,7 +454,6 @@ function registerInterceptor(interceptors, type, handlerOrEntry, options = {}) {
   bucket.push(entry);
 
   state.meta.registered = safeInt(state.meta.registered) + 1;
-
   pushRecent(state, {
     event: existingIndex >= 0 ? "replaced" : "registered",
     type: cleanType,
@@ -547,22 +467,14 @@ function registerInterceptor(interceptors, type, handlerOrEntry, options = {}) {
 
   return () => {
     if (disposed) return false;
-
     disposed = true;
 
     const index = findIndex(bucket, entry.id);
-
     if (index < 0) return false;
 
     bucket.splice(index, 1);
     state.meta.ejected = safeInt(state.meta.ejected) + 1;
-
-    pushRecent(state, {
-      event: "ejected",
-      type: cleanType,
-      id: entry.id,
-    });
-
+    pushRecent(state, { event: "ejected", type: cleanType, id: entry.id });
     return true;
   };
 }
@@ -583,14 +495,12 @@ export function ejectInterceptor(interceptors, type, ref) {
   const state = ensureState(interceptors);
   const cleanType = assertType(type);
   const bucket = bucketOf(state, cleanType);
-
   const index = findIndex(bucket, ref);
 
   if (index < 0) return false;
 
   bucket.splice(index, 1);
   state.meta.ejected = safeInt(state.meta.ejected) + 1;
-
   pushRecent(state, {
     event: "ejected",
     type: cleanType,
@@ -604,14 +514,10 @@ function setEnabled(interceptors, type, ref, enabled) {
   const bucket = bucketOf(interceptors, type);
   const index = findIndex(bucket, ref);
 
-  if (index < 0) return false;
+  if (index < 0 || !isObject(bucket[index])) return false;
 
-  if (isObject(bucket[index])) {
-    bucket[index].enabled = Boolean(enabled);
-    return true;
-  }
-
-  return false;
+  bucket[index].enabled = Boolean(enabled);
+  return true;
 }
 
 export function enableInterceptor(interceptors, type, ref) {
@@ -626,65 +532,19 @@ export function disableInterceptor(interceptors, type, ref) {
    RUNNER
 ========================================================= */
 
-async function runWithTimeout(promise, timeoutMs, label = "interceptor") {
-  const finalTimeout = safeInt(timeoutMs, 0);
-
-  if (finalTimeout <= 0) return promise;
-
-  let timeoutId = null;
-  let didTimeout = false;
-
-  const timeoutPromise = new Promise((_, reject) => {
-    try {
-      timeoutId = setTimeout(() => {
-        didTimeout = true;
-
-        const error = new Error(`Interceptor timeout (${label})`);
-        error.name = "InterceptorTimeoutError";
-        error.timeout = true;
-
-        reject(error);
-      }, finalTimeout);
-    } catch (error) {
-      reject(error);
-    }
-  });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } catch (error) {
-    if (didTimeout) {
-      try {
-        error.timeout = true;
-      } catch {}
-    }
-
-    throw error;
-  } finally {
-    if (timeoutId) {
-      try {
-        clearTimeout(timeoutId);
-      } catch {}
-    }
-  }
-}
-
 function buildContext(type, entry, extra = {}) {
   return {
     type,
-
     interceptor: {
       id: entry.id,
       name: entry.name,
       priority: entry.priority,
       once: entry.once,
-      timeoutMs: entry.timeoutMs,
       failOpen: entry.failOpen,
       order: entry.order,
       tags: entry.tags || [],
       meta: entry.meta || null,
     },
-
     ...extra,
   };
 }
@@ -704,11 +564,9 @@ function patchSuccess(bucket, entry, startedAt) {
 
 function patchFailure(bucket, entry, startedAt, error) {
   const durationMs = nowMs() - startedAt;
-  const timedOut = error?.timeout === true;
 
   patchRuntime(bucket, entry, {
     errorCount: safeInt(entry.errorCount) + 1,
-    timeoutCount: safeInt(entry.timeoutCount) + (timedOut ? 1 : 0),
     lastRunAt: isoNow(),
     lastDurationMs: durationMs,
     lastError: sanitizeError(error),
@@ -729,54 +587,33 @@ function removeOnce(state, type, entry) {
   return removed;
 }
 
-async function runChain({
-  interceptors,
-  type,
-  initialValue,
-  requestConfig,
-  invoke,
-  applyResult,
-} = {}) {
+async function runChain({ interceptors, type, initialValue, requestConfig, invoke, applyResult } = {}) {
   const state = ensureState(interceptors);
   const bucket = bucketOf(state, type);
-  const snapshot = sortedSnapshot(bucket, type);
+  const entries = sortedEnabled(bucket, type);
 
   let current = initialValue;
 
-  if (!snapshot.length) {
+  if (!entries.length) {
     recordSkipped(state, type);
     return current;
   }
 
   touchRun(state, type);
 
-  for (const entry of snapshot) {
+  for (const entry of entries) {
     const startedAt = nowMs();
 
     try {
-      const result = await runWithTimeout(
-        Promise.resolve(invoke(entry, current, requestConfig)),
-        entry.timeoutMs,
-        `${entry.name}:${type}`
-      );
+      const result = await entry.handler(...invoke(entry, current, requestConfig));
 
       patchSuccess(bucket, entry, startedAt);
-
       current = applyResult(current, result);
-    } catch (interceptorError) {
-      patchFailure(bucket, entry, startedAt, interceptorError);
+    } catch (error) {
+      patchFailure(bucket, entry, startedAt, error);
+      recordError(state, type, entry, error);
 
-      recordError(
-        state,
-        type,
-        entry,
-        interceptorError,
-        interceptorError?.timeout === true
-      );
-
-      if (entry.failOpen === false) {
-        throw interceptorError;
-      }
+      if (entry.failOpen === false) throw error;
     } finally {
       removeOnce(state, type, entry);
     }
@@ -793,7 +630,7 @@ export function runRequestInterceptors(interceptors, requestConfig) {
     requestConfig,
 
     invoke(entry, current) {
-      return entry.handler(current, buildContext("request", entry));
+      return [current, buildContext("request", entry)];
     },
 
     applyResult(current, result) {
@@ -810,7 +647,7 @@ export function runResponseInterceptors(interceptors, response, requestConfig) {
     requestConfig,
 
     invoke(entry, current, cfg) {
-      return entry.handler(current, cfg, buildContext("response", entry));
+      return [current, cfg, buildContext("response", entry)];
     },
 
     applyResult(current, result) {
@@ -827,7 +664,7 @@ export function runErrorInterceptors(interceptors, error, requestConfig) {
     requestConfig,
 
     invoke(entry, current, cfg) {
-      return entry.handler(current, cfg, buildContext("error", entry));
+      return [current, cfg, buildContext("error", entry)];
     },
 
     applyResult(current, result) {
@@ -852,12 +689,7 @@ export function clearInterceptors(interceptors, type = "") {
 
     state.meta.ejected = safeInt(state.meta.ejected) + count;
     state.meta.cleared = safeInt(state.meta.cleared) + count;
-
-    pushRecent(state, {
-      event: "cleared",
-      type: cleanType,
-      count,
-    });
+    pushRecent(state, { event: "cleared", type: cleanType, count });
 
     return count;
   }
@@ -882,7 +714,6 @@ export function resetInterceptorsRuntime(interceptors) {
 
       entry.runCount = 0;
       entry.errorCount = 0;
-      entry.timeoutCount = 0;
       entry.lastRunAt = "";
       entry.lastDurationMs = 0;
       entry.lastError = null;
@@ -891,7 +722,6 @@ export function resetInterceptorsRuntime(interceptors) {
 
   state.meta.executed = 0;
   state.meta.failed = 0;
-  state.meta.timedOut = 0;
   state.meta.skipped = 0;
   state.meta.lastRunAt = "";
   state.meta.lastRunType = "";
@@ -913,22 +743,16 @@ function serializeBucket(state, type) {
       id: normalized?.id || "",
       name: normalized?.name || "",
       priority: normalized?.priority || 0,
-      timeoutMs: normalized?.timeoutMs || 0,
       failOpen: normalized?.failOpen !== false,
       once: normalized?.once === true,
       enabled: normalized?.enabled !== false,
       order: normalized?.order || 0,
       createdAt: normalized?.createdAt || "",
-
       runCount: normalized?.runCount || 0,
       errorCount: normalized?.errorCount || 0,
-      timeoutCount: normalized?.timeoutCount || 0,
       lastRunAt: normalized?.lastRunAt || "",
       lastDurationMs: normalized?.lastDurationMs || 0,
-      lastError: normalized?.lastError
-        ? sanitizeError(normalized.lastError)
-        : null,
-
+      lastError: normalized?.lastError ? sanitizeError(normalized.lastError) : null,
       tags: normalized?.tags || [],
       meta: normalized?.meta || null,
     };
@@ -938,35 +762,37 @@ function serializeBucket(state, type) {
 export function getInterceptorsSnapshot(interceptors) {
   const state = ensureState(interceptors);
 
-  return {
+  return sanitizeValue({
     version: INTERCEPTORS_VERSION,
-
     counts: {
       request: state.request.length,
       response: state.response.length,
       error: state.error.length,
     },
-
     activeCounts: {
-      request: sortedSnapshot(state.request, "request").length,
-      response: sortedSnapshot(state.response, "response").length,
-      error: sortedSnapshot(state.error, "error").length,
+      request: sortedEnabled(state.request, "request").length,
+      response: sortedEnabled(state.response, "response").length,
+      error: sortedEnabled(state.error, "error").length,
     },
-
     request: serializeBucket(state, "request"),
     response: serializeBucket(state, "response"),
     error: serializeBucket(state, "error"),
-
     meta: {
       ...state.meta,
       lastError: state.meta.lastError ? sanitizeError(state.meta.lastError) : null,
-      recent: safeArray(state.meta.recent)
-        .slice(0, MAX_RECENT)
-        .map((item) => sanitizeValue(item)),
+      recent: safeArray(state.meta.recent).slice(0, MAX_RECENT).map((item) => sanitizeValue(item)),
     },
-
+    policy: {
+      ownFetch: false,
+      ownRetry: false,
+      ownRefresh: false,
+      ownAuth: false,
+      ownRouter: false,
+      ownToast: false,
+      ownStorage: false,
+    },
     at: isoNow(),
-  };
+  });
 }
 
 /* =========================================================

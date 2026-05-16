@@ -2,7 +2,7 @@
    Onion SPA - Toast API
    Archivo: src/ui/toast/api.js
 
-   Toast API limpio:
+   TOAST API · SIMPLE
    - show / update / dismiss / clear
    - success / error / warning / info / loading
    - store + dom + timers + events sincronizados
@@ -77,11 +77,7 @@ import {
   emitToastDismissed,
 } from "./events.js";
 
-/* =========================================================
-   VERSION / CONSTANTS
-========================================================= */
-
-export const TOAST_API_VERSION = "17.0.1-warn-fix";
+export const TOAST_API_VERSION = "18.0.0-simple";
 
 const SOURCE = "ui.toast.api";
 
@@ -99,13 +95,8 @@ const EVENT_SOURCE_BLOCKLIST = new Set([
   "toast-api:reset",
 ]);
 
-/* =========================================================
-   RUNTIME
-========================================================= */
-
 let clearRunning = false;
 let resetRunning = false;
-
 let lastClearEmitAt = 0;
 let lastResetEmitAt = 0;
 
@@ -132,21 +123,20 @@ function safeObject(value) {
 }
 
 function safeBool(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-  if (value === 1) return true;
-  if (value === 0) return false;
+  if (value === true || value === false) return value;
+  if (value === 1 || value === "1") return true;
+  if (value === 0 || value === "0") return false;
 
   const text = safeText(value, "").toLowerCase();
-
-  if (["true", "1", "yes", "si", "sí", "on", "ok"].includes(text)) return true;
-  if (["false", "0", "no", "off"].includes(text)) return false;
+  if (["true", "yes", "si", "sí", "on", "ok"].includes(text)) return true;
+  if (["false", "no", "off"].includes(text)) return false;
 
   return Boolean(fallback);
 }
 
 function safeNumber(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+  const output = Number(value);
+  return Number.isFinite(output) ? output : fallback;
 }
 
 function now() {
@@ -172,9 +162,7 @@ function safeWarn(...args) {
   } catch {}
 
   try {
-    if (AppCore?.config?.debug) {
-      console.warn("[ToastAPI]", ...args);
-    }
+    if (AppCore?.config?.debug) console.warn("[ToastAPI]", ...args);
   } catch {}
 }
 
@@ -211,9 +199,6 @@ function emit(eventName, payload = {}, options = {}) {
     }
   } catch {}
 
-  /*
-    No duplicar bus + window salvo petición explícita.
-  */
   if ((options.window === true || !hasBus) && isBrowser()) {
     try {
       window.dispatchEvent(new CustomEvent(name, { detail }));
@@ -231,7 +216,6 @@ function nextFrame(callback) {
     try {
       callback();
     } catch {}
-
     return true;
   }
 
@@ -241,7 +225,6 @@ function nextFrame(callback) {
         callback();
       } catch {}
     });
-
     return true;
   } catch {}
 
@@ -251,7 +234,6 @@ function nextFrame(callback) {
         callback();
       } catch {}
     }, 0);
-
     return true;
   } catch {
     return false;
@@ -265,7 +247,6 @@ function delay(callback, ms = 0) {
     try {
       callback();
     } catch {}
-
     return null;
   }
 
@@ -279,30 +260,21 @@ function delay(callback, ms = 0) {
     try {
       callback();
     } catch {}
-
     return null;
   }
 }
 
 function eventSource(options = {}) {
-  return safeText(
-    options.source ||
-      options.origin ||
-      options.eventSource ||
-      "",
-    ""
-  );
+  return safeText(options.source || options.origin || options.eventSource || "", "");
 }
 
 function shouldEmitClear(options = {}) {
   if (options.silent === true || options.emit === false) return false;
 
   const source = eventSource(options);
-
   if (source && EVENT_SOURCE_BLOCKLIST.has(source)) return false;
 
   const stamp = now();
-
   if (stamp - lastClearEmitAt < CLEAR_DEDUPE_MS) return false;
 
   lastClearEmitAt = stamp;
@@ -313,11 +285,9 @@ function shouldEmitReset(options = {}) {
   if (options.silent === true || options.emit === false) return false;
 
   const source = eventSource(options);
-
   if (source && EVENT_SOURCE_BLOCKLIST.has(source)) return false;
 
   const stamp = now();
-
   if (stamp - lastResetEmitAt < RESET_DEDUPE_MS) return false;
 
   lastResetEmitAt = stamp;
@@ -345,6 +315,33 @@ function ensureDom() {
   }
 }
 
+function progressNode(node = null) {
+  if (!node) return null;
+
+  try {
+    return node.querySelector(".toast-progress") || null;
+  } catch {
+    return null;
+  }
+}
+
+function createNode(item) {
+  if (!item) return null;
+
+  try {
+    return createToastNode({
+      id: item.id,
+      type: item.type,
+      title: item.title,
+      message: item.message,
+      closable: item.closable,
+    });
+  } catch (error) {
+    safeWarn("createToastNode falló.", error);
+    return null;
+  }
+}
+
 function appendNode(item) {
   if (!item?.toastEl) return false;
 
@@ -352,10 +349,7 @@ function appendNode(item) {
   if (!container) return false;
 
   try {
-    if (!item.toastEl.isConnected) {
-      container.appendChild(item.toastEl);
-    }
-
+    if (!item.toastEl.isConnected) container.appendChild(item.toastEl);
     return true;
   } catch (error) {
     safeWarn("No se pudo insertar toast.", error);
@@ -392,38 +386,12 @@ function hideNode(item) {
   }
 }
 
-function progressNode(node = null) {
-  if (!node) return null;
-
-  try {
-    return node.querySelector(".toast-progress") || null;
-  } catch {
-    return null;
-  }
-}
-
-function createNode(item) {
-  if (!item) return null;
-
-  try {
-    return createToastNode({
-      id: item.id,
-      type: item.type,
-      title: item.title,
-      message: item.message,
-      closable: item.closable,
-    });
-  } catch (error) {
-    safeWarn("createToastNode falló.", error);
-    return null;
-  }
-}
-
 function patchNode(item) {
   if (!item?.toastEl) return false;
 
   try {
     patchToastNode(item);
+    item.progressEl = item.progressEl || progressNode(item.toastEl);
     return true;
   } catch {
     return false;
@@ -437,34 +405,23 @@ function replaceNode(item) {
   if (!next) return false;
 
   try {
-    if (item.toastEl?.isConnected) {
-      item.toastEl.replaceWith(next);
-    }
-
-    item.toastEl = next;
-    item.progressEl = progressNode(next);
-    item.interactionsBound = false;
-
-    return true;
+    if (item.toastEl?.isConnected) item.toastEl.replaceWith(next);
   } catch (error) {
     safeWarn("No se pudo reemplazar toast node.", error);
-
-    item.toastEl = next;
-    item.progressEl = progressNode(next);
-    item.interactionsBound = false;
-
-    return false;
   }
+
+  item.toastEl = next;
+  item.progressEl = progressNode(next);
+  item.interactionsBound = false;
+
+  return true;
 }
 
 function syncNode(item, options = {}) {
   if (!item) return false;
 
-  if (options.replaceNode === true || !item.toastEl) {
-    replaceNode(item);
-  } else if (!patchNode(item)) {
-    replaceNode(item);
-  }
+  if (options.replaceNode === true || !item.toastEl) replaceNode(item);
+  else if (!patchNode(item)) replaceNode(item);
 
   appendNode(item);
   bindInteractions(item);
@@ -473,7 +430,7 @@ function syncNode(item, options = {}) {
 }
 
 /* =========================================================
-   ITEM
+   ITEM / INPUT
 ========================================================= */
 
 function buildItem({
@@ -511,13 +468,13 @@ function buildItem({
     updatedAt: createdAt,
 
     dismissed: false,
+    dismissedAt: 0,
     dismissReason: "",
 
     useDefaultTitle: Boolean(useDefaultTitle),
     useDefaultMessage: Boolean(useDefaultMessage),
 
     interactionsBound: false,
-
     meta: safeObject(meta),
   };
 }
@@ -528,41 +485,19 @@ function idFromOptions(options = {}) {
 
 function normalizeInput(input = {}, maybeOptions = {}) {
   const source = isObject(input)
-    ? {
-        ...input,
-        ...safeObject(maybeOptions),
-      }
-    : {
-        ...safeObject(maybeOptions),
-        message: input,
-      };
+    ? { ...input, ...safeObject(maybeOptions) }
+    : { ...safeObject(maybeOptions), message: input };
 
   const type = normalizeToastType(source.type);
-
-  const rawMessage =
-    source.message !== undefined
-      ? source.message
-      : source.text;
+  const rawMessage = source.message !== undefined ? source.message : source.text;
 
   const useDefaultTitle = source.useDefaultTitle === true;
+  const useDefaultMessage = source.useDefaultMessage !== undefined
+    ? source.useDefaultMessage === true
+    : !safeText(rawMessage, "") || type === TOAST_TYPE_LOADING;
 
-  const useDefaultMessage =
-    source.useDefaultMessage !== undefined
-      ? source.useDefaultMessage === true
-      : !safeText(rawMessage, "") || type === TOAST_TYPE_LOADING;
-
-  const title = resolveToastTitle(
-    type,
-    source.title,
-    useDefaultTitle
-  );
-
-  const message = resolveToastMessage(
-    type,
-    source.message,
-    source.text,
-    useDefaultMessage
-  );
+  const title = resolveToastTitle(type, source.title, useDefaultTitle);
+  const message = resolveToastMessage(type, source.message, source.text, useDefaultMessage);
 
   const duration = source.persist === true || source.persistent === true
     ? 0
@@ -595,21 +530,27 @@ function normalizeInput(input = {}, maybeOptions = {}) {
   };
 }
 
+function cleanDedupe() {
+  const stamp = now();
+
+  for (const [key, value] of DEDUPE.entries()) {
+    if (!value || stamp - safeNumber(value.at, 0) > DEFAULT_DEDUPE_MS * 8) DEDUPE.delete(key);
+  }
+}
+
 function shouldSkipDedupe(input) {
   if (!input?.dedupe || !input.dedupeKey) return false;
+
+  cleanDedupe();
 
   const previous = DEDUPE.get(input.dedupeKey);
   const stamp = now();
 
   if (previous && stamp - previous.at < input.dedupeMs) {
-    return previous.id || true;
+    if (previous.id && getToastItem(previous.id)) return previous.id;
   }
 
-  DEDUPE.set(input.dedupeKey, {
-    at: stamp,
-    id: input.id,
-  });
-
+  DEDUPE.set(input.dedupeKey, { at: stamp, id: input.id });
   return false;
 }
 
@@ -677,7 +618,6 @@ function syncTimer(item) {
 
 function bindInteractions(item) {
   const node = item?.toastEl;
-
   if (!node || item.interactionsBound) return false;
 
   try {
@@ -734,18 +674,9 @@ function enforceLimit() {
 
   while (active.length > TOAST_MAX_ITEMS) {
     const oldest = active.shift();
-
     if (!oldest?.id) continue;
 
-    if (
-      dismissToast(oldest.id, {
-        reason: "limit",
-        emit: false,
-        source: "toast-limit",
-      })
-    ) {
-      removed += 1;
-    }
+    if (dismissToast(oldest.id, { reason: "limit", emit: false, source: "toast-limit" })) removed += 1;
   }
 
   return removed;
@@ -760,16 +691,13 @@ export function showToast(input = {}, maybeOptions = {}) {
 
   const normalized = normalizeInput(input, maybeOptions);
 
-  if (!normalized.message) {
+  if (!safeText(normalized.message, "")) {
     safeWarn("showToast requiere message/text.");
     return null;
   }
 
   const duplicate = shouldSkipDedupe(normalized);
-
-  if (duplicate) {
-    return typeof duplicate === "string" ? duplicate : normalized.id;
-  }
+  if (duplicate) return typeof duplicate === "string" ? duplicate : normalized.id;
 
   if (!ensureDom()) return null;
 
@@ -786,7 +714,7 @@ export function showToast(input = {}, maybeOptions = {}) {
         useDefaultTitle: normalized.useDefaultTitle,
         useDefaultMessage: normalized.useDefaultMessage,
         meta: normalized.meta,
-        replaceNode: true,
+        replaceNode: normalized.replaceNode === true,
       });
     }
 
@@ -796,7 +724,6 @@ export function showToast(input = {}, maybeOptions = {}) {
   }
 
   const toastEl = createNode(normalized);
-
   if (!toastEl) return null;
 
   const item = buildItem({
@@ -825,26 +752,16 @@ export function showToast(input = {}, maybeOptions = {}) {
 
 export function updateToast(id = "", patch = {}) {
   const toastId = safeText(id, "");
-
   if (!toastId) return null;
 
   const item = getToastItem(toastId);
-
   if (!item || item.dismissed) return null;
 
   const input = safeObject(patch);
 
-  const nextType = input.type !== undefined
-    ? normalizeToastType(input.type)
-    : item.type;
-
-  const nextUseDefaultTitle = input.useDefaultTitle !== undefined
-    ? input.useDefaultTitle === true
-    : item.useDefaultTitle;
-
-  const nextUseDefaultMessage = input.useDefaultMessage !== undefined
-    ? input.useDefaultMessage === true
-    : item.useDefaultMessage;
+  const nextType = input.type !== undefined ? normalizeToastType(input.type) : item.type;
+  const nextUseDefaultTitle = input.useDefaultTitle !== undefined ? input.useDefaultTitle === true : item.useDefaultTitle;
+  const nextUseDefaultMessage = input.useDefaultMessage !== undefined ? input.useDefaultMessage === true : item.useDefaultMessage;
 
   const nextTitle = input.title !== undefined
     ? resolveToastTitle(nextType, input.title, nextUseDefaultTitle)
@@ -858,25 +775,23 @@ export function updateToast(id = "", patch = {}) {
       ? getToastMessage(nextType)
       : item.message;
 
-  if (!nextMessage) {
+  if (!safeText(nextMessage, "")) {
     safeWarn("updateToast requiere message/text.");
     return null;
   }
 
-  const nextDuration =
-    input.duration !== undefined ||
-    input.persist !== undefined ||
-    input.persistent !== undefined
-      ? input.persist === true || input.persistent === true
-        ? 0
-        : normalizeToastDuration(nextType, input.duration)
-      : item.duration;
+  const nextDuration = input.duration !== undefined || input.persist !== undefined || input.persistent !== undefined
+    ? input.persist === true || input.persistent === true
+      ? 0
+      : normalizeToastDuration(nextType, input.duration)
+    : item.duration;
 
   const nextClosable = input.closable !== undefined
     ? input.closable !== false
     : nextType !== TOAST_TYPE_LOADING && item.closable !== false;
 
   clearTimer(item);
+  unmarkToastDismissing(toastId);
 
   item.type = nextType;
   item.title = nextTitle;
@@ -888,18 +803,12 @@ export function updateToast(id = "", patch = {}) {
   item.useDefaultTitle = nextUseDefaultTitle;
   item.useDefaultMessage = nextUseDefaultMessage;
   item.updatedAt = now();
+  item.dismissed = false;
+  item.dismissReason = "";
 
-  if (isObject(input.meta)) {
-    item.meta = {
-      ...safeObject(item.meta),
-      ...input.meta,
-    };
-  }
+  if (isObject(input.meta)) item.meta = { ...safeObject(item.meta), ...input.meta };
 
-  syncNode(item, {
-    replaceNode: input.replaceNode === true,
-  });
-
+  syncNode(item, { replaceNode: input.replaceNode === true });
   syncProgress(item);
   syncTimer(item);
   showNode(item);
@@ -919,13 +828,10 @@ export function updateToast(id = "", patch = {}) {
 
 export function dismissToast(id = "", options = {}) {
   const toastId = safeText(id, "");
-
   if (!toastId) return false;
 
   const item = getToastItem(toastId);
-
   if (!item) return false;
-
   if (item.dismissed || isToastDismissing(toastId)) return false;
 
   const opts = safeObject(options);
@@ -938,35 +844,27 @@ export function dismissToast(id = "", options = {}) {
   item.dismissedAt = now();
 
   clearTimer(item);
+  hideNode(item);
 
   const delayMs = prefersReducedMotion()
     ? TOAST_REDUCED_MOTION_EXIT_DURATION
     : safeNumber(opts.delay, TOAST_EXIT_DURATION);
 
-  hideNode(item);
+  delay(() => destroyItem(item), delayMs);
 
-  const snapshot = {
-    id: item.id,
-    type: item.type,
-    reason,
-  };
-
-  delay(() => {
-    destroyItem(item);
-  }, delayMs);
-
-  try {
-    emitToastDismissed(item);
-  } catch (error) {
-    safeWarn("emitToastDismissed falló.", error);
+  if (opts.emit !== false && opts.silent !== true) {
+    try {
+      emitToastDismissed(item);
+    } catch (error) {
+      safeWarn("emitToastDismissed falló.", error);
+    }
   }
 
-  return snapshot.id;
+  return item.id;
 }
 
 export function clearToasts(options = {}) {
   const opts = safeObject(options);
-
   if (clearRunning) return false;
 
   clearRunning = true;
@@ -974,7 +872,6 @@ export function clearToasts(options = {}) {
   try {
     const ids = [...getToastIds()];
     const immediate = safeBool(opts.immediate, false);
-
     let cleared = 0;
 
     ids.forEach((id) => {
@@ -983,16 +880,7 @@ export function clearToasts(options = {}) {
         return;
       }
 
-      if (
-        dismissToast(id, {
-          reason: opts.reason || "clear",
-          delay: opts.delay,
-          emit: false,
-          source: "toast-api:clear",
-        })
-      ) {
-        cleared += 1;
-      }
+      if (dismissToast(id, { reason: opts.reason || "clear", delay: opts.delay, emit: false, source: "toast-api:clear" })) cleared += 1;
     });
 
     if (shouldEmitClear(opts)) {
@@ -1024,9 +912,7 @@ export function successToast(message = "", options = {}) {
 }
 
 export function errorToast(message = "", options = {}) {
-  const text = message instanceof Error
-    ? safeText(message.message, "Error inesperado")
-    : safeText(message, "");
+  const text = message instanceof Error ? safeText(message.message, "Error inesperado") : safeText(message, "");
 
   return showToast({
     ...safeObject(options),
@@ -1078,13 +964,8 @@ export function loadingToast(message = "", options = {}) {
 export function refreshToastLanguage(item = null) {
   if (!item || item.dismissed) return null;
 
-  if (item.useDefaultTitle) {
-    item.title = getToastTitle(item.type);
-  }
-
-  if (item.useDefaultMessage) {
-    item.message = getToastMessage(item.type);
-  }
+  if (item.useDefaultTitle) item.title = getToastTitle(item.type);
+  if (item.useDefaultMessage) item.message = getToastMessage(item.type);
 
   item.updatedAt = now();
   patchNode(item);
@@ -1100,10 +981,7 @@ export function refreshAllToastsLanguage() {
     if (refreshToastLanguage(item)) refreshed += 1;
   });
 
-  emit("toast:language:refresh", {
-    refreshed,
-  });
-
+  emit("toast:language:refresh", { refreshed });
   return refreshed;
 }
 
@@ -1113,7 +991,6 @@ export function refreshAllToastsLanguage() {
 
 export function resetToastApiState(options = {}) {
   const opts = safeObject(options);
-
   if (resetRunning) return false;
 
   resetRunning = true;
@@ -1121,9 +998,7 @@ export function resetToastApiState(options = {}) {
   try {
     const items = getToastItems();
 
-    items.forEach((item) => {
-      destroyItem(item);
-    });
+    items.forEach((item) => destroyItem(item));
 
     try {
       resetToastStore();
@@ -1156,23 +1031,17 @@ export function getToastApiSnapshot() {
 
   return {
     version: TOAST_API_VERSION,
-
     count: items.length,
     ids: getToastIds(),
     maxItems: TOAST_MAX_ITEMS,
     activeCount: getActiveToasts().length,
-
     clearRunning,
     resetRunning,
-
     lastClearEmitAt,
     lastClearEmitAtIso: lastClearEmitAt ? iso(lastClearEmitAt) : "",
-
     lastResetEmitAt,
     lastResetEmitAtIso: lastResetEmitAt ? iso(lastResetEmitAt) : "",
-
     dedupeCount: DEDUPE.size,
-
     items: items.map((item) => ({
       id: item.id,
       type: item.type,

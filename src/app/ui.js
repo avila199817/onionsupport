@@ -3,15 +3,14 @@
    Archivo: src/app/ui.js
 
    App UI simple:
-   - Inicializa Toast / Sidebar / Topbar una sola vez.
-   - Registra módulos en AppCore sin duplicados.
-   - syncUserUI() solo sincroniza usuario / rol / ruta / tema / idioma.
-   - repairUISystems() por defecto hace sync ligero.
-   - rebind / hardRepair solo explícitos.
-   - AppUI emite app:user-ui:sync.
-   - AppUI NO escucha app:user-ui:sync.
-   - AppUI NO emite app:ui:repair-request.
-   - Sin CSS inline, sin estilos inyectados.
+   - Registra Toast / Sidebar / Topbar sin duplicar.
+   - Toast bridge canónico: AppCore.showToast / AppCore.setShowToast.
+   - No pisa AppCore.toast: Toast sigue siendo módulo.
+   - No inicializa Sidebar/Topbar en rutas auth/login.
+   - Sidebar/Topbar se inicializan lazy al entrar en rutas app.
+   - syncUserUI() es ligero y deduplicado.
+   - repairUISystems() NO emite repair-request.
+   - Sin HTTP, sin Router propio, sin Auth propio, sin estilos runtime.
 ========================================================= */
 
 import { registerModule } from "./helpers.js";
@@ -28,7 +27,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const UI_VERSION = "17.0.0-clean";
+export const UI_VERSION = "18.0.0-simple-fast";
 
 const SOURCE = "app:ui";
 
@@ -50,7 +49,6 @@ const EVENTS = Object.freeze({
   repairSkipped: "app:ui:repair:skipped",
 
   userSync: APP_EVENTS?.userUiSync || "app:user-ui:sync",
-  userSyncStart: "app:user-ui:sync:start",
   userSyncDone: "app:user-ui:sync:done",
   userSyncError: "app:user-ui:sync:error",
 
@@ -71,11 +69,8 @@ const EVENTS = Object.freeze({
   authLogoutSuccess: AUTH_EVENTS?.logoutSuccess || "auth:logout:success",
 
   toastBridgeReady: "app:ui:toast-bridge:ready",
-
   moduleRegistered: "app:ui:module:registered",
   moduleInit: "app:ui:module:init",
-  moduleSkipped: "app:ui:module:skipped",
-  moduleError: "app:ui:module:error",
 
   runtimeEventsBound: "app:ui:runtime-events:bound",
   runtimeEventsUnbound: "app:ui:runtime-events:unbound",
@@ -90,36 +85,14 @@ const MODULES = Object.freeze({
 });
 
 const MODULE_ALIASES = Object.freeze({
-  toast: Object.freeze([
-    "toast",
-    "Toast",
-    "toastModule",
-    "notifications",
-  ]),
-
-  sidebar: Object.freeze([
-    "sidebar",
-    "sidebarUI",
-    "SidebarUI",
-    "Sidebar",
-  ]),
-
-  topbar: Object.freeze([
-    "topbar",
-    "topbarUI",
-    "TopbarUI",
-    "Topbar",
-  ]),
+  toast: Object.freeze(["toast", "Toast", "notifications"]),
+  sidebar: Object.freeze(["sidebar", "sidebarUI", "SidebarUI", "Sidebar"]),
+  topbar: Object.freeze(["topbar", "topbarUI", "TopbarUI", "Topbar"]),
 });
 
-const INIT_METHODS = Object.freeze([
-  "init",
-  "boot",
-  "mount",
-  "start",
-]);
+const INIT_METHODS = Object.freeze(["init", "boot", "mount", "start"]);
 
-const SIDEBAR_LIGHT_METHODS = Object.freeze([
+const SIDEBAR_SYNC_METHODS = Object.freeze([
   "renderUser",
   "refreshUser",
   "updateUser",
@@ -132,7 +105,7 @@ const SIDEBAR_LIGHT_METHODS = Object.freeze([
   "sync",
 ]);
 
-const TOPBAR_LIGHT_METHODS = Object.freeze([
+const TOPBAR_SYNC_METHODS = Object.freeze([
   "renderUser",
   "refreshUser",
   "updateUser",
@@ -145,18 +118,8 @@ const TOPBAR_LIGHT_METHODS = Object.freeze([
   "sync",
 ]);
 
-const HARD_REPAIR_METHODS = Object.freeze([
-  "repair",
-  "refresh",
-  "sync",
-]);
-
-const REBIND_METHODS = Object.freeze([
-  "rebind",
-  "rebindEvents",
-  "bindEvents",
-  "bind",
-]);
+const HARD_REPAIR_METHODS = Object.freeze(["repair", "refresh", "sync"]);
+const REBIND_METHODS = Object.freeze(["rebind", "rebindEvents", "bindEvents", "bind"]);
 
 const TOAST_TYPES = Object.freeze([
   "success",
@@ -165,6 +128,25 @@ const TOAST_TYPES = Object.freeze([
   "warn",
   "info",
   "loading",
+]);
+
+const AUTH_LIKE_FALLBACK_ROUTES = Object.freeze([
+  "/login",
+  "/logout",
+  "/activate-account",
+  "/activate",
+  "/activation",
+  "/reset-password",
+  "/reset-password/confirm",
+  "/forgot-password",
+  "/recover-password",
+  "/password-reset",
+  "/password-reset/confirm",
+  "/2fa",
+  "/otp",
+  "/mfa",
+  "/403",
+  "/404",
 ]);
 
 const SENSITIVE_KEYS_RE =
@@ -196,16 +178,12 @@ const SENSITIVE_QUERY_PARAMS = Object.freeze([
   "sid",
 ]);
 
-const SYNC_DEDUPE_MS = 80;
-const REPAIR_DEDUPE_MS = 140;
-const ROUTE_DEDUPE_MS = 80;
-const LANG_DEDUPE_MS = 120;
-const THEME_DEDUPE_MS = 120;
-const EMIT_DEDUPE_MS = 60;
-const QUEUE_DELAY_MS = 0;
+const SYNC_DEDUPE_MS = 100;
+const REPAIR_DEDUPE_MS = 180;
+const EVENT_DEDUPE_MS = 80;
 
-const MAX_RECENT = 40;
-const MAX_SANITIZE_DEPTH = 5;
+const MAX_RECENT = 20;
+const MAX_SANITIZE_DEPTH = 4;
 
 /* =========================================================
    RUNTIME
@@ -218,11 +196,6 @@ let syncing = false;
 let syncQueued = false;
 let queuedDeps = null;
 
-let languageBound = false;
-let repairBound = false;
-let routeBound = false;
-let sessionBound = false;
-let themeBound = false;
 let runtimeBound = false;
 let toastBridgeBound = false;
 let debugApiBound = false;
@@ -235,24 +208,11 @@ let lastSyncAt = 0;
 let lastRepairSignature = "";
 let lastRepairAt = 0;
 
-let lastRouteSignature = "";
-let lastRouteAt = 0;
-
-let lastLangSignature = "";
-let lastLangAt = 0;
-
-let lastThemeSignature = "";
-let lastThemeAt = 0;
-
-let lastEmitSignature = "";
-let lastEmitAt = 0;
+let lastEventSignature = "";
+let lastEventAt = 0;
 
 const disposers = [];
-const boundEvents = [];
 const boundKeys = new Set();
-
-const registryCache = new Map();
-const registryConflicts = new Set();
 
 const runtime = {
   initialized: false,
@@ -260,7 +220,6 @@ const runtime = {
   initCount: 0,
   syncCount: 0,
   repairCount: 0,
-  repairRequestCount: 0,
   skippedRepairCount: 0,
   eventCount: 0,
   errorCount: 0,
@@ -273,9 +232,6 @@ const runtime = {
 
   lastRepairAt: 0,
   lastRepairReason: "",
-
-  lastEvent: "",
-  lastEventAt: 0,
 
   lastError: null,
   recent: [],
@@ -300,7 +256,7 @@ function isFn(value) {
 }
 
 function isObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value);
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function object(value) {
@@ -324,22 +280,14 @@ function text(value, fallback = "") {
 
 function bool(value, fallback = false) {
   if (typeof value === "boolean") return value;
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
+  if (value === 1) return true;
+  if (value === 0) return false;
 
   if (typeof value === "string") {
-    const key = value.trim().toLowerCase();
+    const clean = value.trim().toLowerCase();
 
-    if (["true", "1", "yes", "si", "sí", "ok", "on"].includes(key)) {
-      return true;
-    }
-
-    if (["false", "0", "no", "off"].includes(key)) {
-      return false;
-    }
+    if (["true", "1", "yes", "si", "sí", "ok", "on"].includes(clean)) return true;
+    if (["false", "0", "no", "off"].includes(clean)) return false;
   }
 
   return Boolean(fallback);
@@ -363,33 +311,13 @@ function iso(ms = now()) {
 
 function clone(value, fallback = null) {
   try {
-    if (typeof structuredClone === "function") {
-      return structuredClone(value);
-    }
+    if (typeof structuredClone === "function") return structuredClone(value);
   } catch {}
 
   try {
     return JSON.parse(JSON.stringify(value));
   } catch {
     return fallback;
-  }
-}
-
-function timeout(callback, ms = 0) {
-  if (!isFn(callback)) return null;
-
-  try {
-    return setTimeout(() => {
-      try {
-        callback();
-      } catch {}
-    }, Math.max(0, Number(ms) || 0));
-  } catch {
-    try {
-      callback();
-    } catch {}
-
-    return null;
   }
 }
 
@@ -491,16 +419,6 @@ function redact(value = "") {
   return output;
 }
 
-function isDomNodeLike(value) {
-  if (!value || typeof value !== "object") return false;
-
-  try {
-    return typeof Node !== "undefined" && value instanceof Node;
-  } catch {}
-
-  return Boolean(value.nodeType && value.nodeName);
-}
-
 function normalizeError(error = null, fallback = "Error UI.") {
   if (!error) return null;
 
@@ -541,18 +459,10 @@ function sanitize(value, depth = 0, keyHint = "") {
 
   if (typeof value === "function") return "[Function]";
 
-  if (isDomNodeLike(value)) {
-    return {
-      node: text(value.nodeName, "Node"),
-      id: text(value.id, ""),
-      className: text(value.className?.baseVal || value.className, ""),
-    };
-  }
-
   if (value instanceof Error) return normalizeError(value);
 
   if (Array.isArray(value)) {
-    return value.slice(0, 80).map((item) => sanitize(item, depth + 1, keyHint));
+    return value.slice(0, 40).map((item) => sanitize(item, depth + 1, keyHint));
   }
 
   if (value instanceof Map) {
@@ -572,18 +482,18 @@ function sanitize(value, depth = 0, keyHint = "") {
   if (isObject(value)) {
     const output = {};
 
-    for (const [key, item] of Object.entries(value).slice(0, 120)) {
+    for (const [key, item] of Object.entries(value).slice(0, 80)) {
       output[key] = sanitize(item, depth + 1, key);
     }
 
     return output;
   }
 
-  return value;
+  return String(value);
 }
 
 /* =========================================================
-   LOG / EMIT / RECENT
+   LOG / EMIT
 ========================================================= */
 
 function pushRecent(event = {}) {
@@ -601,76 +511,61 @@ function pushRecent(event = {}) {
 }
 
 function log(AppCore, ...args) {
-  const clean = args.map((item) => sanitize(item));
-
   try {
-    AppCore?.utils?.log?.("[AppUI]", ...clean);
-    return;
-  } catch {}
-
-  try {
-    if (AppCore?.config?.debug) console.log("[AppUI]", ...clean);
+    AppCore?.utils?.log?.("[AppUI]", ...args.map((item) => sanitize(item)));
   } catch {}
 }
 
 function warn(AppCore, ...args) {
-  const clean = args.map((item) => sanitize(item));
-
   try {
-    AppCore?.utils?.warn?.("[AppUI]", ...clean);
+    AppCore?.utils?.warn?.("[AppUI]", ...args.map((item) => sanitize(item)));
     return;
   } catch {}
 
   try {
-    console.warn("[AppUI]", ...clean);
+    console.warn("[AppUI]", ...args.map((item) => sanitize(item)));
   } catch {}
 }
 
 function errorLog(AppCore, ...args) {
-  const clean = args.map((item) => sanitize(item));
-
   try {
-    AppCore?.utils?.error?.("[AppUI]", ...clean);
+    AppCore?.utils?.error?.("[AppUI]", ...args.map((item) => sanitize(item)));
     return;
   } catch {}
 
   try {
-    console.error("[AppUI]", ...clean);
+    console.error("[AppUI]", ...args.map((item) => sanitize(item)));
   } catch {}
 }
 
-function emitSignature(eventName = "", payload = {}) {
+function eventSignature(eventName = "", payload = {}) {
   return [
     text(eventName, ""),
     text(payload?.reason || payload?.phase || "", ""),
-    text(payload?.source || "", ""),
     text(payload?.route || payload?.canonicalPath || "", ""),
     text(payload?.publicPath || "", ""),
-    payload?.ok === false ? "fail" : "ok",
   ].join("|");
 }
 
 function emit(AppCore, eventName = "", payload = {}, options = {}) {
   const name = text(eventName, "");
-  const opts = object(options);
-
   if (!name) return false;
 
-  if (opts.dedupe !== false && opts.force !== true) {
-    const signature = emitSignature(name, payload);
-    const stamp = now();
+  const opts = object(options);
+  const signature = eventSignature(name, payload);
+  const stamp = now();
 
-    if (signature === lastEmitSignature && stamp - lastEmitAt < EMIT_DEDUPE_MS) {
-      return false;
-    }
-
-    lastEmitSignature = signature;
-    lastEmitAt = stamp;
+  if (opts.force !== true && signature === lastEventSignature && stamp - lastEventAt < EVENT_DEDUPE_MS) {
+    return false;
   }
+
+  lastEventSignature = signature;
+  lastEventAt = stamp;
 
   const finalPayload = sanitize({
     source: SOURCE,
     version: UI_VERSION,
+    at: iso(),
     ...object(payload),
   });
 
@@ -683,9 +578,7 @@ function emit(AppCore, eventName = "", payload = {}, options = {}) {
       AppCore.events.emit(name, finalPayload);
       emitted = true;
     }
-  } catch (error) {
-    warn(AppCore, `AppCore.events.emit("${name}") falló.`, error);
-  }
+  } catch {}
 
   if ((opts.window === true || !hasBus) && isBrowser()) {
     try {
@@ -715,20 +608,7 @@ function setLastError(AppCore, source = "ui", error = null) {
     message: snapshot.message,
   });
 
-  emit(AppCore, EVENTS.moduleError, snapshot);
-
   return snapshot;
-}
-
-function recordEvent(eventName = "", payload = {}) {
-  runtime.eventCount += 1;
-  runtime.lastEvent = text(eventName, "");
-  runtime.lastEventAt = now();
-
-  pushRecent({
-    event: runtime.lastEvent,
-    payload: sanitize(payload),
-  });
 }
 
 /* =========================================================
@@ -738,37 +618,24 @@ function recordEvent(eventName = "", payload = {}) {
 function getModule(AppCore, names = []) {
   if (!AppCore) return null;
 
-  const keys = array(names)
-    .map((name) => text(name, ""))
-    .filter(Boolean);
+  const keys = array(names).map((name) => text(name, "")).filter(Boolean);
 
-  try {
-    for (const key of keys) {
+  for (const key of keys) {
+    try {
       const value = AppCore.modules?.get?.(key);
       if (value) return value;
-    }
-  } catch {}
+    } catch {}
 
-  try {
-    for (const key of keys) {
-      const value = AppCore.modules?.[key];
-      if (value) return value;
-    }
-  } catch {}
-
-  try {
-    for (const key of keys) {
+    try {
       const value = AppCore.registry?.modules?.get?.(key);
       if (value) return value;
-    }
-  } catch {}
+    } catch {}
 
-  try {
-    for (const key of keys) {
+    try {
       const value = AppCore?.[key];
       if (value) return value;
-    }
-  } catch {}
+    } catch {}
+  }
 
   return null;
 }
@@ -803,8 +670,6 @@ function resolveDeps(first = {}, second = {}) {
     Toast:
       deps.Toast ||
       AppCore?.Toast ||
-      AppCore?.toastModule ||
-      AppCore?.toast ||
       getModule(AppCore, MODULE_ALIASES.toast),
 
     I18n:
@@ -827,6 +692,100 @@ function resolveDeps(first = {}, second = {}) {
       AppCore?.topbar ||
       getModule(AppCore, MODULE_ALIASES.topbar),
   };
+}
+
+/* =========================================================
+   ROUTE / AUTH ROUTE
+========================================================= */
+
+function normalizePath(path = "/") {
+  let value = text(path, "/");
+
+  try {
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(value)) {
+      const url = new URL(value, window.location.origin);
+      value = `${url.pathname || "/"}${url.search || ""}${url.hash || ""}`;
+    }
+  } catch {}
+
+  value = value.split("?")[0].split("#")[0] || "/";
+  value = value.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+
+  if (!value.startsWith("/")) value = `/${value}`;
+  if (value.length > 1) value = value.replace(/\/+$/g, "") || "/";
+
+  const parts = value.split("/").filter(Boolean);
+
+  if (/^@[A-Za-z0-9._-]{1,80}$/.test(parts[0] || "")) {
+    const rest = parts.slice(1).join("/");
+    return rest ? `/${rest}` : "/";
+  }
+
+  return value || "/";
+}
+
+function routeMatches(path = "/", candidate = "/") {
+  const cleanPath = normalizePath(path);
+  const cleanCandidate = normalizePath(candidate);
+
+  if (!cleanCandidate || cleanCandidate === "/") return cleanPath === cleanCandidate;
+
+  return cleanPath === cleanCandidate || cleanPath.startsWith(`${cleanCandidate}/`);
+}
+
+function currentRoute(AppCore = null, Router = null) {
+  try {
+    return (
+      Router?.getCurrentCanonicalPath?.() ||
+      Router?.getCurrentPath?.() ||
+      AppCore?.state?.route ||
+      AppCore?.state?.canonicalPath ||
+      (isBrowser() ? `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}` : "/")
+    );
+  } catch {
+    return "/";
+  }
+}
+
+function currentPublicPath(AppCore = null, Router = null) {
+  try {
+    return (
+      Router?.getCurrentPublicPath?.() ||
+      Router?.getCurrentPath?.() ||
+      AppCore?.state?.publicPath ||
+      currentRoute(AppCore, Router)
+    );
+  } catch {
+    return "/";
+  }
+}
+
+function configuredAuthRoutes(AppCore = null) {
+  const config = AppCore?.config || {};
+
+  return [
+    ...AUTH_LIKE_FALLBACK_ROUTES,
+    ...array(config.authLikeRoutes),
+    ...array(config.router?.authLikeRoutes),
+    ...array(config.auth?.technicalPublicRoutes),
+    ...array(config.technicalPublicRoutes),
+    config.routes?.login,
+    config.routes?.activateAccount,
+    config.routes?.resetPassword,
+    config.routes?.resetPasswordConfirm,
+    config.routes?.forgotPassword,
+    config.routes?.recoverPassword,
+    config.routes?.passwordReset,
+    config.routes?.twoFactor,
+    config.routes?.otp,
+    config.routes?.mfa,
+  ].filter(Boolean);
+}
+
+function isAuthLikeRoute(AppCore = null, Router = null) {
+  const route = currentRoute(AppCore, Router);
+
+  return configuredAuthRoutes(AppCore).some((candidate) => routeMatches(route, candidate));
 }
 
 /* =========================================================
@@ -919,20 +878,16 @@ function getCurrentRole(AppCore, Auth, user) {
   );
 }
 
-function getAuthStatus(AppCore, Auth, user) {
+function isAuthenticated(AppCore, Auth, user) {
   let authenticated = false;
 
   try {
-    if (isFn(AppCore?.isAuthenticated)) {
-      authenticated = Boolean(AppCore.isAuthenticated());
-    }
+    if (isFn(AppCore?.isAuthenticated)) authenticated = Boolean(AppCore.isAuthenticated());
   } catch {}
 
   if (!authenticated) {
     try {
-      if (isFn(Auth?.isAuthenticated)) {
-        authenticated = Boolean(Auth.isAuthenticated());
-      }
+      if (isFn(Auth?.isAuthenticated)) authenticated = Boolean(Auth.isAuthenticated());
     } catch {}
   }
 
@@ -943,80 +898,51 @@ function getAuthStatus(AppCore, Auth, user) {
   return Boolean(authenticated && hasUser(user));
 }
 
-function routerPublicPath(Router) {
-  try {
-    return Router?.getCurrentPublicPath?.() || Router?.getCurrentPath?.() || "";
-  } catch {
-    return "";
-  }
-}
-
-function routerCanonicalPath(Router) {
-  try {
-    return Router?.getCurrentCanonicalPath?.() || Router?.getCurrentPath?.() || "";
-  } catch {
-    return "";
-  }
-}
-
 function getUserSnapshot(AppCore, Auth = null, Router = null) {
   const state = object(AppCore?.state);
-
   const user = getCurrentUser(AppCore, Auth);
   const role = getCurrentRole(AppCore, Auth, user);
 
-  const username =
-    user?.username ||
-    user?.userName ||
-    user?.slug ||
-    user?.email ||
-    user?.mail ||
-    state.username ||
-    null;
-
-  const displayName =
-    user?.displayName ||
-    user?.display_name ||
-    user?.name ||
-    user?.fullName ||
-    user?.full_name ||
-    user?.username ||
-    user?.userName ||
-    user?.email ||
-    user?.mail ||
-    null;
-
-  const avatarUrl =
-    user?.avatarUrl ||
-    user?.avatarURL ||
-    user?.avatar ||
-    user?.photoURL ||
-    user?.picture ||
-    user?.image ||
-    null;
-
-  const route =
-    state.route ||
-    state.canonicalPath ||
-    routerCanonicalPath(Router) ||
-    "/";
-
-  const publicPath =
-    state.publicPath ||
-    routerPublicPath(Router) ||
-    route ||
-    "/";
+  const route = currentRoute(AppCore, Router);
+  const publicPath = currentPublicPath(AppCore, Router);
 
   return {
     user,
     userId: getUserId(user),
 
-    authenticated: getAuthStatus(AppCore, Auth, user),
+    authenticated: isAuthenticated(AppCore, Auth, user),
 
     role,
-    username,
-    displayName,
-    avatarUrl,
+
+    username:
+      user?.username ||
+      user?.userName ||
+      user?.slug ||
+      user?.email ||
+      user?.mail ||
+      state.username ||
+      null,
+
+    displayName:
+      user?.displayName ||
+      user?.display_name ||
+      user?.name ||
+      user?.fullName ||
+      user?.full_name ||
+      user?.username ||
+      user?.userName ||
+      user?.email ||
+      user?.mail ||
+      null,
+
+    avatarUrl:
+      user?.avatarUrl ||
+      user?.avatarURL ||
+      user?.avatar ||
+      user?.photoURL ||
+      user?.picture ||
+      user?.image ||
+      null,
 
     lang:
       state.lang ||
@@ -1032,198 +958,81 @@ function getUserSnapshot(AppCore, Auth = null, Router = null) {
 
     route,
     publicPath,
+    authRoute: isAuthLikeRoute(AppCore, Router),
   };
 }
 
 /* =========================================================
-   MODULE REGISTRY
+   MODULE REGISTRY / INIT
 ========================================================= */
 
-function registryValue(AppCore, name = "") {
-  const key = text(name, "");
-  if (!AppCore || !key) return null;
-
-  try {
-    const value = AppCore.modules?.get?.(key);
-    if (value) return value;
-  } catch {}
-
-  try {
-    const value = AppCore.modules?.[key];
-    if (value) return value;
-  } catch {}
-
-  try {
-    const value = AppCore.registry?.modules?.get?.(key);
-    if (value) return value;
-  } catch {}
-
-  try {
-    const value = AppCore?.[key];
-    if (value) return value;
-  } catch {}
-
-  return null;
-}
-
-function markConflict(AppCore, name = "", alias = "") {
-  const key = `${text(name, "")}:${text(alias, "")}`;
-
-  if (registryConflicts.has(key)) return;
-
-  registryConflicts.add(key);
-
-  warn(AppCore, "Conflicto de módulo UI. Se conserva instancia existente.", {
-    name,
-    alias,
-  });
-}
-
-function registerAlias(AppCore, canonical, alias, moduleRef) {
+function registerAlias(AppCore, alias, moduleRef) {
   if (!AppCore || !alias || !moduleRef) return false;
 
-  const existing = registryValue(AppCore, alias);
-
-  if (existing && existing !== moduleRef) {
-    markConflict(AppCore, canonical, alias);
-    return false;
-  }
-
-  let ok = false;
-
   try {
-    if (canExtend(AppCore)) {
-      ok = defineValue(AppCore, alias, moduleRef) || ok;
-    }
+    const current =
+      AppCore.modules?.get?.(alias) ||
+      AppCore.registry?.modules?.get?.(alias) ||
+      AppCore?.[alias] ||
+      null;
+
+    if (current && current !== moduleRef) return false;
   } catch {}
 
   try {
-    if (AppCore.modules && canExtend(AppCore.modules)) {
-      if (!AppCore.modules[alias] || AppCore.modules[alias] === moduleRef) {
-        AppCore.modules[alias] = moduleRef;
-        ok = true;
-      }
-    }
+    if (canExtend(AppCore)) defineValue(AppCore, alias, moduleRef);
   } catch {}
 
   try {
-    if (isFn(AppCore.modules?.set) && !registryValue(AppCore, alias)) {
-      const result = AppCore.modules.set(alias, moduleRef, {
-        source: SOURCE,
-        alias: true,
-        canonical,
-        emit: false,
-        silent: true,
-      });
-
-      ok = result !== false || ok;
-    }
-  } catch {}
-
-  try {
-    if (isFn(AppCore.registry?.modules?.set) && !registryValue(AppCore, alias)) {
-      AppCore.registry.modules.set(alias, moduleRef);
-      ok = true;
-    }
-  } catch {}
-
-  return ok;
-}
-
-function registerCanonical(AppCore, name, moduleRef) {
-  const key = text(name, "");
-  if (!AppCore || !key || !moduleRef) return false;
-
-  const existing = registryValue(AppCore, key);
-
-  if (existing && existing === moduleRef) return true;
-
-  if (existing && existing !== moduleRef) {
-    markConflict(AppCore, key, key);
-    return false;
-  }
-
-  const cached = registryCache.get(key);
-  if (cached?.moduleRef === moduleRef) return true;
-
-  let ok = false;
-
-  try {
-    const result = registerModule(AppCore, key, moduleRef);
-    ok = result !== false;
-  } catch {}
-
-  try {
-    if (!ok && isFn(AppCore.modules?.register)) {
-      const result = AppCore.modules.register(key, moduleRef, {
-        overwrite: false,
-        replace: false,
-        idempotent: true,
-        source: SOURCE,
-      });
-
-      ok = result !== false;
-    }
-  } catch {}
-
-  try {
-    if (!ok && isFn(AppCore.modules?.set)) {
-      const result = AppCore.modules.set(key, moduleRef, {
-        source: SOURCE,
-        overwrite: false,
-        replace: false,
-      });
-
-      ok = result !== false;
-    }
-  } catch {}
-
-  try {
-    if (!ok && AppCore.modules && canExtend(AppCore.modules)) {
-      AppCore.modules[key] = moduleRef;
-      ok = true;
-    }
-  } catch {}
-
-  try {
-    if (canExtend(AppCore)) {
-      defineValue(AppCore, key, moduleRef);
-    }
-  } catch {}
-
-  if (ok) {
-    registryCache.set(key, {
-      moduleRef,
-      at: iso(),
+    AppCore.modules?.register?.(alias, moduleRef, {
+      overwrite: true,
+      replace: true,
+      source: SOURCE,
+      emit: false,
+      silent: true,
     });
-  }
+  } catch {}
 
-  return ok;
+  try {
+    AppCore.modules?.set?.(alias, moduleRef, {
+      overwrite: true,
+      replace: true,
+      source: SOURCE,
+      emit: false,
+      silent: true,
+    });
+  } catch {}
+
+  try {
+    AppCore.registry?.modules?.set?.(alias, moduleRef);
+  } catch {}
+
+  return true;
 }
 
 function registerAppModule(AppCore, name, moduleRef) {
   const key = text(name, "");
+
   if (!AppCore || !key || !moduleRef) return false;
 
-  let ok = registerCanonical(AppCore, key, moduleRef);
+  let ok = false;
+
+  try {
+    ok = registerModule(AppCore, key, moduleRef) !== false;
+  } catch {}
 
   for (const alias of array(MODULE_ALIASES[key] || [key])) {
-    ok = registerAlias(AppCore, key, alias, moduleRef) || ok;
+    ok = registerAlias(AppCore, alias, moduleRef) || ok;
   }
 
   if (ok) {
     emit(AppCore, EVENTS.moduleRegistered, {
       name: key,
-      aliases: [...array(MODULE_ALIASES[key] || [key])],
     });
   }
 
   return ok;
 }
-
-/* =========================================================
-   MODULE CALLS
-========================================================= */
 
 function wasModuleInitialized(moduleRef) {
   try {
@@ -1236,7 +1045,7 @@ function wasModuleInitialized(moduleRef) {
     return Boolean(
       moduleRef.__appUiInitialized === true ||
         moduleRef.initialized === true ||
-        (moduleRef.ready === true && moduleRef.mounted === true)
+        moduleRef.ready === true
     );
   } catch {
     return false;
@@ -1258,19 +1067,14 @@ function markModuleInitialized(moduleRef, value = true) {
 }
 
 function callMethod(moduleRef, methodName, context = {}) {
-  if (!moduleRef || !methodName || !isFn(moduleRef[methodName])) {
-    return false;
-  }
+  if (!moduleRef || !methodName || !isFn(moduleRef[methodName])) return false;
 
   const fn = moduleRef[methodName];
-  const ctx = object(context);
-  const reason = text(ctx.reason, methodName);
 
   const attempts = [
-    () => fn.call(moduleRef, ctx),
-    () => fn.call(moduleRef, ctx.user, ctx),
-    () => fn.call(moduleRef, reason, ctx),
-    () => fn.call(moduleRef, ctx.AppCore, ctx),
+    () => fn.call(moduleRef, context),
+    () => fn.call(moduleRef, context.user, context),
+    () => fn.call(moduleRef, context.reason || methodName, context),
     () => fn.call(moduleRef),
   ];
 
@@ -1318,6 +1122,8 @@ function callMany(moduleRef, methodNames = [], context = {}) {
 function initModule(AppCore, moduleRef, label = "module", context = {}) {
   if (!moduleRef) return false;
 
+  if (context.force !== true && wasModuleInitialized(moduleRef)) return true;
+
   const ctx = {
     ...object(context),
     AppCore,
@@ -1325,786 +1131,73 @@ function initModule(AppCore, moduleRef, label = "module", context = {}) {
     reason: context.reason || `${label}:init`,
   };
 
-  if (ctx.force !== true && wasModuleInitialized(moduleRef)) {
-    emit(AppCore, EVENTS.moduleSkipped, {
-      label,
-      reason: "already-initialized",
-    });
-
-    return true;
-  }
-
-  let ok = false;
-
-  for (const method of INIT_METHODS) {
-    try {
-      if (callMethod(moduleRef, method, ctx)) {
-        ok = true;
-        break;
-      }
-    } catch (error) {
-      setLastError(AppCore, `${label}.${method}`, error);
-      warn(AppCore, `Error ${label}.${method}().`, error);
-    }
-  }
-
-  if (!ok) {
-    const hasInitMethod = INIT_METHODS.some((method) => isFn(moduleRef?.[method]));
-    ok = !hasInitMethod;
-  }
+  const result = callFirst(moduleRef, INIT_METHODS, ctx);
+  const ok = result.called || !INIT_METHODS.some((method) => isFn(moduleRef?.[method]));
 
   if (ok) {
     markModuleInitialized(moduleRef, true);
 
     emit(AppCore, EVENTS.moduleInit, {
       label,
+      method: result.method,
     });
-
-    log(AppCore, `${label} inicializado.`);
   }
 
   return ok;
 }
 
-/* =========================================================
-   LIGHT SYNC
-========================================================= */
-
-function syncModuleLight(moduleRef, methods = [], context = {}) {
-  if (!moduleRef) {
-    return {
-      ok: false,
-      methods: [],
-    };
-  }
-
-  const result = callMany(moduleRef, methods, context);
-
-  return {
-    ok: result.called,
-    methods: result.methods,
-  };
-}
-
-function syncSidebar(SidebarUI, context = {}) {
-  return syncModuleLight(SidebarUI, SIDEBAR_LIGHT_METHODS, context);
-}
-
-function syncTopbar(TopbarUI, context = {}) {
-  return syncModuleLight(TopbarUI, TOPBAR_LIGHT_METHODS, context);
-}
-
-function hardRepair(moduleRef, context = {}) {
-  return callFirst(moduleRef, HARD_REPAIR_METHODS, context);
-}
-
-function rebindModule(moduleRef, context = {}) {
-  return callFirst(moduleRef, REBIND_METHODS, context);
-}
-
-/* =========================================================
-   SYNC USER UI
-========================================================= */
-
-function syncSignature(snapshot = {}, reason = "") {
-  const data = {
-    reason: text(reason, ""),
-    authenticated: Boolean(snapshot.authenticated),
-    userId: text(snapshot.userId, ""),
-    username: text(snapshot.username, ""),
-    displayName: text(snapshot.displayName, ""),
-    role: text(snapshot.role, ""),
-    lang: text(snapshot.lang, ""),
-    theme: text(snapshot.theme, ""),
-    route: text(snapshot.route, ""),
-    publicPath: text(snapshot.publicPath, ""),
-    hasAvatar: Boolean(snapshot.avatarUrl),
-  };
-
-  try {
-    return JSON.stringify(data);
-  } catch {
-    return String(now());
-  }
-}
-
-function shouldSkipSync(snapshot = {}, reason = "", force = false) {
-  if (force === true) return false;
-
-  const signature = syncSignature(snapshot, reason);
-  const stamp = now();
-
-  if (signature === lastSyncSignature && stamp - lastSyncAt < SYNC_DEDUPE_MS) {
-    return true;
-  }
-
-  lastSyncSignature = signature;
-  lastSyncAt = stamp;
-
-  return false;
-}
-
-export function syncUserUI(first = {}, second = {}) {
-  const deps = resolveDeps(first, second);
-
+function ensureChromeReady(deps = {}, reason = "chrome-ready", force = false) {
   const {
     AppCore,
     Auth,
+    Router,
+    Store,
     SidebarUI,
     TopbarUI,
     Toast,
     I18n,
-    Router,
-    Store,
-
-    reason = "sync-user-ui",
-    payload = {},
-
-    rebind = false,
-    hardRepair: useHardRepair = false,
-    force = false,
   } = deps;
 
-  if (!AppCore) return false;
-
-  const cleanReason = text(reason, "sync-user-ui");
-  const snapshot = getUserSnapshot(AppCore, Auth, Router);
-
-  if (shouldSkipSync(snapshot, cleanReason, force)) {
-    return true;
-  }
-
-  if (syncing) {
-    syncQueued = true;
-
-    queuedDeps = {
-      ...deps,
-      reason: `${cleanReason}:queued`,
-      rebind: false,
-      hardRepair: false,
-      force: true,
+  if (!AppCore) {
+    return {
+      sidebar: false,
+      topbar: false,
+      skipped: true,
     };
-
-    return true;
   }
 
-  syncing = true;
+  const authRoute = isAuthLikeRoute(AppCore, Router);
 
-  const startedAt = now();
-
-  emit(AppCore, EVENTS.userSyncStart, {
-    reason: cleanReason,
-    at: iso(startedAt),
-  });
-
-  try {
-    const context = {
-      AppCore,
-      Auth,
-      Router,
-      Store,
-      SidebarUI,
-      TopbarUI,
-      Toast,
-      I18n,
-
-      reason: cleanReason,
-      payload: sanitize(payload),
-
-      snapshot,
-
-      user: snapshot.user,
-      userId: snapshot.userId,
-
-      authenticated: snapshot.authenticated,
-
-      role: snapshot.role,
-      username: snapshot.username,
-      displayName: snapshot.displayName,
-      avatarUrl: snapshot.avatarUrl,
-
-      lang: snapshot.lang,
-      theme: snapshot.theme,
-
-      route: snapshot.route,
-      publicPath: snapshot.publicPath,
+  if (authRoute && force !== true) {
+    return {
+      sidebar: false,
+      topbar: false,
+      skipped: true,
+      authRoute: true,
     };
-
-    let sidebarResult = { ok: false };
-    let topbarResult = { ok: false };
-
-    if (useHardRepair === true) {
-      const sidebarRepair = hardRepair(SidebarUI, context);
-      const topbarRepair = hardRepair(TopbarUI, context);
-
-      sidebarResult = {
-        ok: sidebarRepair.called,
-        repair: sidebarRepair.method,
-      };
-
-      topbarResult = {
-        ok: topbarRepair.called,
-        repair: topbarRepair.method,
-      };
-    } else {
-      sidebarResult = syncSidebar(SidebarUI, context);
-      topbarResult = syncTopbar(TopbarUI, context);
-    }
-
-    let sidebarRebind = { called: false, method: "" };
-    let topbarRebind = { called: false, method: "" };
-
-    if (rebind === true) {
-      sidebarRebind = rebindModule(SidebarUI, context);
-      topbarRebind = rebindModule(TopbarUI, context);
-    }
-
-    const ok = Boolean(
-      sidebarResult.ok ||
-        topbarResult.ok ||
-        sidebarRebind.called ||
-        topbarRebind.called
-    );
-
-    runtime.syncCount += 1;
-    runtime.lastSyncAt = now();
-    runtime.lastSyncReason = cleanReason;
-
-    pushRecent({
-      event: "sync",
-      reason: cleanReason,
-      authenticated: snapshot.authenticated,
-      username: snapshot.username,
-      route: snapshot.route,
-      publicPath: snapshot.publicPath,
-    });
-
-    /*
-      AppUI emite este evento.
-      AppUI no lo escucha.
-      No se emite user/avatar crudo.
-    */
-    emit(AppCore, EVENTS.userSync, {
-      reason: cleanReason,
-
-      userId: snapshot.userId,
-
-      authenticated: snapshot.authenticated,
-
-      username: snapshot.username,
-      displayName: snapshot.displayName,
-      hasAvatarUrl: Boolean(snapshot.avatarUrl),
-
-      role: snapshot.role,
-      lang: snapshot.lang,
-      theme: snapshot.theme,
-
-      route: snapshot.route,
-      publicPath: snapshot.publicPath,
-    });
-
-    emit(AppCore, EVENTS.userSyncDone, {
-      ok,
-
-      reason: cleanReason,
-      durationMs: now() - startedAt,
-
-      authenticated: snapshot.authenticated,
-      username: snapshot.username,
-      role: snapshot.role,
-
-      route: snapshot.route,
-      publicPath: snapshot.publicPath,
-
-      sidebar: sidebarResult,
-      topbar: topbarResult,
-
-      rebind: Boolean(rebind),
-      hardRepair: Boolean(useHardRepair),
-
-      sidebarRebind: sidebarRebind.method,
-      topbarRebind: topbarRebind.method,
-    });
-
-    log(AppCore, "UI usuario sincronizada.", {
-      reason: cleanReason,
-      authenticated: snapshot.authenticated,
-      username: snapshot.username,
-      role: snapshot.role,
-      sidebar: sidebarResult,
-      topbar: topbarResult,
-      rebind: Boolean(rebind),
-      hardRepair: Boolean(useHardRepair),
-    });
-
-    return true;
-  } catch (error) {
-    setLastError(AppCore, "syncUserUI", error);
-
-    errorLog(AppCore, "syncUserUI() error:", error);
-
-    emit(AppCore, EVENTS.userSyncError, {
-      message: text(error?.message || error, "syncUserUI() error."),
-      reason: cleanReason,
-    });
-
-    return false;
-  } finally {
-    syncing = false;
-
-    if (syncQueued) {
-      const queued = queuedDeps || {
-        ...deps,
-        reason: `${cleanReason}:queued`,
-        rebind: false,
-        hardRepair: false,
-        force: true,
-      };
-
-      syncQueued = false;
-      queuedDeps = null;
-
-      timeout(() => {
-        syncUserUI(queued);
-      }, QUEUE_DELAY_MS);
-    }
-  }
-}
-
-/* =========================================================
-   EVENT BINDING
-========================================================= */
-
-function rememberDisposer(disposer) {
-  if (isFn(disposer)) {
-    disposers.push(disposer);
-  }
-}
-
-function boundKey(scope = DEFAULT_SCOPE, eventName = "", label = "") {
-  return [
-    text(scope, DEFAULT_SCOPE),
-    text(eventName, ""),
-    text(label || eventName, "default"),
-  ].join("::");
-}
-
-function bindEvent(AppCore, scope, eventName, handler, label = "") {
-  if (!AppCore || !eventName || !isFn(handler)) {
-    return false;
   }
 
-  const key = boundKey(scope, eventName, label);
-
-  if (boundKeys.has(key)) return true;
-
-  const wrapped = (eventOrPayload = {}) => {
-    const detail = payloadFrom(eventOrPayload);
-
-    recordEvent(eventName, detail);
-
-    try {
-      handler(detail, eventOrPayload);
-    } catch (error) {
-      setLastError(AppCore, `event:${eventName}`, error);
-    }
+  const ctx = {
+    AppCore,
+    Auth,
+    Router,
+    Store,
+    SidebarUI,
+    TopbarUI,
+    Toast,
+    I18n,
+    reason,
   };
 
-  try {
-    if (isFn(AppCore.cleanup?.event)) {
-      const off = AppCore.cleanup.event(scope, eventName, wrapped, {
-        source: SOURCE,
-      });
+  const sidebar = initModule(AppCore, SidebarUI, "SidebarUI", ctx);
+  const topbar = initModule(AppCore, TopbarUI, "TopbarUI", ctx);
 
-      if (isFn(off)) rememberDisposer(off);
-
-      boundEvents.push(eventName);
-      boundKeys.add(key);
-
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (isFn(AppCore.events?.on)) {
-      const off = AppCore.events.on(eventName, wrapped);
-
-      if (isFn(off)) {
-        rememberDisposer(off);
-      } else if (isFn(AppCore.events?.off)) {
-        rememberDisposer(() => {
-          try {
-            AppCore.events.off(eventName, wrapped);
-          } catch {}
-        });
-      }
-
-      boundEvents.push(eventName);
-      boundKeys.add(key);
-
-      return true;
-    }
-  } catch (error) {
-    warn(AppCore, `AppCore.events.on("${eventName}") falló.`, error);
-  }
-
-  if (!isBrowser()) return false;
-
-  try {
-    window.addEventListener(eventName, wrapped);
-
-    rememberDisposer(() => {
-      try {
-        window.removeEventListener(eventName, wrapped);
-      } catch {}
-    });
-
-    boundEvents.push(eventName);
-    boundKeys.add(key);
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/* =========================================================
-   DEDUPE HELPERS
-========================================================= */
-
-function shouldSkipSignature(type, signature, ms) {
-  const stamp = now();
-
-  if (type === "repair") {
-    if (signature === lastRepairSignature && stamp - lastRepairAt < ms) return true;
-    lastRepairSignature = signature;
-    lastRepairAt = stamp;
-    return false;
-  }
-
-  if (type === "route") {
-    if (signature === lastRouteSignature && stamp - lastRouteAt < ms) return true;
-    lastRouteSignature = signature;
-    lastRouteAt = stamp;
-    return false;
-  }
-
-  if (type === "lang") {
-    if (signature === lastLangSignature && stamp - lastLangAt < ms) return true;
-    lastLangSignature = signature;
-    lastLangAt = stamp;
-    return false;
-  }
-
-  if (type === "theme") {
-    if (signature === lastThemeSignature && stamp - lastThemeAt < ms) return true;
-    lastThemeSignature = signature;
-    lastThemeAt = stamp;
-    return false;
-  }
-
-  return false;
-}
-
-function routeSignature(detail = {}) {
-  return [
-    text(detail.route || detail.canonicalPath || detail.path, ""),
-    text(detail.publicPath || detail.href || detail.to, ""),
-    text(detail.reason || detail.phase || "", ""),
-  ].join("|");
-}
-
-function langSignature(detail = {}) {
-  return [
-    text(detail.lang, ""),
-    text(detail.language, ""),
-    text(detail.locale, ""),
-  ].join("|");
-}
-
-function themeSignature(detail = {}) {
-  return [
-    text(detail.theme, ""),
-    text(detail.mode, ""),
-    text(detail.appearance, ""),
-    text(detail.systemTheme, ""),
-  ].join("|");
-}
-
-function repairSignature(detail = {}) {
-  return [
-    text(detail.source, ""),
-    text(detail.reason || detail.phase, ""),
-    text(detail.route || detail.canonicalPath, ""),
-    text(detail.publicPath, ""),
-    detail.rebind === true ? "rebind" : "no-rebind",
-    detail.hardRepair === true ? "hard" : "light",
-  ].join("|");
-}
-
-/* =========================================================
-   RUNTIME EVENT BINDS
-========================================================= */
-
-export function bindAppLanguageSync(first = {}, second = {}) {
-  const deps = resolveDeps(first, second);
-  const { AppCore, scope = DEFAULT_SCOPE } = deps;
-
-  if (!AppCore) return false;
-
-  if (languageBound || bool(AppCore.__appLangUiBound)) return true;
-
-  const handler = (detail = {}) => {
-    if (shouldSkipSignature("lang", langSignature(detail), LANG_DEDUPE_MS)) {
-      return;
-    }
-
-    syncUserUI({
-      ...deps,
-      reason: "app:lang:change",
-      payload: detail,
-      rebind: false,
-      hardRepair: false,
-      force: true,
-    });
+  return {
+    sidebar,
+    topbar,
+    skipped: false,
+    authRoute: false,
   };
-
-  const ok = bindEvent(AppCore, scope, EVENTS.langChange, handler, "lang-change");
-
-  if (!ok) return false;
-
-  languageBound = true;
-  defineValue(AppCore, "__appLangUiBound", true);
-
-  return true;
-}
-
-function shouldSkipRepairRequest(detail = {}) {
-  const source = text(detail.source, "");
-  const event = text(detail.event, "");
-
-  if (
-    source === SOURCE ||
-    source === EVENTS.userSync ||
-    event === EVENTS.userSync ||
-    source === "app:user-ui:sync" ||
-    event === "app:user-ui:sync"
-  ) {
-    return true;
-  }
-
-  return shouldSkipSignature(
-    "repair",
-    repairSignature(detail),
-    REPAIR_DEDUPE_MS
-  );
-}
-
-export function bindUIRepairSync(first = {}, second = {}) {
-  const deps = resolveDeps(first, second);
-  const { AppCore, scope = DEFAULT_SCOPE } = deps;
-
-  if (!AppCore) return false;
-
-  if (repairBound || bool(AppCore.__appUiRepairBound)) return true;
-
-  const handler = (detail = {}) => {
-    runtime.repairRequestCount += 1;
-
-    if (shouldSkipRepairRequest(detail)) {
-      runtime.skippedRepairCount += 1;
-
-      emit(AppCore, EVENTS.repairSkipped, {
-        reason: detail.reason || detail.phase || "repair-request-deduped",
-        detail: {
-          source: detail.source || null,
-          route: detail.route || detail.canonicalPath || null,
-          publicPath: detail.publicPath || null,
-        },
-      });
-
-      return;
-    }
-
-    repairUISystems({
-      ...deps,
-      reason: detail.reason || detail.phase || "app:ui:repair-request",
-      payload: detail,
-      rebind: detail.rebind === true,
-      hardRepair: detail.hardRepair === true,
-      force: detail.force === true,
-    });
-  };
-
-  const ok = bindEvent(AppCore, scope, EVENTS.repairRequest, handler, "repair-request");
-
-  if (!ok) return false;
-
-  repairBound = true;
-  defineValue(AppCore, "__appUiRepairBound", true);
-
-  return true;
-}
-
-export function bindUIRouteSync(first = {}, second = {}) {
-  const deps = resolveDeps(first, second);
-  const { AppCore, scope = DEFAULT_SCOPE } = deps;
-
-  if (!AppCore) return false;
-
-  if (routeBound || bool(AppCore.__appUiRouteSyncBound)) return true;
-
-  const sync = (reason, detail = {}) => {
-    if (shouldSkipSignature("route", routeSignature(detail), ROUTE_DEDUPE_MS)) {
-      return;
-    }
-
-    syncUserUI({
-      ...deps,
-      reason,
-      payload: detail,
-      rebind: false,
-      hardRepair: false,
-      force: false,
-    });
-  };
-
-  const any = [
-    bindEvent(AppCore, scope, EVENTS.routeChange, (detail) => sync("app:route:change", detail), "route-change"),
-    bindEvent(AppCore, scope, EVENTS.routerRendered, (detail) => sync("router:rendered", detail), "router-rendered"),
-    bindEvent(AppCore, scope, EVENTS.routerAsyncComplete, (detail) => sync("router:render:async-complete", detail), "router-async-complete"),
-  ].some(Boolean);
-
-  routeBound = any;
-  defineValue(AppCore, "__appUiRouteSyncBound", any);
-
-  return any;
-}
-
-export function bindUISessionSync(first = {}, second = {}) {
-  const deps = resolveDeps(first, second);
-  const { AppCore, scope = DEFAULT_SCOPE } = deps;
-
-  if (!AppCore) return false;
-
-  if (sessionBound || bool(AppCore.__appUiSessionSyncBound)) return true;
-
-  const sync = (reason, detail = {}) => {
-    syncUserUI({
-      ...deps,
-      reason,
-      payload: detail,
-      rebind: false,
-      hardRepair: false,
-      force: true,
-    });
-  };
-
-  const eventPairs = [
-    [EVENTS.userChange, "app:user:change"],
-    [EVENTS.sessionRestored, "app:session:restored"],
-    [EVENTS.sessionCleared, "app:session:cleared"],
-    [EVENTS.authSessionRestored, "auth:session:restored"],
-    [EVENTS.authLoginSuccess, "auth:login:success"],
-    [EVENTS.authLogout, "auth:logout"],
-    [EVENTS.authLogoutSuccess, "auth:logout:success"],
-  ];
-
-  let any = false;
-
-  for (const [eventName, reason] of eventPairs) {
-    any = bindEvent(
-      AppCore,
-      scope,
-      eventName,
-      (detail) => sync(reason, detail),
-      `session:${eventName}`
-    ) || any;
-  }
-
-  sessionBound = any;
-  defineValue(AppCore, "__appUiSessionSyncBound", any);
-
-  return any;
-}
-
-export function bindUIThemeSync(first = {}, second = {}) {
-  const deps = resolveDeps(first, second);
-  const { AppCore, scope = DEFAULT_SCOPE } = deps;
-
-  if (!AppCore) return false;
-
-  if (themeBound || bool(AppCore.__appUiThemeSyncBound)) return true;
-
-  const sync = (reason, detail = {}) => {
-    if (shouldSkipSignature("theme", themeSignature(detail), THEME_DEDUPE_MS)) {
-      return;
-    }
-
-    syncUserUI({
-      ...deps,
-      reason,
-      payload: detail,
-      rebind: false,
-      hardRepair: false,
-      force: true,
-    });
-  };
-
-  const events = [
-    EVENTS.themeChange,
-    "onion:theme:change",
-    "theme:change",
-  ];
-
-  let any = false;
-
-  for (const eventName of events) {
-    any = bindEvent(
-      AppCore,
-      scope,
-      eventName,
-      (detail) => sync(eventName, detail),
-      `theme:${eventName}`
-    ) || any;
-  }
-
-  themeBound = any;
-  defineValue(AppCore, "__appUiThemeSyncBound", any);
-
-  return any;
-}
-
-export function bindUIRuntimeEvents(first = {}, second = {}) {
-  const deps = resolveDeps(first, second);
-  const { AppCore } = deps;
-
-  if (!AppCore) return false;
-
-  if (runtimeBound || bool(AppCore.__appUiRuntimeEventsBound)) return true;
-
-  const lang = bindAppLanguageSync(deps);
-  const repair = bindUIRepairSync(deps);
-  const route = bindUIRouteSync(deps);
-  const session = bindUISessionSync(deps);
-  const theme = bindUIThemeSync(deps);
-
-  runtimeBound = Boolean(lang || repair || route || session || theme);
-
-  defineValue(AppCore, "__appUiRuntimeEventsBound", runtimeBound);
-
-  if (runtimeBound) {
-    emit(AppCore, EVENTS.runtimeEventsBound, {
-      langBound: lang,
-      repairBound: repair,
-      routeBound: route,
-      sessionBound: session,
-      themeBound: theme,
-      at: iso(),
-    });
-  }
-
-  return runtimeBound;
 }
 
 /* =========================================================
@@ -2113,9 +1206,7 @@ export function bindUIRuntimeEvents(first = {}, second = {}) {
 
 function normalizeToastType(type = "info") {
   const clean = text(type, "info").toLowerCase();
-
   if (clean === "warn") return "warning";
-
   return TOAST_TYPES.includes(clean) ? clean : "info";
 }
 
@@ -2160,10 +1251,7 @@ function createToastBridge(AppCore, Toast) {
     try {
       const method = toastMethod(Toast, cleanType);
 
-      if (isFn(method)) {
-        return method.call(Toast, cleanMessage, payload);
-      }
-
+      if (isFn(method)) return method.call(Toast, cleanMessage, payload);
       if (isFn(Toast?.show)) return Toast.show(payload);
       if (isFn(Toast?.notify)) return Toast.notify(payload);
 
@@ -2185,14 +1273,15 @@ function attachToastBridge(AppCore, bridge) {
     }
   } catch {}
 
+  /*
+    No pisar AppCore.toast: ese alias pertenece al módulo Toast.
+  */
   if (canExtend(AppCore)) {
     ok = defineValue(AppCore, "showToast", bridge) || ok;
-    ok = defineValue(AppCore, "toast", bridge) || ok;
   }
 
   if (canExtend(AppCore?.utils)) {
     ok = defineValue(AppCore.utils, "showToast", bridge) || ok;
-    ok = defineValue(AppCore.utils, "toast", bridge) || ok;
   }
 
   return ok;
@@ -2209,10 +1298,7 @@ export function bindToastBridge(first = {}, second = null) {
   const bridge = createToastBridge(AppCore, Toast);
   const attached = attachToastBridge(AppCore, bridge);
 
-  if (!attached) {
-    warn(AppCore, "Toast bridge no pudo montarse: objeto no extensible.");
-    return false;
-  }
+  if (!attached) return false;
 
   toastBridgeBound = true;
   defineValue(AppCore, "__toastBridgeBound", true);
@@ -2221,9 +1307,519 @@ export function bindToastBridge(first = {}, second = null) {
     at: iso(),
   });
 
-  log(AppCore, "Toast bridge activo.");
-
   return true;
+}
+
+/* =========================================================
+   SYNC USER UI
+========================================================= */
+
+function syncSignature(snapshot = {}) {
+  const data = {
+    authenticated: Boolean(snapshot.authenticated),
+    userId: text(snapshot.userId, ""),
+    username: text(snapshot.username, ""),
+    displayName: text(snapshot.displayName, ""),
+    role: text(snapshot.role, ""),
+    lang: text(snapshot.lang, ""),
+    theme: text(snapshot.theme, ""),
+    route: normalizePath(snapshot.route || "/"),
+    publicPath: normalizePath(snapshot.publicPath || "/"),
+    hasAvatar: Boolean(snapshot.avatarUrl),
+    authRoute: Boolean(snapshot.authRoute),
+  };
+
+  try {
+    return JSON.stringify(data);
+  } catch {
+    return String(now());
+  }
+}
+
+function shouldSkipSync(snapshot = {}, force = false) {
+  if (force === true) return false;
+
+  const signature = syncSignature(snapshot);
+  const stamp = now();
+
+  if (signature === lastSyncSignature && stamp - lastSyncAt < SYNC_DEDUPE_MS) {
+    return true;
+  }
+
+  lastSyncSignature = signature;
+  lastSyncAt = stamp;
+
+  return false;
+}
+
+export function syncUserUI(first = {}, second = {}) {
+  const deps = resolveDeps(first, second);
+
+  const {
+    AppCore,
+    Auth,
+    SidebarUI,
+    TopbarUI,
+    Toast,
+    I18n,
+    Router,
+    Store,
+
+    reason = "sync-user-ui",
+    payload = {},
+
+    rebind = false,
+    hardRepair = false,
+    force = false,
+  } = deps;
+
+  if (!AppCore) return false;
+
+  const cleanReason = text(reason, "sync-user-ui");
+  const snapshot = getUserSnapshot(AppCore, Auth, Router);
+
+  if (shouldSkipSync(snapshot, force)) {
+    return true;
+  }
+
+  if (syncing) {
+    syncQueued = true;
+    queuedDeps = {
+      ...deps,
+      reason: `${cleanReason}:queued`,
+      rebind: false,
+      hardRepair: false,
+      force: true,
+    };
+
+    return true;
+  }
+
+  syncing = true;
+
+  const startedAt = now();
+
+  try {
+    const context = {
+      AppCore,
+      Auth,
+      Router,
+      Store,
+      SidebarUI,
+      TopbarUI,
+      Toast,
+      I18n,
+
+      reason: cleanReason,
+      payload: sanitize(payload),
+
+      snapshot,
+
+      user: snapshot.user,
+      userId: snapshot.userId,
+
+      authenticated: snapshot.authenticated,
+
+      role: snapshot.role,
+      username: snapshot.username,
+      displayName: snapshot.displayName,
+      avatarUrl: snapshot.avatarUrl,
+
+      lang: snapshot.lang,
+      theme: snapshot.theme,
+
+      route: snapshot.route,
+      publicPath: snapshot.publicPath,
+      authRoute: snapshot.authRoute,
+    };
+
+    let chrome = {
+      skipped: true,
+    };
+
+    let sidebarResult = {
+      ok: false,
+      methods: [],
+    };
+
+    let topbarResult = {
+      ok: false,
+      methods: [],
+    };
+
+    if (!snapshot.authRoute || force === true) {
+      chrome = ensureChromeReady(deps, cleanReason, force === true && !snapshot.authRoute);
+
+      if (hardRepair === true) {
+        const sidebarRepair = callFirst(SidebarUI, HARD_REPAIR_METHODS, context);
+        const topbarRepair = callFirst(TopbarUI, HARD_REPAIR_METHODS, context);
+
+        sidebarResult = {
+          ok: sidebarRepair.called,
+          methods: sidebarRepair.method ? [sidebarRepair.method] : [],
+        };
+
+        topbarResult = {
+          ok: topbarRepair.called,
+          methods: topbarRepair.method ? [topbarRepair.method] : [],
+        };
+      } else {
+        sidebarResult = callMany(SidebarUI, SIDEBAR_SYNC_METHODS, context);
+        topbarResult = callMany(TopbarUI, TOPBAR_SYNC_METHODS, context);
+      }
+
+      if (rebind === true) {
+        callFirst(SidebarUI, REBIND_METHODS, context);
+        callFirst(TopbarUI, REBIND_METHODS, context);
+      }
+    }
+
+    runtime.syncCount += 1;
+    runtime.lastSyncAt = now();
+    runtime.lastSyncReason = cleanReason;
+
+    pushRecent({
+      event: "sync",
+      reason: cleanReason,
+      authenticated: snapshot.authenticated,
+      username: snapshot.username,
+      route: snapshot.route,
+      publicPath: snapshot.publicPath,
+      authRoute: snapshot.authRoute,
+    });
+
+    emit(AppCore, EVENTS.userSync, {
+      reason: cleanReason,
+
+      userId: snapshot.userId,
+
+      authenticated: snapshot.authenticated,
+
+      username: snapshot.username,
+      displayName: snapshot.displayName,
+      hasAvatarUrl: Boolean(snapshot.avatarUrl),
+
+      role: snapshot.role,
+      lang: snapshot.lang,
+      theme: snapshot.theme,
+
+      route: snapshot.route,
+      publicPath: snapshot.publicPath,
+      authRoute: snapshot.authRoute,
+    });
+
+    emit(AppCore, EVENTS.userSyncDone, {
+      ok: true,
+      reason: cleanReason,
+      durationMs: now() - startedAt,
+      authRoute: snapshot.authRoute,
+      chrome,
+      sidebar: sidebarResult,
+      topbar: topbarResult,
+      rebind: Boolean(rebind),
+      hardRepair: Boolean(hardRepair),
+    });
+
+    return true;
+  } catch (error) {
+    setLastError(AppCore, "syncUserUI", error);
+    errorLog(AppCore, "syncUserUI() error:", error);
+
+    emit(AppCore, EVENTS.userSyncError, {
+      message: text(error?.message || error, "syncUserUI() error."),
+      reason: cleanReason,
+    });
+
+    return false;
+  } finally {
+    syncing = false;
+
+    if (syncQueued) {
+      const queued = queuedDeps || {
+        ...deps,
+        reason: `${cleanReason}:queued`,
+        rebind: false,
+        hardRepair: false,
+        force: true,
+      };
+
+      syncQueued = false;
+      queuedDeps = null;
+
+      queueMicrotask(() => {
+        syncUserUI(queued);
+      });
+    }
+  }
+}
+
+/* =========================================================
+   EVENT BINDING
+========================================================= */
+
+function rememberDisposer(disposer) {
+  if (isFn(disposer)) disposers.push(disposer);
+}
+
+function boundKey(scope = DEFAULT_SCOPE, eventName = "", label = "") {
+  return [
+    text(scope, DEFAULT_SCOPE),
+    text(eventName, ""),
+    text(label || eventName, "default"),
+  ].join("::");
+}
+
+function bindEvent(AppCore, scope, eventName, handler, label = "") {
+  if (!AppCore || !eventName || !isFn(handler)) return false;
+
+  const key = boundKey(scope, eventName, label);
+  if (boundKeys.has(key)) return true;
+
+  const wrapped = (eventOrPayload = {}) => {
+    const detail = payloadFrom(eventOrPayload);
+    const signature = eventSignature(eventName, detail);
+    const stamp = now();
+
+    if (signature === lastEventSignature && stamp - lastEventAt < EVENT_DEDUPE_MS) {
+      return;
+    }
+
+    lastEventSignature = signature;
+    lastEventAt = stamp;
+
+    runtime.eventCount += 1;
+
+    try {
+      handler(detail, eventOrPayload);
+    } catch (error) {
+      setLastError(AppCore, `event:${eventName}`, error);
+    }
+  };
+
+  try {
+    if (isFn(AppCore.cleanup?.event)) {
+      const off = AppCore.cleanup.event(scope, eventName, wrapped, {
+        source: SOURCE,
+      });
+
+      rememberDisposer(off);
+      boundKeys.add(key);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (isFn(AppCore.events?.on)) {
+      const off = AppCore.events.on(eventName, wrapped);
+
+      if (isFn(off)) {
+        rememberDisposer(off);
+      } else if (isFn(AppCore.events?.off)) {
+        rememberDisposer(() => AppCore.events.off(eventName, wrapped));
+      }
+
+      boundKeys.add(key);
+      return true;
+    }
+  } catch {}
+
+  if (!isBrowser()) return false;
+
+  try {
+    window.addEventListener(eventName, wrapped);
+    rememberDisposer(() => window.removeEventListener(eventName, wrapped));
+    boundKeys.add(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function bindSyncEvent(deps, eventName, reason, label = "") {
+  const { AppCore, scope = DEFAULT_SCOPE } = deps;
+
+  return bindEvent(
+    AppCore,
+    scope,
+    eventName,
+    (detail) => {
+      syncUserUI({
+        ...deps,
+        reason,
+        payload: detail,
+        rebind: false,
+        hardRepair: false,
+        force: true,
+      });
+    },
+    label || reason
+  );
+}
+
+export function bindAppLanguageSync(first = {}, second = {}) {
+  const deps = resolveDeps(first, second);
+  const { AppCore } = deps;
+
+  if (!AppCore) return false;
+  if (bool(AppCore.__appLangUiBound)) return true;
+
+  const ok = bindSyncEvent(deps, EVENTS.langChange, "app:lang:change", "lang-change");
+  defineValue(AppCore, "__appLangUiBound", ok);
+
+  return ok;
+}
+
+export function bindUIRepairSync(first = {}, second = {}) {
+  const deps = resolveDeps(first, second);
+  const { AppCore, scope = DEFAULT_SCOPE } = deps;
+
+  if (!AppCore) return false;
+  if (bool(AppCore.__appUiRepairBound)) return true;
+
+  const ok = bindEvent(
+    AppCore,
+    scope,
+    EVENTS.repairRequest,
+    (detail = {}) => {
+      const source = text(detail.source, "");
+      const event = text(detail.event, "");
+
+      if (
+        source === SOURCE ||
+        source === EVENTS.userSync ||
+        event === EVENTS.userSync ||
+        source === "app:user-ui:sync"
+      ) {
+        runtime.skippedRepairCount += 1;
+        return;
+      }
+
+      const signature = eventSignature("repair", detail);
+      const stamp = now();
+
+      if (signature === lastRepairSignature && stamp - lastRepairAt < REPAIR_DEDUPE_MS) {
+        runtime.skippedRepairCount += 1;
+        return;
+      }
+
+      lastRepairSignature = signature;
+      lastRepairAt = stamp;
+
+      repairUISystems({
+        ...deps,
+        reason: detail.reason || detail.phase || "app:ui:repair-request",
+        payload: detail,
+        rebind: detail.rebind === true,
+        hardRepair: detail.hardRepair === true,
+        force: detail.force === true,
+      });
+    },
+    "repair-request"
+  );
+
+  defineValue(AppCore, "__appUiRepairBound", ok);
+
+  return ok;
+}
+
+export function bindUIRouteSync(first = {}, second = {}) {
+  const deps = resolveDeps(first, second);
+  const { AppCore } = deps;
+
+  if (!AppCore) return false;
+  if (bool(AppCore.__appUiRouteSyncBound)) return true;
+
+  const ok = [
+    bindSyncEvent(deps, EVENTS.routeChange, "app:route:change", "route-change"),
+    bindSyncEvent(deps, EVENTS.routerRendered, "router:rendered", "router-rendered"),
+    bindSyncEvent(deps, EVENTS.routerAsyncComplete, "router:render:async-complete", "router-async-complete"),
+  ].some(Boolean);
+
+  defineValue(AppCore, "__appUiRouteSyncBound", ok);
+
+  return ok;
+}
+
+export function bindUISessionSync(first = {}, second = {}) {
+  const deps = resolveDeps(first, second);
+  const { AppCore } = deps;
+
+  if (!AppCore) return false;
+  if (bool(AppCore.__appUiSessionSyncBound)) return true;
+
+  const eventPairs = [
+    [EVENTS.userChange, "app:user:change"],
+    [EVENTS.sessionRestored, "app:session:restored"],
+    [EVENTS.sessionCleared, "app:session:cleared"],
+    [EVENTS.authSessionRestored, "auth:session:restored"],
+    [EVENTS.authLoginSuccess, "auth:login:success"],
+    [EVENTS.authLogout, "auth:logout"],
+    [EVENTS.authLogoutSuccess, "auth:logout:success"],
+  ];
+
+  let ok = false;
+
+  for (const [eventName, reason] of eventPairs) {
+    ok = bindSyncEvent(deps, eventName, reason, `session:${eventName}`) || ok;
+  }
+
+  defineValue(AppCore, "__appUiSessionSyncBound", ok);
+
+  return ok;
+}
+
+export function bindUIThemeSync(first = {}, second = {}) {
+  const deps = resolveDeps(first, second);
+  const { AppCore } = deps;
+
+  if (!AppCore) return false;
+  if (bool(AppCore.__appUiThemeSyncBound)) return true;
+
+  const events = [
+    EVENTS.themeChange,
+    "onion:theme:change",
+    "theme:change",
+  ];
+
+  let ok = false;
+
+  for (const eventName of events) {
+    ok = bindSyncEvent(deps, eventName, eventName, `theme:${eventName}`) || ok;
+  }
+
+  defineValue(AppCore, "__appUiThemeSyncBound", ok);
+
+  return ok;
+}
+
+export function bindUIRuntimeEvents(first = {}, second = {}) {
+  const deps = resolveDeps(first, second);
+  const { AppCore } = deps;
+
+  if (!AppCore) return false;
+  if (runtimeBound || bool(AppCore.__appUiRuntimeEventsBound)) return true;
+
+  const lang = bindAppLanguageSync(deps);
+  const repair = bindUIRepairSync(deps);
+  const route = bindUIRouteSync(deps);
+  const session = bindUISessionSync(deps);
+  const theme = bindUIThemeSync(deps);
+
+  runtimeBound = Boolean(lang || repair || route || session || theme);
+  defineValue(AppCore, "__appUiRuntimeEventsBound", runtimeBound);
+
+  if (runtimeBound) {
+    emit(AppCore, EVENTS.runtimeEventsBound, {
+      langBound: lang,
+      repairBound: repair,
+      routeBound: route,
+      sessionBound: session,
+      themeBound: theme,
+      at: iso(),
+    });
+  }
+
+  return runtimeBound;
 }
 
 /* =========================================================
@@ -2232,23 +1828,31 @@ export function bindToastBridge(first = {}, second = null) {
 
 export function repairUISystems(first = {}, second = {}) {
   const deps = resolveDeps(first, second);
-  const { AppCore, reason = "repair-ui", rebind = false, hardRepair = false } = deps;
+  const { AppCore, reason = "repair-ui", rebind = false, hardRepair = false, force = false } = deps;
+
+  if (!AppCore) return false;
+
+  const signature = eventSignature("repair", { reason, route: currentRoute(AppCore, deps.Router), publicPath: currentPublicPath(AppCore, deps.Router) });
+  const stamp = now();
+
+  if (force !== true && signature === lastRepairSignature && stamp - lastRepairAt < REPAIR_DEDUPE_MS) {
+    runtime.skippedRepairCount += 1;
+    return true;
+  }
+
+  lastRepairSignature = signature;
+  lastRepairAt = stamp;
 
   runtime.repairCount += 1;
-  runtime.lastRepairAt = now();
+  runtime.lastRepairAt = stamp;
   runtime.lastRepairReason = text(reason, "repair-ui");
 
-  /*
-    Importante:
-    repairUISystems NO emite app:ui:repair-request.
-    Sólo ejecuta sync ligero salvo flags explícitos.
-  */
   const ok = syncUserUI({
     ...deps,
     reason,
     rebind: rebind === true,
     hardRepair: hardRepair === true,
-    force: true,
+    force,
   });
 
   emit(AppCore, EVENTS.repair, {
@@ -2270,9 +1874,7 @@ export function repairUISystems(first = {}, second = {}) {
 
 function markUiInitialized(AppCore, stateRef = null, value = true) {
   try {
-    if (stateRef) {
-      stateRef.uiInitialized = Boolean(value);
-    }
+    if (stateRef) stateRef.uiInitialized = Boolean(value);
   } catch {}
 
   try {
@@ -2285,11 +1887,7 @@ function markUiInitialized(AppCore, stateRef = null, value = true) {
         silent: true,
       }
     );
-  } catch {
-    try {
-      AppCore?.setState?.({ uiInitialized: Boolean(value) });
-    } catch {}
-  }
+  } catch {}
 
   try {
     if (AppCore?.state && typeof AppCore.state === "object") {
@@ -2337,9 +1935,7 @@ function exposeDebugApi(AppCore = null) {
   };
 
   try {
-    if (isBrowser()) {
-      window.__ONION_APP_UI__ = api;
-    }
+    if (isBrowser()) window.__ONION_APP_UI__ = api;
   } catch {}
 
   try {
@@ -2376,7 +1972,6 @@ export function initUISystems(first = {}) {
   } = deps;
 
   if (!AppCore) return false;
-
   if (initInFlight) return true;
 
   if (
@@ -2388,6 +1983,10 @@ export function initUISystems(first = {}) {
       AppCore?.state?.uiInitialized
     )
   ) {
+    registerAppModule(AppCore, MODULES.toast, Toast);
+    registerAppModule(AppCore, MODULES.sidebar, SidebarUI);
+    registerAppModule(AppCore, MODULES.topbar, TopbarUI);
+
     bindToastBridge({ AppCore, Toast });
     bindUIRuntimeEvents({ ...deps, scope });
     exposeDebugApi(AppCore);
@@ -2397,7 +1996,7 @@ export function initUISystems(first = {}) {
       reason: "init-ui-already-initialized",
       rebind: false,
       hardRepair: false,
-      force: true,
+      force: false,
     });
 
     return true;
@@ -2430,17 +2029,11 @@ export function initUISystems(first = {}) {
 
     bindToastBridge({ AppCore, Toast });
 
-    initModule(AppCore, SidebarUI, "SidebarUI", {
-      ...deps,
-      reason: "init-ui:sidebar",
-      force,
-    });
-
-    initModule(AppCore, TopbarUI, "TopbarUI", {
-      ...deps,
-      reason: "init-ui:topbar",
-      force,
-    });
+    /*
+      Sidebar/Topbar no se inicializan en login/auth.
+      Se inicializan lazy cuando el Router entra en una ruta app.
+    */
+    ensureChromeReady(deps, "init-ui:chrome", force);
 
     bindUIRuntimeEvents({
       ...deps,
@@ -2454,7 +2047,7 @@ export function initUISystems(first = {}) {
       reason: "init-ui",
       rebind: false,
       hardRepair: false,
-      force: true,
+      force: false,
     });
 
     initialized = true;
@@ -2474,6 +2067,7 @@ export function initUISystems(first = {}) {
       modules: {
         ...runtime.modules,
       },
+      authRoute: isAuthLikeRoute(AppCore, deps.Router),
       at: iso(),
     };
 
@@ -2485,9 +2079,7 @@ export function initUISystems(first = {}) {
     return true;
   } catch (error) {
     runtime.lastInitOk = false;
-
     setLastError(AppCore, "initUISystems", error);
-
     errorLog(AppCore, "initUISystems() fatal:", error);
 
     emit(AppCore, EVENTS.initError, {
@@ -2513,14 +2105,8 @@ export function unbindUISystems(AppCore = null) {
     } catch {}
   }
 
-  boundEvents.splice(0);
   boundKeys.clear();
 
-  languageBound = false;
-  repairBound = false;
-  routeBound = false;
-  sessionBound = false;
-  themeBound = false;
   runtimeBound = false;
   toastBridgeBound = false;
 
@@ -2538,12 +2124,12 @@ export function unbindUISystems(AppCore = null) {
     at: iso(),
   });
 
-  log(AppCore, "UISystems listeners desactivados.");
-
   return true;
 }
 
 export function getUISystemsSnapshot(first = {}, second = {}) {
+  const deps = resolveDeps(first, second);
+
   const {
     AppCore,
     Auth,
@@ -2551,7 +2137,7 @@ export function getUISystemsSnapshot(first = {}, second = {}) {
     SidebarUI,
     TopbarUI,
     Toast,
-  } = resolveDeps(first, second);
+  } = deps;
 
   const user = AppCore
     ? getUserSnapshot(AppCore, Auth, Router)
@@ -2570,17 +2156,11 @@ export function getUISystemsSnapshot(first = {}, second = {}) {
     syncingUserUI: Boolean(syncing),
     syncQueued: Boolean(syncQueued),
 
-    languageBound: Boolean(languageBound),
-    repairBound: Boolean(repairBound),
-    routeBound: Boolean(routeBound),
-    sessionBound: Boolean(sessionBound),
-    themeBound: Boolean(themeBound),
     runtimeBound: Boolean(runtimeBound),
     toastBridgeBound: Boolean(toastBridgeBound),
     debugApiBound: Boolean(debugApiBound),
 
-    boundEvents: [...boundEvents],
-    boundKeys: Array.from(boundKeys),
+    boundKeyCount: boundKeys.size,
     disposerCount: disposers.length,
 
     modules: {
@@ -2595,11 +2175,6 @@ export function getUISystemsSnapshot(first = {}, second = {}) {
       topbar: TopbarUI ? wasModuleInitialized(TopbarUI) : false,
     },
 
-    registry: {
-      cached: Array.from(registryCache.keys()),
-      conflicts: Array.from(registryConflicts),
-    },
-
     user: user
       ? {
           authenticated: user.authenticated,
@@ -2611,6 +2186,7 @@ export function getUISystemsSnapshot(first = {}, second = {}) {
           theme: user.theme,
           route: user.route,
           publicPath: user.publicPath,
+          authRoute: user.authRoute,
           hasAvatarUrl: Boolean(user.avatarUrl),
         }
       : null,
@@ -2618,14 +2194,9 @@ export function getUISystemsSnapshot(first = {}, second = {}) {
     initCount: runtime.initCount,
     syncCount: runtime.syncCount,
     repairCount: runtime.repairCount,
-    repairRequestCount: runtime.repairRequestCount,
     skippedRepairCount: runtime.skippedRepairCount,
     eventCount: runtime.eventCount,
     errorCount: runtime.errorCount,
-
-    lastEvent: runtime.lastEvent,
-    lastEventAt: runtime.lastEventAt,
-    lastEventAtIso: runtime.lastEventAt ? iso(runtime.lastEventAt) : "",
 
     lastSyncAt: runtime.lastSyncAt,
     lastSyncAtIso: runtime.lastSyncAt ? iso(runtime.lastSyncAt) : "",
@@ -2640,7 +2211,6 @@ export function getUISystemsSnapshot(first = {}, second = {}) {
     lastInitOk: Boolean(runtime.lastInitOk),
 
     lastError: runtime.lastError,
-
     recent: clone(runtime.recent, []),
 
     dedupe: {
@@ -2651,22 +2221,6 @@ export function getUISystemsSnapshot(first = {}, second = {}) {
       lastRepairSignature: redact(lastRepairSignature),
       lastRepairAt,
       lastRepairAtIso: lastRepairAt ? iso(lastRepairAt) : "",
-
-      lastRouteSignature: redact(lastRouteSignature),
-      lastRouteAt,
-      lastRouteAtIso: lastRouteAt ? iso(lastRouteAt) : "",
-
-      lastLangSignature: redact(lastLangSignature),
-      lastLangAt,
-      lastLangAtIso: lastLangAt ? iso(lastLangAt) : "",
-
-      lastThemeSignature: redact(lastThemeSignature),
-      lastThemeAt,
-      lastThemeAtIso: lastThemeAt ? iso(lastThemeAt) : "",
-
-      lastEmitSignature: redact(lastEmitSignature),
-      lastEmitAt,
-      lastEmitAtIso: lastEmitAt ? iso(lastEmitAt) : "",
     },
   });
 }
@@ -2678,7 +2232,6 @@ export function resetUIRuntimeState() {
     } catch {}
   }
 
-  boundEvents.splice(0);
   boundKeys.clear();
 
   initialized = false;
@@ -2688,11 +2241,6 @@ export function resetUIRuntimeState() {
   syncQueued = false;
   queuedDeps = null;
 
-  languageBound = false;
-  repairBound = false;
-  routeBound = false;
-  sessionBound = false;
-  themeBound = false;
   runtimeBound = false;
   toastBridgeBound = false;
   debugApiBound = false;
@@ -2705,26 +2253,13 @@ export function resetUIRuntimeState() {
   lastRepairSignature = "";
   lastRepairAt = 0;
 
-  lastRouteSignature = "";
-  lastRouteAt = 0;
-
-  lastLangSignature = "";
-  lastLangAt = 0;
-
-  lastThemeSignature = "";
-  lastThemeAt = 0;
-
-  lastEmitSignature = "";
-  lastEmitAt = 0;
-
-  registryCache.clear();
-  registryConflicts.clear();
+  lastEventSignature = "";
+  lastEventAt = 0;
 
   runtime.initialized = false;
   runtime.initCount = 0;
   runtime.syncCount = 0;
   runtime.repairCount = 0;
-  runtime.repairRequestCount = 0;
   runtime.skippedRepairCount = 0;
   runtime.eventCount = 0;
   runtime.errorCount = 0;
@@ -2737,9 +2272,6 @@ export function resetUIRuntimeState() {
 
   runtime.lastInitAt = 0;
   runtime.lastInitOk = false;
-
-  runtime.lastEvent = "";
-  runtime.lastEventAt = 0;
 
   runtime.lastError = null;
   runtime.recent = [];

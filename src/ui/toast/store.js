@@ -2,23 +2,30 @@
    Onion SPA - Toast Store
    Archivo: src/ui/toast/store.js
 
-   Responsabilidades:
+   Toast Store limpio:
    - estado interno del módulo toast
-   - registro de items activos
-   - control de dismissing
-   - lectura ordenada
-   - utilidades CRUD internas
-   - snapshots de diagnóstico
-   - endurecer ids / consistencia / resets
-
-   HARDENING:
-   - ids normalizados de forma estable
-   - no expone referencias internas de Sets/Maps
-   - tolera items corruptos
-   - limpia dismissing al borrar/reemplazar
+   - Map items + Set dismissing
+   - ids normalizados
    - orden estable por createdAt
-   - active toasts robustos aunque el DOM esté en transición
+   - no expone Maps/Sets internos
+   - snapshots sin DOM pesado
+   - sin auth/router/http/store global
 ========================================================= */
+
+import {
+  normalizeToastId,
+  safeNumber,
+  safeObject,
+  safeText,
+  now,
+  nowIso,
+} from "./helpers.js";
+
+/* =========================================================
+   VERSION
+========================================================= */
+
+export const TOAST_STORE_VERSION = "17.0.0-clean";
 
 /* =========================================================
    STATE
@@ -28,177 +35,115 @@ const items = new Map();
 const dismissing = new Set();
 
 /* =========================================================
-   CONSTANTS
-========================================================= */
-
-const MAX_TOAST_ID_LENGTH = 160;
-
-/* =========================================================
    BASICS
 ========================================================= */
 
-function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value).trim();
-
-  return text || fallback;
-}
-
-function safeNumber(value, fallback = 0) {
-  const n =
-    Number(value);
-
-  return Number.isFinite(n)
-    ? n
-    : fallback;
-}
-
 function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function cloneList(list = []) {
-  return Array.isArray(list)
-    ? [...list]
-    : [];
+function isElement(value) {
+  return Boolean(value && typeof value === "object" && value.nodeType === 1);
+}
+
+function isConnectedElement(element) {
+  if (!isElement(element)) return false;
+
+  try {
+    if (typeof element.isConnected === "boolean") {
+      return element.isConnected;
+    }
+  } catch {}
+
+  try {
+    return typeof document !== "undefined" && document.contains(element);
+  } catch {
+    return false;
+  }
+}
+
+function normalizeId(id = "") {
+  return normalizeToastId(id);
+}
+
+function validId(id = "") {
+  return Boolean(normalizeId(id));
+}
+
+function cloneList(values = []) {
+  return Array.isArray(values) ? [...values] : [];
 }
 
 /* =========================================================
-   ID HELPERS
+   ITEM NORMALIZATION
 ========================================================= */
 
-function normalizeId(id) {
-  const raw =
-    safeText(id, "");
-
-  if (!raw) {
-    return "";
-  }
-
-  return raw
-    .replace(/\s+/g, "-")
-    .replace(/[^\w:.-]/g, "")
-    .slice(0, MAX_TOAST_ID_LENGTH)
-    .trim();
+function normalizeTimestamp(value = null, fallback = now()) {
+  const number = safeNumber(value, 0);
+  return number > 0 ? number : fallback;
 }
 
-function isValidId(id) {
-  return Boolean(
-    normalizeId(id)
-  );
-}
+function normalizeItem(id = "", item = {}) {
+  if (!isObject(item)) return null;
 
-/* =========================================================
-   ITEM HELPERS
-========================================================= */
+  const key = normalizeId(id || item.id);
 
-function normalizeToastItem(id, item) {
-  const key =
-    normalizeId(id || item?.id);
+  if (!key) return null;
 
-  if (!key || !isObject(item)) {
-    return null;
-  }
+  const createdAt = normalizeTimestamp(item.createdAt, now());
 
   item.id = key;
+  item.type = safeText(item.type, "info");
+  item.title = safeText(item.title, "");
+  item.message = safeText(item.message, "");
 
-  if (!item.createdAt) {
-    item.createdAt = Date.now();
-  }
+  item.duration = safeNumber(item.duration, 0);
+  item.remaining = safeNumber(item.remaining, item.duration);
+  item.startedAt = safeNumber(item.startedAt, 0);
+  item.timeoutId = item.timeoutId || null;
 
-  if (item.dismissed !== true) {
-    item.dismissed = false;
-  }
+  item.createdAt = createdAt;
+  item.updatedAt = normalizeTimestamp(item.updatedAt, createdAt);
+
+  item.dismissed = item.dismissed === true;
+  item.dismissReason = safeText(item.dismissReason, "");
+
+  item.closable = item.closable !== false;
+
+  item.toastEl = item.toastEl || null;
+  item.progressEl = item.progressEl || null;
+
+  item.useDefaultTitle = item.useDefaultTitle === true;
+  item.useDefaultMessage = item.useDefaultMessage === true;
+
+  item.interactionsBound = item.interactionsBound === true;
+  item.paused = item.paused === true;
+
+  item.meta = safeObject(item.meta);
 
   return item;
 }
 
-function isElementConnected(element) {
-  try {
-    if (!element) {
-      return false;
-    }
+function isToastActive(item = null) {
+  if (!isObject(item)) return false;
+  if (item.dismissed === true) return false;
+  if (dismissing.has(item.id)) return false;
+  if (!item.toastEl) return false;
 
-    if (typeof element.isConnected === "boolean") {
-      return element.isConnected;
-    }
-
-    if (
-      typeof document !== "undefined" &&
-      typeof document.contains === "function"
-    ) {
-      return document.contains(element);
-    }
-  } catch {}
-
-  return false;
+  return isConnectedElement(item.toastEl);
 }
 
-function isToastActive(item) {
-  if (!isObject(item)) {
-    return false;
-  }
+function byCreatedAtAsc(a, b) {
+  const left = safeNumber(a?.createdAt, 0);
+  const right = safeNumber(b?.createdAt, 0);
 
-  if (item.dismissed === true) {
-    return false;
-  }
+  if (left !== right) return left - right;
 
-  /*
-    Si aún no tiene toastEl, no lo consideramos activo visual.
-    Si existe pero está desconectado, probablemente está saliendo
-    o quedó huérfano tras un destroy.
-  */
-  if (!item.toastEl) {
-    return false;
-  }
-
-  return isElementConnected(item.toastEl);
+  return safeText(a?.id, "").localeCompare(safeText(b?.id, ""));
 }
 
-function sortByCreatedAtAsc(a, b) {
-  const left =
-    safeNumber(a?.createdAt, 0);
-
-  const right =
-    safeNumber(b?.createdAt, 0);
-
-  if (left === right) {
-    return safeText(a?.id).localeCompare(
-      safeText(b?.id)
-    );
-  }
-
-  return left - right;
-}
-
-function toDebugItem(item) {
-  return {
-    id: safeText(item?.id, ""),
-    type: safeText(item?.type, ""),
-    title: safeText(item?.title, ""),
-    message: safeText(item?.message, ""),
-    duration: safeNumber(item?.duration, 0),
-    remaining: safeNumber(item?.remaining, 0),
-    createdAt: safeNumber(item?.createdAt, 0),
-    startedAt: safeNumber(item?.startedAt, 0),
-    dismissed: item?.dismissed === true,
-    dismissing: isToastDismissing(item?.id),
-    connected: isElementConnected(item?.toastEl),
-    closable: item?.closable !== false,
-    hasToastEl: Boolean(item?.toastEl),
-    hasProgressEl: Boolean(item?.progressEl),
-  };
+function byCreatedAtDesc(a, b) {
+  return byCreatedAtAsc(b, a);
 }
 
 /* =========================================================
@@ -206,85 +151,102 @@ function toDebugItem(item) {
 ========================================================= */
 
 export function setToastItem(id, item) {
-  const normalized =
-    normalizeToastItem(id, item);
+  const normalized = normalizeItem(id, item);
 
-  if (!normalized) {
-    return null;
-  }
+  if (!normalized) return null;
 
   /*
-    Si se reemplaza un toast con el mismo id, ese id ya no debe
-    seguir marcado como dismissing.
+    Si se reemplaza un toast con el mismo id, deja de estar en dismissing.
   */
   dismissing.delete(normalized.id);
 
-  items.set(
-    normalized.id,
-    normalized
-  );
+  items.set(normalized.id, normalized);
 
   return normalized;
 }
 
 export function getToastItem(id) {
-  const key =
-    normalizeId(id);
+  const key = normalizeId(id);
 
-  if (!key) {
-    return null;
-  }
+  if (!key) return null;
 
   return items.get(key) || null;
 }
 
 export function hasToastItem(id) {
-  const key =
-    normalizeId(id);
+  const key = normalizeId(id);
 
-  if (!key) {
-    return false;
-  }
-
-  return items.has(key);
+  return key ? items.has(key) : false;
 }
 
 export function deleteToastItem(id) {
-  const key =
-    normalizeId(id);
+  const key = normalizeId(id);
 
-  if (!key) {
-    return false;
-  }
+  if (!key) return false;
 
   dismissing.delete(key);
 
   return items.delete(key);
 }
 
+export function replaceToastItem(id, item) {
+  const key = normalizeId(id || item?.id);
+
+  if (!key) return null;
+
+  deleteToastItem(key);
+  return setToastItem(key, item);
+}
+
 /* =========================================================
-   LIST
+   LISTS
 ========================================================= */
 
 export function getToastItems() {
-  return cloneList(
-    Array.from(items.values())
-  );
+  return cloneList(Array.from(items.values()));
+}
+
+export function getSortedToastItems() {
+  return getToastItems().sort(byCreatedAtAsc);
+}
+
+export function getNewestToastItems() {
+  return getToastItems().sort(byCreatedAtDesc);
 }
 
 export function getToastIds() {
-  return cloneList(
-    Array.from(items.keys())
-  );
+  return cloneList(Array.from(items.keys()));
 }
 
 export function getToastCount() {
   return items.size;
 }
 
-export function clearToastItems() {
-  items.clear();
-  return true;
+export function getActiveToasts() {
+  return getToastItems()
+    .filter(isToastActive)
+    .sort(byCreatedAtAsc);
+}
+
+export function getActiveToastCount() {
+  return getActiveToasts().length;
+}
+
+export function getOldestActiveToast() {
+  return getActiveToasts()[0] || null;
+}
+
+export function getNewestActiveToast() {
+  const active = getActiveToasts();
+  return active[active.length - 1] || null;
+}
+
+export function getOldestToast() {
+  return getSortedToastItems()[0] || null;
+}
+
+export function getNewestToast() {
+  return getNewestToastItems()[0] || null;
 }
 
 /* =========================================================
@@ -292,44 +254,41 @@ export function clearToastItems() {
 ========================================================= */
 
 export function markToastDismissing(id) {
-  const key =
-    normalizeId(id);
+  const key = normalizeId(id);
 
-  if (!key) {
-    return false;
-  }
+  if (!key) return false;
 
   dismissing.add(key);
+
+  const item = getToastItem(key);
+
+  if (item) {
+    item.updatedAt = now();
+  }
 
   return true;
 }
 
 export function unmarkToastDismissing(id) {
-  const key =
-    normalizeId(id);
+  const key = normalizeId(id);
 
-  if (!key) {
-    return false;
-  }
+  if (!key) return false;
 
   return dismissing.delete(key);
 }
 
 export function isToastDismissing(id) {
-  const key =
-    normalizeId(id);
+  const key = normalizeId(id);
 
-  if (!key) {
-    return false;
-  }
-
-  return dismissing.has(key);
+  return key ? dismissing.has(key) : false;
 }
 
 export function getDismissingIds() {
-  return cloneList(
-    Array.from(dismissing.values())
-  );
+  return cloneList(Array.from(dismissing.values()));
+}
+
+export function getDismissingCount() {
+  return dismissing.size;
 }
 
 export function clearToastDismissing() {
@@ -338,48 +297,61 @@ export function clearToastDismissing() {
 }
 
 /* =========================================================
-   ACTIVE / SORTED
+   UPDATE HELPERS
 ========================================================= */
 
-export function getActiveToasts() {
-  return getToastItems()
-    .filter(isToastActive)
-    .sort(sortByCreatedAtAsc);
+export function patchToastItem(id, patch = {}) {
+  const item = getToastItem(id);
+
+  if (!item || !isObject(patch)) return null;
+
+  Object.assign(item, patch, {
+    id: item.id,
+    updatedAt: now(),
+  });
+
+  return normalizeItem(item.id, item);
 }
 
-export function getNewestActiveToast() {
-  const active =
-    getActiveToasts();
-
-  return active[active.length - 1] || null;
+export function markToastPaused(id, paused = true) {
+  return patchToastItem(id, {
+    paused: Boolean(paused),
+  });
 }
 
-export function getOldestActiveToast() {
-  const active =
-    getActiveToasts();
-
-  return active[0] || null;
+export function markToastDismissed(id, reason = "dismiss") {
+  return patchToastItem(id, {
+    dismissed: true,
+    dismissReason: safeText(reason, "dismiss"),
+    dismissedAt: now(),
+  });
 }
 
-export function getSortedToastItems() {
-  return getToastItems()
-    .sort(sortByCreatedAtAsc);
+export function unmarkToastDismissed(id) {
+  return patchToastItem(id, {
+    dismissed: false,
+    dismissReason: "",
+    dismissedAt: null,
+  });
 }
 
 /* =========================================================
-   BULK HELPERS
+   BULK CLEANUP
 ========================================================= */
+
+export function clearToastItems() {
+  items.clear();
+  return true;
+}
 
 export function deleteDismissedToasts() {
   let removed = 0;
 
-  getToastItems().forEach((item) => {
+  for (const item of getToastItems()) {
     if (item?.dismissed === true) {
-      if (deleteToastItem(item.id)) {
-        removed += 1;
-      }
+      if (deleteToastItem(item.id)) removed += 1;
     }
-  });
+  }
 
   return removed;
 }
@@ -387,51 +359,22 @@ export function deleteDismissedToasts() {
 export function deleteDisconnectedToasts() {
   let removed = 0;
 
-  getToastItems().forEach((item) => {
+  for (const item of getToastItems()) {
     if (
       item?.dismissed === true ||
       !item?.toastEl ||
-      !isElementConnected(item.toastEl)
+      !isConnectedElement(item.toastEl)
     ) {
-      if (deleteToastItem(item.id)) {
-        removed += 1;
-      }
+      if (deleteToastItem(item.id)) removed += 1;
     }
-  });
+  }
 
   return removed;
 }
 
-/* =========================================================
-   DEBUG SNAPSHOT
-========================================================= */
-
-export function getToastStoreSnapshot() {
-  const all =
-    getSortedToastItems();
-
-  const active =
-    getActiveToasts();
-
-  return {
-    total: items.size,
-    activeCount: active.length,
-    dismissing: dismissing.size,
-
-    ids: getToastIds(),
-    dismissingIds: getDismissingIds(),
-
-    active:
-      active.map(toDebugItem),
-
-    items:
-      all.map(toDebugItem),
-  };
+export function pruneToastStore() {
+  return deleteDisconnectedToasts();
 }
-
-/* =========================================================
-   RESET
-========================================================= */
 
 export function resetToastStore() {
   clearToastItems();
@@ -441,34 +384,108 @@ export function resetToastStore() {
 }
 
 /* =========================================================
+   SNAPSHOT
+========================================================= */
+
+function itemSnapshot(item = null) {
+  return {
+    id: safeText(item?.id, ""),
+
+    type: safeText(item?.type, ""),
+    title: safeText(item?.title, ""),
+    message: safeText(item?.message, ""),
+
+    duration: safeNumber(item?.duration, 0),
+    remaining: safeNumber(item?.remaining, 0),
+    startedAt: safeNumber(item?.startedAt, 0),
+
+    createdAt: safeNumber(item?.createdAt, 0),
+    createdAtIso: item?.createdAt ? nowIso(item.createdAt) : "",
+
+    updatedAt: safeNumber(item?.updatedAt, 0),
+    updatedAtIso: item?.updatedAt ? nowIso(item.updatedAt) : "",
+
+    dismissed: item?.dismissed === true,
+    dismissReason: safeText(item?.dismissReason, ""),
+    dismissing: isToastDismissing(item?.id),
+
+    paused: item?.paused === true,
+    closable: item?.closable !== false,
+
+    useDefaultTitle: item?.useDefaultTitle === true,
+    useDefaultMessage: item?.useDefaultMessage === true,
+
+    hasTimeout: Boolean(item?.timeoutId),
+    hasToastEl: Boolean(item?.toastEl),
+    hasProgressEl: Boolean(item?.progressEl),
+    connected: isConnectedElement(item?.toastEl),
+
+    interactionsBound: item?.interactionsBound === true,
+  };
+}
+
+export function getToastStoreSnapshot() {
+  const all = getSortedToastItems();
+  const active = all.filter(isToastActive);
+
+  return {
+    version: TOAST_STORE_VERSION,
+
+    total: items.size,
+    activeCount: active.length,
+    dismissingCount: dismissing.size,
+
+    ids: getToastIds(),
+    dismissingIds: getDismissingIds(),
+
+    active: active.map(itemSnapshot),
+    items: all.map(itemSnapshot),
+  };
+}
+
+/* =========================================================
    DEFAULT EXPORT
 ========================================================= */
 
 export default {
+  TOAST_STORE_VERSION,
+
   setToastItem,
   getToastItem,
   hasToastItem,
   deleteToastItem,
+  replaceToastItem,
 
   getToastItems,
+  getSortedToastItems,
+  getNewestToastItems,
   getToastIds,
   getToastCount,
-  clearToastItems,
+
+  getActiveToasts,
+  getActiveToastCount,
+  getOldestActiveToast,
+  getNewestActiveToast,
+  getOldestToast,
+  getNewestToast,
 
   markToastDismissing,
   unmarkToastDismissing,
   isToastDismissing,
   getDismissingIds,
+  getDismissingCount,
   clearToastDismissing,
 
-  getActiveToasts,
-  getNewestActiveToast,
-  getOldestActiveToast,
-  getSortedToastItems,
+  patchToastItem,
+  markToastPaused,
+  markToastDismissed,
+  unmarkToastDismissed,
 
+  clearToastItems,
   deleteDismissedToasts,
   deleteDisconnectedToasts,
+  pruneToastStore,
+  resetToastStore,
 
   getToastStoreSnapshot,
-  resetToastStore,
 };

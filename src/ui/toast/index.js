@@ -2,38 +2,23 @@
    Onion SPA - Toast
    Archivo: src/ui/toast/index.js
 
-   ONION SUPPORT · TOAST ORCHESTRATOR
-   UI NOTIFICATIONS · SAFE BRIDGE · EXTREME 10/10
-
-   Responsabilidades:
-   - Ensamblar el módulo toast.
-   - Exponer API pública única.
-   - Inicialización segura e idempotente.
-   - Auto-init transparente al primer uso.
-   - Bind de eventos globales y DOM sin duplicados.
-   - Registro robusto en AppCore / modules / registry.
-   - Compatibilidad bridge para Login / Auth Views.
-   - Aliases legacy: warn / dismissAll / exists / ready.
-   - Bridge opcional window.OnionToast.
-   - Snapshot debug sin objetos pesados.
-   - Destroy seguro.
-   - Cero throws accidentales desde API pública.
-
-   HARDENING:
-   - No CSS inline.
-   - No estilos inyectados desde este orquestador.
-   - Keyframes runtime sólo si dom.js lo soporta y config lo permite.
-   - Sin app:module:duplicate storms.
-   - Registro silencioso preferente en registry.modules.
-   - Event payload sanitizado.
-   - API callable-friendly: show("texto"), show({ ... }).
-   - Compatible con AppCore congelado/parcial.
-   - Tolerante a DOM inexistente.
+   Toast orchestrator limpio:
+   - API pública única
+   - auto-init al primer uso
+   - bind global/DOM idempotente
+   - bridge AppCore.setShowToast()
+   - registro silencioso en AppCore/modules/window
+   - sin auth/router/http/store global
+   - sin estilos runtime
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
-import { TOAST_SCOPE } from "./constants.js";
+import {
+  TOAST_VERSION,
+  TOAST_SOURCE,
+  TOAST_SCOPE,
+} from "./constants.js";
 
 import {
   showToast,
@@ -47,35 +32,64 @@ import {
   loadingToast,
   refreshAllToastsLanguage,
   resetToastApiState,
+  getToastApiSnapshot,
 } from "./api.js";
 
 import {
   bindToastGlobalEvents,
   bindToastDomEvents,
   unbindToastEvents,
+  getToastEventsSnapshot,
 } from "./events.js";
 
 import {
   ensureToastContainer,
   ensureToastKeyframes,
+  getToastDomSnapshot,
 } from "./dom.js";
+
+import {
+  hasToastItem,
+  getToastStoreSnapshot,
+} from "./store.js";
+
+import {
+  getToastHelpersSnapshot,
+  safeText,
+} from "./helpers.js";
+
+import {
+  getToastTextSnapshot,
+} from "./text.js";
 
 /* =========================================================
    VERSION
 ========================================================= */
 
-export const TOAST_MODULE_VERSION =
-  "10.0.0-extreme-safe-bridge";
+export const TOAST_MODULE_VERSION = TOAST_VERSION || "17.0.0-clean";
+
+const SOURCE = TOAST_SOURCE || "ui.toast";
+
+const GLOBAL_KEY = "__ONION_TOAST__";
+
+const EVENTS = Object.freeze({
+  init: "toast:init",
+  initError: "toast:init:error",
+  ready: "toast:ready",
+  destroy: "toast:destroy",
+  registered: "toast:module:registered",
+  bridgeReady: "toast:bridge:ready",
+});
 
 /* =========================================================
    SINGLETON
 ========================================================= */
 
-const Toast = (() => {
+export const Toast = (() => {
   "use strict";
 
   /* =======================================================
-     RUNTIME STATE
+     RUNTIME
   ======================================================= */
 
   let initialized = false;
@@ -86,696 +100,333 @@ const Toast = (() => {
   let initCount = 0;
   let bindCount = 0;
   let destroyCount = 0;
-  let showCount = 0;
+  let callCount = 0;
   let errorCount = 0;
 
   let lastInitAt = "";
   let lastBindAt = "";
   let lastDestroyAt = "";
-  let lastToastAt = "";
+  let lastCallAt = "";
   let lastError = null;
-
-  const bridgeWarnings = new Set();
 
   /* =======================================================
      BASICS
   ======================================================= */
 
   function isBrowser() {
-    return (
-      typeof window !== "undefined" &&
-      typeof document !== "undefined"
-    );
+    return typeof window !== "undefined" && typeof document !== "undefined";
   }
 
-  function isFunction(value) {
+  function isFn(value) {
     return typeof value === "function";
   }
 
   function isObject(value) {
-    return (
-      value !== null &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-    );
+    return Boolean(value && typeof value === "object" && !Array.isArray(value));
   }
 
-  function isAnyObject(value) {
-    return (
-      value !== null &&
-      typeof value === "object"
-    );
+  function safeObject(value) {
+    return isObject(value) ? value : {};
   }
 
-  function safeObject(value, fallback = {}) {
-    return isObject(value)
-      ? value
-      : fallback;
-  }
-
-  function safeArray(value) {
-    return Array.isArray(value)
-      ? value
-      : [];
-  }
-
-  function safeText(value, fallback = "") {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      return fallback;
-    }
-
-    const text =
-      String(value)
-        .replace(/[\r\n\t]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-
-    return text || fallback;
-  }
-
-  function nowIso() {
+  function now() {
     try {
-      return new Date().toISOString();
+      return Date.now();
+    } catch {
+      return 0;
+    }
+  }
+
+  function iso(ms = now()) {
+    try {
+      return new Date(ms).toISOString();
     } catch {
       return "";
     }
   }
 
-  function normalizeOptions(options = {}) {
-    return safeObject(options);
+  function normalizeError(error = null, context = "toast") {
+    if (!error) return null;
+
+    const source = error?.error || error?.reason || error;
+
+    return {
+      context,
+      name: safeText(source?.name || source?.constructor?.name, "Error"),
+      message: safeText(source?.message || source?.reason || source, "Toast error."),
+      code: source?.code || source?.data?.code || source?.response?.data?.code || null,
+      status: source?.status || source?.statusCode || source?.response?.status || null,
+      at: iso(),
+    };
   }
 
+  function recordError(error, context = "toast") {
+    errorCount += 1;
+    lastError = normalizeError(error, context);
+
+    try {
+      AppCore?.utils?.warn?.("[Toast]", lastError);
+    } catch {}
+
+    return lastError;
+  }
+
+  function emit(eventName = "", payload = {}, options = {}) {
+    const name = safeText(eventName, "");
+    if (!name) return false;
+
+    const detail = {
+      source: SOURCE,
+      version: TOAST_MODULE_VERSION,
+      scope: TOAST_SCOPE,
+      at: iso(),
+      ...safeObject(payload),
+    };
+
+    let hasBus = false;
+    let emitted = false;
+
+    try {
+      if (isFn(AppCore?.events?.emit)) {
+        hasBus = true;
+        AppCore.events.emit(name, detail);
+        emitted = true;
+      }
+    } catch {}
+
+    if ((options.window === true || !hasBus) && isBrowser()) {
+      try {
+        window.dispatchEvent(new CustomEvent(name, { detail }));
+        emitted = true;
+      } catch {}
+    }
+
+    return emitted;
+  }
+
+  function log(...args) {
+    try {
+      AppCore?.utils?.log?.("[Toast]", ...args);
+    } catch {}
+  }
+
+  /* =======================================================
+     NORMALIZE INPUT
+  ======================================================= */
+
   function isErrorLike(value) {
-    return (
+    return Boolean(
       value instanceof Error ||
-      (
-        value &&
-        typeof value === "object" &&
         (
-          safeText(value.name, "") ||
-          safeText(value.message, "")
+          value &&
+          typeof value === "object" &&
+          (
+            safeText(value.message, "") ||
+            safeText(value.name, "")
+          )
         )
-      )
     );
   }
 
   function normalizeShowInput(input = {}, options = {}) {
-    const opts =
-      normalizeOptions(options);
+    const opts = safeObject(options);
 
-    if (typeof input === "string") {
+    if (typeof input === "string" || typeof input === "number" || typeof input === "boolean") {
       return {
         ...opts,
-        message:
-          input,
+        message: safeText(input, ""),
       };
     }
 
     if (isErrorLike(input)) {
       return {
         ...opts,
-
-        message:
-          safeText(
-            input.message,
-            "Error inesperado"
-          ),
-
-        error:
-          input,
-
-        type:
-          "error",
+        type: "error",
+        message: safeText(input.message, "Error inesperado."),
+        error: input,
       };
     }
 
     return {
+      ...safeObject(input),
       ...opts,
-      ...normalizeOptions(input),
     };
   }
 
-  function normalizeMessageAndOptions(message = "", options = {}) {
+  function normalizeMessageOptions(message = "", options = {}) {
+    const opts = safeObject(options);
+
     if (isErrorLike(message)) {
       return {
-        message:
-          safeText(
-            message.message,
-            "Error inesperado"
-          ),
-
+        message: safeText(message.message, "Error inesperado."),
         options: {
-          error:
-            message,
-
-          ...normalizeOptions(options),
+          ...opts,
+          error: message,
         },
       };
     }
 
-    if (
-      isObject(message) &&
-      !safeText(message.message, "")
-    ) {
+    if (isObject(message)) {
       return {
-        message:
-          "",
-
+        message: safeText(message.message || message.text || "", ""),
         options: {
           ...message,
-          ...normalizeOptions(options),
+          ...opts,
         },
       };
     }
 
     return {
-      message:
-        safeText(message, ""),
-
-      options:
-        normalizeOptions(options),
+      message: safeText(message, ""),
+      options: opts,
     };
   }
 
   /* =======================================================
-     SANITIZE / LOG
+     DOM / EVENTS
   ======================================================= */
-
-  function sanitizePayload(value, depth = 0, seen = null) {
-    if (!seen) {
-      try {
-        seen = new WeakSet();
-      } catch {
-        seen = null;
-      }
-    }
-
-    if (depth > 5) {
-      return "[MaxDepth]";
-    }
-
-    if (typeof value === "string") {
-      return value
-        .replace(
-          /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-          "$1***"
-        )
-        .replace(
-          /([?&#](?:token|access_token|refresh_token|id_token|code|otp|t)=)([^&#\s]+)/gi,
-          "$1***"
-        );
-    }
-
-    if (
-      value === null ||
-      value === undefined ||
-      typeof value === "number" ||
-      typeof value === "boolean"
-    ) {
-      return value;
-    }
-
-    if (typeof value === "function") {
-      return "[Function]";
-    }
-
-    if (typeof value === "bigint") {
-      return String(value);
-    }
-
-    if (value instanceof Error) {
-      return {
-        name:
-          safeText(value.name, "Error"),
-
-        message:
-          safeText(value.message, "Error"),
-
-        code:
-          value.code || null,
-
-        status:
-          value.status ||
-          value.statusCode ||
-          null,
-
-        stack:
-          value.stack ? "[stack]" : null,
-      };
-    }
-
-    if (isAnyObject(value)) {
-      try {
-        if (
-          seen &&
-          seen.has(value)
-        ) {
-          return "[Circular]";
-        }
-
-        seen?.add?.(value);
-      } catch {}
-    }
-
-    if (Array.isArray(value)) {
-      return value
-        .slice(0, 50)
-        .map((item) =>
-          sanitizePayload(
-            item,
-            depth + 1,
-            seen
-          )
-        );
-    }
-
-    if (isObject(value)) {
-      const output = {};
-
-      for (const [key, item] of Object.entries(value).slice(0, 80)) {
-        if (
-          /token|password|secret|authorization|cookie|credential|otp|mfa|2fa/i.test(key)
-        ) {
-          output[key] =
-            item ? "***" : item;
-          continue;
-        }
-
-        if (
-          /^(event|target|currentTarget|nativeEvent|source|raw|response|request|promise)$/i.test(key)
-        ) {
-          output[key] =
-            item ? `[${key}]` : item;
-          continue;
-        }
-
-        output[key] =
-          sanitizePayload(
-            item,
-            depth + 1,
-            seen
-          );
-      }
-
-      return output;
-    }
-
-    return String(value);
-  }
-
-  function rememberError(error, context = "") {
-    errorCount += 1;
-
-    lastError =
-      sanitizePayload({
-        context:
-          safeText(context, "toast"),
-
-        error,
-        at:
-          nowIso(),
-      });
-
-    return lastError;
-  }
-
-  function safeLog(...args) {
-    const clean =
-      args.map((item) =>
-        sanitizePayload(item)
-      );
-
-    try {
-      AppCore?.utils?.log?.(
-        "[Toast]",
-        ...clean
-      );
-
-      return;
-    } catch {}
-
-    try {
-      if (
-        AppCore?.config?.debug === true ||
-        AppCore?.config?.debugToast === true
-      ) {
-        console.log(
-          "[Toast]",
-          ...clean
-        );
-      }
-    } catch {}
-  }
-
-  function safeWarn(...args) {
-    const clean =
-      args.map((item) =>
-        sanitizePayload(item)
-      );
-
-    try {
-      AppCore?.utils?.warn?.(
-        "[Toast]",
-        ...clean
-      );
-
-      return;
-    } catch {}
-
-    try {
-      if (
-        AppCore?.config?.debug === true ||
-        AppCore?.config?.debugToast === true
-      ) {
-        console.warn(
-          "[Toast]",
-          ...clean
-        );
-      }
-    } catch {}
-  }
-
-  function safeError(...args) {
-    const clean =
-      args.map((item) =>
-        sanitizePayload(item)
-      );
-
-    try {
-      AppCore?.utils?.error?.(
-        "[Toast]",
-        ...clean
-      );
-
-      return;
-    } catch {}
-
-    try {
-      if (
-        AppCore?.config?.debug === true ||
-        AppCore?.config?.debugToast === true
-      ) {
-        console.error(
-          "[Toast]",
-          ...clean
-        );
-      }
-    } catch {}
-  }
-
-  function shouldEmitLifecycleEvents() {
-    try {
-      return Boolean(
-        AppCore?.config?.diagnostics?.toastEvents === true ||
-          AppCore?.config?.diagnostics?.uiEvents === true ||
-          AppCore?.config?.debugToast === true
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  function safeEmit(eventName, payload = {}, options = {}) {
-    const name =
-      safeText(eventName, "");
-
-    if (!name) {
-      return false;
-    }
-
-    const opts =
-      safeObject(options);
-
-    if (
-      opts.lifecycle === true &&
-      !shouldEmitLifecycleEvents()
-    ) {
-      return false;
-    }
-
-    const cleanPayload =
-      sanitizePayload({
-        source:
-          "Toast",
-
-        version:
-          TOAST_MODULE_VERSION,
-
-        scope:
-          TOAST_SCOPE,
-
-        at:
-          nowIso(),
-
-        ...safeObject(payload),
-      });
-
-    let emitted =
-      false;
-
-    try {
-      if (isFunction(AppCore?.events?.emit)) {
-        AppCore.events.emit(
-          name,
-          cleanPayload
-        );
-
-        emitted =
-          true;
-      }
-    } catch {}
-
-    try {
-      if (
-        isBrowser() &&
-        (opts.window === true || !emitted)
-      ) {
-        window.dispatchEvent(
-          new CustomEvent(name, {
-            detail:
-              cleanPayload,
-          })
-        );
-
-        emitted =
-          true;
-      }
-    } catch {}
-
-    return emitted;
-  }
-
-  /* =======================================================
-     DOM
-  ======================================================= */
-
-  function allowRuntimeKeyframes() {
-    try {
-      return Boolean(
-        AppCore?.config?.toast?.runtimeKeyframes === true ||
-          AppCore?.config?.allowToastRuntimeKeyframes === true
-      );
-    } catch {
-      return false;
-    }
-  }
 
   function ensureDom() {
-    if (!isBrowser()) {
-      return false;
-    }
+    if (!isBrowser()) return false;
 
-    /*
-      Por arquitectura, los estilos deben vivir en CSS.
-      Sólo permitimos ensureToastKeyframes() si la config lo activa.
-    */
-    if (allowRuntimeKeyframes()) {
-      try {
-        ensureToastKeyframes?.();
-      } catch (error) {
-        rememberError(
-          error,
-          "ensureToastKeyframes"
-        );
-
-        safeWarn(
-          "No se pudieron asegurar keyframes toast.",
-          error
-        );
-      }
+    try {
+      ensureToastKeyframes?.();
+    } catch (error) {
+      recordError(error, "ensureToastKeyframes");
     }
 
     try {
       ensureToastContainer?.();
       return true;
     } catch (error) {
-      rememberError(
-        error,
-        "ensureToastContainer"
-      );
-
-      safeWarn(
-        "No se pudo asegurar contenedor toast.",
-        error
-      );
-
+      recordError(error, "ensureToastContainer");
       return false;
     }
+  }
+
+  function actions() {
+    return {
+      show,
+      showToast: show,
+
+      update,
+      updateToast: update,
+
+      dismiss,
+      dismissToast: dismiss,
+
+      clear,
+      clearToasts: clear,
+
+      reset,
+      resetToastApiState: reset,
+
+      success,
+      successToast: success,
+
+      error,
+      errorToast: error,
+
+      warning,
+      warn,
+      warningToast: warning,
+
+      info,
+      infoToast: info,
+
+      loading,
+      loadingToast: loading,
+
+      refreshLanguage,
+      refreshAllToastsLanguage: refreshLanguage,
+    };
+  }
+
+  function bindEvents() {
+    if (eventsBound) return true;
+
+    try {
+      bindToastGlobalEvents(actions());
+    } catch (error) {
+      recordError(error, "bindToastGlobalEvents");
+    }
+
+    try {
+      bindToastDomEvents(actions());
+    } catch (error) {
+      recordError(error, "bindToastDomEvents");
+    }
+
+    eventsBound = true;
+    bindCount += 1;
+    lastBindAt = iso();
+
+    return true;
+  }
+
+  function unbindEvents() {
+    if (!eventsBound) return true;
+
+    try {
+      unbindToastEvents();
+    } catch (error) {
+      recordError(error, "unbindToastEvents");
+    }
+
+    eventsBound = false;
+    return true;
   }
 
   /* =======================================================
-     MODULE REGISTRATION
+     BRIDGE / REGISTRATION
   ======================================================= */
 
-  function getRegisteredModule(name = "") {
-    const clean =
-      safeText(name, "");
-
-    if (!clean) {
-      return null;
+  function showBridge(message = "", type = "info", options = {}) {
+    if (isObject(type)) {
+      return show(message, type);
     }
 
-    try {
-      if (isFunction(AppCore?.modules?.get)) {
-        return AppCore.modules.get(clean) || null;
-      }
-    } catch {}
-
-    try {
-      if (AppCore?.registry?.modules?.get) {
-        return AppCore.registry.modules.get(clean) || null;
-      }
-    } catch {}
-
-    try {
-      if (
-        AppCore?.modules &&
-        typeof AppCore.modules === "object" &&
-        AppCore.modules[clean]
-      ) {
-        return AppCore.modules[clean];
-      }
-    } catch {}
-
-    return null;
+    return show({
+      ...safeObject(options),
+      type: safeText(type, "info"),
+      message,
+    });
   }
 
-  function warnBridgeConflictOnce(name = "") {
-    const clean =
-      safeText(name, "");
+  function registerModuleName(name = "") {
+    const clean = safeText(name, "");
+    if (!clean) return false;
 
-    if (!clean || bridgeWarnings.has(clean)) {
-      return;
-    }
+    try {
+      const current = AppCore?.modules?.get?.(clean);
 
-    bridgeWarnings.add(clean);
+      if (current === api) return true;
 
-    safeWarn(
-      "Bridge toast existente con otra instancia. No se fuerza reemplazo para evitar duplicados.",
-      {
-        name:
-          clean,
-      }
-    );
-  }
+      AppCore?.modules?.register?.(clean, api, {
+        overwrite: true,
+        replace: true,
+        aliases: clean === "Toast" ? ["toast"] : ["Toast"],
+        source: SOURCE,
+        silent: true,
+        emit: false,
+      });
 
-  function registerOneModuleName(name = "") {
-    const clean =
-      safeText(name, "");
-
-    if (!clean) {
-      return false;
-    }
-
-    const existing =
-      getRegisteredModule(clean);
-
-    if (existing === api) {
       return true;
-    }
+    } catch {}
 
-    if (
-      existing &&
-      existing !== api
-    ) {
-      warnBridgeConflictOnce(clean);
-      return false;
-    }
+    try {
+      AppCore?.modules?.set?.(clean, api, {
+        source: SOURCE,
+        silent: true,
+        emit: false,
+      });
+
+      return true;
+    } catch {}
 
     try {
       if (AppCore?.registry?.modules?.set) {
-        AppCore.registry.modules.set(
-          clean,
-          api
-        );
-
-        return true;
-      }
-    } catch {}
-
-    try {
-      if (isFunction(AppCore?.modules?.register)) {
-        const result =
-          AppCore.modules.register(
-            clean,
-            api,
-            {
-              aliases:
-                clean === "Toast"
-                  ? ["toast"]
-                  : [],
-
-              overwrite:
-                false,
-
-              replace:
-                false,
-
-              idempotent:
-                true,
-
-              emit:
-                false,
-
-              source:
-                "ui.toast",
-            }
-          );
-
-        return result !== false;
-      }
-    } catch {}
-
-    try {
-      if (isFunction(AppCore?.modules?.set)) {
-        AppCore.modules.set(
-          clean,
-          api,
-          {
-            source:
-              "ui.toast",
-            emit:
-              false,
-          }
-        );
-
-        return true;
-      }
-    } catch {}
-
-    try {
-      if (
-        AppCore?.modules &&
-        typeof AppCore.modules === "object" &&
-        Object.isExtensible(AppCore.modules) &&
-        !AppCore.modules[clean]
-      ) {
-        AppCore.modules[clean] =
-          api;
-
+        AppCore.registry.modules.set(clean, api);
         return true;
       }
     } catch {}
@@ -783,49 +434,37 @@ const Toast = (() => {
     return false;
   }
 
-  function registerAppCoreBridge() {
-    let ok =
-      false;
+  function registerCoreBridge() {
+    let ok = false;
 
     try {
-      if (AppCore) {
-        AppCore.Toast =
-          api;
+      AppCore.Toast = api;
+      ok = true;
+    } catch {}
 
-        ok =
-          true;
+    try {
+      AppCore.toast = api;
+      ok = true;
+    } catch {}
+
+    try {
+      AppCore.setShowToast?.(showBridge);
+      ok = true;
+    } catch {}
+
+    try {
+      if (AppCore.services && typeof AppCore.services === "object") {
+        AppCore.services.toast = api;
+        AppCore.services.Toast = api;
+        ok = true;
       }
     } catch {}
 
     try {
-      if (AppCore) {
-        AppCore.toast =
-          api;
-
-        ok =
-          true;
-      }
-    } catch {}
-
-    try {
-      if (
-        AppCore &&
-        typeof AppCore === "object" &&
-        Object.isExtensible(AppCore)
-      ) {
-        AppCore.ui =
-          isObject(AppCore.ui)
-            ? AppCore.ui
-            : {};
-
-        AppCore.ui.Toast =
-          api;
-
-        AppCore.ui.toast =
-          api;
-
-        ok =
-          true;
+      if (AppCore.ui && typeof AppCore.ui === "object") {
+        AppCore.ui.toast = api;
+        AppCore.ui.Toast = api;
+        ok = true;
       }
     } catch {}
 
@@ -833,231 +472,57 @@ const Toast = (() => {
   }
 
   function registerWindowBridge() {
-    if (!isBrowser()) {
-      return false;
-    }
+    if (!isBrowser()) return false;
 
-    let ok =
-      false;
+    let ok = false;
 
     try {
-      window.OnionToast =
-        api;
-
-      ok =
-        true;
+      window[GLOBAL_KEY] = api;
+      window.OnionToast = api;
+      ok = true;
     } catch {}
 
     try {
-      if (!window.Toast) {
-        window.Toast =
-          api;
+      window.OnionApp = window.OnionApp || {};
+      window.OnionApp.Toast = api;
+      window.OnionApp.toast = api;
+      ok = true;
+    } catch {}
+
+    try {
+      if (!window.Toast || window.Toast === api) {
+        window.Toast = api;
+        ok = true;
       }
-
-      ok =
-        true;
-    } catch {}
-
-    try {
-      window.OnionApp =
-        window.OnionApp || {};
-
-      window.OnionApp.Toast =
-        api;
-
-      window.OnionApp.toast =
-        api;
-
-      ok =
-        true;
     } catch {}
 
     return ok;
   }
 
-  function registerModule(options = {}) {
-    const opts =
-      safeObject(options);
+  function register(options = {}) {
+    const opts = safeObject(options);
 
-    const registryResults = {
-      Toast:
-        false,
-
-      toast:
-        false,
-
-      toastModule:
-        false,
+    const modules = {
+      Toast: registerModuleName("Toast"),
+      toast: registerModuleName("toast"),
     };
 
-    try {
-      registryResults.Toast =
-        registerOneModuleName("Toast");
+    const core = registerCoreBridge();
+    const win = opts.windowBridge === false ? false : registerWindowBridge();
 
-      registryResults.toast =
-        registerOneModuleName("toast");
+    emit(EVENTS.registered, {
+      modules,
+      core,
+      window: win,
+    });
 
-      registryResults.toastModule =
-        registerOneModuleName("toastModule");
-    } catch (error) {
-      rememberError(
-        error,
-        "registerModule"
-      );
-    }
+    emit(EVENTS.bridgeReady, {
+      core,
+      window: win,
+      showBridge: true,
+    });
 
-    const coreOk =
-      registerAppCoreBridge();
-
-    const windowOk =
-      opts.windowBridge === false
-        ? false
-        : registerWindowBridge();
-
-    safeEmit(
-      "toast:module:registered",
-      {
-        registry:
-          registryResults,
-
-        coreOk,
-        windowOk,
-      },
-      {
-        lifecycle:
-          true,
-      }
-    );
-
-    return Boolean(
-      registryResults.Toast ||
-        registryResults.toast ||
-        registryResults.toastModule ||
-        coreOk ||
-        windowOk
-    );
-  }
-
-  /* =======================================================
-     EVENTS
-  ======================================================= */
-
-  function buildEventHandlers() {
-    return {
-      show,
-      update,
-      dismiss,
-      clear,
-
-      success,
-      error,
-      warning,
-      warn,
-      info,
-      loading,
-
-      dismissAll,
-
-      refreshAllToastsLanguage:
-        refreshLanguage,
-
-      refreshLanguage,
-    };
-  }
-
-  function bindEvents() {
-    if (eventsBound) {
-      return true;
-    }
-
-    try {
-      bindToastGlobalEvents(
-        buildEventHandlers()
-      );
-    } catch (error) {
-      rememberError(
-        error,
-        "bindToastGlobalEvents"
-      );
-
-      safeWarn(
-        "bindToastGlobalEvents falló.",
-        error
-      );
-    }
-
-    try {
-      bindToastDomEvents({
-        dismiss,
-        dismissToast:
-          dismiss,
-        clear,
-      });
-    } catch (error) {
-      rememberError(
-        error,
-        "bindToastDomEvents"
-      );
-
-      safeWarn(
-        "bindToastDomEvents falló.",
-        error
-      );
-    }
-
-    eventsBound =
-      true;
-
-    bindCount += 1;
-    lastBindAt =
-      nowIso();
-
-    safeEmit(
-      "toast:events:bound",
-      {
-        bindCount,
-      },
-      {
-        lifecycle:
-          true,
-      }
-    );
-
-    return true;
-  }
-
-  function unbindEvents() {
-    if (!eventsBound) {
-      return true;
-    }
-
-    try {
-      unbindToastEvents?.();
-    } catch (error) {
-      rememberError(
-        error,
-        "unbindToastEvents"
-      );
-
-      safeWarn(
-        "unbindToastEvents falló.",
-        error
-      );
-    }
-
-    eventsBound =
-      false;
-
-    safeEmit(
-      "toast:events:unbound",
-      {},
-      {
-        lifecycle:
-          true,
-      }
-    );
-
-    return true;
+    return Boolean(modules.Toast || modules.toast || core || win);
   }
 
   /* =======================================================
@@ -1065,114 +530,72 @@ const Toast = (() => {
   ======================================================= */
 
   function init(options = {}) {
-    const opts =
-      safeObject(options);
+    const opts = safeObject(options);
 
-    if (initialized) {
+    if (initialized && opts.force !== true) {
       ensureDom();
-      registerModule(opts);
-
+      register(opts);
       return api;
     }
 
-    if (initializing) {
-      return api;
-    }
+    if (initializing) return api;
 
-    initializing =
-      true;
-
-    destroyed =
-      false;
+    initializing = true;
+    destroyed = false;
 
     try {
       ensureDom();
-      bindEvents();
-      registerModule(opts);
 
-      initialized =
-        true;
+      if (opts.bindEvents !== false && opts.events !== false) {
+        bindEvents();
+      }
 
+      register(opts);
+
+      initialized = true;
       initCount += 1;
-      lastInitAt =
-        nowIso();
+      lastInitAt = iso();
 
-      safeEmit(
-        "toast:init",
-        {
-          initialized:
-            true,
-          initCount,
-        },
-        {
-          lifecycle:
-            true,
-        }
-      );
+      emit(EVENTS.init, {
+        initialized: true,
+        initCount,
+      });
 
-      safeLog(
-        "Toast UI inicializado correctamente.",
-        {
-          version:
-            TOAST_MODULE_VERSION,
-          scope:
-            TOAST_SCOPE,
-        }
-      );
+      emit(EVENTS.ready, {
+        ready: true,
+      });
+
+      log("ready", {
+        version: TOAST_MODULE_VERSION,
+      });
 
       return api;
     } catch (error) {
-      initialized =
-        false;
+      initialized = false;
+      recordError(error, "init");
 
-      rememberError(
-        error,
-        "init"
-      );
-
-      safeError(
-        "No se pudo inicializar Toast.",
-        error
-      );
-
-      safeEmit(
-        "toast:init:error",
+      emit(
+        EVENTS.initError,
         {
-          error:
-            lastError,
-          message:
-            safeText(
-              error?.message,
-              "Toast init error"
-            ),
+          error: lastError,
         },
         {
-          lifecycle:
-            true,
-          window:
-            true,
+          window: true,
         }
       );
 
       return api;
     } finally {
-      initializing =
-        false;
+      initializing = false;
     }
   }
 
   function ensureReady() {
-    if (
-      destroyed &&
-      !initializing
-    ) {
-      destroyed =
-        false;
-    }
+    if (destroyed) destroyed = false;
 
-    if (!initialized) {
+    if (!initialized && !initializing) {
       init();
-    } else {
+    } else if (initialized) {
       ensureDom();
     }
 
@@ -1180,8 +603,7 @@ const Toast = (() => {
   }
 
   function destroy(options = {}) {
-    const opts =
-      safeObject(options);
+    const opts = safeObject(options);
 
     try {
       unbindEvents();
@@ -1189,259 +611,221 @@ const Toast = (() => {
 
     if (opts.clear !== false) {
       try {
-        clearToasts();
+        resetToastApiState({
+          silent: true,
+          source: "toast-index:destroy",
+        });
       } catch (error) {
-        rememberError(
-          error,
-          "destroy:clearToasts"
-        );
+        recordError(error, "destroy:reset");
       }
     }
 
-    if (opts.resetRuntime !== false) {
-      try {
-        resetToastApiState?.();
-      } catch (error) {
-        rememberError(
-          error,
-          "destroy:resetToastApiState"
-        );
-      }
-    }
-
-    initialized =
-      false;
-
-    initializing =
-      false;
-
-    destroyed =
-      true;
+    initialized = false;
+    initializing = false;
+    destroyed = true;
 
     destroyCount += 1;
-    lastDestroyAt =
-      nowIso();
+    lastDestroyAt = iso();
 
-    safeEmit(
-      "toast:destroy",
-      {
-        destroyed:
-          true,
-        destroyCount,
-      },
-      {
-        lifecycle:
-          true,
-      }
-    );
+    emit(EVENTS.destroy, {
+      destroyed: true,
+      destroyCount,
+    });
 
     return true;
   }
 
   /* =======================================================
-     SAFE CALLS
+     SAFE CALL
   ======================================================= */
 
-  function callToastFunction(fn, args = [], context = "") {
+  function call(fn, args = [], context = "toast") {
     ensureReady();
 
+    callCount += 1;
+    lastCallAt = iso();
+
     try {
-      const result =
-        fn(...args);
-
-      showCount +=
-        context.startsWith("show") ||
-        context.startsWith("success") ||
-        context.startsWith("error") ||
-        context.startsWith("warning") ||
-        context.startsWith("info") ||
-        context.startsWith("loading")
-          ? 1
-          : 0;
-
-      lastToastAt =
-        nowIso();
-
-      return result;
+      return fn(...args);
     } catch (error) {
-      rememberError(
-        error,
-        context
-      );
-
-      safeWarn(
-        "Toast API falló.",
-        {
-          context,
-          error,
-        }
-      );
-
+      recordError(error, context);
       return null;
     }
   }
 
   /* =======================================================
-     PUBLIC API · CORE
+     API CORE
   ======================================================= */
 
   function show(input = {}, options = {}) {
-    return callToastFunction(
+    return call(
       showToast,
       [
-        normalizeShowInput(
-          input,
-          options
-        ),
+        normalizeShowInput(input, {
+          source: SOURCE,
+          ...safeObject(options),
+        }),
       ],
       "show"
     );
   }
 
-  function update(id, patch = {}) {
-    const toastId =
-      safeText(id, "");
+  function update(idOrPatch = "", patch = {}) {
+    const id = isObject(idOrPatch)
+      ? safeText(idOrPatch.id || idOrPatch.toastId || idOrPatch.key, "")
+      : safeText(idOrPatch, "");
 
-    if (!toastId) {
-      return null;
-    }
+    const finalPatch = isObject(idOrPatch)
+      ? {
+          ...idOrPatch,
+          ...safeObject(patch),
+          source: SOURCE,
+        }
+      : {
+          ...safeObject(patch),
+          source: SOURCE,
+        };
 
-    return callToastFunction(
+    if (!id) return null;
+
+    return call(
       updateToast,
       [
-        toastId,
-        normalizeOptions(patch),
+        id,
+        finalPatch,
       ],
       "update"
     );
   }
 
-  function dismiss(id = null) {
-    ensureReady();
+  function dismiss(id = null, options = {}) {
+    const toastId = safeText(id, "");
 
-    if (
-      id === null ||
-      id === undefined ||
-      id === ""
-    ) {
-      return clear();
+    if (!toastId) {
+      return clear(options);
     }
 
-    return callToastFunction(
+    return call(
       dismissToast,
       [
-        id,
+        toastId,
+        {
+          source: SOURCE,
+          ...safeObject(options),
+        },
       ],
       "dismiss"
     );
   }
 
-  function dismissAll() {
-    return clear();
-  }
-
-  function clear() {
-    return callToastFunction(
+  function clear(options = {}) {
+    return call(
       clearToasts,
-      [],
+      [
+        {
+          source: "toast-api:clear",
+          ...safeObject(options),
+        },
+      ],
       "clear"
     );
   }
 
+  function reset(options = {}) {
+    return call(
+      resetToastApiState,
+      [
+        {
+          source: "toast-api:reset",
+          ...safeObject(options),
+        },
+      ],
+      "reset"
+    );
+  }
+
   /* =======================================================
-     PUBLIC API · VARIANTS
+     API VARIANTS
   ======================================================= */
 
   function success(message = "", options = {}) {
-    const normalized =
-      normalizeMessageAndOptions(
-        message,
-        options
-      );
+    const normalized = normalizeMessageOptions(message, options);
 
-    return callToastFunction(
+    return call(
       successToast,
       [
         normalized.message,
-        normalized.options,
+        {
+          source: SOURCE,
+          ...normalized.options,
+        },
       ],
       "success"
     );
   }
 
   function error(message = "", options = {}) {
-    const normalized =
-      normalizeMessageAndOptions(
-        message,
-        options
-      );
+    const normalized = normalizeMessageOptions(message, options);
 
-    return callToastFunction(
+    return call(
       errorToast,
       [
-        normalized.message ||
-          "Error inesperado",
-        normalized.options,
+        normalized.message || "Error inesperado.",
+        {
+          source: SOURCE,
+          ...normalized.options,
+        },
       ],
       "error"
     );
   }
 
   function warning(message = "", options = {}) {
-    const normalized =
-      normalizeMessageAndOptions(
-        message,
-        options
-      );
+    const normalized = normalizeMessageOptions(message, options);
 
-    return callToastFunction(
+    return call(
       warningToast,
       [
         normalized.message,
-        normalized.options,
+        {
+          source: SOURCE,
+          ...normalized.options,
+        },
       ],
       "warning"
     );
   }
 
   function warn(message = "", options = {}) {
-    return warning(
-      message,
-      options
-    );
+    return warning(message, options);
   }
 
   function info(message = "", options = {}) {
-    const normalized =
-      normalizeMessageAndOptions(
-        message,
-        options
-      );
+    const normalized = normalizeMessageOptions(message, options);
 
-    return callToastFunction(
+    return call(
       infoToast,
       [
         normalized.message,
-        normalized.options,
+        {
+          source: SOURCE,
+          ...normalized.options,
+        },
       ],
       "info"
     );
   }
 
   function loading(message = "", options = {}) {
-    const normalized =
-      normalizeMessageAndOptions(
-        message,
-        options
-      );
+    const normalized = normalizeMessageOptions(message, options);
 
-    return callToastFunction(
+    return call(
       loadingToast,
       [
         normalized.message,
         {
-          persist:
-            true,
+          source: SOURCE,
+          persist: true,
           ...normalized.options,
         },
       ],
@@ -1450,11 +834,43 @@ const Toast = (() => {
   }
 
   /* =======================================================
-     PUBLIC API · LANGUAGE / LEGACY
+     ALIASES / UTILITIES
   ======================================================= */
 
+  function notify(message = "", options = {}) {
+    return show(message, options);
+  }
+
+  function toast(message = "", options = {}) {
+    return show(message, options);
+  }
+
+  function open(message = "", options = {}) {
+    return show(message, options);
+  }
+
+  function push(message = "", options = {}) {
+    return show(message, options);
+  }
+
+  function dismissAll(options = {}) {
+    return clear(options);
+  }
+
+  function hide(id = null, options = {}) {
+    return dismiss(id, options);
+  }
+
+  function close(id = null, options = {}) {
+    return dismiss(id, options);
+  }
+
+  function remove(id = null, options = {}) {
+    return dismiss(id, options);
+  }
+
   function refreshLanguage() {
-    return callToastFunction(
+    return call(
       refreshAllToastsLanguage,
       [],
       "refreshLanguage"
@@ -1462,67 +878,57 @@ const Toast = (() => {
   }
 
   function exists(id = null) {
-    /*
-      Alias legacy:
-      - Sin id: confirma que el módulo existe.
-      - Con id: si api.js no expone estado interno, devolvemos true sólo si
-        hay un id textual. Evita romper vistas legacy que esperan boolean.
-    */
-    if (
-      id === null ||
-      id === undefined ||
-      id === ""
-    ) {
-      return true;
-    }
+    const toastId = safeText(id, "");
 
-    return Boolean(
-      safeText(id, "")
-    );
+    if (!toastId) return true;
+
+    try {
+      return hasToastItem(toastId);
+    } catch {
+      return false;
+    }
   }
 
   function ready() {
-    return Boolean(
-      initialized &&
-        !destroyed
-    );
+    return Boolean(initialized && !destroyed);
   }
 
   function resolve() {
     ensureReady();
-
     return api;
   }
 
   /* =======================================================
-     DEBUG
+     SNAPSHOT
   ======================================================= */
 
-  function getSnapshot() {
-    return sanitizePayload({
-      version:
-        TOAST_MODULE_VERSION,
+  function snapshotOf(fn, fallback = null) {
+    try {
+      return fn?.() ?? fallback;
+    } catch (error) {
+      recordError(error, "snapshot");
+      return fallback;
+    }
+  }
 
-      initialized:
-        Boolean(initialized),
+  function getSnapshot(options = {}) {
+    const deep = options?.deep === true;
 
-      initializing:
-        Boolean(initializing),
+    return {
+      version: TOAST_MODULE_VERSION,
+      source: SOURCE,
+      scope: TOAST_SCOPE,
 
-      eventsBound:
-        Boolean(eventsBound),
-
-      destroyed:
-        Boolean(destroyed),
-
-      scope:
-        TOAST_SCOPE,
+      initialized,
+      initializing,
+      eventsBound,
+      destroyed,
 
       counters: {
         initCount,
         bindCount,
         destroyCount,
-        showCount,
+        callCount,
         errorCount,
       },
 
@@ -1530,76 +936,73 @@ const Toast = (() => {
         lastInitAt,
         lastBindAt,
         lastDestroyAt,
-        lastToastAt,
+        lastCallAt,
       },
 
       bridges: {
-        hasAppCore:
-          Boolean(AppCore),
-
-        hasEventBus:
-          Boolean(AppCore?.events),
-
-        hasModules:
-          Boolean(AppCore?.modules),
-
-        hasRegistryModules:
-          Boolean(AppCore?.registry?.modules),
-
-        appCoreToast:
-          Boolean(AppCore?.Toast === api),
-
-        appCoreToastLower:
-          Boolean(AppCore?.toast === api),
-
-        hasWindowBridge:
-          isBrowser()
-            ? Boolean(window.OnionToast === api)
-            : false,
-
-        hasWindowToast:
-          isBrowser()
-            ? Boolean(window.Toast === api)
-            : false,
+        coreToast: Boolean(AppCore?.Toast === api),
+        coreToastLower: Boolean(AppCore?.toast === api),
+        showToastBridge: true,
+        modulesToast: Boolean(AppCore?.modules?.get?.("Toast") === api),
+        modulesToastLower: Boolean(AppCore?.modules?.get?.("toast") === api),
+        windowOnionToast: isBrowser() ? Boolean(window.OnionToast === api) : false,
+        windowGlobalKey: isBrowser() ? Boolean(window[GLOBAL_KEY] === api) : false,
       },
 
-      config: {
-        runtimeKeyframes:
-          allowRuntimeKeyframes(),
-      },
+      api: snapshotOf(getToastApiSnapshot, null),
+      store: snapshotOf(getToastStoreSnapshot, null),
+
+      deep: deep
+        ? {
+            dom: snapshotOf(getToastDomSnapshot, null),
+            events: snapshotOf(getToastEventsSnapshot, null),
+            helpers: snapshotOf(getToastHelpersSnapshot, null),
+            text: snapshotOf(getToastTextSnapshot, null),
+          }
+        : null,
 
       lastError,
-    });
-  }
 
-  function getState() {
-    return getSnapshot();
+      at: iso(),
+    };
   }
 
   /* =======================================================
-     API
+     PUBLIC API
   ======================================================= */
 
   const api = {
     TOAST_MODULE_VERSION,
-    version:
-      TOAST_MODULE_VERSION,
-
-    scope:
-      TOAST_SCOPE,
+    version: TOAST_MODULE_VERSION,
+    source: SOURCE,
+    scope: TOAST_SCOPE,
 
     init,
     destroy,
-
     ensureReady,
+    register,
     resolve,
 
+    bindEvents,
+    unbindEvents,
+
     show,
+    notify,
+    toast,
+    open,
+    push,
+
     update,
 
     dismiss,
-    dismissAll,
+    hide,
+    close,
+    remove,
+
     clear,
+    dismissAll,
+    clearAll: clear,
+    reset,
 
     success,
     error,
@@ -1608,22 +1011,17 @@ const Toast = (() => {
     info,
     loading,
 
-    refreshAllToastsLanguage:
-      refreshLanguage,
-
     refreshLanguage,
+    refreshAllToastsLanguage: refreshLanguage,
 
     exists,
     ready,
 
     getSnapshot,
-    getState,
-    getDebugSnapshot:
-      getSnapshot,
+    getDebugSnapshot: getSnapshot,
+    getState: getSnapshot,
 
-    registerModule,
-    bindEvents,
-    unbindEvents,
+    bridge: showBridge,
 
     get initialized() {
       return Boolean(initialized);
@@ -1642,8 +1040,35 @@ const Toast = (() => {
     },
   };
 
+  try {
+    register({
+      windowBridge: true,
+    });
+  } catch {}
+
   return api;
 })();
 
-export { Toast };
+export function initToast(options = {}) {
+  return Toast.init(options);
+}
+
+export function destroyToast(options = {}) {
+  return Toast.destroy(options);
+}
+
+export const show = (...args) => Toast.show(...args);
+export const notify = (...args) => Toast.notify(...args);
+export const toast = (...args) => Toast.toast(...args);
+export const update = (...args) => Toast.update(...args);
+export const dismiss = (...args) => Toast.dismiss(...args);
+export const clear = (...args) => Toast.clear(...args);
+
+export const success = (...args) => Toast.success(...args);
+export const error = (...args) => Toast.error(...args);
+export const warning = (...args) => Toast.warning(...args);
+export const warn = (...args) => Toast.warn(...args);
+export const info = (...args) => Toast.info(...args);
+export const loading = (...args) => Toast.loading(...args);
+
 export default Toast;

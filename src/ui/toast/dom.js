@@ -2,7 +2,7 @@
    Onion SPA - Toast DOM
    Archivo: src/ui/toast/dom.js
 
-   Toast DOM limpio:
+   TOAST DOM · SIMPLE
    - crea/resuelve stack container
    - renderiza toast node seguro
    - texto siempre con textContent
@@ -56,15 +56,9 @@ import {
   TOAST_PROGRESS_ANIMATION_NAME,
 } from "./constants.js";
 
-import {
-  getToastCloseLabel,
-} from "./text.js";
+import { getToastCloseLabel } from "./text.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const TOAST_DOM_VERSION = "17.0.0-clean";
+export const TOAST_DOM_VERSION = "18.0.0-simple";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -82,20 +76,18 @@ function isElement(value) {
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
-
-  const text = String(value).trim();
-  return text || fallback;
+  const output = String(value).trim();
+  return output || fallback;
 }
 
 function safeBool(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-  if (value === 1) return true;
-  if (value === 0) return false;
+  if (value === true || value === false) return value;
+  if (value === 1 || value === "1") return true;
+  if (value === 0 || value === "0") return false;
 
-  const text = safeText(value, "").toLowerCase();
-
-  if (["true", "1", "yes", "si", "sí", "on", "ok"].includes(text)) return true;
-  if (["false", "0", "no", "off"].includes(text)) return false;
+  const output = safeText(value, "").toLowerCase();
+  if (["true", "yes", "si", "sí", "on", "ok"].includes(output)) return true;
+  if (["false", "no", "off"].includes(output)) return false;
 
   return Boolean(fallback);
 }
@@ -103,10 +95,7 @@ function safeBool(value, fallback = false) {
 function normalizeToastType(type = TOAST_DEFAULT_TYPE) {
   const raw = safeText(type, TOAST_DEFAULT_TYPE).toLowerCase();
   const alias = TOAST_TYPE_ALIASES?.[raw] || raw;
-
-  return TOAST_TYPES.includes(alias)
-    ? alias
-    : TOAST_DEFAULT_TYPE;
+  return TOAST_TYPES.includes(alias) ? alias : TOAST_DEFAULT_TYPE;
 }
 
 function createEl(tagName = "div", className = "") {
@@ -114,9 +103,7 @@ function createEl(tagName = "div", className = "") {
 
   try {
     const node = document.createElement(tagName);
-
     if (className) node.className = className;
-
     return node;
   } catch {
     return null;
@@ -127,12 +114,8 @@ function setAttr(node, name, value) {
   if (!isElement(node) || !name) return false;
 
   try {
-    if (value === null || value === undefined || value === "") {
-      node.removeAttribute(name);
-    } else {
-      node.setAttribute(name, String(value));
-    }
-
+    if (value === null || value === undefined || value === "") node.removeAttribute(name);
+    else node.setAttribute(name, String(value));
     return true;
   } catch {
     return false;
@@ -171,13 +154,13 @@ function removeNode(node) {
   try {
     node.remove();
     return true;
+  } catch {}
+
+  try {
+    node.parentNode?.removeChild?.(node);
+    return true;
   } catch {
-    try {
-      node.parentNode?.removeChild?.(node);
-      return true;
-    } catch {
-      return false;
-    }
+    return false;
   }
 }
 
@@ -187,13 +170,13 @@ function replaceNode(current, next) {
   try {
     current.replaceWith(next);
     return true;
+  } catch {}
+
+  try {
+    current.parentNode?.replaceChild?.(next, current);
+    return true;
   } catch {
-    try {
-      current.parentNode?.replaceChild?.(next, current);
-      return true;
-    } catch {
-      return false;
-    }
+    return false;
   }
 }
 
@@ -206,13 +189,11 @@ function buildToastClassName(type = TOAST_DEFAULT_TYPE, extra = "") {
   const toastType = normalizeToastType(type);
 
   return [
-    TOAST_CLASS_ITEM,
-    toastType,                 // legacy
-    getTypeClass(toastType),   // BEM/current
+    TOAST_CLASS_ITEM || "toast",
+    toastType,
+    getTypeClass(toastType),
     safeText(extra, ""),
-  ]
-    .filter(Boolean)
-    .join(" ");
+  ].filter(Boolean).join(" ");
 }
 
 function reducedMotion() {
@@ -233,11 +214,7 @@ export function getToastContainer() {
   if (!isBrowser()) return null;
 
   try {
-    return (
-      document.getElementById(TOAST_CONTAINER_ID) ||
-      document.querySelector("[data-toast-root]") ||
-      null
-    );
+    return document.getElementById(TOAST_CONTAINER_ID) || document.querySelector("[data-toast-root]") || null;
   } catch {
     return null;
   }
@@ -261,11 +238,9 @@ export function ensureToastContainer() {
 
   try {
     if (!container.id) container.id = TOAST_CONTAINER_ID;
-
     container.classList.add(TOAST_CLASS_CONTAINER || "toast-stack");
 
     setDataAttr(container, TOAST_DATA_ROOT, "true");
-
     setAttr(container, "role", "region");
     setAttr(container, "aria-label", "Notificaciones");
     setAttr(container, "aria-live", TOAST_LIVE_POLITE);
@@ -280,11 +255,6 @@ export function ensureToastContainer() {
    KEYFRAMES
 ========================================================= */
 
-/*
-  CSP limpio:
-  Los @keyframes viven en CSS. Esta función sólo deja una marca
-  de diagnóstico/compatibilidad para api.js.
-*/
 export function ensureToastKeyframes() {
   if (!isBrowser()) return null;
 
@@ -292,10 +262,7 @@ export function ensureToastKeyframes() {
     const existing = document.getElementById(TOAST_KEYFRAMES_ID);
     if (existing) return existing;
 
-    document.documentElement?.setAttribute(
-      "data-toast-keyframes",
-      TOAST_PROGRESS_ANIMATION_NAME || "toast-progress-shrink"
-    );
+    document.documentElement?.setAttribute("data-toast-keyframes", TOAST_PROGRESS_ANIMATION_NAME || "toast-progress-shrink");
   } catch {}
 
   return null;
@@ -324,12 +291,10 @@ function svgNode() {
 
   try {
     const svg = document.createElementNS(SVG_NS, "svg");
-
     setAttr(svg, "viewBox", "0 0 24 24");
     setAttr(svg, "fill", "none");
     setAttr(svg, "aria-hidden", "true");
     setAttr(svg, "focusable", "false");
-
     return svg;
   } catch {
     return null;
@@ -341,11 +306,7 @@ function svgPath(attrs = {}) {
 
   try {
     const path = document.createElementNS(SVG_NS, "path");
-
-    Object.entries(attrs).forEach(([key, value]) => {
-      path.setAttribute(key, String(value));
-    });
-
+    Object.entries(attrs).forEach(([key, value]) => path.setAttribute(key, String(value)));
     return path;
   } catch {
     return null;
@@ -357,11 +318,7 @@ function svgCircle(attrs = {}) {
 
   try {
     const circle = document.createElementNS(SVG_NS, "circle");
-
-    Object.entries(attrs).forEach(([key, value]) => {
-      circle.setAttribute(key, String(value));
-    });
-
+    Object.entries(attrs).forEach(([key, value]) => circle.setAttribute(key, String(value)));
     return circle;
   } catch {
     return null;
@@ -387,27 +344,9 @@ function makeErrorIcon() {
   const svg = svgNode();
   if (!svg) return null;
 
-  append(svg, svgPath({
-    d: "M15 9 9 15",
-    stroke: "currentColor",
-    "stroke-width": "1.9",
-    "stroke-linecap": "round",
-  }));
-
-  append(svg, svgPath({
-    d: "M9 9l6 6",
-    stroke: "currentColor",
-    "stroke-width": "1.9",
-    "stroke-linecap": "round",
-  }));
-
-  append(svg, svgCircle({
-    cx: "12",
-    cy: "12",
-    r: "9",
-    stroke: "currentColor",
-    "stroke-width": "1.7",
-  }));
+  append(svg, svgPath({ d: "M15 9 9 15", stroke: "currentColor", "stroke-width": "1.9", "stroke-linecap": "round" }));
+  append(svg, svgPath({ d: "M9 9l6 6", stroke: "currentColor", "stroke-width": "1.9", "stroke-linecap": "round" }));
+  append(svg, svgCircle({ cx: "12", cy: "12", r: "9", stroke: "currentColor", "stroke-width": "1.7" }));
 
   return svg;
 }
@@ -422,20 +361,8 @@ function makeWarningIcon() {
     "stroke-width": "1.7",
     "stroke-linejoin": "round",
   }));
-
-  append(svg, svgPath({
-    d: "M12 9v4.2",
-    stroke: "currentColor",
-    "stroke-width": "1.9",
-    "stroke-linecap": "round",
-  }));
-
-  append(svg, svgCircle({
-    cx: "12",
-    cy: "16.8",
-    r: "1",
-    fill: "currentColor",
-  }));
+  append(svg, svgPath({ d: "M12 9v4.2", stroke: "currentColor", "stroke-width": "1.9", "stroke-linecap": "round" }));
+  append(svg, svgCircle({ cx: "12", cy: "16.8", r: "1", fill: "currentColor" }));
 
   return svg;
 }
@@ -444,36 +371,14 @@ function makeInfoIcon() {
   const svg = svgNode();
   if (!svg) return null;
 
-  append(svg, svgCircle({
-    cx: "12",
-    cy: "12",
-    r: "9",
-    stroke: "currentColor",
-    "stroke-width": "1.7",
-  }));
-
-  append(svg, svgPath({
-    d: "M12 10.5v5",
-    stroke: "currentColor",
-    "stroke-width": "1.9",
-    "stroke-linecap": "round",
-  }));
-
-  append(svg, svgCircle({
-    cx: "12",
-    cy: "7.4",
-    r: "1",
-    fill: "currentColor",
-  }));
+  append(svg, svgCircle({ cx: "12", cy: "12", r: "9", stroke: "currentColor", "stroke-width": "1.7" }));
+  append(svg, svgPath({ d: "M12 10.5v5", stroke: "currentColor", "stroke-width": "1.9", "stroke-linecap": "round" }));
+  append(svg, svgCircle({ cx: "12", cy: "7.4", r: "1", fill: "currentColor" }));
 
   return svg;
 }
 
 export function getToastIconSvg(type = TOAST_DEFAULT_TYPE) {
-  /*
-    Compat legacy: algunos diagnósticos esperan esta función.
-    No se usa para renderizar contenido de usuario.
-  */
   switch (normalizeToastType(type)) {
     case TOAST_TYPE_SUCCESS:
       return "success";
@@ -494,7 +399,6 @@ export function createToastIconNode(type = TOAST_DEFAULT_TYPE) {
 
   const toastType = normalizeToastType(type);
   const icon = createEl("div", TOAST_CLASS_ICON || "toast-icon");
-
   if (!icon) return null;
 
   setAttr(icon, "aria-hidden", "true");
@@ -506,14 +410,15 @@ export function createToastIconNode(type = TOAST_DEFAULT_TYPE) {
     return icon;
   }
 
-  const svg =
-    toastType === TOAST_TYPE_SUCCESS ? makeSuccessIcon()
-      : toastType === TOAST_TYPE_ERROR ? makeErrorIcon()
-        : toastType === TOAST_TYPE_WARNING ? makeWarningIcon()
-          : makeInfoIcon();
+  const svg = toastType === TOAST_TYPE_SUCCESS
+    ? makeSuccessIcon()
+    : toastType === TOAST_TYPE_ERROR
+      ? makeErrorIcon()
+      : toastType === TOAST_TYPE_WARNING
+        ? makeWarningIcon()
+        : makeInfoIcon();
 
   append(icon, svg);
-
   return icon;
 }
 
@@ -521,15 +426,8 @@ export function createToastIconNode(type = TOAST_DEFAULT_TYPE) {
    CONTENT NODES
 ========================================================= */
 
-export function createToastContentNode({
-  title = "",
-  message = "",
-} = {}) {
-  const content = createEl(
-    "div",
-    `toast-content ${TOAST_CLASS_BODY || "toast-body"}`
-  );
-
+export function createToastContentNode({ title = "", message = "" } = {}) {
+  const content = createEl("div", `toast-content ${TOAST_CLASS_BODY || "toast-body"}`);
   if (!content) return null;
 
   const cleanTitle = safeText(title, "");
@@ -537,13 +435,11 @@ export function createToastContentNode({
 
   if (cleanTitle) {
     const titleEl = createEl("h4", TOAST_CLASS_TITLE || "toast-title");
-
     setText(titleEl, cleanTitle);
     append(content, titleEl);
   }
 
   const messageEl = createEl("p", TOAST_CLASS_MESSAGE || "toast-message");
-
   setText(messageEl, cleanMessage);
   append(content, messageEl);
 
@@ -552,7 +448,6 @@ export function createToastContentNode({
 
 export function createToastCloseButton(id = "") {
   const button = createEl("button", TOAST_CLASS_CLOSE || "toast-close");
-
   if (!button) return null;
 
   const label = safeText(getToastCloseLabel(), "Cerrar notificación");
@@ -569,11 +464,9 @@ export function createToastCloseButton(id = "") {
 
 export function createToastProgressNode() {
   const progress = createEl("div", TOAST_CLASS_PROGRESS || "toast-progress");
-
   if (!progress) return null;
 
   setAttr(progress, "aria-hidden", "true");
-
   return progress;
 }
 
@@ -595,7 +488,6 @@ export function createToastNode({
 
   const toastId = safeText(id, "");
   const toastType = normalizeToastType(type);
-
   const node = createEl("article", buildToastClassName(toastType));
 
   if (!node) return null;
@@ -619,9 +511,7 @@ export function createToastNode({
   append(node, createToastIconNode(toastType));
   append(node, createToastContentNode({ title, message }));
 
-  if (safeBool(closable, true)) {
-    append(node, createToastCloseButton(toastId));
-  }
+  if (safeBool(closable, true)) append(node, createToastCloseButton(toastId));
 
   append(node, createToastProgressNode());
 
@@ -681,16 +571,14 @@ export function patchToastNode(item) {
 
   const node = item.toastEl;
   const toastType = normalizeToastType(item.type);
-  const wasVisible = node.classList?.contains?.(TOAST_CLASS_VISIBLE);
+  const wasVisible = node.classList?.contains?.(TOAST_CLASS_VISIBLE) || node.classList?.contains?.("show");
 
-  node.className = buildToastClassName(
-    toastType,
-    item.dismissed ? TOAST_CLASS_DISMISSING : ""
-  );
+  node.className = buildToastClassName(toastType, item.dismissed ? TOAST_CLASS_DISMISSING : "");
 
   if (wasVisible && !item.dismissed) {
     try {
-      node.classList.add(TOAST_CLASS_VISIBLE);
+      node.classList.add(TOAST_CLASS_VISIBLE || "show");
+      node.classList.add("show");
     } catch {}
   }
 
@@ -725,9 +613,8 @@ export function patchToastNode(item) {
   const nextIcon = createToastIconNode(toastType);
   const oldIcon = getToastIconNode(node);
 
-  if (oldIcon && nextIcon) {
-    replaceNode(oldIcon, nextIcon);
-  } else if (nextIcon) {
+  if (oldIcon && nextIcon) replaceNode(oldIcon, nextIcon);
+  else if (nextIcon) {
     try {
       node.prepend(nextIcon);
     } catch {
@@ -735,27 +622,19 @@ export function patchToastNode(item) {
     }
   }
 
-  const nextContent = createToastContentNode({
-    title: item.title,
-    message: item.message,
-  });
-
+  const nextContent = createToastContentNode({ title: item.title, message: item.message });
   const oldContent = getToastContentNode(node);
 
-  if (oldContent && nextContent) {
-    replaceNode(oldContent, nextContent);
-  } else if (nextContent) {
-    append(node, nextContent);
-  }
+  if (oldContent && nextContent) replaceNode(oldContent, nextContent);
+  else if (nextContent) append(node, nextContent);
 
   const oldClose = getToastCloseNode(node);
 
   if (item.closable) {
     const nextClose = createToastCloseButton(item.id);
 
-    if (oldClose && nextClose) {
-      replaceNode(oldClose, nextClose);
-    } else if (nextClose) {
+    if (oldClose && nextClose) replaceNode(oldClose, nextClose);
+    else if (nextClose) {
       const progress = getToastProgressNode(node);
 
       try {
@@ -769,9 +648,7 @@ export function patchToastNode(item) {
     removeNode(oldClose);
   }
 
-  if (!getToastProgressNode(node)) {
-    append(node, createToastProgressNode());
-  }
+  if (!getToastProgressNode(node)) append(node, createToastProgressNode());
 
   item.toastEl = node;
   item.progressEl = getToastProgressNode(node);
@@ -790,7 +667,9 @@ export function markToastNodeDismissing(item) {
 
   try {
     node.classList.add(TOAST_CLASS_DISMISSING);
+    node.classList.add("is-dismissing");
     node.classList.remove(TOAST_CLASS_VISIBLE);
+    node.classList.remove("show");
 
     setDataAttr(node, TOAST_DATA_DISMISSING, "true");
     setAttr(node, "aria-hidden", "true");
@@ -808,10 +687,9 @@ export function unmarkToastNodeDismissing(item) {
 
   try {
     node.classList.remove(TOAST_CLASS_DISMISSING);
-
+    node.classList.remove("is-dismissing");
     setDataAttr(node, TOAST_DATA_DISMISSING, null);
     setAttr(node, "aria-hidden", null);
-
     return true;
   } catch {
     return false;
@@ -844,27 +722,25 @@ export function removeToastNode(item) {
 export function getToastDomSnapshot() {
   const container = getToastContainer();
 
+  let toastCount = 0;
+
+  try {
+    toastCount = container
+      ? container.querySelectorAll(`.${TOAST_CLASS_ITEM || "toast"}, [${TOAST_DATA_ID}]`).length
+      : 0;
+  } catch {}
+
   return {
     version: TOAST_DOM_VERSION,
     browser: isBrowser(),
-
     containerId: TOAST_CONTAINER_ID,
     hasContainer: Boolean(container),
-
-    toastCount: container
-      ? container.querySelectorAll(".toast").length
-      : 0,
-
+    toastCount,
     reducedMotion: reducedMotion(),
-
     keyframesId: TOAST_KEYFRAMES_ID,
     progressAnimation: TOAST_PROGRESS_ANIMATION_NAME,
   };
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   TOAST_DOM_VERSION,

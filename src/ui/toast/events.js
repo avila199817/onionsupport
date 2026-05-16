@@ -2,7 +2,7 @@
    Onion SPA - Toast Events
    Archivo: src/ui/toast/events.js
 
-   Toast Events limpio:
+   TOAST EVENTS · SIMPLE
    - puente AppCore.events/window -> Toast API
    - click delegated para dismiss
    - refresh al cambiar idioma
@@ -37,87 +37,26 @@ import {
   TOAST_EVENT_ERROR_INTERNAL,
 } from "./constants.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const TOAST_EVENTS_VERSION = "17.0.0-clean";
+export const TOAST_EVENTS_VERSION = "18.0.0-simple";
 
 const SOURCE = "ui.toast.events";
-
 const DOM_CLICK_EVENT = "click";
 const EVENT_DEDUPE_MS = 64;
 
 const BOUND_EVENT = "toast:events:bound";
 const UNBOUND_EVENT = "toast:events:unbound";
 
-const GLOBAL_SHOW_EVENTS = Object.freeze([
-  TOAST_EVENT_SHOW,
-  `${TOAST_SCOPE}:show`,
-]);
-
-const GLOBAL_SUCCESS_EVENTS = Object.freeze([
-  TOAST_EVENT_SUCCESS,
-  `${TOAST_SCOPE}:success`,
-]);
-
-const GLOBAL_ERROR_EVENTS = Object.freeze([
-  TOAST_EVENT_ERROR,
-  `${TOAST_SCOPE}:error`,
-]);
-
-const GLOBAL_WARNING_EVENTS = Object.freeze([
-  TOAST_EVENT_WARNING,
-  "toast:warn",
-  `${TOAST_SCOPE}:warning`,
-  `${TOAST_SCOPE}:warn`,
-]);
-
-const GLOBAL_INFO_EVENTS = Object.freeze([
-  TOAST_EVENT_INFO,
-  `${TOAST_SCOPE}:info`,
-]);
-
-const GLOBAL_LOADING_EVENTS = Object.freeze([
-  TOAST_EVENT_LOADING,
-  `${TOAST_SCOPE}:loading`,
-]);
-
-const GLOBAL_UPDATE_EVENTS = Object.freeze([
-  TOAST_EVENT_UPDATE,
-  `${TOAST_SCOPE}:update`,
-]);
-
-const GLOBAL_DISMISS_EVENTS = Object.freeze([
-  TOAST_EVENT_DISMISS,
-  "toast:hide",
-  "toast:close",
-  `${TOAST_SCOPE}:dismiss`,
-  `${TOAST_SCOPE}:hide`,
-  `${TOAST_SCOPE}:close`,
-]);
-
-const GLOBAL_CLEAR_EVENTS = Object.freeze([
-  TOAST_EVENT_CLEAR,
-  "toast:dismiss-all",
-  "toast:clear-all",
-  `${TOAST_SCOPE}:clear`,
-  `${TOAST_SCOPE}:dismiss-all`,
-  `${TOAST_SCOPE}:clear-all`,
-]);
-
-const GLOBAL_RESET_EVENTS = Object.freeze([
-  TOAST_EVENT_RESET,
-  `${TOAST_SCOPE}:reset`,
-]);
-
-const GLOBAL_LANGUAGE_EVENTS = Object.freeze([
-  TOAST_EVENT_LANGUAGE_REFRESH,
-  "app:lang:change",
-  "app:i18n:change",
-  "i18n:change",
-  `${TOAST_SCOPE}:language:refresh`,
-]);
+const GLOBAL_SHOW_EVENTS = Object.freeze([TOAST_EVENT_SHOW, `${TOAST_SCOPE}:show`]);
+const GLOBAL_SUCCESS_EVENTS = Object.freeze([TOAST_EVENT_SUCCESS, `${TOAST_SCOPE}:success`]);
+const GLOBAL_ERROR_EVENTS = Object.freeze([TOAST_EVENT_ERROR, `${TOAST_SCOPE}:error`]);
+const GLOBAL_WARNING_EVENTS = Object.freeze([TOAST_EVENT_WARNING, "toast:warn", `${TOAST_SCOPE}:warning`, `${TOAST_SCOPE}:warn`]);
+const GLOBAL_INFO_EVENTS = Object.freeze([TOAST_EVENT_INFO, `${TOAST_SCOPE}:info`]);
+const GLOBAL_LOADING_EVENTS = Object.freeze([TOAST_EVENT_LOADING, `${TOAST_SCOPE}:loading`]);
+const GLOBAL_UPDATE_EVENTS = Object.freeze([TOAST_EVENT_UPDATE, `${TOAST_SCOPE}:update`]);
+const GLOBAL_DISMISS_EVENTS = Object.freeze([TOAST_EVENT_DISMISS, "toast:hide", "toast:close", `${TOAST_SCOPE}:dismiss`, `${TOAST_SCOPE}:hide`, `${TOAST_SCOPE}:close`]);
+const GLOBAL_CLEAR_EVENTS = Object.freeze([TOAST_EVENT_CLEAR, "toast:dismiss-all", "toast:clear-all", `${TOAST_SCOPE}:clear`, `${TOAST_SCOPE}:dismiss-all`, `${TOAST_SCOPE}:clear-all`]);
+const GLOBAL_RESET_EVENTS = Object.freeze([TOAST_EVENT_RESET, `${TOAST_SCOPE}:reset`]);
+const GLOBAL_LANGUAGE_EVENTS = Object.freeze([TOAST_EVENT_LANGUAGE_REFRESH, "app:lang:change", "app:i18n:change", "i18n:change", `${TOAST_SCOPE}:language:refresh`]);
 
 const INTERNAL_LIFECYCLE_EVENTS = new Set([
   TOAST_EVENT_SHOWN,
@@ -125,7 +64,6 @@ const INTERNAL_LIFECYCLE_EVENTS = new Set([
   TOAST_EVENT_DISMISSED,
   TOAST_EVENT_CLEARED,
   TOAST_EVENT_ERROR_INTERNAL,
-
   `${TOAST_SCOPE}:shown`,
   `${TOAST_SCOPE}:updated`,
   `${TOAST_SCOPE}:dismissed`,
@@ -133,13 +71,17 @@ const INTERNAL_LIFECYCLE_EVENTS = new Set([
   `${TOAST_SCOPE}:internal-error`,
 ]);
 
-/* =========================================================
-   STATE
-========================================================= */
+const EVENT_SOURCE_BLOCKLIST = new Set([
+  SOURCE,
+  "ui.toast.api",
+  "ui.toast.index",
+  "toast-api:clear",
+  "toast-api:reset",
+  "toast-events",
+]);
 
 let globalEventsBound = false;
 let domEventsBound = false;
-
 let boundAt = "";
 let unboundAt = "";
 let lastEventKey = "";
@@ -180,25 +122,23 @@ function safeObject(value) {
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
-
-  const text = String(value).trim();
-  return text || fallback;
+  const output = String(value).trim();
+  return output || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+  const output = Number(value);
+  return Number.isFinite(output) ? output : fallback;
 }
 
 function safeBool(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-  if (value === 1) return true;
-  if (value === 0) return false;
+  if (value === true || value === false) return value;
+  if (value === 1 || value === "1") return true;
+  if (value === 0 || value === "0") return false;
 
-  const text = safeText(value, "").toLowerCase();
-
-  if (["true", "1", "yes", "si", "sí", "on", "ok"].includes(text)) return true;
-  if (["false", "0", "no", "off"].includes(text)) return false;
+  const output = safeText(value, "").toLowerCase();
+  if (["true", "yes", "si", "sí", "on", "ok"].includes(output)) return true;
+  if (["false", "no", "off"].includes(output)) return false;
 
   return Boolean(fallback);
 }
@@ -243,13 +183,12 @@ function errorLog(...args) {
 
 function rememberOff(off) {
   if (!isFn(off)) return false;
-
   manualUnsubscribers.add(off);
   return true;
 }
 
 function runManualOffs() {
-  for (const off of Array.from(manualUnsubscribers)) {
+  for (const off of [...manualUnsubscribers]) {
     try {
       off();
     } catch {}
@@ -260,10 +199,6 @@ function runManualOffs() {
 }
 
 function cleanupScope() {
-  try {
-    AppCore?.cleanup?.scope?.(TOAST_SCOPE);
-  } catch {}
-
   return TOAST_SCOPE;
 }
 
@@ -281,13 +216,10 @@ function normalizeDetail(input = null, { stringKey = "message" } = {}) {
   const raw = rawDetail(input);
 
   if (raw === null || raw === undefined) return null;
-
   if (isPlainObject(raw)) return raw;
 
-  if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") {
-    return {
-      [stringKey]: safeText(raw, ""),
-    };
+  if (["string", "number", "boolean"].includes(typeof raw)) {
+    return { [stringKey]: safeText(raw, "") };
   }
 
   return null;
@@ -295,82 +227,35 @@ function normalizeDetail(input = null, { stringKey = "message" } = {}) {
 
 function normalizeToastDetail(input = null, options = {}) {
   const detail = normalizeDetail(input, options);
-
   if (!detail) return null;
 
-  const id = safeText(
-    detail.id ??
-      detail.toastId ??
-      detail.toast_id ??
-      detail.key ??
-      "",
-    ""
-  );
-
-  const type = safeText(
-    detail.type ??
-      detail.variant ??
-      "",
-    ""
-  );
-
-  const title = safeText(
-    detail.title ??
-      detail.heading ??
-      "",
-    ""
-  );
-
-  const message = safeText(
-    detail.message ??
-      detail.text ??
-      detail.description ??
-      "",
-    ""
-  );
-
-  const text = safeText(
-    detail.text ??
-      detail.message ??
-      detail.description ??
-      "",
-    ""
-  );
+  const id = safeText(detail.id ?? detail.toastId ?? detail.toast_id ?? detail.key ?? "", "");
+  const type = safeText(detail.type ?? detail.variant ?? "", "");
+  const title = safeText(detail.title ?? detail.heading ?? "", "");
+  const message = safeText(detail.message ?? detail.text ?? detail.description ?? "", "");
+  const text = safeText(detail.text ?? detail.message ?? detail.description ?? "", "");
 
   return {
     ...detail,
-
     id,
     toastId: id,
-
     type,
     title,
-
     message,
     text,
-
     duration: detail.duration,
     closable: detail.closable,
-
     persist: detail.persist,
     persistent: detail.persistent,
-
     replace: detail.replace,
     replaceNode: detail.replaceNode,
-
     dedupe: detail.dedupe,
     dedupeMs: detail.dedupeMs,
     dedupeKey: detail.dedupeKey,
-
-    source: detail.source || "event-bus",
-
+    source: detail.source || detail.origin || detail.eventSource || "event-bus",
     useDefaultTitle: safeBool(detail.useDefaultTitle, false),
     useDefaultMessage: safeBool(detail.useDefaultMessage, false),
   };
-}
-
-function eventNameFromInput(input = null, fallback = "") {
-  return safeText(input?.type || input?.eventName || fallback, "");
 }
 
 function sourceFromDetail(detail = {}) {
@@ -379,6 +264,11 @@ function sourceFromDetail(detail = {}) {
 
 function isInternalLifecycleEvent(eventName = "") {
   return INTERNAL_LIFECYCLE_EVENTS.has(safeText(eventName, ""));
+}
+
+function shouldIgnoreSource(detail = {}) {
+  const source = sourceFromDetail(detail);
+  return Boolean(source && EVENT_SOURCE_BLOCKLIST.has(source));
 }
 
 function dedupeEvent(eventName = "", input = null) {
@@ -393,16 +283,13 @@ function dedupeEvent(eventName = "", input = null) {
     isObject(detail) ? detail.id || detail.toastId || detail.key || "" : "",
     isObject(detail) ? detail.type || detail.variant || "" : "",
     isObject(detail) ? detail.message || detail.text || detail.description || "" : safeText(detail, ""),
-    isObject(detail) ? detail.source || "" : "",
+    isObject(detail) ? detail.source || detail.origin || "" : "",
   ].join("|");
 
-  if (key === lastEventKey && stamp - lastEventAt < EVENT_DEDUPE_MS) {
-    return true;
-  }
+  if (key === lastEventKey && stamp - lastEventAt < EVENT_DEDUPE_MS) return true;
 
   lastEventKey = key;
   lastEventAt = stamp;
-
   return false;
 }
 
@@ -445,54 +332,40 @@ function emitEvent(eventName = "", payload = {}, options = {}) {
 export function buildToastEventPayload(item, extra = {}) {
   return {
     id: item?.id || null,
-
     type: item?.type || null,
-
     title: item?.title || "",
     message: item?.message || "",
-
     duration: item?.duration ?? 0,
     remaining: item?.remaining ?? 0,
-
     closable: Boolean(item?.closable),
     dismissed: Boolean(item?.dismissed),
-
     useDefaultTitle: Boolean(item?.useDefaultTitle),
     useDefaultMessage: Boolean(item?.useDefaultMessage),
-
     createdAt: item?.createdAt || null,
     updatedAt: item?.updatedAt || null,
-
     timestamp: now(),
-
     ...safeObject(extra),
   };
 }
 
 export function emitToastShown(item) {
   const payload = buildToastEventPayload(item);
-
   emitEvent(TOAST_EVENT_SHOWN, payload);
   emitEvent(`${TOAST_SCOPE}:shown`, payload);
-
   return payload;
 }
 
 export function emitToastUpdated(item) {
   const payload = buildToastEventPayload(item);
-
   emitEvent(TOAST_EVENT_UPDATED, payload);
   emitEvent(`${TOAST_SCOPE}:updated`, payload);
-
   return payload;
 }
 
 export function emitToastDismissed(item) {
   const payload = buildToastEventPayload(item);
-
   emitEvent(TOAST_EVENT_DISMISSED, payload);
   emitEvent(`${TOAST_SCOPE}:dismissed`, payload);
-
   return payload;
 }
 
@@ -501,18 +374,10 @@ export function emitToastDismissed(item) {
 ========================================================= */
 
 function bindCoreEvent(scope, eventName, handler) {
+  void scope;
+
   const name = safeText(eventName, "");
-
   if (!name || !isFn(handler)) return false;
-
-  try {
-    if (isFn(AppCore?.cleanup?.event)) {
-      AppCore.cleanup.event(scope, name, handler);
-      return true;
-    }
-  } catch (error) {
-    warn("cleanup.event falló.", { eventName: name, error });
-  }
 
   try {
     if (isFn(AppCore?.events?.on)) {
@@ -528,18 +393,10 @@ function bindCoreEvent(scope, eventName, handler) {
 }
 
 function bindWindowEvent(scope, eventName, handler) {
+  void scope;
+
   const name = safeText(eventName, "");
-
   if (!isBrowser() || !name || !isFn(handler)) return false;
-
-  try {
-    if (isFn(AppCore?.cleanup?.on)) {
-      AppCore.cleanup.on(scope, window, name, handler);
-      return true;
-    }
-  } catch (error) {
-    warn("cleanup.on(window) falló.", { eventName: name, error });
-  }
 
   try {
     window.addEventListener(name, handler);
@@ -552,12 +409,12 @@ function bindWindowEvent(scope, eventName, handler) {
 
 function bindDomEvent(scope, node, eventName, handler, options = false) {
   const name = safeText(eventName, "");
-
   if (!isBrowser() || !node || !name || !isFn(handler)) return false;
 
   try {
     if (isFn(AppCore?.cleanup?.on)) {
-      AppCore.cleanup.on(scope, node, name, handler, options);
+      const off = AppCore.cleanup.on(scope, node, name, handler, options);
+      rememberOff(off);
       return true;
     }
   } catch (error) {
@@ -585,7 +442,6 @@ function bindEvents(scope, eventNames = [], handler) {
       const wrapped = (event) => {
         if (isInternalLifecycleEvent(eventName)) return;
         if (dedupeEvent(eventName, event)) return;
-
         handler(event, eventName);
       };
 
@@ -629,87 +485,67 @@ export function bindToastGlobalEvents(actions = {}) {
   const warning = actions.warning || actions.warn || actions.warningToast;
   const info = actions.info || actions.infoToast;
   const loading = actions.loading || actions.loadingToast;
-
-  const refreshLanguage =
-    actions.refreshAllToastsLanguage ||
-    actions.refreshLanguage ||
-    actions.refresh;
+  const refreshLanguage = actions.refreshAllToastsLanguage || actions.refreshLanguage || actions.refresh;
 
   bindEvents(scope, GLOBAL_SHOW_EVENTS, (event) => {
     const detail = normalizeToastDetail(event);
-    if (!detail) return;
-
+    if (!detail || shouldIgnoreSource(detail)) return;
     callAction(show, detail);
   });
 
   bindEvents(scope, GLOBAL_SUCCESS_EVENTS, (event) => {
     const detail = normalizeToastDetail(event);
-    if (!detail) return;
-
+    if (!detail || shouldIgnoreSource(detail)) return;
     callAction(success, detail.message || detail.text || "", detail);
   });
 
   bindEvents(scope, GLOBAL_ERROR_EVENTS, (event) => {
     const detail = normalizeToastDetail(event);
-    if (!detail) return;
-
+    if (!detail || shouldIgnoreSource(detail)) return;
     callAction(error, detail.message || detail.text || "", detail);
   });
 
   bindEvents(scope, GLOBAL_WARNING_EVENTS, (event) => {
     const detail = normalizeToastDetail(event);
-    if (!detail) return;
-
+    if (!detail || shouldIgnoreSource(detail)) return;
     callAction(warning, detail.message || detail.text || "", detail);
   });
 
   bindEvents(scope, GLOBAL_INFO_EVENTS, (event) => {
     const detail = normalizeToastDetail(event);
-    if (!detail) return;
-
+    if (!detail || shouldIgnoreSource(detail)) return;
     callAction(info, detail.message || detail.text || "", detail);
   });
 
   bindEvents(scope, GLOBAL_LOADING_EVENTS, (event) => {
     const detail = normalizeToastDetail(event);
-    if (!detail) return;
-
+    if (!detail || shouldIgnoreSource(detail)) return;
     callAction(loading, detail.message || detail.text || "", detail);
   });
 
   bindEvents(scope, GLOBAL_UPDATE_EVENTS, (event) => {
     const detail = normalizeToastDetail(event);
-    if (!detail?.id) return;
+    if (!detail || shouldIgnoreSource(detail) || !detail.id) return;
 
-    const patch = isPlainObject(detail.patch)
-      ? {
-          ...detail,
-          ...detail.patch,
-        }
-      : detail;
-
+    const patch = isPlainObject(detail.patch) ? { ...detail, ...detail.patch } : detail;
     callAction(update, detail.id, patch);
   });
 
   bindEvents(scope, GLOBAL_DISMISS_EVENTS, (event) => {
     const detail = normalizeToastDetail(event, { stringKey: "id" });
+    if (!detail || shouldIgnoreSource(detail)) return;
 
-    if (!detail?.id) {
-      callAction(dismiss, null, {
-        reason: "event-dismiss",
-        source: "event-bus",
-      });
+    if (!detail.id) {
+      callAction(dismiss, null, { reason: "event-dismiss", source: "event-bus" });
       return;
     }
 
-    callAction(dismiss, detail.id, {
-      reason: detail.reason || "event-dismiss",
-      source: "event-bus",
-    });
+    callAction(dismiss, detail.id, { reason: detail.reason || "event-dismiss", source: "event-bus" });
   });
 
   bindEvents(scope, GLOBAL_CLEAR_EVENTS, (event) => {
     const detail = normalizeToastDetail(event, { stringKey: "reason" }) || {};
+    if (shouldIgnoreSource(detail)) return;
 
     callAction(clear, {
       ...detail,
@@ -720,6 +556,7 @@ export function bindToastGlobalEvents(actions = {}) {
 
   bindEvents(scope, GLOBAL_RESET_EVENTS, (event) => {
     const detail = normalizeToastDetail(event, { stringKey: "reason" }) || {};
+    if (shouldIgnoreSource(detail)) return;
 
     callAction(reset, {
       ...detail,
@@ -735,12 +572,7 @@ export function bindToastGlobalEvents(actions = {}) {
   globalEventsBound = true;
   boundAt = iso();
 
-  emitEvent(BOUND_EVENT, {
-    scope,
-    global: true,
-    dom: domEventsBound,
-  });
-
+  emitEvent(BOUND_EVENT, { scope, global: true, dom: domEventsBound });
   return scope;
 }
 
@@ -750,7 +582,6 @@ export function bindToastGlobalEvents(actions = {}) {
 
 function getDismissTarget(event) {
   const target = event?.target;
-
   if (!target || !isFn(target.closest)) return null;
 
   try {
@@ -813,10 +644,7 @@ export function bindToastDomEvents(actions = {}) {
         event.stopPropagation();
       } catch {}
 
-      callAction(dismiss, toastId || null, {
-        reason: "dom-click",
-        source: "dom",
-      });
+      callAction(dismiss, toastId || null, { reason: "dom-click", source: "dom" });
     },
     true
   );
@@ -824,12 +652,7 @@ export function bindToastDomEvents(actions = {}) {
   domEventsBound = true;
   boundAt = boundAt || iso();
 
-  emitEvent(BOUND_EVENT, {
-    scope,
-    global: globalEventsBound,
-    dom: true,
-  });
-
+  emitEvent(BOUND_EVENT, { scope, global: globalEventsBound, dom: true });
   return scope;
 }
 
@@ -850,16 +673,11 @@ export function unbindToastEvents() {
 
   globalEventsBound = false;
   domEventsBound = false;
-
   unboundAt = iso();
-
   lastEventKey = "";
   lastEventAt = 0;
 
-  emitEvent(UNBOUND_EVENT, {
-    scope: TOAST_SCOPE,
-  });
-
+  emitEvent(UNBOUND_EVENT, { scope: TOAST_SCOPE });
   return true;
 }
 
@@ -871,53 +689,35 @@ export function getToastEventsSnapshot() {
   return {
     version: TOAST_EVENTS_VERSION,
     source: SOURCE,
-
     scope: TOAST_SCOPE,
-
     globalEventsBound,
     domEventsBound,
-
     boundAt,
     unboundAt,
-
     manualUnsubscribers: manualUnsubscribers.size,
-
     hasAppCoreEvents: Boolean(AppCore?.events),
     hasAppCoreEventsOn: isFn(AppCore?.events?.on),
     hasAppCoreEventsEmit: isFn(AppCore?.events?.emit),
-
     hasCleanup: Boolean(AppCore?.cleanup),
-    hasCleanupEvent: isFn(AppCore?.cleanup?.event),
     hasCleanupOn: isFn(AppCore?.cleanup?.on),
     hasCleanupRun: isFn(AppCore?.cleanup?.run),
     hasCleanupClear: isFn(AppCore?.cleanup?.clear),
-
     lastEventKey,
     lastEventAt,
     lastEventAtIso: lastEventAt ? iso(lastEventAt) : "",
-
     events: TOAST_EVENTS,
-
     browser: isBrowser(),
   };
 }
 
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
-
 export default {
   TOAST_EVENTS_VERSION,
-
   buildToastEventPayload,
-
   emitToastShown,
   emitToastUpdated,
   emitToastDismissed,
-
   bindToastGlobalEvents,
   bindToastDomEvents,
   unbindToastEvents,
-
   getToastEventsSnapshot,
 };

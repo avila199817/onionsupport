@@ -2,7 +2,7 @@
    Onion SPA - App Bootstrap
    Archivo: src/app/index.js
 
-   APP ORCHESTRATOR · SIMPLE · CORE ALIGNED
+   APP ORCHESTRATOR · SIMPLE · CORE ALIGNED · FAST PUBLIC BOOT
 
    Responsabilidad:
    - Orquestar boot lógico de la SPA.
@@ -11,7 +11,8 @@
    - No duplicar HTTP/Auth/Router.
    - Preservar rutas públicas técnicas con token.
    - Render token routes antes de restore.
-   - Restore normal antes de render privado.
+   - Render rutas públicas auth rápido, sin esperar restore.
+   - Restore normal sólo para rutas privadas.
    - Sin lógica de negocio.
 ========================================================= */
 
@@ -77,9 +78,10 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const APP_VERSION = "18.0.0-clean-core-aligned";
+export const APP_VERSION = "18.1.0-fast-public-boot";
 
 const SOURCE = "app:index";
+
 const RUNTIME_APP_KEY = "__ONION_APP__";
 const AUTO_BOOT_KEY = "__ONION_ALLOW_APP_AUTO_BOOT__";
 const DISABLE_AUTO_BOOT_KEY = "__ONION_DISABLE_AUTO_BOOT__";
@@ -117,6 +119,27 @@ const TOKEN_PARAM_NAMES = Object.freeze([
   "auth",
   "jwt",
   "sid",
+]);
+
+const PUBLIC_AUTH_ROUTES = new Set([
+  "/login",
+  "/signin",
+  "/sign-in",
+  "/auth",
+  "/auth/login",
+
+  "/forgot-password",
+  "/recover-password",
+  "/recover",
+  "/password-reset",
+  "/reset-password",
+
+  "/2fa",
+  "/otp",
+  "/mfa",
+
+  "/403",
+  "/404",
 ]);
 
 const PUBLIC_TOKEN_ROUTES = Object.freeze([
@@ -677,6 +700,7 @@ function getPublicTokenBoot() {
       active: false,
       route: null,
       publicPath: DEFAULT_ROUTE,
+      canonicalPath: DEFAULT_ROUTE,
       href: "",
     };
   }
@@ -709,6 +733,53 @@ function getPublicTokenBoot() {
     canonicalPath: clean,
     href,
   };
+}
+
+function isPublicAuthRoute(path = getBrowserPublicPath()) {
+  const clean = canonicalPath(path);
+
+  if (PUBLIC_AUTH_ROUTES.has(clean)) return true;
+
+  for (const publicPath of PUBLIC_AUTH_ROUTES) {
+    if (publicPath !== DEFAULT_ROUTE && clean.startsWith(`${publicPath}/`)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hasLocalToken() {
+  try {
+    if (AppCore?.state?.hasToken === true) return true;
+
+    const state = AppCore?.state || {};
+    const session = state.session || state.sessionData || {};
+
+    const token =
+      state.token ||
+      state.accessToken ||
+      state.access_token ||
+      session.token ||
+      session.accessToken ||
+      session.access_token ||
+      "";
+
+    if (text(token, "")) return true;
+  } catch {}
+
+  try {
+    if (isFn(Auth?.hasToken) && Auth.hasToken()) return true;
+    if (isFn(Auth?.getToken) && text(Auth.getToken(), "")) return true;
+    if (isFn(Auth?.getAccessToken) && text(Auth.getAccessToken(), "")) return true;
+  } catch {}
+
+  return false;
+}
+
+function shouldRenderBeforeRestore(tokenBoot = null) {
+  if (tokenBoot?.active) return true;
+  return isPublicAuthRoute(getBrowserPublicPath());
 }
 
 function setWindowValueOnce(key = "", value = "") {
@@ -1223,6 +1294,35 @@ function restoreHandledNavigation(result = null) {
   );
 }
 
+function restoreInBackgroundIfUseful(reason = "background-restore") {
+  if (!hasLocalToken()) return false;
+
+  setState({
+    appRestoreBackgroundStarted: true,
+    appRestoreBackgroundReason: reason,
+  });
+
+  void restoreSession({
+    skipNavigation: true,
+  }).then((result) => {
+    setState({
+      appRestoreBackgroundDone: true,
+      appRestoreBackgroundAt: isoNow(),
+      appRestoreBackgroundHandled: restoreHandledNavigation(result),
+    });
+  }).catch((error) => {
+    warn("restore background falló.", error);
+
+    setState({
+      appRestoreBackgroundDone: true,
+      appRestoreBackgroundError: true,
+      appRestoreBackgroundAt: isoNow(),
+    });
+  });
+
+  return true;
+}
+
 async function renderRoute(reason = "initial") {
   const path = getCurrentPath();
 
@@ -1304,14 +1404,6 @@ async function finalizeBoot() {
     });
   } catch {}
 
-  try {
-    await warmup?.(
-      buildDeps({
-        reason: "after-boot",
-      })
-    );
-  } catch {}
-
   emit("app:boot:complete", {
     at: lastReadyAt,
   });
@@ -1323,6 +1415,14 @@ async function finalizeBoot() {
   log("ready", {
     at: lastReadyAt,
   });
+
+  try {
+    void warmup?.(
+      buildDeps({
+        reason: "after-boot",
+      })
+    );
+  } catch {}
 
   return true;
 }
@@ -1388,6 +1488,7 @@ function failBoot(error) {
 async function runBoot(options = {}) {
   const opts = object(options);
   const tokenBoot = captureInitialUrl();
+  const fastPublicBoot = shouldRenderBeforeRestore(tokenBoot);
 
   booting = true;
   booted = false;
@@ -1400,6 +1501,7 @@ async function runBoot(options = {}) {
     appError: false,
     appSource: text(opts.source, SOURCE),
     appPublicTokenBoot: Boolean(tokenBoot?.active),
+    appFastPublicBoot: Boolean(fastPublicBoot),
     booting: true,
     ready: false,
   });
@@ -1407,6 +1509,7 @@ async function runBoot(options = {}) {
   emit("app:boot:start", {
     publicTokenBoot: Boolean(tokenBoot?.active),
     publicTokenRouteKey: tokenBoot?.key || null,
+    fastPublicBoot: Boolean(fastPublicBoot),
     path: redact(tokenBoot?.publicPath || getBrowserPublicPath()),
   });
 
@@ -1428,12 +1531,18 @@ async function runBoot(options = {}) {
   if (tokenBoot?.active) {
     await renderRoute("public-token-first");
 
-    void restoreSession({
-      skipNavigation: true,
-    });
+    restoreInBackgroundIfUseful("public-token-route");
 
     setState({
       appPublicTokenRouteRendered: true,
+    });
+  } else if (fastPublicBoot) {
+    await renderRoute("public-fast-first");
+
+    restoreInBackgroundIfUseful("public-auth-route");
+
+    setState({
+      appPublicRouteRendered: true,
     });
   } else {
     const restoreResult = await restoreSession({
@@ -1546,6 +1655,7 @@ export function destroy(options = {}) {
 
 export function getState() {
   const tokenBoot = getPublicTokenBoot();
+  const publicPath = getCurrentPath();
 
   return {
     version: APP_VERSION,
@@ -1565,8 +1675,10 @@ export function getState() {
 
     publicTokenBoot: Boolean(tokenBoot.active),
     publicTokenRouteKey: tokenBoot.key || null,
+    publicAuthRoute: isPublicAuthRoute(publicPath),
+    hasLocalToken: hasLocalToken(),
 
-    path: redact(getCurrentPath()),
+    path: redact(publicPath),
 
     coreReady: Boolean(AppCore),
     servicesReady: Boolean(getCoreHttp() || ServiceHttp),

@@ -2,9 +2,9 @@
    Onion SPA - Core Request
    Archivo: src/core/request.js
 
-   CORE REQUEST · FINAL
+   CORE REQUEST · SIMPLE
    - Motor fetch único
-   - Timeout real
+   - Timeout real por intento
    - Retry explícito y seguro
    - Dedupe sólo GET/HEAD
    - /api/auth/me siempre privado
@@ -30,7 +30,7 @@ import {
   safeClone as helperSafeClone,
 } from "./helpers.js";
 
-export const REQUEST_VERSION = "20.0.0-final";
+export const REQUEST_VERSION = "21.0.0-simple";
 
 const DEFAULT_METHOD = "GET";
 const DEFAULT_RESPONSE_TYPE = "auto";
@@ -51,8 +51,8 @@ const TEXT_TYPES = Object.freeze(["text/", "application/xml", "application/xhtml
 const BINARY_TYPES = Object.freeze(["application/octet-stream", "application/pdf", "application/zip", "image/", "audio/", "video/"]);
 
 const OPTION_KEYS = Object.freeze([
-  "method", "headers", "query", "params", "body", "data", "payload", "auth", "public", "skipAuth",
-  "token", "timeout", "signal", "retries", "retryDelay", "retryDelayMs", "retryMaxDelay", "retryMaxDelayMs",
+  "method", "headers", "query", "params", "body", "data", "payload", "auth", "public", "skipAuth", "token",
+  "timeout", "signal", "retries", "retryDelay", "retryDelayMs", "retryMaxDelay", "retryMaxDelayMs",
   "retryStatuses", "retryMethods", "retryUnsafeMethods", "dedupe", "dedupeKey", "responseType", "raw",
   "silent", "emitEvents", "emitFinalEvents", "emitLifecycleEvents", "emitStartEvent", "emitRetryEvents",
   "emitDedupeEvents", "emitAbortAsError", "expectedStatuses", "credentials", "cache", "mode", "redirect",
@@ -93,15 +93,17 @@ function safeText(value, fallback = "") {
   try {
     if (isFn(helperSafeText)) return helperSafeText(value, fallback);
   } catch {}
+
   if (value === null || value === undefined) return fallback;
-  const text = String(value).trim();
-  return text || fallback;
+  const out = String(value).trim();
+  return out || fallback;
 }
 
 function safeObject(value, fallback = {}) {
   try {
     if (isFn(helperSafeObject)) return helperSafeObject(value, fallback);
   } catch {}
+
   return isPlainObject(value) ? value : fallback;
 }
 
@@ -109,8 +111,9 @@ function safeArray(value) {
   try {
     if (isFn(helperSafeArray)) return helperSafeArray(value);
   } catch {}
+
   if (Array.isArray(value)) return value;
-  if (value instanceof Set) return Array.from(value);
+  if (value instanceof Set) return [...value];
   if (value === null || value === undefined) return [];
   return [value];
 }
@@ -119,9 +122,11 @@ function safeClone(value, fallback = null) {
   try {
     if (isFn(helperSafeClone)) return helperSafeClone(value, fallback);
   } catch {}
+
   try {
     if (typeof structuredClone === "function") return structuredClone(value);
   } catch {}
+
   try {
     return JSON.parse(JSON.stringify(value));
   } catch {
@@ -129,42 +134,44 @@ function safeClone(value, fallback = null) {
   }
 }
 
-const number = (value, fallback = 0) => {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-};
+function number(value, fallback = 0) {
+  const out = Number(value);
+  return Number.isFinite(out) ? out : fallback;
+}
 
-const now = () => {
+function now() {
   try {
     return Date.now();
   } catch {
     return 0;
   }
-};
+}
 
-const iso = (ms = now()) => {
+function iso(ms = now()) {
   try {
     return new Date(ms).toISOString();
   } catch {
     return "";
   }
-};
+}
 
-const redact = (value = "") => {
+function redact(value = "") {
   try {
     return redactTokenInText(value);
   } catch {
     return safeText(value, "");
   }
-};
+}
 
 function hashText(value = "") {
-  const text = safeText(value, "");
+  const input = safeText(value, "");
   let hash = 2166136261;
-  for (let i = 0; i < text.length; i += 1) {
-    hash ^= text.charCodeAt(i);
+
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
     hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
   }
+
   return `h${(hash >>> 0).toString(36)}`;
 }
 
@@ -173,13 +180,22 @@ function normalizeMethod(method = DEFAULT_METHOD) {
   return KNOWN_METHODS.includes(clean) ? clean : DEFAULT_METHOD;
 }
 
-const isKnownMethod = (method = "") => KNOWN_METHODS.includes(safeText(method, "").toUpperCase());
-const bodyAllowed = (method = DEFAULT_METHOD) => !BODYLESS_METHODS.includes(normalizeMethod(method));
-const canDedupe = (method = DEFAULT_METHOD) => DEDUPE_METHODS.includes(normalizeMethod(method));
+function isKnownMethod(method = "") {
+  return KNOWN_METHODS.includes(safeText(method, "").toUpperCase());
+}
+
+function bodyAllowed(method = DEFAULT_METHOD) {
+  return !BODYLESS_METHODS.includes(normalizeMethod(method));
+}
+
+function canDedupe(method = DEFAULT_METHOD) {
+  return DEDUPE_METHODS.includes(normalizeMethod(method));
+}
 
 function normalizeToken(token = "") {
   const clean = safeText(token, "").replace(/^Bearer\s+/i, "").trim();
   if (!clean) return "";
+
   try {
     return hasValidToken(clean) ? clean : "";
   } catch {
@@ -229,7 +245,9 @@ function pathForPolicy(path = "") {
   return (value || "/").toLowerCase();
 }
 
-const isPrivateMePath = (path = "") => PRIVATE_ME_PATHS.includes(pathForPolicy(path));
+function isPrivateMePath(path = "") {
+  return PRIVATE_ME_PATHS.includes(pathForPolicy(path));
+}
 
 function isPublicRequestPath(path = "") {
   if (isPrivateMePath(path)) return false;
@@ -246,17 +264,29 @@ function isPublicRequestPath(path = "") {
 
 function normalizeRequestArguments(arg1, arg2 = {}, arg3 = undefined) {
   if (typeof arg1 === "string" && isKnownMethod(arg1) && typeof arg2 === "string") {
-    return { path: arg2, options: { ...safeObject(arg3), method: normalizeMethod(arg1) } };
+    return {
+      path: arg2,
+      options: {
+        ...safeObject(arg3),
+        method: normalizeMethod(arg1),
+      },
+    };
   }
 
   if (isPlainObject(arg1)) {
     return {
       path: arg1.path || arg1.url || arg1.endpoint || "/",
-      options: { ...arg1, ...safeObject(arg2) },
+      options: {
+        ...arg1,
+        ...safeObject(arg2),
+      },
     };
   }
 
-  return { path: arg1, options: safeObject(arg2) };
+  return {
+    path: arg1,
+    options: safeObject(arg2),
+  };
 }
 
 function looksLikeOptionsObject(value = {}) {
@@ -264,35 +294,40 @@ function looksLikeOptionsObject(value = {}) {
 }
 
 function headersToObject(headers = {}) {
-  const output = {};
-  if (!headers) return output;
+  const out = {};
+  if (!headers) return out;
 
   try {
     if (typeof Headers !== "undefined" && headers instanceof Headers) {
-      headers.forEach((value, key) => { output[key] = value; });
-      return output;
+      headers.forEach((value, key) => {
+        out[key] = value;
+      });
+      return out;
     }
   } catch {}
 
   try {
     if (isFn(headers.forEach)) {
-      headers.forEach((value, key) => { output[key] = value; });
-      return output;
+      headers.forEach((value, key) => {
+        out[key] = value;
+      });
+      return out;
     }
   } catch {}
 
   if (Array.isArray(headers)) {
     for (const entry of headers) {
-      if (Array.isArray(entry) && entry.length >= 2) output[entry[0]] = entry[1];
+      if (Array.isArray(entry) && entry.length >= 2) out[entry[0]] = entry[1];
     }
-    return output;
+    return out;
   }
 
-  return isPlainObject(headers) ? { ...headers } : output;
+  return isPlainObject(headers) ? { ...headers } : out;
 }
 
 function normalizePlainHeaders(headers = {}) {
   const source = headersToObject(headers);
+
   try {
     return headersToObject(normalizeHeaders(source));
   } catch {
@@ -324,22 +359,26 @@ function deleteHeader(headers = {}, name = "") {
   return headers;
 }
 
-const hasHeader = (headers = {}, name = "") => getHeader(headers, name) !== undefined;
+function hasHeader(headers = {}, name = "") {
+  return getHeader(headers, name) !== undefined;
+}
 
 function responseHeaders(response = null) {
-  const output = {};
+  const out = {};
   try {
-    response?.headers?.forEach?.((value, key) => { output[key] = value; });
+    response?.headers?.forEach?.((value, key) => {
+      out[key] = value;
+    });
   } catch {}
-  return output;
+  return out;
 }
 
 function sanitizeHeaders(headers = {}) {
-  const output = {};
+  const out = {};
   for (const [key, value] of Object.entries(headersToObject(headers))) {
-    output[key] = SENSITIVE_HEADER_RE.test(key) ? "***" : redact(String(value));
+    out[key] = SENSITIVE_HEADER_RE.test(key) ? "***" : redact(String(value));
   }
-  return output;
+  return out;
 }
 
 /* =========================================================
@@ -351,7 +390,7 @@ function sanitizeValue(value, depth = 0, keyHint = "", seen = new WeakSet()) {
   if (depth > 4) return "[depth-limit]";
   if (value === null || value === undefined) return value;
   if (typeof value === "string") return redact(value);
-  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (["number", "boolean"].includes(typeof value)) return value;
   if (typeof value === "bigint") return String(value);
   if (typeof value === "function") return "[function]";
 
@@ -373,32 +412,28 @@ function sanitizeValue(value, depth = 0, keyHint = "", seen = new WeakSet()) {
       seen.add(value);
     } catch {}
 
-    const output = {};
+    const out = {};
     for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = sanitizeValue(item, depth + 1, key, seen);
+      out[key] = sanitizeValue(item, depth + 1, key, seen);
     }
-    return output;
+    return out;
   }
 
-  try {
-    return redact(String(value));
-  } catch {
-    return "[unserializable]";
-  }
+  return redact(String(value));
 }
 
 function sanitizeError(error = {}) {
-  const output = safeClone(error, {}) || {};
-  output.url = redact(output.url || "");
-  output.redactedUrl = redact(output.redactedUrl || output.url || "");
-  output.message = redact(output.message || "");
-  output.statusText = redact(output.statusText || "");
-  output.raw = undefined;
-  output.stack = output.stack ? "[stack]" : undefined;
-  if (output.headers) output.headers = sanitizeHeaders(output.headers);
-  if (output.data) output.data = sanitizeValue(output.data);
-  if (output.hints) output.hints = sanitizeValue(output.hints);
-  return output;
+  const out = safeClone(error, {}) || {};
+  out.url = redact(out.url || "");
+  out.redactedUrl = redact(out.redactedUrl || out.url || "");
+  out.message = redact(out.message || "");
+  out.statusText = redact(out.statusText || "");
+  out.raw = undefined;
+  out.stack = out.stack ? "[stack]" : undefined;
+  if (out.headers) out.headers = sanitizeHeaders(out.headers);
+  if (out.data) out.data = sanitizeValue(out.data);
+  if (out.hints) out.hints = sanitizeValue(out.hints);
+  return out;
 }
 
 function emit(events, eventName, payload = {}) {
@@ -427,12 +462,14 @@ function debugWarn(...args) {
    RESPONSE PARSER
 ========================================================= */
 
-const includesAny = (value = "", fragments = []) => {
-  const text = safeText(value, "").toLowerCase();
-  return safeArray(fragments).some((fragment) => text.includes(fragment));
-};
+function includesAny(value = "", fragments = []) {
+  const clean = safeText(value, "").toLowerCase();
+  return safeArray(fragments).some((fragment) => clean.includes(fragment));
+}
 
-const responseHasBody = (response) => Boolean(response && ![204, 205, 304].includes(response.status));
+function responseHasBody(response) {
+  return Boolean(response && ![204, 205, 304].includes(response.status));
+}
 
 export async function parseResponseBody(response, responseType = DEFAULT_RESPONSE_TYPE) {
   if (!responseHasBody(response)) return null;
@@ -449,12 +486,12 @@ export async function parseResponseBody(response, responseType = DEFAULT_RESPONS
     if (type === "text") return await response.text();
 
     if (type === "json" || includesAny(contentType, JSON_TYPES)) {
-      const text = await response.text();
-      if (!safeText(text, "")) return null;
+      const raw = await response.text();
+      if (!safeText(raw, "")) return null;
       try {
-        return JSON.parse(text);
+        return JSON.parse(raw);
       } catch {
-        return type === "json" ? null : text;
+        return type === "json" ? null : raw;
       }
     }
 
@@ -478,6 +515,7 @@ function extractDataMessage(data = null) {
   if (!isObj(data)) return safeText(data, "");
 
   const errors = Array.isArray(data.errors) ? data.errors : [];
+
   return (
     safeText(data.message, "") ||
     safeText(data.mensaje, "") ||
@@ -541,7 +579,9 @@ export function buildRequestError({
    ABORT / RETRY
 ========================================================= */
 
-const isSignal = (value) => Boolean(value && typeof value === "object" && "aborted" in value && isFn(value.addEventListener));
+function isSignal(value) {
+  return Boolean(value && typeof value === "object" && "aborted" in value && isFn(value.addEventListener));
+}
 
 function signalAborted(signal) {
   try {
@@ -633,9 +673,12 @@ function mergeSignals(signals = []) {
   if (!controller) return clean[0];
 
   const cleanups = [];
+
   const cleanup = () => {
     for (const fn of cleanups.splice(0)) {
-      try { fn(); } catch {}
+      try {
+        fn();
+      } catch {}
     }
   };
 
@@ -644,7 +687,9 @@ function mergeSignals(signals = []) {
     try {
       controller.abort(signalReason(signal) || "aborted");
     } catch {
-      try { controller.abort(); } catch {}
+      try {
+        controller.abort();
+      } catch {}
     } finally {
       cleanup();
     }
@@ -744,8 +789,8 @@ export function shouldRetryRequest(error, requestConfig = {}) {
   if (error?.aborted && !error?.timeout) return false;
   if (error?.timeout || error?.status === 0) return true;
 
-  const statuses = safeArray(requestConfig.retryStatuses);
-  if (statuses.length) return statuses.map((status) => number(status, -1)).includes(number(error?.status, 0));
+  const statuses = safeArray(requestConfig.retryStatuses).map((status) => number(status, -1));
+  if (statuses.length) return statuses.includes(number(error?.status, 0));
 
   const status = number(error?.status, 0);
   return RETRYABLE_STATUSES.includes(status) || status >= 500;
@@ -763,6 +808,8 @@ function retryDelayMs(error, attempt, requestConfig = {}) {
 }
 
 export async function executeFetchWithRetry(url, fetchFactory, requestConfig = {}, utils = {}) {
+  void utils;
+
   const retries = number(requestConfig?.retries ?? config?.requestRetries ?? config?.api?.retries, DEFAULT_RETRIES);
   let attempt = 0;
   let lastError = null;
@@ -814,21 +861,7 @@ export async function executeFetchWithRetry(url, fetchFactory, requestConfig = {
         });
       } catch {}
 
-      try {
-        await abortableDelay(delayMs, requestConfig.retrySignal);
-      } catch (delayError) {
-        throw delayError?.status !== undefined
-          ? delayError
-          : createAbortError({
-              signal: requestConfig.retrySignal,
-              url,
-              method: requestConfig.method,
-              attempt,
-              attempts: attempt + 1,
-              message: "Request aborted during retry delay",
-            });
-      }
-
+      await abortableDelay(delayMs, requestConfig.retrySignal);
       attempt += 1;
     }
   }
@@ -915,25 +948,45 @@ async function runNamedHooks({ hooks, registry, name, payload, context } = {}) {
    BODY / URL
 ========================================================= */
 
-const isFormDataBody = (value) => {
-  try { return typeof FormData !== "undefined" && value instanceof FormData; } catch { return false; }
-};
+function isFormDataBody(value) {
+  try {
+    return typeof FormData !== "undefined" && value instanceof FormData;
+  } catch {
+    return false;
+  }
+}
 
-const isUrlSearchParamsBody = (value) => {
-  try { return typeof URLSearchParams !== "undefined" && value instanceof URLSearchParams; } catch { return false; }
-};
+function isUrlSearchParamsBody(value) {
+  try {
+    return typeof URLSearchParams !== "undefined" && value instanceof URLSearchParams;
+  } catch {
+    return false;
+  }
+}
 
-const isBlobBody = (value) => {
-  try { return typeof Blob !== "undefined" && value instanceof Blob; } catch { return false; }
-};
+function isBlobBody(value) {
+  try {
+    return typeof Blob !== "undefined" && value instanceof Blob;
+  } catch {
+    return false;
+  }
+}
 
-const isArrayBufferBody = (value) => {
-  try { return typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer; } catch { return false; }
-};
+function isArrayBufferBody(value) {
+  try {
+    return typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer;
+  } catch {
+    return false;
+  }
+}
 
-const isReadableStreamBody = (value) => {
-  try { return typeof ReadableStream !== "undefined" && value instanceof ReadableStream; } catch { return false; }
-};
+function isReadableStreamBody(value) {
+  try {
+    return typeof ReadableStream !== "undefined" && value instanceof ReadableStream;
+  } catch {
+    return false;
+  }
+}
 
 function serializeBody({ method, body, headers } = {}) {
   if (!bodyAllowed(method)) {
@@ -949,9 +1002,7 @@ function serializeBody({ method, body, headers } = {}) {
   }
 
   if (isUrlSearchParamsBody(body)) {
-    if (!hasHeader(headers, "Content-Type")) {
-      setHeader(headers, "Content-Type", "application/x-www-form-urlencoded;charset=UTF-8");
-    }
+    if (!hasHeader(headers, "Content-Type")) setHeader(headers, "Content-Type", "application/x-www-form-urlencoded;charset=UTF-8");
     return body;
   }
 
@@ -962,7 +1013,7 @@ function serializeBody({ method, body, headers } = {}) {
 
   if (isPlainObject(body) || Array.isArray(body)) {
     if (!hasHeader(headers, "Content-Type")) setHeader(headers, "Content-Type", "application/json");
-    if (contentType.includes("application/json") || contentType.includes("+json") || !contentType) {
+    if (!contentType || contentType.includes("application/json") || contentType.includes("+json")) {
       try {
         return JSON.stringify(body);
       } catch {
@@ -1023,27 +1074,23 @@ function shouldEmitLifecycle(requestConfig = {}, type = "") {
   if (requestConfig.emitLifecycleEvents === true) return true;
 
   if (type === "start") {
-    return requestConfig.emitStartEvent === true ||
-      config?.diagnostics?.requestLifecycleEvents === true ||
-      config?.debugRequestLifecycle === true;
+    return requestConfig.emitStartEvent === true || config?.diagnostics?.requestLifecycleEvents === true || config?.debugRequestLifecycle === true;
   }
 
   if (type === "retry") {
-    return requestConfig.emitRetryEvents === true ||
-      config?.diagnostics?.requestRetryEvents === true ||
-      config?.debugRequestLifecycle === true;
+    return requestConfig.emitRetryEvents === true || config?.diagnostics?.requestRetryEvents === true || config?.debugRequestLifecycle === true;
   }
 
   if (type === "deduped") {
-    return requestConfig.emitDedupeEvents === true ||
-      config?.diagnostics?.requestDedupeEvents === true ||
-      config?.debugRequestLifecycle === true;
+    return requestConfig.emitDedupeEvents === true || config?.diagnostics?.requestDedupeEvents === true || config?.debugRequestLifecycle === true;
   }
 
   return false;
 }
 
-const shouldEmitFinal = (requestConfig = {}) => requestConfig.emitEvents !== false && requestConfig.emitFinalEvents !== false;
+function shouldEmitFinal(requestConfig = {}) {
+  return requestConfig.emitEvents !== false && requestConfig.emitFinalEvents !== false;
+}
 
 function storeError(setError, error) {
   if (!isFn(setError)) return false;
@@ -1073,15 +1120,9 @@ function stableStringify(value, seen = new WeakSet()) {
   if (value === null || value === undefined) return "";
   if (typeof value !== "object") return String(value);
   if (seen.has(value)) return "[circular]";
-
   seen.add(value);
-
   if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item, seen)).join(",")}]`;
-
-  return `{${Object.keys(value)
-    .sort()
-    .map((key) => `${key}:${stableStringify(value[key], seen)}`)
-    .join("|")}}`;
+  return `{${Object.keys(value).sort().map((key) => `${key}:${stableStringify(value[key], seen)}`).join("|")}}`;
 }
 
 function fingerprint({ method, url, headers, payload, auth, token }) {
@@ -1199,9 +1240,7 @@ export function createRequest({ state, events, setError, utils, registry, hooks 
       merged.public = true;
       merged.skipAuth = true;
     } else {
-      merged.auth = merged.auth === undefined || merged.auth === null
-        ? !isPublicRequestPath(merged.path)
-        : Boolean(merged.auth);
+      merged.auth = merged.auth === undefined || merged.auth === null ? !isPublicRequestPath(merged.path) : Boolean(merged.auth);
       merged.public = merged.auth === false;
       merged.skipAuth = merged.auth === false;
     }
@@ -1276,7 +1315,6 @@ export function createRequest({ state, events, setError, utils, registry, hooks 
     }
 
     const payload = serializeBody({ method, body: requestConfig.body, headers });
-
     const dedupeKey = requestConfig.dedupe !== false && canDedupe(method)
       ? requestConfig.dedupeKey || fingerprint({ method, url, headers, payload, auth: requestConfig.auth, token: requestConfig.auth ? token : "" })
       : null;
@@ -1285,7 +1323,12 @@ export function createRequest({ state, events, setError, utils, registry, hooks 
       stats.deduped += 1;
 
       if (shouldEmitLifecycle(requestConfig, "deduped")) {
-        emit(events, REQUEST_EVENTS.deduped, { requestId, url: redactedUrl, method, auth: Boolean(requestConfig.auth) });
+        emit(events, REQUEST_EVENTS.deduped, {
+          requestId,
+          url: redactedUrl,
+          method,
+          auth: Boolean(requestConfig.auth),
+        });
       }
 
       return inFlight.get(dedupeKey);
@@ -1449,7 +1492,11 @@ export function createRequest({ state, events, setError, utils, registry, hooks 
             requestId,
             utils,
             response,
-            requestConfig: { ...requestConfig, url: redactedUrl, headers: sanitizeHeaders(headers) },
+            requestConfig: {
+              ...requestConfig,
+              url: redactedUrl,
+              headers: sanitizeHeaders(headers),
+            },
           },
         });
 
@@ -1511,7 +1558,11 @@ export function createRequest({ state, events, setError, utils, registry, hooks 
               phase: "onRequestError",
               requestId,
               utils,
-              requestConfig: { ...requestConfig, url: redactedUrl, headers: sanitizeHeaders(headers) },
+              requestConfig: {
+                ...requestConfig,
+                url: redactedUrl,
+                headers: sanitizeHeaders(headers),
+              },
             },
           });
         }
@@ -1625,7 +1676,11 @@ export function createRequest({ state, events, setError, utils, registry, hooks 
     }
 
     if (opts.emitEvents !== false) {
-      emit(events, REQUEST_EVENTS.abort, { count, reason, at: iso() });
+      emit(events, REQUEST_EVENTS.abort, {
+        count,
+        reason: redact(reason),
+        at: iso(),
+      });
     }
 
     return count;
@@ -1643,22 +1698,39 @@ export function createApiClient(request) {
     const finalMethod = normalizeMethod(method);
 
     if (BODYLESS_METHODS.includes(finalMethod)) {
-      return request(finalMethod, path, { ...safeObject(bodyOrOptions), method: finalMethod });
+      return request(finalMethod, path, {
+        ...safeObject(bodyOrOptions),
+        method: finalMethod,
+      });
     }
 
-    return request(finalMethod, path, { ...safeObject(maybeOptions), method: finalMethod, body: bodyOrOptions });
+    return request(finalMethod, path, {
+      ...safeObject(maybeOptions),
+      method: finalMethod,
+      body: bodyOrOptions,
+    });
   }
 
   function deleteWithOptionalBody(path, bodyOrOptions = {}, maybeOptions = undefined) {
     if (maybeOptions !== undefined) {
-      return request("DELETE", path, { ...safeObject(maybeOptions), method: "DELETE", body: bodyOrOptions });
+      return request("DELETE", path, {
+        ...safeObject(maybeOptions),
+        method: "DELETE",
+        body: bodyOrOptions,
+      });
     }
 
     if (looksLikeOptionsObject(bodyOrOptions)) {
-      return request("DELETE", path, { ...safeObject(bodyOrOptions), method: "DELETE" });
+      return request("DELETE", path, {
+        ...safeObject(bodyOrOptions),
+        method: "DELETE",
+      });
     }
 
-    return request("DELETE", path, { method: "DELETE", body: bodyOrOptions });
+    return request("DELETE", path, {
+      method: "DELETE",
+      body: bodyOrOptions,
+    });
   }
 
   return {
@@ -1674,15 +1746,26 @@ export function createApiClient(request) {
     del: (path, bodyOrOptions = {}, maybeOptions = undefined) => deleteWithOptionalBody(path, bodyOrOptions, maybeOptions),
 
     upload(path, formData, options = {}) {
-      return request(path, { ...options, method: options.method || "POST", body: formData });
+      return request(path, {
+        ...options,
+        method: options.method || "POST",
+        body: formData,
+      });
     },
 
     download(path, options = {}) {
-      return request(path, { ...options, method: options.method || "GET", responseType: options.responseType || "blob" });
+      return request(path, {
+        ...options,
+        method: options.method || "GET",
+        responseType: options.responseType || "blob",
+      });
     },
 
     raw(path, options = {}) {
-      return request(path, { ...options, raw: true });
+      return request(path, {
+        ...options,
+        raw: true,
+      });
     },
 
     request: (arg1, arg2 = {}, arg3 = undefined) => request(arg1, arg2, arg3),

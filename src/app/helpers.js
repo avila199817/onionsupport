@@ -2,12 +2,13 @@
    Onion SPA - App Helpers
    Archivo: src/app/helpers.js
 
-   App helpers:
-   - publicPath conserva /@usuario, query y hash.
-   - canonicalPath elimina /@usuario, query/hash y colapsa token routes.
-   - preserva activation/reset token routes hasta scrub oficial.
-   - cleanup/module helpers sin duplicados.
-   - cero event storm / cero side effects raros.
+   APP HELPERS · FINAL SIMPLE
+   - Helpers mínimos de boot/compat
+   - publicPath conserva /@usuario + query/hash
+   - canonicalPath elimina /@usuario + query/hash y colapsa rutas técnicas
+   - Captura inicial de activation/reset con token
+   - Registro de módulos idempotente
+   - Sin Auth, Router real, fetch, storage, Toast, sesión, render ni history
 ========================================================= */
 
 import {
@@ -22,27 +23,20 @@ import {
    VERSION / CONSTANTS
 ========================================================= */
 
-export const HELPERS_VERSION = "18.0.0-clean";
+export const HELPERS_VERSION = "20.0.0-final";
 
 const DEFAULT_ROUTE = "/";
 const DEFAULT_SCOPE = APP_SCOPE || "app";
 
-const INITIAL_URL_KEY =
-  APP_RUNTIME_KEYS?.initialUrl ||
-  "__ONION_INITIAL_URL__";
-
-const BOOT_CONTEXT_KEY =
-  APP_RUNTIME_KEYS?.bootContext ||
-  "__ONION_BOOT_CONTEXT__";
-
-const MAIN_BOOT_CONTEXT_KEY =
-  APP_RUNTIME_KEYS?.mainBootContext ||
-  "__ONION_MAIN_BOOT_CONTEXT__";
+const INITIAL_URL_KEY = APP_RUNTIME_KEYS?.initialUrl || "__ONION_INITIAL_URL__";
+const BOOT_CONTEXT_KEY = APP_RUNTIME_KEYS?.bootContext || "__ONION_BOOT_CONTEXT__";
+const MAIN_BOOT_CONTEXT_KEY = APP_RUNTIME_KEYS?.mainBootContext || "__ONION_MAIN_BOOT_CONTEXT__";
 
 const ACTIVATION_PATH = "/activate-account";
 const RESET_CONFIRM_PATH = "/reset-password/confirm";
 
 const ACTIVATION_ALIASES = Object.freeze([
+  ACTIVATION_PATH,
   "/activate",
   "/activation",
   "/account/activate",
@@ -50,36 +44,18 @@ const ACTIVATION_ALIASES = Object.freeze([
 ]);
 
 const RESET_CONFIRM_ALIASES = Object.freeze([
+  RESET_CONFIRM_PATH,
   "/reset-password-confirm",
   "/password-reset/confirm",
   "/password-reset-confirm",
+  "/confirm-reset-password",
 ]);
 
-const ACTIVATION_TOKEN_PARAMS = Object.freeze([
-  "token",
-  "activationToken",
-  "activateToken",
-  "activation_token",
-  "activate_token",
-  "code",
-  "t",
-]);
-
-const RESET_TOKEN_PARAMS = Object.freeze([
-  "token",
-  "resetToken",
-  "passwordResetToken",
-  "confirmToken",
-  "reset_token",
-  "password_reset_token",
-  "confirm_token",
-  "code",
-  "t",
-]);
+const ACTIVATION_TOKEN_PARAMS = Object.freeze(["token", "activationToken", "activateToken", "activation_token", "activate_token", "code", "t"]);
+const RESET_TOKEN_PARAMS = Object.freeze(["token", "resetToken", "passwordResetToken", "confirmToken", "reset_token", "password_reset_token", "confirm_token", "code", "t"]);
 
 const SENSITIVE_PARAMS = Object.freeze(
-  Array.isArray(GENERIC_SENSITIVE_PARAM_NAMES) &&
-    GENERIC_SENSITIVE_PARAM_NAMES.length
+  Array.isArray(GENERIC_SENSITIVE_PARAM_NAMES) && GENERIC_SENSITIVE_PARAM_NAMES.length
     ? GENERIC_SENSITIVE_PARAM_NAMES
     : [
         "token",
@@ -118,100 +94,28 @@ const SENSITIVE_PARAMS = Object.freeze(
 
 const USERNAME_RE = /^@[A-Za-z0-9._-]{1,80}$/;
 const ABSOLUTE_URL_RE = /^[a-z][a-z\d+.-]*:\/\//i;
-const PROTOCOL_RE = /^[a-z][a-z0-9+.-]*:/i;
+const ANY_PROTOCOL_RE = /^[a-z][a-z0-9+.-]*:/i;
+const SENSITIVE_KEY_RE = /token|secret|password|authorization|credential|jwt|bearer|session|refresh|otp|mfa|2fa|code/i;
 
-const FALLBACK_PUBLIC_TOKEN_ROUTES = Object.freeze([
+const FALLBACK_TOKEN_ROUTES = Object.freeze([
   Object.freeze({
     key: "activation",
     path: ACTIVATION_PATH,
-    aliases: ACTIVATION_ALIASES,
-    paths: Object.freeze([ACTIVATION_PATH, ...ACTIVATION_ALIASES]),
-    windowKey:
-      APP_RUNTIME_KEYS?.activateAccountInitialUrl ||
-      APP_RUNTIME_KEYS?.activationInitialUrl ||
-      "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-    windowKeys: Object.freeze([
-      APP_RUNTIME_KEYS?.activateAccountInitialUrl ||
-        "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-      APP_RUNTIME_KEYS?.activationInitialUrl ||
-        "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-    ]),
-    stateUrlKey:
-      APP_STATE_KEYS?.bootActivationInitialUrl ||
-      "bootActivationInitialUrl",
-    statePathKey:
-      APP_STATE_KEYS?.bootActivationInitialPath ||
-      "bootActivationInitialPath",
-    statePublicPathKey:
-      APP_STATE_KEYS?.bootActivationInitialPublicPath ||
-      "bootActivationInitialPublicPath",
-    stateIsRouteKey:
-      APP_STATE_KEYS?.bootIsActivation ||
-      "bootIsActivation",
-    stateHasTokenKey:
-      APP_STATE_KEYS?.bootHasActivationToken ||
-      "bootHasActivationToken",
-    scrubbedStateKeys: Object.freeze([
-      "scrubbedActivationToken",
-      "activationTokenScrubbed",
-      "scrubbedActivateAccountToken",
-    ]),
-    scrubbedHistoryKeys: Object.freeze([
-      "scrubbedActivationToken",
-      "activationTokenScrubbed",
-      "scrubbedActivateAccountToken",
-      "scrubbedPublicTokenRoute",
-      "scrubbedTokenRoute",
-    ]),
+    paths: ACTIVATION_ALIASES,
+    windowKeys: Object.freeze([APP_RUNTIME_KEYS?.activateAccountInitialUrl || "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__"]),
     tokenParamNames: ACTIVATION_TOKEN_PARAMS,
+    scrubbedKeys: Object.freeze(["scrubbedActivationToken", "activationTokenScrubbed", "scrubbedActivateAccountToken", "scrubbedPublicTokenRoute", "scrubbedTokenRoute"]),
   }),
-
   Object.freeze({
     key: "resetConfirm",
     path: RESET_CONFIRM_PATH,
-    aliases: RESET_CONFIRM_ALIASES,
-    paths: Object.freeze([RESET_CONFIRM_PATH, ...RESET_CONFIRM_ALIASES]),
-    windowKey:
-      APP_RUNTIME_KEYS?.resetConfirmInitialUrl ||
-      "__ONION_RESET_CONFIRM_INITIAL_URL__",
+    paths: RESET_CONFIRM_ALIASES,
     windowKeys: Object.freeze([
-      APP_RUNTIME_KEYS?.resetPasswordConfirmInitialUrl ||
-        "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-      APP_RUNTIME_KEYS?.resetConfirmInitialUrl ||
-        "__ONION_RESET_CONFIRM_INITIAL_URL__",
-    ]),
-    stateUrlKey:
-      APP_STATE_KEYS?.bootResetConfirmInitialUrl ||
-      "bootResetConfirmInitialUrl",
-    statePathKey:
-      APP_STATE_KEYS?.bootResetConfirmInitialPath ||
-      "bootResetConfirmInitialPath",
-    statePublicPathKey:
-      APP_STATE_KEYS?.bootResetConfirmInitialPublicPath ||
-      "bootResetConfirmInitialPublicPath",
-    stateIsRouteKey:
-      APP_STATE_KEYS?.bootIsResetConfirm ||
-      "bootIsResetConfirm",
-    stateHasTokenKey:
-      APP_STATE_KEYS?.bootHasResetToken ||
-      "bootHasResetToken",
-    scrubbedStateKeys: Object.freeze([
-      "scrubbedResetToken",
-      "resetTokenScrubbed",
-      "scrubbedResetConfirmToken",
-      "scrubbedPasswordResetToken",
-      "scrubbedResetPasswordToken",
-    ]),
-    scrubbedHistoryKeys: Object.freeze([
-      "scrubbedResetToken",
-      "resetTokenScrubbed",
-      "scrubbedResetConfirmToken",
-      "scrubbedPasswordResetToken",
-      "scrubbedResetPasswordToken",
-      "scrubbedPublicTokenRoute",
-      "scrubbedTokenRoute",
+      APP_RUNTIME_KEYS?.resetPasswordConfirmInitialUrl || "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+      APP_RUNTIME_KEYS?.resetConfirmInitialUrl || "__ONION_RESET_CONFIRM_INITIAL_URL__",
     ]),
     tokenParamNames: RESET_TOKEN_PARAMS,
+    scrubbedKeys: Object.freeze(["scrubbedResetToken", "resetTokenScrubbed", "scrubbedResetConfirmToken", "scrubbedPasswordResetToken", "scrubbedResetPasswordToken", "scrubbedPublicTokenRoute", "scrubbedTokenRoute"]),
   }),
 ]);
 
@@ -235,12 +139,14 @@ function isFn(value) {
   return typeof value === "function";
 }
 
-function safeObject(value) {
-  return isObject(value) ? value : {};
+function safeObject(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
 }
 
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+function toArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value === null || value === undefined || value === "") return [];
+  return [value];
 }
 
 function safeText(value, fallback = "") {
@@ -271,19 +177,7 @@ function iso(ms = now()) {
 }
 
 function unique(values = []) {
-  const output = [];
-  const seen = new Set();
-
-  for (const value of safeArray(values).flat(Infinity)) {
-    const clean = safeText(value, "");
-
-    if (!clean || seen.has(clean)) continue;
-
-    seen.add(clean);
-    output.push(clean);
-  }
-
-  return output;
+  return [...new Set(toArray(values).flat(Infinity).map((item) => safeText(item, "")).filter(Boolean))];
 }
 
 function canExtend(value) {
@@ -298,13 +192,7 @@ function defineHiddenValue(target, key, value) {
   if (!target || !key || !canExtend(target)) return false;
 
   try {
-    Object.defineProperty(target, key, {
-      value,
-      enumerable: false,
-      configurable: true,
-      writable: true,
-    });
-
+    Object.defineProperty(target, key, { value, enumerable: false, configurable: true, writable: true });
     return true;
   } catch {}
 
@@ -316,11 +204,9 @@ function defineHiddenValue(target, key, value) {
   }
 }
 
-function safeClone(value, fallback = null) {
+function clone(value, fallback = null) {
   try {
-    if (typeof structuredClone === "function") {
-      return structuredClone(value);
-    }
+    if (typeof structuredClone === "function") return structuredClone(value);
   } catch {}
 
   try {
@@ -330,42 +216,21 @@ function safeClone(value, fallback = null) {
   }
 }
 
-function getBaseOrigin() {
-  if (isBrowser() && window.location?.origin) {
-    return window.location.origin;
-  }
-
+function baseOrigin() {
+  if (isBrowser() && window.location?.origin) return window.location.origin;
   return "http://localhost";
 }
 
 function looksLikeAppCore(value) {
-  if (!isObjectLike(value)) return false;
-
   return Boolean(
-    value.state ||
-      value.utils ||
-      value.events ||
-      value.modules ||
-      value.cleanup ||
-      value.dom ||
-      isFn(value.setState) ||
-      isFn(value.setRoute) ||
-      isFn(value.setPublicPath)
+    isObjectLike(value) &&
+      (value.state || value.utils || value.events || value.modules || value.cleanup || value.dom || isFn(value.setState) || isFn(value.setRoute) || isFn(value.setPublicPath))
   );
 }
 
 function resolvePathArgs(first, second, fallback = DEFAULT_ROUTE) {
-  if (looksLikeAppCore(first)) {
-    return {
-      AppCore: first,
-      path: second === undefined ? fallback : second,
-    };
-  }
-
-  return {
-    AppCore: null,
-    path: first === undefined ? fallback : first,
-  };
+  if (looksLikeAppCore(first)) return { AppCore: first, path: second === undefined ? fallback : second };
+  return { AppCore: null, path: first === undefined ? fallback : first };
 }
 
 /* =========================================================
@@ -379,10 +244,8 @@ function isHashRouterPath(value = "") {
 
 function normalizeHashRouterPath(value = "") {
   const raw = safeText(value, "");
-
   if (!raw) return DEFAULT_ROUTE;
   if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
-
   return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
 }
 
@@ -409,42 +272,32 @@ function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
 
   for (const segment of value.split("/").filter(Boolean)) {
     if (segment === ".") continue;
-
     if (segment === "..") {
       stack.pop();
       continue;
     }
-
     stack.push(segment);
   }
 
-  value = `/${stack.join("/")}`;
-
-  return value.length > 1
-    ? value.replace(/\/+$/g, "") || DEFAULT_ROUTE
-    : value || DEFAULT_ROUTE;
+  value = `/${stack.join("/")}` || DEFAULT_ROUTE;
+  return value.length > 1 ? value.replace(/\/+$/g, "") || DEFAULT_ROUTE : value;
 }
 
 function splitPath(path = DEFAULT_ROUTE) {
   let raw = safeText(path, DEFAULT_ROUTE) || DEFAULT_ROUTE;
-
-  if (isHashRouterPath(raw)) {
-    raw = normalizeHashRouterPath(raw);
-  }
+  if (isHashRouterPath(raw)) raw = normalizeHashRouterPath(raw);
 
   let pathname = raw;
   let search = "";
   let hash = "";
 
   const hashIndex = pathname.indexOf("#");
-
   if (hashIndex >= 0) {
     hash = pathname.slice(hashIndex);
     pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
   }
 
   const searchIndex = pathname.indexOf("?");
-
   if (searchIndex >= 0) {
     search = pathname.slice(searchIndex);
     pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
@@ -457,43 +310,29 @@ function splitPath(path = DEFAULT_ROUTE) {
   };
 }
 
+function normalizePath(path = DEFAULT_ROUTE) {
+  const { pathname, search, hash } = splitPath(path || DEFAULT_ROUTE);
+  return `${pathname}${search}${hash}`;
+}
+
 function pathFromUrlLike(value = DEFAULT_ROUTE) {
   const raw = safeText(value, DEFAULT_ROUTE) || DEFAULT_ROUTE;
 
-  if (isHashRouterPath(raw)) {
-    return normalizePath(normalizeHashRouterPath(raw));
-  }
-
-  if (PROTOCOL_RE.test(raw) && !ABSOLUTE_URL_RE.test(raw)) {
-    return DEFAULT_ROUTE;
-  }
+  if (isHashRouterPath(raw)) return normalizePath(normalizeHashRouterPath(raw));
+  if (ANY_PROTOCOL_RE.test(raw) && !ABSOLUTE_URL_RE.test(raw)) return DEFAULT_ROUTE;
 
   try {
     if (ABSOLUTE_URL_RE.test(raw)) {
-      const parsed = new URL(raw, getBaseOrigin());
-
-      if (parsed.origin !== getBaseOrigin()) {
-        return DEFAULT_ROUTE;
-      }
-
-      if (parsed.hash && isHashRouterPath(parsed.hash)) {
-        return normalizePath(normalizeHashRouterPath(parsed.hash));
-      }
-
-      return normalizePath(
-        `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`
-      );
+      const parsed = new URL(raw, baseOrigin());
+      if (parsed.origin !== baseOrigin()) return DEFAULT_ROUTE;
+      if (parsed.hash && isHashRouterPath(parsed.hash)) return normalizePath(normalizeHashRouterPath(parsed.hash));
+      return normalizePath(`${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`);
     }
   } catch {
     return DEFAULT_ROUTE;
   }
 
-  return normalizePath(raw);
-}
-
-function normalizePath(path = DEFAULT_ROUTE) {
-  const { pathname, search, hash } = splitPath(path || DEFAULT_ROUTE);
-  return `${pathname}${search}${hash}`;
+  return normalizePath(raw.startsWith("/") || raw.startsWith("#") ? raw : `/${raw}`);
 }
 
 export function stripSearchAndHash(path = DEFAULT_ROUTE) {
@@ -526,175 +365,55 @@ export function stripUsernamePrefix(path = DEFAULT_ROUTE) {
    PROTECTED TOKEN ROUTES
 ========================================================= */
 
-function routeConfigFallbackByKey(key = "") {
-  return FALLBACK_PUBLIC_TOKEN_ROUTES.find((item) => item.key === key) || null;
-}
-
-function routeConfigFallbackByPath(path = "") {
-  const clean = normalizePathnameOnly(path);
-
-  return (
-    FALLBACK_PUBLIC_TOKEN_ROUTES.find((item) =>
-      unique([item.path, ...(item.paths || []), ...(item.aliases || [])])
-        .map(normalizePathnameOnly)
-        .includes(clean)
-    ) || null
-  );
-}
-
-function routeList(path = "", aliases = [], paths = []) {
-  return unique([path, ...safeArray(paths), ...safeArray(aliases)])
-    .map(normalizePathnameOnly)
-    .filter((item) => item && item !== DEFAULT_ROUTE);
-}
-
-function normalizeProtectedRouteConfig(config = {}) {
+function normalizeTokenRoute(config = {}) {
   const source = safeObject(config);
-
-  const rawPath =
-    source.path ||
-    source.route ||
-    source.canonicalPath ||
-    DEFAULT_ROUTE;
-
-  const path = normalizePathnameOnly(rawPath);
-
-  const key = safeText(
-    source.key ||
-      source.name ||
-      path.replace(/^\/+/, "").replace(/[/-]/g, "_"),
-    ""
-  );
-
-  const fallback =
-    routeConfigFallbackByKey(key) ||
-    routeConfigFallbackByPath(path) ||
-    {};
-
-  const defaultAliases =
-    key === "activation" || path === ACTIVATION_PATH
-      ? ACTIVATION_ALIASES
-      : key === "resetConfirm" || path === RESET_CONFIRM_PATH
-        ? RESET_CONFIRM_ALIASES
-        : [];
-
-  const aliases = routeList(path, [
-    ...(fallback.aliases || []),
-    ...(source.aliases || []),
-    ...defaultAliases,
-  ]).filter((item) => item !== path);
-
-  const paths = routeList(path, aliases, [
-    ...(fallback.paths || []),
-    ...(source.paths || []),
-  ]);
-
-  const windowKeys = unique([
-    ...(fallback.windowKeys || []),
-    fallback.windowKey,
-    ...(source.windowKeys || []),
-    source.windowKey,
-    source.initialWindowKey,
-    source.runtimeKey,
-  ]);
-
-  const defaultTokenParams =
-    key === "activation" || path === ACTIVATION_PATH
-      ? ACTIVATION_TOKEN_PARAMS
-      : key === "resetConfirm" || path === RESET_CONFIRM_PATH
-        ? RESET_TOKEN_PARAMS
-        : [];
+  const key = safeText(source.key || source.name, "");
+  const fallback = key === "resetConfirm" ? FALLBACK_TOKEN_ROUTES[1] : key === "activation" ? FALLBACK_TOKEN_ROUTES[0] : null;
+  const path = normalizePathnameOnly(source.path || source.route || source.canonicalPath || fallback?.path || ACTIVATION_PATH);
+  const inferredKey = key || (path.includes("reset") || path.includes("password") ? "resetConfirm" : "activation");
+  const defaults = inferredKey === "resetConfirm" ? FALLBACK_TOKEN_ROUTES[1] : FALLBACK_TOKEN_ROUTES[0];
 
   return Object.freeze({
-    ...fallback,
+    ...defaults,
     ...source,
-
-    key,
+    key: inferredKey,
     path,
-
-    aliases: Object.freeze(aliases),
-    paths: Object.freeze(paths),
-    allPaths: Object.freeze(paths),
-
-    windowKey: windowKeys[0] || "",
-    windowKeys: Object.freeze(windowKeys),
-
-    stateUrlKey: source.stateUrlKey || fallback.stateUrlKey || "",
-    statePathKey: source.statePathKey || fallback.statePathKey || "",
-    statePublicPathKey: source.statePublicPathKey || fallback.statePublicPathKey || "",
-    stateIsRouteKey: source.stateIsRouteKey || fallback.stateIsRouteKey || "",
-    stateHasTokenKey: source.stateHasTokenKey || fallback.stateHasTokenKey || "",
-
-    scrubbedStateKeys: Object.freeze(unique([
-      ...(fallback.scrubbedStateKeys || []),
-      ...(source.scrubbedStateKeys || []),
-    ])),
-
-    scrubbedHistoryKeys: Object.freeze(unique([
-      ...(fallback.scrubbedHistoryKeys || []),
-      ...(source.scrubbedHistoryKeys || []),
-    ])),
-
-    tokenParamNames: Object.freeze(unique([
-      ...(fallback.tokenParamNames || []),
-      ...(source.tokenParamNames || []),
-      ...defaultTokenParams,
-    ])),
+    paths: Object.freeze(unique([path, ...toArray(defaults.paths), ...toArray(source.paths), ...toArray(source.aliases)]).map(normalizePathnameOnly)),
+    windowKeys: Object.freeze(unique([...toArray(defaults.windowKeys), ...toArray(source.windowKeys), source.windowKey, source.initialWindowKey, source.runtimeKey])),
+    tokenParamNames: Object.freeze(unique([...toArray(defaults.tokenParamNames), ...toArray(source.tokenParamNames), ...toArray(source.params)])),
+    scrubbedKeys: Object.freeze(unique([...toArray(defaults.scrubbedKeys), ...toArray(source.scrubbedKeys), ...toArray(source.scrubbedStateKeys), ...toArray(source.scrubbedHistoryKeys)])),
   });
 }
 
 export const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze(
-  (
-    Array.isArray(CONSTANT_PUBLIC_TOKEN_ROUTES) &&
-    CONSTANT_PUBLIC_TOKEN_ROUTES.length
-      ? CONSTANT_PUBLIC_TOKEN_ROUTES
-      : FALLBACK_PUBLIC_TOKEN_ROUTES
-  )
-    .map(normalizeProtectedRouteConfig)
+  (Array.isArray(CONSTANT_PUBLIC_TOKEN_ROUTES) && CONSTANT_PUBLIC_TOKEN_ROUTES.length ? CONSTANT_PUBLIC_TOKEN_ROUTES : FALLBACK_TOKEN_ROUTES)
+    .map(normalizeTokenRoute)
     .filter((item) => item.path && item.path !== DEFAULT_ROUTE)
 );
 
-function getRoutePaths(config = null) {
-  return safeArray(config?.allPaths).length
-    ? safeArray(config.allPaths)
-    : routeList(config?.path || "", config?.aliases || [], config?.paths || []);
-}
-
-function matchProtectedPath(config = null, path = DEFAULT_ROUTE) {
-  if (!config?.path) return "";
-
+function matchTokenRoute(config, path = DEFAULT_ROUTE) {
+  if (!config) return "";
   const clean = normalizePathnameOnly(path);
 
-  for (const routePath of getRoutePaths(config)) {
-    const base = normalizePathnameOnly(routePath);
-
-    if (clean === base || clean.startsWith(`${base}/`)) {
-      return base;
-    }
+  for (const candidate of config.paths || []) {
+    const base = normalizePathnameOnly(candidate);
+    if (clean === base || clean.startsWith(`${base}/`)) return base;
   }
 
   return "";
 }
 
-function getProtectedRouteConfig(pathOrUrl = "") {
-  const publicPath = pathFromUrlLike(pathOrUrl);
+function tokenRouteFor(pathOrUrl = "") {
+  const publicPath = pathFromUrlLike(pathOrUrl || DEFAULT_ROUTE);
   const clean = stripSearchAndHash(stripUsernamePrefix(publicPath));
-
-  return (
-    PROTECTED_PUBLIC_TOKEN_ROUTES.find((config) =>
-      Boolean(matchProtectedPath(config, clean))
-    ) || null
-  );
+  return PROTECTED_PUBLIC_TOKEN_ROUTES.find((config) => matchTokenRoute(config, clean)) || null;
 }
 
 function canonicalizeProtectedPath(path = DEFAULT_ROUTE) {
-  const publicPath = normalizePath(path);
-  const clean = stripSearchAndHash(stripUsernamePrefix(publicPath));
+  const clean = stripSearchAndHash(stripUsernamePrefix(pathFromUrlLike(path || DEFAULT_ROUTE)));
 
   for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
-    if (matchProtectedPath(config, clean)) {
-      return normalizePathnameOnly(config.path);
-    }
+    if (matchTokenRoute(config, clean)) return normalizePathnameOnly(config.path);
   }
 
   return normalizePathnameOnly(clean);
@@ -702,30 +421,15 @@ function canonicalizeProtectedPath(path = DEFAULT_ROUTE) {
 
 export function normalizePublicPath(first = DEFAULT_ROUTE, second = undefined) {
   const { AppCore, path } = resolvePathArgs(first, second, DEFAULT_ROUTE);
-  const raw = safeText(path, DEFAULT_ROUTE) || DEFAULT_ROUTE;
-  const fallback = pathFromUrlLike(raw);
+  const fallback = pathFromUrlLike(path || DEFAULT_ROUTE);
 
-  /*
-    publicPath preserva query/hash/token.
-    No delegamos con suffix porque normalizadores legacy pueden truncarlo.
-  */
-  if (raw.includes("?") || raw.includes("#")) {
-    return fallback;
-  }
+  if (String(path || "").includes("?") || String(path || "").includes("#")) return fallback;
 
   try {
-    const delegated =
-      AppCore?.utils?.normalizePublicPath?.(raw) ||
-      AppCore?.utils?.normalizePath?.(raw);
-
+    const delegated = AppCore?.utils?.normalizePublicPath?.(path) || AppCore?.utils?.normalizePath?.(path);
     if (delegated) {
       const clean = pathFromUrlLike(delegated);
-
-      if (fallback !== DEFAULT_ROUTE && clean === DEFAULT_ROUTE) {
-        return fallback;
-      }
-
-      return clean;
+      return fallback !== DEFAULT_ROUTE && clean === DEFAULT_ROUTE ? fallback : clean;
     }
   } catch {}
 
@@ -734,24 +438,15 @@ export function normalizePublicPath(first = DEFAULT_ROUTE, second = undefined) {
 
 export function normalizeCanonicalPath(first = DEFAULT_ROUTE, second = undefined) {
   const { AppCore, path } = resolvePathArgs(first, second, DEFAULT_ROUTE);
-  const raw = safeText(path, DEFAULT_ROUTE) || DEFAULT_ROUTE;
-  const fallback = canonicalizeProtectedPath(raw);
+  const fallback = canonicalizeProtectedPath(path || DEFAULT_ROUTE);
 
-  if (raw.includes("?") || raw.includes("#")) {
-    return fallback;
-  }
+  if (String(path || "").includes("?") || String(path || "").includes("#")) return fallback;
 
   try {
-    const delegated = AppCore?.utils?.normalizeCanonicalPath?.(raw);
-
+    const delegated = AppCore?.utils?.normalizeCanonicalPath?.(path);
     if (delegated) {
       const clean = canonicalizeProtectedPath(delegated);
-
-      if (fallback !== DEFAULT_ROUTE && clean === DEFAULT_ROUTE) {
-        return fallback;
-      }
-
-      return clean;
+      return fallback !== DEFAULT_ROUTE && clean === DEFAULT_ROUTE ? fallback : clean;
     }
   } catch {}
 
@@ -759,19 +454,14 @@ export function normalizeCanonicalPath(first = DEFAULT_ROUTE, second = undefined
 }
 
 /* =========================================================
-   TOKEN DETECTION / SCRUB
+   TOKEN DETECTION / INITIAL CAPTURE
 ========================================================= */
 
 function extractPathToken(config, pathOrUrl = "") {
-  if (!config?.path) return "";
-
-  const path = pathFromUrlLike(pathOrUrl);
-  const clean = stripSearchAndHash(stripUsernamePrefix(path));
-  const matched = matchProtectedPath(config, clean);
-
-  if (!matched || !clean.startsWith(`${matched}/`)) {
-    return "";
-  }
+  const publicPath = pathFromUrlLike(pathOrUrl);
+  const clean = stripSearchAndHash(stripUsernamePrefix(publicPath));
+  const matched = matchTokenRoute(config, clean);
+  if (!matched || !clean.startsWith(`${matched}/`)) return "";
 
   const token = clean.slice(`${matched}/`.length).split("/")[0];
 
@@ -785,67 +475,47 @@ function extractPathToken(config, pathOrUrl = "") {
 function hasTokenInSearch(search = "", names = []) {
   try {
     const params = new URLSearchParams(search || "");
-
-    return safeArray(names).some((name) =>
-      Boolean(safeText(params.get(name), ""))
-    );
+    return toArray(names).some((name) => Boolean(safeText(params.get(name), "")));
   } catch {
     return false;
   }
 }
 
 function hasProtectedToken(config, pathOrUrl = "") {
-  if (!config) return false;
+  if (!config || !pathOrUrl) return false;
+  if (extractPathToken(config, pathOrUrl)) return true;
 
-  const raw = safeText(pathOrUrl, "");
+  const local = pathFromUrlLike(pathOrUrl);
+  const parts = splitPath(local);
 
-  if (!raw) return false;
-
-  if (extractPathToken(config, raw)) return true;
+  if (hasTokenInSearch(parts.search, config.tokenParamNames)) return true;
 
   try {
-    const parsed = new URL(raw, getBaseOrigin());
-
-    if (parsed.origin !== getBaseOrigin()) return false;
-
-    if (hasTokenInSearch(parsed.search, config.tokenParamNames)) {
-      return true;
-    }
+    const parsed = new URL(pathOrUrl, baseOrigin());
+    if (parsed.origin !== baseOrigin()) return false;
+    if (hasTokenInSearch(parsed.search, config.tokenParamNames)) return true;
 
     if (parsed.hash && isHashRouterPath(parsed.hash)) {
       const hashPath = normalizeHashRouterPath(parsed.hash);
       const hashParts = splitPath(hashPath);
-
-      return Boolean(
-        extractPathToken(config, hashPath) ||
-          hasTokenInSearch(hashParts.search, config.tokenParamNames)
-      );
+      return Boolean(extractPathToken(config, hashPath) || hasTokenInSearch(hashParts.search, config.tokenParamNames));
     }
 
     if (parsed.hash && parsed.hash.includes("?")) {
       const query = parsed.hash.split("?").slice(1).join("?");
       return hasTokenInSearch(query ? `?${query}` : "", config.tokenParamNames);
     }
+  } catch {}
 
-    return false;
-  } catch {
-    const normalized = normalizePath(raw);
-    const parts = splitPath(normalized);
-
-    if (hasTokenInSearch(parts.search, config.tokenParamNames)) {
-      return true;
-    }
-
-    if (parts.hash && parts.hash.includes("?")) {
-      const query = parts.hash.split("?").slice(1).join("?");
-      return hasTokenInSearch(query ? `?${query}` : "", config.tokenParamNames);
-    }
-
-    return false;
+  if (parts.hash && parts.hash.includes("?")) {
+    const query = parts.hash.split("?").slice(1).join("?");
+    return hasTokenInSearch(query ? `?${query}` : "", config.tokenParamNames);
   }
+
+  return false;
 }
 
-function getHistoryState() {
+function historyState() {
   if (!isBrowser()) return {};
 
   try {
@@ -857,69 +527,37 @@ function getHistoryState() {
 
 function isProtectedTokenScrubbed(config = null) {
   if (!config) return false;
+  const state = historyState();
 
-  const state = getHistoryState();
-
-  for (const key of safeArray(config.scrubbedStateKeys)) {
-    if (state[key]) return true;
-  }
-
-  for (const key of safeArray(config.scrubbedHistoryKeys)) {
+  for (const key of config.scrubbedKeys || []) {
     if (!state[key]) continue;
-
-    if (
-      key === "scrubbedPublicTokenRoute" ||
-      key === "scrubbedTokenRoute"
-    ) {
-      return state[key] === true || state[key] === config.key;
-    }
-
+    if ((key === "scrubbedPublicTokenRoute" || key === "scrubbedTokenRoute") && state[key] !== true && state[key] !== config.key) continue;
     return true;
   }
 
-  return Boolean(
-    state.scrubbedPublicTokenRoute === true ||
-      state.scrubbedTokenRoute === true ||
-      state.scrubbedPublicTokenRoute === config.key ||
-      state.scrubbedTokenRoute === config.key
-  );
+  return Boolean(state.scrubbedPublicTokenRoute === true || state.scrubbedTokenRoute === true || state.scrubbedPublicTokenRoute === config.key || state.scrubbedTokenRoute === config.key);
 }
 
-function isAnyProtectedTokenScrubbed() {
+function anyProtectedTokenScrubbed() {
   return PROTECTED_PUBLIC_TOKEN_ROUTES.some(isProtectedTokenScrubbed);
 }
 
 export function isProtectedPublicTokenPath(pathOrUrl = "") {
-  const config = getProtectedRouteConfig(pathOrUrl);
-
-  return Boolean(
-    config &&
-      !isProtectedTokenScrubbed(config) &&
-      hasProtectedToken(config, pathOrUrl)
-  );
+  const config = tokenRouteFor(pathOrUrl);
+  return Boolean(config && !isProtectedTokenScrubbed(config) && hasProtectedToken(config, pathOrUrl));
 }
 
 export function isActivationPath(path = "") {
-  const config = PROTECTED_PUBLIC_TOKEN_ROUTES.find((item) =>
-    item.key === "activation" || item.path === ACTIVATION_PATH
-  );
-
-  return Boolean(config && matchProtectedPath(config, stripSearchAndHash(stripUsernamePrefix(pathFromUrlLike(path)))));
+  const clean = canonicalizeProtectedPath(path || DEFAULT_ROUTE);
+  return clean === ACTIVATION_PATH;
 }
 
 export function isResetConfirmPath(path = "") {
-  const config = PROTECTED_PUBLIC_TOKEN_ROUTES.find((item) =>
-    item.key === "resetConfirm" || item.path === RESET_CONFIRM_PATH
-  );
-
-  return Boolean(config && matchProtectedPath(config, stripSearchAndHash(stripUsernamePrefix(pathFromUrlLike(path)))));
+  const clean = canonicalizeProtectedPath(path || DEFAULT_ROUTE);
+  return clean === RESET_CONFIRM_PATH;
 }
 
-/* =========================================================
-   WINDOW / BOOT CONTEXT
-========================================================= */
-
-function getWindowValue(key = "") {
+function windowValue(key = "") {
   if (!isBrowser() || !key) return "";
 
   try {
@@ -929,7 +567,7 @@ function getWindowValue(key = "") {
   }
 }
 
-function getWindowObject(key = "") {
+function windowObject(key = "") {
   if (!isBrowser() || !key) return {};
 
   try {
@@ -944,7 +582,6 @@ function setWindowValue(key = "", value = "", onlyIfMissing = true) {
 
   try {
     if (onlyIfMissing && window[key]) return true;
-
     window[key] = value;
     return true;
   } catch {
@@ -952,94 +589,39 @@ function setWindowValue(key = "", value = "", onlyIfMissing = true) {
   }
 }
 
-function getInitialUrl() {
-  return getWindowValue(INITIAL_URL_KEY);
-}
-
-function setInitialUrl(value = "") {
-  return setWindowValue(INITIAL_URL_KEY, value, true);
-}
-
-function getBootContext() {
-  return getWindowObject(BOOT_CONTEXT_KEY);
-}
-
-function getMainBootContext() {
-  return getWindowObject(MAIN_BOOT_CONTEXT_KEY);
-}
-
 function patchBootContext(patch = {}) {
   if (!isBrowser()) return false;
 
   try {
-    window[BOOT_CONTEXT_KEY] = {
-      ...safeObject(window[BOOT_CONTEXT_KEY]),
-      ...safeObject(patch),
-    };
-
+    window[BOOT_CONTEXT_KEY] = { ...safeObject(window[BOOT_CONTEXT_KEY]), ...safeObject(patch) };
     return true;
   } catch {
     return false;
   }
 }
 
-function applyStatePatch(AppCore, patch = {}) {
-  const cleanPatch = safeObject(patch);
+function patchState(AppCore, patch = {}) {
+  const data = safeObject(patch);
+  if (!Object.keys(data).length) return false;
 
-  if (!Object.keys(cleanPatch).length) return false;
-
-  const options = {
-    source: "app:helpers:boot-context",
-    emit: false,
-    emitState: false,
-    silent: true,
-  };
+  const options = { source: "app.helpers", emit: false, emitState: false, silent: true };
 
   try {
-    AppCore?.setState?.(cleanPatch, options);
+    AppCore?.setState?.(data, options);
   } catch {}
 
   try {
-    AppCore?.patchState?.(cleanPatch, options);
+    AppCore?.patchState?.(data, options);
   } catch {}
 
   try {
-    if (AppCore?.state && typeof AppCore.state === "object") {
-      Object.assign(AppCore.state, cleanPatch);
-    }
+    if (AppCore?.state && typeof AppCore.state === "object") Object.assign(AppCore.state, data);
   } catch {}
 
   return true;
 }
 
-function getStoredInitialUrl(config) {
-  const keys = safeArray(config?.windowKeys).length
-    ? safeArray(config.windowKeys)
-    : [config?.windowKey].filter(Boolean);
-
-  for (const key of keys) {
-    const value = getWindowValue(key);
-    if (value) return value;
-  }
-
-  return "";
-}
-
-function setStoredInitialUrl(config, value = "") {
-  const keys = safeArray(config?.windowKeys).length
-    ? safeArray(config.windowKeys)
-    : [config?.windowKey].filter(Boolean);
-
-  let wrote = false;
-
-  for (const key of keys) {
-    wrote = setWindowValue(key, value, true) || wrote;
-  }
-
-  return wrote;
-}
-
-function getBrowserHref() {
+function browserHref() {
   if (!isBrowser()) return "";
 
   try {
@@ -1049,145 +631,98 @@ function getBrowserHref() {
   }
 }
 
-function buildBrowserPath() {
+function browserPath() {
   if (!isBrowser()) return DEFAULT_ROUTE;
 
   try {
     const hash = window.location.hash || "";
-
-    if (hash && isHashRouterPath(hash)) {
-      return normalizePath(normalizeHashRouterPath(hash));
-    }
-
-    return normalizePath(
-      `${window.location.pathname || DEFAULT_ROUTE}${window.location.search || ""}${hash}`
-    );
+    if (hash && isHashRouterPath(hash)) return normalizePath(normalizeHashRouterPath(hash));
+    return normalizePath(`${window.location.pathname || DEFAULT_ROUTE}${window.location.search || ""}${hash}`);
   } catch {
     return DEFAULT_ROUTE;
   }
 }
 
-function getMainBootCandidateUrl() {
-  const context = getMainBootContext();
-
-  return safeText(
-    context.initialUrl ||
-      context.href ||
-      context.url ||
-      context.mainInitialUrl ||
-      context.mainInitialPublicPath ||
-      context.protectedInitialUrl ||
-      context.protectedInitialPublicPath ||
-      context.publicPath ||
-      "",
-    ""
-  );
+function mainBootCandidate() {
+  const ctx = windowObject(MAIN_BOOT_CONTEXT_KEY);
+  return safeText(ctx.initialUrl || ctx.href || ctx.url || ctx.mainInitialUrl || ctx.mainInitialPublicPath || ctx.protectedInitialUrl || ctx.protectedInitialPublicPath || ctx.publicPath || "", "");
 }
-
-/* =========================================================
-   INITIAL URL CAPTURE
-========================================================= */
 
 export function captureInitialUrl(AppCore = null) {
   if (!isBrowser()) return false;
 
-  try {
-    const href = getBrowserHref();
-    const mainCandidate = getMainBootCandidateUrl();
-    const initialCandidate = mainCandidate || href;
+  const href = browserHref();
+  const initial = mainBootCandidate() || href;
+  if (!initial) return false;
 
-    if (!initialCandidate) return false;
+  setWindowValue(INITIAL_URL_KEY, initial, true);
 
-    setInitialUrl(initialCandidate);
+  const publicPath = pathFromUrlLike(initial);
+  const canonicalPath = normalizeCanonicalPath(AppCore, publicPath);
 
-    const bootPublicPath = pathFromUrlLike(initialCandidate);
-    const bootCanonicalPath = normalizeCanonicalPath(bootPublicPath);
+  const basePatch = {
+    [APP_STATE_KEYS?.bootInitialUrl || "bootInitialUrl"]: initial,
+    [APP_STATE_KEYS?.bootInitialPath || "bootInitialPath"]: publicPath,
+    [APP_STATE_KEYS?.bootCanonicalPath || "bootCanonicalPath"]: canonicalPath,
+  };
 
-    const basePatch = {
-      [APP_STATE_KEYS?.bootInitialUrl || "bootInitialUrl"]: initialCandidate,
-      [APP_STATE_KEYS?.bootInitialPath || "bootInitialPath"]: bootPublicPath,
-      [APP_STATE_KEYS?.bootCanonicalPath || "bootCanonicalPath"]: bootCanonicalPath,
-    };
+  patchBootContext(basePatch);
+  patchState(AppCore, basePatch);
 
-    patchBootContext(basePatch);
-    applyStatePatch(AppCore, basePatch);
+  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+    if (isProtectedTokenScrubbed(config)) continue;
 
-    for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
-      if (isProtectedTokenScrubbed(config)) continue;
+    const candidates = unique([initial, href, mainBootCandidate(), ...toArray(config.windowKeys).map(windowValue)]).filter(Boolean);
 
-      const candidates = unique([
-        initialCandidate,
-        href,
-        mainCandidate,
-        getStoredInitialUrl(config),
-      ]).filter(Boolean);
+    for (const candidate of candidates) {
+      if (!tokenRouteFor(candidate)) continue;
+      if (!matchTokenRoute(config, stripSearchAndHash(stripUsernamePrefix(pathFromUrlLike(candidate))))) continue;
+      if (!hasProtectedToken(config, candidate)) continue;
 
-      for (const candidate of candidates) {
-        if (!getProtectedRouteConfig(candidate)) continue;
-        if (!matchProtectedPath(config, stripSearchAndHash(stripUsernamePrefix(pathFromUrlLike(candidate))))) continue;
-        if (!hasProtectedToken(config, candidate)) continue;
+      const protectedPublicPath = pathFromUrlLike(candidate);
+      const protectedCanonicalPath = normalizeCanonicalPath(AppCore, protectedPublicPath);
 
-        const publicPath = pathFromUrlLike(candidate);
-        const canonicalPath = normalizeCanonicalPath(publicPath);
+      const patch = {
+        [APP_STATE_KEYS?.bootProtectedInitialUrl || "bootProtectedInitialUrl"]: candidate,
+        [APP_STATE_KEYS?.bootProtectedInitialPath || "bootProtectedInitialPath"]: protectedPublicPath,
+        [APP_STATE_KEYS?.bootProtectedInitialPublicPath || "bootProtectedInitialPublicPath"]: protectedPublicPath,
+        [APP_STATE_KEYS?.bootCanonicalPath || "bootCanonicalPath"]: protectedCanonicalPath,
+        [APP_STATE_KEYS?.bootProtectedRouteKey || "bootProtectedRouteKey"]: config.key,
+        [APP_STATE_KEYS?.bootIsPublicTokenRoute || "bootIsPublicTokenRoute"]: true,
+        [APP_STATE_KEYS?.bootHasPublicToken || "bootHasPublicToken"]: true,
+        [APP_STATE_KEYS?.bootHasProtectedToken || "bootHasProtectedToken"]: true,
+      };
 
-        const patch = {
-          [APP_STATE_KEYS?.bootProtectedInitialUrl || "bootProtectedInitialUrl"]: candidate,
-          [APP_STATE_KEYS?.bootProtectedInitialPath || "bootProtectedInitialPath"]: publicPath,
-          [APP_STATE_KEYS?.bootProtectedInitialPublicPath || "bootProtectedInitialPublicPath"]: publicPath,
-          [APP_STATE_KEYS?.bootCanonicalPath || "bootCanonicalPath"]: canonicalPath,
-          [APP_STATE_KEYS?.bootProtectedRouteKey || "bootProtectedRouteKey"]: config.key,
-          [APP_STATE_KEYS?.bootIsPublicTokenRoute || "bootIsPublicTokenRoute"]: true,
-          [APP_STATE_KEYS?.bootHasPublicToken || "bootHasPublicToken"]: true,
-          [APP_STATE_KEYS?.bootHasProtectedToken || "bootHasProtectedToken"]: true,
-        };
-
-        if (config.stateUrlKey) patch[config.stateUrlKey] = candidate;
-        if (config.statePathKey) patch[config.statePathKey] = publicPath;
-        if (config.statePublicPathKey) patch[config.statePublicPathKey] = publicPath;
-        if (config.stateIsRouteKey) patch[config.stateIsRouteKey] = true;
-        if (config.stateHasTokenKey) patch[config.stateHasTokenKey] = true;
-
-        setStoredInitialUrl(config, candidate);
-        patchBootContext(patch);
-        applyStatePatch(AppCore, patch);
-
-        break;
-      }
+      for (const key of config.windowKeys || []) setWindowValue(key, candidate, true);
+      patchBootContext(patch);
+      patchState(AppCore, patch);
+      break;
     }
-
-    return true;
-  } catch {
-    return false;
   }
+
+  return true;
 }
 
-function getProtectedStoredUrlCandidates() {
-  return PROTECTED_PUBLIC_TOKEN_ROUTES
-    .filter((config) => !isProtectedTokenScrubbed(config))
-    .map((config) => getStoredInitialUrl(config))
-    .filter(Boolean);
-}
-
-function getStateProtectedUrlCandidates(AppCore = null) {
+function protectedCandidates(AppCore = null) {
   const state = safeObject(AppCore?.state);
-  const boot = getBootContext();
-  const main = getMainBootContext();
-
+  const boot = windowObject(BOOT_CONTEXT_KEY);
+  const main = windowObject(MAIN_BOOT_CONTEXT_KEY);
   const values = [];
 
   for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
-    values.push(
-      state[config.stateUrlKey],
-      state[config.statePathKey],
-      state[config.statePublicPathKey]
-    );
+    values.push(...toArray(config.windowKeys).map(windowValue));
   }
 
   values.push(
-    state[APP_STATE_KEYS?.bootProtectedInitialUrl || "bootProtectedInitialUrl"],
-    state[APP_STATE_KEYS?.bootProtectedInitialPath || "bootProtectedInitialPath"],
-    state[APP_STATE_KEYS?.bootProtectedInitialPublicPath || "bootProtectedInitialPublicPath"],
-
+    state.bootProtectedInitialUrl,
+    state.bootProtectedInitialPath,
+    state.bootProtectedInitialPublicPath,
+    state.bootActivationInitialUrl,
+    state.bootActivationInitialPath,
+    state.bootActivationInitialPublicPath,
+    state.bootResetConfirmInitialUrl,
+    state.bootResetConfirmInitialPath,
+    state.bootResetConfirmInitialPublicPath,
     boot.bootProtectedInitialUrl,
     boot.bootProtectedInitialPath,
     boot.bootProtectedInitialPublicPath,
@@ -1197,43 +732,28 @@ function getStateProtectedUrlCandidates(AppCore = null) {
     boot.bootResetConfirmInitialUrl,
     boot.bootResetConfirmInitialPath,
     boot.bootResetConfirmInitialPublicPath,
-    boot.bootResetPasswordConfirmInitialUrl,
-    boot.bootResetPasswordConfirmInitialPath,
-    boot.bootResetPasswordConfirmInitialPublicPath,
-
     main.initialUrl,
     main.href,
     main.url,
-    main.mainInitialUrl,
-    main.mainInitialPublicPath,
     main.protectedInitialUrl,
     main.protectedInitialPublicPath,
-    main.publicPath
+    windowValue(INITIAL_URL_KEY),
+    browserHref(),
+    browserPath()
   );
 
-  return values.map((item) => safeText(item, "")).filter(Boolean);
+  return unique(values).filter(Boolean);
 }
 
 export function resolveProtectedInitialContext(AppCore = null) {
   captureInitialUrl(AppCore);
 
-  const candidates = unique([
-    ...getProtectedStoredUrlCandidates(),
-    ...getStateProtectedUrlCandidates(AppCore),
-    getInitialUrl(),
-    getBrowserHref(),
-    buildBrowserPath(),
-  ]).filter(Boolean);
-
-  for (const candidate of candidates) {
-    const config = getProtectedRouteConfig(candidate);
-
-    if (!config) continue;
-    if (isProtectedTokenScrubbed(config)) continue;
-    if (!hasProtectedToken(config, candidate)) continue;
+  for (const candidate of protectedCandidates(AppCore)) {
+    const config = tokenRouteFor(candidate);
+    if (!config || isProtectedTokenScrubbed(config) || !hasProtectedToken(config, candidate)) continue;
 
     const publicPath = pathFromUrlLike(candidate);
-    const canonicalPath = normalizeCanonicalPath(publicPath);
+    const canonicalPath = normalizeCanonicalPath(AppCore, publicPath);
     const tokenInPath = Boolean(extractPathToken(config, candidate));
 
     return {
@@ -1262,7 +782,7 @@ export function resolveProtectedInitialContext(AppCore = null) {
     url: "",
     hasToken: false,
     tokenInPath: false,
-    scrubbed: isAnyProtectedTokenScrubbed(),
+    scrubbed: anyProtectedTokenScrubbed(),
     redactedPath: "",
     redactedPublicPath: "",
     redactedCanonicalPath: "",
@@ -1279,30 +799,15 @@ export function getProtectedInitialPublicPath(AppCore = null) {
    CURRENT PATHS
 ========================================================= */
 
-function shouldPreferBrowserPathOverState(AppCore = null) {
-  const protectedPath = getProtectedInitialPublicPath(AppCore);
-
-  if (protectedPath) return true;
-
-  const browserPath = buildBrowserPath();
-  const statePublicPath = safeText(AppCore?.state?.publicPath, "");
+function preferBrowserPath(AppCore = null) {
+  if (getProtectedInitialPublicPath(AppCore)) return true;
+  const browser = browserPath();
+  const statePublic = safeText(AppCore?.state?.publicPath, "");
   const stateRoute = safeText(AppCore?.state?.route, "");
 
-  if (!isAnyProtectedTokenScrubbed() && isProtectedPublicTokenPath(browserPath)) {
-    return true;
-  }
-
-  if (!statePublicPath && !stateRoute) {
-    return true;
-  }
-
-  if (
-    browserPath &&
-    browserPath !== DEFAULT_ROUTE &&
-    (statePublicPath === DEFAULT_ROUTE || stateRoute === DEFAULT_ROUTE)
-  ) {
-    return true;
-  }
+  if (!anyProtectedTokenScrubbed() && isProtectedPublicTokenPath(browser)) return true;
+  if (!statePublic && !stateRoute) return true;
+  if (browser && browser !== DEFAULT_ROUTE && (statePublic === DEFAULT_ROUTE || stateRoute === DEFAULT_ROUTE)) return true;
 
   return false;
 }
@@ -1311,125 +816,64 @@ export function getCurrentPath(AppCore, Router = null) {
   captureInitialUrl(AppCore);
 
   const protectedPath = getProtectedInitialPublicPath(AppCore);
-
-  if (protectedPath) {
-    return normalizePublicPath(AppCore, protectedPath);
-  }
-
-  if (shouldPreferBrowserPathOverState(AppCore)) {
-    return normalizePublicPath(AppCore, buildBrowserPath());
-  }
+  if (protectedPath) return normalizePublicPath(AppCore, protectedPath);
+  if (preferBrowserPath(AppCore)) return normalizePublicPath(AppCore, browserPath());
 
   try {
-    const routerPublicPath =
-      Router?.getCurrentPublicPath?.() ||
-      Router?.getCurrentPath?.();
-
-    if (routerPublicPath) {
-      return normalizePublicPath(AppCore, routerPublicPath);
-    }
+    const routerPath = Router?.getCurrentPublicPath?.() || Router?.getCurrentPath?.();
+    if (routerPath) return normalizePublicPath(AppCore, routerPath);
   } catch {}
 
-  const statePath =
-    safeText(AppCore?.state?.publicPath, "") ||
-    safeText(AppCore?.state?.route, "");
-
-  return normalizePublicPath(AppCore, statePath || buildBrowserPath());
+  return normalizePublicPath(AppCore, AppCore?.state?.publicPath || AppCore?.state?.route || browserPath());
 }
 
 export function getCurrentPublicPath(AppCore, Router = null) {
   captureInitialUrl(AppCore);
 
   const protectedPath = getProtectedInitialPublicPath(AppCore);
-
-  if (protectedPath) {
-    return normalizePublicPath(AppCore, protectedPath);
-  }
-
-  if (shouldPreferBrowserPathOverState(AppCore)) {
-    return normalizePublicPath(AppCore, buildBrowserPath());
-  }
+  if (protectedPath) return normalizePublicPath(AppCore, protectedPath);
+  if (preferBrowserPath(AppCore)) return normalizePublicPath(AppCore, browserPath());
 
   try {
-    const routerPublicPath = Router?.getCurrentPublicPath?.();
-
-    if (routerPublicPath) {
-      return normalizePublicPath(AppCore, routerPublicPath);
-    }
+    const routerPath = Router?.getCurrentPublicPath?.();
+    if (routerPath) return normalizePublicPath(AppCore, routerPath);
   } catch {}
 
-  const statePublicPath = safeText(AppCore?.state?.publicPath, "");
-
-  return normalizePublicPath(AppCore, statePublicPath || buildBrowserPath());
+  return normalizePublicPath(AppCore, AppCore?.state?.publicPath || browserPath());
 }
 
 export function getCurrentCanonicalPath(AppCore, Router = null) {
   captureInitialUrl(AppCore);
 
   const protectedContext = resolveProtectedInitialContext(AppCore);
-
-  if (protectedContext.hasToken) {
-    return normalizeCanonicalPath(AppCore, protectedContext.publicPath);
-  }
-
-  if (shouldPreferBrowserPathOverState(AppCore)) {
-    return normalizeCanonicalPath(AppCore, buildBrowserPath());
-  }
+  if (protectedContext.hasToken) return normalizeCanonicalPath(AppCore, protectedContext.publicPath);
+  if (preferBrowserPath(AppCore)) return normalizeCanonicalPath(AppCore, browserPath());
 
   try {
-    const routerCanonicalPath =
-      Router?.getCurrentCanonicalPath?.() ||
-      Router?.getCurrentPath?.();
-
-    if (routerCanonicalPath) {
-      return normalizeCanonicalPath(AppCore, routerCanonicalPath);
-    }
+    const routerPath = Router?.getCurrentCanonicalPath?.() || Router?.getCurrentPath?.();
+    if (routerPath) return normalizeCanonicalPath(AppCore, routerPath);
   } catch {}
 
-  const stateCanonical =
-    safeText(AppCore?.state?.route, "") ||
-    safeText(AppCore?.state?.canonicalPath, "");
-
-  return normalizeCanonicalPath(
-    AppCore,
-    stateCanonical || getCurrentPublicPath(AppCore, Router)
-  );
+  return normalizeCanonicalPath(AppCore, AppCore?.state?.canonicalPath || AppCore?.state?.route || getCurrentPublicPath(AppCore, Router));
 }
 
 /* =========================================================
-   SAFE INTERNAL TARGETS
+   SAFE TARGETS / REDACTION / HTML
 ========================================================= */
 
 export function isSafeInternalPath(value = "") {
   const raw = safeText(value, "");
-
-  if (!raw) return false;
-  if (!raw.startsWith("/")) return false;
-  if (raw.startsWith("//")) return false;
-  if (PROTOCOL_RE.test(raw)) return false;
-  if (/[\r\n\t\\]/.test(raw)) return false;
-
-  return true;
+  return Boolean(raw && raw.startsWith("/") && !raw.startsWith("//") && !ANY_PROTOCOL_RE.test(raw) && !/[\r\n\t\\]/.test(raw));
 }
 
 export function normalizeInternalPathTarget(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
   const raw = safeText(value, fallback) || fallback;
-
-  if (!isSafeInternalPath(raw)) {
-    return normalizePath(fallback);
-  }
+  if (!isSafeInternalPath(raw)) return normalizePath(fallback);
 
   try {
-    const parsed = new URL(raw, getBaseOrigin());
-
-    if (parsed.origin !== getBaseOrigin()) {
-      return normalizePath(fallback);
-    }
-
-    const path = normalizePath(
-      `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`
-    );
-
+    const parsed = new URL(raw, baseOrigin());
+    if (parsed.origin !== baseOrigin()) return normalizePath(fallback);
+    const path = normalizePath(`${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`);
     return isSafeInternalPath(path) ? path : normalizePath(fallback);
   } catch {
     const path = normalizePath(raw);
@@ -1437,35 +881,24 @@ export function normalizeInternalPathTarget(value = DEFAULT_ROUTE, fallback = DE
   }
 }
 
-/* =========================================================
-   REDACTION / HTML
-========================================================= */
-
 function escapeRegExp(value = "") {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export function redactTokenInText(value = "") {
   let output = safeText(value, "");
-
   if (!output) return "";
 
   for (const name of SENSITIVE_PARAMS) {
     try {
-      output = output.replace(
-        new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi"),
-        "$1***"
-      );
+      output = output.replace(new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi"), "$1***");
     } catch {}
   }
 
   for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
-    for (const routePath of getRoutePaths(config)) {
+    for (const routePath of config.paths || []) {
       try {
-        output = output.replace(
-          new RegExp(`(${escapeRegExp(routePath)})\\/([^/?#\\s]+)`, "gi"),
-          "$1/***"
-        );
+        output = output.replace(new RegExp(`(${escapeRegExp(routePath)})\\/([^/?#\\s]+)`, "gi"), "$1/***");
       } catch {}
     }
   }
@@ -1490,9 +923,7 @@ export function escapeHtml(AppCore, value = "") {
   }
 
   try {
-    if (isFn(core?.utils?.escapeHtml)) {
-      return core.utils.escapeHtml(String(input ?? ""));
-    }
+    if (isFn(core?.utils?.escapeHtml)) return core.utils.escapeHtml(String(input ?? ""));
   } catch {}
 
   return String(input ?? "")
@@ -1504,56 +935,38 @@ export function escapeHtml(AppCore, value = "") {
 }
 
 /* =========================================================
-   CLEANUP
+   CLEANUP / MODULES
 ========================================================= */
 
 export function ensureScope(AppCore, scope = DEFAULT_SCOPE) {
-  const finalScope = safeText(scope, DEFAULT_SCOPE) || DEFAULT_SCOPE;
+  const name = safeText(scope, DEFAULT_SCOPE) || DEFAULT_SCOPE;
 
   try {
-    if (isFn(AppCore?.cleanup?.scope)) {
-      return AppCore.cleanup.scope(finalScope);
-    }
+    if (isFn(AppCore?.cleanup?.scope)) return AppCore.cleanup.scope(name);
   } catch {}
 
   try {
-    if (isFn(AppCore?.cleanup?.ensureScope)) {
-      return AppCore.cleanup.ensureScope(finalScope);
-    }
+    if (isFn(AppCore?.cleanup?.ensureScope)) return AppCore.cleanup.ensureScope(name);
   } catch {}
 
   try {
     if (AppCore?.cleanup && canExtend(AppCore.cleanup)) {
-      if (!AppCore.cleanup.scopes) {
-        AppCore.cleanup.scopes = new Map();
-      }
-
-      if (
-        AppCore.cleanup.scopes instanceof Map &&
-        !AppCore.cleanup.scopes.has(finalScope)
-      ) {
-        AppCore.cleanup.scopes.set(finalScope, {
-          name: finalScope,
-          disposers: [],
-        });
-      }
-
-      return AppCore.cleanup.scopes instanceof Map
-        ? AppCore.cleanup.scopes.get(finalScope)
-        : { name: finalScope };
+      if (!AppCore.cleanup.scopes) AppCore.cleanup.scopes = new Map();
+      if (AppCore.cleanup.scopes instanceof Map && !AppCore.cleanup.scopes.has(name)) AppCore.cleanup.scopes.set(name, { name, disposers: [] });
+      return AppCore.cleanup.scopes instanceof Map ? AppCore.cleanup.scopes.get(name) : { name };
     }
   } catch {}
 
-  return { name: finalScope };
+  return { name };
 }
 
 export function clearScope(AppCore, scope = DEFAULT_SCOPE) {
-  const finalScope = safeText(scope, DEFAULT_SCOPE) || DEFAULT_SCOPE;
+  const name = safeText(scope, DEFAULT_SCOPE) || DEFAULT_SCOPE;
 
   for (const method of ["run", "clear", "dispose"]) {
     try {
       if (isFn(AppCore?.cleanup?.[method])) {
-        AppCore.cleanup[method](finalScope);
+        AppCore.cleanup[method](name);
         return true;
       }
     } catch {}
@@ -1561,141 +974,87 @@ export function clearScope(AppCore, scope = DEFAULT_SCOPE) {
 
   try {
     const scopes = AppCore?.cleanup?.scopes;
-
-    if (scopes instanceof Map && scopes.has(finalScope)) {
-      const scopeRef = scopes.get(finalScope);
-      const disposers = safeArray(scopeRef?.disposers);
-
-      for (const dispose of disposers.splice(0)) {
+    if (scopes instanceof Map && scopes.has(name)) {
+      const ref = scopes.get(name);
+      const disposers = toArray(ref?.disposers);
+      while (disposers.length) {
         try {
-          dispose();
+          disposers.pop()?.();
         } catch {}
       }
-
-      scopes.delete(finalScope);
+      scopes.delete(name);
     }
   } catch {}
 
   return true;
 }
 
-/* =========================================================
-   MODULES
-========================================================= */
-
 function getRegisteredModule(AppCore, name = "") {
-  const cleanName = safeText(name, "");
-
-  if (!cleanName) return null;
+  const key = safeText(name, "");
+  if (!key) return null;
 
   try {
-    const value = AppCore?.modules?.get?.(cleanName);
+    const value = AppCore?.modules?.get?.(key);
     if (value) return value;
   } catch {}
 
   try {
-    if (AppCore?.modules?.[cleanName]) return AppCore.modules[cleanName];
-  } catch {}
-
-  try {
-    const value = AppCore?.registry?.modules?.get?.(cleanName);
+    const value = AppCore?.registry?.modules?.get?.(key);
     if (value) return value;
   } catch {}
 
   try {
-    if (AppCore?.[cleanName]) return AppCore[cleanName];
-  } catch {}
-
-  return null;
+    return AppCore?.[key] || AppCore?.modules?.[key] || null;
+  } catch {
+    return null;
+  }
 }
 
 export function registerModule(AppCore, name, moduleRef, aliases = []) {
   const moduleName = safeText(name, "");
-
   if (!AppCore || !moduleName || !moduleRef) return false;
 
-  const names = unique([moduleName, ...safeArray(aliases)]);
+  const names = unique([moduleName, ...toArray(aliases)]);
   let registered = false;
 
   try {
-    if (!AppCore.modules && canExtend(AppCore)) {
-      AppCore.modules = {};
-    }
+    if (!AppCore.modules && canExtend(AppCore)) AppCore.modules = {};
   } catch {}
-
-  const modules = AppCore?.modules;
-
-  if (!modules) return false;
 
   for (const currentName of names) {
     const current = getRegisteredModule(AppCore, currentName);
 
-    if (current && Object.is(current, moduleRef)) {
+    if (current && current !== moduleRef) continue;
+    if (current === moduleRef) {
       registered = true;
-      continue;
-    }
-
-    /*
-      No pisamos módulos distintos: evita bridges stale y duplicate storms.
-    */
-    if (current && !Object.is(current, moduleRef)) {
       continue;
     }
 
     let ok = false;
 
     try {
-      if (isFn(modules.register)) {
-        ok = modules.register(currentName, moduleRef, {
-          replace: false,
-          overwrite: false,
-          idempotent: true,
-          source: "app:helpers",
-        }) !== false;
-      }
+      if (isFn(AppCore.modules?.register)) ok = AppCore.modules.register(currentName, moduleRef, { replace: false, overwrite: false, idempotent: true, source: "app.helpers" }) !== false;
     } catch {}
-
-    if (!ok) {
-      try {
-        if (isFn(modules.set) && !getRegisteredModule(AppCore, currentName)) {
-          ok = modules.set(currentName, moduleRef, {
-            replace: false,
-            overwrite: false,
-            idempotent: true,
-            source: "app:helpers",
-          }) !== false;
-        }
-      } catch {}
-    }
-
-    if (!ok) {
-      try {
-        if (canExtend(modules) && !modules[currentName]) {
-          modules[currentName] = moduleRef;
-          ok = true;
-        }
-      } catch {}
-    }
-
-    if (!ok) {
-      try {
-        if (
-          AppCore?.registry?.modules &&
-          isFn(AppCore.registry.modules.set) &&
-          !AppCore.registry.modules.get?.(currentName)
-        ) {
-          AppCore.registry.modules.set(currentName, moduleRef);
-          ok = true;
-        }
-      } catch {}
-    }
 
     try {
-      if (canExtend(AppCore) && !AppCore[currentName]) {
-        defineHiddenValue(AppCore, currentName, moduleRef);
+      if (!ok && isFn(AppCore.modules?.set) && !getRegisteredModule(AppCore, currentName)) ok = AppCore.modules.set(currentName, moduleRef, { replace: false, overwrite: false, idempotent: true, source: "app.helpers" }) !== false;
+    } catch {}
+
+    try {
+      if (!ok && canExtend(AppCore.modules) && !AppCore.modules[currentName]) {
+        AppCore.modules[currentName] = moduleRef;
+        ok = true;
       }
     } catch {}
 
+    try {
+      if (!ok && AppCore.registry?.modules && isFn(AppCore.registry.modules.set) && !AppCore.registry.modules.get?.(currentName)) {
+        AppCore.registry.modules.set(currentName, moduleRef);
+        ok = true;
+      }
+    } catch {}
+
+    if (canExtend(AppCore) && !AppCore[currentName]) defineHiddenValue(AppCore, currentName, moduleRef);
     registered = registered || ok;
   }
 
@@ -1706,90 +1065,61 @@ export function registerModule(AppCore, name, moduleRef, aliases = []) {
    SNAPSHOT
 ========================================================= */
 
-function sanitizeBootContext(context = {}) {
-  const output = {};
+function sanitizeSnapshot(value, depth = 0) {
+  if (depth > 4) return "[depth-limit]";
+  if (typeof value === "string") return redactTokenInText(value);
+  if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "function") return "[function]";
+  if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitizeSnapshot(item, depth + 1));
 
-  for (const [key, value] of Object.entries(safeObject(context))) {
-    output[key] =
-      /token|url|path|href/i.test(key) && typeof value === "string"
-        ? redactTokenInText(value)
-        : value;
+  if (isObject(value)) {
+    const output = {};
+    for (const [key, item] of Object.entries(value).slice(0, 80)) {
+      output[key] = SENSITIVE_KEY_RE.test(key) ? (item ? "***" : item) : sanitizeSnapshot(item, depth + 1);
+    }
+    return output;
   }
 
-  return output;
-}
-
-function getInitialUrlSnapshot() {
-  return {
-    initialUrl: redactTokenInText(getInitialUrl()),
-    browserHref: redactTokenInText(getBrowserHref()),
-    browserPath: redactTokenInText(buildBrowserPath()),
-
-    bootContext: safeClone(sanitizeBootContext(getBootContext()), {}),
-    mainBootContext: safeClone(sanitizeBootContext(getMainBootContext()), {}),
-
-    protectedRoutes: PROTECTED_PUBLIC_TOKEN_ROUTES.map((config) => {
-      const stored = getStoredInitialUrl(config);
-
-      return {
-        key: config.key,
-        path: config.path,
-        aliases: [...safeArray(config.aliases)],
-        paths: [...getRoutePaths(config)],
-        windowKeys: [...safeArray(config.windowKeys)],
-        hasStoredInitialUrl: Boolean(stored),
-        storedInitialUrl: redactTokenInText(stored),
-        scrubbed: isProtectedTokenScrubbed(config),
-      };
-    }),
-  };
+  return String(value);
 }
 
 export function getHelpersSnapshot(AppCore, Router = null) {
   const protectedContext = resolveProtectedInitialContext(AppCore);
 
-  return {
+  return sanitizeSnapshot({
     version: HELPERS_VERSION,
-
-    path: redactTokenInText(getCurrentPath(AppCore, Router)),
-    publicPath: redactTokenInText(getCurrentPublicPath(AppCore, Router)),
-    canonicalPath: redactTokenInText(getCurrentCanonicalPath(AppCore, Router)),
-
-    browserPath: redactTokenInText(buildBrowserPath()),
-    browserHref: redactTokenInText(getBrowserHref()),
-
-    initial: getInitialUrlSnapshot(),
-
-    protectedInitial: {
-      key: protectedContext.key,
-      hasToken: Boolean(protectedContext.hasToken),
-      tokenInPath: Boolean(protectedContext.tokenInPath),
-      scrubbed: Boolean(protectedContext.scrubbed),
-      path: protectedContext.redactedPath,
-      publicPath: protectedContext.redactedPublicPath,
-      canonicalPath:
-        protectedContext.redactedCanonicalPath ||
-        redactTokenInText(protectedContext.canonicalPath),
-      url: protectedContext.redactedUrl,
-    },
-
+    path: getCurrentPath(AppCore, Router),
+    publicPath: getCurrentPublicPath(AppCore, Router),
+    canonicalPath: getCurrentCanonicalPath(AppCore, Router),
+    browserPath: browserPath(),
+    browserHref: browserHref(),
+    initialUrl: windowValue(INITIAL_URL_KEY),
+    bootContext: windowObject(BOOT_CONTEXT_KEY),
+    mainBootContext: windowObject(MAIN_BOOT_CONTEXT_KEY),
+    protectedInitial: protectedContext,
+    tokenRoutes: PROTECTED_PUBLIC_TOKEN_ROUTES.map((config) => ({
+      key: config.key,
+      path: config.path,
+      paths: [...toArray(config.paths)],
+      windowKeys: [...toArray(config.windowKeys)],
+      scrubbed: isProtectedTokenScrubbed(config),
+    })),
     hasCleanup: Boolean(AppCore?.cleanup),
     hasModules: Boolean(AppCore?.modules),
     hasRouter: Boolean(Router),
-    routerHasCanonicalGetter: Boolean(Router?.getCurrentCanonicalPath),
-    routerHasPublicGetter: Boolean(Router?.getCurrentPublicPath),
-
     at: iso(),
-  };
+    policy: {
+      helpersOnly: true,
+      ownAuth: false,
+      ownRouter: false,
+      ownStorage: false,
+      ownFetch: false,
+      ownRender: false,
+      ownHistory: false,
+      ownToast: false,
+    },
+  });
 }
-
-/* =========================================================
-   EARLY CAPTURE
-========================================================= */
-
-try {
-  captureInitialUrl();
-} catch {}
 
 /* =========================================================
    DEFAULT EXPORT

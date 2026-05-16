@@ -2,9 +2,9 @@
    Onion SPA - Store Notify
    Archivo: src/store/notify.js
 
-   Store notify limpio:
+   STORE NOTIFY · SIMPLE
    - payload estable
-   - global/key/selector listeners
+   - listeners global/key/selector
    - errores aislados
    - clones por subscriber
    - sin event storm diagnóstico por defecto
@@ -18,21 +18,12 @@ import {
   isFunction,
   isPlainObject,
   normalizePath,
-  safeArray,
   safeNumber,
   safeObject,
   safeText,
 } from "./helpers.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const STORE_NOTIFY_VERSION = "15.0.0-clean";
-
-/* =========================================================
-   CONSTANTS
-========================================================= */
+export const STORE_NOTIFY_VERSION = "16.0.0-simple";
 
 const STORE_NOTIFY_EVENT = "store:notify";
 const STORE_NOTIFY_ERROR_EVENT = "store:notify:error";
@@ -71,15 +62,21 @@ function iso(ms = now()) {
   }
 }
 
-function toSet(value) {
-  if (value instanceof Set) return value;
+function toArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return [...value];
 
   try {
-    if (Array.isArray(value)) return new Set(value);
-    if (value && typeof value[Symbol.iterator] === "function") return new Set(value);
+    if (value && typeof value[Symbol.iterator] === "function") return [...value];
   } catch {}
 
-  return new Set();
+  if (value === null || value === undefined) return [];
+  return [value];
+}
+
+function toSet(value) {
+  if (value instanceof Set) return value;
+  return new Set(toArray(value));
 }
 
 function toMap(value) {
@@ -140,21 +137,20 @@ function pathString(path = "") {
 }
 
 function uniquePaths(paths = [], limit = DEFAULT_MAX_CHANGED_PATHS) {
-  const out = [];
+  const output = [];
   const seen = new Set();
 
-  for (const item of safeArray(paths).flat(Infinity)) {
+  for (const item of toArray(paths).flat(Infinity)) {
     const path = pathString(item);
-
     if (!path || seen.has(path)) continue;
 
     seen.add(path);
-    out.push(path);
+    output.push(path);
 
-    if (out.length >= limit) break;
+    if (output.length >= limit) break;
   }
 
-  return out;
+  return output;
 }
 
 /**
@@ -168,21 +164,14 @@ export function pathMatches(watchedPath = "", changedPath = "") {
 
   if (!watched || !changed) return false;
 
-  return (
-    watched === changed ||
-    watched.startsWith(`${changed}.`) ||
-    changed.startsWith(`${watched}.`)
-  );
+  return watched === changed || watched.startsWith(`${changed}.`) || changed.startsWith(`${watched}.`);
 }
 
 function anyPathMatches(watchedPath = "", changedPaths = []) {
   const watched = pathString(watchedPath);
-
   if (!watched) return false;
 
-  return uniquePaths(changedPaths).some((changedPath) =>
-    pathMatches(watched, changedPath)
-  );
+  return uniquePaths(changedPaths).some((changedPath) => pathMatches(watched, changedPath));
 }
 
 function pathDepth(path = "") {
@@ -195,18 +184,17 @@ function pathDepth(path = "") {
 ========================================================= */
 
 function redactText(value = "") {
-  const text = safeText(value, "");
-
-  if (!text) return "";
+  const raw = safeText(value, "");
+  if (!raw) return "";
 
   try {
-    return text.replace(TOKENISH_TEXT_RE, (match) => {
+    return raw.replace(TOKENISH_TEXT_RE, (match) => {
       if (/^bearer\s+/i.test(match)) return "Bearer ***";
       if (/^[?&#]/.test(match)) return match.replace(/=.+$/g, "=***");
       return "***";
     });
   } catch {
-    return text;
+    return raw;
   }
 }
 
@@ -223,18 +211,10 @@ function sanitizeError(error = null) {
 }
 
 function sanitizeValue(value, depth = 0, keyHint = "", seen = new WeakSet()) {
-  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) {
-    return value ? "***" : null;
-  }
-
+  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) return value ? "***" : null;
   if (depth > MAX_SANITIZE_DEPTH) return "[depth-limit]";
 
-  if (
-    value === null ||
-    value === undefined ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
+  if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") {
     return value;
   }
 
@@ -244,9 +224,7 @@ function sanitizeValue(value, depth = 0, keyHint = "", seen = new WeakSet()) {
   if (value instanceof Error) return sanitizeError(value);
 
   if (Array.isArray(value)) {
-    return value
-      .slice(0, MAX_ARRAY_PREVIEW)
-      .map((item) => sanitizeValue(item, depth + 1, keyHint, seen));
+    return value.slice(0, MAX_ARRAY_PREVIEW).map((item) => sanitizeValue(item, depth + 1, keyHint, seen));
   }
 
   if (isAnyObject(value)) {
@@ -290,10 +268,7 @@ function safeLogError(AppCore, label, error, payload = {}) {
   } catch {}
 
   try {
-    if (AppCore?.config?.debug) {
-      console.error(label, error, sanitizeValue(payload));
-    }
-
+    if (AppCore?.config?.debug) console.error(label, error, sanitizeValue(payload));
     return true;
   } catch {
     return false;
@@ -353,11 +328,7 @@ function runSafely(AppCore, label, fn, eventName = STORE_NOTIFY_ERROR_EVENT, ext
 function snapshotValue(snapshot) {
   if (!isFunction(snapshot)) return snapshot;
 
-  return runSafely(
-    null,
-    "Store snapshot builder error",
-    () => snapshot()
-  );
+  return runSafely(null, "Store snapshot builder error", () => snapshot());
 }
 
 export function buildPayload(snapshot, changedPaths = [], previousState = null) {
@@ -380,7 +351,6 @@ function clonePayload(payload = {}, extra = {}) {
   return freezePayload({
     ...clone(source, {}),
     ...clone(extra, {}),
-
     state: clone(source.state, {}),
     previousState: source.previousState ? clone(source.previousState, null) : null,
     changedPaths: uniquePaths(source.changedPaths),
@@ -395,7 +365,6 @@ function normalizeFinalPayload({ payload, snapshot } = {}) {
   return freezePayload({
     version: source.version || STORE_NOTIFY_VERSION,
     ...clone(source, {}),
-
     state: clone(state, {}),
     previousState: source.previousState ? clone(source.previousState, null) : null,
     changedPaths: uniquePaths(source.changedPaths),
@@ -412,18 +381,13 @@ function shouldCleanupInvalid(options = {}) {
   return options?.cleanupInvalid === true;
 }
 
-export function notifyGlobalListeners({
-  AppCore,
-  listeners,
-  payload,
-  options = {},
-} = {}) {
+export function notifyGlobalListeners({ AppCore, listeners, payload, options = {} } = {}) {
   const bucket = toSet(listeners);
   if (!bucket.size) return 0;
 
   let notified = 0;
 
-  for (const listener of Array.from(bucket)) {
+  for (const listener of [...bucket]) {
     if (!isFunction(listener)) {
       if (shouldCleanupInvalid(options)) bucket.delete(listener);
       continue;
@@ -433,18 +397,11 @@ export function notifyGlobalListeners({
       AppCore,
       "Store global listener error",
       () => {
-        listener(
-          clonePayload(payload, {
-            listenerType: "global",
-          })
-        );
-
+        listener(clonePayload(payload, { listenerType: "global" }));
         notified += 1;
       },
       STORE_LISTENER_ERROR_EVENT,
-      {
-        listenerType: "global",
-      }
+      { listenerType: "global" }
     );
   }
 
@@ -485,30 +442,13 @@ function resolveCurrentValue({ get, state, path }) {
   return getByPath(state, path, undefined);
 }
 
-function notifyKeyEntry({
-  AppCore,
-  get,
-  payload,
-  path,
-  entry,
-  bucket,
-} = {}) {
+function notifyKeyEntry({ AppCore, get, payload, path, entry, bucket } = {}) {
   const item = normalizeKeyEntry(entry, path);
   if (!item || !isFunction(item.listener)) return false;
 
-  const matchedPaths = payload.changedPaths.filter((changedPath) =>
-    pathMatches(path, changedPath)
-  );
-
-  const value = resolveCurrentValue({
-    get,
-    state: payload.state,
-    path,
-  });
-
-  const previousValue = payload.previousState
-    ? getByPath(payload.previousState, path, undefined)
-    : undefined;
+  const matchedPaths = payload.changedPaths.filter((changedPath) => pathMatches(path, changedPath));
+  const value = resolveCurrentValue({ get, state: payload.state, path });
+  const previousValue = payload.previousState ? getByPath(payload.previousState, path, undefined) : undefined;
 
   runSafely(
     AppCore,
@@ -525,10 +465,7 @@ function notifyKeyEntry({
       );
     },
     STORE_KEY_ERROR_EVENT,
-    {
-      listenerType: "key",
-      path,
-    }
+    { listenerType: "key", path }
   );
 
   if (item.once === true) {
@@ -540,13 +477,7 @@ function notifyKeyEntry({
   return true;
 }
 
-export function notifyKeyListeners({
-  AppCore,
-  keyListeners,
-  get,
-  payload,
-  options = {},
-} = {}) {
+export function notifyKeyListeners({ AppCore, keyListeners, get, payload, options = {} } = {}) {
   const map = toMap(keyListeners);
   if (!map.size) return 0;
 
@@ -554,10 +485,7 @@ export function notifyKeyListeners({
   if (!changedPaths.length) return 0;
 
   let notified = 0;
-
-  const entries = Array
-    .from(map.entries())
-    .sort(([a], [b]) => pathDepth(a) - pathDepth(b));
+  const entries = [...map.entries()].sort(([a], [b]) => pathDepth(a) - pathDepth(b));
 
   for (const [rawPath, rawBucket] of entries) {
     const path = pathString(rawPath);
@@ -565,19 +493,11 @@ export function notifyKeyListeners({
 
     const bucket = toSet(rawBucket);
 
-    for (const entry of Array.from(bucket)) {
-      const ok = notifyKeyEntry({
-        AppCore,
-        get,
-        payload,
-        path,
-        entry,
-        bucket,
-      });
+    for (const entry of [...bucket]) {
+      const ok = notifyKeyEntry({ AppCore, get, payload, path, entry, bucket });
 
-      if (ok) {
-        notified += 1;
-      } else if (shouldCleanupInvalid(options)) {
+      if (ok) notified += 1;
+      else if (shouldCleanupInvalid(options)) {
         try {
           bucket.delete(entry);
         } catch {}
@@ -630,30 +550,23 @@ function runSelector(entry, state) {
 function valuesEqual(entry, nextValue, previousValue) {
   try {
     return Boolean(getSelectorEquality(entry)(nextValue, previousValue));
+  } catch {}
+
+  try {
+    return deepEqual(nextValue, previousValue);
   } catch {
-    try {
-      return deepEqual(nextValue, previousValue);
-    } catch {
-      return false;
-    }
+    return false;
   }
 }
 
-export function notifySelectorListeners({
-  AppCore,
-  selectorListeners,
-  shallowCloneRoot,
-  state,
-  payload,
-  options = {},
-} = {}) {
+export function notifySelectorListeners({ AppCore, selectorListeners, shallowCloneRoot, state, payload, options = {} } = {}) {
   const bucket = toSet(selectorListeners);
   if (!bucket.size) return 0;
 
   let notified = 0;
   const currentState = selectorState({ shallowCloneRoot, state });
 
-  for (const entry of Array.from(bucket)) {
+  for (const entry of [...bucket]) {
     if (!entry || !isFunction(entry.selector)) {
       if (shouldCleanupInvalid(options)) bucket.delete(entry);
       continue;
@@ -710,9 +623,7 @@ export function notifySelectorListeners({
         notified += 1;
       },
       STORE_SELECTOR_ERROR_EVENT,
-      {
-        listenerType: "selector",
-      }
+      { listenerType: "selector" }
     );
 
     if (entry.once === true) {
@@ -730,14 +641,10 @@ export function notifySelectorListeners({
 ========================================================= */
 
 function shouldEmitDiagnostics(AppCore, options = {}) {
-  if (options.emitDiagnostics === true) return true;
-  if (options.emitStoreNotify === true) return true;
+  if (options.emitDiagnostics === true || options.emitStoreNotify === true) return true;
 
   try {
-    return Boolean(
-      AppCore?.config?.diagnostics?.storeNotify ||
-        AppCore?.config?.diagnostics?.storeEvents
-    );
+    return Boolean(AppCore?.config?.diagnostics?.storeNotify || AppCore?.config?.diagnostics?.storeEvents);
   } catch {
     return false;
   }
@@ -757,24 +664,9 @@ function emitNotifyDiagnostics(AppCore, result, options = {}) {
    MAIN NOTIFY
 ========================================================= */
 
-export function notify({
-  AppCore,
-  listeners,
-  keyListeners,
-  selectorListeners,
-  get,
-  snapshot,
-  shallowCloneRoot,
-  state,
-  payload,
-  options = {},
-} = {}) {
+export function notify({ AppCore, listeners, keyListeners, selectorListeners, get, snapshot, shallowCloneRoot, state, payload, options = {} } = {}) {
   const startedAt = now();
-
-  const finalPayload = normalizeFinalPayload({
-    payload,
-    snapshot,
-  });
+  const finalPayload = normalizeFinalPayload({ payload, snapshot });
 
   if (!finalPayload.changedPaths.length) {
     return {
@@ -794,12 +686,7 @@ export function notify({
   let selectorCount = 0;
 
   try {
-    globalCount = notifyGlobalListeners({
-      AppCore,
-      listeners,
-      payload: finalPayload,
-      options,
-    });
+    globalCount = notifyGlobalListeners({ AppCore, listeners, payload: finalPayload, options });
   } catch (error) {
     reportError(AppCore, "Store global notify phase error", error, {
       listenerType: "global",
@@ -808,13 +695,7 @@ export function notify({
   }
 
   try {
-    keyCount = notifyKeyListeners({
-      AppCore,
-      keyListeners,
-      get,
-      payload: finalPayload,
-      options,
-    });
+    keyCount = notifyKeyListeners({ AppCore, keyListeners, get, payload: finalPayload, options });
   } catch (error) {
     reportError(AppCore, "Store key notify phase error", error, {
       listenerType: "key",
@@ -823,14 +704,7 @@ export function notify({
   }
 
   try {
-    selectorCount = notifySelectorListeners({
-      AppCore,
-      selectorListeners,
-      shallowCloneRoot,
-      state,
-      payload: finalPayload,
-      options,
-    });
+    selectorCount = notifySelectorListeners({ AppCore, selectorListeners, shallowCloneRoot, state, payload: finalPayload, options });
   } catch (error) {
     reportError(AppCore, "Store selector notify phase error", error, {
       listenerType: "selector",
@@ -841,12 +715,10 @@ export function notify({
   const result = {
     ok: true,
     version: STORE_NOTIFY_VERSION,
-
     globalListeners: globalCount,
     keyListeners: keyCount,
     selectorListeners: selectorCount,
     totalListeners: globalCount + keyCount + selectorCount,
-
     changedPaths: finalPayload.changedPaths,
     timestamp: finalPayload.timestamp,
     durationMs: Math.max(0, now() - startedAt),
@@ -861,47 +733,26 @@ export function notify({
    SNAPSHOT
 ========================================================= */
 
-export function buildNotifySnapshot({
-  listeners,
-  keyListeners,
-  selectorListeners,
-} = {}) {
+export function buildNotifySnapshot({ listeners, keyListeners, selectorListeners } = {}) {
   const keyMap = toMap(keyListeners);
 
   return {
     version: STORE_NOTIFY_VERSION,
-
     globalListeners: toSet(listeners).size,
-
-    keyListenerPaths: Array
-      .from(keyMap.keys())
-      .map(pathString)
-      .filter(Boolean),
-
-    keyListenerCount: Array
-      .from(keyMap.values())
-      .reduce((total, bucket) => total + toSet(bucket).size, 0),
-
+    keyListenerPaths: [...keyMap.keys()].map(pathString).filter(Boolean),
+    keyListenerCount: [...keyMap.values()].reduce((total, bucket) => total + toSet(bucket).size, 0),
     selectorListeners: toSet(selectorListeners).size,
-
     at: iso(),
   };
 }
 
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
-
 export default {
   STORE_NOTIFY_VERSION,
-
   buildPayload,
   pathMatches,
-
   notifyGlobalListeners,
   notifyKeyListeners,
   notifySelectorListeners,
-
   notify,
   buildNotifySnapshot,
 };

@@ -2,30 +2,13 @@
    Onion SPA - Core Session
    Archivo: src/core/session.js
 
-   ONION SUPPORT · CORE SESSION
-   PREFERENCES · SESSION · STRICT AUTH · ROUTE SAFE · 17/10
-
-   Responsabilidades:
-   - cargar preferencias persistidas
-   - cargar sesión persistida sin ghost-auth
-   - sincronizar route/publicPath
-   - aplicar usuario/token en una mutación lógica cuando setState existe
-   - limpiar sesión local sin tocar preferencias
-   - mantener auth consistente con state.computeAuthenticated()
-   - preservar currentResolvedUsername sólo con sesión autenticada
-   - sincronizar UI base, tema, idioma, sidebar y loader
-
-   Candados:
-   - token sin usuario usable NO autentica
-   - usuario sin token usable NO autentica
-   - no pinta usuario antiguo si no hay token válido
-   - no emite token real en eventos/snapshots
-   - canonical route sin query/hash
-   - publicPath conserva query/hash y /@usuario
-   - clearSession no borra theme/lang/appearance/sidebar/settings/ui/preferences
-   - compatible con storage local/session/memory
-   - compatible con preboot theme system/light/dark
-   - cero throws accidentales
+   CORE SESSION · CLEAN
+   - Auth estricta: token + user usable = authenticated
+   - Token sin user: hasToken=true, authenticated=false
+   - User sin token: authenticated=false y no se pinta usuario
+   - clearSession no toca preferencias/UI
+   - publicPath conserva /@usuario/query/hash
+   - canonicalPath limpia /@usuario/query/hash y rutas token
 ========================================================= */
 
 import { config } from "./config.js";
@@ -50,19 +33,14 @@ import {
   cloneError as helperCloneError,
 } from "./helpers.js";
 
-import {
-  computeAuthenticated,
-} from "./state.js";
-
-import {
-  removeLegacySessionKeys,
-} from "./storage.js";
+import { computeAuthenticated } from "./state.js";
+import { removeLegacySessionKeys } from "./storage.js";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-const SESSION_VERSION = "17.0.0";
+export const SESSION_VERSION = "18.0.0-clean";
 
 const DEFAULT_ROUTE = "/";
 const DEFAULT_LANG = "es";
@@ -72,20 +50,12 @@ const DEFAULT_THEME_MODE = "system";
 const ACTIVATION_PATH = "/activate-account";
 const RESET_CONFIRM_PATH = "/reset-password/confirm";
 
-const VALID_THEMES = Object.freeze([
-  "dark",
-  "light",
-]);
-
-const VALID_THEME_MODES = Object.freeze([
-  "dark",
-  "light",
-  "system",
-]);
+const VALID_THEMES = Object.freeze(["dark", "light"]);
+const VALID_THEME_MODES = Object.freeze(["dark", "light", "system"]);
 
 const VALID_LANG_RE = /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i;
 
-const SESSION_EVENTS = Object.freeze({
+export const SESSION_EVENTS = Object.freeze({
   routeChange: "app:route:change",
   publicPathChange: "app:public-path:change",
   userChange: "app:user:change",
@@ -151,13 +121,20 @@ const AUTH_STORAGE_KEYS = Object.freeze([
   "redirectAfterLogin",
 ]);
 
-const TOKEN_STORAGE_KEYS = Object.freeze([
+const ACCESS_TOKEN_KEYS = Object.freeze([
   "token",
   "accessToken",
   "access_token",
 ]);
 
-const AUX_TOKEN_STORAGE_KEYS = Object.freeze([
+const USER_STORAGE_KEYS = Object.freeze([
+  "user",
+  "currentUser",
+  "authUser",
+  "sessionUser",
+]);
+
+const AUX_TOKEN_KEYS = Object.freeze([
   "refreshToken",
   "refresh_token",
   "tempToken",
@@ -213,46 +190,36 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
-function localSafeText(value, fallback = "") {
+function text(value, fallback = "") {
   try {
-    if (typeof safeText === "function") {
-      return safeText(value, fallback);
-    }
+    if (typeof safeText === "function") return safeText(value, fallback);
   } catch {}
 
-  if (value === null || value === undefined) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
-  const text = String(value).trim();
-  return text || fallback;
+  const clean = String(value).trim();
+  return clean || fallback;
 }
 
-function localSafeObject(value, fallback = {}) {
+function object(value, fallback = {}) {
   try {
-    if (typeof safeObject === "function") {
-      return safeObject(value, fallback);
-    }
+    if (typeof safeObject === "function") return safeObject(value, fallback);
   } catch {}
 
   return isPlainObject(value) ? value : fallback;
 }
 
-function localSafeLower(value, fallback = "") {
+function lower(value, fallback = "") {
   try {
-    if (typeof safeLower === "function") {
-      return safeLower(value, fallback);
-    }
+    if (typeof safeLower === "function") return safeLower(value, fallback);
   } catch {}
 
-  return localSafeText(value, fallback).toLowerCase();
+  return text(value, fallback).toLowerCase();
 }
 
-function localSafeBool(value, fallback = false) {
+function bool(value, fallback = false) {
   try {
-    if (typeof safeBool === "function") {
-      return safeBool(value, fallback);
-    }
+    if (typeof safeBool === "function") return safeBool(value, fallback);
   } catch {}
 
   if (value === true) return true;
@@ -278,17 +245,15 @@ function localSafeBool(value, fallback = false) {
   return Boolean(fallback);
 }
 
-function localSafeArray(value) {
+function array(value) {
   try {
-    if (typeof safeArray === "function") {
-      return safeArray(value);
-    }
+    if (typeof safeArray === "function") return safeArray(value);
   } catch {}
 
   return Array.isArray(value) ? value : [];
 }
 
-function safeNow() {
+function now() {
   try {
     return Date.now();
   } catch {
@@ -296,7 +261,7 @@ function safeNow() {
   }
 }
 
-function safeNowIso(ms = safeNow()) {
+function iso(ms = now()) {
   try {
     return new Date(ms).toISOString();
   } catch {
@@ -308,31 +273,38 @@ function hasOwn(obj, key) {
   try {
     return Boolean(
       obj &&
-      typeof obj === "object" &&
-      Object.prototype.hasOwnProperty.call(obj, key)
+        typeof obj === "object" &&
+        Object.prototype.hasOwnProperty.call(obj, key)
     );
   } catch {
     return false;
   }
 }
 
-function safeEmit(events, name, payload = {}) {
-  const eventName = localSafeText(name, "");
-
-  if (!eventName) {
-    return false;
+function redact(value = "") {
+  try {
+    return redactTokenInText(value);
+  } catch {
+    return text(value, "");
   }
+}
+
+function emit(events, name, payload = {}) {
+  const eventName = text(name, "");
+  if (!eventName) return false;
+
+  const cleanPayload = sanitize(payload);
 
   try {
     if (isFunction(events?.emit)) {
-      events.emit(eventName, sanitizeForEvent(payload));
+      events.emit(eventName, cleanPayload);
       return true;
     }
   } catch {}
 
   try {
     if (isFunction(events?.dispatch)) {
-      events.dispatch(eventName, sanitizeForEvent(payload));
+      events.dispatch(eventName, cleanPayload);
       return true;
     }
   } catch {}
@@ -340,32 +312,22 @@ function safeEmit(events, name, payload = {}) {
   return false;
 }
 
-function safeSetState(setState, patch = {}, options = undefined) {
-  if (!isFunction(setState)) {
-    return false;
-  }
+function setStateSafe(setState, patch = {}, options = undefined) {
+  if (!isFunction(setState)) return false;
 
   try {
-    if (options !== undefined) {
-      setState(localSafeObject(patch), options);
-    } else {
-      setState(localSafeObject(patch));
-    }
+    if (options !== undefined) setState(object(patch), options);
+    else setState(object(patch));
 
     return true;
-  } catch {}
-
-  return false;
+  } catch {
+    return false;
+  }
 }
 
-function commitState({
-  state,
-  setState,
-  patch = {},
-  options = {},
-} = {}) {
-  const cleanPatch = localSafeObject(patch, {});
-  const wrote = safeSetState(setState, cleanPatch, options);
+function commitState({ state, setState, patch = {}, options = {} } = {}) {
+  const cleanPatch = object(patch, {});
+  const wrote = setStateSafe(setState, cleanPatch, options);
 
   if (state && isObject(state)) {
     try {
@@ -376,112 +338,86 @@ function commitState({
   return wrote;
 }
 
-function getStorageKey(name = "", fallback = "") {
-  const cleanName = localSafeText(name, "");
-  const keys = localSafeObject(config?.storageKeys, {});
+/* =========================================================
+   STORAGE
+========================================================= */
+
+function storageKey(name = "", fallback = "") {
+  const cleanName = text(name, "");
+  const keys = object(config?.storageKeys, {});
 
   return (
-    localSafeText(keys?.[cleanName], "") ||
-    localSafeText(STORAGE_KEY_FALLBACKS?.[cleanName], "") ||
-    localSafeText(fallback, "") ||
+    text(keys?.[cleanName], "") ||
+    text(STORAGE_KEY_FALLBACKS?.[cleanName], "") ||
+    text(fallback, "") ||
     cleanName
   );
 }
 
-function safeStorageGet(storage, key, fallback = null, options = undefined) {
-  const finalKey = localSafeText(key, "");
-
-  if (!finalKey) {
-    return fallback;
-  }
+function storageGet(storage, key, fallback = null, options = undefined) {
+  const finalKey = text(key, "");
+  if (!finalKey) return fallback;
 
   try {
-    if (options !== undefined) {
-      return storage?.get?.(finalKey, fallback, options);
-    }
-
+    if (options !== undefined) return storage?.get?.(finalKey, fallback, options);
     return storage?.get?.(finalKey, fallback);
   } catch {
     return fallback;
   }
 }
 
-function safeStorageGetRaw(storage, key, fallback = null, options = undefined) {
-  const finalKey = localSafeText(key, "");
-
-  if (!finalKey) {
-    return fallback;
-  }
+function storageGetRaw(storage, key, fallback = null, options = undefined) {
+  const finalKey = text(key, "");
+  if (!finalKey) return fallback;
 
   try {
     if (isFunction(storage?.getRaw)) {
-      if (options !== undefined) {
-        return storage.getRaw(finalKey, fallback, options);
-      }
-
+      if (options !== undefined) return storage.getRaw(finalKey, fallback, options);
       return storage.getRaw(finalKey, fallback);
     }
   } catch {}
 
-  return safeStorageGet(storage, finalKey, fallback, options);
+  return storageGet(storage, finalKey, fallback, options);
 }
 
-function safeStorageSet(storage, key, value, options = undefined) {
-  const finalKey = localSafeText(key, "");
-
-  if (!finalKey) {
-    return false;
-  }
+function storageSet(storage, key, value, options = undefined) {
+  const finalKey = text(key, "");
+  if (!finalKey) return false;
 
   try {
-    if (options !== undefined) {
-      storage?.set?.(finalKey, value, options);
-    } else {
-      storage?.set?.(finalKey, value);
-    }
+    if (options !== undefined) storage?.set?.(finalKey, value, options);
+    else storage?.set?.(finalKey, value);
 
     return true;
-  } catch {}
-
-  return false;
-}
-
-function safeStorageSetRaw(storage, key, value, options = undefined) {
-  const finalKey = localSafeText(key, "");
-
-  if (!finalKey) {
+  } catch {
     return false;
   }
+}
+
+function storageSetRaw(storage, key, value, options = undefined) {
+  const finalKey = text(key, "");
+  if (!finalKey) return false;
 
   try {
     if (isFunction(storage?.setRaw)) {
-      if (options !== undefined) {
-        storage.setRaw(finalKey, value, options);
-      } else {
-        storage.setRaw(finalKey, value);
-      }
+      if (options !== undefined) storage.setRaw(finalKey, value, options);
+      else storage.setRaw(finalKey, value);
 
       return true;
     }
   } catch {}
 
-  return safeStorageSet(storage, finalKey, value, options);
+  return storageSet(storage, finalKey, value, options);
 }
 
-function safeStorageRemove(storage, key, options = undefined) {
-  const finalKey = localSafeText(key, "");
-
-  if (!finalKey) {
-    return false;
-  }
+function storageRemove(storage, key, options = undefined) {
+  const finalKey = text(key, "");
+  if (!finalKey) return false;
 
   try {
     if (isFunction(storage?.remove)) {
-      if (options !== undefined) {
-        storage.remove(finalKey, options);
-      } else {
-        storage.remove(finalKey);
-      }
+      if (options !== undefined) storage.remove(finalKey, options);
+      else storage.remove(finalKey);
 
       return true;
     }
@@ -500,122 +436,34 @@ function safeStorageRemove(storage, key, options = undefined) {
   return false;
 }
 
-function safeRedact(value = "") {
-  try {
-    return redactTokenInText(value);
-  } catch {
-    return localSafeText(value, "");
-  }
-}
-
-function stripBearerPrefix(token = "") {
-  return localSafeText(token, "").replace(/^Bearer\s+/i, "").trim();
-}
-
-function safeHasValidToken(token = null) {
-  try {
-    return Boolean(hasValidToken(token));
-  } catch {
-    return Boolean(localSafeText(token, ""));
-  }
-}
-
-function normalizeTokenValue(token = null) {
-  const clean = stripBearerPrefix(token);
-  return safeHasValidToken(clean) ? clean : null;
-}
-
-function safeNormalizeUser(user = null) {
-  if (!user) {
-    return null;
-  }
-
-  try {
-    return normalizeUser(user);
-  } catch {
-    return isPlainObject(user) ? user : null;
-  }
-}
-
-function safeIsUsableUser(user = null) {
-  try {
-    if (typeof isUsableUser === "function") {
-      return Boolean(isUsableUser(user));
-    }
-  } catch {}
-
-  return hasUsableUser(user);
-}
-
-function safeGetUserUsername(user = null) {
-  try {
-    return getUserUsername(user) || null;
-  } catch {
-    return null;
-  }
-}
-
-function safeGetUserDisplayName(user = null) {
-  try {
-    return getUserDisplayName(user) || null;
-  } catch {
-    return null;
-  }
-}
-
-function safeGetUserAvatarUrl(user = null) {
-  try {
-    return getUserAvatarUrl(user) || null;
-  } catch {
-    return null;
-  }
-}
-
-function safeSanitizeUsername(value = "") {
-  try {
-    return sanitizeUsername(value) || null;
-  } catch {
-    return null;
+function removeStorageKeys(storage, keys = []) {
+  for (const keyName of keys) {
+    storageRemove(storage, storageKey(keyName), { all: true });
   }
 }
 
 /* =========================================================
-   REDACTION / SNAPSHOT SAFETY
+   SANITIZE
 ========================================================= */
 
-function sanitizeForEvent(value, depth = 0, keyHint = "") {
-  if (SENSITIVE_KEY_RE.test(localSafeText(keyHint, ""))) {
+function sanitize(value, depth = 0, keyHint = "") {
+  if (SENSITIVE_KEY_RE.test(text(keyHint, ""))) {
     return value ? "***" : null;
   }
 
-  if (depth > 4) {
-    return "[depth-limit]";
-  }
+  if (depth > 4) return "[depth-limit]";
 
-  if (value === null || value === undefined) {
-    return value;
-  }
+  if (value === null || value === undefined) return value;
 
-  if (typeof value === "string") {
-    return safeRedact(value);
-  }
-
-  if (typeof value === "number" || typeof value === "boolean") {
-    return value;
-  }
-
-  if (typeof value === "bigint") {
-    return String(value);
-  }
-
-  if (typeof value === "function") {
-    return "[function]";
-  }
+  if (typeof value === "string") return redact(value);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return "[function]";
 
   if (value instanceof Error) {
     return {
       name: value.name || "Error",
-      message: safeRedact(value.message || "Error"),
+      message: redact(value.message || "Error"),
       stack: value.stack ? "[stack]" : null,
       code: value.code || null,
       status: value.status || value.statusCode || null,
@@ -623,77 +471,40 @@ function sanitizeForEvent(value, depth = 0, keyHint = "") {
   }
 
   if (Array.isArray(value)) {
-    return value
-      .slice(0, 80)
-      .map((item) => sanitizeForEvent(item, depth + 1, keyHint));
+    return value.slice(0, 80).map((item) => sanitize(item, depth + 1, keyHint));
   }
 
   if (isPlainObject(value)) {
     const output = {};
 
     for (const [key, item] of Object.entries(value).slice(0, 120)) {
-      output[key] = SENSITIVE_KEY_RE.test(key)
-        ? item ? "***" : null
-        : sanitizeForEvent(item, depth + 1, key);
+      output[key] = sanitize(item, depth + 1, key);
     }
 
     return output;
   }
 
   try {
-    return safeRedact(String(value));
+    return redact(String(value));
   } catch {
     return "[unserializable]";
   }
 }
 
-function safeCloneError(cloneErrorFn, error = null) {
+function cloneErrorSafe(cloneError, error = null) {
   try {
-    if (isFunction(cloneErrorFn)) {
-      return cloneErrorFn(error);
-    }
+    if (isFunction(cloneError)) return cloneError(error);
   } catch {}
 
   try {
     return helperCloneError(error);
   } catch {}
 
-  if (!error) {
-    return null;
-  }
-
-  return sanitizeForEvent(error);
-}
-
-function createUserSnapshot(user = null) {
-  if (!user || !isObject(user)) {
-    return null;
-  }
-
-  const normalized = safeNormalizeUser(user);
-
-  const snapshot = {
-    id: normalized?.id || normalized?.userId || null,
-    userId: normalized?.userId || normalized?.id || null,
-    username: normalized?.username || null,
-    slug: normalized?.slug || null,
-    email: normalized?.email || null,
-    name: normalized?.name || null,
-    displayName: normalized?.displayName || normalized?.name || null,
-    role: normalized?.role || normalized?.rol || null,
-    roles: localSafeArray(normalized?.roles),
-    avatar: normalized?.avatar ? safeRedact(normalized.avatar) : null,
-    avatarUrl: normalized?.avatarUrl ? safeRedact(normalized.avatarUrl) : null,
-    hasAvatar: Boolean(normalized?.hasAvatar),
-    avatarUpdatedAt: normalized?.avatarUpdatedAt || null,
-    active: normalized?.active !== false,
-  };
-
-  return sanitizeForEvent(snapshot);
+  return error ? sanitize(error) : null;
 }
 
 /* =========================================================
-   PATH HELPERS
+   PATHS
 ========================================================= */
 
 function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
@@ -702,83 +513,55 @@ function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
     .replace(/\\/g, "/")
     .replace(/\/{2,}/g, "/");
 
-  if (!value) {
-    value = DEFAULT_ROUTE;
-  }
+  if (!value) value = DEFAULT_ROUTE;
+  if (!value.startsWith("/")) value = `/${value}`;
 
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
-  }
+  const output = [];
 
-  const normalizedSegments = [];
+  for (const part of value.split("/").filter(Boolean)) {
+    if (part === ".") continue;
 
-  for (const segment of value.split("/").filter(Boolean)) {
-    if (segment === ".") {
+    if (part === "..") {
+      output.pop();
       continue;
     }
 
-    if (segment === "..") {
-      normalizedSegments.pop();
-      continue;
-    }
-
-    normalizedSegments.push(segment);
+    output.push(part);
   }
 
-  value = `/${normalizedSegments.join("/")}`;
+  value = `/${output.join("/")}`;
 
-  if (!value) {
-    value = DEFAULT_ROUTE;
-  }
+  if (value.length > 1) value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
 
-  if (value.length > 1 && value.endsWith("/")) {
-    value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
-  }
-
-  return value;
+  return value || DEFAULT_ROUTE;
 }
 
 function normalizeSearch(search = "") {
-  const raw = localSafeText(search, "");
-
-  if (!raw) {
-    return "";
-  }
-
+  const raw = text(search, "");
+  if (!raw) return "";
   return raw.startsWith("?") ? raw : `?${raw.replace(/^\?+/, "")}`;
 }
 
 function normalizeHash(hash = "") {
-  const raw = localSafeText(hash, "");
-
-  if (!raw) {
-    return "";
-  }
-
+  const raw = text(hash, "");
+  if (!raw) return "";
   return raw.startsWith("#") ? raw : `#${raw.replace(/^#+/, "")}`;
 }
 
 function isHashRouterPath(value = "") {
-  const raw = localSafeText(value, "");
+  const raw = text(value, "");
   return raw.startsWith("#/") || raw.startsWith("#!");
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw = localSafeText(value, "");
-
-  if (!raw) {
-    return DEFAULT_ROUTE;
-  }
-
-  if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
-  }
-
+  const raw = text(value, "");
+  if (!raw) return DEFAULT_ROUTE;
+  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
   return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
 }
 
 function splitFullPath(value = DEFAULT_ROUTE) {
-  const raw = localSafeText(value, DEFAULT_ROUTE) || DEFAULT_ROUTE;
+  const raw = text(value, DEFAULT_ROUTE) || DEFAULT_ROUTE;
 
   if (isHashRouterPath(raw)) {
     return splitFullPath(normalizeHashRouterPath(raw));
@@ -809,31 +592,29 @@ function splitFullPath(value = DEFAULT_ROUTE) {
   };
 }
 
-function getBaseOrigin() {
-  if (isBrowser() && window.location?.origin) {
-    return window.location.origin;
-  }
-
+function baseOrigin() {
+  if (isBrowser() && window.location?.origin) return window.location.origin;
   return "http://localhost";
 }
 
-function normalizePublicPathLocal(value = DEFAULT_ROUTE) {
-  const raw = localSafeText(value, DEFAULT_ROUTE) || DEFAULT_ROUTE;
+function publicPath(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
+  const raw = text(value, "") || fallback || DEFAULT_ROUTE;
 
   if (isHashRouterPath(raw)) {
-    return normalizePublicPathLocal(normalizeHashRouterPath(raw));
+    return publicPath(normalizeHashRouterPath(raw), fallback);
   }
 
   try {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed = new URL(raw, getBaseOrigin());
+      const parsed = new URL(raw, baseOrigin());
 
       if (parsed.hash && isHashRouterPath(parsed.hash)) {
-        return normalizePublicPathLocal(normalizeHashRouterPath(parsed.hash));
+        return publicPath(normalizeHashRouterPath(parsed.hash), fallback);
       }
 
-      return normalizePublicPathLocal(
-        `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`
+      return publicPath(
+        `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`,
+        fallback
       );
     }
   } catch {}
@@ -842,15 +623,15 @@ function normalizePublicPathLocal(value = DEFAULT_ROUTE) {
     return normalizePath(raw);
   } catch {}
 
-  const { pathname, search, hash } = splitFullPath(raw);
-  return `${pathname}${search}${hash}`;
+  const parts = splitFullPath(raw);
+  return `${parts.pathname}${parts.search}${parts.hash}`;
 }
 
-function stripPublicUsernamePrefix(path = DEFAULT_ROUTE) {
-  const parts = splitFullPath(normalizePublicPathLocal(path));
+function stripUsernamePrefix(path = DEFAULT_ROUTE) {
+  const parts = splitFullPath(publicPath(path));
   const segments = parts.pathname.split("/").filter(Boolean);
 
-  if (segments.length > 0 && /^@[A-Za-z0-9._-]{1,80}$/.test(segments[0])) {
+  if (segments.length && /^@[A-Za-z0-9._-]{1,80}$/.test(segments[0])) {
     const rest = segments.slice(1).join("/");
     const cleanPathname = rest ? normalizePathnameOnly(`/${rest}`) : DEFAULT_ROUTE;
 
@@ -861,11 +642,10 @@ function stripPublicUsernamePrefix(path = DEFAULT_ROUTE) {
 }
 
 function stripSearchAndHash(path = DEFAULT_ROUTE) {
-  const parts = splitFullPath(path);
-  return normalizePathnameOnly(parts.pathname || DEFAULT_ROUTE);
+  return normalizePathnameOnly(splitFullPath(path).pathname || DEFAULT_ROUTE);
 }
 
-function collapseTechnicalCanonicalPath(pathname = DEFAULT_ROUTE) {
+function collapseTechnical(pathname = DEFAULT_ROUTE) {
   const clean = normalizePathnameOnly(pathname);
 
   if (clean === ACTIVATION_PATH || clean.startsWith(`${ACTIVATION_PATH}/`)) {
@@ -879,143 +659,73 @@ function collapseTechnicalCanonicalPath(pathname = DEFAULT_ROUTE) {
   return clean;
 }
 
-function safeCanonicalPath(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
+function canonicalPath(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
   const source = value || fallback || DEFAULT_ROUTE;
 
   try {
-    const noUsername = stripPublicUsernamePrefix(source);
+    const noUsername = stripUsernamePrefix(source);
     const delegated = normalizeCanonicalPath(noUsername || DEFAULT_ROUTE);
 
-    return collapseTechnicalCanonicalPath(
-      stripSearchAndHash(delegated || noUsername || DEFAULT_ROUTE)
-    );
+    return collapseTechnical(stripSearchAndHash(delegated || noUsername || DEFAULT_ROUTE));
   } catch {}
 
-  return collapseTechnicalCanonicalPath(
-    stripSearchAndHash(stripPublicUsernamePrefix(source))
-  );
+  return collapseTechnical(stripSearchAndHash(stripUsernamePrefix(source)));
 }
 
-function safePublicPath(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
-  const source = value || fallback || DEFAULT_ROUTE;
-  return normalizePublicPathLocal(source);
-}
-
-function extractUsernameFromPublicPath(publicPath = DEFAULT_ROUTE) {
-  const clean = normalizePublicPathLocal(publicPath);
+function usernameFromPublicPath(value = DEFAULT_ROUTE) {
+  const clean = publicPath(value);
   const match = clean.match(/^\/@([^/]+)(?:\/|$)/i);
 
-  return safeSanitizeUsername(match?.[1] || "");
+  try {
+    return sanitizeUsername(match?.[1] || "") || null;
+  } catch {
+    return null;
+  }
 }
 
 /* =========================================================
-   AUTH DERIVED STATE
+   USER / TOKEN
 ========================================================= */
 
-function normalizeRoleKey(value = "") {
-  return localSafeText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^a-z0-9_:.]/g, "")
-    .replace(/^_+|_+$/g, "")
-    .trim();
+function stripBearer(token = "") {
+  return text(token, "").replace(/^Bearer\s+/i, "").trim();
 }
 
-function resolveRole(user = null) {
-  const role = normalizeRoleKey(
-    user?.role ||
-      user?.rol ||
-      user?.type ||
-      user?.userType ||
-      user?.user_type ||
-      user?.profile?.role ||
-      user?.profile?.rol ||
-      user?.raw?.role ||
-      user?.raw?.rol ||
-      ""
-  );
+function tokenValid(token = null) {
+  const clean = stripBearer(token);
 
-  if (!role) {
-    return null;
+  if (!clean) return false;
+
+  try {
+    return Boolean(hasValidToken(clean));
+  } catch {
+    return Boolean(clean && !/[\s\r\n\t]/.test(clean));
   }
+}
 
-  const aliases = config?.auth?.roles || {};
+function normalizeToken(token = null) {
+  const clean = stripBearer(token);
+  return tokenValid(clean) ? clean : null;
+}
 
-  for (const [alias, target] of Object.entries(aliases)) {
-    if (normalizeRoleKey(alias) === role) {
-      return normalizeRoleKey(target || role) || role;
-    }
+function normalizeUserSafe(user = null) {
+  if (!user) return null;
+
+  try {
+    return normalizeUser(user);
+  } catch {
+    return isPlainObject(user) ? user : null;
   }
-
-  return role;
 }
 
-function resolveRoles(user = null) {
-  const result = [];
+function usableUser(user = null) {
+  const normalized = normalizeUserSafe(user);
 
-  const pushRole = (value) => {
-    if (!value) {
-      return;
-    }
+  if (!normalized || !isObject(normalized)) return false;
 
-    if (Array.isArray(value)) {
-      value.forEach(pushRole);
-      return;
-    }
-
-    if (isPlainObject(value)) {
-      for (const [key, enabled] of Object.entries(value)) {
-        if (localSafeBool(enabled, false)) {
-          pushRole(key);
-        }
-      }
-
-      return;
-    }
-
-    if (typeof value === "string") {
-      value
-        .split(/[,\s|]+/g)
-        .map(normalizeRoleKey)
-        .filter(Boolean)
-        .forEach((item) => result.push(resolveRole({ role: item }) || item));
-      return;
-    }
-
-    const role = resolveRole({ role: value });
-
-    if (role) {
-      result.push(role);
-    }
-  };
-
-  pushRole(user?.roles);
-  pushRole(user?.roleList);
-  pushRole(user?.role_list);
-  pushRole(resolveRole(user));
-
-  return Array.from(new Set(result.filter(Boolean)));
-}
-
-function roleFlags(roles = []) {
-  const set = new Set(localSafeArray(roles));
-
-  return {
-    isAdmin: set.has("admin"),
-    isSupport: set.has("support") || set.has("agent"),
-    isManager: set.has("manager"),
-    isClient: set.has("client"),
-  };
-}
-
-function hasUsableUser(user = null) {
-  const normalized = safeNormalizeUser(user);
-
-  if (!normalized || !isObject(normalized)) {
-    return false;
-  }
+  try {
+    if (typeof isUsableUser === "function") return Boolean(isUsableUser(normalized));
+  } catch {}
 
   if (
     normalized.active === false ||
@@ -1029,7 +739,7 @@ function hasUsableUser(user = null) {
     return false;
   }
 
-  const status = localSafeLower(
+  const status = lower(
     normalized.status ||
       normalized.estado ||
       normalized.state ||
@@ -1057,139 +767,305 @@ function hasUsableUser(user = null) {
     return false;
   }
 
-  return USER_ID_KEYS.some((key) => Boolean(localSafeText(normalized?.[key], "")));
+  return USER_ID_KEYS.some((key) => Boolean(text(normalized?.[key], "")));
 }
 
-function computeAuthSafe(user = null, token = null) {
-  const normalizedUser = safeNormalizeUser(user);
-  const validToken = safeHasValidToken(token);
-  const usableUser = safeIsUsableUser(normalizedUser) || hasUsableUser(normalizedUser);
-
-  if (!validToken || !usableUser) {
-    return false;
-  }
-
+function userUsername(user = null) {
   try {
-    return Boolean(computeAuthenticated(normalizedUser, token));
-  } catch {}
-
-  return true;
-}
-
-function resolveResolvedUsername({
-  state = {},
-  user = null,
-  publicPath = "",
-  authenticated = false,
-} = {}) {
-  if (!authenticated) {
+    return getUserUsername(user) || null;
+  } catch {
     return null;
   }
-
-  const fromPath = extractUsernameFromPublicPath(
-    publicPath || state?.publicPath || DEFAULT_ROUTE
-  );
-
-  const fromUser = safeSanitizeUsername(
-    safeGetUserUsername(user) ||
-      user?.username ||
-      user?.userName ||
-      user?.nick ||
-      user?.alias ||
-      user?.login ||
-      user?.slug ||
-      user?.email ||
-      ""
-  );
-
-  const fromPrevious = safeSanitizeUsername(
-    state?.currentResolvedUsername ||
-      state?.resolvedUsername ||
-      ""
-  );
-
-  return fromPath || fromUser || fromPrevious || null;
 }
 
-function clearAuthPatch() {
+function userDisplayName(user = null) {
+  try {
+    return getUserDisplayName(user) || null;
+  } catch {
+    return null;
+  }
+}
+
+function userAvatarUrl(user = null) {
+  try {
+    return getUserAvatarUrl(user) || null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeRoleKey(value = "") {
+  return text(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_:.]/g, "")
+    .replace(/^_+|_+$/g, "")
+    .trim();
+}
+
+function resolveRole(user = null) {
+  const rawRole = normalizeRoleKey(
+    user?.role ||
+      user?.rol ||
+      user?.type ||
+      user?.userType ||
+      user?.user_type ||
+      user?.profile?.role ||
+      user?.profile?.rol ||
+      user?.raw?.role ||
+      user?.raw?.rol ||
+      ""
+  );
+
+  if (!rawRole) return null;
+
+  const aliases = config?.auth?.roles || {};
+
+  for (const [alias, target] of Object.entries(aliases)) {
+    if (normalizeRoleKey(alias) === rawRole) {
+      return normalizeRoleKey(target || rawRole) || rawRole;
+    }
+  }
+
+  return rawRole;
+}
+
+function resolveRoles(user = null) {
+  const output = [];
+
+  const push = (value) => {
+    if (!value) return;
+
+    if (Array.isArray(value)) {
+      value.forEach(push);
+      return;
+    }
+
+    if (isPlainObject(value)) {
+      for (const [key, enabled] of Object.entries(value)) {
+        if (bool(enabled, false)) push(key);
+      }
+
+      return;
+    }
+
+    if (typeof value === "string") {
+      value
+        .split(/[,\s|]+/g)
+        .map(normalizeRoleKey)
+        .filter(Boolean)
+        .forEach((item) => output.push(resolveRole({ role: item }) || item));
+
+      return;
+    }
+
+    const role = resolveRole({ role: value });
+    if (role) output.push(role);
+  };
+
+  push(user?.roles);
+  push(user?.roleList);
+  push(user?.role_list);
+  push(resolveRole(user));
+
+  return Array.from(new Set(output.filter(Boolean)));
+}
+
+function roleFlags(roles = []) {
+  const set = new Set(array(roles));
+
   return {
-    authenticated: false,
-    hasToken: false,
-
-    user: null,
-    currentUser: null,
-    authUser: null,
-    sessionUser: null,
-
-    token: null,
-    accessToken: null,
-    access_token: null,
-
-    role: null,
-    rol: null,
-    userRole: null,
-    roles: [],
-
-    username: null,
-
-    isAdmin: false,
-    isSupport: false,
-    isManager: false,
-    isClient: false,
-
-    currentResolvedUsername: null,
-    resolvedUsername: null,
+    isAdmin: set.has("admin"),
+    isSupport: set.has("support") || set.has("agent"),
+    isManager: set.has("manager"),
+    isClient: set.has("client"),
   };
 }
 
-function buildAuthPatch(state, options = {}) {
-  const root = localSafeObject(state);
-  const opts = localSafeObject(options);
+function computeAuth(user = null, token = null) {
+  const normalizedUser = normalizeUserSafe(user);
+  const validToken = tokenValid(token);
+  const validUser = usableUser(normalizedUser);
 
-  const normalizedToken = normalizeTokenValue(root.token);
-  const normalizedUser = root.user ? safeNormalizeUser(root.user) : null;
+  if (!validToken || !validUser) return false;
 
-  const forceUnauthenticated = opts.forceUnauthenticated === true;
+  try {
+    return Boolean(computeAuthenticated(normalizedUser, token));
+  } catch {
+    return true;
+  }
+}
 
-  const authenticated = forceUnauthenticated
-    ? false
-    : computeAuthSafe(normalizedUser, normalizedToken);
+/*
+  Estado auth estricto:
+  - Sin token => limpia todo auth.
+  - Token sin user => conserva token + hasToken, pero authenticated=false.
+  - User sin token => limpia user/auth.
+  - Token + user usable => authenticated=true.
+*/
+function buildAuthPatch(root = {}, options = {}) {
+  const source = object(root, {});
+  const forceUnauthenticated = options?.forceUnauthenticated === true;
 
-  if (!authenticated) {
-    return clearAuthPatch();
+  const token = normalizeToken(
+    source.token ||
+      source.accessToken ||
+      source.access_token ||
+      null
+  );
+
+  const user = source.user ? normalizeUserSafe(source.user) : null;
+
+  if (!token) {
+    return {
+      authenticated: false,
+      hasToken: false,
+
+      token: null,
+      accessToken: null,
+      access_token: null,
+
+      user: null,
+      currentUser: null,
+      authUser: null,
+      sessionUser: null,
+
+      role: null,
+      rol: null,
+      userRole: null,
+      roles: [],
+
+      username: null,
+      currentResolvedUsername: null,
+      resolvedUsername: null,
+
+      isAdmin: false,
+      isSupport: false,
+      isManager: false,
+      isClient: false,
+    };
   }
 
-  const role = resolveRole(normalizedUser);
-  const roles = resolveRoles(normalizedUser);
+  if (forceUnauthenticated || !usableUser(user)) {
+    return {
+      authenticated: false,
+      hasToken: true,
+
+      token,
+      accessToken: token,
+      access_token: token,
+
+      user: null,
+      currentUser: null,
+      authUser: null,
+      sessionUser: null,
+
+      role: null,
+      rol: null,
+      userRole: null,
+      roles: [],
+
+      username: null,
+      currentResolvedUsername: null,
+      resolvedUsername: null,
+
+      isAdmin: false,
+      isSupport: false,
+      isManager: false,
+      isClient: false,
+    };
+  }
+
+  const authenticated = computeAuth(user, token);
+
+  if (!authenticated) {
+    return {
+      authenticated: false,
+      hasToken: true,
+
+      token,
+      accessToken: token,
+      access_token: token,
+
+      user: null,
+      currentUser: null,
+      authUser: null,
+      sessionUser: null,
+
+      role: null,
+      rol: null,
+      userRole: null,
+      roles: [],
+
+      username: null,
+      currentResolvedUsername: null,
+      resolvedUsername: null,
+
+      isAdmin: false,
+      isSupport: false,
+      isManager: false,
+      isClient: false,
+    };
+  }
+
+  const role = resolveRole(user);
+  const roles = resolveRoles(user);
   const finalRoles = roles.length ? roles : role ? [role] : [];
   const flags = roleFlags(finalRoles);
 
-  const currentResolvedUsername = resolveResolvedUsername({
-    state: root,
-    user: normalizedUser,
-    publicPath: root.publicPath,
-    authenticated,
-  });
+  const fromPath = usernameFromPublicPath(source.publicPath || source.route || DEFAULT_ROUTE);
+
+  const fromUser =
+    (() => {
+      try {
+        return sanitizeUsername(
+          userUsername(user) ||
+            user?.username ||
+            user?.userName ||
+            user?.nick ||
+            user?.alias ||
+            user?.login ||
+            user?.slug ||
+            user?.email ||
+            ""
+        ) || null;
+      } catch {
+        return null;
+      }
+    })();
+
+  const previous =
+    (() => {
+      try {
+        return sanitizeUsername(source.currentResolvedUsername || source.resolvedUsername || "") || null;
+      } catch {
+        return null;
+      }
+    })();
+
+  const currentResolvedUsername = fromPath || fromUser || previous || null;
 
   return {
     authenticated: true,
     hasToken: true,
 
-    user: normalizedUser,
-    currentUser: normalizedUser,
-    authUser: normalizedUser,
-    sessionUser: normalizedUser,
+    token,
+    accessToken: token,
+    access_token: token,
 
-    token: normalizedToken,
-    accessToken: normalizedToken,
-    access_token: normalizedToken,
+    user,
+    currentUser: user,
+    authUser: user,
+    sessionUser: user,
 
     role,
     rol: role,
     userRole: role,
     roles: finalRoles,
 
-    username: safeGetUserUsername(normalizedUser),
+    username: userUsername(user),
 
     ...flags,
 
@@ -1199,109 +1075,145 @@ function buildAuthPatch(state, options = {}) {
 }
 
 function syncAuthState(state, options = {}) {
-  if (!state || !isObject(state)) {
-    return state;
-  }
+  if (!state || !isObject(state)) return state;
 
-  const patch = buildAuthPatch(state, options);
-  Object.assign(state, patch);
-
+  Object.assign(state, buildAuthPatch(state, options));
   return state;
 }
 
-function emitAuthChangeIfNeeded(events, previousSnapshot, state, cause = "unknown") {
-  const previousAuth = Boolean(previousSnapshot?.authenticated);
-  const nextAuth = Boolean(state?.authenticated);
+/* =========================================================
+   SNAPSHOTS / EVENTS
+========================================================= */
 
-  const previousHasToken = Boolean(previousSnapshot?.hasToken);
-  const nextHasToken = Boolean(state?.hasToken);
+function authSnapshot(state) {
+  return {
+    authenticated: Boolean(state?.authenticated),
+    hasToken: Boolean(state?.hasToken),
+    role: state?.role || null,
+    username: state?.username || userUsername(state?.user) || null,
+    currentResolvedUsername: state?.currentResolvedUsername || null,
+  };
+}
 
-  const previousUsername = previousSnapshot?.username || null;
-  const nextUsername = state?.username || null;
+function userSnapshot(user = null) {
+  if (!user || !isObject(user)) return null;
 
-  const previousResolved = previousSnapshot?.currentResolvedUsername || null;
-  const nextResolved = state?.currentResolvedUsername || null;
+  const normalized = normalizeUserSafe(user);
+
+  return sanitize({
+    id: normalized?.id || normalized?.userId || null,
+    userId: normalized?.userId || normalized?.id || null,
+    username: normalized?.username || null,
+    slug: normalized?.slug || null,
+    email: normalized?.email || null,
+    name: normalized?.name || null,
+    displayName: normalized?.displayName || normalized?.name || null,
+    role: normalized?.role || normalized?.rol || null,
+    roles: array(normalized?.roles),
+    avatar: normalized?.avatar ? redact(normalized.avatar) : null,
+    avatarUrl: normalized?.avatarUrl ? redact(normalized.avatarUrl) : null,
+    hasAvatar: Boolean(normalized?.hasAvatar),
+    avatarUpdatedAt: normalized?.avatarUpdatedAt || null,
+    active: normalized?.active !== false,
+  });
+}
+
+function sessionSnapshot(state, cause = "unknown") {
+  const visiblePublicPath = publicPath(
+    state?.publicPath ||
+      state?.route ||
+      DEFAULT_ROUTE
+  );
+
+  return {
+    version: SESSION_VERSION,
+
+    authenticated: Boolean(state?.authenticated),
+    hasToken: Boolean(state?.hasToken),
+
+    token: null,
+    accessToken: null,
+    refreshToken: null,
+    tempToken: null,
+
+    user: state?.authenticated ? userSnapshot(state?.user || null) : null,
+
+    role: state?.role || null,
+    roles: array(state?.roles),
+
+    username: state?.username || userUsername(state?.user) || null,
+    displayName: state?.authenticated ? userDisplayName(state?.user) : null,
+    avatarUrl: state?.authenticated ? redact(userAvatarUrl(state?.user) || "") : null,
+
+    currentResolvedUsername: state?.currentResolvedUsername || null,
+    resolvedUsername: state?.resolvedUsername || null,
+
+    route: canonicalPath(state?.route || DEFAULT_ROUTE),
+    publicPath: redact(visiblePublicPath),
+
+    theme: state?.theme || config.defaultTheme || DEFAULT_THEME,
+    themeMode: state?.themeMode || null,
+    lang: state?.lang || config.defaultLang || DEFAULT_LANG,
+
+    cause,
+    changedAt: iso(),
+  };
+}
+
+function emitAuthChangeIfNeeded(events, previous, state, cause = "unknown") {
+  const next = authSnapshot(state);
 
   if (
-    previousAuth === nextAuth &&
-    previousHasToken === nextHasToken &&
-    previousUsername === nextUsername &&
-    previousResolved === nextResolved
+    previous?.authenticated === next.authenticated &&
+    previous?.hasToken === next.hasToken &&
+    previous?.role === next.role &&
+    previous?.username === next.username &&
+    previous?.currentResolvedUsername === next.currentResolvedUsername
   ) {
     return false;
   }
 
-  return safeEmit(events, SESSION_EVENTS.authChange, {
-    authenticated: nextAuth,
-    hasToken: nextHasToken,
-    role: state?.role || null,
-    username: nextUsername,
-    currentResolvedUsername: nextResolved,
+  return emit(events, SESSION_EVENTS.authChange, {
+    ...next,
+    previousAuthenticated: Boolean(previous?.authenticated),
     cause,
-    changedAt: safeNowIso(),
+    changedAt: iso(),
   });
+}
+
+function userFingerprint(user = null) {
+  if (!user) return "";
+
+  const normalized = normalizeUserSafe(user);
+
+  try {
+    return JSON.stringify({
+      id: normalized?.id || normalized?.userId || null,
+      username: normalized?.username || null,
+      email: normalized?.email || null,
+      role: normalized?.role || normalized?.rol || null,
+      roles: array(normalized?.roles),
+      avatar: normalized?.avatar || normalized?.avatarUrl || null,
+      avatarUpdatedAt: normalized?.avatarUpdatedAt || null,
+      active: normalized?.active ?? null,
+    });
+  } catch {
+    return String(user);
+  }
+}
+
+function tokenFingerprint(token = null) {
+  const clean = normalizeToken(token);
+  if (!clean) return "";
+  return `${clean.length}:${clean.slice(0, 8)}:${clean.slice(-8)}`;
 }
 
 /* =========================================================
    DOM HELPERS
 ========================================================= */
 
-function setAriaExpanded(el, value) {
-  if (!el) {
-    return false;
-  }
-
-  try {
-    el.setAttribute("aria-expanded", String(Boolean(value)));
-    return true;
-  } catch {}
-
-  return false;
-}
-
-function toggleClass(el, className, force) {
-  if (!el || !className) {
-    return false;
-  }
-
-  try {
-    el.classList.toggle(className, Boolean(force));
-    return true;
-  } catch {}
-
-  return false;
-}
-
-function addClass(el, className) {
-  if (!el || !className) {
-    return false;
-  }
-
-  try {
-    el.classList.add(className);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function removeClass(el, className) {
-  if (!el || !className) {
-    return false;
-  }
-
-  try {
-    el.classList.remove(className);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function setAttribute(el, name, value) {
-  if (!el || !name) {
-    return false;
-  }
+  if (!el || !name) return false;
 
   try {
     if (value === null || value === undefined || value === "") {
@@ -1311,15 +1223,13 @@ function setAttribute(el, name, value) {
     }
 
     return true;
-  } catch {}
-
-  return false;
+  } catch {
+    return false;
+  }
 }
 
 function setDataset(el, key, value) {
-  if (!el || !key) {
-    return false;
-  }
+  if (!el || !key) return false;
 
   try {
     if (value === null || value === undefined || value === "") {
@@ -1334,17 +1244,54 @@ function setDataset(el, key, value) {
   }
 }
 
+function addClass(el, className) {
+  if (!el || !className) return false;
+
+  try {
+    el.classList.add(className);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeClass(el, className) {
+  if (!el || !className) return false;
+
+  try {
+    el.classList.remove(className);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function toggleClass(el, className, force) {
+  if (!el || !className) return false;
+
+  try {
+    el.classList.toggle(className, Boolean(force));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setAriaExpanded(el, value) {
+  return setAttribute(el, "aria-expanded", String(Boolean(value)));
+}
+
 /* =========================================================
    THEME / LANG
 ========================================================= */
 
 function normalizeTheme(theme = config.defaultTheme) {
-  const value = localSafeLower(theme, config.defaultTheme || DEFAULT_THEME);
+  const value = lower(theme, config.defaultTheme || DEFAULT_THEME);
   return VALID_THEMES.includes(value) ? value : DEFAULT_THEME;
 }
 
 function normalizeThemeMode(mode = DEFAULT_THEME_MODE) {
-  const value = localSafeLower(mode, DEFAULT_THEME_MODE);
+  const value = lower(mode, DEFAULT_THEME_MODE);
 
   if (
     [
@@ -1364,14 +1311,12 @@ function normalizeThemeMode(mode = DEFAULT_THEME_MODE) {
 }
 
 function normalizeLang(lang = config.defaultLang) {
-  const value = localSafeLower(lang, config.defaultLang || DEFAULT_LANG).replace(/_/g, "-");
+  const value = lower(lang, config.defaultLang || DEFAULT_LANG).replace(/_/g, "-");
   return VALID_LANG_RE.test(value) ? value : config.defaultLang || DEFAULT_LANG;
 }
 
-function getBootThemeSnapshot() {
-  if (!isBrowser()) {
-    return {};
-  }
+function bootThemeSnapshot() {
+  if (!isBrowser()) return {};
 
   try {
     return window.__ONION_BOOT_THEME__ || {};
@@ -1380,10 +1325,8 @@ function getBootThemeSnapshot() {
   }
 }
 
-function resolveSystemTheme() {
-  if (!isBrowser()) {
-    return DEFAULT_THEME;
-  }
+function systemTheme() {
+  if (!isBrowser()) return DEFAULT_THEME;
 
   try {
     if (isFunction(window.matchMedia) && window.matchMedia("(prefers-color-scheme: dark)").matches) {
@@ -1394,26 +1337,19 @@ function resolveSystemTheme() {
   return "light";
 }
 
-function resolveThemeFromMode(mode = DEFAULT_THEME_MODE) {
+function themeFromMode(mode = DEFAULT_THEME_MODE) {
   const finalMode = normalizeThemeMode(mode);
 
-  if (finalMode === "dark") {
-    return "dark";
-  }
+  if (finalMode === "dark") return "dark";
+  if (finalMode === "light") return "light";
 
-  if (finalMode === "light") {
-    return "light";
-  }
-
-  return resolveSystemTheme();
+  return systemTheme();
 }
 
-function resolveThemeFromUser(user = null) {
-  if (!user || !isObject(user)) {
-    return null;
-  }
+function themeFromUser(user = null) {
+  if (!user || !isObject(user)) return null;
 
-  const explicitTheme = localSafeLower(
+  const explicitTheme = lower(
     user.theme ??
       user?.preferences?.theme ??
       user?.settings?.theme ??
@@ -1424,9 +1360,7 @@ function resolveThemeFromUser(user = null) {
     ""
   );
 
-  if (VALID_THEMES.includes(explicitTheme)) {
-    return explicitTheme;
-  }
+  if (VALID_THEMES.includes(explicitTheme)) return explicitTheme;
 
   const explicitMode = normalizeThemeMode(
     user.themeMode ??
@@ -1444,46 +1378,40 @@ function resolveThemeFromUser(user = null) {
       ""
   );
 
-  if (explicitMode) {
-    return resolveThemeFromMode(explicitMode);
-  }
-
-  return null;
+  return explicitMode ? themeFromMode(explicitMode) : null;
 }
 
-function resolveStoredTheme(storage) {
-  const bootTheme = getBootThemeSnapshot();
+function storedTheme(storage) {
+  const boot = bootThemeSnapshot();
 
-  const bootMode = normalizeThemeMode(bootTheme?.mode || "");
-  const bootResolvedTheme = VALID_THEMES.includes(bootTheme?.theme) ? bootTheme.theme : "";
+  const bootMode = normalizeThemeMode(boot?.mode || "");
+  const bootTheme = VALID_THEMES.includes(boot?.theme) ? boot.theme : "";
 
-  const storedThemeModeRaw =
-    safeStorageGet(storage, getStorageKey("themeMode"), "") ||
-    safeStorageGet(storage, getStorageKey("appearance"), "");
+  const storedModeRaw =
+    storageGet(storage, storageKey("themeMode"), "") ||
+    storageGet(storage, storageKey("appearance"), "");
 
-  const storedThemeMode = storedThemeModeRaw
-    ? normalizeThemeMode(storedThemeModeRaw)
-    : "";
+  const storedMode = storedModeRaw ? normalizeThemeMode(storedModeRaw) : "";
 
-  const storedThemeRaw = safeStorageGet(
+  const storedThemeRaw = storageGet(
     storage,
-    getStorageKey("theme"),
-    bootResolvedTheme || config.defaultTheme || DEFAULT_THEME
+    storageKey("theme"),
+    bootTheme || config.defaultTheme || DEFAULT_THEME
   );
 
-  const storedTheme = normalizeTheme(storedThemeRaw);
+  const stored = normalizeTheme(storedThemeRaw);
 
   const finalMode =
-    storedThemeMode ||
+    storedMode ||
     bootMode ||
     normalizeThemeMode(config?.defaultThemeMode || config?.appearance || "") ||
     DEFAULT_THEME_MODE;
 
-  const finalTheme = storedThemeMode
-    ? resolveThemeFromMode(storedThemeMode)
-    : bootResolvedTheme ||
-      storedTheme ||
-      resolveThemeFromMode(finalMode);
+  const finalTheme = storedMode
+    ? themeFromMode(storedMode)
+    : bootTheme ||
+      stored ||
+      themeFromMode(finalMode);
 
   return {
     theme: normalizeTheme(finalTheme),
@@ -1491,10 +1419,7 @@ function resolveStoredTheme(storage) {
   };
 }
 
-export function syncThemeMetaColor({
-  dom,
-  theme = config.defaultTheme,
-} = {}) {
+export function syncThemeMetaColor({ dom, theme = config.defaultTheme } = {}) {
   const finalTheme = normalizeTheme(theme);
   const color = getThemeColor(finalTheme);
 
@@ -1516,11 +1441,7 @@ export function syncThemeMetaColor({
   return synced;
 }
 
-function applyThemeDom({
-  dom,
-  theme,
-  themeMode = "",
-} = {}) {
+function applyThemeDom({ dom, theme, themeMode = "" } = {}) {
   const finalTheme = normalizeTheme(theme);
   const finalMode = themeMode ? normalizeThemeMode(themeMode) : finalTheme;
 
@@ -1546,104 +1467,10 @@ function applyThemeDom({
 }
 
 /* =========================================================
-   SNAPSHOTS
-========================================================= */
-
-function createAuthSnapshot(state) {
-  return {
-    authenticated: Boolean(state?.authenticated),
-    hasToken: Boolean(state?.hasToken),
-    role: state?.role || null,
-    username: state?.username || safeGetUserUsername(state?.user) || null,
-    currentResolvedUsername: state?.currentResolvedUsername || null,
-  };
-}
-
-function createSessionSnapshot(state, cause = "unknown") {
-  const publicPath = safePublicPath(
-    state?.publicPath ||
-      state?.route ||
-      DEFAULT_ROUTE
-  );
-
-  return {
-    version: SESSION_VERSION,
-
-    authenticated: Boolean(state?.authenticated),
-    hasToken: Boolean(state?.hasToken),
-
-    token: null,
-    accessToken: null,
-    refreshToken: null,
-    tempToken: null,
-
-    user: createUserSnapshot(state?.user || null),
-
-    role: state?.role || null,
-    roles: localSafeArray(state?.roles),
-
-    username: state?.username || safeGetUserUsername(state?.user) || null,
-    displayName: safeGetUserDisplayName(state?.user),
-    avatarUrl: safeRedact(safeGetUserAvatarUrl(state?.user) || ""),
-
-    currentResolvedUsername: state?.currentResolvedUsername || null,
-    resolvedUsername: state?.resolvedUsername || null,
-
-    route: safeCanonicalPath(state?.route || DEFAULT_ROUTE),
-    publicPath: safeRedact(publicPath),
-
-    theme: state?.theme || config.defaultTheme || DEFAULT_THEME,
-    themeMode: state?.themeMode || null,
-    lang: state?.lang || config.defaultLang || DEFAULT_LANG,
-
-    cause,
-    changedAt: safeNowIso(),
-  };
-}
-
-function userFingerprint(user = null) {
-  if (!user) {
-    return "";
-  }
-
-  const normalized = safeNormalizeUser(user);
-
-  try {
-    return JSON.stringify({
-      id: normalized?.id || normalized?.userId || null,
-      username: normalized?.username || null,
-      email: normalized?.email || null,
-      role: normalized?.role || normalized?.rol || null,
-      roles: localSafeArray(normalized?.roles),
-      avatar: normalized?.avatar || normalized?.avatarUrl || null,
-      avatarUpdatedAt: normalized?.avatarUpdatedAt || null,
-      active: normalized?.active ?? null,
-    });
-  } catch {
-    return String(user);
-  }
-}
-
-function tokenFingerprint(token = null) {
-  const clean = normalizeTokenValue(token);
-
-  if (!clean) {
-    return "";
-  }
-
-  return `${clean.length}:${clean.slice(0, 8)}:${clean.slice(-8)}`;
-}
-
-/* =========================================================
    ROUTE
 ========================================================= */
 
-function syncRouteFields({
-  state,
-  setState,
-  route,
-  publicPath,
-} = {}) {
+function syncRouteFields({ state, setState, route, publicPath: nextPublicPath } = {}) {
   if (!state) {
     return {
       route: DEFAULT_ROUTE,
@@ -1652,8 +1479,8 @@ function syncRouteFields({
     };
   }
 
-  const nextPublicPath = safePublicPath(
-    publicPath ||
+  const visiblePath = publicPath(
+    nextPublicPath ||
       state?.publicPath ||
       route ||
       state?.route ||
@@ -1663,27 +1490,27 @@ function syncRouteFields({
       DEFAULT_ROUTE
   );
 
-  const nextCanonical = safeCanonicalPath(
+  const canonical = canonicalPath(
     route ||
-      nextPublicPath ||
+      visiblePath ||
       state?.route ||
       DEFAULT_ROUTE,
     DEFAULT_ROUTE
   );
 
-  const nextStatePreview = {
-    ...state,
-    route: nextCanonical,
-    canonicalPath: nextCanonical,
-    publicPath: nextPublicPath,
+  const preview = {
+    ...object(state),
+    route: canonical,
+    canonicalPath: canonical,
+    publicPath: visiblePath,
   };
 
-  const authPatch = buildAuthPatch(nextStatePreview);
+  const authPatch = buildAuthPatch(preview);
 
   const patch = {
-    route: nextCanonical,
-    canonicalPath: nextCanonical,
-    publicPath: nextPublicPath,
+    route: canonical,
+    canonicalPath: canonical,
+    publicPath: visiblePath,
     currentResolvedUsername: authPatch.currentResolvedUsername,
     resolvedUsername: authPatch.resolvedUsername,
   };
@@ -1697,11 +1524,7 @@ function syncRouteFields({
     },
   });
 
-  return {
-    route: nextCanonical,
-    publicPath: nextPublicPath,
-    currentResolvedUsername: authPatch.currentResolvedUsername,
-  };
+  return patch;
 }
 
 export function setRoute({
@@ -1711,25 +1534,23 @@ export function setRoute({
   route = DEFAULT_ROUTE,
   options = {},
 } = {}) {
-  const previousRoute = safeCanonicalPath(state?.route || DEFAULT_ROUTE);
-  const normalized = safeCanonicalPath(route || DEFAULT_ROUTE);
+  const previousRoute = canonicalPath(state?.route || DEFAULT_ROUTE);
+  const nextRoute = canonicalPath(route || DEFAULT_ROUTE);
 
-  if (previousRoute === normalized) {
-    return normalized;
-  }
+  if (previousRoute === nextRoute) return nextRoute;
 
   const preview = {
-    ...localSafeObject(state),
-    route: normalized,
-    canonicalPath: normalized,
+    ...object(state),
+    route: nextRoute,
+    canonicalPath: nextRoute,
   };
 
   const authPatch = buildAuthPatch(preview);
 
   const patch = {
     lastRoute: previousRoute,
-    route: normalized,
-    canonicalPath: normalized,
+    route: nextRoute,
+    canonicalPath: nextRoute,
     currentResolvedUsername: authPatch.currentResolvedUsername,
     resolvedUsername: authPatch.resolvedUsername,
   };
@@ -1739,20 +1560,20 @@ export function setRoute({
     setState,
     patch,
     options: {
-      ...localSafeObject(options),
+      ...object(options),
       source: options?.source || "core-session:setRoute",
     },
   });
 
-  safeEmit(events, SESSION_EVENTS.routeChange, {
-    route: normalized,
-    canonicalPath: normalized,
+  emit(events, SESSION_EVENTS.routeChange, {
+    route: nextRoute,
+    canonicalPath: nextRoute,
     previousRoute,
-    publicPath: safeRedact(state?.publicPath || normalized),
-    changedAt: safeNowIso(),
+    publicPath: redact(state?.publicPath || nextRoute),
+    changedAt: iso(),
   });
 
-  return normalized;
+  return nextRoute;
 }
 
 export function setPublicPath({
@@ -1763,29 +1584,27 @@ export function setPublicPath({
   path = DEFAULT_ROUTE,
   options = {},
 } = {}) {
-  const previousPublicPath = safePublicPath(state?.publicPath || DEFAULT_ROUTE);
-  const normalized = safePublicPath(path || DEFAULT_ROUTE);
+  const previousPublicPath = publicPath(state?.publicPath || DEFAULT_ROUTE);
+  const nextPublicPath = publicPath(path || DEFAULT_ROUTE);
 
-  if (previousPublicPath === normalized) {
-    return normalized;
-  }
+  if (previousPublicPath === nextPublicPath) return nextPublicPath;
 
-  const nextCanonical = safeCanonicalPath(normalized, state?.route || DEFAULT_ROUTE);
+  const nextRoute = canonicalPath(nextPublicPath, state?.route || DEFAULT_ROUTE);
 
   const preview = {
-    ...localSafeObject(state),
-    publicPath: normalized,
-    route: nextCanonical,
-    canonicalPath: nextCanonical,
+    ...object(state),
+    publicPath: nextPublicPath,
+    route: nextRoute,
+    canonicalPath: nextRoute,
   };
 
   const authPatch = buildAuthPatch(preview);
 
   const patch = {
     lastPublicPath: previousPublicPath,
-    publicPath: normalized,
-    route: nextCanonical,
-    canonicalPath: nextCanonical,
+    publicPath: nextPublicPath,
+    route: nextRoute,
+    canonicalPath: nextRoute,
     currentResolvedUsername: authPatch.currentResolvedUsername,
     resolvedUsername: authPatch.resolvedUsername,
   };
@@ -1795,61 +1614,71 @@ export function setPublicPath({
     setState,
     patch,
     options: {
-      ...localSafeObject(options),
+      ...object(options),
       source: options?.source || "core-session:setPublicPath",
     },
   });
 
-  safeStorageSet(storage, getStorageKey("lastPublicPath"), normalized);
+  storageSet(storage, storageKey("lastPublicPath"), nextPublicPath);
 
-  safeEmit(events, SESSION_EVENTS.publicPathChange, {
-    publicPath: safeRedact(normalized),
-    previousPublicPath: safeRedact(previousPublicPath),
-    route: nextCanonical,
-    canonicalPath: nextCanonical,
-    changedAt: safeNowIso(),
+  emit(events, SESSION_EVENTS.publicPathChange, {
+    publicPath: redact(nextPublicPath),
+    previousPublicPath: redact(previousPublicPath),
+    route: nextRoute,
+    canonicalPath: nextRoute,
+    changedAt: iso(),
   });
 
-  return normalized;
+  return nextPublicPath;
 }
 
 /* =========================================================
-   USER / TOKEN
+   AUTH STORAGE
 ========================================================= */
 
-function persistStrictAuthStorage({
-  storage,
-  token,
-  user,
-  authenticated,
-  tokenWasProvided = true,
-  userWasProvided = true,
-} = {}) {
-  if (authenticated) {
-    if (tokenWasProvided && token) {
-      safeStorageSetRaw(storage, getStorageKey("token"), token);
-      safeStorageSetRaw(storage, getStorageKey("accessToken"), token);
-    }
-
-    if (userWasProvided && user) {
-      safeStorageSet(storage, getStorageKey("user"), user);
-    }
-
+function persistAccessToken(storage, token) {
+  if (token) {
+    storageSetRaw(storage, storageKey("token"), token);
+    storageSetRaw(storage, storageKey("accessToken"), token);
     return;
   }
 
-  if (tokenWasProvided) {
-    for (const keyName of TOKEN_STORAGE_KEYS) {
-      safeStorageRemove(storage, getStorageKey(keyName), { all: true });
-    }
+  removeStorageKeys(storage, ACCESS_TOKEN_KEYS);
+}
+
+function persistUser(storage, user, authenticated) {
+  if (authenticated && user) {
+    storageSet(storage, storageKey("user"), user);
+    return;
   }
 
-  if (userWasProvided) {
-    for (const keyName of ["user", "currentUser", "authUser", "sessionUser"]) {
-      safeStorageRemove(storage, getStorageKey(keyName), { all: true });
-    }
-  }
+  removeStorageKeys(storage, USER_STORAGE_KEYS);
 }
+
+function persistAuxValue(storage, keyName, value, { removeWhenEmpty = true } = {}) {
+  const key = storageKey(keyName);
+
+  if (value === undefined) return false;
+
+  if (value === null || value === "") {
+    if (!removeWhenEmpty) return false;
+    return storageRemove(storage, key, { all: true });
+  }
+
+  if (keyName.toLowerCase().includes("token")) {
+    return storageSetRaw(storage, key, String(value));
+  }
+
+  return storageSet(storage, key, value);
+}
+
+function clearAuxTokens(storage) {
+  removeStorageKeys(storage, AUX_TOKEN_KEYS);
+}
+
+/* =========================================================
+   USER / TOKEN SETTERS
+========================================================= */
 
 export function setUser({
   state,
@@ -1860,48 +1689,37 @@ export function setUser({
   user = null,
   options = {},
 } = {}) {
-  const normalizedUser = user ? safeNormalizeUser(user) : null;
+  const normalizedUser = user ? normalizeUserSafe(user) : null;
 
-  const previousAuth = createAuthSnapshot(state);
-  const previousUserFingerprint = userFingerprint(state?.user);
-  const nextUserFingerprint = userFingerprint(normalizedUser);
+  const previousAuth = authSnapshot(state);
+  const previousUser = userFingerprint(state?.user);
+  const nextUser = userFingerprint(normalizedUser);
 
   const preview = {
-    ...localSafeObject(state),
+    ...object(state),
     user: normalizedUser,
   };
 
   const authPatch = buildAuthPatch(preview, {
-    forceUnauthenticated: !normalizeTokenValue(preview.token) || !hasUsableUser(normalizedUser),
+    forceUnauthenticated: !normalizeToken(preview.token) || !usableUser(normalizedUser),
   });
 
-  const patch = {
-    ...authPatch,
-  };
-
-  if (previousUserFingerprint !== nextUserFingerprint || previousAuth.authenticated !== authPatch.authenticated) {
+  if (previousUser !== nextUser || previousAuth.authenticated !== authPatch.authenticated) {
     commitState({
       state,
       setState,
-      patch,
+      patch: authPatch,
       options: {
-        ...localSafeObject(options),
+        ...object(options),
         source: options?.source || "core-session:setUser",
         forceUnauthenticated: !authPatch.authenticated,
       },
     });
   } else if (state) {
-    Object.assign(state, patch);
+    Object.assign(state, authPatch);
   }
 
-  persistStrictAuthStorage({
-    storage,
-    token: authPatch.token,
-    user: authPatch.user,
-    authenticated: authPatch.authenticated,
-    tokenWasProvided: false,
-    userWasProvided: true,
-  });
+  persistUser(storage, authPatch.user, authPatch.authenticated);
 
   try {
     syncUserUI?.();
@@ -1909,19 +1727,19 @@ export function setUser({
 
   emitAuthChangeIfNeeded(events, previousAuth, state, "setUser");
 
-  safeEmit(events, SESSION_EVENTS.userChange, {
-    user: createUserSnapshot(state?.user),
+  emit(events, SESSION_EVENTS.userChange, {
+    user: state?.authenticated ? userSnapshot(state?.user) : null,
     authenticated: Boolean(state?.authenticated),
     hasToken: Boolean(state?.hasToken),
     role: state?.role || null,
-    username: state?.username || safeGetUserUsername(state?.user),
-    displayName: safeGetUserDisplayName(state?.user),
+    username: state?.username || null,
+    displayName: state?.authenticated ? userDisplayName(state?.user) : null,
     currentResolvedUsername: state?.currentResolvedUsername || null,
-    avatarUrl: safeRedact(safeGetUserAvatarUrl(state?.user) || ""),
-    changedAt: safeNowIso(),
+    avatarUrl: state?.authenticated ? redact(userAvatarUrl(state?.user) || "") : null,
+    changedAt: iso(),
   });
 
-  safeEmit(events, SESSION_EVENTS.sessionState, createSessionSnapshot(state, "setUser"));
+  emit(events, SESSION_EVENTS.sessionState, sessionSnapshot(state, "setUser"));
 
   return state?.user || null;
 }
@@ -1934,144 +1752,64 @@ export function setToken({
   token = null,
   options = {},
 } = {}) {
-  const normalized = normalizeTokenValue(token);
+  const normalizedToken = normalizeToken(token);
 
-  const previousAuth = createAuthSnapshot(state);
-  const previousTokenFingerprint = tokenFingerprint(state?.token);
-  const nextTokenFingerprint = tokenFingerprint(normalized);
+  const previousAuth = authSnapshot(state);
+  const previousToken = tokenFingerprint(state?.token);
+  const nextToken = tokenFingerprint(normalizedToken);
 
   const preview = {
-    ...localSafeObject(state),
-    token: normalized,
-    accessToken: normalized,
-    access_token: normalized,
+    ...object(state),
+    token: normalizedToken,
+    accessToken: normalizedToken,
+    access_token: normalizedToken,
   };
 
   const authPatch = buildAuthPatch(preview, {
-    forceUnauthenticated: !normalized || !hasUsableUser(preview.user),
+    forceUnauthenticated: !normalizedToken || !usableUser(preview.user),
   });
 
-  const patch = {
-    ...authPatch,
-  };
-
-  if (previousTokenFingerprint !== nextTokenFingerprint || previousAuth.authenticated !== authPatch.authenticated) {
+  if (previousToken !== nextToken || previousAuth.authenticated !== authPatch.authenticated) {
     commitState({
       state,
       setState,
-      patch,
+      patch: authPatch,
       options: {
-        ...localSafeObject(options),
+        ...object(options),
         source: options?.source || "core-session:setToken",
         forceUnauthenticated: !authPatch.authenticated,
       },
     });
   } else if (state) {
-    Object.assign(state, patch);
+    Object.assign(state, authPatch);
   }
 
-  persistStrictAuthStorage({
-    storage,
-    token: authPatch.token,
-    user: authPatch.user,
-    authenticated: authPatch.authenticated,
-    tokenWasProvided: true,
-    userWasProvided: false,
-  });
+  persistAccessToken(storage, authPatch.token);
+  persistUser(storage, authPatch.user, authPatch.authenticated);
 
   emitAuthChangeIfNeeded(events, previousAuth, state, "setToken");
 
-  safeEmit(events, SESSION_EVENTS.tokenChange, {
+  emit(events, SESSION_EVENTS.tokenChange, {
     token: null,
     hasToken: Boolean(state?.hasToken),
     authenticated: Boolean(state?.authenticated),
     role: state?.role || null,
     username: state?.username || null,
     currentResolvedUsername: state?.currentResolvedUsername || null,
-    changedAt: safeNowIso(),
+    changedAt: iso(),
   });
 
-  safeEmit(events, SESSION_EVENTS.sessionState, createSessionSnapshot(state, "setToken"));
+  emit(events, SESSION_EVENTS.sessionState, sessionSnapshot(state, "setToken"));
 
   return state?.token || null;
-}
-
-/* =========================================================
-   AUX SESSION STORAGE
-========================================================= */
-
-function persistAuxSessionValue(storage, keyName, value, { removeWhenEmpty = true } = {}) {
-  const key = getStorageKey(keyName);
-
-  if (value === undefined) {
-    return false;
-  }
-
-  if (value === null || value === "") {
-    if (!removeWhenEmpty) {
-      return false;
-    }
-
-    return safeStorageRemove(storage, key, { all: true });
-  }
-
-  if (keyName.toLowerCase().includes("token")) {
-    return safeStorageSetRaw(storage, key, String(value));
-  }
-
-  return safeStorageSet(storage, key, value);
-}
-
-function clearAuxTokens(storage) {
-  for (const keyName of AUX_TOKEN_STORAGE_KEYS) {
-    safeStorageRemove(storage, getStorageKey(keyName), { all: true });
-  }
 }
 
 /* =========================================================
    APPLY SESSION
 ========================================================= */
 
-function resolveApplySessionArgs(input = {}) {
-  const data = localSafeObject(input);
-
-  const token =
-    data.token ??
-    data.accessToken ??
-    data.access_token ??
-    data.authToken ??
-    data.auth_token ??
-    data.jwt ??
-    undefined;
-
-  const user =
-    data.user ??
-    data.usuario ??
-    data.me ??
-    data.account ??
-    data.profile ??
-    data.currentUser ??
-    data.authUser ??
-    data.sessionUser ??
-    data.data?.user ??
-    data.payload?.user ??
-    undefined;
-
-  const refreshToken =
-    data.refreshToken ??
-    data.refresh_token ??
-    undefined;
-
-  const tempToken =
-    data.tempToken ??
-    data.temp_token ??
-    data.temporaryToken ??
-    data.temporary_token ??
-    data.twoFactorToken ??
-    data.two_factor_token ??
-    data.mfaToken ??
-    data.mfa_token ??
-    undefined;
+function resolveApplySession(input = {}) {
+  const data = object(input);
 
   const session =
     data.sessionData ||
@@ -2080,43 +1818,71 @@ function resolveApplySessionArgs(input = {}) {
     data.auth_session ||
     {};
 
-  const sessionId =
-    data.sessionId ??
-    data.session_id ??
-    session.sessionId ??
-    session.session_id ??
-    session.id ??
-    undefined;
-
-  const sessionUserId =
-    data.sessionUserId ??
-    data.session_user_id ??
-    session.sessionUserId ??
-    session.session_user_id ??
-    session.userId ??
-    session.user_id ??
-    undefined;
-
   return {
-    token,
-    user,
-    refreshToken,
-    tempToken,
-    sessionId,
-    sessionUserId,
-    session,
+    token:
+      data.token ??
+      data.accessToken ??
+      data.access_token ??
+      data.authToken ??
+      data.auth_token ??
+      data.jwt ??
+      undefined,
 
+    user:
+      data.user ??
+      data.usuario ??
+      data.me ??
+      data.account ??
+      data.profile ??
+      data.currentUser ??
+      data.authUser ??
+      data.sessionUser ??
+      data.data?.user ??
+      data.payload?.user ??
+      undefined,
+
+    refreshToken:
+      data.refreshToken ??
+      data.refresh_token ??
+      undefined,
+
+    tempToken:
+      data.tempToken ??
+      data.temp_token ??
+      data.temporaryToken ??
+      data.temporary_token ??
+      data.twoFactorToken ??
+      data.two_factor_token ??
+      data.mfaToken ??
+      data.mfa_token ??
+      undefined,
+
+    sessionId:
+      data.sessionId ??
+      data.session_id ??
+      session.sessionId ??
+      session.session_id ??
+      session.id ??
+      undefined,
+
+    sessionUserId:
+      data.sessionUserId ??
+      data.session_user_id ??
+      session.sessionUserId ??
+      session.session_user_id ??
+      session.userId ??
+      session.user_id ??
+      undefined,
+
+    session,
     route: data.route,
     publicPath: data.publicPath,
-
     options: data.options || {},
   };
 }
 
 function callFlexibleSetter(fn, objectArg, directValue, key) {
-  if (!isFunction(fn)) {
-    return null;
-  }
+  if (!isFunction(fn)) return null;
 
   try {
     return fn(objectArg);
@@ -2141,23 +1907,23 @@ export function applySession(input = {}) {
     setUser: injectedSetUser,
     setToken: injectedSetToken,
     setState,
-  } = localSafeObject(input);
+  } = object(input);
 
-  const resolved = resolveApplySessionArgs(input);
-  const opts = localSafeObject(input.options || resolved.options);
+  const resolved = resolveApplySession(input);
+  const opts = object(input.options || resolved.options);
 
-  const previousAuth = createAuthSnapshot(state);
+  const previousAuth = authSnapshot(state);
 
   const tokenWasProvided = resolved.token !== undefined;
   const userWasProvided = resolved.user !== undefined;
 
   const nextToken = tokenWasProvided
-    ? normalizeTokenValue(resolved.token)
-    : normalizeTokenValue(state?.token);
+    ? normalizeToken(resolved.token)
+    : normalizeToken(state?.token);
 
   const nextUser = userWasProvided
     ? resolved.user
-      ? safeNormalizeUser(resolved.user)
+      ? normalizeUserSafe(resolved.user)
       : null
     : state?.user ?? null;
 
@@ -2165,15 +1931,12 @@ export function applySession(input = {}) {
   const publicPathWasProvided = resolved.publicPath !== undefined;
 
   const nextPublicPath = publicPathWasProvided
-    ? safePublicPath(
-        resolved.publicPath,
-        state?.publicPath || state?.route || DEFAULT_ROUTE
-      )
+    ? publicPath(resolved.publicPath, state?.publicPath || state?.route || DEFAULT_ROUTE)
     : state?.publicPath || DEFAULT_ROUTE;
 
   const nextRoute = routeWasProvided
-    ? safeCanonicalPath(resolved.route, state?.route || DEFAULT_ROUTE)
-    : safeCanonicalPath(nextPublicPath || state?.route || DEFAULT_ROUTE);
+    ? canonicalPath(resolved.route, state?.route || DEFAULT_ROUTE)
+    : canonicalPath(nextPublicPath || state?.route || DEFAULT_ROUTE);
 
   const sessionPatch = {};
 
@@ -2191,7 +1954,7 @@ export function applySession(input = {}) {
   }
 
   const preview = {
-    ...localSafeObject(state),
+    ...object(state),
     ...sessionPatch,
     token: nextToken,
     accessToken: nextToken,
@@ -2203,22 +1966,20 @@ export function applySession(input = {}) {
   };
 
   const authPatch = buildAuthPatch(preview, {
-    forceUnauthenticated: !nextToken || !hasUsableUser(nextUser),
+    forceUnauthenticated: !nextToken || !usableUser(nextUser),
   });
 
   if (isFunction(setState) && state) {
-    const basePatch = {
-      ...sessionPatch,
-      route: nextRoute,
-      canonicalPath: nextRoute,
-      publicPath: nextPublicPath,
-      ...authPatch,
-    };
-
     commitState({
       state,
       setState,
-      patch: basePatch,
+      patch: {
+        ...sessionPatch,
+        route: nextRoute,
+        canonicalPath: nextRoute,
+        publicPath: nextPublicPath,
+        ...authPatch,
+      },
       options: {
         ...opts,
         source: opts.source || "core-session:applySession",
@@ -2227,21 +1988,11 @@ export function applySession(input = {}) {
     });
   } else {
     if (tokenWasProvided) {
-      callFlexibleSetter(
-        injectedSetToken,
-        { token: resolved.token },
-        resolved.token,
-        "token"
-      );
+      callFlexibleSetter(injectedSetToken, { token: resolved.token }, resolved.token, "token");
     }
 
     if (userWasProvided) {
-      callFlexibleSetter(
-        injectedSetUser,
-        { user: resolved.user },
-        resolved.user,
-        "user"
-      );
+      callFlexibleSetter(injectedSetUser, { user: resolved.user }, resolved.user, "user");
     }
 
     if (routeWasProvided || publicPathWasProvided) {
@@ -2258,29 +2009,23 @@ export function applySession(input = {}) {
     }
   }
 
-  persistStrictAuthStorage({
-    storage,
-    token: authPatch.token,
-    user: authPatch.user,
-    authenticated: authPatch.authenticated,
-    tokenWasProvided,
-    userWasProvided,
-  });
+  persistAccessToken(storage, authPatch.token);
+  persistUser(storage, authPatch.user, authPatch.authenticated);
 
   if (authPatch.authenticated) {
-    persistAuxSessionValue(storage, "refreshToken", resolved.refreshToken);
-    persistAuxSessionValue(storage, "tempToken", resolved.tempToken);
-    persistAuxSessionValue(storage, "sessionId", resolved.sessionId);
-    persistAuxSessionValue(storage, "sessionUserId", resolved.sessionUserId);
+    persistAuxValue(storage, "refreshToken", resolved.refreshToken);
+    persistAuxValue(storage, "tempToken", resolved.tempToken);
+    persistAuxValue(storage, "sessionId", resolved.sessionId);
+    persistAuxValue(storage, "sessionUserId", resolved.sessionUserId);
   } else {
     clearAuxTokens(storage);
 
     if (resolved.sessionId !== undefined) {
-      safeStorageRemove(storage, getStorageKey("sessionId"), { all: true });
+      storageRemove(storage, storageKey("sessionId"), { all: true });
     }
 
     if (resolved.sessionUserId !== undefined) {
-      safeStorageRemove(storage, getStorageKey("sessionUserId"), { all: true });
+      storageRemove(storage, storageKey("sessionUserId"), { all: true });
     }
   }
 
@@ -2292,10 +2037,10 @@ export function applySession(input = {}) {
 
   emitAuthChangeIfNeeded(events, previousAuth, state, "applySession");
 
-  const snapshot = createSessionSnapshot(state, "applySession");
+  const snapshot = sessionSnapshot(state, "applySession");
 
-  safeEmit(events, SESSION_EVENTS.sessionApplied, snapshot);
-  safeEmit(events, SESSION_EVENTS.sessionState, snapshot);
+  emit(events, SESSION_EVENTS.sessionApplied, snapshot);
+  emit(events, SESSION_EVENTS.sessionState, snapshot);
 
   return snapshot;
 }
@@ -2313,19 +2058,20 @@ export function clearSession({
   utils,
   options = {},
 } = {}) {
-  const opts = localSafeObject(options);
-  const previousAuth = createAuthSnapshot(state);
+  const opts = object(options);
+  const previousAuth = authSnapshot(state);
 
-  for (const keyName of AUTH_STORAGE_KEYS) {
-    safeStorageRemove(storage, getStorageKey(keyName), { all: true });
-  }
+  removeStorageKeys(storage, AUTH_STORAGE_KEYS);
 
   try {
     removeLegacySessionKeys(utils, events);
   } catch {}
 
   const patch = {
-    ...clearAuthPatch(),
+    ...buildAuthPatch({
+      token: null,
+      user: null,
+    }),
     refreshToken: null,
     refresh_token: null,
     tempToken: null,
@@ -2352,7 +2098,7 @@ export function clearSession({
 
   emitAuthChangeIfNeeded(events, previousAuth, state, "clearSession");
 
-  const payload = {
+  emit(events, SESSION_EVENTS.sessionCleared, {
     authenticated: false,
     hasToken: false,
     token: null,
@@ -2362,33 +2108,30 @@ export function clearSession({
     currentResolvedUsername: null,
     silent: Boolean(opts.silent),
     reason: opts.reason || "clearSession",
-    changedAt: safeNowIso(),
-  };
+    changedAt: iso(),
+  });
 
-  safeEmit(events, SESSION_EVENTS.sessionCleared, payload);
-  safeEmit(events, SESSION_EVENTS.sessionState, createSessionSnapshot(state, "clearSession"));
+  emit(events, SESSION_EVENTS.sessionState, sessionSnapshot(state, "clearSession"));
 
   return true;
 }
 
 /* =========================================================
-   PREFS LOAD
+   LOAD PREFERENCES / SESSION
 ========================================================= */
 
-function resolveStoredSidebarOpen(storage) {
-  const collapsed = safeStorageGet(storage, getStorageKey("sidebarCollapsed"), null);
+function storedSidebarOpen(storage) {
+  const collapsed = storageGet(storage, storageKey("sidebarCollapsed"), null);
 
   if (collapsed !== null && collapsed !== undefined && collapsed !== "") {
-    return !localSafeBool(collapsed, false);
+    return !bool(collapsed, false);
   }
 
-  const stored = safeStorageGet(storage, getStorageKey("sidebarOpen"), null);
+  const stored = storageGet(storage, storageKey("sidebarOpen"), null);
 
-  if (stored === null || stored === undefined || stored === "") {
-    return true;
-  }
+  if (stored === null || stored === undefined || stored === "") return true;
 
-  return localSafeBool(stored, true);
+  return bool(stored, true);
 }
 
 export function loadPreferences({
@@ -2398,18 +2141,18 @@ export function loadPreferences({
   events,
   setState,
 } = {}) {
-  const resolvedTheme = resolveStoredTheme(storage);
+  const resolvedTheme = storedTheme(storage);
 
-  const savedLang = safeStorageGet(
+  const savedLang = storageGet(
     storage,
-    getStorageKey("lang"),
+    storageKey("lang"),
     config.defaultLang || DEFAULT_LANG
   );
 
   const theme = normalizeTheme(resolvedTheme.theme);
   const themeMode = normalizeThemeMode(resolvedTheme.themeMode);
   const lang = normalizeLang(savedLang);
-  const sidebarOpen = resolveStoredSidebarOpen(storage);
+  const sidebarOpen = storedSidebarOpen(storage);
 
   commitState({
     state,
@@ -2449,32 +2192,28 @@ export function loadPreferences({
     themeMode,
     lang,
     sidebarOpen,
-    loadedAt: safeNowIso(),
+    loadedAt: iso(),
   };
 
-  safeEmit(events, SESSION_EVENTS.preferencesLoaded, payload);
+  emit(events, SESSION_EVENTS.preferencesLoaded, payload);
 
   return payload;
 }
 
-/* =========================================================
-   SESSION LOAD
-========================================================= */
-
 function readStoredToken(storage) {
   return (
-    safeStorageGetRaw(storage, getStorageKey("token"), null) ||
-    safeStorageGetRaw(storage, getStorageKey("accessToken"), null) ||
-    safeStorageGetRaw(storage, getStorageKey("access_token"), null)
+    storageGetRaw(storage, storageKey("token"), null) ||
+    storageGetRaw(storage, storageKey("accessToken"), null) ||
+    storageGetRaw(storage, storageKey("access_token"), null)
   );
 }
 
 function readStoredUser(storage) {
   return (
-    safeStorageGet(storage, getStorageKey("user"), null) ||
-    safeStorageGet(storage, getStorageKey("currentUser"), null) ||
-    safeStorageGet(storage, getStorageKey("authUser"), null) ||
-    safeStorageGet(storage, getStorageKey("sessionUser"), null)
+    storageGet(storage, storageKey("user"), null) ||
+    storageGet(storage, storageKey("currentUser"), null) ||
+    storageGet(storage, storageKey("authUser"), null) ||
+    storageGet(storage, storageKey("sessionUser"), null)
   );
 }
 
@@ -2485,25 +2224,25 @@ export function loadSession({
   events,
   setState,
 } = {}) {
-  const savedToken = normalizeTokenValue(readStoredToken(storage));
-  const storedUser = savedToken ? safeNormalizeUser(readStoredUser(storage)) : null;
-  const usableSavedUser = hasUsableUser(storedUser) ? storedUser : null;
+  const savedToken = normalizeToken(readStoredToken(storage));
+  const storedUser = savedToken ? normalizeUserSafe(readStoredUser(storage)) : null;
+  const usableStoredUser = usableUser(storedUser) ? storedUser : null;
 
-  const sessionId = safeStorageGet(storage, getStorageKey("sessionId"), null);
-  const sessionUserId = safeStorageGet(storage, getStorageKey("sessionUserId"), null);
+  const sessionId = storageGet(storage, storageKey("sessionId"), null);
+  const sessionUserId = storageGet(storage, storageKey("sessionUserId"), null);
 
   const preview = {
-    ...localSafeObject(state),
+    ...object(state),
     token: savedToken,
     accessToken: savedToken,
     access_token: savedToken,
-    user: usableSavedUser,
+    user: usableStoredUser,
     sessionId: sessionId || null,
     sessionUserId: sessionUserId || null,
   };
 
   const authPatch = buildAuthPatch(preview, {
-    forceUnauthenticated: !savedToken || !usableSavedUser,
+    forceUnauthenticated: !savedToken || !usableStoredUser,
   });
 
   const patch = {
@@ -2522,14 +2261,23 @@ export function loadSession({
     },
   });
 
+  /*
+    Ghost-auth cleanup:
+    - Sin token: no puede quedar user persistido.
+    - Token sin user: conserva token/hasToken para que Auth pueda llamar /me.
+  */
   if (!savedToken) {
-    for (const keyName of ["user", "currentUser", "authUser", "sessionUser"]) {
-      safeStorageRemove(storage, getStorageKey(keyName), { all: true });
-    }
+    removeStorageKeys(storage, USER_STORAGE_KEYS);
+    removeStorageKeys(storage, ACCESS_TOKEN_KEYS);
+  }
+
+  if (savedToken && !usableStoredUser) {
+    removeStorageKeys(storage, USER_STORAGE_KEYS);
+    persistAccessToken(storage, savedToken);
   }
 
   const userTheme = authPatch.authenticated
-    ? resolveThemeFromUser(authPatch.user)
+    ? themeFromUser(authPatch.user)
     : null;
 
   if (userTheme === "light" || userTheme === "dark") {
@@ -2545,7 +2293,7 @@ export function loadSession({
       },
     });
 
-    safeStorageSet(storage, getStorageKey("theme"), userTheme);
+    storageSet(storage, storageKey("theme"), userTheme);
 
     applyThemeDom({
       dom,
@@ -2554,10 +2302,10 @@ export function loadSession({
     });
   }
 
-  const snapshot = createSessionSnapshot(state, "loadSession");
+  const snapshot = sessionSnapshot(state, "loadSession");
 
-  safeEmit(events, SESSION_EVENTS.sessionLoaded, snapshot);
-  safeEmit(events, SESSION_EVENTS.sessionState, snapshot);
+  emit(events, SESSION_EVENTS.sessionLoaded, snapshot);
+  emit(events, SESSION_EVENTS.sessionState, snapshot);
 
   return state;
 }
@@ -2581,26 +2329,25 @@ export function setTheme({
       : "";
 
   const normalizedTheme = normalizedMode
-    ? resolveThemeFromMode(normalizedMode)
+    ? themeFromMode(normalizedMode)
     : normalizeTheme(theme);
 
   const finalMode = normalizedMode || normalizedTheme;
 
-  commitState({
-    state: null,
+  setStateSafe(
     setState,
-    patch: {
+    {
       theme: normalizedTheme,
       themeMode: finalMode,
     },
-    options: {
+    {
       source: "core-session:setTheme",
-    },
-  });
+    }
+  );
 
-  safeStorageSet(storage, getStorageKey("theme"), normalizedTheme);
-  safeStorageSet(storage, getStorageKey("themeMode"), finalMode);
-  safeStorageSet(storage, getStorageKey("appearance"), finalMode);
+  storageSet(storage, storageKey("theme"), normalizedTheme);
+  storageSet(storage, storageKey("themeMode"), finalMode);
+  storageSet(storage, storageKey("appearance"), finalMode);
 
   applyThemeDom({
     dom,
@@ -2617,10 +2364,10 @@ export function setTheme({
     }
   } catch {}
 
-  safeEmit(events, SESSION_EVENTS.themeChange, {
+  emit(events, SESSION_EVENTS.themeChange, {
     theme: normalizedTheme,
     themeMode: finalMode,
-    changedAt: safeNowIso(),
+    changedAt: iso(),
   });
 
   return normalizedTheme;
@@ -2635,19 +2382,19 @@ export function setLang({
 } = {}) {
   const normalized = normalizeLang(lang);
 
-  safeSetState(
+  setStateSafe(
     setState,
     { lang: normalized },
     { source: "core-session:setLang" }
   );
 
-  safeStorageSet(storage, getStorageKey("lang"), normalized);
+  storageSet(storage, storageKey("lang"), normalized);
 
   setAttribute(dom?.html, "lang", normalized);
 
-  safeEmit(events, SESSION_EVENTS.langChange, {
+  emit(events, SESSION_EVENTS.langChange, {
     lang: normalized,
-    changedAt: safeNowIso(),
+    changedAt: iso(),
   });
 
   return normalized;
@@ -2662,14 +2409,14 @@ export function setSidebarOpen({
 } = {}) {
   const next = Boolean(value);
 
-  safeSetState(
+  setStateSafe(
     setState,
     { sidebarOpen: next },
     { source: "core-session:setSidebarOpen" }
   );
 
-  safeStorageSet(storage, getStorageKey("sidebarOpen"), next);
-  safeStorageSet(storage, getStorageKey("sidebarCollapsed"), !next);
+  storageSet(storage, storageKey("sidebarOpen"), next);
+  storageSet(storage, storageKey("sidebarCollapsed"), !next);
 
   toggleClass(dom?.body, "sidebar-open", next);
   toggleClass(dom?.body, "sidebar-collapsed", !next);
@@ -2682,9 +2429,9 @@ export function setSidebarOpen({
   setAriaExpanded(dom?.sidebarToggle, next);
   setAriaExpanded(dom?.sidebarMobileToggle, next);
 
-  safeEmit(events, SESSION_EVENTS.sidebarChange, {
+  emit(events, SESSION_EVENTS.sidebarChange, {
     open: next,
-    changedAt: safeNowIso(),
+    changedAt: iso(),
   });
 
   return next;
@@ -2698,7 +2445,7 @@ export function setLoading({
 } = {}) {
   const next = Boolean(value);
 
-  safeSetState(
+  setStateSafe(
     setState,
     { loading: next },
     { source: "core-session:setLoading" }
@@ -2722,9 +2469,9 @@ export function setLoading({
     setDataset(dom.loader, "loaderState", next ? "visible" : "hidden");
   }
 
-  safeEmit(events, SESSION_EVENTS.loadingChange, {
+  emit(events, SESSION_EVENTS.loadingChange, {
     loading: next,
-    changedAt: safeNowIso(),
+    changedAt: iso(),
   });
 
   return next;
@@ -2737,10 +2484,10 @@ export function setError({
   error = null,
 } = {}) {
   const normalized = error
-    ? safeCloneError(cloneError, error) || error
+    ? cloneErrorSafe(cloneError, error) || error
     : null;
 
-  safeSetState(
+  setStateSafe(
     setState,
     {
       lastError: normalized,
@@ -2752,10 +2499,10 @@ export function setError({
     }
   );
 
-  safeEmit(events, SESSION_EVENTS.error, {
-    error: sanitizeForEvent(normalized),
+  emit(events, SESSION_EVENTS.error, {
+    error: sanitize(normalized),
     hasError: Boolean(normalized),
-    changedAt: safeNowIso(),
+    changedAt: iso(),
   });
 
   return normalized;
@@ -2797,19 +2544,17 @@ export function getSessionDebugSnapshot(state) {
     tempToken: null,
 
     role: state?.role || null,
-    roles: localSafeArray(state?.roles),
+    roles: array(state?.roles),
 
-    username: state?.username || safeGetUserUsername(state?.user),
-    displayName: safeGetUserDisplayName(state?.user),
-    avatarUrl: safeRedact(safeGetUserAvatarUrl(state?.user) || ""),
+    username: state?.username || userUsername(state?.user),
+    displayName: state?.authenticated ? userDisplayName(state?.user) : null,
+    avatarUrl: state?.authenticated ? redact(userAvatarUrl(state?.user) || "") : null,
 
     currentResolvedUsername: state?.currentResolvedUsername || null,
     resolvedUsername: state?.resolvedUsername || null,
 
-    route: safeCanonicalPath(state?.route || DEFAULT_ROUTE),
-    publicPath: safeRedact(
-      safePublicPath(state?.publicPath || state?.route || DEFAULT_ROUTE)
-    ),
+    route: canonicalPath(state?.route || DEFAULT_ROUTE),
+    publicPath: redact(publicPath(state?.publicPath || state?.route || DEFAULT_ROUTE)),
 
     theme: state?.theme || config.defaultTheme || DEFAULT_THEME,
     themeMode: state?.themeMode || null,
@@ -2817,20 +2562,14 @@ export function getSessionDebugSnapshot(state) {
 
     sidebarOpen: typeof state?.sidebarOpen === "boolean" ? state.sidebarOpen : null,
 
-    hasUser: hasUsableUser(state?.user),
-
-    at: safeNowIso(),
+    hasUser: usableUser(state?.user),
+    at: iso(),
   };
 }
 
 /* =========================================================
    DEFAULT EXPORT
 ========================================================= */
-
-export {
-  SESSION_VERSION,
-  SESSION_EVENTS,
-};
 
 export default {
   SESSION_VERSION,

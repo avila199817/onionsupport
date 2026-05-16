@@ -1,44 +1,15 @@
 /* =========================================================
    Onion SPA - App Shell
-   Archivo: /src/app/shell.js
+   Archivo: src/app/shell.js
 
-   ONION SUPPORT · APP SHELL CONTROLLER
-   NO FLICKER · BOOT LOADER ALIGNED · CSP CLEAN · 16/10
-
-   RESPONSABILIDADES:
-   - Resolver elementos principales del shell.
-   - Controlar visibilidad de chrome: sidebar/topbar/tablehead.
-   - Mantener #app-shell estable en login/reset/activate.
-   - Sincronizar aria-busy / aria-hidden / data-shell / data-chrome.
-   - Evitar ocultar loader global durante boot.
-   - Evitar re-toggle visual innecesario.
-   - Emitir eventos de shell sin duplicar bus + window.
-   - Snapshot robusto para debug.
-   - Soportar rutas públicas técnicas con token query/path/hash.
-   - Soportar hash-router /#/login y /#/activate-account?token=...
-   - Soportar publicPath con /@usuario.
-   - No degradar /@usuario/incidencias a /.
-   - No montar Sidebar/Topbar.
-   - No controlar el loader real; eso vive en loader.js.
-   - No decidir navegación; eso vive en router.
-   - Sin CSS inline.
-   - Sin estilos inyectados.
-
-   EXTREME MODE:
-   - Auth/public route detection por path, hash-router y aliases.
-   - Protección fuerte de activate/reset con token en path/query/hash.
-   - App shell nunca se oculta físicamente salvo hideAppShell explícito.
-   - Chrome y shell son conceptos separados.
-   - Sync DOM idempotente para montajes tardíos de Sidebar/Topbar.
-   - Loader no se oculta durante boot salvo force.
-   - Eventos deduplicados y sanitizados.
-   - Snapshot profundo para diagnóstico.
-
-   FIX:
-   - TOKEN_PARAM_NAMES se declara antes de TOKEN_ROUTE_CONFIGS.
-   - Evita ReferenceError por TDZ:
-     Cannot access 'TOKEN_PARAM_NAMES' before initialization.
-     
+   Shell app simple:
+   - #app-shell siempre estable.
+   - chrome = sidebar/topbar/tablehead.
+   - loader no se toca salvo política post-render segura.
+   - auth routes ocultan chrome, no destruyen shell.
+   - publicPath conserva /@usuario, query y hash.
+   - canonicalPath limpia /@usuario, query/hash y aliases técnicos.
+   - sin navegación, sin montar Sidebar/Topbar, sin CSS inline.
 ========================================================= */
 
 import {
@@ -61,207 +32,31 @@ import {
    CONSTANTS
 ========================================================= */
 
-export const SHELL_VERSION =
-  "16.0.0-extreme-pro";
+export const SHELL_VERSION = "17.0.0-clean";
 
-const SHELL_SOURCE =
-  "app:shell";
+const SOURCE = "app:shell";
+const DEFAULT_ROUTE = APP_DEFAULT_ROUTE || "/";
 
-const DEFAULT_ROUTE =
-  APP_DEFAULT_ROUTE ||
-  "/";
-
-const SHELL_RUNTIME_KEY =
+const RUNTIME_KEY =
   APP_RUNTIME_KEYS?.shell ||
   "__ONION_APP_SHELL__";
 
-const SHELL_EVENTS =
-  Object.freeze({
-    change:
-      ROUTER_EVENTS?.shellChange ||
-      "router:shell:change",
+const EVENTS = Object.freeze({
+  change: ROUTER_EVENTS?.shellChange || "router:shell:change",
+  state: ROUTER_EVENTS?.shellState || "router:shell:state",
+  appState: APP_EVENTS?.shellState || "app:shell:state",
+  postRender: APP_EVENTS?.shellPostRender || "app:shell:post-render",
+  ready: APP_EVENTS?.shellReady || "app:shell:ready",
+  busy: APP_EVENTS?.shellBusy || "app:shell:busy",
+  elements: "app:shell:elements",
+  error: "app:shell:error",
+  debugApi: "app:shell:debug-api",
+});
 
-    state:
-      ROUTER_EVENTS?.shellState ||
-      "router:shell:state",
-
-    appState:
-      APP_EVENTS?.shellState ||
-      "app:shell:state",
-
-    postRender:
-      APP_EVENTS?.shellPostRender ||
-      "app:shell:post-render",
-
-    ready:
-      APP_EVENTS?.shellReady ||
-      "app:shell:ready",
-
-    busy:
-      APP_EVENTS?.shellBusy ||
-      "app:shell:busy",
-
-    elements:
-      "app:shell:elements",
-
-    error:
-      "app:shell:error",
-
-    debugApi:
-      "app:shell:debug-api",
-  });
-
-const DOM_SELECTORS =
-  Object.freeze({
-    appShell:
-      Object.freeze(compactList(
-        APP_SELECTORS?.appShell,
-        APP_SELECTORS?.shell,
-        "#app-shell",
-        "[data-app-shell='true']",
-        "[data-app-shell]",
-        ".app-shell",
-        ".layout"
-      )),
-
-    mainContent:
-      Object.freeze(compactList(
-        APP_SELECTORS?.mainContent,
-        APP_SELECTORS?.main,
-        "#main-content",
-        "main.main-content",
-        "[data-main-content='true']",
-        "[data-main-content]",
-        ".main-content"
-      )),
-
-    appContent:
-      Object.freeze(compactList(
-        APP_SELECTORS?.appContent,
-        "#app-content",
-        "[data-app-content='true']",
-        "[data-app-content]",
-        ".app-content"
-      )),
-
-    viewContainer:
-      Object.freeze(compactList(
-        APP_SELECTORS?.viewContainer,
-        APP_SELECTORS?.view,
-        APP_SELECTORS?.viewRoot,
-        APP_SELECTORS?.routerView,
-        "#view-container",
-        "[data-view-root='true']",
-        "[data-view-root]",
-        "[data-router-view='true']",
-        "[data-router-view]",
-        "[data-view-container='true']",
-        "[data-view-container]",
-        "[data-router-outlet]",
-        ".view-container",
-        ".router-view"
-      )),
-
-    sidebarMount:
-      Object.freeze(compactList(
-        APP_SELECTORS?.sidebarMount,
-        "#sidebar-mount",
-        "[data-sidebar-mount='true']",
-        "[data-sidebar-mount]"
-      )),
-
-    topbarMount:
-      Object.freeze(compactList(
-        APP_SELECTORS?.topbarMount,
-        "#topbar-mount",
-        "[data-topbar-mount='true']",
-        "[data-topbar-mount]"
-      )),
-
-    sidebar:
-      Object.freeze(compactList(
-        APP_SELECTORS?.sidebar,
-        "#app-sidebar",
-        "#sidebar",
-        ".sidebar",
-        "[data-sidebar-root='true']",
-        "[data-sidebar-root]",
-        "[data-sidebar]"
-      )),
-
-    topbar:
-      Object.freeze(compactList(
-        APP_SELECTORS?.topbar,
-        "#app-topbar",
-        "#topbar",
-        ".topbar",
-        "[data-topbar-root='true']",
-        "[data-topbar-root]",
-        "[data-topbar]"
-      )),
-
-    tablehead:
-      Object.freeze(compactList(
-        APP_SELECTORS?.tablehead,
-        APP_SELECTORS?.tableHead,
-        "#table-head",
-        "#tablehead",
-        ".table-head",
-        ".tablehead",
-        "[data-tablehead='true']",
-        "[data-tablehead]",
-        "[data-table-head]"
-      )),
-
-    tableheadContainer:
-      Object.freeze(compactList(
-        APP_SELECTORS?.tableheadContainer,
-        APP_SELECTORS?.tableHeadContainer,
-        "#tablehead-container",
-        "#table-head-container",
-        ".tablehead-container",
-        "[data-tablehead-container='true']",
-        "[data-tablehead-container]",
-        "[data-table-head-container]"
-      )),
-
-    mobileSidebarToggle:
-      Object.freeze(compactList(
-        APP_SELECTORS?.mobileSidebarToggle,
-        "#toggleSidebarMobile",
-        "[data-sidebar-mobile-toggle]",
-        "[data-mobile-sidebar-toggle]",
-        "[data-action='toggle-sidebar-mobile']"
-      )),
-
-    loader:
-      Object.freeze(compactList(
-        APP_SELECTORS?.loader,
-        APP_SELECTORS?.appLoader,
-        "#app-loader",
-        "#boot-loader",
-        "[data-app-loader='true']",
-        "[data-app-loader]",
-        ".app-loader"
-      )),
-  });
-
-const FALLBACK_LOGIN_PATHS =
-  Object.freeze([
-    "/login",
-    "/signin",
-    "/sign-in",
-  ]);
-
-const FALLBACK_REGISTER_PATHS =
-  Object.freeze([
-    "/register",
-    "/signup",
-    "/sign-up",
-  ]);
-
-const FALLBACK_RESET_PASSWORD_PATHS =
-  Object.freeze([
+const FALLBACK_PATHS = Object.freeze({
+  login: ["/login", "/signin", "/sign-in"],
+  register: ["/register", "/signup", "/sign-up"],
+  reset: [
     "/forgot-password",
     "/recover-password",
     "/password-reset",
@@ -270,250 +65,290 @@ const FALLBACK_RESET_PASSWORD_PATHS =
     "/reset-password/request",
     "/reset-password-request",
     "/request-reset-password",
-  ]);
-
-const FALLBACK_RESET_CONFIRM_PATHS =
-  Object.freeze([
+  ],
+  resetConfirm: [
     "/reset-password/confirm",
     "/reset-password-confirm",
     "/password-reset/confirm",
     "/password-reset-confirm",
     "/confirm-reset-password",
-  ]);
-
-const FALLBACK_ACTIVATION_PATHS =
-  Object.freeze([
+  ],
+  activation: [
     "/activate-account",
     "/activate",
     "/activation",
     "/account/activate",
     "/activate/first-user",
-  ]);
+  ],
+  twoFactor: ["/2fa", "/otp", "/mfa"],
+});
 
-const LOGIN_PATHS =
-  Object.freeze(
-    normalizeRouteList(FALLBACK_LOGIN_PATHS)
-  );
+const TOKEN_PARAM_NAMES = Object.freeze([
+  "token",
+  "activationToken",
+  "activateToken",
+  "activation_token",
+  "activate_token",
+  "resetToken",
+  "reset_token",
+  "passwordResetToken",
+  "password_reset_token",
+  "confirmToken",
+  "confirm_token",
+  "code",
+  "t",
+  "otp",
+  "totp",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "tempToken",
+  "temp_token",
+  "temporaryToken",
+  "temporary_token",
+  "twoFactorToken",
+  "two_factor_token",
+  "mfaToken",
+  "mfa_token",
+  "authorization",
+  "jwt",
+  "session",
+  "sid",
+]);
 
-const REGISTER_PATHS =
-  Object.freeze(
-    normalizeRouteList(FALLBACK_REGISTER_PATHS)
-  );
+const LOGIN_PATHS = Object.freeze(normalizeRouteList(FALLBACK_PATHS.login));
+const REGISTER_PATHS = Object.freeze(normalizeRouteList(FALLBACK_PATHS.register));
+const RESET_PATHS = Object.freeze(normalizeRouteList(FALLBACK_PATHS.reset));
+const RESET_CONFIRM_PATHS = Object.freeze(normalizeRouteList(FALLBACK_PATHS.resetConfirm));
+const ACTIVATION_PATHS = Object.freeze(normalizeRouteList(FALLBACK_PATHS.activation));
+const TWO_FACTOR_PATHS = Object.freeze(normalizeRouteList(FALLBACK_PATHS.twoFactor));
 
-const RESET_PASSWORD_PATHS =
-  Object.freeze(
-    normalizeRouteList(FALLBACK_RESET_PASSWORD_PATHS)
-  );
+const AUTH_PATHS = Object.freeze(
+  normalizeRouteList([
+    ...array(AUTH_LIKE_ROUTES),
+    ...LOGIN_PATHS,
+    ...REGISTER_PATHS,
+    ...RESET_PATHS,
+    ...RESET_CONFIRM_PATHS,
+    ...ACTIVATION_PATHS,
+    ...TWO_FACTOR_PATHS,
+  ])
+);
 
-const RESET_CONFIRM_PATHS =
-  Object.freeze(
-    normalizeRouteList(FALLBACK_RESET_CONFIRM_PATHS)
-  );
+const AUTH_PREFIXES = Object.freeze(
+  normalizeRouteList([
+    ...array(PUBLIC_TECHNICAL_PREFIXES),
+    ...ACTIVATION_PATHS.map((path) => `${path}/`),
+    ...RESET_CONFIRM_PATHS.map((path) => `${path}/`),
+    ...TWO_FACTOR_PATHS.map((path) => `${path}/`),
+  ])
+);
 
-const ACTIVATION_PATHS =
-  Object.freeze(
-    normalizeRouteList(FALLBACK_ACTIVATION_PATHS)
-  );
+const TOKEN_ROUTE_CONFIGS = Object.freeze(
+  normalizeTokenRouteConfigs(PROTECTED_PUBLIC_TOKEN_ROUTES)
+);
 
-const AUTH_LIKE_PATHS =
-  Object.freeze(
-    normalizeRouteList([
-      ...safeArray(AUTH_LIKE_ROUTES),
-      ...LOGIN_PATHS,
-      ...REGISTER_PATHS,
-      ...RESET_PASSWORD_PATHS,
-      ...RESET_CONFIRM_PATHS,
-      ...ACTIVATION_PATHS,
-    ])
-  );
+const SELECTORS = Object.freeze({
+  appShell: Object.freeze(compactList(
+    APP_SELECTORS?.appShell,
+    APP_SELECTORS?.shell,
+    "#app-shell",
+    "[data-app-shell='true']",
+    "[data-app-shell]",
+    ".app-shell",
+    ".layout"
+  )),
 
-const AUTH_LIKE_PREFIXES =
-  Object.freeze(
-    normalizeRouteList([
-      ...safeArray(PUBLIC_TECHNICAL_PREFIXES),
-      ...ACTIVATION_PATHS.map((path) => `${path}/`),
-      ...RESET_CONFIRM_PATHS.map((path) => `${path}/`),
-    ])
-  );
+  mainContent: Object.freeze(compactList(
+    APP_SELECTORS?.mainContent,
+    APP_SELECTORS?.main,
+    "#main-content",
+    "main.main-content",
+    "[data-main-content='true']",
+    "[data-main-content]",
+    ".main-content",
+    "main"
+  )),
 
-/*
-  CRÍTICO:
-  Debe existir antes de TOKEN_ROUTE_CONFIGS, porque normalizeTokenRouteConfigs()
-  lo lee durante la evaluación del módulo.
-*/
-const TOKEN_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "activation_token",
-    "activate_token",
-    "resetToken",
-    "reset_token",
-    "passwordResetToken",
-    "password_reset_token",
-    "confirmToken",
-    "confirm_token",
-    "code",
-    "t",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
-    "authorization",
-    "jwt",
-    "session",
-    "sid",
-  ]);
+  appContent: Object.freeze(compactList(
+    APP_SELECTORS?.appContent,
+    "#app-content",
+    "[data-app-content='true']",
+    "[data-app-content]",
+    ".app-content"
+  )),
 
-const TOKEN_ROUTE_CONFIGS =
-  Object.freeze(
-    normalizeTokenRouteConfigs(
-      PROTECTED_PUBLIC_TOKEN_ROUTES
-    )
-  );
+  viewContainer: Object.freeze(compactList(
+    APP_SELECTORS?.viewContainer,
+    APP_SELECTORS?.view,
+    APP_SELECTORS?.viewRoot,
+    APP_SELECTORS?.routerView,
+    "#view-container",
+    "[data-view-root='true']",
+    "[data-view-root]",
+    "[data-router-view='true']",
+    "[data-router-view]",
+    "[data-view-container='true']",
+    "[data-view-container]",
+    "[data-router-outlet]",
+    ".view-container",
+    ".router-view"
+  )),
 
-const BOOT_BODY_CLASSES =
-  Object.freeze([
-    "app-booting",
-    "app-loading",
-    "is-booting",
-    "is-loading",
-    "loading",
-  ]);
+  sidebarMount: Object.freeze(compactList(
+    APP_SELECTORS?.sidebarMount,
+    "#sidebar-mount",
+    "[data-sidebar-mount='true']",
+    "[data-sidebar-mount]"
+  )),
 
-const HIDDEN_LOADER_CLASSES =
-  Object.freeze([
-    "is-hidden",
-    "has-hidden",
-    "loader-hidden",
-  ]);
+  topbarMount: Object.freeze(compactList(
+    APP_SELECTORS?.topbarMount,
+    "#topbar-mount",
+    "[data-topbar-mount='true']",
+    "[data-topbar-mount]"
+  )),
 
-const VISIBLE_LOADER_CLASSES =
-  Object.freeze([
-    "is-visible",
-    "is-entering",
-    "is-leaving",
-    "loader-visible",
-  ]);
+  sidebar: Object.freeze(compactList(
+    APP_SELECTORS?.sidebar,
+    "#app-sidebar",
+    "#sidebar",
+    ".sidebar",
+    "[data-sidebar-root='true']",
+    "[data-sidebar-root]",
+    "[data-sidebar]"
+  )),
 
-const CHROME_HIDDEN_CLASS =
-  "route-chrome-hidden";
+  topbar: Object.freeze(compactList(
+    APP_SELECTORS?.topbar,
+    "#app-topbar",
+    "#topbar",
+    ".topbar",
+    "[data-topbar-root='true']",
+    "[data-topbar-root]",
+    "[data-topbar]"
+  )),
 
-const CHROME_VISIBLE_CLASS =
-  "route-chrome-visible";
+  tablehead: Object.freeze(compactList(
+    APP_SELECTORS?.tablehead,
+    APP_SELECTORS?.tableHead,
+    "#table-head",
+    "#tablehead",
+    ".table-head",
+    ".tablehead",
+    "[data-tablehead='true']",
+    "[data-tablehead]",
+    "[data-table-head]"
+  )),
 
-const SHELL_HIDDEN_CLASS =
-  "route-shell-hidden";
+  tableheadContainer: Object.freeze(compactList(
+    APP_SELECTORS?.tableheadContainer,
+    APP_SELECTORS?.tableHeadContainer,
+    "#tablehead-container",
+    "#table-head-container",
+    ".tablehead-container",
+    "[data-tablehead-container='true']",
+    "[data-tablehead-container]",
+    "[data-table-head-container]"
+  )),
 
-const SHELL_VISIBLE_CLASS =
-  "route-shell-visible";
+  mobileSidebarToggle: Object.freeze(compactList(
+    APP_SELECTORS?.mobileSidebarToggle,
+    APP_SELECTORS?.sidebarMobileToggle,
+    "#toggleSidebarMobile",
+    "[data-sidebar-mobile-toggle]",
+    "[data-mobile-sidebar-toggle]",
+    "[data-action='toggle-sidebar-mobile']"
+  )),
 
-const ROUTE_AUTH_CLASS =
-  "route-auth";
+  loader: Object.freeze(compactList(
+    APP_SELECTORS?.loader,
+    APP_SELECTORS?.appLoader,
+    "#app-loader",
+    "#boot-loader",
+    "[data-app-loader='true']",
+    "[data-app-loader]",
+    ".app-loader"
+  )),
+});
 
-const ROUTE_APP_CLASS =
-  "route-app";
+const CLASSES = Object.freeze({
+  boot: ["app-booting", "app-loading", "is-booting", "is-loading", "loading"],
 
-const AUTH_SCREEN_CLASS =
-  "auth-screen";
+  loaderHidden: ["is-hidden", "has-hidden", "loader-hidden"],
+  loaderVisible: ["is-visible", "is-entering", "is-leaving", "loader-visible"],
 
-const LOGIN_NO_SCROLL_CLASS =
-  "login-no-scroll";
+  routeAuth: "route-auth",
+  routeApp: "route-app",
+  authScreen: "auth-screen",
+  loginNoScroll: "login-no-scroll",
 
-const SHELL_EVENT_DEDUPE_MS =
-  40;
+  chromeHidden: "route-chrome-hidden",
+  chromeVisible: "route-chrome-visible",
 
-const SNAPSHOT_MAX_CLASS_LENGTH =
-  800;
+  shellHidden: "route-shell-hidden",
+  shellVisible: "route-shell-visible",
+
+  sidebarResidual: [
+    "sidebar-open",
+    "sidebar-collapsed",
+    "sidebar-transitioning",
+    "sidebar-tooltips-active",
+    "sidebar-mobile-open",
+    "has-sidebar-open",
+  ],
+});
+
+const EVENT_DEDUPE_MS = 40;
+const SNAPSHOT_CLASS_MAX = 800;
 
 /* =========================================================
    RUNTIME
 ========================================================= */
 
-let lastShellEventKey =
-  "";
+let lastEventKey = "";
+let lastEventAt = 0;
+let lastError = null;
 
-let lastShellEventAt =
-  0;
-
-let lastShellError =
-  null;
-
-let debugApiInstalled =
-  false;
-
-let debugApiRef =
-  null;
+let debugApiInstalled = false;
+let debugApiRef = null;
 
 /* =========================================================
    BASICS
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
-}
-
-function safeObject(value) {
-  return isObject(value)
-    ? value
-    : {};
-}
-
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
-}
-
-function isFunction(value) {
+function isFn(value) {
   return typeof value === "function";
 }
 
-function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value)
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  return text || fallback;
+function isObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
 }
 
-function safeIsoDate(ms = safeNow()) {
-  try {
-    return new Date(ms).toISOString();
-  } catch {
-    return "";
-  }
+function object(value) {
+  return isObject(value) ? value : {};
 }
 
-function safeNow() {
+function array(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function text(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+
+  const output = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return output || fallback;
+}
+
+function now() {
   try {
     return Date.now();
   } catch {
@@ -521,28 +356,44 @@ function safeNow() {
   }
 }
 
-function isObjectLike(value) {
-  return (
-    value !== null &&
-    (
-      typeof value === "object" ||
-      typeof value === "function"
-    )
-  );
-}
-
-function isExtensibleObject(value) {
+function iso(ms = now()) {
   try {
-    return (
-      isObjectLike(value) &&
-      Object.isExtensible(value)
-    );
-  } catch {}
-
-  return false;
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
+  }
 }
 
-function safeArrayFromClassList(classList) {
+function compactList(...values) {
+  const out = [];
+  const seen = new Set();
+
+  function add(value) {
+    if (Array.isArray(value)) {
+      value.forEach(add);
+      return;
+    }
+
+    if (value instanceof Set) {
+      Array.from(value).forEach(add);
+      return;
+    }
+
+    if (typeof value !== "string") return;
+
+    const clean = text(value, "");
+    if (!clean || seen.has(clean)) return;
+
+    seen.add(clean);
+    out.push(clean);
+  }
+
+  values.forEach(add);
+
+  return out;
+}
+
+function classListArray(classList) {
   try {
     return Array.from(classList || []);
   } catch {
@@ -550,118 +401,396 @@ function safeArrayFromClassList(classList) {
   }
 }
 
-function compactList(...values) {
-  return Array.from(
-    new Set(
-      values
-        .flat(Infinity)
-        .map((value) => safeText(value, ""))
-        .filter(Boolean)
-    )
-  );
+function isExtensibleObject(value) {
+  try {
+    return value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value);
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
-   TOKEN / SANITIZE
+   PATHS / TOKEN ROUTES
 ========================================================= */
 
-function escapeRegExp(value = "") {
-  return String(value).replace(
-    /[.*+?^${}()|[\]\\]/g,
-    "\\$&"
-  );
+function origin() {
+  if (isBrowser() && window.location?.origin) return window.location.origin;
+  return "http://localhost";
 }
 
-function redactTokenInText(value = "") {
-  let output =
-    safeText(value, "");
+function normalizePathname(pathname = DEFAULT_ROUTE) {
+  let value = text(pathname, DEFAULT_ROUTE)
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
-  if (!output) {
-    return "";
+  if (!value.startsWith("/")) value = `/${value}`;
+
+  const parts = [];
+
+  for (const part of value.split("/").filter(Boolean)) {
+    if (part === ".") continue;
+
+    if (part === "..") {
+      parts.pop();
+      continue;
+    }
+
+    parts.push(part);
   }
+
+  value = `/${parts.join("/")}`;
+
+  return value.length > 1 ? value.replace(/\/+$/g, "") : value || DEFAULT_ROUTE;
+}
+
+function normalizeSearch(search = "") {
+  const value = text(search, "");
+  if (!value) return "";
+  return value.startsWith("?") ? value : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value = text(hash, "");
+  if (!value) return "";
+  return value.startsWith("#") ? value : `#${value.replace(/^#+/, "")}`;
+}
+
+function isHashRouterPath(value = "") {
+  const raw = text(value, "");
+  return raw.startsWith("#/") || raw.startsWith("#!");
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw = text(value, "");
+
+  if (!raw) return DEFAULT_ROUTE;
+  if (raw.startsWith("#!")) return normalizeFullPath(raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE);
+
+  return normalizeFullPath(raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE);
+}
+
+function splitPath(value = DEFAULT_ROUTE) {
+  let raw = text(value, DEFAULT_ROUTE);
+
+  if (isHashRouterPath(raw)) {
+    raw = normalizeHashRouterPath(raw);
+  }
+
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
+  }
+
+  const searchIndex = pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
+  }
+
+  return {
+    pathname: normalizePathname(pathname),
+    search: normalizeSearch(search),
+    hash: normalizeHash(hash),
+  };
+}
+
+function normalizeFullPath(path = DEFAULT_ROUTE) {
+  let raw = text(path, DEFAULT_ROUTE);
+
+  if (!raw) return DEFAULT_ROUTE;
+
+  if (isHashRouterPath(raw)) {
+    return normalizeHashRouterPath(raw);
+  }
+
+  try {
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
+      const parsed = new URL(raw, origin());
+
+      if (parsed.origin !== origin()) return DEFAULT_ROUTE;
+
+      if (parsed.hash && isHashRouterPath(parsed.hash)) {
+        return normalizeHashRouterPath(parsed.hash);
+      }
+
+      raw = `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`;
+    }
+  } catch {
+    return DEFAULT_ROUTE;
+  }
+
+  const parts = splitPath(raw);
+  return `${parts.pathname}${parts.search}${parts.hash}`;
+}
+
+function cleanPath(path = DEFAULT_ROUTE) {
+  return splitPath(normalizeFullPath(path)).pathname || DEFAULT_ROUTE;
+}
+
+function normalizeRouteList(values = []) {
+  return compactList(values).map(normalizePathname);
+}
+
+function isUsernameSegment(segment = "") {
+  return /^@[A-Za-z0-9._-]{1,80}$/.test(text(segment, ""));
+}
+
+function stripUsernamePrefix(path = DEFAULT_ROUTE) {
+  const parts = splitPath(normalizeFullPath(path));
+  const segments = parts.pathname.split("/").filter(Boolean);
+
+  if (segments.length && isUsernameSegment(segments[0])) {
+    const rest = segments.slice(1).join("/");
+    return `${rest ? normalizePathname(`/${rest}`) : DEFAULT_ROUTE}${parts.search}${parts.hash}`;
+  }
+
+  return `${parts.pathname}${parts.search}${parts.hash}`;
+}
+
+function normalizeTokenRouteConfigs(configs = []) {
+  const source = array(configs).length
+    ? array(configs)
+    : [
+        {
+          key: "activation",
+          path: "/activate-account",
+          aliases: FALLBACK_PATHS.activation,
+          tokenParamNames: ["token", "activationToken", "activateToken", "code", "t"],
+        },
+        {
+          key: "resetConfirm",
+          path: "/reset-password/confirm",
+          aliases: FALLBACK_PATHS.resetConfirm,
+          tokenParamNames: ["token", "resetToken", "passwordResetToken", "confirmToken", "code", "t"],
+        },
+      ];
+
+  return source
+    .map((raw) => {
+      const item = object(raw);
+      const key = text(item.key || item.name, "");
+      const path = normalizePathname(
+        item.path ||
+          item.route ||
+          (
+            key === "resetConfirm"
+              ? "/reset-password/confirm"
+              : "/activate-account"
+          )
+      );
+
+      const paths = normalizeRouteList([
+        path,
+        item.paths,
+        item.aliases,
+        key === "activation" ? FALLBACK_PATHS.activation : [],
+        key === "resetConfirm" ? FALLBACK_PATHS.resetConfirm : [],
+      ]);
+
+      return Object.freeze({
+        key: key || path,
+        path,
+        paths: Object.freeze(paths),
+        tokenParamNames: Object.freeze(compactList(
+          item.tokenParamNames,
+          item.params,
+          TOKEN_PARAM_NAMES
+        )),
+      });
+    })
+    .filter((item) => item.key && item.path && item.path !== DEFAULT_ROUTE);
+}
+
+function canonicalizeTokenAlias(path = DEFAULT_ROUTE) {
+  const pathname = cleanPath(stripUsernamePrefix(path));
+
+  for (const config of TOKEN_ROUTE_CONFIGS) {
+    for (const candidate of array(config.paths)) {
+      if (pathname === candidate || pathname.startsWith(`${candidate}/`)) {
+        return config.path;
+      }
+    }
+  }
+
+  return normalizePathname(pathname);
+}
+
+function publicShellPath(AppCore, path = DEFAULT_ROUTE) {
+  const local = normalizeFullPath(path || DEFAULT_ROUTE);
+
+  if (local.includes("?") || local.includes("#") || local.startsWith("/@")) {
+    return local;
+  }
+
+  try {
+    const delegated = AppCore?.utils?.normalizePath?.(path || DEFAULT_ROUTE);
+
+    if (delegated) {
+      const normalized = normalizeFullPath(delegated);
+
+      if (cleanPath(local) !== DEFAULT_ROUTE && cleanPath(normalized) === DEFAULT_ROUTE) {
+        return local;
+      }
+
+      return normalized || local;
+    }
+  } catch {}
+
+  return local;
+}
+
+function canonicalShellPath(AppCore, path = DEFAULT_ROUTE) {
+  const localPublic = publicShellPath(AppCore, path || DEFAULT_ROUTE);
+  const localCanonical = canonicalizeTokenAlias(stripUsernamePrefix(localPublic));
+
+  try {
+    const delegated = AppCore?.utils?.normalizeCanonicalPath?.(stripUsernamePrefix(localPublic));
+
+    if (delegated) {
+      const normalized = canonicalizeTokenAlias(delegated);
+
+      if (localCanonical !== DEFAULT_ROUTE && normalized === DEFAULT_ROUTE) {
+        return localCanonical;
+      }
+
+      return normalized || localCanonical;
+    }
+  } catch {}
+
+  return localCanonical || DEFAULT_ROUTE;
+}
+
+function browserPath() {
+  if (!isBrowser()) return DEFAULT_ROUTE;
+
+  try {
+    const { pathname, search, hash } = window.location;
+
+    if (hash && isHashRouterPath(hash)) {
+      return normalizeHashRouterPath(hash);
+    }
+
+    return normalizeFullPath(`${pathname || DEFAULT_ROUTE}${search || ""}${hash || ""}`);
+  } catch {
+    return DEFAULT_ROUTE;
+  }
+}
+
+function pathMatches(paths = [], path = DEFAULT_ROUTE, { allowPrefix = false } = {}) {
+  const clean = canonicalShellPath(null, path || DEFAULT_ROUTE);
+
+  return array(paths).some((candidate) => {
+    const current = normalizePathname(candidate);
+
+    if (clean === current) return true;
+    return Boolean(allowPrefix && current !== DEFAULT_ROUTE && clean.startsWith(`${current}/`));
+  });
+}
+
+function routeHasToken(path = "") {
+  const value = text(path, "");
+
+  if (!value) return false;
+
+  try {
+    const parsed = new URL(value, origin());
+
+    for (const name of TOKEN_PARAM_NAMES) {
+      if (parsed.searchParams.get(name)) return true;
+    }
+
+    if (parsed.hash && isHashRouterPath(parsed.hash)) {
+      if (routeHasToken(normalizeHashRouterPath(parsed.hash))) return true;
+    }
+
+    if (parsed.hash && parsed.hash.includes("?")) {
+      const query = parsed.hash.split("?").slice(1).join("?");
+      const params = new URLSearchParams(query ? `?${query}` : "");
+
+      for (const name of TOKEN_PARAM_NAMES) {
+        if (params.get(name)) return true;
+      }
+    }
+  } catch {}
+
+  const clean = canonicalShellPath(null, value);
+
+  for (const config of TOKEN_ROUTE_CONFIGS) {
+    for (const routePath of array(config.paths)) {
+      if (!clean.startsWith(`${routePath}/`)) continue;
+
+      const token = clean.slice(`${routePath}/`.length).split("/")[0];
+      if (text(token, "")) return true;
+    }
+  }
+
+  return false;
+}
+
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function redact(value = "") {
+  let output = text(value, "");
+
+  if (!output) return "";
 
   for (const name of TOKEN_PARAM_NAMES) {
     try {
-      output =
-        output.replace(
-          new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi"),
-          "$1***"
-        );
+      output = output.replace(
+        new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi"),
+        "$1***"
+      );
     } catch {}
   }
 
   for (const config of TOKEN_ROUTE_CONFIGS) {
-    for (const path of safeArray(config.paths)) {
+    for (const routePath of array(config.paths)) {
       try {
-        output =
-          output.replace(
-            new RegExp(`(${escapeRegExp(path)}\\/)([^/?#\\s]+)`, "gi"),
-            "$1***"
-          );
+        output = output.replace(
+          new RegExp(`(${escapeRegExp(routePath)}\\/)([^/?#\\s]+)`, "gi"),
+          "$1***"
+        );
       } catch {}
     }
   }
 
   try {
-    output =
-      output.replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      );
-  } catch {}
-
-  try {
-    output =
-      output.replace(
-        /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
-        "$1$2***"
-      );
-  } catch {}
-
-  try {
-    output =
-      output.replace(
-        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-        "***"
-      );
+    output = output
+      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+      .replace(/(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi, "$1$2***")
+      .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
   } catch {}
 
   return output;
 }
 
+/* =========================================================
+   SANITIZE / EVENTS
+========================================================= */
+
 function isDomNodeLike(value) {
-  if (
-    !value ||
-    typeof value !== "object"
-  ) {
-    return false;
-  }
+  if (!value || typeof value !== "object") return false;
 
   try {
-    return Boolean(
-      typeof Node !== "undefined" &&
-        value instanceof Node
-    );
+    return typeof Node !== "undefined" && value instanceof Node;
   } catch {}
 
-  try {
-    return Boolean(
-      value.nodeType &&
-        value.nodeName
-    );
-  } catch {}
-
-  return false;
+  return Boolean(value.nodeType && value.nodeName);
 }
 
-function sanitizePayload(value, depth = 0) {
-  if (depth > 5) {
-    return "[MaxDepth]";
-  }
+function sanitize(value, depth = 0) {
+  if (depth > 5) return "[MaxDepth]";
 
-  if (typeof value === "string") {
-    return redactTokenInText(value);
-  }
+  if (typeof value === "string") return redact(value);
 
   if (
     value === null ||
@@ -672,1008 +801,180 @@ function sanitizePayload(value, depth = 0) {
     return value;
   }
 
-  if (typeof value === "bigint") {
-    return String(value);
-  }
-
-  if (typeof value === "function") {
-    return "[Function]";
-  }
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return "[Function]";
 
   if (isDomNodeLike(value)) {
     return {
-      node:
-        safeText(value.nodeName, "Node"),
-
-      id:
-        safeText(value.id, ""),
-
-      className:
-        safeText(
-          value.className?.baseVal ||
-            value.className,
-          ""
-        ).slice(0, SNAPSHOT_MAX_CLASS_LENGTH),
+      node: text(value.nodeName, "Node"),
+      id: text(value.id, ""),
+      className: text(value.className?.baseVal || value.className, "").slice(0, SNAPSHOT_CLASS_MAX),
     };
-  }
-
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, 80)
-      .map((item) =>
-        sanitizePayload(
-          item,
-          depth + 1
-        )
-      );
   }
 
   if (value instanceof Error) {
     return {
-      name:
-        safeText(value.name, "Error"),
-
-      message:
-        redactTokenInText(value.message || ""),
-
-      code:
-        value.code || null,
-
-      status:
-        value.status ||
-        value.statusCode ||
-        null,
+      name: text(value.name, "Error"),
+      message: redact(value.message || ""),
+      code: value.code || null,
+      status: value.status || value.statusCode || null,
     };
   }
 
-  if (isObject(value)) {
-    const output = {};
+  if (Array.isArray(value)) {
+    return value.slice(0, 80).map((item) => sanitize(item, depth + 1));
+  }
 
-    for (const [key, item] of Object.entries(value)) {
+  if (isObject(value)) {
+    const out = {};
+
+    for (const [key, item] of Object.entries(value).slice(0, 140)) {
       if (/token|secret|password|authorization|credential|jwt|bearer|session|refresh/i.test(key)) {
-        output[key] =
-          item ? "***" : item;
+        out[key] = item ? "***" : item;
         continue;
       }
 
-      output[key] =
-        sanitizePayload(
-          item,
-          depth + 1
-        );
+      out[key] = sanitize(item, depth + 1);
     }
 
-    return output;
+    return out;
   }
 
   return String(value);
 }
 
-/* =========================================================
-   LOG / EMIT / ERROR
-========================================================= */
-
-function safeLog(AppCore, ...args) {
-  const safeArgs =
-    args.map((item) =>
-      sanitizePayload(item)
-    );
+function log(AppCore, ...args) {
+  const clean = args.map((item) => sanitize(item));
 
   try {
-    AppCore?.utils?.log?.(
-      "[AppShell]",
-      ...safeArgs
-    );
-
+    AppCore?.utils?.log?.("[AppShell]", ...clean);
     return;
   } catch {}
 
   try {
-    console.log(
-      "[AppShell]",
-      ...safeArgs
-    );
+    if (AppCore?.config?.debug) console.log("[AppShell]", ...clean);
   } catch {}
 }
 
-function safeWarn(AppCore, ...args) {
-  const safeArgs =
-    args.map((item) =>
-      sanitizePayload(item)
-    );
-
-  let coreLogged =
-    false;
+function warn(AppCore, ...args) {
+  const clean = args.map((item) => sanitize(item));
 
   try {
-    if (isFunction(AppCore?.utils?.warn)) {
-      AppCore.utils.warn(
-        "[AppShell]",
-        ...safeArgs
-      );
-
-      coreLogged =
-        true;
-    }
-  } catch {
-    coreLogged =
-      false;
-  }
-
-  if (coreLogged) {
+    AppCore?.utils?.warn?.("[AppShell]", ...clean);
     return;
-  }
+  } catch {}
 
   try {
-    console.warn(
-      "[AppShell]",
-      ...safeArgs
-    );
+    console.warn("[AppShell]", ...clean);
   } catch {}
 }
 
 function normalizeError(error = null) {
-  if (!error) {
-    return null;
-  }
+  if (!error) return null;
 
   if (typeof error === "string") {
     return {
-      name:
-        "ShellError",
-      message:
-        redactTokenInText(error),
-      code:
-        "SHELL_ERROR",
+      name: "ShellError",
+      message: redact(error),
+      code: "SHELL_ERROR",
     };
   }
 
-  const object =
-    safeObject(error);
+  const source = object(error);
 
   return {
-    name:
-      safeText(
-        object.name,
-        "ShellError"
-      ),
-
-    message:
-      redactTokenInText(
-        safeText(
-          object.message || error,
-          "Error en App Shell."
-        )
-      ),
-
-    code:
-      safeText(
-        object.code ||
-          object.status ||
-          object.statusCode,
-        "SHELL_ERROR"
-      ),
+    name: text(source.name, "ShellError"),
+    message: redact(text(source.message || error, "Error en App Shell.")),
+    code: text(source.code || source.status || source.statusCode, "SHELL_ERROR"),
   };
 }
 
-function safeCreateCustomEvent(name = "", detail = {}) {
-  if (!isBrowser()) {
-    return null;
-  }
+function emit(AppCore, name = "", payload = {}, options = {}) {
+  const eventName = text(name, "");
 
-  const eventName =
-    safeText(name, "");
+  if (!eventName) return false;
 
-  if (!eventName) {
-    return null;
-  }
+  const detail = sanitize(payload);
+
+  let hasBus = false;
+  let emitted = false;
 
   try {
-    if (typeof CustomEvent === "function") {
-      return new CustomEvent(
-        eventName,
-        {
-          detail,
-        }
-      );
+    if (isFn(AppCore?.events?.emit)) {
+      hasBus = true;
+      AppCore.events.emit(eventName, detail);
+      emitted = true;
     }
   } catch {}
 
-  try {
-    const event =
-      document.createEvent("CustomEvent");
-
-    event.initCustomEvent(
-      eventName,
-      false,
-      false,
-      detail
-    );
-
-    return event;
-  } catch {
-    return null;
-  }
-}
-
-function safeEmit(AppCore, name = "", payload = {}, options = {}) {
-  const eventName =
-    safeText(name, "");
-
-  if (!eventName) {
-    return false;
-  }
-
-  const opts =
-    safeObject(options);
-
-  const cleanPayload =
-    sanitizePayload(payload);
-
-  let busAvailable =
-    false;
-
-  let busEmitted =
-    false;
-
-  try {
-    if (isFunction(AppCore?.events?.emit)) {
-      busAvailable =
-        true;
-
-      AppCore.events.emit(
-        eventName,
-        cleanPayload
-      );
-
-      busEmitted =
-        true;
-    }
-  } catch {}
-
-  if (
-    opts.window === true ||
-    (!busAvailable && isBrowser())
-  ) {
+  if ((options.window === true || !hasBus) && isBrowser()) {
     try {
-      const event =
-        safeCreateCustomEvent(
-          eventName,
-          cleanPayload
-        );
-
-      if (event) {
-        window.dispatchEvent(event);
-        return true;
-      }
+      window.dispatchEvent(new CustomEvent(eventName, { detail }));
+      emitted = true;
     } catch {}
   }
 
-  return busEmitted;
+  return emitted;
 }
 
 function emitShellEvent(AppCore, name = "", payload = {}, options = {}) {
-  const opts =
-    safeObject(options);
+  const opts = object(options);
 
   if (opts.dedupe === false) {
-    return safeEmit(
-      AppCore,
-      name,
-      payload,
-      opts
-    );
+    return emit(AppCore, name, {
+      version: SHELL_VERSION,
+      source: SOURCE,
+      at: iso(),
+      ...object(payload),
+    }, opts);
   }
 
-  const key =
-    [
-      safeText(name, ""),
-      payload?.chromeVisible ? "chrome-visible" : "chrome-hidden",
-      payload?.appShellVisible ? "shell-visible" : "shell-hidden",
-      payload?.authLike ? "auth" : "app",
-      payload?.busy ? "busy" : "idle",
-      safeText(payload?.canonical || payload?.snapshot?.canonical, ""),
-      safeText(payload?.publicPath || payload?.snapshot?.publicPath, ""),
-    ].join("|");
+  const key = [
+    text(name, ""),
+    payload?.chromeVisible ? "chrome-visible" : "chrome-hidden",
+    payload?.appShellVisible ? "shell-visible" : "shell-hidden",
+    payload?.authLike ? "auth" : "app",
+    payload?.busy ? "busy" : "idle",
+    text(payload?.canonical || payload?.snapshot?.canonical, ""),
+    text(payload?.publicPath || payload?.snapshot?.publicPath, ""),
+  ].join("|");
 
-  const current =
-    safeNow();
+  const stamp = now();
 
-  if (
-    key === lastShellEventKey &&
-    current - lastShellEventAt < SHELL_EVENT_DEDUPE_MS
-  ) {
+  if (key === lastEventKey && stamp - lastEventAt < EVENT_DEDUPE_MS) {
     return false;
   }
 
-  lastShellEventKey =
-    key;
+  lastEventKey = key;
+  lastEventAt = stamp;
 
-  lastShellEventAt =
-    current;
-
-  return safeEmit(
-    AppCore,
-    name,
-    {
-      version:
-        SHELL_VERSION,
-
-      source:
-        SHELL_SOURCE,
-
-      at:
-        safeIsoDate(),
-
-      ...safeObject(payload),
-    },
-    opts
-  );
+  return emit(AppCore, name, {
+    version: SHELL_VERSION,
+    source: SOURCE,
+    at: iso(),
+    ...object(payload),
+  }, opts);
 }
 
-function recordShellError(AppCore, source = "shell", error = null) {
-  lastShellError = {
-    source:
-      safeText(source, "shell"),
-
-    error:
-      normalizeError(error),
-
-    at:
-      safeIsoDate(),
+function recordError(AppCore, source = "shell", error = null) {
+  lastError = {
+    source: text(source, "shell"),
+    error: normalizeError(error),
+    at: iso(),
   };
 
-  safeWarn(
-    AppCore,
-    "Shell error:",
-    lastShellError
-  );
+  warn(AppCore, "Shell error:", lastError);
+  emit(AppCore, EVENTS.error, lastError);
 
-  safeEmit(
-    AppCore,
-    SHELL_EVENTS.error,
-    lastShellError
-  );
-
-  return lastShellError;
+  return lastError;
 }
 
 /* =========================================================
-   PATH HELPERS
+   DOM
 ========================================================= */
 
-function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
-    return window.location.origin;
-  }
-
-  return "http://localhost";
-}
-
-function isHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  return (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  );
-}
-
-function normalizeHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return DEFAULT_ROUTE;
-  }
-
-  if (raw.startsWith("#!")) {
-    return normalizeLocalFullPath(
-      raw.replace(/^#!\/?/, "/") ||
-        DEFAULT_ROUTE
-    );
-  }
-
-  return normalizeLocalFullPath(
-    raw.replace(/^#\/?/, "/") ||
-      DEFAULT_ROUTE
-  );
-}
-
-function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
-  let value =
-    safeText(pathname, DEFAULT_ROUTE)
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
-
-  if (!value) {
-    value =
-      DEFAULT_ROUTE;
-  }
-
-  if (!value.startsWith("/")) {
-    value =
-      `/${value}`;
-  }
-
-  const segments =
-    value
-      .split("/")
-      .filter(Boolean);
-
-  const output = [];
-
-  for (const segment of segments) {
-    if (segment === ".") {
-      continue;
-    }
-
-    if (segment === "..") {
-      output.pop();
-      continue;
-    }
-
-    output.push(segment);
-  }
-
-  value =
-    `/${output.join("/")}`;
-
-  if (!value) {
-    value =
-      DEFAULT_ROUTE;
-  }
-
-  if (value.length > 1) {
-    value =
-      value.replace(/\/+$/g, "") ||
-      DEFAULT_ROUTE;
-  }
-
-  return value;
-}
-
-function normalizeSearch(search = "") {
-  const value =
-    safeText(search, "");
-
-  if (!value) {
-    return "";
-  }
-
-  return value.startsWith("?")
-    ? value
-    : `?${value.replace(/^\?+/, "")}`;
-}
-
-function normalizeHash(hash = "") {
-  const value =
-    safeText(hash, "");
-
-  if (!value) {
-    return "";
-  }
-
-  return value.startsWith("#")
-    ? value
-    : `#${value.replace(/^#+/, "")}`;
-}
-
-function splitFullPath(value = DEFAULT_ROUTE) {
-  const raw =
-    safeText(value, DEFAULT_ROUTE);
-
-  if (isHashRouterPath(raw)) {
-    return splitFullPath(
-      normalizeHashRouterPath(raw)
-    );
-  }
-
-  let pathname =
-    raw;
-
-  let search =
-    "";
-
-  let hash =
-    "";
-
-  const hashIndex =
-    pathname.indexOf("#");
-
-  if (hashIndex >= 0) {
-    hash =
-      pathname.slice(hashIndex);
-
-    pathname =
-      pathname.slice(0, hashIndex) ||
-      DEFAULT_ROUTE;
-  }
-
-  const searchIndex =
-    pathname.indexOf("?");
-
-  if (searchIndex >= 0) {
-    search =
-      pathname.slice(searchIndex);
-
-    pathname =
-      pathname.slice(0, searchIndex) ||
-      DEFAULT_ROUTE;
-  }
-
-  return {
-    pathname:
-      normalizePathnameOnly(pathname),
-
-    search:
-      normalizeSearch(search),
-
-    hash:
-      normalizeHash(hash),
-  };
-}
-
-function normalizeLocalFullPath(path = DEFAULT_ROUTE) {
-  const raw =
-    safeText(path, DEFAULT_ROUTE);
-
-  if (!raw) {
-    return DEFAULT_ROUTE;
-  }
-
-  if (isHashRouterPath(raw)) {
-    return normalizeHashRouterPath(raw);
-  }
-
-  try {
-    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed =
-        new URL(
-          raw,
-          getBaseOrigin()
-        );
-
-      if (
-        parsed.hash &&
-        isHashRouterPath(parsed.hash)
-      ) {
-        return normalizeHashRouterPath(parsed.hash);
-      }
-
-      return normalizeLocalFullPath(
-        `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`
-      );
-    }
-  } catch {}
-
-  const {
-    pathname,
-    search,
-    hash,
-  } =
-    splitFullPath(raw);
-
-  return `${pathname}${search}${hash}`;
-}
-
-function stripSearchAndHash(path = DEFAULT_ROUTE) {
-  const normalized =
-    normalizeLocalFullPath(
-      path ||
-        DEFAULT_ROUTE
-    );
-
-  return (
-    normalized
-      .split("?")[0]
-      .split("#")[0] ||
-    DEFAULT_ROUTE
-  );
-}
-
-function normalizeRouteList(values = []) {
-  return Array.from(
-    new Set(
-      safeArray(values)
-        .flat(Infinity)
-        .map((item) => safeText(item, ""))
-        .filter(Boolean)
-        .map((item) => normalizePathnameOnly(item))
-    )
-  );
-}
-
-function normalizeTokenRouteConfigs(configs = []) {
-  const source =
-    safeArray(configs).length
-      ? safeArray(configs)
-      : [
-          {
-            key:
-              "activation",
-            path:
-              "/activate-account",
-            aliases:
-              FALLBACK_ACTIVATION_PATHS,
-            tokenParamNames:
-              [
-                "token",
-                "activationToken",
-                "activateToken",
-                "code",
-                "t",
-              ],
-          },
-          {
-            key:
-              "resetConfirm",
-            path:
-              "/reset-password/confirm",
-            aliases:
-              FALLBACK_RESET_CONFIRM_PATHS,
-            tokenParamNames:
-              [
-                "token",
-                "resetToken",
-                "passwordResetToken",
-                "confirmToken",
-                "code",
-                "t",
-              ],
-          },
-        ];
-
-  return source
-    .map((config) => {
-      const item =
-        safeObject(config);
-
-      const path =
-        normalizePathnameOnly(
-          item.path ||
-            item.route ||
-            DEFAULT_ROUTE
-        );
-
-      const aliases =
-        normalizeRouteList([
-          item.aliases,
-          item.paths,
-        ]);
-
-      const paths =
-        normalizeRouteList([
-          path,
-          aliases,
-        ]);
-
-      return Object.freeze({
-        key:
-          safeText(item.key || item.name || path, ""),
-
-        path,
-
-        paths:
-          Object.freeze(paths),
-
-        tokenParamNames:
-          Object.freeze(
-            compactList(
-              item.tokenParamNames,
-              item.params,
-              TOKEN_PARAM_NAMES
-            )
-          ),
-      });
-    })
-    .filter((item) =>
-      item.key &&
-      item.path &&
-      item.path !== DEFAULT_ROUTE
-    );
-}
-
-function isPublicUsernameSegment(segment = "") {
-  return /^@[A-Za-z0-9._-]{1,80}$/.test(
-    safeText(segment, "")
-  );
-}
-
-function stripPublicUsernamePrefix(path = DEFAULT_ROUTE) {
-  const {
-    pathname,
-    search,
-    hash,
-  } =
-    splitFullPath(
-      normalizeLocalFullPath(
-        path ||
-          DEFAULT_ROUTE
-      )
-    );
-
-  const segments =
-    pathname
-      .split("/")
-      .filter(Boolean);
-
-  if (
-    segments.length > 0 &&
-    isPublicUsernameSegment(segments[0])
-  ) {
-    const rest =
-      segments.slice(1).join("/");
-
-    const cleanPathname =
-      rest
-        ? normalizePathnameOnly(`/${rest}`)
-        : DEFAULT_ROUTE;
-
-    return `${cleanPathname}${search}${hash}`;
-  }
-
-  return `${pathname}${search}${hash}`;
-}
-
-function canonicalizeTokenAlias(path = DEFAULT_ROUTE) {
-  const normalized =
-    normalizeLocalFullPath(path || DEFAULT_ROUTE);
-
-  const {
-    pathname,
-  } =
-    splitFullPath(
-      stripPublicUsernamePrefix(normalized)
-    );
-
-  for (const config of TOKEN_ROUTE_CONFIGS) {
-    for (const routePath of safeArray(config.paths)) {
-      if (
-        pathname === routePath ||
-        pathname.startsWith(`${routePath}/`)
-      ) {
-        const rest =
-          pathname.slice(routePath.length);
-
-        return normalizePathnameOnly(
-          `${config.path}${rest}`
-        );
-      }
-    }
-  }
-
-  return normalizePathnameOnly(pathname);
-}
-
-function normalizePublicShellPath(AppCore, path = DEFAULT_ROUTE) {
-  const local =
-    normalizeLocalFullPath(path || DEFAULT_ROUTE);
-
-  /*
-    publicPath conserva query/hash y /@usuario.
-  */
-  if (
-    local.includes("?") ||
-    local.includes("#") ||
-    local.startsWith("/@")
-  ) {
-    return local;
-  }
-
-  try {
-    if (isFunction(AppCore?.utils?.normalizePath)) {
-      const external =
-        normalizeLocalFullPath(
-          AppCore.utils.normalizePath(path || DEFAULT_ROUTE) ||
-            local
-        );
-
-      const localClean =
-        stripSearchAndHash(local);
-
-      const externalClean =
-        stripSearchAndHash(external);
-
-      if (
-        localClean !== DEFAULT_ROUTE &&
-        externalClean === DEFAULT_ROUTE
-      ) {
-        return local;
-      }
-
-      return external || local;
-    }
-  } catch {}
-
-  return local;
-}
-
-function normalizeCanonicalShellPath(AppCore, path = DEFAULT_ROUTE) {
-  const publicPath =
-    normalizePublicShellPath(
-      AppCore,
-      path || DEFAULT_ROUTE
-    );
-
-  const stripped =
-    stripPublicUsernamePrefix(publicPath);
-
-  const localCanonical =
-    canonicalizeTokenAlias(stripped);
-
-  try {
-    if (isFunction(AppCore?.utils?.normalizeCanonicalPath)) {
-      const external =
-        canonicalizeTokenAlias(
-          AppCore.utils.normalizeCanonicalPath(stripped) ||
-            localCanonical
-        );
-
-      if (
-        localCanonical !== DEFAULT_ROUTE &&
-        external === DEFAULT_ROUTE
-      ) {
-        return localCanonical;
-      }
-
-      return external || localCanonical;
-    }
-  } catch {}
-
-  return localCanonical;
-}
-
-function getBrowserPath() {
-  if (!isBrowser()) {
-    return DEFAULT_ROUTE;
-  }
-
-  try {
-    const pathname =
-      window.location.pathname ||
-      DEFAULT_ROUTE;
-
-    const search =
-      window.location.search ||
-      "";
-
-    const hash =
-      window.location.hash ||
-      "";
-
-    if (
-      hash &&
-      isHashRouterPath(hash)
-    ) {
-      return normalizeHashRouterPath(hash);
-    }
-
-    return normalizeLocalFullPath(
-      `${pathname}${search}${hash}`
-    );
-  } catch {
-    return DEFAULT_ROUTE;
-  }
-}
-
-function pathMatches(paths = [], path = DEFAULT_ROUTE, {
-  allowPrefix = false,
-} = {}) {
-  const clean =
-    normalizeCanonicalShellPath(
-      null,
-      path || DEFAULT_ROUTE
-    );
-
-  return safeArray(paths).some((candidate) => {
-    const candidatePath =
-      normalizePathnameOnly(candidate);
-
-    if (clean === candidatePath) {
-      return true;
-    }
-
-    return Boolean(
-      allowPrefix &&
-        clean.startsWith(`${candidatePath}/`)
-    );
-  });
-}
-
-function pathHasAnyToken(path = "") {
-  const value =
-    safeText(path, "");
-
-  if (!value) {
-    return false;
-  }
-
-  try {
-    const parsed =
-      new URL(
-        value,
-        getBaseOrigin()
-      );
-
-    for (const name of TOKEN_PARAM_NAMES) {
-      if (parsed.searchParams.get(name)) {
-        return true;
-      }
-    }
-
-    if (
-      parsed.hash &&
-      isHashRouterPath(parsed.hash)
-    ) {
-      const hashPath =
-        normalizeHashRouterPath(parsed.hash);
-
-      if (pathHasAnyToken(hashPath)) {
-        return true;
-      }
-    }
-
-    if (
-      parsed.hash &&
-      parsed.hash.includes("?")
-    ) {
-      const query =
-        parsed.hash
-          .split("?")
-          .slice(1)
-          .join("?");
-
-      const params =
-        new URLSearchParams(query ? `?${query}` : "");
-
-      for (const name of TOKEN_PARAM_NAMES) {
-        if (params.get(name)) {
-          return true;
-        }
-      }
-    }
-  } catch {}
-
-  const clean =
-    normalizeCanonicalShellPath(
-      null,
-      value
-    );
-
-  for (const config of TOKEN_ROUTE_CONFIGS) {
-    for (const routePath of safeArray(config.paths)) {
-      if (clean.startsWith(`${routePath}/`)) {
-        const token =
-          clean
-            .slice(`${routePath}/`.length)
-            .split("/")[0];
-
-        if (safeText(token, "")) {
-          return true;
-        }
-      }
-    }
-  }
-
-  return false;
-}
-
-/* =========================================================
-   DOM LOW LEVEL
-========================================================= */
-
-function documentContains(element) {
-  if (
-    !isBrowser() ||
-    !element
-  ) {
-    return false;
-  }
+function contains(element) {
+  if (!isBrowser() || !element) return false;
 
   try {
     return document.contains(element);
@@ -1683,56 +984,46 @@ function documentContains(element) {
 }
 
 function queryFirst(selectors = []) {
-  if (!isBrowser()) {
-    return null;
-  }
+  if (!isBrowser()) return null;
 
-  for (const selector of safeArray(selectors)) {
-    const cleanSelector =
-      safeText(selector, "");
+  for (const selector of array(selectors)) {
+    const clean = text(selector, "");
 
-    if (!cleanSelector) {
-      continue;
-    }
+    if (!clean) continue;
 
     try {
-      const element =
-        cleanSelector.startsWith("#")
-          ? document.getElementById(cleanSelector.slice(1))
-          : document.querySelector(cleanSelector);
+      const element = clean.startsWith("#")
+        ? document.getElementById(clean.slice(1))
+        : document.querySelector(clean);
 
-      if (element) {
-        return element;
-      }
+      if (element) return element;
     } catch {}
   }
 
   return null;
 }
 
-function safeAssignDomCache(AppCore, payload = {}) {
+function ensureCoreDom(AppCore) {
   try {
-    if (!AppCore) {
-      return false;
+    if (!AppCore) return null;
+
+    if (!AppCore.dom && isExtensibleObject(AppCore)) {
+      AppCore.dom = {};
     }
 
-    if (
-      !AppCore.dom &&
-      isExtensibleObject(AppCore)
-    ) {
-      AppCore.dom =
-        {};
-    }
+    return isObject(AppCore.dom) ? AppCore.dom : null;
+  } catch {
+    return null;
+  }
+}
 
-    if (!isObject(AppCore.dom)) {
-      return false;
-    }
+function assignDom(AppCore, payload = {}) {
+  const dom = ensureCoreDom(AppCore);
 
-    Object.assign(
-      AppCore.dom,
-      safeObject(payload)
-    );
+  if (!dom) return false;
 
+  try {
+    Object.assign(dom, object(payload));
     return true;
   } catch {
     return false;
@@ -1740,95 +1031,72 @@ function safeAssignDomCache(AppCore, payload = {}) {
 }
 
 function clearDomCache(AppCore) {
-  try {
-    if (
-      AppCore?.dom &&
-      typeof AppCore.dom === "object"
-    ) {
-      for (const key of [
-        "appShell",
-        "mainContent",
-        "appContent",
-        "viewContainer",
-        "sidebarMount",
-        "topbarMount",
-        "sidebar",
-        "topbar",
-        "tablehead",
-        "tableHead",
-        "tableheadContainer",
-        "tableHeadContainer",
-        "sidebarMobileToggle",
-        "mobileSidebarToggle",
-        "loader",
-      ]) {
-        delete AppCore.dom[key];
-      }
-    }
-  } catch {}
+  const dom = ensureCoreDom(AppCore);
+
+  if (!dom) return false;
+
+  for (const key of [
+    "appShell",
+    "shell",
+    "mainContent",
+    "main",
+    "appContent",
+    "viewContainer",
+    "viewRoot",
+    "routerView",
+    "sidebarMount",
+    "topbarMount",
+    "sidebar",
+    "topbar",
+    "tablehead",
+    "tableHead",
+    "tableheadContainer",
+    "tableHeadContainer",
+    "sidebarMobileToggle",
+    "mobileSidebarToggle",
+    "loader",
+    "appLoader",
+  ]) {
+    try {
+      delete dom[key];
+    } catch {}
+  }
 
   return true;
 }
 
-function getCachedDomElement(AppCore, key = "", selectors = []) {
-  if (!isBrowser()) {
-    return null;
-  }
+function domElement(AppCore, key = "", selectors = []) {
+  if (!isBrowser()) return null;
 
   try {
-    const cached =
-      AppCore?.dom?.[key];
+    const cached = AppCore?.dom?.[key];
 
-    if (
-      cached &&
-      documentContains(cached)
-    ) {
-      return cached;
-    }
+    if (cached && contains(cached)) return cached;
   } catch {}
 
-  const found =
-    queryFirst(selectors);
+  const found = queryFirst(selectors);
 
   if (found) {
-    safeAssignDomCache(
-      AppCore,
-      {
-        [key]: found,
-      }
-    );
+    assignDom(AppCore, { [key]: found });
   }
 
   return found;
 }
 
 function setDataset(element, key, value) {
-  if (
-    !element ||
-    !key
-  ) {
-    return false;
-  }
+  if (!element || !key) return false;
 
   try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
+    if (value === null || value === undefined || value === "") {
       delete element.dataset[key];
       return true;
     }
 
-    const next =
-      String(value);
+    const next = String(value);
 
-    if (element.dataset[key] === next) {
-      return true;
+    if (element.dataset[key] !== next) {
+      element.dataset[key] = next;
     }
-
-    element.dataset[key] =
-      next;
 
     return true;
   } catch {
@@ -1836,26 +1104,20 @@ function setDataset(element, key, value) {
   }
 }
 
-function toggleClass(element, name, force) {
-  if (
-    !element ||
-    !name
-  ) {
-    return false;
-  }
+function setAttribute(element, key, value) {
+  if (!element || !key) return false;
 
   try {
-    const next =
-      Boolean(force);
-
-    if (element.classList.contains(name) === next) {
+    if (value === null || value === undefined) {
+      element.removeAttribute(key);
       return true;
     }
 
-    element.classList.toggle(
-      name,
-      next
-    );
+    const next = String(value);
+
+    if (element.getAttribute(key) !== next) {
+      element.setAttribute(key, next);
+    }
 
     return true;
   } catch {
@@ -1863,37 +1125,15 @@ function toggleClass(element, name, force) {
   }
 }
 
-function setAttribute(element, name, value) {
-  if (
-    !element ||
-    !name
-  ) {
-    return false;
-  }
+function toggleClass(element, className, enabled) {
+  if (!element || !className) return false;
 
   try {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      if (element.hasAttribute(name)) {
-        element.removeAttribute(name);
-      }
+    const next = Boolean(enabled);
 
-      return true;
+    if (element.classList.contains(className) !== next) {
+      element.classList.toggle(className, next);
     }
-
-    const next =
-      String(value);
-
-    if (element.getAttribute(name) === next) {
-      return true;
-    }
-
-    element.setAttribute(
-      name,
-      next
-    );
 
     return true;
   } catch {
@@ -1901,40 +1141,36 @@ function setAttribute(element, name, value) {
   }
 }
 
-function applyHidden(element, hidden = false) {
-  if (!element) {
-    return false;
-  }
-
-  const next =
-    Boolean(hidden);
+function addRemoveClasses(element, add = [], remove = []) {
+  if (!element) return false;
 
   try {
-    if (element.hidden !== next) {
-      element.hidden =
-        next;
-    }
+    if (array(remove).length) element.classList.remove(...array(remove));
+    if (array(add).length) element.classList.add(...array(add));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setHidden(element, hidden = false) {
+  if (!element) return false;
+
+  const next = Boolean(hidden);
+
+  try {
+    if (element.hidden !== next) element.hidden = next;
   } catch {}
 
-  setAttribute(
-    element,
-    "aria-hidden",
-    next ? "true" : "false"
-  );
+  setAttribute(element, "aria-hidden", next ? "true" : "false");
 
   return true;
 }
 
-function applyBusy(element, busy = false) {
-  if (!element) {
-    return false;
-  }
+function setBusy(element, busy = false) {
+  if (!element) return false;
 
-  setAttribute(
-    element,
-    "aria-busy",
-    Boolean(busy) ? "true" : "false"
-  );
+  setAttribute(element, "aria-busy", Boolean(busy) ? "true" : "false");
 
   return true;
 }
@@ -1946,170 +1182,87 @@ function applyBusy(element, busy = false) {
 export function getShellElements(AppCore) {
   if (!isBrowser()) {
     return {
-      appShell:
-        null,
-      mainContent:
-        null,
-      appContent:
-        null,
-      viewContainer:
-        null,
-      sidebarMount:
-        null,
-      topbarMount:
-        null,
-      sidebar:
-        null,
-      topbar:
-        null,
-      tablehead:
-        null,
-      tableheadContainer:
-        null,
-      mobileSidebarToggle:
-        null,
-      loader:
-        null,
-      body:
-        null,
-      html:
-        null,
+      html: null,
+      body: null,
+
+      appShell: null,
+      mainContent: null,
+      appContent: null,
+      viewContainer: null,
+
+      sidebarMount: null,
+      topbarMount: null,
+
+      sidebar: null,
+      topbar: null,
+
+      tablehead: null,
+      tableheadContainer: null,
+      mobileSidebarToggle: null,
+
+      loader: null,
     };
   }
 
-  const appShell =
-    getCachedDomElement(
-      AppCore,
-      "appShell",
-      DOM_SELECTORS.appShell
-    );
+  const appShell = domElement(AppCore, "appShell", SELECTORS.appShell);
+  const mainContent = domElement(AppCore, "mainContent", SELECTORS.mainContent);
+  const appContent = domElement(AppCore, "appContent", SELECTORS.appContent);
+  const viewContainer = domElement(AppCore, "viewContainer", SELECTORS.viewContainer);
 
-  const mainContent =
-    getCachedDomElement(
-      AppCore,
-      "mainContent",
-      DOM_SELECTORS.mainContent
-    );
+  const sidebarMount = domElement(AppCore, "sidebarMount", SELECTORS.sidebarMount);
+  const topbarMount = domElement(AppCore, "topbarMount", SELECTORS.topbarMount);
 
-  const appContent =
-    getCachedDomElement(
-      AppCore,
-      "appContent",
-      DOM_SELECTORS.appContent
-    );
+  const sidebar = domElement(AppCore, "sidebar", SELECTORS.sidebar);
+  const topbar = domElement(AppCore, "topbar", SELECTORS.topbar);
 
-  const viewContainer =
-    getCachedDomElement(
-      AppCore,
-      "viewContainer",
-      DOM_SELECTORS.viewContainer
-    );
-
-  const sidebarMount =
-    getCachedDomElement(
-      AppCore,
-      "sidebarMount",
-      DOM_SELECTORS.sidebarMount
-    );
-
-  const topbarMount =
-    getCachedDomElement(
-      AppCore,
-      "topbarMount",
-      DOM_SELECTORS.topbarMount
-    );
-
-  const sidebar =
-    getCachedDomElement(
-      AppCore,
-      "sidebar",
-      DOM_SELECTORS.sidebar
-    );
-
-  const topbar =
-    getCachedDomElement(
-      AppCore,
-      "topbar",
-      DOM_SELECTORS.topbar
-    );
-
-  const tablehead =
-    getCachedDomElement(
-      AppCore,
-      "tablehead",
-      DOM_SELECTORS.tablehead
-    );
-
-  const tableheadContainer =
-    getCachedDomElement(
-      AppCore,
-      "tableheadContainer",
-      DOM_SELECTORS.tableheadContainer
-    );
+  const tablehead = domElement(AppCore, "tablehead", SELECTORS.tablehead);
+  const tableheadContainer = domElement(AppCore, "tableheadContainer", SELECTORS.tableheadContainer);
 
   const mobileSidebarToggle =
-    getCachedDomElement(
-      AppCore,
-      "sidebarMobileToggle",
-      DOM_SELECTORS.mobileSidebarToggle
-    ) ||
-    getCachedDomElement(
-      AppCore,
-      "mobileSidebarToggle",
-      DOM_SELECTORS.mobileSidebarToggle
-    );
+    domElement(AppCore, "sidebarMobileToggle", SELECTORS.mobileSidebarToggle) ||
+    domElement(AppCore, "mobileSidebarToggle", SELECTORS.mobileSidebarToggle);
 
-  const loader =
-    getCachedDomElement(
-      AppCore,
-      "loader",
-      DOM_SELECTORS.loader
-    );
+  const loader = domElement(AppCore, "loader", SELECTORS.loader);
 
-  safeAssignDomCache(
-    AppCore,
-    {
-      appShell,
-      shell:
-        appShell,
+  assignDom(AppCore, {
+    html: document.documentElement || null,
+    body: document.body || null,
 
-      mainContent,
-      main:
-        mainContent,
+    appShell,
+    shell: appShell,
 
-      appContent,
+    mainContent,
+    main: mainContent,
 
-      viewContainer,
-      viewRoot:
-        viewContainer,
-      routerView:
-        viewContainer,
+    appContent,
 
-      sidebarMount,
-      topbarMount,
+    viewContainer,
+    viewRoot: viewContainer,
+    routerView: viewContainer,
 
-      sidebar,
-      topbar,
+    sidebarMount,
+    topbarMount,
 
-      tablehead,
-      tableHead:
-        tablehead,
+    sidebar,
+    topbar,
 
-      tableheadContainer,
-      tableHeadContainer:
-        tableheadContainer,
+    tablehead,
+    tableHead: tablehead,
 
-      sidebarMobileToggle:
-        mobileSidebarToggle,
-      mobileSidebarToggle,
+    tableheadContainer,
+    tableHeadContainer: tableheadContainer,
 
-      loader,
-      appLoader:
-        loader,
-    }
-  );
+    sidebarMobileToggle: mobileSidebarToggle,
+    mobileSidebarToggle,
+
+    loader,
+    appLoader: loader,
+  });
 
   return {
+    html: document.documentElement || null,
+    body: document.body || null,
+
     appShell,
     mainContent,
     appContent,
@@ -2126,197 +1279,104 @@ export function getShellElements(AppCore) {
     mobileSidebarToggle,
 
     loader,
-
-    body:
-      document.body || null,
-
-    html:
-      document.documentElement || null,
   };
 }
 
 export function getViewContainer(AppCore) {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  const element =
-    getCachedDomElement(
-      AppCore,
-      "viewContainer",
-      DOM_SELECTORS.viewContainer
-    );
+  const element = getShellElements(AppCore).viewContainer;
 
   if (element) {
-    safeAssignDomCache(
-      AppCore,
-      {
-        viewContainer:
-          element,
-        viewRoot:
-          element,
-        routerView:
-          element,
-      }
-    );
+    assignDom(AppCore, {
+      viewContainer: element,
+      viewRoot: element,
+      routerView: element,
+    });
   }
 
   return element;
 }
 
 /* =========================================================
-   STATE HELPERS
+   STATE / FLAGS
 ========================================================= */
 
-function getCoreState(AppCore) {
-  return safeObject(AppCore?.state);
+function state(AppCore) {
+  return object(AppCore?.state);
 }
 
 function setCoreState(AppCore, payload = {}) {
-  const cleanPayload =
-    safeObject(payload);
+  const patch = object(payload);
 
   try {
-    AppCore?.setState?.(
-      cleanPayload,
-      {
-        source:
-          SHELL_SOURCE,
-        emit:
-          false,
-        emitState:
-          false,
-        silent:
-          true,
-      }
-    );
+    AppCore?.setState?.(patch, {
+      source: SOURCE,
+      emit: false,
+      emitState: false,
+      silent: true,
+    });
   } catch {}
 
   try {
-    if (
-      AppCore?.state &&
-      typeof AppCore.state === "object"
-    ) {
-      Object.assign(
-        AppCore.state,
-        cleanPayload
-      );
+    if (AppCore?.state && typeof AppCore.state === "object") {
+      Object.assign(AppCore.state, patch);
     }
   } catch {}
 
-  return cleanPayload;
+  return patch;
 }
 
-function hasBodyBootClass() {
-  if (!isBrowser()) {
-    return false;
-  }
+function hasBootClass() {
+  if (!isBrowser()) return false;
 
   try {
-    return BOOT_BODY_CLASSES.some((className) =>
-      Boolean(
-        document.body?.classList?.contains(className) ||
-          document.documentElement?.classList?.contains(className)
-      )
-    );
+    return CLASSES.boot.some((className) => (
+      document.body?.classList?.contains(className) ||
+      document.documentElement?.classList?.contains(className)
+    ));
   } catch {
     return false;
   }
 }
 
 function isBootingOrLoading(AppCore) {
-  const state =
-    getCoreState(AppCore);
+  const current = state(AppCore);
 
   return Boolean(
-    state.booting ||
-      state.loading ||
-      state.appBooting ||
-      state.bootInProgress ||
-      state.loaderVisible ||
-      state.sessionRestoring ||
-      state.authRestoring ||
-      hasBodyBootClass()
+    current.booting ||
+      current.loading ||
+      current.appBooting ||
+      current.bootInProgress ||
+      current.loaderVisible ||
+      current.sessionRestoring ||
+      current.authRestoring ||
+      hasBootClass()
   );
 }
 
-function elementHasHiddenLoaderClass(loader) {
-  if (!loader) {
-    return false;
-  }
+function hasClass(element, classNames = []) {
+  if (!element) return false;
 
   try {
-    return HIDDEN_LOADER_CLASSES.some((className) =>
-      loader.classList.contains(className)
-    );
-  } catch {
-    return false;
-  }
-}
-
-function elementHasVisibleLoaderClass(loader) {
-  if (!loader) {
-    return false;
-  }
-
-  try {
-    return VISIBLE_LOADER_CLASSES.some((className) =>
-      loader.classList.contains(className)
-    );
+    return array(classNames).some((className) => element.classList.contains(className));
   } catch {
     return false;
   }
 }
 
 function isLoaderVisible(AppCore) {
-  const {
-    loader,
-  } =
-    getShellElements(AppCore);
+  const { loader } = getShellElements(AppCore);
 
-  if (!loader) {
-    return false;
-  }
+  if (!loader) return false;
 
   try {
-    if (loader.hidden) {
-      return false;
-    }
+    if (loader.hidden) return false;
+    if (loader.getAttribute("aria-hidden") === "true") return false;
+    if (hasClass(loader, CLASSES.loaderHidden)) return false;
+    if (text(loader.dataset?.loaderVisible, "") === "false") return false;
 
-    if (loader.getAttribute("aria-hidden") === "true") {
-      return false;
-    }
+    const loaderState = text(loader.dataset?.loaderState, "");
 
-    if (elementHasHiddenLoaderClass(loader)) {
-      return false;
-    }
-
-    const dataVisible =
-      safeText(
-        loader.dataset?.loaderVisible,
-        ""
-      );
-
-    if (dataVisible === "false") {
-      return false;
-    }
-
-    const dataState =
-      safeText(
-        loader.dataset?.loaderState,
-        ""
-      );
-
-    if (
-      dataState === "hidden" ||
-      dataState === "removed"
-    ) {
-      return false;
-    }
-
-    if (elementHasVisibleLoaderClass(loader)) {
-      return true;
-    }
+    if (loaderState === "hidden" || loaderState === "removed") return false;
 
     return true;
   } catch {
@@ -2324,217 +1384,85 @@ function isLoaderVisible(AppCore) {
   }
 }
 
-function hasViewContent(viewContainer) {
-  if (!viewContainer) {
-    return false;
-  }
+function hasContent(element) {
+  if (!element) return false;
 
   try {
-    if (viewContainer.childElementCount > 0) {
-      return true;
-    }
+    if (element.childElementCount > 0) return true;
   } catch {}
 
   try {
-    return Boolean(
-      safeText(viewContainer.textContent, "")
-    );
+    return Boolean(text(element.textContent, ""));
   } catch {
     return false;
   }
 }
 
 function tableheadHasContent(tableheadContainer) {
-  if (!tableheadContainer) {
-    return false;
-  }
-
-  try {
-    if (tableheadContainer.childElementCount > 0) {
-      return true;
-    }
-  } catch {}
-
-  try {
-    return Boolean(
-      safeText(tableheadContainer.textContent, "")
-    );
-  } catch {
-    return false;
-  }
+  return hasContent(tableheadContainer);
 }
 
 /* =========================================================
    SHELL DOM STATE
 ========================================================= */
 
-function setAppShellBusy(AppCore, busy = false) {
-  const {
-    appShell,
-    mainContent,
-    appContent,
-    viewContainer,
-  } =
-    getShellElements(AppCore);
+function setShellBusy(AppCore, busy = false) {
+  const { appShell, mainContent, appContent, viewContainer } = getShellElements(AppCore);
 
-  applyBusy(
-    appShell,
-    busy
-  );
-
-  applyBusy(
-    mainContent,
-    busy
-  );
-
-  applyBusy(
-    appContent,
-    busy
-  );
-
-  applyBusy(
-    viewContainer,
-    busy
-  );
+  for (const element of [appShell, mainContent, appContent, viewContainer]) {
+    setBusy(element, busy);
+  }
 
   return Boolean(busy);
 }
 
-function applyRootShellClasses(root, {
+function applyRootState(root, {
   chromeVisible = true,
   authLike = false,
   appShellVisible = true,
 } = {}) {
-  if (!root) {
-    return false;
+  if (!root) return false;
+
+  const chrome = Boolean(chromeVisible);
+  const auth = Boolean(authLike);
+  const shellVisible = appShellVisible !== false;
+
+  toggleClass(root, CLASSES.routeAuth, auth);
+  toggleClass(root, CLASSES.routeApp, !auth);
+
+  toggleClass(root, CLASSES.authScreen, auth);
+  toggleClass(root, CLASSES.loginNoScroll, auth);
+
+  toggleClass(root, CLASSES.chromeHidden, !chrome);
+  toggleClass(root, CLASSES.chromeVisible, chrome);
+
+  toggleClass(root, CLASSES.shellHidden, !chrome);
+  toggleClass(root, CLASSES.shellVisible, shellVisible);
+
+  if (auth && root === document.body) {
+    addRemoveClasses(root, [], CLASSES.sidebarResidual);
   }
 
-  const finalChromeVisible =
-    Boolean(chromeVisible);
-
-  const finalAuthLike =
-    Boolean(authLike);
-
-  const finalAppShellVisible =
-    appShellVisible !== false;
-
-  toggleClass(
-    root,
-    ROUTE_AUTH_CLASS,
-    finalAuthLike
-  );
-
-  toggleClass(
-    root,
-    ROUTE_APP_CLASS,
-    !finalAuthLike
-  );
-
-  toggleClass(
-    root,
-    AUTH_SCREEN_CLASS,
-    finalAuthLike
-  );
-
-  toggleClass(
-    root,
-    LOGIN_NO_SCROLL_CLASS,
-    finalAuthLike
-  );
-
-  toggleClass(
-    root,
-    CHROME_HIDDEN_CLASS,
-    !finalChromeVisible
-  );
-
-  toggleClass(
-    root,
-    CHROME_VISIBLE_CLASS,
-    finalChromeVisible
-  );
-
-  toggleClass(
-    root,
-    SHELL_VISIBLE_CLASS,
-    finalAppShellVisible
-  );
-
-  /*
-    route-shell-hidden significa chrome/layout oculto,
-    NO app-shell.hidden.
-  */
-  toggleClass(
-    root,
-    SHELL_HIDDEN_CLASS,
-    !finalChromeVisible
-  );
-
-  setDataset(
-    root,
-    "shell",
-    finalAppShellVisible ? "visible" : "hidden"
-  );
-
-  setDataset(
-    root,
-    "chrome",
-    finalChromeVisible ? "visible" : "hidden"
-  );
-
-  setDataset(
-    root,
-    "routeMode",
-    finalAuthLike ? "auth" : "app"
-  );
-
-  setDataset(
-    root,
-    "authScreen",
-    finalAuthLike ? "true" : "false"
-  );
-
-  setDataset(
-    root,
-    "appShellVisible",
-    finalAppShellVisible ? "true" : "false"
-  );
+  setDataset(root, "shell", shellVisible ? "visible" : "hidden");
+  setDataset(root, "chrome", chrome ? "visible" : "hidden");
+  setDataset(root, "routeMode", auth ? "auth" : "app");
+  setDataset(root, "authScreen", auth ? "true" : "false");
+  setDataset(root, "appShellVisible", shellVisible ? "true" : "false");
 
   return true;
 }
 
-function applyElementShellDataset(element, {
+function applyElementDataset(element, {
   chromeVisible = true,
   authLike = false,
   appShellVisible = true,
 } = {}) {
-  if (!element) {
-    return false;
-  }
+  if (!element) return false;
 
-  setDataset(
-    element,
-    "shell",
-    appShellVisible !== false ? "visible" : "hidden"
-  );
-
-  setDataset(
-    element,
-    "chrome",
-    chromeVisible ? "visible" : "hidden"
-  );
-
-  setDataset(
-    element,
-    "routeMode",
-    authLike ? "auth" : "app"
-  );
-
-  setDataset(
-    element,
-    "appShellVisible",
-    appShellVisible !== false ? "true" : "false"
-  );
+  setDataset(element, "shell", appShellVisible !== false ? "visible" : "hidden");
+  setDataset(element, "chrome", chromeVisible ? "visible" : "hidden");
+  setDataset(element, "routeMode", authLike ? "auth" : "app");
+  setDataset(element, "appShellVisible", appShellVisible !== false ? "true" : "false");
 
   return true;
 }
@@ -2545,133 +1473,67 @@ function markShellDomState(AppCore, {
   busy = false,
   appShellVisible = true,
 } = {}) {
-  const {
-    appShell,
-    mainContent,
-    appContent,
-    viewContainer,
-    sidebarMount,
-    topbarMount,
-    sidebar,
-    topbar,
-    tablehead,
-    tableheadContainer,
-    body,
-    html,
-  } =
-    getShellElements(AppCore);
+  const elements = getShellElements(AppCore);
 
-  const finalChromeVisible =
-    Boolean(chromeVisible);
+  const chrome = Boolean(chromeVisible);
+  const auth = Boolean(authLike);
+  const shellVisible = appShellVisible !== false;
 
-  const finalAuthLike =
-    Boolean(authLike);
+  applyRootState(elements.body, {
+    chromeVisible: chrome,
+    authLike: auth,
+    appShellVisible: shellVisible,
+  });
 
-  const finalBusy =
-    Boolean(busy);
-
-  const finalAppShellVisible =
-    appShellVisible !== false;
-
-  applyRootShellClasses(
-    body,
-    {
-      chromeVisible:
-        finalChromeVisible,
-      authLike:
-        finalAuthLike,
-      appShellVisible:
-        finalAppShellVisible,
-    }
-  );
-
-  applyRootShellClasses(
-    html,
-    {
-      chromeVisible:
-        finalChromeVisible,
-      authLike:
-        finalAuthLike,
-      appShellVisible:
-        finalAppShellVisible,
-    }
-  );
+  applyRootState(elements.html, {
+    chromeVisible: chrome,
+    authLike: auth,
+    appShellVisible: shellVisible,
+  });
 
   for (const element of [
-    appShell,
-    mainContent,
-    appContent,
-    viewContainer,
-    sidebarMount,
-    topbarMount,
-    sidebar,
-    topbar,
-    tablehead,
-    tableheadContainer,
+    elements.appShell,
+    elements.mainContent,
+    elements.appContent,
+    elements.viewContainer,
+    elements.sidebarMount,
+    elements.topbarMount,
+    elements.sidebar,
+    elements.topbar,
+    elements.tablehead,
+    elements.tableheadContainer,
   ]) {
-    applyElementShellDataset(
-      element,
-      {
-        chromeVisible:
-          finalChromeVisible,
-        authLike:
-          finalAuthLike,
-        appShellVisible:
-          finalAppShellVisible,
-      }
-    );
+    applyElementDataset(element, {
+      chromeVisible: chrome,
+      authLike: auth,
+      appShellVisible: shellVisible,
+    });
   }
 
-  /*
-    Login/reset/activate no ocultan físicamente #app-shell.
-    Sólo hideAppShell explícito puede hacerlo.
-  */
-  if (!finalAppShellVisible) {
-    applyHidden(
-      appShell,
-      true
-    );
-  } else if (appShell) {
-    try {
-      if (appShell.hidden) {
-        appShell.hidden =
-          false;
-      }
-    } catch {}
-
-    setAttribute(
-      appShell,
-      "aria-hidden",
-      "false"
-    );
+  if (shellVisible) {
+    setHidden(elements.appShell, false);
+    setHidden(elements.mainContent, false);
+    setHidden(elements.appContent, false);
+    setHidden(elements.viewContainer, false);
+  } else {
+    setHidden(elements.appShell, true);
   }
 
-  setAppShellBusy(
-    AppCore,
-    finalBusy
-  );
+  setShellBusy(AppCore, busy);
 
   return {
-    shellVisible:
-      finalAppShellVisible,
-
-    chromeVisible:
-      finalChromeVisible,
-
-    authLike:
-      finalAuthLike,
-
-    busy:
-      finalBusy,
+    appShellVisible: shellVisible,
+    chromeVisible: chrome,
+    authLike: auth,
+    busy: Boolean(busy),
   };
 }
 
 export function readShellVisibility(AppCore) {
-  const state =
-    getCoreState(AppCore);
+  const current = state(AppCore);
 
-  if (typeof state.chromeVisible === "boolean") {
-    return state.chromeVisible;
+  if (typeof current.chromeVisible === "boolean") {
+    return current.chromeVisible;
   }
 
   const {
@@ -2681,50 +1543,26 @@ export function readShellVisibility(AppCore) {
     topbarMount,
     sidebar,
     topbar,
-  } =
-    getShellElements(AppCore);
+  } = getShellElements(AppCore);
 
-  const bodyChrome =
-    safeText(
-      body?.dataset?.chrome,
-      ""
-    );
+  const bodyChrome = text(body?.dataset?.chrome, "");
+  if (bodyChrome === "visible") return true;
+  if (bodyChrome === "hidden") return false;
 
-  if (bodyChrome === "visible") {
-    return true;
-  }
+  const htmlChrome = text(html?.dataset?.chrome, "");
+  if (htmlChrome === "visible") return true;
+  if (htmlChrome === "hidden") return false;
 
-  if (bodyChrome === "hidden") {
-    return false;
-  }
+  try {
+    if (
+      body?.classList?.contains(CLASSES.chromeHidden) ||
+      html?.classList?.contains(CLASSES.chromeHidden)
+    ) {
+      return false;
+    }
+  } catch {}
 
-  const htmlChrome =
-    safeText(
-      html?.dataset?.chrome,
-      ""
-    );
-
-  if (htmlChrome === "visible") {
-    return true;
-  }
-
-  if (htmlChrome === "hidden") {
-    return false;
-  }
-
-  if (
-    body?.classList?.contains(CHROME_HIDDEN_CLASS) ||
-    html?.classList?.contains(CHROME_HIDDEN_CLASS)
-  ) {
-    return false;
-  }
-
-  if (
-    sidebarMount?.hidden ||
-    topbarMount?.hidden ||
-    sidebar?.hidden ||
-    topbar?.hidden
-  ) {
+  if (sidebarMount?.hidden || topbarMount?.hidden || sidebar?.hidden || topbar?.hidden) {
     return false;
   }
 
@@ -2732,313 +1570,32 @@ export function readShellVisibility(AppCore) {
 }
 
 /* =========================================================
-   SHELL / CHROME VISIBILITY
-========================================================= */
-
-export function setShellVisibility(AppCore, visible = true, options = {}) {
-  const opts =
-    safeObject(options);
-
-  const nextChromeVisible =
-    Boolean(visible);
-
-  const force =
-    Boolean(opts.force);
-
-  const emit =
-    opts.emit !== false;
-
-  const prevChromeVisible =
-    readShellVisibility(AppCore);
-
-  const inferredAuthLike =
-    opts.authLike !== undefined
-      ? Boolean(opts.authLike)
-      : !nextChromeVisible;
-
-  const busy =
-    opts.busy !== undefined
-      ? Boolean(opts.busy)
-      : isBootingOrLoading(AppCore);
-
-  const appShellVisible =
-    opts.hideAppShell === true
-      ? false
-      : true;
-
-  const {
-    sidebarMount,
-    topbarMount,
-    sidebar,
-    topbar,
-    tablehead,
-    tableheadContainer,
-    mobileSidebarToggle,
-  } =
-    getShellElements(AppCore);
-
-  const chromeHidden =
-    !nextChromeVisible;
-
-  const hasTableheadContent =
-    tableheadHasContent(tableheadContainer);
-
-  /*
-    Sync SIEMPRE:
-    SidebarUI/TopbarUI pueden montarse tarde.
-  */
-  for (const chromeElement of [
-    sidebarMount,
-    topbarMount,
-    sidebar,
-    topbar,
-  ]) {
-    applyHidden(
-      chromeElement,
-      chromeHidden
-    );
-  }
-
-  applyHidden(
-    tablehead,
-    chromeHidden || !hasTableheadContent
-  );
-
-  applyHidden(
-    tableheadContainer,
-    chromeHidden
-  );
-
-  if (mobileSidebarToggle) {
-    applyHidden(
-      mobileSidebarToggle,
-      chromeHidden
-    );
-
-    setAttribute(
-      mobileSidebarToggle,
-      "aria-expanded",
-      "false"
-    );
-  }
-
-  const domState =
-    markShellDomState(
-      AppCore,
-      {
-        chromeVisible:
-          nextChromeVisible,
-        authLike:
-          inferredAuthLike,
-        busy,
-        appShellVisible,
-      }
-    );
-
-  const canonicalPath =
-    normalizeCanonicalShellPath(
-      AppCore,
-      opts.canonicalPath ||
-        getCoreState(AppCore).route ||
-        DEFAULT_ROUTE
-    );
-
-  const publicPath =
-    normalizePublicShellPath(
-      AppCore,
-      opts.publicPath ||
-        getCoreState(AppCore).publicPath ||
-        canonicalPath ||
-        DEFAULT_ROUTE
-    );
-
-  setCoreState(
-    AppCore,
-    {
-      /*
-        shellVisible/appShellVisible = shell físico.
-        chromeVisible/routeShellHidden = sidebar/topbar/tablehead.
-      */
-      shellVisible:
-        domState.shellVisible,
-
-      shellHidden:
-        !domState.shellVisible,
-
-      appShellVisible:
-        domState.shellVisible,
-
-      chromeVisible:
-        nextChromeVisible,
-
-      routeShellHidden:
-        !nextChromeVisible,
-
-      shellAuthLike:
-        inferredAuthLike,
-
-      authScreen:
-        inferredAuthLike,
-
-      shellBusy:
-        busy,
-
-      routeMode:
-        inferredAuthLike ? "auth" : "app",
-
-      currentShellRoute:
-        canonicalPath,
-
-      currentShellCanonicalPath:
-        canonicalPath,
-
-      currentShellPublicPath:
-        publicPath,
-
-      shellUpdatedAt:
-        safeIsoDate(),
-    }
-  );
-
-  if (emit) {
-    const snapshot =
-      getShellSnapshot(AppCore);
-
-    const payload = {
-      reason:
-        safeText(
-          opts.reason,
-          "set-shell-visibility"
-        ),
-
-      hidden:
-        chromeHidden,
-
-      visible:
-        nextChromeVisible,
-
-      chromeVisible:
-        nextChromeVisible,
-
-      appShellVisible:
-        domState.shellVisible,
-
-      changed:
-        force ||
-        prevChromeVisible !== nextChromeVisible ||
-        opts.forceChromeSync === true,
-
-      authLike:
-        inferredAuthLike,
-
-      busy,
-
-      canonical:
-        snapshot.canonical,
-
-      publicPath:
-        snapshot.publicPath,
-
-      snapshot,
-    };
-
-    emitShellEvent(
-      AppCore,
-      SHELL_EVENTS.change,
-      payload
-    );
-
-    emitShellEvent(
-      AppCore,
-      SHELL_EVENTS.state,
-      payload
-    );
-
-    emitShellEvent(
-      AppCore,
-      SHELL_EVENTS.appState,
-      payload
-    );
-  }
-
-  return nextChromeVisible;
-}
-
-/* =========================================================
    ROUTES
 ========================================================= */
 
 export function isLoginPath(AppCore, path = "") {
-  return pathMatches(
-    LOGIN_PATHS,
-    path,
-    {
-      allowPrefix:
-        false,
-    }
-  );
+  return pathMatches(LOGIN_PATHS, path, { allowPrefix: false });
 }
 
 export function isResetPasswordPath(AppCore, path = "") {
-  return pathMatches(
-    RESET_PASSWORD_PATHS,
-    path,
-    {
-      allowPrefix:
-        false,
-    }
-  );
+  return pathMatches(RESET_PATHS, path, { allowPrefix: false });
 }
 
 export function isResetPasswordConfirmPath(AppCore, path = "") {
-  return pathMatches(
-    RESET_CONFIRM_PATHS,
-    path,
-    {
-      allowPrefix:
-        true,
-    }
-  );
+  return pathMatches(RESET_CONFIRM_PATHS, path, { allowPrefix: true });
 }
 
 export function isActivateAccountPath(AppCore, path = "") {
-  return pathMatches(
-    ACTIVATION_PATHS,
-    path,
-    {
-      allowPrefix:
-        true,
-    }
-  );
+  return pathMatches(ACTIVATION_PATHS, path, { allowPrefix: true });
 }
 
 export function isAuthLikePath(AppCore, path = "") {
-  if (
-    pathMatches(
-      AUTH_LIKE_PATHS,
-      path,
-      {
-        allowPrefix:
-          false,
-      }
-    )
-  ) {
-    return true;
-  }
-
-  return pathMatches(
-    AUTH_LIKE_PREFIXES,
-    path,
-    {
-      allowPrefix:
-        true,
-    }
-  );
+  if (pathMatches(AUTH_PATHS, path, { allowPrefix: false })) return true;
+  return pathMatches(AUTH_PREFIXES, path, { allowPrefix: true });
 }
 
 function routeRequestsHiddenChrome(route = null) {
-  const meta =
-    safeObject(route?.meta);
+  const meta = object(route?.meta);
 
   return Boolean(
     route?.hideShell === true ||
@@ -3060,201 +1617,264 @@ function routeRequestsHiddenChrome(route = null) {
   );
 }
 
-function getRouterRoute(AppCore, Router, canonicalPath = "") {
+function routerRoute(AppCore, Router, canonical = "") {
   try {
-    if (isFunction(Router?.getRoute)) {
-      return Router.getRoute(
-        canonicalPath ||
-          getCurrentCanonicalPath(AppCore, Router)
-      );
+    if (isFn(Router?.getRoute)) {
+      return Router.getRoute(canonical || getCurrentCanonicalPath(AppCore, Router));
     }
   } catch {}
 
   try {
-    if (isFunction(Router?.currentRoute)) {
+    if (isFn(Router?.currentRoute)) {
       return Router.currentRoute();
     }
   } catch {}
 
-  try {
-    return Router?.route || Router?.current || null;
-  } catch {
-    return null;
-  }
+  return Router?.route || Router?.current || null;
 }
 
-function safeGetCurrentCanonicalPath(AppCore, Router) {
+function currentCanonical(AppCore, Router) {
   try {
-    return getCurrentCanonicalPath(AppCore, Router);
-  } catch {
-    return "";
-  }
+    const value = getCurrentCanonicalPath(AppCore, Router);
+    if (value) return canonicalShellPath(AppCore, value);
+  } catch {}
+
+  try {
+    const value = Router?.getCurrentCanonicalPath?.();
+    if (value) return canonicalShellPath(AppCore, value);
+  } catch {}
+
+  return canonicalShellPath(
+    AppCore,
+    state(AppCore).route ||
+      state(AppCore).publicPath ||
+      browserPath() ||
+      DEFAULT_ROUTE
+  );
 }
 
-function safeGetCurrentPublicPath(AppCore, Router) {
+function currentPublic(AppCore, Router) {
   try {
-    return getCurrentPublicPath(AppCore, Router);
-  } catch {
-    return "";
-  }
+    const value = getCurrentPublicPath(AppCore, Router);
+    if (value) return publicShellPath(AppCore, value);
+  } catch {}
+
+  try {
+    const value = Router?.getCurrentPublicPath?.();
+    if (value) return publicShellPath(AppCore, value);
+  } catch {}
+
+  return publicShellPath(
+    AppCore,
+    state(AppCore).publicPath ||
+      browserPath() ||
+      state(AppCore).route ||
+      DEFAULT_ROUTE
+  );
 }
 
 export function isAuthLikeRoute(AppCore, Router) {
-  const canonical =
-    normalizeCanonicalShellPath(
-      AppCore,
-      safeGetCurrentCanonicalPath(AppCore, Router) ||
-        AppCore?.state?.route ||
-        DEFAULT_ROUTE
-    );
+  const canonical = currentCanonical(AppCore, Router);
+  const publicValue = currentPublic(AppCore, Router);
+  const browserValue = publicShellPath(AppCore, browserPath());
 
-  const publicPath =
-    normalizePublicShellPath(
-      AppCore,
-      safeGetCurrentPublicPath(AppCore, Router) ||
-        AppCore?.state?.publicPath ||
-        getBrowserPath() ||
-        DEFAULT_ROUTE
-    );
+  const route = routerRoute(AppCore, Router, canonical);
 
-  const browserPath =
-    normalizePublicShellPath(
-      AppCore,
-      getBrowserPath()
-    );
+  if (routeRequestsHiddenChrome(route)) return true;
 
-  const route =
-    getRouterRoute(
-      AppCore,
-      Router,
-      canonical
-    );
-
-  if (routeRequestsHiddenChrome(route)) {
-    return true;
-  }
-
-  return [
-    canonical,
-    publicPath,
-    browserPath,
-  ].some((path) =>
-    isAuthLikePath(AppCore, path)
-  );
-}
-
-export function updateShellVisibilityByRoute(AppCore, Router, options = {}) {
-  const opts =
-    safeObject(options);
-
-  const canonical =
-    normalizeCanonicalShellPath(
-      AppCore,
-      opts.canonicalPath ||
-        safeGetCurrentCanonicalPath(AppCore, Router) ||
-        AppCore?.state?.route ||
-        DEFAULT_ROUTE
-    );
-
-  const publicPath =
-    normalizePublicShellPath(
-      AppCore,
-      opts.publicPath ||
-        safeGetCurrentPublicPath(AppCore, Router) ||
-        AppCore?.state?.publicPath ||
-        getBrowserPath() ||
-        canonical ||
-        DEFAULT_ROUTE
-    );
-
-  const route =
-    opts.route ||
-    getRouterRoute(
-      AppCore,
-      Router,
-      canonical
-    );
-
-  const hasToken =
-    pathHasAnyToken(publicPath) ||
-    pathHasAnyToken(canonical) ||
-    pathHasAnyToken(getBrowserPath());
-
-  const authLike =
-    opts.authLike !== undefined
-      ? Boolean(opts.authLike)
-      : Boolean(
-          routeRequestsHiddenChrome(route) ||
-            isAuthLikeRoute(AppCore, Router)
-        );
-
-  return setShellVisibility(
-    AppCore,
-    !authLike,
-    {
-      ...opts,
-
-      canonicalPath:
-        canonical,
-
-      publicPath,
-
-      authLike,
-
-      hideAppShell:
-        false,
-
-      tokenRoute:
-        hasToken,
-
-      reason:
-        opts.reason ||
-        "update-shell-visibility-by-route",
-    }
-  );
+  return [canonical, publicValue, browserValue].some((path) => isAuthLikePath(AppCore, path));
 }
 
 /* =========================================================
-   LOADER SAFE POLICY
+   VISIBILITY
 ========================================================= */
 
-function hideLoaderDomFallback(AppCore) {
-  const {
-    loader,
-  } =
-    getShellElements(AppCore);
+export function setShellVisibility(AppCore, visible = true, options = {}) {
+  const opts = object(options);
 
-  if (!loader) {
-    return false;
+  const nextChromeVisible = Boolean(visible);
+  const previousChromeVisible = readShellVisibility(AppCore);
+
+  const authLike = opts.authLike !== undefined
+    ? Boolean(opts.authLike)
+    : !nextChromeVisible;
+
+  const busy = opts.busy !== undefined
+    ? Boolean(opts.busy)
+    : isBootingOrLoading(AppCore);
+
+  const appShellVisible = opts.hideAppShell === true
+    ? false
+    : true;
+
+  const elements = getShellElements(AppCore);
+  const chromeHidden = !nextChromeVisible;
+  const hasTablehead = tableheadHasContent(elements.tableheadContainer);
+
+  for (const element of [
+    elements.sidebarMount,
+    elements.topbarMount,
+    elements.sidebar,
+    elements.topbar,
+  ]) {
+    setHidden(element, chromeHidden);
   }
 
+  setHidden(elements.tablehead, chromeHidden || !hasTablehead);
+  setHidden(elements.tableheadContainer, chromeHidden);
+
+  if (elements.mobileSidebarToggle) {
+    setHidden(elements.mobileSidebarToggle, chromeHidden);
+    setAttribute(elements.mobileSidebarToggle, "aria-expanded", "false");
+  }
+
+  const domState = markShellDomState(AppCore, {
+    chromeVisible: nextChromeVisible,
+    authLike,
+    busy,
+    appShellVisible,
+  });
+
+  const canonical = canonicalShellPath(
+    AppCore,
+    opts.canonicalPath ||
+      state(AppCore).route ||
+      DEFAULT_ROUTE
+  );
+
+  const publicValue = publicShellPath(
+    AppCore,
+    opts.publicPath ||
+      state(AppCore).publicPath ||
+      canonical ||
+      DEFAULT_ROUTE
+  );
+
+  setCoreState(AppCore, {
+    shellVisible: domState.appShellVisible,
+    shellHidden: !domState.appShellVisible,
+    appShellVisible: domState.appShellVisible,
+
+    chromeVisible: nextChromeVisible,
+    routeShellHidden: !nextChromeVisible,
+
+    shellAuthLike: authLike,
+    authScreen: authLike,
+    routeMode: authLike ? "auth" : "app",
+
+    shellBusy: busy,
+
+    currentShellRoute: canonical,
+    currentShellCanonicalPath: canonical,
+    currentShellPublicPath: publicValue,
+    shellUpdatedAt: iso(),
+  });
+
+  if (opts.emit !== false) {
+    const snapshot = getShellSnapshot(AppCore, opts.Router || null);
+
+    const payload = {
+      reason: text(opts.reason, "set-shell-visibility"),
+
+      hidden: chromeHidden,
+      visible: nextChromeVisible,
+      chromeVisible: nextChromeVisible,
+      appShellVisible: domState.appShellVisible,
+
+      changed: Boolean(
+        opts.force ||
+          previousChromeVisible !== nextChromeVisible ||
+          opts.forceChromeSync === true
+      ),
+
+      authLike,
+      busy,
+
+      canonical: snapshot.canonical,
+      publicPath: snapshot.publicPath,
+      snapshot,
+    };
+
+    emitShellEvent(AppCore, EVENTS.change, payload);
+    emitShellEvent(AppCore, EVENTS.state, payload);
+    emitShellEvent(AppCore, EVENTS.appState, payload);
+  }
+
+  return nextChromeVisible;
+}
+
+export function updateShellVisibilityByRoute(AppCore, Router, options = {}) {
+  const opts = object(options);
+
+  const canonical = canonicalShellPath(
+    AppCore,
+    opts.canonicalPath ||
+      currentCanonical(AppCore, Router) ||
+      state(AppCore).route ||
+      DEFAULT_ROUTE
+  );
+
+  const publicValue = publicShellPath(
+    AppCore,
+    opts.publicPath ||
+      currentPublic(AppCore, Router) ||
+      state(AppCore).publicPath ||
+      browserPath() ||
+      canonical ||
+      DEFAULT_ROUTE
+  );
+
+  const route = opts.route || routerRoute(AppCore, Router, canonical);
+
+  const tokenRoute = Boolean(
+    routeHasToken(publicValue) ||
+      routeHasToken(canonical) ||
+      routeHasToken(browserPath())
+  );
+
+  const authLike = opts.authLike !== undefined
+    ? Boolean(opts.authLike)
+    : Boolean(
+        routeRequestsHiddenChrome(route) ||
+          isAuthLikeRoute(AppCore, Router)
+      );
+
+  return setShellVisibility(AppCore, !authLike, {
+    ...opts,
+
+    Router,
+    route,
+
+    canonicalPath: canonical,
+    publicPath: publicValue,
+
+    authLike,
+    hideAppShell: false,
+    tokenRoute,
+
+    reason: opts.reason || "update-shell-visibility-by-route",
+  });
+}
+
+/* =========================================================
+   LOADER POLICY
+========================================================= */
+
+function hideLoaderFallback(AppCore) {
+  const { loader } = getShellElements(AppCore);
+
+  if (!loader) return false;
+
   try {
-    loader.hidden =
-      true;
+    loader.hidden = true;
 
-    for (const className of HIDDEN_LOADER_CLASSES) {
-      loader.classList.add(className);
-    }
+    addRemoveClasses(loader, CLASSES.loaderHidden, CLASSES.loaderVisible);
 
-    for (const className of VISIBLE_LOADER_CLASSES) {
-      loader.classList.remove(className);
-    }
+    loader.setAttribute("aria-hidden", "true");
+    loader.setAttribute("aria-busy", "false");
 
-    loader.setAttribute(
-      "aria-hidden",
-      "true"
-    );
-
-    loader.setAttribute(
-      "aria-busy",
-      "false"
-    );
-
-    loader.dataset.loaderVisible =
-      "false";
-
-    loader.dataset.loaderState =
-      "hidden";
+    loader.dataset.loaderVisible = "false";
+    loader.dataset.loaderState = "hidden";
 
     return true;
   } catch {
@@ -3263,56 +1883,29 @@ function hideLoaderDomFallback(AppCore) {
 }
 
 function hideLoaderSafe(AppCore, hideLoader, options = {}) {
-  const opts =
-    safeObject(options);
+  const opts = object(options);
 
-  const bootBusy =
-    isBootingOrLoading(AppCore) ||
-    hasBodyBootClass();
-
-  if (
-    bootBusy &&
-    opts.force !== true
-  ) {
+  if ((isBootingOrLoading(AppCore) || hasBootClass()) && opts.force !== true) {
     return false;
   }
 
   try {
-    if (isFunction(hideLoader)) {
-      hideLoader(
-        AppCore,
-        {
-          reason:
-            opts.reason ||
-            "shell-post-render",
-
-          minVisibleMs:
-            opts.minVisibleMs,
-
-          allowDuringBoot:
-            opts.force === true,
-
-          force:
-            opts.force === true,
-        }
-      );
+    if (isFn(hideLoader)) {
+      hideLoader(AppCore, {
+        reason: opts.reason || "shell-post-render",
+        minVisibleMs: opts.minVisibleMs,
+        allowDuringBoot: opts.force === true,
+        force: opts.force === true,
+      });
 
       return true;
     }
   } catch (error) {
-    recordShellError(
-      AppCore,
-      "hideLoader",
-      error
-    );
+    recordError(AppCore, "hideLoader", error);
   }
 
-  return hideLoaderDomFallback(AppCore);
+  return hideLoaderFallback(AppCore);
 }
-
-/* =========================================================
-   POST RENDER
-========================================================= */
 
 export function applyPostRenderLoaderPolicy({
   AppCore,
@@ -3322,242 +1915,124 @@ export function applyPostRenderLoaderPolicy({
   hideLoaderOnPostRender = true,
   minVisibleMs = undefined,
 } = {}) {
-  const view =
-    getViewContainer(AppCore);
+  const view = getViewContainer(AppCore);
+  const hasViewContent = hasContent(view);
+  const authLike = isAuthLikeRoute(AppCore, Router);
+  const bootBusy = isBootingOrLoading(AppCore) || hasBootClass();
 
-  const hasContent =
-    hasViewContent(view);
+  const chromeVisible = updateShellVisibilityByRoute(AppCore, Router, {
+    authLike,
+    busy: !hasViewContent || bootBusy,
+    hideAppShell: false,
+    forceChromeSync: true,
+    reason: "post-render-policy",
+  });
 
-  const authLike =
-    isAuthLikeRoute(AppCore, Router);
-
-  const bootBusy =
-    isBootingOrLoading(AppCore) ||
-    hasBodyBootClass();
-
-  const chromeVisible =
-    updateShellVisibilityByRoute(
-      AppCore,
-      Router,
-      {
-        authLike,
-        busy:
-          !hasContent || bootBusy,
-        hideAppShell:
-          false,
-        forceChromeSync:
-          true,
-        reason:
-          "post-render-policy",
-      }
-    );
-
-  const shouldConsiderHide =
+  const canHideLoader = Boolean(
     hideLoaderOnPostRender !== false &&
-    (
-      authLike ||
-      hasContent
-    );
-
-  const loaderHidden =
-    shouldConsiderHide
-      ? hideLoaderSafe(
-          AppCore,
-          hideLoader,
-          {
-            force:
-              forceHideLoader === true,
-            reason:
-              "post-render",
-            minVisibleMs,
-          }
-        )
-      : false;
-
-  if (hasContent) {
-    setAppShellBusy(
-      AppCore,
-      bootBusy
-    );
-  }
-
-  const shellSnapshot =
-    getShellSnapshot(
-      AppCore,
-      Router
-    );
-
-  emitShellEvent(
-    AppCore,
-    SHELL_EVENTS.postRender,
-    {
-      authLike,
-
-      hasViewContent:
-        hasContent,
-
-      shellVisible:
-        shellSnapshot.appShellVisible,
-
-      appShellVisible:
-        shellSnapshot.appShellVisible,
-
-      chromeVisible,
-
-      loaderHidden,
-
-      loaderVisible:
-        isLoaderVisible(AppCore),
-
-      bootBusy,
-
-      canonical:
-        shellSnapshot.canonical,
-
-      publicPath:
-        shellSnapshot.publicPath,
-
-      snapshot:
-        shellSnapshot,
-    }
+      (authLike || hasViewContent)
   );
 
-  return shellSnapshot;
+  const loaderHidden = canHideLoader
+    ? hideLoaderSafe(AppCore, hideLoader, {
+        force: forceHideLoader === true,
+        reason: "post-render",
+        minVisibleMs,
+      })
+    : false;
+
+  if (hasViewContent) {
+    setShellBusy(AppCore, bootBusy);
+  }
+
+  const snapshot = getShellSnapshot(AppCore, Router);
+
+  emitShellEvent(AppCore, EVENTS.postRender, {
+    authLike,
+    hasViewContent,
+
+    shellVisible: snapshot.appShellVisible,
+    appShellVisible: snapshot.appShellVisible,
+    chromeVisible,
+
+    loaderHidden,
+    loaderVisible: isLoaderVisible(AppCore),
+
+    bootBusy,
+
+    canonical: snapshot.canonical,
+    publicPath: snapshot.publicPath,
+
+    snapshot,
+  });
+
+  return snapshot;
 }
 
 /* =========================================================
-   APP READY / BUSY HELPERS
+   READY / BUSY
 ========================================================= */
 
 export function markShellReady(AppCore, options = {}) {
-  const opts =
-    safeObject(options);
+  const opts = object(options);
+  const Router = opts.Router || null;
 
-  const Router =
-    opts.Router || null;
+  const authLike = opts.authLike !== undefined
+    ? Boolean(opts.authLike)
+    : isAuthLikeRoute(AppCore, Router);
 
-  const authLike =
-    opts.authLike !== undefined
-      ? Boolean(opts.authLike)
-      : isAuthLikeRoute(AppCore, Router);
+  setShellBusy(AppCore, false);
 
-  setAppShellBusy(
-    AppCore,
-    false
-  );
+  markShellDomState(AppCore, {
+    chromeVisible: opts.chromeVisible !== undefined
+      ? Boolean(opts.chromeVisible)
+      : readShellVisibility(AppCore),
+    authLike,
+    busy: false,
+    appShellVisible: opts.appShellVisible !== false,
+  });
 
-  markShellDomState(
-    AppCore,
-    {
-      chromeVisible:
-        opts.chromeVisible !== undefined
-          ? Boolean(opts.chromeVisible)
-          : readShellVisibility(AppCore),
+  setCoreState(AppCore, {
+    shellBusy: false,
+    shellReady: true,
+    shellReadyAt: iso(),
 
-      authLike,
+    appShellVisible: opts.appShellVisible !== false,
+    shellVisible: opts.appShellVisible !== false,
+    shellHidden: opts.appShellVisible === false,
+  });
 
-      busy:
-        false,
-
-      appShellVisible:
-        opts.appShellVisible !== false,
-    }
-  );
-
-  setCoreState(
-    AppCore,
-    {
-      shellBusy:
-        false,
-
-      shellReady:
-        true,
-
-      shellReadyAt:
-        safeIsoDate(),
-
-      appShellVisible:
-        opts.appShellVisible !== false,
-
-      shellVisible:
-        opts.appShellVisible !== false,
-
-      shellHidden:
-        opts.appShellVisible === false,
-    }
-  );
-
-  emitShellEvent(
-    AppCore,
-    SHELL_EVENTS.ready,
-    {
-      snapshot:
-        getShellSnapshot(
-          AppCore,
-          Router
-        ),
-    }
-  );
+  emitShellEvent(AppCore, EVENTS.ready, {
+    snapshot: getShellSnapshot(AppCore, Router),
+  });
 
   return true;
 }
 
 export function markShellBusy(AppCore, options = {}) {
-  const opts =
-    safeObject(options);
+  const opts = object(options);
 
-  setAppShellBusy(
-    AppCore,
-    true
-  );
+  setShellBusy(AppCore, true);
 
-  markShellDomState(
-    AppCore,
-    {
-      chromeVisible:
-        opts.chromeVisible !== undefined
-          ? Boolean(opts.chromeVisible)
-          : readShellVisibility(AppCore),
+  markShellDomState(AppCore, {
+    chromeVisible: opts.chromeVisible !== undefined
+      ? Boolean(opts.chromeVisible)
+      : readShellVisibility(AppCore),
+    authLike: Boolean(opts.authLike),
+    busy: true,
+    appShellVisible: opts.appShellVisible !== false,
+  });
 
-      authLike:
-        Boolean(opts.authLike),
+  setCoreState(AppCore, {
+    shellBusy: true,
+    appShellVisible: opts.appShellVisible !== false,
+    shellVisible: opts.appShellVisible !== false,
+    shellHidden: opts.appShellVisible === false,
+  });
 
-      busy:
-        true,
-
-      appShellVisible:
-        opts.appShellVisible !== false,
-    }
-  );
-
-  setCoreState(
-    AppCore,
-    {
-      shellBusy:
-        true,
-
-      appShellVisible:
-        opts.appShellVisible !== false,
-
-      shellVisible:
-        opts.appShellVisible !== false,
-
-      shellHidden:
-        opts.appShellVisible === false,
-    }
-  );
-
-  emitShellEvent(
-    AppCore,
-    SHELL_EVENTS.busy,
-    {
-      snapshot:
-        getShellSnapshot(
-          AppCore,
-          opts.Router || null
-        ),
-    }
-  );
+  emitShellEvent(AppCore, EVENTS.busy, {
+    snapshot: getShellSnapshot(AppCore, opts.Router || null),
+  });
 
   return true;
 }
@@ -3566,339 +2041,169 @@ export function markShellBusy(AppCore, options = {}) {
    SNAPSHOT
 ========================================================= */
 
-function getElementSnapshot(element) {
-  if (!element) {
-    return {
-      exists:
-        false,
-    };
-  }
+function elementSnapshot(element) {
+  if (!element) return { exists: false };
 
   return {
-    exists:
-      true,
+    exists: true,
 
-    id:
-      safeText(element.id, ""),
+    id: text(element.id, ""),
+    tag: text(element.tagName?.toLowerCase?.(), ""),
 
-    tag:
-      safeText(
-        element.tagName?.toLowerCase?.(),
-        ""
-      ),
+    hidden: Boolean(element.hidden),
 
-    hidden:
-      Boolean(element.hidden),
+    ariaHidden: text(element.getAttribute?.("aria-hidden"), ""),
+    ariaBusy: text(element.getAttribute?.("aria-busy"), ""),
 
-    ariaHidden:
-      safeText(
-        element.getAttribute?.("aria-hidden"),
-        ""
-      ),
+    datasetShell: text(element.dataset?.shell, ""),
+    datasetChrome: text(element.dataset?.chrome, ""),
+    datasetRouteMode: text(element.dataset?.routeMode, ""),
+    datasetShellInteractive: text(element.dataset?.shellInteractive, ""),
+    datasetAppShellVisible: text(element.dataset?.appShellVisible, ""),
+    datasetLoaderVisible: text(element.dataset?.loaderVisible, ""),
+    datasetLoaderState: text(element.dataset?.loaderState, ""),
 
-    ariaBusy:
-      safeText(
-        element.getAttribute?.("aria-busy"),
-        ""
-      ),
+    className: text(element.className?.baseVal || element.className, "").slice(0, SNAPSHOT_CLASS_MAX),
 
-    datasetShell:
-      safeText(element.dataset?.shell, ""),
-
-    datasetChrome:
-      safeText(element.dataset?.chrome, ""),
-
-    datasetRouteMode:
-      safeText(element.dataset?.routeMode, ""),
-
-    datasetShellInteractive:
-      safeText(element.dataset?.shellInteractive, ""),
-
-    datasetAppShellVisible:
-      safeText(element.dataset?.appShellVisible, ""),
-
-    datasetLoaderVisible:
-      safeText(element.dataset?.loaderVisible, ""),
-
-    datasetLoaderState:
-      safeText(element.dataset?.loaderState, ""),
-
-    className:
-      safeText(
-        element.className?.baseVal ||
-          element.className,
-        ""
-      ).slice(0, SNAPSHOT_MAX_CLASS_LENGTH),
-
-    childCount:
-      (() => {
-        try {
-          return element.children?.length || 0;
-        } catch {
-          return 0;
-        }
-      })(),
+    childCount: (() => {
+      try {
+        return element.children?.length || 0;
+      } catch {
+        return 0;
+      }
+    })(),
   };
 }
 
 export function getShellSnapshot(AppCore, Router = null) {
-  const {
-    appShell,
-    mainContent,
-    appContent,
-    viewContainer,
+  const elements = getShellElements(AppCore);
+  const currentState = state(AppCore);
 
-    sidebarMount,
-    topbarMount,
+  const canonical = canonicalShellPath(
+    AppCore,
+    currentCanonical(AppCore, Router) ||
+      currentState.route ||
+      DEFAULT_ROUTE
+  );
 
-    sidebar,
-    topbar,
+  const publicValue = publicShellPath(
+    AppCore,
+    currentPublic(AppCore, Router) ||
+      currentState.publicPath ||
+      DEFAULT_ROUTE
+  );
 
-    tablehead,
-    tableheadContainer,
-    mobileSidebarToggle,
+  const chromeVisible = readShellVisibility(AppCore);
 
-    loader,
-
-    body,
-    html,
-  } =
-    getShellElements(AppCore);
-
-  const state =
-    getCoreState(AppCore);
-
-  const canonical =
-    normalizeCanonicalShellPath(
-      AppCore,
-      safeGetCurrentCanonicalPath(AppCore, Router) ||
-        state.route ||
-        DEFAULT_ROUTE
-    );
-
-  const publicPath =
-    normalizePublicShellPath(
-      AppCore,
-      safeGetCurrentPublicPath(AppCore, Router) ||
-        state.publicPath ||
-        DEFAULT_ROUTE
-    );
-
-  const chromeVisible =
-    readShellVisibility(AppCore);
-
-  const appShellVisible =
-    appShell
-      ? !appShell.hidden &&
-        appShell.getAttribute("aria-hidden") !== "true"
-      : false;
+  const appShellVisible = elements.appShell
+    ? !elements.appShell.hidden && elements.appShell.getAttribute("aria-hidden") !== "true"
+    : false;
 
   return {
-    version:
-      SHELL_VERSION,
+    version: SHELL_VERSION,
 
-    shellVisible:
-      appShellVisible,
-
+    shellVisible: appShellVisible,
     appShellVisible,
 
     chromeVisible,
+    routeShellHidden: !chromeVisible,
 
-    routeShellHidden:
-      !chromeVisible,
+    authLike: isAuthLikeRoute(AppCore, Router),
 
-    authLike:
-      isAuthLikeRoute(AppCore, Router),
+    tokenRoute: Boolean(
+      routeHasToken(canonical) ||
+        routeHasToken(publicValue) ||
+        routeHasToken(browserPath())
+    ),
 
-    tokenRoute:
-      pathHasAnyToken(canonical) ||
-      pathHasAnyToken(publicPath) ||
-      pathHasAnyToken(getBrowserPath()),
+    canonical: redact(canonical),
+    publicPath: redact(publicValue),
+    browserPath: redact(browserPath()),
 
-    canonical:
-      redactTokenInText(canonical),
+    booting: Boolean(currentState.booting),
+    loading: Boolean(currentState.loading),
+    ready: Boolean(currentState.ready || currentState.appReady),
 
-    publicPath:
-      redactTokenInText(publicPath),
+    bootBusy: isBootingOrLoading(AppCore),
+    bodyBootClass: hasBootClass(),
 
-    browserPath:
-      redactTokenInText(getBrowserPath()),
-
-    booting:
-      Boolean(state.booting),
-
-    loading:
-      Boolean(state.loading),
-
-    ready:
-      Boolean(
-        state.ready ||
-          state.appReady
-      ),
-
-    bootBusy:
-      isBootingOrLoading(AppCore),
-
-    bodyBootClass:
-      hasBodyBootClass(),
-
-    loaderVisible:
-      isLoaderVisible(AppCore),
+    loaderVisible: isLoaderVisible(AppCore),
 
     elements: {
-      appShell:
-        getElementSnapshot(appShell),
+      appShell: elementSnapshot(elements.appShell),
+      mainContent: elementSnapshot(elements.mainContent),
+      appContent: elementSnapshot(elements.appContent),
+      viewContainer: elementSnapshot(elements.viewContainer),
 
-      mainContent:
-        getElementSnapshot(mainContent),
+      sidebarMount: elementSnapshot(elements.sidebarMount),
+      topbarMount: elementSnapshot(elements.topbarMount),
 
-      appContent:
-        getElementSnapshot(appContent),
+      sidebar: elementSnapshot(elements.sidebar),
+      topbar: elementSnapshot(elements.topbar),
 
-      viewContainer:
-        getElementSnapshot(viewContainer),
+      tablehead: elementSnapshot(elements.tablehead),
+      tableheadContainer: elementSnapshot(elements.tableheadContainer),
 
-      sidebarMount:
-        getElementSnapshot(sidebarMount),
-
-      topbarMount:
-        getElementSnapshot(topbarMount),
-
-      sidebar:
-        getElementSnapshot(sidebar),
-
-      topbar:
-        getElementSnapshot(topbar),
-
-      tablehead:
-        getElementSnapshot(tablehead),
-
-      tableheadContainer:
-        getElementSnapshot(tableheadContainer),
-
-      mobileSidebarToggle:
-        getElementSnapshot(mobileSidebarToggle),
-
-      loader:
-        getElementSnapshot(loader),
+      mobileSidebarToggle: elementSnapshot(elements.mobileSidebarToggle),
+      loader: elementSnapshot(elements.loader),
     },
 
-    appShellExists:
-      Boolean(appShell),
+    appShellExists: Boolean(elements.appShell),
+    appShellHidden: Boolean(elements.appShell?.hidden),
+    appShellBusy: text(elements.appShell?.getAttribute?.("aria-busy"), ""),
 
-    appShellHidden:
-      Boolean(appShell?.hidden),
+    mainContentExists: Boolean(elements.mainContent),
+    appContentExists: Boolean(elements.appContent),
 
-    appShellBusy:
-      safeText(
-        appShell?.getAttribute?.("aria-busy"),
-        ""
-      ),
+    hasView: Boolean(elements.viewContainer),
+    hasViewContent: hasContent(elements.viewContainer),
 
-    mainContentExists:
-      Boolean(mainContent),
+    sidebarMountExists: Boolean(elements.sidebarMount),
+    sidebarMountHidden: Boolean(elements.sidebarMount?.hidden),
 
-    appContentExists:
-      Boolean(appContent),
+    topbarMountExists: Boolean(elements.topbarMount),
+    topbarMountHidden: Boolean(elements.topbarMount?.hidden),
 
-    hasView:
-      Boolean(viewContainer),
+    sidebarExists: Boolean(elements.sidebar),
+    sidebarHidden: Boolean(elements.sidebar?.hidden),
 
-    hasViewContent:
-      hasViewContent(viewContainer),
+    topbarExists: Boolean(elements.topbar),
+    topbarHidden: Boolean(elements.topbar?.hidden),
 
-    sidebarMountExists:
-      Boolean(sidebarMount),
+    tableheadExists: Boolean(elements.tablehead),
+    tableheadHidden: Boolean(elements.tablehead?.hidden),
 
-    sidebarMountHidden:
-      Boolean(sidebarMount?.hidden),
+    tableheadContainerExists: Boolean(elements.tableheadContainer),
+    tableheadContainerHidden: Boolean(elements.tableheadContainer?.hidden),
+    tableheadHasContent: tableheadHasContent(elements.tableheadContainer),
 
-    topbarMountExists:
-      Boolean(topbarMount),
+    mobileSidebarToggleExists: Boolean(elements.mobileSidebarToggle),
+    mobileSidebarToggleHidden: Boolean(elements.mobileSidebarToggle?.hidden),
 
-    topbarMountHidden:
-      Boolean(topbarMount?.hidden),
+    loaderExists: Boolean(elements.loader),
+    loaderHidden: Boolean(elements.loader?.hidden),
 
-    sidebarExists:
-      Boolean(sidebar),
+    bodyShell: text(elements.body?.dataset?.shell, ""),
+    htmlShell: text(elements.html?.dataset?.shell, ""),
 
-    sidebarHidden:
-      Boolean(sidebar?.hidden),
+    bodyChrome: text(elements.body?.dataset?.chrome, ""),
+    htmlChrome: text(elements.html?.dataset?.chrome, ""),
 
-    topbarExists:
-      Boolean(topbar),
+    bodyRouteMode: text(elements.body?.dataset?.routeMode, ""),
+    htmlRouteMode: text(elements.html?.dataset?.routeMode, ""),
 
-    topbarHidden:
-      Boolean(topbar?.hidden),
+    bodyClasses: classListArray(elements.body?.classList),
+    htmlClasses: classListArray(elements.html?.classList),
 
-    tableheadExists:
-      Boolean(tablehead),
+    lastShellEventKey: redact(lastEventKey),
+    lastShellEventAt: lastEventAt,
+    lastShellEventAtIso: lastEventAt ? iso(lastEventAt) : "",
 
-    tableheadHidden:
-      Boolean(tablehead?.hidden),
+    lastShellError: lastError,
 
-    tableheadContainerExists:
-      Boolean(tableheadContainer),
+    debugApiInstalled: Boolean(debugApiInstalled),
 
-    tableheadContainerHidden:
-      Boolean(tableheadContainer?.hidden),
-
-    tableheadHasContent:
-      tableheadHasContent(tableheadContainer),
-
-    mobileSidebarToggleExists:
-      Boolean(mobileSidebarToggle),
-
-    mobileSidebarToggleHidden:
-      Boolean(mobileSidebarToggle?.hidden),
-
-    loaderExists:
-      Boolean(loader),
-
-    loaderHidden:
-      Boolean(loader?.hidden),
-
-    bodyShell:
-      safeText(body?.dataset?.shell, ""),
-
-    htmlShell:
-      safeText(html?.dataset?.shell, ""),
-
-    bodyChrome:
-      safeText(body?.dataset?.chrome, ""),
-
-    htmlChrome:
-      safeText(html?.dataset?.chrome, ""),
-
-    bodyRouteMode:
-      safeText(body?.dataset?.routeMode, ""),
-
-    htmlRouteMode:
-      safeText(html?.dataset?.routeMode, ""),
-
-    bodyClasses:
-      safeArrayFromClassList(body?.classList),
-
-    htmlClasses:
-      safeArrayFromClassList(html?.classList),
-
-    lastShellEventKey:
-      redactTokenInText(lastShellEventKey),
-
-    lastShellEventAt,
-
-    lastShellEventAtIso:
-      lastShellEventAt
-        ? safeIsoDate(lastShellEventAt)
-        : "",
-
-    lastShellError,
-
-    debugApiInstalled:
-      Boolean(debugApiInstalled),
-
-    at:
-      safeIsoDate(),
+    at: iso(),
   };
 }
 
@@ -3907,66 +2212,34 @@ export function getShellSnapshot(AppCore, Router = null) {
 ========================================================= */
 
 function attachDebugApi(AppCore = null, api = null) {
-  if (!api) {
-    return false;
-  }
+  if (!api) return false;
 
   try {
     if (isBrowser()) {
-      window[SHELL_RUNTIME_KEY] =
-        api;
-
-      window.__ONION_APP_SHELL__ =
-        api;
+      window[RUNTIME_KEY] = api;
+      window.__ONION_APP_SHELL__ = api;
     }
   } catch {}
 
   try {
-    if (
-      AppCore &&
-      typeof AppCore === "object" &&
-      Object.isExtensible(AppCore)
-    ) {
-      Object.defineProperty(
-        AppCore,
-        "Shell",
-        {
-          value:
-            api,
-          configurable:
-            true,
-          enumerable:
-            false,
-          writable:
-            true,
-        }
-      );
+    if (AppCore && typeof AppCore === "object" && Object.isExtensible(AppCore)) {
+      Object.defineProperty(AppCore, "Shell", {
+        value: api,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+      });
     }
   } catch {}
 
   try {
-    if (
-      AppCore?.modules &&
-      isFunction(AppCore.modules.register)
-    ) {
-      AppCore.modules.register(
-        "Shell",
-        api,
-        {
-          aliases:
-            [
-              "shell",
-              "AppShell",
-              "appShell",
-            ],
-          overwrite:
-            false,
-          replace:
-            false,
-          source:
-            SHELL_SOURCE,
-        }
-      );
+    if (isFn(AppCore?.modules?.register)) {
+      AppCore.modules.register("Shell", api, {
+        aliases: ["shell", "AppShell", "appShell"],
+        overwrite: false,
+        replace: false,
+        source: SOURCE,
+      });
     }
   } catch {}
 
@@ -3974,31 +2247,20 @@ function attachDebugApi(AppCore = null, api = null) {
 }
 
 export function exposeShellDebugApi(AppCore = null) {
-  if (
-    debugApiInstalled &&
-    debugApiRef
-  ) {
-    attachDebugApi(
-      AppCore,
-      debugApiRef
-    );
-
+  if (debugApiInstalled && debugApiRef) {
+    attachDebugApi(AppCore, debugApiRef);
     return debugApiRef;
   }
 
   const api = {
-    version:
-      SHELL_VERSION,
+    version: SHELL_VERSION,
 
     getElements() {
       return getShellElements(AppCore);
     },
 
     getSnapshot(Router = null) {
-      return getShellSnapshot(
-        AppCore,
-        Router
-      );
+      return getShellSnapshot(AppCore, Router);
     },
 
     refresh() {
@@ -4015,128 +2277,76 @@ export function exposeShellDebugApi(AppCore = null) {
     },
 
     setVisible(visible = true, options = {}) {
-      return setShellVisibility(
-        AppCore,
-        visible,
-        options
-      );
+      return setShellVisibility(AppCore, visible, options);
     },
 
     updateByRoute(Router = null, options = {}) {
-      return updateShellVisibilityByRoute(
-        AppCore,
-        Router,
-        options
-      );
+      return updateShellVisibilityByRoute(AppCore, Router, options);
     },
   };
 
-  debugApiRef =
-    api;
+  debugApiRef = api;
+  debugApiInstalled = true;
 
-  debugApiInstalled =
-    true;
+  attachDebugApi(AppCore, api);
 
-  attachDebugApi(
-    AppCore,
-    api
-  );
-
-  emitShellEvent(
-    AppCore,
-    SHELL_EVENTS.debugApi,
-    {
-      installed:
-        true,
-    },
-    {
-      dedupe:
-        false,
-    }
-  );
+  emitShellEvent(AppCore, EVENTS.debugApi, {
+    installed: true,
+  }, {
+    dedupe: false,
+  });
 
   return api;
 }
 
 export function refreshShellElements(AppCore) {
-  const elements =
-    getShellElements(AppCore);
+  const elements = getShellElements(AppCore);
 
   exposeShellDebugApi(AppCore);
 
-  emitShellEvent(
-    AppCore,
-    SHELL_EVENTS.elements,
-    {
-      snapshot:
-        getShellSnapshot(AppCore),
-    },
-    {
-      dedupe:
-        false,
-    }
-  );
+  emitShellEvent(AppCore, EVENTS.elements, {
+    snapshot: getShellSnapshot(AppCore),
+  }, {
+    dedupe: false,
+  });
 
   return elements;
 }
 
 export function resetShellRuntimeState(AppCore) {
-  setCoreState(
-    AppCore,
-    {
-      shellVisible:
-        true,
+  setCoreState(AppCore, {
+    shellVisible: true,
+    shellHidden: false,
+    appShellVisible: true,
 
-      shellHidden:
-        false,
+    chromeVisible: true,
+    routeShellHidden: false,
 
-      appShellVisible:
-        true,
+    shellAuthLike: false,
+    authScreen: false,
 
-      chromeVisible:
-        true,
+    shellBusy: false,
+    shellReady: false,
 
-      routeShellHidden:
-        false,
+    routeMode: "app",
+  });
 
-      shellAuthLike:
-        false,
-
-      authScreen:
-        false,
-
-      shellBusy:
-        false,
-
-      shellReady:
-        false,
-
-      routeMode:
-        "app",
-    }
-  );
-
-  markShellDomState(
-    AppCore,
-    {
-      chromeVisible:
-        true,
-      authLike:
-        false,
-      busy:
-        false,
-      appShellVisible:
-        true,
-    }
-  );
+  markShellDomState(AppCore, {
+    chromeVisible: true,
+    authLike: false,
+    busy: false,
+    appShellVisible: true,
+  });
 
   exposeShellDebugApi(AppCore);
+
+  log(AppCore, "Shell runtime reset.");
 
   return getShellSnapshot(AppCore);
 }
 
 /* =========================================================
-   DEFAULT EXPORT
+   EXPORT
 ========================================================= */
 
 export default {

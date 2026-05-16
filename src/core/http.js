@@ -2,7 +2,7 @@
    Onion SPA - Core HTTP
    Archivo: src/core/http.js
 
-   CORE HTTP · FINAL SIMPLE
+   CORE HTTP · SIMPLE
    - Fachada única sobre src/core/request.js
    - Backend canónico: https://api.onionit.net
    - Sin fetch propio, parser propio, retry propio ni timeout propio
@@ -15,6 +15,7 @@ import { config } from "./config.js";
 
 import {
   hasValidToken as coreHasValidToken,
+  isPublicApiPath as coreIsPublicApiPath,
   redactTokenInText as coreRedactTokenInText,
 } from "./helpers.js";
 
@@ -23,11 +24,7 @@ import {
   createApiClient,
 } from "./request.js";
 
-/* =========================================================
-   CONSTANTS
-========================================================= */
-
-export const HTTP_VERSION = "20.0.0-final";
+export const HTTP_VERSION = "21.0.0-simple";
 
 export const DEFAULT_API_ORIGIN =
   config?.canonicalProductionApiBase || "https://api.onionit.net";
@@ -95,8 +92,10 @@ const SENSITIVE_KEY_RE =
 
 let apiOrigin = DEFAULT_API_ORIGIN;
 let installedAppCore = null;
+let installContext = null;
 let requestEngine = null;
 let apiEngine = null;
+let externalRequest = null;
 let tokenProvider = null;
 let authPayloadCommitter = null;
 let refreshPromise = null;
@@ -151,7 +150,7 @@ function safeObject(value, fallback = {}) {
 
 function safeArray(value) {
   if (Array.isArray(value)) return value;
-  if (value instanceof Set) return Array.from(value);
+  if (value instanceof Set) return [...value];
   if (value === null || value === undefined) return [];
   return [value];
 }
@@ -159,12 +158,12 @@ function safeArray(value) {
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
 
-  const text = String(value)
+  const out = String(value)
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  return text || fallback;
+  return out || fallback;
 }
 
 function safeLower(value, fallback = "") {
@@ -172,8 +171,8 @@ function safeLower(value, fallback = "") {
 }
 
 function safeNumber(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
+  const out = Number(value);
+  return Number.isFinite(out) ? out : fallback;
 }
 
 function now() {
@@ -202,7 +201,6 @@ function defineValue(target, key, value) {
       enumerable: false,
       writable: true,
     });
-
     return true;
   } catch {}
 
@@ -244,18 +242,15 @@ function isProductionEnv() {
 ========================================================= */
 
 export function redactHttpText(value = "") {
-  let output = safeText(value, "");
-
-  if (!output) return "";
+  let out = safeText(value, "");
+  if (!out) return "";
 
   try {
-    if (isFn(coreRedactTokenInText)) {
-      output = coreRedactTokenInText(output);
-    }
+    if (isFn(coreRedactTokenInText)) out = coreRedactTokenInText(out);
   } catch {}
 
   try {
-    output = output
+    out = out
       .replace(
         /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token|otp|totp)=)([^&#\s]+)/gi,
         "$1***"
@@ -266,16 +261,12 @@ export function redactHttpText(value = "") {
       .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
   } catch {}
 
-  return output;
+  return out;
 }
 
 function sanitizePayload(value, depth = 0, keyHint = "", seen = new WeakSet()) {
-  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) {
-    return value ? "***" : null;
-  }
-
+  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) return value ? "***" : null;
   if (depth > 5) return "[depth-limit]";
-
   if (value === null || value === undefined) return value;
   if (typeof value === "string") return redactHttpText(value);
   if (typeof value === "number" || typeof value === "boolean") return value;
@@ -295,9 +286,7 @@ function sanitizePayload(value, depth = 0, keyHint = "", seen = new WeakSet()) {
   }
 
   if (Array.isArray(value)) {
-    return value
-      .slice(0, 50)
-      .map((item) => sanitizePayload(item, depth + 1, keyHint, seen));
+    return value.slice(0, 50).map((item) => sanitizePayload(item, depth + 1, keyHint, seen));
   }
 
   if (isObj(value)) {
@@ -306,13 +295,11 @@ function sanitizePayload(value, depth = 0, keyHint = "", seen = new WeakSet()) {
       seen.add(value);
     } catch {}
 
-    const output = {};
-
+    const out = {};
     for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = sanitizePayload(item, depth + 1, key, seen);
+      out[key] = sanitizePayload(item, depth + 1, key, seen);
     }
-
-    return output;
+    return out;
   }
 
   return redactHttpText(String(value));
@@ -329,7 +316,7 @@ function safeEmit(eventName = "", payload = {}) {
     ...safeObject(payload),
   });
 
-  const events = installedAppCore?.events || installedAppCore?.Events || null;
+  const events = installedAppCore?.events || installedAppCore?.Events || installContext?.events || null;
 
   for (const method of ["emit", "dispatch", "trigger"]) {
     try {
@@ -371,8 +358,7 @@ function safeWarn(...args) {
 
 function isFrontendOrigin(origin = "") {
   try {
-    const parsed = new URL(origin);
-    return FRONTEND_HOST_RE.test(parsed.hostname);
+    return FRONTEND_HOST_RE.test(new URL(origin).hostname);
   } catch {
     return false;
   }
@@ -390,20 +376,15 @@ function normalizeOrigin(value = "", fallback = DEFAULT_API_ORIGIN, options = {}
 
   try {
     const url = new URL(raw);
-
-    if (!["http:", "https:"].includes(url.protocol)) {
-      return fallback;
-    }
+    if (![
+      "http:",
+      "https:",
+    ].includes(url.protocol)) return fallback;
 
     const origin = url.origin.replace(/\/+$/g, "");
+    if (opts.allowFrontendOrigin !== true && isFrontendOrigin(origin)) return fallback;
 
-    if (opts.allowFrontendOrigin !== true && isFrontendOrigin(origin)) {
-      return fallback;
-    }
-
-    return origin === new URL(DEFAULT_API_ORIGIN).origin
-      ? DEFAULT_API_ORIGIN
-      : origin;
+    return origin === new URL(DEFAULT_API_ORIGIN).origin ? DEFAULT_API_ORIGIN : origin;
   } catch {
     return fallback;
   }
@@ -433,55 +414,27 @@ export function getApiOrigin() {
 }
 
 export function setApiOrigin(value = "", options = {}) {
-  apiOrigin = normalizeOrigin(
-    value || DEFAULT_API_ORIGIN,
-    DEFAULT_API_ORIGIN,
-    options
-  );
+  apiOrigin = normalizeOrigin(value || DEFAULT_API_ORIGIN, DEFAULT_API_ORIGIN, options);
 
-  syncConfigOrigin();
-  return apiOrigin;
-}
-
-function syncConfigOrigin() {
   try {
-    if (config && typeof config === "object") {
-      config.apiBase = apiOrigin;
-      config.apiOrigin = apiOrigin;
-      config.apiUrl = apiOrigin;
-
-      if (!config.api || typeof config.api !== "object") {
-        config.api = {};
-      }
-
-      config.api.base = apiOrigin;
-      config.api.baseUrl = apiOrigin;
-      config.api.origin = apiOrigin;
-    }
+    if (isBrowser()) window.__ONION_API_ORIGIN__ = apiOrigin;
   } catch {}
+
+  return apiOrigin;
 }
 
 function normalizePath(path = "/") {
   let value = safeText(path, "/").replace(/\\/g, "/");
-
   if (!value.startsWith("/")) value = `/${value}`;
-
   value = value.replace(/\/{2,}/g, "/");
-
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || "/";
-  }
-
-  return value || "/";
+  return value.length > 1 ? value.replace(/\/+$/g, "") || "/" : value || "/";
 }
 
 function splitRelativeUrl(value = "/") {
   const raw = safeText(value, "/");
-
   const hashIndex = raw.indexOf("#");
   const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
   const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
-
   const queryIndex = beforeHash.indexOf("?");
   const pathname = queryIndex >= 0 ? beforeHash.slice(0, queryIndex) : beforeHash;
   const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
@@ -500,20 +453,14 @@ function appendQuery(url = "", query = null) {
     const parsed = new URL(url);
 
     if (typeof URLSearchParams !== "undefined" && query instanceof URLSearchParams) {
-      for (const [key, value] of query.entries()) {
-        parsed.searchParams.set(key, value);
-      }
-
+      for (const [key, value] of query.entries()) parsed.searchParams.set(key, value);
       return parsed.toString();
     }
 
     if (Array.isArray(query)) {
       for (const [key, value] of query) {
-        if (value !== undefined && value !== null && value !== "") {
-          parsed.searchParams.append(String(key), String(value));
-        }
+        if (value !== undefined && value !== null && value !== "") parsed.searchParams.append(String(key), String(value));
       }
-
       return parsed.toString();
     }
 
@@ -523,15 +470,12 @@ function appendQuery(url = "", query = null) {
 
         if (Array.isArray(value)) {
           for (const item of value) {
-            if (item !== undefined && item !== null && item !== "") {
-              parsed.searchParams.append(key, String(item));
-            }
+            if (item !== undefined && item !== null && item !== "") parsed.searchParams.append(key, String(item));
           }
         } else {
           parsed.searchParams.set(key, String(value));
         }
       }
-
       return parsed.toString();
     }
   } catch {}
@@ -543,12 +487,9 @@ function ensureApiPath(endpoint = "/", options = {}) {
   const opts = safeObject(options);
   const parts = splitRelativeUrl(endpoint);
 
-  if (opts.api === false) {
-    return `${parts.pathname}${parts.search}${parts.hash}`;
-  }
+  if (opts.api === false) return `${parts.pathname}${parts.search}${parts.hash}`;
 
   const prefix = normalizePath(opts.apiPrefix || DEFAULT_API_PREFIX);
-
   if (parts.pathname === prefix || parts.pathname.startsWith(`${prefix}/`)) {
     return `${parts.pathname}${parts.search}${parts.hash}`;
   }
@@ -580,19 +521,11 @@ export function buildApiUrl(endpoint = "/", options = {}) {
   const raw = safeText(endpoint, "/");
 
   if (/^https?:\/\//i.test(raw)) {
-    return appendQuery(
-      rewriteFrontendApiUrl(raw, opts),
-      opts.query || opts.params
-    );
+    return appendQuery(rewriteFrontendApiUrl(raw, opts), opts.query || opts.params);
   }
 
   const path = ensureApiPath(raw, opts);
-
-  const origin = normalizeOrigin(
-    opts.origin || opts.baseURL || opts.baseUrl || getApiOrigin(),
-    DEFAULT_API_ORIGIN,
-    opts
-  );
+  const origin = normalizeOrigin(opts.origin || opts.baseURL || opts.baseUrl || getApiOrigin(), DEFAULT_API_ORIGIN, opts);
 
   return appendQuery(`${origin}${path}`, opts.query || opts.params);
 }
@@ -605,66 +538,49 @@ function pathFromEndpoint(endpoint = "/", options = {}) {
   }
 }
 
+function isPublicAuthPath(path = "") {
+  try {
+    return Boolean(coreIsPublicApiPath(path));
+  } catch {
+    return AUTH_PUBLIC_PATH_RE.test(path);
+  }
+}
+
 /* =========================================================
    TOKEN HELPERS
 ========================================================= */
 
 function unwrapStoredValue(value = "") {
   if (value === null || value === undefined) return "";
-
-  if (typeof value === "number" || typeof value === "boolean") {
-    return safeText(value, "");
-  }
+  if (typeof value === "number" || typeof value === "boolean") return safeText(value, "");
 
   if (isPlainObject(value)) {
-    for (const key of [
-      ...TOKEN_KEYS,
-      ...REFRESH_TOKEN_KEYS,
-      ...TEMP_TOKEN_KEYS,
-      "value",
-      "raw",
-      "data",
-    ]) {
+    for (const key of [...TOKEN_KEYS, ...REFRESH_TOKEN_KEYS, ...TEMP_TOKEN_KEYS, "value", "raw", "data"]) {
       const nested = unwrapStoredValue(value[key]);
       if (nested) return nested;
     }
-
     return "";
   }
 
   const raw = safeText(value, "");
-
   if (!raw) return "";
 
   try {
     const parsed = JSON.parse(raw);
-
-    if (
-      typeof parsed === "string" ||
-      typeof parsed === "number" ||
-      typeof parsed === "boolean" ||
-      isPlainObject(parsed)
-    ) {
-      return unwrapStoredValue(parsed);
-    }
+    if (["string", "number", "boolean"].includes(typeof parsed) || isPlainObject(parsed)) return unwrapStoredValue(parsed);
   } catch {}
 
   return raw;
 }
 
 function normalizeTokenValue(value = "") {
-  let token = unwrapStoredValue(value)
-    .replace(/^Bearer\s+/i, "")
-    .trim();
-
+  const token = unwrapStoredValue(value).replace(/^Bearer\s+/i, "").trim();
   if (!token || BAD_TOKEN_VALUES.has(token.toLowerCase())) return "";
   if (/[\r\n\t\s]/.test(token)) return "";
   if (token.length > 8192) return "";
 
   try {
-    if (isFn(coreHasValidToken) && !coreHasValidToken(token)) {
-      return "";
-    }
+    if (isFn(coreHasValidToken) && !coreHasValidToken(token)) return "";
   } catch {}
 
   return token;
@@ -687,11 +603,7 @@ function getAuthModule() {
 
 function readTokenFromAuthModule(kind = "access") {
   const Auth = getAuthModule();
-
-  const methods =
-    kind === "refresh"
-      ? ["getStoredRefreshToken", "getRefreshToken"]
-      : ["getAccessToken", "getToken"];
+  const methods = kind === "refresh" ? ["getStoredRefreshToken", "getRefreshToken"] : ["getAccessToken", "getToken"];
 
   for (const method of methods) {
     try {
@@ -705,10 +617,7 @@ function readTokenFromAuthModule(kind = "access") {
   try {
     if (kind === "access" && isFn(Auth?.getAuthHeader)) {
       const header = Auth.getAuthHeader();
-      const token = normalizeTokenValue(
-        header?.Authorization || header?.authorization || ""
-      );
-
+      const token = normalizeTokenValue(header?.Authorization || header?.authorization || "");
       if (token) return token;
     }
   } catch {}
@@ -719,7 +628,9 @@ function readTokenFromAuthModule(kind = "access") {
 function coreState() {
   return installedAppCore?.state && typeof installedAppCore.state === "object"
     ? installedAppCore.state
-    : runtimeState;
+    : installContext?.state && typeof installContext.state === "object"
+      ? installContext.state
+      : runtimeState;
 }
 
 function readTokenFromState(kind = "access") {
@@ -776,18 +687,9 @@ export function getRefreshToken() {
 }
 
 function writeRuntimeTokenState(tokens = {}) {
-  const token = normalizeTokenValue(
-    tokens.token || tokens.accessToken || tokens.access_token
-  );
-
-  const refreshToken = normalizeTokenValue(
-    tokens.refreshToken || tokens.refresh_token
-  );
-
-  const tempToken = normalizeTokenValue(
-    tokens.tempToken || tokens.temp_token
-  );
-
+  const token = normalizeTokenValue(tokens.token || tokens.accessToken || tokens.access_token);
+  const refreshToken = normalizeTokenValue(tokens.refreshToken || tokens.refresh_token);
+  const tempToken = normalizeTokenValue(tokens.tempToken || tokens.temp_token);
   const state = coreState();
 
   if (token) {
@@ -861,18 +763,7 @@ export function clearAuthTokens() {
 
   try {
     if (state && typeof state === "object") {
-      for (const key of [
-        "token",
-        "accessToken",
-        "access_token",
-        "authToken",
-        "auth_token",
-        "jwt",
-        "refreshToken",
-        "refresh_token",
-        "tempToken",
-        "temp_token",
-      ]) {
+      for (const key of ["token", "accessToken", "access_token", "authToken", "auth_token", "jwt", "refreshToken", "refresh_token", "tempToken", "temp_token"]) {
         delete state[key];
       }
 
@@ -896,24 +787,13 @@ function collectObjects(value, depth = 0, seen = new WeakSet()) {
     seen.add(value);
   } catch {}
 
-  const output = [value];
+  const out = [value];
 
-  for (const key of [
-    "data",
-    "payload",
-    "result",
-    "body",
-    "response",
-    "auth",
-    "session",
-    "sessionData",
-  ]) {
-    if (value[key] && typeof value[key] === "object") {
-      output.push(...collectObjects(value[key], depth + 1, seen));
-    }
+  for (const key of ["data", "payload", "result", "body", "response", "auth", "session", "sessionData"]) {
+    if (value[key] && typeof value[key] === "object") out.push(...collectObjects(value[key], depth + 1, seen));
   }
 
-  return output;
+  return out;
 }
 
 function pickToken(objects = [], keys = []) {
@@ -923,7 +803,6 @@ function pickToken(objects = [], keys = []) {
       if (token) return token;
     }
   }
-
   return "";
 }
 
@@ -945,9 +824,7 @@ export function setAuthPayloadCommitter(fn) {
 function handleAuthPayload(payload = {}, meta = {}) {
   const tokens = extractTokens(payload);
 
-  if (tokens.token || tokens.refreshToken || tokens.tempToken) {
-    setAuthTokens(tokens);
-  }
+  if (tokens.token || tokens.refreshToken || tokens.tempToken) setAuthTokens(tokens);
 
   try {
     if (isFn(authPayloadCommitter)) {
@@ -995,31 +872,77 @@ export class HttpError extends Error {
    REQUEST ENGINE
 ========================================================= */
 
+function resolveInstallInput(input = null, options = {}) {
+  const context = input?.AppCore || input?.core ? input : null;
+  const appCore = context?.AppCore || context?.core || input || installedAppCore;
+
+  return {
+    context,
+    appCore,
+    options: {
+      ...safeObject(context?.options),
+      ...safeObject(options),
+    },
+  };
+}
+
+function configureAppCore(input = null, options = {}) {
+  const resolved = resolveInstallInput(input, options);
+
+  installContext = resolved.context || installContext;
+  installedAppCore = resolved.appCore || installedAppCore;
+
+  const opts = resolved.options;
+
+  setApiOrigin(
+    opts.apiOrigin ||
+      opts.baseURL ||
+      opts.baseUrl ||
+      opts.apiBase ||
+      resolveRuntimeApiOrigin()
+  );
+
+  externalRequest = isFn(opts.request)
+    ? opts.request
+    : isFn(installContext?.request)
+      ? installContext.request
+      : isFn(installedAppCore?.baseRequest)
+        ? installedAppCore.baseRequest
+        : null;
+
+  if (!authPayloadCommitter && isFn(installedAppCore?.applySession)) {
+    authPayloadCommitter = (payload, meta) => installedAppCore.applySession(payload, meta);
+  }
+
+  setTokenProvider(() => readTokenFromState("access") || runtimeState.token || "");
+
+  requestEngine = null;
+  apiEngine = null;
+
+  return getApiOrigin();
+}
+
 function ensureRequestEngine() {
   if (requestEngine && apiEngine) {
-    return {
-      requestEngine,
-      apiEngine,
-    };
+    return { requestEngine, apiEngine };
   }
 
   syncRuntimeTokenState();
 
-  requestEngine = createRequest({
-    state: coreState(),
-    events: installedAppCore?.events || installedAppCore?.Events || null,
-    setError: installedAppCore?.setError || installedAppCore?.setLastError || null,
-    utils: installedAppCore?.utils || null,
-    registry: installedAppCore?.registry || installedAppCore || null,
-    hooks: installedAppCore?.hooks || null,
-  });
+  requestEngine = isFn(externalRequest)
+    ? externalRequest
+    : createRequest({
+        state: coreState(),
+        events: installedAppCore?.events || installedAppCore?.Events || installContext?.events || null,
+        setError: installedAppCore?.setError || installedAppCore?.setLastError || installContext?.setError || null,
+        utils: installedAppCore?.utils || installContext?.utils || null,
+        registry: installedAppCore?.registry || installContext?.registry || installedAppCore || null,
+        hooks: installedAppCore?.hooks || installContext?.hooks || null,
+      });
 
   apiEngine = createApiClient(requestEngine);
 
-  return {
-    requestEngine,
-    apiEngine,
-  };
+  return { requestEngine, apiEngine };
 }
 
 function normalizeRequestArgs(firstArg = "/", secondArg = {}, thirdArg = {}) {
@@ -1036,11 +959,7 @@ function normalizeRequestArgs(firstArg = "/", secondArg = {}, thirdArg = {}) {
     };
   }
 
-  if (
-    typeof firstArg === "string" &&
-    /^[A-Z]+$/i.test(firstArg) &&
-    typeof secondArg === "string"
-  ) {
+  if (typeof firstArg === "string" && /^[A-Z]+$/i.test(firstArg) && typeof secondArg === "string") {
     return {
       endpoint: secondArg,
       options: {
@@ -1062,24 +981,19 @@ function requestOptions(endpoint = "/", options = {}) {
 
   const auth = AUTH_ME_PATH_RE.test(path)
     ? true
-    : opts.auth === false ||
-        opts.public === true ||
-        opts.skipAuth === true ||
-        opts.noAuthHeader === true
+    : opts.auth === false || opts.public === true || opts.skipAuth === true || opts.noAuthHeader === true
       ? false
       : opts.auth === true
         ? true
-        : !AUTH_PUBLIC_PATH_RE.test(path);
+        : !isPublicAuthPath(path);
 
   return {
     ...opts,
     auth,
     public: auth === false,
     skipAuth: auth === false,
-    timeout: safeNumber(
-      opts.timeout ?? opts.timeoutMs,
-      AUTH_PATH_RE.test(path) ? DEFAULT_AUTH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS
-    ),
+    token: auth ? opts.token || getAccessToken() : "",
+    timeout: safeNumber(opts.timeout ?? opts.timeoutMs, AUTH_PATH_RE.test(path) ? DEFAULT_AUTH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS),
     query: undefined,
     params: undefined,
   };
@@ -1087,10 +1001,8 @@ function requestOptions(endpoint = "/", options = {}) {
 
 function shouldCaptureAuth(endpoint = "/", options = {}) {
   const opts = safeObject(options);
-
   if (opts.captureAuth === true) return true;
   if (opts.captureAuth === false) return false;
-
   return AUTH_PATH_RE.test(pathFromEndpoint(endpoint, opts));
 }
 
@@ -1098,7 +1010,6 @@ export async function request(firstArg = "/", secondArg = {}, thirdArg = {}) {
   const parsed = normalizeRequestArgs(firstArg, secondArg, thirdArg);
   const endpoint = parsed.endpoint;
   const opts = safeObject(parsed.options);
-
   const url = buildApiUrl(endpoint, opts);
   const finalOptions = requestOptions(endpoint, opts);
 
@@ -1119,9 +1030,9 @@ export async function request(firstArg = "/", secondArg = {}, thirdArg = {}) {
         method: finalOptions.method || "GET",
         reason: AUTH_ME_PATH_RE.test(path)
           ? "me"
-          : safeText(path).includes("/login")
+          : path.includes("/login")
             ? "login"
-            : safeText(path).includes("/refresh")
+            : path.includes("/refresh")
               ? "refresh"
               : "auth-response",
         emit: opts.emitAuthEvents !== false,
@@ -1138,48 +1049,27 @@ export async function request(firstArg = "/", secondArg = {}, thirdArg = {}) {
 }
 
 export function get(endpoint = "/", options = {}) {
-  return request(endpoint, {
-    ...safeObject(options),
-    method: "GET",
-  });
+  return request(endpoint, { ...safeObject(options), method: "GET" });
 }
 
 export function head(endpoint = "/", options = {}) {
-  return request(endpoint, {
-    ...safeObject(options),
-    method: "HEAD",
-  });
+  return request(endpoint, { ...safeObject(options), method: "HEAD" });
 }
 
 export function optionsRequest(endpoint = "/", options = {}) {
-  return request(endpoint, {
-    ...safeObject(options),
-    method: "OPTIONS",
-  });
+  return request(endpoint, { ...safeObject(options), method: "OPTIONS" });
 }
 
 export function post(endpoint = "/", body = undefined, options = {}) {
-  return request(endpoint, {
-    ...safeObject(options),
-    method: "POST",
-    body,
-  });
+  return request(endpoint, { ...safeObject(options), method: "POST", body });
 }
 
 export function put(endpoint = "/", body = undefined, options = {}) {
-  return request(endpoint, {
-    ...safeObject(options),
-    method: "PUT",
-    body,
-  });
+  return request(endpoint, { ...safeObject(options), method: "PUT", body });
 }
 
 export function patch(endpoint = "/", body = undefined, options = {}) {
-  return request(endpoint, {
-    ...safeObject(options),
-    method: "PATCH",
-    body,
-  });
+  return request(endpoint, { ...safeObject(options), method: "PATCH", body });
 }
 
 function looksLikeOptionsObject(value = {}) {
@@ -1203,47 +1093,26 @@ function looksLikeOptionsObject(value = {}) {
 
 export function del(endpoint = "/", bodyOrOptions = {}, maybeOptions = undefined) {
   if (maybeOptions !== undefined) {
-    return request(endpoint, {
-      ...safeObject(maybeOptions),
-      method: "DELETE",
-      body: bodyOrOptions,
-    });
+    return request(endpoint, { ...safeObject(maybeOptions), method: "DELETE", body: bodyOrOptions });
   }
 
   if (looksLikeOptionsObject(bodyOrOptions)) {
-    return request(endpoint, {
-      ...safeObject(bodyOrOptions),
-      method: "DELETE",
-    });
+    return request(endpoint, { ...safeObject(bodyOrOptions), method: "DELETE" });
   }
 
-  return request(endpoint, {
-    method: "DELETE",
-    body: bodyOrOptions,
-  });
+  return request(endpoint, { method: "DELETE", body: bodyOrOptions });
 }
 
 export function upload(endpoint = "/", formData, options = {}) {
-  return request(endpoint, {
-    ...safeObject(options),
-    method: options.method || "POST",
-    body: formData,
-  });
+  return request(endpoint, { ...safeObject(options), method: options.method || "POST", body: formData });
 }
 
 export function download(endpoint = "/", options = {}) {
-  return request(endpoint, {
-    ...safeObject(options),
-    method: options.method || "GET",
-    responseType: options.responseType || "blob",
-  });
+  return request(endpoint, { ...safeObject(options), method: options.method || "GET", responseType: options.responseType || "blob" });
 }
 
 export function raw(endpoint = "/", options = {}) {
-  return request(endpoint, {
-    ...safeObject(options),
-    raw: true,
-  });
+  return request(endpoint, { ...safeObject(options), raw: true });
 }
 
 /* =========================================================
@@ -1281,23 +1150,14 @@ export async function refreshSession(options = {}) {
     httpStats.refresh += 1;
 
     const refreshToken = getRefreshToken();
-
-    const body = refreshToken
-      ? {
-          refreshToken,
-          refresh_token: refreshToken,
-        }
-      : undefined;
+    const body = refreshToken ? { refreshToken, refresh_token: refreshToken } : undefined;
 
     return post("/auth/refresh", body, {
       auth: false,
       public: true,
       skipAuth: true,
       retries: 0,
-      timeoutMs: safeNumber(
-        options.timeoutMs ?? options.timeout,
-        DEFAULT_REFRESH_TIMEOUT_MS
-      ),
+      timeoutMs: safeNumber(options.timeoutMs ?? options.timeout, DEFAULT_REFRESH_TIMEOUT_MS),
       captureAuth: true,
       ...safeObject(options),
     });
@@ -1379,25 +1239,6 @@ function createApiClientFacade() {
   };
 }
 
-function configureAppCore(AppCore = null, options = {}) {
-  installedAppCore = AppCore || installedAppCore;
-
-  setApiOrigin(
-    options.apiOrigin ||
-      options.baseURL ||
-      options.baseUrl ||
-      options.apiBase ||
-      resolveRuntimeApiOrigin()
-  );
-
-  requestEngine = null;
-  apiEngine = null;
-
-  setTokenProvider(() => readTokenFromState("access") || runtimeState.token || "");
-
-  return getApiOrigin();
-}
-
 export function installHttp(AppCore = null, options = {}) {
   configureAppCore(AppCore, safeObject(options));
 
@@ -1410,9 +1251,7 @@ export function installHttp(AppCore = null, options = {}) {
       defineValue(installedAppCore, "api", api);
       defineValue(installedAppCore, "apiClient", api);
 
-      if (!installedAppCore.services || typeof installedAppCore.services !== "object") {
-        installedAppCore.services = {};
-      }
+      if (!installedAppCore.services || typeof installedAppCore.services !== "object") installedAppCore.services = {};
 
       installedAppCore.services.http = api;
       installedAppCore.services.Http = api;
@@ -1463,8 +1302,7 @@ export const install = installHttp;
 ========================================================= */
 
 export function getHttpSnapshot(options = {}) {
-  const requestSnapshot =
-    ensureRequestEngine().requestEngine?.getSnapshot?.(options) || null;
+  const requestSnapshot = ensureRequestEngine().requestEngine?.getSnapshot?.(options) || null;
 
   return sanitizePayload({
     version: HTTP_VERSION,

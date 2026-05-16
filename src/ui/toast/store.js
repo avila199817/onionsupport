@@ -2,9 +2,9 @@
    Onion SPA - Toast Store
    Archivo: src/ui/toast/store.js
 
-   Toast Store limpio:
+   TOAST STORE · SIMPLE
    - estado interno del módulo toast
-   - Map items + Set dismissing
+   - Map items + Set dismissing privados
    - ids normalizados
    - orden estable por createdAt
    - no expone Maps/Sets internos
@@ -21,22 +21,21 @@ import {
   nowIso,
 } from "./helpers.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const TOAST_STORE_VERSION = "17.0.0-clean";
-
-/* =========================================================
-   STATE
-========================================================= */
+export const TOAST_STORE_VERSION = "18.0.0-simple";
 
 const items = new Map();
 const dismissing = new Set();
 
+const TOKENISH_TEXT_RE =
+  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|tempToken|temp_token|code|t)=)[^&#\s]+/gi;
+
 /* =========================================================
    BASICS
 ========================================================= */
+
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -50,28 +49,47 @@ function isConnectedElement(element) {
   if (!isElement(element)) return false;
 
   try {
-    if (typeof element.isConnected === "boolean") {
-      return element.isConnected;
-    }
+    if (typeof element.isConnected === "boolean") return element.isConnected;
   } catch {}
 
   try {
-    return typeof document !== "undefined" && document.contains(element);
+    return isBrowser() && document.contains(element);
   } catch {
     return false;
   }
 }
 
 function normalizeId(id = "") {
-  return normalizeToastId(id);
+  try {
+    return normalizeToastId(id);
+  } catch {
+    return safeText(id, "")
+      .replace(/[^a-zA-Z0-9:_-]/g, "")
+      .slice(0, 96);
+  }
 }
 
-function validId(id = "") {
+function hasValidId(id = "") {
   return Boolean(normalizeId(id));
 }
 
-function cloneList(values = []) {
+function list(values = []) {
   return Array.isArray(values) ? [...values] : [];
+}
+
+function redactText(value = "") {
+  const output = safeText(value, "");
+  if (!output) return "";
+
+  try {
+    return output.replace(TOKENISH_TEXT_RE, (match) => {
+      if (/^bearer\s+/i.test(match)) return "Bearer ***";
+      if (/^[?&#]/.test(match)) return match.replace(/=.+$/g, "=***");
+      return "***";
+    });
+  } catch {
+    return output;
+  }
 }
 
 /* =========================================================
@@ -79,33 +97,34 @@ function cloneList(values = []) {
 ========================================================= */
 
 function normalizeTimestamp(value = null, fallback = now()) {
-  const number = safeNumber(value, 0);
-  return number > 0 ? number : fallback;
+  const output = safeNumber(value, 0);
+  return output > 0 ? output : fallback;
 }
 
 function normalizeItem(id = "", item = {}) {
   if (!isObject(item)) return null;
 
   const key = normalizeId(id || item.id);
-
   if (!key) return null;
 
   const createdAt = normalizeTimestamp(item.createdAt, now());
+  const duration = Math.max(0, safeNumber(item.duration, 0));
 
   item.id = key;
   item.type = safeText(item.type, "info");
   item.title = safeText(item.title, "");
   item.message = safeText(item.message, "");
 
-  item.duration = safeNumber(item.duration, 0);
-  item.remaining = safeNumber(item.remaining, item.duration);
-  item.startedAt = safeNumber(item.startedAt, 0);
+  item.duration = duration;
+  item.remaining = Math.max(0, safeNumber(item.remaining, duration));
+  item.startedAt = Math.max(0, safeNumber(item.startedAt, 0));
   item.timeoutId = item.timeoutId || null;
 
   item.createdAt = createdAt;
   item.updatedAt = normalizeTimestamp(item.updatedAt, createdAt);
 
   item.dismissed = item.dismissed === true;
+  item.dismissedAt = safeNumber(item.dismissedAt, 0) || null;
   item.dismissReason = safeText(item.dismissReason, "");
 
   item.closable = item.closable !== false;
@@ -126,10 +145,9 @@ function normalizeItem(id = "", item = {}) {
 
 function isToastActive(item = null) {
   if (!isObject(item)) return false;
-  if (item.dismissed === true) return false;
+  if (!item.id || item.dismissed === true) return false;
   if (dismissing.has(item.id)) return false;
   if (!item.toastEl) return false;
-
   return isConnectedElement(item.toastEl);
 }
 
@@ -146,20 +164,26 @@ function byCreatedAtDesc(a, b) {
   return byCreatedAtAsc(b, a);
 }
 
+function touch(item = null) {
+  if (!item) return false;
+
+  try {
+    item.updatedAt = now();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /* =========================================================
    CRUD
 ========================================================= */
 
 export function setToastItem(id, item) {
   const normalized = normalizeItem(id, item);
-
   if (!normalized) return null;
 
-  /*
-    Si se reemplaza un toast con el mismo id, deja de estar en dismissing.
-  */
   dismissing.delete(normalized.id);
-
   items.set(normalized.id, normalized);
 
   return normalized;
@@ -167,31 +191,25 @@ export function setToastItem(id, item) {
 
 export function getToastItem(id) {
   const key = normalizeId(id);
-
   if (!key) return null;
-
   return items.get(key) || null;
 }
 
 export function hasToastItem(id) {
   const key = normalizeId(id);
-
   return key ? items.has(key) : false;
 }
 
 export function deleteToastItem(id) {
   const key = normalizeId(id);
-
   if (!key) return false;
 
   dismissing.delete(key);
-
   return items.delete(key);
 }
 
 export function replaceToastItem(id, item) {
   const key = normalizeId(id || item?.id);
-
   if (!key) return null;
 
   deleteToastItem(key);
@@ -203,7 +221,7 @@ export function replaceToastItem(id, item) {
 ========================================================= */
 
 export function getToastItems() {
-  return cloneList(Array.from(items.values()));
+  return list([...items.values()]);
 }
 
 export function getSortedToastItems() {
@@ -215,7 +233,7 @@ export function getNewestToastItems() {
 }
 
 export function getToastIds() {
-  return cloneList(Array.from(items.keys()));
+  return list([...items.keys()]);
 }
 
 export function getToastCount() {
@@ -223,9 +241,7 @@ export function getToastCount() {
 }
 
 export function getActiveToasts() {
-  return getToastItems()
-    .filter(isToastActive)
-    .sort(byCreatedAtAsc);
+  return getToastItems().filter(isToastActive).sort(byCreatedAtAsc);
 }
 
 export function getActiveToastCount() {
@@ -255,36 +271,27 @@ export function getNewestToast() {
 
 export function markToastDismissing(id) {
   const key = normalizeId(id);
-
   if (!key) return false;
 
   dismissing.add(key);
-
-  const item = getToastItem(key);
-
-  if (item) {
-    item.updatedAt = now();
-  }
+  touch(getToastItem(key));
 
   return true;
 }
 
 export function unmarkToastDismissing(id) {
   const key = normalizeId(id);
-
   if (!key) return false;
-
   return dismissing.delete(key);
 }
 
 export function isToastDismissing(id) {
   const key = normalizeId(id);
-
   return key ? dismissing.has(key) : false;
 }
 
 export function getDismissingIds() {
-  return cloneList(Array.from(dismissing.values()));
+  return list([...dismissing.values()]);
 }
 
 export function getDismissingCount() {
@@ -302,7 +309,6 @@ export function clearToastDismissing() {
 
 export function patchToastItem(id, patch = {}) {
   const item = getToastItem(id);
-
   if (!item || !isObject(patch)) return null;
 
   Object.assign(item, patch, {
@@ -314,9 +320,7 @@ export function patchToastItem(id, patch = {}) {
 }
 
 export function markToastPaused(id, paused = true) {
-  return patchToastItem(id, {
-    paused: Boolean(paused),
-  });
+  return patchToastItem(id, { paused: Boolean(paused) });
 }
 
 export function markToastDismissed(id, reason = "dismiss") {
@@ -348,9 +352,7 @@ export function deleteDismissedToasts() {
   let removed = 0;
 
   for (const item of getToastItems()) {
-    if (item?.dismissed === true) {
-      if (deleteToastItem(item.id)) removed += 1;
-    }
+    if (item?.dismissed === true && deleteToastItem(item.id)) removed += 1;
   }
 
   return removed;
@@ -360,11 +362,7 @@ export function deleteDisconnectedToasts() {
   let removed = 0;
 
   for (const item of getToastItems()) {
-    if (
-      item?.dismissed === true ||
-      !item?.toastEl ||
-      !isConnectedElement(item.toastEl)
-    ) {
+    if (item?.dismissed === true || !item?.toastEl || !isConnectedElement(item.toastEl)) {
       if (deleteToastItem(item.id)) removed += 1;
     }
   }
@@ -379,7 +377,6 @@ export function pruneToastStore() {
 export function resetToastStore() {
   clearToastItems();
   clearToastDismissing();
-
   return true;
 }
 
@@ -390,10 +387,9 @@ export function resetToastStore() {
 function itemSnapshot(item = null) {
   return {
     id: safeText(item?.id, ""),
-
     type: safeText(item?.type, ""),
-    title: safeText(item?.title, ""),
-    message: safeText(item?.message, ""),
+    title: redactText(item?.title || ""),
+    message: redactText(item?.message || ""),
 
     duration: safeNumber(item?.duration, 0),
     remaining: safeNumber(item?.remaining, 0),
@@ -406,6 +402,7 @@ function itemSnapshot(item = null) {
     updatedAtIso: item?.updatedAt ? nowIso(item.updatedAt) : "",
 
     dismissed: item?.dismissed === true,
+    dismissedAt: safeNumber(item?.dismissedAt, 0) || null,
     dismissReason: safeText(item?.dismissReason, ""),
     dismissing: isToastDismissing(item?.id),
 
@@ -430,22 +427,15 @@ export function getToastStoreSnapshot() {
 
   return {
     version: TOAST_STORE_VERSION,
-
     total: items.size,
     activeCount: active.length,
     dismissingCount: dismissing.size,
-
     ids: getToastIds(),
     dismissingIds: getDismissingIds(),
-
     active: active.map(itemSnapshot),
     items: all.map(itemSnapshot),
   };
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   TOAST_STORE_VERSION,

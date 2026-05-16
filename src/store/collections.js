@@ -2,25 +2,17 @@
    Onion SPA - Store Collections
    Archivo: src/store/collections.js
 
-   Store Collections limpio:
+   STORE COLLECTIONS · SIMPLE
    - Claves estrictas.
    - Aliases seguros.
-   - Matchers simples por id, campo, objeto parcial y lógica.
+   - Matchers por id, campo, objeto parcial y lógica.
    - Sin path injection.
    - Sin prototype pollution.
 ========================================================= */
 
 import { isFunction } from "./helpers.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const COLLECTIONS_VERSION = "15.0.0-clean";
-
-/* =========================================================
-   CONSTANTS
-========================================================= */
+export const COLLECTIONS_VERSION = "16.0.0-simple";
 
 const COLLECTION_KEY_RE = /^[a-zA-Z0-9_-]{1,80}$/;
 
@@ -69,6 +61,8 @@ const COLLECTION_ALIASES = Object.freeze({
 
   search: "search",
   busqueda: "search",
+  busquedas: "search",
+  búsqueda: "search",
   búsquedas: "search",
 });
 
@@ -131,18 +125,8 @@ export const IDENTITY_FIELDS = Object.freeze([
   "username_lower",
 ]);
 
-const FIELD_KEYS = Object.freeze([
-  "field",
-  "key",
-  "path",
-]);
-
-const VALUE_KEYS = Object.freeze([
-  "value",
-  "equals",
-  "eq",
-  "is",
-]);
+const FIELD_KEYS = Object.freeze(["field", "key", "path"]);
+const VALUE_KEYS = Object.freeze(["value", "equals", "eq", "is"]);
 
 const CONTROL_KEYS = new Set([
   "field",
@@ -168,16 +152,19 @@ const CONTROL_KEYS = new Set([
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
-  const text = String(value).trim();
-  return text || fallback;
+  const output = String(value).trim();
+  return output || fallback;
 }
 
 function safeLower(value, fallback = "") {
   return safeText(value, fallback).toLowerCase();
 }
 
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+function toArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return [...value];
+  if (value === null || value === undefined) return [];
+  return [value];
 }
 
 function isObject(value) {
@@ -190,23 +177,14 @@ function safeObject(value) {
 
 function hasOwn(object, key) {
   try {
-    return Boolean(
-      object &&
-        typeof object === "object" &&
-        Object.prototype.hasOwnProperty.call(object, key)
-    );
+    return Object.prototype.hasOwnProperty.call(object, key);
   } catch {
     return false;
   }
 }
 
 function isPrimitive(value) {
-  return (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    typeof value === "bigint"
-  );
+  return ["string", "number", "boolean", "bigint"].includes(typeof value);
 }
 
 function isEmpty(value) {
@@ -214,14 +192,20 @@ function isEmpty(value) {
 }
 
 function unique(values = []) {
-  return Array.from(
-    new Set(
-      safeArray(values)
+  return [
+    ...new Set(
+      toArray(values)
         .flat(Infinity)
         .filter((value) => value !== undefined && value !== null && value !== "")
         .map((value) => (typeof value === "string" ? value.trim() : value))
-    )
-  );
+    ),
+  ];
+}
+
+function stripAccents(value = "") {
+  return safeText(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 /* =========================================================
@@ -229,7 +213,7 @@ function unique(values = []) {
 ========================================================= */
 
 export function normalizeCollectionKey(key = "") {
-  return safeText(key, "")
+  return stripAccents(key)
     .replace(/\s+/g, "")
     .replace(/[^a-zA-Z0-9_-]/g, "");
 }
@@ -241,13 +225,14 @@ export function isValidCollectionKey(key = "") {
 
 export function resolveCollectionKey(state, key) {
   const normalized = normalizeCollectionKey(key);
-
   if (!normalized) return "";
 
   const entities = safeObject(state?.entities);
-  const alias = COLLECTION_ALIASES[normalized] || normalized;
+  const lower = safeLower(normalized);
+  const alias = COLLECTION_ALIASES[lower] || normalized;
 
   if (hasOwn(entities, normalized)) return normalized;
+  if (hasOwn(entities, lower)) return lower;
   if (hasOwn(entities, alias)) return alias;
 
   return alias;
@@ -256,17 +241,9 @@ export function resolveCollectionKey(state, key) {
 export function ensureCollectionKey(state, key) {
   const normalized = normalizeCollectionKey(key);
 
-  if (!normalized) {
-    throw new Error("Clave de colección requerida.");
-  }
-
-  if (!isValidCollectionKey(normalized)) {
-    throw new Error(`Clave de colección inválida: ${normalized}`);
-  }
-
-  if (!state || !isObject(state.entities)) {
-    throw new Error("state.entities no disponible.");
-  }
+  if (!normalized) throw new Error("Clave de colección requerida.");
+  if (!isValidCollectionKey(normalized)) throw new Error(`Clave de colección inválida: ${normalized}`);
+  if (!state || !isObject(state.entities)) throw new Error("state.entities no disponible.");
 
   const resolved = resolveCollectionKey(state, normalized);
 
@@ -281,14 +258,12 @@ export function hasCollection(state, key) {
   if (!isValidCollectionKey(key)) return false;
   if (!isObject(state?.entities)) return false;
 
-  const resolved = resolveCollectionKey(state, key);
-  return hasOwn(state.entities, resolved);
+  return hasOwn(state.entities, resolveCollectionKey(state, key));
 }
 
 export function getCollection(state, key, fallback = []) {
   const resolved = ensureCollectionKey(state, key);
   const value = state.entities[resolved];
-
   return Array.isArray(value) ? value : fallback;
 }
 
@@ -302,7 +277,7 @@ function isUnsafePathKey(key = "") {
 
 function normalizeObjectPath(path = "") {
   return safeText(path, "")
-    .replace(/\[(\w+)\]/g, ".$1")
+    .replace(/\[([\w-]+)\]/g, ".$1")
     .split(".")
     .map((part) => part.trim())
     .filter(Boolean)
@@ -311,20 +286,13 @@ function normalizeObjectPath(path = "") {
 
 function getByPath(object, path = "") {
   const parts = normalizeObjectPath(path);
-
   if (!parts.length) return undefined;
 
   let current = object;
 
   for (const part of parts) {
-    if (current === null || current === undefined || typeof current !== "object") {
-      return undefined;
-    }
-
-    if (!hasOwn(current, part)) {
-      return undefined;
-    }
-
+    if (current === null || current === undefined || typeof current !== "object") return undefined;
+    if (!hasOwn(current, part)) return undefined;
     current = current[part];
   }
 
@@ -336,17 +304,13 @@ function getByPath(object, path = "") {
 ========================================================= */
 
 function comparableText(value) {
-  return safeText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+  return stripAccents(value).toLowerCase();
 }
 
 function comparableNumber(value) {
   if (value === null || value === undefined || value === "") return null;
-
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
+  const output = Number(value);
+  return Number.isFinite(output) ? output : null;
 }
 
 function comparableDate(value) {
@@ -357,7 +321,7 @@ function comparableDate(value) {
     return Number.isFinite(time) ? time : null;
   }
 
-  if (typeof value === "string") {
+  if (typeof value === "string" || typeof value === "number") {
     const parsed = Date.parse(value);
     return Number.isFinite(parsed) ? parsed : null;
   }
@@ -367,19 +331,8 @@ function comparableDate(value) {
 
 function stableStringify(value, seen = new WeakSet()) {
   if (value === null || value === undefined) return String(value);
-
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    typeof value === "bigint"
-  ) {
-    return `${typeof value}:${String(value)}`;
-  }
-
-  if (value instanceof Date) {
-    return `date:${comparableDate(value)}`;
-  }
+  if (isPrimitive(value)) return `${typeof value}:${String(value)}`;
+  if (value instanceof Date) return `date:${comparableDate(value)}`;
 
   if (Array.isArray(value)) {
     return `[${value.map((item) => stableStringify(item, seen)).join(",")}]`;
@@ -391,10 +344,7 @@ function stableStringify(value, seen = new WeakSet()) {
       seen.add(value);
     } catch {}
 
-    const keys = Object.keys(value)
-      .filter((key) => !isUnsafePathKey(key))
-      .sort();
-
+    const keys = Object.keys(value).filter((key) => !isUnsafePathKey(key)).sort();
     return `{${keys.map((key) => `${key}:${stableStringify(value[key], seen)}`).join("|")}}`;
   }
 
@@ -403,30 +353,19 @@ function stableStringify(value, seen = new WeakSet()) {
 
 function valuesEqual(a, b) {
   if (Object.is(a, b)) return true;
-
-  if (a === null || a === undefined || b === null || b === undefined) {
-    return false;
-  }
+  if (a === null || a === undefined || b === null || b === undefined) return false;
 
   const numberA = comparableNumber(a);
   const numberB = comparableNumber(b);
-
-  if (numberA !== null && numberB !== null && numberA === numberB) {
-    return true;
-  }
+  if (numberA !== null && numberB !== null && numberA === numberB) return true;
 
   const dateA = comparableDate(a);
   const dateB = comparableDate(b);
-
-  if (dateA !== null && dateB !== null && dateA === dateB) {
-    return true;
-  }
+  if (dateA !== null && dateB !== null && dateA === dateB) return true;
 
   const textA = safeText(a, "");
   const textB = safeText(b, "");
-
-  if (textA && textB && textA === textB) return true;
-  if (textA && textB && comparableText(textA) === comparableText(textB)) return true;
+  if (textA && textB && (textA === textB || comparableText(textA) === comparableText(textB))) return true;
 
   if (typeof a === "object" || typeof b === "object") {
     try {
@@ -450,10 +389,7 @@ function identityEntries(item = null) {
 
   for (const field of IDENTITY_FIELDS) {
     const value = item[field];
-
-    if (value !== null && value !== undefined && safeText(value, "")) {
-      entries.push({ field, value });
-    }
+    if (!isEmpty(value) && safeText(value, "")) entries.push({ field, value });
   }
 
   return entries;
@@ -470,13 +406,8 @@ export function getEntityIdentity(item = null) {
 
 function matcherIdentityValues(matcher = null) {
   if (isPrimitive(matcher)) return [matcher];
-
   if (!isObject(matcher)) return [];
-
-  if (hasOwn(matcher, "identity") && !isEmpty(matcher.identity)) {
-    return [matcher.identity];
-  }
-
+  if (hasOwn(matcher, "identity") && !isEmpty(matcher.identity)) return [matcher.identity];
   return identityValues(matcher);
 }
 
@@ -486,20 +417,16 @@ function matchByIdentity(item, matcher) {
 
   if (!itemValues.length || !matcherValues.length) return false;
 
-  return itemValues.some((itemValue) =>
-    matcherValues.some((matcherValue) => valuesEqual(itemValue, matcherValue))
-  );
+  return itemValues.some((itemValue) => matcherValues.some((matcherValue) => valuesEqual(itemValue, matcherValue)));
 }
 
 /* =========================================================
-   FIELD MATCHER
+   FIELD / PARTIAL MATCHERS
 ========================================================= */
 
 function firstMatcherValue(matcher = {}, keys = []) {
   for (const key of keys) {
-    if (hasOwn(matcher, key) && !isEmpty(matcher[key])) {
-      return matcher[key];
-    }
+    if (hasOwn(matcher, key) && !isEmpty(matcher[key])) return matcher[key];
   }
 
   return "";
@@ -516,42 +443,24 @@ function fieldMatcher(matcher = {}) {
   const field = safeText(firstMatcherValue(matcher, FIELD_KEYS), "");
   if (!field) return null;
 
-  let value;
-
   for (const key of VALUE_KEYS) {
-    if (hasOwn(matcher, key)) {
-      value = matcher[key];
-      break;
-    }
+    if (hasOwn(matcher, key)) return { field, value: matcher[key] };
   }
 
-  return { field, value };
+  return null;
 }
 
 function matchByField(item, matcher = {}) {
   const normalized = fieldMatcher(matcher);
-
   if (!normalized) return false;
-
   return valuesEqual(getByPath(item, normalized.field), normalized.value);
 }
-
-/* =========================================================
-   PARTIAL OBJECT MATCHER
-========================================================= */
 
 function partialEntries(matcher = {}) {
   return Object.entries(safeObject(matcher)).filter(([key, value]) => {
     if (isUnsafePathKey(key)) return false;
-
-    if (hasFieldMatcher(matcher) && CONTROL_KEYS.has(key)) {
-      return false;
-    }
-
-    if (["where", "any", "or", "all", "and", "not"].includes(key)) {
-      return false;
-    }
-
+    if (hasFieldMatcher(matcher) && CONTROL_KEYS.has(key)) return false;
+    if (["where", "any", "or", "all", "and", "not"].includes(key)) return false;
     return value !== undefined;
   });
 }
@@ -559,19 +468,13 @@ function partialEntries(matcher = {}) {
 function matchPartialObject(item, matcher = {}) {
   if (!isObject(item) || !isObject(matcher)) return false;
 
-  const source = hasOwn(matcher, "where") && isObject(matcher.where)
-    ? matcher.where
-    : matcher;
-
+  const source = hasOwn(matcher, "where") && isObject(matcher.where) ? matcher.where : matcher;
   const entries = partialEntries(source);
 
   if (!entries.length) return false;
 
   return entries.every(([key, expected]) => {
-    const actual = key.includes(".")
-      ? getByPath(item, key)
-      : item[key];
-
+    const actual = key.includes(".") ? getByPath(item, key) : item[key];
     return valuesEqual(actual, expected);
   });
 }
@@ -610,17 +513,9 @@ export function normalizeMatcher(matcher) {
     };
   }
 
-  if (matcher === null || matcher === undefined || matcher === "") {
-    return () => false;
-  }
-
-  if (isPrimitive(matcher)) {
-    return (item) => matchByIdentity(item, matcher);
-  }
-
-  if (Array.isArray(matcher)) {
-    return (item) => matchAny(item, matcher);
-  }
+  if (matcher === null || matcher === undefined || matcher === "") return () => false;
+  if (isPrimitive(matcher)) return (item) => matchByIdentity(item, matcher);
+  if (Array.isArray(matcher)) return (item) => matchAny(item, matcher);
 
   if (isObject(matcher)) {
     return (item) => {
@@ -630,11 +525,7 @@ export function normalizeMatcher(matcher) {
       if (Array.isArray(matcher.and)) return matchAll(item, matcher.and);
       if (hasOwn(matcher, "not")) return matchNot(item, matcher.not);
 
-      return (
-        matchByIdentity(item, matcher) ||
-        matchByField(item, matcher) ||
-        matchPartialObject(item, matcher)
-      );
+      return matchByIdentity(item, matcher) || matchByField(item, matcher) || matchPartialObject(item, matcher);
     };
   }
 
@@ -647,14 +538,12 @@ export function normalizeMatcher(matcher) {
 
 export function findCollectionItem(list = [], matcher = null) {
   if (!Array.isArray(list)) return null;
-
   const match = normalizeMatcher(matcher);
   return list.find((item, index) => match(item, index, list)) || null;
 }
 
 export function findCollectionIndex(list = [], matcher = null) {
   if (!Array.isArray(list)) return -1;
-
   const match = normalizeMatcher(matcher);
   return list.findIndex((item, index) => match(item, index, list));
 }
@@ -665,14 +554,12 @@ export function collectionIncludes(list = [], matcher = null) {
 
 export function filterCollection(list = [], matcher = null) {
   if (!Array.isArray(list)) return [];
-
   const match = normalizeMatcher(matcher);
   return list.filter((item, index) => match(item, index, list));
 }
 
 export function removeCollectionItems(list = [], matcher = null) {
   if (!Array.isArray(list)) return [];
-
   const match = normalizeMatcher(matcher);
   return list.filter((item, index) => !match(item, index, list));
 }
@@ -697,29 +584,13 @@ export function getCollectionsSnapshot(state = {}) {
 
   return {
     version: COLLECTIONS_VERSION,
-
     keys: Object.keys(entities),
-
-    aliases: {
-      ...COLLECTION_ALIASES,
-    },
-
+    aliases: { ...COLLECTION_ALIASES },
     counts: Object.fromEntries(
-      Object.entries(entities).map(([key, value]) => [
-        key,
-        Array.isArray(value)
-          ? value.length
-          : value
-            ? 1
-            : 0,
-      ])
+      Object.entries(entities).map(([key, value]) => [key, Array.isArray(value) ? value.length : value ? 1 : 0])
     ),
   };
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   COLLECTIONS_VERSION,

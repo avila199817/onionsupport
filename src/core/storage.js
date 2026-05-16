@@ -2,30 +2,13 @@
    Onion SPA - Core Storage
    Archivo: src/core/storage.js
 
-   ONION SUPPORT · CORE STORAGE
-   NAMESPACED STORAGE · LOCAL/SESSION/MEMORY · SAFE LEGACY CLEANUP · 17/10
-
-   Responsabilidades:
-   - encapsular acceso localStorage/sessionStorage namespaced
-   - leer / escribir valores serializados y raw
-   - fallback en memoria si Web Storage no está disponible
-   - borrar claves legacy de sesión/auth sin tocar preferencias
-   - limpiar namespace actual sin localStorage.clear() ni sessionStorage.clear()
-   - reparar valores corruptos controlados
-   - migrar claves legacy puntuales
-   - exponer snapshot de diagnóstico redacted
-
-   Candados:
+   CORE STORAGE · CLEAN
+   - localStorage/sessionStorage namespaced
+   - fallback memory
    - nunca usa localStorage.clear()
    - nunca usa sessionStorage.clear()
-   - namespace estable: config.storagePrefix/appKey/appId || "onion"
-   - claves canónicas: prefix:key
-   - corruptos: "", undefined, null, NaN, [object Object]
-   - NO trata false, {}, [] como corruptos genéricos
-   - removeLegacySessionKeys no borra theme/lang/appearance/sidebar/settings/ui/preferences
-   - no borra claves namespaced actuales en limpieza legacy
-   - eventos app:core:storage:* sin tokens/secrets
-   - soporte local/session/memory/all/sessionAlso/localAlso/memoryAlso
+   - removeLegacySessionKeys no borra preferencias/UI
+   - keys/snapshots/eventos sin tokens reales
 ========================================================= */
 
 import { config } from "./config.js";
@@ -42,11 +25,21 @@ import {
    CONSTANTS
 ========================================================= */
 
-const STORAGE_VERSION = "17.0.0";
+export const STORAGE_VERSION = "18.0.0-clean";
+
+export const STORAGE_EVENTS = Object.freeze({
+  ready: "app:core:storage:ready",
+  unavailable: "app:core:storage:unavailable",
+  error: "app:core:storage:error",
+  repaired: "app:core:storage:repaired",
+  cleared: "app:core:storage:cleared",
+  legacyCleared: "app:core:storage:legacy-cleared",
+  migrated: "app:core:storage:migrated",
+});
 
 const DEFAULT_PREFIX = "onion";
-const STORAGE_TEST_KEY = "__storage_test__";
 const DEFAULT_KIND = "local";
+const TEST_KEY = "__storage_test__";
 
 const VALID_KINDS = Object.freeze([
   "local",
@@ -77,6 +70,39 @@ const PREFERENCE_KEY_RE =
   /(^|[:._-])(theme|themeMode|theme_mode|appearance|lang|language|locale|sidebar|sidebarOpen|sidebar_open|sidebarCollapsed|sidebar_collapsed|density|preferences|preferencias|settings|ui)([:._-]|$)/i;
 
 const LEGACY_EXTRA_KEYS = Object.freeze([
+  "token",
+  "accessToken",
+  "access_token",
+  "refreshToken",
+  "refresh_token",
+  "tempToken",
+  "temp_token",
+  "temporaryToken",
+  "temporary_token",
+  "twoFactorToken",
+  "two_factor_token",
+  "mfaToken",
+  "mfa_token",
+
+  "user",
+  "currentUser",
+  "sessionUser",
+  "authUser",
+  "role",
+  "rol",
+  "roles",
+  "session",
+  "sessionData",
+  "auth",
+  "sessionId",
+  "session_id",
+  "sessionUserId",
+  "session_user_id",
+  "postLoginTarget",
+  "post_login_target",
+  "redirectAfterLogin",
+  "redirect_after_login",
+
   "onion_token",
   "onion_access_token",
   "onion_refresh_token",
@@ -164,57 +190,15 @@ const LEGACY_EXTRA_KEYS = Object.freeze([
   "onion:post_login_target",
   "onion:redirectAfterLogin",
   "onion:redirect_after_login",
-
-  "token",
-  "accessToken",
-  "access_token",
-  "refreshToken",
-  "refresh_token",
-  "tempToken",
-  "temp_token",
-  "temporaryToken",
-  "temporary_token",
-  "twoFactorToken",
-  "two_factor_token",
-  "mfaToken",
-  "mfa_token",
-  "user",
-  "currentUser",
-  "sessionUser",
-  "authUser",
-  "role",
-  "rol",
-  "roles",
-  "session",
-  "sessionData",
-  "auth",
-  "sessionId",
-  "session_id",
-  "sessionUserId",
-  "session_user_id",
-  "postLoginTarget",
-  "post_login_target",
-  "redirectAfterLogin",
-  "redirect_after_login",
 ]);
 
-const STORAGE_EVENTS = Object.freeze({
-  ready: "app:core:storage:ready",
-  unavailable: "app:core:storage:unavailable",
-  error: "app:core:storage:error",
-  repaired: "app:core:storage:repaired",
-  cleared: "app:core:storage:cleared",
-  legacyCleared: "app:core:storage:legacy-cleared",
-  migrated: "app:core:storage:migrated",
-});
-
 /* =========================================================
-   MODULE MEMORY FALLBACK
+   MODULE MEMORY
 ========================================================= */
 
 const memoryStorage = new Map();
 
-const storageAvailabilityCache = {
+const availability = {
   local: null,
   session: null,
 };
@@ -222,13 +206,11 @@ const storageAvailabilityCache = {
 let lastStorageError = null;
 
 /* =========================================================
-   BASIC HELPERS
+   BASICS
 ========================================================= */
 
 function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
   const text = String(value).trim();
   return text || fallback;
@@ -255,6 +237,11 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
+function safeNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
 function safeIsoDate(ms = Date.now()) {
   try {
     return new Date(ms).toISOString();
@@ -263,108 +250,27 @@ function safeIsoDate(ms = Date.now()) {
   }
 }
 
-function safeNumber(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
-}
-
 function toArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (value instanceof Set) {
-    return Array.from(value);
-  }
-
-  if (value === null || value === undefined) {
-    return [];
-  }
-
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return Array.from(value);
+  if (value === null || value === undefined) return [];
   return [value];
 }
 
 function unique(values = []) {
-  const result = [];
+  const output = [];
   const seen = new Set();
 
   for (const value of toArray(values).flat(Infinity)) {
-    const clean = safeText(value, "");
+    const text = safeText(value, "");
 
-    if (!clean || seen.has(clean)) {
-      continue;
-    }
+    if (!text || seen.has(text)) continue;
 
-    seen.add(clean);
-    result.push(clean);
+    seen.add(text);
+    output.push(text);
   }
 
-  return result;
-}
-
-function safeWarn(utils, ...args) {
-  try {
-    utils?.warn?.("[Storage]", ...args);
-  } catch {}
-
-  try {
-    if (config?.debug) {
-      console.warn("[Storage]", ...args);
-    }
-  } catch {}
-}
-
-function safeLog(utils, ...args) {
-  try {
-    utils?.log?.("[Storage]", ...args);
-  } catch {}
-
-  try {
-    if (config?.debug) {
-      console.log("[Storage]", ...args);
-    }
-  } catch {}
-}
-
-function safeJsonStringify(value, fallback = "") {
-  try {
-    if (typeof safeStringify === "function") {
-      return safeStringify(value, fallback);
-    }
-  } catch {}
-
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return fallback;
-  }
-}
-
-function safeJsonParse(raw, fallback = null) {
-  if (raw === null || raw === undefined) {
-    return fallback;
-  }
-
-  try {
-    if (typeof safeParse === "function") {
-      return safeParse(raw, fallback);
-    }
-  } catch {}
-
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return fallback;
-  }
-}
-
-function isCorruptedRawValue(raw) {
-  const value = String(raw ?? "").trim();
-  return CORRUPTED_RAW_VALUES.includes(value);
-}
-
-function shouldRemoveOnSet(value) {
-  return value === undefined || value === null;
+  return output;
 }
 
 function normalizeKind(kind = DEFAULT_KIND) {
@@ -372,26 +278,36 @@ function normalizeKind(kind = DEFAULT_KIND) {
   return VALID_KINDS.includes(clean) ? clean : DEFAULT_KIND;
 }
 
+function isCorruptedRaw(raw) {
+  return CORRUPTED_RAW_VALUES.includes(String(raw ?? "").trim());
+}
+
+function shouldRemoveOnSet(value) {
+  return value === undefined || value === null;
+}
+
 /* =========================================================
    REDACTION / EVENTS
 ========================================================= */
 
-function sanitizeSnapshotValue(key = "", value = "") {
+function redact(value = "") {
+  try {
+    return redactTokenInText(String(value ?? ""));
+  } catch {
+    return String(value ?? "");
+  }
+}
+
+function sanitizeValue(key = "", value = "") {
   if (SENSITIVE_KEY_RE.test(key)) {
     return value ? "***" : null;
   }
 
-  try {
-    return redactTokenInText(String(value ?? ""));
-  } catch {
-    return value;
-  }
+  return redact(value);
 }
 
-function sanitizeStoragePayload(value, depth = 0, keyHint = "") {
-  if (depth > 4) {
-    return "[depth-limit]";
-  }
+function sanitizePayload(value, depth = 0, keyHint = "") {
+  if (depth > 4) return "[depth-limit]";
 
   if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) {
     return value ? "***" : null;
@@ -406,56 +322,69 @@ function sanitizeStoragePayload(value, depth = 0, keyHint = "") {
     return value;
   }
 
-  if (typeof value === "string") {
-    return sanitizeSnapshotValue(keyHint, value);
-  }
-
-  if (typeof value === "function") {
-    return "[function]";
-  }
+  if (typeof value === "string") return redact(value);
+  if (typeof value === "function") return "[function]";
 
   if (Array.isArray(value)) {
-    return value
-      .slice(0, 80)
-      .map((item) => sanitizeStoragePayload(item, depth + 1, keyHint));
+    return value.slice(0, 80).map((item) => sanitizePayload(item, depth + 1, keyHint));
   }
 
   if (isObject(value)) {
     const output = {};
 
     for (const [key, item] of Object.entries(value).slice(0, 120)) {
-      output[key] = sanitizeStoragePayload(item, depth + 1, key);
+      output[key] = sanitizePayload(item, depth + 1, key);
     }
 
     return output;
   }
 
   try {
-    return sanitizeSnapshotValue(keyHint, String(value));
+    return redact(String(value));
   } catch {
     return "[unserializable]";
   }
 }
 
 function sanitizeError(error = null) {
-  if (!error) {
-    return null;
-  }
+  if (!error) return null;
 
   return {
     name: safeText(error?.name, "StorageError"),
-    message: safeText(error?.message || error, "Storage error"),
+    message: redact(error?.message || error || "Storage error"),
   };
+}
+
+function safeWarn(utils, ...args) {
+  try {
+    utils?.warn?.("[Storage]", ...args.map((item) => sanitizePayload(item)));
+  } catch {}
+
+  try {
+    if (config?.debug) {
+      console.warn("[Storage]", ...args.map((item) => sanitizePayload(item)));
+    }
+  } catch {}
+}
+
+function safeLog(utils, ...args) {
+  try {
+    utils?.log?.("[Storage]", ...args.map((item) => sanitizePayload(item)));
+  } catch {}
+
+  try {
+    if (config?.debug) {
+      console.log("[Storage]", ...args.map((item) => sanitizePayload(item)));
+    }
+  } catch {}
 }
 
 function safeEmit(events, eventName, payload = {}) {
   const name = safeText(eventName, "");
 
-  if (!name) {
-    return false;
-  }
+  if (!name) return false;
 
-  const cleanPayload = sanitizeStoragePayload(payload);
+  const cleanPayload = sanitizePayload(payload);
 
   try {
     if (isFunction(events?.emit)) {
@@ -486,296 +415,333 @@ function safeEmit(events, eventName, payload = {}) {
   return false;
 }
 
-function sanitizeStats(stats = {}) {
-  return {
-    ...stats,
-    lastKey: sanitizeSnapshotValue(stats.lastKey, stats.lastKey),
-  };
-}
-
 /* =========================================================
-   PREFIX / KEYS
+   KEYS
 ========================================================= */
 
-function getPrefixRaw() {
-  const prefix = safeText(
-    config?.storagePrefix || config?.appKey || config?.appId || DEFAULT_PREFIX,
+function prefixRaw() {
+  return (
+    safeText(
+      config?.storagePrefix ||
+        config?.appKey ||
+        config?.appId ||
+        DEFAULT_PREFIX,
+      DEFAULT_PREFIX
+    )
+      .replace(/^:+|:+$/g, "") ||
     DEFAULT_PREFIX
-  )
-    .replace(/:+$/g, "")
-    .replace(/^:+/g, "");
-
-  return prefix || DEFAULT_PREFIX;
+  );
 }
 
-function getPrefix() {
-  return `${getPrefixRaw()}:`;
+function prefix() {
+  return `${prefixRaw()}:`;
 }
 
-function normalizeStorageKey(key = "") {
-  return safeText(key, "")
-    .replace(/^:+/g, "")
-    .trim();
+function cleanKey(key = "") {
+  return safeText(key, "").replace(/^:+/g, "").trim();
 }
 
 function isNamespacedKey(key = "") {
-  return safeText(key, "").startsWith(getPrefix());
+  return safeText(key, "").startsWith(prefix());
 }
 
-function getNamespacedKey(key = "") {
-  const cleanKey = normalizeStorageKey(key);
+function namespacedKey(key = "") {
+  const clean = cleanKey(key);
 
-  if (!cleanKey) {
-    return getPrefix().replace(/:$/g, "");
+  if (!clean) {
+    return prefix().replace(/:$/g, "");
   }
 
-  if (isNamespacedKey(cleanKey)) {
-    return cleanKey;
+  if (isNamespacedKey(clean)) {
+    return clean;
   }
 
   try {
-    const built = buildStorageKey(cleanKey);
+    const built = buildStorageKey(clean);
 
     if (safeText(built, "") && isNamespacedKey(built)) {
       return built;
     }
   } catch {}
 
-  return `${getPrefix()}${cleanKey}`;
+  return `${prefix()}${clean}`;
 }
 
-function getRawStorageKey(key = "") {
-  return safeText(key, "");
-}
-
-function isCurrentNamespacedKey(key = "") {
-  return isNamespacedKey(safeText(key, ""));
+function stripPrefix(key = "") {
+  const text = safeText(key, "");
+  return text.startsWith(prefix()) ? text.slice(prefix().length) : text;
 }
 
 function namespacePrefix(namespace = "") {
-  const clean = safeText(namespace, "");
+  if (!namespace) return prefix();
 
-  if (!clean) {
-    return getPrefix();
-  }
-
-  const namespaced = getNamespacedKey(clean);
-
-  return namespaced.endsWith(":") ? namespaced : `${namespaced}:`;
-}
-
-function stripCurrentPrefix(key = "") {
-  const clean = safeText(key, "");
-  const prefix = getPrefix();
-
-  if (!clean.startsWith(prefix)) {
-    return clean;
-  }
-
-  return clean.slice(prefix.length);
+  const key = namespacedKey(namespace);
+  return key.endsWith(":") ? key : `${key}:`;
 }
 
 /* =========================================================
    STORAGE BACKENDS
 ========================================================= */
 
-function getStorageObject(kind = DEFAULT_KIND) {
-  if (!isBrowser()) {
-    return null;
-  }
+function backend(kind = DEFAULT_KIND) {
+  if (!isBrowser()) return null;
 
   const finalKind = normalizeKind(kind);
 
   try {
-    if (finalKind === "local") {
-      return window.localStorage || null;
-    }
-
-    if (finalKind === "session") {
-      return window.sessionStorage || null;
-    }
+    if (finalKind === "local") return window.localStorage || null;
+    if (finalKind === "session") return window.sessionStorage || null;
   } catch (error) {
     lastStorageError = error;
-    return null;
   }
 
   return null;
 }
 
-function testStorageAvailability(kind = DEFAULT_KIND) {
+function storageAvailable(kind = DEFAULT_KIND) {
   const finalKind = normalizeKind(kind);
 
-  if (finalKind === "memory") {
-    return true;
+  if (finalKind === "memory") return true;
+
+  if (availability[finalKind] !== null) {
+    return availability[finalKind];
   }
 
-  if (storageAvailabilityCache[finalKind] !== null) {
-    return storageAvailabilityCache[finalKind];
-  }
-
-  const storage = getStorageObject(finalKind);
+  const storage = backend(finalKind);
 
   if (!storage) {
-    storageAvailabilityCache[finalKind] = false;
+    availability[finalKind] = false;
     return false;
   }
 
-  const testKey = `${getPrefix()}${STORAGE_TEST_KEY}:${finalKind}`;
+  const testKey = `${prefix()}${TEST_KEY}:${finalKind}`;
 
   try {
     storage.setItem(testKey, "1");
     storage.removeItem(testKey);
 
-    storageAvailabilityCache[finalKind] = true;
+    availability[finalKind] = true;
     return true;
   } catch (error) {
     lastStorageError = error;
-    storageAvailabilityCache[finalKind] = false;
+    availability[finalKind] = false;
     return false;
   }
 }
 
 function resetStorageAvailabilityCache() {
-  storageAvailabilityCache.local = null;
-  storageAvailabilityCache.session = null;
+  availability.local = null;
+  availability.session = null;
   return true;
 }
 
-function getUsableStorage(kind = DEFAULT_KIND) {
+function usableBackend(kind = DEFAULT_KIND) {
   const finalKind = normalizeKind(kind);
 
-  if (finalKind === "memory") {
-    return null;
-  }
+  if (finalKind === "memory") return null;
+  if (!storageAvailable(finalKind)) return null;
 
-  if (!testStorageAvailability(finalKind)) {
-    return null;
-  }
-
-  return getStorageObject(finalKind);
+  return backend(finalKind);
 }
 
-function storageHasKey(storage, key) {
-  if (!storage || !key) {
-    return false;
+function rawRead(kind, key, fallback = undefined) {
+  if (kind === "memory") {
+    if (!memoryStorage.has(key)) return fallback;
+
+    const raw = memoryStorage.get(key);
+    return raw === undefined || raw === null || isCorruptedRaw(raw) ? fallback : raw;
   }
 
+  const storage = usableBackend(kind);
+
+  if (!storage) return fallback;
+
   try {
-    return storage.getItem(key) !== null;
+    const raw = storage.getItem(key);
+    return raw === null || raw === undefined || isCorruptedRaw(raw) ? fallback : raw;
+  } catch (error) {
+    lastStorageError = error;
+    return fallback;
+  }
+}
+
+function rawWrite(kind, key, raw) {
+  if (kind === "memory") {
+    if (raw === null || raw === undefined) {
+      memoryStorage.delete(key);
+      return true;
+    }
+
+    memoryStorage.set(key, String(raw));
+    return true;
+  }
+
+  const storage = usableBackend(kind);
+
+  if (!storage) return false;
+
+  try {
+    storage.setItem(key, String(raw));
+    return true;
+  } catch (error) {
+    lastStorageError = error;
+    return false;
+  }
+}
+
+function rawRemove(kind, key) {
+  if (kind === "memory") {
+    memoryStorage.delete(key);
+    return true;
+  }
+
+  const storage = backend(kind);
+
+  if (!storage) return false;
+
+  try {
+    storage.removeItem(key);
+    return true;
+  } catch (error) {
+    lastStorageError = error;
+    return false;
+  }
+}
+
+function storageHasRawKey(kind, key) {
+  if (kind === "memory") {
+    if (!memoryStorage.has(key)) return false;
+
+    const raw = memoryStorage.get(key);
+    return raw !== undefined && raw !== null && !isCorruptedRaw(raw);
+  }
+
+  const storage = usableBackend(kind);
+
+  if (!storage) return false;
+
+  try {
+    const raw = storage.getItem(key);
+    return raw !== null && raw !== undefined && !isCorruptedRaw(raw);
   } catch {
     return false;
   }
 }
 
-function readRawFromStorage(kind, namespacedKey, fallback = undefined) {
-  const storage = getUsableStorage(kind);
+/* =========================================================
+   OPTIONS
+========================================================= */
 
-  if (!storage) {
-    return fallback;
-  }
+function kindFromOptions(options = {}) {
+  const opts = isObject(options) ? options : {};
 
-  try {
-    const raw = storage.getItem(namespacedKey);
+  if (opts.memory === true || opts.memoryOnly === true) return "memory";
+  if (opts.session === true || opts.sessionOnly === true) return "session";
+  if (opts.local === true || opts.localOnly === true) return "local";
 
-    if (raw === null || raw === undefined || isCorruptedRawValue(raw)) {
-      return fallback;
-    }
-
-    return raw;
-  } catch (error) {
-    lastStorageError = error;
-    return fallback;
-  }
+  return normalizeKind(opts.kind || opts.storage || DEFAULT_KIND);
 }
 
-function writeRawToStorage(kind, namespacedKey, raw) {
-  const storage = getUsableStorage(kind);
+function readTargets(options = {}) {
+  const opts = isObject(options) ? options : {};
+  const kind = kindFromOptions(opts);
 
-  if (!storage) {
-    return false;
+  if (opts.all === true) return ["local", "session", "memory"];
+  if (kind === "memory") return ["memory"];
+
+  if (kind === "session") {
+    return unique([
+      "session",
+      opts.fallbackLocal === true ? "local" : "",
+      opts.memoryAlso === false ? "" : "memory",
+    ]);
   }
 
-  try {
-    storage.setItem(namespacedKey, raw);
-    return true;
-  } catch (error) {
-    lastStorageError = error;
-    return false;
-  }
+  return unique([
+    "local",
+    opts.fallbackSession === false || opts.localOnly === true ? "" : "session",
+    opts.memoryAlso === false ? "" : "memory",
+  ]);
 }
 
-function removeFromStorage(kind, namespacedKey) {
-  const storage = getStorageObject(kind);
+function writeTargets(options = {}) {
+  const opts = isObject(options) ? options : {};
+  const kind = kindFromOptions(opts);
 
-  if (!storage) {
-    return false;
+  if (opts.all === true) return ["local", "session", "memory"];
+  if (kind === "memory") return ["memory"];
+
+  if (kind === "session") {
+    return unique([
+      "session",
+      opts.localAlso === true ? "local" : "",
+      opts.memoryAlso === false ? "" : "memory",
+    ]);
   }
 
-  try {
-    storage.removeItem(namespacedKey);
-    return true;
-  } catch (error) {
-    lastStorageError = error;
-    return false;
+  return unique([
+    "local",
+    opts.sessionAlso === true ? "session" : "",
+    opts.memoryAlso === false ? "" : "memory",
+  ]);
+}
+
+function removeTargets(options = {}) {
+  const opts = isObject(options) ? options : {};
+  const kind = kindFromOptions(opts);
+
+  if (opts.all === true) return ["local", "session", "memory"];
+  if (kind === "memory") return ["memory"];
+
+  if (opts.localOnly === true) {
+    return unique(["local", opts.memoryAlso === false ? "" : "memory"]);
   }
+
+  if (opts.sessionOnly === true) {
+    return unique(["session", opts.memoryAlso === false ? "" : "memory"]);
+  }
+
+  return unique(["local", "session", "memory"]);
 }
 
 /* =========================================================
-   MEMORY FALLBACK
+   JSON
 ========================================================= */
 
-function readRawFromMemory(namespacedKey, fallback = undefined) {
-  if (!memoryStorage.has(namespacedKey)) {
+function stringify(value, fallback = "") {
+  try {
+    return safeStringify(value, fallback);
+  } catch {}
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function parseJson(raw, fallback = null) {
+  if (raw === null || raw === undefined || isCorruptedRaw(raw)) {
     return fallback;
   }
 
-  const raw = memoryStorage.get(namespacedKey);
+  try {
+    return safeParse(raw, fallback);
+  } catch {}
 
-  if (raw === null || raw === undefined || isCorruptedRawValue(raw)) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function parseValue(raw, fallback = null) {
+  if (raw === null || raw === undefined || isCorruptedRaw(raw)) {
     return fallback;
   }
 
-  return raw;
-}
-
-function writeRawToMemory(namespacedKey, raw) {
-  if (!namespacedKey) {
-    return false;
-  }
-
-  if (raw === null || raw === undefined) {
-    memoryStorage.delete(namespacedKey);
-    return true;
-  }
-
-  memoryStorage.set(namespacedKey, String(raw));
-  return true;
-}
-
-function removeFromMemory(namespacedKey) {
-  memoryStorage.delete(namespacedKey);
-  return true;
-}
-
-/* =========================================================
-   PARSE
-========================================================= */
-
-function parseStoredJson(raw, fallback = null) {
-  if (raw === null || raw === undefined || isCorruptedRawValue(raw)) {
-    return fallback;
-  }
-
-  const parsed = safeJsonParse(raw, undefined);
-  return parsed === undefined ? fallback : parsed;
-}
-
-function parseStoredValue(raw, fallback = null) {
-  if (raw === null || raw === undefined || isCorruptedRawValue(raw)) {
-    return fallback;
-  }
-
-  const parsed = safeJsonParse(raw, undefined);
+  const parsed = parseJson(raw, undefined);
   return parsed === undefined ? raw : parsed;
 }
 
@@ -783,7 +749,7 @@ function parseStoredValue(raw, fallback = null) {
    KEY COLLECTION
 ========================================================= */
 
-function getStorageLength(storage) {
+function storageLength(storage) {
   try {
     return safeNumber(storage?.length, 0);
   } catch {
@@ -791,21 +757,19 @@ function getStorageLength(storage) {
   }
 }
 
-function collectStorageKeys(storage, predicate = () => true) {
+function collectKeysFromStorage(storage, predicate = () => true) {
   const output = [];
 
-  if (!storage) {
-    return output;
-  }
+  if (!storage) return output;
 
-  const length = getStorageLength(storage);
+  const length = storageLength(storage);
 
   try {
-    for (let i = 0; i < length; i += 1) {
-      const currentKey = storage.key(i);
+    for (let index = 0; index < length; index += 1) {
+      const key = storage.key(index);
 
-      if (currentKey && predicate(currentKey)) {
-        output.push(currentKey);
+      if (key && predicate(key)) {
+        output.push(key);
       }
     }
   } catch {}
@@ -817,12 +781,10 @@ function collectStorageKeys(storage, predicate = () => true) {
    LEGACY CLEANUP
 ========================================================= */
 
-function getConfiguredLegacyKeys() {
+function configuredLegacyKeys() {
   const legacy = config?.legacyStorageKeys;
 
-  if (!legacy) {
-    return [];
-  }
+  if (!legacy) return [];
 
   if (Array.isArray(legacy)) {
     return legacy.map((item) => safeText(item, "")).filter(Boolean);
@@ -838,27 +800,18 @@ function getConfiguredLegacyKeys() {
   return [];
 }
 
-function isPreferenceLikeKey(key = "") {
+function isPreferenceKey(key = "") {
   return PREFERENCE_KEY_RE.test(safeText(key, ""));
 }
 
-function getLegacyKeys() {
+function legacyKeys() {
   return unique([
-    ...getConfiguredLegacyKeys(),
+    ...configuredLegacyKeys(),
     ...LEGACY_EXTRA_KEYS,
-  ]).filter((legacyKey) => {
-    if (!legacyKey) {
-      return false;
-    }
-
-    if (isCurrentNamespacedKey(legacyKey)) {
-      return false;
-    }
-
-    if (isPreferenceLikeKey(legacyKey)) {
-      return false;
-    }
-
+  ]).filter((key) => {
+    if (!key) return false;
+    if (isNamespacedKey(key)) return false;
+    if (isPreferenceKey(key)) return false;
     return true;
   });
 }
@@ -866,20 +819,12 @@ function getLegacyKeys() {
 function shouldRemoveLegacyKey(key = "") {
   const clean = safeText(key, "");
 
-  if (!clean) {
-    return false;
-  }
-
-  if (isCurrentNamespacedKey(clean)) {
-    return false;
-  }
-
-  if (isPreferenceLikeKey(clean)) {
-    return false;
-  }
+  if (!clean) return false;
+  if (isNamespacedKey(clean)) return false;
+  if (isPreferenceKey(clean)) return false;
 
   return (
-    getLegacyKeys().includes(clean) ||
+    legacyKeys().includes(clean) ||
     (
       SESSIONISH_KEY_RE.test(clean) &&
       (
@@ -893,30 +838,22 @@ function shouldRemoveLegacyKey(key = "") {
 }
 
 export function removeLegacySessionKeys(utils = null, events = null) {
-  const explicitKeys = getLegacyKeys();
+  const explicitKeys = legacyKeys();
   let removed = 0;
 
   for (const kind of ["local", "session"]) {
-    const storage = getStorageObject(kind);
+    const storage = backend(kind);
 
-    if (!storage) {
-      continue;
-    }
+    if (!storage) continue;
 
-    const scannedKeys = collectStorageKeys(storage, shouldRemoveLegacyKey);
+    const scannedKeys = collectKeysFromStorage(storage, shouldRemoveLegacyKey);
     const keys = unique([...explicitKeys, ...scannedKeys]);
 
-    for (const legacyKey of keys) {
-      const key = getRawStorageKey(legacyKey);
-
-      if (!key || isCurrentNamespacedKey(key) || isPreferenceLikeKey(key)) {
-        continue;
-      }
+    for (const key of keys) {
+      if (!key || isNamespacedKey(key) || isPreferenceKey(key)) continue;
 
       try {
-        if (!storageHasKey(storage, key)) {
-          continue;
-        }
+        if (storage.getItem(key) === null) continue;
 
         storage.removeItem(key);
         removed += 1;
@@ -943,7 +880,7 @@ export function removeLegacySessionKeys(utils = null, events = null) {
 }
 
 /* =========================================================
-   STORAGE FACTORY
+   FACTORY
 ========================================================= */
 
 export function createStorage(input = {}) {
@@ -952,16 +889,12 @@ export function createStorage(input = {}) {
   const utils =
     deps.utils ||
     deps.logger ||
-    input?.utils ||
-    input ||
     null;
 
   const events =
     deps.events ||
     deps.bus ||
     deps.eventBus ||
-    input?.events ||
-    input?.bus ||
     null;
 
   const stats = {
@@ -975,12 +908,12 @@ export function createStorage(input = {}) {
     migrate: 0,
     errors: 0,
 
-    memoryFallbackWrites: 0,
-    memoryFallbackReads: 0,
-    localStorageWrites: 0,
-    localStorageReads: 0,
-    sessionStorageWrites: 0,
-    sessionStorageReads: 0,
+    memoryReads: 0,
+    memoryWrites: 0,
+    localReads: 0,
+    localWrites: 0,
+    sessionReads: 0,
+    sessionWrites: 0,
 
     lastOperation: "",
     lastKey: "",
@@ -996,9 +929,7 @@ export function createStorage(input = {}) {
   }
 
   function recordError(error, operation = "", key = "", kind = "") {
-    if (!error) {
-      return;
-    }
+    if (!error) return;
 
     stats.errors += 1;
     lastStorageError = error;
@@ -1012,165 +943,44 @@ export function createStorage(input = {}) {
 
     safeEmit(events, STORAGE_EVENTS.error, {
       operation,
-      key: sanitizeSnapshotValue(key, key),
+      key: sanitizeValue(key, key),
       kind,
       error: sanitizeError(error),
       at: safeIsoDate(),
     });
   }
 
+  function countRead(kind) {
+    if (kind === "local") stats.localReads += 1;
+    else if (kind === "session") stats.sessionReads += 1;
+    else stats.memoryReads += 1;
+  }
+
+  function countWrite(kind) {
+    if (kind === "local") stats.localWrites += 1;
+    else if (kind === "session") stats.sessionWrites += 1;
+    else stats.memoryWrites += 1;
+  }
+
   function key(name = "") {
-    return getNamespacedKey(name);
-  }
-
-  function resolveKindFromOptions(options = {}) {
-    const opts = isObject(options) ? options : {};
-
-    if (opts.memory === true || opts.memoryOnly === true) {
-      return "memory";
-    }
-
-    if (opts.session === true || opts.sessionOnly === true) {
-      return "session";
-    }
-
-    if (opts.local === true || opts.localOnly === true) {
-      return "local";
-    }
-
-    return normalizeKind(opts.kind || opts.storage || DEFAULT_KIND);
-  }
-
-  function resolveReadTargets(options = {}) {
-    const opts = isObject(options) ? options : {};
-    const requestedKind = resolveKindFromOptions(opts);
-
-    if (opts.all === true) {
-      return unique([requestedKind, "local", "session", "memory"]);
-    }
-
-    if (requestedKind === "memory") {
-      return ["memory"];
-    }
-
-    if (requestedKind === "session") {
-      return unique([
-        "session",
-        opts.sessionOnly === true ? "" : opts.fallbackLocal === true ? "local" : "",
-        opts.memoryAlso === false ? "" : "memory",
-      ]);
-    }
-
-    return unique([
-      "local",
-      opts.localOnly === true ? "" : opts.fallbackSession === false ? "" : "session",
-      opts.memoryAlso === false ? "" : "memory",
-    ]);
-  }
-
-  function resolveWriteTargets(options = {}) {
-    const opts = isObject(options) ? options : {};
-    const requestedKind = resolveKindFromOptions(opts);
-
-    if (opts.all === true) {
-      return ["local", "session", "memory"];
-    }
-
-    if (requestedKind === "memory") {
-      return ["memory"];
-    }
-
-    if (requestedKind === "session") {
-      return unique([
-        "session",
-        opts.sessionOnly === true ? "" : opts.localAlso === true ? "local" : "",
-        opts.memoryAlso === false ? "" : "memory",
-      ]);
-    }
-
-    return unique([
-      "local",
-      opts.localOnly === true ? "" : opts.sessionAlso === true ? "session" : "",
-      opts.memoryAlso === false ? "" : "memory",
-    ]);
-  }
-
-  function resolveRemoveTargets(options = {}) {
-    const opts = isObject(options) ? options : {};
-    const requestedKind = resolveKindFromOptions(opts);
-
-    if (opts.all === true) {
-      return ["local", "session", "memory"];
-    }
-
-    if (requestedKind === "memory") {
-      return ["memory"];
-    }
-
-    if (requestedKind === "session") {
-      return unique([
-        "session",
-        opts.sessionOnly === true ? "" : opts.localAlso === true ? "local" : "",
-        opts.memoryAlso === false ? "" : "memory",
-      ]);
-    }
-
-    return unique([
-      "local",
-      opts.localOnly === true ? "" : opts.sessionAlso === true ? "session" : "",
-      opts.memoryAlso === false ? "" : "memory",
-    ]);
-  }
-
-  function incrementReadCounter(kind) {
-    if (kind === "local") {
-      stats.localStorageReads += 1;
-    } else if (kind === "session") {
-      stats.sessionStorageReads += 1;
-    } else {
-      stats.memoryFallbackReads += 1;
-    }
-  }
-
-  function incrementWriteCounter(kind) {
-    if (kind === "local") {
-      stats.localStorageWrites += 1;
-    } else if (kind === "session") {
-      stats.sessionStorageWrites += 1;
-    } else {
-      stats.memoryFallbackWrites += 1;
-    }
+    return namespacedKey(name);
   }
 
   function getRaw(name, fallback = null, options = {}) {
-    const namespacedKey = key(name);
-    const opts = isObject(options) ? options : {};
-    const requestedKind = resolveKindFromOptions(opts);
+    const finalKey = key(name);
+    const kind = kindFromOptions(options);
 
     stats.get += 1;
-    touch("getRaw", namespacedKey, requestedKind);
+    touch("getRaw", finalKey, kind);
 
-    const targets = resolveReadTargets(opts);
+    for (const target of readTargets(options)) {
+      countRead(target);
 
-    for (const target of targets) {
-      if (target === "memory") {
-        incrementReadCounter("memory");
-
-        const memoryRaw = readRawFromMemory(namespacedKey, undefined);
-
-        if (memoryRaw !== undefined) {
-          return memoryRaw;
-        }
-
-        continue;
-      }
-
-      const raw = readRawFromStorage(target, namespacedKey, undefined);
-      incrementReadCounter(target);
+      const raw = rawRead(target, finalKey, undefined);
 
       if (raw !== undefined) {
-        if (opts.memoryAlso !== false) {
-          writeRawToMemory(namespacedKey, raw);
+        if (target !== "memory" && options?.memoryAlso !== false) {
+          rawWrite("memory", finalKey, raw);
         }
 
         return raw;
@@ -1182,34 +992,26 @@ export function createStorage(input = {}) {
 
   function get(name, fallback = null, options = {}) {
     const raw = getRaw(name, undefined, options);
-    return raw === undefined ? fallback : parseStoredValue(raw, fallback);
+    return raw === undefined ? fallback : parseValue(raw, fallback);
   }
 
   function getJson(name, fallback = null, options = {}) {
     const raw = getRaw(name, undefined, options);
-    return raw === undefined ? fallback : parseStoredJson(raw, fallback);
+    return raw === undefined ? fallback : parseJson(raw, fallback);
   }
 
-  function writeRawToRequestedTargets(name, raw, opts = {}) {
-    const namespacedKey = key(name);
-    const targets = resolveWriteTargets(opts);
-
+  function writeRaw(name, raw, options = {}) {
+    const finalKey = key(name);
     let written = false;
 
-    for (const target of targets) {
-      if (target === "memory") {
-        incrementWriteCounter("memory");
-        written = writeRawToMemory(namespacedKey, raw) || written;
-        continue;
-      }
-
-      const ok = writeRawToStorage(target, namespacedKey, raw);
+    for (const target of writeTargets(options)) {
+      const ok = rawWrite(target, finalKey, raw);
 
       if (ok) {
-        incrementWriteCounter(target);
+        countWrite(target);
         written = true;
       } else {
-        recordError(lastStorageError, "setRaw", namespacedKey, target);
+        recordError(lastStorageError, "setRaw", finalKey, target);
       }
     }
 
@@ -1217,45 +1019,43 @@ export function createStorage(input = {}) {
   }
 
   function setRaw(name, value, options = {}) {
-    const namespacedKey = key(name);
-    const opts = isObject(options) ? options : {};
-    const requestedKind = resolveKindFromOptions(opts);
+    const finalKey = key(name);
+    const kind = kindFromOptions(options);
 
     stats.set += 1;
-    touch("setRaw", namespacedKey, requestedKind);
+    touch("setRaw", finalKey, kind);
 
     if (shouldRemoveOnSet(value)) {
-      return remove(name, opts);
+      return remove(name, options);
     }
 
     const raw = String(value ?? "");
 
-    if (!raw || isCorruptedRawValue(raw)) {
-      return remove(name, opts);
+    if (!raw || isCorruptedRaw(raw)) {
+      return remove(name, options);
     }
 
-    return writeRawToRequestedTargets(name, raw, opts);
+    return writeRaw(name, raw, options);
   }
 
   function set(name, value, options = {}) {
-    const namespacedKey = key(name);
-    const opts = isObject(options) ? options : {};
-    const requestedKind = resolveKindFromOptions(opts);
+    const finalKey = key(name);
+    const kind = kindFromOptions(options);
 
     stats.set += 1;
-    touch("set", namespacedKey, requestedKind);
+    touch("set", finalKey, kind);
 
     if (shouldRemoveOnSet(value)) {
-      return remove(name, opts);
+      return remove(name, options);
     }
 
-    const raw = safeJsonStringify(value, "");
+    const raw = stringify(value, "");
 
-    if (!raw || isCorruptedRawValue(raw)) {
+    if (!raw || isCorruptedRaw(raw)) {
       return false;
     }
 
-    return writeRawToRequestedTargets(name, raw, opts);
+    return writeRaw(name, raw, options);
   }
 
   function setJson(name, value, options = {}) {
@@ -1263,65 +1063,31 @@ export function createStorage(input = {}) {
   }
 
   function remove(name, options = {}) {
-    const namespacedKey = key(name);
-    const opts = isObject(options) ? options : {};
-    const requestedKind = resolveKindFromOptions(opts);
+    const finalKey = key(name);
+    const kind = kindFromOptions(options);
 
     stats.remove += 1;
-    touch("remove", namespacedKey, requestedKind);
+    touch("remove", finalKey, kind);
 
-    const targets = resolveRemoveTargets(opts);
-
-    for (const target of targets) {
-      if (target === "memory") {
-        removeFromMemory(namespacedKey);
-        continue;
-      }
-
-      removeFromStorage(target, namespacedKey);
+    for (const target of removeTargets(options)) {
+      rawRemove(target, finalKey);
     }
 
     return true;
   }
 
   function has(name, options = {}) {
-    const namespacedKey = key(name);
-    const opts = isObject(options) ? options : {};
-    const requestedKind = resolveKindFromOptions(opts);
+    const finalKey = key(name);
+    const kind = kindFromOptions(options);
 
     stats.has += 1;
-    touch("has", namespacedKey, requestedKind);
+    touch("has", finalKey, kind);
 
-    const targets = resolveReadTargets(opts);
+    for (const target of readTargets(options)) {
+      countRead(target);
 
-    for (const target of targets) {
-      if (target === "memory") {
-        if (memoryStorage.has(namespacedKey)) {
-          const raw = memoryStorage.get(namespacedKey);
-
-          if (!isCorruptedRawValue(raw)) {
-            return true;
-          }
-        }
-
-        continue;
-      }
-
-      const storage = getUsableStorage(target);
-
-      if (!storage) {
-        continue;
-      }
-
-      try {
-        const raw = storage.getItem(namespacedKey);
-        incrementReadCounter(target);
-
-        if (raw !== null && raw !== undefined && !isCorruptedRawValue(raw)) {
-          return true;
-        }
-      } catch (error) {
-        recordError(error, "has", namespacedKey, target);
+      if (storageHasRawKey(target, finalKey)) {
+        return true;
       }
     }
 
@@ -1330,83 +1096,78 @@ export function createStorage(input = {}) {
 
   function keys(options = {}) {
     const opts = isObject(options) ? options : {};
-    const requestedKind = resolveKindFromOptions(opts);
-    const includeValues = Boolean(opts.includeValues);
-    const stripPrefix = Boolean(opts.stripPrefix);
-
-    const rawPrefix = opts.prefix ? namespacePrefix(opts.prefix) : getPrefix();
+    const kind = kindFromOptions(opts);
+    const includeValues = opts.includeValues === true;
+    const strip = opts.stripPrefix === true;
+    const targetPrefix = opts.prefix ? namespacePrefix(opts.prefix) : prefix();
 
     stats.keys += 1;
-    touch("keys", rawPrefix, requestedKind);
+    touch("keys", targetPrefix, kind);
 
-    const output = [];
+    const result = [];
+    const seen = new Set();
 
-    function pushKey(currentKey, valueGetter = null) {
-      const visibleKey = stripPrefix ? stripCurrentPrefix(currentKey) : currentKey;
+    function push(currentKey, rawGetter = null) {
+      if (!currentKey || !currentKey.startsWith(targetPrefix)) return;
 
-      const exists = output.some((item) =>
-        typeof item === "string"
-          ? item === visibleKey
-          : item.key === visibleKey || item.namespacedKey === currentKey
-      );
+      const visibleKey = strip ? stripPrefix(currentKey) : currentKey;
 
-      if (exists) {
+      if (seen.has(visibleKey)) return;
+
+      seen.add(visibleKey);
+
+      if (!includeValues) {
+        result.push(visibleKey);
         return;
       }
 
-      if (includeValues) {
-        let raw = "";
+      let raw = "";
 
-        try {
-          raw = isFunction(valueGetter) ? valueGetter() : "";
-        } catch {
-          raw = "";
-        }
-
-        output.push({
-          key: visibleKey,
-          namespacedKey: currentKey,
-          value: sanitizeSnapshotValue(currentKey, raw),
-        });
-      } else {
-        output.push(visibleKey);
+      try {
+        raw = isFunction(rawGetter) ? rawGetter() : "";
+      } catch {
+        raw = "";
       }
+
+      result.push({
+        key: visibleKey,
+        namespacedKey: currentKey,
+        value: sanitizeValue(currentKey, raw),
+      });
     }
 
-    const kindsToRead =
-      requestedKind === "memory"
-        ? ["memory"]
-        : opts.all === true
-          ? ["local", "session", "memory"]
+    const targets =
+      opts.all === true
+        ? ["local", "session", "memory"]
+        : kind === "memory"
+          ? ["memory"]
           : unique([
-              requestedKind,
+              kind,
               opts.sessionAlso === true ? "session" : "",
               opts.localAlso === true ? "local" : "",
               opts.memoryAlso === false ? "" : "memory",
             ]);
 
-    for (const kind of kindsToRead) {
-      if (kind === "memory") {
+    for (const target of targets) {
+      if (target === "memory") {
         for (const currentKey of memoryStorage.keys()) {
-          if (currentKey.startsWith(rawPrefix)) {
-            pushKey(currentKey, () => memoryStorage.get(currentKey));
-          }
+          push(currentKey, () => memoryStorage.get(currentKey));
         }
 
         continue;
       }
 
-      const storage = getStorageObject(kind);
-      const backendKeys = collectStorageKeys(storage, (currentKey) =>
-        currentKey.startsWith(rawPrefix)
+      const storage = backend(target);
+      const collected = collectKeysFromStorage(storage, (currentKey) =>
+        currentKey.startsWith(targetPrefix)
       );
 
-      for (const currentKey of backendKeys) {
-        pushKey(currentKey, () => storage.getItem(currentKey));
+      for (const currentKey of collected) {
+        push(currentKey, () => storage.getItem(currentKey));
       }
     }
 
-    return output;
+    return result;
   }
 
   function entries(options = {}) {
@@ -1418,16 +1179,19 @@ export function createStorage(input = {}) {
 
   function clearNamespace(namespace = "", options = {}) {
     const opts = isObject(options) ? options : {};
-    const prefix = namespace ? namespacePrefix(namespace) : getPrefix();
-    const requestedKind = resolveKindFromOptions(opts);
+    const targetPrefix = namespace ? namespacePrefix(namespace) : prefix();
+    const kind = kindFromOptions(opts);
 
-    const kindsToClear =
+    stats.clear += 1;
+    touch("clearNamespace", targetPrefix, kind);
+
+    const targets =
       opts.all === true
         ? ["local", "session", "memory"]
-        : requestedKind === "memory"
+        : kind === "memory"
           ? ["memory"]
           : unique([
-              requestedKind,
+              kind,
               opts.sessionAlso === true ? "session" : "",
               opts.localAlso === true ? "local" : "",
               opts.memoryAlso === false ? "" : "memory",
@@ -1435,13 +1199,10 @@ export function createStorage(input = {}) {
 
     let removed = 0;
 
-    stats.clear += 1;
-    touch("clearNamespace", prefix, requestedKind);
-
-    for (const kind of kindsToClear) {
-      if (kind === "memory") {
+    for (const target of targets) {
+      if (target === "memory") {
         for (const currentKey of Array.from(memoryStorage.keys())) {
-          if (currentKey.startsWith(prefix)) {
+          if (currentKey.startsWith(targetPrefix)) {
             memoryStorage.delete(currentKey);
             removed += 1;
           }
@@ -1450,17 +1211,17 @@ export function createStorage(input = {}) {
         continue;
       }
 
-      const storage = getStorageObject(kind);
-      const keysToRemove = collectStorageKeys(storage, (currentKey) =>
-        currentKey.startsWith(prefix)
+      const storage = backend(target);
+      const toRemove = collectKeysFromStorage(storage, (currentKey) =>
+        currentKey.startsWith(targetPrefix)
       );
 
-      for (const currentKey of keysToRemove) {
+      for (const currentKey of toRemove) {
         try {
           storage.removeItem(currentKey);
           removed += 1;
         } catch (error) {
-          recordError(error, "clearNamespace", currentKey, kind);
+          recordError(error, "clearNamespace", currentKey, target);
         }
       }
     }
@@ -1468,8 +1229,8 @@ export function createStorage(input = {}) {
     const result = {
       ok: true,
       removed,
-      prefix,
-      kind: requestedKind,
+      prefix: targetPrefix,
+      kind,
     };
 
     safeEmit(events, STORAGE_EVENTS.cleared, {
@@ -1482,7 +1243,6 @@ export function createStorage(input = {}) {
 
   function clearAll(options = {}) {
     const opts = isObject(options) ? options : {};
-    const includeLegacy = opts.includeLegacy === true;
 
     const result = clearNamespace("", {
       ...opts,
@@ -1491,29 +1251,32 @@ export function createStorage(input = {}) {
 
     let removed = result.removed || 0;
 
-    if (includeLegacy) {
+    if (opts.includeLegacy === true) {
       removed += removeLegacySessionKeys(utils, events);
     }
 
     return {
       ...result,
       removed,
-      includeLegacy,
+      includeLegacy: opts.includeLegacy === true,
     };
   }
 
   function repairCorrupted(options = {}) {
     const opts = isObject(options) ? options : {};
-    const requestedKind = resolveKindFromOptions(opts);
-    const prefix = opts.prefix ? namespacePrefix(opts.prefix) : getPrefix();
+    const kind = kindFromOptions(opts);
+    const targetPrefix = opts.prefix ? namespacePrefix(opts.prefix) : prefix();
 
-    const kindsToRepair =
+    stats.repair += 1;
+    touch("repairCorrupted", targetPrefix, kind);
+
+    const targets =
       opts.all === true
         ? ["local", "session", "memory"]
-        : requestedKind === "memory"
+        : kind === "memory"
           ? ["memory"]
           : unique([
-              requestedKind,
+              kind,
               opts.sessionAlso === true ? "session" : "",
               opts.localAlso === true ? "local" : "",
               opts.memoryAlso === false ? "" : "memory",
@@ -1521,13 +1284,10 @@ export function createStorage(input = {}) {
 
     let repaired = 0;
 
-    stats.repair += 1;
-    touch("repairCorrupted", prefix, requestedKind);
-
-    for (const kind of kindsToRepair) {
-      if (kind === "memory") {
+    for (const target of targets) {
+      if (target === "memory") {
         for (const [currentKey, raw] of Array.from(memoryStorage.entries())) {
-          if (currentKey.startsWith(prefix) && isCorruptedRawValue(raw)) {
+          if (currentKey.startsWith(targetPrefix) && isCorruptedRaw(raw)) {
             memoryStorage.delete(currentKey);
             repaired += 1;
           }
@@ -1536,21 +1296,21 @@ export function createStorage(input = {}) {
         continue;
       }
 
-      const storage = getStorageObject(kind);
-      const keysToCheck = collectStorageKeys(storage, (currentKey) =>
-        currentKey.startsWith(prefix)
+      const storage = backend(target);
+      const toCheck = collectKeysFromStorage(storage, (currentKey) =>
+        currentKey.startsWith(targetPrefix)
       );
 
-      for (const currentKey of keysToCheck) {
+      for (const currentKey of toCheck) {
         try {
           const raw = storage.getItem(currentKey);
 
-          if (isCorruptedRawValue(raw)) {
+          if (isCorruptedRaw(raw)) {
             storage.removeItem(currentKey);
             repaired += 1;
           }
         } catch (error) {
-          recordError(error, "repairCorrupted", currentKey, kind);
+          recordError(error, "repairCorrupted", currentKey, target);
         }
       }
     }
@@ -1558,8 +1318,8 @@ export function createStorage(input = {}) {
     const result = {
       ok: true,
       repaired,
-      prefix,
-      kind: requestedKind,
+      prefix: targetPrefix,
+      kind,
     };
 
     safeEmit(events, STORAGE_EVENTS.repaired, {
@@ -1578,21 +1338,21 @@ export function createStorage(input = {}) {
     if (
       !fromKey ||
       !toKey ||
-      isCurrentNamespacedKey(fromKey) ||
-      isPreferenceLikeKey(fromKey)
+      isNamespacedKey(fromKey) ||
+      isPreferenceKey(fromKey)
     ) {
       return false;
     }
 
-    const requestedKind = resolveKindFromOptions(opts);
+    const kind = kindFromOptions(opts);
 
-    const readKinds =
+    const targets =
       opts.all === true
         ? ["local", "session", "memory"]
-        : requestedKind === "memory"
+        : kind === "memory"
           ? ["memory"]
           : unique([
-              requestedKind,
+              kind,
               opts.fallbackSession === false ? "" : "session",
               opts.fallbackLocal === true ? "local" : "",
               opts.memoryAlso === false ? "" : "memory",
@@ -1601,8 +1361,8 @@ export function createStorage(input = {}) {
     let raw;
     let sourceKind = "";
 
-    for (const kind of readKinds) {
-      if (kind === "memory") {
+    for (const target of targets) {
+      if (target === "memory") {
         if (memoryStorage.has(fromKey)) {
           raw = memoryStorage.get(fromKey);
           sourceKind = "memory";
@@ -1612,22 +1372,22 @@ export function createStorage(input = {}) {
         continue;
       }
 
-      const storage = getStorageObject(kind);
+      const storage = backend(target);
 
       try {
         const candidate = storage?.getItem?.(fromKey);
 
         if (candidate !== null && candidate !== undefined) {
           raw = candidate;
-          sourceKind = kind;
+          sourceKind = target;
           break;
         }
       } catch (error) {
-        recordError(error, "migrateLegacyKey:read", fromKey, kind);
+        recordError(error, "migrateLegacyKey:read", fromKey, target);
       }
     }
 
-    if (raw === null || raw === undefined || isCorruptedRawValue(raw)) {
+    if (raw === null || raw === undefined || isCorruptedRaw(raw)) {
       return false;
     }
 
@@ -1638,7 +1398,7 @@ export function createStorage(input = {}) {
         if (sourceKind === "memory") {
           memoryStorage.delete(fromKey);
         } else {
-          getStorageObject(sourceKind)?.removeItem?.(fromKey);
+          backend(sourceKind)?.removeItem?.(fromKey);
         }
       } catch {}
     }
@@ -1647,10 +1407,10 @@ export function createStorage(input = {}) {
       stats.migrate += 1;
 
       safeEmit(events, STORAGE_EVENTS.migrated, {
-        from: sanitizeSnapshotValue(fromKey, fromKey),
-        to: sanitizeSnapshotValue(key(toKey), key(toKey)),
+        from: sanitizeValue(fromKey, fromKey),
+        to: sanitizeValue(key(toKey), key(toKey)),
         sourceKind,
-        kind: requestedKind,
+        kind,
         removedLegacy: opts.removeLegacy !== false,
         at: safeIsoDate(),
       });
@@ -1661,55 +1421,55 @@ export function createStorage(input = {}) {
 
   function getSnapshot(options = {}) {
     const opts = isObject(options) ? options : {};
-    const includeKeys = opts.includeKeys !== false;
-    const includeValues = opts.includeValues === true;
 
     return {
       version: STORAGE_VERSION,
       browser: isBrowser(),
 
-      prefix: getPrefix(),
-      prefixRaw: getPrefixRaw(),
+      prefix: prefix(),
+      prefixRaw: prefixRaw(),
 
-      localStorageAvailable: testStorageAvailability("local"),
-      sessionStorageAvailable: testStorageAvailability("session"),
+      localStorageAvailable: storageAvailable("local"),
+      sessionStorageAvailable: storageAvailable("session"),
       memoryFallbackSize: memoryStorage.size,
 
-      knownLegacyKeys: opts.includeLegacyKeys === true ? getLegacyKeys() : [],
+      knownLegacyKeys: opts.includeLegacyKeys === true ? legacyKeys() : [],
 
-      keys: includeKeys
-        ? keys({
+      keys: opts.includeKeys === false
+        ? []
+        : keys({
             all: true,
-            includeValues,
-          })
-        : [],
+            includeValues: opts.includeValues === true,
+          }),
 
-      stats: sanitizeStats(stats),
+      stats: {
+        ...stats,
+        lastKey: sanitizeValue(stats.lastKey, stats.lastKey),
+      },
 
       lastError: sanitizeError(lastStorageError),
 
       events: STORAGE_EVENTS,
-
       at: safeIsoDate(),
     };
   }
 
   safeLog(utils, "Storage ready.", {
     version: STORAGE_VERSION,
-    prefix: getPrefix(),
-    local: testStorageAvailability("local"),
-    session: testStorageAvailability("session"),
+    prefix: prefix(),
+    local: storageAvailable("local"),
+    session: storageAvailable("session"),
   });
 
   safeEmit(events, STORAGE_EVENTS.ready, {
     version: STORAGE_VERSION,
-    prefix: getPrefix(),
-    localStorageAvailable: testStorageAvailability("local"),
-    sessionStorageAvailable: testStorageAvailability("session"),
+    prefix: prefix(),
+    localStorageAvailable: storageAvailable("local"),
+    sessionStorageAvailable: storageAvailable("session"),
     at: safeIsoDate(),
   });
 
-  if (!testStorageAvailability("local") && !testStorageAvailability("session")) {
+  if (!storageAvailable("local") && !storageAvailable("session")) {
     safeEmit(events, STORAGE_EVENTS.unavailable, {
       memoryFallback: true,
       error: sanitizeError(lastStorageError),
@@ -1720,8 +1480,8 @@ export function createStorage(input = {}) {
   return {
     version: STORAGE_VERSION,
 
-    prefix: getPrefix(),
-    prefixRaw: getPrefixRaw(),
+    prefix: prefix(),
+    prefixRaw: prefixRaw(),
 
     key,
     getNamespacedKey: key,
@@ -1764,13 +1524,8 @@ export function createStorage(input = {}) {
 }
 
 /* =========================================================
-   EXPORTS
+   DEFAULT EXPORT
 ========================================================= */
-
-export {
-  STORAGE_VERSION,
-  STORAGE_EVENTS,
-};
 
 export default {
   STORAGE_VERSION,

@@ -2,17 +2,17 @@
    Onion SPA - Store Helpers
    Archivo: src/store/helpers.js
 
-   Pure helpers:
+   STORE HELPERS · SIMPLE
    - clone/equality/path/merge/collections
    - prototype pollution hardening
    - browser/server safe
    - zero deps
 ========================================================= */
 
-export const STORE_HELPERS_VERSION = "15.0.0-clean";
+export const STORE_HELPERS_VERSION = "16.0.0-simple";
 
-const MAX_CLONE_DEPTH = 80;
-const MAX_EQUAL_DEPTH = 80;
+const MAX_CLONE_DEPTH = 64;
+const MAX_EQUAL_DEPTH = 64;
 const MAX_CHANGED_PATH_DEPTH = 32;
 
 const UNSAFE_PATH_KEYS = new Set([
@@ -83,16 +83,16 @@ export function isWeakSet(value) {
 }
 
 export function isArrayBuffer(value) {
-  return value instanceof ArrayBuffer;
+  return typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer;
 }
 
 export function isDataView(value) {
-  return value instanceof DataView;
+  return typeof DataView !== "undefined" && value instanceof DataView;
 }
 
 export function isTypedArray(value) {
   try {
-    return ArrayBuffer.isView(value) && !(value instanceof DataView);
+    return typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(value) && !isDataView(value);
   } catch {
     return false;
   }
@@ -116,8 +116,8 @@ export function hasOwn(obj, key) {
 
 export function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
-  const text = String(value).trim();
-  return text || fallback;
+  const output = String(value).trim();
+  return output || fallback;
 }
 
 export function safeLower(value, fallback = "") {
@@ -125,27 +125,19 @@ export function safeLower(value, fallback = "") {
 }
 
 export function safeNumber(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+  const output = Number(value);
+  return Number.isFinite(output) ? output : fallback;
 }
 
 export function safeBool(value, fallback = false) {
-  if (value === true) return true;
-  if (value === false) return false;
-  if (value === 1) return true;
-  if (value === 0) return false;
+  if (value === true || value === false) return value;
+  if (value === 1 || value === "1") return true;
+  if (value === 0 || value === "0") return false;
 
-  if (typeof value === "string") {
-    const key = value.trim().toLowerCase();
+  const clean = safeLower(value, "");
 
-    if (["true", "1", "yes", "si", "sí", "on", "enabled", "active"].includes(key)) {
-      return true;
-    }
-
-    if (["false", "0", "no", "off", "disabled", "inactive"].includes(key)) {
-      return false;
-    }
-  }
+  if (["true", "yes", "si", "sí", "on", "ok", "enabled", "active"].includes(clean)) return true;
+  if (["false", "no", "off", "disabled", "inactive"].includes(clean)) return false;
 
   return Boolean(fallback);
 }
@@ -158,22 +150,26 @@ export function safeObject(value, fallback = {}) {
   return isPlainObject(value) ? value : fallback;
 }
 
+function toArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return [...value];
+  if (value === null || value === undefined) return [];
+  return [value];
+}
+
 export function unique(values = []) {
-  return Array.from(
-    new Set(
-      safeArray(values)
+  return [
+    ...new Set(
+      toArray(values)
+        .flat(Infinity)
         .map((item) => safeText(item, ""))
         .filter(Boolean)
-    )
-  );
+    ),
+  ];
 }
 
 export function compact(values = []) {
-  return safeArray(values).filter((item) => (
-    item !== null &&
-    item !== undefined &&
-    item !== ""
-  ));
+  return toArray(values).filter((item) => item !== null && item !== undefined && item !== "");
 }
 
 /* =========================================================
@@ -193,8 +189,7 @@ function shouldSkipKey(key = "") {
 }
 
 export function hasUnsafePathSegment(path) {
-  return normalizePath(path, { allowUnsafeCheckOnly: true })
-    .some((key) => isUnsafePathKey(key));
+  return normalizePath(path, { allowUnsafeCheckOnly: true }).some((key) => isUnsafePathKey(key));
 }
 
 /* =========================================================
@@ -204,14 +199,14 @@ export function hasUnsafePathSegment(path) {
 function cloneArrayBuffer(buffer) {
   try {
     return buffer.slice(0);
+  } catch {}
+
+  try {
+    const copy = new ArrayBuffer(buffer.byteLength);
+    new Uint8Array(copy).set(new Uint8Array(buffer));
+    return copy;
   } catch {
-    try {
-      const copy = new ArrayBuffer(buffer.byteLength);
-      new Uint8Array(copy).set(new Uint8Array(buffer));
-      return copy;
-    } catch {
-      return buffer;
-    }
+    return buffer;
   }
 }
 
@@ -244,6 +239,8 @@ function cloneError(value, seen, depth) {
     status: value.status || value.statusCode || null,
   };
 
+  seen.set(value, output);
+
   for (const key of Object.keys(value)) {
     if (shouldSkipKey(key) || hasOwn(output, key)) continue;
     output[key] = cloneInternal(value[key], seen, depth + 1);
@@ -253,9 +250,7 @@ function cloneError(value, seen, depth) {
 }
 
 function cloneObject(value, seen, depth) {
-  const proto = Object.getPrototypeOf(value);
-  const output = Object.create(proto === null ? null : Object.prototype);
-
+  const output = Object.create(null);
   seen.set(value, output);
 
   for (const key of Object.keys(value)) {
@@ -270,44 +265,39 @@ function cloneInternal(value, seen, depth) {
   if (value === undefined) return undefined;
   if (isPrimitive(value) || isFunction(value)) return value;
   if (depth > MAX_CLONE_DEPTH) return "[depth-limit]";
-
   if (seen.has(value)) return seen.get(value);
 
   if (isDate(value)) {
-    const cloned = new Date(value.getTime());
-    seen.set(value, cloned);
-    return cloned;
+    const output = new Date(value.getTime());
+    seen.set(value, output);
+    return output;
   }
 
   if (isRegExp(value)) {
-    const cloned = new RegExp(value.source, value.flags);
-    cloned.lastIndex = value.lastIndex;
-    seen.set(value, cloned);
-    return cloned;
+    const output = new RegExp(value.source, value.flags);
+    output.lastIndex = value.lastIndex;
+    seen.set(value, output);
+    return output;
   }
 
-  if (value instanceof Error) {
-    const cloned = cloneError(value, seen, depth);
-    seen.set(value, cloned);
-    return cloned;
-  }
+  if (value instanceof Error) return cloneError(value, seen, depth);
 
   if (isArrayBuffer(value)) {
-    const cloned = cloneArrayBuffer(value);
-    seen.set(value, cloned);
-    return cloned;
+    const output = cloneArrayBuffer(value);
+    seen.set(value, output);
+    return output;
   }
 
   if (isDataView(value)) {
-    const cloned = cloneDataView(value);
-    seen.set(value, cloned);
-    return cloned;
+    const output = cloneDataView(value);
+    seen.set(value, output);
+    return output;
   }
 
   if (isTypedArray(value)) {
-    const cloned = cloneTypedArray(value);
-    seen.set(value, cloned);
-    return cloned;
+    const output = cloneTypedArray(value);
+    seen.set(value, output);
+    return output;
   }
 
   if (Array.isArray(value)) {
@@ -346,13 +336,8 @@ function cloneInternal(value, seen, depth) {
     return output;
   }
 
-  if (isWeakMap(value) || isWeakSet(value)) {
-    return value;
-  }
-
-  if (isAnyObject(value)) {
-    return cloneObject(value, seen, depth);
-  }
+  if (isWeakMap(value) || isWeakSet(value)) return value;
+  if (isAnyObject(value)) return cloneObject(value, seen, depth);
 
   return value;
 }
@@ -379,16 +364,6 @@ function markCompared(seen, a, b) {
   return false;
 }
 
-function equalArrays(a, b, seen, depth) {
-  if (a.length !== b.length) return false;
-
-  for (let i = 0; i < a.length; i += 1) {
-    if (!equalInternal(a[i], b[i], seen, depth + 1)) return false;
-  }
-
-  return true;
-}
-
 function equalArrayBuffers(a, b) {
   if (a.byteLength !== b.byteLength) return false;
 
@@ -412,11 +387,21 @@ function equalTypedArrays(a, b) {
   return true;
 }
 
+function equalArrays(a, b, seen, depth) {
+  if (a.length !== b.length) return false;
+
+  for (let i = 0; i < a.length; i += 1) {
+    if (!equalInternal(a[i], b[i], seen, depth + 1)) return false;
+  }
+
+  return true;
+}
+
 function equalMaps(a, b, seen, depth) {
   if (a.size !== b.size) return false;
 
   const used = new Set();
-  const bEntries = Array.from(b.entries());
+  const bEntries = [...b.entries()];
 
   for (const [aKey, aValue] of a.entries()) {
     let matched = false;
@@ -446,7 +431,7 @@ function equalSets(a, b, seen, depth) {
   if (a.size !== b.size) return false;
 
   const used = new Set();
-  const bValues = Array.from(b.values());
+  const bValues = [...b.values()];
 
   for (const aValue of a.values()) {
     let matched = false;
@@ -487,12 +472,9 @@ function equalInternal(a, b, seen, depth) {
   if (typeof a !== typeof b) return false;
   if (isPrimitive(a) || isPrimitive(b)) return false;
   if (!isAnyObject(a) || !isAnyObject(b)) return false;
-
   if (markCompared(seen, a, b)) return true;
 
-  if (isDate(a) || isDate(b)) {
-    return isDate(a) && isDate(b) && a.getTime() === b.getTime();
-  }
+  if (isDate(a) || isDate(b)) return isDate(a) && isDate(b) && a.getTime() === b.getTime();
 
   if (isRegExp(a) || isRegExp(b)) {
     return (
@@ -504,13 +486,8 @@ function equalInternal(a, b, seen, depth) {
     );
   }
 
-  if (isArrayBuffer(a) || isArrayBuffer(b)) {
-    return isArrayBuffer(a) && isArrayBuffer(b) && equalArrayBuffers(a, b);
-  }
-
-  if (isTypedArray(a) || isTypedArray(b)) {
-    return isTypedArray(a) && isTypedArray(b) && equalTypedArrays(a, b);
-  }
+  if (isArrayBuffer(a) || isArrayBuffer(b)) return isArrayBuffer(a) && isArrayBuffer(b) && equalArrayBuffers(a, b);
+  if (isTypedArray(a) || isTypedArray(b)) return isTypedArray(a) && isTypedArray(b) && equalTypedArrays(a, b);
 
   if (isDataView(a) || isDataView(b)) {
     return (
@@ -522,17 +499,9 @@ function equalInternal(a, b, seen, depth) {
     );
   }
 
-  if (isMap(a) || isMap(b)) {
-    return isMap(a) && isMap(b) && equalMaps(a, b, seen, depth);
-  }
-
-  if (isSet(a) || isSet(b)) {
-    return isSet(a) && isSet(b) && equalSets(a, b, seen, depth);
-  }
-
-  if (Array.isArray(a) || Array.isArray(b)) {
-    return Array.isArray(a) && Array.isArray(b) && equalArrays(a, b, seen, depth);
-  }
+  if (isMap(a) || isMap(b)) return isMap(a) && isMap(b) && equalMaps(a, b, seen, depth);
+  if (isSet(a) || isSet(b)) return isSet(a) && isSet(b) && equalSets(a, b, seen, depth);
+  if (Array.isArray(a) || Array.isArray(b)) return Array.isArray(a) && Array.isArray(b) && equalArrays(a, b, seen, depth);
 
   return equalObjects(a, b, seen, depth);
 }
@@ -547,11 +516,10 @@ export function deepEqual(a, b) {
 
 function parseBracketSegment(segment = "") {
   const raw = safeText(segment, "");
-
   if (!raw) return "";
 
   if (
-    (raw.startsWith('"') && raw.endsWith('"')) ||
+    (raw.startsWith("\"") && raw.endsWith("\"")) ||
     (raw.startsWith("'") && raw.endsWith("'")) ||
     (raw.startsWith("`") && raw.endsWith("`"))
   ) {
@@ -565,9 +533,7 @@ export function normalizePath(path, options = {}) {
   const opts = isPlainObject(options) ? options : {};
 
   if (Array.isArray(path)) {
-    const parts = path
-      .map((part) => safeText(part, ""))
-      .filter(Boolean);
+    const parts = path.map((part) => safeText(part, "")).filter(Boolean);
 
     if (opts.allowUnsafeCheckOnly === true) return parts;
 
@@ -585,7 +551,6 @@ export function normalizePath(path, options = {}) {
   function push() {
     const value = safeText(buffer, "");
     buffer = "";
-
     if (value) parts.push(value);
   }
 
@@ -606,7 +571,8 @@ export function normalizePath(path, options = {}) {
       }
 
       if (char === "]") {
-        parts.push(parseBracketSegment(buffer));
+        const value = parseBracketSegment(buffer);
+        if (value) parts.push(value);
         buffer = "";
         inBracket = false;
         continue;
@@ -632,9 +598,7 @@ export function normalizePath(path, options = {}) {
 
   push();
 
-  const normalized = parts
-    .map((part) => safeText(part, ""))
-    .filter(Boolean);
+  const normalized = parts.map((part) => safeText(part, "")).filter(Boolean);
 
   if (opts.allowUnsafeCheckOnly === true) return normalized;
 
@@ -679,9 +643,7 @@ export function getByPath(obj, path, fallback = undefined) {
 }
 
 export function hasByPath(obj, path) {
-  if (path === null || path === undefined || path === "") {
-    return obj !== undefined;
-  }
+  if (path === null || path === undefined || path === "") return obj !== undefined;
 
   const keys = normalizePath(path);
   if (!keys.length) return false;
@@ -691,7 +653,6 @@ export function hasByPath(obj, path) {
   for (const key of keys) {
     if (current === null || current === undefined) return false;
     if (!hasOwn(Object(current), key)) return false;
-
     current = current[key];
   }
 
@@ -737,24 +698,21 @@ export function deleteByPath(obj, path) {
   }
 
   try {
-    if (Array.isArray(current) && isNumericKey(lastKey)) {
-      current.splice(Number(lastKey), 1);
-    } else if (canTraverse(current)) {
-      delete current[lastKey];
-    }
+    if (Array.isArray(current) && isNumericKey(lastKey)) current.splice(Number(lastKey), 1);
+    else if (canTraverse(current)) delete current[lastKey];
   } catch {}
 
   return obj;
 }
 
 export function setImmutableByPath(obj, path, value) {
-  const clone = deepClone(obj);
-  return setByPath(clone, path, value);
+  const output = deepClone(obj);
+  return setByPath(output, path, value);
 }
 
 export function deleteImmutableByPath(obj, path) {
-  const clone = deepClone(obj);
-  return deleteByPath(clone, path);
+  const output = deepClone(obj);
+  return deleteByPath(output, path);
 }
 
 /* =========================================================
@@ -769,13 +727,8 @@ export function mergeDeep(target, source) {
   if (source === undefined) return deepClone(target);
   if (source === null) return null;
 
-  if (Array.isArray(source)) {
-    return source.map((item) => deepClone(item));
-  }
-
-  if (!isMergeable(source)) {
-    return deepClone(source);
-  }
+  if (Array.isArray(source)) return source.map((item) => deepClone(item));
+  if (!isMergeable(source)) return deepClone(source);
 
   const output = isMergeable(target) ? deepClone(target) : {};
 
@@ -785,12 +738,9 @@ export function mergeDeep(target, source) {
     const sourceValue = source[key];
     const targetValue = output[key];
 
-    if (isMergeable(sourceValue) && isMergeable(targetValue)) {
-      output[key] = mergeDeep(targetValue, sourceValue);
-      continue;
-    }
-
-    output[key] = deepClone(sourceValue);
+    output[key] = isMergeable(sourceValue) && isMergeable(targetValue)
+      ? mergeDeep(targetValue, sourceValue)
+      : deepClone(sourceValue);
   }
 
   return output;
@@ -808,17 +758,10 @@ export function collectChangedPaths(input, prefix = "", options = {}) {
   const maxDepth = safeNumber(options?.maxDepth, MAX_CHANGED_PATH_DEPTH);
 
   function walk(value, currentPrefix, depth) {
-    if (depth > maxDepth) {
-      return currentPrefix ? [currentPrefix] : [];
-    }
+    if (depth > maxDepth) return currentPrefix ? [currentPrefix] : [];
 
-    if (!isPlainObject(value) && !Array.isArray(value)) {
-      return currentPrefix ? [currentPrefix] : [];
-    }
-
-    if (Array.isArray(value)) {
-      return currentPrefix ? [currentPrefix] : [];
-    }
+    if (!isPlainObject(value)) return currentPrefix ? [currentPrefix] : [];
+    if (Array.isArray(value)) return currentPrefix ? [currentPrefix] : [];
 
     const paths = [];
 
@@ -837,7 +780,7 @@ export function collectChangedPaths(input, prefix = "", options = {}) {
     return paths;
   }
 
-  return Array.from(new Set(walk(input, safeText(prefix, ""), 0)));
+  return [...new Set(walk(input, safeText(prefix, ""), 0))];
 }
 
 export function collectDiffPaths(previous, next, prefix = "", options = {}) {
@@ -845,18 +788,11 @@ export function collectDiffPaths(previous, next, prefix = "", options = {}) {
 
   function walk(a, b, currentPrefix, depth) {
     if (deepEqual(a, b)) return [];
+    if (depth > maxDepth) return currentPrefix ? [currentPrefix] : [];
 
-    if (depth > maxDepth) {
-      return currentPrefix ? [currentPrefix] : [];
-    }
+    if (!isPlainObject(a) || !isPlainObject(b)) return currentPrefix ? [currentPrefix] : [];
 
-    if (!isPlainObject(a) || !isPlainObject(b)) {
-      return currentPrefix ? [currentPrefix] : [];
-    }
-
-    const keys = Array.from(new Set([...Object.keys(a), ...Object.keys(b)]))
-      .filter((key) => !shouldSkipKey(key));
-
+    const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((key) => !shouldSkipKey(key));
     const paths = [];
 
     for (const key of keys) {
@@ -874,7 +810,7 @@ export function collectDiffPaths(previous, next, prefix = "", options = {}) {
     return paths;
   }
 
-  return Array.from(new Set(walk(previous, next, safeText(prefix, ""), 0)));
+  return [...new Set(walk(previous, next, safeText(prefix, ""), 0))];
 }
 
 /* =========================================================
@@ -901,7 +837,6 @@ export function collectionToMap(items = [], key = "id") {
     if (!item || typeof item !== "object") return;
 
     const id = resolveCollectionKey(item, key);
-
     if (id === null || id === undefined || id === "") return;
 
     map.set(String(id), item);
@@ -912,39 +847,30 @@ export function collectionToMap(items = [], key = "id") {
 
 export function upsertCollection(items = [], nextItem = null, matcher = null) {
   const list = normalizeCollection(items);
-
   if (!nextItem) return list;
 
   const cloned = deepClone(nextItem);
-
   const match = isFunction(matcher)
     ? matcher
     : (item) => item?.id === cloned?.id;
 
   const index = list.findIndex((item) => match(item));
 
-  if (index >= 0) {
-    list[index] = cloned;
-  } else {
-    list.push(cloned);
-  }
+  if (index >= 0) list[index] = cloned;
+  else list.push(cloned);
 
   return list;
 }
 
 export function removeFromCollection(items = [], matcher) {
   const list = normalizeCollection(items);
-
-  const match = isFunction(matcher)
-    ? matcher
-    : (item) => item?.id === matcher;
+  const match = isFunction(matcher) ? matcher : (item) => item?.id === matcher;
 
   return list.filter((item) => !match(item));
 }
 
 export function sortCollection(items = [], compareFn = null) {
   const list = normalizeCollection(items);
-
   return isFunction(compareFn) ? list.sort(compareFn) : list;
 }
 
@@ -955,10 +881,7 @@ export function groupCollectionBy(items = [], keyOrFn = "id") {
     const key = resolveCollectionKey(item, keyOrFn);
     const groupKey = key === null || key === undefined || key === "" ? "__empty__" : String(key);
 
-    if (!groups.has(groupKey)) {
-      groups.set(groupKey, []);
-    }
-
+    if (!groups.has(groupKey)) groups.set(groupKey, []);
     groups.get(groupKey).push(item);
   }
 
@@ -977,24 +900,16 @@ export function pick(object = {}, keys = []) {
   const output = {};
   const source = safeObject(object);
 
-  for (const key of safeArray(keys)) {
+  for (const key of toArray(keys)) {
     const cleanKey = safeText(key, "");
-
-    if (cleanKey && hasOwn(source, cleanKey)) {
-      output[cleanKey] = source[cleanKey];
-    }
+    if (cleanKey && hasOwn(source, cleanKey)) output[cleanKey] = source[cleanKey];
   }
 
   return output;
 }
 
 export function omit(object = {}, keys = []) {
-  const blocked = new Set(
-    safeArray(keys)
-      .map((key) => safeText(key, ""))
-      .filter(Boolean)
-  );
-
+  const blocked = new Set(toArray(keys).map((key) => safeText(key, "")).filter(Boolean));
   const output = {};
 
   for (const [key, value] of Object.entries(safeObject(object))) {

@@ -2,14 +2,14 @@
    Onion SPA - Reactive Store
    Archivo: src/store/index.js
 
-   Store singleton limpio:
+   STORE SINGLETON · SIMPLE
    - estado reactivo por slices
    - sync mínimo con AppCore
    - get() clona / getRaw() explícito
-   - patch/set/replace/remove con cambios reales
-   - global/key/selector subscriptions
+   - patch/set/replace/remove sólo con cambios reales
+   - subscriptions global/key/selector
    - batch sync/async con rollback opcional
-   - sin lógica paralela de auth/http/router
+   - sin Auth/HTTP/Router paralelos
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -24,8 +24,6 @@ import {
   isFunction,
   mergeDeep,
   normalizePath as normalizeStorePath,
-  safeArray,
-  safeBool,
   safeNumber,
   safeObject,
   safeText,
@@ -59,11 +57,7 @@ import {
   unbindCoreEvents,
 } from "./core-sync.js";
 
-/* =========================================================
-   CONSTANTS
-========================================================= */
-
-export const STORE_VERSION = "15.0.0-clean";
+export const STORE_VERSION = "16.0.0-simple";
 
 const SOURCE = "store";
 
@@ -80,22 +74,17 @@ const EVENTS = Object.freeze({
   init: "store:init",
   initSkip: "store:init:skip",
   initError: "store:init:error",
-
   destroy: "store:destroy",
-
   change: "store:change",
   notifyError: "store:notify:error",
-
   hydrateError: "store:hydrate:error",
   coreBindError: "store:core-bind:error",
   coreUnbindError: "store:core-unbind:error",
-
   batchStart: "store:batch:start",
   batchEnd: "store:batch:end",
   batchFlush: "store:batch:flush",
   batchRollback: "store:batch:rollback",
   batchError: "store:batch:error",
-
   error: "store:error",
 });
 
@@ -105,22 +94,15 @@ const SENSITIVE_KEY_RE =
 const TOKENISH_TEXT_RE =
   /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|tempToken|temp_token|code|t)=)[^&#\s]+/gi;
 
-/* =========================================================
-   SINGLETON
-========================================================= */
-
 export const Store = (() => {
   "use strict";
 
   let initialized = false;
   let initializing = false;
   let destroyed = false;
-
   let mutationSeq = 0;
-
   let initStartedAt = 0;
   let initCompletedAt = 0;
-
   let lastError = null;
 
   const state = buildInitialState(AppCore);
@@ -175,16 +157,23 @@ export const Store = (() => {
     }
   }
 
-  function equals(a, b) {
+  function equals(left, right) {
     try {
-      return deepEqual(a, b);
+      return deepEqual(left, right);
     } catch {}
 
     try {
-      return JSON.stringify(a) === JSON.stringify(b);
+      return JSON.stringify(left) === JSON.stringify(right);
     } catch {
-      return Object.is(a, b);
+      return Object.is(left, right);
     }
+  }
+
+  function asArray(value) {
+    if (Array.isArray(value)) return value;
+    if (value instanceof Set) return [...value];
+    if (value === null || value === undefined) return [];
+    return [value];
   }
 
   function pathString(path = "") {
@@ -200,11 +189,9 @@ export const Store = (() => {
     const out = [];
     const seen = new Set();
 
-    for (const item of safeArray(paths).flat(Infinity)) {
+    for (const item of asArray(paths).flat(Infinity)) {
       const path = pathString(item);
-
       if (!path || seen.has(path)) continue;
-
       seen.add(path);
       out.push(path);
     }
@@ -214,11 +201,7 @@ export const Store = (() => {
 
   function assertPath(path, method = "Store") {
     const clean = pathString(path);
-
-    if (!clean) {
-      throw new Error(`${method}(path) requiere path.`);
-    }
-
+    if (!clean) throw new Error(`${method}(path) requiere path.`);
     return clean;
   }
 
@@ -235,33 +218,25 @@ export const Store = (() => {
   ======================================================= */
 
   function redactText(value = "") {
-    const text = safeText(value, "");
-    if (!text) return "";
+    const raw = safeText(value, "");
+    if (!raw) return "";
 
     try {
-      return text.replace(TOKENISH_TEXT_RE, (match) => {
+      return raw.replace(TOKENISH_TEXT_RE, (match) => {
         if (/^bearer\s+/i.test(match)) return "Bearer ***";
         if (/^[?&#]/.test(match)) return match.replace(/=.+$/g, "=***");
         return "***";
       });
     } catch {
-      return text;
+      return raw;
     }
   }
 
-  function sanitize(value, depth = 0, keyHint = "") {
-    if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) {
-      return value ? "***" : null;
-    }
-
+  function sanitize(value, depth = 0, keyHint = "", seen = new WeakSet()) {
+    if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) return value ? "***" : null;
     if (depth > 5) return "[depth-limit]";
 
-    if (
-      value === null ||
-      value === undefined ||
-      typeof value === "number" ||
-      typeof value === "boolean"
-    ) {
+    if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") {
       return value;
     }
 
@@ -280,14 +255,19 @@ export const Store = (() => {
     }
 
     if (Array.isArray(value)) {
-      return value.slice(0, 100).map((item) => sanitize(item, depth + 1, keyHint));
+      return value.slice(0, 100).map((item) => sanitize(item, depth + 1, keyHint, seen));
     }
 
     if (value && typeof value === "object") {
+      try {
+        if (seen.has(value)) return "[circular]";
+        seen.add(value);
+      } catch {}
+
       const output = {};
 
       for (const [key, item] of Object.entries(value).slice(0, 120)) {
-        output[key] = sanitize(item, depth + 1, key);
+        output[key] = sanitize(item, depth + 1, key, seen);
       }
 
       return output;
@@ -336,18 +316,14 @@ export const Store = (() => {
   function recordError(error, source = SOURCE) {
     lastError = normalizeError(error, source);
 
-    emit(EVENTS.error, {
-      error: lastError,
-    });
+    emit(EVENTS.error, { error: lastError });
 
     try {
       AppCore?.utils?.error?.("[Store]", error, lastError);
     } catch {}
 
     try {
-      if (AppCore?.config?.debug) {
-        console.error("[Store]", error, lastError);
-      }
+      if (AppCore?.config?.debug) console.error("[Store]", error, lastError);
     } catch {}
 
     return lastError;
@@ -360,11 +336,15 @@ export const Store = (() => {
   }
 
   /* =======================================================
-     ROOT MUTATION
+     ROOT STATE
   ======================================================= */
 
   function snapshot() {
     return clone(state, {});
+  }
+
+  function rootClone() {
+    return clone(state, shallowCloneRoot(state));
   }
 
   function readClone(value, fallback = value) {
@@ -372,18 +352,11 @@ export const Store = (() => {
     return clone(value, fallback);
   }
 
-  function rootClone() {
-    return clone(state, shallowCloneRoot(state));
-  }
-
   function replaceRoot(nextState = {}) {
-    const next = safeObject(nextState);
+    const cleanNext = safeObject(nextState);
 
-    Object.keys(state).forEach((key) => {
-      delete state[key];
-    });
-
-    Object.assign(state, next);
+    for (const key of Object.keys(state)) delete state[key];
+    Object.assign(state, cleanNext);
 
     return state;
   }
@@ -410,16 +383,14 @@ export const Store = (() => {
   }
 
   function topLevelDiff(previousState = {}, nextState = {}) {
-    const keys = Array.from(
-      new Set([
+    const keys = [
+      ...new Set([
         ...Object.keys(safeObject(previousState)),
         ...Object.keys(safeObject(nextState)),
-      ])
-    );
+      ]),
+    ];
 
-    return uniquePaths(
-      keys.filter((key) => !equals(previousState?.[key], nextState?.[key]))
-    );
+    return uniquePaths(keys.filter((key) => !equals(previousState?.[key], nextState?.[key])));
   }
 
   function patchChangedPaths(partialState = {}, previousState = null, nextState = null) {
@@ -437,9 +408,7 @@ export const Store = (() => {
   }
 
   function sanitizeChangedPaths(paths = []) {
-    return uniquePaths(paths).map((path) => (
-      SENSITIVE_KEY_RE.test(path) ? "[sensitive]" : path
-    ));
+    return uniquePaths(paths).map((path) => (SENSITIVE_KEY_RE.test(path) ? "[sensitive]" : path));
   }
 
   /* =======================================================
@@ -448,7 +417,6 @@ export const Store = (() => {
 
   function notifyNow(changedPaths = [], previousState = {}) {
     const paths = uniquePaths(changedPaths);
-
     if (!paths.length) return false;
 
     const startedAt = now();
@@ -490,11 +458,10 @@ export const Store = (() => {
 
   function queueOrNotify(changedPaths = [], previousState = {}) {
     const paths = uniquePaths(changedPaths);
-
     if (!paths.length) return false;
 
     if (batchDepth > 0) {
-      paths.forEach((path) => batchChangedPaths.add(path));
+      for (const path of paths) batchChangedPaths.add(path);
       return true;
     }
 
@@ -529,7 +496,7 @@ export const Store = (() => {
   function flushBatch() {
     if (batchDepth > 0 || !batchPreviousState) return false;
 
-    const paths = uniquePaths(Array.from(batchChangedPaths));
+    const paths = uniquePaths([...batchChangedPaths]);
     const previousState = batchPreviousState;
     const currentBatchId = batchId;
     const startedAt = batchStartedAt;
@@ -563,7 +530,6 @@ export const Store = (() => {
     });
 
     if (batchDepth > 0) return false;
-
     return flushBatch();
   }
 
@@ -571,9 +537,7 @@ export const Store = (() => {
     const hadState = Boolean(batchPreviousState);
     const currentBatchId = batchId;
 
-    if (batchPreviousState) {
-      restoreRoot(batchPreviousState);
-    }
+    if (batchPreviousState) restoreRoot(batchPreviousState);
 
     clearBatch();
 
@@ -588,22 +552,42 @@ export const Store = (() => {
   }
 
   function withBatch(fn, options = {}) {
-    if (!isFunction(fn)) {
-      throw new Error("Store.withBatch(fn) requiere una función.");
-    }
+    if (!isFunction(fn)) throw new Error("Store.withBatch(fn) requiere una función.");
 
     const opts = safeObject(options);
     const rollbackOnError = opts.rollbackOnError === true;
 
     beginBatch();
 
-    let result;
-
     try {
-      result = fn(api);
+      const result = fn(api);
+
+      if (result && typeof result.then === "function") {
+        return result
+          .then((value) => {
+            endBatch();
+            return value;
+          })
+          .catch((error) => {
+            recordError(error, "batch:async");
+            if (rollbackOnError) rollbackBatch(error);
+            else endBatch();
+
+            emit(EVENTS.batchError, {
+              batchId,
+              phase: "async",
+              rollback: rollbackOnError,
+              error: normalizeError(error, "batch:async"),
+            });
+
+            throw error;
+          });
+      }
+
+      endBatch();
+      return result;
     } catch (error) {
       recordError(error, "batch:sync");
-
       if (rollbackOnError) rollbackBatch(error);
       else endBatch();
 
@@ -616,32 +600,6 @@ export const Store = (() => {
 
       throw error;
     }
-
-    if (result && typeof result.then === "function") {
-      return result
-        .then((value) => {
-          endBatch();
-          return value;
-        })
-        .catch((error) => {
-          recordError(error, "batch:async");
-
-          if (rollbackOnError) rollbackBatch(error);
-          else endBatch();
-
-          emit(EVENTS.batchError, {
-            batchId,
-            phase: "async",
-            rollback: rollbackOnError,
-            error: normalizeError(error, "batch:async"),
-          });
-
-          throw error;
-        });
-    }
-
-    endBatch();
-    return result;
   }
 
   /* =======================================================
@@ -652,10 +610,7 @@ export const Store = (() => {
     if (!path) return rootClone();
 
     const value = getByPath(state, path, undefined);
-
-    return value === undefined
-      ? fallback
-      : readClone(value, fallback);
+    return value === undefined ? fallback : readClone(value, fallback);
   }
 
   function getRaw(path = null, fallback = undefined) {
@@ -666,9 +621,7 @@ export const Store = (() => {
   }
 
   function select(selector, fallback = undefined) {
-    if (!isFunction(selector)) {
-      throw new Error("Store.select(selector) requiere una función.");
-    }
+    if (!isFunction(selector)) throw new Error("Store.select(selector) requiere una función.");
 
     try {
       const value = selector(rootClone());
@@ -687,17 +640,12 @@ export const Store = (() => {
     const cleanPath = assertPath(path, "Store.set");
     const currentValue = getRaw(cleanPath);
 
-    if (equals(currentValue, value)) {
-      return readClone(currentValue);
-    }
+    if (equals(currentValue, value)) return readClone(currentValue);
 
-    const previousState = batchDepth > 0 && batchPreviousState
-      ? batchPreviousState
-      : snapshot();
+    const previousState = batchDepth > 0 && batchPreviousState ? batchPreviousState : snapshot();
 
     setByPath(state, cleanPath, clone(value, value));
     touch();
-
     queueOrNotify([cleanPath], previousState);
 
     return get(cleanPath);
@@ -706,30 +654,17 @@ export const Store = (() => {
   function patch(partialState = {}) {
     assertObject(partialState, "Store.patch");
 
-    if (!Object.keys(partialState).length) {
-      return rootClone();
-    }
+    if (!Object.keys(partialState).length) return rootClone();
 
-    const previousState = batchDepth > 0 && batchPreviousState
-      ? batchPreviousState
-      : snapshot();
+    const previousState = batchDepth > 0 && batchPreviousState ? batchPreviousState : snapshot();
+    const nextState = mergeDeep(snapshot(), clone(partialState, {}));
 
-    const nextState = mergeDeep(
-      snapshot(),
-      clone(partialState, {})
-    );
-
-    if (equals(state, nextState)) {
-      return rootClone();
-    }
+    if (equals(state, nextState)) return rootClone();
 
     replaceRoot(nextState);
     touch();
 
-    queueOrNotify(
-      patchChangedPaths(partialState, previousState, nextState),
-      previousState
-    );
+    queueOrNotify(patchChangedPaths(partialState, previousState, nextState), previousState);
 
     return rootClone();
   }
@@ -738,34 +673,22 @@ export const Store = (() => {
     assertObject(nextState, "Store.replace");
 
     const cleanNext = clone(nextState, {});
+    if (equals(state, cleanNext)) return rootClone();
 
-    if (equals(state, cleanNext)) {
-      return rootClone();
-    }
-
-    const previousState = batchDepth > 0 && batchPreviousState
-      ? batchPreviousState
-      : snapshot();
+    const previousState = batchDepth > 0 && batchPreviousState ? batchPreviousState : snapshot();
 
     replaceRoot(cleanNext);
     touch();
 
     const paths = topLevelDiff(previousState, cleanNext);
-
-    queueOrNotify(
-      paths.length ? paths : ROOT_CHANGED_PATHS,
-      previousState
-    );
+    queueOrNotify(paths.length ? paths : ROOT_CHANGED_PATHS, previousState);
 
     return rootClone();
   }
 
   function update(path, updater) {
     const cleanPath = assertPath(path, "Store.update");
-
-    if (!isFunction(updater)) {
-      throw new Error("Store.update(path, updater) requiere una función.");
-    }
+    if (!isFunction(updater)) throw new Error("Store.update(path, updater) requiere una función.");
 
     const currentValue = get(cleanPath);
     const nextValue = updater(clone(currentValue, currentValue));
@@ -775,29 +698,22 @@ export const Store = (() => {
 
   function remove(path) {
     const cleanPath = assertPath(path, "Store.remove");
-
     if (getRaw(cleanPath) === undefined) return false;
 
-    const previousState = batchDepth > 0 && batchPreviousState
-      ? batchPreviousState
-      : snapshot();
+    const previousState = batchDepth > 0 && batchPreviousState ? batchPreviousState : snapshot();
 
     deleteByPath(state, cleanPath);
     touch();
-
     queueOrNotify([cleanPath], previousState);
 
     return true;
   }
 
   function reset() {
-    const previousState = batchDepth > 0 && batchPreviousState
-      ? batchPreviousState
-      : snapshot();
+    const previousState = batchDepth > 0 && batchPreviousState ? batchPreviousState : snapshot();
 
     replaceRoot(buildInitialState(AppCore));
     touch();
-
     queueOrNotify(ROOT_CHANGED_PATHS, previousState);
 
     return rootClone();
@@ -822,22 +738,14 @@ export const Store = (() => {
       const nextItem = clone(item, item);
       const nextId = nextItem?.[cleanIdKey];
 
-      if (nextId === null || nextId === undefined || nextId === "") {
-        return [...list, nextItem];
-      }
+      if (nextId === null || nextId === undefined || nextId === "") return [...list, nextItem];
 
       const index = list.findIndex((entry) => entry?.[cleanIdKey] === nextId);
-
-      if (index < 0) {
-        return [...list, nextItem];
-      }
+      if (index < 0) return [...list, nextItem];
 
       return list.map((entry, entryIndex) => (
         entryIndex === index
-          ? {
-              ...safeObject(entry),
-              ...safeObject(nextItem),
-            }
+          ? { ...safeObject(entry), ...safeObject(nextItem) }
           : entry
       ));
     });
@@ -861,15 +769,11 @@ export const Store = (() => {
   ======================================================= */
 
   function subscribe(listener, options = {}) {
-    return createSubscription(
-      listeners,
-      listener,
-      {
-        ...safeObject(options),
-        AppCore,
-        snapshot,
-      }
-    );
+    return createSubscription(listeners, listener, {
+      ...safeObject(options),
+      AppCore,
+      snapshot,
+    });
   }
 
   function subscribeKey(path, listener, options = {}) {
@@ -905,11 +809,7 @@ export const Store = (() => {
 
   function unbindCore() {
     try {
-      unbindCoreEvents({
-        AppCore,
-        coreUnsubscribers,
-      });
-
+      unbindCoreEvents({ AppCore, coreUnsubscribers });
       return true;
     } catch (error) {
       recordError(error, "core:unbind");
@@ -1012,26 +912,19 @@ export const Store = (() => {
      ACTIONS / SELECTORS
   ======================================================= */
 
-  const selectors = createSelectors({
-    AppCore,
-    state,
-  });
+  const selectors = createSelectors({ AppCore, state });
 
   const actions = createActions({
     AppCore,
     state,
-
     get,
     getRaw,
-
     set,
     patch,
     replace,
     update,
     remove,
-
     withBatch,
-
     selectors,
   });
 
@@ -1069,13 +962,8 @@ export const Store = (() => {
     try {
       attachToCore();
 
-      if (opts.force === true) {
-        unbindCore();
-      }
-
-      if (opts.hydrate !== false) {
-        hydrateFromCore();
-      }
+      if (opts.force === true) unbindCore();
+      if (opts.hydrate !== false) hydrateFromCore();
 
       bindCore();
 
@@ -1172,7 +1060,7 @@ export const Store = (() => {
 
       batchDepth,
       batchId,
-      batchChangedPaths: sanitizeChangedPaths(Array.from(batchChangedPaths)),
+      batchChangedPaths: sanitizeChangedPaths([...batchChangedPaths]),
       hasBatchPreviousState: Boolean(batchPreviousState),
 
       route: state.app?.route || null,
@@ -1188,7 +1076,6 @@ export const Store = (() => {
       lang: state.ui?.lang || null,
 
       lastError,
-
       at: iso(),
     };
   }
@@ -1216,29 +1103,20 @@ export const Store = (() => {
       destroyed: Boolean(destroyed),
 
       mutationSeq,
-
       diagnostics: getDiagnostics(),
       subscriptions,
       notify: notifySnapshot,
 
-      state: opts.includeState === true
-        ? sanitize(snapshot())
-        : null,
-
-      rawState: opts.includeRawState === true
-        ? snapshot()
-        : null,
+      state: opts.includeState === true ? sanitize(snapshot()) : null,
+      rawState: opts.includeRawState === true ? snapshot() : null,
 
       init: {
         startedAt: initStartedAt ? iso(initStartedAt) : "",
         completedAt: initCompletedAt ? iso(initCompletedAt) : "",
-        durationMs: initStartedAt && initCompletedAt
-          ? Math.max(0, initCompletedAt - initStartedAt)
-          : 0,
+        durationMs: initStartedAt && initCompletedAt ? Math.max(0, initCompletedAt - initStartedAt) : 0,
       },
 
       lastError,
-
       at: iso(),
     };
   }
@@ -1250,7 +1128,6 @@ export const Store = (() => {
   const api = {
     version: STORE_VERSION,
     events: EVENTS,
-
     state,
 
     init,

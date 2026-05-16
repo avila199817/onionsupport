@@ -2,26 +2,15 @@
    Onion SPA - Toast DOM
    Archivo: src/ui/toast/dom.js
 
-   Responsabilidades:
-   - crear stack container
-   - resolver keyframes progreso sin romper CSP
-   - render toast node
-   - iconos por tipo
-   - patch visual node
-   - remove node
-   - endurecer container / patch / attrs / dismiss
-   - mantener compatibilidad CSS legacy
-   - evitar innerHTML con contenido de usuario
-
-   HARDENING PRO:
-   - browser guard total
-   - sin inline style dinámico obligatorio
-   - SVGs internos controlados
+   Toast DOM limpio:
+   - crea/resuelve stack container
+   - renderiza toast node seguro
    - texto siempre con textContent
-   - roles aria por tipo
-   - live regions consistentes
-   - clases legacy + clases BEM compatibles
-   - patch estable sin perder progreso
+   - SVGs internos controlados con createElementNS
+   - patch visual estable
+   - remove node
+   - CSP limpio: no style injection
+   - sin store/timers/auth/router/http
 ========================================================= */
 
 import {
@@ -32,17 +21,21 @@ import {
   TOAST_DATA_ID,
   TOAST_DATA_TYPE,
   TOAST_DATA_DISMISSING,
-
-  TOAST_ROLE_STATUS,
-  TOAST_LIVE_POLITE,
+  TOAST_DATA_PAUSED,
+  TOAST_DATA_PERSISTENT,
+  TOAST_DATA_CREATED_AT,
 
   TOAST_TYPE_SUCCESS,
   TOAST_TYPE_ERROR,
   TOAST_TYPE_WARNING,
   TOAST_TYPE_INFO,
   TOAST_TYPE_LOADING,
+  TOAST_DEFAULT_TYPE,
   TOAST_TYPES,
+  TOAST_TYPE_ALIASES,
 
+  TOAST_ROLE_STATUS,
+  TOAST_LIVE_POLITE,
   TOAST_ROLES_BY_TYPE,
   TOAST_LIVE_BY_TYPE,
 
@@ -50,7 +43,10 @@ import {
   TOAST_CLASS_ITEM,
   TOAST_CLASS_VISIBLE,
   TOAST_CLASS_DISMISSING,
+  TOAST_CLASS_PAUSED,
+  TOAST_CLASS_PERSISTENT,
   TOAST_CLASS_ICON,
+  TOAST_CLASS_BODY,
   TOAST_CLASS_TITLE,
   TOAST_CLASS_MESSAGE,
   TOAST_CLASS_CLOSE,
@@ -65,135 +61,76 @@ import {
 } from "./text.js";
 
 /* =========================================================
-   HELPERS
+   VERSION
+========================================================= */
+
+export const TOAST_DOM_VERSION = "17.0.0-clean";
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/* =========================================================
+   BASICS
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function isElement(value) {
+  return Boolean(value && value.nodeType === 1);
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
-  const text =
-    String(value).trim();
-
+  const text = String(value).trim();
   return text || fallback;
 }
 
 function safeBool(value, fallback = false) {
-  if (typeof value === "boolean") {
-    return value;
-  }
+  if (typeof value === "boolean") return value;
+  if (value === 1) return true;
+  if (value === 0) return false;
 
-  return fallback;
+  const text = safeText(value, "").toLowerCase();
+
+  if (["true", "1", "yes", "si", "sí", "on", "ok"].includes(text)) return true;
+  if (["false", "0", "no", "off"].includes(text)) return false;
+
+  return Boolean(fallback);
 }
 
-function isElement(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      value.nodeType === 1
-  );
+function normalizeToastType(type = TOAST_DEFAULT_TYPE) {
+  const raw = safeText(type, TOAST_DEFAULT_TYPE).toLowerCase();
+  const alias = TOAST_TYPE_ALIASES?.[raw] || raw;
+
+  return TOAST_TYPES.includes(alias)
+    ? alias
+    : TOAST_DEFAULT_TYPE;
+}
+
+function createEl(tagName = "div", className = "") {
+  if (!isBrowser()) return null;
+
+  try {
+    const node = document.createElement(tagName);
+
+    if (className) node.className = className;
+
+    return node;
+  } catch {
+    return null;
+  }
 }
 
 function setAttr(node, name, value) {
-  if (!isElement(node) || !name) {
-    return false;
-  }
+  if (!isElement(node) || !name) return false;
 
   try {
-    if (
-      value === null ||
-      value === undefined
-    ) {
+    if (value === null || value === undefined || value === "") {
       node.removeAttribute(name);
-      return true;
-    }
-
-    node.setAttribute(
-      name,
-      String(value)
-    );
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function removeAttr(node, name) {
-  if (!isElement(node) || !name) {
-    return false;
-  }
-
-  try {
-    node.removeAttribute(name);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function setDataAttr(node, attrName, value) {
-  if (!isElement(node) || !attrName) {
-    return false;
-  }
-
-  try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
-      node.removeAttribute(attrName);
-      return true;
-    }
-
-    node.setAttribute(
-      attrName,
-      String(value)
-    );
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function setNodeText(node, value = "") {
-  if (!isElement(node)) {
-    return false;
-  }
-
-  try {
-    node.textContent =
-      safeText(value, "");
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function clearNode(node) {
-  if (!isElement(node)) {
-    return false;
-  }
-
-  try {
-    while (node.firstChild) {
-      node.removeChild(
-        node.firstChild
-      );
+    } else {
+      node.setAttribute(name, String(value));
     }
 
     return true;
@@ -202,10 +139,23 @@ function clearNode(node) {
   }
 }
 
-function appendIfNode(parent, child) {
-  if (!isElement(parent) || !child) {
+function setDataAttr(node, name, value) {
+  return setAttr(node, name, value);
+}
+
+function setText(node, value = "") {
+  if (!isElement(node)) return false;
+
+  try {
+    node.textContent = safeText(value, "");
+    return true;
+  } catch {
     return false;
   }
+}
+
+function append(parent, child) {
+  if (!isElement(parent) || !child) return false;
 
   try {
     parent.appendChild(child);
@@ -215,53 +165,61 @@ function appendIfNode(parent, child) {
   }
 }
 
-function normalizeToastType(type = TOAST_TYPE_INFO) {
-  const value =
-    safeText(type, TOAST_TYPE_INFO)
-      .toLowerCase();
+function removeNode(node) {
+  if (!node) return false;
 
-  return TOAST_TYPES.includes(value)
-    ? value
-    : TOAST_TYPE_INFO;
+  try {
+    node.remove();
+    return true;
+  } catch {
+    try {
+      node.parentNode?.removeChild?.(node);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
-function getTypeClass(type = TOAST_TYPE_INFO) {
-  const toastType =
-    normalizeToastType(type);
+function replaceNode(current, next) {
+  if (!current || !next) return false;
 
-  return (
-    TOAST_CLASS_BY_TYPE?.[toastType] ||
-    `toast--${toastType}`
-  );
+  try {
+    current.replaceWith(next);
+    return true;
+  } catch {
+    try {
+      current.parentNode?.replaceChild?.(next, current);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
-function getLegacyTypeClass(type = TOAST_TYPE_INFO) {
-  return normalizeToastType(type);
+function getTypeClass(type = TOAST_DEFAULT_TYPE) {
+  const toastType = normalizeToastType(type);
+  return TOAST_CLASS_BY_TYPE?.[toastType] || `toast--${toastType}`;
 }
 
-function buildToastClassName(type = TOAST_TYPE_INFO, extra = "") {
-  const toastType =
-    normalizeToastType(type);
+function buildToastClassName(type = TOAST_DEFAULT_TYPE, extra = "") {
+  const toastType = normalizeToastType(type);
 
   return [
     TOAST_CLASS_ITEM,
-    getLegacyTypeClass(toastType),
-    getTypeClass(toastType),
+    toastType,                 // legacy
+    getTypeClass(toastType),   // BEM/current
     safeText(extra, ""),
   ]
     .filter(Boolean)
     .join(" ");
 }
 
-function isReducedMotion() {
-  if (!isBrowser()) {
-    return false;
-  }
+function reducedMotion() {
+  if (!isBrowser()) return false;
 
   try {
-    return window.matchMedia?.(
-      "(prefers-reduced-motion: reduce)"
-    )?.matches === true;
+    return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
   } catch {
     return false;
   }
@@ -272,13 +230,13 @@ function isReducedMotion() {
 ========================================================= */
 
 export function getToastContainer() {
-  if (!isBrowser()) {
-    return null;
-  }
+  if (!isBrowser()) return null;
 
   try {
-    return document.getElementById(
-      TOAST_CONTAINER_ID
+    return (
+      document.getElementById(TOAST_CONTAINER_ID) ||
+      document.querySelector("[data-toast-root]") ||
+      null
     );
   } catch {
     return null;
@@ -286,747 +244,537 @@ export function getToastContainer() {
 }
 
 export function ensureToastContainer() {
-  if (!isBrowser()) {
-    return null;
-  }
+  if (!isBrowser()) return null;
 
-  let el =
-    getToastContainer();
+  let container = getToastContainer();
 
-  if (el) {
-    setAttr(el, "role", "region");
-    setAttr(el, "aria-label", "Notificaciones");
-    setAttr(el, "aria-live", TOAST_LIVE_POLITE);
-    setAttr(el, "aria-relevant", "additions removals");
-    setAttr(el, "aria-atomic", "false");
-    setDataAttr(el, TOAST_DATA_ROOT, "true");
-
-    if (!el.classList.contains(TOAST_CLASS_CONTAINER)) {
-      try {
-        el.classList.add(TOAST_CLASS_CONTAINER);
-      } catch {}
+  if (!container) {
+    try {
+      container = document.createElement("div");
+      container.id = TOAST_CONTAINER_ID;
+      container.className = TOAST_CLASS_CONTAINER || "toast-stack";
+      document.body.appendChild(container);
+    } catch {
+      return null;
     }
-
-    return el;
   }
 
   try {
-    el =
-      document.createElement("div");
+    if (!container.id) container.id = TOAST_CONTAINER_ID;
 
-    el.id =
-      TOAST_CONTAINER_ID;
+    container.classList.add(TOAST_CLASS_CONTAINER || "toast-stack");
 
-    el.className =
-      TOAST_CLASS_CONTAINER || "toast-stack";
+    setDataAttr(container, TOAST_DATA_ROOT, "true");
 
-    setDataAttr(el, TOAST_DATA_ROOT, "true");
+    setAttr(container, "role", "region");
+    setAttr(container, "aria-label", "Notificaciones");
+    setAttr(container, "aria-live", TOAST_LIVE_POLITE);
+    setAttr(container, "aria-relevant", "additions removals");
+    setAttr(container, "aria-atomic", "false");
+  } catch {}
 
-    setAttr(el, "role", "region");
-    setAttr(el, "aria-label", "Notificaciones");
-    setAttr(el, "aria-live", TOAST_LIVE_POLITE);
-    setAttr(el, "aria-relevant", "additions removals");
-    setAttr(el, "aria-atomic", "false");
-
-    document.body.appendChild(el);
-
-    return el;
-  } catch {
-    return null;
-  }
+  return container;
 }
 
 /* =========================================================
    KEYFRAMES
 ========================================================= */
 
-/**
- * CSP CLEAN:
- * Los keyframes deberían vivir en CSS:
- *
- * @keyframes toast-progress-shrink {
- *   from { transform: scaleX(1); opacity: 1; }
- *   to   { transform: scaleX(0); opacity: .72; }
- * }
- *
- * Esta función existe por compatibilidad con api.js.
- * No inyecta <style> dinámico para evitar romper CSP estricto.
- */
+/*
+  CSP limpio:
+  Los @keyframes viven en CSS. Esta función sólo deja una marca
+  de diagnóstico/compatibilidad para api.js.
+*/
 export function ensureToastKeyframes() {
-  if (!isBrowser()) {
-    return null;
-  }
+  if (!isBrowser()) return null;
 
   try {
-    const existing =
-      document.getElementById(
-        TOAST_KEYFRAMES_ID
-      );
-
-    if (existing) {
-      return existing;
-    }
+    const existing = document.getElementById(TOAST_KEYFRAMES_ID);
+    if (existing) return existing;
 
     document.documentElement?.setAttribute(
       "data-toast-keyframes",
       TOAST_PROGRESS_ANIMATION_NAME || "toast-progress-shrink"
     );
+  } catch {}
 
-    return null;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 /* =========================================================
-   ACCESSIBILITY
+   A11Y
 ========================================================= */
 
-export function getToastRole(type = TOAST_TYPE_INFO) {
-  const toastType =
-    normalizeToastType(type);
-
-  return (
-    TOAST_ROLES_BY_TYPE?.[toastType] ||
-    TOAST_ROLE_STATUS
-  );
+export function getToastRole(type = TOAST_DEFAULT_TYPE) {
+  const toastType = normalizeToastType(type);
+  return TOAST_ROLES_BY_TYPE?.[toastType] || TOAST_ROLE_STATUS;
 }
 
-export function getToastLive(type = TOAST_TYPE_INFO) {
-  const toastType =
-    normalizeToastType(type);
-
-  return (
-    TOAST_LIVE_BY_TYPE?.[toastType] ||
-    TOAST_LIVE_POLITE
-  );
+export function getToastLive(type = TOAST_DEFAULT_TYPE) {
+  const toastType = normalizeToastType(type);
+  return TOAST_LIVE_BY_TYPE?.[toastType] || TOAST_LIVE_POLITE;
 }
 
 /* =========================================================
-   ICONS
+   SVG ICONS
 ========================================================= */
 
-function createSvgNode(svgMarkup = "") {
-  if (!isBrowser()) {
-    return null;
-  }
+function svgNode() {
+  if (!isBrowser()) return null;
 
   try {
-    const template =
-      document.createElement("template");
+    const svg = document.createElementNS(SVG_NS, "svg");
 
-    template.innerHTML =
-      String(svgMarkup || "").trim();
+    setAttr(svg, "viewBox", "0 0 24 24");
+    setAttr(svg, "fill", "none");
+    setAttr(svg, "aria-hidden", "true");
+    setAttr(svg, "focusable", "false");
 
-    const node =
-      template.content.firstElementChild;
-
-    return node || null;
+    return svg;
   } catch {
     return null;
   }
 }
 
-export function getToastIconSvg(type = TOAST_TYPE_INFO) {
-  const toastType =
-    normalizeToastType(type);
+function svgPath(attrs = {}) {
+  if (!isBrowser()) return null;
 
-  switch (toastType) {
-    case TOAST_TYPE_SUCCESS:
-      return `
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-          <path
-            d="M20 7 9 18l-5-5"
-            stroke="currentColor"
-            stroke-width="1.9"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      `;
+  try {
+    const path = document.createElementNS(SVG_NS, "path");
 
-    case TOAST_TYPE_ERROR:
-      return `
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-          <path
-            d="M15 9 9 15"
-            stroke="currentColor"
-            stroke-width="1.9"
-            stroke-linecap="round"
-          />
-          <path
-            d="M9 9l6 6"
-            stroke="currentColor"
-            stroke-width="1.9"
-            stroke-linecap="round"
-          />
-          <circle
-            cx="12"
-            cy="12"
-            r="9"
-            stroke="currentColor"
-            stroke-width="1.7"
-          />
-        </svg>
-      `;
+    Object.entries(attrs).forEach(([key, value]) => {
+      path.setAttribute(key, String(value));
+    });
 
-    case TOAST_TYPE_WARNING:
-      return `
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-          <path
-            d="M12 3.8 21 19a1.2 1.2 0 0 1-1.04 1.8H4.04A1.2 1.2 0 0 1 3 19L12 3.8Z"
-            stroke="currentColor"
-            stroke-width="1.7"
-            stroke-linejoin="round"
-          />
-          <path
-            d="M12 9v4.2"
-            stroke="currentColor"
-            stroke-width="1.9"
-            stroke-linecap="round"
-          />
-          <circle
-            cx="12"
-            cy="16.8"
-            r="1"
-            fill="currentColor"
-          />
-        </svg>
-      `;
-
-    case TOAST_TYPE_LOADING:
-      return "";
-
-    case TOAST_TYPE_INFO:
-    default:
-      return `
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-          <circle
-            cx="12"
-            cy="12"
-            r="9"
-            stroke="currentColor"
-            stroke-width="1.7"
-          />
-          <path
-            d="M12 10.5v5"
-            stroke="currentColor"
-            stroke-width="1.9"
-            stroke-linecap="round"
-          />
-          <circle
-            cx="12"
-            cy="7.4"
-            r="1"
-            fill="currentColor"
-          />
-        </svg>
-      `;
+    return path;
+  } catch {
+    return null;
   }
 }
 
-/* =========================================================
-   NODE HELPERS
-========================================================= */
+function svgCircle(attrs = {}) {
+  if (!isBrowser()) return null;
 
-export function createToastIconNode(type = TOAST_TYPE_INFO) {
-  if (!isBrowser()) {
+  try {
+    const circle = document.createElementNS(SVG_NS, "circle");
+
+    Object.entries(attrs).forEach(([key, value]) => {
+      circle.setAttribute(key, String(value));
+    });
+
+    return circle;
+  } catch {
     return null;
   }
+}
 
-  const toastType =
-    normalizeToastType(type);
+function makeSuccessIcon() {
+  const svg = svgNode();
+  if (!svg) return null;
 
-  const icon =
-    document.createElement("div");
+  append(svg, svgPath({
+    d: "M20 7 9 18l-5-5",
+    stroke: "currentColor",
+    "stroke-width": "1.9",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+  }));
 
-  icon.className =
-    TOAST_CLASS_ICON || "toast-icon";
+  return svg;
+}
+
+function makeErrorIcon() {
+  const svg = svgNode();
+  if (!svg) return null;
+
+  append(svg, svgPath({
+    d: "M15 9 9 15",
+    stroke: "currentColor",
+    "stroke-width": "1.9",
+    "stroke-linecap": "round",
+  }));
+
+  append(svg, svgPath({
+    d: "M9 9l6 6",
+    stroke: "currentColor",
+    "stroke-width": "1.9",
+    "stroke-linecap": "round",
+  }));
+
+  append(svg, svgCircle({
+    cx: "12",
+    cy: "12",
+    r: "9",
+    stroke: "currentColor",
+    "stroke-width": "1.7",
+  }));
+
+  return svg;
+}
+
+function makeWarningIcon() {
+  const svg = svgNode();
+  if (!svg) return null;
+
+  append(svg, svgPath({
+    d: "M12 3.8 21 19a1.2 1.2 0 0 1-1.04 1.8H4.04A1.2 1.2 0 0 1 3 19L12 3.8Z",
+    stroke: "currentColor",
+    "stroke-width": "1.7",
+    "stroke-linejoin": "round",
+  }));
+
+  append(svg, svgPath({
+    d: "M12 9v4.2",
+    stroke: "currentColor",
+    "stroke-width": "1.9",
+    "stroke-linecap": "round",
+  }));
+
+  append(svg, svgCircle({
+    cx: "12",
+    cy: "16.8",
+    r: "1",
+    fill: "currentColor",
+  }));
+
+  return svg;
+}
+
+function makeInfoIcon() {
+  const svg = svgNode();
+  if (!svg) return null;
+
+  append(svg, svgCircle({
+    cx: "12",
+    cy: "12",
+    r: "9",
+    stroke: "currentColor",
+    "stroke-width": "1.7",
+  }));
+
+  append(svg, svgPath({
+    d: "M12 10.5v5",
+    stroke: "currentColor",
+    "stroke-width": "1.9",
+    "stroke-linecap": "round",
+  }));
+
+  append(svg, svgCircle({
+    cx: "12",
+    cy: "7.4",
+    r: "1",
+    fill: "currentColor",
+  }));
+
+  return svg;
+}
+
+export function getToastIconSvg(type = TOAST_DEFAULT_TYPE) {
+  /*
+    Compat legacy: algunos diagnósticos esperan esta función.
+    No se usa para renderizar contenido de usuario.
+  */
+  switch (normalizeToastType(type)) {
+    case TOAST_TYPE_SUCCESS:
+      return "success";
+    case TOAST_TYPE_ERROR:
+      return "error";
+    case TOAST_TYPE_WARNING:
+      return "warning";
+    case TOAST_TYPE_LOADING:
+      return "loading";
+    case TOAST_TYPE_INFO:
+    default:
+      return "info";
+  }
+}
+
+export function createToastIconNode(type = TOAST_DEFAULT_TYPE) {
+  if (!isBrowser()) return null;
+
+  const toastType = normalizeToastType(type);
+  const icon = createEl("div", TOAST_CLASS_ICON || "toast-icon");
+
+  if (!icon) return null;
 
   setAttr(icon, "aria-hidden", "true");
 
   if (toastType === TOAST_TYPE_LOADING) {
-    const spinner =
-      document.createElement("span");
-
-    spinner.className =
-      "toast-spinner";
-
+    const spinner = createEl("span", "toast-spinner");
     setAttr(spinner, "aria-hidden", "true");
-
-    appendIfNode(icon, spinner);
-
+    append(icon, spinner);
     return icon;
   }
 
   const svg =
-    createSvgNode(
-      getToastIconSvg(toastType)
-    );
+    toastType === TOAST_TYPE_SUCCESS ? makeSuccessIcon()
+      : toastType === TOAST_TYPE_ERROR ? makeErrorIcon()
+        : toastType === TOAST_TYPE_WARNING ? makeWarningIcon()
+          : makeInfoIcon();
 
-  if (svg) {
-    appendIfNode(icon, svg);
-  }
+  append(icon, svg);
 
   return icon;
 }
+
+/* =========================================================
+   CONTENT NODES
+========================================================= */
 
 export function createToastContentNode({
   title = "",
   message = "",
 } = {}) {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  const content =
-    document.createElement("div");
-
-  /*
-    Compatibilidad:
-    - toast-content: clase usada por tu DOM actual
-    - toast-body: clase nueva exportada en constants
-  */
-  content.className =
-    "toast-content toast-body";
-
-  const safeTitle =
-    safeText(title, "");
-
-  const safeMessage =
-    safeText(message, "");
-
-  if (safeTitle) {
-    const titleEl =
-      document.createElement("h4");
-
-    titleEl.className =
-      TOAST_CLASS_TITLE || "toast-title";
-
-    setNodeText(
-      titleEl,
-      safeTitle
-    );
-
-    appendIfNode(
-      content,
-      titleEl
-    );
-  }
-
-  const messageEl =
-    document.createElement("p");
-
-  messageEl.className =
-    TOAST_CLASS_MESSAGE || "toast-message";
-
-  setNodeText(
-    messageEl,
-    safeMessage
+  const content = createEl(
+    "div",
+    `toast-content ${TOAST_CLASS_BODY || "toast-body"}`
   );
 
-  appendIfNode(
-    content,
-    messageEl
-  );
+  if (!content) return null;
+
+  const cleanTitle = safeText(title, "");
+  const cleanMessage = safeText(message, "");
+
+  if (cleanTitle) {
+    const titleEl = createEl("h4", TOAST_CLASS_TITLE || "toast-title");
+
+    setText(titleEl, cleanTitle);
+    append(content, titleEl);
+  }
+
+  const messageEl = createEl("p", TOAST_CLASS_MESSAGE || "toast-message");
+
+  setText(messageEl, cleanMessage);
+  append(content, messageEl);
 
   return content;
 }
 
 export function createToastCloseButton(id = "") {
-  if (!isBrowser()) {
-    return null;
-  }
+  const button = createEl("button", TOAST_CLASS_CLOSE || "toast-close");
 
-  const toastId =
-    safeText(id, "");
+  if (!button) return null;
 
-  const button =
-    document.createElement("button");
+  const label = safeText(getToastCloseLabel(), "Cerrar notificación");
 
-  button.type =
-    "button";
+  button.type = "button";
+  button.textContent = "×";
 
-  button.className =
-    TOAST_CLASS_CLOSE || "toast-close";
-
-  setAttr(
-    button,
-    "data-toast-dismiss",
-    toastId
-  );
-
-  setAttr(
-    button,
-    "aria-label",
-    safeText(
-      getToastCloseLabel(),
-      "Cerrar notificación"
-    )
-  );
-
-  setAttr(
-    button,
-    "title",
-    safeText(
-      getToastCloseLabel(),
-      "Cerrar"
-    )
-  );
-
-  button.textContent =
-    "×";
+  setAttr(button, "data-toast-dismiss", safeText(id, ""));
+  setAttr(button, "aria-label", label);
+  setAttr(button, "title", label);
 
   return button;
 }
 
 export function createToastProgressNode() {
-  if (!isBrowser()) {
-    return null;
-  }
+  const progress = createEl("div", TOAST_CLASS_PROGRESS || "toast-progress");
 
-  const progress =
-    document.createElement("div");
+  if (!progress) return null;
 
-  progress.className =
-    TOAST_CLASS_PROGRESS || "toast-progress";
-
-  setAttr(
-    progress,
-    "aria-hidden",
-    "true"
-  );
+  setAttr(progress, "aria-hidden", "true");
 
   return progress;
 }
 
 /* =========================================================
-   NODE
+   TOAST NODE
 ========================================================= */
 
 export function createToastNode({
-  id,
-  type,
-  title,
-  message,
+  id = "",
+  type = TOAST_DEFAULT_TYPE,
+  title = "",
+  message = "",
   closable = true,
+  persistent = false,
+  paused = false,
+  createdAt = "",
 } = {}) {
-  if (!isBrowser()) {
-    return null;
-  }
+  if (!isBrowser()) return null;
 
-  const toastId =
-    safeText(id, "");
+  const toastId = safeText(id, "");
+  const toastType = normalizeToastType(type);
 
-  const toastType =
-    normalizeToastType(type);
+  const node = createEl("article", buildToastClassName(toastType));
 
-  const el =
-    document.createElement("article");
+  if (!node) return null;
 
-  el.className =
-    buildToastClassName(toastType);
+  setDataAttr(node, TOAST_DATA_ID, toastId);
+  setDataAttr(node, TOAST_DATA_TYPE, toastType);
+  setDataAttr(node, TOAST_DATA_DISMISSING, null);
+  setDataAttr(node, TOAST_DATA_PAUSED, paused ? "true" : null);
+  setDataAttr(node, TOAST_DATA_PERSISTENT, persistent ? "true" : null);
+  setDataAttr(node, TOAST_DATA_CREATED_AT, createdAt || String(Date.now()));
 
-  setDataAttr(
-    el,
-    TOAST_DATA_ID,
-    toastId
-  );
-
-  setDataAttr(
-    el,
-    TOAST_DATA_TYPE,
-    toastType
-  );
-
-  setDataAttr(
-    el,
-    TOAST_DATA_DISMISSING,
-    null
-  );
-
-  /*
-    Compatibilidad con código existente:
-    item.toastEl.dataset.toastId
-  */
   try {
-    el.dataset.toastId =
-      toastId;
+    node.dataset.toastId = toastId;
   } catch {}
 
-  setAttr(
-    el,
-    "role",
-    getToastRole(toastType)
-  );
+  setAttr(node, "role", getToastRole(toastType));
+  setAttr(node, "aria-live", getToastLive(toastType));
+  setAttr(node, "aria-atomic", "true");
+  setAttr(node, "tabindex", "-1");
 
-  setAttr(
-    el,
-    "aria-live",
-    getToastLive(toastType)
-  );
-
-  setAttr(
-    el,
-    "aria-atomic",
-    "true"
-  );
-
-  setAttr(
-    el,
-    "tabindex",
-    "-1"
-  );
-
-  appendIfNode(
-    el,
-    createToastIconNode(toastType)
-  );
-
-  appendIfNode(
-    el,
-    createToastContentNode({
-      title,
-      message,
-    })
-  );
+  append(node, createToastIconNode(toastType));
+  append(node, createToastContentNode({ title, message }));
 
   if (safeBool(closable, true)) {
-    appendIfNode(
-      el,
-      createToastCloseButton(toastId)
-    );
+    append(node, createToastCloseButton(toastId));
   }
 
-  appendIfNode(
-    el,
-    createToastProgressNode()
-  );
+  append(node, createToastProgressNode());
 
-  return el;
+  return node;
+}
+
+/* =========================================================
+   QUERY PARTS
+========================================================= */
+
+function getToastContentNode(root) {
+  if (!isElement(root)) return null;
+
+  try {
+    return root.querySelector(".toast-content, .toast-body");
+  } catch {
+    return null;
+  }
+}
+
+function getToastIconNode(root) {
+  if (!isElement(root)) return null;
+
+  try {
+    return root.querySelector(".toast-icon");
+  } catch {
+    return null;
+  }
+}
+
+function getToastCloseNode(root) {
+  if (!isElement(root)) return null;
+
+  try {
+    return root.querySelector(".toast-close");
+  } catch {
+    return null;
+  }
+}
+
+function getToastProgressNode(root) {
+  if (!isElement(root)) return null;
+
+  try {
+    return root.querySelector(".toast-progress");
+  } catch {
+    return null;
+  }
 }
 
 /* =========================================================
    PATCH
 ========================================================= */
 
-function getToastContentNode(root) {
-  if (!isElement(root)) {
-    return null;
-  }
-
-  return (
-    root.querySelector(".toast-content") ||
-    root.querySelector(".toast-body") ||
-    null
-  );
-}
-
-function getToastProgressNode(root) {
-  if (!isElement(root)) {
-    return null;
-  }
-
-  return (
-    root.querySelector(`.${TOAST_CLASS_PROGRESS}`) ||
-    root.querySelector(".toast-progress") ||
-    null
-  );
-}
-
-function getToastIconNode(root) {
-  if (!isElement(root)) {
-    return null;
-  }
-
-  return (
-    root.querySelector(`.${TOAST_CLASS_ICON}`) ||
-    root.querySelector(".toast-icon") ||
-    null
-  );
-}
-
-function getToastCloseNode(root) {
-  if (!isElement(root)) {
-    return null;
-  }
-
-  return (
-    root.querySelector(`.${TOAST_CLASS_CLOSE}`) ||
-    root.querySelector(".toast-close") ||
-    null
-  );
-}
-
 export function patchToastNode(item) {
-  if (
-    !item ||
-    !item.toastEl ||
-    !item.toastEl.isConnected
-  ) {
-    return item || null;
-  }
+  if (!item?.toastEl || !isElement(item.toastEl)) return item || null;
 
-  const current =
-    item.toastEl;
+  const node = item.toastEl;
+  const toastType = normalizeToastType(item.type);
+  const wasVisible = node.classList?.contains?.(TOAST_CLASS_VISIBLE);
 
-  const toastType =
-    normalizeToastType(item.type);
+  node.className = buildToastClassName(
+    toastType,
+    item.dismissed ? TOAST_CLASS_DISMISSING : ""
+  );
 
-  current.className =
-    buildToastClassName(
-      toastType,
-      item.dismissed
-        ? TOAST_CLASS_DISMISSING
-        : ""
-    );
-
-  if (
-    item.toastEl.classList.contains(TOAST_CLASS_VISIBLE)
-  ) {
+  if (wasVisible && !item.dismissed) {
     try {
-      current.classList.add(
-        TOAST_CLASS_VISIBLE
-      );
+      node.classList.add(TOAST_CLASS_VISIBLE);
     } catch {}
   }
 
-  setDataAttr(
-    current,
-    TOAST_DATA_ID,
-    safeText(item.id, "")
-  );
+  if (item.paused) {
+    try {
+      node.classList.add(TOAST_CLASS_PAUSED);
+    } catch {}
+  }
 
-  setDataAttr(
-    current,
-    TOAST_DATA_TYPE,
-    toastType
-  );
+  if (item.duration === 0 || item.persistent) {
+    try {
+      node.classList.add(TOAST_CLASS_PERSISTENT);
+    } catch {}
+  }
 
-  setDataAttr(
-    current,
-    TOAST_DATA_DISMISSING,
-    item.dismissed ? "true" : null
-  );
+  setDataAttr(node, TOAST_DATA_ID, safeText(item.id, ""));
+  setDataAttr(node, TOAST_DATA_TYPE, toastType);
+  setDataAttr(node, TOAST_DATA_DISMISSING, item.dismissed ? "true" : null);
+  setDataAttr(node, TOAST_DATA_PAUSED, item.paused ? "true" : null);
+  setDataAttr(node, TOAST_DATA_PERSISTENT, item.duration === 0 || item.persistent ? "true" : null);
+  setDataAttr(node, TOAST_DATA_CREATED_AT, item.createdAt || null);
 
   try {
-    current.dataset.toastId =
-      safeText(item.id, "");
+    node.dataset.toastId = safeText(item.id, "");
   } catch {}
 
-  setAttr(
-    current,
-    "role",
-    getToastRole(toastType)
-  );
+  setAttr(node, "role", getToastRole(toastType));
+  setAttr(node, "aria-live", getToastLive(toastType));
+  setAttr(node, "aria-atomic", "true");
+  setAttr(node, "tabindex", "-1");
 
-  setAttr(
-    current,
-    "aria-live",
-    getToastLive(toastType)
-  );
-
-  setAttr(
-    current,
-    "aria-atomic",
-    "true"
-  );
-
-  const oldIcon =
-    getToastIconNode(current);
-
-  const oldContent =
-    getToastContentNode(current);
-
-  const oldClose =
-    getToastCloseNode(current);
-
-  const oldProgress =
-    getToastProgressNode(current);
-
-  const nextIcon =
-    createToastIconNode(toastType);
-
-  const nextContent =
-    createToastContentNode({
-      title: item.title,
-      message: item.message,
-    });
+  const nextIcon = createToastIconNode(toastType);
+  const oldIcon = getToastIconNode(node);
 
   if (oldIcon && nextIcon) {
-    try {
-      oldIcon.replaceWith(nextIcon);
-    } catch {}
+    replaceNode(oldIcon, nextIcon);
   } else if (nextIcon) {
     try {
-      current.prepend(nextIcon);
+      node.prepend(nextIcon);
     } catch {
-      appendIfNode(current, nextIcon);
+      append(node, nextIcon);
     }
   }
 
+  const nextContent = createToastContentNode({
+    title: item.title,
+    message: item.message,
+  });
+
+  const oldContent = getToastContentNode(node);
+
   if (oldContent && nextContent) {
-    try {
-      oldContent.replaceWith(nextContent);
-    } catch {}
+    replaceNode(oldContent, nextContent);
   } else if (nextContent) {
-    appendIfNode(
-      current,
-      nextContent
-    );
+    append(node, nextContent);
   }
 
+  const oldClose = getToastCloseNode(node);
+
   if (item.closable) {
-    const nextClose =
-      createToastCloseButton(item.id);
+    const nextClose = createToastCloseButton(item.id);
 
     if (oldClose && nextClose) {
-      try {
-        oldClose.replaceWith(nextClose);
-      } catch {}
+      replaceNode(oldClose, nextClose);
     } else if (nextClose) {
-      /*
-        El close debe ir antes del progress si existe.
-      */
-      try {
-        const progress =
-          getToastProgressNode(current);
+      const progress = getToastProgressNode(node);
 
-        if (progress) {
-          current.insertBefore(
-            nextClose,
-            progress
-          );
-        } else {
-          current.appendChild(
-            nextClose
-          );
-        }
+      try {
+        if (progress) node.insertBefore(nextClose, progress);
+        else node.appendChild(nextClose);
       } catch {
-        appendIfNode(
-          current,
-          nextClose
-        );
+        append(node, nextClose);
       }
     }
   } else if (oldClose) {
-    try {
-      oldClose.remove();
-    } catch {}
+    removeNode(oldClose);
   }
 
-  if (!oldProgress) {
-    appendIfNode(
-      current,
-      createToastProgressNode()
-    );
+  if (!getToastProgressNode(node)) {
+    append(node, createToastProgressNode());
   }
 
-  item.toastEl =
-    current;
-
-  item.progressEl =
-    getToastProgressNode(current);
+  item.toastEl = node;
+  item.progressEl = getToastProgressNode(node);
 
   return item;
 }
@@ -1036,27 +784,16 @@ export function patchToastNode(item) {
 ========================================================= */
 
 export function markToastNodeDismissing(item) {
-  if (!item?.toastEl) {
-    return false;
-  }
+  if (!item?.toastEl) return false;
+
+  const node = item.toastEl;
 
   try {
-    item.toastEl.classList.add(
-      TOAST_CLASS_DISMISSING
-    );
+    node.classList.add(TOAST_CLASS_DISMISSING);
+    node.classList.remove(TOAST_CLASS_VISIBLE);
 
-    item.toastEl.classList.remove(
-      TOAST_CLASS_VISIBLE
-    );
-
-    setDataAttr(
-      item.toastEl,
-      TOAST_DATA_DISMISSING,
-      "true"
-    );
-
-    item.toastEl.style.pointerEvents =
-      "none";
+    setDataAttr(node, TOAST_DATA_DISMISSING, "true");
+    setAttr(node, "aria-hidden", "true");
 
     return true;
   } catch {
@@ -1065,23 +802,15 @@ export function markToastNodeDismissing(item) {
 }
 
 export function unmarkToastNodeDismissing(item) {
-  if (!item?.toastEl) {
-    return false;
-  }
+  if (!item?.toastEl) return false;
+
+  const node = item.toastEl;
 
   try {
-    item.toastEl.classList.remove(
-      TOAST_CLASS_DISMISSING
-    );
+    node.classList.remove(TOAST_CLASS_DISMISSING);
 
-    setDataAttr(
-      item.toastEl,
-      TOAST_DATA_DISMISSING,
-      null
-    );
-
-    item.toastEl.style.pointerEvents =
-      "";
+    setDataAttr(node, TOAST_DATA_DISMISSING, null);
+    setAttr(node, "aria-hidden", null);
 
     return true;
   } catch {
@@ -1094,14 +823,10 @@ export function unmarkToastNodeDismissing(item) {
 ========================================================= */
 
 export function removeToastNode(item) {
-  if (!item) {
-    return false;
-  }
+  if (!item) return false;
 
   try {
-    if (item.toastEl?.isConnected) {
-      item.toastEl.remove();
-    }
+    removeNode(item.toastEl);
   } catch {}
 
   try {
@@ -1113,43 +838,39 @@ export function removeToastNode(item) {
 }
 
 /* =========================================================
-   DEBUG
+   SNAPSHOT
 ========================================================= */
 
 export function getToastDomSnapshot() {
-  const container =
-    getToastContainer();
+  const container = getToastContainer();
 
   return {
-    browser:
-      isBrowser(),
+    version: TOAST_DOM_VERSION,
+    browser: isBrowser(),
 
-    containerId:
-      TOAST_CONTAINER_ID,
+    containerId: TOAST_CONTAINER_ID,
+    hasContainer: Boolean(container),
 
-    hasContainer:
-      Boolean(container),
+    toastCount: container
+      ? container.querySelectorAll(".toast").length
+      : 0,
 
-    toastCount:
-      container
-        ? container.querySelectorAll(".toast").length
-        : 0,
+    reducedMotion: reducedMotion(),
 
-    reducedMotion:
-      isReducedMotion(),
-
-    keyframesId:
-      TOAST_KEYFRAMES_ID,
-
-    progressAnimation:
-      TOAST_PROGRESS_ANIMATION_NAME,
+    keyframesId: TOAST_KEYFRAMES_ID,
+    progressAnimation: TOAST_PROGRESS_ANIMATION_NAME,
   };
 }
 
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
 export default {
+  TOAST_DOM_VERSION,
+
   getToastContainer,
   ensureToastContainer,
-
   ensureToastKeyframes,
 
   getToastRole,

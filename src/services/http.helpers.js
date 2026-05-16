@@ -2,295 +2,340 @@
    Onion SPA - HTTP Helpers
    Archivo: src/services/http.helpers.js
 
-   ONION SUPPORT · HTTP HELPERS
-   PURE HELPERS · RETRY SAFE · ERROR SAFE · TOKEN SAFE · 17/10
-
-   RESPONSABILIDADES:
-   - Config base del servicio HTTP.
-   - Helpers puros de request / retry / error.
-   - Detección de endpoints auth.
-   - Detección de endpoints públicos técnicos.
-   - Normalización de errores.
-   - Sanitización de logs/eventos/snapshots.
-   - Utilidades de signal / abort / timeout.
-   - Cálculo de Retry-After y delays.
-   - Construcción de requestConfig por defecto.
-   - Normalización de headers desde Object, Headers o arrays.
-   - Soporte robusto para Core Request, Http Service y retry engine.
-
-   HARDENING EXTREMO:
-   - Sin dependencias externas.
-   - Sin acceso obligatorio a window/document.
-   - Sin exposición de tokens en logs/summaries/errors.
-   - Compatibilidad con /api/auth y /auth.
-   - /api/auth/me, /auth/me, /api/me y /me NO son públicos.
-   - Login/activation/reset/forgot/2FA/MFA/OTP tratados como públicos.
-   - Requests públicos auth salen sin Authorization.
-   - Requests públicos auth no disparan refresh/logout.
-   - Retry sólo seguro por defecto.
-   - Retry unsafe sólo si el caller lo pide.
-   - Retry 401 bloqueado por defecto: lo gestiona Http Service con refresh.
-   - Retry auth público bloqueado por defecto.
-   - Retry timeout sólo con retryTimeout:true.
-   - Retry-After compatible con segundos y fecha HTTP.
-   - AbortController browser-safe/server-safe.
-   - Headers normalizados desde Object, Headers o arrays.
-   - Error.raw no enumerable.
-   - Snapshots y summaries redactados.
-   - Eventos HTTP low-level apagados por defecto desde config.
-   - sanitizeData() con WeakSet anti-circular.
-   - sanitizeData() con límite real de profundidad, claves, arrays y strings.
-   - sanitizeData() no intenta recorrer Response/Request/Headers/FormData/Blob.
-   - sanitizeRequestConfig() no hace spread completo del requestConfig.
-   - normalizeError() no arrastra objetos raw/response/request gigantes.
-   - Redacción con regex cacheadas para evitar rebuild masivo en loops.
+   Helpers HTTP puros:
+   - Request config base.
+   - Endpoint policy auth/public/private.
+   - /api/auth/me, /auth/me, /api/me y /me siempre privados.
+   - Retry seguro.
+   - Abort/timeout/signal safe.
+   - Error normalization.
+   - Sanitización/redacción sin tokens.
 ========================================================= */
 
 /* =========================================================
    CONFIG
 ========================================================= */
 
+export const HTTP_HELPERS_VERSION = "18.0.0-clean";
+
 export const HTTP_CONFIG = Object.freeze({
-  retries:
-    1,
+  retries: 1,
+  retryDelay: 400,
+  retryJitter: 120,
+  retryStrategy: "linear",
+  retryMaxDelay: 10_000,
 
-  retryDelay:
-    400,
+  retryOnStatuses: null,
+  retryOnConflict: false,
+  retryOnLocked: false,
+  retry401: false,
+  retryTimeout: false,
+  retryPublicAuth: false,
 
-  retryJitter:
-    120,
+  timeout: 30_000,
 
-  retryStrategy:
-    "linear",
+  autoRefreshOn401: true,
+  autoLogoutOn401: true,
+  refreshMinIntervalMs: 0,
 
-  retryMaxDelay:
-    10_000,
+  logRequests: true,
+  logResponses: true,
+  logErrors: true,
 
-  retryOnStatuses:
-    null,
+  defaultUseLoader: true,
+  defaultAuth: true,
+  defaultCredentials: "include",
+  defaultResponseType: "auto",
+  defaultAccept: "application/json",
+  defaultContentType: "application/json",
 
-  retryOnConflict:
-    false,
+  requestIdHeader: "X-Request-Id",
+  clientHeader: "X-Onion-Client",
+  clientHeaderValue: "onion-spa",
 
-  retryOnLocked:
-    false,
+  emitLifecycleEvents: false,
+  emitFinalEvents: true,
+  emitReadyEvent: true,
+  emitBridgeEvent: false,
+  emitInterceptorEvents: false,
+  emitInitSkippedEvents: false,
 
-  retry401:
-    false,
-
-  retryTimeout:
-    false,
-
-  retryPublicAuth:
-    false,
-
-  timeout:
-    30_000,
-
-  autoRefreshOn401:
-    true,
-
-  autoLogoutOn401:
-    true,
-
-  refreshMinIntervalMs:
-    0,
-
-  logRequests:
-    true,
-
-  logResponses:
-    true,
-
-  logErrors:
-    true,
-
-  defaultUseLoader:
-    true,
-
-  defaultAuth:
-    true,
-
-  /*
-    Backend real cross-origin:
-    https://api.onionit.net
-  */
-  defaultCredentials:
-    "include",
-
-  defaultResponseType:
-    "auto",
-
-  defaultAccept:
-    "application/json",
-
-  defaultContentType:
-    "application/json",
-
-  requestIdHeader:
-    "X-Request-Id",
-
-  clientHeader:
-    "X-Onion-Client",
-
-  clientHeaderValue:
-    "onion-spa",
-
-  emitLifecycleEvents:
-    false,
-
-  emitFinalEvents:
-    true,
-
-  emitReadyEvent:
-    true,
-
-  emitBridgeEvent:
-    false,
-
-  emitInterceptorEvents:
-    false,
-
-  emitInitSkippedEvents:
-    false,
-
-  emitRefreshEvents:
-    true,
-
-  emitReplayEvents:
-    true,
-
-  emitAutoLogoutEvents:
-    true,
-
-  emitRuntimeEvents:
-    false,
-
-  emitAuthRefreshEvents:
-    false,
-
-  emitRequestEngineEvents:
-    false,
+  emitRefreshEvents: true,
+  emitReplayEvents: true,
+  emitAutoLogoutEvents: true,
+  emitRuntimeEvents: false,
+  emitAuthRefreshEvents: false,
+  emitRequestEngineEvents: false,
 });
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-export const HTTP_HELPERS_VERSION =
-  "17.0.0";
+const DEFAULT_METHOD = "GET";
+const DEFAULT_ERROR_MESSAGE = "Error en la petición";
+const LOCAL_ORIGIN = "http://localhost";
 
-const DEFAULT_METHOD =
-  "GET";
+const KNOWN_METHODS = Object.freeze([
+  "GET",
+  "HEAD",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "OPTIONS",
+]);
 
-const DEFAULT_ERROR_MESSAGE =
-  "Error en la petición";
+const BODYLESS_METHODS = Object.freeze([
+  "GET",
+  "HEAD",
+  "OPTIONS",
+]);
 
-const LOCAL_ORIGIN =
-  "http://localhost";
+const IDEMPOTENT_METHODS = Object.freeze([
+  "GET",
+  "HEAD",
+  "OPTIONS",
+]);
 
-const MAX_SANITIZE_DEPTH =
-  5;
+const DEFAULT_RETRYABLE_STATUSES = Object.freeze([
+  408,
+  425,
+  429,
+  500,
+  502,
+  503,
+  504,
+]);
 
-const MAX_SANITIZE_ARRAY_ITEMS =
-  50;
+const AUTH_ME_ENDPOINTS = Object.freeze([
+  "/me",
+  "/api/me",
+  "/auth/me",
+  "/api/auth/me",
+]);
 
-const MAX_SANITIZE_OBJECT_KEYS =
-  80;
+const AUTH_ENDPOINT_MARKERS = Object.freeze([
+  "/auth/login",
+  "/auth/register",
+  "/auth/signup",
 
-const MAX_SANITIZE_STRING_LENGTH =
-  4_000;
+  "/auth/logout",
+  "/auth/logout-all",
 
-const MAX_REDACT_INPUT_LENGTH =
-  12_000;
+  "/auth/me",
+  "/auth/session",
+  "/auth/refresh",
+  "/auth/token/refresh",
+  "/auth/renew",
 
-const KNOWN_METHODS =
-  Object.freeze([
-    "GET",
-    "HEAD",
-    "POST",
-    "PUT",
-    "PATCH",
-    "DELETE",
-    "OPTIONS",
-  ]);
+  "/auth/2fa",
+  "/auth/2fa/login",
+  "/auth/2fa/verify",
+  "/auth/mfa",
+  "/auth/mfa/login",
+  "/auth/mfa/verify",
+  "/auth/otp",
+  "/auth/otp/login",
+  "/auth/otp/verify",
 
-const BODYLESS_METHODS =
-  Object.freeze([
-    "GET",
-    "HEAD",
-    "OPTIONS",
-  ]);
+  "/auth/activate",
+  "/auth/activate-account",
+  "/auth/account/activate",
+  "/auth/activation",
+  "/auth/activate/first-user",
+  "/auth/activate/validate",
 
-const IDEMPOTENT_METHODS =
-  Object.freeze([
-    "GET",
-    "HEAD",
-    "OPTIONS",
-  ]);
+  "/auth/reset-password",
+  "/auth/reset-password-request",
+  "/auth/reset-password-confirm",
+  "/auth/reset-password/confirm",
+  "/auth/reset-password/validate",
 
-const SENSITIVE_QUERY_NAMES =
-  Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "activation_token",
-    "activate_token",
-    "resetToken",
-    "reset_token",
-    "passwordResetToken",
-    "password_reset_token",
-    "confirmToken",
-    "confirm_token",
-    "code",
-    "otp",
-    "totp",
-    "pin",
-    "t",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
-    "otpToken",
-    "otp_token",
-    "jwt",
-    "bearer",
-    "auth",
-    "authorization",
-    "password",
-    "newPassword",
-    "currentPassword",
-  ]);
+  "/auth/password-reset",
+  "/auth/password-reset/request",
+  "/auth/password-reset/confirm",
+  "/auth/password-reset/validate",
 
-const SENSITIVE_HEADER_PARTS =
-  Object.freeze([
-    "authorization",
-    "cookie",
-    "set-cookie",
-    "token",
-    "secret",
-    "password",
-    "credential",
-    "apikey",
-    "api-key",
-    "x-api-key",
-    "jwt",
-    "bearer",
-    "refresh",
-    "access",
-    "otp",
-    "mfa",
-    "2fa",
-    "csrf",
-    "xsrf",
-  ]);
+  "/auth/forgot-password",
+  "/auth/recover-password",
+
+  "/auth/_health",
+  "/auth/health",
+]);
+
+const PUBLIC_AUTH_ENDPOINT_MARKERS = Object.freeze([
+  "/auth/login",
+  "/auth/register",
+  "/auth/signup",
+
+  "/auth/refresh",
+  "/auth/token/refresh",
+  "/auth/renew",
+
+  "/auth/2fa",
+  "/auth/2fa/login",
+  "/auth/2fa/verify",
+  "/auth/mfa",
+  "/auth/mfa/login",
+  "/auth/mfa/verify",
+  "/auth/otp",
+  "/auth/otp/login",
+  "/auth/otp/verify",
+
+  "/auth/activate",
+  "/auth/activate-account",
+  "/auth/account/activate",
+  "/auth/activation",
+  "/auth/activate/first-user",
+  "/auth/activate/validate",
+
+  "/auth/reset-password",
+  "/auth/reset-password-request",
+  "/auth/reset-password-confirm",
+  "/auth/reset-password/confirm",
+  "/auth/reset-password/validate",
+
+  "/auth/password-reset",
+  "/auth/password-reset/request",
+  "/auth/password-reset/confirm",
+  "/auth/password-reset/validate",
+
+  "/auth/forgot-password",
+  "/auth/recover-password",
+
+  "/auth/_health",
+  "/auth/health",
+]);
+
+const AUTH_CONTROL_SKIP_REFRESH_MARKERS = Object.freeze([
+  "/auth/login",
+  "/auth/register",
+  "/auth/signup",
+
+  "/auth/refresh",
+  "/auth/token/refresh",
+  "/auth/renew",
+
+  "/auth/logout",
+  "/auth/logout-all",
+
+  "/auth/2fa",
+  "/auth/2fa/login",
+  "/auth/2fa/verify",
+  "/auth/mfa",
+  "/auth/mfa/login",
+  "/auth/mfa/verify",
+  "/auth/otp",
+  "/auth/otp/login",
+  "/auth/otp/verify",
+
+  "/auth/activate",
+  "/auth/activate-account",
+  "/auth/account/activate",
+  "/auth/activation",
+  "/auth/activate/first-user",
+  "/auth/activate/validate",
+
+  "/auth/reset-password",
+  "/auth/reset-password-request",
+  "/auth/reset-password-confirm",
+  "/auth/reset-password/confirm",
+  "/auth/reset-password/validate",
+
+  "/auth/password-reset",
+  "/auth/password-reset/request",
+  "/auth/password-reset/confirm",
+  "/auth/password-reset/validate",
+
+  "/auth/forgot-password",
+  "/auth/recover-password",
+
+  "/auth/_health",
+  "/auth/health",
+]);
+
+const TECHNICAL_PUBLIC_ROUTES = Object.freeze([
+  "/login",
+  "/activate-account",
+  "/reset-password",
+  "/reset-password/confirm",
+  "/forgot-password",
+  "/recover-password",
+  "/password-reset",
+  "/password-reset/confirm",
+  "/2fa",
+  "/otp",
+  "/mfa",
+]);
+
+const SENSITIVE_QUERY_NAMES = Object.freeze([
+  "token",
+  "activationToken",
+  "activateToken",
+  "activation_token",
+  "activate_token",
+  "resetToken",
+  "reset_token",
+  "passwordResetToken",
+  "password_reset_token",
+  "confirmToken",
+  "confirm_token",
+  "code",
+  "otp",
+  "totp",
+  "pin",
+  "t",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "tempToken",
+  "temp_token",
+  "temporaryToken",
+  "temporary_token",
+  "twoFactorToken",
+  "two_factor_token",
+  "mfaToken",
+  "mfa_token",
+  "otpToken",
+  "otp_token",
+  "jwt",
+  "bearer",
+  "auth",
+  "authorization",
+  "password",
+  "newPassword",
+  "currentPassword",
+]);
+
+const SENSITIVE_HEADER_PARTS = Object.freeze([
+  "authorization",
+  "cookie",
+  "set-cookie",
+  "token",
+  "secret",
+  "password",
+  "credential",
+  "apikey",
+  "api-key",
+  "x-api-key",
+  "jwt",
+  "bearer",
+  "refresh",
+  "access",
+  "otp",
+  "mfa",
+  "2fa",
+  "csrf",
+  "xsrf",
+]);
+
+const CORRUPT_TEXT_VALUES = Object.freeze([
+  "undefined",
+  "null",
+  "nan",
+  "[object object]",
+]);
 
 const SENSITIVE_OBJECT_KEY_RE =
   /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|totp|mfa|2fa|csrf|xsrf/i;
@@ -301,189 +346,11 @@ const SENSITIVE_FORM_CODE_KEY_RE =
 const HEAVY_OBJECT_KEY_RE =
   /^(raw|response|request|requestInit|fetchInit|controller|abortController|signal|stack|source|target|currentTarget|nativeEvent|event|promise|reader|stream)$/i;
 
-const AUTH_ME_ENDPOINTS =
-  Object.freeze([
-    "/me",
-    "/api/me",
-    "/auth/me",
-    "/api/auth/me",
-  ]);
-
-const AUTH_ENDPOINT_MARKERS =
-  Object.freeze([
-    "/auth/login",
-    "/auth/register",
-    "/auth/signup",
-
-    "/auth/logout",
-    "/auth/logout-all",
-
-    "/auth/me",
-    "/auth/session",
-    "/auth/refresh",
-    "/auth/token/refresh",
-    "/auth/renew",
-
-    "/auth/2fa",
-    "/auth/2fa/login",
-    "/auth/2fa/verify",
-    "/auth/mfa",
-    "/auth/mfa/login",
-    "/auth/mfa/verify",
-    "/auth/otp",
-    "/auth/otp/login",
-    "/auth/otp/verify",
-
-    "/auth/activate",
-    "/auth/activate-account",
-    "/auth/account/activate",
-    "/auth/activation",
-    "/auth/activate/first-user",
-    "/auth/activate/validate",
-
-    "/auth/reset-password",
-    "/auth/reset-password-request",
-    "/auth/reset-password-confirm",
-    "/auth/reset-password/confirm",
-    "/auth/reset-password/validate",
-
-    "/auth/password-reset",
-    "/auth/password-reset/request",
-    "/auth/password-reset/confirm",
-    "/auth/password-reset/validate",
-
-    "/auth/forgot-password",
-    "/auth/recover-password",
-
-    "/auth/_health",
-    "/auth/health",
-  ]);
-
-const PUBLIC_AUTH_ENDPOINT_MARKERS =
-  Object.freeze([
-    "/auth/login",
-    "/auth/register",
-    "/auth/signup",
-
-    "/auth/refresh",
-    "/auth/token/refresh",
-    "/auth/renew",
-
-    "/auth/2fa",
-    "/auth/2fa/login",
-    "/auth/2fa/verify",
-    "/auth/mfa",
-    "/auth/mfa/login",
-    "/auth/mfa/verify",
-    "/auth/otp",
-    "/auth/otp/login",
-    "/auth/otp/verify",
-
-    "/auth/activate",
-    "/auth/activate-account",
-    "/auth/account/activate",
-    "/auth/activation",
-    "/auth/activate/first-user",
-    "/auth/activate/validate",
-
-    "/auth/reset-password",
-    "/auth/reset-password-request",
-    "/auth/reset-password-confirm",
-    "/auth/reset-password/confirm",
-    "/auth/reset-password/validate",
-
-    "/auth/password-reset",
-    "/auth/password-reset/request",
-    "/auth/password-reset/confirm",
-    "/auth/password-reset/validate",
-
-    "/auth/forgot-password",
-    "/auth/recover-password",
-
-    "/auth/_health",
-    "/auth/health",
-  ]);
-
-const AUTH_CONTROL_SKIP_REFRESH_MARKERS =
-  Object.freeze([
-    "/auth/login",
-    "/auth/register",
-    "/auth/signup",
-
-    "/auth/refresh",
-    "/auth/token/refresh",
-    "/auth/renew",
-
-    "/auth/logout",
-    "/auth/logout-all",
-
-    "/auth/2fa",
-    "/auth/2fa/login",
-    "/auth/2fa/verify",
-    "/auth/mfa",
-    "/auth/mfa/login",
-    "/auth/mfa/verify",
-    "/auth/otp",
-    "/auth/otp/login",
-    "/auth/otp/verify",
-
-    "/auth/activate",
-    "/auth/activate-account",
-    "/auth/account/activate",
-    "/auth/activation",
-    "/auth/activate/first-user",
-    "/auth/activate/validate",
-
-    "/auth/reset-password",
-    "/auth/reset-password-request",
-    "/auth/reset-password-confirm",
-    "/auth/reset-password/confirm",
-    "/auth/reset-password/validate",
-
-    "/auth/password-reset",
-    "/auth/password-reset/request",
-    "/auth/password-reset/confirm",
-    "/auth/password-reset/validate",
-
-    "/auth/forgot-password",
-    "/auth/recover-password",
-
-    "/auth/_health",
-    "/auth/health",
-  ]);
-
-const TECHNICAL_PUBLIC_ROUTES =
-  Object.freeze([
-    "/login",
-    "/activate-account",
-    "/reset-password",
-    "/forgot-password",
-    "/recover-password",
-    "/password-reset",
-    "/reset-password/confirm",
-    "/2fa",
-    "/otp",
-    "/mfa",
-  ]);
-
-const DEFAULT_RETRYABLE_STATUSES =
-  Object.freeze([
-    408,
-    425,
-    429,
-    500,
-    502,
-    503,
-    504,
-  ]);
-
-const CORRUPT_TEXT_VALUES =
-  Object.freeze([
-    "undefined",
-    "null",
-    "nan",
-    "[object object]",
-  ]);
+const MAX_SANITIZE_DEPTH = 5;
+const MAX_SANITIZE_ARRAY_ITEMS = 50;
+const MAX_SANITIZE_OBJECT_KEYS = 80;
+const MAX_SANITIZE_STRING_LENGTH = 4_000;
+const MAX_REDACT_INPUT_LENGTH = 12_000;
 
 /* =========================================================
    BASICS
@@ -494,72 +361,39 @@ export function isFn(value) {
 }
 
 export function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 export function isAnyObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object"
-  );
+  return value !== null && typeof value === "object";
 }
 
 export function safeObject(value, fallback = {}) {
-  return isObject(value)
-    ? value
-    : fallback;
+  return isObject(value) ? value : fallback;
 }
 
 export function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return Array.isArray(value) ? value : [];
 }
 
 export function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
-  const text =
-    String(value).trim();
+  const text = String(value).trim();
 
-  if (!text) {
-    return fallback;
-  }
-
-  if (
-    CORRUPT_TEXT_VALUES.includes(
-      text.toLowerCase()
-    )
-  ) {
-    return fallback;
-  }
+  if (!text) return fallback;
+  if (CORRUPT_TEXT_VALUES.includes(text.toLowerCase())) return fallback;
 
   return text;
 }
 
 export function safeLower(value = "", fallback = "") {
-  return safeText(
-    value,
-    fallback
-  ).toLowerCase();
+  return safeText(value, fallback).toLowerCase();
 }
 
 export function safeNumber(value, fallback = 0) {
-  const number =
-    Number(value);
-
-  return Number.isFinite(number)
-    ? number
-    : fallback;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 export function safeBoolean(value, fallback = false) {
@@ -572,35 +406,13 @@ export function safeBoolean(value, fallback = false) {
   }
 
   if (typeof value === "string") {
-    const clean =
-      value.trim().toLowerCase();
+    const clean = value.trim().toLowerCase();
 
-    if (
-      [
-        "true",
-        "1",
-        "yes",
-        "si",
-        "sí",
-        "ok",
-        "on",
-        "enabled",
-        "active",
-      ].includes(clean)
-    ) {
+    if (["true", "1", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(clean)) {
       return true;
     }
 
-    if (
-      [
-        "false",
-        "0",
-        "no",
-        "off",
-        "disabled",
-        "inactive",
-      ].includes(clean)
-    ) {
+    if (["false", "0", "no", "off", "disabled", "inactive"].includes(clean)) {
       return false;
     }
   }
@@ -626,69 +438,29 @@ export function isoNow(ms = nowMs()) {
 
 export function getBaseOrigin() {
   try {
-    if (
-      typeof window !== "undefined" &&
-      window.location?.origin
-    ) {
-      return window.location.origin;
-    }
+    if (window.location?.origin) return window.location.origin;
   } catch {}
 
   return LOCAL_ORIGIN;
 }
 
 export function escapeRegExp(value = "") {
-  return String(value).replace(
-    /[.*+?^${}()|[\]\\]/g,
-    "\\$&"
-  );
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export function sleep(ms = 0) {
   return new Promise((resolve) => {
     try {
-      setTimeout(
-        resolve,
-        Math.max(
-          0,
-          safeNumber(ms, 0)
-        )
-      );
+      setTimeout(resolve, Math.max(0, safeNumber(ms, 0)));
     } catch {
       resolve();
     }
   });
 }
 
-export function normalizeMethod(method = DEFAULT_METHOD) {
-  const clean =
-    safeText(method, DEFAULT_METHOD)
-      .toUpperCase();
-
-  return KNOWN_METHODS.includes(clean)
-    ? clean
-    : DEFAULT_METHOD;
-}
-
-export function isKnownMethod(method = "") {
-  return KNOWN_METHODS.includes(
-    safeText(method, "")
-      .toUpperCase()
-  );
-}
-
-export function isBodylessMethod(method = DEFAULT_METHOD) {
-  return BODYLESS_METHODS.includes(
-    normalizeMethod(method)
-  );
-}
-
 function hasOwn(obj, key) {
   try {
-    return Object.prototype.hasOwnProperty.call(
-      obj,
-      key
-    );
+    return Object.prototype.hasOwnProperty.call(obj, key);
   } catch {
     return false;
   }
@@ -696,84 +468,121 @@ function hasOwn(obj, key) {
 
 function firstNonEmpty(...values) {
   for (const value of values) {
-    const text =
-      safeText(value, "");
-
-    if (text) {
-      return text;
-    }
+    const text = safeText(value, "");
+    if (text) return text;
   }
 
   return "";
 }
 
 /* =========================================================
-   STRING / REDACTION INTERNALS
+   METHOD
 ========================================================= */
 
-let redactionQueryRulesCache =
-  null;
+export function normalizeMethod(method = DEFAULT_METHOD) {
+  const clean = safeText(method, DEFAULT_METHOD).toUpperCase();
+  return KNOWN_METHODS.includes(clean) ? clean : DEFAULT_METHOD;
+}
 
-function getRedactionQueryRules() {
-  if (redactionQueryRulesCache) {
-    return redactionQueryRulesCache;
-  }
+export function isKnownMethod(method = "") {
+  return KNOWN_METHODS.includes(safeText(method, "").toUpperCase());
+}
 
-  redactionQueryRulesCache =
-    SENSITIVE_QUERY_NAMES.map((name) => {
+export function isBodylessMethod(method = DEFAULT_METHOD) {
+  return BODYLESS_METHODS.includes(normalizeMethod(method));
+}
+
+/* =========================================================
+   REDACTION / SANITIZE
+========================================================= */
+
+let redactionRules = null;
+
+function getRedactionRules() {
+  if (redactionRules) return redactionRules;
+
+  redactionRules = SENSITIVE_QUERY_NAMES
+    .map((name) => {
       try {
-        return new RegExp(
-          `([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`,
-          "gi"
-        );
+        return new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi");
       } catch {
         return null;
       }
-    }).filter(Boolean);
+    })
+    .filter(Boolean);
 
-  return redactionQueryRulesCache;
+  return redactionRules;
 }
 
 function trimForRedaction(value = "") {
-  const text =
-    String(value ?? "");
+  const text = String(value ?? "");
 
-  if (text.length <= MAX_REDACT_INPUT_LENGTH) {
-    return text;
-  }
+  if (text.length <= MAX_REDACT_INPUT_LENGTH) return text;
 
   return `${text.slice(0, MAX_REDACT_INPUT_LENGTH)}…[truncated:${text.length}]`;
 }
 
 function previewString(value = "", maxLength = MAX_SANITIZE_STRING_LENGTH) {
-  const text =
-    String(value ?? "");
+  const text = String(value ?? "");
 
-  if (text.length <= maxLength) {
-    return text;
-  }
+  if (text.length <= maxLength) return text;
 
   return `${text.slice(0, maxLength)}…[truncated:${text.length}]`;
 }
 
+export function redactHttpValue(value = "") {
+  let output = trimForRedaction(value).trim();
+
+  if (!output) return "";
+
+  for (const rule of getRedactionRules()) {
+    try {
+      output = output.replace(rule, "$1***");
+    } catch {}
+  }
+
+  try {
+    output = output.replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***");
+  } catch {}
+
+  try {
+    output = output.replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***");
+  } catch {}
+
+  try {
+    output = output.replace(/(\/password-reset\/confirm\/)([^/?#\s]+)/gi, "$1***");
+  } catch {}
+
+  try {
+    output = output.replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+  } catch {}
+
+  try {
+    output = output.replace(
+      /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
+      "$1$2***"
+    );
+  } catch {}
+
+  try {
+    output = output.replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
+  } catch {}
+
+  return output;
+}
+
 function isSensitiveObjectKey(key = "", parentHint = "") {
-  const cleanKey =
-    safeText(key, "");
+  const cleanKey = safeText(key, "");
 
-  if (!cleanKey) {
-    return false;
-  }
+  if (!cleanKey) return false;
+  if (SENSITIVE_OBJECT_KEY_RE.test(cleanKey)) return true;
 
-  if (SENSITIVE_OBJECT_KEY_RE.test(cleanKey)) {
-    return true;
-  }
+  if (!SENSITIVE_FORM_CODE_KEY_RE.test(cleanKey)) return false;
 
-  if (!SENSITIVE_FORM_CODE_KEY_RE.test(cleanKey)) {
-    return false;
-  }
-
-  const parent =
-    safeLower(parentHint, "");
+  const parent = safeLower(parentHint, "");
 
   return Boolean(
     parent.includes("query") ||
@@ -788,101 +597,17 @@ function isSensitiveObjectKey(key = "", parentHint = "") {
   );
 }
 
-/* =========================================================
-   SANITIZE / REDACT
-========================================================= */
-
-export function redactHttpValue(value = "") {
-  let output =
-    trimForRedaction(value).trim();
-
-  if (!output) {
-    return "";
-  }
-
-  for (const rule of getRedactionQueryRules()) {
-    try {
-      output =
-        output.replace(
-          rule,
-          "$1***"
-        );
-    } catch {}
-  }
-
-  try {
-    output =
-      output.replace(
-        /(\/activate-account\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
-  } catch {}
-
-  try {
-    output =
-      output.replace(
-        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
-  } catch {}
-
-  try {
-    output =
-      output.replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      );
-  } catch {}
-
-  try {
-    output =
-      output.replace(
-        /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
-        "$1$2***"
-      );
-  } catch {}
-
-  try {
-    output =
-      output.replace(
-        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-        "***"
-      );
-  } catch {}
-
-  return output;
-}
-
 function isDomNodeLike(value) {
-  if (
-    !value ||
-    typeof value !== "object"
-  ) {
-    return false;
-  }
+  if (!value || typeof value !== "object") return false;
 
   try {
-    return Boolean(
-      typeof Node !== "undefined" &&
-        value instanceof Node
-    );
+    return typeof Node !== "undefined" && value instanceof Node;
   } catch {}
 
   try {
-    return Boolean(
-      value.nodeType &&
-        value.nodeName
-    );
-  } catch {}
-
-  return false;
-}
-
-function getObjectTag(value) {
-  try {
-    return Object.prototype.toString.call(value);
+    return Boolean(value.nodeType && value.nodeName);
   } catch {
-    return "";
+    return false;
   }
 }
 
@@ -890,10 +615,7 @@ function isArrayBufferLike(value) {
   try {
     return (
       typeof ArrayBuffer !== "undefined" &&
-      (
-        value instanceof ArrayBuffer ||
-        ArrayBuffer.isView?.(value)
-      )
+      (value instanceof ArrayBuffer || ArrayBuffer.isView?.(value))
     );
   } catch {
     return false;
@@ -901,122 +623,67 @@ function isArrayBufferLike(value) {
 }
 
 function sanitizeSpecialObject(value, depth, keyHint, seen) {
-  if (!value) {
-    return value;
-  }
+  if (!value) return value;
 
   if (isDomNodeLike(value)) {
     return {
-      type:
-        "DOMNode",
-
-      node:
-        safeText(value.nodeName, "Node"),
-
-      id:
-        safeText(value.id, ""),
-
-      className:
-        safeText(
-          value.className?.baseVal ||
-            value.className,
-          ""
-        ),
+      type: "DOMNode",
+      node: safeText(value.nodeName, "Node"),
+      id: safeText(value.id, ""),
+      className: safeText(value.className?.baseVal || value.className, ""),
     };
   }
 
   try {
-    if (
-      typeof Headers !== "undefined" &&
-      value instanceof Headers
-    ) {
+    if (typeof Headers !== "undefined" && value instanceof Headers) {
       return sanitizeHeaders(value);
     }
   } catch {}
 
   try {
-    if (
-      typeof Request !== "undefined" &&
-      value instanceof Request
-    ) {
+    if (typeof Request !== "undefined" && value instanceof Request) {
       return {
-        type:
-          "Request",
-
-        method:
-          safeText(value.method, ""),
-
-        url:
-          redactHttpValue(value.url || ""),
-
-        credentials:
-          safeText(value.credentials, ""),
-
-        cache:
-          safeText(value.cache, ""),
-
-        mode:
-          safeText(value.mode, ""),
-
-        headers:
-          sanitizeHeaders(value.headers),
+        type: "Request",
+        method: safeText(value.method, ""),
+        url: redactHttpValue(value.url || ""),
+        credentials: safeText(value.credentials, ""),
+        cache: safeText(value.cache, ""),
+        mode: safeText(value.mode, ""),
+        headers: sanitizeHeaders(value.headers),
       };
     }
   } catch {}
 
   try {
-    if (
-      typeof Response !== "undefined" &&
-      value instanceof Response
-    ) {
+    if (typeof Response !== "undefined" && value instanceof Response) {
       return {
-        type:
-          "Response",
-
-        status:
-          value.status || 0,
-
-        ok:
-          Boolean(value.ok),
-
-        statusText:
-          safeText(value.statusText, ""),
-
-        url:
-          redactHttpValue(value.url || ""),
-
-        redirected:
-          Boolean(value.redirected),
-
-        headers:
-          sanitizeHeaders(value.headers),
+        type: "Response",
+        status: value.status || 0,
+        ok: Boolean(value.ok),
+        statusText: safeText(value.statusText, ""),
+        url: redactHttpValue(value.url || ""),
+        redirected: Boolean(value.redirected),
+        headers: sanitizeHeaders(value.headers),
       };
     }
   } catch {}
 
   try {
-    if (
-      typeof URL !== "undefined" &&
-      value instanceof URL
-    ) {
+    if (typeof URL !== "undefined" && value instanceof URL) {
       return redactHttpValue(value.toString());
     }
   } catch {}
 
   try {
-    if (
-      typeof URLSearchParams !== "undefined" &&
-      value instanceof URLSearchParams
-    ) {
+    if (typeof URLSearchParams !== "undefined" && value instanceof URLSearchParams) {
       const output = {};
 
       for (const [paramKey, paramValue] of value.entries()) {
-        output[paramKey] =
-          SENSITIVE_QUERY_NAMES
-            .map((item) => item.toLowerCase())
-            .includes(String(paramKey).toLowerCase())
-            ? "***"
-            : redactHttpValue(paramValue);
+        const sensitive = SENSITIVE_QUERY_NAMES
+          .map((item) => item.toLowerCase())
+          .includes(String(paramKey).toLowerCase());
+
+        output[paramKey] = sensitive ? "***" : redactHttpValue(paramValue);
       }
 
       return output;
@@ -1024,81 +691,49 @@ function sanitizeSpecialObject(value, depth, keyHint, seen) {
   } catch {}
 
   try {
-    if (
-      typeof AbortSignal !== "undefined" &&
-      value instanceof AbortSignal
-    ) {
+    if (typeof AbortSignal !== "undefined" && value instanceof AbortSignal) {
       return {
-        type:
-          "AbortSignal",
-
-        aborted:
-          Boolean(value.aborted),
-
-        reason:
-          value.aborted
-            ? safeText(value.reason, "")
-            : null,
+        type: "AbortSignal",
+        aborted: Boolean(value.aborted),
+        reason: value.aborted ? safeText(value.reason, "") : null,
       };
     }
   } catch {}
 
   try {
-    if (
-      typeof FormData !== "undefined" &&
-      value instanceof FormData
-    ) {
+    if (typeof FormData !== "undefined" && value instanceof FormData) {
       const keys = [];
 
       try {
-        for (const key of value.keys()) {
-          keys.push(key);
-        }
+        for (const key of value.keys()) keys.push(key);
       } catch {}
 
       return {
-        type:
-          "FormData",
-
-        keys:
-          keys.slice(0, 30),
+        type: "FormData",
+        keys: keys.slice(0, 30),
       };
     }
   } catch {}
 
   try {
-    if (
-      typeof Blob !== "undefined" &&
-      value instanceof Blob
-    ) {
+    if (typeof Blob !== "undefined" && value instanceof Blob) {
       return {
-        type:
-          value.constructor?.name || "Blob",
-
-        mime:
-          safeText(value.type, ""),
-
-        size:
-          safeNumber(value.size, 0),
+        type: value.constructor?.name || "Blob",
+        mime: safeText(value.type, ""),
+        size: safeNumber(value.size, 0),
       };
     }
   } catch {}
 
   if (isArrayBufferLike(value)) {
     return {
-      type:
-        value.constructor?.name || "ArrayBuffer",
-
-      byteLength:
-        safeNumber(value.byteLength, 0),
+      type: value.constructor?.name || "ArrayBuffer",
+      byteLength: safeNumber(value.byteLength, 0),
     };
   }
 
   try {
-    if (
-      typeof ReadableStream !== "undefined" &&
-      value instanceof ReadableStream
-    ) {
+    if (typeof ReadableStream !== "undefined" && value instanceof ReadableStream) {
       return "[ReadableStream]";
     }
   } catch {}
@@ -1111,114 +746,63 @@ function sanitizeSpecialObject(value, depth, keyHint, seen) {
     }
   }
 
-  if (value instanceof RegExp) {
-    return String(value);
-  }
+  if (value instanceof RegExp) return String(value);
 
   if (value instanceof Error) {
     const output = {
-      name:
-        safeText(value.name, "Error"),
-
-      message:
-        redactHttpValue(value.message || ""),
-
-      code:
-        value.code || null,
-
-      status:
-        value.status ||
-        value.statusCode ||
-        value.response?.status ||
-        null,
-
-      statusText:
-        value.statusText ||
-        value.response?.statusText ||
-        null,
-
-      timeout:
-        Boolean(value.timeout),
-
-      aborted:
-        Boolean(value.aborted),
-
-      stack:
-        value.stack ? "[stack]" : null,
+      name: safeText(value.name, "Error"),
+      message: redactHttpValue(value.message || ""),
+      code: value.code || null,
+      status: value.status || value.statusCode || value.response?.status || null,
+      statusText: value.statusText || value.response?.statusText || null,
+      timeout: Boolean(value.timeout),
+      aborted: Boolean(value.aborted),
+      stack: value.stack ? "[stack]" : null,
     };
 
     if (value.data !== undefined) {
-      output.data =
-        sanitizeDataInternal(
-          value.data,
-          depth + 1,
-          "data",
-          seen
-        );
+      output.data = sanitizeDataInternal(value.data, depth + 1, "data", seen);
     }
 
     if (value.body !== undefined) {
-      output.body =
-        sanitizeDataInternal(
-          value.body,
-          depth + 1,
-          "body",
-          seen
-        );
+      output.body = sanitizeDataInternal(value.body, depth + 1, "body", seen);
     }
 
     if (value.headers !== undefined) {
-      output.headers =
-        sanitizeHeaders(value.headers);
+      output.headers = sanitizeHeaders(value.headers);
     }
 
     if (value.url) {
-      output.url =
-        redactHttpValue(value.url);
+      output.url = redactHttpValue(value.url);
     }
 
     if (value.requestId) {
-      output.requestId =
-        safeText(value.requestId, "");
+      output.requestId = safeText(value.requestId, "");
     }
 
     return output;
   }
 
-  const tag =
-    getObjectTag(value);
-
-  if (
-    tag === "[object Promise]" ||
-    isFn(value.then)
-  ) {
-    return "[Promise]";
-  }
+  try {
+    if (Object.prototype.toString.call(value) === "[object Promise]" || isFn(value.then)) {
+      return "[Promise]";
+    }
+  } catch {}
 
   return null;
 }
 
 function sanitizeDataInternal(value, depth = 0, keyHint = "", seen = new WeakSet()) {
-  const cleanKeyHint =
-    safeText(keyHint, "");
+  const cleanKeyHint = safeText(keyHint, "");
 
-  if (
-    cleanKeyHint &&
-    isSensitiveObjectKey(cleanKeyHint, "")
-  ) {
-    return value
-      ? "***"
-      : null;
+  if (cleanKeyHint && isSensitiveObjectKey(cleanKeyHint, "")) {
+    return value ? "***" : null;
   }
 
-  if (depth > MAX_SANITIZE_DEPTH) {
-    return "[MaxDepth]";
-  }
+  if (depth > MAX_SANITIZE_DEPTH) return "[MaxDepth]";
 
   if (typeof value === "string") {
-    return previewString(
-      redactHttpValue(value)
-    );
+    return previewString(redactHttpValue(value));
   }
 
   if (
@@ -1230,53 +814,27 @@ function sanitizeDataInternal(value, depth = 0, keyHint = "", seen = new WeakSet
     return value;
   }
 
-  if (typeof value === "bigint") {
-    return String(value);
-  }
-
-  if (typeof value === "function") {
-    return "[Function]";
-  }
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return "[Function]";
 
   if (isAnyObject(value)) {
     try {
-      if (seen.has(value)) {
-        return "[Circular]";
-      }
-
+      if (seen.has(value)) return "[Circular]";
       seen.add(value);
     } catch {}
   }
 
-  const special =
-    sanitizeSpecialObject(
-      value,
-      depth,
-      cleanKeyHint,
-      seen
-    );
+  const special = sanitizeSpecialObject(value, depth, cleanKeyHint, seen);
 
-  if (special !== null) {
-    return special;
-  }
+  if (special !== null) return special;
 
   if (Array.isArray(value)) {
-    const output =
-      value
-        .slice(0, MAX_SANITIZE_ARRAY_ITEMS)
-        .map((item) =>
-          sanitizeDataInternal(
-            item,
-            depth + 1,
-            cleanKeyHint,
-            seen
-          )
-        );
+    const output = value
+      .slice(0, MAX_SANITIZE_ARRAY_ITEMS)
+      .map((item) => sanitizeDataInternal(item, depth + 1, cleanKeyHint, seen));
 
     if (value.length > MAX_SANITIZE_ARRAY_ITEMS) {
-      output.push(
-        `[truncated:${value.length - MAX_SANITIZE_ARRAY_ITEMS}]`
-      );
+      output.push(`[truncated:${value.length - MAX_SANITIZE_ARRAY_ITEMS}]`);
     }
 
     return output;
@@ -1284,87 +842,50 @@ function sanitizeDataInternal(value, depth = 0, keyHint = "", seen = new WeakSet
 
   if (isAnyObject(value)) {
     const output = {};
-
-    const entries =
-      Object.entries(value)
-        .slice(0, MAX_SANITIZE_OBJECT_KEYS);
+    const entries = Object.entries(value).slice(0, MAX_SANITIZE_OBJECT_KEYS);
 
     for (const [key, item] of entries) {
       if (isSensitiveObjectKey(key, cleanKeyHint)) {
-        output[key] =
-          item ? "***" : item;
-
+        output[key] = item ? "***" : item;
         continue;
       }
 
       if (HEAVY_OBJECT_KEY_RE.test(key)) {
-        output[key] =
-          item
-            ? `[${key}]`
-            : item;
-
+        output[key] = item ? `[${key}]` : item;
         continue;
       }
 
-      output[key] =
-        sanitizeDataInternal(
-          item,
-          depth + 1,
-          key,
-          seen
-        );
+      output[key] = sanitizeDataInternal(item, depth + 1, key, seen);
     }
 
-    const totalKeys =
-      Object.keys(value).length;
+    const totalKeys = Object.keys(value).length;
 
     if (totalKeys > MAX_SANITIZE_OBJECT_KEYS) {
-      output.__truncatedKeys =
-        totalKeys - MAX_SANITIZE_OBJECT_KEYS;
+      output.__truncatedKeys = totalKeys - MAX_SANITIZE_OBJECT_KEYS;
     }
 
     return output;
   }
 
-  return previewString(
-    redactHttpValue(String(value))
-  );
+  return previewString(redactHttpValue(String(value)));
 }
 
 export function sanitizeData(value, depth = 0, keyHint = "", seenArg = null) {
-  let finalKeyHint =
-    keyHint;
-
-  let seen =
-    seenArg;
+  let finalKeyHint = keyHint;
+  let seen = seenArg;
 
   try {
-    if (
-      typeof WeakSet !== "undefined" &&
-      keyHint instanceof WeakSet
-    ) {
-      seen =
-        keyHint;
-
-      finalKeyHint =
-        "";
+    if (typeof WeakSet !== "undefined" && keyHint instanceof WeakSet) {
+      seen = keyHint;
+      finalKeyHint = "";
     }
   } catch {}
 
-  if (
-    !seen ||
-    typeof seen !== "object"
-  ) {
-    seen =
-      new WeakSet();
+  if (!seen || typeof seen !== "object") {
+    seen = new WeakSet();
   }
 
-  return sanitizeDataInternal(
-    value,
-    depth,
-    finalKeyHint,
-    seen
-  );
+  return sanitizeDataInternal(value, depth, finalKeyHint, seen);
 }
 
 /* =========================================================
@@ -1372,9 +893,7 @@ export function sanitizeData(value, depth = 0, keyHint = "", seenArg = null) {
 ========================================================= */
 
 export function headersToPlainObject(headers = {}) {
-  if (!headers) {
-    return {};
-  }
+  if (!headers) return {};
 
   if (typeof Headers !== "undefined") {
     try {
@@ -1382,8 +901,7 @@ export function headersToPlainObject(headers = {}) {
         const output = {};
 
         headers.forEach((value, key) => {
-          output[key] =
-            value;
+          output[key] = value;
         });
 
         return output;
@@ -1392,15 +910,11 @@ export function headersToPlainObject(headers = {}) {
   }
 
   try {
-    if (
-      headers &&
-      isFn(headers.forEach)
-    ) {
+    if (headers && isFn(headers.forEach)) {
       const output = {};
 
       headers.forEach((value, key) => {
-        output[key] =
-          value;
+        output[key] = value;
       });
 
       return output;
@@ -1411,73 +925,44 @@ export function headersToPlainObject(headers = {}) {
     const output = {};
 
     for (const item of headers) {
-      if (
-        Array.isArray(item) &&
-        item.length >= 2
-      ) {
-        const key =
-          safeText(item[0], "");
-
-        if (key) {
-          output[key] =
-            item[1];
-          }
+      if (Array.isArray(item) && item.length >= 2) {
+        const key = safeText(item[0], "");
+        if (key) output[key] = item[1];
       }
     }
 
     return output;
   }
 
-  if (isObject(headers)) {
-    return {
-      ...headers,
-    };
-  }
+  if (isObject(headers)) return { ...headers };
 
   return {};
 }
 
 export function normalizeHeaders(headers = {}) {
-  const source =
-    headersToPlainObject(headers);
-
+  const source = headersToPlainObject(headers);
   const output = {};
 
   for (const [key, value] of Object.entries(source)) {
-    const cleanKey =
-      safeText(key, "");
+    const cleanKey = safeText(key, "");
 
-    if (!cleanKey) {
-      continue;
-    }
+    if (!cleanKey) continue;
+    if (value === undefined || value === null || value === "") continue;
 
-    if (
-      value === undefined ||
-      value === null ||
-      value === ""
-    ) {
-      continue;
-    }
+    const existingKey = Object.keys(output).find(
+      (candidate) => safeLower(candidate, "") === safeLower(cleanKey, "")
+    );
 
-    const existingKey =
-      Object.keys(output).find((candidate) =>
-        safeLower(candidate, "") === safeLower(cleanKey, "")
-      );
-
-    output[existingKey || cleanKey] =
-      value;
+    output[existingKey || cleanKey] = value;
   }
 
   return output;
 }
 
 export function getHeaderValue(headers = {}, name = "") {
-  const target =
-    safeLower(name, "");
+  const target = safeLower(name, "");
 
-  if (!target) {
-    return "";
-  }
+  if (!target) return "";
 
   if (typeof Headers !== "undefined") {
     try {
@@ -1487,63 +972,38 @@ export function getHeaderValue(headers = {}, name = "") {
     } catch {}
   }
 
-  const plain =
-    headersToPlainObject(headers);
+  const plain = headersToPlainObject(headers);
+  const key = Object.keys(plain).find((candidate) => safeLower(candidate, "") === target);
 
-  const key =
-    Object.keys(plain).find((candidate) =>
-      safeLower(candidate, "") === target
-    );
-
-  return key
-    ? safeText(plain[key], "")
-    : "";
+  return key ? safeText(plain[key], "") : "";
 }
 
 export function hasHeader(headers = {}, name = "") {
-  return getHeaderValue(
-    headers,
-    name
-  ) !== "";
+  return getHeaderValue(headers, name) !== "";
 }
 
 export function setHeader(headers = {}, name = "", value = "") {
-  const output =
-    normalizeHeaders(headers);
+  const output = normalizeHeaders(headers);
+  const cleanName = safeText(name, "");
 
-  const cleanName =
-    safeText(name, "");
-
-  if (
-    !cleanName ||
-    value === undefined ||
-    value === null ||
-    value === ""
-  ) {
+  if (!cleanName || value === undefined || value === null || value === "") {
     return output;
   }
 
-  const existingKey =
-    Object.keys(output).find((candidate) =>
-      safeLower(candidate, "") === safeLower(cleanName, "")
-    );
+  const existingKey = Object.keys(output).find(
+    (candidate) => safeLower(candidate, "") === safeLower(cleanName, "")
+  );
 
-  output[existingKey || cleanName] =
-    value;
+  output[existingKey || cleanName] = value;
 
   return output;
 }
 
 export function deleteHeader(headers = {}, name = "") {
-  const output =
-    normalizeHeaders(headers);
+  const output = normalizeHeaders(headers);
+  const target = safeLower(name, "");
 
-  const target =
-    safeLower(name, "");
-
-  if (!target) {
-    return output;
-  }
+  if (!target) return output;
 
   for (const key of Object.keys(output)) {
     if (safeLower(key, "") === target) {
@@ -1555,127 +1015,84 @@ export function deleteHeader(headers = {}, name = "") {
 }
 
 export function sanitizeHeaders(headers = {}) {
-  const source =
-    headersToPlainObject(headers);
-
+  const source = headersToPlainObject(headers);
   const output = {};
 
   for (const [key, value] of Object.entries(source)) {
-    const lower =
-      safeLower(key, "");
+    const lower = safeLower(key, "");
+    const sensitive = SENSITIVE_HEADER_PARTS.some((part) => lower.includes(part));
 
-    const sensitive =
-      SENSITIVE_HEADER_PARTS.some((part) =>
-        lower.includes(part)
-      );
-
-    output[key] =
-      sensitive && value
-        ? "***"
-        : sanitizeData(value, 0, key);
+    output[key] = sensitive && value
+      ? "***"
+      : sanitizeData(value, 0, key);
   }
 
   return output;
 }
 
 /* =========================================================
-   URL / ENDPOINTS
+   URL / ENDPOINT POLICY
 ========================================================= */
 
 export function normalizeEndpointPath(path = "") {
-  const raw =
-    safeText(path, "");
+  const raw = safeText(path, "");
 
-  if (!raw) {
-    return "";
-  }
+  if (!raw) return "";
 
   try {
-    const parsed =
-      new URL(
-        raw,
-        getBaseOrigin()
-      );
+    const parsed = new URL(raw, getBaseOrigin());
 
-    return safeLower(
-      parsed.pathname || raw
-    )
+    return safeLower(parsed.pathname || raw)
       .replace(/\\/g, "/")
       .replace(/\/{2,}/g, "/")
-      .replace(/\/+$/g, "") ||
-      "/";
+      .replace(/\/+$/g, "") || "/";
   } catch {}
 
-  return safeLower(
-    raw
-      .split("?")[0]
-      .split("#")[0] ||
-      raw
-  )
+  return safeLower(raw.split("?")[0].split("#")[0] || raw)
     .replace(/\\/g, "/")
     .replace(/\/{2,}/g, "/")
-    .replace(/\/+$/g, "") ||
-    "/";
+    .replace(/\/+$/g, "") || "/";
 }
 
 export function stripApiPrefix(path = "") {
-  const normalized =
-    normalizeEndpointPath(path);
+  const normalized = normalizeEndpointPath(path);
 
-  if (normalized.startsWith("/api/")) {
-    return normalized.slice(4) || "/";
-  }
-
-  if (normalized === "/api") {
-    return "/";
-  }
+  if (normalized === "/api") return "/";
+  if (normalized.startsWith("/api/")) return normalized.slice(4) || "/";
 
   return normalized;
 }
 
 export function getComparableEndpointPaths(path = "") {
-  const normalized =
-    normalizeEndpointPath(path);
+  const normalized = normalizeEndpointPath(path);
+  const noApi = stripApiPrefix(normalized);
 
-  const noApi =
-    stripApiPrefix(normalized);
-
-  return Array.from(
-    new Set([
-      normalized,
-      noApi,
-    ].filter(Boolean))
-  );
+  return Array.from(new Set([normalized, noApi].filter(Boolean)));
 }
 
 export function endpointMatches(path = "", markers = []) {
-  const paths =
-    getComparableEndpointPaths(path);
+  const paths = getComparableEndpointPaths(path);
 
   return safeArray(markers).some((marker) => {
-    const cleanMarker =
-      normalizeEndpointPath(marker);
+    const cleanMarker = normalizeEndpointPath(marker);
 
-    if (!cleanMarker) {
-      return false;
-    }
+    if (!cleanMarker) return false;
 
-    return paths.some((candidate) =>
+    return paths.some((candidate) => (
       candidate === cleanMarker ||
       candidate.startsWith(`${cleanMarker}/`)
-    );
+    ));
   });
 }
 
 export function isAuthMeEndpoint(path = "") {
-  const paths =
-    getComparableEndpointPaths(path);
+  const paths = getComparableEndpointPaths(path);
 
   return paths.some((candidate) =>
-    AUTH_ME_ENDPOINTS.some((endpoint) =>
+    AUTH_ME_ENDPOINTS.some((endpoint) => (
       candidate === endpoint ||
       candidate.startsWith(`${endpoint}/`)
-    ) ||
+    )) ||
     candidate === "/auth/me" ||
     candidate.startsWith("/auth/me/")
   );
@@ -1684,48 +1101,24 @@ export function isAuthMeEndpoint(path = "") {
 export function isAuthEndpoint(path = "") {
   return Boolean(
     isAuthMeEndpoint(path) ||
-      endpointMatches(
-        path,
-        AUTH_ENDPOINT_MARKERS
-      )
+      endpointMatches(path, AUTH_ENDPOINT_MARKERS)
   );
 }
 
 export function isPublicAuthEndpoint(path = "") {
-  if (isAuthMeEndpoint(path)) {
-    return false;
-  }
+  if (isAuthMeEndpoint(path)) return false;
 
-  return endpointMatches(
-    path,
-    PUBLIC_AUTH_ENDPOINT_MARKERS
-  );
+  return endpointMatches(path, PUBLIC_AUTH_ENDPOINT_MARKERS);
 }
 
 export function isAuthRefreshControlEndpoint(path = "") {
-  if (isAuthMeEndpoint(path)) {
-    return false;
-  }
+  if (isAuthMeEndpoint(path)) return false;
 
-  return endpointMatches(
-    path,
-    AUTH_CONTROL_SKIP_REFRESH_MARKERS
-  );
+  return endpointMatches(path, AUTH_CONTROL_SKIP_REFRESH_MARKERS);
 }
 
 export function isTechnicalPublicRoute(path = "") {
-  const paths =
-    getComparableEndpointPaths(path);
-
-  return TECHNICAL_PUBLIC_ROUTES.some((route) => {
-    const clean =
-      normalizeEndpointPath(route);
-
-    return paths.some((candidate) =>
-      candidate === clean ||
-      candidate.startsWith(`${clean}/`)
-    );
-  });
+  return endpointMatches(path, TECHNICAL_PUBLIC_ROUTES);
 }
 
 export function isTechnicalPublicSpaEndpoint(path = "") {
@@ -1733,13 +1126,11 @@ export function isTechnicalPublicSpaEndpoint(path = "") {
 }
 
 export function isPublicEndpoint(path = "") {
-  if (isAuthMeEndpoint(path)) {
-    return false;
-  }
+  if (isAuthMeEndpoint(path)) return false;
 
-  return (
+  return Boolean(
     isPublicAuthEndpoint(path) ||
-    isTechnicalPublicRoute(path)
+      isTechnicalPublicRoute(path)
   );
 }
 
@@ -1748,8 +1139,7 @@ export function isPublicEndpoint(path = "") {
 ========================================================= */
 
 export function shouldToggleGlobalLoader(requestConfig = {}) {
-  const cfg =
-    safeObject(requestConfig);
+  const cfg = safeObject(requestConfig);
 
   if (cfg.useLoader === false) return false;
   if (cfg.loader === false) return false;
@@ -1762,213 +1152,83 @@ export function shouldToggleGlobalLoader(requestConfig = {}) {
 }
 
 export function sanitizeRequestConfig(requestConfig = {}) {
-  const cfg =
-    safeObject(requestConfig);
-
-  const path =
-    firstNonEmpty(
-      cfg.path,
-      cfg.url,
-      cfg.endpoint,
-      cfg.href,
-      cfg.resource
-    );
+  const cfg = safeObject(requestConfig);
+  const path = firstNonEmpty(cfg.path, cfg.url, cfg.endpoint, cfg.href, cfg.resource);
 
   return {
-    requestId:
-      cfg.requestId || null,
+    requestId: cfg.requestId || null,
+    method: normalizeMethod(cfg.method || DEFAULT_METHOD),
+    path: redactHttpValue(path || ""),
+    url: redactHttpValue(cfg.url || ""),
+    apiBase: redactHttpValue(cfg.apiBase || ""),
+    headers: sanitizeHeaders(cfg.headers || {}),
+    query: sanitizeData(cfg.query ?? null, 0, "query"),
+    params: sanitizeData(cfg.params ?? null, 0, "params"),
+    body: sanitizeData(cfg.body ?? null, 0, "body"),
 
-    method:
-      normalizeMethod(cfg.method || DEFAULT_METHOD),
+    auth: cfg.auth !== false,
+    public: cfg.public === true,
+    skipAuth: cfg.skipAuth === true,
+    noAuthHeader: cfg.noAuthHeader === true,
 
-    path:
-      redactHttpValue(path || ""),
+    credentials: safeText(cfg.credentials, ""),
+    useLoader: shouldToggleGlobalLoader(cfg),
+    silent: cfg.silent === true,
+    background: cfg.background === true,
+    responseType: safeText(cfg.responseType, "auto"),
 
-    url:
-      redactHttpValue(cfg.url || ""),
+    timeout: cfg.timeout ?? null,
+    raw: cfg.raw === true,
+    rawBody: cfg.rawBody === true,
+    upload: cfg.upload === true,
+    download: cfg.download === true,
 
-    apiBase:
-      redactHttpValue(cfg.apiBase || ""),
+    retries: cfg.retries ?? null,
+    retry: cfg.retry !== false,
+    retryUnsafe: cfg.retryUnsafe === true,
+    retryUnsafeMethods: cfg.retryUnsafeMethods === true,
+    retry401: cfg.retry401 === true,
+    retryTimeout: cfg.retryTimeout === true,
+    retryPublicAuth: cfg.retryPublicAuth === true,
+    retryStrategy: safeText(cfg.retryStrategy, ""),
+    retryDelay: cfg.retryDelay ?? null,
+    retryJitter: cfg.retryJitter ?? null,
+    retryMaxDelay: cfg.retryMaxDelay ?? null,
+    retryOnStatuses: Array.isArray(cfg.retryOnStatuses)
+      ? cfg.retryOnStatuses.slice(0, 20)
+      : null,
+    retryOnConflict: cfg.retryOnConflict === true,
+    retryOnLocked: cfg.retryOnLocked === true,
+    maxElapsedMs: cfg.maxElapsedMs || 0,
 
-    headers:
-      sanitizeHeaders(cfg.headers || {}),
+    signal: cfg.signal ? "[AbortSignal]" : null,
+    meta: sanitizeData(cfg.meta || null, 0, "meta"),
 
-    query:
-      sanitizeData(cfg.query ?? null, 0, "query"),
+    startedAt: cfg.startedAt || cfg._startedAt || 0,
 
-    params:
-      sanitizeData(cfg.params ?? null, 0, "params"),
+    skipRetry: cfg._skipRetry === true || cfg.skipRetry === true,
+    skipAuthRefresh: cfg._skipAuthRefresh === true || cfg.skipAuthRefresh === true,
+    noAutoRefresh: cfg.noAutoRefresh === true || cfg.autoRefresh === false,
+    autoRefresh: cfg.autoRefresh === false ? false : undefined,
+    noAutoLogout: cfg.noAutoLogout === true || cfg.autoLogout === false,
+    autoLogout: cfg.autoLogout === false ? false : undefined,
 
-    body:
-      sanitizeData(cfg.body ?? null, 0, "body"),
+    authRefreshAttempted: cfg._authRefreshAttempted === true,
+    authRefreshSucceeded: cfg._authRefreshSucceeded === true,
+    authRefreshFailed: cfg._authRefreshFailed === true,
 
-    auth:
-      cfg.auth !== false,
+    emitEvents: cfg.emitEvents !== false,
+    emitFinalEvents: cfg.emitFinalEvents !== false,
+    emitLifecycleEvents: cfg.emitLifecycleEvents === true,
+    emitRuntimeEvents: cfg.emitRuntimeEvents === true,
+    emitAuthRefreshEvents: cfg.emitAuthRefreshEvents === true,
+    emitRequestEngineEvents: cfg.emitRequestEngineEvents === true,
 
-    public:
-      cfg.public === true,
-
-    skipAuth:
-      cfg.skipAuth === true,
-
-    noAuthHeader:
-      cfg.noAuthHeader === true,
-
-    credentials:
-      safeText(cfg.credentials, ""),
-
-    useLoader:
-      shouldToggleGlobalLoader(cfg),
-
-    silent:
-      cfg.silent === true,
-
-    background:
-      cfg.background === true,
-
-    responseType:
-      safeText(cfg.responseType, "auto"),
-
-    timeout:
-      cfg.timeout ?? null,
-
-    raw:
-      cfg.raw === true,
-
-    rawBody:
-      cfg.rawBody === true,
-
-    upload:
-      cfg.upload === true,
-
-    download:
-      cfg.download === true,
-
-    retries:
-      cfg.retries ?? null,
-
-    retry:
-      cfg.retry !== false,
-
-    retryUnsafe:
-      cfg.retryUnsafe === true,
-
-    retryUnsafeMethods:
-      cfg.retryUnsafeMethods === true,
-
-    retry401:
-      cfg.retry401 === true,
-
-    retryTimeout:
-      cfg.retryTimeout === true,
-
-    retryPublicAuth:
-      cfg.retryPublicAuth === true,
-
-    retryStrategy:
-      safeText(cfg.retryStrategy, ""),
-
-    retryDelay:
-      cfg.retryDelay ?? null,
-
-    retryJitter:
-      cfg.retryJitter ?? null,
-
-    retryMaxDelay:
-      cfg.retryMaxDelay ?? null,
-
-    retryOnStatuses:
-      Array.isArray(cfg.retryOnStatuses)
-        ? cfg.retryOnStatuses.slice(0, 20)
-        : null,
-
-    retryOnConflict:
-      cfg.retryOnConflict === true,
-
-    retryOnLocked:
-      cfg.retryOnLocked === true,
-
-    maxElapsedMs:
-      cfg.maxElapsedMs || 0,
-
-    signal:
-      cfg.signal
-        ? "[AbortSignal]"
-        : null,
-
-    meta:
-      sanitizeData(cfg.meta || null, 0, "meta"),
-
-    startedAt:
-      cfg.startedAt || cfg._startedAt || 0,
-
-    skipRetry:
-      cfg._skipRetry === true ||
-      cfg.skipRetry === true,
-
-    skipAuthRefresh:
-      cfg._skipAuthRefresh === true ||
-      cfg.skipAuthRefresh === true,
-
-    noAutoRefresh:
-      cfg.noAutoRefresh === true ||
-      cfg.autoRefresh === false,
-
-    autoRefresh:
-      cfg.autoRefresh === false
-        ? false
-        : undefined,
-
-    noAutoLogout:
-      cfg.noAutoLogout === true ||
-      cfg.autoLogout === false,
-
-    autoLogout:
-      cfg.autoLogout === false
-        ? false
-        : undefined,
-
-    authRefreshAttempted:
-      cfg._authRefreshAttempted === true,
-
-    authRefreshSucceeded:
-      cfg._authRefreshSucceeded === true,
-
-    authRefreshFailed:
-      cfg._authRefreshFailed === true,
-
-    emitEvents:
-      cfg.emitEvents !== false,
-
-    emitFinalEvents:
-      cfg.emitFinalEvents !== false,
-
-    emitLifecycleEvents:
-      cfg.emitLifecycleEvents === true,
-
-    emitRuntimeEvents:
-      cfg.emitRuntimeEvents === true,
-
-    emitAuthRefreshEvents:
-      cfg.emitAuthRefreshEvents === true,
-
-    emitRequestEngineEvents:
-      cfg.emitRequestEngineEvents === true,
-
-    token:
-      cfg.token ? "***" : null,
-
-    accessToken:
-      cfg.accessToken ? "***" : null,
-
-    access_token:
-      cfg.access_token ? "***" : null,
-
-    refreshToken:
-      cfg.refreshToken ? "***" : null,
-
-    refresh_token:
-      cfg.refresh_token ? "***" : null,
+    token: cfg.token ? "***" : null,
+    accessToken: cfg.accessToken ? "***" : null,
+    access_token: cfg.access_token ? "***" : null,
+    refreshToken: cfg.refreshToken ? "***" : null,
+    refresh_token: cfg.refresh_token ? "***" : null,
   };
 }
 
@@ -1977,29 +1237,15 @@ export function sanitizeRequestConfig(requestConfig = {}) {
 ========================================================= */
 
 export function shouldLogRequests(config, AppCore) {
-  return Boolean(
-    config?.logRequests &&
-      (
-        AppCore?.config?.debug ||
-        AppCore?.state?.debug
-      )
-  );
+  return Boolean(config?.logRequests && (AppCore?.config?.debug || AppCore?.state?.debug));
 }
 
 export function shouldLogResponses(config, AppCore) {
-  return Boolean(
-    config?.logResponses &&
-      (
-        AppCore?.config?.debug ||
-        AppCore?.state?.debug
-      )
-  );
+  return Boolean(config?.logResponses && (AppCore?.config?.debug || AppCore?.state?.debug));
 }
 
 export function shouldLogErrors(config) {
-  return Boolean(
-    config?.logErrors
-  );
+  return Boolean(config?.logErrors);
 }
 
 /* =========================================================
@@ -2020,9 +1266,7 @@ export function hasAbortSignal(value) {
 }
 
 export function withSignal(controllerOrSignal) {
-  if (!controllerOrSignal) {
-    return null;
-  }
+  if (!controllerOrSignal) return null;
 
   if (hasAbortController()) {
     try {
@@ -2032,45 +1276,29 @@ export function withSignal(controllerOrSignal) {
     } catch {}
   }
 
-  if (hasAbortSignal(controllerOrSignal)) {
-    return controllerOrSignal;
-  }
-
-  if (hasAbortSignal(controllerOrSignal?.signal)) {
-    return controllerOrSignal.signal;
-  }
+  if (hasAbortSignal(controllerOrSignal)) return controllerOrSignal;
+  if (hasAbortSignal(controllerOrSignal?.signal)) return controllerOrSignal.signal;
 
   return null;
 }
 
 export function createAbortControllerSafe() {
   try {
-    if (hasAbortController()) {
-      return new AbortController();
-    }
+    if (hasAbortController()) return new AbortController();
   } catch {}
 
   return null;
 }
 
 export function createTimeoutSignal(ms = 0) {
-  const timeoutMs =
-    safeNumber(ms, 0);
+  const timeoutMs = safeNumber(ms, 0);
+  const controller = createAbortControllerSafe();
 
-  const controller =
-    createAbortControllerSafe();
-
-  const timeoutState = {
+  const state = {
     controller,
-
-    signal:
-      controller?.signal || null,
-
-    timeoutId:
-      null,
-
-    fired:
-      false,
+    signal: controller?.signal || null,
+    timeoutId: null,
+    fired: false,
 
     clear() {
       if (this.timeoutId) {
@@ -2079,79 +1307,52 @@ export function createTimeoutSignal(ms = 0) {
         } catch {}
       }
 
-      this.timeoutId =
-        null;
+      this.timeoutId = null;
     },
   };
 
-  if (!controller) {
-    return timeoutState;
-  }
-
-  if (timeoutMs <= 0) {
-    return timeoutState;
-  }
+  if (!controller || timeoutMs <= 0) return state;
 
   try {
-    timeoutState.timeoutId =
-      setTimeout(() => {
-        timeoutState.fired =
-          true;
+    state.timeoutId = setTimeout(() => {
+      state.fired = true;
 
-        const timeoutError =
-          new Error("Request timeout");
+      const timeoutError = new Error("Request timeout");
+      timeoutError.name = "TimeoutError";
+      timeoutError.code = "REQUEST_TIMEOUT";
+      timeoutError.timeout = true;
 
-        timeoutError.name =
-          "TimeoutError";
-
-        timeoutError.code =
-          "REQUEST_TIMEOUT";
-
-        timeoutError.timeout =
-          true;
-
+      try {
+        controller.abort(timeoutError);
+      } catch {
         try {
-          controller.abort(timeoutError);
-        } catch {
-          try {
-            controller.abort();
-          } catch {}
-        }
-      }, timeoutMs);
+          controller.abort();
+        } catch {}
+      }
+    }, timeoutMs);
   } catch {}
 
-  return timeoutState;
+  return state;
 }
 
 export function mergeSignals(signals = []) {
-  const validSignals =
-    safeArray(signals)
-      .map(withSignal)
-      .filter(Boolean);
+  const validSignals = safeArray(signals)
+    .map(withSignal)
+    .filter(Boolean);
 
-  if (!validSignals.length) {
-    return null;
-  }
+  if (!validSignals.length) return null;
 
   try {
-    if (
-      typeof AbortSignal !== "undefined" &&
-      isFn(AbortSignal.any)
-    ) {
+    if (typeof AbortSignal !== "undefined" && isFn(AbortSignal.any)) {
       return AbortSignal.any(validSignals);
     }
   } catch {}
 
-  if (validSignals.length === 1) {
-    return validSignals[0];
-  }
+  if (validSignals.length === 1) return validSignals[0];
 
-  const controller =
-    createAbortControllerSafe();
+  const controller = createAbortControllerSafe();
 
-  if (!controller) {
-    return validSignals[0] || null;
-  }
+  if (!controller) return validSignals[0] || null;
 
   const cleanups = [];
 
@@ -2164,14 +1365,10 @@ export function mergeSignals(signals = []) {
   }
 
   function abortFrom(signal) {
-    if (controller.signal.aborted) {
-      return;
-    }
+    if (controller.signal.aborted) return;
 
     try {
-      controller.abort(
-        signal?.reason || "aborted"
-      );
+      controller.abort(signal?.reason || "aborted");
     } catch {
       try {
         controller.abort();
@@ -2187,26 +1384,14 @@ export function mergeSignals(signals = []) {
       break;
     }
 
-    const onAbort = () => {
-      abortFrom(signal);
-    };
+    const onAbort = () => abortFrom(signal);
 
     try {
-      signal.addEventListener(
-        "abort",
-        onAbort,
-        {
-          once:
-            true,
-        }
-      );
+      signal.addEventListener("abort", onAbort, { once: true });
 
       cleanups.push(() => {
         try {
-          signal.removeEventListener(
-            "abort",
-            onAbort
-          );
+          signal.removeEventListener("abort", onAbort);
         } catch {}
       });
     } catch {}
@@ -2216,18 +1401,12 @@ export function mergeSignals(signals = []) {
 }
 
 export function isAbortError(error) {
-  const name =
-    safeText(error?.name || "");
-
-  const message =
-    safeLower(error?.message || "");
-
-  const code =
-    safeLower(error?.code || "");
+  const name = safeLower(error?.name || "");
+  const message = safeLower(error?.message || "");
+  const code = safeLower(error?.code || "");
 
   return (
-    name === "AbortError" ||
-    safeLower(name) === "aborterror" ||
+    name === "aborterror" ||
     code === "abort_err" ||
     code === "20" ||
     error?.aborted === true ||
@@ -2237,17 +1416,10 @@ export function isAbortError(error) {
 }
 
 export function isTimeoutError(error) {
-  const name =
-    safeLower(error?.name || "");
-
-  const message =
-    safeLower(error?.message || "");
-
-  const reason =
-    safeLower(error?.reason || "");
-
-  const code =
-    safeLower(error?.code || "");
+  const name = safeLower(error?.name || "");
+  const message = safeLower(error?.message || "");
+  const reason = safeLower(error?.reason || "");
+  const code = safeLower(error?.code || "");
 
   return (
     error?.timeout === true ||
@@ -2264,127 +1436,58 @@ export function isTimeoutError(error) {
 ========================================================= */
 
 export function isIdempotentMethod(method = "GET") {
-  return IDEMPOTENT_METHODS.includes(
-    safeText(method, "GET")
-      .toUpperCase()
-  );
+  return IDEMPOTENT_METHODS.includes(safeText(method, "GET").toUpperCase());
 }
 
 export function isRetryableStatus(status = 0, options = {}) {
-  const numericStatus =
-    safeNumber(status, 0);
+  const numericStatus = safeNumber(status, 0);
 
-  if (!numericStatus) {
-    return false;
-  }
+  if (!numericStatus) return false;
 
-  if (
-    numericStatus === 401 &&
-    options.retry401 !== true
-  ) {
-    return false;
-  }
+  if (numericStatus === 401 && options.retry401 !== true) return false;
+  if (numericStatus === 409 && options.retryOnConflict === true) return true;
+  if (numericStatus === 423 && options.retryOnLocked === true) return true;
 
-  if (
-    numericStatus === 409 &&
-    options.retryOnConflict === true
-  ) {
-    return true;
-  }
-
-  if (
-    numericStatus === 423 &&
-    options.retryOnLocked === true
-  ) {
-    return true;
-  }
-
-  return DEFAULT_RETRYABLE_STATUSES.includes(numericStatus) ||
-    (
-      numericStatus >= 500 &&
-      numericStatus <= 599
-    );
-}
-
-export function isRetryableError(error, options = {}) {
-  if (!error) {
-    return false;
-  }
-
-  const timeout =
-    isTimeoutError(error);
-
-  if (
-    !timeout &&
-    isAbortError(error)
-  ) {
-    return false;
-  }
-
-  if (timeout) {
-    return options.retryTimeout === true;
-  }
-
-  const status =
-    safeNumber(
-      error?.status ??
-        error?.response?.status,
-      0
-    );
-
-  if (!status) {
-    return true;
-  }
-
-  return isRetryableStatus(
-    status,
-    options
+  return (
+    DEFAULT_RETRYABLE_STATUSES.includes(numericStatus) ||
+    (numericStatus >= 500 && numericStatus <= 599)
   );
 }
 
+export function isRetryableError(error, options = {}) {
+  if (!error) return false;
+
+  const timeout = isTimeoutError(error);
+
+  if (!timeout && isAbortError(error)) return false;
+  if (timeout) return options.retryTimeout === true;
+
+  const status = safeNumber(error?.status ?? error?.response?.status, 0);
+
+  if (!status) return true;
+
+  return isRetryableStatus(status, options);
+}
+
 export function matchesStatusRule(status, retryOnStatuses) {
-  if (!Array.isArray(retryOnStatuses)) {
-    return null;
-  }
+  if (!Array.isArray(retryOnStatuses)) return null;
 
-  const numericStatus =
-    Number(status);
+  const numericStatus = Number(status);
 
-  if (!Number.isFinite(numericStatus)) {
-    return false;
-  }
+  if (!Number.isFinite(numericStatus)) return false;
 
   return retryOnStatuses.some((candidate) => {
-    if (typeof candidate === "number") {
-      return candidate === numericStatus;
-    }
+    if (typeof candidate === "number") return candidate === numericStatus;
 
-    const rule =
-      safeLower(candidate, "");
+    const rule = safeLower(candidate, "");
 
-    if (!rule) {
-      return false;
-    }
-
-    if (rule === "5xx") {
-      return numericStatus >= 500 &&
-        numericStatus <= 599;
-    }
-
-    if (rule === "4xx") {
-      return numericStatus >= 400 &&
-        numericStatus <= 499;
-    }
+    if (!rule) return false;
+    if (rule === "5xx") return numericStatus >= 500 && numericStatus <= 599;
+    if (rule === "4xx") return numericStatus >= 400 && numericStatus <= 499;
 
     if (rule.endsWith("xx")) {
-      const group =
-        Number(rule[0]);
-
-      return (
-        Number.isFinite(group) &&
-        numericStatus >= group * 100 &&
-        numericStatus <= group * 100 + 99
-      );
+      const group = Number(rule[0]);
+      return Number.isFinite(group) && numericStatus >= group * 100 && numericStatus <= group * 100 + 99;
     }
 
     return Number(rule) === numericStatus;
@@ -2392,31 +1495,20 @@ export function matchesStatusRule(status, retryOnStatuses) {
 }
 
 export function parseRetryAfterMs(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "");
 
-  if (!raw) {
-    return 0;
-  }
+  if (!raw) return 0;
 
-  const seconds =
-    Number(raw);
+  const seconds = Number(raw);
 
   if (Number.isFinite(seconds)) {
-    return Math.max(
-      0,
-      seconds * 1000
-    );
+    return Math.max(0, seconds * 1000);
   }
 
-  const dateMs =
-    Date.parse(raw);
+  const dateMs = Date.parse(raw);
 
   if (Number.isFinite(dateMs)) {
-    return Math.max(
-      0,
-      dateMs - nowMs()
-    );
+    return Math.max(0, dateMs - nowMs());
   }
 
   return 0;
@@ -2428,109 +1520,51 @@ export function buildRetryDelay(config, requestConfig = {}, attempt = 0, error =
     ...safeObject(config),
   };
 
-  const req =
-    safeObject(requestConfig);
+  const req = safeObject(requestConfig);
 
   const retryAfter =
     getHeaderValue(error?.headers, "retry-after") ||
     getHeaderValue(error?.response?.headers, "retry-after");
 
-  const retryAfterMs =
-    parseRetryAfterMs(retryAfter);
+  const retryAfterMs = parseRetryAfterMs(retryAfter);
 
-  const maxDelay =
-    Math.max(
-      0,
-      safeNumber(
-        req.retryMaxDelay ??
-          cfg.retryMaxDelay,
-        HTTP_CONFIG.retryMaxDelay
-      )
-    );
+  const maxDelay = Math.max(
+    0,
+    safeNumber(req.retryMaxDelay ?? cfg.retryMaxDelay, HTTP_CONFIG.retryMaxDelay)
+  );
 
   if (retryAfterMs > 0) {
-    return maxDelay > 0
-      ? Math.min(maxDelay, retryAfterMs)
-      : retryAfterMs;
+    return maxDelay > 0 ? Math.min(maxDelay, retryAfterMs) : retryAfterMs;
   }
 
-  const strategy =
-    safeLower(
-      req.retryStrategy ||
-        cfg.retryStrategy ||
-        HTTP_CONFIG.retryStrategy,
-      HTTP_CONFIG.retryStrategy
-    );
+  const strategy = safeLower(req.retryStrategy || cfg.retryStrategy, HTTP_CONFIG.retryStrategy);
+  const baseDelay = Math.max(0, safeNumber(req.retryDelay ?? cfg.retryDelay, HTTP_CONFIG.retryDelay));
+  const jitter = Math.max(0, safeNumber(req.retryJitter ?? cfg.retryJitter, HTTP_CONFIG.retryJitter));
+  const safeAttempt = Math.max(0, safeNumber(attempt, 0));
+  const randomJitter = jitter > 0 ? Math.floor(Math.random() * jitter) : 0;
 
-  const baseDelay =
-    Math.max(
-      0,
-      safeNumber(
-        req.retryDelay ??
-          cfg.retryDelay,
-        HTTP_CONFIG.retryDelay
-      )
-    );
-
-  const jitter =
-    Math.max(
-      0,
-      safeNumber(
-        req.retryJitter ??
-          cfg.retryJitter,
-        HTTP_CONFIG.retryJitter
-      )
-    );
-
-  const safeAttempt =
-    Math.max(
-      0,
-      safeNumber(attempt, 0)
-    );
-
-  const randomJitter =
-    jitter > 0
-      ? Math.floor(Math.random() * jitter)
-      : 0;
-
-  let computedDelay =
-    baseDelay;
+  let computedDelay = baseDelay;
 
   if (strategy === "exponential") {
-    computedDelay =
-      baseDelay * 2 ** safeAttempt;
+    computedDelay = baseDelay * 2 ** safeAttempt;
   } else if (strategy === "fixed") {
-    computedDelay =
-      baseDelay;
+    computedDelay = baseDelay;
   } else {
-    computedDelay =
-      baseDelay * (safeAttempt + 1);
+    computedDelay = baseDelay * (safeAttempt + 1);
   }
 
-  const delay =
-    computedDelay + randomJitter;
+  const delay = computedDelay + randomJitter;
 
-  return maxDelay > 0
-    ? Math.min(maxDelay, delay)
-    : delay;
+  return maxDelay > 0 ? Math.min(maxDelay, delay) : delay;
 }
 
 function isLikelyPublicAuthRequest(requestConfig = {}) {
-  const req =
-    safeObject(requestConfig);
+  const req = safeObject(requestConfig);
 
-  if (req.public !== true) {
-    return false;
-  }
+  if (req.public !== true) return false;
 
   return isPublicAuthEndpoint(
-    firstNonEmpty(
-      req.path,
-      req.url,
-      req.endpoint,
-      req.href,
-      req.resource
-    )
+    firstNonEmpty(req.path, req.url, req.endpoint, req.href, req.resource)
   );
 }
 
@@ -2540,139 +1574,65 @@ export function shouldRetry(config, error, requestConfig = {}, attempt = 0) {
     ...safeObject(config),
   };
 
-  const req =
-    safeObject(requestConfig);
+  const req = safeObject(requestConfig);
 
-  if (req.retry === false) {
+  if (req.retry === false) return false;
+  if (req._skipRetry === true || req.skipRetry === true) return false;
+
+  const timeout = isTimeoutError(error);
+
+  if (!timeout && (error?.aborted === true || isAbortError(error))) {
     return false;
   }
 
-  if (
-    req._skipRetry === true ||
-    req.skipRetry === true
-  ) {
+  if (timeout && req.retryTimeout !== true && cfg.retryTimeout !== true) {
     return false;
   }
 
-  const timeout =
-    isTimeoutError(error);
+  const status = safeNumber(error?.status ?? error?.response?.status, 0);
 
-  if (
-    !timeout &&
-    (
-      error?.aborted === true ||
-      isAbortError(error)
-    )
-  ) {
+  if (status === 401 && req.retry401 !== true && cfg.retry401 !== true) {
     return false;
   }
 
-  if (
-    timeout &&
-    req.retryTimeout !== true &&
-    cfg.retryTimeout !== true
-  ) {
+  if (isLikelyPublicAuthRequest(req) && req.retryPublicAuth !== true && cfg.retryPublicAuth !== true) {
     return false;
   }
 
-  const status =
-    safeNumber(
-      error?.status ??
-        error?.response?.status,
-      0
-    );
+  const maxRetries = Number.isFinite(Number(req.retries))
+    ? Number(req.retries)
+    : safeNumber(cfg.retries, HTTP_CONFIG.retries);
 
-  if (
-    status === 401 &&
-    req.retry401 !== true &&
-    cfg.retry401 !== true
-  ) {
+  if (maxRetries <= 0) return false;
+  if (attempt >= maxRetries) return false;
+
+  const maxElapsedMs = safeNumber(req.maxElapsedMs, 0);
+  const startedAt = safeNumber(req.startedAt || req._startedAt, 0);
+
+  if (maxElapsedMs > 0 && startedAt > 0 && nowMs() - startedAt >= maxElapsedMs) {
     return false;
   }
 
-  if (
-    isLikelyPublicAuthRequest(req) &&
-    req.retryPublicAuth !== true &&
-    cfg.retryPublicAuth !== true
-  ) {
-    return false;
-  }
-
-  const maxRetries =
-    Number.isFinite(Number(req.retries))
-      ? Number(req.retries)
-      : safeNumber(cfg.retries, HTTP_CONFIG.retries);
-
-  if (maxRetries <= 0) {
-    return false;
-  }
-
-  if (attempt >= maxRetries) {
-    return false;
-  }
-
-  const maxElapsedMs =
-    safeNumber(req.maxElapsedMs, 0);
-
-  const startedAt =
-    safeNumber(
-      req.startedAt ||
-        req._startedAt,
-      0
-    );
-
-  if (
-    maxElapsedMs > 0 &&
-    startedAt > 0 &&
-    nowMs() - startedAt >= maxElapsedMs
-  ) {
-    return false;
-  }
-
-  const retryOnStatuses =
-    Array.isArray(req.retryOnStatuses)
-      ? req.retryOnStatuses
-      : cfg.retryOnStatuses;
+  const retryOnStatuses = Array.isArray(req.retryOnStatuses)
+    ? req.retryOnStatuses
+    : cfg.retryOnStatuses;
 
   if (Array.isArray(retryOnStatuses)) {
-    return Boolean(
-      matchesStatusRule(
-        status,
-        retryOnStatuses
-      )
-    );
+    return Boolean(matchesStatusRule(status, retryOnStatuses));
   }
 
-  const method =
-    normalizeMethod(req.method || "GET");
+  const method = normalizeMethod(req.method || "GET");
+  const allowUnsafeRetry = req.retryUnsafe === true || req.retryUnsafeMethods === true;
 
-  const allowUnsafeRetry =
-    req.retryUnsafe === true ||
-    req.retryUnsafeMethods === true;
-
-  if (
-    !isIdempotentMethod(method) &&
-    !allowUnsafeRetry
-  ) {
+  if (!isIdempotentMethod(method) && !allowUnsafeRetry) {
     return false;
   }
 
   return isRetryableError(error, {
-    retryOnConflict:
-      req.retryOnConflict ??
-      cfg.retryOnConflict,
-
-    retryOnLocked:
-      req.retryOnLocked ??
-      cfg.retryOnLocked,
-
-    retry401:
-      req.retry401 ??
-      cfg.retry401,
-
-    retryTimeout:
-      req.retryTimeout ??
-      cfg.retryTimeout,
+    retryOnConflict: req.retryOnConflict ?? cfg.retryOnConflict,
+    retryOnLocked: req.retryOnLocked ?? cfg.retryOnLocked,
+    retry401: req.retry401 ?? cfg.retry401,
+    retryTimeout: req.retryTimeout ?? cfg.retryTimeout,
   });
 }
 
@@ -2681,9 +1641,7 @@ export function shouldRetry(config, error, requestConfig = {}, attempt = 0) {
 ========================================================= */
 
 function extractErrorData(error = null) {
-  if (!error) {
-    return null;
-  }
+  if (!error) return null;
 
   return (
     error?.data ||
@@ -2695,18 +1653,15 @@ function extractErrorData(error = null) {
   );
 }
 
+function extractErrorHeaders(error = null) {
+  return error?.headers || error?.response?.headers || null;
+}
+
 function extractErrorMessage(error, fallback = DEFAULT_ERROR_MESSAGE) {
-  if (!error) {
-    return fallback;
-  }
+  if (!error) return fallback;
 
-  const data =
-    extractErrorData(error);
-
-  const nestedError =
-    isObject(data?.error)
-      ? data.error
-      : null;
+  const data = extractErrorData(error);
+  const nestedError = isObject(data?.error) ? data.error : null;
 
   return (
     safeText(data?.message, "") ||
@@ -2726,41 +1681,19 @@ function extractErrorMessage(error, fallback = DEFAULT_ERROR_MESSAGE) {
   );
 }
 
-function extractErrorHeaders(error = null) {
-  return (
-    error?.headers ||
-    error?.response?.headers ||
-    null
-  );
-}
-
 function defineRawError(target, raw) {
-  if (!target || !raw) {
-    return target;
-  }
+  if (!target || !raw) return target;
 
   try {
-    Object.defineProperty(
-      target,
-      "raw",
-      {
-        value:
-          raw,
-
-        enumerable:
-          false,
-
-        configurable:
-          true,
-
-        writable:
-          false,
-      }
-    );
+    Object.defineProperty(target, "raw", {
+      value: raw,
+      enumerable: false,
+      configurable: true,
+      writable: false,
+    });
   } catch {
     try {
-      target.raw =
-        raw;
+      target.raw = raw;
     } catch {}
   }
 
@@ -2768,316 +1701,107 @@ function defineRawError(target, raw) {
 }
 
 export function normalizeError(error, requestConfig = null) {
-  const sanitizedConfig =
-    requestConfig
-      ? sanitizeRequestConfig(requestConfig)
-      : null;
+  const raw = error?.raw || error;
 
-  if (
-    error?.name === "HttpErrorNormalized"
-  ) {
-    const timeout =
-      error.timeout === true ||
-      isTimeoutError(error);
+  const status = safeNumber(
+    error?.status ?? error?.statusCode ?? error?.response?.status,
+    0
+  );
 
-    const aborted =
-      timeout
-        ? false
-        : (
-            error.aborted === true ||
-            isAbortError(error)
-          );
+  const statusText = safeText(
+    error?.statusText ?? error?.response?.statusText,
+    ""
+  );
 
-    const normalizedAgain = {
-      name:
-        "HttpErrorNormalized",
+  const method = normalizeMethod(error?.method || requestConfig?.method || DEFAULT_METHOD);
 
-      message:
-        redactHttpValue(
-          safeText(error.message, DEFAULT_ERROR_MESSAGE)
-        ),
+  const rawUrl = firstNonEmpty(
+    error?.redactedUrl,
+    error?.url,
+    error?.path,
+    requestConfig?.url,
+    requestConfig?.path
+  );
 
-      status:
-        safeNumber(error.status, 0),
+  const url = redactHttpValue(rawUrl);
+  const data = extractErrorData(error);
+  const headers = extractErrorHeaders(error);
 
-      statusText:
-        redactHttpValue(error.statusText || ""),
-
-      data:
-        sanitizeData(error.data || null),
-
-      headers:
-        sanitizeHeaders(error.headers || {}),
-
-      url:
-        redactHttpValue(error.url || ""),
-
-      path:
-        redactHttpValue(error.path || requestConfig?.path || ""),
-
-      redactedUrl:
-        redactHttpValue(error.redactedUrl || error.url || error.path || ""),
-
-      method:
-        normalizeMethod(error.method || requestConfig?.method || DEFAULT_METHOD),
-
-      code:
-        error.code || null,
-
-      requestId:
-        error.requestId ||
-        requestConfig?.requestId ||
-        null,
-
-      requestConfig:
-        sanitizeRequestConfig(
-          error.requestConfig ||
-            requestConfig ||
-            {}
-        ),
-
-      aborted,
-      timeout,
-
-      retryable:
-        error.retryable === true,
-
-      public:
-        error.public === true ||
-        requestConfig?.public === true,
-
-      auth:
-        error.auth !== false &&
-        requestConfig?.auth !== false,
-
-      at:
-        error.at || isoNow(),
-    };
-
-    return defineRawError(
-      normalizedAgain,
-      error.raw || error
-    );
-  }
-
-  const status =
-    safeNumber(
-      error?.status ??
-        error?.statusCode ??
-        error?.response?.status,
-      0
-    );
-
-  const statusText =
-    safeText(
-      error?.statusText ??
-        error?.response?.statusText,
-      ""
-    );
-
-  const method =
-    normalizeMethod(
-      error?.method ||
-        requestConfig?.method ||
-        DEFAULT_METHOD
-    );
-
-  const rawUrl =
-    firstNonEmpty(
-      error?.redactedUrl,
-      error?.url,
-      error?.path,
-      requestConfig?.url,
-      requestConfig?.path
-    );
-
-  const url =
-    redactHttpValue(rawUrl);
-
-  const data =
-    extractErrorData(error);
-
-  const headers =
-    extractErrorHeaders(error);
-
-  const timeout =
-    error?.timeout === true ||
-    isTimeoutError(error);
-
-  const aborted =
-    timeout
-      ? false
-      : (
-          error?.aborted === true ||
-          isAbortError(error)
-        );
+  const timeout = error?.timeout === true || isTimeoutError(error);
+  const aborted = timeout ? false : error?.aborted === true || isAbortError(error);
 
   const normalized = {
-    name:
-      "HttpErrorNormalized",
-
-    message:
-      redactHttpValue(
-        extractErrorMessage(error)
-      ),
-
+    name: "HttpErrorNormalized",
+    message: redactHttpValue(extractErrorMessage(error)),
     status,
-
-    statusText:
-      redactHttpValue(statusText),
-
-    data:
-      sanitizeData(data),
-
-    headers:
-      sanitizeHeaders(headers),
+    statusText: redactHttpValue(statusText),
+    data: sanitizeData(data),
+    headers: sanitizeHeaders(headers),
 
     url,
-
-    path:
-      redactHttpValue(
-        error?.path ||
-          requestConfig?.path ||
-          ""
-      ),
-
-    redactedUrl:
-      url,
+    path: redactHttpValue(error?.path || requestConfig?.path || ""),
+    redactedUrl: url,
 
     method,
+    code: error?.code || null,
 
-    code:
-      error?.code || null,
-
-    requestId:
-      error?.requestId ||
-      requestConfig?.requestId ||
-      null,
-
-    requestConfig:
-      sanitizedConfig,
+    requestId: error?.requestId || requestConfig?.requestId || null,
+    requestConfig: requestConfig ? sanitizeRequestConfig(requestConfig) : null,
 
     aborted,
-
     timeout,
 
-    retryable:
-      isRetryableError(error, {
-        retryOnConflict:
-          requestConfig?.retryOnConflict,
+    retryable: isRetryableError(error, {
+      retryOnConflict: requestConfig?.retryOnConflict,
+      retryOnLocked: requestConfig?.retryOnLocked,
+      retry401: requestConfig?.retry401,
+      retryTimeout: requestConfig?.retryTimeout,
+    }),
 
-        retryOnLocked:
-          requestConfig?.retryOnLocked,
+    public: requestConfig?.public === true,
+    auth: requestConfig?.auth !== false,
 
-        retry401:
-          requestConfig?.retry401,
-
-        retryTimeout:
-          requestConfig?.retryTimeout,
-      }),
-
-    public:
-      requestConfig?.public === true,
-
-    auth:
-      requestConfig?.auth !== false,
-
-    at:
-      isoNow(),
+    at: error?.at || isoNow(),
   };
 
-  return defineRawError(
-    normalized,
-    error
-  );
+  return defineRawError(normalized, raw);
 }
 
 /* =========================================================
-   REQUEST CONFIG
+   REQUEST SUMMARY / ATTEMPT
 ========================================================= */
 
 export function buildRequestSummary(requestConfig = {}) {
-  const cfg =
-    safeObject(requestConfig);
-
-  const path =
-    firstNonEmpty(
-      cfg.path,
-      cfg.url,
-      cfg.endpoint,
-      cfg.href,
-      cfg.resource
-    );
+  const cfg = safeObject(requestConfig);
+  const path = firstNonEmpty(cfg.path, cfg.url, cfg.endpoint, cfg.href, cfg.resource);
 
   return {
-    requestId:
-      cfg.requestId || null,
+    requestId: cfg.requestId || null,
+    method: normalizeMethod(cfg.method || DEFAULT_METHOD),
+    path: redactHttpValue(path) || null,
+    query: sanitizeData(cfg.query || null, 0, "query"),
 
-    method:
-      normalizeMethod(cfg.method || DEFAULT_METHOD),
+    auth: cfg.auth !== false,
+    public: cfg.public === true,
+    skipAuth: cfg.skipAuth === true,
+    noAuthHeader: cfg.noAuthHeader === true,
 
-    path:
-      redactHttpValue(path) || null,
+    retries: cfg.retries ?? null,
+    retry: cfg.retry !== false,
+    retryStrategy: cfg.retryStrategy || "linear",
 
-    query:
-      sanitizeData(cfg.query || null, 0, "query"),
+    useLoader: shouldToggleGlobalLoader(cfg),
+    responseType: cfg.responseType || "auto",
+    timeout: cfg.timeout ?? null,
 
-    auth:
-      cfg.auth !== false,
+    raw: cfg.raw === true,
+    upload: cfg.upload === true,
+    download: cfg.download === true,
 
-    public:
-      cfg.public === true,
-
-    skipAuth:
-      cfg.skipAuth === true,
-
-    noAuthHeader:
-      cfg.noAuthHeader === true,
-
-    retries:
-      cfg.retries ?? null,
-
-    retry:
-      cfg.retry !== false,
-
-    retryStrategy:
-      cfg.retryStrategy ||
-      "linear",
-
-    useLoader:
-      shouldToggleGlobalLoader(cfg),
-
-    responseType:
-      cfg.responseType ||
-      "auto",
-
-    timeout:
-      cfg.timeout ?? null,
-
-    raw:
-      cfg.raw === true,
-
-    upload:
-      cfg.upload === true,
-
-    download:
-      cfg.download === true,
-
-    skipRetry:
-      cfg._skipRetry === true ||
-      cfg.skipRetry === true,
-
-    skipAuthRefresh:
-      cfg._skipAuthRefresh === true ||
-      cfg.skipAuthRefresh === true,
-
-    noAutoRefresh:
-      cfg.noAutoRefresh === true ||
-      cfg.autoRefresh === false,
-
-    noAutoLogout:
-      cfg.noAutoLogout === true ||
-      cfg.autoLogout === false,
+    skipRetry: cfg._skipRetry === true || cfg.skipRetry === true,
+    skipAuthRefresh: cfg._skipAuthRefresh === true || cfg.skipAuthRefresh === true,
+    noAutoRefresh: cfg.noAutoRefresh === true || cfg.autoRefresh === false,
+    noAutoLogout: cfg.noAutoLogout === true || cfg.autoLogout === false,
   };
 }
 
@@ -3089,92 +1813,50 @@ export function buildAttemptPayload({
   delayMs = 0,
   phase = "attempt",
 } = {}) {
-  const cfg =
-    safeObject(requestConfig);
-
-  const normalizedError =
-    error
-      ? normalizeError(error, cfg)
-      : null;
-
-  const path =
-    firstNonEmpty(
-      cfg.path,
-      cfg.url,
-      cfg.endpoint,
-      cfg.href,
-      cfg.resource
-    );
+  const cfg = safeObject(requestConfig);
+  const normalizedError = error ? normalizeError(error, cfg) : null;
+  const path = firstNonEmpty(cfg.path, cfg.url, cfg.endpoint, cfg.href, cfg.resource);
 
   return {
-    phase:
-      safeText(phase, "attempt"),
+    phase: safeText(phase, "attempt"),
+    requestId: cfg.requestId || null,
+    attempt: safeNumber(attempt, 0),
+    retries: safeNumber(retries, 0),
+    delayMs: safeNumber(delayMs, 0),
 
-    requestId:
-      cfg.requestId || null,
+    method: normalizeMethod(cfg.method || DEFAULT_METHOD),
+    path: redactHttpValue(path),
 
-    attempt:
-      safeNumber(attempt, 0),
+    auth: cfg.auth !== false,
+    public: cfg.public === true,
 
-    retries:
-      safeNumber(retries, 0),
+    status: normalizedError?.status || 0,
+    code: normalizedError?.code || null,
+    message: normalizedError?.message || "",
+    timeout: Boolean(normalizedError?.timeout),
+    aborted: Boolean(normalizedError?.aborted),
+    retryable: Boolean(normalizedError?.retryable),
 
-    delayMs:
-      safeNumber(delayMs, 0),
-
-    method:
-      normalizeMethod(cfg.method || DEFAULT_METHOD),
-
-    path:
-      redactHttpValue(path),
-
-    auth:
-      cfg.auth !== false,
-
-    public:
-      cfg.public === true,
-
-    status:
-      normalizedError?.status || 0,
-
-    code:
-      normalizedError?.code || null,
-
-    message:
-      normalizedError?.message || "",
-
-    timeout:
-      Boolean(normalizedError?.timeout),
-
-    aborted:
-      Boolean(normalizedError?.aborted),
-
-    retryable:
-      Boolean(normalizedError?.retryable),
-
-    at:
-      isoNow(),
+    at: isoNow(),
   };
 }
 
+/* =========================================================
+   DEFAULT REQUEST CONFIG
+========================================================= */
+
 function resolveDefaultTimeout(baseConfig = {}, AppCore = null) {
-  const fromCore =
-    safeNumber(
-      AppCore?.config?.requestTimeout ??
-        AppCore?.config?.httpTimeout ??
-        AppCore?.config?.timeout ??
-        AppCore?.config?.api?.timeout,
-      NaN
-    );
-
-  if (Number.isFinite(fromCore)) {
-    return fromCore;
-  }
-
-  return safeNumber(
-    baseConfig.timeout,
-    HTTP_CONFIG.timeout
+  const fromCore = safeNumber(
+    AppCore?.config?.requestTimeout ??
+      AppCore?.config?.httpTimeout ??
+      AppCore?.config?.timeout ??
+      AppCore?.config?.api?.timeout,
+    NaN
   );
+
+  if (Number.isFinite(fromCore)) return fromCore;
+
+  return safeNumber(baseConfig.timeout, HTTP_CONFIG.timeout);
 }
 
 function resolveApiBase(config = {}, AppCore = null, options = {}) {
@@ -3193,12 +1875,9 @@ function resolveApiBase(config = {}, AppCore = null, options = {}) {
 }
 
 function shouldDefaultPublic(path = "", options = {}) {
-  const opts =
-    safeObject(options);
+  const opts = safeObject(options);
 
-  if (isAuthMeEndpoint(path)) {
-    return false;
-  }
+  if (isAuthMeEndpoint(path)) return false;
 
   return Boolean(
     opts.public === true ||
@@ -3210,26 +1889,13 @@ function shouldDefaultPublic(path = "", options = {}) {
 }
 
 function normalizeRetryStatuses(value) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return null;
-  }
-
-  if (!Array.isArray(value)) {
-    return null;
-  }
+  if (!Array.isArray(value)) return null;
 
   return value
     .map((item) => {
-      if (typeof item === "number") {
-        return item;
-      }
+      if (typeof item === "number") return item;
 
-      const text =
-        safeText(item, "");
-
+      const text = safeText(item, "");
       return text || null;
     })
     .filter(Boolean);
@@ -3241,250 +1907,90 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
     ...safeObject(config),
   };
 
-  const opts =
-    safeObject(options);
+  const opts = safeObject(options);
 
-  const finalMethod =
-    normalizeMethod(
-      opts.method ||
-        method ||
-        DEFAULT_METHOD
-    );
+  const finalMethod = normalizeMethod(opts.method || method || DEFAULT_METHOD);
+  const finalPath = safeText(opts.path || path, "");
 
-  const finalPath =
-    safeText(
-      opts.path || path,
-      ""
-    );
+  const authMe = isAuthMeEndpoint(finalPath);
+  const endpointPublic = shouldDefaultPublic(finalPath, opts);
+  const publicAuth = isPublicAuthEndpoint(finalPath);
 
-  const authMeEndpoint =
-    isAuthMeEndpoint(finalPath);
-
-  const publicEndpoint =
-    shouldDefaultPublic(
-      finalPath,
-      opts
-    );
-
-  const publicAuthEndpoint =
-    isPublicAuthEndpoint(finalPath);
-
-  const defaultTimeout =
-    resolveDefaultTimeout(
-      cfg,
-      AppCore
-    );
-
-  const defaultAuth =
-    authMeEndpoint
-      ? true
-      : publicEndpoint
-        ? false
-        : cfg.defaultAuth !== false;
-
-  const defaultUseLoader =
-    cfg.defaultUseLoader !== false;
+  const defaultTimeout = resolveDefaultTimeout(cfg, AppCore);
+  const defaultUseLoader = cfg.defaultUseLoader !== false;
 
   const base = {
-    method:
-      finalMethod,
+    method: finalMethod,
+    path: finalPath,
+    url: "",
+    apiBase: resolveApiBase(cfg, AppCore, opts),
 
-    path:
-      finalPath,
+    body: null,
+    headers: {},
 
-    url:
-      "",
+    auth: authMe ? true : endpointPublic ? false : cfg.defaultAuth !== false,
+    public: endpointPublic,
+    skipAuth: endpointPublic,
+    noAuthHeader: endpointPublic,
 
-    apiBase:
-      resolveApiBase(
-        cfg,
-        AppCore,
-        opts
-      ),
+    timeout: defaultTimeout,
+    raw: false,
+    rawBody: false,
+    upload: false,
+    download: false,
 
-    body:
-      null,
+    responseType: cfg.defaultResponseType || HTTP_CONFIG.defaultResponseType,
+    query: null,
+    params: null,
+    credentials: cfg.defaultCredentials || HTTP_CONFIG.defaultCredentials,
 
-    headers:
-      {},
+    useLoader: defaultUseLoader,
 
-    auth:
-      defaultAuth,
+    retries: publicAuth ? 0 : safeNumber(cfg.retries, HTTP_CONFIG.retries),
+    retry: publicAuth ? false : true,
+    retryUnsafe: false,
+    retryUnsafeMethods: false,
+    retry401: false,
+    retryTimeout: false,
+    retryPublicAuth: false,
 
-    public:
-      publicEndpoint,
+    retryStrategy: cfg.retryStrategy || HTTP_CONFIG.retryStrategy,
+    retryDelay: safeNumber(cfg.retryDelay, HTTP_CONFIG.retryDelay),
+    retryJitter: safeNumber(cfg.retryJitter, HTTP_CONFIG.retryJitter),
+    retryMaxDelay: safeNumber(cfg.retryMaxDelay, HTTP_CONFIG.retryMaxDelay),
+    retryOnStatuses: normalizeRetryStatuses(cfg.retryOnStatuses),
+    retryOnConflict: cfg.retryOnConflict === true,
+    retryOnLocked: cfg.retryOnLocked === true,
 
-    skipAuth:
-      publicEndpoint,
+    maxElapsedMs: 0,
+    signal: null,
+    meta: null,
+    requestId: null,
 
-    noAuthHeader:
-      publicEndpoint,
+    startedAt: 0,
+    _startedAt: 0,
 
-    timeout:
-      defaultTimeout,
+    emitEvents: true,
+    emitFinalEvents: cfg.emitFinalEvents !== false,
+    emitLifecycleEvents: cfg.emitLifecycleEvents === true,
+    emitRuntimeEvents: cfg.emitRuntimeEvents === true,
+    emitAuthRefreshEvents: cfg.emitAuthRefreshEvents === true,
+    emitRequestEngineEvents: cfg.emitRequestEngineEvents === true,
 
-    raw:
-      false,
+    _skipRetry: false,
+    skipRetry: false,
 
-    rawBody:
-      false,
+    _skipAuthRefresh: endpointPublic,
+    skipAuthRefresh: endpointPublic,
+    noAutoRefresh: endpointPublic,
+    autoRefresh: endpointPublic ? false : undefined,
 
-    upload:
-      false,
+    noAutoLogout: endpointPublic,
+    autoLogout: endpointPublic ? false : undefined,
 
-    download:
-      false,
-
-    responseType:
-      cfg.defaultResponseType ||
-      HTTP_CONFIG.defaultResponseType,
-
-    query:
-      null,
-
-    params:
-      null,
-
-    credentials:
-      cfg.defaultCredentials ||
-      HTTP_CONFIG.defaultCredentials,
-
-    useLoader:
-      defaultUseLoader,
-
-    retries:
-      publicAuthEndpoint
-        ? 0
-        : safeNumber(
-            cfg.retries,
-            HTTP_CONFIG.retries
-          ),
-
-    retry:
-      publicAuthEndpoint
-        ? false
-        : true,
-
-    retryUnsafe:
-      false,
-
-    retryUnsafeMethods:
-      false,
-
-    retry401:
-      false,
-
-    retryTimeout:
-      false,
-
-    retryPublicAuth:
-      false,
-
-    retryStrategy:
-      cfg.retryStrategy ||
-      HTTP_CONFIG.retryStrategy,
-
-    retryDelay:
-      safeNumber(
-        cfg.retryDelay,
-        HTTP_CONFIG.retryDelay
-      ),
-
-    retryJitter:
-      safeNumber(
-        cfg.retryJitter,
-        HTTP_CONFIG.retryJitter
-      ),
-
-    retryMaxDelay:
-      safeNumber(
-        cfg.retryMaxDelay,
-        HTTP_CONFIG.retryMaxDelay
-      ),
-
-    retryOnStatuses:
-      normalizeRetryStatuses(
-        cfg.retryOnStatuses
-      ),
-
-    retryOnConflict:
-      cfg.retryOnConflict === true,
-
-    retryOnLocked:
-      cfg.retryOnLocked === true,
-
-    maxElapsedMs:
-      0,
-
-    signal:
-      null,
-
-    meta:
-      null,
-
-    requestId:
-      null,
-
-    startedAt:
-      0,
-
-    _startedAt:
-      0,
-
-    emitEvents:
-      true,
-
-    emitFinalEvents:
-      cfg.emitFinalEvents !== false,
-
-    emitLifecycleEvents:
-      cfg.emitLifecycleEvents === true,
-
-    emitRuntimeEvents:
-      cfg.emitRuntimeEvents === true,
-
-    emitAuthRefreshEvents:
-      cfg.emitAuthRefreshEvents === true,
-
-    emitRequestEngineEvents:
-      cfg.emitRequestEngineEvents === true,
-
-    _skipRetry:
-      false,
-
-    skipRetry:
-      false,
-
-    _skipAuthRefresh:
-      publicEndpoint,
-
-    skipAuthRefresh:
-      publicEndpoint,
-
-    noAutoRefresh:
-      publicEndpoint,
-
-    autoRefresh:
-      publicEndpoint
-        ? false
-        : undefined,
-
-    noAutoLogout:
-      publicEndpoint,
-
-    autoLogout:
-      publicEndpoint
-        ? false
-        : undefined,
-
-    _authRefreshAttempted:
-      false,
-
-    _authRefreshSucceeded:
-      false,
-
-    _authRefreshFailed:
-      false,
+    _authRefreshAttempted: false,
+    _authRefreshSucceeded: false,
+    _authRefreshFailed: false,
   };
 
   const merged = {
@@ -3492,320 +1998,152 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
     ...opts,
   };
 
-  const mergedPath =
-    safeText(
-      merged.path || finalPath,
-      finalPath
-    );
+  const mergedPath = safeText(merged.path || finalPath, finalPath);
+  const mergedAuthMe = isAuthMeEndpoint(mergedPath);
+  const mergedPublicAuth = isPublicAuthEndpoint(mergedPath);
 
-  const mergedAuthMe =
-    isAuthMeEndpoint(mergedPath);
-
-  const mergedPublicAuth =
-    isPublicAuthEndpoint(mergedPath);
-
-  const mergedPublic =
-    mergedAuthMe
-      ? false
-      : shouldDefaultPublic(
-          mergedPath,
-          merged
-        );
+  const mergedPublic = mergedAuthMe
+    ? false
+    : shouldDefaultPublic(mergedPath, merged);
 
   /*
     /api/auth/me, /auth/me, /api/me y /me son SIEMPRE privados.
-    No permitimos que public/auth:false los deje sin Authorization.
+    Ningún public/auth:false accidental debe quitar Authorization ahí.
   */
-  const mergedAuth =
-    mergedAuthMe
-      ? true
-      : merged.auth === false ||
+  const mergedAuth = mergedAuthMe
+    ? true
+    : (
+        merged.auth === false ||
         merged.public === true ||
         merged.skipAuth === true ||
         merged.noAuthHeader === true ||
         mergedPublic
-          ? false
-          : merged.auth ?? defaultAuth;
+      )
+        ? false
+        : merged.auth ?? base.auth;
 
-  const publicLike =
-    Boolean(
-      !mergedAuthMe &&
-        (
-          mergedPublic ||
-          mergedAuth === false ||
-          merged.skipAuth === true ||
-          merged.noAuthHeader === true
-        )
-    );
+  const publicLike = Boolean(
+    !mergedAuthMe &&
+      (
+        mergedPublic ||
+        mergedAuth === false ||
+        merged.skipAuth === true ||
+        merged.noAuthHeader === true
+      )
+  );
 
-  const explicitRetry =
-    hasOwn(opts, "retry") ||
-    hasOwn(merged, "retry");
+  const explicitRetry = hasOwn(opts, "retry");
+  const explicitRetries = hasOwn(opts, "retries");
 
-  const explicitRetries =
-    hasOwn(opts, "retries") ||
-    hasOwn(merged, "retries");
+  const finalRetry = mergedPublicAuth && !explicitRetry
+    ? false
+    : merged.retry !== false;
 
-  const headers =
-    normalizeHeaders(
-      merged.headers
-    );
+  const finalRetries = mergedPublicAuth && !explicitRetries
+    ? 0
+    : safeNumber(merged.retries, safeNumber(cfg.retries, HTTP_CONFIG.retries));
 
-  const finalRetry =
-    mergedPublicAuth && !explicitRetry
-      ? false
-      : merged.retry !== false;
-
-  const finalRetries =
-    mergedPublicAuth && !explicitRetries
-      ? 0
-      : safeNumber(
-          merged.retries,
-          safeNumber(cfg.retries, HTTP_CONFIG.retries)
-        );
-
-  const finalRequestConfig = {
+  const finalConfig = {
     ...merged,
 
-    method:
-      normalizeMethod(
-        merged.method || finalMethod
-      ),
+    method: normalizeMethod(merged.method || finalMethod),
+    path: mergedPath,
+    apiBase: resolveApiBase(cfg, AppCore, merged),
 
-    path:
-      mergedPath,
+    headers: normalizeHeaders(merged.headers),
 
-    apiBase:
-      resolveApiBase(
-        cfg,
-        AppCore,
-        merged
-      ),
+    timeout: safeNumber(merged.timeout, defaultTimeout),
 
-    headers,
+    responseType: safeText(
+      merged.responseType,
+      cfg.defaultResponseType || HTTP_CONFIG.defaultResponseType
+    ),
 
-    timeout:
-      safeNumber(
-        merged.timeout,
-        defaultTimeout
-      ),
+    credentials: safeText(
+      merged.credentials,
+      cfg.defaultCredentials || HTTP_CONFIG.defaultCredentials
+    ),
 
-    responseType:
-      safeText(
-        merged.responseType,
-        cfg.defaultResponseType ||
-          HTTP_CONFIG.defaultResponseType
-      ),
+    retries: finalRetries,
+    retry: finalRetry,
 
-    credentials:
-      safeText(
-        merged.credentials,
-        cfg.defaultCredentials ||
-          HTTP_CONFIG.defaultCredentials
-      ),
+    retryUnsafe: merged.retryUnsafe === true,
+    retryUnsafeMethods: merged.retryUnsafeMethods === true,
+    retry401: merged.retry401 === true,
+    retryTimeout: merged.retryTimeout === true,
+    retryPublicAuth: merged.retryPublicAuth === true,
 
-    retries:
-      finalRetries,
+    retryStrategy: safeText(merged.retryStrategy, cfg.retryStrategy || HTTP_CONFIG.retryStrategy),
+    retryDelay: safeNumber(merged.retryDelay, safeNumber(cfg.retryDelay, HTTP_CONFIG.retryDelay)),
+    retryJitter: safeNumber(merged.retryJitter, safeNumber(cfg.retryJitter, HTTP_CONFIG.retryJitter)),
+    retryMaxDelay: safeNumber(merged.retryMaxDelay, safeNumber(cfg.retryMaxDelay, HTTP_CONFIG.retryMaxDelay)),
+    retryOnStatuses: normalizeRetryStatuses(merged.retryOnStatuses) || normalizeRetryStatuses(cfg.retryOnStatuses),
+    retryOnConflict: safeBoolean(merged.retryOnConflict, cfg.retryOnConflict === true),
+    retryOnLocked: safeBoolean(merged.retryOnLocked, cfg.retryOnLocked === true),
 
-    retry:
-      finalRetry,
+    signal: withSignal(merged.signal),
 
-    retryUnsafe:
-      merged.retryUnsafe === true,
+    public: mergedPublic,
+    auth: mergedAuth,
 
-    retryUnsafeMethods:
-      merged.retryUnsafeMethods === true,
+    skipAuth: mergedAuthMe ? false : publicLike,
+    noAuthHeader: mergedAuthMe ? false : publicLike,
 
-    retry401:
-      merged.retry401 === true,
+    useLoader: shouldToggleGlobalLoader({
+      ...merged,
+      useLoader: merged.useLoader ?? defaultUseLoader,
+    }),
 
-    retryTimeout:
-      merged.retryTimeout === true,
+    _startedAt: safeNumber(merged._startedAt || merged.startedAt, 0),
 
-    retryPublicAuth:
-      merged.retryPublicAuth === true,
+    emitEvents: merged.emitEvents !== false,
+    emitFinalEvents: merged.emitFinalEvents !== false,
+    emitLifecycleEvents: merged.emitLifecycleEvents === true,
+    emitRuntimeEvents: merged.emitRuntimeEvents === true,
+    emitAuthRefreshEvents: merged.emitAuthRefreshEvents === true,
+    emitRequestEngineEvents: merged.emitRequestEngineEvents === true,
 
-    retryStrategy:
-      safeText(
-        merged.retryStrategy,
-        cfg.retryStrategy ||
-          HTTP_CONFIG.retryStrategy
-      ),
+    _skipRetry: merged._skipRetry === true || merged.skipRetry === true,
+    skipRetry: merged._skipRetry === true || merged.skipRetry === true,
 
-    retryDelay:
-      safeNumber(
-        merged.retryDelay,
-        safeNumber(cfg.retryDelay, HTTP_CONFIG.retryDelay)
-      ),
+    _skipAuthRefresh: mergedAuthMe
+      ? merged._skipAuthRefresh === true || merged.skipAuthRefresh === true
+      : merged._skipAuthRefresh === true || merged.skipAuthRefresh === true || publicLike,
 
-    retryJitter:
-      safeNumber(
-        merged.retryJitter,
-        safeNumber(cfg.retryJitter, HTTP_CONFIG.retryJitter)
-      ),
+    skipAuthRefresh: mergedAuthMe
+      ? merged._skipAuthRefresh === true || merged.skipAuthRefresh === true
+      : merged._skipAuthRefresh === true || merged.skipAuthRefresh === true || publicLike,
 
-    retryMaxDelay:
-      safeNumber(
-        merged.retryMaxDelay,
-        safeNumber(cfg.retryMaxDelay, HTTP_CONFIG.retryMaxDelay)
-      ),
+    noAutoRefresh: mergedAuthMe
+      ? merged.noAutoRefresh === true || merged.autoRefresh === false
+      : merged.noAutoRefresh === true || merged.autoRefresh === false || publicLike,
 
-    retryOnStatuses:
-      normalizeRetryStatuses(
-        merged.retryOnStatuses
-      ) ||
-      normalizeRetryStatuses(
-        cfg.retryOnStatuses
-      ),
-
-    retryOnConflict:
-      safeBoolean(
-        merged.retryOnConflict,
-        cfg.retryOnConflict === true
-      ),
-
-    retryOnLocked:
-      safeBoolean(
-        merged.retryOnLocked,
-        cfg.retryOnLocked === true
-      ),
-
-    signal:
-      withSignal(merged.signal),
-
-    public:
-      mergedPublic,
-
-    skipAuth:
-      mergedAuthMe
+    autoRefresh: !mergedAuthMe && publicLike
+      ? false
+      : merged.autoRefresh === false
         ? false
-        : publicLike,
+        : undefined,
 
-    noAuthHeader:
-      mergedAuthMe
+    noAutoLogout: mergedAuthMe
+      ? merged.noAutoLogout === true || merged.autoLogout === false
+      : merged.noAutoLogout === true || merged.autoLogout === false || publicLike,
+
+    autoLogout: !mergedAuthMe && publicLike
+      ? false
+      : merged.autoLogout === false
         ? false
-        : publicLike,
+        : undefined,
 
-    auth:
-      mergedAuth,
-
-    useLoader:
-      shouldToggleGlobalLoader({
-        ...merged,
-        useLoader:
-          merged.useLoader ?? defaultUseLoader,
-      }),
-
-    _startedAt:
-      safeNumber(
-        merged._startedAt ||
-          merged.startedAt,
-        0
-      ),
-
-    emitEvents:
-      merged.emitEvents !== false,
-
-    emitFinalEvents:
-      merged.emitFinalEvents !== false,
-
-    emitLifecycleEvents:
-      merged.emitLifecycleEvents === true,
-
-    emitRuntimeEvents:
-      merged.emitRuntimeEvents === true,
-
-    emitAuthRefreshEvents:
-      merged.emitAuthRefreshEvents === true,
-
-    emitRequestEngineEvents:
-      merged.emitRequestEngineEvents === true,
-
-    _skipRetry:
-      merged._skipRetry === true ||
-      merged.skipRetry === true,
-
-    skipRetry:
-      merged._skipRetry === true ||
-      merged.skipRetry === true,
-
-    _skipAuthRefresh:
-      mergedAuthMe
-        ? (
-            merged._skipAuthRefresh === true ||
-            merged.skipAuthRefresh === true
-          )
-        : (
-            merged._skipAuthRefresh === true ||
-            merged.skipAuthRefresh === true ||
-            publicLike
-          ),
-
-    skipAuthRefresh:
-      mergedAuthMe
-        ? (
-            merged._skipAuthRefresh === true ||
-            merged.skipAuthRefresh === true
-          )
-        : (
-            merged._skipAuthRefresh === true ||
-            merged.skipAuthRefresh === true ||
-            publicLike
-          ),
-
-    noAutoRefresh:
-      mergedAuthMe
-        ? (
-            merged.noAutoRefresh === true ||
-            merged.autoRefresh === false
-          )
-        : (
-            merged.noAutoRefresh === true ||
-            merged.autoRefresh === false ||
-            publicLike
-          ),
-
-    autoRefresh:
-      !mergedAuthMe && publicLike
-        ? false
-        : merged.autoRefresh === false
-          ? false
-          : undefined,
-
-    noAutoLogout:
-      mergedAuthMe
-        ? (
-            merged.noAutoLogout === true ||
-            merged.autoLogout === false
-          )
-        : (
-            merged.noAutoLogout === true ||
-            merged.autoLogout === false ||
-            publicLike
-          ),
-
-    autoLogout:
-      !mergedAuthMe && publicLike
-        ? false
-        : merged.autoLogout === false
-          ? false
-          : undefined,
-
-    _authRefreshAttempted:
-      merged._authRefreshAttempted === true,
-
-    _authRefreshSucceeded:
-      merged._authRefreshSucceeded === true,
-
-    _authRefreshFailed:
-      merged._authRefreshFailed === true,
+    _authRefreshAttempted: merged._authRefreshAttempted === true,
+    _authRefreshSucceeded: merged._authRefreshSucceeded === true,
+    _authRefreshFailed: merged._authRefreshFailed === true,
   };
 
-  if (isBodylessMethod(finalRequestConfig.method)) {
-    delete finalRequestConfig.body;
+  if (isBodylessMethod(finalConfig.method)) {
+    delete finalConfig.body;
   }
 
-  return finalRequestConfig;
+  return finalConfig;
 }
 
 /* =========================================================
@@ -3814,117 +2152,53 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
 
 export function getHttpHelpersSnapshot() {
   return sanitizeData({
-    version:
-      HTTP_HELPERS_VERSION,
+    version: HTTP_HELPERS_VERSION,
 
-    defaultConfig:
-      {
-        retries:
-          HTTP_CONFIG.retries,
-
-        timeout:
-          HTTP_CONFIG.timeout,
-
-        autoRefreshOn401:
-          HTTP_CONFIG.autoRefreshOn401,
-
-        autoLogoutOn401:
-          HTTP_CONFIG.autoLogoutOn401,
-
-        defaultCredentials:
-          HTTP_CONFIG.defaultCredentials,
-
-        defaultResponseType:
-          HTTP_CONFIG.defaultResponseType,
-
-        emitLifecycleEvents:
-          HTTP_CONFIG.emitLifecycleEvents,
-
-        emitFinalEvents:
-          HTTP_CONFIG.emitFinalEvents,
-
-        emitRuntimeEvents:
-          HTTP_CONFIG.emitRuntimeEvents,
-
-        emitAuthRefreshEvents:
-          HTTP_CONFIG.emitAuthRefreshEvents,
-
-        emitRequestEngineEvents:
-          HTTP_CONFIG.emitRequestEngineEvents,
-      },
+    defaultConfig: {
+      retries: HTTP_CONFIG.retries,
+      timeout: HTTP_CONFIG.timeout,
+      autoRefreshOn401: HTTP_CONFIG.autoRefreshOn401,
+      autoLogoutOn401: HTTP_CONFIG.autoLogoutOn401,
+      defaultCredentials: HTTP_CONFIG.defaultCredentials,
+      defaultResponseType: HTTP_CONFIG.defaultResponseType,
+      emitLifecycleEvents: HTTP_CONFIG.emitLifecycleEvents,
+      emitFinalEvents: HTTP_CONFIG.emitFinalEvents,
+      emitRuntimeEvents: HTTP_CONFIG.emitRuntimeEvents,
+      emitAuthRefreshEvents: HTTP_CONFIG.emitAuthRefreshEvents,
+      emitRequestEngineEvents: HTTP_CONFIG.emitRequestEngineEvents,
+    },
 
     endpointPolicy: {
-      authMePrivate:
-        true,
-
-      authMeEndpoints:
-        [...AUTH_ME_ENDPOINTS],
-
-      authMarkers:
-        AUTH_ENDPOINT_MARKERS.length,
-
-      publicAuthMarkers:
-        PUBLIC_AUTH_ENDPOINT_MARKERS.length,
-
-      skipRefreshMarkers:
-        AUTH_CONTROL_SKIP_REFRESH_MARKERS.length,
-
-      technicalPublicRoutes:
-        [...TECHNICAL_PUBLIC_ROUTES],
-
-      strictEndpointMatching:
-        true,
-
-      publicAuthDisablesRefresh:
-        true,
-
-      publicAuthDisablesLogout:
-        true,
-
-      publicAuthDisablesRetryByDefault:
-        true,
+      authMePrivate: true,
+      authMeEndpoints: [...AUTH_ME_ENDPOINTS],
+      authMarkers: AUTH_ENDPOINT_MARKERS.length,
+      publicAuthMarkers: PUBLIC_AUTH_ENDPOINT_MARKERS.length,
+      skipRefreshMarkers: AUTH_CONTROL_SKIP_REFRESH_MARKERS.length,
+      technicalPublicRoutes: [...TECHNICAL_PUBLIC_ROUTES],
+      strictEndpointMatching: true,
+      publicAuthDisablesRefresh: true,
+      publicAuthDisablesLogout: true,
+      publicAuthDisablesRetryByDefault: true,
     },
 
-    sanitize:
-      {
-        maxDepth:
-          MAX_SANITIZE_DEPTH,
-
-        maxArrayItems:
-          MAX_SANITIZE_ARRAY_ITEMS,
-
-        maxObjectKeys:
-          MAX_SANITIZE_OBJECT_KEYS,
-
-        maxStringLength:
-          MAX_SANITIZE_STRING_LENGTH,
-
-        circularSafe:
-          true,
-      },
+    sanitize: {
+      maxDepth: MAX_SANITIZE_DEPTH,
+      maxArrayItems: MAX_SANITIZE_ARRAY_ITEMS,
+      maxObjectKeys: MAX_SANITIZE_OBJECT_KEYS,
+      maxStringLength: MAX_SANITIZE_STRING_LENGTH,
+      circularSafe: true,
+    },
 
     retry: {
-      idempotentMethods:
-        [...IDEMPOTENT_METHODS],
-
-      bodylessMethods:
-        [...BODYLESS_METHODS],
-
-      retryableStatuses:
-        [...DEFAULT_RETRYABLE_STATUSES],
-
-      retry401Default:
-        false,
-
-      retryTimeoutDefault:
-        false,
-
-      retryPublicAuthDefault:
-        false,
+      idempotentMethods: [...IDEMPOTENT_METHODS],
+      bodylessMethods: [...BODYLESS_METHODS],
+      retryableStatuses: [...DEFAULT_RETRYABLE_STATUSES],
+      retry401Default: false,
+      retryTimeoutDefault: false,
+      retryPublicAuthDefault: false,
     },
 
-    at:
-      isoNow(),
+    at: isoNow(),
   });
 }
 

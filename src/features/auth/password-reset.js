@@ -2,24 +2,21 @@
    Onion SPA - Password Reset
    Archivo: src/features/auth/password-reset.js
 
-   AUTH PASSWORD RESET · SIMPLE · PUBLIC SAFE · BACKEND ALIGNED
-
-   Reglas:
-   - Request público duro: sin Authorization, sin refresh, sin logout.
-   - No toca sesión auth.
-   - No toca rutas públicas técnicas.
-   - No asume éxito por HTTP 200 si backend no declara ok/success/accepted/valid/completed.
-   - Tokens y passwords no se truncan: se validan.
-   - Default export callable + métodos públicos.
+   AUTH PASSWORD RESET · FINAL SIMPLE
+   - Flujo público request / validate / confirm
+   - Transporte único vía CoreHttp
+   - Sin fetch propio, apiClient propio, Router, Toast ni storage paralelo
+   - No toca sesión salvo token + user explícitos del backend
+   - Preserva rutas técnicas: la vista decide navegación/scrub
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import CoreHttp from "../../core/http.js";
 
 import {
   AUTH_ENDPOINTS,
   AUTH_ENDPOINT_CANDIDATES,
   AUTH_CONSTANTS,
-  AUTH_STORAGE_KEYS,
   AUTH_TOKEN_PARAM_NAMES,
   getPublicAuthRequestOptions,
   getAuthPublicTimeoutMs,
@@ -29,30 +26,38 @@ import {
 } from "./constants.js";
 
 import {
-  normalizeTokenValue as helperNormalizeTokenValue,
   sanitizeRedirectPath,
   redactTokenInText,
 } from "./helpers.js";
 
 import {
+  extractToken,
+  extractRefreshToken,
+  extractUser,
+  normalizeSessionPayload,
+} from "./normalize.js";
+
+import {
   persistLastResetIdentifier,
 } from "./storage.js";
+
+import {
+  applySession,
+} from "./session.js";
 
 /* =========================================================
    META
 ========================================================= */
 
-export const PASSWORD_RESET_MODULE_VERSION = "17.0.0-simple-clean";
+export const PASSWORD_RESET_MODULE_VERSION = "20.0.0-final";
 
 const SOURCE = "auth.password-reset";
-const API_ORIGIN = "https://api.onionit.net";
 
-const DEFAULT_REQUEST_ENDPOINT = "/api/auth/reset-password-request";
-const DEFAULT_CONFIRM_ENDPOINT = "/api/auth/reset-password-confirm";
-const DEFAULT_VALIDATE_ENDPOINT = "/api/auth/reset-password/validate";
-
+const DEFAULT_REQUEST_ENDPOINT = "/auth/reset-password-request";
+const DEFAULT_CONFIRM_ENDPOINT = "/auth/reset-password-confirm";
+const DEFAULT_VALIDATE_ENDPOINT = "/auth/reset-password/validate";
 const DEFAULT_LOGIN_REDIRECT = "/login";
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 30000;
 
 const SUCCESS_STATUS_TEXTS = new Set([
   "ok",
@@ -156,32 +161,17 @@ const TOKEN_FIELD_NAMES = new Set([
   "confirm_token",
 ]);
 
-const AUTH_HEADER_NAMES = new Set([
-  "authorization",
-  "x-auth-token",
-  "x-access-token",
-  "x-refresh-token",
-]);
-
-/* =========================================================
-   RUNTIME
-========================================================= */
-
 const runtime = {
   requestInFlight: null,
   confirmInFlight: null,
   validateInFlight: null,
-
   lastRequestAt: 0,
   lastConfirmAt: 0,
   lastValidateAt: 0,
-
   requestCount: 0,
   confirmCount: 0,
   validateCount: 0,
-
   cooldownUntil: 0,
-
   lastError: null,
   lastResult: null,
 };
@@ -190,24 +180,17 @@ const runtime = {
    BASICS
 ========================================================= */
 
-function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
-}
+const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
+const isFunction = (value) => typeof value === "function";
+const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
-function isFunction(value) {
-  return typeof value === "function";
-}
-
-function isObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function safeObject(value) {
-  return isObject(value) ? value : {};
+function safeObject(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
 }
 
 function safeArray(value) {
   if (Array.isArray(value)) return value;
+  if (value instanceof Set) return Array.from(value);
   if (value === null || value === undefined) return [];
   return [value];
 }
@@ -215,7 +198,10 @@ function safeArray(value) {
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -230,7 +216,7 @@ function clampNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
   return Math.min(Math.max(number, min), max);
 }
 
-function pickFirst(...values) {
+function first(...values) {
   for (const value of values) {
     if (value === null || value === undefined) continue;
     if (typeof value === "string" && value.trim() === "") continue;
@@ -240,8 +226,8 @@ function pickFirst(...values) {
   return null;
 }
 
-function pickFirstText(...values) {
-  return safeText(pickFirst(...values), "");
+function pickText(...values) {
+  return safeText(first(...values), "");
 }
 
 function unique(values = []) {
@@ -249,7 +235,7 @@ function unique(values = []) {
     ...new Set(
       safeArray(values)
         .flat(Infinity)
-        .map((item) => safeText(item))
+        .map((item) => safeText(item, ""))
         .filter(Boolean)
     ),
   ];
@@ -271,24 +257,8 @@ function isoNow(ms = nowMs()) {
   }
 }
 
-function isAbsoluteUrl(value = "") {
-  return /^https?:\/\//i.test(String(value || ""));
-}
-
 function isBadText(value = "") {
-  return BAD_TEXT_VALUES.has(safeText(value).toLowerCase());
-}
-
-function cloneSafe(value, fallback = null) {
-  try {
-    if (typeof structuredClone === "function") return structuredClone(value);
-  } catch {}
-
-  try {
-    return JSON.parse(JSON.stringify(value));
-  } catch {
-    return fallback;
-  }
+  return BAD_TEXT_VALUES.has(safeText(value, "").toLowerCase());
 }
 
 /* =========================================================
@@ -299,7 +269,7 @@ function redact(value = "") {
   try {
     return redactTokenInText(value);
   } catch {
-    return safeText(value)
+    return safeText(value, "")
       .replace(/([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi, "$1***")
       .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***")
       .replace(/(\/password-reset\/confirm\/)([^/?#\s]+)/gi, "$1***")
@@ -308,52 +278,37 @@ function redact(value = "") {
 }
 
 function sanitizeEventPayload(value, depth = 0, keyHint = "") {
-  const key = safeText(keyHint).toLowerCase();
+  const key = safeText(keyHint, "").toLowerCase();
 
-  if (
-    key.includes("token") ||
-    key.includes("password") ||
-    key.includes("authorization") ||
-    key.includes("secret") ||
-    key === "code" ||
-    key === "t" ||
-    key === "otp" ||
-    key === "totp"
-  ) {
+  if (/token|password|authorization|secret|credential|cookie|jwt|bearer|refresh|access|code|otp|totp|csrf|xsrf/.test(key)) {
     return value ? "***" : value;
   }
 
-  if (depth > 5) return "[MaxDepth]";
-
+  if (depth > 4) return "[depth-limit]";
   if (typeof value === "string") return redact(value);
-
-  if (
-    value === null ||
-    value === undefined ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
+  if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return "[function]";
 
   if (Array.isArray(value)) {
-    return value.slice(0, 80).map((item) => sanitizeEventPayload(item, depth + 1, keyHint));
+    return value.slice(0, 50).map((item) => sanitizeEventPayload(item, depth + 1, keyHint));
   }
 
-  if (!isObject(value)) return String(value);
+  if (isObject(value)) {
+    const output = {};
 
-  const output = {};
+    for (const [childKey, childValue] of Object.entries(value).slice(0, 80)) {
+      output[childKey] = sanitizeEventPayload(childValue, depth + 1, childKey);
+    }
 
-  for (const [childKey, childValue] of Object.entries(value).slice(0, 100)) {
-    output[childKey] = sanitizeEventPayload(childValue, depth + 1, childKey);
+    return output;
   }
 
-  return output;
+  return redact(String(value));
 }
 
-function emit(eventName, payload = {}, options = {}) {
-  const name = safeText(eventName);
-
+function emit(eventName = "", payload = {}, options = {}) {
+  const name = safeText(eventName, "");
   if (!name) return false;
   if (options.emit === false || options.emitEvents === false || options.silentEvents === true) return false;
 
@@ -370,7 +325,7 @@ function emit(eventName, payload = {}, options = {}) {
   } catch {}
 
   try {
-    if (isBrowser()) {
+    if (isBrowser() && typeof CustomEvent !== "undefined") {
       document.dispatchEvent(new CustomEvent(name, { detail }));
       return true;
     }
@@ -381,11 +336,11 @@ function emit(eventName, payload = {}, options = {}) {
 
 function warn(...args) {
   try {
-    AppCore?.utils?.warn?.("[PasswordReset]", ...args);
+    AppCore?.utils?.warn?.("[PasswordReset]", ...args.map((item) => sanitizeEventPayload(item)));
   } catch {}
 
   try {
-    if (AppCore?.config?.debug) console.warn("[PasswordReset]", ...args);
+    if (AppCore?.config?.debug) console.warn("[PasswordReset]", ...args.map((item) => sanitizeEventPayload(item)));
   } catch {}
 }
 
@@ -394,131 +349,74 @@ function warn(...args) {
 ========================================================= */
 
 function getIdentifierMaxLength() {
-  return clampNumber(
-    AUTH_CONSTANTS?.resetIdentifierMaxLength ??
-      AUTH_CONSTANTS?.identifierMaxLength ??
-      160,
-    1,
-    512
-  );
+  return clampNumber(AUTH_CONSTANTS?.resetIdentifierMaxLength ?? AUTH_CONSTANTS?.identifierMaxLength ?? 160, 1, 512);
 }
 
 function getTokenMinLength() {
-  return clampNumber(
-    AUTH_CONSTANTS?.resetTokenMinLength ??
-      AUTH_CONSTANTS?.tokenMinLength ??
-      8,
-    1,
-    4096
-  );
+  return clampNumber(AUTH_CONSTANTS?.resetTokenMinLength ?? AUTH_CONSTANTS?.tokenMinLength ?? 8, 1, 4096);
 }
 
 function getTokenMaxLength() {
-  return clampNumber(
-    AUTH_CONSTANTS?.resetTokenMaxLength ??
-      AUTH_CONSTANTS?.tokenMaxLength ??
-      8192,
-    getTokenMinLength(),
-    32768
-  );
+  return clampNumber(AUTH_CONSTANTS?.resetTokenMaxLength ?? AUTH_CONSTANTS?.tokenMaxLength ?? 8192, getTokenMinLength(), 32768);
 }
 
 function getPasswordMinLength() {
-  return clampNumber(
-    AUTH_CONSTANTS?.resetPasswordMinLength ??
-      AUTH_CONSTANTS?.passwordMinLength ??
-      8,
-    1,
-    1024
-  );
+  return clampNumber(AUTH_CONSTANTS?.resetPasswordMinLength ?? AUTH_CONSTANTS?.passwordMinLength ?? 8, 1, 1024);
 }
 
 function getPasswordMaxLength() {
-  return clampNumber(
-    AUTH_CONSTANTS?.resetPasswordMaxLength ??
-      AUTH_CONSTANTS?.passwordMaxLength ??
-      1024,
-    getPasswordMinLength(),
-    8192
-  );
+  return clampNumber(AUTH_CONSTANTS?.resetPasswordMaxLength ?? AUTH_CONSTANTS?.passwordMaxLength ?? 1024, getPasswordMinLength(), 8192);
 }
 
 function getTimeoutMs(options = {}) {
   const explicit = options.timeout ?? options.timeoutMs ?? options.passwordResetTimeoutMs;
-
-  if (explicit !== undefined) {
-    return clampNumber(explicit, 1000, 120000);
-  }
+  if (explicit !== undefined) return clampNumber(explicit, 1000, 120000);
 
   try {
     const fromConstants = getAuthPublicTimeoutMs?.();
     if (fromConstants) return clampNumber(fromConstants, 1000, 120000);
   } catch {}
 
-  return clampNumber(
-    AUTH_CONSTANTS?.authPublicTimeoutMs ??
-      AUTH_CONSTANTS?.requestTimeout ??
-      AppCore?.config?.requestTimeout ??
-      AppCore?.config?.api?.timeout ??
-      DEFAULT_TIMEOUT_MS,
-    1000,
-    120000
-  );
+  return clampNumber(AUTH_CONSTANTS?.authPublicTimeoutMs ?? AUTH_CONSTANTS?.requestTimeout ?? DEFAULT_TIMEOUT_MS, 1000, 120000);
 }
 
 function getDefaultCooldownSeconds() {
-  return clampNumber(
-    AUTH_CONSTANTS?.resetCooldownDefaultSeconds ?? 60,
-    0,
-    3600
-  );
+  return clampNumber(AUTH_CONSTANTS?.resetCooldownDefaultSeconds ?? 60, 0, 3600);
 }
 
 /* =========================================================
    MESSAGES
 ========================================================= */
 
-function defaultRequestSuccessMessage() {
-  return "Si el identificador existe, te enviaremos las instrucciones para restablecer la contraseña.";
-}
-
-function defaultRequestErrorMessage() {
-  return "No se pudo iniciar la recuperación de acceso.";
-}
-
-function defaultConfirmSuccessMessage() {
-  return "La contraseña se ha actualizado correctamente.";
-}
-
-function defaultConfirmErrorMessage() {
-  return "No se pudo restablecer la contraseña.";
-}
-
-function defaultValidateSuccessMessage() {
-  return "El token de recuperación es válido.";
-}
-
-function defaultValidateErrorMessage() {
-  return "El token de recuperación no es válido.";
-}
-
-function rateLimitMessage() {
-  return "Espera un momento antes de volver a intentarlo.";
-}
+const defaultRequestSuccessMessage = () => "Si el identificador existe, te enviaremos las instrucciones para restablecer la contraseña.";
+const defaultRequestErrorMessage = () => "No se pudo iniciar la recuperación de acceso.";
+const defaultConfirmSuccessMessage = () => "La contraseña se ha actualizado correctamente.";
+const defaultConfirmErrorMessage = () => "No se pudo restablecer la contraseña.";
+const defaultValidateSuccessMessage = () => "El token de recuperación es válido.";
+const defaultValidateErrorMessage = () => "El token de recuperación no es válido.";
+const rateLimitMessage = () => "Espera un momento antes de volver a intentarlo.";
 
 /* =========================================================
    ENDPOINTS
 ========================================================= */
 
+function normalizeAuthEndpoint(endpoint = "", fallback = DEFAULT_REQUEST_ENDPOINT) {
+  const raw = safeText(endpoint, fallback);
+
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith("/api/")) return raw;
+  if (raw.startsWith("/auth/")) return raw;
+  if (raw.startsWith("/")) return `/auth${raw}`;
+  return `/auth/${raw}`;
+}
+
 function firstEndpoint(candidates = [], fallback = "") {
-  return safeText(candidates.find((item) => safeText(item)), fallback);
+  return normalizeAuthEndpoint(candidates.find((item) => safeText(item, "")) || fallback, fallback);
 }
 
 function getConfiguredRequestEndpoint() {
   return firstEndpoint([
-    isFunction(getRequestPasswordResetEndpointFromConstants)
-      ? getRequestPasswordResetEndpointFromConstants()
-      : "",
+    isFunction(getRequestPasswordResetEndpointFromConstants) ? getRequestPasswordResetEndpointFromConstants() : "",
     AUTH_ENDPOINTS?.requestPasswordReset,
     AUTH_ENDPOINTS?.resetPasswordRequest,
     AUTH_ENDPOINTS?.forgotPassword,
@@ -530,9 +428,7 @@ function getConfiguredRequestEndpoint() {
 
 function getConfiguredConfirmEndpoint() {
   return firstEndpoint([
-    isFunction(getConfirmPasswordResetEndpointFromConstants)
-      ? getConfirmPasswordResetEndpointFromConstants()
-      : "",
+    isFunction(getConfirmPasswordResetEndpointFromConstants) ? getConfirmPasswordResetEndpointFromConstants() : "",
     AUTH_ENDPOINTS?.confirmResetPassword,
     AUTH_ENDPOINTS?.confirmPasswordReset,
     AUTH_ENDPOINTS?.resetPasswordConfirm,
@@ -543,9 +439,7 @@ function getConfiguredConfirmEndpoint() {
 
 function getConfiguredValidateEndpoint() {
   return firstEndpoint([
-    isFunction(getValidateResetTokenEndpointFromConstants)
-      ? getValidateResetTokenEndpointFromConstants()
-      : "",
+    isFunction(getValidateResetTokenEndpointFromConstants) ? getValidateResetTokenEndpointFromConstants() : "",
     AUTH_ENDPOINTS?.validateResetToken,
     AUTH_ENDPOINTS?.resetPasswordValidate,
     AUTH_ENDPOINTS?.validatePasswordReset,
@@ -558,37 +452,31 @@ function endpointCandidatesFor(type = "request") {
   if (type === "confirm") {
     return unique([
       getConfiguredConfirmEndpoint(),
-      ...(Array.isArray(AUTH_ENDPOINT_CANDIDATES?.confirmPasswordReset)
-        ? AUTH_ENDPOINT_CANDIDATES.confirmPasswordReset
-        : []),
+      ...safeArray(AUTH_ENDPOINT_CANDIDATES?.confirmPasswordReset),
       DEFAULT_CONFIRM_ENDPOINT,
-      "/api/auth/reset-password/confirm",
-      "/api/auth/password-reset/confirm",
-    ]);
+      "/auth/reset-password/confirm",
+      "/auth/password-reset/confirm",
+    ].map((item) => normalizeAuthEndpoint(item, DEFAULT_CONFIRM_ENDPOINT)));
   }
 
   if (type === "validate") {
     return unique([
       getConfiguredValidateEndpoint(),
-      ...(Array.isArray(AUTH_ENDPOINT_CANDIDATES?.validateResetToken)
-        ? AUTH_ENDPOINT_CANDIDATES.validateResetToken
-        : []),
+      ...safeArray(AUTH_ENDPOINT_CANDIDATES?.validateResetToken),
       DEFAULT_VALIDATE_ENDPOINT,
-      "/api/auth/reset-password-validate",
-      "/api/auth/password-reset/validate",
-    ]);
+      "/auth/reset-password-validate",
+      "/auth/password-reset/validate",
+    ].map((item) => normalizeAuthEndpoint(item, DEFAULT_VALIDATE_ENDPOINT)));
   }
 
   return unique([
     getConfiguredRequestEndpoint(),
-    ...(Array.isArray(AUTH_ENDPOINT_CANDIDATES?.requestPasswordReset)
-      ? AUTH_ENDPOINT_CANDIDATES.requestPasswordReset
-      : []),
+    ...safeArray(AUTH_ENDPOINT_CANDIDATES?.requestPasswordReset),
     DEFAULT_REQUEST_ENDPOINT,
-    "/api/auth/forgot-password",
-    "/api/auth/password-reset/request",
-    "/api/auth/reset-password/request",
-  ]);
+    "/auth/forgot-password",
+    "/auth/password-reset/request",
+    "/auth/reset-password/request",
+  ].map((item) => normalizeAuthEndpoint(item, DEFAULT_REQUEST_ENDPOINT)));
 }
 
 export function getRequestPasswordResetEndpoint() {
@@ -620,8 +508,7 @@ export function getValidateResetTokenEndpoint() {
 ========================================================= */
 
 function sanitizeRedirect(value = "", fallback = "") {
-  const raw = safeText(value);
-
+  const raw = safeText(value, "");
   if (!raw) return fallback;
   if (raw.startsWith("//")) return fallback;
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallback;
@@ -631,39 +518,27 @@ function sanitizeRedirect(value = "", fallback = "") {
     return sanitizeRedirectPath(raw, fallback || "") || fallback;
   } catch {
     let path = raw;
-
     if (!path.startsWith("/")) path = `/${path}`;
     path = path.replace(/\/{2,}/g, "/");
-
     return path || fallback;
   }
 }
 
-function getBaseOrigin() {
-  if (isBrowser() && window.location?.origin) return window.location.origin;
-  return "http://localhost";
-}
-
 function isHashRouterPath(value = "") {
-  const raw = safeText(value);
+  const raw = safeText(value, "");
   return raw.startsWith("#/") || raw.startsWith("#!");
 }
 
 function normalizeHashRouterPath(value = "") {
   const raw = safeText(value, "/");
-
   if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
   return raw.replace(/^#\/?/, "/") || "/";
 }
 
 function normalizePathnameOnly(pathname = "/") {
-  let value = safeText(pathname, "/")
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
+  let value = safeText(pathname, "/").replace(/\\/g, "/").replace(/\/{2,}/g, "/");
   if (!value.startsWith("/")) value = `/${value}`;
   if (value.length > 1) value = value.replace(/\/+$/g, "") || "/";
-
   return value || "/";
 }
 
@@ -674,11 +549,7 @@ function getCurrentPath() {
     const pathname = window.location.pathname || "/";
     const search = window.location.search || "";
     const hash = window.location.hash || "";
-
-    if (hash && isHashRouterPath(hash)) {
-      return normalizeHashRouterPath(hash);
-    }
-
+    if (hash && isHashRouterPath(hash)) return normalizeHashRouterPath(hash);
     return `${pathname}${search}${hash}`;
   } catch {
     return "";
@@ -687,30 +558,18 @@ function getCurrentPath() {
 
 function getTokenParamNames(type = "reset") {
   const names = AUTH_TOKEN_PARAM_NAMES?.[type];
-  return Array.isArray(names)
-    ? names
-    : ["token", "resetToken", "passwordResetToken", "confirmToken", "code", "t"];
+  return Array.isArray(names) ? names : ["token", "resetToken", "passwordResetToken", "confirmToken", "code", "t"];
 }
 
 function normalizeResetToken(value = "") {
-  let token = safeText(value);
-
+  let token = safeText(value, "");
   if (!token || isBadText(token)) return "";
 
-  if (/^bearer\s+/i.test(token)) {
-    token = token.replace(/^bearer\s+/i, "").trim();
-  }
-
-  if (/[\r\n\t\s]/.test(token)) return "";
+  token = token.replace(/^bearer\s+/i, "").trim();
+  if (/\s/.test(token)) return "";
   if (token.length > getTokenMaxLength()) return "";
 
-  try {
-    const normalized = safeText(helperNormalizeTokenValue(token));
-    if (!normalized || normalized.length > getTokenMaxLength()) return "";
-    return normalized;
-  } catch {
-    return token;
-  }
+  return token;
 }
 
 function extractTokenFromSearch(search = "", names = getTokenParamNames("reset")) {
@@ -730,12 +589,10 @@ function extractTokenFromPath(path = "") {
   let pathname = "";
 
   try {
-    const parsed = new URL(path, getBaseOrigin());
+    const parsed = new URL(path, "http://localhost");
     pathname = normalizePathnameOnly(parsed.pathname || "/");
   } catch {
-    pathname = normalizePathnameOnly(
-      safeText(path).split("?")[0].split("#")[0] || "/"
-    );
+    pathname = normalizePathnameOnly(safeText(path, "").split("?")[0].split("#")[0] || "/");
   }
 
   for (const marker of ["/reset-password/confirm/", "/password-reset/confirm/"]) {
@@ -754,30 +611,24 @@ function extractTokenFromPath(path = "") {
 }
 
 function extractResetTokenFromUrl(pathOrUrl = getCurrentPath()) {
-  const raw = safeText(pathOrUrl);
+  const raw = safeText(pathOrUrl, "");
   if (!raw) return "";
 
   const value = isHashRouterPath(raw) ? normalizeHashRouterPath(raw) : raw;
-
   const pathToken = extractTokenFromPath(value);
   if (pathToken) return pathToken;
 
   try {
-    const parsed = new URL(value, getBaseOrigin());
-
+    const parsed = new URL(value, "http://localhost");
     const fromSearch = extractTokenFromSearch(parsed.search);
     if (fromSearch) return fromSearch;
 
     if (parsed.hash && isHashRouterPath(parsed.hash)) {
       const hashPath = normalizeHashRouterPath(parsed.hash);
-
       const fromHashPath = extractTokenFromPath(hashPath);
       if (fromHashPath) return fromHashPath;
 
-      const hashQuery = hashPath.includes("?")
-        ? hashPath.split("?").slice(1).join("?")
-        : "";
-
+      const hashQuery = hashPath.includes("?") ? hashPath.split("?").slice(1).join("?") : "";
       const fromHashQuery = extractTokenFromSearch(hashQuery ? `?${hashQuery}` : "");
       if (fromHashQuery) return fromHashQuery;
     }
@@ -803,24 +654,24 @@ function extractResetTokenFromUrl(pathOrUrl = getCurrentPath()) {
 ========================================================= */
 
 function looksLikeEmail(value = "") {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(safeText(value));
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(safeText(value, ""));
 }
 
 function looksLikePhone(value = "") {
-  const clean = safeText(value).replace(/[^\d+]/g, "");
+  const clean = safeText(value, "").replace(/[^\d+]/g, "");
   return /^\+?\d{6,20}$/.test(clean);
 }
 
 function normalizeEmail(value = "") {
-  return safeText(value).toLowerCase().slice(0, 254);
+  return safeText(value, "").toLowerCase().slice(0, 254);
 }
 
 function normalizePhone(value = "") {
-  return safeText(value).replace(/[^\d+]/g, "").slice(0, 32);
+  return safeText(value, "").replace(/[^\d+]/g, "").slice(0, 32);
 }
 
 function normalizeUsername(value = "") {
-  return safeText(value)
+  return safeText(value, "")
     .normalize("NFKC")
     .replace(/^@+/, "")
     .replace(/\s+/g, "")
@@ -831,12 +682,8 @@ function normalizeUsername(value = "") {
 }
 
 function normalizeIdentifier(value = "") {
-  const raw = safeText(value)
-    .normalize("NFKC")
-    .replace(/\s+/g, " ");
-
+  const raw = safeText(value, "").normalize("NFKC").replace(/\s+/g, " ");
   if (isBadText(raw)) return "";
-
   return raw.slice(0, getIdentifierMaxLength() + 1);
 }
 
@@ -846,108 +693,44 @@ function normalizePassword(value = "") {
 }
 
 export function resolveResetPasswordIdentifier(payload = {}) {
-  return safeText(
-    payload.identifier ??
-      payload.login ??
-      payload.email ??
-      payload.username ??
-      payload.user ??
-      payload.phone ??
-      payload.telefono ??
-      payload.mobile ??
-      ""
-  );
+  return safeText(payload.identifier ?? payload.login ?? payload.email ?? payload.username ?? payload.user ?? payload.phone ?? payload.telefono ?? payload.mobile ?? "", "");
 }
 
 export function resolveResetPasswordToken(payload = {}) {
-  return normalizeResetToken(
-    payload.token ??
-      payload.code ??
-      payload.resetToken ??
-      payload.reset_token ??
-      payload.reset_code ??
-      payload.passwordResetToken ??
-      payload.password_reset_token ??
-      payload.confirmToken ??
-      payload.confirm_token ??
-      payload.t ??
-      extractResetTokenFromUrl()
-  );
+  return normalizeResetToken(payload.token ?? payload.code ?? payload.resetToken ?? payload.reset_token ?? payload.reset_code ?? payload.passwordResetToken ?? payload.password_reset_token ?? payload.confirmToken ?? payload.confirm_token ?? payload.t ?? extractResetTokenFromUrl());
 }
 
 export function normalizeResetPasswordPayload(payload = {}) {
   const identifier = normalizeIdentifier(resolveResetPasswordIdentifier(payload));
-
   const email = looksLikeEmail(identifier) ? normalizeEmail(identifier) : "";
   const phone = !email && looksLikePhone(identifier) ? normalizePhone(identifier) : "";
   const username = !email && !phone ? normalizeUsername(identifier) : "";
+  const redirect = sanitizeRedirect(payload.redirect ?? payload.redirectTo ?? payload.returnTo ?? "", "");
+  const lang = safeText(payload.lang ?? payload.language ?? AppCore?.state?.lang ?? AppCore?.config?.defaultLang ?? "es", "es").slice(0, 8);
 
-  const redirect = sanitizeRedirect(
-    payload.redirect ?? payload.redirectTo ?? payload.returnTo ?? "",
-    ""
-  );
-
-  const lang = safeText(
-    payload.lang ??
-      payload.language ??
-      AppCore?.state?.lang ??
-      AppCore?.config?.defaultLang ??
-      "es",
-    "es"
-  ).slice(0, 8);
-
-  return {
-    identifier,
-    email,
-    phone,
-    username,
-    redirect,
-    lang,
-  };
+  return { identifier, email, phone, username, redirect, lang };
 }
 
 export function normalizeConfirmResetPasswordPayload(payload = {}) {
   return {
     token: resolveResetPasswordToken(payload),
-
-    password: normalizePassword(
-      payload.password ??
-        payload.newPassword ??
-        payload.new_password ??
-        ""
-    ),
-
-    confirmPassword: normalizePassword(
-      payload.confirmPassword ??
-        payload.passwordConfirmation ??
-        payload.password_confirmation ??
-        payload.repeatPassword ??
-        payload.repeat_password ??
-        ""
-    ),
-
-    redirect: sanitizeRedirect(
-      payload.redirect ?? payload.redirectTo ?? payload.returnTo ?? DEFAULT_LOGIN_REDIRECT,
-      DEFAULT_LOGIN_REDIRECT
-    ),
+    password: normalizePassword(payload.password ?? payload.newPassword ?? payload.new_password ?? ""),
+    confirmPassword: normalizePassword(payload.confirmPassword ?? payload.passwordConfirmation ?? payload.password_confirmation ?? payload.repeatPassword ?? payload.repeat_password ?? ""),
+    redirect: sanitizeRedirect(payload.redirect ?? payload.redirectTo ?? payload.returnTo ?? DEFAULT_LOGIN_REDIRECT, DEFAULT_LOGIN_REDIRECT),
   };
 }
 
 export function normalizeValidateResetTokenPayload(payload = {}) {
-  return {
-    token: resolveResetPasswordToken(payload),
-  };
+  return { token: resolveResetPasswordToken(payload) };
 }
 
 export const normalizeValidateResetPasswordTokenPayload = normalizeValidateResetTokenPayload;
 
-function stripEmpty(obj = {}) {
+function stripEmpty(object = {}) {
   const output = {};
 
-  for (const [key, value] of Object.entries(obj)) {
-    if (value !== null && value !== undefined && value !== "") {
-      output[key] = value;
-    }
+  for (const [key, value] of Object.entries(object)) {
+    if (value !== null && value !== undefined && value !== "") output[key] = value;
   }
 
   return output;
@@ -959,19 +742,14 @@ export function buildResetPasswordRequestBody(payload = {}) {
   return stripEmpty({
     identifier: normalized.identifier,
     login: normalized.identifier,
-
     email: normalized.email,
-
     username: normalized.username,
     user: normalized.username,
-
     phone: normalized.phone,
     telefono: normalized.phone,
-
     redirect: normalized.redirect,
     redirectTo: normalized.redirect,
     returnTo: normalized.redirect,
-
     lang: normalized.lang,
     language: normalized.lang,
   });
@@ -991,17 +769,14 @@ export function buildConfirmResetPasswordBody(payload = {}) {
     password_reset_token: normalized.token,
     confirmToken: normalized.token,
     confirm_token: normalized.token,
-
     password: normalized.password,
     newPassword: normalized.password,
     new_password: normalized.password,
-
     confirmPassword: normalized.confirmPassword,
     passwordConfirmation: normalized.confirmPassword,
     password_confirmation: normalized.confirmPassword,
     repeatPassword: normalized.confirmPassword,
     repeat_password: normalized.confirmPassword,
-
     redirect: normalized.redirect,
     redirectTo: normalized.redirect,
     returnTo: normalized.redirect,
@@ -1034,30 +809,14 @@ function nodeList(input = {}) {
   const root = safeObject(input);
   const response = safeObject(root.response);
 
-  return [
-    root,
-    safeObject(root.data),
-    safeObject(root.payload),
-    safeObject(root.result),
-    safeObject(root.body),
-    response,
-    safeObject(response.data),
-    safeObject(root.meta),
-  ].filter((node) => Object.keys(node).length > 0);
+  return [root, safeObject(root.data), safeObject(root.payload), safeObject(root.result), safeObject(root.body), response, safeObject(response.data), safeObject(root.meta)].filter((node) => Object.keys(node).length > 0);
 }
 
 function pickPrimitive(nodes = [], keys = []) {
   for (const node of nodes) {
     for (const key of keys) {
       const value = node?.[key];
-
-      if (
-        typeof value === "string" ||
-        typeof value === "number" ||
-        typeof value === "boolean"
-      ) {
-        if (safeText(value)) return value;
-      }
+      if (["string", "number", "boolean"].includes(typeof value) && safeText(value, "")) return value;
     }
   }
 
@@ -1065,28 +824,8 @@ function pickPrimitive(nodes = [], keys = []) {
 }
 
 function resolveExplicitOk(input = {}) {
-  const keys = [
-    "ok",
-    "success",
-    "valid",
-    "accepted",
-    "completed",
-    "done",
-    "sent",
-    "emailSent",
-    "email_sent",
-    "resetSent",
-    "reset_sent",
-    "passwordResetSent",
-    "password_reset_sent",
-    "passwordUpdated",
-    "password_updated",
-    "passwordChanged",
-    "password_changed",
-  ];
-
   for (const node of nodeList(input)) {
-    for (const key of keys) {
+    for (const key of ["ok", "success", "valid", "accepted", "completed", "done", "sent", "emailSent", "email_sent", "resetSent", "reset_sent", "passwordResetSent", "password_reset_sent", "passwordUpdated", "password_updated", "passwordChanged", "password_changed"]) {
       if (typeof node[key] === "boolean") return node[key];
     }
   }
@@ -1095,44 +834,24 @@ function resolveExplicitOk(input = {}) {
 }
 
 function resolveStatus(input = {}) {
-  const value = pickPrimitive(nodeList(input), ["status", "statusCode", "status_code"]);
-  return safeNumber(value, 0);
+  return safeNumber(pickPrimitive(nodeList(input), ["status", "statusCode", "status_code"]), 0);
 }
 
 function resolveStatusText(input = {}) {
   const raw = pickPrimitive(nodeList(input), ["statusText", "status_text", "state", "status", "result", "type"]);
-  const text = safeText(raw).toLowerCase();
-
+  const text = safeText(raw, "").toLowerCase();
   if (!text || Number.isFinite(Number(text))) return "";
   return text;
 }
 
 function resolveCode(input = {}) {
-  return safeText(
-    pickPrimitive(nodeList(input), ["code", "errorCode", "error_code", "error"])
-  );
+  return safeText(pickPrimitive(nodeList(input), ["code", "errorCode", "error_code", "error"]), "");
 }
 
 function resolveMessage(input = {}, fallback = "") {
-  const nodes = nodeList(input);
-
-  for (const node of nodes) {
+  for (const node of nodeList(input)) {
     const error = safeObject(node.error);
-
-    const message = pickFirstText(
-      node.message,
-      node.mensaje,
-      error.message,
-      error.mensaje,
-      error.detail,
-      node.detail,
-      node.description,
-      typeof node.error === "string" ? node.error : "",
-      node.title,
-      node.reason,
-      node.msg
-    );
-
+    const message = pickText(node.message, node.mensaje, error.message, error.mensaje, error.detail, node.detail, node.description, typeof node.error === "string" ? node.error : "", node.title, node.reason, node.msg);
     if (message) return message;
   }
 
@@ -1140,57 +859,29 @@ function resolveMessage(input = {}, fallback = "") {
 }
 
 function resolveRedirectTo(input = {}, fallback = "") {
-  const raw = pickPrimitive(nodeList(input), [
-    "redirectTo",
-    "redirect_to",
-    "redirect",
-    "next",
-    "nextPath",
-    "next_path",
-    "returnTo",
-    "return_to",
-  ]);
-
+  const raw = pickPrimitive(nodeList(input), ["redirectTo", "redirect_to", "redirect", "next", "nextPath", "next_path", "returnTo", "return_to"]);
   return sanitizeRedirect(raw, fallback);
 }
 
 function resolveEmailMasked(input = {}) {
-  return safeText(
-    pickPrimitive(nodeList(input), ["emailMasked", "maskedEmail", "masked_email"])
-  );
+  return safeText(pickPrimitive(nodeList(input), ["emailMasked", "maskedEmail", "masked_email"]), "");
 }
 
 function parseRetryAfterToSeconds(value = "") {
-  const raw = safeText(value);
-
+  const raw = safeText(value, "");
   if (!raw) return 0;
 
   const numeric = Number(raw);
-
-  if (Number.isFinite(numeric)) {
-    return Math.max(0, Math.ceil(numeric));
-  }
+  if (Number.isFinite(numeric)) return Math.max(0, Math.ceil(numeric));
 
   const dateMs = Date.parse(raw);
-
-  if (Number.isFinite(dateMs)) {
-    return Math.max(0, Math.ceil((dateMs - Date.now()) / 1000));
-  }
+  if (Number.isFinite(dateMs)) return Math.max(0, Math.ceil((dateMs - Date.now()) / 1000));
 
   return 0;
 }
 
 function resolveRetryAfter(input = {}) {
-  const value = pickPrimitive(nodeList(input), [
-    "retryAfter",
-    "retry_after",
-    "cooldownSeconds",
-    "cooldown_seconds",
-    "rateLimitSeconds",
-    "rate_limit_seconds",
-  ]);
-
-  return Math.max(0, safeNumber(value, 0));
+  return Math.max(0, safeNumber(pickPrimitive(nodeList(input), ["retryAfter", "retry_after", "cooldownSeconds", "cooldown_seconds", "rateLimitSeconds", "rate_limit_seconds"]), 0));
 }
 
 function isCooldownResponse(input = {}) {
@@ -1199,24 +890,11 @@ function isCooldownResponse(input = {}) {
   const code = resolveCode(input).toUpperCase();
   const statusText = resolveStatusText(input);
 
-  return Boolean(
-    status === 429 ||
-      retryAfter > 0 ||
-      code === "RATE_LIMITED" ||
-      code === "TOO_MANY_REQUESTS" ||
-      statusText === "rate_limited" ||
-      statusText === "too_many_requests" ||
-      nodeList(input).some((node) => (
-        node.cooldown === true ||
-        node.rateLimited === true ||
-        node.rate_limited === true
-      ))
-  );
+  return Boolean(status === 429 || retryAfter > 0 || code === "RATE_LIMITED" || code === "TOO_MANY_REQUESTS" || statusText === "rate_limited" || statusText === "too_many_requests" || nodeList(input).some((node) => node.cooldown === true || node.rateLimited === true || node.rate_limited === true));
 }
 
 function isExplicitFailure(input = {}) {
   const explicitOk = resolveExplicitOk(input);
-
   if (explicitOk === false) return true;
 
   const status = resolveStatus(input);
@@ -1233,7 +911,6 @@ function isExplicitFailure(input = {}) {
 
 function isDeclaredSuccess(input = {}) {
   const explicitOk = resolveExplicitOk(input);
-
   if (explicitOk === true) return true;
   if (explicitOk === false) return false;
 
@@ -1244,146 +921,72 @@ function isDeclaredSuccess(input = {}) {
   return Boolean(statusText && SUCCESS_STATUS_TEXTS.has(statusText));
 }
 
-function normalizeBaseResponse(input = {}, {
-  successMessage = "",
-  errorMessage = "",
-  redirectFallback = "",
-} = {}) {
+function hasCompleteSession(input = {}) {
+  const token = extractToken(input);
+  const user = extractUser(input);
+  return Boolean(token && user && user.active !== false && (user.id || user.userId || user.email || user.username));
+}
+
+function normalizeBaseResponse(input = {}, { successMessage = "", errorMessage = "", redirectFallback = "" } = {}) {
   const cooldown = isCooldownResponse(input);
   const retryAfter = resolveRetryAfter(input);
   const explicitFailure = isExplicitFailure(input);
-
-  const ok = explicitFailure ? false : isDeclaredSuccess(input);
+  const sessionComplete = hasCompleteSession(input);
+  const ok = explicitFailure ? false : isDeclaredSuccess(input) || sessionComplete;
+  const token = extractToken(input);
+  const refreshToken = extractRefreshToken(input);
+  const user = extractUser(input);
+  const sessionData = normalizeSessionPayload(input);
 
   return {
     raw: input,
-
     ok,
     success: ok,
     error: !ok,
-
+    authenticated: Boolean(sessionComplete),
     status: resolveStatus(input),
     statusText: resolveStatusText(input) || null,
     code: resolveCode(input) || null,
-
     explicitFailure,
-
     cooldown,
     rateLimited: cooldown,
-
     retryAfter,
     cooldownSeconds: retryAfter,
-
-    message: resolveMessage(
-      input,
-      ok
-        ? successMessage
-        : cooldown
-          ? rateLimitMessage()
-          : errorMessage
-    ),
-
+    message: resolveMessage(input, ok ? successMessage : cooldown ? rateLimitMessage() : errorMessage),
     redirectTo: resolveRedirectTo(input, redirectFallback),
     emailMasked: resolveEmailMasked(input),
-
+    token: token || null,
+    accessToken: token || null,
+    access_token: token || null,
+    refreshToken: refreshToken || null,
+    refresh_token: refreshToken || null,
+    user: user || null,
+    usuario: user || null,
+    me: user || null,
+    session: sessionData || null,
+    sessionData: sessionData || null,
     at: isoNow(),
   };
 }
 
 export function normalizeResetPasswordResponse(input = {}) {
-  return normalizeBaseResponse(input, {
-    successMessage: defaultRequestSuccessMessage(),
-    errorMessage: defaultRequestErrorMessage(),
-    redirectFallback: "",
-  });
+  return normalizeBaseResponse(input, { successMessage: defaultRequestSuccessMessage(), errorMessage: defaultRequestErrorMessage(), redirectFallback: "" });
 }
 
 export function normalizeConfirmResetPasswordResponse(input = {}) {
-  const normalized = normalizeBaseResponse(input, {
-    successMessage: defaultConfirmSuccessMessage(),
-    errorMessage: defaultConfirmErrorMessage(),
-    redirectFallback: DEFAULT_LOGIN_REDIRECT,
-  });
-
-  return {
-    ...normalized,
-    redirectTo: normalized.redirectTo || DEFAULT_LOGIN_REDIRECT,
-  };
+  const normalized = normalizeBaseResponse(input, { successMessage: defaultConfirmSuccessMessage(), errorMessage: defaultConfirmErrorMessage(), redirectFallback: DEFAULT_LOGIN_REDIRECT });
+  return { ...normalized, redirectTo: normalized.redirectTo || DEFAULT_LOGIN_REDIRECT };
 }
 
 export function normalizeValidateResetTokenResponse(input = {}) {
-  return normalizeBaseResponse(input, {
-    successMessage: defaultValidateSuccessMessage(),
-    errorMessage: defaultValidateErrorMessage(),
-    redirectFallback: "",
-  });
+  return normalizeBaseResponse(input, { successMessage: defaultValidateSuccessMessage(), errorMessage: defaultValidateErrorMessage(), redirectFallback: "" });
 }
 
 export const normalizeValidateResetPasswordTokenResponse = normalizeValidateResetTokenResponse;
 
 /* =========================================================
-   URL / TRANSPORT
+   TRANSPORT
 ========================================================= */
-
-function normalizeApiBase(value = "") {
-  const raw = safeText(value, API_ORIGIN);
-
-  if (!isAbsoluteUrl(raw)) {
-    return raw.replace(/\/+$/g, "");
-  }
-
-  try {
-    const parsed = new URL(raw);
-    const origin = parsed.origin.replace(/\/+$/g, "");
-    const pathname = (parsed.pathname || "/").replace(/\/+$/g, "") || "/";
-
-    if (pathname === "/" || pathname === "/api") return origin;
-
-    return `${origin}${pathname}`.replace(/\/+$/g, "");
-  } catch {
-    return API_ORIGIN;
-  }
-}
-
-function resolveApiBase() {
-  return normalizeApiBase(
-    AppCore?.config?.apiBase ||
-      AppCore?.config?.apiOrigin ||
-      AppCore?.config?.apiUrl ||
-      AppCore?.config?.api?.base ||
-      AppCore?.config?.api?.baseUrl ||
-      AppCore?.config?.api?.origin ||
-      API_ORIGIN
-  );
-}
-
-function buildFinalUrl(endpoint = "") {
-  const clean = safeText(endpoint, DEFAULT_REQUEST_ENDPOINT);
-
-  if (isAbsoluteUrl(clean)) return clean;
-
-  const base = resolveApiBase().replace(/\/+$/g, "");
-
-  let path = clean.startsWith("/") ? clean : `/${clean}`;
-
-  if (base.endsWith("/api") && path.startsWith("/api/")) {
-    path = path.slice(4);
-  }
-
-  return `${base}${path}`;
-}
-
-function stripAuthHeaders(headers = {}) {
-  const output = { ...safeObject(headers) };
-
-  for (const key of Object.keys(output)) {
-    if (AUTH_HEADER_NAMES.has(String(key).toLowerCase())) {
-      delete output[key];
-    }
-  }
-
-  return output;
-}
 
 function buildRequestOptions(options = {}) {
   let publicOptions = {};
@@ -1397,275 +1000,47 @@ function buildRequestOptions(options = {}) {
   return {
     ...publicOptions,
     ...safeObject(options),
-
-    method: "POST",
-
     public: true,
     auth: false,
     skipAuth: true,
     noAuthHeader: true,
-
     _skipAuthRefresh: true,
     skipAuthRefresh: true,
     noAutoRefresh: true,
     autoRefresh: false,
-
     noAutoLogout: true,
     autoLogout: false,
-
     retry: false,
     retries: 0,
     _skipRetry: true,
     skipRetry: true,
-
     silent: true,
     storeError: false,
     dedupe: false,
-
+    captureAuth: false,
     timeout,
     timeoutMs: timeout,
-
-    useLoader: options.useLoader !== false,
-    credentials: options.credentials || "include",
-
-    headers: stripAuthHeaders({
+    headers: {
       "X-Onion-Auth-Flow": "password-reset",
       "X-Request-Source": SOURCE,
       ...safeObject(options.headers),
-    }),
+    },
   };
 }
 
-function getHttpService() {
-  return (
-    AppCore?.Http ||
-    AppCore?.http ||
-    AppCore?.services?.Http ||
-    AppCore?.services?.http ||
-    null
-  );
-}
-
-async function requestWithHttp(endpoint, body, options = {}) {
-  const http = getHttpService();
-
-  if (!http) return null;
-
-  const requestOptions = buildRequestOptions(options);
-
-  if (isFunction(http.post)) {
-    return http.post(endpoint, body, requestOptions);
-  }
-
-  if (isFunction(http.request)) {
-    try {
-      return await http.request("POST", endpoint, {
-        ...requestOptions,
-        body,
-      });
-    } catch (error) {
-      if (getErrorStatus(error)) throw error;
-
-      return http.request(endpoint, {
-        ...requestOptions,
-        method: "POST",
-        body,
-      });
-    }
-  }
-
-  return null;
-}
-
-async function requestWithApiClient(endpoint, body, options = {}) {
-  const client = AppCore?.apiClient;
-
-  if (!client) return null;
-
-  const requestOptions = buildRequestOptions(options);
-
-  if (isFunction(client.post)) {
-    return client.post(endpoint, body, requestOptions);
-  }
-
-  if (isFunction(client.request)) {
-    try {
-      return await client.request(endpoint, {
-        ...requestOptions,
-        method: "POST",
-        body,
-      });
-    } catch (error) {
-      if (getErrorStatus(error)) throw error;
-
-      return client.request("POST", endpoint, {
-        ...requestOptions,
-        body,
-      });
-    }
-  }
-
-  return null;
-}
-
-async function requestWithAppCore(endpoint, body, options = {}) {
-  if (!isFunction(AppCore?.request)) return null;
-
-  const requestOptions = buildRequestOptions(options);
-
-  try {
-    return await AppCore.request(endpoint, {
-      ...requestOptions,
-      method: "POST",
-      body,
-    });
-  } catch (error) {
-    if (getErrorStatus(error)) throw error;
-
-    return AppCore.request("POST", endpoint, {
-      ...requestOptions,
-      body,
-    });
-  }
-}
-
-function createTimeoutError() {
-  const error = new Error("Password reset timeout");
-  error.name = "TimeoutError";
-  error.code = "REQUEST_TIMEOUT";
-  error.timeout = true;
-  return error;
-}
-
-async function parseFetchBody(response) {
-  const contentType = safeText(response?.headers?.get?.("content-type")).toLowerCase();
-
-  try {
-    if (contentType.includes("application/json")) {
-      return await response.json();
-    }
-
-    const text = await response.text();
-
-    if (!text) return {};
-
-    try {
-      return JSON.parse(text);
-    } catch {
-      return { message: text };
-    }
-  } catch {
-    return {};
-  }
-}
-
-async function requestWithFetch(endpoint, body, options = {}) {
-  if (typeof fetch !== "function") {
-    const error = new Error("Fetch API no disponible.");
-    error.status = 500;
-    error.code = "FETCH_MISSING";
-    throw error;
-  }
-
-  const requestOptions = buildRequestOptions(options);
-  const timeout = requestOptions.timeout;
-  const url = buildFinalUrl(endpoint);
-
-  const controller = typeof AbortController !== "undefined"
-    ? new AbortController()
-    : null;
-
-  let timedOut = false;
-
-  const timer = controller
-    ? setTimeout(() => {
-        timedOut = true;
-
-        try {
-          controller.abort(createTimeoutError());
-        } catch {
-          controller.abort();
-        }
-      }, timeout)
-    : null;
-
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: stripAuthHeaders({
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...requestOptions.headers,
-      }),
-      credentials: requestOptions.credentials || "include",
-      cache: "no-store",
-      mode: "cors",
-      signal: requestOptions.signal || controller?.signal || undefined,
-      body: JSON.stringify(body || {}),
-    });
-
-    const payload = safeObject(await parseFetchBody(response));
-
-    const retryAfterHeader = parseRetryAfterToSeconds(response.headers?.get?.("retry-after") || "");
-
-    const enriched = {
-      ...payload,
-      status: payload.status ?? payload.statusCode ?? response.status,
-      statusCode: payload.statusCode ?? payload.status ?? response.status,
-      retryAfter:
-        payload.retryAfter ??
-        payload.retry_after ??
-        payload.cooldownSeconds ??
-        retryAfterHeader,
-    };
-
-    if (!response.ok) {
-      const error = new Error(resolveMessage(enriched, response.statusText || defaultRequestErrorMessage()));
-
-      error.status = response.status;
-      error.statusText = response.statusText;
-      error.data = enriched;
-      error.retryAfter = enriched.retryAfter || 0;
-
-      throw error;
-    }
-
-    return enriched;
-  } catch (error) {
-    if (timedOut) {
-      error.timeout = true;
-      error.aborted = false;
-      error.code = error.code || "REQUEST_TIMEOUT";
-    }
-
-    throw error;
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
 async function executeRequest(endpoint, body, options = {}) {
-  for (const transport of [requestWithHttp, requestWithApiClient, requestWithAppCore]) {
-    const result = await transport(endpoint, body, options);
-
-    if (result !== null && result !== undefined) {
-      return result;
-    }
+  if (!isFunction(CoreHttp?.post)) {
+    const error = new Error("CoreHttp no disponible para password-reset.");
+    error.status = 500;
+    error.code = "CORE_HTTP_MISSING";
+    throw error;
   }
 
-  return requestWithFetch(endpoint, body, options);
+  return CoreHttp.post(endpoint, body, buildRequestOptions(options));
 }
 
 function getErrorStatus(error = null) {
-  return safeNumber(
-    error?.status ||
-      error?.statusCode ||
-      error?.response?.status ||
-      error?.data?.status ||
-      error?.response?.data?.status ||
-      0,
-    0
-  );
+  return safeNumber(error?.status || error?.statusCode || error?.response?.status || error?.data?.status || error?.response?.data?.status || 0, 0);
 }
 
 function shouldTryNextEndpoint(error = null) {
@@ -1677,16 +1052,10 @@ async function executeWithCandidates(candidates = [], body = {}, options = {}) {
 
   for (const endpoint of unique(candidates)) {
     try {
-      return await executeRequest(endpoint, body, {
-        ...safeObject(options),
-        endpoint,
-      });
+      return await executeRequest(endpoint, body, { ...safeObject(options), endpoint });
     } catch (error) {
       lastError = error;
-
-      if (!shouldTryNextEndpoint(error)) {
-        throw error;
-      }
+      if (!shouldTryNextEndpoint(error)) throw error;
     }
   }
 
@@ -1694,72 +1063,27 @@ async function executeWithCandidates(candidates = [], body = {}, options = {}) {
 }
 
 /* =========================================================
-   ERRORS
+   ERRORS / COOLDOWN
 ========================================================= */
 
 function normalizeTransportError(error = null, fallbackMessage = defaultRequestErrorMessage()) {
   const status = getErrorStatus(error);
-
-  const retryAfter = Math.max(
-    0,
-    safeNumber(
-      error?.retryAfter ??
-        error?.retry_after ??
-        error?.cooldownSeconds ??
-        error?.cooldown_seconds ??
-        error?.data?.retryAfter ??
-        error?.data?.retry_after ??
-        error?.data?.cooldownSeconds ??
-        error?.data?.cooldown_seconds ??
-        error?.response?.data?.retryAfter ??
-        error?.response?.data?.retry_after ??
-        error?.response?.data?.cooldownSeconds ??
-        error?.response?.data?.cooldown_seconds ??
-        0,
-      0
-    )
-  );
+  const retryAfter = Math.max(0, safeNumber(error?.retryAfter ?? error?.retry_after ?? error?.cooldownSeconds ?? error?.cooldown_seconds ?? error?.data?.retryAfter ?? error?.data?.retry_after ?? error?.data?.cooldownSeconds ?? error?.data?.cooldown_seconds ?? error?.response?.data?.retryAfter ?? error?.response?.data?.retry_after ?? error?.response?.data?.cooldownSeconds ?? error?.response?.data?.cooldown_seconds ?? 0, 0));
 
   return {
     ok: false,
     success: false,
     error: true,
-
     status,
     statusText: error?.statusText || null,
-
-    code:
-      error?.code ||
-      error?.data?.code ||
-      error?.response?.data?.code ||
-      null,
-
+    code: error?.code || error?.data?.code || error?.response?.data?.code || null,
     retryAfter,
     cooldownSeconds: retryAfter,
     cooldown: status === 429 || retryAfter > 0,
     rateLimited: status === 429 || retryAfter > 0,
-
-    timeout:
-      error?.timeout === true ||
-      String(error?.name || "").toLowerCase().includes("timeout") ||
-      String(error?.code || "").toLowerCase().includes("timeout"),
-
-    aborted:
-      error?.aborted === true ||
-      String(error?.name || "") === "AbortError",
-
-    message:
-      error?.data?.message ||
-      error?.data?.mensaje ||
-      error?.data?.error?.message ||
-      error?.data?.error ||
-      error?.response?.data?.message ||
-      error?.response?.data?.mensaje ||
-      error?.response?.data?.error?.message ||
-      error?.response?.data?.error ||
-      error?.message ||
-      (status === 429 || retryAfter > 0 ? rateLimitMessage() : fallbackMessage),
-
+    timeout: error?.timeout === true || String(error?.name || "").toLowerCase().includes("timeout") || String(error?.code || "").toLowerCase().includes("timeout"),
+    aborted: error?.aborted === true || String(error?.name || "") === "AbortError",
+    message: error?.data?.message || error?.data?.mensaje || error?.data?.error?.message || error?.data?.error || error?.response?.data?.message || error?.response?.data?.mensaje || error?.response?.data?.error?.message || error?.response?.data?.error || error?.message || (status === 429 || retryAfter > 0 ? rateLimitMessage() : fallbackMessage),
     data: error?.data || error?.response?.data || null,
     raw: error || null,
   };
@@ -1768,7 +1092,7 @@ function normalizeTransportError(error = null, fallbackMessage = defaultRequestE
 function rememberError(type = "unknown", error = null) {
   runtime.lastError = {
     type,
-    message: safeText(error?.message),
+    message: safeText(error?.message, ""),
     status: getErrorStatus(error),
     code: error?.code || null,
     timeout: error?.timeout === true,
@@ -1781,6 +1105,7 @@ function rememberResult(type = "unknown", result = {}) {
   runtime.lastResult = {
     type,
     ok: Boolean(result?.ok),
+    authenticated: Boolean(result?.authenticated),
     status: result?.status || 0,
     statusText: result?.statusText || null,
     code: result?.code || null,
@@ -1789,79 +1114,22 @@ function rememberResult(type = "unknown", result = {}) {
     at: isoNow(),
   };
 
-  if (result?.cooldown && result?.retryAfter) {
-    setCooldown(result.retryAfter);
-  }
-
-  if (result?.ok) {
-    clearPasswordResetCooldown();
-  }
-}
-
-/* =========================================================
-   COOLDOWN
-========================================================= */
-
-function getCooldownStorageKey() {
-  return safeText(AUTH_STORAGE_KEYS?.resetCooldownUntil, "reset_cooldown_until");
-}
-
-function readCooldownFromStorage() {
-  try {
-    const key = getCooldownStorageKey();
-
-    return safeNumber(
-      AppCore?.storage?.getRaw?.(key) ??
-        AppCore?.storage?.get?.(key) ??
-        0,
-      0
-    );
-  } catch {
-    return 0;
-  }
-}
-
-function writeCooldownToStorage(untilMs = 0) {
-  try {
-    const key = getCooldownStorageKey();
-
-    if (untilMs > 0) {
-      AppCore?.storage?.setRaw?.(key, String(untilMs));
-      AppCore?.storage?.set?.(key, String(untilMs));
-    } else {
-      AppCore?.storage?.remove?.(key);
-    }
-  } catch {}
-}
-
-function getCooldownUntil() {
-  return Math.max(runtime.cooldownUntil || 0, readCooldownFromStorage());
+  if (result?.cooldown && result?.retryAfter) setCooldown(result.retryAfter);
+  if (result?.ok) clearPasswordResetCooldown();
 }
 
 function getRemainingCooldownSeconds() {
-  return Math.max(0, Math.ceil((getCooldownUntil() - nowMs()) / 1000));
+  return Math.max(0, Math.ceil((runtime.cooldownUntil - nowMs()) / 1000));
 }
 
 function setCooldown(seconds = 0) {
   const value = clampNumber(seconds || getDefaultCooldownSeconds(), 0, 3600);
-
-  if (value <= 0) {
-    runtime.cooldownUntil = 0;
-    writeCooldownToStorage(0);
-    return 0;
-  }
-
-  const until = nowMs() + value * 1000;
-
-  runtime.cooldownUntil = until;
-  writeCooldownToStorage(until);
-
+  runtime.cooldownUntil = value > 0 ? nowMs() + value * 1000 : 0;
   return value;
 }
 
 export function clearPasswordResetCooldown() {
   runtime.cooldownUntil = 0;
-  writeCooldownToStorage(0);
   return true;
 }
 
@@ -1872,31 +1140,20 @@ function cooldownResponse() {
     ok: false,
     success: false,
     error: true,
-
     status: 429,
     code: "RATE_LIMITED",
-
     cooldown: true,
     rateLimited: true,
-
     retryAfter,
     cooldownSeconds: retryAfter,
-
     message: rateLimitMessage(),
-
-    raw: {
-      ok: false,
-      status: 429,
-      retryAfter,
-      message: rateLimitMessage(),
-    },
-
+    raw: { ok: false, status: 429, retryAfter, message: rateLimitMessage() },
     at: isoNow(),
   };
 }
 
 /* =========================================================
-   VALIDATION
+   VALIDATION / SESSION
 ========================================================= */
 
 function validateRequestPayload(normalized = {}) {
@@ -1908,16 +1165,12 @@ function validateRequestPayload(normalized = {}) {
 function validateConfirmPayload(normalized = {}) {
   if (!normalized.token) return "No se recibió token de recuperación.";
   if (normalized.token.length < getTokenMinLength()) return "El token de recuperación no es válido.";
-
   if (!normalized.password) return "La nueva contraseña es obligatoria.";
   if (normalized.password.length < getPasswordMinLength()) return `La contraseña debe tener al menos ${getPasswordMinLength()} caracteres.`;
   if (normalized.password.length > getPasswordMaxLength()) return "La contraseña es demasiado larga.";
-
   if (!normalized.confirmPassword) return "La confirmación de contraseña es obligatoria.";
   if (normalized.confirmPassword.length > getPasswordMaxLength()) return "La confirmación de contraseña es demasiado larga.";
-
   if (normalized.password !== normalized.confirmPassword) return "Las contraseñas no coinciden.";
-
   return "";
 }
 
@@ -1928,8 +1181,7 @@ function validateTokenPayload(normalized = {}) {
 }
 
 function maybePersistResetIdentifier(identifier = "") {
-  const value = safeText(identifier);
-
+  const value = safeText(identifier, "");
   if (!value) return false;
 
   try {
@@ -1940,45 +1192,60 @@ function maybePersistResetIdentifier(identifier = "") {
   }
 }
 
+function maybeApplyReturnedSession(result = {}, source = "password-reset") {
+  if (!result?.authenticated || !result?.token || !result?.user) return null;
+
+  try {
+    return applySession({
+      token: result.token,
+      accessToken: result.token,
+      access_token: result.token,
+      refreshToken: result.refreshToken || null,
+      refresh_token: result.refreshToken || null,
+      user: result.user,
+      usuario: result.user,
+      me: result.user,
+      session: result.sessionData || result.session || null,
+      sessionData: result.sessionData || result.session || null,
+      authenticated: true,
+      preserveExistingUser: false,
+      source,
+      eventMode: "login",
+    }, {
+      source,
+      eventMode: "login",
+      silent: true,
+      emit: false,
+    });
+  } catch (error) {
+    warn("No se pudo aplicar sesión devuelta por password-reset.", error);
+    return null;
+  }
+}
+
 /* =========================================================
    ACTIONS
 ========================================================= */
 
 export async function requestPasswordReset(payload = {}, options = {}) {
   if (runtime.requestInFlight) return runtime.requestInFlight;
-
-  if (getRemainingCooldownSeconds() > 0) {
-    return normalizeResetPasswordResponse(cooldownResponse());
-  }
+  if (getRemainingCooldownSeconds() > 0) return normalizeResetPasswordResponse(cooldownResponse());
 
   const normalized = normalizeResetPasswordPayload(payload);
   const validationError = validateRequestPayload(normalized);
 
-  if (validationError) {
-    return normalizeResetPasswordResponse({
-      ok: false,
-      status: 400,
-      message: validationError,
-    });
-  }
+  if (validationError) return normalizeResetPasswordResponse({ ok: false, status: 400, message: validationError });
 
   const body = buildResetPasswordRequestBody(normalized);
   const endpoints = endpointCandidatesFor("request");
 
   runtime.requestCount += 1;
   runtime.lastRequestAt = nowMs();
-
   maybePersistResetIdentifier(normalized.identifier);
 
   emit("auth:password-reset:request:start", {
     endpoints,
-    identifierType: normalized.email
-      ? "email"
-      : normalized.phone
-        ? "phone"
-        : normalized.username
-          ? "username"
-          : "identifier",
+    identifierType: normalized.email ? "email" : normalized.phone ? "phone" : normalized.username ? "username" : "identifier",
   }, options);
 
   runtime.requestInFlight = (async () => {
@@ -1987,33 +1254,16 @@ export async function requestPasswordReset(payload = {}, options = {}) {
       const result = normalizeResetPasswordResponse(raw);
 
       rememberResult("request", result);
-
-      emit("auth:password-reset:request:complete", {
-        ok: result.ok,
-        status: result.status,
-        statusText: result.statusText,
-        cooldown: result.cooldown,
-        retryAfter: result.retryAfter,
-      }, options);
+      emit("auth:password-reset:request:complete", { ok: result.ok, status: result.status, statusText: result.statusText, cooldown: result.cooldown, retryAfter: result.retryAfter }, options);
 
       return result;
     } catch (error) {
       rememberError("request", error);
 
-      const result = normalizeResetPasswordResponse(
-        normalizeTransportError(error, defaultRequestErrorMessage())
-      );
-
+      const result = normalizeResetPasswordResponse(normalizeTransportError(error, defaultRequestErrorMessage()));
       rememberResult("request:error", result);
 
-      emit("auth:password-reset:request:error", {
-        status: result.status,
-        statusText: result.statusText,
-        code: result.code,
-        cooldown: result.cooldown,
-        retryAfter: result.retryAfter,
-        message: result.message,
-      }, options);
+      emit("auth:password-reset:request:error", { status: result.status, statusText: result.statusText, code: result.code, cooldown: result.cooldown, retryAfter: result.retryAfter, message: result.message }, options);
 
       return result;
     } finally {
@@ -2030,13 +1280,7 @@ export async function confirmResetPassword(payload = {}, options = {}) {
   const normalized = normalizeConfirmResetPasswordPayload(payload);
   const validationError = validateConfirmPayload(normalized);
 
-  if (validationError) {
-    return normalizeConfirmResetPasswordResponse({
-      ok: false,
-      status: 400,
-      message: validationError,
-    });
-  }
+  if (validationError) return normalizeConfirmResetPasswordResponse({ ok: false, status: 400, message: validationError });
 
   const body = buildConfirmResetPasswordBody(normalized);
   const endpoints = endpointCandidatesFor("confirm");
@@ -2050,36 +1294,20 @@ export async function confirmResetPassword(payload = {}, options = {}) {
     try {
       const raw = await executeWithCandidates(endpoints, body, options);
       const result = normalizeConfirmResetPasswordResponse(raw);
+      const sessionSnapshot = maybeApplyReturnedSession(result, "password-reset:confirm");
+      const finalResult = { ...result, sessionApplied: Boolean(sessionSnapshot) };
 
-      rememberResult("confirm", result);
+      rememberResult("confirm", finalResult);
+      emit("auth:password-reset:confirm:complete", { ok: finalResult.ok, status: finalResult.status, statusText: finalResult.statusText, cooldown: finalResult.cooldown, retryAfter: finalResult.retryAfter, redirectTo: finalResult.redirectTo, sessionApplied: finalResult.sessionApplied }, options);
 
-      emit("auth:password-reset:confirm:complete", {
-        ok: result.ok,
-        status: result.status,
-        statusText: result.statusText,
-        cooldown: result.cooldown,
-        retryAfter: result.retryAfter,
-        redirectTo: result.redirectTo,
-      }, options);
-
-      return result;
+      return finalResult;
     } catch (error) {
       rememberError("confirm", error);
 
-      const result = normalizeConfirmResetPasswordResponse(
-        normalizeTransportError(error, defaultConfirmErrorMessage())
-      );
-
+      const result = normalizeConfirmResetPasswordResponse(normalizeTransportError(error, defaultConfirmErrorMessage()));
       rememberResult("confirm:error", result);
 
-      emit("auth:password-reset:confirm:error", {
-        status: result.status,
-        statusText: result.statusText,
-        code: result.code,
-        cooldown: result.cooldown,
-        retryAfter: result.retryAfter,
-        message: result.message,
-      }, options);
+      emit("auth:password-reset:confirm:error", { status: result.status, statusText: result.statusText, code: result.code, cooldown: result.cooldown, retryAfter: result.retryAfter, message: result.message }, options);
 
       return result;
     } finally {
@@ -2096,13 +1324,7 @@ export async function validateResetPasswordToken(payload = {}, options = {}) {
   const normalized = normalizeValidateResetTokenPayload(payload);
   const validationError = validateTokenPayload(normalized);
 
-  if (validationError) {
-    return normalizeValidateResetTokenResponse({
-      ok: false,
-      status: 400,
-      message: validationError,
-    });
-  }
+  if (validationError) return normalizeValidateResetTokenResponse({ ok: false, status: 400, message: validationError });
 
   const body = buildValidateResetTokenBody(normalized);
   const endpoints = endpointCandidatesFor("validate");
@@ -2118,29 +1340,16 @@ export async function validateResetPasswordToken(payload = {}, options = {}) {
       const result = normalizeValidateResetTokenResponse(raw);
 
       rememberResult("validate", result);
-
-      emit("auth:password-reset:validate:complete", {
-        ok: result.ok,
-        status: result.status,
-        statusText: result.statusText,
-      }, options);
+      emit("auth:password-reset:validate:complete", { ok: result.ok, status: result.status, statusText: result.statusText }, options);
 
       return result;
     } catch (error) {
       rememberError("validate", error);
 
-      const result = normalizeValidateResetTokenResponse(
-        normalizeTransportError(error, defaultValidateErrorMessage())
-      );
-
+      const result = normalizeValidateResetTokenResponse(normalizeTransportError(error, defaultValidateErrorMessage()));
       rememberResult("validate:error", result);
 
-      emit("auth:password-reset:validate:error", {
-        status: result.status,
-        statusText: result.statusText,
-        code: result.code,
-        message: result.message,
-      }, options);
+      emit("auth:password-reset:validate:error", { status: result.status, statusText: result.statusText, code: result.code, message: result.message }, options);
 
       return result;
     } finally {
@@ -2192,19 +1401,14 @@ function sanitizeBodyForSnapshot(body = {}) {
 export function getPasswordResetSnapshot() {
   return {
     version: PASSWORD_RESET_MODULE_VERSION,
-
     requestEndpoint: getRequestPasswordResetEndpoint(),
     requestEndpointCandidates: endpointCandidatesFor("request"),
-
     confirmEndpoint: getConfirmResetPasswordEndpoint(),
     confirmEndpointCandidates: endpointCandidatesFor("confirm"),
-
     validateEndpoint: getValidateResetPasswordTokenEndpoint(),
     validateEndpointCandidates: endpointCandidatesFor("validate"),
-
     currentPath: redact(getCurrentPath()),
     hasResetTokenInCurrentUrl: Boolean(extractResetTokenFromUrl()),
-
     publicRequestPolicy: {
       auth: false,
       public: true,
@@ -2216,7 +1420,6 @@ export function getPasswordResetSnapshot() {
       retry: false,
       retries: 0,
     },
-
     limits: {
       identifierMaxLength: getIdentifierMaxLength(),
       tokenMinLength: getTokenMinLength(),
@@ -2226,34 +1429,28 @@ export function getPasswordResetSnapshot() {
       timeout: getTimeoutMs(),
       defaultCooldownSeconds: getDefaultCooldownSeconds(),
     },
-
     runtime: {
       requestInFlight: Boolean(runtime.requestInFlight),
       confirmInFlight: Boolean(runtime.confirmInFlight),
       validateInFlight: Boolean(runtime.validateInFlight),
-
       lastRequestAt: runtime.lastRequestAt,
       lastConfirmAt: runtime.lastConfirmAt,
       lastValidateAt: runtime.lastValidateAt,
-
       requestCount: runtime.requestCount,
       confirmCount: runtime.confirmCount,
       validateCount: runtime.validateCount,
-
-      cooldownUntil: getCooldownUntil(),
+      cooldownUntil: runtime.cooldownUntil,
       remainingCooldownSeconds: getRemainingCooldownSeconds(),
-
-      lastError: runtime.lastError ? cloneSafe(runtime.lastError, null) : null,
-      lastResult: runtime.lastResult ? cloneSafe(runtime.lastResult, null) : null,
+      lastError: runtime.lastError ? { ...runtime.lastError } : null,
+      lastResult: runtime.lastResult ? { ...runtime.lastResult } : null,
     },
-
-    transports: {
-      hasHttpService: Boolean(getHttpService()),
-      hasApiClient: Boolean(AppCore?.apiClient),
-      hasAppCoreRequest: isFunction(AppCore?.request),
-      hasFetch: typeof fetch === "function",
+    transport: {
+      hasCoreHttp: Boolean(CoreHttp?.post),
+      ownFetch: false,
+      ownApiClient: false,
+      ownRouter: false,
+      ownToast: false,
     },
-
     at: isoNow(),
   };
 }
@@ -2270,59 +1467,56 @@ export function getPasswordResetDebugPayload(payload = {}) {
    DEFAULT EXPORT
 ========================================================= */
 
-const PasswordReset = Object.assign(
+const PasswordReset = Object.assign(requestPasswordReset, {
+  version: PASSWORD_RESET_MODULE_VERSION,
+
   requestPasswordReset,
-  {
-    version: PASSWORD_RESET_MODULE_VERSION,
+  resetPasswordRequest,
+  requestResetPassword,
+  passwordResetRequest,
+  forgotPassword,
+  recoverPassword,
 
-    requestPasswordReset,
-    resetPasswordRequest,
-    requestResetPassword,
-    passwordResetRequest,
-    forgotPassword,
-    recoverPassword,
+  confirmResetPassword,
+  resetPasswordConfirm,
+  confirmPasswordReset,
+  passwordResetConfirm,
 
-    confirmResetPassword,
-    resetPasswordConfirm,
-    confirmPasswordReset,
-    passwordResetConfirm,
+  validateResetPasswordToken,
+  validateResetToken,
+  resetPasswordValidate,
+  validatePasswordReset,
+  passwordResetValidate,
 
-    validateResetPasswordToken,
-    validateResetToken,
-    resetPasswordValidate,
-    validatePasswordReset,
-    passwordResetValidate,
+  resolveResetPasswordIdentifier,
+  resolveResetPasswordToken,
 
-    resolveResetPasswordIdentifier,
-    resolveResetPasswordToken,
+  normalizeResetPasswordPayload,
+  normalizeConfirmResetPasswordPayload,
+  normalizeValidateResetTokenPayload,
+  normalizeValidateResetPasswordTokenPayload,
 
-    normalizeResetPasswordPayload,
-    normalizeConfirmResetPasswordPayload,
-    normalizeValidateResetTokenPayload,
-    normalizeValidateResetPasswordTokenPayload,
+  buildResetPasswordRequestBody,
+  buildConfirmResetPasswordBody,
+  buildValidateResetTokenBody,
+  buildValidateResetPasswordTokenBody,
 
-    buildResetPasswordRequestBody,
-    buildConfirmResetPasswordBody,
-    buildValidateResetTokenBody,
-    buildValidateResetPasswordTokenBody,
+  normalizeResetPasswordResponse,
+  normalizeConfirmResetPasswordResponse,
+  normalizeValidateResetTokenResponse,
+  normalizeValidateResetPasswordTokenResponse,
 
-    normalizeResetPasswordResponse,
-    normalizeConfirmResetPasswordResponse,
-    normalizeValidateResetTokenResponse,
-    normalizeValidateResetPasswordTokenResponse,
+  getRequestPasswordResetEndpoint,
+  getResetPasswordRequestEndpoint,
+  getConfirmResetPasswordEndpoint,
+  getConfirmPasswordResetEndpoint,
+  getValidateResetPasswordTokenEndpoint,
+  getValidateResetTokenEndpoint,
 
-    getRequestPasswordResetEndpoint,
-    getResetPasswordRequestEndpoint,
-    getConfirmResetPasswordEndpoint,
-    getConfirmPasswordResetEndpoint,
-    getValidateResetPasswordTokenEndpoint,
-    getValidateResetTokenEndpoint,
+  clearPasswordResetCooldown,
 
-    clearPasswordResetCooldown,
-
-    getPasswordResetSnapshot,
-    getPasswordResetDebugPayload,
-  }
-);
+  getPasswordResetSnapshot,
+  getPasswordResetDebugPayload,
+});
 
 export default PasswordReset;

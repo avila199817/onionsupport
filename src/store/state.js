@@ -2,32 +2,12 @@
    Onion SPA - Store State
    Archivo: src/store/state.js
 
-   ONION SUPPORT · STORE STATE
-   INITIAL STATE · STRICT AUTH · UI SNAPSHOTS · 14/10
-
-   Responsabilidades:
-   - construir estado inicial del Store
-   - exponer snapshots raíz seguros
-   - resolver títulos desde DOM / AppCore
-   - tocar metadata reactiva
-   - clonar slices sin referencias peligrosas
-   - resolver tema inicial desde sistema / navegador / preboot
-   - evitar estados auth fantasma
-   - mantener session/ui/app coherentes durante boot
-   - tolerar AppCore parcial durante arranque
-   - preservar route/publicPath y contexto visible
-   - normalizar entities/flags/meta
-   - no depender de Core completo para arrancar
-
-   HARDENING:
-   - browser/server safe
-   - token sin user NO autentica
-   - user sin token NO autentica
-   - usuario inactivo/bloqueado NO autentica
-   - theme: system/light/dark robusto
-   - no referencias mutables peligrosas en snapshots
-   - títulos tolerantes a DOM parcial
-   - compatible con AppCore.config/state/dom/storage parcial
+   Store State limpio:
+   - El Store NO es dueño de auth, router ni HTTP.
+   - AppCore sigue siendo fuente de sesión/ruta/config.
+   - Store sólo mantiene snapshot ligero + datos de dominio.
+   - Nunca guarda token real.
+   - Auth estricta: token + user activo; si falta uno, no autentica.
 ========================================================= */
 
 import {
@@ -40,189 +20,147 @@ import {
    VERSION
 ========================================================= */
 
-export const STORE_STATE_VERSION =
-  "14.0.0";
+export const STORE_STATE_VERSION = "15.0.0-clean";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-const APP_NAME_FALLBACK =
-  "Onion Support";
+const APP_NAME_FALLBACK = "Onion Support";
+const DEFAULT_ROUTE = "/";
+const DEFAULT_LANG = "es";
+const DEFAULT_THEME = "dark";
 
-const LANG_FALLBACK =
-  "es";
+const ROLE_ADMIN = "admin";
+const ROLE_USER = "user";
 
-const THEME_LIGHT =
-  "light";
+const RESOURCE_KEYS = Object.freeze([
+  "tickets",
+  "incidencias",
+  "facturas",
+  "clientes",
+  "usuarios",
+  "hardware",
+  "recientes",
+]);
 
-const THEME_DARK =
-  "dark";
+const INDEXED_RESOURCE_KEYS = Object.freeze([
+  "tickets",
+  "incidencias",
+  "facturas",
+  "clientes",
+  "usuarios",
+  "hardware",
+]);
 
-const THEME_SYSTEM =
-  "system";
+const FETCH_FLAG_KEYS = Object.freeze([
+  "Dashboard",
+  "Tickets",
+  "Incidencias",
+  "Facturas",
+  "Clientes",
+  "Usuarios",
+  "Hardware",
+  "Search",
+]);
 
-const DEFAULT_ROUTE =
-  "/";
+const TOKEN_BAD_VALUES = Object.freeze([
+  "",
+  "null",
+  "undefined",
+  "false",
+  "true",
+  "nan",
+  "none",
+  "empty",
+  "[object object]",
+  "{}",
+  "[]",
+  "\"\"",
+  "''",
+]);
 
-const TOKEN_BAD_VALUES =
-  Object.freeze([
-    "",
-    "null",
-    "undefined",
-    "false",
-    "true",
-    "nan",
-    "none",
-    "empty",
-    "[object object]",
-    "{}",
-    "[]",
-    "\"\"",
-    "''",
-  ]);
+const USER_ID_KEYS = Object.freeze([
+  "id",
+  "userId",
+  "user_id",
+  "_id",
+  "uid",
+  "sub",
+  "username",
+  "userName",
+  "user_name",
+  "slug",
+  "email",
+  "mail",
+]);
 
-const USER_ID_KEYS =
-  Object.freeze([
-    "id",
-    "userId",
-    "user_id",
-    "_id",
-    "uid",
-    "sub",
-    "username",
-    "userName",
-    "user_name",
-    "email",
-    "mail",
-    "phone",
-    "telefono",
-    "mobile",
-  ]);
+const INACTIVE_STATUSES = Object.freeze([
+  "disabled",
+  "inactive",
+  "deleted",
+  "blocked",
+  "suspended",
+  "banned",
+  "revoked",
+  "archived",
+  "desactivado",
+  "inactivo",
+  "eliminado",
+  "bloqueado",
+  "suspendido",
+]);
 
-const USER_INACTIVE_STATUSES =
-  Object.freeze([
-    "disabled",
-    "inactive",
-    "deleted",
-    "blocked",
-    "suspended",
-    "banned",
-    "revoked",
-    "desactivado",
-    "inactivo",
-    "eliminado",
-    "bloqueado",
-    "suspendido",
-  ]);
-
-const ADMIN_ROLES =
-  Object.freeze([
-    "admin",
-    "administrator",
-    "administrador",
-    "superadmin",
-    "super_admin",
-    "owner",
-    "root",
-  ]);
+const ADMIN_ALIASES = Object.freeze([
+  "admin",
+  "administrator",
+  "administrador",
+  "superadmin",
+  "super_admin",
+  "super-admin",
+  "owner",
+  "root",
+]);
 
 const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code/i;
-
-const DEFAULT_ENTITY_KEYS =
-  Object.freeze([
-    "incidencias",
-    "tickets",
-    "facturas",
-    "usuarios",
-    "clientes",
-    "hardware",
-    "recientes",
-  ]);
-
-const DEFAULT_FETCH_FLAGS =
-  Object.freeze([
-    "Dashboard",
-    "Incidencias",
-    "Tickets",
-    "Facturas",
-    "Usuarios",
-    "Clientes",
-    "Hardware",
-    "Search",
-  ]);
+  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
 
 /* =========================================================
-   BASICS
+   BASIC HELPERS
 ========================================================= */
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value).trim();
-
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
   return text || fallback;
 }
 
 function safeLower(value, fallback = "") {
-  return safeText(
-    value,
-    fallback
-  ).toLowerCase();
+  return safeText(value, fallback).toLowerCase();
 }
 
 function safeNumber(value, fallback = 0) {
-  const number =
-    Number(value);
-
-  return Number.isFinite(number)
-    ? number
-    : fallback;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function safeBool(value, fallback = false) {
   if (value === true) return true;
   if (value === false) return false;
 
-  if (value === 1) return true;
-  if (value === 0) return false;
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
 
   if (typeof value === "string") {
-    const clean =
-      value.trim().toLowerCase();
+    const clean = value.trim().toLowerCase();
 
-    if (
-      [
-        "true",
-        "1",
-        "yes",
-        "si",
-        "sí",
-        "on",
-        "enabled",
-        "active",
-      ].includes(clean)
-    ) {
+    if (["true", "1", "yes", "si", "sí", "ok", "on", "active", "enabled"].includes(clean)) {
       return true;
     }
 
-    if (
-      [
-        "false",
-        "0",
-        "no",
-        "off",
-        "disabled",
-        "inactive",
-      ].includes(clean)
-    ) {
+    if (["false", "0", "no", "off", "inactive", "disabled"].includes(clean)) {
       return false;
     }
   }
@@ -230,56 +168,20 @@ function safeBool(value, fallback = false) {
   return Boolean(fallback);
 }
 
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 function safeObject(value, fallback = {}) {
-  return (
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  )
-    ? value
-    : fallback;
+  return isObject(value) ? value : fallback;
 }
 
 function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return Array.isArray(value) ? value : [];
 }
 
 function isFunction(value) {
   return typeof value === "function";
-}
-
-function hasOwn(obj, key) {
-  try {
-    return Object.prototype.hasOwnProperty.call(
-      obj,
-      key
-    );
-  } catch {
-    return false;
-  }
-}
-
-function clone(value) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return value;
-  }
-
-  try {
-    return deepClone(value);
-  } catch {}
-
-  try {
-    return JSON.parse(
-      JSON.stringify(value)
-    );
-  } catch {
-    return value;
-  }
 }
 
 function nowMs() {
@@ -298,101 +200,74 @@ function nowIso(ms = nowMs()) {
   }
 }
 
+function clone(value, fallback = null) {
+  if (value === null || value === undefined) return value;
+
+  try {
+    return deepClone(value);
+  } catch {}
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return fallback;
+  }
+}
+
 function first(...values) {
   for (const value of values) {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
     return value;
   }
 
   return null;
 }
 
-function flatten(values = []) {
-  const output = [];
-
-  for (const value of safeArray(values)) {
-    if (Array.isArray(value)) {
-      output.push(
-        ...flatten(value)
-      );
-    } else {
-      output.push(value);
-    }
-  }
-
-  return output;
-}
-
 function unique(values = []) {
   return Array.from(
     new Set(
       safeArray(values)
-        .filter((value) =>
-          value !== null &&
-          value !== undefined &&
-          value !== ""
-        )
+        .flat(Infinity)
+        .map((item) => safeText(item, ""))
+        .filter(Boolean)
     )
   );
 }
 
+function toCollection(value) {
+  try {
+    return normalizeCollection(value);
+  } catch {}
+
+  return Array.isArray(value)
+    ? value.slice()
+    : [];
+}
+
 /* =========================================================
-   APPCORE SAFE ACCESS
+   APPCORE ACCESS
 ========================================================= */
 
-function getCoreConfig(AppCore) {
-  return safeObject(
-    AppCore?.config
-  );
+function coreConfig(AppCore) {
+  return safeObject(AppCore?.config);
 }
 
-function getCoreState(AppCore) {
-  return safeObject(
-    AppCore?.state
-  );
+function coreState(AppCore) {
+  return safeObject(AppCore?.state);
 }
 
-function getCoreDom(AppCore) {
-  return safeObject(
-    AppCore?.dom
-  );
+function coreDom(AppCore) {
+  return safeObject(AppCore?.dom);
 }
 
-function getCoreStorage(AppCore) {
-  return safeObject(
-    AppCore?.storage
-  );
+function coreUtils(AppCore) {
+  return safeObject(AppCore?.utils);
 }
 
-function getCoreUtils(AppCore) {
-  return safeObject(
-    AppCore?.utils
-  );
-}
-
-function getAppName(AppCore) {
-  const config =
-    getCoreConfig(AppCore);
+function appName(AppCore) {
+  const config = coreConfig(AppCore);
 
   return (
     safeText(config.appName, "") ||
@@ -402,186 +277,95 @@ function getAppName(AppCore) {
 }
 
 /* =========================================================
-   PATH / LOCATION
+   PATHS
 ========================================================= */
 
 function isHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  return (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  );
+  const text = safeText(value, "");
+  return text.startsWith("#/") || text.startsWith("#!");
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
+  const text = safeText(value, "");
 
-  if (!raw) {
-    return DEFAULT_ROUTE;
-  }
+  if (!text) return DEFAULT_ROUTE;
+  if (text.startsWith("#!")) return text.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
 
-  if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
-  }
-
-  return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
+  return text.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
 }
 
-function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
-  let value =
-    safeText(pathname, DEFAULT_ROUTE)
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
+function normalizePathname(pathname = DEFAULT_ROUTE) {
+  let value = safeText(pathname, DEFAULT_ROUTE)
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
-  if (!value.startsWith("/")) {
-    value =
-      `/${value}`;
-  }
+  if (!value.startsWith("/")) value = `/${value}`;
 
-  const segments =
-    value
-      .split("/")
-      .filter(Boolean);
+  const out = [];
 
-  const output = [];
+  for (const part of value.split("/").filter(Boolean)) {
+    if (part === ".") continue;
 
-  for (const segment of segments) {
-    if (segment === ".") {
+    if (part === "..") {
+      out.pop();
       continue;
     }
 
-    if (segment === "..") {
-      output.pop();
-      continue;
-    }
-
-    output.push(segment);
+    out.push(part);
   }
 
-  value =
-    `/${output.join("/")}`;
+  value = `/${out.join("/")}`;
 
-  if (
-    value.length > 1 &&
-    value.endsWith("/")
-  ) {
-    value =
-      value.replace(/\/+$/g, "") ||
-      DEFAULT_ROUTE;
-  }
-
-  return value || DEFAULT_ROUTE;
+  return value.length > 1
+    ? value.replace(/\/+$/g, "") || DEFAULT_ROUTE
+    : value || DEFAULT_ROUTE;
 }
 
-function normalizeSearch(search = "") {
-  const value =
-    safeText(search, "");
-
-  if (!value) {
-    return "";
-  }
-
-  return value.startsWith("?")
-    ? value
-    : `?${value.replace(/^\?+/, "")}`;
-}
-
-function normalizeHash(hash = "") {
-  const value =
-    safeText(hash, "");
-
-  if (!value) {
-    return "";
-  }
-
-  return value.startsWith("#")
-    ? value
-    : `#${value.replace(/^#+/, "")}`;
-}
-
-function splitFullPath(value = DEFAULT_ROUTE) {
-  const raw =
-    safeText(value, DEFAULT_ROUTE);
+function splitPath(value = DEFAULT_ROUTE) {
+  let raw = safeText(value, DEFAULT_ROUTE);
 
   if (isHashRouterPath(raw)) {
-    return splitFullPath(
-      normalizeHashRouterPath(raw)
-    );
+    raw = normalizeHashRouterPath(raw);
   }
 
-  let pathname =
-    raw;
+  let pathname = raw;
+  let search = "";
+  let hash = "";
 
-  let search =
-    "";
-
-  let hash =
-    "";
-
-  const hashIndex =
-    pathname.indexOf("#");
+  const hashIndex = pathname.indexOf("#");
 
   if (hashIndex >= 0) {
-    hash =
-      pathname.slice(hashIndex);
-
-    pathname =
-      pathname.slice(0, hashIndex) ||
-      DEFAULT_ROUTE;
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
   }
 
-  const searchIndex =
-    pathname.indexOf("?");
+  const searchIndex = pathname.indexOf("?");
 
   if (searchIndex >= 0) {
-    search =
-      pathname.slice(searchIndex);
-
-    pathname =
-      pathname.slice(0, searchIndex) ||
-      DEFAULT_ROUTE;
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
   }
 
   return {
-    pathname:
-      normalizePathnameOnly(pathname),
-
-    search:
-      normalizeSearch(search),
-
-    hash:
-      normalizeHash(hash),
+    pathname: normalizePathname(pathname),
+    search: search ? (search.startsWith("?") ? search : `?${search}`) : "",
+    hash: hash ? (hash.startsWith("#") ? hash : `#${hash}`) : "",
   };
 }
 
 function normalizePublicPath(path = DEFAULT_ROUTE) {
-  const raw =
-    safeText(path, DEFAULT_ROUTE);
+  const raw = safeText(path, DEFAULT_ROUTE);
 
   if (isHashRouterPath(raw)) {
-    return normalizePublicPath(
-      normalizeHashRouterPath(raw)
-    );
+    return normalizePublicPath(normalizeHashRouterPath(raw));
   }
 
   try {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed =
-        new URL(
-          raw,
-          "http://localhost"
-        );
+      const parsed = new URL(raw, "http://localhost");
 
-      if (
-        parsed.hash &&
-        isHashRouterPath(parsed.hash)
-      ) {
-        return normalizePublicPath(
-          normalizeHashRouterPath(parsed.hash)
-        );
+      if (parsed.hash && isHashRouterPath(parsed.hash)) {
+        return normalizePublicPath(normalizeHashRouterPath(parsed.hash));
       }
 
       return normalizePublicPath(
@@ -590,70 +374,36 @@ function normalizePublicPath(path = DEFAULT_ROUTE) {
     }
   } catch {}
 
-  const {
-    pathname,
-    search,
-    hash,
-  } =
-    splitFullPath(raw);
-
-  return `${pathname}${search}${hash}`;
+  const parts = splitPath(raw);
+  return `${parts.pathname}${parts.search}${parts.hash}`;
 }
 
 function stripUsernamePrefix(path = DEFAULT_ROUTE) {
-  const normalized =
-    normalizePublicPath(path);
+  const parts = splitPath(normalizePublicPath(path));
+  const clean = parts.pathname.replace(/^\/@[^/]+(?=\/|$)/i, "") || DEFAULT_ROUTE;
 
-  const {
-    pathname,
-    search,
-    hash,
-  } =
-    splitFullPath(normalized);
-
-  const cleanPathname =
-    pathname.replace(
-      /^\/@[^/]+(?=\/|$)/i,
-      ""
-    ) || DEFAULT_ROUTE;
-
-  return `${normalizePathnameOnly(cleanPathname)}${search}${hash}`;
+  return `${normalizePathname(clean)}${parts.search}${parts.hash}`;
 }
 
 function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
-  const publicPath =
-    stripUsernamePrefix(path);
+  const clean = splitPath(stripUsernamePrefix(path)).pathname;
 
-  const {
-    pathname,
-  } =
-    splitFullPath(publicPath);
-
-  if (
-    pathname === "/activate-account" ||
-    pathname.startsWith("/activate-account/")
-  ) {
+  if (clean === "/activate-account" || clean.startsWith("/activate-account/")) {
     return "/activate-account";
   }
 
-  if (
-    pathname === "/reset-password/confirm" ||
-    pathname.startsWith("/reset-password/confirm/")
-  ) {
+  if (clean === "/reset-password/confirm" || clean.startsWith("/reset-password/confirm/")) {
     return "/reset-password/confirm";
   }
 
-  return pathname || DEFAULT_ROUTE;
+  return clean || DEFAULT_ROUTE;
 }
 
-function getBrowserPublicPath() {
-  if (!isBrowser()) {
-    return DEFAULT_ROUTE;
-  }
+function browserPublicPath() {
+  if (!isBrowser()) return DEFAULT_ROUTE;
 
   try {
-    const hash =
-      window.location.hash || "";
+    const hash = window.location.hash || "";
 
     if (isHashRouterPath(hash)) {
       return normalizePublicPath(hash);
@@ -668,80 +418,96 @@ function getBrowserPublicPath() {
 }
 
 function resolveRoute(AppCore) {
-  const state =
-    getCoreState(AppCore);
+  const state = coreState(AppCore);
+  const utils = coreUtils(AppCore);
 
-  const publicPath =
-    normalizePublicPath(
-      first(
-        state.publicPath,
-        state.lastPublicPath,
-        getBrowserPublicPath(),
-        state.route,
-        DEFAULT_ROUTE
-      )
-    );
+  const rawPublicPath = first(
+    state.publicPath,
+    state.lastPublicPath,
+    browserPublicPath(),
+    state.route,
+    DEFAULT_ROUTE
+  );
 
-  const canonicalPath =
-    normalizeCanonicalPath(
-      first(
-        state.route,
-        state.canonicalPath,
-        publicPath,
-        DEFAULT_ROUTE
-      )
-    );
+  let publicPath = normalizePublicPath(rawPublicPath);
+
+  try {
+    if (isFunction(utils.normalizePath)) {
+      publicPath = normalizePublicPath(utils.normalizePath(publicPath) || publicPath);
+    }
+  } catch {}
+
+  let canonicalPath = normalizeCanonicalPath(
+    first(state.canonicalPath, state.route, publicPath, DEFAULT_ROUTE)
+  );
+
+  try {
+    if (isFunction(utils.normalizeCanonicalPath)) {
+      canonicalPath = normalizeCanonicalPath(utils.normalizeCanonicalPath(publicPath) || canonicalPath);
+    }
+  } catch {}
 
   return {
-    route:
-      canonicalPath,
-
+    route: canonicalPath,
     canonicalPath,
-
-    publicPath:
-      publicPath || canonicalPath || DEFAULT_ROUTE,
+    publicPath: publicPath || canonicalPath || DEFAULT_ROUTE,
   };
 }
 
 /* =========================================================
-   USER / TOKEN VALIDATION
+   SESSION SNAPSHOT
 ========================================================= */
 
 function stripBearer(token = "") {
-  return safeText(token, "")
-    .replace(/^Bearer\s+/i, "")
-    .trim();
+  return safeText(token, "").replace(/^Bearer\s+/i, "").trim();
 }
 
 function hasUsableToken(token = "") {
-  const value =
-    stripBearer(token);
+  const value = stripBearer(token);
 
-  if (!value) {
-    return false;
-  }
-
-  const lower =
-    value.toLowerCase();
-
-  if (TOKEN_BAD_VALUES.includes(lower)) {
-    return false;
-  }
-
-  if (/[\s\r\n\t]/.test(value)) {
-    return false;
-  }
+  if (!value) return false;
+  if (TOKEN_BAD_VALUES.includes(value.toLowerCase())) return false;
+  if (/[\s\r\n\t]/.test(value)) return false;
 
   return true;
 }
 
-function hasUsableUser(user = null) {
-  const current =
-    safeObject(user);
+function readCoreToken(AppCore) {
+  const state = coreState(AppCore);
+  const session = safeObject(state.session);
+  const sessionData = safeObject(state.sessionData);
 
-  if (!Object.keys(current).length) {
-    return false;
-  }
+  let token = stripBearer(
+    first(
+      state.token,
+      state.accessToken,
+      state.access_token,
+      state.jwt,
+      state.bearer,
+
+      session.token,
+      session.accessToken,
+      session.access_token,
+      session.jwt,
+      session.bearer,
+
+      sessionData.token,
+      sessionData.accessToken,
+      sessionData.access_token
+    ) || ""
+  );
+
+  try {
+    const header = AppCore?.getAuthHeader?.() || {};
+    const auth = header.Authorization || header.authorization || "";
+    token = token || stripBearer(auth);
+  } catch {}
+
+  return hasUsableToken(token) ? token : "";
+}
+
+function isInactiveUser(user = {}) {
+  const current = safeObject(user);
 
   if (
     current.active === false ||
@@ -754,215 +520,94 @@ function hasUsableUser(user = null) {
     current.suspended === true ||
     current.revoked === true
   ) {
-    return false;
+    return true;
   }
 
-  const status =
-    safeLower(
-      current.status ||
-        current.estado ||
-        current.state ||
-        current.accountStatus ||
-        ""
-    );
-
-  if (USER_INACTIVE_STATUSES.includes(status)) {
-    return false;
-  }
-
-  return USER_ID_KEYS.some((key) =>
-    Boolean(
-      safeText(current?.[key], "")
-    )
+  const status = safeLower(
+    current.status ||
+      current.estado ||
+      current.state ||
+      current.accountStatus ||
+      current.account_status ||
+      ""
   );
+
+  return INACTIVE_STATUSES.includes(status);
 }
 
-function getStateToken(AppCore) {
-  const state =
-    getCoreState(AppCore);
+function hasUsableUser(user = null) {
+  const current = safeObject(user);
 
-  const session =
-    safeObject(state.session);
+  if (!Object.keys(current).length) return false;
+  if (isInactiveUser(current)) return false;
 
-  return stripBearer(
-    first(
-      state.token,
-      state.accessToken,
-      state.access_token,
-      state.jwt,
-      state.bearer,
-      session.token,
-      session.accessToken,
-      session.access_token,
-      session.jwt,
-      session.bearer
-    ) || ""
-  );
-}
-
-function getStateUser(AppCore) {
-  const state =
-    getCoreState(AppCore);
-
-  const session =
-    safeObject(state.session);
-
-  const user =
-    first(
-      state.user,
-      state.currentUser,
-      state.authUser,
-      state.sessionUser,
-      state.account,
-      state.profile,
-      state.me,
-      state.usuario,
-      session.user,
-      session.currentUser,
-      session.authUser,
-      session.sessionUser,
-      session.account,
-      session.profile,
-      session.me,
-      session.usuario
-    );
-
-  return hasUsableUser(user)
-    ? clone(user)
-    : null;
+  return USER_ID_KEYS.some((key) => Boolean(safeText(current[key], "")));
 }
 
 function normalizeRole(value = "") {
-  if (
-    value === null ||
-    value === undefined ||
-    typeof value === "object"
-  ) {
-    return "";
-  }
-
-  return safeText(value, "")
-    .toLowerCase()
+  const role = safeLower(value, "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[\s-]+/g, "_")
     .replace(/[^a-z0-9_:.]/g, "")
     .trim();
+
+  if (!role) return "";
+  if (ADMIN_ALIASES.includes(role)) return ROLE_ADMIN;
+
+  return ROLE_USER;
 }
 
-function normalizeRoles(value) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return [];
-  }
+function normalizeRoles(values = []) {
+  const roles = unique(safeArray(values).flat(Infinity).map(normalizeRole)).filter(Boolean);
 
-  return flatten(
-    Array.isArray(value)
-      ? value
-      : [value]
-  )
-    .map(normalizeRole)
-    .filter(Boolean);
+  if (roles.includes(ROLE_ADMIN)) return [ROLE_ADMIN];
+
+  return roles.length ? [ROLE_USER] : [];
 }
 
-function collectRolesFromState(AppCore, user = null) {
-  const state =
-    getCoreState(AppCore);
+function readCoreUser(AppCore) {
+  const state = coreState(AppCore);
+  const session = safeObject(state.session);
+  const sessionData = safeObject(state.sessionData);
 
-  const session =
-    safeObject(state.session);
+  const raw = first(
+    state.user,
+    state.currentUser,
+    state.authUser,
+    state.sessionUser,
+    state.account,
+    state.profile,
+    state.usuario,
+    state.me,
 
-  const currentUser =
-    safeObject(user);
+    session.user,
+    session.currentUser,
+    session.authUser,
+    session.sessionUser,
+    session.account,
+    session.profile,
+    session.usuario,
+    session.me,
 
-  const raw =
-    safeObject(currentUser.raw);
-
-  const profile =
-    safeObject(currentUser.profile);
-
-  const roles = [
-    state.role,
-    state.rol,
-    state.userRole,
-    state.user_role,
-    state.roles,
-    state.permissions,
-    state.permisos,
-    state.scopes,
-
-    session.role,
-    session.rol,
-    session.roles,
-    session.permissions,
-    session.permisos,
-    session.scopes,
-
-    currentUser.role,
-    currentUser.rol,
-    currentUser.userRole,
-    currentUser.user_role,
-    currentUser.type,
-    currentUser.userType,
-    currentUser.user_type,
-    currentUser.perfil,
-    currentUser.roles,
-    currentUser.permissions,
-    currentUser.permisos,
-    currentUser.scopes,
-
-    profile.role,
-    profile.rol,
-    profile.roles,
-    profile.permissions,
-    profile.permisos,
-
-    raw.role,
-    raw.rol,
-    raw.userRole,
-    raw.user_role,
-    raw.type,
-    raw.userType,
-    raw.user_type,
-    raw.roles,
-    raw.permissions,
-    raw.permisos,
-    raw.scopes,
-  ];
-
-  if (
-    state.isAdmin === true ||
-    state.admin === true ||
-    currentUser.isAdmin === true ||
-    currentUser.admin === true ||
-    raw.isAdmin === true ||
-    raw.admin === true
-  ) {
-    roles.push("admin");
-  }
-
-  return Array.from(
-    new Set(
-      roles
-        .flatMap((role) =>
-          normalizeRoles(role)
-        )
-        .filter(Boolean)
-    )
+    sessionData.user,
+    sessionData.usuario,
+    sessionData.me
   );
+
+  if (!hasUsableUser(raw)) return null;
+
+  try {
+    const normalized = AppCore?.normalizeUser?.(raw) || AppCore?.utils?.normalizeUser?.(raw);
+    if (hasUsableUser(normalized)) return normalized;
+  } catch {}
+
+  return clone(raw, null);
 }
 
-function resolveDisplayName(user = null) {
-  const current =
-    safeObject(user);
-
-  const profile =
-    safeObject(current.profile);
-
-  const raw =
-    safeObject(current.raw);
+function displayNameOf(user = null) {
+  const current = safeObject(user);
+  const profile = safeObject(current.profile);
 
   return safeText(
     first(
@@ -975,13 +620,7 @@ function resolveDisplayName(user = null) {
       profile.displayName,
       profile.display_name,
       profile.fullName,
-      profile.full_name,
       profile.name,
-      raw.displayName,
-      raw.display_name,
-      raw.fullName,
-      raw.full_name,
-      raw.name,
       current.username,
       current.email,
       "Usuario"
@@ -990,54 +629,35 @@ function resolveDisplayName(user = null) {
   );
 }
 
-function resolveUsername(user = null) {
-  const current =
-    safeObject(user);
-
-  const profile =
-    safeObject(current.profile);
-
-  const raw =
-    safeObject(current.raw);
+function usernameOf(user = null) {
+  const current = safeObject(user);
+  const profile = safeObject(current.profile);
 
   return safeText(
     first(
+      current.slug,
       current.username,
       current.userName,
       current.user_name,
-      current.slug,
       current.login,
       current.alias,
-      profile.username,
-      profile.userName,
       profile.slug,
-      raw.username,
-      raw.userName,
-      raw.slug,
+      profile.username,
       current.email
     ),
     ""
   );
 }
 
-function resolveAvatarUrl(user = null) {
-  const current =
-    safeObject(user);
-
-  const profile =
-    safeObject(current.profile);
-
-  const raw =
-    safeObject(current.raw);
-
-  const rawProfile =
-    safeObject(raw.profile);
+function avatarOf(user = null) {
+  const current = safeObject(user);
+  const profile = safeObject(current.profile);
 
   if (
     current.hasAvatar === false ||
     current.has_avatar === false ||
     profile.hasAvatar === false ||
-    raw.hasAvatar === false
+    profile.has_avatar === false
   ) {
     return "";
   }
@@ -1048,67 +668,35 @@ function resolveAvatarUrl(user = null) {
       current.avatarURL,
       current.avatar_url,
       current.avatar,
-      current.photo,
       current.photoUrl,
       current.photoURL,
       current.photo_url,
-      current.image,
-      current.imageUrl,
-      current.imageURL,
-      current.image_url,
-      current.picture,
+      current.photo,
       current.pictureUrl,
       current.pictureURL,
       current.picture_url,
+      current.picture,
+      current.imageUrl,
+      current.imageURL,
+      current.image_url,
+      current.image,
 
       profile.avatarUrl,
       profile.avatarURL,
       profile.avatar_url,
       profile.avatar,
-      profile.photo,
       profile.photoUrl,
-      profile.photoURL,
-      profile.photo_url,
-      profile.image,
-      profile.imageUrl,
-      profile.picture,
       profile.pictureUrl,
-
-      raw.avatarUrl,
-      raw.avatarURL,
-      raw.avatar_url,
-      raw.avatar,
-      raw.photo,
-      raw.photoUrl,
-      raw.photoURL,
-      raw.photo_url,
-      raw.image,
-      raw.imageUrl,
-      raw.picture,
-      raw.pictureUrl,
-
-      rawProfile.avatarUrl,
-      rawProfile.avatarURL,
-      rawProfile.avatar_url,
-      rawProfile.avatar,
-      rawProfile.photo,
-      rawProfile.photoUrl,
-      rawProfile.picture,
-      rawProfile.pictureUrl
+      profile.imageUrl
     ),
     ""
   );
 }
 
-function buildUserSnapshot(user = null) {
-  if (!hasUsableUser(user)) {
-    return null;
-  }
+function userIdOf(user = null) {
+  const current = safeObject(user);
 
-  const current =
-    safeObject(user);
-
-  const id =
+  return safeText(
     first(
       current.id,
       current.userId,
@@ -1116,236 +704,142 @@ function buildUserSnapshot(user = null) {
       current._id,
       current.uid,
       current.sub
-    );
+    ),
+    ""
+  );
+}
 
-  const displayName =
-    resolveDisplayName(current);
+function publicUserSnapshot(user = null) {
+  if (!hasUsableUser(user)) return null;
 
-  const username =
-    resolveUsername(current);
+  const current = clone(user, {}) || {};
+  const id = userIdOf(current);
+  const displayName = displayNameOf(current);
+  const username = usernameOf(current);
+  const avatarUrl = avatarOf(current);
 
-  const avatarUrl =
-    resolveAvatarUrl(current);
+  for (const key of Object.keys(current)) {
+    if (SENSITIVE_KEY_RE.test(key)) {
+      delete current[key];
+    }
+  }
 
   return {
-    ...clone(current),
+    ...current,
 
-    id:
-      id || null,
+    id: current.id || id || null,
+    userId: current.userId || current.user_id || id || null,
+    user_id: current.user_id || current.userId || id || null,
 
-    userId:
-      current.userId ||
-      current.user_id ||
-      id ||
-      null,
-
-    username:
-      username || null,
+    username: username || null,
+    slug: current.slug || username || null,
 
     displayName,
+    name: current.name || current.nombre || displayName,
 
-    name:
-      current.name ||
-      current.nombre ||
-      displayName,
+    email: current.email || current.mail || null,
 
-    email:
-      current.email ||
-      current.mail ||
-      null,
+    avatar: avatarUrl || null,
+    avatarUrl: avatarUrl || null,
+    picture: avatarUrl || null,
+    hasAvatar: Boolean(avatarUrl),
 
-    avatar:
-      avatarUrl || null,
-
-    avatarUrl:
-      avatarUrl || null,
-
-    hasAvatar:
-      Boolean(avatarUrl),
-
-    active:
-      current.active !== false,
+    active: !isInactiveUser(current),
   };
 }
 
 function resolveSession(AppCore) {
-  const state =
-    getCoreState(AppCore);
+  const state = coreState(AppCore);
 
-  const token =
-    getStateToken(AppCore);
+  const token = readCoreToken(AppCore);
+  const user = readCoreUser(AppCore);
 
-  const user =
-    getStateUser(AppCore);
+  const hasToken = hasUsableToken(token);
+  const hasUser = hasUsableUser(user);
 
-  const tokenValid =
-    hasUsableToken(token);
+  const authenticated = Boolean(state.authenticated === true && hasToken && hasUser);
 
-  const userValid =
-    hasUsableUser(user);
+  if (!authenticated) {
+    return {
+      authenticated: false,
+      hasToken,
+      user: null,
+      role: null,
+      roles: [],
+      username: null,
+      displayName: null,
+      avatarUrl: null,
+      currentResolvedUsername: null,
+      isAdmin: false,
+    };
+  }
 
-  const authenticated =
-    Boolean(
-      state.authenticated === true &&
-        tokenValid &&
-        userValid
-    );
+  const publicUser = publicUserSnapshot(user);
 
-  const roles =
-    authenticated
-      ? collectRolesFromState(
-          AppCore,
-          user
-        )
-      : [];
+  const roles = normalizeRoles([
+    state.roles,
+    publicUser?.roles,
+    state.role,
+    state.rol,
+    publicUser?.role,
+    publicUser?.rol,
+  ]);
 
-  const role =
-    authenticated
-      ? (
-          normalizeRole(
-            first(
-              state.role,
-              state.rol,
-              state.session?.role,
-              state.session?.rol,
-              user?.role,
-              user?.rol,
-              roles[0]
-            )
-          ) || null
-        )
-      : null;
-
-  const userSnapshot =
-    authenticated
-      ? buildUserSnapshot(user)
-      : null;
-
-  const username =
-    authenticated
-      ? (
-          safeText(
-            state.username,
-            ""
-          ) ||
-          resolveUsername(userSnapshot)
-        )
-      : null;
-
-  const displayName =
-    authenticated
-      ? resolveDisplayName(userSnapshot)
-      : null;
-
-  const avatarUrl =
-    authenticated
-      ? resolveAvatarUrl(userSnapshot)
-      : "";
+  const role = roles.includes(ROLE_ADMIN)
+    ? ROLE_ADMIN
+    : ROLE_USER;
 
   return {
-    authenticated,
+    authenticated: true,
+    hasToken: true,
 
-    hasToken:
-      tokenValid,
-
-    token:
-      authenticated
-        ? token
-        : null,
-
-    accessToken:
-      authenticated
-        ? token
-        : null,
-
-    user:
-      userSnapshot,
+    user: publicUser,
 
     role,
-    roles,
+    roles: [role],
 
-    username:
-      username || null,
-
-    displayName:
-      displayName || null,
-
-    avatarUrl:
-      avatarUrl || null,
+    username: safeText(state.username, "") || usernameOf(publicUser) || null,
+    displayName: displayNameOf(publicUser),
+    avatarUrl: avatarOf(publicUser) || null,
 
     currentResolvedUsername:
-      authenticated
-        ? (
-            safeText(state.currentResolvedUsername, "") ||
-            safeText(state.resolvedUsername, "") ||
-            username ||
-            null
-          )
-        : null,
+      safeText(state.currentResolvedUsername, "") ||
+      safeText(state.resolvedUsername, "") ||
+      usernameOf(publicUser) ||
+      null,
 
-    isAdmin:
-      roles.some((candidate) =>
-        ADMIN_ROLES.includes(candidate)
-      ),
+    isAdmin: role === ROLE_ADMIN,
   };
 }
 
 /* =========================================================
-   THEME
+   THEME / LANG / TITLES
 ========================================================= */
 
 function normalizeTheme(value = "") {
-  const theme =
-    safeLower(value, "");
+  const theme = safeLower(value, "");
 
-  if (theme === THEME_LIGHT) {
-    return THEME_LIGHT;
-  }
-
-  if (theme === THEME_DARK) {
-    return THEME_DARK;
-  }
-
-  if (theme === THEME_SYSTEM) {
-    return THEME_SYSTEM;
-  }
+  if (theme === "light") return "light";
+  if (theme === "dark") return "dark";
+  if (theme === "system") return "system";
 
   return "";
 }
 
-function getSystemTheme() {
-  if (!isBrowser()) {
-    return THEME_LIGHT;
-  }
+function systemTheme() {
+  if (!isBrowser()) return DEFAULT_THEME;
 
   try {
-    if (
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches
-    ) {
-      return THEME_DARK;
-    }
-  } catch {}
-
-  return THEME_LIGHT;
-}
-
-function getBootThemeSnapshot() {
-  if (!isBrowser()) {
-    return {};
-  }
-
-  try {
-    return safeObject(window.__ONION_BOOT_THEME__);
+    return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches
+      ? "dark"
+      : "light";
   } catch {
-    return {};
+    return DEFAULT_THEME;
   }
 }
 
-function getDocumentTheme() {
-  if (!isBrowser()) {
-    return "";
-  }
+function documentTheme() {
+  if (!isBrowser()) return "";
 
   try {
     return normalizeTheme(
@@ -1360,294 +854,91 @@ function getDocumentTheme() {
   }
 }
 
-function parseStoredValue(value) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return "";
-  }
-
-  if (typeof value !== "string") {
-    return value;
-  }
-
-  const raw =
-    value.trim();
-
-  if (!raw) {
-    return "";
-  }
+function bootTheme() {
+  if (!isBrowser()) return {};
 
   try {
-    return JSON.parse(raw);
+    return safeObject(window.__ONION_BOOT_THEME__);
   } catch {
-    return raw;
+    return {};
   }
-}
-
-function getStorageCandidate(AppCore, key = "") {
-  const storage =
-    getCoreStorage(AppCore);
-
-  const cleanKey =
-    safeText(key, "");
-
-  if (!cleanKey) {
-    return "";
-  }
-
-  try {
-    if (isFunction(storage?.get)) {
-      return parseStoredValue(
-        storage.get(cleanKey)
-      );
-    }
-  } catch {}
-
-  try {
-    if (isFunction(storage?.getRaw)) {
-      return parseStoredValue(
-        storage.getRaw(cleanKey)
-      );
-    }
-  } catch {}
-
-  if (!isBrowser()) {
-    return "";
-  }
-
-  try {
-    return parseStoredValue(
-      window.localStorage?.getItem?.(cleanKey)
-    );
-  } catch {
-    return "";
-  }
-}
-
-function readStoredTheme(AppCore) {
-  const config =
-    getCoreConfig(AppCore);
-
-  const prefix =
-    safeText(
-      config.storagePrefix ||
-        config.appKey,
-      "onion"
-    ).replace(/:+$/g, "");
-
-  const candidates =
-    unique([
-      "theme",
-      "themeMode",
-      "appearance",
-      `${prefix}:theme`,
-      `${prefix}:themeMode`,
-      `${prefix}:appearance`,
-      "onion:theme",
-      "onion:themeMode",
-      "onion:appearance",
-      "ui.theme",
-      "ui.themeMode",
-      `${prefix}:ui.theme`,
-      `${prefix}:ui.themeMode`,
-    ]);
-
-  for (const key of candidates) {
-    const value =
-      normalizeTheme(
-        getStorageCandidate(
-          AppCore,
-          key
-        )
-      );
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return "";
 }
 
 function resolveThemePreference(AppCore) {
-  const state =
-    getCoreState(AppCore);
-
-  const config =
-    getCoreConfig(AppCore);
-
-  const bootTheme =
-    getBootThemeSnapshot();
+  const state = coreState(AppCore);
+  const config = coreConfig(AppCore);
+  const boot = bootTheme();
 
   return (
     normalizeTheme(state.themePreference) ||
     normalizeTheme(state.themeMode) ||
     normalizeTheme(state.appearance) ||
     normalizeTheme(state.theme) ||
-    normalizeTheme(bootTheme.mode) ||
-    normalizeTheme(bootTheme.themeMode) ||
-    normalizeTheme(bootTheme.theme) ||
-    readStoredTheme(AppCore) ||
+    normalizeTheme(boot.mode) ||
+    normalizeTheme(boot.themeMode) ||
     normalizeTheme(config.defaultTheme) ||
     normalizeTheme(config.ui?.defaultTheme) ||
-    THEME_SYSTEM
+    DEFAULT_THEME
   );
 }
 
 function resolveTheme(AppCore) {
-  const preference =
-    resolveThemePreference(AppCore);
+  const preference = resolveThemePreference(AppCore);
 
-  const bootTheme =
-    getBootThemeSnapshot();
-
-  if (preference === THEME_SYSTEM) {
-    return (
-      normalizeTheme(bootTheme.theme) ||
-      getDocumentTheme() ||
-      getSystemTheme()
-    );
+  if (preference === "system") {
+    return documentTheme() || systemTheme();
   }
 
-  return (
-    normalizeTheme(preference) ||
-    normalizeTheme(bootTheme.theme) ||
-    getDocumentTheme() ||
-    getSystemTheme()
-  );
+  return normalizeTheme(preference) || documentTheme() || systemTheme();
 }
 
-/* =========================================================
-   LANG
-========================================================= */
-
 function normalizeLang(value = "") {
-  const lang =
-    safeLower(value, "")
-      .replace(/_/g, "-");
+  const lang = safeLower(value, "").replace(/_/g, "-");
 
-  if (!lang) {
-    return "";
-  }
+  if (!lang) return "";
 
-  const firstPart =
-    lang.split("-")[0];
+  const firstPart = lang.split("-")[0];
 
-  if (
-    firstPart === "spa" ||
-    firstPart === "spanish" ||
-    firstPart === "castellano" ||
-    firstPart === "español"
-  ) {
-    return "es";
-  }
-
-  if (
-    firstPart === "eng" ||
-    firstPart === "english"
-  ) {
-    return "en";
-  }
-
-  if (
-    firstPart === "cat" ||
-    firstPart === "catalan" ||
-    firstPart === "català" ||
-    firstPart === "catalán"
-  ) {
-    return "ca";
-  }
+  if (["spa", "spanish", "castellano", "español"].includes(firstPart)) return "es";
+  if (["eng", "english"].includes(firstPart)) return "en";
+  if (["cat", "catalan", "català", "catalán"].includes(firstPart)) return "ca";
 
   return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(lang)
     ? lang
     : "";
 }
 
-function readStoredLang(AppCore) {
-  const config =
-    getCoreConfig(AppCore);
-
-  const prefix =
-    safeText(
-      config.storagePrefix ||
-        config.appKey,
-      "onion"
-    ).replace(/:+$/g, "");
-
-  const candidates =
-    unique([
-      "lang",
-      `${prefix}:lang`,
-      "onion:lang",
-      "ui.lang",
-      `${prefix}:ui.lang`,
-    ]);
-
-  for (const key of candidates) {
-    const value =
-      normalizeLang(
-        getStorageCandidate(
-          AppCore,
-          key
-        )
-      );
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return "";
-}
-
 function resolveLang(AppCore) {
-  const state =
-    getCoreState(AppCore);
-
-  const config =
-    getCoreConfig(AppCore);
+  const state = coreState(AppCore);
+  const config = coreConfig(AppCore);
 
   return (
     normalizeLang(state.lang) ||
-    readStoredLang(AppCore) ||
+    normalizeLang(state.language) ||
     normalizeLang(config.defaultLang) ||
     normalizeLang(config.i18n?.defaultLang) ||
-    LANG_FALLBACK
+    DEFAULT_LANG
   );
 }
 
-/* =========================================================
-   TITLES
-========================================================= */
-
 export function safeTitle(AppCore) {
-  const fallback =
-    getAppName(AppCore);
+  const fallback = appName(AppCore);
 
-  if (!isBrowser()) {
-    return fallback;
-  }
+  if (!isBrowser()) return fallback;
 
   try {
-    return (
-      safeText(document.title, "") ||
-      fallback
-    );
+    return safeText(document.title, "") || fallback;
   } catch {
     return fallback;
   }
 }
 
 export function safeTopbarTitle(AppCore) {
-  const dom =
-    getCoreDom(AppCore);
+  const dom = coreDom(AppCore);
 
   const candidates = [
     dom.topbarTitle?.textContent,
     dom.topbarViewTitle?.textContent,
-    dom.title?.textContent,
   ];
 
   if (isBrowser()) {
@@ -1660,327 +951,184 @@ export function safeTopbarTitle(AppCore) {
     } catch {}
   }
 
-  return (
-    safeText(first(...candidates), "") ||
-    safeTitle(AppCore) ||
-    getAppName(AppCore)
-  );
+  return safeText(first(...candidates), "") || safeTitle(AppCore);
 }
 
 /* =========================================================
-   META
-========================================================= */
-
-export function touchMeta(state, extra = {}) {
-  if (
-    !state ||
-    typeof state !== "object"
-  ) {
-    return false;
-  }
-
-  if (
-    !state.meta ||
-    typeof state.meta !== "object" ||
-    Array.isArray(state.meta)
-  ) {
-    state.meta = {};
-  }
-
-  const now =
-    nowMs();
-
-  state.meta.updatedAt =
-    now;
-
-  state.meta.updatedAtIso =
-    nowIso(now);
-
-  state.meta.revision =
-    safeNumber(
-      state.meta.revision,
-      0
-    ) + 1;
-
-  if (extra && typeof extra === "object") {
-    Object.assign(
-      state.meta,
-      clone(extra)
-    );
-  }
-
-  return true;
-}
-
-/* =========================================================
-   INITIAL SLICES
+   SLICES
 ========================================================= */
 
 function buildAppSlice(AppCore) {
-  const coreState =
-    getCoreState(AppCore);
-
-  const route =
-    resolveRoute(AppCore);
+  const state = coreState(AppCore);
+  const route = resolveRoute(AppCore);
 
   return {
-    ready:
-      Boolean(
-        coreState.ready ||
-          coreState.appReady
-      ),
+    ready: Boolean(state.ready || state.appReady || state.coreReady),
+    booted: Boolean(state.booted || state.initialized),
+    initialized: Boolean(state.initialized),
+    booting: Boolean(state.booting || state.coreInitializing),
+    loading: Boolean(state.loading),
 
-    booted:
-      Boolean(
-        coreState.booted ||
-          coreState.initialized
-      ),
+    fatal: Boolean(state.appFatal || state.fatal),
 
-    initialized:
-      Boolean(
-        coreState.initialized
-      ),
+    route: route.route,
+    canonicalPath: route.canonicalPath,
+    publicPath: route.publicPath,
 
-    booting:
-      Boolean(
-        coreState.booting ||
-          coreState.coreInitializing
-      ),
+    lastRoute: state.lastRoute || null,
+    lastPublicPath: state.lastPublicPath || null,
 
-    loading:
-      Boolean(
-        coreState.loading
-      ),
+    routeMode: state.routeMode || "boot",
 
-    fatal:
-      Boolean(
-        coreState.appFatal
-      ),
-
-    route:
-      route.route,
-
-    canonicalPath:
-      route.canonicalPath,
-
-    publicPath:
-      route.publicPath,
-
-    lastRoute:
-      coreState.lastRoute || null,
-
-    lastPublicPath:
-      coreState.lastPublicPath || null,
-
-    routeMode:
-      coreState.routeMode || "boot",
-
-    lastError:
-      clone(
-        coreState.lastError ||
-          coreState.error ||
-          null
-      ),
+    lastError: clone(state.lastError || state.error || null, null),
   };
 }
 
 function buildSessionSlice(AppCore) {
-  const session =
-    resolveSession(AppCore);
+  const session = resolveSession(AppCore);
 
   return {
-    authenticated:
-      session.authenticated,
+    authenticated: session.authenticated,
+    hasToken: session.hasToken,
 
-    hasToken:
-      session.hasToken,
+    /*
+      Compatibilidad de shape:
+      el Store NO guarda token real.
+    */
+    token: null,
+    accessToken: null,
 
-    token:
-      session.token,
+    user: session.user,
+    role: session.role,
+    roles: session.roles,
 
-    accessToken:
-      session.accessToken,
+    username: session.username,
+    displayName: session.displayName,
+    avatarUrl: session.avatarUrl,
 
-    user:
-      session.user,
+    currentResolvedUsername: session.currentResolvedUsername,
 
-    role:
-      session.role,
-
-    roles:
-      session.roles,
-
-    username:
-      session.username,
-
-    displayName:
-      session.displayName,
-
-    avatarUrl:
-      session.avatarUrl,
-
-    currentResolvedUsername:
-      session.currentResolvedUsername,
-
-    isAdmin:
-      Boolean(session.isAdmin),
+    isAdmin: session.isAdmin,
   };
 }
 
 function buildUiSlice(AppCore) {
-  const coreState =
-    getCoreState(AppCore);
+  const state = coreState(AppCore);
 
-  const appName =
-    getAppName(AppCore);
-
-  const themePreference =
-    resolveThemePreference(AppCore);
-
-  const theme =
-    resolveTheme(AppCore);
-
-  const lang =
-    resolveLang(AppCore);
+  const themePreference = resolveThemePreference(AppCore);
+  const theme = resolveTheme(AppCore);
+  const lang = resolveLang(AppCore);
 
   return {
     theme,
-
     themePreference,
-
-    themeMode:
-      themePreference,
+    themeMode: themePreference,
 
     lang,
+    language: lang,
+    locale: lang,
 
     sidebarOpen:
-      coreState.sidebarOpen !== undefined
-        ? Boolean(coreState.sidebarOpen)
+      state.sidebarOpen !== undefined
+        ? Boolean(state.sidebarOpen)
         : true,
 
     shellVisible:
-      coreState.shellVisible !== undefined
-        ? Boolean(coreState.shellVisible)
+      state.shellVisible !== undefined
+        ? Boolean(state.shellVisible)
         : true,
 
     chromeVisible:
-      coreState.chromeVisible !== undefined
-        ? Boolean(coreState.chromeVisible)
+      state.chromeVisible !== undefined
+        ? Boolean(state.chromeVisible)
         : true,
 
-    authScreen:
-      Boolean(coreState.authScreen),
+    authScreen: Boolean(state.authScreen),
+    routeMode: state.routeMode || "boot",
 
-    density:
-      coreState.density || "default",
+    density: state.density || "default",
 
-    pageTitle:
-      safeTitle(AppCore) ||
-      appName,
-
-    topbarTitle:
-      safeTopbarTitle(AppCore) ||
-      appName,
+    pageTitle: safeTitle(AppCore),
+    topbarTitle: safeTopbarTitle(AppCore),
   };
 }
 
-function buildEntitiesSlice() {
-  return {
-    incidencias: [],
-    tickets: [],
-    facturas: [],
-    usuarios: [],
-    clientes: [],
-    hardware: [],
-    recientes: [],
+function createByIdMap() {
+  return Object.fromEntries(
+    INDEXED_RESOURCE_KEYS.map((key) => [key, {}])
+  );
+}
 
-    dashboard:
-      null,
+function buildEntitiesSlice(seed = {}) {
+  const source = safeObject(seed);
+
+  return {
+    tickets: toCollection(source.tickets),
+    incidencias: toCollection(source.incidencias),
+    facturas: toCollection(source.facturas),
+    clientes: toCollection(source.clientes),
+    usuarios: toCollection(source.usuarios),
+    hardware: toCollection(source.hardware),
+    recientes: toCollection(source.recientes),
+
+    dashboard: source.dashboard ? clone(source.dashboard, null) : null,
 
     search: {
-      query:
-        "",
-
-      results:
-        [],
-
-      lastResults:
-        [],
-
-      loading:
-        false,
-
-      error:
-        null,
+      query: safeText(source.search?.query, ""),
+      results: toCollection(source.search?.results),
+      lastResults: toCollection(source.search?.lastResults),
+      loading: Boolean(source.search?.loading),
+      error: clone(source.search?.error || null, null),
+      meta: clone(source.search?.meta || {}, {}),
     },
 
     byId: {
-      incidencias: {},
-      tickets: {},
-      facturas: {},
-      usuarios: {},
-      clientes: {},
-      hardware: {},
+      ...createByIdMap(),
+      ...clone(source.byId || {}, {}),
     },
   };
 }
 
-function buildFlagsSlice() {
+function buildFlagsSlice(seed = {}) {
+  const source = safeObject(seed);
+
   const flags = {
-    hydrating:
-      false,
+    hydrating: Boolean(source.hydrating),
+    hydrated: Boolean(source.hydrated),
 
-    hydrated:
-      false,
-
-    syncingCore:
-      false,
-
-    refreshing:
-      false,
-
-    saving:
-      false,
+    syncingCore: Boolean(source.syncingCore),
+    refreshing: Boolean(source.refreshing),
+    saving: Boolean(source.saving),
   };
 
-  for (const name of DEFAULT_FETCH_FLAGS) {
-    flags[`fetching${name}`] =
-      false;
+  for (const key of FETCH_FLAG_KEYS) {
+    flags[`fetching${key}`] = Boolean(source[`fetching${key}`]);
   }
 
   return flags;
 }
 
-function buildMetaSlice() {
-  const createdAt =
-    nowMs();
+function buildMetaSlice(seed = {}) {
+  const source = safeObject(seed);
+  const createdAt = safeNumber(source.createdAt, nowMs());
 
   return {
-    version:
-      STORE_STATE_VERSION,
+    version: STORE_STATE_VERSION,
 
-    hydrated:
-      false,
+    hydrated: Boolean(source.hydrated),
 
-    revision:
-      0,
+    revision: safeNumber(source.revision, 0),
 
     createdAt,
+    createdAtIso: source.createdAtIso || nowIso(createdAt),
 
-    createdAtIso:
-      nowIso(createdAt),
+    updatedAt: safeNumber(source.updatedAt, createdAt),
+    updatedAtIso: source.updatedAtIso || nowIso(source.updatedAt || createdAt),
 
-    updatedAt:
-      createdAt,
+    source: source.source || "store:state",
 
-    updatedAtIso:
-      nowIso(createdAt),
-
-    source:
-      "store:state",
-
-    entityKeys:
-      [...DEFAULT_ENTITY_KEYS],
+    resourceKeys: [...RESOURCE_KEYS],
+    indexedResourceKeys: [...INDEXED_RESOURCE_KEYS],
   };
 }
 
@@ -1988,49 +1136,54 @@ function buildMetaSlice() {
    INITIAL STATE
 ========================================================= */
 
-export function buildInitialState(AppCore) {
+export function buildInitialState(AppCore = null) {
   return {
-    app:
-      buildAppSlice(AppCore),
-
-    session:
-      buildSessionSlice(AppCore),
-
-    ui:
-      buildUiSlice(AppCore),
-
-    entities:
-      buildEntitiesSlice(),
-
-    flags:
-      buildFlagsSlice(),
-
-    meta:
-      buildMetaSlice(),
+    app: buildAppSlice(AppCore),
+    session: buildSessionSlice(AppCore),
+    ui: buildUiSlice(AppCore),
+    entities: buildEntitiesSlice(),
+    flags: buildFlagsSlice(),
+    meta: buildMetaSlice(),
   };
 }
 
 /* =========================================================
-   SNAPSHOT SANITIZE
+   META
+========================================================= */
+
+export function touchMeta(state, extra = {}) {
+  if (!state || typeof state !== "object") return false;
+
+  if (!isObject(state.meta)) {
+    state.meta = {};
+  }
+
+  const timestamp = nowMs();
+
+  state.meta.version = STORE_STATE_VERSION;
+  state.meta.updatedAt = timestamp;
+  state.meta.updatedAtIso = nowIso(timestamp);
+  state.meta.revision = safeNumber(state.meta.revision, 0) + 1;
+
+  if (isObject(extra)) {
+    Object.assign(state.meta, clone(extra, {}));
+  }
+
+  return true;
+}
+
+/* =========================================================
+   SNAPSHOTS
 ========================================================= */
 
 function sanitizeValue(value, keyHint = "", depth = 0) {
-  if (depth > 8) {
-    return "[depth-limit]";
-  }
+  if (depth > 8) return "[depth-limit]";
 
   if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) {
-    return value
-      ? "***"
-      : null;
+    return value ? "***" : null;
   }
 
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return value;
-  }
+  if (value === null || value === undefined) return value;
 
   if (
     typeof value === "string" ||
@@ -2049,28 +1202,14 @@ function sanitizeValue(value, keyHint = "", depth = 0) {
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) =>
-      sanitizeValue(
-        item,
-        keyHint,
-        depth + 1
-      )
-    );
+    return value.map((item) => sanitizeValue(item, keyHint, depth + 1));
   }
 
-  if (
-    value &&
-    typeof value === "object"
-  ) {
+  if (value && typeof value === "object") {
     const output = {};
 
     for (const [key, item] of Object.entries(value)) {
-      output[key] =
-        sanitizeValue(
-          item,
-          key,
-          depth + 1
-        );
+      output[key] = sanitizeValue(item, key, depth + 1);
     }
 
     return output;
@@ -2079,154 +1218,57 @@ function sanitizeValue(value, keyHint = "", depth = 0) {
   return String(value);
 }
 
-export function buildSafeSnapshot(state = {}) {
-  return sanitizeValue(
-    shallowCloneRoot(state)
-  );
+function cloneEntities(entities = {}) {
+  return buildEntitiesSlice(entities);
 }
 
-/* =========================================================
-   SAFE ROOT SNAPSHOT
-========================================================= */
-
-function cloneEntitySlice(entities = {}) {
-  const source =
-    safeObject(entities);
-
-  return {
-    incidencias:
-      normalizeCollection(
-        source.incidencias
-      ),
-
-    tickets:
-      normalizeCollection(
-        source.tickets
-      ),
-
-    facturas:
-      normalizeCollection(
-        source.facturas
-      ),
-
-    usuarios:
-      normalizeCollection(
-        source.usuarios
-      ),
-
-    clientes:
-      normalizeCollection(
-        source.clientes
-      ),
-
-    hardware:
-      normalizeCollection(
-        source.hardware
-      ),
-
-    recientes:
-      normalizeCollection(
-        source.recientes
-      ),
-
-    dashboard:
-      source.dashboard
-        ? clone(source.dashboard)
-        : null,
-
-    search:
-      {
-        ...safeObject(source.search),
-
-        results:
-          normalizeCollection(
-            source.search?.results
-          ),
-
-        lastResults:
-          normalizeCollection(
-            source.search?.lastResults
-          ),
-      },
-
-    byId:
-      clone(
-        source.byId || {}
-      ),
-  };
-}
-
-export function shallowCloneRoot(state) {
-  const source =
-    safeObject(state);
-
-  const app =
-    safeObject(source.app);
-
-  const session =
-    safeObject(source.session);
-
-  const ui =
-    safeObject(source.ui);
-
-  const entities =
-    safeObject(source.entities);
-
-  const flags =
-    safeObject(source.flags);
-
-  const meta =
-    safeObject(source.meta);
+export function shallowCloneRoot(state = {}) {
+  const source = safeObject(state);
 
   return {
     app: {
-      ...app,
-
-      lastError:
-        clone(app.lastError || null),
+      ...safeObject(source.app),
+      lastError: clone(source.app?.lastError || null, null),
     },
 
     session: {
-      ...session,
-
-      user:
-        session.user
-          ? clone(session.user)
-          : null,
-
-      roles:
-        safeArray(session.roles),
+      ...safeObject(source.session),
 
       /*
-        Store interno conserva token para compatibilidad,
-        pero snapshots públicos deben usar buildSafeSnapshot().
+        Nunca devolver token real desde el Store.
       */
-      token:
-        session.token || null,
+      token: null,
+      accessToken: null,
 
-      accessToken:
-        session.accessToken || null,
+      user: source.session?.user
+        ? clone(source.session.user, null)
+        : null,
+
+      roles: safeArray(source.session?.roles).slice(),
     },
 
     ui: {
-      ...ui,
+      ...safeObject(source.ui),
     },
 
-    entities:
-      cloneEntitySlice(entities),
+    entities: cloneEntities(source.entities),
 
     flags: {
-      ...flags,
+      ...safeObject(source.flags),
     },
 
     meta: {
-      ...meta,
+      ...safeObject(source.meta),
     },
   };
 }
 
+export function buildSafeSnapshot(state = {}) {
+  return sanitizeValue(shallowCloneRoot(state));
+}
+
 /* =========================================================
-   EXPORT DEFAULT
+   DEFAULT EXPORT
 ========================================================= */
 
 export default {

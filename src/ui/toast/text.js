@@ -2,232 +2,172 @@
    Onion SPA - Toast Text
    Archivo: src/ui/toast/text.js
 
-   Responsabilidades:
-   - textos del sistema toast
-   - integración con i18n
-   - títulos por tipo
-   - mensajes genéricos por tipo
-   - labels accesibles
-   - resolución segura de title/message
-   - compatibilidad con mensajes dinámicos
-   - fallback robusto sin romper UI
-
-   HARDENING:
-   - tolera I18n no inicializado
-   - normaliza tipo de toast
-   - no devuelve strings vacíos salvo que proceda
-   - soporta params en traducciones
-   - mantiene API estable para api.js / dom.js
+   Toast Text limpio:
+   - textos y labels del módulo toast
+   - integración i18n tolerante
+   - fallback robusto
+   - resolución title/message
+   - loading siempre tiene mensaje
+   - sin DOM/store/timers/api
 ========================================================= */
 
 import { I18n } from "../../i18n/index.js";
 
 import {
   TOAST_TYPES,
-  TOAST_TYPE_SUCCESS,
-  TOAST_TYPE_ERROR,
-  TOAST_TYPE_WARNING,
   TOAST_TYPE_INFO,
   TOAST_TYPE_LOADING,
+
+  TOAST_TITLE_KEYS,
+  TOAST_MESSAGE_KEYS,
+  TOAST_FALLBACK_TITLES,
+  TOAST_FALLBACK_MESSAGES,
+  TOAST_CLOSE_LABEL,
+  TOAST_MAX_TITLE_LENGTH,
+  TOAST_MAX_TEXT_LENGTH,
 } from "./constants.js";
 
+import {
+  normalizeToastType,
+  normalizeToastTitle,
+  normalizeToastText,
+  safeObject,
+  safeText,
+} from "./helpers.js";
+
 /* =========================================================
-   BASICS
+   VERSION
 ========================================================= */
 
-function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value).trim();
-
-  return text || fallback;
-}
-
-function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-    ? value
-    : {};
-}
-
-function normalizeToastType(type = TOAST_TYPE_INFO) {
-  const value =
-    safeText(type, TOAST_TYPE_INFO)
-      .toLowerCase();
-
-  if (TOAST_TYPES.includes(value)) {
-    return value;
-  }
-
-  return TOAST_TYPE_INFO;
-}
+export const TOAST_TEXT_VERSION = "17.0.0-clean";
 
 /* =========================================================
    I18N
 ========================================================= */
 
-export function t(
-  key,
-  fallback = "",
-  params = {}
-) {
-  const finalKey =
-    safeText(key, "");
+function canTranslate() {
+  return Boolean(I18n && (typeof I18n.t === "function" || typeof I18n.translate === "function"));
+}
 
-  const finalFallback =
-    safeText(fallback, finalKey);
+function callTranslator(key = "", fallback = "", params = {}) {
+  const finalKey = safeText(key, "");
+  const finalFallback = safeText(fallback, finalKey);
+  const finalParams = safeObject(params);
 
-  if (!finalKey) {
-    return finalFallback;
+  if (!finalKey) return finalFallback;
+
+  if (!canTranslate()) return finalFallback;
+
+  const attempts = [
+    () => I18n.t(finalKey, finalParams, finalFallback),
+    () => I18n.t(finalKey, finalFallback, finalParams),
+    () => I18n.t(finalKey),
+    () => I18n.translate(finalKey, finalParams, finalFallback),
+    () => I18n.translate(finalKey, finalFallback, finalParams),
+    () => I18n.translate(finalKey),
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      const value = attempt();
+
+      if (
+        value !== null &&
+        value !== undefined &&
+        String(value).trim() &&
+        String(value).trim() !== finalKey
+      ) {
+        return safeText(value, finalFallback);
+      }
+    } catch {}
   }
 
-  try {
-    const translated =
-      I18n?.t?.(
-        finalKey,
-        safeObject(params),
-        finalFallback
-      );
+  return finalFallback;
+}
 
-    return safeText(
-      translated,
-      finalFallback
-    );
-  } catch {
-    return finalFallback;
-  }
+export function t(key = "", fallback = "", params = {}) {
+  return callTranslator(key, fallback, params);
 }
 
 /* =========================================================
-   KEYS
+   KEYS / FALLBACKS
 ========================================================= */
 
-const TOAST_TITLE_KEYS = Object.freeze({
-  [TOAST_TYPE_SUCCESS]: {
-    key: "toast.types.success",
-    fallback: "Éxito",
-  },
+export function getToastTitleKey(type = TOAST_TYPE_INFO) {
+  const normalized = normalizeToastType(type);
+  return safeText(TOAST_TITLE_KEYS?.[normalized], TOAST_TITLE_KEYS?.[TOAST_TYPE_INFO] || "");
+}
 
-  [TOAST_TYPE_ERROR]: {
-    key: "toast.types.error",
-    fallback: "Error",
-  },
+export function getToastMessageKey(type = TOAST_TYPE_INFO) {
+  const normalized = normalizeToastType(type);
+  return safeText(TOAST_MESSAGE_KEYS?.[normalized], TOAST_MESSAGE_KEYS?.[TOAST_TYPE_INFO] || "");
+}
 
-  [TOAST_TYPE_WARNING]: {
-    key: "toast.types.warning",
-    fallback: "Aviso",
-  },
+export function getToastFallbackTitle(type = TOAST_TYPE_INFO) {
+  const normalized = normalizeToastType(type);
 
-  [TOAST_TYPE_INFO]: {
-    key: "toast.types.info",
-    fallback: "Información",
-  },
+  return normalizeToastTitle(
+    TOAST_FALLBACK_TITLES?.[normalized] ||
+      TOAST_FALLBACK_TITLES?.[TOAST_TYPE_INFO] ||
+      "Información",
+    "Información",
+    TOAST_MAX_TITLE_LENGTH
+  );
+}
 
-  [TOAST_TYPE_LOADING]: {
-    key: "toast.types.loading",
-    fallback: "Cargando",
-  },
-});
+export function getToastFallbackMessage(type = TOAST_TYPE_INFO) {
+  const normalized = normalizeToastType(type);
 
-const TOAST_MESSAGE_KEYS = Object.freeze({
-  [TOAST_TYPE_SUCCESS]: {
-    key: "toast.generic.success",
-    fallback: "Acción completada correctamente",
-  },
-
-  [TOAST_TYPE_ERROR]: {
-    key: "toast.generic.error",
-    fallback: "Ha ocurrido un error inesperado",
-  },
-
-  [TOAST_TYPE_WARNING]: {
-    key: "toast.generic.warning",
-    fallback: "Revisa la información antes de continuar",
-  },
-
-  [TOAST_TYPE_INFO]: {
-    key: "toast.generic.info",
-    fallback: "Hay información nueva disponible",
-  },
-
-  [TOAST_TYPE_LOADING]: {
-    key: "toast.generic.loading",
-    fallback: "Procesando solicitud...",
-  },
-});
-
-/* =========================================================
-   TITLES
-========================================================= */
-
-export function getToastTitle(
-  type = TOAST_TYPE_INFO,
-  params = {}
-) {
-  const normalizedType =
-    normalizeToastType(type);
-
-  const config =
-    TOAST_TITLE_KEYS[normalizedType] ||
-    TOAST_TITLE_KEYS[TOAST_TYPE_INFO];
-
-  return t(
-    config.key,
-    config.fallback,
-    params
+  return normalizeToastText(
+    TOAST_FALLBACK_MESSAGES?.[normalized] ||
+      TOAST_FALLBACK_MESSAGES?.[TOAST_TYPE_INFO] ||
+      "Información disponible.",
+    "Información disponible.",
+    TOAST_MAX_TEXT_LENGTH
   );
 }
 
 /* =========================================================
-   GENERIC MESSAGE
+   PUBLIC TEXT GETTERS
 ========================================================= */
 
-export function getToastMessage(
-  type = TOAST_TYPE_INFO,
-  params = {}
-) {
-  const normalizedType =
-    normalizeToastType(type);
+export function getToastTitle(type = TOAST_TYPE_INFO, params = {}) {
+  const normalized = normalizeToastType(type);
+  const key = getToastTitleKey(normalized);
+  const fallback = getToastFallbackTitle(normalized);
 
-  const config =
-    TOAST_MESSAGE_KEYS[normalizedType] ||
-    TOAST_MESSAGE_KEYS[TOAST_TYPE_INFO];
-
-  return t(
-    config.key,
-    config.fallback,
-    params
+  return normalizeToastTitle(
+    t(key, fallback, params),
+    fallback,
+    TOAST_MAX_TITLE_LENGTH
   );
 }
 
-/* =========================================================
-   ACCESSIBLE LABELS
-========================================================= */
+export function getToastMessage(type = TOAST_TYPE_INFO, params = {}) {
+  const normalized = normalizeToastType(type);
+  const key = getToastMessageKey(normalized);
+  const fallback = getToastFallbackMessage(normalized);
 
-export function getToastCloseLabel(
-  params = {}
-) {
-  return t(
-    "toast.close",
-    "Cerrar notificación",
-    params
+  return normalizeToastText(
+    t(key, fallback, params),
+    fallback,
+    TOAST_MAX_TEXT_LENGTH
   );
 }
 
-export function getToastDismissLabel(
-  params = {}
-) {
-  return t(
-    "toast.dismiss",
+export function getToastCloseLabel(params = {}) {
+  return normalizeToastText(
+    t("toast.close", TOAST_CLOSE_LABEL || "Cerrar notificación", params),
+    TOAST_CLOSE_LABEL || "Cerrar notificación",
+    120
+  );
+}
+
+export function getToastDismissLabel(params = {}) {
+  return normalizeToastText(
+    t("toast.dismiss", "Descartar notificación", params),
     "Descartar notificación",
-    params
+    120
   );
 }
 
@@ -241,21 +181,13 @@ export function resolveToastTitle(
   useDefaultTitle = false,
   params = {}
 ) {
-  const value =
-    safeText(title, "");
+  const explicit = normalizeToastTitle(title, "", TOAST_MAX_TITLE_LENGTH);
 
-  if (value) {
-    return value;
-  }
+  if (explicit) return explicit;
 
-  if (useDefaultTitle === true) {
-    return getToastTitle(
-      type,
-      params
-    );
-  }
-
-  return "";
+  return useDefaultTitle === true
+    ? getToastTitle(type, params)
+    : "";
 }
 
 export function resolveToastMessage(
@@ -265,56 +197,54 @@ export function resolveToastMessage(
   useDefaultMessage = false,
   params = {}
 ) {
-  const value =
-    safeText(
-      message ?? text,
-      ""
-    );
+  const explicit = normalizeToastText(
+    message !== undefined && message !== null && String(message).trim()
+      ? message
+      : text,
+    "",
+    TOAST_MAX_TEXT_LENGTH
+  );
 
-  if (value) {
-    return value;
-  }
+  if (explicit) return explicit;
 
-  /*
-    Loading siempre debe tener mensaje.
-    Si no, el toast queda visualmente vacío.
-  */
-  if (
-    useDefaultMessage === true ||
-    normalizeToastType(type) === TOAST_TYPE_LOADING
-  ) {
-    return getToastMessage(
-      type,
-      params
-    );
+  const normalized = normalizeToastType(type);
+
+  if (useDefaultMessage === true || normalized === TOAST_TYPE_LOADING) {
+    return getToastMessage(normalized, params);
   }
 
   return "";
 }
 
 /* =========================================================
-   DEBUG / SNAPSHOT
+   SNAPSHOT
 ========================================================= */
 
 export function getToastTextSnapshot() {
+  const types = Array.isArray(TOAST_TYPES) ? [...TOAST_TYPES] : [];
+
   return {
-    types: [...TOAST_TYPES],
+    version: TOAST_TEXT_VERSION,
 
-    titles: {
-      success: getToastTitle(TOAST_TYPE_SUCCESS),
-      error: getToastTitle(TOAST_TYPE_ERROR),
-      warning: getToastTitle(TOAST_TYPE_WARNING),
-      info: getToastTitle(TOAST_TYPE_INFO),
-      loading: getToastTitle(TOAST_TYPE_LOADING),
-    },
+    i18nReady: canTranslate(),
 
-    messages: {
-      success: getToastMessage(TOAST_TYPE_SUCCESS),
-      error: getToastMessage(TOAST_TYPE_ERROR),
-      warning: getToastMessage(TOAST_TYPE_WARNING),
-      info: getToastMessage(TOAST_TYPE_INFO),
-      loading: getToastMessage(TOAST_TYPE_LOADING),
-    },
+    types,
+
+    titleKeys: Object.fromEntries(
+      types.map((type) => [type, getToastTitleKey(type)])
+    ),
+
+    messageKeys: Object.fromEntries(
+      types.map((type) => [type, getToastMessageKey(type)])
+    ),
+
+    titles: Object.fromEntries(
+      types.map((type) => [type, getToastTitle(type)])
+    ),
+
+    messages: Object.fromEntries(
+      types.map((type) => [type, getToastMessage(type)])
+    ),
 
     closeLabel: getToastCloseLabel(),
     dismissLabel: getToastDismissLabel(),
@@ -326,7 +256,15 @@ export function getToastTextSnapshot() {
 ========================================================= */
 
 export default {
+  TOAST_TEXT_VERSION,
+
   t,
+
+  getToastTitleKey,
+  getToastMessageKey,
+
+  getToastFallbackTitle,
+  getToastFallbackMessage,
 
   getToastTitle,
   getToastMessage,

@@ -2,35 +2,22 @@
    Onion SPA - Toast Constants
    Archivo: src/ui/toast/constants.js
 
-   Toast constants limpio:
+   TOAST CONSTANTS · SIMPLE
    - sin dependencias
    - sin lógica runtime
    - contrato único para api/dom/store/timers/events/text
    - compatible hacia atrás
 ========================================================= */
 
-/* =========================================================
-   VERSION / SCOPE
-========================================================= */
-
-export const TOAST_VERSION = "17.0.0-clean";
+export const TOAST_VERSION = "18.0.0-simple";
 export const TOAST_SOURCE = "ui.toast";
-
 export const TOAST_SCOPE = "ui:toast";
-
-/* =========================================================
-   IDS / SELECTORS
-========================================================= */
 
 export const TOAST_CONTAINER_ID = "toast-stack";
 export const TOAST_KEYFRAMES_ID = "toast-progress-keyframes";
 
 export const TOAST_CONTAINER_SELECTOR = `#${TOAST_CONTAINER_ID}, [data-toast-root]`;
 export const TOAST_ITEM_SELECTOR = "[data-toast-id]";
-
-/* =========================================================
-   DATA ATTRIBUTES
-========================================================= */
 
 export const TOAST_DATA_ROOT = "data-toast-root";
 export const TOAST_DATA_ID = "data-toast-id";
@@ -39,10 +26,6 @@ export const TOAST_DATA_DISMISSING = "data-toast-dismissing";
 export const TOAST_DATA_PAUSED = "data-toast-paused";
 export const TOAST_DATA_PERSISTENT = "data-toast-persistent";
 export const TOAST_DATA_CREATED_AT = "data-toast-created-at";
-
-/* =========================================================
-   TYPES
-========================================================= */
 
 export const TOAST_TYPE_SUCCESS = "success";
 export const TOAST_TYPE_ERROR = "error";
@@ -60,28 +43,27 @@ export const TOAST_TYPES = Object.freeze([
   TOAST_TYPE_LOADING,
 ]);
 
-export const TOAST_TYPE_SET = Object.freeze(
-  new Set(TOAST_TYPES)
-);
+export const TOAST_TYPE_SET = new Set(TOAST_TYPES);
 
 export const TOAST_TYPE_ALIASES = Object.freeze({
   danger: TOAST_TYPE_ERROR,
   fail: TOAST_TYPE_ERROR,
   failed: TOAST_TYPE_ERROR,
+  failure: TOAST_TYPE_ERROR,
 
   warn: TOAST_TYPE_WARNING,
   alert: TOAST_TYPE_WARNING,
+  caution: TOAST_TYPE_WARNING,
 
   ok: TOAST_TYPE_SUCCESS,
   done: TOAST_TYPE_SUCCESS,
+  saved: TOAST_TYPE_SUCCESS,
 
   pending: TOAST_TYPE_LOADING,
   progress: TOAST_TYPE_LOADING,
+  processing: TOAST_TYPE_LOADING,
+  spinner: TOAST_TYPE_LOADING,
 });
-
-/* =========================================================
-   LIMITS / DEFAULTS
-========================================================= */
 
 export const TOAST_DEFAULT_DURATION = 4200;
 export const TOAST_SUCCESS_DURATION = 3600;
@@ -98,10 +80,6 @@ export const TOAST_MAX_TEXT_LENGTH = 240;
 export const TOAST_MAX_TITLE_LENGTH = 80;
 
 export const TOAST_DEDUPE_MS = 1200;
-
-/* =========================================================
-   TYPE DEFAULTS
-========================================================= */
 
 export const TOAST_DURATIONS_BY_TYPE = Object.freeze({
   [TOAST_TYPE_SUCCESS]: TOAST_SUCCESS_DURATION,
@@ -127,23 +105,14 @@ export const TOAST_PERSISTENT_BY_TYPE = Object.freeze({
   [TOAST_TYPE_LOADING]: true,
 });
 
-/* =========================================================
-   ANIMATION / TIMERS
-========================================================= */
-
 export const TOAST_ENTER_DELAY = 0;
 export const TOAST_EXIT_DURATION = 220;
 export const TOAST_REDUCED_MOTION_EXIT_DURATION = 0;
-
 export const TOAST_PROGRESS_ANIMATION_NAME = "toast-progress-shrink";
 
 export const TOAST_TIMER_TICK_MS = 100;
 export const TOAST_HOVER_PAUSE = true;
 export const TOAST_FOCUS_PAUSE = true;
-
-/* =========================================================
-   A11Y
-========================================================= */
 
 export const TOAST_ROLE_ALERT = "alert";
 export const TOAST_ROLE_STATUS = "status";
@@ -169,10 +138,6 @@ export const TOAST_LIVE_BY_TYPE = Object.freeze({
 
 export const TOAST_CLOSE_LABEL = "Cerrar notificación";
 
-/* =========================================================
-   CSS CLASSES
-========================================================= */
-
 export const TOAST_CLASS_CONTAINER = "toast-stack";
 export const TOAST_CLASS_ITEM = "toast";
 export const TOAST_CLASS_VISIBLE = "show";
@@ -194,10 +159,6 @@ export const TOAST_CLASS_BY_TYPE = Object.freeze({
   [TOAST_TYPE_INFO]: "toast--info",
   [TOAST_TYPE_LOADING]: "toast--loading",
 });
-
-/* =========================================================
-   TEXT DEFAULTS / I18N
-========================================================= */
 
 export const TOAST_I18N_PREFIX = "toast";
 
@@ -232,10 +193,6 @@ export const TOAST_FALLBACK_MESSAGES = Object.freeze({
   [TOAST_TYPE_INFO]: "Información disponible.",
   [TOAST_TYPE_LOADING]: "Procesando...",
 });
-
-/* =========================================================
-   EVENTS
-========================================================= */
 
 export const TOAST_EVENT_SHOW = "toast:show";
 export const TOAST_EVENT_UPDATE = "toast:update";
@@ -284,10 +241,6 @@ export const TOAST_EVENTS = Object.freeze({
   reset: TOAST_EVENT_RESET,
   internalError: TOAST_EVENT_ERROR_INTERNAL,
 });
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   TOAST_VERSION,

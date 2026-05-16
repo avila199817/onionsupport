@@ -2,7 +2,7 @@
    Onion SPA - Toast Helpers
    Archivo: src/ui/toast/helpers.js
 
-   Toast helpers limpio:
+   TOAST HELPERS · SIMPLE
    - utilidades puras
    - ids seguros
    - tipos normalizados
@@ -19,27 +19,16 @@ import {
   TOAST_MAX_DURATION,
   TOAST_MAX_TEXT_LENGTH,
   TOAST_MAX_TITLE_LENGTH,
-
   TOAST_DEFAULT_TYPE,
   TOAST_TYPES,
   TOAST_TYPE_SET,
   TOAST_TYPE_ALIASES,
-
   TOAST_TYPE_INFO,
   TOAST_TYPE_LOADING,
-
   TOAST_DURATIONS_BY_TYPE,
 } from "./constants.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const TOAST_HELPERS_VERSION = "17.0.0-clean";
-
-/* =========================================================
-   RUNTIME
-========================================================= */
+export const TOAST_HELPERS_VERSION = "18.0.0-simple";
 
 let seed = 0;
 
@@ -60,9 +49,7 @@ export function isObject(value) {
 }
 
 export function isPlainObject(value) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 
   try {
     const proto = Object.getPrototypeOf(value);
@@ -77,41 +64,38 @@ export function safeObject(value, fallback = {}) {
 }
 
 export function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return [...value];
+  if (value === null || value === undefined) return [];
+  return [value];
 }
 
 export function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
-
-  const text = String(value).trim();
-  return text || fallback;
+  const output = String(value).trim();
+  return output || fallback;
 }
 
 export function safeNumber(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
+  const output = Number(value);
+  return Number.isFinite(output) ? output : fallback;
 }
 
 export function safeBool(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-  if (value === 1) return true;
-  if (value === 0) return false;
+  if (value === true || value === false) return value;
+  if (value === 1 || value === "1") return true;
+  if (value === 0 || value === "0") return false;
 
-  const text = safeText(value, "").toLowerCase();
-
-  if (["true", "1", "yes", "si", "sí", "on", "ok"].includes(text)) return true;
-  if (["false", "0", "no", "off"].includes(text)) return false;
+  const output = safeText(value, "").toLowerCase();
+  if (["true", "yes", "si", "sí", "on", "ok"].includes(output)) return true;
+  if (["false", "no", "off"].includes(output)) return false;
 
   return Boolean(fallback);
 }
 
 export function clampNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
-  const number = safeNumber(value, min);
-
-  return Math.min(
-    Math.max(number, min),
-    max
-  );
+  const output = safeNumber(value, min);
+  return Math.min(Math.max(output, min), max);
 }
 
 export function now() {
@@ -133,18 +117,17 @@ export function nowIso(ms = now()) {
 export function noop() {}
 
 export function unique(values = []) {
-  const out = [];
+  const output = [];
   const seen = new Set();
 
   for (const value of safeArray(values).flat(Infinity)) {
     const text = safeText(value, "");
     if (!text || seen.has(text)) continue;
-
     seen.add(text);
-    out.push(text);
+    output.push(text);
   }
 
-  return out;
+  return output;
 }
 
 /* =========================================================
@@ -156,9 +139,7 @@ export function safeClone(value, fallback = null) {
   if (value === null) return null;
 
   try {
-    if (typeof structuredClone === "function") {
-      return structuredClone(value);
-    }
+    if (typeof structuredClone === "function") return structuredClone(value);
   } catch {}
 
   try {
@@ -175,7 +156,6 @@ export function normalizeWhitespace(value = "") {
 export function limitText(value = "", max = 240) {
   const clean = normalizeWhitespace(value);
   const limit = Math.max(0, safeNumber(max, 240));
-
   return clean.slice(0, limit);
 }
 
@@ -185,20 +165,14 @@ export function limitText(value = "", max = 240) {
 
 function randomPart() {
   try {
-    if (isBrowser() && window.crypto?.randomUUID) {
-      return window.crypto.randomUUID();
-    }
+    if (isBrowser() && window.crypto?.randomUUID) return window.crypto.randomUUID();
   } catch {}
 
   try {
     if (isBrowser() && window.crypto?.getRandomValues) {
       const buffer = new Uint32Array(2);
       window.crypto.getRandomValues(buffer);
-
-      return Array
-        .from(buffer)
-        .map((item) => item.toString(36))
-        .join("-");
+      return [...buffer].map((item) => item.toString(36)).join("-");
     }
   } catch {}
 
@@ -216,37 +190,28 @@ export function normalizeToastId(value = "") {
 
 export function nextToastId(prefix = "toast") {
   seed = (seed + 1) % Number.MAX_SAFE_INTEGER;
-
-  return normalizeToastId(
-    `${safeText(prefix, "toast")}-${now()}-${seed}-${randomPart()}`
-  );
+  return normalizeToastId(`${safeText(prefix, "toast")}-${now()}-${seed}-${randomPart()}`);
 }
 
 /* =========================================================
-   HTML / SAFE TEXT
+   SAFE TEXT
 ========================================================= */
 
 export function escapeHtml(value = "") {
   return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll("\"", "&quot;")
-    .replaceAll("'", "&#039;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 export function normalizeToastText(value, fallback = "", max = TOAST_MAX_TEXT_LENGTH) {
-  return limitText(
-    value === null || value === undefined ? fallback : value,
-    max
-  );
+  return limitText(value === null || value === undefined ? fallback : value, max);
 }
 
 export function normalizeToastTitle(value, fallback = "", max = TOAST_MAX_TITLE_LENGTH) {
-  return limitText(
-    value === null || value === undefined ? fallback : value,
-    max
-  );
+  return limitText(value === null || value === undefined ? fallback : value, max);
 }
 
 export function hasToastText(value) {
@@ -272,35 +237,29 @@ export function prefersReducedMotion() {
 ========================================================= */
 
 export function normalizeToastType(value = TOAST_DEFAULT_TYPE) {
-  const raw = safeText(value, TOAST_DEFAULT_TYPE)
-    .toLowerCase()
-    .replace(/\s+/g, "-");
-
-  const aliased = TOAST_TYPE_ALIASES?.[raw] || raw;
+  const raw = safeText(value, TOAST_DEFAULT_TYPE).toLowerCase().replace(/\s+/g, "-");
+  const alias = TOAST_TYPE_ALIASES?.[raw] || raw;
 
   try {
-    if (TOAST_TYPE_SET?.has?.(aliased)) {
-      return aliased;
-    }
+    if (TOAST_TYPE_SET?.has?.(alias)) return alias;
   } catch {}
 
-  if (Array.isArray(TOAST_TYPES) && TOAST_TYPES.includes(aliased)) {
-    return aliased;
-  }
+  if (Array.isArray(TOAST_TYPES) && TOAST_TYPES.includes(alias)) return alias;
 
   return TOAST_DEFAULT_TYPE || TOAST_TYPE_INFO;
 }
 
 export function isValidToastType(value = "") {
   const raw = safeText(value, "").toLowerCase().replace(/\s+/g, "-");
-
   if (!raw) return false;
 
+  const alias = TOAST_TYPE_ALIASES?.[raw] || raw;
+
   try {
-    return TOAST_TYPE_SET?.has?.(raw) === true;
+    if (TOAST_TYPE_SET?.has?.(alias)) return true;
   } catch {}
 
-  return Array.isArray(TOAST_TYPES) && TOAST_TYPES.includes(raw);
+  return Array.isArray(TOAST_TYPES) && TOAST_TYPES.includes(alias);
 }
 
 export function isToastLoading(type = "") {
@@ -313,71 +272,38 @@ export function isToastLoading(type = "") {
 
 function parseDurationString(value = "") {
   const raw = safeText(value, "").toLowerCase();
-
   if (!raw) return null;
 
-  if (
-    [
-      "persist",
-      "persistent",
-      "manual",
-      "infinite",
-      "infinity",
-      "none",
-      "off",
-      "false",
-    ].includes(raw)
-  ) {
-    return 0;
-  }
+  if (["persist", "persistent", "manual", "infinite", "infinity", "none", "off", "false"].includes(raw)) return 0;
 
   const match = raw.match(/^(\d+(?:\.\d+)?)(ms|s)?$/);
-
   if (!match) return null;
 
   const amount = Number(match[1]);
-
   if (!Number.isFinite(amount)) return null;
 
-  return match[2] === "s"
-    ? amount * 1000
-    : amount;
+  return match[2] === "s" ? amount * 1000 : amount;
 }
 
 function defaultDurationForType(type = TOAST_DEFAULT_TYPE) {
   const normalizedType = normalizeToastType(type);
-
-  return safeNumber(
-    TOAST_DURATIONS_BY_TYPE?.[normalizedType],
-    TOAST_DEFAULT_DURATION
-  );
+  return safeNumber(TOAST_DURATIONS_BY_TYPE?.[normalizedType], TOAST_DEFAULT_DURATION);
 }
 
 export function normalizeToastDuration(type = TOAST_DEFAULT_TYPE, duration = undefined) {
   const normalizedType = normalizeToastType(type);
-
   if (normalizedType === TOAST_TYPE_LOADING) return 0;
 
   let value = duration;
 
-  if (value === undefined || value === true) {
-    value = defaultDurationForType(normalizedType);
-  } else if (value === false || value === null || value === 0) {
-    return 0;
-  } else if (typeof value === "string") {
-    const parsed = parseDurationString(value);
-    value = parsed === null ? defaultDurationForType(normalizedType) : parsed;
-  }
+  if (value === undefined || value === true) value = defaultDurationForType(normalizedType);
+  else if (value === false || value === null || value === 0) return 0;
+  else if (typeof value === "string") value = parseDurationString(value) ?? defaultDurationForType(normalizedType);
 
-  const number = safeNumber(value, defaultDurationForType(normalizedType));
+  const output = safeNumber(value, defaultDurationForType(normalizedType));
+  if (output <= 0) return 0;
 
-  if (number <= 0) return 0;
-
-  return clampNumber(
-    number,
-    TOAST_MIN_DURATION,
-    TOAST_MAX_DURATION
-  );
+  return clampNumber(output, TOAST_MIN_DURATION, TOAST_MAX_DURATION);
 }
 
 export function isPersistentToastDuration(duration = 0) {
@@ -390,7 +316,6 @@ export function isPersistentToastDuration(duration = 0) {
 
 export function normalizeToastOptions(options = {}) {
   const source = safeObject(options);
-
   const type = normalizeToastType(source.type);
 
   const message = normalizeToastText(
@@ -409,25 +334,20 @@ export function normalizeToastOptions(options = {}) {
     ? 0
     : normalizeToastDuration(type, source.duration);
 
+  const id = normalizeToastId(source.id || source.toastId || source.key || "");
+
   return {
     ...source,
-
-    id: normalizeToastId(source.id || source.toastId || source.key || ""),
+    id,
     toastId: normalizeToastId(source.toastId || source.id || source.key || ""),
-
     type,
     title,
     message,
     text: message,
-
     duration,
-
     persist: duration <= 0,
     persistent: duration <= 0,
-
-    closable: source.closable !== undefined
-      ? source.closable !== false
-      : type !== TOAST_TYPE_LOADING,
+    closable: source.closable !== undefined ? source.closable !== false : type !== TOAST_TYPE_LOADING,
   };
 }
 
@@ -438,27 +358,18 @@ export function normalizeToastOptions(options = {}) {
 export function getToastHelpersSnapshot() {
   return {
     version: TOAST_HELPERS_VERSION,
-
     seed,
-
     browser: isBrowser(),
     reducedMotion: prefersReducedMotion(),
-
     defaultType: TOAST_DEFAULT_TYPE,
     types: Array.isArray(TOAST_TYPES) ? [...TOAST_TYPES] : [],
-
     defaultDuration: TOAST_DEFAULT_DURATION,
     minDuration: TOAST_MIN_DURATION,
     maxDuration: TOAST_MAX_DURATION,
-
     maxTextLength: TOAST_MAX_TEXT_LENGTH,
     maxTitleLength: TOAST_MAX_TITLE_LENGTH,
   };
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   TOAST_HELPERS_VERSION,

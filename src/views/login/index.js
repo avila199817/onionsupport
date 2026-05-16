@@ -13,11 +13,12 @@
    - auth-screen controlado sin event storm
    - sin HTTP directo
    - sin Store paralelo
+   - usa Toast canónico: ../../ui/toast/index.js
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import { Auth } from "../../features/auth/index.js";
-import ToastBridge from "../../ui/toast/toast.bridge.js";
+import Toast from "../../ui/toast/index.js";
 
 import getLoginTemplate from "./login.template.js";
 
@@ -58,9 +59,10 @@ import {
    VERSION / CONSTANTS
 ========================================================= */
 
-export const LOGIN_VIEW_VERSION = "17.0.0-clean";
+export const LOGIN_VIEW_VERSION = "17.0.1-toast-canonical";
 
 const SOURCE = "login.view";
+
 const LOGIN_ROUTE = "/login";
 const DEFAULT_HOME = "/";
 const DEFAULT_2FA = "/2fa";
@@ -138,6 +140,7 @@ const EVENTS = Object.freeze({
 let globalSubmitPromise = null;
 let globalSubmitFingerprint = "";
 let globalSubmitStartedAt = 0;
+
 let lastSuccessToastAt = 0;
 let lastInstance = null;
 
@@ -210,7 +213,9 @@ function errorLog(...args) {
   } catch {}
 
   try {
-    if (AppCore?.config?.debug) console.error("[LoginView]", ...args);
+    if (AppCore?.config?.debug) {
+      console.error("[LoginView]", ...args);
+    }
   } catch {}
 }
 
@@ -273,6 +278,203 @@ function withTimeout(work, timeoutMs = 0, code = "TIMEOUT") {
 }
 
 /* =========================================================
+   TOAST CANÓNICO
+========================================================= */
+
+function hasToastApi(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (
+        isFn(value.show) ||
+        isFn(value.notify) ||
+        isFn(value.toast) ||
+        isFn(value.success) ||
+        isFn(value.error) ||
+        isFn(value.warning) ||
+        isFn(value.warn) ||
+        isFn(value.info) ||
+        isFn(value.loading) ||
+        isFn(value.dismiss) ||
+        isFn(value.clear)
+      )
+  );
+}
+
+function callToastProvider(provider, method, message = "", options = {}) {
+  if (!provider) return null;
+
+  const opts = safeObject(options);
+  const text = safeText(message, "");
+
+  try {
+    if (hasToastApi(provider)) {
+      if (method === "warning" && isFn(provider.warn) && !isFn(provider.warning)) {
+        return provider.warn(text, opts);
+      }
+
+      if (isFn(provider[method])) {
+        return provider[method](text, opts);
+      }
+
+      if (isFn(provider.show)) {
+        return provider.show({
+          ...opts,
+          type: opts.type || method || "info",
+          message: text,
+        });
+      }
+
+      if (isFn(provider.notify)) {
+        return provider.notify(text, {
+          ...opts,
+          type: opts.type || method || "info",
+        });
+      }
+
+      if (isFn(provider.toast)) {
+        return provider.toast(text, {
+          ...opts,
+          type: opts.type || method || "info",
+        });
+      }
+    }
+
+    if (isFn(provider)) {
+      return provider(text, opts.type || method || "info", opts);
+    }
+  } catch (error) {
+    warn("toast provider failed", normalizeError(error));
+  }
+
+  return null;
+}
+
+function createToastAdapter(provider = null) {
+  const fallback = Toast;
+  const target = provider || fallback;
+
+  return {
+    init(...args) {
+      try {
+        if (hasToastApi(target) && isFn(target.init)) return target.init(...args);
+      } catch {}
+
+      try {
+        if (hasToastApi(fallback) && isFn(fallback.init)) return fallback.init(...args);
+      } catch {}
+
+      return null;
+    },
+
+    show(message = "", options = {}) {
+      return (
+        callToastProvider(target, "show", message, options) ??
+        callToastProvider(fallback, "show", message, options)
+      );
+    },
+
+    success(message = "", options = {}) {
+      return (
+        callToastProvider(target, "success", message, options) ??
+        callToastProvider(fallback, "success", message, options)
+      );
+    },
+
+    error(message = "", options = {}) {
+      return (
+        callToastProvider(target, "error", message, options) ??
+        callToastProvider(fallback, "error", message, options)
+      );
+    },
+
+    warning(message = "", options = {}) {
+      return (
+        callToastProvider(target, "warning", message, options) ??
+        callToastProvider(target, "warn", message, options) ??
+        callToastProvider(fallback, "warning", message, options) ??
+        callToastProvider(fallback, "warn", message, options)
+      );
+    },
+
+    warn(message = "", options = {}) {
+      return this.warning(message, options);
+    },
+
+    info(message = "", options = {}) {
+      return (
+        callToastProvider(target, "info", message, options) ??
+        callToastProvider(fallback, "info", message, options)
+      );
+    },
+
+    loading(message = "", options = {}) {
+      const opts = {
+        persist: true,
+        duration: 0,
+        ...safeObject(options),
+      };
+
+      return (
+        callToastProvider(target, "loading", message, opts) ??
+        callToastProvider(fallback, "loading", message, opts)
+      );
+    },
+
+    dismiss(id = null, options = {}) {
+      try {
+        if (hasToastApi(target) && isFn(target.dismiss)) return target.dismiss(id, options);
+      } catch {}
+
+      try {
+        if (hasToastApi(target) && isFn(target.close)) return target.close(id, options);
+      } catch {}
+
+      try {
+        if (hasToastApi(target) && isFn(target.hide)) return target.hide(id, options);
+      } catch {}
+
+      try {
+        if (hasToastApi(fallback) && isFn(fallback.dismiss)) return fallback.dismiss(id, options);
+      } catch {}
+
+      return null;
+    },
+
+    clear(options = {}) {
+      try {
+        if (hasToastApi(target) && isFn(target.clear)) return target.clear(options);
+      } catch {}
+
+      try {
+        if (hasToastApi(target) && isFn(target.dismissAll)) return target.dismissAll(options);
+      } catch {}
+
+      try {
+        if (hasToastApi(fallback) && isFn(fallback.clear)) return fallback.clear(options);
+      } catch {}
+
+      return null;
+    },
+  };
+}
+
+function resolveToastApi(deps = {}) {
+  const custom =
+    deps.toast ||
+    deps.Toast ||
+    deps.toastProvider ||
+    AppCore?.Toast ||
+    AppCore?.toast ||
+    AppCore?.services?.toast ||
+    AppCore?.ui?.toast ||
+    AppCore?.showToast ||
+    null;
+
+  return createToastAdapter(custom || Toast);
+}
+
+/* =========================================================
    PATH / ROUTER
 ========================================================= */
 
@@ -310,7 +512,10 @@ function normalizePathname(value = "/") {
   }
 
   path = `/${out.join("/")}`;
-  return path.length > 1 ? path.replace(/\/+$/g, "") : path;
+
+  return path.length > 1
+    ? path.replace(/\/+$/g, "")
+    : path;
 }
 
 function normalizePath(value = "/") {
@@ -1266,7 +1471,7 @@ function clearInstance(container, instance) {
 ========================================================= */
 
 function renderTemplate(container, html = "") {
-  const markup = safeText(html, "");
+  const markup = String(html || "");
 
   if (!isBrowser()) {
     try {
@@ -1326,7 +1531,7 @@ export function renderLoginView(container, deps = {}) {
 
   enableAuthScreen();
 
-  const toast = ToastBridge.of(deps.toast || deps.Toast || deps.toastProvider || null);
+  const toast = resolveToastApi(deps);
 
   try {
     toast.init?.();
@@ -1383,7 +1588,11 @@ export function renderLoginView(container, deps = {}) {
       if (mounted && isLoginRoute()) {
         submitting = false;
         leavingLogin = false;
-        unlockLoginForm(refs, { submitLabel, loadingLabel });
+
+        unlockLoginForm(refs, {
+          submitLabel,
+          loadingLabel,
+        });
 
         emit(EVENTS.submitUnlocked, {
           reason: "watchdog",
@@ -1520,6 +1729,7 @@ export function renderLoginView(container, deps = {}) {
 
     if (!executor) {
       const message = "No se encontró el módulo de autenticación.";
+
       setGlobalLoginError(refs, message);
 
       try {
@@ -1537,7 +1747,7 @@ export function renderLoginView(container, deps = {}) {
       setSubmitting(true);
       startWatchdog();
 
-      loadingToastId = toast.loading?.("Validando credenciales...", {
+      loadingToastId = toast.loading("Validando credenciales...", {
         id: "login:loading",
         persist: true,
         dedupeMs: 0,

@@ -2,14 +2,14 @@
    Onion SPA - Toast
    Archivo: src/ui/toast/index.js
 
-   Toast orchestrator limpio:
+   TOAST ORCHESTRATOR · SIMPLE
    - API pública única
    - auto-init al primer uso
    - bind global/DOM idempotente
    - bridge AppCore.setShowToast()
    - registro silencioso en AppCore/modules/window
    - sin auth/router/http/store global
-   - sin estilos runtime
+   - sin estilos runtime fuera de dom.js
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -58,18 +58,12 @@ import {
   safeText,
 } from "./helpers.js";
 
-import {
-  getToastTextSnapshot,
-} from "./text.js";
+import { getToastTextSnapshot } from "./text.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const TOAST_MODULE_VERSION = TOAST_VERSION || "17.0.0-clean";
+export const TOAST_MODULE_VERSION = TOAST_VERSION || "18.0.0-simple";
 
 const SOURCE = TOAST_SOURCE || "ui.toast";
-
+const SCOPE = TOAST_SCOPE || "toast";
 const GLOBAL_KEY = "__ONION_TOAST__";
 
 const EVENTS = Object.freeze({
@@ -81,16 +75,8 @@ const EVENTS = Object.freeze({
   bridgeReady: "toast:bridge:ready",
 });
 
-/* =========================================================
-   SINGLETON
-========================================================= */
-
 export const Toast = (() => {
   "use strict";
-
-  /* =======================================================
-     RUNTIME
-  ======================================================= */
 
   let initialized = false;
   let initializing = false;
@@ -178,7 +164,7 @@ export const Toast = (() => {
     const detail = {
       source: SOURCE,
       version: TOAST_MODULE_VERSION,
-      scope: TOAST_SCOPE,
+      scope: SCOPE,
       at: iso(),
       ...safeObject(payload),
     };
@@ -211,20 +197,13 @@ export const Toast = (() => {
   }
 
   /* =======================================================
-     NORMALIZE INPUT
+     INPUT NORMALIZATION
   ======================================================= */
 
   function isErrorLike(value) {
     return Boolean(
       value instanceof Error ||
-        (
-          value &&
-          typeof value === "object" &&
-          (
-            safeText(value.message, "") ||
-            safeText(value.name, "")
-          )
-        )
+        (value && typeof value === "object" && (safeText(value.message, "") || safeText(value.name, "")))
     );
   }
 
@@ -308,35 +287,25 @@ export const Toast = (() => {
     return {
       show,
       showToast: show,
-
       update,
       updateToast: update,
-
       dismiss,
       dismissToast: dismiss,
-
       clear,
       clearToasts: clear,
-
       reset,
       resetToastApiState: reset,
-
       success,
       successToast: success,
-
       error,
       errorToast: error,
-
       warning,
       warn,
       warningToast: warning,
-
       info,
       infoToast: info,
-
       loading,
       loadingToast: loading,
-
       refreshLanguage,
       refreshAllToastsLanguage: refreshLanguage,
     };
@@ -382,9 +351,7 @@ export const Toast = (() => {
   ======================================================= */
 
   function showBridge(message = "", type = "info", options = {}) {
-    if (isObject(type)) {
-      return show(message, type);
-    }
+    if (isObject(type)) return show(message, type);
 
     return show({
       ...safeObject(options),
@@ -399,7 +366,6 @@ export const Toast = (() => {
 
     try {
       const current = AppCore?.modules?.get?.(clean);
-
       if (current === api) return true;
 
       AppCore?.modules?.register?.(clean, api, {
@@ -420,7 +386,6 @@ export const Toast = (() => {
         silent: true,
         emit: false,
       });
-
       return true;
     } catch {}
 
@@ -510,17 +475,8 @@ export const Toast = (() => {
     const core = registerCoreBridge();
     const win = opts.windowBridge === false ? false : registerWindowBridge();
 
-    emit(EVENTS.registered, {
-      modules,
-      core,
-      window: win,
-    });
-
-    emit(EVENTS.bridgeReady, {
-      core,
-      window: win,
-      showBridge: true,
-    });
+    emit(EVENTS.registered, { modules, core, window: win });
+    emit(EVENTS.bridgeReady, { core, window: win, showBridge: true });
 
     return Boolean(modules.Toast || modules.toast || core || win);
   }
@@ -534,6 +490,7 @@ export const Toast = (() => {
 
     if (initialized && opts.force !== true) {
       ensureDom();
+      if (opts.bindEvents !== false && opts.events !== false) bindEvents();
       register(opts);
       return api;
     }
@@ -546,9 +503,7 @@ export const Toast = (() => {
     try {
       ensureDom();
 
-      if (opts.bindEvents !== false && opts.events !== false) {
-        bindEvents();
-      }
+      if (opts.bindEvents !== false && opts.events !== false) bindEvents();
 
       register(opts);
 
@@ -556,34 +511,16 @@ export const Toast = (() => {
       initCount += 1;
       lastInitAt = iso();
 
-      emit(EVENTS.init, {
-        initialized: true,
-        initCount,
-      });
+      emit(EVENTS.init, { initialized: true, initCount });
+      emit(EVENTS.ready, { ready: true });
 
-      emit(EVENTS.ready, {
-        ready: true,
-      });
-
-      log("ready", {
-        version: TOAST_MODULE_VERSION,
-      });
-
+      log("ready", { version: TOAST_MODULE_VERSION });
       return api;
     } catch (error) {
       initialized = false;
       recordError(error, "init");
 
-      emit(
-        EVENTS.initError,
-        {
-          error: lastError,
-        },
-        {
-          window: true,
-        }
-      );
-
+      emit(EVENTS.initError, { error: lastError }, { window: true });
       return api;
     } finally {
       initializing = false;
@@ -593,11 +530,8 @@ export const Toast = (() => {
   function ensureReady() {
     if (destroyed) destroyed = false;
 
-    if (!initialized && !initializing) {
-      init();
-    } else if (initialized) {
-      ensureDom();
-    }
+    if (!initialized && !initializing) init();
+    else if (initialized) ensureDom();
 
     return true;
   }
@@ -611,10 +545,7 @@ export const Toast = (() => {
 
     if (opts.clear !== false) {
       try {
-        resetToastApiState({
-          silent: true,
-          source: "toast-index:destroy",
-        });
+        resetToastApiState({ silent: true, source: "toast-index:destroy" });
       } catch (error) {
         recordError(error, "destroy:reset");
       }
@@ -627,11 +558,7 @@ export const Toast = (() => {
     destroyCount += 1;
     lastDestroyAt = iso();
 
-    emit(EVENTS.destroy, {
-      destroyed: true,
-      destroyCount,
-    });
-
+    emit(EVENTS.destroy, { destroyed: true, destroyCount });
     return true;
   }
 
@@ -644,6 +571,8 @@ export const Toast = (() => {
 
     callCount += 1;
     lastCallAt = iso();
+
+    if (!isFn(fn)) return null;
 
     try {
       return fn(...args);
@@ -675,45 +604,22 @@ export const Toast = (() => {
       ? safeText(idOrPatch.id || idOrPatch.toastId || idOrPatch.key, "")
       : safeText(idOrPatch, "");
 
-    const finalPatch = isObject(idOrPatch)
-      ? {
-          ...idOrPatch,
-          ...safeObject(patch),
-          source: SOURCE,
-        }
-      : {
-          ...safeObject(patch),
-          source: SOURCE,
-        };
-
     if (!id) return null;
 
-    return call(
-      updateToast,
-      [
-        id,
-        finalPatch,
-      ],
-      "update"
-    );
+    const finalPatch = isObject(idOrPatch)
+      ? { ...idOrPatch, ...safeObject(patch), source: SOURCE }
+      : { ...safeObject(patch), source: SOURCE };
+
+    return call(updateToast, [id, finalPatch], "update");
   }
 
   function dismiss(id = null, options = {}) {
     const toastId = safeText(id, "");
-
-    if (!toastId) {
-      return clear(options);
-    }
+    if (!toastId) return clear(options);
 
     return call(
       dismissToast,
-      [
-        toastId,
-        {
-          source: SOURCE,
-          ...safeObject(options),
-        },
-      ],
+      [toastId, { source: SOURCE, ...safeObject(options) }],
       "dismiss"
     );
   }
@@ -721,12 +627,7 @@ export const Toast = (() => {
   function clear(options = {}) {
     return call(
       clearToasts,
-      [
-        {
-          source: "toast-api:clear",
-          ...safeObject(options),
-        },
-      ],
+      [{ source: "toast-api:clear", ...safeObject(options) }],
       "clear"
     );
   }
@@ -734,12 +635,7 @@ export const Toast = (() => {
   function reset(options = {}) {
     return call(
       resetToastApiState,
-      [
-        {
-          source: "toast-api:reset",
-          ...safeObject(options),
-        },
-      ],
+      [{ source: "toast-api:reset", ...safeObject(options) }],
       "reset"
     );
   }
@@ -750,50 +646,21 @@ export const Toast = (() => {
 
   function success(message = "", options = {}) {
     const normalized = normalizeMessageOptions(message, options);
-
-    return call(
-      successToast,
-      [
-        normalized.message,
-        {
-          source: SOURCE,
-          ...normalized.options,
-        },
-      ],
-      "success"
-    );
+    return call(successToast, [normalized.message, { source: SOURCE, ...normalized.options }], "success");
   }
 
   function error(message = "", options = {}) {
     const normalized = normalizeMessageOptions(message, options);
-
     return call(
       errorToast,
-      [
-        normalized.message || "Error inesperado.",
-        {
-          source: SOURCE,
-          ...normalized.options,
-        },
-      ],
+      [normalized.message || "Error inesperado.", { source: SOURCE, ...normalized.options }],
       "error"
     );
   }
 
   function warning(message = "", options = {}) {
     const normalized = normalizeMessageOptions(message, options);
-
-    return call(
-      warningToast,
-      [
-        normalized.message,
-        {
-          source: SOURCE,
-          ...normalized.options,
-        },
-      ],
-      "warning"
-    );
+    return call(warningToast, [normalized.message, { source: SOURCE, ...normalized.options }], "warning");
   }
 
   function warn(message = "", options = {}) {
@@ -802,33 +669,14 @@ export const Toast = (() => {
 
   function info(message = "", options = {}) {
     const normalized = normalizeMessageOptions(message, options);
-
-    return call(
-      infoToast,
-      [
-        normalized.message,
-        {
-          source: SOURCE,
-          ...normalized.options,
-        },
-      ],
-      "info"
-    );
+    return call(infoToast, [normalized.message, { source: SOURCE, ...normalized.options }], "info");
   }
 
   function loading(message = "", options = {}) {
     const normalized = normalizeMessageOptions(message, options);
-
     return call(
       loadingToast,
-      [
-        normalized.message,
-        {
-          source: SOURCE,
-          persist: true,
-          ...normalized.options,
-        },
-      ],
+      [normalized.message, { source: SOURCE, persist: true, ...normalized.options }],
       "loading"
     );
   }
@@ -870,16 +718,11 @@ export const Toast = (() => {
   }
 
   function refreshLanguage() {
-    return call(
-      refreshAllToastsLanguage,
-      [],
-      "refreshLanguage"
-    );
+    return call(refreshAllToastsLanguage, [], "refreshLanguage");
   }
 
   function exists(id = null) {
     const toastId = safeText(id, "");
-
     if (!toastId) return true;
 
     try {
@@ -917,7 +760,7 @@ export const Toast = (() => {
     return {
       version: TOAST_MODULE_VERSION,
       source: SOURCE,
-      scope: TOAST_SCOPE,
+      scope: SCOPE,
 
       initialized,
       initializing,
@@ -962,7 +805,6 @@ export const Toast = (() => {
         : null,
 
       lastError,
-
       at: iso(),
     };
   }
@@ -975,7 +817,7 @@ export const Toast = (() => {
     TOAST_MODULE_VERSION,
     version: TOAST_MODULE_VERSION,
     source: SOURCE,
-    scope: TOAST_SCOPE,
+    scope: SCOPE,
 
     init,
     destroy,
@@ -1041,9 +883,7 @@ export const Toast = (() => {
   };
 
   try {
-    register({
-      windowBridge: true,
-    });
+    register({ windowBridge: true });
   } catch {}
 
   return api;

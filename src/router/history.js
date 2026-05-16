@@ -2,13 +2,14 @@
    Onion SPA - Router History
    Archivo: src/router/history.js
 
-   History clean:
-   - push/replace centralizados.
-   - publicPath conserva /@usuario + query/hash.
-   - canonicalPath limpio.
-   - rutas técnicas con token protegidas hasta scrub oficial.
-   - sin dependencia de app/constants.js.
-   - cero duplicidad rara.
+   ROUTER HISTORY · FINAL SIMPLE
+   - Historial SPA puro
+   - pushState / replaceState / back
+   - Estado inicial seguro
+   - publicPath conserva /@usuario + query/hash
+   - canonicalPath limpio
+   - Scrub explícito de tokens técnicos
+   - Sin Auth, guards, render, fetch, storage, Toast ni permisos
 ========================================================= */
 
 import {
@@ -31,49 +32,21 @@ import {
    VERSION / CONSTANTS
 ========================================================= */
 
-export const ROUTER_HISTORY_VERSION = "12.0.0-clean";
+export const ROUTER_HISTORY_VERSION = "20.0.0-final";
 
-const HISTORY_STATE_VERSION = 6;
+const SOURCE = "router.history";
+const HISTORY_STATE_VERSION = 7;
 const DEFAULT_ROUTE = "/";
-
-const ACTIVATION_PATH =
-  RouterTokenRoutes?.ACTIVATION_PATH ||
-  "/activate-account";
-
-const RESET_CONFIRM_PATH =
-  RouterTokenRoutes?.RESET_CONFIRM_PATH ||
-  "/reset-password/confirm";
-
-const PASSWORD_RESET_CONFIRM_PATH =
-  RouterTokenRoutes?.PASSWORD_RESET_CONFIRM_PATH ||
-  "/password-reset/confirm";
-
 const WRITE_DEDUPE_MS = 32;
+
+const ACTIVATION_PATH = RouterTokenRoutes?.ACTIVATION_PATH || "/activate-account";
+const RESET_CONFIRM_PATH = RouterTokenRoutes?.RESET_CONFIRM_PATH || "/reset-password/confirm";
+const PASSWORD_RESET_CONFIRM_PATH = RouterTokenRoutes?.PASSWORD_RESET_CONFIRM_PATH || "/password-reset/confirm";
 
 const SENSITIVE_PARAM_NAMES = Object.freeze([
   ...new Set([
-    ...(RouterTokenRoutes?.ACTIVATION_TOKEN_PARAM_NAMES || [
-      "token",
-      "activationToken",
-      "activateToken",
-      "activation_token",
-      "activate_token",
-      "code",
-      "t",
-    ]),
-
-    ...(RouterTokenRoutes?.RESET_TOKEN_PARAM_NAMES || [
-      "token",
-      "resetToken",
-      "passwordResetToken",
-      "confirmToken",
-      "reset_token",
-      "password_reset_token",
-      "confirm_token",
-      "code",
-      "t",
-    ]),
-
+    ...(RouterTokenRoutes?.ACTIVATION_TOKEN_PARAM_NAMES || ["token", "activationToken", "activateToken", "activation_token", "activate_token", "code", "t"]),
+    ...(RouterTokenRoutes?.RESET_TOKEN_PARAM_NAMES || ["token", "resetToken", "passwordResetToken", "confirmToken", "reset_token", "password_reset_token", "confirm_token", "code", "t"]),
     "access_token",
     "refresh_token",
     "id_token",
@@ -133,22 +106,18 @@ function isoNow(ms = nowMs()) {
 }
 
 function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return text || fallback;
 }
 
-function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : {};
-}
-
-function isFn(value) {
-  return typeof value === "function";
+function safeObject(value, fallback = {}) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : fallback;
 }
 
 function nextHistoryId() {
@@ -165,9 +134,7 @@ function normalizePathname(pathname = DEFAULT_ROUTE) {
     .replace(/\\/g, "/")
     .replace(/\/{2,}/g, "/");
 
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
-  }
+  if (!value.startsWith("/")) value = `/${value}`;
 
   const stack = [];
 
@@ -184,9 +151,7 @@ function normalizePathname(pathname = DEFAULT_ROUTE) {
 
   value = `/${stack.join("/")}` || DEFAULT_ROUTE;
 
-  return value.length > 1
-    ? value.replace(/\/+$/g, "") || DEFAULT_ROUTE
-    : value;
+  return value.length > 1 ? value.replace(/\/+$/g, "") || DEFAULT_ROUTE : value;
 }
 
 function normalizeSearch(search = "") {
@@ -216,23 +181,19 @@ function normalizeHashRouterPath(value = "") {
 function splitUrl(value = DEFAULT_ROUTE) {
   const raw = safeText(value, DEFAULT_ROUTE) || DEFAULT_ROUTE;
 
-  if (isHashRouterPath(raw)) {
-    return splitUrl(normalizeHashRouterPath(raw));
-  }
+  if (isHashRouterPath(raw)) return splitUrl(normalizeHashRouterPath(raw));
 
   let pathname = raw;
   let search = "";
   let hash = "";
 
   const hashIndex = pathname.indexOf("#");
-
   if (hashIndex >= 0) {
     hash = pathname.slice(hashIndex);
     pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
   }
 
   const searchIndex = pathname.indexOf("?");
-
   if (searchIndex >= 0) {
     search = pathname.slice(searchIndex);
     pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
@@ -245,11 +206,7 @@ function splitUrl(value = DEFAULT_ROUTE) {
   };
 }
 
-function joinUrl({
-  pathname = DEFAULT_ROUTE,
-  search = "",
-  hash = "",
-} = {}) {
+function joinUrl({ pathname = DEFAULT_ROUTE, search = "", hash = "" } = {}) {
   return `${normalizePathname(pathname)}${normalizeSearch(search)}${normalizeHash(hash)}`;
 }
 
@@ -261,18 +218,12 @@ function browserPath() {
     const search = window.location.search || "";
     const hash = window.location.hash || "";
 
-    if (hash && isHashRouterPath(hash)) {
-      return normalizePath(normalizeHashRouterPath(hash));
-    }
+    if (hash && isHashRouterPath(hash)) return publicOf(null, normalizeHashRouterPath(hash));
 
-    return normalizePath(`${pathname}${search}${hash}`);
+    return publicOf(null, `${pathname}${search}${hash}`);
   } catch {
     return DEFAULT_ROUTE;
   }
-}
-
-function sameUrl(a = "", b = "") {
-  return safeText(a, "") === safeText(b, "");
 }
 
 function canonicalOf(AppCore, path = DEFAULT_ROUTE) {
@@ -295,67 +246,36 @@ function routeKind(AppCore, path = "") {
   const canonical = canonicalOf(AppCore, path);
 
   if (canonical === ACTIVATION_PATH) return "activation";
-  if (canonical === RESET_CONFIRM_PATH) return "resetConfirm";
+  if (canonical === RESET_CONFIRM_PATH || canonical === PASSWORD_RESET_CONFIRM_PATH) return "resetConfirm";
 
   return "";
 }
 
-function normalizePublicUrl(
-  AppCore,
-  path = DEFAULT_ROUTE,
-  {
-    preserveCurrentContext = false,
-    preservePath = false,
-    ignoreProtectedInitialUrl = false,
-  } = {}
-) {
-  const protectedInitial = ignoreProtectedInitialUrl
-    ? ""
-    : getProtectedInitialPublicPath(AppCore);
+function normalizePublicUrl(AppCore, path = DEFAULT_ROUTE, options = {}) {
+  const opts = safeObject(options);
+  const protectedInitial = opts.ignoreProtectedInitialUrl ? "" : getProtectedInitialPublicPath(AppCore);
 
   const targetKind = routeKind(AppCore, path);
   const protectedKind = routeKind(AppCore, protectedInitial);
 
-  if (
-    protectedInitial &&
-    targetKind &&
-    protectedKind &&
-    targetKind === protectedKind
-  ) {
+  if (protectedInitial && targetKind && protectedKind && targetKind === protectedKind) {
     return publicOf(AppCore, protectedInitial);
   }
 
-  if (preservePath) {
+  if (opts.preservePath === true) {
     return normalizePublicUrl(AppCore, browserPath(), {
-      preserveCurrentContext: false,
-      preservePath: false,
-      ignoreProtectedInitialUrl,
+      ignoreProtectedInitialUrl: opts.ignoreProtectedInitialUrl,
     });
   }
 
   const target = splitUrl(publicOf(AppCore, path));
   const current = splitUrl(browserPath());
-
-  const sameCanonical =
-    canonicalOf(AppCore, target.pathname) ===
-    canonicalOf(AppCore, current.pathname);
+  const sameCanonical = canonicalOf(AppCore, target.pathname) === canonicalOf(AppCore, current.pathname);
 
   return joinUrl({
     pathname: target.pathname,
-    search:
-      preserveCurrentContext &&
-      sameCanonical &&
-      !target.search &&
-      current.search
-        ? current.search
-        : target.search,
-    hash:
-      preserveCurrentContext &&
-      sameCanonical &&
-      !target.hash &&
-      current.hash
-        ? current.hash
-        : target.hash,
+    search: opts.preserveCurrentContext === true && sameCanonical && !target.search && current.search ? current.search : target.search,
+    hash: opts.preserveCurrentContext === true && sameCanonical && !target.hash && current.hash ? current.hash : target.hash,
   });
 }
 
@@ -367,10 +287,7 @@ function comparableCurrentUrl(AppCore) {
       getCurrentPublicPath(AppCore) ||
       getCurrentPath(AppCore) ||
       DEFAULT_ROUTE,
-    {
-      preserveCurrentContext: false,
-      ignoreProtectedInitialUrl: true,
-    }
+    { ignoreProtectedInitialUrl: true }
   );
 }
 
@@ -378,7 +295,8 @@ function comparableCurrentUrl(AppCore) {
    EVENTS / DEBUG SAFETY
 ========================================================= */
 
-function sanitize(value, seen = new WeakSet()) {
+function sanitize(value, depth = 0, seen = new WeakSet()) {
+  if (depth > 4) return "[depth-limit]";
   if (value === null || value === undefined) return value;
 
   if (typeof value === "string") {
@@ -390,36 +308,31 @@ function sanitize(value, seen = new WeakSet()) {
   }
 
   if (typeof value === "number" || typeof value === "boolean") return value;
-  if (typeof value === "function") return "[Function]";
+  if (typeof value === "function") return "[function]";
 
   if (value instanceof Error) {
     return {
       name: value.name || "Error",
       message: redactTokenInText(value.message || ""),
       code: value.code || null,
-      status: value.status || value.statusCode || null,
+      status: value.status || value.statusCode || value.response?.status || null,
     };
   }
 
-  if (Array.isArray(value)) {
-    return value.slice(0, 80).map((item) => sanitize(item, seen));
-  }
+  if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitize(item, depth + 1, seen));
 
   if (value && typeof value === "object") {
     try {
-      if (seen.has(value)) return "[Circular]";
+      if (seen.has(value)) return "[circular]";
       seen.add(value);
     } catch {}
 
     const output = {};
 
-    for (const [key, item] of Object.entries(value).slice(0, 120)) {
-      if (/token|authorization|password|secret|credential|jwt|bearer|otp|totp|code/i.test(key)) {
-        output[key] = item ? "***" : item;
-        continue;
-      }
-
-      output[key] = sanitize(item, seen);
+    for (const [key, item] of Object.entries(value).slice(0, 80)) {
+      output[key] = /token|authorization|password|secret|credential|jwt|bearer|otp|totp|mfa|2fa|code/i.test(key)
+        ? item ? "***" : item
+        : sanitize(item, depth + 1, seen);
     }
 
     return output;
@@ -430,40 +343,28 @@ function sanitize(value, seen = new WeakSet()) {
 
 function emit(AppCore, eventName = "", payload = {}, options = {}) {
   const name = safeText(eventName, "");
+  if (!name || options.emit === false || options.emitEvents === false) return false;
 
-  if (!name) return false;
-
-  const cleanPayload = sanitize({
-    source: "router.history",
+  const detail = sanitize({
+    source: SOURCE,
     version: ROUTER_HISTORY_VERSION,
     at: isoNow(),
     ...safeObject(payload),
   });
 
-  let busAvailable = false;
-  let busEmitted = false;
+  try {
+    AppCore?.events?.emit?.(name, detail);
+    return true;
+  } catch {}
 
   try {
-    if (isFn(AppCore?.events?.emit)) {
-      busAvailable = true;
-      AppCore.events.emit(name, cleanPayload);
-      busEmitted = true;
+    if (isBrowser() && typeof CustomEvent !== "undefined") {
+      window.dispatchEvent(new CustomEvent(name, { detail }));
+      return true;
     }
   } catch {}
 
-  if (options.window === true || (!busAvailable && isBrowser())) {
-    try {
-      window.dispatchEvent(
-        new CustomEvent(name, {
-          detail: cleanPayload,
-        })
-      );
-
-      return true;
-    } catch {}
-  }
-
-  return busEmitted;
+  return false;
 }
 
 function warn(AppCore, ...args) {
@@ -471,13 +372,11 @@ function warn(AppCore, ...args) {
 
   try {
     AppCore?.utils?.warn?.("[RouterHistory]", ...clean);
-  } catch {}
-
-  try {
-    if (AppCore?.config?.debug) {
-      console.warn("[RouterHistory]", ...clean);
-    }
-  } catch {}
+  } catch {
+    try {
+      if (AppCore?.config?.debug) console.warn("[RouterHistory]", ...clean);
+    } catch {}
+  }
 }
 
 /* =========================================================
@@ -496,7 +395,6 @@ function currentHistoryState() {
 
 function comparableState(state = null) {
   const value = safeObject(state);
-
   if (!Object.keys(value).length) return null;
 
   return {
@@ -542,59 +440,71 @@ function writeSignature({ method = "", url = "", state = {} } = {}) {
   ].join("|");
 }
 
-export function createHistoryState({
-  AppCore,
-  pathname = DEFAULT_ROUTE,
-  extras = {},
-} = {}) {
+function resolveHistoryContext(AppCore, pathname = DEFAULT_ROUTE, options = {}) {
+  const opts = safeObject(options);
+
+  let rawPublicPath = "";
+
+  try {
+    rawPublicPath = opts.publicPath || buildHistoryUrl(AppCore, opts.getRoute, pathname, opts) || pathname || DEFAULT_ROUTE;
+  } catch {
+    rawPublicPath = opts.publicPath || pathname || DEFAULT_ROUTE;
+  }
+
+  const publicPath = normalizePublicUrl(AppCore, rawPublicPath, {
+    preserveCurrentContext: opts.preserveCurrentContext === true || opts.preservePublicPath === true || opts.preserveUrl === true,
+    preservePath: opts.preservePath === true,
+    ignoreProtectedInitialUrl: opts.ignoreProtectedInitialUrl === true || opts.scrubProtectedToken === true,
+  });
+
+  const canonicalPath = opts.canonicalPath || canonicalOf(AppCore, publicPath);
+  const rawCanonicalPath = opts.rawCanonicalPath || opts.requestedCanonicalPath || canonicalPath;
+
+  const requestedPath = normalizePublicUrl(
+    AppCore,
+    opts.requestedPath || opts.fromPath || pathname || publicPath,
+    {
+      ignoreProtectedInitialUrl: opts.ignoreProtectedInitialUrl === true || opts.scrubProtectedToken === true,
+    }
+  );
+
+  const username = opts.username || opts.resolvedUsername || getCurrentResolvedUsername(AppCore) || null;
+
+  return {
+    publicPath,
+    canonicalPath,
+    rawCanonicalPath,
+    requestedPath,
+    username,
+  };
+}
+
+export function createHistoryState({ AppCore, pathname = DEFAULT_ROUTE, extras = {} } = {}) {
   const extra = safeObject(extras);
 
   const publicPath = normalizePublicUrl(AppCore, extra.publicPath || pathname || DEFAULT_ROUTE, {
-    preserveCurrentContext: false,
     ignoreProtectedInitialUrl: extra.scrubProtectedToken === true,
   });
 
   let base = {};
 
   try {
-    base =
-      buildStatePayload(AppCore, publicPath, {
-        ts: nowMs(),
-        ...extra,
-      }) || {};
+    base = buildStatePayload(AppCore, publicPath, { ts: nowMs(), ...extra }) || {};
   } catch {
     base = {};
   }
 
   const id = extra.id || base.id || nextHistoryId();
-
-  const canonicalPath =
-    extra.canonicalPath ||
-    base.canonicalPath ||
-    canonicalOf(AppCore, publicPath);
-
-  const rawCanonicalPath =
-    extra.rawCanonicalPath ||
-    base.rawCanonicalPath ||
-    canonicalPath;
-
-  const requestedPath =
-    extra.requestedPath ||
-    base.requestedPath ||
-    publicPath;
-
-  const username =
-    extra.username ||
-    base.username ||
-    getCurrentResolvedUsername(AppCore) ||
-    null;
+  const canonicalPath = extra.canonicalPath || base.canonicalPath || canonicalOf(AppCore, publicPath);
+  const rawCanonicalPath = extra.rawCanonicalPath || base.rawCanonicalPath || canonicalPath;
+  const requestedPath = extra.requestedPath || base.requestedPath || publicPath;
+  const username = extra.username || base.username || getCurrentResolvedUsername(AppCore) || null;
 
   return {
     ...base,
     ...extra,
 
     __onionRouterHistory: true,
-
     version: HISTORY_STATE_VERSION,
 
     id,
@@ -615,81 +525,7 @@ export function createHistoryState({
   };
 }
 
-function resolveHistoryContext(AppCore, pathname = DEFAULT_ROUTE, options = {}) {
-  const opts = safeObject(options);
-
-  let rawPublicPath = "";
-
-  try {
-    rawPublicPath =
-      opts.publicPath ||
-      buildHistoryUrl(AppCore, opts.getRoute, pathname, opts) ||
-      pathname ||
-      DEFAULT_ROUTE;
-  } catch {
-    rawPublicPath =
-      opts.publicPath ||
-      pathname ||
-      DEFAULT_ROUTE;
-  }
-
-  const publicPath = normalizePublicUrl(AppCore, rawPublicPath, {
-    preserveCurrentContext:
-      opts.preserveCurrentContext === true ||
-      opts.preservePublicPath === true ||
-      opts.preserveUrl === true,
-
-    preservePath: opts.preservePath === true,
-
-    ignoreProtectedInitialUrl:
-      opts.ignoreProtectedInitialUrl === true ||
-      opts.scrubProtectedToken === true,
-  });
-
-  const canonicalPath =
-    opts.canonicalPath ||
-    canonicalOf(AppCore, publicPath);
-
-  const rawCanonicalPath =
-    opts.rawCanonicalPath ||
-    opts.requestedCanonicalPath ||
-    canonicalPath;
-
-  const requestedPath = normalizePublicUrl(
-    AppCore,
-    opts.requestedPath ||
-      opts.fromPath ||
-      pathname ||
-      publicPath,
-    {
-      preserveCurrentContext: false,
-      ignoreProtectedInitialUrl:
-        opts.ignoreProtectedInitialUrl === true ||
-        opts.scrubProtectedToken === true,
-    }
-  );
-
-  const username =
-    opts.username ||
-    opts.resolvedUsername ||
-    getCurrentResolvedUsername(AppCore) ||
-    null;
-
-  return {
-    publicPath,
-    canonicalPath,
-    rawCanonicalPath,
-    requestedPath,
-    username,
-  };
-}
-
-function resolvedState({
-  AppCore,
-  pathname = DEFAULT_ROUTE,
-  options = {},
-  mode = "push",
-} = {}) {
+function resolvedState({ AppCore, pathname = DEFAULT_ROUTE, options = {}, mode = "push" } = {}) {
   const context = resolveHistoryContext(AppCore, pathname, options);
 
   const state = createHistoryState({
@@ -714,10 +550,7 @@ function resolvedState({
     },
   });
 
-  return {
-    ...context,
-    state,
-  };
+  return { ...context, state };
 }
 
 /* =========================================================
@@ -726,195 +559,90 @@ function resolvedState({
 
 function shouldSkipWrite(options = {}) {
   if (options.scrubProtectedToken === true) return false;
-
-  return Boolean(
-    options.skipHistory === true ||
-    options.protectedInitialUrl === true
-  );
+  return Boolean(options.skipHistory === true || options.protectedInitialUrl === true);
 }
 
 function historyWrite(AppCore, method, state, url, meta = {}) {
   if (!canUseHistory()) return false;
-
-  if (method !== "pushState" && method !== "replaceState") {
-    return false;
-  }
+  if (method !== "pushState" && method !== "replaceState") return false;
 
   const cleanUrl = safeText(url, DEFAULT_ROUTE) || DEFAULT_ROUTE;
 
   try {
     window.history[method](state, "", cleanUrl);
 
-    lastWriteSignature =
-      meta.writeSignature ||
-      writeSignature({
-        method,
-        url: cleanUrl,
-        state,
-      });
-
+    lastWriteSignature = meta.writeSignature || writeSignature({ method, url: cleanUrl, state });
     lastWriteAt = nowMs();
 
-    emit(AppCore, HISTORY_EVENTS.write, {
-      method,
-      url: cleanUrl,
-      state,
-      meta,
-    });
-
+    emit(AppCore, HISTORY_EVENTS.write, { method, url: cleanUrl, state, meta });
     return true;
   } catch (error) {
-    warn(AppCore, `History ${method} falló.`, {
-      url: cleanUrl,
-      error,
-    });
-
-    emit(AppCore, HISTORY_EVENTS.error, {
-      method,
-      url: cleanUrl,
-      error,
-      message: error?.message || String(error),
-      meta,
-    });
-
+    warn(AppCore, `History ${method} falló.`, { url: cleanUrl, error });
+    emit(AppCore, HISTORY_EVENTS.error, { method, url: cleanUrl, error, message: error?.message || String(error), meta });
     return false;
   }
 }
 
-export function pushState({
-  AppCore,
-  pathname = DEFAULT_ROUTE,
-  options = {},
-} = {}) {
+export function pushState({ AppCore, pathname = DEFAULT_ROUTE, options = {} } = {}) {
   if (!canUseHistory()) return false;
 
   const opts = safeObject(options);
 
   if (shouldSkipWrite(opts)) {
-    emit(AppCore, HISTORY_EVENTS.skip, {
-      method: "pushState",
-      reason: "skip-history",
-      pathname,
-      options: opts,
-    });
-
+    emit(AppCore, HISTORY_EVENTS.skip, { method: "pushState", reason: "skip-history", pathname, options: opts });
     return false;
   }
 
-  const { publicPath, state } = resolvedState({
-    AppCore,
-    pathname,
-    options: opts,
-    mode: "push",
-  });
+  const { publicPath, state } = resolvedState({ AppCore, pathname, options: opts, mode: "push" });
 
-  if (
-    sameHistoryState(currentHistoryState(), state) &&
-    opts.forceHistory !== true
-  ) {
-    emit(AppCore, HISTORY_EVENTS.skip, {
-      method: "pushState",
-      reason: "same-state",
-      publicPath,
-      state,
-    });
-
+  if (sameHistoryState(currentHistoryState(), state) && opts.forceHistory !== true) {
+    emit(AppCore, HISTORY_EVENTS.skip, { method: "pushState", reason: "same-state", publicPath, state });
     return false;
   }
 
   return historyWrite(AppCore, "pushState", state, publicPath, {
     pathname,
     options: opts,
-    writeSignature: writeSignature({
-      method: "pushState",
-      url: publicPath,
-      state,
-    }),
+    writeSignature: writeSignature({ method: "pushState", url: publicPath, state }),
   });
 }
 
-export function replaceState({
-  AppCore,
-  pathname = DEFAULT_ROUTE,
-  options = {},
-} = {}) {
+export function replaceState({ AppCore, pathname = DEFAULT_ROUTE, options = {} } = {}) {
   if (!canUseHistory()) return false;
 
   const opts = safeObject(options);
 
   if (shouldSkipWrite(opts)) {
-    emit(AppCore, HISTORY_EVENTS.skip, {
-      method: "replaceState",
-      reason: "skip-history",
-      pathname,
-      options: opts,
-    });
-
+    emit(AppCore, HISTORY_EVENTS.skip, { method: "replaceState", reason: "skip-history", pathname, options: opts });
     return false;
   }
 
-  const { publicPath, state } = resolvedState({
-    AppCore,
-    pathname,
-    options: opts,
-    mode: "replace",
-  });
+  const { publicPath, state } = resolvedState({ AppCore, pathname, options: opts, mode: "replace" });
 
-  if (
-    sameHistoryState(currentHistoryState(), state) &&
-    opts.forceHistory !== true
-  ) {
-    emit(AppCore, HISTORY_EVENTS.skip, {
-      method: "replaceState",
-      reason: "same-state",
-      publicPath,
-      state,
-    });
-
+  if (sameHistoryState(currentHistoryState(), state) && opts.forceHistory !== true) {
+    emit(AppCore, HISTORY_EVENTS.skip, { method: "replaceState", reason: "same-state", publicPath, state });
     return false;
   }
 
   return historyWrite(AppCore, "replaceState", state, publicPath, {
     pathname,
     options: opts,
-    writeSignature: writeSignature({
-      method: "replaceState",
-      url: publicPath,
-      state,
-    }),
+    writeSignature: writeSignature({ method: "replaceState", url: publicPath, state }),
   });
 }
 
-export function updateHistory({
-  AppCore,
-  getRoute,
-  pathname = DEFAULT_ROUTE,
-  options = {},
-} = {}) {
+export function updateHistory({ AppCore, getRoute, pathname = DEFAULT_ROUTE, options = {} } = {}) {
   if (!canUseHistory()) return false;
 
-  const opts = {
-    ...safeObject(options),
-    getRoute,
-  };
+  const opts = { ...safeObject(options), getRoute };
 
   if (shouldSkipWrite(opts)) {
-    emit(AppCore, HISTORY_EVENTS.skip, {
-      method: "updateHistory",
-      reason: "skip-history",
-      pathname,
-      options: opts,
-    });
-
+    emit(AppCore, HISTORY_EVENTS.skip, { method: "updateHistory", reason: "skip-history", pathname, options: opts });
     return false;
   }
 
   const context = resolveHistoryContext(AppCore, pathname, opts);
-
-  const method =
-    opts.replaceState === true
-      ? "replaceState"
-      : "pushState";
+  const method = opts.replaceState === true ? "replaceState" : "pushState";
 
   const state = createHistoryState({
     AppCore,
@@ -934,73 +662,33 @@ export function updateHistory({
   });
 
   const currentUrl = comparableCurrentUrl(AppCore);
-  const sameCurrentUrl = sameUrl(context.publicPath, currentUrl);
+  const signature = writeSignature({ method, url: context.publicPath, state });
+  const sameLastWrite = signature === lastWriteSignature && nowMs() - lastWriteAt < WRITE_DEDUPE_MS;
 
-  const signature = writeSignature({
-    method,
-    url: context.publicPath,
+  if (sameHistoryState(currentHistoryState(), state) && opts.forceHistory !== true) {
+    emit(AppCore, HISTORY_EVENTS.skip, { method: "updateHistory", reason: "same-state", nextUrl: context.publicPath, currentUrl, state });
+    return false;
+  }
+
+  if (sameLastWrite && opts.forceHistory !== true) {
+    emit(AppCore, HISTORY_EVENTS.skip, { method: "updateHistory", reason: "same-last-write", nextUrl: context.publicPath, currentUrl, state });
+    return false;
+  }
+
+  return historyWrite(
+    AppCore,
+    context.publicPath === currentUrl || opts.replaceState === true ? "replaceState" : "pushState",
     state,
-  });
-
-  const sameLastWrite =
-    signature === lastWriteSignature &&
-    nowMs() - lastWriteAt < WRITE_DEDUPE_MS;
-
-  if (
-    sameHistoryState(currentHistoryState(), state) &&
-    opts.forceHistory !== true
-  ) {
-    emit(AppCore, HISTORY_EVENTS.skip, {
-      method: "updateHistory",
-      reason: "same-state",
-      nextUrl: context.publicPath,
-      currentUrl,
-      state,
-    });
-
-    return false;
-  }
-
-  if (
-    sameLastWrite &&
-    opts.forceHistory !== true
-  ) {
-    emit(AppCore, HISTORY_EVENTS.skip, {
-      method: "updateHistory",
-      reason: "same-last-write",
-      nextUrl: context.publicPath,
-      currentUrl,
-      state,
-    });
-
-    return false;
-  }
-
-  if (
-    sameCurrentUrl ||
-    opts.replaceState === true
-  ) {
-    return historyWrite(AppCore, "replaceState", state, context.publicPath, {
-      pathname,
-      options: opts,
-      writeSignature: signature,
-    });
-  }
-
-  return historyWrite(AppCore, "pushState", state, context.publicPath, {
-    pathname,
-    options: opts,
-    writeSignature: signature,
-  });
+    context.publicPath,
+    { pathname, options: opts, writeSignature: signature }
+  );
 }
 
 /* =========================================================
    INITIAL STATE
 ========================================================= */
 
-export function ensureInitialHistoryState({
-  AppCore,
-} = {}) {
+export function ensureInitialHistoryState({ AppCore } = {}) {
   if (!canUseHistory()) return false;
 
   try {
@@ -1011,15 +699,8 @@ export function ensureInitialHistoryState({
       getCurrentPath(AppCore) ||
       DEFAULT_ROUTE;
 
-    const publicPath = normalizePublicUrl(AppCore, currentUrl, {
-      preserveCurrentContext: false,
-      ignoreProtectedInitialUrl: true,
-    });
-
-    const canonicalPath =
-      canonicalOf(AppCore, publicPath) ||
-      getCurrentCanonicalPath(AppCore) ||
-      DEFAULT_ROUTE;
+    const publicPath = normalizePublicUrl(AppCore, currentUrl, { ignoreProtectedInitialUrl: true });
+    const canonicalPath = canonicalOf(AppCore, publicPath) || getCurrentCanonicalPath(AppCore) || DEFAULT_ROUTE;
 
     const state = createHistoryState({
       AppCore,
@@ -1038,46 +719,21 @@ export function ensureInitialHistoryState({
 
     const currentState = currentHistoryState();
 
-    if (
-      currentState &&
-      Number(currentState.version || 0) >= HISTORY_STATE_VERSION &&
-      sameHistoryState(currentState, state)
-    ) {
-      emit(AppCore, HISTORY_EVENTS.initial, {
-        reason: "existing-valid-state",
-        currentUrl: publicPath,
-        canonicalPath,
-        state: currentState,
-      });
-
+    if (currentState && Number(currentState.version || 0) >= HISTORY_STATE_VERSION && sameHistoryState(currentState, state)) {
+      emit(AppCore, HISTORY_EVENTS.initial, { reason: "existing-valid-state", currentUrl: publicPath, canonicalPath, state: currentState });
       return true;
     }
 
     const ok = historyWrite(AppCore, "replaceState", state, publicPath, {
       reason: "ensure-initial-history-state",
-      writeSignature: writeSignature({
-        method: "replaceState",
-        url: publicPath,
-        state,
-      }),
+      writeSignature: writeSignature({ method: "replaceState", url: publicPath, state }),
     });
 
-    emit(AppCore, HISTORY_EVENTS.initial, {
-      ok,
-      currentUrl: publicPath,
-      canonicalPath,
-      state,
-    });
-
+    emit(AppCore, HISTORY_EVENTS.initial, { ok, currentUrl: publicPath, canonicalPath, state });
     return ok;
   } catch (error) {
     warn(AppCore, "ensureInitialHistoryState falló.", error);
-
-    emit(AppCore, HISTORY_EVENTS.error, {
-      method: "ensureInitialHistoryState",
-      error,
-    });
-
+    emit(AppCore, HISTORY_EVENTS.error, { method: "ensureInitialHistoryState", error });
     return false;
   }
 }
@@ -1088,18 +744,14 @@ export function ensureInitialHistoryState({
 
 function removeSensitiveSearchParams(search = "") {
   const normalized = normalizeSearch(search);
-
   if (!normalized) return "";
 
   try {
     const params = new URLSearchParams(normalized);
 
-    for (const name of SENSITIVE_PARAM_NAMES) {
-      params.delete(name);
-    }
+    for (const name of SENSITIVE_PARAM_NAMES) params.delete(name);
 
     const output = params.toString();
-
     return output ? `?${output}` : "";
   } catch {
     let output = normalized;
@@ -1107,10 +759,7 @@ function removeSensitiveSearchParams(search = "") {
     for (const name of SENSITIVE_PARAM_NAMES) {
       try {
         output = output
-          .replace(
-            new RegExp(`([?&])${String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=[^&#]*&?`, "gi"),
-            "$1"
-          )
+          .replace(new RegExp(`([?&])${String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=[^&#]*&?`, "gi"), "$1")
           .replace(/[?&]$/g, "");
       } catch {}
     }
@@ -1129,18 +778,9 @@ function removeProtectedPathToken(pathname = DEFAULT_ROUTE) {
   const rest = hasUsername ? segments.slice(1) : segments;
 
   const candidates = [
-    {
-      base: ACTIVATION_PATH,
-      output: ACTIVATION_PATH,
-    },
-    {
-      base: RESET_CONFIRM_PATH,
-      output: RESET_CONFIRM_PATH,
-    },
-    {
-      base: PASSWORD_RESET_CONFIRM_PATH,
-      output: RESET_CONFIRM_PATH,
-    },
+    { base: ACTIVATION_PATH, output: ACTIVATION_PATH },
+    { base: RESET_CONFIRM_PATH, output: RESET_CONFIRM_PATH },
+    { base: PASSWORD_RESET_CONFIRM_PATH, output: RESET_CONFIRM_PATH },
   ];
 
   for (const item of candidates) {
@@ -1150,10 +790,7 @@ function removeProtectedPathToken(pathname = DEFAULT_ROUTE) {
     if (!matches) continue;
 
     const tail = rest.slice(baseSegments.length + 1);
-    const outputSegments = [
-      ...item.output.split("/").filter(Boolean),
-      ...tail,
-    ];
+    const outputSegments = [...item.output.split("/").filter(Boolean), ...tail];
 
     return normalizePathname(`/${outputSegments.join("/")}`);
   }
@@ -1162,18 +799,11 @@ function removeProtectedPathToken(pathname = DEFAULT_ROUTE) {
 }
 
 export function buildScrubbedProtectedUrl(AppCore, url = "") {
-  const original =
-    safeText(url, "") ||
-    browserPath() ||
-    DEFAULT_ROUTE;
-
+  const original = safeText(url, "") || browserPath() || DEFAULT_ROUTE;
   const parts = splitUrl(original);
 
   if (parts.hash && isHashRouterPath(parts.hash)) {
-    return buildScrubbedProtectedUrl(
-      AppCore,
-      normalizeHashRouterPath(parts.hash)
-    );
+    return buildScrubbedProtectedUrl(AppCore, normalizeHashRouterPath(parts.hash));
   }
 
   let hash = parts.hash;
@@ -1183,45 +813,34 @@ export function buildScrubbedProtectedUrl(AppCore, url = "") {
       const [hashPath, ...queryParts] = hash.split("?");
       const query = queryParts.join("?");
       const cleanQuery = removeSensitiveSearchParams(query ? `?${query}` : "");
-
       hash = cleanQuery ? `${hashPath}${cleanQuery}` : hashPath;
     } catch {}
   }
 
-  return normalizePath(AppCore, joinUrl({
-    pathname: removeProtectedPathToken(parts.pathname),
-    search: removeSensitiveSearchParams(parts.search),
-    hash,
-  }));
+  return publicOf(
+    AppCore,
+    joinUrl({
+      pathname: removeProtectedPathToken(parts.pathname),
+      search: removeSensitiveSearchParams(parts.search),
+      hash,
+    })
+  );
 }
 
 function scrubKind(AppCore, url = "") {
   const canonical = canonicalOf(AppCore, url);
 
   if (canonical === ACTIVATION_PATH) return "activation";
-  if (canonical === RESET_CONFIRM_PATH) return "resetConfirm";
+  if (canonical === RESET_CONFIRM_PATH || canonical === PASSWORD_RESET_CONFIRM_PATH) return "resetConfirm";
 
   return "";
 }
 
-export function scrubProtectedTokenFromHistory({
-  AppCore,
-  url = "",
-  reason = "protected-token-scrub",
-  replace = true,
-  extraState = {},
-} = {}) {
+export function scrubProtectedTokenFromHistory({ AppCore, url = "", reason = "protected-token-scrub", replace = true, extraState = {} } = {}) {
   if (!canUseHistory()) return false;
 
-  const currentUrl =
-    safeText(url, "") ||
-    browserPath() ||
-    comparableCurrentUrl(AppCore) ||
-    DEFAULT_ROUTE;
-
-  if (!isProtectedPublicTokenPath(currentUrl)) {
-    return false;
-  }
+  const currentUrl = safeText(url, "") || browserPath() || comparableCurrentUrl(AppCore) || DEFAULT_ROUTE;
+  if (!isProtectedPublicTokenPath(currentUrl)) return false;
 
   const scrubbedUrl = buildScrubbedProtectedUrl(AppCore, currentUrl);
   const kind = scrubKind(AppCore, scrubbedUrl);
@@ -1261,6 +880,7 @@ export function scrubProtectedTokenFromHistory({
       scrubbedProtectedToken: true,
       scrubbedProtectedTokenKind: kind || null,
       scrubbedProtectedTokenAt: isoNow(),
+      scrubProtectedToken: true,
     },
   });
 
@@ -1269,11 +889,7 @@ export function scrubProtectedTokenFromHistory({
   const ok = historyWrite(AppCore, method, state, scrubbedUrl, {
     reason,
     scrubbed: true,
-    writeSignature: writeSignature({
-      method,
-      url: scrubbedUrl,
-      state,
-    }),
+    writeSignature: writeSignature({ method, url: scrubbedUrl, state }),
   });
 
   if (ok) {
@@ -1298,11 +914,7 @@ export function back(AppCore = null) {
 
   try {
     window.history.back();
-
-    emit(AppCore, HISTORY_EVENTS.back, {
-      at: isoNow(),
-    });
-
+    emit(AppCore, HISTORY_EVENTS.back, { at: isoNow() });
     return true;
   } catch {
     return false;
@@ -1310,25 +922,11 @@ export function back(AppCore = null) {
 }
 
 export function getPopStatePath(AppCore, eventOrState = null) {
-  const state =
-    eventOrState?.state ||
-    eventOrState ||
-    currentHistoryState() ||
-    {};
-
-  const fromState = safeText(
-    state.publicPath ||
-      state.path ||
-      state.requestedPath ||
-      "",
-    ""
-  );
+  const state = eventOrState?.state || eventOrState || currentHistoryState() || {};
+  const fromState = safeText(state.publicPath || state.path || state.requestedPath || "", "");
 
   if (fromState) {
-    return normalizePublicUrl(AppCore, fromState, {
-      preserveCurrentContext: false,
-      ignoreProtectedInitialUrl: true,
-    });
+    return normalizePublicUrl(AppCore, fromState, { ignoreProtectedInitialUrl: true });
   }
 
   return comparableCurrentUrl(AppCore) || DEFAULT_ROUTE;
@@ -1367,6 +965,15 @@ export function getHistorySnapshot(AppCore) {
     sequence,
 
     state: canUseHistory() ? window.history.state : null,
+
+    policy: {
+      ownAuth: false,
+      ownGuards: false,
+      ownRender: false,
+      ownStorage: false,
+      ownToast: false,
+      historyOnly: true,
+    },
   });
 }
 

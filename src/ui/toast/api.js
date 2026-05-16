@@ -2,25 +2,16 @@
    Onion SPA - Toast API
    Archivo: src/ui/toast/api.js
 
-   Responsabilidades:
-   - api pública del sistema toast
+   Toast API limpio:
    - show / update / dismiss / clear
-   - atajos success / error / warning / info / loading
-   - integrar store + dom + timers + events
-   - limitar máximo de toasts
-   - refresco live de idioma
-   - soportar replace por id de forma estable
-   - endurecer dismiss / clear / reset
-   - proteger SSR/no-browser
-   - evitar timers huérfanos
-   - evitar nodos zombie
-   - mantener estado store/dom/timers consistente
-
-   FIX CRÍTICO:
-   - evitar recursión infinita clearToasts() -> toast:clear -> clearToasts()
-   - safeEmit no duplica AppCore.events + window cuando existe bus
-   - clearToasts soporta silent / emit:false / source app-events
-   - clearToasts queda protegido por lock anti reentrada
+   - success / error / warning / info / loading
+   - store + dom + timers + events sincronizados
+   - límite máximo de items
+   - replace por id
+   - dedupe simple anti-spam
+   - clear/reset anti-reentrada
+   - SSR safe
+   - sin lógica auth/router/http
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -32,6 +23,8 @@ import {
   TOAST_TYPE_WARNING,
   TOAST_TYPE_INFO,
   TOAST_TYPE_LOADING,
+  TOAST_EXIT_DURATION,
+  TOAST_REDUCED_MOTION_EXIT_DURATION,
 } from "./constants.js";
 
 import {
@@ -85,16 +78,16 @@ import {
 } from "./events.js";
 
 /* =========================================================
-   RUNTIME GUARDS
+   VERSION / CONSTANTS
 ========================================================= */
 
-let clearToastsRunning = false;
-let resetToastApiRunning = false;
-let lastClearToastsEmitAt = 0;
-let lastResetToastEmitAt = 0;
+export const TOAST_API_VERSION = "17.0.0-clean";
 
-const CLEAR_TOASTS_EMIT_DEDUPE_MS = 120;
-const RESET_TOAST_EMIT_DEDUPE_MS = 120;
+const SOURCE = "ui.toast.api";
+
+const DEFAULT_DEDUPE_MS = 1200;
+const CLEAR_DEDUPE_MS = 120;
+const RESET_DEDUPE_MS = 120;
 
 const EVENT_SOURCE_BLOCKLIST = new Set([
   "event-bus",
@@ -102,166 +95,126 @@ const EVENT_SOURCE_BLOCKLIST = new Set([
   "toast-events",
   "toast:clear",
   "toast:reset",
+  "toast-api:clear",
+  "toast-api:reset",
 ]);
+
+/* =========================================================
+   RUNTIME
+========================================================= */
+
+let clearRunning = false;
+let resetRunning = false;
+
+let lastClearEmitAt = 0;
+let lastResetEmitAt = 0;
+
+const DEDUPE = new Map();
 
 /* =========================================================
    BASICS
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isFunction(value) {
+function isFn(value) {
   return typeof value === "function";
 }
 
 function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function safeObject(value) {
+  return isObject(value) ? value : {};
 }
 
 function safeBool(value, fallback = false) {
-  if (typeof value === "boolean") {
-    return value;
-  }
+  if (typeof value === "boolean") return value;
+  if (value === 1) return true;
+  if (value === 0) return false;
 
-  if (typeof value === "string") {
-    const key = value.trim().toLowerCase();
+  const text = safeText(value, "").toLowerCase();
 
-    if (["true", "1", "yes", "si", "sí", "on"].includes(key)) {
-      return true;
-    }
+  if (["true", "1", "yes", "si", "sí", "on", "ok"].includes(text)) return true;
+  if (["false", "0", "no", "off"].includes(text)) return false;
 
-    if (["false", "0", "no", "off"].includes(key)) {
-      return false;
-    }
-  }
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-
-  return fallback;
+  return Boolean(fallback);
 }
 
 function safeNumber(value, fallback = 0) {
   const n = Number(value);
-
-  return Number.isFinite(n)
-    ? n
-    : fallback;
+  return Number.isFinite(n) ? n : fallback;
 }
 
-function safeWarn(...args) {
-  let emittedByCore = false;
-
+function now() {
   try {
-    if (typeof AppCore?.utils?.warn === "function") {
-      AppCore.utils.warn(
-        "[ToastAPI]",
-        ...args
-      );
-
-      emittedByCore = true;
-    }
+    return Date.now();
   } catch {
-    emittedByCore = false;
+    return 0;
   }
+}
 
-  if (emittedByCore) {
-    return;
+function iso(ms = now()) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
   }
+}
+
+function warn(...args) {
+  try {
+    AppCore?.utils?.warn?.("[ToastAPI]", ...args);
+    return;
+  } catch {}
 
   try {
-    console.warn(
-      "[ToastAPI]",
-      ...args
-    );
+    if (AppCore?.config?.debug) console.warn("[ToastAPI]", ...args);
   } catch {}
 }
 
-function safeError(...args) {
-  let emittedByCore = false;
-
+function errorLog(...args) {
   try {
-    if (typeof AppCore?.utils?.error === "function") {
-      AppCore.utils.error(
-        "[ToastAPI]",
-        ...args
-      );
-
-      emittedByCore = true;
-    }
-  } catch {
-    emittedByCore = false;
-  }
-
-  if (emittedByCore) {
+    AppCore?.utils?.error?.("[ToastAPI]", ...args);
     return;
-  }
+  } catch {}
 
   try {
-    console.error(
-      "[ToastAPI]",
-      ...args
-    );
+    console.error("[ToastAPI]", ...args);
   } catch {}
 }
 
-function safeEmit(eventName, payload = {}, options = {}) {
+function emit(eventName, payload = {}, options = {}) {
   const name = safeText(eventName, "");
+  if (!name) return false;
 
-  if (!name) {
-    return false;
-  }
+  const detail = {
+    source: SOURCE,
+    version: TOAST_API_VERSION,
+    at: iso(),
+    ...safeObject(payload),
+  };
 
-  const opts =
-    isObject(options)
-      ? options
-      : {};
-
-  let busAvailable = false;
+  let hasBus = false;
   let emitted = false;
 
   try {
-    if (
-      typeof AppCore?.events?.emit === "function"
-    ) {
-      busAvailable = true;
-
-      AppCore.events.emit(
-        name,
-        payload
-      );
-
+    if (isFn(AppCore?.events?.emit)) {
+      hasBus = true;
+      AppCore.events.emit(name, detail);
       emitted = true;
     }
   } catch {}
 
   /*
-    CRÍTICO:
-    Si existe AppCore.events, NO duplicamos en window por defecto.
-    Emitir por bus + window puede duplicar listeners y provocar loops.
+    No duplicar bus + window salvo petición explícita.
   */
-  if (
-    opts.window === true ||
-    (!busAvailable && isBrowser())
-  ) {
+  if ((options.window === true || !hasBus) && isBrowser()) {
     try {
-      window.dispatchEvent(
-        new CustomEvent(name, {
-          detail: payload,
-        })
-      );
-
+      window.dispatchEvent(new CustomEvent(name, { detail }));
       emitted = true;
     } catch {}
   }
@@ -270,15 +223,12 @@ function safeEmit(eventName, payload = {}, options = {}) {
 }
 
 function nextFrame(callback) {
-  if (!isFunction(callback)) {
-    return false;
-  }
+  if (!isFn(callback)) return false;
 
   if (!isBrowser()) {
     try {
       callback();
     } catch {}
-
     return true;
   }
 
@@ -300,25 +250,18 @@ function nextFrame(callback) {
     }, 0);
 
     return true;
-  } catch {}
-
-  try {
-    callback();
-  } catch {}
-
-  return true;
+  } catch {
+    return false;
+  }
 }
 
-function safeDelay(callback, delay = 0) {
-  if (!isFunction(callback)) {
-    return null;
-  }
+function delay(callback, ms = 0) {
+  if (!isFn(callback)) return null;
 
   if (!isBrowser()) {
     try {
       callback();
     } catch {}
-
     return null;
   }
 
@@ -327,132 +270,82 @@ function safeDelay(callback, delay = 0) {
       try {
         callback();
       } catch {}
-    }, Math.max(0, safeNumber(delay, 0)));
-  } catch {}
-
-  try {
-    callback();
-  } catch {}
-
-  return null;
-}
-
-function getEventSource(options = {}) {
-  return safeText(
-    options?.source ||
-      options?.origin ||
-      options?.eventSource ||
-      "",
-    ""
-  );
-}
-
-function shouldEmitClearToastsEvent(options = {}) {
-  if (options?.silent === true) {
-    return false;
-  }
-
-  if (options?.emit === false) {
-    return false;
-  }
-
-  const source =
-    getEventSource(options);
-
-  if (
-    source &&
-    EVENT_SOURCE_BLOCKLIST.has(source)
-  ) {
-    return false;
-  }
-
-  const now =
-    Date.now();
-
-  if (
-    now - lastClearToastsEmitAt <
-    CLEAR_TOASTS_EMIT_DEDUPE_MS
-  ) {
-    return false;
-  }
-
-  lastClearToastsEmitAt =
-    now;
-
-  return true;
-}
-
-function shouldEmitResetToastEvent(options = {}) {
-  if (options?.silent === true) {
-    return false;
-  }
-
-  if (options?.emit === false) {
-    return false;
-  }
-
-  const source =
-    getEventSource(options);
-
-  if (
-    source &&
-    EVENT_SOURCE_BLOCKLIST.has(source)
-  ) {
-    return false;
-  }
-
-  const now =
-    Date.now();
-
-  if (
-    now - lastResetToastEmitAt <
-    RESET_TOAST_EMIT_DEDUPE_MS
-  ) {
-    return false;
-  }
-
-  lastResetToastEmitAt =
-    now;
-
-  return true;
-}
-
-/* =========================================================
-   DOM SAFETY
-========================================================= */
-
-function ensureToastDom() {
-  try {
-    ensureToastKeyframes();
-  } catch (error) {
-    safeWarn(
-      "No se pudieron asegurar keyframes.",
-      error
-    );
-  }
-
-  try {
-    return ensureToastContainer();
-  } catch (error) {
-    safeWarn(
-      "No se pudo asegurar contenedor.",
-      error
-    );
+    }, Math.max(0, safeNumber(ms, 0)));
+  } catch {
+    try {
+      callback();
+    } catch {}
 
     return null;
   }
 }
 
-function appendToastNode(item) {
-  if (!item?.toastEl) {
-    return false;
+function eventSource(options = {}) {
+  return safeText(
+    options.source ||
+      options.origin ||
+      options.eventSource ||
+      "",
+    ""
+  );
+}
+
+function shouldEmitClear(options = {}) {
+  if (options.silent === true || options.emit === false) return false;
+
+  const source = eventSource(options);
+
+  if (source && EVENT_SOURCE_BLOCKLIST.has(source)) return false;
+
+  const stamp = now();
+
+  if (stamp - lastClearEmitAt < CLEAR_DEDUPE_MS) return false;
+
+  lastClearEmitAt = stamp;
+  return true;
+}
+
+function shouldEmitReset(options = {}) {
+  if (options.silent === true || options.emit === false) return false;
+
+  const source = eventSource(options);
+
+  if (source && EVENT_SOURCE_BLOCKLIST.has(source)) return false;
+
+  const stamp = now();
+
+  if (stamp - lastResetEmitAt < RESET_DEDUPE_MS) return false;
+
+  lastResetEmitAt = stamp;
+  return true;
+}
+
+/* =========================================================
+   DOM
+========================================================= */
+
+function ensureDom() {
+  if (!isBrowser()) return null;
+
+  try {
+    ensureToastKeyframes();
+  } catch (error) {
+    warn("ensureToastKeyframes falló.", error);
   }
 
-  const container = ensureToastDom();
-
-  if (!container) {
-    return false;
+  try {
+    return ensureToastContainer();
+  } catch (error) {
+    warn("ensureToastContainer falló.", error);
+    return null;
   }
+}
+
+function appendNode(item) {
+  if (!item?.toastEl) return false;
+
+  const container = ensureDom();
+  if (!container) return false;
 
   try {
     if (!item.toastEl.isConnected) {
@@ -461,57 +354,125 @@ function appendToastNode(item) {
 
     return true;
   } catch (error) {
-    safeWarn(
-      "No se pudo insertar toast en DOM.",
-      error
-    );
-
+    warn("No se pudo insertar toast.", error);
     return false;
   }
 }
 
-function showToastNode(item) {
-  if (!item?.toastEl) {
-    return false;
-  }
+function showNode(item) {
+  if (!item?.toastEl) return false;
 
   nextFrame(() => {
-    if (
-      item.toastEl?.isConnected &&
-      !item.dismissed
-    ) {
+    if (!item?.toastEl?.isConnected || item.dismissed) return;
+
+    try {
       item.toastEl.classList.add("show");
       item.toastEl.removeAttribute("aria-hidden");
-    }
+    } catch {}
   });
 
   return true;
 }
 
-function hideToastNode(item) {
-  const toastEl =
-    item?.toastEl || null;
-
-  if (!toastEl) {
-    return false;
-  }
+function hideNode(item) {
+  const node = item?.toastEl;
+  if (!node) return false;
 
   try {
-    toastEl.classList.remove("show");
-    toastEl.style.pointerEvents = "none";
-    toastEl.setAttribute("aria-hidden", "true");
+    node.classList.remove("show");
+    node.classList.add("is-dismissing");
+    node.setAttribute("aria-hidden", "true");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function progressNode(node = null) {
+  if (!node) return null;
+
+  try {
+    return node.querySelector(".toast-progress") || null;
+  } catch {
+    return null;
+  }
+}
+
+function createNode(item) {
+  if (!item) return null;
+
+  try {
+    return createToastNode({
+      id: item.id,
+      type: item.type,
+      title: item.title,
+      message: item.message,
+      closable: item.closable,
+    });
+  } catch (error) {
+    warn("createToastNode falló.", error);
+    return null;
+  }
+}
+
+function patchNode(item) {
+  if (!item?.toastEl) return false;
+
+  try {
+    patchToastNode(item);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function replaceNode(item) {
+  if (!item) return false;
+
+  const next = createNode(item);
+  if (!next) return false;
+
+  try {
+    if (item.toastEl?.isConnected) {
+      item.toastEl.replaceWith(next);
+    }
+
+    item.toastEl = next;
+    item.progressEl = progressNode(next);
+    item.interactionsBound = false;
 
     return true;
-  } catch {}
+  } catch (error) {
+    warn("No se pudo reemplazar toast node.", error);
 
-  return false;
+    item.toastEl = next;
+    item.progressEl = progressNode(next);
+    item.interactionsBound = false;
+
+    return false;
+  }
+}
+
+function syncNode(item, options = {}) {
+  if (!item) return false;
+
+  if (options.replaceNode === true || !item.toastEl) {
+    replaceNode(item);
+  } else if (!patchNode(item)) {
+    replaceNode(item);
+  }
+
+  appendNode(item);
+  bindInteractions(item);
+
+  return true;
 }
 
 /* =========================================================
-   ITEM FACTORY
+   ITEM
 ========================================================= */
 
-function buildToastItem({
+function buildItem({
   id,
   type,
   title,
@@ -524,6 +485,8 @@ function buildToastItem({
   useDefaultMessage,
   meta = {},
 } = {}) {
+  const createdAt = now();
+
   return {
     id,
     type,
@@ -540,132 +503,73 @@ function buildToastItem({
     toastEl: toastEl || null,
     progressEl: progressEl || null,
 
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    createdAt,
+    updatedAt: createdAt,
 
     dismissed: false,
+    dismissReason: "",
 
     useDefaultTitle: Boolean(useDefaultTitle),
     useDefaultMessage: Boolean(useDefaultMessage),
 
     interactionsBound: false,
 
-    meta: isObject(meta)
-      ? meta
-      : {},
+    meta: safeObject(meta),
   };
 }
 
-function resolveToastId(options = {}) {
-  const explicit =
-    safeText(options.id, "");
-
-  return explicit || nextToastId();
+function idFromOptions(options = {}) {
+  return safeText(options.id || options.toastId || options.key, "") || nextToastId();
 }
 
-function resolveUseDefaultTitle(options = {}) {
-  return options.useDefaultTitle === true;
-}
+function normalizeInput(input = {}, maybeOptions = {}) {
+  const source = isObject(input)
+    ? {
+        ...input,
+        ...safeObject(maybeOptions),
+      }
+    : {
+        ...safeObject(maybeOptions),
+        message: input,
+      };
 
-function resolveUseDefaultMessage(type, options = {}) {
-  const explicit =
-    options.useDefaultMessage;
+  const type = normalizeToastType(source.type);
 
-  if (explicit !== undefined) {
-    return explicit === true;
-  }
+  const rawMessage =
+    source.message !== undefined
+      ? source.message
+      : source.text;
 
-  const message =
-    safeText(
-      options.message ??
-        options.text,
-      ""
-    );
-
-  return (
-    !message ||
-    type === TOAST_TYPE_LOADING
-  );
-}
-
-function resolveToastDuration(type, options = {}) {
-  if (
-    options.persist === true ||
-    options.persistent === true
-  ) {
-    return 0;
-  }
-
-  return normalizeToastDuration(
-    type,
-    options.duration
-  );
-}
-
-function resolveToastClosable(type, options = {}) {
-  if (options.closable !== undefined) {
-    return options.closable !== false;
-  }
-
-  if (type === TOAST_TYPE_LOADING) {
-    return false;
-  }
-
-  return true;
-}
-
-function normalizeToastInput(options = {}) {
-  const input =
-    isObject(options)
-      ? options
-      : {
-          message: safeText(options, ""),
-        };
-
-  const type =
-    normalizeToastType(input.type);
-
-  const id =
-    resolveToastId(input);
-
-  const useDefaultTitle =
-    resolveUseDefaultTitle(input);
+  const useDefaultTitle = source.useDefaultTitle === true;
 
   const useDefaultMessage =
-    resolveUseDefaultMessage(
-      type,
-      input
-    );
+    source.useDefaultMessage !== undefined
+      ? source.useDefaultMessage === true
+      : !safeText(rawMessage, "") || type === TOAST_TYPE_LOADING;
 
-  const title =
-    resolveToastTitle(
-      type,
-      input.title,
-      useDefaultTitle
-    );
+  const title = resolveToastTitle(
+    type,
+    source.title,
+    useDefaultTitle
+  );
 
-  const message =
-    resolveToastMessage(
-      type,
-      input.message,
-      input.text,
-      useDefaultMessage
-    );
+  const message = resolveToastMessage(
+    type,
+    source.message,
+    source.text,
+    useDefaultMessage
+  );
 
-  const duration =
-    resolveToastDuration(
-      type,
-      input
-    );
+  const duration = source.persist === true || source.persistent === true
+    ? 0
+    : normalizeToastDuration(type, source.duration);
 
-  const closable =
-    resolveToastClosable(
-      type,
-      input
-    );
+  const closable = source.closable !== undefined
+    ? source.closable !== false
+    : type !== TOAST_TYPE_LOADING;
 
   return {
-    id,
+    id: idFromOptions(source),
     type,
     title,
     message,
@@ -673,75 +577,85 @@ function normalizeToastInput(options = {}) {
     closable,
     useDefaultTitle,
     useDefaultMessage,
-    meta:
-      isObject(input.meta)
-        ? input.meta
-        : {},
+    replace: source.replace !== false,
+    replaceNode: source.replaceNode === true,
+    dedupe: source.dedupe !== false,
+    dedupeMs: Math.max(0, safeNumber(source.dedupeMs, DEFAULT_DEDUPE_MS)),
+    dedupeKey: safeText(
+      source.dedupeKey ||
+        source.fingerprint ||
+        `${type}:${safeText(title, "")}:${safeText(message, "")}`,
+      ""
+    ),
+    meta: safeObject(source.meta),
   };
 }
 
+function shouldSkipDedupe(input) {
+  if (!input?.dedupe || !input.dedupeKey) return false;
+
+  const previous = DEDUPE.get(input.dedupeKey);
+  const stamp = now();
+
+  if (previous && stamp - previous.at < input.dedupeMs) {
+    return previous.id || true;
+  }
+
+  DEDUPE.set(input.dedupeKey, {
+    at: stamp,
+    id: input.id,
+  });
+
+  return false;
+}
+
+function isPersistent(item) {
+  return safeNumber(item?.duration, 0) <= 0;
+}
+
 /* =========================================================
-   TIMER / PROGRESS
+   TIMERS / PROGRESS
 ========================================================= */
 
-function isPersistedToast(item) {
-  return Number(item?.duration || 0) <= 0;
-}
-
-function syncToastProgress(item) {
-  if (
-    !item ||
-    item.dismissed
-  ) {
-    return false;
-  }
-
-  if (isPersistedToast(item)) {
-    try {
-      if (item.progressEl) {
-        item.progressEl.style.animation = "none";
-        item.progressEl.style.opacity = "0";
-        item.progressEl.style.transform = "";
-      }
-    } catch {}
-
-    return true;
-  }
-
-  try {
-    runToastProgress(
-      item,
-      item.duration
-    );
-
-    return true;
-  } catch (error) {
-    safeWarn(
-      "No se pudo iniciar progreso toast.",
-      error
-    );
-
-    return false;
-  }
-}
-
-function syncToastTimer(item) {
-  if (
-    !item ||
-    item.dismissed
-  ) {
-    return false;
-  }
+function clearTimer(item) {
+  if (!item) return false;
 
   try {
     clearToastTimer(item);
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  if (isPersistedToast(item)) {
+function syncProgress(item) {
+  if (!item || item.dismissed) return false;
+
+  if (isPersistent(item)) {
     item.remaining = 0;
     item.startedAt = 0;
     item.timeoutId = null;
+    return true;
+  }
 
+  try {
+    runToastProgress(item, item.duration);
+    return true;
+  } catch (error) {
+    warn("runToastProgress falló.", error);
+    return false;
+  }
+}
+
+function syncTimer(item) {
+  if (!item || item.dismissed) return false;
+
+  clearTimer(item);
+
+  if (isPersistent(item)) {
+    item.remaining = 0;
+    item.startedAt = 0;
+    item.timeoutId = null;
     return true;
   }
 
@@ -752,84 +666,38 @@ function syncToastTimer(item) {
     startToastTimer(item);
     return true;
   } catch (error) {
-    safeWarn(
-      "No se pudo iniciar timer toast.",
-      error
-    );
-
+    warn("startToastTimer falló.", error);
     return false;
   }
 }
 
-/* =========================================================
-   INTERACTIONS
-========================================================= */
+function bindInteractions(item) {
+  const node = item?.toastEl;
 
-function registerToastInteractions(item) {
-  const toastEl =
-    item?.toastEl || null;
-
-  if (
-    !toastEl ||
-    item.interactionsBound
-  ) {
-    return false;
-  }
+  if (!node || item.interactionsBound) return false;
 
   try {
-    toastEl.addEventListener(
-      "mouseenter",
-      () => {
-        pauseToastTimer(item);
-      }
-    );
-
-    toastEl.addEventListener(
-      "mouseleave",
-      () => {
-        resumeToastTimer(item);
-      }
-    );
-
-    toastEl.addEventListener(
-      "focusin",
-      () => {
-        pauseToastTimer(item);
-      }
-    );
-
-    toastEl.addEventListener(
-      "focusout",
-      () => {
-        resumeToastTimer(item);
-      }
-    );
+    node.addEventListener("mouseenter", () => pauseToastTimer(item));
+    node.addEventListener("mouseleave", () => resumeToastTimer(item));
+    node.addEventListener("focusin", () => pauseToastTimer(item));
+    node.addEventListener("focusout", () => resumeToastTimer(item));
 
     item.interactionsBound = true;
-
     return true;
   } catch (error) {
-    safeWarn(
-      "No se pudieron registrar interacciones toast.",
-      error
-    );
-
+    warn("No se pudieron vincular interacciones toast.", error);
     return false;
   }
 }
 
 /* =========================================================
-   DESTROY
+   DESTROY / LIMIT
 ========================================================= */
 
-function destroyToastItem(item) {
-  if (!item) {
-    return false;
-  }
+function destroyItem(item) {
+  if (!item) return false;
 
-  try {
-    clearToastTimer(item);
-  } catch {}
+  clearTimer(item);
 
   try {
     removeToastNode(item);
@@ -851,46 +719,26 @@ function destroyToastItem(item) {
   return true;
 }
 
-function destroyToastById(id) {
-  const item =
-    getToastItem(id);
-
-  if (!item) {
-    return false;
-  }
-
-  return destroyToastItem(item);
+function destroyById(id = "") {
+  const item = getToastItem(id);
+  return item ? destroyItem(item) : false;
 }
 
-/* =========================================================
-   LIMIT
-========================================================= */
-
-function enforceToastLimit() {
-  const active =
-    getActiveToasts();
-
+function enforceLimit() {
+  const active = getActiveToasts();
   let removed = 0;
 
-  while (
-    active.length > TOAST_MAX_ITEMS
-  ) {
-    const oldest =
-      active.shift();
+  while (active.length > TOAST_MAX_ITEMS) {
+    const oldest = active.shift();
 
-    if (!oldest?.id) {
-      continue;
-    }
+    if (!oldest?.id) continue;
 
     if (
-      dismissToast(
-        oldest.id,
-        {
-          reason: "limit",
-          emit: false,
-          source: "toast-limit",
-        }
-      )
+      dismissToast(oldest.id, {
+        reason: "limit",
+        emit: false,
+        source: "toast-limit",
+      })
     ) {
       removed += 1;
     }
@@ -900,368 +748,131 @@ function enforceToastLimit() {
 }
 
 /* =========================================================
-   NODE REPLACE / PATCH
+   PUBLIC: SHOW / UPDATE
 ========================================================= */
 
-function createFreshToastNode(item) {
-  if (!item) {
-    return null;
-  }
+export function showToast(input = {}, maybeOptions = {}) {
+  if (!isBrowser()) return null;
 
-  try {
-    return createToastNode({
-      id: item.id,
-      type: item.type,
-      title: item.title,
-      message: item.message,
-      closable: item.closable,
-    });
-  } catch (error) {
-    safeWarn(
-      "No se pudo crear nodo toast.",
-      error
-    );
-
-    return null;
-  }
-}
-
-function createOrReplaceToastNode(item) {
-  if (!item) {
-    return item;
-  }
-
-  const nextNode =
-    createFreshToastNode(item);
-
-  if (!nextNode) {
-    return item;
-  }
-
-  try {
-    if (item.toastEl?.isConnected) {
-      item.toastEl.replaceWith(nextNode);
-    }
-
-    item.toastEl = nextNode;
-    item.progressEl =
-      nextNode.querySelector(".toast-progress");
-
-    item.interactionsBound = false;
-  } catch (error) {
-    safeWarn(
-      "No se pudo reemplazar nodo toast.",
-      error
-    );
-  }
-
-  return item;
-}
-
-function patchExistingToastNode(item) {
-  if (!item?.toastEl) {
-    return false;
-  }
-
-  try {
-    patchToastNode(item);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function syncToastNode(item, { replaceNode = false } = {}) {
-  if (!item) {
-    return false;
-  }
-
-  if (
-    replaceNode ||
-    !item.toastEl
-  ) {
-    createOrReplaceToastNode(item);
-  } else if (!patchExistingToastNode(item)) {
-    createOrReplaceToastNode(item);
-  }
-
-  appendToastNode(item);
-  registerToastInteractions(item);
-
-  return true;
-}
-
-/* =========================================================
-   LANGUAGE
-========================================================= */
-
-export function refreshToastLanguage(item) {
-  if (
-    !item ||
-    item.dismissed
-  ) {
-    return item;
-  }
-
-  if (item.useDefaultTitle) {
-    item.title =
-      getToastTitle(item.type);
-  }
-
-  if (item.useDefaultMessage) {
-    item.message =
-      getToastMessage(item.type);
-  }
-
-  item.updatedAt = Date.now();
-
-  patchExistingToastNode(item);
-
-  return item;
-}
-
-export function refreshAllToastsLanguage() {
-  const items =
-    getToastItems();
-
-  let refreshed = 0;
-
-  items.forEach((item) => {
-    if (
-      refreshToastLanguage(item)
-    ) {
-      refreshed += 1;
-    }
-  });
-
-  safeEmit(
-    "toast:language:refresh",
-    {
-      refreshed,
-    }
-  );
-
-  return true;
-}
-
-/* =========================================================
-   SHOW
-========================================================= */
-
-export function showToast(options = {}) {
-  const normalized =
-    normalizeToastInput(options);
+  const normalized = normalizeInput(input, maybeOptions);
 
   if (!normalized.message) {
-    safeWarn(
-      "showToast requiere message/text."
-    );
-
+    warn("showToast requiere message/text.");
     return null;
   }
 
-  const container =
-    ensureToastDom();
+  const duplicate = shouldSkipDedupe(normalized);
 
-  if (!container) {
-    return null;
+  if (duplicate) {
+    return typeof duplicate === "string" ? duplicate : normalized.id;
   }
 
-  const existing =
-    getToastItem(normalized.id);
+  if (!ensureDom()) return null;
 
-  if (existing) {
-    return updateToast(
-      normalized.id,
-      {
-        type:
-          normalized.type,
-        title:
-          normalized.title,
-        message:
-          normalized.message,
-        duration:
-          normalized.duration,
-        closable:
-          normalized.closable,
-        useDefaultTitle:
-          normalized.useDefaultTitle,
-        useDefaultMessage:
-          normalized.useDefaultMessage,
-        meta:
-          normalized.meta,
-        replaceNode:
-          true,
-      }
-    );
+  const existing = getToastItem(normalized.id);
+
+  if (existing && !existing.dismissed && !isToastDismissing(normalized.id)) {
+    if (normalized.replace) {
+      return updateToast(normalized.id, {
+        type: normalized.type,
+        title: normalized.title,
+        message: normalized.message,
+        duration: normalized.duration,
+        closable: normalized.closable,
+        useDefaultTitle: normalized.useDefaultTitle,
+        useDefaultMessage: normalized.useDefaultMessage,
+        meta: normalized.meta,
+        replaceNode: true,
+      });
+    }
+
+    normalized.id = nextToastId();
+  } else if (existing) {
+    destroyItem(existing);
   }
 
-  const toastEl =
-    createToastNode({
-      id:
-        normalized.id,
-      type:
-        normalized.type,
-      title:
-        normalized.title,
-      message:
-        normalized.message,
-      closable:
-        normalized.closable,
-    });
+  const toastEl = createNode(normalized);
 
-  const item =
-    buildToastItem({
-      id:
-        normalized.id,
-      type:
-        normalized.type,
-      title:
-        normalized.title,
-      message:
-        normalized.message,
-      duration:
-        normalized.duration,
-      closable:
-        normalized.closable,
-      toastEl,
-      progressEl:
-        toastEl?.querySelector?.(".toast-progress") ||
-        null,
-      useDefaultTitle:
-        normalized.useDefaultTitle,
-      useDefaultMessage:
-        normalized.useDefaultMessage,
-      meta:
-        normalized.meta,
-    });
+  if (!toastEl) return null;
 
-  setToastItem(
-    item.id,
-    item
-  );
+  const item = buildItem({
+    ...normalized,
+    toastEl,
+    progressEl: progressNode(toastEl),
+  });
 
-  appendToastNode(item);
-  registerToastInteractions(item);
-  syncToastProgress(item);
-  syncToastTimer(item);
-  enforceToastLimit();
-  showToastNode(item);
+  setToastItem(item.id, item);
+
+  appendNode(item);
+  bindInteractions(item);
+  syncProgress(item);
+  syncTimer(item);
+  enforceLimit();
+  showNode(item);
 
   try {
     emitToastShown(item);
   } catch (error) {
-    safeWarn(
-      "emitToastShown falló.",
-      error
-    );
+    warn("emitToastShown falló.", error);
   }
 
   return item.id;
 }
 
-/* =========================================================
-   UPDATE
-========================================================= */
+export function updateToast(id = "", patch = {}) {
+  const toastId = safeText(id, "");
 
-export function updateToast(id, patch = {}) {
-  const normalizedId =
-    safeText(id, "");
+  if (!toastId) return null;
 
-  if (!normalizedId) {
-    return null;
-  }
+  const item = getToastItem(toastId);
 
-  const item =
-    getToastItem(normalizedId);
+  if (!item || item.dismissed) return null;
 
-  if (
-    !item ||
-    item.dismissed
-  ) {
-    return null;
-  }
+  const input = safeObject(patch);
 
-  const patchObject =
-    isObject(patch)
-      ? patch
-      : {};
+  const nextType = input.type !== undefined
+    ? normalizeToastType(input.type)
+    : item.type;
 
-  const nextType =
-    patchObject.type !== undefined
-      ? normalizeToastType(
-          patchObject.type
-        )
-      : item.type;
+  const nextUseDefaultTitle = input.useDefaultTitle !== undefined
+    ? input.useDefaultTitle === true
+    : item.useDefaultTitle;
 
-  const nextUseDefaultTitle =
-    patchObject.useDefaultTitle !== undefined
-      ? patchObject.useDefaultTitle === true
-      : item.useDefaultTitle;
+  const nextUseDefaultMessage = input.useDefaultMessage !== undefined
+    ? input.useDefaultMessage === true
+    : item.useDefaultMessage;
 
-  const nextUseDefaultMessage =
-    patchObject.useDefaultMessage !== undefined
-      ? patchObject.useDefaultMessage === true
-      : item.useDefaultMessage;
+  const nextTitle = input.title !== undefined
+    ? resolveToastTitle(nextType, input.title, nextUseDefaultTitle)
+    : nextUseDefaultTitle
+      ? getToastTitle(nextType)
+      : item.title;
 
-  const nextTitle =
-    patchObject.title !== undefined
-      ? resolveToastTitle(
-          nextType,
-          patchObject.title,
-          nextUseDefaultTitle
-        )
-      : (
-          nextUseDefaultTitle
-            ? getToastTitle(nextType)
-            : item.title
-        );
-
-  const nextMessage =
-    patchObject.message !== undefined ||
-    patchObject.text !== undefined
-      ? resolveToastMessage(
-          nextType,
-          patchObject.message,
-          patchObject.text,
-          nextUseDefaultMessage
-        )
-      : (
-          nextUseDefaultMessage
-            ? getToastMessage(nextType)
-            : item.message
-        );
+  const nextMessage = input.message !== undefined || input.text !== undefined
+    ? resolveToastMessage(nextType, input.message, input.text, nextUseDefaultMessage)
+    : nextUseDefaultMessage
+      ? getToastMessage(nextType)
+      : item.message;
 
   if (!nextMessage) {
-    safeWarn(
-      "updateToast requiere message/text."
-    );
-
+    warn("updateToast requiere message/text.");
     return null;
   }
 
   const nextDuration =
-    patchObject.duration !== undefined ||
-    patchObject.persist !== undefined ||
-    patchObject.persistent !== undefined
-      ? resolveToastDuration(
-          nextType,
-          patchObject
-        )
+    input.duration !== undefined ||
+    input.persist !== undefined ||
+    input.persistent !== undefined
+      ? input.persist === true || input.persistent === true
+        ? 0
+        : normalizeToastDuration(nextType, input.duration)
       : item.duration;
 
-  const nextClosable =
-    patchObject.closable !== undefined
-      ? patchObject.closable !== false
-      : (
-          nextType === TOAST_TYPE_LOADING
-            ? false
-            : item.closable
-        );
+  const nextClosable = input.closable !== undefined
+    ? input.closable !== false
+    : nextType !== TOAST_TYPE_LOADING && item.closable !== false;
 
-  try {
-    clearToastTimer(item);
-  } catch {}
+  clearTimer(item);
 
   item.type = nextType;
   item.title = nextTitle;
@@ -1272,203 +883,126 @@ export function updateToast(id, patch = {}) {
   item.closable = nextClosable;
   item.useDefaultTitle = nextUseDefaultTitle;
   item.useDefaultMessage = nextUseDefaultMessage;
-  item.updatedAt = Date.now();
+  item.updatedAt = now();
 
-  if (isObject(patchObject.meta)) {
+  if (isObject(input.meta)) {
     item.meta = {
-      ...(isObject(item.meta) ? item.meta : {}),
-      ...patchObject.meta,
+      ...safeObject(item.meta),
+      ...input.meta,
     };
   }
 
-  syncToastNode(
-    item,
-    {
-      replaceNode:
-        patchObject.replaceNode === true,
-    }
-  );
+  syncNode(item, {
+    replaceNode: input.replaceNode === true,
+  });
 
-  syncToastProgress(item);
-  syncToastTimer(item);
-  showToastNode(item);
+  syncProgress(item);
+  syncTimer(item);
+  showNode(item);
 
   try {
     emitToastUpdated(item);
   } catch (error) {
-    safeWarn(
-      "emitToastUpdated falló.",
-      error
-    );
+    warn("emitToastUpdated falló.", error);
   }
 
   return item.id;
 }
 
 /* =========================================================
-   DISMISS
+   PUBLIC: DISMISS / CLEAR
 ========================================================= */
 
-export function dismissToast(id, options = {}) {
-  const normalizedId =
-    safeText(id, "");
+export function dismissToast(id = "", options = {}) {
+  const toastId = safeText(id, "");
 
-  if (!normalizedId) {
-    return false;
-  }
+  if (!toastId) return false;
 
-  const item =
-    getToastItem(normalizedId);
+  const item = getToastItem(toastId);
 
-  if (!item) {
-    return false;
-  }
+  if (!item) return false;
 
-  if (
-    item.dismissed ||
-    isToastDismissing(normalizedId)
-  ) {
-    return false;
-  }
+  if (item.dismissed || isToastDismissing(toastId)) return false;
 
-  const reason =
-    safeText(
-      options.reason,
-      "dismiss"
-    );
+  const opts = safeObject(options);
+  const reason = safeText(opts.reason, "dismiss");
 
-  markToastDismissing(normalizedId);
+  markToastDismissing(toastId);
 
   item.dismissed = true;
   item.dismissReason = reason;
-  item.dismissedAt = Date.now();
+  item.dismissedAt = now();
 
-  try {
-    clearToastTimer(item);
-  } catch {}
+  clearTimer(item);
 
-  const toastEl =
-    item.toastEl;
+  const delayMs = prefersReducedMotion()
+    ? TOAST_REDUCED_MOTION_EXIT_DURATION
+    : safeNumber(opts.delay, TOAST_EXIT_DURATION);
 
-  if (!toastEl) {
-    destroyToastItem(item);
+  hideNode(item);
 
-    try {
-      emitToastDismissed(item);
-    } catch {}
+  const snapshot = {
+    id: item.id,
+    type: item.type,
+    reason,
+  };
 
-    return true;
-  }
-
-  hideToastNode(item);
-
-  const delay =
-    prefersReducedMotion()
-      ? 0
-      : safeNumber(
-          options.delay,
-          220
-        );
-
-  safeDelay(() => {
-    destroyToastItem(item);
-  }, delay);
+  delay(() => {
+    destroyItem(item);
+  }, delayMs);
 
   try {
     emitToastDismissed(item);
   } catch (error) {
-    safeWarn(
-      "emitToastDismissed falló.",
-      error
-    );
+    warn("emitToastDismissed falló.", error);
   }
 
-  return true;
+  return snapshot.id;
 }
 
-/* =========================================================
-   CLEAR
-========================================================= */
-
 export function clearToasts(options = {}) {
-  const opts =
-    isObject(options)
-      ? options
-      : {};
+  const opts = safeObject(options);
 
-  /*
-    CRÍTICO:
-    Si toast:clear vuelve a llamar clearToasts() desde events.js,
-    cortamos la reentrada en seco.
-  */
-  if (clearToastsRunning) {
-    return false;
-  }
+  if (clearRunning) return false;
 
-  clearToastsRunning = true;
+  clearRunning = true;
 
   try {
-    const immediate =
-      safeBool(
-        opts.immediate,
-        false
-      );
-
-    const ids =
-      [...getToastIds()];
+    const ids = [...getToastIds()];
+    const immediate = safeBool(opts.immediate, false);
 
     let cleared = 0;
 
     ids.forEach((id) => {
       if (immediate) {
-        if (destroyToastById(id)) {
-          cleared += 1;
-        }
-
+        if (destroyById(id)) cleared += 1;
         return;
       }
 
       if (
-        dismissToast(
-          id,
-          {
-            reason:
-              opts.reason ||
-              "clear",
-            delay:
-              opts.delay,
-            emit:
-              false,
-            source:
-              "clear-toasts",
-          }
-        )
+        dismissToast(id, {
+          reason: opts.reason || "clear",
+          delay: opts.delay,
+          emit: false,
+          source: "toast-api:clear",
+        })
       ) {
         cleared += 1;
       }
     });
 
-    if (
-      shouldEmitClearToastsEvent(opts)
-    ) {
-      safeEmit(
-        "toast:clear",
-        {
-          cleared,
-          immediate,
-          reason:
-            opts.reason ||
-            "clear",
-          source:
-            opts.source ||
-            "toast-api",
-        }
-      );
+    if (shouldEmitClear(opts)) {
+      emit("toast:clear", {
+        cleared,
+        immediate,
+        reason: opts.reason || "clear",
+        source: opts.source || SOURCE,
+      });
     }
 
     return true;
   } finally {
-    clearToastsRunning = false;
+    clearRunning = false;
   }
 }
 
@@ -1477,85 +1011,96 @@ export function clearToasts(options = {}) {
 ========================================================= */
 
 export function successToast(message = "", options = {}) {
-  const normalizedMessage =
-    safeText(message, "");
-
   return showToast({
-    ...options,
+    ...safeObject(options),
     type: TOAST_TYPE_SUCCESS,
-    message: normalizedMessage,
-    useDefaultMessage:
-      !normalizedMessage,
+    message: safeText(message, ""),
+    useDefaultMessage: !safeText(message, ""),
   });
 }
 
 export function errorToast(message = "", options = {}) {
-  const normalizedMessage =
-    message instanceof Error
-      ? safeText(
-          message.message,
-          "Error inesperado"
-        )
-      : safeText(message, "");
+  const text = message instanceof Error
+    ? safeText(message.message, "Error inesperado")
+    : safeText(message, "");
 
   return showToast({
-    ...options,
+    ...safeObject(options),
     type: TOAST_TYPE_ERROR,
-    message: normalizedMessage,
-    useDefaultMessage:
-      !normalizedMessage,
+    message: text,
+    useDefaultMessage: !text,
     meta: {
-      ...(isObject(options.meta) ? options.meta : {}),
-      error:
-        message instanceof Error
-          ? message
-          : options.error || null,
+      ...safeObject(options.meta),
+      error: message instanceof Error ? message : options.error || null,
     },
   });
 }
 
 export function warningToast(message = "", options = {}) {
-  const normalizedMessage =
-    safeText(message, "");
-
   return showToast({
-    ...options,
+    ...safeObject(options),
     type: TOAST_TYPE_WARNING,
-    message: normalizedMessage,
-    useDefaultMessage:
-      !normalizedMessage,
+    message: safeText(message, ""),
+    useDefaultMessage: !safeText(message, ""),
   });
 }
 
 export function infoToast(message = "", options = {}) {
-  const normalizedMessage =
-    safeText(message, "");
-
   return showToast({
-    ...options,
+    ...safeObject(options),
     type: TOAST_TYPE_INFO,
-    message: normalizedMessage,
-    useDefaultMessage:
-      !normalizedMessage,
+    message: safeText(message, ""),
+    useDefaultMessage: !safeText(message, ""),
   });
 }
 
 export function loadingToast(message = "", options = {}) {
-  const normalizedMessage =
-    safeText(message, "");
-
   return showToast({
-    ...options,
+    ...safeObject(options),
     type: TOAST_TYPE_LOADING,
-    message: normalizedMessage,
-    useDefaultMessage:
-      !normalizedMessage,
+    message: safeText(message, ""),
+    useDefaultMessage: !safeText(message, ""),
     duration: 0,
     persist: true,
-    closable:
-      options.closable ??
-      false,
+    closable: options.closable ?? false,
+    dedupeMs: options.dedupeMs ?? 0,
   });
+}
+
+/* =========================================================
+   LANGUAGE
+========================================================= */
+
+export function refreshToastLanguage(item = null) {
+  if (!item || item.dismissed) return null;
+
+  if (item.useDefaultTitle) {
+    item.title = getToastTitle(item.type);
+  }
+
+  if (item.useDefaultMessage) {
+    item.message = getToastMessage(item.type);
+  }
+
+  item.updatedAt = now();
+  patchNode(item);
+
+  return item;
+}
+
+export function refreshAllToastsLanguage() {
+  const items = getToastItems();
+  let refreshed = 0;
+
+  items.forEach((item) => {
+    if (refreshToastLanguage(item)) refreshed += 1;
+  });
+
+  emit("toast:language:refresh", {
+    refreshed,
+  });
+
+  return refreshed;
 }
 
 /* =========================================================
@@ -1563,149 +1108,126 @@ export function loadingToast(message = "", options = {}) {
 ========================================================= */
 
 export function resetToastApiState(options = {}) {
-  const opts =
-    isObject(options)
-      ? options
-      : {};
+  const opts = safeObject(options);
 
-  if (resetToastApiRunning) {
-    return false;
-  }
+  if (resetRunning) return false;
 
-  resetToastApiRunning = true;
+  resetRunning = true;
 
   try {
-    const items =
-      getToastItems();
+    const items = getToastItems();
 
     items.forEach((item) => {
-      try {
-        clearToastTimer(item);
-      } catch {}
-
-      try {
-        removeToastNode(item);
-      } catch {}
-
-      try {
-        unmarkToastDismissing(item.id);
-      } catch {}
+      destroyItem(item);
     });
 
     try {
       resetToastStore();
     } catch (error) {
-      safeError(
-        "resetToastStore falló.",
-        error
-      );
+      errorLog("resetToastStore falló.", error);
     }
 
-    if (
-      shouldEmitResetToastEvent(opts)
-    ) {
-      safeEmit(
-        "toast:reset",
-        {
-          count:
-            items.length,
-          reason:
-            opts.reason ||
-            "reset",
-          source:
-            opts.source ||
-            "toast-api",
-        }
-      );
+    DEDUPE.clear();
+
+    if (shouldEmitReset(opts)) {
+      emit("toast:reset", {
+        count: items.length,
+        reason: opts.reason || "reset",
+        source: opts.source || SOURCE,
+      });
     }
 
     return true;
   } finally {
-    resetToastApiRunning = false;
+    resetRunning = false;
   }
 }
 
 /* =========================================================
-   DEBUG
+   SNAPSHOT
 ========================================================= */
 
 export function getToastApiSnapshot() {
-  const items =
-    getToastItems();
+  const items = getToastItems();
 
   return {
-    count:
-      items.length,
+    version: TOAST_API_VERSION,
 
-    ids:
-      getToastIds(),
+    count: items.length,
+    ids: getToastIds(),
+    maxItems: TOAST_MAX_ITEMS,
+    activeCount: getActiveToasts().length,
 
-    maxItems:
-      TOAST_MAX_ITEMS,
+    clearRunning,
+    resetRunning,
 
-    activeCount:
-      getActiveToasts().length,
+    lastClearEmitAt,
+    lastClearEmitAtIso: lastClearEmitAt ? iso(lastClearEmitAt) : "",
 
-    clearToastsRunning,
-    resetToastApiRunning,
-    lastClearToastsEmitAt,
-    lastResetToastEmitAt,
+    lastResetEmitAt,
+    lastResetEmitAtIso: lastResetEmitAt ? iso(lastResetEmitAt) : "",
 
-    items:
-      items.map((item) => ({
-        id:
-          item.id,
+    dedupeCount: DEDUPE.size,
 
-        type:
-          item.type,
-
-        duration:
-          item.duration,
-
-        remaining:
-          item.remaining,
-
-        dismissed:
-          Boolean(item.dismissed),
-
-        dismissing:
-          isToastDismissing(item.id),
-
-        hasNode:
-          Boolean(item.toastEl),
-
-        connected:
-          Boolean(item.toastEl?.isConnected),
-
-        hasProgress:
-          Boolean(item.progressEl),
-
-        useDefaultTitle:
-          Boolean(item.useDefaultTitle),
-
-        useDefaultMessage:
-          Boolean(item.useDefaultMessage),
-
-        createdAt:
-          item.createdAt,
-
-        updatedAt:
-          item.updatedAt || null,
-      })),
+    items: items.map((item) => ({
+      id: item.id,
+      type: item.type,
+      duration: item.duration,
+      remaining: item.remaining,
+      dismissed: Boolean(item.dismissed),
+      dismissing: isToastDismissing(item.id),
+      hasNode: Boolean(item.toastEl),
+      connected: Boolean(item.toastEl?.isConnected),
+      hasProgress: Boolean(item.progressEl),
+      useDefaultTitle: Boolean(item.useDefaultTitle),
+      useDefaultMessage: Boolean(item.useDefaultMessage),
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt || null,
+    })),
   };
 }
 
+/* =========================================================
+   ALIASES / DEFAULT
+========================================================= */
+
+export const show = showToast;
+export const update = updateToast;
+export const dismiss = dismissToast;
+export const clear = clearToasts;
+
+export const success = successToast;
+export const error = errorToast;
+export const warning = warningToast;
+export const warn = warningToast;
+export const info = infoToast;
+export const loading = loadingToast;
+
 export default {
+  TOAST_API_VERSION,
+
   showToast,
   updateToast,
   dismissToast,
   clearToasts,
+
+  show,
+  update,
+  dismiss,
+  clear,
 
   successToast,
   errorToast,
   warningToast,
   infoToast,
   loadingToast,
+
+  success,
+  error,
+  warning,
+  warn,
+  info,
+  loading,
 
   refreshToastLanguage,
   refreshAllToastsLanguage,

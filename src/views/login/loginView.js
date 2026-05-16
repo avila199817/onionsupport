@@ -2,33 +2,14 @@
    Onion SPA - Login View Legacy Bridge
    Archivo: src/views/loginView.js
 
-   AUTH VIEW LEGACY BRIDGE · CORE/APP/SHELL ALIGNED · 16/10
-
-   RESPONSABILIDADES:
-   - Mantener compatibilidad con imports legacy: src/views/loginView.js.
-   - Delegar el render real en src/views/login/index.js.
-   - Evitar dos orquestadores de login en paralelo.
-   - Evitar doble Auth.login.
-   - Evitar doble syncSession.
-   - Evitar doble navegación post-login.
-   - Evitar doble toast.
-   - Preparar shell mínimo de auth-screen por compatibilidad.
-   - Sincronizar html/body/shell/main/view sin estilos inline.
-   - Ocultar chrome legacy: sidebar/topbar/tablehead, no app-shell.
-   - Desbloquear loader global como fallback sin pelearse con loader.js.
-   - Exponer API estable: render/init/destroy/mount/unmount/dispose.
-   - Exponer snapshot debug seguro.
-   - Tolerar default export function u object con render/init/mount.
-   - Redactar tokens en eventos/logs/snapshots.
-
-   REGLAS:
-   - Este archivo NO ejecuta Auth.login.
-   - Este archivo NO llama syncSession().
-   - Este archivo NO decide redirect post-login.
-   - Este archivo NO toca storage auth.
-   - Este archivo NO usa CSS inline.
-   - Este archivo NO renderiza toast inline.
-   - El login real vive en src/views/login/index.js.
+   Bridge legacy limpio:
+   - mantiene imports antiguos src/views/loginView.js
+   - delega render real en src/views/login/index.js
+   - no ejecuta Auth.login
+   - no sincroniza sesión
+   - no decide redirect
+   - prepara shell auth mínimo
+   - sin CSS inline / sin innerHTML / sin event storm
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -39,257 +20,99 @@ import LoginDefault, * as LoginModule from "./login/index.js";
    VERSION / CONSTANTS
 ========================================================= */
 
-export const LOGIN_VIEW_BRIDGE_VERSION =
-  "16.0.0-legacy-bridge";
+export const LOGIN_VIEW_BRIDGE_VERSION = "17.0.0-clean";
 
-const SOURCE =
-  "LoginViewLegacyBridge";
+const SOURCE = "loginView.legacyBridge";
+const SCOPE = "view:login:legacy-bridge";
 
-const SCOPE =
-  "view:login:legacy-bridge";
+const LOGIN_PATH = "/login";
+const DEFAULT_PATH = "/";
+const RUNTIME_KEY = "__ONION_LOGIN_VIEW_BRIDGE__";
 
-const DEFAULT_CONTAINER_ID =
-  "view-container";
+const EVENTS = Object.freeze({
+  beforeRender: "login:view:before-render",
+  rendered: "login:view:rendered",
+  destroyed: "login:view:destroyed",
+  error: "login:view:error",
+  shellPrepared: "login:view:shell-prepared",
+  debugReady: "login:view:debug-ready",
+});
 
-const DEFAULT_ROUTE =
-  "/";
+const AUTH_ROOT_CLASSES = Object.freeze([
+  "auth-screen",
+  "route-auth",
+  "route-shell-hidden",
+  "route-chrome-hidden",
+]);
 
-const LOGIN_ROUTE =
-  "/login";
+const APP_ROOT_CLASSES = Object.freeze([
+  "route-app",
+  "route-shell-visible",
+  "route-chrome-visible",
+]);
 
-const RUNTIME_KEY =
-  "__ONION_LOGIN_VIEW_BRIDGE__";
+const LOADING_CLASSES = Object.freeze([
+  "loading",
+  "app-loading",
+  "app-booting",
+  "is-loading",
+  "is-booting",
+]);
 
-const EVENT_DEDUPE_MS =
-  80;
-
-const SNAPSHOT_MAX_CLASS_LENGTH =
-  800;
-
-const AUTH_SCREEN_CLASSES =
-  Object.freeze([
-    "auth-screen",
-    "login-no-scroll",
-    "route-auth",
-    "route-shell-hidden",
-    "route-chrome-hidden",
-  ]);
-
-const APP_SCREEN_CLASSES =
-  Object.freeze([
-    "route-app",
-    "route-shell-visible",
-    "route-chrome-visible",
-  ]);
-
-const LOADING_CLASSES =
-  Object.freeze([
-    "loading",
-    "app-loading",
-    "app-booting",
-    "is-loading",
-    "is-booting",
-  ]);
-
-const TOKEN_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "activation_token",
-    "activate_token",
-    "resetToken",
-    "reset_token",
-    "passwordResetToken",
-    "password_reset_token",
-    "confirmToken",
-    "confirm_token",
-    "code",
-    "t",
-    "otp",
-    "totp",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
-    "authorization",
-    "jwt",
-    "session",
-    "sid",
-  ]);
-
-const TOKEN_ROUTE_PATHS =
-  Object.freeze([
-    "/activate-account",
-    "/activate",
-    "/activation",
-    "/account/activate",
-    "/activate/first-user",
-    "/reset-password/confirm",
-    "/reset-password-confirm",
-    "/password-reset/confirm",
-    "/password-reset-confirm",
-    "/confirm-reset-password",
-  ]);
-
-const DOM_IDS =
-  Object.freeze({
-    shell:
-      "app-shell",
-
-    main:
-      "main-content",
-
-    appContent:
-      "app-content",
-
-    view:
-      "view-container",
-
-    sidebarMount:
-      "sidebar-mount",
-
-    topbarMount:
-      "topbar-mount",
-
-    tablehead:
-      "table-head",
-
-    tableheadContainer:
-      "tablehead-container",
-
-    loader:
-      "app-loader",
-  });
-
-const BRIDGE_EVENTS =
-  Object.freeze({
-    beforeRender:
-      "login:view:before-render",
-
-    rendered:
-      "login:view:rendered",
-
-    destroyed:
-      "login:view:destroyed",
-
-    error:
-      "login:view:error",
-
-    shellPrepared:
-      "login:view:shell-prepared",
-
-    debugReady:
-      "login:view:debug-ready",
-  });
+const TOKENISH_RE =
+  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|tempToken|temp_token|code|t|otp|mfaToken|mfa_token)=)[^&#\s]+/gi;
 
 /* =========================================================
    RUNTIME
 ========================================================= */
 
-let activeController =
-  null;
+let activeController = null;
+let activeContainer = null;
+let activeEpoch = 0;
+let renderEpoch = 0;
+let renderInFlight = false;
 
-let activeContainer =
-  null;
+let lastRenderAt = "";
+let lastDestroyAt = "";
+let lastError = null;
 
-let activeEpoch =
-  0;
+let lastEventKey = "";
+let lastEventAt = 0;
 
-let renderEpoch =
-  0;
-
-let renderInFlight =
-  false;
-
-let lastRenderAt =
-  "";
-
-let lastDestroyAt =
-  "";
-
-let lastError =
-  null;
-
-let lastEventKey =
-  "";
-
-let lastEventAt =
-  0;
-
-let debugBridgeReady =
-  false;
+let debugReady = false;
 
 /* =========================================================
    BASICS
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isFunction(value) {
+function isFn(value) {
   return typeof value === "function";
 }
 
 function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
-}
-
-function isObjectLike(value) {
-  return (
-    value !== null &&
-    (
-      typeof value === "object" ||
-      typeof value === "function"
-    )
-  );
+  return value && typeof value === "object" && !Array.isArray(value);
 }
 
 function safeObject(value) {
-  return isObject(value)
-    ? value
-    : {};
-}
-
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return isObject(value) ? value : {};
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
-  const text =
-    String(value)
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
 
-function safeNow() {
+function now() {
   try {
     return Date.now();
   } catch {
@@ -297,7 +120,7 @@ function safeNow() {
   }
 }
 
-function safeIsoNow(ms = safeNow()) {
+function iso(ms = now()) {
   try {
     return new Date(ms).toISOString();
   } catch {
@@ -305,61 +128,13 @@ function safeIsoNow(ms = safeNow()) {
   }
 }
 
-function isExtensibleTarget(value) {
-  try {
-    return (
-      isObjectLike(value) &&
-      Object.isExtensible(value)
-    );
-  } catch {}
-
-  return false;
-}
-
-function safeDefineValue(target, key, value) {
-  if (
-    !target ||
-    !key ||
-    !isExtensibleTarget(target)
-  ) {
-    return false;
-  }
-
-  try {
-    Object.defineProperty(
-      target,
-      key,
-      {
-        value,
-        enumerable: false,
-        configurable: true,
-        writable: true,
-      }
-    );
-
-    return true;
-  } catch {}
-
-  try {
-    target[key] = value;
-    return true;
-  } catch {}
-
-  return false;
-}
-
-function isDomNode(value) {
-  if (
-    !isBrowser() ||
-    !value
-  ) {
-    return false;
-  }
+function isNode(value) {
+  if (!isBrowser() || !value) return false;
 
   try {
     return Boolean(
-      value === document ||
-        value === window ||
+      value === window ||
+        value === document ||
         value.nodeType === 1 ||
         value.nodeType === 9 ||
         value.nodeType === 11
@@ -369,292 +144,112 @@ function isDomNode(value) {
   }
 }
 
-function isConnected(node) {
-  if (
-    !isBrowser() ||
-    !node
-  ) {
+function connected(node) {
+  if (!isBrowser() || !node) return false;
+
+  try {
+    if (node === window || node === document) return true;
+    return Boolean(node.isConnected || document.contains(node));
+  } catch {
     return false;
   }
-
-  try {
-    if (
-      node === document ||
-      node === window
-    ) {
-      return true;
-    }
-
-    return Boolean(node.isConnected);
-  } catch {}
-
-  try {
-    return document.contains(node);
-  } catch {}
-
-  return false;
 }
 
-function safeArrayFromClassList(classList) {
+function defineHidden(target, key, value) {
+  if (!target || !key) return false;
+
   try {
-    return Array.from(classList || []);
+    Object.defineProperty(target, key, {
+      value,
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
+
+    return true;
+  } catch {}
+
+  try {
+    target[key] = value;
+    return true;
   } catch {
-    return [];
+    return false;
   }
 }
 
 /* =========================================================
-   REDACTION / SANITIZE
+   REDACTION / LOGS
 ========================================================= */
 
-function escapeRegExp(value = "") {
-  return String(value).replace(
-    /[.*+?^${}()|[\]\\]/g,
-    "\\$&"
-  );
-}
-
-function redactSensitiveText(value = "") {
-  let output =
-    safeText(value, "");
-
-  if (!output) {
-    return "";
-  }
-
-  for (const name of TOKEN_PARAM_NAMES) {
-    try {
-      output =
-        output.replace(
-          new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi"),
-          "$1***"
-        );
-    } catch {}
-  }
-
-  for (const path of TOKEN_ROUTE_PATHS) {
-    try {
-      output =
-        output.replace(
-          new RegExp(`(${escapeRegExp(path)}\\/)([^/?#\\s]+)`, "gi"),
-          "$1***"
-        );
-    } catch {}
-  }
+function redact(value = "") {
+  const text = safeText(value, "");
+  if (!text) return "";
 
   try {
-    output =
-      output.replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      );
-  } catch {}
-
-  try {
-    output =
-      output.replace(
-        /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
-        "$1$2***"
-      );
-  } catch {}
-
-  try {
-    output =
-      output.replace(
-        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-        "***"
-      );
-  } catch {}
-
-  return output;
+    return text
+      .replace(TOKENISH_RE, (match) => {
+        if (/^bearer\s+/i.test(match)) return "Bearer ***";
+        if (/^[?&#]/.test(match)) return match.replace(/=.+$/g, "=***");
+        return "***";
+      })
+      .replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***")
+      .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***");
+  } catch {
+    return text;
+  }
 }
 
 function sanitizeError(error = null) {
-  if (!error) {
-    return null;
-  }
+  if (!error) return null;
 
-  const source =
-    error?.error ||
-    error?.reason ||
-    error;
+  const source = error?.error || error?.reason || error;
 
   return {
-    name:
-      safeText(
-        source?.name ||
-          source?.constructor?.name,
-        "Error"
-      ),
-
-    message:
-      redactSensitiveText(
-        safeText(
-          source?.message ||
-            source?.reason ||
-            source,
-          "Error"
-        )
-      ),
-
-    status:
-      source?.status ||
-      source?.statusCode ||
-      source?.response?.status ||
-      0,
-
-    code:
-      source?.code ||
-      source?.data?.code ||
-      source?.response?.data?.code ||
-      null,
-
-    at:
-      safeIsoNow(),
+    name: safeText(source?.name || source?.constructor?.name, "Error"),
+    message: redact(safeText(source?.message || source?.reason || source, "Error")),
+    status: source?.status || source?.statusCode || source?.response?.status || 0,
+    code: source?.code || source?.data?.code || source?.response?.data?.code || null,
+    at: iso(),
   };
 }
 
-function isDomNodeLike(value) {
-  if (
-    !value ||
-    typeof value !== "object"
-  ) {
-    return false;
-  }
+function sanitize(value, depth = 0, seen = new WeakSet()) {
+  if (depth > 5) return "[depth-limit]";
 
-  try {
-    return Boolean(
-      typeof Node !== "undefined" &&
-        value instanceof Node
-    );
-  } catch {}
+  if (typeof value === "string") return redact(value);
+  if (value === null || value === undefined) return value;
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return "[function]";
+  if (value instanceof Error) return sanitizeError(value);
 
-  try {
-    return Boolean(
-      value.nodeType &&
-        value.nodeName
-    );
-  } catch {}
-
-  return false;
-}
-
-function sanitizePayload(value, depth = 0, seen = null) {
-  if (!seen) {
-    try {
-      seen = new WeakSet();
-    } catch {
-      seen = null;
-    }
-  }
-
-  if (depth > 6) {
-    return "[MaxDepth]";
-  }
-
-  if (typeof value === "string") {
-    return redactSensitiveText(value);
-  }
-
-  if (
-    value === null ||
-    value === undefined ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
-  if (typeof value === "bigint") {
-    return String(value);
-  }
-
-  if (typeof value === "function") {
-    return "[Function]";
-  }
-
-  if (isDomNodeLike(value)) {
+  if (isNode(value)) {
     return {
-      node:
-        safeText(value.nodeName, "Node"),
-
-      id:
-        safeText(value.id, ""),
-
-      className:
-        safeText(
-          value.className?.baseVal ||
-            value.className,
-          ""
-        ).slice(0, SNAPSHOT_MAX_CLASS_LENGTH),
+      node: safeText(value.nodeName, "Node"),
+      id: safeText(value.id, ""),
+      className: safeText(value.className?.baseVal || value.className, "").slice(0, 500),
     };
-  }
-
-  if (value instanceof Error) {
-    return sanitizeError(value);
-  }
-
-  if (isObjectLike(value)) {
-    try {
-      if (
-        seen &&
-        seen.has(value)
-      ) {
-        return "[Circular]";
-      }
-
-      seen?.add?.(value);
-    } catch {}
   }
 
   if (Array.isArray(value)) {
-    return value
-      .slice(0, 80)
-      .map((item) =>
-        sanitizePayload(
-          item,
-          depth + 1,
-          seen
-        )
-      );
+    return value.slice(0, 80).map((item) => sanitize(item, depth + 1, seen));
   }
 
-  if (value instanceof Map) {
-    return {
-      type: "Map",
-      size: value.size,
-    };
-  }
+  if (value && typeof value === "object") {
+    try {
+      if (seen.has(value)) return "[circular]";
+      seen.add(value);
+    } catch {}
 
-  if (value instanceof Set) {
-    return {
-      type: "Set",
-      size: value.size,
-    };
-  }
-
-  if (isObject(value)) {
     const output = {};
 
-    for (const [key, item] of Object.entries(value).slice(0, 120)) {
-      if (/token|secret|password|authorization|credential|jwt|bearer|otp|code|session|refresh/i.test(key)) {
-        output[key] =
-          item === null ||
-          item === undefined ||
-          item === "" ||
-          typeof item === "boolean"
-            ? item
-            : "***";
-
+    for (const [key, item] of Object.entries(value).slice(0, 100)) {
+      if (/token|secret|password|authorization|credential|jwt|bearer|otp|mfa|code|session|refresh/i.test(key)) {
+        output[key] = item ? "***" : item;
         continue;
       }
 
-      output[key] =
-        sanitizePayload(
-          item,
-          depth + 1,
-          seen
-        );
+      output[key] = sanitize(item, depth + 1, seen);
     }
 
     return output;
@@ -663,637 +258,231 @@ function sanitizePayload(value, depth = 0, seen = null) {
   return String(value);
 }
 
-/* =========================================================
-   LOG / EVENTS
-========================================================= */
+function log(...args) {
+  try {
+    AppCore?.utils?.log?.(`[${SOURCE}]`, ...args.map((item) => sanitize(item)));
+  } catch {}
+}
 
-function safeLog(...args) {
-  const cleanArgs =
-    args.map((item) =>
-      sanitizePayload(item)
-    );
+function warn(...args) {
+  const clean = args.map((item) => sanitize(item));
 
   try {
-    AppCore?.utils?.log?.(
-      `[${SOURCE}]`,
-      ...cleanArgs
-    );
-
+    AppCore?.utils?.warn?.(`[${SOURCE}]`, ...clean);
     return;
   } catch {}
 
   try {
-    if (AppCore?.config?.debug) {
-      console.log(
-        `[${SOURCE}]`,
-        ...cleanArgs
-      );
-    }
+    if (AppCore?.config?.debug) console.warn(`[${SOURCE}]`, ...clean);
   } catch {}
 }
 
-function safeWarn(...args) {
-  const cleanArgs =
-    args.map((item) =>
-      sanitizePayload(item)
-    );
-
-  let coreLogged =
-    false;
+function errorLog(...args) {
+  const clean = args.map((item) => sanitize(item));
 
   try {
-    if (isFunction(AppCore?.utils?.warn)) {
-      AppCore.utils.warn(
-        `[${SOURCE}]`,
-        ...cleanArgs
-      );
-
-      coreLogged =
-        true;
-    }
-  } catch {
-    coreLogged =
-      false;
-  }
-
-  if (coreLogged) {
+    AppCore?.utils?.error?.(`[${SOURCE}]`, ...clean);
     return;
-  }
-
-  try {
-    console.warn(
-      `[${SOURCE}]`,
-      ...cleanArgs
-    );
-  } catch {}
-}
-
-function safeError(...args) {
-  const cleanArgs =
-    args.map((item) =>
-      sanitizePayload(item)
-    );
-
-  let coreLogged =
-    false;
-
-  try {
-    if (isFunction(AppCore?.utils?.error)) {
-      AppCore.utils.error(
-        `[${SOURCE}]`,
-        ...cleanArgs
-      );
-
-      coreLogged =
-        true;
-    }
-  } catch {
-    coreLogged =
-      false;
-  }
-
-  if (coreLogged) {
-    return;
-  }
-
-  try {
-    console.error(
-      `[${SOURCE}]`,
-      ...cleanArgs
-    );
-  } catch {}
-}
-
-function safeCreateCustomEvent(name = "", detail = {}) {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  const eventName =
-    safeText(name, "");
-
-  if (!eventName) {
-    return null;
-  }
-
-  try {
-    if (typeof CustomEvent === "function") {
-      return new CustomEvent(
-        eventName,
-        {
-          detail,
-        }
-      );
-    }
   } catch {}
 
   try {
-    const event =
-      document.createEvent("CustomEvent");
-
-    event.initCustomEvent(
-      eventName,
-      false,
-      false,
-      detail
-    );
-
-    return event;
-  } catch {
-    return null;
-  }
+    console.error(`[${SOURCE}]`, ...clean);
+  } catch {}
 }
 
-function shouldDedupeEvent(eventName = "", payload = {}, force = false) {
-  if (force) {
-    return false;
-  }
+function shouldDedupeEvent(name = "", payload = {}, force = false) {
+  if (force) return false;
 
-  const key =
-    [
-      safeText(eventName, ""),
-      safeText(payload?.reason, ""),
-      safeText(payload?.path, ""),
-      safeText(payload?.containerId, ""),
-      safeText(payload?.epoch, ""),
-      payload?.ok === false ? "fail" : "ok",
-    ].join("|");
+  const key = [
+    name,
+    payload?.epoch,
+    payload?.containerId,
+    payload?.reason,
+    payload?.ok === false ? "fail" : "ok",
+  ].map((item) => safeText(item, "")).join("|");
 
-  const current =
-    safeNow();
+  const stamp = now();
 
-  if (
-    key === lastEventKey &&
-    current - lastEventAt < EVENT_DEDUPE_MS
-  ) {
-    return true;
-  }
+  if (key === lastEventKey && stamp - lastEventAt < 80) return true;
 
-  lastEventKey =
-    key;
-
-  lastEventAt =
-    current;
+  lastEventKey = key;
+  lastEventAt = stamp;
 
   return false;
 }
 
-function safeEmit(eventName = "", payload = {}, options = {}) {
-  const name =
-    safeText(eventName, "");
+function emit(name, payload = {}, options = {}) {
+  const eventName = safeText(name, "");
+  if (!eventName) return false;
 
-  if (!name) {
+  const opts = safeObject(options);
+
+  if (opts.dedupe !== false && shouldDedupeEvent(eventName, payload, opts.force === true)) {
     return false;
   }
 
-  const opts =
-    safeObject(options);
+  const detail = sanitize({
+    source: SOURCE,
+    version: LOGIN_VIEW_BRIDGE_VERSION,
+    at: iso(),
+    ...safeObject(payload),
+  });
 
-  if (
-    opts.dedupe !== false &&
-    shouldDedupeEvent(
-      name,
-      payload,
-      opts.force === true
-    )
-  ) {
-    return false;
-  }
-
-  const cleanPayload =
-    sanitizePayload({
-      source:
-        SOURCE,
-
-      version:
-        LOGIN_VIEW_BRIDGE_VERSION,
-
-      at:
-        safeIsoNow(),
-
-      ...safeObject(payload),
-    });
-
-  let busAvailable =
-    false;
-
-  let busEmitted =
-    false;
+  let hasBus = false;
+  let emitted = false;
 
   try {
-    if (isFunction(AppCore?.events?.emit)) {
-      busAvailable =
-        true;
-
-      AppCore.events.emit(
-        name,
-        cleanPayload
-      );
-
-      busEmitted =
-        true;
+    if (isFn(AppCore?.events?.emit)) {
+      hasBus = true;
+      AppCore.events.emit(eventName, detail);
+      emitted = true;
     }
   } catch {}
 
-  /*
-    Anti storm:
-    Si existe AppCore.events, no duplicamos window.
-  */
-  if (
-    opts.window === true ||
-    (!busAvailable && isBrowser())
-  ) {
+  if ((opts.window === true || !hasBus) && isBrowser()) {
     try {
-      const event =
-        safeCreateCustomEvent(
-          name,
-          cleanPayload
-        );
-
-      if (event) {
-        window.dispatchEvent(event);
-        return true;
-      }
+      window.dispatchEvent(new CustomEvent(eventName, { detail }));
+      emitted = true;
     } catch {}
   }
 
-  return busEmitted;
+  return emitted;
 }
 
 /* =========================================================
-   PATH / ROUTE HELPERS
+   PATH HELPERS
 ========================================================= */
 
-function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
-    return window.location.origin;
-  }
-
-  return "http://localhost";
-}
-
 function isHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  return (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  );
-}
-
-function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
-  let value =
-    safeText(pathname, DEFAULT_ROUTE)
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
-
-  if (!value) {
-    value =
-      DEFAULT_ROUTE;
-  }
-
-  if (!value.startsWith("/")) {
-    value =
-      `/${value}`;
-  }
-
-  const segments =
-    value
-      .split("/")
-      .filter(Boolean);
-
-  const output =
-    [];
-
-  for (const segment of segments) {
-    if (segment === ".") {
-      continue;
-    }
-
-    if (segment === "..") {
-      output.pop();
-      continue;
-    }
-
-    output.push(segment);
-  }
-
-  value =
-    `/${output.join("/")}`;
-
-  if (!value) {
-    value =
-      DEFAULT_ROUTE;
-  }
-
-  if (value.length > 1) {
-    value =
-      value.replace(/\/+$/g, "") ||
-      DEFAULT_ROUTE;
-  }
-
-  return value;
-}
-
-function normalizeSearch(search = "") {
-  const raw =
-    safeText(search, "");
-
-  if (!raw) {
-    return "";
-  }
-
-  return raw.startsWith("?")
-    ? raw
-    : `?${raw.replace(/^\?+/, "")}`;
-}
-
-function normalizeHash(hash = "") {
-  const raw =
-    safeText(hash, "");
-
-  if (!raw) {
-    return "";
-  }
-
-  return raw.startsWith("#")
-    ? raw
-    : `#${raw.replace(/^#+/, "")}`;
+  const text = safeText(value, "");
+  return text.startsWith("#/") || text.startsWith("#!");
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return DEFAULT_ROUTE;
-  }
-
-  if (raw.startsWith("#!")) {
-    return normalizeFullPath(
-      raw.replace(/^#!\/?/, "/")
-    );
-  }
-
-  return normalizeFullPath(
-    raw.replace(/^#\/?/, "/")
-  );
+  const text = safeText(value, "");
+  if (!text) return DEFAULT_PATH;
+  if (text.startsWith("#!")) return `/${text.replace(/^#!\/?/, "")}` || DEFAULT_PATH;
+  return `/${text.replace(/^#\/?/, "")}` || DEFAULT_PATH;
 }
 
-function splitFullPath(path = DEFAULT_ROUTE) {
-  const raw =
-    safeText(path, DEFAULT_ROUTE);
+function normalizePathname(value = DEFAULT_PATH) {
+  let path = safeText(value, DEFAULT_PATH)
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
-  if (isHashRouterPath(raw)) {
-    return splitFullPath(
-      normalizeHashRouterPath(raw)
-    );
+  if (!path.startsWith("/")) path = `/${path}`;
+
+  const out = [];
+
+  for (const part of path.split("/").filter(Boolean)) {
+    if (part === ".") continue;
+    if (part === "..") {
+      out.pop();
+      continue;
+    }
+
+    out.push(part);
   }
 
-  let pathname =
-    raw;
+  path = `/${out.join("/")}`;
+  return path.length > 1 ? path.replace(/\/+$/g, "") : path;
+}
 
-  let search =
-    "";
+function splitPath(value = DEFAULT_PATH) {
+  let raw = safeText(value, DEFAULT_PATH);
 
-  let hash =
-    "";
+  if (isHashRouterPath(raw)) raw = normalizeHashRouterPath(raw);
 
-  const hashIndex =
-    pathname.indexOf("#");
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
 
   if (hashIndex >= 0) {
-    hash =
-      pathname.slice(hashIndex);
-
-    pathname =
-      pathname.slice(0, hashIndex) ||
-      DEFAULT_ROUTE;
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || DEFAULT_PATH;
   }
 
-  const searchIndex =
-    pathname.indexOf("?");
+  const searchIndex = pathname.indexOf("?");
 
   if (searchIndex >= 0) {
-    search =
-      pathname.slice(searchIndex);
-
-    pathname =
-      pathname.slice(0, searchIndex) ||
-      DEFAULT_ROUTE;
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || DEFAULT_PATH;
   }
 
   return {
-    pathname:
-      normalizePathnameOnly(pathname),
-
-    search:
-      normalizeSearch(search),
-
-    hash:
-      normalizeHash(hash),
+    pathname: normalizePathname(pathname),
+    search,
+    hash,
   };
 }
 
-function normalizeFullPath(path = DEFAULT_ROUTE) {
-  const raw =
-    safeText(path, DEFAULT_ROUTE);
-
-  if (!raw) {
-    return DEFAULT_ROUTE;
-  }
-
-  if (isHashRouterPath(raw)) {
-    return normalizeHashRouterPath(raw);
-  }
+function normalizePath(value = DEFAULT_PATH) {
+  const raw = safeText(value, DEFAULT_PATH);
 
   try {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed =
-        new URL(
-          raw,
-          getBaseOrigin()
-        );
+      const url = new URL(raw, window.location?.origin || "http://localhost");
 
-      if (
-        parsed.origin !== getBaseOrigin()
-      ) {
-        return DEFAULT_ROUTE;
-      }
+      if (url.hash && isHashRouterPath(url.hash)) return normalizePath(url.hash);
 
-      if (
-        parsed.hash &&
-        isHashRouterPath(parsed.hash)
-      ) {
-        return normalizeHashRouterPath(parsed.hash);
-      }
-
-      return normalizeFullPath(
-        `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`
-      );
+      return normalizePath(`${url.pathname || DEFAULT_PATH}${url.search || ""}${url.hash || ""}`);
     }
   } catch {
-    return DEFAULT_ROUTE;
+    return DEFAULT_PATH;
   }
 
-  const {
-    pathname,
-    search,
-    hash,
-  } =
-    splitFullPath(raw);
-
+  const { pathname, search, hash } = splitPath(raw);
   return `${pathname}${search}${hash}`;
 }
 
-function normalizePath(path = DEFAULT_ROUTE) {
-  const raw =
-    safeText(path, DEFAULT_ROUTE) ||
-    DEFAULT_ROUTE;
-
-  const fallback =
-    normalizeFullPath(raw);
-
-  /*
-    Con query/hash no delegamos: algunos normalizadores legacy destruyen token.
-  */
-  if (
-    raw.includes("?") ||
-    raw.includes("#")
-  ) {
-    return fallback;
-  }
-
-  try {
-    if (isFunction(AppCore?.utils?.normalizePath)) {
-      const normalized =
-        AppCore.utils.normalizePath(raw);
-
-      if (normalized) {
-        const clean =
-          normalizeFullPath(normalized);
-
-        if (
-          fallback !== DEFAULT_ROUTE &&
-          clean === DEFAULT_ROUTE
-        ) {
-          return fallback;
-        }
-
-        return clean;
-      }
-    }
-  } catch {}
-
-  return fallback;
+function stripSearchHash(value = DEFAULT_PATH) {
+  return splitPath(normalizePath(value)).pathname;
 }
 
-function stripSearchAndHash(path = DEFAULT_ROUTE) {
-  return (
-    normalizePath(path)
-      .split("?")[0]
-      .split("#")[0] ||
-    DEFAULT_ROUTE
-  );
-}
+function stripUsernamePrefix(value = DEFAULT_PATH) {
+  const { pathname, search, hash } = splitPath(normalizePath(value));
+  const parts = pathname.split("/").filter(Boolean);
 
-function stripUsernamePrefix(path = DEFAULT_ROUTE) {
-  const full =
-    normalizePath(path);
-
-  const {
-    pathname,
-    search,
-    hash,
-  } =
-    splitFullPath(full);
-
-  const parts =
-    pathname
-      .split("/")
-      .filter(Boolean);
-
-  if (
-    parts.length > 0 &&
-    /^@[A-Za-z0-9._-]{1,80}$/.test(parts[0])
-  ) {
-    const rest =
-      parts.slice(1).join("/");
-
-    return `${rest ? `/${rest}` : DEFAULT_ROUTE}${search}${hash}`;
+  if (parts[0] && /^@[A-Za-z0-9._-]{1,80}$/.test(parts[0])) {
+    const rest = parts.slice(1).join("/");
+    return `${rest ? `/${rest}` : DEFAULT_PATH}${search}${hash}`;
   }
 
   return `${pathname}${search}${hash}`;
 }
 
-function getCurrentPath() {
-  if (!isBrowser()) {
-    return DEFAULT_ROUTE;
-  }
+function currentPath() {
+  if (!isBrowser()) return DEFAULT_PATH;
 
   try {
-    const pathname =
-      window.location.pathname ||
-      DEFAULT_ROUTE;
+    const hash = window.location.hash || "";
 
-    const search =
-      window.location.search ||
-      "";
+    if (isHashRouterPath(hash)) return normalizePath(hash);
 
-    const hash =
-      window.location.hash ||
-      "";
-
-    if (
-      hash &&
-      isHashRouterPath(hash)
-    ) {
-      return normalizeHashRouterPath(hash);
-    }
-
-    return normalizePath(
-      `${pathname}${search}${hash}`
-    );
+    return normalizePath(`${window.location.pathname || DEFAULT_PATH}${window.location.search || ""}${hash}`);
   } catch {
-    return DEFAULT_ROUTE;
+    return DEFAULT_PATH;
   }
 }
 
-function getCurrentCanonicalPath() {
-  return stripSearchAndHash(
-    stripUsernamePrefix(
-      getCurrentPath()
-    )
-  );
+function currentCanonicalPath() {
+  return stripSearchHash(stripUsernamePrefix(currentPath()));
 }
 
-function isLoginRoute(path = getCurrentPath()) {
-  const clean =
-    stripSearchAndHash(
-      stripUsernamePrefix(path)
-    );
+function isLoginRoute(path = currentPath()) {
+  const clean = stripSearchHash(stripUsernamePrefix(path));
 
-  return (
-    clean === LOGIN_ROUTE ||
-    clean.startsWith(`${LOGIN_ROUTE}/`)
-  );
+  return clean === LOGIN_PATH || clean.startsWith(`${LOGIN_PATH}/`);
 }
 
 /* =========================================================
-   DOM HELPERS
+   DOM / SHELL
 ========================================================= */
 
-function getById(id = "") {
-  if (
-    !isBrowser() ||
-    !id
-  ) {
-    return null;
-  }
+function byId(id = "") {
+  if (!isBrowser() || !id) return null;
 
   try {
     return document.getElementById(id);
@@ -1302,13 +491,8 @@ function getById(id = "") {
   }
 }
 
-function query(selector = "") {
-  if (
-    !isBrowser() ||
-    !selector
-  ) {
-    return null;
-  }
+function qs(selector = "") {
+  if (!isBrowser() || !selector) return null;
 
   try {
     return document.querySelector(selector);
@@ -1317,138 +501,11 @@ function query(selector = "") {
   }
 }
 
-function setAttribute(element, name, value) {
-  if (
-    !element ||
-    !name
-  ) {
-    return false;
-  }
-
-  try {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      element.removeAttribute(name);
-      return true;
-    }
-
-    element.setAttribute(
-      name,
-      String(value)
-    );
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function setDataset(element, key, value) {
-  if (
-    !element ||
-    !key
-  ) {
-    return false;
-  }
-
-  try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
-      delete element.dataset[key];
-      return true;
-    }
-
-    element.dataset[key] =
-      String(value);
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function toggleClass(element, className, enabled) {
-  if (
-    !element ||
-    !className
-  ) {
-    return false;
-  }
-
-  try {
-    element.classList.toggle(
-      className,
-      Boolean(enabled)
-    );
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function removeClasses(element, classNames = []) {
-  if (!element) {
-    return false;
-  }
-
-  try {
-    for (const className of safeArray(classNames)) {
-      if (className) {
-        element.classList.remove(className);
-      }
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function applyHidden(element, hidden = false) {
-  if (!element) {
-    return false;
-  }
-
-  const next =
-    Boolean(hidden);
-
-  try {
-    element.hidden =
-      next;
-  } catch {}
-
-  setAttribute(
-    element,
-    "aria-hidden",
-    next ? "true" : "false"
-  );
-
-  return true;
-}
-
-function applyBusy(element, busy = false) {
-  if (!element) {
-    return false;
-  }
-
-  setAttribute(
-    element,
-    "aria-busy",
-    Boolean(busy) ? "true" : "false"
-  );
-
-  return true;
-}
-
 function getShellElements() {
   if (!isBrowser()) {
     return {
+      html: null,
+      body: null,
       shell: null,
       main: null,
       appContent: null,
@@ -1458,60 +515,327 @@ function getShellElements() {
       tablehead: null,
       tableheadContainer: null,
       loader: null,
-      body: null,
-      html: null,
     };
   }
 
   return {
+    html: document.documentElement || null,
+    body: document.body || null,
+
     shell:
-      getById(DOM_IDS.shell) ||
-      query("[data-app-shell='true'],.app-shell"),
+      AppCore?.dom?.appShell ||
+      AppCore?.dom?.shell ||
+      byId("app-shell") ||
+      qs("[data-app-shell],.app-shell"),
 
     main:
-      getById(DOM_IDS.main) ||
-      query("[data-main-content='true'],main.main-content,.main-content"),
+      AppCore?.dom?.mainContent ||
+      AppCore?.dom?.main ||
+      byId("main-content") ||
+      qs("[data-main-content],main.main-content,.main-content,main"),
 
     appContent:
-      getById(DOM_IDS.appContent) ||
-      query("[data-app-content='true'],.app-content"),
+      AppCore?.dom?.appContent ||
+      byId("app-content") ||
+      qs("[data-app-content],.app-content"),
 
     view:
-      getById(DOM_IDS.view) ||
-      query("[data-view-root='true'],[data-router-view='true'],[data-view-container='true'],.view-container"),
+      AppCore?.dom?.viewContainer ||
+      AppCore?.dom?.routerView ||
+      AppCore?.dom?.viewRoot ||
+      byId("view-container") ||
+      qs("[data-view-root],[data-router-view],[data-view-container],.view-container,.router-view"),
 
     sidebarMount:
-      getById(DOM_IDS.sidebarMount) ||
-      query("[data-sidebar-mount='true'],[data-sidebar-mount]"),
+      AppCore?.dom?.sidebarMount ||
+      byId("sidebar-mount") ||
+      qs("[data-sidebar-mount]"),
 
     topbarMount:
-      getById(DOM_IDS.topbarMount) ||
-      query("[data-topbar-mount='true'],[data-topbar-mount]"),
+      AppCore?.dom?.topbarMount ||
+      byId("topbar-mount") ||
+      qs("[data-topbar-mount]"),
 
     tablehead:
-      getById(DOM_IDS.tablehead) ||
-      query("[data-tablehead='true'],[data-tablehead],.table-head"),
+      AppCore?.dom?.tablehead ||
+      byId("table-head") ||
+      qs("[data-tablehead],.table-head"),
 
     tableheadContainer:
-      getById(DOM_IDS.tableheadContainer) ||
-      query("[data-tablehead-container='true'],[data-tablehead-container]"),
+      AppCore?.dom?.tableheadContainer ||
+      byId("tablehead-container") ||
+      qs("[data-tablehead-container]"),
 
     loader:
-      getById(DOM_IDS.loader) ||
-      query("[data-app-loader='true'],[data-app-loader],.app-loader"),
-
-    body:
-      document.body || null,
-
-    html:
-      document.documentElement || null,
+      AppCore?.dom?.loader ||
+      byId("app-loader") ||
+      qs("[data-app-loader],.app-loader"),
   };
 }
 
-function getFallbackContainer() {
-  if (!isBrowser()) {
-    return null;
+function setAttr(el, key, value) {
+  if (!el || !key) return false;
+
+  try {
+    if (value === null || value === undefined) {
+      el.removeAttribute(key);
+      return true;
+    }
+
+    el.setAttribute(key, String(value));
+    return true;
+  } catch {
+    return false;
   }
+}
+
+function setData(el, key, value) {
+  if (!el || !key) return false;
+
+  try {
+    if (value === null || value === undefined || value === "") {
+      delete el.dataset[key];
+      return true;
+    }
+
+    el.dataset[key] = String(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setHidden(el, hidden = false) {
+  if (!el) return false;
+
+  try {
+    el.hidden = Boolean(hidden);
+  } catch {}
+
+  setAttr(el, "aria-hidden", hidden ? "true" : "false");
+  return true;
+}
+
+function setBusy(el, busy = false) {
+  return setAttr(el, "aria-busy", busy ? "true" : "false");
+}
+
+function toggleClass(el, className, enabled) {
+  if (!el || !className) return false;
+
+  try {
+    el.classList.toggle(className, Boolean(enabled));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeClasses(el, classNames = []) {
+  if (!el) return false;
+
+  try {
+    for (const className of classNames) {
+      if (className) el.classList.remove(className);
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function syncDomCache(container = null) {
+  try {
+    if (!AppCore.dom) AppCore.dom = {};
+  } catch {
+    return false;
+  }
+
+  const dom = getShellElements();
+  const view = container || dom.view;
+
+  try {
+    Object.assign(AppCore.dom, {
+      html: dom.html,
+      body: dom.body,
+
+      appShell: dom.shell,
+      shell: dom.shell,
+
+      mainContent: dom.main,
+      main: dom.main,
+
+      appContent: dom.appContent,
+
+      viewContainer: view,
+      routerView: view,
+      viewRoot: view,
+
+      sidebarMount: dom.sidebarMount,
+      topbarMount: dom.topbarMount,
+
+      tablehead: dom.tablehead,
+      tableHead: dom.tablehead,
+      tableheadContainer: dom.tableheadContainer,
+      tableHeadContainer: dom.tableheadContainer,
+
+      loader: dom.loader,
+      appLoader: dom.loader,
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setAuthScreen(active = true) {
+  if (!isBrowser()) return false;
+
+  const enabled = Boolean(active);
+  const dom = getShellElements();
+
+  for (const root of [dom.html, dom.body]) {
+    if (!root) continue;
+
+    for (const className of AUTH_ROOT_CLASSES) toggleClass(root, className, enabled);
+    for (const className of APP_ROOT_CLASSES) toggleClass(root, className, !enabled);
+
+    setData(root, "routeMode", enabled ? "auth" : "app");
+    setData(root, "authScreen", enabled ? "true" : "false");
+    setData(root, "chrome", enabled ? "hidden" : "visible");
+    setData(root, "shell", "visible");
+    setData(root, "appLoading", "false");
+  }
+
+  for (const el of [dom.shell, dom.main, dom.appContent, dom.view]) {
+    setHidden(el, false);
+    setBusy(el, false);
+    setData(el, "shell", "visible");
+    setData(el, "routeMode", enabled ? "auth" : "app");
+    setData(el, "chrome", enabled ? "hidden" : "visible");
+  }
+
+  for (const el of [dom.sidebarMount, dom.topbarMount, dom.tablehead, dom.tableheadContainer]) {
+    setHidden(el, enabled);
+    setBusy(el, false);
+  }
+
+  return true;
+}
+
+function releaseAuthScreenIfNeeded() {
+  if (!isBrowser()) return false;
+  if (isLoginRoute()) return false;
+  return setAuthScreen(false);
+}
+
+function hideLoaderFallback() {
+  try {
+    AppCore?.setLoading?.(false, {
+      source: SOURCE,
+      silent: true,
+    });
+  } catch {
+    try {
+      AppCore?.setLoading?.(false);
+    } catch {}
+  }
+
+  try {
+    AppCore?.setState?.(
+      {
+        loading: false,
+        appLoading: false,
+        loaderVisible: false,
+      },
+      {
+        source: SOURCE,
+        emit: false,
+        emitState: false,
+        silent: true,
+      }
+    );
+  } catch {}
+
+  const loaderModule =
+    AppCore?.modules?.get?.("Loader") ||
+    AppCore?.modules?.get?.("loader") ||
+    AppCore?.Loader ||
+    AppCore?.loader ||
+    null;
+
+  try {
+    if (isFn(loaderModule?.hide)) {
+      loaderModule.hide({
+        source: SOURCE,
+        reason: "login-bridge-rendered",
+        force: true,
+        allowDuringBoot: true,
+      });
+
+      return true;
+    }
+  } catch {}
+
+  const dom = getShellElements();
+
+  for (const root of [dom.body, dom.html]) {
+    removeClasses(root, LOADING_CLASSES);
+    setData(root, "appLoading", "false");
+    setData(root, "appBooting", "false");
+  }
+
+  if (dom.loader) {
+    setHidden(dom.loader, true);
+    setBusy(dom.loader, false);
+
+    setData(dom.loader, "loaderVisible", "false");
+    setData(dom.loader, "loaderState", "hidden");
+
+    try {
+      dom.loader.classList.add("is-hidden", "has-hidden", "loader-hidden");
+      dom.loader.classList.remove("is-visible", "is-entering", "is-leaving", "loader-visible");
+    } catch {}
+  }
+
+  return true;
+}
+
+function prepareLoginShell(container = null) {
+  syncDomCache(container);
+  setAuthScreen(true);
+  hideLoaderFallback();
+
+  try {
+    AppCore?.clearDynamicContainers?.({
+      includeView: false,
+      includeTopbar: true,
+      includeTablehead: true,
+      source: SOURCE,
+    });
+  } catch {}
+
+  try {
+    AppCore?.setDocumentTitle?.(AppCore?.config?.appName || "Onion Support");
+  } catch {}
+
+  emit(EVENTS.shellPrepared, {
+    path: currentPath(),
+    canonicalPath: currentCanonicalPath(),
+    containerId: safeText(container?.id, ""),
+  });
+
+  return true;
+}
+
+/* =========================================================
+   RENDER DELEGATION
+========================================================= */
+
+function resolveContainer(input = null) {
+  if (isNode(input)) return input;
 
   try {
     return (
@@ -1526,677 +850,79 @@ function getFallbackContainer() {
   }
 }
 
-function resolveContainer(candidate = null) {
-  if (
-    candidate &&
-    isDomNode(candidate)
-  ) {
-    return candidate;
-  }
+function resolveRenderer() {
+  const candidates = [
+    LoginDefault?.render,
+    LoginDefault?.init,
+    LoginDefault?.mount,
+    LoginDefault,
 
-  return getFallbackContainer();
+    LoginModule.render,
+    LoginModule.init,
+    LoginModule.mount,
+
+    LoginModule.default?.render,
+    LoginModule.default?.init,
+    LoginModule.default?.mount,
+    LoginModule.default,
+  ];
+
+  return candidates.find(isFn) || null;
 }
-
-function syncDomCache(container = null) {
-  try {
-    if (
-      !AppCore ||
-      typeof AppCore !== "object"
-    ) {
-      return false;
-    }
-
-    if (
-      !AppCore.dom &&
-      isExtensibleTarget(AppCore)
-    ) {
-      AppCore.dom =
-        {};
-    }
-
-    if (!isObject(AppCore.dom)) {
-      return false;
-    }
-
-    const elements =
-      getShellElements();
-
-    Object.assign(
-      AppCore.dom,
-      {
-        appShell:
-          elements.shell,
-        shell:
-          elements.shell,
-
-        mainContent:
-          elements.main,
-        main:
-          elements.main,
-
-        appContent:
-          elements.appContent,
-
-        viewContainer:
-          container || elements.view,
-        routerView:
-          container || elements.view,
-        viewRoot:
-          container || elements.view,
-
-        sidebarMount:
-          elements.sidebarMount,
-        topbarMount:
-          elements.topbarMount,
-
-        tablehead:
-          elements.tablehead,
-        tableHead:
-          elements.tablehead,
-
-        tableheadContainer:
-          elements.tableheadContainer,
-        tableHeadContainer:
-          elements.tableheadContainer,
-
-        loader:
-          elements.loader,
-        appLoader:
-          elements.loader,
-      }
-    );
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/* =========================================================
-   MODULE HELPERS
-========================================================= */
-
-function getCoreModule(names = []) {
-  const keys =
-    safeArray(names)
-      .map((name) => safeText(name, ""))
-      .filter(Boolean);
-
-  for (const key of keys) {
-    try {
-      if (isFunction(AppCore?.modules?.get)) {
-        const value =
-          AppCore.modules.get(key);
-
-        if (value) {
-          return value;
-        }
-      }
-    } catch {}
-
-    try {
-      if (AppCore?.modules?.[key]) {
-        return AppCore.modules[key];
-      }
-    } catch {}
-
-    try {
-      if (AppCore?.[key]) {
-        return AppCore[key];
-      }
-    } catch {}
-
-    try {
-      if (isFunction(AppCore?.registry?.modules?.get)) {
-        const value =
-          AppCore.registry.modules.get(key);
-
-        if (value) {
-          return value;
-        }
-      }
-    } catch {}
-  }
-
-  return null;
-}
-
-function resolveDelegatedRenderer() {
-  const candidates =
-    [
-      LoginDefault,
-      LoginDefault?.render,
-      LoginDefault?.init,
-      LoginDefault?.mount,
-
-      LoginModule?.render,
-      LoginModule?.init,
-      LoginModule?.mount,
-
-      LoginModule?.default,
-      LoginModule?.default?.render,
-      LoginModule?.default?.init,
-      LoginModule?.default?.mount,
-    ];
-
-  for (const candidate of candidates) {
-    if (isFunction(candidate)) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
-/* =========================================================
-   SHELL / LOADER COMPAT
-========================================================= */
-
-function setAuthScreenMode(active = true) {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  const enabled =
-    Boolean(active);
-
-  const {
-    body,
-    html,
-    shell,
-    main,
-    appContent,
-    view,
-    sidebarMount,
-    topbarMount,
-    tablehead,
-    tableheadContainer,
-  } =
-    getShellElements();
-
-  for (const root of [
-    html,
-    body,
-  ]) {
-    if (!root) {
-      continue;
-    }
-
-    for (const className of AUTH_SCREEN_CLASSES) {
-      toggleClass(
-        root,
-        className,
-        enabled
-      );
-    }
-
-    for (const className of APP_SCREEN_CLASSES) {
-      toggleClass(
-        root,
-        className,
-        !enabled
-      );
-    }
-
-    setDataset(
-      root,
-      "routeMode",
-      enabled ? "auth" : "app"
-    );
-
-    setDataset(
-      root,
-      "authScreen",
-      enabled ? "true" : "false"
-    );
-
-    setDataset(
-      root,
-      "chrome",
-      enabled ? "hidden" : "visible"
-    );
-
-    setDataset(
-      root,
-      "shell",
-      "visible"
-    );
-  }
-
-  for (const element of [
-    shell,
-    main,
-    appContent,
-    view,
-  ]) {
-    if (!element) {
-      continue;
-    }
-
-    try {
-      element.hidden =
-        false;
-    } catch {}
-
-    setAttribute(
-      element,
-      "aria-hidden",
-      "false"
-    );
-
-    setAttribute(
-      element,
-      "aria-busy",
-      "false"
-    );
-
-    setDataset(
-      element,
-      "shell",
-      "visible"
-    );
-
-    setDataset(
-      element,
-      "routeMode",
-      enabled ? "auth" : "app"
-    );
-
-    setDataset(
-      element,
-      "chrome",
-      enabled ? "hidden" : "visible"
-    );
-  }
-
-  for (const chromeElement of [
-    sidebarMount,
-    topbarMount,
-    tablehead,
-    tableheadContainer,
-  ]) {
-    applyHidden(
-      chromeElement,
-      enabled
-    );
-  }
-
-  return true;
-}
-
-function releaseAuthScreenModeIfNeeded() {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  if (isLoginRoute()) {
-    return false;
-  }
-
-  return setAuthScreenMode(false);
-}
-
-function stopGlobalLoadingFallback() {
-  try {
-    AppCore?.setLoading?.(
-      false,
-      {
-        source:
-          SOURCE,
-        silent:
-          true,
-      }
-    );
-  } catch {
-    try {
-      AppCore?.setLoading?.(false);
-    } catch {}
-  }
-
-  try {
-    AppCore?.setState?.(
-      {
-        loading:
-          false,
-        appLoading:
-          false,
-        loaderVisible:
-          false,
-      },
-      {
-        source:
-          SOURCE,
-        emit:
-          false,
-        emitState:
-          false,
-        silent:
-          true,
-      }
-    );
-  } catch {}
-
-  const loaderModule =
-    getCoreModule([
-      "Loader",
-      "loader",
-      "AppLoader",
-      "appLoader",
-    ]);
-
-  try {
-    if (isFunction(loaderModule?.hide)) {
-      loaderModule.hide({
-        source:
-          SOURCE,
-        reason:
-          "login-bridge-rendered",
-        force:
-          true,
-        allowDuringBoot:
-          true,
-      });
-
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (isFunction(loaderModule?.forceHide)) {
-      loaderModule.forceHide({
-        source:
-          SOURCE,
-        reason:
-          "login-bridge-rendered",
-      });
-
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (isFunction(loaderModule?.finalize)) {
-      loaderModule.finalize({
-        source:
-          SOURCE,
-        reason:
-          "login-bridge-rendered",
-      });
-
-      return true;
-    }
-  } catch {}
-
-  try {
-    const {
-      loader,
-      body,
-      html,
-    } =
-      getShellElements();
-
-    for (const root of [
-      body,
-      html,
-    ]) {
-      removeClasses(
-        root,
-        LOADING_CLASSES
-      );
-
-      setDataset(
-        root,
-        "appLoading",
-        "false"
-      );
-
-      setDataset(
-        root,
-        "appBooting",
-        "false"
-      );
-    }
-
-    if (loader) {
-      loader.hidden =
-        true;
-
-      setAttribute(
-        loader,
-        "aria-hidden",
-        "true"
-      );
-
-      setAttribute(
-        loader,
-        "aria-busy",
-        "false"
-      );
-
-      setDataset(
-        loader,
-        "loaderVisible",
-        "false"
-      );
-
-      setDataset(
-        loader,
-        "loaderState",
-        "hidden"
-      );
-
-      loader.classList?.add?.(
-        "is-hidden",
-        "has-hidden",
-        "loader-hidden"
-      );
-
-      loader.classList?.remove?.(
-        "is-visible",
-        "is-entering",
-        "is-leaving",
-        "loader-visible"
-      );
-    }
-  } catch {}
-
-  return true;
-}
-
-function syncShellAuthMode() {
-  const shellModule =
-    getCoreModule([
-      "Shell",
-      "shell",
-      "AppShell",
-      "appShell",
-    ]);
-
-  try {
-    if (isFunction(shellModule?.setVisible)) {
-      shellModule.setVisible(
-        false,
-        {
-          source:
-            SOURCE,
-          reason:
-            "login-bridge-auth-mode",
-          authLike:
-            true,
-          hideAppShell:
-            false,
-          force:
-            true,
-          forceChromeSync:
-            true,
-        }
-      );
-
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (isFunction(shellModule?.setShellVisibility)) {
-      shellModule.setShellVisibility(
-        AppCore,
-        false,
-        {
-          source:
-            SOURCE,
-          reason:
-            "login-bridge-auth-mode",
-          authLike:
-            true,
-          hideAppShell:
-            false,
-          force:
-            true,
-          forceChromeSync:
-            true,
-        }
-      );
-
-      return true;
-    }
-  } catch {}
-
-  return setAuthScreenMode(true);
-}
-
-function prepareLoginShell(container = null) {
-  syncDomCache(container);
-
-  setAuthScreenMode(true);
-  syncShellAuthMode();
-  stopGlobalLoadingFallback();
-
-  try {
-    AppCore?.clearDynamicContainers?.({
-      includeView:
-        false,
-      includeTopbar:
-        true,
-      includeTablehead:
-        true,
-      source:
-        SOURCE,
-    });
-  } catch {}
-
-  try {
-    AppCore?.setDocumentTitle?.(
-      AppCore?.config?.appName ||
-        "Onion Support"
-    );
-  } catch {}
-
-  safeEmit(
-    BRIDGE_EVENTS.shellPrepared,
-    {
-      path:
-        normalizePath(getCurrentPath()),
-
-      canonicalPath:
-        getCurrentCanonicalPath(),
-
-      containerId:
-        safeText(container?.id, ""),
-    }
-  );
-
-  return true;
-}
-
-/* =========================================================
-   CONTROLLER HELPERS
-========================================================= */
 
 function hasController(value = null) {
   return Boolean(
     value &&
       (
-        isFunction(value.destroy) ||
-        isFunction(value.unmount) ||
-        isFunction(value.dispose) ||
-        isFunction(value.teardown) ||
-        isFunction(value.abort)
+        isFn(value.destroy) ||
+        isFn(value.unmount) ||
+        isFn(value.dispose) ||
+        isFn(value.teardown) ||
+        isFn(value.abort)
       )
   );
 }
 
 function normalizeController(value = null, epoch = 0) {
-  if (hasController(value)) {
-    return value;
-  }
+  if (hasController(value)) return value;
 
   return {
-    source:
-      SOURCE,
-
+    source: SOURCE,
     epoch,
 
     destroy() {},
 
     getSnapshot() {
       return {
-        source:
-          SOURCE,
+        source: SOURCE,
         epoch,
-        delegatedController:
-          false,
+        delegatedController: false,
       };
     },
   };
 }
 
-function destroyController(controller = null, options = {}) {
-  if (!controller) {
-    return false;
-  }
+function destroyController(controller = null, reason = "destroy") {
+  if (!controller) return false;
 
-  const methods =
-    [
-      "destroy",
-      "unmount",
-      "dispose",
-      "teardown",
-      "abort",
-    ];
-
-  const context = {
-    source:
-      SOURCE,
-    reason:
-      safeText(
-        options.reason,
-        "destroy"
-      ),
-    epoch:
-      options.epoch || activeEpoch,
-  };
-
-  for (const method of methods) {
-    if (!isFunction(controller?.[method])) {
-      continue;
-    }
+  for (const method of ["destroy", "unmount", "dispose", "teardown", "abort"]) {
+    if (!isFn(controller?.[method])) continue;
 
     try {
-      controller[method](context);
+      controller[method]({
+        source: SOURCE,
+        reason,
+        epoch: activeEpoch,
+      });
+
       return true;
     } catch (error) {
       try {
         controller[method]();
         return true;
       } catch (fallbackError) {
-        lastError =
-          sanitizeError(fallbackError || error);
-
-        safeWarn(
-          `Error ejecutando controller.${method}().`,
-          lastError
-        );
-
+        lastError = sanitizeError(fallbackError || error);
+        warn(`controller.${method}() falló.`, lastError);
         return false;
       }
     }
@@ -2205,7 +931,7 @@ function destroyController(controller = null, options = {}) {
   return false;
 }
 
-function clearScopedCleanup() {
+function cleanupScope() {
   try {
     AppCore?.cleanup?.run?.(SCOPE);
   } catch {}
@@ -2221,536 +947,288 @@ function clearScopedCleanup() {
   return true;
 }
 
-function destroyActiveController({
+function destroyActive({
   preserveAuthScreen = false,
-  emit = true,
-  reason = "destroy-active-controller",
+  emitEvent = true,
+  reason = "destroy",
 } = {}) {
-  const controller =
-    activeController;
-
-  const hadController =
-    Boolean(controller);
+  const controller = activeController;
+  const hadController = Boolean(controller);
 
   try {
-    destroyController(
-      controller,
-      {
-        reason,
-        epoch:
-          activeEpoch,
-      }
-    );
+    destroyController(controller, reason);
   } finally {
-    activeController =
-      null;
+    activeController = null;
+    activeContainer = null;
+    activeEpoch = 0;
+    renderInFlight = false;
 
-    activeContainer =
-      null;
+    cleanupScope();
 
-    activeEpoch =
-      0;
+    if (!preserveAuthScreen) releaseAuthScreenIfNeeded();
 
-    renderInFlight =
-      false;
+    lastDestroyAt = iso();
 
-    clearScopedCleanup();
-
-    if (!preserveAuthScreen) {
-      releaseAuthScreenModeIfNeeded();
-    }
-
-    lastDestroyAt =
-      safeIsoNow();
-
-    if (
-      emit &&
-      hadController
-    ) {
-      safeEmit(
-        BRIDGE_EVENTS.destroyed,
-        {
-          epoch:
-            renderEpoch,
-
-          preserveAuthScreen:
-            Boolean(preserveAuthScreen),
-
-          reason,
-        }
-      );
+    if (emitEvent && hadController) {
+      emit(EVENTS.destroyed, {
+        epoch: renderEpoch,
+        preserveAuthScreen,
+        reason,
+      });
     }
   }
 
   return hadController;
 }
 
-/* =========================================================
-   ARG NORMALIZATION
-========================================================= */
-
 function normalizeRenderArgs(input = null, maybeDeps = {}) {
-  let container =
-    null;
-
-  let deps =
-    {};
-
-  if (isDomNode(input)) {
-    container =
-      input;
-
-    deps =
-      safeObject(maybeDeps);
-  } else if (isObject(input)) {
-    container =
-      input.container ||
-      input.target ||
-      input.root ||
-      input.el ||
-      null;
-
-    deps = {
-      ...input,
+  if (isNode(input)) {
+    return {
+      container: resolveContainer(input),
+      deps: safeObject(maybeDeps),
     };
+  }
+
+  if (isObject(input)) {
+    const container = input.container || input.target || input.root || input.el || null;
+    const deps = { ...input };
 
     delete deps.container;
     delete deps.target;
     delete deps.root;
     delete deps.el;
-  } else {
-    deps =
-      safeObject(maybeDeps);
+
+    return {
+      container: resolveContainer(container),
+      deps,
+    };
   }
 
   return {
-    container:
-      resolveContainer(container),
-
-    deps,
+    container: resolveContainer(null),
+    deps: safeObject(maybeDeps),
   };
 }
 
-function callDelegatedRenderer(renderer, container, deps = {}, epoch = 0) {
+function callRenderer(renderer, container, deps = {}, epoch = 0) {
   const context = {
-    source:
-      SOURCE,
-
-    legacyBridge:
-      true,
-
-    scope:
-      SCOPE,
-
+    source: SOURCE,
+    legacyBridge: true,
+    scope: SCOPE,
     epoch,
 
     AppCore,
 
     container,
-    target:
-      container,
-    root:
-      container,
-    el:
-      container,
+    target: container,
+    root: container,
+    el: container,
 
-    path:
-      normalizePath(getCurrentPath()),
-
-    canonicalPath:
-      getCurrentCanonicalPath(),
+    path: currentPath(),
+    canonicalPath: currentCanonicalPath(),
 
     ...safeObject(deps),
   };
 
-  /*
-    Firma canónica de vistas actuales:
-      render(container, context)
-  */
   try {
-    return renderer(
-      container,
-      context
-    );
+    return renderer(container, context);
   } catch (firstError) {
-    /*
-      Compat moderna:
-        render(context)
-    */
     try {
       return renderer(context);
     } catch {
-      /*
-        Si ambas fallan, lanzamos el error original.
-      */
       throw firstError;
     }
   }
 }
 
 /* =========================================================
-   PUBLIC RENDER API
+   PUBLIC API
 ========================================================= */
 
 function render(input = null, maybeDeps = {}) {
   if (!isBrowser()) {
-    safeWarn(
-      "Render ignorado fuera de browser."
-    );
-
+    warn("render ignorado fuera de browser.");
     return null;
   }
 
-  const {
-    container,
-    deps,
-  } =
-    normalizeRenderArgs(
-      input,
-      maybeDeps
-    );
+  const { container, deps } = normalizeRenderArgs(input, maybeDeps);
 
   if (!container) {
-    const error =
-      new Error(
-        "LoginView: no se encontró #view-container."
-      );
+    const err = new Error("LoginView: no se encontró #view-container.");
+    lastError = sanitizeError(err);
 
-    lastError =
-      sanitizeError(error);
-
-    safeError(
-      lastError.message
-    );
-
-    safeEmit(
-      BRIDGE_EVENTS.error,
-      {
-        error:
-          lastError,
-      },
-      {
-        force:
-          true,
-      }
-    );
+    errorLog(lastError.message);
+    emit(EVENTS.error, { error: lastError }, { force: true, dedupe: false });
 
     return null;
   }
 
-  const renderer =
-    resolveDelegatedRenderer();
+  const renderer = resolveRenderer();
 
-  if (!isFunction(renderer)) {
-    const error =
-      new Error(
-        "LoginView: src/views/login/index.js no exporta render/init/mount válido."
-      );
+  if (!renderer) {
+    const err = new Error("LoginView: src/views/login/index.js no exporta render/init/mount válido.");
+    lastError = sanitizeError(err);
 
-    lastError =
-      sanitizeError(error);
-
-    safeError(
-      lastError.message
-    );
-
-    safeEmit(
-      BRIDGE_EVENTS.error,
-      {
-        error:
-          lastError,
-      },
-      {
-        force:
-          true,
-      }
-    );
+    errorLog(lastError.message);
+    emit(EVENTS.error, { error: lastError }, { force: true, dedupe: false });
 
     return null;
   }
 
   renderEpoch += 1;
+  const epoch = renderEpoch;
 
-  const epoch =
-    renderEpoch;
+  renderInFlight = true;
 
-  renderInFlight =
-    true;
-
-  destroyActiveController({
-    preserveAuthScreen:
-      true,
-    emit:
-      false,
-    reason:
-      "before-new-render",
+  destroyActive({
+    preserveAuthScreen: true,
+    emitEvent: false,
+    reason: "before-new-render",
   });
 
-  activeEpoch =
-    epoch;
+  activeEpoch = epoch;
+  activeContainer = container;
 
   prepareLoginShell(container);
 
-  safeEmit(
-    BRIDGE_EVENTS.beforeRender,
-    {
-      epoch,
-      path:
-        normalizePath(
-          getCurrentPath()
-        ),
-      canonicalPath:
-        getCurrentCanonicalPath(),
-      containerId:
-        safeText(
-          container.id,
-          ""
-        ),
-    }
-  );
+  emit(EVENTS.beforeRender, {
+    epoch,
+    path: currentPath(),
+    canonicalPath: currentCanonicalPath(),
+    containerId: safeText(container.id, ""),
+  });
 
   try {
-    const result =
-      callDelegatedRenderer(
-        renderer,
-        container,
-        {
-          ...safeObject(deps),
-          source:
-            SOURCE,
-          legacyBridge:
-            true,
-        },
-        epoch
-      );
+    const result = callRenderer(
+      renderer,
+      container,
+      {
+        ...deps,
+        source: SOURCE,
+        legacyBridge: true,
+      },
+      epoch
+    );
 
-    /*
-      Si el renderer devuelve Promise, dejamos un controller provisional.
-      No bloqueamos Router con una vista congelada.
-    */
-    if (
-      result &&
-      isFunction(result.then)
-    ) {
-      const asyncController =
-        normalizeController(
-          null,
-          epoch
-        );
+    if (result && isFn(result.then)) {
+      const provisional = normalizeController(null, epoch);
 
-      activeController =
-        asyncController;
-
-      activeContainer =
-        container;
+      activeController = provisional;
+      renderInFlight = false;
+      lastRenderAt = iso();
+      lastError = null;
 
       result
         .then((controller) => {
           if (epoch !== activeEpoch) {
-            destroyController(
-              controller,
-              {
-                reason:
-                  "async-render-stale",
-                epoch,
-              }
-            );
-
+            destroyController(controller, "async-render-stale");
             return;
           }
 
-          activeController =
-            normalizeController(
-              controller,
-              epoch
-            );
+          activeController = normalizeController(controller, epoch);
+          renderInFlight = false;
+          lastRenderAt = iso();
+          lastError = null;
 
-          lastRenderAt =
-            safeIsoNow();
+          hideLoaderFallback();
 
-          lastError =
-            null;
-
-          stopGlobalLoadingFallback();
-
-          safeEmit(
-            BRIDGE_EVENTS.rendered,
-            {
-              epoch,
-              async:
-                true,
-              containerId:
-                safeText(container.id, ""),
-              connected:
-                isConnected(container),
-            }
-          );
+          emit(EVENTS.rendered, {
+            epoch,
+            async: true,
+            containerId: safeText(container.id, ""),
+            connected: connected(container),
+          });
         })
         .catch((error) => {
-          if (epoch !== activeEpoch) {
-            return;
-          }
+          if (epoch !== activeEpoch) return;
 
-          lastError =
-            sanitizeError(error);
+          lastError = sanitizeError(error);
 
-          activeController =
-            null;
+          activeController = null;
+          activeContainer = null;
+          activeEpoch = 0;
+          renderInFlight = false;
 
-          activeContainer =
-            null;
+          releaseAuthScreenIfNeeded();
 
-          renderInFlight =
-            false;
-
-          releaseAuthScreenModeIfNeeded();
-
-          safeEmit(
-            BRIDGE_EVENTS.error,
+          emit(
+            EVENTS.error,
             {
               epoch,
-              async:
-                true,
-              error:
-                lastError,
+              async: true,
+              error: lastError,
             },
             {
-              force:
-                true,
-              dedupe:
-                false,
+              force: true,
+              dedupe: false,
             }
           );
 
-          safeError(
-            "Error async renderizando login delegado.",
-            lastError
-          );
+          errorLog("Error async renderizando login delegado.", lastError);
         });
 
-      lastRenderAt =
-        safeIsoNow();
-
-      lastError =
-        null;
-
-      renderInFlight =
-        false;
-
-      stopGlobalLoadingFallback();
-
-      return asyncController;
+      hideLoaderFallback();
+      return provisional;
     }
 
-    activeController =
-      normalizeController(
-        result,
-        epoch
-      );
+    activeController = normalizeController(result, epoch);
+    renderInFlight = false;
+    lastRenderAt = iso();
+    lastError = null;
 
-    activeContainer =
-      container;
+    hideLoaderFallback();
 
-    lastRenderAt =
-      safeIsoNow();
+    emit(EVENTS.rendered, {
+      epoch,
+      async: false,
+      containerId: safeText(container.id, ""),
+      connected: connected(container),
+    });
 
-    lastError =
-      null;
-
-    renderInFlight =
-      false;
-
-    stopGlobalLoadingFallback();
-
-    safeEmit(
-      BRIDGE_EVENTS.rendered,
-      {
-        epoch,
-        async:
-          false,
-        containerId:
-          safeText(
-            container.id,
-            ""
-          ),
-        connected:
-          isConnected(container),
-      }
-    );
-
-    safeLog(
-      "Login bridge render OK.",
-      {
-        epoch,
-      }
-    );
+    log("render OK", { epoch });
 
     return activeController;
   } catch (error) {
-    lastError =
-      sanitizeError(error);
+    lastError = sanitizeError(error);
 
-    activeController =
-      null;
+    activeController = null;
+    activeContainer = null;
+    activeEpoch = 0;
+    renderInFlight = false;
 
-    activeContainer =
-      null;
+    releaseAuthScreenIfNeeded();
 
-    activeEpoch =
-      0;
-
-    renderInFlight =
-      false;
-
-    releaseAuthScreenModeIfNeeded();
-
-    safeEmit(
-      BRIDGE_EVENTS.error,
+    emit(
+      EVENTS.error,
       {
         epoch,
-        error:
-          lastError,
+        error: lastError,
       },
       {
-        force:
-          true,
-        dedupe:
-          false,
+        force: true,
+        dedupe: false,
       }
     );
 
-    safeError(
-      "Error renderizando login delegado.",
-      lastError
-    );
+    errorLog("Error renderizando login delegado.", lastError);
 
     throw error;
   }
 }
 
 function init(input = null, maybeDeps = {}) {
-  return render(
-    input,
-    maybeDeps
-  );
+  return render(input, maybeDeps);
 }
 
 function mount(input = null, maybeDeps = {}) {
-  return render(
-    input,
-    maybeDeps
-  );
+  return render(input, maybeDeps);
 }
 
 function destroy(options = {}) {
-  return destroyActiveController({
-    preserveAuthScreen:
-      options?.preserveAuthScreen === true,
-    emit:
-      options?.emit !== false,
-    reason:
-      options?.reason ||
-      "destroy",
+  return destroyActive({
+    preserveAuthScreen: options?.preserveAuthScreen === true,
+    emitEvent: options?.emit !== false,
+    reason: options?.reason || "destroy",
   });
 }
 
@@ -2770,279 +1248,142 @@ function teardown(options = {}) {
    SNAPSHOT
 ========================================================= */
 
-function getElementSnapshot(element = null) {
-  if (!element) {
-    return {
-      exists:
-        false,
-    };
-  }
+function elementSnapshot(el = null) {
+  if (!el) return { exists: false };
 
   return {
-    exists:
-      true,
+    exists: true,
+    id: safeText(el.id, ""),
+    tag: safeText(el.tagName?.toLowerCase?.(), ""),
+    hidden: Boolean(el.hidden),
+    connected: connected(el),
 
-    id:
-      safeText(element.id, ""),
-
-    tag:
-      safeText(
-        element.tagName?.toLowerCase?.(),
-        ""
-      ),
-
-    hidden:
-      Boolean(element.hidden),
-
-    ariaHidden:
-      safeText(
-        element.getAttribute?.("aria-hidden"),
-        ""
-      ),
-
-    ariaBusy:
-      safeText(
-        element.getAttribute?.("aria-busy"),
-        ""
-      ),
+    ariaHidden: safeText(el.getAttribute?.("aria-hidden"), ""),
+    ariaBusy: safeText(el.getAttribute?.("aria-busy"), ""),
 
     dataset: {
-      shell:
-        safeText(element.dataset?.shell, ""),
-
-      chrome:
-        safeText(element.dataset?.chrome, ""),
-
-      routeMode:
-        safeText(element.dataset?.routeMode, ""),
-
-      appShellVisible:
-        safeText(element.dataset?.appShellVisible, ""),
-
-      loaderVisible:
-        safeText(element.dataset?.loaderVisible, ""),
-
-      loaderState:
-        safeText(element.dataset?.loaderState, ""),
+      shell: safeText(el.dataset?.shell, ""),
+      chrome: safeText(el.dataset?.chrome, ""),
+      routeMode: safeText(el.dataset?.routeMode, ""),
+      loaderVisible: safeText(el.dataset?.loaderVisible, ""),
+      loaderState: safeText(el.dataset?.loaderState, ""),
     },
 
-    className:
-      safeText(
-        element.className?.baseVal ||
-          element.className,
-        ""
-      ).slice(0, SNAPSHOT_MAX_CLASS_LENGTH),
+    className: safeText(el.className?.baseVal || el.className, "").slice(0, 500),
 
-    classes:
-      safeArrayFromClassList(element.classList),
-
-    childCount:
-      (() => {
-        try {
-          return element.children?.length || 0;
-        } catch {
-          return 0;
-        }
-      })(),
+    childCount: (() => {
+      try {
+        return el.children?.length || 0;
+      } catch {
+        return 0;
+      }
+    })(),
   };
 }
 
-function getLoginViewSnapshot() {
-  const elements =
-    getShellElements();
+function getSnapshot() {
+  const dom = getShellElements();
 
-  return sanitizePayload({
-    version:
-      LOGIN_VIEW_BRIDGE_VERSION,
+  return sanitize({
+    version: LOGIN_VIEW_BRIDGE_VERSION,
+    source: SOURCE,
+    scope: SCOPE,
 
-    source:
-      SOURCE,
-
-    scope:
-      SCOPE,
-
-    active:
-      Boolean(activeController),
-
-    renderInFlight:
-      Boolean(renderInFlight),
-
-    hasActiveController:
-      hasController(activeController),
+    active: Boolean(activeController),
+    renderInFlight: Boolean(renderInFlight),
+    hasActiveController: hasController(activeController),
 
     activeEpoch,
-
-    activeContainer: {
-      exists:
-        Boolean(activeContainer),
-
-      id:
-        safeText(
-          activeContainer?.id,
-          ""
-        ),
-
-      connected:
-        isConnected(activeContainer),
-    },
-
     renderEpoch,
 
-    currentPath:
-      isBrowser()
-        ? normalizePath(getCurrentPath())
-        : "",
+    currentPath: isBrowser() ? currentPath() : "",
+    canonicalPath: isBrowser() ? currentCanonicalPath() : "",
+    isLoginRoute: isBrowser() ? isLoginRoute() : false,
 
-    canonicalPath:
-      isBrowser()
-        ? getCurrentCanonicalPath()
-        : "",
-
-    isLoginRoute:
-      isBrowser()
-        ? isLoginRoute()
-        : false,
-
-    delegatedRenderer:
-      Boolean(resolveDelegatedRenderer()),
-
-    delegatedDefaultType:
-      typeof LoginDefault,
+    delegatedRenderer: Boolean(resolveRenderer()),
 
     moduleExports: {
-      hasDefault:
-        Boolean(LoginModule?.default),
+      hasDefault: Boolean(LoginModule?.default),
+      hasRender: isFn(LoginModule?.render),
+      hasInit: isFn(LoginModule?.init),
+      hasMount: isFn(LoginModule?.mount),
+    },
 
-      hasRender:
-        isFunction(LoginModule?.render),
-
-      hasInit:
-        isFunction(LoginModule?.init),
-
-      hasMount:
-        isFunction(LoginModule?.mount),
+    activeContainer: {
+      exists: Boolean(activeContainer),
+      id: safeText(activeContainer?.id, ""),
+      connected: connected(activeContainer),
     },
 
     dom: {
-      shell:
-        getElementSnapshot(elements.shell),
-
-      main:
-        getElementSnapshot(elements.main),
-
-      appContent:
-        getElementSnapshot(elements.appContent),
-
-      view:
-        getElementSnapshot(elements.view),
-
-      sidebarMount:
-        getElementSnapshot(elements.sidebarMount),
-
-      topbarMount:
-        getElementSnapshot(elements.topbarMount),
-
-      tablehead:
-        getElementSnapshot(elements.tablehead),
-
-      tableheadContainer:
-        getElementSnapshot(elements.tableheadContainer),
-
-      loader:
-        getElementSnapshot(elements.loader),
-
-      body:
-        getElementSnapshot(elements.body),
-
-      html:
-        getElementSnapshot(elements.html),
+      html: elementSnapshot(dom.html),
+      body: elementSnapshot(dom.body),
+      shell: elementSnapshot(dom.shell),
+      main: elementSnapshot(dom.main),
+      appContent: elementSnapshot(dom.appContent),
+      view: elementSnapshot(dom.view),
+      sidebarMount: elementSnapshot(dom.sidebarMount),
+      topbarMount: elementSnapshot(dom.topbarMount),
+      tablehead: elementSnapshot(dom.tablehead),
+      tableheadContainer: elementSnapshot(dom.tableheadContainer),
+      loader: elementSnapshot(dom.loader),
     },
 
     lastRenderAt,
     lastDestroyAt,
-
     lastError,
 
-    lastEventKey:
-      redactSensitiveText(lastEventKey),
-
+    lastEventKey: redact(lastEventKey),
     lastEventAt,
+    lastEventAtIso: lastEventAt ? iso(lastEventAt) : "",
 
-    lastEventAtIso:
-      lastEventAt
-        ? safeIsoNow(lastEventAt)
-        : "",
-
-    debugBridgeReady:
-      Boolean(debugBridgeReady),
-
-    at:
-      safeIsoNow(),
+    debugReady,
+    at: iso(),
   });
 }
 
 /* =========================================================
-   LEGACY COMPAT OBJECT
+   EXPORT / DEBUG BRIDGE
 ========================================================= */
 
-export const LoginView =
-  Object.freeze({
-    version:
-      LOGIN_VIEW_BRIDGE_VERSION,
+export const LoginView = Object.freeze({
+  version: LOGIN_VIEW_BRIDGE_VERSION,
 
-    render,
-    init,
-    mount,
+  render,
+  init,
+  mount,
 
-    destroy,
-    unmount,
-    dispose,
-    teardown,
+  destroy,
+  unmount,
+  dispose,
+  teardown,
 
-    getSnapshot:
-      getLoginViewSnapshot,
-
-    getDebugSnapshot:
-      getLoginViewSnapshot,
-  });
-
-/* =========================================================
-   DEBUG BRIDGE
-========================================================= */
+  getSnapshot,
+  getDebugSnapshot: getSnapshot,
+});
 
 function exposeDebugBridge() {
   try {
     if (isBrowser()) {
-      window.LoginView =
-        window.LoginView ||
-        LoginView;
-
-      window[RUNTIME_KEY] =
-        LoginView;
+      window.LoginView = window.LoginView || LoginView;
+      window[RUNTIME_KEY] = LoginView;
     }
   } catch {}
 
   try {
-    safeDefineValue(
-      AppCore,
-      "LoginView",
-      LoginView
-    );
+    defineHidden(AppCore, "LoginView", LoginView);
   } catch {}
 
-  if (!debugBridgeReady) {
-    debugBridgeReady =
-      true;
+  if (!debugReady) {
+    debugReady = true;
 
-    safeEmit(
-      BRIDGE_EVENTS.debugReady,
+    emit(
+      EVENTS.debugReady,
       {
-        installed:
-          true,
+        installed: true,
       },
       {
-        dedupe:
-          false,
+        dedupe: false,
       }
     );
   }
@@ -3051,9 +1392,5 @@ function exposeDebugBridge() {
 }
 
 exposeDebugBridge();
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default LoginView;

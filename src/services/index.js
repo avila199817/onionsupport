@@ -11,6 +11,7 @@
    - Interceptores opcionales en http.interceptors.js.
    - Sin router, sin vistas, sin lógica de negocio.
    - Sin apiClient.js paralelo.
+   - Sin TDZ/serviceConfig before initialization.
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -22,7 +23,6 @@ import {
 
   isFn,
   safeObject,
-  safeArray,
   safeText,
   safeNumber,
   safeBoolean,
@@ -36,7 +36,6 @@ import {
   hasHeader,
   setHeader,
   deleteHeader,
-  sanitizeHeaders,
 
   redactHttpValue,
   sanitizeData,
@@ -93,13 +92,13 @@ import {
    VERSION
 ========================================================= */
 
-export const HTTP_SERVICE_VERSION = "18.0.0-clean-service";
+export const HTTP_SERVICE_VERSION = "18.0.1-config-tdz-fix";
 
 const SERVICE_NAME = "http";
 const SERVICE_SOURCE = "services/index.js";
 
 const DEFAULT_API_BASE = "https://api.onionit.net";
-const DEFAULT_TIMEOUT_MS = HTTP_CONFIG.timeout || 30_000;
+const DEFAULT_TIMEOUT_MS = safeNumber(HTTP_CONFIG?.timeout, 30_000);
 const UPLOAD_TIMEOUT_MS = 120_000;
 
 const AUTH_ME_CANONICAL = "/api/auth/me";
@@ -166,7 +165,13 @@ const serviceState = {
   lastError: null,
 };
 
-let serviceConfig = normalizeConfig();
+/*
+  Importante:
+  serviceConfig NO puede llamarse dentro de normalizeConfig()
+  antes de estar inicializado.
+*/
+let serviceConfig = null;
+let tokenProvider = null;
 
 /* =========================================================
    BASIC HELPERS
@@ -185,14 +190,6 @@ function nextRequestId() {
   return `http_${nowMs()}_${serviceState.requestSeq}`;
 }
 
-function getBaseOrigin() {
-  if (isBrowser() && window.location?.origin) {
-    return window.location.origin;
-  }
-
-  return "http://localhost";
-}
-
 function isAbsoluteUrl(value = "") {
   return /^[a-z][a-z\d+.-]*:\/\//i.test(safeText(value, ""));
 }
@@ -205,20 +202,59 @@ function safeRedact(value = "") {
   }
 }
 
+function getCoreConfig() {
+  return AppCore?.config || {};
+}
+
+function getCurrentConfigBase() {
+  return serviceConfig || HTTP_CONFIG || {};
+}
+
+function safeWarn(...args) {
+  const safeArgs = args.map((item) => sanitizeData(item));
+
+  try {
+    AppCore?.utils?.warn?.("[HTTP Service]", ...safeArgs);
+    return;
+  } catch {}
+
+  try {
+    if (serviceConfig?.debug || AppCore?.config?.debugHttpService) {
+      console.warn("[HTTP Service]", ...safeArgs);
+    }
+  } catch {}
+}
+
+function safeConsoleError(...args) {
+  const safeArgs = args.map((item) => sanitizeData(item));
+
+  try {
+    AppCore?.utils?.error?.("[HTTP Service]", ...safeArgs);
+    return;
+  } catch {}
+
+  try {
+    if (serviceConfig?.debug || AppCore?.config?.debugHttpService) {
+      console.error("[HTTP Service]", ...safeArgs);
+    }
+  } catch {}
+}
+
 function safeEmit(name = "", payload = {}, requestConfig = {}) {
   const eventName = safeText(name, "");
 
   if (!eventName) return false;
 
   const cfg = safeObject(requestConfig);
+  const cfgBase = getCurrentConfigBase();
 
   const shouldEmit =
     cfg.emitEvents !== false &&
     (
       cfg.emitLifecycleEvents === true ||
       cfg.debugHttpEvents === true ||
-      serviceConfig.emitLifecycleEvents === true ||
-      serviceConfig.debug === true ||
+      cfgBase.emitLifecycleEvents === true ||
+      cfgBase.debug === true ||
       AppCore?.config?.diagnostics?.httpLifecycleEvents === true ||
       AppCore?.config?.debugHttpService === true
     );
@@ -240,36 +276,6 @@ function safeEmit(name = "", payload = {}, requestConfig = {}) {
   } catch {
     return false;
   }
-}
-
-function safeWarn(...args) {
-  const safeArgs = args.map((item) => sanitizeData(item));
-
-  try {
-    AppCore?.utils?.warn?.("[HTTP Service]", ...safeArgs);
-    return;
-  } catch {}
-
-  try {
-    if (serviceConfig.debug || AppCore?.config?.debugHttpService) {
-      console.warn("[HTTP Service]", ...safeArgs);
-    }
-  } catch {}
-}
-
-function safeConsoleError(...args) {
-  const safeArgs = args.map((item) => sanitizeData(item));
-
-  try {
-    AppCore?.utils?.error?.("[HTTP Service]", ...safeArgs);
-    return;
-  } catch {}
-
-  try {
-    if (serviceConfig.debug || AppCore?.config?.debugHttpService) {
-      console.error("[HTTP Service]", ...safeArgs);
-    }
-  } catch {}
 }
 
 /* =========================================================
@@ -306,13 +312,30 @@ function normalizeApiBase(base = "") {
   }
 }
 
+function resolveCredentials(next = {}, coreConfig = {}, merged = {}) {
+  if (next.defaultCredentials || next.credentials) {
+    return next.defaultCredentials || next.credentials;
+  }
+
+  if (coreConfig.api?.defaultCredentials || coreConfig.api?.credentials) {
+    return coreConfig.api.defaultCredentials || coreConfig.api.credentials;
+  }
+
+  if (coreConfig.api?.withCredentials === false) {
+    return "omit";
+  }
+
+  return merged.defaultCredentials || "include";
+}
+
 function normalizeConfig(patch = {}) {
-  const coreConfig = AppCore?.config || {};
+  const coreConfig = getCoreConfig();
+  const current = getCurrentConfigBase();
   const next = safeObject(patch);
 
   const merged = {
     ...HTTP_CONFIG,
-    ...serviceConfig,
+    ...current,
     ...next,
   };
 
@@ -356,7 +379,7 @@ function normalizeConfig(patch = {}) {
         coreConfig.requestRetries ??
         coreConfig.api?.retries ??
         merged.retries,
-      HTTP_CONFIG.retries
+      safeNumber(HTTP_CONFIG?.retries, 0)
     ),
 
     retryDelay: safeNumber(
@@ -365,7 +388,7 @@ function normalizeConfig(patch = {}) {
         coreConfig.requestRetryDelayMs ??
         coreConfig.api?.retryDelayMs ??
         merged.retryDelay,
-      HTTP_CONFIG.retryDelay
+      safeNumber(HTTP_CONFIG?.retryDelay, 350)
     ),
 
     retryMaxDelay: safeNumber(
@@ -374,37 +397,30 @@ function normalizeConfig(patch = {}) {
         coreConfig.requestRetryMaxDelayMs ??
         coreConfig.api?.retryMaxDelayMs ??
         merged.retryMaxDelay,
-      HTTP_CONFIG.retryMaxDelay
+      safeNumber(HTTP_CONFIG?.retryMaxDelay, 4000)
     ),
 
-    defaultCredentials:
-      next.defaultCredentials ??
-      next.credentials ??
-      coreConfig.api?.defaultCredentials ??
-      coreConfig.api?.credentials ??
-      coreConfig.api?.withCredentials === false
-        ? "omit"
-        : "include",
+    defaultCredentials: resolveCredentials(next, coreConfig, merged),
 
     defaultUseLoader: safeBoolean(
       next.defaultUseLoader ??
         next.useLoader ??
         merged.defaultUseLoader,
-      HTTP_CONFIG.defaultUseLoader
+      safeBoolean(HTTP_CONFIG?.defaultUseLoader, false)
     ),
 
     autoRefreshOn401: safeBoolean(
       next.autoRefreshOn401 ??
         next.autoRefresh ??
         merged.autoRefreshOn401,
-      HTTP_CONFIG.autoRefreshOn401
+      safeBoolean(HTTP_CONFIG?.autoRefreshOn401, true)
     ),
 
     autoLogoutOn401: safeBoolean(
       next.autoLogoutOn401 ??
         next.autoLogout ??
         merged.autoLogoutOn401,
-      HTTP_CONFIG.autoLogoutOn401
+      safeBoolean(HTTP_CONFIG?.autoLogoutOn401, true)
     ),
 
     emitLifecycleEvents: safeBoolean(
@@ -419,6 +435,11 @@ function normalizeConfig(patch = {}) {
       true
     ),
 
+    defaultResponseType:
+      next.defaultResponseType ||
+      merged.defaultResponseType ||
+      "auto",
+
     debug: safeBoolean(
       next.debug ??
         coreConfig.debugHttpService ??
@@ -427,6 +448,11 @@ function normalizeConfig(patch = {}) {
     ),
   };
 }
+
+/*
+  Inicialización segura tras declarar normalizeConfig().
+*/
+serviceConfig = normalizeConfig({});
 
 export function configure(patch = {}) {
   serviceConfig = normalizeConfig(patch);
@@ -623,8 +649,6 @@ export function redact(value = "") {
 /* =========================================================
    AUTH / TOKEN HELPERS
 ========================================================= */
-
-let tokenProvider = null;
 
 export function setTokenProvider(provider = null) {
   tokenProvider = isFn(provider) ? provider : null;
@@ -839,7 +863,9 @@ function buildRequestConfig(method = "GET", path = "/", options = {}) {
   const finalMethod = normalizeMethod(method);
   const finalPath = normalizeServicePath(path || opts.path || opts.url || "/");
   const requestId = opts.requestId || nextRequestId();
+
   const publicRequest = shouldBePublic(finalPath, opts);
+
   const authEnabled = opts.auth === false
     ? false
     : !publicRequest && opts.skipAuth !== true;
@@ -885,7 +911,6 @@ function buildRequestConfig(method = "GET", path = "/", options = {}) {
     apiBase: opts.apiBase || serviceConfig.apiBase,
 
     requestId,
-
     headers,
 
     body: isBodylessMethod(finalMethod)
@@ -1535,29 +1560,29 @@ export function del(path, bodyOrOptions = {}, maybeOptions = undefined) {
   return request("DELETE", path, safeObject(bodyOrOptions));
 }
 
-export function raw(path, options = {}) {
+export function raw(path, requestOptions = {}) {
   return request("GET", path, {
-    ...safeObject(options),
+    ...safeObject(requestOptions),
     raw: true,
     responseType: "raw",
   });
 }
 
-export function upload(path, body, options = {}) {
-  return request(options.method || "POST", path, {
-    ...safeObject(options),
+export function upload(path, body, requestOptions = {}) {
+  return request(requestOptions.method || "POST", path, {
+    ...safeObject(requestOptions),
     body,
     upload: true,
-    timeout: options.timeout || options.timeoutMs || UPLOAD_TIMEOUT_MS,
+    timeout: requestOptions.timeout || requestOptions.timeoutMs || UPLOAD_TIMEOUT_MS,
   });
 }
 
-export function download(path, options = {}) {
+export function download(path, requestOptions = {}) {
   return request("GET", path, {
-    ...safeObject(options),
+    ...safeObject(requestOptions),
     download: true,
-    responseType: options.responseType || "blob",
-    timeout: options.timeout || options.timeoutMs || UPLOAD_TIMEOUT_MS,
+    responseType: requestOptions.responseType || "blob",
+    timeout: requestOptions.timeout || requestOptions.timeoutMs || UPLOAD_TIMEOUT_MS,
   });
 }
 
@@ -1565,7 +1590,7 @@ export function download(path, options = {}) {
    AUTH CONVENIENCE
 ========================================================= */
 
-export async function login(body = {}, options = {}) {
+export async function login(body = {}, requestOptions = {}) {
   const response = await post(
     "/api/auth/login",
     body,
@@ -1577,7 +1602,7 @@ export async function login(body = {}, options = {}) {
       noAutoRefresh: true,
       noAutoLogout: true,
       captureAuth: true,
-      ...safeObject(options),
+      ...safeObject(requestOptions),
     }
   );
 
@@ -1589,7 +1614,7 @@ export async function login(body = {}, options = {}) {
   return response;
 }
 
-export function me(options = {}) {
+export function me(requestOptions = {}) {
   return get(
     AUTH_ME_CANONICAL,
     {
@@ -1598,12 +1623,12 @@ export function me(options = {}) {
       skipAuth: false,
       noAuthHeader: false,
       captureAuth: true,
-      ...safeObject(options),
+      ...safeObject(requestOptions),
     }
   );
 }
 
-export async function refresh(body = {}, options = {}) {
+export async function refresh(body = {}, requestOptions = {}) {
   const response = await post(
     "/api/auth/refresh",
     body,
@@ -1615,7 +1640,7 @@ export async function refresh(body = {}, options = {}) {
       noAutoRefresh: true,
       noAutoLogout: true,
       captureAuth: true,
-      ...safeObject(options),
+      ...safeObject(requestOptions),
     }
   );
 
@@ -1627,26 +1652,26 @@ export async function refresh(body = {}, options = {}) {
   return response;
 }
 
-export async function refreshSession(options = {}) {
+export async function refreshSession(requestOptions = {}) {
   try {
     if (isFn(Auth?.refreshSession)) {
       return await Auth.refreshSession(Auth.session || undefined, {
         reason: "http-service-refresh",
-        ...safeObject(options),
+        ...safeObject(requestOptions),
       });
     }
   } catch {}
 
   return refresh(
-    options.body || {},
+    requestOptions.body || {},
     {
-      ...safeObject(options),
+      ...safeObject(requestOptions),
       noAutoRefresh: true,
     }
   );
 }
 
-export async function logout(body = {}, options = {}) {
+export async function logout(body = {}, requestOptions = {}) {
   let response = null;
   let serverFailed = false;
 
@@ -1661,13 +1686,13 @@ export async function logout(body = {}, options = {}) {
         skipAuthRefresh: true,
         _skipAuthRefresh: true,
         noAutoLogout: true,
-        ...safeObject(options),
+        ...safeObject(requestOptions),
       }
     );
   } catch (error) {
     serverFailed = true;
 
-    if (options.throwOnServerError === true) {
+    if (requestOptions.throwOnServerError === true) {
       throw error;
     }
   }
@@ -1690,16 +1715,16 @@ export async function logout(body = {}, options = {}) {
    INTERCEPTORS API
 ========================================================= */
 
-function useRequestInterceptor(handler, options = {}) {
-  return useRequest(interceptors, handler, options);
+function useRequestInterceptor(handler, interceptorOptions = {}) {
+  return useRequest(interceptors, handler, interceptorOptions);
 }
 
-function useResponseInterceptor(handler, options = {}) {
-  return useResponse(interceptors, handler, options);
+function useResponseInterceptor(handler, interceptorOptions = {}) {
+  return useResponse(interceptors, handler, interceptorOptions);
 }
 
-function useErrorInterceptor(handler, options = {}) {
-  return useError(interceptors, handler, options);
+function useErrorInterceptor(handler, interceptorOptions = {}) {
+  return useError(interceptors, handler, interceptorOptions);
 }
 
 function eject(ref, type = "") {
@@ -1756,6 +1781,7 @@ export function attachToAppCore() {
         aliases: ["http", "ApiClient", "apiClient", "api"],
         source: SERVICE_SOURCE,
         emit: false,
+        silent: true,
       }
     );
   } catch {}
@@ -1810,7 +1836,7 @@ export function init(patch = {}) {
   return Http;
 }
 
-export function install(AppCoreRef = AppCore, options = {}) {
+export function install(AppCoreRef = AppCore, installOptions = {}) {
   if (AppCoreRef && AppCoreRef !== AppCore) {
     try {
       AppCoreRef.Http = Http;
@@ -1825,16 +1851,16 @@ export function install(AppCoreRef = AppCore, options = {}) {
     } catch {}
   }
 
-  return init(options);
+  return init(installOptions);
 }
 
-export function resetRuntime(options = {}) {
+export function resetRuntime(resetOptions = {}) {
   resetPendingRequests(
     AppCore,
     AppCore?.state,
     {
       source: "http.service:reset",
-      ...safeObject(options),
+      ...safeObject(resetOptions),
     }
   );
 
@@ -1843,7 +1869,7 @@ export function resetRuntime(options = {}) {
     AppCore?.state,
     {
       source: "http.service:reset-runtime",
-      ...safeObject(options),
+      ...safeObject(resetOptions),
     }
   );
 
@@ -1910,8 +1936,8 @@ export function getState() {
   return getSnapshot();
 }
 
-export function getSnapshot(options = {}) {
-  const deep = options?.deep === true;
+export function getSnapshot(snapshotOptions = {}) {
+  const deep = snapshotOptions?.deep === true;
 
   return sanitizeData({
     version: HTTP_SERVICE_VERSION,

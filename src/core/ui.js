@@ -2,39 +2,13 @@
    Onion SPA - Core UI
    Archivo: src/core/ui.js
 
-   ONION SUPPORT · CORE UI
-   GLOBAL UI HELPERS · USER VISUAL SYNC · AVATAR SAFE · 16/10
-
-   Responsabilidades:
-   - helpers UI globales del Core
-   - sincronizar título documento
-   - limpiar contenedores dinámicos shell
-   - sincronizar bloque visual usuario
-   - refresco reactivo con i18n
-   - pintar avatar robusto en sidebar/topbar sin romper fallback
-
-   Candados:
-   - no destruir la estructura DOM del avatar del sidebar
-   - respetar #sidebarAvatarImage y #sidebarAvatarFallback
-   - soportar avatarRoot como contenedor o como <img>
-   - si falta root, resolverlo desde imagen/fallback existentes
-   - evitar innerHTML/textContent sobre root del avatar
-   - evitar title nativo en avatar/nombre
-   - no forzar ni borrar data-tooltip custom
-   - no pintar usuario fantasma si state.authenticated=false
-   - no emitir avatarUrl sensible/SAS en eventos
-   - no duplicar nodos avatar
-   - fallback consistente
-   - title reactivo robusto
-   - sync UI segura aunque falten nodos
-   - browser/server safe
-   - recache DOM ligero si UI montó tarde
-   - eventos consistentes
-   - snapshots útiles
-   - protección contra onload/onerror obsoletos
-   - sin innerHTML
-   - sin estilos inline
-   - sin imports duplicados
+   CORE UI · CLEAN
+   - document title + topbar title
+   - dynamic containers cleanup
+   - user/sidebar/topbar sync
+   - avatar seguro sin innerHTML ni inline styles
+   - no usuario fantasma si authenticated=false
+   - eventos/snapshot sin avatarUrl/tokens reales
 ========================================================= */
 
 import { config } from "./config.js";
@@ -51,192 +25,182 @@ import {
    CONSTANTS
 ========================================================= */
 
-const UI_VERSION = "16.0.0-avatar-safe";
+export const UI_VERSION = "18.0.0-clean";
 
 const DEFAULT_USER_NAME = "Usuario";
 const DEFAULT_AVATAR_TEXT = "ON";
 const DEFAULT_TITLE = "Onion Support";
 
-const USER_UI_EVENT = "app:user-ui:sync";
-const TITLE_EVENT = "app:title:change";
-const DYNAMIC_CLEARED_EVENT = "app:dynamic:cleared";
-const AVATAR_LOAD_EVENT = "app:user-ui:avatar-load";
-const AVATAR_ERROR_EVENT = "app:user-ui:avatar-error";
-const AVATAR_FALLBACK_EVENT = "app:user-ui:avatar-fallback";
+export const USER_UI_EVENT = "app:user-ui:sync";
+export const TITLE_EVENT = "app:title:change";
+export const DYNAMIC_CLEARED_EVENT = "app:dynamic:cleared";
+export const AVATAR_LOAD_EVENT = "app:user-ui:avatar-load";
+export const AVATAR_ERROR_EVENT = "app:user-ui:avatar-error";
+export const AVATAR_FALLBACK_EVENT = "app:user-ui:avatar-fallback";
+
 const USER_RECACHE_EVENT = "app:user-ui:recache";
 const USER_DEFERRED_SYNC_EVENT = "app:user-ui:deferred-sync";
 
-const AVATAR_RENDER_TOKENS = new WeakMap();
+const AVATAR_TOKENS = new WeakMap();
 
 let deferredUserSyncScheduled = false;
 
-const SIDEBAR_SCOPE_SELECTORS = Object.freeze([
-  "#sidebar",
-  "#app-sidebar",
-  "#sidebar-mount",
-  "[data-sidebar-root]",
-  "[data-sidebar]",
-  "[data-sidebar-mount]",
-  ".sidebar",
-  ".app-sidebar",
-]);
-
-const TOPBAR_SCOPE_SELECTORS = Object.freeze([
-  "#topbar",
-  "#app-topbar",
-  "#topbar-mount",
-  "[data-topbar-root]",
-  "[data-topbar]",
-  "[data-topbar-mount]",
-  ".topbar",
-  ".app-topbar",
-]);
-
-const AVATAR_SELECTORS = Object.freeze({
-  sidebarRoot: Object.freeze([
-    "#sidebar-avatar",
-    "#sidebarAvatar",
-    "[data-sidebar-avatar='true']",
-    "[data-sidebar-avatar]",
-    "[data-user-avatar='sidebar']",
-    ".sidebar-avatar",
-    ".sidebar-user-avatar",
+const SCOPE_SELECTORS = Object.freeze({
+  sidebar: Object.freeze([
+    "#app-sidebar",
+    "#sidebar",
+    "#sidebar-mount",
+    "[data-sidebar-root]",
+    "[data-sidebar]",
+    "[data-sidebar-mount]",
+    ".sidebar",
+    ".app-sidebar",
   ]),
 
-  topbarRoot: Object.freeze([
-    "#topbar-avatar",
-    "#topbarAvatar",
-    "[data-topbar-avatar='true']",
-    "[data-topbar-avatar]",
-    "[data-user-avatar='topbar']",
-    "[data-user-avatar-topbar]",
-    ".topbar-avatar",
-    ".topbar-user-avatar",
-  ]),
-
-  sidebarImage: Object.freeze([
-    "#sidebarAvatarImage",
-    "#sidebar-avatar-image",
-    "img[data-sidebar-avatar-image='true']",
-    "img[data-sidebar-avatar-image]",
-    "img[data-avatar-image='sidebar']",
-    ".sidebar-avatar img",
-    ".sidebar-avatar__image",
-    ".sidebar-user-avatar img",
-  ]),
-
-  topbarImage: Object.freeze([
-    "#topbarAvatarImage",
-    "#topbar-avatar-image",
-    "img[data-topbar-avatar-image='true']",
-    "img[data-topbar-avatar-image]",
-    "img[data-avatar-image='topbar']",
-    ".topbar-avatar img",
-    ".topbar-avatar__image",
-    ".topbar-user-avatar img",
-  ]),
-
-  sidebarFallback: Object.freeze([
-    "#sidebarAvatarFallback",
-    "#sidebar-avatar-fallback",
-    "[data-sidebar-avatar-fallback='true']",
-    "[data-sidebar-avatar-fallback]",
-    "[data-avatar-fallback='sidebar']",
-    ".sidebar-avatar-fallback",
-    ".sidebar-avatar__fallback",
-    ".sidebar-user-avatar-fallback",
-  ]),
-
-  topbarFallback: Object.freeze([
-    "#topbarAvatarFallback",
-    "#topbar-avatar-fallback",
-    "[data-topbar-avatar-fallback='true']",
-    "[data-topbar-avatar-fallback]",
-    "[data-avatar-fallback='topbar']",
-    ".topbar-avatar-fallback",
-    ".topbar-avatar__fallback",
-    ".topbar-user-avatar-fallback",
+  topbar: Object.freeze([
+    "#app-topbar",
+    "#topbar",
+    "#topbar-mount",
+    "[data-topbar-root]",
+    "[data-topbar]",
+    "[data-topbar-mount]",
+    ".topbar",
+    ".app-topbar",
   ]),
 });
 
-const USER_NAME_SELECTORS = Object.freeze([
-  "#sidebar-name",
-  "#sidebarName",
-  "[data-sidebar-name='true']",
-  "[data-sidebar-name]",
-  "[data-user-name='sidebar']",
-  ".sidebar-name",
-  ".sidebar-user-name",
-]);
+const USER_SELECTORS = Object.freeze({
+  sidebarName: Object.freeze([
+    "#sidebar-name",
+    "#sidebarName",
+    "[data-sidebar-name]",
+    "[data-user-name='sidebar']",
+    ".sidebar-name",
+    ".sidebar-user-name",
+  ]),
 
-const USER_EMAIL_SELECTORS = Object.freeze([
-  "#sidebar-email",
-  "#sidebarEmail",
-  "[data-sidebar-email='true']",
-  "[data-sidebar-email]",
-  "[data-user-email='sidebar']",
-  ".sidebar-email",
-  ".sidebar-user-email",
-]);
+  sidebarEmail: Object.freeze([
+    "#sidebar-email",
+    "#sidebarEmail",
+    "[data-sidebar-email]",
+    "[data-user-email='sidebar']",
+    ".sidebar-email",
+    ".sidebar-user-email",
+  ]),
 
-const USER_ROLE_SELECTORS = Object.freeze([
-  "#sidebar-role",
-  "#sidebarRole",
-  "[data-sidebar-role='true']",
-  "[data-sidebar-role]",
-  "[data-user-role='sidebar']",
-  ".sidebar-role",
-  ".sidebar-user-role",
-]);
+  sidebarRole: Object.freeze([
+    "#sidebar-role",
+    "#sidebarRole",
+    "[data-sidebar-role]",
+    "[data-user-role='sidebar']",
+    ".sidebar-role",
+    ".sidebar-user-role",
+  ]),
 
-const TOPBAR_USER_NAME_SELECTORS = Object.freeze([
-  "#topbar-user-name",
-  "#topbarUserName",
-  "[data-topbar-user-name='true']",
-  "[data-topbar-user-name]",
-  "[data-user-name='topbar']",
-  "[data-user-name-topbar]",
-  ".topbar-user-name",
-]);
+  topbarUserName: Object.freeze([
+    "#topbar-user-name",
+    "#topbarUserName",
+    "[data-topbar-user-name]",
+    "[data-user-name='topbar']",
+    "[data-user-name-topbar]",
+    ".topbar-user-name",
+  ]),
 
-const USER_TOGGLE_SELECTORS = Object.freeze([
-  "#userToggle",
-  "#user-toggle",
-  "[data-user-toggle='true']",
-  "[data-user-toggle]",
-  "[data-user-menu-toggle]",
-]);
+  userToggle: Object.freeze([
+    "#userToggle",
+    "#user-toggle",
+    "[data-user-toggle]",
+    "[data-user-menu-toggle]",
+  ]),
 
-const USER_DROPDOWN_SELECTORS = Object.freeze([
-  "#userDropdown",
-  "#user-dropdown",
-  "[data-user-dropdown='true']",
-  "[data-user-dropdown]",
-  "[data-user-menu]",
-]);
+  userDropdown: Object.freeze([
+    "#userDropdown",
+    "#user-dropdown",
+    "[data-user-dropdown]",
+    "[data-user-menu]",
+  ]),
 
-const LOGOUT_SELECTORS = Object.freeze([
-  "#logoutBtn",
-  "#logout-button",
-  "#logout-btn",
-  "[data-logout-button='true']",
-  "[data-logout-button]",
-  "[data-logout]",
-  "[data-action='logout']",
-]);
+  logoutBtn: Object.freeze([
+    "#logoutBtn",
+    "#logout-button",
+    "#logout-btn",
+    "[data-logout-button]",
+    "[data-logout]",
+    "[data-action='logout']",
+  ]),
 
-const TOPBAR_TITLE_SELECTORS = Object.freeze([
-  "#topbar-title",
-  "[data-topbar-title='true']",
-  "[data-topbar-title]",
-  ".topbar-title",
-]);
+  topbarTitle: Object.freeze([
+    "#topbar-title",
+    "[data-topbar-title]",
+    ".topbar-title",
+  ]),
+});
 
-const DYNAMIC_CONTAINER_SELECTORS = Object.freeze({
+const AVATAR_SELECTORS = Object.freeze({
+  sidebar: Object.freeze({
+    root: Object.freeze([
+      "#sidebar-avatar",
+      "#sidebarAvatar",
+      "[data-sidebar-avatar]",
+      "[data-user-avatar='sidebar']",
+      ".sidebar-avatar",
+      ".sidebar-user-avatar",
+    ]),
+    image: Object.freeze([
+      "#sidebarAvatarImage",
+      "#sidebar-avatar-image",
+      "img[data-sidebar-avatar-image]",
+      "img[data-avatar-image='sidebar']",
+      ".sidebar-avatar img",
+      ".sidebar-avatar__image",
+      ".sidebar-user-avatar img",
+    ]),
+    fallback: Object.freeze([
+      "#sidebarAvatarFallback",
+      "#sidebar-avatar-fallback",
+      "[data-sidebar-avatar-fallback]",
+      "[data-avatar-fallback='sidebar']",
+      ".sidebar-avatar-fallback",
+      ".sidebar-avatar__fallback",
+      ".sidebar-user-avatar-fallback",
+    ]),
+  }),
+
+  topbar: Object.freeze({
+    root: Object.freeze([
+      "#topbar-avatar",
+      "#topbarAvatar",
+      "[data-topbar-avatar]",
+      "[data-user-avatar='topbar']",
+      "[data-user-avatar-topbar]",
+      ".topbar-avatar",
+      ".topbar-user-avatar",
+    ]),
+    image: Object.freeze([
+      "#topbarAvatarImage",
+      "#topbar-avatar-image",
+      "img[data-topbar-avatar-image]",
+      "img[data-avatar-image='topbar']",
+      ".topbar-avatar img",
+      ".topbar-avatar__image",
+      ".topbar-user-avatar img",
+    ]),
+    fallback: Object.freeze([
+      "#topbarAvatarFallback",
+      "#topbar-avatar-fallback",
+      "[data-topbar-avatar-fallback]",
+      "[data-avatar-fallback='topbar']",
+      ".topbar-avatar-fallback",
+      ".topbar-avatar__fallback",
+      ".topbar-user-avatar-fallback",
+    ]),
+  }),
+});
+
+const DYNAMIC_SELECTORS = Object.freeze({
   topbarViewContainer: Object.freeze([
     "#topbarview-container",
     "#topbar-view-container",
-    "[data-topbar-view-container='true']",
     "[data-topbar-view-container]",
     ".topbar-view-container",
   ]),
@@ -244,7 +208,6 @@ const DYNAMIC_CONTAINER_SELECTORS = Object.freeze({
   tableheadContainer: Object.freeze([
     "#tablehead-container",
     "#table-head-container",
-    "[data-tablehead-container='true']",
     "[data-tablehead-container]",
     "[data-table-head-container]",
     ".tablehead-container",
@@ -253,10 +216,10 @@ const DYNAMIC_CONTAINER_SELECTORS = Object.freeze({
   tablehead: Object.freeze([
     "#table-head",
     "#tablehead",
-    ".table-head",
-    ".tablehead",
     "[data-tablehead]",
     "[data-table-head]",
+    ".table-head",
+    ".tablehead",
   ]),
 
   viewContainer: Object.freeze([
@@ -264,7 +227,6 @@ const DYNAMIC_CONTAINER_SELECTORS = Object.freeze({
     "#router-view",
     "#app-view",
     "[data-view-root]",
-    "[data-view-container='true']",
     "[data-view-container]",
     "[data-router-view]",
     "[data-router-outlet]",
@@ -281,32 +243,23 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isObject(value) {
-  return value !== null && typeof value === "object";
+function isFunction(value) {
+  return typeof value === "function";
 }
 
-function isPlainObject(value) {
+function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function isFunction(value) {
-  return typeof value === "function";
+function safeObject(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
 }
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
 
   const text = String(value).trim();
-
   return text || fallback;
-}
-
-function safeObject(value, fallback = {}) {
-  return isPlainObject(value) ? value : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
 }
 
 function toArray(value) {
@@ -314,17 +267,6 @@ function toArray(value) {
   if (value instanceof Set) return Array.from(value);
   if (value === null || value === undefined) return [];
   return [value];
-}
-
-function unique(values = []) {
-  return Array.from(
-    new Set(
-      toArray(values)
-        .flat(Infinity)
-        .map((item) => safeText(item, ""))
-        .filter(Boolean)
-    )
-  );
 }
 
 function safeBool(value, fallback = false) {
@@ -343,7 +285,7 @@ function safeBool(value, fallback = false) {
   return Boolean(fallback);
 }
 
-function safeNowIso() {
+function nowIso() {
   try {
     return new Date().toISOString();
   } catch {
@@ -359,143 +301,12 @@ function safeRedact(value = "") {
   }
 }
 
-function shouldRedactPayloadKey(keyHint = "") {
-  const key = safeText(keyHint, "");
-
-  if (!key) return false;
-
-  if (/^has[A-Z].*Url$/.test(key)) return false;
-  if (/^has[A-Z]/.test(key)) return false;
-  if (/^is[A-Z]/.test(key)) return false;
-  if (/^can[A-Z]/.test(key)) return false;
-
-  return /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|avatarUrl|avatar_url|signedUrl|signed_url|sas|blobUrl|downloadUrl|viewUrl/i.test(key);
-}
-
-function sanitizeEventPayload(value, depth = 0, keyHint = "") {
-  if (depth > 4) return "[depth-limit]";
-
-  if (shouldRedactPayloadKey(keyHint)) {
-    return value ? "***" : null;
-  }
-
-  if (value === null || value === undefined) return value;
-
-  if (typeof value === "string") return safeRedact(value);
-  if (typeof value === "number" || typeof value === "boolean") return value;
-  if (typeof value === "bigint") return String(value);
-  if (typeof value === "function") return "[function]";
-
-  if (value instanceof Error) {
-    return {
-      name: value.name || "Error",
-      message: safeRedact(value.message || "Error"),
-      stack: value.stack ? "[stack]" : null,
-    };
-  }
-
-  if (Array.isArray(value)) {
-    return value.slice(0, 80).map((item) =>
-      sanitizeEventPayload(item, depth + 1, keyHint)
-    );
-  }
-
-  if (isPlainObject(value)) {
-    const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 120)) {
-      output[key] = sanitizeEventPayload(item, depth + 1, key);
-    }
-
-    return output;
-  }
-
+function removeNativeTooltip(el) {
   try {
-    return safeRedact(String(value));
-  } catch {
-    return "[unserializable]";
-  }
-}
-
-function safeEmit(events, eventName, payload = {}) {
-  const name = safeText(eventName, "");
-
-  if (!name) return false;
-
-  try {
-    events?.emit?.(name, sanitizeEventPayload(payload));
-    return true;
+    el?.removeAttribute?.("title");
   } catch {}
 
-  return false;
-}
-
-function safeSetText(el, value = "") {
-  if (!el) return false;
-
-  try {
-    const next = safeText(value, "");
-
-    if (el.textContent !== next) el.textContent = next;
-
-    return true;
-  } catch {}
-
-  return false;
-}
-
-function safeSetAttr(el, name, value) {
-  if (!el || !name) return false;
-
-  try {
-    if (value === null || value === undefined || value === "") {
-      el.removeAttribute(name);
-    } else if (el.getAttribute(name) !== String(value)) {
-      el.setAttribute(name, String(value));
-    }
-
-    return true;
-  } catch {}
-
-  return false;
-}
-
-function safeRemoveAttr(el, name) {
-  if (!el || !name) return false;
-
-  try {
-    el.removeAttribute(name);
-    return true;
-  } catch {}
-
-  return false;
-}
-
-function safeToggleClass(el, className, force) {
-  if (!el || !className) return false;
-
-  try {
-    el.classList.toggle(className, Boolean(force));
-    return true;
-  } catch {}
-
-  return false;
-}
-
-function safeDatasetSet(el, key, value) {
-  if (!el || !key) return false;
-
-  try {
-    if (value === null || value === undefined || value === "") {
-      delete el.dataset[key];
-    } else if (el.dataset[key] !== String(value)) {
-      el.dataset[key] = String(value);
-    }
-
-    return true;
-  } catch {}
-
-  return false;
+  return true;
 }
 
 function isConnected(el) {
@@ -506,6 +317,7 @@ function isConnected(el) {
       isBrowser() &&
       (
         el === document ||
+        el === window ||
         el === document.documentElement ||
         el === document.body
       )
@@ -525,25 +337,39 @@ function isConnected(el) {
   return false;
 }
 
+function isImageElement(el) {
+  try {
+    return safeText(el?.tagName, "").toLowerCase() === "img";
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   SAFE DOM
+========================================================= */
+
 function queryFirst(selectors = [], root = null) {
   if (!isBrowser()) return null;
 
   const scope = root || document;
 
   for (const selector of toArray(selectors)) {
-    const cleanSelector = safeText(selector, "");
+    const clean = safeText(selector, "");
 
-    if (!cleanSelector) continue;
+    if (!clean) continue;
 
     try {
-      if (cleanSelector.startsWith("#") && scope === document) {
-        const foundById = document.getElementById(cleanSelector.slice(1));
-
-        if (foundById) return foundById;
+      if (
+        scope === document &&
+        clean.startsWith("#") &&
+        !/[ .:[>+~,]/.test(clean.slice(1))
+      ) {
+        const byId = document.getElementById(clean.slice(1));
+        if (byId) return byId;
       }
 
-      const found = scope.querySelector?.(cleanSelector);
-
+      const found = scope.querySelector?.(clean);
       if (found) return found;
     } catch {}
   }
@@ -558,15 +384,15 @@ function queryAll(selectors = [], root = null) {
   const output = [];
 
   for (const selector of toArray(selectors)) {
-    const cleanSelector = safeText(selector, "");
+    const clean = safeText(selector, "");
 
-    if (!cleanSelector) continue;
+    if (!clean) continue;
 
     try {
-      const nodes = Array.from(scope.querySelectorAll?.(cleanSelector) || []);
+      const nodes = Array.from(scope.querySelectorAll?.(clean) || []);
 
       for (const node of nodes) {
-        if (!output.includes(node)) output.push(node);
+        if (node && !output.includes(node)) output.push(node);
       }
     } catch {}
   }
@@ -579,92 +405,152 @@ function queryFirstInScopes(selectors = [], scopes = []) {
     if (!scope || !isConnected(scope)) continue;
 
     const found = queryFirst(selectors, scope);
-
     if (found) return found;
   }
 
   return queryFirst(selectors);
 }
 
-function getScopeNodes(dom, kind = "sidebar") {
+function cacheNode(dom, key, node) {
+  if (!dom || !key || !node) return node || null;
+
+  try {
+    dom[key] = node;
+    dom[`${key}El`] = node;
+  } catch {}
+
+  return node;
+}
+
+function cachedNode(dom, key) {
+  const node = dom?.[key] || dom?.[`${key}El`] || null;
+  return node && isConnected(node) ? node : null;
+}
+
+function getScopes(dom, type = "sidebar") {
   if (!isBrowser()) return [];
 
-  const nodes = [];
+  const raw =
+    type === "topbar"
+      ? [
+          dom?.topbar,
+          dom?.topbarRoot,
+          dom?.topbarMount,
+          queryFirst(SCOPE_SELECTORS.topbar),
+        ]
+      : [
+          dom?.sidebar,
+          dom?.sidebarRoot,
+          dom?.sidebarMount,
+          queryFirst(SCOPE_SELECTORS.sidebar),
+        ];
 
-  if (kind === "sidebar") {
-    nodes.push(
-      dom?.sidebar,
-      dom?.sidebarRoot,
-      dom?.sidebarMount,
-      queryFirst(SIDEBAR_SCOPE_SELECTORS)
-    );
-  } else if (kind === "topbar") {
-    nodes.push(
-      dom?.topbar,
-      dom?.topbarRoot,
-      dom?.topbarMount,
-      queryFirst(TOPBAR_SCOPE_SELECTORS)
-    );
-  }
-
-  return nodes.filter((node, index, arr) =>
+  return raw.filter((node, index, arr) =>
     node &&
     isConnected(node) &&
     arr.indexOf(node) === index
   );
 }
 
-function resolveDomNode(dom, key, selectors = [], root = null) {
-  const cached = dom?.[key] || null;
+function resolveScopedNode(dom, key, selectors = [], scopeType = "") {
+  const cached = cachedNode(dom, key);
+  if (cached) return cached;
 
-  if (cached && isConnected(cached)) return cached;
-
-  const found = root
-    ? queryFirst(selectors, root)
-    : queryFirst(selectors);
-
-  try {
-    if (found && dom && key) {
-      dom[key] = found;
-      dom[`${key}El`] = found;
-    }
-  } catch {}
-
-  return found;
-}
-
-function resolveScopedDomNode(dom, key, selectors = [], kind = "") {
-  const cached = dom?.[key] || null;
-
-  if (cached && isConnected(cached)) return cached;
-
-  const scopes = kind ? getScopeNodes(dom, kind) : [];
-
+  const scopes = scopeType ? getScopes(dom, scopeType) : [];
   const found = scopes.length
     ? queryFirstInScopes(selectors, scopes)
     : queryFirst(selectors);
 
-  try {
-    if (found && dom && key) {
-      dom[key] = found;
-      dom[`${key}El`] = found;
-    }
-  } catch {}
-
-  return found;
+  return cacheNode(dom, key, found);
 }
 
-function isImageElement(el) {
+function setText(el, value = "") {
+  if (!el) return false;
+
   try {
-    return safeText(el?.tagName, "").toLowerCase() === "img";
+    const next = safeText(value, "");
+
+    if (el.textContent !== next) {
+      el.textContent = next;
+    }
+
+    return true;
   } catch {
     return false;
   }
 }
 
-function removeNativeTooltip(el) {
-  safeRemoveAttr(el, "title");
-  return true;
+function setAttr(el, name, value) {
+  if (!el || !name) return false;
+
+  try {
+    if (value === null || value === undefined || value === "") {
+      el.removeAttribute(name);
+    } else if (el.getAttribute(name) !== String(value)) {
+      el.setAttribute(name, String(value));
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeAttr(el, name) {
+  if (!el || !name) return false;
+
+  try {
+    el.removeAttribute(name);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setDataset(el, key, value) {
+  if (!el || !key) return false;
+
+  try {
+    if (value === null || value === undefined || value === "") {
+      delete el.dataset[key];
+    } else if (el.dataset[key] !== String(value)) {
+      el.dataset[key] = String(value);
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function toggleClass(el, className, force) {
+  if (!el || !className) return false;
+
+  try {
+    el.classList.toggle(className, Boolean(force));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearElement(el) {
+  if (!el) return false;
+
+  try {
+    el.replaceChildren();
+    return true;
+  } catch {}
+
+  try {
+    while (el.firstChild) {
+      el.removeChild(el.firstChild);
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function nextFrame(callback) {
@@ -695,62 +581,82 @@ function nextFrame(callback) {
   } catch {}
 }
 
-function getConfigValue(path = "", fallback = undefined) {
-  const parts = safeText(path, "")
-    .split(".")
-    .filter(Boolean);
+/* =========================================================
+   EVENTS / SNAPSHOT SANITIZE
+========================================================= */
 
-  let current = config;
+function shouldRedactKey(keyHint = "") {
+  const key = safeText(keyHint, "");
 
-  for (const part of parts) {
-    if (!current || current[part] === undefined) return fallback;
-    current = current[part];
+  if (!key) return false;
+  if (/^has[A-Z]/.test(key)) return false;
+  if (/^is[A-Z]/.test(key)) return false;
+  if (/^can[A-Z]/.test(key)) return false;
+
+  return /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|avatarUrl|avatar_url|signedUrl|signed_url|sas|blobUrl|downloadUrl|viewUrl/i.test(key);
+}
+
+function sanitizePayload(value, depth = 0, keyHint = "") {
+  if (depth > 4) return "[depth-limit]";
+
+  if (shouldRedactKey(keyHint)) {
+    return value ? "***" : null;
   }
 
-  return current === undefined ? fallback : current;
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") return safeRedact(value);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return "[function]";
+
+  if (value instanceof Error) {
+    return {
+      name: value.name || "Error",
+      message: safeRedact(value.message || "Error"),
+      stack: value.stack ? "[stack]" : null,
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 80).map((item) =>
+      sanitizePayload(item, depth + 1, keyHint)
+    );
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value).slice(0, 120)) {
+      output[key] = sanitizePayload(item, depth + 1, key);
+    }
+
+    return output;
+  }
+
+  try {
+    return safeRedact(String(value));
+  } catch {
+    return "[unserializable]";
+  }
+}
+
+function emit(events, eventName, payload = {}) {
+  const name = safeText(eventName, "");
+  if (!name) return false;
+
+  try {
+    events?.emit?.(name, sanitizePayload(payload));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
-   SAFE USER HELPERS
+   I18N / TITLE
 ========================================================= */
 
-function safeGetUserDisplayName(user = null) {
-  try {
-    return getUserDisplayName(user);
-  } catch {
-    return "";
-  }
-}
-
-function safeGetUserUsername(user = null) {
-  try {
-    return getUserUsername(user);
-  } catch {
-    return "";
-  }
-}
-
-function safeGetUserAvatarUrl(user = null) {
-  try {
-    return getUserAvatarUrl(user);
-  } catch {
-    return "";
-  }
-}
-
-function safeGetInitials(value = "") {
-  try {
-    return getInitials(value);
-  } catch {
-    return "";
-  }
-}
-
-/* =========================================================
-   I18N
-========================================================= */
-
-function getI18nFromRuntime() {
+function runtimeI18n() {
   if (!isBrowser()) return null;
 
   try {
@@ -766,31 +672,27 @@ function getI18nFromRuntime() {
   }
 }
 
-function safeTranslate(key, params = {}, fallback = "") {
+function translate(key = "", params = {}, fallback = "") {
   const cleanKey = safeText(key, "");
   const cleanFallback = safeText(fallback, cleanKey);
 
   if (!cleanKey) return cleanFallback;
 
   try {
-    const runtimeI18n = getI18nFromRuntime();
+    const i18n = runtimeI18n();
 
-    if (isFunction(runtimeI18n?.t)) {
-      return runtimeI18n.t(cleanKey, params, cleanFallback) || cleanFallback;
+    if (isFunction(i18n?.t)) {
+      return i18n.t(cleanKey, params, cleanFallback) || cleanFallback;
     }
   } catch {}
 
   return cleanFallback;
 }
 
-/* =========================================================
-   ARG NORMALIZATION
-========================================================= */
-
-function normalizeTitleArgs(input = {}, maybeExtra = {}) {
+function normalizeTitleInput(input = {}, extra = {}) {
   if (typeof input === "string") {
     return {
-      ...safeObject(maybeExtra),
+      ...safeObject(extra),
       title: input,
     };
   }
@@ -798,42 +700,19 @@ function normalizeTitleArgs(input = {}, maybeExtra = {}) {
   return safeObject(input);
 }
 
-function normalizeSyncArgs(input = {}) {
-  if (
-    input &&
-    typeof input === "object" &&
-    (
-      "state" in input ||
-      "dom" in input ||
-      "events" in input ||
-      "recache" in input
-    )
-  ) {
-    return input;
-  }
-
-  return {
-    state: input,
-  };
-}
-
-/* =========================================================
-   DOCUMENT TITLE
-========================================================= */
-
-function normalizeTitle(value = "", fallback = config.appName || DEFAULT_TITLE) {
+function cleanTitle(value = "", fallback = config.appName || DEFAULT_TITLE) {
   return safeText(value, fallback)
     .replace(/\s+/g, " ")
     .slice(0, 160);
 }
 
-export function setDocumentTitle(input = {}, maybeExtra = {}) {
-  const args = normalizeTitleArgs(input, maybeExtra);
+export function setDocumentTitle(input = {}, extra = {}) {
+  const args = normalizeTitleInput(input, extra);
 
   const {
     dom,
     events,
-    title = config.appName,
+    title = config.appName || DEFAULT_TITLE,
     titleKey = "",
     titleParams = {},
     suffix = "",
@@ -843,18 +722,13 @@ export function setDocumentTitle(input = {}, maybeExtra = {}) {
     topbarTitleParams = {},
   } = args;
 
-  const baseTitle = normalizeTitle(title, config.appName || DEFAULT_TITLE);
+  const baseTitle = cleanTitle(title, config.appName || DEFAULT_TITLE);
 
-  let finalTitle = baseTitle;
+  let finalTitle = titleKey
+    ? cleanTitle(translate(titleKey, titleParams, baseTitle), baseTitle)
+    : baseTitle;
 
-  if (titleKey) {
-    finalTitle = normalizeTitle(
-      safeTranslate(titleKey, titleParams, baseTitle),
-      baseTitle
-    );
-  }
-
-  const cleanSuffix = normalizeTitle(suffix, "");
+  const cleanSuffix = cleanTitle(suffix, "");
 
   if (cleanSuffix && !finalTitle.includes(cleanSuffix)) {
     finalTitle = `${finalTitle} · ${cleanSuffix}`;
@@ -867,61 +741,42 @@ export function setDocumentTitle(input = {}, maybeExtra = {}) {
   }
 
   const topbarTitleNode =
-    dom?.topbarTitle ||
-    resolveScopedDomNode(dom, "topbarTitle", TOPBAR_TITLE_SELECTORS, "topbar");
+    cachedNode(dom, "topbarTitle") ||
+    resolveScopedNode(dom, "topbarTitle", USER_SELECTORS.topbarTitle, "topbar");
 
-  let finalTopbarTitle = normalizeTitle(topbarTitle, baseTitle);
+  let finalTopbarTitle = cleanTitle(topbarTitle, baseTitle);
 
   if (topbarTitleKey) {
-    finalTopbarTitle = normalizeTitle(
-      safeTranslate(topbarTitleKey, topbarTitleParams, finalTopbarTitle),
+    finalTopbarTitle = cleanTitle(
+      translate(topbarTitleKey, topbarTitleParams, finalTopbarTitle),
       finalTopbarTitle
     );
   }
 
   if (updateTopbar !== false && topbarTitleNode) {
-    safeSetText(topbarTitleNode, finalTopbarTitle);
-    safeDatasetSet(topbarTitleNode, "titleSynced", "true");
-    safeDatasetSet(topbarTitleNode, "titleUpdatedAt", safeNowIso());
+    setText(topbarTitleNode, finalTopbarTitle);
+    setDataset(topbarTitleNode, "titleSynced", "true");
+    setDataset(topbarTitleNode, "titleUpdatedAt", nowIso());
     removeNativeTooltip(topbarTitleNode);
   }
 
-  safeEmit(events, TITLE_EVENT, {
+  emit(events, TITLE_EVENT, {
     title: finalTitle,
     topbarTitle: finalTopbarTitle,
-    at: safeNowIso(),
+    at: nowIso(),
   });
 
   return finalTitle;
 }
 
 /* =========================================================
-   CLEAR DYNAMIC CONTAINERS
+   DYNAMIC CONTAINERS
 ========================================================= */
 
-function clearElement(el) {
-  if (!el) return false;
-
-  try {
-    el.replaceChildren();
-    return true;
-  } catch {}
-
-  try {
-    while (el.firstChild) el.removeChild(el.firstChild);
-    return true;
-  } catch {}
-
-  return false;
-}
-
-function resolveDynamicContainer(dom, key = "") {
-  const selectors = DYNAMIC_CONTAINER_SELECTORS[key] || [];
-
+function resolveDynamic(dom, key = "") {
   return (
-    dom?.[key] ||
-    dom?.[`${key}El`] ||
-    resolveDomNode(dom, key, selectors)
+    cachedNode(dom, key) ||
+    resolveScopedNode(dom, key, DYNAMIC_SELECTORS[key] || [], "")
   );
 }
 
@@ -934,731 +789,93 @@ export function clearDynamicContainers({
   resetTableheadVisibility = true,
   extraKeys = [],
 } = {}) {
-  const cleared = [];
   const keys = [];
 
   if (includeTopbar !== false) keys.push("topbarViewContainer");
   if (includeTablehead !== false) keys.push("tableheadContainer");
   if (includeView === true) keys.push("viewContainer");
 
-  for (const key of safeArray(extraKeys)) {
+  for (const key of toArray(extraKeys)) {
     if (key && !keys.includes(key)) keys.push(key);
   }
 
-  for (const key of keys) {
-    const node = resolveDynamicContainer(dom, key);
+  const cleared = [];
 
-    if (node && clearElement(node)) cleared.push(key);
+  for (const key of keys) {
+    const node = resolveDynamic(dom, key);
+
+    if (node && clearElement(node)) {
+      cleared.push(key);
+    }
   }
 
   if (
     resetTableheadVisibility !== false &&
     (
-      cleared.includes("tableheadContainer") ||
-      includeTablehead !== false
+      includeTablehead !== false ||
+      cleared.includes("tableheadContainer")
     )
   ) {
     const tablehead =
-      dom?.tablehead ||
-      dom?.tableHead ||
-      dom?.tableheadEl ||
-      resolveDynamicContainer(dom, "tablehead");
+      cachedNode(dom, "tablehead") ||
+      cachedNode(dom, "tableHead") ||
+      resolveDynamic(dom, "tablehead");
 
     if (tablehead) {
       try {
         tablehead.hidden = true;
       } catch {}
 
-      safeSetAttr(tablehead, "aria-hidden", "true");
-      safeDatasetSet(tablehead, "visible", "false");
-      safeDatasetSet(tablehead, "tableheadState", "empty");
+      setAttr(tablehead, "aria-hidden", "true");
+      setDataset(tablehead, "visible", "false");
+      setDataset(tablehead, "tableheadState", "empty");
     }
   }
 
-  safeEmit(events, DYNAMIC_CLEARED_EVENT, {
+  emit(events, DYNAMIC_CLEARED_EVENT, {
     cleared,
     includeView: Boolean(includeView),
-    at: safeNowIso(),
+    at: nowIso(),
   });
 
   return true;
 }
 
 /* =========================================================
-   AVATAR URL SAFETY
+   USER DATA
 ========================================================= */
 
-function isValidAvatarUrl(value = "") {
-  const raw = safeText(value, "");
-
-  if (!raw) return false;
-
-  if (/^(javascript|vbscript):/i.test(raw)) return false;
-
-  if (/^data:/i.test(raw)) {
-    return /^data:image\/(png|jpe?g|gif|webp|avif);base64,/i.test(raw);
-  }
-
-  if (/^blob:/i.test(raw)) return true;
-  if (/^\/(?!\/)/.test(raw)) return true;
-  if (/^\.\.?\//.test(raw)) return true;
-
+function safeUserDisplayName(user = null) {
   try {
-    const url = new URL(
-      raw,
-      isBrowser() ? window.location.origin : "http://localhost"
-    );
-
-    return ["http:", "https:", "blob:"].includes(url.protocol);
+    return getUserDisplayName(user);
   } catch {
-    return false;
+    return "";
   }
 }
 
-/* =========================================================
-   AVATAR NODES
-========================================================= */
-
-function normalizeAvatarText(value = "") {
-  const text = safeText(value, DEFAULT_AVATAR_TEXT)
-    .replace(/[^a-zA-Z0-9]/g, "")
-    .slice(0, 2)
-    .toUpperCase();
-
-  return text || DEFAULT_AVATAR_TEXT;
-}
-
-function getAvatarSelectors(idPrefix = "sidebar") {
-  const prefix = safeText(idPrefix, "sidebar").toLowerCase();
-
-  if (prefix === "topbar") {
-    return {
-      root: AVATAR_SELECTORS.topbarRoot,
-      image: AVATAR_SELECTORS.topbarImage,
-      fallback: AVATAR_SELECTORS.topbarFallback,
-      kind: "topbar",
-    };
-  }
-
-  return {
-    root: AVATAR_SELECTORS.sidebarRoot,
-    image: AVATAR_SELECTORS.sidebarImage,
-    fallback: AVATAR_SELECTORS.sidebarFallback,
-    kind: "sidebar",
-  };
-}
-
-function getAvatarSearchRoot(avatarRoot) {
-  if (!avatarRoot) return null;
-
-  if (isImageElement(avatarRoot)) {
-    return avatarRoot.parentElement || null;
-  }
-
-  return avatarRoot;
-}
-
-function getAvatarNodes(avatarRoot, idPrefix = "sidebar") {
-  if (!avatarRoot) {
-    return {
-      imgEl: null,
-      fallbackEl: null,
-    };
-  }
-
-  const selectors = getAvatarSelectors(idPrefix);
-
-  if (isImageElement(avatarRoot)) {
-    const parent = getAvatarSearchRoot(avatarRoot);
-
-    return {
-      imgEl: avatarRoot,
-      fallbackEl: parent ? queryFirst(selectors.fallback, parent) : null,
-    };
-  }
-
-  return {
-    imgEl: queryFirst(selectors.image, avatarRoot),
-    fallbackEl: queryFirst(selectors.fallback, avatarRoot),
-  };
-}
-
-function resolveAvatarRoot(dom, key, idPrefix = "sidebar") {
-  const cached = dom?.[key] || null;
-
-  if (cached && isConnected(cached)) return cached;
-
-  const selectors = getAvatarSelectors(idPrefix);
-  const scopes = getScopeNodes(dom, selectors.kind);
-
-  let root = scopes.length
-    ? queryFirstInScopes(selectors.root, scopes)
-    : queryFirst(selectors.root);
-
-  if (!root) {
-    const image = scopes.length
-      ? queryFirstInScopes(selectors.image, scopes)
-      : queryFirst(selectors.image);
-
-    const fallback = scopes.length
-      ? queryFirstInScopes(selectors.fallback, scopes)
-      : queryFirst(selectors.fallback);
-
-    if (
-      image?.parentElement &&
-      fallback?.parentElement &&
-      image.parentElement === fallback.parentElement
-    ) {
-      root = image.parentElement;
-    } else if (image?.parentElement) {
-      root = image.parentElement;
-    } else if (fallback?.parentElement) {
-      root = fallback.parentElement;
-    } else {
-      root = image || fallback || null;
-    }
-  }
-
+function safeUserUsername(user = null) {
   try {
-    if (root && dom && key) {
-      dom[key] = root;
-      dom[`${key}El`] = root;
-    }
-  } catch {}
-
-  return root;
-}
-
-function getNextAvatarRenderToken(avatarRoot) {
-  if (!avatarRoot) return "";
-
-  const next = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-
-  try {
-    AVATAR_RENDER_TOKENS.set(avatarRoot, next);
-  } catch {}
-
-  return next;
-}
-
-function isCurrentAvatarRenderToken(avatarRoot, token) {
-  if (!avatarRoot) return false;
-
-  try {
-    return AVATAR_RENDER_TOKENS.get(avatarRoot) === token;
+    return getUserUsername(user);
   } catch {
-    return true;
+    return "";
   }
 }
 
-function ensureAvatarImageNode(avatarRoot, idPrefix = "sidebar") {
-  if (!avatarRoot || !isBrowser()) return null;
-
-  if (isImageElement(avatarRoot)) {
-    safeDatasetSet(avatarRoot, "avatarImage", "true");
-    return avatarRoot;
-  }
-
-  const { imgEl } = getAvatarNodes(avatarRoot, idPrefix);
-
-  if (imgEl) {
-    safeDatasetSet(imgEl, "avatarImage", "true");
-    return imgEl;
-  }
-
-  let created = null;
-
+function safeUserAvatarUrl(user = null) {
   try {
-    created = document.createElement("img");
+    return getUserAvatarUrl(user);
   } catch {
-    return null;
+    return "";
   }
-
-  created.id = idPrefix === "topbar"
-    ? "topbarAvatarImage"
-    : "sidebarAvatarImage";
-
-  created.className = "avatar-image";
-
-  safeDatasetSet(created, "avatarImage", "true");
-
-  try {
-    created.loading = "eager";
-    created.decoding = "async";
-    created.draggable = false;
-    created.referrerPolicy = "no-referrer";
-  } catch {}
-
-  created.hidden = true;
-
-  safeSetAttr(created, "aria-hidden", "true");
-  removeNativeTooltip(created);
-
-  try {
-    avatarRoot.appendChild(created);
-  } catch {}
-
-  return created;
 }
 
-function ensureAvatarFallbackNode(avatarRoot, avatarText = DEFAULT_AVATAR_TEXT, idPrefix = "sidebar") {
-  if (!avatarRoot || !isBrowser()) return null;
-
-  const selectors = getAvatarSelectors(idPrefix);
-  const cleanText = normalizeAvatarText(avatarText);
-
-  if (isImageElement(avatarRoot)) {
-    const parent = avatarRoot.parentElement;
-
-    if (!parent) return null;
-
-    let fallback = queryFirst(selectors.fallback, parent);
-
-    if (fallback) {
-      safeDatasetSet(fallback, "avatarFallback", "true");
-      safeSetText(fallback, cleanText);
-      removeNativeTooltip(fallback);
-      return fallback;
-    }
-
-    try {
-      fallback = document.createElement("span");
-    } catch {
-      return null;
-    }
-
-    fallback.id = idPrefix === "topbar"
-      ? "topbarAvatarFallback"
-      : "sidebarAvatarFallback";
-
-    fallback.className = "avatar-fallback";
-
-    safeDatasetSet(fallback, "avatarFallback", "true");
-    safeSetAttr(fallback, "aria-hidden", "true");
-    safeSetText(fallback, cleanText);
-    removeNativeTooltip(fallback);
-
-    try {
-      parent.appendChild(fallback);
-    } catch {}
-
-    return fallback;
-  }
-
-  const { fallbackEl } = getAvatarNodes(avatarRoot, idPrefix);
-
-  if (fallbackEl) {
-    safeDatasetSet(fallbackEl, "avatarFallback", "true");
-    safeSetText(fallbackEl, cleanText);
-    removeNativeTooltip(fallbackEl);
-    return fallbackEl;
-  }
-
-  let created = null;
-
+function safeInitials(value = "") {
   try {
-    created = document.createElement("span");
+    return getInitials(value);
   } catch {
-    return null;
+    return "";
   }
-
-  created.id = idPrefix === "topbar"
-    ? "topbarAvatarFallback"
-    : "sidebarAvatarFallback";
-
-  created.className = "avatar-fallback";
-
-  safeDatasetSet(created, "avatarFallback", "true");
-  safeSetAttr(created, "aria-hidden", "true");
-  safeSetText(created, cleanText);
-  removeNativeTooltip(created);
-
-  try {
-    avatarRoot.appendChild(created);
-  } catch {}
-
-  return created;
 }
-
-function cleanupDuplicateAvatarNodes(avatarRoot, idPrefix = "sidebar") {
-  if (!avatarRoot) return false;
-
-  const selectors = getAvatarSelectors(idPrefix);
-  const searchRoot = getAvatarSearchRoot(avatarRoot);
-
-  if (!searchRoot) return false;
-
-  const images = isImageElement(avatarRoot)
-    ? [avatarRoot]
-    : queryAll(selectors.image, searchRoot);
-
-  const fallbacks = queryAll(selectors.fallback, searchRoot);
-
-  let changed = false;
-
-  images.slice(1).forEach((node) => {
-    try {
-      node.remove();
-      changed = true;
-    } catch {}
-  });
-
-  fallbacks.slice(1).forEach((node) => {
-    try {
-      node.remove();
-      changed = true;
-    } catch {}
-  });
-
-  return changed;
-}
-
-function setAvatarRootMeta(avatarRoot, {
-  avatarAlt,
-  displayName,
-  username = "",
-  authenticated = false,
-  mode = "",
-} = {}) {
-  if (!avatarRoot) return;
-
-  safeSetAttr(avatarRoot, "aria-label", avatarAlt);
-  safeDatasetSet(avatarRoot, "displayName", displayName);
-  safeDatasetSet(avatarRoot, "username", username);
-  safeDatasetSet(avatarRoot, "authenticated", authenticated ? "true" : "false");
-
-  if (mode) safeDatasetSet(avatarRoot, "avatarMode", mode);
-
-  removeNativeTooltip(avatarRoot);
-}
-
-function emitAvatarEvent(events, eventName, payload = {}) {
-  return safeEmit(events, eventName, {
-    mode: payload.mode || null,
-    reason: payload.reason || null,
-    displayName: payload.displayName || null,
-    username: payload.username || null,
-    authenticated: Boolean(payload.authenticated),
-    hasAvatarUrl: Boolean(payload.hasAvatarUrl),
-    at: safeNowIso(),
-  });
-}
-
-function renderAvatarFallback(
-  avatarRoot,
-  {
-    avatarText = DEFAULT_AVATAR_TEXT,
-    avatarAlt = DEFAULT_USER_NAME,
-    displayName = DEFAULT_USER_NAME,
-    username = "",
-    authenticated = false,
-    idPrefix = "sidebar",
-    events = null,
-    reason = "fallback",
-  } = {}
-) {
-  if (!avatarRoot) return false;
-
-  const renderToken = getNextAvatarRenderToken(avatarRoot);
-  const cleanAvatarText = normalizeAvatarText(avatarText);
-
-  cleanupDuplicateAvatarNodes(avatarRoot, idPrefix);
-
-  const imgEl = ensureAvatarImageNode(avatarRoot, idPrefix);
-  const fallbackEl = ensureAvatarFallbackNode(avatarRoot, cleanAvatarText, idPrefix);
-
-  if (imgEl) {
-    try {
-      imgEl.onload = null;
-      imgEl.onerror = null;
-      imgEl.hidden = true;
-      imgEl.removeAttribute("src");
-      imgEl.alt = avatarAlt;
-    } catch {}
-
-    safeSetAttr(imgEl, "aria-hidden", "true");
-    safeDatasetSet(imgEl, "avatarState", reason);
-    removeNativeTooltip(imgEl);
-  }
-
-  if (fallbackEl) {
-    try {
-      fallbackEl.hidden = false;
-    } catch {}
-
-    safeSetAttr(fallbackEl, "aria-hidden", "false");
-    safeSetText(fallbackEl, cleanAvatarText);
-    safeDatasetSet(fallbackEl, "avatarState", reason);
-    removeNativeTooltip(fallbackEl);
-  } else if (isImageElement(avatarRoot)) {
-    try {
-      avatarRoot.hidden = false;
-    } catch {}
-
-    safeSetAttr(avatarRoot, "aria-hidden", "false");
-    safeSetAttr(avatarRoot, "alt", avatarAlt);
-  }
-
-  const visualRoot = isImageElement(avatarRoot)
-    ? avatarRoot.parentElement || avatarRoot
-    : avatarRoot;
-
-  safeToggleClass(visualRoot, "has-image", false);
-  safeToggleClass(visualRoot, "has-fallback", true);
-  safeToggleClass(visualRoot, "is-loading", false);
-
-  setAvatarRootMeta(visualRoot, {
-    avatarAlt,
-    displayName,
-    username,
-    authenticated,
-    mode: "fallback",
-  });
-
-  safeDatasetSet(visualRoot, "avatarState", reason);
-  safeDatasetSet(visualRoot, "avatarText", cleanAvatarText);
-
-  if (isCurrentAvatarRenderToken(avatarRoot, renderToken)) {
-    emitAvatarEvent(events, AVATAR_FALLBACK_EVENT, {
-      mode: "fallback",
-      reason,
-      displayName,
-      username,
-      authenticated,
-      hasAvatarUrl: false,
-    });
-  }
-
-  return true;
-}
-
-function applyAvatarImageVisible({
-  avatarRoot,
-  imgEl,
-  fallbackEl,
-  avatarAlt,
-  displayName,
-  username,
-  authenticated,
-  events,
-  renderToken,
-} = {}) {
-  if (
-    !avatarRoot ||
-    !imgEl ||
-    !isCurrentAvatarRenderToken(avatarRoot, renderToken)
-  ) {
-    return false;
-  }
-
-  try {
-    imgEl.hidden = false;
-  } catch {}
-
-  safeSetAttr(imgEl, "aria-hidden", "false");
-  safeSetAttr(imgEl, "alt", avatarAlt);
-
-  if (fallbackEl) {
-    try {
-      fallbackEl.hidden = true;
-    } catch {}
-
-    safeSetAttr(fallbackEl, "aria-hidden", "true");
-  }
-
-  const visualRoot = isImageElement(avatarRoot)
-    ? avatarRoot.parentElement || avatarRoot
-    : avatarRoot;
-
-  safeToggleClass(visualRoot, "has-image", true);
-  safeToggleClass(visualRoot, "has-fallback", false);
-  safeToggleClass(visualRoot, "is-loading", false);
-
-  setAvatarRootMeta(visualRoot, {
-    avatarAlt,
-    displayName,
-    username,
-    authenticated,
-    mode: "image",
-  });
-
-  safeDatasetSet(visualRoot, "avatarState", "loaded");
-
-  emitAvatarEvent(events, AVATAR_LOAD_EVENT, {
-    mode: "image",
-    displayName,
-    username,
-    authenticated,
-    hasAvatarUrl: true,
-  });
-
-  return true;
-}
-
-function renderAvatarImage(
-  avatarRoot,
-  {
-    avatarUrl = "",
-    avatarAlt = DEFAULT_USER_NAME,
-    displayName = DEFAULT_USER_NAME,
-    avatarText = DEFAULT_AVATAR_TEXT,
-    username = "",
-    authenticated = false,
-    idPrefix = "sidebar",
-    events = null,
-  } = {}
-) {
-  if (!avatarRoot) return false;
-
-  const safeUrl = safeText(avatarUrl, "");
-
-  if (!isValidAvatarUrl(safeUrl)) {
-    return renderAvatarFallback(avatarRoot, {
-      avatarText,
-      avatarAlt,
-      displayName,
-      username,
-      authenticated,
-      idPrefix,
-      events,
-      reason: "invalid-url",
-    });
-  }
-
-  cleanupDuplicateAvatarNodes(avatarRoot, idPrefix);
-
-  const renderToken = getNextAvatarRenderToken(avatarRoot);
-  const cleanAvatarText = normalizeAvatarText(avatarText);
-
-  const imgEl = ensureAvatarImageNode(avatarRoot, idPrefix);
-  const fallbackEl = ensureAvatarFallbackNode(avatarRoot, cleanAvatarText, idPrefix);
-
-  if (!imgEl) {
-    return renderAvatarFallback(avatarRoot, {
-      avatarText: cleanAvatarText,
-      avatarAlt,
-      displayName,
-      username,
-      authenticated,
-      idPrefix,
-      events,
-      reason: "missing-image-node",
-    });
-  }
-
-  const visualRoot = isImageElement(avatarRoot)
-    ? avatarRoot.parentElement || avatarRoot
-    : avatarRoot;
-
-  safeToggleClass(visualRoot, "is-loading", true);
-  safeDatasetSet(visualRoot, "avatarState", "loading");
-  safeDatasetSet(visualRoot, "avatarMode", "image");
-
-  setAvatarRootMeta(visualRoot, {
-    avatarAlt,
-    displayName,
-    username,
-    authenticated,
-    mode: "image",
-  });
-
-  if (fallbackEl) {
-    try {
-      fallbackEl.hidden = false;
-    } catch {}
-
-    safeSetAttr(fallbackEl, "aria-hidden", "false");
-    safeSetText(fallbackEl, cleanAvatarText);
-  }
-
-  try {
-    imgEl.loading = "eager";
-    imgEl.decoding = "async";
-    imgEl.draggable = false;
-    imgEl.referrerPolicy = "no-referrer";
-    imgEl.alt = avatarAlt;
-    imgEl.hidden = true;
-
-    safeSetAttr(imgEl, "aria-hidden", "true");
-
-    imgEl.onload = () => {
-      applyAvatarImageVisible({
-        avatarRoot,
-        imgEl,
-        fallbackEl,
-        avatarAlt,
-        displayName,
-        username,
-        authenticated,
-        events,
-        renderToken,
-      });
-    };
-
-    imgEl.onerror = () => {
-      if (!isCurrentAvatarRenderToken(avatarRoot, renderToken)) return;
-
-      emitAvatarEvent(events, AVATAR_ERROR_EVENT, {
-        displayName,
-        username,
-        authenticated,
-        hasAvatarUrl: true,
-      });
-
-      renderAvatarFallback(avatarRoot, {
-        avatarText: cleanAvatarText,
-        avatarAlt,
-        displayName,
-        username,
-        authenticated,
-        idPrefix,
-        events,
-        reason: "image-error",
-      });
-    };
-
-    if (imgEl.src !== safeUrl) {
-      imgEl.src = safeUrl;
-    }
-  } catch {
-    return renderAvatarFallback(avatarRoot, {
-      avatarText: cleanAvatarText,
-      avatarAlt,
-      displayName,
-      username,
-      authenticated,
-      idPrefix,
-      events,
-      reason: "render-error",
-    });
-  }
-
-  removeNativeTooltip(imgEl);
-
-  nextFrame(() => {
-    try {
-      if (imgEl.complete && imgEl.naturalWidth > 0) {
-        applyAvatarImageVisible({
-          avatarRoot,
-          imgEl,
-          fallbackEl,
-          avatarAlt,
-          displayName,
-          username,
-          authenticated,
-          events,
-          renderToken,
-        });
-      }
-    } catch {}
-  });
-
-  return true;
-}
-
-/* =========================================================
-   USER UI DATA
-========================================================= */
 
 function normalizeStatus(value = "") {
   return safeText(value, "")
@@ -1670,7 +887,7 @@ function normalizeStatus(value = "") {
 }
 
 function hasRealUser(user = null) {
-  if (!user || !isObject(user)) return false;
+  if (!user || typeof user !== "object") return false;
 
   const status = normalizeStatus(
     user.status ??
@@ -1732,12 +949,20 @@ function hasRealUser(user = null) {
   );
 }
 
+function avatarText(value = "") {
+  const text = safeText(value, DEFAULT_AVATAR_TEXT)
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return text || DEFAULT_AVATAR_TEXT;
+}
+
 function resolveUserUiData(state = {}) {
   const root = safeObject(state);
-
   const authenticated = Boolean(root.authenticated);
 
-  const candidateUser =
+  const candidate =
     root.user ||
     root.currentUser ||
     root.authUser ||
@@ -1746,39 +971,39 @@ function resolveUserUiData(state = {}) {
     root.sessionData?.user ||
     null;
 
-  const user = authenticated && hasRealUser(candidateUser)
-    ? candidateUser
+  const user = authenticated && hasRealUser(candidate)
+    ? candidate
     : null;
 
-  const displayName = authenticated && user
-    ? safeGetUserDisplayName(user) || DEFAULT_USER_NAME
+  const displayName = user
+    ? safeUserDisplayName(user) || DEFAULT_USER_NAME
     : DEFAULT_USER_NAME;
 
-  const username = authenticated && user
-    ? safeGetUserUsername(user) || ""
+  const username = user
+    ? safeUserUsername(user) || ""
     : "";
 
-  const email = authenticated && user
+  const email = user
     ? safeText(user.email || user.mail || "", "")
     : "";
 
-  const role = authenticated && user
+  const role = user
     ? safeText(
         root.role ||
           root.userRole ||
-          user?.role ||
-          user?.rol ||
+          user.role ||
+          user.rol ||
           "",
         ""
       )
     : "";
 
-  const avatarUrl = authenticated && user
-    ? safeGetUserAvatarUrl(user)
+  const avatarUrl = user
+    ? safeUserAvatarUrl(user)
     : "";
 
-  const avatarText = normalizeAvatarText(
-    safeGetInitials(displayName) ||
+  const text = avatarText(
+    safeInitials(displayName) ||
       (
         username
           ? username.slice(0, 2).toUpperCase()
@@ -1786,256 +1011,649 @@ function resolveUserUiData(state = {}) {
       )
   );
 
-  const avatarAlt = `${safeTranslate("common.user", {}, "Usuario")} ${displayName}`;
-
   return {
     user,
-    authenticated,
+    authenticated: Boolean(user && authenticated),
     hasUser: Boolean(user),
     displayName,
     username,
     email,
     role,
     avatarUrl,
-    avatarText,
-    avatarAlt,
+    avatarText: text,
+    avatarAlt: `${translate("common.user", {}, "Usuario")} ${displayName}`,
   };
+}
+
+/* =========================================================
+   AVATAR
+========================================================= */
+
+function avatarSelectorGroup(kind = "sidebar") {
+  return kind === "topbar" ? AVATAR_SELECTORS.topbar : AVATAR_SELECTORS.sidebar;
+}
+
+function isValidAvatarUrl(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return false;
+
+  if (/^(javascript|vbscript):/i.test(raw)) return false;
+
+  if (/^data:/i.test(raw)) {
+    return /^data:image\/(png|jpe?g|gif|webp|avif);base64,/i.test(raw);
+  }
+
+  if (/^blob:/i.test(raw)) return true;
+  if (/^\/(?!\/)/.test(raw)) return true;
+  if (/^\.\.?\//.test(raw)) return true;
+
+  try {
+    const url = new URL(raw, isBrowser() ? window.location.origin : "http://localhost");
+    return ["http:", "https:", "blob:"].includes(url.protocol);
+  } catch {
+    return false;
+  }
+}
+
+function avatarSearchRoot(root) {
+  if (!root) return null;
+  return isImageElement(root) ? root.parentElement || null : root;
+}
+
+function getAvatarNodes(root, kind = "sidebar") {
+  if (!root) {
+    return {
+      imgEl: null,
+      fallbackEl: null,
+    };
+  }
+
+  const selectors = avatarSelectorGroup(kind);
+
+  if (isImageElement(root)) {
+    const parent = avatarSearchRoot(root);
+
+    return {
+      imgEl: root,
+      fallbackEl: parent ? queryFirst(selectors.fallback, parent) : null,
+    };
+  }
+
+  return {
+    imgEl: queryFirst(selectors.image, root),
+    fallbackEl: queryFirst(selectors.fallback, root),
+  };
+}
+
+function cacheAvatarNodes(dom, kind = "sidebar", root = null) {
+  if (!dom || !root) return;
+
+  const nodes = getAvatarNodes(root, kind);
+  const prefix = kind === "topbar" ? "topbar" : "sidebar";
+
+  try {
+    dom[`${prefix}Avatar`] = root;
+    dom[`${prefix}AvatarImage`] = nodes.imgEl || null;
+    dom[`${prefix}AvatarFallback`] = nodes.fallbackEl || null;
+  } catch {}
+}
+
+function resolveAvatarRoot(dom, kind = "sidebar") {
+  const key = kind === "topbar" ? "topbarAvatar" : "sidebarAvatar";
+  const cached = cachedNode(dom, key);
+
+  if (cached) {
+    cacheAvatarNodes(dom, kind, cached);
+    return cached;
+  }
+
+  const selectors = avatarSelectorGroup(kind);
+  const scopes = getScopes(dom, kind);
+
+  let root = scopes.length
+    ? queryFirstInScopes(selectors.root, scopes)
+    : queryFirst(selectors.root);
+
+  if (!root) {
+    const image = scopes.length
+      ? queryFirstInScopes(selectors.image, scopes)
+      : queryFirst(selectors.image);
+
+    const fallback = scopes.length
+      ? queryFirstInScopes(selectors.fallback, scopes)
+      : queryFirst(selectors.fallback);
+
+    if (
+      image?.parentElement &&
+      fallback?.parentElement &&
+      image.parentElement === fallback.parentElement
+    ) {
+      root = image.parentElement;
+    } else if (image?.parentElement) {
+      root = image.parentElement;
+    } else if (fallback?.parentElement) {
+      root = fallback.parentElement;
+    } else {
+      root = image || fallback || null;
+    }
+  }
+
+  cacheNode(dom, key, root);
+  cacheAvatarNodes(dom, kind, root);
+
+  return root;
+}
+
+function nextAvatarToken(root) {
+  if (!root) return "";
+
+  const token = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+  try {
+    AVATAR_TOKENS.set(root, token);
+  } catch {}
+
+  return token;
+}
+
+function isCurrentAvatarToken(root, token) {
+  if (!root) return false;
+
+  try {
+    return AVATAR_TOKENS.get(root) === token;
+  } catch {
+    return true;
+  }
+}
+
+function ensureAvatarImage(root, kind = "sidebar") {
+  if (!root || !isBrowser()) return null;
+
+  if (isImageElement(root)) {
+    setDataset(root, "avatarImage", "true");
+    return root;
+  }
+
+  const existing = getAvatarNodes(root, kind).imgEl;
+
+  if (existing) {
+    setDataset(existing, "avatarImage", "true");
+    return existing;
+  }
+
+  let img = null;
+
+  try {
+    img = document.createElement("img");
+  } catch {
+    return null;
+  }
+
+  img.id = kind === "topbar" ? "topbarAvatarImage" : "sidebarAvatarImage";
+  img.className = "avatar-image";
+
+  try {
+    img.loading = "eager";
+    img.decoding = "async";
+    img.draggable = false;
+    img.referrerPolicy = "no-referrer";
+    img.hidden = true;
+  } catch {}
+
+  setDataset(img, "avatarImage", "true");
+  setAttr(img, "aria-hidden", "true");
+  removeNativeTooltip(img);
+
+  try {
+    root.appendChild(img);
+  } catch {}
+
+  return img;
+}
+
+function ensureAvatarFallback(root, text = DEFAULT_AVATAR_TEXT, kind = "sidebar") {
+  if (!root || !isBrowser()) return null;
+
+  const selectors = avatarSelectorGroup(kind);
+  const cleanText = avatarText(text);
+
+  const container = isImageElement(root)
+    ? root.parentElement
+    : root;
+
+  if (!container) return null;
+
+  const existing = queryFirst(selectors.fallback, container);
+
+  if (existing) {
+    setDataset(existing, "avatarFallback", "true");
+    setText(existing, cleanText);
+    removeNativeTooltip(existing);
+    return existing;
+  }
+
+  let fallback = null;
+
+  try {
+    fallback = document.createElement("span");
+  } catch {
+    return null;
+  }
+
+  fallback.id = kind === "topbar" ? "topbarAvatarFallback" : "sidebarAvatarFallback";
+  fallback.className = "avatar-fallback";
+
+  setDataset(fallback, "avatarFallback", "true");
+  setAttr(fallback, "aria-hidden", "true");
+  setText(fallback, cleanText);
+  removeNativeTooltip(fallback);
+
+  try {
+    container.appendChild(fallback);
+  } catch {}
+
+  return fallback;
+}
+
+function removeDuplicateAvatarNodes(root, kind = "sidebar") {
+  if (!root) return false;
+
+  const selectors = avatarSelectorGroup(kind);
+  const searchRoot = avatarSearchRoot(root);
+
+  if (!searchRoot) return false;
+
+  const images = isImageElement(root) ? [root] : queryAll(selectors.image, searchRoot);
+  const fallbacks = queryAll(selectors.fallback, searchRoot);
+
+  let changed = false;
+
+  for (const node of images.slice(1)) {
+    try {
+      node.remove();
+      changed = true;
+    } catch {}
+  }
+
+  for (const node of fallbacks.slice(1)) {
+    try {
+      node.remove();
+      changed = true;
+    } catch {}
+  }
+
+  return changed;
+}
+
+function avatarVisualRoot(root) {
+  if (!root) return null;
+  return isImageElement(root) ? root.parentElement || root : root;
+}
+
+function setAvatarMeta(root, data = {}, mode = "") {
+  const visual = avatarVisualRoot(root);
+
+  if (!visual) return;
+
+  setAttr(visual, "aria-label", data.avatarAlt || data.displayName || DEFAULT_USER_NAME);
+  setDataset(visual, "displayName", data.displayName || DEFAULT_USER_NAME);
+  setDataset(visual, "username", data.username || "");
+  setDataset(visual, "authenticated", data.authenticated ? "true" : "false");
+
+  if (mode) setDataset(visual, "avatarMode", mode);
+
+  removeNativeTooltip(visual);
+}
+
+function emitAvatar(events, eventName, data = {}, extra = {}) {
+  return emit(events, eventName, {
+    displayName: data.displayName || null,
+    username: data.username || null,
+    authenticated: Boolean(data.authenticated),
+    hasAvatarUrl: Boolean(data.avatarUrl),
+    reason: extra.reason || null,
+    mode: extra.mode || null,
+    at: nowIso(),
+  });
+}
+
+function renderAvatarFallback(root, data = {}, kind = "sidebar", events = null, reason = "fallback") {
+  if (!root) return false;
+
+  const token = nextAvatarToken(root);
+  const text = avatarText(data.avatarText);
+
+  removeDuplicateAvatarNodes(root, kind);
+
+  const img = ensureAvatarImage(root, kind);
+  const fallback = ensureAvatarFallback(root, text, kind);
+
+  if (img) {
+    try {
+      img.onload = null;
+      img.onerror = null;
+      img.hidden = true;
+      img.removeAttribute("src");
+      img.alt = data.avatarAlt || data.displayName || DEFAULT_USER_NAME;
+    } catch {}
+
+    setAttr(img, "aria-hidden", "true");
+    setDataset(img, "avatarState", reason);
+    removeNativeTooltip(img);
+  }
+
+  if (fallback) {
+    try {
+      fallback.hidden = false;
+    } catch {}
+
+    setAttr(fallback, "aria-hidden", "false");
+    setText(fallback, text);
+    setDataset(fallback, "avatarState", reason);
+    removeNativeTooltip(fallback);
+  } else if (isImageElement(root)) {
+    try {
+      root.hidden = false;
+    } catch {}
+
+    setAttr(root, "aria-hidden", "false");
+    setAttr(root, "alt", data.avatarAlt || data.displayName || DEFAULT_USER_NAME);
+  }
+
+  const visual = avatarVisualRoot(root);
+
+  toggleClass(visual, "has-image", false);
+  toggleClass(visual, "has-fallback", true);
+  toggleClass(visual, "is-loading", false);
+
+  setAvatarMeta(root, data, "fallback");
+  setDataset(visual, "avatarState", reason);
+  setDataset(visual, "avatarText", text);
+
+  if (isCurrentAvatarToken(root, token)) {
+    emitAvatar(events, AVATAR_FALLBACK_EVENT, data, {
+      mode: "fallback",
+      reason,
+    });
+  }
+
+  return true;
+}
+
+function showAvatarImage(root, img, fallback, data = {}, events = null, token = "") {
+  if (!root || !img || !isCurrentAvatarToken(root, token)) return false;
+
+  try {
+    img.hidden = false;
+  } catch {}
+
+  setAttr(img, "aria-hidden", "false");
+  setAttr(img, "alt", data.avatarAlt || data.displayName || DEFAULT_USER_NAME);
+
+  if (fallback) {
+    try {
+      fallback.hidden = true;
+    } catch {}
+
+    setAttr(fallback, "aria-hidden", "true");
+  }
+
+  const visual = avatarVisualRoot(root);
+
+  toggleClass(visual, "has-image", true);
+  toggleClass(visual, "has-fallback", false);
+  toggleClass(visual, "is-loading", false);
+
+  setAvatarMeta(root, data, "image");
+  setDataset(visual, "avatarState", "loaded");
+
+  emitAvatar(events, AVATAR_LOAD_EVENT, data, {
+    mode: "image",
+  });
+
+  return true;
+}
+
+function renderAvatarImage(root, data = {}, kind = "sidebar", events = null) {
+  if (!root) return false;
+
+  const url = safeText(data.avatarUrl, "");
+
+  if (!isValidAvatarUrl(url)) {
+    return renderAvatarFallback(root, data, kind, events, "invalid-url");
+  }
+
+  removeDuplicateAvatarNodes(root, kind);
+
+  const token = nextAvatarToken(root);
+  const text = avatarText(data.avatarText);
+  const img = ensureAvatarImage(root, kind);
+  const fallback = ensureAvatarFallback(root, text, kind);
+
+  if (!img) {
+    return renderAvatarFallback(root, data, kind, events, "missing-image-node");
+  }
+
+  const visual = avatarVisualRoot(root);
+
+  toggleClass(visual, "is-loading", true);
+  setDataset(visual, "avatarState", "loading");
+  setDataset(visual, "avatarMode", "image");
+  setAvatarMeta(root, data, "image");
+
+  if (fallback) {
+    try {
+      fallback.hidden = false;
+    } catch {}
+
+    setAttr(fallback, "aria-hidden", "false");
+    setText(fallback, text);
+  }
+
+  try {
+    img.loading = "eager";
+    img.decoding = "async";
+    img.draggable = false;
+    img.referrerPolicy = "no-referrer";
+    img.alt = data.avatarAlt || data.displayName || DEFAULT_USER_NAME;
+    img.hidden = true;
+
+    setAttr(img, "aria-hidden", "true");
+    removeNativeTooltip(img);
+
+    img.onload = () => {
+      showAvatarImage(root, img, fallback, data, events, token);
+    };
+
+    img.onerror = () => {
+      if (!isCurrentAvatarToken(root, token)) return;
+
+      emitAvatar(events, AVATAR_ERROR_EVENT, data, {
+        reason: "image-error",
+      });
+
+      renderAvatarFallback(root, data, kind, events, "image-error");
+    };
+
+    if (img.src !== url) {
+      img.src = url;
+    }
+  } catch {
+    return renderAvatarFallback(root, data, kind, events, "render-error");
+  }
+
+  nextFrame(() => {
+    try {
+      if (img.complete && img.naturalWidth > 0) {
+        showAvatarImage(root, img, fallback, data, events, token);
+      }
+    } catch {}
+  });
+
+  return true;
+}
+
+function syncAvatar(dom, kind = "sidebar", data = {}, events = null) {
+  const root = resolveAvatarRoot(dom, kind);
+
+  if (!root) return false;
+
+  if (!data.avatarUrl) {
+    return renderAvatarFallback(
+      root,
+      data,
+      kind,
+      events,
+      data.authenticated ? "no-avatar-url" : "unauthenticated"
+    );
+  }
+
+  return renderAvatarImage(root, data, kind, events);
 }
 
 /* =========================================================
    USER NODE SYNC
 ========================================================= */
 
-function syncTextUserNode(node, {
-  displayName,
-  username,
-  role,
-  authenticated,
-} = {}) {
+function syncTextNode(node, data = {}) {
   if (!node) return false;
 
-  safeSetText(node, displayName);
-  safeDatasetSet(node, "username", username);
-  safeDatasetSet(node, "role", role);
-  safeDatasetSet(node, "authenticated", authenticated ? "true" : "false");
+  setText(node, data.displayName || DEFAULT_USER_NAME);
+  setDataset(node, "username", data.username || "");
+  setDataset(node, "role", data.role || "");
+  setDataset(node, "authenticated", data.authenticated ? "true" : "false");
   removeNativeTooltip(node);
 
   return true;
 }
 
-function syncEmailNode(node, {
-  email,
-  authenticated,
-} = {}) {
+function syncEmailNode(node, data = {}) {
   if (!node) return false;
 
-  safeSetText(node, authenticated ? email || "" : "");
-  safeDatasetSet(node, "authenticated", authenticated ? "true" : "false");
+  setText(node, data.authenticated ? data.email || "" : "");
+  setDataset(node, "authenticated", data.authenticated ? "true" : "false");
   removeNativeTooltip(node);
 
   return true;
 }
 
-function syncRoleNode(node, {
-  role,
-  authenticated,
-} = {}) {
+function syncRoleNode(node, data = {}) {
   if (!node) return false;
 
-  safeSetText(node, authenticated ? role || "" : "");
-  safeDatasetSet(node, "authenticated", authenticated ? "true" : "false");
+  setText(node, data.authenticated ? data.role || "" : "");
+  setDataset(node, "authenticated", data.authenticated ? "true" : "false");
   removeNativeTooltip(node);
 
   return true;
 }
 
-function syncSidebarName(dom, data = {}) {
-  const sidebarName =
-    dom?.sidebarName ||
-    resolveScopedDomNode(dom, "sidebarName", USER_NAME_SELECTORS, "sidebar");
-
-  return syncTextUserNode(sidebarName, data);
-}
-
-function syncSidebarEmail(dom, data = {}) {
-  const sidebarEmail =
-    dom?.sidebarEmail ||
-    resolveScopedDomNode(dom, "sidebarEmail", USER_EMAIL_SELECTORS, "sidebar");
-
-  return syncEmailNode(sidebarEmail, data);
-}
-
-function syncSidebarRole(dom, data = {}) {
-  const sidebarRole =
-    dom?.sidebarRole ||
-    resolveScopedDomNode(dom, "sidebarRole", USER_ROLE_SELECTORS, "sidebar");
-
-  return syncRoleNode(sidebarRole, data);
-}
-
-function syncTopbarUserName(dom, data = {}) {
-  const topbarUserName =
-    dom?.topbarUserName ||
-    resolveScopedDomNode(dom, "topbarUserName", TOPBAR_USER_NAME_SELECTORS, "topbar");
-
-  return syncTextUserNode(topbarUserName, data);
-}
-
-function syncAvatarRoot(dom, key, idPrefix, data, events = null) {
-  const avatarRoot = resolveAvatarRoot(dom, key, idPrefix);
-
-  if (!avatarRoot) return false;
-
-  const {
-    avatarUrl,
-    avatarText,
-    avatarAlt,
-    displayName,
-    username,
-    authenticated,
-  } = data;
-
-  if (!avatarUrl) {
-    return renderAvatarFallback(avatarRoot, {
-      avatarText,
-      avatarAlt,
-      displayName,
-      username,
-      authenticated,
-      idPrefix,
-      events,
-      reason: authenticated ? "no-avatar-url" : "unauthenticated",
-    });
-  }
-
-  return renderAvatarImage(avatarRoot, {
-    avatarUrl,
-    avatarAlt,
-    displayName,
-    avatarText,
-    username,
-    authenticated,
-    idPrefix,
-    events,
-  });
-}
-
-function syncSidebarAvatar(dom, data, events = null) {
-  return syncAvatarRoot(dom, "sidebarAvatar", "sidebar", data, events);
-}
-
-function syncTopbarAvatar(dom, data, events = null) {
-  return syncAvatarRoot(dom, "topbarAvatar", "topbar", data, events);
-}
-
-function syncUserToggle(dom, data) {
+function syncUserToggle(dom, data = {}) {
   const toggle =
-    dom?.userToggle ||
-    resolveScopedDomNode(dom, "userToggle", USER_TOGGLE_SELECTORS, "sidebar") ||
-    resolveScopedDomNode(dom, "userToggle", USER_TOGGLE_SELECTORS, "topbar");
+    resolveScopedNode(dom, "userToggle", USER_SELECTORS.userToggle, "sidebar") ||
+    resolveScopedNode(dom, "userToggle", USER_SELECTORS.userToggle, "topbar");
 
   if (!toggle) return false;
 
-  safeSetAttr(toggle, "aria-label", data.displayName);
-  safeDatasetSet(toggle, "username", data.username);
-  safeDatasetSet(toggle, "role", data.role);
-  safeDatasetSet(toggle, "authenticated", data.authenticated ? "true" : "false");
-  safeSetAttr(toggle, "aria-haspopup", "menu");
+  setAttr(toggle, "aria-label", data.displayName || DEFAULT_USER_NAME);
+  setAttr(toggle, "aria-haspopup", "menu");
+  setDataset(toggle, "username", data.username || "");
+  setDataset(toggle, "role", data.role || "");
+  setDataset(toggle, "authenticated", data.authenticated ? "true" : "false");
   removeNativeTooltip(toggle);
 
   return true;
 }
 
-function syncUserDropdown(dom, data) {
+function syncUserDropdown(dom, data = {}) {
   const dropdown =
-    dom?.userDropdown ||
-    resolveScopedDomNode(dom, "userDropdown", USER_DROPDOWN_SELECTORS, "sidebar") ||
-    resolveScopedDomNode(dom, "userDropdown", USER_DROPDOWN_SELECTORS, "topbar");
+    resolveScopedNode(dom, "userDropdown", USER_SELECTORS.userDropdown, "sidebar") ||
+    resolveScopedNode(dom, "userDropdown", USER_SELECTORS.userDropdown, "topbar");
 
   if (!dropdown) return false;
 
-  safeDatasetSet(dropdown, "username", data.username);
-  safeDatasetSet(dropdown, "role", data.role);
-  safeDatasetSet(dropdown, "authenticated", data.authenticated ? "true" : "false");
+  setDataset(dropdown, "username", data.username || "");
+  setDataset(dropdown, "role", data.role || "");
+  setDataset(dropdown, "authenticated", data.authenticated ? "true" : "false");
 
   return true;
 }
 
-function syncLogoutButton(dom, data) {
-  const logoutBtn =
-    dom?.logoutBtn ||
-    resolveScopedDomNode(dom, "logoutBtn", LOGOUT_SELECTORS, "sidebar") ||
-    resolveScopedDomNode(dom, "logoutBtn", LOGOUT_SELECTORS, "topbar");
+function syncLogoutButton(dom, data = {}) {
+  const button =
+    resolveScopedNode(dom, "logoutBtn", USER_SELECTORS.logoutBtn, "sidebar") ||
+    resolveScopedNode(dom, "logoutBtn", USER_SELECTORS.logoutBtn, "topbar");
 
-  if (!logoutBtn) return false;
+  if (!button) return false;
 
-  safeDatasetSet(logoutBtn, "authenticated", data.authenticated ? "true" : "false");
-  removeNativeTooltip(logoutBtn);
+  setDataset(button, "authenticated", data.authenticated ? "true" : "false");
+  removeNativeTooltip(button);
 
   return true;
 }
 
 /* =========================================================
-   RECACHE
+   RECACHE / SYNC
 ========================================================= */
 
 export function recacheUserNodes(dom, events = null) {
   if (!dom) return {};
 
-  const result = {};
+  const result = {
+    sidebarName: Boolean(resolveScopedNode(dom, "sidebarName", USER_SELECTORS.sidebarName, "sidebar")),
+    sidebarEmail: Boolean(resolveScopedNode(dom, "sidebarEmail", USER_SELECTORS.sidebarEmail, "sidebar")),
+    sidebarRole: Boolean(resolveScopedNode(dom, "sidebarRole", USER_SELECTORS.sidebarRole, "sidebar")),
+    sidebarAvatar: Boolean(resolveAvatarRoot(dom, "sidebar")),
 
-  result.sidebarName = Boolean(
-    resolveScopedDomNode(dom, "sidebarName", USER_NAME_SELECTORS, "sidebar")
-  );
+    topbarUserName: Boolean(resolveScopedNode(dom, "topbarUserName", USER_SELECTORS.topbarUserName, "topbar")),
+    topbarAvatar: Boolean(resolveAvatarRoot(dom, "topbar")),
 
-  result.sidebarEmail = Boolean(
-    resolveScopedDomNode(dom, "sidebarEmail", USER_EMAIL_SELECTORS, "sidebar")
-  );
+    userToggle: Boolean(
+      resolveScopedNode(dom, "userToggle", USER_SELECTORS.userToggle, "sidebar") ||
+      resolveScopedNode(dom, "userToggle", USER_SELECTORS.userToggle, "topbar")
+    ),
 
-  result.sidebarRole = Boolean(
-    resolveScopedDomNode(dom, "sidebarRole", USER_ROLE_SELECTORS, "sidebar")
-  );
+    userDropdown: Boolean(
+      resolveScopedNode(dom, "userDropdown", USER_SELECTORS.userDropdown, "sidebar") ||
+      resolveScopedNode(dom, "userDropdown", USER_SELECTORS.userDropdown, "topbar")
+    ),
 
-  result.sidebarAvatar = Boolean(
-    resolveAvatarRoot(dom, "sidebarAvatar", "sidebar")
-  );
+    logoutBtn: Boolean(
+      resolveScopedNode(dom, "logoutBtn", USER_SELECTORS.logoutBtn, "sidebar") ||
+      resolveScopedNode(dom, "logoutBtn", USER_SELECTORS.logoutBtn, "topbar")
+    ),
 
-  result.topbarUserName = Boolean(
-    resolveScopedDomNode(dom, "topbarUserName", TOPBAR_USER_NAME_SELECTORS, "topbar")
-  );
+    topbarTitle: Boolean(resolveScopedNode(dom, "topbarTitle", USER_SELECTORS.topbarTitle, "topbar")),
+  };
 
-  result.topbarAvatar = Boolean(
-    resolveAvatarRoot(dom, "topbarAvatar", "topbar")
-  );
-
-  result.userToggle = Boolean(
-    resolveScopedDomNode(dom, "userToggle", USER_TOGGLE_SELECTORS, "sidebar") ||
-      resolveScopedDomNode(dom, "userToggle", USER_TOGGLE_SELECTORS, "topbar")
-  );
-
-  result.userDropdown = Boolean(
-    resolveScopedDomNode(dom, "userDropdown", USER_DROPDOWN_SELECTORS, "sidebar") ||
-      resolveScopedDomNode(dom, "userDropdown", USER_DROPDOWN_SELECTORS, "topbar")
-  );
-
-  result.logoutBtn = Boolean(
-    resolveScopedDomNode(dom, "logoutBtn", LOGOUT_SELECTORS, "sidebar") ||
-      resolveScopedDomNode(dom, "logoutBtn", LOGOUT_SELECTORS, "topbar")
-  );
-
-  result.topbarTitle = Boolean(
-    resolveScopedDomNode(dom, "topbarTitle", TOPBAR_TITLE_SELECTORS, "topbar")
-  );
-
-  safeEmit(events, USER_RECACHE_EVENT, {
+  emit(events, USER_RECACHE_EVENT, {
     nodes: result,
-    at: safeNowIso(),
+    at: nowIso(),
   });
 
   return result;
 }
 
-function shouldScheduleDeferredSync(synced = {}) {
+function normalizeSyncArgs(input = {}) {
+  if (
+    input &&
+    typeof input === "object" &&
+    (
+      "state" in input ||
+      "dom" in input ||
+      "events" in input ||
+      "recache" in input
+    )
+  ) {
+    return input;
+  }
+
+  return {
+    state: input,
+  };
+}
+
+function shouldDeferSync(synced = {}) {
   return !(
     synced.sidebarName ||
     synced.sidebarAvatar ||
@@ -2045,19 +1663,17 @@ function shouldScheduleDeferredSync(synced = {}) {
   );
 }
 
-function scheduleDeferredUserSync(args = {}) {
-  if (deferredUserSyncScheduled || !isBrowser()) {
-    return false;
-  }
+function scheduleDeferredSync(args = {}) {
+  if (deferredUserSyncScheduled || !isBrowser()) return false;
 
   deferredUserSyncScheduled = true;
 
   nextFrame(() => {
     deferredUserSyncScheduled = false;
 
-    safeEmit(args.events, USER_DEFERRED_SYNC_EVENT, {
+    emit(args.events, USER_DEFERRED_SYNC_EVENT, {
       reason: "nodes-mounted-late",
-      at: safeNowIso(),
+      at: nowIso(),
     });
 
     try {
@@ -2071,10 +1687,6 @@ function scheduleDeferredUserSync(args = {}) {
 
   return true;
 }
-
-/* =========================================================
-   SYNC USER UI
-========================================================= */
 
 export function syncUserUI(input = {}) {
   const args = normalizeSyncArgs(input);
@@ -2093,23 +1705,28 @@ export function syncUserUI(input = {}) {
 
   const data = resolveUserUiData(state);
 
+  const sidebarName = resolveScopedNode(dom, "sidebarName", USER_SELECTORS.sidebarName, "sidebar");
+  const sidebarEmail = resolveScopedNode(dom, "sidebarEmail", USER_SELECTORS.sidebarEmail, "sidebar");
+  const sidebarRole = resolveScopedNode(dom, "sidebarRole", USER_SELECTORS.sidebarRole, "sidebar");
+  const topbarUserName = resolveScopedNode(dom, "topbarUserName", USER_SELECTORS.topbarUserName, "topbar");
+
   const synced = {
-    sidebarName: syncSidebarName(dom, data),
-    sidebarEmail: syncSidebarEmail(dom, data),
-    sidebarRole: syncSidebarRole(dom, data),
+    sidebarName: syncTextNode(sidebarName, data),
+    sidebarEmail: syncEmailNode(sidebarEmail, data),
+    sidebarRole: syncRoleNode(sidebarRole, data),
 
-    sidebarAvatar: syncSidebarAvatar(dom, data, events),
+    sidebarAvatar: syncAvatar(dom, "sidebar", data, events),
 
-    topbarUserName: syncTopbarUserName(dom, data),
-    topbarAvatar: syncTopbarAvatar(dom, data, events),
+    topbarUserName: syncTextNode(topbarUserName, data),
+    topbarAvatar: syncAvatar(dom, "topbar", data, events),
 
     userToggle: syncUserToggle(dom, data),
     userDropdown: syncUserDropdown(dom, data),
     logoutBtn: syncLogoutButton(dom, data),
   };
 
-  if (deferIfMissing !== false && shouldScheduleDeferredSync(synced)) {
-    scheduleDeferredUserSync(args);
+  if (deferIfMissing !== false && shouldDeferSync(synced)) {
+    scheduleDeferredSync(args);
   }
 
   const payload = {
@@ -2122,10 +1739,10 @@ export function syncUserUI(input = {}) {
     hasAvatarUrl: Boolean(data.avatarUrl),
     synced,
     version: UI_VERSION,
-    at: safeNowIso(),
+    at: nowIso(),
   };
 
-  safeEmit(events, USER_UI_EVENT, payload);
+  emit(events, USER_UI_EVENT, payload);
 
   return payload;
 }
@@ -2134,7 +1751,7 @@ export function syncUserUI(input = {}) {
    SNAPSHOT
 ========================================================= */
 
-function getElementState(el) {
+function elementState(el) {
   if (!el) {
     return {
       exists: false,
@@ -2168,13 +1785,13 @@ function getElementState(el) {
   };
 }
 
-function getAvatarSnapshot(root, idPrefix = "sidebar") {
-  const avatarNodes = getAvatarNodes(root, idPrefix);
+function avatarSnapshot(root, kind = "sidebar") {
+  const nodes = getAvatarNodes(root, kind);
 
   return {
-    root: getElementState(root),
-    image: getElementState(avatarNodes.imgEl),
-    fallback: getElementState(avatarNodes.fallbackEl),
+    root: elementState(root),
+    image: elementState(nodes.imgEl),
+    fallback: elementState(nodes.fallbackEl),
     mode: safeText(root?.dataset?.avatarMode, ""),
     state: safeText(root?.dataset?.avatarState, ""),
   };
@@ -2186,29 +1803,19 @@ export function getUiSnapshot({
 } = {}) {
   const data = resolveUserUiData(state);
 
-  const sidebarAvatarRoot =
-    dom?.sidebarAvatar ||
-    resolveAvatarRoot(dom, "sidebarAvatar", "sidebar");
-
-  const topbarAvatarRoot =
-    dom?.topbarAvatar ||
-    resolveAvatarRoot(dom, "topbarAvatar", "topbar");
+  const sidebarAvatar = cachedNode(dom, "sidebarAvatar") || resolveAvatarRoot(dom, "sidebar");
+  const topbarAvatar = cachedNode(dom, "topbarAvatar") || resolveAvatarRoot(dom, "topbar");
 
   return {
     version: UI_VERSION,
 
-    title: isBrowser()
-      ? safeText(document.title, "")
-      : "",
+    title: isBrowser() ? safeText(document.title, "") : "",
 
     config: {
       appName: safeText(config?.appName, DEFAULT_TITLE),
       defaultLang: safeText(config?.defaultLang, "es"),
       defaultTheme: safeText(config?.defaultTheme, "dark"),
-      syncUserUIOnAuthChange: safeBool(
-        getConfigValue("ui.syncUserUIOnAuthChange", true),
-        true
-      ),
+      syncUserUIOnAuthChange: safeBool(config?.ui?.syncUserUIOnAuthChange, true),
     },
 
     user: {
@@ -2222,42 +1829,32 @@ export function getUiSnapshot({
     },
 
     dom: {
-      hasTopbarTitle: Boolean(dom?.topbarTitle),
-      hasSidebarName: Boolean(dom?.sidebarName),
-      hasSidebarEmail: Boolean(dom?.sidebarEmail),
-      hasSidebarRole: Boolean(dom?.sidebarRole),
-      hasSidebarAvatar: Boolean(dom?.sidebarAvatar),
-      hasTopbarUserName: Boolean(dom?.topbarUserName),
-      hasTopbarAvatar: Boolean(dom?.topbarAvatar),
-      hasUserToggle: Boolean(dom?.userToggle),
-      hasUserDropdown: Boolean(dom?.userDropdown),
-      hasLogoutBtn: Boolean(dom?.logoutBtn),
-      hasTopbarViewContainer: Boolean(dom?.topbarViewContainer),
-      hasTableheadContainer: Boolean(dom?.tableheadContainer),
+      hasTopbarTitle: Boolean(cachedNode(dom, "topbarTitle")),
+      hasSidebarName: Boolean(cachedNode(dom, "sidebarName")),
+      hasSidebarEmail: Boolean(cachedNode(dom, "sidebarEmail")),
+      hasSidebarRole: Boolean(cachedNode(dom, "sidebarRole")),
+      hasSidebarAvatar: Boolean(sidebarAvatar),
+      hasTopbarUserName: Boolean(cachedNode(dom, "topbarUserName")),
+      hasTopbarAvatar: Boolean(topbarAvatar),
+      hasUserToggle: Boolean(cachedNode(dom, "userToggle")),
+      hasUserDropdown: Boolean(cachedNode(dom, "userDropdown")),
+      hasLogoutBtn: Boolean(cachedNode(dom, "logoutBtn")),
+      hasTopbarViewContainer: Boolean(cachedNode(dom, "topbarViewContainer")),
+      hasTableheadContainer: Boolean(cachedNode(dom, "tableheadContainer")),
     },
 
     avatar: {
-      sidebar: getAvatarSnapshot(sidebarAvatarRoot, "sidebar"),
-      topbar: getAvatarSnapshot(topbarAvatarRoot, "topbar"),
+      sidebar: avatarSnapshot(sidebarAvatar, "sidebar"),
+      topbar: avatarSnapshot(topbarAvatar, "topbar"),
     },
 
-    at: safeNowIso(),
+    at: nowIso(),
   };
 }
 
 /* =========================================================
-   EXPORTS
+   DEFAULT EXPORT
 ========================================================= */
-
-export {
-  UI_VERSION,
-  USER_UI_EVENT,
-  TITLE_EVENT,
-  DYNAMIC_CLEARED_EVENT,
-  AVATAR_LOAD_EVENT,
-  AVATAR_ERROR_EVENT,
-  AVATAR_FALLBACK_EVENT,
-};
 
 export default {
   UI_VERSION,

@@ -4,18 +4,15 @@
 
    Responsabilidad única:
    - Ser el único entrypoint físico cargado por index.html.
-   - Esperar DOM ready.
+   - Capturar URL inicial.
+   - Bloquear auto-boot legacy.
    - Cargar /src/app/index.js.
-   - Ejecutar el boot lógico una sola vez.
+   - Ejecutar App.boot() una sola vez.
    - Capturar error fatal de arranque.
-   - No meter auth.
-   - No meter router.
-   - No meter API.
-   - No meter store.
-   - No meter vistas.
+   - No meter auth/router/API/store/vistas.
 ========================================================= */
 
-const MAIN_VERSION = "v1-simple-main";
+const MAIN_VERSION = "v2-fast-main";
 const APP_MODULE_PATH = "./app/index.js";
 
 const BOOT_LOCK_KEY = "__ONION_MAIN_BOOT_LOCK__";
@@ -23,13 +20,19 @@ const DISABLE_AUTO_BOOT_KEY = "__ONION_DISABLE_AUTO_BOOT__";
 const INITIAL_URL_KEY = "__ONION_INITIAL_URL__";
 const BOOT_CONTEXT_KEY = "__ONION_BOOT_CONTEXT__";
 
+const FATAL_ERROR_KEY = "__ONION_FATAL_ERROR__";
+const MAIN_DEBUG_KEY = "__ONION_MAIN__";
+
 const DEFAULT_ERROR_TITLE = "Error de arranque";
 const DEFAULT_ERROR_MESSAGE = "No se pudo iniciar Onion Support.";
 
 let appModule = null;
+let appModulePromise = null;
 let bootPromise = null;
+
 let startedAt = 0;
 let failed = false;
+let errorsBound = false;
 
 /* =========================================================
    BASIC HELPERS
@@ -39,12 +42,16 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isFunction(value) {
+function isFn(value) {
   return typeof value === "function";
 }
 
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function safeObject(value) {
+  return isObject(value) ? value : {};
 }
 
 function safeText(value, fallback = "") {
@@ -58,25 +65,23 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
-function nowIso() {
+function nowMs() {
   try {
-    return new Date().toISOString();
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+function nowIso(ms = nowMs()) {
+  try {
+    return new Date(ms).toISOString();
   } catch {
     return "";
   }
 }
 
-function getRequestPath() {
-  if (!isBrowser()) return "/";
-
-  try {
-    return `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
-  } catch {
-    return "/";
-  }
-}
-
-function getInitialUrl() {
+function currentHref() {
   if (!isBrowser()) return "";
 
   try {
@@ -86,6 +91,24 @@ function getInitialUrl() {
   }
 }
 
+function currentPath() {
+  if (!isBrowser()) return "/";
+
+  try {
+    return `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
+  } catch {
+    return "/";
+  }
+}
+
+/* =========================================================
+   REDACTION / ERROR
+========================================================= */
+
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function redactUrl(value = "") {
   let output = safeText(value, "");
 
@@ -93,6 +116,11 @@ function redactUrl(value = "") {
 
   const sensitive = [
     "token",
+    "activationToken",
+    "activateToken",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
     "code",
     "t",
     "otp",
@@ -106,20 +134,24 @@ function redactUrl(value = "") {
     "mfa_token",
     "twoFactorToken",
     "two_factor_token",
+    "authorization",
+    "jwt",
+    "sid",
   ];
 
-  try {
-    for (const key of sensitive) {
+  for (const key of sensitive) {
+    try {
       output = output.replace(
-        new RegExp(`([?&#]${key}=)([^&#\\s]+)`, "gi"),
+        new RegExp(`([?&#]${escapeRegExp(key)}=)([^&#\\s]+)`, "gi"),
         "$1***"
       );
-    }
+    } catch {}
+  }
 
-    output = output.replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    );
+  try {
+    output = output
+      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+      .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
   } catch {}
 
   return output;
@@ -136,8 +168,8 @@ function serializeError(error) {
   if (error instanceof Error) {
     return {
       name: safeText(error.name, "Error"),
-      message: safeText(error.message, DEFAULT_ERROR_MESSAGE),
-      stack: redactUrl(safeText(error.stack, "")),
+      message: redactUrl(safeText(error.message, DEFAULT_ERROR_MESSAGE)),
+      stack: error.stack ? "[stack]" : "",
       code: error.code || null,
       status: error.status || error.statusCode || null,
     };
@@ -146,14 +178,14 @@ function serializeError(error) {
   if (typeof error === "string") {
     return {
       name: "ThrownString",
-      message: safeText(error, DEFAULT_ERROR_MESSAGE),
+      message: redactUrl(safeText(error, DEFAULT_ERROR_MESSAGE)),
     };
   }
 
   if (isObject(error)) {
     return {
       name: safeText(error.name, "ObjectError"),
-      message: safeText(error.message || error.reason, DEFAULT_ERROR_MESSAGE),
+      message: redactUrl(safeText(error.message || error.reason, DEFAULT_ERROR_MESSAGE)),
       code: error.code || null,
       status: error.status || error.statusCode || null,
     };
@@ -161,7 +193,7 @@ function serializeError(error) {
 
   return {
     name: "ThrownValue",
-    message: safeText(String(error), DEFAULT_ERROR_MESSAGE),
+    message: redactUrl(String(error)),
   };
 }
 
@@ -170,31 +202,40 @@ function serializeError(error) {
 ========================================================= */
 
 function setDataset(element, key, value) {
-  if (!element || !key) return;
+  if (!element || !key) return false;
 
   try {
     element.dataset[key] = String(value);
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function addClass(element, className) {
-  if (!element || !className) return;
+  if (!element || !className) return false;
 
   try {
     element.classList.add(className);
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function removeClass(element, className) {
-  if (!element || !className) return;
+  if (!element || !className) return false;
 
   try {
     element.classList.remove(className);
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function markBooting() {
-  if (!isBrowser()) return;
+  if (!isBrowser()) return false;
 
   const html = document.documentElement;
   const body = document.body;
@@ -215,13 +256,13 @@ function markBooting() {
     setDataset(element, "mainFailed", "false");
   }
 
-  if (html) {
-    setDataset(html, "appState", "booting");
-  }
+  setDataset(html, "appState", "booting");
+
+  return true;
 }
 
 function markMainReady() {
-  if (!isBrowser()) return;
+  if (!isBrowser()) return false;
 
   const html = document.documentElement;
   const body = document.body;
@@ -232,10 +273,12 @@ function markMainReady() {
     setDataset(element, "mainReady", "true");
     setDataset(element, "mainFailed", "false");
   }
+
+  return true;
 }
 
 function markFatal() {
-  if (!isBrowser()) return;
+  if (!isBrowser()) return false;
 
   const html = document.documentElement;
   const body = document.body;
@@ -257,30 +300,9 @@ function markFatal() {
     setDataset(element, "routeMode", "fatal");
   }
 
-  if (html) {
-    setDataset(html, "appState", "fatal");
-  }
-}
+  setDataset(html, "appState", "fatal");
 
-/* =========================================================
-   DOM READY
-========================================================= */
-
-function waitForDomReady() {
-  if (!isBrowser()) return Promise.resolve();
-
-  if (
-    document.readyState === "interactive" ||
-    document.readyState === "complete"
-  ) {
-    return Promise.resolve();
-  }
-
-  return new Promise((resolve) => {
-    document.addEventListener("DOMContentLoaded", resolve, {
-      once: true,
-    });
-  });
+  return true;
 }
 
 /* =========================================================
@@ -288,26 +310,32 @@ function waitForDomReady() {
 ========================================================= */
 
 function disableLegacyAutoBoot() {
-  if (!isBrowser()) return;
+  if (!isBrowser()) return false;
 
   try {
     window[DISABLE_AUTO_BOOT_KEY] = true;
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function captureBootContext() {
   const context = {
     source: "main",
     version: MAIN_VERSION,
-    initialUrl: getInitialUrl(),
-    initialPath: getRequestPath(),
+    initialUrl: currentHref(),
+    initialPath: currentPath(),
     capturedAt: nowIso(),
   };
 
   if (!isBrowser()) return context;
 
   try {
-    window[INITIAL_URL_KEY] = context.initialUrl;
+    if (!window[INITIAL_URL_KEY]) {
+      window[INITIAL_URL_KEY] = context.initialUrl;
+    }
+
     window[BOOT_CONTEXT_KEY] = {
       ...(isObject(window[BOOT_CONTEXT_KEY]) ? window[BOOT_CONTEXT_KEY] : {}),
       ...context,
@@ -324,31 +352,54 @@ function captureBootContext() {
 async function loadAppModule() {
   if (appModule) return appModule;
 
-  appModule = await import(APP_MODULE_PATH);
+  if (!appModulePromise) {
+    appModulePromise = import(APP_MODULE_PATH)
+      .then((moduleValue) => {
+        appModule = moduleValue;
+        return moduleValue;
+      })
+      .finally(() => {
+        appModulePromise = null;
+      });
+  }
 
-  return appModule;
+  return appModulePromise;
 }
 
 function resolveBootFunction(moduleValue) {
   if (!moduleValue) return null;
 
-  if (isFunction(moduleValue.bootApp)) return moduleValue.bootApp;
-  if (isFunction(moduleValue.boot)) return moduleValue.boot;
-  if (isFunction(moduleValue.start)) return moduleValue.start;
+  if (isFn(moduleValue.bootApp)) return moduleValue.bootApp;
+  if (isFn(moduleValue.boot)) return moduleValue.boot;
+  if (isFn(moduleValue.start)) return moduleValue.start;
 
-  if (moduleValue.App && isFunction(moduleValue.App.boot)) {
+  if (moduleValue.App && isFn(moduleValue.App.boot)) {
     return moduleValue.App.boot.bind(moduleValue.App);
   }
 
-  if (moduleValue.default && isFunction(moduleValue.default.boot)) {
+  if (moduleValue.default && isFn(moduleValue.default.boot)) {
     return moduleValue.default.boot.bind(moduleValue.default);
   }
 
-  if (isFunction(moduleValue.default)) {
+  if (isFn(moduleValue.default)) {
     return moduleValue.default;
   }
 
   return null;
+}
+
+function exposeLoadedApp(moduleValue, result) {
+  if (!isBrowser()) return false;
+
+  try {
+    window.OnionApp = window.OnionApp || {};
+    window.OnionApp.app = result || moduleValue?.App || moduleValue?.default || null;
+    window.OnionApp.module = moduleValue || null;
+    window.OnionApp.main = api;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -356,13 +407,13 @@ function resolveBootFunction(moduleValue) {
 ========================================================= */
 
 function hideLoaderEmergency() {
-  if (!isBrowser()) return;
+  if (!isBrowser()) return false;
 
   const loader =
     document.getElementById("app-loader") ||
     document.querySelector("[data-app-loader='true']");
 
-  if (!loader) return;
+  if (!loader) return false;
 
   try {
     loader.hidden = true;
@@ -372,7 +423,10 @@ function hideLoaderEmergency() {
     loader.classList.add("is-hidden");
     loader.dataset.loaderVisible = "false";
     loader.dataset.loaderState = "hidden";
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function getFatalRoot() {
@@ -382,23 +436,28 @@ function getFatalRoot() {
     document.getElementById("view-container") ||
     document.getElementById("app-content") ||
     document.getElementById("main-content") ||
-    document.body
+    document.body ||
+    null
   );
 }
 
 function clearNode(node) {
-  if (!node) return;
+  if (!node) return false;
 
   try {
     node.replaceChildren();
-    return;
+    return true;
   } catch {}
 
   try {
     while (node.firstChild) {
       node.removeChild(node.firstChild);
     }
-  } catch {}
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function createFatalView(error) {
@@ -443,14 +502,14 @@ function createFatalView(error) {
 }
 
 function renderFatal(error) {
-  if (!isBrowser()) return;
+  if (!isBrowser()) return false;
 
   markFatal();
   hideLoaderEmergency();
 
   const root = getFatalRoot();
 
-  if (!root) return;
+  if (!root) return false;
 
   try {
     root.hidden = false;
@@ -460,6 +519,8 @@ function renderFatal(error) {
 
   clearNode(root);
   root.appendChild(createFatalView(error));
+
+  return true;
 }
 
 function handleFatal(error, reason = "boot") {
@@ -467,14 +528,16 @@ function handleFatal(error, reason = "boot") {
 
   const serialized = serializeError(error);
 
-  try {
-    window.__ONION_FATAL_ERROR__ = {
-      reason,
-      error: serialized,
-      rawError: error,
-      at: nowIso(),
-    };
-  } catch {}
+  if (isBrowser()) {
+    try {
+      window[FATAL_ERROR_KEY] = {
+        reason,
+        error: serialized,
+        rawError: error,
+        at: nowIso(),
+      };
+    } catch {}
+  }
 
   try {
     console.error("[Onion Main] Fatal boot error:", serialized);
@@ -491,7 +554,9 @@ function handleFatal(error, reason = "boot") {
 ========================================================= */
 
 function bindGlobalErrors() {
-  if (!isBrowser()) return;
+  if (!isBrowser() || errorsBound) return false;
+
+  errorsBound = true;
 
   try {
     window.addEventListener("error", (event) => {
@@ -526,84 +591,119 @@ function bindGlobalErrors() {
       handleFatal(event.reason, "unhandledrejection");
     });
   } catch {}
+
+  return true;
 }
 
 /* =========================================================
    BOOT
 ========================================================= */
 
-async function boot(options = {}) {
-  if (bootPromise && options.force !== true) {
-    return bootPromise;
-  }
+function getExternalBootLock() {
+  if (!isBrowser()) return null;
 
-  if (isBrowser()) {
-    const existingLock = window[BOOT_LOCK_KEY];
+  try {
+    const lock = window[BOOT_LOCK_KEY];
 
-    if (
-      existingLock &&
-      existingLock.promise &&
-      isFunction(existingLock.promise.then) &&
-      options.force !== true
-    ) {
-      return existingLock.promise;
+    if (lock?.promise && isFn(lock.promise.then)) {
+      return lock;
     }
-  }
+  } catch {}
 
-  startedAt = Date.now();
-  failed = false;
+  return null;
+}
 
-  disableLegacyAutoBoot();
-  markBooting();
-
-  const bootContext = captureBootContext();
-
-  bootPromise = (async () => {
-    await waitForDomReady();
-
-    const moduleValue = await loadAppModule();
-    const bootFn = resolveBootFunction(moduleValue);
-
-    if (!bootFn) {
-      throw new Error("No se encontró función de arranque en src/app/index.js.");
-    }
-
-    const result = await bootFn({
-      source: "main",
-      version: MAIN_VERSION,
-      bootContext,
-      startedAt,
-      ...options,
-    });
-
-    markMainReady();
-
-    return result || moduleValue;
-  })()
-    .catch((error) => {
-      handleFatal(error, "boot");
-      throw error;
-    })
-    .finally(() => {
-      try {
-        if (window[BOOT_LOCK_KEY]?.promise === bootPromise) {
-          delete window[BOOT_LOCK_KEY];
-        }
-      } catch {}
-
-      bootPromise = null;
-    });
+function setBootLock(promise) {
+  if (!isBrowser() || !promise) return false;
 
   try {
     window[BOOT_LOCK_KEY] = {
       source: "main",
       version: MAIN_VERSION,
-      promise: bootPromise,
+      promise,
       startedAt,
     };
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearBootLock(promise) {
+  if (!isBrowser()) return false;
+
+  try {
+    if (window[BOOT_LOCK_KEY]?.promise === promise) {
+      delete window[BOOT_LOCK_KEY];
+      return true;
+    }
   } catch {}
 
-  return bootPromise;
+  return false;
+}
+
+async function runBoot(options = {}) {
+  startedAt = nowMs();
+  failed = false;
+
+  disableLegacyAutoBoot();
+
+  const bootContext = captureBootContext();
+
+  markBooting();
+
+  const moduleValue = await loadAppModule();
+  const bootFn = resolveBootFunction(moduleValue);
+
+  if (!bootFn) {
+    throw new Error("No se encontró función de arranque en src/app/index.js.");
+  }
+
+  const result = await bootFn({
+    ...safeObject(options),
+    source: safeText(options.source, "main"),
+    version: MAIN_VERSION,
+    bootContext,
+    startedAt,
+  });
+
+  markMainReady();
+  exposeLoadedApp(moduleValue, result);
+
+  return result || moduleValue;
+}
+
+function boot(options = {}) {
+  const opts = safeObject(options);
+
+  if (bootPromise && opts.force !== true) {
+    return bootPromise;
+  }
+
+  const externalLock = getExternalBootLock();
+
+  if (externalLock && opts.force !== true) {
+    return externalLock.promise;
+  }
+
+  const promise = runBoot(opts)
+    .catch((error) => {
+      handleFatal(error, "boot");
+      throw error;
+    })
+    .finally(() => {
+      clearBootLock(promise);
+
+      if (bootPromise === promise) {
+        bootPromise = null;
+      }
+    });
+
+  bootPromise = promise;
+  setBootLock(promise);
+
+  return promise;
 }
 
 function start(options = {}) {
@@ -618,30 +718,37 @@ function start(options = {}) {
 function getState() {
   return {
     version: MAIN_VERSION,
+
     startedAt,
-    startedAtIso: startedAt ? new Date(startedAt).toISOString() : "",
+    startedAtIso: startedAt ? nowIso(startedAt) : "",
+
     failed,
     hasBootPromise: Boolean(bootPromise),
     appLoaded: Boolean(appModule),
-    initialUrl: redactUrl(getInitialUrl()),
-    initialPath: redactUrl(getRequestPath()),
+
+    initialUrl: redactUrl(currentHref()),
+    initialPath: redactUrl(currentPath()),
   };
 }
 
+const api = {
+  version: MAIN_VERSION,
+  start,
+  boot,
+  getState,
+};
+
 function exposeDebugBridge() {
-  if (!isBrowser()) return;
+  if (!isBrowser()) return false;
 
   try {
     window.OnionApp = window.OnionApp || {};
-    window.OnionApp.main = {
-      version: MAIN_VERSION,
-      start,
-      boot,
-      getState,
-    };
-
-    window.__ONION_MAIN__ = window.OnionApp.main;
-  } catch {}
+    window.OnionApp.main = api;
+    window[MAIN_DEBUG_KEY] = api;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -650,13 +757,12 @@ function exposeDebugBridge() {
 
 disableLegacyAutoBoot();
 captureBootContext();
-markBooting();
 bindGlobalErrors();
 exposeDebugBridge();
 
 start().catch(() => {
   /*
-    handleFatal() ya pinta el fallback.
+    handleFatal() ya pinta fallback.
   */
 });
 
@@ -671,9 +777,4 @@ export {
   getState,
 };
 
-export default {
-  version: MAIN_VERSION,
-  start,
-  boot,
-  getState,
-};
+export default api;

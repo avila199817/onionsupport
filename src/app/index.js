@@ -2,18 +2,13 @@
    Onion SPA - App Bootstrap
    Archivo: src/app/index.js
 
-   APP ORCHESTRATOR · SIMPLE · CORE ALIGNED · FAST PUBLIC BOOT
-
-   Responsabilidad:
-   - Orquestar boot lógico de la SPA.
-   - Delegar en Core/Auth/Router/UI/I18n/Store/Services.
-   - No autoarrancar salvo override explícito.
-   - No duplicar HTTP/Auth/Router.
-   - Preservar rutas públicas técnicas con token.
-   - Render token routes antes de restore.
-   - Render rutas públicas auth rápido, sin esperar restore.
-   - Restore normal sólo para rutas privadas.
-   - Sin lógica de negocio.
+   APP ORCHESTRATOR · FINAL SIMPLE
+   - Orquesta boot lógico de la SPA
+   - Delega en Core/Auth/Router/UI/I18n/Store/Services
+   - Preserva rutas públicas técnicas con token
+   - Render público técnico antes de restore
+   - Restore normal sólo para rutas privadas
+   - Sin HTTP/Auth/Router/Toast/storage paralelos
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -74,142 +69,30 @@ import {
   warmup,
 } from "./warmup.js";
 
+import {
+  captureInitialUrl as captureRouterInitialUrl,
+  getCurrentPublicPath as getRouterCurrentPublicPath,
+} from "../router/helpers.js";
+
+import {
+  isPublicTechnicalRoute,
+  hasActivationToken,
+  hasResetToken,
+  hasTokenInUrl,
+  redactTokenInText,
+} from "../features/auth/helpers.js";
+
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-export const APP_VERSION = "18.1.0-fast-public-boot";
+export const APP_VERSION = "20.0.0-final";
 
-const SOURCE = "app:index";
-
+const SOURCE = "app.index";
 const RUNTIME_APP_KEY = "__ONION_APP__";
 const AUTO_BOOT_KEY = "__ONION_ALLOW_APP_AUTO_BOOT__";
 const DISABLE_AUTO_BOOT_KEY = "__ONION_DISABLE_AUTO_BOOT__";
-
 const DEFAULT_ROUTE = "/";
-
-const TOKEN_PARAM_NAMES = Object.freeze([
-  "token",
-  "activationToken",
-  "activateToken",
-  "activation_token",
-  "activate_token",
-  "resetToken",
-  "passwordResetToken",
-  "reset_token",
-  "password_reset_token",
-  "confirmToken",
-  "confirm_token",
-  "code",
-  "t",
-  "access_token",
-  "refresh_token",
-  "id_token",
-  "tempToken",
-  "temp_token",
-  "temporaryToken",
-  "temporary_token",
-  "twoFactorToken",
-  "two_factor_token",
-  "mfaToken",
-  "mfa_token",
-  "otpToken",
-  "otp_token",
-  "authorization",
-  "auth",
-  "jwt",
-  "sid",
-]);
-
-const PUBLIC_AUTH_ROUTES = new Set([
-  "/login",
-  "/signin",
-  "/sign-in",
-  "/auth",
-  "/auth/login",
-
-  "/forgot-password",
-  "/recover-password",
-  "/recover",
-  "/password-reset",
-  "/reset-password",
-
-  "/2fa",
-  "/otp",
-  "/mfa",
-
-  "/403",
-  "/404",
-]);
-
-const PUBLIC_TOKEN_ROUTES = Object.freeze([
-  Object.freeze({
-    key: "activation",
-    canonicalPath: "/activate-account",
-    paths: Object.freeze([
-      "/activate-account",
-      "/activate",
-      "/activation",
-      "/account/activate",
-      "/activate/first-user",
-    ]),
-    windowKeys: Object.freeze([
-      "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-    ]),
-    scrubFlags: Object.freeze([
-      "scrubbedActivationToken",
-      "activationTokenScrubbed",
-      "scrubbedActivateAccountToken",
-      "scrubbedPublicTokenRoute",
-      "scrubbedTokenRoute",
-    ]),
-    tokenParams: Object.freeze([
-      "token",
-      "activationToken",
-      "activateToken",
-      "activation_token",
-      "activate_token",
-      "code",
-      "t",
-    ]),
-  }),
-
-  Object.freeze({
-    key: "resetConfirm",
-    canonicalPath: "/reset-password/confirm",
-    paths: Object.freeze([
-      "/reset-password/confirm",
-      "/reset-password-confirm",
-      "/password-reset/confirm",
-      "/password-reset-confirm",
-      "/confirm-reset-password",
-    ]),
-    windowKeys: Object.freeze([
-      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-      "__ONION_RESET_CONFIRM_INITIAL_URL__",
-    ]),
-    scrubFlags: Object.freeze([
-      "scrubbedResetToken",
-      "resetTokenScrubbed",
-      "scrubbedResetConfirmToken",
-      "scrubbedPasswordResetToken",
-      "scrubbedResetPasswordToken",
-      "scrubbedPublicTokenRoute",
-      "scrubbedTokenRoute",
-    ]),
-    tokenParams: Object.freeze([
-      "token",
-      "resetToken",
-      "passwordResetToken",
-      "reset_token",
-      "password_reset_token",
-      "confirmToken",
-      "confirm_token",
-      "code",
-      "t",
-    ]),
-  }),
-]);
 
 /* =========================================================
    RUNTIME
@@ -219,7 +102,6 @@ let bootPromise = null;
 let booted = false;
 let booting = false;
 let eventsBound = false;
-
 let lastError = null;
 let lastReadyAt = "";
 
@@ -229,20 +111,12 @@ const disposers = [];
    BASICS
 ========================================================= */
 
-function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
-}
+const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
+const isFn = (value) => typeof value === "function";
+const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
-function isFn(value) {
-  return typeof value === "function";
-}
-
-function isObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function object(value) {
-  return isObject(value) ? value : {};
+function object(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
 }
 
 function text(value, fallback = "") {
@@ -280,67 +154,24 @@ function safeAsync(fn, fallback = null, ...args) {
   }
 }
 
-/* =========================================================
-   REDACTION
-========================================================= */
-
-function escapeRegExp(value = "") {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function redact(value = "") {
-  let output = text(value, "");
-
-  if (!output) return "";
-
-  for (const param of TOKEN_PARAM_NAMES) {
-    try {
-      output = output.replace(
-        new RegExp(`([?&#]${escapeRegExp(param)}=)([^&#\\s]+)`, "gi"),
-        "$1***"
-      );
-    } catch {}
-  }
-
-  for (const route of PUBLIC_TOKEN_ROUTES) {
-    for (const path of route.paths) {
-      try {
-        output = output.replace(
-          new RegExp(`(${escapeRegExp(path)}\\/)([^/?#\\s]+)`, "gi"),
-          "$1***"
-        );
-      } catch {}
-    }
-  }
-
   try {
-    output = output
-      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-      .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
-  } catch {}
-
-  return output;
+    return redactTokenInText(value);
+  } catch {
+    return text(value, "");
+  }
 }
 
 function sanitize(value, depth = 0, keyHint = "") {
-  if (depth > 5) return "[MaxDepth]";
+  if (depth > 4) return "[depth-limit]";
 
   if (/token|secret|password|authorization|credential|cookie|jwt|bearer|session|refresh|otp|mfa|2fa|code/i.test(keyHint)) {
     return value ? "***" : value;
   }
 
   if (typeof value === "string") return redact(value);
-
-  if (
-    value === null ||
-    value === undefined ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
-  if (typeof value === "function") return "[Function]";
+  if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "function") return "[function]";
 
   if (value instanceof Error) {
     return {
@@ -348,18 +179,15 @@ function sanitize(value, depth = 0, keyHint = "") {
       message: redact(value.message || ""),
       code: value.code || null,
       status: value.status || value.statusCode || null,
-      stack: value.stack ? "[stack]" : "",
     };
   }
 
-  if (Array.isArray(value)) {
-    return value.slice(0, 80).map((item) => sanitize(item, depth + 1, keyHint));
-  }
+  if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitize(item, depth + 1, keyHint));
 
   if (isObject(value)) {
     const output = {};
 
-    for (const [key, item] of Object.entries(value).slice(0, 120)) {
+    for (const [key, item] of Object.entries(value).slice(0, 80)) {
       output[key] = sanitize(item, depth + 1, key);
     }
 
@@ -386,367 +214,95 @@ function log(...args) {
 
   try {
     AppCore?.utils?.log?.("[App]", ...args.map((item) => sanitize(item)));
-    return;
-  } catch {}
-
-  try {
-    console.log("[App]", ...args.map((item) => sanitize(item)));
-  } catch {}
+  } catch {
+    try {
+      console.log("[App]", ...args.map((item) => sanitize(item)));
+    } catch {}
+  }
 }
 
 function warn(...args) {
   try {
     AppCore?.utils?.warn?.("[App]", ...args.map((item) => sanitize(item)));
-    return;
-  } catch {}
-
-  try {
-    console.warn("[App]", ...args.map((item) => sanitize(item)));
-  } catch {}
+  } catch {
+    try {
+      console.warn("[App]", ...args.map((item) => sanitize(item)));
+    } catch {}
+  }
 }
 
 function errorLog(...args) {
   try {
     AppCore?.utils?.error?.("[App]", ...args.map((item) => sanitize(item)));
-    return;
-  } catch {}
-
-  try {
-    console.error("[App]", ...args.map((item) => sanitize(item)));
-  } catch {}
+  } catch {
+    try {
+      console.error("[App]", ...args.map((item) => sanitize(item)));
+    } catch {}
+  }
 }
 
 function emit(eventName = "", payload = {}, options = {}) {
   const name = text(eventName, "");
+  if (!name || options.emit === false || options.emitEvents === false) return false;
 
-  if (!name) return false;
-
-  const detail = sanitize({
-    source: SOURCE,
-    version: APP_VERSION,
-    at: isoNow(),
-    ...object(payload),
-  });
-
-  let emitted = false;
-  let hasBus = false;
+  const detail = sanitize({ source: SOURCE, version: APP_VERSION, at: isoNow(), ...object(payload) });
 
   try {
-    if (isFn(AppCore?.events?.emit)) {
-      hasBus = true;
-      AppCore.events.emit(name, detail);
-      emitted = true;
+    AppCore?.events?.emit?.(name, detail);
+    return true;
+  } catch {}
+
+  try {
+    if (isBrowser() && typeof CustomEvent !== "undefined") {
+      window.dispatchEvent(new CustomEvent(name, { detail }));
+      return true;
     }
   } catch {}
 
-  if ((options.window === true || !hasBus) && isBrowser()) {
-    try {
-      window.dispatchEvent(new CustomEvent(name, { detail }));
-      emitted = true;
-    } catch {}
-  }
-
-  return emitted;
+  return false;
 }
 
 /* =========================================================
-   PATH / PUBLIC TOKEN BOOT
+   PATH / PUBLIC BOOT
 ========================================================= */
 
-function origin() {
-  if (isBrowser() && window.location?.origin) return window.location.origin;
-  return "http://localhost";
-}
-
-function isHashRouterPath(value = "") {
-  const raw = text(value, "");
-  return raw.startsWith("#/") || raw.startsWith("#!");
-}
-
-function normalizeHashRouterPath(value = "") {
-  const raw = text(value, "");
-  if (!raw) return DEFAULT_ROUTE;
-  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
-  return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
-}
-
-function normalizePathname(value = DEFAULT_ROUTE) {
-  let path = text(value, DEFAULT_ROUTE)
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
-  if (!path.startsWith("/")) path = `/${path}`;
-
-  const output = [];
-
-  for (const part of path.split("/").filter(Boolean)) {
-    if (part === ".") continue;
-
-    if (part === "..") {
-      output.pop();
-      continue;
-    }
-
-    output.push(part);
-  }
-
-  path = `/${output.join("/")}`;
-
-  return path.length > 1 ? path.replace(/\/+$/g, "") : path;
-}
-
-function splitPath(value = DEFAULT_ROUTE) {
-  let raw = text(value, DEFAULT_ROUTE);
-
-  if (isHashRouterPath(raw)) {
-    raw = normalizeHashRouterPath(raw);
-  }
-
-  let pathname = raw;
-  let search = "";
-  let hash = "";
-
-  const hashIndex = pathname.indexOf("#");
-
-  if (hashIndex >= 0) {
-    hash = pathname.slice(hashIndex);
-    pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
-  }
-
-  const searchIndex = pathname.indexOf("?");
-
-  if (searchIndex >= 0) {
-    search = pathname.slice(searchIndex);
-    pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
-  }
-
-  return {
-    pathname: normalizePathname(pathname),
-    search: search ? (search.startsWith("?") ? search : `?${search}`) : "",
-    hash: hash ? (hash.startsWith("#") ? hash : `#${hash}`) : "",
-  };
-}
-
-function toLocalPath(value = DEFAULT_ROUTE) {
-  const raw = text(value, DEFAULT_ROUTE);
-
-  if (isHashRouterPath(raw)) {
-    return toLocalPath(normalizeHashRouterPath(raw));
-  }
-
-  try {
-    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const url = new URL(raw, origin());
-
-      if (url.origin !== origin()) {
-        return DEFAULT_ROUTE;
-      }
-
-      if (url.hash && isHashRouterPath(url.hash)) {
-        return toLocalPath(normalizeHashRouterPath(url.hash));
-      }
-
-      return toLocalPath(`${url.pathname || DEFAULT_ROUTE}${url.search || ""}${url.hash || ""}`);
-    }
-  } catch {
-    return DEFAULT_ROUTE;
-  }
-
-  const parts = splitPath(raw);
-  return `${parts.pathname}${parts.search}${parts.hash}`;
-}
-
-function stripSearchHash(value = DEFAULT_ROUTE) {
-  return splitPath(toLocalPath(value)).pathname || DEFAULT_ROUTE;
-}
-
-function stripUsernamePrefix(pathname = DEFAULT_ROUTE) {
-  const clean = normalizePathname(pathname);
-  const parts = clean.split("/").filter(Boolean);
-
-  if (/^@[A-Za-z0-9._-]{1,80}$/.test(parts[0] || "")) {
-    const rest = parts.slice(1).join("/");
-    return rest ? normalizePathname(`/${rest}`) : DEFAULT_ROUTE;
-  }
-
-  return clean;
-}
-
-function canonicalPath(value = DEFAULT_ROUTE) {
-  return stripUsernamePrefix(stripSearchHash(value));
-}
-
-function getBrowserPublicPath() {
+function browserPath() {
   if (!isBrowser()) return DEFAULT_ROUTE;
 
   try {
     const { pathname, search, hash } = window.location;
-
-    if (hash && isHashRouterPath(hash)) {
-      return toLocalPath(normalizeHashRouterPath(hash));
-    }
-
-    return toLocalPath(`${pathname || DEFAULT_ROUTE}${search || ""}${hash || ""}`);
+    if (hash?.startsWith?.("#/") || hash?.startsWith?.("#!")) return hash.replace(/^#!?\/?/, "/") || DEFAULT_ROUTE;
+    return `${pathname || DEFAULT_ROUTE}${search || ""}${hash || ""}`;
   } catch {
     return DEFAULT_ROUTE;
   }
 }
 
-function getBrowserHref() {
-  if (!isBrowser()) return "";
-
-  try {
-    return window.location.href || "";
-  } catch {
-    return "";
-  }
+function currentPublicPath() {
+  return (
+    safeCall(() => Router?.getCurrentPublicPath?.(), "") ||
+    safeCall(() => getRouterCurrentPublicPath?.(AppCore), "") ||
+    AppCore?.state?.publicPath ||
+    browserPath()
+  );
 }
 
-function getCurrentPath() {
-  try {
-    return Router?.getCurrentPublicPath?.() || getBrowserPublicPath();
-  } catch {
-    return getBrowserPublicPath();
-  }
-}
+function publicBootContext() {
+  safeCall(captureRouterInitialUrl, false);
 
-function hasTokenInSearch(search = "", names = []) {
-  try {
-    const params = new URLSearchParams(search || "");
-    return names.some((name) => Boolean(text(params.get(name), "")));
-  } catch {
-    return false;
-  }
-}
-
-function getPathToken(route, value = "") {
-  const clean = canonicalPath(toLocalPath(value));
-
-  for (const path of route.paths) {
-    if (!clean.startsWith(`${path}/`)) continue;
-
-    const token = clean.slice(`${path}/`.length).split("/")[0];
-
-    try {
-      return text(decodeURIComponent(token || ""), "");
-    } catch {
-      return text(token, "");
-    }
-  }
-
-  return "";
-}
-
-function hasRouteToken(route, value = "") {
-  const raw = text(value, "");
-
-  if (!raw) return false;
-  if (getPathToken(route, raw)) return true;
-
-  try {
-    const url = new URL(raw, origin());
-
-    if (url.origin !== origin()) return false;
-
-    if (hasTokenInSearch(url.search, route.tokenParams)) return true;
-
-    if (url.hash && isHashRouterPath(url.hash)) {
-      const hashPath = normalizeHashRouterPath(url.hash);
-
-      if (getPathToken(route, hashPath)) return true;
-
-      const hashParts = splitPath(hashPath);
-
-      if (hasTokenInSearch(hashParts.search, route.tokenParams)) return true;
-    }
-
-    if (url.hash && url.hash.includes("?")) {
-      const query = url.hash.split("?").slice(1).join("?");
-      return hasTokenInSearch(query ? `?${query}` : "", route.tokenParams);
-    }
-  } catch {
-    const parts = splitPath(raw);
-
-    if (hasTokenInSearch(parts.search, route.tokenParams)) return true;
-
-    if (parts.hash && parts.hash.includes("?")) {
-      const query = parts.hash.split("?").slice(1).join("?");
-      return hasTokenInSearch(query ? `?${query}` : "", route.tokenParams);
-    }
-  }
-
-  return false;
-}
-
-function historyState() {
-  if (!isBrowser()) return {};
-
-  try {
-    return object(window.history?.state);
-  } catch {
-    return {};
-  }
-}
-
-function isScrubbed(route) {
-  const state = historyState();
-
-  return route.scrubFlags.some((flag) => Boolean(state[flag]));
-}
-
-function getPublicTokenBoot() {
-  if (!isBrowser()) {
-    return {
-      active: false,
-      route: null,
-      publicPath: DEFAULT_ROUTE,
-      canonicalPath: DEFAULT_ROUTE,
-      href: "",
-    };
-  }
-
-  const href = getBrowserHref();
-  const publicPath = getBrowserPublicPath();
-  const clean = canonicalPath(publicPath);
-
-  for (const route of PUBLIC_TOKEN_ROUTES) {
-    const matches = route.paths.some((path) => clean === path || clean.startsWith(`${path}/`));
-
-    if (!matches || isScrubbed(route)) continue;
-
-    if (hasRouteToken(route, href) || hasRouteToken(route, publicPath)) {
-      return {
-        active: true,
-        route,
-        key: route.key,
-        publicPath,
-        canonicalPath: route.canonicalPath,
-        href,
-      };
-    }
-  }
+  const publicPath = currentPublicPath();
+  const publicRoute = safeCall(isPublicTechnicalRoute, false, publicPath) === true;
+  const tokenRoute = Boolean(
+    safeCall(hasActivationToken, false, publicPath) ||
+      safeCall(hasResetToken, false, publicPath) ||
+      safeCall(hasTokenInUrl, false, publicPath, "twoFactor")
+  );
 
   return {
-    active: false,
-    route: null,
+    active: Boolean(publicRoute),
+    tokenRoute,
     publicPath,
-    canonicalPath: clean,
-    href,
   };
-}
-
-function isPublicAuthRoute(path = getBrowserPublicPath()) {
-  const clean = canonicalPath(path);
-
-  if (PUBLIC_AUTH_ROUTES.has(clean)) return true;
-
-  for (const publicPath of PUBLIC_AUTH_ROUTES) {
-    if (publicPath !== DEFAULT_ROUTE && clean.startsWith(`${publicPath}/`)) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 function hasLocalToken() {
@@ -755,15 +311,7 @@ function hasLocalToken() {
 
     const state = AppCore?.state || {};
     const session = state.session || state.sessionData || {};
-
-    const token =
-      state.token ||
-      state.accessToken ||
-      state.access_token ||
-      session.token ||
-      session.accessToken ||
-      session.access_token ||
-      "";
+    const token = state.token || state.accessToken || state.access_token || session.token || session.accessToken || session.access_token || "";
 
     if (text(token, "")) return true;
   } catch {}
@@ -777,83 +325,13 @@ function hasLocalToken() {
   return false;
 }
 
-function shouldRenderBeforeRestore(tokenBoot = null) {
-  if (tokenBoot?.active) return true;
-  return isPublicAuthRoute(getBrowserPublicPath());
-}
-
-function setWindowValueOnce(key = "", value = "") {
-  if (!isBrowser() || !key || !value) return false;
-
-  try {
-    if (!window[key]) window[key] = value;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function patchBootContext(patch = {}) {
-  if (!isBrowser()) return false;
-
-  try {
-    window.__ONION_BOOT_CONTEXT__ = {
-      ...object(window.__ONION_BOOT_CONTEXT__),
-      ...object(patch),
-    };
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function captureInitialUrl() {
-  if (!isBrowser()) return null;
-
-  const boot = getPublicTokenBoot();
-
-  try {
-    const href = getBrowserHref();
-
-    if (href) {
-      setWindowValueOnce("__ONION_INITIAL_URL__", href);
-    }
-
-    if (boot.active && boot.route) {
-      for (const key of boot.route.windowKeys) {
-        setWindowValueOnce(key, href);
-      }
-
-      patchBootContext({
-        bootProtectedInitialUrl: href,
-        bootProtectedInitialPublicPath: boot.publicPath,
-        bootProtectedInitialPath: boot.canonicalPath,
-        bootProtectedRouteKey: boot.key,
-        bootIsPublicTokenRoute: true,
-        bootHasPublicToken: true,
-      });
-    }
-  } catch {}
-
-  return boot;
-}
-
 /* =========================================================
-   CORE BRIDGES / DEPS
+   CORE / MODULES
 ========================================================= */
 
 function getCoreHttp() {
   try {
-    return (
-      AppCore?.getHttpClient?.() ||
-      AppCore?.Http ||
-      AppCore?.http ||
-      AppCore?.services?.http ||
-      AppCore?.services?.api ||
-      AppCore?.apiClient ||
-      null
-    );
+    return AppCore?.getHttpClient?.() || AppCore?.Http || AppCore?.http || AppCore?.services?.http || AppCore?.services?.api || AppCore?.apiClient || null;
   } catch {
     return null;
   }
@@ -861,78 +339,32 @@ function getCoreHttp() {
 
 function registerCoreModule(name = "", value = null, aliases = []) {
   const cleanName = text(name, "");
-
   if (!cleanName || !value) return false;
 
   try {
-    AppCore?.modules?.register?.(cleanName, value, {
-      overwrite: true,
-      replace: true,
-      aliases,
-      source: SOURCE,
-      silent: true,
-      emit: false,
-    });
-
+    AppCore?.modules?.register?.(cleanName, value, { overwrite: true, replace: true, aliases, source: SOURCE, silent: true, emit: false });
     return true;
   } catch {}
 
   try {
-    AppCore?.modules?.set?.(cleanName, value, {
-      overwrite: true,
-      replace: true,
-      source: SOURCE,
-      emit: false,
-    });
-
+    AppCore?.modules?.set?.(cleanName, value, { overwrite: true, replace: true, source: SOURCE, emit: false });
     return true;
   } catch {}
 
-  try {
-    AppCore.registry.modules.set(cleanName, value);
-    return true;
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 function exposeModulesToCore() {
   if (!AppCore || typeof AppCore !== "object") return false;
 
-  try {
-    AppCore.Router = Router;
-    AppCore.router = Router;
-  } catch {}
-
-  try {
-    AppCore.Auth = Auth;
-    AppCore.auth = Auth;
-  } catch {}
-
-  try {
-    AppCore.Store = Store;
-    AppCore.store = Store;
-  } catch {}
-
-  try {
-    AppCore.Toast = Toast;
-    AppCore.toast = Toast;
-  } catch {}
-
-  try {
-    AppCore.I18n = I18n;
-    AppCore.i18n = I18n;
-  } catch {}
-
-  try {
-    AppCore.SidebarUI = SidebarUI;
-    AppCore.sidebarUI = SidebarUI;
-    AppCore.sidebar = SidebarUI;
-
-    AppCore.TopbarUI = TopbarUI;
-    AppCore.topbarUI = TopbarUI;
-    AppCore.topbar = TopbarUI;
-  } catch {}
+  try { AppCore.App = App; AppCore.app = App; } catch {}
+  try { AppCore.Router = Router; AppCore.router = Router; } catch {}
+  try { AppCore.Auth = Auth; AppCore.auth = Auth; } catch {}
+  try { AppCore.Store = Store; AppCore.store = Store; } catch {}
+  try { AppCore.Toast = Toast; AppCore.toast = Toast; } catch {}
+  try { AppCore.I18n = I18n; AppCore.i18n = I18n; } catch {}
+  try { AppCore.SidebarUI = SidebarUI; AppCore.sidebarUI = SidebarUI; AppCore.sidebar = SidebarUI; } catch {}
+  try { AppCore.TopbarUI = TopbarUI; AppCore.topbarUI = TopbarUI; AppCore.topbar = TopbarUI; } catch {}
 
   registerCoreModule("App", App, ["app"]);
   registerCoreModule("Router", Router, ["router"]);
@@ -946,14 +378,8 @@ function exposeModulesToCore() {
   try {
     AppCore.services = AppCore.services || {};
     AppCore.services.serviceHttp = ServiceHttp;
-
-    if (!AppCore.services.http) {
-      AppCore.services.http = getCoreHttp() || ServiceHttp;
-    }
-
-    if (!AppCore.services.api) {
-      AppCore.services.api = AppCore.services.http;
-    }
+    AppCore.services.http = AppCore.services.http || getCoreHttp() || ServiceHttp;
+    AppCore.services.api = AppCore.services.api || AppCore.services.http;
   } catch {}
 
   return true;
@@ -963,43 +389,29 @@ function buildDeps(extra = {}) {
   return {
     AppCore,
     App,
-
     Store,
     Auth,
     Router,
-
     Http: getCoreHttp() || ServiceHttp,
     ServiceHttp,
-
     SidebarUI,
     TopbarUI,
     Toast,
     I18n,
-
     getViewContainer,
     setShellVisibility,
     updateShellVisibilityByRoute,
     applyPostRenderLoaderPolicy,
-
     ...object(extra),
   };
 }
 
 function setState(patch = {}, options = {}) {
   const cleanPatch = object(patch);
-
   if (!Object.keys(cleanPatch).length) return false;
 
   try {
-    AppCore?.setState?.(cleanPatch, {
-      source: SOURCE,
-      emit: false,
-      emitState: false,
-      emitDerived: false,
-      silent: true,
-      ...object(options),
-    });
-
+    AppCore?.setState?.(cleanPatch, { source: SOURCE, emit: false, emitState: false, silent: true, ...object(options) });
     return true;
   } catch {}
 
@@ -1022,12 +434,12 @@ function callInit(target, deps = {}, names = ["init"]) {
     try {
       const result = target[name](deps);
       return result !== false;
-    } catch (errorWithDeps) {
+    } catch (withDepsError) {
       try {
         const result = target[name]();
         return result !== false;
-      } catch (errorWithoutDeps) {
-        warn(`${name} falló.`, errorWithoutDeps || errorWithDeps);
+      } catch (withoutDepsError) {
+        warn(`${name} falló.`, withoutDepsError || withDepsError);
         return false;
       }
     }
@@ -1043,72 +455,40 @@ function callInit(target, deps = {}, names = ["init"]) {
 async function initCore() {
   exposeModulesToCore();
 
-  if (isFn(AppCore?.installHttpBridge)) {
-    safeCall(() => AppCore.installHttpBridge("app:init"));
-  }
+  if (isFn(AppCore?.installHttpBridge)) safeCall(() => AppCore.installHttpBridge("app:init"));
 
   if (isFn(AppCore?.init)) {
-    await AppCore.init({
-      source: SOURCE,
-      version: APP_VERSION,
-    });
+    await AppCore.init({ source: SOURCE, version: APP_VERSION });
   }
 
   exposeModulesToCore();
 
-  setState({
-    appVersion: APP_VERSION,
-    appBooting: true,
-    appReady: false,
-    appBooted: false,
-    appSource: SOURCE,
-  });
-
+  setState({ appVersion: APP_VERSION, appBooting: true, appReady: false, appBooted: false, appSource: SOURCE });
   return true;
 }
 
 async function initServices() {
   callInit(ServiceHttp, buildDeps(), ["init", "boot", "start"]);
-
-  setState({
-    servicesReady: true,
-  });
-
+  setState({ servicesReady: true });
   return true;
 }
 
 async function initStore() {
   callInit(Store, buildDeps(), ["init", "boot", "start"]);
+  setState({ storeReady: true });
+  return true;
+}
 
-  setState({
-    storeReady: true,
-  });
-
+async function initAuth() {
+  callInit(Auth, buildDeps({ skipRestore: true, skipNavigation: true, noRedirect: true }), ["init", "boot", "start"]);
+  setState({ authReady: true });
   return true;
 }
 
 async function initLanguage() {
-  try {
-    await safeAsync(initI18n, true, buildDeps());
-  } catch (error) {
-    warn("initI18n falló.", error);
-  }
-
-  try {
-    await safeAsync(
-      syncLangState,
-      true,
-      buildDeps({
-        reason: "app-boot",
-      })
-    );
-  } catch {}
-
-  setState({
-    i18nReady: true,
-    i18nInitialized: true,
-  });
-
+  await safeAsync(initI18n, true, buildDeps());
+  await safeAsync(syncLangState, true, buildDeps({ reason: "app-boot" }));
+  setState({ i18nReady: true, i18nInitialized: true });
   return true;
 }
 
@@ -1129,9 +509,15 @@ async function initRouter() {
     }
   }
 
-  if (!configured) {
-    throw new Error("No se pudo configurar el Router.");
+  if (!configured && isFn(Router?.init)) {
+    try {
+      configured = Router.init(buildDeps()) !== false;
+    } catch (error) {
+      warn("Router.init falló.", error);
+    }
   }
+
+  if (!configured) throw new Error("No se pudo configurar el Router.");
 
   let bound = false;
 
@@ -1149,11 +535,7 @@ async function initRouter() {
     }
   }
 
-  setState({
-    routerReady: true,
-    routerBound: Boolean(bound),
-  });
-
+  setState({ routerReady: true, routerBound: Boolean(bound) });
   return true;
 }
 
@@ -1161,81 +543,33 @@ async function initUI() {
   let ok = false;
 
   try {
-    ok = initUISystems?.(
-      buildDeps({
-        state: getState(),
-        scope: "app:ui",
-      })
-    ) !== false;
+    ok = initUISystems?.(buildDeps({ state: getState(), scope: "app:ui" })) !== false;
   } catch (error) {
     warn("initUISystems falló.", error);
   }
 
-  try {
-    syncUserUI?.(
-      buildDeps({
-        reason: "app-boot",
-      })
-    );
-  } catch {}
+  try { syncUserUI?.(buildDeps({ reason: "app-boot" })); } catch {}
+  try { repairUISystems?.(buildDeps({ reason: "app-boot" })); } catch {}
 
-  try {
-    repairUISystems?.(
-      buildDeps({
-        reason: "app-boot",
-      })
-    );
-  } catch {}
-
-  setState({
-    uiReady: Boolean(ok),
-    uiInitialized: Boolean(ok),
-  });
-
+  setState({ uiReady: Boolean(ok), uiInitialized: Boolean(ok) });
   return true;
 }
 
 async function bindEvents() {
   if (eventsBound) return true;
-
   eventsBound = true;
 
   try {
-    const disposer = bindGlobalErrorHandlers?.(
-      buildDeps({
-        scope: "app:errors",
-      })
-    );
-
+    const disposer = bindGlobalErrorHandlers?.(buildDeps({ scope: "app:errors" }));
     if (isFn(disposer)) disposers.push(disposer);
   } catch {}
 
   try {
-    const disposer = bindAppEvents?.(
-      buildDeps({
-        scope: "app:events",
-
-        syncUserUI: () => {
-          try {
-            syncUserUI?.(
-              buildDeps({
-                reason: "app-event",
-              })
-            );
-          } catch {}
-        },
-
-        repairUISystems: () => {
-          try {
-            repairUISystems?.(
-              buildDeps({
-                reason: "app-event",
-              })
-            );
-          } catch {}
-        },
-      })
-    );
+    const disposer = bindAppEvents?.(buildDeps({
+      scope: "app:events",
+      syncUserUI: () => safeCall(syncUserUI, null, buildDeps({ reason: "app-event" })),
+      repairUISystems: () => safeCall(repairUISystems, null, buildDeps({ reason: "app-event" })),
+    }));
 
     if (isFn(disposer)) disposers.push(disposer);
   } catch {}
@@ -1251,29 +585,15 @@ async function restoreSession({ skipNavigation = false } = {}) {
   if (!isFn(restoreSessionInBackground)) return null;
 
   try {
-    const result = await restoreSessionInBackground(
-      buildDeps({
-        state: getState(),
-        warmup,
-
-        skipNavigation,
-        skipRedirect: skipNavigation,
-        noRedirect: skipNavigation,
-        skipPostRestoreNavigation: skipNavigation,
-
-        syncUserUI: () => {
-          try {
-            syncUserUI?.(
-              buildDeps({
-                reason: "restore-session",
-              })
-            );
-          } catch {}
-        },
-      })
-    );
-
-    return result || null;
+    return await restoreSessionInBackground(buildDeps({
+      state: getState(),
+      warmup,
+      skipNavigation,
+      skipRedirect: skipNavigation,
+      noRedirect: skipNavigation,
+      skipPostRestoreNavigation: skipNavigation,
+      syncUserUI: () => safeCall(syncUserUI, null, buildDeps({ reason: "restore-session" })),
+    }));
   } catch (error) {
     warn("restoreSession falló.", error);
     return null;
@@ -1297,66 +617,37 @@ function restoreHandledNavigation(result = null) {
 function restoreInBackgroundIfUseful(reason = "background-restore") {
   if (!hasLocalToken()) return false;
 
-  setState({
-    appRestoreBackgroundStarted: true,
-    appRestoreBackgroundReason: reason,
-  });
+  setState({ appRestoreBackgroundStarted: true, appRestoreBackgroundReason: reason });
 
-  void restoreSession({
-    skipNavigation: true,
-  }).then((result) => {
-    setState({
-      appRestoreBackgroundDone: true,
-      appRestoreBackgroundAt: isoNow(),
-      appRestoreBackgroundHandled: restoreHandledNavigation(result),
+  void restoreSession({ skipNavigation: true })
+    .then((result) => {
+      setState({ appRestoreBackgroundDone: true, appRestoreBackgroundAt: isoNow(), appRestoreBackgroundHandled: restoreHandledNavigation(result) });
+    })
+    .catch((error) => {
+      warn("restore background falló.", error);
+      setState({ appRestoreBackgroundDone: true, appRestoreBackgroundError: true, appRestoreBackgroundAt: isoNow() });
     });
-  }).catch((error) => {
-    warn("restore background falló.", error);
-
-    setState({
-      appRestoreBackgroundDone: true,
-      appRestoreBackgroundError: true,
-      appRestoreBackgroundAt: isoNow(),
-    });
-  });
 
   return true;
 }
 
 async function renderRoute(reason = "initial") {
-  const path = getCurrentPath();
+  const path = currentPublicPath();
 
   if (isFn(renderInitialRoute)) {
-    return renderInitialRoute(
-      buildDeps({
-        reason,
-        source: SOURCE,
-        path,
-        publicPath: path,
-      })
-    );
+    return renderInitialRoute(buildDeps({ reason, source: SOURCE, path, publicPath: path }));
+  }
+
+  if (isFn(Router?.renderCurrent)) {
+    return Router.renderCurrent({ force: true, forceRender: true, preservePublicPath: true, preserveUrl: true, reason, source: SOURCE });
   }
 
   if (isFn(Router?.render)) {
-    return Router.render(path, {
-      force: true,
-      forceRender: true,
-      preservePublicPath: true,
-      preserveUrl: true,
-      reason,
-      source: SOURCE,
-    });
+    return Router.render(path, { force: true, forceRender: true, preservePublicPath: true, preserveUrl: true, reason, source: SOURCE });
   }
 
   if (isFn(Router?.navigate)) {
-    return Router.navigate(path, {
-      force: true,
-      forceRender: true,
-      preservePublicPath: true,
-      preserveUrl: true,
-      reason,
-      source: SOURCE,
-    });
+    return Router.navigate(path, { force: true, forceRender: true, preservePublicPath: true, preserveUrl: true, reason, source: SOURCE });
   }
 
   throw new Error("No hay función disponible para renderizar la ruta inicial.");
@@ -1367,61 +658,26 @@ async function renderRoute(reason = "initial") {
 ========================================================= */
 
 async function finalizeBoot() {
-  try {
-    syncUserUI?.(
-      buildDeps({
-        reason: "finalize-boot",
-      })
-    );
-  } catch {}
-
-  try {
-    repairUISystems?.(
-      buildDeps({
-        reason: "finalize-boot",
-      })
-    );
-  } catch {}
+  safeCall(syncUserUI, null, buildDeps({ reason: "finalize-boot" }));
+  safeCall(repairUISystems, null, buildDeps({ reason: "finalize-boot" }));
 
   booted = true;
   booting = false;
   lastReadyAt = isoNow();
 
-  setState({
-    appBooting: false,
-    appReady: true,
-    appBooted: true,
-    appReadyAt: lastReadyAt,
-    ready: true,
-    booting: false,
-  });
+  setState({ appBooting: false, appReady: true, appBooted: true, appReadyAt: lastReadyAt, ready: true, booting: false });
 
   try {
-    hideLoader(AppCore, {
-      reason: "app-ready",
-      minVisibleMs: 300,
-      finalize: true,
-    });
+    hideLoader(AppCore, { reason: "app-ready", minVisibleMs: 300, finalize: true });
   } catch {}
 
-  emit("app:boot:complete", {
-    at: lastReadyAt,
-  });
+  emit("app:boot:complete", { at: lastReadyAt });
+  emit("app:ready", { at: lastReadyAt });
 
-  emit("app:ready", {
-    at: lastReadyAt,
-  });
-
-  log("ready", {
-    at: lastReadyAt,
-  });
+  log("ready", { at: lastReadyAt });
 
   try {
-    void warmup?.(
-      buildDeps({
-        reason: "after-boot",
-      })
-    );
+    void warmup?.(buildDeps({ reason: "after-boot" }));
   } catch {}
 
   return true;
@@ -1429,23 +685,11 @@ async function finalizeBoot() {
 
 function renderFatal(error) {
   try {
-    forceHideLoader(AppCore, {
-      reason: "app-boot-error",
-      force: true,
-    });
+    forceHideLoader(AppCore, { reason: "app-boot-error", force: true });
   } catch {}
 
   try {
-    renderBootError({
-      AppCore,
-      Auth,
-      Router,
-      Toast,
-      error,
-      getViewContainer,
-      setShellVisibility,
-      hideLoader: forceHideLoader,
-    });
+    renderBootError({ AppCore, Auth, Router, Toast, error, getViewContainer, setShellVisibility, hideLoader: forceHideLoader });
   } catch (renderError) {
     errorLog("No se pudo renderizar boot error.", renderError);
   }
@@ -1463,19 +707,12 @@ function failBoot(error) {
     appReady: false,
     appBooted: false,
     appError: true,
-    appLastError: {
-      message,
-      name: text(error?.name, "Error"),
-      at: isoNow(),
-    },
+    appLastError: { message, name: text(error?.name, "Error"), at: isoNow() },
     booting: false,
     ready: false,
   });
 
-  emit("app:boot:error", {
-    message,
-  });
-
+  emit("app:boot:error", { message });
   renderFatal(error);
 
   return App;
@@ -1487,8 +724,8 @@ function failBoot(error) {
 
 async function runBoot(options = {}) {
   const opts = object(options);
-  const tokenBoot = captureInitialUrl();
-  const fastPublicBoot = shouldRenderBeforeRestore(tokenBoot);
+  const bootContext = publicBootContext();
+  const fastPublicBoot = Boolean(bootContext.active);
 
   booting = true;
   booted = false;
@@ -1500,75 +737,49 @@ async function runBoot(options = {}) {
     appBooted: false,
     appError: false,
     appSource: text(opts.source, SOURCE),
-    appPublicTokenBoot: Boolean(tokenBoot?.active),
-    appFastPublicBoot: Boolean(fastPublicBoot),
+    appPublicTokenBoot: Boolean(bootContext.tokenRoute),
+    appFastPublicBoot: fastPublicBoot,
     booting: true,
     ready: false,
   });
 
   emit("app:boot:start", {
-    publicTokenBoot: Boolean(tokenBoot?.active),
-    publicTokenRouteKey: tokenBoot?.key || null,
-    fastPublicBoot: Boolean(fastPublicBoot),
-    path: redact(tokenBoot?.publicPath || getBrowserPublicPath()),
+    publicTokenBoot: Boolean(bootContext.tokenRoute),
+    fastPublicBoot,
+    path: redact(bootContext.publicPath || browserPath()),
   });
 
   try {
-    showLoader(AppCore, {
-      booting: true,
-      reason: "app-boot",
-    });
+    showLoader(AppCore, { booting: true, reason: "app-boot" });
   } catch {}
 
   await initCore();
   await bindEvents();
   await initServices();
   await initStore();
+  await initAuth();
   await initLanguage();
   await initRouter();
   await initUI();
 
-  if (tokenBoot?.active) {
-    await renderRoute("public-token-first");
-
-    restoreInBackgroundIfUseful("public-token-route");
-
-    setState({
-      appPublicTokenRouteRendered: true,
-    });
-  } else if (fastPublicBoot) {
-    await renderRoute("public-fast-first");
-
-    restoreInBackgroundIfUseful("public-auth-route");
-
-    setState({
-      appPublicRouteRendered: true,
-    });
+  if (fastPublicBoot) {
+    await renderRoute(bootContext.tokenRoute ? "public-token-first" : "public-fast-first");
+    restoreInBackgroundIfUseful(bootContext.tokenRoute ? "public-token-route" : "public-auth-route");
+    setState({ appPublicRouteRendered: true, appPublicTokenRouteRendered: Boolean(bootContext.tokenRoute) });
   } else {
-    const restoreResult = await restoreSession({
-      skipNavigation: false,
-    });
-
-    if (!restoreHandledNavigation(restoreResult)) {
-      await renderRoute("after-restore");
-    }
+    const restoreResult = await restoreSession({ skipNavigation: false });
+    if (!restoreHandledNavigation(restoreResult)) await renderRoute("after-restore");
   }
 
   await finalizeBoot();
-
   return App;
 }
 
 export function boot(options = {}) {
   const opts = object(options);
 
-  if (booted && opts.force !== true) {
-    return Promise.resolve(App);
-  }
-
-  if (bootPromise && opts.force !== true) {
-    return bootPromise;
-  }
+  if (booted && opts.force !== true) return Promise.resolve(App);
+  if (bootPromise && opts.force !== true) return bootPromise;
 
   bootPromise = runBoot(opts)
     .catch((error) => failBoot(error))
@@ -1584,16 +795,8 @@ export function start(options = {}) {
 }
 
 export async function reboot(options = {}) {
-  destroy({
-    keepGlobal: true,
-    silent: true,
-  });
-
-  return boot({
-    ...object(options),
-    force: true,
-    reason: text(options?.reason, "reboot"),
-  });
+  destroy({ keepGlobal: true, silent: true });
+  return boot({ ...object(options), force: true, reason: text(options?.reason, "reboot") });
 }
 
 export function destroy(options = {}) {
@@ -1618,31 +821,16 @@ export function destroy(options = {}) {
   } catch {}
 
   try {
-    forceHideLoader(AppCore, {
-      reason: "app-destroy",
-      force: true,
-    });
+    forceHideLoader(AppCore, { reason: "app-destroy", force: true });
   } catch {}
 
-  setState({
-    appBooting: false,
-    appReady: false,
-    appBooted: false,
-    booting: false,
-    ready: false,
-  });
+  setState({ appBooting: false, appReady: false, appBooted: false, booting: false, ready: false });
 
-  if (opts.silent !== true) {
-    emit("app:destroy", {
-      at: isoNow(),
-    });
-  }
+  if (opts.silent !== true) emit("app:destroy", { at: isoNow() });
 
   if (!opts.keepGlobal && isBrowser()) {
     try {
-      if (window[RUNTIME_APP_KEY] === App) {
-        delete window[RUNTIME_APP_KEY];
-      }
+      if (window[RUNTIME_APP_KEY] === App) delete window[RUNTIME_APP_KEY];
     } catch {}
   }
 
@@ -1654,39 +842,26 @@ export function destroy(options = {}) {
 ========================================================= */
 
 export function getState() {
-  const tokenBoot = getPublicTokenBoot();
-  const publicPath = getCurrentPath();
+  const bootContext = publicBootContext();
+  const path = currentPublicPath();
 
   return {
     version: APP_VERSION,
-
     booted,
     booting,
     hasBootPromise: Boolean(bootPromise),
-
     lastReadyAt,
-
-    lastError: lastError
-      ? {
-          message: text(lastError.message || lastError, ""),
-          name: text(lastError.name, "Error"),
-        }
-      : null,
-
-    publicTokenBoot: Boolean(tokenBoot.active),
-    publicTokenRouteKey: tokenBoot.key || null,
-    publicAuthRoute: isPublicAuthRoute(publicPath),
+    lastError: lastError ? { message: text(lastError.message || lastError, ""), name: text(lastError.name, "Error") } : null,
+    publicTokenBoot: Boolean(bootContext.tokenRoute),
+    publicAuthRoute: Boolean(bootContext.active),
     hasLocalToken: hasLocalToken(),
-
-    path: redact(publicPath),
-
+    path: redact(path),
     coreReady: Boolean(AppCore),
     servicesReady: Boolean(getCoreHttp() || ServiceHttp),
     storeReady: Boolean(Store),
     authReady: Boolean(Auth),
     routerReady: Boolean(Router),
     uiReady: Boolean(SidebarUI || TopbarUI),
-
     state: {
       appBooting: Boolean(AppCore?.state?.appBooting),
       appReady: Boolean(AppCore?.state?.appReady),
@@ -1704,7 +879,6 @@ export function getSnapshot() {
     source: SOURCE,
     version: APP_VERSION,
     ...getState(),
-
     modules: {
       AppCore: Boolean(AppCore),
       Auth: Boolean(Auth),
@@ -1717,7 +891,14 @@ export function getSnapshot() {
       Toast: Boolean(Toast),
       I18n: Boolean(I18n),
     },
-
+    policy: {
+      ownHttp: false,
+      ownAuth: false,
+      ownRouter: false,
+      ownToast: false,
+      ownStorage: false,
+      bootOnly: true,
+    },
     at: isoNow(),
   };
 }
@@ -1739,37 +920,13 @@ export const App = {
   getDebugSnapshot: getSnapshot,
   snapshot: getSnapshot,
 
-  getCore() {
-    return AppCore;
-  },
-
-  getRouter() {
-    return Router;
-  },
-
-  getAuth() {
-    return Auth;
-  },
-
-  getStore() {
-    return Store;
-  },
-
-  getHttp() {
-    return getCoreHttp() || ServiceHttp;
-  },
-
-  getUI() {
-    return {
-      SidebarUI,
-      TopbarUI,
-      Toast,
-    };
-  },
-
-  getI18n() {
-    return I18n;
-  },
+  getCore: () => AppCore,
+  getRouter: () => Router,
+  getAuth: () => Auth,
+  getStore: () => Store,
+  getHttp: () => getCoreHttp() || ServiceHttp,
+  getUI: () => ({ SidebarUI, TopbarUI, Toast }),
+  getI18n: () => I18n,
 };
 
 /* =========================================================
@@ -1777,9 +934,7 @@ export const App = {
 ========================================================= */
 
 try {
-  if (isBrowser()) {
-    window[RUNTIME_APP_KEY] = App;
-  }
+  if (isBrowser()) window[RUNTIME_APP_KEY] = App;
 } catch {}
 
 try {
@@ -1791,14 +946,8 @@ try {
 ========================================================= */
 
 try {
-  if (
-    isBrowser() &&
-    window[DISABLE_AUTO_BOOT_KEY] !== true &&
-    window[AUTO_BOOT_KEY] === true
-  ) {
-    boot({
-      source: "app:auto",
-    });
+  if (isBrowser() && window[DISABLE_AUTO_BOOT_KEY] !== true && window[AUTO_BOOT_KEY] === true) {
+    boot({ source: "app:auto" });
   }
 } catch {}
 

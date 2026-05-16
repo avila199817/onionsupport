@@ -2,15 +2,13 @@
    Onion SPA - Core
    Archivo: src/core/index.js
 
-   CORE SINGLETON · CLEAN KERNEL
+   CORE SINGLETON · SIMPLE KERNEL
    - AppCore único
    - State / Events / Storage / Cleanup / Modules / Hooks
    - request.js = motor HTTP base
    - http.js = facade HTTP única
    - Auth estricta: token + user activo
-   - Token sin user conserva hasToken para /me, pero NO autentica
-   - User sin token NO autentica
-   - Bridges Router/Auth/Store/Http sin event storm
+   - Bridges Router/Auth/Store/Http sin sistemas paralelos
    - Snapshots sin secretos
 ========================================================= */
 
@@ -41,17 +39,10 @@ import {
   cloneState,
   setState as stateSetState,
   setStateBase as stateSetStateBase,
-  getState as stateGetState,
-  getStateBase as stateGetStateBase,
   computeAuthenticated,
 } from "./state.js";
 
-import {
-  createDomCache,
-  cacheDom,
-  validateRequiredDom,
-} from "./dom.js";
-
+import { createDomCache, cacheDom, validateRequiredDom } from "./dom.js";
 import { createStorage } from "./storage.js";
 import { createEvents } from "./events.js";
 import { createCleanup } from "./cleanup.js";
@@ -81,11 +72,7 @@ import {
   syncUserUI as syncUserUIBase,
 } from "./ui.js";
 
-import {
-  createRequest,
-  createApiClient,
-} from "./request.js";
-
+import { createRequest, createApiClient } from "./request.js";
 import * as CoreHttpModule from "./http.js";
 
 import {
@@ -97,17 +84,13 @@ import {
 export const AppCore = (() => {
   "use strict";
 
-  /* =======================================================
-     CONSTANTS
-  ======================================================= */
-
-  const VERSION = "18.0.0-clean-core";
+  const VERSION = "19.0.0-simple-core";
   const SOURCE = "core";
 
   const DEFAULT_APP_NAME = "Onion Support";
-  const DEFAULT_STORAGE_PREFIX = "onion";
   const DEFAULT_LANG = "es";
   const DEFAULT_THEME = "dark";
+  const DEFAULT_STORAGE_PREFIX = "onion";
 
   const EVENTS = Object.freeze({
     initStart: "app:core:init:start",
@@ -147,13 +130,19 @@ export const AppCore = (() => {
     "mfa_token",
     "twoFactorToken",
     "two_factor_token",
+    "otpToken",
+    "otp_token",
     "password",
-    "otp",
-    "code",
-    "authorization",
-    "jwt",
-    "bearer",
+    "passwordHash",
     "secret",
+    "authorization",
+    "cookie",
+    "otp",
+    "totp",
+    "code",
+    "backupCodes",
+    "connectionString",
+    "sas",
   ]);
 
   const TOKEN_KEYS = Object.freeze([
@@ -166,26 +155,6 @@ export const AppCore = (() => {
     "bearer",
     "idToken",
     "id_token",
-  ]);
-
-  const REFRESH_TOKEN_KEYS = Object.freeze([
-    "refreshToken",
-    "refresh_token",
-  ]);
-
-  const TEMP_TOKEN_KEYS = Object.freeze([
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "challengeToken",
-    "challenge_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
-    "otpToken",
-    "otp_token",
   ]);
 
   const USER_KEYS = Object.freeze([
@@ -213,62 +182,7 @@ export const AppCore = (() => {
     "user_name",
     "email",
     "mail",
-    "phone",
-    "telefono",
-    "mobile",
-    "displayName",
-    "name",
-    "nombre",
   ]);
-
-  const SESSION_ID_KEYS = Object.freeze([
-    "sessionId",
-    "session_id",
-    "sid",
-  ]);
-
-  const SESSION_USER_ID_KEYS = Object.freeze([
-    "sessionUserId",
-    "session_user_id",
-    "userId",
-    "user_id",
-    "uid",
-    "sub",
-  ]);
-
-  const NESTED_KEYS = Object.freeze([
-    "data",
-    "payload",
-    "result",
-    "body",
-    "response",
-    "auth",
-    "authData",
-    "session",
-    "sessionData",
-    "account",
-    "profile",
-    "me",
-    "user",
-    "usuario",
-  ]);
-
-  const BRIDGE_CANONICAL = Object.freeze({
-    Router: "Router",
-    router: "Router",
-
-    Auth: "Auth",
-    auth: "Auth",
-
-    Store: "Store",
-    store: "Store",
-
-    Http: "Http",
-    http: "Http",
-    ApiClient: "Http",
-    apiClient: "Http",
-    api: "Http",
-  });
 
   const BRIDGE_ALIASES = Object.freeze({
     Router: Object.freeze(["Router", "router"]),
@@ -277,14 +191,29 @@ export const AppCore = (() => {
     Http: Object.freeze(["Http", "http", "ApiClient", "apiClient", "api"]),
   });
 
-  /* =======================================================
-     RUNTIME
-  ======================================================= */
+  const BRIDGE_CANONICAL = Object.freeze({
+    Router: "Router",
+    router: "Router",
+    Auth: "Auth",
+    auth: "Auth",
+    Store: "Store",
+    store: "Store",
+    Http: "Http",
+    http: "Http",
+    ApiClient: "Http",
+    apiClient: "Http",
+    api: "Http",
+  });
+
+  const registry = {
+    modules: new Map(),
+    scopes: new Map(),
+    hooks: Object.create(null),
+  };
 
   let initialized = false;
   let initPromise = null;
   let initCycle = 0;
-
   let networkBound = false;
   let readyCallbacksFlushed = false;
 
@@ -296,22 +225,6 @@ export const AppCore = (() => {
   let httpInstalled = false;
   let httpReadyEmitted = false;
 
-  const registry = {
-    modules: new Map(),
-    scopes: new Map(),
-    hooks: {
-      beforeInit: [],
-      afterInit: [],
-      beforeRequest: [],
-      afterResponse: [],
-      onRequestError: [],
-    },
-  };
-
-  /* =======================================================
-     BASICS
-  ======================================================= */
-
   function isBrowser() {
     return typeof window !== "undefined" && typeof document !== "undefined";
   }
@@ -322,10 +235,6 @@ export const AppCore = (() => {
 
   function isObject(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value);
-  }
-
-  function anyObject(value) {
-    return value !== null && typeof value === "object";
   }
 
   function object(value) {
@@ -341,7 +250,6 @@ export const AppCore = (() => {
 
   function text(value, fallback = "") {
     if (value === null || value === undefined) return fallback;
-
     const output = String(value).trim();
     return output || fallback;
   }
@@ -357,57 +265,26 @@ export const AppCore = (() => {
 
   function bool(value, fallback = false) {
     if (value === true || value === false) return value;
-
-    if (typeof value === "number") {
-      if (value === 1) return true;
-      if (value === 0) return false;
-    }
+    if (value === 1 || value === "1") return true;
+    if (value === 0 || value === "0") return false;
 
     const clean = lower(value, "");
 
-    if (["true", "1", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(clean)) {
-      return true;
-    }
-
-    if (["false", "0", "no", "off", "disabled", "inactive"].includes(clean)) {
-      return false;
-    }
+    if (["true", "yes", "si", "sí", "on", "active", "enabled"].includes(clean)) return true;
+    if (["false", "no", "off", "inactive", "disabled"].includes(clean)) return false;
 
     return Boolean(fallback);
   }
 
-  function unique(values = []) {
-    return [
-      ...new Set(
-        array(values)
-          .flat(Infinity)
-          .map((item) => text(item, ""))
-          .filter(Boolean)
-      ),
-    ];
-  }
-
   function now() {
-    try {
-      return Date.now();
-    } catch {
-      return 0;
-    }
+    return Date.now();
   }
 
-  function iso(ms = now()) {
+  function iso(value = now()) {
     try {
-      return new Date(ms).toISOString();
+      return new Date(value).toISOString();
     } catch {
       return "";
-    }
-  }
-
-  function hasOwn(obj, key) {
-    try {
-      return Object.prototype.hasOwnProperty.call(obj, key);
-    } catch {
-      return false;
     }
   }
 
@@ -417,9 +294,7 @@ export const AppCore = (() => {
     } catch {}
 
     try {
-      if (typeof structuredClone === "function") {
-        return structuredClone(value);
-      }
+      if (typeof structuredClone === "function") return structuredClone(value);
     } catch {}
 
     try {
@@ -429,17 +304,13 @@ export const AppCore = (() => {
     }
   }
 
-  function first(...values) {
-    for (const value of values) {
-      if (value === null || value === undefined) continue;
-      if (typeof value === "string" && value.trim() === "") continue;
-      if (Array.isArray(value) && value.length === 0) continue;
-      if (isObject(value) && Object.keys(value).length === 0) continue;
+  function safeFactory(factory, fallback) {
+    try {
+      const value = isFn(factory) ? factory() : null;
+      if (value) return value;
+    } catch {}
 
-      return value;
-    }
-
-    return null;
+    return isFn(fallback) ? fallback() : fallback;
   }
 
   function appName() {
@@ -450,8 +321,8 @@ export const AppCore = (() => {
     return Boolean(
       config?.debug ||
         config?.dev ||
-        config?.environment === "development" ||
-        config?.env === "development"
+        config?.env === "development" ||
+        config?.environment === "development"
     );
   }
 
@@ -477,32 +348,15 @@ export const AppCore = (() => {
     } catch {}
   }
 
-  function safeFactory(factory, fallback, ...args) {
-    try {
-      if (isFn(factory)) {
-        const value = factory(...args);
-
-        if (value) return value;
-      }
-    } catch {}
-
-    return isFn(fallback) ? fallback() : fallback;
-  }
-
-  /* =======================================================
-     REDACTION
-  ======================================================= */
-
   function escapeRegExp(value = "") {
     return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
-  function redact(value = "") {
+  function redactText(value = "") {
     let output = text(value, "");
-
     if (!output) return "";
 
-    const params = [
+    for (const key of [
       "token",
       "activationToken",
       "activateToken",
@@ -515,21 +369,14 @@ export const AppCore = (() => {
       "refresh_token",
       "id_token",
       "tempToken",
-      "temp_token",
       "temporaryToken",
-      "temporary_token",
       "twoFactorToken",
-      "two_factor_token",
       "mfaToken",
-      "mfa_token",
       "otpToken",
-      "otp_token",
-    ];
-
-    for (const name of params) {
+    ]) {
       try {
         output = output.replace(
-          new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi"),
+          new RegExp(`([?&#]${escapeRegExp(key)}=)([^&#\\s]+)`, "gi"),
           "$1***"
         );
       } catch {}
@@ -537,12 +384,11 @@ export const AppCore = (() => {
 
     try {
       output = output
-        .replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***")
-        .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***")
-        .replace(/(\/password-reset\/confirm\/)([^/?#\s]+)/gi, "$1***")
-        .replace(/(\/(?:2fa|otp|mfa)\/)([^/?#\s]+)/gi, "$1***")
-        .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-        .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+        .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1***")
+        .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***")
+        .replace(/(\/(?:activate-account|activate|activation)\/)([^/?#\s]+)/gi, "$1***")
+        .replace(/(\/(?:reset-password\/confirm|password-reset\/confirm)\/)([^/?#\s]+)/gi, "$1***")
+        .replace(/(\/(?:2fa|mfa|otp)\/)([^/?#\s]+)/gi, "$1***");
     } catch {}
 
     return output;
@@ -555,44 +401,51 @@ export const AppCore = (() => {
 
     return {
       name: text(source?.name, "Error"),
-      message: redact(text(source?.message || source?.reason || source, "Error")),
-      code: text(source?.code || source?.data?.code || source?.response?.data?.code || "", ""),
+      message: redactText(text(source?.message || source?.reason || source, "Error")),
+      code: text(source?.code || source?.data?.code || source?.response?.data?.code, ""),
       status: number(source?.status || source?.statusCode || source?.response?.status, 0),
-      timeout: Boolean(source?.timeout),
       aborted: Boolean(source?.aborted),
+      timeout: Boolean(source?.timeout),
       at: iso(),
     };
   }
 
-  function sanitizeState(input = {}) {
-    const clean = clone(input, {}) || {};
+  function sanitizeValue(value, depth = 0, seen = new WeakSet()) {
+    if (depth > 7) return "[depth-limit]";
+    if (typeof value === "string") return redactText(value);
+    if (!value || typeof value !== "object") return value;
 
-    for (const key of SENSITIVE_KEYS) {
-      if (key in clean) {
-        clean[key] = clean[key] ? "***" : null;
-      }
+    try {
+      if (seen.has(value)) return "[circular]";
+      seen.add(value);
+    } catch {}
+
+    if (Array.isArray(value)) {
+      return value.map((item) => sanitizeValue(item, depth + 1, seen));
     }
 
-    for (const key of [
-      "route",
-      "publicPath",
-      "lastRoute",
-      "lastPublicPath",
-      "bootInitialUrl",
-      "bootProtectedInitialUrl",
-      "bootActivationInitialUrl",
-      "bootResetConfirmInitialUrl",
-      "lastRequestUrl",
-    ]) {
-      if (clean[key]) {
-        clean[key] = redact(clean[key]);
-      }
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      const cleanKey = lower(key, "");
+
+      output[key] = SENSITIVE_KEYS.some((sensitive) => cleanKey.includes(lower(sensitive)))
+        ? item
+          ? "***"
+          : null
+        : sanitizeValue(item, depth + 1, seen);
     }
 
-    if (clean.error) clean.error = sanitizeError(clean.error);
-    if (clean.lastError) clean.lastError = sanitizeError(clean.lastError);
+    return output;
+  }
 
-    return clean;
+  function sanitizeState(input = state) {
+    const output = sanitizeValue(clone(input, {}), 0) || {};
+
+    if (output.error) output.error = sanitizeError(output.error);
+    if (output.lastError) output.lastError = sanitizeError(output.lastError);
+
+    return output;
   }
 
   function publicUser(user = null) {
@@ -611,45 +464,26 @@ export const AppCore = (() => {
   function snapshotFrom(ref, options = {}) {
     if (!ref) return null;
 
-    try {
-      if (isFn(ref.getSnapshot)) return ref.getSnapshot(options);
-    } catch {}
-
-    try {
-      if (isFn(ref.getDebugSnapshot)) return ref.getDebugSnapshot(options);
-    } catch {}
-
-    try {
-      if (isFn(ref.snapshot)) return ref.snapshot(options);
-    } catch {}
+    for (const key of ["getSnapshot", "getDebugSnapshot", "snapshot"]) {
+      try {
+        if (isFn(ref[key])) return ref[key](options);
+      } catch {}
+    }
 
     return null;
   }
 
-  /* =======================================================
-     FALLBACK EVENTS
-  ======================================================= */
-
   function fallbackEvents() {
     const map = new Map();
 
-    function setFor(name) {
-      const key = text(name, "");
-
-      if (!key) return null;
-      if (!map.has(key)) map.set(key, new Set());
-
-      return map.get(key);
-    }
-
     function on(name, handler) {
-      const set = setFor(name);
+      const key = text(name, "");
+      if (!key || !isFn(handler)) return () => false;
 
-      if (!set || !isFn(handler)) return () => false;
+      if (!map.has(key)) map.set(key, new Set());
+      map.get(key).add(handler);
 
-      set.add(handler);
-
-      return () => off(name, handler);
+      return () => off(key, handler);
     }
 
     function once(name, handler) {
@@ -662,12 +496,7 @@ export const AppCore = (() => {
 
         disposed = true;
         dispose();
-
-        try {
-          handler(...args);
-        } catch (err) {
-          warn("event once handler error", name, err);
-        }
+        handler(...args);
       });
 
       return dispose;
@@ -675,68 +504,51 @@ export const AppCore = (() => {
 
     function off(name, handler = null) {
       const key = text(name, "");
-
       if (!key) return false;
 
-      if (!handler) {
-        map.delete(key);
-        return true;
-      }
+      if (!handler) return map.delete(key);
 
       map.get(key)?.delete(handler);
-
       return true;
     }
 
     function emit(name, payload = {}) {
       const key = text(name, "");
-
       if (!key) return false;
 
-      const handlers = [...(map.get(key) || [])];
-      const wildcard = [...(map.get("*") || [])];
+      const event = { type: key, detail: payload, payload };
 
-      const event = {
-        type: key,
-        detail: payload,
-        payload,
-      };
-
-      for (const handler of handlers) {
+      for (const handler of [...(map.get(key) || [])]) {
         try {
           handler(event);
         } catch (err) {
-          warn("event handler error", key, err);
+          warn("event handler failed", key, err);
         }
       }
 
-      for (const handler of wildcard) {
+      for (const handler of [...(map.get("*") || [])]) {
         try {
           handler(key, payload, event);
         } catch (err) {
-          warn("event wildcard handler error", key, err);
+          warn("event wildcard handler failed", key, err);
         }
       }
-
-      return handlers.length + wildcard.length > 0;
-    }
-
-    function clear(name = "") {
-      const key = text(name, "");
-
-      if (key) map.delete(key);
-      else map.clear();
 
       return true;
     }
 
-    function getSnapshot() {
-      return {
-        fallback: true,
-        names: [...map.keys()],
-        listenerCount: [...map.values()].reduce((sum, set) => sum + set.size, 0),
-      };
+    function clear(name = "") {
+      const key = text(name, "");
+      if (key) map.delete(key);
+      else map.clear();
+      return true;
     }
+
+    const getSnapshot = () => ({
+      fallback: true,
+      names: [...map.keys()],
+      listenerCount: [...map.values()].reduce((sum, set) => sum + set.size, 0),
+    });
 
     return {
       on,
@@ -747,473 +559,19 @@ export const AppCore = (() => {
       trigger: emit,
       clear,
       removeAllListeners: clear,
-
       getSnapshot,
       getDebugSnapshot: getSnapshot,
       snapshot: getSnapshot,
     };
   }
 
-  /* =======================================================
-     FALLBACK STORAGE
-  ======================================================= */
-
-  function fallbackStorage() {
-    const memory = new Map();
-    const prefix = text(config?.storagePrefix || config?.appKey, DEFAULT_STORAGE_PREFIX);
-
-    function key(name = "") {
-      const clean = text(name, "");
-
-      if (!clean) return `${prefix}:`;
-
-      if (
-        clean.startsWith(`${prefix}:`) ||
-        clean.startsWith(`${prefix}.`) ||
-        clean.startsWith(`${prefix}_`)
-      ) {
-        return clean;
-      }
-
-      return `${prefix}:${clean}`;
-    }
-
-    function web(kind = "localStorage") {
-      if (!isBrowser()) return null;
-
-      try {
-        return window?.[kind] || null;
-      } catch {
-        return null;
-      }
-    }
-
-    function getRaw(name, fallback = null) {
-      const finalKey = key(name);
-
-      try {
-        const local = web("localStorage")?.getItem?.(finalKey);
-
-        if (local !== null && local !== undefined) return local;
-      } catch {}
-
-      try {
-        const session = web("sessionStorage")?.getItem?.(finalKey);
-
-        if (session !== null && session !== undefined) return session;
-      } catch {}
-
-      return memory.has(finalKey) ? memory.get(finalKey) : fallback;
-    }
-
-    function setRaw(name, value, options = {}) {
-      const finalKey = key(name);
-
-      if (value === null || value === undefined) return remove(name);
-
-      const raw = String(value);
-
-      memory.set(finalKey, raw);
-
-      try {
-        const target = options.session === true
-          ? web("sessionStorage")
-          : web("localStorage");
-
-        target?.setItem?.(finalKey, raw);
-      } catch {}
-
-      return true;
-    }
-
-    function parse(raw, fallback = null) {
-      if (raw === null || raw === undefined || raw === "") return fallback;
-
-      try {
-        return JSON.parse(raw);
-      } catch {
-        return fallback;
-      }
-    }
-
-    function get(name, fallback = null) {
-      const raw = getRaw(name, undefined);
-
-      if (raw === undefined) return fallback;
-
-      const parsed = parse(raw, undefined);
-
-      return parsed === undefined ? raw : parsed;
-    }
-
-    function set(name, value, options = {}) {
-      try {
-        return setRaw(name, JSON.stringify(value), options);
-      } catch {
-        return setRaw(name, String(value ?? ""), options);
-      }
-    }
-
-    function remove(name) {
-      const finalKey = key(name);
-
-      memory.delete(finalKey);
-
-      try {
-        web("localStorage")?.removeItem?.(finalKey);
-      } catch {}
-
-      try {
-        web("sessionStorage")?.removeItem?.(finalKey);
-      } catch {}
-
-      return true;
-    }
-
-    function getSnapshot() {
-      return {
-        fallback: true,
-        prefix,
-        memoryKeys: [...memory.keys()].map(redact),
-      };
-    }
-
-    return {
-      prefix,
-      key,
-      normalizeKey: key,
-
-      getRaw,
-      setRaw,
-
-      get,
-      set,
-
-      getJson: (name, fallback = null) => parse(getRaw(name, null), fallback),
-      setJson: set,
-
-      remove,
-      del: remove,
-      delete: remove,
-
-      has: (name) => getRaw(name, undefined) !== undefined,
-      keys: () => [...memory.keys()],
-
-      getSnapshot,
-      getDebugSnapshot: getSnapshot,
-      snapshot: getSnapshot,
-    };
-  }
-
-  /* =======================================================
-     FALLBACK CLEANUP
-  ======================================================= */
-
-  function fallbackCleanup() {
-    function scope(name = "global") {
-      const clean = text(name, "global");
-
-      if (!registry.scopes.has(clean)) {
-        registry.scopes.set(clean, new Set());
-      }
-
-      return clean;
-    }
-
-    function add(scopeName, disposer) {
-      if (!isFn(disposer)) return () => false;
-
-      const clean = scope(scopeName);
-      registry.scopes.get(clean).add(disposer);
-
-      return () => {
-        try {
-          disposer();
-        } catch {}
-
-        try {
-          registry.scopes.get(clean)?.delete(disposer);
-        } catch {}
-
-        return true;
-      };
-    }
-
-    function event(scopeName, target, eventName, handler, options = false) {
-      if (!target || !eventName || !isFn(handler)) return () => false;
-
-      try {
-        target.addEventListener(eventName, handler, options);
-        return add(scopeName, () => target.removeEventListener(eventName, handler, options));
-      } catch {
-        return () => false;
-      }
-    }
-
-    function timeout(scopeName, fn, ms = 0) {
-      if (!isFn(fn)) return () => false;
-
-      try {
-        const id = setTimeout(fn, Math.max(0, number(ms, 0)));
-        return add(scopeName, () => clearTimeout(id));
-      } catch {
-        return () => false;
-      }
-    }
-
-    function interval(scopeName, fn, ms = 0) {
-      if (!isFn(fn)) return () => false;
-
-      try {
-        const id = setInterval(fn, Math.max(0, number(ms, 0)));
-        return add(scopeName, () => clearInterval(id));
-      } catch {
-        return () => false;
-      }
-    }
-
-    function run(scopeName = "global") {
-      const clean = text(scopeName, "global");
-      const disposers = registry.scopes.get(clean);
-
-      if (!disposers) return true;
-
-      for (const dispose of [...disposers]) {
-        try {
-          dispose();
-        } catch {}
-      }
-
-      disposers.clear();
-
-      return true;
-    }
-
-    function clear(scopeName = "") {
-      const clean = text(scopeName, "");
-
-      if (clean) return run(clean);
-
-      for (const key of [...registry.scopes.keys()]) {
-        run(key);
-      }
-
-      registry.scopes.clear();
-
-      return true;
-    }
-
-    function getSnapshot() {
-      return {
-        fallback: true,
-        scopes: [...registry.scopes.entries()].map(([name, set]) => ({
-          name,
-          count: set.size,
-        })),
-      };
-    }
-
-    return {
-      scope: (name) => ({ name: scope(name) }),
-      ensureScope: (name) => ({ name: scope(name) }),
-
-      add,
-      on: event,
-      event,
-      bus: event,
-
-      timeout,
-      timer: timeout,
-      interval,
-
-      run,
-      dispose: run,
-      clear,
-
-      getSnapshot,
-      getDebugSnapshot: getSnapshot,
-      snapshot: getSnapshot,
-    };
-  }
-
-  /* =======================================================
-     FALLBACK MODULES / HOOKS
-  ======================================================= */
-
-  function fallbackModules() {
-    function get(name) {
-      return registry.modules.get(text(name, "")) || null;
-    }
-
-    function register(name, value, options = {}) {
-      const key = text(name, "");
-
-      if (!key || !value) return false;
-
-      const previous = registry.modules.get(key);
-
-      if (previous && options.replace !== true && options.overwrite !== true) {
-        return previous;
-      }
-
-      registry.modules.set(key, value);
-
-      if (options.emit === true) {
-        emit(
-          previous ? EVENTS.moduleReplaced : EVENTS.moduleRegistered,
-          {
-            name: key,
-            replaced: Boolean(previous),
-            source: SOURCE,
-          }
-        );
-      }
-
-      return value;
-    }
-
-    function set(name, value, options = {}) {
-      return register(name, value, {
-        ...object(options),
-        replace: options.replace !== false,
-        overwrite: options.overwrite !== false,
-      });
-    }
-
-    function remove(name) {
-      return registry.modules.delete(text(name, ""));
-    }
-
-    function list() {
-      return [...registry.modules.keys()];
-    }
-
-    function getSnapshot() {
-      return {
-        fallback: true,
-        count: registry.modules.size,
-        modules: list(),
-      };
-    }
-
-    return {
-      has: (name) => registry.modules.has(text(name, "")),
-      get,
-
-      register,
-      set,
-      upsert: set,
-
-      remove,
-      delete: remove,
-      unregister: remove,
-
-      list,
-      names: list,
-
-      getSnapshot,
-      getDebugSnapshot: getSnapshot,
-      snapshot: getSnapshot,
-    };
-  }
-
-  function fallbackHooks() {
-    function listFor(name) {
-      const key = text(name, "");
-
-      if (!key) return null;
-      if (!Array.isArray(registry.hooks[key])) registry.hooks[key] = [];
-
-      return registry.hooks[key];
-    }
-
-    function add(name, handler) {
-      const list = listFor(name);
-
-      if (!list || !isFn(handler)) return () => false;
-
-      list.push(handler);
-
-      return () => {
-        const key = text(name, "");
-        registry.hooks[key] = array(registry.hooks[key]).filter((item) => item !== handler);
-        return true;
-      };
-    }
-
-    async function run(name, payload = {}) {
-      let current = payload;
-
-      for (const hook of array(registry.hooks[text(name, "")])) {
-        if (!isFn(hook)) continue;
-
-        try {
-          const next = await hook(current);
-
-          if (next !== undefined) current = next;
-        } catch (err) {
-          warn("hook error", name, err);
-        }
-      }
-
-      return current;
-    }
-
-    function clear(name = "") {
-      const key = text(name, "");
-
-      if (key) {
-        registry.hooks[key] = [];
-      } else {
-        Object.keys(registry.hooks).forEach((hookName) => {
-          registry.hooks[hookName] = [];
-        });
-      }
-
-      return true;
-    }
-
-    function getSnapshot() {
-      return Object.fromEntries(
-        Object.entries(registry.hooks).map(([key, value]) => [
-          key,
-          Array.isArray(value) ? value.length : 0,
-        ])
-      );
-    }
-
-    return {
-      add,
-      on: add,
-      use: add,
-      register: add,
-
-      run,
-      runSeries: run,
-
-      get: (name) => array(registry.hooks[text(name, "")]),
-      clear,
-
-      getSnapshot,
-      getDebugSnapshot: getSnapshot,
-      snapshot: getSnapshot,
-    };
-  }
-
-  /* =======================================================
-     ROOT OBJECTS
-  ======================================================= */
-
-  const events = safeFactory(createEvents, fallbackEvents, {
-    maxRecentEvents: config?.diagnostics?.maxRecentEvents,
-  });
-
-  const state = safeFactory(createInitialState, () => ({}), { config }) || {};
-  const dom = safeFactory(createDomCache, () => ({})) || {};
+  const events = safeFactory(
+    () => createEvents({ maxRecentEvents: config?.diagnostics?.maxRecentEvents }),
+    fallbackEvents
+  );
 
   function emit(name, payload = {}) {
     const eventName = text(name, "");
-
     if (!eventName) return false;
 
     try {
@@ -1281,13 +639,7 @@ export const AppCore = (() => {
     },
 
     sleep(ms = 0) {
-      return new Promise((resolve) => {
-        try {
-          setTimeout(resolve, Math.max(0, number(ms, 0)));
-        } catch {
-          resolve();
-        }
-      });
+      return new Promise((resolve) => setTimeout(resolve, Math.max(0, number(ms, 0))));
     },
 
     nextTick(fn) {
@@ -1305,17 +657,9 @@ export const AppCore = (() => {
       }
 
       try {
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          try {
-            fn();
-          } catch {}
-        }));
+        requestAnimationFrame(() => requestAnimationFrame(() => fn()));
       } catch {
-        setTimeout(() => {
-          try {
-            fn();
-          } catch {}
-        }, 0);
+        setTimeout(fn, 0);
       }
     },
 
@@ -1345,7 +689,7 @@ export const AppCore = (() => {
     getInitials,
     isPublicApiPath,
 
-    redactTokenInText: redact,
+    redactTokenInText: redactText,
     sanitizeErrorForSnapshot: sanitizeError,
     sanitizeStateForSnapshot: sanitizeState,
 
@@ -1363,32 +707,338 @@ export const AppCore = (() => {
     nowIso: iso,
   };
 
-  const cleanup = safeFactory(createCleanup, fallbackCleanup, {
-    registry,
-    events,
-    utils,
-  });
+  function fallbackStorage() {
+    const memory = new Map();
+    const prefix = text(config?.storagePrefix || config?.appKey, DEFAULT_STORAGE_PREFIX);
 
-  const storage = safeFactory(createStorage, fallbackStorage, {
-    utils,
-    events,
-  });
+    const key = (name = "") => {
+      const clean = text(name, "");
+      if (!clean) return `${prefix}:`;
+      if (clean.startsWith(`${prefix}:`) || clean.startsWith(`${prefix}.`) || clean.startsWith(`${prefix}_`)) {
+        return clean;
+      }
+      return `${prefix}:${clean}`;
+    };
 
-  const modules = safeFactory(createModules, fallbackModules, {
-    registry,
-    events,
-    utils,
-  });
+    const area = (session = false) => {
+      if (!isBrowser()) return null;
 
-  const hooks = safeFactory(createHooks, fallbackHooks, {
-    registry,
-    events,
-    utils,
-  });
+      try {
+        return session ? window.sessionStorage : window.localStorage;
+      } catch {
+        return null;
+      }
+    };
 
-  /* =======================================================
-     AUTH DERIVATION
-  ======================================================= */
+    const getRaw = (name, fallback = null) => {
+      const finalKey = key(name);
+
+      try {
+        const value = area(false)?.getItem?.(finalKey);
+        if (value !== null && value !== undefined) return value;
+      } catch {}
+
+      try {
+        const value = area(true)?.getItem?.(finalKey);
+        if (value !== null && value !== undefined) return value;
+      } catch {}
+
+      return memory.has(finalKey) ? memory.get(finalKey) : fallback;
+    };
+
+    const setRaw = (name, value, options = {}) => {
+      const finalKey = key(name);
+      if (value === null || value === undefined) return remove(name);
+
+      const raw = String(value);
+      memory.set(finalKey, raw);
+
+      try {
+        area(options.session === true)?.setItem?.(finalKey, raw);
+      } catch {}
+
+      return true;
+    };
+
+    const parse = (raw, fallback = null) => {
+      if (raw === null || raw === undefined || raw === "") return fallback;
+
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return fallback;
+      }
+    };
+
+    const get = (name, fallback = null) => {
+      const raw = getRaw(name, undefined);
+      if (raw === undefined) return fallback;
+
+      const parsed = parse(raw, undefined);
+      return parsed === undefined ? raw : parsed;
+    };
+
+    const set = (name, value, options = {}) => {
+      try {
+        return setRaw(name, JSON.stringify(value), options);
+      } catch {
+        return setRaw(name, String(value ?? ""), options);
+      }
+    };
+
+    function remove(name) {
+      const finalKey = key(name);
+      memory.delete(finalKey);
+
+      try {
+        area(false)?.removeItem?.(finalKey);
+      } catch {}
+
+      try {
+        area(true)?.removeItem?.(finalKey);
+      } catch {}
+
+      return true;
+    }
+
+    const getSnapshot = () => ({
+      fallback: true,
+      prefix,
+      memoryKeys: [...memory.keys()].map(redactText),
+    });
+
+    return {
+      prefix,
+      key,
+      normalizeKey: key,
+      getRaw,
+      setRaw,
+      get,
+      set,
+      getJson: (name, fallback = null) => parse(getRaw(name, null), fallback),
+      setJson: set,
+      remove,
+      del: remove,
+      delete: remove,
+      has: (name) => getRaw(name, undefined) !== undefined,
+      keys: () => [...memory.keys()],
+      getSnapshot,
+      getDebugSnapshot: getSnapshot,
+      snapshot: getSnapshot,
+    };
+  }
+
+  function fallbackCleanup() {
+    const ensure = (name = "global") => {
+      const clean = text(name, "global");
+      if (!registry.scopes.has(clean)) registry.scopes.set(clean, new Set());
+      return clean;
+    };
+
+    const add = (scopeName, disposer) => {
+      if (!isFn(disposer)) return () => false;
+
+      const name = ensure(scopeName);
+      registry.scopes.get(name).add(disposer);
+
+      return () => {
+        try {
+          disposer();
+        } catch {}
+
+        registry.scopes.get(name)?.delete(disposer);
+        return true;
+      };
+    };
+
+    const event = (scopeName, target, eventName, handler, options = false) => {
+      if (!target || !eventName || !isFn(handler)) return () => false;
+
+      try {
+        target.addEventListener(eventName, handler, options);
+        return add(scopeName, () => target.removeEventListener(eventName, handler, options));
+      } catch {
+        return () => false;
+      }
+    };
+
+    const timeout = (scopeName, fn, ms = 0) => {
+      const id = setTimeout(fn, Math.max(0, number(ms, 0)));
+      return add(scopeName, () => clearTimeout(id));
+    };
+
+    const interval = (scopeName, fn, ms = 0) => {
+      const id = setInterval(fn, Math.max(0, number(ms, 0)));
+      return add(scopeName, () => clearInterval(id));
+    };
+
+    const run = (scopeName = "") => {
+      const names = scopeName ? [scopeName] : [...registry.scopes.keys()];
+
+      for (const name of names) {
+        const set = registry.scopes.get(name);
+        if (!set) continue;
+
+        for (const dispose of [...set]) {
+          try {
+            dispose();
+          } catch {}
+        }
+
+        set.clear();
+      }
+
+      if (!scopeName) registry.scopes.clear();
+      return true;
+    };
+
+    const getSnapshot = () => ({
+      fallback: true,
+      scopes: [...registry.scopes.entries()].map(([name, set]) => ({ name, count: set.size })),
+    });
+
+    return {
+      scope: (name) => ({ name: ensure(name) }),
+      ensureScope: (name) => ({ name: ensure(name) }),
+      add,
+      on: event,
+      event,
+      bus: event,
+      timeout,
+      timer: timeout,
+      interval,
+      run,
+      dispose: run,
+      clear: run,
+      getSnapshot,
+      getDebugSnapshot: getSnapshot,
+      snapshot: getSnapshot,
+    };
+  }
+
+  function fallbackModules() {
+    const get = (name) => registry.modules.get(text(name, "")) || null;
+
+    const register = (name, value, options = {}) => {
+      const key = text(name, "");
+      if (!key || !value) return false;
+
+      const previous = registry.modules.get(key);
+
+      if (previous && previous !== value && options.replace !== true && options.overwrite !== true) {
+        return previous;
+      }
+
+      registry.modules.set(key, value);
+
+      if (options.emit === true) {
+        emit(previous ? EVENTS.moduleReplaced : EVENTS.moduleRegistered, {
+          name: key,
+          replaced: Boolean(previous),
+          source: text(options.source, SOURCE),
+        });
+      }
+
+      return value;
+    };
+
+    const remove = (name) => registry.modules.delete(text(name, ""));
+    const list = () => [...registry.modules.keys()];
+    const getSnapshot = () => ({ fallback: true, count: registry.modules.size, modules: list() });
+
+    return {
+      has: (name) => registry.modules.has(text(name, "")),
+      get,
+      register,
+      set: register,
+      upsert: register,
+      remove,
+      delete: remove,
+      unregister: remove,
+      list,
+      names: list,
+      getSnapshot,
+      getDebugSnapshot: getSnapshot,
+      snapshot: getSnapshot,
+    };
+  }
+
+  function fallbackHooks() {
+    const listFor = (name) => {
+      const key = text(name, "");
+      if (!key) return null;
+      if (!Array.isArray(registry.hooks[key])) registry.hooks[key] = [];
+      return registry.hooks[key];
+    };
+
+    const add = (name, handler) => {
+      const list = listFor(name);
+      if (!list || !isFn(handler)) return () => false;
+
+      list.push(handler);
+
+      return () => {
+        const key = text(name, "");
+        registry.hooks[key] = array(registry.hooks[key]).filter((item) => item !== handler);
+        return true;
+      };
+    };
+
+    const run = async (name, payload = {}) => {
+      let current = payload;
+
+      for (const hook of array(registry.hooks[text(name, "")])) {
+        if (!isFn(hook)) continue;
+
+        try {
+          const next = await hook(current);
+          if (next !== undefined) current = next;
+        } catch (err) {
+          warn("hook failed", name, err);
+        }
+      }
+
+      return current;
+    };
+
+    const clear = (name = "") => {
+      const key = text(name, "");
+
+      if (key) registry.hooks[key] = [];
+      else {
+        for (const hookName of Object.keys(registry.hooks)) {
+          registry.hooks[hookName] = [];
+        }
+      }
+
+      return true;
+    };
+
+    const getSnapshot = () => Object.fromEntries(
+      Object.entries(registry.hooks).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0])
+    );
+
+    return {
+      add,
+      on: add,
+      use: add,
+      register: add,
+      run,
+      runSeries: run,
+      get: (name) => array(registry.hooks[text(name, "")]),
+      clear,
+      getSnapshot,
+      getDebugSnapshot: getSnapshot,
+      snapshot: getSnapshot,
+    };
+  }
+
+  const state = safeFactory(() => createInitialState({ config }), () => ({}));
+  const dom = safeFactory(() => createDomCache(), () => ({}));
+  const storage = safeFactory(() => createStorage({ utils, events }), fallbackStorage);
+  const cleanup = safeFactory(() => createCleanup({ registry, events, utils }), fallbackCleanup);
+  const modules = safeFactory(() => createModules({ registry, events, utils }), fallbackModules);
+  const hooks = safeFactory(() => createHooks({ registry, events, utils }), fallbackHooks);
 
   function stripBearer(value = "") {
     return text(value, "").replace(/^Bearer\s+/i, "").trim();
@@ -1396,58 +1046,37 @@ export const AppCore = (() => {
 
   function validToken(value = "") {
     const token = stripBearer(value);
+    if (!token || /[\s\r\n\t]/.test(token)) return false;
 
-    if (!token) return false;
-
-    const badValues = new Set([
-      "null",
-      "undefined",
-      "false",
-      "true",
-      "nan",
-      "none",
-      "[object object]",
-      "{}",
-      "[]",
-    ]);
-
-    if (badValues.has(token.toLowerCase())) return false;
-    if (/[\s\r\n\t]/.test(token)) return false;
+    const bad = lower(token, "");
+    if (["null", "undefined", "false", "true", "nan", "none", "[object object]", "{}", "[]"].includes(bad)) {
+      return false;
+    }
 
     try {
       return Boolean(hasValidToken(token));
     } catch {
-      return true;
+      return token.length >= 8;
     }
   }
 
-  function usableUser(value = null) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return false;
-    }
+  function usableUser(user = null) {
+    if (!isObject(user)) return false;
 
     if (
-      value.active === false ||
-      value.enabled === false ||
-      value.disabled === true ||
-      value.deleted === true ||
-      value.archived === true ||
-      value.blocked === true ||
-      value.suspended === true ||
-      value.banned === true ||
-      value.revoked === true
+      user.active === false ||
+      user.enabled === false ||
+      user.disabled === true ||
+      user.deleted === true ||
+      user.archived === true ||
+      user.blocked === true ||
+      user.suspended === true ||
+      user.revoked === true
     ) {
       return false;
     }
 
-    const status = lower(
-      value.status ||
-        value.estado ||
-        value.state ||
-        value.accountStatus ||
-        "",
-      ""
-    );
+    const status = lower(user.status || user.estado || user.state || user.accountStatus || "", "");
 
     if (
       [
@@ -1470,15 +1099,14 @@ export const AppCore = (() => {
       return false;
     }
 
-    return USER_ID_KEYS.some((key) => Boolean(text(value?.[key], "")));
+    return USER_ID_KEYS.some((key) => Boolean(text(user[key], "")));
   }
 
   function normalizeUserSafe(value = null) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    if (!isObject(value)) return null;
 
     try {
       const normalized = normalizeUser(value);
-
       if (usableUser(normalized)) return normalized;
     } catch {}
 
@@ -1492,13 +1120,8 @@ export const AppCore = (() => {
         user?.rol ||
         user?.userRole ||
         user?.user_role ||
-        user?.type ||
-        user?.userType ||
-        user?.user_type ||
         user?.profile?.role ||
         user?.profile?.rol ||
-        user?.raw?.role ||
-        user?.raw?.rol ||
         "",
       ""
     )
@@ -1507,50 +1130,31 @@ export const AppCore = (() => {
       .replace(/[\s-]+/g, "_")
       .replace(/[^a-z0-9_:.]/g, "");
 
-    if (
-      [
-        "admin",
-        "administrator",
-        "administrador",
-        "superadmin",
-        "super_admin",
-        "owner",
-        "root",
-      ].includes(raw)
-    ) {
-      return "admin";
-    }
-
-    return "user";
+    return ["admin", "administrator", "administrador", "superadmin", "super_admin", "owner", "root"].includes(raw)
+      ? "admin"
+      : "user";
   }
 
   function tokenFrom(root = state) {
-    const session = object(root.session);
-    const sessionData = object(root.sessionData);
-
-    for (const value of [
-      ...TOKEN_KEYS.map((key) => root[key]),
-      ...TOKEN_KEYS.map((key) => session[key]),
-      ...TOKEN_KEYS.map((key) => sessionData[key]),
-    ]) {
-      if (validToken(value)) return stripBearer(value);
+    for (const key of TOKEN_KEYS) {
+      if (validToken(root?.[key])) return stripBearer(root[key]);
+      if (validToken(root?.session?.[key])) return stripBearer(root.session[key]);
+      if (validToken(root?.sessionData?.[key])) return stripBearer(root.sessionData[key]);
     }
 
     return null;
   }
 
   function userFrom(root = state) {
-    const session = object(root.session);
-    const sessionData = object(root.sessionData);
+    for (const key of USER_KEYS) {
+      const direct = normalizeUserSafe(root?.[key]);
+      if (direct) return direct;
 
-    for (const value of [
-      ...USER_KEYS.map((key) => root[key]),
-      ...USER_KEYS.map((key) => session[key]),
-      ...USER_KEYS.map((key) => sessionData[key]),
-    ]) {
-      const user = normalizeUserSafe(value);
+      const session = normalizeUserSafe(root?.session?.[key]);
+      if (session) return session;
 
-      if (user) return user;
+      const sessionData = normalizeUserSafe(root?.sessionData?.[key]);
+      if (sessionData) return sessionData;
     }
 
     return null;
@@ -1567,14 +1171,13 @@ export const AppCore = (() => {
         user?.slug ||
         user?.email ||
         user?.mail ||
-        user?.name ||
         "",
       ""
     ) || null;
   }
 
-  function clearAuthFields(root = state) {
-    Object.assign(root, {
+  function clearAuthFields() {
+    Object.assign(state, {
       token: null,
       accessToken: null,
       access_token: null,
@@ -1604,60 +1207,35 @@ export const AppCore = (() => {
       isSupport: false,
       isManager: false,
     });
-
-    return root;
   }
 
-  function setTokenOnly(root = state, token = null) {
-    Object.assign(root, {
-      token,
-      accessToken: token,
-      access_token: token,
+  function setTokenOnly(token) {
+    clearAuthFields();
 
-      user: null,
-      currentUser: null,
-      sessionUser: null,
-      authUser: null,
-      account: null,
-      profile: null,
-
-      authenticated: false,
-      hasToken: Boolean(token),
-
-      role: null,
-      rol: null,
-      userRole: null,
-      roles: [],
-
-      username: null,
-      currentResolvedUsername: null,
-      resolvedUsername: null,
-
-      isAdmin: false,
-      isUser: false,
-      isClient: false,
-      isSupport: false,
-      isManager: false,
-    });
-
-    return root;
+    state.token = token;
+    state.accessToken = token;
+    state.access_token = token;
+    state.hasToken = Boolean(token);
   }
 
   function syncAuth(options = {}) {
     if (options.forceUnauthenticated === true) {
-      return clearAuthFields(state);
+      clearAuthFields();
+      return state;
     }
 
     const token = tokenFrom(state);
 
     if (!token) {
-      return clearAuthFields(state);
+      clearAuthFields();
+      return state;
     }
 
     const user = userFrom(state);
 
     if (!user) {
-      return setTokenOnly(state, token);
+      setTokenOnly(token);
+      return state;
     }
 
     let authenticated = false;
@@ -1669,11 +1247,12 @@ export const AppCore = (() => {
     }
 
     if (!authenticated) {
-      return setTokenOnly(state, token);
+      setTokenOnly(token);
+      return state;
     }
 
     const role = roleOf(user, state.role);
-    const roles = [role];
+    const username = usernameOf(user);
 
     Object.assign(state, {
       token,
@@ -1693,20 +1272,20 @@ export const AppCore = (() => {
       role,
       rol: role,
       userRole: role,
-      roles,
+      roles: [role],
 
-      username: usernameOf(user),
+      username,
 
       currentResolvedUsername:
         sanitizeUsername(state.currentResolvedUsername || state.resolvedUsername || "") ||
-        sanitizeUsername(usernameOf(user) || "") ||
+        sanitizeUsername(username || "") ||
         null,
 
       resolvedUsername: state.currentResolvedUsername || null,
 
       isAdmin: role === "admin",
       isUser: role === "user",
-      isClient: role === "user",
+      isClient: false,
       isSupport: false,
       isManager: false,
     });
@@ -1732,8 +1311,37 @@ export const AppCore = (() => {
     return keys.some((key) => before[key] !== after[key]);
   }
 
-  function emitDerived(before = {}, after = {}, patch = {}, options = {}) {
-    if (options.emit === false) return false;
+  function writeState(patch = {}, options = {}) {
+    const cleanPatch = isObject(patch) ? patch : {};
+
+    try {
+      stateSetState({ state, events, patch: cleanPatch, options });
+      return true;
+    } catch {}
+
+    try {
+      stateSetStateBase(state, cleanPatch, { ...options, events });
+      return true;
+    } catch {}
+
+    Object.assign(state, cleanPatch);
+    return false;
+  }
+
+  function publicState(options = {}) {
+    let output = null;
+
+    try {
+      output = cloneState(state);
+    } catch {}
+
+    if (!output) output = clone(state, { ...state }) || { ...state };
+
+    return options.safe ? sanitizeState(output) : output;
+  }
+
+  function emitStateChanges(before = {}, after = {}, patch = {}, options = {}) {
+    if (options.emit === false || options.silent === true) return;
 
     const source = text(options.source, "core:setState");
     const changedKeys = Object.keys(object(patch));
@@ -1745,8 +1353,6 @@ export const AppCore = (() => {
         source,
       });
     }
-
-    if (options.emitDerived !== true) return false;
 
     if (markerChanged(before, after, ["authenticated", "hasToken", "role"])) {
       emit(EVENTS.authChange, {
@@ -1761,7 +1367,7 @@ export const AppCore = (() => {
     if (markerChanged(before, after, ["userId", "username", "role"])) {
       emit(EVENTS.userChange, {
         authenticated: Boolean(after.authenticated),
-        user: state.authenticated ? publicUser(state.user) : null,
+        user: after.authenticated ? publicUser(state.user) : null,
         username: after.username || null,
         role: after.role || null,
         source,
@@ -1785,88 +1391,25 @@ export const AppCore = (() => {
         source,
       });
     }
-
-    return true;
-  }
-
-  /* =======================================================
-     STATE API
-  ======================================================= */
-
-  function applyBaseSetState(root, patch, options = {}) {
-    const attempts = [
-      () => stateSetState({ state: root, events, patch, options }),
-      () => stateSetStateBase(root, patch, { ...options, events }),
-    ];
-
-    for (const attempt of attempts) {
-      try {
-        attempt();
-        return true;
-      } catch {}
-    }
-
-    Object.assign(root, patch);
-    return false;
-  }
-
-  function getStateBaseCompat(root) {
-    const attempts = [
-      () => stateGetState(root),
-      () => stateGetStateBase(root),
-      () => stateGetState({ state: root }),
-    ];
-
-    for (const attempt of attempts) {
-      try {
-        const value = attempt();
-
-        if (value) return value;
-      } catch {}
-    }
-
-    return null;
-  }
-
-  function publicState(options = {}) {
-    let output = null;
-
-    try {
-      output = cloneState(state);
-    } catch {}
-
-    if (!output) {
-      output = clone(state, { ...state }) || { ...state };
-    }
-
-    return options.safe ? sanitizeState(output) : output;
   }
 
   function setState(patch = {}, options = {}) {
-    const cleanPatch = isObject(patch) ? patch : {};
     const opts = object(options);
-
+    const cleanPatch = isObject(patch) ? patch : {};
     const before = marker(state);
 
-    applyBaseSetState(state, cleanPatch, opts);
-
-    syncAuth({
-      forceUnauthenticated: opts.forceUnauthenticated === true,
-    });
+    writeState(cleanPatch, opts);
+    syncAuth({ forceUnauthenticated: opts.forceUnauthenticated === true });
 
     const after = marker(state);
-
-    emitDerived(before, after, cleanPatch, opts);
+    emitStateChanges(before, after, cleanPatch, opts);
 
     return publicState();
   }
 
   function getState(options = {}) {
     syncAuth();
-
-    const output = getStateBaseCompat(state) || publicState();
-
-    return options.safe ? sanitizeState(output) : output;
+    return publicState(options);
   }
 
   function patchState(patch = {}, options = {}) {
@@ -1889,8 +1432,9 @@ export const AppCore = (() => {
   }
 
   function hasRole(roleOrRoles = []) {
-    const roles = array(roleOrRoles).map((item) => roleOf({ role: item }));
-    return roles.includes(getCurrentRole());
+    const current = getCurrentRole();
+    const roles = array(roleOrRoles).map((role) => roleOf({ role }));
+    return roles.includes(current);
   }
 
   function getAuthHeader() {
@@ -1904,19 +1448,11 @@ export const AppCore = (() => {
     };
   }
 
-  /* =======================================================
-     UI API
-  ======================================================= */
-
   function setDocumentTitle(title = appName()) {
     const finalTitle = text(title, appName());
 
     try {
-      return setDocumentTitleBase({
-        dom,
-        events,
-        title: finalTitle,
-      });
+      return setDocumentTitleBase({ dom, events, title: finalTitle });
     } catch {}
 
     if (!isBrowser()) return false;
@@ -1931,11 +1467,7 @@ export const AppCore = (() => {
 
   function clearDynamicContainers(options = {}) {
     try {
-      return clearDynamicContainersBase({
-        dom,
-        events,
-        ...object(options),
-      });
+      return clearDynamicContainersBase({ dom, events, ...object(options) });
     } catch {
       return false;
     }
@@ -1943,12 +1475,7 @@ export const AppCore = (() => {
 
   function syncUserUI(options = {}) {
     try {
-      return syncUserUIBase({
-        state,
-        dom,
-        events,
-        ...object(options),
-      });
+      return syncUserUIBase({ state, dom, events, ...object(options) });
     } catch (err) {
       warn("syncUserUI failed", err);
       return false;
@@ -1980,130 +1507,11 @@ export const AppCore = (() => {
     }
   }
 
-  /* =======================================================
-     SESSION EXTRACTION
-  ======================================================= */
-
-  function collectObjects(value, depth = 0, seen = new WeakSet()) {
-    if (depth > 8 || !value || typeof value !== "object") return [];
-
-    try {
-      if (seen.has(value)) return [];
-      seen.add(value);
-    } catch {}
-
-    const output = [value];
-
-    for (const key of NESTED_KEYS) {
-      if (value[key] && typeof value[key] === "object") {
-        output.push(...collectObjects(value[key], depth + 1, seen));
-      }
-    }
-
-    if (value.response?.data && typeof value.response.data === "object") {
-      output.push(...collectObjects(value.response.data, depth + 1, seen));
-    }
-
-    return output;
-  }
-
-  function pickToken(objects = [], keys = []) {
-    for (const obj of array(objects)) {
-      for (const key of keys) {
-        if (validToken(obj?.[key])) return stripBearer(obj[key]);
-      }
-    }
-
-    return null;
-  }
-
-  function pickUser(objects = []) {
-    for (const obj of array(objects)) {
-      for (const key of USER_KEYS) {
-        const user = normalizeUserSafe(obj?.[key]);
-
-        if (user) return user;
-      }
-    }
-
-    for (const obj of array(objects)) {
-      const user = normalizeUserSafe(obj);
-
-      if (user) return user;
-    }
-
-    return null;
-  }
-
-  function pickText(objects = [], keys = []) {
-    for (const obj of array(objects)) {
-      for (const key of keys) {
-        const value = text(obj?.[key], "");
-
-        if (value) return value;
-      }
-    }
-
-    return null;
-  }
-
-  function pickObject(objects = [], keys = []) {
-    for (const obj of array(objects)) {
-      for (const key of keys) {
-        if (isObject(obj?.[key])) return obj[key];
-      }
-    }
-
-    return null;
-  }
-
-  function extractSessionPayload(payload = {}) {
-    const source = object(payload);
-    const objects = collectObjects(source);
-
-    return {
-      raw: source,
-
-      token: pickToken(objects, TOKEN_KEYS),
-      refreshToken: pickToken(objects, REFRESH_TOKEN_KEYS),
-      tempToken: pickToken(objects, TEMP_TOKEN_KEYS),
-
-      user: pickUser(objects),
-
-      session:
-        pickObject(objects, ["session", "sessionData", "authSession", "auth_session"]) ||
-        null,
-
-      sessionId: pickText(objects, SESSION_ID_KEYS),
-      sessionUserId: pickText(objects, SESSION_USER_ID_KEYS),
-
-      route:
-        source.route ||
-        source.canonicalPath ||
-        source.data?.route ||
-        source.data?.canonicalPath ||
-        null,
-
-      publicPath:
-        source.publicPath ||
-        source.data?.publicPath ||
-        null,
-    };
-  }
-
-  /* =======================================================
-     SESSION API
-  ======================================================= */
-
   function setRoute(route = "/", options = {}) {
+    const opts = object(options);
+
     try {
-      return setRouteBase({
-        state,
-        setState,
-        events,
-        route,
-        options: object(options),
-      });
+      return setRouteBase({ state, setState, events, route, options: opts });
     } catch {}
 
     const clean = normalizeCanonicalPath(route || "/");
@@ -2114,8 +1522,8 @@ export const AppCore = (() => {
         canonicalPath: clean,
       },
       {
-        source: "core:setRoute:fallback",
-        emitDerived: true,
+        ...opts,
+        source: text(opts.source, "core:setRoute:fallback"),
       }
     );
 
@@ -2123,15 +1531,10 @@ export const AppCore = (() => {
   }
 
   function setPublicPath(path = "/", options = {}) {
+    const opts = object(options);
+
     try {
-      return setPublicPathBase({
-        state,
-        storage,
-        setState,
-        events,
-        path,
-        options: object(options),
-      });
+      return setPublicPathBase({ state, storage, setState, events, path, options: opts });
     } catch {}
 
     const publicPath = normalizePath(path || "/");
@@ -2144,8 +1547,8 @@ export const AppCore = (() => {
         canonicalPath: route,
       },
       {
-        source: "core:setPublicPath:fallback",
-        emitDerived: true,
+        ...opts,
+        source: text(opts.source, "core:setPublicPath:fallback"),
       }
     );
 
@@ -2153,6 +1556,8 @@ export const AppCore = (() => {
   }
 
   function setUser(user = null, options = {}) {
+    const opts = object(options);
+
     try {
       const output = setUserBase({
         state,
@@ -2161,13 +1566,10 @@ export const AppCore = (() => {
         setState,
         syncUserUI,
         user,
-        options: object(options),
+        options: opts,
       });
 
-      syncAuth({
-        forceUnauthenticated: !user && !state.token,
-      });
-
+      syncAuth({ forceUnauthenticated: !user && !state.token });
       return output;
     } catch {}
 
@@ -2176,9 +1578,9 @@ export const AppCore = (() => {
         user: user ? normalizeUserSafe(user) : null,
       },
       {
-        source: "core:setUser:fallback",
+        ...opts,
+        source: text(opts.source, "core:setUser:fallback"),
         forceUnauthenticated: !user && !state.token,
-        emitDerived: true,
       }
     );
 
@@ -2186,6 +1588,7 @@ export const AppCore = (() => {
   }
 
   function setToken(token = null, options = {}) {
+    const opts = object(options);
     const cleanToken = validToken(token) ? stripBearer(token) : null;
 
     try {
@@ -2195,13 +1598,10 @@ export const AppCore = (() => {
         events,
         setState,
         token: cleanToken,
-        options: object(options),
+        options: opts,
       });
 
-      syncAuth({
-        forceUnauthenticated: !cleanToken,
-      });
-
+      syncAuth({ forceUnauthenticated: !cleanToken });
       return output;
     } catch {}
 
@@ -2212,44 +1612,63 @@ export const AppCore = (() => {
         access_token: cleanToken,
       },
       {
-        source: "core:setToken:fallback",
+        ...opts,
+        source: text(opts.source, "core:setToken:fallback"),
         forceUnauthenticated: !cleanToken,
-        emitDerived: true,
       }
     );
 
     return state.token;
   }
 
-  function adaptSetter(value, key) {
-    if (isObject(value) && hasOwn(value, key)) return value[key];
-    return value;
+  function payloadValue(payload = {}, key = "") {
+    if (!payload || !key) return null;
+
+    return (
+      payload[key] ??
+      payload.data?.[key] ??
+      payload.payload?.[key] ??
+      payload.result?.[key] ??
+      payload.auth?.[key] ??
+      payload.session?.[key] ??
+      null
+    );
+  }
+
+  function pickToken(payload = {}) {
+    for (const key of TOKEN_KEYS) {
+      const value = payloadValue(payload, key);
+      if (validToken(value)) return stripBearer(value);
+    }
+
+    return null;
+  }
+
+  function pickUser(payload = {}) {
+    for (const key of USER_KEYS) {
+      const user = normalizeUserSafe(payloadValue(payload, key));
+      if (user) return user;
+    }
+
+    return normalizeUserSafe(payload);
   }
 
   function applySession(sessionPayload = {}, options = {}) {
     const opts = object(options);
-    const extracted = extractSessionPayload(sessionPayload);
+    const payload = object(sessionPayload);
 
-    const token =
-      hasOwn(sessionPayload, "token") ||
-      hasOwn(sessionPayload, "accessToken") ||
-      hasOwn(sessionPayload, "access_token") ||
-      extracted.token
-        ? extracted.token
-        : tokenFrom(state);
+    const token = pickToken(payload);
+    const user = pickUser(payload);
 
-    const user =
-      hasOwn(sessionPayload, "user") ||
-      hasOwn(sessionPayload, "usuario") ||
-      hasOwn(sessionPayload, "me") ||
-      hasOwn(sessionPayload, "account") ||
-      hasOwn(sessionPayload, "profile") ||
-      extracted.user
-        ? extracted.user
-        : userFrom(state);
+    const refreshToken = payloadValue(payload, "refreshToken") || payloadValue(payload, "refresh_token");
+    const tempToken =
+      payloadValue(payload, "tempToken") ||
+      payloadValue(payload, "temp_token") ||
+      payloadValue(payload, "temporaryToken") ||
+      payloadValue(payload, "temporary_token");
 
     let result = null;
-    let baseOk = false;
+    let delegated = false;
 
     try {
       result = applySessionBase({
@@ -2258,12 +1677,12 @@ export const AppCore = (() => {
         events,
 
         setUser: (value) =>
-          setUser(adaptSetter(value, "user"), {
+          setUser(isObject(value) && "user" in value ? value.user : value, {
             source: "core:applySession:setUser",
           }),
 
         setToken: (value) =>
-          setToken(adaptSetter(value, "token"), {
+          setToken(isObject(value) && "token" in value ? value.token : value, {
             source: "core:applySession:setToken",
           }),
 
@@ -2272,105 +1691,60 @@ export const AppCore = (() => {
         token,
         user,
 
-        refreshToken: extracted.refreshToken,
-        tempToken: extracted.tempToken,
+        refreshToken,
+        tempToken,
 
-        session: extracted.session,
-        sessionId: extracted.sessionId,
-        sessionUserId: extracted.sessionUserId,
+        session: payload.session || payload.sessionData || null,
+        sessionId: payloadValue(payload, "sessionId") || payloadValue(payload, "session_id"),
+        sessionUserId:
+          payloadValue(payload, "sessionUserId") ||
+          payloadValue(payload, "session_user_id") ||
+          payloadValue(payload, "userId"),
 
-        route: extracted.route,
-        publicPath: extracted.publicPath,
+        route: payload.route || payload.canonicalPath || payload.data?.route || payload.data?.canonicalPath || null,
+        publicPath: payload.publicPath || payload.data?.publicPath || null,
 
         options: opts,
       });
 
-      baseOk = true;
+      delegated = true;
     } catch {}
 
-    if (!baseOk) {
-      if (token !== undefined) {
-        state.token = validToken(token) ? stripBearer(token) : null;
-        state.accessToken = state.token;
-        state.access_token = state.token;
+    if (!delegated) {
+      if (token) {
+        state.token = token;
+        state.accessToken = token;
+        state.access_token = token;
       }
 
-      if (user !== undefined) {
-        state.user = normalizeUserSafe(user);
+      if (user) state.user = user;
+
+      if (refreshToken) {
+        state.refreshToken = refreshToken;
+        state.refresh_token = refreshToken;
       }
 
-      if (extracted.refreshToken) {
-        state.refreshToken = extracted.refreshToken;
-        state.refresh_token = extracted.refreshToken;
-      }
-
-      if (extracted.tempToken) {
-        state.tempToken = extracted.tempToken;
-        state.temp_token = extracted.tempToken;
-      }
-
-      if (extracted.session || extracted.sessionId || extracted.sessionUserId) {
-        state.session = {
-          ...object(extracted.session),
-
-          sessionId:
-            extracted.sessionId ||
-            extracted.session?.sessionId ||
-            extracted.session?.session_id ||
-            null,
-
-          session_id:
-            extracted.sessionId ||
-            extracted.session?.session_id ||
-            extracted.session?.sessionId ||
-            null,
-
-          userId:
-            extracted.sessionUserId ||
-            extracted.session?.userId ||
-            extracted.session?.user_id ||
-            null,
-
-          user_id:
-            extracted.sessionUserId ||
-            extracted.session?.user_id ||
-            extracted.session?.userId ||
-            null,
-        };
-
-        state.sessionData = state.session;
-      }
-
-      if (extracted.route) {
-        setRoute(extracted.route, {
-          source: "core:applySession:fallback-route",
-        });
-      }
-
-      if (extracted.publicPath) {
-        setPublicPath(extracted.publicPath, {
-          source: "core:applySession:fallback-public-path",
-        });
+      if (tempToken) {
+        state.tempToken = tempToken;
+        state.temp_token = tempToken;
       }
 
       result = {
-        token: state.token,
-        user: state.user,
+        token: state.token || null,
+        user: state.user || null,
         session: state.session || null,
       };
     }
 
-    syncAuth({
-      forceUnauthenticated: token === null,
-    });
+    syncAuth({ forceUnauthenticated: opts.forceUnauthenticated === true });
 
-    if (opts.emit === true || !baseOk) {
+    if (opts.emit !== false) {
       emit(EVENTS.sessionApplied, {
         authenticated: Boolean(state.authenticated),
         hasToken: Boolean(state.hasToken),
         user: publicUser(state.user),
         role: state.role || null,
-        source: text(opts.source, baseOk ? "core:applySession" : "core:applySession:fallback"),
+        source: text(opts.source, delegated ? "core:applySession" : "core:applySession:fallback"),
       });
     }
 
@@ -2379,9 +1753,8 @@ export const AppCore = (() => {
 
   function clearSession(options = {}) {
     const opts = object(options);
-
     let result = null;
-    let baseOk = false;
+    let delegated = false;
 
     try {
       result = clearSessionBase({
@@ -2394,10 +1767,10 @@ export const AppCore = (() => {
         options: opts,
       });
 
-      baseOk = true;
+      delegated = true;
     } catch {}
 
-    clearAuthFields(state);
+    clearAuthFields();
 
     state.refreshToken = null;
     state.refresh_token = null;
@@ -2410,68 +1783,43 @@ export const AppCore = (() => {
     state.sessionId = null;
     state.sessionUserId = null;
 
-    if (!baseOk) {
-      setState(
-        {},
-        {
-          source: "core:clearSession:fallback",
-          forceUnauthenticated: true,
-          emitDerived: true,
-        }
-      );
+    setState(
+      {},
+      {
+        source: text(opts.source, delegated ? "core:clearSession" : "core:clearSession:fallback"),
+        forceUnauthenticated: true,
+        silent: opts.silent === true,
+      }
+    );
 
-      result = true;
-    }
-
-    if (opts.emit === true || !baseOk) {
+    if (opts.emit !== false) {
       emit(EVENTS.sessionCleared, {
         silent: Boolean(opts.silent),
-        source: text(opts.source, baseOk ? "core:clearSession" : "core:clearSession:fallback"),
+        source: text(opts.source, delegated ? "core:clearSession" : "core:clearSession:fallback"),
       });
     }
 
-    return result;
+    return delegated ? result : true;
   }
 
   function setTheme(theme, themeMode = "") {
     try {
-      return setThemeBase({
-        dom,
-        storage,
-        events,
-        setState,
-        theme,
-        themeMode,
-      });
+      return setThemeBase({ dom, storage, events, setState, theme, themeMode });
     } catch {}
 
     const clean = lower(theme, DEFAULT_THEME) === "light" ? "light" : DEFAULT_THEME;
-
-    setState(
-      { theme: clean },
-      { source: "core:setTheme:fallback" }
-    );
-
+    setState({ theme: clean }, { source: "core:setTheme:fallback" });
     return clean;
   }
 
   function setLang(lang) {
     try {
-      return setLangBase({
-        dom,
-        storage,
-        events,
-        setState,
-        lang,
-      });
+      return setLangBase({ dom, storage, events, setState, lang });
     } catch {}
 
     const clean = lower(lang, DEFAULT_LANG);
 
-    setState(
-      { lang: clean },
-      { source: "core:setLang:fallback" }
-    );
+    setState({ lang: clean }, { source: "core:setLang:fallback" });
 
     try {
       if (isBrowser()) document.documentElement.lang = clean;
@@ -2487,53 +1835,27 @@ export const AppCore = (() => {
 
   function setSidebarOpen(value) {
     try {
-      return setSidebarOpenBase({
-        dom,
-        storage,
-        events,
-        setState,
-        value,
-      });
+      return setSidebarOpenBase({ dom, storage, events, setState, value });
     } catch {}
 
     const next = Boolean(value);
-
-    setState(
-      { sidebarOpen: next },
-      { source: "core:setSidebarOpen:fallback" }
-    );
-
+    setState({ sidebarOpen: next }, { source: "core:setSidebarOpen:fallback" });
     return next;
   }
 
   function setLoading(value) {
     try {
-      return setLoadingBase({
-        dom,
-        events,
-        setState,
-        value,
-      });
+      return setLoadingBase({ dom, events, setState, value });
     } catch {}
 
     const next = Boolean(value);
-
-    setState(
-      { loading: next },
-      { source: "core:setLoading:fallback" }
-    );
-
+    setState({ loading: next }, { source: "core:setLoading:fallback" });
     return next;
   }
 
   function setError(err = null) {
     try {
-      return setErrorBase({
-        events,
-        setState,
-        cloneError,
-        error: err,
-      });
+      return setErrorBase({ events, setState, cloneError, error: err });
     } catch {}
 
     const normalized = err ? cloneError(err) : null;
@@ -2550,9 +1872,31 @@ export const AppCore = (() => {
     return normalized;
   }
 
-  /* =======================================================
-     REQUEST / HTTP
-  ======================================================= */
+  function apiBase() {
+    return text(
+      config?.apiBase ||
+        config?.api?.baseUrl ||
+        config?.api?.base ||
+        config?.backendUrl ||
+        "",
+      ""
+    );
+  }
+
+  function isAbsoluteUrl(url = "") {
+    return /^https?:\/\//i.test(text(url, ""));
+  }
+
+  function resolveUrl(url = "") {
+    const raw = text(url, "/");
+    if (isAbsoluteUrl(raw)) return raw;
+
+    try {
+      return buildUrl(apiBase(), raw);
+    } catch {
+      return `${apiBase().replace(/\/+$/, "")}/${raw.replace(/^\/+/, "")}`;
+    }
+  }
 
   async function fallbackRequest(url, options = {}) {
     if (!isBrowser() || !isFn(fetch)) {
@@ -2561,10 +1905,19 @@ export const AppCore = (() => {
 
     const opts = { ...object(options) };
     const method = text(opts.method, "GET").toUpperCase();
+    const finalUrl = resolveUrl(url);
+
+    const publicRequest =
+      opts.public === true ||
+      opts.auth === false ||
+      opts.skipAuth === true ||
+      opts._skipAuth === true ||
+      isPublicApiPath(finalUrl);
 
     const headers = {
       Accept: "application/json",
       ...object(opts.headers),
+      ...(publicRequest ? {} : getAuthHeader()),
     };
 
     const hasBody =
@@ -2589,17 +1942,16 @@ export const AppCore = (() => {
       body = JSON.stringify(body);
     }
 
-    const response = await fetch(url, {
+    const response = await fetch(finalUrl, {
       ...opts,
       method,
       headers,
       credentials: opts.credentials || "include",
-      cache: opts.cache || "no-store",
+      cache: opts.cache || (opts.noCache ? "no-store" : "default"),
       body: hasBody ? body : undefined,
     });
 
     const contentType = response.headers?.get?.("content-type") || "";
-
     let payload = null;
 
     if (contentType.includes("application/json")) {
@@ -2630,66 +1982,27 @@ export const AppCore = (() => {
       err.status = response.status;
       err.response = response;
       err.data = payload;
-
       throw err;
     }
 
     return payload;
   }
 
-  const baseRequest = safeFactory(createRequest, () => fallbackRequest, {
-    state,
-    events,
-    setError,
-    utils,
-    registry,
-    hooks,
-  });
+  const baseRequest = safeFactory(
+    () => createRequest({ state, events, setError, utils, registry, hooks }),
+    () => fallbackRequest
+  );
 
-  function fallbackApiClient(req) {
-    const call = isFn(req) ? req : fallbackRequest;
+  function simpleClient(requestFn) {
+    const call = isFn(requestFn) ? requestFn : fallbackRequest;
 
     return {
       request: call,
-
-      get(url, options = {}) {
-        return call(url, {
-          ...options,
-          method: "GET",
-        });
-      },
-
-      post(url, body = undefined, options = {}) {
-        return call(url, {
-          ...options,
-          method: "POST",
-          body,
-        });
-      },
-
-      put(url, body = undefined, options = {}) {
-        return call(url, {
-          ...options,
-          method: "PUT",
-          body,
-        });
-      },
-
-      patch(url, body = undefined, options = {}) {
-        return call(url, {
-          ...options,
-          method: "PATCH",
-          body,
-        });
-      },
-
-      delete(url, options = {}) {
-        return call(url, {
-          ...options,
-          method: "DELETE",
-        });
-      },
-
+      get: (url, options = {}) => call(url, { ...options, method: "GET" }),
+      post: (url, body = undefined, options = {}) => call(url, { ...options, method: "POST", body }),
+      put: (url, body = undefined, options = {}) => call(url, { ...options, method: "PUT", body }),
+      patch: (url, body = undefined, options = {}) => call(url, { ...options, method: "PATCH", body }),
+      delete: (url, options = {}) => call(url, { ...options, method: "DELETE" }),
       del(url, options = {}) {
         return this.delete(url, options);
       },
@@ -2697,62 +2010,60 @@ export const AppCore = (() => {
   }
 
   const baseApiClient = safeFactory(
-    createApiClient,
-    () => fallbackApiClient(baseRequest),
-    baseRequest
+    () => createApiClient(baseRequest),
+    () => simpleClient(baseRequest)
   );
 
   requestBridge = baseRequest;
   apiClientBridge = baseApiClient;
 
   function authEndpoint(name = "", fallback = "") {
-    const endpointMap = object(config?.auth?.endpoints || config?.api?.endpoints);
+    const endpoints = object(config?.auth?.endpoints || config?.api?.endpoints);
 
     return (
-      text(endpointMap[name], "") ||
+      text(endpoints[name], "") ||
       text(config?.auth?.[`${name}Endpoint`], "") ||
       text(config?.api?.[`${name}Endpoint`], "") ||
       fallback
     );
   }
 
-  function setMember(target, key, value) {
+  function defineMissing(target, key, value, enumerable = false) {
     if (!target || !key || value === undefined || value === null) return false;
 
     try {
-      if (target[key] === undefined || target[key] === null) {
-        target[key] = value;
-        return true;
-      }
+      if (target[key] !== undefined && target[key] !== null) return true;
     } catch {}
 
     try {
       Object.defineProperty(target, key, {
         value,
         configurable: true,
-        enumerable: false,
+        enumerable,
         writable: true,
       });
 
       return true;
     } catch {}
 
-    return false;
+    try {
+      target[key] = value;
+      return true;
+    } catch {
+      return false;
+    }
   }
 
-  function compatHttpClient(candidate = null) {
+  function normalizeHttpClient(candidate = null) {
     const source =
-      candidate &&
-      (typeof candidate === "object" || typeof candidate === "function")
+      candidate && (typeof candidate === "object" || typeof candidate === "function")
         ? candidate
         : {};
 
     let client = source;
 
     try {
-      if (!Object.isExtensible(client) || Array.isArray(client)) {
-        client = {};
-      }
+      if (!Object.isExtensible(client) || Array.isArray(client)) client = {};
     } catch {
       client = {};
     }
@@ -2765,118 +2076,62 @@ export const AppCore = (() => {
           ? requestBridge
           : baseRequest;
 
-    setMember(client, "request", requestFn);
+    defineMissing(client, "request", requestFn, true);
+    defineMissing(client, "get", (url, options = {}) => requestFn(url, { ...options, method: "GET" }), true);
+    defineMissing(client, "post", (url, body = undefined, options = {}) => requestFn(url, { ...options, method: "POST", body }), true);
+    defineMissing(client, "put", (url, body = undefined, options = {}) => requestFn(url, { ...options, method: "PUT", body }), true);
+    defineMissing(client, "patch", (url, body = undefined, options = {}) => requestFn(url, { ...options, method: "PATCH", body }), true);
+    defineMissing(client, "delete", (url, options = {}) => requestFn(url, { ...options, method: "DELETE" }), true);
+    defineMissing(client, "del", (url, options = {}) => client.delete(url, options), true);
 
-    setMember(client, "get", client.get || ((url, options = {}) =>
-      requestFn(url, {
-        ...options,
-        method: "GET",
+    defineMissing(client, "login", (body = {}, options = {}) =>
+      client.post(authEndpoint("login", "/api/auth/login"), body, {
+        public: true,
+        auth: false,
+        skipAuth: true,
+        _skipAuthRefresh: true,
+        skipAuthRefresh: true,
+        ...object(options),
       })
-    ));
+    );
 
-    setMember(client, "post", client.post || ((url, body = undefined, options = {}) =>
-      requestFn(url, {
-        ...options,
-        method: "POST",
-        body,
+    defineMissing(client, "refresh", (body = {}, options = {}) =>
+      client.post(authEndpoint("refresh", "/api/auth/refresh"), body, {
+        public: true,
+        auth: false,
+        skipAuth: true,
+        _skipAuthRefresh: true,
+        skipAuthRefresh: true,
+        noAutoLogout: true,
+        ...object(options),
       })
-    ));
+    );
 
-    setMember(client, "put", client.put || ((url, body = undefined, options = {}) =>
-      requestFn(url, {
-        ...options,
-        method: "PUT",
-        body,
+    defineMissing(client, "me", (options = {}) =>
+      client.get(authEndpoint("me", "/api/auth/me"), {
+        auth: true,
+        public: false,
+        skipAuth: false,
+        noCache: true,
+        cache: "no-store",
+        ...object(options),
       })
-    ));
+    );
 
-    setMember(client, "patch", client.patch || ((url, body = undefined, options = {}) =>
-      requestFn(url, {
-        ...options,
-        method: "PATCH",
-        body,
+    defineMissing(client, "logout", (body = {}, options = {}) =>
+      client.post(authEndpoint("logout", "/api/auth/logout"), body, {
+        auth: true,
+        public: false,
+        skipAuth: false,
+        noCache: true,
+        _skipAuthRefresh: true,
+        skipAuthRefresh: true,
+        ...object(options),
       })
-    ));
+    );
 
-    setMember(client, "delete", client.delete || ((url, options = {}) =>
-      requestFn(url, {
-        ...options,
-        method: "DELETE",
-      })
-    ));
-
-    setMember(client, "del", client.del || ((url, options = {}) =>
-      client.delete(url, options)
-    ));
-
-    setMember(client, "login", client.login || ((body = {}, options = {}) =>
-      client.post(
-        authEndpoint("login", "/api/auth/login"),
-        body,
-        {
-          public: true,
-          auth: false,
-          skipAuth: true,
-          _skipAuthRefresh: true,
-          skipAuthRefresh: true,
-          ...object(options),
-        }
-      )
-    ));
-
-    setMember(client, "refresh", client.refresh || ((body = {}, options = {}) =>
-      client.post(
-        authEndpoint("refresh", "/api/auth/refresh"),
-        body,
-        {
-          public: true,
-          auth: false,
-          skipAuth: true,
-          _skipAuthRefresh: true,
-          skipAuthRefresh: true,
-          noAutoLogout: true,
-          ...object(options),
-        }
-      )
-    ));
-
-    setMember(client, "me", client.me || ((options = {}) =>
-      client.get(
-        authEndpoint("me", "/api/auth/me"),
-        {
-          auth: true,
-          public: false,
-          skipAuth: false,
-          noCache: true,
-          cache: "no-store",
-          ...object(options),
-        }
-      )
-    ));
-
-    setMember(client, "logout", client.logout || ((body = {}, options = {}) =>
-      client.post(
-        authEndpoint("logout", "/api/auth/logout"),
-        body,
-        {
-          auth: true,
-          public: false,
-          skipAuth: false,
-          noCache: true,
-          _skipAuthRefresh: true,
-          skipAuthRefresh: true,
-          ...object(options),
-        }
-      )
-    ));
-
-    setMember(client, "getSnapshot", client.getSnapshot || (() => ({
-      version: text(
-        client.version ||
-          client.HTTP_VERSION ||
-          client.CORE_HTTP_VERSION,
-        "core-http-bridge"
-      ),
+    defineMissing(client, "getSnapshot", () => ({
+      version: text(client.version || client.HTTP_VERSION || client.CORE_HTTP_VERSION, "core-http"),
       installed: true,
       hasRequest: isFn(client.request),
       hasGet: isFn(client.get),
@@ -2884,12 +2139,80 @@ export const AppCore = (() => {
       hasMe: isFn(client.me),
       source: "core:index:http",
       at: iso(),
-    })));
+    }));
 
-    setMember(client, "getDebugSnapshot", client.getDebugSnapshot || client.getSnapshot);
-    setMember(client, "snapshot", client.snapshot || client.getSnapshot);
+    defineMissing(client, "getDebugSnapshot", client.getSnapshot);
+    defineMissing(client, "snapshot", client.getSnapshot);
 
     return client;
+  }
+
+  function bridgeCanonical(name = "") {
+    return BRIDGE_CANONICAL[text(name, "")] || text(name, "");
+  }
+
+  function bridgeAliases(name = "") {
+    const canonical = bridgeCanonical(name);
+    return BRIDGE_ALIASES[canonical] || [canonical];
+  }
+
+  function getBridge(name = "") {
+    for (const alias of bridgeAliases(name)) {
+      try {
+        const value = modules?.get?.(alias) || registry.modules.get(alias);
+        if (value) return value;
+      } catch {}
+    }
+
+    return null;
+  }
+
+  function registerBridge(name = "", value = null, options = {}) {
+    const canonical = bridgeCanonical(name);
+    if (!canonical || !value) return false;
+
+    for (const alias of bridgeAliases(canonical)) {
+      try {
+        modules?.register?.(alias, value, {
+          overwrite: true,
+          replace: true,
+          emit: false,
+          silent: true,
+          source: text(options.source, "core:bridge"),
+        });
+      } catch {
+        try {
+          registry.modules.set(alias, value);
+        } catch {}
+      }
+    }
+
+    return value;
+  }
+
+  function registerModule(name = "", value = null, options = {}) {
+    const key = text(name, "");
+    if (!key || !value) return false;
+
+    let result = null;
+
+    try {
+      result = modules?.register?.(key, value, {
+        overwrite: options.overwrite !== false,
+        replace: options.replace !== false,
+        emit: options.emit === true,
+        source: text(options.source, SOURCE),
+      });
+    } catch {}
+
+    if (!result) registry.modules.set(key, value);
+    if (BRIDGE_CANONICAL[key]) registerBridge(key, value, options);
+
+    return result || value;
+  }
+
+  function getModule(name = "") {
+    return getBridge(name) || modules?.get?.(name) || registry.modules.get(text(name, "")) || null;
   }
 
   function httpExport(name = "") {
@@ -2908,101 +2231,37 @@ export const AppCore = (() => {
     }
   }
 
-  function bridgeCanonical(name = "") {
-    return BRIDGE_CANONICAL[text(name, "")] || text(name, "");
-  }
-
-  function bridgeAliases(name = "") {
-    const canonical = bridgeCanonical(name);
-    return BRIDGE_ALIASES[canonical] || [canonical];
-  }
-
-  function getBridge(name = "") {
-    const aliases = bridgeAliases(name);
-
-    for (const alias of aliases) {
-      try {
-        const value = modules?.get?.(alias) || registry.modules.get(alias);
-        if (value) return value;
-      } catch {}
-    }
-
-    return null;
-  }
-
-  function registerBridge(name = "", value = null, options = {}) {
-    const canonical = bridgeCanonical(name);
-    const aliases = bridgeAliases(canonical);
-
-    if (!canonical || !value) return false;
-
-    let changed = false;
-
-    for (const alias of aliases) {
-      const previous = getBridge(alias);
-
-      if (previous === value) continue;
-
-      try {
-        modules?.register?.(alias, value, {
-          overwrite: true,
-          replace: true,
-          source: text(options.source, "core:bridge"),
-          emit: false,
-          silent: true,
-        });
-
-        changed = true;
-        continue;
-      } catch {}
-
-      try {
-        registry.modules.set(alias, value);
-        changed = true;
-      } catch {}
-    }
-
-    return changed || true;
-  }
-
   function resolveHttpCandidate(context = {}) {
+    const def = defaultHttpExport();
+
     const installers = [
       httpExport("installHttp"),
       httpExport("installCoreHttp"),
       httpExport("install"),
+      isFn(def) ? def : null,
     ].filter(isFn);
 
-    const defaultExport = defaultHttpExport();
-
-    if (isFn(defaultExport)) installers.push(defaultExport);
-
     for (const install of installers) {
-      const attempts = [
-        () => install(api, context),
-        () => install({ AppCore: api, core: api, ...context }),
+      for (const attempt of [
         () => install(context),
+        () => install({ AppCore: api, core: api, ...context }),
+        () => install(api, context),
         () => install(api),
-      ];
-
-      for (const attempt of attempts) {
+      ]) {
         try {
           const value = attempt();
-
           if (value) return value;
         } catch {}
       }
-
-      const bridged = getBridge("Http");
-
-      if (bridged) return bridged;
     }
 
     return (
+      getBridge("Http") ||
       httpExport("Http") ||
       httpExport("http") ||
       httpExport("apiClient") ||
       httpExport("client") ||
-      (defaultExport && typeof defaultExport === "object" ? defaultExport : null)
+      (def && typeof def === "object" ? def : null)
     );
   }
 
@@ -3010,10 +2269,7 @@ export const AppCore = (() => {
     const opts = object(options);
 
     if (httpInstalled && httpBridge && opts.force !== true) {
-      registerBridge("Http", httpBridge, {
-        source: "core:http:existing",
-      });
-
+      registerBridge("Http", httpBridge, { source: "core:http:existing" });
       return httpBridge;
     }
 
@@ -3056,14 +2312,7 @@ export const AppCore = (() => {
     };
 
     const previous = httpBridge;
-    const candidate = resolveHttpCandidate(context);
-
-    const client = compatHttpClient(
-      candidate ||
-        httpBridge ||
-        apiClientBridge ||
-        baseApiClient
-    );
+    const client = normalizeHttpClient(resolveHttpCandidate(context) || httpBridge || apiClientBridge || baseApiClient);
 
     httpBridge = client;
     apiClientBridge = client;
@@ -3077,16 +2326,12 @@ export const AppCore = (() => {
       }
     }
 
-    registerBridge("Http", client, {
-      source: "core:http",
-    });
+    registerBridge("Http", client, { source: "core:http" });
 
-    try {
-      api.services.http = client;
-      api.services.Http = client;
-      api.services.api = client;
-      api.services.apiClient = client;
-    } catch {}
+    api.services.http = client;
+    api.services.Http = client;
+    api.services.api = client;
+    api.services.apiClient = client;
 
     if (!httpReadyEmitted || previous !== client || opts.force === true) {
       httpReadyEmitted = true;
@@ -3127,10 +2372,6 @@ export const AppCore = (() => {
     return getHttpClient();
   }
 
-  /* =======================================================
-     READY / INIT
-  ======================================================= */
-
   function ready(fn) {
     if (!isFn(fn)) return () => false;
 
@@ -3138,7 +2379,7 @@ export const AppCore = (() => {
       try {
         fn();
       } catch (err) {
-        error("ready callback error", err);
+        error("ready callback failed", err);
       }
 
       return () => false;
@@ -3149,14 +2390,13 @@ export const AppCore = (() => {
 
       const handler = () => {
         if (disposed) return;
-
         disposed = true;
         readyCallbacksFlushed = true;
 
         try {
           fn();
         } catch (err) {
-          error("ready callback error", err);
+          error("ready callback failed", err);
         }
       };
 
@@ -3182,7 +2422,7 @@ export const AppCore = (() => {
     try {
       fn();
     } catch (err) {
-      error("ready callback error", err);
+      error("ready callback failed", err);
     }
 
     return () => true;
@@ -3196,21 +2436,7 @@ export const AppCore = (() => {
       warn("hooks failed", name, err);
     }
 
-    let current = payload;
-
-    for (const hook of array(registry.hooks?.[name])) {
-      if (!isFn(hook)) continue;
-
-      try {
-        const next = await hook(current);
-
-        if (next !== undefined) current = next;
-      } catch (err) {
-        warn("hook failed", name, err);
-      }
-    }
-
-    return current;
+    return payload;
   }
 
   function safeCacheDom() {
@@ -3268,14 +2494,7 @@ export const AppCore = (() => {
     if (config?.featureFlags?.enableNetworkEvents === false) return false;
 
     try {
-      bindNetworkEvents({
-        state,
-        events,
-        cleanup,
-        utils,
-        setState,
-      });
-
+      bindNetworkEvents({ state, events, cleanup, utils, setState });
       networkBound = true;
       return true;
     } catch (err) {
@@ -3297,7 +2516,10 @@ export const AppCore = (() => {
           coreInitCycle: cycleId,
           coreVersion: VERSION,
         },
-        { source: "core:init:start" }
+        {
+          source: "core:init:start",
+          silent: true,
+        }
       );
 
       installHttpBridge("core:init:before-hooks");
@@ -3353,7 +2575,10 @@ export const AppCore = (() => {
           coreVersion: VERSION,
           coreReadyAt: iso(),
         },
-        { source: "core:init:ready" }
+        {
+          source: "core:init:ready",
+          silent: true,
+        }
       );
 
       await runHooks("afterInit", {
@@ -3385,10 +2610,8 @@ export const AppCore = (() => {
         cycleId,
         authenticated: Boolean(state.authenticated),
         hasToken: Boolean(state.hasToken),
-        route: state.route || "/",
-        publicPath: redact(state.publicPath || "/"),
-        lang: state.lang || DEFAULT_LANG,
-        theme: state.theme || DEFAULT_THEME,
+        route: redactText(state.route || "/"),
+        publicPath: redactText(state.publicPath || "/"),
         hasHttp: Boolean(getHttpClient()),
       });
 
@@ -3407,7 +2630,10 @@ export const AppCore = (() => {
           coreVersion: VERSION,
           coreErrorAt: iso(),
         },
-        { source: "core:init:error" }
+        {
+          source: "core:init:error",
+          silent: true,
+        }
       );
 
       setError(err);
@@ -3448,7 +2674,6 @@ export const AppCore = (() => {
     initialized = false;
     initPromise = null;
     networkBound = false;
-
     httpInstalled = false;
     httpReadyEmitted = false;
 
@@ -3460,7 +2685,10 @@ export const AppCore = (() => {
         coreReady: false,
         coreInitializing: false,
       },
-      { source: "core:reboot" }
+      {
+        source: "core:reboot",
+        silent: true,
+      }
     );
 
     emit(EVENTS.reboot, {
@@ -3473,10 +2701,6 @@ export const AppCore = (() => {
       force: true,
     });
   }
-
-  /* =======================================================
-     SNAPSHOT
-  ======================================================= */
 
   function getSnapshot(options = {}) {
     syncAuth();
@@ -3509,8 +2733,8 @@ export const AppCore = (() => {
         username: state.username || null,
         currentResolvedUsername: state.currentResolvedUsername || null,
 
-        route: redact(state.route || "/"),
-        publicPath: redact(state.publicPath || "/"),
+        route: redactText(state.route || "/"),
+        publicPath: redactText(state.publicPath || "/"),
 
         theme: state.theme || DEFAULT_THEME,
         lang: state.lang || DEFAULT_LANG,
@@ -3557,20 +2781,12 @@ export const AppCore = (() => {
       storage: deep ? snapshotFrom(storage) : null,
       modules: deep ? snapshotFrom(modules) : null,
       hooks: deep ? snapshotFrom(hooks) : null,
-
-      request: deep ? snapshotFrom(getActiveRequest()) : null,
-      apiClient: deep ? snapshotFrom(getActiveApiClient()) : null,
       http: deep ? snapshotFrom(getHttpClient()) : null,
-
       network: deep ? getNetworkSnapshot({ state }) : null,
 
       at: iso(),
     };
   }
-
-  /* =======================================================
-     PUBLIC API
-  ======================================================= */
 
   const api = {
     CORE_VERSION: VERSION,
@@ -3625,6 +2841,11 @@ export const AppCore = (() => {
     setShowToast,
     showToast,
 
+    registerModule,
+    getModule,
+    registerBridge,
+    getBridge,
+
     installHttpBridge,
     getHttpClient,
     getActiveRequest,
@@ -3665,7 +2886,7 @@ export const AppCore = (() => {
         set(value) {
           if (!value) return;
 
-          const client = compatHttpClient(value);
+          const client = normalizeHttpClient(value);
 
           httpBridge = client;
           apiClientBridge = client;
@@ -3679,9 +2900,7 @@ export const AppCore = (() => {
             }
           }
 
-          registerBridge("Http", client, {
-            source: "core:set:apiClient",
-          });
+          registerBridge("Http", client, { source: "core:set:apiClient" });
         },
       },
 
@@ -3694,15 +2913,13 @@ export const AppCore = (() => {
         set(value) {
           if (!value) return;
 
-          const client = compatHttpClient(value);
+          const client = normalizeHttpClient(value);
 
           httpBridge = client;
           apiClientBridge = client;
           httpInstalled = true;
 
-          registerBridge("Http", client, {
-            source: "core:set:Http",
-          });
+          registerBridge("Http", client, { source: "core:set:Http" });
         },
       },
 
@@ -3715,15 +2932,13 @@ export const AppCore = (() => {
         set(value) {
           if (!value) return;
 
-          const client = compatHttpClient(value);
+          const client = normalizeHttpClient(value);
 
           httpBridge = client;
           apiClientBridge = client;
           httpInstalled = true;
 
-          registerBridge("Http", client, {
-            source: "core:set:http",
-          });
+          registerBridge("Http", client, { source: "core:set:http" });
         },
       },
 
@@ -3734,9 +2949,7 @@ export const AppCore = (() => {
           return getBridge("Router");
         },
         set(value) {
-          registerBridge("Router", value, {
-            source: "core:set:Router",
-          });
+          registerBridge("Router", value, { source: "core:set:Router" });
         },
       },
 
@@ -3747,9 +2960,7 @@ export const AppCore = (() => {
           return getBridge("Router");
         },
         set(value) {
-          registerBridge("Router", value, {
-            source: "core:set:router",
-          });
+          registerBridge("Router", value, { source: "core:set:router" });
         },
       },
 
@@ -3760,9 +2971,7 @@ export const AppCore = (() => {
           return getBridge("Auth");
         },
         set(value) {
-          registerBridge("Auth", value, {
-            source: "core:set:Auth",
-          });
+          registerBridge("Auth", value, { source: "core:set:Auth" });
         },
       },
 
@@ -3773,9 +2982,7 @@ export const AppCore = (() => {
           return getBridge("Auth");
         },
         set(value) {
-          registerBridge("Auth", value, {
-            source: "core:set:auth",
-          });
+          registerBridge("Auth", value, { source: "core:set:auth" });
         },
       },
 
@@ -3786,9 +2993,7 @@ export const AppCore = (() => {
           return getBridge("Store");
         },
         set(value) {
-          registerBridge("Store", value, {
-            source: "core:set:Store",
-          });
+          registerBridge("Store", value, { source: "core:set:Store" });
         },
       },
 
@@ -3799,9 +3004,7 @@ export const AppCore = (() => {
           return getBridge("Store");
         },
         set(value) {
-          registerBridge("Store", value, {
-            source: "core:set:store",
-          });
+          registerBridge("Store", value, { source: "core:set:store" });
         },
       },
     });

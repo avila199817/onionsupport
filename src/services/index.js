@@ -1,132 +1,172 @@
 /* =========================================================
    Onion SPA - HTTP Service
-   Archivo: /src/services/index.js
+   Archivo: src/services/index.js
 
-   Responsabilidad:
-   - Cliente HTTP central de la SPA.
-   - Hablar con https://api.onionit.net.
-   - Adjuntar token cuando toque.
-   - Refresh automático una sola vez en 401 privado.
-   - Sin lógica de vistas.
-   - Sin router.
-   - Sin métricas raras.
+   HTTP SERVICE · FACADE ÚNICA SPA
+   - Cliente HTTP central.
+   - Backend real: https://api.onionit.net.
+   - Delega ejecución en http.request.js.
+   - Delega auto-refresh 401 en http.auth.js.
+   - Runtime/pending en http.runtime.js.
+   - Interceptores opcionales en http.interceptors.js.
+   - Sin router, sin vistas, sin lógica de negocio.
+   - Sin apiClient.js paralelo.
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
 import { Auth } from "../features/auth/index.js";
 
+import {
+  HTTP_CONFIG,
+  HTTP_HELPERS_VERSION,
+
+  isFn,
+  safeObject,
+  safeArray,
+  safeText,
+  safeNumber,
+  safeBoolean,
+  nowMs,
+  isoNow,
+
+  normalizeMethod,
+  isBodylessMethod,
+
+  normalizeHeaders,
+  hasHeader,
+  setHeader,
+  deleteHeader,
+  sanitizeHeaders,
+
+  redactHttpValue,
+  sanitizeData,
+  sanitizeRequestConfig,
+
+  isPublicEndpoint,
+  isAuthMeEndpoint,
+  shouldToggleGlobalLoader,
+
+  normalizeError,
+  getHttpHelpersSnapshot,
+} from "./http.helpers.js";
+
+import {
+  executeWithRetry,
+  getHttpRequestEngineSnapshot,
+} from "./http.request.js";
+
+import {
+  runAutoRefreshIfNeeded,
+  getHttpAuthSnapshot,
+  resetHttpAuthRuntime,
+} from "./http.auth.js";
+
+import {
+  incrementPendingRequests,
+  decrementPendingRequests,
+  resetPendingRequests,
+
+  createAbortController as createRuntimeAbortController,
+  abortController as abortRuntimeController,
+
+  getHttpRuntimeSnapshot,
+  resetHttpRuntime,
+} from "./http.runtime.js";
+
+import {
+  createInterceptorsState,
+  useRequest,
+  useResponse,
+  useError,
+  ejectInterceptor,
+  enableInterceptor,
+  disableInterceptor,
+  clearInterceptors,
+  resetInterceptorsRuntime,
+  runRequestInterceptors,
+  runResponseInterceptors,
+  runErrorInterceptors,
+  getInterceptorsSnapshot,
+} from "./http.interceptors.js";
+
 /* =========================================================
-   CONFIG
+   VERSION
 ========================================================= */
 
-const HTTP_VERSION = "v1-simple-http";
-const DEFAULT_API_BASE = "https://api.onionit.net";
-const DEFAULT_TIMEOUT_MS = 30000;
+export const HTTP_SERVICE_VERSION = "18.0.0-clean-service";
 
-let config = {
-  apiBase: DEFAULT_API_BASE,
-  timeoutMs: DEFAULT_TIMEOUT_MS,
-  useLoader: true,
-  autoRefresh: true,
-  autoLogout: true,
-  debug: false,
+const SERVICE_NAME = "http";
+const SERVICE_SOURCE = "services/index.js";
+
+const DEFAULT_API_BASE = "https://api.onionit.net";
+const DEFAULT_TIMEOUT_MS = HTTP_CONFIG.timeout || 30_000;
+const UPLOAD_TIMEOUT_MS = 120_000;
+
+const AUTH_ME_CANONICAL = "/api/auth/me";
+
+const RESOURCE_PREFIXES = Object.freeze([
+  "/users",
+  "/usuarios",
+  "/clientes",
+  "/clients",
+  "/tickets",
+  "/incidencias",
+  "/facturas",
+  "/invoices",
+  "/search",
+]);
+
+const HEADER_DEFAULTS = Object.freeze({
+  accept: "application/json",
+  requestedWith: "XMLHttpRequest",
+  client: "onion-spa",
+});
+
+const EVENTS = Object.freeze({
+  ready: "http:ready",
+  configured: "http:configured",
+  installed: "http:installed",
+
+  start: "http:request:start",
+  success: "http:request:success",
+  error: "http:request:error",
+  complete: "http:request:complete",
+  replay: "http:request:replay-after-refresh",
+
+  logoutLocal: "http:logout-local",
+});
+
+/* =========================================================
+   INTERNAL STATE
+========================================================= */
+
+const interceptors = createInterceptorsState();
+
+const serviceState = {
+  version: HTTP_SERVICE_VERSION,
+
+  initialized: false,
+  installed: false,
+  installedAt: "",
+
+  requestSeq: 0,
+
+  total: 0,
+  success: 0,
+  error: 0,
+  replay: 0,
+  aborted: 0,
+  timeout: 0,
+
+  lastRequestAt: "",
+  lastSuccessAt: "",
+  lastErrorAt: "",
+
+  lastRequest: null,
+  lastError: null,
 };
 
-let initialized = false;
-let pendingRequests = 0;
-let refreshPromise = null;
-let requestSeq = 0;
-let lastError = null;
-
-/* =========================================================
-   STORAGE KEYS
-========================================================= */
-
-const ACCESS_TOKEN_KEYS = [
-  "onion:accessToken",
-  "onion_accessToken",
-  "onion.accessToken",
-  "accessToken",
-  "access_token",
-  "token",
-];
-
-const REFRESH_TOKEN_KEYS = [
-  "onion:refreshToken",
-  "onion_refreshToken",
-  "onion.refreshToken",
-  "refreshToken",
-  "refresh_token",
-];
-
-const SESSION_ID_KEYS = [
-  "onion:sessionId",
-  "onion_sessionId",
-  "onion.sessionId",
-  "sessionId",
-  "session_id",
-];
-
-const USER_ID_KEYS = [
-  "onion:userId",
-  "onion_userId",
-  "onion.userId",
-  "userId",
-  "user_id",
-];
-
-/* =========================================================
-   PUBLIC / PRIVATE ENDPOINTS
-========================================================= */
-
-const PUBLIC_AUTH_MARKERS = [
-  "/auth/login",
-  "/auth/register",
-  "/auth/signup",
-
-  "/auth/refresh",
-  "/auth/token/refresh",
-  "/auth/renew",
-
-  "/auth/logout",
-  "/auth/logout-all",
-
-  "/auth/2fa",
-  "/auth/2fa/login",
-  "/auth/mfa",
-  "/auth/mfa/login",
-  "/auth/otp",
-  "/auth/otp/login",
-
-  "/auth/activate",
-  "/auth/activate-account",
-  "/auth/account/activate",
-  "/auth/activation",
-  "/auth/activate/first-user",
-
-  "/auth/reset-password",
-  "/auth/reset-password-request",
-  "/auth/reset-password-confirm",
-  "/auth/reset-password/confirm",
-
-  "/auth/password-reset",
-  "/auth/password-reset/request",
-  "/auth/password-reset/confirm",
-
-  "/auth/forgot-password",
-  "/auth/recover-password",
-
-  "/auth/_health",
-  "/auth/_meta",
-  "/auth/_routes",
-];
-
-const AUTH_ME_PATHS = [
-  "/me",
-  "/api/me",
-  "/auth/me",
-  "/api/auth/me",
-];
+let serviceConfig = normalizeConfig();
 
 /* =========================================================
    BASIC HELPERS
@@ -140,713 +180,1164 @@ function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function isFunction(value) {
-  return typeof value === "function";
-}
-
-function safeObject(value) {
-  return isObject(value) ? value : {};
-}
-
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-
-  const text = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return text || fallback;
-}
-
 function nextRequestId() {
-  requestSeq += 1;
-  return `http_${Date.now()}_${requestSeq}`;
+  serviceState.requestSeq += 1;
+  return `http_${nowMs()}_${serviceState.requestSeq}`;
 }
 
-function normalizeMethod(method = "GET") {
-  const clean = safeText(method, "GET").toUpperCase();
-
-  if (
-    clean === "GET" ||
-    clean === "HEAD" ||
-    clean === "POST" ||
-    clean === "PUT" ||
-    clean === "PATCH" ||
-    clean === "DELETE" ||
-    clean === "OPTIONS"
-  ) {
-    return clean;
+function getBaseOrigin() {
+  if (isBrowser() && window.location?.origin) {
+    return window.location.origin;
   }
 
-  return "GET";
+  return "http://localhost";
 }
 
-function isBodylessMethod(method) {
-  const clean = normalizeMethod(method);
-  return clean === "GET" || clean === "HEAD" || clean === "OPTIONS";
+function isAbsoluteUrl(value = "") {
+  return /^[a-z][a-z\d+.-]*:\/\//i.test(safeText(value, ""));
 }
 
-function normalizeApiBase(value = "") {
-  const raw = safeText(value, DEFAULT_API_BASE).replace(/\/+$/, "");
-
-  if (!raw) return DEFAULT_API_BASE;
-
-  return raw;
-}
-
-function getApiBase() {
-  return normalizeApiBase(
-    AppCore?.config?.apiBase ||
-      AppCore?.config?.apiUrl ||
-      AppCore?.config?.apiOrigin ||
-      config.apiBase ||
-      DEFAULT_API_BASE
-  );
-}
-
-function normalizeEndpointPath(path = "") {
-  let clean = safeText(path, "/");
-
-  if (!clean) clean = "/";
-
+function safeRedact(value = "") {
   try {
-    const parsed = new URL(clean, "https://local.invalid");
-    clean = parsed.pathname || "/";
+    return redactHttpValue(value);
   } catch {
-    clean = clean.split("?")[0].split("#")[0] || "/";
+    return safeText(value, "");
   }
-
-  clean = clean.replace(/\/{2,}/g, "/");
-
-  if (clean.length > 1 && clean.endsWith("/")) {
-    clean = clean.replace(/\/+$/, "");
-  }
-
-  return clean.toLowerCase();
 }
 
-function stripApiPrefix(path = "") {
-  const clean = normalizeEndpointPath(path);
+function safeEmit(name = "", payload = {}, requestConfig = {}) {
+  const eventName = safeText(name, "");
 
-  if (clean === "/api") return "/";
-  if (clean.startsWith("/api/")) return clean.slice(4) || "/";
+  if (!eventName) return false;
 
-  return clean;
-}
+  const cfg = safeObject(requestConfig);
 
-function isAuthMeEndpoint(path = "") {
-  const clean = normalizeEndpointPath(path);
-  const noApi = stripApiPrefix(clean);
-
-  return AUTH_ME_PATHS.includes(clean) || AUTH_ME_PATHS.includes(noApi);
-}
-
-function isPublicEndpoint(path = "") {
-  if (isAuthMeEndpoint(path)) return false;
-
-  const clean = normalizeEndpointPath(path);
-  const noApi = stripApiPrefix(clean);
-
-  return PUBLIC_AUTH_MARKERS.some((marker) => {
-    return (
-      clean === marker ||
-      clean.startsWith(`${marker}/`) ||
-      noApi === marker ||
-      noApi.startsWith(`${marker}/`)
+  const shouldEmit =
+    cfg.emitEvents !== false &&
+    (
+      cfg.emitLifecycleEvents === true ||
+      cfg.debugHttpEvents === true ||
+      serviceConfig.emitLifecycleEvents === true ||
+      serviceConfig.debug === true ||
+      AppCore?.config?.diagnostics?.httpLifecycleEvents === true ||
+      AppCore?.config?.debugHttpService === true
     );
-  });
-}
 
-function isPrivateRequest(options = {}) {
-  const opts = safeObject(options);
-
-  if (opts.auth === false || opts.public === true || opts.skipAuth === true) {
-    return false;
-  }
-
-  if (isAuthMeEndpoint(opts.path || opts.url)) {
-    return true;
-  }
-
-  if (isPublicEndpoint(opts.path || opts.url)) {
-    return false;
-  }
-
-  return true;
-}
-
-function buildUrl(path = "") {
-  const raw = safeText(path, "/");
-
-  if (/^https?:\/\//i.test(raw)) {
-    return raw;
-  }
-
-  let clean = raw.startsWith("/") ? raw : `/${raw}`;
-
-  if (clean === "/me" || clean === "/auth/me" || clean === "/api/me") {
-    clean = "/api/auth/me";
-  } else if (clean.startsWith("/auth/")) {
-    clean = `/api${clean}`;
-  } else if (
-    clean.startsWith("/users") ||
-    clean.startsWith("/clientes") ||
-    clean.startsWith("/tickets") ||
-    clean.startsWith("/incidencias") ||
-    clean.startsWith("/facturas") ||
-    clean.startsWith("/search")
-  ) {
-    clean = `/api${clean}`;
-  }
-
-  return `${getApiBase()}${clean}`;
-}
-
-function redact(value = "") {
-  let text = safeText(value, "");
-
-  if (!text) return "";
-
-  const keys = [
-    "token",
-    "code",
-    "t",
-    "access_token",
-    "refresh_token",
-    "password",
-    "otp",
-    "mfa",
-    "2fa",
-  ];
-
-  for (const key of keys) {
-    try {
-      text = text.replace(
-        new RegExp(`([?&#]${key}=)([^&#\\s]+)`, "gi"),
-        "$1***"
-      );
-    } catch {}
-  }
+  if (!shouldEmit) return false;
 
   try {
-    text = text.replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
+    AppCore?.events?.emit?.(
+      eventName,
+      sanitizeData({
+        version: HTTP_SERVICE_VERSION,
+        source: SERVICE_SOURCE,
+        at: isoNow(),
+        ...safeObject(payload),
+      })
     );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeWarn(...args) {
+  const safeArgs = args.map((item) => sanitizeData(item));
+
+  try {
+    AppCore?.utils?.warn?.("[HTTP Service]", ...safeArgs);
+    return;
   } catch {}
 
-  return text;
+  try {
+    if (serviceConfig.debug || AppCore?.config?.debugHttpService) {
+      console.warn("[HTTP Service]", ...safeArgs);
+    }
+  } catch {}
+}
+
+function safeConsoleError(...args) {
+  const safeArgs = args.map((item) => sanitizeData(item));
+
+  try {
+    AppCore?.utils?.error?.("[HTTP Service]", ...safeArgs);
+    return;
+  } catch {}
+
+  try {
+    if (serviceConfig.debug || AppCore?.config?.debugHttpService) {
+      console.error("[HTTP Service]", ...safeArgs);
+    }
+  } catch {}
 }
 
 /* =========================================================
-   STORAGE / AUTH HELPERS
+   CONFIG
 ========================================================= */
 
-function readStorage(keys = []) {
-  if (!isBrowser()) return "";
+function normalizeApiBase(base = "") {
+  const raw = safeText(base, DEFAULT_API_BASE).replace(/\/+$/g, "");
 
-  for (const storageName of ["localStorage", "sessionStorage"]) {
-    let storage = null;
-
-    try {
-      storage = window[storageName];
-    } catch {
-      storage = null;
-    }
-
-    if (!storage) continue;
-
-    for (const key of keys) {
-      try {
-        const value = safeText(storage.getItem(key), "");
-
-        if (value) return value;
-      } catch {}
-    }
+  if (!raw || raw === "/" || raw === "/api" || raw === "api") {
+    return DEFAULT_API_BASE;
   }
+
+  if (!isAbsoluteUrl(raw)) {
+    return raw;
+  }
+
+  try {
+    const parsed = new URL(raw);
+    const origin = parsed.origin.replace(/\/+$/g, "");
+    const pathname = (parsed.pathname || "/").replace(/\/+$/g, "");
+
+    if (!pathname || pathname === "/" || pathname === "/api") {
+      return origin;
+    }
+
+    if (origin === DEFAULT_API_BASE) {
+      return origin;
+    }
+
+    return `${origin}${pathname}`;
+  } catch {
+    return DEFAULT_API_BASE;
+  }
+}
+
+function normalizeConfig(patch = {}) {
+  const coreConfig = AppCore?.config || {};
+  const next = safeObject(patch);
+
+  const merged = {
+    ...HTTP_CONFIG,
+    ...serviceConfig,
+    ...next,
+  };
+
+  const apiBase = normalizeApiBase(
+    next.apiBase ||
+      next.apiOrigin ||
+      next.apiUrl ||
+      coreConfig.apiBase ||
+      coreConfig.apiOrigin ||
+      coreConfig.apiUrl ||
+      coreConfig.api?.base ||
+      coreConfig.api?.baseUrl ||
+      coreConfig.api?.origin ||
+      merged.apiBase ||
+      DEFAULT_API_BASE
+  );
+
+  const timeout = safeNumber(
+    next.timeout ??
+      next.timeoutMs ??
+      next.requestTimeout ??
+      coreConfig.requestTimeout ??
+      coreConfig.api?.timeout ??
+      merged.timeout,
+    DEFAULT_TIMEOUT_MS
+  );
+
+  return {
+    ...merged,
+
+    apiBase,
+    apiOrigin: apiBase,
+    apiUrl: apiBase,
+
+    timeout,
+    timeoutMs: timeout,
+
+    retries: safeNumber(
+      next.retries ??
+        next.requestRetries ??
+        coreConfig.requestRetries ??
+        coreConfig.api?.retries ??
+        merged.retries,
+      HTTP_CONFIG.retries
+    ),
+
+    retryDelay: safeNumber(
+      next.retryDelay ??
+        next.retryDelayMs ??
+        coreConfig.requestRetryDelayMs ??
+        coreConfig.api?.retryDelayMs ??
+        merged.retryDelay,
+      HTTP_CONFIG.retryDelay
+    ),
+
+    retryMaxDelay: safeNumber(
+      next.retryMaxDelay ??
+        next.retryMaxDelayMs ??
+        coreConfig.requestRetryMaxDelayMs ??
+        coreConfig.api?.retryMaxDelayMs ??
+        merged.retryMaxDelay,
+      HTTP_CONFIG.retryMaxDelay
+    ),
+
+    defaultCredentials:
+      next.defaultCredentials ??
+      next.credentials ??
+      coreConfig.api?.defaultCredentials ??
+      coreConfig.api?.credentials ??
+      coreConfig.api?.withCredentials === false
+        ? "omit"
+        : "include",
+
+    defaultUseLoader: safeBoolean(
+      next.defaultUseLoader ??
+        next.useLoader ??
+        merged.defaultUseLoader,
+      HTTP_CONFIG.defaultUseLoader
+    ),
+
+    autoRefreshOn401: safeBoolean(
+      next.autoRefreshOn401 ??
+        next.autoRefresh ??
+        merged.autoRefreshOn401,
+      HTTP_CONFIG.autoRefreshOn401
+    ),
+
+    autoLogoutOn401: safeBoolean(
+      next.autoLogoutOn401 ??
+        next.autoLogout ??
+        merged.autoLogoutOn401,
+      HTTP_CONFIG.autoLogoutOn401
+    ),
+
+    emitLifecycleEvents: safeBoolean(
+      next.emitLifecycleEvents ??
+        merged.emitLifecycleEvents,
+      false
+    ),
+
+    emitFinalEvents: safeBoolean(
+      next.emitFinalEvents ??
+        merged.emitFinalEvents,
+      true
+    ),
+
+    debug: safeBoolean(
+      next.debug ??
+        coreConfig.debugHttpService ??
+        merged.debug,
+      false
+    ),
+  };
+}
+
+export function configure(patch = {}) {
+  serviceConfig = normalizeConfig(patch);
+
+  safeEmit(
+    EVENTS.configured,
+    {
+      apiBase: serviceConfig.apiBase,
+      timeout: serviceConfig.timeout,
+      retries: serviceConfig.retries,
+    },
+    {
+      emitLifecycleEvents: serviceConfig.emitLifecycleEvents,
+    }
+  );
+
+  return getConfig();
+}
+
+export function getConfig() {
+  return sanitizeData({
+    version: HTTP_SERVICE_VERSION,
+
+    apiBase: serviceConfig.apiBase,
+    apiOrigin: serviceConfig.apiOrigin,
+    apiUrl: serviceConfig.apiUrl,
+
+    timeout: serviceConfig.timeout,
+    timeoutMs: serviceConfig.timeoutMs,
+
+    retries: serviceConfig.retries,
+    retryDelay: serviceConfig.retryDelay,
+    retryMaxDelay: serviceConfig.retryMaxDelay,
+
+    defaultCredentials: serviceConfig.defaultCredentials,
+    defaultUseLoader: serviceConfig.defaultUseLoader,
+
+    autoRefreshOn401: serviceConfig.autoRefreshOn401,
+    autoLogoutOn401: serviceConfig.autoLogoutOn401,
+
+    emitLifecycleEvents: serviceConfig.emitLifecycleEvents,
+    emitFinalEvents: serviceConfig.emitFinalEvents,
+
+    debug: serviceConfig.debug,
+  });
+}
+
+/* =========================================================
+   PATH / URL
+========================================================= */
+
+function splitSuffix(path = "") {
+  const raw = safeText(path, "/");
+
+  let base = raw;
+  let suffix = "";
+
+  const hashIndex = base.indexOf("#");
+
+  if (hashIndex >= 0) {
+    suffix = base.slice(hashIndex);
+    base = base.slice(0, hashIndex) || "/";
+  }
+
+  const queryIndex = base.indexOf("?");
+
+  if (queryIndex >= 0) {
+    suffix = `${base.slice(queryIndex)}${suffix}`;
+    base = base.slice(0, queryIndex) || "/";
+  }
+
+  return {
+    base,
+    suffix,
+  };
+}
+
+function normalizePathname(path = "/") {
+  let value = safeText(path, "/").replace(/\\/g, "/");
+
+  if (!value.startsWith("/")) value = `/${value}`;
+
+  value = value.replace(/\/{2,}/g, "/");
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
+}
+
+function normalizeServicePath(path = "/") {
+  const raw = safeText(path, "/");
+
+  if (isAbsoluteUrl(raw)) return raw;
+
+  const { base, suffix } = splitSuffix(raw);
+  let clean = normalizePathname(base);
+
+  if (clean === "/me" || clean === "/api/me" || clean === "/auth/me") {
+    clean = AUTH_ME_CANONICAL;
+  } else if (clean.startsWith("/auth/")) {
+    clean = `/api${clean}`;
+  } else if (RESOURCE_PREFIXES.some((prefix) => clean === prefix || clean.startsWith(`${prefix}/`))) {
+    clean = `/api${clean}`;
+  }
+
+  return `${clean}${suffix}`;
+}
+
+function appendQuery(url = "", query = null) {
+  if (!query) return url;
+
+  let params = null;
+
+  try {
+    if (typeof URLSearchParams !== "undefined" && query instanceof URLSearchParams) {
+      params = query;
+    } else if (typeof query === "string") {
+      params = new URLSearchParams(query.startsWith("?") ? query.slice(1) : query);
+    } else if (isObject(query)) {
+      params = new URLSearchParams();
+
+      for (const [key, value] of Object.entries(query)) {
+        if (value === null || value === undefined || value === "") continue;
+
+        if (Array.isArray(value)) {
+          value.forEach((item) => {
+            if (item !== null && item !== undefined && item !== "") {
+              params.append(key, String(item));
+            }
+          });
+          continue;
+        }
+
+        if (value instanceof Date) {
+          params.set(key, value.toISOString());
+          continue;
+        }
+
+        if (typeof value === "object") {
+          params.set(key, JSON.stringify(value));
+          continue;
+        }
+
+        params.set(key, String(value));
+      }
+    }
+  } catch {
+    params = null;
+  }
+
+  const queryString = params?.toString?.() || "";
+
+  if (!queryString) return url;
+
+  return `${url}${url.includes("?") ? "&" : "?"}${queryString}`;
+}
+
+function joinUrl(base = "", path = "") {
+  const rawPath = safeText(path, "/");
+
+  if (isAbsoluteUrl(rawPath)) return rawPath;
+
+  const cleanBase = normalizeApiBase(base);
+  const cleanPath = normalizeServicePath(rawPath);
+
+  if (!cleanBase) return cleanPath;
+
+  if (cleanBase.endsWith("/api") && cleanPath.startsWith("/api/")) {
+    return `${cleanBase}${cleanPath.slice(4)}`;
+  }
+
+  return `${cleanBase}/${cleanPath.replace(/^\/+/g, "")}`;
+}
+
+export function buildUrl(path = "/", query = null) {
+  const normalized = normalizeServicePath(path);
+
+  if (isAbsoluteUrl(normalized)) {
+    return appendQuery(normalized, query);
+  }
+
+  return appendQuery(
+    joinUrl(serviceConfig.apiBase || DEFAULT_API_BASE, normalized),
+    query
+  );
+}
+
+export function redact(value = "") {
+  return safeRedact(value);
+}
+
+/* =========================================================
+   AUTH / TOKEN HELPERS
+========================================================= */
+
+let tokenProvider = null;
+
+export function setTokenProvider(provider = null) {
+  tokenProvider = isFn(provider) ? provider : null;
+  return Boolean(tokenProvider);
+}
+
+function stripBearer(token = "") {
+  return safeText(token, "").replace(/^Bearer\s+/i, "").trim();
+}
+
+function hasUsableToken(token = "") {
+  const value = stripBearer(token);
+
+  if (!value) return false;
+
+  const lower = value.toLowerCase();
+
+  if (
+    [
+      "null",
+      "undefined",
+      "false",
+      "true",
+      "nan",
+      "none",
+      "empty",
+      "[object object]",
+      "{}",
+      "[]",
+      "\"\"",
+      "''",
+    ].includes(lower)
+  ) {
+    return false;
+  }
+
+  return !/[\s\r\n\t]/.test(value);
+}
+
+export function getAccessToken() {
+  try {
+    const provided = tokenProvider?.();
+    if (hasUsableToken(provided)) return stripBearer(provided);
+  } catch {}
+
+  try {
+    const authToken = Auth?.getAccessToken?.() || Auth?.getToken?.();
+    if (hasUsableToken(authToken)) return stripBearer(authToken);
+  } catch {}
+
+  try {
+    const state = AppCore?.state || {};
+    const session = state.session || state.sessionData || {};
+
+    const token =
+      state.token ||
+      state.accessToken ||
+      state.access_token ||
+      session.token ||
+      session.accessToken ||
+      session.access_token ||
+      "";
+
+    if (hasUsableToken(token)) return stripBearer(token);
+  } catch {}
 
   return "";
 }
 
-function writeStorage(keys = [], value = "") {
-  if (!isBrowser()) return false;
-
-  const text = safeText(value, "");
-
-  if (!text) return false;
-
+export function getRefreshToken() {
   try {
-    const storage = window.localStorage;
-    storage.setItem(keys[0], text);
-    return true;
+    const value = Auth?.getRefreshToken?.() || Auth?.session?.refreshToken;
+    if (hasUsableToken(value)) return stripBearer(value);
   } catch {}
 
   try {
-    const storage = window.sessionStorage;
-    storage.setItem(keys[0], text);
+    const state = AppCore?.state || {};
+    const session = state.session || state.sessionData || {};
+
+    const token =
+      state.refreshToken ||
+      state.refresh_token ||
+      session.refreshToken ||
+      session.refresh_token ||
+      "";
+
+    if (hasUsableToken(token)) return stripBearer(token);
+  } catch {}
+
+  return "";
+}
+
+function getAuthHeader() {
+  try {
+    const header = AppCore?.getAuthHeader?.();
+
+    if (header && typeof header === "object") {
+      return header;
+    }
+  } catch {}
+
+  const token = getAccessToken();
+
+  return token
+    ? {
+        Authorization: `Bearer ${token}`,
+      }
+    : {};
+}
+
+function shouldBePublic(path = "", options = {}) {
+  const opts = safeObject(options);
+  const normalized = normalizeServicePath(path);
+
+  if (isAuthMeEndpoint(normalized)) return false;
+
+  if (opts.public === true) return true;
+  if (opts.auth === false || opts.skipAuth === true) return true;
+
+  if (opts.public === false) return false;
+
+  try {
+    return Boolean(isPublicEndpoint(normalized));
+  } catch {
+    return false;
+  }
+}
+
+export function isAuthMeRequest(path = "") {
+  return Boolean(isAuthMeEndpoint(normalizeServicePath(path)));
+}
+
+export function isPublicRequest(path = "", options = {}) {
+  return shouldBePublic(path, options);
+}
+
+export function isPrivateRequest(path = "", options = {}) {
+  const opts = safeObject(options);
+
+  if (shouldBePublic(path, opts)) return false;
+  if (opts.auth === false || opts.skipAuth === true) return false;
+
+  return true;
+}
+
+/* =========================================================
+   REQUEST CONFIG
+========================================================= */
+
+function shouldUseLoader(requestConfig = {}) {
+  const req = safeObject(requestConfig);
+
+  if (req.loader === false || req.useLoader === false) return false;
+  if (req.background === true || req.silent === true) return false;
+
+  try {
+    return Boolean(shouldToggleGlobalLoader(serviceConfig, req));
+  } catch {}
+
+  return serviceConfig.defaultUseLoader !== false;
+}
+
+function shouldTrackPending(requestConfig = {}) {
+  const req = safeObject(requestConfig);
+  return req.trackPending !== false && req.pending !== false;
+}
+
+function applyDefaultHeaders(headers = {}, requestConfig = {}) {
+  const req = safeObject(requestConfig);
+  const output = normalizeHeaders(headers || {});
+
+  if (!hasHeader(output, "Accept")) {
+    setHeader(output, "Accept", HEADER_DEFAULTS.accept);
+  }
+
+  if (!hasHeader(output, "X-Requested-With")) {
+    setHeader(output, "X-Requested-With", HEADER_DEFAULTS.requestedWith);
+  }
+
+  if (!hasHeader(output, "X-Onion-Client")) {
+    setHeader(output, "X-Onion-Client", HEADER_DEFAULTS.client);
+  }
+
+  if (!hasHeader(output, "X-Client-Version")) {
+    setHeader(output, "X-Client-Version", HTTP_SERVICE_VERSION);
+  }
+
+  if (!hasHeader(output, "X-Request-Id")) {
+    setHeader(output, "X-Request-Id", req.requestId);
+  }
+
+  if (req.noAuthHeader === true || req.public === true || req.auth === false || req.skipAuth === true) {
+    deleteHeader(output, "Authorization");
+    deleteHeader(output, "authorization");
+    return output;
+  }
+
+  if (!hasHeader(output, "Authorization")) {
+    const authHeader = getAuthHeader();
+    const value = authHeader.Authorization || authHeader.authorization || "";
+
+    if (value) {
+      setHeader(output, "Authorization", value);
+    }
+  }
+
+  return output;
+}
+
+function buildRequestConfig(method = "GET", path = "/", options = {}) {
+  const opts = safeObject(options);
+  const finalMethod = normalizeMethod(method);
+  const finalPath = normalizeServicePath(path || opts.path || opts.url || "/");
+  const requestId = opts.requestId || nextRequestId();
+  const publicRequest = shouldBePublic(finalPath, opts);
+  const authEnabled = opts.auth === false
+    ? false
+    : !publicRequest && opts.skipAuth !== true;
+
+  const timeout = safeNumber(
+    opts.timeout ??
+      opts.timeoutMs ??
+      opts.requestTimeout ??
+      serviceConfig.timeout,
+    DEFAULT_TIMEOUT_MS
+  );
+
+  const headers = applyDefaultHeaders(
+    opts.headers,
+    {
+      ...opts,
+      method: finalMethod,
+      path: finalPath,
+      requestId,
+      public: publicRequest,
+      auth: authEnabled,
+      skipAuth: opts.skipAuth === true || publicRequest,
+      noAuthHeader: opts.noAuthHeader === true || publicRequest || !authEnabled,
+    }
+  );
+
+  const body =
+    opts.body !== undefined
+      ? opts.body
+      : opts.data !== undefined
+        ? opts.data
+        : opts.payload;
+
+  const requestConfig = {
+    ...opts,
+
+    method: finalMethod,
+    path: finalPath,
+    url: opts.url && isAbsoluteUrl(opts.url)
+      ? opts.url
+      : undefined,
+
+    apiBase: opts.apiBase || serviceConfig.apiBase,
+
+    requestId,
+
+    headers,
+
+    body: isBodylessMethod(finalMethod)
+      ? undefined
+      : body,
+
+    public: publicRequest,
+    auth: authEnabled,
+    skipAuth: opts.skipAuth === true || publicRequest,
+    noAuthHeader: opts.noAuthHeader === true || publicRequest || !authEnabled,
+
+    timeout,
+    timeoutMs: timeout,
+
+    credentials: opts.credentials ?? serviceConfig.defaultCredentials ?? "include",
+    cache: opts.cache ?? "no-store",
+
+    responseType: opts.responseType || serviceConfig.defaultResponseType || "auto",
+
+    retries:
+      opts.retries !== undefined
+        ? opts.retries
+        : serviceConfig.retries,
+
+    retry:
+      opts.retry !== undefined
+        ? opts.retry
+        : undefined,
+
+    retryDelay:
+      opts.retryDelay ??
+      opts.retryDelayMs ??
+      serviceConfig.retryDelay,
+
+    retryMaxDelay:
+      opts.retryMaxDelay ??
+      opts.retryMaxDelayMs ??
+      serviceConfig.retryMaxDelay,
+
+    autoRefresh:
+      opts.autoRefresh === false || opts.noAutoRefresh === true
+        ? false
+        : serviceConfig.autoRefreshOn401 !== false,
+
+    noAutoRefresh:
+      opts.noAutoRefresh === true ||
+      opts.autoRefresh === false ||
+      publicRequest ||
+      !authEnabled,
+
+    _skipAuthRefresh:
+      opts._skipAuthRefresh === true ||
+      opts.skipAuthRefresh === true,
+
+    skipAuthRefresh:
+      opts._skipAuthRefresh === true ||
+      opts.skipAuthRefresh === true,
+
+    autoLogout:
+      opts.autoLogout === false || opts.noAutoLogout === true
+        ? false
+        : serviceConfig.autoLogoutOn401 !== false,
+
+    noAutoLogout:
+      opts.noAutoLogout === true ||
+      opts.autoLogout === false ||
+      publicRequest ||
+      !authEnabled,
+
+    emitLifecycleEvents:
+      opts.emitLifecycleEvents ??
+      serviceConfig.emitLifecycleEvents,
+
+    emitFinalEvents:
+      opts.emitFinalEvents ??
+      serviceConfig.emitFinalEvents,
+
+    service: Http,
+    httpService: Http,
+    Http,
+    http: Http,
+    client: Http,
+
+    serviceRequest: request,
+    httpRequest: request,
+  };
+
+  try {
+    return sanitizeRequestConfig(requestConfig, {
+      keepRaw: true,
+    }) || requestConfig;
+  } catch {
+    return requestConfig;
+  }
+}
+
+/* =========================================================
+   PENDING / LOADER
+========================================================= */
+
+function startRuntime(requestConfig = {}) {
+  const req = safeObject(requestConfig);
+  const trackPending = shouldTrackPending(req);
+  const useLoader = shouldUseLoader(req);
+
+  if (trackPending) {
+    try {
+      incrementPendingRequests(
+        AppCore,
+        AppCore?.state,
+        {
+          source: "http.service:start",
+          requestId: req.requestId,
+          emitRuntimeEvents: req.emitRuntimeEvents,
+        }
+      );
+    } catch {}
+  }
+
+  if (useLoader) {
+    try {
+      AppCore?.setLoading?.(true);
+    } catch {}
+  }
+
+  return {
+    trackPending,
+    useLoader,
+  };
+}
+
+function stopRuntime(handle = {}, requestConfig = {}) {
+  const req = safeObject(requestConfig);
+
+  if (handle.trackPending) {
+    try {
+      decrementPendingRequests(
+        AppCore,
+        AppCore?.state,
+        {
+          source: "http.service:complete",
+          requestId: req.requestId,
+          emitRuntimeEvents: req.emitRuntimeEvents,
+        }
+      );
+    } catch {}
+  }
+
+  if (handle.useLoader) {
+    const pending = safeNumber(AppCore?.state?.pendingRequests, 0);
+
+    if (pending <= 0) {
+      try {
+        AppCore?.setLoading?.(false);
+      } catch {}
+    }
+  }
+}
+
+/* =========================================================
+   SESSION COMMIT / LOGOUT
+========================================================= */
+
+function looksLikeAuthPayload(payload = null) {
+  if (!payload || typeof payload !== "object") return false;
+
+  return Boolean(
+    payload.token ||
+      payload.accessToken ||
+      payload.access_token ||
+      payload.refreshToken ||
+      payload.refresh_token ||
+      payload.user ||
+      payload.usuario ||
+      payload.me ||
+      payload.account ||
+      payload.profile ||
+      payload.auth?.token ||
+      payload.auth?.accessToken ||
+      payload.auth?.user ||
+      payload.data?.token ||
+      payload.data?.accessToken ||
+      payload.data?.user
+  );
+}
+
+function shouldCommitAuthPayload(response, requestConfig = {}) {
+  const req = safeObject(requestConfig);
+
+  if (req.captureAuth === false || req.applySession === false) return false;
+  if (!looksLikeAuthPayload(response)) return false;
+
+  const path = normalizeServicePath(req.path || req.url || "");
+
+  return Boolean(
+    req.captureAuth === true ||
+      path.includes("/api/auth/login") ||
+      path.includes("/api/auth/refresh") ||
+      path === AUTH_ME_CANONICAL
+  );
+}
+
+function commitAuthPayload(response, requestConfig = {}) {
+  if (!shouldCommitAuthPayload(response, requestConfig)) {
+    return false;
+  }
+
+  const req = safeObject(requestConfig);
+
+  try {
+    if (isFn(Auth?.applySession)) {
+      Auth.applySession(response, {
+        source: "http.service",
+        reason: req.path?.includes("/login")
+          ? "http-login"
+          : req.path?.includes("/refresh")
+            ? "http-refresh"
+            : "http-auth-response",
+        emitRepair: true,
+      });
+
+      return true;
+    }
+  } catch {}
+
+  try {
+    AppCore?.applySession?.(
+      response,
+      {
+        source: "http.service",
+        reason: "http-auth-response",
+      }
+    );
+
     return true;
   } catch {}
 
   return false;
 }
 
-function removeStorage(keys = []) {
-  if (!isBrowser()) return;
-
-  for (const storageName of ["localStorage", "sessionStorage"]) {
-    try {
-      const storage = window[storageName];
-
-      for (const key of keys) {
-        storage.removeItem(key);
-      }
-    } catch {}
-  }
-}
-
-function getAccessToken() {
-  try {
-    const value =
-      Auth?.getAccessToken?.() ||
-      Auth?.getToken?.() ||
-      Auth?.session?.getAccessToken?.();
-
-    if (value) return value;
-  } catch {}
-
-  return readStorage(ACCESS_TOKEN_KEYS);
-}
-
-function getRefreshToken() {
-  try {
-    const value =
-      Auth?.getRefreshToken?.() ||
-      Auth?.session?.getRefreshToken?.();
-
-    if (value) return value;
-  } catch {}
-
-  return readStorage(REFRESH_TOKEN_KEYS);
-}
-
-function getSessionId() {
-  try {
-    const value =
-      Auth?.getSessionId?.() ||
-      Auth?.session?.getSessionId?.();
-
-    if (value) return value;
-  } catch {}
-
-  return readStorage(SESSION_ID_KEYS);
-}
-
-function getUserId() {
-  try {
-    const value =
-      Auth?.getUserId?.() ||
-      Auth?.session?.getUserId?.();
-
-    if (value) return value;
-  } catch {}
-
-  return readStorage(USER_ID_KEYS);
-}
-
-function saveAuthPayload(payload = {}) {
-  const data = safeObject(payload);
-
-  const accessToken =
-    data.accessToken ||
-    data.access_token ||
-    data.token ||
-    data.auth?.accessToken ||
-    data.auth?.access_token ||
-    "";
-
-  const refreshToken =
-    data.refreshToken ||
-    data.refresh_token ||
-    data.auth?.refreshToken ||
-    data.auth?.refresh_token ||
-    "";
-
-  const session = data.session || data.sessionData || data.auth?.session || {};
-  const user = data.user || data.usuario || data.me || data.account || data.auth?.user || {};
-
-  const sessionId = session.sessionId || session.id || data.sessionId || "";
-  const userId = user.userId || user.id || session.userId || data.userId || "";
-
-  try {
-    Auth?.setSession?.(data);
-  } catch {}
-
-  try {
-    Auth?.saveSession?.(data);
-  } catch {}
-
-  if (accessToken) writeStorage(ACCESS_TOKEN_KEYS, accessToken);
-  if (refreshToken) writeStorage(REFRESH_TOKEN_KEYS, refreshToken);
-  if (sessionId) writeStorage(SESSION_ID_KEYS, sessionId);
-  if (userId) writeStorage(USER_ID_KEYS, userId);
-
-  return true;
-}
-
-function clearAuthPayload() {
-  try {
-    Auth?.clearSession?.();
-  } catch {}
-
-  try {
-    Auth?.clear?.();
-  } catch {}
-
-  removeStorage(ACCESS_TOKEN_KEYS);
-  removeStorage(REFRESH_TOKEN_KEYS);
-  removeStorage(SESSION_ID_KEYS);
-  removeStorage(USER_ID_KEYS);
-}
-
-/* =========================================================
-   LOADER
-========================================================= */
-
-function startLoader(options = {}) {
-  const opts = safeObject(options);
-
-  if (opts.loader === false || opts.useLoader === false) return false;
-
-  pendingRequests += 1;
-
-  try {
-    AppCore?.setLoading?.(true);
-  } catch {}
-
-  try {
-    if (AppCore?.state) {
-      AppCore.state.pendingRequests = pendingRequests;
-    }
-  } catch {}
-
-  return true;
-}
-
-function stopLoader(started = false) {
-  if (!started) return;
-
-  pendingRequests = Math.max(0, pendingRequests - 1);
-
-  try {
-    if (AppCore?.state) {
-      AppCore.state.pendingRequests = pendingRequests;
-    }
-  } catch {}
-
-  if (pendingRequests === 0) {
-    try {
-      AppCore?.setLoading?.(false);
-    } catch {}
-  }
-}
-
-/* =========================================================
-   FETCH CORE
-========================================================= */
-
-function buildHeaders(options = {}) {
-  const opts = safeObject(options);
-  const headers = {
-    Accept: "application/json",
-    "X-Requested-With": "XMLHttpRequest",
-    "X-Onion-Client": "onion-spa",
-    "X-Client-Version": HTTP_VERSION,
-    "X-Request-Id": opts.requestId || nextRequestId(),
-    ...(opts.headers || {}),
-  };
-
-  const isFormData =
-    typeof FormData !== "undefined" && opts.body instanceof FormData;
-
-  if (!isFormData && opts.body !== undefined && opts.body !== null) {
-    headers["Content-Type"] = headers["Content-Type"] || "application/json";
-  }
-
-  if (isPrivateRequest(opts)) {
-    const token = getAccessToken();
-
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-  } else {
-    delete headers.Authorization;
-    delete headers.authorization;
-  }
-
-  return headers;
-}
-
-function buildFetchBody(method, options = {}) {
-  const opts = safeObject(options);
-
-  if (isBodylessMethod(method)) return undefined;
-
-  if (opts.body === undefined || opts.body === null) {
-    return undefined;
-  }
-
-  if (typeof FormData !== "undefined" && opts.body instanceof FormData) {
-    return opts.body;
-  }
-
-  if (typeof Blob !== "undefined" && opts.body instanceof Blob) {
-    return opts.body;
-  }
-
-  if (typeof ArrayBuffer !== "undefined" && opts.body instanceof ArrayBuffer) {
-    return opts.body;
-  }
-
-  if (typeof opts.body === "string") {
-    return opts.body;
-  }
-
-  return JSON.stringify(opts.body);
-}
-
-function createTimeoutSignal(timeoutMs, externalSignal) {
-  const timeout = Number(timeoutMs || config.timeoutMs || DEFAULT_TIMEOUT_MS);
-
-  const controller = new AbortController();
-
-  let timeoutId = null;
-
-  const abort = () => {
-    try {
-      controller.abort();
-    } catch {}
-  };
-
-  if (externalSignal) {
-    if (externalSignal.aborted) {
-      abort();
-    } else {
-      try {
-        externalSignal.addEventListener("abort", abort, { once: true });
-      } catch {}
-    }
-  }
-
-  if (timeout > 0) {
-    timeoutId = setTimeout(abort, timeout);
-  }
-
-  return {
-    signal: controller.signal,
-    clear() {
-      if (timeoutId) clearTimeout(timeoutId);
-
-      if (externalSignal) {
-        try {
-          externalSignal.removeEventListener("abort", abort);
-        } catch {}
-      }
-    },
-  };
-}
-
-async function parseResponse(response, options = {}) {
-  const opts = safeObject(options);
-
-  if (opts.raw === true) {
-    return response;
-  }
-
-  if (opts.responseType === "blob") {
-    return response.blob();
-  }
-
-  if (opts.responseType === "arrayBuffer") {
-    return response.arrayBuffer();
-  }
-
-  if (opts.responseType === "text") {
-    return response.text();
-  }
-
-  const contentType = response.headers.get("content-type") || "";
-
-  if (contentType.includes("application/json") || contentType.includes("+json")) {
-    return response.json();
-  }
-
-  const text = await response.text();
-
-  if (!text) return null;
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
-
-function normalizeError(error, context = {}) {
-  const ctx = safeObject(context);
-
-  if (error?.__onionNormalized) {
-    return error;
-  }
-
-  const normalized = new Error(
-    safeText(
-      error?.message ||
-        error?.data?.message ||
-        error?.data?.error ||
-        error?.statusText ||
-        "Error HTTP",
-      "Error HTTP"
-    )
-  );
-
-  normalized.__onionNormalized = true;
-  normalized.name = safeText(error?.name, "HttpError");
-  normalized.status = Number(error?.status || error?.statusCode || ctx.status || 0);
-  normalized.code = safeText(error?.code || error?.data?.code || error?.data?.error, "");
-  normalized.data = error?.data ?? null;
-  normalized.method = ctx.method || error?.method || "";
-  normalized.url = ctx.url || error?.url || "";
-  normalized.path = ctx.path || error?.path || "";
-  normalized.requestId = ctx.requestId || error?.requestId || "";
-  normalized.aborted = error?.name === "AbortError" || error?.aborted === true;
-  normalized.timeout = normalized.aborted && normalized.status === 0;
-
-  return normalized;
-}
-
-async function baseRequest(method, path, options = {}) {
-  const opts = safeObject(options);
-  const finalMethod = normalizeMethod(method);
-  const requestId = opts.requestId || nextRequestId();
-  const url = buildUrl(path);
-
-  const prepared = {
-    ...opts,
-    method: finalMethod,
-    path,
-    url,
-    requestId,
-  };
-
-  const timeoutSignal = createTimeoutSignal(
-    opts.timeoutMs || opts.timeout || config.timeoutMs,
-    opts.signal
-  );
-
-  try {
-    const response = await fetch(url, {
-      method: finalMethod,
-      headers: buildHeaders(prepared),
-      body: buildFetchBody(finalMethod, prepared),
-      credentials: opts.credentials || "omit",
-      cache: opts.cache || "no-store",
-      signal: timeoutSignal.signal,
-    });
-
-    const data = await parseResponse(response, prepared);
-
-    if (!response.ok) {
-      const err = new Error(
-        safeText(data?.message || data?.error || response.statusText, "Error HTTP")
-      );
-
-      err.status = response.status;
-      err.statusCode = response.status;
-      err.code = data?.code || data?.error || "";
-      err.data = data;
-      err.method = finalMethod;
-      err.path = path;
-      err.url = url;
-      err.requestId = requestId;
-
-      throw err;
-    }
-
-    return data;
-  } catch (err) {
-    throw normalizeError(err, {
-      method: finalMethod,
-      path,
-      url,
-      requestId,
-    });
-  } finally {
-    timeoutSignal.clear();
-  }
-}
-
-/* =========================================================
-   REFRESH / LOGOUT
-========================================================= */
-
-async function refreshSession() {
-  if (refreshPromise) return refreshPromise;
-
-  refreshPromise = (async () => {
-    const refreshToken = getRefreshToken();
-    const sessionId = getSessionId();
-    const userId = getUserId();
-
-    if (!refreshToken || !sessionId || !userId) {
-      return false;
-    }
-
-    try {
-      const payload = await baseRequest("POST", "/api/auth/refresh", {
-        public: true,
-        auth: false,
-        skipAuth: true,
-        noAutoRefresh: true,
-        noAutoLogout: true,
-        loader: false,
-        body: {
-          refreshToken,
-          sessionId,
-          userId,
-        },
-      });
-
-      saveAuthPayload(payload);
-
-      return true;
-    } catch {
-      return false;
-    }
-  })().finally(() => {
-    refreshPromise = null;
-  });
-
-  return refreshPromise;
-}
-
 async function logoutLocal(reason = "http-401") {
-  clearAuthPayload();
-
   try {
     await Auth?.logout?.({
       silent: false,
       notifyServer: false,
+      localOnly: true,
       reason,
     });
+
+    safeEmit(
+      EVENTS.logoutLocal,
+      {
+        reason,
+      },
+      {
+        emitLifecycleEvents: serviceConfig.emitLifecycleEvents,
+      }
+    );
+
+    return true;
   } catch {}
+
+  try {
+    Auth?.clearSession?.({
+      reason,
+      emit: true,
+    });
+  } catch {}
+
+  try {
+    AppCore?.clearSession?.({
+      reason,
+      source: "http.service",
+      silent: false,
+    });
+  } catch {}
+
+  safeEmit(
+    EVENTS.logoutLocal,
+    {
+      reason,
+    },
+    {
+      emitLifecycleEvents: serviceConfig.emitLifecycleEvents,
+    }
+  );
 
   return true;
 }
 
 /* =========================================================
-   PUBLIC REQUEST API
+   REQUEST EXECUTION
 ========================================================= */
+
+function normalizeServiceError(error, requestConfig = {}) {
+  const normalized = normalizeError(error, requestConfig);
+
+  normalized.requestId = normalized.requestId || requestConfig.requestId;
+  normalized.method = normalized.method || requestConfig.method;
+  normalized.path = normalized.path || safeRedact(requestConfig.path || "");
+  normalized.url = normalized.url || safeRedact(requestConfig.url || "");
+
+  return normalized;
+}
+
+function getStatus(error = null) {
+  return safeNumber(
+    error?.status ||
+      error?.statusCode ||
+      error?.response?.status ||
+      error?.data?.status,
+    0
+  );
+}
+
+function shouldTryAutoRefresh(error = null, requestConfig = {}) {
+  const req = safeObject(requestConfig);
+  const status = getStatus(error);
+
+  if (status !== 401) return false;
+
+  if (
+    req._retriedAfterRefresh === true ||
+    req.noAutoRefresh === true ||
+    req.autoRefresh === false ||
+    req._skipAuthRefresh === true ||
+    req.skipAuthRefresh === true
+  ) {
+    return false;
+  }
+
+  if (
+    req.public === true ||
+    req.auth === false ||
+    req.skipAuth === true ||
+    req.noAuthHeader === true
+  ) {
+    return false;
+  }
+
+  if (error?.aborted === true || error?.timeout === true) return false;
+
+  return serviceConfig.autoRefreshOn401 !== false;
+}
+
+function shouldAutoLogout(error = null, requestConfig = {}) {
+  const req = safeObject(requestConfig);
+
+  if (getStatus(error) !== 401) return false;
+  if (serviceConfig.autoLogoutOn401 === false) return false;
+  if (req.noAutoLogout === true || req.autoLogout === false) return false;
+  if (req.public === true || req.auth === false || req.skipAuth === true) return false;
+
+  return true;
+}
+
+async function executeOnce(requestConfig = {}) {
+  const baseConfig = {
+    ...safeObject(requestConfig),
+    service: Http,
+    httpService: Http,
+    Http,
+    http: Http,
+    client: Http,
+    serviceRequest: request,
+    httpRequest: request,
+  };
+
+  const interceptedConfig =
+    await runRequestInterceptors(
+      interceptors,
+      baseConfig
+    );
+
+  const finalConfig = {
+    ...baseConfig,
+    ...safeObject(interceptedConfig),
+    requestId: baseConfig.requestId,
+    service: Http,
+    httpService: Http,
+    Http,
+    http: Http,
+    client: Http,
+    serviceRequest: request,
+    httpRequest: request,
+  };
+
+  const response = await executeWithRetry({
+    AppCore,
+    config: serviceConfig,
+    requestConfig: finalConfig,
+  });
+
+  const interceptedResponse =
+    await runResponseInterceptors(
+      interceptors,
+      response,
+      finalConfig
+    );
+
+  commitAuthPayload(interceptedResponse, finalConfig);
+
+  return interceptedResponse;
+}
+
+async function executeWithAutoRefresh(requestConfig = {}) {
+  try {
+    return await executeOnce(requestConfig);
+  } catch (error) {
+    const normalized = normalizeServiceError(error, requestConfig);
+
+    if (!shouldTryAutoRefresh(normalized, requestConfig)) {
+      throw normalized;
+    }
+
+    const refreshed = await runAutoRefreshIfNeeded({
+      AppCore,
+      Auth,
+      config: serviceConfig,
+      state: serviceState,
+      error: normalized,
+      requestConfig,
+    });
+
+    if (!refreshed) {
+      throw normalized;
+    }
+
+    serviceState.replay += 1;
+
+    safeEmit(
+      EVENTS.replay,
+      {
+        requestId: requestConfig.requestId,
+        path: safeRedact(requestConfig.path || ""),
+        method: requestConfig.method,
+      },
+      requestConfig
+    );
+
+    const replayConfig = {
+      ...requestConfig,
+      _retriedAfterRefresh: true,
+      noAutoRefresh: true,
+      skipAuthRefresh: true,
+      _skipAuthRefresh: true,
+      requestId: `${requestConfig.requestId}:replay`,
+    };
+
+    return executeOnce(replayConfig);
+  }
+}
 
 function normalizeRequestArgs(arg1, arg2, arg3) {
   if (isObject(arg1)) {
@@ -871,117 +1362,169 @@ function normalizeRequestArgs(arg1, arg2, arg3) {
 
   return {
     method: normalizeMethod(safeObject(arg2).method || "GET"),
-    path: arg1,
+    path: arg1 || "/",
     options: safeObject(arg2),
   };
 }
 
-async function request(...args) {
+export async function request(...args) {
   init();
 
-  const { method, path, options } = normalizeRequestArgs(...args);
-  const opts = safeObject(options);
+  const normalized = normalizeRequestArgs(...args);
 
-  const loaderStarted = startLoader(opts);
+  const requestConfig = buildRequestConfig(
+    normalized.method,
+    normalized.path,
+    normalized.options
+  );
+
+  const runtimeHandle = startRuntime(requestConfig);
+  const startedAt = nowMs();
+
+  serviceState.total += 1;
+  serviceState.lastRequestAt = isoNow(startedAt);
+  serviceState.lastRequest = sanitizeData({
+    requestId: requestConfig.requestId,
+    method: requestConfig.method,
+    path: safeRedact(requestConfig.path),
+    public: requestConfig.public,
+    auth: requestConfig.auth,
+  });
+
+  safeEmit(
+    EVENTS.start,
+    {
+      requestId: requestConfig.requestId,
+      method: requestConfig.method,
+      path: safeRedact(requestConfig.path),
+      public: requestConfig.public,
+      auth: requestConfig.auth,
+    },
+    requestConfig
+  );
 
   try {
+    const response = await executeWithAutoRefresh(requestConfig);
+
+    serviceState.success += 1;
+    serviceState.lastSuccessAt = isoNow();
+
+    safeEmit(
+      EVENTS.success,
+      {
+        requestId: requestConfig.requestId,
+        method: requestConfig.method,
+        path: safeRedact(requestConfig.path),
+        durationMs: nowMs() - startedAt,
+      },
+      requestConfig
+    );
+
+    return response;
+  } catch (error) {
+    let finalError = normalizeServiceError(error, requestConfig);
+
     try {
-      return await baseRequest(method, path, opts);
-    } catch (err) {
-      const normalized = normalizeError(err, {
-        method,
-        path,
-      });
-
-      const canRefresh =
-        config.autoRefresh !== false &&
-        opts.noAutoRefresh !== true &&
-        opts.autoRefresh !== false &&
-        normalized.status === 401 &&
-        isPrivateRequest({
-          ...opts,
-          method,
-          path,
-        });
-
-      if (!canRefresh || opts._retriedAfterRefresh === true) {
-        throw normalized;
-      }
-
-      const refreshed = await refreshSession();
-
-      if (!refreshed) {
-        throw normalized;
-      }
-
-      return await baseRequest(method, path, {
-        ...opts,
-        _retriedAfterRefresh: true,
-        noAutoRefresh: true,
-      });
+      finalError =
+        await runErrorInterceptors(
+          interceptors,
+          finalError,
+          requestConfig
+        ) || finalError;
+    } catch (interceptorError) {
+      finalError = normalizeServiceError(interceptorError, requestConfig);
     }
-  } catch (err) {
-    const normalized = normalizeError(err, {
-      method,
-      path,
+
+    serviceState.error += 1;
+    serviceState.lastErrorAt = isoNow();
+
+    if (finalError.aborted === true) serviceState.aborted += 1;
+    if (finalError.timeout === true) serviceState.timeout += 1;
+
+    serviceState.lastError = sanitizeData({
+      name: finalError.name || "HttpError",
+      message: finalError.message || "Error HTTP",
+      status: finalError.status || 0,
+      code: finalError.code || null,
+      requestId: requestConfig.requestId,
+      method: requestConfig.method,
+      path: safeRedact(requestConfig.path),
+      aborted: Boolean(finalError.aborted),
+      timeout: Boolean(finalError.timeout),
+      at: serviceState.lastErrorAt,
     });
 
-    lastError = {
-      message: normalized.message,
-      status: normalized.status,
-      code: normalized.code,
-      path: redact(path),
-      at: new Date().toISOString(),
-    };
+    safeEmit(
+      EVENTS.error,
+      {
+        requestId: requestConfig.requestId,
+        method: requestConfig.method,
+        path: safeRedact(requestConfig.path),
+        durationMs: nowMs() - startedAt,
+        error: serviceState.lastError,
+      },
+      requestConfig
+    );
 
-    if (
-      config.autoLogout !== false &&
-      normalized.status === 401 &&
-      isPrivateRequest({
-        ...opts,
-        method,
-        path,
-      })
-    ) {
+    if (shouldAutoLogout(finalError, requestConfig)) {
       await logoutLocal("http-401");
     }
 
-    throw normalized;
+    throw finalError;
   } finally {
-    stopLoader(loaderStarted);
+    stopRuntime(runtimeHandle, requestConfig);
+
+    safeEmit(
+      EVENTS.complete,
+      {
+        requestId: requestConfig.requestId,
+        method: requestConfig.method,
+        path: safeRedact(requestConfig.path),
+        durationMs: nowMs() - startedAt,
+      },
+      requestConfig
+    );
   }
 }
 
-function get(path, options = {}) {
+/* =========================================================
+   METHOD HELPERS
+========================================================= */
+
+export function get(path, options = {}) {
   return request("GET", path, options);
 }
 
-function head(path, options = {}) {
+export function head(path, options = {}) {
   return request("HEAD", path, options);
 }
 
-function post(path, body = null, options = {}) {
+export function options(path, requestOptions = {}) {
+  return request("OPTIONS", path, requestOptions);
+}
+
+export function post(path, body = null, options = {}) {
   return request("POST", path, {
     ...safeObject(options),
     body,
   });
 }
 
-function put(path, body = null, options = {}) {
+export function put(path, body = null, options = {}) {
   return request("PUT", path, {
     ...safeObject(options),
     body,
   });
 }
 
-function patch(path, body = null, options = {}) {
+export function patch(path, body = null, options = {}) {
   return request("PATCH", path, {
     ...safeObject(options),
     body,
   });
 }
 
-function del(path, bodyOrOptions = {}, maybeOptions) {
+export function del(path, bodyOrOptions = {}, maybeOptions = undefined) {
   if (maybeOptions !== undefined) {
     return request("DELETE", path, {
       ...safeObject(maybeOptions),
@@ -992,97 +1535,365 @@ function del(path, bodyOrOptions = {}, maybeOptions) {
   return request("DELETE", path, safeObject(bodyOrOptions));
 }
 
-function upload(path, formData, options = {}) {
-  return request(options.method || "POST", path, {
+export function raw(path, options = {}) {
+  return request("GET", path, {
     ...safeObject(options),
-    body: formData,
-    timeoutMs: options.timeoutMs || options.timeout || 120000,
+    raw: true,
+    responseType: "raw",
   });
 }
 
-function download(path, options = {}) {
+export function upload(path, body, options = {}) {
+  return request(options.method || "POST", path, {
+    ...safeObject(options),
+    body,
+    upload: true,
+    timeout: options.timeout || options.timeoutMs || UPLOAD_TIMEOUT_MS,
+  });
+}
+
+export function download(path, options = {}) {
   return request("GET", path, {
     ...safeObject(options),
+    download: true,
     responseType: options.responseType || "blob",
-    timeoutMs: options.timeoutMs || options.timeout || 120000,
+    timeout: options.timeout || options.timeoutMs || UPLOAD_TIMEOUT_MS,
   });
 }
 
 /* =========================================================
-   INIT / BRIDGE
+   AUTH CONVENIENCE
 ========================================================= */
 
-function attachToAppCore() {
+export async function login(body = {}, options = {}) {
+  const response = await post(
+    "/api/auth/login",
+    body,
+    {
+      public: true,
+      auth: false,
+      skipAuth: true,
+      noAuthHeader: true,
+      noAutoRefresh: true,
+      noAutoLogout: true,
+      captureAuth: true,
+      ...safeObject(options),
+    }
+  );
+
+  commitAuthPayload(response, {
+    path: "/api/auth/login",
+    captureAuth: true,
+  });
+
+  return response;
+}
+
+export function me(options = {}) {
+  return get(
+    AUTH_ME_CANONICAL,
+    {
+      auth: true,
+      public: false,
+      skipAuth: false,
+      noAuthHeader: false,
+      captureAuth: true,
+      ...safeObject(options),
+    }
+  );
+}
+
+export async function refresh(body = {}, options = {}) {
+  const response = await post(
+    "/api/auth/refresh",
+    body,
+    {
+      public: true,
+      auth: false,
+      skipAuth: true,
+      noAuthHeader: true,
+      noAutoRefresh: true,
+      noAutoLogout: true,
+      captureAuth: true,
+      ...safeObject(options),
+    }
+  );
+
+  commitAuthPayload(response, {
+    path: "/api/auth/refresh",
+    captureAuth: true,
+  });
+
+  return response;
+}
+
+export async function refreshSession(options = {}) {
+  try {
+    if (isFn(Auth?.refreshSession)) {
+      return await Auth.refreshSession(Auth.session || undefined, {
+        reason: "http-service-refresh",
+        ...safeObject(options),
+      });
+    }
+  } catch {}
+
+  return refresh(
+    options.body || {},
+    {
+      ...safeObject(options),
+      noAutoRefresh: true,
+    }
+  );
+}
+
+export async function logout(body = {}, options = {}) {
+  let response = null;
+  let serverFailed = false;
+
+  try {
+    response = await post(
+      "/api/auth/logout",
+      body,
+      {
+        auth: true,
+        public: false,
+        noAutoRefresh: true,
+        skipAuthRefresh: true,
+        _skipAuthRefresh: true,
+        noAutoLogout: true,
+        ...safeObject(options),
+      }
+    );
+  } catch (error) {
+    serverFailed = true;
+
+    if (options.throwOnServerError === true) {
+      throw error;
+    }
+  }
+
+  await logoutLocal(
+    serverFailed
+      ? "http-logout-local-after-server-error"
+      : "http-logout"
+  );
+
+  return response || {
+    ok: !serverFailed,
+    success: !serverFailed,
+    local: true,
+    serverFailed,
+  };
+}
+
+/* =========================================================
+   INTERCEPTORS API
+========================================================= */
+
+function useRequestInterceptor(handler, options = {}) {
+  return useRequest(interceptors, handler, options);
+}
+
+function useResponseInterceptor(handler, options = {}) {
+  return useResponse(interceptors, handler, options);
+}
+
+function useErrorInterceptor(handler, options = {}) {
+  return useError(interceptors, handler, options);
+}
+
+function eject(ref, type = "") {
+  return ejectInterceptor(interceptors, type, ref);
+}
+
+function enable(ref, type = "") {
+  return enableInterceptor(interceptors, type, ref);
+}
+
+function disable(ref, type = "") {
+  return disableInterceptor(interceptors, type, ref);
+}
+
+function clearInterceptorGroup(type = "") {
+  return clearInterceptors(interceptors, type);
+}
+
+/* =========================================================
+   INSTALL / BRIDGE
+========================================================= */
+
+export function attachToAppCore() {
   try {
     AppCore.Http = Http;
-    AppCore.http = Http;
+  } catch {}
 
-    AppCore.services = AppCore.services || {};
+  try {
+    AppCore.http = Http;
+  } catch {}
+
+  try {
+    AppCore.apiClient = Http;
+  } catch {}
+
+  try {
+    if (!AppCore.services || typeof AppCore.services !== "object") {
+      AppCore.services = {};
+    }
+
     AppCore.services.Http = Http;
     AppCore.services.http = Http;
     AppCore.services.api = Http;
     AppCore.services.apiClient = Http;
   } catch {}
 
+  try {
+    AppCore.modules?.register?.(
+      "Http",
+      Http,
+      {
+        overwrite: true,
+        replace: true,
+        aliases: ["http", "ApiClient", "apiClient", "api"],
+        source: SERVICE_SOURCE,
+        emit: false,
+      }
+    );
+  } catch {}
+
+  try {
+    AppCore.modules?.set?.("Http", Http);
+    AppCore.modules?.set?.("http", Http);
+    AppCore.modules?.set?.("ApiClient", Http);
+    AppCore.modules?.set?.("apiClient", Http);
+    AppCore.modules?.set?.("api", Http);
+  } catch {}
+
+  try {
+    if (isBrowser()) {
+      window.__ONION_HTTP__ = Http;
+      window.__ONION_API_CLIENT__ = Http;
+      window.__ONION_API_ORIGIN__ = serviceConfig.apiBase;
+    }
+  } catch {}
+
+  serviceState.installed = true;
+  serviceState.installedAt = serviceState.installedAt || isoNow();
+
   return true;
 }
 
-function init(patch = {}) {
-  if (initialized) {
+export function init(patch = {}) {
+  configure(patch);
+
+  if (serviceState.initialized) {
     attachToAppCore();
     return Http;
   }
 
-  configure(patch);
   attachToAppCore();
 
-  initialized = true;
+  serviceState.initialized = true;
+
+  safeEmit(
+    EVENTS.ready,
+    {
+      apiBase: serviceConfig.apiBase,
+      initialized: true,
+    },
+    {
+      emitLifecycleEvents:
+        serviceConfig.emitReadyEvent === true ||
+        serviceConfig.emitLifecycleEvents === true,
+    }
+  );
 
   return Http;
 }
 
-function configure(patch = {}) {
-  const next = safeObject(patch);
+export function install(AppCoreRef = AppCore, options = {}) {
+  if (AppCoreRef && AppCoreRef !== AppCore) {
+    try {
+      AppCoreRef.Http = Http;
+      AppCoreRef.http = Http;
+      AppCoreRef.apiClient = Http;
 
-  config = {
-    ...config,
-    ...next,
-  };
+      AppCoreRef.services = AppCoreRef.services || {};
+      AppCoreRef.services.Http = Http;
+      AppCoreRef.services.http = Http;
+      AppCoreRef.services.api = Http;
+      AppCoreRef.services.apiClient = Http;
+    } catch {}
+  }
 
-  config.apiBase = normalizeApiBase(config.apiBase || DEFAULT_API_BASE);
-  config.timeoutMs = Number(config.timeoutMs || config.timeout || DEFAULT_TIMEOUT_MS);
-
-  return getConfig();
+  return init(options);
 }
 
-function getConfig() {
-  return {
-    apiBase: getApiBase(),
-    timeoutMs: config.timeoutMs,
-    useLoader: config.useLoader,
-    autoRefresh: config.autoRefresh,
-    autoLogout: config.autoLogout,
-    debug: config.debug,
-  };
+export function resetRuntime(options = {}) {
+  resetPendingRequests(
+    AppCore,
+    AppCore?.state,
+    {
+      source: "http.service:reset",
+      ...safeObject(options),
+    }
+  );
+
+  resetHttpRuntime(
+    AppCore,
+    AppCore?.state,
+    {
+      source: "http.service:reset-runtime",
+      ...safeObject(options),
+    }
+  );
+
+  resetHttpAuthRuntime(serviceState);
+  resetInterceptorsRuntime(interceptors);
+
+  serviceState.total = 0;
+  serviceState.success = 0;
+  serviceState.error = 0;
+  serviceState.replay = 0;
+  serviceState.aborted = 0;
+  serviceState.timeout = 0;
+  serviceState.lastRequest = null;
+  serviceState.lastError = null;
+
+  return true;
 }
 
-function getState() {
-  return {
-    version: HTTP_VERSION,
-    initialized,
-    pendingRequests,
-    hasRefreshPromise: Boolean(refreshPromise),
-    lastError,
-    apiBase: getApiBase(),
-    authenticated: Boolean(getAccessToken()),
-  };
+/* =========================================================
+   ABORT
+========================================================= */
+
+export function createAbortController(meta = {}) {
+  try {
+    return createRuntimeAbortController({
+      source: "http.service",
+      ...safeObject(meta),
+    });
+  } catch {}
+
+  try {
+    return new AbortController();
+  } catch {
+    return null;
+  }
 }
 
-function createAbortController() {
-  return new AbortController();
-}
+export function abort(controller, reason = "http-abort") {
+  try {
+    if (isFn(abortRuntimeController)) {
+      return abortRuntimeController(
+        controller,
+        reason,
+        {
+          source: "http.service",
+        }
+      );
+    }
+  } catch {}
 
-function abort(controller, reason = "abort") {
   try {
     controller?.abort?.(reason);
     return true;
@@ -1092,46 +1903,144 @@ function abort(controller, reason = "abort") {
 }
 
 /* =========================================================
+   SNAPSHOT
+========================================================= */
+
+export function getState() {
+  return getSnapshot();
+}
+
+export function getSnapshot(options = {}) {
+  const deep = options?.deep === true;
+
+  return sanitizeData({
+    version: HTTP_SERVICE_VERSION,
+    service: SERVICE_NAME,
+
+    initialized: Boolean(serviceState.initialized),
+    installed: Boolean(serviceState.installed),
+    installedAt: serviceState.installedAt,
+
+    apiBase: serviceConfig.apiBase,
+
+    pendingRequests: safeNumber(AppCore?.state?.pendingRequests, 0),
+
+    stats: {
+      total: serviceState.total,
+      success: serviceState.success,
+      error: serviceState.error,
+      replay: serviceState.replay,
+      aborted: serviceState.aborted,
+      timeout: serviceState.timeout,
+      lastRequestAt: serviceState.lastRequestAt,
+      lastSuccessAt: serviceState.lastSuccessAt,
+      lastErrorAt: serviceState.lastErrorAt,
+      lastRequest: serviceState.lastRequest,
+      lastError: serviceState.lastError,
+    },
+
+    auth: {
+      hasAccessToken: Boolean(getAccessToken()),
+      hasRefreshToken: Boolean(getRefreshToken()),
+      authMePrivate: true,
+    },
+
+    config: getConfig(),
+
+    modules: deep
+      ? {
+          helpers: getHttpHelpersSnapshot(),
+          requestEngine: getHttpRequestEngineSnapshot(),
+          auth: getHttpAuthSnapshot(serviceState),
+          runtime: getHttpRuntimeSnapshot(AppCore?.state),
+          interceptors: getInterceptorsSnapshot(interceptors),
+        }
+      : null,
+
+    versions: {
+      helpers: HTTP_HELPERS_VERSION,
+    },
+
+    at: isoNow(),
+  });
+}
+
+/* =========================================================
    EXPORT OBJECT
 ========================================================= */
 
 const Http = {
-  version: HTTP_VERSION,
+  __ONION_HTTP_SERVICE__: true,
+  SERVICE_NAME,
+  HTTP_SERVICE_VERSION,
+
+  version: HTTP_SERVICE_VERSION,
 
   init,
+  install,
   configure,
-  getConfig,
-  getState,
-  getSnapshot: getState,
-  getDebugSnapshot: getState,
 
   attachToAppCore,
 
+  getConfig,
+  getState,
+  getSnapshot,
+  getDebugSnapshot: getSnapshot,
+  snapshot: getSnapshot,
+
   request,
+
   get,
   head,
+  options,
   post,
   put,
   patch,
   delete: del,
   del,
+  raw,
 
   upload,
   download,
 
+  login,
+  me,
+  refresh,
   refreshSession,
+  logout,
   logoutLocal,
+
+  setTokenProvider,
+  getAccessToken,
+  getRefreshToken,
+
+  isPublicEndpoint: isPublicRequest,
+  isPublicRequest,
+  isPrivateRequest,
+  isAuthMeEndpoint: isAuthMeRequest,
+  isAuthMeRequest,
+
+  buildUrl,
+  redact,
 
   createAbortController,
   abort,
 
-  isPublicEndpoint,
-  isPrivateRequest,
-  isAuthMeEndpoint,
+  interceptors,
 
-  buildUrl,
-  redact,
+  useRequest: useRequestInterceptor,
+  useResponse: useResponseInterceptor,
+  useError: useErrorInterceptor,
+
+  ejectInterceptor: eject,
+  enableInterceptor: enable,
+  disableInterceptor: disable,
+  clearInterceptors: clearInterceptorGroup,
+
+  resetRuntime,
 };
+
+attachToAppCore();
 
 export { Http };
 

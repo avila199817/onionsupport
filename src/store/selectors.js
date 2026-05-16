@@ -2,8 +2,8 @@
    Onion SPA - Store Selectors
    Archivo: src/store/selectors.js
 
-   Selectors limpios:
-   - auth estricta = token usable + user activo usable
+   STORE SELECTORS · SIMPLE
+   - auth estricta derivada = hasToken + user activo usable
    - roles reales: admin / user
    - snapshots sin token crudo por defecto
    - colecciones clonadas salvo collectionRaw()
@@ -12,25 +12,20 @@
 
 import {
   deepClone,
-  deepEqual,
   getByPath,
   isFunction,
-  safeArray,
   safeNumber,
   safeObject,
   safeText,
   unique,
 } from "./helpers.js";
 
-import {
-  ensureCollectionKey,
-} from "./collections.js";
+import { ensureCollectionKey } from "./collections.js";
 
-export const STORE_SELECTORS_VERSION = "15.0.0-clean";
+export const STORE_SELECTORS_VERSION = "16.0.0-simple";
 
-/* =========================================================
-   CONSTANTS
-========================================================= */
+const ROLE_ADMIN = "admin";
+const ROLE_USER = "user";
 
 const BAD_TOKEN_VALUES = new Set([
   "",
@@ -57,6 +52,7 @@ const DISABLED_STATUS = new Set([
   "banned",
   "revoked",
   "deactivated",
+  "archived",
   "desactivado",
   "inactivo",
   "eliminado",
@@ -64,6 +60,7 @@ const DISABLED_STATUS = new Set([
   "suspendido",
   "baneado",
   "revocado",
+  "archivado",
 ]);
 
 const ADMIN_ALIASES = new Set([
@@ -95,30 +92,43 @@ const ENTITY_ID_KEYS = Object.freeze([
   "id",
   "_id",
   "uuid",
-
   "userId",
   "user_id",
   "uid",
   "sub",
-
   "ticketId",
   "ticket_id",
   "incidenciaId",
   "incidencia_id",
-
   "clienteId",
   "cliente_id",
   "clientId",
   "client_id",
   "customerId",
   "customer_id",
-
   "facturaId",
   "factura_id",
   "invoiceId",
   "invoice_id",
   "numeroFacturaLegal",
   "numero_factura_legal",
+]);
+
+const USER_ID_KEYS = Object.freeze([
+  "id",
+  "userId",
+  "user_id",
+  "_id",
+  "uid",
+  "sub",
+  "username",
+  "userName",
+  "user_name",
+  "email",
+  "mail",
+  "phone",
+  "telefono",
+  "mobile",
 ]);
 
 const SENSITIVE_TOKEN_RE =
@@ -149,6 +159,7 @@ function clone(value, fallback = null) {
 
 function toArray(value) {
   if (Array.isArray(value)) return value;
+  if (value instanceof Set) return [...value];
   if (value === null || value === undefined) return [];
   return [value];
 }
@@ -181,17 +192,17 @@ function nowIso() {
 }
 
 function redactTokenInText(value = "") {
-  const text = safeText(value, "");
-  if (!text) return "";
+  const output = safeText(value, "");
+  if (!output) return "";
 
   try {
-    return text.replace(SENSITIVE_TOKEN_RE, (match) => {
+    return output.replace(SENSITIVE_TOKEN_RE, (match) => {
       if (/^bearer\s+/i.test(match)) return "Bearer ***";
       if (/^[?&#]/.test(match)) return match.replace(/=.+$/g, "=***");
       return "***";
     });
   } catch {
-    return text;
+    return output;
   }
 }
 
@@ -202,11 +213,14 @@ function stripBearer(token = "") {
 function hasUsableToken(token = "") {
   const value = stripBearer(token);
   if (!value) return false;
-
   if (BAD_TOKEN_VALUES.has(value.toLowerCase())) return false;
   if (/[\s\r\n\t]/.test(value)) return false;
-
   return true;
+}
+
+function hasTokenFlag(session = {}, rootState = {}) {
+  if (session.hasToken === true || rootState.hasToken === true) return true;
+  return hasUsableToken(readRawToken(session, rootState));
 }
 
 /* =========================================================
@@ -225,10 +239,8 @@ function lowerKey(value = "") {
 
 function normalizeRole(value = "") {
   const key = lowerKey(value);
-
-  if (ADMIN_ALIASES.has(key)) return "admin";
-  if (USER_ALIASES.has(key)) return "user";
-
+  if (ADMIN_ALIASES.has(key)) return ROLE_ADMIN;
+  if (USER_ALIASES.has(key)) return ROLE_USER;
   return "";
 }
 
@@ -238,18 +250,17 @@ function normalizePermission(value = "") {
 
 function isDisabledUser(user = null) {
   const current = safeObject(user);
+  const raw = safeObject(current.raw);
 
-  const status = lowerKey(
-    first(
-      current.status,
-      current.estado,
-      current.state,
-      current.accountStatus,
-      current.account_status,
-      current.raw?.status,
-      current.raw?.estado
-    ) || ""
-  );
+  const status = lowerKey(first(
+    current.status,
+    current.estado,
+    current.state,
+    current.accountStatus,
+    current.account_status,
+    raw.status,
+    raw.estado
+  ) || "");
 
   if (DISABLED_STATUS.has(status)) return true;
 
@@ -267,6 +278,7 @@ function isDisabledUser(user = null) {
       current.suspended === true ||
       current.revoked === true ||
       current.deactivated === true ||
+      current.archived === true ||
       current.deletedAt ||
       current.disabledAt ||
       current.blockedAt
@@ -275,25 +287,9 @@ function isDisabledUser(user = null) {
 
 function hasUsableUser(user = null) {
   const current = safeObject(user);
-
-  if (!current || isDisabledUser(current)) return false;
-
-  return Boolean(
-    safeText(current.id, "") ||
-      safeText(current.userId, "") ||
-      safeText(current.user_id, "") ||
-      safeText(current._id, "") ||
-      safeText(current.uid, "") ||
-      safeText(current.sub, "") ||
-      safeText(current.username, "") ||
-      safeText(current.userName, "") ||
-      safeText(current.user_name, "") ||
-      safeText(current.email, "") ||
-      safeText(current.mail, "") ||
-      safeText(current.phone, "") ||
-      safeText(current.telefono, "") ||
-      safeText(current.mobile, "")
-  );
+  if (!Object.keys(current).length) return false;
+  if (isDisabledUser(current)) return false;
+  return USER_ID_KEYS.some((key) => Boolean(safeText(current[key], "")));
 }
 
 function getSessionUser(session = {}, rootState = {}) {
@@ -309,7 +305,6 @@ function getSessionUser(session = {}, rootState = {}) {
     session.auth?.user,
     session.auth?.usuario,
     session.auth?.me,
-
     rootState.user,
     rootState.usuario,
     rootState.currentUser,
@@ -323,25 +318,22 @@ function getSessionUser(session = {}, rootState = {}) {
   return hasUsableUser(user) ? safeObject(user) : null;
 }
 
-function getSessionToken(session = {}, rootState = {}) {
-  return stripBearer(
-    first(
-      session.token,
-      session.accessToken,
-      session.access_token,
-      session.jwt,
-      session.bearer,
-      session.auth?.token,
-      session.auth?.accessToken,
-      session.auth?.access_token,
-
-      rootState.token,
-      rootState.accessToken,
-      rootState.access_token,
-      rootState.jwt,
-      rootState.bearer
-    ) || ""
-  );
+function readRawToken(session = {}, rootState = {}) {
+  return stripBearer(first(
+    session.token,
+    session.accessToken,
+    session.access_token,
+    session.jwt,
+    session.bearer,
+    session.auth?.token,
+    session.auth?.accessToken,
+    session.auth?.access_token,
+    rootState.token,
+    rootState.accessToken,
+    rootState.access_token,
+    rootState.jwt,
+    rootState.bearer
+  ) || "");
 }
 
 function getUserIdentity(user = null) {
@@ -408,19 +400,16 @@ function getUserDisplayName(user = null) {
     safeText(current.nombre, "") ||
     safeText(current.fullName, "") ||
     safeText(current.full_name, "") ||
-
     safeText(profile.displayName, "") ||
     safeText(profile.display_name, "") ||
     safeText(profile.name, "") ||
     safeText(profile.nombre, "") ||
     safeText(profile.fullName, "") ||
     safeText(profile.full_name, "") ||
-
     safeText(raw.displayName, "") ||
     safeText(raw.display_name, "") ||
     safeText(raw.name, "") ||
     safeText(raw.nombre, "") ||
-
     safeText(current.username, "") ||
     safeText(current.userName, "") ||
     safeText(current.email, "") ||
@@ -445,10 +434,7 @@ function isSafeAvatarUrl(url = "") {
     return false;
   }
 
-  if (lower.startsWith("data:")) {
-    return /^data:image\/(png|jpe?g|gif|webp|avif);base64,/i.test(value);
-  }
-
+  if (lower.startsWith("data:")) return /^data:image\/(png|jpe?g|gif|webp|avif);base64,/i.test(value);
   return true;
 }
 
@@ -458,14 +444,7 @@ function getUserAvatar(user = null) {
   const raw = safeObject(current.raw);
   const rawProfile = safeObject(raw.profile);
 
-  const hasAvatar =
-    current.hasAvatar ??
-    current.has_avatar ??
-    profile.hasAvatar ??
-    profile.has_avatar ??
-    raw.hasAvatar ??
-    raw.has_avatar;
-
+  const hasAvatar = current.hasAvatar ?? current.has_avatar ?? profile.hasAvatar ?? profile.has_avatar ?? raw.hasAvatar ?? raw.has_avatar;
   if (hasAvatar === false) return "";
 
   const avatar =
@@ -485,41 +464,20 @@ function getUserAvatar(user = null) {
     safeText(current.imageURL, "") ||
     safeText(current.image_url, "") ||
     safeText(current.image, "") ||
-
     safeText(profile.avatarUrl, "") ||
     safeText(profile.avatarURL, "") ||
     safeText(profile.avatar_url, "") ||
     safeText(profile.avatar, "") ||
     safeText(profile.photoUrl, "") ||
-    safeText(profile.photoURL, "") ||
-    safeText(profile.photo_url, "") ||
-    safeText(profile.photo, "") ||
     safeText(profile.pictureUrl, "") ||
-    safeText(profile.pictureURL, "") ||
-    safeText(profile.picture_url, "") ||
-    safeText(profile.picture, "") ||
     safeText(profile.imageUrl, "") ||
-    safeText(profile.imageURL, "") ||
-    safeText(profile.image_url, "") ||
-    safeText(profile.image, "") ||
-
     safeText(raw.avatarUrl, "") ||
     safeText(raw.avatarURL, "") ||
     safeText(raw.avatar_url, "") ||
     safeText(raw.avatar, "") ||
     safeText(raw.photoUrl, "") ||
-    safeText(raw.photoURL, "") ||
-    safeText(raw.photo_url, "") ||
-    safeText(raw.photo, "") ||
     safeText(raw.pictureUrl, "") ||
-    safeText(raw.pictureURL, "") ||
-    safeText(raw.picture_url, "") ||
-    safeText(raw.picture, "") ||
     safeText(raw.imageUrl, "") ||
-    safeText(raw.imageURL, "") ||
-    safeText(raw.image_url, "") ||
-    safeText(raw.image, "") ||
-
     safeText(rawProfile.avatarUrl, "") ||
     safeText(rawProfile.avatar_url, "") ||
     safeText(rawProfile.avatar, "") ||
@@ -533,19 +491,17 @@ function collectRoles(user = null, session = {}, rootState = {}) {
   const profile = safeObject(current.profile);
   const raw = safeObject(current.raw);
 
-  const roles = [
+  const roles = unique([
     rootState.role,
     rootState.rol,
     rootState.userRole,
     rootState.user_role,
     rootState.roles,
-
     session.role,
     session.rol,
     session.userRole,
     session.user_role,
     session.roles,
-
     current.role,
     current.rol,
     current.userRole,
@@ -555,7 +511,6 @@ function collectRoles(user = null, session = {}, rootState = {}) {
     current.user_type,
     current.perfil,
     current.roles,
-
     profile.role,
     profile.rol,
     profile.userRole,
@@ -563,7 +518,6 @@ function collectRoles(user = null, session = {}, rootState = {}) {
     profile.type,
     profile.perfil,
     profile.roles,
-
     raw.role,
     raw.rol,
     raw.userRole,
@@ -573,15 +527,11 @@ function collectRoles(user = null, session = {}, rootState = {}) {
     raw.user_type,
     raw.perfil,
     raw.roles,
-
     raw?.profile?.role,
     raw?.profile?.rol,
     raw?.profile?.userRole,
     raw?.profile?.roles,
-  ]
-    .flat(Infinity)
-    .map(normalizeRole)
-    .filter(Boolean);
+  ].flat(Infinity).map(normalizeRole).filter(Boolean));
 
   const adminFlag = [
     current.isAdmin,
@@ -600,10 +550,9 @@ function collectRoles(user = null, session = {}, rootState = {}) {
     session.admin,
   ].some((value) => value === true);
 
-  if (adminFlag) roles.push("admin");
+  if (adminFlag) roles.push(ROLE_ADMIN);
 
-  const finalRoles = unique(roles);
-  return finalRoles.length ? finalRoles : ["user"];
+  return roles.includes(ROLE_ADMIN) ? [ROLE_ADMIN] : [ROLE_USER];
 }
 
 function collectPermissions(user = null, session = {}, rootState = {}) {
@@ -615,37 +564,29 @@ function collectPermissions(user = null, session = {}, rootState = {}) {
     rootState.permissions,
     rootState.permisos,
     rootState.scopes,
-
     session.permissions,
     session.permisos,
     session.scopes,
-
     current.permissions,
     current.permisos,
     current.scopes,
     current.authorities,
-
     profile.permissions,
     profile.permisos,
     profile.scopes,
     profile.authorities,
-
     raw.permissions,
     raw.permisos,
     raw.scopes,
     raw.authorities,
-
     raw?.profile?.permissions,
     raw?.profile?.permisos,
     raw?.profile?.scopes,
-  ]
-    .flat(Infinity)
-    .map(normalizePermission)
-    .filter(Boolean));
+  ].flat(Infinity).map(normalizePermission).filter(Boolean));
 }
 
 function canonicalRole(roles = []) {
-  return roles.includes("admin") ? "admin" : "user";
+  return roles.includes(ROLE_ADMIN) ? ROLE_ADMIN : ROLE_USER;
 }
 
 /* =========================================================
@@ -654,11 +595,9 @@ function canonicalRole(roles = []) {
 
 function normalizeTheme(value = "") {
   const theme = safeText(value, "").toLowerCase();
-
   if (theme === "light") return "light";
   if (theme === "dark") return "dark";
   if (theme === "system") return "system";
-
   return "";
 }
 
@@ -677,7 +616,6 @@ function normalizeLang(value = "") {
   if (!lang) return "";
 
   const base = lang.split("-")[0];
-
   if (["spa", "spanish", "castellano", "español"].includes(base)) return "es";
   if (["eng", "english"].includes(base)) return "en";
   if (["cat", "catalan", "català", "catalán"].includes(base)) return "ca";
@@ -716,7 +654,6 @@ function sameEntityId(entity = null, id = "") {
   if (!target) return false;
 
   const item = safeObject(entity);
-
   return ENTITY_ID_KEYS.some((key) => safeText(item?.[key], "") === target);
 }
 
@@ -729,10 +666,7 @@ function cloneCollection(value) {
    FACTORY
 ========================================================= */
 
-export function createSelectors({
-  AppCore,
-  state,
-} = {}) {
+export function createSelectors({ AppCore, state } = {}) {
   const rootState = state || {};
 
   function root() {
@@ -748,14 +682,12 @@ export function createSelectors({
 
     return {
       ...slice,
-
       token: slice.token ?? root().token ?? null,
       accessToken: slice.accessToken ?? root().accessToken ?? root().access_token ?? null,
       access_token: slice.access_token ?? slice.accessToken ?? root().access_token ?? root().accessToken ?? null,
-
+      hasToken: slice.hasToken ?? root().hasToken ?? false,
       user: slice.user ?? root().user ?? root().currentUser ?? root().authUser ?? root().sessionUser ?? null,
       usuario: slice.usuario ?? root().usuario ?? null,
-
       role: slice.role ?? root().role ?? root().rol ?? root().userRole ?? null,
       roles: slice.roles ?? root().roles ?? [],
       permissions: slice.permissions ?? root().permissions ?? root().permisos ?? [],
@@ -765,7 +697,6 @@ export function createSelectors({
   function ui() {
     return {
       ...safeObject(root().ui),
-
       theme: root().ui?.theme ?? root().theme ?? null,
       themeMode: root().ui?.themeMode ?? root().themeMode ?? root().appearance ?? null,
       lang: root().ui?.lang ?? root().lang ?? root().language ?? null,
@@ -785,8 +716,12 @@ export function createSelectors({
     return safeObject(root().meta);
   }
 
-  function tokenValue() {
-    return getSessionToken(session(), root());
+  function rawTokenValue() {
+    return readRawToken(session(), root());
+  }
+
+  function hasTokenValue() {
+    return hasTokenFlag(session(), root());
   }
 
   function userValue() {
@@ -796,7 +731,7 @@ export function createSelectors({
   function authenticated() {
     return Boolean(
       (session().authenticated === true || root().authenticated === true) &&
-        hasUsableToken(tokenValue()) &&
+        hasTokenValue() &&
         hasUsableUser(userValue())
     );
   }
@@ -816,28 +751,33 @@ export function createSelectors({
     return collectPermissions(userValue(), session(), root());
   }
 
-  function collectionRaw(key) {
+  function collectionRawValue(key) {
     const finalKey = safeEnsureCollectionKey(root(), key);
     if (!finalKey) return undefined;
 
-    if (hasOwn(entities(), finalKey)) return entities()[finalKey];
+    const storeEntities = entities();
+    const collections = safeObject(root().collections);
+
+    if (hasOwn(storeEntities, finalKey)) return storeEntities[finalKey];
     if (hasOwn(root(), finalKey)) return root()[finalKey];
-    if (hasOwn(safeObject(root().collections), finalKey)) return root().collections[finalKey];
+    if (hasOwn(collections, finalKey)) return collections[finalKey];
 
     return undefined;
   }
 
   function collectionListRaw(key) {
-    const value = collectionRaw(key);
+    const value = collectionRawValue(key);
     return Array.isArray(value) ? value : [];
   }
 
+  function collectionListWithFallback(key, fallbackKey = "") {
+    const primary = collectionListRaw(key);
+    if (primary.length || !fallbackKey) return primary;
+    return collectionListRaw(fallbackKey);
+  }
+
   function appName() {
-    return (
-      safeText(AppCore?.config?.appName, "") ||
-      safeText(AppCore?.config?.name, "") ||
-      "Onion Support"
-    );
+    return safeText(AppCore?.config?.appName, "") || safeText(AppCore?.config?.name, "") || "Onion Support";
   }
 
   const selectors = {
@@ -846,12 +786,7 @@ export function createSelectors({
     ===================================== */
 
     isReady() {
-      return Boolean(
-        app().ready ||
-          app().booted ||
-          root().ready ||
-          root().booted
-      );
+      return Boolean(app().ready || app().booted || root().ready || root().booted);
     },
 
     isInitialized() {
@@ -918,7 +853,7 @@ export function createSelectors({
     },
 
     hasToken() {
-      return hasUsableToken(tokenValue());
+      return hasTokenValue();
     },
 
     hasUser() {
@@ -966,16 +901,13 @@ export function createSelectors({
     },
 
     isAdmin() {
-      return roleValue() === "admin";
+      return roleValue() === ROLE_ADMIN;
     },
 
     isUser() {
-      return roleValue() === "user";
+      return roleValue() === ROLE_USER;
     },
 
-    /*
-      Compat legacy. El sistema real sólo usa admin/user.
-    */
     isSupport() {
       return false;
     },
@@ -991,15 +923,10 @@ export function createSelectors({
     hasRole(...roles) {
       if (!authenticated()) return false;
 
-      const requested = roles
-        .flat(Infinity)
-        .map(normalizeRole)
-        .filter(Boolean);
-
+      const requested = roles.flat(Infinity).map(normalizeRole).filter(Boolean);
       if (!requested.length) return true;
 
       const current = new Set(rolesValue());
-
       return requested.some((role) => current.has(role));
     },
 
@@ -1010,30 +937,20 @@ export function createSelectors({
     hasAllRoles(roles = []) {
       if (!authenticated()) return false;
 
-      const requested = toArray(roles)
-        .flat(Infinity)
-        .map(normalizeRole)
-        .filter(Boolean);
-
+      const requested = toArray(roles).flat(Infinity).map(normalizeRole).filter(Boolean);
       if (!requested.length) return true;
 
       const current = new Set(rolesValue());
-
       return requested.every((role) => current.has(role));
     },
 
     hasPermission(...permissions) {
       if (!authenticated()) return false;
 
-      const requested = permissions
-        .flat(Infinity)
-        .map(normalizePermission)
-        .filter(Boolean);
-
+      const requested = permissions.flat(Infinity).map(normalizePermission).filter(Boolean);
       if (!requested.length) return true;
 
       const current = new Set(permissionsValue());
-
       return requested.some((permission) => current.has(permission));
     },
 
@@ -1044,26 +961,20 @@ export function createSelectors({
     hasAllPermissions(permissions = []) {
       if (!authenticated()) return false;
 
-      const requested = toArray(permissions)
-        .flat(Infinity)
-        .map(normalizePermission)
-        .filter(Boolean);
-
+      const requested = toArray(permissions).flat(Infinity).map(normalizePermission).filter(Boolean);
       if (!requested.length) return true;
 
       const current = new Set(permissionsValue());
-
       return requested.every((permission) => current.has(permission));
     },
 
     token() {
-      const token = tokenValue();
+      const token = rawTokenValue();
       return hasUsableToken(token) ? token : null;
     },
 
     authHeader() {
       const token = selectors.token();
-
       if (!token) return {};
 
       const headerName = safeText(AppCore?.config?.auth?.tokenHeader, "Authorization");
@@ -1082,7 +993,7 @@ export function createSelectors({
         version: STORE_SELECTORS_VERSION,
 
         authenticated: authenticated(),
-        hasToken: Boolean(token),
+        hasToken: hasTokenValue(),
 
         token: opts.includeToken === true ? token : null,
         accessToken: opts.includeToken === true ? token : null,
@@ -1156,12 +1067,7 @@ export function createSelectors({
     },
 
     density() {
-      return (
-        safeText(ui().density, "") ||
-        safeText(AppCore?.state?.density, "") ||
-        safeText(AppCore?.config?.ui?.density, "") ||
-        "default"
-      );
+      return safeText(ui().density, "") || safeText(AppCore?.state?.density, "") || safeText(AppCore?.config?.ui?.density, "") || "default";
     },
 
     uiSnapshot(options = {}) {
@@ -1201,7 +1107,6 @@ export function createSelectors({
     isFetching(key = "") {
       const clean = safeText(key, "");
       if (!clean) return false;
-
       const flagName = `fetching${clean[0]?.toUpperCase() || ""}${clean.slice(1)}`;
       return selectors.flag(flagName, false);
     },
@@ -1211,11 +1116,11 @@ export function createSelectors({
     ===================================== */
 
     collection(key) {
-      return cloneCollection(collectionRaw(key));
+      return cloneCollection(collectionRawValue(key));
     },
 
     collectionRaw(key) {
-      return collectionRaw(key);
+      return collectionRawValue(key);
     },
 
     collectionList(key) {
@@ -1223,7 +1128,7 @@ export function createSelectors({
     },
 
     count(key) {
-      const value = collectionRaw(key);
+      const value = collectionRawValue(key);
       if (Array.isArray(value)) return value.length;
       return value ? 1 : 0;
     },
@@ -1233,37 +1138,26 @@ export function createSelectors({
     },
 
     first(key) {
-      const value = collectionRaw(key);
-
-      if (Array.isArray(value)) {
-        return value.length ? clone(value[0]) : null;
-      }
-
+      const value = collectionRawValue(key);
+      if (Array.isArray(value)) return value.length ? clone(value[0]) : null;
       return value ? clone(value) : null;
     },
 
     last(key) {
-      const value = collectionRaw(key);
-
-      if (Array.isArray(value)) {
-        return value.length ? clone(value[value.length - 1]) : null;
-      }
-
+      const value = collectionRawValue(key);
+      if (Array.isArray(value)) return value.length ? clone(value[value.length - 1]) : null;
       return value ? clone(value) : null;
     },
 
     find(key, predicate) {
       const list = collectionListRaw(key);
-
       if (!Array.isArray(list) || !isFunction(predicate)) return null;
 
       for (let index = 0; index < list.length; index += 1) {
         const item = list[index];
 
         try {
-          if (predicate(clone(item), index, clone(list, []))) {
-            return clone(item);
-          }
+          if (predicate(clone(item), index, clone(list, []))) return clone(item);
         } catch {}
       }
 
@@ -1272,16 +1166,13 @@ export function createSelectors({
 
     filter(key, predicate) {
       const list = collectionListRaw(key);
-
       if (!Array.isArray(list) || !isFunction(predicate)) return [];
 
       const output = [];
 
       list.forEach((item, index) => {
         try {
-          if (predicate(clone(item), index, clone(list, []))) {
-            output.push(clone(item));
-          }
+          if (predicate(clone(item), index, clone(list, []))) output.push(clone(item));
         } catch {}
       });
 
@@ -1290,7 +1181,6 @@ export function createSelectors({
 
     map(key, mapper) {
       const list = collectionListRaw(key);
-
       if (!Array.isArray(list) || !isFunction(mapper)) return [];
 
       return list.map((item, index) => {
@@ -1305,12 +1195,11 @@ export function createSelectors({
     byId(key, id) {
       const targetId = safeText(id, "");
       if (!targetId) return null;
-
       return selectors.find(key, (item) => sameEntityId(item, targetId));
     },
 
     ids(key) {
-      const value = collectionRaw(key);
+      const value = collectionRawValue(key);
 
       if (!Array.isArray(value)) {
         const id = getEntityId(value);
@@ -1321,7 +1210,7 @@ export function createSelectors({
     },
 
     entityMap(key) {
-      const value = collectionRaw(key);
+      const value = collectionRawValue(key);
       const map = new Map();
 
       if (!Array.isArray(value)) {
@@ -1351,7 +1240,7 @@ export function createSelectors({
     },
 
     tickets() {
-      return selectors.collectionList("incidencias");
+      return collectionListWithFallback("tickets", "incidencias").map((item) => clone(item));
     },
 
     facturas() {
@@ -1407,26 +1296,17 @@ export function createSelectors({
 
       return {
         version: STORE_SELECTORS_VERSION,
-
         app: selectors.appSnapshot(),
-
         session: selectors.sessionSnapshot({
           includeToken: opts.includeToken === true,
           includeRaw: opts.includeRawSession === true,
         }),
-
         ui: selectors.uiSnapshot({
           includeRaw: opts.includeRawUi === true,
         }),
-
         flags: selectors.flags(),
-
-        entities: opts.includeEntities === false
-          ? null
-          : clone(entities(), {}),
-
+        entities: opts.includeEntities === false ? null : clone(entities(), {}),
         meta: selectors.meta(),
-
         at: nowIso(),
       };
     },
@@ -1442,10 +1322,6 @@ export function createSelectors({
 
   return selectors;
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   STORE_SELECTORS_VERSION,

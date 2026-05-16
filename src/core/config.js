@@ -2,17 +2,16 @@
    Onion SPA - Core Config
    Archivo: src/core/config.js
 
-   CORE CONFIG · CLEAN CONTRACT
-   - API producción: https://api.onionit.net
+   CORE CONFIG · SIMPLE CONTRACT
+   - Backend real: https://api.onionit.net
    - apiBase nunca termina en /api
    - /api/auth/me siempre privado
-   - rutas SPA canónicas
-   - rutas técnicas públicas con token preservado
-   - endpoints backend activos
-   - runtime overrides seguros
+   - Rutas SPA canónicas
+   - Rutas técnicas públicas con token preservado
+   - Runtime overrides mínimos y seguros
 ========================================================= */
 
-export const CONFIG_VERSION = "18.0.0-clean";
+export const CONFIG_VERSION = "19.0.0-simple";
 
 export const CANONICAL_PRODUCTION_API_BASE = "https://api.onionit.net";
 
@@ -35,7 +34,7 @@ const PRIVATE_ME_PATHS = Object.freeze([
 ]);
 
 /* =========================================================
-   SAFE HELPERS
+   HELPERS
 ========================================================= */
 
 function isPlainObject(value) {
@@ -47,10 +46,6 @@ function isPlainObject(value) {
   } catch {
     return false;
   }
-}
-
-function isObjectLike(value) {
-  return value !== null && (typeof value === "object" || typeof value === "function");
 }
 
 function text(value, fallback = "") {
@@ -65,25 +60,14 @@ function text(value, fallback = "") {
 }
 
 function bool(value, fallback = false) {
-  if (value === true) return true;
-  if (value === false) return false;
+  if (value === true || value === false) return value;
+  if (value === 1 || value === "1") return true;
+  if (value === 0 || value === "0") return false;
 
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
+  const clean = text(value, "").toLowerCase();
 
-  if (typeof value === "string") {
-    const clean = value.trim().toLowerCase();
-
-    if (["true", "1", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(clean)) {
-      return true;
-    }
-
-    if (["false", "0", "no", "off", "disabled", "inactive"].includes(clean)) {
-      return false;
-    }
-  }
+  if (["true", "yes", "si", "sí", "on", "ok", "active", "enabled"].includes(clean)) return true;
+  if (["false", "no", "off", "inactive", "disabled"].includes(clean)) return false;
 
   return Boolean(fallback);
 }
@@ -95,7 +79,7 @@ function number(value, fallback = 0) {
 
 function toArray(value) {
   if (Array.isArray(value)) return value;
-  if (value instanceof Set) return Array.from(value);
+  if (value instanceof Set) return [...value];
   if (value === null || value === undefined || value === "") return [];
   return [value];
 }
@@ -105,21 +89,10 @@ function unique(values = []) {
   const seen = new Set();
 
   for (const item of toArray(values).flat(Infinity)) {
-    if (item === null || item === undefined || item === "") continue;
-
     const value = typeof item === "string" ? item.trim() : item;
-    if (value === "") continue;
+    if (value === null || value === undefined || value === "") continue;
 
-    const key = typeof value === "string"
-      ? value
-      : (() => {
-          try {
-            return JSON.stringify(value);
-          } catch {
-            return String(value);
-          }
-        })();
-
+    const key = typeof value === "string" ? value : JSON.stringify(value);
     if (seen.has(key)) continue;
 
     seen.add(key);
@@ -130,23 +103,21 @@ function unique(values = []) {
 }
 
 function clonePlain(value, seen = new WeakMap()) {
-  if (value === null || value === undefined) return value;
-  if (typeof value !== "object") return value;
+  if (value === null || value === undefined || typeof value !== "object") return value;
 
   try {
     if (seen.has(value)) return seen.get(value);
   } catch {}
 
   if (Array.isArray(value)) {
-    const arr = [];
+    const out = [];
 
     try {
-      seen.set(value, arr);
+      seen.set(value, out);
     } catch {}
 
-    for (const item of value) arr.push(clonePlain(item, seen));
-
-    return arr;
+    for (const item of value) out.push(clonePlain(item, seen));
+    return out;
   }
 
   if (!isPlainObject(value)) return value;
@@ -158,7 +129,7 @@ function clonePlain(value, seen = new WeakMap()) {
   } catch {}
 
   for (const [key, item] of Object.entries(value)) {
-    if (typeof item === "function") continue;
+    if (typeof item === "function" || item === undefined) continue;
     out[key] = clonePlain(item, seen);
   }
 
@@ -170,9 +141,7 @@ function merge(base = {}, override = {}) {
     return unique([...base, ...override]);
   }
 
-  const out = Array.isArray(base)
-    ? clonePlain(base)
-    : clonePlain(isPlainObject(base) ? base : {});
+  const out = clonePlain(isPlainObject(base) || Array.isArray(base) ? base : {});
 
   if (!isPlainObject(override) && !Array.isArray(override)) return out;
 
@@ -200,7 +169,7 @@ function merge(base = {}, override = {}) {
 }
 
 function deepFreeze(value, seen = new WeakSet()) {
-  if (!isObjectLike(value) || Object.isFrozen(value)) return value;
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
 
   try {
     if (seen.has(value)) return value;
@@ -217,7 +186,7 @@ function deepFreeze(value, seen = new WeakSet()) {
 }
 
 /* =========================================================
-   RUNTIME / ENV
+   RUNTIME
 ========================================================= */
 
 function rootObject() {
@@ -225,21 +194,16 @@ function rootObject() {
     if (typeof globalThis !== "undefined") return globalThis;
   } catch {}
 
-  try {
-    if (typeof window !== "undefined") return window;
-  } catch {}
-
   return {};
 }
 
-function baseOrigin() {
+function runtimeConfig() {
   try {
-    if (typeof window !== "undefined" && window.location?.origin) {
-      return window.location.origin;
-    }
-  } catch {}
-
-  return "http://localhost";
+    const root = rootObject();
+    return isPlainObject(root.__ONION_CONFIG__) ? root.__ONION_CONFIG__ : {};
+  } catch {
+    return {};
+  }
 }
 
 function metaEnv() {
@@ -250,38 +214,20 @@ function metaEnv() {
   }
 }
 
-function runtimeConfig() {
-  const root = rootObject();
-
-  try {
-    return isPlainObject(root.__ONION_CONFIG__) ? root.__ONION_CONFIG__ : {};
-  } catch {
-    return {};
-  }
-}
-
 function envValue(keys = [], fallback = "") {
-  const names = Array.isArray(keys) ? keys : [keys];
   const runtime = runtimeConfig();
   const env = metaEnv();
   const root = rootObject();
 
-  for (const key of names) {
+  for (const key of toArray(keys)) {
     const clean = text(key, "");
     if (!clean) continue;
 
-    if (runtime[clean] !== undefined && runtime[clean] !== null && runtime[clean] !== "") {
-      return runtime[clean];
-    }
-
-    if (env[clean] !== undefined && env[clean] !== null && env[clean] !== "") {
-      return env[clean];
-    }
+    if (runtime[clean] !== undefined && runtime[clean] !== null && runtime[clean] !== "") return runtime[clean];
+    if (env[clean] !== undefined && env[clean] !== null && env[clean] !== "") return env[clean];
 
     try {
-      if (root[clean] !== undefined && root[clean] !== null && root[clean] !== "") {
-        return root[clean];
-      }
+      if (root[clean] !== undefined && root[clean] !== null && root[clean] !== "") return root[clean];
     } catch {}
   }
 
@@ -289,24 +235,27 @@ function envValue(keys = [], fallback = "") {
 }
 
 function isProduction(env = "") {
-  const clean = text(env, "").toLowerCase();
-  return clean === "production" || clean === "prod";
+  return ["production", "prod"].includes(text(env, "").toLowerCase());
+}
+
+function baseOrigin() {
+  try {
+    if (typeof window !== "undefined" && window.location?.origin) return window.location.origin;
+  } catch {}
+
+  return "http://localhost";
 }
 
 /* =========================================================
    PATHS
 ========================================================= */
 
-function isHashRouterPath(value = "") {
-  const raw = text(value, "");
-  return raw.startsWith("#/") || raw.startsWith("#!");
-}
-
 function normalizeHashRouterPath(value = "") {
   const raw = text(value, "");
   if (!raw) return "/";
   if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
-  return raw.replace(/^#\/?/, "/") || "/";
+  if (raw.startsWith("#/")) return raw.replace(/^#\/?/, "/") || "/";
+  return raw;
 }
 
 function normalizePathname(pathname = "/") {
@@ -320,30 +269,26 @@ function normalizePathname(pathname = "/") {
 
   for (const segment of value.split("/")) {
     if (!segment || segment === ".") continue;
-
     if (segment === "..") {
       stack.pop();
       continue;
     }
-
     stack.push(segment);
   }
 
-  value = `/${stack.join("/")}` || "/";
-
+  value = `/${stack.join("/")}`;
   return value.length > 1 ? value.replace(/\/+$/g, "") || "/" : value;
 }
 
 function pathFromUrlLike(value = "") {
   const raw = text(value, "");
   if (!raw) return "";
-
-  if (isHashRouterPath(raw)) return normalizeHashRouterPath(raw);
+  if (raw.startsWith("#/") || raw.startsWith("#!")) return normalizeHashRouterPath(raw);
 
   try {
     const parsed = new URL(raw, baseOrigin());
 
-    if (parsed.hash && isHashRouterPath(parsed.hash)) {
+    if (parsed.hash && (parsed.hash.startsWith("#/") || parsed.hash.startsWith("#!"))) {
       return normalizeHashRouterPath(parsed.hash);
     }
 
@@ -361,14 +306,12 @@ function normalizePath(path = "/") {
   let hash = "";
 
   const hashIndex = pathname.indexOf("#");
-
   if (hashIndex >= 0) {
     hash = pathname.slice(hashIndex);
     pathname = pathname.slice(0, hashIndex) || "/";
   }
 
   const searchIndex = pathname.indexOf("?");
-
   if (searchIndex >= 0) {
     search = pathname.slice(searchIndex);
     pathname = pathname.slice(0, searchIndex) || "/";
@@ -382,26 +325,7 @@ function stripSearchAndHash(path = "/") {
 }
 
 function normalizePathList(list = []) {
-  return unique(toArray(list).flat().map(stripSearchAndHash).filter(Boolean));
-}
-
-function normalizeMap(map = {}, normalizer = (value) => value) {
-  if (!isPlainObject(map)) return {};
-
-  const out = {};
-
-  for (const [key, value] of Object.entries(map)) {
-    const cleanKey = text(key, "");
-    if (!cleanKey) continue;
-
-    const cleanValue = normalizer(value);
-
-    if (!cleanValue) continue;
-
-    out[cleanKey] = cleanValue;
-  }
-
-  return out;
+  return unique(toArray(list).flat(Infinity).map(stripSearchAndHash).filter(Boolean));
 }
 
 function pathMatches(path = "", candidate = "") {
@@ -434,9 +358,7 @@ function originFromUrl(value = "") {
 }
 
 function normalizeBaseUrl(value = "") {
-  const raw = text(value, "");
-  if (!raw || raw === "/") return "";
-  return raw.replace(/\/+$/g, "");
+  return text(value, "").replace(/\/+$/g, "");
 }
 
 function normalizeAbsoluteApiBase(value = "") {
@@ -445,15 +367,12 @@ function normalizeAbsoluteApiBase(value = "") {
 
   try {
     const parsed = new URL(raw);
-
     if (!["http:", "https:"].includes(parsed.protocol)) return "";
 
     const origin = parsed.origin.replace(/\/+$/g, "");
     const pathname = normalizePathname(parsed.pathname || "/");
 
     if (pathname === "/" || pathname === "/api") return origin;
-    if (CANONICAL_BACKEND_API_ORIGINS.includes(origin)) return origin;
-
     return `${origin}${pathname}`.replace(/\/+$/g, "");
   } catch {
     return "";
@@ -470,26 +389,25 @@ function isCanonicalBackendApiOrigin(value = "") {
   return Boolean(origin && CANONICAL_BACKEND_API_ORIGINS.includes(origin));
 }
 
-function normalizeApiBase(value = "", { env = "production", fallback = "" } = {}) {
+function normalizeApiBase(value = "", { env = "production", fallback = CANONICAL_PRODUCTION_API_BASE } = {}) {
   if (isProduction(env)) return CANONICAL_PRODUCTION_API_BASE;
 
   const raw = normalizeBaseUrl(value);
-  const safeFallback = normalizeBaseUrl(fallback);
+  const safeFallback = normalizeBaseUrl(fallback) || CANONICAL_PRODUCTION_API_BASE;
 
   if (!raw) return safeFallback;
+  if (raw === "/api" || raw === "api") return "";
   if (isForbiddenFrontendApiBase(raw)) return safeFallback;
 
   if (/^https?:\/\//i.test(raw)) {
     return normalizeAbsoluteApiBase(raw) || safeFallback;
   }
 
-  if (raw === "/api" || raw === "api") return "";
-
   return raw.replace(/\/+$/g, "");
 }
 
 /* =========================================================
-   NORMALIZERS
+   NORMALIZATION
 ========================================================= */
 
 function normalizeStoragePrefix(value = "onion") {
@@ -529,34 +447,28 @@ function pickRuntimeOverrides(runtime = {}) {
     "env",
     "environment",
     "debug",
-
     "apiBase",
     "apiOrigin",
     "apiUrl",
-
     "requestTimeout",
     "requestRetries",
     "requestRetryDelayMs",
     "requestRetryMaxDelayMs",
     "requestRetryMethods",
-
     "defaultLang",
     "fallbackLang",
     "defaultTheme",
     "storagePrefix",
-
     "routes",
     "routeAliases",
     "publicRoutes",
     "authLikeRoutes",
     "technicalPublicRoutes",
     "protectedPublicTokenRoutes",
-
     "storageKeys",
     "legacyStorageKeys",
     "publicApiPaths",
     "privateApiPaths",
-
     "api",
     "auth",
     "ui",
@@ -574,12 +486,10 @@ function pickRuntimeOverrides(runtime = {}) {
 
   for (const [key, value] of Object.entries(runtime)) {
     if (!allowed.has(key) || value === undefined || typeof value === "function") continue;
-    out[key] = value;
+    out[key] = clonePlain(value);
   }
 
-  return isPlainObject(runtime.override)
-    ? merge(out, runtime.override)
-    : out;
+  return isPlainObject(runtime.override) ? merge(out, runtime.override) : out;
 }
 
 /* =========================================================
@@ -613,7 +523,10 @@ const APP_ID = normalizeStoragePrefix(
 );
 
 const STORAGE_PREFIX = normalizeStoragePrefix(
-  envValue(["ONION_STORAGE_PREFIX", "VITE_ONION_STORAGE_PREFIX", "APP_STORAGE_PREFIX"], runtime.storagePrefix || runtime.appKey || runtime.appId || APP_ID)
+  envValue(
+    ["ONION_STORAGE_PREFIX", "VITE_ONION_STORAGE_PREFIX", "APP_STORAGE_PREFIX"],
+    runtime.storagePrefix || runtime.appKey || runtime.appId || APP_ID
+  )
 );
 
 const RAW_API_BASE = envValue(
@@ -638,12 +551,12 @@ const RAW_API_BASE = envValue(
     runtime.api?.base ||
     runtime.api?.baseUrl ||
     runtime.api?.origin ||
-    ""
+    CANONICAL_PRODUCTION_API_BASE
 );
 
 const API_BASE = normalizeApiBase(RAW_API_BASE, {
   env: APP_ENV,
-  fallback: isProduction(APP_ENV) ? CANONICAL_PRODUCTION_API_BASE : "",
+  fallback: CANONICAL_PRODUCTION_API_BASE,
 });
 
 /* =========================================================
@@ -666,7 +579,6 @@ const ROUTES = Object.freeze({
   servidor: "/servidor",
 
   activateAccount: "/activate-account",
-
   resetPassword: "/reset-password",
   resetPasswordConfirm: "/reset-password/confirm",
   forgotPassword: "/forgot-password",
@@ -773,69 +685,24 @@ const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
     statePublicPathKey: "bootActivationInitialPublicPath",
     stateIsRouteKey: "bootIsActivation",
     stateHasTokenKey: "bootHasActivationToken",
-    scrubbedStateKeys: [
-      "scrubbedActivationToken",
-      "activationTokenScrubbed",
-      "scrubbedActivateAccountToken",
-    ],
-    scrubbedHistoryKeys: [
-      "scrubbedActivationToken",
-      "activationTokenScrubbed",
-      "scrubbedActivateAccountToken",
-      "scrubbedPublicTokenRoute",
-      "scrubbedTokenRoute",
-    ],
-    tokenParamNames: [
-      "token",
-      "activationToken",
-      "activateToken",
-      "activation_token",
-      "activate_token",
-      "code",
-      "t",
-    ],
+    scrubbedStateKeys: ["scrubbedActivationToken", "activationTokenScrubbed", "scrubbedActivateAccountToken"],
+    scrubbedHistoryKeys: ["scrubbedActivationToken", "activationTokenScrubbed", "scrubbedActivateAccountToken", "scrubbedPublicTokenRoute", "scrubbedTokenRoute"],
+    tokenParamNames: ["token", "activationToken", "activateToken", "activation_token", "activate_token", "code", "t"],
   }),
 
   Object.freeze({
     key: "resetConfirm",
     path: ROUTES.resetPasswordConfirm,
     windowKey: "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-    windowKeys: [
-      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-      "__ONION_RESET_CONFIRM_INITIAL_URL__",
-    ],
+    windowKeys: ["__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__", "__ONION_RESET_CONFIRM_INITIAL_URL__"],
     stateUrlKey: "bootResetConfirmInitialUrl",
     statePathKey: "bootResetConfirmInitialPath",
     statePublicPathKey: "bootResetConfirmInitialPublicPath",
     stateIsRouteKey: "bootIsResetConfirm",
     stateHasTokenKey: "bootHasResetToken",
-    scrubbedStateKeys: [
-      "scrubbedResetToken",
-      "resetTokenScrubbed",
-      "scrubbedResetConfirmToken",
-      "scrubbedPasswordResetToken",
-      "scrubbedResetPasswordToken",
-    ],
-    scrubbedHistoryKeys: [
-      "scrubbedResetToken",
-      "resetTokenScrubbed",
-      "scrubbedResetConfirmToken",
-      "scrubbedPasswordResetToken",
-      "scrubbedResetPasswordToken",
-      "scrubbedPublicTokenRoute",
-      "scrubbedTokenRoute",
-    ],
-    tokenParamNames: [
-      "token",
-      "resetToken",
-      "passwordResetToken",
-      "reset_token",
-      "password_reset_token",
-      "confirmToken",
-      "confirm_token",
-      "code",
-      "t",
-    ],
+    scrubbedStateKeys: ["scrubbedResetToken", "resetTokenScrubbed", "scrubbedResetConfirmToken", "scrubbedPasswordResetToken", "scrubbedResetPasswordToken"],
+    scrubbedHistoryKeys: ["scrubbedResetToken", "resetTokenScrubbed", "scrubbedResetConfirmToken", "scrubbedPasswordResetToken", "scrubbedResetPasswordToken", "scrubbedPublicTokenRoute", "scrubbedTokenRoute"],
+    tokenParamNames: ["token", "resetToken", "passwordResetToken", "reset_token", "password_reset_token", "confirmToken", "confirm_token", "code", "t"],
   }),
 ]);
 
@@ -912,12 +779,11 @@ const LEGACY_STORAGE_KEYS = Object.freeze({
 });
 
 /* =========================================================
-   AUTH / API
+   API / AUTH
 ========================================================= */
 
 const AUTH_ENDPOINTS = Object.freeze({
   login: "/api/auth/login",
-
   logout: "/api/auth/logout",
   logoutAll: "/api/auth/logout-all",
 
@@ -938,13 +804,9 @@ const AUTH_ENDPOINTS = Object.freeze({
   accountActivation: "/api/auth/activate",
   createUserActivation: "/api/auth/activate",
   confirmActivation: "/api/auth/activate",
-
   activateAccountLegacy: "/api/auth/activate-account",
   activationLegacy: "/api/auth/activate-account",
-
   activateFirstUser: "/api/auth/activate/first-user",
-  firstUserActivation: "/api/auth/activate/first-user",
-
   validateActivationToken: "/api/auth/activate/validate",
   activationValidate: "/api/auth/activate/validate",
   validateActivateAccount: "/api/auth/activate/validate",
@@ -988,58 +850,22 @@ const AUTH_ENDPOINTS = Object.freeze({
 const AUTH_ENDPOINT_CANDIDATES = Object.freeze({
   login: ["/api/auth/login"],
   logout: ["/api/auth/logout"],
-
   me: ["/api/auth/me", "/auth/me", "/api/me", "/me"],
   refresh: ["/api/auth/refresh"],
 
   activateAccount: ["/api/auth/activate", "/api/auth/activate-account"],
   activateFirstUser: ["/api/auth/activate/first-user"],
-  validateActivationToken: [
-    "/api/auth/activate/validate",
-    "/api/auth/activation/validate",
-    "/api/auth/activate-account/validate",
-  ],
+  validateActivationToken: ["/api/auth/activate/validate", "/api/auth/activation/validate", "/api/auth/activate-account/validate"],
 
-  requestPasswordReset: [
-    "/api/auth/reset-password-request",
-    "/api/auth/forgot-password",
-    "/api/auth/password-reset/request",
-    "/api/auth/reset-password/request",
-  ],
-  confirmPasswordReset: [
-    "/api/auth/reset-password-confirm",
-    "/api/auth/reset-password/confirm",
-    "/api/auth/password-reset/confirm",
-  ],
-  validateResetToken: [
-    "/api/auth/reset-password/validate",
-    "/api/auth/reset-password-validate",
-    "/api/auth/password-reset/validate",
-  ],
+  requestPasswordReset: ["/api/auth/reset-password-request", "/api/auth/forgot-password", "/api/auth/password-reset/request", "/api/auth/reset-password/request"],
+  confirmPasswordReset: ["/api/auth/reset-password-confirm", "/api/auth/reset-password/confirm", "/api/auth/password-reset/confirm"],
+  validateResetToken: ["/api/auth/reset-password/validate", "/api/auth/reset-password-validate", "/api/auth/password-reset/validate"],
 
-  twoFactorLogin: [
-    "/api/auth/2fa/login",
-    "/api/auth/mfa/login",
-    "/api/auth/2fa/verify",
-    "/api/auth/mfa/verify",
-  ],
-  twoFactorRequest: [
-    "/api/auth/2fa/request",
-    "/api/auth/mfa/request",
-  ],
-  twoFactorResend: [
-    "/api/auth/2fa/resend",
-    "/api/auth/mfa/resend",
-  ],
+  twoFactorLogin: ["/api/auth/2fa/login", "/api/auth/mfa/login", "/api/auth/2fa/verify", "/api/auth/mfa/verify"],
+  twoFactorRequest: ["/api/auth/2fa/request", "/api/auth/mfa/request"],
+  twoFactorResend: ["/api/auth/2fa/resend", "/api/auth/mfa/resend"],
 
-  health: [
-    "/api/auth/_health",
-    "/api/auth/health",
-    "/api/health",
-    "/api/health/ready",
-    "/api/_health",
-    "/health",
-  ],
+  health: ["/api/auth/_health", "/api/auth/health", "/api/health", "/api/health/ready", "/api/_health", "/health"],
 });
 
 const PUBLIC_API_PATHS = Object.freeze(normalizePublicApiList([
@@ -1088,19 +914,15 @@ function endpointGroups(candidates = AUTH_ENDPOINT_CANDIDATES, endpoints = AUTH_
     endpoints.login,
     endpoints.refresh,
     endpoints.logout,
-
     ...(candidates.activateAccount || []),
     ...(candidates.activateFirstUser || []),
     ...(candidates.validateActivationToken || []),
-
     ...(candidates.requestPasswordReset || []),
     ...(candidates.confirmPasswordReset || []),
     ...(candidates.validateResetToken || []),
-
     ...(candidates.twoFactorLogin || []),
     ...(candidates.twoFactorRequest || []),
     ...(candidates.twoFactorResend || []),
-
     ...(candidates.health || []),
   ]);
 
@@ -1109,29 +931,13 @@ function endpointGroups(candidates = AUTH_ENDPOINT_CANDIDATES, endpoints = AUTH_
     private: normalizePathList([...privatePaths, ...PRIVATE_ME_PATHS]),
     controlSkipRefresh,
     session: normalizePathList([endpoints.login, endpoints.logout, endpoints.me, endpoints.refresh]),
-    activation: normalizePathList([
-      ...(candidates.activateAccount || []),
-      ...(candidates.activateFirstUser || []),
-      ...(candidates.validateActivationToken || []),
-    ]),
-    passwordReset: normalizePathList([
-      ...(candidates.requestPasswordReset || []),
-      ...(candidates.confirmPasswordReset || []),
-      ...(candidates.validateResetToken || []),
-    ]),
-    twoFactor: normalizePathList([
-      ...(candidates.twoFactorLogin || []),
-      ...(candidates.twoFactorRequest || []),
-      ...(candidates.twoFactorResend || []),
-    ]),
+    activation: normalizePathList([...(candidates.activateAccount || []), ...(candidates.activateFirstUser || []), ...(candidates.validateActivationToken || [])]),
+    passwordReset: normalizePathList([...(candidates.requestPasswordReset || []), ...(candidates.confirmPasswordReset || []), ...(candidates.validateResetToken || [])]),
+    twoFactor: normalizePathList([...(candidates.twoFactorLogin || []), ...(candidates.twoFactorRequest || []), ...(candidates.twoFactorResend || [])]),
   };
 }
 
 const AUTH_ENDPOINT_GROUPS = Object.freeze(endpointGroups());
-
-/* =========================================================
-   RESOURCE ENDPOINTS
-========================================================= */
 
 const RESOURCES = Object.freeze({
   tickets: {
@@ -1221,7 +1027,7 @@ const RESOURCES = Object.freeze({
 });
 
 /* =========================================================
-   BLOCKS
+   CONFIG BLOCKS
 ========================================================= */
 
 const API = Object.freeze({
@@ -1300,67 +1106,11 @@ const AUTH = Object.freeze({
 
   tokenParamNames: {
     generic: ["token", "code", "t"],
-
-    auth: [
-      "token",
-      "accessToken",
-      "access_token",
-      "authToken",
-      "auth_token",
-      "jwt",
-      "idToken",
-      "id_token",
-      "code",
-      "t",
-    ],
-
-    refresh: [
-      "refreshToken",
-      "refresh_token",
-      "token",
-      "code",
-      "t",
-    ],
-
-    activation: [
-      "token",
-      "activationToken",
-      "activateToken",
-      "activation_token",
-      "activate_token",
-      "code",
-      "t",
-    ],
-
-    reset: [
-      "token",
-      "resetToken",
-      "passwordResetToken",
-      "confirmToken",
-      "reset_token",
-      "password_reset_token",
-      "confirm_token",
-      "code",
-      "t",
-    ],
-
-    twoFactor: [
-      "tempToken",
-      "temp_token",
-      "temporaryToken",
-      "temporary_token",
-      "challengeToken",
-      "challenge_token",
-      "twoFactorToken",
-      "two_factor_token",
-      "mfaToken",
-      "mfa_token",
-      "otpToken",
-      "otp_token",
-      "code",
-      "otp",
-      "totp",
-    ],
+    auth: ["token", "accessToken", "access_token", "authToken", "auth_token", "jwt", "idToken", "id_token", "code", "t"],
+    refresh: ["refreshToken", "refresh_token", "token", "code", "t"],
+    activation: ["token", "activationToken", "activateToken", "activation_token", "activate_token", "code", "t"],
+    reset: ["token", "resetToken", "passwordResetToken", "confirmToken", "reset_token", "password_reset_token", "confirm_token", "code", "t"],
+    twoFactor: ["tempToken", "temp_token", "temporaryToken", "temporary_token", "challengeToken", "challenge_token", "twoFactorToken", "two_factor_token", "mfaToken", "mfa_token", "otpToken", "otp_token", "code", "otp", "totp"],
   },
 
   session: {
@@ -1582,7 +1332,7 @@ const SECURITY = Object.freeze({
 });
 
 /* =========================================================
-   FINAL NORMALIZATION
+   FINAL CONFIG
 ========================================================= */
 
 function normalizeProtectedTokenRoutes(list = []) {
@@ -1594,12 +1344,10 @@ function normalizeProtectedTokenRoutes(list = []) {
 
     const key = text(item.key, "");
     const path = stripSearchAndHash(item.path || "");
-
     if (!key || !path) continue;
 
     const dedupe = `${key}:${path}`;
     if (seen.has(dedupe)) continue;
-
     seen.add(dedupe);
 
     const windowKeys = unique([...toArray(item.windowKeys), item.windowKey]);
@@ -1654,11 +1402,25 @@ function normalizeCandidates(candidates = {}) {
   }
 
   out.me = normalizePathList(["/api/auth/me", "/auth/me", "/api/me", "/me"]);
-  out.activateAccount = normalizePathList([
-    "/api/auth/activate",
-    "/api/auth/activate-account",
-    ...(out.activateAccount || []),
-  ]);
+  out.activateAccount = normalizePathList(["/api/auth/activate", "/api/auth/activate-account", ...(out.activateAccount || [])]);
+
+  return out;
+}
+
+function normalizeMap(map = {}, normalizer = (value) => value) {
+  if (!isPlainObject(map)) return {};
+
+  const out = {};
+
+  for (const [key, value] of Object.entries(map)) {
+    const cleanKey = text(key, "");
+    if (!cleanKey) continue;
+
+    const cleanValue = normalizer(value);
+    if (!cleanValue) continue;
+
+    out[cleanKey] = cleanValue;
+  }
 
   return out;
 }
@@ -1750,7 +1512,7 @@ function normalizeFinalConfig(input = {}) {
     out.apiBase || out.apiOrigin || out.apiUrl || out.api?.base || out.api?.baseUrl || out.api?.origin || API_BASE,
     {
       env: out.env,
-      fallback: isProduction(out.env) ? CANONICAL_PRODUCTION_API_BASE : API_BASE,
+      fallback: CANONICAL_PRODUCTION_API_BASE,
     }
   );
 
@@ -1839,12 +1601,7 @@ function normalizeFinalConfig(input = {}) {
   out.auth.protectedPublicTokenRoutes = out.protectedPublicTokenRoutes;
   out.auth.endpoints = normalizeEndpoints(out.auth.endpoints);
   out.auth.endpointCandidates = normalizeCandidates(out.auth.endpointCandidates);
-  out.auth.endpointGroups = endpointGroups(
-    out.auth.endpointCandidates,
-    out.auth.endpoints,
-    out.publicApiPaths,
-    out.privateApiPaths
-  );
+  out.auth.endpointGroups = endpointGroups(out.auth.endpointCandidates, out.auth.endpoints, out.publicApiPaths, out.privateApiPaths);
   out.auth.loginRoute = out.routes.login;
   out.auth.logoutRoute = out.routes.logout;
   out.auth.homeRoute = out.routes.home;
@@ -1902,12 +1659,11 @@ function normalizeFinalConfig(input = {}) {
     ...(out.security.sensitiveQueryParams || []),
   ]);
 
-  /*
-    Candados finales. Ningún override puede saltarlos.
-  */
+  /* Candados finales: ningún override puede saltarlos. */
+
   out.apiBase = normalizeApiBase(out.apiBase, {
     env: out.env,
-    fallback: isProduction(out.env) ? CANONICAL_PRODUCTION_API_BASE : API_BASE,
+    fallback: CANONICAL_PRODUCTION_API_BASE,
   });
 
   out.apiOrigin = out.apiBase;
@@ -1927,12 +1683,7 @@ function normalizeFinalConfig(input = {}) {
   out.auth.privateApiPaths = out.privateApiPaths;
   out.auth.endpoints = normalizeEndpoints(out.auth.endpoints);
   out.auth.endpointCandidates = normalizeCandidates(out.auth.endpointCandidates);
-  out.auth.endpointGroups = endpointGroups(
-    out.auth.endpointCandidates,
-    out.auth.endpoints,
-    out.publicApiPaths,
-    out.privateApiPaths
-  );
+  out.auth.endpointGroups = endpointGroups(out.auth.endpointCandidates, out.auth.endpoints, out.publicApiPaths, out.privateApiPaths);
 
   return out;
 }
@@ -2060,9 +1811,7 @@ export function isPrivateApiPath(path = "") {
 
 export function isTechnicalPublicRoute(path = "") {
   const clean = stripSearchAndHash(normalizePath(path));
-
-  return toArray(config.auth?.technicalPublicRoutes || config.technicalPublicRoutes)
-    .some((item) => pathMatches(clean, item));
+  return toArray(config.auth?.technicalPublicRoutes || config.technicalPublicRoutes).some((item) => pathMatches(clean, item));
 }
 
 export function isPublicRoute(path = "") {

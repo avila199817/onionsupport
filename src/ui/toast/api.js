@@ -81,7 +81,7 @@ import {
    VERSION / CONSTANTS
 ========================================================= */
 
-export const TOAST_API_VERSION = "17.0.0-clean";
+export const TOAST_API_VERSION = "17.0.1-warn-fix";
 
 const SOURCE = "ui.toast.api";
 
@@ -165,14 +165,16 @@ function iso(ms = now()) {
   }
 }
 
-function warn(...args) {
+function safeWarn(...args) {
   try {
     AppCore?.utils?.warn?.("[ToastAPI]", ...args);
     return;
   } catch {}
 
   try {
-    if (AppCore?.config?.debug) console.warn("[ToastAPI]", ...args);
+    if (AppCore?.config?.debug) {
+      console.warn("[ToastAPI]", ...args);
+    }
   } catch {}
 }
 
@@ -229,6 +231,7 @@ function nextFrame(callback) {
     try {
       callback();
     } catch {}
+
     return true;
   }
 
@@ -262,6 +265,7 @@ function delay(callback, ms = 0) {
     try {
       callback();
     } catch {}
+
     return null;
   }
 
@@ -330,13 +334,13 @@ function ensureDom() {
   try {
     ensureToastKeyframes();
   } catch (error) {
-    warn("ensureToastKeyframes falló.", error);
+    safeWarn("ensureToastKeyframes falló.", error);
   }
 
   try {
     return ensureToastContainer();
   } catch (error) {
-    warn("ensureToastContainer falló.", error);
+    safeWarn("ensureToastContainer falló.", error);
     return null;
   }
 }
@@ -354,7 +358,7 @@ function appendNode(item) {
 
     return true;
   } catch (error) {
-    warn("No se pudo insertar toast.", error);
+    safeWarn("No se pudo insertar toast.", error);
     return false;
   }
 }
@@ -410,7 +414,7 @@ function createNode(item) {
       closable: item.closable,
     });
   } catch (error) {
-    warn("createToastNode falló.", error);
+    safeWarn("createToastNode falló.", error);
     return null;
   }
 }
@@ -443,7 +447,7 @@ function replaceNode(item) {
 
     return true;
   } catch (error) {
-    warn("No se pudo reemplazar toast node.", error);
+    safeWarn("No se pudo reemplazar toast node.", error);
 
     item.toastEl = next;
     item.progressEl = progressNode(next);
@@ -642,7 +646,7 @@ function syncProgress(item) {
     runToastProgress(item, item.duration);
     return true;
   } catch (error) {
-    warn("runToastProgress falló.", error);
+    safeWarn("runToastProgress falló.", error);
     return false;
   }
 }
@@ -666,7 +670,7 @@ function syncTimer(item) {
     startToastTimer(item);
     return true;
   } catch (error) {
-    warn("startToastTimer falló.", error);
+    safeWarn("startToastTimer falló.", error);
     return false;
   }
 }
@@ -685,7 +689,7 @@ function bindInteractions(item) {
     item.interactionsBound = true;
     return true;
   } catch (error) {
-    warn("No se pudieron vincular interacciones toast.", error);
+    safeWarn("No se pudieron vincular interacciones toast.", error);
     return false;
   }
 }
@@ -757,7 +761,7 @@ export function showToast(input = {}, maybeOptions = {}) {
   const normalized = normalizeInput(input, maybeOptions);
 
   if (!normalized.message) {
-    warn("showToast requiere message/text.");
+    safeWarn("showToast requiere message/text.");
     return null;
   }
 
@@ -813,7 +817,7 @@ export function showToast(input = {}, maybeOptions = {}) {
   try {
     emitToastShown(item);
   } catch (error) {
-    warn("emitToastShown falló.", error);
+    safeWarn("emitToastShown falló.", error);
   }
 
   return item.id;
@@ -855,7 +859,7 @@ export function updateToast(id = "", patch = {}) {
       : item.message;
 
   if (!nextMessage) {
-    warn("updateToast requiere message/text.");
+    safeWarn("updateToast requiere message/text.");
     return null;
   }
 
@@ -903,7 +907,7 @@ export function updateToast(id = "", patch = {}) {
   try {
     emitToastUpdated(item);
   } catch (error) {
-    warn("emitToastUpdated falló.", error);
+    safeWarn("emitToastUpdated falló.", error);
   }
 
   return item.id;
@@ -954,7 +958,7 @@ export function dismissToast(id = "", options = {}) {
   try {
     emitToastDismissed(item);
   } catch (error) {
-    warn("emitToastDismissed falló.", error);
+    safeWarn("emitToastDismissed falló.", error);
   }
 
   return snapshot.id;

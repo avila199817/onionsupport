@@ -2,7 +2,7 @@
    Onion SPA - Store Subscriptions
    Archivo: src/store/subscriptions.js
 
-   Store subscriptions limpio:
+   STORE SUBSCRIPTIONS · SIMPLE
    - global / key / selector subscriptions
    - unsubscribe idempotente
    - immediate / once
@@ -15,6 +15,7 @@
 import {
   deepClone,
   deepEqual,
+  getByPath,
   isFunction,
   normalizePath,
   safeBool,
@@ -22,15 +23,7 @@ import {
   safeText,
 } from "./helpers.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const STORE_SUBSCRIPTIONS_VERSION = "15.0.0-clean";
-
-/* =========================================================
-   EVENTS
-========================================================= */
+export const STORE_SUBSCRIPTIONS_VERSION = "16.0.0-simple";
 
 const EVENTS = Object.freeze({
   add: "store:subscription:add",
@@ -48,34 +41,10 @@ const SENSITIVE_KEY_RE =
 const TOKENISH_TEXT_RE =
   /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|tempToken|temp_token|code|t)=)[^&#\s]+/gi;
 
-/* =========================================================
-   IDS
-========================================================= */
-
 const functionIds = new WeakMap();
 
 let nextFunctionId = 1;
 let nextSubscriptionId = 1;
-
-function getFunctionId(fn) {
-  if (!isFunction(fn)) return "fn:none";
-
-  try {
-    if (!functionIds.has(fn)) {
-      functionIds.set(fn, nextFunctionId++);
-    }
-
-    return `fn:${functionIds.get(fn)}`;
-  } catch {
-    return "fn:unknown";
-  }
-}
-
-function createSubscriptionId(prefix = "sub") {
-  const id = `${prefix}_${nextSubscriptionId}`;
-  nextSubscriptionId += 1;
-  return id;
-}
 
 /* =========================================================
    BASICS
@@ -95,6 +64,23 @@ function iso(ms = now()) {
   } catch {
     return "";
   }
+}
+
+function getFunctionId(fn) {
+  if (!isFunction(fn)) return "fn:none";
+
+  try {
+    if (!functionIds.has(fn)) functionIds.set(fn, nextFunctionId++);
+    return `fn:${functionIds.get(fn)}`;
+  } catch {
+    return "fn:unknown";
+  }
+}
+
+function createSubscriptionId(prefix = "sub") {
+  const id = `${prefix}_${nextSubscriptionId}`;
+  nextSubscriptionId += 1;
+  return id;
 }
 
 function clone(value, fallback = null) {
@@ -124,14 +110,14 @@ function freeze(value) {
   }
 }
 
-function createNoopUnsubscribe() {
-  const noop = () => false;
+function noopUnsubscribe() {
+  const fn = () => false;
 
   try {
-    noop.__storeUnsubscribeNoop = true;
+    fn.__storeUnsubscribeNoop = true;
   } catch {}
 
-  return noop;
+  return fn;
 }
 
 function pathString(path = "") {
@@ -162,7 +148,7 @@ function shallowState({ shallowCloneRoot, state }) {
 }
 
 /* =========================================================
-   REDACTION / ERROR
+   REDACTION / DIAGNOSTICS
 ========================================================= */
 
 function redactText(value = "") {
@@ -192,36 +178,29 @@ function sanitizeError(error = null) {
   };
 }
 
-function sanitizePayload(value, depth = 0, keyHint = "") {
-  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) {
-    return value ? "***" : null;
-  }
-
+function sanitizePayload(value, depth = 0, keyHint = "", seen = new WeakSet()) {
+  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) return value ? "***" : null;
   if (depth > 4) return "[depth-limit]";
-
-  if (
-    value === null ||
-    value === undefined ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
+  if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "string") return redactText(value);
   if (typeof value === "bigint") return String(value);
   if (typeof value === "function") return "[function]";
   if (value instanceof Error) return sanitizeError(value);
 
   if (Array.isArray(value)) {
-    return value.slice(0, 80).map((item) => sanitizePayload(item, depth + 1, keyHint));
+    return value.slice(0, 80).map((item) => sanitizePayload(item, depth + 1, keyHint, seen));
   }
 
   if (value && typeof value === "object") {
+    try {
+      if (seen.has(value)) return "[circular]";
+      seen.add(value);
+    } catch {}
+
     const output = {};
 
     for (const [key, item] of Object.entries(value).slice(0, 120)) {
-      output[key] = sanitizePayload(item, depth + 1, key);
+      output[key] = sanitizePayload(item, depth + 1, key, seen);
     }
 
     return output;
@@ -235,14 +214,10 @@ function sanitizePayload(value, depth = 0, keyHint = "") {
 }
 
 function shouldEmitDiagnostics(AppCore, options = {}) {
-  if (options.emitDiagnostics === true) return true;
-  if (options.emitSubscriptionEvents === true) return true;
+  if (options.emitDiagnostics === true || options.emitSubscriptionEvents === true) return true;
 
   try {
-    return Boolean(
-      AppCore?.config?.diagnostics?.storeSubscriptions ||
-        AppCore?.config?.diagnostics?.storeEvents
-    );
+    return Boolean(AppCore?.config?.diagnostics?.storeSubscriptions || AppCore?.config?.diagnostics?.storeEvents);
   } catch {
     return false;
   }
@@ -280,9 +255,7 @@ function reportError(AppCore, label, error, extra = {}, options = {}) {
   } catch {}
 
   try {
-    if (AppCore?.config?.debug) {
-      console.error(payload.label, error, payload);
-    }
+    if (AppCore?.config?.debug) console.error(payload.label, error, payload);
   } catch {}
 
   emit(AppCore, EVENTS.error, payload, {
@@ -339,12 +312,7 @@ function normalizeOptions(options = {}) {
   const opts = safeObject(options);
 
   return {
-    immediate: Boolean(
-      opts.immediate === true ||
-        opts.fireImmediately === true ||
-        opts.emitCurrent === true
-    ),
-
+    immediate: Boolean(opts.immediate === true || opts.fireImmediately === true || opts.emitCurrent === true),
     once: Boolean(opts.once),
 
     label: safeText(opts.label, ""),
@@ -360,11 +328,7 @@ function normalizeOptions(options = {}) {
     snapshot: isFunction(opts.snapshot) ? opts.snapshot : null,
     get: isFunction(opts.get) ? opts.get : null,
 
-    emitDiagnostics: Boolean(
-      opts.emitDiagnostics === true ||
-        opts.emitSubscriptionEvents === true
-    ),
-
+    emitDiagnostics: Boolean(opts.emitDiagnostics === true || opts.emitSubscriptionEvents === true),
     cleanupInvalid: safeBool(opts.cleanupInvalid, false),
     meta: safeObject(opts.meta, null),
   };
@@ -397,7 +361,6 @@ function createMeta({
     selectorId: selector ? getFunctionId(selector) : "",
 
     active: true,
-
     meta: meta ? clone(meta, null) : null,
 
     createdAt: iso(createdAtMs),
@@ -408,7 +371,7 @@ function createMeta({
   };
 }
 
-function markMetaInactive(meta, reason = "unsubscribe") {
+function markInactive(meta, reason = "unsubscribe") {
   const stamp = now();
 
   meta.active = false;
@@ -450,18 +413,13 @@ function emitImmediate(AppCore, meta, options) {
    PAYLOAD
 ========================================================= */
 
-function buildBasePayload({
-  snapshot,
-  changedPaths = [],
-  previousState = null,
-} = {}) {
+function buildBasePayload({ snapshot, changedPaths = [], previousState = null } = {}) {
   const timestamp = now();
 
   return freeze({
     state: clone(snapshotValue(snapshot), {}),
     previousState: previousState ? clone(previousState, null) : null,
-    changedPaths: Array
-      .from(new Set((Array.isArray(changedPaths) ? changedPaths : []).map(pathString).filter(Boolean))),
+    changedPaths: [...new Set((Array.isArray(changedPaths) ? changedPaths : []).map(pathString).filter(Boolean))],
     timestamp,
     timestampIso: iso(timestamp),
   });
@@ -473,7 +431,6 @@ function buildListenerPayload(payload = {}, extra = {}) {
   return freeze({
     ...clone(source, {}),
     ...clone(extra, {}),
-
     state: clone(source.state, {}),
     previousState: source.previousState ? clone(source.previousState, null) : null,
     changedPaths: Array.isArray(source.changedPaths) ? [...source.changedPaths] : [],
@@ -586,19 +543,27 @@ export function subscribe(listeners, listener, options = {}) {
   const AppCore = opts.AppCore || null;
 
   if (!listeners || !isFunction(listeners.add) || !isFunction(listeners.delete)) {
-    reportError(AppCore, "Store subscribe requiere un Set válido.", new Error("INVALID_LISTENERS_SET"), {
-      type: "global",
-    }, opts);
+    reportError(
+      AppCore,
+      "Store subscribe requiere un Set válido.",
+      new Error("INVALID_LISTENERS_SET"),
+      { type: "global" },
+      opts
+    );
 
-    return createNoopUnsubscribe();
+    return noopUnsubscribe();
   }
 
   if (!isFunction(listener)) {
-    reportError(AppCore, "Store subscribe requiere listener function.", new Error("INVALID_LISTENER"), {
-      type: "global",
-    }, opts);
+    reportError(
+      AppCore,
+      "Store subscribe requiere listener function.",
+      new Error("INVALID_LISTENER"),
+      { type: "global" },
+      opts
+    );
 
-    return createNoopUnsubscribe();
+    return noopUnsubscribe();
   }
 
   const existing = findExistingGlobal(listeners, listener, opts);
@@ -609,7 +574,6 @@ export function subscribe(listeners, listener, options = {}) {
   }
 
   const id = createSubscriptionId("global");
-
   const meta = createMeta({
     id,
     type: "global",
@@ -627,7 +591,7 @@ export function subscribe(listeners, listener, options = {}) {
     if (!active) return false;
 
     active = false;
-    markMetaInactive(meta, reason);
+    markInactive(meta, reason);
 
     try {
       listeners.delete(wrappedListener);
@@ -669,7 +633,7 @@ export function subscribe(listeners, listener, options = {}) {
   try {
     listeners.add(wrappedListener);
   } catch {
-    return createNoopUnsubscribe();
+    return noopUnsubscribe();
   }
 
   emitAdd(AppCore, meta, opts);
@@ -708,54 +672,47 @@ export function subscribe(listeners, listener, options = {}) {
    KEY / PATH
 ========================================================= */
 
-export function subscribeKey({
-  AppCore,
-  keyListeners,
-  path,
-  listener,
-  get,
-  snapshot,
-  options = {},
-} = {}) {
+export function subscribeKey({ AppCore, keyListeners, path, listener, get, snapshot, options = {} } = {}) {
   const opts = normalizeOptions(options);
   const watchedPath = pathString(path);
 
   if (!watchedPath || !isFunction(listener)) {
-    reportError(AppCore, "subscribeKey requiere path y listener.", new Error("INVALID_KEY_SUBSCRIPTION"), {
-      type: "key",
-      path: watchedPath,
-    }, opts);
+    reportError(
+      AppCore,
+      "subscribeKey requiere path y listener.",
+      new Error("INVALID_KEY_SUBSCRIPTION"),
+      { type: "key", path: watchedPath },
+      opts
+    );
 
-    return createNoopUnsubscribe();
+    return noopUnsubscribe();
   }
 
-  if (
-    !keyListeners ||
-    !isFunction(keyListeners.has) ||
-    !isFunction(keyListeners.set) ||
-    !isFunction(keyListeners.get) ||
-    !isFunction(keyListeners.delete)
-  ) {
-    reportError(AppCore, "subscribeKey requiere keyListeners Map válido.", new Error("INVALID_KEY_LISTENERS_MAP"), {
-      type: "key",
-      path: watchedPath,
-    }, opts);
+  if (!keyListeners || !isFunction(keyListeners.has) || !isFunction(keyListeners.set) || !isFunction(keyListeners.get) || !isFunction(keyListeners.delete)) {
+    reportError(
+      AppCore,
+      "subscribeKey requiere keyListeners Map válido.",
+      new Error("INVALID_KEY_LISTENERS_MAP"),
+      { type: "key", path: watchedPath },
+      opts
+    );
 
-    return createNoopUnsubscribe();
+    return noopUnsubscribe();
   }
 
   if (!isFunction(get) || !isFunction(snapshot)) {
-    reportError(AppCore, "subscribeKey requiere get() y snapshot().", new Error("INVALID_KEY_DEPS"), {
-      type: "key",
-      path: watchedPath,
-    }, opts);
+    reportError(
+      AppCore,
+      "subscribeKey requiere get() y snapshot().",
+      new Error("INVALID_KEY_DEPS"),
+      { type: "key", path: watchedPath },
+      opts
+    );
 
-    return createNoopUnsubscribe();
+    return noopUnsubscribe();
   }
 
-  if (!keyListeners.has(watchedPath)) {
-    keyListeners.set(watchedPath, new Set());
-  }
+  if (!keyListeners.has(watchedPath)) keyListeners.set(watchedPath, new Set());
 
   const bucket = keyListeners.get(watchedPath);
   const existing = findExistingKey(bucket, listener, opts);
@@ -766,7 +723,6 @@ export function subscribeKey({
   }
 
   const id = createSubscriptionId("key");
-
   const meta = createMeta({
     id,
     type: "key",
@@ -785,7 +741,7 @@ export function subscribeKey({
     if (!active) return false;
 
     active = false;
-    markMetaInactive(meta, reason);
+    markInactive(meta, reason);
 
     try {
       entry.active = false;
@@ -811,22 +767,17 @@ export function subscribeKey({
 
   const entry = {
     __storeSubscriptionType: "key",
-
     id,
     type: "key",
     path: watchedPath,
-
     listener,
     listenerId: getFunctionId(listener),
-
     label: opts.label,
     name: opts.name,
     once: opts.once,
-
     active: true,
     meta,
     unsubscribe,
-
     createdAt: meta.createdAt,
     createdAtMs: meta.createdAtMs,
   };
@@ -834,7 +785,7 @@ export function subscribeKey({
   try {
     bucket.add(entry);
   } catch {
-    return createNoopUnsubscribe();
+    return noopUnsubscribe();
   }
 
   emitAdd(AppCore, meta, opts);
@@ -878,22 +829,13 @@ export function subscribeKey({
    SELECTOR
 ========================================================= */
 
-function computeSelectorValue({
-  AppCore,
-  selector,
-  shallowCloneRoot,
-  state,
-  label = "Store selector error",
-  options = {},
-} = {}) {
+function computeSelectorValue({ AppCore, selector, shallowCloneRoot, state, label = "Store selector error", options = {} } = {}) {
   return runSafely(
     AppCore,
     label,
     () => selector(shallowState({ shallowCloneRoot, state })),
     undefined,
-    {
-      type: "selector",
-    },
+    { type: "selector" },
     options
   );
 }
@@ -927,27 +869,39 @@ export function subscribeSelector({
   const opts = normalizeOptions(options);
 
   if (!isFunction(selector) || !isFunction(listener)) {
-    reportError(AppCore, "subscribeSelector requiere selector y listener.", new Error("INVALID_SELECTOR_SUBSCRIPTION"), {
-      type: "selector",
-    }, opts);
+    reportError(
+      AppCore,
+      "subscribeSelector requiere selector y listener.",
+      new Error("INVALID_SELECTOR_SUBSCRIPTION"),
+      { type: "selector" },
+      opts
+    );
 
-    return createNoopUnsubscribe();
+    return noopUnsubscribe();
   }
 
   if (!selectorListeners || !isFunction(selectorListeners.add) || !isFunction(selectorListeners.delete)) {
-    reportError(AppCore, "subscribeSelector requiere selectorListeners Set válido.", new Error("INVALID_SELECTOR_LISTENERS_SET"), {
-      type: "selector",
-    }, opts);
+    reportError(
+      AppCore,
+      "subscribeSelector requiere selectorListeners Set válido.",
+      new Error("INVALID_SELECTOR_LISTENERS_SET"),
+      { type: "selector" },
+      opts
+    );
 
-    return createNoopUnsubscribe();
+    return noopUnsubscribe();
   }
 
   if (!isFunction(snapshot) || !isFunction(shallowCloneRoot)) {
-    reportError(AppCore, "subscribeSelector requiere snapshot() y shallowCloneRoot().", new Error("INVALID_SELECTOR_DEPS"), {
-      type: "selector",
-    }, opts);
+    reportError(
+      AppCore,
+      "subscribeSelector requiere snapshot() y shallowCloneRoot().",
+      new Error("INVALID_SELECTOR_DEPS"),
+      { type: "selector" },
+      opts
+    );
 
-    return createNoopUnsubscribe();
+    return noopUnsubscribe();
   }
 
   const existing = findExistingSelector(selectorListeners, selector, listener, opts);
@@ -986,7 +940,7 @@ export function subscribeSelector({
     if (!active) return false;
 
     active = false;
-    markMetaInactive(meta, reason);
+    markInactive(meta, reason);
 
     try {
       entry.active = false;
@@ -999,7 +953,6 @@ export function subscribeSelector({
 
   const entry = {
     __storeSubscriptionType: "selector",
-
     id,
     type: "selector",
 
@@ -1030,7 +983,7 @@ export function subscribeSelector({
   try {
     selectorListeners.add(entry);
   } catch {
-    return createNoopUnsubscribe();
+    return noopUnsubscribe();
   }
 
   emitAdd(AppCore, meta, opts);
@@ -1137,11 +1090,7 @@ function selectorEntries(selectorListeners) {
     }));
 }
 
-export function getSubscriptionsSnapshot({
-  listeners,
-  keyListeners,
-  selectorListeners,
-} = {}) {
+export function getSubscriptionsSnapshot({ listeners, keyListeners, selectorListeners } = {}) {
   const global = globalEntries(listeners);
   const key = keyEntries(keyListeners || new Map());
   const selector = selectorEntries(selectorListeners || new Set());
@@ -1164,18 +1113,11 @@ export function getSubscriptionsSnapshot({
   };
 }
 
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
-
 export default {
   STORE_SUBSCRIPTIONS_VERSION,
-
   subscribe,
   subscribeKey,
   subscribeSelector,
-
   shouldNotifySelectorEntry,
-
   getSubscriptionsSnapshot,
 };

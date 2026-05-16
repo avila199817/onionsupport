@@ -2,16 +2,15 @@
    Onion SPA - HTTP Runtime
    Archivo: src/services/http.runtime.js
 
-   Runtime HTTP fino:
-   - pending counter seguro
+   HTTP RUNTIME · FINAL SIMPLE
+   - Pending counter mínimo
    - delay cancelable
    - AbortController helpers
-   - eventos internos opt-in
-   - snapshot sin secretos
-   - sin cliente HTTP paralelo
+   - Reset y snapshot sin secretos
+   - Sin cliente HTTP, Auth, Router, Toast, loader ni storage
 ========================================================= */
 
-export const HTTP_RUNTIME_VERSION = "16.0.0-clean";
+export const HTTP_RUNTIME_VERSION = "20.0.0-final";
 
 export const HTTP_RUNTIME_EVENTS = Object.freeze({
   delayStart: "http:delay:start",
@@ -24,27 +23,23 @@ export const HTTP_RUNTIME_EVENTS = Object.freeze({
   runtimeReset: "http:runtime:reset",
 });
 
-const state = {
+const SENSITIVE_KEY_RE = /token|secret|password|authorization|credential|cookie|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
+
+const runtime = {
   delaySeq: 0,
   controllerSeq: 0,
-
   delays: new Map(),
   controllers: new Map(),
-
   pendingChanges: 0,
   pendingEmits: 0,
   pendingSilentChanges: 0,
-
   abortControllersCreated: 0,
   abortControllersAborted: 0,
-
   lastPendingAt: "",
   lastPendingSource: "",
   lastPendingRequestId: null,
-
   lastAbortAt: "",
   lastAbortReason: "",
-
   lastRuntimeResetAt: "",
 };
 
@@ -55,21 +50,28 @@ const countedAborts = new WeakSet();
    BASICS
 ========================================================= */
 
-function isFn(value) {
-  return typeof value === "function";
+const isFn = (value) => typeof value === "function";
+const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+function safeObject(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
 }
 
-function isObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value);
-}
-
-function safeObject(value) {
-  return isObject(value) ? value : {};
+function safeArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return Array.from(value);
+  if (value === null || value === undefined) return [];
+  return [value];
 }
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
-  const text = String(value).trim();
+
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return text || fallback;
 }
 
@@ -107,12 +109,11 @@ function sourceFrom(meta = {}, fallback = "http.runtime") {
 }
 
 /* =========================================================
-   REDACTION
+   REDACTION / SANITIZE
 ========================================================= */
 
 function redactText(value = "") {
   let text = safeText(value, "");
-
   if (!text) return "";
 
   try {
@@ -132,26 +133,14 @@ function redactText(value = "") {
   return text;
 }
 
-function sanitize(value, depth = 0, keyHint = "") {
-  if (/token|secret|password|authorization|credential|cookie|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i.test(keyHint)) {
-    return value ? "***" : null;
-  }
-
-  if (depth > 5) return "[MaxDepth]";
+function sanitize(value, depth = 0, keyHint = "", seen = new WeakSet()) {
+  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) return value ? "***" : null;
+  if (depth > 4) return "[depth-limit]";
 
   if (typeof value === "string") return redactText(value);
-
-  if (
-    value === null ||
-    value === undefined ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
+  if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "bigint") return String(value);
-  if (typeof value === "function") return "[Function]";
+  if (typeof value === "function") return "[function]";
 
   if (value instanceof Error) {
     return {
@@ -161,18 +150,24 @@ function sanitize(value, depth = 0, keyHint = "") {
       status: value.status || value.statusCode || null,
       aborted: value.aborted === true,
       timeout: value.timeout === true,
+      stack: value.stack ? "[stack]" : null,
     };
   }
 
   if (Array.isArray(value)) {
-    return value.slice(0, 80).map((item) => sanitize(item, depth + 1, keyHint));
+    return value.slice(0, 50).map((item) => sanitize(item, depth + 1, keyHint, seen));
   }
 
   if (value && typeof value === "object") {
+    try {
+      if (seen.has(value)) return "[circular]";
+      seen.add(value);
+    } catch {}
+
     const output = {};
 
-    for (const [key, item] of Object.entries(value).slice(0, 120)) {
-      output[key] = sanitize(item, depth + 1, key);
+    for (const [key, item] of Object.entries(value).slice(0, 80)) {
+      output[key] = sanitize(item, depth + 1, key, seen);
     }
 
     return output;
@@ -186,21 +181,13 @@ function sanitize(value, depth = 0, keyHint = "") {
 ========================================================= */
 
 function diagnosticsEnabled(AppCore, meta = {}) {
-  const options = safeObject(meta);
+  const opts = safeObject(meta);
 
-  if (options.emitEvents === false) return false;
-
-  if (
-    options.emitRuntimeEvents === true ||
-    options.emitHttpRuntimeEvents === true ||
-    options.debugRuntimeEvents === true
-  ) {
-    return true;
-  }
+  if (opts.emitEvents === false) return false;
+  if (opts.emitRuntimeEvents === true || opts.emitHttpRuntimeEvents === true || opts.debugRuntimeEvents === true) return true;
 
   try {
     const diagnostics = AppCore?.config?.diagnostics || {};
-
     return Boolean(
       diagnostics.httpRuntimeEvents === true ||
         diagnostics.httpLifecycleEvents === true ||
@@ -213,55 +200,19 @@ function diagnosticsEnabled(AppCore, meta = {}) {
 
 function emit(AppCore, eventName = "", payload = {}, meta = {}) {
   const name = safeText(eventName, "");
-
-  if (!name || !diagnosticsEnabled(AppCore, meta)) {
-    return false;
-  }
+  if (!name || !diagnosticsEnabled(AppCore, meta)) return false;
 
   try {
-    AppCore?.events?.emit?.(name, sanitize(payload));
+    AppCore?.events?.emit?.(name, sanitize({ version: HTTP_RUNTIME_VERSION, ...safeObject(payload) }));
     return true;
   } catch {
     return false;
   }
 }
 
-function warn(AppCore, ...args) {
-  const clean = args.map((item) => sanitize(item));
-
-  try {
-    AppCore?.utils?.warn?.("[HTTP Runtime]", ...clean);
-    return;
-  } catch {}
-
-  try {
-    if (AppCore?.config?.debug === true || AppCore?.config?.debugHttpRuntime === true) {
-      console.warn("[HTTP Runtime]", ...clean);
-    }
-  } catch {}
-}
-
 /* =========================================================
-   SLEEP / DELAY
+   ABORT BASICS
 ========================================================= */
-
-export function sleep(AppCore, ms = 0) {
-  const wait = clampMs(ms);
-
-  try {
-    if (isFn(AppCore?.utils?.sleep)) {
-      return AppCore.utils.sleep(wait);
-    }
-  } catch {}
-
-  return new Promise((resolve) => {
-    try {
-      setTimeout(resolve, wait);
-    } catch {
-      resolve();
-    }
-  });
-}
 
 export function isAbortSignal(signal = null) {
   return Boolean(
@@ -318,11 +269,9 @@ export function createAbortError(signal = null, message = "Aborted") {
   try {
     if (typeof DOMException !== "undefined") {
       const error = new DOMException(finalMessage, "AbortError");
-
       try {
         error.aborted = true;
       } catch {}
-
       return error;
     }
   } catch {}
@@ -331,18 +280,14 @@ export function createAbortError(signal = null, message = "Aborted") {
   error.name = "AbortError";
   error.code = "ABORT_ERR";
   error.aborted = true;
-
   return error;
 }
 
 function addAbortListener(signal, handler) {
-  if (!isAbortSignal(signal) || !isFn(handler)) {
-    return () => {};
-  }
+  if (!isAbortSignal(signal) || !isFn(handler)) return () => {};
 
   try {
     signal.addEventListener("abort", handler, { once: true });
-
     return () => {
       try {
         signal.removeEventListener("abort", handler);
@@ -353,23 +298,69 @@ function addAbortListener(signal, handler) {
   }
 }
 
-function createDelayId(meta = {}) {
-  state.delaySeq += 1;
+/* =========================================================
+   SLEEP / DELAY
+========================================================= */
 
-  const requestId = requestIdFrom(meta);
+function parseSleepArgs(arg1, arg2) {
+  if (typeof arg1 === "number" || typeof arg1 === "string") {
+    return { AppCore: null, ms: arg1 };
+  }
 
-  return requestId
-    ? `delay_${requestId}_${state.delaySeq}`
-    : `delay_${state.delaySeq}`;
+  return { AppCore: arg1 || null, ms: arg2 };
 }
 
-export function delay(AppCore, ms = 0, signal = null, meta = {}) {
+export function sleep(arg1, arg2 = 0) {
+  const { AppCore, ms } = parseSleepArgs(arg1, arg2);
   const wait = clampMs(ms);
-  const options = safeObject(meta);
 
-  const delayId = createDelayId(options);
-  const requestId = requestIdFrom(options);
-  const source = sourceFrom(options, "http.runtime:delay");
+  try {
+    if (isFn(AppCore?.utils?.sleep)) return AppCore.utils.sleep(wait);
+  } catch {}
+
+  return new Promise((resolve) => {
+    try {
+      setTimeout(resolve, wait);
+    } catch {
+      resolve();
+    }
+  });
+}
+
+function parseDelayArgs(arg1, arg2, arg3, arg4) {
+  if (typeof arg1 === "number" || typeof arg1 === "string") {
+    return {
+      AppCore: null,
+      ms: arg1,
+      signal: isAbortSignal(arg2) ? arg2 : null,
+      meta: isAbortSignal(arg2) ? safeObject(arg3) : safeObject(arg2),
+    };
+  }
+
+  return {
+    AppCore: arg1 || null,
+    ms: arg2,
+    signal: isAbortSignal(arg3) ? arg3 : null,
+    meta: safeObject(arg4),
+  };
+}
+
+function createDelayId(meta = {}) {
+  runtime.delaySeq += 1;
+  const requestId = requestIdFrom(meta);
+  return requestId ? `delay_${requestId}_${runtime.delaySeq}` : `delay_${runtime.delaySeq}`;
+}
+
+export function delay(arg1, arg2 = 0, arg3 = null, arg4 = {}) {
+  const parsed = parseDelayArgs(arg1, arg2, arg3, arg4);
+  const AppCore = parsed.AppCore;
+  const wait = clampMs(parsed.ms);
+  const signal = parsed.signal;
+  const meta = parsed.meta;
+
+  const delayId = createDelayId(meta);
+  const requestId = requestIdFrom(meta);
+  const source = sourceFrom(meta, "http.runtime:delay");
   const startedAt = nowMs();
 
   let settled = false;
@@ -377,15 +368,22 @@ export function delay(AppCore, ms = 0, signal = null, meta = {}) {
   let removeAbort = () => {};
   let rejectRef = null;
 
-  const base = {
-    delayId,
-    requestId,
-    source,
-    ms: wait,
+  const base = { delayId, requestId, source, ms: wait };
+
+  const cleanup = () => {
+    try {
+      removeAbort();
+    } catch {}
+
+    try {
+      if (timer) clearTimeout(timer);
+    } catch {}
+
+    timer = null;
   };
 
-  function finish(type = "end", extra = {}) {
-    state.delays.delete(delayId);
+  const finish = (type = "end", extra = {}) => {
+    runtime.delays.delete(delayId);
 
     emit(
       AppCore,
@@ -400,71 +398,40 @@ export function delay(AppCore, ms = 0, signal = null, meta = {}) {
         at: nowIso(),
         ...safeObject(extra),
       },
-      options
+      meta
     );
-  }
+  };
 
-  function cleanup() {
-    try {
-      removeAbort();
-    } catch {}
-
-    try {
-      if (timer) clearTimeout(timer);
-    } catch {}
-
-    timer = null;
-  }
-
-  function cancel(reason = "delay-cancelled") {
+  const cancel = (reason = "delay-cancelled") => {
     if (settled) return false;
 
     settled = true;
     cleanup();
 
-    const error = createAbortError(
-      { aborted: true, reason },
-      reason
-    );
+    const error = createAbortError({ aborted: true, reason }, reason);
 
-    finish("cancel", {
-      cancelled: true,
-      reason,
-      error,
-    });
+    finish("cancel", { cancelled: true, reason: redactText(reason), error });
 
     try {
       rejectRef?.(error);
     } catch {}
 
     return true;
-  }
+  };
 
-  state.delays.set(delayId, {
+  runtime.delays.set(delayId, {
     ...base,
     startedAt,
     startedAtIso: nowIso(startedAt),
     cancel,
   });
 
-  emit(
-    AppCore,
-    HTTP_RUNTIME_EVENTS.delayStart,
-    {
-      ...base,
-      at: nowIso(startedAt),
-    },
-    options
-  );
+  emit(AppCore, HTTP_RUNTIME_EVENTS.delayStart, { ...base, at: nowIso(startedAt) }, meta);
 
   if (isSignalAborted(signal)) {
     const error = createAbortError(signal, "Delay aborted before start");
-
-    finish("abort", {
-      aborted: true,
-      error,
-    });
-
+    runtime.delays.delete(delayId);
+    finish("abort", { aborted: true, error });
     return Promise.reject(error);
   }
 
@@ -479,12 +446,7 @@ export function delay(AppCore, ms = 0, signal = null, meta = {}) {
         cleanup();
 
         const error = createAbortError(signal, "Delay aborted");
-
-        finish("abort", {
-          aborted: true,
-          error,
-        });
-
+        finish("abort", { aborted: true, error });
         reject(error);
       });
     }
@@ -509,14 +471,10 @@ export function delay(AppCore, ms = 0, signal = null, meta = {}) {
 
 export function cancelDelay(delayId = "", reason = "delay-cancelled") {
   const id = safeText(delayId, "");
-
   if (!id) return false;
 
-  const record = state.delays.get(id);
-
-  if (!record || !isFn(record.cancel)) {
-    return false;
-  }
+  const record = runtime.delays.get(id);
+  if (!record || !isFn(record.cancel)) return false;
 
   try {
     return Boolean(record.cancel(reason));
@@ -528,10 +486,8 @@ export function cancelDelay(delayId = "", reason = "delay-cancelled") {
 export function cancelActiveDelays(reason = "runtime-cancel-delays") {
   let cancelled = 0;
 
-  for (const id of Array.from(state.delays.keys())) {
-    if (cancelDelay(id, reason)) {
-      cancelled += 1;
-    }
+  for (const id of Array.from(runtime.delays.keys())) {
+    if (cancelDelay(id, reason)) cancelled += 1;
   }
 
   return cancelled;
@@ -542,19 +498,14 @@ export function cancelActiveDelays(reason = "runtime-cancel-delays") {
 ========================================================= */
 
 function ensurePending(targetState) {
-  if (!targetState || typeof targetState !== "object") {
-    return { pendingRequests: 0 };
-  }
-
+  if (!targetState || typeof targetState !== "object") return { pendingRequests: 0 };
   targetState.pendingRequests = Math.max(0, safeNumber(targetState.pendingRequests, 0));
-
   return targetState;
 }
 
 function setPending(AppCore, targetState, next, meta = {}, previous = null) {
-  const options = safeObject(meta);
+  const opts = safeObject(meta);
   const root = ensurePending(targetState);
-
   const before = previous === null
     ? Math.max(0, safeNumber(root.pendingRequests, 0))
     : Math.max(0, safeNumber(previous, 0));
@@ -564,22 +515,22 @@ function setPending(AppCore, targetState, next, meta = {}, previous = null) {
   const payload = {
     pending: root.pendingRequests,
     previous: before,
-    source: sourceFrom(options, "http.runtime:pending"),
-    requestId: requestIdFrom(options),
-    underflowPrevented: Boolean(options.underflowPrevented),
-    changeCount: state.pendingChanges + 1,
+    source: sourceFrom(opts, "http.runtime:pending"),
+    requestId: requestIdFrom(opts),
+    underflowPrevented: Boolean(opts.underflowPrevented),
+    changeCount: runtime.pendingChanges + 1,
     at: nowIso(),
   };
 
-  state.pendingChanges += 1;
-  state.lastPendingAt = payload.at;
-  state.lastPendingSource = payload.source;
-  state.lastPendingRequestId = payload.requestId;
+  runtime.pendingChanges += 1;
+  runtime.lastPendingAt = payload.at;
+  runtime.lastPendingSource = payload.source;
+  runtime.lastPendingRequestId = payload.requestId;
 
-  if (emit(AppCore, HTTP_RUNTIME_EVENTS.pendingChange, payload, options)) {
-    state.pendingEmits += 1;
+  if (emit(AppCore, HTTP_RUNTIME_EVENTS.pendingChange, payload, opts)) {
+    runtime.pendingEmits += 1;
   } else {
-    state.pendingSilentChanges += 1;
+    runtime.pendingSilentChanges += 1;
   }
 
   return root.pendingRequests;
@@ -645,22 +596,15 @@ function getControllerId(controller, meta = {}) {
 
   try {
     if (!controllerIds.has(controller)) {
-      state.controllerSeq += 1;
-
+      runtime.controllerSeq += 1;
       const requestId = requestIdFrom(meta);
-
-      controllerIds.set(
-        controller,
-        requestId
-          ? `abort_${requestId}_${state.controllerSeq}`
-          : `abort_${state.controllerSeq}`
-      );
+      controllerIds.set(controller, requestId ? `abort_${requestId}_${runtime.controllerSeq}` : `abort_${runtime.controllerSeq}`);
     }
 
     return controllerIds.get(controller);
   } catch {
-    state.controllerSeq += 1;
-    return `abort_${state.controllerSeq}`;
+    runtime.controllerSeq += 1;
+    return `abort_${runtime.controllerSeq}`;
   }
 }
 
@@ -675,40 +619,28 @@ function markAborted(controller, reason = "aborted", AppCore = null, meta = {}) 
   const id = getControllerId(controller, meta);
   const cleanReason = redactText(reason);
 
-  state.abortControllersAborted += 1;
-  state.lastAbortAt = nowIso();
-  state.lastAbortReason = cleanReason;
-  state.controllers.delete(id);
+  runtime.abortControllersAborted += 1;
+  runtime.lastAbortAt = nowIso();
+  runtime.lastAbortReason = cleanReason;
+  runtime.controllers.delete(id);
 
-  emit(
-    AppCore,
-    HTTP_RUNTIME_EVENTS.abort,
-    {
-      controllerId: id,
-      reason: cleanReason,
-      at: state.lastAbortAt,
-    },
-    meta
-  );
-
+  emit(AppCore, HTTP_RUNTIME_EVENTS.abort, { controllerId: id, reason: cleanReason, at: runtime.lastAbortAt }, meta);
   return true;
 }
 
 function wrapAbort(controller, meta = {}) {
-  if (!controller || !isFn(controller.abort) || controller.__onionAbortWrapped) {
-    return controller;
-  }
+  if (!controller || !isFn(controller.abort) || controller.__onionAbortWrapped) return controller;
 
   const originalAbort = controller.abort.bind(controller);
   const AppCore = meta.AppCore || meta.core || null;
 
   try {
     controller.abort = function onionAbort(reason = "aborted") {
-      const cleanReason = safeText(reason, "aborted");
+      const cleanReason = safeText(reason?.message || reason, "aborted");
       let result;
 
       try {
-        result = originalAbort(cleanReason);
+        result = originalAbort(reason);
       } catch {
         result = originalAbort();
       } finally {
@@ -725,9 +657,7 @@ function wrapAbort(controller, meta = {}) {
 }
 
 export function createAbortController(metaOrReason = "") {
-  const meta = isObject(metaOrReason)
-    ? metaOrReason
-    : { reason: safeText(metaOrReason, "") };
+  const meta = isObject(metaOrReason) ? metaOrReason : { reason: safeText(metaOrReason, "") };
 
   if (typeof AbortController === "undefined") {
     return {
@@ -743,9 +673,8 @@ export function createAbortController(metaOrReason = "") {
   const controller = wrapAbort(new AbortController(), meta);
   const id = getControllerId(controller, meta);
 
-  state.abortControllersCreated += 1;
-
-  state.controllers.set(id, {
+  runtime.abortControllersCreated += 1;
+  runtime.controllers.set(id, {
     controllerId: id,
     requestId: requestIdFrom(meta),
     source: sourceFrom(meta, "http.runtime:createAbortController"),
@@ -769,14 +698,12 @@ export function createAbortController(metaOrReason = "") {
 }
 
 export function abortController(controller, reason = "aborted", AppCore = null) {
-  if (!controller || !isFn(controller.abort)) {
-    return false;
-  }
+  if (!controller || !isFn(controller.abort)) return false;
 
-  const cleanReason = safeText(reason, "aborted");
+  const cleanReason = safeText(reason?.message || reason, "aborted");
 
   try {
-    controller.abort(cleanReason);
+    controller.abort(reason);
     markAborted(controller, cleanReason, AppCore);
     return true;
   } catch {
@@ -791,38 +718,27 @@ export function abortController(controller, reason = "aborted", AppCore = null) 
 }
 
 export function mergeAbortSignals(signals = []) {
-  const valid = Array.isArray(signals)
-    ? signals.filter(isAbortSignal)
-    : [];
-
+  const valid = safeArray(signals).filter(isAbortSignal);
   if (!valid.length) return null;
   if (valid.length === 1) return valid[0];
 
   try {
-    if (typeof AbortSignal !== "undefined" && isFn(AbortSignal.any)) {
-      return AbortSignal.any(valid);
-    }
+    if (typeof AbortSignal !== "undefined" && isFn(AbortSignal.any)) return AbortSignal.any(valid);
   } catch {}
 
-  const controller = createAbortController({
-    source: "http.runtime:mergeAbortSignals",
-  });
-
-  if (!controller?.signal) {
-    return valid[0] || null;
-  }
+  const controller = createAbortController({ source: "http.runtime:mergeAbortSignals" });
+  if (!controller?.signal) return valid[0] || null;
 
   const cleanups = [];
-
-  function cleanup() {
+  const cleanup = () => {
     while (cleanups.length) {
       try {
         cleanups.pop()?.();
       } catch {}
     }
-  }
+  };
 
-  function abortFrom(signal) {
+  const abortFrom = (signal) => {
     if (controller.signal.aborted) return;
 
     try {
@@ -834,7 +750,7 @@ export function mergeAbortSignals(signals = []) {
     } finally {
       cleanup();
     }
-  }
+  };
 
   for (const signal of valid) {
     if (isSignalAborted(signal)) {
@@ -858,11 +774,9 @@ export function getHttpRuntimeSnapshot(targetState = null) {
 
   return sanitize({
     version: HTTP_RUNTIME_VERSION,
-
     pendingRequests: pending,
-
-    activeDelayCount: state.delays.size,
-    activeDelays: Array.from(state.delays.values()).map((item) => ({
+    activeDelayCount: runtime.delays.size,
+    activeDelays: Array.from(runtime.delays.values()).map((item) => ({
       delayId: item.delayId,
       requestId: item.requestId,
       source: item.source,
@@ -870,29 +784,29 @@ export function getHttpRuntimeSnapshot(targetState = null) {
       startedAtIso: item.startedAtIso,
       elapsedMs: Math.max(0, stamp - safeNumber(item.startedAt, stamp)),
     })),
-
-    activeControllerCount: state.controllers.size,
-    activeControllers: Array.from(state.controllers.values()),
-
-    delaySeq: state.delaySeq,
-    controllerSeq: state.controllerSeq,
-
-    pendingChanges: state.pendingChanges,
-    pendingEmits: state.pendingEmits,
-    pendingSilentChanges: state.pendingSilentChanges,
-
-    lastPendingAt: state.lastPendingAt,
-    lastPendingSource: state.lastPendingSource,
-    lastPendingRequestId: state.lastPendingRequestId,
-
-    abortControllersCreated: state.abortControllersCreated,
-    abortControllersAborted: state.abortControllersAborted,
-
-    lastAbortAt: state.lastAbortAt,
-    lastAbortReason: state.lastAbortReason,
-
-    lastRuntimeResetAt: state.lastRuntimeResetAt,
-
+    activeControllerCount: runtime.controllers.size,
+    activeControllers: Array.from(runtime.controllers.values()),
+    delaySeq: runtime.delaySeq,
+    controllerSeq: runtime.controllerSeq,
+    pendingChanges: runtime.pendingChanges,
+    pendingEmits: runtime.pendingEmits,
+    pendingSilentChanges: runtime.pendingSilentChanges,
+    lastPendingAt: runtime.lastPendingAt,
+    lastPendingSource: runtime.lastPendingSource,
+    lastPendingRequestId: runtime.lastPendingRequestId,
+    abortControllersCreated: runtime.abortControllersCreated,
+    abortControllersAborted: runtime.abortControllersAborted,
+    lastAbortAt: runtime.lastAbortAt,
+    lastAbortReason: runtime.lastAbortReason,
+    lastRuntimeResetAt: runtime.lastRuntimeResetAt,
+    policy: {
+      ownHttpClient: false,
+      ownAuth: false,
+      ownRouter: false,
+      ownToast: false,
+      ownLoader: false,
+      storage: false,
+    },
     at: nowIso(),
   });
 }
@@ -902,26 +816,21 @@ export function resetHttpRuntime(AppCore = null, targetState = null, meta = {}) 
 
   cancelActiveDelays("http-runtime-reset");
 
-  state.delays.clear();
-  state.controllers.clear();
-
-  state.delaySeq = 0;
-  state.controllerSeq = 0;
-
-  state.pendingChanges = 0;
-  state.pendingEmits = 0;
-  state.pendingSilentChanges = 0;
-
-  state.lastPendingAt = "";
-  state.lastPendingSource = "";
-  state.lastPendingRequestId = null;
-
-  state.abortControllersCreated = 0;
-  state.abortControllersAborted = 0;
-  state.lastAbortAt = "";
-  state.lastAbortReason = "";
-
-  state.lastRuntimeResetAt = nowIso();
+  runtime.delays.clear();
+  runtime.controllers.clear();
+  runtime.delaySeq = 0;
+  runtime.controllerSeq = 0;
+  runtime.pendingChanges = 0;
+  runtime.pendingEmits = 0;
+  runtime.pendingSilentChanges = 0;
+  runtime.lastPendingAt = "";
+  runtime.lastPendingSource = "";
+  runtime.lastPendingRequestId = null;
+  runtime.abortControllersCreated = 0;
+  runtime.abortControllersAborted = 0;
+  runtime.lastAbortAt = "";
+  runtime.lastAbortReason = "";
+  runtime.lastRuntimeResetAt = nowIso();
 
   if (targetState && typeof targetState === "object") {
     resetPendingRequests(AppCore, targetState, {
@@ -934,7 +843,7 @@ export function resetHttpRuntime(AppCore = null, targetState = null, meta = {}) 
     AppCore,
     HTTP_RUNTIME_EVENTS.runtimeReset,
     {
-      at: state.lastRuntimeResetAt,
+      at: runtime.lastRuntimeResetAt,
       source: options.source || "http.runtime:reset",
     },
     options

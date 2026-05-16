@@ -2,22 +2,22 @@
    Onion SPA - App Constants
    Archivo: src/app/constants.js
 
-   Contrato puro del módulo app:
-   - cero DOM
-   - cero storage
-   - cero side effects
-   - rutas técnicas con token preservadas
-   - constantes pequeñas, congeladas y compatibles
+   APP CONSTANTS · FINAL SIMPLE
+   - Contrato estático del módulo app
+   - Sin DOM, storage, fetch, Auth, Router, Toast, render ni navegación
+   - Rutas técnicas con token preservadas
+   - Constantes pequeñas, congeladas y compatibles
 ========================================================= */
 
-export const APP_CONSTANTS_VERSION = "18.0.0-clean";
+export const APP_CONSTANTS_VERSION = "20.0.0-final";
 
 /* =========================================================
-   BASE
+   BASE HELPERS · PURE
 ========================================================= */
 
 const DEFAULT_ROUTE_VALUE = "/";
 const LOCAL_ORIGIN = "http://localhost";
+const PUBLIC_USERNAME_RE = /^@[A-Za-z0-9._-]{1,80}$/;
 
 function deepFreeze(value, seen = new WeakSet()) {
   if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -26,10 +26,7 @@ function deepFreeze(value, seen = new WeakSet()) {
     if (seen.has(value)) return value;
     seen.add(value);
 
-    for (const key of Object.getOwnPropertyNames(value)) {
-      deepFreeze(value[key], seen);
-    }
-
+    for (const key of Object.getOwnPropertyNames(value)) deepFreeze(value[key]);
     return Object.freeze(value);
   } catch {
     return value;
@@ -49,6 +46,20 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function array(value) {
+  if (Array.isArray(value)) return [...value];
+  if (value === null || value === undefined || value === "") return [];
+  return [value];
+}
+
+function unique(values = []) {
+  return [...new Set(array(values).flat(Infinity).map((item) => safeText(item, "")).filter(Boolean))];
+}
+
+function cloneObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? { ...value } : {};
+}
+
 function hasOwn(object, key) {
   try {
     return Object.prototype.hasOwnProperty.call(object, key);
@@ -57,45 +68,17 @@ function hasOwn(object, key) {
   }
 }
 
-function array(value) {
-  if (Array.isArray(value)) return [...value];
-  if (value === null || value === undefined) return [];
-  return [value];
-}
-
-function unique(values = []) {
-  return [...new Set(array(values).flat(Infinity).map((v) => safeText(v, "")).filter(Boolean))];
-}
-
-function cloneObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? { ...value } : {};
-}
-
-function cloneRouteConfig(config = null) {
-  return config
-    ? freeze({
-        ...config,
-        aliases: array(config.aliases),
-        paths: array(config.paths),
-        windowKeys: array(config.windowKeys),
-        tokenParamNames: array(config.tokenParamNames),
-        scrubbedStateKeys: array(config.scrubbedStateKeys),
-        scrubbedHistoryKeys: array(config.scrubbedHistoryKeys),
-      })
-    : null;
+function readConstant(object, key = "", fallback = null) {
+  const cleanKey = safeText(key, "");
+  return cleanKey && hasOwn(object, cleanKey) ? object[cleanKey] : fallback;
 }
 
 /* =========================================================
    PATH HELPERS · PURE
 ========================================================= */
 
-const PUBLIC_USERNAME_RE = /^@[A-Za-z0-9._-]{1,80}$/;
-
 function normalizePathname(pathname = DEFAULT_ROUTE_VALUE) {
-  let value = safeText(pathname, DEFAULT_ROUTE_VALUE)
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
+  let value = safeText(pathname, DEFAULT_ROUTE_VALUE).replace(/\\/g, "/").replace(/\/{2,}/g, "/");
   if (!value.startsWith("/")) value = `/${value}`;
 
   const parts = [];
@@ -110,7 +93,7 @@ function normalizePathname(pathname = DEFAULT_ROUTE_VALUE) {
   }
 
   value = `/${parts.join("/")}`;
-  return value.length > 1 ? value.replace(/\/+$/g, "") : value || DEFAULT_ROUTE_VALUE;
+  return value.length > 1 ? value.replace(/\/+$/g, "") || DEFAULT_ROUTE_VALUE : value || DEFAULT_ROUTE_VALUE;
 }
 
 function normalizeSearch(search = "") {
@@ -133,16 +116,13 @@ function isHashRouterPath(value = "") {
 function normalizeHashRouterPath(value = "") {
   const raw = safeText(value, "");
   if (!raw) return DEFAULT_ROUTE_VALUE;
-  if (raw.startsWith("#!")) return normalizeLocalPath(raw.replace(/^#!\/?/, "/"));
-  return normalizeLocalPath(raw.replace(/^#\/?/, "/"));
+  if (raw.startsWith("#!")) return normalizeLocalPath(raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE_VALUE);
+  return normalizeLocalPath(raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE_VALUE);
 }
 
 function splitPath(path = DEFAULT_ROUTE_VALUE) {
-  let raw = safeText(path, DEFAULT_ROUTE_VALUE);
-
-  if (isHashRouterPath(raw)) {
-    raw = normalizeHashRouterPath(raw);
-  }
+  let raw = safeText(path, DEFAULT_ROUTE_VALUE) || DEFAULT_ROUTE_VALUE;
+  if (isHashRouterPath(raw)) raw = normalizeHashRouterPath(raw);
 
   let pathname = raw;
   let search = "";
@@ -168,23 +148,19 @@ function splitPath(path = DEFAULT_ROUTE_VALUE) {
 }
 
 function normalizeLocalPath(path = DEFAULT_ROUTE_VALUE) {
-  const raw = safeText(path, DEFAULT_ROUTE_VALUE);
+  const raw = safeText(path, DEFAULT_ROUTE_VALUE) || DEFAULT_ROUTE_VALUE;
 
-  if (isHashRouterPath(raw)) {
-    return normalizeHashRouterPath(raw);
-  }
+  if (isHashRouterPath(raw)) return normalizeHashRouterPath(raw);
 
   try {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
       const url = new URL(raw, LOCAL_ORIGIN);
-
-      if (url.hash && isHashRouterPath(url.hash)) {
-        return normalizeHashRouterPath(url.hash);
-      }
-
-      return normalizeLocalPath(`${url.pathname || "/"}${url.search || ""}${url.hash || ""}`);
+      if (url.hash && isHashRouterPath(url.hash)) return normalizeHashRouterPath(url.hash);
+      return normalizeLocalPath(`${url.pathname || DEFAULT_ROUTE_VALUE}${url.search || ""}${url.hash || ""}`);
     }
-  } catch {}
+  } catch {
+    return DEFAULT_ROUTE_VALUE;
+  }
 
   const { pathname, search, hash } = splitPath(raw);
   return `${pathname}${search}${hash}`;
@@ -224,6 +200,20 @@ function pathMatches(path = "", candidate = "") {
   return current === target || current.startsWith(`${target}/`);
 }
 
+function cloneRouteConfig(config = null) {
+  return config
+    ? freeze({
+        ...config,
+        aliases: array(config.aliases),
+        paths: array(config.paths),
+        windowKeys: array(config.windowKeys),
+        tokenParamNames: array(config.tokenParamNames),
+        scrubbedStateKeys: array(config.scrubbedStateKeys),
+        scrubbedHistoryKeys: array(config.scrubbedHistoryKeys),
+      })
+    : null;
+}
+
 /* =========================================================
    SCOPES
 ========================================================= */
@@ -233,7 +223,6 @@ export const APP_SCOPE = "app:global";
 export const APP_SCOPES = freeze({
   global: APP_SCOPE,
   boot: "app:boot",
-  bootState: "app:boot-state",
   constants: "app:constants",
   events: "app:events",
   errors: "app:errors",
@@ -254,7 +243,7 @@ export const APP_SCOPES = freeze({
 ========================================================= */
 
 export const BOOT_FAILSAFE_LOADER_MS = 12000;
-export const BOOT_MIN_LOADER_VISIBLE_MS = 500;
+export const BOOT_MIN_LOADER_VISIBLE_MS = 300;
 export const BOOT_HIDE_TRANSITION_MS = 220;
 export const BOOT_RENDER_TIMEOUT_MS = 10000;
 export const BOOT_RESTORE_TIMEOUT_MS = 12000;
@@ -281,13 +270,11 @@ export const BOOT_CONSTANTS = freeze({
   eventDedupeMs: BOOT_EVENT_DEDUPE_MS,
   routeSyncDedupeMs: BOOT_ROUTE_SYNC_DEDUPE_MS,
   langRerenderDedupeMs: BOOT_LANG_RERENDER_DEDUPE_MS,
-  stepWarnMs: 2500,
   maxBootRetries: 1,
 });
 
 export const BOOT_PHASES = freeze({
   idle: "idle",
-  preparing: "preparing",
   booting: "booting",
   services: "services",
   store: "store",
@@ -295,12 +282,10 @@ export const BOOT_PHASES = freeze({
   ui: "ui",
   restoring: "restoring",
   rendering: "rendering",
-  binding: "binding",
   finalizing: "finalizing",
   ready: "ready",
   error: "error",
   fatal: "fatal",
-  rebooting: "rebooting",
 });
 
 export const BOOT_FLAGS = freeze({
@@ -309,26 +294,22 @@ export const BOOT_FLAGS = freeze({
   ready: "ready",
   appReady: "appReady",
   appBooting: "appBooting",
+  appBooted: "appBooted",
   appFatal: "appFatal",
-  fatal: "fatal",
   loading: "loading",
   restoring: "restoring",
   authRestoring: "authRestoring",
   sessionRestoring: "sessionRestoring",
   servicesReady: "servicesReady",
   storeReady: "storeReady",
-  routerConfigured: "routerConfigured",
+  routerReady: "routerReady",
   routerBound: "routerBound",
   uiReady: "uiReady",
-  uiMounted: "uiMounted",
+  uiInitialized: "uiInitialized",
   i18nInitialized: "i18nInitialized",
-  readyEmitted: "readyEmitted",
-  handlersBound: "handlersBound",
-  appEventsBound: "appEventsBound",
   bootNavigationHandled: "bootNavigationHandled",
-  loginNavigationHandled: "loginNavigationHandled",
-  loginInProgress: "loginInProgress",
   initialRouteRendered: "initialRouteRendered",
+  loginInProgress: "loginInProgress",
 });
 
 /* =========================================================
@@ -349,24 +330,17 @@ export const APP_RUNTIME_KEYS = freeze({
   coreApi: "__ONION_CORE__",
   appApi: "__ONION_APP__",
   routerApi: "__ONION_ROUTER__",
-  appEvents: "__ONION_APP_EVENTS__",
-  bootState: "__ONION_BOOT_STATE__",
   loader: "__ONION_APP_LOADER__",
   shell: "__ONION_APP_SHELL__",
   appUi: "__ONION_APP_UI__",
+  appEvents: "__ONION_APP_EVENTS__",
   warmup: "__ONION_WARMUP__",
   errors: "__ONION_APP_ERRORS__",
 
   bootTheme: "__ONION_BOOT_THEME__",
-  themeApi: "__ONION_THEME__",
-  setTheme: "__ONION_SET_THEME__",
-  getTheme: "__ONION_GET_THEME__",
-  clearTheme: "__ONION_CLEAR_THEME__",
-  reapplyTheme: "__ONION_REAPPLY_THEME__",
-
   debug: "__ONION_DEBUG__",
   disableAutoBoot: "__ONION_DISABLE_AUTO_BOOT__",
-  lastReadyAt: "__ONION_APP_LAST_READY_AT__",
+  allowAutoBoot: "__ONION_ALLOW_APP_AUTO_BOOT__",
 });
 
 export const APP_STATE_KEYS = freeze({
@@ -380,6 +354,7 @@ export const APP_STATE_KEYS = freeze({
   bootProtectedRouteKey: "bootProtectedRouteKey",
   bootIsPublicTokenRoute: "bootIsPublicTokenRoute",
   bootHasPublicToken: "bootHasPublicToken",
+  bootHasProtectedToken: "bootHasProtectedToken",
 
   bootActivationInitialUrl: "bootActivationInitialUrl",
   bootActivationInitialPath: "bootActivationInitialPath",
@@ -422,6 +397,8 @@ export const APP_ROUTES = freeze({
   login: "/login",
   signin: "/signin",
   signIn: "/sign-in",
+  auth: "/auth",
+  authLogin: "/auth/login",
 
   forbidden: "/403",
   notFound: "/404",
@@ -435,13 +412,13 @@ export const APP_ROUTES = freeze({
   resetPassword: "/reset-password",
   resetPasswordConfirm: "/reset-password/confirm",
   resetPasswordConfirmLegacy: "/reset-password-confirm",
-
   forgotPassword: "/forgot-password",
   recoverPassword: "/recover-password",
-
+  recover: "/recover",
   passwordReset: "/password-reset",
   passwordResetConfirm: "/password-reset/confirm",
   passwordResetConfirmLegacy: "/password-reset-confirm",
+  confirmResetPassword: "/confirm-reset-password",
 
   twoFA: "/2fa",
   mfa: "/mfa",
@@ -457,22 +434,25 @@ export const AUTH_LIKE_ROUTES = freeze([
   APP_ROUTES.login,
   APP_ROUTES.signin,
   APP_ROUTES.signIn,
-
+  APP_ROUTES.auth,
+  APP_ROUTES.authLogin,
+  APP_ROUTES.forbidden,
+  APP_ROUTES.notFound,
   APP_ROUTES.activate,
   APP_ROUTES.activation,
   APP_ROUTES.activateAccount,
   APP_ROUTES.accountActivate,
   APP_ROUTES.activateFirstUser,
-
   APP_ROUTES.resetPassword,
   APP_ROUTES.resetPasswordConfirm,
   APP_ROUTES.resetPasswordConfirmLegacy,
   APP_ROUTES.forgotPassword,
   APP_ROUTES.recoverPassword,
+  APP_ROUTES.recover,
   APP_ROUTES.passwordReset,
   APP_ROUTES.passwordResetConfirm,
   APP_ROUTES.passwordResetConfirmLegacy,
-
+  APP_ROUTES.confirmResetPassword,
   APP_ROUTES.twoFA,
   APP_ROUTES.mfa,
   APP_ROUTES.otp,
@@ -484,16 +464,16 @@ export const PUBLIC_TECHNICAL_ROUTES = freeze([
   APP_ROUTES.activateAccount,
   APP_ROUTES.accountActivate,
   APP_ROUTES.activateFirstUser,
-
   APP_ROUTES.resetPassword,
   APP_ROUTES.resetPasswordConfirm,
   APP_ROUTES.resetPasswordConfirmLegacy,
   APP_ROUTES.forgotPassword,
   APP_ROUTES.recoverPassword,
+  APP_ROUTES.recover,
   APP_ROUTES.passwordReset,
   APP_ROUTES.passwordResetConfirm,
   APP_ROUTES.passwordResetConfirmLegacy,
-
+  APP_ROUTES.confirmResetPassword,
   APP_ROUTES.twoFA,
   APP_ROUTES.mfa,
   APP_ROUTES.otp,
@@ -518,64 +498,24 @@ export const PUBLIC_TECHNICAL_PREFIXES = freeze([
    TOKEN ROUTES / SENSITIVE PARAMS
 ========================================================= */
 
-export const ACTIVATION_TOKEN_PARAM_NAMES = freeze([
-  "token",
-  "activationToken",
-  "activateToken",
-  "activation_token",
-  "activate_token",
-  "code",
-  "t",
-]);
+export const ACTIVATION_TOKEN_PARAM_NAMES = freeze(["token", "activationToken", "activateToken", "activation_token", "activate_token", "code", "t"]);
+export const RESET_TOKEN_PARAM_NAMES = freeze(["token", "resetToken", "passwordResetToken", "reset_token", "password_reset_token", "confirmToken", "confirm_token", "code", "t"]);
+export const TWO_FACTOR_TOKEN_PARAM_NAMES = freeze(["tempToken", "temp_token", "temporaryToken", "temporary_token", "twoFactorToken", "two_factor_token", "mfaToken", "mfa_token", "otpToken", "otp_token", "token", "code", "otp", "totp", "t"]);
 
-export const RESET_TOKEN_PARAM_NAMES = freeze([
-  "token",
-  "resetToken",
-  "passwordResetToken",
-  "reset_token",
-  "password_reset_token",
-  "confirmToken",
-  "confirm_token",
-  "code",
-  "t",
-]);
-
-export const TWO_FACTOR_TOKEN_PARAM_NAMES = freeze([
-  "tempToken",
-  "temp_token",
-  "temporaryToken",
-  "temporary_token",
-  "challengeToken",
-  "challenge_token",
-  "twoFactorToken",
-  "two_factor_token",
-  "mfaToken",
-  "mfa_token",
-  "otpToken",
-  "otp_token",
-  "token",
-  "code",
-  "otp",
-  "totp",
-  "t",
-]);
-
-export const GENERIC_SENSITIVE_PARAM_NAMES = freeze(
-  unique([
-    ...ACTIVATION_TOKEN_PARAM_NAMES,
-    ...RESET_TOKEN_PARAM_NAMES,
-    ...TWO_FACTOR_TOKEN_PARAM_NAMES,
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "authorization",
-    "auth",
-    "jwt",
-    "bearer",
-    "session",
-    "sid",
-  ])
-);
+export const GENERIC_SENSITIVE_PARAM_NAMES = freeze(unique([
+  ...ACTIVATION_TOKEN_PARAM_NAMES,
+  ...RESET_TOKEN_PARAM_NAMES,
+  ...TWO_FACTOR_TOKEN_PARAM_NAMES,
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "authorization",
+  "auth",
+  "jwt",
+  "bearer",
+  "session",
+  "sid",
+]));
 
 export const PUBLIC_TOKEN_ROUTE_KEYS = freeze({
   activation: "activation",
@@ -584,7 +524,6 @@ export const PUBLIC_TOKEN_ROUTE_KEYS = freeze({
 
 function makeTokenRoute(config) {
   const path = normalizePathname(config.path);
-
   const aliases = unique(config.aliases || []).map(normalizePathname);
   const paths = unique([path, ...aliases, ...(config.paths || [])]).map(normalizePathname);
 
@@ -593,17 +532,14 @@ function makeTokenRoute(config) {
     path,
     aliases,
     paths,
-
     windowKey: config.windowKey || "",
     windowKeys: unique(config.windowKeys || []),
-
     statePrefix: config.statePrefix || "",
     stateUrlKey: config.stateUrlKey || "",
     statePathKey: config.statePathKey || "",
     statePublicPathKey: config.statePublicPathKey || "",
     stateIsRouteKey: config.stateIsRouteKey || "",
     stateHasTokenKey: config.stateHasTokenKey || "",
-
     scrubbedStateKeys: unique(config.scrubbedStateKeys || []),
     scrubbedHistoryKeys: unique(config.scrubbedHistoryKeys || []),
     tokenParamNames: unique(config.tokenParamNames || []),
@@ -614,73 +550,33 @@ export const PROTECTED_PUBLIC_TOKEN_ROUTES = freeze([
   makeTokenRoute({
     key: PUBLIC_TOKEN_ROUTE_KEYS.activation,
     path: ACTIVATION_PATH,
-    aliases: [
-      APP_ROUTES.activate,
-      APP_ROUTES.activation,
-      APP_ROUTES.accountActivate,
-      APP_ROUTES.activateFirstUser,
-    ],
+    aliases: [APP_ROUTES.activate, APP_ROUTES.activation, APP_ROUTES.accountActivate, APP_ROUTES.activateFirstUser],
     windowKey: APP_RUNTIME_KEYS.activateAccountInitialUrl,
-    windowKeys: [
-      APP_RUNTIME_KEYS.activateAccountInitialUrl,
-      APP_RUNTIME_KEYS.activationInitialUrl,
-    ],
+    windowKeys: [APP_RUNTIME_KEYS.activateAccountInitialUrl, APP_RUNTIME_KEYS.activationInitialUrl],
     statePrefix: "Activation",
     stateUrlKey: APP_STATE_KEYS.bootActivationInitialUrl,
     statePathKey: APP_STATE_KEYS.bootActivationInitialPath,
     statePublicPathKey: APP_STATE_KEYS.bootActivationInitialPublicPath,
     stateIsRouteKey: APP_STATE_KEYS.bootIsActivation,
     stateHasTokenKey: APP_STATE_KEYS.bootHasActivationToken,
-    scrubbedStateKeys: [
-      "scrubbedActivationToken",
-      "activationTokenScrubbed",
-      "scrubbedActivateAccountToken",
-    ],
-    scrubbedHistoryKeys: [
-      "scrubbedActivationToken",
-      "activationTokenScrubbed",
-      "scrubbedActivateAccountToken",
-      "scrubbedPublicTokenRoute",
-      "scrubbedTokenRoute",
-    ],
+    scrubbedStateKeys: ["scrubbedActivationToken", "activationTokenScrubbed", "scrubbedActivateAccountToken"],
+    scrubbedHistoryKeys: ["scrubbedActivationToken", "activationTokenScrubbed", "scrubbedActivateAccountToken", "scrubbedPublicTokenRoute", "scrubbedTokenRoute"],
     tokenParamNames: ACTIVATION_TOKEN_PARAM_NAMES,
   }),
-
   makeTokenRoute({
     key: PUBLIC_TOKEN_ROUTE_KEYS.resetConfirm,
     path: RESET_CONFIRM_PATH,
-    aliases: [
-      APP_ROUTES.resetPasswordConfirmLegacy,
-      APP_ROUTES.passwordResetConfirm,
-      APP_ROUTES.passwordResetConfirmLegacy,
-    ],
+    aliases: [APP_ROUTES.resetPasswordConfirmLegacy, APP_ROUTES.passwordResetConfirm, APP_ROUTES.passwordResetConfirmLegacy, APP_ROUTES.confirmResetPassword],
     windowKey: APP_RUNTIME_KEYS.resetPasswordConfirmInitialUrl,
-    windowKeys: [
-      APP_RUNTIME_KEYS.resetPasswordConfirmInitialUrl,
-      APP_RUNTIME_KEYS.resetConfirmInitialUrl,
-    ],
+    windowKeys: [APP_RUNTIME_KEYS.resetPasswordConfirmInitialUrl, APP_RUNTIME_KEYS.resetConfirmInitialUrl],
     statePrefix: "ResetConfirm",
     stateUrlKey: APP_STATE_KEYS.bootResetConfirmInitialUrl,
     statePathKey: APP_STATE_KEYS.bootResetConfirmInitialPath,
     statePublicPathKey: APP_STATE_KEYS.bootResetConfirmInitialPublicPath,
     stateIsRouteKey: APP_STATE_KEYS.bootIsResetConfirm,
     stateHasTokenKey: APP_STATE_KEYS.bootHasResetToken,
-    scrubbedStateKeys: [
-      "scrubbedResetToken",
-      "resetTokenScrubbed",
-      "scrubbedResetConfirmToken",
-      "scrubbedPasswordResetToken",
-      "scrubbedResetPasswordToken",
-    ],
-    scrubbedHistoryKeys: [
-      "scrubbedResetToken",
-      "resetTokenScrubbed",
-      "scrubbedResetConfirmToken",
-      "scrubbedPasswordResetToken",
-      "scrubbedResetPasswordToken",
-      "scrubbedPublicTokenRoute",
-      "scrubbedTokenRoute",
-    ],
+    scrubbedStateKeys: ["scrubbedResetToken", "resetTokenScrubbed", "scrubbedResetConfirmToken", "scrubbedPasswordResetToken", "scrubbedResetPasswordToken"],
+    scrubbedHistoryKeys: ["scrubbedResetToken", "resetTokenScrubbed", "scrubbedResetConfirmToken", "scrubbedPasswordResetToken", "scrubbedResetPasswordToken", "scrubbedPublicTokenRoute", "scrubbedTokenRoute"],
     tokenParamNames: RESET_TOKEN_PARAM_NAMES,
   }),
 ]);
@@ -694,9 +590,8 @@ export const APP_EVENTS = freeze({
   destroy: "app:destroy",
   reboot: "app:reboot",
 
-  bootState: "app:boot:state",
   bootStart: "app:boot:start",
-  bootStep: "app:boot:step",
+  bootComplete: "app:boot:complete",
   bootReady: "app:boot:ready",
   bootError: "app:boot:error",
   bootFatal: "app:boot:fatal",
@@ -706,6 +601,7 @@ export const APP_EVENTS = freeze({
   bootLoaderForceHide: "app:boot:loader:force-hide",
 
   routeChange: "app:route:change",
+  routeSynced: "app:events:route-synced",
   publicPathChange: "app:public-path:change",
 
   userChange: "app:user:change",
@@ -717,9 +613,6 @@ export const APP_EVENTS = freeze({
   sessionRestoreStart: "app:session:restore:start",
   sessionRestoreDone: "app:session:restore:done",
   sessionRestoreError: "app:session:restore:error",
-
-  authNavigation: "app:auth:navigation",
-  ghostAuthBlocked: "app:auth:ghost-blocked",
 
   uiReady: "app:ui:ready",
   uiRepair: "app:ui:repair",
@@ -765,12 +658,9 @@ export const AUTH_EVENTS = freeze({
 });
 
 export const STORE_EVENTS = freeze({
-  bootState: "store:boot:state",
-  bootStart: "store:boot:start",
-  bootReady: "store:boot:ready",
-  bootError: "store:boot:error",
   change: "store:change",
   ready: "store:ready",
+  error: "store:error",
 });
 
 export const DOM_EVENTS = freeze({
@@ -792,100 +682,73 @@ export const DOM_EVENTS = freeze({
 
 export const UI_CONSTANTS = freeze({
   appName: "Onion Support",
-
   defaultTheme: "dark",
   fallbackTheme: "dark",
   defaultThemeMode: "system",
   themeStorageKey: "theme",
-
   defaultLang: "es",
   fallbackLang: "es",
   langStorageKey: "lang",
   supportedLangs: ["es", "en", "ca"],
-
   defaultRoute: DEFAULT_ROUTE,
   defaultPublicPath: DEFAULT_ROUTE,
-
   bootingClass: "app-booting",
   loadingClass: "app-loading",
   readyClass: "app-ready",
   fatalClass: "app-fatal",
   errorClass: "app-error",
-
   authScreenClass: "auth-screen",
-  loginNoScrollClass: "login-no-scroll",
   routeAuthClass: "route-auth",
   routeAppClass: "route-app",
   chromeHiddenClass: "route-chrome-hidden",
   chromeVisibleClass: "route-chrome-visible",
-  shellHiddenRouteClass: "route-shell-hidden",
-  shellVisibleRouteClass: "route-shell-visible",
 });
 
 export const APP_DOM_IDS = freeze({
   app: "app",
   root: "app-root",
-
   shell: "app-shell",
   appShell: "app-shell",
-
   loader: "app-loader",
   appLoader: "app-loader",
-
   main: "main-content",
   mainContent: "main-content",
   appContent: "app-content",
   view: "view-container",
   viewContainer: "view-container",
-
   sidebar: "app-sidebar",
   sidebarMount: "sidebar-mount",
   topbar: "app-topbar",
   topbarMount: "topbar-mount",
-
   tablehead: "table-head",
   tableHead: "table-head",
   tableheadContainer: "tablehead-container",
   tableHeadContainer: "tablehead-container",
-
   mobileSidebarToggle: "toggleSidebarMobile",
 });
 
 export const APP_SELECTORS = freeze({
   app: "#app",
   root: "#app-root",
-
   shell: "#app-shell",
   appShell: "#app-shell, [data-app-shell='true'], [data-app-shell]",
-
   loader: "#app-loader",
   appLoader: "#app-loader, [data-app-loader='true'], [data-app-loader]",
-
   main: "#main-content",
   mainContent: "#main-content, [data-main-content='true'], [data-main-content], main",
-
   appContent: "#app-content, [data-app-content='true'], [data-app-content]",
   view: "#view-container",
   viewContainer: "#view-container, [data-view-root='true'], [data-router-view='true'], [data-router-view]",
-
   sidebar: "#app-sidebar, #sidebar, [data-sidebar-root], .sidebar",
   sidebarMount: "#sidebar-mount, [data-sidebar-mount]",
-
   topbar: "#app-topbar, #topbar, [data-topbar-root], .topbar",
   topbarMount: "#topbar-mount, [data-topbar-mount]",
-
   tablehead: "#table-head, [data-tablehead], .table-head",
   tableHead: "#table-head, [data-tablehead], .table-head",
-
   tableheadContainer: "#tablehead-container, [data-tablehead-container]",
   tableHeadContainer: "#tablehead-container, [data-tablehead-container]",
-
-  topbarViewContainer:
-    "#topbarview-container, #topbar-view-container, [data-topbar-view-container='true'], [data-topbar-view-container]",
-
   mobileSidebarToggle: "#toggleSidebarMobile, [data-sidebar-mobile-toggle]",
   spaLink: "a[data-spa]",
-  tooltip: "[data-tooltip]",
 });
 
 export const APP_MODULES = freeze({
@@ -902,202 +765,69 @@ export const APP_MODULES = freeze({
   shell: "Shell",
   warmup: "Warmup",
   errors: "Errors",
-  bootState: "BootState",
   appEvents: "AppEvents",
   appUi: "UI",
 });
 
 /* =========================================================
-   UI REPAIR
+   UI REPAIR COMPAT
 ========================================================= */
 
 export const UI_REPAIR_REASONS = freeze({
   init: "init-ui",
-  alreadyReady: "init-ui-already-ready",
   restore: "restore-session",
-  restoreErrorNonBlocking: "restore-session-error-non-blocking",
   renderInitial: "render-initial-route",
-  restoreNavigationHandled: "restore-navigation-handled",
-  beforeFinalize: "before-finalize",
   finalize: "finalize-boot",
-  finalizeAfterPaint: "finalize-boot:after-paint",
   bootError: "boot-error",
-  bootAlreadyBooted: "boot-already-booted",
   routeChange: "app:route:change",
   routerRendered: "router:rendered",
   langChange: "app:lang:change",
   themeChange: "app:theme:change",
 });
 
-export const UI_LIGHT_USER_METHODS = freeze([
-  "renderUser",
-  "refreshUser",
-  "updateUser",
-  "syncUser",
-]);
-
-export const UI_LIGHT_VISUAL_METHODS = freeze([
-  "applyRoleVisibility",
-  "syncRouteAndIndicator",
-  "syncIndicator",
-  "updateToggleLabel",
-  "syncRoute",
-  "updateRoute",
-  "syncBreadcrumb",
-  "updateBreadcrumb",
-]);
-
-export const UI_LIGHT_FALLBACK_METHODS = freeze([
-  "refresh",
-  "sync",
-]);
-
-export const UI_HARD_REPAIR_METHODS = freeze([
-  "repair",
-  "refresh",
-  "sync",
-]);
-
-export const UI_REBIND_METHODS = freeze([
-  "rebind",
-  "rebindEvents",
-  "bindEvents",
-  "bind",
-]);
-
-export const UI_REPAIR_METHODS = freeze([
-  ...UI_LIGHT_USER_METHODS,
-  ...UI_LIGHT_VISUAL_METHODS,
-  ...UI_LIGHT_FALLBACK_METHODS,
-]);
-
-export const UI_AFTER_PAINT_REPAIR_METHODS = freeze([
-  "sync",
-  "syncUser",
-  "refreshUser",
-  "updateUser",
-  "syncRouteAndIndicator",
-  "syncIndicator",
-]);
+export const UI_LIGHT_USER_METHODS = freeze(["renderUser", "refreshUser", "updateUser", "syncUser"]);
+export const UI_LIGHT_VISUAL_METHODS = freeze(["applyRoleVisibility", "syncRouteAndIndicator", "syncIndicator", "updateToggleLabel", "syncRoute", "updateRoute", "syncBreadcrumb", "updateBreadcrumb"]);
+export const UI_LIGHT_FALLBACK_METHODS = freeze(["refresh", "sync"]);
+export const UI_HARD_REPAIR_METHODS = freeze(["repair", "refresh", "sync"]);
+export const UI_REBIND_METHODS = freeze(["rebind", "rebindEvents", "bindEvents", "bind"]);
+export const UI_REPAIR_METHODS = freeze([...UI_LIGHT_USER_METHODS, ...UI_LIGHT_VISUAL_METHODS, ...UI_LIGHT_FALLBACK_METHODS]);
+export const UI_AFTER_PAINT_REPAIR_METHODS = freeze(["sync", "syncUser", "refreshUser", "updateUser", "syncRouteAndIndicator", "syncIndicator"]);
 
 /* =========================================================
    LOGGING
 ========================================================= */
 
 export const APP_LOG_PREFIX = "[App]";
-
-export const APP_LOG_LEVELS = freeze({
-  debug: "debug",
-  info: "info",
-  warn: "warn",
-  error: "error",
-  fatal: "fatal",
-});
+export const APP_LOG_LEVELS = freeze({ debug: "debug", info: "info", warn: "warn", error: "error", fatal: "fatal" });
 
 /* =========================================================
    GETTERS
 ========================================================= */
 
-function readConstant(object, key = "", fallback = null) {
-  const cleanKey = safeText(key, "");
-  return cleanKey && hasOwn(object, cleanKey) ? object[cleanKey] : fallback;
-}
-
-export function getAppScope(key = "global") {
-  return readConstant(APP_SCOPES, key, APP_SCOPE);
-}
-
-export function getAppScopes() {
-  return cloneObject(APP_SCOPES);
-}
-
-export function getBootFailsafeMs() {
-  return BOOT_CONSTANTS.failsafeLoaderMs;
-}
-
-export function getBootMinLoaderVisibleMs() {
-  return BOOT_CONSTANTS.minLoaderVisibleMs;
-}
-
-export function getBootHideTransitionMs() {
-  return BOOT_CONSTANTS.hideTransitionMs;
-}
-
-export function getBootRenderTimeoutMs() {
-  return BOOT_CONSTANTS.renderTimeoutMs;
-}
-
-export function getBootRestoreTimeoutMs() {
-  return BOOT_CONSTANTS.restoreTimeoutMs;
-}
-
-export function getBootMainTimeoutMs() {
-  return BOOT_CONSTANTS.mainTimeoutMs;
-}
-
-export function getBootConstant(key = "", fallback = null) {
-  return readConstant(BOOT_CONSTANTS, key, fallback);
-}
-
-export function getBootPhase(key = "", fallback = BOOT_PHASES.idle) {
-  return readConstant(BOOT_PHASES, key, fallback);
-}
-
-export function getBootFlag(key = "", fallback = "") {
-  return readConstant(BOOT_FLAGS, key, fallback);
-}
-
-export function getAppEvent(key = "", fallback = "") {
-  return readConstant(APP_EVENTS, key, fallback);
-}
-
-export function getRouterEvent(key = "", fallback = "") {
-  return readConstant(ROUTER_EVENTS, key, fallback);
-}
-
-export function getAuthEvent(key = "", fallback = "") {
-  return readConstant(AUTH_EVENTS, key, fallback);
-}
-
-export function getStoreEvent(key = "", fallback = "") {
-  return readConstant(STORE_EVENTS, key, fallback);
-}
-
-export function getDomEvent(key = "", fallback = "") {
-  return readConstant(DOM_EVENTS, key, fallback);
-}
-
-export function getUiConstant(key = "", fallback = null) {
-  return readConstant(UI_CONSTANTS, key, fallback);
-}
-
-export function getDomId(key = "", fallback = "") {
-  return readConstant(APP_DOM_IDS, key, fallback);
-}
-
-export function getSelector(key = "", fallback = "") {
-  return readConstant(APP_SELECTORS, key, fallback);
-}
-
-export function getRuntimeKey(key = "", fallback = "") {
-  return readConstant(APP_RUNTIME_KEYS, key, fallback);
-}
-
-export function getAppStateKey(key = "", fallback = "") {
-  return readConstant(APP_STATE_KEYS, key, fallback);
-}
-
-export function getAppRoute(key = "", fallback = DEFAULT_ROUTE) {
-  return readConstant(APP_ROUTES, key, fallback);
-}
-
-export function getAppModuleName(key = "", fallback = "") {
-  return readConstant(APP_MODULES, key, fallback);
-}
-
-export function getUiRepairReason(key = "", fallback = "unknown") {
-  return readConstant(UI_REPAIR_REASONS, key, fallback);
-}
+export function getAppScope(key = "global") { return readConstant(APP_SCOPES, key, APP_SCOPE); }
+export function getAppScopes() { return cloneObject(APP_SCOPES); }
+export function getBootFailsafeMs() { return BOOT_CONSTANTS.failsafeLoaderMs; }
+export function getBootMinLoaderVisibleMs() { return BOOT_CONSTANTS.minLoaderVisibleMs; }
+export function getBootHideTransitionMs() { return BOOT_CONSTANTS.hideTransitionMs; }
+export function getBootRenderTimeoutMs() { return BOOT_CONSTANTS.renderTimeoutMs; }
+export function getBootRestoreTimeoutMs() { return BOOT_CONSTANTS.restoreTimeoutMs; }
+export function getBootMainTimeoutMs() { return BOOT_CONSTANTS.mainTimeoutMs; }
+export function getBootConstant(key = "", fallback = null) { return readConstant(BOOT_CONSTANTS, key, fallback); }
+export function getBootPhase(key = "", fallback = BOOT_PHASES.idle) { return readConstant(BOOT_PHASES, key, fallback); }
+export function getBootFlag(key = "", fallback = "") { return readConstant(BOOT_FLAGS, key, fallback); }
+export function getAppEvent(key = "", fallback = "") { return readConstant(APP_EVENTS, key, fallback); }
+export function getRouterEvent(key = "", fallback = "") { return readConstant(ROUTER_EVENTS, key, fallback); }
+export function getAuthEvent(key = "", fallback = "") { return readConstant(AUTH_EVENTS, key, fallback); }
+export function getStoreEvent(key = "", fallback = "") { return readConstant(STORE_EVENTS, key, fallback); }
+export function getDomEvent(key = "", fallback = "") { return readConstant(DOM_EVENTS, key, fallback); }
+export function getUiConstant(key = "", fallback = null) { return readConstant(UI_CONSTANTS, key, fallback); }
+export function getDomId(key = "", fallback = "") { return readConstant(APP_DOM_IDS, key, fallback); }
+export function getSelector(key = "", fallback = "") { return readConstant(APP_SELECTORS, key, fallback); }
+export function getRuntimeKey(key = "", fallback = "") { return readConstant(APP_RUNTIME_KEYS, key, fallback); }
+export function getAppStateKey(key = "", fallback = "") { return readConstant(APP_STATE_KEYS, key, fallback); }
+export function getAppRoute(key = "", fallback = DEFAULT_ROUTE) { return readConstant(APP_ROUTES, key, fallback); }
+export function getAppModuleName(key = "", fallback = "") { return readConstant(APP_MODULES, key, fallback); }
+export function getUiRepairReason(key = "", fallback = "unknown") { return readConstant(UI_REPAIR_REASONS, key, fallback); }
 
 /* =========================================================
    ROUTE HELPERS
@@ -1108,112 +838,37 @@ export function getPublicTokenRouteConfigRaw(key = "") {
   return PROTECTED_PUBLIC_TOKEN_ROUTES.find((item) => item.key === cleanKey) || null;
 }
 
-export function getPublicTokenRouteConfig(key = "") {
-  return cloneRouteConfig(getPublicTokenRouteConfigRaw(key));
-}
+export function getPublicTokenRouteConfig(key = "") { return cloneRouteConfig(getPublicTokenRouteConfigRaw(key)); }
 
 export function getPublicTokenRouteConfigByPath(path = "") {
   const cleanPath = normalizeCanonicalRoutePathValue(path);
-
-  const config =
-    PROTECTED_PUBLIC_TOKEN_ROUTES.find((item) => {
-      const paths = unique([item.path, ...(item.paths || []), ...(item.aliases || [])]);
-
-      return paths.some((candidate) => pathMatches(cleanPath, candidate));
-    }) || null;
-
+  const config = PROTECTED_PUBLIC_TOKEN_ROUTES.find((item) => unique([item.path, ...(item.paths || []), ...(item.aliases || [])]).some((candidate) => pathMatches(cleanPath, candidate))) || null;
   return cloneRouteConfig(config);
 }
 
-export function getPublicTokenRouteConfigs() {
-  return PROTECTED_PUBLIC_TOKEN_ROUTES.map((item) => cloneRouteConfig(item));
-}
-
-export function getPublicTokenRoutePaths() {
-  return unique(PROTECTED_PUBLIC_TOKEN_ROUTES.flatMap((item) => [item.path, ...(item.paths || []), ...(item.aliases || [])]));
-}
-
-export function getPublicTokenRouteKeys() {
-  return PROTECTED_PUBLIC_TOKEN_ROUTES.map((item) => item.key);
-}
-
-export function getPublicTechnicalRoutes() {
-  return array(PUBLIC_TECHNICAL_ROUTES);
-}
-
-export function getPublicTechnicalPrefixes() {
-  return array(PUBLIC_TECHNICAL_PREFIXES);
-}
-
-export function isKnownPublicTokenRouteKey(key = "") {
-  return Boolean(getPublicTokenRouteConfigRaw(key));
-}
-
-export function isPublicTechnicalRoute(path = "") {
-  const cleanPath = normalizeCanonicalRoutePathValue(path);
-
-  return (
-    PUBLIC_TECHNICAL_ROUTES.some((route) => pathMatches(cleanPath, route)) ||
-    PUBLIC_TECHNICAL_PREFIXES.some((prefix) => cleanPath.startsWith(prefix.replace(/\/+$/g, "")))
-  );
-}
-
-export function isAuthLikeRoute(path = "") {
-  const cleanPath = normalizeCanonicalRoutePathValue(path);
-
-  return (
-    AUTH_LIKE_ROUTES.some((route) => pathMatches(cleanPath, route)) ||
-    PUBLIC_TECHNICAL_PREFIXES.some((prefix) => cleanPath.startsWith(prefix.replace(/\/+$/g, "")))
-  );
-}
-
-export function isProtectedPublicTokenRoute(path = "") {
-  return Boolean(getPublicTokenRouteConfigByPath(path));
-}
-
-export function normalizePublicRoutePath(path = DEFAULT_ROUTE) {
-  return normalizePublicRoutePathValue(path);
-}
-
-export function normalizeCanonicalRoutePath(path = DEFAULT_ROUTE) {
-  return normalizeCanonicalRoutePathValue(path);
-}
+export function getPublicTokenRouteConfigs() { return PROTECTED_PUBLIC_TOKEN_ROUTES.map((item) => cloneRouteConfig(item)); }
+export function getPublicTokenRoutePaths() { return unique(PROTECTED_PUBLIC_TOKEN_ROUTES.flatMap((item) => [item.path, ...(item.paths || []), ...(item.aliases || [])])); }
+export function getPublicTokenRouteKeys() { return PROTECTED_PUBLIC_TOKEN_ROUTES.map((item) => item.key); }
+export function getPublicTechnicalRoutes() { return array(PUBLIC_TECHNICAL_ROUTES); }
+export function getPublicTechnicalPrefixes() { return array(PUBLIC_TECHNICAL_PREFIXES); }
+export function isKnownPublicTokenRouteKey(key = "") { return Boolean(getPublicTokenRouteConfigRaw(key)); }
+export function isPublicTechnicalRoute(path = "") { return PUBLIC_TECHNICAL_ROUTES.some((route) => pathMatches(path, route)) || PUBLIC_TECHNICAL_PREFIXES.some((prefix) => normalizeCanonicalRoutePathValue(path).startsWith(prefix.replace(/\/+$/g, ""))); }
+export function isAuthLikeRoute(path = "") { return AUTH_LIKE_ROUTES.some((route) => pathMatches(path, route)) || PUBLIC_TECHNICAL_PREFIXES.some((prefix) => normalizeCanonicalRoutePathValue(path).startsWith(prefix.replace(/\/+$/g, ""))); }
+export function isProtectedPublicTokenRoute(path = "") { return Boolean(getPublicTokenRouteConfigByPath(path)); }
+export function normalizePublicRoutePath(path = DEFAULT_ROUTE) { return normalizePublicRoutePathValue(path); }
+export function normalizeCanonicalRoutePath(path = DEFAULT_ROUTE) { return normalizeCanonicalRoutePathValue(path); }
 
 /* =========================================================
-   REPAIR HELPERS
+   REPAIR / SENSITIVE HELPERS
 ========================================================= */
 
-export function getUiRepairMethods() {
-  return array(UI_REPAIR_METHODS);
-}
-
-export function getUiLightUserMethods() {
-  return array(UI_LIGHT_USER_METHODS);
-}
-
-export function getUiLightVisualMethods() {
-  return array(UI_LIGHT_VISUAL_METHODS);
-}
-
-export function getUiLightFallbackMethods() {
-  return array(UI_LIGHT_FALLBACK_METHODS);
-}
-
-export function getUiHardRepairMethods() {
-  return array(UI_HARD_REPAIR_METHODS);
-}
-
-export function getUiRebindMethods() {
-  return array(UI_REBIND_METHODS);
-}
-
-export function getUiAfterPaintRepairMethods() {
-  return array(UI_AFTER_PAINT_REPAIR_METHODS);
-}
-
-/* =========================================================
-   SENSITIVE / REDACTION
-========================================================= */
+export function getUiRepairMethods() { return array(UI_REPAIR_METHODS); }
+export function getUiLightUserMethods() { return array(UI_LIGHT_USER_METHODS); }
+export function getUiLightVisualMethods() { return array(UI_LIGHT_VISUAL_METHODS); }
+export function getUiLightFallbackMethods() { return array(UI_LIGHT_FALLBACK_METHODS); }
+export function getUiHardRepairMethods() { return array(UI_HARD_REPAIR_METHODS); }
+export function getUiRebindMethods() { return array(UI_REBIND_METHODS); }
+export function getUiAfterPaintRepairMethods() { return array(UI_AFTER_PAINT_REPAIR_METHODS); }
 
 export function clampBootTimeoutMs(value, fallback = BOOT_MAIN_TIMEOUT_MS) {
   const ms = safeNumber(value, fallback);
@@ -1225,13 +880,9 @@ export function isSensitiveParamName(name = "") {
   return GENERIC_SENSITIVE_PARAM_NAMES.some((item) => item.toLowerCase() === clean);
 }
 
-export function getSensitiveParamNames() {
-  return array(GENERIC_SENSITIVE_PARAM_NAMES);
-}
+export function getSensitiveParamNames() { return array(GENERIC_SENSITIVE_PARAM_NAMES); }
 
-function escapeRegExp(value = "") {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+function escapeRegExp(value = "") { return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
 export function redactSensitiveText(value = "") {
   let output = safeText(value, "");
@@ -1270,58 +921,26 @@ export function redactSensitiveText(value = "") {
 export function getAppConstantsSnapshot() {
   return freeze({
     version: APP_CONSTANTS_VERSION,
-
     scope: APP_SCOPE,
     scopes: APP_SCOPES,
-
-    boot: {
-      constants: BOOT_CONSTANTS,
-      phases: BOOT_PHASES,
-      flags: BOOT_FLAGS,
-    },
-
+    boot: { constants: BOOT_CONSTANTS, phases: BOOT_PHASES, flags: BOOT_FLAGS },
     runtimeKeys: APP_RUNTIME_KEYS,
     stateKeys: APP_STATE_KEYS,
-
     routes: {
       app: APP_ROUTES,
       authLike: AUTH_LIKE_ROUTES,
       publicTechnical: PUBLIC_TECHNICAL_ROUTES,
       publicTechnicalPrefixes: PUBLIC_TECHNICAL_PREFIXES,
     },
-
     publicTokenRoutes: PROTECTED_PUBLIC_TOKEN_ROUTES,
     sensitiveParams: GENERIC_SENSITIVE_PARAM_NAMES,
-
-    events: {
-      app: APP_EVENTS,
-      router: ROUTER_EVENTS,
-      auth: AUTH_EVENTS,
-      store: STORE_EVENTS,
-      dom: DOM_EVENTS,
-    },
-
+    events: { app: APP_EVENTS, router: ROUTER_EVENTS, auth: AUTH_EVENTS, store: STORE_EVENTS, dom: DOM_EVENTS },
     ui: UI_CONSTANTS,
-
-    dom: {
-      ids: APP_DOM_IDS,
-      selectors: APP_SELECTORS,
-    },
-
+    dom: { ids: APP_DOM_IDS, selectors: APP_SELECTORS },
     modules: APP_MODULES,
-
-    repair: {
-      reasons: UI_REPAIR_REASONS,
-      methods: UI_REPAIR_METHODS,
-      hardRepairMethods: UI_HARD_REPAIR_METHODS,
-      rebindMethods: UI_REBIND_METHODS,
-      afterPaintMethods: UI_AFTER_PAINT_REPAIR_METHODS,
-    },
-
-    log: {
-      prefix: APP_LOG_PREFIX,
-      levels: APP_LOG_LEVELS,
-    },
+    repair: { reasons: UI_REPAIR_REASONS, methods: UI_REPAIR_METHODS, hardRepairMethods: UI_HARD_REPAIR_METHODS, rebindMethods: UI_REBIND_METHODS, afterPaintMethods: UI_AFTER_PAINT_REPAIR_METHODS },
+    log: { prefix: APP_LOG_PREFIX, levels: APP_LOG_LEVELS },
+    policy: { constantsOnly: true, ownDom: false, ownStorage: false, ownAuth: false, ownRouter: false, ownFetch: false, ownToast: false, ownRender: false },
   });
 }
 
@@ -1398,7 +1017,6 @@ export default freeze({
 
   getAppScope,
   getAppScopes,
-
   getBootFailsafeMs,
   getBootMinLoaderVisibleMs,
   getBootHideTransitionMs,
@@ -1408,21 +1026,19 @@ export default freeze({
   getBootConstant,
   getBootPhase,
   getBootFlag,
-
   getAppEvent,
   getRouterEvent,
   getAuthEvent,
   getStoreEvent,
   getDomEvent,
-
   getUiConstant,
   getDomId,
   getSelector,
-
   getRuntimeKey,
   getAppStateKey,
-
   getAppRoute,
+  getAppModuleName,
+  getUiRepairReason,
 
   getPublicTokenRouteConfig,
   getPublicTokenRouteConfigRaw,
@@ -1432,17 +1048,13 @@ export default freeze({
   getPublicTokenRouteKeys,
   getPublicTechnicalRoutes,
   getPublicTechnicalPrefixes,
-
   isKnownPublicTokenRouteKey,
   isPublicTechnicalRoute,
   isAuthLikeRoute,
   isProtectedPublicTokenRoute,
-
   normalizePublicRoutePath,
   normalizeCanonicalRoutePath,
 
-  getAppModuleName,
-  getUiRepairReason,
   getUiRepairMethods,
   getUiLightUserMethods,
   getUiLightVisualMethods,
@@ -1455,6 +1067,5 @@ export default freeze({
   isSensitiveParamName,
   getSensitiveParamNames,
   redactSensitiveText,
-
   getAppConstantsSnapshot,
 });

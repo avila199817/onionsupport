@@ -5,11 +5,11 @@
    CORE SINGLETON · CLEAN KERNEL
    - AppCore único
    - State / Events / Storage / Cleanup / Modules / Hooks
-   - request.js = motor base
+   - request.js = motor HTTP base
    - http.js = facade HTTP única
    - Auth estricta: token + user activo
-   - token sin user conserva hasToken para /me, pero NO autentica
-   - user sin token NO autentica
+   - Token sin user conserva hasToken para /me, pero NO autentica
+   - User sin token NO autentica
    - Bridges Router/Auth/Store/Http sin event storm
    - Snapshots sin secretos
 ========================================================= */
@@ -96,6 +96,10 @@ import {
 
 export const AppCore = (() => {
   "use strict";
+
+  /* =======================================================
+     CONSTANTS
+  ======================================================= */
 
   const VERSION = "18.0.0-clean-core";
   const SOURCE = "core";
@@ -252,10 +256,13 @@ export const AppCore = (() => {
   const BRIDGE_CANONICAL = Object.freeze({
     Router: "Router",
     router: "Router",
+
     Auth: "Auth",
     auth: "Auth",
+
     Store: "Store",
     store: "Store",
+
     Http: "Http",
     http: "Http",
     ApiClient: "Http",
@@ -270,13 +277,18 @@ export const AppCore = (() => {
     Http: Object.freeze(["Http", "http", "ApiClient", "apiClient", "api"]),
   });
 
+  /* =======================================================
+     RUNTIME
+  ======================================================= */
+
   let initialized = false;
   let initPromise = null;
   let initCycle = 0;
 
   let networkBound = false;
-  let showToastBridge = null;
   let readyCallbacksFlushed = false;
+
+  let showToastBridge = null;
 
   let requestBridge = null;
   let apiClientBridge = null;
@@ -297,7 +309,7 @@ export const AppCore = (() => {
   };
 
   /* =======================================================
-     BASIC
+     BASICS
   ======================================================= */
 
   function isBrowser() {
@@ -312,7 +324,7 @@ export const AppCore = (() => {
     return value !== null && typeof value === "object" && !Array.isArray(value);
   }
 
-  function isAnyObject(value) {
+  function anyObject(value) {
     return value !== null && typeof value === "object";
   }
 
@@ -320,10 +332,18 @@ export const AppCore = (() => {
     return isObject(value) ? value : {};
   }
 
+  function array(value) {
+    if (Array.isArray(value)) return value;
+    if (value instanceof Set) return [...value];
+    if (value === null || value === undefined) return [];
+    return [value];
+  }
+
   function text(value, fallback = "") {
     if (value === null || value === undefined) return fallback;
-    const out = String(value).trim();
-    return out || fallback;
+
+    const output = String(value).trim();
+    return output || fallback;
   }
 
   function lower(value, fallback = "") {
@@ -331,8 +351,8 @@ export const AppCore = (() => {
   }
 
   function number(value, fallback = 0) {
-    const out = Number(value);
-    return Number.isFinite(out) ? out : fallback;
+    const output = Number(value);
+    return Number.isFinite(output) ? output : fallback;
   }
 
   function bool(value, fallback = false) {
@@ -356,15 +376,15 @@ export const AppCore = (() => {
     return Boolean(fallback);
   }
 
-  function array(value) {
-    if (Array.isArray(value)) return value;
-    if (value instanceof Set) return [...value];
-    if (value === null || value === undefined) return [];
-    return [value];
-  }
-
   function unique(values = []) {
-    return [...new Set(array(values).flat(Infinity).map((item) => text(item, "")).filter(Boolean))];
+    return [
+      ...new Set(
+        array(values)
+          .flat(Infinity)
+          .map((item) => text(item, ""))
+          .filter(Boolean)
+      ),
+    ];
   }
 
   function now() {
@@ -397,7 +417,9 @@ export const AppCore = (() => {
     } catch {}
 
     try {
-      if (typeof structuredClone === "function") return structuredClone(value);
+      if (typeof structuredClone === "function") {
+        return structuredClone(value);
+      }
     } catch {}
 
     try {
@@ -405,6 +427,23 @@ export const AppCore = (() => {
     } catch {
       return fallback;
     }
+  }
+
+  function first(...values) {
+    for (const value of values) {
+      if (value === null || value === undefined) continue;
+      if (typeof value === "string" && value.trim() === "") continue;
+      if (Array.isArray(value) && value.length === 0) continue;
+      if (isObject(value) && Object.keys(value).length === 0) continue;
+
+      return value;
+    }
+
+    return null;
+  }
+
+  function appName() {
+    return text(config?.appName || config?.name, DEFAULT_APP_NAME);
   }
 
   function debugEnabled() {
@@ -416,12 +455,9 @@ export const AppCore = (() => {
     );
   }
 
-  function appName() {
-    return text(config?.appName || config?.name, DEFAULT_APP_NAME);
-  }
-
   function log(...args) {
     if (!debugEnabled()) return;
+
     try {
       console.log(`[${appName()}]`, ...args);
     } catch {}
@@ -429,6 +465,7 @@ export const AppCore = (() => {
 
   function warn(...args) {
     if (!debugEnabled()) return;
+
     try {
       console.warn(`[${appName()}]`, ...args);
     } catch {}
@@ -440,23 +477,12 @@ export const AppCore = (() => {
     } catch {}
   }
 
-  function first(...values) {
-    for (const value of values) {
-      if (value === null || value === undefined) continue;
-      if (typeof value === "string" && value.trim() === "") continue;
-      if (Array.isArray(value) && value.length === 0) continue;
-      if (isObject(value) && Object.keys(value).length === 0) continue;
-      return value;
-    }
-
-    return null;
-  }
-
   function safeFactory(factory, fallback, ...args) {
     try {
       if (isFn(factory)) {
-        const out = factory(...args);
-        if (out) return out;
+        const value = factory(...args);
+
+        if (value) return value;
       }
     } catch {}
 
@@ -464,7 +490,7 @@ export const AppCore = (() => {
   }
 
   /* =======================================================
-     REDACTION / SNAPSHOTS
+     REDACTION
   ======================================================= */
 
   function escapeRegExp(value = "") {
@@ -472,10 +498,11 @@ export const AppCore = (() => {
   }
 
   function redact(value = "") {
-    let out = text(value, "");
-    if (!out) return "";
+    let output = text(value, "");
 
-    for (const name of [
+    if (!output) return "";
+
+    const params = [
       "token",
       "activationToken",
       "activateToken",
@@ -497,9 +524,11 @@ export const AppCore = (() => {
       "mfa_token",
       "otpToken",
       "otp_token",
-    ]) {
+    ];
+
+    for (const name of params) {
       try {
-        out = out.replace(
+        output = output.replace(
           new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi"),
           "$1***"
         );
@@ -507,7 +536,7 @@ export const AppCore = (() => {
     }
 
     try {
-      out = out
+      output = output
         .replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***")
         .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***")
         .replace(/(\/password-reset\/confirm\/)([^/?#\s]+)/gi, "$1***")
@@ -516,7 +545,7 @@ export const AppCore = (() => {
         .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
     } catch {}
 
-    return out;
+    return output;
   }
 
   function sanitizeError(err = null) {
@@ -539,7 +568,9 @@ export const AppCore = (() => {
     const clean = clone(input, {}) || {};
 
     for (const key of SENSITIVE_KEYS) {
-      if (key in clean) clean[key] = clean[key] ? "***" : null;
+      if (key in clean) {
+        clean[key] = clean[key] ? "***" : null;
+      }
     }
 
     for (const key of [
@@ -553,7 +584,9 @@ export const AppCore = (() => {
       "bootResetConfirmInitialUrl",
       "lastRequestUrl",
     ]) {
-      if (clean[key]) clean[key] = redact(clean[key]);
+      if (clean[key]) {
+        clean[key] = redact(clean[key]);
+      }
     }
 
     if (clean.error) clean.error = sanitizeError(clean.error);
@@ -594,7 +627,7 @@ export const AppCore = (() => {
   }
 
   /* =======================================================
-     FALLBACKS
+     FALLBACK EVENTS
   ======================================================= */
 
   function fallbackEvents() {
@@ -602,13 +635,16 @@ export const AppCore = (() => {
 
     function setFor(name) {
       const key = text(name, "");
+
       if (!key) return null;
       if (!map.has(key)) map.set(key, new Set());
+
       return map.get(key);
     }
 
     function on(name, handler) {
       const set = setFor(name);
+
       if (!set || !isFn(handler)) return () => false;
 
       set.add(handler);
@@ -623,9 +659,15 @@ export const AppCore = (() => {
 
       const dispose = on(name, (...args) => {
         if (disposed) return;
+
         disposed = true;
         dispose();
-        handler(...args);
+
+        try {
+          handler(...args);
+        } catch (err) {
+          warn("event once handler error", name, err);
+        }
       });
 
       return dispose;
@@ -633,6 +675,7 @@ export const AppCore = (() => {
 
     function off(name, handler = null) {
       const key = text(name, "");
+
       if (!key) return false;
 
       if (!handler) {
@@ -641,29 +684,37 @@ export const AppCore = (() => {
       }
 
       map.get(key)?.delete(handler);
+
       return true;
     }
 
     function emit(name, payload = {}) {
       const key = text(name, "");
+
       if (!key) return false;
 
       const handlers = [...(map.get(key) || [])];
       const wildcard = [...(map.get("*") || [])];
 
-      for (const fn of handlers) {
+      const event = {
+        type: key,
+        detail: payload,
+        payload,
+      };
+
+      for (const handler of handlers) {
         try {
-          fn({ type: key, detail: payload, payload });
+          handler(event);
         } catch (err) {
           warn("event handler error", key, err);
         }
       }
 
-      for (const fn of wildcard) {
+      for (const handler of wildcard) {
         try {
-          fn(key, payload, { type: key, detail: payload, payload });
+          handler(key, payload, event);
         } catch (err) {
-          warn("event wildcard error", key, err);
+          warn("event wildcard handler error", key, err);
         }
       }
 
@@ -672,8 +723,10 @@ export const AppCore = (() => {
 
     function clear(name = "") {
       const key = text(name, "");
+
       if (key) map.delete(key);
       else map.clear();
+
       return true;
     }
 
@@ -690,12 +743,20 @@ export const AppCore = (() => {
       once,
       off,
       emit,
+      dispatch: emit,
+      trigger: emit,
       clear,
+      removeAllListeners: clear,
+
       getSnapshot,
       getDebugSnapshot: getSnapshot,
       snapshot: getSnapshot,
     };
   }
+
+  /* =======================================================
+     FALLBACK STORAGE
+  ======================================================= */
 
   function fallbackStorage() {
     const memory = new Map();
@@ -703,13 +764,23 @@ export const AppCore = (() => {
 
     function key(name = "") {
       const clean = text(name, "");
+
       if (!clean) return `${prefix}:`;
-      if (clean.startsWith(`${prefix}:`) || clean.startsWith(`${prefix}.`) || clean.startsWith(`${prefix}_`)) return clean;
+
+      if (
+        clean.startsWith(`${prefix}:`) ||
+        clean.startsWith(`${prefix}.`) ||
+        clean.startsWith(`${prefix}_`)
+      ) {
+        return clean;
+      }
+
       return `${prefix}:${clean}`;
     }
 
     function web(kind = "localStorage") {
       if (!isBrowser()) return null;
+
       try {
         return window?.[kind] || null;
       } catch {
@@ -722,11 +793,13 @@ export const AppCore = (() => {
 
       try {
         const local = web("localStorage")?.getItem?.(finalKey);
+
         if (local !== null && local !== undefined) return local;
       } catch {}
 
       try {
         const session = web("sessionStorage")?.getItem?.(finalKey);
+
         if (session !== null && session !== undefined) return session;
       } catch {}
 
@@ -739,10 +812,14 @@ export const AppCore = (() => {
       if (value === null || value === undefined) return remove(name);
 
       const raw = String(value);
+
       memory.set(finalKey, raw);
 
       try {
-        const target = options.session === true ? web("sessionStorage") : web("localStorage");
+        const target = options.session === true
+          ? web("sessionStorage")
+          : web("localStorage");
+
         target?.setItem?.(finalKey, raw);
       } catch {}
 
@@ -751,6 +828,7 @@ export const AppCore = (() => {
 
     function parse(raw, fallback = null) {
       if (raw === null || raw === undefined || raw === "") return fallback;
+
       try {
         return JSON.parse(raw);
       } catch {
@@ -760,9 +838,11 @@ export const AppCore = (() => {
 
     function get(name, fallback = null) {
       const raw = getRaw(name, undefined);
+
       if (raw === undefined) return fallback;
 
       const parsed = parse(raw, undefined);
+
       return parsed === undefined ? raw : parsed;
     }
 
@@ -825,10 +905,18 @@ export const AppCore = (() => {
     };
   }
 
+  /* =======================================================
+     FALLBACK CLEANUP
+  ======================================================= */
+
   function fallbackCleanup() {
     function scope(name = "global") {
       const clean = text(name, "global");
-      if (!registry.scopes.has(clean)) registry.scopes.set(clean, new Set());
+
+      if (!registry.scopes.has(clean)) {
+        registry.scopes.set(clean, new Set());
+      }
+
       return clean;
     }
 
@@ -897,6 +985,7 @@ export const AppCore = (() => {
       }
 
       disposers.clear();
+
       return true;
     }
 
@@ -905,7 +994,10 @@ export const AppCore = (() => {
 
       if (clean) return run(clean);
 
-      for (const key of [...registry.scopes.keys()]) run(key);
+      for (const key of [...registry.scopes.keys()]) {
+        run(key);
+      }
+
       registry.scopes.clear();
 
       return true;
@@ -924,20 +1016,29 @@ export const AppCore = (() => {
     return {
       scope: (name) => ({ name: scope(name) }),
       ensureScope: (name) => ({ name: scope(name) }),
+
       add,
       on: event,
       event,
+      bus: event,
+
       timeout,
       timer: timeout,
       interval,
+
       run,
       dispose: run,
       clear,
+
       getSnapshot,
       getDebugSnapshot: getSnapshot,
       snapshot: getSnapshot,
     };
   }
+
+  /* =======================================================
+     FALLBACK MODULES / HOOKS
+  ======================================================= */
 
   function fallbackModules() {
     function get(name) {
@@ -946,6 +1047,7 @@ export const AppCore = (() => {
 
     function register(name, value, options = {}) {
       const key = text(name, "");
+
       if (!key || !value) return false;
 
       const previous = registry.modules.get(key);
@@ -997,14 +1099,18 @@ export const AppCore = (() => {
     return {
       has: (name) => registry.modules.has(text(name, "")),
       get,
+
       register,
       set,
       upsert: set,
+
       remove,
       delete: remove,
       unregister: remove,
+
       list,
       names: list,
+
       getSnapshot,
       getDebugSnapshot: getSnapshot,
       snapshot: getSnapshot,
@@ -1014,13 +1120,16 @@ export const AppCore = (() => {
   function fallbackHooks() {
     function listFor(name) {
       const key = text(name, "");
+
       if (!key) return null;
       if (!Array.isArray(registry.hooks[key])) registry.hooks[key] = [];
+
       return registry.hooks[key];
     }
 
     function add(name, handler) {
       const list = listFor(name);
+
       if (!list || !isFn(handler)) return () => false;
 
       list.push(handler);
@@ -1040,6 +1149,7 @@ export const AppCore = (() => {
 
         try {
           const next = await hook(current);
+
           if (next !== undefined) current = next;
         } catch (err) {
           warn("hook error", name, err);
@@ -1052,10 +1162,13 @@ export const AppCore = (() => {
     function clear(name = "") {
       const key = text(name, "");
 
-      if (key) registry.hooks[key] = [];
-      else Object.keys(registry.hooks).forEach((hookName) => {
-        registry.hooks[hookName] = [];
-      });
+      if (key) {
+        registry.hooks[key] = [];
+      } else {
+        Object.keys(registry.hooks).forEach((hookName) => {
+          registry.hooks[hookName] = [];
+        });
+      }
 
       return true;
     }
@@ -1074,10 +1187,13 @@ export const AppCore = (() => {
       on: add,
       use: add,
       register: add,
+
       run,
       runSeries: run,
+
       get: (name) => array(registry.hooks[text(name, "")]),
       clear,
+
       getSnapshot,
       getDebugSnapshot: getSnapshot,
       snapshot: getSnapshot,
@@ -1097,6 +1213,7 @@ export const AppCore = (() => {
 
   function emit(name, payload = {}) {
     const eventName = text(name, "");
+
     if (!eventName) return false;
 
     try {
@@ -1110,6 +1227,7 @@ export const AppCore = (() => {
   const utils = {
     qs(selector, scope = null) {
       if (!isBrowser()) return null;
+
       try {
         return (scope || document).querySelector(selector);
       } catch {
@@ -1119,6 +1237,7 @@ export const AppCore = (() => {
 
     qsa(selector, scope = null) {
       if (!isBrowser()) return [];
+
       try {
         return [...((scope || document).querySelectorAll(selector) || [])];
       } catch {
@@ -1128,6 +1247,7 @@ export const AppCore = (() => {
 
     byId(id = "") {
       if (!isBrowser()) return null;
+
       try {
         return document.getElementById(id);
       } catch {
@@ -1161,7 +1281,13 @@ export const AppCore = (() => {
     },
 
     sleep(ms = 0) {
-      return new Promise((resolve) => setTimeout(resolve, Math.max(0, number(ms, 0))));
+      return new Promise((resolve) => {
+        try {
+          setTimeout(resolve, Math.max(0, number(ms, 0)));
+        } catch {
+          resolve();
+        }
+      });
     },
 
     nextTick(fn) {
@@ -1273,7 +1399,7 @@ export const AppCore = (() => {
 
     if (!token) return false;
 
-    const bad = new Set([
+    const badValues = new Set([
       "null",
       "undefined",
       "false",
@@ -1285,7 +1411,7 @@ export const AppCore = (() => {
       "[]",
     ]);
 
-    if (bad.has(token.toLowerCase())) return false;
+    if (badValues.has(token.toLowerCase())) return false;
     if (/[\s\r\n\t]/.test(token)) return false;
 
     try {
@@ -1295,19 +1421,10 @@ export const AppCore = (() => {
     }
   }
 
-  function normalizeUserSafe(value = null) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-
-    try {
-      const normalized = normalizeUser(value);
-      if (usableUser(normalized)) return normalized;
-    } catch {}
-
-    return usableUser(value) ? value : null;
-  }
-
   function usableUser(value = null) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return false;
+    }
 
     if (
       value.active === false ||
@@ -1323,28 +1440,49 @@ export const AppCore = (() => {
       return false;
     }
 
-    const status = lower(value.status || value.estado || value.state || value.accountStatus || "", "");
+    const status = lower(
+      value.status ||
+        value.estado ||
+        value.state ||
+        value.accountStatus ||
+        "",
+      ""
+    );
 
-    if ([
-      "disabled",
-      "inactive",
-      "deleted",
-      "archived",
-      "blocked",
-      "suspended",
-      "banned",
-      "revoked",
-      "desactivado",
-      "inactivo",
-      "eliminado",
-      "archivado",
-      "bloqueado",
-      "suspendido",
-    ].includes(status)) {
+    if (
+      [
+        "disabled",
+        "inactive",
+        "deleted",
+        "archived",
+        "blocked",
+        "suspended",
+        "banned",
+        "revoked",
+        "desactivado",
+        "inactivo",
+        "eliminado",
+        "archivado",
+        "bloqueado",
+        "suspendido",
+      ].includes(status)
+    ) {
       return false;
     }
 
     return USER_ID_KEYS.some((key) => Boolean(text(value?.[key], "")));
+  }
+
+  function normalizeUserSafe(value = null) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+
+    try {
+      const normalized = normalizeUser(value);
+
+      if (usableUser(normalized)) return normalized;
+    } catch {}
+
+    return usableUser(value) ? value : null;
   }
 
   function roleOf(user = null, explicit = "") {
@@ -1369,15 +1507,17 @@ export const AppCore = (() => {
       .replace(/[\s-]+/g, "_")
       .replace(/[^a-z0-9_:.]/g, "");
 
-    if ([
-      "admin",
-      "administrator",
-      "administrador",
-      "superadmin",
-      "super_admin",
-      "owner",
-      "root",
-    ].includes(raw)) {
+    if (
+      [
+        "admin",
+        "administrator",
+        "administrador",
+        "superadmin",
+        "super_admin",
+        "owner",
+        "root",
+      ].includes(raw)
+    ) {
       return "admin";
     }
 
@@ -1409,6 +1549,7 @@ export const AppCore = (() => {
       ...USER_KEYS.map((key) => sessionData[key]),
     ]) {
       const user = normalizeUserSafe(value);
+
       if (user) return user;
     }
 
@@ -1467,7 +1608,7 @@ export const AppCore = (() => {
     return root;
   }
 
-  function tokenOnly(root = state, token = null) {
+  function setTokenOnly(root = state, token = null) {
     Object.assign(root, {
       token,
       accessToken: token,
@@ -1516,7 +1657,7 @@ export const AppCore = (() => {
     const user = userFrom(state);
 
     if (!user) {
-      return tokenOnly(state, token);
+      return setTokenOnly(state, token);
     }
 
     let authenticated = false;
@@ -1528,7 +1669,7 @@ export const AppCore = (() => {
     }
 
     if (!authenticated) {
-      return tokenOnly(state, token);
+      return setTokenOnly(state, token);
     }
 
     const role = roleOf(user, state.role);
@@ -1555,10 +1696,12 @@ export const AppCore = (() => {
       roles,
 
       username: usernameOf(user),
+
       currentResolvedUsername:
         sanitizeUsername(state.currentResolvedUsername || state.resolvedUsername || "") ||
         sanitizeUsername(usernameOf(user) || "") ||
         null,
+
       resolvedUsername: state.currentResolvedUsername || null,
 
       isAdmin: role === "admin",
@@ -1676,8 +1819,9 @@ export const AppCore = (() => {
 
     for (const attempt of attempts) {
       try {
-        const out = attempt();
-        if (out) return out;
+        const value = attempt();
+
+        if (value) return value;
       } catch {}
     }
 
@@ -1685,15 +1829,17 @@ export const AppCore = (() => {
   }
 
   function publicState(options = {}) {
-    let out = null;
+    let output = null;
 
     try {
-      out = cloneState(state);
+      output = cloneState(state);
     } catch {}
 
-    if (!out) out = clone(state, { ...state }) || { ...state };
+    if (!output) {
+      output = clone(state, { ...state }) || { ...state };
+    }
 
-    return options.safe ? sanitizeState(out) : out;
+    return options.safe ? sanitizeState(output) : output;
   }
 
   function setState(patch = {}, options = {}) {
@@ -1717,8 +1863,10 @@ export const AppCore = (() => {
 
   function getState(options = {}) {
     syncAuth();
-    const out = getStateBaseCompat(state) || publicState();
-    return options.safe ? sanitizeState(out) : out;
+
+    const output = getStateBaseCompat(state) || publicState();
+
+    return options.safe ? sanitizeState(output) : output;
   }
 
   function patchState(patch = {}, options = {}) {
@@ -1757,11 +1905,11 @@ export const AppCore = (() => {
   }
 
   /* =======================================================
-     UI
+     UI API
   ======================================================= */
 
-  function setDocumentTitle(title = getAppName()) {
-    const finalTitle = text(title, getAppName());
+  function setDocumentTitle(title = appName()) {
+    const finalTitle = text(title, appName());
 
     try {
       return setDocumentTitleBase({
@@ -1844,19 +1992,19 @@ export const AppCore = (() => {
       seen.add(value);
     } catch {}
 
-    const out = [value];
+    const output = [value];
 
     for (const key of NESTED_KEYS) {
       if (value[key] && typeof value[key] === "object") {
-        out.push(...collectObjects(value[key], depth + 1, seen));
+        output.push(...collectObjects(value[key], depth + 1, seen));
       }
     }
 
     if (value.response?.data && typeof value.response.data === "object") {
-      out.push(...collectObjects(value.response.data, depth + 1, seen));
+      output.push(...collectObjects(value.response.data, depth + 1, seen));
     }
 
-    return out;
+    return output;
   }
 
   function pickToken(objects = [], keys = []) {
@@ -1873,12 +2021,14 @@ export const AppCore = (() => {
     for (const obj of array(objects)) {
       for (const key of USER_KEYS) {
         const user = normalizeUserSafe(obj?.[key]);
+
         if (user) return user;
       }
     }
 
     for (const obj of array(objects)) {
       const user = normalizeUserSafe(obj);
+
       if (user) return user;
     }
 
@@ -1889,6 +2039,7 @@ export const AppCore = (() => {
     for (const obj of array(objects)) {
       for (const key of keys) {
         const value = text(obj?.[key], "");
+
         if (value) return value;
       }
     }
@@ -2003,7 +2154,7 @@ export const AppCore = (() => {
 
   function setUser(user = null, options = {}) {
     try {
-      const out = setUserBase({
+      const output = setUserBase({
         state,
         storage,
         events,
@@ -2017,7 +2168,7 @@ export const AppCore = (() => {
         forceUnauthenticated: !user && !state.token,
       });
 
-      return out;
+      return output;
     } catch {}
 
     setState(
@@ -2038,7 +2189,7 @@ export const AppCore = (() => {
     const cleanToken = validToken(token) ? stripBearer(token) : null;
 
     try {
-      const out = setTokenBase({
+      const output = setTokenBase({
         state,
         storage,
         events,
@@ -2051,7 +2202,7 @@ export const AppCore = (() => {
         forceUnauthenticated: !cleanToken,
       });
 
-      return out;
+      return output;
     } catch {}
 
     setState(
@@ -2153,20 +2304,54 @@ export const AppCore = (() => {
         state.refresh_token = extracted.refreshToken;
       }
 
+      if (extracted.tempToken) {
+        state.tempToken = extracted.tempToken;
+        state.temp_token = extracted.tempToken;
+      }
+
       if (extracted.session || extracted.sessionId || extracted.sessionUserId) {
         state.session = {
           ...object(extracted.session),
-          sessionId: extracted.sessionId || extracted.session?.sessionId || null,
-          session_id: extracted.sessionId || extracted.session?.session_id || null,
-          userId: extracted.sessionUserId || extracted.session?.userId || null,
-          user_id: extracted.sessionUserId || extracted.session?.user_id || null,
+
+          sessionId:
+            extracted.sessionId ||
+            extracted.session?.sessionId ||
+            extracted.session?.session_id ||
+            null,
+
+          session_id:
+            extracted.sessionId ||
+            extracted.session?.session_id ||
+            extracted.session?.sessionId ||
+            null,
+
+          userId:
+            extracted.sessionUserId ||
+            extracted.session?.userId ||
+            extracted.session?.user_id ||
+            null,
+
+          user_id:
+            extracted.sessionUserId ||
+            extracted.session?.user_id ||
+            extracted.session?.userId ||
+            null,
         };
 
         state.sessionData = state.session;
       }
 
-      if (extracted.route) setRoute(extracted.route, { source: "core:applySession:fallback-route" });
-      if (extracted.publicPath) setPublicPath(extracted.publicPath, { source: "core:applySession:fallback-public-path" });
+      if (extracted.route) {
+        setRoute(extracted.route, {
+          source: "core:applySession:fallback-route",
+        });
+      }
+
+      if (extracted.publicPath) {
+        setPublicPath(extracted.publicPath, {
+          source: "core:applySession:fallback-public-path",
+        });
+      }
 
       result = {
         token: state.token,
@@ -2396,7 +2581,11 @@ export const AppCore = (() => {
       !(body instanceof FormData) &&
       typeof body !== "string"
     ) {
-      headers["Content-Type"] = headers["Content-Type"] || headers["content-type"] || "application/json";
+      headers["Content-Type"] =
+        headers["Content-Type"] ||
+        headers["content-type"] ||
+        "application/json";
+
       body = JSON.stringify(body);
     }
 
@@ -2441,6 +2630,7 @@ export const AppCore = (() => {
       err.status = response.status;
       err.response = response;
       err.data = payload;
+
       throw err;
     }
 
@@ -2560,7 +2750,9 @@ export const AppCore = (() => {
     let client = source;
 
     try {
-      if (!Object.isExtensible(client) || Array.isArray(client)) client = {};
+      if (!Object.isExtensible(client) || Array.isArray(client)) {
+        client = {};
+      }
     } catch {
       client = {};
     }
@@ -2679,7 +2871,12 @@ export const AppCore = (() => {
     ));
 
     setMember(client, "getSnapshot", client.getSnapshot || (() => ({
-      version: text(client.version || client.HTTP_VERSION || client.CORE_HTTP_VERSION, "core-http-bridge"),
+      version: text(
+        client.version ||
+          client.HTTP_VERSION ||
+          client.CORE_HTTP_VERSION,
+        "core-http-bridge"
+      ),
       installed: true,
       hasRequest: isFn(client.request),
       hasGet: isFn(client.get),
@@ -2711,9 +2908,31 @@ export const AppCore = (() => {
     }
   }
 
+  function bridgeCanonical(name = "") {
+    return BRIDGE_CANONICAL[text(name, "")] || text(name, "");
+  }
+
+  function bridgeAliases(name = "") {
+    const canonical = bridgeCanonical(name);
+    return BRIDGE_ALIASES[canonical] || [canonical];
+  }
+
+  function getBridge(name = "") {
+    const aliases = bridgeAliases(name);
+
+    for (const alias of aliases) {
+      try {
+        const value = modules?.get?.(alias) || registry.modules.get(alias);
+        if (value) return value;
+      } catch {}
+    }
+
+    return null;
+  }
+
   function registerBridge(name = "", value = null, options = {}) {
-    const canonical = BRIDGE_CANONICAL[text(name, "")] || text(name, "");
-    const aliases = BRIDGE_ALIASES[canonical] || [canonical];
+    const canonical = bridgeCanonical(name);
+    const aliases = bridgeAliases(canonical);
 
     if (!canonical || !value) return false;
 
@@ -2746,20 +2965,6 @@ export const AppCore = (() => {
     return changed || true;
   }
 
-  function getBridge(name = "") {
-    const canonical = BRIDGE_CANONICAL[text(name, "")] || text(name, "");
-    const aliases = BRIDGE_ALIASES[canonical] || [canonical];
-
-    for (const alias of aliases) {
-      try {
-        const value = modules?.get?.(alias) || registry.modules.get(alias);
-        if (value) return value;
-      } catch {}
-    }
-
-    return null;
-  }
-
   function resolveHttpCandidate(context = {}) {
     const installers = [
       httpExport("installHttp"),
@@ -2781,12 +2986,14 @@ export const AppCore = (() => {
 
       for (const attempt of attempts) {
         try {
-          const out = attempt();
-          if (out) return out;
+          const value = attempt();
+
+          if (value) return value;
         } catch {}
       }
 
       const bridged = getBridge("Http");
+
       if (bridged) return bridged;
     }
 
@@ -2803,7 +3010,10 @@ export const AppCore = (() => {
     const opts = object(options);
 
     if (httpInstalled && httpBridge && opts.force !== true) {
-      registerBridge("Http", httpBridge, { source: "core:http:existing" });
+      registerBridge("Http", httpBridge, {
+        source: "core:http:existing",
+      });
+
       return httpBridge;
     }
 
@@ -2939,6 +3149,7 @@ export const AppCore = (() => {
 
       const handler = () => {
         if (disposed) return;
+
         disposed = true;
         readyCallbacksFlushed = true;
 
@@ -2992,6 +3203,7 @@ export const AppCore = (() => {
 
       try {
         const next = await hook(current);
+
         if (next !== undefined) current = next;
       } catch (err) {
         warn("hook failed", name, err);
@@ -3356,10 +3568,6 @@ export const AppCore = (() => {
     };
   }
 
-  function getAppName() {
-    return appName();
-  }
-
   /* =======================================================
      PUBLIC API
   ======================================================= */
@@ -3471,7 +3679,9 @@ export const AppCore = (() => {
             }
           }
 
-          registerBridge("Http", client, { source: "core:set:apiClient" });
+          registerBridge("Http", client, {
+            source: "core:set:apiClient",
+          });
         },
       },
 
@@ -3490,7 +3700,9 @@ export const AppCore = (() => {
           apiClientBridge = client;
           httpInstalled = true;
 
-          registerBridge("Http", client, { source: "core:set:Http" });
+          registerBridge("Http", client, {
+            source: "core:set:Http",
+          });
         },
       },
 
@@ -3509,7 +3721,9 @@ export const AppCore = (() => {
           apiClientBridge = client;
           httpInstalled = true;
 
-          registerBridge("Http", client, { source: "core:set:http" });
+          registerBridge("Http", client, {
+            source: "core:set:http",
+          });
         },
       },
 
@@ -3520,7 +3734,9 @@ export const AppCore = (() => {
           return getBridge("Router");
         },
         set(value) {
-          registerBridge("Router", value, { source: "core:set:Router" });
+          registerBridge("Router", value, {
+            source: "core:set:Router",
+          });
         },
       },
 
@@ -3531,7 +3747,9 @@ export const AppCore = (() => {
           return getBridge("Router");
         },
         set(value) {
-          registerBridge("Router", value, { source: "core:set:router" });
+          registerBridge("Router", value, {
+            source: "core:set:router",
+          });
         },
       },
 
@@ -3542,7 +3760,9 @@ export const AppCore = (() => {
           return getBridge("Auth");
         },
         set(value) {
-          registerBridge("Auth", value, { source: "core:set:Auth" });
+          registerBridge("Auth", value, {
+            source: "core:set:Auth",
+          });
         },
       },
 
@@ -3553,7 +3773,9 @@ export const AppCore = (() => {
           return getBridge("Auth");
         },
         set(value) {
-          registerBridge("Auth", value, { source: "core:set:auth" });
+          registerBridge("Auth", value, {
+            source: "core:set:auth",
+          });
         },
       },
 
@@ -3564,7 +3786,9 @@ export const AppCore = (() => {
           return getBridge("Store");
         },
         set(value) {
-          registerBridge("Store", value, { source: "core:set:Store" });
+          registerBridge("Store", value, {
+            source: "core:set:Store",
+          });
         },
       },
 
@@ -3575,7 +3799,9 @@ export const AppCore = (() => {
           return getBridge("Store");
         },
         set(value) {
-          registerBridge("Store", value, { source: "core:set:store" });
+          registerBridge("Store", value, {
+            source: "core:set:store",
+          });
         },
       },
     });

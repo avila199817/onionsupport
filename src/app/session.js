@@ -2,12 +2,13 @@
    Onion SPA - App Session Bootstrap
    Archivo: src/app/session.js
 
-   APP SESSION · FINAL SIMPLE
-   - Puente boot ↔ Auth
+   APP SESSION · SIMPLE BRIDGE
+   - puente boot ↔ Auth
    - Auth hace el restore real
    - App sólo pasa flags de boot y sincroniza UI
-   - No fetch, CoreHttp directo, storage directo ni sesión paralela
-   - No applySession propio, refresh propio ni navegación agresiva
+   - preserva rutas públicas técnicas
+   - sin fetch, CoreHttp directo, storage directo ni sesión paralela
+   - sin applySession propio, refresh propio ni navegación manual
 ========================================================= */
 
 import {
@@ -24,13 +25,10 @@ import {
   isPublicTechnicalRoute,
 } from "../features/auth/helpers.js";
 
-/* =========================================================
-   CONSTANTS
-========================================================= */
-
-export const SESSION_VERSION = "20.0.0-final";
+export const SESSION_VERSION = "21.0.0-simple";
 
 const SOURCE = "app.session";
+const READY_DEDUPE_MS = 160;
 
 const EVENTS = Object.freeze({
   restoreStart: "app:session:restore:start",
@@ -42,15 +40,9 @@ const EVENTS = Object.freeze({
   uiRepairRequest: "app:ui:repair-request",
 });
 
-/* =========================================================
-   RUNTIME
-========================================================= */
-
 let restorePromise = null;
 let lastReadyKey = "";
 let lastReadyAt = 0;
-
-const READY_DEDUPE_MS = 160;
 
 /* =========================================================
    BASICS
@@ -58,7 +50,7 @@ const READY_DEDUPE_MS = 160;
 
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
 const isFn = (value) => typeof value === "function";
-const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
 
 function object(value, fallback = {}) {
   return isObject(value) ? value : fallback;
@@ -123,13 +115,11 @@ function sanitize(value, depth = 0, keyHint = "") {
   if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitize(item, depth + 1, keyHint));
 
   if (isObject(value)) {
-    const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = sanitize(item, depth + 1, key);
-    }
-
-    return output;
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 80)
+        .map(([key, item]) => [key, sanitize(item, depth + 1, key)])
+    );
   }
 
   return String(value);
@@ -278,11 +268,28 @@ function readRole(AppCore, Auth) {
     if (isFn(Auth?.getCurrentRole)) return Auth.getCurrentRole();
   } catch {}
 
-  return AppCore?.state?.role || AppCore?.state?.rol || AppCore?.state?.userRole || readUser(AppCore, Auth)?.role || null;
+  const user = readUser(AppCore, Auth);
+  return AppCore?.state?.role || AppCore?.state?.rol || AppCore?.state?.userRole || user?.role || user?.rol || null;
+}
+
+function publicUser(user = null) {
+  const source = object(user, null);
+  if (!source) return null;
+
+  return {
+    id: source.id || source.userId || source.user_id || source.uid || source.sub || null,
+    userId: source.userId || source.id || source.uid || source.sub || null,
+    username: source.username || source.userName || source.slug || null,
+    name: source.name || source.fullName || source.displayName || source.display_name || source.username || null,
+    displayName: source.name || source.fullName || source.displayName || source.display_name || source.username || null,
+    fullName: source.name || source.fullName || source.displayName || source.display_name || null,
+    role: source.role || source.rol || source.userRole || null,
+    avatarUrl: source.avatarUrl || source.avatarURL || source.avatar || source.photoURL || source.picture || null,
+  };
 }
 
 /* =========================================================
-   UI / READY
+   UI / READY EVENTS
 ========================================================= */
 
 async function runSyncUserUI({ AppCore, Auth, Router, syncUserUI, reason = "session-sync" } = {}) {
@@ -298,10 +305,12 @@ async function runSyncUserUI({ AppCore, Auth, Router, syncUserUI, reason = "sess
     await Promise.resolve(AppCore?.syncUserUI?.({ reason, source: SOURCE }));
   } catch {}
 
+  const user = readUser(AppCore, Auth);
+
   emit(AppCore, EVENTS.uiRepairRequest, {
     reason,
     authenticated: isAuthenticated(AppCore, Auth),
-    user: readUser(AppCore, Auth),
+    user: publicUser(user),
     role: readRole(AppCore, Auth),
     repairShell: false,
     hardRepair: false,
@@ -312,12 +321,14 @@ async function runSyncUserUI({ AppCore, Auth, Router, syncUserUI, reason = "sess
 }
 
 function readyPayload({ AppCore, Auth, Router, reason = "session-ready", result = {} } = {}) {
+  const user = readUser(AppCore, Auth);
+
   return {
     reason,
     ok: Boolean(result?.ok) || isAuthenticated(AppCore, Auth),
     restored: Boolean(result?.restored) || Boolean(result?.ok) || isAuthenticated(AppCore, Auth),
     authenticated: isAuthenticated(AppCore, Auth),
-    user: readUser(AppCore, Auth),
+    user: publicUser(user),
     role: readRole(AppCore, Auth),
     route: currentCanonicalPath(AppCore, Router),
     publicPath: currentPublicPath(AppCore, Router),
@@ -359,17 +370,19 @@ function emitReadyEvents({ AppCore, Auth, Router, reason = "session-ready", resu
 ========================================================= */
 
 function restoreOptions({ publicRoute = false, skipNavigation = true } = {}) {
+  const skipNav = Boolean(publicRoute || skipNavigation);
+
   return {
     silent: true,
 
-    skipNavigation: true,
-    skipRedirect: true,
-    noRedirect: true,
-    skipPostRestoreNavigation: true,
+    skipNavigation: skipNav,
+    skipRedirect: skipNav,
+    noRedirect: skipNav,
+    skipPostRestoreNavigation: skipNav,
 
-    preserveCurrentRoute: publicRoute || skipNavigation,
-    preserveRoute: publicRoute || skipNavigation,
-    preservePublicPath: publicRoute || skipNavigation,
+    preserveCurrentRoute: publicRoute || skipNav,
+    preserveRoute: publicRoute || skipNav,
+    preservePublicPath: publicRoute || skipNav,
     preserveSearch: publicRoute,
     preserveHash: publicRoute,
 
@@ -392,9 +405,20 @@ async function callAuthRestore(Auth, options) {
   return null;
 }
 
-function cleanResult(result = {}) {
-  const payload = sanitize(object(result));
-  return object(payload);
+function resultFlags(result = {}, AppCore = null, Auth = null) {
+  const payload = object(result);
+
+  return {
+    ok: Boolean(payload.ok) || isAuthenticated(AppCore, Auth),
+    restored: Boolean(payload.restored) || Boolean(payload.ok) || isAuthenticated(AppCore, Auth),
+    authenticated: isAuthenticated(AppCore, Auth),
+    reason: text(payload.reason || payload.code, ""),
+    code: text(payload.code, "") || null,
+    navigationHandled: Boolean(payload.navigationHandled || payload.navigated || payload.redirected),
+    navigated: Boolean(payload.navigated || payload.navigationHandled),
+    redirected: Boolean(payload.redirected || payload.navigationHandled),
+    routeChanged: Boolean(payload.routeChanged),
+  };
 }
 
 export async function restoreAuthSession({
@@ -424,35 +448,42 @@ export async function restoreAuthSession({
     });
 
     try {
-      if (!Auth || (!isFn(Auth.restoreSession) && !isFn(Auth.restore) && !isFn(Auth.restoreSessionInBackground) && !isFn(Auth.session?.restore))) {
-        if (syncUi) await runSyncUserUI({ AppCore, Auth, Router, syncUserUI, reason: "auth-module-missing" });
+      const hasRestore = Boolean(
+        Auth &&
+          (isFn(Auth.restoreSession) || isFn(Auth.restore) || isFn(Auth.restoreSessionInBackground) || isFn(Auth.session?.restore))
+      );
 
-        return {
+      if (!hasRestore) {
+        const missingResult = {
           ok: false,
           restored: false,
           reason: "auth-module-missing",
           authenticated: isAuthenticated(AppCore, Auth),
+          publicTechnicalBoot: publicRoute,
           navigationHandled: false,
+          navigated: false,
+          redirected: false,
+          routeChanged: false,
         };
+
+        if (syncUi) await runSyncUserUI({ AppCore, Auth, Router, syncUserUI, reason: "auth-module-missing" });
+        if (emitReady) emitReadyEvents({ AppCore, Auth, Router, reason: "auth-module-missing", result: missingResult });
+
+        emit(AppCore, EVENTS.restoreDone, missingResult);
+        return missingResult;
       }
 
       const result = await Promise.resolve(callAuthRestore(Auth, restoreOptions({ publicRoute, skipNavigation })));
-      const cleaned = cleanResult(result);
+      const flags = resultFlags(result, AppCore, Auth);
 
       if (syncUi) await runSyncUserUI({ AppCore, Auth, Router, syncUserUI, reason: "restore-auth-session" });
-      if (emitReady) emitReadyEvents({ AppCore, Auth, Router, reason: "restore-auth-session", result: cleaned });
 
       const finalResult = {
-        ...cleaned,
-        ok: Boolean(cleaned.ok) || isAuthenticated(AppCore, Auth),
-        restored: Boolean(cleaned.restored) || Boolean(cleaned.ok) || isAuthenticated(AppCore, Auth),
-        authenticated: isAuthenticated(AppCore, Auth),
+        ...flags,
         publicTechnicalBoot: publicRoute,
-        navigationHandled: Boolean(cleaned.navigationHandled || cleaned.navigated || cleaned.redirected),
-        navigated: Boolean(cleaned.navigated || cleaned.navigationHandled),
-        redirected: Boolean(cleaned.redirected || cleaned.navigationHandled),
-        routeChanged: Boolean(cleaned.routeChanged),
       };
+
+      if (emitReady) emitReadyEvents({ AppCore, Auth, Router, reason: "restore-auth-session", result: finalResult });
 
       emit(AppCore, EVENTS.restoreDone, finalResult);
       return finalResult;
@@ -540,21 +571,16 @@ export async function restoreSessionInBackground({
     const afterCanonical = currentCanonicalPath(AppCore, Router);
     const afterPublic = currentPublicPath(AppCore, Router);
     const routeChanged = Boolean(beforeCanonical !== afterCanonical || beforePublic !== afterPublic);
+    const flags = resultFlags(result, AppCore, Auth);
 
     const finalResult = {
-      ...cleanResult(result),
-      ok: Boolean(result?.ok) || isAuthenticated(AppCore, Auth),
-      restored: Boolean(result?.restored) || Boolean(result?.ok) || isAuthenticated(AppCore, Auth),
-      authenticated: isAuthenticated(AppCore, Auth),
+      ...flags,
       publicTechnicalBoot: publicRoute,
       skipPostRestoreNavigation: skipNav,
       beforeCanonical,
       beforePublic,
       afterCanonical,
       afterPublic,
-      navigationHandled: Boolean(result?.navigationHandled || result?.navigated || result?.redirected),
-      navigated: Boolean(result?.navigated || result?.navigationHandled),
-      redirected: Boolean(result?.redirected || result?.navigationHandled),
       routeChanged,
     };
 
@@ -582,7 +608,7 @@ export async function restoreSessionInBackground({
 }
 
 /* =========================================================
-   OPTIONAL COMPAT
+   COMPAT
 ========================================================= */
 
 export async function navigateAfterSessionRestore() {
@@ -590,7 +616,7 @@ export async function navigateAfterSessionRestore() {
 }
 
 /* =========================================================
-   DEBUG
+   SNAPSHOT
 ========================================================= */
 
 export function getSessionBootstrapSnapshot({ AppCore, Auth = null, Router = null, state } = {}) {
@@ -618,10 +644,6 @@ export function getSessionBootstrapSnapshot({ AppCore, Auth = null, Router = nul
     },
   });
 }
-
-/* =========================================================
-   EXPORT
-========================================================= */
 
 export default {
   SESSION_VERSION,

@@ -4,11 +4,12 @@
 
    ROUTER GUARDS · SIMPLE
    - capa fina Router ↔ Auth
-   - Auth decide sesión; Router decide ruta
-   - rutas públicas técnicas siempre permitidas
+   - Auth/session ya entregan usuario normalizado
    - autenticado = token usable + user usable + activo
    - roles reales: admin / user
+   - rutas públicas técnicas siempre permitidas
    - redirects internos seguros
+   - sin aliases de rol, sin shapes legacy infinitos
    - sin fetch, refresh, restore, login/logout, storage, Toast ni navegación
 ========================================================= */
 
@@ -23,114 +24,22 @@ import {
   AUTH_PUBLIC_TECHNICAL_ROUTES,
 } from "../features/auth/constants.js";
 
-export const GUARDS_VERSION = "21.0.0-simple";
+export const GUARDS_VERSION = "21.0.1-simple";
 
 const LOGIN_PATH = "/login";
 const HOME_PATH = "/";
 const FORBIDDEN_PATH = "/403";
 
-const LOGIN_PATHS = Object.freeze([
-  "/login",
-  "/signin",
-  "/sign-in",
-  "/auth",
-  "/auth/login",
-]);
+const ROLES = Object.freeze(["admin", "user"]);
+const ROLE_SET = new Set(ROLES);
 
-const PUBLIC_TECHNICAL_ROUTES = Object.freeze([
-  ...(Array.isArray(AUTH_PUBLIC_TECHNICAL_ROUTES) ? AUTH_PUBLIC_TECHNICAL_ROUTES : []),
-  "/activate-account",
-  "/activate",
-  "/activation",
-  "/account/activate",
-  "/activate/first-user",
-  "/reset-password",
-  "/reset-password/confirm",
-  "/reset-password-confirm",
-  "/password-reset",
-  "/password-reset/confirm",
-  "/password-reset-confirm",
-  "/confirm-reset-password",
-  "/forgot-password",
-  "/recover-password",
-  "/recover",
-  "/2fa",
-  "/otp",
-  "/mfa",
-].filter((path) => !LOGIN_PATHS.includes(path)));
+const PUBLIC_TECHNICAL_ROUTES = Object.freeze(
+  [...new Set(Array.isArray(AUTH_PUBLIC_TECHNICAL_ROUTES) ? AUTH_PUBLIC_TECHNICAL_ROUTES : [])]
+    .filter((path) => path && path !== LOGIN_PATH)
+);
 
-const BAD_TOKEN_VALUES = new Set([
-  "",
-  "null",
-  "undefined",
-  "false",
-  "true",
-  "none",
-  "nan",
-  "[object object]",
-  "{}",
-  "[]",
-]);
-
-const USER_ID_KEYS = Object.freeze([
-  "id",
-  "userId",
-  "user_id",
-  "_id",
-  "uid",
-  "sub",
-  "username",
-  "userName",
-  "user_name",
-  "email",
-  "mail",
-  "displayName",
-  "name",
-  "nombre",
-]);
-
-const ADMIN_ALIASES = new Set([
-  "admin",
-  "administrator",
-  "administrador",
-  "superadmin",
-  "super_admin",
-  "super-admin",
-  "owner",
-  "root",
-]);
-
-const USER_ALIASES = new Set([
-  "user",
-  "usuario",
-  "client",
-  "cliente",
-  "customer",
-]);
-
-const SENSITIVE_QUERY_PARAMS = Object.freeze([
-  "token",
-  "activationToken",
-  "activateToken",
-  "resetToken",
-  "passwordResetToken",
-  "confirmToken",
-  "code",
-  "t",
-  "access_token",
-  "refresh_token",
-  "id_token",
-  "tempToken",
-  "temp_token",
-  "temporaryToken",
-  "temporary_token",
-  "twoFactorToken",
-  "two_factor_token",
-  "mfaToken",
-  "mfa_token",
-  "otpToken",
-  "otp_token",
-]);
+const BAD_TOKEN_VALUES = new Set(["", "null", "undefined", "false", "true", "none", "nan", "[object object]", "{}", "[]"]);
+const SENSITIVE_QUERY_PARAMS = Object.freeze(["token", "code", "t", "access_token", "refresh_token", "id_token", "tempToken", "temp_token"]);
 
 export const GUARD_REASONS = Object.freeze({
   allow: "allowed",
@@ -175,14 +84,7 @@ function safeText(value, fallback = "") {
 }
 
 function unique(values = []) {
-  return [
-    ...new Set(
-      safeArray(values)
-        .flat(Infinity)
-        .map((item) => safeText(item, ""))
-        .filter(Boolean)
-    ),
-  ];
+  return [...new Set(safeArray(values).flat(Infinity).map((item) => safeText(item, "")).filter(Boolean))];
 }
 
 function first(...values) {
@@ -198,9 +100,7 @@ function first(...values) {
 
 function truthy(value) {
   if (value === true || value === 1) return true;
-
-  const text = safeText(value, "").toLowerCase();
-  return ["true", "1", "yes", "si", "sí", "ok", "on"].includes(text);
+  return ["true", "1", "yes", "si", "sí", "ok", "on"].includes(safeText(value, "").toLowerCase());
 }
 
 function baseOrigin() {
@@ -213,10 +113,7 @@ function baseOrigin() {
 ========================================================= */
 
 function normalizePathname(pathname = "/") {
-  let value = safeText(pathname, "/")
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
+  let value = safeText(pathname, "/").replace(/\\/g, "/").replace(/\/{2,}/g, "/");
   if (!value.startsWith("/")) value = `/${value}`;
 
   const stack = [];
@@ -406,7 +303,7 @@ function routeGuestOnly(route, canonicalPath = "/") {
   const clean = stripSearchAndHash(canonicalPath);
   const path = routePath(route);
 
-  if (LOGIN_PATHS.includes(clean) || LOGIN_PATHS.includes(path)) return true;
+  if (clean === LOGIN_PATH || path === LOGIN_PATH) return true;
   return Boolean(route?.guestOnly || route?.publicOnly || meta.guestOnly || meta.publicOnly);
 }
 
@@ -434,75 +331,31 @@ function isExplicitPrivate(route) {
 }
 
 function normalizeRole(value = "") {
-  const role = safeText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^a-z0-9_:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-
-  if (ADMIN_ALIASES.has(role)) return "admin";
-  if (USER_ALIASES.has(role)) return "user";
-  return role || "";
+  const role = safeText(value, "").toLowerCase().trim();
+  return ROLE_SET.has(role) ? role : "";
 }
 
 export function normalizeGuardRoles(value) {
-  const raw = [];
-
-  for (const item of safeArray(value).flat(Infinity)) {
-    if (isObject(item)) {
-      raw.push(item.role, item.rol, item.name, item.key, item.id, item.value);
-
-      for (const [key, enabled] of Object.entries(item)) {
-        if (truthy(enabled)) raw.push(key);
-      }
-
-      continue;
-    }
-
-    if (typeof item === "string") {
-      raw.push(...item.split(/[,\s|]+/g));
-      continue;
-    }
-
-    raw.push(item);
-  }
-
-  return unique(raw.map(normalizeRole).filter(Boolean));
+  const source = Array.isArray(value) ? value.flat(Infinity) : safeText(value, "").split(/[,\s|]+/g);
+  return unique(source.map(normalizeRole).filter(Boolean));
 }
 
 function routeRoleInfo(route) {
   const meta = metaOf(route);
-
-  const values = [
+  const rawRoles = unique([
     route?.role,
     route?.requiredRole,
-    route?.requireRole,
-    route?.allowedRole,
     meta.role,
     meta.requiredRole,
-    meta.requireRole,
-    meta.allowedRole,
     ...safeArray(route?.roles),
-    ...safeArray(route?.allowRoles),
-    ...safeArray(route?.allowedRoles),
     ...safeArray(route?.requiredRoles),
-    ...safeArray(route?.requireRoles),
     ...safeArray(meta.roles),
-    ...safeArray(meta.allowRoles),
-    ...safeArray(meta.allowedRoles),
     ...safeArray(meta.requiredRoles),
-    ...safeArray(meta.requireRoles),
-  ];
+    truthy(route?.admin) || truthy(route?.requiresAdmin) || truthy(meta.admin) || truthy(meta.requiresAdmin) ? "admin" : "",
+  ].filter(Boolean));
 
-  if (truthy(route?.admin) || truthy(route?.requiresAdmin) || truthy(meta.admin) || truthy(meta.requiresAdmin)) values.push("admin");
-  if (truthy(route?.user) || truthy(route?.requiresUser) || truthy(meta.user) || truthy(meta.requiresUser)) values.push("user");
-
-  const rawRoles = unique(values.flat(Infinity).map((item) => safeText(item, "")).filter(Boolean));
-  const normalized = normalizeGuardRoles(rawRoles);
-  const roles = normalized.filter((role) => role === "admin" || role === "user");
-  const unsupportedRoles = normalized.filter((role) => role && role !== "admin" && role !== "user");
+  const roles = normalizeGuardRoles(rawRoles);
+  const unsupportedRoles = rawRoles.filter((role) => !normalizeRole(role));
 
   return { rawRoles, roles, unsupportedRoles };
 }
@@ -524,15 +377,13 @@ function isPublicTechnicalPath(path = "/") {
 
   return PUBLIC_TECHNICAL_ROUTES.some((route) => {
     const normalized = normalizePathname(route);
-    if (LOGIN_PATHS.includes(normalized)) return false;
-    return clean === normalized || clean.startsWith(`${normalized}/`);
+    return normalized && clean !== LOGIN_PATH && (clean === normalized || clean.startsWith(`${normalized}/`));
   });
 }
 
 function isAuthRoutePath(path = "/") {
   const clean = stripSearchAndHash(stripUsernamePrefix(path));
-  if (LOGIN_PATHS.includes(clean)) return true;
-  return clean.startsWith("/auth/");
+  return clean === LOGIN_PATH || clean.startsWith("/auth/");
 }
 
 function isPublicTechnicalRoute(route, canonicalPath = "/", publicPath = null) {
@@ -562,14 +413,13 @@ function getViaAuth(Auth = null, names = []) {
 
 function currentUser(AppCore = null, Auth = null) {
   return safeObject(first(
-    getViaAuth(Auth, ["getUser", "getCurrentUser", "currentUser"]),
+    getViaAuth(Auth, ["getUser", "getCurrentUser"]),
     AppCore?.state?.user,
     AppCore?.state?.currentUser,
     AppCore?.state?.sessionUser,
-    AppCore?.state?.authUser,
     AppCore?.state?.session?.user,
-    Auth?.session?.user,
-    Auth?.user
+    Auth?.user,
+    Auth?.session?.user
   ));
 }
 
@@ -583,9 +433,7 @@ function currentToken(AppCore = null, Auth = null) {
     AppCore?.state?.session?.accessToken,
     Auth?.token,
     Auth?.accessToken,
-    Auth?.access_token,
-    Auth?.session?.token,
-    Auth?.session?.accessToken
+    Auth?.session?.token
   );
 
   if (!token) {
@@ -610,44 +458,17 @@ function usableToken(token = "") {
   return true;
 }
 
-function normalizeStatus(value = "") {
-  return safeText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^a-z0-9_:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-}
-
 function userActive(user = null) {
   if (!isObject(user)) return false;
 
-  const status = normalizeStatus(first(user.status, user.estado, user.state, user.accountStatus, user.account_status, ""));
+  const status = safeText(first(user.status, user.estado, user.state, ""), "").toLowerCase();
+  if (["disabled", "blocked", "deleted", "archived", "inactive", "suspended", "locked", "banned", "revoked"].includes(status)) return false;
 
-  if ([
-    "disabled",
-    "blocked",
-    "deleted",
-    "archived",
-    "inactive",
-    "suspended",
-    "locked",
-    "banned",
-    "deactivated",
-    "revoked",
-    "bloqueado",
-    "eliminado",
-    "inactivo",
-    "suspendido",
-    "desactivado",
-  ].includes(status)) return false;
-
-  return !(user.active === false || user.enabled === false || user.disabled === true || user.is_active === false || user.isActive === false || user.is_enabled === false || user.isEnabled === false || user.blocked === true || user.locked === true || user.deleted === true || user.archived === true || user.suspended === true || user.banned === true || user.revoked === true);
+  return !(user.active === false || user.enabled === false || user.disabled === true || user.blocked === true || user.locked === true || user.deleted === true || user.archived === true || user.suspended === true || user.banned === true || user.revoked === true);
 }
 
 function usableUser(user = null) {
-  return Boolean(isObject(user) && userActive(user) && USER_ID_KEYS.some((key) => safeText(user?.[key], "")));
+  return Boolean(isObject(user) && userActive(user) && (safeText(user.userId, "") || safeText(user.id, "")));
 }
 
 function authApiAuthenticated(Auth = null) {
@@ -655,7 +476,7 @@ function authApiAuthenticated(Auth = null) {
     if (isFn(Auth?.isAuthenticated)) return Boolean(Auth.isAuthenticated());
   } catch {}
 
-  return Boolean(Auth?.authenticated || Auth?.isAuth || Auth?.session?.authenticated);
+  return Boolean(Auth?.authenticated || Auth?.session?.authenticated);
 }
 
 function isAuthenticated(AppCore = null, Auth = null) {
@@ -670,41 +491,19 @@ function hasGhostAuth(AppCore = null, Auth = null) {
 function roleCandidates(AppCore = null, Auth = null) {
   const user = currentUser(AppCore, Auth);
   const state = safeObject(AppCore?.state);
-  const session = safeObject(state.session);
-  const raw = safeObject(user.raw);
-  const profile = safeObject(user.profile);
 
-  const values = [
+  const roles = normalizeGuardRoles([
     getViaAuth(Auth, ["getRole", "getCurrentRole"]),
     ...safeArray(getViaAuth(Auth, ["getRoles", "getCurrentRoles"])),
     state.role,
-    state.rol,
-    state.userRole,
     ...safeArray(state.roles),
-    session.role,
-    session.rol,
-    session.userRole,
-    ...safeArray(session.roles),
     user.role,
-    user.rol,
-    user.userRole,
-    user.user_role,
     ...safeArray(user.roles),
-    profile.role,
-    profile.rol,
-    ...safeArray(profile.roles),
-    raw.role,
-    raw.rol,
-    ...safeArray(raw.roles),
     Auth?.role,
-    Auth?.rol,
-    Auth?.userRole,
     ...safeArray(Auth?.roles),
-  ];
+    truthy(state.isAdmin) || truthy(user.isAdmin) || truthy(Auth?.isAdmin) ? "admin" : "",
+  ]);
 
-  if ([state.isAdmin, state.admin, session.isAdmin, session.admin, user.isAdmin, user.admin, profile.isAdmin, profile.admin, raw.isAdmin, raw.admin].some(truthy)) values.push("admin");
-
-  const roles = normalizeGuardRoles(values);
   if (roles.includes("admin")) return ["admin"];
   if (roles.includes("user")) return ["user"];
   return isAuthenticated(AppCore, Auth) ? ["user"] : [];
@@ -716,7 +515,7 @@ function currentRole(AppCore = null, Auth = null) {
 }
 
 function hasAllowedRole(AppCore = null, Auth = null, allowedRoles = []) {
-  const allowed = normalizeGuardRoles(allowedRoles).filter((role) => role === "admin" || role === "user");
+  const allowed = normalizeGuardRoles(allowedRoles);
   if (!allowed.length) return true;
 
   const roles = roleCandidates(AppCore, Auth);
@@ -733,11 +532,11 @@ function getRuntimeFlags(AppCore = null) {
   const state = safeObject(AppCore?.state);
 
   return {
-    loginInProgress: Boolean(state.loginInProgress || state.authLoginInProgress || state.isLoggingIn || state.loggingIn),
-    loginNavigationHandled: Boolean(state.loginNavigationHandled || state.authLoginNavigationHandled),
+    loginInProgress: Boolean(state.loginInProgress || state.isLoggingIn || state.loggingIn),
+    loginNavigationHandled: Boolean(state.loginNavigationHandled),
     bootNavigationHandled: Boolean(state.bootNavigationHandled),
     initialRouteRendered: Boolean(state.initialRouteRendered),
-    restoring: Boolean(state.restoring || state.authRestoring || state.sessionRestoring || state.restoreInFlight || state.authRestoreInFlight),
+    restoring: Boolean(state.restoring || state.authRestoring || state.sessionRestoring),
     booting: Boolean(state.booting || state.loading || state.bootPhase === "booting" || state.bootPhase === "restoring"),
   };
 }
@@ -748,7 +547,8 @@ function loginTransitionActive(AppCore = null) {
 }
 
 function authenticatedRedirectTarget(AppCore, route, getRoute) {
-  const explicit = safeText(first(route?.redirectAuthenticated, route?.redirectIfAuth, route?.meta?.redirectAuthenticated, route?.meta?.redirectIfAuth, ""), "");
+  const meta = safeObject(route?.meta);
+  const explicit = safeText(first(route?.redirectAuthenticated, route?.redirectIfAuth, meta.redirectAuthenticated, meta.redirectIfAuth, ""), "");
 
   if (explicit) {
     const target = safeRedirect(explicit, "");
@@ -953,16 +753,13 @@ export function getGuardsSnapshot({ AppCore = null, Auth = null, route = null, r
     route: route
       ? {
           path: route.path || null,
-          canonicalPath: route.canonicalPath || null,
           name: route.name || null,
           viewKey: route.viewKey || null,
-          viewName: route.viewName || null,
           public: route.public,
           private: route.private,
           requiresAuth: route.requiresAuth,
           guestOnly: route.guestOnly,
           roles: route.roles || [],
-          meta: route.meta || null,
         }
       : null,
     auth: {
@@ -987,7 +784,9 @@ export function getGuardsSnapshot({ AppCore = null, Auth = null, route = null, r
       ownStorage: false,
       ownTransport: false,
       ownRouterNavigation: false,
-      roles: ["admin", "user"],
+      roles: ROLES,
+      userIdentityKeys: ["userId", "id"],
+      roleAliases: false,
     },
     access,
   };

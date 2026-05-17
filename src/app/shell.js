@@ -2,11 +2,13 @@
    Onion SPA - App Shell
    Archivo: src/app/shell.js
 
-   APP SHELL · FINAL SIMPLE
-   - Adapter mínimo para boot/compat
-   - router/shell.js gestiona el chrome real
-   - Aquí sólo exponemos helpers que usa app/index.js
-   - Sin Auth, guards, render de vistas, history, storage, Toast ni navegación
+   APP SHELL · SIMPLE ADAPTER
+   - adapter mínimo para boot/compat
+   - router/shell.js gobierna el chrome real
+   - expone helpers usados por app/index.js
+   - sincroniza visibilidad por ruta
+   - aplica política de loader post-render
+   - sin Auth, guards, render de vistas, history, storage, Toast ni navegación
 ========================================================= */
 
 import {
@@ -15,11 +17,7 @@ import {
   getShellSnapshot as getRouterShellSnapshot,
 } from "../router/shell.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const SHELL_VERSION = "20.0.0-final";
+export const SHELL_VERSION = "21.0.0-simple";
 
 const SOURCE = "app.shell";
 const DEFAULT_ROUTE = "/";
@@ -66,11 +64,11 @@ const AUTH_PREFIXES = Object.freeze([
   "/mfa/",
 ]);
 
-const BOOT_CLASSES = Object.freeze(["app-booting", "app-loading", "is-booting", "is-loading", "loading"]);
 const LOADER_VISIBLE_CLASSES = Object.freeze(["is-visible", "is-entering", "is-leaving", "loader-visible", "app-loader--visible"]);
 const LOADER_HIDDEN_CLASSES = Object.freeze(["is-hidden", "has-hidden", "loader-hidden"]);
 
 const TOKEN_RE = /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token|temporaryToken|temporary_token|twoFactorToken|two_factor_token|mfaToken|mfa_token|otpToken|otp_token)=)([^&#\s]+)/gi;
+const SENSITIVE_KEY_RE = /token|secret|password|authorization|credential|jwt|bearer|session|refresh|otp|mfa|2fa|code/i;
 
 /* =========================================================
    BASICS
@@ -78,7 +76,7 @@ const TOKEN_RE = /([?&#](?:token|activationToken|activateToken|resetToken|passwo
 
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
 const isFn = (value) => typeof value === "function";
-const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
 
 function object(value, fallback = {}) {
   return isObject(value) ? value : fallback;
@@ -114,11 +112,7 @@ function redact(value = "") {
 
 function sanitize(value, depth = 0, keyHint = "") {
   if (depth > 4) return "[depth-limit]";
-
-  if (/token|secret|password|authorization|credential|jwt|bearer|session|refresh|otp|mfa|2fa|code/i.test(keyHint)) {
-    return value ? "***" : value;
-  }
-
+  if (SENSITIVE_KEY_RE.test(text(keyHint, ""))) return value ? "***" : value;
   if (typeof value === "string") return redact(value);
   if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "function") return "[function]";
@@ -135,13 +129,11 @@ function sanitize(value, depth = 0, keyHint = "") {
   if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitize(item, depth + 1, keyHint));
 
   if (isObject(value)) {
-    const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = sanitize(item, depth + 1, key);
-    }
-
-    return output;
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 80)
+        .map(([key, item]) => [key, sanitize(item, depth + 1, key)])
+    );
   }
 
   return String(value);
@@ -151,12 +143,7 @@ function emit(AppCore, eventName = "", payload = {}, options = {}) {
   const name = text(eventName, "");
   if (!name || options.emit === false || options.emitEvents === false) return false;
 
-  const detail = sanitize({
-    source: SOURCE,
-    version: SHELL_VERSION,
-    at: isoNow(),
-    ...object(payload),
-  });
+  const detail = sanitize({ source: SOURCE, version: SHELL_VERSION, at: isoNow(), ...object(payload) });
 
   try {
     AppCore?.events?.emit?.(name, detail);
@@ -207,17 +194,15 @@ function normalizePathname(path = DEFAULT_ROUTE) {
     .replace(/\/{2,}/g, "/")
     .replace(/^\/@[^/]+(?=\/|$)/i, "");
 
+  if (!value) value = DEFAULT_ROUTE;
   if (!value.startsWith("/")) value = `/${value}`;
 
   const parts = [];
 
   for (const part of value.split("/").filter(Boolean)) {
     if (part === ".") continue;
-    if (part === "..") {
-      parts.pop();
-      continue;
-    }
-    parts.push(part);
+    if (part === "..") parts.pop();
+    else parts.push(part);
   }
 
   value = `/${parts.join("/")}` || DEFAULT_ROUTE;
@@ -272,8 +257,8 @@ function routeForVisibility({ visible = true, route = null, canonical = DEFAULT_
   }
 
   return {
-    path: DEFAULT_ROUTE,
-    canonicalPath: DEFAULT_ROUTE,
+    path: canonical || DEFAULT_ROUTE,
+    canonicalPath: canonical || DEFAULT_ROUTE,
     hideShell: false,
     shell: true,
     showShell: true,
@@ -290,13 +275,8 @@ function routeForVisibility({ visible = true, route = null, canonical = DEFAULT_
 function setHidden(element, hidden = false) {
   if (!element) return false;
 
-  try {
-    element.hidden = Boolean(hidden);
-  } catch {}
-
-  try {
-    element.setAttribute("aria-hidden", hidden ? "true" : "false");
-  } catch {}
+  try { element.hidden = Boolean(hidden); } catch {}
+  try { element.setAttribute("aria-hidden", hidden ? "true" : "false"); } catch {}
 
   return true;
 }
@@ -326,23 +306,8 @@ function hasContent(element) {
   }
 }
 
-function getLoader(AppCore) {
-  try {
-    const elements = getShellElements(AppCore);
-    if (elements.loader) return elements.loader;
-  } catch {}
-
-  if (!isBrowser()) return null;
-
-  try {
-    return document.getElementById("app-loader") || document.querySelector("[data-app-loader], .app-loader");
-  } catch {
-    return null;
-  }
-}
-
 function hideLoaderFallback(AppCore) {
-  const loader = getLoader(AppCore);
+  const loader = getShellElements(AppCore).loader;
   if (!loader) return false;
 
   try {
@@ -360,7 +325,7 @@ function hideLoaderFallback(AppCore) {
 }
 
 export function getShellElements(AppCore) {
-  const elements = getRouterShellElements(AppCore);
+  const elements = getRouterShellElements(AppCore) || {};
 
   return {
     html: elements.html || null,
@@ -415,21 +380,21 @@ export function readShellVisibility(AppCore) {
 
 export function setShellVisibility(AppCore, visible = true, options = {}) {
   const opts = object(options);
+  const show = Boolean(visible);
   const canonical = canonicalPath(opts.canonicalPath || AppCore?.state?.route || DEFAULT_ROUTE);
   const publicPath = text(opts.publicPath || AppCore?.state?.publicPath || canonical, canonical);
-  const route = routeForVisibility({ visible, route: opts.route || null, canonical });
-
+  const route = routeForVisibility({ visible: show, route: opts.route || null, canonical });
   const result = setRouterShellMode(AppCore, route);
 
   setState(AppCore, {
     appShellVisible: true,
-    shellVisible: Boolean(visible),
-    shellHidden: !Boolean(visible),
-    chromeVisible: Boolean(visible),
-    chromeHidden: !Boolean(visible),
-    routeShellHidden: !Boolean(visible),
-    authScreen: !Boolean(visible),
-    routeMode: visible ? "app" : "auth",
+    shellVisible: show,
+    shellHidden: !show,
+    chromeVisible: show,
+    chromeHidden: !show,
+    routeShellHidden: !show,
+    authScreen: !show,
+    routeMode: show ? "app" : "auth",
     currentShellRoute: canonical,
     currentShellCanonicalPath: canonical,
     currentShellPublicPath: publicPath,
@@ -437,14 +402,14 @@ export function setShellVisibility(AppCore, visible = true, options = {}) {
 
   emit(AppCore, "app:shell:state", {
     reason: text(opts.reason, "set-shell-visibility"),
-    visible: Boolean(visible),
-    chromeVisible: Boolean(visible),
-    authLike: !Boolean(visible),
+    visible: show,
+    chromeVisible: show,
+    authLike: !show,
     canonicalPath: canonical,
     publicPath,
   });
 
-  return result?.visible ?? Boolean(visible);
+  return result?.visible ?? show;
 }
 
 export function updateShellVisibilityByRoute(AppCore, Router = null, options = {}) {
@@ -458,13 +423,12 @@ export function updateShellVisibilityByRoute(AppCore, Router = null, options = {
     route = route || Router?.getRoute?.(canonical) || Router?.getCurrentRoute?.() || null;
   } catch {}
 
-  const authLike = opts.authLike !== undefined ? Boolean(opts.authLike) : Boolean(isAuthLikePathValue(canonical) || route?.layout === "auth" || route?.hideShell === true || route?.shell === false || route?.meta?.layout === "auth");
+  const authLike = opts.authLike !== undefined
+    ? Boolean(opts.authLike)
+    : Boolean(isAuthLikePathValue(canonical) || route?.layout === "auth" || route?.hideShell === true || route?.shell === false || route?.meta?.layout === "auth");
 
-  if (!route) {
-    route = routeForVisibility({ visible: !authLike, canonical });
-  }
-
-  const result = setRouterShellMode(AppCore, route);
+  const finalRoute = route || routeForVisibility({ visible: !authLike, canonical });
+  const result = setRouterShellMode(AppCore, finalRoute);
 
   setState(AppCore, {
     appShellVisible: true,
@@ -511,7 +475,8 @@ export function applyPostRenderLoaderPolicy({
   hideLoaderOnPostRender = true,
   minVisibleMs = 0,
 } = {}) {
-  const view = getViewContainer(AppCore);
+  const elements = getShellElements(AppCore);
+  const view = elements.viewContainer;
   const hasViewContent = hasContent(view);
   const chromeVisible = updateShellVisibilityByRoute(AppCore, Router, { reason: "post-render-policy" });
 
@@ -525,7 +490,7 @@ export function applyPostRenderLoaderPolicy({
     });
   }
 
-  for (const element of [getShellElements(AppCore).appShell, getShellElements(AppCore).mainContent, getShellElements(AppCore).appContent, view]) {
+  for (const element of [elements.appShell, elements.mainContent, elements.appContent, view]) {
     setHidden(element, false);
     setBusy(element, false);
   }
@@ -554,7 +519,9 @@ export function markShellReady(AppCore, options = {}) {
 }
 
 export function markShellBusy(AppCore, options = {}) {
-  for (const element of [getShellElements(AppCore).appShell, getShellElements(AppCore).mainContent, getShellElements(AppCore).appContent, getShellElements(AppCore).viewContainer]) {
+  const elements = getShellElements(AppCore);
+
+  for (const element of [elements.appShell, elements.mainContent, elements.appContent, elements.viewContainer]) {
     setBusy(element, true);
   }
 
@@ -626,10 +593,10 @@ function elementSnapshot(element) {
 
 export function getShellSnapshot(AppCore, Router = null) {
   const elements = getShellElements(AppCore);
-  let routerSnapshot = null;
+  let routerShell = null;
 
   try {
-    routerSnapshot = getRouterShellSnapshot(AppCore);
+    routerShell = getRouterShellSnapshot(AppCore);
   } catch {}
 
   const canonical = currentCanonical(AppCore, Router);
@@ -660,7 +627,7 @@ export function getShellSnapshot(AppCore, Router = null) {
       tableheadContainer: elementSnapshot(elements.tableheadContainer),
       loader: elementSnapshot(elements.loader),
     },
-    routerShell: routerSnapshot,
+    routerShell,
     policy: {
       adapterOnly: true,
       ownRouter: false,
@@ -718,10 +685,6 @@ export function exposeShellDebugApi(AppCore = null) {
 
   return api;
 }
-
-/* =========================================================
-   EXPORT
-========================================================= */
 
 export default {
   SHELL_VERSION,

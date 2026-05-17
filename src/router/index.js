@@ -8,11 +8,10 @@
    - guards deciden acceso
    - render pinta vistas
    - history gestiona push/replace/popstate
-   - sin Auth real, fetch, storage, Toast ni lógica de vistas
+   - sin Auth estático, fetch, storage, Toast ni lógica de vistas
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
-import { Auth } from "../features/auth/index.js";
 
 import {
   getRouteNames,
@@ -70,7 +69,7 @@ import {
   setShellMode,
 } from "./shell.js";
 
-export const ROUTER_VERSION = "21.0.0-simple";
+export const ROUTER_VERSION = "21.0.1-simple";
 
 export const Router = (() => {
   "use strict";
@@ -81,6 +80,7 @@ export const Router = (() => {
 
   const LOGIN_PATH = ROUTE_PATHS?.LOGIN || "/login";
   const HOME_PATH = ROUTE_PATHS?.HOME || "/";
+  const MAX_REDIRECT_DEPTH = 4;
 
   const EVENTS = Object.freeze({
     configured: "router:configured",
@@ -104,6 +104,9 @@ export const Router = (() => {
   let lastRenderedCanonicalPath = "";
   let lastRenderedPublicPath = "";
   let lastRenderedAt = 0;
+
+  let authReadyScheduled = false;
+  let repairScheduled = false;
 
   const disposers = [];
 
@@ -273,6 +276,26 @@ export const Router = (() => {
   }
 
   /* =======================================================
+     AUTH RUNTIME
+  ======================================================= */
+
+  function moduleGet(name = "") {
+    try {
+      return AppCore?.modules?.get?.(name) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function getAuth() {
+    try {
+      return AppCore?.Auth || AppCore?.auth || moduleGet("Auth") || moduleGet("auth") || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /* =======================================================
      PATH / ROUTE RESOLUTION
   ======================================================= */
 
@@ -357,7 +380,10 @@ export const Router = (() => {
     } catch {}
 
     try {
-      if (route?.pattern instanceof RegExp && route.pattern.test(clean)) return "route.pattern";
+      if (route?.pattern instanceof RegExp) {
+        route.pattern.lastIndex = 0;
+        if (route.pattern.test(clean)) return "route.pattern";
+      }
     } catch {}
 
     return "";
@@ -576,8 +602,20 @@ export const Router = (() => {
     return true;
   }
 
+  function scheduleRepairCurrentRoute(phase = "repair") {
+    if (repairScheduled) return false;
+    repairScheduled = true;
+
+    afterPaint(() => {
+      repairScheduled = false;
+      repairCurrentRoute(phase);
+    });
+
+    return true;
+  }
+
   function repairShell(payload = {}) {
-    if (typeof payload === "string") return repairCurrentRoute(payload);
+    if (typeof payload === "string") return scheduleRepairCurrentRoute(payload);
 
     const data = safeObject(payload);
     const resolved = data.route
@@ -631,7 +669,7 @@ export const Router = (() => {
     try {
       const access = shouldAllowRoute({
         AppCore,
-        Auth,
+        Auth: getAuth(),
         route,
         requestedCanonicalPath: canonicalPath,
         requestedPublicPath: publicPath,
@@ -646,7 +684,9 @@ export const Router = (() => {
   }
 
   async function renderDenied(access, data, options, seq) {
+    const opts = safeObject(options);
     const reason = access?.reason || "blocked";
+    const redirectDepth = Math.min(Number(opts.redirectDepth || opts._redirectDepth || 0) || 0, MAX_REDIRECT_DEPTH);
 
     if (!isLatest(seq)) return stale(seq, "guard-stale");
 
@@ -687,7 +727,21 @@ export const Router = (() => {
     }
 
     if (reason === "already-authenticated" && access.redirectTo) {
-      return executeRender(access.redirectTo || getDefaultHome(), { ...safeObject(options), replaceState: true, force: true, forceRender: true, source: "guard:already-authenticated" }, seq);
+      const target = normalizePublicPath(access.redirectTo || getDefaultHome());
+
+      if (redirectDepth >= MAX_REDIRECT_DEPTH || sameCanonical(target, data.canonicalPath)) {
+        return { ok: false, handled: true, redirected: false, reason: "redirect-loop-blocked" };
+      }
+
+      return executeRender(target, {
+        ...opts,
+        replaceState: true,
+        force: true,
+        forceRender: true,
+        source: "guard:already-authenticated",
+        redirectDepth: redirectDepth + 1,
+        _redirectDepth: redirectDepth + 1,
+      }, seq);
     }
 
     destroyActiveView();
@@ -1009,6 +1063,8 @@ export const Router = (() => {
   }
 
   function isAuthenticated() {
+    const Auth = getAuth();
+
     try {
       return Boolean(Auth?.isAuthenticated?.());
     } catch {
@@ -1016,13 +1072,20 @@ export const Router = (() => {
     }
   }
 
-  function onAuthReady() {
+  function runAuthReady() {
+    authReadyScheduled = false;
     repairCurrentRoute("auth-ready");
 
     const current = currentComparable();
     if (current.canonicalPath === LOGIN_PATH && isAuthenticated()) {
       goAfterLogin(HOME_PATH, { source: "auth-ready" });
     }
+  }
+
+  function onAuthReady() {
+    if (authReadyScheduled) return;
+    authReadyScheduled = true;
+    afterPaint(runAuthReady);
   }
 
   function bindLinks() {
@@ -1063,8 +1126,10 @@ export const Router = (() => {
     return api;
   }
 
-  function bind() {
+  function bind(options = {}) {
     if (bound) return api;
+
+    const opts = safeObject(options);
 
     validateRoutesTable(AppCore, routes, normalizeCanonicalPathHelper);
     attachToAppCore();
@@ -1080,25 +1145,25 @@ export const Router = (() => {
       });
 
       ["app:user:change", "auth:logout:success", "app:session:cleared", "app:ui:repair-request"].forEach((name) => {
-        disposers.push(onEvent(name, () => repairCurrentRoute(name)));
+        disposers.push(onEvent(name, () => scheduleRepairCurrentRoute(name)));
       });
     }
 
     ensureInitialHistoryState({ AppCore });
-    emit(EVENTS.bound, { routes: routes.map((route) => route.path) });
+    emit(EVENTS.bound, { routes: routes.map((route) => route.path), appManagedInitialRender: opts.appManagedInitialRender === true });
 
     return api;
   }
 
   function init(options = {}) {
     configure(options);
-    bind();
+    bind(options);
     return api;
   }
 
   function start(options = {}) {
     init(options);
-    if (options.render === false) return Promise.resolve(api);
+    if (options.render === false || options.skipInitialRender === true || options.appManagedInitialRender === true) return Promise.resolve(api);
     return renderCurrent({ initialRender: true, preserveUrl: true, source: "router.start", ...safeObject(options) });
   }
 
@@ -1111,6 +1176,8 @@ export const Router = (() => {
 
     destroyActiveView();
     bound = false;
+    authReadyScheduled = false;
+    repairScheduled = false;
     emit(EVENTS.unbound);
     return api;
   }
@@ -1151,9 +1218,12 @@ export const Router = (() => {
       lastRenderedAt,
       lastRenderedAtIso: lastRenderedAt ? iso(lastRenderedAt) : "",
       authenticated: isAuthenticated(),
+      authReadyScheduled,
+      repairScheduled,
       routes: routeSnapshot,
       policy: {
         ownAuth: false,
+        staticAuthImport: false,
         ownStorage: false,
         ownTransport: false,
         ownToast: false,

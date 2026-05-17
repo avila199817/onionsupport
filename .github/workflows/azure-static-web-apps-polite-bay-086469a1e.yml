@@ -1,7 +1,6 @@
 name: Azure Static Web Apps CI/CD
 
-run-name: >-
-  SWA · ${{ github.event_name }} · ${{ github.head_ref || github.ref_name || 'manual' }}
+run-name: SWA · ${{ github.event_name }} · ${{ github.head_ref || github.ref_name || 'manual' }}
 
 on:
   push:
@@ -20,24 +19,23 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: >-
-    azure-static-web-apps-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: swa-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
+  pull-requests: write
 
 env:
   APP_LOCATION: "/"
   API_LOCATION: ""
   OUTPUT_LOCATION: ""
   PRODUCTION_BRANCH: "main"
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   AZURE_STATIC_WEB_APPS_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
 
 jobs:
-  deploy_static_web_app:
-    name: Deploy Static Web App
+  deploy:
+    name: Deploy
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -50,559 +48,45 @@ jobs:
         github.event.pull_request.head.repo.full_name == github.repository
       )
 
-    permissions:
-      contents: read
-      pull-requests: write
-
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
+          fetch-depth: 1
           submodules: false
           lfs: false
-          fetch-depth: 1
           persist-credentials: false
 
-      - name: Validate deployment token
+      - name: Validate package
         shell: bash
         run: |
           set -euo pipefail
 
           if [ -z "${AZURE_STATIC_WEB_APPS_API_TOKEN:-}" ]; then
-            echo "::error::Falta el secret AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E o está vacío."
+            echo "::error::Falta el secret AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E."
             exit 1
           fi
 
-          echo "Deployment token detected."
-
-      - name: Validate Onion SPA package
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          APP_ROOT="${APP_LOCATION:-/}"
-          APP_ROOT="${APP_ROOT%/}"
-
-          if [ -z "$APP_ROOT" ] || [ "$APP_ROOT" = "/" ]; then
-            APP_ROOT="."
-          fi
-
-          echo "App root: $APP_ROOT"
-          echo "API location: ${API_LOCATION:-<empty>}"
-          echo "Output location: ${OUTPUT_LOCATION:-<empty>}"
-          echo "Production branch: ${PRODUCTION_BRANCH:-main}"
-
-          if [ ! -d "$APP_ROOT" ]; then
-            echo "::error file=$APP_ROOT::No existe APP_LOCATION."
-            exit 1
-          fi
-
-          if [ ! -f "$APP_ROOT/index.html" ]; then
-            echo "::error file=$APP_ROOT/index.html::No se encontró index.html. Con skip_app_build=true, Azure Static Web Apps despliega directamente APP_LOCATION."
-            exit 1
-          fi
-
-          if [ ! -f "$APP_ROOT/staticwebapp.config.json" ]; then
-            echo "::error file=$APP_ROOT/staticwebapp.config.json::No se encontró staticwebapp.config.json. Para Onion SPA es obligatorio para navigationFallback, headers y MIME types."
-            exit 1
-          fi
-
-          if [ ! -f "$APP_ROOT/site.webmanifest" ]; then
-            echo "::error file=$APP_ROOT/site.webmanifest::No se encontró site.webmanifest."
-            exit 1
-          fi
-
-          if [ ! -f "$APP_ROOT/robots.txt" ]; then
-            echo "::error file=$APP_ROOT/robots.txt::No se encontró robots.txt."
-            exit 1
-          fi
-
-          export APP_ROOT
-
-          python3 - <<'PY'
-          import json
-          import os
-          import pathlib
-          import re
-          import sys
-          import xml.etree.ElementTree as ET
-
-          app_root = pathlib.Path(os.environ["APP_ROOT"])
-
-          config_path = app_root / "staticwebapp.config.json"
-          index_path = app_root / "index.html"
-          manifest_path = app_root / "site.webmanifest"
-          robots_path = app_root / "robots.txt"
-          sitemap_path = app_root / "sitemap.xml"
-
-          def error(path, message):
-              print(f"::error file={path}::{message}")
-              sys.exit(1)
-
-          def warning(path, message):
-              print(f"::warning file={path}::{message}")
-
-          def notice(path, message):
-              print(f"::notice file={path}::{message}")
-
-          def read_text(path):
-              return path.read_text(encoding="utf-8", errors="replace")
-
-          def load_json(path):
-              try:
-                  return json.loads(read_text(path))
-              except Exception as exc:
-                  error(path, f"No es JSON válido: {exc}")
-
-          def strip_html_comments(text):
-              return re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
-
-          def get_attr(tag, attr):
-              match = re.search(
-                  rf'\b{re.escape(attr)}\s*=\s*["\']([^"\']*)["\']',
-                  tag,
-                  flags=re.IGNORECASE
-              )
-              return match.group(1).strip() if match else ""
-
-          def has_attr(tag, attr):
-              return re.search(
-                  rf'\b{re.escape(attr)}(?:\s*=\s*["\'][^"\']*["\'])?',
-                  tag,
-                  flags=re.IGNORECASE
-              ) is not None
-
-          def normalize_url_path(value):
-              value = str(value or "").strip()
-              return value.split("?", 1)[0].split("#", 1)[0]
-
-          def asset_exists(url_path):
-              clean = normalize_url_path(url_path)
-              if not clean.startswith("/"):
-                  return True
-              physical = app_root / clean.lstrip("/")
-              return physical.exists()
-
-          def find_tag_with_asset(html, tag_name, attr_name, asset_path):
-              pattern = rf"<{re.escape(tag_name)}\b[^>]*>"
-              for match in re.finditer(pattern, html, flags=re.IGNORECASE):
-                  tag = match.group(0)
-                  attr_value = normalize_url_path(get_attr(tag, attr_name))
-                  if attr_value == asset_path:
-                      return match.start(), tag
-              return -1, ""
-
-          def has_id(html, dom_id):
-              return re.search(
-                  rf'\bid\s*=\s*["\']{re.escape(dom_id)}["\']',
-                  html,
-                  flags=re.IGNORECASE
-              ) is not None
-
-          config = load_json(config_path)
-          manifest = load_json(manifest_path)
-
-          index_text = read_text(index_path)
-          robots_text = read_text(robots_path)
-          index_without_comments = strip_html_comments(index_text)
-
-          # =====================================================
-          # staticwebapp.config.json
-          # =====================================================
-
-          navigation = config.get("navigationFallback") or {}
-          rewrite = navigation.get("rewrite")
-
-          if rewrite != "/index.html":
-              error(config_path, "navigationFallback.rewrite debe ser /index.html para Onion SPA.")
-
-          excludes = navigation.get("exclude") or []
-
-          if not isinstance(excludes, list):
-              error(config_path, "navigationFallback.exclude debe ser un array.")
-
-          required_excludes = [
-              "/api/*",
-              "/.auth/*",
-              "/robots.txt",
-              "/sitemap.xml",
-              "/manifest.json",
-              "/site.webmanifest",
-              "/sw.js",
-              "/favicon.ico",
-              "/src/*",
-              "/assets/*"
-          ]
-
-          missing_excludes = [item for item in required_excludes if item not in excludes]
-
-          if missing_excludes:
-              warning(
-                  config_path,
-                  "Faltan excludes recomendados en navigationFallback: " + ", ".join(missing_excludes)
-              )
-
-          if "/favicon.svg" in excludes:
-              error(config_path, "No declares /favicon.svg en navigationFallback.exclude porque no existe ni se usa.")
-
-          routes = config.get("routes") or []
-
-          if not isinstance(routes, list):
-              error(config_path, "routes debe ser un array.")
-
-          sitemap_routes = [
-              route for route in routes
-              if isinstance(route, dict) and route.get("route") == "/sitemap.xml"
-          ]
-
-          if not sitemap_routes:
-              error(config_path, "Debe existir una regla para /sitemap.xml.")
-
-          if not any(route.get("statusCode") == 404 for route in sitemap_routes):
-              error(config_path, "/sitemap.xml debe responder 404 mientras Onion Support sea SPA privada.")
-
-          static_config_routes = [
-              route for route in routes
-              if isinstance(route, dict) and route.get("route") == "/staticwebapp.config.json"
-          ]
-
-          if not static_config_routes:
-              error(config_path, "Debe existir una regla que oculte /staticwebapp.config.json.")
-
-          if not any(route.get("statusCode") == 404 for route in static_config_routes):
-              error(config_path, "/staticwebapp.config.json debe responder 404.")
-
-          global_headers = config.get("globalHeaders") or {}
-
-          if not isinstance(global_headers, dict):
-              error(config_path, "globalHeaders debe ser un objeto.")
-
-          csp = global_headers.get("Content-Security-Policy", "")
-
-          if not csp:
-              error(config_path, "Falta Content-Security-Policy en globalHeaders.")
-
-          required_csp_parts = [
-              "default-src 'self'",
-              "base-uri 'self'",
-              "object-src 'none'",
-              "frame-ancestors 'none'",
-              "script-src 'self'",
-              "script-src-attr 'none'",
-              "style-src 'self'",
-              "manifest-src 'self'"
-          ]
-
-          missing_csp = [part for part in required_csp_parts if part not in csp]
-
-          if missing_csp:
-              error(config_path, "CSP incompleta. Faltan: " + ", ".join(missing_csp))
-
-          if "'unsafe-inline'" in csp:
-              error(config_path, "La CSP no debe permitir 'unsafe-inline'. Onion SPA no usa CSS/JS inline.")
-
-          if "fonts.googleapis.com" in csp or "fonts.gstatic.com" in csp:
-              error(config_path, "La CSP no debe permitir Google Fonts. Onion usa fuentes locales/sistema.")
-
-          mime_types = config.get("mimeTypes") or {}
-
-          if not isinstance(mime_types, dict):
-              error(config_path, "mimeTypes debe ser un objeto.")
-
-          required_mimes = {
-              ".html": "text/html",
-              ".css": "text/css",
-              ".js": "application/javascript",
-              ".mjs": "application/javascript",
-              ".json": "application/json",
-              ".webmanifest": "application/manifest+json",
-              ".png": "image/png",
-              ".ico": "image/x-icon"
-          }
-
-          for ext, expected in required_mimes.items():
-              actual = mime_types.get(ext)
-              if actual != expected:
-                  error(config_path, f"mimeTypes{ext} debe ser {expected}, valor actual: {actual!r}")
-
-          # =====================================================
-          # index.html
-          # =====================================================
-
-          if not index_text.lstrip().lower().startswith("<!doctype html>"):
-              warning(index_path, "index.html debería empezar con <!DOCTYPE html>.")
-
-          html_open_match = re.search(r"<html\b[^>]*>", index_without_comments, flags=re.IGNORECASE)
-
-          if not html_open_match:
-              error(index_path, "No se detectó etiqueta <html>.")
-
-          html_open = html_open_match.group(0)
-
-          if get_attr(html_open, "lang").lower() != "es":
-              error(index_path, "El shell SPA debe declarar html lang=\"es\".")
-
-          if get_attr(html_open, "data-app").lower() != "onion":
-              error(index_path, "El shell SPA debe declarar data-app=\"onion\".")
-
-          base_match = re.search(r"<base\b[^>]*>", index_without_comments, flags=re.IGNORECASE)
-
-          if not base_match or get_attr(base_match.group(0), "href") != "/":
-              error(index_path, "index.html debe declarar <base href=\"/\">.")
-
-          theme_pos, theme_tag = find_tag_with_asset(
-              index_without_comments,
-              "script",
-              "src",
-              "/src/preboot/theme.js"
+          required_files=(
+            "index.html"
+            "staticwebapp.config.json"
+            "site.webmanifest"
+            "robots.txt"
+            "src/main.js"
+            "src/preboot/theme.js"
+            "src/css/app.css"
           )
 
-          css_pos, css_tag = find_tag_with_asset(
-              index_without_comments,
-              "link",
-              "href",
-              "/src/css/app.css"
-          )
-
-          main_pos, main_tag = find_tag_with_asset(
-              index_without_comments,
-              "script",
-              "src",
-              "/src/main.js"
-          )
-
-          if theme_pos < 0:
-              error(index_path, "No se detectó <script src=\"/src/preboot/theme.js\">.")
-
-          if css_pos < 0:
-              error(index_path, "No se detectó <link rel=\"stylesheet\" href=\"/src/css/app.css\">.")
-
-          if main_pos < 0:
-              error(index_path, "No se detectó <script type=\"module\" src=\"/src/main.js\">.")
-
-          if has_attr(theme_tag, "async") or has_attr(theme_tag, "defer") or get_attr(theme_tag, "type"):
-              error(index_path, "/src/preboot/theme.js debe cargar síncrono antes del CSS, sin async, sin defer y sin type=module.")
-
-          css_rel_tokens = set(get_attr(css_tag, "rel").lower().split())
-
-          if "stylesheet" not in css_rel_tokens:
-              error(index_path, "/src/css/app.css debe cargarse con rel=\"stylesheet\".")
-
-          if get_attr(main_tag, "type").lower() != "module":
-              error(index_path, "/src/main.js debe cargarse con type=\"module\".")
-
-          if not (theme_pos < css_pos < main_pos):
-              error(
-                  index_path,
-                  "Orden inválido. Debe ser: /src/preboot/theme.js antes de /src/css/app.css y /src/main.js después del CSS."
-              )
-
-          if "fonts.googleapis.com" in index_without_comments or "fonts.gstatic.com" in index_without_comments:
-              error(index_path, "index.html no debe referenciar Google Fonts.")
-
-          if "<style" in index_without_comments.lower():
-              error(index_path, "index.html no debe contener <style> inline.")
-
-          if re.search(r"\sstyle\s*=", index_without_comments, flags=re.IGNORECASE):
-              error(index_path, "index.html no debe contener atributos style inline.")
-
-          inline_handler = re.search(
-              r"\s(onclick|onload|onerror|onchange|onsubmit|oninput|onkeydown|onkeyup|onmouseover|onfocus|onblur)\s*=",
-              index_without_comments,
-              flags=re.IGNORECASE
-          )
-
-          if inline_handler:
-              error(index_path, "index.html no debe contener handlers inline.")
-
-          html_asset_refs = re.findall(
-              r'\b(?:href|src)\s*=\s*["\']([^"\']+)["\']',
-              index_without_comments,
-              flags=re.IGNORECASE
-          )
-
-          if any("favicon.svg" in ref for ref in html_asset_refs):
-              error(index_path, "index.html no debe referenciar favicon.svg en href/src.")
-
-          link_tags = re.findall(r"<link\b[^>]*>", index_without_comments, flags=re.IGNORECASE)
-
-          standard_icon_links = []
-          all_icon_links = []
-
-          for tag in link_tags:
-              rel_value = get_attr(tag, "rel").lower()
-              href_value = get_attr(tag, "href")
-              href_path = normalize_url_path(href_value)
-
-              rel_tokens = set(rel_value.split())
-              is_icon_link = "icon" in rel_tokens or "apple-touch-icon" in rel_tokens
-
-              if is_icon_link:
-                  all_icon_links.append((tag, rel_value, href_value, href_path))
-
-              if "icon" in rel_tokens and "apple-touch-icon" not in rel_tokens:
-                  standard_icon_links.append((tag, rel_value, href_value, href_path))
-
-              if is_icon_link and href_path == "/favicon.ico":
-                  error(index_path, "No declares /favicon.ico en index.html. Queda sólo como fallback físico pasivo.")
-
-              if is_icon_link and "favicon_support.png" in href_value:
-                  error(index_path, "index.html no debe usar favicon_support.png como favicon del SPA.")
-
-          if not standard_icon_links:
-              error(index_path, "index.html debe declarar al menos un rel=icon estándar.")
-
-          if not any("/src/media/img/favicon_black_circle.png" in href for _, _, href, _ in all_icon_links):
-              error(index_path, "El favicon real del SPA debe ser /src/media/img/favicon_black_circle.png en un link rel=icon/apple-touch-icon.")
-
-          required_index_assets = [
-              "/src/media/img/favicon_black_circle.png",
-              "/src/media/img/favicon_white.png",
-              "/src/media/img/favicon_black.png",
-              "/src/css/app.css",
-              "/src/preboot/theme.js",
-              "/src/main.js"
-          ]
-
-          missing_assets = [
-              asset for asset in required_index_assets
-              if not any(normalize_url_path(ref) == asset for ref in html_asset_refs)
-          ]
-
-          if missing_assets:
-              error(index_path, "Faltan assets obligatorios en href/src de index.html: " + ", ".join(missing_assets))
-
-          for asset in required_index_assets:
-              if not asset_exists(asset):
-                  error(index_path, f"El asset obligatorio no existe físicamente: {asset}")
-
-          required_dom_ids = [
-              "app-loader",
-              "app-shell",
-              "sidebar-mount",
-              "topbar-mount",
-              "main-content",
-              "table-head",
-              "tablehead-container",
-              "app-content",
-              "view-container"
-          ]
-
-          missing_dom_nodes = [
-              dom_id for dom_id in required_dom_ids
-              if not has_id(index_without_comments, dom_id)
-          ]
-
-          if missing_dom_nodes:
-              error(index_path, "Faltan nodos canónicos del shell SPA: " + ", ".join(missing_dom_nodes))
-
-          # =====================================================
-          # site.webmanifest
-          # =====================================================
-
-          icons = manifest.get("icons") or []
-
-          if not icons:
-              error(manifest_path, "site.webmanifest debe declarar icons.")
-
-          if not isinstance(icons, list):
-              error(manifest_path, "site.webmanifest icons debe ser un array.")
-
-          icon_sources = [
-              str(icon.get("src", ""))
-              for icon in icons
-              if isinstance(icon, dict)
-          ]
-
-          if not any("/src/media/img/favicon_black_circle.png" in src for src in icon_sources):
-              error(manifest_path, "site.webmanifest debe usar /src/media/img/favicon_black_circle.png.")
-
-          forbidden_manifest_refs = [
-              "/favicon.ico",
-              "favicon_support.png",
-              "favicon.svg"
-          ]
-
-          for forbidden in forbidden_manifest_refs:
-              if any(forbidden in src for src in icon_sources):
-                  error(manifest_path, f"site.webmanifest no debe referenciar {forbidden}.")
-
-          for src in icon_sources:
-              if src.startswith("/") and not asset_exists(src):
-                  error(manifest_path, f"Icono declarado en manifest no existe físicamente: {src}")
-
-          if manifest.get("start_url") != "/":
-              error(manifest_path, "site.webmanifest start_url debe ser /.")
-
-          if manifest.get("scope") != "/":
-              error(manifest_path, "site.webmanifest scope debe ser /.")
-
-          if manifest.get("display") != "standalone":
-              warning(manifest_path, "display debería ser standalone.")
-
-          # =====================================================
-          # robots.txt
-          # =====================================================
-
-          robots_lines = []
-
-          for raw_line in robots_text.splitlines():
-              line = raw_line.strip()
-
-              if not line:
-                  continue
-
-              if line.startswith("#"):
-                  continue
-
-              robots_lines.append(line)
-
-          robots_lines_lower = [line.lower() for line in robots_lines]
-
-          if not any(line == "user-agent: *" for line in robots_lines_lower):
-              error(robots_path, "robots.txt debe contener User-agent: *.")
-
-          if not any(line == "disallow: /" for line in robots_lines_lower):
-              error(robots_path, "robots.txt debe bloquear todo el panel privado con Disallow: /.")
-
-          if any(line == "allow: /" for line in robots_lines_lower):
-              error(robots_path, "robots.txt no debe contener Allow: / porque la SPA es privada.")
-
-          if any(line.startswith("sitemap:") for line in robots_lines_lower):
-              error(robots_path, "robots.txt no debe declarar Sitemap mientras /sitemap.xml responda 404.")
-
-          if any("favicon.svg" in line for line in robots_lines_lower):
-              error(robots_path, "robots.txt no debe declarar favicon.svg.")
-
-          if not any("/src/media/img/favicon_black_circle.png" in line for line in robots_lines):
-              warning(robots_path, "robots.txt debería permitir favicon_black_circle.png.")
-
-          # =====================================================
-          # sitemap.xml
-          # =====================================================
-
-          if sitemap_path.exists():
-              try:
-                  tree = ET.parse(sitemap_path)
-                  root = tree.getroot()
-              except Exception as exc:
-                  error(sitemap_path, f"sitemap.xml no es XML válido: {exc}")
-
-              namespace = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
-              urls = root.findall(f"{namespace}url")
-
-              if urls:
-                  error(sitemap_path, "sitemap.xml debe estar vacío de URLs mientras Onion Support sea SPA privada.")
-          else:
-              notice(
-                  sitemap_path,
-                  "No existe sitemap.xml físico. Correcto si /sitemap.xml responde 404 desde staticwebapp.config.json."
-              )
-
-          print("Onion SPA package validated.")
-          PY
-
-      - name: Deploy to Azure Static Web Apps
+          for file in "${required_files[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "::error file=$file::Archivo obligatorio no encontrado."
+              exit 1
+            fi
+          done
+
+          echo "Onion SPA package OK."
+
+      - name: Deploy
         id: deploy
         uses: Azure/static-web-apps-deploy@v1
         with:
@@ -619,8 +103,8 @@ jobs:
           skip_app_build: true
           skip_api_build: true
 
-  close_pull_request_preview:
-    name: Close Pull Request Preview
+  close_preview:
+    name: Close PR Preview
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -629,25 +113,18 @@ jobs:
       github.event.action == 'closed' &&
       github.event.pull_request.head.repo.full_name == github.repository
 
-    permissions:
-      contents: read
-      pull-requests: write
-
     steps:
-      - name: Validate deployment token
+      - name: Validate token
         shell: bash
         run: |
           set -euo pipefail
 
           if [ -z "${AZURE_STATIC_WEB_APPS_API_TOKEN:-}" ]; then
-            echo "::error::Falta el secret AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E o está vacío."
+            echo "::error::Falta el secret AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E."
             exit 1
           fi
 
-          echo "Deployment token detected."
-
-      - name: Close Azure Static Web Apps preview environment
-        id: close_preview
+      - name: Close preview
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ env.AZURE_STATIC_WEB_APPS_API_TOKEN }}

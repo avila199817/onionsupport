@@ -2,27 +2,27 @@
    Onion SPA - Auth Constants
    Archivo: src/features/auth/constants.js
 
-   AUTH CONSTANTS · FINAL SIMPLE
-   - Contrato estático Auth para frontend
-   - Backend real bajo /api/auth
-   - /me siempre privado
-   - Públicos técnicos sin auth/refresh/retry/logout automático
-   - Roles reales: admin / user
-   - Sin AppCore, CoreHttp, storage runtime, Router, Toast ni lógica de sesión
+   AUTH CONSTANTS · SIMPLE
+   - contrato estático Auth para frontend
+   - backend real bajo /api/auth
+   - /api/auth/me y aliases /me siempre privados
+   - rutas técnicas públicas sin auth header/refresh/retry/logout automático
+   - roles reales: admin / user
+   - sin AppCore, CoreHttp, storage runtime, Router, Toast ni lógica de sesión
 ========================================================= */
+
+export const AUTH_CONSTANTS_VERSION = "21.0.0-simple";
+export const AUTH_MODULE_VERSION = AUTH_CONSTANTS_VERSION;
 
 /* =========================================================
-   VERSION
+   BASE HELPERS
 ========================================================= */
 
-export const AUTH_CONSTANTS_VERSION = "20.0.0-final";
+const DEFAULT_ROUTE = "/";
+const LOCAL_ORIGIN = "http://localhost";
 
-/* =========================================================
-   HELPERS BASE
-========================================================= */
-
-const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const isObjectLike = (value) => value !== null && (typeof value === "object" || typeof value === "function");
+const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
 export function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
@@ -45,14 +45,12 @@ export function safeInt(value, fallback = 0) {
 }
 
 export function safeBool(value, fallback = false) {
-  if (value === true) return true;
-  if (value === false) return false;
-  if (value === 1) return true;
-  if (value === 0) return false;
+  if (value === true || value === 1 || value === "1") return true;
+  if (value === false || value === 0 || value === "0") return false;
 
   const text = safeText(value, "").toLowerCase();
-  if (["true", "1", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(text)) return true;
-  if (["false", "0", "no", "off", "disabled", "inactive"].includes(text)) return false;
+  if (["true", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(text)) return true;
+  if (["false", "no", "off", "disabled", "inactive"].includes(text)) return false;
 
   return Boolean(fallback);
 }
@@ -70,12 +68,17 @@ function hasOwn(object, key) {
   }
 }
 
-function unique(values = []) {
-  const input = Array.isArray(values) ? values : [values];
+function toArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return [...value];
+  if (value === null || value === undefined || value === "") return [];
+  return [value];
+}
 
+function unique(values = []) {
   return [
     ...new Set(
-      input
+      toArray(values)
         .flat(Infinity)
         .map((value) => safeText(value, ""))
         .filter(Boolean)
@@ -83,11 +86,14 @@ function unique(values = []) {
   ];
 }
 
-function deepFreeze(value) {
+function deepFreeze(value, seen = new WeakSet()) {
   if (!isObjectLike(value) || Object.isFrozen(value)) return value;
 
   try {
-    for (const key of Object.getOwnPropertyNames(value)) deepFreeze(value[key]);
+    if (seen.has(value)) return value;
+    seen.add(value);
+
+    for (const key of Object.getOwnPropertyNames(value)) deepFreeze(value[key], seen);
     return Object.freeze(value);
   } catch {
     return value;
@@ -105,9 +111,9 @@ function isHashRouterPath(value = "") {
 
 function normalizeHashRouterPath(value = "") {
   const raw = safeText(value, "");
-  if (!raw) return "/";
-  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
-  return raw.replace(/^#\/?/, "/") || "/";
+  if (!raw) return DEFAULT_ROUTE;
+  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
+  return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
 }
 
 function stripScopedUserPrefix(path = "") {
@@ -116,32 +122,32 @@ function stripScopedUserPrefix(path = "") {
 
   const parts = value.split("/");
   if (parts.length >= 3 && /^@[A-Za-z0-9._-]{1,80}$/.test(parts[1])) {
-    return `/${parts.slice(2).join("/")}` || "/";
+    return `/${parts.slice(2).join("/")}` || DEFAULT_ROUTE;
   }
 
   return value;
 }
 
-function normalizePathnameOnly(pathname = "/") {
-  let value = safeText(pathname, "/").replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
+  let value = safeText(pathname, DEFAULT_ROUTE)
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
-  if (!value) value = "/";
+  if (!value) value = DEFAULT_ROUTE;
   if (!value.startsWith("/")) value = `/${value}`;
 
   value = stripScopedUserPrefix(value);
 
   const parts = [];
+
   for (const segment of value.split("/")) {
     if (!segment || segment === ".") continue;
-    if (segment === "..") {
-      parts.pop();
-      continue;
-    }
-    parts.push(segment);
+    if (segment === "..") parts.pop();
+    else parts.push(segment);
   }
 
-  value = `/${parts.join("/")}` || "/";
-  if (value.length > 1) value = value.replace(/\/+$/g, "") || "/";
+  value = `/${parts.join("/")}` || DEFAULT_ROUTE;
+  if (value.length > 1) value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
 
   return value;
 }
@@ -159,13 +165,13 @@ function splitSearchAndHash(path = "") {
   const hashIndex = pathname.indexOf("#");
   if (hashIndex >= 0) {
     hash = pathname.slice(hashIndex);
-    pathname = pathname.slice(0, hashIndex) || "/";
+    pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
   }
 
   const searchIndex = pathname.indexOf("?");
   if (searchIndex >= 0) {
     search = pathname.slice(searchIndex);
-    pathname = pathname.slice(0, searchIndex) || "/";
+    pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
   }
 
   return { pathname, search, hash };
@@ -177,9 +183,9 @@ export function pathFromUrlLike(value = "") {
   if (isHashRouterPath(raw)) return normalizeHashRouterPath(raw);
 
   try {
-    const parsed = new URL(raw, "http://localhost");
+    const parsed = new URL(raw, LOCAL_ORIGIN);
     if (parsed.hash && isHashRouterPath(parsed.hash)) return normalizeHashRouterPath(parsed.hash);
-    return `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`;
+    return `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`;
   } catch {
     return raw;
   }
@@ -265,6 +271,10 @@ export const PASSWORD_RESET_VALIDATE_ENDPOINT = "/api/auth/password-reset/valida
 
 export const AUTH_PUBLIC_TECHNICAL_ROUTES = deepFreeze([
   "/login",
+  "/signin",
+  "/sign-in",
+  "/auth",
+  "/auth/login",
   "/activate-account",
   "/activate",
   "/activation",
@@ -279,6 +289,7 @@ export const AUTH_PUBLIC_TECHNICAL_ROUTES = deepFreeze([
   "/confirm-reset-password",
   "/forgot-password",
   "/recover-password",
+  "/recover",
   "/2fa",
   "/otp",
   "/mfa",
@@ -288,13 +299,16 @@ export const AUTH_TECHNICAL_ROUTE_ALIASES = deepFreeze({
   login: "/login",
   signin: "/login",
   signIn: "/login",
+  auth: "/login",
   activate: "/activate-account",
   activation: "/activate-account",
   activateAccount: "/activate-account",
   accountActivation: "/activate-account",
+  activateFirstUser: "/activate/first-user",
   resetPassword: "/reset-password",
   forgotPassword: "/forgot-password",
   recoverPassword: "/recover-password",
+  recover: "/recover-password",
   passwordReset: "/password-reset",
   resetPasswordConfirm: "/reset-password/confirm",
   confirmResetPassword: "/reset-password/confirm",
@@ -662,6 +676,7 @@ export const AUTH_FAILURE_CODES = deepFreeze([
 
 export const AUTH_SUCCESS_STATUSES = deepFreeze(["ok", "success", "successful", "authenticated", "active", "valid", "token_only", "token-only", "user_only", "user-only", "session", "refreshed"]);
 export const AUTH_2FA_STATUSES = deepFreeze(["2fa_required", "mfa_required", "totp_required", "otp_required", "two_factor_required", "verification_required", "challenge_required"]);
+export const AUTH_ROLES = deepFreeze(["admin", "user"]);
 
 /* =========================================================
    RESOLVE HELPERS
@@ -854,17 +869,17 @@ export function isPublicTechnicalRoute(path = "") {
 
 export function isActivationRoute(path = "") {
   const normalized = normalizeRoutePath(path);
-  return normalized === "/activate-account" || normalized.startsWith("/activate-account/") || normalized === "/activate" || normalized.startsWith("/activate/");
+  return normalized === "/activate-account" || normalized.startsWith("/activate-account/") || normalized === "/activate" || normalized.startsWith("/activate/") || normalized === "/activation" || normalized.startsWith("/activation/") || normalized === "/account/activate" || normalized.startsWith("/account/activate/");
 }
 
 export function isResetPasswordRoute(path = "") {
   const normalized = normalizeRoutePath(path);
-  return normalized === "/reset-password" || normalized.startsWith("/reset-password/") || normalized === "/password-reset" || normalized.startsWith("/password-reset/") || normalized === "/forgot-password" || normalized.startsWith("/forgot-password/") || normalized === "/recover-password" || normalized.startsWith("/recover-password/");
+  return normalized === "/reset-password" || normalized.startsWith("/reset-password/") || normalized === "/password-reset" || normalized.startsWith("/password-reset/") || normalized === "/forgot-password" || normalized.startsWith("/forgot-password/") || normalized === "/recover-password" || normalized.startsWith("/recover-password/") || normalized === "/recover" || normalized.startsWith("/recover/");
 }
 
 export function isResetPasswordConfirmRoute(path = "") {
   const normalized = normalizeRoutePath(path);
-  return normalized === "/reset-password/confirm" || normalized.startsWith("/reset-password/confirm/") || normalized === "/password-reset/confirm" || normalized.startsWith("/password-reset/confirm/");
+  return normalized === "/reset-password/confirm" || normalized.startsWith("/reset-password/confirm/") || normalized === "/password-reset/confirm" || normalized.startsWith("/password-reset/confirm/") || normalized === "/reset-password-confirm" || normalized === "/password-reset-confirm" || normalized === "/confirm-reset-password";
 }
 
 export function isTwoFactorRoute(path = "") {
@@ -937,16 +952,17 @@ export function hasTokenInUrl(value = "", type = "generic") {
   return false;
 }
 
-export function hasActivationToken(value = "") {
+function hasTokenPathSegment(value = "", bases = []) {
   const normalized = normalizeRoutePath(pathFromUrlLike(value) || value);
-  if (normalized.startsWith("/activate-account/") || normalized.startsWith("/activate/")) return true;
-  return hasTokenInUrl(value, "activation");
+  return bases.some((base) => normalized.startsWith(`${base}/`) && normalized.slice(base.length + 1).split("/")[0]?.length >= 8);
+}
+
+export function hasActivationToken(value = "") {
+  return hasTokenPathSegment(value, ["/activate-account", "/activate", "/activation", "/account/activate"]) || hasTokenInUrl(value, "activation");
 }
 
 export function hasResetToken(value = "") {
-  const normalized = normalizeRoutePath(pathFromUrlLike(value) || value);
-  if (normalized.startsWith("/reset-password/confirm/") || normalized.startsWith("/password-reset/confirm/")) return true;
-  return hasTokenInUrl(value, "reset");
+  return hasTokenPathSegment(value, ["/reset-password/confirm", "/password-reset/confirm"]) || hasTokenInUrl(value, "reset");
 }
 
 export const hasTwoFactorToken = (value = "") => hasTokenInUrl(value, "twoFactor");
@@ -955,14 +971,13 @@ export const hasTwoFactorToken = (value = "") => hasTokenInUrl(value, "twoFactor
    SNAPSHOT
 ========================================================= */
 
-function sanitizeSnapshot(value) {
-  if (Array.isArray(value)) return value.map(sanitizeSnapshot);
+function sanitizeSnapshot(value, keyHint = "") {
+  if (/token|password|secret|authorization/i.test(keyHint)) return value ? "***" : value;
+  if (Array.isArray(value)) return value.map((item) => sanitizeSnapshot(item, keyHint));
 
   if (isObject(value)) {
     const output = {};
-    for (const [key, item] of Object.entries(value)) {
-      output[key] = /token|password|secret|authorization/i.test(key) ? (item ? "***" : item) : sanitizeSnapshot(item);
-    }
+    for (const [key, item] of Object.entries(value)) output[key] = sanitizeSnapshot(item, key);
     return output;
   }
 
@@ -981,6 +996,7 @@ export function getAuthConstantsSnapshot() {
     storageKeys: AUTH_STORAGE_KEYS,
     legacyStorageKeys: AUTH_LEGACY_STORAGE_KEYS,
     constants: AUTH_CONSTANTS,
+    roles: AUTH_ROLES,
     publicTechnicalRoutes: AUTH_PUBLIC_TECHNICAL_ROUTES,
     technicalRouteAliases: AUTH_TECHNICAL_ROUTE_ALIASES,
     tokenParamNames: AUTH_TOKEN_PARAM_NAMES,
@@ -999,6 +1015,11 @@ export function getAuthConstantsSnapshot() {
       publicAuthNoLogout: true,
       publicAuthNoRetry: true,
       staticContractOnly: true,
+      noAppCore: true,
+      noCoreHttp: true,
+      noRouter: true,
+      noToast: true,
+      noRuntimeStorage: true,
     },
   });
 }
@@ -1009,6 +1030,7 @@ export function getAuthConstantsSnapshot() {
 
 export default deepFreeze({
   AUTH_CONSTANTS_VERSION,
+  AUTH_MODULE_VERSION,
 
   LOGIN_ENDPOINT,
   LOGOUT_ENDPOINT,
@@ -1064,6 +1086,7 @@ export default deepFreeze({
   AUTH_FAILURE_CODES,
   AUTH_SUCCESS_STATUSES,
   AUTH_2FA_STATUSES,
+  AUTH_ROLES,
   AUTH_PUBLIC_TECHNICAL_ROUTES,
   AUTH_TECHNICAL_ROUTE_ALIASES,
   AUTH_TOKEN_PARAM_NAMES,

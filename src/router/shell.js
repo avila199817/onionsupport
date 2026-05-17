@@ -2,11 +2,11 @@
    Onion SPA - Router Shell
    Archivo: src/router/shell.js
 
-   ROUTER SHELL · FINAL SIMPLE
-   - Chrome/layout del Router
-   - Limpia slots dinámicos seguros
-   - Aplica title, menú activo y modo auth/app
-   - Sin Auth, guards, render de vistas, history, storage, Toast ni navegación
+   ROUTER SHELL · SIMPLE
+   - chrome/layout del Router
+   - limpia slots dinámicos seguros
+   - aplica title, menú activo y modo auth/app
+   - sin Auth, guards, render de vistas, history, storage, Toast ni navegación
 ========================================================= */
 
 import {
@@ -14,11 +14,7 @@ import {
   resolveSpaHref,
 } from "./helpers.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const ROUTER_SHELL_VERSION = "20.0.0-final";
+export const ROUTER_SHELL_VERSION = "21.0.0-simple";
 
 const SOURCE = "router.shell";
 const EVENT_DEDUPE_MS = 64;
@@ -128,7 +124,7 @@ let lastActiveMenuAt = 0;
 
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
 const isFn = (value) => typeof value === "function";
-const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
 
 function safeObject(value, fallback = {}) {
   return isObject(value) ? value : fallback;
@@ -146,11 +142,7 @@ function safeText(value, fallback = "") {
 }
 
 function nowMs() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
+  try { return Date.now(); } catch { return 0; }
 }
 
 function unique(values = []) {
@@ -163,16 +155,18 @@ function redactText(value = "") {
     .replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***")
     .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***")
     .replace(/(\/password-reset\/confirm\/)([^/?#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
-function sanitizePayload(value, depth = 0, seen = new WeakSet()) {
+function sanitizePayload(value, depth = 0, seen = new WeakSet(), keyHint = "") {
   if (depth > 4) return "[depth-limit]";
+  if (/token|authorization|password|secret|credential|jwt|bearer|otp|totp|mfa|2fa|code/i.test(keyHint)) return value ? "***" : value;
   if (typeof value === "string") return redactText(value);
   if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "function") return "[function]";
 
-  if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitizePayload(item, depth + 1, seen));
+  if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitizePayload(item, depth + 1, seen, keyHint));
 
   if (isObject(value)) {
     try {
@@ -180,15 +174,11 @@ function sanitizePayload(value, depth = 0, seen = new WeakSet()) {
       seen.add(value);
     } catch {}
 
-    const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = /token|authorization|password|secret|credential|jwt|bearer|otp|totp|mfa|2fa|code/i.test(key)
-        ? item ? "***" : item
-        : sanitizePayload(item, depth + 1, seen);
-    }
-
-    return output;
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 80)
+        .map(([key, item]) => [key, sanitizePayload(item, depth + 1, seen, key)])
+    );
   }
 
   return String(value);
@@ -220,7 +210,9 @@ function emit(AppCore, eventName = "", payload = {}, options = {}) {
 }
 
 function emitDeduped(AppCore, eventName = "", payload = {}, ms = EVENT_DEDUPE_MS) {
-  const key = [eventName, payload?.route, payload?.canonicalPath, payload?.publicPath, payload?.mode, payload?.chromeHidden].map((item) => safeText(item, "")).join("|");
+  const key = [eventName, payload?.route, payload?.canonicalPath, payload?.publicPath, payload?.mode, payload?.chromeHidden]
+    .map((item) => safeText(item, ""))
+    .join("|");
   const current = nowMs();
 
   if (key === lastEventKey && current - lastEventAt < ms) return false;
@@ -255,7 +247,7 @@ function ensureDom(AppCore) {
 }
 
 function isConnected(node) {
-  if (!node) return false;
+  if (!node || !isBrowser()) return false;
 
   try {
     return Boolean(node.isConnected || document.contains(node));
@@ -315,13 +307,8 @@ function setHidden(element, hidden = false) {
 
   const next = Boolean(hidden);
 
-  try {
-    element.hidden = next;
-  } catch {}
-
-  try {
-    element.setAttribute("aria-hidden", next ? "true" : "false");
-  } catch {}
+  try { element.hidden = next; } catch {}
+  try { element.setAttribute("aria-hidden", next ? "true" : "false"); } catch {}
 
   return true;
 }
@@ -597,13 +584,8 @@ export function getShellElements(AppCore) {
 function isProtectedClearNode(node) {
   if (!node) return true;
 
-  try {
-    if (node.matches?.(PROTECTED_CLEAR_SELECTOR)) return true;
-  } catch {}
-
-  try {
-    if (node.closest?.(PROTECTED_CLEAR_SELECTOR)) return true;
-  } catch {}
+  try { if (node.matches?.(PROTECTED_CLEAR_SELECTOR)) return true; } catch {}
+  try { if (node.closest?.(PROTECTED_CLEAR_SELECTOR)) return true; } catch {}
 
   return false;
 }
@@ -785,15 +767,8 @@ export function setActiveMenu(AppCore, pathname = "/") {
 function hasContent(element) {
   if (!element) return false;
 
-  try {
-    if (element.childElementCount > 0) return true;
-  } catch {}
-
-  try {
-    return Boolean(safeText(element.textContent, ""));
-  } catch {
-    return false;
-  }
+  try { if (element.childElementCount > 0) return true; } catch {}
+  try { return Boolean(safeText(element.textContent, "")); } catch { return false; }
 }
 
 function exposeCoreLayout(elements) {
@@ -874,9 +849,7 @@ function syncShellState(AppCore, { chromeHidden = false, authScreen = false, mod
   try {
     AppCore?.setState?.(patch, { source: SOURCE, emit: false, silent: true });
   } catch {
-    try {
-      if (AppCore?.state) Object.assign(AppCore.state, patch);
-    } catch {}
+    try { if (AppCore?.state) Object.assign(AppCore.state, patch); } catch {}
   }
 
   try {

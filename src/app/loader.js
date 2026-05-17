@@ -2,12 +2,13 @@
    Onion SPA - App Loader
    Archivo: src/app/loader.js
 
-   APP LOADER · FINAL SIMPLE
-   - Controla #app-loader
-   - Crea fallback mínimo sólo si falta
-   - Sin Auth, Router, guards, render, history, fetch, storage ni Toast
-   - Sin CSS runtime, sin innerHTML, sin lógica de rutas
-   - Failsafe anti-loader infinito
+   APP LOADER · SIMPLE
+   - controla #app-loader
+   - crea fallback mínimo sólo si falta
+   - show / hide / forceHide
+   - failsafe anti-loader infinito
+   - sin Auth, Router, guards, render, history, fetch, storage ni Toast
+   - sin CSS runtime ni innerHTML
 ========================================================= */
 
 import {
@@ -18,11 +19,7 @@ import {
   BOOT_HIDE_TRANSITION_MS,
 } from "./constants.js";
 
-/* =========================================================
-   VERSION / CONSTANTS
-========================================================= */
-
-export const LOADER_VERSION = "20.0.0-final";
+export const LOADER_VERSION = "21.0.0-simple";
 
 const SOURCE = "app.loader";
 const LOADER_ID = "app-loader";
@@ -73,10 +70,7 @@ const MAX_FAILSAFE_MS = 120000;
 const EVENT_DEDUPE_MS = 80;
 
 const TOKEN_RE = /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token|temporaryToken|temporary_token|twoFactorToken|two_factor_token|mfaToken|mfa_token|otpToken|otp_token|authorization|jwt|session|sid)=)([^&#\s]+)/gi;
-
-/* =========================================================
-   RUNTIME
-========================================================= */
+const SENSITIVE_KEY_RE = /token|secret|password|authorization|credential|jwt|bearer|session|refresh|otp|mfa|2fa|code/i;
 
 let sequence = 0;
 let lastShowAt = 0;
@@ -98,7 +92,7 @@ const isBrowser = () => typeof window !== "undefined" && typeof document !== "un
 const isFn = (value) => typeof value === "function";
 
 function object(value, fallback = {}) {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : fallback;
+  return value && typeof value === "object" && !Array.isArray(value) ? value : fallback;
 }
 
 function array(value) {
@@ -124,11 +118,7 @@ function number(value, fallback = 0) {
 }
 
 function epoch() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
+  try { return Date.now(); } catch { return 0; }
 }
 
 function perf() {
@@ -140,11 +130,7 @@ function perf() {
 }
 
 function iso(ms = epoch()) {
-  try {
-    return new Date(ms).toISOString();
-  } catch {
-    return "";
-  }
+  try { return new Date(ms).toISOString(); } catch { return ""; }
 }
 
 function clamp(value, fallback, min, max) {
@@ -161,9 +147,7 @@ function isCurrentSeq(id) {
 }
 
 function clearTimer(id) {
-  try {
-    if (id) clearTimeout(id);
-  } catch {}
+  try { if (id) clearTimeout(id); } catch {}
 }
 
 function clearUiTimers() {
@@ -175,16 +159,15 @@ function clearUiTimers() {
 
 function afterPaint() {
   return new Promise((resolve) => {
-    if (!isBrowser()) return resolve();
+    if (!isBrowser()) {
+      resolve();
+      return;
+    }
 
     try {
       window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
     } catch {
-      try {
-        window.setTimeout(resolve, 0);
-      } catch {
-        resolve();
-      }
+      try { window.setTimeout(resolve, 0); } catch { resolve(); }
     }
   });
 }
@@ -206,11 +189,7 @@ function redact(value = "") {
 
 function sanitize(value, depth = 0, keyHint = "") {
   if (depth > 4) return "[depth-limit]";
-
-  if (/token|secret|password|authorization|credential|jwt|bearer|session|refresh|otp|mfa|2fa|code/i.test(keyHint)) {
-    return value ? "***" : value;
-  }
-
+  if (SENSITIVE_KEY_RE.test(text(keyHint, ""))) return value ? "***" : value;
   if (typeof value === "string") return redact(value);
   if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "bigint") return String(value);
@@ -228,26 +207,32 @@ function sanitize(value, depth = 0, keyHint = "") {
   if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitize(item, depth + 1, keyHint));
 
   if (value && typeof value === "object") {
-    const output = {};
-    for (const [key, item] of Object.entries(value).slice(0, 80)) output[key] = sanitize(item, depth + 1, key);
-    return output;
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 80)
+        .map(([key, item]) => [key, sanitize(item, depth + 1, key)])
+    );
   }
 
   return String(value);
 }
 
-function shouldDedupe(eventName = "", payload = {}, force = false) {
-  if (force) return false;
-
-  const key = [
+function eventKey(eventName = "", payload = {}) {
+  return [
     text(eventName, ""),
     text(payload?.reason, ""),
     text(payload?.loaderState || payload?.state, ""),
     payload?.forced ? "forced" : "normal",
     payload?.fatal ? "fatal" : "ok",
   ].join("|");
+}
 
+function shouldDedupe(eventName = "", payload = {}, force = false) {
+  if (force) return false;
+
+  const key = eventKey(eventName, payload);
   const current = epoch();
+
   if (key === lastEventKey && current - lastEventAt < EVENT_DEDUPE_MS) return true;
 
   lastEventKey = key;
@@ -291,9 +276,7 @@ function warn(AppCore, ...args) {
   try {
     AppCore?.utils?.warn?.("[Loader]", ...args.map((item) => sanitize(item)));
   } catch {
-    try {
-      if (AppCore?.config?.debug) console.warn("[Loader]", ...args.map((item) => sanitize(item)));
-    } catch {}
+    try { if (AppCore?.config?.debug) console.warn("[Loader]", ...args.map((item) => sanitize(item))); } catch {}
   }
 }
 
@@ -316,7 +299,21 @@ function setCoreState(AppCore, patch = {}, options = {}) {
   if (!Object.keys(data).length) return false;
 
   try {
-    AppCore?.setState?.(data, { source: SOURCE, emit: options.emit === true, emitState: options.emitState === true, silent: options.silent !== false });
+    AppCore?.setState?.(data, {
+      source: SOURCE,
+      emit: options.emit === true,
+      emitState: options.emitState === true,
+      silent: options.silent !== false,
+    });
+    return true;
+  } catch {}
+
+  try {
+    AppCore?.patchState?.(data, {
+      source: SOURCE,
+      emit: options.emit === true,
+      silent: options.silent !== false,
+    });
     return true;
   } catch {}
 
@@ -333,11 +330,9 @@ function setCoreState(AppCore, patch = {}, options = {}) {
 function setLoading(AppCore, value = false) {
   const next = Boolean(value);
 
-  try {
-    AppCore?.setLoading?.(next);
-  } catch {}
-
+  try { AppCore?.setLoading?.(next); } catch {}
   setCoreState(AppCore, { loading: next });
+
   return true;
 }
 
@@ -367,28 +362,16 @@ function setDomRef(AppCore, key = "", value = null) {
 
 function byId(id = "") {
   if (!isBrowser() || !id) return null;
-  try {
-    return document.getElementById(id);
-  } catch {
-    return null;
-  }
+  try { return document.getElementById(id); } catch { return null; }
 }
 
 function qs(selector = "") {
   if (!isBrowser() || !selector) return null;
-  try {
-    return document.querySelector(selector);
-  } catch {
-    return null;
-  }
+  try { return document.querySelector(selector); } catch { return null; }
 }
 
 function contains(element) {
-  try {
-    return Boolean(element && document.contains(element));
-  } catch {
-    return false;
-  }
+  try { return Boolean(element && document.contains(element)); } catch { return false; }
 }
 
 function attr(element, name, value) {
@@ -454,6 +437,7 @@ function toggleClasses(element, classes = [], enabled = false) {
 
 function createEl(tagName = "div", { id = "", className = "", textContent = "", attrs = {}, dataset = {} } = {}) {
   const element = document.createElement(tagName);
+
   if (id) element.id = id;
   if (className) element.className = className;
   if (textContent) element.textContent = textContent;
@@ -502,6 +486,7 @@ function syncExistingLoader(AppCore, loader) {
 
   try {
     if (!loader.id) loader.id = LOADER_ID;
+
     data(loader, "appLoader", "true");
     if (!loader.getAttribute("role")) attr(loader, "role", "status");
     if (!loader.getAttribute("aria-live")) attr(loader, "aria-live", "polite");
@@ -516,6 +501,7 @@ function syncExistingLoader(AppCore, loader) {
 
     setDomRef(AppCore, "loader", loader);
     setDomRef(AppCore, "appLoader", loader);
+
     return true;
   } catch (error) {
     recordError(AppCore, "sync-existing-loader", error);
@@ -543,7 +529,6 @@ function createFallbackLoader(AppCore) {
 
     copy.appendChild(createEl("strong", { className: "app-loader__title", textContent: cfg.appName, dataset: { loaderTitle: "true" } }));
     copy.appendChild(createEl("span", { className: "app-loader__text", textContent: cfg.text, dataset: { loaderText: "true" } }));
-
     if (cfg.subtext) copy.appendChild(createEl("small", { className: "app-loader__subtext", textContent: cfg.subtext, dataset: { loaderSubtext: "true" } }));
 
     card.appendChild(brand);
@@ -581,13 +566,11 @@ export function getLoaderElement(AppCore) {
 }
 
 function ensureLoaderElement(AppCore) {
-  const loader = getLoaderElement(AppCore);
-  if (loader) return loader;
-  return createFallbackLoader(AppCore);
+  return getLoaderElement(AppCore) || createFallbackLoader(AppCore);
 }
 
 /* =========================================================
-   DOCUMENT / SHELL STATE
+   DOCUMENT STATE
 ========================================================= */
 
 function setDocumentLoading(enabled = false, { booting = false, fatal = false } = {}) {
@@ -660,9 +643,7 @@ function isLoaderActuallyVisible(loader) {
     if ([STATES.hidden, "removed"].includes(loader.dataset?.loaderState)) return false;
 
     const style = window.getComputedStyle?.(loader);
-    if (style) {
-      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
-    }
+    if (style && (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0)) return false;
 
     return true;
   } catch {
@@ -755,7 +736,12 @@ function hasBootClass() {
   if (!isBrowser()) return false;
 
   try {
-    return Boolean(document.documentElement?.classList?.contains("app-booting") || document.documentElement?.classList?.contains("app-loading") || document.body?.classList?.contains("app-booting") || document.body?.classList?.contains("app-loading"));
+    return Boolean(
+      document.documentElement?.classList?.contains("app-booting") ||
+        document.documentElement?.classList?.contains("app-loading") ||
+        document.body?.classList?.contains("app-booting") ||
+        document.body?.classList?.contains("app-loading")
+    );
   } catch {
     return false;
   }
@@ -773,7 +759,15 @@ function bootActive(AppCore, state = null) {
 
 function allowHideDuringBoot(options = {}) {
   const reason = text(options.reason, "").toLowerCase();
-  return Boolean(options.force === true || options.forceHide === true || options.finalize === true || options.allowDuringBoot === true || options.failsafe === true || ["finalize-boot", "boot-complete", "app-ready", "failsafe", "boot-error", "app-boot-error", "app-destroy", "reboot-reset"].includes(reason));
+
+  return Boolean(
+    options.force === true ||
+      options.forceHide === true ||
+      options.finalize === true ||
+      options.allowDuringBoot === true ||
+      options.failsafe === true ||
+      ["finalize-boot", "boot-complete", "app-ready", "failsafe", "boot-error", "app-boot-error", "app-destroy", "reboot-reset"].includes(reason)
+  );
 }
 
 /* =========================================================
@@ -789,7 +783,7 @@ export function showLoader(AppCore, options = {}) {
     return true;
   }
 
-  const id = nextSeq();
+  const seq = nextSeq();
   clearUiTimers();
 
   const loader = ensureLoaderElement(AppCore);
@@ -805,7 +799,13 @@ export function showLoader(AppCore, options = {}) {
 
   setCoreState(AppCore, { loaderVisible: true, loaderState: state, loaderShownAt: epoch() });
 
-  emitLoader(AppCore, EVENTS.show, { sequence: id, hasLoader: Boolean(loader), booting: Boolean(opts.booting), reason: text(opts.reason, ""), loaderState: state }, LEGACY_ALIASES.show);
+  emitLoader(
+    AppCore,
+    EVENTS.show,
+    { sequence: seq, hasLoader: Boolean(loader), booting: Boolean(opts.booting), reason: text(opts.reason, ""), loaderState: state },
+    LEGACY_ALIASES.show
+  );
+
   return true;
 }
 
@@ -818,7 +818,7 @@ export function forceHideLoader(AppCore, options = {}) {
     return true;
   }
 
-  const id = nextSeq();
+  const seq = nextSeq();
   clearUiTimers();
   clearBootFailsafeTimer(opts.state || null, AppCore);
 
@@ -830,10 +830,16 @@ export function forceHideLoader(AppCore, options = {}) {
 
   setLoading(AppCore, false);
   setBooting(AppCore, false);
-
   setCoreState(AppCore, { loaderVisible: false, loaderState: state, loaderHiddenAt: epoch() });
 
-  emitLoader(AppCore, EVENTS.forceHide, { sequence: id, forced: true, hasLoader: Boolean(loader), fatal: Boolean(opts.fatal), reason: text(opts.reason, ""), loaderState: state }, LEGACY_ALIASES.forceHide, { force: true });
+  emitLoader(
+    AppCore,
+    EVENTS.forceHide,
+    { sequence: seq, forced: true, hasLoader: Boolean(loader), fatal: Boolean(opts.fatal), reason: text(opts.reason, ""), loaderState: state },
+    LEGACY_ALIASES.forceHide,
+    { force: true }
+  );
+
   return true;
 }
 
@@ -852,7 +858,7 @@ export function hideLoader(AppCore, options = {}) {
   }
 
   const cfg = loaderConfig(AppCore);
-  const id = nextSeq();
+  const seq = nextSeq();
   clearUiTimers();
 
   const minVisibleMs = Math.max(0, number(opts.minVisibleMs, cfg.minVisibleMs));
@@ -860,9 +866,9 @@ export function hideLoader(AppCore, options = {}) {
   const remaining = Math.max(0, minVisibleMs - elapsed);
 
   const run = async () => {
-    if (!isCurrentSeq(id)) return false;
+    if (!isCurrentSeq(seq)) return false;
     await afterPaint();
-    if (!isCurrentSeq(id)) return false;
+    if (!isCurrentSeq(seq)) return false;
 
     const loader = getLoaderElement(AppCore);
     const state = opts.fatal ? STATES.fatal : STATES.hidden;
@@ -871,14 +877,21 @@ export function hideLoader(AppCore, options = {}) {
 
     if (loader) {
       if (opts.fatal) markHidden(loader, state);
-      else hideWithTransition(AppCore, loader, state, id);
+      else hideWithTransition(AppCore, loader, state, seq);
     }
 
     setLoading(AppCore, false);
     setBooting(AppCore, false);
     setCoreState(AppCore, { loaderVisible: false, loaderState: state, loaderHiddenAt: epoch() });
+    clearBootFailsafeTimer(opts.state || null, AppCore);
 
-    emitLoader(AppCore, EVENTS.hide, { sequence: id, forced: false, hasLoader: Boolean(loader), remaining, fatal: Boolean(opts.fatal), reason: text(opts.reason, ""), loaderState: state }, LEGACY_ALIASES.hide);
+    emitLoader(
+      AppCore,
+      EVENTS.hide,
+      { sequence: seq, forced: false, hasLoader: Boolean(loader), remaining, fatal: Boolean(opts.fatal), reason: text(opts.reason, ""), loaderState: state },
+      LEGACY_ALIASES.hide
+    );
+
     return true;
   };
 
@@ -951,7 +964,13 @@ export function clearBootFailsafeTimer(state = null, AppCore = null) {
     }
   } catch {}
 
-  setCoreState(AppCore, { bootFailsafeStartedAt: 0, bootFailsafeTimeoutMs: 0, bootFailsafeArmId: 0, bootFailsafeArmed: false });
+  setCoreState(AppCore, {
+    bootFailsafeStartedAt: 0,
+    bootFailsafeTimeoutMs: 0,
+    bootFailsafeArmId: 0,
+    bootFailsafeArmed: false,
+  });
+
   return true;
 }
 
@@ -972,7 +991,12 @@ export function armBootFailsafeLoader({ AppCore, state, hideLoader: hideFn = for
     }
   } catch {}
 
-  setCoreState(AppCore, { bootFailsafeStartedAt: startedAt, bootFailsafeTimeoutMs: timeout, bootFailsafeArmId: armId, bootFailsafeArmed: true });
+  setCoreState(AppCore, {
+    bootFailsafeStartedAt: startedAt,
+    bootFailsafeTimeoutMs: timeout,
+    bootFailsafeArmId: armId,
+    bootFailsafeArmed: true,
+  });
 
   failsafeTimer = window.setTimeout(() => {
     try {
@@ -1010,11 +1034,7 @@ export function armBootFailsafeLoader({ AppCore, state, hideLoader: hideFn = for
 ========================================================= */
 
 function classList(element) {
-  try {
-    return Array.from(element?.classList || []);
-  } catch {
-    return [];
-  }
+  try { return Array.from(element?.classList || []); } catch { return []; }
 }
 
 function computed(element) {
@@ -1022,7 +1042,12 @@ function computed(element) {
 
   try {
     const style = window.getComputedStyle(element);
-    return { display: text(style.display, ""), opacity: text(style.opacity, ""), visibility: text(style.visibility, ""), pointerEvents: text(style.pointerEvents, "") };
+    return {
+      display: text(style.display, ""),
+      opacity: text(style.opacity, ""),
+      visibility: text(style.visibility, ""),
+      pointerEvents: text(style.pointerEvents, ""),
+    };
   } catch {
     return {};
   }
@@ -1038,7 +1063,12 @@ function elementSnapshot(element) {
     hidden: Boolean(element.hidden),
     ariaHidden: text(element.getAttribute?.("aria-hidden"), ""),
     ariaBusy: text(element.getAttribute?.("aria-busy"), ""),
-    dataset: sanitize({ loaderVisible: element.dataset?.loaderVisible, loaderState: element.dataset?.loaderState, shellState: element.dataset?.shellState, routeMode: element.dataset?.routeMode }),
+    dataset: sanitize({
+      loaderVisible: element.dataset?.loaderVisible,
+      loaderState: element.dataset?.loaderState,
+      shellState: element.dataset?.shellState,
+      routeMode: element.dataset?.routeMode,
+    }),
     classList: classList(element),
     computedStyle: computed(element),
   };
@@ -1081,7 +1111,15 @@ export function getLoaderSnapshot(AppCore, state = null) {
     hasTransitionTimer: Boolean(transitionTimer),
     lastError,
     debugInstalled,
-    policy: { loaderOnly: true, ownAuth: false, ownRouter: false, ownRender: false, ownHistory: false, ownStorage: false, ownToast: false },
+    policy: {
+      loaderOnly: true,
+      ownAuth: false,
+      ownRouter: false,
+      ownRender: false,
+      ownHistory: false,
+      ownStorage: false,
+      ownToast: false,
+    },
   });
 }
 
@@ -1096,7 +1134,9 @@ function attachDebugApi(AppCore, api) {
   } catch {}
 
   try {
-    if (AppCore && typeof AppCore === "object" && Object.isExtensible(AppCore)) Object.defineProperty(AppCore, "Loader", { value: api, configurable: true, enumerable: false, writable: true });
+    if (AppCore && typeof AppCore === "object" && Object.isExtensible(AppCore)) {
+      Object.defineProperty(AppCore, "Loader", { value: api, configurable: true, enumerable: false, writable: true });
+    }
   } catch {}
 
   try {
@@ -1127,12 +1167,9 @@ export function installLoaderDebugApi(AppCore = null) {
   debugInstalled = true;
   attachDebugApi(AppCore, debugApi);
   emitLoader(AppCore, EVENTS.debugApi, { installed: true });
+
   return debugApi;
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   LOADER_VERSION,

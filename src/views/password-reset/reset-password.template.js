@@ -1,443 +1,322 @@
 /* =========================================================
-   Onion SPA - Reset Password Template
-   Archivo: src/views/password-reset/reset-password.template.js
+   Onion Support - Password Reset Template
+   Archivo: /src/views/password-reset/reset-password.template.js
 
-   RESET PASSWORD · AUTH TEMPLATE · FINAL PRO SYSTEM · CSP CLEAN · 10/10
-   LOGIN.CSS CONTRACT ALIGNED · APPLE STYLE · PRO SAAS AUTH
-
-   RESPONSABILIDADES:
-   - generar el HTML premium de recuperación de acceso
-   - reutilizar el MISMO sistema visual de /src/css/auth/login.css
-   - mantener layout auth-screen alineado con login
-   - conservar bloque lateral izquierdo de estado
-   - renderizar card principal a la derecha
-   - soportar input de usuario o email
-   - incluir toast superior derecho desacoplado
-   - usar logo real de empresa según tema activo
-   - alinear contrato de logo con login.template.js
-   - exponer ids estables para dom.js e index.js
-   - mantener compatibilidad total con flujo SPA
-
-   IMPORTANTE:
+   Responsabilidad:
+   - HTML mínimo para password reset.
+   - Soporta dos modos:
+     /password-request  -> request
+     /password-reset    -> confirm
+   - Sin imports.
+   - Sin Auth.
+   - Sin HTTP.
+   - Sin Router.
+   - Sin Store.
+   - Sin Toast.
+   - Sin bridge.
    - Sin CSS inline.
-   - Sin <style> inyectado.
    - Sin JS visual.
-   - Sin duplicidades visuales.
-   - Sin native title tooltip.
-   - El CSS vive en /src/css/auth/login.css.
+   - Sin rutas legacy.
+   - Compatible con resetPasswordView.js.
 ========================================================= */
 
-import { escapeHtml } from "./reset-password.helpers.js";
+export const TEMPLATE_VERSION = "simple";
+
+const DEFAULT_APP_NAME = "Onion Support";
+const DEFAULT_LOGIN_HREF = "/login";
+const DEFAULT_LOGO = "/src/media/img/favicon_black_circle.png?v=6";
 
 /* =========================================================
-   BASICS
+   HELPERS
 ========================================================= */
 
-function safeText(value = "", fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
-
-  const text = String(value).trim();
-
-  return text || fallback;
+function text(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
 }
 
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+function escapeHtml(value = "") {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
-/* =========================================================
-   ICONS
-========================================================= */
-
-function getToastInfoIcon() {
-  return `
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-      <path
-        fill="currentColor"
-        d="M11 7h2V5h-2v2Zm0 12h2V9h-2v10Zm1-17C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2Z"
-      />
-    </svg>
-  `;
+function escapeAttr(value = "") {
+  return escapeHtml(text(value, ""));
 }
 
-function getToastCloseIcon() {
-  return `
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
-      <path
-        fill="currentColor"
-        d="M18.3 5.71 12 12.01l-6.3-6.3-1.41 1.41 6.3 6.3-6.3 6.29 1.41 1.41 6.3-6.29 6.29 6.29 1.41-1.41-6.29-6.29 6.29-6.3-1.41-1.41Z"
-      />
-    </svg>
-  `;
+function safeInternalHref(value = "", fallback = DEFAULT_LOGIN_HREF) {
+  const raw = text(value, "");
+  const fallbackHref = text(fallback, DEFAULT_LOGIN_HREF);
+
+  if (!raw) return fallbackHref;
+  if (!raw.startsWith("/")) return fallbackHref;
+  if (raw.startsWith("//")) return fallbackHref;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallbackHref;
+  if (/[\r\n\t\\]/.test(raw)) return fallbackHref;
+
+  return raw.replace(/\/{2,}/g, "/") || fallbackHref;
 }
 
-function getBackArrowIcon() {
-  return `
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
-      <path
-        fill="currentColor"
-        d="M14.71 6.29a1 1 0 0 1 0 1.41L11.41 11H20a1 1 0 1 1 0 2h-8.59l3.3 3.29a1 1 0 0 1-1.41 1.42l-5-5a1 1 0 0 1 0-1.42l5-5a1 1 0 0 1 1.41 0Z"
-      />
-    </svg>
-  `;
+function safeAssetSrc(value = "", fallback = DEFAULT_LOGO) {
+  const raw = text(value, "");
+  const fallbackSrc = text(fallback, DEFAULT_LOGO);
+
+  if (!raw) return fallbackSrc;
+  if (!raw.startsWith("/")) return fallbackSrc;
+  if (raw.startsWith("//")) return fallbackSrc;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return fallbackSrc;
+  if (/[\r\n\t\\]/.test(raw)) return fallbackSrc;
+
+  return raw;
 }
 
-/* =========================================================
-   LOGO
-   Contrato alineado con login.template.js + login.css:
-   - .login-logo-theme
-   - .login-logo-theme-img
-   - .login-logo-theme-dark
-   - .login-logo-theme-light
-   - .logo-dark / .logo-light legacy aliases
-   - .login-logo--dark / .login-logo--light legacy aliases
-========================================================= */
+function normalizeToken(value = "") {
+  const token = text(value, "").replace(/^Bearer\s+/i, "");
 
-function renderThemeLogo({
-  darkSrc = "/src/media/img/favicon_white.png",
-  lightSrc = "/src/media/img/favicon_black.png",
-  alt = "Onion Support",
-} = {}) {
-  const finalAlt = safeText(alt, "Onion Support");
+  if (!token) return "";
+  if (/\s/.test(token)) return "";
 
-  return `
-    <span
-      class="login-logo-theme"
-      aria-label="${escapeHtml(finalAlt)}"
-      data-login-logo="true"
-      data-login-logo-theme="true"
-    >
-      <img
-        class="login-logo-theme-img login-logo-theme-dark logo-dark login-logo--dark"
-        src="${escapeHtml(darkSrc)}"
-        alt=""
-        width="44"
-        height="44"
-        loading="eager"
-        decoding="async"
-        aria-hidden="true"
-      />
-
-      <img
-        class="login-logo-theme-img login-logo-theme-light logo-light login-logo--light"
-        src="${escapeHtml(lightSrc)}"
-        alt=""
-        width="44"
-        height="44"
-        loading="eager"
-        decoding="async"
-        aria-hidden="true"
-      />
-    </span>
-  `;
-}
-
-/* =========================================================
-   TOAST
-========================================================= */
-
-function renderToast() {
-  return `
-    <div
-      class="login-toast-stack login-toast-stack--top-right"
-      aria-live="polite"
-      aria-atomic="true"
-      data-reset-password-toast-stack="true"
-    >
-      <div
-        id="resetPasswordToast"
-        class="login-toast"
-        role="status"
-        aria-hidden="true"
-        data-state="default"
-        hidden
-      >
-        <div class="login-toast-glow" aria-hidden="true"></div>
-
-        <div class="login-toast-body">
-          <div
-            id="resetPasswordToastIcon"
-            class="login-toast-icon"
-            aria-hidden="true"
-          >
-            ${getToastInfoIcon()}
-          </div>
-
-          <div class="login-toast-content">
-            <div
-              id="resetPasswordToastTitle"
-              class="login-toast-title"
-            >
-              Aviso
-            </div>
-
-            <div
-              id="resetPasswordToastText"
-              class="login-toast-text"
-            ></div>
-          </div>
-
-          <button
-            type="button"
-            id="resetPasswordToastClose"
-            class="login-toast-close"
-            aria-label="Cerrar aviso"
-            data-tooltip="Cerrar aviso"
-            data-reset-password-toast-close="true"
-          >
-            ${getToastCloseIcon()}
-          </button>
-        </div>
-
-        <span
-          id="resetPasswordToastProgress"
-          class="login-toast-progress"
-          aria-hidden="true"
-        ></span>
-      </div>
-    </div>
-  `;
-}
-
-/* =========================================================
-   LEFT PANEL
-========================================================= */
-
-function renderSignalItem(text = "") {
-  const label = safeText(text, "");
-
-  if (!label) {
+  if (
+    ["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
+      token.toLowerCase()
+    )
+  ) {
     return "";
   }
 
+  return token;
+}
+
+function normalizeMode(options = {}) {
+  const mode = text(options.mode || options.flow, "").toLowerCase();
+
+  if (options.isConfirm === true) return "confirm";
+  if (mode === "confirm") return "confirm";
+
+  return "request";
+}
+
+/* =========================================================
+   PARTIALS
+========================================================= */
+
+function renderMessage() {
   return `
-    <div class="login-signal-item">
-      <span class="dot" aria-hidden="true"></span>
-      <span>${escapeHtml(label)}</span>
+    <div
+      class="password-reset-message"
+      id="passwordResetMessage"
+      data-password-reset-message="true"
+      data-reset-password-message="true"
+      data-password-reset-error="true"
+      data-reset-password-error="true"
+      role="alert"
+      aria-live="polite"
+      aria-atomic="true"
+      hidden
+    ></div>
+  `;
+}
+
+function renderRequestFields({ identifier = "" } = {}) {
+  const value = text(identifier, "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .slice(0, 180);
+
+  return `
+    <div class="password-reset-field" data-password-reset-field="identifier">
+      <label class="password-reset-label" for="passwordResetIdentifier">
+        Usuario o email
+      </label>
+
+      <input
+        class="input-text"
+        id="passwordResetIdentifier"
+        name="identifier"
+        type="text"
+        autocomplete="username"
+        inputmode="email"
+        autocapitalize="none"
+        spellcheck="false"
+        placeholder="Usuario o email"
+        value="${escapeAttr(value)}"
+        data-password-reset-identifier="true"
+        data-reset-password-identifier="true"
+        required
+      />
     </div>
   `;
 }
 
-function renderLeftPanel({
-  heroEyebrow = "ONION SUPPORT · RECUPERACIÓN PROTEGIDA",
-  heroTitle = "Recuperación segura del acceso al panel",
-  bullets = [],
-} = {}) {
-  const customSignals = safeArray(bullets)
-    .map((item) => safeText(item, ""))
-    .filter(Boolean);
-
-  const finalSignals = customSignals.length
-    ? customSignals
-    : [
-        "Validación segura de usuario o email",
-        "Flujo protegido desacoplado del acceso principal",
-        "Recuperación guiada alineada al entorno operativo",
-      ];
+function renderConfirmFields({ token = "" } = {}) {
+  const safeToken = normalizeToken(token);
 
   return `
-    <aside
-      class="login-side login-side-left login-side-left--raised"
-      aria-label="Estado de recuperación"
-    >
-      <div class="login-side-panel login-side-panel--status">
-        <div class="login-side-eyebrow">
-          ${escapeHtml(heroEyebrow)}
-        </div>
+    <input
+      type="hidden"
+      name="token"
+      value="${escapeAttr(safeToken)}"
+      data-password-reset-token="true"
+      data-reset-token="true"
+    />
 
-        <h3>
-          ${escapeHtml(heroTitle)}
-        </h3>
+    <div class="password-reset-field" data-password-reset-field="password">
+      <label class="password-reset-label" for="passwordResetPassword">
+        Nueva contraseña
+      </label>
 
-        <div class="login-signal-list">
-          ${finalSignals.map(renderSignalItem).join("")}
-        </div>
-      </div>
-    </aside>
+      <input
+        class="input-text"
+        id="passwordResetPassword"
+        name="password"
+        type="password"
+        autocomplete="new-password"
+        placeholder="Nueva contraseña"
+        data-password-reset-password="true"
+        data-reset-password-password="true"
+        required
+      />
+    </div>
+
+    <div class="password-reset-field" data-password-reset-field="confirm-password">
+      <label class="password-reset-label" for="passwordResetConfirmPassword">
+        Confirmar contraseña
+      </label>
+
+      <input
+        class="input-text"
+        id="passwordResetConfirmPassword"
+        name="confirmPassword"
+        type="password"
+        autocomplete="new-password"
+        placeholder="Confirmar contraseña"
+        data-password-reset-confirm="true"
+        data-reset-password-confirm="true"
+        required
+      />
+    </div>
   `;
 }
 
 /* =========================================================
-   FORM
+   TEMPLATE
 ========================================================= */
 
-function renderForm({
-  appName = "Onion Support",
-  title = "Recuperar acceso",
-  subtitle = "",
-  rememberedIdentifier = "",
-  submitLabel = "Enviar enlace",
-  identifierPlaceholder = "Usuario o email",
-  backLabel = "Volver al acceso",
-  backHref = "/login",
-  footerText = "Entorno protegido. Usa un identificador válido de tu cuenta corporativa.",
-  logoDarkSrc = "/src/media/img/favicon_white.png",
-  logoLightSrc = "/src/media/img/favicon_black.png",
-} = {}) {
-  const finalAppName = safeText(appName, "Onion Support");
+export function getResetPasswordTemplate(options = {}) {
+  const mode = normalizeMode(options);
+  const isConfirm = mode === "confirm";
 
-  const finalTitle = safeText(title, "Recuperar acceso");
+  const appName = text(options.appName, DEFAULT_APP_NAME);
+  const logoSrc = safeAssetSrc(options.logoSrc, DEFAULT_LOGO);
 
-  const finalSubtitle = safeText(
-    subtitle,
-    `Recuperar acceso a ${finalAppName}`
+  const title = text(
+    options.title,
+    isConfirm ? "Nueva contraseña" : "Recuperar acceso"
   );
 
-  const finalIdentifier = safeText(rememberedIdentifier, "");
-  const finalSubmitLabel = safeText(submitLabel, "Enviar enlace");
-  const finalIdentifierPlaceholder = safeText(identifierPlaceholder, "Usuario o email");
-  const finalBackLabel = safeText(backLabel, "Volver al acceso");
-  const finalBackHref = safeText(backHref, "/login");
-  const finalFooterText = safeText(
-    footerText,
-    "Entorno protegido. Usa un identificador válido de tu cuenta corporativa."
+  const subtitle = text(
+    options.subtitle,
+    isConfirm
+      ? `Define una nueva contraseña para ${appName}.`
+      : `Introduce tu usuario o email de ${appName}.`
   );
+
+  const submitLabel = text(
+    options.submitLabel,
+    isConfirm ? "Cambiar contraseña" : "Enviar enlace"
+  );
+
+  const backLabel = text(options.backLabel, "Volver al acceso");
+  const backHref = safeInternalHref(options.backHref, DEFAULT_LOGIN_HREF);
 
   return `
     <section
-      class="login-stage login-stage--right"
-      aria-label="Formulario de recuperación"
+      class="password-reset-view"
+      id="passwordResetView"
+      data-view="password-reset"
+      data-view-name="password-reset"
+      data-password-reset-view="true"
+      data-reset-password-view="true"
+      data-password-reset-mode="${escapeAttr(mode)}"
+      data-template-version="${escapeAttr(TEMPLATE_VERSION)}"
     >
-      <div class="login-card-shell login-card-shell--right">
-        <div
-          class="login-card login-card--offset login-card--clean reset-password-card"
-          id="resetPasswordCard"
-          data-reset-password-card="true"
-        >
-          <header class="login-header">
-            <div class="logo-fade" aria-hidden="true">
-              ${renderThemeLogo({
-                darkSrc: logoDarkSrc,
-                lightSrc: logoLightSrc,
-                alt: finalAppName,
-              })}
-            </div>
+      <div class="password-reset-shell">
+        <article class="password-reset-card" aria-labelledby="passwordResetTitle">
+          <header class="password-reset-header">
+            <img
+              class="password-reset-logo"
+              src="${escapeAttr(logoSrc)}"
+              alt=""
+              width="48"
+              height="48"
+              loading="eager"
+              decoding="async"
+              draggable="false"
+              aria-hidden="true"
+            />
 
-            <h2>${escapeHtml(finalTitle)}</h2>
+            <h1 class="password-reset-title" id="passwordResetTitle">
+              ${escapeHtml(title)}
+            </h1>
 
-            <p class="login-subtitle">
-              ${escapeHtml(finalSubtitle)}
+            <p class="password-reset-subtitle" id="passwordResetDescription">
+              ${escapeHtml(subtitle)}
             </p>
           </header>
 
           <form
-            class="login-form reset-password-form"
-            id="resetPasswordForm"
+            class="password-reset-form"
+            id="passwordResetForm"
+            data-password-reset-form="true"
             data-reset-password-form="true"
+            data-password-reset-flow="${escapeAttr(mode)}"
+            aria-describedby="passwordResetDescription passwordResetMessage"
             novalidate
           >
-            <div
-              class="login-field"
-              data-field="identifier"
-              data-reset-password-field="identifier"
-            >
-              <input
-                class="input-text"
-                id="resetIdentifier"
-                name="identifier"
-                type="text"
-                autocomplete="username"
-                inputmode="email"
-                placeholder="${escapeHtml(finalIdentifierPlaceholder)}"
-                value="${escapeHtml(finalIdentifier)}"
-                aria-label="Usuario o email"
-                data-reset-password-identifier="true"
-                required
-              />
-            </div>
+            ${renderMessage()}
 
-            <div
-              class="login-error"
-              id="resetPasswordError"
-              role="alert"
-              aria-live="polite"
-              aria-atomic="true"
-            ></div>
+            ${
+              isConfirm
+                ? renderConfirmFields({ token: options.token })
+                : renderRequestFields({
+                    identifier:
+                      options.identifier ||
+                      options.rememberedIdentifier ||
+                      "",
+                  })
+            }
 
             <button
-              class="login-button"
-              id="resetPasswordButton"
+              class="password-reset-submit"
+              id="passwordResetSubmit"
               type="submit"
+              data-password-reset-submit="true"
               data-reset-password-submit="true"
             >
-              <span class="login-submit-text">
-                ${escapeHtml(finalSubmitLabel)}
-              </span>
+              ${escapeHtml(submitLabel)}
             </button>
 
-            <div class="login-reset">
+            <p class="password-reset-back">
               <a
-                class="login-reset-link reset-password-back-link"
-                href="${escapeHtml(finalBackHref)}"
-                id="backToLoginLink"
+                class="password-reset-back-link"
+                href="${escapeAttr(backHref)}"
                 data-spa
+                data-password-reset-back="true"
                 data-reset-password-back="true"
               >
-                <span
-                  class="login-reset-link-icon"
-                  aria-hidden="true"
-                >
-                  ${getBackArrowIcon()}
-                </span>
-
-                <span>${escapeHtml(finalBackLabel)}</span>
+                ${escapeHtml(backLabel)}
               </a>
-            </div>
+            </p>
           </form>
-
-          <footer class="login-footer">
-            <span>${escapeHtml(finalFooterText)}</span>
-          </footer>
-        </div>
+        </article>
       </div>
     </section>
   `;
 }
-
-/* =========================================================
-   FULL TEMPLATE
-========================================================= */
-
-export function getResetPasswordTemplate(options = {}) {
-  const appName = safeText(
-    options?.appName,
-    "Onion Support"
-  );
-
-  return `
-    <section
-      class="login-view reset-password-view"
-      data-view="reset-password"
-      data-reset-password-view="true"
-    >
-      ${renderToast()}
-
-      <div class="login-scene">
-        <div
-          class="login-grid"
-          id="resetPasswordGrid"
-          data-reset-password-grid="true"
-        >
-          ${renderLeftPanel({
-            ...options,
-            appName,
-          })}
-
-          ${renderForm({
-            ...options,
-            appName,
-          })}
-        </div>
-      </div>
-    </section>
-  `;
-}
-
-/* =========================================================
-   EXPORTS
-========================================================= */
 
 export { getResetPasswordTemplate as ResetPasswordTemplate };
 

@@ -2,42 +2,41 @@
    Onion SPA - App Constants
    Archivo: src/app/constants.js
 
-   APP CONSTANTS · FINAL SIMPLE
-   - Contrato estático del módulo app
-   - Sin DOM, storage, fetch, Auth, Router, Toast, render ni navegación
-   - Rutas técnicas con token preservadas
-   - Constantes pequeñas, congeladas y compatibles
+   APP CONSTANTS · SIMPLE
+   - contrato estático del módulo app
+   - scopes/rutas/eventos/ids/boot config
+   - rutas técnicas con token preservadas
+   - helpers puros de ruta/redacción/compat
+   - sin DOM, storage, fetch, Auth, Router, Toast, render ni navegación
 ========================================================= */
 
-export const APP_CONSTANTS_VERSION = "20.0.0-final";
+export const APP_CONSTANTS_VERSION = "21.0.0-simple";
 
 /* =========================================================
-   BASE HELPERS · PURE
+   PURE HELPERS
 ========================================================= */
 
 const DEFAULT_ROUTE_VALUE = "/";
 const LOCAL_ORIGIN = "http://localhost";
 const PUBLIC_USERNAME_RE = /^@[A-Za-z0-9._-]{1,80}$/;
+const ABSOLUTE_URL_RE = /^[a-z][a-z\d+.-]*:\/\//i;
 
-function deepFreeze(value, seen = new WeakSet()) {
-  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
-
+function freeze(value) {
   try {
-    if (seen.has(value)) return value;
-    seen.add(value);
-
-    for (const key of Object.getOwnPropertyNames(value)) deepFreeze(value[key]);
     return Object.freeze(value);
   } catch {
     return value;
   }
 }
 
-const freeze = (value) => deepFreeze(value);
-
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
-  const text = String(value).replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim();
+
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return text || fallback;
 }
 
@@ -78,18 +77,19 @@ function readConstant(object, key = "", fallback = null) {
 ========================================================= */
 
 function normalizePathname(pathname = DEFAULT_ROUTE_VALUE) {
-  let value = safeText(pathname, DEFAULT_ROUTE_VALUE).replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+  let value = safeText(pathname, DEFAULT_ROUTE_VALUE)
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!value) value = DEFAULT_ROUTE_VALUE;
   if (!value.startsWith("/")) value = `/${value}`;
 
   const parts = [];
 
   for (const part of value.split("/").filter(Boolean)) {
-    if (part === ".") continue;
-    if (part === "..") {
-      parts.pop();
-      continue;
-    }
-    parts.push(part);
+    if (!part || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
   }
 
   value = `/${parts.join("/")}`;
@@ -116,8 +116,7 @@ function isHashRouterPath(value = "") {
 function normalizeHashRouterPath(value = "") {
   const raw = safeText(value, "");
   if (!raw) return DEFAULT_ROUTE_VALUE;
-  if (raw.startsWith("#!")) return normalizeLocalPath(raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE_VALUE);
-  return normalizeLocalPath(raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE_VALUE);
+  return raw.startsWith("#!") ? normalizeLocalPath(raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE_VALUE) : normalizeLocalPath(raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE_VALUE);
 }
 
 function splitPath(path = DEFAULT_ROUTE_VALUE) {
@@ -153,7 +152,7 @@ function normalizeLocalPath(path = DEFAULT_ROUTE_VALUE) {
   if (isHashRouterPath(raw)) return normalizeHashRouterPath(raw);
 
   try {
-    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
+    if (ABSOLUTE_URL_RE.test(raw)) {
       const url = new URL(raw, LOCAL_ORIGIN);
       if (url.hash && isHashRouterPath(url.hash)) return normalizeHashRouterPath(url.hash);
       return normalizeLocalPath(`${url.pathname || DEFAULT_ROUTE_VALUE}${url.search || ""}${url.hash || ""}`);
@@ -741,7 +740,7 @@ export const APP_SELECTORS = freeze({
   viewContainer: "#view-container, [data-view-root='true'], [data-router-view='true'], [data-router-view]",
   sidebar: "#app-sidebar, #sidebar, [data-sidebar-root], .sidebar",
   sidebarMount: "#sidebar-mount, [data-sidebar-mount]",
-  topbar: "#app-topbar, #topbar, [data-topbar-root], .topbar",
+  topbar: "#app-topbar, #topbar, [data-topbar='root'], [data-topbar-root], .topbar",
   topbarMount: "#topbar-mount, [data-topbar-mount]",
   tablehead: "#table-head, [data-tablehead], .table-head",
   tableHead: "#table-head, [data-tablehead], .table-head",
@@ -838,7 +837,9 @@ export function getPublicTokenRouteConfigRaw(key = "") {
   return PROTECTED_PUBLIC_TOKEN_ROUTES.find((item) => item.key === cleanKey) || null;
 }
 
-export function getPublicTokenRouteConfig(key = "") { return cloneRouteConfig(getPublicTokenRouteConfigRaw(key)); }
+export function getPublicTokenRouteConfig(key = "") {
+  return cloneRouteConfig(getPublicTokenRouteConfigRaw(key));
+}
 
 export function getPublicTokenRouteConfigByPath(path = "") {
   const cleanPath = normalizeCanonicalRoutePathValue(path);
@@ -880,9 +881,13 @@ export function isSensitiveParamName(name = "") {
   return GENERIC_SENSITIVE_PARAM_NAMES.some((item) => item.toLowerCase() === clean);
 }
 
-export function getSensitiveParamNames() { return array(GENERIC_SENSITIVE_PARAM_NAMES); }
+export function getSensitiveParamNames() {
+  return array(GENERIC_SENSITIVE_PARAM_NAMES);
+}
 
-function escapeRegExp(value = "") { return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 export function redactSensitiveText(value = "") {
   let output = safeText(value, "");
@@ -938,9 +943,24 @@ export function getAppConstantsSnapshot() {
     ui: UI_CONSTANTS,
     dom: { ids: APP_DOM_IDS, selectors: APP_SELECTORS },
     modules: APP_MODULES,
-    repair: { reasons: UI_REPAIR_REASONS, methods: UI_REPAIR_METHODS, hardRepairMethods: UI_HARD_REPAIR_METHODS, rebindMethods: UI_REBIND_METHODS, afterPaintMethods: UI_AFTER_PAINT_REPAIR_METHODS },
+    repair: {
+      reasons: UI_REPAIR_REASONS,
+      methods: UI_REPAIR_METHODS,
+      hardRepairMethods: UI_HARD_REPAIR_METHODS,
+      rebindMethods: UI_REBIND_METHODS,
+      afterPaintMethods: UI_AFTER_PAINT_REPAIR_METHODS,
+    },
     log: { prefix: APP_LOG_PREFIX, levels: APP_LOG_LEVELS },
-    policy: { constantsOnly: true, ownDom: false, ownStorage: false, ownAuth: false, ownRouter: false, ownFetch: false, ownToast: false, ownRender: false },
+    policy: {
+      constantsOnly: true,
+      ownDom: false,
+      ownStorage: false,
+      ownAuth: false,
+      ownRouter: false,
+      ownFetch: false,
+      ownToast: false,
+      ownRender: false,
+    },
   });
 }
 

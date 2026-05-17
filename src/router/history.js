@@ -2,14 +2,14 @@
    Onion SPA - Router History
    Archivo: src/router/history.js
 
-   ROUTER HISTORY · FINAL SIMPLE
-   - Historial SPA puro
+   ROUTER HISTORY · SIMPLE
+   - historial SPA puro
    - pushState / replaceState / back
-   - Estado inicial seguro
+   - estado inicial seguro
    - publicPath conserva /@usuario + query/hash
    - canonicalPath limpio
-   - Scrub explícito de tokens técnicos
-   - Sin Auth, guards, render, fetch, storage, Toast ni permisos
+   - scrub explícito de tokens técnicos
+   - sin Auth, guards, render, fetch, storage, Toast ni permisos
 ========================================================= */
 
 import {
@@ -28,14 +28,10 @@ import {
   RouterTokenRoutes,
 } from "./helpers.js";
 
-/* =========================================================
-   VERSION / CONSTANTS
-========================================================= */
-
-export const ROUTER_HISTORY_VERSION = "20.0.0-final";
+export const ROUTER_HISTORY_VERSION = "21.0.0-simple";
 
 const SOURCE = "router.history";
-const HISTORY_STATE_VERSION = 7;
+const HISTORY_STATE_VERSION = 8;
 const DEFAULT_ROUTE = "/";
 const WRITE_DEDUPE_MS = 32;
 
@@ -60,6 +56,11 @@ const SENSITIVE_PARAM_NAMES = Object.freeze([
     "mfa_token",
     "otpToken",
     "otp_token",
+    "authorization",
+    "auth",
+    "jwt",
+    "session",
+    "sid",
   ]),
 ]);
 
@@ -72,13 +73,13 @@ const HISTORY_EVENTS = Object.freeze({
   back: "router:history:back",
 });
 
-/* =========================================================
-   BASICS
-========================================================= */
-
 let sequence = 0;
 let lastWriteSignature = "";
 let lastWriteAt = 0;
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function canUseHistory() {
   return Boolean(
@@ -90,19 +91,11 @@ function canUseHistory() {
 }
 
 function nowMs() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
+  try { return Date.now(); } catch { return 0; }
 }
 
 function isoNow(ms = nowMs()) {
-  try {
-    return new Date(ms).toISOString();
-  } catch {
-    return "";
-  }
+  try { return new Date(ms).toISOString(); } catch { return ""; }
 }
 
 function safeText(value, fallback = "") {
@@ -140,17 +133,11 @@ function normalizePathname(pathname = DEFAULT_ROUTE) {
 
   for (const segment of value.split("/")) {
     if (!segment || segment === ".") continue;
-
-    if (segment === "..") {
-      stack.pop();
-      continue;
-    }
-
-    stack.push(segment);
+    if (segment === "..") stack.pop();
+    else stack.push(segment);
   }
 
   value = `/${stack.join("/")}` || DEFAULT_ROUTE;
-
   return value.length > 1 ? value.replace(/\/+$/g, "") || DEFAULT_ROUTE : value;
 }
 
@@ -210,19 +197,11 @@ function joinUrl({ pathname = DEFAULT_ROUTE, search = "", hash = "" } = {}) {
   return `${normalizePathname(pathname)}${normalizeSearch(search)}${normalizeHash(hash)}`;
 }
 
-function browserPath() {
-  if (!isBrowser()) return DEFAULT_ROUTE;
-
+function publicOf(AppCore, path = DEFAULT_ROUTE) {
   try {
-    const pathname = window.location.pathname || DEFAULT_ROUTE;
-    const search = window.location.search || "";
-    const hash = window.location.hash || "";
-
-    if (hash && isHashRouterPath(hash)) return publicOf(null, normalizeHashRouterPath(hash));
-
-    return publicOf(null, `${pathname}${search}${hash}`);
+    return normalizePath(AppCore, path) || DEFAULT_ROUTE;
   } catch {
-    return DEFAULT_ROUTE;
+    return joinUrl(splitUrl(path));
   }
 }
 
@@ -234,11 +213,18 @@ function canonicalOf(AppCore, path = DEFAULT_ROUTE) {
   }
 }
 
-function publicOf(AppCore, path = DEFAULT_ROUTE) {
+function browserPath() {
+  if (!isBrowser()) return DEFAULT_ROUTE;
+
   try {
-    return normalizePath(AppCore, path) || DEFAULT_ROUTE;
+    const pathname = window.location.pathname || DEFAULT_ROUTE;
+    const search = window.location.search || "";
+    const hash = window.location.hash || "";
+
+    if (hash && isHashRouterPath(hash)) return publicOf(null, normalizeHashRouterPath(hash));
+    return publicOf(null, `${pathname}${search}${hash}`);
   } catch {
-    return joinUrl(splitUrl(path));
+    return DEFAULT_ROUTE;
   }
 }
 
@@ -254,7 +240,6 @@ function routeKind(AppCore, path = "") {
 function normalizePublicUrl(AppCore, path = DEFAULT_ROUTE, options = {}) {
   const opts = safeObject(options);
   const protectedInitial = opts.ignoreProtectedInitialUrl ? "" : getProtectedInitialPublicPath(AppCore);
-
   const targetKind = routeKind(AppCore, path);
   const protectedKind = routeKind(AppCore, protectedInitial);
 
@@ -282,11 +267,7 @@ function normalizePublicUrl(AppCore, path = DEFAULT_ROUTE, options = {}) {
 function comparableCurrentUrl(AppCore) {
   return normalizePublicUrl(
     AppCore,
-    getProtectedInitialPublicPath(AppCore) ||
-      browserPath() ||
-      getCurrentPublicPath(AppCore) ||
-      getCurrentPath(AppCore) ||
-      DEFAULT_ROUTE,
+    getProtectedInitialPublicPath(AppCore) || browserPath() || getCurrentPublicPath(AppCore) || getCurrentPath(AppCore) || DEFAULT_ROUTE,
     { ignoreProtectedInitialUrl: true }
   );
 }
@@ -295,16 +276,13 @@ function comparableCurrentUrl(AppCore) {
    EVENTS / DEBUG SAFETY
 ========================================================= */
 
-function sanitize(value, depth = 0, seen = new WeakSet()) {
+function sanitize(value, depth = 0, seen = new WeakSet(), keyHint = "") {
   if (depth > 4) return "[depth-limit]";
+  if (/token|authorization|password|secret|credential|jwt|bearer|otp|totp|mfa|2fa|code/i.test(keyHint)) return value ? "***" : value;
   if (value === null || value === undefined) return value;
 
   if (typeof value === "string") {
-    try {
-      return redactTokenInText(value);
-    } catch {
-      return value;
-    }
+    try { return redactTokenInText(value); } catch { return value; }
   }
 
   if (typeof value === "number" || typeof value === "boolean") return value;
@@ -319,7 +297,7 @@ function sanitize(value, depth = 0, seen = new WeakSet()) {
     };
   }
 
-  if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitize(item, depth + 1, seen));
+  if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitize(item, depth + 1, seen, keyHint));
 
   if (value && typeof value === "object") {
     try {
@@ -327,15 +305,11 @@ function sanitize(value, depth = 0, seen = new WeakSet()) {
       seen.add(value);
     } catch {}
 
-    const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = /token|authorization|password|secret|credential|jwt|bearer|otp|totp|mfa|2fa|code/i.test(key)
-        ? item ? "***" : item
-        : sanitize(item, depth + 1, seen);
-    }
-
-    return output;
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 80)
+        .map(([key, item]) => [key, sanitize(item, depth + 1, seen, key)])
+    );
   }
 
   return String(value);
@@ -385,12 +359,7 @@ function warn(AppCore, ...args) {
 
 function currentHistoryState() {
   if (!canUseHistory()) return null;
-
-  try {
-    return window.history.state || null;
-  } catch {
-    return null;
-  }
+  try { return window.history.state || null; } catch { return null; }
 }
 
 function comparableState(state = null) {
@@ -415,15 +384,13 @@ function sameHistoryState(a = null, b = null) {
 
   if (!current || !next) return false;
 
-  return (
-    current.publicPath === next.publicPath &&
+  return current.publicPath === next.publicPath &&
     current.canonicalPath === next.canonicalPath &&
     current.rawCanonicalPath === next.rawCanonicalPath &&
     current.requestedPath === next.requestedPath &&
     current.username === next.username &&
     current.redirectedFrom === next.redirectedFrom &&
-    current.mode === next.mode
-  );
+    current.mode === next.mode;
 }
 
 function writeSignature({ method = "", url = "", state = {} } = {}) {
@@ -459,29 +426,16 @@ function resolveHistoryContext(AppCore, pathname = DEFAULT_ROUTE, options = {}) 
 
   const canonicalPath = opts.canonicalPath || canonicalOf(AppCore, publicPath);
   const rawCanonicalPath = opts.rawCanonicalPath || opts.requestedCanonicalPath || canonicalPath;
-
-  const requestedPath = normalizePublicUrl(
-    AppCore,
-    opts.requestedPath || opts.fromPath || pathname || publicPath,
-    {
-      ignoreProtectedInitialUrl: opts.ignoreProtectedInitialUrl === true || opts.scrubProtectedToken === true,
-    }
-  );
-
+  const requestedPath = normalizePublicUrl(AppCore, opts.requestedPath || opts.fromPath || pathname || publicPath, {
+    ignoreProtectedInitialUrl: opts.ignoreProtectedInitialUrl === true || opts.scrubProtectedToken === true,
+  });
   const username = opts.username || opts.resolvedUsername || getCurrentResolvedUsername(AppCore) || null;
 
-  return {
-    publicPath,
-    canonicalPath,
-    rawCanonicalPath,
-    requestedPath,
-    username,
-  };
+  return { publicPath, canonicalPath, rawCanonicalPath, requestedPath, username };
 }
 
 export function createHistoryState({ AppCore, pathname = DEFAULT_ROUTE, extras = {} } = {}) {
   const extra = safeObject(extras);
-
   const publicPath = normalizePublicUrl(AppCore, extra.publicPath || pathname || DEFAULT_ROUTE, {
     ignoreProtectedInitialUrl: extra.scrubProtectedToken === true,
   });
@@ -533,16 +487,13 @@ function resolvedState({ AppCore, pathname = DEFAULT_ROUTE, options = {}, mode =
     pathname: context.publicPath,
     extras: {
       mode,
-
       canonicalPath: context.canonicalPath,
       rawCanonicalPath: context.rawCanonicalPath,
       publicPath: context.publicPath,
       requestedPath: context.requestedPath,
       username: context.username,
-
       redirectedFrom: options.redirectedFrom || null,
       source: options.source || null,
-
       preservePath: options.preservePath === true,
       preserveCurrentContext: options.preserveCurrentContext === true,
       protectedInitialUrl: options.protectedInitialUrl === true,
@@ -649,13 +600,11 @@ export function updateHistory({ AppCore, getRoute, pathname = DEFAULT_ROUTE, opt
     pathname: context.publicPath,
     extras: {
       mode: method === "replaceState" ? "replace" : "push",
-
       canonicalPath: context.canonicalPath,
       rawCanonicalPath: context.rawCanonicalPath,
       publicPath: context.publicPath,
       requestedPath: context.requestedPath,
       username: context.username,
-
       redirectedFrom: opts.redirectedFrom || null,
       source: opts.source || null,
     },
@@ -692,13 +641,7 @@ export function ensureInitialHistoryState({ AppCore } = {}) {
   if (!canUseHistory()) return false;
 
   try {
-    const currentUrl =
-      getProtectedInitialPublicPath(AppCore) ||
-      browserPath() ||
-      getCurrentPublicPath(AppCore) ||
-      getCurrentPath(AppCore) ||
-      DEFAULT_ROUTE;
-
+    const currentUrl = getProtectedInitialPublicPath(AppCore) || browserPath() || getCurrentPublicPath(AppCore) || getCurrentPath(AppCore) || DEFAULT_ROUTE;
     const publicPath = normalizePublicUrl(AppCore, currentUrl, { ignoreProtectedInitialUrl: true });
     const canonicalPath = canonicalOf(AppCore, publicPath) || getCurrentCanonicalPath(AppCore) || DEFAULT_ROUTE;
 
@@ -748,9 +691,7 @@ function removeSensitiveSearchParams(search = "") {
 
   try {
     const params = new URLSearchParams(normalized);
-
     for (const name of SENSITIVE_PARAM_NAMES) params.delete(name);
-
     const output = params.toString();
     return output ? `?${output}` : "";
   } catch {
@@ -758,8 +699,9 @@ function removeSensitiveSearchParams(search = "") {
 
     for (const name of SENSITIVE_PARAM_NAMES) {
       try {
+        const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         output = output
-          .replace(new RegExp(`([?&])${String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=[^&#]*&?`, "gi"), "$1")
+          .replace(new RegExp(`([?&])${escaped}=[^&#]*&?`, "gi"), "$1")
           .replace(/[?&]$/g, "");
       } catch {}
     }
@@ -817,14 +759,11 @@ export function buildScrubbedProtectedUrl(AppCore, url = "") {
     } catch {}
   }
 
-  return publicOf(
-    AppCore,
-    joinUrl({
-      pathname: removeProtectedPathToken(parts.pathname),
-      search: removeSensitiveSearchParams(parts.search),
-      hash,
-    })
-  );
+  return publicOf(AppCore, joinUrl({
+    pathname: removeProtectedPathToken(parts.pathname),
+    search: removeSensitiveSearchParams(parts.search),
+    hash,
+  }));
 }
 
 function scrubKind(AppCore, url = "") {
@@ -845,20 +784,19 @@ export function scrubProtectedTokenFromHistory({ AppCore, url = "", reason = "pr
   const scrubbedUrl = buildScrubbedProtectedUrl(AppCore, currentUrl);
   const kind = scrubKind(AppCore, scrubbedUrl);
 
-  const flags =
-    kind === "resetConfirm"
-      ? {
-          scrubbedResetToken: true,
-          resetTokenScrubbed: true,
-          scrubbedResetPasswordToken: true,
-          scrubbedResetConfirmToken: true,
-          scrubbedPasswordResetToken: true,
-        }
-      : {
-          scrubbedActivationToken: true,
-          activationTokenScrubbed: true,
-          scrubbedActivateAccountToken: true,
-        };
+  const flags = kind === "resetConfirm"
+    ? {
+        scrubbedResetToken: true,
+        resetTokenScrubbed: true,
+        scrubbedResetPasswordToken: true,
+        scrubbedResetConfirmToken: true,
+        scrubbedPasswordResetToken: true,
+      }
+    : {
+        scrubbedActivationToken: true,
+        activationTokenScrubbed: true,
+        scrubbedActivateAccountToken: true,
+      };
 
   const state = createHistoryState({
     AppCore,
@@ -866,15 +804,12 @@ export function scrubProtectedTokenFromHistory({ AppCore, url = "", reason = "pr
     extras: {
       ...safeObject(extraState),
       ...flags,
-
       mode: "scrub",
       publicPath: scrubbedUrl,
       requestedPath: scrubbedUrl,
       canonicalPath: canonicalOf(AppCore, scrubbedUrl),
       rawCanonicalPath: canonicalOf(AppCore, scrubbedUrl),
-
       source: reason,
-
       scrubbedPublicTokenRoute: kind || true,
       scrubbedTokenRoute: kind || true,
       scrubbedProtectedToken: true,
@@ -885,22 +820,13 @@ export function scrubProtectedTokenFromHistory({ AppCore, url = "", reason = "pr
   });
 
   const method = replace ? "replaceState" : "pushState";
-
   const ok = historyWrite(AppCore, method, state, scrubbedUrl, {
     reason,
     scrubbed: true,
     writeSignature: writeSignature({ method, url: scrubbedUrl, state }),
   });
 
-  if (ok) {
-    emit(AppCore, HISTORY_EVENTS.scrub, {
-      reason,
-      from: currentUrl,
-      to: scrubbedUrl,
-      kind,
-      state,
-    });
-  }
+  if (ok) emit(AppCore, HISTORY_EVENTS.scrub, { reason, from: currentUrl, to: scrubbedUrl, kind, state });
 
   return ok;
 }
@@ -925,10 +851,7 @@ export function getPopStatePath(AppCore, eventOrState = null) {
   const state = eventOrState?.state || eventOrState || currentHistoryState() || {};
   const fromState = safeText(state.publicPath || state.path || state.requestedPath || "", "");
 
-  if (fromState) {
-    return normalizePublicUrl(AppCore, fromState, { ignoreProtectedInitialUrl: true });
-  }
-
+  if (fromState) return normalizePublicUrl(AppCore, fromState, { ignoreProtectedInitialUrl: true });
   return comparableCurrentUrl(AppCore) || DEFAULT_ROUTE;
 }
 
@@ -942,30 +865,22 @@ export function getHistorySnapshot(AppCore) {
 
   return sanitize({
     version: ROUTER_HISTORY_VERSION,
-
     canUseHistory: canUseHistory(),
     historyStateVersion: HISTORY_STATE_VERSION,
-
     browserPublicUrl: browserPath(),
     currentComparableUrl: currentUrl,
     protectedInitialUrl,
-
     currentCanonicalPath: canonicalOf(AppCore, currentUrl || DEFAULT_ROUTE),
     currentPublicPath: currentUrl,
-
     currentAppPublicPath: getCurrentPublicPath(AppCore) || null,
     currentAppCanonicalPath: getCurrentCanonicalPath(AppCore) || null,
     currentAppPath: getCurrentPath(AppCore) || null,
     currentResolvedUsername: getCurrentResolvedUsername(AppCore) || null,
-
     lastWriteSignature,
     lastWriteAt,
     lastWriteAtIso: lastWriteAt ? isoNow(lastWriteAt) : "",
-
     sequence,
-
     state: canUseHistory() ? window.history.state : null,
-
     policy: {
       ownAuth: false,
       ownGuards: false,

@@ -3,12 +3,12 @@
    Archivo: src/core/http.js
 
    CORE HTTP · SIMPLE
-   - Fachada única sobre src/core/request.js
-   - Backend canónico: https://api.onionit.net
-   - Sin fetch propio, parser propio, retry propio ni timeout propio
-   - Sin Router, Toast, navegación, storage agresivo ni Auth pesada
+   - fachada única sobre src/core/request.js
+   - backend canónico: https://api.onionit.net
+   - sin fetch propio, parser propio, retry propio ni timeout propio
+   - sin Router, Toast, navegación, storage agresivo ni Auth pesada
    - Auth real delegada a src/features/auth/*
-   - Eventos/snapshots sin tokens reales
+   - eventos/snapshots sin tokens reales
 ========================================================= */
 
 import { config } from "./config.js";
@@ -26,9 +26,7 @@ import {
 
 export const HTTP_VERSION = "21.0.0-simple";
 
-export const DEFAULT_API_ORIGIN =
-  config?.canonicalProductionApiBase || "https://api.onionit.net";
-
+export const DEFAULT_API_ORIGIN = config?.canonicalProductionApiBase || "https://api.onionit.net";
 export const DEFAULT_API_PREFIX = "/api";
 export const DEFAULT_TIMEOUT_MS = 30000;
 export const DEFAULT_AUTH_TIMEOUT_MS = 30000;
@@ -188,6 +186,14 @@ function iso(ms = now()) {
     return new Date(ms).toISOString();
   } catch {
     return "";
+  }
+}
+
+function hasOwn(target, key) {
+  try {
+    return Object.prototype.hasOwnProperty.call(target, key);
+  } catch {
+    return false;
   }
 }
 
@@ -376,10 +382,7 @@ function normalizeOrigin(value = "", fallback = DEFAULT_API_ORIGIN, options = {}
 
   try {
     const url = new URL(raw);
-    if (![
-      "http:",
-      "https:",
-    ].includes(url.protocol)) return fallback;
+    if (!["http:", "https:"].includes(url.protocol)) return fallback;
 
     const origin = url.origin.replace(/\/+$/g, "");
     if (opts.allowFrontendOrigin !== true && isFrontendOrigin(origin)) return fallback;
@@ -787,13 +790,13 @@ function collectObjects(value, depth = 0, seen = new WeakSet()) {
     seen.add(value);
   } catch {}
 
-  const out = [value];
+  const output = [value];
 
   for (const key of ["data", "payload", "result", "body", "response", "auth", "session", "sessionData"]) {
-    if (value[key] && typeof value[key] === "object") out.push(...collectObjects(value[key], depth + 1, seen));
+    if (value[key] && typeof value[key] === "object") output.push(...collectObjects(value[key], depth + 1, seen));
   }
 
-  return out;
+  return output;
 }
 
 function pickToken(objects = [], keys = []) {
@@ -803,6 +806,7 @@ function pickToken(objects = [], keys = []) {
       if (token) return token;
     }
   }
+
   return "";
 }
 
@@ -823,7 +827,6 @@ export function setAuthPayloadCommitter(fn) {
 
 function handleAuthPayload(payload = {}, meta = {}) {
   const tokens = extractTokens(payload);
-
   if (tokens.token || tokens.refreshToken || tokens.tempToken) setAuthTokens(tokens);
 
   try {
@@ -1088,7 +1091,7 @@ function looksLikeOptionsObject(value = {}) {
     "retries",
     "responseType",
     "silent",
-  ].some((key) => Object.hasOwn(value, key));
+  ].some((key) => hasOwn(value, key));
 }
 
 export function del(endpoint = "/", bodyOrOptions = {}, maybeOptions = undefined) {
@@ -1338,6 +1341,19 @@ export function getHttpSnapshot(options = {}) {
       apiMe: true,
       authMe: true,
       apiAuthMe: true,
+    },
+
+    policy: {
+      facadeOnly: true,
+      backendCanonical: true,
+      noOwnFetch: true,
+      noOwnRetry: true,
+      noOwnParser: true,
+      noRouter: true,
+      noToast: true,
+      noStorageAggressive: true,
+      mePrivate: true,
+      redactedSnapshots: true,
     },
 
     at: iso(),

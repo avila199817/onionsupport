@@ -1,2158 +1,1305 @@
-/* =========================================================
-   Onion SPA - Core
-   Archivo: src/core/index.js
+ /* =========================================================
+   Onion Support - Core
+   Archivo: /src/core/index.js
 
-   CORE SINGLETON · SIMPLE KERNEL
-   - AppCore único
-   - State / Events / Storage / Cleanup / Modules / Hooks
-   - request.js = motor HTTP base
-   - http.js = facade HTTP única
-   - Auth estricta: token + user activo
-   - Bridges Router/Auth/Store/Http sin sistemas paralelos
-   - Snapshots sin secretos
+   Responsabilidad:
+   - Kernel mínimo global.
+   - Estado en memoria.
+   - Event bus mínimo.
+   - Registry mínimo de módulos.
+   - Cleanup mínimo.
+   - Hooks mínimos.
+   - HTTP único mínimo.
+   - Auth estricta: token + user usable.
+   - User inválido sólo si disabled.
+   - Roles únicos: admin / user.
+   - Sin storage.
+   - Sin DOM cache complejo.
+   - Sin network listeners.
+   - Sin framework interno.
 ========================================================= */
 
 import { config } from "./config.js";
 
-import {
-  isDocumentReady,
-  safeClone,
-  cloneError,
-  joinUrl,
-  buildUrl,
-  normalizePath,
-  normalizeCanonicalPath,
-  stripUsernamePrefix,
-  sanitizeUsername,
-  slugify,
-  normalizeUser,
-  getUserUsername,
-  getUserDisplayName,
-  getUserAvatarUrl,
-  hasValidToken,
-  getInitials,
-  isPublicApiPath,
-} from "./helpers.js";
+export const CORE_VERSION = "simple";
 
-import {
-  createInitialState,
-  cloneState,
-  setState as stateSetState,
-  setStateBase as stateSetStateBase,
-  computeAuthenticated,
-} from "./state.js";
+const API_BASE =
+  config?.apiBase ||
+  config?.api?.baseUrl ||
+  "https://api.onionit.net";
 
-import { createDomCache, cacheDom, validateRequiredDom } from "./dom.js";
-import { createStorage } from "./storage.js";
-import { createEvents } from "./events.js";
-import { createCleanup } from "./cleanup.js";
-import { createModules } from "./modules.js";
-import { createHooks } from "./hooks.js";
+const APP_NAME =
+  config?.appName ||
+  config?.name ||
+  "Onion Support";
 
-import {
-  setRoute as setRouteBase,
-  setPublicPath as setPublicPathBase,
-  setUser as setUserBase,
-  setToken as setTokenBase,
-  applySession as applySessionBase,
-  clearSession as clearSessionBase,
-  loadPreferences,
-  loadSession,
-  setTheme as setThemeBase,
-  setLang as setLangBase,
-  setSidebarOpen as setSidebarOpenBase,
-  setLoading as setLoadingBase,
-  setError as setErrorBase,
-  syncBaseUI,
-} from "./session.js";
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
 
-import {
-  setDocumentTitle as setDocumentTitleBase,
-  clearDynamicContainers as clearDynamicContainersBase,
-  syncUserUI as syncUserUIBase,
-} from "./ui.js";
+function isFn(value) {
+  return typeof value === "function";
+}
 
-import { createRequest, createApiClient } from "./request.js";
-import * as CoreHttpModule from "./http.js";
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
-import {
-  bindNetworkEvents,
-  unbindNetworkEvents,
-  getNetworkSnapshot,
-} from "./network.js";
+function text(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
+}
 
-export const CORE_VERSION = "21.0.0-simple";
-
-export const AppCore = (() => {
-  "use strict";
-
-  const VERSION = CORE_VERSION;
-  const SOURCE = "core";
-
-  const DEFAULT_APP_NAME = "Onion Support";
-  const DEFAULT_LANG = "es";
-  const DEFAULT_THEME = "dark";
-  const DEFAULT_STORAGE_PREFIX = "onion";
-
-  const EVENTS = Object.freeze({
-    initStart: "app:core:init:start",
-    ready: "app:core:ready",
-    initError: "app:core:init:error",
-    reboot: "app:core:reboot",
-
-    stateChange: "app:state:change",
-    authChange: "app:auth:change",
-    userChange: "app:user:change",
-    routeChange: "app:route:change",
-    publicPathChange: "app:public-path:change",
-
-    sessionApplied: "app:session:applied",
-    sessionCleared: "app:session:cleared",
-
-    moduleRegistered: "app:module:registered",
-    moduleReplaced: "app:module:replaced",
-
-    toastBridgeReady: "app:toast:bridge-ready",
-    httpReady: "app:http:ready",
-  });
-
-  const SENSITIVE_KEYS = Object.freeze([
-    "token",
-    "accessToken",
-    "access_token",
-    "refreshToken",
-    "refresh_token",
-    "idToken",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "mfaToken",
-    "mfa_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "otpToken",
-    "otp_token",
-    "password",
-    "passwordHash",
-    "secret",
-    "authorization",
-    "cookie",
-    "otp",
-    "totp",
-    "code",
-    "backupCodes",
-    "connectionString",
-    "sas",
-  ]);
-
-  const TOKEN_KEYS = Object.freeze([
-    "token",
-    "accessToken",
-    "access_token",
-    "authToken",
-    "auth_token",
-    "jwt",
-    "bearer",
-    "idToken",
-    "id_token",
-  ]);
-
-  const USER_KEYS = Object.freeze([
-    "user",
-    "usuario",
-    "me",
-    "account",
-    "profile",
-    "currentUser",
-    "current_user",
-    "sessionUser",
-    "authUser",
-  ]);
-
-  const USER_ID_KEYS = Object.freeze([
-    "id",
-    "userId",
-    "user_id",
-    "_id",
-    "uid",
-    "uuid",
-    "sub",
-    "username",
-    "userName",
-    "user_name",
-    "email",
-    "mail",
-  ]);
-
-  const BRIDGE_ALIASES = Object.freeze({
-    Router: Object.freeze(["Router", "router"]),
-    Auth: Object.freeze(["Auth", "auth"]),
-    Store: Object.freeze(["Store", "store"]),
-    Http: Object.freeze(["Http", "http", "ApiClient", "apiClient", "api"]),
-  });
-
-  const BRIDGE_CANONICAL = Object.freeze({
-    Router: "Router",
-    router: "Router",
-    Auth: "Auth",
-    auth: "Auth",
-    Store: "Store",
-    store: "Store",
-    Http: "Http",
-    http: "Http",
-    ApiClient: "Http",
-    apiClient: "Http",
-    api: "Http",
-  });
-
-  const registry = {
-    modules: new Map(),
-    scopes: new Map(),
-    hooks: Object.create(null),
-  };
-
-  let initialized = false;
-  let initPromise = null;
-  let initCycle = 0;
-  let networkBound = false;
-  let readyCallbacksFlushed = false;
-
-  let showToastBridge = null;
-
-  let requestBridge = null;
-  let apiClientBridge = null;
-  let httpBridge = null;
-  let httpInstalled = false;
-  let httpReadyEmitted = false;
-
-  /* =======================================================
-     BASICS
-  ======================================================= */
-
-  function isBrowser() {
-    return typeof window !== "undefined" && typeof document !== "undefined";
-  }
-
-  function isFn(value) {
-    return typeof value === "function";
-  }
-
-  function isObject(value) {
-    return Boolean(value && typeof value === "object" && !Array.isArray(value));
-  }
-
-  function object(value) {
-    return isObject(value) ? value : {};
-  }
-
-  function array(value) {
-    if (Array.isArray(value)) return value;
-    if (value instanceof Set) return [...value];
-    if (value === null || value === undefined) return [];
-    return [value];
-  }
-
-  function text(value, fallback = "") {
-    if (value === null || value === undefined) return fallback;
-    const output = String(value).trim();
-    return output || fallback;
-  }
-
-  function lower(value, fallback = "") {
-    return text(value, fallback).toLowerCase();
-  }
-
-  function number(value, fallback = 0) {
-    const output = Number(value);
-    return Number.isFinite(output) ? output : fallback;
-  }
-
-  function bool(value, fallback = false) {
-    if (value === true || value === false) return value;
-    if (value === 1 || value === "1") return true;
-    if (value === 0 || value === "0") return false;
-
-    const clean = lower(value, "");
-    if (["true", "yes", "si", "sí", "on", "active", "enabled"].includes(clean)) return true;
-    if (["false", "no", "off", "inactive", "disabled"].includes(clean)) return false;
-
-    return Boolean(fallback);
-  }
-
-  function now() {
-    try {
-      return Date.now();
-    } catch {
-      return 0;
-    }
-  }
-
-  function iso(value = now()) {
-    try {
-      return new Date(value).toISOString();
-    } catch {
-      return "";
-    }
-  }
-
-  function clone(value, fallback = null) {
-    try {
-      return safeClone(value, fallback);
-    } catch {}
-
-    try {
-      if (typeof structuredClone === "function") return structuredClone(value);
-    } catch {}
-
+function clone(value) {
+  try {
+    return structuredClone(value);
+  } catch {
     try {
       return JSON.parse(JSON.stringify(value));
     } catch {
-      return fallback;
+      return value;
     }
   }
+}
 
-  function safeFactory(factory, fallback) {
-    try {
-      const value = isFn(factory) ? factory() : null;
-      if (value) return value;
-    } catch {}
+function cleanRole(value = "") {
+  return String(value).toLowerCase() === "admin" ? "admin" : "user";
+}
 
-    return isFn(fallback) ? fallback() : fallback;
+function tokenOk(value = "") {
+  const token = text(value, "").replace(/^Bearer\s+/i, "");
+
+  if (!token) return false;
+  if (/\s/.test(token)) return false;
+
+  const invalid = ["null", "undefined", "false", "true", "[object object]"];
+
+  if (invalid.includes(token.toLowerCase())) {
+    return false;
   }
 
-  function appName() {
-    return text(config?.appName || config?.name, DEFAULT_APP_NAME);
-  }
+  return token.length >= 8;
+}
 
-  function debugEnabled() {
-    return Boolean(config?.debug || config?.dev || config?.env === "development" || config?.environment === "development");
-  }
+function userOk(user = null) {
+  if (!isObject(user)) return false;
 
-  function log(...args) {
-    if (!debugEnabled()) return;
-    try { console.log(`[${appName()}]`, ...args); } catch {}
-  }
+  if (user.disabled === true) return false;
 
-  function warn(...args) {
-    if (!debugEnabled()) return;
-    try { console.warn(`[${appName()}]`, ...args); } catch {}
-  }
+  const status = String(user.status || "").toLowerCase();
 
-  function error(...args) {
-    try { console.error(`[${appName()}]`, ...args); } catch {}
-  }
+  if (status === "disabled") return false;
 
-  function escapeRegExp(value = "") {
-    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
+  return Boolean(
+    user.id ||
+      user.userId ||
+      user.username ||
+      user.email
+  );
+}
 
-  function redactText(value = "") {
-    let output = text(value, "");
-    if (!output) return "";
+function publicUser(user = null) {
+  if (!isObject(user)) return null;
 
-    for (const key of [
-      "token",
-      "activationToken",
-      "activateToken",
-      "resetToken",
-      "passwordResetToken",
-      "confirmToken",
-      "code",
-      "t",
-      "access_token",
-      "refresh_token",
-      "id_token",
-      "tempToken",
-      "temporaryToken",
-      "twoFactorToken",
-      "mfaToken",
-      "otpToken",
-    ]) {
-      try {
-        output = output.replace(new RegExp(`([?&#]${escapeRegExp(key)}=)([^&#\\s]+)`, "gi"), "$1***");
-      } catch {}
+  return {
+    id: user.id || user.userId || null,
+    userId: user.userId || user.id || null,
+    username: user.username || user.slug || user.email || null,
+    displayName:
+      user.name ||
+      user.fullName ||
+      user.displayName ||
+      user.username ||
+      null,
+    fullName:
+      user.name ||
+      user.fullName ||
+      user.displayName ||
+      null,
+    role: cleanRole(user.role || user.rol),
+    hasAvatar: Boolean(user.avatar || user.avatarUrl || user.picture),
+  };
+}
+
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+function joinUrl(base = "", path = "") {
+  if (/^https?:\/\//i.test(path)) return path;
+
+  const root = String(base || "").replace(/\/+$/g, "");
+  const clean = String(path || "").replace(/^\/+/g, "");
+
+  return `${root}/${clean}`;
+}
+
+/* =========================================================
+   EVENTS
+========================================================= */
+
+function createEvents() {
+  const listeners = new Map();
+
+  function on(name, handler) {
+    if (!name || !isFn(handler)) return () => false;
+
+    if (!listeners.has(name)) {
+      listeners.set(name, new Set());
     }
 
-    try {
-      output = output
-        .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1***")
-        .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***")
-        .replace(/(\/(?:activate-account|activate|activation)\/)([^/?#\s]+)/gi, "$1***")
-        .replace(/(\/(?:reset-password\/confirm|password-reset\/confirm)\/)([^/?#\s]+)/gi, "$1***")
-        .replace(/(\/(?:2fa|mfa|otp)\/)([^/?#\s]+)/gi, "$1***");
-    } catch {}
+    listeners.get(name).add(handler);
 
-    return output;
+    return () => off(name, handler);
   }
 
-  function sanitizeError(err = null) {
-    if (!err) return null;
+  function once(name, handler) {
+    if (!isFn(handler)) return () => false;
 
-    const source = err?.reason || err?.error || err;
+    const dispose = on(name, (...args) => {
+      dispose();
+      handler(...args);
+    });
 
-    return {
-      name: text(source?.name, "Error"),
-      message: redactText(text(source?.message || source?.reason || source, "Error")),
-      code: text(source?.code || source?.data?.code || source?.response?.data?.code, ""),
-      status: number(source?.status || source?.statusCode || source?.response?.status, 0),
-      aborted: Boolean(source?.aborted),
-      timeout: Boolean(source?.timeout),
-      at: iso(),
-    };
+    return dispose;
   }
 
-  function sanitizeValue(value, depth = 0, seen = new WeakSet(), keyHint = "") {
-    if (depth > 7) return "[depth-limit]";
+  function off(name, handler = null) {
+    if (!name) return false;
 
-    if (SENSITIVE_KEYS.some((sensitive) => lower(keyHint, "").includes(lower(sensitive)))) {
-      return value ? "***" : value;
-    }
-
-    if (typeof value === "string") return redactText(value);
-    if (!value || typeof value !== "object") return value;
-
-    try {
-      if (seen.has(value)) return "[circular]";
-      seen.add(value);
-    } catch {}
-
-    if (Array.isArray(value)) return value.map((item) => sanitizeValue(item, depth + 1, seen, keyHint));
-
-    const output = {};
-
-    for (const [key, item] of Object.entries(value)) {
-      output[key] = sanitizeValue(item, depth + 1, seen, key);
-    }
-
-    return output;
-  }
-
-  function sanitizeState(input = state) {
-    const output = sanitizeValue(clone(input, {}), 0) || {};
-
-    if (output.error) output.error = sanitizeError(output.error);
-    if (output.lastError) output.lastError = sanitizeError(output.lastError);
-
-    return output;
-  }
-
-  function publicUser(user = null) {
-    if (!isObject(user)) return null;
-
-    return {
-      id: user.id || user.userId || user.user_id || user.uid || null,
-      userId: user.userId || user.user_id || user.id || user.uid || null,
-      username: user.username || user.userName || user.user_name || user.slug || null,
-      displayName: user.name || user.displayName || user.nombre || user.username || null,
-      fullName: user.name || user.fullName || user.displayName || user.nombre || null,
-      role: user.role || user.rol || null,
-      hasAvatar: Boolean(user.avatar || user.avatarUrl || user.picture),
-    };
-  }
-
-  function snapshotFrom(ref, options = {}) {
-    if (!ref) return null;
-
-    for (const key of ["getSnapshot", "getDebugSnapshot", "snapshot"]) {
-      try {
-        if (isFn(ref[key])) return ref[key](options);
-      } catch {}
-    }
-
-    return null;
-  }
-
-  /* =======================================================
-     FALLBACK SYSTEMS
-  ======================================================= */
-
-  function fallbackEvents() {
-    const map = new Map();
-
-    function on(name, handler) {
-      const key = text(name, "");
-      if (!key || !isFn(handler)) return () => false;
-
-      if (!map.has(key)) map.set(key, new Set());
-      map.get(key).add(handler);
-
-      return () => off(key, handler);
-    }
-
-    function once(name, handler) {
-      if (!isFn(handler)) return () => false;
-
-      let disposed = false;
-      const dispose = on(name, (...args) => {
-        if (disposed) return;
-        disposed = true;
-        dispose();
-        handler(...args);
-      });
-
-      return dispose;
-    }
-
-    function off(name, handler = null) {
-      const key = text(name, "");
-      if (!key) return false;
-      if (!handler) return map.delete(key);
-      map.get(key)?.delete(handler);
+    if (!handler) {
+      listeners.delete(name);
       return true;
     }
 
-    function emitEvent(name, payload = {}) {
-      const key = text(name, "");
-      if (!key) return false;
-
-      const event = { type: key, detail: payload, payload };
-
-      for (const handler of [...(map.get(key) || [])]) {
-        try { handler(event); } catch (err) { warn("event handler failed", key, err); }
-      }
-
-      for (const handler of [...(map.get("*") || [])]) {
-        try { handler(key, payload, event); } catch (err) { warn("event wildcard handler failed", key, err); }
-      }
-
-      return true;
-    }
-
-    function clear(name = "") {
-      const key = text(name, "");
-      if (key) map.delete(key);
-      else map.clear();
-      return true;
-    }
-
-    const getSnapshot = () => ({ fallback: true, names: [...map.keys()], listenerCount: [...map.values()].reduce((sum, set) => sum + set.size, 0) });
-
-    return { on, once, off, emit: emitEvent, dispatch: emitEvent, trigger: emitEvent, clear, removeAllListeners: clear, getSnapshot, getDebugSnapshot: getSnapshot, snapshot: getSnapshot };
+    listeners.get(name)?.delete(handler);
+    return true;
   }
-
-  const events = safeFactory(() => createEvents({ maxRecentEvents: config?.diagnostics?.maxRecentEvents }), fallbackEvents);
 
   function emit(name, payload = {}) {
-    const eventName = text(name, "");
-    if (!eventName) return false;
+    if (!name) return false;
 
-    try {
-      events.emit(eventName, payload);
-      return true;
-    } catch {
-      return false;
+    const event = {
+      type: name,
+      detail: payload,
+      payload,
+    };
+
+    for (const handler of listeners.get(name) || []) {
+      try {
+        handler(event);
+      } catch {
+        // Un listener no debe romper Core.
+      }
     }
+
+    return true;
   }
 
-  const utils = {
-    qs(selector, scope = null) {
-      if (!isBrowser()) return null;
-      try { return (scope || document).querySelector(selector); } catch { return null; }
-    },
+  function clear() {
+    listeners.clear();
+    return true;
+  }
 
-    qsa(selector, scope = null) {
-      if (!isBrowser()) return [];
-      try { return [...((scope || document).querySelectorAll(selector) || [])]; } catch { return []; }
-    },
-
-    byId(id = "") {
-      if (!isBrowser()) return null;
-      try { return document.getElementById(id); } catch { return null; }
-    },
-
-    on(target, eventName, handler, options = false) {
-      if (!target || !eventName || !isFn(handler)) return () => false;
-
-      try {
-        target.addEventListener(eventName, handler, options);
-        return () => {
-          try {
-            target.removeEventListener(eventName, handler, options);
-            return true;
-          } catch {
-            return false;
-          }
-        };
-      } catch {
-        return () => false;
-      }
-    },
-
-    off(target, eventName, handler, options = false) {
-      try { target?.removeEventListener?.(eventName, handler, options); } catch {}
-    },
-
-    sleep(ms = 0) {
-      return new Promise((resolve) => setTimeout(resolve, Math.max(0, number(ms, 0))));
-    },
-
-    nextTick(fn) {
-      return Promise.resolve().then(() => (isFn(fn) ? fn() : undefined));
-    },
-
-    afterPaint(fn) {
-      if (!isFn(fn)) return;
-      if (!isBrowser()) {
-        try { fn(); } catch {}
-        return;
-      }
-      try { requestAnimationFrame(() => requestAnimationFrame(() => fn())); } catch { setTimeout(fn, 0); }
-    },
-
-    log,
-    warn,
-    error,
+  return {
+    on,
+    once,
+    off,
     emit,
-
-    safeClone: clone,
-    cloneError,
-
-    joinUrl,
-    buildUrl,
-
-    normalizePath,
-    normalizeCanonicalPath,
-    stripUsernamePrefix,
-
-    sanitizeUsername,
-    slugify,
-
-    normalizeUser,
-    getUserUsername,
-    getUserDisplayName,
-    getUserAvatarUrl,
-    hasValidToken,
-    getInitials,
-    isPublicApiPath,
-
-    redactTokenInText: redactText,
-    sanitizeErrorForSnapshot: sanitizeError,
-    sanitizeStateForSnapshot: sanitizeState,
-
-    safeText: text,
-    safeLower: lower,
-    safeBool: bool,
-    safeNumber: number,
-    safeArray: array,
-    safeObject: object,
-
-    isObject,
-    isFunction: isFn,
-
-    now,
-    nowIso: iso,
+    dispatch: emit,
+    trigger: emit,
+    clear,
+    getSnapshot: () => ({
+      names: [...listeners.keys()],
+    }),
   };
+}
 
-  function fallbackStorage() {
-    const memory = new Map();
-    const prefix = text(config?.storagePrefix || config?.appKey, DEFAULT_STORAGE_PREFIX);
+/* =========================================================
+   MODULES
+========================================================= */
 
-    const key = (name = "") => {
-      const clean = text(name, "");
-      if (!clean) return `${prefix}:`;
-      if (clean.startsWith(`${prefix}:`) || clean.startsWith(`${prefix}.`) || clean.startsWith(`${prefix}_`)) return clean;
-      return `${prefix}:${clean}`;
-    };
+function createModules() {
+  const map = new Map();
 
-    const area = (session = false) => {
-      if (!isBrowser()) return null;
-      try { return session ? window.sessionStorage : window.localStorage; } catch { return null; }
-    };
+  function register(name, value) {
+    if (!name || !value) return false;
 
-    const getRaw = (name, fallback = null) => {
-      const finalKey = key(name);
-
-      try {
-        const value = area(false)?.getItem?.(finalKey);
-        if (value !== null && value !== undefined) return value;
-      } catch {}
-
-      try {
-        const value = area(true)?.getItem?.(finalKey);
-        if (value !== null && value !== undefined) return value;
-      } catch {}
-
-      return memory.has(finalKey) ? memory.get(finalKey) : fallback;
-    };
-
-    const setRaw = (name, value, options = {}) => {
-      const finalKey = key(name);
-      if (value === null || value === undefined) return remove(name);
-
-      const raw = String(value);
-      memory.set(finalKey, raw);
-
-      try { area(options.session === true)?.setItem?.(finalKey, raw); } catch {}
-      return true;
-    };
-
-    const parse = (raw, fallback = null) => {
-      if (raw === null || raw === undefined || raw === "") return fallback;
-      try { return JSON.parse(raw); } catch { return fallback; }
-    };
-
-    const get = (name, fallback = null) => {
-      const raw = getRaw(name, undefined);
-      if (raw === undefined) return fallback;
-      const parsed = parse(raw, undefined);
-      return parsed === undefined ? raw : parsed;
-    };
-
-    const set = (name, value, options = {}) => {
-      try { return setRaw(name, JSON.stringify(value), options); } catch { return setRaw(name, String(value ?? ""), options); }
-    };
-
-    function remove(name) {
-      const finalKey = key(name);
-      memory.delete(finalKey);
-      try { area(false)?.removeItem?.(finalKey); } catch {}
-      try { area(true)?.removeItem?.(finalKey); } catch {}
-      return true;
-    }
-
-    const getSnapshot = () => ({ fallback: true, prefix, memoryKeys: [...memory.keys()].map(redactText) });
-
-    return { prefix, key, normalizeKey: key, getRaw, setRaw, get, set, getJson: (name, fallback = null) => parse(getRaw(name, null), fallback), setJson: set, remove, del: remove, delete: remove, has: (name) => getRaw(name, undefined) !== undefined, keys: () => [...memory.keys()], getSnapshot, getDebugSnapshot: getSnapshot, snapshot: getSnapshot };
+    map.set(name, value);
+    return value;
   }
 
-  function fallbackCleanup() {
-    const ensure = (name = "global") => {
-      const clean = text(name, "global");
-      if (!registry.scopes.has(clean)) registry.scopes.set(clean, new Set());
-      return clean;
-    };
+  function get(name) {
+    return map.get(name) || null;
+  }
 
-    const add = (scopeName, disposer) => {
-      if (!isFn(disposer)) return () => false;
-      const name = ensure(scopeName);
-      registry.scopes.get(name).add(disposer);
-      return () => {
-        try { disposer(); } catch {}
-        registry.scopes.get(name)?.delete(disposer);
-        return true;
-      };
-    };
+  function remove(name) {
+    return map.delete(name);
+  }
 
-    const event = (scopeName, target, eventName, handler, options = false) => {
-      if (!target || !eventName || !isFn(handler)) return () => false;
+  return {
+    register,
+    set: register,
+    upsert: register,
+    get,
+    has: (name) => map.has(name),
+    remove,
+    delete: remove,
+    list: () => [...map.keys()],
+    names: () => [...map.keys()],
+    getSnapshot: () => ({
+      count: map.size,
+      modules: [...map.keys()],
+    }),
+  };
+}
+
+/* =========================================================
+   CLEANUP
+========================================================= */
+
+function createCleanup() {
+  const scopes = new Map();
+
+  function add(scope = "global", disposer = null) {
+    if (!isFn(disposer)) return () => false;
+
+    if (!scopes.has(scope)) {
+      scopes.set(scope, new Set());
+    }
+
+    scopes.get(scope).add(disposer);
+
+    return () => {
       try {
-        target.addEventListener(eventName, handler, options);
-        return add(scopeName, () => target.removeEventListener(eventName, handler, options));
+        disposer();
       } catch {
-        return () => false;
-      }
-    };
-
-    const timeout = (scopeName, fn, ms = 0) => {
-      const id = setTimeout(fn, Math.max(0, number(ms, 0)));
-      return add(scopeName, () => clearTimeout(id));
-    };
-
-    const interval = (scopeName, fn, ms = 0) => {
-      const id = setInterval(fn, Math.max(0, number(ms, 0)));
-      return add(scopeName, () => clearInterval(id));
-    };
-
-    const run = (scopeName = "") => {
-      const names = scopeName ? [scopeName] : [...registry.scopes.keys()];
-
-      for (const name of names) {
-        const set = registry.scopes.get(name);
-        if (!set) continue;
-        for (const dispose of [...set]) {
-          try { dispose(); } catch {}
-        }
-        set.clear();
+        // noop
       }
 
-      if (!scopeName) registry.scopes.clear();
+      scopes.get(scope)?.delete(disposer);
       return true;
     };
-
-    const getSnapshot = () => ({ fallback: true, scopes: [...registry.scopes.entries()].map(([name, set]) => ({ name, count: set.size })) });
-
-    return { scope: (name) => ({ name: ensure(name) }), ensureScope: (name) => ({ name: ensure(name) }), add, on: event, event, bus: event, timeout, timer: timeout, interval, run, dispose: run, clear: run, getSnapshot, getDebugSnapshot: getSnapshot, snapshot: getSnapshot };
   }
 
-  function fallbackModules() {
-    const get = (name) => registry.modules.get(text(name, "")) || null;
+  function event(scope, target, eventName, handler, options = false) {
+    if (!target || !eventName || !isFn(handler)) return () => false;
 
-    const register = (name, value, options = {}) => {
-      const key = text(name, "");
-      if (!key || !value) return false;
+    target.addEventListener(eventName, handler, options);
 
-      const previous = registry.modules.get(key);
-      if (previous && previous !== value && options.replace !== true && options.overwrite !== true) return previous;
-
-      registry.modules.set(key, value);
-
-      if (options.emit === true) {
-        emit(previous ? EVENTS.moduleReplaced : EVENTS.moduleRegistered, { name: key, replaced: Boolean(previous), source: text(options.source, SOURCE) });
-      }
-
-      return value;
-    };
-
-    const remove = (name) => registry.modules.delete(text(name, ""));
-    const list = () => [...registry.modules.keys()];
-    const getSnapshot = () => ({ fallback: true, count: registry.modules.size, modules: list() });
-
-    return { has: (name) => registry.modules.has(text(name, "")), get, register, set: register, upsert: register, remove, delete: remove, unregister: remove, list, names: list, getSnapshot, getDebugSnapshot: getSnapshot, snapshot: getSnapshot };
+    return add(scope, () => {
+      target.removeEventListener(eventName, handler, options);
+    });
   }
 
-  function fallbackHooks() {
-    const listFor = (name) => {
-      const key = text(name, "");
-      if (!key) return null;
-      if (!Array.isArray(registry.hooks[key])) registry.hooks[key] = [];
-      return registry.hooks[key];
-    };
+  function run(scope = "") {
+    const names = scope ? [scope] : [...scopes.keys()];
 
-    const add = (name, handler) => {
-      const list = listFor(name);
-      if (!list || !isFn(handler)) return () => false;
-      list.push(handler);
-      return () => {
-        const key = text(name, "");
-        registry.hooks[key] = array(registry.hooks[key]).filter((item) => item !== handler);
-        return true;
-      };
-    };
-
-    const run = async (name, payload = {}) => {
-      let current = payload;
-      for (const hook of array(registry.hooks[text(name, "")])) {
-        if (!isFn(hook)) continue;
+    for (const name of names) {
+      for (const disposer of scopes.get(name) || []) {
         try {
-          const next = await hook(current);
-          if (next !== undefined) current = next;
-        } catch (err) {
-          warn("hook failed", name, err);
+          disposer();
+        } catch {
+          // noop
         }
       }
-      return current;
-    };
 
-    const clear = (name = "") => {
-      const key = text(name, "");
-      if (key) registry.hooks[key] = [];
-      else {
-        for (const hookName of Object.keys(registry.hooks)) registry.hooks[hookName] = [];
-      }
+      scopes.delete(name);
+    }
+
+    return true;
+  }
+
+  return {
+    add,
+    event,
+    on: event,
+    run,
+    clear: run,
+    dispose: run,
+    scope: (name = "global") => ({ name }),
+    ensureScope: (name = "global") => ({ name }),
+    getSnapshot: () => ({
+      scopes: [...scopes.keys()],
+    }),
+  };
+}
+
+/* =========================================================
+   HOOKS
+========================================================= */
+
+function createHooks() {
+  const map = new Map();
+
+  function add(name, handler) {
+    if (!name || !isFn(handler)) return () => false;
+
+    if (!map.has(name)) {
+      map.set(name, []);
+    }
+
+    map.get(name).push(handler);
+
+    return () => {
+      map.set(
+        name,
+        (map.get(name) || []).filter((item) => item !== handler)
+      );
+
       return true;
     };
-
-    const getSnapshot = () => Object.fromEntries(Object.entries(registry.hooks).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
-
-    return { add, on: add, use: add, register: add, run, runSeries: run, get: (name) => array(registry.hooks[text(name, "")]), clear, getSnapshot, getDebugSnapshot: getSnapshot, snapshot: getSnapshot };
   }
 
-  const state = safeFactory(() => createInitialState({ config }), () => ({}));
-  const dom = safeFactory(() => createDomCache(), () => ({}));
-  const storage = safeFactory(() => createStorage({ utils, events }), fallbackStorage);
-  const cleanup = safeFactory(() => createCleanup({ registry, events, utils }), fallbackCleanup);
-  const modules = safeFactory(() => createModules({ registry, events, utils }), fallbackModules);
-  const hooks = safeFactory(() => createHooks({ registry, events, utils }), fallbackHooks);
+  async function run(name, payload = {}) {
+    let current = payload;
 
-  /* =======================================================
-     AUTH STATE
-  ======================================================= */
+    for (const handler of map.get(name) || []) {
+      try {
+        const next = await handler(current);
 
-  function stripBearer(value = "") {
-    return text(value, "").replace(/^Bearer\s+/i, "").trim();
+        if (next !== undefined) {
+          current = next;
+        }
+      } catch {
+        // noop
+      }
+    }
+
+    return current;
   }
 
-  function validToken(value = "") {
-    const token = stripBearer(value);
-    if (!token || /[\s\r\n\t]/.test(token)) return false;
+  return {
+    add,
+    on: add,
+    use: add,
+    register: add,
+    run,
+    runSeries: run,
+    clear: (name = "") => {
+      if (name) map.delete(name);
+      else map.clear();
 
-    const bad = lower(token, "");
-    if (["null", "undefined", "false", "true", "nan", "none", "[object object]", "{}", "[]"].includes(bad)) return false;
+      return true;
+    },
+    getSnapshot: () => ({
+      hooks: [...map.keys()],
+    }),
+  };
+}
 
-    try {
-      return Boolean(hasValidToken(token));
-    } catch {
-      return token.length >= 8;
+const events = createEvents();
+const modules = createModules();
+const cleanup = createCleanup();
+const hooks = createHooks();
+
+const services = {};
+const dom = {};
+const registry = {
+  modules,
+  hooks,
+  cleanup,
+};
+
+const initialLang = isBrowser()
+  ? document.documentElement.lang || "en"
+  : "en";
+
+const initialLocale = isBrowser()
+  ? document.documentElement.dataset.locale || initialLang
+  : "en";
+
+const initialTheme = isBrowser()
+  ? document.documentElement.dataset.theme || "system"
+  : "system";
+
+const state = {
+  initialized: false,
+  ready: false,
+  booting: false,
+  loading: false,
+
+  route: "/",
+  canonicalPath: "/",
+  publicPath: "/",
+
+  token: null,
+  accessToken: null,
+  access_token: null,
+
+  user: null,
+  currentUser: null,
+
+  authenticated: false,
+  hasToken: false,
+
+  role: null,
+  rol: null,
+  roles: [],
+
+  isAdmin: false,
+  isUser: false,
+  isSupport: false,
+  isManager: false,
+  isClient: false,
+
+  lang: initialLang,
+  language: initialLang,
+  locale: initialLocale,
+
+  theme: initialTheme,
+
+  error: null,
+  lastError: null,
+  hasError: false,
+};
+
+let initialized = false;
+let initPromise = null;
+let toastBridge = null;
+let httpClient = null;
+
+/* =========================================================
+   AUTH STATE
+========================================================= */
+
+function syncAuth() {
+  const rawToken = state.token || state.accessToken || state.access_token;
+  const token = tokenOk(rawToken)
+    ? String(rawToken).replace(/^Bearer\s+/i, "")
+    : null;
+
+  const rawUser = state.user || state.currentUser;
+  const user = userOk(rawUser) ? rawUser : null;
+
+  state.token = token;
+  state.accessToken = token;
+  state.access_token = token;
+
+  state.user = user;
+  state.currentUser = user;
+
+  state.hasToken = Boolean(token);
+  state.authenticated = Boolean(token && user);
+
+  if (state.authenticated) {
+    const role = cleanRole(user.role || user.rol || state.role);
+
+    state.role = role;
+    state.rol = role;
+    state.roles = [role];
+
+    state.isAdmin = role === "admin";
+    state.isUser = role === "user";
+  } else {
+    state.role = null;
+    state.rol = null;
+    state.roles = [];
+
+    state.isAdmin = false;
+    state.isUser = false;
+  }
+
+  state.isSupport = false;
+  state.isManager = false;
+  state.isClient = false;
+
+  return state;
+}
+
+function getState(options = {}) {
+  syncAuth();
+  return options.raw ? state : clone(state);
+}
+
+function setState(patch = {}, options = {}) {
+  if (isObject(patch)) {
+    Object.assign(state, patch);
+  }
+
+  if (options.forceUnauthenticated === true) {
+    state.token = null;
+    state.accessToken = null;
+    state.access_token = null;
+    state.user = null;
+    state.currentUser = null;
+  }
+
+  syncAuth();
+
+  if (options.emit !== false && options.silent !== true) {
+    events.emit("app:state:change", {
+      state: getState(),
+      source: options.source || "core:setState",
+    });
+  }
+
+  return getState(options);
+}
+
+function patchState(patch = {}, options = {}) {
+  return setState(patch, options);
+}
+
+function isAuthenticated() {
+  syncAuth();
+  return Boolean(state.authenticated);
+}
+
+function getCurrentUser() {
+  syncAuth();
+  return state.user;
+}
+
+function getCurrentRole() {
+  syncAuth();
+  return state.role;
+}
+
+function hasRole(roleOrRoles = []) {
+  const roles = Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles];
+  return roles.map(cleanRole).includes(getCurrentRole());
+}
+
+function getAuthHeader() {
+  syncAuth();
+
+  if (!state.token) return {};
+
+  return {
+    Authorization: `Bearer ${state.token}`,
+  };
+}
+
+/* =========================================================
+   STATE WRAPPERS
+========================================================= */
+
+function setRoute(route = "/", options = {}) {
+  const path = String(route || "/").split("?")[0].split("#")[0] || "/";
+
+  setState(
+    {
+      route: path,
+      canonicalPath: path,
+    },
+    {
+      source: options.source || "core:setRoute",
+      silent: options.silent,
+    }
+  );
+
+  return path;
+}
+
+function setPublicPath(path = "/", options = {}) {
+  const publicPath = String(path || "/");
+  const route = publicPath.split("?")[0].split("#")[0] || "/";
+
+  setState(
+    {
+      publicPath,
+      route,
+      canonicalPath: route,
+    },
+    {
+      source: options.source || "core:setPublicPath",
+      silent: options.silent,
+    }
+  );
+
+  return publicPath;
+}
+
+function setUser(user = null, options = {}) {
+  const cleanUser = userOk(user) ? user : null;
+
+  setState(
+    {
+      user: cleanUser,
+      currentUser: cleanUser,
+    },
+    {
+      source: options.source || "core:setUser",
+      silent: options.silent,
+      forceUnauthenticated: !cleanUser && !state.token,
+    }
+  );
+
+  return state.user;
+}
+
+function setToken(token = null, options = {}) {
+  const cleanToken = tokenOk(token)
+    ? String(token).replace(/^Bearer\s+/i, "")
+    : null;
+
+  setState(
+    {
+      token: cleanToken,
+      accessToken: cleanToken,
+      access_token: cleanToken,
+    },
+    {
+      source: options.source || "core:setToken",
+      silent: options.silent,
+      forceUnauthenticated: !cleanToken,
+    }
+  );
+
+  return state.token;
+}
+
+function pick(payload = {}, names = []) {
+  for (const name of names) {
+    const value =
+      payload?.[name] ??
+      payload?.data?.[name] ??
+      payload?.auth?.[name] ??
+      payload?.session?.[name];
+
+    if (value !== undefined && value !== null) {
+      return value;
     }
   }
 
-  function usableUser(user = null) {
-    if (!isObject(user)) return false;
+  return null;
+}
 
-    if (user.active === false || user.enabled === false || user.disabled === true || user.deleted === true || user.archived === true || user.blocked === true || user.suspended === true || user.revoked === true) return false;
+function applySession(payload = {}, options = {}) {
+  const token = pick(payload, ["token", "accessToken", "access_token"]);
+  const user =
+    pick(payload, ["user", "usuario", "me", "account", "profile"]) ||
+    (userOk(payload) ? payload : null);
 
-    const status = lower(user.status || user.estado || user.state || user.accountStatus || "", "")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[\s-]+/g, "_");
+  const cleanToken = tokenOk(token)
+    ? String(token).replace(/^Bearer\s+/i, "")
+    : state.token;
 
-    if (["disabled", "inactive", "deleted", "archived", "blocked", "suspended", "banned", "revoked", "desactivado", "inactivo", "eliminado", "archivado", "bloqueado", "suspendido"].includes(status)) return false;
+  const cleanUser = userOk(user) ? user : state.user;
 
-    return USER_ID_KEYS.some((key) => Boolean(text(user[key], "")));
-  }
-
-  function normalizeUserSafe(value = null) {
-    if (!isObject(value)) return null;
-
-    try {
-      const normalized = normalizeUser(value);
-      if (usableUser(normalized)) return normalized;
-    } catch {}
-
-    return usableUser(value) ? value : null;
-  }
-
-  function roleOf(user = null, explicit = "") {
-    const raw = lower(explicit || user?.role || user?.rol || user?.userRole || user?.user_role || user?.profile?.role || user?.profile?.rol || "", "")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[\s-]+/g, "_")
-      .replace(/[^a-z0-9_:.]/g, "");
-
-    return ["admin", "administrator", "administrador", "superadmin", "super_admin", "owner", "root"].includes(raw) ? "admin" : "user";
-  }
-
-  function tokenFrom(root = state) {
-    for (const key of TOKEN_KEYS) {
-      if (validToken(root?.[key])) return stripBearer(root[key]);
-      if (validToken(root?.session?.[key])) return stripBearer(root.session[key]);
-      if (validToken(root?.sessionData?.[key])) return stripBearer(root.sessionData[key]);
+  setState(
+    {
+      token: cleanToken,
+      accessToken: cleanToken,
+      access_token: cleanToken,
+      user: cleanUser,
+      currentUser: cleanUser,
+    },
+    {
+      source: options.source || "core:applySession",
+      silent: options.silent,
     }
-    return null;
-  }
+  );
 
-  function userFrom(root = state) {
-    for (const key of USER_KEYS) {
-      const direct = normalizeUserSafe(root?.[key]);
-      if (direct) return direct;
+  return {
+    token: state.token,
+    user: state.user,
+    authenticated: state.authenticated,
+  };
+}
 
-      const session = normalizeUserSafe(root?.session?.[key]);
-      if (session) return session;
-
-      const sessionData = normalizeUserSafe(root?.sessionData?.[key]);
-      if (sessionData) return sessionData;
-    }
-    return null;
-  }
-
-  function usernameOf(user = null) {
-    return text(getUserUsername(user) || user?.username || user?.userName || user?.user_name || user?.usernameLower || user?.username_lower || user?.slug || user?.email || user?.mail || "", "") || null;
-  }
-
-  function clearAuthFields() {
-    Object.assign(state, {
+function clearSession(options = {}) {
+  setState(
+    {
       token: null,
       accessToken: null,
       access_token: null,
 
       user: null,
       currentUser: null,
-      sessionUser: null,
-      authUser: null,
-      account: null,
-      profile: null,
 
       authenticated: false,
       hasToken: false,
 
       role: null,
       rol: null,
-      userRole: null,
       roles: [],
-
-      username: null,
-      currentResolvedUsername: null,
-      resolvedUsername: null,
 
       isAdmin: false,
       isUser: false,
-      isClient: false,
       isSupport: false,
       isManager: false,
-    });
-  }
-
-  function setTokenOnly(token) {
-    clearAuthFields();
-    state.token = token;
-    state.accessToken = token;
-    state.access_token = token;
-    state.hasToken = Boolean(token);
-  }
-
-  function syncAuth(options = {}) {
-    if (options.forceUnauthenticated === true) {
-      clearAuthFields();
-      return state;
-    }
-
-    const token = tokenFrom(state);
-    if (!token) {
-      clearAuthFields();
-      return state;
-    }
-
-    const user = userFrom(state);
-    if (!user) {
-      setTokenOnly(token);
-      return state;
-    }
-
-    let authenticated = false;
-    try {
-      authenticated = Boolean(computeAuthenticated(user, token));
-    } catch {
-      authenticated = true;
-    }
-
-    if (!authenticated) {
-      setTokenOnly(token);
-      return state;
-    }
-
-    const role = roleOf(user, state.role);
-    const username = usernameOf(user);
-    const resolvedUsername = sanitizeUsername(state.currentResolvedUsername || state.resolvedUsername || "") || sanitizeUsername(username || "") || null;
-
-    Object.assign(state, {
-      token,
-      accessToken: token,
-      access_token: token,
-
-      user,
-      currentUser: user,
-      sessionUser: user,
-      authUser: user,
-      account: user,
-      profile: user,
-
-      authenticated: true,
-      hasToken: true,
-
-      role,
-      rol: role,
-      userRole: role,
-      roles: [role],
-
-      username,
-      currentResolvedUsername: resolvedUsername,
-      resolvedUsername,
-
-      isAdmin: role === "admin",
-      isUser: role === "user",
       isClient: false,
-      isSupport: false,
-      isManager: false,
-    });
-
-    return state;
-  }
-
-  function marker(root = state) {
-    return {
-      authenticated: Boolean(root.authenticated),
-      hasToken: Boolean(root.hasToken),
-      userId: root.user?.userId || root.user?.id || null,
-      username: root.username || null,
-      role: root.role || null,
-      route: root.route || "/",
-      publicPath: root.publicPath || "/",
-      lang: root.lang || DEFAULT_LANG,
-      theme: root.theme || DEFAULT_THEME,
-    };
-  }
-
-  function markerChanged(before = {}, after = {}, keys = []) {
-    return keys.some((key) => before[key] !== after[key]);
-  }
-
-  function writeState(patch = {}, options = {}) {
-    const cleanPatch = isObject(patch) ? patch : {};
-
-    try {
-      stateSetState({ state, events, patch: cleanPatch, options });
-      return true;
-    } catch {}
-
-    try {
-      stateSetStateBase(state, cleanPatch, { ...options, events });
-      return true;
-    } catch {}
-
-    Object.assign(state, cleanPatch);
-    return false;
-  }
-
-  function publicState(options = {}) {
-    let output = null;
-
-    try { output = cloneState(state); } catch {}
-    if (!output) output = clone(state, { ...state }) || { ...state };
-
-    return options.safe ? sanitizeState(output) : output;
-  }
-
-  function emitStateChanges(before = {}, after = {}, patch = {}, options = {}) {
-    if (options.emit === false || options.silent === true) return;
-
-    const source = text(options.source, "core:setState");
-    const changedKeys = Object.keys(object(patch));
-
-    if (options.emitState === true && changedKeys.length) {
-      emit(EVENTS.stateChange, { changedKeys, state: sanitizeState(state), source });
+    },
+    {
+      source: options.source || "core:clearSession",
+      silent: options.silent,
+      emit: options.emit,
+      forceUnauthenticated: true,
     }
+  );
 
-    if (markerChanged(before, after, ["authenticated", "hasToken", "role"])) {
-      emit(EVENTS.authChange, { authenticated: Boolean(after.authenticated), hasToken: Boolean(after.hasToken), role: after.role || null, username: after.username || null, source });
-    }
+  return true;
+}
 
-    if (markerChanged(before, after, ["userId", "username", "role"])) {
-      emit(EVENTS.userChange, { authenticated: Boolean(after.authenticated), user: after.authenticated ? publicUser(state.user) : null, username: after.username || null, role: after.role || null, source });
-    }
+function setTheme(theme = "system") {
+  const value = ["dark", "light", "system"].includes(theme)
+    ? theme
+    : "system";
 
-    if (markerChanged(before, after, ["route"])) {
-      emit(EVENTS.routeChange, { route: after.route || "/", previousRoute: before.route || "/", publicPath: after.publicPath || "/", source });
-    }
+  state.theme = value;
 
-    if (markerChanged(before, after, ["publicPath"])) {
-      emit(EVENTS.publicPathChange, { publicPath: after.publicPath || "/", previousPublicPath: before.publicPath || "/", route: after.route || "/", source });
-    }
+  if (isBrowser()) {
+    document.documentElement.dataset.theme = value;
   }
 
-  function setState(patch = {}, options = {}) {
-    const opts = object(options);
-    const cleanPatch = isObject(patch) ? patch : {};
-    const before = marker(state);
+  return value;
+}
 
-    writeState(cleanPatch, opts);
-    syncAuth({ forceUnauthenticated: opts.forceUnauthenticated === true });
+function setLang(lang = "en") {
+  const value = ["ca", "es", "en"].includes(lang) ? lang : "en";
 
-    const after = marker(state);
-    emitStateChanges(before, after, cleanPatch, opts);
+  state.lang = value;
+  state.language = value;
+  state.locale = value;
 
-    return publicState();
+  if (isBrowser()) {
+    document.documentElement.lang = value;
+    document.documentElement.dataset.locale = value;
   }
 
-  function getState(options = {}) {
-    syncAuth();
-    return publicState(options);
-  }
+  return value;
+}
 
-  function patchState(patch = {}, options = {}) {
-    return setState(patch, options);
-  }
+function setSidebarOpen(value = false) {
+  state.sidebarOpen = Boolean(value);
+  return state.sidebarOpen;
+}
 
-  function isAuthenticated() {
-    syncAuth();
-    return Boolean(state.authenticated);
-  }
+function setLoading(value = false) {
+  state.loading = Boolean(value);
+  return state.loading;
+}
 
-  function getCurrentUser() {
-    syncAuth();
-    return state.user || null;
-  }
+function setError(error = null) {
+  state.error = error;
+  state.lastError = error;
+  state.hasError = Boolean(error);
 
-  function getCurrentRole() {
-    syncAuth();
-    return state.role || null;
-  }
+  return error;
+}
 
-  function hasRole(roleOrRoles = []) {
-    const current = getCurrentRole();
-    const roles = array(roleOrRoles).map((role) => roleOf({ role }));
-    return roles.includes(current);
-  }
+/* =========================================================
+   UI COMPAT
+========================================================= */
 
-  function getAuthHeader() {
-    syncAuth();
-    if (!state.token) return {};
+function setDocumentTitle(title = APP_NAME) {
+  if (!isBrowser()) return false;
 
-    return {
-      [text(config?.auth?.tokenHeader, "Authorization")]: `${text(config?.auth?.bearerPrefix, "Bearer")} ${state.token}`,
-    };
-  }
+  document.title = text(title, APP_NAME);
+  return document.title;
+}
 
-  /* =======================================================
-     UI / SESSION WRAPPERS
-  ======================================================= */
+function clearDynamicContainers() {
+  return true;
+}
 
-  function setDocumentTitle(title = appName()) {
-    const finalTitle = text(title, appName());
+function syncUserUI() {
+  return true;
+}
 
-    try { return setDocumentTitleBase({ dom, events, title: finalTitle }); } catch {}
-    if (!isBrowser()) return false;
+function setShowToast(fn) {
+  if (!isFn(fn)) return false;
 
-    try {
-      document.title = finalTitle;
-      return document.title;
-    } catch {
-      return false;
-    }
-  }
+  toastBridge = fn;
+  return true;
+}
 
-  function clearDynamicContainers(options = {}) {
-    try { return clearDynamicContainersBase({ dom, events, ...object(options) }); } catch { return false; }
-  }
+function showToast(message = "", type = "info", options = {}) {
+  if (!isFn(toastBridge)) return null;
 
-  function syncUserUI(options = {}) {
-    try { return syncUserUIBase({ state, dom, events, ...object(options) }); } catch (err) { warn("syncUserUI failed", err); return false; }
-  }
-
-  function setShowToast(fn) {
-    if (!isFn(fn)) return false;
-    showToastBridge = fn;
-    emit(EVENTS.toastBridgeReady, { ready: true, at: iso(), source: SOURCE });
-    return true;
-  }
-
-  function showToast(message = "", type = "info", options = {}) {
-    if (!isFn(showToastBridge)) return null;
-    try { return showToastBridge(message, type, options); } catch (err) { warn("toast bridge failed", err); return null; }
-  }
-
-  function setRoute(route = "/", options = {}) {
-    const opts = object(options);
-
-    try { return setRouteBase({ state, setState, events, route, options: opts }); } catch {}
-
-    const clean = normalizeCanonicalPath(route || "/");
-    setState({ route: clean, canonicalPath: clean }, { ...opts, source: text(opts.source, "core:setRoute:fallback") });
-    return clean;
-  }
-
-  function setPublicPath(path = "/", options = {}) {
-    const opts = object(options);
-
-    try { return setPublicPathBase({ state, storage, setState, events, path, options: opts }); } catch {}
-
-    const publicPath = normalizePath(path || "/");
-    const route = normalizeCanonicalPath(publicPath);
-
-    setState({ publicPath, route, canonicalPath: route }, { ...opts, source: text(opts.source, "core:setPublicPath:fallback") });
-    return publicPath;
-  }
-
-  function setUser(user = null, options = {}) {
-    const opts = object(options);
-
-    try {
-      const output = setUserBase({ state, storage, events, setState, syncUserUI, user, options: opts });
-      syncAuth({ forceUnauthenticated: !user && !state.token });
-      return output;
-    } catch {}
-
-    setState({ user: user ? normalizeUserSafe(user) : null }, { ...opts, source: text(opts.source, "core:setUser:fallback"), forceUnauthenticated: !user && !state.token });
-    return state.user;
-  }
-
-  function setToken(token = null, options = {}) {
-    const opts = object(options);
-    const cleanToken = validToken(token) ? stripBearer(token) : null;
-
-    try {
-      const output = setTokenBase({ state, storage, events, setState, token: cleanToken, options: opts });
-      syncAuth({ forceUnauthenticated: !cleanToken });
-      return output;
-    } catch {}
-
-    setState({ token: cleanToken, accessToken: cleanToken, access_token: cleanToken }, { ...opts, source: text(opts.source, "core:setToken:fallback"), forceUnauthenticated: !cleanToken });
-    return state.token;
-  }
-
-  function payloadValue(payload = {}, key = "") {
-    if (!payload || !key) return null;
-
-    return payload[key] ?? payload.data?.[key] ?? payload.payload?.[key] ?? payload.result?.[key] ?? payload.auth?.[key] ?? payload.session?.[key] ?? null;
-  }
-
-  function pickToken(payload = {}) {
-    for (const key of TOKEN_KEYS) {
-      const value = payloadValue(payload, key);
-      if (validToken(value)) return stripBearer(value);
-    }
+  try {
+    return toastBridge(message, type, options);
+  } catch {
     return null;
   }
+}
 
-  function pickUser(payload = {}) {
-    for (const key of USER_KEYS) {
-      const user = normalizeUserSafe(payloadValue(payload, key));
-      if (user) return user;
-    }
-    return normalizeUserSafe(payload);
+/* =========================================================
+   MODULES / BRIDGES
+========================================================= */
+
+function registerModule(name = "", value = null) {
+  if (!name || !value) return false;
+
+  modules.register(name, value);
+  return value;
+}
+
+function getModule(name = "") {
+  return modules.get(name);
+}
+
+function bridgeAliases(name = "") {
+  return {
+    Router: ["Router", "router"],
+    router: ["Router", "router"],
+
+    Auth: ["Auth", "auth"],
+    auth: ["Auth", "auth"],
+
+    Store: ["Store", "store"],
+    store: ["Store", "store"],
+
+    Http: ["Http", "http", "api", "apiClient"],
+    http: ["Http", "http", "api", "apiClient"],
+    api: ["Http", "http", "api", "apiClient"],
+    apiClient: ["Http", "http", "api", "apiClient"],
+  }[name] || [name];
+}
+
+function registerBridge(name = "", value = null) {
+  if (!name || !value) return false;
+
+  for (const alias of bridgeAliases(name)) {
+    modules.register(alias, value);
   }
 
-  function applySession(sessionPayload = {}, options = {}) {
-    const opts = object(options);
-    const payload = object(sessionPayload);
+  return value;
+}
 
-    const token = pickToken(payload);
-    const user = pickUser(payload);
-    const refreshToken = payloadValue(payload, "refreshToken") || payloadValue(payload, "refresh_token");
-    const tempToken = payloadValue(payload, "tempToken") || payloadValue(payload, "temp_token") || payloadValue(payload, "temporaryToken") || payloadValue(payload, "temporary_token");
+function getBridge(name = "") {
+  for (const alias of bridgeAliases(name)) {
+    const value = modules.get(alias);
 
-    let result = null;
-    let delegated = false;
-
-    try {
-      result = applySessionBase({
-        state,
-        storage,
-        events,
-        setUser: (value) => setUser(isObject(value) && "user" in value ? value.user : value, { source: "core:applySession:setUser" }),
-        setToken: (value) => setToken(isObject(value) && "token" in value ? value.token : value, { source: "core:applySession:setToken" }),
-        setState,
-        token,
-        user,
-        refreshToken,
-        tempToken,
-        session: payload.session || payload.sessionData || null,
-        sessionId: payloadValue(payload, "sessionId") || payloadValue(payload, "session_id"),
-        sessionUserId: payloadValue(payload, "sessionUserId") || payloadValue(payload, "session_user_id") || payloadValue(payload, "userId"),
-        route: payload.route || payload.canonicalPath || payload.data?.route || payload.data?.canonicalPath || null,
-        publicPath: payload.publicPath || payload.data?.publicPath || null,
-        options: opts,
-      });
-      delegated = true;
-    } catch {}
-
-    if (!delegated) {
-      if (token) {
-        state.token = token;
-        state.accessToken = token;
-        state.access_token = token;
-      }
-      if (user) state.user = user;
-      if (refreshToken) {
-        state.refreshToken = refreshToken;
-        state.refresh_token = refreshToken;
-      }
-      if (tempToken) {
-        state.tempToken = tempToken;
-        state.temp_token = tempToken;
-      }
-      result = { token: state.token || null, user: state.user || null, session: state.session || null };
-    }
-
-    syncAuth({ forceUnauthenticated: opts.forceUnauthenticated === true });
-
-    if (opts.emit !== false) {
-      emit(EVENTS.sessionApplied, { authenticated: Boolean(state.authenticated), hasToken: Boolean(state.hasToken), user: publicUser(state.user), role: state.role || null, source: text(opts.source, delegated ? "core:applySession" : "core:applySession:fallback") });
-    }
-
-    return result;
+    if (value) return value;
   }
 
-  function clearSession(options = {}) {
-    const opts = object(options);
-    let result = null;
-    let delegated = false;
+  return null;
+}
 
-    try {
-      result = clearSessionBase({ state, storage, events, setState, syncUserUI, utils, options: opts });
-      delegated = true;
-    } catch {}
+/* =========================================================
+   HTTP
+========================================================= */
 
-    clearAuthFields();
-    Object.assign(state, {
-      refreshToken: null,
-      refresh_token: null,
-      idToken: null,
-      id_token: null,
-      tempToken: null,
-      temp_token: null,
-      session: null,
-      sessionData: null,
-      sessionId: null,
-      sessionUserId: null,
-    });
-
-    setState({}, { source: text(opts.source, delegated ? "core:clearSession" : "core:clearSession:fallback"), forceUnauthenticated: true, silent: opts.silent === true });
-
-    if (opts.emit !== false) {
-      emit(EVENTS.sessionCleared, { silent: Boolean(opts.silent), source: text(opts.source, delegated ? "core:clearSession" : "core:clearSession:fallback") });
-    }
-
-    return delegated ? result : true;
+async function request(url = "", options = {}) {
+  if (!isBrowser() || !isFn(fetch)) {
+    throw new Error("Fetch API no disponible.");
   }
 
-  function setTheme(theme, themeMode = "") {
-    try { return setThemeBase({ dom, storage, events, setState, theme, themeMode }); } catch {}
+  const method = text(options.method, "GET").toUpperCase();
+  const finalUrl = /^https?:\/\//i.test(url) ? url : joinUrl(API_BASE, url);
 
-    const clean = lower(theme, DEFAULT_THEME) === "light" ? "light" : DEFAULT_THEME;
-    setState({ theme: clean }, { source: "core:setTheme:fallback" });
-    return clean;
+  const publicRequest =
+    options.public === true ||
+    options.auth === false ||
+    options.skipAuth === true;
+
+  const body =
+    options.body &&
+    method !== "GET" &&
+    method !== "HEAD"
+      ? options.body instanceof FormData
+        ? options.body
+        : JSON.stringify(options.body)
+      : undefined;
+
+  const headers = {
+    Accept: "application/json",
+    ...(body && !(options.body instanceof FormData)
+      ? { "Content-Type": "application/json" }
+      : {}),
+    ...(publicRequest ? {} : getAuthHeader()),
+    ...(options.headers || {}),
+  };
+
+  const response = await fetch(finalUrl, {
+    method,
+    headers,
+    credentials: options.credentials || "include",
+    cache: options.cache || "default",
+    body,
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+
+  const data = contentType.includes("application/json")
+    ? await response.json().catch(() => null)
+    : await response.text().catch(() => "");
+
+  if (!response.ok) {
+    const error = new Error(
+      data?.message ||
+        data?.error ||
+        response.statusText ||
+        `HTTP ${response.status}`
+    );
+
+    error.status = response.status;
+    error.data = data;
+
+    throw error;
   }
 
-  function setLang(lang) {
-    try { return setLangBase({ dom, storage, events, setState, lang }); } catch {}
+  return data;
+}
 
-    const clean = lower(lang, DEFAULT_LANG);
-    setState({ lang: clean }, { source: "core:setLang:fallback" });
+function createHttpClient() {
+  return {
+    request,
 
-    try { if (isBrowser()) document.documentElement.lang = clean; } catch {}
-    emit("app:lang:change", { lang: clean, source: "core:setLang:fallback" });
+    get: (url, options = {}) =>
+      request(url, { ...options, method: "GET" }),
 
-    return clean;
+    post: (url, body = undefined, options = {}) =>
+      request(url, { ...options, method: "POST", body }),
+
+    put: (url, body = undefined, options = {}) =>
+      request(url, { ...options, method: "PUT", body }),
+
+    patch: (url, body = undefined, options = {}) =>
+      request(url, { ...options, method: "PATCH", body }),
+
+    delete: (url, options = {}) =>
+      request(url, { ...options, method: "DELETE" }),
+
+    del: (url, options = {}) =>
+      request(url, { ...options, method: "DELETE" }),
+
+    login: (body = {}, options = {}) =>
+      request("/api/auth/login", {
+        ...options,
+        method: "POST",
+        body,
+        public: true,
+        auth: false,
+        skipAuth: true,
+      }),
+
+    refresh: (body = {}, options = {}) =>
+      request("/api/auth/refresh", {
+        ...options,
+        method: "POST",
+        body,
+        public: true,
+        auth: false,
+        skipAuth: true,
+      }),
+
+    me: (options = {}) =>
+      request("/api/auth/me", {
+        ...options,
+        method: "GET",
+      }),
+
+    logout: (body = {}, options = {}) =>
+      request("/api/auth/logout", {
+        ...options,
+        method: "POST",
+        body,
+      }),
+
+    getSnapshot: () => ({
+      version: "simple-http",
+      apiBase: API_BASE,
+    }),
+  };
+}
+
+function installHttpBridge() {
+  if (!httpClient) {
+    httpClient = createHttpClient();
   }
 
-  function setSidebarOpen(value) {
-    try { return setSidebarOpenBase({ dom, storage, events, setState, value }); } catch {}
+  services.http = httpClient;
+  services.Http = httpClient;
+  services.api = httpClient;
+  services.apiClient = httpClient;
 
-    const next = Boolean(value);
-    setState({ sidebarOpen: next }, { source: "core:setSidebarOpen:fallback" });
-    return next;
-  }
+  registerBridge("Http", httpClient);
 
-  function setLoading(value) {
-    try { return setLoadingBase({ dom, events, setState, value }); } catch {}
+  return httpClient;
+}
 
-    const next = Boolean(value);
-    setState({ loading: next }, { source: "core:setLoading:fallback" });
-    return next;
-  }
+function getHttpClient() {
+  return httpClient || installHttpBridge();
+}
 
-  function setError(err = null) {
-    try { return setErrorBase({ events, setState, cloneError, error: err }); } catch {}
+function getActiveRequest() {
+  return getHttpClient().request;
+}
 
-    const normalized = err ? cloneError(err) : null;
-    setState({ error: normalized, lastError: normalized, hasError: Boolean(normalized) }, { source: "core:setError:fallback" });
-    return normalized;
-  }
+function getActiveApiClient() {
+  return getHttpClient();
+}
 
-  /* =======================================================
-     HTTP BRIDGE
-  ======================================================= */
+/* =========================================================
+   LIFECYCLE
+========================================================= */
 
-  function apiBase() {
-    return text(config?.apiBase || config?.api?.baseUrl || config?.api?.base || config?.backendUrl || "", "");
-  }
+function ready(fn) {
+  if (!isFn(fn)) return () => false;
 
-  function isAbsoluteUrl(url = "") {
-    return /^https?:\/\//i.test(text(url, ""));
-  }
-
-  function resolveUrl(url = "") {
-    const raw = text(url, "/");
-    if (isAbsoluteUrl(raw)) return raw;
-
-    try { return buildUrl(apiBase(), raw); } catch { return `${apiBase().replace(/\/+$/, "")}/${raw.replace(/^\/+/, "")}`; }
-  }
-
-  async function fallbackRequest(url, options = {}) {
-    if (!isBrowser() || !isFn(fetch)) throw new Error("Fetch API no disponible.");
-
-    const opts = { ...object(options) };
-    const method = text(opts.method, "GET").toUpperCase();
-    const finalUrl = resolveUrl(url);
-    const publicRequest = opts.public === true || opts.auth === false || opts.skipAuth === true || opts._skipAuth === true || isPublicApiPath(finalUrl);
-
-    const headers = {
-      Accept: "application/json",
-      ...object(opts.headers),
-      ...(publicRequest ? {} : getAuthHeader()),
-    };
-
-    const hasBody = opts.body !== undefined && opts.body !== null && method !== "GET" && method !== "HEAD";
-    let body = opts.body;
-
-    if (hasBody && typeof FormData !== "undefined" && !(body instanceof FormData) && typeof body !== "string") {
-      headers["Content-Type"] = headers["Content-Type"] || headers["content-type"] || "application/json";
-      body = JSON.stringify(body);
-    }
-
-    const response = await fetch(finalUrl, {
-      ...opts,
-      method,
-      headers,
-      credentials: opts.credentials || "include",
-      cache: opts.cache || (opts.noCache ? "no-store" : "default"),
-      body: hasBody ? body : undefined,
-    });
-
-    const contentType = response.headers?.get?.("content-type") || "";
-    let payload = null;
-
-    if (contentType.includes("application/json")) {
-      try { payload = await response.json(); } catch { payload = null; }
-    } else {
-      try { payload = await response.text(); } catch { payload = ""; }
-    }
-
-    if (!response.ok) {
-      const err = new Error(text(payload?.message || payload?.error?.message || payload?.error || response.statusText, `HTTP ${response.status}`));
-      err.status = response.status;
-      err.response = response;
-      err.data = payload;
-      throw err;
-    }
-
-    return payload;
-  }
-
-  const baseRequest = safeFactory(() => createRequest({ state, events, setError, utils, registry, hooks }), () => fallbackRequest);
-
-  function simpleClient(requestFn) {
-    const call = isFn(requestFn) ? requestFn : fallbackRequest;
-
-    return {
-      request: call,
-      get: (url, options = {}) => call(url, { ...options, method: "GET" }),
-      post: (url, body = undefined, options = {}) => call(url, { ...options, method: "POST", body }),
-      put: (url, body = undefined, options = {}) => call(url, { ...options, method: "PUT", body }),
-      patch: (url, body = undefined, options = {}) => call(url, { ...options, method: "PATCH", body }),
-      delete: (url, options = {}) => call(url, { ...options, method: "DELETE" }),
-      del(url, options = {}) { return this.delete(url, options); },
-    };
-  }
-
-  const baseApiClient = safeFactory(() => createApiClient(baseRequest), () => simpleClient(baseRequest));
-
-  requestBridge = baseRequest;
-  apiClientBridge = baseApiClient;
-
-  function authEndpoint(name = "", fallback = "") {
-    const endpoints = object(config?.auth?.endpoints || config?.api?.endpoints);
-    return text(endpoints[name], "") || text(config?.auth?.[`${name}Endpoint`], "") || text(config?.api?.[`${name}Endpoint`], "") || fallback;
-  }
-
-  function defineMissing(target, key, value, enumerable = false) {
-    if (!target || !key || value === undefined || value === null) return false;
-
-    try {
-      if (target[key] !== undefined && target[key] !== null) return true;
-    } catch {}
-
-    try {
-      Object.defineProperty(target, key, { value, configurable: true, enumerable, writable: true });
-      return true;
-    } catch {}
-
-    try {
-      target[key] = value;
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function normalizeHttpClient(candidate = null) {
-    const source = candidate && (typeof candidate === "object" || typeof candidate === "function") ? candidate : {};
-    let client = source;
-
-    try {
-      if (!Object.isExtensible(client) || Array.isArray(client)) client = {};
-    } catch {
-      client = {};
-    }
-
-    const requestFn = isFn(source.request) ? source.request.bind(source) : isFn(source) ? source : isFn(requestBridge) ? requestBridge : baseRequest;
-
-    defineMissing(client, "request", requestFn, true);
-    defineMissing(client, "get", (url, options = {}) => requestFn(url, { ...options, method: "GET" }), true);
-    defineMissing(client, "post", (url, body = undefined, options = {}) => requestFn(url, { ...options, method: "POST", body }), true);
-    defineMissing(client, "put", (url, body = undefined, options = {}) => requestFn(url, { ...options, method: "PUT", body }), true);
-    defineMissing(client, "patch", (url, body = undefined, options = {}) => requestFn(url, { ...options, method: "PATCH", body }), true);
-    defineMissing(client, "delete", (url, options = {}) => requestFn(url, { ...options, method: "DELETE" }), true);
-    defineMissing(client, "del", (url, options = {}) => client.delete(url, options), true);
-
-    defineMissing(client, "login", (body = {}, options = {}) => client.post(authEndpoint("login", "/api/auth/login"), body, { public: true, auth: false, skipAuth: true, _skipAuthRefresh: true, skipAuthRefresh: true, ...object(options) }));
-    defineMissing(client, "refresh", (body = {}, options = {}) => client.post(authEndpoint("refresh", "/api/auth/refresh"), body, { public: true, auth: false, skipAuth: true, _skipAuthRefresh: true, skipAuthRefresh: true, noAutoLogout: true, ...object(options) }));
-    defineMissing(client, "me", (options = {}) => client.get(authEndpoint("me", "/api/auth/me"), { auth: true, public: false, skipAuth: false, noCache: true, cache: "no-store", ...object(options) }));
-    defineMissing(client, "logout", (body = {}, options = {}) => client.post(authEndpoint("logout", "/api/auth/logout"), body, { auth: true, public: false, skipAuth: false, noCache: true, _skipAuthRefresh: true, skipAuthRefresh: true, ...object(options) }));
-
-    defineMissing(client, "getSnapshot", () => ({ version: text(client.version || client.HTTP_VERSION || client.CORE_HTTP_VERSION, "core-http"), installed: true, hasRequest: isFn(client.request), hasGet: isFn(client.get), hasPost: isFn(client.post), hasMe: isFn(client.me), source: "core:index:http", at: iso() }));
-    defineMissing(client, "getDebugSnapshot", client.getSnapshot);
-    defineMissing(client, "snapshot", client.getSnapshot);
-
-    return client;
-  }
-
-  function bridgeCanonical(name = "") {
-    return BRIDGE_CANONICAL[text(name, "")] || text(name, "");
-  }
-
-  function bridgeAliases(name = "") {
-    const canonical = bridgeCanonical(name);
-    return BRIDGE_ALIASES[canonical] || [canonical];
-  }
-
-  function getBridge(name = "") {
-    for (const alias of bridgeAliases(name)) {
-      try {
-        const value = modules?.get?.(alias) || registry.modules.get(alias);
-        if (value) return value;
-      } catch {}
-    }
-    return null;
-  }
-
-  function registerBridge(name = "", value = null, options = {}) {
-    const canonical = bridgeCanonical(name);
-    if (!canonical || !value) return false;
-
-    for (const alias of bridgeAliases(canonical)) {
-      try {
-        modules?.register?.(alias, value, { overwrite: true, replace: true, emit: false, silent: true, source: text(options.source, "core:bridge") });
-      } catch {
-        try { registry.modules.set(alias, value); } catch {}
-      }
-    }
-
-    return value;
-  }
-
-  function registerModule(name = "", value = null, options = {}) {
-    const key = text(name, "");
-    if (!key || !value) return false;
-
-    let result = null;
-
-    try {
-      result = modules?.register?.(key, value, { overwrite: options.overwrite !== false, replace: options.replace !== false, emit: options.emit === true, source: text(options.source, SOURCE) });
-    } catch {}
-
-    if (!result) registry.modules.set(key, value);
-    if (BRIDGE_CANONICAL[key]) registerBridge(key, value, options);
-
-    return result || value;
-  }
-
-  function getModule(name = "") {
-    return getBridge(name) || modules?.get?.(name) || registry.modules.get(text(name, "")) || null;
-  }
-
-  function httpExport(name = "") {
-    try { return CoreHttpModule?.[name] || null; } catch { return null; }
-  }
-
-  function defaultHttpExport() {
-    try { return CoreHttpModule?.default || null; } catch { return null; }
-  }
-
-  function resolveHttpCandidate(context = {}) {
-    const def = defaultHttpExport();
-    const installers = [httpExport("installHttp"), httpExport("installCoreHttp"), httpExport("install"), isFn(def) ? def : null].filter(isFn);
-
-    for (const install of installers) {
-      for (const attempt of [() => install(context), () => install({ AppCore: api, core: api, ...context }), () => install(api, context), () => install(api)]) {
-        try {
-          const value = attempt();
-          if (value) return value;
-        } catch {}
-      }
-    }
-
-    return getBridge("Http") || httpExport("Http") || httpExport("http") || httpExport("apiClient") || httpExport("client") || (def && typeof def === "object" ? def : null);
-  }
-
-  function installHttpBridge(reason = "core:http:install", options = {}) {
-    const opts = object(options);
-
-    if (httpInstalled && httpBridge && opts.force !== true) {
-      registerBridge("Http", httpBridge, { source: "core:http:existing" });
-      return httpBridge;
-    }
-
-    const context = {
-      AppCore: api,
-      core: api,
-      config,
-      state,
-      dom,
-      events,
-      storage,
-      cleanup,
-      modules,
-      hooks,
-      utils,
-      request: requestBridge || baseRequest,
-      baseRequest,
-      apiClient: apiClientBridge || baseApiClient,
-      baseApiClient,
-      getState,
-      setState,
-      patchState,
-      setError,
-      getAuthHeader,
-      setToken,
-      setUser,
-      applySession,
-      clearSession,
-      source: "core:index",
-      reason,
-      options: opts,
-    };
-
-    const previous = httpBridge;
-    const client = normalizeHttpClient(resolveHttpCandidate(context) || httpBridge || apiClientBridge || baseApiClient);
-
-    httpBridge = client;
-    apiClientBridge = client;
-    httpInstalled = true;
-
-    if (isFn(client.request)) {
-      try { requestBridge = client.request.bind(client); } catch { requestBridge = client.request; }
-    }
-
-    registerBridge("Http", client, { source: "core:http" });
-
-    api.services.http = client;
-    api.services.Http = client;
-    api.services.api = client;
-    api.services.apiClient = client;
-
-    if (!httpReadyEmitted || previous !== client || opts.force === true) {
-      httpReadyEmitted = true;
-      emit(EVENTS.httpReady, { installed: true, reason, hasRequest: isFn(client.request), hasGet: isFn(client.get), hasPost: isFn(client.post), hasMe: isFn(client.me), source: SOURCE });
-    }
-
-    return client;
-  }
-
-  function getHttpClient() {
-    return httpBridge || getBridge("Http") || apiClientBridge || baseApiClient;
-  }
-
-  function getActiveRequest() {
-    const client = getHttpClient();
-    if (isFn(client?.request)) {
-      try { return client.request.bind(client); } catch { return client.request; }
-    }
-    return requestBridge || baseRequest;
-  }
-
-  function getActiveApiClient() {
-    return getHttpClient();
-  }
-
-  /* =======================================================
-     INIT
-  ======================================================= */
-
-  function ready(fn) {
-    if (!isFn(fn)) return () => false;
-
-    if (!isBrowser()) {
-      try { fn(); } catch (err) { error("ready callback failed", err); }
-      return () => false;
-    }
-
-    if (!isDocumentReady()) {
-      let disposed = false;
-      const handler = () => {
-        if (disposed) return;
-        disposed = true;
-        readyCallbacksFlushed = true;
-        try { fn(); } catch (err) { error("ready callback failed", err); }
-      };
-
-      try {
-        document.addEventListener("DOMContentLoaded", handler, { once: true });
-        return () => {
-          disposed = true;
-          try { document.removeEventListener("DOMContentLoaded", handler); } catch {}
-          return true;
-        };
-      } catch {
-        return () => false;
-      }
-    }
-
-    readyCallbacksFlushed = true;
-    try { fn(); } catch (err) { error("ready callback failed", err); }
+  if (!isBrowser() || document.readyState !== "loading") {
+    fn();
     return () => true;
   }
 
-  async function runHooks(name, payload = {}) {
-    try {
-      if (isFn(hooks?.runSeries)) return await hooks.runSeries(name, payload);
-      if (isFn(hooks?.run)) return await hooks.run(name, payload);
-    } catch (err) {
-      warn("hooks failed", name, err);
-    }
-    return payload;
-  }
+  document.addEventListener("DOMContentLoaded", fn, { once: true });
 
-  function safeCacheDom() {
-    try { cacheDom({ dom, utils, events }); return true; } catch (err) { warn("cacheDom failed", err); return false; }
-  }
+  return () => {
+    document.removeEventListener("DOMContentLoaded", fn);
+    return true;
+  };
+}
 
-  function safeValidateDom() {
-    try { validateRequiredDom({ dom, utils, events }); return true; } catch (err) { warn("validateRequiredDom failed", err); return false; }
-  }
+async function init() {
+  if (initialized) return AppCore;
+  if (initPromise) return initPromise;
 
-  function safeLoadPreferences() {
-    try { loadPreferences({ state, storage, dom, events, setState }); return true; } catch (err) { warn("loadPreferences failed", err); return false; }
-  }
+  initPromise = Promise.resolve()
+    .then(() => {
+      state.booting = true;
+      state.ready = false;
 
-  function safeLoadSession() {
-    try { loadSession({ state, storage, dom, events, setState }); return true; } catch (err) { warn("loadSession failed", err); return false; }
-  }
-
-  function safeSyncBaseUI() {
-    try { syncBaseUI({ setDocumentTitle, syncUserUI }); return true; } catch (err) { warn("syncBaseUI failed", err); return false; }
-  }
-
-  function bindNetworkSafe() {
-    if (networkBound) return true;
-    if (config?.featureFlags?.enableNetworkEvents === false) return false;
-
-    try {
-      bindNetworkEvents({ state, events, cleanup, utils, setState });
-      networkBound = true;
-      return true;
-    } catch (err) {
-      warn("network bind failed", err);
-      return false;
-    }
-  }
-
-  async function doInit() {
-    const cycleId = ++initCycle;
-
-    try {
-      setState({ booting: true, ready: false, initialized: false, coreInitializing: true, coreInitCycle: cycleId, coreVersion: VERSION }, { source: "core:init:start", silent: true });
-      installHttpBridge("core:init:before-hooks");
-
-      emit(EVENTS.initStart, { cycleId, version: VERSION, state: sanitizeState(state), source: SOURCE });
-
-      await runHooks("beforeInit", { state, dom, config, events, utils, storage, cleanup, modules, hooks, request: getActiveRequest(), apiClient: getActiveApiClient(), http: getHttpClient(), Http: getHttpClient(), cycleId, version: VERSION });
-
-      safeCacheDom();
-      safeValidateDom();
-      safeLoadPreferences();
-      safeLoadSession();
-      syncAuth();
-      safeSyncBaseUI();
-      bindNetworkSafe();
-      installHttpBridge("core:init:after-session");
+      installHttpBridge();
 
       initialized = true;
 
-      setState({ initialized: true, booting: false, ready: true, coreInitializing: false, coreReady: true, coreInitCycle: cycleId, coreVersion: VERSION, coreReadyAt: iso() }, { source: "core:init:ready", silent: true });
+      state.initialized = true;
+      state.booting = false;
+      state.ready = true;
 
-      await runHooks("afterInit", { state, dom, config, events, utils, storage, cleanup, modules, hooks, request: getActiveRequest(), apiClient: getActiveApiClient(), http: getHttpClient(), Http: getHttpClient(), cycleId, version: VERSION });
+      events.emit("app:core:ready", {
+        version: CORE_VERSION,
+      });
 
-      emit(EVENTS.ready, { cycleId, version: VERSION, state: sanitizeState(state), source: SOURCE });
-
-      log("Core ready", { cycleId, authenticated: Boolean(state.authenticated), hasToken: Boolean(state.hasToken), route: redactText(state.route || "/"), publicPath: redactText(state.publicPath || "/"), hasHttp: Boolean(getHttpClient()) });
-
-      return api;
-    } catch (err) {
-      initialized = false;
-
-      setState({ initialized: false, ready: false, booting: false, coreInitializing: false, coreReady: false, coreInitCycle: cycleId, coreVersion: VERSION, coreErrorAt: iso() }, { source: "core:init:error", silent: true });
-      setError(err);
-      emit(EVENTS.initError, { cycleId, version: VERSION, error: sanitizeError(err), source: SOURCE });
-
-      throw err;
-    } finally {
+      return AppCore;
+    })
+    .finally(() => {
       initPromise = null;
-    }
-  }
-
-  function init(options = {}) {
-    const opts = object(options);
-
-    if (!opts.force && (initialized || state.initialized)) {
-      syncAuth();
-      installHttpBridge("core:init:already-ready");
-      return Promise.resolve(api);
-    }
-
-    if (initPromise) return initPromise;
-
-    initPromise = doInit();
-    return initPromise;
-  }
-
-  function rebootCore(options = {}) {
-    try { unbindNetworkEvents({ cleanup, events, utils }); } catch {}
-
-    initialized = false;
-    initPromise = null;
-    networkBound = false;
-    httpInstalled = false;
-    httpReadyEmitted = false;
-
-    setState({ initialized: false, ready: false, booting: false, coreReady: false, coreInitializing: false }, { source: "core:reboot", silent: true });
-    emit(EVENTS.reboot, { at: iso(), source: SOURCE });
-
-    return init({ ...object(options), force: true });
-  }
-
-  function getSnapshot(options = {}) {
-    syncAuth();
-
-    const deep = options.deep === true;
-
-    return {
-      appName: appName(),
-      version: VERSION,
-      debug: debugEnabled(),
-
-      initialized: Boolean(initialized || state.initialized),
-      initInFlight: Boolean(initPromise),
-      initCycle,
-
-      networkEventsBound: Boolean(networkBound),
-      readyCallbacksFlushed: Boolean(readyCallbacksFlushed),
-
-      state: {
-        initialized: Boolean(state.initialized),
-        ready: Boolean(state.ready),
-        booting: Boolean(state.booting),
-        loading: Boolean(state.loading),
-        authenticated: Boolean(state.authenticated),
-        hasToken: Boolean(state.hasToken),
-        user: publicUser(state.user),
-        role: state.role || null,
-        username: state.username || null,
-        currentResolvedUsername: state.currentResolvedUsername || null,
-        route: redactText(state.route || "/"),
-        publicPath: redactText(state.publicPath || "/"),
-        theme: state.theme || DEFAULT_THEME,
-        lang: state.lang || DEFAULT_LANG,
-        hasError: Boolean(state.error || state.hasError),
-      },
-
-      dom: {
-        hasShell: Boolean(dom.appShell || dom.shell),
-        hasViewContainer: Boolean(dom.viewContainer),
-        hasSidebar: Boolean(dom.sidebar),
-        hasTopbar: Boolean(dom.topbar),
-        hasLoader: Boolean(dom.loader),
-      },
-
-      registry: {
-        moduleCount: registry.modules.size,
-        modules: [...registry.modules.keys()],
-        scopeCount: registry.scopes.size,
-        hookCounts: Object.fromEntries(Object.entries(registry.hooks || {}).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0])),
-      },
-
-      bridges: {
-        toast: Boolean(showToastBridge),
-        Router: Boolean(getBridge("Router")),
-        Auth: Boolean(getBridge("Auth")),
-        Store: Boolean(getBridge("Store")),
-        Http: Boolean(getHttpClient()),
-        apiClient: Boolean(getActiveApiClient()),
-        httpInstalled: Boolean(httpInstalled),
-        httpReadyEmitted: Boolean(httpReadyEmitted),
-      },
-
-      events: deep ? snapshotFrom(events) : null,
-      cleanup: deep ? snapshotFrom(cleanup) : null,
-      storage: deep ? snapshotFrom(storage) : null,
-      modules: deep ? snapshotFrom(modules) : null,
-      hooks: deep ? snapshotFrom(hooks) : null,
-      http: deep ? snapshotFrom(getHttpClient()) : null,
-      network: deep ? getNetworkSnapshot({ state }) : null,
-
-      policy: {
-        singletonOnly: true,
-        ownRouter: false,
-        ownAuthFlow: false,
-        ownStore: false,
-        duplicateHttp: false,
-        strictAuth: true,
-      },
-
-      at: iso(),
-    };
-  }
-
-  const api = {
-    CORE_VERSION: VERSION,
-    version: VERSION,
-
-    config,
-    state,
-    dom,
-    registry,
-
-    utils,
-    storage,
-    events,
-    cleanup,
-    modules,
-    hooks,
-
-    services: {},
-
-    init,
-    rebootCore,
-    ready,
-
-    getState,
-    setState,
-    patchState,
-
-    isAuthenticated,
-    getCurrentUser,
-    getCurrentRole,
-    hasRole,
-    getAuthHeader,
-
-    setRoute,
-    setPublicPath,
-
-    setUser,
-    setToken,
-    applySession,
-    clearSession,
-
-    setTheme,
-    setLang,
-    setSidebarOpen,
-    setLoading,
-    setError,
-
-    setDocumentTitle,
-    clearDynamicContainers,
-    syncUserUI,
-
-    setShowToast,
-    showToast,
-
-    registerModule,
-    getModule,
-    registerBridge,
-    getBridge,
-
-    installHttpBridge,
-    getHttpClient,
-    getActiveRequest,
-    getActiveApiClient,
-
-    baseRequest,
-    baseApiClient,
-
-    getSnapshot,
-    getDebugSnapshot: getSnapshot,
-    snapshot: getSnapshot,
-
-    getUserDisplayName,
-    getUserUsername,
-    getUserAvatarUrl,
-    normalizeUser,
-  };
-
-  try {
-    Object.defineProperties(api, {
-      request: {
-        enumerable: true,
-        configurable: false,
-        get() { return getActiveRequest(); },
-        set(value) { if (isFn(value)) requestBridge = value; },
-      },
-
-      apiClient: {
-        enumerable: true,
-        configurable: false,
-        get() { return getActiveApiClient(); },
-        set(value) {
-          if (!value) return;
-          const client = normalizeHttpClient(value);
-          httpBridge = client;
-          apiClientBridge = client;
-          httpInstalled = true;
-          if (isFn(client.request)) {
-            try { requestBridge = client.request.bind(client); } catch { requestBridge = client.request; }
-          }
-          registerBridge("Http", client, { source: "core:set:apiClient" });
-        },
-      },
-
-      Http: {
-        enumerable: false,
-        configurable: false,
-        get() { return getHttpClient(); },
-        set(value) {
-          if (!value) return;
-          const client = normalizeHttpClient(value);
-          httpBridge = client;
-          apiClientBridge = client;
-          httpInstalled = true;
-          registerBridge("Http", client, { source: "core:set:Http" });
-        },
-      },
-
-      http: {
-        enumerable: false,
-        configurable: false,
-        get() { return getHttpClient(); },
-        set(value) {
-          if (!value) return;
-          const client = normalizeHttpClient(value);
-          httpBridge = client;
-          apiClientBridge = client;
-          httpInstalled = true;
-          registerBridge("Http", client, { source: "core:set:http" });
-        },
-      },
-
-      Router: {
-        enumerable: false,
-        configurable: false,
-        get() { return getBridge("Router"); },
-        set(value) { registerBridge("Router", value, { source: "core:set:Router" }); },
-      },
-
-      router: {
-        enumerable: false,
-        configurable: false,
-        get() { return getBridge("Router"); },
-        set(value) { registerBridge("Router", value, { source: "core:set:router" }); },
-      },
-
-      Auth: {
-        enumerable: false,
-        configurable: false,
-        get() { return getBridge("Auth"); },
-        set(value) { registerBridge("Auth", value, { source: "core:set:Auth" }); },
-      },
-
-      auth: {
-        enumerable: false,
-        configurable: false,
-        get() { return getBridge("Auth"); },
-        set(value) { registerBridge("Auth", value, { source: "core:set:auth" }); },
-      },
-
-      Store: {
-        enumerable: false,
-        configurable: false,
-        get() { return getBridge("Store"); },
-        set(value) { registerBridge("Store", value, { source: "core:set:Store" }); },
-      },
-
-      store: {
-        enumerable: false,
-        configurable: false,
-        get() { return getBridge("Store"); },
-        set(value) { registerBridge("Store", value, { source: "core:set:store" }); },
-      },
     });
-  } catch {}
 
-  try { installHttpBridge("core:bootstrap"); } catch (err) { warn("installHttpBridge bootstrap failed", err); }
+  return initPromise;
+}
 
-  try {
-    if (isBrowser()) {
-      window.__ONION_CORE__ = api;
-      window.AppCore = api;
-    }
-  } catch {}
+function rebootCore() {
+  initialized = false;
 
-  try {
-    return Object.freeze(api);
-  } catch {
-    return api;
-  }
-})();
+  state.initialized = false;
+  state.ready = false;
+  state.booting = false;
+
+  cleanup.run();
+
+  return init();
+}
+
+function getSnapshot() {
+  syncAuth();
+
+  return {
+    version: CORE_VERSION,
+    initialized,
+    ready: Boolean(state.ready),
+    booting: Boolean(state.booting),
+    authenticated: Boolean(state.authenticated),
+    hasToken: Boolean(state.hasToken),
+    user: publicUser(state.user),
+    role: state.role,
+    route: redact(state.route || "/"),
+    publicPath: redact(state.publicPath || "/"),
+    lang: state.lang,
+    theme: state.theme,
+    hasHttp: Boolean(httpClient),
+    modules: modules.list(),
+  };
+}
+
+/* =========================================================
+   API
+========================================================= */
+
+export const AppCore = {
+  CORE_VERSION,
+  version: CORE_VERSION,
+
+  config,
+  state,
+  dom,
+  registry,
+
+  utils: {
+    text,
+    clone,
+    redact,
+
+    byId: (id) => (isBrowser() ? document.getElementById(id) : null),
+    qs: (selector) => (isBrowser() ? document.querySelector(selector) : null),
+    qsa: (selector) => (isBrowser() ? [...document.querySelectorAll(selector)] : []),
+
+    log: (...args) => console.log("[Onion]", ...args),
+    warn: (...args) => console.warn("[Onion]", ...args),
+    error: (...args) => console.error("[Onion]", ...args),
+  },
+
+  events,
+  cleanup,
+  modules,
+  hooks,
+  services,
+
+  init,
+  rebootCore,
+  ready,
+
+  getState,
+  setState,
+  patchState,
+
+  isAuthenticated,
+  getCurrentUser,
+  getCurrentRole,
+  hasRole,
+  getAuthHeader,
+
+  setRoute,
+  setPublicPath,
+
+  setUser,
+  setToken,
+  applySession,
+  clearSession,
+
+  setTheme,
+  setLang,
+  setSidebarOpen,
+  setLoading,
+  setError,
+
+  setDocumentTitle,
+  clearDynamicContainers,
+  syncUserUI,
+
+  setShowToast,
+  showToast,
+
+  registerModule,
+  getModule,
+  registerBridge,
+  getBridge,
+
+  installHttpBridge,
+  getHttpClient,
+  getActiveRequest,
+  getActiveApiClient,
+
+  request,
+  apiClient: null,
+
+  getSnapshot,
+  getDebugSnapshot: getSnapshot,
+  snapshot: getSnapshot,
+
+  normalizeUser: (user) => user,
+
+  getUserDisplayName: (user) =>
+    user?.name ||
+    user?.displayName ||
+    user?.username ||
+    "",
+
+  getUserUsername: (user) =>
+    user?.username ||
+    user?.slug ||
+    user?.email ||
+    "",
+
+  getUserAvatarUrl: (user) =>
+    user?.avatarUrl ||
+    user?.avatar ||
+    user?.picture ||
+    "",
+};
+
+Object.defineProperties(AppCore, {
+  Http: {
+    get() {
+      return getHttpClient();
+    },
+    set(value) {
+      if (value) {
+        httpClient = value;
+        registerBridge("Http", httpClient);
+      }
+    },
+  },
+
+  http: {
+    get() {
+      return getHttpClient();
+    },
+    set(value) {
+      if (value) {
+        httpClient = value;
+        registerBridge("Http", httpClient);
+      }
+    },
+  },
+
+  Router: {
+    get() {
+      return getBridge("Router");
+    },
+    set(value) {
+      registerBridge("Router", value);
+    },
+  },
+
+  router: {
+    get() {
+      return getBridge("Router");
+    },
+    set(value) {
+      registerBridge("Router", value);
+    },
+  },
+
+  Auth: {
+    get() {
+      return getBridge("Auth");
+    },
+    set(value) {
+      registerBridge("Auth", value);
+    },
+  },
+
+  auth: {
+    get() {
+      return getBridge("Auth");
+    },
+    set(value) {
+      registerBridge("Auth", value);
+    },
+  },
+
+  Store: {
+    get() {
+      return getBridge("Store");
+    },
+    set(value) {
+      registerBridge("Store", value);
+    },
+  },
+
+  store: {
+    get() {
+      return getBridge("Store");
+    },
+    set(value) {
+      registerBridge("Store", value);
+    },
+  },
+});
+
+AppCore.apiClient = getHttpClient();
+
+if (isBrowser()) {
+  window.__ONION_CORE__ = AppCore;
+  window.AppCore = AppCore;
+}
 
 export default AppCore;

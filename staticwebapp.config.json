@@ -21,20 +21,16 @@
       "/css/*",
       "/js/*",
       "/.well-known/*",
-      "/.git/*",
-      "/.github/*",
-      "/.env*",
-      "/config/*",
-      "/node_modules/*",
-      "/package.json",
-      "/package-lock.json",
-      "/staticwebapp.config.json",
       "/*.{js,mjs,css,png,jpg,jpeg,gif,svg,webp,avif,bmp,ico,json,txt,xml,webmanifest,map,woff,woff2,ttf,eot,otf,pdf,mp4,webm,mp3,wav,ogg,wasm}"
     ]
   },
   "routes": [
     {
       "route": "/staticwebapp.config.json",
+      "statusCode": 404
+    },
+    {
+      "route": "/sitemap.xml",
       "statusCode": 404
     },
     {
@@ -63,6 +59,10 @@
     },
     {
       "route": "/package-lock.json",
+      "statusCode": 404
+    },
+    {
+      "route": "/apple-touch-icon.png",
       "statusCode": 404
     },
     {
@@ -97,12 +97,6 @@
     },
     {
       "route": "/robots.txt",
-      "headers": {
-        "Cache-Control": "public, max-age=3600"
-      }
-    },
-    {
-      "route": "/sitemap.xml",
       "headers": {
         "Cache-Control": "public, max-age=3600"
       }

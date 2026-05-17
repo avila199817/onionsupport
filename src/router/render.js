@@ -2,11 +2,12 @@
    Onion SPA - Router Render
    Archivo: src/router/render.js
 
-   ROUTER RENDER · FINAL SIMPLE
-   - Pinta vistas y estados de ruta
-   - Sin Auth real, guards, history propio, storage, Toast ni navegación
+   ROUTER RENDER · SIMPLE
+   - pinta vistas y estados de ruta
    - Router index orquesta; render sólo renderiza
    - route.render() recibe renderRoot + context
+   - history sólo se usa si Router index lo inyecta
+   - sin Auth real, guards, storage, Toast, fetch ni navegación propia
 ========================================================= */
 
 import {
@@ -21,27 +22,23 @@ import {
   redactTokenInText,
 } from "./helpers.js";
 
-/* =========================================================
-   VERSION / CONSTANTS
-========================================================= */
-
-export const ROUTER_RENDER_VERSION = "20.0.0-final";
+export const ROUTER_RENDER_VERSION = "21.0.0-simple";
 
 const SOURCE = "router.render";
 const DEFAULT_ROUTE = "/";
 const RENDER_HOST_ATTR = "data-router-view-host";
 const RENDER_HOST_CLASS = "router-view-host";
 
+let renderSeq = 0;
+let activeController = null;
+
 /* =========================================================
    BASICS
 ========================================================= */
 
-let renderSeq = 0;
-let activeController = null;
-
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
 const isFn = (value) => typeof value === "function";
-const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
 
 function isNode(value) {
   try {
@@ -67,11 +64,7 @@ function safeText(value, fallback = "") {
 }
 
 function nowMs() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
+  try { return Date.now(); } catch { return 0; }
 }
 
 function perfMs() {
@@ -83,11 +76,7 @@ function perfMs() {
 }
 
 function isoNow() {
-  try {
-    return new Date().toISOString();
-  } catch {
-    return "";
-  }
+  try { return new Date().toISOString(); } catch { return ""; }
 }
 
 function redact(value = "") {
@@ -98,8 +87,9 @@ function redact(value = "") {
   }
 }
 
-function sanitize(value, depth = 0, seen = new WeakSet()) {
+function sanitize(value, depth = 0, seen = new WeakSet(), keyHint = "") {
   if (depth > 4) return "[depth-limit]";
+  if (/token|authorization|password|secret|credential|jwt|bearer|refresh|access|otp|totp|mfa|2fa|code/i.test(keyHint)) return value ? "***" : value;
   if (typeof value === "string") return redact(value);
   if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "function") return "[function]";
@@ -113,7 +103,7 @@ function sanitize(value, depth = 0, seen = new WeakSet()) {
     };
   }
 
-  if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitize(item, depth + 1, seen));
+  if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitize(item, depth + 1, seen, keyHint));
 
   if (isObject(value)) {
     try {
@@ -121,15 +111,11 @@ function sanitize(value, depth = 0, seen = new WeakSet()) {
       seen.add(value);
     } catch {}
 
-    const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = /token|authorization|password|secret|credential|jwt|bearer|refresh|access|otp|totp|mfa|2fa|code/i.test(key)
-        ? item ? "***" : item
-        : sanitize(item, depth + 1, seen);
-    }
-
-    return output;
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 80)
+        .map(([key, item]) => [key, sanitize(item, depth + 1, seen, key)])
+    );
   }
 
   return String(value);
@@ -196,15 +182,13 @@ function stripSearchAndHash(path = DEFAULT_ROUTE) {
 }
 
 function usernameFrom(AppCore, requestedUsername = null, path = "") {
-  return (
-    safeText(requestedUsername, "") ||
+  return safeText(requestedUsername, "") ||
     extractUsernameFromPath(AppCore, path || "") ||
     getCurrentResolvedUsername(AppCore) ||
     getCurrentUsername(AppCore) ||
     AppCore?.state?.user?.username ||
     AppCore?.state?.user?.slug ||
-    null
-  );
+    null;
 }
 
 function resolveRoutePaths({
@@ -215,15 +199,8 @@ function resolveRoutePaths({
   publicPath: explicitPublicPath = "",
   requestedUsername = null,
 } = {}) {
-  const finalCanonical = stripSearchAndHash(
-    canonical(AppCore, canonicalPath || route?.path || requestedPath || DEFAULT_ROUTE)
-  );
-
-  const finalPublic = publicPath(
-    AppCore,
-    explicitPublicPath || requestedPath || finalCanonical || DEFAULT_ROUTE
-  );
-
+  const finalCanonical = stripSearchAndHash(canonical(AppCore, canonicalPath || route?.path || requestedPath || DEFAULT_ROUTE));
+  const finalPublic = publicPath(AppCore, explicitPublicPath || requestedPath || finalCanonical || DEFAULT_ROUTE);
   const username = usernameFrom(AppCore, requestedUsername, finalPublic);
 
   return {
@@ -240,9 +217,12 @@ function resolveRoutePaths({
 function queryFirst(selectors = []) {
   if (!isBrowser()) return null;
 
-  for (const selector of selectors) {
+  for (const selector of Array.isArray(selectors) ? selectors : [selectors]) {
+    const clean = safeText(selector, "");
+    if (!clean) continue;
+
     try {
-      const element = selector.startsWith("#") ? document.getElementById(selector.slice(1)) : document.querySelector(selector);
+      const element = clean.startsWith("#") ? document.getElementById(clean.slice(1)) : document.querySelector(clean);
       if (element) return element;
     } catch {}
   }
@@ -299,11 +279,9 @@ function el(tagName = "div", { className = "", text = "", attrs = {}, dataset = 
 function append(parent, children = []) {
   if (!parent) return parent;
 
-  for (const child of children) {
+  for (const child of Array.isArray(children) ? children : [children]) {
     if (!child) continue;
-    try {
-      parent.appendChild(child);
-    } catch {}
+    try { parent.appendChild(child); } catch {}
   }
 
   return parent;
@@ -316,9 +294,7 @@ function paint(target, node) {
     target.replaceChildren(node);
   } catch {
     empty(target);
-    try {
-      target.appendChild(node);
-    } catch {}
+    try { target.appendChild(node); } catch {}
   }
 
   return node;
@@ -466,9 +442,7 @@ function adoptResult(target, result) {
 ========================================================= */
 
 function beginRender() {
-  try {
-    activeController?.abort?.("superseded");
-  } catch {}
+  try { activeController?.abort?.("superseded"); } catch {}
 
   const renderId = ++renderSeq;
   const controller = typeof AbortController === "function" ? new AbortController() : null;
@@ -478,10 +452,7 @@ function beginRender() {
 }
 
 function abortActiveRender(reason = "aborted") {
-  try {
-    activeController?.abort?.(reason);
-  } catch {}
-
+  try { activeController?.abort?.(reason); } catch {}
   activeController = null;
 }
 
@@ -575,23 +546,18 @@ export function syncRouteState(AppCore, canonicalPath = DEFAULT_ROUTE, routePubl
   const finalPublic = publicPath(AppCore, routePublicPath || finalCanonical);
   const username = usernameFrom(AppCore, null, finalPublic);
 
-  try {
-    AppCore?.setRoute?.(finalCanonical);
-  } catch {}
+  try { AppCore?.setRoute?.(finalCanonical); } catch {}
+  try { AppCore?.setPublicPath?.(finalPublic); } catch {}
 
-  try {
-    AppCore?.setPublicPath?.(finalPublic);
-  } catch {}
+  const patch = {
+    route: finalCanonical,
+    canonicalPath: finalCanonical,
+    publicPath: finalPublic,
+    currentResolvedUsername: username,
+  };
 
-  const patch = { route: finalCanonical, canonicalPath: finalCanonical, publicPath: finalPublic, currentResolvedUsername: username };
-
-  try {
-    AppCore?.setState?.(patch, { source: SOURCE, emit: false, emitState: false, silent: true });
-  } catch {}
-
-  try {
-    if (AppCore?.state) Object.assign(AppCore.state, patch);
-  } catch {}
+  try { AppCore?.setState?.(patch, { source: SOURCE, emit: false, emitState: false, silent: true }); } catch {}
+  try { if (AppCore?.state) Object.assign(AppCore.state, patch); } catch {}
 
   return { canonicalPath: finalCanonical, publicPath: finalPublic, username };
 }
@@ -615,7 +581,14 @@ export function buildRouteRenderContext({
   renderRoot = null,
   viewContainer = null,
 } = {}) {
-  const resolved = resolveRoutePaths({ AppCore, route, requestedPath: routePublicPath || requestedPath, canonicalPath, publicPath: routePublicPath || requestedPath, requestedUsername });
+  const resolved = resolveRoutePaths({
+    AppCore,
+    route,
+    requestedPath: routePublicPath || requestedPath,
+    canonicalPath,
+    publicPath: routePublicPath || requestedPath,
+    requestedUsername,
+  });
   const rootView = viewContainer || getViewContainer(AppCore);
   const host = renderRoot || currentHost(AppCore) || rootView;
 
@@ -755,7 +728,7 @@ function updateHistory(fn, payload = {}) {
    MAIN FLOWS
 ========================================================= */
 
-export async function renderRouteSuccess({ AppCore, route, requestedPath, canonicalPath, requestedUsername, setShellMode, setDocumentTitle, getRoute } = {}) {
+export async function renderRouteSuccess({ AppCore, route, requestedPath, canonicalPath, requestedUsername, setShellMode, setDocumentTitle } = {}) {
   const startedAt = perfMs();
   const { renderId, signal } = beginRender();
   const resolved = resolveRoutePaths({ AppCore, route, requestedPath, canonicalPath, requestedUsername });
@@ -875,8 +848,8 @@ export async function renderLoginRedirect(args = {}) {
   }
 
   markReady(args.AppCore, renderId, route, loginPath, finalPublic);
-
   emit(args.AppCore, "router:render:login-redirect", { canonicalPath: loginPath, publicPath: finalPublic, renderId });
+
   return null;
 }
 
@@ -886,6 +859,7 @@ export function renderRouteRuntimeError(args = {}) {
   call(args.setDocumentTitle, "Error de navegación");
 
   const view = renderRuntimeErrorView(args.AppCore, args.error, args.getRoute);
+
   emit(args.AppCore, "router:render:error", {
     error: args.error,
     message: args.error?.message || "Error de navegación",

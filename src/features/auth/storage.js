@@ -2,12 +2,12 @@
    Onion SPA - Auth Storage
    Archivo: src/features/auth/storage.js
 
-   AUTH STORAGE · FINAL SIMPLE
-   - Almacenamiento mínimo de Auth
-   - Tokens access/refresh/temp y contexto sessionId/sessionUserId
-   - Limpieza sólo de claves concretas de Auth
-   - Compat legacy mínima
-   - Sin sesión, Router, API, permisos, roles complejos ni storage.clear()
+   AUTH STORAGE · SIMPLE
+   - almacenamiento mínimo de Auth
+   - tokens access/refresh/temp y contexto sessionId/sessionUserId
+   - limpieza sólo de claves concretas de Auth
+   - compat legacy mínima
+   - sin sesión, Router, API, permisos, roles complejos ni storage.clear()
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -18,20 +18,13 @@ import {
   AUTH_CONSTANTS,
 } from "./constants.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const AUTH_STORAGE_VERSION = "20.0.0-final";
-
-/* =========================================================
-   CONFIG
-========================================================= */
+export const AUTH_STORAGE_VERSION = "21.0.0-simple";
 
 const DEFAULT_PREFIX = "onion";
 const DEFAULT_TOKEN_MAX_LENGTH = 8192;
 const DEFAULT_TEXT_MAX_LENGTH = 300;
 const DEFAULT_ROUTE_MAX_LENGTH = 1000;
+const SESSION_VALUE_ABSOLUTE_MAX = 2048;
 
 const memoryStorage = new Map();
 let lastStorageError = null;
@@ -104,12 +97,15 @@ const SLOT_ALIASES = Object.freeze({
     "mfa_token",
     "challengeToken",
     "challenge_token",
+    "otpToken",
+    "otp_token",
     "onion:tempToken",
     "onion:temp_token",
     "onion.tempToken",
     "onion_temp_token",
     "onion_mfa_token",
     "onion_two_factor_token",
+    "onion_otp_token",
   ],
 
   sessionId: [
@@ -169,6 +165,8 @@ const TOKEN_PICK_KEYS = Object.freeze([
   "two_factor_token",
   "mfaToken",
   "mfa_token",
+  "otpToken",
+  "otp_token",
   "value",
   "raw",
   "data",
@@ -197,6 +195,9 @@ const CORRUPT_VALUES = new Set([
   "\"true\"",
 ]);
 
+const ADMIN_ALIASES = new Set(["admin", "administrator", "administrador", "superadmin", "super_admin", "super-admin", "owner", "root"]);
+const USER_ALIASES = new Set(["user", "usuario", "client", "cliente", "customer"]);
+
 /* =========================================================
    BASICS
 ========================================================= */
@@ -210,7 +211,7 @@ function safeObject(value, fallback = {}) {
 
 function safeArray(value) {
   if (Array.isArray(value)) return value;
-  if (value instanceof Set) return Array.from(value);
+  if (value instanceof Set) return [...value];
   if (value === null || value === undefined) return [];
   return [value];
 }
@@ -268,20 +269,32 @@ function getLegacyKeys() {
 }
 
 function getTokenMaxLength() {
-  return safeNumber(AUTH_CONSTANTS?.tokenMaxLength, DEFAULT_TOKEN_MAX_LENGTH);
+  return safeNumber(AUTH_CONSTANTS?.tokenMaxLength, DEFAULT_TOKEN_MAX_LENGTH) || DEFAULT_TOKEN_MAX_LENGTH;
 }
 
 function getTextMaxLength() {
-  return safeNumber(AUTH_CONSTANTS?.textValueMaxLength, DEFAULT_TEXT_MAX_LENGTH);
+  return safeNumber(AUTH_CONSTANTS?.textValueMaxLength, DEFAULT_TEXT_MAX_LENGTH) || DEFAULT_TEXT_MAX_LENGTH;
 }
 
 function getSessionMaxLength() {
-  return safeNumber(AUTH_CONSTANTS?.sessionValueMaxLength, DEFAULT_TEXT_MAX_LENGTH);
+  return Math.min(
+    safeNumber(AUTH_CONSTANTS?.sessionValueMaxLength, DEFAULT_TEXT_MAX_LENGTH) || DEFAULT_TEXT_MAX_LENGTH,
+    SESSION_VALUE_ABSOLUTE_MAX
+  );
 }
 
 function normalizeRole(value = "") {
-  const role = safeText(value, "").toLowerCase();
-  return role === "admin" ? "admin" : role ? "user" : "";
+  const role = safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_:.]/g, "")
+    .replace(/^_+|_+$/g, "");
+
+  if (ADMIN_ALIASES.has(role)) return "admin";
+  if (USER_ALIASES.has(role)) return "user";
+  return role ? "user" : "";
 }
 
 function isCorrupt(value = "") {
@@ -527,6 +540,7 @@ function removeAppStorage(key = "") {
       try {
         if (typeof storage[method] === "function") {
           storage[method](variant);
+          storage[method](stripPrefix(variant));
           removed = true;
         }
       } catch (error) {
@@ -644,10 +658,7 @@ function writeMany(keys = [], value = "", options = {}) {
   const cleanValue = safeText(value, "");
   let ok = false;
 
-  for (const key of unique(keys)) {
-    ok = writeRaw(key, cleanValue, options) || ok;
-  }
-
+  for (const key of unique(keys)) ok = writeRaw(key, cleanValue, options) || ok;
   return ok;
 }
 
@@ -665,10 +676,7 @@ function removeRaw(key = "") {
 function removeMany(keys = []) {
   let ok = false;
 
-  for (const key of unique(keys)) {
-    ok = removeRaw(key) || ok;
-  }
-
+  for (const key of unique(keys)) ok = removeRaw(key) || ok;
   return ok;
 }
 
@@ -729,7 +737,22 @@ function normalizeText(value = "", maxLength = getTextMaxLength(), pickKeys = TE
   const raw = unwrapValue(value, pickKeys);
   if (!raw || isCorrupt(raw)) return "";
 
-  return safeText(raw, "").slice(0, maxLength);
+  const clean = safeText(raw, "");
+  const limit = safeNumber(maxLength, getTextMaxLength());
+
+  if (limit > 0 && clean.length > limit) return "";
+  return clean;
+}
+
+function normalizeRouteText(value = "") {
+  const raw = unwrapValue(value, TEXT_PICK_KEYS);
+  if (!raw || isCorrupt(raw)) return "";
+
+  const clean = safeText(raw, "");
+  if (clean.length > DEFAULT_ROUTE_MAX_LENGTH) return "";
+  if (!clean.startsWith("/") || clean.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(clean) || /[\r\n\t\\]/.test(clean)) return "";
+
+  return clean;
 }
 
 function normalizeToken(value = "") {
@@ -758,7 +781,6 @@ function normalizeSessionData(sessionData = null, user = null) {
   const session = safeObject(data.session || data.sessionData);
   const auth = safeObject(data.auth);
   const authSession = safeObject(auth.session || auth.sessionData);
-
   const safeUser = safeObject(user || data.user || data.usuario || data.me || data.account || auth.user || auth.usuario);
 
   const sessionId = normalizeSessionId(
@@ -782,12 +804,15 @@ function normalizeSessionData(sessionData = null, user = null) {
       data.userId ||
       data.user_id ||
       data.uid ||
+      data.sub ||
       session.userId ||
       session.user_id ||
       session.uid ||
+      session.sub ||
       authSession.userId ||
       authSession.user_id ||
       authSession.uid ||
+      authSession.sub ||
       safeUser.userId ||
       safeUser.user_id ||
       safeUser.id ||
@@ -974,14 +999,14 @@ export function getStoredLastResetIdentifier() {
 }
 
 export function persistRedirectAfterLogin(value = null) {
-  const normalized = normalizeText(value, DEFAULT_ROUTE_MAX_LENGTH);
+  const normalized = normalizeRouteText(value);
   const keys = getKeys();
   if (!normalized) return removeStoredRedirectAfterLogin();
   return writeRaw(keys.redirectAfterLogin, normalized);
 }
 
 export function getStoredRedirectAfterLogin() {
-  return normalizeText(readFirst(slotKeys("redirectAfterLogin")), DEFAULT_ROUTE_MAX_LENGTH);
+  return normalizeRouteText(readFirst(slotKeys("redirectAfterLogin")));
 }
 
 export function removeStoredRedirectAfterLogin() {
@@ -1000,7 +1025,6 @@ export function repairCorruptedAuthStorage() {
     if (!raw) continue;
 
     const unwrapped = unwrapValue(raw, TEXT_PICK_KEYS);
-
     if (isCorrupt(unwrapped)) {
       if (removeRaw(key)) removed += 1;
     }
@@ -1083,6 +1107,8 @@ export function getAuthStorageSnapshot() {
       storageClearAll: false,
       storesFullUser: false,
       roles: ["admin", "user"],
+      tokenNoTruncate: true,
+      concreteKeyCleanupOnly: true,
     },
 
     at: new Date().toISOString(),

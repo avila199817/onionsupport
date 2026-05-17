@@ -2,11 +2,13 @@
    Onion SPA - App I18n
    Archivo: src/app/i18n.js
 
-   APP I18N · FINAL SIMPLE
-   - Adapter de boot/sync sobre i18n/index.js
-   - Inicia I18n real si existe
-   - Sin sistema i18n paralelo, sin Router/render, sin Toast, sin fetch
-   - Sin diccionarios grandes aquí
+   APP I18N · SIMPLE ADAPTER
+   - adapter de boot/sync sobre i18n/index.js
+   - inicia I18n real si existe
+   - sincroniza lang/document/AppCore
+   - expone bridge AppCore.t / AppCore.changeLanguage
+   - sin sistema i18n paralelo, sin Router/render, sin Toast, sin fetch
+   - sin diccionarios grandes aquí
 ========================================================= */
 
 import {
@@ -21,11 +23,7 @@ import {
   UI_CONSTANTS,
 } from "./constants.js";
 
-/* =========================================================
-   VERSION / CONSTANTS
-========================================================= */
-
-export const I18N_VERSION = "20.0.0-final";
+export const I18N_VERSION = "21.0.0-simple";
 
 const SOURCE = "app.i18n";
 const DEFAULT_SCOPE = APP_SCOPES?.i18n || APP_SCOPE || "app:i18n";
@@ -109,10 +107,6 @@ const SENSITIVE_KEY_RE = /token|secret|password|authorization|credential|jwt|bea
 const LANG_EMIT_DEDUPE_MS = 80;
 const MAX_ERRORS = 12;
 
-/* =========================================================
-   RUNTIME
-========================================================= */
-
 let initialized = false;
 let boundCore = null;
 let currentAppCore = null;
@@ -138,7 +132,7 @@ const runtime = {
 };
 
 /* =========================================================
-   BASIC HELPERS
+   BASICS
 ========================================================= */
 
 function uniqueStatic(values = []) {
@@ -157,8 +151,8 @@ function uniqueStatic(values = []) {
 }
 
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
-const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-const isObjectLike = (value) => value !== null && (typeof value === "object" || typeof value === "function");
+const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
+const isObjectLike = (value) => Boolean(value && (typeof value === "object" || typeof value === "function"));
 const isFn = (value) => typeof value === "function";
 
 function safeObject(value, fallback = {}) {
@@ -187,27 +181,15 @@ function unique(values = []) {
 }
 
 function now() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
+  try { return Date.now(); } catch { return 0; }
 }
 
 function iso(ms = now()) {
-  try {
-    return new Date(ms).toISOString();
-  } catch {
-    return "";
-  }
+  try { return new Date(ms).toISOString(); } catch { return ""; }
 }
 
 function canExtend(value) {
-  try {
-    return isObjectLike(value) && Object.isExtensible(value);
-  } catch {
-    return false;
-  }
+  try { return isObjectLike(value) && Object.isExtensible(value); } catch { return false; }
 }
 
 function defineHidden(target, key, value) {
@@ -235,7 +217,7 @@ async function maybeAwait(value) {
 }
 
 /* =========================================================
-   SANITIZE / LOG / EMIT
+   SANITIZE / EMIT
 ========================================================= */
 
 function redactText(value = "") {
@@ -266,7 +248,7 @@ function normalizeError(error, fallback = "Error i18n.") {
 
 function sanitize(value, depth = 0, keyHint = "") {
   if (depth > 4) return "[depth-limit]";
-  if (SENSITIVE_KEY_RE.test(keyHint)) return value ? "***" : value;
+  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) return value ? "***" : value;
   if (typeof value === "string") return redactText(value);
   if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "function") return "[function]";
@@ -274,31 +256,25 @@ function sanitize(value, depth = 0, keyHint = "") {
   if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitize(item, depth + 1));
 
   if (isObject(value)) {
-    const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = sanitize(item, depth + 1, key);
-    }
-
-    return output;
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 80)
+        .map(([key, item]) => [key, sanitize(item, depth + 1, key)])
+    );
   }
 
   return String(value);
 }
 
 function safeLog(AppCore, ...args) {
-  try {
-    AppCore?.utils?.log?.("[AppI18n]", ...args.map((item) => sanitize(item)));
-  } catch {}
+  try { AppCore?.utils?.log?.("[AppI18n]", ...args.map((item) => sanitize(item))); } catch {}
 }
 
 function safeWarn(AppCore, ...args) {
   try {
     AppCore?.utils?.warn?.("[AppI18n]", ...args.map((item) => sanitize(item)));
   } catch {
-    try {
-      if (AppCore?.config?.debug) console.warn("[AppI18n]", ...args.map((item) => sanitize(item)));
-    } catch {}
+    try { if (AppCore?.config?.debug) console.warn("[AppI18n]", ...args.map((item) => sanitize(item))); } catch {}
   }
 }
 
@@ -394,7 +370,12 @@ function normalizeLangList(values = []) {
 
 function getLangMeta(lang = FALLBACK_LANG) {
   const clean = normalizeLang(lang, FALLBACK_LANG);
-  return { ...(LANG_META[clean] || {}), lang: clean, locale: LANG_META[clean]?.locale || clean, direction: LANG_META[clean]?.direction || "ltr" };
+  return {
+    ...(LANG_META[clean] || {}),
+    lang: clean,
+    locale: LANG_META[clean]?.locale || clean,
+    direction: LANG_META[clean]?.direction || "ltr",
+  };
 }
 
 function getAvailableLangs(I18n) {
@@ -519,10 +500,12 @@ function readStoredLang() {
 
 function writeStoredLang(lang = "") {
   if (!isBrowser()) return false;
+
   const clean = normalizeLang(lang, "");
   if (!clean) return false;
 
   let ok = false;
+
   for (const key of STORAGE_KEYS) {
     try {
       window.localStorage?.setItem?.(key, clean);
@@ -567,6 +550,7 @@ function setDocumentLang(lang = FALLBACK_LANG) {
 
 function getNestedValue(source = {}, key = "") {
   if (!source || !key) return undefined;
+
   let current = source;
 
   for (const part of String(key).split(".").filter(Boolean)) {
@@ -686,6 +670,10 @@ function setStateSilent(AppCore, patch = {}) {
     AppCore?.setState?.(cleanPatch, { source: SOURCE, emit: false, emitState: false, silent: true });
   } catch {}
 
+  try {
+    AppCore?.patchState?.(cleanPatch, { source: SOURCE, emit: false, silent: true });
+  } catch {}
+
   return cleanPatch;
 }
 
@@ -734,6 +722,7 @@ function attachBridge(AppCore, I18n, Router) {
   const tBridge = (key, fallback = "", params = {}) => translateWithI18n(I18n, key, fallback, params);
 
   let ok = false;
+
   ok = defineHidden(AppCore, "changeLanguage", changeLanguageBridge) || ok;
   ok = defineHidden(AppCore, "setLanguage", changeLanguageBridge) || ok;
   ok = defineHidden(AppCore, "getLanguage", getLanguageBridge) || ok;
@@ -856,7 +845,16 @@ export function syncLangState(first = {}, second = null) {
   runtime.syncCount += 1;
 
   if (emit) {
-    safeEmit(AppCore, EVENTS.sync, { lang, language: lang, locale: meta.locale, dir: meta.direction, fallbackLang: FALLBACK_LANG, defaultLang: DEFAULT_LANG, available, reason: runtime.reason });
+    safeEmit(AppCore, EVENTS.sync, {
+      lang,
+      language: lang,
+      locale: meta.locale,
+      dir: meta.direction,
+      fallbackLang: FALLBACK_LANG,
+      defaultLang: DEFAULT_LANG,
+      available,
+      reason: runtime.reason,
+    });
   }
 
   return lang;
@@ -901,7 +899,14 @@ export async function initI18n(first = {}, second = null) {
 
   setStateSilent(AppCore, { i18nInitialized: true });
 
-  const payload = { ok: true, lang, fallbackLang: FALLBACK_LANG, defaultLang: DEFAULT_LANG, available: getAvailableLangs(I18n), scope: DEFAULT_SCOPE };
+  const payload = {
+    ok: true,
+    lang,
+    fallbackLang: FALLBACK_LANG,
+    defaultLang: DEFAULT_LANG,
+    available: getAvailableLangs(I18n),
+    scope: DEFAULT_SCOPE,
+  };
 
   safeEmit(AppCore, EVENTS.initDone, payload);
   safeEmit(AppCore, EVENTS.ready, payload);
@@ -933,8 +938,6 @@ function emitLangChange(AppCore, payload = {}) {
 export function changeLanguage(first = {}, second = null) {
   const deps = resolveDeps(first, second);
   const previous = deps.force ? null : changePromise;
-
-  let finalPromise;
 
   const runPromise = (previous || Promise.resolve())
     .catch(() => {})
@@ -984,12 +987,11 @@ export function changeLanguage(first = {}, second = null) {
       return finalLang;
     })
     .catch((error) => {
-      const { AppCore } = deps;
-      pushError(AppCore, error, "changeLanguage");
+      pushError(deps.AppCore, error, "changeLanguage");
       throw error;
     });
 
-  finalPromise = runPromise.finally(() => {
+  const finalPromise = runPromise.finally(() => {
     if (changePromise === finalPromise) changePromise = null;
   });
 
@@ -1100,10 +1102,6 @@ export function resetI18nRuntimeState() {
 
   return getI18nSnapshot();
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   I18N_VERSION,

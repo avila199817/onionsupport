@@ -1,26 +1,3 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- =====================================================
-     ONION SUPPORT · SITEMAP
-     Archivo: /sitemap.xml
-
-     ESTADO ACTUAL:
-     - Onion Support es una SPA privada.
-     - No existen rutas públicas SEO indexables.
-     - No se incluyen rutas internas:
-       /tickets, /incidencias, /facturas, /users, /usuarios,
-       /clientes, /clients, /hardware, /settings, /account...
-     - No se incluyen rutas auth/técnicas:
-       /login, /logout, /activate-account, /reset-password,
-       /forgot-password, /recover-password, /password-reset,
-       /2fa, /otp...
-     - No se declara la raíz "/" porque sirve el panel privado con noindex.
-     - El sitemap no debe usarse para rutas privadas de aplicación.
-
-     CUANDO EXISTA LANDING PÚBLICA REAL:
-     - Añadir sólo URLs públicas indexables.
-     - No añadir rutas privadas del panel.
-     - No añadir rutas auth.
-     - No añadir rutas con token.
-===================================================== -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 </urlset>

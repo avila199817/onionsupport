@@ -2,12 +2,13 @@
    Onion SPA - App Events
    Archivo: src/app/events.js
 
-   APP EVENTS · FINAL SIMPLE
-   - Wiring mínimo de eventos de App
-   - Sin Auth paralelo, Router paralelo, render propio, restore ni refresh
-   - Sin fetch, storage, Toast obligatorio ni permisos
-   - router:rendered sólo sincroniza estado + loader post-render
-   - UI sync sólo por callback inyectado
+   APP EVENTS · SIMPLE WIRING
+   - wiring mínimo de eventos de App
+   - sincroniza UI sólo por callback inyectado
+   - router:rendered sólo parchea estado + loader post-render
+   - idioma/tema actualizan estado básico
+   - sin Auth paralelo, Router paralelo, render propio, restore ni refresh
+   - sin fetch, storage, Toast obligatorio ni permisos
 ========================================================= */
 
 import {
@@ -30,11 +31,7 @@ import {
   AUTH_EVENTS,
 } from "./constants.js";
 
-/* =========================================================
-   VERSION / CONSTANTS
-========================================================= */
-
-export const APP_EVENTS_VERSION = "20.0.0-final";
+export const APP_EVENTS_VERSION = "21.0.0-simple";
 
 const SOURCE = "app.events";
 const DEFAULT_ROUTE = "/";
@@ -90,20 +87,17 @@ const THEME_EVENTS = Object.freeze([
 
 const SENSITIVE_KEY_RE = /token|secret|password|authorization|credential|jwt|bearer|otp|code|session|refresh|access/i;
 
-/* =========================================================
-   RUNTIME
-========================================================= */
-
 let bound = false;
 let binding = false;
 let boundScope = "";
+let debugApiInstalled = false;
+
 let lastUiKey = "";
 let lastUiAt = 0;
 let lastRouterKey = "";
 let lastRouterAt = 0;
 let lastEmitKey = "";
 let lastEmitAt = 0;
-let debugApiInstalled = false;
 
 const disposers = [];
 const boundKeys = new Set();
@@ -124,8 +118,8 @@ const eventState = {
 
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
 const isFn = (value) => typeof value === "function";
-const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-const isObjectLike = (value) => value !== null && (typeof value === "object" || typeof value === "function");
+const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
+const isObjectLike = (value) => Boolean(value && (typeof value === "object" || typeof value === "function"));
 
 function object(value, fallback = {}) {
   return isObject(value) ? value : fallback;
@@ -159,7 +153,14 @@ function iso(ms = now()) {
 }
 
 function unique(values = []) {
-  return [...new Set((Array.isArray(values) ? values : [values]).flat(Infinity).map((item) => text(item, "")).filter(Boolean))];
+  return [
+    ...new Set(
+      (Array.isArray(values) ? values : [values])
+        .flat(Infinity)
+        .map((item) => text(item, ""))
+        .filter(Boolean)
+    ),
+  ];
 }
 
 function canDefine(value) {
@@ -189,7 +190,7 @@ function defineHidden(target, key, value) {
 function payloadFrom(eventOrPayload = {}) {
   if (isObject(eventOrPayload?.detail)) return eventOrPayload.detail;
   if (isObject(eventOrPayload?.payload)) return eventOrPayload.payload;
-  return isObject(eventOrPayload) ? eventOrPayload : {};
+  return object(eventOrPayload);
 }
 
 /* =========================================================
@@ -218,7 +219,7 @@ function normalizeError(error = null) {
 
 function sanitize(value, depth = 0, keyHint = "") {
   if (depth > 4) return "[depth-limit]";
-  if (SENSITIVE_KEY_RE.test(keyHint)) return value ? "***" : value;
+  if (SENSITIVE_KEY_RE.test(text(keyHint, ""))) return value ? "***" : value;
   if (typeof value === "string") return redact(value);
   if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "bigint") return String(value);
@@ -229,25 +230,30 @@ function sanitize(value, depth = 0, keyHint = "") {
   if (value instanceof Set) return { type: "Set", size: value.size };
 
   if (isObject(value)) {
-    const output = {};
-    for (const [key, item] of Object.entries(value).slice(0, 80)) output[key] = sanitize(item, depth + 1, key);
-    return output;
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 80)
+        .map(([key, item]) => [key, sanitize(item, depth + 1, key)])
+    );
   }
 
   return String(value);
 }
 
-function shouldDedupeEmit(eventName = "", payload = {}, force = false) {
-  if (force) return false;
-
-  const key = [
+function emitKey(eventName = "", payload = {}) {
+  return [
     eventName,
     payload?.reason || payload?.phase || "",
     payload?.route || payload?.canonicalPath || "",
     payload?.publicPath || "",
     payload?.ok === false ? "fail" : "ok",
   ].map((item) => text(item, "")).join("|");
+}
 
+function shouldDedupeEmit(eventName = "", payload = {}, force = false) {
+  if (force) return false;
+
+  const key = emitKey(eventName, payload);
   const stamp = now();
 
   if (key === lastEmitKey && stamp - lastEmitAt < DEDUPE_MS) return true;
@@ -317,9 +323,9 @@ function recordError(AppCore, eventName = "", error = null) {
 function callPathHelper(fn, AppCore, Router, fallback = DEFAULT_ROUTE) {
   if (!isFn(fn)) return fallback;
 
-  for (const call of [() => fn(AppCore, Router), () => fn(AppCore), () => fn()]) {
+  for (const attempt of [() => fn(AppCore, Router), () => fn(AppCore), () => fn()]) {
     try {
-      const value = call();
+      const value = attempt();
       if (value) return value;
     } catch {}
   }
@@ -546,8 +552,16 @@ function applyLoaderPolicy({ AppCore, Router, applyPostRenderLoaderPolicy, paylo
   return false;
 }
 
-function requestUiRepair(AppCore, reason = "event", payload = {}) {
-  const detail = { source: SOURCE, reason: text(reason, "event"), payload: object(payload), hardRepair: false, rebind: false, at: iso() };
+export function requestUiRepair(AppCore, reason = "event", payload = {}) {
+  const detail = {
+    source: SOURCE,
+    reason: text(reason, "event"),
+    payload: object(payload),
+    hardRepair: false,
+    rebind: false,
+    at: iso(),
+  };
+
   emit(AppCore, EVENT_NAMES.appUiRepairRequest, detail, { force: true });
   return detail;
 }
@@ -604,11 +618,10 @@ function setI18nLang(I18n, lang = "es") {
 }
 
 function resolveLang(AppCore, I18n, payload = {}) {
-  return normalizeLang(payload.lang || payload.language || payload.locale || I18n?.getLang?.() || I18n?.getLanguage?.() || I18n?.lang || AppCore?.state?.lang || "es", "es");
-}
-
-function shouldRerenderOnLang(payload = {}) {
-  return Boolean(payload.rerenderByEvents === true || payload.appEventsRerender === true || payload.forceEventsRerender === true);
+  return normalizeLang(
+    payload.lang || payload.language || payload.locale || I18n?.getLang?.() || I18n?.getLanguage?.() || I18n?.lang || AppCore?.state?.lang || "es",
+    "es"
+  );
 }
 
 /* =========================================================
@@ -674,7 +687,8 @@ function bindEvent({ AppCore, eventName, label = "", handler, windowFallback = t
     const payload = payloadFrom(eventOrPayload);
     recordHandled(cleanName, payload);
 
-    Promise.resolve(handler(payload, { eventName: cleanName, label: cleanLabel, raw: eventOrPayload })).catch((error) => recordError(AppCore, cleanName, error));
+    Promise.resolve(handler(payload, { eventName: cleanName, label: cleanLabel, raw: eventOrPayload }))
+      .catch((error) => recordError(AppCore, cleanName, error));
   };
 
   const ok = bindViaBus(AppCore, cleanName, wrapped) || (windowFallback && bindViaWindow(cleanName, wrapped));
@@ -770,10 +784,6 @@ function bindLanguageEvents(context) {
       setI18nLang(I18n, lang);
       setStateSilent(AppCore, { lang, language: lang, locale: payload.locale || lang });
 
-      if (shouldRerenderOnLang(payload)) {
-        emit(AppCore, "app:i18n:rerender:skipped", { reason: "app-events-no-render", lang, handledBy: SOURCE, routerRender: false });
-      }
-
       await syncUi({ ...context, reason: "app:lang:change", payload, force: true });
     },
   });
@@ -829,7 +839,7 @@ function exposeDebugApi(AppCore = null) {
    PUBLIC API
 ========================================================= */
 
-export function bindAppEvents({ AppCore, Auth, Router, Store, SidebarUI, TopbarUI, Toast, I18n, scope = DEFAULT_SCOPE, syncUserUI, repairUISystems, rerenderCurrentRoute, applyPostRenderLoaderPolicy } = {}) {
+export function bindAppEvents({ AppCore, Auth, Router, Store, SidebarUI, TopbarUI, Toast, I18n, scope = DEFAULT_SCOPE, syncUserUI, repairUISystems, applyPostRenderLoaderPolicy } = {}) {
   if (bound) return true;
 
   if (binding) {
@@ -852,7 +862,6 @@ export function bindAppEvents({ AppCore, Auth, Router, Store, SidebarUI, TopbarU
     scope: finalScope,
     syncUserUI,
     repairUISystems,
-    rerenderCurrentRoute,
     applyPostRenderLoaderPolicy: isFn(applyPostRenderLoaderPolicy) ? applyPostRenderLoaderPolicy : applyPostRenderLoaderPolicyBase,
   };
 
@@ -883,9 +892,7 @@ export function bindAppEvents({ AppCore, Auth, Router, Store, SidebarUI, TopbarU
 
 export function unbindAppEvents(AppCore = null) {
   while (disposers.length) {
-    try {
-      disposers.pop()?.();
-    } catch {}
+    try { disposers.pop()?.(); } catch {}
   }
 
   boundKeys.clear();
@@ -905,7 +912,7 @@ export function getAppEventsSnapshot() {
     binding: Boolean(binding),
     boundScope,
     boundEvents: [...eventState.boundEvents],
-    boundKeys: Array.from(boundKeys),
+    boundKeys: [...boundKeys],
     disposers: disposers.length,
     lastRouterKey: redact(lastRouterKey),
     lastRouterAt,
@@ -946,18 +953,16 @@ export function resetAppEventsState() {
   lastUiAt = 0;
   lastEmitKey = "";
   lastEmitAt = 0;
+
   eventState.totalHandled = 0;
   eventState.totalErrors = 0;
   eventState.lastEvent = "";
   eventState.lastEventAt = 0;
   eventState.lastError = null;
   eventState.recent = [];
+
   return getAppEventsSnapshot();
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   APP_EVENTS_VERSION,

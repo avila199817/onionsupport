@@ -1,984 +1,1212 @@
 /* =========================================================
-   Onion SPA - Reset Password View
-   Archivo: src/views/password-reset/resetPasswordView.js
+   Onion Support - Password Reset View
+   Archivo: /src/views/password-reset/resetPasswordView.js
 
-   RESET PASSWORD · VIEW REAL · AUTH FULLSCREEN · CSP CLEAN · 10/10
-
-   RESPONSABILIDADES:
-   - pintar pantalla de recuperación de acceso
-   - activar modo fullscreen auth
-   - validar identificador en cliente
-   - enviar solicitud a Auth / handler resuelto
-   - mostrar feedback visual mediante toast bridge
-   - soportar usuario o email
-   - redirigir correctamente tras success si aplica
-   - evitar delays artificiales innecesarios
-   - respetar layout auth premium
-   - mantener cleanup completo de la vista
-   - renderizar usando src/views/password-reset/reset-password.template.js
-
-   HARDENING:
-   - guards de browser
-   - timers centralizados
-   - navegación segura post-success
-   - sync de modo auth estable
-   - cleanup completo
-   - handler resolution robusta
-   - compatibilidad con router que prioriza init()
-   - sin CSS inline
-   - sin <style> inyectado
-   - sin duplicidades visuales
+   Responsabilidad:
+   - Una vista mínima para:
+     /password-request
+     /password-reset?token=...
+   - Request: pedir enlace de recuperación.
+   - Confirm: cambiar contraseña con token.
+   - Sin Toast.
+   - Sin bridge.
+   - Sin helpers DOM externos.
+   - Sin Store.
+   - Sin HTTP directo.
+   - Sin Router paralelo.
+   - Sin cleanup registry complejo.
+   - Sin rutas legacy.
+   - Sin 2FA/MFA/OTP.
+   - Sin magia negra.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import { Auth } from "../../features/auth/index.js";
-import { Router } from "../../router/index.js";
 
 import { getResetPasswordTemplate } from "./reset-password.template.js";
 
-import {
-  loadRememberedIdentifier,
-  createResetPasswordPayload,
-  validateResetPasswordPayload,
-  getFirstResetPasswordError,
-  normalizeResetPasswordResult,
-  resolveResetPasswordErrorMessage,
-  resolveResetPasswordRedirect,
-  buildResetPasswordSuccessMessage,
-  persistResetPasswordIdentifier,
-  safeText,
-} from "./reset-password.helpers.js";
+export const RESET_PASSWORD_VIEW_VERSION = "simple";
 
-import {
-  getResetPasswordRefs,
-  clearResetPasswordErrors,
-  applyResetPasswordErrors,
-  setGlobalResetPasswordError,
-  setResetPasswordLoading,
-  setResetPasswordSuccessState,
-  setResetPasswordNeutralState,
-  focusResetPasswordPrimaryField,
-  readResetPasswordFormState,
-  bindResetPasswordInputClearers,
-  bindResetPasswordSubmit,
-  bindResetPasswordToastClose,
-  bindResetPasswordBackLink,
-  hideResetPasswordToast,
-  shakeResetPasswordCard,
-} from "./reset-password.dom.js";
+const SOURCE = "password-reset.view";
 
-import createResetPasswordToastBridge from "./toast.bridge.js";
+const PASSWORD_REQUEST_ROUTE = "/password-request";
+const PASSWORD_RESET_ROUTE = "/password-reset";
+const LOGIN_ROUTE = "/login";
 
-export const ResetPasswordView = (() => {
-  "use strict";
+const INSTANCE_KEY = "__ONION_PASSWORD_RESET_VIEW_INSTANCE__";
 
-  /* =========================================================
-     CONSTANTS
-  ========================================================= */
+let lastInstance = null;
 
-  const SCOPE = "view:reset-password";
-  const RESET_ROUTE_PREFIX = "/reset-password";
-  const LOGIN_ROUTE = "/login";
+/* =========================================================
+   BASICS
+========================================================= */
 
-  const SUCCESS_REDIRECT_DELAY = 2200;
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
 
-  /* =========================================================
-     RUNTIME
-  ========================================================= */
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
-  let redirectTimerId = null;
-  let isNavigatingAway = false;
-  let isSubmitting = false;
-  let localCleanup = null;
+function isFunction(value) {
+  return typeof value === "function";
+}
 
-  /* =========================================================
-     BASICS
-  ========================================================= */
+function isContainer(value) {
+  return Boolean(value && typeof value.querySelector === "function");
+}
 
-  function isBrowser() {
-    return (
-      typeof window !== "undefined" &&
-      typeof document !== "undefined"
+function text(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function emit(eventName = "", payload = {}) {
+  try {
+    AppCore?.events?.emit?.(eventName, {
+      source: SOURCE,
+      version: RESET_PASSWORD_VIEW_VERSION,
+      at: nowIso(),
+      ...payload,
+      token: null,
+      accessToken: null,
+      refreshToken: null,
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   PATHS
+========================================================= */
+
+function normalizePublicPath(path = "/") {
+  let value = text(path, "/");
+
+  if (value.startsWith("#/")) value = value.slice(1);
+  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
+
+  if (!value.startsWith("/")) value = `/${value}`;
+
+  value = value.replace(/\/{2,}/g, "/");
+
+  return value || "/";
+}
+
+function normalizeCanonicalPath(path = "/") {
+  let value = normalizePublicPath(path).split("?")[0].split("#")[0] || "/";
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "");
+  }
+
+  return value || "/";
+}
+
+function currentPath() {
+  if (!isBrowser()) {
+    return AppCore?.state?.publicPath || AppCore?.state?.route || "/";
+  }
+
+  try {
+    const hash = window.location.hash || "";
+
+    if (hash.startsWith("#/") || hash.startsWith("#!")) {
+      return normalizePublicPath(hash);
+    }
+
+    return normalizePublicPath(
+      `${window.location.pathname || "/"}${window.location.search || ""}${hash}`
     );
+  } catch {
+    return "/";
   }
+}
 
-  function safeWarnLog(...args) {
-    try {
-      AppCore?.utils?.warn?.("[ResetPasswordView]", ...args);
-      return;
-    } catch {}
+function currentCanonicalPath() {
+  return normalizeCanonicalPath(currentPath());
+}
 
-    try {
-      console.warn("[ResetPasswordView]", ...args);
-    } catch {}
+function currentMode() {
+  return currentCanonicalPath() === PASSWORD_RESET_ROUTE && getUrlToken()
+    ? "confirm"
+    : "request";
+}
+
+function isPasswordResetRoute() {
+  const path = currentCanonicalPath();
+
+  return path === PASSWORD_REQUEST_ROUTE || path === PASSWORD_RESET_ROUTE;
+}
+
+function isSafeInternalPath(path = "") {
+  const value = text(path, "");
+
+  if (!value) return false;
+  if (!value.startsWith("/")) return false;
+  if (value.startsWith("//")) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return false;
+  if (/[\r\n\t\\]/.test(value)) return false;
+
+  return true;
+}
+
+function safeInternalPath(path = "", fallback = LOGIN_ROUTE) {
+  const candidate = normalizePublicPath(path || fallback);
+
+  return isSafeInternalPath(candidate) ? candidate : fallback;
+}
+
+function getRouter() {
+  try {
+    return AppCore?.Router || AppCore?.router || AppCore?.modules?.get?.("Router") || AppCore?.modules?.get?.("router") || null;
+  } catch {
+    return null;
   }
-
-  function safeErrorLog(...args) {
-    try {
-      AppCore?.utils?.error?.("[ResetPasswordView]", ...args);
-      return;
-    } catch {}
-
-    try {
-      console.error("[ResetPasswordView]", ...args);
-    } catch {}
-  }
-
-  function safeEmit(eventName = "", payload = {}) {
-    const name = safeText(eventName, "");
-    if (!name) return false;
-
-    let emitted = false;
-
-    try {
-      AppCore?.events?.emit?.(name, payload);
-      emitted = true;
-    } catch {}
-
-    try {
-      if (isBrowser()) {
-        window.dispatchEvent(
-          new CustomEvent(name, {
-            detail: payload,
-          })
-        );
-
-        emitted = true;
-      }
-    } catch {}
-
-    return emitted;
-  }
-
-  function isPlainObject(value) {
-    return (
-      value !== null &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-    );
-  }
-
-  function isLikelyContainer(value) {
-    return Boolean(
-      value &&
-      typeof value === "object" &&
-      typeof value.querySelector === "function"
-    );
-  }
-
-  function resolveDeps(arg1, arg2) {
-    if (isLikelyContainer(arg1)) {
-      return isPlainObject(arg2) ? arg2 : {};
-    }
-
-    return isPlainObject(arg1) ? arg1 : {};
-  }
-
-  /* =========================================================
-     TIMERS / CLEANUP
-  ========================================================= */
-
-  function clearRedirectTimer() {
-    if (!redirectTimerId || !isBrowser()) {
-      redirectTimerId = null;
-      return;
-    }
-
-    try {
-      window.clearTimeout(redirectTimerId);
-    } catch {}
-
-    redirectTimerId = null;
-  }
-
-  function runLocalCleanup() {
-    try {
-      localCleanup?.();
-    } catch {}
-
-    localCleanup = null;
-  }
-
-  function destroyViewState({
-    preserveToast = false,
-  } = {}) {
-    clearRedirectTimer();
-
-    try {
-      AppCore?.cleanup?.run?.(SCOPE);
-    } catch {}
-
-    runLocalCleanup();
-
-    if (!preserveToast) {
-      const container = getContainer();
-
-      if (container) {
-        try {
-          const refs = getResetPasswordRefs(container);
-          hideResetPasswordToast(refs);
-        } catch {}
-      }
-    }
-  }
-
-  /* =========================================================
-     DOM / CONTAINER
-  ========================================================= */
-
-  function getContainer() {
-    if (!isBrowser()) {
-      return null;
-    }
-
-    return (
-      AppCore?.dom?.viewContainer ||
-      document.getElementById("view-container") ||
-      document.querySelector("#view-container") ||
-      null
-    );
-  }
-
-  function getShellElements() {
-    if (!isBrowser()) {
-      return {
-        sidebar: null,
-        topbar: null,
-        topbarViewContainer: null,
-        tableheadContainer: null,
-      };
-    }
-
-    return {
-      sidebar:
-        AppCore?.dom?.sidebar ||
-        document.getElementById("sidebar") ||
-        document.getElementById("sidebar-mount"),
-
-      topbar:
-        AppCore?.dom?.topbar ||
-        document.getElementById("topbar") ||
-        document.getElementById("topbar-mount") ||
-        document.querySelector(".topbar"),
-
-      topbarViewContainer:
-        AppCore?.dom?.topbarViewContainer ||
-        document.getElementById("topbarview-container") ||
-        document.getElementById("topbar-view-container"),
-
-      tableheadContainer:
-        AppCore?.dom?.tableheadContainer ||
-        document.getElementById("tablehead-container") ||
-        document.querySelector(".table-head"),
-    };
-  }
-
-  /* =========================================================
-     SHELL / AUTH MODE
-  ========================================================= */
-
-  function setElementHidden(element, hidden) {
-    if (!element) return;
-
-    try {
-      element.hidden = Boolean(hidden);
-    } catch {}
-
-    try {
-      element.setAttribute("aria-hidden", hidden ? "true" : "false");
-    } catch {}
-  }
-
-  function setAuthScreen(active) {
-    if (!isBrowser() || !document?.body) {
-      return;
-    }
-
-    const enabled = Boolean(active);
-
-    const {
-      sidebar,
-      topbar,
-      topbarViewContainer,
-      tableheadContainer,
-    } = getShellElements();
-
-    document.body.classList.toggle("auth-screen", enabled);
-    document.body.classList.toggle("route-auth", enabled);
-    document.body.classList.toggle("route-shell-hidden", enabled);
-    document.body.classList.toggle("login-no-scroll", enabled);
-
-    setElementHidden(sidebar, enabled);
-    setElementHidden(topbar, enabled);
-    setElementHidden(topbarViewContainer, enabled);
-    setElementHidden(tableheadContainer, enabled);
-  }
-
-  function forceHideGlobalLoader() {
-    if (!isBrowser()) {
-      return;
-    }
-
-    const loader =
-      AppCore?.dom?.loader ||
-      document.getElementById("app-loader") ||
-      document.querySelector("[data-app-loader]");
-
-    try {
-      if (typeof AppCore?.setLoading === "function") {
-        AppCore.setLoading(false);
-      }
-    } catch {}
-
-    try {
-      document.body?.classList?.remove?.(
-        "loading",
-        "is-loading",
-        "app-loading"
-      );
-    } catch {}
-
-    if (!loader) {
-      return;
-    }
-
-    try {
-      loader.hidden = true;
-      loader.setAttribute("aria-hidden", "true");
-      loader.setAttribute("data-auth-forced-hidden", "true");
-    } catch {}
-  }
-
-  function restoreGlobalLoaderState() {
-    if (!isBrowser()) {
-      return;
-    }
-
-    const loader =
-      AppCore?.dom?.loader ||
-      document.getElementById("app-loader") ||
-      document.querySelector("[data-app-loader]");
-
-    if (!loader) {
-      return;
-    }
-
-    try {
-      loader.removeAttribute("data-auth-forced-hidden");
-      loader.setAttribute("aria-hidden", "true");
-
-      if (!document.body?.classList?.contains?.("loading")) {
-        loader.hidden = true;
-      }
-    } catch {}
-  }
-
-  /* =========================================================
-     ROUTING
-  ========================================================= */
-
-  function normalizePath(path = "/") {
-    const raw = safeText(path, "/") || "/";
-
-    try {
-      if (typeof AppCore?.utils?.normalizePath === "function") {
-        const normalized = AppCore.utils.normalizePath(raw);
-        if (normalized) return normalized;
-      }
-    } catch {}
-
-    if (raw === "/") {
-      return "/";
-    }
-
-    return (
-      raw
-        .replace(/\/{2,}/g, "/")
-        .replace(/\/+$/g, "") || "/"
-    );
-  }
-
-  function getCurrentBrowserPath() {
-    if (!isBrowser()) {
-      return "/";
-    }
-
-    try {
-      return normalizePath(
-        `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
-      );
-    } catch {
-      return "/";
-    }
-  }
-
-  function getCleanPath(path = "/") {
-    return normalizePath(path)
-      .split("?")[0]
-      .split("#")[0] || "/";
-  }
-
-  function isResetPasswordPath(path = "") {
-    const clean = getCleanPath(path);
-
-    return (
-      clean === RESET_ROUTE_PREFIX ||
-      clean.startsWith(`${RESET_ROUTE_PREFIX}/`)
-    );
-  }
-
-  function navigateTo(path = LOGIN_ROUTE) {
-    if (!isBrowser()) {
-      return;
-    }
-
-    const target = normalizePath(path || LOGIN_ROUTE);
-
-    setAuthScreen(false);
-    forceHideGlobalLoader();
-
-    if (typeof Router?.navigate === "function") {
-      Router.navigate(target, {
+}
+
+async function navigateTo(path = LOGIN_ROUTE) {
+  const target = safeInternalPath(path, LOGIN_ROUTE);
+  const router = getRouter();
+
+  try {
+    if (isFunction(router?.replace)) {
+      await router.replace(target, {
+        source: SOURCE,
         replaceState: true,
         force: true,
       });
-      return;
+
+      return true;
     }
 
-    if (typeof AppCore?.navigate === "function") {
-      AppCore.navigate(target);
-      return;
-    }
+    if (isFunction(router?.navigate)) {
+      await router.navigate(target, {
+        source: SOURCE,
+        replaceState: true,
+        force: true,
+      });
 
-    if (typeof AppCore?.router?.navigate === "function") {
-      AppCore.router.navigate(target);
-      return;
+      return true;
     }
+  } catch {
+    // fallback abajo
+  }
 
+  if (!isBrowser()) return false;
+
+  try {
     window.location.assign(target);
-  }
-
-  function navigateSoon(path = LOGIN_ROUTE, delay = 0) {
-    if (!isBrowser()) {
-      return;
-    }
-
-    clearRedirectTimer();
-
-    const safeDelay = Math.max(0, Number(delay) || 0);
-
-    if (safeDelay <= 0) {
-      navigateTo(path);
-      return;
-    }
-
-    redirectTimerId = window.setTimeout(() => {
-      navigateTo(path);
-    }, safeDelay);
-  }
-
-  function emitRouteRendered() {
-    const payload = {
-      route: RESET_ROUTE_PREFIX,
-      path: RESET_ROUTE_PREFIX,
-      canonicalPath: RESET_ROUTE_PREFIX,
-      view: "reset-password",
-      source: "ResetPasswordView",
-    };
-
-    safeEmit("app:route:rendered", payload);
-    safeEmit("router:rendered", payload);
-  }
-
-  /* =========================================================
-     RESOLUTION
-  ========================================================= */
-
-  function resolveAppName() {
-    return (
-      safeText(AppCore?.config?.appName, "") ||
-      "Onion Support"
-    );
-  }
-
-  function createExecutorCandidate(fn, ctx = null) {
-    if (typeof fn !== "function") {
-      return null;
-    }
-
-    return async function executeResetPassword(payload) {
-      return fn.call(ctx, payload);
-    };
-  }
-
-  function resolveExecutor(deps = {}) {
-    const candidates = [
-      createExecutorCandidate(deps.onSubmit, deps),
-      createExecutorCandidate(deps.submitResetPassword, deps),
-      createExecutorCandidate(deps.requestResetPassword, deps),
-      createExecutorCandidate(deps.resetPassword, deps),
-
-      createExecutorCandidate(Auth?.requestPasswordReset, Auth),
-      createExecutorCandidate(Auth?.resetPasswordRequest, Auth),
-      createExecutorCandidate(Auth?.forgotPassword, Auth),
-
-      createExecutorCandidate(AppCore?.services?.auth?.requestPasswordReset, AppCore?.services?.auth),
-      createExecutorCandidate(AppCore?.services?.auth?.resetPasswordRequest, AppCore?.services?.auth),
-      createExecutorCandidate(AppCore?.services?.auth?.forgotPassword, AppCore?.services?.auth),
-
-      createExecutorCandidate(AppCore?.auth?.requestPasswordReset, AppCore?.auth),
-      createExecutorCandidate(AppCore?.auth?.resetPasswordRequest, AppCore?.auth),
-      createExecutorCandidate(AppCore?.auth?.forgotPassword, AppCore?.auth),
-    ].filter(Boolean);
-
-    return candidates[0] || null;
-  }
-
-  /* =========================================================
-     SUCCESS / ERROR FLOW
-  ========================================================= */
-
-  function handleValidationError(refs, toast, errors = {}) {
-    applyResetPasswordErrors(refs, errors);
-
-    const message =
-      getFirstResetPasswordError(errors) ||
-      "Revisa el formulario.";
-
-    toast.error(message);
-    shakeResetPasswordCard(refs);
-
+    return true;
+  } catch {
     return false;
   }
+}
 
-  function handleRequestError(refs, toast, error) {
-    const message =
-      resolveResetPasswordErrorMessage(error);
+/* =========================================================
+   TOKEN
+========================================================= */
 
-    setGlobalResetPasswordError(refs, message);
-    toast.error(message);
-    shakeResetPasswordCard(refs);
+function normalizeToken(value = "") {
+  const token = text(value, "").replace(/^Bearer\s+/i, "");
 
-    safeEmit("auth:reset-password:error", {
-      message,
-      error,
-      source: "ResetPasswordView",
-    });
+  if (!token) return "";
+  if (/\s/.test(token)) return "";
 
-    safeErrorLog("reset error", error);
+  if (
+    ["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
+      token.toLowerCase()
+    )
+  ) {
+    return "";
   }
 
-  function handleCooldown(refs, toast, result) {
-    setResetPasswordNeutralState(refs, {
-      submitLabel: "Enviar enlace",
-    });
+  return token;
+}
 
-    toast.warning(
-      result?.message || "Espera antes de volver a intentarlo."
+function tokenFromSearch(search = "") {
+  const raw = text(search, "");
+
+  if (!raw) return "";
+
+  try {
+    const params = new URLSearchParams(raw.startsWith("?") ? raw : `?${raw}`);
+    return normalizeToken(params.get("token"));
+  } catch {
+    return "";
+  }
+}
+
+function tokenFromHash(hash = "") {
+  const raw = text(hash, "");
+
+  if (!raw || !raw.includes("?")) return "";
+
+  const query = raw.split("?").slice(1).join("?");
+
+  return tokenFromSearch(query ? `?${query}` : "");
+}
+
+function getUrlToken() {
+  if (!isBrowser()) return "";
+
+  try {
+    return tokenFromSearch(window.location.search) || tokenFromHash(window.location.hash);
+  } catch {
+    return "";
+  }
+}
+
+/* =========================================================
+   DOM
+========================================================= */
+
+function getContainer() {
+  if (!isBrowser()) return null;
+
+  try {
+    return (
+      AppCore?.dom?.viewContainer ||
+      document.getElementById("view-container") ||
+      document.getElementById("app-content") ||
+      document.getElementById("main-content") ||
+      null
     );
-
-    safeEmit("auth:reset-password:cooldown", {
-      result,
-      source: "ResetPasswordView",
-    });
+  } catch {
+    return null;
   }
+}
 
-  function handleSuccess(refs, toast, result, deps = {}) {
-    const successMessage =
-      buildResetPasswordSuccessMessage(result);
+function query(root, selector = "") {
+  if (!root || !selector) return null;
 
-    setResetPasswordSuccessState(refs, {
-      title: "Solicitud enviada",
-      message: successMessage,
-    });
+  try {
+    return root.querySelector(selector);
+  } catch {
+    return null;
+  }
+}
 
-    toast.success(successMessage);
+function setHidden(node, hidden = false) {
+  if (!node) return false;
 
-    const redirectTo =
-      resolveResetPasswordRedirect(result, deps);
+  try {
+    node.hidden = Boolean(hidden);
+    node.setAttribute("aria-hidden", hidden ? "true" : "false");
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-    safeEmit("auth:reset-password:success", {
-      result,
-      redirectTo,
-      source: "ResetPasswordView",
-    });
+function setBusy(node, busy = false) {
+  if (!node) return false;
 
-    const shouldRedirect =
-      deps.redirectAfterSuccess === true;
+  try {
+    node.setAttribute("aria-busy", busy ? "true" : "false");
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-    if (!shouldRedirect) {
-      return;
+function setDisabled(node, disabled = false) {
+  if (!node) return false;
+
+  try {
+    node.disabled = Boolean(disabled);
+    node.setAttribute("aria-disabled", disabled ? "true" : "false");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createMessageNode() {
+  if (!isBrowser()) return null;
+
+  const node = document.createElement("div");
+
+  node.className = "password-reset-message";
+  node.dataset.passwordResetMessage = "true";
+  node.setAttribute("role", "alert");
+  node.setAttribute("aria-live", "polite");
+  node.hidden = true;
+
+  return node;
+}
+
+function getMessageNode(container, form) {
+  return (
+    query(container, "[data-password-reset-message]") ||
+    query(container, "[data-reset-password-message]") ||
+    query(container, "[data-password-reset-error]") ||
+    query(container, "[data-reset-password-error]") ||
+    query(container, ".password-reset-message") ||
+    (() => {
+      const node = createMessageNode();
+
+      try {
+        form?.prepend?.(node);
+      } catch {
+        try {
+          container.prepend(node);
+        } catch {
+          // noop
+        }
+      }
+
+      return node;
+    })()
+  );
+}
+
+function setMessage(node, message = "", type = "error") {
+  if (!node) return false;
+
+  const clean = text(message, "");
+
+  try {
+    node.textContent = clean;
+    node.hidden = !clean;
+    node.dataset.messageType = clean ? type : "";
+    node.classList.toggle("is-error", type === "error" && Boolean(clean));
+    node.classList.toggle("is-success", type === "success" && Boolean(clean));
+    node.classList.toggle("is-info", type === "info" && Boolean(clean));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setFieldError(field, message = "") {
+  if (!field) return false;
+
+  const clean = text(message, "");
+
+  try {
+    field.setAttribute("aria-invalid", clean ? "true" : "false");
+
+    if (clean) {
+      field.dataset.error = clean;
+    } else {
+      delete field.dataset.error;
     }
 
-    isNavigatingAway = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-    navigateSoon(
-      redirectTo,
-      Number(deps.redirectDelay) || SUCCESS_REDIRECT_DELAY
-    );
+function hideLoader() {
+  if (!isBrowser()) return false;
+
+  try {
+    document.documentElement.classList.remove("app-loading", "app-booting", "loading");
+    document.body.classList.remove("app-loading", "app-booting", "loading", "is-loading");
+  } catch {
+    // noop
   }
 
-  /* =========================================================
-     RENDER CORE
-  ========================================================= */
+  const loader = document.getElementById("app-loader");
 
-  function buildTemplateOptions(deps = {}) {
-    const appName = resolveAppName();
-    const rememberedIdentifier = loadRememberedIdentifier();
+  if (loader) {
+    setHidden(loader, true);
+    setBusy(loader, false);
 
-    return {
-      appName,
-      rememberedIdentifier,
+    try {
+      loader.classList.remove("is-visible");
+    } catch {
+      // noop
+    }
+  }
 
-      heroEyebrow: "ONION SUPPORT · RECUPERACIÓN PROTEGIDA",
-      heroTitle: "Recuperación segura del acceso al panel",
-      bullets: [
-        "Validación segura de usuario o email",
-        "Flujo protegido desacoplado del acceso principal",
-        "Recuperación guiada alineada al entorno operativo",
-      ],
+  try {
+    AppCore?.setLoading?.(false);
+  } catch {
+    // noop
+  }
 
-      title: "Recuperar acceso",
-      subtitle: `Recuperar acceso a ${appName}`,
-      submitLabel: "Enviar enlace",
-      backLabel: "Volver al acceso",
-      backHref: LOGIN_ROUTE,
-      footerText:
-        "Entorno protegido. Usa un identificador válido de tu cuenta corporativa.",
+  return true;
+}
 
+/* =========================================================
+   TEMPLATE
+========================================================= */
+
+function fallbackTemplate(mode = "request") {
+  const isConfirm = mode === "confirm";
+  const appName = text(AppCore?.config?.appName, "Onion Support");
+
+  return `
+    <section
+      class="password-reset-view"
+      data-view="password-reset"
+      data-password-reset-view="true"
+      data-password-reset-mode="${isConfirm ? "confirm" : "request"}"
+    >
+      <article class="password-reset-card">
+        <header class="password-reset-header">
+          <h1 class="password-reset-title">${isConfirm ? "Nueva contraseña" : "Recuperar acceso"}</h1>
+          <p class="password-reset-subtitle">
+            ${isConfirm ? `Define una nueva contraseña para ${appName}.` : `Introduce tu usuario o email de ${appName}.`}
+          </p>
+        </header>
+
+        <form
+          class="password-reset-form"
+          data-password-reset-form="true"
+          data-reset-password-form="true"
+          novalidate
+        >
+          <div
+            class="password-reset-message"
+            data-password-reset-message="true"
+            data-password-reset-error="true"
+            role="alert"
+            aria-live="polite"
+            hidden
+          ></div>
+
+          ${
+            isConfirm
+              ? `
+                <input
+                  type="hidden"
+                  name="token"
+                  value="${escapeHtml(getUrlToken())}"
+                  data-password-reset-token="true"
+                />
+
+                <div class="password-reset-field">
+                  <label for="resetPassword">Nueva contraseña</label>
+                  <input
+                    id="resetPassword"
+                    name="password"
+                    type="password"
+                    autocomplete="new-password"
+                    data-password-reset-password="true"
+                    required
+                  />
+                </div>
+
+                <div class="password-reset-field">
+                  <label for="resetConfirmPassword">Confirmar contraseña</label>
+                  <input
+                    id="resetConfirmPassword"
+                    name="confirmPassword"
+                    type="password"
+                    autocomplete="new-password"
+                    data-password-reset-confirm="true"
+                    required
+                  />
+                </div>
+              `
+              : `
+                <div class="password-reset-field">
+                  <label for="resetIdentifier">Usuario o email</label>
+                  <input
+                    id="resetIdentifier"
+                    name="identifier"
+                    type="text"
+                    autocomplete="username"
+                    data-password-reset-identifier="true"
+                    data-reset-password-identifier="true"
+                    required
+                  />
+                </div>
+              `
+          }
+
+          <button
+            class="password-reset-submit"
+            type="submit"
+            data-password-reset-submit="true"
+            data-reset-password-submit="true"
+          >
+            ${isConfirm ? "Cambiar contraseña" : "Enviar enlace"}
+          </button>
+
+          <p class="password-reset-back">
+            <a href="/login" data-spa data-password-reset-back="true">Volver al acceso</a>
+          </p>
+        </form>
+      </article>
+    </section>
+  `;
+}
+
+function escapeHtml(value = "") {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function templateHtml(mode = "request", deps = {}) {
+  try {
+    const html = getResetPasswordTemplate({
       ...deps,
-    };
-  }
-
-  function runRender(deps = {}) {
-    const container = getContainer();
-
-    if (!container) {
-      safeWarnLog(
-        "No se encontró #view-container para renderizar."
-      );
-
-      forceHideGlobalLoader();
-
-      return {
-        ok: false,
-        missingContainer: true,
-      };
-    }
-
-    isNavigatingAway = false;
-    isSubmitting = false;
-
-    destroyViewState({
-      preserveToast: false,
+      mode,
+      flow: mode,
+      isConfirm: mode === "confirm",
+      token: mode === "confirm" ? getUrlToken() : "",
+      title: mode === "confirm" ? "Nueva contraseña" : "Recuperar acceso",
+      submitLabel: mode === "confirm" ? "Cambiar contraseña" : "Enviar enlace",
+      backHref: LOGIN_ROUTE,
     });
 
-    setAuthScreen(true);
+    if (typeof html === "string" && html.includes("<")) {
+      return html;
+    }
+  } catch {
+    // fallback abajo
+  }
 
+  return fallbackTemplate(mode);
+}
+
+function renderTemplate(container, mode = "request", deps = {}) {
+  try {
+    container.innerHTML = templateHtml(mode, deps);
+    return true;
+  } catch {
     try {
-      AppCore?.clearDynamicContainers?.();
-    } catch {}
+      container.innerHTML = fallbackTemplate(mode);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
 
+/* =========================================================
+   REFS
+========================================================= */
+
+function getRefs(container) {
+  const form =
+    query(container, "[data-password-reset-form]") ||
+    query(container, "[data-reset-password-form]") ||
+    query(container, "form") ||
+    null;
+
+  return {
+    form,
+
+    identifier:
+      query(container, "[name='identifier']") ||
+      query(container, "[name='email']") ||
+      query(container, "[name='username']") ||
+      query(container, "[data-password-reset-identifier]") ||
+      query(container, "[data-reset-password-identifier]") ||
+      null,
+
+    token:
+      query(container, "[name='token']") ||
+      query(container, "[data-password-reset-token]") ||
+      query(container, "[data-reset-token]") ||
+      null,
+
+    password:
+      query(container, "[name='password']") ||
+      query(container, "[name='newPassword']") ||
+      query(container, "[data-password-reset-password]") ||
+      query(container, "[data-reset-password-password]") ||
+      null,
+
+    confirmPassword:
+      query(container, "[name='confirmPassword']") ||
+      query(container, "[name='passwordConfirmation']") ||
+      query(container, "[name='confirm_password']") ||
+      query(container, "[data-password-reset-confirm]") ||
+      query(container, "[data-reset-password-confirm]") ||
+      null,
+
+    submit:
+      query(container, "button[type='submit']") ||
+      query(container, "[data-password-reset-submit]") ||
+      query(container, "[data-reset-password-submit]") ||
+      null,
+
+    back:
+      query(container, "[data-password-reset-back]") ||
+      query(container, "[data-reset-password-back]") ||
+      query(container, "a[href='/login']") ||
+      null,
+  };
+}
+
+function refsNeedFallback(refs, mode) {
+  if (!refs.form) return true;
+  if (mode === "request" && !refs.identifier) return true;
+  if (mode === "confirm" && (!refs.password || !refs.confirmPassword)) return true;
+
+  return false;
+}
+
+function ensureTemplateShape(container, mode, deps) {
+  let refs = getRefs(container);
+
+  if (refsNeedFallback(refs, mode)) {
+    container.innerHTML = fallbackTemplate(mode);
+    refs = getRefs(container);
+  }
+
+  return refs;
+}
+
+/* =========================================================
+   FORM
+========================================================= */
+
+function readRequestPayload(refs) {
+  return {
+    identifier: text(refs.identifier?.value, ""),
+  };
+}
+
+function readConfirmPayload(refs) {
+  return {
+    token: normalizeToken(refs.token?.value || getUrlToken()),
+    password: String(refs.password?.value || ""),
+    confirmPassword: String(refs.confirmPassword?.value || ""),
+  };
+}
+
+function validateRequest(payload = {}) {
+  const errors = {};
+
+  if (!text(payload.identifier, "")) {
+    errors.identifier = "Introduce tu usuario o email.";
+  }
+
+  return errors;
+}
+
+function validateConfirm(payload = {}) {
+  const errors = {};
+
+  if (!normalizeToken(payload.token)) {
+    errors.token = "El token de recuperación no es válido.";
+  }
+
+  if (!String(payload.password || "")) {
+    errors.password = "Introduce la nueva contraseña.";
+  }
+
+  if (!String(payload.confirmPassword || "")) {
+    errors.confirmPassword = "Confirma la nueva contraseña.";
+  }
+
+  if (
+    payload.password &&
+    payload.confirmPassword &&
+    payload.password !== payload.confirmPassword
+  ) {
+    errors.confirmPassword = "Las contraseñas no coinciden.";
+  }
+
+  return errors;
+}
+
+function firstError(errors = {}) {
+  return Object.values(errors).find(Boolean) || "";
+}
+
+function clearErrors(refs, messageNode) {
+  setMessage(messageNode, "");
+  setFieldError(refs.identifier, "");
+  setFieldError(refs.password, "");
+  setFieldError(refs.confirmPassword, "");
+}
+
+function applyErrors(refs, messageNode, errors = {}) {
+  setFieldError(refs.identifier, errors.identifier || "");
+  setFieldError(refs.password, errors.password || "");
+  setFieldError(refs.confirmPassword, errors.confirmPassword || "");
+
+  setMessage(messageNode, firstError(errors), "error");
+
+  const firstField =
+    errors.identifier
+      ? refs.identifier
+      : errors.password
+        ? refs.password
+        : errors.confirmPassword
+          ? refs.confirmPassword
+          : null;
+
+  try {
+    firstField?.focus?.();
+  } catch {
+    // noop
+  }
+}
+
+function setLoading(refs, loading = false) {
+  const active = Boolean(loading);
+
+  setBusy(refs.form, active);
+  setDisabled(refs.identifier, active);
+  setDisabled(refs.password, active);
+  setDisabled(refs.confirmPassword, active);
+  setDisabled(refs.submit, active);
+
+  if (refs.submit) {
     try {
-      AppCore?.setDocumentTitle?.("Recuperar acceso");
-    } catch {}
+      if (!refs.submit.dataset.defaultLabel) {
+        refs.submit.dataset.defaultLabel = refs.submit.textContent;
+      }
 
-    container.innerHTML =
-      getResetPasswordTemplate(
-        buildTemplateOptions(deps)
-      );
+      refs.submit.textContent = active
+        ? "Procesando..."
+        : refs.submit.dataset.defaultLabel;
+    } catch {
+      // noop
+    }
+  }
+}
 
-    forceHideGlobalLoader();
-    bind(deps);
-    emitRouteRendered();
+/* =========================================================
+   RESULTS
+========================================================= */
 
+function resultOk(result = {}) {
+  return Boolean(
+    result &&
+      result.ok !== false &&
+      result.success !== false &&
+      result.error !== true
+  );
+}
+
+function resultMessage(result = {}, fallback = "") {
+  return text(
+    result?.message ||
+      result?.mensaje ||
+      result?.detail ||
+      result?.description ||
+      fallback,
+    fallback
+  );
+}
+
+function errorMessage(error = null, fallback = "No se pudo completar la operación.") {
+  return text(
+    error?.message ||
+      error?.data?.message ||
+      error?.response?.data?.message ||
+      error?.mensaje ||
+      error?.error,
+    fallback
+  );
+}
+
+/* =========================================================
+   ACTIONS
+========================================================= */
+
+async function requestReset(payload = {}) {
+  if (!isFunction(Auth?.requestPasswordReset)) {
+    throw new Error("Auth.requestPasswordReset no está disponible.");
+  }
+
+  return Auth.requestPasswordReset(
+    {
+      identifier: payload.identifier,
+    },
+    {
+      source: SOURCE,
+    }
+  );
+}
+
+async function confirmReset(payload = {}) {
+  if (!isFunction(Auth?.confirmResetPassword)) {
+    throw new Error("Auth.confirmResetPassword no está disponible.");
+  }
+
+  return Auth.confirmResetPassword(
+    {
+      token: payload.token,
+      password: payload.password,
+      confirmPassword: payload.confirmPassword,
+    },
+    {
+      source: SOURCE,
+    }
+  );
+}
+
+/* =========================================================
+   INSTANCE
+========================================================= */
+
+function destroyPrevious(container) {
+  try {
+    const previous = container?.[INSTANCE_KEY];
+
+    if (previous?.destroy) {
+      previous.destroy({ remount: true });
+      return true;
+    }
+  } catch {
+    // noop
+  }
+
+  return false;
+}
+
+function storeInstance(container, instance) {
+  if (!container || !instance) return false;
+
+  try {
+    Object.defineProperty(container, INSTANCE_KEY, {
+      value: instance,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+    });
+  } catch {
+    try {
+      container[INSTANCE_KEY] = instance;
+    } catch {
+      // noop
+    }
+  }
+
+  lastInstance = instance;
+
+  return true;
+}
+
+function clearInstance(container, instance) {
+  try {
+    if (container?.[INSTANCE_KEY] === instance) {
+      delete container[INSTANCE_KEY];
+    }
+  } catch {
+    // noop
+  }
+
+  if (lastInstance === instance) {
+    lastInstance = null;
+  }
+
+  return true;
+}
+
+/* =========================================================
+   VIEW
+========================================================= */
+
+export function renderResetPasswordView(containerArg = null, deps = {}) {
+  const container = isContainer(containerArg) ? containerArg : getContainer();
+
+  if (!container) {
     return {
-      ok: true,
-      view: "reset-password",
+      ok: false,
+      missingContainer: true,
     };
   }
 
-  /* =========================================================
-     BIND
-  ========================================================= */
+  const options = isObject(deps) ? deps : {};
+  const mode = currentMode();
 
-  function bind(deps = {}) {
-    if (!isBrowser()) {
-      return;
+  destroyPrevious(container);
+  renderTemplate(container, mode, options);
+
+  const refs = ensureTemplateShape(container, mode, options);
+  const messageNode = getMessageNode(container, refs.form);
+
+  let mounted = true;
+  let submitting = false;
+
+  function setSubmitting(value = false) {
+    submitting = Boolean(value);
+    setLoading(refs, submitting);
+  }
+
+  async function submit(event = null) {
+    try {
+      event?.preventDefault?.();
+    } catch {
+      // noop
     }
 
-    const scope =
-      AppCore?.cleanup?.scope?.(SCOPE) ||
-      SCOPE;
-
-    const container = getContainer();
-    const refs = getResetPasswordRefs(container);
-
-    if (!refs?.form || !refs?.identifierInput || !refs?.submitButton) {
-      safeWarnLog(
-        "Faltan nodos críticos del formulario."
-      );
-
-      forceHideGlobalLoader();
-      return;
+    if (!mounted || submitting) {
+      return false;
     }
 
-    const cleanups = [];
+    clearErrors(refs, messageNode);
 
-    const toast =
-      deps.toast ||
-      createResetPasswordToastBridge(refs);
+    const payload = mode === "confirm"
+      ? readConfirmPayload(refs)
+      : readRequestPayload(refs);
+
+    const errors = mode === "confirm"
+      ? validateConfirm(payload)
+      : validateRequest(payload);
+
+    if (Object.keys(errors).length) {
+      applyErrors(refs, messageNode, errors);
+      return false;
+    }
+
+    setSubmitting(true);
+
+    emit("auth:password-reset:view:submit:start", {
+      mode,
+    });
 
     try {
-      toast.init?.();
-    } catch {}
+      const result = mode === "confirm"
+        ? await confirmReset(payload)
+        : await requestReset(payload);
 
-    const executeReset = resolveExecutor(deps);
-
-    const submitLabel =
-      safeText(deps.submitLabel, "") ||
-      "Enviar enlace";
-
-    const loadingLabel =
-      safeText(deps.loadingLabel, "") ||
-      "Enviando...";
-
-    function resetNeutral() {
-      clearResetPasswordErrors(refs);
-
-      setResetPasswordNeutralState(refs, {
-        submitLabel,
-      });
-    }
-
-    function onBack(event) {
-      event.preventDefault();
-
-      if (isSubmitting || isNavigatingAway) {
-        return;
+      if (!resultOk(result)) {
+        throw result || new Error("PASSWORD_RESET_FAILED");
       }
 
-      isNavigatingAway = true;
-
-      navigateTo(
-        safeText(deps.backHref, "") || LOGIN_ROUTE
-      );
-    }
-
-    function onToastClose() {
-      if (isSubmitting && isNavigatingAway) {
-        return;
-      }
-
-      try {
-        toast.dismiss?.();
-      } catch {}
-    }
-
-    async function onSubmit(event) {
-      event.preventDefault();
-
-      if (isSubmitting || isNavigatingAway) {
-        return;
-      }
-
-      clearResetPasswordErrors(refs);
-
-      try {
-        toast.dismiss?.();
-      } catch {}
-
-      const formState =
-        readResetPasswordFormState(refs);
-
-      const payload =
-        createResetPasswordPayload(formState);
-
-      const errors =
-        validateResetPasswordPayload(payload);
-
-      if (Object.keys(errors).length > 0) {
-        handleValidationError(refs, toast, errors);
-        return;
-      }
-
-      if (!executeReset) {
-        handleRequestError(
-          refs,
-          toast,
-          new Error("No se encontró handler de recuperación.")
+      if (mode === "confirm") {
+        setMessage(
+          messageNode,
+          resultMessage(result, "La contraseña se ha actualizado correctamente."),
+          "success"
         );
 
-        return;
-      }
-
-      persistResetPasswordIdentifier(
-        payload.identifier
-      );
-
-      isSubmitting = true;
-
-      setResetPasswordLoading(refs, true, {
-        submitLabel,
-        loadingLabel,
-      });
-
-      let loadingId = null;
-
-      try {
-        loadingId = toast.loading?.(
-          "Procesando recuperación de acceso...",
-          {
-            persist: true,
-          }
-        );
-
-        const rawResult =
-          await executeReset(payload);
-
-        const result =
-          normalizeResetPasswordResult(rawResult);
-
-        toast.dismiss?.(loadingId);
-
-        if (result.cooldown) {
-          handleCooldown(refs, toast, result);
-          return;
-        }
-
-        if (!result.ok) {
-          throw result;
-        }
-
-        handleSuccess(refs, toast, result, deps);
-      } catch (error) {
-        toast.dismiss?.(loadingId);
-
-        handleRequestError(refs, toast, error);
-
-        setResetPasswordLoading(refs, false, {
-          submitLabel,
-          loadingLabel,
+        emit("auth:password-reset:view:submit:done", {
+          mode,
+          ok: true,
         });
-      } finally {
-        if (!isNavigatingAway) {
-          isSubmitting = false;
 
-          if (!refs?.form?.hasAttribute("data-success")) {
-            setResetPasswordLoading(refs, false, {
-              submitLabel,
-              loadingLabel,
-            });
-          }
+        if (mounted && isPasswordResetRoute()) {
+          await navigateTo(result?.redirectTo || LOGIN_ROUTE);
         }
+
+        return true;
+      }
+
+      setMessage(
+        messageNode,
+        resultMessage(
+          result,
+          "Si el identificador existe, recibirás instrucciones para restablecer la contraseña."
+        ),
+        "success"
+      );
+
+      emit("auth:password-reset:view:submit:done", {
+        mode,
+        ok: true,
+      });
+
+      return true;
+    } catch (error) {
+      const message = errorMessage(
+        error,
+        mode === "confirm"
+          ? "No se pudo restablecer la contraseña."
+          : "No se pudo iniciar la recuperación de acceso."
+      );
+
+      setMessage(messageNode, message, "error");
+
+      emit("auth:password-reset:view:error", {
+        mode,
+        message,
+        status: error?.status || error?.statusCode || 0,
+        code: error?.code || null,
+      });
+
+      return false;
+    } finally {
+      if (mounted) {
+        setSubmitting(false);
       }
     }
+  }
 
-    resetNeutral();
+  const disposers = [];
 
-    focusResetPasswordPrimaryField(refs, {
-      rememberedIdentifier: loadRememberedIdentifier(),
-    });
+  try {
+    refs.form?.addEventListener?.("submit", submit);
+    disposers.push(() => refs.form?.removeEventListener?.("submit", submit));
+  } catch {
+    // noop
+  }
 
-    forceHideGlobalLoader();
+  const clearOnInput = () => clearErrors(refs, messageNode);
 
-    cleanups.push(
-      bindResetPasswordInputClearers(refs, resetNeutral)
-    );
-
-    cleanups.push(
-      bindResetPasswordSubmit(refs, onSubmit)
-    );
-
-    cleanups.push(
-      bindResetPasswordToastClose(refs, onToastClose)
-    );
-
-    cleanups.push(
-      bindResetPasswordBackLink(refs, onBack)
-    );
-
+  for (const field of [refs.identifier, refs.password, refs.confirmPassword]) {
     try {
-      AppCore?.cleanup?.event?.(
-        scope,
-        "router:before-render",
-        ({ detail } = {}) => {
-          const nextPath =
-            detail?.path ||
-            detail?.canonicalPath ||
-            "";
+      field?.addEventListener?.("input", clearOnInput);
+      disposers.push(() => field?.removeEventListener?.("input", clearOnInput));
+    } catch {
+      // noop
+    }
+  }
 
-          if (
-            nextPath &&
-            !isResetPasswordPath(nextPath)
-          ) {
-            setAuthScreen(false);
-          }
+  try {
+    refs.back?.addEventListener?.("click", (event) => {
+      event.preventDefault();
+      navigateTo(LOGIN_ROUTE);
+    });
+  } catch {
+    // noop
+  }
+
+  try {
+    (mode === "confirm" ? refs.password : refs.identifier)?.focus?.();
+  } catch {
+    // noop
+  }
+
+  hideLoader();
+
+  emit("auth:password-reset:view:ready", {
+    mode,
+    route: currentCanonicalPath(),
+  });
+
+  const instance = {
+    version: RESET_PASSWORD_VIEW_VERSION,
+
+    mode,
+
+    destroy() {
+      mounted = false;
+
+      while (disposers.length) {
+        try {
+          disposers.pop()?.();
+        } catch {
+          // noop
         }
-      );
-    } catch {}
-
-    const cleanup = () => {
-      for (const unbind of cleanups) {
-        try {
-          unbind?.();
-        } catch {}
       }
 
-      clearRedirectTimer();
+      clearInstance(container, instance);
+      emit("auth:password-reset:view:destroyed", { mode });
 
-      if (!isNavigatingAway) {
-        try {
-          toast.dismiss?.();
-        } catch {}
+      return true;
+    },
 
-        hideResetPasswordToast(refs);
-        setAuthScreen(false);
-        restoreGlobalLoaderState();
-      }
+    submit,
+
+    getSnapshot() {
+      return {
+        version: RESET_PASSWORD_VIEW_VERSION,
+        source: SOURCE,
+
+        mounted,
+        submitting,
+        mode,
+
+        route: currentCanonicalPath(),
+        stillOnPasswordReset: isPasswordResetRoute(),
+
+        hasToken: mode === "confirm" ? Boolean(getUrlToken()) : false,
+
+        dom: {
+          hasForm: Boolean(refs.form),
+          hasIdentifier: Boolean(refs.identifier),
+          hasPassword: Boolean(refs.password),
+          hasConfirmPassword: Boolean(refs.confirmPassword),
+          hasSubmit: Boolean(refs.submit),
+          hasMessage: Boolean(messageNode),
+        },
+
+        at: nowIso(),
+      };
+    },
+
+    getDebugSnapshot() {
+      return this.getSnapshot();
+    },
+  };
+
+  storeInstance(container, instance);
+
+  return instance;
+}
+
+/* =========================================================
+   COMPAT API
+========================================================= */
+
+function resolveArgs(arg1 = null, arg2 = {}) {
+  if (isContainer(arg1)) {
+    return {
+      container: arg1,
+      deps: isObject(arg2) ? arg2 : {},
     };
-
-    localCleanup = cleanup;
-
-    try {
-      AppCore?.cleanup?.add?.(scope, () => {
-        cleanup();
-        localCleanup = null;
-      });
-    } catch {}
-  }
-
-  /* =========================================================
-     PUBLIC API
-  ========================================================= */
-
-  function init(arg1 = {}, arg2 = {}) {
-    const deps = resolveDeps(arg1, arg2);
-    return runRender(deps);
-  }
-
-  function render(arg1 = {}, arg2 = {}) {
-    const deps = resolveDeps(arg1, arg2);
-    return runRender(deps);
-  }
-
-  function destroy() {
-    isNavigatingAway = false;
-    isSubmitting = false;
-
-    destroyViewState({
-      preserveToast: false,
-    });
-
-    setAuthScreen(false);
-    restoreGlobalLoaderState();
   }
 
   return {
-    init,
-    render,
-    destroy,
+    container: getContainer(),
+    deps: isObject(arg1) ? arg1 : {},
   };
-})();
+}
+
+export function init(arg1 = null, arg2 = {}) {
+  const { container, deps } = resolveArgs(arg1, arg2);
+  return renderResetPasswordView(container, deps);
+}
+
+export function render(arg1 = null, arg2 = {}) {
+  const { container, deps } = resolveArgs(arg1, arg2);
+  return renderResetPasswordView(container, deps);
+}
+
+export function mount(arg1 = null, arg2 = {}) {
+  return render(arg1, arg2);
+}
+
+export function destroy(options = {}) {
+  if (lastInstance?.destroy) {
+    return lastInstance.destroy(options);
+  }
+
+  return false;
+}
+
+export function getSnapshot() {
+  if (lastInstance?.getSnapshot) {
+    return lastInstance.getSnapshot();
+  }
+
+  return {
+    version: RESET_PASSWORD_VIEW_VERSION,
+    source: SOURCE,
+    mounted: false,
+    route: currentCanonicalPath(),
+    mode: currentMode(),
+    at: nowIso(),
+  };
+}
+
+export const ResetPasswordView = {
+  version: RESET_PASSWORD_VIEW_VERSION,
+
+  init,
+  render,
+  mount,
+  destroy,
+
+  getSnapshot,
+  getDebugSnapshot: getSnapshot,
+};
 
 export default ResetPasswordView;

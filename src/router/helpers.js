@@ -9,14 +9,10 @@
    - preserva rutas técnicas con token hasta scrub oficial
    - redirects internos seguros
    - redacción fuerte de tokens
-   - sin Auth real, fetch, storage, Toast, render ni navegación
+   - sin Auth, fetch, storage, Toast, render ni navegación
 ========================================================= */
 
-import {
-  AUTH_TOKEN_PARAM_NAMES,
-} from "../features/auth/constants.js";
-
-export const ROUTER_HELPERS_VERSION = "21.0.0-simple";
+export const ROUTER_HELPERS_VERSION = "21.0.1-simple";
 
 export const ROUTER_CONFIG = Object.freeze({
   maxRouteLength: 2048,
@@ -37,53 +33,14 @@ const ACTIVATION_INITIAL_URL_KEY = "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__";
 const RESET_CONFIRM_INITIAL_URL_KEY = "__ONION_RESET_CONFIRM_INITIAL_URL__";
 const RESET_PASSWORD_CONFIRM_INITIAL_URL_KEY = "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__";
 
-const USERNAME_RE = /^@[A-Za-z0-9._-]{1,80}$/;
+const USERNAME_RE = /^@[A-Za-z0-9._-]{1,64}$/;
 const UNSAFE_PROTOCOL_RE = /^(javascript:|data:|vbscript:|file:)/i;
-const ABSOLUTE_URL_RE = /^[a-z][a-z\d+.-]*:\/\//i;
 const ANY_PROTOCOL_RE = /^[a-z][a-z\d+.-]*:/i;
+const ABSOLUTE_URL_RE = /^[a-z][a-z\d+.-]*:\/\//i;
 
-const ACTIVATION_TOKEN_PARAMS = Object.freeze(unique([
-  ...(Array.isArray(AUTH_TOKEN_PARAM_NAMES?.activation) ? AUTH_TOKEN_PARAM_NAMES.activation : []),
-  "token",
-  "activationToken",
-  "activateToken",
-  "activation_token",
-  "activate_token",
-  "code",
-  "t",
-]));
-
-const RESET_TOKEN_PARAMS = Object.freeze(unique([
-  ...(Array.isArray(AUTH_TOKEN_PARAM_NAMES?.reset) ? AUTH_TOKEN_PARAM_NAMES.reset : []),
-  "token",
-  "resetToken",
-  "passwordResetToken",
-  "confirmToken",
-  "reset_token",
-  "password_reset_token",
-  "confirm_token",
-  "code",
-  "t",
-]));
-
-const TWO_FACTOR_TOKEN_PARAMS = Object.freeze(unique([
-  ...(Array.isArray(AUTH_TOKEN_PARAM_NAMES?.twoFactor) ? AUTH_TOKEN_PARAM_NAMES.twoFactor : []),
-  "tempToken",
-  "temp_token",
-  "temporaryToken",
-  "temporary_token",
-  "twoFactorToken",
-  "two_factor_token",
-  "mfaToken",
-  "mfa_token",
-  "otpToken",
-  "otp_token",
-  "code",
-  "otp",
-  "totp",
-  "t",
-]));
-
+const ACTIVATION_TOKEN_PARAMS = Object.freeze(["token", "activationToken", "activateToken", "code", "t"]);
+const RESET_TOKEN_PARAMS = Object.freeze(["token", "resetToken", "passwordResetToken", "confirmToken", "code", "t"]);
+const TWO_FACTOR_TOKEN_PARAMS = Object.freeze(["tempToken", "temp_token", "mfaToken", "mfa_token", "otpToken", "otp_token", "code", "otp", "totp", "t"]);
 const SENSITIVE_PARAMS = Object.freeze(unique([
   ...ACTIVATION_TOKEN_PARAMS,
   ...RESET_TOKEN_PARAMS,
@@ -92,9 +49,7 @@ const SENSITIVE_PARAMS = Object.freeze(unique([
   "refresh_token",
   "id_token",
   "authorization",
-  "auth",
   "jwt",
-  "bearer",
   "session",
   "sid",
 ]));
@@ -129,47 +84,18 @@ const TOKEN_ROUTES = Object.freeze([
   Object.freeze({
     key: "activation",
     canonical: ACTIVATION_PATH,
-    bases: Object.freeze([
-      ACTIVATION_PATH,
-      "/activate",
-      "/activation",
-      "/account/activate",
-      "/activate/first-user",
-    ]),
+    bases: Object.freeze([ACTIVATION_PATH, "/activate", "/activation", "/account/activate", "/activate/first-user"]),
     initialKeys: Object.freeze([ACTIVATION_INITIAL_URL_KEY]),
     tokenParams: ACTIVATION_TOKEN_PARAMS,
-    scrubKeys: Object.freeze([
-      "scrubbedActivationToken",
-      "activationTokenScrubbed",
-      "scrubbedActivateAccountToken",
-      "scrubbedPublicTokenRoute",
-      "scrubbedTokenRoute",
-    ]),
+    scrubKeys: Object.freeze(["scrubbedActivationToken", "activationTokenScrubbed", "scrubbedPublicTokenRoute", "scrubbedTokenRoute"]),
   }),
   Object.freeze({
     key: "resetConfirm",
     canonical: RESET_CONFIRM_PATH,
-    bases: Object.freeze([
-      RESET_CONFIRM_PATH,
-      "/reset-password-confirm",
-      PASSWORD_RESET_CONFIRM_PATH,
-      "/password-reset-confirm",
-      "/confirm-reset-password",
-    ]),
-    initialKeys: Object.freeze([
-      RESET_PASSWORD_CONFIRM_INITIAL_URL_KEY,
-      RESET_CONFIRM_INITIAL_URL_KEY,
-    ]),
+    bases: Object.freeze([RESET_CONFIRM_PATH, "/reset-password-confirm", PASSWORD_RESET_CONFIRM_PATH, "/password-reset-confirm", "/confirm-reset-password"]),
+    initialKeys: Object.freeze([RESET_PASSWORD_CONFIRM_INITIAL_URL_KEY, RESET_CONFIRM_INITIAL_URL_KEY]),
     tokenParams: RESET_TOKEN_PARAMS,
-    scrubKeys: Object.freeze([
-      "scrubbedResetToken",
-      "resetTokenScrubbed",
-      "scrubbedResetPasswordToken",
-      "scrubbedResetConfirmToken",
-      "scrubbedPasswordResetToken",
-      "scrubbedPublicTokenRoute",
-      "scrubbedTokenRoute",
-    ]),
+    scrubKeys: Object.freeze(["scrubbedResetToken", "resetTokenScrubbed", "scrubbedResetConfirmToken", "scrubbedPublicTokenRoute", "scrubbedTokenRoute"]),
   }),
 ]);
 
@@ -215,14 +141,7 @@ function toArray(value) {
 }
 
 function unique(values = []) {
-  return [
-    ...new Set(
-      toArray(values)
-        .flat(Infinity)
-        .map((item) => safeText(item, ""))
-        .filter(Boolean)
-    ),
-  ];
+  return [...new Set(toArray(values).flat(Infinity).map((item) => safeText(item, "")).filter(Boolean))];
 }
 
 function escapeRegExp(value = "") {
@@ -251,8 +170,7 @@ function resolvePathArgs(first, second, fallback = HOME) {
 }
 
 export function normalizeRouteInput(value = HOME) {
-  const text = String(value ?? "").trim();
-  return (text || HOME).slice(0, ROUTER_CONFIG.maxRouteLength);
+  return safeText(value, HOME).slice(0, ROUTER_CONFIG.maxRouteLength) || HOME;
 }
 
 function baseOrigin() {
@@ -261,8 +179,7 @@ function baseOrigin() {
 }
 
 export function escapeHtml(first = "", second = undefined) {
-  let value = first;
-  if (looksLikeAppCore(first)) value = second;
+  const value = looksLikeAppCore(first) ? second : first;
 
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -338,10 +255,7 @@ function normalizeHash(hash = "") {
 }
 
 function normalizePathname(pathname = HOME) {
-  let value = safeText(pathname, HOME)
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
+  let value = safeText(pathname, HOME).replace(/\\/g, "/").replace(/\/{2,}/g, "/");
   if (!value.startsWith("/")) value = `/${value}`;
 
   const stack = [];
@@ -375,14 +289,8 @@ function splitRawPath(path = HOME) {
   if (ABSOLUTE_URL_RE.test(raw)) {
     try {
       const url = new URL(raw, baseOrigin());
-
       if (url.hash && isHashRouterPath(url.hash)) return splitRawPath(normalizeHashRouterPath(url.hash));
-
-      return {
-        pathname: url.pathname || HOME,
-        search: normalizeSearch(url.search || ""),
-        hash: normalizeHash(url.hash || ""),
-      };
+      return { pathname: url.pathname || HOME, search: normalizeSearch(url.search || ""), hash: normalizeHash(url.hash || "") };
     } catch {}
   }
 
@@ -402,11 +310,7 @@ function splitRawPath(path = HOME) {
     pathname = pathname.slice(0, searchIndex) || HOME;
   }
 
-  return {
-    pathname,
-    search: normalizeSearch(search),
-    hash: normalizeHash(hash),
-  };
+  return { pathname, search: normalizeSearch(search), hash: normalizeHash(hash) };
 }
 
 function normalizePathnameWithCore(AppCore, pathname = HOME) {
@@ -434,9 +338,7 @@ export function normalizePath(first = null, second = undefined) {
   if (raw.startsWith("#") && !isHashRouterPath(raw)) return normalizeHash(raw);
 
   const { pathname, search, hash } = splitRawPath(raw);
-  const cleanPathname = normalizePathnameWithCore(AppCore, pathname);
-
-  return `${cleanPathname}${search}${hash}`;
+  return `${normalizePathnameWithCore(AppCore, pathname)}${search}${hash}`;
 }
 
 export function stripSearchAndHash(path = HOME) {
@@ -466,12 +368,12 @@ export function pathFromUrlLike(value = "") {
    USERNAME SCOPE
 ========================================================= */
 
-function isUsernameSegment(segment = "") {
-  return USERNAME_RE.test(safeText(segment, ""));
-}
-
 function pathSegments(pathname = HOME) {
   return normalizePathname(pathname).split("/").filter(Boolean);
+}
+
+function isUsernameSegment(segment = "") {
+  return USERNAME_RE.test(safeText(segment, ""));
 }
 
 function stripUsernameFromPathname(pathname = HOME) {
@@ -491,13 +393,8 @@ function usernameFromPathname(pathname = HOME) {
 }
 
 export function sanitizeUsername(first = null, second = undefined) {
-  let AppCore = null;
-  let value = first;
-
-  if (looksLikeAppCore(first)) {
-    AppCore = first;
-    value = second;
-  }
+  const AppCore = looksLikeAppCore(first) ? first : null;
+  const value = looksLikeAppCore(first) ? second : first;
 
   let normalized = String(value || "")
     .normalize("NFKC")
@@ -522,13 +419,11 @@ export function sanitizeUsername(first = null, second = undefined) {
 export function extractUsernameFromPath(first = null, second = undefined) {
   const { AppCore, path } = resolvePathArgs(first, second, HOME);
   const parts = splitRawPath(normalizePath(AppCore, path));
-  const username = sanitizeUsername(AppCore, usernameFromPathname(parts.pathname));
-
-  return username || null;
+  return sanitizeUsername(AppCore, usernameFromPathname(parts.pathname)) || null;
 }
 
 export function getCurrentUsername(AppCore) {
-  return sanitizeUsername(AppCore, AppCore?.state?.user?.username || AppCore?.state?.user?.userName || AppCore?.state?.user?.nick || AppCore?.state?.user?.alias || AppCore?.state?.user?.slug || "") || null;
+  return sanitizeUsername(AppCore, AppCore?.state?.user?.username || AppCore?.state?.user?.slug || "") || null;
 }
 
 export function getCurrentResolvedUsername(AppCore) {
@@ -578,6 +473,11 @@ function isTokenRouteScrubbed(config) {
   return toArray(config.scrubKeys).some((key) => Boolean(state?.[key]));
 }
 
+function isPathOrChild(path = "", base = HOME) {
+  const pathname = stripUsernameFromPathname(stripSearchAndHash(normalizePath(path)));
+  return pathname === base || pathname.startsWith(`${base}/`);
+}
+
 function tokenRouteConfig(pathOrUrl = "") {
   const path = pathFromUrlLike(pathOrUrl);
   const pathname = stripUsernameFromPathname(stripSearchAndHash(path));
@@ -585,20 +485,13 @@ function tokenRouteConfig(pathOrUrl = "") {
   return TOKEN_ROUTES.find((config) => config.bases.some((base) => pathname === base || pathname.startsWith(`${base}/`))) || null;
 }
 
-function isPathOrChild(path = "", base = HOME) {
-  const pathname = stripUsernameFromPathname(stripSearchAndHash(normalizePath(path)));
-  return pathname === base || pathname.startsWith(`${base}/`);
-}
-
 function tokenFromPathBase(pathOrUrl = "", basePath = "") {
   const base = normalizePathname(basePath);
   if (!base) return "";
 
   try {
-    const path = pathFromUrlLike(pathOrUrl);
-    const parts = splitRawPath(path);
+    const parts = splitRawPath(pathFromUrlLike(pathOrUrl));
     const pathname = stripUsernameFromPathname(parts.pathname || HOME);
-
     if (!pathname.startsWith(`${base}/`)) return "";
 
     const token = pathname.slice(`${base}/`.length).split("/")[0];
@@ -849,31 +742,11 @@ function stateInitialCandidates(AppCore, config) {
   ];
 
   if (config?.key === "activation") {
-    candidates.push(
-      state.bootActivationInitialUrl,
-      state.bootActivationInitialPublicPath,
-      state.bootActivationInitialPath,
-      boot.bootActivationInitialUrl,
-      boot.bootActivationInitialPublicPath,
-      boot.bootActivationInitialPath
-    );
+    candidates.push(state.bootActivationInitialUrl, state.bootActivationInitialPublicPath, boot.bootActivationInitialUrl, boot.bootActivationInitialPublicPath);
   }
 
   if (config?.key === "resetConfirm") {
-    candidates.push(
-      state.bootResetConfirmInitialUrl,
-      state.bootResetConfirmInitialPublicPath,
-      state.bootResetConfirmInitialPath,
-      state.bootResetPasswordConfirmInitialUrl,
-      state.bootResetPasswordConfirmInitialPublicPath,
-      state.bootResetPasswordConfirmInitialPath,
-      boot.bootResetConfirmInitialUrl,
-      boot.bootResetConfirmInitialPublicPath,
-      boot.bootResetConfirmInitialPath,
-      boot.bootResetPasswordConfirmInitialUrl,
-      boot.bootResetPasswordConfirmInitialPublicPath,
-      boot.bootResetPasswordConfirmInitialPath
-    );
+    candidates.push(state.bootResetConfirmInitialUrl, state.bootResetConfirmInitialPublicPath, state.bootResetPasswordConfirmInitialUrl, boot.bootResetConfirmInitialUrl, boot.bootResetConfirmInitialPublicPath, boot.bootResetPasswordConfirmInitialUrl);
   }
 
   return candidates.map((value) => safeText(value, "")).filter(Boolean);
@@ -894,12 +767,7 @@ function protectedInitialPath(AppCore = null, config = null) {
 
   for (const candidate of candidates) {
     const path = pathFromUrlLike(candidate);
-
-    const matched = config.bases.some((base) =>
-      isPathOrChild(path, base) &&
-      hasPublicToken({ pathOrUrl: candidate, basePath: base, tokenParams: config.tokenParams })
-    );
-
+    const matched = config.bases.some((base) => isPathOrChild(path, base) && hasPublicToken({ pathOrUrl: candidate, basePath: base, tokenParams: config.tokenParams }));
     if (matched) return path;
   }
 
@@ -924,12 +792,12 @@ export function getProtectedInitialPublicPath(AppCore = null) {
 
 export function normalizeCanonicalPath(first = null, second = undefined) {
   const { AppCore, path } = resolvePathArgs(first, second, HOME);
-
   const stripped = stripUsernamePrefix(AppCore, path);
   const pathname = normalizePathname(stripSearchAndHash(stripped));
 
-  if (TOKEN_ROUTES[0].bases.some((base) => pathname === base || pathname.startsWith(`${base}/`))) return ACTIVATION_PATH;
-  if (TOKEN_ROUTES[1].bases.some((base) => pathname === base || pathname.startsWith(`${base}/`))) return RESET_CONFIRM_PATH;
+  for (const route of TOKEN_ROUTES) {
+    if (route.bases.some((base) => pathname === base || pathname.startsWith(`${base}/`))) return route.canonical;
+  }
 
   return pathname;
 }
@@ -1003,10 +871,8 @@ export function isExternalHref(href = "") {
 
 export function isUnsafeHref(href = "") {
   const raw = safeText(href, "");
-
   if (!raw) return false;
   if (/[\r\n\t]/.test(raw)) return true;
-
   return UNSAFE_PROTOCOL_RE.test(raw);
 }
 
@@ -1058,13 +924,10 @@ export function resolveSpaHref(AppCore, href = HOME) {
 ========================================================= */
 
 function isAuthLikeCanonical(path = HOME) {
-  const canonical = normalizeCanonicalPath(path);
+  const canonicalPath = normalizeCanonicalPath(path);
 
-  if (PUBLIC_AUTH_PATHS.has(canonical)) return true;
-
-  return canonical.startsWith(`${ACTIVATION_PATH}/`) ||
-    canonical.startsWith(`${RESET_CONFIRM_PATH}/`) ||
-    canonical.startsWith(`${PASSWORD_RESET_CONFIRM_PATH}/`);
+  if (PUBLIC_AUTH_PATHS.has(canonicalPath)) return true;
+  return TOKEN_ROUTES.some((route) => route.bases.some((base) => canonicalPath === base || canonicalPath.startsWith(`${base}/`)));
 }
 
 export function canUsePublicSlugForRoute(route, routeNames = null) {
@@ -1075,21 +938,7 @@ export function canUsePublicSlugForRoute(route, routeNames = null) {
 
   if (routePath === names.LOGIN) return false;
   if (isAuthLikeCanonical(routePath)) return false;
-
-  if (
-    route.hideShell === true ||
-    route.shell === false ||
-    route.showShell === false ||
-    route.layout === "auth" ||
-    route.layout === "public" ||
-    route.meta?.hideShell === true ||
-    route.meta?.shell === false ||
-    route.meta?.showShell === false ||
-    route.meta?.layout === "auth" ||
-    route.meta?.layout === "public"
-  ) {
-    return false;
-  }
+  if (route.hideShell === true || route.shell === false || route.showShell === false || route.layout === "auth" || route.layout === "public") return false;
 
   return true;
 }
@@ -1123,14 +972,7 @@ export function buildPublicPath(AppCore, getRoute, canonicalPath = HOME, options
   if (!route && sourceHadSlug && !isAuthLikeCanonical(clean)) return normalizePath(AppCore, source);
   if (!route || !canUsePublicSlugForRoute(route, routeNames)) return publicWithoutSlug;
 
-  const username = sanitizeUsername(
-    AppCore,
-    opts.username ||
-      opts.resolvedUsername ||
-      extractUsernameFromPath(AppCore, opts.fromPath || opts.publicPath || source || "") ||
-      getCurrentResolvedUsername(AppCore) ||
-      getCurrentUsername(AppCore)
-  );
+  const username = sanitizeUsername(AppCore, opts.username || opts.resolvedUsername || extractUsernameFromPath(AppCore, source) || getCurrentResolvedUsername(AppCore) || getCurrentUsername(AppCore));
 
   if (!username) return publicWithoutSlug;
   if (clean === routeNames.HOME) return normalizePath(AppCore, `/@${username}${suffix}`);
@@ -1150,10 +992,10 @@ export function getRedirectPath(AppCore) {
 
   if (isUnsafeHref(resolved) || isExternalHref(resolved)) return null;
 
-  const canonical = normalizeCanonicalPath(AppCore, resolved);
+  const canonicalPath = normalizeCanonicalPath(AppCore, resolved);
   const loginCanonical = normalizeCanonicalPath(AppCore, routeNames.LOGIN);
 
-  if (canonical === loginCanonical || isAuthLikeCanonical(canonical)) return null;
+  if (canonicalPath === loginCanonical || isAuthLikeCanonical(canonicalPath)) return null;
 
   return normalizePath(AppCore, resolved);
 }
@@ -1188,13 +1030,7 @@ export function buildHistoryUrl(AppCore, getRoute, pathname = HOME, options = {}
 
   if (isUnsafeHref(resolved) || isExternalHref(resolved)) return routeNames.HOME;
 
-  if (
-    opts.preservePath === true ||
-    opts.preservePublicPath === true ||
-    opts.preserveUrl === true ||
-    opts.protectedInitialUrl === true ||
-    opts.skipHistory === true
-  ) {
+  if (opts.preservePath === true || opts.preservePublicPath === true || opts.preserveUrl === true || opts.protectedInitialUrl === true || opts.skipHistory === true) {
     return normalizePath(AppCore, resolved);
   }
 
@@ -1207,23 +1043,23 @@ export function buildHistoryUrl(AppCore, getRoute, pathname = HOME, options = {}
 }
 
 export function buildStatePayload(AppCore, pathname = HOME, extras = {}) {
-  const publicPath = normalizePath(AppCore, pathname);
-  const canonical = normalizeCanonicalPath(AppCore, publicPath);
-  const username = extractUsernameFromPath(AppCore, publicPath) || getCurrentResolvedUsername(AppCore) || null;
+  const publicPathValue = normalizePath(AppCore, pathname);
+  const canonicalPathValue = normalizeCanonicalPath(AppCore, publicPathValue);
+  const username = extractUsernameFromPath(AppCore, publicPathValue) || getCurrentResolvedUsername(AppCore) || null;
 
   return {
-    path: publicPath,
-    publicPath,
-    canonicalPath: canonical,
-    rawCanonicalPath: canonical,
-    requestedPath: publicPath,
-    searchAndHash: getSearchAndHash(publicPath),
+    path: publicPathValue,
+    publicPath: publicPathValue,
+    canonicalPath: canonicalPathValue,
+    rawCanonicalPath: canonicalPathValue,
+    requestedPath: publicPathValue,
+    searchAndHash: getSearchAndHash(publicPathValue),
     username,
-    isActivationRoute: canonical === ACTIVATION_PATH,
-    isResetConfirmRoute: canonical === RESET_CONFIRM_PATH,
-    hasActivationToken: hasActivationToken(publicPath),
-    hasResetConfirmToken: hasResetConfirmToken(publicPath),
-    isProtectedPublicTokenRoute: isProtectedPublicTokenPath(publicPath),
+    isActivationRoute: canonicalPathValue === ACTIVATION_PATH,
+    isResetConfirmRoute: canonicalPathValue === RESET_CONFIRM_PATH,
+    hasActivationToken: hasActivationToken(publicPathValue),
+    hasResetConfirmToken: hasResetConfirmToken(publicPathValue),
+    isProtectedPublicTokenRoute: isProtectedPublicTokenPath(publicPathValue),
     ...safeObject(extras),
   };
 }
@@ -1269,6 +1105,9 @@ export function getRouterHelpersSnapshot(AppCore) {
       ownTransport: false,
       ownRender: false,
       ownNavigation: false,
+      importsAuth: false,
+      publicPathKeepsQueryHash: true,
+      canonicalStripsUsernameQueryHash: true,
     },
   };
 }

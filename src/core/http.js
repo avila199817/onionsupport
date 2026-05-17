@@ -1,121 +1,64 @@
 /* =========================================================
-   Onion SPA - Core HTTP
-   Archivo: src/core/http.js
+   Onion Support - Core HTTP
+   Archivo: /src/core/http.js
 
-   CORE HTTP · SIMPLE
-   - fachada única sobre src/core/request.js
-   - backend canónico: https://api.onionit.net
-   - sin fetch propio, parser propio, retry propio ni timeout propio
-   - sin Router, Toast, navegación, storage agresivo ni Auth pesada
-   - Auth real delegada a src/features/auth/*
-   - eventos/snapshots sin tokens reales
+   Responsabilidad:
+   - Fachada mínima sobre core/request.js.
+   - Sin fetch propio.
+   - Sin parser propio.
+   - Sin retry propio.
+   - Sin refresh automático.
+   - Sin Auth discovery.
+   - Sin Router.
+   - Sin Toast.
+   - Sin Storage.
+   - Sin magia negra.
 ========================================================= */
 
 import { config } from "./config.js";
-
-import {
-  hasValidToken as coreHasValidToken,
-  isPublicApiPath as coreIsPublicApiPath,
-  redactTokenInText as coreRedactTokenInText,
-} from "./helpers.js";
 
 import {
   createRequest,
   createApiClient,
 } from "./request.js";
 
-export const HTTP_VERSION = "21.0.0-simple";
+export const HTTP_VERSION = "simple";
 
-export const DEFAULT_API_ORIGIN = config?.canonicalProductionApiBase || "https://api.onionit.net";
+export const DEFAULT_API_ORIGIN = "https://api.onionit.net";
 export const DEFAULT_API_PREFIX = "/api";
 export const DEFAULT_TIMEOUT_MS = 30000;
 export const DEFAULT_AUTH_TIMEOUT_MS = 30000;
 export const DEFAULT_REFRESH_TIMEOUT_MS = 30000;
 
-const SOURCE = "CoreHTTP";
+const AUTH_ENDPOINTS = Object.freeze({
+  login: "/api/auth/login",
+  logout: "/api/auth/logout",
+  me: "/api/auth/me",
+  refresh: "/api/auth/refresh",
+  activate: "/api/auth/activate",
+  requestPasswordReset: "/api/auth/reset-password-request",
+  confirmPasswordReset: "/api/auth/reset-password-confirm",
+});
 
-const FRONTEND_HOST_RE = /^(?:www\.)?onionsupport\.com$/i;
-const AUTH_PATH_RE = /^\/api\/auth(?:\/|$)/i;
-const AUTH_ME_PATH_RE = /^(?:\/api)?\/auth\/me\/?$|^(?:\/api)?\/me\/?$/i;
-const AUTH_PUBLIC_PATH_RE = /^\/api\/auth\/(?:login|refresh|token\/refresh|renew|2fa(?:\/|$)|mfa(?:\/|$)|otp(?:\/|$)|activate(?:\/|$)|activate-account(?:\/|$)|activation(?:\/|$)|account\/activate(?:\/|$)|reset-password(?:\/|$)|reset-password-request|reset-password-confirm|forgot-password|recover-password|password-reset(?:\/|$)|_health|health)(?:\/|$)/i;
-
-const TOKEN_KEYS = Object.freeze([
-  "token",
-  "accessToken",
-  "access_token",
-  "authToken",
-  "auth_token",
-  "jwt",
-  "idToken",
-  "id_token",
-  "bearer",
+const PUBLIC_AUTH_ENDPOINTS = Object.freeze([
+  AUTH_ENDPOINTS.login,
+  AUTH_ENDPOINTS.refresh,
+  AUTH_ENDPOINTS.activate,
+  AUTH_ENDPOINTS.requestPasswordReset,
+  AUTH_ENDPOINTS.confirmPasswordReset,
 ]);
 
-const REFRESH_TOKEN_KEYS = Object.freeze([
-  "refreshToken",
-  "refresh_token",
-]);
-
-const TEMP_TOKEN_KEYS = Object.freeze([
-  "tempToken",
-  "temp_token",
-  "temporaryToken",
-  "temporary_token",
-  "challengeToken",
-  "challenge_token",
-  "twoFactorToken",
-  "two_factor_token",
-  "mfaToken",
-  "mfa_token",
-]);
-
-const BAD_TOKEN_VALUES = new Set([
-  "",
-  "null",
-  "undefined",
-  "false",
-  "true",
-  "nan",
-  "none",
-  "empty",
-  "{}",
-  "[]",
-  "[object object]",
-  "\"\"",
-  "''",
-]);
-
-const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
-
-let apiOrigin = DEFAULT_API_ORIGIN;
-let installedAppCore = null;
-let installContext = null;
+let apiOrigin = normalizeOrigin(config?.apiBase || DEFAULT_API_ORIGIN);
+let appCore = null;
 let requestEngine = null;
 let apiEngine = null;
-let externalRequest = null;
 let tokenProvider = null;
 let authPayloadCommitter = null;
-let refreshPromise = null;
 
-const runtimeState = {
-  token: "",
-  accessToken: "",
-  access_token: "",
-  refreshToken: "",
-  refresh_token: "",
-  tempToken: "",
-  temp_token: "",
-  hasToken: false,
-};
-
-const httpStats = {
-  version: HTTP_VERSION,
+const stats = {
   total: 0,
   success: 0,
   error: 0,
-  refresh: 0,
-  lastRequestAt: "",
   lastUrl: "",
   lastError: null,
 };
@@ -124,720 +67,222 @@ const httpStats = {
    BASICS
 ========================================================= */
 
-const isFn = (value) => typeof value === "function";
-const isObj = (value) => value !== null && typeof value === "object";
-
 function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
+  return typeof window !== "undefined";
 }
 
-function isPlainObject(value) {
-  if (!isObj(value) || Array.isArray(value)) return false;
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function text(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
+}
+
+function normalizeOrigin(value = "") {
+  const raw = text(value, DEFAULT_API_ORIGIN).replace(/\/+$/g, "");
 
   try {
-    const proto = Object.getPrototypeOf(value);
-    return proto === Object.prototype || proto === null;
+    const url = new URL(raw);
+
+    if (!["http:", "https:"].includes(url.protocol)) {
+      return DEFAULT_API_ORIGIN;
+    }
+
+    return url.origin;
   } catch {
+    return DEFAULT_API_ORIGIN;
+  }
+}
+
+function cleanPath(path = "/") {
+  try {
+    return new URL(path, DEFAULT_API_ORIGIN).pathname || "/";
+  } catch {
+    return String(path || "/").split("?")[0].split("#")[0] || "/";
+  }
+}
+
+function isPublicEndpoint(path = "") {
+  const clean = cleanPath(path);
+
+  if (clean === AUTH_ENDPOINTS.me) return false;
+
+  return PUBLIC_AUTH_ENDPOINTS.some((endpoint) => clean === endpoint);
+}
+
+function shouldUseAuth(endpoint = "", options = {}) {
+  const path = cleanPath(endpoint);
+
+  if (path === AUTH_ENDPOINTS.me) return true;
+
+  if (options.auth === false || options.public === true || options.skipAuth === true) {
     return false;
   }
+
+  if (options.auth === true) return true;
+
+  return !isPublicEndpoint(path);
 }
 
-function safeObject(value, fallback = {}) {
-  return isPlainObject(value) ? value : fallback;
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
-function safeArray(value) {
-  if (Array.isArray(value)) return value;
-  if (value instanceof Set) return [...value];
-  if (value === null || value === undefined) return [];
-  return [value];
-}
+function appendQuery(url = "", query = null) {
+  if (!isObject(query)) return url;
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
+  const parsed = new URL(url, DEFAULT_API_ORIGIN);
 
-  const out = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return out || fallback;
-}
-
-function safeLower(value, fallback = "") {
-  return safeText(value, fallback).toLowerCase();
-}
-
-function safeNumber(value, fallback = 0) {
-  const out = Number(value);
-  return Number.isFinite(out) ? out : fallback;
-}
-
-function now() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
-}
-
-function iso(ms = now()) {
-  try {
-    return new Date(ms).toISOString();
-  } catch {
-    return "";
-  }
-}
-
-function hasOwn(target, key) {
-  try {
-    return Object.prototype.hasOwnProperty.call(target, key);
-  } catch {
-    return false;
-  }
-}
-
-function defineValue(target, key, value) {
-  if (!target || !key) return false;
-
-  try {
-    Object.defineProperty(target, key, {
-      value,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-    });
-    return true;
-  } catch {}
-
-  try {
-    target[key] = value;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function readImportMetaEnv(key = "") {
-  try {
-    return import.meta?.env?.[key] || "";
-  } catch {
-    return "";
-  }
-}
-
-function readRuntimeGlobal(key = "") {
-  try {
-    if (typeof window !== "undefined" && window[key]) return window[key];
-  } catch {}
-
-  try {
-    if (typeof globalThis !== "undefined" && globalThis[key]) return globalThis[key];
-  } catch {}
-
-  return "";
-}
-
-function isProductionEnv() {
-  const env = safeLower(config?.env || config?.environment || "", "");
-  return env === "production" || env === "prod";
-}
-
-/* =========================================================
-   REDACTION / EVENTS
-========================================================= */
-
-export function redactHttpText(value = "") {
-  let out = safeText(value, "");
-  if (!out) return "";
-
-  try {
-    if (isFn(coreRedactTokenInText)) out = coreRedactTokenInText(out);
-  } catch {}
-
-  try {
-    out = out
-      .replace(
-        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token|otp|totp)=)([^&#\s]+)/gi,
-        "$1***"
-      )
-      .replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***")
-      .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***")
-      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-      .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
-  } catch {}
-
-  return out;
-}
-
-function sanitizePayload(value, depth = 0, keyHint = "", seen = new WeakSet()) {
-  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) return value ? "***" : null;
-  if (depth > 5) return "[depth-limit]";
-  if (value === null || value === undefined) return value;
-  if (typeof value === "string") return redactHttpText(value);
-  if (typeof value === "number" || typeof value === "boolean") return value;
-  if (typeof value === "bigint") return String(value);
-  if (typeof value === "function") return "[function]";
-
-  if (value instanceof Error) {
-    return {
-      name: value.name || "Error",
-      message: redactHttpText(value.message || ""),
-      status: value.status || value.statusCode || 0,
-      code: value.code || "",
-      timeout: Boolean(value.timeout),
-      aborted: Boolean(value.aborted),
-      stack: value.stack ? "[stack]" : "",
-    };
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === "") continue;
+    parsed.searchParams.set(key, String(value));
   }
 
-  if (Array.isArray(value)) {
-    return value.slice(0, 50).map((item) => sanitizePayload(item, depth + 1, keyHint, seen));
-  }
-
-  if (isObj(value)) {
-    try {
-      if (seen.has(value)) return "[circular]";
-      seen.add(value);
-    } catch {}
-
-    const out = {};
-    for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      out[key] = sanitizePayload(item, depth + 1, key, seen);
-    }
-    return out;
-  }
-
-  return redactHttpText(String(value));
+  return parsed.toString();
 }
 
-function safeEmit(eventName = "", payload = {}) {
-  const name = safeText(eventName, "");
-  if (!name) return false;
-
-  const clean = sanitizePayload({
-    source: SOURCE,
-    version: HTTP_VERSION,
-    at: iso(),
-    ...safeObject(payload),
-  });
-
-  const events = installedAppCore?.events || installedAppCore?.Events || installContext?.events || null;
-
-  for (const method of ["emit", "dispatch", "trigger"]) {
-    try {
-      if (isFn(events?.[method])) {
-        events[method](name, clean);
-        return true;
-      }
-    } catch {}
-  }
-
-  try {
-    if (isBrowser() && typeof CustomEvent !== "undefined") {
-      window.dispatchEvent(new CustomEvent(name, { detail: clean }));
-      return true;
-    }
-  } catch {}
-
-  return false;
+function getState() {
+  return appCore?.state && typeof appCore.state === "object"
+    ? appCore.state
+    : {};
 }
 
-function safeWarn(...args) {
-  const clean = args.map((item) => sanitizePayload(item));
+function validToken(value = "") {
+  const token = text(value, "").replace(/^Bearer\s+/i, "");
 
-  try {
-    if (isFn(installedAppCore?.utils?.warn)) {
-      installedAppCore.utils.warn("[CoreHTTP]", ...clean);
-      return;
-    }
-  } catch {}
+  if (!token) return false;
+  if (/\s/.test(token)) return false;
 
-  try {
-    if (config?.debug) console.warn("[CoreHTTP]", ...clean);
-  } catch {}
+  return !["null", "undefined", "false", "true", "[object object]"].includes(
+    token.toLowerCase()
+  );
 }
 
 /* =========================================================
    ORIGIN / URL
 ========================================================= */
 
-function isFrontendOrigin(origin = "") {
-  try {
-    return FRONTEND_HOST_RE.test(new URL(origin).hostname);
-  } catch {
-    return false;
-  }
-}
-
-function normalizeOrigin(value = "", fallback = DEFAULT_API_ORIGIN, options = {}) {
-  const opts = safeObject(options);
-
-  if (isProductionEnv() && opts.allowNonCanonicalProduction !== true) {
-    return DEFAULT_API_ORIGIN;
-  }
-
-  const raw = safeText(value, "");
-  if (!raw) return fallback;
-
-  try {
-    const url = new URL(raw);
-    if (!["http:", "https:"].includes(url.protocol)) return fallback;
-
-    const origin = url.origin.replace(/\/+$/g, "");
-    if (opts.allowFrontendOrigin !== true && isFrontendOrigin(origin)) return fallback;
-
-    return origin === new URL(DEFAULT_API_ORIGIN).origin ? DEFAULT_API_ORIGIN : origin;
-  } catch {
-    return fallback;
-  }
-}
-
-function resolveRuntimeApiOrigin() {
-  return normalizeOrigin(
-    config?.apiBase ||
-      config?.apiOrigin ||
-      config?.apiUrl ||
-      config?.api?.base ||
-      config?.api?.baseUrl ||
-      config?.api?.origin ||
-      readRuntimeGlobal("__ONION_API_ORIGIN__") ||
-      readRuntimeGlobal("ONION_API_ORIGIN") ||
-      readImportMetaEnv("VITE_ONION_API_BASE") ||
-      readImportMetaEnv("VITE_API_ORIGIN") ||
-      readImportMetaEnv("VITE_API_BASE") ||
-      readImportMetaEnv("VITE_API_URL") ||
-      DEFAULT_API_ORIGIN,
-    DEFAULT_API_ORIGIN
-  );
-}
-
 export function getApiOrigin() {
-  return normalizeOrigin(apiOrigin, DEFAULT_API_ORIGIN);
-}
-
-export function setApiOrigin(value = "", options = {}) {
-  apiOrigin = normalizeOrigin(value || DEFAULT_API_ORIGIN, DEFAULT_API_ORIGIN, options);
-
-  try {
-    if (isBrowser()) window.__ONION_API_ORIGIN__ = apiOrigin;
-  } catch {}
-
   return apiOrigin;
 }
 
-function normalizePath(path = "/") {
-  let value = safeText(path, "/").replace(/\\/g, "/");
-  if (!value.startsWith("/")) value = `/${value}`;
-  value = value.replace(/\/{2,}/g, "/");
-  return value.length > 1 ? value.replace(/\/+$/g, "") || "/" : value || "/";
-}
-
-function splitRelativeUrl(value = "/") {
-  const raw = safeText(value, "/");
-  const hashIndex = raw.indexOf("#");
-  const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
-  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : "";
-  const queryIndex = beforeHash.indexOf("?");
-  const pathname = queryIndex >= 0 ? beforeHash.slice(0, queryIndex) : beforeHash;
-  const search = queryIndex >= 0 ? beforeHash.slice(queryIndex) : "";
-
-  return {
-    pathname: normalizePath(pathname || "/"),
-    search,
-    hash,
-  };
-}
-
-function appendQuery(url = "", query = null) {
-  if (!query) return url;
-
-  try {
-    const parsed = new URL(url);
-
-    if (typeof URLSearchParams !== "undefined" && query instanceof URLSearchParams) {
-      for (const [key, value] of query.entries()) parsed.searchParams.set(key, value);
-      return parsed.toString();
-    }
-
-    if (Array.isArray(query)) {
-      for (const [key, value] of query) {
-        if (value !== undefined && value !== null && value !== "") parsed.searchParams.append(String(key), String(value));
-      }
-      return parsed.toString();
-    }
-
-    if (isPlainObject(query)) {
-      for (const [key, value] of Object.entries(query)) {
-        if (value === undefined || value === null || value === "") continue;
-
-        if (Array.isArray(value)) {
-          for (const item of value) {
-            if (item !== undefined && item !== null && item !== "") parsed.searchParams.append(key, String(item));
-          }
-        } else {
-          parsed.searchParams.set(key, String(value));
-        }
-      }
-      return parsed.toString();
-    }
-  } catch {}
-
-  return url;
-}
-
-function ensureApiPath(endpoint = "/", options = {}) {
-  const opts = safeObject(options);
-  const parts = splitRelativeUrl(endpoint);
-
-  if (opts.api === false) return `${parts.pathname}${parts.search}${parts.hash}`;
-
-  const prefix = normalizePath(opts.apiPrefix || DEFAULT_API_PREFIX);
-  if (parts.pathname === prefix || parts.pathname.startsWith(`${prefix}/`)) {
-    return `${parts.pathname}${parts.search}${parts.hash}`;
-  }
-
-  return `${prefix}${parts.pathname}${parts.search}${parts.hash}`;
-}
-
-function rewriteFrontendApiUrl(raw = "", options = {}) {
-  const opts = safeObject(options);
-
-  try {
-    const parsed = new URL(raw);
-    const pathname = parsed.pathname || "/";
-
-    if (
-      opts.allowFrontendOrigin !== true &&
-      isFrontendOrigin(parsed.origin) &&
-      (pathname === DEFAULT_API_PREFIX || pathname.startsWith(`${DEFAULT_API_PREFIX}/`))
-    ) {
-      return `${getApiOrigin()}${pathname}${parsed.search || ""}${parsed.hash || ""}`;
-    }
-  } catch {}
-
-  return raw;
+export function setApiOrigin(value = "") {
+  apiOrigin = normalizeOrigin(value || DEFAULT_API_ORIGIN);
+  return apiOrigin;
 }
 
 export function buildApiUrl(endpoint = "/", options = {}) {
-  const opts = safeObject(options);
-  const raw = safeText(endpoint, "/");
+  const raw = text(endpoint, "/");
 
   if (/^https?:\/\//i.test(raw)) {
-    return appendQuery(rewriteFrontendApiUrl(raw, opts), opts.query || opts.params);
+    return appendQuery(raw, options.query || options.params);
   }
 
-  const path = ensureApiPath(raw, opts);
-  const origin = normalizeOrigin(opts.origin || opts.baseURL || opts.baseUrl || getApiOrigin(), DEFAULT_API_ORIGIN, opts);
-
-  return appendQuery(`${origin}${path}`, opts.query || opts.params);
+  const path = raw.startsWith("/") ? raw : `/${raw}`;
+  return appendQuery(`${apiOrigin}${path}`, options.query || options.params);
 }
 
-function pathFromEndpoint(endpoint = "/", options = {}) {
-  try {
-    return new URL(buildApiUrl(endpoint, options)).pathname || "/";
-  } catch {
-    return normalizePath(endpoint);
-  }
-}
-
-function isPublicAuthPath(path = "") {
-  try {
-    return Boolean(coreIsPublicApiPath(path));
-  } catch {
-    return AUTH_PUBLIC_PATH_RE.test(path);
-  }
+export function redactHttpText(value = "") {
+  return redact(value);
 }
 
 /* =========================================================
-   TOKEN HELPERS
+   TOKEN COMPAT
 ========================================================= */
 
-function unwrapStoredValue(value = "") {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "number" || typeof value === "boolean") return safeText(value, "");
-
-  if (isPlainObject(value)) {
-    for (const key of [...TOKEN_KEYS, ...REFRESH_TOKEN_KEYS, ...TEMP_TOKEN_KEYS, "value", "raw", "data"]) {
-      const nested = unwrapStoredValue(value[key]);
-      if (nested) return nested;
-    }
-    return "";
-  }
-
-  const raw = safeText(value, "");
-  if (!raw) return "";
-
-  try {
-    const parsed = JSON.parse(raw);
-    if (["string", "number", "boolean"].includes(typeof parsed) || isPlainObject(parsed)) return unwrapStoredValue(parsed);
-  } catch {}
-
-  return raw;
-}
-
-function normalizeTokenValue(value = "") {
-  const token = unwrapStoredValue(value).replace(/^Bearer\s+/i, "").trim();
-  if (!token || BAD_TOKEN_VALUES.has(token.toLowerCase())) return "";
-  if (/[\r\n\t\s]/.test(token)) return "";
-  if (token.length > 8192) return "";
-
-  try {
-    if (isFn(coreHasValidToken) && !coreHasValidToken(token)) return "";
-  } catch {}
-
-  return token;
-}
-
-function getAuthModule() {
-  try {
-    return (
-      installedAppCore?.Auth ||
-      installedAppCore?.auth ||
-      installedAppCore?.modules?.get?.("Auth") ||
-      installedAppCore?.modules?.get?.("auth") ||
-      (isBrowser() ? window.Auth || window.OnionAuth : null) ||
-      null
-    );
-  } catch {
-    return null;
-  }
-}
-
-function readTokenFromAuthModule(kind = "access") {
-  const Auth = getAuthModule();
-  const methods = kind === "refresh" ? ["getStoredRefreshToken", "getRefreshToken"] : ["getAccessToken", "getToken"];
-
-  for (const method of methods) {
-    try {
-      if (isFn(Auth?.[method])) {
-        const token = normalizeTokenValue(Auth[method]());
-        if (token) return token;
-      }
-    } catch {}
-  }
-
-  try {
-    if (kind === "access" && isFn(Auth?.getAuthHeader)) {
-      const header = Auth.getAuthHeader();
-      const token = normalizeTokenValue(header?.Authorization || header?.authorization || "");
-      if (token) return token;
-    }
-  } catch {}
-
-  return "";
-}
-
-function coreState() {
-  return installedAppCore?.state && typeof installedAppCore.state === "object"
-    ? installedAppCore.state
-    : installContext?.state && typeof installContext.state === "object"
-      ? installContext.state
-      : runtimeState;
-}
-
-function readTokenFromState(kind = "access") {
-  const state = safeObject(coreState());
-  const session = safeObject(state.session || state.sessionData);
-
-  if (kind === "refresh") {
-    return normalizeTokenValue(
-      state.refreshToken ||
-        state.refresh_token ||
-        session.refreshToken ||
-        session.refresh_token ||
-        runtimeState.refreshToken ||
-        runtimeState.refresh_token ||
-        ""
-    );
-  }
-
-  return normalizeTokenValue(
-    state.token ||
-      state.accessToken ||
-      state.access_token ||
-      state.authToken ||
-      state.auth_token ||
-      state.jwt ||
-      session.token ||
-      session.accessToken ||
-      session.access_token ||
-      runtimeState.token ||
-      runtimeState.accessToken ||
-      runtimeState.access_token ||
-      ""
-  );
-}
-
-export function setTokenProvider(provider) {
-  tokenProvider = isFn(provider) ? provider : null;
+export function setTokenProvider(provider = null) {
+  tokenProvider = isFunction(provider) ? provider : null;
   return true;
 }
 
 export function getAccessToken() {
   try {
-    if (isFn(tokenProvider)) {
-      const token = normalizeTokenValue(tokenProvider());
-      if (token) return token;
-    }
-  } catch {}
+    const provided = tokenProvider?.();
 
-  return readTokenFromAuthModule("access") || readTokenFromState("access") || "";
+    if (validToken(provided)) {
+      return String(provided).replace(/^Bearer\s+/i, "");
+    }
+  } catch {
+    // noop
+  }
+
+  const state = getState();
+  const token = state.token || state.accessToken || state.access_token || "";
+
+  return validToken(token) ? String(token).replace(/^Bearer\s+/i, "") : "";
 }
 
 export function getRefreshToken() {
-  return readTokenFromAuthModule("refresh") || readTokenFromState("refresh") || "";
-}
+  const state = getState();
+  const token = state.refreshToken || state.refresh_token || "";
 
-function writeRuntimeTokenState(tokens = {}) {
-  const token = normalizeTokenValue(tokens.token || tokens.accessToken || tokens.access_token);
-  const refreshToken = normalizeTokenValue(tokens.refreshToken || tokens.refresh_token);
-  const tempToken = normalizeTokenValue(tokens.tempToken || tokens.temp_token);
-  const state = coreState();
-
-  if (token) {
-    runtimeState.token = token;
-    runtimeState.accessToken = token;
-    runtimeState.access_token = token;
-    runtimeState.hasToken = true;
-  }
-
-  if (refreshToken) {
-    runtimeState.refreshToken = refreshToken;
-    runtimeState.refresh_token = refreshToken;
-  }
-
-  if (tempToken) {
-    runtimeState.tempToken = tempToken;
-    runtimeState.temp_token = tempToken;
-  }
-
-  try {
-    if (state && typeof state === "object") {
-      if (token) {
-        state.token = token;
-        state.accessToken = token;
-        state.access_token = token;
-        state.hasToken = true;
-      }
-
-      if (refreshToken) {
-        state.refreshToken = refreshToken;
-        state.refresh_token = refreshToken;
-      }
-
-      if (tempToken) {
-        state.tempToken = tempToken;
-        state.temp_token = tempToken;
-        state.twoFactorPending = true;
-      }
-    }
-  } catch {}
-}
-
-function syncRuntimeTokenState() {
-  writeRuntimeTokenState({
-    token: getAccessToken(),
-    refreshToken: getRefreshToken(),
-  });
+  return validToken(token) ? String(token).replace(/^Bearer\s+/i, "") : "";
 }
 
 export function setAuthTokens(payload = {}) {
-  writeRuntimeTokenState(safeObject(payload));
+  const state = getState();
+
+  const token =
+    payload.token ||
+    payload.accessToken ||
+    payload.access_token ||
+    "";
+
+  const refreshToken =
+    payload.refreshToken ||
+    payload.refresh_token ||
+    "";
+
+  if (validToken(token)) {
+    state.token = String(token).replace(/^Bearer\s+/i, "");
+    state.accessToken = state.token;
+    state.access_token = state.token;
+    state.hasToken = true;
+  }
+
+  if (validToken(refreshToken)) {
+    state.refreshToken = String(refreshToken).replace(/^Bearer\s+/i, "");
+    state.refresh_token = state.refreshToken;
+  }
 
   return {
-    token: runtimeState.token,
-    refreshToken: runtimeState.refreshToken,
-    tempToken: runtimeState.tempToken,
+    token: state.token || "",
+    refreshToken: state.refreshToken || "",
   };
 }
 
 export function clearAuthTokens() {
-  runtimeState.token = "";
-  runtimeState.accessToken = "";
-  runtimeState.access_token = "";
-  runtimeState.refreshToken = "";
-  runtimeState.refresh_token = "";
-  runtimeState.tempToken = "";
-  runtimeState.temp_token = "";
-  runtimeState.hasToken = false;
+  const state = getState();
 
-  const state = coreState();
+  delete state.token;
+  delete state.accessToken;
+  delete state.access_token;
+  delete state.refreshToken;
+  delete state.refresh_token;
 
-  try {
-    if (state && typeof state === "object") {
-      for (const key of ["token", "accessToken", "access_token", "authToken", "auth_token", "jwt", "refreshToken", "refresh_token", "tempToken", "temp_token"]) {
-        delete state[key];
-      }
-
-      state.hasToken = false;
-      state.twoFactorPending = false;
-    }
-  } catch {}
+  state.hasToken = false;
 
   return true;
 }
 
-/* =========================================================
-   AUTH PAYLOAD CAPTURE
-========================================================= */
-
-function collectObjects(value, depth = 0, seen = new WeakSet()) {
-  if (!value || typeof value !== "object" || depth > 5) return [];
-
-  try {
-    if (seen.has(value)) return [];
-    seen.add(value);
-  } catch {}
-
-  const output = [value];
-
-  for (const key of ["data", "payload", "result", "body", "response", "auth", "session", "sessionData"]) {
-    if (value[key] && typeof value[key] === "object") output.push(...collectObjects(value[key], depth + 1, seen));
-  }
-
-  return output;
-}
-
-function pickToken(objects = [], keys = []) {
-  for (const object of safeArray(objects)) {
-    for (const key of safeArray(keys)) {
-      const token = normalizeTokenValue(object?.[key]);
-      if (token) return token;
-    }
-  }
-
-  return "";
-}
-
-function extractTokens(payload = {}) {
-  const objects = collectObjects(payload);
-
-  return {
-    token: pickToken(objects, TOKEN_KEYS),
-    refreshToken: pickToken(objects, REFRESH_TOKEN_KEYS),
-    tempToken: pickToken(objects, TEMP_TOKEN_KEYS),
-  };
-}
-
-export function setAuthPayloadCommitter(fn) {
-  authPayloadCommitter = isFn(fn) ? fn : null;
+export function setAuthPayloadCommitter(fn = null) {
+  authPayloadCommitter = isFunction(fn) ? fn : null;
   return true;
 }
 
-function handleAuthPayload(payload = {}, meta = {}) {
-  const tokens = extractTokens(payload);
-  if (tokens.token || tokens.refreshToken || tokens.tempToken) setAuthTokens(tokens);
-
+function commitAuthPayload(payload = {}, meta = {}) {
   try {
-    if (isFn(authPayloadCommitter)) {
-      authPayloadCommitter(payload, {
-        source: "core:http",
-        ...safeObject(meta),
-      });
-    }
-  } catch (error) {
-    safeWarn("authPayloadCommitter failed", error);
+    authPayloadCommitter?.(payload, meta);
+  } catch {
+    // noop
   }
 
   return payload;
@@ -849,273 +294,194 @@ function handleAuthPayload(payload = {}, meta = {}) {
 
 export class HttpError extends Error {
   constructor(message = "HTTP_ERROR", options = {}) {
-    super(redactHttpText(message));
+    super(redact(message));
 
     this.name = "HttpError";
     this.status = options.status || 0;
-    this.statusCode = options.status || 0;
+    this.statusCode = this.status;
     this.code = options.code || "HTTP_ERROR";
     this.method = options.method || "";
-    this.url = redactHttpText(options.url || "");
-    this.path = options.path || "";
-    this.requestId = options.requestId || "";
-    this.data = sanitizePayload(options.data ?? null);
-    this.headers = sanitizePayload(options.headers || {});
-    this.retriable = Boolean(options.retriable);
-    this.timeout = Boolean(options.timeout);
-    this.aborted = Boolean(options.aborted);
-    this.network = Boolean(options.network);
-    this.at = iso();
-
-    defineValue(this, "raw", options.raw || null);
+    this.url = redact(options.url || "");
+    this.data = options.data || null;
   }
 }
 
 /* =========================================================
-   REQUEST ENGINE
+   ENGINE
 ========================================================= */
 
-function resolveInstallInput(input = null, options = {}) {
-  const context = input?.AppCore || input?.core ? input : null;
-  const appCore = context?.AppCore || context?.core || input || installedAppCore;
-
-  return {
-    context,
-    appCore,
-    options: {
-      ...safeObject(context?.options),
-      ...safeObject(options),
-    },
-  };
-}
-
-function configureAppCore(input = null, options = {}) {
-  const resolved = resolveInstallInput(input, options);
-
-  installContext = resolved.context || installContext;
-  installedAppCore = resolved.appCore || installedAppCore;
-
-  const opts = resolved.options;
-
-  setApiOrigin(
-    opts.apiOrigin ||
-      opts.baseURL ||
-      opts.baseUrl ||
-      opts.apiBase ||
-      resolveRuntimeApiOrigin()
-  );
-
-  externalRequest = isFn(opts.request)
-    ? opts.request
-    : isFn(installContext?.request)
-      ? installContext.request
-      : isFn(installedAppCore?.baseRequest)
-        ? installedAppCore.baseRequest
-        : null;
-
-  if (!authPayloadCommitter && isFn(installedAppCore?.applySession)) {
-    authPayloadCommitter = (payload, meta) => installedAppCore.applySession(payload, meta);
-  }
-
-  setTokenProvider(() => readTokenFromState("access") || runtimeState.token || "");
-
-  requestEngine = null;
-  apiEngine = null;
-
-  return getApiOrigin();
-}
-
-function ensureRequestEngine() {
+function ensureEngines() {
   if (requestEngine && apiEngine) {
-    return { requestEngine, apiEngine };
+    return {
+      requestEngine,
+      apiEngine,
+    };
   }
 
-  syncRuntimeTokenState();
-
-  requestEngine = isFn(externalRequest)
-    ? externalRequest
-    : createRequest({
-        state: coreState(),
-        events: installedAppCore?.events || installedAppCore?.Events || installContext?.events || null,
-        setError: installedAppCore?.setError || installedAppCore?.setLastError || installContext?.setError || null,
-        utils: installedAppCore?.utils || installContext?.utils || null,
-        registry: installedAppCore?.registry || installContext?.registry || installedAppCore || null,
-        hooks: installedAppCore?.hooks || installContext?.hooks || null,
-      });
+  requestEngine = createRequest({
+    state: getState(),
+    events: appCore?.events || null,
+    setError: appCore?.setError || null,
+  });
 
   apiEngine = createApiClient(requestEngine);
 
-  return { requestEngine, apiEngine };
-}
-
-function normalizeRequestArgs(firstArg = "/", secondArg = {}, thirdArg = {}) {
-  if (isPlainObject(firstArg) && (firstArg.url || firstArg.path || firstArg.endpoint)) {
-    return {
-      endpoint: firstArg.url || firstArg.path || firstArg.endpoint,
-      options: {
-        ...firstArg,
-        url: undefined,
-        path: undefined,
-        endpoint: undefined,
-        ...safeObject(secondArg),
-      },
-    };
-  }
-
-  if (typeof firstArg === "string" && /^[A-Z]+$/i.test(firstArg) && typeof secondArg === "string") {
-    return {
-      endpoint: secondArg,
-      options: {
-        ...safeObject(thirdArg),
-        method: firstArg.toUpperCase(),
-      },
-    };
-  }
-
   return {
-    endpoint: firstArg,
-    options: safeObject(secondArg),
+    requestEngine,
+    apiEngine,
   };
 }
 
-function requestOptions(endpoint = "/", options = {}) {
-  const opts = safeObject(options);
-  const path = pathFromEndpoint(endpoint, opts);
+function normalizeRequestArgs(first = "/", second = {}, third = {}) {
+  if (typeof first === "string" && /^[A-Z]+$/i.test(first) && typeof second === "string") {
+    return {
+      endpoint: second,
+      options: {
+        ...(isObject(third) ? third : {}),
+        method: first.toUpperCase(),
+      },
+    };
+  }
 
-  const auth = AUTH_ME_PATH_RE.test(path)
-    ? true
-    : opts.auth === false || opts.public === true || opts.skipAuth === true || opts.noAuthHeader === true
-      ? false
-      : opts.auth === true
-        ? true
-        : !isPublicAuthPath(path);
+  if (isObject(first)) {
+    return {
+      endpoint: first.url || first.path || first.endpoint || "/",
+      options: {
+        ...first,
+        ...(isObject(second) ? second : {}),
+      },
+    };
+  }
 
   return {
-    ...opts,
-    auth,
-    public: auth === false,
-    skipAuth: auth === false,
-    token: auth ? opts.token || getAccessToken() : "",
-    timeout: safeNumber(opts.timeout ?? opts.timeoutMs, AUTH_PATH_RE.test(path) ? DEFAULT_AUTH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS),
+    endpoint: first,
+    options: isObject(second) ? second : {},
+  };
+}
+
+export async function request(first = "/", second = {}, third = {}) {
+  const parsed = normalizeRequestArgs(first, second, third);
+  const endpoint = text(parsed.endpoint, "/");
+  const options = parsed.options || {};
+
+  const url = buildApiUrl(endpoint, options);
+  const auth = shouldUseAuth(url, options);
+
+  const finalOptions = {
+    ...options,
     query: undefined,
     params: undefined,
+    auth,
+    public: !auth,
+    skipAuth: !auth,
+    token: auth ? options.token || getAccessToken() : "",
   };
-}
 
-function shouldCaptureAuth(endpoint = "/", options = {}) {
-  const opts = safeObject(options);
-  if (opts.captureAuth === true) return true;
-  if (opts.captureAuth === false) return false;
-  return AUTH_PATH_RE.test(pathFromEndpoint(endpoint, opts));
-}
-
-export async function request(firstArg = "/", secondArg = {}, thirdArg = {}) {
-  const parsed = normalizeRequestArgs(firstArg, secondArg, thirdArg);
-  const endpoint = parsed.endpoint;
-  const opts = safeObject(parsed.options);
-  const url = buildApiUrl(endpoint, opts);
-  const finalOptions = requestOptions(endpoint, opts);
-
-  syncRuntimeTokenState();
-
-  httpStats.total += 1;
-  httpStats.lastRequestAt = iso();
-  httpStats.lastUrl = redactHttpText(url);
+  stats.total += 1;
+  stats.lastUrl = redact(url);
 
   try {
-    const result = await ensureRequestEngine().apiEngine.request(url, finalOptions);
+    const result = await ensureEngines().apiEngine.request(url, finalOptions);
 
-    if (shouldCaptureAuth(endpoint, opts) && isPlainObject(result)) {
-      const path = pathFromEndpoint(endpoint, opts);
+    stats.success += 1;
 
-      handleAuthPayload(result, {
-        endpoint: path,
+    if (options.captureAuth === true && isObject(result)) {
+      commitAuthPayload(result, {
+        endpoint: cleanPath(url),
         method: finalOptions.method || "GET",
-        reason: AUTH_ME_PATH_RE.test(path)
-          ? "me"
-          : path.includes("/login")
-            ? "login"
-            : path.includes("/refresh")
-              ? "refresh"
-              : "auth-response",
-        emit: opts.emitAuthEvents !== false,
       });
     }
 
-    httpStats.success += 1;
     return result;
   } catch (error) {
-    httpStats.error += 1;
-    httpStats.lastError = sanitizePayload(error);
+    stats.error += 1;
+    stats.lastError = {
+      name: error?.name || "Error",
+      message: error?.message || String(error),
+      status: error?.status || 0,
+    };
+
     throw error;
   }
 }
 
+/* =========================================================
+   HTTP VERBS
+========================================================= */
+
 export function get(endpoint = "/", options = {}) {
-  return request(endpoint, { ...safeObject(options), method: "GET" });
+  return request(endpoint, {
+    ...options,
+    method: "GET",
+  });
 }
 
 export function head(endpoint = "/", options = {}) {
-  return request(endpoint, { ...safeObject(options), method: "HEAD" });
+  return request(endpoint, {
+    ...options,
+    method: "HEAD",
+  });
 }
 
 export function optionsRequest(endpoint = "/", options = {}) {
-  return request(endpoint, { ...safeObject(options), method: "OPTIONS" });
+  return request(endpoint, {
+    ...options,
+    method: "OPTIONS",
+  });
 }
 
 export function post(endpoint = "/", body = undefined, options = {}) {
-  return request(endpoint, { ...safeObject(options), method: "POST", body });
+  return request(endpoint, {
+    ...options,
+    method: "POST",
+    body,
+  });
 }
 
 export function put(endpoint = "/", body = undefined, options = {}) {
-  return request(endpoint, { ...safeObject(options), method: "PUT", body });
+  return request(endpoint, {
+    ...options,
+    method: "PUT",
+    body,
+  });
 }
 
 export function patch(endpoint = "/", body = undefined, options = {}) {
-  return request(endpoint, { ...safeObject(options), method: "PATCH", body });
+  return request(endpoint, {
+    ...options,
+    method: "PATCH",
+    body,
+  });
 }
 
-function looksLikeOptionsObject(value = {}) {
-  return isPlainObject(value) && [
-    "method",
-    "headers",
-    "query",
-    "params",
-    "body",
-    "data",
-    "auth",
-    "public",
-    "timeout",
-    "timeoutMs",
-    "signal",
-    "retries",
-    "responseType",
-    "silent",
-  ].some((key) => hasOwn(value, key));
-}
-
-export function del(endpoint = "/", bodyOrOptions = {}, maybeOptions = undefined) {
-  if (maybeOptions !== undefined) {
-    return request(endpoint, { ...safeObject(maybeOptions), method: "DELETE", body: bodyOrOptions });
-  }
-
-  if (looksLikeOptionsObject(bodyOrOptions)) {
-    return request(endpoint, { ...safeObject(bodyOrOptions), method: "DELETE" });
-  }
-
-  return request(endpoint, { method: "DELETE", body: bodyOrOptions });
+export function del(endpoint = "/", options = {}) {
+  return request(endpoint, {
+    ...options,
+    method: "DELETE",
+  });
 }
 
 export function upload(endpoint = "/", formData, options = {}) {
-  return request(endpoint, { ...safeObject(options), method: options.method || "POST", body: formData });
+  return request(endpoint, {
+    ...options,
+    method: options.method || "POST",
+    body: formData,
+  });
 }
 
 export function download(endpoint = "/", options = {}) {
-  return request(endpoint, { ...safeObject(options), method: options.method || "GET", responseType: options.responseType || "blob" });
+  return request(endpoint, {
+    ...options,
+    method: "GET",
+    responseType: options.responseType || "blob",
+  });
 }
 
 export function raw(endpoint = "/", options = {}) {
-  return request(endpoint, { ...safeObject(options), raw: true });
+  return request(endpoint, {
+    ...options,
+    raw: true,
+  });
 }
 
 /* =========================================================
@@ -1123,178 +489,118 @@ export function raw(endpoint = "/", options = {}) {
 ========================================================= */
 
 export function login(credentials = {}, options = {}) {
-  return post("/auth/login", credentials, {
+  return post(AUTH_ENDPOINTS.login, credentials, {
+    ...options,
     auth: false,
     public: true,
     skipAuth: true,
-    retries: 0,
-    timeoutMs: DEFAULT_AUTH_TIMEOUT_MS,
     captureAuth: true,
-    ...safeObject(options),
   });
 }
 
 export function me(options = {}) {
-  return get("/auth/me", {
+  return get(AUTH_ENDPOINTS.me, {
+    ...options,
     auth: true,
     public: false,
-    retries: 0,
-    timeoutMs: DEFAULT_AUTH_TIMEOUT_MS,
+    skipAuth: false,
     cache: "no-store",
     captureAuth: true,
-    ...safeObject(options),
   });
 }
 
-export async function refreshSession(options = {}) {
-  if (refreshPromise) return refreshPromise;
-
-  refreshPromise = (async () => {
-    httpStats.refresh += 1;
-
-    const refreshToken = getRefreshToken();
-    const body = refreshToken ? { refreshToken, refresh_token: refreshToken } : undefined;
-
-    return post("/auth/refresh", body, {
-      auth: false,
-      public: true,
-      skipAuth: true,
-      retries: 0,
-      timeoutMs: safeNumber(options.timeoutMs ?? options.timeout, DEFAULT_REFRESH_TIMEOUT_MS),
-      captureAuth: true,
-      ...safeObject(options),
-    });
-  })();
-
-  try {
-    return await refreshPromise;
-  } finally {
-    refreshPromise = null;
-  }
+export function refreshSession(body = {}, options = {}) {
+  return post(AUTH_ENDPOINTS.refresh, body, {
+    ...options,
+    auth: false,
+    public: true,
+    skipAuth: true,
+    captureAuth: true,
+  });
 }
 
 export function refresh(options = {}) {
-  return refreshSession(options);
+  return refreshSession({}, options);
 }
 
 export function logout(options = {}) {
-  return post("/auth/logout", {}, {
+  return post(AUTH_ENDPOINTS.logout, {}, {
+    ...options,
     auth: true,
-    retries: 0,
-    timeoutMs: DEFAULT_AUTH_TIMEOUT_MS,
+    public: false,
     captureAuth: false,
-    ...safeObject(options),
   }).finally(() => {
     clearAuthTokens();
   });
 }
 
-/* =========================================================
-   INSTALL / FACADE
-========================================================= */
-
-function createApiClientFacade() {
-  return {
-    version: HTTP_VERSION,
-
-    get origin() {
-      return getApiOrigin();
-    },
-
-    setOrigin: setApiOrigin,
-    buildUrl: buildApiUrl,
-    buildApiUrl,
-
-    request,
-
-    get,
-    head,
-    options: optionsRequest,
-    post,
-    put,
-    patch,
-
-    delete: del,
-    del,
-
-    upload,
-    download,
-    raw,
-
-    login,
-    me,
-    refresh,
-    refreshSession,
-    logout,
-
-    setTokenProvider,
-    setAuthPayloadCommitter,
-    setAuthTokens,
-    clearAuthTokens,
-    getAccessToken,
-    getRefreshToken,
-
-    install: installHttp,
-
-    getSnapshot: getHttpSnapshot,
-    getDebugSnapshot: getHttpSnapshot,
-    snapshot: getHttpSnapshot,
-  };
+export function activate(body = {}, options = {}) {
+  return post(AUTH_ENDPOINTS.activate, body, {
+    ...options,
+    auth: false,
+    public: true,
+    skipAuth: true,
+  });
 }
 
-export function installHttp(AppCore = null, options = {}) {
-  configureAppCore(AppCore, safeObject(options));
-
-  const api = createApiClientFacade();
-
-  try {
-    if (installedAppCore && typeof installedAppCore === "object") {
-      defineValue(installedAppCore, "http", api);
-      defineValue(installedAppCore, "Http", api);
-      defineValue(installedAppCore, "api", api);
-      defineValue(installedAppCore, "apiClient", api);
-
-      if (!installedAppCore.services || typeof installedAppCore.services !== "object") installedAppCore.services = {};
-
-      installedAppCore.services.http = api;
-      installedAppCore.services.Http = api;
-      installedAppCore.services.api = api;
-      installedAppCore.services.apiClient = api;
-    }
-  } catch {}
-
-  try {
-    const modules = installedAppCore?.modules;
-
-    if (isFn(modules?.register)) {
-      modules.register("Http", api, {
-        overwrite: true,
-        replace: true,
-        aliases: ["http", "api", "ApiClient", "apiClient"],
-        source: "core/http.js",
-      });
-    } else if (isFn(modules?.set)) {
-      modules.set("Http", api);
-      modules.set("http", api);
-      modules.set("api", api);
-      modules.set("ApiClient", api);
-      modules.set("apiClient", api);
-    }
-  } catch {}
-
-  try {
-    if (isBrowser()) {
-      window.__ONION_HTTP__ = api;
-      window.__ONION_API_ORIGIN__ = getApiOrigin();
-    }
-  } catch {}
-
-  safeEmit("http:installed", {
-    origin: getApiOrigin(),
-    appCore: Boolean(installedAppCore),
+export function requestPasswordReset(body = {}, options = {}) {
+  return post(AUTH_ENDPOINTS.requestPasswordReset, body, {
+    ...options,
+    auth: false,
+    public: true,
+    skipAuth: true,
   });
+}
 
-  return api;
+export function confirmPasswordReset(body = {}, options = {}) {
+  return post(AUTH_ENDPOINTS.confirmPasswordReset, body, {
+    ...options,
+    auth: false,
+    public: true,
+    skipAuth: true,
+  });
+}
+
+/* =========================================================
+   INSTALL
+========================================================= */
+
+export function installHttp(AppCore = null, options = {}) {
+  appCore = AppCore || appCore;
+
+  if (options.apiOrigin || options.apiBase || options.baseUrl) {
+    setApiOrigin(options.apiOrigin || options.apiBase || options.baseUrl);
+  }
+
+  requestEngine = null;
+  apiEngine = null;
+
+  if (isObject(appCore)) {
+    appCore.http = Http;
+    appCore.Http = Http;
+    appCore.api = Http;
+    appCore.apiClient = Http;
+
+    if (!isObject(appCore.services)) {
+      appCore.services = {};
+    }
+
+    appCore.services.http = Http;
+    appCore.services.Http = Http;
+    appCore.services.api = Http;
+    appCore.services.apiClient = Http;
+
+    try {
+      appCore.modules?.register?.("Http", Http);
+      appCore.modules?.register?.("http", Http);
+      appCore.modules?.register?.("api", Http);
+      appCore.modules?.register?.("apiClient", Http);
+    } catch {
+      // noop
+    }
+  }
+
+  return Http;
 }
 
 export const installCoreHttp = installHttp;
@@ -1304,83 +610,83 @@ export const install = installHttp;
    SNAPSHOT
 ========================================================= */
 
-export function getHttpSnapshot(options = {}) {
-  const requestSnapshot = ensureRequestEngine().requestEngine?.getSnapshot?.(options) || null;
-
-  return sanitizePayload({
+export function getHttpSnapshot() {
+  return {
     version: HTTP_VERSION,
-
     origin: getApiOrigin(),
-    defaultOrigin: DEFAULT_API_ORIGIN,
-    apiPrefix: DEFAULT_API_PREFIX,
-
-    installed: Boolean(installedAppCore),
-    hasFetch: typeof globalThis !== "undefined" && isFn(globalThis.fetch),
-    hasAbortController: typeof AbortController === "function",
-
-    hasTokenProvider: Boolean(tokenProvider),
-    hasAuthModule: Boolean(getAuthModule()),
-
+    installed: Boolean(appCore),
+    hasRequestEngine: Boolean(requestEngine),
+    hasApiEngine: Boolean(apiEngine),
     hasAccessToken: Boolean(getAccessToken()),
     hasRefreshToken: Boolean(getRefreshToken()),
-
-    refreshInFlight: Boolean(refreshPromise),
-
-    stats: httpStats,
-    request: requestSnapshot,
-
-    endpoints: {
-      login: buildApiUrl("/auth/login"),
-      me: buildApiUrl("/auth/me"),
-      refresh: buildApiUrl("/auth/refresh"),
-      logout: buildApiUrl("/auth/logout"),
+    stats: {
+      ...stats,
+      lastUrl: redact(stats.lastUrl),
     },
-
-    privateChecks: {
-      me: true,
-      apiMe: true,
-      authMe: true,
-      apiAuthMe: true,
-    },
-
-    policy: {
-      facadeOnly: true,
-      backendCanonical: true,
-      noOwnFetch: true,
-      noOwnRetry: true,
-      noOwnParser: true,
-      noRouter: true,
-      noToast: true,
-      noStorageAggressive: true,
-      mePrivate: true,
-      redactedSnapshots: true,
-    },
-
-    at: iso(),
-  });
+    endpoints: AUTH_ENDPOINTS,
+  };
 }
 
 /* =========================================================
-   DEFAULT FACADE
+   FACADE
 ========================================================= */
 
-try {
-  setApiOrigin(resolveRuntimeApiOrigin());
-} catch {
-  setApiOrigin(DEFAULT_API_ORIGIN);
-}
+export const Http = {
+  version: HTTP_VERSION,
 
-export const Http = createApiClientFacade();
+  get origin() {
+    return getApiOrigin();
+  },
+
+  setOrigin: setApiOrigin,
+  getApiOrigin,
+  setApiOrigin,
+
+  buildUrl: buildApiUrl,
+  buildApiUrl,
+
+  request,
+
+  get,
+  head,
+  options: optionsRequest,
+  post,
+  put,
+  patch,
+
+  delete: del,
+  del,
+
+  upload,
+  download,
+  raw,
+
+  login,
+  me,
+  refresh,
+  refreshSession,
+  logout,
+
+  activate,
+  requestPasswordReset,
+  confirmPasswordReset,
+
+  setTokenProvider,
+  setAuthPayloadCommitter,
+  setAuthTokens,
+  clearAuthTokens,
+  getAccessToken,
+  getRefreshToken,
+
+  install: installHttp,
+
+  getSnapshot: getHttpSnapshot,
+  getDebugSnapshot: getHttpSnapshot,
+  snapshot: getHttpSnapshot,
+};
 
 export const http = Http;
 export const apiClient = Http;
 export const client = Http;
-
-try {
-  if (isBrowser()) {
-    window.__ONION_HTTP__ = Http;
-    window.__ONION_API_ORIGIN__ = getApiOrigin();
-  }
-} catch {}
 
 export default Http;

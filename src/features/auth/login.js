@@ -2,13 +2,13 @@
    Onion SPA - Auth Login
    Archivo: src/features/auth/login.js
 
-   AUTH LOGIN · FINAL SIMPLE
-   - Login público vía CoreHttp
-   - Sin fetch propio, apiClient propio, Router, Toast ni DOM hacks
-   - Sin refresh automático
+   AUTH LOGIN · SIMPLE
+   - login público vía CoreHttp
+   - sin fetch propio, apiClient propio, Router, Toast ni DOM hacks
+   - sin refresh automático
    - 2FA no autentica
-   - Sesión real aplicada por session.js
-   - Roles reales: admin / user
+   - sesión real aplicada por session.js
+   - roles reales: admin / user
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -17,7 +17,6 @@ import CoreHttp from "../../core/http.js";
 import {
   isBrowser,
   sanitizeUsername,
-  normalizeCanonicalPath,
   getCurrentCanonicalPath,
   isAuthRoute,
   configLikeRoute,
@@ -48,11 +47,7 @@ import {
   clearSessionLocal,
 } from "./session.js";
 
-/* =========================================================
-   META
-========================================================= */
-
-export const LOGIN_VERSION = "20.0.0-final";
+export const LOGIN_VERSION = "21.0.0-simple";
 
 const SOURCE = "auth.login";
 const DEFAULT_HOME_PATH = "/";
@@ -64,9 +59,18 @@ let loginPromise = null;
 let loginFingerprint = "";
 let loginSequence = 0;
 
-/* =========================================================
-   RESPONSE KEYS
-========================================================= */
+const VALID_ROLES = Object.freeze(["admin", "user"]);
+
+const ADMIN_ALIASES = new Set([
+  "admin",
+  "administrator",
+  "administrador",
+  "superadmin",
+  "super_admin",
+  "super-admin",
+  "owner",
+  "root",
+]);
 
 const TOKEN_KEYS = Object.freeze([
   "token",
@@ -126,6 +130,8 @@ const NESTED_KEYS = Object.freeze([
   "response",
   "auth",
   "authData",
+  "session",
+  "sessionData",
 ]);
 
 const TWO_FACTOR_KEYS = Object.freeze([
@@ -133,8 +139,11 @@ const TWO_FACTOR_KEYS = Object.freeze([
   "requires_2fa",
   "require2FA",
   "require_2fa",
+  "requiresTwoFactor",
   "twoFactorRequired",
   "two_factor_required",
+  "requiresMfa",
+  "requires_mfa",
   "mfaRequired",
   "mfa_required",
   "otpRequired",
@@ -197,7 +206,7 @@ const BAD_TOKEN_VALUES = new Set([
   "''",
 ]);
 
-const VALID_ROLES = Object.freeze(["admin", "user"]);
+const SENSITIVE_KEY_RE = /token|authorization|password|secret|credential|cookie|jwt|bearer|refresh|access|otp|mfa|2fa|totp|code|csrf|xsrf/i;
 
 /* =========================================================
    BASICS
@@ -212,7 +221,7 @@ function safeObject(value, fallback = {}) {
 
 function safeArray(value) {
   if (Array.isArray(value)) return value;
-  if (value instanceof Set) return Array.from(value);
+  if (value instanceof Set) return [...value];
   if (value === null || value === undefined) return [];
   return [value];
 }
@@ -234,15 +243,12 @@ function safeRawText(value, fallback = "") {
 }
 
 function safeBool(value, fallback = false) {
-  if (value === true) return true;
-  if (value === false) return false;
-  if (value === 1) return true;
-  if (value === 0) return false;
+  if (value === true || value === 1 || value === "1") return true;
+  if (value === false || value === 0 || value === "0") return false;
 
   const text = safeText(value, "").toLowerCase();
-
-  if (["true", "1", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(text)) return true;
-  if (["false", "0", "no", "off", "disabled", "inactive"].includes(text)) return false;
+  if (["true", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(text)) return true;
+  if (["false", "no", "off", "disabled", "inactive"].includes(text)) return false;
 
   return Boolean(fallback);
 }
@@ -268,16 +274,11 @@ function firstText(...values) {
     const text = safeText(value, "");
     if (text) return text;
   }
-
   return "";
 }
 
 function isoNow() {
-  try {
-    return new Date().toISOString();
-  } catch {
-    return "";
-  }
+  try { return new Date().toISOString(); } catch { return ""; }
 }
 
 function getState() {
@@ -286,27 +287,17 @@ function getState() {
 
 function safeSetState(patch = {}, options = {}) {
   const finalPatch = safeObject(patch);
+  const finalOptions = {
+    source: SOURCE,
+    emit: false,
+    emitState: false,
+    emitDerived: false,
+    silent: true,
+    ...safeObject(options),
+  };
 
-  try {
-    AppCore?.setState?.(finalPatch, {
-      source: SOURCE,
-      emit: false,
-      emitState: false,
-      emitDerived: false,
-      silent: true,
-      ...safeObject(options),
-    });
-  } catch {}
-
-  try {
-    AppCore?.patchState?.(finalPatch, {
-      source: SOURCE,
-      emit: false,
-      emitState: false,
-      silent: true,
-      ...safeObject(options),
-    });
-  } catch {}
+  try { AppCore?.setState?.(finalPatch, finalOptions); } catch {}
+  try { AppCore?.patchState?.(finalPatch, finalOptions); } catch {}
 
   try {
     if (AppCore?.state && typeof AppCore.state === "object") Object.assign(AppCore.state, finalPatch);
@@ -317,11 +308,7 @@ function safeSetState(patch = {}, options = {}) {
 
 function wait(ms = 0) {
   return new Promise((resolve) => {
-    try {
-      setTimeout(resolve, Math.max(0, safeNumber(ms, 0)));
-    } catch {
-      resolve();
-    }
+    try { setTimeout(resolve, Math.max(0, safeNumber(ms, 0))); } catch { resolve(); }
   });
 }
 
@@ -334,7 +321,7 @@ function redact(value = "") {
     return redactTokenInText(value);
   } catch {
     return safeText(value, "")
-      .replace(/([?&#](?:token|activationToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi, "$1***")
+      .replace(/([?&#](?:token|activationToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token)=)([^&#\s]+)/gi, "$1***")
       .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
       .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
   }
@@ -357,43 +344,63 @@ function sanitizeUserForEvent(user = null) {
   if (!isPlainObject(user)) return null;
 
   const output = { ...user };
-
   for (const key of Object.keys(output)) {
-    if (/token|password|hash|secret|otp|totp|mfa|2fa|authorization|cookie/i.test(key) || key.startsWith("_")) {
-      delete output[key];
-    }
+    if (SENSITIVE_KEY_RE.test(key) || key.startsWith("_")) delete output[key];
   }
 
-  if (output.avatar) output.avatar = redact(output.avatar);
-  if (output.avatarUrl) output.avatarUrl = redact(output.avatarUrl);
-  if (output.picture) output.picture = redact(output.picture);
+  for (const key of ["avatar", "avatarUrl", "picture", "photo", "image"]) {
+    if (output[key]) output[key] = redact(output[key]);
+  }
 
   return output;
 }
 
+function sanitizeForEvent(value, depth = 0, keyHint = "", seen = new WeakSet()) {
+  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) return value ? "***" : null;
+  if (depth > 4) return "[depth-limit]";
+  if (typeof value === "string") return redact(value);
+  if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "function") return "[function]";
+
+  if (value instanceof Error) {
+    return {
+      name: value.name || "Error",
+      message: redact(value.message || ""),
+      status: value.status || value.statusCode || value.response?.status || null,
+      code: value.code || value.data?.code || value.response?.data?.code || null,
+      stack: value.stack ? "[stack]" : null,
+    };
+  }
+
+  if (Array.isArray(value)) return value.slice(0, 50).map((item) => sanitizeForEvent(item, depth + 1, keyHint, seen));
+
+  if (isPlainObject(value)) {
+    try {
+      if (seen.has(value)) return "[circular]";
+      seen.add(value);
+    } catch {}
+
+    const output = {};
+    for (const [key, item] of Object.entries(value).slice(0, 80)) {
+      output[key] = key === "user" ? sanitizeUserForEvent(item) : sanitizeForEvent(item, depth + 1, key, seen);
+    }
+    return output;
+  }
+
+  return String(value);
+}
+
 function emit(eventName, payload = {}, options = {}) {
   const name = safeText(eventName, "");
+  if (!name || options.silent === true || options.emit === false || options.emitEvents === false) return false;
 
-  if (!name) return false;
-  if (options.silent === true || options.emit === false || options.emitEvents === false) return false;
-
-  const detail = {
+  const detail = sanitizeForEvent({
     source: SOURCE,
     version: LOGIN_VERSION,
     at: isoNow(),
     ...safeObject(payload),
-  };
-
-  for (const key of ["token", "accessToken", "access_token", "refreshToken", "refresh_token", "tempToken", "temp_token", "authorization", "password", "code", "otp", "totp"]) {
-    if (key in detail) detail[key] = null;
-  }
-
-  if (detail.identifier) detail.identifier = redactIdentifier(detail.identifier);
-  if (detail.user) detail.user = sanitizeUserForEvent(detail.user);
-
-  for (const key of ["path", "route", "publicPath", "redirectTo", "url", "endpoint"]) {
-    if (detail[key]) detail[key] = redact(detail[key]);
-  }
+  });
 
   try {
     AppCore?.events?.emit?.(name, detail);
@@ -411,11 +418,8 @@ function emit(eventName, payload = {}, options = {}) {
 }
 
 function setError(error = null) {
-  try {
-    AppCore?.setError?.(error);
-  } catch {}
-
-  safeSetState(error ? { error, lastError: error, hasError: true } : { error: null, hasError: false });
+  try { AppCore?.setError?.(error); } catch {}
+  safeSetState(error ? { error, lastError: error, hasError: true } : { error: null, lastError: null, hasError: false });
   return true;
 }
 
@@ -424,20 +428,16 @@ function setError(error = null) {
 ========================================================= */
 
 function createAuthError(message = "No se pudo iniciar sesión.", { status = 401, code = "LOGIN_FAILED", raw = null } = {}) {
-  const error = new Error(message);
+  const error = new Error(redact(message));
 
   error.name = "AuthLoginError";
   error.status = status;
   error.statusCode = status;
   error.code = code;
-  error.data = { code, message, status };
+  error.data = { code, message: redact(message), status };
 
   try {
-    Object.defineProperty(error, "raw", {
-      value: raw,
-      enumerable: false,
-      configurable: true,
-    });
+    Object.defineProperty(error, "raw", { value: raw, enumerable: false, configurable: true });
   } catch {
     error.raw = raw;
   }
@@ -512,7 +512,6 @@ function resolveLoginEndpoint() {
 
 function resolveTimeout(options = {}) {
   const custom = options.timeout ?? options.timeoutMs ?? options.loginTimeoutMs;
-
   if (custom !== undefined) return Math.max(1000, safeNumber(custom, DEFAULT_TIMEOUT_MS));
 
   try {
@@ -526,6 +525,8 @@ function resolveTimeout(options = {}) {
 }
 
 function publicLoginOptions(options = {}) {
+  const timeout = resolveTimeout(options);
+
   return {
     ...safeObject(options),
     public: true,
@@ -545,8 +546,8 @@ function publicLoginOptions(options = {}) {
     storeError: false,
     dedupe: false,
     captureAuth: false,
-    timeout: resolveTimeout(options),
-    timeoutMs: resolveTimeout(options),
+    timeout,
+    timeoutMs: timeout,
     headers: {
       "X-Onion-Auth-Flow": "login",
       "X-Request-Source": SOURCE,
@@ -596,19 +597,15 @@ export function resolveLoginIdentifier(credentials = {}) {
 }
 
 export function normalizeLoginPayload(credentials = {}) {
-  const maxIdentifier = safeNumber(AUTH_CONSTANTS?.identifierMaxLength, 160);
-  const maxPassword = safeNumber(AUTH_CONSTANTS?.passwordMaxLength, 1024);
+  const maxIdentifier = Math.max(1, safeNumber(AUTH_CONSTANTS?.identifierMaxLength, 160));
+  const maxPassword = Math.max(1, safeNumber(AUTH_CONSTANTS?.passwordMaxLength, 1024));
 
-  const identifier = safeText(resolveLoginIdentifier(credentials))
-    .normalize("NFKC")
-    .replace(/\s+/g, " ")
-    .slice(0, maxIdentifier);
-
-  const password = safeRawText(credentials.password ?? credentials.pass ?? "").slice(0, maxPassword);
+  const rawIdentifier = safeText(resolveLoginIdentifier(credentials)).normalize("NFKC").replace(/\s+/g, " ");
+  const rawPassword = safeRawText(credentials.password ?? credentials.pass ?? "");
 
   return {
-    identifier,
-    password,
+    identifier: rawIdentifier.length > maxIdentifier ? "" : rawIdentifier,
+    password: rawPassword.length > maxPassword ? "" : rawPassword,
     remember: safeBool(credentials.remember, false),
   };
 }
@@ -690,7 +687,6 @@ function pickValue(objects = [], keys = []) {
       if (value !== null && value !== undefined && value !== "") return value;
     }
   }
-
   return "";
 }
 
@@ -704,7 +700,6 @@ function pickObject(objects = [], keys = []) {
       if (isPlainObject(object?.[key])) return object[key];
     }
   }
-
   return null;
 }
 
@@ -753,7 +748,7 @@ function normalizeRole(value = "user") {
     .replace(/[^a-z0-9_:.]/g, "")
     .replace(/^_+|_+$/g, "") || "user";
 
-  return role === "admin" ? "admin" : "user";
+  return ADMIN_ALIASES.has(role) ? "admin" : "user";
 }
 
 function normalizeStatus(value = "") {
@@ -775,9 +770,7 @@ function isUserActive(user = null) {
     return false;
   }
 
-  if (user.disabled === true || user.deleted === true || user.blocked === true || user.banned === true || user.suspended === true || user.revoked === true || user.archived === true) {
-    return false;
-  }
+  if (user.disabled === true || user.deleted === true || user.blocked === true || user.banned === true || user.suspended === true || user.revoked === true || user.archived === true) return false;
 
   const active = user.active ?? user.enabled ?? user.isActive ?? user.isEnabled;
   return active === undefined || active === null || active === "" ? true : safeBool(active, true);
@@ -811,7 +804,7 @@ function normalizeUserForClient(user = null) {
   const avatar = resolveAvatar(user);
   const preferences = safeObject(user.preferences || user.preferencias);
   const usernameLower = user.usernameLower || user.username_lower || sanitizeUsername(username || email || "");
-  const displayName = user.displayName || user.fullName || user.name || user.nombre || username || email || "Usuario";
+  const displayName = firstText(user.name, user.nombre, user.fullName, user.full_name, user.displayName, username, email, "Usuario");
 
   return {
     ...user,
@@ -832,10 +825,14 @@ function normalizeUserForClient(user = null) {
     name: displayName,
     nombre: user.nombre || displayName,
     displayName,
-    fullName: user.fullName || displayName,
+    fullName: user.fullName || user.full_name || displayName,
+    full_name: user.full_name || user.fullName || displayName,
+    footerName: displayName,
+    greetingName: displayName,
     role,
     rol: role,
-    roles: unique([role, ...safeArray(user.roles)]).filter((item) => VALID_ROLES.includes(item)),
+    userRole: role,
+    roles: [role],
     permissions: safeArray(user.permissions || user.permisos),
     permisos: safeArray(user.permisos || user.permissions),
     avatar,
@@ -869,10 +866,7 @@ function hasUsableUser(user = null) {
       user.email ||
       user.mail ||
       user.phone ||
-      user.telefono ||
-      user.name ||
-      user.nombre ||
-      user.displayName
+      user.telefono
   );
 }
 
@@ -905,7 +899,7 @@ function normalizeSessionData(session = null, user = null) {
 
 function validateResponseSoft(response) {
   try {
-    return validateAuthResponse(response);
+    return validateAuthResponse(response, { mode: "login", allow2FAWithoutTempToken: false });
   } catch {
     return null;
   }
@@ -925,7 +919,7 @@ function normalizeAuthPayload(response) {
   let token = normalizeToken(pickText(objects, TOKEN_KEYS));
   const refreshToken = normalizeToken(pickText(objects, REFRESH_TOKEN_KEYS));
   let tempToken = normalizeToken(pickText(objects, TEMP_TOKEN_KEYS));
-  const user = normalizeUserForClient(pickObject(objects, USER_KEYS));
+  const user = normalizeUserForClient(pickObject(objects, USER_KEYS) || validated.user || validated.usuario || validated.me);
   const role = normalizeRole(firstText(pickText(objects, ["role", "rol", "type", "tipo", "userRole", "user_role"]), user?.role, "user"));
   const permissions = unique([...pickArray(objects, ["permissions", "permisos", "scopes", "scope"]), ...safeArray(user?.permissions), ...safeArray(user?.permisos)]);
   const status = pickValue(objects, ["status", "statusCode", "status_code", "state", "estado"]);
@@ -933,10 +927,10 @@ function normalizeAuthPayload(response) {
   const code = pickText(objects, ["code", "errorCode", "error_code", "error"]);
   const message = pickText(objects, ["message", "mensaje", "errorMessage", "error_message", "detail", "description", "reason"]);
   const redirectTo = normalizeRedirectCandidate(pickText(objects, ["redirectTo", "redirect_to", "redirect", "next", "returnTo", "target"]));
-  const sessionData = normalizeSessionData(pickObject(objects, SESSION_KEYS), user);
+  const sessionData = normalizeSessionData(pickObject(objects, SESSION_KEYS) || validated.sessionData || validated.session, user);
   const tokenVersion = sessionData?.tokenVersion ?? user?.tokenVersion ?? pickValue(objects, ["tokenVersion", "token_version", "tv"]);
 
-  let requires2FA = Boolean(tempToken) || pickBool(objects, TWO_FACTOR_KEYS) || TWO_FACTOR_STATUSES.has(statusKey);
+  let requires2FA = Boolean(tempToken) || pickBool(objects, TWO_FACTOR_KEYS) || TWO_FACTOR_STATUSES.has(statusKey) || validated.requires2FA === true;
 
   if (requires2FA && !tempToken && token && !hasUsableUser(user)) {
     tempToken = token;
@@ -952,7 +946,9 @@ function normalizeAuthPayload(response) {
     (Number.isFinite(statusNumber) && statusNumber >= 400) ||
     (codeUpper && FAILURE_CODES.has(codeUpper)) ||
     (statusKey && FAILURE_STATUSES.has(statusKey)) ||
-    objects.some((object) => object.ok === false || object.success === false)
+    objects.some((object) => object.ok === false || object.success === false) ||
+    validated.ok === false ||
+    validated.success === false
   );
 
   const authenticated = !explicitFailure && !requires2FA && hasUsableToken(token) && hasUsableUser(user);
@@ -1134,9 +1130,7 @@ function clearLoginAuthState(reason = "login-clear") {
     });
   } catch {}
 
-  try {
-    persistTempToken(null);
-  } catch {}
+  try { persistTempToken(null); } catch {}
 
   safeSetState({
     loginInProgress: false,
@@ -1185,6 +1179,7 @@ function applyAuthenticatedLogin(authData = {}) {
   const token = normalizeToken(authData.token);
   const user = normalizeUserForClient(authData.user);
   const sessionData = normalizeSessionData(authData.sessionData || authData.session, user);
+  const role = normalizeRole(authData.role || user?.role || "user");
 
   const payload = {
     token,
@@ -1197,8 +1192,10 @@ function applyAuthenticatedLogin(authData = {}) {
     me: user,
     account: user,
     profile: user,
-    role: authData.role || user?.role || "user",
-    rol: authData.role || user?.role || "user",
+    role,
+    rol: role,
+    userRole: role,
+    roles: [role],
     permissions: authData.permissions || user?.permissions || [],
     permisos: authData.permissions || user?.permisos || [],
     session: sessionData,
@@ -1298,9 +1295,7 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
       });
     }
 
-    try {
-      persistTempToken(authData.tempToken);
-    } catch {}
+    try { persistTempToken(authData.tempToken); } catch {}
 
     applySession({
       tempToken: authData.tempToken,
@@ -1318,7 +1313,7 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
       emit: false,
     });
 
-    const redirectTo = authData.redirectTo || DEFAULT_2FA_PATH;
+    const redirectTo = normalizeRedirectCandidate(authData.redirectTo) || DEFAULT_2FA_PATH;
 
     const result = {
       ok: true,
@@ -1355,10 +1350,7 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
     });
   }
 
-  try {
-    persistTempToken(null);
-  } catch {}
-
+  try { persistTempToken(null); } catch {}
   await wait(0);
 
   const trustedAuthRedirect = options.trustAuthRedirect === true && authData.redirectTo ? normalizeRedirectCandidate(authData.redirectTo) : "";
@@ -1377,8 +1369,8 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
     accessToken: snapshot.token,
     refreshToken: snapshot.refreshToken || authData.refreshToken || "",
     user: snapshot.user,
-    role: snapshot.role || authData.role || "user",
-    roles: snapshot.roles || [snapshot.role || authData.role || "user"],
+    role: normalizeRole(snapshot.role || authData.role || "user"),
+    roles: normalizeRole(snapshot.role || authData.role || "user") === "admin" ? ["admin"] : ["user"],
     permissions: snapshot.permissions || authData.permissions || [],
     session: snapshot.session || authData.sessionData || null,
     sessionData: snapshot.sessionData || snapshot.session || authData.sessionData || null,
@@ -1395,7 +1387,7 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
       user: result.user,
       role: result.role,
       redirectTo,
-      sessionId: result.sessionId,
+      sessionId: result.sessionId ? "***" : null,
       tokenVersion: result.tokenVersion,
       sequence,
     });
@@ -1405,7 +1397,7 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
     authenticated: true,
     user: result.user,
     role: result.role,
-    sessionId: result.sessionId,
+    sessionId: result.sessionId ? "***" : null,
     tokenVersion: result.tokenVersion,
     sequence,
   });
@@ -1478,9 +1470,7 @@ export async function handleLoginFormSubmit(formElement, options = {}) {
     throw new Error("Se esperaba un formulario HTML válido.");
   }
 
-  try {
-    options.event?.preventDefault?.();
-  } catch {}
+  try { options.event?.preventDefault?.(); } catch {}
 
   const formData = new FormData(formElement);
 
@@ -1501,9 +1491,7 @@ export async function handleLoginFormSubmit(formElement, options = {}) {
   const result = await login(credentials, options);
 
   if (safeBool(options.resetOnSuccess, false) && result?.status === "authenticated") {
-    try {
-      formElement.reset();
-    } catch {}
+    try { formElement.reset(); } catch {}
   }
 
   return result;
@@ -1551,8 +1539,8 @@ export function getLoginSnapshot() {
     roles: state.roles || [],
     permissions: safeArray(state.permissions || user?.permissions),
     hasSession: Boolean(state.session?.sessionId || state.sessionData?.sessionId || state.sessionId),
-    sessionId: state.session?.sessionId || state.sessionData?.sessionId || state.sessionId || null,
-    sessionUserId: state.session?.sessionUserId || state.sessionData?.sessionUserId || state.sessionUserId || null,
+    sessionId: state.session?.sessionId || state.sessionData?.sessionId || state.sessionId ? "***" : null,
+    sessionUserId: state.session?.sessionUserId || state.sessionData?.sessionUserId || state.sessionUserId ? "***" : null,
     tokenVersion: state.tokenVersion ?? state.session?.tokenVersion ?? state.sessionData?.tokenVersion ?? user?.tokenVersion ?? null,
     loginInProgress: Boolean(state.loginInProgress),
     twoFactorPending: Boolean(state.twoFactorPending),
@@ -1562,6 +1550,8 @@ export function getLoginSnapshot() {
       ownToast: false,
       ownRefresh: false,
       roles: [...VALID_ROLES],
+      authenticatedRequiresTokenAndUser: true,
+      publicLoginNoAuthHeader: true,
     },
     at: isoNow(),
   };

@@ -52,7 +52,7 @@ import {
   redactTokenInText,
 } from "../features/auth/helpers.js";
 
-export const APP_VERSION = "21.0.0-simple";
+export const APP_VERSION = "21.0.1-simple";
 
 const SOURCE = "app.index";
 const RUNTIME_APP_KEY = "__ONION_APP__";
@@ -113,6 +113,14 @@ async function callAsync(fn, fallback = null, ...args) {
     return isFn(fn) ? await fn(...args) : fallback;
   } catch {
     return fallback;
+  }
+}
+
+function getCoreState() {
+  try {
+    return AppCore?.state && typeof AppCore.state === "object" ? AppCore.state : {};
+  } catch {
+    return {};
   }
 }
 
@@ -246,8 +254,8 @@ function currentPublicPath() {
   );
 }
 
-function publicBootContext() {
-  call(captureRouterInitialUrl, false);
+function publicBootContext({ capture = false } = {}) {
+  if (capture) call(captureRouterInitialUrl, false);
 
   const publicPath = currentPublicPath();
   const active = call(isPublicTechnicalRoute, false, publicPath) === true;
@@ -262,13 +270,11 @@ function publicBootContext() {
 
 function hasLocalToken() {
   try {
-    if (AppCore?.state?.hasToken === true) return true;
-
     const state = object(AppCore?.state);
     const session = object(state.session || state.sessionData);
     const token = state.token || state.accessToken || state.access_token || session.token || session.accessToken || session.access_token || "";
 
-    if (text(token, "")) return true;
+    if (state.hasToken === true || text(token, "")) return true;
   } catch {}
 
   try {
@@ -499,7 +505,7 @@ async function initUI() {
   let ok = false;
 
   try {
-    ok = initUISystems?.(buildDeps({ state: getState(), scope: "app:ui" })) !== false;
+    ok = initUISystems?.(buildDeps({ state: getCoreState(), scope: "app:ui" })) !== false;
   } catch (error) {
     warn("initUISystems falló.", error);
   }
@@ -542,7 +548,7 @@ async function restoreSession({ skipNavigation = false } = {}) {
 
   try {
     return await restoreSessionInBackground(buildDeps({
-      state: getState(),
+      state: getCoreState(),
       warmup,
       skipNavigation,
       skipRedirect: skipNavigation,
@@ -702,7 +708,7 @@ function failBoot(error) {
 
 async function runBoot(options = {}) {
   const opts = object(options);
-  const bootContext = publicBootContext();
+  const bootContext = publicBootContext({ capture: true });
   const fastPublicBoot = Boolean(bootContext.active);
 
   booting = true;
@@ -826,8 +832,9 @@ export function destroy(options = {}) {
 ========================================================= */
 
 export function getState() {
-  const bootContext = publicBootContext();
+  const bootContext = publicBootContext({ capture: false });
   const path = currentPublicPath();
+  const coreState = getCoreState();
 
   return {
     version: APP_VERSION,
@@ -852,13 +859,13 @@ export function getState() {
     routerReady: Boolean(Router),
     uiReady: Boolean(SidebarUI || TopbarUI),
     state: {
-      appBooting: Boolean(AppCore?.state?.appBooting),
-      appReady: Boolean(AppCore?.state?.appReady),
-      appBooted: Boolean(AppCore?.state?.appBooted),
-      authenticated: Boolean(AppCore?.state?.authenticated),
-      hasToken: Boolean(AppCore?.state?.hasToken),
-      route: redact(AppCore?.state?.route || DEFAULT_ROUTE),
-      publicPath: redact(AppCore?.state?.publicPath || DEFAULT_ROUTE),
+      appBooting: Boolean(coreState.appBooting),
+      appReady: Boolean(coreState.appReady),
+      appBooted: Boolean(coreState.appBooted),
+      authenticated: Boolean(coreState.authenticated),
+      hasToken: Boolean(coreState.hasToken),
+      route: redact(coreState.route || DEFAULT_ROUTE),
+      publicPath: redact(coreState.publicPath || DEFAULT_ROUTE),
     },
   };
 }

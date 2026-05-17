@@ -2,11 +2,12 @@
    Onion SPA - App Errors
    Archivo: src/app/errors.js
 
-   APP ERRORS · FINAL SIMPLE
-   - Handlers globales mínimos
-   - Pantalla fatal de boot segura
-   - Redacción fuerte de tokens
-   - Sin Auth/Router paralelos, restore, refresh, fetch, storage ni Toast obligatorio
+   APP ERRORS · SIMPLE
+   - handlers globales mínimos
+   - pantalla fatal de boot segura
+   - redacción fuerte de tokens
+   - recovery básico: reload / reboot / login
+   - sin Auth/Router paralelos, restore, refresh, fetch, storage ni Toast obligatorio
 ========================================================= */
 
 import {
@@ -16,11 +17,7 @@ import {
   LOGIN_PATH as LOGIN_PATH_FROM_CONSTANTS,
 } from "./constants.js";
 
-/* =========================================================
-   VERSION / CONSTANTS
-========================================================= */
-
-export const APP_ERRORS_VERSION = "20.0.0-final";
+export const APP_ERRORS_VERSION = "21.0.0-simple";
 
 const SOURCE = "app.errors";
 const DEFAULT_SCOPE = APP_SCOPES?.errors || APP_SCOPES?.events || APP_SCOPE || "app:errors";
@@ -28,7 +25,6 @@ const LOGIN_PATH = LOGIN_PATH_FROM_CONSTANTS || "/login";
 
 const DEFAULT_MESSAGE = "Se produjo un error inesperado.";
 const DEFAULT_BOOT_MESSAGE = "No se pudo iniciar la aplicación correctamente.";
-
 const MAX_RECENT_ERRORS = 20;
 const TOAST_THROTTLE_MS = 2500;
 const RENDER_THROTTLE_MS = 1000;
@@ -116,10 +112,6 @@ const IGNORED_ERROR_PATTERNS = Object.freeze([
   /^Script error\.?$/i,
 ]);
 
-/* =========================================================
-   RUNTIME
-========================================================= */
-
 let handlersBound = false;
 let bindingInFlight = false;
 let boundScope = "";
@@ -145,8 +137,8 @@ const errorState = {
 ========================================================= */
 
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
-const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-const isObjectLike = (value) => value !== null && (typeof value === "object" || typeof value === "function");
+const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
+const isObjectLike = (value) => Boolean(value && (typeof value === "object" || typeof value === "function"));
 const isFn = (value) => typeof value === "function";
 
 function object(value, fallback = {}) {
@@ -170,27 +162,15 @@ function number(value, fallback = 0) {
 }
 
 function now() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
+  try { return Date.now(); } catch { return 0; }
 }
 
 function iso(ms = now()) {
-  try {
-    return new Date(ms).toISOString();
-  } catch {
-    return "";
-  }
+  try { return new Date(ms).toISOString(); } catch { return ""; }
 }
 
 function canDefine(value) {
-  try {
-    return isObjectLike(value) && Object.isExtensible(value);
-  } catch {
-    return false;
-  }
+  try { return isObjectLike(value) && Object.isExtensible(value); } catch { return false; }
 }
 
 function defineHidden(target, key, value) {
@@ -267,7 +247,11 @@ function sanitize(value, depth = 0, keyHint = "") {
   if (value instanceof Error) return normalizeError(value);
 
   if (isDomNodeLike(value)) {
-    return { node: text(value.nodeName, "Node"), id: text(value.id, ""), className: text(value.className?.baseVal || value.className, "") };
+    return {
+      node: text(value.nodeName, "Node"),
+      id: text(value.id, ""),
+      className: text(value.className?.baseVal || value.className, ""),
+    };
   }
 
   if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitize(item, depth + 1));
@@ -275,13 +259,11 @@ function sanitize(value, depth = 0, keyHint = "") {
   if (value instanceof Set) return { type: "Set", size: value.size };
 
   if (isObject(value)) {
-    const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = sanitize(item, depth + 1, key);
-    }
-
-    return output;
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 80)
+        .map(([key, item]) => [key, sanitize(item, depth + 1, key)])
+    );
   }
 
   return redactTokenInText(String(value));
@@ -295,9 +277,7 @@ function warn(AppCore, ...args) {
   try {
     AppCore?.utils?.warn?.("[AppErrors]", ...args.map((item) => sanitize(item)));
   } catch {
-    try {
-      if (AppCore?.config?.debug) console.warn("[AppErrors]", ...args.map((item) => sanitize(item)));
-    } catch {}
+    try { if (AppCore?.config?.debug) console.warn("[AppErrors]", ...args.map((item) => sanitize(item))); } catch {}
   }
 }
 
@@ -360,7 +340,10 @@ function errorCode(error = null) {
   const candidate = errorCandidate(error);
   if (!candidate || typeof candidate === "string") return "";
 
-  return text(candidate.code || candidate.status || candidate.statusCode || candidate.data?.code || candidate.response?.status || candidate.response?.statusCode || "", "");
+  return text(
+    candidate.code || candidate.status || candidate.statusCode || candidate.data?.code || candidate.response?.status || candidate.response?.statusCode || "",
+    ""
+  );
 }
 
 function errorStack(error = null) {
@@ -499,16 +482,12 @@ function setCoreError(AppCore, snapshot = null) {
     lastBootError: snapshot?.boot === true ? snapshot : AppCore?.state?.lastBootError || null,
   };
 
-  try {
-    AppCore?.setError?.(snapshot);
-  } catch {}
+  try { AppCore?.setError?.(snapshot); } catch {}
 
   try {
     AppCore?.setState?.(patch, { source: SOURCE, emit: false, emitState: false, silent: true });
   } catch {
-    try {
-      AppCore?.patchState?.(patch, { source: SOURCE, emit: false, silent: true });
-    } catch {}
+    try { AppCore?.patchState?.(patch, { source: SOURCE, emit: false, silent: true }); } catch {}
   }
 
   try {
@@ -520,7 +499,13 @@ function setCoreError(AppCore, snapshot = null) {
 
 function toastError(Toast, AppCore, message, options = {}) {
   const cleanMessage = redactTokenInText(text(message, DEFAULT_MESSAGE));
-  const payload = { title: text(options.title, "Error"), duration: number(options.duration, 5000), ...object(options), type: "error", message: cleanMessage };
+  const payload = {
+    title: text(options.title, "Error"),
+    duration: number(options.duration, 5000),
+    ...object(options),
+    type: "error",
+    message: cleanMessage,
+  };
 
   for (const attempt of [
     () => Toast?.error?.(cleanMessage, payload),
@@ -545,20 +530,12 @@ function toastError(Toast, AppCore, message, options = {}) {
 
 function byId(id = "") {
   if (!isBrowser() || !id) return null;
-  try {
-    return document.getElementById(id);
-  } catch {
-    return null;
-  }
+  try { return document.getElementById(id); } catch { return null; }
 }
 
 function qs(selector = "") {
   if (!isBrowser() || !selector) return null;
-  try {
-    return document.querySelector(selector);
-  } catch {
-    return null;
-  }
+  try { return document.querySelector(selector); } catch { return null; }
 }
 
 function attr(element, key, value) {
@@ -587,6 +564,7 @@ function data(element, key, value) {
 
 function addClasses(element, classes = []) {
   if (!element) return false;
+
   try {
     const clean = Array.isArray(classes) ? classes.filter(Boolean) : [classes].filter(Boolean);
     if (clean.length) element.classList.add(...clean);
@@ -598,6 +576,7 @@ function addClasses(element, classes = []) {
 
 function removeClasses(element, classes = []) {
   if (!element) return false;
+
   try {
     const clean = Array.isArray(classes) ? classes.filter(Boolean) : [classes].filter(Boolean);
     if (clean.length) element.classList.remove(...clean);
@@ -625,6 +604,7 @@ function empty(element) {
 
 function createElement(tagName = "div", { id = "", className = "", textContent = "", attrs = {}, dataset = {} } = {}) {
   const element = document.createElement(tagName);
+
   if (id) element.id = id;
   if (className) element.className = className;
   if (textContent) element.textContent = textContent;
@@ -639,9 +619,7 @@ function append(parent, children = []) {
   if (!parent) return parent;
 
   for (const child of Array.isArray(children) ? children : [children]) {
-    try {
-      if (child) parent.appendChild(child);
-    } catch {}
+    try { if (child) parent.appendChild(child); } catch {}
   }
 
   return parent;
@@ -840,10 +818,7 @@ function markFatalDom(AppCore, snapshot = {}) {
   for (const element of [byId(DOM_IDS.appShell), byId(DOM_IDS.mainContent), byId(DOM_IDS.appContent), byId(DOM_IDS.viewContainer)]) {
     if (!element) continue;
 
-    try {
-      element.hidden = false;
-    } catch {}
-
+    try { element.hidden = false; } catch {}
     attr(element, "aria-hidden", "false");
     attr(element, "aria-busy", "false");
     data(element, "shellState", "fatal");
@@ -867,9 +842,7 @@ function markFatalDom(AppCore, snapshot = {}) {
   try {
     AppCore?.setState?.(patch, { source: `${SOURCE}:fatal-dom`, emit: false, silent: true });
   } catch {
-    try {
-      AppCore?.patchState?.(patch, { source: `${SOURCE}:fatal-dom`, emit: false, silent: true });
-    } catch {}
+    try { AppCore?.patchState?.(patch, { source: `${SOURCE}:fatal-dom`, emit: false, silent: true }); } catch {}
   }
 
   try {
@@ -939,11 +912,21 @@ function metaRow(label = "", value = "") {
 }
 
 function actionButton(action, label, className = "ui-btn ui-btn-secondary") {
-  return createElement("button", { className, textContent: label, attrs: { type: "button" }, dataset: { bootErrorAction: action } });
+  return createElement("button", {
+    className,
+    textContent: label,
+    attrs: { type: "button" },
+    dataset: { bootErrorAction: action },
+  });
 }
 
 function buildBootErrorNode(snapshot = {}) {
-  const section = createElement("section", { className: "content-wrapper boot-error-view", attrs: { "aria-labelledby": "boot-error-title" }, dataset: { view: "boot-error", bootErrorView: "true" } });
+  const section = createElement("section", {
+    className: "content-wrapper boot-error-view",
+    attrs: { "aria-labelledby": "boot-error-title" },
+    dataset: { view: "boot-error", bootErrorView: "true" },
+  });
+
   const card = createElement("div", { className: "panel-block boot-error-card", dataset: { bootErrorCard: "true" } });
   const inner = createElement("div", { className: "boot-error-card__inner" });
   const icon = createElement("div", { className: "boot-error-card__icon", textContent: "!", attrs: { "aria-hidden": "true" } });
@@ -956,13 +939,13 @@ function buildBootErrorNode(snapshot = {}) {
   ]);
 
   const meta = createElement("div", { className: "boot-error-card__meta", dataset: { bootErrorMeta: "true" } });
-  append(meta, [metaRow("Código:", snapshot.code || snapshot.name || "BOOT_ERROR"), metaRow("Tipo:", snapshot.kind || "runtime"), metaRow("Fecha:", snapshot.at || iso())]);
+  append(meta, [
+    metaRow("Código:", snapshot.code || snapshot.name || "BOOT_ERROR"),
+    metaRow("Tipo:", snapshot.kind || "runtime"),
+    metaRow("Fecha:", snapshot.at || iso()),
+  ]);
 
-  const details = createElement("details", { className: "boot-error-card__details" });
-  const summary = createElement("summary", { textContent: "Detalle técnico" });
-  const pre = createElement("pre", { className: "boot-error-card__pre" });
-
-  pre.textContent = [
+  const technicalText = [
     snapshot.rawMessage ? `Mensaje: ${snapshot.rawMessage}` : "",
     snapshot.kind ? `Tipo: ${snapshot.kind}` : "",
     snapshot.url ? `URL: ${snapshot.url}` : "",
@@ -971,14 +954,18 @@ function buildBootErrorNode(snapshot = {}) {
     snapshot.stack ? `Stack:\n${snapshot.stack}` : "",
   ].filter(Boolean).join("\n");
 
-  if (pre.textContent) {
-    append(details, [summary, pre]);
+  if (technicalText) {
+    const details = createElement("details", { className: "boot-error-card__details" });
+    append(details, [
+      createElement("summary", { textContent: "Detalle técnico" }),
+      createElement("pre", { className: "boot-error-card__pre", textContent: technicalText }),
+    ]);
     meta.appendChild(details);
   }
 
   const retryButton = actionButton("retry", "Reintentar", "ui-btn ui-btn-primary");
-  const loginButton = actionButton("login", "Ir al login");
   const rebootButton = actionButton("reboot", "Reiniciar app");
+  const loginButton = actionButton("login", "Ir al login");
   const actions = createElement("div", { className: "boot-error-card__actions" });
 
   append(actions, [retryButton, rebootButton, loginButton]);
@@ -1017,6 +1004,8 @@ function bindBootErrorActions({ AppCore, snapshot, retryButton, rebootButton, lo
 ========================================================= */
 
 export function renderBootError({ AppCore, Auth, Toast, error, getViewContainer, setShellVisibility: setShellVisibilityFn, hideLoader: hideLoaderFn } = {}) {
+  void Auth;
+
   const snapshot = createErrorSnapshot({ source: "boot", error, severity: "critical", boot: true, handled: true });
 
   pushRecent(snapshot);
@@ -1057,11 +1046,9 @@ export function renderBootError({ AppCore, Auth, Toast, error, getViewContainer,
     attr(container, "aria-hidden", "false");
     data(container, "viewState", "boot-error");
 
-    bindBootErrorActions({ AppCore, Auth, snapshot, ...view });
+    bindBootErrorActions({ AppCore, snapshot, ...view });
 
-    try {
-      view.retryButton?.focus?.();
-    } catch {}
+    try { view.retryButton?.focus?.(); } catch {}
 
     if (!isThrottled("toast", snapshot, TOAST_THROTTLE_MS)) {
       toastError(Toast, AppCore, snapshot.message, { title: "Error de arranque", duration: 6000 });
@@ -1089,7 +1076,12 @@ function normalizeResourceError(event = null) {
   const tagName = text(target.tagName, "resource").toLowerCase();
   const url = redactTokenInText(text(target.src || target.href, ""));
 
-  return { name: "ResourceLoadError", message: `No se pudo cargar el recurso ${tagName}${url ? `: ${url}` : "."}`, url, targetTag: tagName };
+  return {
+    name: "ResourceLoadError",
+    message: `No se pudo cargar el recurso ${tagName}${url ? `: ${url}` : "."}`,
+    url,
+    targetTag: tagName,
+  };
 }
 
 function isIgnoredError(error = null) {
@@ -1158,7 +1150,14 @@ export function bindGlobalErrorHandlers({ AppCore, Toast, scope = DEFAULT_SCOPE 
       const resourceError = normalizeResourceError(event);
       const tagName = text(event?.target?.tagName, "");
 
-      processRuntimeError({ AppCore, Toast, source: "window.resource-error", error: resourceError, severity: "warning", toast: /script|link/i.test(tagName) });
+      processRuntimeError({
+        AppCore,
+        Toast,
+        source: "window.resource-error",
+        error: resourceError,
+        severity: "warning",
+        toast: /script|link/i.test(tagName),
+      });
       return;
     }
 
@@ -1166,7 +1165,13 @@ export function bindGlobalErrorHandlers({ AppCore, Toast, scope = DEFAULT_SCOPE 
       AppCore,
       Toast,
       source: "window.error",
-      error: event?.error || { name: "WindowError", message: event?.message || "Error global no controlado", filename: event?.filename, lineno: event?.lineno, colno: event?.colno },
+      error: event?.error || {
+        name: "WindowError",
+        message: event?.message || "Error global no controlado",
+        filename: event?.filename,
+        lineno: event?.lineno,
+        colno: event?.colno,
+      },
       severity: "error",
       toast: true,
     });
@@ -1204,9 +1209,7 @@ export function bindGlobalErrorHandlers({ AppCore, Toast, scope = DEFAULT_SCOPE 
 export function unbindGlobalErrorHandlers(AppCore = null) {
   while (boundListeners.length) {
     const item = boundListeners.pop();
-    try {
-      item.target?.removeEventListener?.(item.eventName, item.handler, item.options);
-    } catch {}
+    try { item.target?.removeEventListener?.(item.eventName, item.handler, item.options); } catch {}
   }
 
   handlersBound = false;
@@ -1237,13 +1240,8 @@ export function exposeDebugApi(AppCore = null) {
     unbind: () => unbindGlobalErrorHandlers(AppCore),
   };
 
-  try {
-    window.__ONION_APP_ERRORS__ = api;
-  } catch {}
-
-  try {
-    defineHidden(AppCore, "Errors", api);
-  } catch {}
+  try { window.__ONION_APP_ERRORS__ = api; } catch {}
+  try { defineHidden(AppCore, "Errors", api); } catch {}
 
   if (!debugApiInstalled) {
     debugApiInstalled = true;
@@ -1317,10 +1315,6 @@ export function resetErrorState() {
 
   return getErrorStateSnapshot();
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   APP_ERRORS_VERSION,

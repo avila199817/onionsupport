@@ -1,20 +1,28 @@
-<!DOCTYPE html>
+<!doctype html>
 <html
-  lang="es"
+  lang="en"
+  dir="ltr"
   data-app="onion"
   data-app-name="Onion Support"
-  data-theme="dark"
+  data-locale="en"
+  data-locale-source="initial"
+  data-locale-fallback="en"
+  data-locale-supported="ca es en"
+  data-theme="system"
   data-theme-mode="system"
   data-theme-source="initial"
+  data-theme-ready="false"
   data-app-state="booting"
   data-app-loading="true"
   data-app-booting="true"
   data-app-ready="false"
+  data-authenticated="false"
   data-route-mode="boot"
   data-shell="visible"
   data-shell-state="booting"
+  data-shell-interactive="false"
   data-chrome="hidden"
-  class="app-booting app-loading"
+  class="no-js app-booting app-loading"
 >
 <head>
   <!-- =========================================================
@@ -22,29 +30,28 @@
        Archivo: /index.html
 
        Contrato:
-       - Puerta física de entrada de la SPA.
+       - Entrada física única de la SPA.
        - Sin JS inline.
        - Sin CSS inline.
        - Sin llamadas API.
        - Sin lógica auth.
        - Sin lógica router.
-       - Sin assets externos.
-       - Tema inicial: /src/preboot/theme.js
-       - CSS global: /src/css/app.css
-       - JS entrypoint: /src/main.js
-       - Vista SPA: #view-container
-       - Sidebar: #sidebar-mount
-       - Topbar: #topbar-mount
+       - Sin clientes HTTP.
+       - Theme + locale inicial: /src/preboot/theme.js.
+       - CSS global: /src/css/app.css.
+       - JS entrypoint único: /src/main.js.
+       - Vista SPA: #view-container.
+       - Sidebar: #sidebar-mount.
+       - Topbar: #topbar-mount.
   ========================================================= -->
 
   <meta charset="UTF-8">
+  <base href="/">
 
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1.0, viewport-fit=cover"
   >
-
-  <base href="/">
 
   <title>Onion Support</title>
 
@@ -90,18 +97,21 @@
 
   <meta
     name="color-scheme"
-    content="dark light"
+    content="light dark"
   >
 
   <meta
     name="theme-color"
-    content="#0a0c11"
-    data-onion-theme-color="true"
+    media="(prefers-color-scheme: light)"
+    content="#ffffff"
+    data-onion-theme-color-light="true"
   >
 
   <meta
-    name="msapplication-TileColor"
+    name="theme-color"
+    media="(prefers-color-scheme: dark)"
     content="#0a0c11"
+    data-onion-theme-color-dark="true"
   >
 
   <meta
@@ -116,7 +126,13 @@
 
   <meta
     name="apple-mobile-web-app-status-bar-style"
-    content="black-translucent"
+    content="default"
+  >
+
+  <link
+    rel="icon"
+    href="/favicon.ico"
+    sizes="any"
   >
 
   <link
@@ -165,7 +181,7 @@
     href="/src/main.js"
   >
 
-  <!-- Tema inicial antes del CSS para evitar parpadeo. -->
+  <!-- Preboot único: resuelve theme system/browser + locale ca/es/en con fallback en. -->
   <script src="/src/preboot/theme.js"></script>
 
   <link
@@ -193,14 +209,16 @@
   data-route-mode="boot"
   data-shell="visible"
   data-shell-state="booting"
+  data-shell-interactive="false"
   data-chrome="hidden"
 >
   <a
     class="sr-only sr-only-focusable app-skip-link"
     href="#main-content"
     data-skip-link="true"
+    data-i18n="a11y.skipMain"
   >
-    Saltar al contenido principal
+    Skip to main content
   </a>
 
   <div
@@ -282,16 +300,18 @@
           id="app-loader-text"
           class="app-loader__text"
           data-loader-text="true"
+          data-i18n="loader.text"
         >
-          Cargando sesión...
+          Loading session...
         </span>
 
         <small
           id="app-loader-subtext"
           class="app-loader__subtext"
           data-loader-subtext="true"
+          data-i18n="loader.subtext"
         >
-          Preparando panel seguro
+          Preparing secure panel
         </small>
       </div>
 
@@ -314,15 +334,18 @@
       <main
         class="main-content noscript-main"
         role="main"
-        aria-label="Contenido principal"
+        aria-label="Main content"
       >
         <div id="noscript-content">
-          <section class="noscript-box">
-            <h1>JavaScript es necesario</h1>
+          <section
+            class="noscript-box"
+            lang="en"
+          >
+            <h1>JavaScript required</h1>
 
             <p>
-              Onion Support necesita JavaScript para cargar la navegación SPA,
-              el panel, las vistas y la autenticación.
+              Onion Support requires JavaScript to load the panel,
+              navigation, views and authentication.
             </p>
           </section>
         </div>
@@ -368,7 +391,7 @@
       id="main-content"
       class="main-content"
       role="main"
-      aria-label="Contenido principal"
+      aria-label="Main content"
       tabindex="-1"
       aria-busy="true"
       aria-hidden="false"

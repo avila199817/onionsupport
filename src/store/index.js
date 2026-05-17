@@ -5,50 +5,31 @@
    Responsabilidad:
    - Store mínimo de compat.
    - Estado simple en memoria.
+   - get / set / patch / update / remove.
    - Suscripciones simples.
    - No duplica Auth.
    - No duplica Core.
    - No duplica Router.
    - No duplica HTTP.
+   - No sincroniza Core en paralelo.
+   - No guarda tokens reales.
    - Sin helpers externos.
-   - Sin acciones complejas.
-   - Sin core-sync paralelo.
+   - Sin magia negra.
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
 
 export const STORE_VERSION = "simple";
 
-const DEFAULT_STATE = {
-  app: {
-    route: "/",
-    publicPath: "/",
-    ready: false,
-  },
+const BLOCKED_KEYS = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+]);
 
-  session: {
-    authenticated: false,
-    hasToken: false,
-    user: null,
-    role: null,
-  },
-
-  ui: {
-    theme: "system",
-    lang: "en",
-    sidebarOpen: true,
-  },
-
-  entities: {},
-  flags: {},
-
-  meta: {
-    version: STORE_VERSION,
-    createdAt: "",
-    updatedAt: "",
-    changeCount: 0,
-  },
-};
+function nowIso() {
+  return new Date().toISOString();
+}
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -58,11 +39,10 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
-function nowIso() {
-  return new Date().toISOString();
-}
-
 function clone(value) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
   try {
     return structuredClone(value);
   } catch {
@@ -74,19 +54,31 @@ function clone(value) {
   }
 }
 
-function pathParts(path = "") {
-  if (Array.isArray(path)) return path.filter(Boolean);
+function same(a, b) {
+  if (Object.is(a, b)) return true;
 
-  return String(path || "")
-    .split(".")
-    .map((part) => part.trim())
-    .filter(Boolean);
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+function pathParts(path = "") {
+  const parts = Array.isArray(path)
+    ? path
+    : String(path || "").split(".");
+
+  return parts
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .filter((part) => !BLOCKED_KEYS.has(part));
 }
 
 function getByPath(root, path, fallback = undefined) {
   const parts = pathParts(path);
 
-  if (!parts.length) return root;
+  if (!parts.length) return fallback;
 
   let current = root;
 
@@ -139,26 +131,56 @@ function deleteByPath(root, path) {
   return true;
 }
 
-function mergeDeep(target, source) {
-  const output = clone(target) || {};
+function merge(target = {}, source = {}) {
+  const output = isObject(target) ? clone(target) : {};
 
-  for (const [key, value] of Object.entries(source || {})) {
-    if (isObject(value) && isObject(output[key])) {
-      output[key] = mergeDeep(output[key], value);
-    } else {
-      output[key] = clone(value);
-    }
+  if (!isObject(source)) return output;
+
+  for (const [key, value] of Object.entries(source)) {
+    if (BLOCKED_KEYS.has(key)) continue;
+
+    output[key] =
+      isObject(value) && isObject(output[key])
+        ? merge(output[key], value)
+        : clone(value);
   }
 
   return output;
 }
 
-function equal(a, b) {
-  try {
-    return JSON.stringify(a) === JSON.stringify(b);
-  } catch {
-    return Object.is(a, b);
-  }
+function createInitialState() {
+  const now = nowIso();
+
+  return {
+    app: {
+      route: "/",
+      publicPath: "/",
+      ready: false,
+    },
+
+    session: {
+      authenticated: false,
+      hasToken: false,
+      user: null,
+      role: null,
+    },
+
+    ui: {
+      theme: "system",
+      lang: "en",
+      sidebarOpen: true,
+    },
+
+    entities: {},
+    flags: {},
+
+    meta: {
+      version: STORE_VERSION,
+      createdAt: now,
+      updatedAt: now,
+      changeCount: 0,
+    },
+  };
 }
 
 function touch(state) {
@@ -168,51 +190,18 @@ function touch(state) {
   state.meta.changeCount = Number(state.meta.changeCount || 0) + 1;
 }
 
-function createInitialState() {
-  const state = clone(DEFAULT_STATE);
-
-  const now = nowIso();
-
-  state.meta.createdAt = now;
-  state.meta.updatedAt = now;
-
-  try {
-    state.app.route = AppCore?.state?.route || "/";
-    state.app.publicPath = AppCore?.state?.publicPath || state.app.route;
-    state.app.ready = Boolean(AppCore?.state?.ready || AppCore?.state?.appReady);
-
-    state.session.authenticated = Boolean(AppCore?.state?.authenticated);
-    state.session.hasToken = Boolean(AppCore?.state?.hasToken);
-    state.session.user = AppCore?.state?.user || null;
-    state.session.role = AppCore?.state?.role || null;
-
-    state.ui.theme = AppCore?.state?.theme || state.ui.theme;
-    state.ui.lang = AppCore?.state?.lang || AppCore?.state?.language || state.ui.lang;
-  } catch {
-    // Core no disponible: estado base.
-  }
-
-  return state;
-}
-
-function normalizeChanged(paths = []) {
-  return [...new Set(paths.filter(Boolean))];
-}
-
-function makePayload(store, changedPaths = [], previousState = null) {
-  return {
-    version: STORE_VERSION,
-    changedPaths: normalizeChanged(changedPaths),
-    state: store.get(),
-    previousState: previousState ? clone(previousState) : null,
-  };
+function matchPath(watched = "", changed = "") {
+  return (
+    watched === changed ||
+    watched.startsWith(`${changed}.`) ||
+    changed.startsWith(`${watched}.`)
+  );
 }
 
 export const Store = (() => {
   let initialized = false;
   let initializing = false;
   let destroyed = false;
-
   let mutationSeq = 0;
 
   const state = createInitialState();
@@ -221,30 +210,24 @@ export const Store = (() => {
   const keyListeners = new Map();
   const selectorListeners = new Set();
 
-  let batchDepth = 0;
-  let batchPreviousState = null;
-  const batchChangedPaths = new Set();
-
   /* =======================================================
      NOTIFY
   ======================================================= */
 
-  function notify(changedPaths = [], previousState = null) {
-    const paths = normalizeChanged(changedPaths);
+  function notify(paths = [], previousState = null) {
+    const changedPaths = [...new Set(paths.filter(Boolean))];
 
-    if (!paths.length) return false;
-
-    if (batchDepth > 0) {
-      for (const path of paths) {
-        batchChangedPaths.add(path);
-      }
-
-      return true;
-    }
+    if (!changedPaths.length) return false;
 
     mutationSeq += 1;
 
-    const payload = makePayload(api, paths, previousState);
+    const payload = {
+      version: STORE_VERSION,
+      seq: mutationSeq,
+      changedPaths,
+      state: get(),
+      previousState: previousState ? clone(previousState) : null,
+    };
 
     for (const listener of [...listeners]) {
       try {
@@ -254,50 +237,38 @@ export const Store = (() => {
       }
     }
 
-    for (const path of paths) {
-      for (const [watchedPath, set] of keyListeners.entries()) {
-        if (path === watchedPath || path.startsWith(`${watchedPath}.`)) {
-          for (const listener of [...set]) {
-            try {
-              listener(get(watchedPath), payload);
-            } catch {
-              // noop
-            }
-          }
+    for (const [watchedPath, bucket] of keyListeners.entries()) {
+      if (!changedPaths.some((path) => matchPath(watchedPath, path))) continue;
+
+      for (const listener of [...bucket]) {
+        try {
+          listener(get(watchedPath), payload);
+        } catch {
+          // Un key listener no rompe Store.
         }
       }
     }
 
-    for (const item of [...selectorListeners]) {
+    for (const entry of [...selectorListeners]) {
       try {
-        const next = item.selector(get());
-        const changed = !equal(next, item.last);
+        const nextValue = entry.selector(get());
 
-        if (changed) {
-          const previous = item.last;
-          item.last = clone(next);
-          item.listener(next, previous, payload);
+        if (!same(nextValue, entry.lastValue)) {
+          const previousValue = entry.lastValue;
+          entry.lastValue = clone(nextValue);
+          entry.listener(nextValue, previousValue, payload);
         }
       } catch {
-        // noop
+        // Un selector listener no rompe Store.
       }
-    }
-
-    try {
-      AppCore?.events?.emit?.("store:change", {
-        seq: mutationSeq,
-        changedPaths: paths,
-      });
-    } catch {
-      // noop
     }
 
     return true;
   }
 
-  function commit(changedPaths = [], previousState = null) {
+  function commit(paths = [], previousState = null) {
     touch(state);
-    notify(changedPaths, previousState);
+    return notify(paths, previousState);
   }
 
   /* =======================================================
@@ -336,13 +307,13 @@ export const Store = (() => {
   ======================================================= */
 
   function set(path, value) {
+    if (!path) return get();
+
     const current = getRaw(path);
 
-    if (equal(current, value)) {
-      return get(path);
-    }
+    if (same(current, value)) return get(path);
 
-    const previous = batchPreviousState || get();
+    const previous = get();
 
     setByPath(state, path, clone(value));
     commit([path], previous);
@@ -353,10 +324,10 @@ export const Store = (() => {
   function patch(partial = {}) {
     if (!isObject(partial)) return get();
 
-    const previous = batchPreviousState || get();
-    const next = mergeDeep(state, partial);
+    const previous = get();
+    const next = merge(state, partial);
 
-    if (equal(state, next)) return get();
+    if (same(state, next)) return get();
 
     for (const key of Object.keys(state)) {
       delete state[key];
@@ -372,16 +343,15 @@ export const Store = (() => {
   function replace(nextState = {}) {
     if (!isObject(nextState)) return get();
 
-    const previous = batchPreviousState || get();
+    if (same(state, nextState)) return get();
 
-    if (equal(state, nextState)) return get();
+    const previous = get();
 
     for (const key of Object.keys(state)) {
       delete state[key];
     }
 
     Object.assign(state, clone(nextState));
-
     commit(Object.keys(state), previous);
 
     return get();
@@ -390,19 +360,16 @@ export const Store = (() => {
   function update(path, updater) {
     if (!isFunction(updater)) return get(path);
 
-    const current = get(path);
-    return set(path, updater(current));
+    return set(path, updater(get(path)));
   }
 
   function remove(path) {
     if (getRaw(path) === undefined) return false;
 
-    const previous = batchPreviousState || get();
+    const previous = get();
     const ok = deleteByPath(state, path);
 
-    if (ok) {
-      commit([path], previous);
-    }
+    if (ok) commit([path], previous);
 
     return ok;
   }
@@ -412,82 +379,24 @@ export const Store = (() => {
   }
 
   /* =======================================================
-     BATCH
+     BATCH COMPAT
+     No batch real. Mantiene API sin meter sistema paralelo.
   ======================================================= */
 
   function beginBatch() {
-    if (batchDepth === 0) {
-      batchPreviousState = get();
-      batchChangedPaths.clear();
-    }
-
-    batchDepth += 1;
-
-    return batchDepth;
+    return 0;
   }
 
   function endBatch() {
-    if (batchDepth <= 0) return false;
-
-    batchDepth -= 1;
-
-    if (batchDepth > 0) return false;
-
-    const paths = [...batchChangedPaths];
-    const previous = batchPreviousState;
-
-    batchPreviousState = null;
-    batchChangedPaths.clear();
-
-    if (paths.length) {
-      notify(paths, previous);
-    }
-
     return true;
   }
 
   function rollbackBatch() {
-    if (batchPreviousState) {
-      for (const key of Object.keys(state)) {
-        delete state[key];
-      }
-
-      Object.assign(state, clone(batchPreviousState));
-    }
-
-    batchDepth = 0;
-    batchPreviousState = null;
-    batchChangedPaths.clear();
-
-    return true;
+    return false;
   }
 
   function withBatch(fn) {
-    if (!isFunction(fn)) return null;
-
-    beginBatch();
-
-    try {
-      const result = fn(api);
-
-      if (result && isFunction(result.then)) {
-        return result
-          .then((value) => {
-            endBatch();
-            return value;
-          })
-          .catch((error) => {
-            rollbackBatch();
-            throw error;
-          });
-      }
-
-      endBatch();
-      return result;
-    } catch (error) {
-      rollbackBatch();
-      throw error;
-    }
+    return isFunction(fn) ? fn(api) : null;
   }
 
   /* =======================================================
@@ -542,10 +451,24 @@ export const Store = (() => {
      SUBSCRIPTIONS
   ======================================================= */
 
-  function subscribe(listener) {
+  function subscribe(listener, options = {}) {
     if (!isFunction(listener)) return () => false;
 
     listeners.add(listener);
+
+    if (options.immediate === true) {
+      try {
+        listener({
+          version: STORE_VERSION,
+          seq: mutationSeq,
+          changedPaths: [],
+          state: get(),
+          previousState: null,
+        });
+      } catch {
+        // noop
+      }
+    }
 
     return () => {
       listeners.delete(listener);
@@ -553,7 +476,7 @@ export const Store = (() => {
     };
   }
 
-  function subscribeKey(path, listener) {
+  function subscribeKey(path, listener, options = {}) {
     if (!path || !isFunction(listener)) return () => false;
 
     if (!keyListeners.has(path)) {
@@ -562,27 +485,68 @@ export const Store = (() => {
 
     keyListeners.get(path).add(listener);
 
+    if (options.immediate === true) {
+      try {
+        listener(get(path), {
+          version: STORE_VERSION,
+          seq: mutationSeq,
+          changedPaths: [],
+          state: get(),
+          previousState: null,
+        });
+      } catch {
+        // noop
+      }
+    }
+
     return () => {
       keyListeners.get(path)?.delete(listener);
+
+      if (keyListeners.get(path)?.size === 0) {
+        keyListeners.delete(path);
+      }
+
       return true;
     };
   }
 
-  function subscribeSelector(selector, listener) {
+  function subscribeSelector(selector, listener, options = {}) {
     if (!isFunction(selector) || !isFunction(listener)) {
       return () => false;
     }
 
-    const item = {
+    let initialValue;
+
+    try {
+      initialValue = selector(get());
+    } catch {
+      initialValue = undefined;
+    }
+
+    const entry = {
       selector,
       listener,
-      last: clone(selector(get())),
+      lastValue: clone(initialValue),
     };
 
-    selectorListeners.add(item);
+    selectorListeners.add(entry);
+
+    if (options.immediate === true) {
+      try {
+        listener(clone(initialValue), undefined, {
+          version: STORE_VERSION,
+          seq: mutationSeq,
+          changedPaths: [],
+          state: get(),
+          previousState: null,
+        });
+      } catch {
+        // noop
+      }
+    }
 
     return () => {
-      selectorListeners.delete(item);
+      selectorListeners.delete(entry);
       return true;
     };
   }
@@ -626,10 +590,6 @@ export const Store = (() => {
     keyListeners.clear();
     selectorListeners.clear();
 
-    batchDepth = 0;
-    batchPreviousState = null;
-    batchChangedPaths.clear();
-
     if (options.clearState === true) {
       replace(createInitialState());
     }
@@ -650,7 +610,7 @@ export const Store = (() => {
   }
 
   /* =======================================================
-     SNAPSHOT / DIAGNOSTICS
+     SNAPSHOT
   ======================================================= */
 
   function getDiagnostics() {
@@ -663,7 +623,6 @@ export const Store = (() => {
       listeners: listeners.size,
       keyListeners: keyListeners.size,
       selectorListeners: selectorListeners.size,
-      batchDepth,
       stateChangeCount: state.meta?.changeCount || 0,
     };
   }

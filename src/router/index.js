@@ -2,13 +2,13 @@
    Onion SPA - Router
    Archivo: src/router/index.js
 
-   ROUTER · FINAL SIMPLE
-   - Orquestador de navegación SPA
-   - Helpers normalizan rutas
-   - Guards deciden acceso
-   - Render pinta vistas
-   - History gestiona push/replace/popstate
-   - Sin Auth real, fetch, storage, Toast ni lógica de vistas
+   ROUTER · SIMPLE
+   - orquestador real de navegación SPA
+   - helpers normalizan rutas
+   - guards deciden acceso
+   - render pinta vistas
+   - history gestiona push/replace/popstate
+   - sin Auth real, fetch, storage, Toast ni lógica de vistas
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -70,12 +70,13 @@ import {
   setShellMode,
 } from "./shell.js";
 
+export const ROUTER_VERSION = "21.0.0-simple";
+
 export const Router = (() => {
   "use strict";
 
-  const VERSION = "20.0.0-final";
+  const VERSION = ROUTER_VERSION;
   const SOURCE = "router.index";
-
   const routes = getImmutableRoutes();
 
   const LOGIN_PATH = ROUTE_PATHS?.LOGIN || "/login";
@@ -89,7 +90,6 @@ export const Router = (() => {
     rendered: "router:rendered",
     renderError: "router:render:error",
     renderStale: "router:render:stale",
-    internalRedirect: "router:internal-redirect",
     loaderHidden: "app:loader:hidden",
   });
 
@@ -107,13 +107,13 @@ export const Router = (() => {
 
   const disposers = [];
 
-  /* =========================================================
+  /* =======================================================
      BASICS
-  ========================================================= */
+  ======================================================= */
 
   const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
   const isFn = (value) => typeof value === "function";
-  const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
 
   function safeObject(value, fallback = {}) {
     return isObject(value) ? value : fallback;
@@ -135,19 +135,11 @@ export const Router = (() => {
   }
 
   function now() {
-    try {
-      return Date.now();
-    } catch {
-      return 0;
-    }
+    try { return Date.now(); } catch { return 0; }
   }
 
   function iso(ms = now()) {
-    try {
-      return new Date(ms).toISOString();
-    } catch {
-      return "";
-    }
+    try { return new Date(ms).toISOString(); } catch { return ""; }
   }
 
   function callHelper(fn, ...args) {
@@ -170,8 +162,9 @@ export const Router = (() => {
     }
   }
 
-  function sanitize(value, depth = 0, seen = new WeakSet()) {
+  function sanitize(value, depth = 0, seen = new WeakSet(), keyHint = "") {
     if (depth > 4) return "[depth-limit]";
+    if (/token|secret|password|authorization|credential|jwt|bearer|otp|mfa|2fa|code/i.test(keyHint)) return value ? "***" : value;
     if (typeof value === "string") return redact(value);
     if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
     if (typeof value === "function") return "[function]";
@@ -185,7 +178,7 @@ export const Router = (() => {
       };
     }
 
-    if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitize(item, depth + 1, seen));
+    if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitize(item, depth + 1, seen, keyHint));
 
     if (isObject(value)) {
       try {
@@ -193,15 +186,11 @@ export const Router = (() => {
         seen.add(value);
       } catch {}
 
-      const output = {};
-
-      for (const [key, item] of Object.entries(value).slice(0, 80)) {
-        output[key] = /token|secret|password|authorization|credential|jwt|bearer|otp|mfa|2fa|code/i.test(key)
-          ? item ? "***" : item
-          : sanitize(item, depth + 1, seen);
-      }
-
-      return output;
+      return Object.fromEntries(
+        Object.entries(value)
+          .slice(0, 80)
+          .map(([key, item]) => [key, sanitize(item, depth + 1, seen, key)])
+      );
     }
 
     return String(value);
@@ -244,9 +233,7 @@ export const Router = (() => {
     try {
       target.addEventListener(event, handler, options);
       return () => {
-        try {
-          target.removeEventListener(event, handler, options);
-        } catch {}
+        try { target.removeEventListener(event, handler, options); } catch {}
       };
     } catch {
       return () => {};
@@ -262,9 +249,7 @@ export const Router = (() => {
         if (isFn(off)) return off;
 
         return () => {
-          try {
-            AppCore?.events?.off?.(name, handler);
-          } catch {}
+          try { AppCore?.events?.off?.(name, handler); } catch {}
         };
       }
     } catch {}
@@ -276,9 +261,7 @@ export const Router = (() => {
     if (!isFn(callback)) return;
 
     if (!isBrowser()) {
-      try {
-        callback();
-      } catch {}
+      try { callback(); } catch {}
       return;
     }
 
@@ -289,9 +272,9 @@ export const Router = (() => {
     }
   }
 
-  /* =========================================================
+  /* =======================================================
      PATH / ROUTE RESOLUTION
-  ========================================================= */
+  ======================================================= */
 
   function browserPath() {
     if (!isBrowser()) return HOME_PATH;
@@ -387,15 +370,15 @@ export const Router = (() => {
 
     for (const route of routes) {
       const matchedBy = routeMatches(route, clean);
-      if (matchedBy) {
-        return {
-          route,
-          publicPath,
-          canonicalPath: routePath(route),
-          rawCanonicalPath: clean,
-          matchedBy,
-        };
-      }
+      if (!matchedBy) continue;
+
+      return {
+        route,
+        publicPath,
+        canonicalPath: routePath(route),
+        rawCanonicalPath: clean,
+        matchedBy,
+      };
     }
 
     return {
@@ -437,15 +420,13 @@ export const Router = (() => {
 
     const username = options.username || options.resolvedUsername || usernameFor(requestedPath || canonicalPath);
 
-    return (
-      callCoreHelper(buildPublicPathHelper, getRoute, canonicalPath, {
-        ...safeObject(options),
-        username,
-        resolvedUsername: username,
-        fromPath: requestedPath,
-        publicPath: requestedPath,
-      }) || normalizePublicPath(requestedPath || canonicalPath)
-    );
+    return callCoreHelper(buildPublicPathHelper, getRoute, canonicalPath, {
+      ...safeObject(options),
+      username,
+      resolvedUsername: username,
+      fromPath: requestedPath,
+      publicPath: requestedPath,
+    }) || normalizePublicPath(requestedPath || canonicalPath);
   }
 
   function getRequestedData(path = HOME_PATH, options = {}) {
@@ -453,13 +434,7 @@ export const Router = (() => {
     const requestedPath = normalizePublicPath(opts.publicPath || opts.requestedPath || path || HOME_PATH);
     const seed = opts.canonicalPath || opts.route?.path || requestedPath;
     const match = opts.route
-      ? {
-          route: opts.route,
-          publicPath: requestedPath,
-          canonicalPath: routePath(opts.route),
-          rawCanonicalPath: normalizeCanonicalPath(seed),
-          matchedBy: "provided",
-        }
+      ? { route: opts.route, publicPath: requestedPath, canonicalPath: routePath(opts.route), rawCanonicalPath: normalizeCanonicalPath(seed), matchedBy: "provided" }
       : getRouteMatch(seed);
 
     const route = match.route;
@@ -490,9 +465,9 @@ export const Router = (() => {
     return getDefaultHomeTarget(AppCore, getRoute) || HOME_PATH;
   }
 
-  /* =========================================================
+  /* =======================================================
      STATE / SHELL
-  ========================================================= */
+  ======================================================= */
 
   function setState(patch = {}) {
     const data = safeObject(patch);
@@ -519,13 +494,8 @@ export const Router = (() => {
     const canonical = stripQuery(normalizeCanonicalPath(canonicalPath || HOME_PATH));
     const publicValue = normalizePublicPath(publicPath || canonical);
 
-    try {
-      AppCore?.setRoute?.(canonical);
-    } catch {}
-
-    try {
-      AppCore?.setPublicPath?.(publicValue);
-    } catch {}
+    try { AppCore?.setRoute?.(canonical); } catch {}
+    try { AppCore?.setPublicPath?.(publicValue); } catch {}
 
     setState({
       route: canonical,
@@ -546,11 +516,7 @@ export const Router = (() => {
   function destroyActiveView() {
     if (!activeView) return false;
 
-    try {
-      activeView.destroy?.();
-    } catch (error) {
-      warn("view destroy failed", error);
-    }
+    try { activeView.destroy?.(); } catch (error) { warn("view destroy failed", error); }
 
     activeView = null;
     return true;
@@ -574,7 +540,7 @@ export const Router = (() => {
 
     try {
       loader.classList.remove("is-visible", "is-entering", "is-leaving", "app-loader--visible");
-      loader.classList.add("is-hidden", "has-hidden");
+      loader.classList.add("is-hidden", "has-hidden", "loader-hidden");
       loader.setAttribute("aria-hidden", "true");
       loader.setAttribute("aria-busy", "false");
       loader.dataset.loaderVisible = "false";
@@ -587,20 +553,11 @@ export const Router = (() => {
   }
 
   function applyShell(route, canonicalPath, publicPath, phase = "router", hideLoading = false) {
-    try {
-      setShellMode(AppCore, route);
-    } catch {}
-
-    try {
-      setActiveMenu(AppCore, canonicalPath);
-    } catch {}
-
-    try {
-      setDocumentTitle(AppCore, route?.title || route?.label || route?.name || "");
-    } catch {}
+    try { setShellMode(AppCore, route); } catch {}
+    try { setActiveMenu(AppCore, canonicalPath); } catch {}
+    try { setDocumentTitle(AppCore, route?.title || route?.label || route?.name || ""); } catch {}
 
     if (hideLoading) hideLoader(phase);
-
     return true;
   }
 
@@ -636,9 +593,9 @@ export const Router = (() => {
     );
   }
 
-  /* =========================================================
+  /* =======================================================
      RENDER
-  ========================================================= */
+  ======================================================= */
 
   function shouldSkipHistory(options = {}) {
     return Boolean(options.skipHistory === true || options.protectedInitialUrl === true || (options.initialRender === true && options.preserveUrl === true));
@@ -696,20 +653,18 @@ export const Router = (() => {
     if ((reason === "not-authenticated" || reason === "ghost-auth-blocked") && access.redirectTo) {
       destroyActiveView();
 
-      await Promise.resolve(
-        renderLoginRedirect({
-          AppCore,
-          getRoute,
-          updateHistory,
-          canonicalPath: data.canonicalPath,
-          publicPath: data.publicPath,
-          redirectTo: normalizePublicPath(access.redirectTo),
-          clearDynamicContainers: () => clearDynamicContainers(AppCore),
-          setActiveMenu: (path) => setActiveMenu(AppCore, path),
-          setShellMode: (route) => setShellMode(AppCore, route),
-          setDocumentTitle: (title) => setDocumentTitle(AppCore, title),
-        })
-      );
+      await Promise.resolve(renderLoginRedirect({
+        AppCore,
+        getRoute,
+        updateHistory,
+        canonicalPath: data.canonicalPath,
+        publicPath: data.publicPath,
+        redirectTo: normalizePublicPath(access.redirectTo),
+        clearDynamicContainers: () => clearDynamicContainers(AppCore),
+        setActiveMenu: (path) => setActiveMenu(AppCore, path),
+        setShellMode: (route) => setShellMode(AppCore, route),
+        setDocumentTitle: (title) => setDocumentTitle(AppCore, title),
+      }));
 
       if (!isLatest(seq)) return stale(seq, "login-redirect-stale");
 
@@ -847,23 +802,19 @@ export const Router = (() => {
     try {
       destroyActiveView();
 
-      const view = await Promise.resolve(
-        renderRouteSuccess({
-          AppCore,
-          route: data.route,
-          requestedPath: data.publicPath,
-          canonicalPath: data.canonicalPath,
-          requestedUsername: data.username,
-          getRoute,
-          setShellMode: (route) => setShellMode(AppCore, route),
-          setDocumentTitle: (title) => setDocumentTitle(AppCore, title),
-        })
-      );
+      const view = await Promise.resolve(renderRouteSuccess({
+        AppCore,
+        route: data.route,
+        requestedPath: data.publicPath,
+        canonicalPath: data.canonicalPath,
+        requestedUsername: data.username,
+        getRoute,
+        setShellMode: (route) => setShellMode(AppCore, route),
+        setDocumentTitle: (title) => setDocumentTitle(AppCore, title),
+      }));
 
       if (!isLatest(seq)) {
-        try {
-          view?.destroy?.();
-        } catch {}
+        try { view?.destroy?.(); } catch {}
         return stale(seq, "after-view-render-stale");
       }
 
@@ -929,13 +880,18 @@ export const Router = (() => {
   }
 
   function renderCurrent(options = {}) {
-    const path = browserPath();
-    return render(path, { preservePublicPath: true, preserveUrl: true, replaceState: true, source: "render-current", ...safeObject(options) });
+    return render(browserPath(), {
+      preservePublicPath: true,
+      preserveUrl: true,
+      replaceState: true,
+      source: "render-current",
+      ...safeObject(options),
+    });
   }
 
-  /* =========================================================
+  /* =======================================================
      NAVIGATION
-  ========================================================= */
+  ======================================================= */
 
   function noop(reason, data = {}) {
     return Promise.resolve({ ok: true, skipped: true, reason, canonicalPath: data.canonicalPath || null, publicPath: data.publicPath || null });
@@ -1002,9 +958,9 @@ export const Router = (() => {
     });
   }
 
-  /* =========================================================
+  /* =======================================================
      BINDINGS
-  ========================================================= */
+  ======================================================= */
 
   function onClick(event) {
     if (
@@ -1035,9 +991,7 @@ export const Router = (() => {
 
     event.preventDefault();
 
-    try {
-      event.__onionRouterHandled = true;
-    } catch {}
+    try { event.__onionRouterHandled = true; } catch {}
 
     navigate(href, { source: "link-click" });
   }
@@ -1100,6 +1054,8 @@ export const Router = (() => {
   }
 
   function configure(options = {}) {
+    if (configured) return api;
+
     configured = true;
     attachToAppCore();
 
@@ -1150,9 +1106,7 @@ export const Router = (() => {
     if (!bound) return api;
 
     while (disposers.length) {
-      try {
-        disposers.pop()?.();
-      } catch {}
+      try { disposers.pop()?.(); } catch {}
     }
 
     destroyActiveView();
@@ -1161,9 +1115,9 @@ export const Router = (() => {
     return api;
   }
 
-  /* =========================================================
+  /* =======================================================
      SNAPSHOT / DEBUG
-  ========================================================= */
+  ======================================================= */
 
   function getCurrentRoute() {
     return getRoute(currentCanonicalPath());
@@ -1214,9 +1168,7 @@ export const Router = (() => {
       ? { target: redact(target), data: getRequestedData(target, { preservePublicPath: true, preserveUrl: true }), match: getRouteMatch(target), snapshot: getSnapshot() }
       : getSnapshot();
 
-    try {
-      console.log("[Router:debug]", sanitize(snapshot));
-    } catch {}
+    try { console.log("[Router:debug]", sanitize(snapshot)); } catch {}
 
     return sanitize(snapshot);
   }

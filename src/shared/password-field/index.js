@@ -2,21 +2,12 @@
    Onion SPA - Shared Password Field Index
    Archivo: src/shared/password-field/index.js
 
-   ONION SUPPORT · SHARED PASSWORD FIELD FACADE
-   EXPORT CONTRACT · NO SIDE EFFECTS · 16/10
-
-   Responsabilidades:
-   - Centralizar exports públicos del sistema password-field.
-   - Exponer renderer reutilizable de campos password.
-   - Exponer binder DOM para eye / caps lock.
-   - Simplificar imports desde login / reset / settings / cuenta.
-   - Evitar imports profundos repetidos.
-   - Mantener compatibilidad con named imports y default import.
-   - No tocar DOM al importar.
-   - No registrar listeners al importar.
-   - No depender de AppCore.
-   - No usar CSS inline.
-   - No inyectar estilos.
+   PASSWORD FIELD FACADE · SIMPLE
+   - fachada pública única del password-field compartido
+   - reexporta renderer + binder DOM
+   - aliases compat para vistas existentes
+   - sin side effects al importar
+   - sin AppCore, sin CSS inline, sin inyección de estilos
 ========================================================= */
 
 import {
@@ -31,71 +22,36 @@ import {
   bindPasswordFieldsInScope,
 } from "./password-field.dom.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const PASSWORD_FIELD_VERSION =
-  "16.0.0-shared-facade";
-
-/* =========================================================
-   NAMED EXPORTS
-========================================================= */
+export const PASSWORD_FIELD_VERSION = "21.0.0-simple";
 
 export {
   renderPasswordField,
   getEyeIcon,
   getEyeOffIcon,
   getCapsIcon,
-
   bindPasswordField,
   bindPasswordFieldsInScope,
 };
 
-/* =========================================================
-   COMPAT ALIASES
-========================================================= */
+export const render = renderPasswordField;
+export const bind = bindPasswordField;
+export const bindAll = bindPasswordFieldsInScope;
 
-export const render =
-  renderPasswordField;
+export const PasswordField = Object.freeze({
+  version: PASSWORD_FIELD_VERSION,
 
-export const bind =
-  bindPasswordField;
+  render,
+  renderPasswordField,
 
-export const bindAll =
-  bindPasswordFieldsInScope;
+  getEyeIcon,
+  getEyeOffIcon,
+  getCapsIcon,
 
-/* =========================================================
-   PUBLIC API OBJECT
-========================================================= */
+  bind,
+  bindPasswordField,
 
-export const PasswordField =
-  Object.freeze({
-    version:
-      PASSWORD_FIELD_VERSION,
-
-    render:
-      renderPasswordField,
-
-    renderPasswordField,
-
-    getEyeIcon,
-    getEyeOffIcon,
-    getCapsIcon,
-
-    bind:
-      bindPasswordField,
-
-    bindPasswordField,
-
-    bindAll:
-      bindPasswordFieldsInScope,
-
-    bindPasswordFieldsInScope,
-  });
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
+  bindAll,
+  bindPasswordFieldsInScope,
+});
 
 export default PasswordField;

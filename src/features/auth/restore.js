@@ -1,14 +1,20 @@
 /* =========================================================
-   Onion SPA - Auth Restore
-   Archivo: src/features/auth/restore.js
+   Onion Support - Auth Restore
+   Archivo: /src/features/auth/restore.js
 
-   AUTH RESTORE · SIMPLE
-   - restaurar sesión usando CoreHttp
-   - prioridad: token -> /auth/me
-   - fallback: refresh -> /auth/me
-   - nunca authenticated sin token + user usable
-   - preserva rutas públicas técnicas durante boot
-   - sin fetch propio, apiClient propio, Router, Toast ni storage global
+   Responsabilidad:
+   - Restaurar sesión mínima.
+   - Si hay token: pedir /api/auth/me.
+   - Si /me devuelve user: aplicar sesión.
+   - Si no hay token: limpiar sesión local.
+   - Sin refresh automático.
+   - Sin fetch propio.
+   - Sin apiClient propio.
+   - Sin Router.
+   - Sin Toast.
+   - Sin 2FA/MFA/OTP.
+   - Sin rutas legacy.
+   - Sin preserve-route complejo.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -21,23 +27,14 @@ import {
 
 import {
   AUTH_ENDPOINTS,
-  AUTH_CONSTANTS,
 } from "./constants.js";
 
 import {
-  extractToken,
-  extractUser,
-  extractRefreshToken,
-  normalizeSessionPayload,
-  normalizeUser,
+  normalizeAuthResponse,
 } from "./normalize.js";
 
 import {
   getStoredAccessToken,
-  getStoredRefreshToken,
-  getStoredSessionId,
-  getStoredSessionUserId,
-  hasRefreshContext,
 } from "./storage.js";
 
 import {
@@ -46,1025 +43,371 @@ import {
   buildSessionSnapshot,
 } from "./session.js";
 
-export const RESTORE_VERSION = "21.0.0-simple";
+export const RESTORE_VERSION = "simple";
 
-const RESTORE_SOURCE = "auth.restore";
-const BACKEND_ORIGIN = "https://api.onionit.net";
-const DEFAULT_ROUTE = "/";
+const SOURCE = "auth.restore";
 
 const runtimeSession = {
-  checking: false,
-  refreshing: false,
   restoring: false,
-  mePromise: null,
-  refreshPromise: null,
+  checking: false,
   restorePromise: null,
-  lastCheckAt: 0,
-  lastRefreshAt: 0,
+  mePromise: null,
   lastRestoreAt: 0,
-  refreshFailCount: 0,
-  refreshBlockedUntil: 0,
+  lastMeAt: 0,
   lastError: null,
 };
-
-const ACTIVATION_PATHS = Object.freeze([
-  "/activate-account",
-  "/activate",
-  "/activation",
-  "/account/activate",
-  "/activate/first-user",
-]);
-
-const RESET_CONFIRM_PATHS = Object.freeze([
-  "/reset-password/confirm",
-  "/reset-password-confirm",
-  "/password-reset/confirm",
-  "/password-reset-confirm",
-  "/confirm-reset-password",
-]);
-
-const PUBLIC_TECHNICAL_ROUTES = Object.freeze([
-  "/login",
-  ...ACTIVATION_PATHS,
-  "/reset-password",
-  ...RESET_CONFIRM_PATHS,
-  "/forgot-password",
-  "/recover-password",
-  "/password-reset",
-  "/2fa",
-  "/mfa",
-  "/otp",
-]);
-
-const AUTH_FAILURE_CODES = new Set([
-  "UNAUTHORIZED",
-  "FORBIDDEN",
-  "INVALID_TOKEN",
-  "TOKEN_INVALID",
-  "TOKEN_EXPIRED",
-  "SESSION_EXPIRED",
-  "SESSION_REVOKED",
-  "SESSION_NOT_FOUND",
-  "TOKEN_VERSION_MISMATCH",
-  "USER_NOT_FOUND",
-  "USER_DISABLED",
-  "USER_NOT_AVAILABLE",
-  "AUTH_FAILED",
-  "AUTH_RESTORE_FAILED",
-  "REFRESH_CONTEXT_MISSING",
-  "REFRESH_INVALID_SESSION",
-  "REFRESH_EMPTY_RESPONSE",
-  "REFRESH_UNUSABLE_RESPONSE",
-  "ME_USER_MISSING",
-]);
-
-const TRANSIENT_STATUS_CODES = new Set([0, 408, 425, 429, 500, 502, 503, 504]);
-
-const TOKEN_KEYS = Object.freeze(["token", "accessToken", "access_token", "authToken", "auth_token", "jwt", "bearer", "idToken", "id_token"]);
-const REFRESH_TOKEN_KEYS = Object.freeze(["refreshToken", "refresh_token"]);
-const USER_KEYS = Object.freeze(["user", "usuario", "me", "account", "profile", "currentUser", "current_user"]);
-const SESSION_KEYS = Object.freeze(["session", "sessionData", "session_data", "authSession", "auth_session"]);
-const SESSION_ID_KEYS = Object.freeze(["sessionId", "session_id", "sid", "id"]);
-const SESSION_USER_ID_KEYS = Object.freeze(["sessionUserId", "session_user_id", "userId", "user_id", "uid", "sub"]);
-const NESTED_KEYS = Object.freeze(["data", "payload", "result", "body", "response", "auth", "authData", "session", "sessionData"]);
-
-const BAD_TOKEN_VALUES = new Set(["", "null", "undefined", "false", "true", "nan", "none", "[object object]", "{}", "[]"]);
-const DISABLED_STATUS = new Set(["disabled", "inactive", "deleted", "blocked", "suspended", "banned", "revoked", "archived", "desactivado", "inactivo", "eliminado", "bloqueado", "suspendido"]);
-const SENSITIVE_KEY_RE = /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
 
 /* =========================================================
    BASICS
 ========================================================= */
 
-const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
-const isFunction = (value) => typeof value === "function";
-const isPlainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-
-function safeObject(value, fallback = {}) {
-  return isPlainObject(value) ? value : fallback;
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-
-  const text = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return text || fallback;
+function isFunction(value) {
+  return typeof value === "function";
 }
 
-function safeLower(value = "", fallback = "") {
-  return safeText(value, fallback).toLowerCase();
+function text(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
 }
 
-function safeNumber(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
+function nowIso() {
+  return new Date().toISOString();
 }
 
-function safeBool(value, fallback = false) {
-  if (value === true || value === 1 || value === "1") return true;
-  if (value === false || value === 0 || value === "0") return false;
-
-  const text = safeLower(value, "");
-  if (["true", "yes", "si", "sí", "on", "ok", "active"].includes(text)) return true;
-  if (["false", "no", "off", "inactive", "disabled"].includes(text)) return false;
-
-  return Boolean(fallback);
+function readState() {
+  return isObject(AppCore?.state) ? AppCore.state : {};
 }
 
-function first(...values) {
-  for (const value of values) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (isPlainObject(value) && Object.keys(value).length === 0) continue;
-    return value;
-  }
-
-  return null;
+function stripBearer(value = "") {
+  return text(value, "").replace(/^Bearer\s+/i, "");
 }
 
-function firstText(...values) {
-  return safeText(first(...values), "");
+function tokenOk(value = "") {
+  const token = stripBearer(value);
+
+  if (!token) return false;
+  if (/\s/.test(token)) return false;
+
+  return !["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
+    token.toLowerCase()
+  );
 }
 
-function nowMs() {
-  try { return Date.now(); } catch { return 0; }
+function cleanToken(value = "") {
+  return tokenOk(value) ? stripBearer(value) : "";
 }
 
-function nowIso(ms = nowMs()) {
-  try { return new Date(ms).toISOString(); } catch { return ""; }
+function userDisabled(user = null) {
+  if (!isObject(user)) return true;
+
+  return (
+    user.disabled === true ||
+    String(user.status || "").toLowerCase() === "disabled"
+  );
 }
 
-function getState() {
-  return safeObject(AppCore?.state);
-}
-
-function safeSetState(patch = {}, options = {}) {
-  const cleanPatch = safeObject(patch);
-  const finalOptions = {
-    source: RESTORE_SOURCE,
-    emit: false,
-    emitState: false,
-    emitDerived: false,
-    silent: true,
-    ...safeObject(options),
-  };
-
-  try { AppCore?.setState?.(cleanPatch, finalOptions); } catch {}
-  try { AppCore?.patchState?.(cleanPatch, finalOptions); } catch {}
-
-  try {
-    if (AppCore?.state && typeof AppCore.state === "object") Object.assign(AppCore.state, cleanPatch);
-  } catch {}
-
-  return getState();
-}
-
-/* =========================================================
-   TOKEN / USER
-========================================================= */
-
-function stripBearer(token = "") {
-  return safeText(token, "").replace(/^Bearer\s+/i, "").trim();
-}
-
-function hasUsableToken(token = "") {
-  const value = stripBearer(token);
-  if (!value || /[\s\r\n\t]/.test(value)) return false;
-  if (BAD_TOKEN_VALUES.has(value.toLowerCase())) return false;
-
-  const max = safeNumber(AppCore?.config?.auth?.tokenMaxLength || AppCore?.config?.auth?.constants?.tokenMaxLength, 8192);
-  if (max > 0 && value.length > max) return false;
-
-  try {
-    if (isFunction(AppCore?.utils?.hasValidToken)) return Boolean(AppCore.utils.hasValidToken(value));
-  } catch {}
-
-  return true;
-}
-
-function normalizeStatus(value = "") {
-  return safeText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^a-z0-9_:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-}
-
-function isUserActive(user = null) {
-  if (!isPlainObject(user)) return false;
-
-  const status = normalizeStatus(user.status || user.estado || user.state || user.accountStatus || "");
-  if (DISABLED_STATUS.has(status)) return false;
-
-  if (user.disabled === true || user.deleted === true || user.blocked === true || user.banned === true || user.suspended === true || user.revoked === true || user.archived === true) return false;
-
-  const active = user.active ?? user.enabled ?? user.isActive ?? user.isEnabled;
-  return active === undefined || active === null || active === "" ? true : safeBool(active, true);
-}
-
-function hasUsableUser(user = null) {
-  if (!isPlainObject(user) || !isUserActive(user)) return false;
+function userOk(user = null) {
+  if (!isObject(user)) return false;
+  if (userDisabled(user)) return false;
 
   return Boolean(
     user.id ||
       user.userId ||
-      user.user_id ||
-      user.uid ||
-      user.sub ||
       user.username ||
-      user.userName ||
-      user.user_name ||
-      user.email ||
-      user.mail ||
-      user.phone ||
-      user.telefono
+      user.slug ||
+      user.email
   );
-}
-
-function normalizeUserForRestore(user = null) {
-  if (!isPlainObject(user)) return null;
-
-  try {
-    const normalized = normalizeUser(user);
-    if (hasUsableUser(normalized)) return normalized;
-  } catch {}
-
-  return hasUsableUser(user) ? user : null;
-}
-
-function getCurrentToken() {
-  const state = getState();
-
-  return stripBearer(
-    firstText(
-      state.token,
-      state.accessToken,
-      state.access_token,
-      state.session?.token,
-      state.session?.accessToken,
-      state.session?.access_token,
-      state.sessionData?.token,
-      state.sessionData?.accessToken,
-      state.sessionData?.access_token,
-      getStoredAccessToken()
-    )
-  );
-}
-
-function getCurrentUser() {
-  const state = getState();
-
-  return normalizeUserForRestore(
-    state.user ||
-      state.currentUser ||
-      state.authUser ||
-      state.sessionUser ||
-      state.session?.user ||
-      state.session?.usuario ||
-      state.sessionData?.user ||
-      state.sessionData?.usuario ||
-      null
-  );
-}
-
-function hasCompleteAuthState() {
-  return Boolean(hasUsableToken(getCurrentToken()) && hasUsableUser(getCurrentUser()));
-}
-
-/* =========================================================
-   ERRORS / EVENTS
-========================================================= */
-
-function createRestoreError(message = "No se pudo restaurar la sesión.", { status = 401, code = "AUTH_RESTORE_FAILED", response = null } = {}) {
-  const error = new Error(redact(message));
-
-  error.name = "AuthRestoreError";
-  error.status = status;
-  error.statusCode = status;
-  error.code = code;
-  error.data = { code, message: redact(message), status };
-
-  try {
-    Object.defineProperty(error, "raw", { value: response, enumerable: false, configurable: true });
-  } catch {
-    error.raw = response;
-  }
-
-  return error;
-}
-
-function getErrorStatus(error = null) {
-  return safeNumber(error?.status || error?.statusCode || error?.response?.status || error?.data?.status || error?.raw?.status || 0, 0);
-}
-
-function getErrorCode(error = null) {
-  return safeText(error?.code || error?.data?.code || error?.response?.data?.code || error?.response?.data?.error || error?.raw?.code || error?.raw?.error || "", "").toUpperCase();
-}
-
-function buildErrorPayload(error = null) {
-  return {
-    name: safeText(error?.name, "Error"),
-    status: getErrorStatus(error) || null,
-    code: getErrorCode(error) || null,
-    message: redact(extractMessage(error) || safeText(error?.message, "Error")),
-    timeout: Boolean(error?.timeout),
-    aborted: Boolean(error?.aborted),
-    at: nowIso(),
-  };
-}
-
-function isTransientError(error = null) {
-  const status = getErrorStatus(error);
-  if (TRANSIENT_STATUS_CODES.has(status)) return true;
-  if (error?.timeout === true || error?.aborted === true || error?.name === "AbortError") return true;
-
-  const message = safeLower(extractMessage(error) || error?.message || "", "");
-  return ["network", "timeout", "fetch", "cors", "offline", "failed to fetch"].some((item) => message.includes(item));
-}
-
-function shouldClearForError(error = null) {
-  const status = getErrorStatus(error);
-  if (status === 401 || status === 403) return true;
-
-  const code = getErrorCode(error);
-  return Boolean(code && AUTH_FAILURE_CODES.has(code));
 }
 
 function redact(value = "") {
   try {
     return redactTokenInText(value);
   } catch {
-    return safeText(value, "")
-      .replace(/([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi, "$1***")
-      .replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***")
-      .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***")
-      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-      .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    return text(value, "").replace(/([?&#]token=)([^&#\s]+)/gi, "$1***");
   }
-}
-
-function sanitizeUserForEvent(user = null) {
-  if (!isPlainObject(user)) return null;
-
-  const output = { ...user };
-  for (const key of Object.keys(output)) {
-    if (SENSITIVE_KEY_RE.test(key) || key.startsWith("_")) delete output[key];
-  }
-
-  for (const key of ["avatar", "avatarUrl", "picture", "photo", "image"]) {
-    if (output[key]) output[key] = redact(output[key]);
-  }
-
-  return output;
 }
 
 function emit(eventName = "", payload = {}, options = {}) {
-  const name = safeText(eventName, "");
-  if (!name || options.silent === true || options.emitEvents === false) return false;
-
-  const cleanPayload = {
-    source: RESTORE_SOURCE,
-    version: RESTORE_VERSION,
-    at: nowIso(),
-    ...safeObject(payload),
-  };
-
-  for (const key of ["token", "accessToken", "access_token", "refreshToken", "refresh_token", "tempToken", "temp_token", "authorization", "password", "code", "otp", "totp"]) {
-    if (key in cleanPayload) cleanPayload[key] = null;
+  if (options.silent === true || options.emit === false || options.emitEvents === false) {
+    return false;
   }
-
-  for (const key of ["route", "publicPath", "browserPath", "initialUrl", "url"]) {
-    if (cleanPayload[key]) cleanPayload[key] = redact(cleanPayload[key]);
-  }
-
-  if (cleanPayload.user) cleanPayload.user = sanitizeUserForEvent(cleanPayload.user);
 
   try {
-    AppCore?.events?.emit?.(name, cleanPayload);
+    AppCore?.events?.emit?.(eventName, {
+      source: SOURCE,
+      version: RESTORE_VERSION,
+      at: nowIso(),
+      ...payload,
+      token: null,
+      accessToken: null,
+      refreshToken: null,
+    });
+
     return true;
-  } catch {}
-
-  return false;
-}
-
-function emitError(eventName, error, extra = {}, options = {}) {
-  return emit(eventName, { ...safeObject(extra), error: buildErrorPayload(error), message: extractMessage(error) }, options);
-}
-
-/* =========================================================
-   ROUTE PRESERVATION
-========================================================= */
-
-function isHashRouterPath(value = "") {
-  const raw = safeText(value, "");
-  return raw.startsWith("#/") || raw.startsWith("#!");
-}
-
-function normalizeHashRouterPath(value = "") {
-  const raw = safeText(value, "");
-  if (!raw) return DEFAULT_ROUTE;
-  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
-  return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
-}
-
-function normalizePathname(pathname = DEFAULT_ROUTE) {
-  let value = safeText(pathname, DEFAULT_ROUTE).replace(/\\/g, "/").replace(/\/{2,}/g, "/");
-  if (!value.startsWith("/")) value = `/${value}`;
-
-  const parts = [];
-  for (const part of value.split("/").filter(Boolean)) {
-    if (part === ".") continue;
-    if (part === "..") parts.pop();
-    else parts.push(part);
-  }
-
-  value = `/${parts.join("/")}` || DEFAULT_ROUTE;
-  if (value.length > 1) value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
-  return value;
-}
-
-function splitPath(path = DEFAULT_ROUTE) {
-  const raw = safeText(path, DEFAULT_ROUTE);
-  if (isHashRouterPath(raw)) return splitPath(normalizeHashRouterPath(raw));
-
-  let pathname = raw;
-  let search = "";
-  let hash = "";
-
-  const hashIndex = pathname.indexOf("#");
-  if (hashIndex >= 0) {
-    hash = pathname.slice(hashIndex);
-    pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
-  }
-
-  const searchIndex = pathname.indexOf("?");
-  if (searchIndex >= 0) {
-    search = pathname.slice(searchIndex);
-    pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
-  }
-
-  return { pathname: normalizePathname(pathname), search, hash };
-}
-
-function pathFromUrlLike(value = "") {
-  const raw = safeText(value, "");
-  if (!raw) return "";
-  if (isHashRouterPath(raw)) return normalizeHashRouterPath(raw);
-
-  try {
-    const parsed = new URL(raw, "http://localhost");
-    if (parsed.hash && isHashRouterPath(parsed.hash)) return normalizeHashRouterPath(parsed.hash);
-    return `${normalizePathname(parsed.pathname || DEFAULT_ROUTE)}${parsed.search || ""}${parsed.hash || ""}`;
   } catch {
-    return raw.startsWith("/") ? raw : `/${raw}`;
+    return false;
   }
-}
-
-function stripPublicUsernamePrefix(path = DEFAULT_ROUTE) {
-  const clean = splitPath(path).pathname;
-  const parts = clean.split("/").filter(Boolean);
-
-  if (parts[0] && /^@[A-Za-z0-9._-]{1,80}$/.test(parts[0])) {
-    return parts.length > 1 ? normalizePathname(`/${parts.slice(1).join("/")}`) : DEFAULT_ROUTE;
-  }
-
-  return clean;
-}
-
-function canonicalRoutePath(path = DEFAULT_ROUTE) {
-  const clean = stripPublicUsernamePrefix(pathFromUrlLike(path) || path || DEFAULT_ROUTE);
-
-  if (ACTIVATION_PATHS.some((candidate) => clean === candidate || clean.startsWith(`${candidate}/`))) return "/activate-account";
-  if (RESET_CONFIRM_PATHS.some((candidate) => clean === candidate || clean.startsWith(`${candidate}/`))) return "/reset-password/confirm";
-
-  return clean;
-}
-
-function getBrowserPublicPath() {
-  if (!isBrowser()) return "";
-
-  try {
-    const { pathname, search, hash } = window.location;
-    if (hash && isHashRouterPath(hash)) return normalizeHashRouterPath(hash);
-    return `${pathname || DEFAULT_ROUTE}${search || ""}${hash || ""}`;
-  } catch {
-    return "";
-  }
-}
-
-function isPublicTechnicalRoute(path = DEFAULT_ROUTE) {
-  const clean = canonicalRoutePath(path);
-  return PUBLIC_TECHNICAL_ROUTES.some((candidate) => clean === candidate || clean.startsWith(`${candidate}/`));
-}
-
-function captureRouteContext(options = {}) {
-  const state = getState();
-  const publicPath = safeText(options.publicPath || state.publicPath, "") || getBrowserPublicPath() || DEFAULT_ROUTE;
-  const route = safeText(options.route || state.route, "") || canonicalRoutePath(publicPath) || DEFAULT_ROUTE;
-  const preserve = Boolean(
-    options.publicRoute ||
-      options.preserveRoute ||
-      options.preserveCurrentRoute ||
-      options.activationBoot ||
-      options.resetConfirmBoot ||
-      isPublicTechnicalRoute(route) ||
-      isPublicTechnicalRoute(publicPath)
-  );
-
-  return {
-    preserve,
-    route: canonicalRoutePath(route || publicPath || DEFAULT_ROUTE),
-    publicPath: publicPath || route || DEFAULT_ROUTE,
-    activationBoot: Boolean(options.activationBoot || canonicalRoutePath(route) === "/activate-account"),
-    resetConfirmBoot: Boolean(options.resetConfirmBoot || canonicalRoutePath(route) === "/reset-password/confirm"),
-  };
-}
-
-function restoreRouteContext(routeContext = {}) {
-  if (!routeContext?.preserve) return false;
-
-  const route = canonicalRoutePath(routeContext.route || routeContext.publicPath || DEFAULT_ROUTE);
-  const publicPath = safeText(routeContext.publicPath, route);
-
-  safeSetState({
-    route,
-    canonicalPath: route,
-    publicPath,
-    bootIsActivation: Boolean(routeContext.activationBoot || getState().bootIsActivation),
-    bootHasActivationToken: Boolean(routeContext.activationBoot || getState().bootHasActivationToken),
-    bootIsResetConfirm: Boolean(routeContext.resetConfirmBoot || getState().bootIsResetConfirm),
-    bootHasResetToken: Boolean(routeContext.resetConfirmBoot || getState().bootHasResetToken),
-  }, { source: `${RESTORE_SOURCE}:restore-route` });
-
-  return true;
 }
 
 /* =========================================================
-   CORE HTTP
+   ERRORS
 ========================================================= */
 
-function resolveEndpoint(key, fallback = "") {
-  const endpoint = safeText(
-    AUTH_ENDPOINTS?.[key] ||
-      AUTH_ENDPOINTS?.auth?.[key] ||
-      AppCore?.config?.auth?.endpoints?.[key] ||
-      AppCore?.config?.endpoints?.auth?.[key],
-    fallback
-  );
+function createRestoreError(message = "No se pudo restaurar la sesión.", options = {}) {
+  const error = new Error(redact(message));
 
-  if (/^https?:\/\//i.test(endpoint)) return endpoint;
-  if (endpoint.startsWith("/api/")) return endpoint;
-  if (endpoint.startsWith("/auth/")) return endpoint;
-  if (endpoint.startsWith("/")) return `/auth${endpoint}`;
-  return `/auth/${endpoint}`;
+  error.name = "AuthRestoreError";
+  error.status = options.status || 401;
+  error.statusCode = error.status;
+  error.code = options.code || "AUTH_RESTORE_FAILED";
+
+  return error;
 }
 
-function getMeOptions(options = {}) {
-  return {
-    ...safeObject(options),
-    auth: true,
-    public: false,
-    skipAuth: false,
-    noAuthHeader: false,
-    captureAuth: false,
-    retries: 0,
-    cache: "no-store",
-    noAutoRefresh: true,
-    _skipAuthRefresh: true,
-    skipAuthRefresh: true,
-  };
-}
+function normalizeRestoreError(error) {
+  if (error?.name === "AuthRestoreError") return error;
 
-function getRefreshOptions(options = {}) {
-  return {
-    ...safeObject(options),
-    auth: false,
-    public: true,
-    skipAuth: true,
-    noAuthHeader: true,
-    captureAuth: false,
-    retries: 0,
-    noAutoRefresh: true,
-    _skipAuthRefresh: true,
-    skipAuthRefresh: true,
-  };
-}
+  const status =
+    error?.status ||
+    error?.statusCode ||
+    error?.response?.status ||
+    0;
 
-async function apiMe(options = {}) {
-  const token = safeText(options.token || getCurrentToken(), "");
-
-  if (isFunction(CoreHttp?.me)) return CoreHttp.me(getMeOptions({ ...options, token }));
-  return CoreHttp.request(resolveEndpoint("me", "/auth/me"), getMeOptions({ ...options, method: "GET", token }));
-}
-
-async function apiRefresh(body = {}, options = {}) {
-  const endpoint = resolveEndpoint("refresh", "/auth/refresh");
-  const finalOptions = getRefreshOptions(options);
-
-  if (isFunction(CoreHttp?.post)) return CoreHttp.post(endpoint, body, finalOptions);
-  return CoreHttp.request(endpoint, { ...finalOptions, method: "POST", body });
+  return createRestoreError(extractMessage(error), {
+    status: status || 500,
+    code:
+      error?.code ||
+      error?.data?.code ||
+      error?.response?.data?.code ||
+      "AUTH_RESTORE_FAILED",
+  });
 }
 
 /* =========================================================
-   RESPONSE NORMALIZATION
+   STATE
 ========================================================= */
 
-function collectObjects(raw = {}) {
-  const output = [];
-  const queue = [raw];
-  const seen = new WeakSet();
+function getCurrentToken() {
+  const state = readState();
 
-  while (queue.length && output.length < 60) {
-    const current = queue.shift();
-    if (!isPlainObject(current)) continue;
+  return cleanToken(
+    state.token ||
+      state.accessToken ||
+      state.access_token ||
+      state.session?.token ||
+      state.session?.accessToken ||
+      state.session?.access_token ||
+      getStoredAccessToken() ||
+      ""
+  );
+}
 
+function getCurrentUser() {
+  const state = readState();
+
+  return (
+    userOk(state.user) && state.user
+  ) || (
+    userOk(state.currentUser) && state.currentUser
+  ) || (
+    userOk(state.authUser) && state.authUser
+  ) || (
+    userOk(state.sessionUser) && state.sessionUser
+  ) || (
+    userOk(state.session?.user) && state.session.user
+  ) || null;
+}
+
+function hasCompleteAuthState() {
+  return Boolean(getCurrentToken() && getCurrentUser());
+}
+
+function getSession(sessionArg = null) {
+  return isObject(sessionArg) &&
+    ("restorePromise" in sessionArg || "mePromise" in sessionArg || "restoring" in sessionArg)
+    ? sessionArg
+    : runtimeSession;
+}
+
+function publicUser(user = null) {
+  if (!userOk(user)) return null;
+
+  return {
+    id: user.id || user.userId || null,
+    userId: user.userId || user.id || null,
+    username: user.username || user.slug || null,
+    displayName: user.displayName || user.name || user.username || null,
+    role: user.role || user.rol || null,
+    hasAvatar: Boolean(user.avatar || user.avatarUrl || user.picture),
+  };
+}
+
+function publicSnapshot(extra = {}) {
+  const snapshot = (() => {
     try {
-      if (seen.has(current)) continue;
-      seen.add(current);
-    } catch {}
-
-    output.push(current);
-
-    for (const key of NESTED_KEYS) {
-      if (isPlainObject(current[key])) queue.push(current[key]);
+      return buildSessionSnapshot();
+    } catch {
+      return {};
     }
+  })();
 
-    if (isPlainObject(current.response?.data)) queue.push(current.response.data);
-  }
-
-  return output;
-}
-
-function pickValue(objects = [], keys = []) {
-  for (const object of objects) {
-    for (const key of keys) {
-      if (object?.[key] !== null && object?.[key] !== undefined && object?.[key] !== "") return object[key];
-    }
-  }
-
-  return undefined;
-}
-
-function pickText(objects = [], keys = []) {
-  return safeText(pickValue(objects, keys), "");
-}
-
-function pickObject(objects = [], keys = []) {
-  for (const object of objects) {
-    for (const key of keys) {
-      if (isPlainObject(object?.[key])) return object[key];
-    }
-  }
-
-  return null;
-}
-
-function responseStatus(response = null) {
-  return pickValue(collectObjects(response), ["status", "statusCode", "status_code"]);
-}
-
-function responseCode(response = null) {
-  return safeText(pickValue(collectObjects(response), ["code", "error", "errorCode", "error_code"]), "");
-}
-
-function responseMessage(response = null) {
-  return safeText(pickValue(collectObjects(response), ["message", "mensaje", "errorMessage", "error_message", "detail", "description"]), "");
-}
-
-function isExplicitAuthFailure(response = null) {
-  if (!isPlainObject(response)) return false;
-
-  const status = Number(responseStatus(response) || 0);
-  if (Number.isFinite(status) && status >= 400) return true;
-
-  const code = responseCode(response).toUpperCase();
-  if (code && AUTH_FAILURE_CODES.has(code)) return true;
-
-  return collectObjects(response).some((object) => object.ok === false || object.success === false || (object.authenticated === false && code));
-}
-
-function extractUserFallback(response = null) {
-  const imported = normalizeUserForRestore(extractUser(response));
-  return imported || normalizeUserForRestore(pickObject(collectObjects(response), USER_KEYS));
-}
-
-function extractTokenFallback(response = null) {
-  const imported = safeText(extractToken(response), "");
-  if (hasUsableToken(imported)) return stripBearer(imported);
-  return stripBearer(pickText(collectObjects(response), TOKEN_KEYS));
-}
-
-function extractRefreshTokenFallback(response = null) {
-  const imported = safeText(extractRefreshToken(response), "");
-  if (hasUsableToken(imported)) return stripBearer(imported);
-  return stripBearer(pickText(collectObjects(response), REFRESH_TOKEN_KEYS));
-}
-
-function normalizeSessionPayloadFallback(response = null) {
-  try {
-    const normalized = normalizeSessionPayload(response);
-    if (isPlainObject(normalized)) return normalized;
-  } catch {}
-
-  const objects = collectObjects(response);
-  const session = pickObject(objects, SESSION_KEYS) || {};
-  const sessionId = pickText(objects, SESSION_ID_KEYS);
-  const sessionUserId = pickText(objects, SESSION_USER_ID_KEYS);
-
-  if (!Object.keys(session).length && !sessionId && !sessionUserId) return null;
-
-  return {
-    ...session,
-    sessionId: session.sessionId || session.session_id || session.sid || session.id || sessionId || null,
-    session_id: session.session_id || session.sessionId || session.sid || session.id || sessionId || null,
-    sid: session.sid || sessionId || null,
-    userId: session.userId || session.user_id || session.sessionUserId || sessionUserId || null,
-    user_id: session.user_id || session.userId || session.sessionUserId || sessionUserId || null,
-    sessionUserId: session.sessionUserId || session.session_user_id || session.userId || sessionUserId || null,
-    session_user_id: session.session_user_id || session.sessionUserId || session.userId || sessionUserId || null,
-  };
-}
-
-function normalizeAuthResponse(response = null) {
-  if (isExplicitAuthFailure(response)) {
-    return {
-      ok: false,
-      explicitFailure: true,
-      token: "",
-      user: null,
-      refreshToken: "",
-      sessionData: null,
-      status: responseStatus(response) || 401,
-      code: responseCode(response) || "AUTH_FAILED",
-      message: responseMessage(response) || "No se pudo restaurar la sesión.",
-      response,
-    };
-  }
-
-  const token = extractTokenFallback(response);
-  const user = extractUserFallback(response);
-  const refreshToken = extractRefreshTokenFallback(response);
-  const sessionData = normalizeSessionPayloadFallback(response);
-
-  return {
-    ok: Boolean(hasUsableToken(token) || hasUsableUser(user)),
-    explicitFailure: false,
-    token,
-    user: hasUsableUser(user) ? user : null,
-    refreshToken,
-    sessionData,
-    status: responseStatus(response) || (hasUsableToken(token) && hasUsableUser(user) ? "authenticated" : hasUsableToken(token) ? "token_only" : hasUsableUser(user) ? "user_only" : ""),
-    code: responseCode(response) || "",
-    message: responseMessage(response) || "",
-    response,
-  };
-}
-
-function assertNoExplicitFailure(auth = {}) {
-  if (auth.explicitFailure || auth.ok === false) {
-    throw createRestoreError(auth.message || "No se pudo restaurar la sesión.", {
-      status: Number(auth.status) || 401,
-      code: auth.code || "AUTH_RESTORE_FAILED",
-      response: auth.response,
-    });
-  }
-}
-
-/* =========================================================
-   REFRESH CONTEXT
-========================================================= */
-
-function getStoredRefreshPayload() {
-  const state = getState();
-  const session = safeObject(state.session || state.sessionData);
-  const user = safeObject(state.user || state.currentUser || state.authUser || state.sessionUser);
-
-  return {
-    refreshToken: stripBearer(getStoredRefreshToken() || state.refreshToken || state.refresh_token || session.refreshToken || session.refresh_token || ""),
-    sessionId: firstText(getStoredSessionId(), session.sessionId, session.session_id, session.sid, state.sessionId),
-    userId: firstText(getStoredSessionUserId(), session.userId, session.user_id, session.sessionUserId, session.session_user_id, user.userId, user.user_id, user.id, user.sub, state.sessionUserId),
-  };
-}
-
-function hasUsableRefreshPayload(payload = getStoredRefreshPayload()) {
-  return Boolean(hasUsableToken(payload.refreshToken) && safeText(payload.sessionId, "") && safeText(payload.userId, ""));
-}
-
-function canAttemptRefresh(session = runtimeSession) {
-  if (safeNumber(session.refreshBlockedUntil, 0) > Date.now()) return false;
-  return Boolean(hasRefreshContext() && hasUsableRefreshPayload());
-}
-
-function getMaxRefreshFailures() {
-  return safeNumber(AUTH_CONSTANTS?.maxSequentialRefreshFailures, 3);
-}
-
-function getRefreshCooldownMs() {
-  return safeNumber(AUTH_CONSTANTS?.refreshRetryCooldownMs, 30000);
-}
-
-/* =========================================================
-   APPLY / CLEAR
-========================================================= */
-
-function getSafeSessionSnapshot() {
-  try {
-    return buildSessionSnapshot();
-  } catch {
-    return { authenticated: false, token: getCurrentToken() || null, user: getCurrentUser() || null };
-  }
-}
-
-function assertCompleteSnapshot(snapshot = {}, code = "INVALID_SESSION") {
-  const token = snapshot.token || snapshot.accessToken || getCurrentToken();
+  const state = readState();
   const user = snapshot.user || getCurrentUser();
 
-  if (!snapshot.authenticated || !hasUsableToken(token) || !hasUsableUser(user)) {
-    throw createRestoreError("La sesión restaurada no es válida.", { status: 401, code });
-  }
-
-  return true;
-}
-
-function applyAuthenticatedSession({ token, user, refreshToken, sessionData, source = RESTORE_SOURCE } = {}) {
-  const cleanToken = stripBearer(token);
-  const cleanUser = normalizeUserForRestore(user);
-
-  if (!hasUsableToken(cleanToken) || !hasUsableUser(cleanUser)) {
-    throw createRestoreError("Sesión incompleta.", { status: 401, code: "APPLY_AUTH_SESSION_INCOMPLETE" });
-  }
-
-  const snapshot = applySession({
-    token: cleanToken,
-    accessToken: cleanToken,
-    access_token: cleanToken,
-    refreshToken: refreshToken || undefined,
-    refresh_token: refreshToken || undefined,
-    session: sessionData || undefined,
-    sessionData: sessionData || undefined,
-    user: cleanUser,
-    usuario: cleanUser,
-    me: cleanUser,
-    account: cleanUser,
-    profile: cleanUser,
-    authenticated: true,
-    preserveExistingUser: false,
-    source,
-    eventMode: "restore",
-  }, {
-    source,
-    eventMode: "restore",
-    repairUI: false,
-    silent: true,
-    emit: false,
-  });
-
-  return snapshot;
-}
-
-function applyProvisionalTokenSession({ token, refreshToken, sessionData, source = "refresh:token-only" } = {}) {
-  const cleanToken = stripBearer(token);
-  if (!hasUsableToken(cleanToken)) throw createRestoreError("Token provisional ausente.", { status: 401, code: "PROVISIONAL_TOKEN_MISSING" });
-
-  return applySession({
-    token: cleanToken,
-    accessToken: cleanToken,
-    access_token: cleanToken,
-    refreshToken: refreshToken || undefined,
-    refresh_token: refreshToken || undefined,
-    session: sessionData || undefined,
-    sessionData: sessionData || undefined,
-    user: null,
-    authenticated: false,
-    preserveExistingUser: false,
-    silent: true,
-    source,
-    eventMode: "refresh",
-  }, {
-    source,
-    eventMode: "refresh",
-    silent: true,
-    emit: false,
-  });
-}
-
-function clearSessionProtected({ options = {}, routeContext = null, reason = "restore-clear" } = {}) {
-  const ctx = routeContext || captureRouteContext(options);
-
-  try {
-    clearSessionLocal({
-      silent: true,
-      preserveRoute: ctx.preserve,
-      preserveCurrentRoute: ctx.preserve,
-      route: ctx.route,
-      publicPath: ctx.publicPath,
-      source: RESTORE_SOURCE,
-      reason,
-    });
-  } catch {}
-
-  safeSetState({
-    authenticated: false,
-    hasToken: false,
-    token: null,
-    accessToken: null,
-    access_token: null,
-    user: null,
-    currentUser: null,
-    authUser: null,
-    sessionUser: null,
-    role: "",
-    userRole: "",
-    roles: [],
-    session: null,
-    sessionData: null,
-    sessionId: null,
-    sessionUserId: null,
-  }, {
-    forceUnauthenticated: true,
-    source: `${RESTORE_SOURCE}:clear`,
-  });
-
-  restoreRouteContext(ctx);
-
-  emit("auth:restore:session-cleared", { reason, protectedRoute: ctx.preserve, route: ctx.route, publicPath: ctx.publicPath }, options);
-  return true;
-}
-
-function buildPublicSessionPayload(snapshot = {}) {
-  const user = snapshot.user || getCurrentUser();
-  const token = snapshot.token || snapshot.accessToken || getCurrentToken();
-
   return {
-    authenticated: Boolean(snapshot.authenticated && hasUsableToken(token) && hasUsableUser(user)),
-    hasToken: hasUsableToken(token),
+    version: RESTORE_VERSION,
+    authenticated: Boolean(snapshot.authenticated || hasCompleteAuthState()),
+    hasToken: Boolean(getCurrentToken()),
+    hasUser: Boolean(userOk(user)),
+    user: publicUser(user),
+    role: snapshot.role || state.role || user?.role || null,
+    route: redact(state.route || "/"),
+    publicPath: redact(state.publicPath || "/"),
     token: null,
     accessToken: null,
     refreshToken: null,
-    user: sanitizeUserForEvent(user),
-    role: snapshot.role || user?.role || user?.rol || getState().role || null,
+    ...extra,
   };
+}
+
+/* =========================================================
+   HTTP
+========================================================= */
+
+function meEndpoint() {
+  return AUTH_ENDPOINTS?.me || "/api/auth/me";
+}
+
+async function apiMe(token = "", options = {}) {
+  if (!tokenOk(token)) {
+    throw createRestoreError("No hay token para restaurar sesión.", {
+      status: 401,
+      code: "TOKEN_MISSING",
+    });
+  }
+
+  if (isFunction(CoreHttp?.me)) {
+    return CoreHttp.me({
+      ...options,
+      token,
+      auth: true,
+      public: false,
+      skipAuth: false,
+      cache: "no-store",
+    });
+  }
+
+  return CoreHttp.get(meEndpoint(), {
+    ...options,
+    token,
+    auth: true,
+    public: false,
+    skipAuth: false,
+    cache: "no-store",
+  });
 }
 
 /* =========================================================
    /ME
 ========================================================= */
 
-function getSession(sessionArg) {
-  return isPlainObject(sessionArg) && ("restorePromise" in sessionArg || "refreshPromise" in sessionArg || "mePromise" in sessionArg) ? sessionArg : runtimeSession;
-}
-
-export async function fetchMe(sessionArg = runtimeSession) {
+export async function fetchMe(sessionArg = runtimeSession, options = {}) {
   const session = getSession(sessionArg);
-  const token = getCurrentToken();
-
-  if (!hasUsableToken(token)) {
-    throw createRestoreError("No hay token para /me.", { status: 401, code: "TOKEN_MISSING" });
-  }
 
   if (session.mePromise) return session.mePromise;
 
+  const token = getCurrentToken();
+
+  if (!tokenOk(token)) {
+    throw createRestoreError("No hay token para /me.", {
+      status: 401,
+      code: "TOKEN_MISSING",
+    });
+  }
+
   session.checking = true;
-  emit("auth:me:start", { hasToken: true });
+
+  emit("auth:me:start", {
+    hasToken: true,
+  }, options);
 
   session.mePromise = (async () => {
     try {
-      const response = await apiMe({ token });
-      const auth = normalizeAuthResponse(response);
-      assertNoExplicitFailure(auth);
+      const response = await apiMe(token, options);
 
-      const user = normalizeUserForRestore(auth.user);
-      if (!hasUsableUser(user)) {
-        throw createRestoreError("No se pudo resolver usuario válido desde /me.", { status: 401, code: "ME_USER_MISSING", response });
-      }
-
-      const snapshot = applyAuthenticatedSession({
-        token: auth.token || token,
-        user,
-        refreshToken: auth.refreshToken || undefined,
-        sessionData: auth.sessionData || undefined,
-        source: "restore.me",
+      const normalized = normalizeAuthResponse(response, {
+        mode: "me",
+        allowUserOnly: true,
+        requireUser: true,
       });
 
-      assertCompleteSnapshot(snapshot, "ME_INVALID_SESSION");
+      const user =
+        normalized.user ||
+        normalized.me ||
+        normalized.usuario ||
+        null;
 
-      session.lastCheckAt = Date.now();
+      if (!userOk(user)) {
+        throw createRestoreError("No se pudo resolver usuario válido desde /me.", {
+          status: 401,
+          code: "ME_USER_MISSING",
+        });
+      }
+
+      const snapshot = applySession(
+        {
+          ...normalized,
+          token,
+          accessToken: token,
+          access_token: token,
+          user,
+          me: user,
+          usuario: user,
+          source: SOURCE,
+          eventMode: "restore",
+        },
+        {
+          source: SOURCE,
+          eventMode: "restore",
+          silent: true,
+          emit: false,
+        }
+      );
+
+      session.lastMeAt = Date.now();
       session.lastError = null;
 
-      emit("auth:me:success", buildPublicSessionPayload(snapshot));
+      emit("auth:me:success", publicSnapshot({
+        user: publicUser(user),
+      }), options);
 
-      return snapshot.user;
+      return {
+        ok: true,
+        user,
+        snapshot,
+      };
     } catch (error) {
-      session.lastError = { type: "me", ...buildErrorPayload(error) };
-      emitError("auth:me:error", error);
-      throw error;
+      const finalError = normalizeRestoreError(error);
+
+      session.lastError = {
+        type: "me",
+        message: finalError.message,
+        status: finalError.status || 0,
+        code: finalError.code || null,
+        at: nowIso(),
+      };
+
+      emit("auth:me:error", {
+        message: finalError.message,
+        status: finalError.status || 0,
+        code: finalError.code || null,
+      }, options);
+
+      throw finalError;
     } finally {
       session.checking = false;
       session.mePromise = null;
@@ -1075,282 +418,178 @@ export async function fetchMe(sessionArg = runtimeSession) {
 }
 
 /* =========================================================
-   REFRESH
+   REFRESH COMPAT
+   No refresh automático en restore mínimo.
 ========================================================= */
 
-export async function refreshSession(sessionArg = runtimeSession) {
-  const session = getSession(sessionArg);
-  const body = getStoredRefreshPayload();
-
-  if (!hasUsableRefreshPayload(body)) {
-    throw createRestoreError("No hay contexto refresh completo.", { status: 401, code: "REFRESH_CONTEXT_MISSING" });
-  }
-
-  if (session.refreshPromise) return session.refreshPromise;
-
-  if (safeNumber(session.refreshBlockedUntil, 0) > Date.now()) {
-    throw createRestoreError("Refresh temporalmente bloqueado.", { status: 429, code: "REFRESH_BLOCKED" });
-  }
-
-  session.refreshing = true;
-  emit("auth:refresh:start", {
-    hasRefreshContext: true,
-    hasRefreshToken: Boolean(body.refreshToken),
-    hasSessionContext: Boolean(body.sessionId && body.userId),
+export async function refreshSession() {
+  throw createRestoreError("Refresh automático desactivado en restore mínimo.", {
+    status: 400,
+    code: "REFRESH_DISABLED",
   });
+}
 
-  session.refreshPromise = (async () => {
+export async function restoreUsingMe(sessionArg = runtimeSession, options = {}) {
+  const result = await fetchMe(sessionArg, options);
+
+  return {
+    ok: true,
+    user: result.user,
+    source: "me",
+  };
+}
+
+export async function restoreUsingRefreshOnly() {
+  return refreshSession();
+}
+
+export async function restoreUsingRefreshPreferred() {
+  return refreshSession();
+}
+
+export async function restoreAfterMeFailure(_sessionArg, error, options = {}) {
+  const finalError = normalizeRestoreError(error);
+
+  if (finalError.status === 401 || finalError.status === 403) {
     try {
-      const response = await apiRefresh(body, { auth: false, public: true, skipAuth: true });
-      const auth = normalizeAuthResponse(response);
-      assertNoExplicitFailure(auth);
-
-      const tokenOk = hasUsableToken(auth.token);
-      const userOk = hasUsableUser(auth.user);
-
-      if (!tokenOk && !userOk) {
-        throw createRestoreError("Refresh sin sesión recuperable.", { status: 401, code: "REFRESH_EMPTY_RESPONSE", response });
-      }
-
-      let snapshot = null;
-
-      if (tokenOk && userOk) {
-        snapshot = applyAuthenticatedSession({
-          token: auth.token,
-          user: auth.user,
-          refreshToken: auth.refreshToken || body.refreshToken,
-          sessionData: auth.sessionData || { sessionId: body.sessionId, userId: body.userId },
-          source: "refresh",
-        });
-      } else if (tokenOk && !userOk) {
-        applyProvisionalTokenSession({
-          token: auth.token,
-          refreshToken: auth.refreshToken || body.refreshToken,
-          sessionData: auth.sessionData || { sessionId: body.sessionId, userId: body.userId },
-        });
-
-        await fetchMe(session);
-        snapshot = getSafeSessionSnapshot();
-      } else if (!tokenOk && userOk && hasUsableToken(getCurrentToken())) {
-        snapshot = applyAuthenticatedSession({
-          token: getCurrentToken(),
-          user: auth.user,
-          refreshToken: auth.refreshToken || body.refreshToken,
-          sessionData: auth.sessionData || { sessionId: body.sessionId, userId: body.userId },
-          source: "refresh:user-only",
-        });
-      }
-
-      assertCompleteSnapshot(snapshot, "REFRESH_INVALID_SESSION");
-
-      session.lastRefreshAt = Date.now();
-      session.refreshFailCount = 0;
-      session.refreshBlockedUntil = 0;
-      session.lastError = null;
-
-      emit("auth:refresh:success", buildPublicSessionPayload(snapshot));
-
-      return { ok: true, ...snapshot, response, source: "refresh" };
-    } catch (error) {
-      session.refreshFailCount = safeNumber(session.refreshFailCount, 0) + 1;
-
-      if (session.refreshFailCount >= getMaxRefreshFailures()) {
-        session.refreshBlockedUntil = Date.now() + getRefreshCooldownMs();
-      }
-
-      session.lastError = { type: "refresh", ...buildErrorPayload(error) };
-      emitError("auth:refresh:error", error, { refreshFailCount: session.refreshFailCount, refreshBlockedUntil: session.refreshBlockedUntil || null });
-
-      throw error;
-    } finally {
-      session.refreshing = false;
-      session.refreshPromise = null;
-    }
-  })();
-
-  return session.refreshPromise;
-}
-
-/* =========================================================
-   RESTORE MODES
-========================================================= */
-
-export async function restoreUsingMe(session = runtimeSession) {
-  const user = await fetchMe(session);
-  const snapshot = getSafeSessionSnapshot();
-
-  assertCompleteSnapshot(snapshot, "RESTORE_ME_INVALID_SESSION");
-  emit("auth:restore:success", { ...buildPublicSessionPayload(snapshot), source: "me" });
-
-  return { ok: true, user, source: "me" };
-}
-
-export async function restoreUsingRefreshOnly(session = runtimeSession) {
-  const refreshed = await refreshSession(session);
-
-  if (!hasCompleteAuthState() && hasUsableToken(getCurrentToken())) await fetchMe(session);
-
-  const snapshot = getSafeSessionSnapshot();
-  assertCompleteSnapshot(snapshot, "RESTORE_REFRESH_INVALID_SESSION");
-
-  emit("auth:restore:success", { ...buildPublicSessionPayload(snapshot), source: "refresh" });
-
-  return { ok: true, user: snapshot.user || null, refreshed, source: "refresh" };
-}
-
-export async function restoreUsingRefreshPreferred(session = runtimeSession) {
-  return restoreUsingRefreshOnly(session);
-}
-
-export async function restoreAfterMeFailure(session = runtimeSession, meError, options = {}, routeContext = null) {
-  if (isTransientError(meError) && hasCompleteAuthState()) {
-    restoreRouteContext(routeContext);
-    const snapshot = getSafeSessionSnapshot();
-    return { ok: true, user: snapshot.user, source: "cached-after-me-transient", provisional: true, protectedRoute: Boolean(routeContext?.preserve) };
-  }
-
-  if (canAttemptRefresh(session)) {
-    try {
-      return await restoreUsingRefreshOnly(session);
-    } catch (refreshError) {
-      if (isTransientError(refreshError) && hasCompleteAuthState()) {
-        restoreRouteContext(routeContext);
-        const snapshot = getSafeSessionSnapshot();
-        return { ok: true, user: snapshot.user, source: "cached-after-refresh-transient", provisional: true, protectedRoute: Boolean(routeContext?.preserve) };
-      }
-
-      if (shouldClearForError(meError) || shouldClearForError(refreshError)) clearSessionProtected({ options, routeContext, reason: "me-refresh-failed-clearable" });
-      else restoreRouteContext(routeContext);
-
-      emitError("auth:restore:error", refreshError, { protectedRoute: Boolean(routeContext?.preserve) }, options);
-      return { ok: false, user: null, error: refreshError, protectedRoute: Boolean(routeContext?.preserve) };
+      clearSessionLocal({
+        source: SOURCE,
+        silent: true,
+      });
+    } catch {
+      // noop
     }
   }
 
-  if (shouldClearForError(meError)) clearSessionProtected({ options, routeContext, reason: "me-failed-clearable" });
-  else restoreRouteContext(routeContext);
-
-  emitError("auth:restore:error", meError, { protectedRoute: Boolean(routeContext?.preserve) }, options);
-  return { ok: false, user: null, error: meError, protectedRoute: Boolean(routeContext?.preserve) };
+  return {
+    ok: false,
+    user: null,
+    error: finalError,
+    protectedRoute: false,
+    source: "me-failed",
+    options,
+  };
 }
 
 /* =========================================================
    RESTORE SESSION
 ========================================================= */
 
-function looksLikeRuntimeSession(value) {
-  return Boolean(isPlainObject(value) && ("checking" in value || "refreshing" in value || "restoring" in value || "restorePromise" in value));
-}
-
-function resolveRestoreArgs(...args) {
-  if (looksLikeRuntimeSession(args[0])) return { session: args[0], options: safeObject(args[1]) };
-  return { session: runtimeSession, options: safeObject(args[0]) };
-}
-
-function normalizeRestoreOptions(options = {}) {
-  const opts = safeObject(options);
+function resolveArgs(...args) {
+  if (isObject(args[0]) && ("restorePromise" in args[0] || "mePromise" in args[0] || "restoring" in args[0])) {
+    return {
+      session: args[0],
+      options: isObject(args[1]) ? args[1] : {},
+    };
+  }
 
   return {
-    ...opts,
-    silent: safeBool(opts.silent, false),
-    publicRoute: safeBool(opts.publicRoute, false),
-    preserveRoute: safeBool(opts.preserveRoute, false),
-    preserveCurrentRoute: safeBool(opts.preserveCurrentRoute, false),
-    activationBoot: safeBool(opts.activationBoot, false),
-    resetConfirmBoot: safeBool(opts.resetConfirmBoot, false),
+    session: runtimeSession,
+    options: isObject(args[0]) ? args[0] : {},
   };
 }
 
-function clearRuntimeFlags(session) {
-  session.checking = false;
-  session.refreshing = false;
-  session.restoring = false;
-  session.mePromise = null;
-  session.refreshPromise = null;
-  session.restorePromise = null;
-}
-
 export async function restoreSession(...args) {
-  const { session, options: rawOptions } = resolveRestoreArgs(...args);
-  const options = normalizeRestoreOptions(rawOptions);
-  const routeContext = captureRouteContext(options);
+  const { session, options } = resolveArgs(...args);
 
   if (session.restorePromise) return session.restorePromise;
 
   session.restoring = true;
 
   emit("auth:restore:start", {
-    hasToken: hasUsableToken(getCurrentToken()),
-    hasUser: hasUsableUser(getCurrentUser()),
-    hasCompleteAuthState: hasCompleteAuthState(),
-    hasRefreshContext: hasRefreshContext(),
-    hasUsableRefreshPayload: hasUsableRefreshPayload(),
-    protectedRoute: routeContext.preserve,
-    route: routeContext.route,
-    publicPath: routeContext.publicPath,
+    hasToken: Boolean(getCurrentToken()),
+    hasUser: Boolean(getCurrentUser()),
   }, options);
 
   session.restorePromise = (async () => {
     try {
-      const tokenAvailable = hasUsableToken(getCurrentToken());
-      const refreshAvailable = canAttemptRefresh(session);
+      if (hasCompleteAuthState()) {
+        session.lastRestoreAt = Date.now();
+        session.lastError = null;
 
-      if (tokenAvailable) {
-        try {
-          const result = await restoreUsingMe(session);
-          restoreRouteContext(routeContext);
-          session.lastRestoreAt = Date.now();
-          return { ...result, protectedRoute: routeContext.preserve };
-        } catch (meError) {
-          const result = await restoreAfterMeFailure(session, meError, options, routeContext);
-          restoreRouteContext(routeContext);
-          session.lastRestoreAt = Date.now();
-          return result;
-        }
+        const snapshot = publicSnapshot({
+          source: "state",
+        });
+
+        emit("auth:restore:success", snapshot, options);
+
+        return {
+          ok: true,
+          user: getCurrentUser(),
+          source: "state",
+        };
       }
 
-      if (refreshAvailable) {
+      const token = getCurrentToken();
+
+      if (!tokenOk(token)) {
         try {
-          const result = await restoreUsingRefreshPreferred(session);
-          restoreRouteContext(routeContext);
-          session.lastRestoreAt = Date.now();
-          return { ...result, protectedRoute: routeContext.preserve };
-        } catch (refreshError) {
-          if (isTransientError(refreshError) && hasCompleteAuthState()) {
-            restoreRouteContext(routeContext);
-            const snapshot = getSafeSessionSnapshot();
-            return { ok: true, user: snapshot.user, source: "cached-after-refresh-transient", provisional: true, protectedRoute: routeContext.preserve };
-          }
-
-          if (shouldClearForError(refreshError)) {
-            clearSessionProtected({ options, routeContext, reason: "refresh-failed-clearable" });
-            return { ok: false, user: null, error: refreshError, protectedRoute: routeContext.preserve };
-          }
-
-          restoreRouteContext(routeContext);
-          return { ok: false, user: null, error: refreshError, protectedRoute: routeContext.preserve };
+          clearSessionLocal({
+            source: SOURCE,
+            silent: true,
+          });
+        } catch {
+          // noop
         }
+
+        emit("auth:restore:empty", {
+          reason: "missing-token",
+        }, options);
+
+        return {
+          ok: false,
+          user: null,
+          source: "empty",
+        };
       }
 
-      clearSessionProtected({ options, routeContext, reason: "missing-token-and-refresh" });
-      emit("auth:restore:empty", { reason: "missing-token-and-refresh", protectedRoute: routeContext.preserve }, options);
+      const result = await restoreUsingMe(session, options);
 
-      return { ok: false, user: null, protectedRoute: routeContext.preserve };
+      session.lastRestoreAt = Date.now();
+      session.lastError = null;
+
+      emit("auth:restore:success", publicSnapshot({
+        source: "me",
+      }), options);
+
+      return result;
     } catch (error) {
-      if (isTransientError(error) && hasCompleteAuthState()) {
-        restoreRouteContext(routeContext);
-        const snapshot = getSafeSessionSnapshot();
-        return { ok: true, user: snapshot.user, source: "cached-after-restore-transient", provisional: true, protectedRoute: routeContext.preserve };
+      const finalError = normalizeRestoreError(error);
+
+      session.lastError = {
+        type: "restore",
+        message: finalError.message,
+        status: finalError.status || 0,
+        code: finalError.code || null,
+        at: nowIso(),
+      };
+
+      if (finalError.status === 401 || finalError.status === 403) {
+        try {
+          clearSessionLocal({
+            source: SOURCE,
+            silent: true,
+          });
+        } catch {
+          // noop
+        }
       }
 
-      if (shouldClearForError(error)) clearSessionProtected({ options, routeContext, reason: "restore-failed-clearable" });
-      else restoreRouteContext(routeContext);
+      emit("auth:restore:error", {
+        message: finalError.message,
+        status: finalError.status || 0,
+        code: finalError.code || null,
+      }, options);
 
-      emitError("auth:restore:error", error, { protectedRoute: routeContext.preserve }, options);
-      return { ok: false, user: null, error, protectedRoute: routeContext.preserve };
+      return {
+        ok: false,
+        user: null,
+        error: finalError,
+        source: "error",
+      };
     } finally {
-      restoreRouteContext(routeContext);
-      clearRuntimeFlags(session);
+      session.restoring = false;
+      session.restorePromise = null;
     }
   })();
 
@@ -1360,58 +599,48 @@ export async function restoreSession(...args) {
 export const restoreSessionInBackground = restoreSession;
 
 /* =========================================================
-   DEBUG
+   SNAPSHOT
 ========================================================= */
 
 export function getRestoreSnapshot(sessionArg = runtimeSession) {
   const session = getSession(sessionArg);
-  const routeContext = captureRouteContext({});
-  const refreshPayload = getStoredRefreshPayload();
-  const snapshot = getSafeSessionSnapshot();
 
   return {
     version: RESTORE_VERSION,
-    authenticated: Boolean(snapshot.authenticated),
-    hasToken: hasUsableToken(snapshot.token || snapshot.accessToken || getCurrentToken()),
-    hasUser: hasUsableUser(snapshot.user || getCurrentUser()),
-    user: sanitizeUserForEvent(snapshot.user || getCurrentUser()),
-    role: snapshot.role || getState().role || null,
-    checking: Boolean(session.checking),
-    refreshing: Boolean(session.refreshing),
+
     restoring: Boolean(session.restoring),
-    hasMePromise: Boolean(session.mePromise),
-    hasRefreshPromise: Boolean(session.refreshPromise),
+    checking: Boolean(session.checking),
+
     hasRestorePromise: Boolean(session.restorePromise),
-    refreshFailCount: safeNumber(session.refreshFailCount, 0),
-    refreshBlockedUntil: safeNumber(session.refreshBlockedUntil, 0),
-    lastCheckAt: safeNumber(session.lastCheckAt, 0),
-    lastRefreshAt: safeNumber(session.lastRefreshAt, 0),
-    lastRestoreAt: safeNumber(session.lastRestoreAt, 0),
+    hasMePromise: Boolean(session.mePromise),
+
+    lastRestoreAt: session.lastRestoreAt || 0,
+    lastMeAt: session.lastMeAt || 0,
     lastError: session.lastError || null,
-    hasRefreshContext: hasRefreshContext(),
-    hasUsableRefreshPayload: hasUsableRefreshPayload(refreshPayload),
-    hasStoredRefreshToken: Boolean(refreshPayload.refreshToken),
-    hasStoredSessionContext: Boolean(refreshPayload.sessionId && refreshPayload.userId),
-    protectedRoute: routeContext.preserve,
-    route: redact(routeContext.route),
-    publicPath: redact(routeContext.publicPath),
+
+    authenticated: hasCompleteAuthState(),
+    hasToken: Boolean(getCurrentToken()),
+    hasUser: Boolean(getCurrentUser()),
+
+    user: publicUser(getCurrentUser()),
+
+    route: redact(readState().route || "/"),
+    publicPath: redact(readState().publicPath || "/"),
+
     transport: {
-      hasCoreHttp: Boolean(CoreHttp?.request),
-      apiBase: safeText(AppCore?.config?.apiBase || AppCore?.config?.apiOrigin || BACKEND_ORIGIN, BACKEND_ORIGIN),
-      me: resolveEndpoint("me", "/auth/me"),
-      refresh: resolveEndpoint("refresh", "/auth/refresh"),
+      hasCoreHttp: Boolean(CoreHttp?.request || CoreHttp?.me || CoreHttp?.get),
+      me: meEndpoint(),
     },
+
     policy: {
       ownFetch: false,
       ownApiClient: false,
       ownRouter: false,
       ownToast: false,
-      restoreRequiresMeVerification: true,
-      preservesTechnicalRoutes: true,
+      noRefreshAuto: true,
+      restoreUsesMeOnly: true,
       authenticatedRequiresTokenAndUser: true,
-      tokenOnlyNeverAuthenticated: true,
     },
-    at: nowIso(),
   };
 }
 

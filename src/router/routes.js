@@ -2,12 +2,12 @@
    Onion SPA - Routes
    Archivo: src/router/routes.js
 
-   ROUTES TABLE · FINAL SIMPLE
-   - Tabla estática de rutas SPA
-   - Aliases centralizados en ROUTE_ALIASES
-   - Roles reales: admin / user
-   - Sin Auth, guards, history, fetch, storage, Toast ni navegación
-   - Render sólo adapta vistas importadas
+   ROUTES TABLE · SIMPLE
+   - tabla estática de rutas SPA
+   - aliases centralizados en ROUTE_ALIASES
+   - roles reales: admin / user
+   - render sólo adapta vistas importadas
+   - sin Auth, guards, history, fetch, storage, Toast ni navegación
 ========================================================= */
 
 import { I18n } from "../i18n/index.js";
@@ -26,11 +26,8 @@ import { ClientesView } from "../views/clientes/index.js";
 import { CuentaView } from "../views/cuenta/index.js";
 import { AjustesView } from "../views/ajustes/index.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
+export const ROUTES_VERSION = "21.0.0-simple";
 
-export const ROUTES_VERSION = "20.0.0-final";
 const ROUTE_SOURCE = "router.routes";
 
 /* =========================================================
@@ -316,7 +313,10 @@ function stripUsername(path = "/") {
 }
 
 function normalizePathname(path = "/") {
-  let clean = safeText(stripUsername(path), "/").replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+  let clean = safeText(stripUsername(path), "/")
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
   if (!clean.startsWith("/")) clean = `/${clean}`;
 
   const parts = [];
@@ -653,25 +653,210 @@ function publicAuthRoute(config = {}) {
 
 export function createRoutes() {
   return [
-    privateRoute({ path: ROUTE_PATHS.HOME, name: ROUTE_NAMES.HOME, viewKey: ROUTE_VIEW_KEYS.HOME, viewName: ROUTE_VIEW_NAMES.HOME, titleKey: "routes.home", titleFallback: "Inicio", order: 10, render: renderHome }),
-    privateRoute({ path: ROUTE_PATHS.INCIDENCIAS, name: ROUTE_NAMES.INCIDENCIAS, viewKey: ROUTE_VIEW_KEYS.INCIDENCIAS, viewName: ROUTE_VIEW_NAMES.INCIDENCIAS, titleKey: "routes.incidencias", titleFallback: "Incidencias", order: 20, render: renderIncidencias }),
-    privateRoute({ path: ROUTE_PATHS.FACTURAS, name: ROUTE_NAMES.FACTURAS, viewKey: ROUTE_VIEW_KEYS.FACTURAS, viewName: ROUTE_VIEW_NAMES.FACTURAS, titleKey: "routes.facturas", titleFallback: "Facturas", order: 30, render: renderFacturas }),
-    adminRoute({ path: ROUTE_PATHS.USUARIOS, name: ROUTE_NAMES.USUARIOS, viewKey: ROUTE_VIEW_KEYS.USUARIOS, viewName: ROUTE_VIEW_NAMES.USUARIOS, titleKey: "routes.usuarios", titleFallback: "Usuarios", order: 40, render: renderUsuarios }),
-    adminRoute({ path: ROUTE_PATHS.CLIENTES, name: ROUTE_NAMES.CLIENTES, viewKey: ROUTE_VIEW_KEYS.CLIENTES, viewName: ROUTE_VIEW_NAMES.CLIENTES, titleKey: "routes.clientes", titleFallback: "Clientes", order: 50, render: renderClientes }),
-    privateRoute({ path: ROUTE_PATHS.CUENTA, name: ROUTE_NAMES.CUENTA, viewKey: ROUTE_VIEW_KEYS.CUENTA, viewName: ROUTE_VIEW_NAMES.CUENTA, titleKey: "routes.cuenta", titleFallback: "Cuenta", order: 60, render: renderCuenta }),
-    privateRoute({ path: ROUTE_PATHS.AJUSTES, name: ROUTE_NAMES.AJUSTES, viewKey: ROUTE_VIEW_KEYS.AJUSTES, viewName: ROUTE_VIEW_NAMES.AJUSTES, titleKey: "routes.ajustes", titleFallback: "Ajustes", order: 70, render: renderAjustes }),
-    adminRoute({ path: ROUTE_PATHS.SERVIDOR, name: ROUTE_NAMES.SERVIDOR, viewKey: ROUTE_VIEW_KEYS.SERVIDOR, viewName: ROUTE_VIEW_NAMES.SERVIDOR, titleKey: "routes.servidor", titleFallback: "Servidor", order: 80, render: renderServidor }),
+    privateRoute({
+      path: ROUTE_PATHS.HOME,
+      name: ROUTE_NAMES.HOME,
+      viewKey: ROUTE_VIEW_KEYS.HOME,
+      viewName: ROUTE_VIEW_NAMES.HOME,
+      titleKey: "routes.home",
+      titleFallback: "Inicio",
+      order: 10,
+      render: renderHome,
+    }),
 
-    publicAuthRoute({ path: ROUTE_PATHS.LOGIN, name: ROUTE_NAMES.LOGIN, viewKey: ROUTE_VIEW_KEYS.LOGIN, viewName: ROUTE_VIEW_NAMES.LOGIN, titleKey: "routes.login", titleFallback: "Acceso", guestOnly: true, redirectAuthenticated: ROUTE_PATHS.HOME, order: 1000, render: renderLogin }),
-    publicAuthRoute({ path: ROUTE_PATHS.ACTIVATE_ACCOUNT, name: ROUTE_NAMES.ACTIVATE_ACCOUNT, viewKey: ROUTE_VIEW_KEYS.ACTIVATE_ACCOUNT, viewName: ROUTE_VIEW_NAMES.ACTIVATE_ACCOUNT, titleKey: "routes.activateAccount", titleFallback: "Activar cuenta", tokenRoute: true, order: 1010, render: renderActivateAccount }),
-    publicAuthRoute({ path: ROUTE_PATHS.RESET_PASSWORD, name: ROUTE_NAMES.RESET_PASSWORD, viewKey: ROUTE_VIEW_KEYS.RESET_PASSWORD, viewName: ROUTE_VIEW_NAMES.RESET_PASSWORD, titleKey: "routes.resetPassword", titleFallback: "Recuperar acceso", order: 1020, render: renderResetPassword }),
-    publicAuthRoute({ path: ROUTE_PATHS.RESET_PASSWORD_CONFIRM, name: ROUTE_NAMES.RESET_PASSWORD_CONFIRM, viewKey: ROUTE_VIEW_KEYS.RESET_PASSWORD_CONFIRM, viewName: ROUTE_VIEW_NAMES.RESET_PASSWORD_CONFIRM, titleKey: "routes.resetPasswordConfirm", titleFallback: "Nueva contraseña", tokenRoute: true, order: 1030, render: renderConfirmResetPassword }),
-    publicAuthRoute({ path: ROUTE_PATHS.FORGOT_PASSWORD, name: ROUTE_NAMES.FORGOT_PASSWORD, viewKey: ROUTE_VIEW_KEYS.RESET_PASSWORD, viewName: ROUTE_VIEW_NAMES.RESET_PASSWORD, titleKey: "routes.forgotPassword", titleFallback: "Recuperar acceso", order: 1040, render: renderResetPassword }),
-    publicAuthRoute({ path: ROUTE_PATHS.RECOVER_PASSWORD, name: ROUTE_NAMES.RECOVER_PASSWORD, viewKey: ROUTE_VIEW_KEYS.RESET_PASSWORD, viewName: ROUTE_VIEW_NAMES.RESET_PASSWORD, titleKey: "routes.recoverPassword", titleFallback: "Recuperar acceso", order: 1050, render: renderResetPassword }),
-    publicAuthRoute({ path: ROUTE_PATHS.PASSWORD_RESET, name: ROUTE_NAMES.PASSWORD_RESET, viewKey: ROUTE_VIEW_KEYS.RESET_PASSWORD, viewName: ROUTE_VIEW_NAMES.RESET_PASSWORD, titleKey: "routes.passwordReset", titleFallback: "Recuperar acceso", order: 1060, render: renderResetPassword }),
-    publicAuthRoute({ path: ROUTE_PATHS.TWO_FACTOR, name: ROUTE_NAMES.TWO_FACTOR, viewKey: ROUTE_VIEW_KEYS.TWO_FACTOR, viewName: ROUTE_VIEW_NAMES.TWO_FACTOR, titleKey: "routes.twoFactor", titleFallback: "Verificación", tokenRoute: true, order: 1070, render: renderLogin }),
-    publicAuthRoute({ path: ROUTE_PATHS.OTP, name: ROUTE_NAMES.OTP, viewKey: ROUTE_VIEW_KEYS.TWO_FACTOR, viewName: ROUTE_VIEW_NAMES.TWO_FACTOR, titleKey: "routes.otp", titleFallback: "Verificación", tokenRoute: true, order: 1080, render: renderLogin }),
-    publicAuthRoute({ path: ROUTE_PATHS.MFA, name: ROUTE_NAMES.MFA, viewKey: ROUTE_VIEW_KEYS.TWO_FACTOR, viewName: ROUTE_VIEW_NAMES.TWO_FACTOR, titleKey: "routes.mfa", titleFallback: "Verificación", tokenRoute: true, order: 1090, render: renderLogin }),
+    privateRoute({
+      path: ROUTE_PATHS.INCIDENCIAS,
+      name: ROUTE_NAMES.INCIDENCIAS,
+      viewKey: ROUTE_VIEW_KEYS.INCIDENCIAS,
+      viewName: ROUTE_VIEW_NAMES.INCIDENCIAS,
+      titleKey: "routes.incidencias",
+      titleFallback: "Incidencias",
+      order: 20,
+      render: renderIncidencias,
+    }),
+
+    privateRoute({
+      path: ROUTE_PATHS.FACTURAS,
+      name: ROUTE_NAMES.FACTURAS,
+      viewKey: ROUTE_VIEW_KEYS.FACTURAS,
+      viewName: ROUTE_VIEW_NAMES.FACTURAS,
+      titleKey: "routes.facturas",
+      titleFallback: "Facturas",
+      order: 30,
+      render: renderFacturas,
+    }),
+
+    adminRoute({
+      path: ROUTE_PATHS.USUARIOS,
+      name: ROUTE_NAMES.USUARIOS,
+      viewKey: ROUTE_VIEW_KEYS.USUARIOS,
+      viewName: ROUTE_VIEW_NAMES.USUARIOS,
+      titleKey: "routes.usuarios",
+      titleFallback: "Usuarios",
+      order: 40,
+      render: renderUsuarios,
+    }),
+
+    adminRoute({
+      path: ROUTE_PATHS.CLIENTES,
+      name: ROUTE_NAMES.CLIENTES,
+      viewKey: ROUTE_VIEW_KEYS.CLIENTES,
+      viewName: ROUTE_VIEW_NAMES.CLIENTES,
+      titleKey: "routes.clientes",
+      titleFallback: "Clientes",
+      order: 50,
+      render: renderClientes,
+    }),
+
+    privateRoute({
+      path: ROUTE_PATHS.CUENTA,
+      name: ROUTE_NAMES.CUENTA,
+      viewKey: ROUTE_VIEW_KEYS.CUENTA,
+      viewName: ROUTE_VIEW_NAMES.CUENTA,
+      titleKey: "routes.cuenta",
+      titleFallback: "Cuenta",
+      order: 60,
+      render: renderCuenta,
+    }),
+
+    privateRoute({
+      path: ROUTE_PATHS.AJUSTES,
+      name: ROUTE_NAMES.AJUSTES,
+      viewKey: ROUTE_VIEW_KEYS.AJUSTES,
+      viewName: ROUTE_VIEW_NAMES.AJUSTES,
+      titleKey: "routes.ajustes",
+      titleFallback: "Ajustes",
+      order: 70,
+      render: renderAjustes,
+    }),
+
+    adminRoute({
+      path: ROUTE_PATHS.SERVIDOR,
+      name: ROUTE_NAMES.SERVIDOR,
+      viewKey: ROUTE_VIEW_KEYS.SERVIDOR,
+      viewName: ROUTE_VIEW_NAMES.SERVIDOR,
+      titleKey: "routes.servidor",
+      titleFallback: "Servidor",
+      order: 80,
+      render: renderServidor,
+    }),
+
+    publicAuthRoute({
+      path: ROUTE_PATHS.LOGIN,
+      name: ROUTE_NAMES.LOGIN,
+      viewKey: ROUTE_VIEW_KEYS.LOGIN,
+      viewName: ROUTE_VIEW_NAMES.LOGIN,
+      titleKey: "routes.login",
+      titleFallback: "Acceso",
+      guestOnly: true,
+      redirectAuthenticated: ROUTE_PATHS.HOME,
+      order: 1000,
+      render: renderLogin,
+    }),
+
+    publicAuthRoute({
+      path: ROUTE_PATHS.ACTIVATE_ACCOUNT,
+      name: ROUTE_NAMES.ACTIVATE_ACCOUNT,
+      viewKey: ROUTE_VIEW_KEYS.ACTIVATE_ACCOUNT,
+      viewName: ROUTE_VIEW_NAMES.ACTIVATE_ACCOUNT,
+      titleKey: "routes.activateAccount",
+      titleFallback: "Activar cuenta",
+      tokenRoute: true,
+      order: 1010,
+      render: renderActivateAccount,
+    }),
+
+    publicAuthRoute({
+      path: ROUTE_PATHS.RESET_PASSWORD,
+      name: ROUTE_NAMES.RESET_PASSWORD,
+      viewKey: ROUTE_VIEW_KEYS.RESET_PASSWORD,
+      viewName: ROUTE_VIEW_NAMES.RESET_PASSWORD,
+      titleKey: "routes.resetPassword",
+      titleFallback: "Recuperar acceso",
+      order: 1020,
+      render: renderResetPassword,
+    }),
+
+    publicAuthRoute({
+      path: ROUTE_PATHS.RESET_PASSWORD_CONFIRM,
+      name: ROUTE_NAMES.RESET_PASSWORD_CONFIRM,
+      viewKey: ROUTE_VIEW_KEYS.RESET_PASSWORD_CONFIRM,
+      viewName: ROUTE_VIEW_NAMES.RESET_PASSWORD_CONFIRM,
+      titleKey: "routes.resetPasswordConfirm",
+      titleFallback: "Nueva contraseña",
+      tokenRoute: true,
+      order: 1030,
+      render: renderConfirmResetPassword,
+    }),
+
+    publicAuthRoute({
+      path: ROUTE_PATHS.FORGOT_PASSWORD,
+      name: ROUTE_NAMES.FORGOT_PASSWORD,
+      viewKey: ROUTE_VIEW_KEYS.RESET_PASSWORD,
+      viewName: ROUTE_VIEW_NAMES.RESET_PASSWORD,
+      titleKey: "routes.forgotPassword",
+      titleFallback: "Recuperar acceso",
+      order: 1040,
+      render: renderResetPassword,
+    }),
+
+    publicAuthRoute({
+      path: ROUTE_PATHS.RECOVER_PASSWORD,
+      name: ROUTE_NAMES.RECOVER_PASSWORD,
+      viewKey: ROUTE_VIEW_KEYS.RESET_PASSWORD,
+      viewName: ROUTE_VIEW_NAMES.RESET_PASSWORD,
+      titleKey: "routes.recoverPassword",
+      titleFallback: "Recuperar acceso",
+      order: 1050,
+      render: renderResetPassword,
+    }),
+
+    publicAuthRoute({
+      path: ROUTE_PATHS.PASSWORD_RESET,
+      name: ROUTE_NAMES.PASSWORD_RESET,
+      viewKey: ROUTE_VIEW_KEYS.RESET_PASSWORD,
+      viewName: ROUTE_VIEW_NAMES.RESET_PASSWORD,
+      titleKey: "routes.passwordReset",
+      titleFallback: "Recuperar acceso",
+      order: 1060,
+      render: renderResetPassword,
+    }),
+
+    publicAuthRoute({
+      path: ROUTE_PATHS.TWO_FACTOR,
+      name: ROUTE_NAMES.TWO_FACTOR,
+      viewKey: ROUTE_VIEW_KEYS.TWO_FACTOR,
+      viewName: ROUTE_VIEW_NAMES.TWO_FACTOR,
+      titleKey: "routes.twoFactor",
+      titleFallback: "Verificación",
+      tokenRoute: true,
+      order: 1070,
+      render: renderLogin,
+    }),
+
+    publicAuthRoute({
+      path: ROUTE_PATHS.OTP,
+      name: ROUTE_NAMES.OTP,
+      viewKey: ROUTE_VIEW_KEYS.TWO_FACTOR,
+      viewName: ROUTE_VIEW_NAMES.TWO_FACTOR,
+      titleKey: "routes.otp",
+      titleFallback: "Verificación",
+      tokenRoute: true,
+      order: 1080,
+      render: renderLogin,
+    }),
+
+    publicAuthRoute({
+      path: ROUTE_PATHS.MFA,
+      name: ROUTE_NAMES.MFA,
+      viewKey: ROUTE_VIEW_KEYS.TWO_FACTOR,
+      viewName: ROUTE_VIEW_NAMES.TWO_FACTOR,
+      titleKey: "routes.mfa",
+      titleFallback: "Verificación",
+      tokenRoute: true,
+      order: 1090,
+      render: renderLogin,
+    }),
   ].sort((a, b) => safeNumber(a.order) - safeNumber(b.order) || a.path.localeCompare(b.path));
 }
 

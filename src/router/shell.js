@@ -7,24 +7,24 @@
    - limpia slots dinámicos seguros
    - aplica title, menú activo y modo auth/app
    - sin Auth, guards, render de vistas, history, storage, Toast ni navegación
+   - sin eventos para evitar loops de UI/Router
 ========================================================= */
 
 import {
   normalizeCanonicalPath,
-  resolveSpaHref,
 } from "./helpers.js";
 
-export const ROUTER_SHELL_VERSION = "21.0.0-simple";
+export const ROUTER_SHELL_VERSION = "21.0.1-simple";
 
 const SOURCE = "router.shell";
-const EVENT_DEDUPE_MS = 64;
+const DEFAULT_ROUTE = "/";
 
-const AUTH_PATHS = new Set([
+const AUTH_PATHS = Object.freeze([
   "/login",
-  "/signin",
-  "/sign-in",
   "/auth",
   "/auth/login",
+  "/signin",
+  "/sign-in",
   "/activate-account",
   "/activate",
   "/activation",
@@ -32,36 +32,22 @@ const AUTH_PATHS = new Set([
   "/activate/first-user",
   "/reset-password",
   "/reset-password/confirm",
-  "/reset-password-confirm",
+  "/password-reset",
+  "/password-reset/confirm",
   "/forgot-password",
   "/recover-password",
   "/recover",
-  "/password-reset",
-  "/password-reset/confirm",
-  "/password-reset-confirm",
-  "/confirm-reset-password",
   "/2fa",
   "/otp",
   "/mfa",
-]);
-
-const AUTH_PREFIXES = Object.freeze([
-  "/activate-account/",
-  "/activate/",
-  "/activation/",
-  "/account/activate/",
-  "/activate/first-user/",
-  "/reset-password/confirm/",
-  "/password-reset/confirm/",
-  "/2fa/",
-  "/otp/",
-  "/mfa/",
+  "/403",
+  "/404",
 ]);
 
 const BOOT_CLASSES = Object.freeze(["app-booting", "app-loading", "loading"]);
 const AUTH_CLASSES = Object.freeze(["auth-screen", "route-auth", "route-shell-hidden", "route-chrome-hidden", "shell-hidden"]);
 const APP_CLASSES = Object.freeze(["route-app", "route-shell-visible", "route-chrome-visible", "shell-visible"]);
-const SIDEBAR_CLASSES = Object.freeze(["sidebar-open", "sidebar-collapsed", "sidebar-mobile-open", "has-sidebar-open"]);
+const SIDEBAR_OPEN_CLASSES = Object.freeze(["sidebar-open", "sidebar-mobile-open", "has-sidebar-open"]);
 
 const ACTIVE_LINK_CLASSES = Object.freeze(["active", "is-active", "router-active", "sidebar-link--active", "menu-item--active"]);
 const ACTIVE_PARENT_CLASSES = Object.freeze(["active", "is-active", "router-active"]);
@@ -111,19 +97,17 @@ const PROTECTED_CLEAR_SELECTOR = [
   "[data-topbar-mount]",
 ].join(",");
 
-const SENSITIVE_TEXT_RE = /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token|temporaryToken|temporary_token|twoFactorToken|two_factor_token|mfaToken|mfa_token|otpToken|otp_token)=)([^&#\s]+)/gi;
+const SENSITIVE_TEXT_RE = /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token|mfaToken|mfa_token|otpToken|otp_token)=)([^&#\s]+)/gi;
+const SENSITIVE_KEY_RE = /token|authorization|password|secret|credential|jwt|bearer|otp|totp|mfa|2fa|code/i;
 
-let lastEventKey = "";
-let lastEventAt = 0;
 let lastActiveMenuKey = "";
-let lastActiveMenuAt = 0;
+let lastShellSignature = "";
 
 /* =========================================================
    BASICS
 ========================================================= */
 
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
-const isFn = (value) => typeof value === "function";
 const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
 
 function safeObject(value, fallback = {}) {
@@ -141,10 +125,6 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
-function nowMs() {
-  try { return Date.now(); } catch { return 0; }
-}
-
 function unique(values = []) {
   return [...new Set(values.flat(Infinity).map((item) => safeText(item, "")).filter(Boolean))];
 }
@@ -153,6 +133,7 @@ function redactText(value = "") {
   return safeText(value, "")
     .replace(SENSITIVE_TEXT_RE, "$1***")
     .replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***")
+    .replace(/(\/activate\/)([^/?#\s]+)/gi, "$1***")
     .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***")
     .replace(/(\/password-reset\/confirm\/)([^/?#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
@@ -161,7 +142,7 @@ function redactText(value = "") {
 
 function sanitizePayload(value, depth = 0, seen = new WeakSet(), keyHint = "") {
   if (depth > 4) return "[depth-limit]";
-  if (/token|authorization|password|secret|credential|jwt|bearer|otp|totp|mfa|2fa|code/i.test(keyHint)) return value ? "***" : value;
+  if (SENSITIVE_KEY_RE.test(keyHint)) return value ? "***" : value;
   if (typeof value === "string") return redactText(value);
   if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "function") return "[function]";
@@ -182,45 +163,6 @@ function sanitizePayload(value, depth = 0, seen = new WeakSet(), keyHint = "") {
   }
 
   return String(value);
-}
-
-function emit(AppCore, eventName = "", payload = {}, options = {}) {
-  const name = safeText(eventName, "");
-  if (!name || options.emit === false || options.emitEvents === false) return false;
-
-  const detail = sanitizePayload({
-    source: SOURCE,
-    version: ROUTER_SHELL_VERSION,
-    ...safeObject(payload),
-  });
-
-  try {
-    AppCore?.events?.emit?.(name, detail);
-    return true;
-  } catch {}
-
-  try {
-    if (isBrowser() && typeof CustomEvent !== "undefined") {
-      window.dispatchEvent(new CustomEvent(name, { detail }));
-      return true;
-    }
-  } catch {}
-
-  return false;
-}
-
-function emitDeduped(AppCore, eventName = "", payload = {}, ms = EVENT_DEDUPE_MS) {
-  const key = [eventName, payload?.route, payload?.canonicalPath, payload?.publicPath, payload?.mode, payload?.chromeHidden]
-    .map((item) => safeText(item, ""))
-    .join("|");
-  const current = nowMs();
-
-  if (key === lastEventKey && current - lastEventAt < ms) return false;
-
-  lastEventKey = key;
-  lastEventAt = current;
-
-  return emit(AppCore, eventName, payload);
 }
 
 function warn(AppCore, ...args) {
@@ -437,7 +379,7 @@ function routePath(route = null) {
 
 function isAuthPath(path = "/") {
   const clean = normalizePathname(path);
-  return AUTH_PATHS.has(clean) || AUTH_PREFIXES.some((prefix) => clean.startsWith(prefix));
+  return AUTH_PATHS.some((item) => clean === item || clean.startsWith(`${item}/`));
 }
 
 function routeHidesChrome(route = null) {
@@ -477,7 +419,6 @@ function isHashOnlyHref(href = "") {
 
 function isExternalHref(href = "") {
   const raw = safeText(href, "");
-
   if (!raw) return false;
   if (/^(mailto:|tel:)/i.test(raw)) return true;
   if (raw.startsWith("//")) return true;
@@ -496,12 +437,7 @@ function isExternalHref(href = "") {
 function resolveHref(AppCore, href = "") {
   const raw = safeText(href, "");
   if (!raw || isUnsafeHref(raw) || isHashOnlyHref(raw) || isExternalHref(raw)) return "";
-
-  try {
-    return resolveSpaHref(AppCore, raw) || "";
-  } catch {
-    return raw;
-  }
+  return raw;
 }
 
 /* =========================================================
@@ -535,7 +471,7 @@ export function getShellElements(AppCore) {
   const shell = resolveElement(AppCore, ["shell", "appShell", "layout"], ["#app-shell", "[data-app-shell]", ".app-shell", ".layout"]);
   const main = resolveElement(AppCore, ["main", "mainContent"], ["#main-content", "[data-main-content]", ".main-content", "main[role='main']", "main"]);
   const appContent = resolveElement(AppCore, ["appContent", "content"], ["#app-content", "[data-app-content]"]);
-  const viewContainer = resolveElement(AppCore, ["viewContainer", "routerView", "view"], ["#view-container", "[data-view-root]", "[data-router-view]"]);
+  const viewContainer = resolveElement(AppCore, ["viewContainer", "routerView", "view"], ["#view-container", "[data-view-root]", "[data-view-container='true']", "[data-router-view]"]);
   const sidebarMount = resolveElement(AppCore, ["sidebarMount"], ["#sidebar-mount", "[data-sidebar-mount]"]);
   const topbarMount = resolveElement(AppCore, ["topbarMount"], ["#topbar-mount", "[data-topbar-mount]"]);
   const sidebar = resolveElement(AppCore, ["sidebar", "sidebarRoot"], ["#app-sidebar", "#sidebar", ".sidebar", "[data-sidebar-root]", "[data-sidebar]"]);
@@ -613,8 +549,6 @@ export function clearDynamicContainers(AppCore) {
     }
 
     for (const node of queryAll(DYNAMIC_SELECTOR)) changed = clearSafeNode(node) || changed;
-
-    emit(AppCore, "router:shell:dynamic-cleared", { changed });
     return changed;
   } catch (error) {
     warn(AppCore, "clearDynamicContainers() falló", error);
@@ -639,7 +573,7 @@ export function setDocumentTitle(AppCore, title = "") {
   const { cleanTitle, finalTitle } = normalizeTitle(title, appName);
 
   try {
-    if (isFn(AppCore?.setDocumentTitle)) {
+    if (typeof AppCore?.setDocumentTitle === "function") {
       AppCore.setDocumentTitle(cleanTitle, { finalTitle, source: SOURCE });
       return true;
     }
@@ -679,13 +613,10 @@ function getLinkCandidate(link) {
 }
 
 function getLinkCanonical(AppCore, link) {
-  const candidate = getLinkCandidate(link);
+  const candidate = resolveHref(AppCore, getLinkCandidate(link));
   if (!candidate) return "";
 
-  const resolved = resolveHref(AppCore, candidate);
-  if (!resolved) return "";
-
-  return canonicalPath(AppCore, resolved);
+  return canonicalPath(AppCore, candidate);
 }
 
 function getActiveParent(link) {
@@ -738,6 +669,11 @@ export function setActiveMenu(AppCore, pathname = "/") {
   const links = getMenuLinks();
   let activeCount = 0;
 
+  const key = `${currentCanonical}|${links.length}`;
+  if (key === lastActiveMenuKey) return true;
+
+  lastActiveMenuKey = key;
+
   for (const link of links) clearActiveState(link);
 
   for (const link of links) {
@@ -748,16 +684,7 @@ export function setActiveMenu(AppCore, pathname = "/") {
     activeCount += 1;
   }
 
-  const key = `${currentCanonical}|${links.length}|${activeCount}`;
-  const current = nowMs();
-
-  if (key !== lastActiveMenuKey || current - lastActiveMenuAt > EVENT_DEDUPE_MS) {
-    lastActiveMenuKey = key;
-    lastActiveMenuAt = current;
-    emit(AppCore, "router:shell:active-menu", { canonicalPath: currentCanonical, count: links.length, activeCount });
-  }
-
-  return true;
+  return activeCount >= 0;
 }
 
 /* =========================================================
@@ -803,7 +730,7 @@ function applyRootState({ html, body, shell, chromeHidden = false, authScreen = 
     setDataset(root, "appLoading", "false");
   }
 
-  if (body && chromeHidden) removeClasses(body, ...SIDEBAR_CLASSES);
+  if (body && chromeHidden) removeClasses(body, ...SIDEBAR_OPEN_CLASSES);
   if (body && !chromeHidden) {
     removeClasses(body, ...AUTH_CLASSES, "login-no-scroll");
     addClasses(body, ...APP_CLASSES);
@@ -852,10 +779,6 @@ function syncShellState(AppCore, { chromeHidden = false, authScreen = false, mod
     try { if (AppCore?.state) Object.assign(AppCore.state, patch); } catch {}
   }
 
-  try {
-    AppCore?.setShellVisibility?.(!chromeHidden, { source: SOURCE, mode, route });
-  } catch {}
-
   return patch;
 }
 
@@ -866,28 +789,16 @@ export function setShellMode(AppCore, route = null) {
   const authScreen = routeIsAuthScreen(route);
   const mode = chromeHidden ? "auth" : "app";
   const elements = getShellElements(AppCore);
+  const signature = [path, currentCanonical, chromeHidden ? "hidden" : "visible", authScreen ? "auth" : "app"].join("|");
 
   exposeCoreLayout(elements);
   applyChrome(elements, chromeHidden);
   applyRootState({ ...elements, chromeHidden, authScreen, mode, route: path, canonicalPath: currentCanonical });
 
-  const statePatch = syncShellState(AppCore, { chromeHidden, authScreen, mode, route: path, canonicalPath: currentCanonical });
-
-  emitDeduped(AppCore, "router:shell:change", {
-    route: path,
-    canonicalPath: currentCanonical,
-    chromeHidden,
-    authScreen,
-    mode,
-    hasShell: Boolean(elements.shell),
-    hasMain: Boolean(elements.main),
-    hasAppContent: Boolean(elements.appContent),
-    hasViewContainer: Boolean(elements.viewContainer),
-    hasSidebar: Boolean(elements.sidebar || elements.sidebarMount),
-    hasTopbar: Boolean(elements.topbar || elements.topbarMount),
-    hasTablehead: Boolean(elements.tablehead),
-    state: statePatch,
-  });
+  if (signature !== lastShellSignature) {
+    lastShellSignature = signature;
+    syncShellState(AppCore, { chromeHidden, authScreen, mode, route: path, canonicalPath: currentCanonical });
+  }
 
   return {
     hidden: chromeHidden,
@@ -943,10 +854,8 @@ export function getShellSnapshot(AppCore) {
     chromeHidden: AppCore?.state?.chromeHidden ?? null,
     authScreen: AppCore?.state?.authScreen ?? null,
     routeMode: AppCore?.state?.routeMode || null,
-    lastEventKey: redactText(lastEventKey),
-    lastEventAt,
+    lastShellSignature: redactText(lastShellSignature),
     lastActiveMenuKey: redactText(lastActiveMenuKey),
-    lastActiveMenuAt,
     dom: {
       bodyClasses: elements.body?.className || "",
       htmlClasses: elements.html?.className || "",
@@ -973,6 +882,7 @@ export function getShellSnapshot(AppCore) {
       ownStorage: false,
       ownToast: false,
       shellOnly: true,
+      eventless: true,
     },
   };
 }

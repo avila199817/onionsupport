@@ -1,22 +1,15 @@
 /* =========================================================
-   ONION SUPPORT — AUTH VIEWS
-   Archivo: /src/css/auth/login.css
+   ONION SUPPORT — AUTH / LOGIN
+   Archivo: src/css/auth/login.css
 
-   FINAL EXTREME SYSTEM · APPLE STYLE · PRO SAAS AUTH · 16/10
-   TOKEN PRO SYSTEM ALIGNED · CSP CLEAN · NO INLINE · NO PALETTE LOCAL
-   AUTH TECHNICAL VIEWS · LOGIN / RESET / ACTIVATE / OTP
-
-   REGLAS:
-   - Sin paletas locales.
-   - Sin variables nuevas.
-   - Sin :root.
-   - Sin CSS inline.
-   - Sin estilos inyectados.
-   - Dark/light salen por tokens globales.
-   - html[data-theme] sólo alterna logo dark/light.
-   - Login desktop con side panel + card derecha.
-   - Reset/activate/OTP con card centrada.
-   - Mobile limpio: sólo card.
+   LOGIN CSS · SIMPLE
+   - Sin :root
+   - Sin paletas locales
+   - Sin estilos inline
+   - Sin Toast duplicado
+   - Compatible con login.template.js + login.dom.js
+   - Login: panel lateral + card derecha en desktop
+   - Auth técnico/reset/activate/OTP: card centrada reutilizable
 ========================================================= */
 
 
@@ -25,12 +18,8 @@
 ========================================================= */
 
 body.auth-screen {
-  --app-sidebar-current-width: 0px;
-  --app-offset-tablehead: 0px;
-
   min-block-size: 100vh;
   min-block-size: 100dvh;
-
   background-color: var(--main-bg);
   background-image: var(--body-bg);
 }
@@ -56,101 +45,60 @@ body.auth-screen #app-shell {
 
 body.auth-screen .main-content {
   position: fixed;
-
   inset: 0;
-
-  margin: 0 !important;
-
   inline-size: 100% !important;
   max-inline-size: 100% !important;
-
   min-block-size: 100vh;
   min-block-size: 100dvh;
-
   block-size: 100vh;
   block-size: 100dvh;
-
+  margin: 0 !important;
   overflow: hidden;
 }
 
-body.auth-screen #app-content {
+body.auth-screen #app-content,
+body.auth-screen #view-container {
   min-block-size: 100vh;
   min-block-size: 100dvh;
-
   padding: 0 !important;
-
   overflow: hidden;
 }
 
 body.auth-screen #view-container {
   position: relative;
   isolation: isolate;
-
-  display: block;
-
   inline-size: 100%;
-
-  min-block-size: 100vh;
-  min-block-size: 100dvh;
-
-  overflow: hidden;
 }
 
 body.auth-screen.login-no-scroll,
-body.auth-screen.auth-no-scroll,
-body.auth-screen.login-no-scroll .main-content,
-body.auth-screen.auth-no-scroll .main-content,
-body.auth-screen.login-no-scroll #app-content,
-body.auth-screen.auth-no-scroll #app-content,
-body.auth-screen.login-no-scroll #view-container,
-body.auth-screen.auth-no-scroll #view-container {
+body.auth-screen.auth-no-scroll {
   overflow: hidden;
 }
 
 
 /* =========================================================
-   BASE VIEW
+   VIEW BASE
 ========================================================= */
 
 .auth-view,
 .login-view {
   position: relative;
   isolation: isolate;
-
   inline-size: 100%;
-
   min-block-size: 100vh;
   min-block-size: 100dvh;
-
   block-size: 100vh;
   block-size: 100dvh;
-
   overflow: hidden;
-
   color: var(--text);
   font-family: var(--font-family);
-
   background:
-    radial-gradient(
-      circle at 12% 18%,
-      color-mix(in srgb, var(--accent) 8%, transparent),
-      transparent 30%
-    ),
-    radial-gradient(
-      circle at 88% 14%,
-      color-mix(in srgb, var(--info) 7%, transparent),
-      transparent 26%
-    ),
-    radial-gradient(
-      circle at 54% 106%,
-      color-mix(in srgb, var(--text-strong) 4%, transparent),
-      transparent 30%
-    ),
+    radial-gradient(circle at 12% 18%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 30%),
+    radial-gradient(circle at 88% 14%, color-mix(in srgb, var(--info) 7%, transparent), transparent 26%),
+    radial-gradient(circle at 54% 106%, color-mix(in srgb, var(--text-strong) 4%, transparent), transparent 30%),
     var(--gradient-overlay),
     var(--app-noise),
     var(--body-bg);
-
-  container-type: inline-size;
 }
 
 .auth-view,
@@ -170,26 +118,14 @@ body.auth-screen.auth-no-scroll #view-container {
   position: absolute;
   inset: 0;
   z-index: 0;
-
   pointer-events: none;
-
   background:
-    linear-gradient(
-      color-mix(in srgb, var(--text-strong) 2%, transparent) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--text-strong) 2%, transparent) 1px,
-      transparent 1px
-    );
-
+    linear-gradient(color-mix(in srgb, var(--text-strong) 2%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--text-strong) 2%, transparent) 1px, transparent 1px);
   background-size: 34px 34px;
-
+  opacity: .42;
   mask-image: linear-gradient(180deg, rgb(0 0 0 / .28), transparent 84%);
   -webkit-mask-image: linear-gradient(180deg, rgb(0 0 0 / .28), transparent 84%);
-
-  opacity: .46;
 }
 
 .auth-view::after,
@@ -198,69 +134,41 @@ body.auth-screen.auth-no-scroll #view-container {
   position: absolute;
   inset: 0;
   z-index: 0;
-
   pointer-events: none;
-
-  background:
-    radial-gradient(
-      circle at 50% 0%,
-      color-mix(in srgb, var(--text-strong) 3%, transparent),
-      transparent 58%
-    );
-
+  background: radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--text-strong) 3%, transparent), transparent 58%);
   opacity: .72;
 }
-
-
-/* =========================================================
-   SCENE
-========================================================= */
 
 .auth-scene,
 .login-scene {
   position: relative;
   z-index: 1;
   isolation: isolate;
-
   inline-size: 100%;
-
   min-block-size: 100vh;
   min-block-size: 100dvh;
-
   block-size: 100%;
 }
 
 
 /* =========================================================
-   GRID
+   GRID / LAYOUT
 ========================================================= */
 
 .auth-grid,
 .login-grid {
   position: relative;
   z-index: 1;
-
+  display: grid;
+  grid-template-columns: minmax(380px, 510px) minmax(520px, 1fr);
+  align-items: center;
+  gap: clamp(26px, 3vw, 46px);
   inline-size: min(100%, 1520px);
-
   min-block-size: 100vh;
   min-block-size: 100dvh;
-
   block-size: 100%;
-
   margin-inline: auto;
-
-  padding:
-    clamp(16px, 2vh, 22px)
-    clamp(20px, 3vw, 40px);
-
-  display: grid;
-  grid-template-columns:
-    minmax(400px, 520px)
-    minmax(520px, 1fr);
-
-  align-items: center;
-
-  gap: clamp(26px, 3vw, 46px);
+  padding: clamp(16px, 2vh, 22px) clamp(20px, 3vw, 40px);
 }
 
 .auth-grid--center,
@@ -274,387 +182,32 @@ body.auth-screen.auth-no-scroll #view-container {
 
 
 /* =========================================================
-   TOAST STACK
-========================================================= */
-
-.auth-toast-stack,
-.login-toast-stack {
-  position: absolute;
-
-  inset-block-start: max(16px, var(--app-safe-top, 0px));
-  inset-inline-end: max(16px, var(--app-safe-right, 0px));
-
-  z-index: var(--z-toast);
-
-  pointer-events: none;
-}
-
-.auth-toast-stack--top-right,
-.login-toast-stack--top-right {
-  display: flex;
-  justify-content: flex-end;
-
-  inline-size: min(100% - 32px, 480px);
-}
-
-.auth-toast,
-.login-toast {
-  position: relative;
-  isolation: isolate;
-
-  inline-size: min(480px, calc(100vw - 32px));
-
-  overflow: hidden;
-
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-2xl);
-
-  background:
-    var(--glass-shine),
-    var(--surface-glass-strong);
-
-  backdrop-filter: var(--blur-lg);
-  -webkit-backdrop-filter: var(--blur-lg);
-
-  box-shadow:
-    var(--shadow-lg),
-    var(--shadow-inner);
-
-  opacity: 0;
-  transform: translateY(-10px) scale(.985);
-
-  pointer-events: auto;
-
-  transition:
-    opacity var(--duration-normal) var(--ease-standard),
-    transform var(--duration-normal) var(--ease-standard),
-    border-color var(--duration-normal) var(--ease-standard),
-    box-shadow var(--duration-normal) var(--ease-standard);
-}
-
-.auth-toast::before,
-.login-toast::before {
-  content: "";
-  position: absolute;
-  inset: -30% auto auto -10%;
-  z-index: -1;
-
-  inline-size: 180px;
-  block-size: 180px;
-
-  border-radius: 50%;
-
-  background:
-    radial-gradient(
-      circle,
-      color-mix(in srgb, var(--accent) 14%, transparent),
-      transparent 70%
-    );
-
-  filter: blur(18px);
-
-  pointer-events: none;
-}
-
-.auth-toast.is-visible,
-.login-toast.is-visible {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-}
-
-.auth-toast.is-success,
-.login-toast.is-success {
-  border-color: var(--border-success);
-
-  box-shadow:
-    var(--shadow-lg),
-    0 10px 22px color-mix(in srgb, var(--success) 8%, transparent),
-    var(--shadow-inner);
-}
-
-.auth-toast.is-error,
-.login-toast.is-error {
-  border-color: var(--border-error);
-
-  box-shadow:
-    var(--shadow-lg),
-    0 10px 22px color-mix(in srgb, var(--error) 8%, transparent),
-    var(--shadow-inner);
-}
-
-.auth-toast.is-warning,
-.login-toast.is-warning {
-  border-color: var(--border-warning);
-
-  box-shadow:
-    var(--shadow-lg),
-    0 10px 22px color-mix(in srgb, var(--warning) 8%, transparent),
-    var(--shadow-inner);
-}
-
-.auth-toast.is-info,
-.login-toast.is-info {
-  border-color: var(--border-info);
-}
-
-.auth-toast-glow,
-.login-toast-glow {
-  display: none;
-}
-
-.auth-toast-body,
-.login-toast-body {
-  position: relative;
-  z-index: 1;
-
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: start;
-
-  gap: 12px;
-
-  padding: 16px 16px 14px;
-}
-
-.auth-toast-icon,
-.login-toast-icon {
-  flex: none;
-
-  display: grid;
-  place-items: center;
-
-  inline-size: 40px;
-  block-size: 40px;
-
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-md);
-
-  background:
-    var(--glass-shine),
-    var(--surface-glass);
-
-  color: var(--text-muted);
-
-  box-shadow: var(--shadow-inner);
-}
-
-.auth-toast.is-success .auth-toast-icon,
-.login-toast.is-success .login-toast-icon {
-  color: var(--success);
-}
-
-.auth-toast.is-error .auth-toast-icon,
-.login-toast.is-error .login-toast-icon {
-  color: var(--error);
-}
-
-.auth-toast.is-warning .auth-toast-icon,
-.login-toast.is-warning .login-toast-icon {
-  color: var(--warning);
-}
-
-.auth-toast.is-info .auth-toast-icon,
-.login-toast.is-info .login-toast-icon {
-  position: relative;
-  color: var(--info);
-}
-
-.auth-toast.is-info .auth-toast-icon::after,
-.login-toast.is-info .login-toast-icon::after {
-  content: "";
-  position: absolute;
-
-  inline-size: 10px;
-  block-size: 10px;
-
-  border-radius: 50%;
-
-  background: var(--info);
-
-  box-shadow:
-    0 0 0 0 color-mix(in srgb, var(--info) 8%, transparent),
-    0 0 14px color-mix(in srgb, var(--info) 20%, transparent);
-
-  animation: authToastPulseDot .95s ease-in-out infinite;
-}
-
-.auth-toast.is-info .auth-toast-icon svg,
-.login-toast.is-info .login-toast-icon svg {
-  opacity: .18;
-}
-
-.auth-toast-content,
-.login-toast-content {
-  display: grid;
-  gap: 4px;
-
-  min-inline-size: 0;
-  padding-block-start: 2px;
-}
-
-.auth-toast-title,
-.login-toast-title {
-  margin: 0;
-
-  color: var(--text-strong);
-
-  font-size: var(--font-base);
-  font-weight: var(--weight-bold);
-  line-height: 1.2;
-}
-
-.auth-toast-text,
-.login-toast-text {
-  margin: 0;
-
-  color: var(--text-dim);
-
-  font-size: var(--font-md);
-  line-height: 1.45;
-
-  text-wrap: pretty;
-}
-
-.auth-toast-close,
-.login-toast-close {
-  display: grid;
-  place-items: center;
-
-  inline-size: 34px;
-  block-size: 34px;
-
-  border: 0;
-  border-radius: var(--radius-md);
-  outline: none;
-
-  background: transparent;
-  color: var(--text-dim);
-
-  cursor: pointer;
-
-  transition:
-    background var(--duration-normal) var(--ease-standard),
-    color var(--duration-normal) var(--ease-standard),
-    opacity var(--duration-normal) var(--ease-standard);
-}
-
-.auth-toast-close:hover,
-.login-toast-close:hover {
-  background: var(--surface-hover);
-  color: var(--text-strong);
-}
-
-.auth-toast-close:focus-visible,
-.login-toast-close:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-.auth-toast-progress,
-.login-toast-progress {
-  position: absolute;
-
-  inset-inline: 12px;
-  inset-block-end: 10px;
-
-  block-size: 3px;
-
-  border-radius: var(--radius-pill);
-
-  background:
-    linear-gradient(
-      90deg,
-      var(--accent),
-      color-mix(in srgb, var(--accent-3, var(--accent)) 84%, var(--text-strong) 16%)
-    );
-
-  transform-origin: left center;
-}
-
-.auth-toast.is-info .auth-toast-progress,
-.login-toast.is-info .login-toast-progress {
-  display: none !important;
-}
-
-@keyframes authToastProgress {
-  from {
-    transform: scaleX(1);
-    opacity: 1;
-  }
-
-  to {
-    transform: scaleX(0);
-    opacity: .72;
-  }
-}
-
-@keyframes authToastPulseDot {
-  0%,
-  100% {
-    opacity: .42;
-    transform: scale(.74);
-
-    box-shadow:
-      0 0 0 0 color-mix(in srgb, var(--info) 6%, transparent),
-      0 0 8px color-mix(in srgb, var(--info) 12%, transparent);
-  }
-
-  50% {
-    opacity: 1;
-    transform: scale(1);
-
-    box-shadow:
-      0 0 0 6px color-mix(in srgb, var(--info) 10%, transparent),
-      0 0 16px color-mix(in srgb, var(--info) 22%, transparent);
-  }
-}
-
-
-/* =========================================================
    SIDE PANEL
 ========================================================= */
 
 .auth-side,
 .login-side {
   position: relative;
-
   display: grid;
   align-items: center;
   align-content: center;
-
-  min-block-size: 0;
-
   gap: 16px;
-
+  min-block-size: 0;
   pointer-events: none;
-}
-
-.auth-side-left--raised,
-.login-side-left--raised {
-  align-self: center;
-  padding-block-start: 0;
 }
 
 .auth-side-panel,
 .login-side-panel {
   position: relative;
   isolation: isolate;
-
   overflow: hidden;
-
+  inline-size: min(100%, 490px);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-3xl);
-
-  background:
-    var(--glass-shine),
-    var(--surface-glass);
-
+  background: var(--glass-shine), var(--surface-glass);
   backdrop-filter: var(--blur-lg);
   -webkit-backdrop-filter: var(--blur-lg);
-
-  box-shadow:
-    var(--shadow-md),
-    var(--shadow-inner);
+  box-shadow: var(--shadow-md), var(--shadow-inner);
 }
 
 .auth-side-panel::before,
@@ -663,22 +216,10 @@ body.auth-screen.auth-no-scroll #view-container {
   position: absolute;
   inset: 0;
   z-index: -1;
-
   pointer-events: none;
-
   background:
-    radial-gradient(
-      circle at top right,
-      color-mix(in srgb, var(--text-strong) 5%, transparent),
-      transparent 28%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-strong) 2%, transparent),
-      transparent 32%
-    );
-
-  opacity: .86;
+    radial-gradient(circle at top right, color-mix(in srgb, var(--text-strong) 5%, transparent), transparent 28%),
+    linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 2%, transparent), transparent 32%);
 }
 
 .auth-side-panel::after,
@@ -686,49 +227,26 @@ body.auth-screen.auth-no-scroll #view-container {
   content: "";
   position: absolute;
   inset: auto -18% -42% 42%;
-
   inline-size: 220px;
   block-size: 220px;
-
   border-radius: 50%;
-
-  background:
-    radial-gradient(
-      circle,
-      color-mix(in srgb, var(--accent) 12%, transparent),
-      transparent 70%
-    );
-
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%);
   filter: blur(18px);
-  opacity: .84;
-
   pointer-events: none;
 }
 
 .auth-side-panel--status,
 .login-side-panel--status {
-  inline-size: min(100%, 490px);
-  min-block-size: 0;
-
   padding: 24px;
-}
-
-.auth-side-panel--compact,
-.login-side-panel--compact {
-  inline-size: min(100%, 490px);
 }
 
 .auth-side-eyebrow,
 .login-side-eyebrow {
   display: inline-flex;
   align-items: center;
-
   gap: 10px;
-
   margin-block-end: 14px;
-
   color: var(--text-dim);
-
   font-size: var(--font-xs);
   font-weight: var(--weight-semibold);
   letter-spacing: .12em;
@@ -738,48 +256,35 @@ body.auth-screen.auth-no-scroll #view-container {
 .auth-side-eyebrow::before,
 .login-side-eyebrow::before {
   content: "";
-
   flex: none;
-
   inline-size: 10px;
   block-size: 10px;
-
   border-radius: 50%;
-
   background: var(--gradient-success);
-
   box-shadow:
     0 0 0 4px color-mix(in srgb, var(--success) 8%, transparent),
     0 0 10px color-mix(in srgb, var(--success) 14%, transparent);
 }
 
-.auth-side-panel--status h3,
-.login-side-panel--status h3 {
+.auth-side-panel h3,
+.login-side-panel h3 {
   margin: 0;
-
   max-inline-size: 15ch;
-
   color: var(--text-strong);
-
   font-size: clamp(28px, 2vw, 36px);
   font-weight: var(--weight-black);
   line-height: 1.04;
   letter-spacing: var(--letter-tight);
-
   text-wrap: balance;
 }
 
 .auth-side-text,
 .login-side-text {
   margin: 14px 0 0;
-
   max-inline-size: 46ch;
-
   color: var(--text-dim);
-
   font-size: var(--font-md);
   line-height: 1.5;
-
   text-wrap: pretty;
 }
 
@@ -787,7 +292,6 @@ body.auth-screen.auth-no-scroll #view-container {
 .login-signal-list {
   display: grid;
   gap: 12px;
-
   margin-block-start: 22px;
 }
 
@@ -795,57 +299,49 @@ body.auth-screen.auth-no-scroll #view-container {
 .login-signal-item {
   display: flex;
   align-items: center;
-
   gap: 12px;
-
   min-block-size: 52px;
-
   padding-inline: 16px;
-
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-xl);
-
-  background:
-    var(--glass-shine),
-    var(--surface-glass);
-
+  background: var(--glass-shine), var(--surface-glass);
   color: var(--text-soft);
-
   font-size: var(--font-base);
-
   box-shadow: var(--shadow-inner);
 }
 
 .auth-signal-item .dot,
-.login-signal-item .dot {
+.login-signal-item .dot,
+.auth-meta::before,
+.login-meta::before {
+  content: "";
   flex: none;
-
-  inline-size: 12px;
-  block-size: 12px;
-
+  inline-size: 10px;
+  block-size: 10px;
   border-radius: 50%;
-
   background: var(--gradient-success);
-
   box-shadow:
     0 0 0 5px color-mix(in srgb, var(--success) 8%, transparent),
     0 0 14px color-mix(in srgb, var(--success) 16%, transparent);
-
   animation: authPilotPulse 2.6s ease-in-out infinite;
+}
+
+.auth-signal-item .dot,
+.login-signal-item .dot {
+  inline-size: 12px;
+  block-size: 12px;
 }
 
 
 /* =========================================================
-   STAGE / CARD SHELL
+   STAGE / CARD
 ========================================================= */
 
 .auth-stage,
 .login-stage {
   position: relative;
-
   display: grid;
   align-items: center;
-
   block-size: 100%;
   min-block-size: 0;
 }
@@ -863,10 +359,8 @@ body.auth-screen.auth-no-scroll #view-container {
 .auth-card-shell,
 .login-card-shell {
   position: relative;
-
   display: flex;
   align-items: center;
-
   inline-size: 100%;
 }
 
@@ -886,36 +380,22 @@ body.auth-screen.auth-no-scroll #view-container {
 .login-card {
   position: relative;
   isolation: isolate;
-
   display: grid;
   gap: 20px;
-
   inline-size: 100%;
   max-inline-size: 520px;
-
   max-block-size: calc(100dvh - 40px);
-
   padding: clamp(20px, 2vw, 28px);
-
   overflow: auto;
-
   border: 1px solid var(--auth-card-border);
   border-radius: var(--card-radius-lg);
-
   background: var(--auth-card-bg);
-
   backdrop-filter: var(--blur-xl);
   -webkit-backdrop-filter: var(--blur-xl);
-
   box-shadow: var(--auth-card-shadow);
-
-  transform: none !important;
-  will-change: auto;
-
   scrollbar-width: thin;
   scrollbar-gutter: stable;
   scrollbar-color: var(--scrollbar-thumb) transparent;
-
   transition:
     border-color var(--duration-normal) var(--ease-standard),
     box-shadow var(--duration-normal) var(--ease-standard),
@@ -925,7 +405,6 @@ body.auth-screen.auth-no-scroll #view-container {
 .auth-card::-webkit-scrollbar,
 .login-card::-webkit-scrollbar {
   inline-size: var(--scrollbar-size);
-  block-size: var(--scrollbar-size);
 }
 
 .auth-card::-webkit-scrollbar-track,
@@ -937,26 +416,38 @@ body.auth-screen.auth-no-scroll #view-container {
 .login-card::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: var(--radius-pill);
-
   background: var(--scrollbar-thumb);
   background-clip: padding-box;
 }
 
-.auth-card::-webkit-scrollbar-thumb:hover,
-.login-card::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
-  background-clip: padding-box;
+.auth-card::before,
+.login-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--text-strong) 6%, transparent), transparent 28%),
+    radial-gradient(circle at 0% 100%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 24%),
+    linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 2%, transparent), transparent 32%);
+}
+
+.auth-card::after,
+.login-card::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: calc(var(--card-radius-lg) - 1px);
+  pointer-events: none;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 6%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--text-strong) 2%, transparent);
 }
 
 .auth-card--offset,
 .login-card--offset {
   margin-inline-start: auto;
-  margin-inline-end: 0;
-}
-
-.auth-card--clean,
-.login-card--clean {
-  max-block-size: calc(100dvh - 40px);
 }
 
 .auth-card--narrow,
@@ -969,187 +460,74 @@ body.auth-screen.auth-no-scroll #view-container {
   max-inline-size: 620px;
 }
 
-.auth-card::before,
-.login-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-
-  pointer-events: none;
-
-  background:
-    radial-gradient(
-      circle at top right,
-      color-mix(in srgb, var(--text-strong) 6%, transparent),
-      transparent 28%
-    ),
-    radial-gradient(
-      circle at 0% 100%,
-      color-mix(in srgb, var(--accent) 6%, transparent),
-      transparent 24%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-strong) 2%, transparent),
-      transparent 32%
-    );
-
-  opacity: 1;
-}
-
-.auth-card::after,
-.login-card::after {
-  content: "";
-  position: absolute;
-  inset: 1px;
-
-  border-radius: calc(var(--card-radius-lg) - 1px);
-
-  pointer-events: none;
-
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 6%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, var(--text-strong) 2%, transparent);
-}
-
-.auth-side-panel--status,
-.login-side-panel--status,
-.auth-card--clean,
-.login-card--clean {
-  margin-block: 0;
-}
-
-
-/* =========================================================
-   CARD ERROR SHAKE
-========================================================= */
-
 .auth-card.shake,
 .login-card.shake {
-  animation: authCardShakeGlow .42s ease;
-}
-
-@keyframes authCardShakeGlow {
-  0% {
-    border-color: var(--auth-card-border);
-    box-shadow: var(--auth-card-shadow);
-  }
-
-  25% {
-    border-color: var(--border-error);
-
-    box-shadow:
-      var(--auth-card-shadow),
-      0 0 0 4px color-mix(in srgb, var(--error) 10%, transparent);
-  }
-
-  50% {
-    border-color: color-mix(in srgb, var(--error) 65%, var(--border-error));
-
-    box-shadow:
-      var(--auth-card-shadow),
-      0 0 0 6px color-mix(in srgb, var(--error) 12%, transparent);
-  }
-
-  100% {
-    border-color: var(--auth-card-border);
-    box-shadow: var(--auth-card-shadow);
-  }
+  animation: authCardShake .42s ease;
 }
 
 
 /* =========================================================
-   HEADER
+   HEADER / LOGO
 ========================================================= */
 
 .auth-header,
 .login-header {
   display: grid;
   justify-items: center;
-
   gap: 12px;
-
   text-align: center;
 }
 
 .auth-header-top,
 .login-header-top {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-
   inline-size: 100%;
-
-  position: relative;
 }
 
+.auth-title,
+.login-title,
 .auth-header h1,
 .auth-header h2,
-.auth-title,
 .login-header h1,
-.login-header h2,
-.login-title {
+.login-header h2 {
   margin: 0;
-
   max-inline-size: 14ch;
-
   color: var(--text-strong);
-
   font-family: var(--font-family);
   font-size: clamp(26px, 2.4vw, 36px);
   font-weight: var(--weight-black);
   line-height: 1.04;
   letter-spacing: var(--letter-tight);
-
   text-wrap: balance;
 }
 
 .auth-subtitle,
 .login-subtitle {
   margin: 0;
-
   max-inline-size: 36ch;
-
   color: var(--text-dim);
-
   font-size: var(--font-md);
   line-height: 1.5;
-
   text-wrap: pretty;
 }
-
-
-/* =========================================================
-   LOGO
-========================================================= */
 
 .auth-logo,
 .logo-fade {
   position: relative;
   isolation: isolate;
-
   display: grid;
   place-items: center;
-
   inline-size: 76px;
   block-size: 76px;
-
   margin-inline: auto;
-
+  overflow: hidden;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-2xl);
-
-  background:
-    var(--glass-shine),
-    var(--surface-glass-strong);
-
-  box-shadow:
-    var(--shadow-md),
-    var(--shadow-inner);
-
-  overflow: hidden;
-  transform: translateZ(0);
+  background: var(--glass-shine), var(--surface-glass-strong);
+  box-shadow: var(--shadow-md), var(--shadow-inner);
 }
 
 .auth-logo::before,
@@ -1158,27 +536,12 @@ body.auth-screen.auth-no-scroll #view-container {
   position: absolute;
   inset: -36%;
   z-index: -1;
-
   pointer-events: none;
-
   background:
-    radial-gradient(
-      circle at 50% 14%,
-      color-mix(in srgb, var(--text-strong) 8%, transparent),
-      transparent 42%
-    ),
-    conic-gradient(
-      from 180deg,
-      transparent 0deg,
-      color-mix(in srgb, var(--accent) 12%, transparent) 72deg,
-      transparent 146deg,
-      color-mix(in srgb, var(--text-strong) 5%, transparent) 230deg,
-      transparent 360deg
-    );
-
+    radial-gradient(circle at 50% 14%, color-mix(in srgb, var(--text-strong) 8%, transparent), transparent 42%),
+    conic-gradient(from 180deg, transparent 0deg, color-mix(in srgb, var(--accent) 12%, transparent) 72deg, transparent 146deg, color-mix(in srgb, var(--text-strong) 5%, transparent) 230deg, transparent 360deg);
   filter: blur(16px);
   opacity: .56;
-
   animation: authLogoGlowSpin 12s linear infinite;
 }
 
@@ -1187,18 +550,9 @@ body.auth-screen.auth-no-scroll #view-container {
   content: "";
   position: absolute;
   inset: 1px;
-
   border-radius: calc(var(--radius-2xl) - 1px);
-
   pointer-events: none;
-
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-strong) 7%, transparent),
-      transparent 42%
-    );
-
+  background: linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 7%, transparent), transparent 42%);
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, var(--text-strong) 7%, transparent),
     inset 0 -1px 0 color-mix(in srgb, var(--text-strong) 2%, transparent);
@@ -1208,13 +562,10 @@ body.auth-screen.auth-no-scroll #view-container {
 .login-logo-theme {
   position: relative;
   z-index: 1;
-
   display: grid;
   place-items: center;
-
   inline-size: 44px;
   block-size: 44px;
-
   color: var(--text-strong);
 }
 
@@ -1222,108 +573,37 @@ body.auth-screen.auth-no-scroll #view-container {
 .login-logo-theme-img {
   position: absolute;
   inset: 0;
-
   display: block;
-
   inline-size: 44px;
   block-size: 44px;
-
   object-fit: contain;
   object-position: center;
-
   opacity: 0;
-
   transform: scale(.96);
-
-  filter:
-    drop-shadow(
-      0 6px 14px
-      color-mix(in srgb, var(--shadow-strong) 42%, transparent)
-    );
-
+  filter: drop-shadow(0 6px 14px color-mix(in srgb, var(--shadow-strong) 42%, transparent));
   transition:
     opacity var(--duration-normal) var(--ease-standard),
-    transform var(--duration-normal) var(--ease-standard),
-    filter var(--duration-normal) var(--ease-standard);
+    transform var(--duration-normal) var(--ease-standard);
 }
 
 .auth-logo-theme-dark,
 .login-logo-theme-dark,
-.logo-fade .logo-dark,
-.logo-fade .login-logo--dark,
-.auth-logo .logo-dark,
-.auth-logo .auth-logo--dark {
+html[data-theme="dark"] .auth-logo-theme-dark,
+html[data-theme="dark"] .login-logo-theme-dark,
+html[data-theme="light"] .auth-logo-theme-light,
+html[data-theme="light"] .login-logo-theme-light {
   opacity: 1;
   transform: scale(1);
 }
 
 .auth-logo-theme-light,
 .login-logo-theme-light,
-.logo-fade .logo-light,
-.logo-fade .login-logo--light,
-.auth-logo .logo-light,
-.auth-logo .auth-logo--light {
-  opacity: 0;
-  transform: scale(.96);
-}
-
-html[data-theme="light"] .auth-logo-theme-dark,
-html[data-theme="light"] .login-logo-theme-dark,
-html[data-theme="light"] .logo-fade .logo-dark,
-html[data-theme="light"] .logo-fade .login-logo--dark,
-html[data-theme="light"] .auth-logo .logo-dark,
-html[data-theme="light"] .auth-logo .auth-logo--dark {
-  opacity: 0;
-  transform: scale(.96);
-}
-
-html[data-theme="light"] .auth-logo-theme-light,
-html[data-theme="light"] .login-logo-theme-light,
-html[data-theme="light"] .logo-fade .logo-light,
-html[data-theme="light"] .logo-fade .login-logo--light,
-html[data-theme="light"] .auth-logo .logo-light,
-html[data-theme="light"] .auth-logo .auth-logo--light {
-  opacity: 1;
-  transform: scale(1);
-}
-
-html[data-theme="dark"] .auth-logo-theme-dark,
-html[data-theme="dark"] .login-logo-theme-dark,
-html[data-theme="dark"] .logo-fade .logo-dark,
-html[data-theme="dark"] .logo-fade .login-logo--dark,
-html[data-theme="dark"] .auth-logo .logo-dark,
-html[data-theme="dark"] .auth-logo .auth-logo--dark {
-  opacity: 1;
-  transform: scale(1);
-}
-
 html[data-theme="dark"] .auth-logo-theme-light,
 html[data-theme="dark"] .login-logo-theme-light,
-html[data-theme="dark"] .logo-fade .logo-light,
-html[data-theme="dark"] .logo-fade .login-logo--light,
-html[data-theme="dark"] .auth-logo .logo-light,
-html[data-theme="dark"] .auth-logo .auth-logo--light {
+html[data-theme="light"] .auth-logo-theme-dark,
+html[data-theme="light"] .login-logo-theme-dark {
   opacity: 0;
   transform: scale(.96);
-}
-
-.auth-logo:hover .auth-logo-theme-img,
-.logo-fade:hover .login-logo-theme-img {
-  filter:
-    drop-shadow(
-      0 8px 18px
-      color-mix(in srgb, var(--shadow-strong) 50%, transparent)
-    );
-}
-
-@keyframes authLogoGlowSpin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 
@@ -1336,35 +616,23 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   position: absolute;
   inset-inline-end: 0;
   inset-block-start: 50%;
-
   transform: translateY(-50%);
-
   display: grid;
   place-items: center;
-
   inline-size: 42px;
   block-size: 42px;
-
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-xl);
   outline: none;
-
-  background:
-    var(--glass-shine),
-    var(--surface-glass);
-
+  background: var(--glass-shine), var(--surface-glass);
   color: var(--text-muted);
-
   box-shadow: var(--shadow-inner);
-
   cursor: pointer;
-
   transition:
     background var(--duration-normal) var(--ease-standard),
     border-color var(--duration-normal) var(--ease-standard),
     color var(--duration-normal) var(--ease-standard),
-    box-shadow var(--duration-normal) var(--ease-standard),
-    transform var(--duration-normal) var(--ease-standard);
+    box-shadow var(--duration-normal) var(--ease-standard);
 }
 
 .auth-theme-toggle:hover,
@@ -1372,7 +640,6 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   border-color: var(--accent-border);
   color: var(--text-strong);
   background: var(--surface-hover);
-
   box-shadow:
     var(--shadow-inner),
     0 0 0 4px color-mix(in srgb, var(--accent) 8%, transparent);
@@ -1390,48 +657,31 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   cursor: not-allowed;
 }
 
-.login-theme-toggle-icon,
-.auth-theme-toggle-icon {
+.auth-theme-toggle-icon,
+.login-theme-toggle-icon {
   position: relative;
-
   display: grid;
   place-items: center;
-
   inline-size: 18px;
   block-size: 18px;
-
   border-radius: 50%;
-
   background:
-    radial-gradient(
-      circle at 32% 28%,
-      var(--text-strong),
-      color-mix(in srgb, var(--text-strong) 52%, transparent) 42%,
-      transparent 43%
-    );
-
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--text-strong) 18%, transparent),
-    0 0 16px color-mix(in srgb, var(--accent) 12%, transparent);
+    radial-gradient(circle at 32% 28%, var(--text-strong), color-mix(in srgb, var(--text-strong) 52%, transparent) 42%, transparent 43%);
 }
 
-.login-theme-toggle-orb,
-.auth-theme-toggle-orb {
+.auth-theme-toggle-orb,
+.login-theme-toggle-orb {
   display: block;
-
   inline-size: 10px;
   block-size: 10px;
-
   border-radius: 50%;
-
   background: var(--accent);
-
   opacity: .52;
 }
 
 
 /* =========================================================
-   FORM
+   FORM / INPUTS
 ========================================================= */
 
 .auth-form,
@@ -1443,7 +693,6 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
 .auth-field,
 .login-field {
   position: relative;
-
   display: grid;
   gap: 8px;
 }
@@ -1453,25 +702,18 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
 [data-password-input] {
   inline-size: 100%;
   block-size: var(--input-height-lg);
-
   appearance: none;
   -webkit-appearance: none;
-
   padding-inline: 16px;
-
   border: 1px solid var(--auth-input-border);
   border-radius: var(--input-radius);
   outline: none;
-
   background: var(--auth-input-bg);
   color: var(--input-text);
-
   box-shadow: var(--input-shadow);
-
   font: inherit;
   font-size: var(--font-base);
   font-weight: var(--weight-medium);
-
   transition:
     background var(--duration-normal) var(--ease-standard),
     border-color var(--duration-normal) var(--ease-standard),
@@ -1516,7 +758,6 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
 [data-password-input][aria-invalid="true"],
 [data-password-input].is-invalid {
   border-color: var(--input-border-error);
-
   box-shadow:
     0 0 0 4px color-mix(in srgb, var(--error) 10%, transparent),
     0 8px 20px color-mix(in srgb, var(--error) 8%, transparent);
@@ -1525,22 +766,13 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
 .auth-field-error,
 .login-field-error {
   color: var(--error);
-
-  font-size: var(--font-sm);
-  line-height: var(--line-normal);
-}
-
-.auth-field-help,
-.login-field-help {
-  color: var(--text-dim);
-
   font-size: var(--font-sm);
   line-height: var(--line-normal);
 }
 
 
 /* =========================================================
-   PASSWORD FIELD
+   PASSWORD
 ========================================================= */
 
 .auth-password-wrapper,
@@ -1560,52 +792,31 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
 .password-toggle,
 [data-password-toggle] {
   position: absolute;
-
   inset-block-start: 5px;
   inset-inline-end: 10px;
-
   display: grid;
   place-items: center;
-
   inline-size: 40px;
   block-size: 40px;
-
   padding: 0;
-
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   outline: none;
-
   background: transparent;
   color: var(--text-dim);
-
   line-height: 0;
-
   cursor: pointer;
-
   transition:
     background var(--duration-normal) var(--ease-standard),
     color var(--duration-normal) var(--ease-standard),
     border-color var(--duration-normal) var(--ease-standard),
-    box-shadow var(--duration-normal) var(--ease-standard),
     opacity var(--duration-normal) var(--ease-standard);
-}
-
-.auth-password-toggle svg,
-.password-toggle svg,
-[data-password-toggle] svg {
-  display: block;
-  flex: none;
-  pointer-events: none;
 }
 
 .auth-password-toggle:hover,
 .password-toggle:hover,
 [data-password-toggle]:hover {
-  background: transparent;
-  border-color: transparent;
   color: var(--text-muted);
-  box-shadow: none;
 }
 
 .auth-password-toggle.active,
@@ -1618,7 +829,6 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   background: var(--accent-ghost);
   border-color: var(--accent-border);
   color: var(--text-strong);
-  box-shadow: none;
 }
 
 .auth-password-toggle:focus-visible,
@@ -1639,53 +849,33 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
 [data-password-toggle-icon] {
   display: grid;
   place-items: center;
-
   inline-size: 20px;
   block-size: 20px;
-
   color: currentColor;
 }
-
-
-/* =========================================================
-   CAPS LOCK INDICATOR
-========================================================= */
 
 .auth-caps-indicator,
 .caps-indicator,
 .password-caps,
 [data-password-caps] {
   position: absolute;
-
   inset-block-start: 50%;
   inset-inline-end: 54px;
-
   transform: translateY(-50%);
-
   display: inline-flex;
   align-items: center;
-
   gap: 8px;
-
   min-block-size: 30px;
-
   padding: 0 9px 0 8px;
-
   border: 1px solid var(--border-warning);
   border-radius: var(--radius-pill);
-
-  background:
-    var(--glass-shine),
-    var(--warning-bg);
-
+  background: var(--glass-shine), var(--warning-bg);
   box-shadow:
     var(--shadow-inner),
     0 6px 16px color-mix(in srgb, var(--warning) 8%, transparent);
-
+  color: var(--warning);
   pointer-events: none;
-
   opacity: 0;
-
   transition:
     opacity var(--duration-normal) var(--ease-standard),
     transform var(--duration-normal) var(--ease-standard);
@@ -1703,53 +893,9 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   transform: translateY(-50%);
 }
 
-.auth-caps-icon,
-.caps-icon {
-  position: static;
-
-  color: var(--warning);
-
-  opacity: .96;
-
-  filter:
-    drop-shadow(
-      0 0 8px
-      color-mix(in srgb, var(--warning) 18%, transparent)
-    );
-
-  pointer-events: none;
-
-  animation: authCapsPulse 1.8s ease-in-out infinite;
-}
-
-.auth-caps-label,
-.caps-label,
-.password-caps {
-  color: var(--warning);
-
-  font-size: 10px;
-  font-weight: var(--weight-semibold);
-  letter-spacing: .02em;
-
-  white-space: nowrap;
-}
-
-@keyframes authCapsPulse {
-  0%,
-  100% {
-    opacity: .72;
-    transform: scale(1);
-  }
-
-  50% {
-    opacity: 1;
-    transform: scale(1.05);
-  }
-}
-
 
 /* =========================================================
-   OPTIONS
+   OPTIONS / CHECKBOX / META
 ========================================================= */
 
 .auth-options,
@@ -1757,135 +903,78 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   display: flex;
   align-items: center;
   justify-content: space-between;
-
   gap: 12px;
   flex-wrap: wrap;
-
   margin-block-start: 2px;
 }
 
 .auth-check,
 .login-check {
   position: relative;
-
   display: inline-flex;
   align-items: center;
-
   min-block-size: 24px;
-
-  border: 0 !important;
-  outline: none !important;
-
-  background: transparent !important;
-  box-shadow: none !important;
-
   color: var(--text-muted);
-
   cursor: pointer;
   user-select: none;
-
   font-size: var(--font-md);
   line-height: 1.2;
-}
-
-.auth-check:hover,
-.auth-check:active,
-.auth-check:focus-within,
-.login-check:hover,
-.login-check:active,
-.login-check:focus-within {
-  border-color: transparent !important;
-  outline: none !important;
-  background: transparent !important;
-  box-shadow: none !important;
 }
 
 .auth-check input,
 .login-check input {
   position: absolute;
-
   inline-size: 1px;
   block-size: 1px;
-
   margin: 0;
   padding: 0;
-
   opacity: 0;
-
   overflow: hidden;
-
   clip: rect(0 0 0 0);
   clip-path: inset(50%);
-
   white-space: nowrap;
-
   border: 0;
-
   pointer-events: none;
 }
 
 .auth-check span,
 .login-check span {
   position: relative;
-
   display: inline-flex;
   align-items: center;
-
   gap: 10px;
-
   color: var(--text-muted);
-
-  transition:
-    color var(--duration-normal) var(--ease-standard),
-    opacity var(--duration-normal) var(--ease-standard);
+  transition: color var(--duration-normal) var(--ease-standard);
 }
 
 .auth-check span::before,
 .login-check span::before {
   content: "";
-
   flex: none;
-
   inline-size: 18px;
   block-size: 18px;
-
   border: 1px solid var(--border-default);
   border-radius: 5px;
-
-  background:
-    var(--glass-shine),
-    var(--surface-glass);
-
-  box-shadow:
-    var(--shadow-inner),
-    0 1px 2px color-mix(in srgb, var(--shadow-strong) 6%, transparent);
-
+  background: var(--glass-shine), var(--surface-glass);
+  box-shadow: var(--shadow-inner);
   transition:
     background var(--duration-normal) var(--ease-standard),
     border-color var(--duration-normal) var(--ease-standard),
-    box-shadow var(--duration-normal) var(--ease-standard),
-    transform .18s var(--ease-standard);
+    box-shadow var(--duration-normal) var(--ease-standard);
 }
 
 .auth-check span::after,
 .login-check span::after {
   content: "";
-
   position: absolute;
-
   inset-inline-start: 6px;
   inset-block-start: 3px;
-
   inline-size: 5px;
   block-size: 10px;
-
   border: solid var(--text-on-accent);
   border-width: 0 2px 2px 0;
-
   opacity: 0;
-
   transform: rotate(45deg) scale(.82);
-
   transition:
     opacity var(--duration-fast) var(--ease-standard),
     transform var(--duration-fast) var(--ease-standard);
@@ -1896,20 +985,10 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   color: var(--text-strong);
 }
 
-.auth-check:hover span::before,
-.login-check:hover span::before {
-  border-color: var(--accent-border);
-
-  box-shadow:
-    var(--shadow-inner),
-    0 0 0 4px color-mix(in srgb, var(--accent) 9%, transparent);
-}
-
 .auth-check input:checked + span::before,
 .login-check input:checked + span::before {
   border-color: var(--accent-border-strong, var(--accent-border));
   background: var(--btn-primary-bg);
-
   box-shadow:
     0 8px 18px color-mix(in srgb, var(--accent) 18%, transparent),
     0 0 0 4px color-mix(in srgb, var(--accent) 10%, transparent),
@@ -1924,8 +1003,6 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
 
 .auth-check input:focus-visible + span::before,
 .login-check input:focus-visible + span::before {
-  outline: none;
-
   box-shadow:
     var(--focus-ring),
     0 0 0 5px color-mix(in srgb, var(--accent) 10%, transparent);
@@ -1941,96 +1018,40 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
 .login-meta {
   display: inline-flex;
   align-items: center;
-
   gap: 8px;
-
   color: var(--text-dim);
-
   font-size: var(--font-sm);
-
   white-space: nowrap;
-}
-
-.auth-meta::before,
-.login-meta::before {
-  content: "";
-
-  flex: none;
-
-  inline-size: 9px;
-  block-size: 9px;
-
-  border-radius: 50%;
-
-  background: var(--gradient-success);
-
-  box-shadow:
-    0 0 0 5px color-mix(in srgb, var(--success) 8%, transparent),
-    0 0 12px color-mix(in srgb, var(--success) 16%, transparent);
-
-  animation: authPilotPulse 2.6s ease-in-out infinite;
-}
-
-@keyframes authPilotPulse {
-  0%,
-  100% {
-    opacity: .72;
-    transform: scale(1);
-
-    box-shadow:
-      0 0 0 5px color-mix(in srgb, var(--success) 6%, transparent),
-      0 0 8px color-mix(in srgb, var(--success) 12%, transparent);
-  }
-
-  50% {
-    opacity: 1;
-    transform: scale(1.08);
-
-    box-shadow:
-      0 0 0 7px color-mix(in srgb, var(--success) 10%, transparent),
-      0 0 16px color-mix(in srgb, var(--success) 20%, transparent);
-  }
 }
 
 
 /* =========================================================
-   SUBMIT BUTTON
+   BUTTON / ERROR / LINKS / FOOTER
 ========================================================= */
 
 .auth-button,
 .login-button {
   position: relative;
   isolation: isolate;
-
   display: inline-flex;
   align-items: center;
   justify-content: center;
-
   inline-size: 100%;
   block-size: var(--btn-height-lg);
-
   gap: 10px;
-
   padding-inline: 18px;
-
+  overflow: hidden;
   border: 1px solid var(--btn-primary-border);
   border-radius: var(--btn-radius);
   outline: none;
-
   background: var(--btn-primary-bg);
   color: var(--btn-primary-text);
-
   box-shadow: var(--btn-primary-shadow);
-
   cursor: pointer;
-
-  overflow: hidden;
-
   font: inherit;
   font-size: var(--font-base);
   font-weight: var(--weight-bold);
   letter-spacing: .01em;
-
   transition:
     transform .18s var(--ease-standard),
     filter var(--duration-normal) var(--ease-standard),
@@ -2044,57 +1065,17 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   position: absolute;
   inset: 0;
   z-index: 0;
-
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-on-accent) 12%, transparent),
-      transparent 38%
-    );
-
+  background: linear-gradient(180deg, color-mix(in srgb, var(--text-on-accent) 12%, transparent), transparent 38%);
   opacity: .86;
-}
-
-.auth-button::after,
-.login-button::after {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  z-index: 0;
-
-  border-radius: inherit;
-
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--text-on-accent) 14%, transparent) 0%,
-      color-mix(in srgb, var(--text-on-accent) 5%, transparent) 24%,
-      transparent 42%,
-      transparent 58%,
-      color-mix(in srgb, var(--text-on-accent) 5%, transparent) 78%,
-      color-mix(in srgb, var(--text-on-accent) 10%, transparent) 100%
-    );
-
-  opacity: 0;
-
-  pointer-events: none;
-
-  transition: opacity var(--duration-normal) var(--ease-standard);
 }
 
 .auth-button:hover,
 .login-button:hover {
   transform: translateY(-1px);
   filter: brightness(1.02);
-
   box-shadow:
     var(--btn-primary-shadow),
     0 14px 32px color-mix(in srgb, var(--accent) 18%, transparent);
-}
-
-.auth-button:hover::after,
-.login-button:hover::after {
-  opacity: 1;
 }
 
 .auth-button:active,
@@ -2105,7 +1086,6 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
 .auth-button:focus-visible,
 .login-button:focus-visible {
   outline: none;
-
   box-shadow:
     var(--btn-primary-shadow),
     var(--focus-ring-strong);
@@ -2125,68 +1105,33 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   z-index: 1;
 }
 
-.login-view__spinner,
-.auth-view__spinner {
+.auth-view__spinner,
+.login-view__spinner {
   position: relative;
   z-index: 1;
-
   flex: none;
-
   inline-size: 16px;
   block-size: 16px;
-
   border: 2px solid color-mix(in srgb, var(--btn-primary-text) 38%, transparent);
   border-block-start-color: var(--btn-primary-text);
   border-radius: 50%;
-
   animation: authButtonSpin .76s linear infinite;
 }
-
-@keyframes authButtonSpin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.auth-button[data-loading="true"] .auth-submit-text,
-.login-button[data-loading="true"] .login-submit-text {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-
-
-/* =========================================================
-   FORM ERROR
-   CRÍTICO:
-   No usar display:none !important. Si no, el login parece congelado
-   porque el error backend queda invisible.
-========================================================= */
 
 .auth-error,
 .login-error {
   display: none;
-
   margin: 0;
-
   padding: 12px 14px;
-
   border: 1px solid var(--border-error);
   border-radius: var(--radius-lg);
-
-  background:
-    var(--glass-shine),
-    var(--error-bg);
-
+  background: var(--glass-shine), var(--error-bg);
   color: var(--error);
-
   box-shadow:
     var(--shadow-inner),
     0 8px 20px color-mix(in srgb, var(--error) 8%, transparent);
-
   font-size: var(--font-sm);
   line-height: 1.45;
-
   text-wrap: pretty;
 }
 
@@ -2204,62 +1149,24 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   display: none;
 }
 
-
-/* =========================================================
-   RESET / SECONDARY LINK
-========================================================= */
-
 .auth-reset,
 .login-reset {
   display: flex;
   justify-content: center;
-
-  margin-block-start: 0;
 }
 
 .auth-reset a,
 .login-reset a,
 .auth-link {
   position: relative;
-
   color: var(--link);
-
   text-decoration: none;
-
   font-size: var(--font-sm);
   font-weight: var(--weight-medium);
-
   opacity: .92;
-
   transition:
     color var(--duration-normal) var(--ease-standard),
-    opacity var(--duration-normal) var(--ease-standard),
-    text-shadow var(--duration-normal) var(--ease-standard);
-}
-
-.auth-reset a::after,
-.login-reset a::after,
-.auth-link::after {
-  content: "";
-  position: absolute;
-
-  inset-inline: 0;
-  inset-block-end: -3px;
-
-  block-size: 1px;
-
-  border-radius: var(--radius-pill);
-
-  background: currentColor;
-
-  opacity: 0;
-
-  transform: scaleX(.72);
-  transform-origin: center;
-
-  transition:
-    opacity var(--duration-normal) var(--ease-standard),
-    transform var(--duration-normal) var(--ease-standard);
+    opacity var(--duration-normal) var(--ease-standard);
 }
 
 .auth-reset a:hover,
@@ -2267,16 +1174,6 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
 .auth-link:hover {
   color: var(--text-strong);
   opacity: 1;
-
-  text-shadow:
-    0 0 10px color-mix(in srgb, var(--text-strong) 4%, transparent);
-}
-
-.auth-reset a:hover::after,
-.login-reset a:hover::after,
-.auth-link:hover::after {
-  opacity: .68;
-  transform: scaleX(1);
 }
 
 .auth-reset a:focus-visible,
@@ -2297,24 +1194,14 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   pointer-events: none;
 }
 
-
-/* =========================================================
-   FOOTER
-========================================================= */
-
 .auth-footer,
 .login-footer {
   display: flex;
   align-items: center;
   justify-content: center;
-
   gap: 10px;
   flex-wrap: wrap;
-
-  padding-block-start: 0;
-
   color: var(--text-dim);
-
   font-size: var(--font-xs);
   text-align: center;
 }
@@ -2328,58 +1215,42 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   display: grid;
   justify-items: center;
   gap: 14px;
-
   text-align: center;
 }
 
 .auth-status-icon {
   display: grid;
   place-items: center;
-
   inline-size: 58px;
   block-size: 58px;
-
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-2xl);
-
-  background:
-    var(--glass-shine),
-    var(--surface-glass);
-
+  background: var(--glass-shine), var(--surface-glass);
   color: var(--text-dim);
-
   box-shadow: var(--shadow-md), var(--shadow-inner);
 }
 
 .auth-status-icon.success {
   color: var(--success);
   border-color: var(--border-success);
-  background:
-    var(--glass-shine),
-    var(--success-bg);
+  background: var(--glass-shine), var(--success-bg);
 }
 
 .auth-status-icon.warning {
   color: var(--warning);
   border-color: var(--border-warning);
-  background:
-    var(--glass-shine),
-    var(--warning-bg);
+  background: var(--glass-shine), var(--warning-bg);
 }
 
 .auth-status-icon.error {
   color: var(--error);
   border-color: var(--border-error);
-  background:
-    var(--glass-shine),
-    var(--error-bg);
+  background: var(--glass-shine), var(--error-bg);
 }
 
 .auth-status-title {
   margin: 0;
-
   color: var(--text-strong);
-
   font-size: var(--font-2xl);
   line-height: var(--line-snug);
   font-weight: var(--weight-black);
@@ -2388,11 +1259,8 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
 
 .auth-status-text {
   margin: 0;
-
   max-inline-size: 44ch;
-
   color: var(--text-dim);
-
   font-size: var(--font-md);
   line-height: var(--line-normal);
 }
@@ -2401,23 +1269,17 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
-
   inline-size: 100%;
 }
 
 .auth-code-input {
   block-size: 52px;
-
   border: 1px solid var(--auth-input-border);
   border-radius: var(--radius-lg);
-
   background: var(--auth-input-bg);
   color: var(--text-strong);
-
   box-shadow: var(--input-shadow);
-
   text-align: center;
-
   font: inherit;
   font-size: var(--font-xl);
   font-weight: var(--weight-black);
@@ -2426,87 +1288,66 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
 
 .auth-code-input:focus {
   outline: none;
-
   border-color: var(--auth-input-border-focus);
   box-shadow: var(--input-shadow-focus);
 }
 
 
 /* =========================================================
-   REDUCED MOTION
+   ANIMATIONS
 ========================================================= */
 
-@media (prefers-reduced-motion: reduce) {
-  .auth-logo::before,
-  .logo-fade::before,
-  .auth-signal-item .dot,
-  .login-signal-item .dot,
-  .auth-meta::before,
-  .login-meta::before,
-  .auth-caps-icon,
-  .caps-icon,
-  .auth-toast.is-info .auth-toast-icon::after,
-  .login-toast.is-info .login-toast-icon::after,
-  .login-view__spinner,
-  .auth-view__spinner {
-    animation: none !important;
+@keyframes authLogoGlowSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes authPilotPulse {
+  0%,
+  100% {
+    opacity: .72;
+    transform: scale(1);
   }
 
-  .auth-button,
-  .login-button,
-  .auth-button::after,
-  .login-button::after,
-  .auth-toast,
-  .login-toast,
-  .auth-toast-progress,
-  .login-toast-progress,
-  .auth-card.shake,
-  .login-card.shake,
-  .auth-logo-theme-img,
-  .login-logo-theme-img,
-  .auth-theme-toggle,
-  .login-theme-toggle {
-    transition: none !important;
-    animation: none !important;
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes authButtonSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes authCardShake {
+  0%,
+  100% {
+    border-color: var(--auth-card-border);
+    box-shadow: var(--auth-card-shadow);
   }
 
-  .auth-button:hover,
-  .auth-button:active,
-  .login-button:hover,
-  .login-button:active,
-  .auth-theme-toggle,
-  .login-theme-toggle {
-    transform: none !important;
+  35% {
+    border-color: var(--border-error);
+    box-shadow:
+      var(--auth-card-shadow),
+      0 0 0 4px color-mix(in srgb, var(--error) 10%, transparent);
   }
 }
 
 
 /* =========================================================
-   LARGE DESKTOP
+   RESPONSIVE
 ========================================================= */
 
 @media (min-width: 1500px) {
   .auth-grid,
   .login-grid {
     inline-size: min(100%, 1600px);
-
-    grid-template-columns:
-      minmax(420px, 540px)
-      minmax(560px, 1fr);
-
+    grid-template-columns: minmax(420px, 540px) minmax(560px, 1fr);
     gap: 50px;
-  }
-
-  .auth-grid--center,
-  .login-grid--center,
-  .auth-grid.center,
-  .login-grid.center {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .auth-card,
-  .login-card {
-    max-inline-size: 520px;
   }
 
   .auth-card-shell--right,
@@ -2514,36 +1355,17 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
     padding-inline-end: 64px;
   }
 
-  .auth-side-panel--status,
-  .auth-side-panel--compact,
-  .login-side-panel--status,
-  .login-side-panel--compact {
+  .auth-side-panel,
+  .login-side-panel {
     inline-size: min(100%, 510px);
   }
 }
 
-
-/* =========================================================
-   DESKTOP / MEDIUM
-========================================================= */
-
 @media (max-width: 1220px) {
   .auth-grid,
   .login-grid {
-    inline-size: min(100%, 1400px);
-
-    grid-template-columns:
-      minmax(330px, 420px)
-      minmax(460px, 1fr);
-
+    grid-template-columns: minmax(330px, 420px) minmax(460px, 1fr);
     gap: 26px;
-  }
-
-  .auth-grid--center,
-  .login-grid--center,
-  .auth-grid.center,
-  .login-grid.center {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .auth-card-shell--right,
@@ -2551,15 +1373,8 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
     padding-inline-end: 18px;
   }
 
-  .auth-side,
-  .login-side {
-    align-self: center;
-  }
-
-  .auth-side-panel--status,
-  .auth-side-panel--compact,
-  .login-side-panel--status,
-  .login-side-panel--compact {
+  .auth-side-panel,
+  .login-side-panel {
     inline-size: min(100%, 420px);
   }
 
@@ -2568,21 +1383,11 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
     padding: 24px 22px;
   }
 
-  .auth-side-panel--status h3,
-  .login-side-panel--status h3 {
+  .auth-side-panel h3,
+  .login-side-panel h3 {
     font-size: 30px;
   }
-
-  .auth-signal-item,
-  .login-signal-item {
-    min-block-size: 52px;
-  }
 }
-
-
-/* =========================================================
-   TABLET
-========================================================= */
 
 @media (max-width: 1040px) {
   body.auth-screen .main-content,
@@ -2594,47 +1399,28 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   .auth-view,
   .login-view {
     block-size: auto;
-
     min-block-size: 100vh;
     min-block-size: 100dvh;
-
     overflow: auto;
   }
 
   .auth-grid,
   .login-grid {
     block-size: auto;
-
     min-block-size: 100vh;
     min-block-size: 100dvh;
-
-    padding:
-      20px
-      18px
-      18px;
-
     grid-template-columns: 1fr;
     align-content: center;
-
     gap: 18px;
+    padding: 20px 18px 18px;
   }
 
   .auth-side,
   .login-side {
     order: 1;
-
     inline-size: 100%;
     max-inline-size: 620px;
-
     margin-inline: auto;
-    padding-block-start: 0;
-
-    transform: none;
-  }
-
-  .auth-side-panel--compact,
-  .login-side-panel--compact {
-    inline-size: 100%;
   }
 
   .auth-stage,
@@ -2657,26 +1443,9 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   .login-card--offset {
     max-inline-size: min(100%, 500px);
     max-block-size: none;
-
     margin-inline: auto;
   }
-
-  .auth-side-panel--status,
-  .login-side-panel--status {
-    min-block-size: auto;
-  }
-
-  .auth-toast-stack,
-  .login-toast-stack {
-    inset-block-start: max(12px, var(--app-safe-top, 0px));
-    inset-inline-end: max(12px, var(--app-safe-right, 0px));
-  }
 }
-
-
-/* =========================================================
-   MOBILE
-========================================================= */
 
 @media (max-width: 760px) {
   body.auth-screen .main-content,
@@ -2689,38 +1458,24 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   .login-view {
     min-block-size: 100svh;
     block-size: auto;
-
     overflow: auto;
   }
 
   .auth-grid,
   .login-grid {
     inline-size: 100%;
-
     min-block-size: 100svh;
     block-size: auto;
-
-    padding:
-      14px
-      14px
-      max(14px, var(--app-safe-bottom, 0px));
-
     grid-template-columns: 1fr;
     align-content: center;
-
     gap: 0;
+    padding: 14px 14px max(14px, var(--app-safe-bottom, 0px));
   }
 
   .auth-side,
-  .auth-side-left,
   .auth-side-panel,
-  .auth-side-panel--status,
-  .auth-side-panel--compact,
   .login-side,
-  .login-side-left,
-  .login-side-panel,
-  .login-side-panel--status,
-  .login-side-panel--compact {
+  .login-side-panel {
     display: none !important;
   }
 
@@ -2730,39 +1485,21 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
     min-block-size: auto;
   }
 
-  .auth-card-shell,
-  .auth-card-shell--right,
-  .login-card-shell,
-  .login-card-shell--right {
-    justify-content: center;
-    padding-inline-end: 0;
-  }
-
-  .auth-card,
-  .auth-card--offset,
-  .login-card,
-  .login-card--offset {
-    max-inline-size: 100%;
-    max-block-size: none;
-
-    margin-inline: auto;
-  }
-
   .auth-card,
   .login-card {
+    max-inline-size: 100%;
+    max-block-size: none;
+    margin-inline: auto;
     padding: 20px 16px;
     gap: 18px;
-
-    border-radius: var(--radius-2xl);
-
     overflow: visible;
+    border-radius: var(--radius-2xl);
   }
 
   .auth-logo,
   .logo-fade {
     inline-size: 70px;
     block-size: 70px;
-
     border-radius: 20px;
   }
 
@@ -2778,21 +1515,15 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   .login-theme-toggle {
     inline-size: 38px;
     block-size: 38px;
-
     border-radius: var(--radius-lg);
   }
 
-  .auth-header,
-  .login-header {
-    gap: 10px;
-  }
-
+  .auth-title,
+  .login-title,
   .auth-header h1,
   .auth-header h2,
-  .auth-title,
   .login-header h1,
-  .login-header h2,
-  .login-title {
+  .login-header h2 {
     max-inline-size: 13ch;
     font-size: 28px;
   }
@@ -2800,11 +1531,6 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   .auth-subtitle,
   .login-subtitle {
     font-size: 13px;
-  }
-
-  .auth-form,
-  .login-form {
-    gap: 14px;
   }
 
   .auth-input,
@@ -2828,26 +1554,9 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   .password-toggle,
   [data-password-toggle] {
     inset-inline-end: 8px;
-
     inline-size: 38px;
     block-size: 38px;
-
     border-radius: 11px;
-  }
-
-  .auth-password-toggle:hover,
-  .auth-password-toggle.active,
-  .auth-password-toggle:focus-visible,
-  .auth-password-toggle:active,
-  .password-toggle:hover,
-  .password-toggle.active,
-  .password-toggle:focus-visible,
-  .password-toggle:active,
-  [data-password-toggle]:hover,
-  [data-password-toggle].active,
-  [data-password-toggle]:focus-visible,
-  [data-password-toggle]:active {
-    transform: none;
   }
 
   .auth-caps-indicator,
@@ -2855,15 +1564,8 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   .password-caps,
   [data-password-caps] {
     inset-inline-end: 50px;
-
     min-block-size: 28px;
-
     padding: 0 8px 0 7px;
-  }
-
-  .auth-caps-label,
-  .caps-label {
-    font-size: 10px;
   }
 
   .auth-options,
@@ -2882,31 +1584,6 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
     font-size: 11px;
   }
 
-  .auth-toast-stack--top-right,
-  .login-toast-stack--top-right {
-    inline-size: min(100% - 24px, 100%);
-  }
-
-  .auth-toast,
-  .login-toast {
-    inline-size: min(100%, calc(100vw - 24px));
-    border-radius: 18px;
-  }
-
-  .auth-toast-body,
-  .login-toast-body {
-    gap: 10px;
-    padding: 14px 14px 12px;
-  }
-
-  .auth-toast-icon,
-  .login-toast-icon {
-    inline-size: 36px;
-    block-size: 36px;
-
-    border-radius: 11px;
-  }
-
   .auth-code-grid {
     gap: 6px;
   }
@@ -2916,11 +1593,6 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
     font-size: var(--font-lg);
   }
 }
-
-
-/* =========================================================
-   EXTRA SMALL
-========================================================= */
 
 @media (max-width: 420px) {
   .auth-grid,
@@ -2933,12 +1605,12 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
     padding: 18px 14px;
   }
 
+  .auth-title,
+  .login-title,
   .auth-header h1,
   .auth-header h2,
-  .auth-title,
   .login-header h1,
-  .login-header h2,
-  .login-title {
+  .login-header h2 {
     font-size: 24px;
   }
 
@@ -2960,28 +1632,12 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   .password-caps,
   [data-password-caps] {
     inset-inline-end: 48px;
-    padding: 0 7px 0 6px;
-  }
-
-  .auth-caps-label,
-  .caps-label {
-    display: none;
-  }
-
-  .auth-toast,
-  .login-toast {
-    border-radius: 16px;
   }
 
   .auth-code-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
-
-
-/* =========================================================
-   SHORT VIEWPORT
-========================================================= */
 
 @media (max-height: 720px) and (min-width: 761px) {
   .auth-card,
@@ -3004,12 +1660,12 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
     block-size: 36px;
   }
 
+  .auth-title,
+  .login-title,
   .auth-header h1,
   .auth-header h2,
-  .auth-title,
   .login-header h1,
-  .login-header h2,
-  .login-title {
+  .login-header h2 {
     font-size: 28px;
   }
 
@@ -3029,8 +1685,39 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
 
 
 /* =========================================================
-   PRINT
+   REDUCED MOTION / PRINT
 ========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-logo::before,
+  .logo-fade::before,
+  .auth-signal-item .dot,
+  .login-signal-item .dot,
+  .auth-meta::before,
+  .login-meta::before,
+  .auth-view__spinner,
+  .login-view__spinner {
+    animation: none !important;
+  }
+
+  .auth-button,
+  .login-button,
+  .auth-card,
+  .login-card,
+  .auth-logo-theme-img,
+  .login-logo-theme-img,
+  .auth-theme-toggle,
+  .login-theme-toggle {
+    transition: none !important;
+  }
+
+  .auth-button:hover,
+  .login-button:hover,
+  .auth-theme-toggle,
+  .login-theme-toggle {
+    transform: none !important;
+  }
+}
 
 @media print {
   body.auth-screen,
@@ -3042,8 +1729,6 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
 
   .auth-side,
   .login-side,
-  .auth-toast-stack,
-  .login-toast-stack,
   .auth-theme-toggle,
   .login-theme-toggle {
     display: none !important;
@@ -3058,19 +1743,14 @@ html[data-theme="dark"] .auth-logo .auth-logo--light {
   .login-card-shell,
   .login-card {
     display: block !important;
-
     inline-size: 100% !important;
     max-inline-size: none !important;
-
     block-size: auto !important;
     min-block-size: 0 !important;
     max-block-size: none !important;
-
     margin: 0 !important;
     padding: 0 !important;
-
     overflow: visible !important;
-
     background: transparent !important;
     box-shadow: none !important;
     border: 0 !important;

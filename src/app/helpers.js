@@ -2,13 +2,14 @@
    Onion SPA - App Helpers
    Archivo: src/app/helpers.js
 
-   APP HELPERS · FINAL SIMPLE
-   - Helpers mínimos de boot/compat
+   APP HELPERS · SIMPLE
+   - helpers puros de boot/compat
    - publicPath conserva /@usuario + query/hash
-   - canonicalPath elimina /@usuario + query/hash y colapsa rutas técnicas
-   - Captura inicial de activation/reset con token
-   - Registro de módulos idempotente
-   - Sin Auth, Router real, fetch, storage, Toast, sesión, render ni history
+   - canonicalPath elimina /@usuario + query/hash
+   - canonicalPath colapsa rutas técnicas con token
+   - captura inicial de activation/reset con token
+   - registro de módulos idempotente
+   - sin Auth, Router real, fetch, storage, Toast, sesión, render ni history
 ========================================================= */
 
 import {
@@ -19,11 +20,7 @@ import {
   GENERIC_SENSITIVE_PARAM_NAMES,
 } from "./constants.js";
 
-/* =========================================================
-   VERSION / CONSTANTS
-========================================================= */
-
-export const HELPERS_VERSION = "20.0.0-final";
+export const HELPERS_VERSION = "21.0.0-simple";
 
 const DEFAULT_ROUTE = "/";
 const DEFAULT_SCOPE = APP_SCOPE || "app";
@@ -53,6 +50,28 @@ const RESET_CONFIRM_ALIASES = Object.freeze([
 
 const ACTIVATION_TOKEN_PARAMS = Object.freeze(["token", "activationToken", "activateToken", "activation_token", "activate_token", "code", "t"]);
 const RESET_TOKEN_PARAMS = Object.freeze(["token", "resetToken", "passwordResetToken", "confirmToken", "reset_token", "password_reset_token", "confirm_token", "code", "t"]);
+
+const FALLBACK_TOKEN_ROUTES = Object.freeze([
+  Object.freeze({
+    key: "activation",
+    path: ACTIVATION_PATH,
+    paths: ACTIVATION_ALIASES,
+    windowKeys: Object.freeze([APP_RUNTIME_KEYS?.activateAccountInitialUrl || "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__"]),
+    tokenParamNames: ACTIVATION_TOKEN_PARAMS,
+    scrubbedKeys: Object.freeze(["scrubbedActivationToken", "activationTokenScrubbed", "scrubbedPublicTokenRoute", "scrubbedTokenRoute"]),
+  }),
+  Object.freeze({
+    key: "resetConfirm",
+    path: RESET_CONFIRM_PATH,
+    paths: RESET_CONFIRM_ALIASES,
+    windowKeys: Object.freeze([
+      APP_RUNTIME_KEYS?.resetPasswordConfirmInitialUrl || "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+      APP_RUNTIME_KEYS?.resetConfirmInitialUrl || "__ONION_RESET_CONFIRM_INITIAL_URL__",
+    ]),
+    tokenParamNames: RESET_TOKEN_PARAMS,
+    scrubbedKeys: Object.freeze(["scrubbedResetToken", "resetTokenScrubbed", "scrubbedPublicTokenRoute", "scrubbedTokenRoute"]),
+  }),
+]);
 
 const SENSITIVE_PARAMS = Object.freeze(
   Array.isArray(GENERIC_SENSITIVE_PARAM_NAMES) && GENERIC_SENSITIVE_PARAM_NAMES.length
@@ -97,47 +116,14 @@ const ABSOLUTE_URL_RE = /^[a-z][a-z\d+.-]*:\/\//i;
 const ANY_PROTOCOL_RE = /^[a-z][a-z0-9+.-]*:/i;
 const SENSITIVE_KEY_RE = /token|secret|password|authorization|credential|jwt|bearer|session|refresh|otp|mfa|2fa|code/i;
 
-const FALLBACK_TOKEN_ROUTES = Object.freeze([
-  Object.freeze({
-    key: "activation",
-    path: ACTIVATION_PATH,
-    paths: ACTIVATION_ALIASES,
-    windowKeys: Object.freeze([APP_RUNTIME_KEYS?.activateAccountInitialUrl || "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__"]),
-    tokenParamNames: ACTIVATION_TOKEN_PARAMS,
-    scrubbedKeys: Object.freeze(["scrubbedActivationToken", "activationTokenScrubbed", "scrubbedActivateAccountToken", "scrubbedPublicTokenRoute", "scrubbedTokenRoute"]),
-  }),
-  Object.freeze({
-    key: "resetConfirm",
-    path: RESET_CONFIRM_PATH,
-    paths: RESET_CONFIRM_ALIASES,
-    windowKeys: Object.freeze([
-      APP_RUNTIME_KEYS?.resetPasswordConfirmInitialUrl || "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-      APP_RUNTIME_KEYS?.resetConfirmInitialUrl || "__ONION_RESET_CONFIRM_INITIAL_URL__",
-    ]),
-    tokenParamNames: RESET_TOKEN_PARAMS,
-    scrubbedKeys: Object.freeze(["scrubbedResetToken", "resetTokenScrubbed", "scrubbedResetConfirmToken", "scrubbedPasswordResetToken", "scrubbedResetPasswordToken", "scrubbedPublicTokenRoute", "scrubbedTokenRoute"]),
-  }),
-]);
-
 /* =========================================================
    BASICS
 ========================================================= */
 
-function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function isObjectLike(value) {
-  return value !== null && (typeof value === "object" || typeof value === "function");
-}
-
-function isFn(value) {
-  return typeof value === "function";
-}
+const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
+const isFn = (value) => typeof value === "function";
+const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
+const isObjectLike = (value) => Boolean(value && (typeof value === "object" || typeof value === "function"));
 
 function safeObject(value, fallback = {}) {
   return isObject(value) ? value : fallback;
@@ -204,18 +190,6 @@ function defineHiddenValue(target, key, value) {
   }
 }
 
-function clone(value, fallback = null) {
-  try {
-    if (typeof structuredClone === "function") return structuredClone(value);
-  } catch {}
-
-  try {
-    return JSON.parse(JSON.stringify(value));
-  } catch {
-    return fallback;
-  }
-}
-
 function baseOrigin() {
   if (isBrowser() && window.location?.origin) return window.location.origin;
   return "http://localhost";
@@ -266,21 +240,19 @@ function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
     .replace(/\\/g, "/")
     .replace(/\/{2,}/g, "/");
 
+  if (!value) value = DEFAULT_ROUTE;
   if (!value.startsWith("/")) value = `/${value}`;
 
   const stack = [];
 
   for (const segment of value.split("/").filter(Boolean)) {
-    if (segment === ".") continue;
-    if (segment === "..") {
-      stack.pop();
-      continue;
-    }
-    stack.push(segment);
+    if (!segment || segment === ".") continue;
+    if (segment === "..") stack.pop();
+    else stack.push(segment);
   }
 
-  value = `/${stack.join("/")}` || DEFAULT_ROUTE;
-  return value.length > 1 ? value.replace(/\/+$/g, "") || DEFAULT_ROUTE : value;
+  value = `/${stack.join("/")}`;
+  return value.length > 1 ? value.replace(/\/+$/g, "") || DEFAULT_ROUTE : value || DEFAULT_ROUTE;
 }
 
 function splitPath(path = DEFAULT_ROUTE) {
@@ -349,8 +321,7 @@ function isUsernameSegment(segment = "") {
 }
 
 export function stripUsernamePrefix(path = DEFAULT_ROUTE) {
-  const normalized = normalizePath(path);
-  const { pathname, search, hash } = splitPath(normalized);
+  const { pathname, search, hash } = splitPath(normalizePath(path));
   const segments = pathname.split("/").filter(Boolean);
 
   if (segments.length && isUsernameSegment(segments[0])) {
@@ -393,6 +364,7 @@ export const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze(
 
 function matchTokenRoute(config, path = DEFAULT_ROUTE) {
   if (!config) return "";
+
   const clean = normalizePathnameOnly(path);
 
   for (const candidate of config.paths || []) {
@@ -461,6 +433,7 @@ function extractPathToken(config, pathOrUrl = "") {
   const publicPath = pathFromUrlLike(pathOrUrl);
   const clean = stripSearchAndHash(stripUsernamePrefix(publicPath));
   const matched = matchTokenRoute(config, clean);
+
   if (!matched || !clean.startsWith(`${matched}/`)) return "";
 
   const token = clean.slice(`${matched}/`.length).split("/")[0];
@@ -527,6 +500,7 @@ function historyState() {
 
 function isProtectedTokenScrubbed(config = null) {
   if (!config) return false;
+
   const state = historyState();
 
   for (const key of config.scrubbedKeys || []) {
@@ -548,13 +522,11 @@ export function isProtectedPublicTokenPath(pathOrUrl = "") {
 }
 
 export function isActivationPath(path = "") {
-  const clean = canonicalizeProtectedPath(path || DEFAULT_ROUTE);
-  return clean === ACTIVATION_PATH;
+  return canonicalizeProtectedPath(path || DEFAULT_ROUTE) === ACTIVATION_PATH;
 }
 
 export function isResetConfirmPath(path = "") {
-  const clean = canonicalizeProtectedPath(path || DEFAULT_ROUTE);
-  return clean === RESET_CONFIRM_PATH;
+  return canonicalizeProtectedPath(path || DEFAULT_ROUTE) === RESET_CONFIRM_PATH;
 }
 
 function windowValue(key = "") {
@@ -606,14 +578,8 @@ function patchState(AppCore, patch = {}) {
 
   const options = { source: "app.helpers", emit: false, emitState: false, silent: true };
 
-  try {
-    AppCore?.setState?.(data, options);
-  } catch {}
-
-  try {
-    AppCore?.patchState?.(data, options);
-  } catch {}
-
+  try { AppCore?.setState?.(data, options); } catch {}
+  try { AppCore?.patchState?.(data, options); } catch {}
   try {
     if (AppCore?.state && typeof AppCore.state === "object") Object.assign(AppCore.state, data);
   } catch {}
@@ -675,8 +641,8 @@ export function captureInitialUrl(AppCore = null) {
     const candidates = unique([initial, href, mainBootCandidate(), ...toArray(config.windowKeys).map(windowValue)]).filter(Boolean);
 
     for (const candidate of candidates) {
-      if (!tokenRouteFor(candidate)) continue;
-      if (!matchTokenRoute(config, stripSearchAndHash(stripUsernamePrefix(pathFromUrlLike(candidate))))) continue;
+      const candidateConfig = tokenRouteFor(candidate);
+      if (!candidateConfig || candidateConfig.key !== config.key) continue;
       if (!hasProtectedToken(config, candidate)) continue;
 
       const protectedPublicPath = pathFromUrlLike(candidate);
@@ -709,9 +675,7 @@ function protectedCandidates(AppCore = null) {
   const main = windowObject(MAIN_BOOT_CONTEXT_KEY);
   const values = [];
 
-  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
-    values.push(...toArray(config.windowKeys).map(windowValue));
-  }
+  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) values.push(...toArray(config.windowKeys).map(windowValue));
 
   values.push(
     state.bootProtectedInitialUrl,
@@ -801,6 +765,7 @@ export function getProtectedInitialPublicPath(AppCore = null) {
 
 function preferBrowserPath(AppCore = null) {
   if (getProtectedInitialPublicPath(AppCore)) return true;
+
   const browser = browserPath();
   const statePublic = safeText(AppCore?.state?.publicPath, "");
   const stateRoute = safeText(AppCore?.state?.route, "");
@@ -978,9 +943,7 @@ export function clearScope(AppCore, scope = DEFAULT_SCOPE) {
       const ref = scopes.get(name);
       const disposers = toArray(ref?.disposers);
       while (disposers.length) {
-        try {
-          disposers.pop()?.();
-        } catch {}
+        try { disposers.pop()?.(); } catch {}
       }
       scopes.delete(name);
     }
@@ -1065,19 +1028,19 @@ export function registerModule(AppCore, name, moduleRef, aliases = []) {
    SNAPSHOT
 ========================================================= */
 
-function sanitizeSnapshot(value, depth = 0) {
+function sanitizeSnapshot(value, depth = 0, keyHint = "") {
   if (depth > 4) return "[depth-limit]";
   if (typeof value === "string") return redactTokenInText(value);
   if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "function") return "[function]";
-  if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitizeSnapshot(item, depth + 1));
+  if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitizeSnapshot(item, depth + 1, keyHint));
 
   if (isObject(value)) {
-    const output = {};
-    for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = SENSITIVE_KEY_RE.test(key) ? (item ? "***" : item) : sanitizeSnapshot(item, depth + 1);
-    }
-    return output;
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 80)
+        .map(([key, item]) => [key, SENSITIVE_KEY_RE.test(key) ? (item ? "***" : item) : sanitizeSnapshot(item, depth + 1, key)])
+    );
   }
 
   return String(value);
@@ -1120,10 +1083,6 @@ export function getHelpersSnapshot(AppCore, Router = null) {
     },
   });
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   HELPERS_VERSION,

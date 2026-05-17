@@ -9,6 +9,7 @@
    - clearSession no toca preferencias/UI
    - publicPath conserva /@usuario/query/hash
    - canonicalPath limpia /@usuario/query/hash y rutas token
+   - roles reales: admin / user
 ========================================================= */
 
 import { config } from "./config.js";
@@ -35,7 +36,7 @@ import {
 import { computeAuthenticated } from "./state.js";
 import { removeLegacySessionKeys } from "./storage.js";
 
-export const SESSION_VERSION = "19.0.0-simple";
+export const SESSION_VERSION = "21.0.0-simple";
 
 const DEFAULT_ROUTE = "/";
 const DEFAULT_LANG = "es";
@@ -118,22 +119,9 @@ const ACCESS_TOKEN_KEYS = Object.freeze(["token", "accessToken", "access_token"]
 const USER_STORAGE_KEYS = Object.freeze(["user", "currentUser", "authUser", "sessionUser"]);
 const AUX_KEYS = Object.freeze(["refreshToken", "refresh_token", "tempToken", "temp_token", "sessionId", "sessionUserId"]);
 
-const USER_ID_KEYS = Object.freeze([
-  "id",
-  "userId",
-  "user_id",
-  "_id",
-  "uid",
-  "sub",
-  "username",
-  "userName",
-  "user_name",
-  "email",
-  "mail",
-]);
-
-const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
+const USER_ID_KEYS = Object.freeze(["id", "userId", "user_id", "_id", "uid", "sub", "username", "userName", "user_name", "email", "mail"]);
+const SENSITIVE_KEY_RE = /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
+const ADMIN_ALIASES = Object.freeze(["admin", "administrator", "administrador", "superadmin", "super_admin", "super-admin", "owner", "root"]);
 
 /* =========================================================
    BASICS
@@ -199,7 +187,6 @@ function bool(value, fallback = false) {
   if (value === 0 || value === "0") return false;
 
   const clean = lower(value, "");
-
   if (["true", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(clean)) return true;
   if (["false", "no", "off", "disabled", "inactive"].includes(clean)) return false;
 
@@ -292,12 +279,7 @@ function storageKey(name = "", fallback = "") {
   const cleanName = text(name, "");
   const keys = object(config?.storageKeys, {});
 
-  return (
-    text(keys?.[cleanName], "") ||
-    text(STORAGE_KEY_FALLBACKS?.[cleanName], "") ||
-    text(fallback, "") ||
-    cleanName
-  );
+  return text(keys?.[cleanName], "") || text(STORAGE_KEY_FALLBACKS?.[cleanName], "") || text(fallback, "") || cleanName;
 }
 
 function storageGet(storage, key, fallback = null, options = undefined) {
@@ -358,35 +340,20 @@ function storageRemove(storage, key, options = undefined) {
   const finalKey = text(key, "");
   if (!finalKey) return false;
 
-  try {
-    if (isFunction(storage?.remove)) {
-      if (options !== undefined) storage.remove(finalKey, options);
-      else storage.remove(finalKey);
+  for (const method of ["remove", "delete", "del"]) {
+    try {
+      if (!isFunction(storage?.[method])) continue;
+      if (options !== undefined && method === "remove") storage[method](finalKey, options);
+      else storage[method](finalKey);
       return true;
-    }
-  } catch {}
-
-  try {
-    if (isFunction(storage?.delete)) {
-      storage.delete(finalKey);
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (isFunction(storage?.del)) {
-      storage.del(finalKey);
-      return true;
-    }
-  } catch {}
+    } catch {}
+  }
 
   return false;
 }
 
 function removeStorageKeys(storage, keys = []) {
-  for (const keyName of keys) {
-    storageRemove(storage, storageKey(keyName), { all: true });
-  }
+  for (const keyName of keys) storageRemove(storage, storageKey(keyName), { all: true });
 }
 
 /* =========================================================
@@ -406,7 +373,7 @@ function sanitize(value, depth = 0, keyHint = "", seen = new WeakSet()) {
     return {
       name: value.name || "Error",
       message: redact(value.message || "Error"),
-      stack: value.stack ? "[stack]" : null,
+      stack: value.stack ? "[stack]": null,
       code: value.code || null,
       status: value.status || value.statusCode || null,
     };
@@ -421,9 +388,7 @@ function sanitize(value, depth = 0, keyHint = "", seen = new WeakSet()) {
     } catch {}
 
     const out = {};
-    for (const [key, item] of Object.entries(value).slice(0, 120)) {
-      out[key] = sanitize(item, depth + 1, key, seen);
-    }
+    for (const [key, item] of Object.entries(value).slice(0, 120)) out[key] = sanitize(item, depth + 1, key, seen);
     return out;
   }
 
@@ -476,10 +441,7 @@ function publicPath(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
       const parsed = new URL(raw, baseOrigin());
 
-      if (parsed.hash && isHashRouterPath(parsed.hash)) {
-        return publicPath(normalizeHashRouterPath(parsed.hash), fallback);
-      }
-
+      if (parsed.hash && isHashRouterPath(parsed.hash)) return publicPath(normalizeHashRouterPath(parsed.hash), fallback);
       return normalizePath(`${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`);
     }
   } catch {}
@@ -497,10 +459,9 @@ function stripSearchAndHash(path = DEFAULT_ROUTE) {
 
 function stripUsernamePrefix(path = DEFAULT_ROUTE) {
   const visible = publicPath(path);
-  const suffix = visible.includes("?") || visible.includes("#")
-    ? visible.slice(stripSearchAndHash(visible).length)
-    : "";
-  const clean = stripSearchAndHash(visible).replace(/^\/@[^/]+(?=\/|$)/i, "") || DEFAULT_ROUTE;
+  const base = stripSearchAndHash(visible);
+  const suffix = visible.slice(base.length);
+  const clean = base.replace(/^\/@[^/]+(?=\/|$)/i, "") || DEFAULT_ROUTE;
   return publicPath(`${clean}${suffix}`);
 }
 
@@ -525,7 +486,7 @@ function usernameFromPublicPath(value = DEFAULT_ROUTE) {
 }
 
 /* =========================================================
-   USER / TOKEN
+   USER / TOKEN / ROLE
 ========================================================= */
 
 function stripBearer(token = "") {
@@ -566,40 +527,14 @@ function usableUser(user = null) {
     if (typeof isUsableUser === "function") return Boolean(isUsableUser(normalized));
   } catch {}
 
-  if (
-    normalized.active === false ||
-    normalized.disabled === true ||
-    normalized.deleted === true ||
-    normalized.archived === true ||
-    normalized.blocked === true ||
-    normalized.suspended === true ||
-    normalized.revoked === true
-  ) {
-    return false;
-  }
+  if (normalized.active === false || normalized.disabled === true || normalized.deleted === true || normalized.archived === true || normalized.blocked === true || normalized.suspended === true || normalized.revoked === true) return false;
 
-  const status = lower(normalized.status || normalized.estado || normalized.state || normalized.accountStatus || "", "");
+  const status = lower(normalized.status || normalized.estado || normalized.state || normalized.accountStatus || "", "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_");
 
-  if (
-    [
-      "disabled",
-      "inactive",
-      "deleted",
-      "blocked",
-      "suspended",
-      "banned",
-      "revoked",
-      "archived",
-      "desactivado",
-      "inactivo",
-      "bloqueado",
-      "eliminado",
-      "suspendido",
-      "archivado",
-    ].includes(status)
-  ) {
-    return false;
-  }
+  if (["disabled", "inactive", "deleted", "blocked", "suspended", "banned", "revoked", "archived", "desactivado", "inactivo", "bloqueado", "eliminado", "suspendido", "archivado"].includes(status)) return false;
 
   return USER_ID_KEYS.some((key) => Boolean(text(normalized?.[key], "")));
 }
@@ -637,26 +572,11 @@ function normalizeRole(value = "") {
     .replace(/[^a-z0-9_:.]/g, "")
     .trim();
 
-  return ["admin", "administrator", "administrador", "superadmin", "super_admin", "super-admin", "owner", "root"].includes(clean)
-    ? "admin"
-    : "user";
+  return ADMIN_ALIASES.includes(clean) ? "admin" : "user";
 }
 
 function roleOf(user = null) {
-  return normalizeRole(
-    user?.role ||
-      user?.rol ||
-      user?.userRole ||
-      user?.user_role ||
-      user?.type ||
-      user?.userType ||
-      user?.user_type ||
-      user?.profile?.role ||
-      user?.profile?.rol ||
-      user?.raw?.role ||
-      user?.raw?.rol ||
-      "user"
-  );
+  return normalizeRole(user?.role || user?.rol || user?.userRole || user?.user_role || user?.type || user?.userType || user?.user_type || user?.profile?.role || user?.profile?.rol || user?.raw?.role || user?.raw?.rol || "user");
 }
 
 function computeAuth(user = null, token = null) {
@@ -673,17 +593,9 @@ function computeAuth(user = null, token = null) {
   }
 }
 
-/*
-  Estado auth estricto:
-  - Sin token => limpia todo auth.
-  - Token sin user => conserva token + hasToken, authenticated=false.
-  - User sin token => no autentica.
-  - Token + user usable => authenticated=true.
-*/
 function buildAuthPatch(root = {}, options = {}) {
   const source = object(root, {});
   const forceUnauthenticated = options?.forceUnauthenticated === true;
-
   const token = normalizeToken(source.token || source.accessToken || source.access_token || null);
   const user = source.user ? normalizeUserSafe(source.user) : null;
 
@@ -708,27 +620,16 @@ function buildAuthPatch(root = {}, options = {}) {
   };
 
   if (!token) {
-    return {
-      ...clear,
-      hasToken: false,
-      token: null,
-      accessToken: null,
-      access_token: null,
-    };
+    return { ...clear, hasToken: false, token: null, accessToken: null, access_token: null };
   }
 
   if (forceUnauthenticated || !usableUser(user) || !computeAuth(user, token)) {
-    return {
-      ...clear,
-      hasToken: true,
-      token,
-      accessToken: token,
-      access_token: token,
-    };
+    return { ...clear, hasToken: true, token, accessToken: token, access_token: token };
   }
 
   const role = roleOf(user);
   const fromPath = usernameFromPublicPath(source.publicPath || source.route || DEFAULT_ROUTE);
+
   const fromUser = (() => {
     try {
       return sanitizeUsername(userUsername(user) || user?.username || user?.email || "") || null;
@@ -750,29 +651,23 @@ function buildAuthPatch(root = {}, options = {}) {
   return {
     authenticated: true,
     hasToken: true,
-
     token,
     accessToken: token,
     access_token: token,
-
     user,
     currentUser: user,
     authUser: user,
     sessionUser: user,
-
     role,
     rol: role,
     userRole: role,
     roles: [role],
-
     username: userUsername(user),
-
     isAdmin: role === "admin",
     isUser: role === "user",
     isClient: false,
     isSupport: false,
     isManager: false,
-
     currentResolvedUsername,
     resolvedUsername: currentResolvedUsername,
   };
@@ -825,34 +720,25 @@ function sessionSnapshot(state, cause = "unknown") {
 
   return {
     version: SESSION_VERSION,
-
     authenticated: Boolean(state?.authenticated),
     hasToken: Boolean(state?.hasToken),
-
     token: null,
     accessToken: null,
     refreshToken: null,
     tempToken: null,
-
     user: state?.authenticated ? userSnapshot(state?.user || null) : null,
-
     role: state?.role || null,
     roles: array(state?.roles),
-
     username: state?.username || userUsername(state?.user) || null,
     displayName: state?.authenticated ? userDisplayName(state?.user) : null,
     avatarUrl: state?.authenticated ? redact(userAvatarUrl(state?.user) || "") : null,
-
     currentResolvedUsername: state?.currentResolvedUsername || null,
     resolvedUsername: state?.resolvedUsername || null,
-
     route: canonicalPath(state?.route || DEFAULT_ROUTE),
     publicPath: redact(visiblePublicPath),
-
     theme: state?.theme || config.defaultTheme || DEFAULT_THEME,
     themeMode: state?.themeMode || null,
     lang: state?.lang || config.defaultLang || DEFAULT_LANG,
-
     cause,
     changedAt: iso(),
   };
@@ -861,22 +747,9 @@ function sessionSnapshot(state, cause = "unknown") {
 function emitAuthChangeIfNeeded(events, previous, state, cause = "unknown") {
   const next = authSnapshot(state);
 
-  if (
-    previous?.authenticated === next.authenticated &&
-    previous?.hasToken === next.hasToken &&
-    previous?.role === next.role &&
-    previous?.username === next.username &&
-    previous?.currentResolvedUsername === next.currentResolvedUsername
-  ) {
-    return false;
-  }
+  if (previous?.authenticated === next.authenticated && previous?.hasToken === next.hasToken && previous?.role === next.role && previous?.username === next.username && previous?.currentResolvedUsername === next.currentResolvedUsername) return false;
 
-  return emit(events, SESSION_EVENTS.authChange, {
-    ...next,
-    previousAuthenticated: Boolean(previous?.authenticated),
-    cause,
-    changedAt: iso(),
-  });
+  return emit(events, SESSION_EVENTS.authChange, { ...next, previousAuthenticated: Boolean(previous?.authenticated), cause, changedAt: iso() });
 }
 
 function userFingerprint(user = null) {
@@ -975,10 +848,7 @@ function normalizeTheme(theme = config.defaultTheme) {
 function normalizeThemeMode(mode = DEFAULT_THEME_MODE) {
   const value = lower(mode, DEFAULT_THEME_MODE);
 
-  if (["auto", "automatic", "browser", "os", "device", "system-preference", "system_preference"].includes(value)) {
-    return "system";
-  }
-
+  if (["auto", "automatic", "browser", "os", "device", "system-preference", "system_preference"].includes(value)) return "system";
   return VALID_THEME_MODES.includes(value) ? value : DEFAULT_THEME_MODE;
 }
 
@@ -1017,75 +887,34 @@ function themeFromMode(mode = DEFAULT_THEME_MODE) {
 function themeFromUser(user = null) {
   if (!user || !isObject(user)) return null;
 
-  const explicitTheme = lower(
-    user.theme ??
-      user?.preferences?.theme ??
-      user?.settings?.theme ??
-      user?.raw?.theme ??
-      user?.raw?.preferences?.theme ??
-      user?.raw?.settings?.theme ??
-      "",
-    ""
-  );
-
+  const explicitTheme = lower(user.theme ?? user?.preferences?.theme ?? user?.settings?.theme ?? user?.raw?.theme ?? user?.raw?.preferences?.theme ?? user?.raw?.settings?.theme ?? "", "");
   if (VALID_THEMES.includes(explicitTheme)) return explicitTheme;
 
-  const explicitMode = lower(
-    user.themeMode ??
-      user.theme_mode ??
-      user.appearance ??
-      user?.preferences?.themeMode ??
-      user?.preferences?.theme_mode ??
-      user?.preferences?.appearance ??
-      user?.settings?.themeMode ??
-      user?.settings?.theme_mode ??
-      user?.settings?.appearance ??
-      "",
-    ""
-  );
-
+  const explicitMode = lower(user.themeMode ?? user.theme_mode ?? user.appearance ?? user?.preferences?.themeMode ?? user?.preferences?.theme_mode ?? user?.preferences?.appearance ?? user?.settings?.themeMode ?? user?.settings?.theme_mode ?? user?.settings?.appearance ?? "", "");
   return explicitMode ? themeFromMode(explicitMode) : null;
 }
 
 function storedTheme(storage) {
   const boot = bootThemeSnapshot();
-
   const bootMode = normalizeThemeMode(boot?.mode || "");
   const bootTheme = VALID_THEMES.includes(boot?.theme) ? boot.theme : "";
 
-  const storedModeRaw =
-    storageGet(storage, storageKey("themeMode"), "") ||
-    storageGet(storage, storageKey("appearance"), "");
-
+  const storedModeRaw = storageGet(storage, storageKey("themeMode"), "") || storageGet(storage, storageKey("appearance"), "");
   const storedMode = storedModeRaw ? normalizeThemeMode(storedModeRaw) : "";
-
   const storedThemeRaw = storageGet(storage, storageKey("theme"), bootTheme || config.defaultTheme || DEFAULT_THEME);
   const stored = normalizeTheme(storedThemeRaw);
 
-  const finalMode =
-    storedMode ||
-    bootMode ||
-    normalizeThemeMode(config?.defaultThemeMode || config?.appearance || "") ||
-    DEFAULT_THEME_MODE;
-
+  const finalMode = storedMode || bootMode || normalizeThemeMode(config?.defaultThemeMode || config?.appearance || "") || DEFAULT_THEME_MODE;
   const finalTheme = storedMode ? themeFromMode(storedMode) : bootTheme || stored || themeFromMode(finalMode);
 
-  return {
-    theme: normalizeTheme(finalTheme),
-    themeMode: normalizeThemeMode(finalMode),
-  };
+  return { theme: normalizeTheme(finalTheme), themeMode: normalizeThemeMode(finalMode) };
 }
 
 export function syncThemeMetaColor({ dom, theme = config.defaultTheme } = {}) {
   const finalTheme = normalizeTheme(theme);
   const color = getThemeColor(finalTheme);
 
-  const candidates = [
-    dom?.themeColorMeta,
-    dom?.metaThemeColor,
-    isBrowser() ? document.querySelector?.("meta[name='theme-color']") : null,
-  ].filter(Boolean);
-
+  const candidates = [dom?.themeColorMeta, dom?.metaThemeColor, isBrowser() ? document.querySelector?.("meta[name='theme-color']") : null].filter(Boolean);
   let synced = false;
 
   for (const meta of candidates) {
@@ -1116,7 +945,6 @@ function applyThemeDom({ dom, theme, themeMode = "" } = {}) {
   addClass(dom?.body, `theme-${finalTheme}`);
 
   syncThemeMetaColor({ dom, theme: finalTheme });
-
   return finalTheme;
 }
 
@@ -1127,14 +955,7 @@ function applyThemeDom({ dom, theme, themeMode = "" } = {}) {
 function syncRouteFields({ state, setState, route, publicPath: nextPublicPath } = {}) {
   const visiblePath = publicPath(nextPublicPath || state?.publicPath || route || state?.route || DEFAULT_ROUTE);
   const canonical = canonicalPath(route || visiblePath || state?.route || DEFAULT_ROUTE);
-
-  const preview = {
-    ...object(state),
-    route: canonical,
-    canonicalPath: canonical,
-    publicPath: visiblePath,
-  };
-
+  const preview = { ...object(state), route: canonical, canonicalPath: canonical, publicPath: visiblePath };
   const authPatch = buildAuthPatch(preview);
 
   const patch = {
@@ -1145,13 +966,7 @@ function syncRouteFields({ state, setState, route, publicPath: nextPublicPath } 
     resolvedUsername: authPatch.resolvedUsername,
   };
 
-  commitState({
-    state,
-    setState,
-    patch,
-    options: { source: "core-session:syncRouteFields" },
-  });
-
+  commitState({ state, setState, patch, options: { source: "core-session:syncRouteFields" } });
   return patch;
 }
 
@@ -1161,14 +976,7 @@ export function setRoute({ state, setState, events, route = DEFAULT_ROUTE, optio
 
   if (previousRoute === nextRoute) return nextRoute;
 
-  const preview = {
-    ...object(state),
-    route: nextRoute,
-    canonicalPath: nextRoute,
-  };
-
-  const authPatch = buildAuthPatch(preview);
-
+  const authPatch = buildAuthPatch({ ...object(state), route: nextRoute, canonicalPath: nextRoute });
   const patch = {
     lastRoute: previousRoute,
     route: nextRoute,
@@ -1177,15 +985,7 @@ export function setRoute({ state, setState, events, route = DEFAULT_ROUTE, optio
     resolvedUsername: authPatch.resolvedUsername,
   };
 
-  commitState({
-    state,
-    setState,
-    patch,
-    options: {
-      ...object(options),
-      source: options?.source || "core-session:setRoute",
-    },
-  });
+  commitState({ state, setState, patch, options: { ...object(options), source: options?.source || "core-session:setRoute" } });
 
   emit(events, SESSION_EVENTS.routeChange, {
     route: nextRoute,
@@ -1205,16 +1005,7 @@ export function setPublicPath({ state, storage, setState, events, path = DEFAULT
   if (previousPublicPath === nextPublicPath) return nextPublicPath;
 
   const nextRoute = canonicalPath(nextPublicPath, state?.route || DEFAULT_ROUTE);
-
-  const preview = {
-    ...object(state),
-    publicPath: nextPublicPath,
-    route: nextRoute,
-    canonicalPath: nextRoute,
-  };
-
-  const authPatch = buildAuthPatch(preview);
-
+  const authPatch = buildAuthPatch({ ...object(state), publicPath: nextPublicPath, route: nextRoute, canonicalPath: nextRoute });
   const patch = {
     lastPublicPath: previousPublicPath,
     publicPath: nextPublicPath,
@@ -1224,16 +1015,7 @@ export function setPublicPath({ state, storage, setState, events, path = DEFAULT
     resolvedUsername: authPatch.resolvedUsername,
   };
 
-  commitState({
-    state,
-    setState,
-    patch,
-    options: {
-      ...object(options),
-      source: options?.source || "core-session:setPublicPath",
-    },
-  });
-
+  commitState({ state, setState, patch, options: { ...object(options), source: options?.source || "core-session:setPublicPath" } });
   storageSet(storage, storageKey("lastPublicPath"), nextPublicPath);
 
   emit(events, SESSION_EVENTS.publicPathChange, {
@@ -1309,27 +1091,11 @@ export function setUser({ state, storage, events, setState, syncUserUI, user = n
   const previousAuth = authSnapshot(state);
   const previousUser = userFingerprint(state?.user);
   const nextUser = userFingerprint(normalizedUser);
-
-  const preview = {
-    ...object(state),
-    user: normalizedUser,
-  };
-
-  const authPatch = buildAuthPatch(preview, {
-    forceUnauthenticated: !normalizeToken(preview.token) || !usableUser(normalizedUser),
-  });
+  const preview = { ...object(state), user: normalizedUser };
+  const authPatch = buildAuthPatch(preview, { forceUnauthenticated: !normalizeToken(preview.token) || !usableUser(normalizedUser) });
 
   if (previousUser !== nextUser || previousAuth.authenticated !== authPatch.authenticated) {
-    commitState({
-      state,
-      setState,
-      patch: authPatch,
-      options: {
-        ...object(options),
-        source: options?.source || "core-session:setUser",
-        forceUnauthenticated: !authPatch.authenticated,
-      },
-    });
+    commitState({ state, setState, patch: authPatch, options: { ...object(options), source: options?.source || "core-session:setUser", forceUnauthenticated: !authPatch.authenticated } });
   } else if (state) {
     Object.assign(state, authPatch);
   }
@@ -1355,7 +1121,6 @@ export function setUser({ state, storage, events, setState, syncUserUI, user = n
   });
 
   emit(events, SESSION_EVENTS.sessionState, sessionSnapshot(state, "setUser"));
-
   return state?.user || null;
 }
 
@@ -1364,29 +1129,11 @@ export function setToken({ state, storage, events, setState, token = null, optio
   const previousAuth = authSnapshot(state);
   const previousToken = tokenFingerprint(state?.token);
   const nextToken = tokenFingerprint(normalizedToken);
-
-  const preview = {
-    ...object(state),
-    token: normalizedToken,
-    accessToken: normalizedToken,
-    access_token: normalizedToken,
-  };
-
-  const authPatch = buildAuthPatch(preview, {
-    forceUnauthenticated: !normalizedToken || !usableUser(preview.user),
-  });
+  const preview = { ...object(state), token: normalizedToken, accessToken: normalizedToken, access_token: normalizedToken };
+  const authPatch = buildAuthPatch(preview, { forceUnauthenticated: !normalizedToken || !usableUser(preview.user) });
 
   if (previousToken !== nextToken || previousAuth.authenticated !== authPatch.authenticated) {
-    commitState({
-      state,
-      setState,
-      patch: authPatch,
-      options: {
-        ...object(options),
-        source: options?.source || "core-session:setToken",
-        forceUnauthenticated: !authPatch.authenticated,
-      },
-    });
+    commitState({ state, setState, patch: authPatch, options: { ...object(options), source: options?.source || "core-session:setToken", forceUnauthenticated: !authPatch.authenticated } });
   } else if (state) {
     Object.assign(state, authPatch);
   }
@@ -1407,7 +1154,6 @@ export function setToken({ state, storage, events, setState, token = null, optio
   });
 
   emit(events, SESSION_EVENTS.sessionState, sessionSnapshot(state, "setToken"));
-
   return state?.token || null;
 }
 
@@ -1433,34 +1179,8 @@ function resolveApplySession(input = {}) {
   };
 }
 
-function callFlexibleSetter(fn, objectArg, directValue, key) {
-  if (!isFunction(fn)) return null;
-
-  try {
-    return fn(objectArg);
-  } catch {}
-
-  try {
-    return fn(directValue);
-  } catch {}
-
-  try {
-    return fn({ [key]: directValue });
-  } catch {}
-
-  return null;
-}
-
 export function applySession(input = {}) {
-  const {
-    state,
-    storage,
-    events,
-    setUser: injectedSetUser,
-    setToken: injectedSetToken,
-    setState,
-  } = object(input);
-
+  const { state, storage, events, setState } = object(input);
   const resolved = resolveApplySession(input);
   const opts = object(input.options || resolved.options);
   const previousAuth = authSnapshot(state);
@@ -1476,60 +1196,18 @@ export function applySession(input = {}) {
   const nextRoute = routeWasProvided ? canonicalPath(resolved.route, state?.route || DEFAULT_ROUTE) : canonicalPath(nextPublicPath || state?.route || DEFAULT_ROUTE);
 
   const sessionPatch = {};
-
   if (resolved.session && isObject(resolved.session)) {
     sessionPatch.session = resolved.session;
     sessionPatch.sessionData = resolved.session;
   }
-
   if (resolved.sessionId !== undefined) sessionPatch.sessionId = resolved.sessionId || null;
   if (resolved.sessionUserId !== undefined) sessionPatch.sessionUserId = resolved.sessionUserId || null;
 
-  const preview = {
-    ...object(state),
-    ...sessionPatch,
-    token: nextToken,
-    accessToken: nextToken,
-    access_token: nextToken,
-    user: nextUser,
-    route: nextRoute,
-    canonicalPath: nextRoute,
-    publicPath: nextPublicPath,
-  };
+  const authPatch = buildAuthPatch({ ...object(state), ...sessionPatch, token: nextToken, accessToken: nextToken, access_token: nextToken, user: nextUser, route: nextRoute, canonicalPath: nextRoute, publicPath: nextPublicPath }, { forceUnauthenticated: !nextToken || !usableUser(nextUser) });
 
-  const authPatch = buildAuthPatch(preview, {
-    forceUnauthenticated: !nextToken || !usableUser(nextUser),
-  });
+  const patch = { ...sessionPatch, route: nextRoute, canonicalPath: nextRoute, publicPath: nextPublicPath, ...authPatch };
 
-  const patch = {
-    ...sessionPatch,
-    route: nextRoute,
-    canonicalPath: nextRoute,
-    publicPath: nextPublicPath,
-    ...authPatch,
-  };
-
-  if (isFunction(setState) && state) {
-    commitState({
-      state,
-      setState,
-      patch,
-      options: {
-        ...opts,
-        source: opts.source || "core-session:applySession",
-        forceUnauthenticated: !authPatch.authenticated,
-      },
-    });
-  } else {
-    if (tokenWasProvided) callFlexibleSetter(injectedSetToken, { token: resolved.token }, resolved.token, "token");
-    if (userWasProvided) callFlexibleSetter(injectedSetUser, { user: resolved.user }, resolved.user, "user");
-
-    if (routeWasProvided || publicPathWasProvided) {
-      syncRouteFields({ state, setState, route: nextRoute, publicPath: nextPublicPath });
-    }
-
-    if (state) Object.assign(state, patch);
-  }
+  commitState({ state, setState, patch, options: { ...opts, source: opts.source || "core-session:applySession", forceUnauthenticated: !authPatch.authenticated } });
 
   persistAccessToken(storage, authPatch.token);
   persistUser(storage, authPatch.user, authPatch.authenticated);
@@ -1550,7 +1228,6 @@ export function applySession(input = {}) {
   emitAuthChangeIfNeeded(events, previousAuth, state, "applySession");
 
   const snapshot = sessionSnapshot(state, "applySession");
-
   emit(events, SESSION_EVENTS.sessionApplied, snapshot);
   emit(events, SESSION_EVENTS.sessionState, snapshot);
 
@@ -1579,15 +1256,7 @@ export function clearSession({ state, storage, events, setState, syncUserUI, uti
     sessionUserId: null,
   };
 
-  commitState({
-    state,
-    setState,
-    patch,
-    options: {
-      source: opts.source || "core-session:clearSession",
-      forceUnauthenticated: true,
-    },
-  });
+  commitState({ state, setState, patch, options: { source: opts.source || "core-session:clearSession", forceUnauthenticated: true } });
 
   try {
     syncUserUI?.();
@@ -1609,7 +1278,6 @@ export function clearSession({ state, storage, events, setState, syncUserUI, uti
   });
 
   emit(events, SESSION_EVENTS.sessionState, sessionSnapshot(state, "clearSession"));
-
   return true;
 }
 
@@ -1619,7 +1287,6 @@ export function clearSession({ state, storage, events, setState, syncUserUI, uti
 
 function storedSidebarOpen(storage) {
   const collapsed = storageGet(storage, storageKey("sidebarCollapsed"), null);
-
   if (collapsed !== null && collapsed !== undefined && collapsed !== "") return !bool(collapsed, false);
 
   const stored = storageGet(storage, storageKey("sidebarOpen"), null);
@@ -1630,25 +1297,14 @@ function storedSidebarOpen(storage) {
 
 export function loadPreferences({ state, storage, dom, events, setState } = {}) {
   const resolvedTheme = storedTheme(storage);
-
-  const savedLang =
-    storageGet(storage, storageKey("lang"), "") ||
-    storageGet(storage, storageKey("language"), "") ||
-    storageGet(storage, storageKey("locale"), "") ||
-    config.defaultLang ||
-    DEFAULT_LANG;
+  const savedLang = storageGet(storage, storageKey("lang"), "") || storageGet(storage, storageKey("language"), "") || storageGet(storage, storageKey("locale"), "") || config.defaultLang || DEFAULT_LANG;
 
   const theme = normalizeTheme(resolvedTheme.theme);
   const themeMode = normalizeThemeMode(resolvedTheme.themeMode);
   const lang = normalizeLang(savedLang);
   const sidebarOpen = storedSidebarOpen(storage);
 
-  commitState({
-    state,
-    setState,
-    patch: { theme, themeMode, lang, sidebarOpen },
-    options: { source: "core-session:loadPreferences" },
-  });
+  commitState({ state, setState, patch: { theme, themeMode, lang, sidebarOpen }, options: { source: "core-session:loadPreferences" } });
 
   applyThemeDom({ dom, theme, themeMode });
   setAttribute(dom?.html, "lang", lang);
@@ -1663,73 +1319,32 @@ export function loadPreferences({ state, storage, dom, events, setState } = {}) 
   setAriaExpanded(dom?.sidebarToggle, sidebarOpen);
   setAriaExpanded(dom?.sidebarMobileToggle, sidebarOpen);
 
-  const payload = {
-    theme,
-    themeMode,
-    lang,
-    sidebarOpen,
-    loadedAt: iso(),
-  };
-
+  const payload = { theme, themeMode, lang, sidebarOpen, loadedAt: iso() };
   emit(events, SESSION_EVENTS.preferencesLoaded, payload);
 
   return payload;
 }
 
 function readStoredToken(storage) {
-  return (
-    storageGetRaw(storage, storageKey("token"), null) ||
-    storageGetRaw(storage, storageKey("accessToken"), null) ||
-    storageGetRaw(storage, storageKey("access_token"), null)
-  );
+  return storageGetRaw(storage, storageKey("token"), null) || storageGetRaw(storage, storageKey("accessToken"), null) || storageGetRaw(storage, storageKey("access_token"), null);
 }
 
 function readStoredUser(storage) {
-  return (
-    storageGet(storage, storageKey("user"), null) ||
-    storageGet(storage, storageKey("currentUser"), null) ||
-    storageGet(storage, storageKey("authUser"), null) ||
-    storageGet(storage, storageKey("sessionUser"), null)
-  );
+  return storageGet(storage, storageKey("user"), null) || storageGet(storage, storageKey("currentUser"), null) || storageGet(storage, storageKey("authUser"), null) || storageGet(storage, storageKey("sessionUser"), null);
 }
 
 export function loadSession({ state, storage, dom, events, setState } = {}) {
   const savedToken = normalizeToken(readStoredToken(storage));
   const storedUser = savedToken ? normalizeUserSafe(readStoredUser(storage)) : null;
   const usableStoredUser = usableUser(storedUser) ? storedUser : null;
-
   const sessionId = storageGet(storage, storageKey("sessionId"), null);
   const sessionUserId = storageGet(storage, storageKey("sessionUserId"), null);
 
-  const preview = {
-    ...object(state),
-    token: savedToken,
-    accessToken: savedToken,
-    access_token: savedToken,
-    user: usableStoredUser,
-    sessionId: sessionId || null,
-    sessionUserId: sessionUserId || null,
-  };
+  const authPatch = buildAuthPatch({ ...object(state), token: savedToken, accessToken: savedToken, access_token: savedToken, user: usableStoredUser, sessionId: sessionId || null, sessionUserId: sessionUserId || null }, { forceUnauthenticated: !savedToken || !usableStoredUser });
 
-  const authPatch = buildAuthPatch(preview, {
-    forceUnauthenticated: !savedToken || !usableStoredUser,
-  });
+  const patch = { sessionId: authPatch.authenticated ? sessionId || null : null, sessionUserId: authPatch.authenticated ? sessionUserId || null : null, ...authPatch };
 
-  const patch = {
-    sessionId: authPatch.authenticated ? sessionId || null : null,
-    sessionUserId: authPatch.authenticated ? sessionUserId || null : null,
-    ...authPatch,
-  };
-
-  commitState({
-    state,
-    setState,
-    patch,
-    options: {
-      source: "core-session:loadSession",
-      forceUnauthenticated: !authPatch.authenticated,
-    },
-  });
+  commitState({ state, setState, patch, options: { source: "core-session:loadSession", forceUnauthenticated: !authPatch.authenticated } });
 
   if (!savedToken) {
     removeStorageKeys(storage, USER_STORAGE_KEYS);
@@ -1745,22 +1360,12 @@ export function loadSession({ state, storage, dom, events, setState } = {}) {
   const userTheme = authPatch.authenticated ? themeFromUser(authPatch.user) : null;
 
   if (userTheme === "light" || userTheme === "dark") {
-    commitState({
-      state,
-      setState,
-      patch: {
-        theme: userTheme,
-        themeMode: state?.themeMode || userTheme,
-      },
-      options: { source: "core-session:loadSession:userTheme" },
-    });
-
+    commitState({ state, setState, patch: { theme: userTheme, themeMode: state?.themeMode || userTheme }, options: { source: "core-session:loadSession:userTheme" } });
     storageSet(storage, storageKey("theme"), userTheme);
     applyThemeDom({ dom, theme: userTheme, themeMode: state?.themeMode || userTheme });
   }
 
   const snapshot = sessionSnapshot(state, "loadSession");
-
   emit(events, SESSION_EVENTS.sessionLoaded, snapshot);
   emit(events, SESSION_EVENTS.sessionState, snapshot);
 
@@ -1772,12 +1377,7 @@ export function loadSession({ state, storage, dom, events, setState } = {}) {
 ========================================================= */
 
 export function setTheme({ dom, storage, events, setState, theme = config.defaultTheme, themeMode = "" } = {}) {
-  const normalizedMode = themeMode
-    ? normalizeThemeMode(themeMode)
-    : VALID_THEME_MODES.includes(theme)
-      ? normalizeThemeMode(theme)
-      : "";
-
+  const normalizedMode = themeMode ? normalizeThemeMode(themeMode) : VALID_THEME_MODES.includes(theme) ? normalizeThemeMode(theme) : "";
   const normalizedTheme = normalizedMode ? themeFromMode(normalizedMode) : normalizeTheme(theme);
   const finalMode = normalizedMode || normalizedTheme;
 
@@ -1790,17 +1390,10 @@ export function setTheme({ dom, storage, events, setState, theme = config.defaul
   applyThemeDom({ dom, theme: normalizedTheme, themeMode: finalMode });
 
   try {
-    if (isBrowser() && window.__ONION_THEME__?.set && themeMode) {
-      window.__ONION_THEME__.set(finalMode, { source: "core-session:setTheme", emit: false });
-    }
+    if (isBrowser() && window.__ONION_THEME__?.set && themeMode) window.__ONION_THEME__.set(finalMode, { source: "core-session:setTheme", emit: false });
   } catch {}
 
-  emit(events, SESSION_EVENTS.themeChange, {
-    theme: normalizedTheme,
-    themeMode: finalMode,
-    changedAt: iso(),
-  });
-
+  emit(events, SESSION_EVENTS.themeChange, { theme: normalizedTheme, themeMode: finalMode, changedAt: iso() });
   return normalizedTheme;
 }
 
@@ -1813,11 +1406,7 @@ export function setLang({ dom, storage, events, setState, lang = config.defaultL
   storageSet(storage, storageKey("locale"), normalized);
 
   setAttribute(dom?.html, "lang", normalized);
-
-  emit(events, SESSION_EVENTS.langChange, {
-    lang: normalized,
-    changedAt: iso(),
-  });
+  emit(events, SESSION_EVENTS.langChange, { lang: normalized, changedAt: iso() });
 
   return normalized;
 }
@@ -1826,13 +1415,11 @@ export function setSidebarOpen({ dom, storage, events, setState, value } = {}) {
   const next = Boolean(value);
 
   setStateSafe(setState, { sidebarOpen: next }, { source: "core-session:setSidebarOpen" });
-
   storageSet(storage, storageKey("sidebarOpen"), next);
   storageSet(storage, storageKey("sidebarCollapsed"), !next);
 
   toggleClass(dom?.body, "sidebar-open", next);
   toggleClass(dom?.body, "sidebar-collapsed", !next);
-
   toggleClass(dom?.sidebar, "open", next);
   toggleClass(dom?.sidebar, "collapsed", !next);
   toggleClass(dom?.sidebar, "is-open", next);
@@ -1841,11 +1428,7 @@ export function setSidebarOpen({ dom, storage, events, setState, value } = {}) {
   setAriaExpanded(dom?.sidebarToggle, next);
   setAriaExpanded(dom?.sidebarMobileToggle, next);
 
-  emit(events, SESSION_EVENTS.sidebarChange, {
-    open: next,
-    changedAt: iso(),
-  });
-
+  emit(events, SESSION_EVENTS.sidebarChange, { open: next, changedAt: iso() });
   return next;
 }
 
@@ -1872,32 +1455,15 @@ export function setLoading({ dom, events, setState, value } = {}) {
     setDataset(dom.loader, "loaderState", next ? "visible" : "hidden");
   }
 
-  emit(events, SESSION_EVENTS.loadingChange, {
-    loading: next,
-    changedAt: iso(),
-  });
-
+  emit(events, SESSION_EVENTS.loadingChange, { loading: next, changedAt: iso() });
   return next;
 }
 
 export function setError({ events, setState, cloneError, error = null } = {}) {
   const normalized = error ? cloneErrorSafe(cloneError, error) || error : null;
 
-  setStateSafe(
-    setState,
-    {
-      lastError: normalized,
-      error: normalized,
-      hasError: Boolean(normalized),
-    },
-    { source: "core-session:setError" }
-  );
-
-  emit(events, SESSION_EVENTS.error, {
-    error: sanitize(normalized),
-    hasError: Boolean(normalized),
-    changedAt: iso(),
-  });
+  setStateSafe(setState, { lastError: normalized, error: normalized, hasError: Boolean(normalized) }, { source: "core-session:setError" });
+  emit(events, SESSION_EVENTS.error, { error: sanitize(normalized), hasError: Boolean(normalized), changedAt: iso() });
 
   return normalized;
 }
@@ -1921,34 +1487,25 @@ export function syncBaseUI({ setDocumentTitle, syncUserUI } = {}) {
 export function getSessionDebugSnapshot(state) {
   return {
     version: SESSION_VERSION,
-
     authenticated: Boolean(state?.authenticated),
     hasToken: Boolean(state?.hasToken),
-
     token: null,
     accessToken: null,
     refreshToken: null,
     tempToken: null,
-
     role: state?.role || null,
     roles: array(state?.roles),
-
     username: state?.username || userUsername(state?.user),
     displayName: state?.authenticated ? userDisplayName(state?.user) : null,
     avatarUrl: state?.authenticated ? redact(userAvatarUrl(state?.user) || "") : null,
-
     currentResolvedUsername: state?.currentResolvedUsername || null,
     resolvedUsername: state?.resolvedUsername || null,
-
     route: canonicalPath(state?.route || DEFAULT_ROUTE),
     publicPath: redact(publicPath(state?.publicPath || state?.route || DEFAULT_ROUTE)),
-
     theme: state?.theme || config.defaultTheme || DEFAULT_THEME,
     themeMode: state?.themeMode || null,
     lang: state?.lang || config.defaultLang || DEFAULT_LANG,
-
     sidebarOpen: typeof state?.sidebarOpen === "boolean" ? state.sidebarOpen : null,
-
     hasUser: usableUser(state?.user),
     at: iso(),
   };
@@ -1961,26 +1518,20 @@ export function getSessionDebugSnapshot(state) {
 export default {
   SESSION_VERSION,
   SESSION_EVENTS,
-
   setRoute,
   setPublicPath,
-
   setUser,
   setToken,
   applySession,
   clearSession,
-
   loadPreferences,
   loadSession,
-
   syncThemeMetaColor,
-
   setTheme,
   setLang,
   setSidebarOpen,
   setLoading,
   setError,
-
   syncBaseUI,
   getSessionDebugSnapshot,
 };

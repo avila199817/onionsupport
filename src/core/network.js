@@ -2,16 +2,17 @@
    Onion SPA - Core Network
    Archivo: src/core/network.js
 
-   CORE NETWORK · CLEAN
-   - Bind idempotente de conectividad
-   - State sync seguro online/offline/unknown
-   - Cleanup compatible
-   - Sin event storm
+   CORE NETWORK · SIMPLE
+   - bind idempotente de conectividad
+   - sync seguro online/offline/unknown
+   - cleanup compatible
+   - eventos deduplicados
+   - sin Auth, Router, Store, Storage, fetch ni UI
 ========================================================= */
 
 import { isBrowser } from "./helpers.js";
 
-export const NETWORK_VERSION = "18.0.0-clean";
+export const NETWORK_VERSION = "21.0.0-simple";
 export const NETWORK_SCOPE = "core:network";
 
 export const NETWORK_EVENTS = Object.freeze({
@@ -42,8 +43,7 @@ const PASSIVE_REASONS = new Set([
   "snapshot",
 ]);
 
-const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
+const SENSITIVE_KEY_RE = /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
 
 let bound = false;
 let bindingId = 0;
@@ -99,15 +99,23 @@ function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-  const text = String(value).trim();
-  return text || fallback;
+function hasOwn(target, key) {
+  try {
+    return Object.prototype.hasOwnProperty.call(target, key);
+  } catch {
+    return false;
+  }
 }
 
-function safeNumber(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
+function text(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const output = String(value).trim();
+  return output || fallback;
+}
+
+function number(value, fallback = 0) {
+  const output = Number(value);
+  return Number.isFinite(output) ? output : fallback;
 }
 
 function now() {
@@ -138,22 +146,10 @@ function clone(value, fallback = null) {
   }
 }
 
-function sanitize(value, depth = 0, keyHint = "") {
+function sanitize(value, depth = 0, keyHint = "", seen = new WeakSet()) {
   if (depth > 4) return "[depth-limit]";
-
-  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) {
-    return value ? "***" : value;
-  }
-
-  if (
-    value === null ||
-    value === undefined ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
+  if (SENSITIVE_KEY_RE.test(text(keyHint, ""))) return value ? "***" : value;
+  if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "string") return value.slice(0, 500);
   if (typeof value === "bigint") return String(value);
   if (typeof value === "function") return "[function]";
@@ -161,22 +157,21 @@ function sanitize(value, depth = 0, keyHint = "") {
   if (value instanceof Error) {
     return {
       name: value.name || "Error",
-      message: safeText(value.message, "Error"),
+      message: text(value.message, "Error"),
       stack: value.stack ? "[stack]" : "",
     };
   }
 
-  if (Array.isArray(value)) {
-    return value.slice(0, 40).map((item) => sanitize(item, depth + 1, keyHint));
-  }
+  if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitize(item, depth + 1, keyHint, seen));
 
   if (isObject(value)) {
+    try {
+      if (seen.has(value)) return "[circular]";
+      seen.add(value);
+    } catch {}
+
     const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = sanitize(item, depth + 1, key);
-    }
-
+    for (const [key, item] of Object.entries(value).slice(0, 80)) output[key] = sanitize(item, depth + 1, key, seen);
     return output;
   }
 
@@ -188,7 +183,7 @@ function sanitize(value, depth = 0, keyHint = "") {
 }
 
 function emit(events, name, payload = {}) {
-  const eventName = safeText(name, "");
+  const eventName = text(name, "");
   if (!eventName) return false;
 
   const clean = sanitize({
@@ -198,26 +193,14 @@ function emit(events, name, payload = {}) {
     ...payload,
   });
 
-  try {
-    if (isFn(events?.emit)) {
-      events.emit(eventName, clean);
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (isFn(events?.dispatch)) {
-      events.dispatch(eventName, clean);
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (isFn(events?.trigger)) {
-      events.trigger(eventName, clean);
-      return true;
-    }
-  } catch {}
+  for (const method of ["emit", "dispatch", "trigger"]) {
+    try {
+      if (isFn(events?.[method])) {
+        events[method](eventName, clean);
+        return true;
+      }
+    } catch {}
+  }
 
   return false;
 }
@@ -259,8 +242,8 @@ function record(type = "event", payload = {}) {
 function recordError(error, source = "network") {
   const payload = {
     source,
-    name: safeText(error?.name, "Error"),
-    message: safeText(error?.message || error, "Network error."),
+    name: text(error?.name, "Error"),
+    message: text(error?.message || error, "Network error."),
     at: iso(),
   };
 
@@ -281,13 +264,13 @@ function recordError(error, source = "network") {
 ========================================================= */
 
 function fallbackOnlineFromReason(reason = "") {
-  const clean = safeText(reason, "");
+  const clean = text(reason, "");
   if (clean === "online") return true;
   if (clean === "offline") return false;
   return null;
 }
 
-function getNavigatorOnline(reason = "") {
+function browserOnline(reason = "") {
   if (!isBrowser()) return null;
 
   try {
@@ -303,7 +286,7 @@ function statusFromOnline(online = null) {
   return "unknown";
 }
 
-function getVisibilityState() {
+function visibilityState() {
   if (!isBrowser()) return null;
 
   try {
@@ -313,7 +296,7 @@ function getVisibilityState() {
   }
 }
 
-function getHidden() {
+function hiddenState() {
   if (!isBrowser()) return null;
 
   try {
@@ -323,7 +306,7 @@ function getHidden() {
   }
 }
 
-function getConnection() {
+function connectionApi() {
   if (!isBrowser()) return null;
 
   try {
@@ -334,12 +317,12 @@ function getConnection() {
 }
 
 function numeric(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
+  const output = Number(value);
+  return Number.isFinite(output) ? output : null;
 }
 
 function connectionSnapshot() {
-  const connection = getConnection();
+  const connection = connectionApi();
   if (!connection) return null;
 
   try {
@@ -358,7 +341,7 @@ function connectionSnapshot() {
   }
 }
 
-function fingerprint(connection = connectionSnapshot()) {
+function connectionFingerprint(connection = connectionSnapshot()) {
   if (!connection) return "";
 
   return [
@@ -372,15 +355,15 @@ function fingerprint(connection = connectionSnapshot()) {
 }
 
 function browserSnapshot() {
-  const online = getNavigatorOnline();
+  const online = browserOnline();
 
   return {
     browser: isBrowser(),
     online,
     offline: online === null ? null : !online,
     status: statusFromOnline(online),
-    visibilityState: getVisibilityState(),
-    hidden: getHidden(),
+    visibilityState: visibilityState(),
+    hidden: hiddenState(),
     connection: connectionSnapshot(),
     at: iso(),
   };
@@ -391,12 +374,12 @@ function browserSnapshot() {
 ========================================================= */
 
 function updateContext(context = {}) {
-  if (Object.prototype.hasOwnProperty.call(context, "state")) active.state = context.state || null;
-  if (Object.prototype.hasOwnProperty.call(context, "events")) active.events = context.events || null;
-  if (Object.prototype.hasOwnProperty.call(context, "cleanup")) active.cleanup = context.cleanup || null;
-  if (Object.prototype.hasOwnProperty.call(context, "utils")) active.utils = context.utils || null;
-  if (Object.prototype.hasOwnProperty.call(context, "setState")) active.setState = isFn(context.setState) ? context.setState : null;
-  if (context.scope) active.scope = safeText(context.scope, NETWORK_SCOPE);
+  if (hasOwn(context, "state")) active.state = context.state || null;
+  if (hasOwn(context, "events")) active.events = context.events || null;
+  if (hasOwn(context, "cleanup")) active.cleanup = context.cleanup || null;
+  if (hasOwn(context, "utils")) active.utils = context.utils || null;
+  if (hasOwn(context, "setState")) active.setState = isFn(context.setState) ? context.setState : null;
+  if (context.scope) active.scope = text(context.scope, NETWORK_SCOPE);
 
   return active;
 }
@@ -418,10 +401,10 @@ function buildPatch({ online, reason = "sync", changed = false } = {}) {
     networkRtt: connection?.rtt ?? null,
     networkSaveData: connection?.saveData ?? null,
 
-    networkVisibilityState: getVisibilityState(),
-    networkHidden: getHidden(),
+    networkVisibilityState: visibilityState(),
+    networkHidden: hiddenState(),
 
-    lastNetworkReason: safeText(reason, "sync"),
+    lastNetworkReason: text(reason, "sync"),
     lastNetworkSyncAt: iso(atMs),
     lastNetworkSyncAtMs: atMs,
   };
@@ -449,22 +432,15 @@ function buildPatch({ online, reason = "sync", changed = false } = {}) {
 function writeState(state, patch = {}, setState = null) {
   if (!state || typeof state !== "object") return false;
 
-  const unknown = patch.online === null || patch.networkOnline === null;
-
-  if (isFn(setState) && !unknown) {
-    try {
+  try {
+    if (isFn(setState)) {
       setState(patch, {
         source: "core:network",
         emitDerived: false,
+        silent: true,
       });
-
-      try {
-        Object.assign(state, patch);
-      } catch {}
-
-      return true;
-    } catch {}
-  }
+    }
+  } catch {}
 
   try {
     Object.assign(state, patch);
@@ -482,33 +458,29 @@ function buildPayload({ online, reason = "sync", changed = false, throttled = fa
     offline: online === null ? null : !online,
     status,
     known: online === true || online === false,
-
-    reason: safeText(reason, "sync"),
-    source: safeText(source, "network"),
+    reason: text(reason, "sync"),
+    source: text(source, "network"),
     changed: Boolean(changed),
     throttled: Boolean(throttled),
-
     bound: Boolean(bound),
     bindingId,
-
-    visibilityState: getVisibilityState(),
-    hidden: getHidden(),
+    visibilityState: visibilityState(),
+    hidden: hiddenState(),
     connection: connectionSnapshot(),
-
     stateOnline: active.state?.online ?? null,
     stateOffline: active.state?.offline ?? null,
     stateStatus: active.state?.networkStatus || "",
   };
 }
 
-function shouldThrottle({ reason, force, online, status, visibilityState, hidden, connectionFp } = {}) {
+function shouldThrottle({ reason, force, online, status, visibility, hidden, connectionFp } = {}) {
   if (force) return false;
-  if (!PASSIVE_REASONS.has(safeText(reason, ""))) return false;
+  if (!PASSIVE_REASONS.has(text(reason, ""))) return false;
 
   if (
     online !== lastOnline ||
     status !== lastStatus ||
-    visibilityState !== lastVisibilityState ||
+    visibility !== lastVisibilityState ||
     hidden !== lastHidden ||
     connectionFp !== lastConnectionFingerprint
   ) {
@@ -534,25 +506,24 @@ export function syncNetworkState({
 } = {}) {
   updateContext({ state, events, utils, setState });
 
-  const online = getNavigatorOnline(reason);
+  const online = browserOnline(reason);
   const status = statusFromOnline(online);
-  const visibilityState = getVisibilityState();
-  const hidden = getHidden();
-  const connectionFp = fingerprint();
+  const visibility = visibilityState();
+  const hidden = hiddenState();
+  const connectionFp = connectionFingerprint();
 
-  if (shouldThrottle({ reason, force, online, status, visibilityState, hidden, connectionFp })) {
+  if (shouldThrottle({ reason, force, online, status, visibility, hidden, connectionFp })) {
     stats.throttled += 1;
 
     const payload = buildPayload({
       online: lastOnline,
-      reason: `${safeText(reason, "sync")}:throttled`,
+      reason: `${text(reason, "sync")}:throttled`,
       throttled: true,
       source,
     });
 
     if (shouldEmit) emit(active.events, NETWORK_EVENTS.state, payload);
     record("throttled", payload);
-
     return payload;
   }
 
@@ -563,9 +534,9 @@ export function syncNetworkState({
 
   lastOnline = online;
   lastStatus = status;
-  lastReason = safeText(reason, "sync");
+  lastReason = text(reason, "sync");
   lastSyncAt = now();
-  lastVisibilityState = visibilityState;
+  lastVisibilityState = visibility;
   lastHidden = hidden;
   lastConnectionFingerprint = connectionFp;
 
@@ -635,10 +606,8 @@ function addManualDisposer(disposer) {
 }
 
 function clearManualDisposers() {
-  for (const dispose of Array.from(manualDisposers)) {
-    try {
-      dispose?.();
-    } catch {}
+  for (const dispose of [...manualDisposers]) {
+    try { dispose?.(); } catch {}
   }
 
   manualDisposers.clear();
@@ -697,7 +666,7 @@ function bindDom({ cleanup, scope, target, eventName, handler, options = { passi
 }
 
 function bindConnection(cleanup, scope) {
-  const connection = getConnection();
+  const connection = connectionApi();
   if (!connection) return () => false;
 
   if (isFn(connection.addEventListener)) {
@@ -771,7 +740,6 @@ function handleOffline() {
 
 function handleVisibilityChange() {
   const before = lastVisibilityState;
-
   const payload = syncNetworkState({
     state: active.state,
     events: active.events,
@@ -784,8 +752,7 @@ function handleVisibilityChange() {
 
   if (payload?.throttled === true) return;
 
-  const next = getVisibilityState();
-
+  const next = visibilityState();
   if (before !== next) {
     stats.visibility += 1;
     const eventPayload = { ...payload, visibilityState: next };
@@ -855,6 +822,7 @@ function handlePageHide(event = null) {
 
 function handleConnectionChange() {
   const before = lastConnectionFingerprint;
+  const next = connectionFingerprint();
 
   const payload = syncNetworkState({
     state: active.state,
@@ -862,7 +830,7 @@ function handleConnectionChange() {
     utils: active.utils,
     setState: active.setState,
     reason: "connection-change",
-    emit: before !== fingerprint(),
+    emit: before !== next,
     source: "navigator:connection",
   });
 
@@ -872,7 +840,7 @@ function handleConnectionChange() {
 
   const eventPayload = {
     ...payload,
-    changed: before !== fingerprint(),
+    changed: before !== next,
     connection: connectionSnapshot(),
   };
 
@@ -894,19 +862,12 @@ export function bindNetworkEvents({
   force = false,
 } = {}) {
   const previous = { ...active };
-
   updateContext({ state, events, cleanup, utils, setState, scope });
 
   if (!isBrowser()) {
-    const patch = buildPatch({
-      online: null,
-      reason: "server",
-      changed: false,
-    });
-
+    const patch = buildPatch({ online: null, reason: "server", changed: false });
     writeState(active.state, patch, active.setState);
     record("server", { status: "unknown" });
-
     return false;
   }
 
@@ -950,9 +911,9 @@ export function bindNetworkEvents({
     bindingId += 1;
     stats.bind += 1;
 
-    lastVisibilityState = getVisibilityState();
-    lastHidden = getHidden();
-    lastConnectionFingerprint = fingerprint();
+    lastVisibilityState = visibilityState();
+    lastHidden = hiddenState();
+    lastConnectionFingerprint = connectionFingerprint();
 
     const payload = syncNetworkState({
       state: active.state,
@@ -969,7 +930,7 @@ export function bindNetworkEvents({
       ...payload,
       scope,
       bindingId,
-      hasConnectionApi: Boolean(getConnection()),
+      hasConnectionApi: Boolean(connectionApi()),
     };
 
     emit(active.events, NETWORK_EVENTS.bound, boundPayload);
@@ -987,7 +948,7 @@ export function unbindNetworkEvents({ cleanup, events, utils, scope = NETWORK_SC
   const finalCleanup = cleanup || active.cleanup;
   const finalEvents = events || active.events;
   const finalUtils = utils || active.utils;
-  const finalScope = safeText(scope || active.scope, NETWORK_SCOPE);
+  const finalScope = text(scope || active.scope, NETWORK_SCOPE);
 
   try {
     if (isFn(finalCleanup?.run)) finalCleanup.run(finalScope);
@@ -1002,10 +963,7 @@ export function unbindNetworkEvents({ cleanup, events, utils, scope = NETWORK_SC
   bound = false;
   stats.unbind += 1;
 
-  const payload = {
-    scope: finalScope,
-    bindingId,
-  };
+  const payload = { scope: finalScope, bindingId };
 
   emit(finalEvents, NETWORK_EVENTS.unbound, payload);
   record("unbound", payload);
@@ -1019,15 +977,15 @@ export function unbindNetworkEvents({ cleanup, events, utils, scope = NETWORK_SC
 ========================================================= */
 
 export function isNetworkOnline() {
-  return getNavigatorOnline() === true;
+  return browserOnline() === true;
 }
 
 export function isNetworkOffline() {
-  return getNavigatorOnline() === false;
+  return browserOnline() === false;
 }
 
 export function getNetworkStatus() {
-  return statusFromOnline(getNavigatorOnline());
+  return statusFromOnline(browserOnline());
 }
 
 /* =========================================================
@@ -1036,19 +994,17 @@ export function getNetworkStatus() {
 
 export function getNetworkSnapshot({ state, includeRecent = true } = {}) {
   const sourceState = state || active.state;
-  const currentOnline = getNavigatorOnline();
+  const currentOnline = browserOnline();
   const connection = connectionSnapshot();
 
   return sanitize({
     version: NETWORK_VERSION,
     bound: Boolean(bound),
     bindingId,
-
     online: currentOnline,
     offline: currentOnline === null ? null : !currentOnline,
     status: statusFromOnline(currentOnline),
     known: currentOnline === true || currentOnline === false,
-
     lastOnline,
     lastStatus,
     lastReason,
@@ -1059,11 +1015,9 @@ export function getNetworkSnapshot({ state, includeRecent = true } = {}) {
     lastVisibilityState,
     lastHidden,
     lastConnectionFingerprint,
-    currentConnectionFingerprint: fingerprint(connection),
-
+    currentConnectionFingerprint: connectionFingerprint(connection),
     activeScope: active.scope,
     manualDisposerCount: manualDisposers.size,
-
     activeContext: {
       hasState: Boolean(active.state),
       hasEvents: Boolean(active.events),
@@ -1071,12 +1025,10 @@ export function getNetworkSnapshot({ state, includeRecent = true } = {}) {
       hasUtils: Boolean(active.utils),
       hasSetState: Boolean(active.setState),
     },
-
     stats: {
       ...stats,
       manualDisposers: manualDisposers.size,
     },
-
     state: {
       online: sourceState?.online ?? null,
       offline: sourceState?.offline ?? null,
@@ -1097,10 +1049,20 @@ export function getNetworkSnapshot({ state, includeRecent = true } = {}) {
       rtt: sourceState?.networkRtt ?? null,
       saveData: sourceState?.networkSaveData ?? null,
     },
-
     browser: browserSnapshot(),
     recent: includeRecent === false ? [] : recent.map((item) => ({ ...item })),
     lastError: lastError ? clone(lastError, null) : null,
+    policy: {
+      networkOnly: true,
+      idempotentBind: true,
+      cleanupCompatible: true,
+      noAuth: true,
+      noRouter: true,
+      noStore: true,
+      noStorage: true,
+      noFetch: true,
+      noUi: true,
+    },
     at: iso(),
   });
 }

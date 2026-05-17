@@ -2,31 +2,12 @@
    Onion SPA - Topbar Sidebar Bridge
    Archivo: src/ui/topbar/topbar.sidebar.js
 
-   FINAL PRO SYSTEM · TOPBAR SIDEBAR BRIDGE · DESKTOP SAFE · NO STORM · 10/10
-   TOKEN PRO SYSTEM ALIGNED · MOBILE ONLY CONTROL · DESKTOP CLEAN SAFE
-
-   Responsabilidades:
-   - integrar TopbarUI con SidebarUI
-   - gestionar toggle mobile del sidebar
-   - sincronizar estado aria del botón mobile
-   - mantener limpio el offset visual del topbar
-   - no pisar layout con inline styles permanentes
-   - cerrar/limpiar estado mobile al pasar a desktop
-   - tolerar varias APIs de SidebarUI
-   - emitir eventos de sincronización sin duplicar tormentas
-   - no romper sidebar desktop ni sidebar-collapsed
-   - no bloquear clicks del menú lateral
-
-   FIX CRÍTICO:
-   - en desktop NO se pone aria-hidden="true" al sidebar
-   - en desktop sólo se limpian residuos mobile
-   - en desktop NO se toca sidebar-collapsed
-   - en desktop NO se eliminan clases estructurales desktop del sidebar
-   - mobile closed sí puede usar aria-hidden="true"
-   - no emite AppCore.events + window a la vez
-   - si SidebarUI gestiona la acción, no duplicamos sidebar:state:synced
-   - toggle mobile prioriza métodos mobile antes que toggleSidebar desktop
-   - guards browser completos para SSR / boot parcial
+   TOPBAR SIDEBAR BRIDGE · SIMPLE
+   - puente entre TopbarUI y SidebarUI
+   - controla sidebar mobile desde el botón del topbar
+   - en desktop sólo limpia residuos mobile
+   - no toca collapsed desktop ni clases estructurales desktop
+   - no aplica layout/offsets permanentes desde JS
 ========================================================= */
 
 import {
@@ -34,42 +15,31 @@ import {
   isMobileViewport,
 } from "./topbar.helpers.js";
 
-/* =========================================================
-   CONSTANTS
-========================================================= */
+export const TOPBAR_SIDEBAR_VERSION = "topbar-sidebar-v16-simple";
 
-const BODY_SIDEBAR_OPEN_CLASS =
-  "sidebar-open";
+const SOURCE = "topbar";
+const BRIDGE = "topbar.sidebar";
 
-const BODY_SIDEBAR_CLOSING_CLASS =
-  "sidebar-closing";
+const DEFAULT_BREAKPOINT = 900;
+const DEFAULT_SIDEBAR_ID = "sidebar";
 
-const BODY_ROUTE_SHELL_HIDDEN_CLASS =
-  "route-shell-hidden";
+const BODY_SIDEBAR_OPEN_CLASS = "sidebar-open";
+const BODY_SIDEBAR_CLOSING_CLASS = "sidebar-closing";
+const BODY_ROUTE_SHELL_HIDDEN_CLASS = "route-shell-hidden";
+const BODY_AUTH_SCREEN_CLASS = "auth-screen";
+const MOBILE_TOGGLE_ACTIVE_CLASS = "is-active";
 
-const BODY_AUTH_SCREEN_CLASS =
-  "auth-screen";
+const SYNC_EVENT_NAME = "sidebar:state:synced";
+const TOPBAR_SYNC_EVENT_NAME = "topbar:sidebar:mobile-synced";
 
-const MOBILE_TOGGLE_ACTIVE_CLASS =
-  "is-active";
-
-const DEFAULT_SIDEBAR_ID =
-  "sidebar";
-
-const SYNC_EVENT_NAME =
-  "sidebar:state:synced";
-
-const TOPBAR_SYNC_EVENT_NAME =
-  "topbar:sidebar:mobile-synced";
-
-const SIDEBAR_MOBILE_CLASSES = Object.freeze([
+const MOBILE_MODE_CLASSES = Object.freeze([
   "is-mobile",
   "mobile-open",
   "is-mobile-open",
   "sidebar-mobile-open",
 ]);
 
-const SIDEBAR_MOBILE_OPEN_CLASSES = Object.freeze([
+const MOBILE_OPEN_CLASSES = Object.freeze([
   "open",
   "is-open",
   "sidebar-open",
@@ -78,30 +48,25 @@ const SIDEBAR_MOBILE_OPEN_CLASSES = Object.freeze([
   "sidebar-mobile-open",
 ]);
 
-const SIDEBAR_MOBILE_DATA_KEYS = Object.freeze([
+const MOBILE_DATA_KEYS = Object.freeze([
   "mobileOpen",
   "mobile",
 ]);
 
 /* =========================================================
-   SAFE HELPERS
+   BASICS
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isFunction(value) {
+function isFn(value) {
   return typeof value === "function";
 }
 
 function safeCall(fn, ...args) {
-  if (!isFunction(fn)) {
-    return undefined;
-  }
+  if (!isFn(fn)) return undefined;
 
   try {
     return fn(...args);
@@ -111,105 +76,60 @@ function safeCall(fn, ...args) {
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value).trim();
-
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
   return text || fallback;
 }
 
 function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-    ? value
-    : {};
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
 function isElement(value) {
-  return Boolean(
-    value &&
-    value.nodeType === 1
-  );
+  return Boolean(value && value.nodeType === 1);
 }
 
-function getBody() {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  return (
-    document.body ||
-    document.documentElement ||
-    null
-  );
+function bodyEl() {
+  if (!isBrowser()) return null;
+  return document.body || document.documentElement || null;
 }
 
-function getHtml() {
-  if (!isBrowser()) {
-    return null;
-  }
-
+function htmlEl() {
+  if (!isBrowser()) return null;
   return document.documentElement || null;
 }
 
-function nextFrame(fn) {
-  if (!isFunction(fn)) {
-    return false;
-  }
+function nextFrame(callback) {
+  if (!isFn(callback)) return false;
 
   if (!isBrowser()) {
-    safeCall(fn);
+    safeCall(callback);
     return true;
   }
 
   try {
-    window.requestAnimationFrame(() => {
-      safeCall(fn);
-    });
-
+    window.requestAnimationFrame(() => safeCall(callback));
     return true;
   } catch {}
 
   try {
-    window.setTimeout(() => {
-      safeCall(fn);
-    }, 0);
-
+    window.setTimeout(() => safeCall(callback), 0);
     return true;
   } catch {
-    safeCall(fn);
+    safeCall(callback);
     return true;
   }
 }
 
-function getMobileBreakpoint() {
-  return (
-    Number(TOPBAR_SEARCH_CONFIG?.mobileBreakpoint) ||
-    900
-  );
+function breakpoint() {
+  return Number(TOPBAR_SEARCH_CONFIG?.mobileBreakpoint) || DEFAULT_BREAKPOINT;
 }
 
 function setAttr(element, name = "", value = "") {
-  if (
-    !isElement(element) ||
-    !name
-  ) {
-    return false;
-  }
+  if (!isElement(element) || !name) return false;
 
   try {
-    element.setAttribute(
-      name,
-      String(value)
-    );
-
+    element.setAttribute(name, String(value));
     return true;
   } catch {
     return false;
@@ -217,12 +137,7 @@ function setAttr(element, name = "", value = "") {
 }
 
 function removeAttr(element, name = "") {
-  if (
-    !isElement(element) ||
-    !name
-  ) {
-    return false;
-  }
+  if (!isElement(element) || !name) return false;
 
   try {
     element.removeAttribute(name);
@@ -233,22 +148,34 @@ function removeAttr(element, name = "") {
 }
 
 function toggleClass(element, className = "", enabled = false) {
-  if (
-    !isElement(element) ||
-    !className
-  ) {
-    return false;
-  }
+  if (!isElement(element) || !className) return false;
 
   try {
-    element.classList.toggle(
-      className,
-      Boolean(enabled)
-    );
-
+    element.classList.toggle(className, Boolean(enabled));
     return true;
   } catch {
     return false;
+  }
+}
+
+function safeGetDom(getDom) {
+  try {
+    if (isFn(getDom)) return getDom() || {};
+  } catch {}
+
+  return {};
+}
+
+function isVisibleElement(element) {
+  if (!isElement(element)) return false;
+
+  try {
+    if (element.hidden === true) return false;
+    const style = window.getComputedStyle?.(element);
+    if (!style) return true;
+    return style.display !== "none" && style.visibility !== "hidden";
+  } catch {
+    return true;
   }
 }
 
@@ -257,43 +184,26 @@ function toggleClass(element, className = "", enabled = false) {
 ========================================================= */
 
 function emitSidebarEvent(AppCore, eventName = "", payload = {}) {
-  const name =
-    safeText(eventName, "");
+  const name = safeText(eventName, "");
+  if (!name) return false;
 
-  if (!name) {
-    return false;
-  }
-
-  const finalPayload = {
-    source:
-      "topbar",
-
-    bridge:
-      "topbar.sidebar",
-
+  const detail = {
+    source: SOURCE,
+    bridge: BRIDGE,
+    version: TOPBAR_SIDEBAR_VERSION,
     ...safeObject(payload),
   };
 
   try {
-    if (isFunction(AppCore?.events?.emit)) {
-      AppCore.events.emit(
-        name,
-        finalPayload
-      );
-
+    if (isFn(AppCore?.events?.emit)) {
+      AppCore.events.emit(name, detail);
       return true;
     }
   } catch {}
 
   try {
-    if (isBrowser()) {
-      window.dispatchEvent(
-        new CustomEvent(name, {
-          detail:
-            finalPayload,
-        })
-      );
-
+    if (isBrowser() && typeof CustomEvent !== "undefined") {
+      window.dispatchEvent(new CustomEvent(name, { detail }));
       return true;
     }
   } catch {}
@@ -302,184 +212,96 @@ function emitSidebarEvent(AppCore, eventName = "", payload = {}) {
 }
 
 function emitMobileSync(AppCore, payload = {}, options = {}) {
-  const finalPayload = {
-    source:
-      "topbar",
-
-    bridge:
-      "topbar.sidebar",
-
+  const detail = {
+    source: SOURCE,
+    bridge: BRIDGE,
     ...safeObject(payload),
   };
 
-  emitSidebarEvent(
-    AppCore,
-    TOPBAR_SYNC_EVENT_NAME,
-    finalPayload
-  );
+  emitSidebarEvent(AppCore, TOPBAR_SYNC_EVENT_NAME, detail);
 
-  /*
-    Legacy sólo si el bridge ha aplicado estado por fallback.
-    Si SidebarUI gestionó la acción, evitamos duplicar su propio evento.
-  */
-  if (options.legacy === true) {
-    emitSidebarEvent(
-      AppCore,
-      SYNC_EVENT_NAME,
-      finalPayload
-    );
-  }
+  // Sólo emitimos legacy si el fallback DOM aplicó el estado.
+  // Si SidebarUI gestionó la acción, dejamos que emita sus propios eventos.
+  if (options.legacy === true) emitSidebarEvent(AppCore, SYNC_EVENT_NAME, detail);
 
   return true;
 }
 
 /* =========================================================
-   SIDEBAR MODULE RESOLUTION
+   SIDEBAR MODULE
 ========================================================= */
 
 export function getSidebarModule(AppCore) {
-  const moduleNames = [
-    "SidebarUI",
-    "sidebar",
-    "Sidebar",
-    "sidebarUI",
-    "ui:sidebar",
-  ];
+  const names = ["SidebarUI", "sidebar", "Sidebar", "sidebarUI", "ui:sidebar"];
 
   try {
-    const modules =
-      AppCore?.modules;
-
-    if (
-      modules?.get &&
-      isFunction(modules.get)
-    ) {
-      for (const name of moduleNames) {
-        const found =
-          modules.get(name);
-
-        if (found) {
-          return found;
-        }
+    if (isFn(AppCore?.modules?.get)) {
+      for (const name of names) {
+        const found = AppCore.modules.get(name);
+        if (found) return found;
       }
     }
 
-    if (
-      modules &&
-      typeof modules === "object"
-    ) {
-      const candidates = [
-        modules.SidebarUI,
-        modules.Sidebar,
-        modules.sidebar,
-        modules.sidebarUI,
-      ];
-
-      for (const found of candidates) {
-        if (found) {
-          return found;
-        }
+    const modules = AppCore?.modules;
+    if (modules && typeof modules === "object") {
+      for (const key of ["SidebarUI", "Sidebar", "sidebar", "sidebarUI"]) {
+        if (modules[key]) return modules[key];
       }
     }
 
-    if (AppCore?.sidebar) {
-      return AppCore.sidebar;
-    }
+    if (AppCore?.SidebarUI) return AppCore.SidebarUI;
+    if (AppCore?.Sidebar) return AppCore.Sidebar;
+    if (AppCore?.sidebar) return AppCore.sidebar;
 
-    if (
-      isBrowser() &&
-      window?.OnionSidebarUI
-    ) {
-      return window.OnionSidebarUI;
-    }
+    if (isBrowser() && window?.OnionSidebarUI) return window.OnionSidebarUI;
+    if (isBrowser() && window?.SidebarUI) return window.SidebarUI;
+  } catch {}
 
-    if (
-      isBrowser() &&
-      window?.SidebarUI
-    ) {
-      return window.SidebarUI;
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 function callSidebarAction(sidebarModule, action = "", payload = {}) {
-  if (!sidebarModule) {
-    return false;
-  }
+  if (!sidebarModule) return false;
 
-  /*
-    Orden intencionado:
-    - primero APIs explícitamente mobile
-    - después aliases genéricos open/close
-    - toggleSidebar queda al final porque suele ser collapse desktop
-  */
-  const actionMap = {
-    open:
-      [
-        "openMobileSidebar",
-        "openSidebarMobile",
-        "openMobile",
-        "showMobileSidebar",
-        "showSidebarMobile",
-        "openSidebar",
-        "open",
-      ],
-
-    close:
-      [
-        "closeMobileSidebar",
-        "closeSidebarMobile",
-        "closeMobile",
-        "hideMobileSidebar",
-        "hideSidebarMobile",
-        "closeSidebar",
-        "close",
-      ],
-
-    toggle:
-      [
-        "toggleMobileSidebar",
-        "toggleSidebarMobile",
-        "toggleMobile",
-        "toggleSidebar",
-        "toggle",
-      ],
+  const map = {
+    open: [
+      "openMobileSidebar",
+      "openSidebarMobile",
+      "openMobile",
+      "showMobileSidebar",
+      "showSidebarMobile",
+      "openSidebar",
+      "open",
+    ],
+    close: [
+      "closeMobileSidebar",
+      "closeSidebarMobile",
+      "closeMobile",
+      "hideMobileSidebar",
+      "hideSidebarMobile",
+      "closeSidebar",
+      "close",
+    ],
+    toggle: [
+      "toggleMobileSidebar",
+      "toggleSidebarMobile",
+      "toggleMobile",
+      "toggleSidebar",
+      "toggle",
+    ],
   };
 
-  const names =
-    actionMap[action] || [];
-
-  for (const name of names) {
-    const fn =
-      sidebarModule?.[name];
-
-    if (!isFunction(fn)) {
-      continue;
-    }
+  for (const name of map[action] || []) {
+    const fn = sidebarModule?.[name];
+    if (!isFn(fn)) continue;
 
     try {
-      const result =
-        fn.call(
-          sidebarModule,
-          {
-            source:
-              "topbar",
+      const result = fn.call(sidebarModule, {
+        source: SOURCE,
+        mobile: true,
+        ...safeObject(payload),
+      });
 
-            mobile:
-              true,
-
-            ...safeObject(payload),
-          }
-        );
-
-      /*
-        false explícito = no gestionado.
-        undefined suele ser éxito en APIs UI.
-      */
       return result !== false;
     } catch {}
   }
@@ -488,118 +310,38 @@ function callSidebarAction(sidebarModule, action = "", payload = {}) {
 }
 
 /* =========================================================
-   VIEWPORT
+   VIEWPORT / SHELL
 ========================================================= */
 
-function isMobileOnlyContext() {
+function mobileContext() {
   try {
-    return Boolean(
-      isMobileViewport(
-        getMobileBreakpoint()
-      )
-    );
+    return Boolean(isMobileViewport(breakpoint()));
   } catch {}
 
-  if (!isBrowser()) {
-    return false;
-  }
+  if (!isBrowser()) return false;
 
   try {
-    return window.innerWidth < getMobileBreakpoint();
+    return window.innerWidth < breakpoint();
   } catch {
     return false;
   }
 }
 
-function isDesktopContext() {
-  return !isMobileOnlyContext();
-}
-
-function isVisibleElement(element) {
-  if (!isElement(element)) {
-    return false;
-  }
-
-  try {
-    if (element.hidden === true) {
-      return false;
-    }
-
-    const style =
-      window.getComputedStyle?.(element);
-
-    if (!style) {
-      return true;
-    }
-
-    return (
-      style.display !== "none" &&
-      style.visibility !== "hidden"
-    );
-  } catch {
-    return true;
-  }
-}
-
-function safeGetDom(getDom) {
-  try {
-    if (isFunction(getDom)) {
-      return getDom() || {};
-    }
-  } catch {}
-
-  return {};
+function desktopContext() {
+  return !mobileContext();
 }
 
 function shouldUseMobileSidebarMode(getDom) {
-  if (!isBrowser()) {
-    return false;
-  }
+  if (!isBrowser()) return false;
+  if (mobileContext()) return true;
 
-  if (isMobileOnlyContext()) {
-    return true;
-  }
-
-  const {
-    mobileToggle,
-  } =
-    safeGetDom(getDom);
-
+  const { mobileToggle } = safeGetDom(getDom);
   return isVisibleElement(mobileToggle);
 }
 
-/* =========================================================
-   DOM RESOLUTION
-========================================================= */
-
-function getSidebarId(sidebar) {
-  if (!isElement(sidebar)) {
-    return DEFAULT_SIDEBAR_ID;
-  }
-
-  const existing =
-    safeText(sidebar.id, "");
-
-  if (existing) {
-    return existing;
-  }
-
-  try {
-    sidebar.id =
-      DEFAULT_SIDEBAR_ID;
-
-    return sidebar.id;
-  } catch {
-    return DEFAULT_SIDEBAR_ID;
-  }
-}
-
-function isRouteShellHidden() {
-  const body =
-    getBody();
-
-  const html =
-    getHtml();
+function routeShellHidden() {
+  const body = bodyEl();
+  const html = htmlEl();
 
   return Boolean(
     body?.classList?.contains?.(BODY_ROUTE_SHELL_HIDDEN_CLASS) ||
@@ -618,19 +360,10 @@ function isRouteShellHidden() {
 ========================================================= */
 
 export function syncFixedTopbarOffset(getDom) {
-  const {
-    topbar,
-  } =
-    safeGetDom(getDom);
+  const { topbar } = safeGetDom(getDom);
+  if (!isElement(topbar)) return false;
 
-  if (!isElement(topbar)) {
-    return false;
-  }
-
-  /*
-    No aplicamos offsets desde JS.
-    Sólo limpiamos residuos legacy inline para que layout/topbar.css gobiernen.
-  */
+  // Layout lo gobierna CSS. Sólo limpiamos residuos legacy inline.
   try {
     topbar.style.left = "";
     topbar.style.right = "";
@@ -645,55 +378,40 @@ export function syncFixedTopbarOffset(getDom) {
 }
 
 /* =========================================================
-   DESKTOP / MOBILE VISUAL STATE
+   VISUAL STATE
 ========================================================= */
 
-function restoreDesktopSidebarAccessibility(sidebar) {
-  if (!isElement(sidebar)) {
-    return false;
+function sidebarId(sidebar) {
+  if (!isElement(sidebar)) return DEFAULT_SIDEBAR_ID;
+
+  const existing = safeText(sidebar.id, "");
+  if (existing) return existing;
+
+  try {
+    sidebar.id = DEFAULT_SIDEBAR_ID;
+    return sidebar.id;
+  } catch {
+    return DEFAULT_SIDEBAR_ID;
   }
+}
 
-  /*
-    Desktop:
-    - aria-hidden=false si no estamos en auth/shell-hidden.
-    - inert fuera.
-    - no tocamos collapsed.
-    - no eliminamos clases estructurales desktop.
-  */
-  if (
-    !isRouteShellHidden() &&
-    sidebar.hidden !== true
-  ) {
-    setAttr(
-      sidebar,
-      "aria-hidden",
-      "false"
-    );
+function restoreDesktopSidebarAccessibility(sidebar) {
+  if (!isElement(sidebar)) return false;
 
-    removeAttr(
-      sidebar,
-      "inert"
-    );
+  // En desktop no tocamos collapsed ni clases estructurales.
+  if (!routeShellHidden() && sidebar.hidden !== true) {
+    setAttr(sidebar, "aria-hidden", "false");
+    removeAttr(sidebar, "inert");
   }
 
   try {
-    sidebar.dataset.mode =
-      "desktop";
+    sidebar.dataset.mode = "desktop";
+    sidebar.dataset.mobileOpen = "false";
 
-    sidebar.dataset.mobileOpen =
-      "false";
+    if (!routeShellHidden()) sidebar.dataset.open = "true";
 
-    if (!isRouteShellHidden()) {
-      sidebar.dataset.open =
-        "true";
-    }
-
-    if (
-      safeText(sidebar.dataset.state, "") === "closed" ||
-      safeText(sidebar.dataset.state, "") === "open"
-    ) {
-      sidebar.dataset.state =
-        "desktop";
+    if (["closed", "open"].includes(safeText(sidebar.dataset.state, ""))) {
+      sidebar.dataset.state = "desktop";
     }
   } catch {}
 
@@ -701,131 +419,68 @@ function restoreDesktopSidebarAccessibility(sidebar) {
 }
 
 function clearMobileSidebarResidue(sidebar) {
-  const body =
-    getBody();
+  const body = bodyEl();
 
   try {
-    body?.classList?.remove?.(
-      BODY_SIDEBAR_OPEN_CLASS,
-      BODY_SIDEBAR_CLOSING_CLASS
-    );
+    body?.classList?.remove?.(BODY_SIDEBAR_OPEN_CLASS, BODY_SIDEBAR_CLOSING_CLASS);
   } catch {}
 
-  if (!isElement(sidebar)) {
-    return false;
-  }
+  if (!isElement(sidebar)) return false;
 
-  /*
-    Importante:
-    En desktop NO quitamos open/is-open genéricos porque algunos sidebars
-    los usan como clase estructural de visibilidad. Sólo quitamos mobile residue.
-  */
+  // En desktop no quitamos open/is-open genéricos: pueden ser estructurales.
   try {
-    SIDEBAR_MOBILE_CLASSES.forEach((className) => {
-      sidebar.classList.remove(className);
-    });
+    MOBILE_MODE_CLASSES.forEach((className) => sidebar.classList.remove(className));
   } catch {}
 
   try {
-    SIDEBAR_MOBILE_DATA_KEYS.forEach((key) => {
-      if (key in sidebar.dataset) {
-        sidebar.dataset[key] =
-          "false";
-      }
+    MOBILE_DATA_KEYS.forEach((key) => {
+      if (key in sidebar.dataset) sidebar.dataset[key] = "false";
     });
   } catch {}
 
   restoreDesktopSidebarAccessibility(sidebar);
-
   return true;
 }
 
-function applySidebarVisualState(sidebar, open = false) {
-  const body =
-    getBody();
+function applyMobileSidebarState(sidebar, open = false) {
+  const body = bodyEl();
+  const nextOpen = Boolean(open);
 
-  const nextOpen =
-    Boolean(open);
-
-  /*
-    Desktop nunca se cierra desde este bridge.
-    Pasar a desktop = limpiar residue mobile + restaurar accesibilidad.
-  */
-  if (isDesktopContext()) {
+  if (desktopContext()) {
     clearMobileSidebarResidue(sidebar);
     return true;
   }
 
   if (isElement(sidebar)) {
     try {
-      SIDEBAR_MOBILE_OPEN_CLASSES.forEach((className) => {
-        sidebar.classList.toggle(
-          className,
-          nextOpen
-        );
-      });
-
-      SIDEBAR_MOBILE_CLASSES.forEach((className) => {
-        sidebar.classList.toggle(
-          className,
-          nextOpen
-        );
-      });
+      MOBILE_OPEN_CLASSES.forEach((className) => toggleClass(sidebar, className, nextOpen));
+      MOBILE_MODE_CLASSES.forEach((className) => toggleClass(sidebar, className, nextOpen));
     } catch {}
 
     try {
-      sidebar.dataset.mode =
-        "mobile";
+      sidebar.dataset.mode = "mobile";
+      sidebar.dataset.state = nextOpen ? "open" : "closed";
+      sidebar.dataset.open = String(nextOpen);
+      sidebar.dataset.mobileOpen = String(nextOpen);
+      sidebar.setAttribute("aria-hidden", String(!nextOpen));
 
-      sidebar.dataset.state =
-        nextOpen ? "open" : "closed";
-
-      sidebar.dataset.open =
-        String(nextOpen);
-
-      sidebar.dataset.mobileOpen =
-        String(nextOpen);
-
-      sidebar.setAttribute(
-        "aria-hidden",
-        String(!nextOpen)
-      );
-
-      if (nextOpen) {
-        sidebar.removeAttribute("inert");
-      } else {
-        sidebar.setAttribute(
-          "inert",
-          ""
-        );
-      }
+      if (nextOpen) sidebar.removeAttribute("inert");
+      else sidebar.setAttribute("inert", "");
     } catch {}
   }
 
   try {
-    body?.classList?.toggle?.(
-      BODY_SIDEBAR_OPEN_CLASS,
-      nextOpen
-    );
-
-    if (!nextOpen) {
-      body?.classList?.remove?.(
-        BODY_SIDEBAR_CLOSING_CLASS
-      );
-    }
+    body?.classList?.toggle?.(BODY_SIDEBAR_OPEN_CLASS, nextOpen);
+    if (!nextOpen) body?.classList?.remove?.(BODY_SIDEBAR_CLOSING_CLASS);
   } catch {}
 
   return true;
 }
 
-function forceCloseSidebarVisualState(getDom) {
-  const {
-    sidebar,
-  } =
-    safeGetDom(getDom);
+function forceCloseMobileVisualState(getDom) {
+  const { sidebar } = safeGetDom(getDom);
 
   clearMobileSidebarResidue(sidebar);
-
   setMobileToggleState(getDom);
   syncFixedTopbarOffset(getDom);
 
@@ -833,175 +488,57 @@ function forceCloseSidebarVisualState(getDom) {
 }
 
 /* =========================================================
-   STATE DETECTION
+   STATE
 ========================================================= */
 
 export function getSidebarMobileOpenState(sidebar) {
-  /*
-    En desktop no existe estado mobile abierto.
-    Evita que data-state/open legacy haga creer al topbar
-    que el sidebar mobile está abierto.
-  */
-  if (isDesktopContext()) {
-    return false;
-  }
+  if (desktopContext()) return false;
 
-  const body =
-    getBody();
+  const body = bodyEl();
+  const bodyOpen = Boolean(body?.classList?.contains?.(BODY_SIDEBAR_OPEN_CLASS));
 
-  const bodyOpen =
-    Boolean(
-      body?.classList?.contains?.(
-        BODY_SIDEBAR_OPEN_CLASS
-      )
-    );
-
-  const sidebarOpen =
-    Boolean(
-      isElement(sidebar) &&
-        SIDEBAR_MOBILE_OPEN_CLASSES.some((className) =>
-          sidebar.classList?.contains?.(className)
-        )
-    );
-
-  const dataOpen =
-    Boolean(
-      isElement(sidebar) &&
-        [
-          "open",
-          "opened",
-          "true",
-        ].includes(
-          safeText(
-            sidebar.dataset?.state,
-            ""
-          ).toLowerCase()
-        )
-    );
-
-  const dataMobileOpen =
-    Boolean(
-      isElement(sidebar) &&
-        safeText(
-          sidebar.dataset?.mobileOpen,
-          ""
-        ).toLowerCase() === "true"
-    );
-
-  const ariaOpen =
-    Boolean(
-      isElement(sidebar) &&
-        sidebar.getAttribute?.("aria-hidden") === "false" &&
-        (
-          bodyOpen ||
-          sidebarOpen ||
-          dataOpen ||
-          dataMobileOpen
-        )
-    );
-
-  return Boolean(
-    bodyOpen ||
-      sidebarOpen ||
-      dataOpen ||
-      dataMobileOpen ||
-      ariaOpen
+  const classOpen = Boolean(
+    isElement(sidebar) && MOBILE_OPEN_CLASSES.some((className) => sidebar.classList?.contains?.(className))
   );
+
+  const dataState = safeText(sidebar?.dataset?.state, "").toLowerCase();
+  const dataOpen = isElement(sidebar) && ["open", "opened", "true"].includes(dataState);
+  const dataMobileOpen = isElement(sidebar) && safeText(sidebar.dataset?.mobileOpen, "").toLowerCase() === "true";
+  const ariaOpen = isElement(sidebar) && sidebar.getAttribute?.("aria-hidden") === "false" && (bodyOpen || classOpen || dataOpen || dataMobileOpen);
+
+  return Boolean(bodyOpen || classOpen || dataOpen || dataMobileOpen || ariaOpen);
 }
 
-/* =========================================================
-   MOBILE TOGGLE STATE
-========================================================= */
-
 export function setMobileToggleState(getDom) {
-  const {
-    mobileToggle,
-    sidebar,
-  } =
-    safeGetDom(getDom);
+  const { mobileToggle, sidebar } = safeGetDom(getDom);
+  if (!isElement(mobileToggle)) return false;
 
-  if (!isElement(mobileToggle)) {
-    return false;
-  }
-
-  const isDesktop =
-    isDesktopContext();
-
-  const isOpen =
-    !isDesktop &&
-    getSidebarMobileOpenState(sidebar);
-
-  const sidebarId =
-    getSidebarId(sidebar);
+  const desktop = desktopContext();
+  const open = !desktop && getSidebarMobileOpenState(sidebar);
+  const id = sidebarId(sidebar);
 
   try {
-    mobileToggle.setAttribute(
-      "aria-expanded",
-      String(isOpen)
-    );
-
-    mobileToggle.setAttribute(
-      "aria-controls",
-      sidebarId
-    );
-
-    mobileToggle.setAttribute(
-      "aria-label",
-      isOpen
-        ? "Cerrar navegación"
-        : "Abrir navegación"
-    );
-
-    mobileToggle.dataset.state =
-      isOpen ? "open" : "closed";
-
-    mobileToggle.dataset.mobile =
-      String(!isDesktop);
-
-    mobileToggle.classList.toggle(
-      MOBILE_TOGGLE_ACTIVE_CLASS,
-      isOpen
-    );
-
-    /*
-      La visibilidad final también está en CSS.
-      hidden sólo evita foco accidental en desktop.
-    */
-    mobileToggle.hidden =
-      isDesktop;
-
-    mobileToggle.setAttribute(
-      "data-tooltip",
-      isOpen
-        ? "Cerrar navegación"
-        : "Abrir navegación"
-    );
-
+    mobileToggle.setAttribute("aria-expanded", String(open));
+    mobileToggle.setAttribute("aria-controls", id);
+    mobileToggle.setAttribute("aria-label", open ? "Cerrar navegación" : "Abrir navegación");
+    mobileToggle.setAttribute("data-tooltip", open ? "Cerrar navegación" : "Abrir navegación");
     mobileToggle.removeAttribute("title");
+
+    mobileToggle.dataset.state = open ? "open" : "closed";
+    mobileToggle.dataset.mobile = String(!desktop);
+    mobileToggle.classList.toggle(MOBILE_TOGGLE_ACTIVE_CLASS, open);
+
+    // CSS decide la estética; hidden evita foco accidental en desktop.
+    mobileToggle.hidden = desktop;
   } catch {}
 
   return true;
 }
 
-/* =========================================================
-   POST ACTION SYNC
-========================================================= */
-
-function postMobileActionSync({
-  AppCore,
-  getDom,
-  requestedOpen = false,
-  handledByModule = false,
-  reason = "mobile-action",
-} = {}) {
+function postMobileActionSync({ AppCore, getDom, requestedOpen = false, handledByModule = false, reason = "mobile-action" } = {}) {
   nextFrame(() => {
-    const dom =
-      safeGetDom(getDom);
-
-    const realOpen =
-      getSidebarMobileOpenState(
-        dom.sidebar
-      );
+    const { sidebar } = safeGetDom(getDom);
+    const realOpen = getSidebarMobileOpenState(sidebar);
 
     setMobileToggleState(getDom);
     syncFixedTopbarOffset(getDom);
@@ -1009,20 +546,13 @@ function postMobileActionSync({
     emitMobileSync(
       AppCore,
       {
-        open:
-          realOpen,
-
-        requestedOpen:
-          Boolean(requestedOpen),
-
-        handledByModule:
-          Boolean(handledByModule),
-
+        open: realOpen,
+        requestedOpen: Boolean(requestedOpen),
+        handledByModule: Boolean(handledByModule),
         reason,
       },
       {
-        legacy:
-          !handledByModule,
+        legacy: !handledByModule,
       }
     );
   });
@@ -1034,42 +564,22 @@ function postMobileActionSync({
    PUBLIC ACTIONS
 ========================================================= */
 
-export function openSidebarMobile({
-  AppCore,
-  getDom,
-} = {}) {
+export function openSidebarMobile({ AppCore, getDom } = {}) {
   if (!shouldUseMobileSidebarMode(getDom)) {
-    forceCloseSidebarVisualState(getDom);
+    forceCloseMobileVisualState(getDom);
     return false;
   }
 
-  const {
-    sidebar,
-  } =
-    safeGetDom(getDom);
+  const { sidebar } = safeGetDom(getDom);
 
-  const alreadyOpen =
-    getSidebarMobileOpenState(sidebar);
-
-  if (alreadyOpen) {
+  if (getSidebarMobileOpenState(sidebar)) {
     setMobileToggleState(getDom);
     syncFixedTopbarOffset(getDom);
-
     return true;
   }
 
-  const sidebarModule =
-    getSidebarModule(AppCore);
-
-  const handledByModule =
-    callSidebarAction(
-      sidebarModule,
-      "open",
-      {
-        open:
-          true,
-      }
-    );
+  const sidebarModule = getSidebarModule(AppCore);
+  const handledByModule = callSidebarAction(sidebarModule, "open", { open: true });
 
   if (!handledByModule) {
     if (!isElement(sidebar)) {
@@ -1078,61 +588,29 @@ export function openSidebarMobile({
       return false;
     }
 
-    applySidebarVisualState(
-      sidebar,
-      true
-    );
+    applyMobileSidebarState(sidebar, true);
   }
 
-  postMobileActionSync({
-    AppCore,
-    getDom,
-    requestedOpen:
-      true,
-    handledByModule,
-    reason:
-      "open",
-  });
-
+  postMobileActionSync({ AppCore, getDom, requestedOpen: true, handledByModule, reason: "open" });
   return true;
 }
 
-export function closeSidebarMobile({
-  AppCore,
-  getDom,
-} = {}) {
+export function closeSidebarMobile({ AppCore, getDom } = {}) {
   if (!shouldUseMobileSidebarMode(getDom)) {
-    forceCloseSidebarVisualState(getDom);
+    forceCloseMobileVisualState(getDom);
     return false;
   }
 
-  const {
-    sidebar,
-  } =
-    safeGetDom(getDom);
+  const { sidebar } = safeGetDom(getDom);
 
-  const alreadyClosed =
-    !getSidebarMobileOpenState(sidebar);
-
-  if (alreadyClosed) {
+  if (!getSidebarMobileOpenState(sidebar)) {
     setMobileToggleState(getDom);
     syncFixedTopbarOffset(getDom);
-
     return true;
   }
 
-  const sidebarModule =
-    getSidebarModule(AppCore);
-
-  const handledByModule =
-    callSidebarAction(
-      sidebarModule,
-      "close",
-      {
-        open:
-          false,
-      }
-    );
+  const sidebarModule = getSidebarModule(AppCore);
+  const handledByModule = callSidebarAction(sidebarModule, "close", { open: false });
 
   if (!handledByModule) {
     if (!isElement(sidebar)) {
@@ -1141,68 +619,25 @@ export function closeSidebarMobile({
       return false;
     }
 
-    applySidebarVisualState(
-      sidebar,
-      false
-    );
+    applyMobileSidebarState(sidebar, false);
   }
 
-  postMobileActionSync({
-    AppCore,
-    getDom,
-    requestedOpen:
-      false,
-    handledByModule,
-    reason:
-      "close",
-  });
-
+  postMobileActionSync({ AppCore, getDom, requestedOpen: false, handledByModule, reason: "close" });
   return true;
 }
 
-export function toggleSidebarMobile({
-  AppCore,
-  getDom,
-} = {}) {
+export function toggleSidebarMobile({ AppCore, getDom } = {}) {
   if (!shouldUseMobileSidebarMode(getDom)) {
-    forceCloseSidebarVisualState(getDom);
+    forceCloseMobileVisualState(getDom);
     return false;
   }
 
-  const {
-    sidebar,
-  } =
-    safeGetDom(getDom);
+  const { sidebar } = safeGetDom(getDom);
+  const nextOpen = !getSidebarMobileOpenState(sidebar);
+  const sidebarModule = getSidebarModule(AppCore);
 
-  const currentlyOpen =
-    getSidebarMobileOpenState(sidebar);
-
-  const nextOpen =
-    !currentlyOpen;
-
-  const sidebarModule =
-    getSidebarModule(AppCore);
-
-  const handledByExplicitMethod =
-    callSidebarAction(
-      sidebarModule,
-      nextOpen ? "open" : "close",
-      {
-        open:
-          nextOpen,
-      }
-    );
-
-  const handledByModule =
-    handledByExplicitMethod ||
-    callSidebarAction(
-      sidebarModule,
-      "toggle",
-      {
-        open:
-          nextOpen,
-      }
-    );
+  const handledByExplicitMethod = callSidebarAction(sidebarModule, nextOpen ? "open" : "close", { open: nextOpen });
+  const handledByModule = handledByExplicitMethod || callSidebarAction(sidebarModule, "toggle", { open: nextOpen });
 
   if (!handledByModule) {
     if (!isElement(sidebar)) {
@@ -1211,49 +646,20 @@ export function toggleSidebarMobile({
       return false;
     }
 
-    applySidebarVisualState(
-      sidebar,
-      nextOpen
-    );
+    applyMobileSidebarState(sidebar, nextOpen);
   }
 
-  postMobileActionSync({
-    AppCore,
-    getDom,
-    requestedOpen:
-      nextOpen,
-    handledByModule,
-    reason:
-      "toggle",
-  });
-
+  postMobileActionSync({ AppCore, getDom, requestedOpen: nextOpen, handledByModule, reason: "toggle" });
   return true;
 }
-
-/* =========================================================
-   VIEWPORT RESIZE
-========================================================= */
 
 export function handleViewportResize(getDom, closeSidebarMobileFn) {
-  if (isDesktopContext()) {
-    /*
-      Desktop:
-      - limpia residuos mobile
-      - restaura aria-hidden=false
-      - NO toca sidebar-collapsed
-      - NO invoca closeSidebarMobileFn
-      - NO elimina clases desktop estructurales
-    */
-    forceCloseSidebarVisualState(getDom);
+  void closeSidebarMobileFn;
+
+  if (desktopContext()) {
+    forceCloseMobileVisualState(getDom);
     return true;
   }
-
-  /*
-    Mobile:
-    - no cerramos automáticamente
-    - sólo sincronizamos botón/offset
-  */
-  void closeSidebarMobileFn;
 
   setMobileToggleState(getDom);
   syncFixedTopbarOffset(getDom);
@@ -1261,11 +667,9 @@ export function handleViewportResize(getDom, closeSidebarMobileFn) {
   return true;
 }
 
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
-
 export default {
+  TOPBAR_SIDEBAR_VERSION,
+
   getSidebarModule,
 
   syncFixedTopbarOffset,

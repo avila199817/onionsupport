@@ -2,13 +2,13 @@
    Onion SPA - Auth Restore
    Archivo: src/features/auth/restore.js
 
-   AUTH RESTORE · FINAL SIMPLE
-   - Restaurar sesión usando CoreHttp
-   - Prioridad: token -> /auth/me
-   - Fallback: refresh -> /auth/me
-   - Nunca authenticated sin token + user usable
-   - Preserva rutas públicas técnicas durante boot
-   - Sin fetch propio, apiClient propio, Router, Toast ni storage global
+   AUTH RESTORE · SIMPLE
+   - restaurar sesión usando CoreHttp
+   - prioridad: token -> /auth/me
+   - fallback: refresh -> /auth/me
+   - nunca authenticated sin token + user usable
+   - preserva rutas públicas técnicas durante boot
+   - sin fetch propio, apiClient propio, Router, Toast ni storage global
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -16,6 +16,7 @@ import CoreHttp from "../../core/http.js";
 
 import {
   extractMessage,
+  redactTokenInText,
 } from "./helpers.js";
 
 import {
@@ -45,14 +46,11 @@ import {
   buildSessionSnapshot,
 } from "./session.js";
 
-/* =========================================================
-   META
-========================================================= */
-
-export const RESTORE_VERSION = "20.0.0-final";
+export const RESTORE_VERSION = "21.0.0-simple";
 
 const RESTORE_SOURCE = "auth.restore";
 const BACKEND_ORIGIN = "https://api.onionit.net";
+const DEFAULT_ROUTE = "/";
 
 const runtimeSession = {
   checking: false,
@@ -69,22 +67,30 @@ const runtimeSession = {
   lastError: null,
 };
 
-const PUBLIC_TECHNICAL_ROUTES = Object.freeze([
-  "/login",
+const ACTIVATION_PATHS = Object.freeze([
   "/activate-account",
   "/activate",
   "/activation",
   "/account/activate",
   "/activate/first-user",
-  "/reset-password",
+]);
+
+const RESET_CONFIRM_PATHS = Object.freeze([
   "/reset-password/confirm",
   "/reset-password-confirm",
-  "/password-reset",
   "/password-reset/confirm",
   "/password-reset-confirm",
   "/confirm-reset-password",
+]);
+
+const PUBLIC_TECHNICAL_ROUTES = Object.freeze([
+  "/login",
+  ...ACTIVATION_PATHS,
+  "/reset-password",
+  ...RESET_CONFIRM_PATHS,
   "/forgot-password",
   "/recover-password",
+  "/password-reset",
   "/2fa",
   "/mfa",
   "/otp",
@@ -122,6 +128,10 @@ const SESSION_ID_KEYS = Object.freeze(["sessionId", "session_id", "sid", "id"]);
 const SESSION_USER_ID_KEYS = Object.freeze(["sessionUserId", "session_user_id", "userId", "user_id", "uid", "sub"]);
 const NESTED_KEYS = Object.freeze(["data", "payload", "result", "body", "response", "auth", "authData", "session", "sessionData"]);
 
+const BAD_TOKEN_VALUES = new Set(["", "null", "undefined", "false", "true", "nan", "none", "[object object]", "{}", "[]"]);
+const DISABLED_STATUS = new Set(["disabled", "inactive", "deleted", "blocked", "suspended", "banned", "revoked", "archived", "desactivado", "inactivo", "eliminado", "bloqueado", "suspendido"]);
+const SENSITIVE_KEY_RE = /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
+
 /* =========================================================
    BASICS
 ========================================================= */
@@ -155,14 +165,12 @@ function safeNumber(value, fallback = 0) {
 }
 
 function safeBool(value, fallback = false) {
-  if (value === true) return true;
-  if (value === false) return false;
-  if (value === 1) return true;
-  if (value === 0) return false;
+  if (value === true || value === 1 || value === "1") return true;
+  if (value === false || value === 0 || value === "0") return false;
 
   const text = safeLower(value, "");
-  if (["true", "1", "yes", "si", "sí", "on", "ok", "active"].includes(text)) return true;
-  if (["false", "0", "no", "off", "inactive", "disabled"].includes(text)) return false;
+  if (["true", "yes", "si", "sí", "on", "ok", "active"].includes(text)) return true;
+  if (["false", "no", "off", "inactive", "disabled"].includes(text)) return false;
 
   return Boolean(fallback);
 }
@@ -172,6 +180,7 @@ function first(...values) {
     if (value === null || value === undefined) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
+    if (isPlainObject(value) && Object.keys(value).length === 0) continue;
     return value;
   }
 
@@ -182,12 +191,12 @@ function firstText(...values) {
   return safeText(first(...values), "");
 }
 
-function nowIso(ms = Date.now()) {
-  try {
-    return new Date(ms).toISOString();
-  } catch {
-    return "";
-  }
+function nowMs() {
+  try { return Date.now(); } catch { return 0; }
+}
+
+function nowIso(ms = nowMs()) {
+  try { return new Date(ms).toISOString(); } catch { return ""; }
 }
 
 function getState() {
@@ -196,24 +205,17 @@ function getState() {
 
 function safeSetState(patch = {}, options = {}) {
   const cleanPatch = safeObject(patch);
+  const finalOptions = {
+    source: RESTORE_SOURCE,
+    emit: false,
+    emitState: false,
+    emitDerived: false,
+    silent: true,
+    ...safeObject(options),
+  };
 
-  try {
-    AppCore?.setState?.(cleanPatch, {
-      source: RESTORE_SOURCE,
-      emit: false,
-      silent: true,
-      ...safeObject(options),
-    });
-  } catch {}
-
-  try {
-    AppCore?.patchState?.(cleanPatch, {
-      source: RESTORE_SOURCE,
-      emit: false,
-      silent: true,
-      ...safeObject(options),
-    });
-  } catch {}
+  try { AppCore?.setState?.(cleanPatch, finalOptions); } catch {}
+  try { AppCore?.patchState?.(cleanPatch, finalOptions); } catch {}
 
   try {
     if (AppCore?.state && typeof AppCore.state === "object") Object.assign(AppCore.state, cleanPatch);
@@ -233,12 +235,9 @@ function stripBearer(token = "") {
 function hasUsableToken(token = "") {
   const value = stripBearer(token);
   if (!value || /[\s\r\n\t]/.test(value)) return false;
+  if (BAD_TOKEN_VALUES.has(value.toLowerCase())) return false;
 
-  if (["null", "undefined", "false", "true", "nan", "none", "[object object]", "{}", "[]"].includes(value.toLowerCase())) {
-    return false;
-  }
-
-  const max = safeNumber(AppCore?.config?.auth?.tokenMaxLength, 8192);
+  const max = safeNumber(AppCore?.config?.auth?.tokenMaxLength || AppCore?.config?.auth?.constants?.tokenMaxLength, 8192);
   if (max > 0 && value.length > max) return false;
 
   try {
@@ -248,18 +247,23 @@ function hasUsableToken(token = "") {
   return true;
 }
 
+function normalizeStatus(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_:.]/g, "")
+    .replace(/^_+|_+$/g, "");
+}
+
 function isUserActive(user = null) {
   if (!isPlainObject(user)) return false;
 
-  const status = safeLower(user.status || user.estado || user.state || user.accountStatus || "", "");
+  const status = normalizeStatus(user.status || user.estado || user.state || user.accountStatus || "");
+  if (DISABLED_STATUS.has(status)) return false;
 
-  if (["disabled", "inactive", "deleted", "blocked", "suspended", "banned", "revoked", "archived", "desactivado", "inactivo", "eliminado", "bloqueado", "suspendido"].includes(status)) {
-    return false;
-  }
-
-  if (user.disabled === true || user.deleted === true || user.blocked === true || user.banned === true || user.suspended === true || user.revoked === true || user.archived === true) {
-    return false;
-  }
+  if (user.disabled === true || user.deleted === true || user.blocked === true || user.banned === true || user.suspended === true || user.revoked === true || user.archived === true) return false;
 
   const active = user.active ?? user.enabled ?? user.isActive ?? user.isEnabled;
   return active === undefined || active === null || active === "" ? true : safeBool(active, true);
@@ -280,10 +284,7 @@ function hasUsableUser(user = null) {
       user.email ||
       user.mail ||
       user.phone ||
-      user.telefono ||
-      user.name ||
-      user.nombre ||
-      user.displayName
+      user.telefono
   );
 }
 
@@ -342,13 +343,13 @@ function hasCompleteAuthState() {
 ========================================================= */
 
 function createRestoreError(message = "No se pudo restaurar la sesión.", { status = 401, code = "AUTH_RESTORE_FAILED", response = null } = {}) {
-  const error = new Error(message);
+  const error = new Error(redact(message));
 
   error.name = "AuthRestoreError";
   error.status = status;
   error.statusCode = status;
   error.code = code;
-  error.data = { code, message, status };
+  error.data = { code, message: redact(message), status };
 
   try {
     Object.defineProperty(error, "raw", { value: response, enumerable: false, configurable: true });
@@ -372,7 +373,7 @@ function buildErrorPayload(error = null) {
     name: safeText(error?.name, "Error"),
     status: getErrorStatus(error) || null,
     code: getErrorCode(error) || null,
-    message: extractMessage(error) || safeText(error?.message, "Error"),
+    message: redact(extractMessage(error) || safeText(error?.message, "Error")),
     timeout: Boolean(error?.timeout),
     aborted: Boolean(error?.aborted),
     at: nowIso(),
@@ -397,26 +398,29 @@ function shouldClearForError(error = null) {
 }
 
 function redact(value = "") {
-  return safeText(value, "")
-    .replace(/([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi, "$1***")
-    .replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***")
-    .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+  try {
+    return redactTokenInText(value);
+  } catch {
+    return safeText(value, "")
+      .replace(/([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi, "$1***")
+      .replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***")
+      .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***")
+      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+      .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+  }
 }
 
 function sanitizeUserForEvent(user = null) {
   if (!isPlainObject(user)) return null;
 
   const output = { ...user };
-
   for (const key of Object.keys(output)) {
-    if (/password|hash|token|secret|otp|totp|mfa|2fa|authorization|cookie/i.test(key) || key.startsWith("_")) delete output[key];
+    if (SENSITIVE_KEY_RE.test(key) || key.startsWith("_")) delete output[key];
   }
 
-  if (output.avatar) output.avatar = redact(output.avatar);
-  if (output.avatarUrl) output.avatarUrl = redact(output.avatarUrl);
-  if (output.picture) output.picture = redact(output.picture);
+  for (const key of ["avatar", "avatarUrl", "picture", "photo", "image"]) {
+    if (output[key]) output[key] = redact(output[key]);
+  }
 
   return output;
 }
@@ -465,20 +469,48 @@ function isHashRouterPath(value = "") {
 
 function normalizeHashRouterPath(value = "") {
   const raw = safeText(value, "");
-  if (!raw) return "/";
-  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || "/";
-  return raw.replace(/^#\/?/, "/") || "/";
+  if (!raw) return DEFAULT_ROUTE;
+  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
+  return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
 }
 
-function normalizePathname(pathname = "/") {
-  let value = safeText(pathname, "/").replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+function normalizePathname(pathname = DEFAULT_ROUTE) {
+  let value = safeText(pathname, DEFAULT_ROUTE).replace(/\\/g, "/").replace(/\/{2,}/g, "/");
   if (!value.startsWith("/")) value = `/${value}`;
-  if (value.length > 1) value = value.replace(/\/+$/g, "") || "/";
+
+  const parts = [];
+  for (const part of value.split("/").filter(Boolean)) {
+    if (part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+
+  value = `/${parts.join("/")}` || DEFAULT_ROUTE;
+  if (value.length > 1) value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
   return value;
 }
 
-function stripSearchAndHash(path = "/") {
-  return normalizePathname(safeText(path, "/").split("?")[0].split("#")[0] || "/");
+function splitPath(path = DEFAULT_ROUTE) {
+  const raw = safeText(path, DEFAULT_ROUTE);
+  if (isHashRouterPath(raw)) return splitPath(normalizeHashRouterPath(raw));
+
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
+  }
+
+  const searchIndex = pathname.indexOf("?");
+  if (searchIndex >= 0) {
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
+  }
+
+  return { pathname: normalizePathname(pathname), search, hash };
 }
 
 function pathFromUrlLike(value = "") {
@@ -489,19 +521,28 @@ function pathFromUrlLike(value = "") {
   try {
     const parsed = new URL(raw, "http://localhost");
     if (parsed.hash && isHashRouterPath(parsed.hash)) return normalizeHashRouterPath(parsed.hash);
-    return `${normalizePathname(parsed.pathname || "/")}${parsed.search || ""}${parsed.hash || ""}`;
+    return `${normalizePathname(parsed.pathname || DEFAULT_ROUTE)}${parsed.search || ""}${parsed.hash || ""}`;
   } catch {
     return raw.startsWith("/") ? raw : `/${raw}`;
   }
 }
 
-function stripPublicUsernamePrefix(path = "/") {
-  const clean = stripSearchAndHash(path);
+function stripPublicUsernamePrefix(path = DEFAULT_ROUTE) {
+  const clean = splitPath(path).pathname;
   const parts = clean.split("/").filter(Boolean);
 
   if (parts[0] && /^@[A-Za-z0-9._-]{1,80}$/.test(parts[0])) {
-    return parts.length > 1 ? normalizePathname(`/${parts.slice(1).join("/")}`) : "/";
+    return parts.length > 1 ? normalizePathname(`/${parts.slice(1).join("/")}`) : DEFAULT_ROUTE;
   }
+
+  return clean;
+}
+
+function canonicalRoutePath(path = DEFAULT_ROUTE) {
+  const clean = stripPublicUsernamePrefix(pathFromUrlLike(path) || path || DEFAULT_ROUTE);
+
+  if (ACTIVATION_PATHS.some((candidate) => clean === candidate || clean.startsWith(`${candidate}/`))) return "/activate-account";
+  if (RESET_CONFIRM_PATHS.some((candidate) => clean === candidate || clean.startsWith(`${candidate}/`))) return "/reset-password/confirm";
 
   return clean;
 }
@@ -512,21 +553,21 @@ function getBrowserPublicPath() {
   try {
     const { pathname, search, hash } = window.location;
     if (hash && isHashRouterPath(hash)) return normalizeHashRouterPath(hash);
-    return `${pathname || "/"}${search || ""}${hash || ""}`;
+    return `${pathname || DEFAULT_ROUTE}${search || ""}${hash || ""}`;
   } catch {
     return "";
   }
 }
 
-function isPublicTechnicalRoute(path = "/") {
-  const clean = stripPublicUsernamePrefix(pathFromUrlLike(path) || path || "/");
+function isPublicTechnicalRoute(path = DEFAULT_ROUTE) {
+  const clean = canonicalRoutePath(path);
   return PUBLIC_TECHNICAL_ROUTES.some((candidate) => clean === candidate || clean.startsWith(`${candidate}/`));
 }
 
 function captureRouteContext(options = {}) {
   const state = getState();
-  const publicPath = safeText(options.publicPath || state.publicPath, "") || getBrowserPublicPath() || "/";
-  const route = safeText(options.route || state.route, "") || stripPublicUsernamePrefix(publicPath) || "/";
+  const publicPath = safeText(options.publicPath || state.publicPath, "") || getBrowserPublicPath() || DEFAULT_ROUTE;
+  const route = safeText(options.route || state.route, "") || canonicalRoutePath(publicPath) || DEFAULT_ROUTE;
   const preserve = Boolean(
     options.publicRoute ||
       options.preserveRoute ||
@@ -539,18 +580,29 @@ function captureRouteContext(options = {}) {
 
   return {
     preserve,
-    route: stripPublicUsernamePrefix(route || publicPath || "/"),
-    publicPath: publicPath || route || "/",
+    route: canonicalRoutePath(route || publicPath || DEFAULT_ROUTE),
+    publicPath: publicPath || route || DEFAULT_ROUTE,
+    activationBoot: Boolean(options.activationBoot || canonicalRoutePath(route) === "/activate-account"),
+    resetConfirmBoot: Boolean(options.resetConfirmBoot || canonicalRoutePath(route) === "/reset-password/confirm"),
   };
 }
 
 function restoreRouteContext(routeContext = {}) {
   if (!routeContext?.preserve) return false;
 
-  const route = routeContext.route || "/";
-  const publicPath = routeContext.publicPath || route;
+  const route = canonicalRoutePath(routeContext.route || routeContext.publicPath || DEFAULT_ROUTE);
+  const publicPath = safeText(routeContext.publicPath, route);
 
-  safeSetState({ route, canonicalPath: route, publicPath }, { source: `${RESTORE_SOURCE}:restore-route` });
+  safeSetState({
+    route,
+    canonicalPath: route,
+    publicPath,
+    bootIsActivation: Boolean(routeContext.activationBoot || getState().bootIsActivation),
+    bootHasActivationToken: Boolean(routeContext.activationBoot || getState().bootHasActivationToken),
+    bootIsResetConfirm: Boolean(routeContext.resetConfirmBoot || getState().bootIsResetConfirm),
+    bootHasResetToken: Boolean(routeContext.resetConfirmBoot || getState().bootHasResetToken),
+  }, { source: `${RESTORE_SOURCE}:restore-route` });
+
   return true;
 }
 
@@ -606,20 +658,18 @@ function getRefreshOptions(options = {}) {
 }
 
 async function apiMe(options = {}) {
-  if (isFunction(CoreHttp?.me)) return CoreHttp.me(getMeOptions(options));
-  return CoreHttp.request(resolveEndpoint("me", "/auth/me"), getMeOptions({ ...options, method: "GET" }));
+  const token = safeText(options.token || getCurrentToken(), "");
+
+  if (isFunction(CoreHttp?.me)) return CoreHttp.me(getMeOptions({ ...options, token }));
+  return CoreHttp.request(resolveEndpoint("me", "/auth/me"), getMeOptions({ ...options, method: "GET", token }));
 }
 
 async function apiRefresh(body = {}, options = {}) {
-  if (isFunction(CoreHttp?.refreshSession)) {
-    return CoreHttp.refreshSession(getRefreshOptions({ ...options, body }));
-  }
+  const endpoint = resolveEndpoint("refresh", "/auth/refresh");
+  const finalOptions = getRefreshOptions(options);
 
-  if (isFunction(CoreHttp?.refresh)) {
-    return CoreHttp.refresh(getRefreshOptions({ ...options, body }));
-  }
-
-  return CoreHttp.post(resolveEndpoint("refresh", "/auth/refresh"), body, getRefreshOptions(options));
+  if (isFunction(CoreHttp?.post)) return CoreHttp.post(endpoint, body, finalOptions);
+  return CoreHttp.request(endpoint, { ...finalOptions, method: "POST", body });
 }
 
 /* =========================================================
@@ -712,7 +762,9 @@ function extractTokenFallback(response = null) {
 }
 
 function extractRefreshTokenFallback(response = null) {
-  return stripBearer(safeText(extractRefreshToken(response), "") || pickText(collectObjects(response), REFRESH_TOKEN_KEYS));
+  const imported = safeText(extractRefreshToken(response), "");
+  if (hasUsableToken(imported)) return stripBearer(imported);
+  return stripBearer(pickText(collectObjects(response), REFRESH_TOKEN_KEYS));
 }
 
 function normalizeSessionPayloadFallback(response = null) {
@@ -795,14 +847,14 @@ function getStoredRefreshPayload() {
   const user = safeObject(state.user || state.currentUser || state.authUser || state.sessionUser);
 
   return {
-    refreshToken: stripBearer(getStoredRefreshToken() || state.refreshToken || state.refresh_token || ""),
+    refreshToken: stripBearer(getStoredRefreshToken() || state.refreshToken || state.refresh_token || session.refreshToken || session.refresh_token || ""),
     sessionId: firstText(getStoredSessionId(), session.sessionId, session.session_id, session.sid, state.sessionId),
-    userId: firstText(getStoredSessionUserId(), session.userId, session.user_id, session.sessionUserId, user.userId, user.user_id, user.id, user.sub, state.sessionUserId),
+    userId: firstText(getStoredSessionUserId(), session.userId, session.user_id, session.sessionUserId, session.session_user_id, user.userId, user.user_id, user.id, user.sub, state.sessionUserId),
   };
 }
 
 function hasUsableRefreshPayload(payload = getStoredRefreshPayload()) {
-  return Boolean(stripBearer(payload.refreshToken) && safeText(payload.sessionId, "") && safeText(payload.userId, ""));
+  return Boolean(hasUsableToken(payload.refreshToken) && safeText(payload.sessionId, "") && safeText(payload.userId, ""));
 }
 
 function canAttemptRefresh(session = runtimeSession) {
@@ -870,6 +922,8 @@ function applyAuthenticatedSession({ token, user, refreshToken, sessionData, sou
     source,
     eventMode: "restore",
     repairUI: false,
+    silent: true,
+    emit: false,
   });
 
   return snapshot;
@@ -893,6 +947,11 @@ function applyProvisionalTokenSession({ token, refreshToken, sessionData, source
     silent: true,
     source,
     eventMode: "refresh",
+  }, {
+    source,
+    eventMode: "refresh",
+    silent: true,
+    emit: false,
   });
 }
 
@@ -1121,7 +1180,6 @@ export async function restoreUsingMe(session = runtimeSession) {
   const snapshot = getSafeSessionSnapshot();
 
   assertCompleteSnapshot(snapshot, "RESTORE_ME_INVALID_SESSION");
-
   emit("auth:restore:success", { ...buildPublicSessionPayload(snapshot), source: "me" });
 
   return { ok: true, user, source: "me" };
@@ -1130,9 +1188,7 @@ export async function restoreUsingMe(session = runtimeSession) {
 export async function restoreUsingRefreshOnly(session = runtimeSession) {
   const refreshed = await refreshSession(session);
 
-  if (!hasCompleteAuthState() && hasUsableToken(getCurrentToken())) {
-    await fetchMe(session);
-  }
+  if (!hasCompleteAuthState() && hasUsableToken(getCurrentToken())) await fetchMe(session);
 
   const snapshot = getSafeSessionSnapshot();
   assertCompleteSnapshot(snapshot, "RESTORE_REFRESH_INVALID_SESSION");
@@ -1163,22 +1219,16 @@ export async function restoreAfterMeFailure(session = runtimeSession, meError, o
         return { ok: true, user: snapshot.user, source: "cached-after-refresh-transient", provisional: true, protectedRoute: Boolean(routeContext?.preserve) };
       }
 
-      if (shouldClearForError(meError) || shouldClearForError(refreshError)) {
-        clearSessionProtected({ options, routeContext, reason: "me-refresh-failed-clearable" });
-      } else {
-        restoreRouteContext(routeContext);
-      }
+      if (shouldClearForError(meError) || shouldClearForError(refreshError)) clearSessionProtected({ options, routeContext, reason: "me-refresh-failed-clearable" });
+      else restoreRouteContext(routeContext);
 
       emitError("auth:restore:error", refreshError, { protectedRoute: Boolean(routeContext?.preserve) }, options);
       return { ok: false, user: null, error: refreshError, protectedRoute: Boolean(routeContext?.preserve) };
     }
   }
 
-  if (shouldClearForError(meError)) {
-    clearSessionProtected({ options, routeContext, reason: "me-failed-clearable" });
-  } else {
-    restoreRouteContext(routeContext);
-  }
+  if (shouldClearForError(meError)) clearSessionProtected({ options, routeContext, reason: "me-failed-clearable" });
+  else restoreRouteContext(routeContext);
 
   emitError("auth:restore:error", meError, { protectedRoute: Boolean(routeContext?.preserve) }, options);
   return { ok: false, user: null, error: meError, protectedRoute: Boolean(routeContext?.preserve) };
@@ -1283,7 +1333,6 @@ export async function restoreSession(...args) {
       }
 
       clearSessionProtected({ options, routeContext, reason: "missing-token-and-refresh" });
-
       emit("auth:restore:empty", { reason: "missing-token-and-refresh", protectedRoute: routeContext.preserve }, options);
 
       return { ok: false, user: null, protectedRoute: routeContext.preserve };
@@ -1359,6 +1408,8 @@ export function getRestoreSnapshot(sessionArg = runtimeSession) {
       ownToast: false,
       restoreRequiresMeVerification: true,
       preservesTechnicalRoutes: true,
+      authenticatedRequiresTokenAndUser: true,
+      tokenOnlyNeverAuthenticated: true,
     },
     at: nowIso(),
   };

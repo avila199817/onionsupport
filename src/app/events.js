@@ -4,10 +4,11 @@
 
    APP EVENTS · SIMPLE WIRING
    - wiring mínimo de eventos de App
-   - sincroniza UI sólo por callback inyectado
    - router:rendered sólo parchea estado + loader post-render
    - idioma/tema actualizan estado básico
+   - repair explícito sólo por app:ui:repair-request
    - sin Auth paralelo, Router paralelo, render propio, restore ni refresh
+   - sin user/session/login/logout listeners para evitar loops
    - sin fetch, storage, Toast obligatorio ni permisos
 ========================================================= */
 
@@ -28,56 +29,32 @@ import {
   APP_SCOPES,
   APP_EVENTS,
   ROUTER_EVENTS,
-  AUTH_EVENTS,
 } from "./constants.js";
 
-export const APP_EVENTS_VERSION = "21.0.0-simple";
+export const APP_EVENTS_VERSION = "21.0.1-simple";
 
 const SOURCE = "app.events";
 const DEFAULT_ROUTE = "/";
 const DEFAULT_SCOPE = APP_SCOPES?.events || APP_SCOPE || "app:events";
 
-const DEDUPE_MS = 120;
-const ROUTER_DEDUPE_MS = 40;
+const DEDUPE_MS = 160;
+const ROUTER_DEDUPE_MS = 64;
 const MAX_RECENT = 30;
 
 const EVENT_NAMES = Object.freeze({
-  appReady: APP_EVENTS?.ready || "app:ready",
-  appUiReady: APP_EVENTS?.uiReady || "app:ui:ready",
-  appUiRepairRequest: APP_EVENTS?.uiRepairRequest || "app:ui:repair-request",
-  appUserChange: APP_EVENTS?.userChange || "app:user:change",
   appEventsReady: "app:events:ready",
   appEventsBound: "app:events:bound",
   appEventsUnbound: "app:events:unbound",
   appEventsError: "app:events:error",
-  appEventsUiSynced: "app:events:ui-synced",
   appRouteSynced: APP_EVENTS?.routeSynced || "app:events:route-synced",
-  appRouteChange: APP_EVENTS?.routeChange || "app:route:change",
-  appSessionRestored: APP_EVENTS?.sessionRestored || "app:session:restored",
-  appSessionCleared: APP_EVENTS?.sessionCleared || "app:session:cleared",
+  appUiRepairRequest: APP_EVENTS?.uiRepairRequest || "app:ui:repair-request",
   appLangChange: APP_EVENTS?.langChange || "app:lang:change",
   appThemeChange: APP_EVENTS?.themeChange || "app:theme:change",
   onionThemeChange: "onion:theme:change",
   legacyThemeChange: "theme:change",
-  authSessionRestored: AUTH_EVENTS?.sessionRestored || "auth:session:restored",
-  authLoginSuccess: AUTH_EVENTS?.loginSuccess || "auth:login:success",
-  authLogout: AUTH_EVENTS?.logout || "auth:logout",
-  authLogoutSuccess: AUTH_EVENTS?.logoutSuccess || "auth:logout:success",
   routerRendered: ROUTER_EVENTS?.rendered || "router:rendered",
   routerAsyncComplete: ROUTER_EVENTS?.asyncComplete || "router:render:async-complete",
 });
-
-const USER_SYNC_EVENTS = Object.freeze([
-  EVENT_NAMES.appReady,
-  EVENT_NAMES.appUiReady,
-  EVENT_NAMES.appUserChange,
-  EVENT_NAMES.appSessionRestored,
-  EVENT_NAMES.appSessionCleared,
-  EVENT_NAMES.authSessionRestored,
-  EVENT_NAMES.authLoginSuccess,
-  EVENT_NAMES.authLogout,
-  EVENT_NAMES.authLogoutSuccess,
-]);
 
 const THEME_EVENTS = Object.freeze([
   EVENT_NAMES.appThemeChange,
@@ -92,12 +69,12 @@ let binding = false;
 let boundScope = "";
 let debugApiInstalled = false;
 
-let lastUiKey = "";
-let lastUiAt = 0;
 let lastRouterKey = "";
 let lastRouterAt = 0;
 let lastEmitKey = "";
 let lastEmitAt = 0;
+let lastInboundKey = "";
+let lastInboundAt = 0;
 
 const disposers = [];
 const boundKeys = new Set();
@@ -446,85 +423,6 @@ function patchRouteState(AppCore, { route = DEFAULT_ROUTE, publicPath = DEFAULT_
    UI / LOADER
 ========================================================= */
 
-function getAuthUser(Auth) {
-  try {
-    return Auth?.getUser?.() || Auth?.getCurrentUser?.() || Auth?.user || null;
-  } catch {
-    return null;
-  }
-}
-
-function getAuthStatus(Auth) {
-  try {
-    if (isFn(Auth?.isAuthenticated)) return Boolean(Auth.isAuthenticated());
-  } catch {}
-
-  return Boolean(Auth?.authenticated);
-}
-
-function uiDedupeKey(context = {}) {
-  return [
-    context.route || DEFAULT_ROUTE,
-    context.publicPath || DEFAULT_ROUTE,
-    context.authenticated ? "auth" : "anon",
-    context.user?.id || context.user?.userId || "",
-    context.user?.username || context.user?.email || "",
-    context.user?.role || context.user?.rol || context.role || "",
-  ].map((item) => text(item, "")).join("|");
-}
-
-function shouldSkipUiSync(context = {}, force = false) {
-  if (force) return false;
-
-  const key = redact(uiDedupeKey(context));
-  const stamp = now();
-
-  if (key === lastUiKey && stamp - lastUiAt < DEDUPE_MS) return true;
-
-  lastUiKey = key;
-  lastUiAt = stamp;
-
-  return false;
-}
-
-async function syncUi({ AppCore, Auth, Router, Store, SidebarUI, TopbarUI, Toast, I18n, syncUserUI, reason = "sync-ui", payload = {}, force = false } = {}) {
-  const publicPath = resolvePublicPath(AppCore, Router, payload);
-  const route = resolveCanonicalPath(AppCore, Router, payload);
-  const user = AppCore?.state?.user || AppCore?.state?.currentUser || AppCore?.state?.sessionUser || getAuthUser(Auth);
-
-  const context = {
-    AppCore,
-    Auth,
-    Router,
-    Store,
-    SidebarUI,
-    TopbarUI,
-    Toast,
-    I18n,
-    reason,
-    payload: object(payload),
-    route,
-    publicPath,
-    user,
-    role: AppCore?.state?.role || user?.role || user?.rol || null,
-    authenticated: Boolean(AppCore?.state?.authenticated || getAuthStatus(Auth)),
-    rebind: false,
-    hardRepair: false,
-    force,
-  };
-
-  if (shouldSkipUiSync(context, force)) return true;
-
-  if (isFn(syncUserUI)) {
-    await Promise.resolve(syncUserUI(context));
-    emit(AppCore, EVENT_NAMES.appEventsUiSynced, { reason, route, publicPath, injected: true, ok: true });
-    return true;
-  }
-
-  emit(AppCore, EVENT_NAMES.appEventsUiSynced, { reason, route, publicPath, injected: false, ok: false });
-  return false;
-}
-
 function shouldSkipRouterSync(route = DEFAULT_ROUTE, publicPath = DEFAULT_ROUTE) {
   const key = `${redact(route)}|${redact(publicPath)}`;
   const stamp = now();
@@ -685,6 +583,14 @@ function bindEvent({ AppCore, eventName, label = "", handler, windowFallback = t
 
   const wrapped = (eventOrPayload = {}) => {
     const payload = payloadFrom(eventOrPayload);
+    const inboundKey = [cleanName, text(payload?.reason || payload?.phase, ""), text(payload?.route || payload?.canonicalPath, ""), text(payload?.publicPath, "")].join("|");
+    const stamp = now();
+
+    if (inboundKey === lastInboundKey && stamp - lastInboundAt < DEDUPE_MS) return;
+
+    lastInboundKey = inboundKey;
+    lastInboundAt = stamp;
+
     recordHandled(cleanName, payload);
 
     Promise.resolve(handler(payload, { eventName: cleanName, label: cleanLabel, raw: eventOrPayload }))
@@ -710,31 +616,13 @@ function bindMany({ AppCore, eventNames = [], label = "", handler, windowFallbac
    HANDLERS
 ========================================================= */
 
-function bindUserEvents(context) {
-  bindMany({
-    AppCore: context.AppCore,
-    label: "user-sync",
-    eventNames: USER_SYNC_EVENTS,
-    handler: (payload, meta) => syncUi({ ...context, reason: meta.eventName || payload.reason || "user-sync", payload, force: true }),
-  });
-}
-
-function bindRouteChangeEvents(context) {
-  bindEvent({
-    AppCore: context.AppCore,
-    eventName: EVENT_NAMES.appRouteChange,
-    label: "app-route-change-sync",
-    handler: (payload) => syncUi({ ...context, reason: "app:route:change", payload }),
-  });
-}
-
 function bindRouterEvents(context) {
   const { AppCore, Router, applyPostRenderLoaderPolicy } = context;
 
   bindEvent({
     AppCore,
     eventName: EVENT_NAMES.routerRendered,
-    label: "router-rendered-state-loader-sync",
+    label: "router-rendered-state-loader-only",
     handler: (payload) => {
       const publicPath = resolvePublicPath(AppCore, Router, payload);
       const canonicalPath = resolveCanonicalPath(AppCore, Router, payload);
@@ -760,18 +648,19 @@ function bindRouterEvents(context) {
   bindEvent({
     AppCore,
     eventName: EVENT_NAMES.routerAsyncComplete,
-    label: "router-async-complete-state-only",
+    label: "router-async-complete-state-loader-only",
     handler: (payload) => {
       const publicPath = resolvePublicPath(AppCore, Router, payload);
       const canonicalPath = resolveCanonicalPath(AppCore, Router, payload);
       patchRouteState(AppCore, { route: canonicalPath, publicPath });
+      applyLoaderPolicy({ AppCore, Router, applyPostRenderLoaderPolicy, payload });
       emit(AppCore, EVENT_NAMES.appRouteSynced, { reason: "router:render:async-complete", route: canonicalPath, publicPath, silent: true });
     },
   });
 }
 
 function bindLanguageEvents(context) {
-  const { AppCore, I18n } = context;
+  const { AppCore, I18n, syncUserUI } = context;
 
   bindEvent({
     AppCore,
@@ -784,22 +673,46 @@ function bindLanguageEvents(context) {
       setI18nLang(I18n, lang);
       setStateSilent(AppCore, { lang, language: lang, locale: payload.locale || lang });
 
-      await syncUi({ ...context, reason: "app:lang:change", payload, force: true });
+      if (isFn(syncUserUI)) await Promise.resolve(syncUserUI({ ...context, reason: "app:lang:change", payload, force: true }));
     },
   });
 }
 
 function bindThemeEvents(context) {
-  const { AppCore } = context;
+  const { AppCore, syncUserUI } = context;
 
   bindMany({
     AppCore,
-    label: "theme-sync",
+    label: "theme-state-only",
     eventNames: THEME_EVENTS,
-    handler: (payload) => {
+    handler: async (payload) => {
       const theme = text(payload.theme || payload.mode || payload.appearance || payload.value || "", "");
       if (theme) setStateSilent(AppCore, { theme, mode: payload.mode || theme, appearance: payload.appearance || payload.mode || theme });
-      return syncUi({ ...context, reason: "theme-change", payload, force: true });
+      if (isFn(syncUserUI)) await Promise.resolve(syncUserUI({ ...context, reason: "theme-change", payload, force: true }));
+    },
+  });
+}
+
+function bindRepairEvent(context) {
+  const { AppCore, repairUISystems } = context;
+
+  bindEvent({
+    AppCore,
+    eventName: EVENT_NAMES.appUiRepairRequest,
+    label: "explicit-ui-repair-only",
+    handler: async (payload) => {
+      if (text(payload.source, "") === SOURCE) return;
+      if (!isFn(repairUISystems)) return;
+
+      await Promise.resolve(repairUISystems({
+        ...context,
+        reason: payload.reason || payload.phase || "app:ui:repair-request",
+        payload,
+        force: payload.force === true,
+        rebind: payload.rebind === true,
+        hardRepair: payload.hardRepair === true,
+        allowAuthRouteChrome: payload.allowAuthRouteChrome === true,
+      }));
     },
   });
 }
@@ -827,10 +740,7 @@ function exposeDebugApi(AppCore = null) {
     if (isBrowser()) window.__ONION_APP_EVENTS__ = api;
   } catch {}
 
-  try {
-    defineHidden(AppCore, "AppEvents", api);
-  } catch {}
-
+  defineHidden(AppCore, "AppEvents", api);
   debugApiInstalled = true;
   return api;
 }
@@ -866,11 +776,10 @@ export function bindAppEvents({ AppCore, Auth, Router, Store, SidebarUI, TopbarU
   };
 
   try {
-    bindUserEvents(context);
-    bindRouteChangeEvents(context);
     bindRouterEvents(context);
     bindLanguageEvents(context);
     bindThemeEvents(context);
+    bindRepairEvent(context);
 
     bound = true;
     boundScope = finalScope;
@@ -917,9 +826,6 @@ export function getAppEventsSnapshot() {
     lastRouterKey: redact(lastRouterKey),
     lastRouterAt,
     lastRouterAtIso: lastRouterAt ? iso(lastRouterAt) : "",
-    lastUiKey: redact(lastUiKey),
-    lastUiAt,
-    lastUiAtIso: lastUiAt ? iso(lastUiAt) : "",
     lastEmitKey: redact(lastEmitKey),
     lastEmitAt,
     lastEmitAtIso: lastEmitAt ? iso(lastEmitAt) : "",
@@ -941,6 +847,7 @@ export function getAppEventsSnapshot() {
       ownFetch: false,
       ownStorage: false,
       ownToast: false,
+      userSessionListeners: false,
       aggressiveRepair: false,
     },
   });
@@ -949,10 +856,10 @@ export function getAppEventsSnapshot() {
 export function resetAppEventsState() {
   lastRouterKey = "";
   lastRouterAt = 0;
-  lastUiKey = "";
-  lastUiAt = 0;
   lastEmitKey = "";
   lastEmitAt = 0;
+  lastInboundKey = "";
+  lastInboundAt = 0;
 
   eventState.totalHandled = 0;
   eventState.totalErrors = 0;

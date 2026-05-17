@@ -1,215 +1,173 @@
 /* =========================================================
-   Onion SPA - Login View
-   Archivo: src/views/login/index.js
+   Onion Support - Login View
+   Archivo: /src/views/login/index.js
 
-   LOGIN VIEW · SIMPLE
-   - renderiza template
-   - conecta helpers DOM de la vista
-   - llama Auth.login o executor custom
-   - Auth aplica sesión; la vista sólo navega si sigue en /login
-   - custom executor puede sincronizar sesión vía syncSession()
-   - anti doble submit local/global
-   - Toast canónico único
-   - sin HTTP directo, Store paralelo ni Router paralelo
+   Responsabilidad:
+   - Renderizar login.
+   - Leer formulario.
+   - Validar campos mínimos.
+   - Llamar Auth.login().
+   - Mostrar error en DOM.
+   - Navegar al terminar.
+   - Sin HTTP directo.
+   - Sin Store.
+   - Sin Toast.
+   - Sin 2FA/MFA/OTP.
+   - Sin custom executors.
+   - Sin eventos DOM globales.
+   - Sin magia negra.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import { Auth } from "../../features/auth/index.js";
-import Toast from "../../ui/toast/index.js";
 
 import getLoginTemplate from "./login.template.js";
 
-import {
-  loadRememberedIdentifier,
-  createLoginPayload,
-  validateLoginPayload,
-  getFirstLoginError,
-  normalizeAuthResult,
-  resolveAuthErrorMessage,
-  persistRememberedIdentifier,
-  syncSession,
-  resolveLoginRedirect,
-  shouldRedirectAfterLogin,
-  hasUsableToken,
-  hasUsableUser,
-  safeText,
-} from "./login.helpers.js";
-
-import {
-  getLoginRefs,
-  clearLoginErrors,
-  applyLoginErrors,
-  setGlobalLoginError,
-  setLoginLoading,
-  unlockLoginForm,
-  focusLoginPrimaryField,
-  readLoginFormState,
-  bindLoginInputClearers,
-  bindThemeToggle,
-  bindLoginSubmit,
-  bindLoginPasswordFields,
-  destroyLoginPasswordFields,
-  getLoginDomSnapshot,
-} from "./login.dom.js";
-
-export const LOGIN_VIEW_VERSION = "21.0.0-simple";
+export const LOGIN_VIEW_VERSION = "simple";
 
 const SOURCE = "login.view";
 const LOGIN_ROUTE = "/login";
-const DEFAULT_HOME = "/";
-const DEFAULT_2FA = "/2fa";
+const HOME_ROUTE = "/";
+const PASSWORD_REQUEST_ROUTE = "/password-request";
+
 const INSTANCE_KEY = "__ONION_LOGIN_VIEW_INSTANCE__";
-const RUNTIME_KEY = "__ONION_LOGIN_VIEW__";
-const GLOBAL_SUBMIT_TIMEOUT_MS = 45_000;
-const SUCCESS_TOAST_DEDUPE_MS = 1_600;
 
-const LOGIN_EVENTS = Object.freeze({
-  ready: "auth:login:view:ready",
-  submitStart: "auth:login:view:submit:start",
-  submitDone: "auth:login:view:submit:done",
-  submitBlocked: "auth:login:view:submit:blocked",
-  submitUnlocked: "auth:login:view:submit:unlocked",
-  error: "auth:login:view:error",
-  navigationStart: "auth:login:view:navigation:start",
-  navigationDone: "auth:login:view:navigation:done",
-  navigationError: "auth:login:view:navigation:error",
-  destroyed: "auth:login:view:destroyed",
-});
-
-let globalSubmitPromise = null;
-let globalSubmitFingerprint = "";
-let globalSubmitStartedAt = 0;
-let lastSuccessToastAt = 0;
 let lastInstance = null;
 
 /* =========================================================
    BASICS
 ========================================================= */
 
-const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
-const isFn = (value) => typeof value === "function";
-const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
-const safeObject = (value) => (isObject(value) ? value : {});
-
-function now() {
-  try { return Date.now(); } catch { return 0; }
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function iso(ms = now()) {
-  try { return new Date(ms).toISOString(); } catch { return ""; }
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function normalizeError(error = null) {
-  const source = error?.error || error?.reason || error;
-  if (!source) return null;
+function isFunction(value) {
+  return typeof value === "function";
+}
 
-  return {
-    name: safeText(source?.name || source?.constructor?.name, "Error"),
-    message: safeText(source?.message || source?.reason || source, "Error"),
-    code: source?.code || source?.data?.code || source?.response?.data?.code || null,
-    status: source?.status || source?.statusCode || source?.response?.status || 0,
-    at: iso(),
-  };
+function text(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
+}
+
+function bool(value, fallback = false) {
+  if (value === true || value === 1 || value === "1") return true;
+  if (value === false || value === 0 || value === "0") return false;
+
+  const clean = text(value, "").toLowerCase();
+
+  if (["true", "yes", "si", "sí", "on"].includes(clean)) return true;
+  if (["false", "no", "off"].includes(clean)) return false;
+
+  return Boolean(fallback);
+}
+
+function nowIso() {
+  return new Date().toISOString();
 }
 
 function emit(eventName = "", payload = {}) {
-  const name = safeText(eventName, "");
-  if (!name) return false;
-
-  const detail = {
-    source: SOURCE,
-    version: LOGIN_VIEW_VERSION,
-    at: iso(),
-    ...safeObject(payload),
-  };
-
   try {
-    AppCore?.events?.emit?.(name, detail);
+    AppCore?.events?.emit?.(eventName, {
+      source: SOURCE,
+      version: LOGIN_VIEW_VERSION,
+      at: nowIso(),
+      ...payload,
+      token: null,
+      accessToken: null,
+      refreshToken: null,
+    });
+
     return true;
-  } catch {}
-
-  try {
-    if (isBrowser() && typeof CustomEvent !== "undefined") {
-      window.dispatchEvent(new CustomEvent(name, { detail }));
-      return true;
-    }
-  } catch {}
-
-  return false;
-}
-
-function warn(...args) {
-  try { AppCore?.utils?.warn?.("[LoginView]", ...args); } catch {}
-}
-
-function log(...args) {
-  try { AppCore?.utils?.log?.("[LoginView]", ...args); } catch {}
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
-   PATH / ROUTER
+   PATHS / NAVIGATION
 ========================================================= */
 
-function normalizePath(path = DEFAULT_HOME) {
-  let value = safeText(path, DEFAULT_HOME).replace(/\\/g, "/");
+function normalizePublicPath(path = HOME_ROUTE) {
+  let value = text(path, HOME_ROUTE);
+
+  if (value.startsWith("#/")) value = value.slice(1);
+  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
+
   if (!value.startsWith("/")) value = `/${value}`;
-  value = value.replace(/\/+/g, "/");
-  return value.length > 1 ? value.replace(/\/+$/g, "") || DEFAULT_HOME : value;
+
+  value = value.replace(/\/{2,}/g, "/");
+
+  return value || HOME_ROUTE;
 }
 
-function stripSearchHash(path = DEFAULT_HOME) {
-  return normalizePath(path).split("?")[0].split("#")[0] || DEFAULT_HOME;
+function normalizeCanonicalPath(path = HOME_ROUTE) {
+  let value = normalizePublicPath(path).split("?")[0].split("#")[0] || HOME_ROUTE;
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "");
+  }
+
+  return value || HOME_ROUTE;
 }
 
 function currentPath() {
-  if (!isBrowser()) return AppCore?.state?.publicPath || AppCore?.state?.route || DEFAULT_HOME;
+  if (!isBrowser()) {
+    return AppCore?.state?.publicPath || AppCore?.state?.route || HOME_ROUTE;
+  }
 
   try {
-    const { pathname, search, hash } = window.location;
-    if (hash?.startsWith("#/") || hash?.startsWith("#!")) return normalizePath(hash.replace(/^#!?\/?/, "/"));
-    return `${pathname || DEFAULT_HOME}${search || ""}${hash || ""}`;
+    const hash = window.location.hash || "";
+
+    if (hash.startsWith("#/") || hash.startsWith("#!")) {
+      return normalizePublicPath(hash);
+    }
+
+    return normalizePublicPath(
+      `${window.location.pathname || HOME_ROUTE}${window.location.search || ""}${hash}`
+    );
   } catch {
-    return DEFAULT_HOME;
+    return HOME_ROUTE;
   }
 }
 
-function currentCanonicalPath() {
-  const statePath = AppCore?.state?.canonicalPath || AppCore?.state?.route || "";
-  return stripSearchHash(statePath || currentPath());
+function isLoginRoute(path = currentPath()) {
+  return normalizeCanonicalPath(path) === LOGIN_ROUTE;
 }
 
-function isLoginRoute(path = currentCanonicalPath()) {
-  const clean = stripSearchHash(path);
-  return clean === LOGIN_ROUTE || clean.startsWith(`${LOGIN_ROUTE}/`);
+function isSafeInternalPath(path = "") {
+  const value = text(path, "");
+
+  if (!value) return false;
+  if (!value.startsWith("/")) return false;
+  if (value.startsWith("//")) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return false;
+  if (/[\r\n\t\\]/.test(value)) return false;
+
+  return true;
 }
 
-function isUnsafeRedirect(path = "") {
-  const raw = safeText(path, "");
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return true;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || /[\r\n\t\\]/.test(raw)) return true;
+function safeTarget(path = "", fallback = HOME_ROUTE) {
+  const candidate = normalizePublicPath(path || fallback);
 
-  try {
-    const decoded = decodeURIComponent(raw).trim().replace(/\\/g, "/");
-    return decoded.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(decoded) || /[\r\n\t]/.test(decoded);
-  } catch {
-    return true;
-  }
-}
-
-function safeInternalPath(path = "", fallback = DEFAULT_HOME, { allowLogin = false } = {}) {
-  const candidate = normalizePath(path || fallback || DEFAULT_HOME);
-  const fallbackPath = normalizePath(fallback || DEFAULT_HOME);
-
-  if (isUnsafeRedirect(candidate)) return fallbackPath;
-  if (!allowLogin && isLoginRoute(candidate)) return fallbackPath;
+  if (!isSafeInternalPath(candidate)) return fallback;
+  if (normalizeCanonicalPath(candidate) === LOGIN_ROUTE) return fallback;
 
   return candidate;
 }
 
-function configuredHome() {
-  return safeInternalPath(
-    AppCore?.config?.routes?.home || AppCore?.config?.auth?.homeRoute || AppCore?.config?.auth?.postLoginFallback || DEFAULT_HOME,
-    DEFAULT_HOME
+function homeTarget() {
+  return safeTarget(
+    AppCore?.config?.routes?.home ||
+      AppCore?.config?.auth?.homeRoute ||
+      AppCore?.config?.auth?.postLoginFallback ||
+      HOME_ROUTE,
+    HOME_ROUTE
   );
 }
 
@@ -221,302 +179,450 @@ function getRouter() {
   }
 }
 
-async function navigateTo(path = DEFAULT_HOME, options = {}) {
-  const target = safeInternalPath(path, configuredHome(), { allowLogin: options.allowLogin === true });
+async function navigateTo(path = HOME_ROUTE) {
+  const target = safeTarget(path, homeTarget());
   const router = getRouter();
 
-  emit(LOGIN_EVENTS.navigationStart, { target, method: router ? "router" : "location" });
-
-  const navOptions = {
-    replaceState: options.replaceState !== false,
-    force: true,
-    forceRender: true,
-    source: SOURCE,
-    fromLogin: true,
-    reason: options.reason || "login-navigation",
-  };
-
   try {
-    if (isFn(router?.navigate)) {
-      await router.navigate(target, navOptions);
-      emit(LOGIN_EVENTS.navigationDone, { target, method: "router.navigate" });
+    if (isFunction(router?.replace)) {
+      await router.replace(target, {
+        source: SOURCE,
+        replaceState: true,
+        force: true,
+      });
+
       return true;
     }
 
-    if (isFn(router?.replace)) {
-      await router.replace(target, navOptions);
-      emit(LOGIN_EVENTS.navigationDone, { target, method: "router.replace" });
-      return true;
-    }
+    if (isFunction(router?.navigate)) {
+      await router.navigate(target, {
+        source: SOURCE,
+        replaceState: true,
+        force: true,
+      });
 
-    if (isFn(AppCore?.navigate)) {
-      await AppCore.navigate(target, navOptions);
-      emit(LOGIN_EVENTS.navigationDone, { target, method: "AppCore.navigate" });
       return true;
     }
-  } catch (error) {
-    warn("navigation failed", normalizeError(error));
+  } catch {
+    // Fallback abajo.
   }
 
   if (!isBrowser()) return false;
 
   try {
     window.location.assign(target);
-    emit(LOGIN_EVENTS.navigationDone, { target, method: "window.location.assign" });
     return true;
-  } catch (error) {
-    emit(LOGIN_EVENTS.navigationError, { target, error: normalizeError(error) });
+  } catch {
     return false;
   }
 }
 
 /* =========================================================
-   CHROME / LOADER
+   DOM
 ========================================================= */
+
+function query(root, selector = "") {
+  if (!root || !selector) return null;
+
+  try {
+    return root.querySelector(selector);
+  } catch {
+    return null;
+  }
+}
+
+function setHidden(node, hidden = false) {
+  if (!node) return false;
+
+  try {
+    node.hidden = Boolean(hidden);
+    node.setAttribute("aria-hidden", hidden ? "true" : "false");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setBusy(node, busy = false) {
+  if (!node) return false;
+
+  try {
+    node.setAttribute("aria-busy", busy ? "true" : "false");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setDisabled(node, disabled = false) {
+  if (!node) return false;
+
+  try {
+    node.disabled = Boolean(disabled);
+    node.setAttribute("aria-disabled", disabled ? "true" : "false");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createMessageNode() {
+  if (!isBrowser()) return null;
+
+  const node = document.createElement("div");
+
+  node.className = "login-message";
+  node.setAttribute("role", "alert");
+  node.setAttribute("aria-live", "polite");
+  node.dataset.loginMessage = "true";
+  node.hidden = true;
+
+  return node;
+}
+
+function getMessageNode(container, form) {
+  return (
+    query(container, "[data-login-message]") ||
+    query(container, "[data-login-error]") ||
+    query(container, ".login-message") ||
+    (() => {
+      const node = createMessageNode();
+
+      try {
+        form?.prepend?.(node);
+      } catch {
+        try {
+          container.prepend(node);
+        } catch {
+          // noop
+        }
+      }
+
+      return node;
+    })()
+  );
+}
+
+function setMessage(node, message = "", type = "error") {
+  if (!node) return false;
+
+  const clean = text(message, "");
+
+  try {
+    node.textContent = clean;
+    node.hidden = !clean;
+    node.dataset.messageType = clean ? type : "";
+    node.classList.toggle("is-error", type === "error" && Boolean(clean));
+    node.classList.toggle("is-success", type === "success" && Boolean(clean));
+    node.classList.toggle("is-info", type === "info" && Boolean(clean));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getRefs(container) {
+  const form =
+    query(container, "form[data-login-form]") ||
+    query(container, "form") ||
+    null;
+
+  return {
+    form,
+
+    identifier:
+      query(container, "[name='identifier']") ||
+      query(container, "[name='email']") ||
+      query(container, "[name='username']") ||
+      query(container, "[data-login-identifier]") ||
+      null,
+
+    password:
+      query(container, "[name='password']") ||
+      query(container, "[data-login-password]") ||
+      null,
+
+    remember:
+      query(container, "[name='remember']") ||
+      query(container, "[data-login-remember]") ||
+      null,
+
+    submit:
+      query(container, "button[type='submit']") ||
+      query(container, "[data-login-submit]") ||
+      null,
+  };
+}
+
+function renderTemplate(container, deps = {}) {
+  const html = getLoginTemplate({
+    appName: text(AppCore?.config?.appName, "Onion Support"),
+    identifier: "",
+    forgotPasswordHref: PASSWORD_REQUEST_ROUTE,
+    passwordRequestHref: PASSWORD_REQUEST_ROUTE,
+    ...deps,
+  });
+
+  try {
+    const template = document.createElement("template");
+    template.innerHTML = String(html || "");
+    container.replaceChildren(template.content.cloneNode(true));
+    return true;
+  } catch {
+    try {
+      container.innerHTML = String(html || "");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+function focusPrimary(refs) {
+  try {
+    const target = refs.identifier || refs.password;
+    target?.focus?.();
+    target?.select?.();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function hideLoader() {
   if (!isBrowser()) return false;
 
   try {
-    document.documentElement?.classList?.remove?.("app-loading", "app-booting", "loading");
-    document.body?.classList?.remove?.("app-loading", "app-booting", "loading", "is-loading", "is-booting");
-    if (document.documentElement?.dataset) document.documentElement.dataset.appLoading = "false";
-    if (document.body?.dataset) document.body.dataset.appLoading = "false";
-  } catch {}
+    document.documentElement.classList.remove("app-loading", "app-booting", "loading");
+    document.body.classList.remove("app-loading", "app-booting", "loading", "is-loading");
+  } catch {
+    // noop
+  }
 
-  const loader = AppCore?.dom?.loader || document.querySelector?.("#app-loader,[data-app-loader],.app-loader");
+  const loader = document.getElementById("app-loader");
+
+  if (loader) {
+    setHidden(loader, true);
+    setBusy(loader, false);
+
+    try {
+      loader.classList.remove("is-visible");
+    } catch {
+      // noop
+    }
+  }
 
   try {
-    if (loader) {
-      loader.hidden = true;
-      loader.setAttribute("aria-hidden", "true");
-      loader.setAttribute("aria-busy", "false");
-      loader.classList.remove("is-visible", "is-entering", "app-loader--visible");
-      loader.classList.add("is-hidden");
-    }
-  } catch {}
+    AppCore?.setLoading?.(false);
+  } catch {
+    // noop
+  }
 
-  try { AppCore?.setLoading?.(false); } catch {}
-  return true;
-}
-
-function setAuthScreen(active = true) {
-  if (!isBrowser()) return false;
-
-  try {
-    document.body?.classList?.toggle?.("auth-screen", active);
-    document.body?.classList?.toggle?.("login-no-scroll", active);
-    document.body?.classList?.toggle?.("route-auth", active);
-    document.documentElement?.classList?.toggle?.("route-auth", active);
-
-    if (document.body?.dataset) {
-      document.body.dataset.authScreen = active ? "true" : "false";
-      document.body.dataset.routeMode = active ? "auth" : "app";
-      document.body.dataset.chrome = active ? "hidden" : "visible";
-    }
-
-    if (document.documentElement?.dataset) {
-      document.documentElement.dataset.routeMode = active ? "auth" : "app";
-      document.documentElement.dataset.chrome = active ? "hidden" : "visible";
-    }
-  } catch {}
-
-  try {
-    AppCore?.setState?.({
-      authScreen: active,
-      routeMode: active ? "auth" : "app",
-      chromeVisible: !active,
-      chromeHidden: active,
-      shellHidden: active,
-      routeShellHidden: active,
-    }, { source: SOURCE, emit: false, silent: true });
-  } catch {}
-
-  hideLoader();
   return true;
 }
 
 /* =========================================================
-   TOAST
+   FORM
 ========================================================= */
 
-function dismissToast(id) {
-  if (id === null || id === undefined || id === "") return;
-  try { Toast.dismiss?.(id); } catch {}
-}
+function readForm(refs) {
+  const form = refs.form;
 
-function toastError(message = "") {
-  try { Toast.error?.(message); } catch {}
-}
+  if (!form) {
+    return {
+      identifier: "",
+      password: "",
+      remember: false,
+    };
+  }
 
-function toastInfo(message = "") {
-  try { Toast.info?.(message); } catch {}
-}
-
-function toastSuccess(message = "") {
-  try { Toast.success?.(message); } catch {}
-}
-
-function toastLoading(message = "") {
   try {
-    return Toast.loading?.(message, { id: "login:loading", persist: true, duration: 0 });
+    const data = new FormData(form);
+
+    return {
+      identifier: text(
+        data.get("identifier") ||
+          data.get("email") ||
+          data.get("username") ||
+          refs.identifier?.value ||
+          "",
+        ""
+      ),
+
+      password: String(
+        data.get("password") ||
+          refs.password?.value ||
+          ""
+      ),
+
+      remember: bool(
+        data.get("remember") ||
+          refs.remember?.checked ||
+          false,
+        false
+      ),
+    };
   } catch {
-    return null;
+    return {
+      identifier: text(refs.identifier?.value, ""),
+      password: String(refs.password?.value || ""),
+      remember: Boolean(refs.remember?.checked),
+    };
   }
 }
 
-/* =========================================================
-   GLOBAL SUBMIT LOCK
-========================================================= */
+function validatePayload(payload = {}) {
+  const errors = {};
 
-function fingerprint(payload = {}) {
-  return [
-    safeText(payload.identifier || payload.email || payload.username || payload.user || payload.login || "", "").toLowerCase(),
-    payload.remember || payload.rememberMe ? "1" : "0",
-  ].join("|");
+  if (!text(payload.identifier, "")) {
+    errors.identifier = "Introduce tu usuario o email.";
+  }
+
+  if (!String(payload.password || "")) {
+    errors.password = "Introduce tu contraseña.";
+  }
+
+  return errors;
 }
 
-function clearGlobalSubmit() {
-  globalSubmitPromise = null;
-  globalSubmitFingerprint = "";
-  globalSubmitStartedAt = 0;
+function firstError(errors = {}) {
+  return Object.values(errors).find(Boolean) || "";
 }
 
-function clearStaleGlobalSubmit() {
-  if (!globalSubmitPromise) return false;
-  if (!globalSubmitStartedAt || now() - globalSubmitStartedAt > GLOBAL_SUBMIT_TIMEOUT_MS) {
-    clearGlobalSubmit();
+function setFieldError(field, message = "") {
+  if (!field) return false;
+
+  const clean = text(message, "");
+
+  try {
+    field.setAttribute("aria-invalid", clean ? "true" : "false");
+
+    if (clean) {
+      field.dataset.error = clean;
+    } else {
+      delete field.dataset.error;
+    }
+
     return true;
+  } catch {
+    return false;
   }
-  return false;
 }
 
-function hasGlobalSubmit() {
-  clearStaleGlobalSubmit();
-  return Boolean(globalSubmitPromise);
+function clearErrors(refs, messageNode) {
+  setMessage(messageNode, "");
+  setFieldError(refs.identifier, "");
+  setFieldError(refs.password, "");
 }
 
-function runGlobalSubmit(work, submitFingerprint = "") {
-  clearStaleGlobalSubmit();
-  if (globalSubmitPromise) return globalSubmitPromise;
+function applyErrors(refs, messageNode, errors = {}) {
+  setFieldError(refs.identifier, errors.identifier || "");
+  setFieldError(refs.password, errors.password || "");
+  setMessage(messageNode, firstError(errors), "error");
 
-  let timer = null;
+  if (errors.identifier) {
+    try {
+      refs.identifier?.focus?.();
+    } catch {
+      // noop
+    }
 
-  globalSubmitStartedAt = now();
-  globalSubmitFingerprint = submitFingerprint;
+    return;
+  }
 
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => {
-      const error = new Error("LOGIN_SUBMIT_TIMEOUT");
-      error.code = "LOGIN_SUBMIT_TIMEOUT";
-      reject(error);
-    }, GLOBAL_SUBMIT_TIMEOUT_MS);
-  });
+  if (errors.password) {
+    try {
+      refs.password?.focus?.();
+    } catch {
+      // noop
+    }
+  }
+}
 
-  globalSubmitPromise = Promise.race([Promise.resolve().then(work), timeout])
-    .finally(() => {
-      try { clearTimeout(timer); } catch {}
-      clearGlobalSubmit();
-    });
+function setLoading(refs, loading = false, submitLabel = "") {
+  const active = Boolean(loading);
+  const label = text(submitLabel || refs.submit?.dataset?.defaultLabel || refs.submit?.textContent, "Entrar");
 
-  return globalSubmitPromise;
+  setBusy(refs.form, active);
+  setDisabled(refs.identifier, active);
+  setDisabled(refs.password, active);
+  setDisabled(refs.remember, active);
+  setDisabled(refs.submit, active);
+
+  if (refs.submit) {
+    try {
+      if (!refs.submit.dataset.defaultLabel) {
+        refs.submit.dataset.defaultLabel = label;
+      }
+
+      refs.submit.textContent = active ? "Accediendo..." : refs.submit.dataset.defaultLabel;
+    } catch {
+      // noop
+    }
+  }
 }
 
 /* =========================================================
-   AUTH EXECUTOR
+   AUTH
 ========================================================= */
 
-function moduleAuth() {
-  try {
-    return AppCore?.modules?.get?.("Auth") || AppCore?.modules?.get?.("auth") || AppCore?.Auth || AppCore?.auth || null;
-  } catch {
-    return null;
-  }
-}
+function normalizeLoginResult(result = {}) {
+  const state = isObject(AppCore?.state) ? AppCore.state : {};
 
-function resolveLoginExecutor(deps = {}) {
-  const authModule = moduleAuth();
+  const authenticated = Boolean(
+    result?.authenticated ||
+      (state.authenticated && state.hasToken && (state.user || state.currentUser))
+  );
 
-  const candidates = [
-    { fn: deps.onSubmit, owner: deps, source: "deps.onSubmit", custom: true },
-    { fn: deps.submitLogin, owner: deps, source: "deps.submitLogin", custom: true },
-    { fn: deps.login, owner: deps, source: "deps.login", custom: true },
-    { fn: Auth?.login, owner: Auth, source: "Auth.login", custom: false },
-    { fn: authModule?.login, owner: authModule, source: "moduleAuth.login", custom: false },
-  ];
+  const user =
+    result?.user ||
+    result?.usuario ||
+    result?.me ||
+    state.user ||
+    state.currentUser ||
+    null;
 
-  return candidates.find((item) => isFn(item.fn)) || null;
-}
-
-function buildLoginOptions(deps = {}) {
   return {
-    source: SOURCE,
-    navigate: false,
-    skipNavigate: true,
-    skipNavigation: true,
-    skipRedirect: true,
-    noRedirect: true,
-    preserveCurrentRoute: true,
-    preserveRoute: true,
-    preservePublicPath: true,
-    emitLoginSuccessEvent: deps.emitLoginSuccessEvent === true,
-    redirectTo: deps.redirectTo,
-    redirect: deps.redirect,
-    target: deps.target,
+    ok: result?.ok !== false && result?.success !== false && authenticated,
+    success: result?.success !== false && authenticated,
+    authenticated,
+
+    user,
+
+    role:
+      result?.role ||
+      user?.role ||
+      state.role ||
+      null,
+
+    roles:
+      Array.isArray(result?.roles)
+        ? result.roles
+        : user?.role
+          ? [user.role]
+          : state.role
+            ? [state.role]
+            : [],
+
+    redirectTo:
+      result?.redirectTo ||
+      result?.redirect ||
+      state.redirectAfterLogin ||
+      homeTarget(),
+
+    message:
+      result?.message ||
+      "",
   };
 }
 
-function stateToken() {
-  return safeText(
-    AppCore?.state?.token ||
-      AppCore?.state?.accessToken ||
-      AppCore?.state?.access_token ||
-      AppCore?.state?.session?.token ||
-      AppCore?.state?.session?.accessToken ||
-      "",
-    ""
+function errorMessage(error = null) {
+  return (
+    text(error?.message, "") ||
+    text(error?.data?.message, "") ||
+    text(error?.response?.data?.message, "") ||
+    "No se pudo iniciar sesión."
   );
-}
-
-function stateUser() {
-  return AppCore?.state?.user || AppCore?.state?.currentUser || AppCore?.state?.authUser || AppCore?.state?.sessionUser || AppCore?.state?.session?.user || null;
-}
-
-function buildCoreAuthResult() {
-  const token = stateToken();
-  const user = stateUser();
-
-  if (!hasUsableToken(token) || !hasUsableUser(user)) return null;
-
-  return normalizeAuthResult({
-    ok: true,
-    success: true,
-    authenticated: true,
-    token,
-    accessToken: token,
-    user,
-    usuario: user,
-    source: "core-state",
-  });
-}
-
-function normalizeLoginResult(rawResult = null) {
-  const normalized = normalizeAuthResult(rawResult || {});
-
-  if (normalized.authenticated || normalized.requires2FA || normalized.explicitFailure) return normalized;
-
-  return buildCoreAuthResult() || normalized;
-}
-
-function isAuthenticatedResult(auth = {}) {
-  if (!auth || auth.requires2FA || auth.explicitFailure) return false;
-  if (auth.authenticated === true) return true;
-  return Boolean(hasUsableToken(auth.token || auth.accessToken || auth.access_token || stateToken()) && hasUsableUser(auth.user || auth.usuario || stateUser()));
-}
-
-function is2FAResult(auth = {}) {
-  const status = safeText(auth?.status, "").toLowerCase();
-  return Boolean(auth?.requires2FA === true || ["2fa_required", "mfa_required", "two_factor_required", "otp_required"].includes(status));
 }
 
 /* =========================================================
@@ -526,11 +632,14 @@ function is2FAResult(auth = {}) {
 function destroyPrevious(container) {
   try {
     const previous = container?.[INSTANCE_KEY];
+
     if (previous?.destroy) {
-      previous.destroy({ remount: true, preserveAuthScreen: true });
+      previous.destroy({ remount: true });
       return true;
     }
-  } catch {}
+  } catch {
+    // noop
+  }
 
   return false;
 }
@@ -539,52 +648,39 @@ function storeInstance(container, instance) {
   if (!container || !instance) return false;
 
   try {
-    Object.defineProperty(container, INSTANCE_KEY, { value: instance, configurable: true, enumerable: false, writable: true });
+    Object.defineProperty(container, INSTANCE_KEY, {
+      value: instance,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+    });
   } catch {
-    try { container[INSTANCE_KEY] = instance; } catch {}
+    try {
+      container[INSTANCE_KEY] = instance;
+    } catch {
+      // noop
+    }
   }
 
   lastInstance = instance;
-
-  try {
-    if (isBrowser()) window[RUNTIME_KEY] = instance;
-  } catch {}
 
   return true;
 }
 
 function clearInstance(container, instance) {
   try {
-    if (container?.[INSTANCE_KEY] === instance) delete container[INSTANCE_KEY];
-  } catch {}
-
-  if (lastInstance === instance) lastInstance = null;
-  return true;
-}
-
-function renderTemplate(container, html = "") {
-  const markup = String(html || "");
-
-  if (!isBrowser()) {
-    try { container.innerHTML = markup; return true; } catch { return false; }
-  }
-
-  try {
-    const template = document.createElement("template");
-    template.innerHTML = markup;
-    container.replaceChildren(template.content.cloneNode(true));
-    return true;
+    if (container?.[INSTANCE_KEY] === instance) {
+      delete container[INSTANCE_KEY];
+    }
   } catch {
-    try { container.innerHTML = markup; return true; } catch { return false; }
+    // noop
   }
-}
 
-function appName() {
-  return safeText(AppCore?.config?.appName, "Onion Support");
-}
+  if (lastInstance === instance) {
+    lastInstance = null;
+  }
 
-function forgotHref(deps = {}) {
-  return safeText(deps.forgotPasswordHref, "") || safeText(AppCore?.config?.routes?.forgotPassword, "") || "/forgot-password";
+  return true;
 }
 
 /* =========================================================
@@ -592,269 +688,178 @@ function forgotHref(deps = {}) {
 ========================================================= */
 
 export function renderLoginView(container, deps = {}) {
-  if (!container) throw new Error("[LoginView] container requerido.");
+  if (!container) {
+    throw new Error("[LoginView] container requerido.");
+  }
 
   destroyPrevious(container);
-  setAuthScreen(true);
+  renderTemplate(container, deps);
+
+  const refs = getRefs(container);
+  const messageNode = getMessageNode(container, refs.form);
 
   let mounted = true;
   let submitting = false;
-  let leavingLogin = false;
-  let loadingToastId = null;
-  let watchdog = null;
-
-  const rememberedIdentifier = loadRememberedIdentifier();
-
-  renderTemplate(container, getLoginTemplate({
-    appName: appName(),
-    identifier: rememberedIdentifier,
-    forgotPasswordHref: forgotHref(deps),
-    ...safeObject(deps),
-  }));
-
-  const refs = getLoginRefs(container);
-  const executor = resolveLoginExecutor(deps);
-
-  const submitLabel = safeText(deps.submitLabel, "Entrar al panel");
-  const loadingLabel = safeText(deps.loadingLabel, "Accediendo...");
-
-  const passwordBindings = bindLoginPasswordFields(container);
-  const disposers = [
-    bindLoginInputClearers(refs, () => clearLoginErrors(refs)),
-    bindThemeToggle(refs, toggleTheme),
-    bindLoginSubmit(refs, handleSubmit),
-  ].filter(Boolean);
-
-  function closeLoadingToast() {
-    dismissToast(loadingToastId);
-    loadingToastId = null;
-  }
-
-  function stopWatchdog() {
-    if (!watchdog) return;
-    try { clearTimeout(watchdog); } catch {}
-    watchdog = null;
-  }
-
-  function startWatchdog() {
-    stopWatchdog();
-
-    watchdog = setTimeout(() => {
-      watchdog = null;
-      closeLoadingToast();
-      clearGlobalSubmit();
-
-      if (!mounted || !isLoginRoute()) return;
-
-      submitting = false;
-      leavingLogin = false;
-      unlockLoginForm(refs, { submitLabel, loadingLabel });
-      emit(LOGIN_EVENTS.submitUnlocked, { reason: "watchdog" });
-      toastError("Se recuperó el formulario. Inténtalo de nuevo.");
-    }, GLOBAL_SUBMIT_TIMEOUT_MS + 2_500);
-  }
 
   function setSubmitting(value = false) {
     submitting = Boolean(value);
+    setLoading(refs, submitting);
+  }
+
+  async function submit(event = null) {
+    try {
+      event?.preventDefault?.();
+    } catch {
+      // noop
+    }
+
+    if (!mounted || submitting) {
+      return false;
+    }
+
+    clearErrors(refs, messageNode);
+
+    const payload = readForm(refs);
+    const errors = validatePayload(payload);
+
+    if (Object.keys(errors).length) {
+      applyErrors(refs, messageNode, errors);
+      return false;
+    }
+
+    setSubmitting(true);
+    emit("auth:login:view:submit:start");
 
     try {
-      if (refs.form?.dataset) {
-        if (submitting) refs.form.dataset.loginSubmitting = "1";
-        else delete refs.form.dataset.loginSubmitting;
-      }
-    } catch {}
-
-    setLoginLoading(refs, submitting, { submitLabel, loadingLabel });
-  }
-
-  function unlock(reason = "manual") {
-    closeLoadingToast();
-    stopWatchdog();
-    clearGlobalSubmit();
-
-    submitting = false;
-
-    if (mounted) unlockLoginForm(refs, { submitLabel, loadingLabel });
-    emit(LOGIN_EVENTS.submitUnlocked, { reason });
-    return true;
-  }
-
-  async function navigateAfter(auth = {}) {
-    if (deps.navigate === false || deps.skipNavigate === true || deps.manualNavigate === true) return false;
-    if (!shouldRedirectAfterLogin(auth, deps)) return false;
-    if (!isLoginRoute()) return false;
-
-    const target = safeInternalPath(
-      resolveLoginRedirect(auth, deps) || (auth.requires2FA ? DEFAULT_2FA : configuredHome()),
-      auth.requires2FA ? DEFAULT_2FA : configuredHome(),
-      { allowLogin: false }
-    );
-
-    leavingLogin = true;
-    return navigateTo(target, { replaceState: true, reason: auth.requires2FA ? "login-2fa" : "login-success", allowLogin: auth.requires2FA === true });
-  }
-
-  async function handleSubmit(event) {
-    try { event?.preventDefault?.(); } catch {}
-
-    if (submitting || leavingLogin || hasGlobalSubmit() || refs.form?.dataset?.loginSubmitting === "1") {
-      emit(LOGIN_EVENTS.submitBlocked, { submitting, leavingLogin, hasGlobalSubmit: hasGlobalSubmit(), fingerprint: globalSubmitFingerprint });
-      toastInfo("Ya hay un inicio de sesión en curso.");
-      return;
-    }
-
-    clearLoginErrors(refs);
-
-    const formState = readLoginFormState(refs);
-    const payload = createLoginPayload(formState);
-    const validationErrors = validateLoginPayload(payload);
-
-    if (Object.keys(validationErrors).length) {
-      applyLoginErrors(refs, validationErrors);
-      toastError(getFirstLoginError(validationErrors) || "Revisa el formulario.");
-      return;
-    }
-
-    if (!executor) {
-      const message = "No se encontró el módulo de autenticación.";
-      setGlobalLoginError(refs, message);
-      toastError(message);
-      return;
-    }
-
-    persistRememberedIdentifier(payload);
-
-    const submitFingerprint = fingerprint(payload);
-
-    try {
-      setSubmitting(true);
-      startWatchdog();
-
-      loadingToastId = toastLoading("Validando credenciales...");
-      emit(LOGIN_EVENTS.submitStart, { executor: executor.source, customExecutor: executor.custom, fingerprint: submitFingerprint });
-
-      const rawResult = await runGlobalSubmit(
-        () => executor.fn.call(executor.owner || null, payload, buildLoginOptions(deps)),
-        submitFingerprint
+      const raw = await Auth.login(
+        {
+          identifier: payload.identifier,
+          password: payload.password,
+          remember: payload.remember,
+        },
+        {
+          source: SOURCE,
+          skipNavigation: true,
+          skipRedirect: true,
+          noRedirect: true,
+        }
       );
 
-      const auth = normalizeLoginResult(rawResult);
-      closeLoadingToast();
+      const result = normalizeLoginResult(raw);
 
-      if (!mounted) return;
-
-      if (is2FAResult(auth)) {
-        toastInfo(auth.message || "Verificación adicional requerida.");
-        await navigateAfter({ ...auth, requires2FA: true, redirectTo: auth.redirectTo || DEFAULT_2FA });
-        emit(LOGIN_EVENTS.submitDone, { ok: true, twoFactor: true });
-        return;
+      if (!result.authenticated) {
+        throw new Error(result.message || "Login inválido.");
       }
 
-      if (!isAuthenticatedResult(auth)) throw rawResult || new Error("INVALID_LOGIN_RESULT");
-      if (executor.custom === true) syncSession(auth, { source: SOURCE });
+      setMessage(messageNode, "Sesión iniciada correctamente.", "success");
 
-      if (now() - lastSuccessToastAt > SUCCESS_TOAST_DEDUPE_MS) {
-        lastSuccessToastAt = now();
-        toastSuccess(auth.message || "Sesión iniciada correctamente.");
+      emit("auth:login:view:submit:done", {
+        authenticated: true,
+        role: result.role || null,
+      });
+
+      if (isLoginRoute()) {
+        await navigateTo(result.redirectTo || homeTarget());
       }
 
-      const navigated = await navigateAfter(auth);
-      emit(LOGIN_EVENTS.submitDone, { ok: true, authenticated: true, navigated });
+      return true;
     } catch (error) {
-      closeLoadingToast();
+      const message = errorMessage(error);
 
-      const normalized = normalizeError(error);
-      const message = normalized?.code === "LOGIN_SUBMIT_TIMEOUT" || normalized?.message === "LOGIN_SUBMIT_TIMEOUT"
-        ? "La solicitud tardó demasiado. Revisa tu conexión y vuelve a intentarlo."
-        : resolveAuthErrorMessage(error);
+      setMessage(messageNode, message, "error");
 
-      setGlobalLoginError(refs, message);
-      toastError(message);
-      emit(LOGIN_EVENTS.error, { message, error: normalized });
-      warn("login error", normalized);
+      emit("auth:login:view:error", {
+        message,
+        status: error?.status || error?.statusCode || 0,
+        code: error?.code || null,
+      });
+
+      return false;
     } finally {
-      stopWatchdog();
-      closeLoadingToast();
-
-      if (!leavingLogin || isLoginRoute()) {
-        leavingLogin = false;
-        unlock("finally");
+      if (mounted) {
+        setSubmitting(false);
       }
     }
   }
 
-  function toggleTheme() {
-    const current = safeText(AppCore?.state?.theme || document.documentElement?.dataset?.theme || AppCore?.config?.defaultTheme || "dark", "dark").toLowerCase();
-    const next = current === "light" ? "dark" : "light";
+  const disposers = [];
 
-    try { AppCore?.setTheme?.(next); }
-    catch {
-      try { document.documentElement.dataset.theme = next; } catch {}
-    }
-
-    toastInfo(`Tema ${next} activado.`);
+  try {
+    refs.form?.addEventListener?.("submit", submit);
+    disposers.push(() => refs.form?.removeEventListener?.("submit", submit));
+  } catch {
+    // noop
   }
 
-  focusLoginPrimaryField(refs, { rememberedIdentifier });
-  hideLoader();
+  const clearOnInput = () => clearErrors(refs, messageNode);
 
-  emit(LOGIN_EVENTS.ready, { route: LOGIN_ROUTE, view: "login", executor: executor?.source || null });
+  for (const field of [refs.identifier, refs.password]) {
+    try {
+      field?.addEventListener?.("input", clearOnInput);
+      disposers.push(() => field?.removeEventListener?.("input", clearOnInput));
+    } catch {
+      // noop
+    }
+  }
+
+  hideLoader();
+  focusPrimary(refs);
+
+  emit("auth:login:view:ready", {
+    route: LOGIN_ROUTE,
+  });
 
   const instance = {
     version: LOGIN_VIEW_VERSION,
 
-    destroy(options = {}) {
+    destroy() {
       mounted = false;
-      stopWatchdog();
-      closeLoadingToast();
 
-      for (const dispose of disposers.splice(0)) {
-        try { dispose?.(); } catch {}
-      }
-
-      try { destroyLoginPasswordFields(container); }
-      catch {
-        for (const binding of passwordBindings || []) {
-          try {
-            if (isFn(binding)) binding();
-            else if (isFn(binding?.destroy)) binding.destroy();
-            else if (isFn(binding?.unbind)) binding.unbind();
-            else if (isFn(binding?.dispose)) binding.dispose();
-          } catch {}
+      while (disposers.length) {
+        try {
+          disposers.pop()?.();
+        } catch {
+          // noop
         }
       }
 
-      if (options.preserveAuthScreen !== true && options.remount !== true && !isLoginRoute()) setAuthScreen(false);
-
       clearInstance(container, instance);
-      emit(LOGIN_EVENTS.destroyed, { remount: options.remount === true, preserveAuthScreen: options.preserveAuthScreen === true, leavingLogin });
+
+      emit("auth:login:view:destroyed");
+      return true;
     },
 
-    unlock,
+    unlock() {
+      setSubmitting(false);
+      return true;
+    },
+
+    submit,
 
     getSnapshot() {
       return {
         version: LOGIN_VIEW_VERSION,
         source: SOURCE,
-        mounted: Boolean(mounted),
-        submitting: Boolean(submitting),
-        leavingLogin: Boolean(leavingLogin),
+
+        mounted,
+        submitting,
+
         currentPath: currentPath(),
-        currentCanonicalPath: currentCanonicalPath(),
         stillOnLogin: isLoginRoute(),
-        hasGlobalSubmit: hasGlobalSubmit(),
-        globalSubmitFingerprint,
-        globalSubmitStartedAt,
-        globalSubmitStartedAtIso: globalSubmitStartedAt ? iso(globalSubmitStartedAt) : "",
-        hasLoadingToast: Boolean(loadingToastId),
-        hasWatchdog: Boolean(watchdog),
-        executor: executor?.source || null,
-        customExecutor: executor?.custom === true,
+
         authenticated: Boolean(AppCore?.state?.authenticated),
-        hasStateToken: Boolean(stateToken()),
-        hasStateUser: hasUsableUser(stateUser()),
-        dom: getLoginDomSnapshot(refs),
-        at: iso(),
+        hasUser: Boolean(AppCore?.state?.user || AppCore?.state?.currentUser),
+        hasToken: Boolean(AppCore?.state?.hasToken),
+
+        dom: {
+          hasForm: Boolean(refs.form),
+          hasIdentifier: Boolean(refs.identifier),
+          hasPassword: Boolean(refs.password),
+          hasSubmit: Boolean(refs.submit),
+          hasMessage: Boolean(messageNode),
+        },
+
+        at: nowIso(),
       };
     },
 
@@ -864,7 +869,6 @@ export function renderLoginView(container, deps = {}) {
   };
 
   storeInstance(container, instance);
-  log("ready", { executor: executor?.source || null });
 
   return instance;
 }
@@ -883,25 +887,26 @@ export function mount(container, deps = {}) {
 
 export function destroy(options = {}) {
   if (lastInstance?.destroy) {
-    lastInstance.destroy(options);
-    return true;
+    return lastInstance.destroy(options);
   }
 
   return false;
 }
 
 export function getSnapshot() {
-  if (lastInstance?.getSnapshot) return lastInstance.getSnapshot();
+  if (lastInstance?.getSnapshot) {
+    return lastInstance.getSnapshot();
+  }
 
   return {
     version: LOGIN_VIEW_VERSION,
     source: SOURCE,
     mounted: false,
     currentPath: isBrowser() ? currentPath() : "",
-    currentCanonicalPath: isBrowser() ? currentCanonicalPath() : "",
     stillOnLogin: isBrowser() ? isLoginRoute() : false,
-    hasGlobalSubmit: hasGlobalSubmit(),
-    at: iso(),
+    authenticated: Boolean(AppCore?.state?.authenticated),
+    hasToken: Boolean(AppCore?.state?.hasToken),
+    at: nowIso(),
   };
 }
 
@@ -919,10 +924,6 @@ export const LoginView = Object.assign(
     getDebugSnapshot: getSnapshot,
   }
 );
-
-try {
-  if (isBrowser()) window[RUNTIME_KEY] = LoginView;
-} catch {}
 
 export { renderLoginView as render };
 

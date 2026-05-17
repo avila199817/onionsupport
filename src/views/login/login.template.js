@@ -2,86 +2,45 @@
    Onion SPA - Login Template
    Archivo: src/views/login/login.template.js
 
-   AUTH TEMPLATE · CSP CLEAN · NO CSS INLINE · NO STYLE TAGS
-   FINAL PRO SYSTEM · TOKEN PRO SYSTEM · 16/10
-
-   RESPONSABILIDADES:
-   - generar el HTML del login alineado con /src/css/auth/login.css
-   - centralizar el markup premium de la vista
-   - mantener IDs y data-hooks estables para login.dom.js
-   - respetar el sistema visual auth-screen / login-grid / login-card
-   - unificar forgot password hacia /reset-password
-   - soportar usuario, email o teléfono como identificador
-   - usar logo real de empresa según tema activo
-   - reutilizar el sistema compartido de password-field
-   - dejar toda la capa visual en CSS externo
-   - incluir theme toggle si login.dom lo quiere enlazar
-   - mantener accesibilidad básica sin title nativo
-   - evitar href/src peligrosos
-   - evitar HTML inyectable desde options
-
-   IMPORTANTE:
-   - Sin <style>.
-   - Sin style="".
-   - Sin CSS inyectado por JS.
-   - Sin duplicidades visuales.
-   - El CSS debe vivir en /src/css/auth/login.css.
+   LOGIN TEMPLATE · SIMPLE
+   - HTML puro del login
+   - IDs/data-hooks estables para login.dom.js
+   - sin <style>, sin style="", sin CSS por JS
+   - sin Auth, HTTP, Router, Store ni Toast
+   - password-field compartido con fallback local
+   - href/src saneados
 ========================================================= */
 
 import { escapeHtml } from "./login.helpers.js";
 import { renderPasswordField } from "../../shared/password-field/index.js";
 
-/* =========================================================
-   CONSTANTS
-========================================================= */
+export const TEMPLATE_VERSION = "21.0.0-simple";
 
-const TEMPLATE_VERSION =
-  "16.0.0-extreme-pro";
+const DEFAULT_APP_NAME = "Onion Support";
+const DEFAULT_FORGOT_PASSWORD_HREF = "/reset-password";
+const DEFAULT_LOGO_DARK = "/src/media/img/favicon_white.png";
+const DEFAULT_LOGO_LIGHT = "/src/media/img/favicon_black.png";
 
-const DEFAULT_APP_NAME =
-  "Onion Support";
+const DEFAULT_SIGNALS = Object.freeze([
+  "Autenticación robusta del sistema",
+  "Sesión protegida con refresh seguro",
+  "Acceso estable al entorno operativo",
+]);
 
-const DEFAULT_FORGOT_PASSWORD_HREF =
-  "/reset-password";
-
-const DEFAULT_LOGO_DARK =
-  "/src/media/img/favicon_white.png";
-
-const DEFAULT_LOGO_LIGHT =
-  "/src/media/img/favicon_black.png";
-
-const DEFAULT_SIGNALS =
-  Object.freeze([
-    "Autenticación robusta del sistema",
-    "Sesión protegida con refresh seguro",
-    "Acceso estable al entorno operativo",
-  ]);
-
-const SAFE_INTERNAL_HREF_FALLBACK =
-  DEFAULT_FORGOT_PASSWORD_HREF;
+const SAFE_INTERNAL_HREF_FALLBACK = DEFAULT_FORGOT_PASSWORD_HREF;
 
 /* =========================================================
    SAFE HELPERS
 ========================================================= */
 
 function safeText(value = "", fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value).trim();
-
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
   return text || fallback;
 }
 
 function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return Array.isArray(value) ? value : [];
 }
 
 function hasText(value = "") {
@@ -89,138 +48,48 @@ function hasText(value = "") {
 }
 
 function escapeAttr(value = "") {
-  return escapeHtml(
-    safeText(value, "")
-  );
+  return escapeHtml(safeText(value, ""));
 }
 
 function isSafeRelativePath(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "");
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || /[\r\n\t\\]/.test(raw)) return false;
 
-  if (!raw) {
-    return false;
-  }
-
-  if (!raw.startsWith("/")) {
-    return false;
-  }
-
-  if (raw.startsWith("//")) {
-    return false;
-  }
-
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-    return false;
-  }
-
-  if (/[\r\n\t]/.test(raw)) {
-    return false;
-  }
-
-  const lower =
-    raw.toLowerCase();
-
-  if (
-    lower.includes("%0d") ||
-    lower.includes("%0a") ||
-    lower.includes("%09") ||
-    lower.includes("%5c") ||
-    raw.includes("\\")
-  ) {
-    return false;
-  }
+  const lower = raw.toLowerCase();
+  if (lower.includes("%0d") || lower.includes("%0a") || lower.includes("%09") || lower.includes("%5c")) return false;
 
   try {
-    const decoded =
-      decodeURIComponent(raw)
-        .trim()
-        .replace(/\\/g, "/");
-
-    if (
-      decoded.startsWith("//") ||
-      /^[a-z][a-z0-9+.-]*:/i.test(decoded) ||
-      /[\r\n\t]/.test(decoded)
-    ) {
-      return false;
-    }
+    const decoded = decodeURIComponent(raw).trim().replace(/\\/g, "/");
+    return !(decoded.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(decoded) || /[\r\n\t]/.test(decoded));
   } catch {
     return false;
   }
-
-  return true;
 }
 
 function normalizeInternalHref(value = "", fallback = SAFE_INTERNAL_HREF_FALLBACK) {
-  const raw =
-    safeText(value, "");
+  const cleanFallback = isSafeRelativePath(fallback) ? fallback : SAFE_INTERNAL_HREF_FALLBACK;
+  const raw = safeText(value, "");
 
-  const cleanFallback =
-    isSafeRelativePath(fallback)
-      ? fallback
-      : SAFE_INTERNAL_HREF_FALLBACK;
-
-  if (!raw) {
-    return cleanFallback;
-  }
-
-  if (!isSafeRelativePath(raw)) {
-    return cleanFallback;
-  }
-
-  return raw
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/") ||
-    cleanFallback;
+  if (!raw || !isSafeRelativePath(raw)) return cleanFallback;
+  return raw.replace(/\\/g, "/").replace(/\/{2,}/g, "/") || cleanFallback;
 }
 
 function isSafeAssetSrc(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "");
+  if (!raw) return false;
 
-  if (!raw) {
-    return false;
-  }
+  const lower = raw.toLowerCase();
+  if (lower.startsWith("javascript:") || lower.startsWith("vbscript:") || lower.startsWith("data:text/html") || lower.startsWith("data:application/") || lower.startsWith("data:image/svg")) return false;
+  if (lower.startsWith("data:")) return /^data:image\/(png|jpe?g|gif|webp|avif);base64,/i.test(raw);
 
-  const lower =
-    raw.toLowerCase();
-
-  if (
-    lower.startsWith("javascript:") ||
-    lower.startsWith("vbscript:") ||
-    lower.startsWith("data:text/html") ||
-    lower.startsWith("data:application/") ||
-    lower.startsWith("data:image/svg")
-  ) {
-    return false;
-  }
-
-  if (lower.startsWith("data:")) {
-    return /^data:image\/(png|jpe?g|gif|webp|avif);base64,/i.test(raw);
-  }
-
-  if (/^\/(?!\/)/.test(raw)) {
-    return true;
-  }
-
-  if (/^\.\.?\//.test(raw)) {
-    return true;
-  }
-
-  return false;
+  return /^\/(?!\/)/.test(raw) || /^\.\/?\.?\//.test(raw);
 }
 
 function normalizeAssetSrc(value = "", fallback = "") {
-  const raw =
-    safeText(value, "");
-
-  if (isSafeAssetSrc(raw)) {
-    return raw;
-  }
-
-  return isSafeAssetSrc(fallback)
-    ? fallback
-    : "";
+  const raw = safeText(value, "");
+  if (isSafeAssetSrc(raw)) return raw;
+  return isSafeAssetSrc(fallback) ? fallback : "";
 }
 
 function normalizeIdentifierForValue(value = "") {
@@ -231,20 +100,15 @@ function normalizeIdentifierForValue(value = "") {
 }
 
 function normalizeSignalList(value = []) {
-  const custom =
-    safeArray(value)
-      .map((item) =>
-        safeText(item, "")
-      )
-      .filter(Boolean);
+  const custom = safeArray(value)
+    .map((item) => safeText(item, ""))
+    .filter(Boolean);
 
-  return custom.length
-    ? custom
-    : [...DEFAULT_SIGNALS];
+  return custom.length ? custom : [...DEFAULT_SIGNALS];
 }
 
 /* =========================================================
-   ICONS
+   PARTIALS
 ========================================================= */
 
 function renderThemeIcon() {
@@ -255,39 +119,17 @@ function renderThemeIcon() {
   `;
 }
 
-/* =========================================================
-   LOGO
-========================================================= */
-
 function renderThemeLogo({
   darkSrc = DEFAULT_LOGO_DARK,
   lightSrc = DEFAULT_LOGO_LIGHT,
   alt = DEFAULT_APP_NAME,
 } = {}) {
-  const finalAlt =
-    safeText(
-      alt,
-      DEFAULT_APP_NAME
-    );
-
-  const finalDarkSrc =
-    normalizeAssetSrc(
-      darkSrc,
-      DEFAULT_LOGO_DARK
-    );
-
-  const finalLightSrc =
-    normalizeAssetSrc(
-      lightSrc,
-      DEFAULT_LOGO_LIGHT
-    );
+  const finalAlt = safeText(alt, DEFAULT_APP_NAME);
+  const finalDarkSrc = normalizeAssetSrc(darkSrc, DEFAULT_LOGO_DARK);
+  const finalLightSrc = normalizeAssetSrc(lightSrc, DEFAULT_LOGO_LIGHT);
 
   return `
-    <span
-      class="login-logo-theme"
-      aria-label="${escapeAttr(finalAlt)}"
-      data-login-logo="true"
-    >
+    <span class="login-logo-theme" aria-label="${escapeAttr(finalAlt)}" data-login-logo="true">
       <img
         class="login-logo-theme-img login-logo-theme-dark"
         src="${escapeAttr(finalDarkSrc)}"
@@ -317,17 +159,9 @@ function renderThemeLogo({
   `;
 }
 
-/* =========================================================
-   LEFT PANEL
-========================================================= */
-
 function renderSignalItem(text = "") {
-  const label =
-    safeText(text, "");
-
-  if (!label) {
-    return "";
-  }
+  const label = safeText(text, "");
+  if (!label) return "";
 
   return `
     <div class="login-signal-item" data-login-signal="true">
@@ -343,58 +177,29 @@ function renderLeftPanel({
   heroText = "",
   bullets = [],
 } = {}) {
-  const finalSignals =
-    normalizeSignalList(bullets);
-
-  const cleanHeroText =
-    safeText(heroText, "");
+  const cleanHeroText = safeText(heroText, "");
+  const signals = normalizeSignalList(bullets);
 
   return `
-    <aside
-      class="login-side login-side-left login-side-left--raised"
-      aria-label="Estado del acceso"
-      data-login-side="left"
-    >
+    <aside class="login-side login-side-left login-side-left--raised" aria-label="Estado del acceso" data-login-side="left">
       <div class="login-side-panel login-side-panel--status">
-        <div class="login-side-eyebrow">
-          ${escapeHtml(heroEyebrow)}
-        </div>
+        <div class="login-side-eyebrow">${escapeHtml(heroEyebrow)}</div>
 
-        <h3>
-          ${escapeHtml(heroTitle)}
-        </h3>
+        <h3>${escapeHtml(heroTitle)}</h3>
 
-        ${
-          cleanHeroText
-            ? `
-              <p class="login-side-text">
-                ${escapeHtml(cleanHeroText)}
-              </p>
-            `
-            : ""
-        }
+        ${cleanHeroText ? `<p class="login-side-text">${escapeHtml(cleanHeroText)}</p>` : ""}
 
         <div class="login-signal-list" data-login-signal-list="true">
-          ${finalSignals.map(renderSignalItem).join("")}
+          ${signals.map(renderSignalItem).join("")}
         </div>
       </div>
     </aside>
   `;
 }
 
-/* =========================================================
-   FIELD ERROR
-========================================================= */
-
-function renderFieldError({
-  id = "",
-  field = "",
-} = {}) {
-  const finalId =
-    safeText(id, "");
-
-  const finalField =
-    safeText(field, "");
+function renderFieldError({ id = "", field = "" } = {}) {
+  const finalId = safeText(id, "");
+  const finalField = safeText(field, "");
 
   return `
     <p
@@ -408,10 +213,6 @@ function renderFieldError({
     ></p>
   `;
 }
-
-/* =========================================================
-   PASSWORD FIELD
-========================================================= */
 
 function renderPasswordFallbackControl() {
   return `
@@ -440,11 +241,7 @@ function renderPasswordFallbackControl() {
         data-show-label="Mostrar contraseña"
         data-hide-label="Ocultar contraseña"
       >
-        <span
-          class="password-toggle-icon"
-          data-password-toggle-icon="true"
-          aria-hidden="true"
-        ></span>
+        <span class="password-toggle-icon" data-password-toggle-icon="true" aria-hidden="true"></span>
       </button>
     </div>
 
@@ -455,131 +252,58 @@ function renderPasswordFallbackControl() {
       data-login-caps="true"
       aria-live="polite"
       hidden
-    >
-      Bloq Mayús
-    </div>
+    >Bloq Mayús</div>
   `;
 }
 
 function renderPasswordSharedControl() {
   try {
-    if (typeof renderPasswordField !== "function") {
-      return "";
-    }
+    if (typeof renderPasswordField !== "function") return "";
 
-    const html =
-      renderPasswordField({
-        escapeHtml,
+    const html = renderPasswordField({
+      escapeHtml,
+      fieldId: "loginPasswordField",
+      inputId: "loginPassword",
+      id: "loginPassword",
+      fieldName: "password",
+      name: "password",
+      placeholder: "Contraseña",
+      ariaLabel: "Contraseña",
+      autocomplete: "current-password",
+      fieldClass: "password-field login-password-field",
+      rootClass: "password-field login-password-field",
+      fieldDataName: "password",
+      dataField: "password",
+      wrapperClass: "password-wrapper",
+      inputClass: "input-text",
+      toggleId: "togglePassword",
+      toggleClass: "password-toggle",
+      capsId: "loginCapsIndicator",
+      required: true,
+      showCapsIndicator: true,
+      capsLabel: "Bloq Mayús",
+      toggleLabelShow: "Mostrar contraseña",
+      toggleLabelHide: "Ocultar contraseña",
+      dataAttrs: {
+        loginPassword: "true",
+        passwordInput: "true",
+      },
+    });
 
-        fieldId:
-          "loginPasswordField",
-
-        inputId:
-          "loginPassword",
-
-        id:
-          "loginPassword",
-
-        fieldName:
-          "password",
-
-        name:
-          "password",
-
-        placeholder:
-          "Contraseña",
-
-        ariaLabel:
-          "Contraseña",
-
-        autocomplete:
-          "current-password",
-
-        fieldClass:
-          "password-field login-password-field",
-
-        rootClass:
-          "password-field login-password-field",
-
-        fieldDataName:
-          "password",
-
-        dataField:
-          "password",
-
-        wrapperClass:
-          "password-wrapper",
-
-        inputClass:
-          "input-text",
-
-        toggleId:
-          "togglePassword",
-
-        toggleClass:
-          "password-toggle",
-
-        capsId:
-          "loginCapsIndicator",
-
-        required:
-          true,
-
-        showCapsIndicator:
-          true,
-
-        capsLabel:
-          "Bloq Mayús",
-
-        toggleLabelShow:
-          "Mostrar contraseña",
-
-        toggleLabelHide:
-          "Ocultar contraseña",
-
-        dataAttrs: {
-          loginPassword:
-            "true",
-        },
-      });
-
-    return typeof html === "string" && hasText(html)
-      ? html
-      : "";
+    return typeof html === "string" && hasText(html) ? html : "";
   } catch {
     return "";
   }
 }
 
 function renderLoginPasswordField() {
-  const shared =
-    renderPasswordSharedControl();
-
   return `
-    <div
-      class="login-field"
-      data-field="password"
-      data-login-field="password"
-      data-login-password-field="true"
-    >
-      ${
-        shared ||
-        renderPasswordFallbackControl()
-      }
-
-      ${renderFieldError({
-        id:
-          "loginPasswordError",
-        field:
-          "password",
-      })}
+    <div class="login-field" data-field="password" data-login-field="password" data-login-password-field="true">
+      ${renderPasswordSharedControl() || renderPasswordFallbackControl()}
+      ${renderFieldError({ id: "loginPasswordError", field: "password" })}
     </div>
   `;
 }
-
-/* =========================================================
-   FORM
-========================================================= */
 
 function renderForm({
   identifier = "",
@@ -597,118 +321,44 @@ function renderForm({
   logoLightSrc = DEFAULT_LOGO_LIGHT,
   showThemeToggle = true,
 } = {}) {
-  const finalAppName =
-    safeText(
-      appName,
-      DEFAULT_APP_NAME
-    );
-
-  const finalIdentifier =
-    normalizeIdentifierForValue(identifier);
-
-  const finalTitle =
-    safeText(
-      title,
-      "Iniciar sesión"
-    );
-
-  const finalSubtitle =
-    safeText(
-      subtitle,
-      `Iniciar sesión en ${finalAppName}`
-    );
-
-  const finalSubmitLabel =
-    safeText(
-      submitLabel,
-      "Iniciar sesión"
-    );
-
-  const finalRememberLabel =
-    safeText(
-      rememberLabel,
-      "Recordarme"
-    );
-
-  const finalForgotLabel =
-    safeText(
-      forgotLabel,
-      "¿Has olvidado tu contraseña?"
-    );
-
-  const finalForgotHref =
-    normalizeInternalHref(
-      forgotPasswordHref,
-      DEFAULT_FORGOT_PASSWORD_HREF
-    );
-
-  const finalFooterText =
-    safeText(
-      footerText,
-      "Entorno protegido. Usa tus credenciales corporativas autorizadas."
-    );
-
-  const finalSecureLabel =
-    safeText(
-      secureLabel,
-      "Conexión segura"
-    );
-
-  const finalThemeToggleLabel =
-    safeText(
-      themeToggleLabel,
-      "Cambiar tema"
-    );
+  const finalAppName = safeText(appName, DEFAULT_APP_NAME);
+  const finalIdentifier = normalizeIdentifierForValue(identifier);
+  const finalTitle = safeText(title, "Iniciar sesión");
+  const finalSubtitle = safeText(subtitle, `Iniciar sesión en ${finalAppName}`);
+  const finalSubmitLabel = safeText(submitLabel, "Iniciar sesión");
+  const finalRememberLabel = safeText(rememberLabel, "Recordarme");
+  const finalForgotLabel = safeText(forgotLabel, "¿Has olvidado tu contraseña?");
+  const finalForgotHref = normalizeInternalHref(forgotPasswordHref, DEFAULT_FORGOT_PASSWORD_HREF);
+  const finalFooterText = safeText(footerText, "Entorno protegido. Usa tus credenciales corporativas autorizadas.");
+  const finalSecureLabel = safeText(secureLabel, "Conexión segura");
+  const finalThemeToggleLabel = safeText(themeToggleLabel, "Cambiar tema");
 
   return `
-    <section
-      class="login-stage login-stage--right"
-      aria-label="Formulario de acceso"
-      data-login-stage="form"
-    >
+    <section class="login-stage login-stage--right" aria-label="Formulario de acceso" data-login-stage="form">
       <div class="login-card-shell login-card-shell--right">
         <div class="login-card login-card--offset login-card--clean">
           <header class="login-header">
             <div class="login-header-top">
               <div class="logo-fade" aria-hidden="true">
-                ${renderThemeLogo({
-                  darkSrc:
-                    logoDarkSrc,
-                  lightSrc:
-                    logoLightSrc,
-                  alt:
-                    finalAppName,
-                })}
+                ${renderThemeLogo({ darkSrc: logoDarkSrc, lightSrc: logoLightSrc, alt: finalAppName })}
               </div>
 
-              ${
-                showThemeToggle === false
-                  ? ""
-                  : `
-                    <button
-                      class="login-theme-toggle"
-                      id="loginThemeToggle"
-                      type="button"
-                      aria-label="${escapeAttr(finalThemeToggleLabel)}"
-                      data-login-theme-toggle="true"
-                      data-theme-toggle="true"
-                    >
-                      ${renderThemeIcon()}
-                    </button>
-                  `
-              }
+              ${showThemeToggle === false ? "" : `
+                <button
+                  class="login-theme-toggle"
+                  id="loginThemeToggle"
+                  type="button"
+                  aria-label="${escapeAttr(finalThemeToggleLabel)}"
+                  data-login-theme-toggle="true"
+                  data-theme-toggle="true"
+                >
+                  ${renderThemeIcon()}
+                </button>
+              `}
             </div>
 
-            <h1 class="login-title">
-              ${escapeHtml(finalTitle)}
-            </h1>
-
-            <p
-              class="login-subtitle"
-              id="loginDescription"
-            >
-              ${escapeHtml(finalSubtitle)}
-            </p>
+            <h1 class="login-title">${escapeHtml(finalTitle)}</h1>
+            <p class="login-subtitle" id="loginDescription">${escapeHtml(finalSubtitle)}</p>
           </header>
 
           <form
@@ -719,11 +369,7 @@ function renderForm({
             aria-describedby="loginDescription loginError"
             novalidate
           >
-            <div
-              class="login-field"
-              data-field="identifier"
-              data-login-field="identifier"
-            >
+            <div class="login-field" data-field="identifier" data-login-field="identifier">
               <input
                 class="input-text"
                 id="loginIdentifier"
@@ -733,20 +379,15 @@ function renderForm({
                 inputmode="text"
                 autocapitalize="none"
                 spellcheck="false"
-                placeholder="Usuario o email"
+                placeholder="Usuario, email o teléfono"
                 value="${escapeAttr(finalIdentifier)}"
-                aria-label="Usuario o email"
+                aria-label="Usuario, email o teléfono"
                 aria-describedby="loginIdentifierError"
                 data-login-identifier="true"
                 required
               />
 
-              ${renderFieldError({
-                id:
-                  "loginIdentifierError",
-                field:
-                  "identifier",
-              })}
+              ${renderFieldError({ id: "loginIdentifierError", field: "identifier" })}
             </div>
 
             ${renderLoginPasswordField()}
@@ -764,11 +405,7 @@ function renderForm({
                 <span>${escapeHtml(finalRememberLabel)}</span>
               </label>
 
-              <div
-                class="login-meta"
-                aria-label="Estado de conexión"
-                data-login-secure-meta="true"
-              >
+              <div class="login-meta" aria-label="Estado de conexión" data-login-secure-meta="true">
                 <span>${escapeHtml(finalSecureLabel)}</span>
               </div>
             </div>
@@ -783,18 +420,8 @@ function renderForm({
               hidden
             ></div>
 
-            <button
-              class="login-button"
-              id="loginSubmit"
-              type="submit"
-              data-login-submit="true"
-            >
-              <span
-                class="login-submit-text"
-                data-login-submit-text="true"
-              >
-                ${escapeHtml(finalSubmitLabel)}
-              </span>
+            <button class="login-button" id="loginSubmit" type="submit" data-login-submit="true">
+              <span class="login-submit-text" data-login-submit-text="true">${escapeHtml(finalSubmitLabel)}</span>
             </button>
 
             <div class="login-reset">
@@ -805,9 +432,7 @@ function renderForm({
                 data-spa
                 data-forgot-password-link="true"
                 data-login-forgot-password="true"
-              >
-                ${escapeHtml(finalForgotLabel)}
-              </a>
+              >${escapeHtml(finalForgotLabel)}</a>
             </div>
           </form>
 
@@ -825,11 +450,7 @@ function renderForm({
 ========================================================= */
 
 export function getLoginTemplate(options = {}) {
-  const appName =
-    safeText(
-      options?.appName,
-      DEFAULT_APP_NAME
-    );
+  const appName = safeText(options?.appName, DEFAULT_APP_NAME);
 
   return `
     <section
@@ -842,28 +463,14 @@ export function getLoginTemplate(options = {}) {
     >
       <div class="login-scene">
         <div class="login-grid">
-          ${renderLeftPanel({
-            ...options,
-            appName,
-          })}
-
-          ${renderForm({
-            ...options,
-            appName,
-          })}
+          ${renderLeftPanel({ ...options, appName })}
+          ${renderForm({ ...options, appName })}
         </div>
       </div>
     </section>
   `;
 }
 
-/* =========================================================
-   EXPORTS
-========================================================= */
-
-export {
-  TEMPLATE_VERSION,
-  getLoginTemplate as LoginTemplate,
-};
+export { getLoginTemplate as LoginTemplate };
 
 export default getLoginTemplate;

@@ -2,13 +2,13 @@
    Onion SPA - Auth Helpers
    Archivo: src/features/auth/helpers.js
 
-   AUTH HELPERS · FINAL SIMPLE
-   - Utilidades puras para Auth
-   - Path público conserva query/hash
-   - Path canónico elimina query/hash y /@usuario
-   - Rutas técnicas con token no se rompen
-   - Tokens no se truncan: si exceden límite, se invalidan
-   - Sin AppCore, storage, sesión, Router, Toast ni transporte
+   AUTH HELPERS · SIMPLE
+   - utilidades puras para Auth
+   - publicPath conserva query/hash
+   - canonicalPath elimina query/hash y /@usuario
+   - rutas técnicas con token no se rompen
+   - tokens nunca se truncan: si exceden límite, se invalidan
+   - sin AppCore, storage, sesión, Router, Toast ni transporte
 ========================================================= */
 
 import {
@@ -17,11 +17,7 @@ import {
   AUTH_TOKEN_PARAM_NAMES,
 } from "./constants.js";
 
-/* =========================================================
-   META / CONSTANTS
-========================================================= */
-
-export const AUTH_HELPERS_VERSION = "20.0.0-final";
+export const AUTH_HELPERS_VERSION = "21.0.0-simple";
 
 const DEFAULT_ROUTE = "/";
 const LOCAL_ORIGIN = "http://localhost";
@@ -80,6 +76,11 @@ const AUTH_ROUTES = Object.freeze([
 ]);
 
 const DEFAULT_PUBLIC_ROUTES = Object.freeze([
+  "/login",
+  "/signin",
+  "/sign-in",
+  "/auth",
+  "/auth/login",
   "/activate-account",
   "/activate",
   "/activation",
@@ -93,6 +94,7 @@ const DEFAULT_PUBLIC_ROUTES = Object.freeze([
   "/password-reset-confirm",
   "/confirm-reset-password",
   "/forgot-password",
+  "/recover",
   "/recover-password",
   "/2fa",
   "/otp",
@@ -165,14 +167,12 @@ export function clampNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
 }
 
 export function safeBool(value, fallback = false) {
-  if (value === true) return true;
-  if (value === false) return false;
-  if (value === 1) return true;
-  if (value === 0) return false;
+  if (value === true || value === 1 || value === "1") return true;
+  if (value === false || value === 0 || value === "0") return false;
 
   const text = safeText(value, "").toLowerCase();
-  if (["true", "1", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(text)) return true;
-  if (["false", "0", "no", "off", "disabled", "inactive"].includes(text)) return false;
+  if (["true", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(text)) return true;
+  if (["false", "no", "off", "disabled", "inactive"].includes(text)) return false;
 
   return Boolean(fallback);
 }
@@ -190,6 +190,7 @@ export function safeArray(value) {
 
 export function toArray(value) {
   if (Array.isArray(value)) return value;
+  if (value instanceof Set) return [...value];
   if (value === null || value === undefined) return [];
   return [value];
 }
@@ -443,7 +444,7 @@ export function isActivationRoute(path = getCurrentPublicPath()) {
 }
 
 export function isResetPasswordRoute(path = getCurrentPublicPath()) {
-  return routeStartsWith(path, "/reset-password") || routeStartsWith(path, "/password-reset");
+  return routeStartsWith(path, "/reset-password") || routeStartsWith(path, "/password-reset") || routeStartsWith(path, "/forgot-password") || routeStartsWith(path, "/recover-password") || routeStartsWith(path, "/recover");
 }
 
 export function isResetPasswordConfirmRoute(path = getCurrentPublicPath()) {
@@ -467,9 +468,7 @@ function hasEncodedRedirectRisk(path = "") {
   const lower = raw.toLowerCase();
   if (!raw) return true;
 
-  if (lower.includes("%0d") || lower.includes("%0a") || lower.includes("%09") || lower.includes("%5c") || raw.includes("\\")) {
-    return true;
-  }
+  if (lower.includes("%0d") || lower.includes("%0a") || lower.includes("%09") || lower.includes("%5c") || raw.includes("\\")) return true;
 
   try {
     const decoded = decodeURIComponent(raw).trim().replace(/\\/g, "/");
@@ -582,8 +581,9 @@ export function normalizeSessionValue(value = null, maxLength = AUTH_CONSTANTS?.
 
   const normalized = String(value).normalize("NFKC").trim().replace(/[\r\n\t]/g, "");
   if (!normalized || isBadText(normalized)) return null;
+  if (normalized.length > sessionMax(maxLength)) return null;
 
-  return normalized.slice(0, sessionMax(maxLength));
+  return normalized;
 }
 
 export function hasValidToken(token = null) {
@@ -647,7 +647,7 @@ export function extractTokenFromSearch(search = "", names = []) {
 
 export function extractPathToken(path = "", basePath = "") {
   const pathname = stripSearchAndHash(stripUsernamePrefix(normalizePublicPath(path)));
-  const base = normalizeCanonicalPath(basePath);
+  const base = normalizePathnameOnly(basePath);
 
   if (!base || !pathname.startsWith(`${base}/`)) return null;
 
@@ -774,13 +774,8 @@ export function redactTokenInText(value = "") {
   output = redactPathTokens(output);
   output = redactJsonTokenFields(output);
 
-  try {
-    output = output.replace(BEARER_RE, "$1***");
-  } catch {}
-
-  try {
-    output = output.replace(JWT_RE, "***");
-  } catch {}
+  try { output = output.replace(BEARER_RE, "$1***"); } catch {}
+  try { output = output.replace(JWT_RE, "***"); } catch {}
 
   return output;
 }
@@ -919,6 +914,7 @@ export function getAuthHelpersSnapshot() {
       ownRouter: false,
       ownHttp: false,
       ownToast: false,
+      tokenNoTruncate: true,
     },
     at: new Date().toISOString(),
   };

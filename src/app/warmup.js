@@ -2,15 +2,16 @@
    Onion SPA - App Warmup
    Archivo: src/app/warmup.js
 
-   APP WARMUP · FINAL SIMPLE
-   - Post-boot best-effort
-   - Snapshot ligero de App/Core/Auth/Router/UI/DOM
-   - Eventos opcionales y debug opcional
-   - Sin Auth paralelo, restore, refresh, navegación, render, fetch ni storage pesado
-   - Nunca bloquea ni rompe el arranque
+   APP WARMUP · SIMPLE
+   - post-boot best-effort
+   - snapshot ligero de App/Core/Auth/Router/UI/DOM
+   - health/warnings simples
+   - eventos opcionales y debug opcional
+   - nunca bloquea ni rompe el arranque
+   - sin Auth paralelo, restore, refresh, navegación, render, fetch ni storage pesado
 ========================================================= */
 
-export const WARMUP_VERSION = "20.0.0-final";
+export const WARMUP_VERSION = "21.0.0-simple";
 
 const SOURCE = "app.warmup";
 const DEFAULT_ROUTE = "/";
@@ -33,12 +34,12 @@ const DOM_SELECTORS = Object.freeze({
   shell: ["#app-shell", "[data-app-shell]", ".app-shell"],
   main: ["#main-content", "[data-main-content]", "main"],
   appContent: ["#app-content", "[data-app-content]"],
-  viewContainer: ["#view-container", "[data-view-root]", "[data-router-view]"],
+  viewContainer: ["#view-container", "[data-view-root]", "[data-router-view]", "[data-view-container='true']", ".view-container"],
   loader: ["#app-loader", "[data-app-loader]", ".app-loader"],
   sidebarMount: ["#sidebar-mount", "[data-sidebar-mount]"],
   topbarMount: ["#topbar-mount", "[data-topbar-mount]"],
-  sidebar: ["#app-sidebar", "#sidebar", "[data-sidebar-root]", ".sidebar"],
-  topbar: ["#app-topbar", "#topbar", "[data-topbar-root]", ".topbar"],
+  sidebar: ["#sidebar", "#app-sidebar", "[data-sidebar-root]", ".sidebar"],
+  topbar: ["#topbar", "#app-topbar", "[data-topbar='root']", "[data-topbar-root]", ".topbar"],
 });
 
 const AUTH_PATHS = Object.freeze([
@@ -78,8 +79,8 @@ const recentSnapshots = [];
 
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
 const isFn = (value) => typeof value === "function";
-const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-const isObjectLike = (value) => value !== null && (typeof value === "object" || typeof value === "function");
+const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
+const isObjectLike = (value) => Boolean(value && (typeof value === "object" || typeof value === "function"));
 
 function object(value, fallback = {}) {
   return isObject(value) ? value : fallback;
@@ -102,11 +103,7 @@ function number(value, fallback = 0) {
 }
 
 function now() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
+  try { return Date.now(); } catch { return 0; }
 }
 
 function perfNow() {
@@ -118,19 +115,11 @@ function perfNow() {
 }
 
 function iso(ms = now()) {
-  try {
-    return new Date(ms).toISOString();
-  } catch {
-    return "";
-  }
+  try { return new Date(ms).toISOString(); } catch { return ""; }
 }
 
 function canExtend(value) {
-  try {
-    return isObjectLike(value) && Object.isExtensible(value);
-  } catch {
-    return false;
-  }
+  try { return isObjectLike(value) && Object.isExtensible(value); } catch { return false; }
 }
 
 function defineValue(target, key, value) {
@@ -184,7 +173,7 @@ function isDomNode(value) {
 
 function sanitize(value, depth = 0, keyHint = "") {
   if (depth > MAX_SANITIZE_DEPTH) return "[depth-limit]";
-  if (SENSITIVE_KEY_RE.test(keyHint)) return value ? "***" : value;
+  if (SENSITIVE_KEY_RE.test(text(keyHint, ""))) return value ? "***" : value;
   if (typeof value === "string") return redact(value);
   if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "bigint") return String(value);
@@ -212,13 +201,11 @@ function sanitize(value, depth = 0, keyHint = "") {
   if (value instanceof Set) return { type: "Set", size: value.size };
 
   if (isObject(value)) {
-    const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = sanitize(item, depth + 1, key);
-    }
-
-    return output;
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 80)
+        .map(([key, item]) => [key, sanitize(item, depth + 1, key)])
+    );
   }
 
   return String(value);
@@ -289,6 +276,14 @@ function getModule(AppCore, names = []) {
   return null;
 }
 
+function getHttp(AppCore, deps = {}) {
+  try {
+    return deps.Http || AppCore?.Http || AppCore?.http || AppCore?.services?.http || AppCore?.getHttpClient?.() || null;
+  } catch {
+    return deps.Http || null;
+  }
+}
+
 function resolveDeps(first = {}, second = {}) {
   const deps = normalizeDeps(first, second);
   const AppCore = deps.AppCore || null;
@@ -303,7 +298,7 @@ function resolveDeps(first = {}, second = {}) {
     TopbarUI: deps.TopbarUI || AppCore?.TopbarUI || AppCore?.topbarUI || AppCore?.topbar || getModule(AppCore, ["TopbarUI", "topbarUI", "topbar"]),
     Toast: deps.Toast || AppCore?.Toast || AppCore?.toast || getModule(AppCore, ["Toast", "toast"]),
     I18n: deps.I18n || AppCore?.I18n || AppCore?.i18n || getModule(AppCore, ["I18n", "i18n"]),
-    Http: deps.Http || AppCore?.Http || AppCore?.http || AppCore?.services?.http || AppCore?.getHttpClient?.() || null,
+    Http: getHttp(AppCore, deps),
   };
 }
 
@@ -314,11 +309,9 @@ function resolveDeps(first = {}, second = {}) {
 function normalizePath(path = DEFAULT_ROUTE) {
   let value = text(path, DEFAULT_ROUTE);
 
-  if (value.startsWith("#/") || value.startsWith("#!")) {
-    value = value.replace(/^#!?\/?/, "/") || DEFAULT_ROUTE;
-  }
+  if (value.startsWith("#/") || value.startsWith("#!")) value = value.replace(/^#!?\/?/, "/") || DEFAULT_ROUTE;
 
-  if (/^[a-z][a-z\d+.-]*:\/\//i.test(value)) {
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(value) && isBrowser()) {
     try {
       const url = new URL(value, window.location?.origin || "http://localhost");
       value = `${url.pathname || DEFAULT_ROUTE}${url.search || ""}${url.hash || ""}`;
@@ -373,8 +366,11 @@ function queryFirst(selectors = []) {
   if (!isBrowser()) return null;
 
   for (const selector of selectors) {
+    const clean = text(selector, "");
+    if (!clean) continue;
+
     try {
-      const element = selector.startsWith("#") ? document.getElementById(selector.slice(1)) : document.querySelector(selector);
+      const element = /^#[A-Za-z][A-Za-z0-9_-]*$/.test(clean) ? document.getElementById(clean.slice(1)) : document.querySelector(clean);
       if (element) return element;
     } catch {}
   }
@@ -383,11 +379,7 @@ function queryFirst(selectors = []) {
 }
 
 function classList(element) {
-  try {
-    return Array.from(element?.classList || []);
-  } catch {
-    return [];
-  }
+  try { return Array.from(element?.classList || []); } catch { return []; }
 }
 
 function elementSnapshot(selectors = []) {
@@ -436,7 +428,7 @@ function appSnapshot(AppCore) {
 
   return {
     present: Boolean(AppCore),
-    apiBase: config.apiBase || null,
+    apiBase: config.apiBase || config.API_BASE || null,
     appName: config.appName || config.name || null,
     route: redact(state.route || DEFAULT_ROUTE),
     publicPath: redact(state.publicPath || DEFAULT_ROUTE),
@@ -490,9 +482,7 @@ function routerSnapshot(AppCore, Router) {
   const state = object(AppCore?.state);
   let snap = null;
 
-  try {
-    snap = Router?.getSnapshot?.() || Router?.getDebugSnapshot?.() || Router?.getState?.() || null;
-  } catch {}
+  try { snap = Router?.getSnapshot?.() || Router?.getDebugSnapshot?.() || Router?.getState?.() || null; } catch {}
 
   return {
     present: Boolean(Router),
@@ -510,9 +500,7 @@ function routerSnapshot(AppCore, Router) {
 function storeSnapshot(Store) {
   let state = {};
 
-  try {
-    state = object(Store?.getState?.());
-  } catch {}
+  try { state = object(Store?.getState?.()); } catch {}
 
   return {
     present: Boolean(Store),
@@ -526,9 +514,7 @@ function storeSnapshot(Store) {
 function moduleSnapshot(moduleRef) {
   let snap = null;
 
-  try {
-    snap = moduleRef?.getSnapshot?.() || moduleRef?.getState?.() || null;
-  } catch {}
+  try { snap = moduleRef?.getSnapshot?.() || moduleRef?.getState?.() || null; } catch {}
 
   return {
     present: Boolean(moduleRef),
@@ -563,7 +549,14 @@ function shellSnapshot(AppCore) {
   const loader = elements.loader;
   const hiddenLoaderClasses = ["is-hidden", "has-hidden", "loader-hidden"];
 
-  const loaderVisible = Boolean(loader.exists && !loader.hidden && loader.ariaHidden !== "true" && loader.dataset.loaderVisible !== "false" && loader.dataset.loaderState !== "hidden" && !loader.classes?.some?.((name) => hiddenLoaderClasses.includes(name)));
+  const loaderVisible = Boolean(
+    loader.exists &&
+      !loader.hidden &&
+      loader.ariaHidden !== "true" &&
+      loader.dataset.loaderVisible !== "false" &&
+      loader.dataset.loaderState !== "hidden" &&
+      !loader.classes?.some?.((name) => hiddenLoaderClasses.includes(name))
+  );
 
   return {
     domCache: {
@@ -660,9 +653,7 @@ function historySnapshot() {
   if (!isBrowser()) return { length: 0, state: null };
 
   let state = null;
-  try {
-    state = window.history?.state || null;
-  } catch {}
+  try { state = window.history?.state || null; } catch {}
 
   return { length: number(window.history?.length, 0), state: sanitize(state) };
 }
@@ -670,9 +661,7 @@ function historySnapshot() {
 function httpSnapshot(Http) {
   let snap = null;
 
-  try {
-    snap = Http?.getSnapshot?.() || Http?.getState?.() || null;
-  } catch {}
+  try { snap = Http?.getSnapshot?.() || Http?.getState?.() || null; } catch {}
 
   return {
     present: Boolean(Http),
@@ -910,15 +899,18 @@ export async function warmup(first = {}, second = {}) {
     remember(snapshot);
 
     if (AppCore && exposeDebug !== false) exposeWarmupDebugApi({ ...deps, AppCore });
-
-    if (AppCore && shouldLogOutput === true) {
-      log(AppCore, "log", "Warmup ejecutado", getWarmupSummary(snapshot));
-    }
+    if (AppCore && shouldLogOutput === true) log(AppCore, "log", "Warmup ejecutado", getWarmupSummary(snapshot));
 
     if (AppCore && shouldEmit !== false) {
       emit(AppCore, EVENTS.warmup, snapshot);
       emit(AppCore, EVENTS.summary, getWarmupSummary(snapshot));
-      emit(AppCore, EVENTS.ready, { ok: snapshot.ok, reason: snapshot.reason, health: snapshot.health, warningCount: snapshot.warningCount, durationMs: snapshot.durationMs });
+      emit(AppCore, EVENTS.ready, {
+        ok: snapshot.ok,
+        reason: snapshot.reason,
+        health: snapshot.health,
+        warningCount: snapshot.warningCount,
+        durationMs: snapshot.durationMs,
+      });
 
       for (const warning of snapshot.warnings || []) {
         if (warning.severity === "critical" || warning.severity === "high") {
@@ -929,14 +921,18 @@ export async function warmup(first = {}, second = {}) {
 
     return snapshot;
   } catch (error) {
-    const fallback = sanitize({ version: WARMUP_VERSION, ok: false, reason, error, durationMs: Math.max(0, Math.round(perfNow() - started)), policy: { bestEffort: true, failedSoftly: true } });
+    const fallback = sanitize({
+      version: WARMUP_VERSION,
+      ok: false,
+      reason,
+      error,
+      durationMs: Math.max(0, Math.round(perfNow() - started)),
+      policy: { bestEffort: true, failedSoftly: true },
+    });
+
     remember(fallback);
     return fallback;
   }
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default warmup;

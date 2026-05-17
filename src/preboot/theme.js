@@ -2,22 +2,22 @@
    Onion Support - Preboot
    Archivo: /src/preboot/theme.js
 
-   Responsabilidad única:
-   - Aplicar tema inicial según navegador/sistema.
-   - Aplicar idioma inicial según navegador.
-   - Soportar solo: ca, es, en.
-   - Fallback de idioma: en.
+   Responsabilidad:
+   - Tema inicial según navegador/sistema.
+   - Idioma inicial según navegador.
+   - Idiomas soportados: ca, es, en.
+   - Fallback idioma: en.
    - Sin storage.
    - Sin API.
    - Sin auth.
    - Sin router.
-   - Sin llamadas HTTP.
+   - Sin HTTP.
 ========================================================= */
 
 (() => {
   "use strict";
 
-  const SUPPORTED_LOCALES = ["ca", "es", "en"];
+  const LOCALES = ["ca", "es", "en"];
   const FALLBACK_LOCALE = "en";
 
   const THEME_COLORS = {
@@ -43,10 +43,9 @@
     },
   };
 
-  function getSystemTheme() {
+  function getTheme() {
     try {
-      return window.matchMedia &&
-        window.matchMedia("(prefers-color-scheme: dark)").matches
+      return window.matchMedia("(prefers-color-scheme: dark)").matches
         ? "dark"
         : "light";
     } catch {
@@ -62,7 +61,7 @@
       .split("-")[0];
   }
 
-  function getBrowserLocale() {
+  function getLocale() {
     const languages =
       navigator.languages && navigator.languages.length
         ? navigator.languages
@@ -71,16 +70,16 @@
     for (const language of languages) {
       const locale = normalizeLocale(language);
 
-      if (SUPPORTED_LOCALES.includes(locale)) {
+      if (LOCALES.includes(locale)) {
         return {
-          locale,
+          value: locale,
           source: "browser",
         };
       }
     }
 
     return {
-      locale: FALLBACK_LOCALE,
+      value: FALLBACK_LOCALE,
       source: "fallback",
     };
   }
@@ -93,14 +92,6 @@
     }
   }
 
-  function applyLoaderText(locale) {
-    const text = TEXTS[locale] || TEXTS[FALLBACK_LOCALE];
-
-    setText("[data-skip-link]", text.skip);
-    setText("[data-loader-text]", text.loader);
-    setText("[data-loader-subtext]", text.subtext);
-  }
-
   function setMeta(name, value) {
     const meta = document.querySelector(`meta[name="${name}"]:not([media])`);
 
@@ -109,7 +100,7 @@
     }
   }
 
-  function applyThemeTo(element, theme) {
+  function applyTheme(element, theme) {
     if (!element) return;
 
     element.classList.remove("no-js", "theme-dark", "theme-light");
@@ -122,67 +113,66 @@
     element.dataset.themeReady = "true";
   }
 
-  function applyLocaleTo(element, locale, source) {
+  function applyLocale(element, locale) {
     if (!element) return;
 
-    element.lang = locale;
+    element.lang = locale.value;
     element.dir = "ltr";
 
-    element.dataset.locale = locale;
-    element.dataset.localeSource = source;
+    element.dataset.locale = locale.value;
+    element.dataset.localeSource = locale.source;
     element.dataset.localeFallback = FALLBACK_LOCALE;
-    element.dataset.localeSupported = SUPPORTED_LOCALES.join(" ");
+    element.dataset.localeSupported = LOCALES.join(" ");
   }
 
-  function applyPreboot() {
-    const theme = getSystemTheme();
-    const { locale, source } = getBrowserLocale();
+  function applyTexts(locale) {
+    const text = TEXTS[locale.value] || TEXTS[FALLBACK_LOCALE];
 
-    applyThemeTo(document.documentElement, theme);
-    applyLocaleTo(document.documentElement, locale, source);
+    setText("[data-skip-link]", text.skip);
+    setText("[data-loader-text]", text.loader);
+    setText("[data-loader-subtext]", text.subtext);
+  }
+
+  const root = document.documentElement;
+  const locale = getLocale();
+
+  function apply() {
+    const theme = getTheme();
+
+    applyTheme(root, theme);
+    applyLocale(root, locale);
 
     if (document.body) {
-      applyThemeTo(document.body, theme);
-      applyLocaleTo(document.body, locale, source);
-      applyLoaderText(locale);
+      applyTheme(document.body, theme);
+      applyLocale(document.body, locale);
+      applyTexts(locale);
     }
 
     setMeta("theme-color", THEME_COLORS[theme]);
     setMeta("msapplication-TileColor", THEME_COLORS[theme]);
 
-    window.__ONION_PREBOOT__ = Object.freeze({
+    window.__ONION_PREBOOT__ = {
       theme,
       themeMode: "system",
       themeSource: "browser",
-      locale,
-      localeSource: source,
+      locale: locale.value,
+      localeSource: locale.source,
       fallbackLocale: FALLBACK_LOCALE,
-      supportedLocales: SUPPORTED_LOCALES,
-    });
+      supportedLocales: LOCALES,
+    };
   }
 
-  function applyWhenBodyExists() {
-    if (document.body) {
-      applyPreboot();
-      return;
-    }
+  apply();
 
-    document.addEventListener("DOMContentLoaded", applyPreboot, {
-      once: true,
-    });
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", apply, { once: true });
   }
 
-  function watchSystemTheme() {
-    try {
-      const media = window.matchMedia("(prefers-color-scheme: dark)");
-
-      media.addEventListener("change", applyPreboot);
-    } catch {
-      // Navegador antiguo: no pasa nada.
-    }
+  try {
+    window
+      .matchMedia("(prefers-color-scheme: dark)")
+      .addEventListener("change", apply);
+  } catch {
+    // Sin soporte matchMedia moderno: no hace falta hacer nada.
   }
-
-  applyPreboot();
-  applyWhenBodyExists();
-  watchSystemTheme();
 })();

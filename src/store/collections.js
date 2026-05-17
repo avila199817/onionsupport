@@ -1,211 +1,75 @@
 /* =========================================================
-   Onion SPA - Store Collections
-   Archivo: src/store/collections.js
+   Onion Support - Store Collections
+   Archivo: /src/store/collections.js
 
-   STORE COLLECTIONS · SIMPLE
-   - Claves estrictas.
-   - Aliases seguros.
-   - Matchers por id, campo, objeto parcial y lógica.
+   Responsabilidad:
+   - Helpers genéricos de colecciones.
+   - Sin imports.
+   - Sin aliases.
+   - Sin recursos inventados.
+   - Sin matchers complejos.
    - Sin path injection.
    - Sin prototype pollution.
+   - Simplicidad extrema.
 ========================================================= */
 
-import { isFunction } from "./helpers.js";
-
-export const COLLECTIONS_VERSION = "16.0.0-simple";
+export const COLLECTIONS_VERSION = "simple";
 
 const COLLECTION_KEY_RE = /^[a-zA-Z0-9_-]{1,80}$/;
 
-const UNSAFE_PATH_KEYS = new Set([
+const UNSAFE_KEYS = new Set([
   "__proto__",
   "prototype",
   "constructor",
 ]);
 
-const COLLECTION_ALIASES = Object.freeze({
-  ticket: "tickets",
-  tickets: "tickets",
-  incidencia: "incidencias",
-  incidencias: "incidencias",
-  incident: "incidencias",
-  incidents: "incidencias",
-
-  factura: "facturas",
-  facturas: "facturas",
-  invoice: "facturas",
-  invoices: "facturas",
-  billing: "facturas",
-
-  cliente: "clientes",
-  clientes: "clientes",
-  client: "clientes",
-  clients: "clientes",
-  customer: "clientes",
-  customers: "clientes",
-
-  usuario: "usuarios",
-  usuarios: "usuarios",
-  user: "usuarios",
-  users: "usuarios",
-
-  hardware: "hardware",
-  device: "hardware",
-  devices: "hardware",
-  equipo: "hardware",
-  equipos: "hardware",
-
-  reciente: "recientes",
-  recientes: "recientes",
-  recent: "recientes",
-  recents: "recientes",
-
-  search: "search",
-  busqueda: "search",
-  busquedas: "search",
-  búsqueda: "search",
-  búsquedas: "search",
-});
-
 export const IDENTITY_FIELDS = Object.freeze([
   "id",
-  "_id",
   "uuid",
-  "uid",
-  "sub",
-
-  "ticketId",
-  "ticket_id",
-  "incidenciaId",
-  "incidencia_id",
-  "caseId",
-  "case_id",
-
-  "clienteId",
-  "cliente_id",
-  "clientId",
-  "client_id",
-  "customerId",
-  "customer_id",
-
-  "facturaId",
-  "factura_id",
-  "invoiceId",
-  "invoice_id",
-  "numeroFacturaLegal",
-  "numero_factura_legal",
-  "invoiceNumber",
-  "invoice_number",
-
   "userId",
-  "user_id",
-  "usuarioId",
-  "usuario_id",
-  "accountId",
-  "account_id",
-
-  "hardwareId",
-  "hardware_id",
-  "deviceId",
-  "device_id",
-  "serial",
-  "serialNumber",
-  "serial_number",
-
-  "sessionId",
-  "session_id",
-
-  "phone",
-  "telefono",
-  "mobile",
+  "ticketId",
+  "clienteId",
+  "facturaId",
+  "invoiceId",
   "email",
-  "mail",
   "slug",
   "username",
-  "usernameLower",
-  "username_lower",
 ]);
 
-const FIELD_KEYS = Object.freeze(["field", "key", "path"]);
-const VALUE_KEYS = Object.freeze(["value", "equals", "eq", "is"]);
-
-const CONTROL_KEYS = new Set([
-  "field",
-  "key",
-  "path",
-  "value",
-  "equals",
-  "eq",
-  "is",
-  "where",
-  "any",
-  "or",
-  "all",
-  "and",
-  "not",
-  "identity",
-  "id",
-]);
-
-/* =========================================================
-   BASICS
-========================================================= */
-
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-  const output = String(value).trim();
-  return output || fallback;
-}
-
-function safeLower(value, fallback = "") {
-  return safeText(value, fallback).toLowerCase();
-}
-
-function toArray(value) {
-  if (Array.isArray(value)) return value;
-  if (value instanceof Set) return [...value];
-  if (value === null || value === undefined) return [];
-  return [value];
+function isFunction(value) {
+  return typeof value === "function";
 }
 
 function isObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function safeObject(value) {
-  return isObject(value) ? value : {};
+function text(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
 }
 
 function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(Object(object), key);
+}
+
+function clone(value) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
   try {
-    return Object.prototype.hasOwnProperty.call(object, key);
+    return structuredClone(value);
   } catch {
-    return false;
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch {
+      return value;
+    }
   }
 }
 
-function isPrimitive(value) {
-  return ["string", "number", "boolean", "bigint"].includes(typeof value);
-}
-
-function isEmpty(value) {
-  return value === null || value === undefined || value === "";
-}
-
-function unique(values = []) {
-  return [
-    ...new Set(
-      toArray(values)
-        .flat(Infinity)
-        .filter((value) => value !== undefined && value !== null && value !== "")
-        .map((value) => (typeof value === "string" ? value.trim() : value))
-    ),
-  ];
-}
-
-function stripAccents(value = "") {
-  return safeText(value, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+function isUnsafeKey(key = "") {
+  return UNSAFE_KEYS.has(String(key || ""));
 }
 
 /* =========================================================
@@ -213,7 +77,7 @@ function stripAccents(value = "") {
 ========================================================= */
 
 export function normalizeCollectionKey(key = "") {
-  return stripAccents(key)
+  return text(key, "")
     .replace(/\s+/g, "")
     .replace(/[^a-zA-Z0-9_-]/g, "");
 }
@@ -223,76 +87,80 @@ export function isValidCollectionKey(key = "") {
   return Boolean(normalized && COLLECTION_KEY_RE.test(normalized));
 }
 
-export function resolveCollectionKey(state, key) {
-  const normalized = normalizeCollectionKey(key);
-  if (!normalized) return "";
-
-  const entities = safeObject(state?.entities);
-  const lower = safeLower(normalized);
-  const alias = COLLECTION_ALIASES[lower] || normalized;
-
-  if (hasOwn(entities, normalized)) return normalized;
-  if (hasOwn(entities, lower)) return lower;
-  if (hasOwn(entities, alias)) return alias;
-
-  return alias;
+export function resolveCollectionKey(_state, key = "") {
+  return normalizeCollectionKey(key);
 }
 
-export function ensureCollectionKey(state, key) {
-  const normalized = normalizeCollectionKey(key);
+export function ensureCollectionKey(state, key = "") {
+  const resolved = resolveCollectionKey(state, key);
 
-  if (!normalized) throw new Error("Clave de colección requerida.");
-  if (!isValidCollectionKey(normalized)) throw new Error(`Clave de colección inválida: ${normalized}`);
-  if (!state || !isObject(state.entities)) throw new Error("state.entities no disponible.");
+  if (!resolved) {
+    throw new Error("Clave de colección requerida.");
+  }
 
-  const resolved = resolveCollectionKey(state, normalized);
+  if (!isValidCollectionKey(resolved)) {
+    throw new Error(`Clave de colección inválida: ${resolved}`);
+  }
+
+  if (!state || typeof state !== "object") {
+    throw new Error("State inválido.");
+  }
+
+  if (!isObject(state.entities)) {
+    state.entities = {};
+  }
 
   if (!hasOwn(state.entities, resolved)) {
-    throw new Error(`Colección no registrada en store.entities: ${normalized}`);
+    state.entities[resolved] = [];
+  }
+
+  if (!Array.isArray(state.entities[resolved])) {
+    state.entities[resolved] = [];
   }
 
   return resolved;
 }
 
-export function hasCollection(state, key) {
-  if (!isValidCollectionKey(key)) return false;
-  if (!isObject(state?.entities)) return false;
+export function hasCollection(state, key = "") {
+  const resolved = resolveCollectionKey(state, key);
 
-  return hasOwn(state.entities, resolveCollectionKey(state, key));
+  return Boolean(
+    resolved &&
+      isObject(state?.entities) &&
+      hasOwn(state.entities, resolved) &&
+      Array.isArray(state.entities[resolved])
+  );
 }
 
-export function getCollection(state, key, fallback = []) {
+export function getCollection(state, key = "", fallback = []) {
   const resolved = ensureCollectionKey(state, key);
   const value = state.entities[resolved];
+
   return Array.isArray(value) ? value : fallback;
 }
 
 /* =========================================================
-   SAFE PATHS
+   OBJECT PATH
 ========================================================= */
 
-function isUnsafePathKey(key = "") {
-  return UNSAFE_PATH_KEYS.has(safeText(key, ""));
-}
-
-function normalizeObjectPath(path = "") {
-  return safeText(path, "")
-    .replace(/\[([\w-]+)\]/g, ".$1")
+function normalizePath(path = "") {
+  return text(path, "")
+    .replace(/\[(["'`]?)(.*?)\1\]/g, ".$2")
     .split(".")
     .map((part) => part.trim())
     .filter(Boolean)
-    .filter((part) => !isUnsafePathKey(part));
+    .filter((part) => !isUnsafeKey(part));
 }
 
 function getByPath(object, path = "") {
-  const parts = normalizeObjectPath(path);
+  const parts = normalizePath(path);
+
   if (!parts.length) return undefined;
 
   let current = object;
 
   for (const part of parts) {
-    if (current === null || current === undefined || typeof current !== "object") return undefined;
-    if (!hasOwn(current, part)) return undefined;
+    if (current === null || current === undefined) return undefined;
     current = current[part];
   }
 
@@ -300,209 +168,52 @@ function getByPath(object, path = "") {
 }
 
 /* =========================================================
-   VALUE COMPARE
-========================================================= */
-
-function comparableText(value) {
-  return stripAccents(value).toLowerCase();
-}
-
-function comparableNumber(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const output = Number(value);
-  return Number.isFinite(output) ? output : null;
-}
-
-function comparableDate(value) {
-  if (!value) return null;
-
-  if (value instanceof Date) {
-    const time = value.getTime();
-    return Number.isFinite(time) ? time : null;
-  }
-
-  if (typeof value === "string" || typeof value === "number") {
-    const parsed = Date.parse(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  return null;
-}
-
-function stableStringify(value, seen = new WeakSet()) {
-  if (value === null || value === undefined) return String(value);
-  if (isPrimitive(value)) return `${typeof value}:${String(value)}`;
-  if (value instanceof Date) return `date:${comparableDate(value)}`;
-
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringify(item, seen)).join(",")}]`;
-  }
-
-  if (typeof value === "object") {
-    try {
-      if (seen.has(value)) return "[circular]";
-      seen.add(value);
-    } catch {}
-
-    const keys = Object.keys(value).filter((key) => !isUnsafePathKey(key)).sort();
-    return `{${keys.map((key) => `${key}:${stableStringify(value[key], seen)}`).join("|")}}`;
-  }
-
-  return String(value);
-}
-
-function valuesEqual(a, b) {
-  if (Object.is(a, b)) return true;
-  if (a === null || a === undefined || b === null || b === undefined) return false;
-
-  const numberA = comparableNumber(a);
-  const numberB = comparableNumber(b);
-  if (numberA !== null && numberB !== null && numberA === numberB) return true;
-
-  const dateA = comparableDate(a);
-  const dateB = comparableDate(b);
-  if (dateA !== null && dateB !== null && dateA === dateB) return true;
-
-  const textA = safeText(a, "");
-  const textB = safeText(b, "");
-  if (textA && textB && (textA === textB || comparableText(textA) === comparableText(textB))) return true;
-
-  if (typeof a === "object" || typeof b === "object") {
-    try {
-      return stableStringify(a) === stableStringify(b);
-    } catch {
-      return false;
-    }
-  }
-
-  return false;
-}
-
-/* =========================================================
    IDENTITY
 ========================================================= */
 
-function identityEntries(item = null) {
-  if (!isObject(item)) return [];
-
-  const entries = [];
+export function getEntityIdentity(item = null) {
+  if (!isObject(item)) return null;
 
   for (const field of IDENTITY_FIELDS) {
-    const value = item[field];
-    if (!isEmpty(value) && safeText(value, "")) entries.push({ field, value });
-  }
+    const value = text(item[field], "");
 
-  return entries;
-}
-
-function identityValues(item = null) {
-  return unique(identityEntries(item).map((entry) => entry.value));
-}
-
-export function getEntityIdentity(item = null) {
-  const values = identityValues(item);
-  return values.length ? values[0] : null;
-}
-
-function matcherIdentityValues(matcher = null) {
-  if (isPrimitive(matcher)) return [matcher];
-  if (!isObject(matcher)) return [];
-  if (hasOwn(matcher, "identity") && !isEmpty(matcher.identity)) return [matcher.identity];
-  return identityValues(matcher);
-}
-
-function matchByIdentity(item, matcher) {
-  const itemValues = identityValues(item);
-  const matcherValues = matcherIdentityValues(matcher);
-
-  if (!itemValues.length || !matcherValues.length) return false;
-
-  return itemValues.some((itemValue) => matcherValues.some((matcherValue) => valuesEqual(itemValue, matcherValue)));
-}
-
-/* =========================================================
-   FIELD / PARTIAL MATCHERS
-========================================================= */
-
-function firstMatcherValue(matcher = {}, keys = []) {
-  for (const key of keys) {
-    if (hasOwn(matcher, key) && !isEmpty(matcher[key])) return matcher[key];
-  }
-
-  return "";
-}
-
-function hasFieldMatcher(matcher = {}) {
-  const field = firstMatcherValue(matcher, FIELD_KEYS);
-  return Boolean(field && VALUE_KEYS.some((key) => hasOwn(matcher, key)));
-}
-
-function fieldMatcher(matcher = {}) {
-  if (!hasFieldMatcher(matcher)) return null;
-
-  const field = safeText(firstMatcherValue(matcher, FIELD_KEYS), "");
-  if (!field) return null;
-
-  for (const key of VALUE_KEYS) {
-    if (hasOwn(matcher, key)) return { field, value: matcher[key] };
+    if (value) return value;
   }
 
   return null;
 }
 
-function matchByField(item, matcher = {}) {
-  const normalized = fieldMatcher(matcher);
-  if (!normalized) return false;
-  return valuesEqual(getByPath(item, normalized.field), normalized.value);
+function sameValue(left, right) {
+  if (Object.is(left, right)) return true;
+
+  const a = text(left, "");
+  const b = text(right, "");
+
+  if (!a || !b) return false;
+
+  return a === b;
 }
 
-function partialEntries(matcher = {}) {
-  return Object.entries(safeObject(matcher)).filter(([key, value]) => {
-    if (isUnsafePathKey(key)) return false;
-    if (hasFieldMatcher(matcher) && CONTROL_KEYS.has(key)) return false;
-    if (["where", "any", "or", "all", "and", "not"].includes(key)) return false;
-    return value !== undefined;
-  });
-}
-
-function matchPartialObject(item, matcher = {}) {
+function partialMatch(item = null, matcher = {}) {
   if (!isObject(item) || !isObject(matcher)) return false;
 
-  const source = hasOwn(matcher, "where") && isObject(matcher.where) ? matcher.where : matcher;
-  const entries = partialEntries(source);
+  for (const [key, expected] of Object.entries(matcher)) {
+    if (isUnsafeKey(key)) return false;
+    if (["field", "key", "path", "value", "equals", "eq", "id"].includes(key)) continue;
 
-  if (!entries.length) return false;
-
-  return entries.every(([key, expected]) => {
     const actual = key.includes(".") ? getByPath(item, key) : item[key];
-    return valuesEqual(actual, expected);
-  });
+
+    if (!sameValue(actual, expected)) return false;
+  }
+
+  return true;
 }
 
 /* =========================================================
-   LOGICAL MATCHERS
+   MATCHERS
 ========================================================= */
 
-function matchAny(item, matchers = []) {
-  if (!Array.isArray(matchers) || !matchers.length) return false;
-  return matchers.some((matcher) => normalizeMatcher(matcher)(item));
-}
-
-function matchAll(item, matchers = []) {
-  if (!Array.isArray(matchers) || !matchers.length) return false;
-  return matchers.every((matcher) => normalizeMatcher(matcher)(item));
-}
-
-function matchNot(item, matcher = null) {
-  if (matcher === null || matcher === undefined) return false;
-  return !normalizeMatcher(matcher)(item);
-}
-
-/* =========================================================
-   NORMALIZE MATCHER
-========================================================= */
-
-export function normalizeMatcher(matcher) {
+export function normalizeMatcher(matcher = null) {
   if (isFunction(matcher)) {
     return (item, index, list) => {
       try {
@@ -513,38 +224,49 @@ export function normalizeMatcher(matcher) {
     };
   }
 
-  if (matcher === null || matcher === undefined || matcher === "") return () => false;
-  if (isPrimitive(matcher)) return (item) => matchByIdentity(item, matcher);
-  if (Array.isArray(matcher)) return (item) => matchAny(item, matcher);
+  if (matcher === null || matcher === undefined || matcher === "") {
+    return () => false;
+  }
+
+  if (typeof matcher === "string" || typeof matcher === "number" || typeof matcher === "boolean") {
+    return (item) => sameValue(getEntityIdentity(item), matcher);
+  }
 
   if (isObject(matcher)) {
-    return (item) => {
-      if (Array.isArray(matcher.any)) return matchAny(item, matcher.any);
-      if (Array.isArray(matcher.or)) return matchAny(item, matcher.or);
-      if (Array.isArray(matcher.all)) return matchAll(item, matcher.all);
-      if (Array.isArray(matcher.and)) return matchAll(item, matcher.and);
-      if (hasOwn(matcher, "not")) return matchNot(item, matcher.not);
+    if (matcher.id !== undefined) {
+      return (item) => sameValue(getEntityIdentity(item), matcher.id);
+    }
 
-      return matchByIdentity(item, matcher) || matchByField(item, matcher) || matchPartialObject(item, matcher);
-    };
+    const field = matcher.field || matcher.key || matcher.path;
+    const value = matcher.value ?? matcher.equals ?? matcher.eq;
+
+    if (field && value !== undefined) {
+      return (item) => sameValue(getByPath(item, field), value);
+    }
+
+    return (item) => partialMatch(item, matcher);
   }
 
   return () => false;
 }
 
 /* =========================================================
-   ENTITY HELPERS
+   COLLECTION HELPERS
 ========================================================= */
 
 export function findCollectionItem(list = [], matcher = null) {
   if (!Array.isArray(list)) return null;
+
   const match = normalizeMatcher(matcher);
+
   return list.find((item, index) => match(item, index, list)) || null;
 }
 
 export function findCollectionIndex(list = [], matcher = null) {
   if (!Array.isArray(list)) return -1;
+
   const match = normalizeMatcher(matcher);
+
   return list.findIndex((item, index) => match(item, index, list));
 }
 
@@ -554,25 +276,32 @@ export function collectionIncludes(list = [], matcher = null) {
 
 export function filterCollection(list = [], matcher = null) {
   if (!Array.isArray(list)) return [];
+
   const match = normalizeMatcher(matcher);
+
   return list.filter((item, index) => match(item, index, list));
 }
 
 export function removeCollectionItems(list = [], matcher = null) {
   if (!Array.isArray(list)) return [];
+
   const match = normalizeMatcher(matcher);
+
   return list.filter((item, index) => !match(item, index, list));
 }
 
 export function upsertCollectionItem(list = [], item = null, matcher = null) {
-  const source = Array.isArray(list) ? [...list] : [];
+  const output = Array.isArray(list) ? [...list] : [];
   const match = normalizeMatcher(matcher || item);
-  const index = source.findIndex((entry, entryIndex) => match(entry, entryIndex, source));
+  const index = output.findIndex((entry, entryIndex) => match(entry, entryIndex, output));
 
-  if (index >= 0) source[index] = item;
-  else source.push(item);
+  if (index >= 0) {
+    output[index] = clone(item);
+  } else {
+    output.push(clone(item));
+  }
 
-  return source;
+  return output;
 }
 
 /* =========================================================
@@ -580,17 +309,23 @@ export function upsertCollectionItem(list = [], item = null, matcher = null) {
 ========================================================= */
 
 export function getCollectionsSnapshot(state = {}) {
-  const entities = safeObject(state?.entities);
+  const entities = isObject(state?.entities) ? state.entities : {};
 
   return {
     version: COLLECTIONS_VERSION,
     keys: Object.keys(entities),
-    aliases: { ...COLLECTION_ALIASES },
     counts: Object.fromEntries(
-      Object.entries(entities).map(([key, value]) => [key, Array.isArray(value) ? value.length : value ? 1 : 0])
+      Object.entries(entities).map(([key, value]) => [
+        key,
+        Array.isArray(value) ? value.length : value ? 1 : 0,
+      ])
     ),
   };
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   COLLECTIONS_VERSION,

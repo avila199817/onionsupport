@@ -22,7 +22,7 @@ import {
   redactTokenInText,
 } from "./helpers.js";
 
-export const ROUTER_RENDER_VERSION = "21.0.0-simple";
+export const ROUTER_RENDER_VERSION = "21.0.1-simple";
 
 const SOURCE = "router.render";
 const DEFAULT_ROUTE = "/";
@@ -242,6 +242,18 @@ function setDataset(element, key, value) {
   }
 }
 
+function setAttr(element, key, value) {
+  if (!element || !key) return false;
+
+  try {
+    if (value === null || value === undefined || value === "") element.removeAttribute(key);
+    else element.setAttribute(key, String(value));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function empty(element) {
   if (!element) return false;
 
@@ -347,7 +359,11 @@ function markView({
   setDataset(view, "routerViewKey", route?.viewKey || "");
   setDataset(view, "routerViewName", route?.viewName || "");
 
+  setAttr(view, "aria-busy", status === "pending" ? "true" : "false");
+  setAttr(view, "aria-hidden", "false");
+
   try {
+    view.hidden = false;
     view.classList.add("router-view-root");
     view.classList.toggle("is-rendering", status === "pending");
     view.classList.toggle("is-ready", status === "ready");
@@ -417,6 +433,19 @@ function markError(AppCore, renderId, route = null, canonicalPath = DEFAULT_ROUT
   return true;
 }
 
+function resultNode(result) {
+  if (!result) return null;
+  if (isNode(result)) return result;
+
+  if (isNode(result.element)) return result.element;
+  if (isNode(result.node)) return result.node;
+  if (isNode(result.root)) return result.root;
+  if (isNode(result.container)) return result.container;
+  if (isNode(result.el)) return result.el;
+
+  return null;
+}
+
 function adoptResult(target, result) {
   if (!target || result === null || result === undefined) return result || null;
 
@@ -426,14 +455,16 @@ function adoptResult(target, result) {
     return wrapper;
   }
 
-  if (!isNode(result)) return result;
-  if (result === target) return result;
+  const node = resultNode(result);
+  if (!node) return result;
+
+  if (node === target) return result;
 
   try {
-    if (target.contains(result)) return result;
+    if (target.contains(node)) return result;
   } catch {}
 
-  paint(target, result);
+  paint(target, node);
   return result;
 }
 
@@ -840,17 +871,19 @@ export async function renderLoginRedirect(args = {}) {
     renderRoot: target,
   });
 
+  let result = null;
+
   if (isFn(routeRenderer(route).render)) {
-    const result = await Promise.resolve(runRenderer(route, target, ctx));
+    result = await Promise.resolve(runRenderer(route, target, ctx));
     adoptResult(target, result);
   } else {
-    renderGenericView(args.AppCore, route, target);
+    result = renderGenericView(args.AppCore, route, target);
   }
 
   markReady(args.AppCore, renderId, route, loginPath, finalPublic);
   emit(args.AppCore, "router:render:login-redirect", { canonicalPath: loginPath, publicPath: finalPublic, renderId });
 
-  return null;
+  return result || null;
 }
 
 export function renderRouteRuntimeError(args = {}) {

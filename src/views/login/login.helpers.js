@@ -2,23 +2,19 @@
    Onion SPA - Login Helpers
    Archivo: src/views/login/login.helpers.js
 
-   Login helpers limpios:
-   - validación mínima
-   - payload Auth.login
-   - normalización respuesta auth/2FA
-   - sesión estricta token+user
+   LOGIN HELPERS · SIMPLE
+   - validación mínima del formulario
+   - payload compatible con Auth.login
+   - normalización de resultado auth / 2FA
+   - sesión estricta token + user usable
    - redirect seguro post-login
    - remember identifier
-   - sin DOM, sin HTTP, sin navegación directa
+   - sin DOM, sin HTTP y sin navegación directa
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
-/* =========================================================
-   VERSION / CONSTANTS
-========================================================= */
-
-export const LOGIN_HELPERS_VERSION = "17.0.0-clean";
+export const LOGIN_HELPERS_VERSION = "21.0.0-simple";
 export const LOGIN_REMEMBER_KEY = "auth:last-identifier";
 
 const DEFAULT_HOME_PATH = "/";
@@ -36,28 +32,10 @@ const REMEMBER_KEYS = Object.freeze([
   "auth:lastEmail",
   "login:last-identifier",
   "login:lastIdentifier",
-  "login:last-email",
-  "login:lastEmail",
   "last_login_identifier",
   "lastLoginIdentifier",
   "last_username",
   "lastUsername",
-]);
-
-const BAD_TOKEN_VALUES = new Set([
-  "",
-  "null",
-  "undefined",
-  "false",
-  "true",
-  "none",
-  "nan",
-  "empty",
-  "[object object]",
-  "{}",
-  "[]",
-  "\"\"",
-  "''",
 ]);
 
 const TOKEN_KEYS = Object.freeze([
@@ -72,10 +50,7 @@ const TOKEN_KEYS = Object.freeze([
   "bearer",
 ]);
 
-const REFRESH_TOKEN_KEYS = Object.freeze([
-  "refreshToken",
-  "refresh_token",
-]);
+const REFRESH_TOKEN_KEYS = Object.freeze(["refreshToken", "refresh_token"]);
 
 const TEMP_TOKEN_KEYS = Object.freeze([
   "tempToken",
@@ -88,6 +63,8 @@ const TEMP_TOKEN_KEYS = Object.freeze([
   "two_factor_token",
   "mfaToken",
   "mfa_token",
+  "otpToken",
+  "otp_token",
 ]);
 
 const USER_KEYS = Object.freeze([
@@ -124,7 +101,6 @@ const WALK_KEYS = Object.freeze([
   "session",
   "sessionData",
   "session_data",
-  "meta",
 ]);
 
 const USER_ID_KEYS = Object.freeze([
@@ -143,35 +119,40 @@ const USER_ID_KEYS = Object.freeze([
   "mail",
   "phone",
   "telefono",
-  "mobile",
-  "cellphone",
 ]);
 
-const ENVELOPE_KEYS = Object.freeze([
-  "ok",
-  "success",
-  "authenticated",
-  "status",
-  "statusCode",
-  "status_code",
-  "error",
-  "errorCode",
-  "error_code",
-  "token",
-  "accessToken",
-  "access_token",
-  "refreshToken",
-  "refresh_token",
-  "tempToken",
-  "temp_token",
-  "data",
-  "payload",
-  "result",
-  "body",
-  "response",
-  "auth",
-  "session",
-  "sessionData",
+const AUTH_BLOCKED_REDIRECTS = new Set([
+  "/login",
+  "/logout",
+  "/reset-password",
+  "/reset-password/confirm",
+  "/reset-password-confirm",
+  "/forgot-password",
+  "/recover-password",
+  "/password-reset",
+  "/password-reset/confirm",
+  "/password-reset-confirm",
+  "/confirm-reset-password",
+  "/activate-account",
+  "/activate",
+  "/activation",
+  "/account/activate",
+  "/activate/first-user",
+  "/2fa",
+  "/otp",
+  "/mfa",
+  "/403",
+  "/404",
+]);
+
+const TWO_FACTOR_STATUSES = new Set([
+  "2fa_required",
+  "mfa_required",
+  "totp_required",
+  "two_factor_required",
+  "verification_required",
+  "challenge_required",
+  "otp_required",
 ]);
 
 const FAILURE_CODES = new Set([
@@ -230,60 +211,35 @@ const SUCCESS_STATUSES = new Set([
   "done",
 ]);
 
-const TWO_FACTOR_STATUSES = new Set([
-  "2fa_required",
-  "mfa_required",
-  "totp_required",
-  "two_factor_required",
-  "verification_required",
-  "challenge_required",
-  "otp_required",
+const ADMIN_ALIASES = new Set([
+  "admin",
+  "administrator",
+  "administrador",
+  "superadmin",
+  "super_admin",
+  "super-admin",
+  "owner",
+  "root",
 ]);
 
-const AUTH_BLOCKED_REDIRECTS = new Set([
-  "/login",
-  "/logout",
-  "/reset-password",
-  "/reset-password/confirm",
-  "/reset-password-confirm",
-  "/forgot-password",
-  "/recover-password",
-  "/password-reset",
-  "/password-reset/request",
-  "/password-reset/confirm",
-  "/password-reset-confirm",
-  "/confirm-reset-password",
-  "/activate-account",
-  "/activate",
-  "/activation",
-  "/account/activate",
-  "/activate/first-user",
-  "/2fa",
-  "/otp",
-  "/mfa",
-  "/403",
-  "/404",
+const BAD_TOKEN_VALUES = new Set([
+  "",
+  "null",
+  "undefined",
+  "false",
+  "true",
+  "none",
+  "nan",
+  "empty",
+  "[object object]",
+  "{}",
+  "[]",
+  "\"\"",
+  "''",
 ]);
 
-const ROLE_DEFAULT_REDIRECTS = new Set([
-  "/usuarios",
-  "/users",
-  "/clientes",
-  "/clients",
-  "/facturas",
-  "/invoices",
-  "/incidencias",
-  "/tickets",
-  "/servidor",
-  "/server",
-  "/hardware",
-]);
-
-const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
-
-const TOKENISH_RE =
-  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|tempToken|temp_token|code|t)=)[^&#\s]+/gi;
+const SENSITIVE_KEY_RE = /token|authorization|cookie|password|secret|credential|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
+const TOKENISH_RE = /(bearer\s+)[a-z0-9._~+/=-]+|[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|tempToken|temp_token|code|t)=)[^&#\s]+/gi;
 
 /* =========================================================
    BASICS
@@ -313,7 +269,9 @@ export function safeObject(value, fallback = {}) {
 }
 
 function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return [...value];
+  return [];
 }
 
 export function safeText(value, fallback = "") {
@@ -333,15 +291,12 @@ function safeNumber(value, fallback = 0) {
 }
 
 function safeBool(value, fallback = false) {
-  if (value === true) return true;
-  if (value === false) return false;
-  if (value === 1) return true;
-  if (value === 0) return false;
+  if (value === true || value === 1 || value === "1") return true;
+  if (value === false || value === 0 || value === "0") return false;
 
   const text = safeText(value, "").toLowerCase();
-
-  if (["true", "1", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(text)) return true;
-  if (["false", "0", "no", "off", "disabled", "inactive"].includes(text)) return false;
+  if (["true", "yes", "si", "sí", "ok", "on", "enabled", "active"].includes(text)) return true;
+  if (["false", "no", "off", "disabled", "inactive"].includes(text)) return false;
 
   return Boolean(fallback);
 }
@@ -390,13 +345,9 @@ function configNumber(paths = [], fallback = 0) {
   for (const path of safeArray(paths)) {
     let current = AppCore?.config;
 
-    for (const part of safeText(path, "").split(".").filter(Boolean)) {
-      current = current?.[part];
-    }
+    for (const part of safeText(path, "").split(".").filter(Boolean)) current = current?.[part];
 
-    if (current !== undefined && current !== null && current !== "") {
-      return safeNumber(current, fallback);
-    }
+    if (current !== undefined && current !== null && current !== "") return safeNumber(current, fallback);
   }
 
   return fallback;
@@ -427,16 +378,14 @@ function redactText(value = "") {
   if (!text) return "";
 
   try {
-    if (isFunction(AppCore?.utils?.redactTokenInText)) {
-      return AppCore.utils.redactTokenInText(text);
-    }
+    if (isFunction(AppCore?.utils?.redactTokenInText)) return AppCore.utils.redactTokenInText(text);
   } catch {}
 
   try {
     return text
-      .replace(TOKENISH_RE, (match) => {
-        if (/^bearer\s+/i.test(match)) return "Bearer ***";
-        if (/^[?&#]/.test(match)) return match.replace(/=.+$/g, "=***");
+      .replace(TOKENISH_RE, (match, bearerPrefix, queryPrefix) => {
+        if (bearerPrefix) return `${bearerPrefix}***`;
+        if (queryPrefix) return `${queryPrefix}***`;
         return "***";
       })
       .replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***")
@@ -458,31 +407,15 @@ export function escapeHtml(value = "") {
 function sanitizeForSnapshot(value, depth = 0, keyHint = "") {
   if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) return value ? "***" : null;
   if (depth > 4) return "[depth-limit]";
-
-  if (
-    value === null ||
-    value === undefined ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
+  if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "string") return redactText(value);
   if (typeof value === "function") return "[function]";
   if (value instanceof Error) return { name: value.name || "Error", message: redactText(value.message || "") };
-
-  if (Array.isArray(value)) {
-    return value.slice(0, 80).map((item) => sanitizeForSnapshot(item, depth + 1, keyHint));
-  }
+  if (Array.isArray(value)) return value.slice(0, 80).map((item) => sanitizeForSnapshot(item, depth + 1, keyHint));
 
   if (value && typeof value === "object") {
     const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 120)) {
-      output[key] = sanitizeForSnapshot(item, depth + 1, key);
-    }
-
+    for (const [key, item] of Object.entries(value).slice(0, 120)) output[key] = sanitizeForSnapshot(item, depth + 1, key);
     return output;
   }
 
@@ -554,16 +487,7 @@ export function createLoginPayload({
   rememberMe = undefined,
   redirect = "",
 } = {}) {
-  const id = (
-    normalizeIdentifier(identifier) ||
-    normalizeIdentifier(email) ||
-    normalizeIdentifier(username) ||
-    normalizeIdentifier(user) ||
-    normalizeIdentifier(login) ||
-    normalizeIdentifier(phone) ||
-    normalizeIdentifier(telefono)
-  );
-
+  const id = normalizeIdentifier(identifier) || normalizeIdentifier(email) || normalizeIdentifier(username) || normalizeIdentifier(user) || normalizeIdentifier(login) || normalizeIdentifier(phone) || normalizeIdentifier(telefono);
   const finalEmail = looksLikeEmail(id) ? id.toLowerCase() : "";
   const finalPhone = !finalEmail && looksLikePhone(id) ? normalizePhone(id) : "";
   const finalUsername = !finalEmail && !finalPhone ? normalizeUsername(id) : "";
@@ -572,73 +496,36 @@ export function createLoginPayload({
   return {
     identifier: id,
     login: id,
-
     email: finalEmail,
     username: finalUsername,
     user: finalUsername || id,
-
     phone: finalPhone,
     telefono: finalPhone,
-
-    /*
-      Password intencionadamente sin trim.
-      Sólo se valida presencia con .trim().
-    */
     password: rawText(password, ""),
-
     remember: finalRemember,
     rememberMe: finalRemember,
-
     redirect: safeText(redirect, ""),
   };
 }
 
 export function validateLoginPayload(payload = {}) {
-  const identifier = normalizeIdentifier(
-    payload.identifier ||
-      payload.email ||
-      payload.username ||
-      payload.user ||
-      payload.login ||
-      payload.phone ||
-      payload.telefono ||
-      ""
-  );
-
+  const identifier = normalizeIdentifier(payload.identifier || payload.email || payload.username || payload.user || payload.login || payload.phone || payload.telefono || "");
   const password = rawText(payload.password, "");
   const errors = {};
 
-  if (!identifier) {
-    errors.identifier = "Introduce tu email o nombre de usuario.";
-  } else if (identifier.length > identifierMax()) {
-    errors.identifier = "El identificador es demasiado largo.";
-  } else if (looksLikeEmail(identifier) && !isValidEmail(identifier)) {
-    errors.identifier = "El formato del email no es válido.";
-  }
+  if (!identifier) errors.identifier = "Introduce tu email o nombre de usuario.";
+  else if (identifier.length > identifierMax()) errors.identifier = "El identificador es demasiado largo.";
+  else if (looksLikeEmail(identifier) && !isValidEmail(identifier)) errors.identifier = "El formato del email no es válido.";
 
-  if (!password.trim()) {
-    errors.password = "Introduce tu contraseña.";
-  } else if (password.length < passwordMin()) {
-    errors.password = `La contraseña debe tener al menos ${passwordMin()} caracteres.`;
-  } else if (password.length > passwordMax()) {
-    errors.password = "La contraseña es demasiado larga.";
-  }
+  if (!password.trim()) errors.password = "Introduce tu contraseña.";
+  else if (password.length < passwordMin()) errors.password = `La contraseña debe tener al menos ${passwordMin()} caracteres.`;
+  else if (password.length > passwordMax()) errors.password = "La contraseña es demasiado larga.";
 
   return errors;
 }
 
 export function getFirstLoginError(errors = {}) {
-  return (
-    safeText(errors.identifier, "") ||
-    safeText(errors.email, "") ||
-    safeText(errors.username, "") ||
-    safeText(errors.user, "") ||
-    safeText(errors.password, "") ||
-    safeText(errors.global, "") ||
-    safeText(errors.form, "") ||
-    safeText(errors.message, "") ||
-    ""
-  );
+  return safeText(errors.identifier, "") || safeText(errors.email, "") || safeText(errors.username, "") || safeText(errors.user, "") || safeText(errors.password, "") || safeText(errors.global, "") || safeText(errors.form, "") || safeText(errors.message, "") || "";
 }
 
 /* =========================================================
@@ -646,21 +533,11 @@ export function getFirstLoginError(errors = {}) {
 ========================================================= */
 
 export function getStorage() {
-  try {
-    return AppCore?.storage || null;
-  } catch {
-    return null;
-  }
+  try { return AppCore?.storage || null; } catch { return null; }
 }
 
 export function getNamespacedKey(key = "") {
-  const prefix = safeText(
-    AppCore?.config?.storagePrefix ||
-      AppCore?.config?.appKey ||
-      AppCore?.config?.appId,
-    "onion"
-  ).replace(/^:+|:+$/g, "") || "onion";
-
+  const prefix = safeText(AppCore?.config?.storagePrefix || AppCore?.config?.appKey || AppCore?.config?.appId, "onion").replace(/^:+|:+$/g, "") || "onion";
   const clean = safeText(key, "").replace(/^:+/g, "");
   return `${prefix}:${clean}`;
 }
@@ -669,13 +546,10 @@ function storageCandidates(key = "") {
   const base = [key, getNamespacedKey(key)];
 
   if (key === LOGIN_REMEMBER_KEY) {
-    base.push(
-      ...REMEMBER_KEYS,
-      ...REMEMBER_KEYS.map(getNamespacedKey)
-    );
+    base.push(...REMEMBER_KEYS, ...REMEMBER_KEYS.map(getNamespacedKey));
   }
 
-  return Array.from(new Set(base.map((item) => safeText(item, "")).filter(Boolean)));
+  return [...new Set(base.map((item) => safeText(item, "")).filter(Boolean))];
 }
 
 function unwrapStoredText(value, fallback = "") {
@@ -685,25 +559,10 @@ function unwrapStoredText(value, fallback = "") {
     const raw = String(value).trim();
     if (!raw) return fallback;
 
-    try {
-      return unwrapStoredText(JSON.parse(raw), raw);
-    } catch {
-      return raw;
-    }
+    try { return unwrapStoredText(JSON.parse(raw), raw); } catch { return raw; }
   }
 
-  if (isPlainObject(value)) {
-    return firstText(
-      value.value,
-      value.raw,
-      value.data,
-      value.identifier,
-      value.email,
-      value.username,
-      value.user,
-      fallback
-    );
-  }
+  if (isPlainObject(value)) return firstText(value.value, value.raw, value.data, value.identifier, value.email, value.username, value.user, fallback);
 
   return fallback;
 }
@@ -751,7 +610,6 @@ export function readStorage(key, fallback = "") {
 export function writeStorage(key, value = "") {
   const clean = safeText(key, "");
   const text = safeText(value, "");
-
   if (!clean) return false;
   if (!text) return removeStorage(clean);
 
@@ -789,33 +647,15 @@ export function removeStorage(key) {
   let removed = false;
 
   for (const candidate of storageCandidates(clean)) {
-    try {
-      storage?.remove?.(candidate);
-      removed = true;
-    } catch {}
-
-    try {
-      storage?.delete?.(candidate);
-      removed = true;
-    } catch {}
-
-    try {
-      storage?.del?.(candidate);
-      removed = true;
-    } catch {}
+    try { storage?.remove?.(candidate); removed = true; } catch {}
+    try { storage?.delete?.(candidate); removed = true; } catch {}
+    try { storage?.del?.(candidate); removed = true; } catch {}
   }
 
   if (isBrowser()) {
     for (const candidate of storageCandidates(clean)) {
-      try {
-        window.localStorage?.removeItem?.(candidate);
-        removed = true;
-      } catch {}
-
-      try {
-        window.sessionStorage?.removeItem?.(candidate);
-        removed = true;
-      } catch {}
+      try { window.localStorage?.removeItem?.(candidate); removed = true; } catch {}
+      try { window.sessionStorage?.removeItem?.(candidate); removed = true; } catch {}
     }
   }
 
@@ -832,9 +672,7 @@ export function loadRememberedEmail() {
 
 export function saveRememberedIdentifier(identifier = "") {
   const clean = normalizeIdentifier(identifier);
-
   if (!clean) return clearRememberedIdentifier();
-
   return writeStorage(LOGIN_REMEMBER_KEY, clean);
 }
 
@@ -850,22 +688,8 @@ export function clearRememberedEmail() {
   return clearRememberedIdentifier();
 }
 
-export function persistRememberedIdentifier({
-  identifier = "",
-  email = "",
-  username = "",
-  user = "",
-  login = "",
-  remember = false,
-  rememberMe = undefined,
-} = {}) {
-  const id =
-    normalizeIdentifier(identifier) ||
-    normalizeIdentifier(email) ||
-    normalizeIdentifier(username) ||
-    normalizeIdentifier(user) ||
-    normalizeIdentifier(login);
-
+export function persistRememberedIdentifier({ identifier = "", email = "", username = "", user = "", login = "", remember = false, rememberMe = undefined } = {}) {
+  const id = normalizeIdentifier(identifier) || normalizeIdentifier(email) || normalizeIdentifier(username) || normalizeIdentifier(user) || normalizeIdentifier(login);
   const shouldRemember = rememberMe !== undefined ? safeBool(rememberMe, false) : Boolean(remember);
 
   if (shouldRemember) {
@@ -903,21 +727,15 @@ function normalizeHashRouterPath(value = "") {
 }
 
 function normalizePathname(pathname = "/") {
-  let value = safeText(pathname, "/")
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
+  let value = safeText(pathname, "/").replace(/\\/g, "/").replace(/\/{2,}/g, "/");
   if (!value.startsWith("/")) value = `/${value}`;
 
   const stack = [];
 
   for (const part of value.split("/").filter(Boolean)) {
     if (part === ".") continue;
-    if (part === "..") {
-      stack.pop();
-      continue;
-    }
-    stack.push(part);
+    if (part === "..") stack.pop();
+    else stack.push(part);
   }
 
   value = `/${stack.join("/")}`;
@@ -926,7 +744,6 @@ function normalizePathname(pathname = "/") {
 
 function splitPath(path = "/") {
   let raw = safeText(path, "/") || "/";
-
   if (isHashRouterPath(raw)) raw = normalizeHashRouterPath(raw);
 
   let pathname = raw;
@@ -945,26 +762,17 @@ function splitPath(path = "/") {
     pathname = pathname.slice(0, searchIndex) || "/";
   }
 
-  return {
-    pathname: normalizePathname(pathname),
-    search,
-    hash,
-  };
+  return { pathname: normalizePathname(pathname), search, hash };
 }
 
 function pathFromUrlLike(value = "") {
   const raw = safeText(value, "");
   if (!raw) return "";
-
   if (isHashRouterPath(raw)) return normalizeHashRouterPath(raw);
 
   try {
     const parsed = new URL(raw, baseOrigin());
-
-    if (parsed.hash && isHashRouterPath(parsed.hash)) {
-      return normalizeHashRouterPath(parsed.hash);
-    }
-
+    if (parsed.hash && isHashRouterPath(parsed.hash)) return normalizeHashRouterPath(parsed.hash);
     return `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`;
   } catch {
     return raw;
@@ -979,7 +787,6 @@ export function normalizePath(path = "/") {
 
   const raw = pathFromUrlLike(path) || "/";
   const { pathname, search, hash } = splitPath(raw);
-
   return `${pathname}${search}${hash}`;
 }
 
@@ -992,9 +799,7 @@ export function getCurrentBrowserPath() {
 
   try {
     const hash = window.location.hash || "";
-
     if (isHashRouterPath(hash)) return normalizePath(hash);
-
     return normalizePath(`${window.location.pathname || "/"}${window.location.search || ""}${hash}`);
   } catch {
     return "/";
@@ -1006,50 +811,19 @@ export function isAuthPath(path = "") {
 
   if (AUTH_BLOCKED_REDIRECTS.has(clean)) return true;
 
-  return (
-    clean.startsWith("/login/") ||
-    clean.startsWith("/logout/") ||
-    clean.startsWith("/reset-password/") ||
-    clean.startsWith("/forgot-password/") ||
-    clean.startsWith("/recover-password/") ||
-    clean.startsWith("/password-reset/") ||
-    clean.startsWith("/activate-account/") ||
-    clean.startsWith("/activate/") ||
-    clean.startsWith("/activation/") ||
-    clean.startsWith("/account/activate/") ||
-    clean.startsWith("/2fa/") ||
-    clean.startsWith("/otp/") ||
-    clean.startsWith("/mfa/")
-  );
+  return ["/login/", "/logout/", "/reset-password/", "/forgot-password/", "/recover-password/", "/password-reset/", "/activate-account/", "/activate/", "/activation/", "/account/activate/", "/2fa/", "/otp/", "/mfa/"].some((prefix) => clean.startsWith(prefix));
 }
 
 function hasOpenRedirectRisk(value = "") {
   const raw = safeText(value, "");
-
-  if (!raw) return true;
-  if (raw.startsWith("//")) return true;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return true;
-  if (/[\r\n\t\\]/.test(raw)) return true;
+  if (!raw || raw.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(raw) || /[\r\n\t\\]/.test(raw)) return true;
 
   const lower = raw.toLowerCase();
-
-  if (
-    lower.includes("%0d") ||
-    lower.includes("%0a") ||
-    lower.includes("%09") ||
-    lower.includes("%5c")
-  ) {
-    return true;
-  }
+  if (lower.includes("%0d") || lower.includes("%0a") || lower.includes("%09") || lower.includes("%5c")) return true;
 
   try {
     const decoded = decodeURIComponent(raw).trim().replace(/\\/g, "/");
-
-    return (
-      decoded.startsWith("//") ||
-      /^[a-z][a-z0-9+.-]*:/i.test(decoded) ||
-      /[\r\n\t]/.test(decoded)
-    );
+    return decoded.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(decoded) || /[\r\n\t]/.test(decoded);
   } catch {
     return true;
   }
@@ -1058,63 +832,29 @@ function hasOpenRedirectRisk(value = "") {
 export function isSafeInternalRedirect(path = "", options = {}) {
   const opts = safeObject(options);
   const value = safeText(path, "").slice(0, REDIRECT_MAX);
-
-  if (!value || !value.startsWith("/")) return false;
-  if (hasOpenRedirectRisk(value)) return false;
+  if (!value || !value.startsWith("/") || hasOpenRedirectRisk(value)) return false;
 
   const normalized = normalizePath(value);
-
   if (opts.allowAuthPaths !== true && isAuthPath(normalized)) return false;
 
   return true;
 }
 
 export function ensureSafeRedirect(path = "", fallback = DEFAULT_HOME_PATH, options = {}) {
-  const fallbackPath = isSafeInternalRedirect(fallback, {
-    allowAuthPaths: options.allowFallbackAuthPath === true,
-  })
-    ? normalizePath(fallback)
-    : DEFAULT_HOME_PATH;
-
+  const fallbackPath = isSafeInternalRedirect(fallback, { allowAuthPaths: options.allowFallbackAuthPath === true }) ? normalizePath(fallback) : DEFAULT_HOME_PATH;
   const candidate = normalizePath(path || "");
 
-  return isSafeInternalRedirect(candidate, options)
-    ? candidate
-    : fallbackPath;
-}
-
-function isRoleDefaultRedirect(path = "") {
-  const clean = stripSearchAndHash(path).toLowerCase();
-
-  return ROLE_DEFAULT_REDIRECTS.has(clean) || /^\/@[^/]+\/?$/i.test(clean);
+  return isSafeInternalRedirect(candidate, options) ? candidate : fallbackPath;
 }
 
 function configuredHome() {
-  const home = normalizePath(
-    AppCore?.config?.routes?.home ||
-      AppCore?.config?.auth?.homeRoute ||
-      AppCore?.config?.auth?.postLoginFallback ||
-      DEFAULT_HOME_PATH
-  );
-
-  return home && !isAuthPath(home) && !isRoleDefaultRedirect(home)
-    ? home
-    : DEFAULT_HOME_PATH;
+  const home = normalizePath(AppCore?.config?.routes?.home || AppCore?.config?.auth?.homeRoute || AppCore?.config?.auth?.postLoginFallback || DEFAULT_HOME_PATH);
+  return home && !isAuthPath(home) ? home : DEFAULT_HOME_PATH;
 }
 
 function configured2FA() {
-  const target = normalizePath(
-    AppCore?.config?.routes?.twoFactor ||
-      AppCore?.config?.routes?.mfa ||
-      AppCore?.config?.auth?.twoFactorRoute ||
-      DEFAULT_2FA_PATH
-  );
-
-  return isSafeInternalRedirect(target, {
-    allowAuthPaths: true,
-  })
-    ? target
-    : DEFAULT_2FA_PATH;
+  const target = normalizePath(AppCore?.config?.routes?.twoFactor || AppCore?.config?.routes?.mfa || AppCore?.config?.auth?.twoFactorRoute || DEFAULT_2FA_PATH);
+  return isSafeInternalRedirect(target, { allowAuthPaths: true }) ? target : DEFAULT_2FA_PATH;
 }
 
 export function getUrlRedirectParam() {
@@ -1127,7 +867,6 @@ export function getUrlRedirectParam() {
 
   try {
     const hash = window.location.hash || "";
-
     if (hash.includes("?")) {
       const query = hash.split("?").slice(1).join("?");
       const value = new URLSearchParams(query).get("redirect");
@@ -1147,13 +886,8 @@ function collectObjects(payload = null) {
   const seen = new WeakSet();
   const queue = [payload];
 
-  let guard = 0;
-
-  while (queue.length && guard < 140) {
-    guard += 1;
-
+  while (queue.length && out.length < 100) {
     const current = queue.shift();
-
     if (!current || typeof current !== "object") continue;
 
     try {
@@ -1169,8 +903,6 @@ function collectObjects(payload = null) {
     }
 
     if (current.response?.data && typeof current.response.data === "object") queue.push(current.response.data);
-    if (current.auth?.data && typeof current.auth.data === "object") queue.push(current.auth.data);
-    if (current.session?.data && typeof current.session.data === "object") queue.push(current.session.data);
   }
 
   return out;
@@ -1182,14 +914,7 @@ function pickValue(objects = [], keys = []) {
 
     for (const key of keys) {
       const value = object[key];
-
-      if (
-        value !== null &&
-        value !== undefined &&
-        !(typeof value === "string" && value.trim() === "")
-      ) {
-        return value;
-      }
+      if (value !== null && value !== undefined && !(typeof value === "string" && value.trim() === "")) return value;
     }
   }
 
@@ -1220,15 +945,8 @@ function normalizeToken(token = null) {
   if (token === null || token === undefined) return "";
 
   let value = String(token).trim();
-
-  if (/^bearer\s+/i.test(value)) {
-    value = value.replace(/^bearer\s+/i, "").trim();
-  }
-
-  if (!value) return "";
-  if (BAD_TOKEN_VALUES.has(value.toLowerCase())) return "";
-  if (/[\s\r\n\t]/.test(value)) return "";
-  if (value.length > tokenMax()) return "";
+  if (/^bearer\s+/i.test(value)) value = value.replace(/^bearer\s+/i, "").trim();
+  if (!value || BAD_TOKEN_VALUES.has(value.toLowerCase()) || /[\s\r\n\t]/.test(value) || value.length > tokenMax()) return "";
 
   return value;
 }
@@ -1238,97 +956,43 @@ export function hasUsableToken(token = "") {
   if (!value) return false;
 
   try {
-    if (isFunction(AppCore?.utils?.hasValidToken)) {
-      return Boolean(AppCore.utils.hasValidToken(value));
-    }
+    if (isFunction(AppCore?.utils?.hasValidToken)) return Boolean(AppCore.utils.hasValidToken(value));
   } catch {}
 
   return true;
 }
 
 function normalizeRole(value = "") {
-  return safeText(value, "")
+  const role = safeText(value, "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[\s-]+/g, "_")
     .replace(/[^a-z0-9_:.]/g, "")
     .replace(/^_+|_+$/g, "");
+
+  if (ADMIN_ALIASES.has(role)) return "admin";
+  return role ? "user" : "";
 }
 
 function userActive(user = null) {
   if (!isPlainObject(user)) return false;
 
-  const status = normalizeRole(
-    user.status ||
-      user.estado ||
-      user.state ||
-      user.accountStatus ||
-      user.account_status ||
-      ""
-  );
+  const status = normalizeRole(user.status || user.estado || user.state || user.accountStatus || user.account_status || "");
+  if (["disabled", "inactive", "deleted", "blocked", "suspended", "banned", "archived", "revoked", "desactivado", "inactivo", "eliminado", "bloqueado", "suspendido"].includes(status)) return false;
 
-  if (
-    [
-      "disabled",
-      "inactive",
-      "deleted",
-      "blocked",
-      "suspended",
-      "banned",
-      "archived",
-      "revoked",
-      "desactivado",
-      "inactivo",
-      "eliminado",
-      "bloqueado",
-      "suspendido",
-    ].includes(status)
-  ) {
-    return false;
-  }
-
-  return !(
-    user.active === false ||
-    user.enabled === false ||
-    user.disabled === true ||
-    user.deleted === true ||
-    user.blocked === true ||
-    user.locked === true ||
-    user.suspended === true ||
-    user.banned === true ||
-    user.archived === true
-  );
+  return !(user.active === false || user.enabled === false || user.disabled === true || user.deleted === true || user.blocked === true || user.locked === true || user.suspended === true || user.banned === true || user.archived === true);
 }
 
 function hasIdentity(value = {}) {
   if (!isPlainObject(value)) return false;
-
   return USER_ID_KEYS.some((key) => Boolean(safeText(value[key], "")));
 }
 
 function hasNestedIdentity(value = {}) {
   if (!isPlainObject(value)) return false;
 
-  return [
-    value,
-    value.user,
-    value.usuario,
-    value.me,
-    value.account,
-    value.profile,
-    value.currentUser,
-    value.authUser,
-    value.sessionUser,
-    value.raw,
-    value.raw?.user,
-    value.raw?.profile,
-  ].some(hasIdentity);
-}
-
-function isEnvelope(value = {}) {
-  if (!isPlainObject(value)) return false;
-  return ENVELOPE_KEYS.some((key) => hasOwn(value, key));
+  return [value, value.user, value.usuario, value.me, value.account, value.profile, value.currentUser, value.authUser, value.sessionUser, value.raw, value.raw?.user, value.raw?.profile].some(hasIdentity);
 }
 
 function sanitizeUserRaw(value = {}, depth = 0, seen = new WeakSet()) {
@@ -1343,22 +1007,9 @@ function sanitizeUserRaw(value = {}, depth = 0, seen = new WeakSet()) {
 
   for (const [key, item] of Object.entries(value).slice(0, 160)) {
     if (SENSITIVE_KEY_RE.test(key)) continue;
-
-    if (Array.isArray(item)) {
-      output[key] = item.slice(0, 100).map((entry) => (
-        isPlainObject(entry)
-          ? sanitizeUserRaw(entry, depth + 1, seen)
-          : entry
-      ));
-      continue;
-    }
-
-    if (isPlainObject(item)) {
-      output[key] = sanitizeUserRaw(item, depth + 1, seen);
-      continue;
-    }
-
-    output[key] = item;
+    if (Array.isArray(item)) output[key] = item.slice(0, 100).map((entry) => (isPlainObject(entry) ? sanitizeUserRaw(entry, depth + 1, seen) : entry));
+    else if (isPlainObject(item)) output[key] = sanitizeUserRaw(item, depth + 1, seen);
+    else output[key] = item;
   }
 
   return output;
@@ -1369,132 +1020,43 @@ function fallbackNormalizeUser(user = {}) {
 
   const profile = safeObject(user.profile);
   const raw = safeObject(user.raw);
-
-  const id = first(
-    user.id,
-    user.userId,
-    user.user_id,
-    user.uuid,
-    user._id,
-    user.uid,
-    user.sub,
-    profile.id,
-    profile.userId,
-    profile.user_id,
-    raw.id,
-    raw.userId,
-    raw.user_id,
-    raw.sub
-  ) || null;
-
-  const email = firstText(
-    user.email,
-    user.mail,
-    user.emailLower,
-    user.email_lower,
-    profile.email,
-    profile.mail,
-    raw.email,
-    raw.mail
-  );
-
-  const username = normalizeUsername(
-    firstText(
-      user.username,
-      user.userName,
-      user.user_name,
-      user.nick,
-      user.alias,
-      user.login,
-      user.slug,
-      profile.username,
-      profile.userName,
-      profile.user_name,
-      profile.slug,
-      raw.username,
-      raw.userName,
-      raw.user_name,
-      raw.slug,
-      email,
-      id
-    )
-  );
-
-  const displayName = firstText(
-    user.displayName,
-    user.display_name,
-    user.name,
-    user.nombre,
-    user.fullName,
-    user.full_name,
-    profile.displayName,
-    profile.display_name,
-    profile.name,
-    profile.nombre,
-    raw.displayName,
-    raw.display_name,
-    raw.name,
-    username,
-    email,
-    id,
-    "Usuario"
-  );
-
-  const role = normalizeRole(
-    firstText(
-      user.role,
-      user.rol,
-      user.userRole,
-      user.user_role,
-      user.type,
-      user.userType,
-      user.user_type,
-      user.perfil,
-      profile.role,
-      profile.rol,
-      raw.role,
-      raw.rol
-    )
-  );
-
+  const id = first(user.id, user.userId, user.user_id, user.uuid, user._id, user.uid, user.sub, profile.id, profile.userId, raw.id, raw.userId, raw.sub) || null;
+  const email = firstText(user.email, user.mail, user.emailLower, user.email_lower, profile.email, raw.email, raw.mail);
+  const username = normalizeUsername(firstText(user.username, user.userName, user.user_name, user.nick, user.alias, user.login, user.slug, profile.username, profile.slug, raw.username, raw.slug, email, id));
+  const displayName = firstText(user.displayName, user.display_name, user.name, user.nombre, user.fullName, user.full_name, profile.displayName, profile.name, raw.displayName, raw.name, username, email, id, "Usuario");
+  const role = normalizeRole(firstText(user.role, user.rol, user.userRole, user.user_role, user.type, user.userType, user.perfil, profile.role, raw.role));
   const clean = sanitizeUserRaw(user);
 
   return {
     ...clean,
-
     id,
-
     userId: user.userId ?? user.user_id ?? id,
     user_id: user.user_id ?? user.userId ?? id,
     uid: user.uid ?? id,
     sub: user.sub ?? id,
-
     username,
     usernameLower: user.usernameLower || user.username_lower || username || null,
     username_lower: user.username_lower || user.usernameLower || username || null,
-
     slug: normalizeUsername(firstText(user.slug, profile.slug, raw.slug, username, slugify(displayName))),
-
     name: displayName,
     nombre: user.nombre || displayName,
     displayName,
-
+    fullName: user.fullName || user.full_name || displayName,
+    full_name: user.full_name || user.fullName || displayName,
+    footerName: displayName,
+    greetingName: displayName,
     email,
     emailLower: firstText(user.emailLower, user.email_lower, email).toLowerCase(),
     email_lower: firstText(user.email_lower, user.emailLower, email).toLowerCase(),
-
     role,
     rol: role,
-    roles: Array.isArray(user.roles) ? user.roles : role ? [role] : [],
-
+    roles: role ? [role] : [],
     active: userActive(user),
   };
 }
 
 function normalizeUserCandidate(user = null) {
   if (!isPlainObject(user)) return null;
-
-  if (isEnvelope(user) && !hasNestedIdentity(user)) return null;
 
   try {
     const normalized = AppCore?.utils?.normalizeUser?.(user);
@@ -1506,30 +1068,14 @@ function normalizeUserCandidate(user = null) {
 }
 
 export function hasUsableUser(user = {}) {
-  if (!isPlainObject(user)) return false;
-  if (!userActive(user)) return false;
-
+  if (!isPlainObject(user) || !userActive(user)) return false;
   return USER_ID_KEYS.some((key) => Boolean(safeText(user[key], "")));
 }
 
 export function getUserIdentity(user = {}) {
   if (!isPlainObject(user)) return "";
 
-  return (
-    safeText(user.userId, "") ||
-    safeText(user.user_id, "") ||
-    safeText(user.id, "") ||
-    safeText(user._id, "") ||
-    safeText(user.uid, "") ||
-    safeText(user.sub, "") ||
-    safeText(user.email, "") ||
-    safeText(user.mail, "") ||
-    safeText(user.username, "") ||
-    safeText(user.userName, "") ||
-    safeText(user.user_name, "") ||
-    safeText(user.phone, "") ||
-    safeText(user.telefono, "")
-  );
+  return safeText(user.userId, "") || safeText(user.user_id, "") || safeText(user.id, "") || safeText(user._id, "") || safeText(user.uid, "") || safeText(user.sub, "") || safeText(user.email, "") || safeText(user.mail, "") || safeText(user.username, "") || safeText(user.userName, "") || safeText(user.user_name, "") || safeText(user.phone, "") || safeText(user.telefono, "");
 }
 
 function extractUser(raw = {}) {
@@ -1555,38 +1101,15 @@ function extractUser(raw = {}) {
 }
 
 function currentToken() {
-  return normalizeToken(
-    AppCore?.state?.token ||
-      AppCore?.state?.accessToken ||
-      AppCore?.state?.access_token ||
-      AppCore?.state?.auth?.token ||
-      AppCore?.state?.session?.token ||
-      AppCore?.state?.session?.accessToken ||
-      ""
-  );
+  return normalizeToken(AppCore?.state?.token || AppCore?.state?.accessToken || AppCore?.state?.access_token || AppCore?.state?.auth?.token || AppCore?.state?.session?.token || AppCore?.state?.session?.accessToken || "");
 }
 
 function currentUser() {
-  return (
-    AppCore?.state?.user ||
-    AppCore?.state?.currentUser ||
-    AppCore?.state?.authUser ||
-    AppCore?.state?.sessionUser ||
-    AppCore?.state?.me ||
-    AppCore?.state?.account ||
-    AppCore?.state?.profile ||
-    AppCore?.state?.auth?.user ||
-    AppCore?.state?.session?.user ||
-    null
-  );
+  return AppCore?.state?.user || AppCore?.state?.currentUser || AppCore?.state?.authUser || AppCore?.state?.sessionUser || AppCore?.state?.me || AppCore?.state?.account || AppCore?.state?.profile || AppCore?.state?.auth?.user || AppCore?.state?.session?.user || null;
 }
 
 function currentAuthenticated() {
-  return Boolean(
-    AppCore?.state?.authenticated === true ||
-      AppCore?.state?.auth?.authenticated === true ||
-      AppCore?.state?.session?.authenticated === true
-  );
+  return Boolean(AppCore?.state?.authenticated === true || AppCore?.state?.auth?.authenticated === true || AppCore?.state?.session?.authenticated === true);
 }
 
 /* =========================================================
@@ -1599,7 +1122,6 @@ function extractStatus(raw = {}) {
 
 function statusKey(value = "") {
   const raw = safeText(value, "").toLowerCase();
-
   if (!raw || Number.isFinite(Number(raw))) return "";
 
   return raw
@@ -1614,20 +1136,9 @@ function extractCode(raw = {}) {
   return pickText(collectObjects(raw), ["code", "errorCode", "error_code", "error"]);
 }
 
-function extractMessage(raw = {}) {
+function extractResponseMessage(raw = {}) {
   for (const object of collectObjects(raw)) {
-    const value = pickValue(object ? [object] : [], [
-      "message",
-      "mensaje",
-      "errorMessage",
-      "error_message",
-      "detail",
-      "description",
-      "title",
-      "reason",
-      "msg",
-      "error",
-    ]);
+    const value = pickValue([object], ["message", "mensaje", "errorMessage", "error_message", "detail", "description", "title", "reason", "msg", "error"]);
 
     if (typeof value === "string" || typeof value === "number") {
       const text = safeText(value, "");
@@ -1656,14 +1167,7 @@ function explicitFailure(raw = {}) {
   const code = safeText(extractCode(raw), "").toUpperCase();
   if (code && FAILURE_CODES.has(code)) return true;
 
-  return objects.some((object) => (
-    object?.ok === false ||
-    object?.success === false ||
-    (
-      object?.authenticated === false &&
-      ["unauthorized", "auth_error", "not_authenticated"].includes(status)
-    )
-  ));
+  return objects.some((object) => object?.ok === false || object?.success === false || (object?.authenticated === false && ["unauthorized", "auth_error", "not_authenticated"].includes(status)));
 }
 
 function declaredSuccess(raw = {}) {
@@ -1672,12 +1176,7 @@ function declaredSuccess(raw = {}) {
 
   if (status && SUCCESS_STATUSES.has(status)) return true;
 
-  return objects.some((object) => (
-    object?.ok === true ||
-    object?.success === true ||
-    object?.authenticated === true ||
-    object?.status === true
-  ));
+  return objects.some((object) => object?.ok === true || object?.success === true || object?.authenticated === true || object?.status === true);
 }
 
 function requires2FA(raw = {}, { tempToken = "", token = "", user = null } = {}) {
@@ -1686,90 +1185,49 @@ function requires2FA(raw = {}, { tempToken = "", token = "", user = null } = {})
 
   if (TWO_FACTOR_STATUSES.has(status)) return true;
 
-  const flags = [
-    "requires2FA",
-    "requires_2fa",
-    "require2FA",
-    "require_2fa",
-    "requiresTwoFactor",
-    "twoFactorRequired",
-    "requiresMfa",
-    "requires_mfa",
-    "mfaRequired",
-    "mfa_required",
-    "totpRequired",
-    "totp_required",
-    "challengeRequired",
-    "challenge_required",
-  ];
+  const flags = ["requires2FA", "requires_2fa", "require2FA", "require_2fa", "requiresTwoFactor", "twoFactorRequired", "requiresMfa", "requires_mfa", "mfaRequired", "mfa_required", "totpRequired", "totp_required", "challengeRequired", "challenge_required"];
 
-  if (objects.some((object) => flags.some((key) => safeBool(object?.[key], false)))) {
-    return true;
-  }
+  if (objects.some((object) => flags.some((key) => safeBool(object?.[key], false)))) return true;
 
   return Boolean(tempToken && !(token && hasUsableUser(user)));
 }
 
 function fillFromCoreSession({ token = "", user = null, success = false, failed = false } = {}) {
-  if (failed || !success) {
-    return { token, user, usedCoreSession: false };
-  }
+  if (failed || !success) return { token, user, usedCoreSession: false };
 
   const stateToken = currentToken();
   const stateUser = normalizeUserCandidate(currentUser());
   const stateIdentity = getUserIdentity(stateUser || {});
   const rawIdentity = getUserIdentity(user || {});
 
-  if (!token && !user && currentAuthenticated() && hasUsableToken(stateToken) && hasUsableUser(stateUser)) {
-    return { token: stateToken, user: stateUser, usedCoreSession: true };
-  }
-
-  if (token && !user && stateToken === token && hasUsableUser(stateUser)) {
-    return { token, user: stateUser, usedCoreSession: true };
-  }
-
-  if (user && !token && rawIdentity && stateIdentity && rawIdentity === stateIdentity && hasUsableToken(stateToken)) {
-    return { token: stateToken, user, usedCoreSession: true };
-  }
+  if (!token && !user && currentAuthenticated() && hasUsableToken(stateToken) && hasUsableUser(stateUser)) return { token: stateToken, user: stateUser, usedCoreSession: true };
+  if (token && !user && stateToken === token && hasUsableUser(stateUser)) return { token, user: stateUser, usedCoreSession: true };
+  if (user && !token && rawIdentity && stateIdentity && rawIdentity === stateIdentity && hasUsableToken(stateToken)) return { token: stateToken, user, usedCoreSession: true };
 
   return { token, user, usedCoreSession: false };
 }
 
 export function normalizeAuthResult(result = {}) {
-  const raw = result && typeof result === "object"
-    ? result
-    : { message: safeText(result, "") };
-
+  const raw = result && typeof result === "object" ? result : { message: safeText(result, "") };
   const objects = collectObjects(raw);
 
   let token = normalizeToken(pickText(objects, TOKEN_KEYS));
   const refreshToken = normalizeToken(pickText(objects, REFRESH_TOKEN_KEYS));
   let tempToken = normalizeToken(pickText(objects, TEMP_TOKEN_KEYS));
-
   let user = extractUser(raw);
 
   const failed = explicitFailure(raw);
   const success = declaredSuccess(raw);
-  const message = extractMessage(raw);
+  const message = extractResponseMessage(raw);
   const code = extractCode(raw);
   const statusValue = extractStatus(raw);
   const status = statusKey(statusValue);
 
-  const filled = fillFromCoreSession({
-    token,
-    user,
-    success,
-    failed,
-  });
-
+  const filled = fillFromCoreSession({ token, user, success, failed });
   token = filled.token;
   user = filled.user;
 
-  let need2FA = requires2FA(raw, {
-    tempToken,
-    token,
-    user,
-  });
+  let need2FA = requires2FA(raw, { tempToken, token, user });
 
   if (need2FA && !tempToken && token && !hasUsableUser(user)) {
     tempToken = token;
@@ -1778,102 +1236,41 @@ export function normalizeAuthResult(result = {}) {
 
   if (need2FA) token = "";
 
-  const authenticated = Boolean(
-    !failed &&
-      !need2FA &&
-      hasUsableToken(token) &&
-      hasUsableUser(user)
-  );
-
+  const authenticated = Boolean(!failed && !need2FA && hasUsableToken(token) && hasUsableUser(user));
   const tokenOnly = Boolean(!failed && !need2FA && hasUsableToken(token) && !hasUsableUser(user));
   const userOnly = Boolean(!failed && !need2FA && !hasUsableToken(token) && hasUsableUser(user));
-
-  const redirectTo = pickText(objects, [
-    "redirectTo",
-    "redirect_to",
-    "redirect",
-    "returnTo",
-    "return_to",
-    "next",
-    "nextPath",
-    "next_path",
-    "target",
-  ]);
-
+  const redirectTo = pickText(objects, ["redirectTo", "redirect_to", "redirect", "returnTo", "return_to", "next", "nextPath", "next_path", "target"]);
   const sessionData = pickObject(objects, SESSION_KEYS);
-
-  const navigationHandled = objects.some((object) => (
-    safeBool(object.navigationHandled, false) ||
-    safeBool(object.navigated, false) ||
-    safeBool(object.didNavigate, false) ||
-    safeBool(object.redirected, false)
-  ));
-
-  const role = normalizeRole(
-    firstText(
-      pickText(objects, ["role", "rol", "userRole", "user_role", "type", "tipo", "perfil"]),
-      user?.role,
-      user?.rol
-    )
-  );
-
+  const navigationHandled = objects.some((object) => safeBool(object.navigationHandled, false) || safeBool(object.navigated, false) || safeBool(object.didNavigate, false) || safeBool(object.redirected, false));
+  const role = normalizeRole(firstText(pickText(objects, ["role", "rol", "userRole", "user_role", "type", "tipo", "perfil"]), user?.role, user?.rol));
   const ok = failed ? false : Boolean(authenticated || need2FA);
 
   return {
     raw: result,
-
     ok,
     success: ok,
     explicitFailure: failed,
     declaredSuccess: success,
-
-    status: safeText(
-      statusValue,
-      failed
-        ? "auth_failed"
-        : need2FA
-          ? "2fa_required"
-          : authenticated
-            ? "authenticated"
-            : tokenOnly
-              ? "token_only"
-              : userOnly
-                ? "user_only"
-                : SUCCESS_STATUSES.has(status)
-                  ? status
-                  : success
-                    ? "success_without_session"
-                    : ""
-    ),
-
+    status: safeText(statusValue, failed ? "auth_failed" : need2FA ? "2fa_required" : authenticated ? "authenticated" : tokenOnly ? "token_only" : userOnly ? "user_only" : SUCCESS_STATUSES.has(status) ? status : success ? "success_without_session" : ""),
     code: safeText(code, ""),
     message: safeText(message, ""),
-
     token,
     accessToken: token,
     access_token: token,
-
     refreshToken,
     refresh_token: refreshToken,
-
     tempToken,
     temp_token: tempToken,
-
     sessionData,
     session: sessionData,
-
     user,
     usuario: user,
-
     role,
-
     redirectTo: safeText(redirectTo, ""),
-
     requires2FA: Boolean(need2FA),
     authenticated,
     tokenOnly,
     userOnly,
-
     usedCoreSession: Boolean(filled.usedCoreSession),
     navigationHandled,
   };
@@ -1881,58 +1278,33 @@ export function normalizeAuthResult(result = {}) {
 
 export function resolveAuthErrorMessage(error) {
   const normalized = normalizeAuthResult(error);
+  const code = (safeText(error?.data?.code, "") || safeText(error?.data?.error, "") || safeText(error?.response?.data?.code, "") || safeText(error?.response?.data?.error, "") || safeText(error?.code, "") || safeText(normalized.code, "")).toUpperCase();
+  const backendMessage = safeText(error?.data?.message, "") || safeText(error?.data?.mensaje, "") || safeText(error?.response?.data?.message, "") || safeText(error?.response?.data?.mensaje, "") || safeText(error?.message, "") || safeText(error?.statusText, "") || safeText(normalized.message, "");
 
-  const code = (
-    safeText(error?.data?.code, "") ||
-    safeText(error?.data?.error, "") ||
-    safeText(error?.response?.data?.code, "") ||
-    safeText(error?.response?.data?.error, "") ||
-    safeText(error?.code, "") ||
-    safeText(normalized.code, "")
-  ).toUpperCase();
-
-  const backendMessage =
-    safeText(error?.data?.message, "") ||
-    safeText(error?.data?.mensaje, "") ||
-    safeText(error?.response?.data?.message, "") ||
-    safeText(error?.response?.data?.mensaje, "") ||
-    safeText(error?.message, "") ||
-    safeText(error?.statusText, "") ||
-    safeText(normalized.message, "");
-
-  if (backendMessage && backendMessage !== "[object Object]") {
-    return redactText(backendMessage);
-  }
+  if (backendMessage && backendMessage !== "[object Object]") return redactText(backendMessage);
 
   switch (code) {
     case "INVALID_CREDENTIALS":
     case "BAD_CREDENTIALS":
     case "CREDENTIALS_INVALID":
       return "Credenciales incorrectas.";
-
     case "ACCOUNT_TEMPORARILY_LOCKED":
       return "La cuenta está bloqueada temporalmente. Inténtalo de nuevo más tarde.";
-
     case "ACCOUNT_DISABLED":
     case "USER_DISABLED":
     case "USER_NOT_AVAILABLE":
       return "La cuenta no está disponible.";
-
     case "MISSING_CREDENTIALS":
       return "Introduce usuario/email y contraseña.";
-
     case "INVALID_LOGIN_SESSION":
       return "Login inválido: el servidor no devolvió una sesión válida.";
-
     case "TOKEN_VERSION_MISMATCH":
     case "SESSION_EXPIRED":
     case "SESSION_REVOKED":
       return "La sesión no es válida. Inicia sesión de nuevo.";
-
     case "UNAUTHORIZED":
     case "FORBIDDEN":
       return "No tienes autorización para acceder.";
-
     default:
       return "No se ha podido iniciar sesión.";
   }
@@ -1940,34 +1312,21 @@ export function resolveAuthErrorMessage(error) {
 
 /* =========================================================
    SESSION SYNC
-   Thin compatibility wrapper. Auth/Core remain owners.
 ========================================================= */
 
 function invalidSessionError(message = "Login inválido: sesión incompleta.") {
   const error = new Error(message);
-
   error.name = "LoginSessionError";
   error.status = 401;
   error.code = "INVALID_LOGIN_SESSION";
-  error.data = {
-    code: "INVALID_LOGIN_SESSION",
-    message,
-  };
-
+  error.data = { code: "INVALID_LOGIN_SESSION", message };
   return error;
 }
 
 function alreadySynced(token = "", user = null) {
   const currentIdentity = getUserIdentity(currentUser() || {});
   const nextIdentity = getUserIdentity(user || {});
-
-  return Boolean(
-    currentAuthenticated() &&
-      currentToken() === token &&
-      currentIdentity &&
-      nextIdentity &&
-      currentIdentity === nextIdentity
-  );
+  return Boolean(currentAuthenticated() && currentToken() === token && currentIdentity && nextIdentity && currentIdentity === nextIdentity);
 }
 
 function fallbackApplySession({ token, user, role = "", refreshToken = "", sessionData = null } = {}) {
@@ -1975,22 +1334,18 @@ function fallbackApplySession({ token, user, role = "", refreshToken = "", sessi
     token,
     accessToken: token,
     access_token: token,
-
     refreshToken: refreshToken || null,
     refresh_token: refreshToken || null,
-
     user,
     currentUser: user,
     authUser: user,
     sessionUser: user,
-
-    role: role || user?.role || user?.rol || "",
-    rol: role || user?.role || user?.rol || "",
-    userRole: role || user?.role || user?.rol || "",
-
+    role: role || user?.role || user?.rol || "user",
+    rol: role || user?.role || user?.rol || "user",
+    userRole: role || user?.role || user?.rol || "user",
+    roles: [role || user?.role || user?.rol || "user"],
     authenticated: true,
     hasToken: true,
-
     session: {
       ...safeObject(AppCore?.state?.session),
       token,
@@ -1999,20 +1354,14 @@ function fallbackApplySession({ token, user, role = "", refreshToken = "", sessi
       refreshToken: refreshToken || null,
       refresh_token: refreshToken || null,
       user,
-      role: role || user?.role || user?.rol || "",
+      role: role || user?.role || user?.rol || "user",
       authenticated: true,
       data: sessionData || undefined,
     },
   };
 
   try {
-    AppCore?.setState?.(patch, {
-      source: "login.helpers:fallback-session",
-      allowExplicitAuthenticated: true,
-      forceAuthenticated: true,
-      emitDerived: true,
-    });
-
+    AppCore?.setState?.(patch, { source: "login.helpers:fallback-session", allowExplicitAuthenticated: true, forceAuthenticated: true, emitDerived: true });
     return true;
   } catch {}
 
@@ -2028,90 +1377,50 @@ export function syncSession(auth = {}, options = {}) {
   const normalized = normalizeAuthResult(auth);
 
   if (normalized.requires2FA && !normalized.token) {
-    return {
-      token: "",
-      user: null,
-      role: "",
-      authenticated: false,
-      requires2FA: true,
-      tempToken: normalized.tempToken || "",
-      alreadySynced: false,
-    };
+    return { token: "", user: null, role: "", authenticated: false, requires2FA: true, tempToken: normalized.tempToken || "", alreadySynced: false };
   }
 
-  if (normalized.explicitFailure || normalized.ok === false) {
-    throw invalidSessionError(normalized.message || "No se pudo iniciar sesión.");
-  }
-
-  if (!hasUsableToken(normalized.token)) {
-    throw invalidSessionError("No se recibió token de autenticación.");
-  }
-
-  if (!hasUsableUser(normalized.user)) {
-    throw invalidSessionError("No se recibió usuario válido para la sesión.");
-  }
+  if (normalized.explicitFailure || normalized.ok === false) throw invalidSessionError(normalized.message || "No se pudo iniciar sesión.");
+  if (!hasUsableToken(normalized.token)) throw invalidSessionError("No se recibió token de autenticación.");
+  if (!hasUsableUser(normalized.user)) throw invalidSessionError("No se recibió usuario válido para la sesión.");
 
   const token = normalizeToken(normalized.token);
   const user = normalized.user;
-  const role = normalized.role || user?.role || user?.rol || "";
+  const role = normalized.role || user?.role || user?.rol || "user";
   const synced = alreadySynced(token, user);
 
   if (!synced) {
     try {
-      AppCore?.applySession?.(
-        {
-          token,
-          accessToken: token,
-          access_token: token,
-
-          refreshToken: normalized.refreshToken || null,
-          refresh_token: normalized.refreshToken || null,
-
-          user,
-          usuario: user,
-          me: user,
-          account: user,
-          profile: user,
-
-          role,
-          rol: role,
-
-          session: normalized.sessionData || null,
-          sessionData: normalized.sessionData || null,
-
-          authenticated: true,
-          source: options.source || "login.helpers:syncSession",
-        },
-        {
-          source: options.source || "login.helpers:syncSession",
-          allowExplicitAuthenticated: true,
-          forceAuthenticated: true,
-        }
-      );
+      AppCore?.applySession?.({
+        token,
+        accessToken: token,
+        access_token: token,
+        refreshToken: normalized.refreshToken || null,
+        refresh_token: normalized.refreshToken || null,
+        user,
+        usuario: user,
+        me: user,
+        account: user,
+        profile: user,
+        role,
+        rol: role,
+        session: normalized.sessionData || null,
+        sessionData: normalized.sessionData || null,
+        authenticated: true,
+        source: options.source || "login.helpers:syncSession",
+      }, {
+        source: options.source || "login.helpers:syncSession",
+        allowExplicitAuthenticated: true,
+        forceAuthenticated: true,
+      });
     } catch {
-      fallbackApplySession({
-        token,
-        user,
-        role,
-        refreshToken: normalized.refreshToken,
-        sessionData: normalized.sessionData,
-      });
+      fallbackApplySession({ token, user, role, refreshToken: normalized.refreshToken, sessionData: normalized.sessionData });
     }
 
-    if (!alreadySynced(token, user)) {
-      fallbackApplySession({
-        token,
-        user,
-        role,
-        refreshToken: normalized.refreshToken,
-        sessionData: normalized.sessionData,
-      });
-    }
+    if (!alreadySynced(token, user)) fallbackApplySession({ token, user, role, refreshToken: normalized.refreshToken, sessionData: normalized.sessionData });
   }
 
-  try {
-    AppCore?.syncUserUI?.();
-  } catch {}
+  try { AppCore?.syncUserUI?.(); } catch {}
 
   try {
     AppCore?.events?.emit?.("auth:login:session-synced", {
@@ -2124,13 +1433,7 @@ export function syncSession(auth = {}, options = {}) {
     });
   } catch {}
 
-  return {
-    token,
-    user,
-    role,
-    authenticated: true,
-    alreadySynced: synced,
-  };
+  return { token, user, role, authenticated: true, alreadySynced: synced };
 }
 
 /* =========================================================
@@ -2138,51 +1441,25 @@ export function syncSession(auth = {}, options = {}) {
 ========================================================= */
 
 function explicitRedirect(options = {}) {
-  return (
-    safeText(options.redirectTo, "") ||
-    safeText(options.successRedirect, "") ||
-    safeText(options.redirect, "") ||
-    safeText(options.target, "") ||
-    ""
-  );
+  return safeText(options.redirectTo, "") || safeText(options.successRedirect, "") || safeText(options.redirect, "") || safeText(options.target, "") || "";
 }
 
 export function resolveLoginRedirect(auth = {}, options = {}) {
   const normalized = normalizeAuthResult(auth);
   const home = configuredHome();
-
   const explicit = explicitRedirect(options);
 
-  if (explicit) {
-    return ensureSafeRedirect(explicit, home);
-  }
+  if (explicit) return ensureSafeRedirect(explicit, home);
 
   const queryRedirect = getUrlRedirectParam();
-
-  if (queryRedirect) {
-    return ensureSafeRedirect(queryRedirect, home);
-  }
+  if (queryRedirect) return ensureSafeRedirect(queryRedirect, home);
 
   if (normalized.requires2FA) {
     const twoFactor = configured2FA();
-
-    return ensureSafeRedirect(
-      normalized.redirectTo || twoFactor,
-      twoFactor,
-      {
-        allowAuthPaths: true,
-        allowFallbackAuthPath: true,
-      }
-    );
+    return ensureSafeRedirect(normalized.redirectTo || twoFactor, twoFactor, { allowAuthPaths: true, allowFallbackAuthPath: true });
   }
 
-  if (
-    normalized.redirectTo &&
-    options.trustAuthRedirect === true &&
-    !isRoleDefaultRedirect(normalized.redirectTo)
-  ) {
-    return ensureSafeRedirect(normalized.redirectTo, home);
-  }
+  if (normalized.redirectTo && options.trustAuthRedirect === true) return ensureSafeRedirect(normalized.redirectTo, home);
 
   return home;
 }
@@ -2191,19 +1468,9 @@ export function shouldRedirectAfterLogin(auth = {}, options = {}) {
   if (options.redirectAfterSuccess === false) return false;
 
   const normalized = normalizeAuthResult(auth);
-
   if (normalized.navigationHandled) return false;
 
-  if (
-    !normalized.requires2FA &&
-    (
-      normalized.explicitFailure ||
-      !hasUsableToken(normalized.token) ||
-      !hasUsableUser(normalized.user)
-    )
-  ) {
-    return false;
-  }
+  if (!normalized.requires2FA && (normalized.explicitFailure || !hasUsableToken(normalized.token) || !hasUsableUser(normalized.user))) return false;
 
   return normalizePath(getCurrentBrowserPath()) !== normalizePath(resolveLoginRedirect(normalized, options));
 }
@@ -2213,46 +1480,19 @@ export function shouldRedirectAfterLogin(auth = {}, options = {}) {
 ========================================================= */
 
 export function createLoginUiState(overrides = {}) {
-  return {
-    loading: false,
-    submitting: false,
-    success: false,
-    error: "",
-    message: "",
-    requires2FA: false,
-    redirectTo: "",
-    ...safeObject(overrides),
-  };
+  return { loading: false, submitting: false, success: false, error: "", message: "", requires2FA: false, redirectTo: "", ...safeObject(overrides) };
 }
 
 export function setLoginLoading(uiState = {}, loading = true) {
-  return {
-    ...safeObject(uiState),
-    loading: Boolean(loading),
-    submitting: Boolean(loading),
-    error: Boolean(loading) ? "" : safeText(uiState.error, ""),
-  };
+  return { ...safeObject(uiState), loading: Boolean(loading), submitting: Boolean(loading), error: Boolean(loading) ? "" : safeText(uiState.error, "") };
 }
 
 export function setLoginError(uiState = {}, error = "") {
-  return {
-    ...safeObject(uiState),
-    loading: false,
-    submitting: false,
-    success: false,
-    error: redactText(safeText(error, "No se ha podido iniciar sesión.")),
-  };
+  return { ...safeObject(uiState), loading: false, submitting: false, success: false, error: redactText(safeText(error, "No se ha podido iniciar sesión.")) };
 }
 
 export function setLoginSuccess(uiState = {}, message = "Sesión iniciada.") {
-  return {
-    ...safeObject(uiState),
-    loading: false,
-    submitting: false,
-    success: true,
-    error: "",
-    message: safeText(message, "Sesión iniciada."),
-  };
+  return { ...safeObject(uiState), loading: false, submitting: false, success: true, error: "", message: safeText(message, "Sesión iniciada.") };
 }
 
 /* =========================================================
@@ -2264,41 +1504,41 @@ export function getLoginHelpersSnapshot(auth = null) {
 
   return sanitizeForSnapshot({
     version: LOGIN_HELPERS_VERSION,
-
     rememberKey: LOGIN_REMEMBER_KEY,
     rememberedIdentifier: loadRememberedIdentifier() ? "***" : "",
-
     currentPath: getCurrentBrowserPath(),
     homePath: configuredHome(),
     twoFactorPath: configured2FA(),
-
     limits: {
       identifierMaxLength: identifierMax(),
       passwordMinLength: passwordMin(),
       passwordMaxLength: passwordMax(),
       tokenMaxLength: tokenMax(),
     },
-
-    auth: normalized
-      ? {
-          ok: normalized.ok,
-          status: normalized.status,
-          explicitFailure: normalized.explicitFailure,
-          declaredSuccess: normalized.declaredSuccess,
-          authenticated: normalized.authenticated,
-          requires2FA: normalized.requires2FA,
-          hasToken: Boolean(normalized.token),
-          hasRefreshToken: Boolean(normalized.refreshToken),
-          hasTempToken: Boolean(normalized.tempToken),
-          hasUser: Boolean(normalized.user),
-          usedCoreSession: Boolean(normalized.usedCoreSession),
-          tokenOnly: Boolean(normalized.tokenOnly),
-          userOnly: Boolean(normalized.userOnly),
-          role: normalized.role || null,
-          redirectTo: normalized.redirectTo || "",
-        }
-      : null,
-
+    auth: normalized ? {
+      ok: normalized.ok,
+      status: normalized.status,
+      explicitFailure: normalized.explicitFailure,
+      declaredSuccess: normalized.declaredSuccess,
+      authenticated: normalized.authenticated,
+      requires2FA: normalized.requires2FA,
+      hasToken: Boolean(normalized.token),
+      hasRefreshToken: Boolean(normalized.refreshToken),
+      hasTempToken: Boolean(normalized.tempToken),
+      hasUser: Boolean(normalized.user),
+      usedCoreSession: Boolean(normalized.usedCoreSession),
+      tokenOnly: Boolean(normalized.tokenOnly),
+      userOnly: Boolean(normalized.userOnly),
+      role: normalized.role || null,
+      redirectTo: normalized.redirectTo || "",
+    } : null,
+    policy: {
+      helpersOnly: true,
+      ownDom: false,
+      ownHttp: false,
+      ownRouterNavigation: false,
+      strictSession: true,
+    },
     at: nowIso(),
   });
 }

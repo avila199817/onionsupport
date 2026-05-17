@@ -2,13 +2,13 @@
    Onion SPA - Auth Facade
    Archivo: src/features/auth/index.js
 
-   AUTH FACADE · FINAL SIMPLE
-   - Punto público único de Auth
-   - Sesión real delegada en session.js/login.js/restore.js/logout.js
-   - Transporte delegado en CoreHttp
-   - Sin fetch propio, apiClient propio, Router, Toast ni storage paralelo
-   - Roles reales: admin / user
-   - Sin tokens en eventos/snapshots
+   AUTH FACADE · SIMPLE
+   - punto público único de Auth
+   - sesión real delegada en session.js/login.js/restore.js/logout.js
+   - transporte delegado en CoreHttp
+   - sin fetch propio, apiClient propio, Router, Toast ni storage paralelo
+   - roles reales: admin / user
+   - sin tokens en eventos/snapshots
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -61,9 +61,9 @@ import {
   isAuthenticated as sessionIsAuthenticated,
   getCurrentUser as sessionGetCurrentUser,
   getCurrentToken as sessionGetCurrentToken,
-  getCurrentRole,
-  getCurrentRoles,
-  isCurrentUserAdmin,
+  getCurrentRole as sessionGetCurrentRole,
+  getCurrentRoles as sessionGetCurrentRoles,
+  isCurrentUserAdmin as sessionIsCurrentUserAdmin,
   hasRole as sessionHasRole,
   requireRole as sessionRequireRole,
   getAuthHeader,
@@ -106,11 +106,7 @@ import * as ActivationApi from "./activation.js";
 import * as TwoFactorApi from "./2fa.js";
 import * as PasswordResetApi from "./password-reset.js";
 
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const AUTH_MODULE_VERSION = "20.0.0-final";
+export const AUTH_MODULE_VERSION = "21.0.0-simple";
 
 const SOURCE = "Auth";
 const BACKEND_ORIGIN = "https://api.onionit.net";
@@ -126,12 +122,20 @@ const PUBLIC_TECHNICAL_ROUTES = Object.freeze([
   ...(Array.isArray(AUTH_PUBLIC_TECHNICAL_ROUTES) ? AUTH_PUBLIC_TECHNICAL_ROUTES : []),
   "/login",
   "/activate-account",
+  "/activate",
+  "/activation",
+  "/account/activate",
+  "/activate/first-user",
   "/reset-password",
   "/reset-password/confirm",
+  "/reset-password-confirm",
   "/forgot-password",
   "/recover-password",
+  "/recover",
   "/password-reset",
   "/password-reset/confirm",
+  "/password-reset-confirm",
+  "/confirm-reset-password",
   "/2fa",
   "/otp",
   "/mfa",
@@ -139,8 +143,26 @@ const PUBLIC_TECHNICAL_ROUTES = Object.freeze([
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
 
-const SENSITIVE_KEYS_RE =
-  /token|authorization|password|secret|credential|cookie|jwt|bearer|refresh|access|otp|mfa|2fa|code|totp|csrf|xsrf/i;
+const ADMIN_ALIASES = new Set([
+  "admin",
+  "administrator",
+  "administrador",
+  "superadmin",
+  "super_admin",
+  "super-admin",
+  "owner",
+  "root",
+]);
+
+const USER_ALIASES = new Set([
+  "user",
+  "usuario",
+  "client",
+  "cliente",
+  "customer",
+]);
+
+const SENSITIVE_KEYS_RE = /token|authorization|password|secret|credential|cookie|jwt|bearer|refresh|access|otp|mfa|2fa|code|totp|csrf|xsrf/i;
 
 /* =========================================================
    BASICS
@@ -159,7 +181,7 @@ function safeObject(value, fallback = {}) {
 
 function safeArray(value) {
   if (Array.isArray(value)) return value;
-  if (value instanceof Set) return Array.from(value);
+  if (value instanceof Set) return [...value];
   if (value === null || value === undefined) return [];
   return [value];
 }
@@ -225,10 +247,7 @@ function redact(value = "") {
     return redactTokenInText(value);
   } catch {
     return safeText(value, "")
-      .replace(
-        /([?&#](?:token|code|t|otp|totp|access_token|refresh_token|id_token|tempToken|temp_token)=)([^&#\s]+)/gi,
-        "$1***"
-      )
+      .replace(/([?&#](?:token|code|t|otp|totp|access_token|refresh_token|id_token|tempToken|temp_token)=)([^&#\s]+)/gi, "$1***")
       .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
       .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
   }
@@ -269,9 +288,7 @@ function sanitizePayload(value, depth = 0, keyHint = "", seen = new WeakSet()) {
     };
   }
 
-  if (Array.isArray(value)) {
-    return value.slice(0, 50).map((item) => sanitizePayload(item, depth + 1, keyHint, seen));
-  }
+  if (Array.isArray(value)) return value.slice(0, 50).map((item) => sanitizePayload(item, depth + 1, keyHint, seen));
 
   if (isObject(value)) {
     try {
@@ -355,17 +372,30 @@ function repairUserUI(reason = "auth-session", options = {}) {
 ========================================================= */
 
 function normalizeRole(value = "", fallback = "") {
-  const role = safeText(value, fallback).toLowerCase();
+  const role = safeText(value, fallback)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_:.]/g, "")
+    .replace(/^_+|_+$/g, "");
+
+  if (ADMIN_ALIASES.has(role)) return "admin";
+  if (USER_ALIASES.has(role)) return "user";
   return VALID_ROLES.includes(role) ? role : fallback;
+}
+
+function normalizeRoles(values = []) {
+  const roles = unique(safeArray(values).flat(Infinity).map((role) => normalizeRole(role, "")).filter(Boolean));
+  if (roles.includes("admin")) return ["admin"];
+  return roles.includes("user") ? ["user"] : [];
 }
 
 function usableToken(value = "") {
   const token = safeText(value, "").replace(/^Bearer\s+/i, "").trim();
   if (!token || /[\s\r\n\t]/.test(token)) return "";
 
-  if (["null", "undefined", "false", "true", "none", "nan", "[object object]", "{}", "[]"].includes(token.toLowerCase())) {
-    return "";
-  }
+  if (["null", "undefined", "false", "true", "none", "nan", "[object object]", "{}", "[]"].includes(token.toLowerCase())) return "";
 
   try {
     if (isFn(AppCore?.utils?.hasValidToken) && !AppCore.utils.hasValidToken(token)) return "";
@@ -386,16 +416,17 @@ function normalizeUserForFacade(user = null) {
   }
 
   if (!isObject(normalized)) return null;
-  if (normalized.active === false || normalized.disabled === true || normalized.deleted === true) return null;
+  if (normalized.active === false || normalized.disabled === true || normalized.deleted === true || normalized.archived === true || normalized.blocked === true) return null;
 
   const role = normalizeRole(normalized.role || normalized.rol, "user");
+  const roles = normalizeRoles([role, ...safeArray(normalized.roles)]);
 
   return {
     ...normalized,
     role,
     rol: role,
     userRole: role,
-    roles: unique([role, ...safeArray(normalized.roles)]).filter((item) => VALID_ROLES.includes(item)),
+    roles: roles.length ? roles : [role],
   };
 }
 
@@ -461,7 +492,6 @@ function hasValidToken() {
 
 function isAuthenticatedSafe() {
   const strict = Boolean(hasValidToken() && getUser());
-
   if (!strict) return false;
 
   try {
@@ -475,21 +505,20 @@ function getRole() {
   const user = getUser();
   if (!user) return "";
 
-  return normalizeRole(
-    safeCall(getCurrentRole, "") || user.role || user.rol,
-    "user"
-  );
+  return normalizeRole(safeCall(sessionGetCurrentRole, "") || user.role || user.rol, "user");
 }
 
 function getRoles() {
   const user = getUser();
   if (!user) return [];
 
-  return unique([
-    ...safeArray(safeCall(getCurrentRoles, [])),
+  const roles = normalizeRoles([
+    ...safeArray(safeCall(sessionGetCurrentRoles, [])),
     ...safeArray(user.roles),
     getRole(),
-  ]).filter((role) => VALID_ROLES.includes(role));
+  ]);
+
+  return roles.length ? roles : ["user"];
 }
 
 function getPermissions() {
@@ -498,10 +527,10 @@ function getPermissions() {
 }
 
 function isAdmin() {
-  return getRole() === "admin" || safeCall(isCurrentUserAdmin, false) === true;
+  return getRole() === "admin" || safeCall(sessionIsCurrentUserAdmin, false) === true;
 }
 
-function isUnsupportedLegacyRole() {
+function unsupportedLegacyRole() {
   return false;
 }
 
@@ -647,9 +676,7 @@ async function authApiRequest(method = "GET", path = "", body = undefined, optio
   const upper = safeText(method, "GET").toUpperCase();
   const opts = authRequestOptions(path, { ...safeObject(options), method: upper });
 
-  if (!["GET", "HEAD", "OPTIONS"].includes(upper)) {
-    opts.body = body;
-  }
+  if (!["GET", "HEAD", "OPTIONS"].includes(upper)) opts.body = body;
 
   return CoreHttp.request(path, opts);
 }
@@ -731,14 +758,16 @@ async function fetchMe(options = {}) {
         useCurrentToken: true,
       });
 
-      if (normalized.user && (normalized.token || getToken())) {
+      const currentToken = normalized.token || getToken();
+
+      if (normalized.user && currentToken) {
         applySessionFacade(
           {
             ...safeObject(result),
             ...normalized,
-            token: normalized.token || getToken(),
-            accessToken: normalized.token || getToken(),
-            access_token: normalized.token || getToken(),
+            token: currentToken,
+            accessToken: currentToken,
+            access_token: currentToken,
           },
           {
             source: "Auth.me",
@@ -787,14 +816,20 @@ async function refreshSession(options = {}) {
         useCurrentToken: true,
       });
 
-      if (normalized.token && normalized.user) {
-        applySessionFacade(normalized, {
-          source: "Auth.refresh",
-          eventMode: "refresh",
-          reason: "auth-refresh",
-          repairUI: options.repairUI !== false,
-        });
-      } else if (normalized.token && !getUser()) {
+      const token = normalized.token || getToken();
+      const user = normalized.user || getUser();
+
+      if (token && user) {
+        applySessionFacade(
+          { ...safeObject(result), ...normalized, token, accessToken: token, access_token: token, user },
+          {
+            source: "Auth.refresh",
+            eventMode: "refresh",
+            reason: "auth-refresh",
+            repairUI: options.repairUI !== false,
+          }
+        );
+      } else if (token && !user) {
         try {
           await fetchMe({ repairUI: options.repairUI !== false });
         } catch {}
@@ -907,19 +942,12 @@ async function login(credentials = {}, options = {}) {
 
       if (!isAuthenticatedSafe()) {
         const normalized = normalizeAuthPayload(result, { useCurrentToken: true });
-
         if (normalized.token && normalized.user) {
-          applySessionFacade(normalized, {
-            source: "Auth.login",
-            eventMode: "login",
-            reason: "auth-login",
-          });
+          applySessionFacade(normalized, { source: "Auth.login", eventMode: "login", reason: "auth-login" });
         }
       }
 
-      if (!isAuthenticatedSafe()) {
-        throw new Error("Login inválido: no hay sesión autenticada usable.");
-      }
+      if (!isAuthenticatedSafe()) throw new Error("Login inválido: no hay sesión autenticada usable.");
 
       const user = getUser();
 
@@ -970,13 +998,7 @@ async function handleLoginFormSubmit(formElement, options = {}) {
     });
 
     if (result?.authenticated || isAuthenticatedSafe()) {
-      emit("auth:login:success", {
-        authenticated: true,
-        user: getUser(),
-        role: getRole(),
-        roles: getRoles(),
-      });
-
+      emit("auth:login:success", { authenticated: true, user: getUser(), role: getRole(), roles: getRoles() });
       repairUserUI("auth-login-form", { silentEvents: true });
     }
 
@@ -985,9 +1007,7 @@ async function handleLoginFormSubmit(formElement, options = {}) {
 
   const HTMLForm = isBrowser() ? window.HTMLFormElement : null;
 
-  if (!HTMLForm || !(formElement instanceof HTMLForm)) {
-    throw new Error("Se esperaba un formulario HTML válido.");
-  }
+  if (!HTMLForm || !(formElement instanceof HTMLForm)) throw new Error("Se esperaba un formulario HTML válido.");
 
   options?.event?.preventDefault?.();
 
@@ -995,15 +1015,7 @@ async function handleLoginFormSubmit(formElement, options = {}) {
 
   return login(
     {
-      identifier:
-        formData.get("identifier") ||
-        formData.get("username") ||
-        formData.get("email") ||
-        formData.get("phone") ||
-        formData.get("telefono") ||
-        formData.get("user") ||
-        formData.get("login") ||
-        "",
+      identifier: formData.get("identifier") || formData.get("username") || formData.get("email") || formData.get("phone") || formData.get("telefono") || formData.get("user") || formData.get("login") || "",
       password: formData.get("password") || "",
       remember: ["on", "true", "1"].includes(String(formData.get("remember") || "").toLowerCase()),
     },
@@ -1078,14 +1090,7 @@ async function verifyTwoFactor(payload = {}, options = {}) {
       syncAuthState();
     } catch {}
 
-    emit("auth:login:success", {
-      authenticated: true,
-      user: getUser(),
-      role: getRole(),
-      roles: getRoles(),
-      reason: "2fa",
-    });
-
+    emit("auth:login:success", { authenticated: true, user: getUser(), role: getRole(), roles: getRoles(), reason: "2fa" });
     repairUserUI("auth-2fa-success", { silentEvents: true });
   }
 
@@ -1196,19 +1201,8 @@ function attachToCore(api) {
   } catch {}
 
   try {
-    AppCore.modules?.register?.("Auth", api, {
-      replace: true,
-      overwrite: true,
-      emit: false,
-      source: "features/auth/index.js",
-    });
-
-    AppCore.modules?.register?.("auth", api, {
-      replace: true,
-      overwrite: true,
-      emit: false,
-      source: "features/auth/index.js",
-    });
+    AppCore.modules?.register?.("Auth", api, { replace: true, overwrite: true, emit: false, source: "features/auth/index.js" });
+    AppCore.modules?.register?.("auth", api, { replace: true, overwrite: true, emit: false, source: "features/auth/index.js" });
   } catch {}
 
   try {
@@ -1258,7 +1252,6 @@ export const Auth = {
     lastError: null,
   },
 
-  /* user/state */
   getUser,
   getCurrentUser,
   currentUser,
@@ -1273,16 +1266,15 @@ export const Auth = {
   getRole,
   getRoles,
   getPermissions,
-  getCurrentRole,
-  getCurrentRoles,
+  getCurrentRole: getRole,
+  getCurrentRoles: getRoles,
   isCurrentUserAdmin: isAdmin,
-  isCurrentUserSupport: isUnsupportedLegacyRole,
-  isCurrentUserManager: isUnsupportedLegacyRole,
-  isCurrentUserClient: isUnsupportedLegacyRole,
+  isCurrentUserSupport: unsupportedLegacyRole,
+  isCurrentUserManager: unsupportedLegacyRole,
+  isCurrentUserClient: unsupportedLegacyRole,
   hasRole: hasRoleFacade,
   requireRole: requireRoleFacade,
 
-  /* actions */
   login,
   logout,
   handleLoginFormSubmit,
@@ -1298,7 +1290,6 @@ export const Auth = {
   clearSessionLocal,
   applySession: applySessionFacade,
 
-  /* guards */
   guardAuthenticated,
   guardRole,
   guardGuest,
@@ -1316,19 +1307,16 @@ export const Auth = {
   canAccessRoute,
   buildGuardErrorPayload,
 
-  /* session helpers */
   getAuthHeader,
   buildSessionSnapshot,
   getSessionDebugSnapshot,
 
-  /* login helpers */
   resolveLoginIdentifier,
   normalizeLoginPayload,
   buildLoginRequestBody,
   buildLoginRedirectPath,
   getPostLoginTarget,
 
-  /* activation */
   activateAccount,
   activate: activateAccount,
   activation: activateAccount,
@@ -1344,7 +1332,6 @@ export const Auth = {
   buildActivationRequestBody: pickExport(ActivationApi, "buildActivationRequestBody", "buildActivateAccountBody") || ((payload = {}) => payload),
   normalizeActivationResponse: pickExport(ActivationApi, "normalizeActivationResponse", "normalizeActivateAccountResponse") || ((response = {}) => response),
 
-  /* 2FA */
   verifyTwoFactor,
   verify2FA: verifyTwoFactor,
   login2fa: verifyTwoFactor,
@@ -1367,7 +1354,6 @@ export const Auth = {
   isTwoFactorRoute: pickExport(TwoFactorApi, "isTwoFactorRoute") || (() => false),
   getTwoFactorRedirectPath: pickExport(TwoFactorApi, "getTwoFactorRedirectPath") || (() => "/2fa"),
 
-  /* password reset */
   requestPasswordReset,
   resetPasswordRequest: requestPasswordReset,
   requestResetPassword: requestPasswordReset,
@@ -1392,7 +1378,6 @@ export const Auth = {
   normalizeResetPasswordResponse: pickExport(PasswordResetApi, "normalizeResetPasswordResponse") || ((response = {}) => response),
   normalizeConfirmResetPasswordResponse: pickExport(PasswordResetApi, "normalizeConfirmResetPasswordResponse") || ((response = {}) => response),
 
-  /* storage */
   hasRefreshToken,
   hasRefreshContext,
   getStoredRefreshToken,
@@ -1400,7 +1385,6 @@ export const Auth = {
   getStoredSessionId,
   getStoredSessionUserId,
 
-  /* routes */
   getCurrentRouteContext,
   getCurrentPublicPath,
   getCurrentCanonicalPath,
@@ -1414,7 +1398,6 @@ export const Auth = {
   normalizeCanonicalPath: routeCanonicalPath,
   sanitizeRedirectPath,
 
-  /* normalize/api/debug */
   normalizeUser,
   normalizeAuthPayload,
   normalizeAuthResponse,

@@ -9,6 +9,7 @@
    - sincroniza visibilidad por ruta
    - aplica política de loader post-render
    - sin Auth, guards, render de vistas, history, storage, Toast ni navegación
+   - sin eventos reactivos para evitar loops
 ========================================================= */
 
 import {
@@ -17,18 +18,19 @@ import {
   getShellSnapshot as getRouterShellSnapshot,
 } from "../router/shell.js";
 
-export const SHELL_VERSION = "21.0.0-simple";
+export const SHELL_VERSION = "21.0.1-simple";
 
 const SOURCE = "app.shell";
 const DEFAULT_ROUTE = "/";
 const DEBUG_KEY = "__ONION_APP_SHELL__";
 
-const AUTH_PATHS = new Set([
+const AUTH_PATHS = Object.freeze([
   "/login",
   "/signin",
   "/sign-in",
   "/auth",
   "/auth/login",
+  "/logout",
   "/activate-account",
   "/activate",
   "/activation",
@@ -37,13 +39,13 @@ const AUTH_PATHS = new Set([
   "/reset-password",
   "/reset-password/confirm",
   "/reset-password-confirm",
-  "/forgot-password",
-  "/recover-password",
-  "/recover",
   "/password-reset",
   "/password-reset/confirm",
   "/password-reset-confirm",
   "/confirm-reset-password",
+  "/forgot-password",
+  "/recover-password",
+  "/recover",
   "/2fa",
   "/otp",
   "/mfa",
@@ -51,23 +53,10 @@ const AUTH_PATHS = new Set([
   "/404",
 ]);
 
-const AUTH_PREFIXES = Object.freeze([
-  "/activate-account/",
-  "/activate/",
-  "/activation/",
-  "/account/activate/",
-  "/activate/first-user/",
-  "/reset-password/confirm/",
-  "/password-reset/confirm/",
-  "/2fa/",
-  "/otp/",
-  "/mfa/",
-]);
-
 const LOADER_VISIBLE_CLASSES = Object.freeze(["is-visible", "is-entering", "is-leaving", "loader-visible", "app-loader--visible"]);
 const LOADER_HIDDEN_CLASSES = Object.freeze(["is-hidden", "has-hidden", "loader-hidden"]);
 
-const TOKEN_RE = /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token|temporaryToken|temporary_token|twoFactorToken|two_factor_token|mfaToken|mfa_token|otpToken|otp_token)=)([^&#\s]+)/gi;
+const TOKEN_RE = /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token|mfaToken|mfa_token|otpToken|otp_token)=)([^&#\s]+)/gi;
 const SENSITIVE_KEY_RE = /token|secret|password|authorization|credential|jwt|bearer|session|refresh|otp|mfa|2fa|code/i;
 
 /* =========================================================
@@ -93,18 +82,11 @@ function text(value, fallback = "") {
   return output || fallback;
 }
 
-function isoNow() {
-  try {
-    return new Date().toISOString();
-  } catch {
-    return "";
-  }
-}
-
 function redact(value = "") {
   return text(value, "")
     .replace(TOKEN_RE, "$1***")
     .replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***")
+    .replace(/(\/activate\/)([^/?#\s]+)/gi, "$1***")
     .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***")
     .replace(/(\/password-reset\/confirm\/)([^/?#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
@@ -137,27 +119,6 @@ function sanitize(value, depth = 0, keyHint = "") {
   }
 
   return String(value);
-}
-
-function emit(AppCore, eventName = "", payload = {}, options = {}) {
-  const name = text(eventName, "");
-  if (!name || options.emit === false || options.emitEvents === false) return false;
-
-  const detail = sanitize({ source: SOURCE, version: SHELL_VERSION, at: isoNow(), ...object(payload) });
-
-  try {
-    AppCore?.events?.emit?.(name, detail);
-    return true;
-  } catch {}
-
-  try {
-    if (isBrowser() && typeof CustomEvent !== "undefined") {
-      window.dispatchEvent(new CustomEvent(name, { detail }));
-      return true;
-    }
-  } catch {}
-
-  return false;
 }
 
 function setState(AppCore, patch = {}) {
@@ -237,40 +198,44 @@ function currentPublic(AppCore, Router = null) {
 
 function isAuthLikePathValue(path = DEFAULT_ROUTE) {
   const clean = canonicalPath(path);
-  return AUTH_PATHS.has(clean) || AUTH_PREFIXES.some((prefix) => clean.startsWith(prefix));
+  return AUTH_PATHS.some((candidate) => clean === candidate || clean.startsWith(`${candidate}/`));
 }
 
 function routeForVisibility({ visible = true, route = null, canonical = DEFAULT_ROUTE } = {}) {
   if (route) return route;
 
-  if (!visible) {
-    return {
-      path: canonical || "/login",
-      canonicalPath: canonical || "/login",
-      hideShell: true,
-      shell: false,
-      showShell: false,
-      layout: "auth",
-      authScreen: true,
-      meta: { layout: "auth", hideShell: true, shell: false },
-    };
-  }
+  const show = Boolean(visible);
 
   return {
-    path: canonical || DEFAULT_ROUTE,
-    canonicalPath: canonical || DEFAULT_ROUTE,
-    hideShell: false,
-    shell: true,
-    showShell: true,
-    layout: "app",
-    authScreen: false,
-    meta: { layout: "app", hideShell: false, shell: true },
+    path: canonical || (show ? DEFAULT_ROUTE : "/login"),
+    canonicalPath: canonical || (show ? DEFAULT_ROUTE : "/login"),
+    hideShell: !show,
+    shell: show,
+    showShell: show,
+    layout: show ? "app" : "auth",
+    authScreen: !show,
+    meta: {
+      layout: show ? "app" : "auth",
+      hideShell: !show,
+      shell: show,
+      showShell: show,
+    },
   };
 }
 
 /* =========================================================
    DOM / ELEMENTS
 ========================================================= */
+
+function query(selector = "") {
+  if (!isBrowser() || !selector) return null;
+
+  try {
+    return selector.startsWith("#") ? document.getElementById(selector.slice(1)) : document.querySelector(selector);
+  } catch {
+    return null;
+  }
+}
 
 function setHidden(element, hidden = false) {
   if (!element) return false;
@@ -306,6 +271,35 @@ function hasContent(element) {
   }
 }
 
+function fallbackShellElements(AppCore) {
+  if (!isBrowser()) return {};
+
+  const dom = object(AppCore?.dom);
+
+  return {
+    html: document.documentElement || null,
+    body: document.body || null,
+    shell: dom.shell || query("#app-shell") || query("[data-app-shell]"),
+    appShell: dom.shell || query("#app-shell") || query("[data-app-shell]"),
+    main: dom.main || query("#main-content") || query("[data-main-content]") || query(".main-content"),
+    mainContent: dom.main || query("#main-content") || query("[data-main-content]") || query(".main-content"),
+    appContent: dom.appContent || query("#app-content") || query("[data-app-content]"),
+    viewContainer: dom.viewContainer || query("#view-container") || query("[data-view-container='true']") || query("[data-router-view]"),
+    view: dom.viewContainer || query("#view-container") || query("[data-view-container='true']") || query("[data-router-view]"),
+    sidebarMount: dom.sidebarMount || query("#sidebar-mount") || query("[data-sidebar-mount]"),
+    topbarMount: dom.topbarMount || query("#topbar-mount") || query("[data-topbar-mount]"),
+    sidebar: dom.sidebar || query(".sidebar") || query("[data-sidebar]"),
+    topbar: dom.topbar || query(".topbar") || query("[data-topbar]"),
+    tablehead: dom.tablehead || query("#table-head") || query("[data-tablehead]"),
+    tableHead: dom.tablehead || query("#table-head") || query("[data-tablehead]"),
+    tableheadContainer: dom.tableheadContainer || query("#tablehead-container") || query("[data-tablehead-container]"),
+    tableHeadContainer: dom.tableheadContainer || query("#tablehead-container") || query("[data-tablehead-container]"),
+    mobileToggle: dom.mobileToggle || query("[data-mobile-sidebar-toggle]"),
+    mobileSidebarToggle: dom.mobileToggle || query("[data-mobile-sidebar-toggle]"),
+    loader: dom.loader || query("#app-loader") || query("[data-app-loader]") || query(".app-loader"),
+  };
+}
+
 function hideLoaderFallback(AppCore) {
   const loader = getShellElements(AppCore).loader;
   if (!loader) return false;
@@ -325,31 +319,33 @@ function hideLoaderFallback(AppCore) {
 }
 
 export function getShellElements(AppCore) {
-  const elements = getRouterShellElements(AppCore) || {};
+  const routerElements = getRouterShellElements(AppCore) || {};
+  const fallback = fallbackShellElements(AppCore);
+  const elements = { ...fallback, ...routerElements };
 
   return {
-    html: elements.html || null,
-    body: elements.body || null,
-    appShell: elements.shell || elements.appShell || null,
-    shell: elements.shell || elements.appShell || null,
-    mainContent: elements.main || elements.mainContent || null,
-    main: elements.main || elements.mainContent || null,
-    appContent: elements.appContent || null,
-    viewContainer: elements.viewContainer || elements.view || null,
-    viewRoot: elements.viewContainer || elements.view || null,
-    routerView: elements.viewContainer || elements.view || null,
-    sidebarMount: elements.sidebarMount || null,
-    topbarMount: elements.topbarMount || null,
-    sidebar: elements.sidebar || null,
-    topbar: elements.topbar || null,
-    tablehead: elements.tablehead || elements.tableHead || null,
-    tableHead: elements.tablehead || elements.tableHead || null,
-    tableheadContainer: elements.tableheadContainer || elements.tableHeadContainer || null,
-    tableHeadContainer: elements.tableheadContainer || elements.tableHeadContainer || null,
-    mobileSidebarToggle: elements.mobileToggle || elements.mobileSidebarToggle || null,
-    sidebarMobileToggle: elements.mobileToggle || elements.mobileSidebarToggle || null,
-    loader: elements.loader || null,
-    appLoader: elements.loader || null,
+    html: elements.html || fallback.html || null,
+    body: elements.body || fallback.body || null,
+    appShell: elements.shell || elements.appShell || fallback.appShell || null,
+    shell: elements.shell || elements.appShell || fallback.shell || null,
+    mainContent: elements.main || elements.mainContent || fallback.mainContent || null,
+    main: elements.main || elements.mainContent || fallback.main || null,
+    appContent: elements.appContent || fallback.appContent || null,
+    viewContainer: elements.viewContainer || elements.view || fallback.viewContainer || null,
+    viewRoot: elements.viewContainer || elements.view || fallback.viewContainer || null,
+    routerView: elements.viewContainer || elements.view || fallback.viewContainer || null,
+    sidebarMount: elements.sidebarMount || fallback.sidebarMount || null,
+    topbarMount: elements.topbarMount || fallback.topbarMount || null,
+    sidebar: elements.sidebar || fallback.sidebar || null,
+    topbar: elements.topbar || fallback.topbar || null,
+    tablehead: elements.tablehead || elements.tableHead || fallback.tablehead || null,
+    tableHead: elements.tablehead || elements.tableHead || fallback.tableHead || null,
+    tableheadContainer: elements.tableheadContainer || elements.tableHeadContainer || fallback.tableheadContainer || null,
+    tableHeadContainer: elements.tableheadContainer || elements.tableHeadContainer || fallback.tableHeadContainer || null,
+    mobileSidebarToggle: elements.mobileToggle || elements.mobileSidebarToggle || fallback.mobileSidebarToggle || null,
+    sidebarMobileToggle: elements.mobileToggle || elements.mobileSidebarToggle || fallback.sidebarMobileToggle || null,
+    loader: elements.loader || fallback.loader || null,
+    appLoader: elements.loader || fallback.loader || null,
   };
 }
 
@@ -398,15 +394,6 @@ export function setShellVisibility(AppCore, visible = true, options = {}) {
     currentShellRoute: canonical,
     currentShellCanonicalPath: canonical,
     currentShellPublicPath: publicPath,
-  });
-
-  emit(AppCore, "app:shell:state", {
-    reason: text(opts.reason, "set-shell-visibility"),
-    visible: show,
-    chromeVisible: show,
-    authLike: !show,
-    canonicalPath: canonical,
-    publicPath,
   });
 
   return result?.visible ?? show;
@@ -495,16 +482,15 @@ export function applyPostRenderLoaderPolicy({
     setBusy(element, false);
   }
 
-  const snapshot = getShellSnapshot(AppCore, Router);
-
-  emit(AppCore, "app:shell:post-render", {
-    hasViewContent,
-    chromeVisible,
+  setState(AppCore, {
+    shellBusy: false,
+    shellReady: true,
+    shellReadyAt: new Date().toISOString(),
     loaderHidden,
-    snapshot,
+    chromeVisible,
   });
 
-  return snapshot;
+  return getShellSnapshot(AppCore, Router);
 }
 
 /* =========================================================
@@ -513,8 +499,7 @@ export function applyPostRenderLoaderPolicy({
 
 export function markShellReady(AppCore, options = {}) {
   updateShellVisibilityByRoute(AppCore, options.Router || null, options);
-  setState(AppCore, { shellBusy: false, shellReady: true, shellReadyAt: isoNow() });
-  emit(AppCore, "app:shell:ready", { snapshot: getShellSnapshot(AppCore, options.Router || null) });
+  setState(AppCore, { shellBusy: false, shellReady: true, shellReadyAt: new Date().toISOString() });
   return true;
 }
 
@@ -526,7 +511,6 @@ export function markShellBusy(AppCore, options = {}) {
   }
 
   setState(AppCore, { shellBusy: true });
-  emit(AppCore, "app:shell:busy", { snapshot: getShellSnapshot(AppCore, options.Router || null) });
   return true;
 }
 
@@ -636,6 +620,7 @@ export function getShellSnapshot(AppCore, Router = null) {
       ownRender: false,
       ownStorage: false,
       ownToast: false,
+      eventless: true,
     },
   });
 }

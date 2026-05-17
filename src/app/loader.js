@@ -9,17 +9,17 @@
    - failsafe anti-loader infinito
    - sin Auth, Router, guards, render, history, fetch, storage ni Toast
    - sin CSS runtime ni innerHTML
+   - sin aliases legacy ni eventos extra
 ========================================================= */
 
 import {
-  APP_EVENTS,
   APP_RUNTIME_KEYS,
   BOOT_FAILSAFE_LOADER_MS,
   BOOT_MIN_LOADER_VISIBLE_MS,
   BOOT_HIDE_TRANSITION_MS,
 } from "./constants.js";
 
-export const LOADER_VERSION = "21.0.0-simple";
+export const LOADER_VERSION = "21.0.1-simple";
 
 const SOURCE = "app.loader";
 const LOADER_ID = "app-loader";
@@ -35,21 +35,15 @@ const STATES = Object.freeze({
 });
 
 const EVENTS = Object.freeze({
-  show: APP_EVENTS?.bootLoaderShow || "app:boot:loader:show",
-  hide: APP_EVENTS?.bootLoaderHide || "app:boot:loader:hide",
+  show: "app:boot:loader:show",
+  hide: "app:boot:loader:hide",
   hideSkipped: "app:boot:loader:hide-skipped",
-  forceHide: APP_EVENTS?.bootLoaderForceHide || "app:boot:loader:force-hide",
+  forceHide: "app:boot:loader:force-hide",
   fallbackCreated: "app:loader:fallback:created",
   failsafeArmed: "app:loader:failsafe:armed",
   failsafe: "app:loader:failsafe",
   failsafeStale: "app:loader:failsafe:stale",
   debugApi: "app:loader:debug-api",
-});
-
-const LEGACY_ALIASES = Object.freeze({
-  show: ["app:loader:show"],
-  hide: ["app:loader:hide"],
-  forceHide: ["app:loader:force-hide"],
 });
 
 const HTML_LOADING_CLASSES = Object.freeze(["app-loading", "app-booting"]);
@@ -67,9 +61,9 @@ const DEFAULT_MIN_VISIBLE_MS = Math.max(0, number(BOOT_MIN_LOADER_VISIBLE_MS, 30
 const DEFAULT_FAILSAFE_MS = 12000;
 const MIN_FAILSAFE_MS = 8000;
 const MAX_FAILSAFE_MS = 120000;
-const EVENT_DEDUPE_MS = 80;
+const EVENT_DEDUPE_MS = 100;
 
-const TOKEN_RE = /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token|temporaryToken|temporary_token|twoFactorToken|two_factor_token|mfaToken|mfa_token|otpToken|otp_token|authorization|jwt|session|sid)=)([^&#\s]+)/gi;
+const TOKEN_RE = /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token|mfaToken|mfa_token|otpToken|otp_token|authorization|jwt|session|sid)=)([^&#\s]+)/gi;
 const SENSITIVE_KEY_RE = /token|secret|password|authorization|credential|jwt|bearer|session|refresh|otp|mfa|2fa|code/i;
 
 let sequence = 0;
@@ -260,16 +254,6 @@ function emit(AppCore, eventName = "", payload = {}, options = {}) {
   } catch {}
 
   return false;
-}
-
-function emitLoader(AppCore, eventName = "", payload = {}, aliases = [], options = {}) {
-  let emitted = emit(AppCore, eventName, payload, options);
-
-  for (const alias of array(aliases)) {
-    if (alias && alias !== eventName) emitted = emit(AppCore, alias, payload, { ...object(options), dedupe: false }) || emitted;
-  }
-
-  return emitted;
 }
 
 function warn(AppCore, ...args) {
@@ -540,7 +524,7 @@ function createFallbackLoader(AppCore) {
     setDomRef(AppCore, "loader", loader);
     setDomRef(AppCore, "appLoader", loader);
 
-    emitLoader(AppCore, EVENTS.fallbackCreated, { generated: true, hasLoader: true });
+    emit(AppCore, EVENTS.fallbackCreated, { generated: true, hasLoader: true });
     return loader;
   } catch (error) {
     recordError(AppCore, "create-fallback-loader", error);
@@ -766,7 +750,7 @@ function allowHideDuringBoot(options = {}) {
       options.finalize === true ||
       options.allowDuringBoot === true ||
       options.failsafe === true ||
-      ["finalize-boot", "boot-complete", "app-ready", "failsafe", "boot-error", "app-boot-error", "app-destroy", "reboot-reset"].includes(reason)
+      ["finalize-boot", "boot-complete", "app-ready", "failsafe", "boot-error", "app-boot-error", "app-destroy", "reboot-reset", "post-render"].includes(reason)
   );
 }
 
@@ -799,13 +783,7 @@ export function showLoader(AppCore, options = {}) {
 
   setCoreState(AppCore, { loaderVisible: true, loaderState: state, loaderShownAt: epoch() });
 
-  emitLoader(
-    AppCore,
-    EVENTS.show,
-    { sequence: seq, hasLoader: Boolean(loader), booting: Boolean(opts.booting), reason: text(opts.reason, ""), loaderState: state },
-    LEGACY_ALIASES.show
-  );
-
+  emit(AppCore, EVENTS.show, { sequence: seq, hasLoader: Boolean(loader), booting: Boolean(opts.booting), reason: text(opts.reason, ""), loaderState: state });
   return true;
 }
 
@@ -832,14 +810,7 @@ export function forceHideLoader(AppCore, options = {}) {
   setBooting(AppCore, false);
   setCoreState(AppCore, { loaderVisible: false, loaderState: state, loaderHiddenAt: epoch() });
 
-  emitLoader(
-    AppCore,
-    EVENTS.forceHide,
-    { sequence: seq, forced: true, hasLoader: Boolean(loader), fatal: Boolean(opts.fatal), reason: text(opts.reason, ""), loaderState: state },
-    LEGACY_ALIASES.forceHide,
-    { force: true }
-  );
-
+  emit(AppCore, EVENTS.forceHide, { sequence: seq, forced: true, hasLoader: Boolean(loader), fatal: Boolean(opts.fatal), reason: text(opts.reason, ""), loaderState: state }, { force: true });
   return true;
 }
 
@@ -853,7 +824,7 @@ export function hideLoader(AppCore, options = {}) {
   }
 
   if (bootActive(AppCore, opts.state || null) && !allowHideDuringBoot(opts)) {
-    emitLoader(AppCore, EVENTS.hideSkipped, { reason: text(opts.reason, "boot-active"), bootActive: true });
+    emit(AppCore, EVENTS.hideSkipped, { reason: text(opts.reason, "boot-active"), bootActive: true });
     return false;
   }
 
@@ -885,13 +856,7 @@ export function hideLoader(AppCore, options = {}) {
     setCoreState(AppCore, { loaderVisible: false, loaderState: state, loaderHiddenAt: epoch() });
     clearBootFailsafeTimer(opts.state || null, AppCore);
 
-    emitLoader(
-      AppCore,
-      EVENTS.hide,
-      { sequence: seq, forced: false, hasLoader: Boolean(loader), remaining, fatal: Boolean(opts.fatal), reason: text(opts.reason, ""), loaderState: state },
-      LEGACY_ALIASES.hide
-    );
-
+    emit(AppCore, EVENTS.hide, { sequence: seq, forced: false, hasLoader: Boolean(loader), remaining, fatal: Boolean(opts.fatal), reason: text(opts.reason, ""), loaderState: state });
     return true;
   };
 
@@ -923,8 +888,6 @@ export function takeOverStaticLoader(AppCore) {
   setCoreState(AppCore, { loaderVisible: true, loaderState: STATES.booting, loaderShownAt: epoch() });
 
   installLoaderDebugApi(AppCore);
-  emitLoader(AppCore, "app:loader:takeover", { hasLoader: Boolean(loader), loaderState: STATES.booting });
-
   return Boolean(loader);
 }
 
@@ -1008,13 +971,13 @@ export function armBootFailsafeLoader({ AppCore, state, hideLoader: hideFn = for
       const finalized = bootFinalized(state, coreState);
 
       if (!stillBooting && !stillLoading && !loaderVisible) {
-        emitLoader(AppCore, EVENTS.failsafeStale, { timeout, armId, reason: "already-idle" });
+        emit(AppCore, EVENTS.failsafeStale, { timeout, armId, reason: "already-idle" });
         clearBootFailsafeTimer(state, AppCore);
         return;
       }
 
       hideFn(AppCore, { reason: finalized ? "failsafe-stale-after-ready" : "failsafe", state, force: true, failsafe: true });
-      emitLoader(AppCore, finalized ? EVENTS.failsafeStale : EVENTS.failsafe, { timeout, armId, booting: stillBooting, loading: stillLoading, loaderVisible, finalized }, [], { force: true });
+      emit(AppCore, finalized ? EVENTS.failsafeStale : EVENTS.failsafe, { timeout, armId, booting: stillBooting, loading: stillLoading, loaderVisible, finalized }, { force: true });
       clearBootFailsafeTimer(state, AppCore);
     } catch (error) {
       recordError(AppCore, "boot-failsafe", error);
@@ -1025,7 +988,7 @@ export function armBootFailsafeLoader({ AppCore, state, hideLoader: hideFn = for
     if (state) state.bootFailsafeTimer = failsafeTimer;
   } catch {}
 
-  emitLoader(AppCore, EVENTS.failsafeArmed, { timeout, armId });
+  emit(AppCore, EVENTS.failsafeArmed, { timeout, armId });
   return failsafeTimer;
 }
 
@@ -1119,6 +1082,7 @@ export function getLoaderSnapshot(AppCore, state = null) {
       ownHistory: false,
       ownStorage: false,
       ownToast: false,
+      legacyAliases: false,
     },
   });
 }
@@ -1166,7 +1130,7 @@ export function installLoaderDebugApi(AppCore = null) {
 
   debugInstalled = true;
   attachDebugApi(AppCore, debugApi);
-  emitLoader(AppCore, EVENTS.debugApi, { installed: true });
+  emit(AppCore, EVENTS.debugApi, { installed: true });
 
   return debugApi;
 }

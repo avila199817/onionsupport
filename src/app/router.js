@@ -5,15 +5,14 @@
    APP ROUTER · SIMPLE WRAPPER
    - adaptador fino sobre Router real
    - configura Router una vez
-   - bindea Router una vez
    - render inicial serializado
+   - bindea Router una vez después del render inicial
    - preserva publicPath y rutas técnicas con token
    - sin Auth real, guards, history, fetch, storage ni Toast propios
 ========================================================= */
 
 import { AppCore as ImportedAppCore } from "../core/index.js";
 import { Router as ImportedRouter } from "../router/index.js";
-import { Auth as ImportedAuth } from "../features/auth/index.js";
 
 import {
   captureInitialUrl,
@@ -23,7 +22,7 @@ import {
   redactTokenInText,
 } from "../router/helpers.js";
 
-export const ROUTER_BOOTSTRAP_VERSION = "21.0.0-simple";
+export const ROUTER_BOOTSTRAP_VERSION = "21.0.1-simple";
 
 const SOURCE = "app.router";
 const DEFAULT_ROUTE = "/";
@@ -40,13 +39,15 @@ const EVENTS = Object.freeze({
 
 let RuntimeAppCore = ImportedAppCore;
 let RuntimeRouter = ImportedRouter;
-let RuntimeAuth = ImportedAuth;
+let RuntimeAuth = null;
 
 let configured = false;
+let bindRequested = false;
 let bound = false;
 let firstRenderDone = false;
 let initialRenderPromise = null;
 let renderCycle = 0;
+let initialUrlCaptured = false;
 
 const bootState = {
   lastConfiguredAt: 0,
@@ -214,7 +215,7 @@ function resolveDeps(deps = {}) {
 
   RuntimeAppCore = input.AppCore || input.core || RuntimeAppCore || ImportedAppCore;
   RuntimeRouter = input.Router || input.router || RuntimeAppCore?.Router || RuntimeAppCore?.router || moduleGet(RuntimeAppCore, "Router") || moduleGet(RuntimeAppCore, "router") || RuntimeRouter || ImportedRouter;
-  RuntimeAuth = input.Auth || input.auth || RuntimeAppCore?.Auth || RuntimeAppCore?.auth || moduleGet(RuntimeAppCore, "Auth") || moduleGet(RuntimeAppCore, "auth") || RuntimeAuth || ImportedAuth;
+  RuntimeAuth = input.Auth || input.auth || RuntimeAppCore?.Auth || RuntimeAppCore?.auth || moduleGet(RuntimeAppCore, "Auth") || moduleGet(RuntimeAppCore, "auth") || RuntimeAuth || null;
 
   return { AppCore: RuntimeAppCore, Router: RuntimeRouter, Auth: RuntimeAuth };
 }
@@ -250,6 +251,18 @@ function exposeRouterToCore() {
    PATH / INITIAL CONTEXT
 ========================================================= */
 
+function ensureInitialUrlCaptured() {
+  if (initialUrlCaptured) return true;
+
+  try {
+    captureInitialUrl();
+    initialUrlCaptured = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function browserPath() {
   if (!isBrowser()) return DEFAULT_ROUTE;
 
@@ -271,9 +284,9 @@ function currentPublicPath(fallback = DEFAULT_ROUTE) {
   }
 }
 
-function protectedInitialPath() {
+function protectedInitialPath({ capture = false } = {}) {
   try {
-    captureInitialUrl();
+    if (capture) ensureInitialUrlCaptured();
     return getProtectedInitialPublicPath(RuntimeAppCore) || "";
   } catch {
     return "";
@@ -286,7 +299,7 @@ function explicitPathFromDeps(deps = {}) {
 
 function initialContext(deps = {}) {
   const data = object(deps);
-  const protectedPath = protectedInitialPath();
+  const protectedPath = protectedInitialPath({ capture: true });
   const explicitPath = explicitPathFromDeps(data);
   const publicPath = protectedPath || explicitPath || currentPublicPath(DEFAULT_ROUTE) || DEFAULT_ROUTE;
   const canonicalPath = normalizeCanonicalPath(RuntimeAppCore, publicPath) || DEFAULT_ROUTE;
@@ -339,7 +352,7 @@ function markInitialRenderDone(value = true) {
 
 export function configureRouter(deps = {}) {
   resolveDeps(deps);
-  captureInitialUrl();
+  ensureInitialUrlCaptured();
   exposeRouterToCore();
 
   if (configured) return true;
@@ -351,6 +364,8 @@ export function configureRouter(deps = {}) {
         core: RuntimeAppCore,
         Auth: RuntimeAuth,
         auth: RuntimeAuth,
+        appManagedInitialRender: true,
+        skipInitialRender: true,
         source: SOURCE,
       });
 
@@ -370,12 +385,9 @@ export function configureRouter(deps = {}) {
   }
 }
 
-export function bindRouter(deps = {}) {
-  resolveDeps(deps);
-  captureInitialUrl();
-
-  if (!configured && configureRouter(deps) === false) return false;
+function bindRuntimeRouter() {
   if (bound) return true;
+  if (!configured && configureRouter() === false) return false;
 
   try {
     if (isFn(RuntimeRouter?.bind)) {
@@ -384,7 +396,9 @@ export function bindRouter(deps = {}) {
         core: RuntimeAppCore,
         Auth: RuntimeAuth,
         auth: RuntimeAuth,
-        initialRenderDone: firstRenderDone,
+        initialRenderDone: true,
+        appManagedInitialRender: true,
+        skipInitialRender: true,
         source: SOURCE,
       });
 
@@ -407,6 +421,18 @@ export function bindRouter(deps = {}) {
     warn("Error bindeando Router", error);
     return false;
   }
+}
+
+export function bindRouter(deps = {}) {
+  resolveDeps(deps);
+  ensureInitialUrlCaptured();
+
+  if (!configured && configureRouter(deps) === false) return false;
+
+  bindRequested = true;
+
+  if (firstRenderDone) return bindRuntimeRouter();
+  return true;
 }
 
 /* =========================================================
@@ -443,9 +469,12 @@ async function runInitialRender(ctx = {}, cycleId = 0) {
     result = { ok: false, rendered: false, reason: "router-render-missing" };
   }
 
+  if (result === false) throw new Error("Router devolvió false en render inicial.");
   if (cycleId !== renderCycle) return { ok: false, stale: true };
 
   markInitialRenderDone(true);
+
+  if (bindRequested) bindRuntimeRouter();
 
   bootState.lastRenderedPath = data.canonicalPath || DEFAULT_ROUTE;
   bootState.lastRenderedPublicPath = path;
@@ -462,12 +491,12 @@ async function runInitialRender(ctx = {}, cycleId = 0) {
     at: iso(bootState.lastRenderAt),
   });
 
-  return result || { ok: true, rendered: true };
+  return result ?? { ok: true, rendered: true };
 }
 
 export function renderInitialRoute(deps = {}) {
   resolveDeps(deps);
-  captureInitialUrl();
+  ensureInitialUrlCaptured();
 
   if (!configured && configureRouter(deps) === false) return Promise.resolve(false);
   if (firstRenderDone) return Promise.resolve(true);
@@ -518,7 +547,10 @@ export function resetRouterBootstrap(options = {}) {
   renderCycle = 0;
 
   if (opts.resetConfigured) configured = false;
-  if (opts.resetBound) bound = false;
+  if (opts.resetBound) {
+    bound = false;
+    bindRequested = false;
+  }
 
   Object.assign(bootState, {
     lastInitialPath: "",
@@ -546,12 +578,13 @@ export function getRouterBootstrapState() {
     routerSnapshot = RuntimeRouter?.getSnapshot?.() || RuntimeRouter?.getDebugSnapshot?.() || RuntimeRouter?.getState?.() || null;
   } catch {}
 
-  const protectedPath = protectedInitialPath();
+  const protectedPath = protectedInitialPath({ capture: false });
   const current = currentPublicPath();
 
   return sanitize({
     version: ROUTER_BOOTSTRAP_VERSION,
     configured,
+    bindRequested,
     bound,
     firstRenderDone,
     initialRenderInFlight: Boolean(initialRenderPromise),
@@ -583,6 +616,7 @@ export function getRouterBootstrapState() {
       ownRender: false,
       ownStorage: false,
       ownToast: false,
+      appManagedInitialRender: true,
     },
   });
 }

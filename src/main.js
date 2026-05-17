@@ -8,11 +8,11 @@
    - desactiva auto-boot legacy antes de importar App
    - importa app/index.js bajo demanda
    - ejecuta App.boot() una sola vez
-   - fallback fatal mínimo si app/errors.js no llega a responder
+   - fallback fatal mínimo si App falla al arrancar
    - sin Auth, Router, Services, Store, Toast, vistas, fetch ni storage
 ========================================================= */
 
-export const MAIN_VERSION = "21.0.0-simple";
+export const MAIN_VERSION = "21.0.1-simple";
 
 const APP_MODULE_PATH = "./app/index.js";
 
@@ -30,8 +30,11 @@ const DEFAULT_ERROR_MESSAGE = "No se pudo iniciar Onion Support.";
 
 let appModule = null;
 let appModulePromise = null;
+let appResult = null;
 let bootPromise = null;
+let bootCompleted = false;
 let startedAt = 0;
+let completedAt = 0;
 let failed = false;
 let initialBootContext = null;
 
@@ -543,11 +546,15 @@ function clearBootLock(promise) {
 
 async function runBoot(options = {}) {
   startedAt = now();
+  completedAt = 0;
   failed = false;
 
   disableLegacyAutoBoot();
 
-  const bootContext = captureBootContext();
+  const bootContext = {
+    ...object(initialBootContext),
+    ...captureBootContext(),
+  };
 
   markBooting();
 
@@ -564,15 +571,20 @@ async function runBoot(options = {}) {
     startedAt,
   });
 
-  markMainReady();
-  exposeLoadedApp(moduleValue, result);
+  appResult = result || moduleValue;
+  bootCompleted = true;
+  completedAt = now();
 
-  return result || moduleValue;
+  markMainReady();
+  exposeLoadedApp(moduleValue, appResult);
+
+  return appResult;
 }
 
 export function boot(options = {}) {
   const opts = object(options);
 
+  if (bootCompleted && opts.force !== true) return Promise.resolve(appResult || appModule);
   if (bootPromise && opts.force !== true) return bootPromise;
 
   const lock = externalBootLock();
@@ -603,7 +615,10 @@ export function getState() {
     version: MAIN_VERSION,
     startedAt,
     startedAtIso: startedAt ? iso(startedAt) : "",
+    completedAt,
+    completedAtIso: completedAt ? iso(completedAt) : "",
     failed,
+    bootCompleted,
     hasBootPromise: Boolean(bootPromise),
     appLoaded: Boolean(appModule),
     initialUrl: redact(currentHref()),
@@ -650,7 +665,6 @@ function exposeDebugBridge() {
 
 disableLegacyAutoBoot();
 initialBootContext = captureBootContext();
-markBooting();
 exposeDebugBridge();
 
 void start({ source: "main", bootContext: initialBootContext }).catch(() => {

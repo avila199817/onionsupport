@@ -2,29 +2,25 @@
    Onion SPA - App UI Systems
    Archivo: src/app/ui.js
 
-   APP UI · FINAL SIMPLE
-   - Adapter de boot/sync para UI común
-   - Toast real: ui/toast
-   - Sidebar real: ui/sidebar
-   - Topbar real: ui/topbar
-   - Sin Auth, Router, Store, Toast ni DOM paralelo
-   - Sin fetch, storage, permisos ni lógica de vistas
+   APP UI · SIMPLE ADAPTER
+   - registra Toast / SidebarUI / TopbarUI
+   - monta chrome sólo cuando corresponde
+   - sincroniza usuario/ruta/tema/idioma
+   - repara UI bajo demanda
+   - expone puente AppCore.showToast
+   - sin Auth, Router, Store, fetch, storage ni vistas propios
 ========================================================= */
 
 import { registerModule } from "./helpers.js";
 
-/* =========================================================
-   VERSION / CONSTANTS
-========================================================= */
-
-export const UI_VERSION = "20.0.0-final";
+export const UI_VERSION = "21.0.0-simple";
 
 const SOURCE = "app.ui";
 const DEBUG_KEY = "__ONION_APP_UI__";
 const DEFAULT_SCOPE = "app:ui";
 
 const INIT_METHODS = Object.freeze(["init", "boot", "mount", "start"]);
-const SYNC_METHODS = Object.freeze(["renderUser", "refreshUser", "updateUser", "syncUser", "syncRoute", "refresh", "sync"]);
+const SYNC_METHODS = Object.freeze(["syncUser", "renderUser", "refreshUser", "updateUser", "sync", "refresh"]);
 const REPAIR_METHODS = Object.freeze(["repair", "refresh", "sync"]);
 const REBIND_METHODS = Object.freeze(["rebind", "rebindEvents", "bindEvents", "bind"]);
 
@@ -89,7 +85,7 @@ const EVENTS = Object.freeze({
 const ROUTE_EVENTS = Object.freeze(["app:route:change", "router:rendered", "router:render:async-complete"]);
 const SESSION_EVENTS = Object.freeze(["app:user:change", "app:session:restored", "app:session:cleared", "auth:session:restored", "auth:login:success", "auth:logout", "auth:logout:success"]);
 const THEME_EVENTS = Object.freeze(["app:theme:change", "onion:theme:change", "theme:change"]);
-const LANG_EVENTS = Object.freeze(["app:lang:change"]);
+const LANG_EVENTS = Object.freeze(["app:lang:change", "i18n:change"]);
 
 const SYNC_DEDUPE_MS = 120;
 const REPAIR_DEDUPE_MS = 180;
@@ -98,10 +94,6 @@ const EVENT_DEDUPE_MS = 80;
 const SENSITIVE_KEY_RE = /token|secret|password|authorization|bearer|credential|jwt|session|refresh|otp|mfa|2fa|code/i;
 const TOKEN_QUERY_RE = /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token|temporaryToken|temporary_token|twoFactorToken|two_factor_token|mfaToken|mfa_token|authorization|jwt|session|sid)=)([^&#\s]+)/gi;
 
-/* =========================================================
-   RUNTIME
-========================================================= */
-
 let initialized = false;
 let initInFlight = false;
 let syncing = false;
@@ -109,14 +101,16 @@ let queuedSync = null;
 let runtimeBound = false;
 let toastBridgeBound = false;
 let debugApiBound = false;
+let moduleInitState = new WeakMap();
+
 let lastSyncSignature = "";
 let lastSyncAt = 0;
 let lastRepairSignature = "";
 let lastRepairAt = 0;
-let lastEventSignature = "";
-let lastEventAt = 0;
-
-let moduleInitState = new WeakMap();
+let lastEmitSignature = "";
+let lastEmitAt = 0;
+let lastInboundSignature = "";
+let lastInboundAt = 0;
 
 const disposers = [];
 const boundKeys = new Set();
@@ -141,7 +135,7 @@ const runtime = {
 
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
 const isFn = (value) => typeof value === "function";
-const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
 
 function object(value, fallback = {}) {
   return isObject(value) ? value : fallback;
@@ -176,7 +170,7 @@ function iso(ms = now()) {
 
 function canExtend(value) {
   try {
-    return value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value);
+    return Boolean(value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value));
   } catch {
     return false;
   }
@@ -198,6 +192,14 @@ function defineValue(target, key, value) {
   }
 }
 
+function microtask(callback) {
+  try {
+    queueMicrotask(callback);
+  } catch {
+    Promise.resolve().then(callback).catch(() => {});
+  }
+}
+
 function normalizeDeps(first = {}, second = {}) {
   if (isObject(first) && ("AppCore" in first || "Auth" in first || "Router" in first || "Store" in first || "Toast" in first || "SidebarUI" in first || "TopbarUI" in first)) {
     return { ...first };
@@ -209,7 +211,7 @@ function normalizeDeps(first = {}, second = {}) {
 function payloadFrom(eventOrPayload = {}) {
   if (isObject(eventOrPayload?.detail)) return eventOrPayload.detail;
   if (isObject(eventOrPayload?.payload)) return eventOrPayload.payload;
-  return isObject(eventOrPayload) ? eventOrPayload : {};
+  return object(eventOrPayload);
 }
 
 /* =========================================================
@@ -250,13 +252,11 @@ function sanitize(value, depth = 0, keyHint = "") {
   if (value instanceof Set) return { type: "Set", size: value.size };
 
   if (isObject(value)) {
-    const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = sanitize(item, depth + 1, key);
-    }
-
-    return output;
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 80)
+        .map(([key, item]) => [key, sanitize(item, depth + 1, key)])
+    );
   }
 
   return String(value);
@@ -269,10 +269,10 @@ function emit(AppCore, eventName = "", payload = {}, options = {}) {
   const signature = [name, text(payload?.reason || payload?.phase, ""), text(payload?.route || payload?.canonicalPath, ""), text(payload?.publicPath, "")].join("|");
   const stamp = now();
 
-  if (options.force !== true && signature === lastEventSignature && stamp - lastEventAt < EVENT_DEDUPE_MS) return false;
+  if (options.force !== true && signature === lastEmitSignature && stamp - lastEmitAt < EVENT_DEDUPE_MS) return false;
 
-  lastEventSignature = signature;
-  lastEventAt = stamp;
+  lastEmitSignature = signature;
+  lastEmitAt = stamp;
 
   const detail = sanitize({ source: SOURCE, version: UI_VERSION, at: iso(), ...object(payload) });
 
@@ -315,7 +315,7 @@ function setLastError(AppCore, source = "ui", error = null) {
 function getModule(AppCore, names = []) {
   for (const key of names.map((name) => text(name, "")).filter(Boolean)) {
     try {
-      const value = AppCore?.modules?.get?.(key) || AppCore?.registry?.modules?.get?.(key) || AppCore?.[key] || null;
+      const value = AppCore?.modules?.get?.(key) || AppCore?.registry?.modules?.get?.(key) || AppCore?.modules?.[key] || AppCore?.[key] || null;
       if (value) return value;
     } catch {}
   }
@@ -333,7 +333,7 @@ function resolveDeps(first = {}, second = {}) {
     Auth: deps.Auth || AppCore?.Auth || AppCore?.auth || getModule(AppCore, ["Auth", "auth"]),
     Router: deps.Router || AppCore?.Router || AppCore?.router || getModule(AppCore, ["Router", "router"]),
     Store: deps.Store || AppCore?.Store || AppCore?.store || getModule(AppCore, ["Store", "store"]),
-    Toast: deps.Toast || AppCore?.Toast || getModule(AppCore, ["Toast", "toast", "notifications"]),
+    Toast: deps.Toast || AppCore?.Toast || AppCore?.toast || getModule(AppCore, ["Toast", "toast", "notifications"]),
     I18n: deps.I18n || AppCore?.I18n || AppCore?.i18n || getModule(AppCore, ["I18n", "i18n"]),
     SidebarUI: deps.SidebarUI || AppCore?.SidebarUI || AppCore?.sidebarUI || AppCore?.sidebar || getModule(AppCore, ["SidebarUI", "sidebarUI", "Sidebar", "sidebar"]),
     TopbarUI: deps.TopbarUI || AppCore?.TopbarUI || AppCore?.topbarUI || AppCore?.topbar || getModule(AppCore, ["TopbarUI", "topbarUI", "Topbar", "topbar"]),
@@ -356,7 +356,7 @@ function registerAlias(AppCore, alias = "", moduleRef = null) {
   } catch {}
 
   try {
-    if (canExtend(AppCore)) defineValue(AppCore, alias, moduleRef);
+    defineValue(AppCore, alias, moduleRef);
   } catch {}
 
   return true;
@@ -391,7 +391,7 @@ function markInitialized(moduleRef, value = true) {
   } catch {}
 
   try {
-    if (canExtend(moduleRef)) defineValue(moduleRef, "__appUiInitialized", Boolean(value));
+    defineValue(moduleRef, "__appUiInitialized", Boolean(value));
   } catch {}
 }
 
@@ -424,22 +424,13 @@ function callFirst(moduleRef, methodNames = [], context = {}) {
   return { called: false, method: "" };
 }
 
-function callMany(moduleRef, methodNames = [], context = {}) {
-  const methods = [];
-
-  for (const method of methodNames) {
-    if (callMethod(moduleRef, method, context)) methods.push(method);
-  }
-
-  return { called: methods.length > 0, methods };
-}
-
 function initModule(AppCore, moduleRef, label = "module", context = {}) {
   if (!moduleRef) return false;
   if (context.force !== true && wasInitialized(moduleRef)) return true;
 
+  const hasInitMethod = INIT_METHODS.some((method) => isFn(moduleRef?.[method]));
   const result = callFirst(moduleRef, INIT_METHODS, { ...context, AppCore, label, reason: context.reason || `${label}:init` });
-  const ok = result.called || !INIT_METHODS.some((method) => isFn(moduleRef?.[method]));
+  const ok = result.called || !hasInitMethod;
 
   if (ok) markInitialized(moduleRef, true);
   return ok;
@@ -450,7 +441,12 @@ function initModule(AppCore, moduleRef, label = "module", context = {}) {
 ========================================================= */
 
 function normalizePath(path = "/") {
-  let value = text(path, "/").split("?")[0].split("#")[0] || "/";
+  let value = text(path, "/");
+
+  if (value.startsWith("#/")) value = value.replace(/^#\/?/, "/");
+  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
+
+  value = value.split("?")[0].split("#")[0] || "/";
   value = value.replace(/\\/g, "/").replace(/\/+/g, "/");
   if (!value.startsWith("/")) value = `/${value}`;
   if (value.length > 1) value = value.replace(/\/+$/g, "") || "/";
@@ -507,7 +503,7 @@ function getUserId(user = null) {
 
 function getCurrentUser(AppCore, Auth) {
   const state = object(AppCore?.state);
-  const session = object(state.session);
+  const session = object(state.session || state.sessionData);
   const auth = object(state.auth);
 
   return state.user || state.currentUser || state.sessionUser || state.authUser || state.me || state.account || state.profile || session.user || auth.user || callGetter(Auth, ["getUser", "getCurrentUser", "currentUser"]) || Auth?.user || null;
@@ -515,7 +511,7 @@ function getCurrentUser(AppCore, Auth) {
 
 function getCurrentRole(AppCore, Auth, user) {
   const state = object(AppCore?.state);
-  const session = object(state.session);
+  const session = object(state.session || state.sessionData);
   const auth = object(state.auth);
 
   return state.role || state.rol || state.userRole || session.role || session.rol || auth.role || auth.rol || user?.role || user?.rol || user?.userRole || callGetter(Auth, ["getCurrentRole", "getRole"]) || Auth?.role || null;
@@ -547,6 +543,7 @@ function getUserSnapshot(AppCore, Auth = null, Router = null) {
   const role = getCurrentRole(AppCore, Auth, user);
   const route = currentRoute(AppCore, Router);
   const publicPath = currentPublicPath(AppCore, Router);
+  const displayName = user?.name || user?.fullName || user?.displayName || user?.display_name || user?.username || user?.email || null;
 
   return {
     user,
@@ -554,7 +551,8 @@ function getUserSnapshot(AppCore, Auth = null, Router = null) {
     authenticated: isAuthenticated(AppCore, Auth, user),
     role,
     username: user?.username || user?.userName || user?.slug || user?.email || state.username || null,
-    displayName: user?.displayName || user?.display_name || user?.name || user?.fullName || user?.username || user?.email || null,
+    displayName,
+    name: user?.name || displayName,
     avatarUrl: user?.avatarUrl || user?.avatarURL || user?.avatar || user?.photoURL || user?.picture || null,
     lang: state.lang || state.language || state.locale || null,
     theme: state.theme || state.mode || state.appearance || null,
@@ -570,7 +568,8 @@ function getUserSnapshot(AppCore, Auth = null, Router = null) {
 
 function normalizeToastType(type = "info") {
   const clean = text(type, "info").toLowerCase();
-  return clean === "warn" ? "warning" : ["success", "error", "warning", "info", "loading"].includes(clean) ? clean : "info";
+  if (clean === "warn") return "warning";
+  return ["success", "error", "warning", "info", "loading"].includes(clean) ? clean : "info";
 }
 
 function createToastBridge(AppCore, Toast) {
@@ -604,8 +603,8 @@ function attachToastBridge(AppCore, bridge) {
     }
   } catch {}
 
-  if (canExtend(AppCore)) ok = defineValue(AppCore, "showToast", bridge) || ok;
-  if (canExtend(AppCore?.utils)) ok = defineValue(AppCore.utils, "showToast", bridge) || ok;
+  ok = defineValue(AppCore, "showToast", bridge) || ok;
+  ok = defineValue(AppCore?.utils, "showToast", bridge) || ok;
 
   return ok;
 }
@@ -623,7 +622,7 @@ export function bindToastBridge(first = {}, second = null) {
   toastBridgeBound = true;
   defineValue(AppCore, "__toastBridgeBound", true);
 
-  emit(AppCore, "app:ui:toast-bridge:ready");
+  emit(AppCore, EVENTS.toastBridgeReady);
   return true;
 }
 
@@ -631,17 +630,19 @@ export function bindToastBridge(first = {}, second = null) {
    SYNC / REPAIR
 ========================================================= */
 
-function ensureChromeReady(deps = {}, reason = "chrome-ready", force = false) {
+function ensureChromeReady(deps = {}, reason = "chrome-ready", options = {}) {
   const { AppCore, SidebarUI, TopbarUI, Router } = deps;
   const authRoute = isAuthLikeRoute(AppCore, Router);
 
-  if (authRoute && force !== true) return { sidebar: false, topbar: false, skipped: true, authRoute: true };
+  if (authRoute && options.allowAuthRouteChrome !== true) {
+    return { sidebar: false, topbar: false, skipped: true, authRoute: true };
+  }
 
-  const ctx = { ...deps, reason };
+  const context = { ...deps, reason };
 
   return {
-    sidebar: initModule(AppCore, SidebarUI, "SidebarUI", ctx),
-    topbar: initModule(AppCore, TopbarUI, "TopbarUI", ctx),
+    sidebar: initModule(AppCore, SidebarUI, "SidebarUI", context),
+    topbar: initModule(AppCore, TopbarUI, "TopbarUI", context),
     skipped: false,
     authRoute: false,
   };
@@ -678,7 +679,11 @@ function shouldSkipSync(snapshot = {}, force = false) {
 
 export function syncUserUI(first = {}, second = {}) {
   const deps = resolveDeps(first, second);
-  const { AppCore, Auth, Router, SidebarUI, TopbarUI, reason = "sync-user-ui", rebind = false, hardRepair = false, force = false } = deps;
+  const { AppCore, Auth, Router, SidebarUI, TopbarUI } = deps;
+  const reason = text(deps.reason, "sync-user-ui");
+  const force = deps.force === true;
+  const rebind = deps.rebind === true;
+  const hardRepair = deps.hardRepair === true;
 
   if (!AppCore) return false;
 
@@ -693,17 +698,32 @@ export function syncUserUI(first = {}, second = {}) {
   syncing = true;
 
   try {
-    const context = { ...deps, reason, snapshot, user: snapshot.user, authenticated: snapshot.authenticated, role: snapshot.role, username: snapshot.username, displayName: snapshot.displayName, avatarUrl: snapshot.avatarUrl, route: snapshot.route, publicPath: snapshot.publicPath, authRoute: snapshot.authRoute };
-    let chrome = { skipped: true };
-    let sidebar = { called: false, methods: [] };
-    let topbar = { called: false, methods: [] };
+    const context = {
+      ...deps,
+      reason,
+      snapshot,
+      user: snapshot.user,
+      authenticated: snapshot.authenticated,
+      role: snapshot.role,
+      username: snapshot.username,
+      displayName: snapshot.displayName,
+      name: snapshot.name,
+      avatarUrl: snapshot.avatarUrl,
+      route: snapshot.route,
+      publicPath: snapshot.publicPath,
+      authRoute: snapshot.authRoute,
+    };
 
-    if (!snapshot.authRoute || force === true) {
-      chrome = ensureChromeReady(deps, reason, force === true && !snapshot.authRoute);
-      sidebar = hardRepair ? callFirst(SidebarUI, REPAIR_METHODS, context) : callMany(SidebarUI, SYNC_METHODS, context);
-      topbar = hardRepair ? callFirst(TopbarUI, REPAIR_METHODS, context) : callMany(TopbarUI, SYNC_METHODS, context);
+    let chrome = { skipped: true, authRoute: snapshot.authRoute };
+    let sidebar = { called: false, method: "" };
+    let topbar = { called: false, method: "" };
 
-      if (rebind === true) {
+    if (!snapshot.authRoute || deps.allowAuthRouteChrome === true) {
+      chrome = ensureChromeReady(deps, reason, { allowAuthRouteChrome: deps.allowAuthRouteChrome === true });
+      sidebar = callFirst(SidebarUI, hardRepair ? REPAIR_METHODS : SYNC_METHODS, context);
+      topbar = callFirst(TopbarUI, hardRepair ? REPAIR_METHODS : SYNC_METHODS, context);
+
+      if (rebind) {
         callFirst(SidebarUI, REBIND_METHODS, context);
         callFirst(TopbarUI, REBIND_METHODS, context);
       }
@@ -711,10 +731,28 @@ export function syncUserUI(first = {}, second = {}) {
 
     runtime.syncCount += 1;
     runtime.lastSyncAt = now();
-    runtime.lastSyncReason = text(reason, "sync-user-ui");
+    runtime.lastSyncReason = reason;
 
-    emit(AppCore, EVENTS.userSync, { reason, authenticated: snapshot.authenticated, username: snapshot.username, role: snapshot.role, route: snapshot.route, publicPath: snapshot.publicPath, authRoute: snapshot.authRoute });
-    emit(AppCore, EVENTS.userSyncDone, { ok: true, reason, authRoute: snapshot.authRoute, chrome, sidebar, topbar, rebind: Boolean(rebind), hardRepair: Boolean(hardRepair) });
+    emit(AppCore, EVENTS.userSync, {
+      reason,
+      authenticated: snapshot.authenticated,
+      username: snapshot.username,
+      role: snapshot.role,
+      route: snapshot.route,
+      publicPath: snapshot.publicPath,
+      authRoute: snapshot.authRoute,
+    });
+
+    emit(AppCore, EVENTS.userSyncDone, {
+      ok: true,
+      reason,
+      authRoute: snapshot.authRoute,
+      chrome,
+      sidebar,
+      topbar,
+      rebind,
+      hardRepair,
+    });
 
     return true;
   } catch (error) {
@@ -727,14 +765,16 @@ export function syncUserUI(first = {}, second = {}) {
     if (queuedSync) {
       const queued = queuedSync;
       queuedSync = null;
-      queueMicrotask(() => syncUserUI(queued));
+      microtask(() => syncUserUI(queued));
     }
   }
 }
 
 export function repairUISystems(first = {}, second = {}) {
   const deps = resolveDeps(first, second);
-  const { AppCore, reason = "repair-ui", force = false, rebind = false, hardRepair = false } = deps;
+  const { AppCore } = deps;
+  const reason = text(deps.reason, "repair-ui");
+  const force = deps.force === true;
 
   if (!AppCore) return false;
 
@@ -748,11 +788,11 @@ export function repairUISystems(first = {}, second = {}) {
 
   runtime.repairCount += 1;
   runtime.lastRepairAt = stamp;
-  runtime.lastRepairReason = text(reason, "repair-ui");
+  runtime.lastRepairReason = reason;
 
-  const ok = syncUserUI({ ...deps, reason, force, rebind, hardRepair });
+  const ok = syncUserUI({ ...deps, reason, force, hardRepair: true });
 
-  emit(AppCore, EVENTS.repair, { reason, ok, rebind: Boolean(rebind), hardRepair: Boolean(hardRepair) });
+  emit(AppCore, EVENTS.repair, { reason, ok, rebind: deps.rebind === true, hardRepair: true });
   emit(AppCore, EVENTS.repairDone, { reason, ok });
 
   return ok;
@@ -777,10 +817,10 @@ function bindEvent(AppCore, scope, eventName, handler, label = "") {
     const signature = [eventName, text(detail?.reason || detail?.phase, ""), text(detail?.route || detail?.canonicalPath, ""), text(detail?.publicPath, "")].join("|");
     const stamp = now();
 
-    if (signature === lastEventSignature && stamp - lastEventAt < EVENT_DEDUPE_MS) return;
+    if (signature === lastInboundSignature && stamp - lastInboundAt < EVENT_DEDUPE_MS) return;
 
-    lastEventSignature = signature;
-    lastEventAt = stamp;
+    lastInboundSignature = signature;
+    lastInboundAt = stamp;
 
     try {
       handler(detail, eventOrPayload);
@@ -822,7 +862,13 @@ function bindSyncEvents(deps, events = [], reasonPrefix = "event") {
   let ok = false;
 
   for (const eventName of events) {
-    ok = bindEvent(deps.AppCore, deps.scope || DEFAULT_SCOPE, eventName, (detail) => syncUserUI({ ...deps, reason: `${reasonPrefix}:${eventName}`, payload: detail, force: true }), `${reasonPrefix}:${eventName}`) || ok;
+    ok = bindEvent(
+      deps.AppCore,
+      deps.scope || DEFAULT_SCOPE,
+      eventName,
+      (detail) => syncUserUI({ ...deps, reason: `${reasonPrefix}:${eventName}`, payload: detail, force: true }),
+      `${reasonPrefix}:${eventName}`
+    ) || ok;
   }
 
   return ok;
@@ -873,10 +919,25 @@ export function bindUIRepairSync(first = {}, second = {}) {
   if (!deps.AppCore) return false;
   if (deps.AppCore.__appUiRepairBound === true) return true;
 
-  const ok = bindEvent(deps.AppCore, deps.scope || DEFAULT_SCOPE, EVENTS.repairRequest, (detail = {}) => {
-    if (text(detail.source, "") === SOURCE) return;
-    repairUISystems({ ...deps, reason: detail.reason || detail.phase || "repair-request", payload: detail, force: detail.force === true, rebind: detail.rebind === true, hardRepair: detail.hardRepair === true });
-  }, "repair-request");
+  const ok = bindEvent(
+    deps.AppCore,
+    deps.scope || DEFAULT_SCOPE,
+    EVENTS.repairRequest,
+    (detail = {}) => {
+      if (text(detail.source, "") === SOURCE) return;
+
+      repairUISystems({
+        ...deps,
+        reason: detail.reason || detail.phase || "repair-request",
+        payload: detail,
+        force: detail.force === true,
+        rebind: detail.rebind === true,
+        hardRepair: detail.hardRepair === true,
+        allowAuthRouteChrome: detail.allowAuthRouteChrome === true,
+      });
+    },
+    "repair-request"
+  );
 
   defineValue(deps.AppCore, "__appUiRepairBound", ok);
   return ok;
@@ -887,13 +948,13 @@ export function bindUIRuntimeEvents(first = {}, second = {}) {
   if (!deps.AppCore) return false;
   if (runtimeBound || deps.AppCore.__appUiRuntimeEventsBound === true) return true;
 
-  const ok = Boolean(
-    bindAppLanguageSync(deps) |
-      bindUIRepairSync(deps) |
-      bindUIRouteSync(deps) |
-      bindUISessionSync(deps) |
-      bindUIThemeSync(deps)
-  );
+  const ok = [
+    bindAppLanguageSync(deps),
+    bindUIRepairSync(deps),
+    bindUIRouteSync(deps),
+    bindUISessionSync(deps),
+    bindUIThemeSync(deps),
+  ].some(Boolean);
 
   runtimeBound = ok;
   defineValue(deps.AppCore, "__appUiRuntimeEventsBound", ok);
@@ -923,7 +984,7 @@ function markUiInitialized(AppCore, stateRef = null, value = true) {
 }
 
 function exposeDebugApi(AppCore = null) {
-  if (debugApiBound && isBrowser() && window.__ONION_APP_UI__) return window.__ONION_APP_UI__;
+  if (debugApiBound && isBrowser() && window[DEBUG_KEY]) return window[DEBUG_KEY];
 
   const api = {
     version: UI_VERSION,
@@ -931,15 +992,15 @@ function exposeDebugApi(AppCore = null) {
     repair: (options = {}) => repairUISystems({ AppCore, ...object(options) }),
     unbind: () => unbindUISystems(AppCore),
     snapshot: (extra = {}) => getUISystemsSnapshot({ AppCore, ...object(extra) }),
-    reset: resetUIRuntimeState,
+    reset: () => resetUIRuntimeState(AppCore),
   };
 
   try {
-    if (isBrowser()) window.__ONION_APP_UI__ = api;
+    if (isBrowser()) window[DEBUG_KEY] = api;
   } catch {}
 
   try {
-    if (canExtend(AppCore)) defineValue(AppCore, "UI", api);
+    defineValue(AppCore, "UI", api);
   } catch {}
 
   debugApiBound = true;
@@ -948,7 +1009,8 @@ function exposeDebugApi(AppCore = null) {
 
 export function initUISystems(first = {}) {
   const deps = resolveDeps(first);
-  const { AppCore, Toast, SidebarUI, TopbarUI, state: stateRef, scope = DEFAULT_SCOPE, force = false } = deps;
+  const { AppCore, Toast, SidebarUI, TopbarUI, state: stateRef, scope = DEFAULT_SCOPE } = deps;
+  const force = deps.force === true;
 
   if (!AppCore) return false;
   if (initInFlight) return true;
@@ -974,7 +1036,7 @@ export function initUISystems(first = {}) {
 
     initModule(AppCore, Toast, "Toast", { ...deps, reason: "init-ui:toast", force });
     bindToastBridge({ AppCore, Toast });
-    ensureChromeReady(deps, "init-ui:chrome", force);
+    ensureChromeReady(deps, "init-ui:chrome", { allowAuthRouteChrome: deps.allowAuthRouteChrome === true });
     bindUIRuntimeEvents({ ...deps, scope });
     exposeDebugApi(AppCore);
     syncUserUI({ ...deps, reason: "init-ui" });
@@ -1020,7 +1082,7 @@ export function unbindUISystems(AppCore = null) {
     defineValue(AppCore, "__toastBridgeBound", false);
   }
 
-  emit(AppCore, EVENTS.runtimeEventsUnbound);
+  emit(AppCore, EVENTS.runtimeEventsUnbound, {}, { force: true });
   return true;
 }
 
@@ -1040,17 +1102,48 @@ export function getUISystemsSnapshot(first = {}, second = {}) {
     debugApiBound,
     boundKeyCount: boundKeys.size,
     disposerCount: disposers.length,
-    modules: { toast: Boolean(Toast), sidebar: Boolean(SidebarUI), topbar: Boolean(TopbarUI) },
-    moduleInit: { toast: Toast ? wasInitialized(Toast) : false, sidebar: SidebarUI ? wasInitialized(SidebarUI) : false, topbar: TopbarUI ? wasInitialized(TopbarUI) : false },
-    user: user ? { authenticated: user.authenticated, userId: user.userId, username: user.username, displayName: user.displayName, role: user.role, lang: user.lang, theme: user.theme, route: user.route, publicPath: user.publicPath, authRoute: user.authRoute, hasAvatarUrl: Boolean(user.avatarUrl) } : null,
+    modules: {
+      toast: Boolean(Toast),
+      sidebar: Boolean(SidebarUI),
+      topbar: Boolean(TopbarUI),
+    },
+    moduleInit: {
+      toast: Toast ? wasInitialized(Toast) : false,
+      sidebar: SidebarUI ? wasInitialized(SidebarUI) : false,
+      topbar: TopbarUI ? wasInitialized(TopbarUI) : false,
+    },
+    user: user
+      ? {
+          authenticated: user.authenticated,
+          userId: user.userId,
+          username: user.username,
+          displayName: user.displayName,
+          role: user.role,
+          lang: user.lang,
+          theme: user.theme,
+          route: user.route,
+          publicPath: user.publicPath,
+          authRoute: user.authRoute,
+          hasAvatarUrl: Boolean(user.avatarUrl),
+        }
+      : null,
     runtime,
     dedupe: { lastSyncAt, lastRepairAt },
-    policy: { adapterOnly: true, ownAuth: false, ownRouter: false, ownStore: false, ownToast: false, ownFetch: false, ownStorage: false, ownViews: false },
+    policy: {
+      adapterOnly: true,
+      ownAuth: false,
+      ownRouter: false,
+      ownStore: false,
+      ownToast: false,
+      ownFetch: false,
+      ownStorage: false,
+      ownViews: false,
+    },
   });
 }
 
-export function resetUIRuntimeState() {
-  unbindUISystems();
+export function resetUIRuntimeState(AppCore = null) {
+  unbindUISystems(AppCore);
 
   initialized = false;
   initInFlight = false;
@@ -1062,8 +1155,10 @@ export function resetUIRuntimeState() {
   lastSyncAt = 0;
   lastRepairSignature = "";
   lastRepairAt = 0;
-  lastEventSignature = "";
-  lastEventAt = 0;
+  lastEmitSignature = "";
+  lastEmitAt = 0;
+  lastInboundSignature = "";
+  lastInboundAt = 0;
 
   Object.assign(runtime, {
     initCount: 0,
@@ -1079,12 +1174,8 @@ export function resetUIRuntimeState() {
     lastError: null,
   });
 
-  return getUISystemsSnapshot();
+  return getUISystemsSnapshot({ AppCore });
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   UI_VERSION,

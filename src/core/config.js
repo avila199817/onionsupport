@@ -3,15 +3,16 @@
    Archivo: src/core/config.js
 
    CORE CONFIG · SIMPLE CONTRACT
-   - Backend real: https://api.onionit.net
+   - backend real: https://api.onionit.net
    - apiBase nunca termina en /api
    - /api/auth/me siempre privado
-   - Rutas SPA canónicas
-   - Rutas técnicas públicas con token preservado
-   - Runtime overrides mínimos y seguros
+   - rutas SPA canónicas
+   - rutas técnicas públicas con token preservado
+   - runtime overrides mínimos y seguros
+   - sin estado mutable, fetch, Auth, Router, Store ni Toast
 ========================================================= */
 
-export const CONFIG_VERSION = "19.0.0-simple";
+export const CONFIG_VERSION = "21.0.0-simple";
 
 export const CANONICAL_PRODUCTION_API_BASE = "https://api.onionit.net";
 
@@ -111,11 +112,7 @@ function clonePlain(value, seen = new WeakMap()) {
 
   if (Array.isArray(value)) {
     const out = [];
-
-    try {
-      seen.set(value, out);
-    } catch {}
-
+    try { seen.set(value, out); } catch {}
     for (const item of value) out.push(clonePlain(item, seen));
     return out;
   }
@@ -123,10 +120,7 @@ function clonePlain(value, seen = new WeakMap()) {
   if (!isPlainObject(value)) return value;
 
   const out = {};
-
-  try {
-    seen.set(value, out);
-  } catch {}
+  try { seen.set(value, out); } catch {}
 
   for (const [key, item] of Object.entries(value)) {
     if (typeof item === "function" || item === undefined) continue;
@@ -137,17 +131,12 @@ function clonePlain(value, seen = new WeakMap()) {
 }
 
 function merge(base = {}, override = {}) {
-  if (Array.isArray(base) && Array.isArray(override)) {
-    return unique([...base, ...override]);
-  }
+  if (Array.isArray(base) && Array.isArray(override)) return unique([...base, ...override]);
 
   const out = clonePlain(isPlainObject(base) || Array.isArray(base) ? base : {});
-
   if (!isPlainObject(override) && !Array.isArray(override)) return out;
 
-  if (Array.isArray(out) && Array.isArray(override)) {
-    return unique([...out, ...override]);
-  }
+  if (Array.isArray(out) && Array.isArray(override)) return unique([...out, ...override]);
 
   for (const [key, value] of Object.entries(override)) {
     if (value === undefined || typeof value === "function") continue;
@@ -175,10 +164,7 @@ function deepFreeze(value, seen = new WeakSet()) {
     if (seen.has(value)) return value;
     seen.add(value);
 
-    for (const key of Object.getOwnPropertyNames(value)) {
-      deepFreeze(value[key], seen);
-    }
-
+    for (const key of Object.getOwnPropertyNames(value)) deepFreeze(value[key], seen);
     return Object.freeze(value);
   } catch {
     return value;
@@ -269,11 +255,8 @@ function normalizePathname(pathname = "/") {
 
   for (const segment of value.split("/")) {
     if (!segment || segment === ".") continue;
-    if (segment === "..") {
-      stack.pop();
-      continue;
-    }
-    stack.push(segment);
+    if (segment === "..") stack.pop();
+    else stack.push(segment);
   }
 
   value = `/${stack.join("/")}`;
@@ -399,10 +382,7 @@ function normalizeApiBase(value = "", { env = "production", fallback = CANONICAL
   if (raw === "/api" || raw === "api") return "";
   if (isForbiddenFrontendApiBase(raw)) return safeFallback;
 
-  if (/^https?:\/\//i.test(raw)) {
-    return normalizeAbsoluteApiBase(raw) || safeFallback;
-  }
-
+  if (/^https?:\/\//i.test(raw)) return normalizeAbsoluteApiBase(raw) || safeFallback;
   return raw.replace(/\/+$/g, "");
 }
 
@@ -420,9 +400,9 @@ function normalizeLang(value = "es") {
   const raw = text(value, "es").toLowerCase().replace(/_/g, "-");
   const first = raw.split("-")[0] || raw;
 
-  if (["spa", "spanish", "castellano", "español"].includes(first)) return "es";
+  if (["spa", "spanish", "castellano", "español", "espanol"].includes(first)) return "es";
   if (["eng", "english"].includes(first)) return "en";
-  if (["cat", "catalan", "català", "catalán"].includes(first)) return "ca";
+  if (["cat", "catalan", "català", "catalán", "catala"].includes(first)) return "ca";
 
   return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(raw) ? raw : "es";
 }
@@ -433,6 +413,24 @@ function normalizeTheme(value = "dark") {
 
 function normalizePublicApiList(list = []) {
   return normalizePathList(list).filter((path) => !isPrivateMePath(path));
+}
+
+function normalizeMap(map = {}, normalizer = (value) => value) {
+  if (!isPlainObject(map)) return {};
+
+  const out = {};
+
+  for (const [key, value] of Object.entries(map)) {
+    const cleanKey = text(key, "");
+    if (!cleanKey) continue;
+
+    const cleanValue = normalizer(value);
+    if (!cleanValue) continue;
+
+    out[cleanKey] = cleanValue;
+  }
+
+  return out;
 }
 
 function pickRuntimeOverrides(runtime = {}) {
@@ -498,36 +496,13 @@ function pickRuntimeOverrides(runtime = {}) {
 
 const runtime = runtimeConfig();
 
-const APP_NAME = text(
-  envValue(["ONION_APP_NAME", "VITE_ONION_APP_NAME", "APP_NAME"], runtime.appName || runtime.name || "Onion Support"),
-  "Onion Support"
-);
+const APP_NAME = text(envValue(["ONION_APP_NAME", "VITE_ONION_APP_NAME", "APP_NAME"], runtime.appName || runtime.name || "Onion Support"), "Onion Support");
+const APP_VERSION = text(envValue(["ONION_APP_VERSION", "VITE_ONION_APP_VERSION", "APP_VERSION"], runtime.version || "2.1.0"), "2.1.0");
+const APP_ENV = text(envValue(["ONION_ENV", "VITE_ONION_ENV", "NODE_ENV", "APP_ENV"], runtime.env || runtime.environment || "production"), "production").toLowerCase();
+const DEBUG = bool(envValue(["ONION_DEBUG", "VITE_ONION_DEBUG", "APP_DEBUG"], runtime.debug ?? false), false);
 
-const APP_VERSION = text(
-  envValue(["ONION_APP_VERSION", "VITE_ONION_APP_VERSION", "APP_VERSION"], runtime.version || "2.1.0"),
-  "2.1.0"
-);
-
-const APP_ENV = text(
-  envValue(["ONION_ENV", "VITE_ONION_ENV", "NODE_ENV", "APP_ENV"], runtime.env || runtime.environment || "production"),
-  "production"
-).toLowerCase();
-
-const DEBUG = bool(
-  envValue(["ONION_DEBUG", "VITE_ONION_DEBUG", "APP_DEBUG"], runtime.debug ?? false),
-  false
-);
-
-const APP_ID = normalizeStoragePrefix(
-  envValue(["ONION_APP_ID", "VITE_ONION_APP_ID", "APP_ID"], runtime.appId || runtime.appKey || "onion")
-);
-
-const STORAGE_PREFIX = normalizeStoragePrefix(
-  envValue(
-    ["ONION_STORAGE_PREFIX", "VITE_ONION_STORAGE_PREFIX", "APP_STORAGE_PREFIX"],
-    runtime.storagePrefix || runtime.appKey || runtime.appId || APP_ID
-  )
-);
+const APP_ID = normalizeStoragePrefix(envValue(["ONION_APP_ID", "VITE_ONION_APP_ID", "APP_ID"], runtime.appId || runtime.appKey || "onion"));
+const STORAGE_PREFIX = normalizeStoragePrefix(envValue(["ONION_STORAGE_PREFIX", "VITE_ONION_STORAGE_PREFIX", "APP_STORAGE_PREFIX"], runtime.storagePrefix || runtime.appKey || runtime.appId || APP_ID));
 
 const RAW_API_BASE = envValue(
   [
@@ -545,19 +520,10 @@ const RAW_API_BASE = envValue(
     "API_URL",
     "PUBLIC_API_ORIGIN",
   ],
-  runtime.apiBase ||
-    runtime.apiOrigin ||
-    runtime.apiUrl ||
-    runtime.api?.base ||
-    runtime.api?.baseUrl ||
-    runtime.api?.origin ||
-    CANONICAL_PRODUCTION_API_BASE
+  runtime.apiBase || runtime.apiOrigin || runtime.apiUrl || runtime.api?.base || runtime.api?.baseUrl || runtime.api?.origin || CANONICAL_PRODUCTION_API_BASE
 );
 
-const API_BASE = normalizeApiBase(RAW_API_BASE, {
-  env: APP_ENV,
-  fallback: CANONICAL_PRODUCTION_API_BASE,
-});
+const API_BASE = normalizeApiBase(RAW_API_BASE, { env: APP_ENV, fallback: CANONICAL_PRODUCTION_API_BASE });
 
 /* =========================================================
    ROUTES
@@ -620,8 +586,15 @@ const ROUTE_ALIASES = Object.freeze({
 
   "/server": ROUTES.servidor,
 
+  "/signin": ROUTES.login,
+  "/sign-in": ROUTES.login,
+  "/auth": ROUTES.login,
+  "/auth/login": ROUTES.login,
+
   "/activate": ROUTES.activateAccount,
   "/activation": ROUTES.activateAccount,
+  "/account/activate": ROUTES.activateAccount,
+  "/activate/first-user": ROUTES.activateAccount,
 
   "/forgot": ROUTES.forgotPassword,
   "/recover": ROUTES.recoverPassword,
@@ -629,6 +602,8 @@ const ROUTE_ALIASES = Object.freeze({
   "/reset-confirm": ROUTES.resetPasswordConfirm,
   "/reset-password-confirm": ROUTES.resetPasswordConfirm,
   "/password-reset/confirm": ROUTES.resetPasswordConfirm,
+  "/password-reset-confirm": ROUTES.resetPasswordConfirm,
+  "/confirm-reset-password": ROUTES.resetPasswordConfirm,
 
   "/2-factor": ROUTES.twoFactor,
   "/two-factor": ROUTES.twoFactor,
@@ -678,6 +653,7 @@ const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
   Object.freeze({
     key: "activation",
     path: ROUTES.activateAccount,
+    aliases: ["/activate", "/activation", "/account/activate", "/activate/first-user"],
     windowKey: "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
     windowKeys: ["__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__"],
     stateUrlKey: "bootActivationInitialUrl",
@@ -689,10 +665,10 @@ const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
     scrubbedHistoryKeys: ["scrubbedActivationToken", "activationTokenScrubbed", "scrubbedActivateAccountToken", "scrubbedPublicTokenRoute", "scrubbedTokenRoute"],
     tokenParamNames: ["token", "activationToken", "activateToken", "activation_token", "activate_token", "code", "t"],
   }),
-
   Object.freeze({
     key: "resetConfirm",
     path: ROUTES.resetPasswordConfirm,
+    aliases: ["/reset-password-confirm", "/password-reset/confirm", "/password-reset-confirm", "/confirm-reset-password"],
     windowKey: "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
     windowKeys: ["__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__", "__ONION_RESET_CONFIRM_INITIAL_URL__"],
     stateUrlKey: "bootResetConfirmInitialUrl",
@@ -889,15 +865,12 @@ const PUBLIC_API_PATHS = Object.freeze(normalizePublicApiList([
 
 const PRIVATE_API_PATHS = Object.freeze(normalizePathList([
   ...PRIVATE_ME_PATHS,
-
   AUTH_ENDPOINTS.logout,
   AUTH_ENDPOINTS.logoutAll,
-
   "/api/auth/2fa/setup",
   "/api/auth/2fa/confirm",
   "/api/auth/2fa/disable",
   "/api/auth/change-password",
-
   "/api/users",
   "/api/usuarios",
   "/api/clientes",
@@ -1085,7 +1058,6 @@ const AUTH = Object.freeze({
     "super-admin": "admin",
     owner: "admin",
     root: "admin",
-
     user: "user",
     usuario: "user",
     client: "user",
@@ -1120,7 +1092,6 @@ const AUTH = Object.freeze({
     persistUser: true,
     persistToken: true,
     allowRefreshContext: true,
-
     requireTokenForAuthenticated: true,
     allowTechnicalAuthenticatedWithoutUser: false,
     clearGhostUserWithoutToken: true,
@@ -1200,7 +1171,7 @@ const ROUTER = Object.freeze({
 const LOADER = Object.freeze({
   staticLoaderId: "app-loader",
   minVisibleMs: 500,
-  failsafeMs: 2500,
+  failsafeMs: 12000,
 
   bootClass: "app-booting",
   loadingClass: "app-loading",
@@ -1219,7 +1190,6 @@ const LOADER = Object.freeze({
 
 const EVENTS = Object.freeze({
   ready: "app:ready",
-
   bootStart: "app:boot:start",
   bootReady: "app:boot:ready",
   bootComplete: "app:boot:complete",
@@ -1247,26 +1217,20 @@ const EVENTS = Object.freeze({
 const FEATURE_FLAGS = Object.freeze({
   restoreSessionOnBoot: true,
   renderPublicTokenRouteBeforeRestore: true,
-
   preserveActivationUrl: true,
   preserveResetConfirmUrl: true,
-
   bindRouterAfterFirstRender: true,
   enableBootFailsafe: true,
   enableNetworkEvents: true,
   enableToastBridge: true,
-
   enableShellSnapshots: true,
   enableDebugSnapshots: true,
-
   clearGhostUserWithoutToken: true,
   requireAuthorizationForMe: true,
   keepMeEndpointPrivate: true,
-
   enableRequestDedupe: true,
   enableRequestRetry: true,
   enableRequestAbort: true,
-
   enableRuntimeConfig: true,
   forceCanonicalProductionApiBase: true,
 });
@@ -1275,13 +1239,10 @@ const DIAGNOSTICS = Object.freeze({
   enabled: DEBUG,
   logPrefix: "[Onion]",
   redactTokens: true,
-
   emitSnapshots: true,
   maxRecentErrors: 12,
   maxRecentEvents: 25,
-
   exposeDebugBridge: true,
-
   requestLifecycleEvents: false,
   requestRetryEvents: false,
   requestDedupeEvents: false,
@@ -1291,16 +1252,12 @@ const SECURITY = Object.freeze({
   privateSpa: true,
   noIndex: true,
   redactTokens: true,
-
   preserveTechnicalTokenUrlUntilViewCapture: true,
   allowHashRouterTokenRoutes: true,
-
   canonicalProductionApiBase: CANONICAL_PRODUCTION_API_BASE,
   canonicalBackendApiOrigins: CANONICAL_BACKEND_API_ORIGINS,
   forbiddenFrontendApiOrigins: FORBIDDEN_FRONTEND_API_ORIGINS,
-
   unsafeHrefProtocols: ["javascript:", "data:", "vbscript:"],
-
   sensitiveQueryParams: [
     "token",
     "activationToken",
@@ -1350,12 +1307,16 @@ function normalizeProtectedTokenRoutes(list = []) {
     if (seen.has(dedupe)) continue;
     seen.add(dedupe);
 
+    const aliases = normalizePathList(item.aliases || []);
+    const paths = normalizePathList([path, ...aliases, ...(item.paths || [])]);
     const windowKeys = unique([...toArray(item.windowKeys), item.windowKey]);
 
     out.push({
       ...item,
       key,
       path,
+      aliases,
+      paths,
       windowKey: item.windowKey || windowKeys[0] || "",
       windowKeys,
       tokenParamNames: unique(item.tokenParamNames || []),
@@ -1382,7 +1343,6 @@ function normalizeEndpoints(endpoints = {}) {
   out.accountActivation = "/api/auth/activate";
   out.createUserActivation = "/api/auth/activate";
   out.confirmActivation = "/api/auth/activate";
-
   out.activateAccountLegacy = "/api/auth/activate-account";
   out.activationLegacy = "/api/auth/activate-account";
 
@@ -1397,30 +1357,10 @@ function normalizeCandidates(candidates = {}) {
   const source = merge(AUTH_ENDPOINT_CANDIDATES, isPlainObject(candidates) ? candidates : {});
   const out = {};
 
-  for (const [key, value] of Object.entries(source)) {
-    out[key] = normalizePathList(value);
-  }
+  for (const [key, value] of Object.entries(source)) out[key] = normalizePathList(value);
 
   out.me = normalizePathList(["/api/auth/me", "/auth/me", "/api/me", "/me"]);
   out.activateAccount = normalizePathList(["/api/auth/activate", "/api/auth/activate-account", ...(out.activateAccount || [])]);
-
-  return out;
-}
-
-function normalizeMap(map = {}, normalizer = (value) => value) {
-  if (!isPlainObject(map)) return {};
-
-  const out = {};
-
-  for (const [key, value] of Object.entries(map)) {
-    const cleanKey = text(key, "");
-    if (!cleanKey) continue;
-
-    const cleanValue = normalizer(value);
-    if (!cleanValue) continue;
-
-    out[cleanKey] = cleanValue;
-  }
 
   return out;
 }
@@ -1431,10 +1371,8 @@ function buildBaseConfig() {
 
     appName: APP_NAME,
     name: APP_NAME,
-
     appId: APP_ID,
     appKey: STORAGE_PREFIX,
-
     version: APP_VERSION,
     env: APP_ENV,
     environment: APP_ENV,
@@ -1493,11 +1431,9 @@ function normalizeFinalConfig(input = {}) {
 
   out.appName = text(out.appName || out.name, APP_NAME);
   out.name = out.appName;
-
   out.version = text(out.version, APP_VERSION);
   out.env = text(out.env || out.environment, APP_ENV).toLowerCase();
   out.environment = out.env;
-
   out.debug = bool(out.debug, DEBUG);
 
   out.appId = normalizeStoragePrefix(out.appId || APP_ID || "onion");
@@ -1508,13 +1444,10 @@ function normalizeFinalConfig(input = {}) {
   out.canonicalBackendApiOrigins = CANONICAL_BACKEND_API_ORIGINS;
   out.forbiddenFrontendApiOrigins = FORBIDDEN_FRONTEND_API_ORIGINS;
 
-  out.apiBase = normalizeApiBase(
-    out.apiBase || out.apiOrigin || out.apiUrl || out.api?.base || out.api?.baseUrl || out.api?.origin || API_BASE,
-    {
-      env: out.env,
-      fallback: CANONICAL_PRODUCTION_API_BASE,
-    }
-  );
+  out.apiBase = normalizeApiBase(out.apiBase || out.apiOrigin || out.apiUrl || out.api?.base || out.api?.baseUrl || out.api?.origin || API_BASE, {
+    env: out.env,
+    fallback: CANONICAL_PRODUCTION_API_BASE,
+  });
 
   out.apiOrigin = out.apiBase;
   out.apiUrl = out.apiBase;
@@ -1526,49 +1459,16 @@ function normalizeFinalConfig(input = {}) {
   out.routes = normalizeMap(merge(ROUTES, out.routes || {}), normalizePath);
   out.routeAliases = normalizeMap(merge(ROUTE_ALIASES, out.routeAliases || {}), stripSearchAndHash);
 
-  out.publicRoutes = normalizePathList([
-    ...PUBLIC_ROUTES,
-    ...(out.publicRoutes || []),
-    ...(out.router?.publicRoutes || []),
-  ]);
-
-  out.authLikeRoutes = normalizePathList([
-    ...AUTH_LIKE_ROUTES,
-    ...(out.authLikeRoutes || []),
-    ...(out.router?.authLikeRoutes || []),
-  ]);
-
-  out.technicalPublicRoutes = normalizePathList([
-    ...TECHNICAL_PUBLIC_ROUTES,
-    ...(out.technicalPublicRoutes || []),
-    ...(out.auth?.technicalPublicRoutes || []),
-    ...(out.router?.technicalPublicRoutes || []),
-  ]);
-
-  out.protectedPublicTokenRoutes = normalizeProtectedTokenRoutes([
-    ...PROTECTED_PUBLIC_TOKEN_ROUTES,
-    ...(out.protectedPublicTokenRoutes || []),
-    ...(out.auth?.protectedPublicTokenRoutes || []),
-    ...(out.router?.protectedPublicTokenRoutes || []),
-  ]);
+  out.publicRoutes = normalizePathList([...PUBLIC_ROUTES, ...(out.publicRoutes || []), ...(out.router?.publicRoutes || [])]);
+  out.authLikeRoutes = normalizePathList([...AUTH_LIKE_ROUTES, ...(out.authLikeRoutes || []), ...(out.router?.authLikeRoutes || [])]);
+  out.technicalPublicRoutes = normalizePathList([...TECHNICAL_PUBLIC_ROUTES, ...(out.technicalPublicRoutes || []), ...(out.auth?.technicalPublicRoutes || []), ...(out.router?.technicalPublicRoutes || [])]);
+  out.protectedPublicTokenRoutes = normalizeProtectedTokenRoutes([...PROTECTED_PUBLIC_TOKEN_ROUTES, ...(out.protectedPublicTokenRoutes || []), ...(out.auth?.protectedPublicTokenRoutes || []), ...(out.router?.protectedPublicTokenRoutes || [])]);
 
   out.storageKeys = merge(STORAGE_KEYS, out.storageKeys || {});
   out.legacyStorageKeys = merge(LEGACY_STORAGE_KEYS, out.legacyStorageKeys || {});
 
-  out.publicApiPaths = normalizePublicApiList([
-    ...PUBLIC_API_PATHS,
-    ...(out.publicApiPaths || []),
-    ...(out.api?.publicPaths || []),
-    ...(out.auth?.publicApiPaths || []),
-  ]);
-
-  out.privateApiPaths = normalizePathList([
-    ...PRIVATE_API_PATHS,
-    ...PRIVATE_ME_PATHS,
-    ...(out.privateApiPaths || []),
-    ...(out.api?.privatePaths || []),
-    ...(out.auth?.privateApiPaths || []),
-  ]);
+  out.publicApiPaths = normalizePublicApiList([...PUBLIC_API_PATHS, ...(out.publicApiPaths || []), ...(out.api?.publicPaths || []), ...(out.auth?.publicApiPaths || [])]);
+  out.privateApiPaths = normalizePathList([...PRIVATE_API_PATHS, ...PRIVATE_ME_PATHS, ...(out.privateApiPaths || []), ...(out.api?.privatePaths || []), ...(out.auth?.privateApiPaths || [])]);
 
   out.api = merge(API, out.api || {});
   out.api.base = out.apiBase;
@@ -1654,18 +1554,11 @@ function normalizeFinalConfig(input = {}) {
   out.security.canonicalBackendApiOrigins = CANONICAL_BACKEND_API_ORIGINS;
   out.security.forbiddenFrontendApiOrigins = FORBIDDEN_FRONTEND_API_ORIGINS;
   out.security.redactTokens = true;
-  out.security.sensitiveQueryParams = unique([
-    ...SECURITY.sensitiveQueryParams,
-    ...(out.security.sensitiveQueryParams || []),
-  ]);
+  out.security.sensitiveQueryParams = unique([...SECURITY.sensitiveQueryParams, ...(out.security.sensitiveQueryParams || [])]);
 
   /* Candados finales: ningún override puede saltarlos. */
 
-  out.apiBase = normalizeApiBase(out.apiBase, {
-    env: out.env,
-    fallback: CANONICAL_PRODUCTION_API_BASE,
-  });
-
+  out.apiBase = normalizeApiBase(out.apiBase, { env: out.env, fallback: CANONICAL_PRODUCTION_API_BASE });
   out.apiOrigin = out.apiBase;
   out.apiUrl = out.apiBase;
 
@@ -1688,11 +1581,7 @@ function normalizeFinalConfig(input = {}) {
   return out;
 }
 
-export const config = deepFreeze(
-  normalizeFinalConfig(
-    merge(buildBaseConfig(), pickRuntimeOverrides(runtime))
-  )
-);
+export const config = deepFreeze(normalizeFinalConfig(merge(buildBaseConfig(), pickRuntimeOverrides(runtime))));
 
 /* =========================================================
    PUBLIC HELPERS
@@ -1743,10 +1632,7 @@ function apiBasePath() {
   if (!apiBase) return "";
 
   try {
-    if (/^[a-z][a-z\d+.-]*:\/\//i.test(apiBase)) {
-      return stripSearchAndHash(new URL(apiBase, baseOrigin()).pathname || "");
-    }
-
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(apiBase)) return stripSearchAndHash(new URL(apiBase, baseOrigin()).pathname || "");
     return stripSearchAndHash(apiBase);
   } catch {
     return "";
@@ -1781,12 +1667,10 @@ export function isPublicApiPath(path = "") {
     const current = stripSearchAndHash(normalizePath(item));
     const currentWithoutBase = stripApiBasePrefix(current);
 
-    return (
-      pathMatches(clean, current) ||
+    return pathMatches(clean, current) ||
       pathMatches(withoutBase, current) ||
       pathMatches(clean, currentWithoutBase) ||
-      pathMatches(withoutBase, currentWithoutBase)
-    );
+      pathMatches(withoutBase, currentWithoutBase);
   });
 }
 
@@ -1800,12 +1684,10 @@ export function isPrivateApiPath(path = "") {
     const current = stripSearchAndHash(normalizePath(item));
     const currentWithoutBase = stripApiBasePrefix(current);
 
-    return (
-      pathMatches(clean, current) ||
+    return pathMatches(clean, current) ||
       pathMatches(withoutBase, current) ||
       pathMatches(clean, currentWithoutBase) ||
-      pathMatches(withoutBase, currentWithoutBase)
-    );
+      pathMatches(withoutBase, currentWithoutBase);
   });
 }
 
@@ -1884,6 +1766,8 @@ export function getConfigSnapshot() {
     protectedPublicTokenRoutes: config.protectedPublicTokenRoutes.map((route) => ({
       key: route.key,
       path: route.path,
+      aliases: route.aliases || [],
+      paths: route.paths || [],
       windowKey: route.windowKey,
       windowKeys: route.windowKeys,
       tokenParamNames: route.tokenParamNames,
@@ -1891,6 +1775,9 @@ export function getConfigSnapshot() {
 
     publicApiPaths: config.auth.publicApiPaths,
     privateApiPaths: config.auth.privateApiPaths,
+
+    meIsPublic: isPublicApiPath("/api/auth/me"),
+    meIsPrivate: isPrivateApiPath("/api/auth/me"),
 
     authEndpoints: config.auth.endpoints,
     authEndpointCandidates: config.auth.endpointCandidates,
@@ -1903,6 +1790,15 @@ export function getConfigSnapshot() {
     ui: config.ui,
     featureFlags: config.featureFlags,
     diagnostics: config.diagnostics,
+
+    policy: {
+      configOnly: true,
+      ownAuth: false,
+      ownRouter: false,
+      ownFetch: false,
+      mePrivate: true,
+      canonicalApiBase: true,
+    },
   };
 }
 

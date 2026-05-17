@@ -1,69 +1,21 @@
 {
   "name": "Onion Support",
   "short_name": "Onion",
-  "description": "Onion Support · Panel privado SaaS de soporte, incidencias, facturación y gestión interna.",
+  "description": "Panel privado de soporte.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#0a0c11",
   "theme_color": "#0a0c11",
-  "orientation": "any",
-  "dir": "ltr",
   "lang": "es",
-  "categories": [
-    "business",
-    "productivity",
-    "utilities"
-  ],
-  "prefer_related_applications": false,
+  "dir": "ltr",
   "icons": [
     {
       "src": "/src/media/img/favicon_black_circle.png?v=6",
       "sizes": "128x128",
       "type": "image/png",
       "purpose": "any"
-    }
-  ],
-  "shortcuts": [
-    {
-      "name": "Incidencias",
-      "short_name": "Incidencias",
-      "description": "Abrir el panel de incidencias.",
-      "url": "/incidencias",
-      "icons": [
-        {
-          "src": "/src/media/img/favicon_black_circle.png?v=6",
-          "sizes": "128x128",
-          "type": "image/png"
-        }
-      ]
-    },
-    {
-      "name": "Facturas",
-      "short_name": "Facturas",
-      "description": "Abrir el panel de facturación.",
-      "url": "/facturas",
-      "icons": [
-        {
-          "src": "/src/media/img/favicon_black_circle.png?v=6",
-          "sizes": "128x128",
-          "type": "image/png"
-        }
-      ]
-    },
-    {
-      "name": "Clientes",
-      "short_name": "Clientes",
-      "description": "Abrir el panel de clientes.",
-      "url": "/clientes",
-      "icons": [
-        {
-          "src": "/src/media/img/favicon_black_circle.png?v=6",
-          "sizes": "128x128",
-          "type": "image/png"
-        }
-      ]
     }
   ]
 }

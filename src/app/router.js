@@ -2,13 +2,13 @@
    Onion SPA - App Router Bootstrap
    Archivo: src/app/router.js
 
-   APP ROUTER · FINAL SIMPLE
-   - Adaptador fino de boot sobre Router real
-   - Configura Router una vez
-   - Bindea Router una vez
-   - Render inicial serializado
-   - Preserva publicPath y rutas técnicas con token
-   - Sin Auth real, restore, refresh, fetch, storage, Toast, guards propios ni history propio
+   APP ROUTER · SIMPLE WRAPPER
+   - adaptador fino sobre Router real
+   - configura Router una vez
+   - bindea Router una vez
+   - render inicial serializado
+   - preserva publicPath y rutas técnicas con token
+   - sin Auth real, guards, history, fetch, storage ni Toast propios
 ========================================================= */
 
 import { AppCore as ImportedAppCore } from "../core/index.js";
@@ -23,11 +23,7 @@ import {
   redactTokenInText,
 } from "../router/helpers.js";
 
-/* =========================================================
-   VERSION / CONSTANTS
-========================================================= */
-
-export const ROUTER_BOOTSTRAP_VERSION = "20.0.0-final";
+export const ROUTER_BOOTSTRAP_VERSION = "21.0.0-simple";
 
 const SOURCE = "app.router";
 const DEFAULT_ROUTE = "/";
@@ -41,10 +37,6 @@ const EVENTS = Object.freeze({
   initialRenderError: "app:router:initial-render:error",
   reset: "app:router:reset",
 });
-
-/* =========================================================
-   RUNTIME
-========================================================= */
 
 let RuntimeAppCore = ImportedAppCore;
 let RuntimeRouter = ImportedRouter;
@@ -75,7 +67,7 @@ const bootState = {
 
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
 const isFn = (value) => typeof value === "function";
-const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
 
 function object(value, fallback = {}) {
   return isObject(value) ? value : fallback;
@@ -140,13 +132,11 @@ function sanitize(value, depth = 0, keyHint = "") {
   if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitize(item, depth + 1, keyHint));
 
   if (isObject(value)) {
-    const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = sanitize(item, depth + 1, key);
-    }
-
-    return output;
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 80)
+        .map(([key, item]) => [key, sanitize(item, depth + 1, key)])
+    );
   }
 
   return String(value);
@@ -238,7 +228,14 @@ function exposeRouterToCore() {
   } catch {}
 
   try {
-    RuntimeAppCore?.modules?.register?.("Router", RuntimeRouter, { overwrite: true, replace: true, aliases: ["router"], source: SOURCE, emit: false, silent: true });
+    RuntimeAppCore?.modules?.register?.("Router", RuntimeRouter, {
+      overwrite: true,
+      replace: true,
+      aliases: ["router"],
+      source: SOURCE,
+      emit: false,
+      silent: true,
+    });
   } catch {}
 
   try {
@@ -258,18 +255,19 @@ function browserPath() {
 
   try {
     const { pathname, search, hash } = window.location;
-    if (hash?.startsWith?.("#/") || hash?.startsWith?.("#!")) return hash.replace(/^#!?\/?/, "/") || DEFAULT_ROUTE;
+    if (hash?.startsWith?.("#/")) return hash.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
+    if (hash?.startsWith?.("#!")) return hash.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
     return `${pathname || DEFAULT_ROUTE}${search || ""}${hash || ""}`;
   } catch {
     return DEFAULT_ROUTE;
   }
 }
 
-function currentPublicPath() {
+function currentPublicPath(fallback = DEFAULT_ROUTE) {
   try {
-    return RuntimeRouter?.getCurrentPublicPath?.() || getCurrentPublicPath(RuntimeAppCore) || browserPath() || DEFAULT_ROUTE;
+    return RuntimeRouter?.getCurrentPublicPath?.() || getCurrentPublicPath(RuntimeAppCore) || browserPath() || fallback;
   } catch {
-    return browserPath() || DEFAULT_ROUTE;
+    return browserPath() || fallback;
   }
 }
 
@@ -282,13 +280,19 @@ function protectedInitialPath() {
   }
 }
 
-function initialContext(reason = "initial-render") {
+function explicitPathFromDeps(deps = {}) {
+  return text(deps.publicPath || deps.path || deps.requestedPath || deps.route || "", "");
+}
+
+function initialContext(deps = {}) {
+  const data = object(deps);
   const protectedPath = protectedInitialPath();
-  const publicPath = protectedPath || currentPublicPath() || DEFAULT_ROUTE;
+  const explicitPath = explicitPathFromDeps(data);
+  const publicPath = protectedPath || explicitPath || currentPublicPath(DEFAULT_ROUTE) || DEFAULT_ROUTE;
   const canonicalPath = normalizeCanonicalPath(RuntimeAppCore, publicPath) || DEFAULT_ROUTE;
 
   return {
-    reason,
+    reason: text(data.reason, "initial-render"),
     publicPath,
     canonicalPath,
     protectedPublicPath: protectedPath,
@@ -323,7 +327,10 @@ function renderOptions(ctx = {}, cycleId = 0) {
 
 function markInitialRenderDone(value = true) {
   firstRenderDone = Boolean(value);
-  setState({ initialRouteRendered: Boolean(value), bootNavigationHandled: Boolean(value) });
+  setState({
+    initialRouteRendered: Boolean(value),
+    bootNavigationHandled: Boolean(value),
+  });
 }
 
 /* =========================================================
@@ -339,7 +346,14 @@ export function configureRouter(deps = {}) {
 
   try {
     if (isFn(RuntimeRouter?.configure)) {
-      const result = RuntimeRouter.configure({ AppCore: RuntimeAppCore, core: RuntimeAppCore, Auth: RuntimeAuth, auth: RuntimeAuth, source: SOURCE });
+      const result = RuntimeRouter.configure({
+        AppCore: RuntimeAppCore,
+        core: RuntimeAppCore,
+        Auth: RuntimeAuth,
+        auth: RuntimeAuth,
+        source: SOURCE,
+      });
+
       if (result === false) return false;
     }
 
@@ -365,14 +379,27 @@ export function bindRouter(deps = {}) {
 
   try {
     if (isFn(RuntimeRouter?.bind)) {
-      const result = RuntimeRouter.bind({ AppCore: RuntimeAppCore, core: RuntimeAppCore, Auth: RuntimeAuth, auth: RuntimeAuth, initialRenderDone: firstRenderDone, source: SOURCE });
+      const result = RuntimeRouter.bind({
+        AppCore: RuntimeAppCore,
+        core: RuntimeAppCore,
+        Auth: RuntimeAuth,
+        auth: RuntimeAuth,
+        initialRenderDone: firstRenderDone,
+        source: SOURCE,
+      });
+
       if (result === false) return false;
     }
 
     bound = true;
     bootState.lastBoundAt = now();
 
-    emit(EVENTS.bound, { bound: true, initialRenderDone: firstRenderDone, at: iso(bootState.lastBoundAt) });
+    emit(EVENTS.bound, {
+      bound: true,
+      initialRenderDone: firstRenderDone,
+      at: iso(bootState.lastBoundAt),
+    });
+
     return true;
   } catch (error) {
     bound = false;
@@ -404,14 +431,15 @@ async function runInitialRender(ctx = {}, cycleId = 0) {
 
   let result = null;
 
-  if (isFn(RuntimeRouter?.render)) {
-    result = await RuntimeRouter.render(path, options);
-  } else if (isFn(RuntimeRouter?.navigate)) {
-    result = await RuntimeRouter.navigate(path, options);
-  } else if (isFn(RuntimeRouter?.renderCurrent)) {
-    result = await RuntimeRouter.renderCurrent(options);
-  } else {
-    setState({ route: data.canonicalPath || DEFAULT_ROUTE, canonicalPath: data.canonicalPath || DEFAULT_ROUTE, publicPath: path });
+  if (isFn(RuntimeRouter?.render)) result = await RuntimeRouter.render(path, options);
+  else if (isFn(RuntimeRouter?.navigate)) result = await RuntimeRouter.navigate(path, options);
+  else if (isFn(RuntimeRouter?.renderCurrent)) result = await RuntimeRouter.renderCurrent(options);
+  else {
+    setState({
+      route: data.canonicalPath || DEFAULT_ROUTE,
+      canonicalPath: data.canonicalPath || DEFAULT_ROUTE,
+      publicPath: path,
+    });
     result = { ok: false, rendered: false, reason: "router-render-missing" };
   }
 
@@ -446,7 +474,7 @@ export function renderInitialRoute(deps = {}) {
   if (initialRenderPromise) return initialRenderPromise;
 
   const cycleId = ++renderCycle;
-  const ctx = initialContext(deps?.reason || "initial-render");
+  const ctx = initialContext(deps);
 
   initialRenderPromise = runInitialRender(ctx, cycleId)
     .then((result) => result !== false)
@@ -463,7 +491,12 @@ export function renderInitialRoute(deps = {}) {
         at: iso(),
       });
 
-      warn("Fallo render inicial", { canonicalPath: ctx.canonicalPath, publicPath: ctx.publicPath, error });
+      warn("Fallo render inicial", {
+        canonicalPath: ctx.canonicalPath,
+        publicPath: ctx.publicPath,
+        error,
+      });
+
       return false;
     })
     .finally(() => {
@@ -508,6 +541,7 @@ export function getRouterBootstrapState() {
   resolveDeps();
 
   let routerSnapshot = null;
+
   try {
     routerSnapshot = RuntimeRouter?.getSnapshot?.() || RuntimeRouter?.getDebugSnapshot?.() || RuntimeRouter?.getState?.() || null;
   } catch {}
@@ -537,7 +571,9 @@ export function getRouterBootstrapState() {
     lastRenderOk: bootState.lastRenderOk,
     lastRenderError: bootState.lastRenderError,
     lastConfiguredAt: bootState.lastConfiguredAt,
+    lastConfiguredAtIso: bootState.lastConfiguredAt ? iso(bootState.lastConfiguredAt) : "",
     lastBoundAt: bootState.lastBoundAt,
+    lastBoundAtIso: bootState.lastBoundAt ? iso(bootState.lastBoundAt) : "",
     routerSnapshot,
     policy: {
       wrapperOnly: true,
@@ -572,7 +608,12 @@ function exposeDebugApi() {
 
   try {
     if (RuntimeAppCore && typeof RuntimeAppCore === "object" && Object.isExtensible(RuntimeAppCore)) {
-      Object.defineProperty(RuntimeAppCore, "RouterBootstrap", { value: api, configurable: true, enumerable: false, writable: true });
+      Object.defineProperty(RuntimeAppCore, "RouterBootstrap", {
+        value: api,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+      });
     }
   } catch {}
 
@@ -580,10 +621,6 @@ function exposeDebugApi() {
 }
 
 exposeDebugApi();
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default {
   ROUTER_BOOTSTRAP_VERSION,

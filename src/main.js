@@ -2,17 +2,17 @@
    Onion SPA - Entry Point
    Archivo: src/main.js
 
-   MAIN · FINAL SIMPLE
-   - Único entrypoint cargado por index.html
-   - Captura URL inicial antes del boot
-   - Desactiva auto-boot legacy
-   - Importa app/index.js
-   - Ejecuta App.boot() una sola vez
-   - Fallback fatal mínimo si el boot no llega a app/errors.js
-   - Sin Auth, Router, Services, Store, Toast, vistas, fetch ni storage
+   MAIN · SIMPLE
+   - único entrypoint cargado por index.html
+   - captura URL inicial antes del boot
+   - desactiva auto-boot legacy antes de importar App
+   - importa app/index.js bajo demanda
+   - ejecuta App.boot() una sola vez
+   - fallback fatal mínimo si app/errors.js no llega a responder
+   - sin Auth, Router, Services, Store, Toast, vistas, fetch ni storage
 ========================================================= */
 
-export const MAIN_VERSION = "20.0.0-final";
+export const MAIN_VERSION = "21.0.0-simple";
 
 const APP_MODULE_PATH = "./app/index.js";
 
@@ -33,6 +33,7 @@ let appModulePromise = null;
 let bootPromise = null;
 let startedAt = 0;
 let failed = false;
+let initialBootContext = null;
 
 /* =========================================================
    BASICS
@@ -40,7 +41,7 @@ let failed = false;
 
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
 const isFn = (value) => typeof value === "function";
-const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
 
 function object(value, fallback = {}) {
   return isObject(value) ? value : fallback;
@@ -152,9 +153,7 @@ function redact(value = "") {
 }
 
 function serializeError(error) {
-  if (!error) {
-    return { name: "UnknownError", message: DEFAULT_ERROR_MESSAGE };
-  }
+  if (!error) return { name: "UnknownError", message: DEFAULT_ERROR_MESSAGE };
 
   if (error instanceof Error) {
     return {
@@ -398,13 +397,11 @@ function hideLoaderFallback() {
 function getFatalRoot() {
   if (!isBrowser()) return null;
 
-  return (
-    document.getElementById("view-container") ||
+  return document.getElementById("view-container") ||
     document.getElementById("app-content") ||
     document.getElementById("main-content") ||
     document.body ||
-    null
-  );
+    null;
 }
 
 function empty(node) {
@@ -430,6 +427,7 @@ function createFatalView(error) {
   section.className = "content-wrapper boot-error-view";
   section.setAttribute("role", "alert");
   section.setAttribute("aria-live", "assertive");
+  section.dataset.view = "boot-error";
 
   const card = document.createElement("div");
   card.className = "panel-block boot-error-card";
@@ -610,6 +608,15 @@ export function getState() {
     appLoaded: Boolean(appModule),
     initialUrl: redact(currentHref()),
     initialPath: redact(currentPath()),
+    bootContext: initialBootContext
+      ? {
+          source: initialBootContext.source,
+          version: initialBootContext.version,
+          initialPath: redact(initialBootContext.initialPath),
+          initialUrl: redact(initialBootContext.initialUrl),
+          capturedAt: initialBootContext.capturedAt,
+        }
+      : null,
   };
 }
 
@@ -642,10 +649,11 @@ function exposeDebugBridge() {
 ========================================================= */
 
 disableLegacyAutoBoot();
-captureBootContext();
+initialBootContext = captureBootContext();
+markBooting();
 exposeDebugBridge();
 
-start().catch(() => {
+void start({ source: "main", bootContext: initialBootContext }).catch(() => {
   /* handleFatal() ya pintó fallback. */
 });
 

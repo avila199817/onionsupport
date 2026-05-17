@@ -2,12 +2,13 @@
    Onion SPA - Auth Normalize
    Archivo: src/features/auth/normalize.js
 
-   AUTH NORMALIZE · FINAL SIMPLE
-   - Normalizador puro de Auth
-   - Sin CoreHttp, storage, session, Router, Toast ni side effects
+   AUTH NORMALIZE · SIMPLE
+   - normalizador puro de Auth
+   - sin CoreHttp, storage, session, Router, Toast ni side effects
    - token + user usable = authenticated
    - token-only/user-only no autentican
-   - Roles reales: admin / user
+   - roles reales: admin / user
+   - tokens/session values no se truncan: si exceden límite, se invalidan
 ========================================================= */
 
 import {
@@ -22,11 +23,7 @@ import {
   AUTH_2FA_STATUSES as AUTH_2FA_STATUS_LIST,
 } from "./constants.js";
 
-/* =========================================================
-   META / CONSTANTS
-========================================================= */
-
-export const AUTH_NORMALIZE_VERSION = "20.0.0-final";
+export const AUTH_NORMALIZE_VERSION = "21.0.0-simple";
 
 const DEFAULT_TOKEN_MAX_LENGTH = 8192;
 const DEFAULT_SESSION_VALUE_MAX_LENGTH = 200;
@@ -40,6 +37,7 @@ const ADMIN_ALIASES = new Set([
   "administrador",
   "superadmin",
   "super_admin",
+  "super-admin",
   "owner",
   "root",
 ]);
@@ -205,6 +203,12 @@ const USER_IDENTITY_KEYS = Object.freeze([
   "phone",
   "telefono",
   "mobile",
+  "name",
+  "nombre",
+  "displayName",
+  "display_name",
+  "fullName",
+  "full_name",
 ]);
 
 const AUTH_ENVELOPE_KEYS = Object.freeze([
@@ -258,8 +262,7 @@ const DISABLED_STATUS = new Set([
   "suspendido",
 ]);
 
-const SENSITIVE_RAW_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
+const SENSITIVE_RAW_KEY_RE = /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
 
 /* =========================================================
    BASICS
@@ -295,12 +298,17 @@ function safeObject(value) {
 
 function toArray(value) {
   if (Array.isArray(value)) return value;
+  if (value instanceof Set) return [...value];
   if (value === null || value === undefined) return [];
   return [value];
 }
 
 function hasOwn(obj, key) {
-  return Boolean(obj && typeof obj === "object" && Object.prototype.hasOwnProperty.call(obj, key));
+  try {
+    return Boolean(obj && typeof obj === "object" && Object.prototype.hasOwnProperty.call(obj, key));
+  } catch {
+    return false;
+  }
 }
 
 function first(...values) {
@@ -328,12 +336,12 @@ function unique(values = []) {
 
 function normalizeBoolean(value, fallback = false) {
   if (typeof value === "boolean") return value;
-  if (value === 1) return true;
-  if (value === 0) return false;
+  if (value === 1 || value === "1") return true;
+  if (value === 0 || value === "0") return false;
 
   const key = safeLower(value);
-  if (["1", "true", "yes", "on", "si", "sí", "ok", "enabled", "active"].includes(key)) return true;
-  if (["0", "false", "no", "off", "disabled", "inactive"].includes(key)) return false;
+  if (["true", "yes", "on", "si", "sí", "ok", "enabled", "active"].includes(key)) return true;
+  if (["false", "no", "off", "disabled", "inactive"].includes(key)) return false;
 
   return Boolean(fallback);
 }
@@ -350,9 +358,16 @@ function getSessionValueMaxLength() {
   return safeNumber(AUTH_CONSTANTS?.sessionValueMaxLength, DEFAULT_SESSION_VALUE_MAX_LENGTH) || DEFAULT_SESSION_VALUE_MAX_LENGTH;
 }
 
-function safeSessionValue(value = "") {
-  const text = safeText(value, "");
-  return text ? text.slice(0, getSessionValueMaxLength()) : "";
+function normalizeSessionValue(value = "") {
+  if (value === null || value === undefined) return "";
+
+  const normalized = String(value).normalize("NFKC").trim().replace(/[\r\n\t]/g, "");
+  if (!normalized || TOKEN_FALSE_VALUES.has(normalized.toLowerCase())) return "";
+
+  const max = getSessionValueMaxLength();
+  if (max > 0 && normalized.length > max) return "";
+
+  return normalized;
 }
 
 /* =========================================================
@@ -399,7 +414,9 @@ function normalizeKey(value = "") {
 
 function extractTrueKeys(map = {}) {
   if (!isObject(map)) return [];
-  return Object.entries(map).filter(([, value]) => normalizeBoolean(value, false)).map(([key]) => key);
+  return Object.entries(map)
+    .filter(([, value]) => normalizeBoolean(value, false))
+    .map(([key]) => key);
 }
 
 export function normalizeRoleList(value) {
@@ -738,7 +755,7 @@ function isSafeAvatarUrl(url = "") {
   const lower = value.toLowerCase();
 
   if (!value) return false;
-  return !(lower.startsWith("javascript:") || lower.startsWith("vbscript:") || lower.startsWith("data:text/html") || lower.startsWith("data:application/"));
+  return !(lower.startsWith("javascript:") || lower.startsWith("vbscript:") || lower.startsWith("data:text/html") || lower.startsWith("data:application/") || lower.startsWith("data:image/svg"));
 }
 
 function normalizeAvatarUrl(rawUser = {}) {
@@ -825,7 +842,10 @@ export function normalizeUser(rawUser = null) {
     name: displayName,
     nombre: displayName,
     fullName: displayName,
+    full_name: displayName,
     displayName,
+    footerName: displayName,
+    greetingName: displayName,
 
     email,
     emailLower: email,
@@ -837,6 +857,7 @@ export function normalizeUser(rawUser = null) {
 
     role,
     rol: role,
+    userRole: role,
     roles,
 
     permissions,
@@ -894,6 +915,11 @@ export function normalizeUser(rawUser = null) {
   };
 }
 
+export function isUsableUser(user = null) {
+  const normalized = normalizeUser(user);
+  return Boolean(normalized && normalized.active !== false && (normalized.id || normalized.userId || normalized.username || normalized.email));
+}
+
 /* =========================================================
    USER / SESSION EXTRACTORS
 ========================================================= */
@@ -930,8 +956,8 @@ export function normalizeSessionPayload(payload = null) {
   const sessionNode = pickObjectFromObjects(objects, SESSION_KEYS) || {};
   const user = extractUser(payload);
 
-  const sessionId = safeSessionValue(first(sessionNode.sessionId, sessionNode.session_id, sessionNode.sid, sessionNode.id, pickValueFromObjects(objects, ["sessionId", "session_id", "sid"])) || "");
-  const userId = safeSessionValue(first(sessionNode.sessionUserId, sessionNode.session_user_id, sessionNode.userId, sessionNode.user_id, sessionNode.uid, sessionNode.sub, pickValueFromObjects(objects, ["sessionUserId", "session_user_id", "userId", "user_id", "uid", "sub"]), user?.userId, user?.id, user?.email) || "");
+  const sessionId = normalizeSessionValue(first(sessionNode.sessionId, sessionNode.session_id, sessionNode.sid, sessionNode.id, pickValueFromObjects(objects, ["sessionId", "session_id", "sid"])) || "");
+  const userId = normalizeSessionValue(first(sessionNode.sessionUserId, sessionNode.session_user_id, sessionNode.userId, sessionNode.user_id, sessionNode.uid, sessionNode.sub, pickValueFromObjects(objects, ["sessionUserId", "session_user_id", "userId", "user_id", "uid", "sub"]), user?.userId, user?.id, user?.email) || "");
   const expiresAt = first(sessionNode.expiresAt, sessionNode.expires_at, sessionNode.refreshExpiresAt, sessionNode.refresh_expires_at, sessionNode.exp, pickValueFromObjects(objects, ["expiresAt", "expires_at", "refreshExpiresAt", "refresh_expires_at", "exp", "expiration", "expires"])) || null;
   const tokenVersion = first(sessionNode.tokenVersion, sessionNode.token_version, sessionNode.tv, pickValueFromObjects(objects, ["tokenVersion", "token_version", "tv"]), user?.tokenVersion, user?.token_version, user?.tv) ?? null;
 
@@ -1008,8 +1034,23 @@ export function extractRequires2FA(payload = null) {
    AUTH VALIDATION
 ========================================================= */
 
+function flowMode(options = {}) {
+  return normalizeKey(options.mode || options.flow || options.type || "generic");
+}
+
+function canAllowTokenOnly(options = {}, mode = "generic") {
+  if (options.allowTokenOnly === true) return true;
+  return mode === "refresh" || mode === "renew" || mode === "token_refresh" || mode === "token";
+}
+
+function canAllowUserOnly(options = {}, mode = "generic") {
+  if (options.allowUserOnly === true) return true;
+  return mode === "me" || mode === "profile" || mode === "current_user" || mode === "session";
+}
+
 export function validateAuthResponse(response = null, options = {}) {
   const opts = isObject(options) ? options : {};
+  const mode = flowMode(opts);
 
   if (isExplicitAuthFailure(response)) {
     throw createNormalizeError(getResponseMessage(response) || "No se pudo iniciar sesión.", {
@@ -1028,11 +1069,12 @@ export function validateAuthResponse(response = null, options = {}) {
 
   const hasToken = Boolean(token);
   const hasUser = Boolean(user && user.active !== false);
-  const mode = normalizeKey(opts.mode || opts.flow || opts.type || "generic");
-
   const requireAuthenticated = opts.requireAuthenticated === true || mode === "login" || mode === "authenticate";
   const requireToken = opts.requireToken === true || mode === "login" || mode === "refresh";
   const requireUser = opts.requireUser === true || mode === "login" || mode === "me";
+  const allowTokenOnly = canAllowTokenOnly(opts, mode);
+  const allowUserOnly = canAllowUserOnly(opts, mode);
+  const allowEmptySuccess = opts.allowEmptySuccess === true;
 
   if (requires2FA) {
     if (!tempToken && opts.allow2FAWithoutTempToken !== true) {
@@ -1052,6 +1094,8 @@ export function validateAuthResponse(response = null, options = {}) {
       accessToken: null,
       access_token: null,
       user: user || null,
+      usuario: user || null,
+      me: user || null,
       refreshToken: null,
       refresh_token: null,
       session: null,
@@ -1086,7 +1130,7 @@ export function validateAuthResponse(response = null, options = {}) {
     };
   }
 
-  if (hasToken && !hasUser && !requireAuthenticated && !requireUser) {
+  if (hasToken && !hasUser && !requireAuthenticated && !requireUser && allowTokenOnly) {
     return {
       ok: true,
       success: true,
@@ -1107,7 +1151,7 @@ export function validateAuthResponse(response = null, options = {}) {
     };
   }
 
-  if (!hasToken && hasUser && !requireAuthenticated && !requireToken) {
+  if (!hasToken && hasUser && !requireAuthenticated && !requireToken && allowUserOnly) {
     return {
       ok: true,
       success: true,
@@ -1119,6 +1163,27 @@ export function validateAuthResponse(response = null, options = {}) {
       user,
       usuario: user,
       me: user,
+      refreshToken: refreshToken || null,
+      refresh_token: refreshToken || null,
+      session: sessionData || null,
+      sessionData: sessionData || null,
+      tempToken: null,
+      temp_token: null,
+      requires2FA: false,
+      response,
+    };
+  }
+
+  if (allowEmptySuccess && !hasToken && !hasUser) {
+    return {
+      ok: true,
+      success: true,
+      authenticated: false,
+      status: "empty_success",
+      token: null,
+      accessToken: null,
+      access_token: null,
+      user: null,
       refreshToken: refreshToken || null,
       refresh_token: refreshToken || null,
       session: sessionData || null,
@@ -1163,6 +1228,8 @@ export function normalizeAuthResponse(response = null, options = {}) {
       accessToken: null,
       access_token: null,
       user: extractUser(response),
+      usuario: extractUser(response),
+      me: extractUser(response),
       refreshToken: null,
       refresh_token: null,
       session: null,
@@ -1191,7 +1258,7 @@ export function getAuthNormalizeSnapshot(response = null) {
   const refreshToken = extractRefreshToken(response);
   const tempToken = extractTempToken(response);
   const user = extractUser(response);
-  const normalized = normalizeAuthResponse(response, { allow2FAWithoutTempToken: true });
+  const normalized = normalizeAuthResponse(response, { allow2FAWithoutTempToken: true, allowTokenOnly: true, allowUserOnly: true });
 
   return {
     version: AUTH_NORMALIZE_VERSION,
@@ -1216,6 +1283,8 @@ export function getAuthNormalizeSnapshot(response = null) {
           userId: user.userId || null,
           username: user.username || null,
           email: user.email || null,
+          name: user.name || null,
+          displayName: user.displayName || null,
           role: user.role || null,
           roles: user.roles || [],
           isAdmin: Boolean(user.isAdmin),
@@ -1233,6 +1302,7 @@ export function getAuthNormalizeSnapshot(response = null) {
       ownRouter: false,
       ownToast: false,
       roles: ["admin", "user"],
+      tokenNoTruncate: true,
     },
   };
 }
@@ -1245,6 +1315,7 @@ export default {
   AUTH_NORMALIZE_VERSION,
 
   normalizeUser,
+  isUsableUser,
   normalizeSessionPayload,
 
   normalizeRoleList,

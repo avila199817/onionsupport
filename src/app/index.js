@@ -5,9 +5,9 @@
    Responsabilidad:
    - Boot mínimo de la SPA.
    - Iniciar Core/Auth/Router si existen.
-   - Restaurar sesión si Auth lo soporta.
-   - Renderizar ruta actual si Router lo soporta.
-   - Mostrar shell.
+   - Intentar restaurar sesión.
+   - Renderizar ruta actual.
+   - Actualizar shell.
    - Ocultar loader.
    - Sin Store.
    - Sin Toast.
@@ -15,7 +15,7 @@
    - Sin Topbar.
    - Sin I18n.
    - Sin Services.
-   - Sin eventos custom.
+   - Sin eventos.
    - Sin warmup.
 ========================================================= */
 
@@ -23,27 +23,25 @@ import { AppCore } from "../core/index.js";
 import { Auth } from "../features/auth/index.js";
 import { Router } from "../router/index.js";
 
+import { showLoader, hideLoader, forceHideLoader } from "./loader.js";
+
+import {
+  updateShellVisibilityByRoute,
+  markShellReady,
+  markShellBusy,
+  getViewContainer,
+  setShellVisibility,
+} from "./shell.js";
+
 let bootPromise = null;
 let ready = false;
 
-function path() {
+function currentPath() {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
 
-async function call(target, names, ...args) {
-  for (const name of names) {
-    if (typeof target?.[name] === "function") {
-      return target[name](...args);
-    }
-  }
-
-  return null;
-}
-
 function setAppState(state) {
-  for (const element of [document.documentElement, document.body]) {
-    if (!element) continue;
-
+  for (const element of [document.documentElement, document.body].filter(Boolean)) {
     element.dataset.appState = state;
     element.dataset.appBooting = state === "booting" ? "true" : "false";
     element.dataset.appReady = state === "ready" ? "true" : "false";
@@ -55,37 +53,51 @@ function setAppState(state) {
   }
 }
 
-function showShell() {
-  const shell = document.getElementById("app-shell");
+async function call(target, names, payload = {}) {
+  for (const name of names) {
+    if (typeof target?.[name] === "function") {
+      return target[name](payload);
+    }
+  }
 
-  if (!shell) return;
-
-  shell.hidden = false;
-  shell.setAttribute("aria-hidden", "false");
-  shell.setAttribute("aria-busy", "false");
-  shell.dataset.shellState = "ready";
+  return null;
 }
 
-function hideLoader() {
-  const loader = document.getElementById("app-loader");
+async function tryCall(target, names, payload = {}) {
+  try {
+    return await call(target, names, payload);
+  } catch {
+    return null;
+  }
+}
 
-  if (!loader) return;
+async function renderRoute() {
+  const path = currentPath();
 
-  loader.hidden = true;
-  loader.setAttribute("aria-hidden", "true");
-  loader.setAttribute("aria-busy", "false");
-  loader.classList.remove("is-visible");
+  if (typeof Router?.renderCurrent === "function") {
+    return Router.renderCurrent();
+  }
+
+  if (typeof Router?.render === "function") {
+    return Router.render(path);
+  }
+
+  if (typeof Router?.navigate === "function") {
+    return Router.navigate(path);
+  }
+
+  return null;
 }
 
 function renderFatal() {
-  const root =
-    document.getElementById("view-container") ||
-    document.getElementById("app-content") ||
-    document.getElementById("main-content");
+  const root = getViewContainer() || document.body;
+
+  setAppState("fatal");
+  setShellVisibility(null, true);
+  markShellReady();
+  forceHideLoader();
 
   if (!root) return;
-
-  root.replaceChildren();
 
   const section = document.createElement("section");
   section.className = "boot-error-view";
@@ -98,57 +110,37 @@ function renderFatal() {
   text.textContent = "No se pudo iniciar Onion Support.";
 
   section.append(title, text);
-  root.appendChild(section);
-
-  showShell();
-  hideLoader();
-}
-
-async function renderRoute() {
-  const currentPath = path();
-
-  if (typeof Router?.renderCurrent === "function") {
-    return Router.renderCurrent();
-  }
-
-  if (typeof Router?.render === "function") {
-    return Router.render(currentPath);
-  }
-
-  if (typeof Router?.navigate === "function") {
-    return Router.navigate(currentPath);
-  }
-
-  return null;
+  root.replaceChildren(section);
 }
 
 async function runBoot(options = {}) {
   setAppState("booting");
+  markShellBusy();
+  showLoader();
 
-  await call(AppCore, ["init", "boot", "start"], {
+  const payload = {
     source: "app",
     ...options,
-  });
+  };
 
-  await call(Auth, ["init", "boot", "start"], {
-    source: "app",
+  await tryCall(AppCore, ["init", "boot", "start"], payload);
+
+  await tryCall(Auth, ["init", "boot", "start"], {
+    ...payload,
     skipNavigation: true,
   });
 
-  await call(Router, ["init", "boot", "start"], {
-    source: "app",
-  });
+  await tryCall(Router, ["init", "boot", "start"], payload);
 
-  await call(Auth, ["restore", "restoreSession"], {
-    source: "app",
-  });
+  await tryCall(Auth, ["restore", "restoreSession"], payload);
 
   await renderRoute();
 
-  showShell();
+  updateShellVisibilityByRoute(AppCore, Router);
+  markShellReady();
   hideLoader();
-  setAppState("ready");
 
+  setAppState("ready");
   ready = true;
 
   return App;
@@ -161,7 +153,6 @@ export function boot(options = {}) {
   bootPromise = runBoot(options)
     .catch((error) => {
       console.error("[Onion App] Boot error:", error);
-      setAppState("fatal");
       renderFatal();
       return App;
     })

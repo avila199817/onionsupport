@@ -6,19 +6,20 @@
       "/api/*",
       "/.auth/*",
       "/robots.txt",
+      "/sitemap.xml",
       "/BingSiteAuth.xml",
-      "/manifest.json",
       "/site.webmanifest",
-      "/sw.js",
+      "/manifest.json",
       "/favicon.ico",
       "/apple-touch-icon.png",
+      "/sw.js",
+      "/src/*",
       "/assets/*",
       "/media/*",
       "/fonts/*",
+      "/img/*",
       "/css/*",
       "/js/*",
-      "/img/*",
-      "/src/*",
       "/.well-known/*",
       "/.git/*",
       "/.github/*",
@@ -27,208 +28,89 @@
       "/node_modules/*",
       "/package.json",
       "/package-lock.json",
+      "/staticwebapp.config.json",
       "/*.{js,mjs,css,png,jpg,jpeg,gif,svg,webp,avif,bmp,ico,json,txt,xml,webmanifest,map,woff,woff2,ttf,eot,otf,pdf,mp4,webm,mp3,wav,ogg,wasm}"
     ]
   },
   "routes": [
     {
       "route": "/staticwebapp.config.json",
-      "statusCode": 404,
-      "headers": {
-        "Cache-Control": "no-store",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/sitemap.xml",
-      "statusCode": 404,
-      "headers": {
-        "Cache-Control": "no-store",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
+      "statusCode": 404
     },
     {
       "route": "/.env*",
-      "statusCode": 404,
-      "headers": {
-        "Cache-Control": "no-store",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
+      "statusCode": 404
     },
     {
       "route": "/.git/*",
-      "statusCode": 404,
-      "headers": {
-        "Cache-Control": "no-store",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
+      "statusCode": 404
     },
     {
       "route": "/.github/*",
-      "statusCode": 404,
-      "headers": {
-        "Cache-Control": "no-store",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
+      "statusCode": 404
     },
     {
       "route": "/config/*",
-      "statusCode": 404,
-      "headers": {
-        "Cache-Control": "no-store",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
+      "statusCode": 404
     },
     {
       "route": "/node_modules/*",
-      "statusCode": 404,
-      "headers": {
-        "Cache-Control": "no-store",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
+      "statusCode": 404
     },
     {
       "route": "/package.json",
-      "statusCode": 404,
-      "headers": {
-        "Cache-Control": "no-store",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
+      "statusCode": 404
     },
     {
       "route": "/package-lock.json",
-      "statusCode": 404,
-      "headers": {
-        "Cache-Control": "no-store",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
+      "statusCode": 404
     },
     {
       "route": "/",
-      "rewrite": "/index.html",
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Pragma": "no-cache",
-        "Expires": "0",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
+      "rewrite": "/index.html"
     },
     {
       "route": "/index.html",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "Pragma": "no-cache",
-        "Expires": "0",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/*.html",
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Pragma": "no-cache",
-        "Expires": "0",
-        "X-Robots-Tag": "noindex, nofollow"
+        "Expires": "0"
       }
     },
     {
       "route": "/src/*",
       "headers": {
-        "Cache-Control": "no-cache, must-revalidate",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/assets/*",
-      "headers": {
-        "Cache-Control": "public, max-age=31536000, immutable",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/media/*",
-      "headers": {
-        "Cache-Control": "public, max-age=31536000, immutable",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/fonts/*",
-      "headers": {
-        "Cache-Control": "public, max-age=31536000, immutable",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/img/*",
-      "headers": {
-        "Cache-Control": "public, max-age=31536000, immutable",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/css/*",
-      "headers": {
-        "Cache-Control": "no-cache, must-revalidate",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/js/*",
-      "headers": {
-        "Cache-Control": "no-cache, must-revalidate",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/favicon.ico",
-      "headers": {
-        "Cache-Control": "no-cache, must-revalidate",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/apple-touch-icon.png",
-      "headers": {
-        "Cache-Control": "no-cache, must-revalidate",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/manifest.json",
-      "headers": {
-        "Cache-Control": "no-cache, must-revalidate",
-        "X-Robots-Tag": "noindex, nofollow"
+        "Cache-Control": "no-cache, must-revalidate"
       }
     },
     {
       "route": "/site.webmanifest",
       "headers": {
-        "Cache-Control": "no-cache, must-revalidate",
-        "X-Robots-Tag": "noindex, nofollow"
+        "Cache-Control": "no-cache, must-revalidate"
       }
     },
     {
-      "route": "/sw.js",
+      "route": "/favicon.ico",
       "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Pragma": "no-cache",
-        "Expires": "0",
-        "X-Robots-Tag": "noindex, nofollow"
+        "Cache-Control": "no-cache, must-revalidate"
       }
     },
     {
       "route": "/robots.txt",
       "headers": {
-        "Cache-Control": "public, max-age=3600",
-        "X-Robots-Tag": "noindex, nofollow"
+        "Cache-Control": "public, max-age=3600"
+      }
+    },
+    {
+      "route": "/sitemap.xml",
+      "headers": {
+        "Cache-Control": "public, max-age=3600"
       }
     },
     {
       "route": "/BingSiteAuth.xml",
       "headers": {
-        "Cache-Control": "public, max-age=3600",
-        "X-Robots-Tag": "noindex, nofollow"
+        "Cache-Control": "public, max-age=3600"
       }
     }
   ],
@@ -236,47 +118,13 @@
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
-    "X-DNS-Prefetch-Control": "off",
-    "X-Download-Options": "noopen",
-    "X-Permitted-Cross-Domain-Policies": "none",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Robots-Tag": "noindex, nofollow",
-    "Permissions-Policy": "accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), fullscreen=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()",
-    "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
-    "Cross-Origin-Resource-Policy": "same-origin",
-    "Content-Security-Policy": "upgrade-insecure-requests; default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; script-src-elem 'self'; script-src-attr 'none'; style-src 'self'; style-src-elem 'self'; style-src-attr 'none'; font-src 'self' data:; img-src 'self' data: blob: https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net; media-src 'self' data: blob: https://*.blob.core.windows.net; connect-src 'self' https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net wss://api.onionit.net wss://*.onionit.net; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'self' blob: https://*.blob.core.windows.net; manifest-src 'self';"
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+    "Content-Security-Policy": "upgrade-insecure-requests; default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data: blob: https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net; media-src 'self' data: blob: https://*.blob.core.windows.net; connect-src 'self' https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net wss://api.onionit.net wss://*.onionit.net; manifest-src 'self';"
   },
   "mimeTypes": {
-    ".html": "text/html",
-    ".css": "text/css",
-    ".js": "application/javascript",
     ".mjs": "application/javascript",
-    ".json": "application/json",
-    ".map": "application/json",
-    ".wasm": "application/wasm",
-    ".xml": "application/xml",
-    ".txt": "text/plain",
-    ".webmanifest": "application/manifest+json",
-    ".svg": "image/svg+xml",
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".avif": "image/avif",
-    ".bmp": "image/bmp",
-    ".ico": "image/x-icon",
-    ".cur": "image/x-icon",
-    ".woff": "font/woff",
-    ".woff2": "font/woff2",
-    ".ttf": "font/ttf",
-    ".otf": "font/otf",
-    ".eot": "application/vnd.ms-fontobject",
-    ".pdf": "application/pdf",
-    ".mp4": "video/mp4",
-    ".webm": "video/webm",
-    ".mp3": "audio/mpeg",
-    ".wav": "audio/wav",
-    ".ogg": "audio/ogg"
+    ".webmanifest": "application/manifest+json"
   }
 }

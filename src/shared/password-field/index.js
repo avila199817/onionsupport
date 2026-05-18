@@ -8,6 +8,10 @@
    - Mantener aliases simples de compatibilidad.
    - Sin side effects al importar.
    - Sin AppCore.
+   - Sin Auth.
+   - Sin Router.
+   - Sin Store.
+   - Sin Toast.
    - Sin CSS inline.
    - Sin inyección de estilos.
    - Sin lógica duplicada.
@@ -29,7 +33,7 @@ import {
   getPasswordFieldSnapshot,
 } from "./password-field.dom.js";
 
-export const PASSWORD_FIELD_VERSION = "minimal-2";
+export const PASSWORD_FIELD_VERSION = "password-field.index.v1";
 
 /* =========================================================
    TEMPLATE
@@ -65,7 +69,10 @@ export const unbind = unbindPasswordField;
 export const unbindAll = unbindPasswordFieldsInScope;
 
 export const isBound = isPasswordFieldBound;
+
 export const getSnapshot = getPasswordFieldSnapshot;
+export const getDebugSnapshot = getPasswordFieldSnapshot;
+export const snapshot = getPasswordFieldSnapshot;
 
 /* =========================================================
    FACADE
@@ -98,6 +105,9 @@ export const PasswordField = Object.freeze({
   isPasswordFieldBound,
 
   getSnapshot,
+  getDebugSnapshot,
+  snapshot,
+
   getPasswordFieldSnapshot,
 });
 

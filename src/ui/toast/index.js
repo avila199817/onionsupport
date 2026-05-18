@@ -26,17 +26,10 @@ export const TOAST_MODULE_VERSION = "simple";
 
 const SOURCE = "ui.toast";
 const GLOBAL_KEY = "__ONION_TOAST__";
-
 const CONTAINER_ID = "toast-container";
 const MAX_TOASTS = 5;
 
-const VALID_TYPES = new Set([
-  "success",
-  "error",
-  "warning",
-  "info",
-  "loading",
-]);
+const VALID_TYPES = new Set(["success", "error", "warning", "info", "loading"]);
 
 const DEFAULT_DURATIONS = Object.freeze({
   success: 3500,
@@ -161,15 +154,15 @@ function getToastContainer({ create = true } = {}) {
 }
 
 function findToastNode(id = "") {
-  const root = getToastContainer({
-    create: false,
-  });
+  const root = getToastContainer({ create: false });
 
   if (!root || !id) return null;
 
   try {
-    return [...root.querySelectorAll("[data-toast-id]")]
-      .find((node) => node.dataset.toastId === id) || null;
+    return (
+      [...root.querySelectorAll("[data-toast-id]")]
+        .find((node) => node.dataset.toastId === id) || null
+    );
   } catch {
     return null;
   }
@@ -202,8 +195,8 @@ function createToastNode(item) {
   close.className = "toast-close";
   close.type = "button";
   close.textContent = "×";
-  close.setAttribute("aria-label", "Cerrar notificación");
   close.dataset.toastDismiss = item.id;
+  close.setAttribute("aria-label", "Cerrar notificación");
 
   content.append(title, message);
   body.append(content, close);
@@ -298,9 +291,7 @@ function armTimer(item = {}) {
   if (!duration) return false;
 
   const timer = window.setTimeout(() => {
-    dismissToast(item.id, {
-      reason: "timeout",
-    });
+    dismissToast(item.id, { reason: "timeout" });
   }, duration);
 
   timers.set(item.id, timer);
@@ -314,9 +305,7 @@ function enforceLimit() {
 
     if (!firstId) break;
 
-    dismissToast(firstId, {
-      reason: "limit",
-    });
+    dismissToast(firstId, { reason: "limit" });
   }
 }
 
@@ -396,17 +385,13 @@ function showToast(input = {}, options = {}) {
   const payload = normalizeShowInput(input, options);
   const type = normalizeType(payload.type || "info");
 
+  const title = text(payload.title || "", "");
   const message = text(
-    payload.message ||
-      payload.text ||
-      payload.description ||
-      "",
+    payload.message || payload.text || payload.description || "",
     type === "loading" ? "Cargando..." : ""
   );
 
-  const title = text(payload.title || "", "");
-
-  if (!message && !title) return null;
+  if (!title && !message) return null;
 
   const id = normalizeId(payload.id || payload.toastId || payload.key) || createId();
 
@@ -426,23 +411,19 @@ function showToast(input = {}, options = {}) {
   const root = getToastContainer();
 
   if (root) {
-    let node = findToastNode(id);
+    const current = findToastNode(id);
 
-    if (!node) {
-      node = createToastNode(item);
-      root.appendChild(node);
+    if (current) {
+      patchToastNode(current, item);
     } else {
-      patchToastNode(node, item);
+      root.appendChild(createToastNode(item));
     }
   }
 
   armTimer(item);
   enforceLimit();
 
-  emit("toast:show", {
-    id,
-    type,
-  });
+  emit("toast:show", { id, type });
 
   return id;
 }
@@ -459,39 +440,31 @@ function updateToast(idOrPatch = "", patch = {}) {
   const current = items.get(id);
 
   const nextPatch = isObject(idOrPatch)
-    ? {
-        ...idOrPatch,
-        ...patch,
-      }
+    ? { ...idOrPatch, ...patch }
     : isObject(patch)
       ? patch
       : {};
 
-  const nextType = normalizeType(nextPatch.type || current.type);
+  const type = normalizeType(nextPatch.type || current.type);
 
   const next = {
     ...current,
     ...nextPatch,
     id,
-    type: nextType,
+    type,
     title: text(nextPatch.title ?? current.title, ""),
     message: text(nextPatch.message ?? nextPatch.text ?? current.message, ""),
-    persist:
-      nextPatch.persist !== undefined
-        ? nextPatch.persist === true
-        : nextType === "loading",
+    persist: nextPatch.persist !== undefined
+      ? nextPatch.persist === true
+      : type === "loading",
     updatedAt: nowIso(),
   };
 
   items.set(id, next);
-
   patchToastNode(findToastNode(id), next);
   armTimer(next);
 
-  emit("toast:update", {
-    id,
-    type: next.type,
-  });
+  emit("toast:update", { id, type });
 
   return id;
 }
@@ -588,7 +561,6 @@ function onClick(event) {
   if (!button) return;
 
   event.preventDefault();
-
   dismissToast(button.dataset.toastDismiss || "");
 }
 
@@ -621,10 +593,12 @@ function unbindToastEvents() {
   try {
     clickCleanup?.();
   } catch {
-    clickCleanup = null;
+    // noop
   }
 
+  clickCleanup = null;
   eventsBound = false;
+
   return true;
 }
 
@@ -669,10 +643,7 @@ function registerToast() {
     try {
       window[GLOBAL_KEY] = api;
       window.OnionToast = api;
-
-      if (!window.Toast || window.Toast === api) {
-        window.Toast = api;
-      }
+      window.Toast = window.Toast || api;
     } catch {
       // noop
     }
@@ -710,9 +681,7 @@ function destroyToast(options = {}) {
   unbindToastEvents();
 
   if (options.clear !== false) {
-    clearToasts({
-      reason: "destroy",
-    });
+    clearToasts({ reason: "destroy" });
   }
 
   initialized = false;
@@ -746,9 +715,7 @@ function refreshLanguage() {
 ========================================================= */
 
 function getSnapshot() {
-  const root = getToastContainer({
-    create: false,
-  });
+  const root = getToastContainer({ create: false });
 
   return {
     version: TOAST_MODULE_VERSION,
@@ -864,6 +831,7 @@ export const Toast = api;
 
 /* =========================================================
    NAMED EXPORTS
+   Sin wrappers duplicados.
 ========================================================= */
 
 export function initToastModule(options = {}) {
@@ -874,35 +842,41 @@ export function destroyToastModule(options = {}) {
   return Toast.destroy(options);
 }
 
-export const init = (...args) => Toast.init(...args);
-export const destroy = (...args) => Toast.destroy(...args);
-export const ensureReady = (...args) => Toast.ensureReady(...args);
-export const register = (...args) => Toast.register(...args);
-export const resolve = (...args) => Toast.resolve(...args);
+export {
+  initToast as init,
+  destroyToast as destroy,
+  ensureReady,
+  registerToast as register,
+  resolveToast as resolve,
 
-export const show = (...args) => Toast.show(...args);
-export const notify = (...args) => Toast.notify(...args);
-export const toast = (...args) => Toast.toast(...args);
-export const open = (...args) => Toast.open(...args);
-export const push = (...args) => Toast.push(...args);
+  bindToastEvents as bindEvents,
+  unbindToastEvents as unbindEvents,
 
-export const update = (...args) => Toast.update(...args);
+  showToast as show,
+  showToast as notify,
+  showToast as toast,
+  showToast as open,
+  showToast as push,
 
-export const dismiss = (...args) => Toast.dismiss(...args);
-export const hide = (...args) => Toast.hide(...args);
-export const close = (...args) => Toast.close(...args);
-export const remove = (...args) => Toast.remove(...args);
+  updateToast as update,
 
-export const clear = (...args) => Toast.clear(...args);
-export const dismissAll = (...args) => Toast.dismissAll(...args);
-export const clearAll = (...args) => Toast.clearAll(...args);
-export const reset = (...args) => Toast.reset(...args);
+  dismissToast as dismiss,
+  dismissToast as hide,
+  dismissToast as close,
+  dismissToast as remove,
 
-export const success = (...args) => Toast.success(...args);
-export const error = (...args) => Toast.error(...args);
-export const warning = (...args) => Toast.warning(...args);
-export const warn = (...args) => Toast.warn(...args);
-export const info = (...args) => Toast.info(...args);
-export const loading = (...args) => Toast.loading(...args);
+  clearToasts as clear,
+  clearToasts as dismissAll,
+  clearToasts as clearAll,
+
+  resetToasts as reset,
+
+  successToast as success,
+  errorToast as error,
+  warningToast as warning,
+  warnToast as warn,
+  infoToast as info,
+  loadingToast as loading,
+};
 
 export default Toast;

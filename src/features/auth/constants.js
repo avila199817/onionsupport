@@ -9,9 +9,10 @@
    - Token param único: token.
    - Rutas públicas reales actuales:
      /login
-     /password-reset
      /password-request
+     /password-reset
      /activate-account
+   - Home visible de usuario: /@{user.slug}.
    - Roles únicos: admin / user.
    - Sin AppCore.
    - Sin CoreHttp.
@@ -22,15 +23,20 @@
    - Sin aliases legacy masivos.
 ========================================================= */
 
-export const AUTH_CONSTANTS_VERSION = "simple";
+export const AUTH_CONSTANTS_VERSION = "auth.constants.v2";
 export const AUTH_MODULE_VERSION = AUTH_CONSTANTS_VERSION;
 
 const DEFAULT_ROUTE = "/";
 const LOCAL_ORIGIN = "http://localhost";
 const TOKEN_PARAM = "token";
+const USER_HOME_PREFIX = "/@";
 
 function freeze(value) {
-  return Object.freeze(value);
+  try {
+    return Object.freeze(value);
+  } catch {
+    return value;
+  }
 }
 
 /* =========================================================
@@ -81,34 +87,64 @@ function normalizeHashRouterPath(value = "") {
   const raw = safeText(value, "");
 
   if (!raw) return DEFAULT_ROUTE;
-  if (raw.startsWith("#!")) return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
 
-  return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
-}
-
-function stripUsernamePrefix(path = "") {
-  const clean = safeText(path, "");
-
-  if (!clean.startsWith("/@")) return clean;
-
-  const parts = clean.split("/").filter(Boolean);
-
-  if (parts[0]?.startsWith("@")) {
-    return `/${parts.slice(1).join("/")}` || DEFAULT_ROUTE;
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
   }
 
-  return clean;
+  if (raw.startsWith("#/")) {
+    return raw.slice(1) || DEFAULT_ROUTE;
+  }
+
+  return raw || DEFAULT_ROUTE;
+}
+
+function normalizeSearch(search = "") {
+  const value = safeText(search, "");
+
+  if (!value || value === "?") return "";
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value = safeText(hash, "");
+
+  if (!value || value === "#") return "";
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
 }
 
 function normalizePathname(pathname = DEFAULT_ROUTE) {
   let value = safeText(pathname, DEFAULT_ROUTE).replace(/\\/g, "/");
 
-  if (!value.startsWith("/")) value = `/${value}`;
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
 
-  value = value.replace(/\/+/g, "/");
-  value = stripUsernamePrefix(value);
+  value = value.replace(/\/{2,}/g, "/");
 
-  if (value.length > 1) value = value.replace(/\/+$/g, "");
+  const parts = [];
+
+  for (const part of value.split("/")) {
+    if (!part || part === ".") continue;
+
+    if (part === "..") {
+      parts.pop();
+    } else {
+      parts.push(part);
+    }
+  }
+
+  value = `/${parts.join("/")}`;
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
+  }
 
   return value || DEFAULT_ROUTE;
 }
@@ -140,19 +176,26 @@ function splitPath(path = DEFAULT_ROUTE) {
 
   return {
     pathname: normalizePathname(pathname),
-    search,
-    hash,
+    search: normalizeSearch(search),
+    hash: normalizeHash(hash),
   };
 }
 
-export function pathFromUrlLike(value = "") {
-  const raw = safeText(value, "");
+function joinPath(parts = {}) {
+  return [
+    normalizePathname(parts.pathname || DEFAULT_ROUTE),
+    normalizeSearch(parts.search || ""),
+    normalizeHash(parts.hash || ""),
+  ].join("");
+}
 
-  if (!raw) return "";
-  if (isHashRouterPath(raw)) return normalizeHashRouterPath(raw);
-
+function sameOriginUrlToPath(raw = "") {
   try {
     const url = new URL(raw, LOCAL_ORIGIN);
+
+    if (url.origin !== LOCAL_ORIGIN) {
+      return "";
+    }
 
     if (url.hash && isHashRouterPath(url.hash)) {
       return normalizeHashRouterPath(url.hash);
@@ -160,8 +203,32 @@ export function pathFromUrlLike(value = "") {
 
     return `${url.pathname || DEFAULT_ROUTE}${url.search || ""}${url.hash || ""}`;
   } catch {
-    return raw;
+    return "";
   }
+}
+
+export function pathFromUrlLike(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return "";
+
+  if (isHashRouterPath(raw)) {
+    return normalizeHashRouterPath(raw);
+  }
+
+  if (raw.startsWith("//")) {
+    return DEFAULT_ROUTE;
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    return sameOriginUrlToPath(raw) || DEFAULT_ROUTE;
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+    return DEFAULT_ROUTE;
+  }
+
+  return raw;
 }
 
 export function normalizeEndpointPath(path = "") {
@@ -185,6 +252,50 @@ function endpointInList(path = "", list = []) {
     const endpoint = normalizeEndpointPath(item);
     return clean === endpoint || clean.startsWith(`${endpoint}/`);
   });
+}
+
+/* =========================================================
+   USER HOME
+========================================================= */
+
+export function normalizeUserSlug(value = "") {
+  const slug = safeText(value, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+
+  if (!slug) return "";
+
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
+export function extractUserHomeSlugFromRoute(path = "") {
+  const route = normalizeRoutePath(path);
+
+  if (!route.startsWith(USER_HOME_PREFIX)) return "";
+
+  const slug = route.slice(USER_HOME_PREFIX.length);
+
+  if (!slug || slug.includes("/")) return "";
+
+  return normalizeUserSlug(slug);
+}
+
+export function isUserHomeRoute(path = "") {
+  return Boolean(extractUserHomeSlugFromRoute(path));
+}
+
+export function buildUserHomeRoute(slug = "") {
+  const clean = normalizeUserSlug(slug);
+  return clean ? `${USER_HOME_PREFIX}${clean}` : DEFAULT_ROUTE;
+}
+
+export function canonicalAuthRoutePath(path = "") {
+  const route = normalizeRoutePath(path);
+  return isUserHomeRoute(route) ? DEFAULT_ROUTE : route;
 }
 
 /* =========================================================
@@ -213,7 +324,6 @@ export const AUTH_ENDPOINTS = freeze({
   confirmPasswordReset: CONFIRM_RESET_ENDPOINT,
 });
 
-/* Compat mínima: un endpoint por acción. Sin legacy. */
 export const AUTH_ENDPOINT_CANDIDATES = freeze({
   login: freeze([LOGIN_ENDPOINT]),
   logout: freeze([LOGOUT_ENDPOINT]),
@@ -264,14 +374,14 @@ export const AUTH_CONTROL_SKIP_REFRESH_PATHS = freeze([...AUTH_ENDPOINT_GROUPS.p
 ========================================================= */
 
 export const LOGIN_ROUTE = "/login";
-export const PASSWORD_RESET_ROUTE = "/password-reset";
 export const PASSWORD_REQUEST_ROUTE = "/password-request";
+export const PASSWORD_RESET_ROUTE = "/password-reset";
 export const ACTIVATE_ACCOUNT_ROUTE = "/activate-account";
 
 export const AUTH_PUBLIC_TECHNICAL_ROUTES = freeze([
   LOGIN_ROUTE,
-  PASSWORD_RESET_ROUTE,
   PASSWORD_REQUEST_ROUTE,
+  PASSWORD_RESET_ROUTE,
   ACTIVATE_ACCOUNT_ROUTE,
 ]);
 
@@ -288,7 +398,6 @@ export const AUTH_TOKEN_PARAM_NAMES = freeze({
   reset: freeze([TOKEN_PARAM]),
   refresh: freeze([TOKEN_PARAM]),
 
-  /* Compat vacía: no hay 2FA/MFA/OTP en el SPA mínimo actual. */
   twoFactor: freeze([]),
 });
 
@@ -346,7 +455,6 @@ export const AUTH_STORAGE_KEYS = freeze({
   token: "token",
   accessToken: "access_token",
   refreshToken: "refresh_token",
-  user: "user",
   role: "role",
 });
 
@@ -360,10 +468,16 @@ export const AUTH_CONSTANTS = freeze({
   identifierMaxLength: 160,
   usernameMaxLength: 80,
   emailMaxLength: 254,
+
   passwordMinLength: 8,
   passwordMaxLength: 1024,
+
   tokenMinLength: 8,
   tokenMaxLength: 8192,
+
+  textValueMaxLength: 300,
+  sessionValueMaxLength: 200,
+
   requestTimeout: 30000,
   loginTimeoutMs: 30000,
   authPublicTimeoutMs: 30000,
@@ -478,7 +592,6 @@ export const getConfirmPasswordResetEndpoint = () => CONFIRM_RESET_ENDPOINT;
 export const getConfirmResetPasswordEndpoint = getConfirmPasswordResetEndpoint;
 export const getConfirmPasswordResetEndpointCandidates = () => [CONFIRM_RESET_ENDPOINT];
 
-/* Compat mínima: no hay validate endpoints reales ahora. */
 export const getValidateActivationTokenEndpoint = () => "";
 export const getValidateActivateAccountTokenEndpoint = () => "";
 export const getValidateActivationTokenEndpointCandidates = () => [];
@@ -486,7 +599,6 @@ export const getValidateResetTokenEndpoint = () => "";
 export const getValidateResetPasswordTokenEndpoint = () => "";
 export const getValidateResetTokenEndpointCandidates = () => [];
 
-/* Compat vacía: no hay 2FA/MFA/OTP en constants mínimo. */
 export const getTwoFactorLoginEndpoint = () => "";
 export const getTwoFactorRequestEndpoint = () => "";
 export const getTwoFactorResendEndpoint = () => "";
@@ -500,9 +612,14 @@ export const getAuthHealthEndpoint = () => "";
    LIMIT GETTERS
 ========================================================= */
 
-export const getIdentifierMaxLength = () => clampNumber(getAuthConstant("identifierMaxLength", 160), 1, 1024);
-export const getPasswordMinLength = () => clampNumber(getAuthConstant("passwordMinLength", 8), 1, 1024);
-export const getPasswordMaxLength = () => clampNumber(getAuthConstant("passwordMaxLength", 1024), getPasswordMinLength(), 8192);
+export const getIdentifierMaxLength = () =>
+  clampNumber(getAuthConstant("identifierMaxLength", 160), 1, 1024);
+
+export const getPasswordMinLength = () =>
+  clampNumber(getAuthConstant("passwordMinLength", 8), 1, 1024);
+
+export const getPasswordMaxLength = () =>
+  clampNumber(getAuthConstant("passwordMaxLength", 1024), getPasswordMinLength(), 8192);
 
 export const getActivationPasswordMinLength = getPasswordMinLength;
 export const getActivationPasswordMaxLength = getPasswordMaxLength;
@@ -510,8 +627,11 @@ export const getActivationPasswordMaxLength = getPasswordMaxLength;
 export const getResetPasswordMinLength = getPasswordMinLength;
 export const getResetPasswordMaxLength = getPasswordMaxLength;
 
-export const getTokenMinLength = () => clampNumber(getAuthConstant("tokenMinLength", 8), 1, 4096);
-export const getTokenMaxLength = () => clampNumber(getAuthConstant("tokenMaxLength", 8192), getTokenMinLength(), 32768);
+export const getTokenMinLength = () =>
+  clampNumber(getAuthConstant("tokenMinLength", 8), 1, 4096);
+
+export const getTokenMaxLength = () =>
+  clampNumber(getAuthConstant("tokenMaxLength", 8192), getTokenMinLength(), 32768);
 
 export const getActivationTokenMinLength = getTokenMinLength;
 export const getActivationTokenMaxLength = getTokenMaxLength;
@@ -519,20 +639,29 @@ export const getActivationTokenMaxLength = getTokenMaxLength;
 export const getResetTokenMinLength = getTokenMinLength;
 export const getResetTokenMaxLength = getTokenMaxLength;
 
-export const getTempTokenMinLength = getTokenMinLength;
-export const getTempTokenMaxLength = getTokenMaxLength;
+export const getTempTokenMinLength = () => 0;
+export const getTempTokenMaxLength = () => 0;
 
-export const getSessionValueMaxLength = () => 200;
-export const getRequestTimeout = () => clampNumber(getAuthConstant("requestTimeout", 30000), 1000, 120000);
-export const getLoginTimeoutMs = () => clampNumber(getAuthConstant("loginTimeoutMs", 30000), 1000, 120000);
-export const getAuthPublicTimeoutMs = () => clampNumber(getAuthConstant("authPublicTimeoutMs", 30000), 1000, 120000);
+export const getSessionValueMaxLength = () =>
+  clampNumber(getAuthConstant("sessionValueMaxLength", 200), 1, 1000);
+
+export const getTextValueMaxLength = () =>
+  clampNumber(getAuthConstant("textValueMaxLength", 300), 1, 2000);
+
+export const getRequestTimeout = () =>
+  clampNumber(getAuthConstant("requestTimeout", 30000), 1000, 120000);
+
+export const getLoginTimeoutMs = () =>
+  clampNumber(getAuthConstant("loginTimeoutMs", 30000), 1000, 120000);
+
+export const getAuthPublicTimeoutMs = () =>
+  clampNumber(getAuthConstant("authPublicTimeoutMs", 30000), 1000, 120000);
 
 export const getRefreshRetryCooldownMs = () => 30000;
 export const getMaxSequentialRefreshFailures = () => 3;
 export const getLoginCooldownMs = () => 30000;
 export const getLoginMaxAttemptsBeforeCooldown = () => 5;
 
-/* Compat vacía. */
 export const getTwoFactorCodeMinLength = () => 0;
 export const getTwoFactorCodeMaxLength = () => 0;
 
@@ -541,21 +670,25 @@ export const getTwoFactorCodeMaxLength = () => 0;
 ========================================================= */
 
 export function isPublicTechnicalRoute(path = "") {
-  const clean = normalizeRoutePath(path);
+  const clean = canonicalAuthRoutePath(path);
   return AUTH_PUBLIC_TECHNICAL_ROUTES.includes(clean);
 }
 
 export function isActivationRoute(path = "") {
-  return normalizeRoutePath(path) === ACTIVATE_ACCOUNT_ROUTE;
+  return canonicalAuthRoutePath(path) === ACTIVATE_ACCOUNT_ROUTE;
+}
+
+export function isPasswordRequestRoute(path = "") {
+  return canonicalAuthRoutePath(path) === PASSWORD_REQUEST_ROUTE;
 }
 
 export function isResetPasswordRoute(path = "") {
-  const clean = normalizeRoutePath(path);
+  const clean = canonicalAuthRoutePath(path);
   return clean === PASSWORD_RESET_ROUTE || clean === PASSWORD_REQUEST_ROUTE;
 }
 
 export function isResetPasswordConfirmRoute(path = "") {
-  return normalizeRoutePath(path) === PASSWORD_RESET_ROUTE;
+  return canonicalAuthRoutePath(path) === PASSWORD_RESET_ROUTE;
 }
 
 export function isTwoFactorRoute() {
@@ -583,9 +716,13 @@ export function isAuthEndpoint(path = "") {
   );
 }
 
-export const isAuthFailureCode = (code = "") => AUTH_FAILURE_CODES.includes(safeText(code, "").toUpperCase());
+export const isAuthFailureCode = (code = "") =>
+  AUTH_FAILURE_CODES.includes(safeText(code, "").toUpperCase());
+
 export const isAuth2FAStatus = () => false;
-export const isAuthSuccessStatus = (status = "") => AUTH_SUCCESS_STATUSES.includes(safeText(status, "").toLowerCase());
+
+export const isAuthSuccessStatus = (status = "") =>
+  AUTH_SUCCESS_STATUSES.includes(safeText(status, "").toLowerCase());
 
 /* =========================================================
    TOKEN URL HELPERS
@@ -654,35 +791,56 @@ export function hasTwoFactorToken() {
 export function getAuthConstantsSnapshot() {
   return {
     version: AUTH_CONSTANTS_VERSION,
+
     endpoints: AUTH_ENDPOINTS,
     endpointCandidates: AUTH_ENDPOINT_CANDIDATES,
     endpointGroups: AUTH_ENDPOINT_GROUPS,
+
     publicApiPaths: AUTH_PUBLIC_API_PATHS,
     privateApiPaths: AUTH_PRIVATE_API_PATHS,
     controlSkipRefreshPaths: AUTH_CONTROL_SKIP_REFRESH_PATHS,
+
     storageKeys: AUTH_STORAGE_KEYS,
     legacyStorageKeys: AUTH_LEGACY_STORAGE_KEYS,
+
     constants: AUTH_CONSTANTS,
     roles: AUTH_ROLES,
+
     publicTechnicalRoutes: AUTH_PUBLIC_TECHNICAL_ROUTES,
     technicalRouteAliases: AUTH_TECHNICAL_ROUTE_ALIASES,
+
+    userHome: {
+      prefix: USER_HOME_PREFIX,
+      canonical: DEFAULT_ROUTE,
+    },
+
     tokenParamNames: AUTH_TOKEN_PARAM_NAMES,
+
     requestOptions: {
       public: AUTH_PUBLIC_REQUEST_OPTIONS,
       private: AUTH_PRIVATE_REQUEST_OPTIONS,
       refresh: AUTH_REFRESH_REQUEST_OPTIONS,
     },
+
     failureCodes: AUTH_FAILURE_CODES,
     successStatuses: AUTH_SUCCESS_STATUSES,
     twoFactorStatuses: AUTH_2FA_STATUSES,
+
     policy: {
       tokenParam: TOKEN_PARAM,
       roles: ["admin", "user"],
+
       meAlwaysPrivate: true,
       staticContractOnly: true,
+
       noRouter: true,
       noToast: true,
       noRuntimeStorage: true,
+
+      userSlugHome: true,
+      preservesAtSlug: true,
+      noUsernameStrip: true,
+
       no2fa: true,
       noLegacyAliases: true,
     },
@@ -707,9 +865,11 @@ export default freeze({
   CONFIRM_RESET_ENDPOINT,
 
   LOGIN_ROUTE,
-  PASSWORD_RESET_ROUTE,
   PASSWORD_REQUEST_ROUTE,
+  PASSWORD_RESET_ROUTE,
   ACTIVATE_ACCOUNT_ROUTE,
+
+  USER_HOME_PREFIX,
 
   AUTH_ENDPOINTS,
   AUTH_ENDPOINT_CANDIDATES,
@@ -743,6 +903,12 @@ export default freeze({
   pathFromUrlLike,
   normalizeEndpointPath,
   normalizeRoutePath,
+
+  normalizeUserSlug,
+  extractUserHomeSlugFromRoute,
+  isUserHomeRoute,
+  buildUserHomeRoute,
+  canonicalAuthRoutePath,
 
   getPublicAuthRequestOptions,
   getPrivateAuthRequestOptions,
@@ -808,6 +974,7 @@ export default freeze({
   getTempTokenMinLength,
   getTempTokenMaxLength,
   getSessionValueMaxLength,
+  getTextValueMaxLength,
   getRequestTimeout,
   getLoginTimeoutMs,
   getAuthPublicTimeoutMs,
@@ -820,6 +987,7 @@ export default freeze({
 
   isPublicTechnicalRoute,
   isActivationRoute,
+  isPasswordRequestRoute,
   isResetPasswordRoute,
   isResetPasswordConfirmRoute,
   isTwoFactorRoute,

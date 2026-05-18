@@ -6,6 +6,8 @@
    - Pantallas auth simples y centradas.
    - Login / password reset con card única.
    - Compatible con shared/password-field.
+   - Eye toggle visible.
+   - CapsLock visible sólo cuando el DOM lo activa.
    - Sin :root.
    - Sin tokens nuevos.
    - Sin layout lateral.
@@ -357,6 +359,7 @@ body.auth-screen.auth-no-scroll {
   display: block;
   inline-size: 100%;
   min-inline-size: 0;
+  overflow: visible;
 }
 
 .password-wrapper .input-text,
@@ -377,7 +380,7 @@ body.auth-screen.auth-no-scroll {
   position: absolute;
   inset-block-start: 50%;
   inset-inline-end: 8px;
-  z-index: 2;
+  z-index: 3;
   display: inline-grid;
   place-items: center;
   inline-size: 40px;
@@ -417,13 +420,13 @@ body.auth-screen.auth-no-scroll {
 }
 
 .password-toggle[aria-pressed="true"],
-.password-toggle.is-visible,
+.password-toggle.is-password-visible,
 .login-password-toggle[aria-pressed="true"],
-.login-password-toggle.is-visible,
+.login-password-toggle.is-password-visible,
 .password-reset-password-toggle[aria-pressed="true"],
-.password-reset-password-toggle.is-visible,
+.password-reset-password-toggle.is-password-visible,
 [data-password-toggle][aria-pressed="true"],
-[data-password-toggle].is-visible {
+[data-password-toggle].is-password-visible {
   color: var(--text-strong);
   border-color: var(--accent-border);
   background: var(--accent-ghost);
@@ -470,13 +473,68 @@ body.auth-screen.auth-no-scroll {
   display: none;
 }
 
-.login-view .password-caps,
-.login-view [data-password-caps],
-.login-view .caps-indicator,
-.auth-view .password-caps,
-.auth-view [data-password-caps],
-.auth-view .caps-indicator {
+
+/* =========================================================
+   PASSWORD FIELD / CAPSLOCK
+========================================================= */
+
+.password-caps,
+[data-password-caps] {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-end: 56px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-block-size: 30px;
+  max-inline-size: calc(100% - 112px);
+  padding: 0 10px;
+  overflow: hidden;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  background: var(--accent-ghost);
+  color: var(--text-strong);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.password-caps[hidden],
+[data-password-caps][hidden] {
   display: none;
+}
+
+.caps-icon,
+[data-password-caps-icon-wrapper] {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  inline-size: 16px;
+  block-size: 16px;
+  color: currentColor;
+}
+
+.caps-icon svg,
+[data-password-caps-icon-wrapper] svg {
+  display: block;
+  inline-size: 16px;
+  block-size: 16px;
+  color: currentColor;
+  stroke: currentColor;
+}
+
+.caps-label,
+[data-password-caps-label] {
+  display: inline-block;
+  min-inline-size: 0;
+  overflow: hidden;
+  color: currentColor;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 
@@ -781,9 +839,9 @@ body.auth-screen.auth-no-scroll {
 
 .auth-message.is-success,
 .login-message.is-success {
-  border-color: var(--border-success);
-  background: var(--success-bg);
-  color: var(--success);
+  border-color: var(--accent-border);
+  background: var(--accent-ghost);
+  color: var(--text-strong);
 }
 
 
@@ -942,6 +1000,27 @@ body.auth-screen.auth-no-scroll {
     border-radius: 11px;
   }
 
+  .password-caps,
+  [data-password-caps] {
+    inset-inline-end: 52px;
+    min-block-size: 28px;
+    max-inline-size: calc(100% - 102px);
+    padding-inline: 8px;
+    font-size: var(--font-xs);
+  }
+
+  .caps-icon,
+  [data-password-caps-icon-wrapper] {
+    inline-size: 14px;
+    block-size: 14px;
+  }
+
+  .caps-icon svg,
+  [data-password-caps-icon-wrapper] svg {
+    inline-size: 14px;
+    block-size: 14px;
+  }
+
   .auth-options,
   .login-options {
     align-items: flex-start;
@@ -983,6 +1062,11 @@ body.auth-screen.auth-no-scroll {
   .password-reset-password-wrapper .auth-input,
   [data-password-wrapper] [data-password-input] {
     padding-inline-end: 54px;
+  }
+
+  .password-caps,
+  [data-password-caps] {
+    max-inline-size: calc(100% - 98px);
   }
 }
 

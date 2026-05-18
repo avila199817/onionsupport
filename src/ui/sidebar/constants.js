@@ -9,6 +9,7 @@
    - Clases comunes.
    - Metadatos visuales mínimos de rutas.
    - Roles únicos: admin / user.
+   - Home privada compatible con /@slug.
    - Sin imports.
    - Sin DOM.
    - Sin Auth.
@@ -82,6 +83,8 @@ export function normalizeSidebarRole(value = "") {
 ========================================================= */
 
 export const HOME_ROUTE = "/";
+export const USER_HOME_PREFIX = "/@";
+
 export const INCIDENCIAS_ROUTE = "/incidencias";
 export const FACTURAS_ROUTE = "/facturas";
 export const USUARIOS_ROUTE = "/usuarios";
@@ -121,19 +124,25 @@ export const SIDEBAR_ADMIN_FALLBACK_ROUTES = freeze([
 export function normalizeSidebarPath(path = "/") {
   let value = text(path, "/").replace(/\\/g, "/");
 
-  if (value.startsWith("#/")) value = value.slice(1);
-  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
-
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
-    try {
-      const url = new URL(value);
-      value = `${url.pathname || "/"}${url.search || ""}${url.hash || ""}`;
-    } catch {
-      value = "/";
-    }
+  if (value.startsWith("#/")) {
+    value = value.slice(1);
   }
 
-  if (!value.startsWith("/")) value = `/${value}`;
+  if (value.startsWith("#!")) {
+    value = value.replace(/^#!\/?/, "/");
+  }
+
+  if (value.startsWith("//")) {
+    return "/";
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+    return "/";
+  }
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
 
   value = value.replace(/\/{2,}/g, "/");
 
@@ -148,6 +157,17 @@ export function canonicalSidebarPath(path = "/") {
   }
 
   return value || "/";
+}
+
+export function isSidebarHomeRoute(path = "/") {
+  const route = canonicalSidebarPath(path);
+
+  if (route === HOME_ROUTE) return true;
+  if (!route.startsWith(USER_HOME_PREFIX)) return false;
+
+  const slug = route.slice(USER_HOME_PREFIX.length);
+
+  return Boolean(slug && !slug.includes("/"));
 }
 
 export function isSidebarPublicRoute(path = "/") {
@@ -222,27 +242,45 @@ export const SIDEBAR_ROUTE_META = freeze({
   }),
 });
 
-export function getSidebarRouteMeta(path = "/") {
+function knownSidebarRouteMeta(path = "/") {
   const route = canonicalSidebarPath(path);
 
-  return (
-    SIDEBAR_ROUTE_META[route] ||
-    freeze({
-      key: route.replace(/^\//, "") || "home",
-      label:
-        route === "/"
-          ? "Inicio"
-          : route
-              .replace(/^\//, "")
-              .replace(/[-_]+/g, " ")
-              .replace(/^\w/, (letter) => letter.toUpperCase()),
-      icon: "home",
-      order: 999,
-    })
-  );
+  if (isSidebarHomeRoute(route)) {
+    return SIDEBAR_ROUTE_META[HOME_ROUTE];
+  }
+
+  return SIDEBAR_ROUTE_META[route] || null;
+}
+
+function fallbackRouteMeta(path = "/") {
+  const route = canonicalSidebarPath(path);
+  const key = route.replace(/^\//, "") || "home";
+
+  return freeze({
+    key,
+    label:
+      route === "/"
+        ? "Inicio"
+        : key
+            .split("/")
+            .filter(Boolean)
+            .pop()
+            .replace(/[-_]+/g, " ")
+            .replace(/^\w/, (letter) => letter.toUpperCase()),
+    icon: "home",
+    order: 999,
+  });
+}
+
+export function getSidebarRouteMeta(path = "/") {
+  return knownSidebarRouteMeta(path) || fallbackRouteMeta(path);
 }
 
 export function getSidebarRouteLabel(path = "/", fallback = "") {
+  const known = knownSidebarRouteMeta(path);
+
+  if (known) return known.label;
+
   return text(fallback, getSidebarRouteMeta(path).label);
 }
 
@@ -393,6 +431,8 @@ export function getSidebarConstantsSnapshot() {
     },
 
     routes: {
+      home: HOME_ROUTE,
+      userHomePrefix: USER_HOME_PREFIX,
       public: SIDEBAR_PUBLIC_ROUTES,
       privateFallback: SIDEBAR_PRIVATE_FALLBACK_ROUTES,
       adminFallback: SIDEBAR_ADMIN_FALLBACK_ROUTES,
@@ -429,6 +469,7 @@ export default freeze({
   normalizeSidebarRole,
 
   HOME_ROUTE,
+  USER_HOME_PREFIX,
   INCIDENCIAS_ROUTE,
   FACTURAS_ROUTE,
   USUARIOS_ROUTE,
@@ -448,6 +489,7 @@ export default freeze({
 
   normalizeSidebarPath,
   canonicalSidebarPath,
+  isSidebarHomeRoute,
   isSidebarPublicRoute,
   isSidebarAdminFallbackRoute,
 

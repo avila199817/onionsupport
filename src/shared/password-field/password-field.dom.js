@@ -17,7 +17,7 @@
    - Sin recrear SVGs desde JS.
 ========================================================= */
 
-export const PASSWORD_FIELD_DOM_VERSION = "minimal-2";
+export const PASSWORD_FIELD_DOM_VERSION = "minimal-3";
 
 const FIELD_SELECTOR = "[data-password-field]";
 const WRAPPER_SELECTOR = "[data-password-wrapper], .password-wrapper, .login-password-wrapper, .password-reset-password-wrapper";
@@ -138,18 +138,18 @@ function setData(node, key = "", value = null) {
   }
 }
 
-function toggleClass(node, className = "", enabled = false) {
+function toggleClass(node, className = "", active = false) {
   if (!isElement(node) || !className) return false;
 
   try {
-    node.classList.toggle(className, Boolean(enabled));
+    node.classList.toggle(className, Boolean(active));
     return true;
   } catch {
     return false;
   }
 }
 
-function bindDom(node, eventName = "", handler = null, options = false) {
+function bindDom(node, eventName = "", handler = null) {
   if (!node || !eventName || !isFn(handler) || !isFn(node.addEventListener)) {
     return () => {};
   }
@@ -157,7 +157,7 @@ function bindDom(node, eventName = "", handler = null, options = false) {
   let disposed = false;
 
   try {
-    node.addEventListener(eventName, handler, options);
+    node.addEventListener(eventName, handler);
   } catch {
     return () => {};
   }
@@ -167,10 +167,8 @@ function bindDom(node, eventName = "", handler = null, options = false) {
     disposed = true;
 
     try {
-      node.removeEventListener(eventName, handler, options);
-    } catch {
-      // noop
-    }
+      node.removeEventListener(eventName, handler);
+    } catch {}
   };
 }
 
@@ -194,6 +192,20 @@ function focusInput(input) {
    RESOLUTION
 ========================================================= */
 
+function resolveRoot(node) {
+  if (!isElement(node)) return null;
+
+  if (matches(node, FIELD_SELECTOR)) return node;
+
+  const field = closest(node, FIELD_SELECTOR);
+  if (field) return field;
+
+  if (matches(node, WRAPPER_SELECTOR)) return node;
+
+  const wrapper = closest(node, WRAPPER_SELECTOR);
+  return wrapper || node;
+}
+
 function findInput(root) {
   if (!root) return null;
   if (isInput(root) && matches(root, INPUT_SELECTOR)) return root;
@@ -207,35 +219,14 @@ function findToggle(root) {
 }
 
 function findIcon(toggle) {
-  if (!isButton(toggle)) return null;
-  return qs(toggle, ICON_SELECTOR);
-}
-
-function resolveRoot(node) {
-  if (!isElement(node)) return null;
-
-  if (matches(node, FIELD_SELECTOR)) return node;
-
-  const field = closest(node, FIELD_SELECTOR);
-  if (field) return field;
-
-  if (matches(node, WRAPPER_SELECTOR)) return node;
-
-  const wrapper = closest(node, WRAPPER_SELECTOR);
-  if (wrapper) return wrapper;
-
-  return node;
+  return isButton(toggle) ? qs(toggle, ICON_SELECTOR) : null;
 }
 
 function resolveParts(node) {
   const root = resolveRoot(node);
 
   if (!root) {
-    return {
-      root: null,
-      input: null,
-      toggle: null,
-    };
+    return { root: null, input: null, toggle: null };
   }
 
   return {
@@ -259,7 +250,7 @@ function getBinding(node) {
 }
 
 /* =========================================================
-   UI STATE
+   STATE
 ========================================================= */
 
 function showLabel(toggle) {
@@ -295,9 +286,7 @@ function setInputType(input, visible = false) {
   try {
     start = input.selectionStart;
     end = input.selectionEnd;
-  } catch {
-    // noop
-  }
+  } catch {}
 
   try {
     input.type = nextType;
@@ -309,9 +298,7 @@ function setInputType(input, visible = false) {
     if (start !== null && end !== null && isFn(input.setSelectionRange)) {
       input.setSelectionRange(start, end);
     }
-  } catch {
-    // noop
-  }
+  } catch {}
 
   return true;
 }
@@ -332,9 +319,7 @@ function syncIcon(toggle, visible = false) {
   try {
     if (eye) eye.hidden = active;
     if (eyeOff) eyeOff.hidden = !active;
-  } catch {
-    // noop
-  }
+  } catch {}
 
   return true;
 }
@@ -375,14 +360,13 @@ function canToggle(parts = {}) {
 }
 
 /* =========================================================
-   PUBLIC API
+   SINGLE FIELD
 ========================================================= */
 
 export function bindPasswordField(fieldRoot) {
   if (!isBrowser() || !isElement(fieldRoot)) return null;
 
   const parts = resolveParts(fieldRoot);
-
   if (!validParts(parts)) return null;
 
   const existing = BINDINGS.get(parts.root);
@@ -420,33 +404,29 @@ export function bindPasswordField(fieldRoot) {
     return setVisible(!isVisible(input), options);
   }
 
-  function handleToggleClick(event) {
+  function onToggleClick(event) {
     try {
       event?.preventDefault?.();
-    } catch {
-      // noop
-    }
+    } catch {}
 
     toggleVisibility({ focus: true });
   }
 
-  function handleFormReset() {
+  function onFormReset() {
     try {
       window.setTimeout(() => {
         if (!destroyed) {
           setVisible(false, { focus: false });
         }
       }, 0);
-    } catch {
-      // noop
-    }
+    } catch {}
   }
 
-  disposers.push(bindDom(toggle, "click", handleToggleClick));
+  disposers.push(bindDom(toggle, "click", onToggleClick));
 
   const form = closest(input, "form");
   if (form) {
-    disposers.push(bindDom(form, "reset", handleFormReset));
+    disposers.push(bindDom(form, "reset", onFormReset));
   }
 
   setData(root, BOUND_DATA_KEY, "true");
@@ -493,18 +473,14 @@ export function bindPasswordField(fieldRoot) {
       try {
         setInputType(input, false);
         syncState(parts);
-      } catch {
-        // noop
-      }
+      } catch {}
 
       destroyed = true;
 
       while (disposers.length) {
         try {
           disposers.pop()?.();
-        } catch {
-          // noop
-        }
+        } catch {}
       }
 
       setData(root, BOUND_DATA_KEY, null);
@@ -524,7 +500,6 @@ export function bindPasswordField(fieldRoot) {
       setAttr(toggle, "aria-label", showLabel(toggle));
 
       BINDINGS.delete(root);
-
       return true;
     },
 
@@ -550,15 +525,9 @@ export function bindPasswordField(fieldRoot) {
   return binding;
 }
 
-export function unbindPasswordField(fieldRoot) {
-  const binding = getBinding(fieldRoot);
-  return binding ? binding.destroy() : false;
-}
-
-export function isPasswordFieldBound(fieldRoot) {
-  const binding = getBinding(fieldRoot);
-  return Boolean(binding && binding.destroyed !== true);
-}
+/* =========================================================
+   SCOPE
+========================================================= */
 
 function collectFieldRoots(scope = null) {
   const root = scope || (isBrowser() ? document : null);
@@ -572,7 +541,6 @@ function collectFieldRoots(scope = null) {
     if (!isElement(node)) return;
 
     const parts = resolveParts(node);
-
     if (!validParts(parts) || seen.has(parts.root)) return;
 
     seen.add(parts.root);
@@ -602,6 +570,11 @@ export function bindPasswordFieldsInScope(scope = null) {
     .filter(Boolean);
 }
 
+export function unbindPasswordField(fieldRoot) {
+  const binding = getBinding(fieldRoot);
+  return binding ? binding.destroy() : false;
+}
+
 export function unbindPasswordFieldsInScope(scope = null) {
   if (!isBrowser()) return 0;
 
@@ -612,6 +585,11 @@ export function unbindPasswordFieldsInScope(scope = null) {
   }
 
   return count;
+}
+
+export function isPasswordFieldBound(fieldRoot) {
+  const binding = getBinding(fieldRoot);
+  return Boolean(binding && binding.destroyed !== true);
 }
 
 /* =========================================================

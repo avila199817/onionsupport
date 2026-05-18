@@ -7,6 +7,7 @@
    - API base desde config.
    - Auth header sólo si toca.
    - /api/auth/me siempre privado.
+   - Bloquear endpoints externos.
    - Sin hooks.
    - Sin retry real.
    - Sin dedupe real.
@@ -19,7 +20,7 @@
 
 import { config } from "./config.js";
 
-export const REQUEST_VERSION = "simple";
+export const REQUEST_VERSION = "core.request.v2";
 
 export const REQUEST_EVENTS = Object.freeze({
   start: "app:request:start",
@@ -43,6 +44,7 @@ const API_BASE = normalizeApiBase(
 
 const AUTH_ENDPOINTS = Object.freeze({
   login: "/api/auth/login",
+  logout: "/api/auth/logout",
   refresh: "/api/auth/refresh",
   activate: "/api/auth/activate",
   requestPasswordReset: "/api/auth/reset-password-request",
@@ -87,11 +89,19 @@ function normalizeApiBase(value = "") {
       return DEFAULT_API_BASE;
     }
 
-    if (raw.endsWith("/api")) {
-      return raw.slice(0, -4);
+    if (url.pathname === "/api") {
+      return url.origin;
     }
 
     return url.origin;
+  } catch {
+    return DEFAULT_API_BASE;
+  }
+}
+
+function apiOrigin() {
+  try {
+    return new URL(API_BASE).origin;
   } catch {
     return DEFAULT_API_BASE;
   }
@@ -125,54 +135,10 @@ function normalizeMethod(method = "GET") {
     : "GET";
 }
 
-function cleanPath(path = "/") {
-  let value = text(path, "/");
-
-  try {
-    value = new URL(value, DEFAULT_API_BASE).pathname || "/";
-  } catch {
-    value = value.split("?")[0].split("#")[0] || "/";
-  }
-
-  if (!value.startsWith("/")) value = `/${value}`;
-  if (value.length > 1) value = value.replace(/\/+$/g, "");
-
-  return value || "/";
-}
-
-function isPublicApiPath(path = "") {
-  const clean = cleanPath(path);
-
-  if (clean === PRIVATE_ME_PATH) return false;
-
-  return PUBLIC_API_PATHS.includes(clean);
-}
-
-function joinUrl(base = "", path = "") {
-  if (/^https?:\/\//i.test(path)) return path;
-
-  const root = text(base, API_BASE).replace(/\/+$/g, "");
-  const clean = text(path, "/").replace(/^\/+/g, "");
-
-  return `${root}/${clean}`;
-}
-
-function appendQuery(url = "", query = null) {
-  if (!isObject(query)) return url;
-
-  const target = new URL(url, DEFAULT_API_BASE);
-
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === null || value === "") continue;
-    target.searchParams.set(key, String(value));
-  }
-
-  return target.toString();
-}
-
 function redact(value = "") {
   return String(value || "")
     .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -181,6 +147,7 @@ function tokenOk(token = "") {
 
   if (!value) return false;
   if (/\s/.test(value)) return false;
+  if (value.length > 8192) return false;
 
   return ![
     "null",
@@ -193,16 +160,114 @@ function tokenOk(token = "") {
   ].includes(value.toLowerCase());
 }
 
-function getToken(state = {}, options = {}) {
-  const token =
-    options.token ||
-    state?.token ||
-    state?.accessToken ||
-    state?.access_token ||
-    "";
-
-  return tokenOk(token) ? String(token).replace(/^Bearer\s+/i, "") : "";
+function cleanToken(token = "") {
+  const value = text(token, "").replace(/^Bearer\s+/i, "");
+  return tokenOk(value) ? value : "";
 }
+
+function getToken(state = {}, options = {}) {
+  return cleanToken(
+    options.token ||
+      state?.token ||
+      state?.accessToken ||
+      state?.access_token ||
+      ""
+  );
+}
+
+/* =========================================================
+   PATHS / URL
+========================================================= */
+
+function endpointToPath(endpoint = "/") {
+  const raw = text(endpoint, "/");
+
+  if (!raw) return "";
+  if (raw.startsWith("//")) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      const url = new URL(raw);
+
+      if (url.origin !== apiOrigin()) {
+        return "";
+      }
+
+      return `${url.pathname || "/"}${url.search || ""}`;
+    }
+  } catch {
+    return "";
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+    return "";
+  }
+
+  const path = raw.startsWith("/") ? raw : `/${raw}`;
+
+  return path.split("#")[0] || "/";
+}
+
+function cleanPath(path = "/") {
+  const clean = endpointToPath(path);
+
+  if (!clean) return "";
+
+  return clean.split("?")[0] || "/";
+}
+
+function joinUrl(base = "", path = "") {
+  const root = text(base, API_BASE).replace(/\/+$/g, "");
+  const clean = text(path, "/").replace(/^\/+/g, "");
+
+  return `${root}/${clean}`;
+}
+
+function appendQuery(url = "", query = null) {
+  if (!isObject(query)) return url;
+
+  const target = new URL(url, API_BASE);
+
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === "") continue;
+    target.searchParams.set(key, String(value));
+  }
+
+  return target.toString();
+}
+
+function isPublicApiPath(path = "") {
+  const clean = cleanPath(path);
+
+  if (!clean) return false;
+  if (clean === PRIVATE_ME_PATH) return false;
+
+  return PUBLIC_API_PATHS.includes(clean);
+}
+
+function shouldUseAuth(path = "", options = {}) {
+  const clean = cleanPath(path);
+
+  if (clean === PRIVATE_ME_PATH) return true;
+
+  if (
+    options.public === true ||
+    options.skipAuth === true ||
+    options.auth === false ||
+    options.noAuthHeader === true
+  ) {
+    return false;
+  }
+
+  if (options.auth === true) return true;
+
+  return !isPublicApiPath(clean);
+}
+
+/* =========================================================
+   BODY / HEADERS
+========================================================= */
 
 function serializeBody(method = "GET", body = undefined) {
   if (["GET", "HEAD", "OPTIONS"].includes(method)) return undefined;
@@ -214,18 +279,26 @@ function serializeBody(method = "GET", body = undefined) {
   return JSON.stringify(body);
 }
 
-function buildHeaders({ state = {}, options = {}, auth = false, body = undefined } = {}) {
+function buildHeaders({
+  state = {},
+  options = {},
+  auth = false,
+  body = undefined,
+} = {}) {
   const headers = {
-    Accept: "application/json",
-    ...(options.headers || {}),
+    ...(isObject(options.headers) ? options.headers : {}),
   };
+
+  if (!headers.Accept && !headers.accept) {
+    headers.Accept = "application/json";
+  }
 
   const hasBody = body !== undefined && body !== null;
 
   if (
     hasBody &&
-    !isFormData(options.body) &&
-    !isUrlSearchParams(options.body) &&
+    !isFormData(body) &&
+    !isUrlSearchParams(body) &&
     !headers["Content-Type"] &&
     !headers["content-type"]
   ) {
@@ -235,7 +308,7 @@ function buildHeaders({ state = {}, options = {}, auth = false, body = undefined
   if (auth) {
     const token = getToken(state, options);
 
-    if (token) {
+    if (token && !headers.Authorization && !headers.authorization) {
       headers.Authorization = `Bearer ${token}`;
     }
   } else {
@@ -244,24 +317,6 @@ function buildHeaders({ state = {}, options = {}, auth = false, body = undefined
   }
 
   return headers;
-}
-
-function shouldUseAuth(path = "", options = {}) {
-  const clean = cleanPath(path);
-
-  if (clean === PRIVATE_ME_PATH) return true;
-
-  if (
-    options.public === true ||
-    options.skipAuth === true ||
-    options.auth === false
-  ) {
-    return false;
-  }
-
-  if (options.auth === true) return true;
-
-  return !isPublicApiPath(clean);
 }
 
 /* =========================================================
@@ -301,6 +356,7 @@ export function buildRequestError({
   url = "",
   method = "GET",
   raw = null,
+  code = "",
 } = {}) {
   const status = response?.status || 0;
 
@@ -312,12 +368,13 @@ export function buildRequestError({
     response?.statusText ||
     `HTTP ${status || "ERROR"}`;
 
-  const error = new Error(String(message));
+  const error = new Error(redact(String(message)));
 
   error.name = "RequestError";
   error.status = status;
   error.statusCode = status;
   error.statusText = response?.statusText || "";
+  error.code = code || data?.code || raw?.code || "REQUEST_ERROR";
   error.url = redact(url);
   error.method = normalizeMethod(method);
   error.data = data;
@@ -405,12 +462,22 @@ export function createRequest({ state = {}, events = null, setError = null } = {
     const { path, options } = normalizeArgs(...args);
 
     const method = normalizeMethod(options.method);
+    const clean = endpointToPath(path);
+
+    if (!clean) {
+      throw buildRequestError({
+        method,
+        raw: "Endpoint no permitido.",
+        code: "ENDPOINT_NOT_ALLOWED",
+      });
+    }
+
     const body = options.body ?? options.data ?? options.payload;
     const query = options.query ?? options.params ?? null;
 
-    const url = appendQuery(joinUrl(API_BASE, path), query);
-    const clean = cleanPath(url);
-    const auth = shouldUseAuth(clean, options);
+    const url = appendQuery(joinUrl(API_BASE, clean), query);
+    const endpointPath = cleanPath(clean);
+    const auth = shouldUseAuth(endpointPath, options);
 
     const serializedBody = serializeBody(method, body);
 
@@ -445,7 +512,12 @@ export function createRequest({ state = {}, events = null, setError = null } = {
       const runFetch = fetchFn();
 
       if (!runFetch) {
-        throw new Error("Fetch API no disponible.");
+        throw buildRequestError({
+          url,
+          method,
+          raw: "Fetch API no disponible.",
+          code: "FETCH_MISSING",
+        });
       }
 
       const response = await runFetch(url, {
@@ -524,7 +596,7 @@ export function createRequest({ state = {}, events = null, setError = null } = {
           requestId,
           method,
           status: error.status || error.statusCode || 0,
-          message: error.message || "Request error",
+          message: redact(error.message || "Request error"),
         });
       }
 
@@ -546,8 +618,9 @@ export function createRequest({ state = {}, events = null, setError = null } = {
       lastError: lastError
         ? {
             name: lastError.name || "Error",
-            message: lastError.message || "",
+            message: redact(lastError.message || ""),
             status: lastError.status || lastError.statusCode || 0,
+            code: lastError.code || null,
           }
         : null,
     };

@@ -6,13 +6,15 @@
    - Render DOM mínimo.
    - Preparar #view-container.
    - Ejecutar route.render(root, context).
+   - Inyectar contexto común: AppCore / I18n / t / Toast.
    - Pintar fallback simple.
    - Sin imports.
    - Sin Auth.
    - Sin guards.
    - Sin history propio.
    - Sin storage.
-   - Sin Toast.
+   - Sin Toast propio.
+   - Sin i18n propio.
    - Sin fetch.
    - Sin username public slug.
    - Sin CustomEvent.
@@ -436,6 +438,39 @@ function adoptResult(target, result) {
 }
 
 /* =========================================================
+   SHARED CONTEXT
+========================================================= */
+
+function getI18n(AppCore = null) {
+  return AppCore?.I18n || AppCore?.i18n || AppCore?.services?.i18n || null;
+}
+
+function getToast(AppCore = null) {
+  return AppCore?.Toast || AppCore?.toast || AppCore?.services?.toast || null;
+}
+
+function getTranslator(AppCore = null) {
+  if (isFunction(AppCore?.t)) return AppCore.t;
+
+  const I18n = getI18n(AppCore);
+
+  if (isFunction(I18n?.t)) return I18n.t;
+  if (isFunction(I18n?.translate)) return I18n.translate;
+
+  return (key = "", _params = {}, fallback = "") => text(fallback || key, "");
+}
+
+function getShowToast(AppCore = null) {
+  const Toast = getToast(AppCore);
+
+  if (isFunction(AppCore?.showToast)) return AppCore.showToast;
+  if (isFunction(Toast?.show)) return Toast.show.bind(Toast);
+  if (isFunction(Toast)) return Toast;
+
+  return null;
+}
+
+/* =========================================================
    ROUTE RENDERER
 ========================================================= */
 
@@ -519,25 +554,31 @@ export function emitRendered(AppCore = null, payload = {}) {
   return finalPayload;
 }
 
+/* Compat: el router actual ya sincroniza estado. Mantener para imports antiguos. */
 export function syncRouteState(AppCore = null, canonicalPath = DEFAULT_ROUTE, publicPath = null) {
   const canonical = normalizeCanonicalPath(canonicalPath || DEFAULT_ROUTE);
   const visible = normalizePublicPath(publicPath || canonical);
 
-  const patch = {
-    route: canonical,
-    canonicalPath: canonical,
-    publicPath: visible,
-  };
-
   try {
-    AppCore?.setState?.(patch, {
-      source: SOURCE,
-      silent: true,
-      emit: false,
-    });
+    AppCore?.setState?.(
+      {
+        route: canonical,
+        canonicalPath: canonical,
+        publicPath: visible,
+      },
+      {
+        source: SOURCE,
+        silent: true,
+        emit: false,
+      }
+    );
   } catch {
     try {
-      Object.assign(AppCore.state, patch);
+      Object.assign(AppCore.state, {
+        route: canonical,
+        canonicalPath: canonical,
+        publicPath: visible,
+      });
     } catch {
       // noop
     }
@@ -576,9 +617,22 @@ export function buildRouteRenderContext({
   const view = viewContainer || getViewContainer(AppCore);
   const host = renderRoot || getCurrentHost(AppCore) || view;
 
+  const I18n = getI18n(AppCore);
+  const Toast = getToast(AppCore);
+  const t = getTranslator(AppCore);
+  const showToast = getShowToast(AppCore);
+
   return Object.freeze({
     AppCore,
     route,
+
+    I18n,
+    i18n: I18n,
+    t,
+
+    Toast,
+    toast: Toast,
+    showToast,
 
     path: resolved.publicPath,
     requestedPath: resolved.publicPath,
@@ -618,12 +672,10 @@ function fallbackView({ kind = "info", title = "", message = "", action = null }
     className: "router-fallback__card",
   });
 
-  const heading = create("h1", {
+  append(card, create("h1", {
     className: "router-fallback__title",
     textContent: title || "Onion Support",
-  });
-
-  append(card, heading);
+  }));
 
   if (message) {
     append(card, create("p", {
@@ -931,6 +983,13 @@ export function getRenderSnapshot(AppCore = null) {
     currentPublicPath: redact(AppCore?.state?.publicPath || DEFAULT_ROUTE),
     currentCanonicalPath: redact(AppCore?.state?.canonicalPath || AppCore?.state?.route || DEFAULT_ROUTE),
 
+    context: {
+      hasI18n: Boolean(getI18n(AppCore)),
+      hasTranslator: isFunction(getTranslator(AppCore)),
+      hasToast: Boolean(getToast(AppCore)),
+      hasShowToast: isFunction(getShowToast(AppCore)),
+    },
+
     dom: {
       hasView: Boolean(view),
       hasHost: Boolean(host),
@@ -950,6 +1009,8 @@ export function getRenderSnapshot(AppCore = null) {
       ownHistory: false,
       ownStorage: false,
       ownToast: false,
+      ownI18n: false,
+      injectsSharedContext: true,
       ownNavigation: false,
       ownShellRepair: false,
       noUsernamePublicSlug: true,

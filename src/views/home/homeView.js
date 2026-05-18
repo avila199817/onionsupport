@@ -6,16 +6,19 @@
    - Controlador real de la vista Home.
    - Render principal con home.template.js.
    - Carga de datos delegada en home.api.js.
-   - Estado delegado en home.state.js.
-   - Modelo delegado en home.model.js.
+   - Estado runtime delegado en home.state.js.
+   - Store/cache runtime delegado en home.store.js.
+   - Modelo/normalización delegado en home.model.js.
    - Eventos DOM delegados en home.bindings.js.
    - Acciones delegadas en home.actions.js.
+   - Renderiza dentro del host recibido por Router.
+   - Devuelve API/controller, no el contenedor padre.
    - Sin validar rutas.
    - Sin resolver slug.
    - Sin Auth guards.
    - Sin Router guards.
    - Sin bridges globales.
-   - Sin eventos externos masivos.
+   - Sin eventos externos.
    - Sin cache local propia.
    - Sin imports opcionales.
    - Sin modales de otras vistas.
@@ -33,7 +36,6 @@ import {
   loadHomeDashboard,
   refreshHomeDashboard,
   hydrateHomeFromCache,
-  normalizeHomeDashboardResponse,
   getHomeApiSnapshot,
 } from "./home.api.js";
 
@@ -43,19 +45,8 @@ import {
   getHomeStateSnapshot,
   setLoading,
   setRefreshing,
-  setLoaded,
-  setHydrated,
   setError,
   clearHomeError,
-  setDashboard,
-  setSummary,
-  setTickets,
-  setInvoices,
-  setUsers,
-  setClients,
-  setRecent,
-  setRequestId,
-  setLastSyncAt,
   setPage,
   setPageSize,
   setOpeningTicketId,
@@ -90,6 +81,8 @@ import {
   exportHomeCsvAction,
   navigateFromHomeAction,
   runHomeQuickAction,
+  openHomeWidgetAction as actionOpenHomeWidget,
+  copyHomeWidgetIdAction,
   getHomeActionsSnapshot,
 } from "./home.actions.js";
 
@@ -99,14 +92,13 @@ import {
   safeArray,
   safeObject,
   isObject,
-  isFunction,
   first,
   nowIso,
   sanitizePayload,
   showToast,
 } from "./home.utils.js";
 
-export const HOME_VIEW_VERSION = "home.view.v1";
+export const HOME_VIEW_VERSION = "home.view.v2";
 
 export const HomeView = (() => {
   "use strict";
@@ -123,7 +115,9 @@ export const HomeView = (() => {
 
   let bindingsCleanup = null;
   let currentContainer = null;
+
   let renderSeq = 0;
+  let loadSeq = 0;
 
   /* =======================================================
      BASICS
@@ -146,6 +140,15 @@ export const HomeView = (() => {
     return renderSeq;
   }
 
+  function nextLoadSeq() {
+    loadSeq += 1;
+    return loadSeq;
+  }
+
+  function isCurrentLoad(seq = 0) {
+    return !destroyed && seq === loadSeq;
+  }
+
   function isCurrentRender(seq = 0) {
     return !destroyed && seq === renderSeq;
   }
@@ -157,17 +160,16 @@ export const HomeView = (() => {
   function getCurrentUser() {
     const state = getState();
 
-    return (
-      safeObject(
-        first(
-          state.user,
-          state.currentUser,
-          state.authUser,
-          state.sessionUser,
-          state.session?.user,
-          {}
-        )
-      ) || {}
+    return safeObject(
+      first(
+        state.user,
+        state.currentUser,
+        state.authUser,
+        state.sessionUser,
+        state.session?.user,
+        state.sessionData?.user,
+        {}
+      )
     );
   }
 
@@ -179,6 +181,7 @@ export const HomeView = (() => {
       first(
         state.role,
         state.rol,
+        state.userRole,
         user.role,
         user.rol,
         "user"
@@ -199,12 +202,15 @@ export const HomeView = (() => {
     if (isElement(context?.viewContainer)) return context.viewContainer;
 
     return (
+      AppCore?.dom?.routerViewHost ||
+      AppCore?.dom?.viewHost ||
       AppCore?.dom?.viewContainer ||
       document.getElementById("view-container") ||
-      document.getElementById("app-content") ||
-      document.getElementById("main-content") ||
+      document.querySelector("[data-router-view-host='true']") ||
       document.querySelector("[data-router-view]") ||
       document.querySelector("[data-view-root]") ||
+      document.getElementById("app-content") ||
+      document.getElementById("main-content") ||
       null
     );
   }
@@ -232,6 +238,23 @@ export const HomeView = (() => {
     );
   }
 
+  function htmlToElement(html = "") {
+    if (!isBrowser()) return null;
+
+    try {
+      const template = document.createElement("template");
+      template.innerHTML = String(html || "").trim();
+
+      return template.content.firstElementChild || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function hasKeys(value = {}) {
+    return Boolean(isObject(value) && Object.keys(value).length > 0);
+  }
+
   /* =======================================================
      STATE NORMALIZATION
   ======================================================= */
@@ -242,6 +265,7 @@ export const HomeView = (() => {
 
     homeState.dashboard = safeObject(homeState.dashboard);
     homeState.summary = safeObject(homeState.summary);
+
     homeState.widgets = safeArray(homeState.widgets);
 
     homeState.tickets = safeArray(homeState.tickets);
@@ -264,114 +288,48 @@ export const HomeView = (() => {
     return homeState;
   }
 
-  function getDashboardSource(payload = {}) {
-    const response = safeObject(
-      normalizeHomeDashboardResponse?.(payload) || payload
-    );
+  function hasDashboardData(dashboard = {}) {
+    const data = safeObject(dashboard);
 
-    return safeObject(
-      first(
-        response.dashboard,
-        response.data?.dashboard,
-        response.payload?.dashboard,
-        response.result?.dashboard,
-        response
-      )
+    return Boolean(
+      hasKeys(data.summary) ||
+        safeArray(data.widgets).length ||
+        safeArray(data.tickets).length ||
+        safeArray(data.incidencias).length ||
+        safeArray(data.invoices).length ||
+        safeArray(data.facturas).length ||
+        safeArray(data.clients).length ||
+        safeArray(data.clientes).length ||
+        safeArray(data.users).length ||
+        safeArray(data.usuarios).length ||
+        safeArray(data.activity).length ||
+        safeArray(data.recent).length ||
+        safeNumber(data.totalTickets, 0) > 0 ||
+        safeNumber(data.incidenciasTotal, 0) > 0 ||
+        safeNumber(data.facturasTotal, 0) > 0 ||
+        safeNumber(data.clientsCount, 0) > 0 ||
+        safeNumber(data.clientesCount, 0) > 0 ||
+        safeNumber(data.usersCount, 0) > 0
     );
   }
 
   function normalizeDashboardPayload(payload = {}) {
-    const response = safeObject(
-      normalizeHomeDashboardResponse?.(payload) || payload
-    );
-
-    const rawDashboard = getDashboardSource(response);
-    const dashboard = normalizeHomeDashboard(rawDashboard);
-
-    const summary = safeObject(
+    const source = safeObject(
       first(
-        dashboard.summary,
-        dashboard.stats,
-        dashboard.metrics,
-        dashboard.totals,
-        dashboard.counts,
-        response.summary,
-        response.stats,
-        {}
+        payload?.dashboard,
+        payload?.data?.dashboard,
+        payload?.payload?.dashboard,
+        payload?.result?.dashboard,
+        payload
       )
     );
 
-    const tickets = normalizeHomeTickets(
-      first(
-        dashboard.tickets,
-        dashboard.incidencias,
-        response.tickets,
-        response.incidencias,
-        []
-      )
-    );
-
-    const invoices = normalizeHomeInvoices(
-      first(
-        dashboard.invoices,
-        dashboard.facturas,
-        response.invoices,
-        response.facturas,
-        []
-      )
-    );
-
-    const users = normalizeHomeUsers(
-      first(
-        dashboard.users,
-        dashboard.usuarios,
-        response.users,
-        response.usuarios,
-        []
-      )
-    );
-
-    const clients = normalizeHomeClients(
-      first(
-        dashboard.clients,
-        dashboard.clientes,
-        dashboard.customers,
-        response.clients,
-        response.clientes,
-        response.customers,
-        []
-      )
-    );
-
-    const rawActivity = normalizeHomeActivityList(
-      first(
-        dashboard.activity,
-        dashboard.activities,
-        dashboard.recent,
-        dashboard.recentActivity,
-        response.activity,
-        response.activities,
-        response.recent,
-        response.recentActivity,
-        []
-      )
-    );
-
-    const activity = rawActivity.length
-      ? rawActivity
-      : normalizeHomeActivityList(
-          buildHomeActivityFromCollections({
-            tickets,
-            invoices,
-            users,
-            clients,
-          })
-        );
+    const dashboard = normalizeHomeDashboard(source);
 
     const requestId = safeText(
       first(
-        response.requestId,
-        response.meta?.requestId,
+        payload?.requestId,
+        payload?.meta?.requestId,
         dashboard.requestId,
         dashboard.meta?.requestId,
         homeState.requestId,
@@ -382,9 +340,9 @@ export const HomeView = (() => {
 
     const lastSyncAt = safeText(
       first(
-        response.lastSyncAt,
-        response.updatedAt,
-        response.generatedAt,
+        payload?.lastSyncAt,
+        payload?.updatedAt,
+        payload?.generatedAt,
         dashboard.updatedAt,
         dashboard.generatedAt,
         dashboard.meta?.updatedAt,
@@ -396,41 +354,9 @@ export const HomeView = (() => {
     return {
       dashboard: {
         ...dashboard,
-
-        summary,
-        stats: summary,
-        metrics: summary,
-        totals: summary,
-        counts: summary,
-
-        tickets,
-        incidencias: tickets,
-
-        invoices,
-        facturas: invoices,
-
-        users,
-        usuarios: users,
-
-        clients,
-        clientes: clients,
-        customers: clients,
-
-        activity,
-        activities: activity,
-        recent: activity,
-        recentActivity: activity,
-
-        updatedAt: lastSyncAt,
         requestId,
+        updatedAt: lastSyncAt,
       },
-
-      summary,
-      tickets,
-      invoices,
-      users,
-      clients,
-      activity,
       requestId,
       lastSyncAt,
     };
@@ -440,77 +366,29 @@ export const HomeView = (() => {
     const opts = safeObject(options);
     const normalized = normalizeDashboardPayload(payload);
 
+    if (!hasDashboardData(normalized.dashboard)) {
+      return null;
+    }
+
     syncHomeStateFromDashboard(normalized.dashboard, {
       replace: opts.replace === true,
       requestId: normalized.requestId,
       lastSyncAt: normalized.lastSyncAt,
     });
 
-    setDashboard(normalized.dashboard, {
-      replace: opts.replace === true,
-    });
-
-    setSummary(normalized.summary, {
-      replace: opts.replace === true,
-    });
-
-    setTickets(normalized.tickets, {
-      remoteCount: normalized.tickets.length,
-    });
-
-    setInvoices(normalized.invoices, {
-      remoteCount: normalized.invoices.length,
-    });
-
-    setUsers(normalized.users, {
-      remoteCount: normalized.users.length,
-    });
-
-    setClients(normalized.clients, {
-      remoteCount: normalized.clients.length,
-    });
-
-    setRecent(normalized.activity, {
-      remoteCount: normalized.activity.length,
-    });
-
-    setRequestId(normalized.requestId);
-    setLastSyncAt(normalized.lastSyncAt);
-
     replaceHomeStore(
       {
         dashboard: normalized.dashboard,
-        summary: normalized.summary,
-        widgets: safeArray(normalized.dashboard.widgets),
-
-        tickets: normalized.tickets,
-        incidencias: normalized.tickets,
-
-        invoices: normalized.invoices,
-        facturas: normalized.invoices,
-
-        users: normalized.users,
-        usuarios: normalized.users,
-
-        clients: normalized.clients,
-        clientes: normalized.clients,
-
-        activity: normalized.activity,
-        recent: normalized.activity,
-        recentActivity: normalized.activity,
-
         requestId: normalized.requestId,
         lastSyncAt: normalized.lastSyncAt,
       },
       {
         preserveExisting: opts.preserveExisting !== false,
-        reason: opts.source || SOURCE,
+        replace: opts.replace === true,
       }
     );
 
     clearHomeError();
-    setLoaded(true);
-    setHydrated(true);
 
     return normalized;
   }
@@ -519,20 +397,17 @@ export const HomeView = (() => {
     try {
       const cached = hydrateHomeFromCache?.();
 
-      if (cached) {
-        applyDashboardPayload(cached.dashboard || cached, {
-          source: "home.cache",
-          preserveExisting: true,
-        });
+      if (!cached?.hydrated) return false;
 
-        setHydrated(true);
-        return true;
-      }
+      const normalized = applyDashboardPayload(cached.dashboard || cached, {
+        source: "home.cache",
+        preserveExisting: true,
+      });
+
+      return Boolean(normalized);
     } catch {
-      // noop
+      return false;
     }
-
-    return false;
   }
 
   /* =======================================================
@@ -571,22 +446,25 @@ export const HomeView = (() => {
   }
 
   function getPagination(items = getTickets()) {
+    const rows = safeArray(items);
+
     try {
       return paginateHomeItems(
-        items,
+        rows,
         safeNumber(homeState.page, 1),
         safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE)
       );
     } catch {
       const pageSize = Math.max(1, safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE));
-      const total = items.length;
+      const total = rows.length;
       const totalPages = Math.max(1, Math.ceil(total / pageSize));
       const page = Math.min(Math.max(1, safeNumber(homeState.page, 1)), totalPages);
       const start = (page - 1) * pageSize;
+      const pageItems = rows.slice(start, start + pageSize);
 
       return {
-        items: items.slice(start, start + pageSize),
-        pageItems: items.slice(start, start + pageSize),
+        items: pageItems,
+        pageItems,
         page,
         currentPage: page,
         pageSize,
@@ -749,6 +627,38 @@ export const HomeView = (() => {
     `;
   }
 
+  function renderError(container = null, error = null) {
+    if (!isElement(container)) return null;
+
+    const node =
+      htmlToElement(renderHomeErrorState(safeErrorMessage(error))) ||
+      htmlToElement(`
+        <section class="panel-content home-view home-view--error" data-view="home">
+          <div class="content-wrapper home-view-wrapper">
+            <div class="home-error-fallback" role="alert">
+              <h1>No se pudo cargar el Home</h1>
+              <p>${safeErrorMessage(error)}</p>
+            </div>
+          </div>
+        </section>
+      `);
+
+    if (!node) return null;
+
+    try {
+      container.replaceChildren(node);
+    } catch {
+      try {
+        container.innerHTML = "";
+        container.appendChild(node);
+      } catch {
+        return null;
+      }
+    }
+
+    return node;
+  }
+
   function renderView(container = currentContainer) {
     if (destroyed || !isElement(container)) return null;
 
@@ -758,22 +668,22 @@ export const HomeView = (() => {
 
     try {
       setViewBusy(container, Boolean(homeState.loading || homeState.refreshing));
-      container.innerHTML = buildHtml();
+
+      const node = htmlToElement(buildHtml());
+
+      if (!node) {
+        throw new Error("HOME_VIEW_NODE_EMPTY");
+      }
+
+      container.replaceChildren(node);
       setViewBusy(container, false);
 
       currentContainer = container;
 
-      return isCurrentRender(seq) ? container : null;
+      return isCurrentRender(seq) ? node : null;
     } catch (error) {
       setViewBusy(container, false);
-
-      try {
-        container.innerHTML = renderHomeErrorState(safeErrorMessage(error));
-      } catch {
-        // noop
-      }
-
-      return container;
+      return renderError(container, error);
     }
   }
 
@@ -782,15 +692,28 @@ export const HomeView = (() => {
 
     if (!container) return null;
 
+    destroyed = false;
+    initialized = true;
     currentContainer = container;
 
-    const node = renderView(container);
+    ensureBaseState();
 
-    if (node) {
-      bind(container);
+    if (!homeState.hydrated && !hasVisibleData()) {
+      hydrateBestEffort();
     }
 
-    return node;
+    renderView(container);
+    bind(container);
+
+    if (!homeState.loaded && !inflightLoad) {
+      void loadData({
+        force: false,
+        silent: hasVisibleData(),
+        asRefresh: false,
+      });
+    }
+
+    return api;
   }
 
   /* =======================================================
@@ -804,8 +727,8 @@ export const HomeView = (() => {
         getUsers().length ||
         getClients().length ||
         getActivity().length ||
-        Object.keys(safeObject(homeState.summary)).length ||
-        Object.keys(safeObject(homeState.dashboard)).length
+        hasKeys(homeState.summary) ||
+        hasKeys(homeState.dashboard)
     );
   }
 
@@ -813,6 +736,7 @@ export const HomeView = (() => {
     if (destroyed) return false;
     if (inflightLoad) return inflightLoad;
 
+    const seq = nextLoadSeq();
     const opts = safeObject(options);
     const refresh = opts.asRefresh === true;
 
@@ -837,21 +761,24 @@ export const HomeView = (() => {
               returnStaleOnError: true,
             });
 
-        applyDashboardPayload(response, {
+        if (!isCurrentLoad(seq)) return false;
+
+        const normalized = applyDashboardPayload(response, {
           source: refresh ? "home.refresh" : "home.load",
           preserveExisting: true,
         });
 
-        setLoaded(true);
-        setHydrated(true);
-        clearHomeError();
+        if (!normalized) {
+          return false;
+        }
 
         return true;
       } catch (error) {
+        if (!isCurrentLoad(seq)) return false;
+
         const message = safeErrorMessage(error);
 
         setError(message);
-        setLoaded(true);
 
         if (opts.silent !== true) {
           showToast(message, "error");
@@ -859,11 +786,16 @@ export const HomeView = (() => {
 
         return false;
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (isCurrentLoad(seq)) {
+          setLoading(false);
+          setRefreshing(false);
 
-        renderView(currentContainer);
-        bind(currentContainer);
+          renderView(currentContainer);
+
+          if (!bindingsCleanup && currentContainer) {
+            bind(currentContainer);
+          }
+        }
 
         inflightLoad = null;
       }
@@ -876,13 +808,23 @@ export const HomeView = (() => {
      ACTIONS
   ======================================================= */
 
+  function rerender() {
+    const node = renderView(currentContainer);
+
+    if (!bindingsCleanup && currentContainer) {
+      bind(currentContainer);
+    }
+
+    return node;
+  }
+
   function goToPage(page = 1) {
     const pagination = getPagination(getTickets());
     const totalPages = Math.max(1, safeNumber(pagination.totalPages, 1));
     const nextPage = Math.min(Math.max(1, safeNumber(page, 1)), totalPages);
 
     setPage(nextPage);
-    renderView(currentContainer);
+    rerender();
 
     return nextPage;
   }
@@ -900,7 +842,7 @@ export const HomeView = (() => {
 
     setPageSize(size);
     setPage(1);
-    renderView(currentContainer);
+    rerender();
 
     return size;
   }
@@ -911,7 +853,7 @@ export const HomeView = (() => {
     if (!target) return false;
 
     setNavigatingAction(target);
-    renderView(currentContainer);
+    rerender();
 
     try {
       return await navigateFromHomeAction({
@@ -921,7 +863,7 @@ export const HomeView = (() => {
       });
     } finally {
       setNavigatingAction("");
-      renderView(currentContainer);
+      rerender();
     }
   }
 
@@ -936,37 +878,37 @@ export const HomeView = (() => {
 
     setOpeningTicketId(id);
     setSelectedTicketId(id);
-    renderView(currentContainer);
+    rerender();
 
     try {
-      return await runHomeQuickAction({
-        action: "open-ticket",
+      return await navigateFromHomeAction({
         route: "/incidencias",
         payload: {
           ...safeObject(payload),
           ticketId: id,
           incidenciaId: id,
         },
+        silent: false,
       });
     } finally {
       setOpeningTicketId("");
-      renderView(currentContainer);
+      rerender();
     }
   }
 
   async function createIncidencia(draft = {}) {
     setCreating(true);
-    renderView(currentContainer);
+    rerender();
 
     try {
-      return await runHomeQuickAction({
-        action: "create-incidencia",
+      return await navigateFromHomeAction({
         route: "/incidencias",
         payload: safeObject(draft),
+        silent: false,
       });
     } finally {
       setCreating(false);
-      renderView(currentContainer);
+      rerender();
     }
   }
 
@@ -1013,19 +955,25 @@ export const HomeView = (() => {
 
       runHomeQuickAction: runQuickAction,
 
-      openHomeWidgetAction: ({ widgetId = "", payload = {} } = {}) =>
-        openTicket(widgetId, payload),
-
-      copyHomeWidgetIdAction: ({ widgetId = "" } = {}) =>
-        runHomeQuickAction({
-          action: "copy-id",
-          payload: {
-            widgetId,
-          },
+      openHomeWidgetAction: ({ widgetId = "", payload = {}, navigate = true, silent = false } = {}) =>
+        actionOpenHomeWidget({
+          widgetId,
+          payload,
+          navigate,
+          silent,
         }),
 
-      createFromHomeAction: ({ draft = {}, payload = {} } = {}) =>
-        createIncidencia(first(draft, payload, {})),
+      copyHomeWidgetIdAction,
+
+      createFromHomeAction: ({ draft = {}, payload = {}, silent = false } = {}) =>
+        createIncidencia(first(draft, payload, {}), {
+          silent,
+        }),
+
+      goToPage,
+      goPrevPage,
+      goNextPage,
+      changePageSize,
     });
 
     return true;
@@ -1045,19 +993,11 @@ export const HomeView = (() => {
     currentContainer = container;
 
     inflightInit = (async () => {
-      initialized = true;
+      render(container, args[1]);
 
-      ensureBaseState();
-      hydrateBestEffort();
-
-      renderView(container);
-      bind(container);
-
-      await loadData({
-        force: false,
-        silent: hasVisibleData(),
-        asRefresh: false,
-      });
+      if (inflightLoad) {
+        await inflightLoad;
+      }
 
       return api;
     })();
@@ -1096,6 +1036,8 @@ export const HomeView = (() => {
     initialized = false;
 
     nextRenderSeq();
+    nextLoadSeq();
+
     cleanupBindings();
 
     setLoading(false);
@@ -1175,6 +1117,9 @@ export const HomeView = (() => {
       requestId: homeState.requestId || "",
       lastSyncAt: homeState.lastSyncAt || "",
 
+      hasContainer: Boolean(currentContainer),
+      hasBindings: Boolean(bindingsCleanup),
+
       hasInflightInit: Boolean(inflightInit),
       hasInflightLoad: Boolean(inflightLoad),
     });
@@ -1228,6 +1173,7 @@ export const HomeView = (() => {
     getClientes: getClients,
 
     getActivity,
+
     getDashboard: () => safeObject(homeState.dashboard),
     getSummary: () => safeObject(homeState.summary),
     getWidgets: () => safeArray(homeState.widgets),

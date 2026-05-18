@@ -1,5 +1,5 @@
 /* =========================================================
-   Onion Support - Preboot
+   Onion Support - Preboot Theme
    Archivo: /src/preboot/theme.js
 
    Responsabilidad:
@@ -12,45 +12,23 @@
    - Sin auth.
    - Sin router.
    - Sin HTTP.
+   - Sin eventos custom.
+   - Sin magia negra.
 ========================================================= */
 
 (() => {
   "use strict";
 
-  const LOCALES = ["ca", "es", "en"];
+  const SUPPORTED_LOCALES = ["ca", "es", "en"];
   const FALLBACK_LOCALE = "en";
 
   const THEME_COLORS = {
-    dark: "#0a0c11",
     light: "#ffffff",
+    dark: "#0a0c11",
   };
 
-  const TEXTS = {
-    ca: {
-      skip: "Saltar al contingut principal",
-      loader: "Carregant sessió...",
-      subtext: "Preparant el panell",
-    },
-    es: {
-      skip: "Saltar al contenido principal",
-      loader: "Cargando sesión...",
-      subtext: "Preparando el panel",
-    },
-    en: {
-      skip: "Skip to main content",
-      loader: "Loading session...",
-      subtext: "Preparing panel",
-    },
-  };
-
-  function getTheme() {
-    try {
-      return window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light";
-    } catch {
-      return "dark";
-    }
+  function isBrowser() {
+    return typeof window !== "undefined" && typeof document !== "undefined";
   }
 
   function normalizeLocale(value) {
@@ -61,16 +39,15 @@
       .split("-")[0];
   }
 
-  function getLocale() {
-    const languages =
-      navigator.languages && navigator.languages.length
-        ? navigator.languages
-        : [navigator.language];
+  function resolveLocale() {
+    const languages = Array.isArray(navigator.languages) && navigator.languages.length
+      ? navigator.languages
+      : [navigator.language];
 
     for (const language of languages) {
       const locale = normalizeLocale(language);
 
-      if (LOCALES.includes(locale)) {
+      if (SUPPORTED_LOCALES.includes(locale)) {
         return {
           value: locale,
           source: "browser",
@@ -84,88 +61,109 @@
     };
   }
 
-  function setText(selector, value) {
-    const element = document.querySelector(selector);
-
-    if (element) {
-      element.textContent = value;
+  function resolveSystemTheme() {
+    try {
+      return window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light";
+    } catch {
+      return "light";
     }
   }
 
-  function setMeta(name, value) {
-    const meta = document.querySelector(`meta[name="${name}"]:not([media])`);
+  function setThemeMeta(theme) {
+    const color = THEME_COLORS[theme] || THEME_COLORS.light;
 
-    if (meta) {
-      meta.setAttribute("content", value);
+    try {
+      document
+        .querySelectorAll("meta[name='theme-color']")
+        .forEach((meta) => {
+          const media = meta.getAttribute("media") || "";
+
+          if (!media) {
+            meta.setAttribute("content", color);
+          }
+        });
+    } catch {
+      // noop
     }
   }
 
   function applyTheme(element, theme) {
-    if (!element) return;
+    if (!element) return false;
 
-    element.classList.remove("no-js", "theme-dark", "theme-light");
-    element.classList.add("js", `theme-${theme}`);
+    try {
+      element.classList.remove("no-js", "theme-light", "theme-dark");
+      element.classList.add("js", `theme-${theme}`);
 
-    element.dataset.theme = theme;
-    element.dataset.themeMode = "system";
-    element.dataset.themeSource = "browser";
-    element.dataset.systemTheme = theme;
-    element.dataset.themeReady = "true";
+      element.dataset.theme = theme;
+      element.dataset.themeMode = "system";
+      element.dataset.themeSource = "browser";
+      element.dataset.systemTheme = theme;
+      element.dataset.themeReady = "true";
+
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function applyLocale(element, locale) {
-    if (!element) return;
+    if (!element) return false;
 
-    element.lang = locale.value;
-    element.dir = "ltr";
+    try {
+      element.lang = locale.value;
+      element.dir = "ltr";
 
-    element.dataset.locale = locale.value;
-    element.dataset.localeSource = locale.source;
-    element.dataset.localeFallback = FALLBACK_LOCALE;
-    element.dataset.localeSupported = LOCALES.join(" ");
+      element.dataset.locale = locale.value;
+      element.dataset.localeSource = locale.source;
+      element.dataset.localeFallback = FALLBACK_LOCALE;
+      element.dataset.localeSupported = SUPPORTED_LOCALES.join(" ");
+
+      return true;
+    } catch {
+      return false;
+    }
   }
-
-  function applyTexts(locale) {
-    const text = TEXTS[locale.value] || TEXTS[FALLBACK_LOCALE];
-
-    setText("[data-skip-link]", text.skip);
-    setText("[data-loader-text]", text.loader);
-    setText("[data-loader-subtext]", text.subtext);
-  }
-
-  const root = document.documentElement;
-  const locale = getLocale();
 
   function apply() {
-    const theme = getTheme();
+    if (!isBrowser()) return false;
 
-    applyTheme(root, theme);
-    applyLocale(root, locale);
+    const theme = resolveSystemTheme();
+    const locale = resolveLocale();
+
+    applyTheme(document.documentElement, theme);
+    applyLocale(document.documentElement, locale);
 
     if (document.body) {
       applyTheme(document.body, theme);
       applyLocale(document.body, locale);
-      applyTexts(locale);
     }
 
-    setMeta("theme-color", THEME_COLORS[theme]);
-    setMeta("msapplication-TileColor", THEME_COLORS[theme]);
+    setThemeMeta(theme);
 
-    window.__ONION_PREBOOT__ = {
+    window.__ONION_PREBOOT__ = Object.freeze({
       theme,
       themeMode: "system",
       themeSource: "browser",
+
       locale: locale.value,
       localeSource: locale.source,
       fallbackLocale: FALLBACK_LOCALE,
-      supportedLocales: LOCALES,
-    };
+      supportedLocales: [...SUPPORTED_LOCALES],
+    });
+
+    return true;
   }
+
+  if (!isBrowser()) return;
 
   apply();
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", apply, { once: true });
+    document.addEventListener("DOMContentLoaded", apply, {
+      once: true,
+    });
   }
 
   try {
@@ -173,6 +171,6 @@
       .matchMedia("(prefers-color-scheme: dark)")
       .addEventListener("change", apply);
   } catch {
-    // Sin soporte matchMedia moderno: no hace falta hacer nada.
+    // Navegador sin listener moderno. No pasa nada.
   }
 })();

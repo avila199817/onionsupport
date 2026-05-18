@@ -1,50 +1,57 @@
 /* =========================================================
-   Onion SPA - Topbar DOM
-   Archivo: src/ui/topbar/topbar.dom.js
+   Onion Support - Topbar DOM
+   Archivo: /src/ui/topbar/topbar.dom.js
 
-   TOPBAR DOM · SIMPLE
-   - template HTML del topbar
-   - mount estable en #topbar-mount
-   - sin duplicados
-   - refs internas resueltas dentro del topbar
-   - cache sólo nodos conectados en AppCore.dom
-   - ARIA base del buscador
-   - sin CSS inline, sin overlays, sin glass DOM
+   Responsabilidad:
+   - Compat DOM mínima para Topbar.
+   - Montar en #topbar-mount.
+   - Cachear refs básicas en AppCore.dom.
+   - Sin search runtime.
+   - Sin overlays.
+   - Sin glass DOM.
+   - Sin duplicados complejos.
+   - Sin CSS inline.
+   - Sin submódulos.
+   - Sin magia negra.
+   - El topbar real vive en src/ui/topbar/index.js.
 ========================================================= */
 
-export const TOPBAR_DOM_VERSION = "topbar-dom-v16-simple";
+export const TOPBAR_DOM_VERSION = "simple";
 
 export const TOPBAR_IDS = Object.freeze({
   mount: "topbar-mount",
-  root: "topbar",
-  legacyRoot: "app-topbar",
+  root: "app-topbar",
+  legacyRoot: "topbar",
   title: "topbar-title",
   mobileToggle: "toggleSidebarMobile",
+
+  // Compat: ya no se renderiza búsqueda aquí.
   searchInput: "topbar-search",
   searchResults: "topbar-search-results",
   searchLabel: "topbar-search-label",
+
   viewContainer: "view-container",
 });
 
 export const TOPBAR_SELECTORS = Object.freeze({
   layout: ".layout",
-  appShell: "#app-shell, [data-app-shell='true'], [data-app-shell], .app-shell",
-  topbarMount: "#topbar-mount, [data-topbar-mount], [data-topbar-mount='true']",
-  topbar: ".topbar, #topbar, #app-topbar, [data-topbar='root']",
+  appShell: "#app-shell, [data-app-shell], .app-shell",
+  topbarMount: "#topbar-mount, [data-topbar-mount]",
+  topbar: "#app-topbar, #topbar, [data-topbar-root], [data-topbar='root'], .topbar",
 
-  topbarLeft: ".topbar-left, [data-topbar='left']",
-  topbarRight: ".topbar-right, [data-topbar='right']",
-  mobileToggle: ".topbar-mobile-toggle, #toggleSidebarMobile, [data-topbar-action='toggle-sidebar']",
-  title: ".topbar-title, #topbar-title, [data-topbar='title']",
+  topbarLeft: ".topbar-left, [data-topbar-left]",
+  topbarRight: ".topbar-right, [data-topbar-user], .topbar-right",
+  mobileToggle: "[data-topbar-sidebar-toggle], #toggleSidebarMobile, .topbar-sidebar-toggle",
+  title: "[data-topbar-title], #topbar-title, .topbar-title",
 
-  searchWrap: ".topbar-search-wrap, [data-topbar='search-wrap']",
-  searchIcon: ".topbar-search-icon, [data-topbar='search-icon']",
-  searchInput: ".topbar-search, #topbar-search, [data-topbar='search-input']",
-  searchResults: ".topbar-search-results, #topbar-search-results, [data-topbar='search-results']",
+  searchWrap: "[data-topbar='search-wrap'], .topbar-search-wrap",
+  searchIcon: "[data-topbar='search-icon'], .topbar-search-icon",
+  searchInput: "#topbar-search, [data-topbar='search-input'], .topbar-search",
+  searchResults: "#topbar-search-results, [data-topbar='search-results'], .topbar-search-results",
   searchLabel: "#topbar-search-label, [data-topbar='search-label']",
 
-  sidebar: ".sidebar, #sidebar, #app-sidebar, [data-sidebar-root], [data-sidebar='true']",
-  mainContent: ".main-content, #main-content, #app-main, main.main-content, main[role='main'], main",
+  sidebar: "#app-sidebar, #sidebar, [data-sidebar-root], .sidebar",
+  mainContent: "#main-content, #app-main, main",
   appContent: "#app-content, [data-app-content], .app-content",
   viewContainer: "#view-container, [data-view-container], .view-container",
 });
@@ -67,54 +74,29 @@ function isElement(value) {
   return Boolean(value && value.nodeType === 1);
 }
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-  const text = String(value).trim();
-  return text || fallback;
+function text(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
 }
 
-function getAppDom(AppCore) {
+function getAppDom(AppCore = null) {
   if (!isObject(AppCore)) return fallbackDomCache;
 
-  if (!AppCore.dom || typeof AppCore.dom !== "object") {
-    try {
-      AppCore.dom = {};
-    } catch {
-      return fallbackDomCache;
-    }
+  try {
+    AppCore.dom = isObject(AppCore.dom) ? AppCore.dom : {};
+    return AppCore.dom;
+  } catch {
+    return fallbackDomCache;
   }
-
-  return AppCore.dom;
 }
 
-function rootOf(root = null) {
-  if (!isBrowser()) return null;
-  return root || document;
-}
-
-function qs(selector = "", root = null) {
+function query(selector = "", root = null) {
   if (!isBrowser() || !selector) return null;
 
-  const scope = rootOf(root);
-  if (!scope?.querySelector) return null;
-
   try {
-    return scope.querySelector(selector);
+    return (root || document).querySelector(selector);
   } catch {
     return null;
-  }
-}
-
-function qsa(selector = "", root = null) {
-  if (!isBrowser() || !selector) return [];
-
-  const scope = rootOf(root);
-  if (!scope?.querySelectorAll) return [];
-
-  try {
-    return [...scope.querySelectorAll(selector)];
-  } catch {
-    return [];
   }
 }
 
@@ -128,171 +110,64 @@ function byId(id = "") {
   }
 }
 
-function contains(parent = null, child = null) {
-  if (!isElement(parent) || !isElement(child)) return false;
+function connected(node = null) {
+  if (!isElement(node)) return null;
 
   try {
-    return parent === child || parent.contains(child);
+    if (node.isConnected === true) return node;
   } catch {
-    return false;
+    // noop
+  }
+
+  try {
+    return document.contains(node) ? node : null;
+  } catch {
+    return null;
   }
 }
 
-function isConnected(node = null) {
-  if (!node || !isBrowser()) return false;
+function clear(node = null) {
+  if (!node) return false;
 
   try {
-    if (typeof node.isConnected === "boolean") return node.isConnected;
-  } catch {}
-
-  try {
-    return document.contains(node);
+    node.replaceChildren();
+    return true;
   } catch {
-    return false;
+    try {
+      node.textContent = "";
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
-function connectedOrNull(node = null) {
-  return isElement(node) && isConnected(node) ? node : null;
-}
-
-function setAttr(element, name = "", value = "") {
-  if (!isElement(element) || !name) return false;
+function setAttr(node = null, name = "", value = "") {
+  if (!isElement(node) || !name) return false;
 
   try {
-    element.setAttribute(name, String(value));
+    node.setAttribute(name, String(value));
     return true;
   } catch {
     return false;
   }
 }
 
-function setAttrIfMissing(element, name = "", value = "") {
-  if (!isElement(element) || !name) return false;
+function ensureId(node = null, id = "") {
+  if (!isElement(node)) return "";
 
-  try {
-    if (!element.hasAttribute(name)) element.setAttribute(name, String(value));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function removeAttr(element, name = "") {
-  if (!isElement(element) || !name) return false;
-
-  try {
-    element.removeAttribute(name);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function ensureId(element, id = "") {
-  if (!isElement(element)) return "";
-
-  const current = safeText(element.id, "");
+  const current = text(node.id, "");
   if (current) return current;
 
-  const next = safeText(id, "");
+  const next = text(id, "");
   if (!next) return "";
 
   try {
-    element.id = next;
+    node.id = next;
     return next;
   } catch {
     return "";
   }
-}
-
-function uniqueElements(nodes = []) {
-  const seen = new Set();
-  const output = [];
-
-  for (const node of nodes) {
-    if (!isElement(node) || seen.has(node)) continue;
-    seen.add(node);
-    output.push(node);
-  }
-
-  return output;
-}
-
-function isTopbarRoot(node = null) {
-  if (!isElement(node)) return false;
-
-  const id = safeText(node.id, "");
-  return Boolean(
-    id === TOPBAR_IDS.root ||
-      id === TOPBAR_IDS.legacyRoot ||
-      node.classList?.contains?.("topbar") ||
-      node.getAttribute?.("data-topbar") === "root"
-  );
-}
-
-function isTopbarMount(node = null) {
-  if (!isElement(node)) return false;
-
-  return Boolean(
-    node.id === TOPBAR_IDS.mount ||
-      node.hasAttribute?.("data-topbar-mount") ||
-      node.getAttribute?.("data-topbar-mount") === "true"
-  );
-}
-
-function findInsideRoot(root = null, id = "", selector = "") {
-  if (!isElement(root)) return null;
-
-  const bySelector = selector ? connectedOrNull(qs(selector, root)) : null;
-  if (bySelector) return bySelector;
-
-  const byIdNode = id ? connectedOrNull(byId(id)) : null;
-  return byIdNode && contains(root, byIdNode) ? byIdNode : null;
-}
-
-function getTopbarCandidates() {
-  if (!isBrowser()) return [];
-
-  return uniqueElements([
-    ...qsa(`#${TOPBAR_IDS.root}`),
-    ...qsa(`#${TOPBAR_IDS.legacyRoot}`),
-    ...qsa("[data-topbar='root']"),
-    ...qsa(".topbar"),
-  ]).filter(isTopbarRoot);
-}
-
-function removeDuplicateTopbars(keep = null) {
-  if (!isBrowser()) return null;
-
-  const candidates = getTopbarCandidates();
-  const kept = connectedOrNull(keep) || candidates.find(isConnected) || null;
-
-  for (const node of candidates) {
-    if (!isElement(node) || (kept && node === kept)) continue;
-
-    try {
-      node.remove();
-    } catch {}
-  }
-
-  return kept;
-}
-
-function resolveExistingTopbar(AppCore) {
-  const dom = getAppDom(AppCore);
-
-  const cached = connectedOrNull(dom.topbar || dom.appTopbar || dom.topbarRoot);
-  if (cached && isTopbarRoot(cached)) return removeDuplicateTopbars(cached);
-
-  const direct = connectedOrNull(byId(TOPBAR_IDS.root)) ||
-    connectedOrNull(byId(TOPBAR_IDS.legacyRoot)) ||
-    connectedOrNull(qs("[data-topbar='root']")) ||
-    connectedOrNull(qs(".topbar"));
-
-  if (direct && isTopbarRoot(direct)) return removeDuplicateTopbars(direct);
-
-  return removeDuplicateTopbars(null);
 }
 
 /* =========================================================
@@ -302,74 +177,34 @@ function resolveExistingTopbar(AppCore) {
 export function getTopbarTemplate() {
   return `
     <header
-      class="topbar"
       id="${TOPBAR_IDS.root}"
+      class="topbar app-topbar"
+      data-topbar-root="true"
       data-topbar="root"
       role="banner"
+      aria-label="Barra superior"
     >
-      <div class="topbar-left" data-topbar="left">
+      <div class="topbar-left" data-topbar-left="true">
         <button
-          type="button"
-          class="topbar-mobile-toggle"
           id="${TOPBAR_IDS.mobileToggle}"
-          data-topbar-action="toggle-sidebar"
-          data-tooltip="Abrir navegación"
-          aria-label="Abrir navegación"
-          aria-controls="sidebar"
+          class="topbar-sidebar-toggle"
+          type="button"
+          data-topbar-sidebar-toggle="true"
+          aria-label="Abrir menú"
           aria-expanded="false"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-            <path d="M4 7h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-            <path d="M4 12h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-            <path d="M4 17h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-          </svg>
-        </button>
+        >☰</button>
 
-        <h1 class="topbar-title" id="${TOPBAR_IDS.title}" data-topbar="title">Onion Support</h1>
+        <h1
+          id="${TOPBAR_IDS.title}"
+          class="topbar-title"
+          data-topbar-title="true"
+        >Onion Support</h1>
       </div>
 
-      <div class="topbar-right" data-topbar="right">
-        <div class="topbar-search-wrap" data-topbar="search-wrap">
-          <span id="${TOPBAR_IDS.searchLabel}" class="visually-hidden" data-topbar="search-label">Buscar en la aplicación</span>
-
-          <svg class="topbar-search-icon" data-topbar="search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-            <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
-            <path d="M20 20l-3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-
-          <input
-            type="search"
-            id="${TOPBAR_IDS.searchInput}"
-            class="topbar-search"
-            data-topbar="search-input"
-            data-topbar-search="true"
-            placeholder="Buscar..."
-            autocomplete="off"
-            autocapitalize="off"
-            spellcheck="false"
-            inputmode="search"
-            role="combobox"
-            aria-label="Buscar en la aplicación"
-            aria-labelledby="${TOPBAR_IDS.searchLabel}"
-            aria-controls="${TOPBAR_IDS.searchResults}"
-            aria-expanded="false"
-            aria-autocomplete="list"
-            aria-haspopup="listbox"
-          >
-
-          <div
-            id="${TOPBAR_IDS.searchResults}"
-            class="topbar-search-results"
-            data-topbar="search-results"
-            data-topbar-search-results="true"
-            hidden
-            role="listbox"
-            aria-hidden="true"
-            aria-live="polite"
-            aria-labelledby="${TOPBAR_IDS.searchLabel}"
-          ></div>
-        </div>
-      </div>
+      <div
+        class="topbar-right"
+        data-topbar-user="true"
+      ></div>
     </header>
   `;
 }
@@ -382,386 +217,261 @@ function createTopbarElement() {
     template.innerHTML = getTopbarTemplate().trim();
     return template.content.firstElementChild || null;
   } catch {
-    try {
-      const wrapper = document.createElement("div");
-      wrapper.innerHTML = getTopbarTemplate().trim();
-      return wrapper.firstElementChild || null;
-    } catch {
-      return null;
-    }
+    return null;
   }
 }
 
 function createTopbarMountElement() {
   if (!isBrowser()) return null;
 
-  try {
-    const mount = document.createElement("div");
-    mount.id = TOPBAR_IDS.mount;
-    mount.setAttribute("data-topbar-mount", "true");
-    return mount;
-  } catch {
-    return null;
-  }
+  const mount = document.createElement("div");
+  mount.id = TOPBAR_IDS.mount;
+  mount.dataset.topbarMount = "true";
+
+  return mount;
 }
 
 /* =========================================================
    ROOT RESOLVERS
 ========================================================= */
 
-export function getShellRootEl(AppCore) {
+export function getShellRootEl(AppCore = null) {
   if (!isBrowser()) return null;
 
   const dom = getAppDom(AppCore);
 
-  return connectedOrNull(dom.appShell) ||
-    connectedOrNull(dom.shell) ||
-    connectedOrNull(dom.layout) ||
-    connectedOrNull(byId("app-shell")) ||
-    connectedOrNull(qs(TOPBAR_SELECTORS.appShell)) ||
-    connectedOrNull(byId("app-layout")) ||
-    connectedOrNull(qs(TOPBAR_SELECTORS.layout)) ||
-    connectedOrNull(byId("app")) ||
-    connectedOrNull(byId("app-root")) ||
+  return (
+    connected(dom.appShell) ||
+    connected(dom.shell) ||
+    connected(dom.layout) ||
+    connected(byId("app-shell")) ||
+    connected(query(TOPBAR_SELECTORS.appShell)) ||
     document.body ||
-    null;
+    null
+  );
 }
 
-export function getMainContentEl(AppCore) {
+export function getMainContentEl(AppCore = null) {
   if (!isBrowser()) return null;
 
   const dom = getAppDom(AppCore);
 
-  return connectedOrNull(dom.mainContent) ||
-    connectedOrNull(dom.main) ||
-    connectedOrNull(byId("main-content")) ||
-    connectedOrNull(byId("app-main")) ||
-    connectedOrNull(qs(TOPBAR_SELECTORS.mainContent));
+  return (
+    connected(dom.mainContent) ||
+    connected(dom.main) ||
+    connected(byId("main-content")) ||
+    connected(byId("app-main")) ||
+    connected(query(TOPBAR_SELECTORS.mainContent)) ||
+    null
+  );
 }
 
-export function getAppContentEl(AppCore) {
+export function getAppContentEl(AppCore = null) {
   if (!isBrowser()) return null;
 
   const dom = getAppDom(AppCore);
 
-  return connectedOrNull(dom.appContent) ||
-    connectedOrNull(byId("app-content")) ||
-    connectedOrNull(qs(TOPBAR_SELECTORS.appContent));
+  return (
+    connected(dom.appContent) ||
+    connected(byId("app-content")) ||
+    connected(query(TOPBAR_SELECTORS.appContent)) ||
+    null
+  );
 }
 
-export function getViewContainerEl(AppCore) {
+export function getViewContainerEl(AppCore = null) {
   if (!isBrowser()) return null;
 
   const dom = getAppDom(AppCore);
 
-  return connectedOrNull(dom.viewContainer) ||
-    connectedOrNull(byId(TOPBAR_IDS.viewContainer)) ||
-    connectedOrNull(qs(TOPBAR_SELECTORS.viewContainer));
+  return (
+    connected(dom.viewContainer) ||
+    connected(byId(TOPBAR_IDS.viewContainer)) ||
+    connected(query(TOPBAR_SELECTORS.viewContainer)) ||
+    null
+  );
 }
 
-export function getSidebarEl(AppCore) {
+export function getSidebarEl(AppCore = null) {
   if (!isBrowser()) return null;
 
   const dom = getAppDom(AppCore);
 
-  return connectedOrNull(dom.sidebar) ||
-    connectedOrNull(byId("sidebar")) ||
-    connectedOrNull(byId("app-sidebar")) ||
-    connectedOrNull(qs(TOPBAR_SELECTORS.sidebar));
+  return (
+    connected(dom.sidebar) ||
+    connected(dom.sidebarRoot) ||
+    connected(byId("app-sidebar")) ||
+    connected(byId("sidebar")) ||
+    connected(query(TOPBAR_SELECTORS.sidebar)) ||
+    null
+  );
 }
 
-export function getTopbarMountEl(AppCore, options = {}) {
+export function getTopbarMountEl(AppCore = null, options = {}) {
   if (!isBrowser()) return null;
 
-  const opts = isObject(options) ? options : {};
   const dom = getAppDom(AppCore);
 
-  const existing = connectedOrNull(dom.topbarMount) ||
-    connectedOrNull(byId(TOPBAR_IDS.mount)) ||
-    connectedOrNull(qs(TOPBAR_SELECTORS.topbarMount));
+  const existing =
+    connected(dom.topbarMount) ||
+    connected(byId(TOPBAR_IDS.mount)) ||
+    connected(query(TOPBAR_SELECTORS.topbarMount));
 
-  if (existing && isTopbarMount(existing)) {
-    setAttr(existing, "data-topbar-mount", "true");
+  if (existing) {
+    existing.dataset.topbarMount = "true";
     return existing;
   }
 
-  if (opts.create === false) return null;
+  if (options?.create === false) return null;
 
-  const shellRoot = opts.shellRoot || getShellRootEl(AppCore);
-  if (!shellRoot) return null;
+  const shell = options?.shellRoot || getShellRootEl(AppCore);
+  if (!shell) return null;
 
   const mount = createTopbarMountElement();
   if (!mount) return null;
 
   try {
-    const sidebarMount = connectedOrNull(byId("sidebar-mount")) || connectedOrNull(qs("[data-sidebar-mount]"));
-    const mainContent = getMainContentEl(AppCore);
+    const main = getMainContentEl(AppCore);
+    const sidebarMount = connected(byId("sidebar-mount"));
 
-    if (sidebarMount && sidebarMount.parentNode === shellRoot) sidebarMount.insertAdjacentElement("afterend", mount);
-    else if (mainContent && mainContent.parentNode === shellRoot) shellRoot.insertBefore(mount, mainContent);
-    else shellRoot.prepend(mount);
-  } catch {
-    try {
-      shellRoot.insertBefore(mount, shellRoot.firstChild || null);
-    } catch {
-      return null;
+    if (sidebarMount && sidebarMount.parentNode === shell) {
+      sidebarMount.insertAdjacentElement("afterend", mount);
+    } else if (main && main.parentNode === shell) {
+      shell.insertBefore(mount, main);
+    } else {
+      shell.prepend(mount);
     }
-  }
 
-  return connectedOrNull(mount);
+    return connected(mount);
+  } catch {
+    return null;
+  }
 }
 
 /* =========================================================
    MOUNT
 ========================================================= */
 
-function insertTopbar({ topbar, mount, shellRoot, sidebar, mainContent } = {}) {
-  if (!isElement(topbar)) return false;
+function findTopbar(AppCore = null) {
+  const dom = getAppDom(AppCore);
 
-  if (isElement(mount)) {
-    try {
-      mount.appendChild(topbar);
-      return true;
-    } catch {}
-  }
-
-  if (!isElement(shellRoot)) return false;
-
-  try {
-    if (isElement(sidebar) && sidebar.parentNode === shellRoot) {
-      sidebar.insertAdjacentElement("afterend", topbar);
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (isElement(mainContent) && mainContent.parentNode === shellRoot) {
-      shellRoot.insertBefore(topbar, mainContent);
-      return true;
-    }
-  } catch {}
-
-  try {
-    shellRoot.prepend(topbar);
-    return true;
-  } catch {}
-
-  try {
-    shellRoot.insertBefore(topbar, shellRoot.firstChild || null);
-    return true;
-  } catch {
-    return false;
-  }
+  return (
+    connected(dom.topbar) ||
+    connected(dom.appTopbar) ||
+    connected(dom.topbarRoot) ||
+    connected(byId(TOPBAR_IDS.root)) ||
+    connected(byId(TOPBAR_IDS.legacyRoot)) ||
+    connected(query(TOPBAR_SELECTORS.topbar)) ||
+    null
+  );
 }
 
-function ensureTopbarInMount(AppCore, topbar = null) {
-  if (!isBrowser() || !isElement(topbar)) return topbar;
-
-  const mount = getTopbarMountEl(AppCore, { create: true });
-  if (!mount || topbar.parentNode === mount) return topbar;
+function removeDuplicateTopbars(keep = null) {
+  if (!isBrowser()) return keep;
 
   try {
-    mount.appendChild(topbar);
-  } catch {}
+    const nodes = [
+      ...document.querySelectorAll(TOPBAR_SELECTORS.topbar),
+    ];
+
+    for (const node of nodes) {
+      if (!isElement(node) || node === keep) continue;
+      node.remove();
+    }
+  } catch {
+    // noop
+  }
+
+  return keep;
+}
+
+export function mountTopbar(AppCore = null) {
+  if (!isBrowser()) return null;
+
+  const mount = getTopbarMountEl(AppCore, {
+    create: true,
+  });
+
+  if (!mount) return null;
+
+  let topbar = findTopbar(AppCore);
+
+  if (!topbar) {
+    topbar = createTopbarElement();
+  }
+
+  if (!topbar) return null;
+
+  try {
+    if (topbar.parentNode !== mount) {
+      clear(mount);
+      mount.appendChild(topbar);
+    }
+  } catch {
+    return null;
+  }
+
+  removeDuplicateTopbars(topbar);
+  prepareTopbarDom(topbar);
+  syncTopbarDomCache(AppCore);
 
   return topbar;
 }
 
-export function mountTopbar(AppCore) {
-  if (!isBrowser()) return null;
-
-  const shellRoot = getShellRootEl(AppCore);
-  const mount = getTopbarMountEl(AppCore, { create: true, shellRoot });
-  const existing = resolveExistingTopbar(AppCore);
-
-  if (existing) {
-    ensureTopbarInMount(AppCore, existing);
-    prepareTopbarDom(existing);
-    syncTopbarDomCache(AppCore);
-    return existing;
-  }
-
-  if (!shellRoot) return null;
-
-  const topbar = createTopbarElement();
-  if (!topbar) return null;
-
-  const inserted = insertTopbar({
-    topbar,
-    mount,
-    shellRoot,
-    sidebar: getSidebarEl(AppCore),
-    mainContent: getMainContentEl(AppCore),
-  });
-
-  if (!inserted) {
-    try {
-      document.body?.insertAdjacentElement?.("afterbegin", topbar);
-    } catch {
-      return null;
-    }
-  }
-
-  const mounted = connectedOrNull(byId(TOPBAR_IDS.root)) ||
-    connectedOrNull(topbar) ||
-    connectedOrNull(qs(TOPBAR_SELECTORS.topbar));
-
-  if (!mounted) return null;
-
-  removeDuplicateTopbars(mounted);
-  ensureTopbarInMount(AppCore, mounted);
-  prepareTopbarDom(mounted);
-  syncTopbarDomCache(AppCore);
-
-  return mounted;
-}
-
 /* =========================================================
-   DOM PREP
+   PREP
 ========================================================= */
-
-function ensureMinimalStructure(root = null) {
-  if (!isElement(root)) return false;
-
-  const hasLeft = Boolean(qs(TOPBAR_SELECTORS.topbarLeft, root));
-  const hasRight = Boolean(qs(TOPBAR_SELECTORS.topbarRight, root));
-
-  if (root.children.length > 0 && (hasLeft || hasRight)) return true;
-
-  const fresh = createTopbarElement();
-  if (!fresh) return false;
-
-  try {
-    root.innerHTML = fresh.innerHTML;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function resultsOpen(searchResults = null) {
-  if (!isElement(searchResults)) return false;
-
-  return Boolean(
-    searchResults.classList?.contains?.("active") ||
-      searchResults.classList?.contains?.("is-open") ||
-      searchResults.classList?.contains?.("is-search-open") ||
-      searchResults.dataset?.searchOpen === "true" ||
-      searchResults.hidden === false ||
-      searchResults.getAttribute?.("aria-hidden") === "false"
-  );
-}
 
 export function prepareTopbarDom(topbar = null) {
   if (!isBrowser()) return false;
 
-  const root = connectedOrNull(topbar) ||
-    connectedOrNull(byId(TOPBAR_IDS.root)) ||
-    connectedOrNull(byId(TOPBAR_IDS.legacyRoot)) ||
-    connectedOrNull(qs(TOPBAR_SELECTORS.topbar));
+  const root =
+    connected(topbar) ||
+    connected(byId(TOPBAR_IDS.root)) ||
+    connected(byId(TOPBAR_IDS.legacyRoot)) ||
+    connected(query(TOPBAR_SELECTORS.topbar));
 
   if (!root) return false;
 
-  ensureMinimalStructure(root);
-
-  try {
-    root.classList.add("topbar");
-  } catch {}
-
-  const left = qs(TOPBAR_SELECTORS.topbarLeft, root);
-  const right = qs(TOPBAR_SELECTORS.topbarRight, root);
-  const title = findInsideRoot(root, TOPBAR_IDS.title, TOPBAR_SELECTORS.title);
-  const mobileToggle = findInsideRoot(root, TOPBAR_IDS.mobileToggle, TOPBAR_SELECTORS.mobileToggle);
-  const searchWrap = qs(TOPBAR_SELECTORS.searchWrap, root);
-  const searchIcon = qs(TOPBAR_SELECTORS.searchIcon, root);
-  const searchInput = findInsideRoot(root, TOPBAR_IDS.searchInput, TOPBAR_SELECTORS.searchInput);
-  const searchResults = findInsideRoot(root, TOPBAR_IDS.searchResults, TOPBAR_SELECTORS.searchResults);
-  const searchLabel = findInsideRoot(root, TOPBAR_IDS.searchLabel, TOPBAR_SELECTORS.searchLabel);
-  const open = resultsOpen(searchResults);
-
   ensureId(root, TOPBAR_IDS.root);
-  ensureId(title, TOPBAR_IDS.title);
-  ensureId(mobileToggle, TOPBAR_IDS.mobileToggle);
-  ensureId(searchInput, TOPBAR_IDS.searchInput);
-  ensureId(searchResults, TOPBAR_IDS.searchResults);
-  ensureId(searchLabel, TOPBAR_IDS.searchLabel);
-
+  root.classList.add("topbar", "app-topbar");
+  setAttr(root, "data-topbar-root", "true");
   setAttr(root, "data-topbar", "root");
   setAttr(root, "role", "banner");
+  setAttr(root, "aria-label", "Barra superior");
 
-  if (left) {
-    try { left.classList.add("topbar-left"); } catch {}
-    setAttrIfMissing(left, "data-topbar", "left");
-  }
-
-  if (right) {
-    try { right.classList.add("topbar-right"); } catch {}
-    setAttrIfMissing(right, "data-topbar", "right");
-  }
+  const title =
+    connected(query("[data-topbar-title]", root)) ||
+    connected(query(".topbar-title", root)) ||
+    connected(byId(TOPBAR_IDS.title));
 
   if (title) {
-    try { title.classList.add("topbar-title"); } catch {}
-    setAttr(title, "data-topbar", "title");
+    ensureId(title, TOPBAR_IDS.title);
+    title.classList.add("topbar-title");
+    setAttr(title, "data-topbar-title", "true");
   }
 
-  if (mobileToggle) {
-    try { mobileToggle.classList.add("topbar-mobile-toggle"); } catch {}
-    setAttr(mobileToggle, "type", "button");
-    setAttr(mobileToggle, "data-topbar-action", "toggle-sidebar");
-    setAttr(mobileToggle, "aria-controls", "sidebar");
-    setAttrIfMissing(mobileToggle, "aria-expanded", "false");
-    setAttrIfMissing(mobileToggle, "aria-label", "Abrir navegación");
-    setAttrIfMissing(mobileToggle, "data-tooltip", "Abrir navegación");
-    removeAttr(mobileToggle, "title");
+  const toggle =
+    connected(query("[data-topbar-sidebar-toggle]", root)) ||
+    connected(query(".topbar-sidebar-toggle", root)) ||
+    connected(byId(TOPBAR_IDS.mobileToggle));
+
+  if (toggle) {
+    ensureId(toggle, TOPBAR_IDS.mobileToggle);
+    toggle.classList.add("topbar-sidebar-toggle");
+    setAttr(toggle, "type", "button");
+    setAttr(toggle, "data-topbar-sidebar-toggle", "true");
+    setAttr(toggle, "aria-label", toggle.getAttribute("aria-label") || "Abrir menú");
+    setAttr(toggle, "aria-expanded", toggle.getAttribute("aria-expanded") || "false");
   }
 
-  if (searchWrap) {
-    try { searchWrap.classList.add("topbar-search-wrap"); } catch {}
-    setAttr(searchWrap, "data-topbar", "search-wrap");
-  }
+  const user =
+    connected(query("[data-topbar-user]", root)) ||
+    connected(query(".topbar-right", root));
 
-  if (searchIcon) {
-    try { searchIcon.classList.add("topbar-search-icon"); } catch {}
-    setAttr(searchIcon, "data-topbar", "search-icon");
-    setAttr(searchIcon, "aria-hidden", "true");
-    setAttr(searchIcon, "focusable", "false");
-  }
-
-  if (searchInput) {
-    try { searchInput.classList.add("topbar-search"); } catch {}
-    setAttr(searchInput, "type", "search");
-    setAttr(searchInput, "data-topbar", "search-input");
-    setAttr(searchInput, "data-topbar-search", "true");
-    setAttr(searchInput, "role", "combobox");
-    setAttr(searchInput, "autocomplete", "off");
-    setAttr(searchInput, "autocapitalize", "off");
-    setAttr(searchInput, "spellcheck", "false");
-    setAttr(searchInput, "inputmode", "search");
-    setAttr(searchInput, "aria-label", "Buscar en la aplicación");
-    setAttr(searchInput, "aria-controls", TOPBAR_IDS.searchResults);
-    setAttr(searchInput, "aria-expanded", String(open));
-    setAttr(searchInput, "aria-autocomplete", "list");
-    setAttr(searchInput, "aria-haspopup", "listbox");
-    if (searchLabel) setAttr(searchInput, "aria-labelledby", TOPBAR_IDS.searchLabel);
-    removeAttr(searchInput, "title");
-  }
-
-  if (searchResults) {
-    try { searchResults.classList.add("topbar-search-results"); } catch {}
-    setAttr(searchResults, "data-topbar", "search-results");
-    setAttr(searchResults, "data-topbar-search-results", "true");
-    setAttr(searchResults, "role", "listbox");
-    setAttr(searchResults, "aria-hidden", open ? "false" : "true");
-    setAttr(searchResults, "aria-live", "polite");
-    if (searchLabel) setAttr(searchResults, "aria-labelledby", TOPBAR_IDS.searchLabel);
-    if (!open) {
-      try { searchResults.hidden = true; } catch {}
-    }
-  }
-
-  if (searchLabel) {
-    try { searchLabel.classList.add("visually-hidden"); } catch {}
-    setAttr(searchLabel, "data-topbar", "search-label");
+  if (user) {
+    user.classList.add("topbar-right");
+    setAttr(user, "data-topbar-user", "true");
   }
 
   return true;
@@ -771,7 +481,7 @@ export function prepareTopbarDom(topbar = null) {
    DOM GETTERS / CACHE
 ========================================================= */
 
-export function getTopbarDom(AppCore) {
+export function getTopbarDom(AppCore = null) {
   if (!isBrowser()) {
     return {
       topbarMount: null,
@@ -793,95 +503,104 @@ export function getTopbarDom(AppCore) {
   }
 
   const dom = getAppDom(AppCore);
-  const topbarMount = connectedOrNull(dom.topbarMount) || connectedOrNull(byId(TOPBAR_IDS.mount)) || connectedOrNull(qs(TOPBAR_SELECTORS.topbarMount));
-  const topbar = connectedOrNull(dom.topbar) ||
-    connectedOrNull(dom.appTopbar) ||
-    connectedOrNull(dom.topbarRoot) ||
-    connectedOrNull(byId(TOPBAR_IDS.root)) ||
-    connectedOrNull(byId(TOPBAR_IDS.legacyRoot)) ||
-    connectedOrNull(qs(TOPBAR_SELECTORS.topbar, topbarMount)) ||
-    connectedOrNull(qs(TOPBAR_SELECTORS.topbar));
-
-  const title = connectedOrNull(dom.topbarTitle) || findInsideRoot(topbar, TOPBAR_IDS.title, TOPBAR_SELECTORS.title);
-  const mobileToggle = connectedOrNull(dom.mobileSidebarToggle) || connectedOrNull(dom.toggleSidebarMobile) || findInsideRoot(topbar, TOPBAR_IDS.mobileToggle, TOPBAR_SELECTORS.mobileToggle);
-  const sidebar = getSidebarEl(AppCore);
-  const topbarLeft = connectedOrNull(dom.topbarLeft) || connectedOrNull(qs(TOPBAR_SELECTORS.topbarLeft, topbar));
-  const topbarRight = connectedOrNull(dom.topbarRight) || connectedOrNull(qs(TOPBAR_SELECTORS.topbarRight, topbar));
-  const searchInput = connectedOrNull(dom.searchInput) || findInsideRoot(topbar, TOPBAR_IDS.searchInput, TOPBAR_SELECTORS.searchInput);
-  const searchResults = connectedOrNull(dom.searchResults) || findInsideRoot(topbar, TOPBAR_IDS.searchResults, TOPBAR_SELECTORS.searchResults);
-  const searchWrap = connectedOrNull(dom.searchWrap) ||
-    connectedOrNull(searchInput?.closest?.(TOPBAR_SELECTORS.searchWrap)) ||
-    connectedOrNull(searchResults?.closest?.(TOPBAR_SELECTORS.searchWrap)) ||
-    connectedOrNull(qs(TOPBAR_SELECTORS.searchWrap, topbar));
-  const searchIcon = connectedOrNull(dom.searchIcon) || connectedOrNull(qs(TOPBAR_SELECTORS.searchIcon, searchWrap || topbar));
-  const searchLabel = connectedOrNull(dom.searchLabel) || findInsideRoot(topbar, TOPBAR_IDS.searchLabel, TOPBAR_SELECTORS.searchLabel);
+  const topbar = findTopbar(AppCore);
 
   return {
-    topbarMount,
+    topbarMount:
+      connected(dom.topbarMount) ||
+      connected(byId(TOPBAR_IDS.mount)) ||
+      connected(query(TOPBAR_SELECTORS.topbarMount)) ||
+      null,
+
     topbar,
-    title,
-    mobileToggle,
-    sidebar,
-    topbarLeft,
-    topbarRight,
-    searchWrap,
-    searchIcon,
-    searchInput,
-    searchResults,
-    searchLabel,
+
+    title:
+      connected(dom.topbarTitle) ||
+      connected(query("[data-topbar-title]", topbar)) ||
+      connected(query(".topbar-title", topbar)) ||
+      connected(byId(TOPBAR_IDS.title)) ||
+      null,
+
+    mobileToggle:
+      connected(dom.mobileSidebarToggle) ||
+      connected(dom.toggleSidebarMobile) ||
+      connected(query("[data-topbar-sidebar-toggle]", topbar)) ||
+      connected(query(".topbar-sidebar-toggle", topbar)) ||
+      connected(byId(TOPBAR_IDS.mobileToggle)) ||
+      null,
+
+    sidebar: getSidebarEl(AppCore),
+
+    topbarLeft:
+      connected(dom.topbarLeft) ||
+      connected(query(".topbar-left", topbar)) ||
+      null,
+
+    topbarRight:
+      connected(dom.topbarRight) ||
+      connected(query("[data-topbar-user]", topbar)) ||
+      connected(query(".topbar-right", topbar)) ||
+      null,
+
+    // Search compat: el topbar simple no lo monta.
+    searchWrap: null,
+    searchIcon: null,
+    searchInput: null,
+    searchResults: null,
+    searchLabel: null,
+
     mainContent: getMainContentEl(AppCore),
     appContent: getAppContentEl(AppCore),
     viewContainer: getViewContainerEl(AppCore),
   };
 }
 
-export function syncTopbarDomCache(AppCore) {
+export function syncTopbarDomCache(AppCore = null) {
   const cache = getAppDom(AppCore);
   const dom = getTopbarDom(AppCore);
 
-  if (dom.topbarMount) setAttr(dom.topbarMount, "data-topbar-mount", "true");
-  if (dom.topbar) prepareTopbarDom(dom.topbar);
+  cache.topbarMount = dom.topbarMount || null;
+  cache.topbar = dom.topbar || null;
+  cache.appTopbar = dom.topbar || null;
+  cache.topbarRoot = dom.topbar || null;
+  cache.topbarTitle = dom.title || null;
+  cache.mobileSidebarToggle = dom.mobileToggle || null;
+  cache.toggleSidebarMobile = dom.mobileToggle || null;
+  cache.sidebar = dom.sidebar || connected(cache.sidebar) || null;
+  cache.topbarLeft = dom.topbarLeft || null;
+  cache.topbarRight = dom.topbarRight || null;
 
-  const fresh = getTopbarDom(AppCore);
+  cache.searchWrap = null;
+  cache.searchIcon = null;
+  cache.searchInput = null;
+  cache.searchResults = null;
+  cache.searchLabel = null;
 
-  cache.topbarMount = fresh.topbarMount || null;
-  cache.topbar = fresh.topbar || null;
-  cache.appTopbar = fresh.topbar || null;
-  cache.topbarRoot = fresh.topbar || null;
-  cache.topbarTitle = fresh.title || null;
-  cache.mobileSidebarToggle = fresh.mobileToggle || null;
-  cache.toggleSidebarMobile = fresh.mobileToggle || null;
-  cache.sidebar = fresh.sidebar || connectedOrNull(cache.sidebar) || null;
-  cache.topbarLeft = fresh.topbarLeft || null;
-  cache.topbarRight = fresh.topbarRight || null;
-  cache.searchWrap = fresh.searchWrap || null;
-  cache.searchIcon = fresh.searchIcon || null;
-  cache.searchInput = fresh.searchInput || null;
-  cache.searchResults = fresh.searchResults || null;
-  cache.searchLabel = fresh.searchLabel || null;
-  cache.mainContent = fresh.mainContent || connectedOrNull(cache.mainContent) || null;
-  cache.appContent = fresh.appContent || connectedOrNull(cache.appContent) || null;
-  cache.viewContainer = fresh.viewContainer || connectedOrNull(cache.viewContainer) || null;
+  cache.mainContent = dom.mainContent || connected(cache.mainContent) || null;
+  cache.appContent = dom.appContent || connected(cache.appContent) || null;
+  cache.viewContainer = dom.viewContainer || connected(cache.viewContainer) || null;
 
-  return { ...fresh };
+  return dom;
 }
 
 /* =========================================================
    UTILITIES
 ========================================================= */
 
-export function isTopbarMounted(AppCore) {
+export function isTopbarMounted(AppCore = null) {
   const dom = getTopbarDom(AppCore);
-  return Boolean(dom.topbar && isConnected(dom.topbar));
+  return Boolean(dom.topbar);
 }
 
-export function unmountTopbar(AppCore) {
+export function unmountTopbar(AppCore = null) {
   const cache = getAppDom(AppCore);
   const dom = getTopbarDom(AppCore);
 
   try {
     dom.topbar?.remove?.();
-  } catch {}
+  } catch {
+    // noop
+  }
 
   cache.topbar = null;
   cache.appTopbar = null;
@@ -891,6 +610,7 @@ export function unmountTopbar(AppCore) {
   cache.toggleSidebarMobile = null;
   cache.topbarLeft = null;
   cache.topbarRight = null;
+
   cache.searchWrap = null;
   cache.searchIcon = null;
   cache.searchInput = null;
@@ -899,6 +619,10 @@ export function unmountTopbar(AppCore) {
 
   return true;
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   TOPBAR_DOM_VERSION,

@@ -31,6 +31,18 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
+function text(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
+}
+
+function redact(value = "") {
+  return text(value, "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
 function currentPath() {
   if (!isBrowser()) return "/";
 
@@ -70,7 +82,7 @@ function toggleClass(element = null, className = "", enabled = false) {
 function setMainState(state = "booting") {
   if (!isBrowser()) return false;
 
-  const value = String(state || "booting");
+  const value = text(state, "booting");
   const booting = value === "booting";
   const ready = value === "ready";
   const fatal = value === "fatal";
@@ -234,7 +246,10 @@ function showFatalError(error = null) {
   root.replaceChildren(section);
 
   try {
-    console.error("[Onion Main] Boot error:", error);
+    console.error("[Onion Main] Boot error:", {
+      name: error?.name || "Error",
+      message: redact(error?.message || String(error || "")),
+    });
   } catch {
     // noop
   }

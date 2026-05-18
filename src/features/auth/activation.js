@@ -7,7 +7,8 @@
    - Endpoint real: /api/auth/activate.
    - Token param único: token.
    - Transporte único vía CoreHttp.
-   - Aplica sesión sólo si backend devuelve token + user.
+   - Aplica sesión sólo si backend devuelve token + user usable.
+   - No inventar slug.
    - Sin fetch propio.
    - Sin apiClient propio.
    - Sin Router.
@@ -17,16 +18,17 @@
    - Sin first-user real.
    - Sin validate endpoint inventado.
    - Sin aliases legacy pesados.
+   - Sin 2FA/MFA/OTP.
    - Sin magia negra.
 ========================================================= */
 
-import CoreHttp from "../../core/http.js";
+import * as CoreHttpModule from "../../core/http.js";
 
 import {
   applySession,
 } from "./session.js";
 
-export const ACTIVATION_MODULE_VERSION = "simple";
+export const ACTIVATION_MODULE_VERSION = "auth.activation.v2";
 
 const SOURCE = "auth.activation";
 const ENDPOINT = "/api/auth/activate";
@@ -37,6 +39,12 @@ const TOKEN_MIN_LENGTH = 8;
 const TOKEN_MAX_LENGTH = 8192;
 const PASSWORD_MIN_LENGTH = 8;
 const PASSWORD_MAX_LENGTH = 1024;
+
+const CoreHttp =
+  CoreHttpModule.default ||
+  CoreHttpModule.Http ||
+  CoreHttpModule.http ||
+  CoreHttpModule;
 
 let activatePromise = null;
 
@@ -66,12 +74,17 @@ function rawText(value = "", fallback = "") {
 }
 
 function nowIso() {
-  return new Date().toISOString();
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
 }
 
 function redact(value = "") {
   return text(value, "")
     .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -80,10 +93,11 @@ function redact(value = "") {
 ========================================================= */
 
 function normalizeTokenValue(value = "") {
-  const token = text(value, "");
+  const token = text(value, "").replace(/^Bearer\s+/i, "");
 
   if (!token) return "";
   if (/\s/.test(token)) return "";
+  if (token.length > TOKEN_MAX_LENGTH) return "";
 
   if (
     ["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
@@ -93,7 +107,7 @@ function normalizeTokenValue(value = "") {
     return "";
   }
 
-  return token.slice(0, TOKEN_MAX_LENGTH);
+  return token;
 }
 
 function readTokenFromLocation() {
@@ -110,8 +124,9 @@ function readTokenFromLocation() {
 
   try {
     const hash = String(window.location.hash || "").replace(/^#/, "");
-    const query = hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : hash;
+    const query = hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : "";
     const params = new URLSearchParams(query);
+
     return normalizeTokenValue(params.get(TOKEN_PARAM) || "");
   } catch {
     return "";
@@ -123,10 +138,17 @@ export function extractActivationToken() {
 }
 
 export function resolveActivationToken(payload = {}) {
+  if (!isObject(payload)) {
+    return normalizeTokenValue(payload || extractActivationToken() || "");
+  }
+
   return normalizeTokenValue(
-    payload?.token ||
-      payload?.activationToken ||
-      payload?.activation_token ||
+    payload.token ||
+      payload.data?.token ||
+      payload.payload?.token ||
+      payload.result?.token ||
+      payload.activationToken ||
+      payload.activation_token ||
       extractActivationToken() ||
       ""
   );
@@ -173,16 +195,11 @@ export const normalizeActivateAccountPayload = normalizeActivationPayload;
 export function buildActivateAccountBody(payload = {}) {
   const normalized = normalizeActivationPayload(payload);
 
-  const body = {
+  return {
     token: normalized.token,
     password: normalized.password,
+    confirmPassword: normalized.confirmPassword,
   };
-
-  if (normalized.confirmPassword) {
-    body.confirmPassword = normalized.confirmPassword;
-  }
-
-  return body;
 }
 
 export const buildActivationRequestBody = buildActivateAccountBody;
@@ -191,8 +208,8 @@ function validateActivationPayload(payload = {}) {
   const normalized = normalizeActivationPayload(payload);
 
   if (!normalized.token) return "No se recibió token de activación.";
-  if (normalized.token.length < TOKEN_MIN_LENGTH) return "El token de activación no es válido.";
-  if (normalized.token.length > TOKEN_MAX_LENGTH) return "El token de activación no es válido.";
+  if (normalized.token.length < TOKEN_MIN_LENGTH) return "El enlace de activación no es válido.";
+  if (normalized.token.length > TOKEN_MAX_LENGTH) return "El enlace de activación no es válido.";
 
   if (!normalized.password) return "La contraseña es obligatoria.";
   if (normalized.password.length < PASSWORD_MIN_LENGTH) {
@@ -202,7 +219,11 @@ function validateActivationPayload(payload = {}) {
     return "La contraseña es demasiado larga.";
   }
 
-  if (normalized.confirmPassword && normalized.password !== normalized.confirmPassword) {
+  if (!normalized.confirmPassword) {
+    return "Confirma la contraseña.";
+  }
+
+  if (normalized.password !== normalized.confirmPassword) {
     return "Las contraseñas no coinciden.";
   }
 
@@ -242,63 +263,163 @@ function pick(nodes = [], keys = []) {
 }
 
 function cleanRole(value = "") {
+  if (Array.isArray(value)) {
+    const roles = value.map(cleanRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "user";
+  }
+
   return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
+}
+
+function normalizeSlug(value = "") {
+  const slug = text(value, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+
+  if (!slug) return "";
+
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
+function extractUserSlug(user = null) {
+  if (!isObject(user)) return "";
+
+  return normalizeSlug(
+    user.slug ||
+      user.lookup?.slug ||
+      user.profile?.slug ||
+      ""
+  );
+}
+
+function removeSensitiveUserFields(user = {}) {
+  const output = { ...user };
+
+  for (const key of [
+    "password",
+    "passwordHash",
+    "hash",
+    "salt",
+
+    "token",
+    "accessToken",
+    "access_token",
+    "refreshToken",
+    "refresh_token",
+
+    "resetToken",
+    "activationToken",
+
+    "otp",
+    "otpCode",
+    "mfa",
+    "twofa_secret",
+    "twofaSecret",
+    "totpSecret",
+    "backupCodes",
+  ]) {
+    try {
+      delete output[key];
+    } catch {
+      // noop
+    }
+  }
+
+  return output;
 }
 
 function userDisabled(user = null) {
   if (!isObject(user)) return true;
 
-  return (
+  const status = text(user.status || user.estado, "").toLowerCase();
+
+  return Boolean(
     user.disabled === true ||
-    String(user.status || "").toLowerCase() === "disabled"
+      user.deleted === true ||
+      user.archived === true ||
+      user.active === false ||
+      status === "disabled" ||
+      status === "deleted" ||
+      status === "archived"
+  );
+}
+
+function hasUserIdentity(user = null) {
+  if (!isObject(user)) return false;
+
+  return Boolean(
+    text(user.id, "") ||
+      text(user.userId, "") ||
+      text(user.username, "") ||
+      text(user.slug, "") ||
+      text(user.lookup?.slug, "")
   );
 }
 
 function userOk(user = null) {
-  if (!isObject(user)) return false;
-  if (userDisabled(user)) return false;
-
   return Boolean(
-    user.id ||
-      user.userId ||
-      user.username ||
-      user.slug ||
-      user.email
+    isObject(user) &&
+      !userDisabled(user) &&
+      hasUserIdentity(user)
   );
 }
 
 function normalizeUser(user = null) {
   if (!userOk(user)) return null;
 
-  const id = user.userId || user.id || null;
-  const username = user.username || user.slug || user.email || id || null;
+  const safeUser = removeSensitiveUserFields(user);
 
-  const displayName =
-    user.name ||
-    user.fullName ||
-    user.displayName ||
-    user.nombre ||
-    username ||
-    user.email ||
-    id ||
-    "Usuario";
+  const id = text(safeUser.userId || safeUser.id, "");
+  const slug = extractUserSlug(safeUser);
+  const profile = isObject(safeUser.profile) ? safeUser.profile : {};
 
-  const role = cleanRole(user.role || user.rol);
+  const username = text(
+    safeUser.username ||
+      safeUser.userName ||
+      safeUser.user_name ||
+      slug ||
+      id,
+    ""
+  );
+
+  const displayName = text(
+    safeUser.displayName ||
+      safeUser.fullName ||
+      safeUser.name ||
+      safeUser.nombre ||
+      profile.displayName ||
+      profile.fullName ||
+      profile.name ||
+      profile.nombre ||
+      username ||
+      id,
+    "Usuario"
+  );
+
+  const role = cleanRole(safeUser.role || safeUser.rol || safeUser.roles);
 
   return {
-    ...user,
+    ...safeUser,
 
-    id,
-    userId: user.userId || id,
+    id: id || null,
+    userId: safeUser.userId || id || null,
 
-    username,
-    slug: user.slug || username,
+    username: username || null,
+    slug: slug || null,
 
-    name: user.name || displayName,
-    fullName: user.fullName || displayName,
+    name: safeUser.name || displayName,
+    fullName: safeUser.fullName || displayName,
     displayName,
 
-    email: user.email || null,
+    email: safeUser.email || null,
 
     role,
     rol: role,
@@ -309,10 +430,10 @@ function normalizeUser(user = null) {
     isManager: false,
     isClient: false,
 
-    avatar: user.avatar || user.avatarUrl || user.picture || null,
-    avatarUrl: user.avatarUrl || user.avatar || user.picture || null,
-    picture: user.picture || user.avatarUrl || user.avatar || null,
-    hasAvatar: Boolean(user.avatar || user.avatarUrl || user.picture),
+    avatar: safeUser.avatar || safeUser.avatarUrl || safeUser.picture || null,
+    avatarUrl: safeUser.avatarUrl || safeUser.avatar || safeUser.picture || null,
+    picture: safeUser.picture || safeUser.avatarUrl || safeUser.avatar || null,
+    hasAvatar: Boolean(safeUser.avatar || safeUser.avatarUrl || safeUser.picture),
 
     active: true,
     disabled: false,
@@ -327,7 +448,8 @@ function publicUser(user = null) {
   return {
     id: clean.id || clean.userId || null,
     userId: clean.userId || clean.id || null,
-    username: clean.username || clean.slug || null,
+    username: clean.username || null,
+    slug: clean.slug || null,
     displayName: clean.displayName || clean.name || clean.username || null,
     role: clean.role || clean.rol || null,
     hasAvatar: Boolean(clean.avatar || clean.avatarUrl || clean.picture),
@@ -340,6 +462,15 @@ function readToken(payload = {}) {
       "token",
       "accessToken",
       "access_token",
+    ]) || ""
+  );
+}
+
+function readRefreshToken(payload = {}) {
+  return normalizeTokenValue(
+    pick(nested(payload), [
+      "refreshToken",
+      "refresh_token",
     ]) || ""
   );
 }
@@ -439,15 +570,15 @@ function responseRedirect(input = {}, fallback = DEFAULT_LOGIN_REDIRECT) {
 
 export function normalizeActivationResponse(input = {}) {
   const ok = responseOk(input);
+
   const token = readToken(input);
+  const refreshToken = readRefreshToken(input);
   const user = readUser(input);
   const session = readSession(input);
 
   const authenticated = Boolean(token && user);
 
   return {
-    raw: input,
-
     ok,
     success: ok,
     activated: ok,
@@ -469,6 +600,9 @@ export function normalizeActivationResponse(input = {}) {
     token: authenticated ? token : null,
     accessToken: authenticated ? token : null,
     access_token: authenticated ? token : null,
+
+    refreshToken: authenticated && refreshToken ? refreshToken : null,
+    refresh_token: authenticated && refreshToken ? refreshToken : null,
 
     user: authenticated ? user : null,
     usuario: authenticated ? user : null,
@@ -500,19 +634,64 @@ function publicOptions(options = {}) {
 }
 
 async function postActivation(body = {}, options = {}) {
+  const requestOptions = publicOptions(options);
+
+  if (isFunction(CoreHttp?.activate)) {
+    return CoreHttp.activate(body, requestOptions);
+  }
+
   if (isFunction(CoreHttp?.post)) {
-    return CoreHttp.post(ENDPOINT, body, publicOptions(options));
+    return CoreHttp.post(ENDPOINT, body, requestOptions);
   }
 
   if (isFunction(CoreHttp?.request)) {
     return CoreHttp.request(ENDPOINT, {
-      ...publicOptions(options),
+      ...requestOptions,
       method: "POST",
       body,
     });
   }
 
   throw new Error("Cliente HTTP no disponible.");
+}
+
+/* =========================================================
+   RESULT SANITIZE
+========================================================= */
+
+function sanitizeActivationResult(result = {}) {
+  return {
+    ok: result.ok === true,
+    success: result.success === true,
+    activated: result.activated === true,
+    valid: result.valid === true,
+    error: result.error === true,
+
+    authenticated: result.authenticated === true,
+    sessionApplied: result.sessionApplied === true,
+
+    message: result.message || "",
+    code: result.code || "",
+    status: result.status || 0,
+
+    redirectTo: responseRedirect(result),
+
+    token: null,
+    accessToken: null,
+    access_token: null,
+
+    refreshToken: null,
+    refresh_token: null,
+
+    user: publicUser(result.user),
+    usuario: publicUser(result.user),
+    me: publicUser(result.user),
+
+    session: null,
+    sessionData: null,
+
+    at: result.at || nowIso(),
+  };
 }
 
 /* =========================================================
@@ -537,7 +716,11 @@ export async function activateAccount(payload = {}, options = {}) {
 
   activatePromise = (async () => {
     try {
-      const raw = await postActivation(buildActivateAccountBody(normalized), options);
+      const raw = await postActivation(
+        buildActivateAccountBody(normalized),
+        options
+      );
+
       const result = normalizeActivationResponse(raw);
 
       if (result.authenticated && result.token && result.user) {
@@ -547,6 +730,9 @@ export async function activateAccount(payload = {}, options = {}) {
               token: result.token,
               accessToken: result.token,
               access_token: result.token,
+
+              refreshToken: result.refreshToken,
+              refresh_token: result.refresh_token,
 
               user: result.user,
               usuario: result.user,
@@ -576,11 +762,12 @@ export async function activateAccount(payload = {}, options = {}) {
           ok: false,
           status: error?.status || error?.statusCode || error?.response?.status || 0,
           code: error?.code || error?.data?.code || error?.response?.data?.code || null,
-          message:
+          message: redact(
             error?.data?.message ||
-            error?.response?.data?.message ||
-            error?.message ||
-            "No se pudo activar la cuenta.",
+              error?.response?.data?.message ||
+              error?.message ||
+              "No se pudo activar la cuenta."
+          ),
           error: true,
         })
       );
@@ -590,25 +777,6 @@ export async function activateAccount(payload = {}, options = {}) {
   })();
 
   return activatePromise;
-}
-
-function sanitizeActivationResult(result = {}) {
-  return {
-    ...result,
-
-    token: null,
-    accessToken: null,
-    access_token: null,
-
-    refreshToken: null,
-    refresh_token: null,
-
-    user: publicUser(result.user),
-    usuario: publicUser(result.user),
-    me: publicUser(result.user),
-
-    raw: undefined,
-  };
 }
 
 export const activate = activateAccount;
@@ -622,6 +790,7 @@ export const confirmActivation = activateAccount;
 
 export async function validateActivationToken(payload = {}) {
   const token = resolveActivationToken(payload);
+
   const valid = Boolean(
     token &&
       token.length >= TOKEN_MIN_LENGTH &&
@@ -674,7 +843,7 @@ export const buildFirstUserActivationBody = buildActivateFirstUserBody;
 
 export function normalizeFirstUserActivationResponse(input = {}) {
   return {
-    ...normalizeActivationResponse(input),
+    ...sanitizeActivationResult(normalizeActivationResponse(input)),
     code: "UNSUPPORTED_FLOW",
   };
 }
@@ -697,7 +866,7 @@ export function buildValidateActivationTokenBody(payload = {}) {
 
 export function normalizeValidateActivationTokenResponse(input = {}) {
   return {
-    ...normalizeActivationResponse(input),
+    ...sanitizeActivationResult(normalizeActivationResponse(input)),
     authenticated: false,
     token: null,
     accessToken: null,
@@ -739,6 +908,7 @@ export function getActivationSnapshot() {
     version: ACTIVATION_MODULE_VERSION,
 
     endpoint: ENDPOINT,
+    tokenParam: TOKEN_PARAM,
 
     currentPath: redact(
       isBrowser()
@@ -758,20 +928,33 @@ export function getActivationSnapshot() {
     },
 
     transport: {
-      hasCoreHttp: Boolean(CoreHttp?.post || CoreHttp?.request),
+      hasCoreHttp: Boolean(CoreHttp?.activate || CoreHttp?.post || CoreHttp?.request),
       ownFetch: false,
       ownApiClient: false,
       ownRouter: false,
       ownToast: false,
+      ownStorage: false,
     },
 
     policy: {
       endpoint: ENDPOINT,
       tokenParam: TOKEN_PARAM,
+
+      publicEndpoint: true,
       noFirstUser: true,
       noValidateEndpoint: true,
+
       noStorage: true,
+      noRouter: true,
+      noToast: true,
+      noRefresh: true,
+
+      noSlugFabrication: true,
+      noEmailIdentity: true,
+
       applySessionOnlyWithTokenAndUser: true,
+      sanitizedResult: true,
+      no2fa: true,
     },
   };
 }

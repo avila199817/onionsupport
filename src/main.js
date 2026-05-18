@@ -5,7 +5,7 @@
    Responsabilidad:
    - Entry point único de la SPA.
    - Bloquear auto-boot legacy.
-   - Capturar URL inicial.
+   - Capturar path inicial para el boot.
    - Cargar /src/app/index.js.
    - Ejecutar boot una sola vez.
    - Mostrar error mínimo si falla.
@@ -21,8 +21,6 @@
 const APP_MODULE = "./app/index.js";
 
 const BOOT_PROMISE_KEY = "__ONION_MAIN_BOOT_PROMISE__";
-const BOOT_CONTEXT_KEY = "__ONION_BOOT_CONTEXT__";
-const INITIAL_URL_KEY = "__ONION_INITIAL_URL__";
 const DISABLE_AUTO_BOOT_KEY = "__ONION_DISABLE_AUTO_BOOT__";
 
 /* =========================================================
@@ -36,7 +34,11 @@ function isBrowser() {
 function currentPath() {
   if (!isBrowser()) return "/";
 
-  return `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
+  try {
+    return `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
+  } catch {
+    return "/";
+  }
 }
 
 function setDataset(element = null, key = "", value = "") {
@@ -62,28 +64,6 @@ function toggleClass(element = null, className = "", enabled = false) {
 }
 
 /* =========================================================
-   BOOT CONTEXT
-========================================================= */
-
-function createBootContext() {
-  window[DISABLE_AUTO_BOOT_KEY] = true;
-
-  if (!window[INITIAL_URL_KEY]) {
-    window[INITIAL_URL_KEY] = window.location.href;
-  }
-
-  const context = {
-    source: "main",
-    initialUrl: window[INITIAL_URL_KEY],
-    initialPath: currentPath(),
-  };
-
-  window[BOOT_CONTEXT_KEY] = context;
-
-  return context;
-}
-
-/* =========================================================
    MAIN STATE
 ========================================================= */
 
@@ -91,18 +71,38 @@ function setMainState(state = "booting") {
   if (!isBrowser()) return false;
 
   const value = String(state || "booting");
+  const booting = value === "booting";
+  const ready = value === "ready";
+  const fatal = value === "fatal";
 
   for (const element of [document.documentElement, document.body].filter(Boolean)) {
     setDataset(element, "mainState", value);
     setDataset(element, "appState", value);
 
-    toggleClass(element, "app-booting", value === "booting");
-    toggleClass(element, "app-loading", value === "booting");
-    toggleClass(element, "app-ready", value === "ready");
-    toggleClass(element, "app-fatal", value === "fatal");
+    setDataset(element, "appLoading", booting ? "true" : "false");
+    setDataset(element, "appBooting", booting ? "true" : "false");
+    setDataset(element, "appReady", ready ? "true" : "false");
+
+    toggleClass(element, "app-booting", booting);
+    toggleClass(element, "app-loading", booting);
+    toggleClass(element, "app-ready", ready);
+    toggleClass(element, "app-fatal", fatal);
   }
 
   return true;
+}
+
+/* =========================================================
+   BOOT CONTEXT
+========================================================= */
+
+function createBootContext() {
+  window[DISABLE_AUTO_BOOT_KEY] = true;
+
+  return {
+    source: "main",
+    initialPath: currentPath(),
+  };
 }
 
 /* =========================================================
@@ -179,6 +179,7 @@ function showShellForFatal() {
     shell.setAttribute("aria-hidden", "false");
     shell.setAttribute("aria-busy", "false");
     shell.dataset.shellState = "fatal";
+    shell.dataset.shell = "visible";
     return true;
   } catch {
     return false;
@@ -225,7 +226,9 @@ function showFatalError(error = null) {
   const button = document.createElement("button");
   button.type = "button";
   button.textContent = "Recargar";
-  button.addEventListener("click", () => window.location.reload());
+  button.addEventListener("click", () => {
+    window.location.reload();
+  });
 
   section.append(title, message, button);
   root.replaceChildren(section);

@@ -7,7 +7,10 @@
    - Si ya hay token + user usable: mantener sesión.
    - Si hay token sin user: pedir /api/auth/me.
    - Si /me devuelve user válido: aplicar sesión.
-   - Si no hay token o /me falla con 401/403: limpiar sesión local.
+   - Si no hay token: limpiar sesión local.
+   - Si /me falla con 401/403: limpiar sesión local.
+   - No inventar slug.
+   - No navegar.
    - Sin refresh automático.
    - Sin fetch propio.
    - Sin apiClient propio.
@@ -27,11 +30,12 @@ import {
   isAuthenticated,
   getCurrentToken,
   getCurrentUser,
+  getCurrentUserSlug,
+  getCurrentUserHomePath,
 } from "./session.js";
 
-export const RESTORE_VERSION = "minimal-1";
+export const RESTORE_VERSION = "auth.restore.v1";
 
-const SOURCE = "auth.restore";
 const ME_ENDPOINT = "/api/auth/me";
 
 const CoreHttp =
@@ -43,8 +47,10 @@ const CoreHttp =
 const runtime = {
   restoring: false,
   checking: false,
+
   restorePromise: null,
   mePromise: null,
+
   lastRestoreAt: 0,
   lastMeAt: 0,
   lastError: null,
@@ -75,6 +81,10 @@ function nowIso() {
   }
 }
 
+/* =========================================================
+   TOKEN
+========================================================= */
+
 function stripBearer(value = "") {
   return text(value, "").replace(/^Bearer\s+/i, "");
 }
@@ -96,14 +106,32 @@ function tokenOk(value = "") {
   ].includes(token.toLowerCase());
 }
 
+function cleanToken(value = "") {
+  return tokenOk(value) ? stripBearer(value) : "";
+}
+
+function currentToken() {
+  return cleanToken(getCurrentToken?.() || "");
+}
+
+function currentUser() {
+  return getCurrentUser?.() || null;
+}
+
+/* =========================================================
+   ERRORS
+========================================================= */
+
 function authErrorStatus(error = null) {
-  return Number(
-    error?.status ||
-      error?.statusCode ||
-      error?.response?.status ||
-      error?.data?.status ||
-      0
-  ) || 0;
+  return (
+    Number(
+      error?.status ||
+        error?.statusCode ||
+        error?.response?.status ||
+        error?.data?.status ||
+        0
+    ) || 0
+  );
 }
 
 function extractMessage(error = null) {
@@ -114,10 +142,6 @@ function extractMessage(error = null) {
     String(error || "")
   );
 }
-
-/* =========================================================
-   ERRORS
-========================================================= */
 
 function createRestoreError(message = "No se pudo restaurar la sesión.", options = {}) {
   const error = new Error(text(message, "No se pudo restaurar la sesión."));
@@ -160,11 +184,68 @@ function rememberError(type = "restore", error = null) {
 }
 
 /* =========================================================
+   SNAPSHOT
+========================================================= */
+
+function sessionSnapshot(extra = {}) {
+  let snapshot = {};
+
+  try {
+    snapshot = buildSessionSnapshot(extra) || {};
+  } catch {
+    snapshot = {};
+  }
+
+  return {
+    version: RESTORE_VERSION,
+
+    authenticated: Boolean(snapshot.authenticated || isAuthenticated()),
+    hasToken: Boolean(currentToken()),
+    hasUser: Boolean(currentUser()),
+
+    user: snapshot.user || null,
+
+    userSlug: snapshot.userSlug || getCurrentUserSlug?.() || null,
+    homePath: snapshot.homePath || getCurrentUserHomePath?.() || "/",
+    defaultHome: snapshot.defaultHome || snapshot.homePath || getCurrentUserHomePath?.() || "/",
+    postLoginTarget: snapshot.postLoginTarget || snapshot.homePath || getCurrentUserHomePath?.() || null,
+
+    role: snapshot.role || currentUser()?.role || null,
+    roles: Array.isArray(snapshot.roles) ? snapshot.roles : [],
+
+    source: extra.source || snapshot.source || "",
+    eventMode: extra.eventMode || snapshot.eventMode || "",
+  };
+}
+
+function restoreResult(source = "state") {
+  const snapshot = sessionSnapshot({
+    source,
+    eventMode: "restore",
+  });
+
+  return {
+    ok: Boolean(snapshot.authenticated),
+    authenticated: Boolean(snapshot.authenticated),
+    user: snapshot.user || null,
+
+    userSlug: snapshot.userSlug || null,
+    homePath: snapshot.homePath || "/",
+    postLoginTarget: snapshot.postLoginTarget || snapshot.homePath || null,
+
+    snapshot,
+    source,
+  };
+}
+
+/* =========================================================
    HTTP
 ========================================================= */
 
 async function requestMe(token = "", options = {}) {
-  if (!tokenOk(token)) {
+  const safeToken = cleanToken(token);
+
+  if (!safeToken) {
     throw createRestoreError("No hay token para restaurar sesión.", {
       status: 401,
       code: "TOKEN_MISSING",
@@ -173,7 +254,7 @@ async function requestMe(token = "", options = {}) {
 
   const requestOptions = {
     ...options,
-    token,
+    token: safeToken,
     auth: true,
     public: false,
     skipAuth: false,
@@ -202,48 +283,27 @@ async function requestMe(token = "", options = {}) {
 }
 
 /* =========================================================
-   CORE
+   SESSION APPLY / CLEAR
 ========================================================= */
 
-function currentToken() {
-  return stripBearer(getCurrentToken?.() || "");
-}
-
-function currentUser() {
-  return getCurrentUser?.() || null;
-}
-
-function sessionSnapshot(extra = {}) {
-  let snapshot = {};
-
-  try {
-    snapshot = buildSessionSnapshot(extra) || {};
-  } catch {
-    snapshot = {};
-  }
-
-  return {
-    version: RESTORE_VERSION,
-    authenticated: Boolean(snapshot.authenticated || isAuthenticated()),
-    hasToken: Boolean(currentToken()),
-    hasUser: Boolean(currentUser()),
-    user: snapshot.user || currentUser() || null,
-    role: snapshot.role || currentUser()?.role || null,
-    ...extra,
-  };
-}
-
 function applyMeResponse(response = {}, token = "", options = {}) {
+  const safeToken = cleanToken(token);
+
+  const payload = isObject(response)
+    ? response
+    : {
+        data: response,
+      };
+
   const snapshot = applySession(
     {
-      ...(isObject(response) ? response : { data: response }),
-
-      token,
-      accessToken: token,
-      access_token: token,
+      ...payload,
+      token: safeToken,
+      accessToken: safeToken,
+      access_token: safeToken,
     },
     {
-      source: SOURCE,
+      source: "auth.restore",
       eventMode: "restore",
       silent: options.silent !== false,
       emit: options.emit === true,
@@ -263,7 +323,7 @@ function applyMeResponse(response = {}, token = "", options = {}) {
 function clearInvalidSession(options = {}) {
   try {
     clearSessionLocal({
-      source: SOURCE,
+      source: "auth.restore",
       silent: options.silent !== false,
       emit: options.emit === true,
     });
@@ -295,18 +355,13 @@ export async function fetchMe(options = {}) {
   runtime.mePromise = (async () => {
     try {
       const response = await requestMe(token, options);
-      const snapshot = applyMeResponse(response, token, options);
+
+      applyMeResponse(response, token, options);
 
       runtime.lastMeAt = Date.now();
       runtime.lastError = null;
 
-      return {
-        ok: true,
-        authenticated: true,
-        user: currentUser(),
-        snapshot,
-        source: "me",
-      };
+      return restoreResult("me");
     } catch (error) {
       throw rememberError("me", error);
     } finally {
@@ -333,13 +388,7 @@ export async function restoreSession(options = {}) {
         runtime.lastRestoreAt = Date.now();
         runtime.lastError = null;
 
-        return {
-          ok: true,
-          authenticated: true,
-          user: currentUser(),
-          snapshot: sessionSnapshot({ source: "state" }),
-          source: "state",
-        };
+        return restoreResult("state");
       }
 
       const token = currentToken();
@@ -354,13 +403,20 @@ export async function restoreSession(options = {}) {
           ok: false,
           authenticated: false,
           user: null,
+          userSlug: null,
+          homePath: "/",
+          postLoginTarget: null,
+          snapshot: sessionSnapshot({
+            source: "empty",
+            eventMode: "restore",
+          }),
           source: "empty",
         };
       }
 
       const result = await fetchMe(options);
 
-      runtime.lastRestoreAt = Date.now;
+      runtime.lastRestoreAt = Date.now();
       runtime.lastError = null;
 
       return {
@@ -379,7 +435,14 @@ export async function restoreSession(options = {}) {
         ok: false,
         authenticated: false,
         user: null,
+        userSlug: null,
+        homePath: "/",
+        postLoginTarget: null,
         error: finalError,
+        snapshot: sessionSnapshot({
+          source: "error",
+          eventMode: "restore",
+        }),
         source: "error",
       };
     } finally {
@@ -423,7 +486,14 @@ export async function restoreAfterMeFailure(_sessionArg, error, options = {}) {
     ok: false,
     authenticated: false,
     user: null,
+    userSlug: null,
+    homePath: "/",
+    postLoginTarget: null,
     error: finalError,
+    snapshot: sessionSnapshot({
+      source: "me-failed",
+      eventMode: "restore",
+    }),
     source: "me-failed",
   };
 }
@@ -433,6 +503,11 @@ export async function restoreAfterMeFailure(_sessionArg, error, options = {}) {
 ========================================================= */
 
 export function getRestoreSnapshot() {
+  const snapshot = sessionSnapshot({
+    source: "snapshot",
+    eventMode: "debug",
+  });
+
   return {
     version: RESTORE_VERSION,
 
@@ -446,9 +521,13 @@ export function getRestoreSnapshot() {
     lastMeAt: runtime.lastMeAt || 0,
     lastError: runtime.lastError || null,
 
-    authenticated: Boolean(isAuthenticated()),
+    authenticated: Boolean(snapshot.authenticated),
     hasToken: Boolean(currentToken()),
     hasUser: Boolean(currentUser()),
+
+    userSlug: snapshot.userSlug || null,
+    homePath: snapshot.homePath || "/",
+    postLoginTarget: snapshot.postLoginTarget || null,
 
     endpoint: ME_ENDPOINT,
   };
@@ -462,10 +541,12 @@ export default {
   RESTORE_VERSION,
 
   fetchMe,
+
   restoreSession,
   restoreSessionInBackground,
 
   refreshSession,
+
   restoreUsingMe,
   restoreUsingRefreshOnly,
   restoreUsingRefreshPreferred,

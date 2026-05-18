@@ -3,9 +3,9 @@
    Archivo: /src/main.js
 
    Responsabilidad:
-   - Entry point único del SPA.
+   - Entry point único de la SPA.
    - Bloquear auto-boot legacy.
-   - Guardar URL inicial.
+   - Capturar URL inicial.
    - Cargar /src/app/index.js.
    - Ejecutar boot una sola vez.
    - Mostrar error mínimo si falla.
@@ -15,11 +15,19 @@
    - Sin Services.
    - Sin fetch.
    - Sin storage.
+   - Sin magia negra.
 ========================================================= */
 
 const APP_MODULE = "./app/index.js";
+const BOOT_PROMISE_KEY = "__ONION_MAIN_BOOT_PROMISE__";
 
-function getInitialPath() {
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function currentPath() {
+  if (!isBrowser()) return "/";
+
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
 
@@ -33,7 +41,7 @@ function createBootContext() {
   const context = {
     source: "main",
     initialUrl: window.__ONION_INITIAL_URL__,
-    initialPath: getInitialPath(),
+    initialPath: currentPath(),
   };
 
   window.__ONION_BOOT_CONTEXT__ = context;
@@ -41,36 +49,36 @@ function createBootContext() {
   return context;
 }
 
-function setMainState(state) {
-  const elements = [document.documentElement, document.body].filter(Boolean);
+function setMainState(state = "booting") {
+  if (!isBrowser()) return false;
 
-  for (const element of elements) {
+  for (const element of [document.documentElement, document.body].filter(Boolean)) {
     element.dataset.mainState = state;
+    element.dataset.appState = state === "fatal" ? "fatal" : element.dataset.appState || state;
+
+    element.classList.toggle("app-booting", state === "booting");
+    element.classList.toggle("app-loading", state === "booting");
+    element.classList.toggle("app-ready", state === "ready");
+    element.classList.toggle("app-fatal", state === "fatal");
   }
+
+  return true;
 }
 
-function resolveBoot(module) {
-  if (typeof module?.boot === "function") {
-    return module.boot;
-  }
+function resolveBoot(module = {}) {
+  if (typeof module.boot === "function") return module.boot;
+  if (typeof module.bootApp === "function") return module.bootApp;
+  if (typeof module.start === "function") return module.start;
 
-  if (typeof module?.bootApp === "function") {
-    return module.bootApp;
-  }
-
-  if (typeof module?.start === "function") {
-    return module.start;
-  }
-
-  if (typeof module?.App?.boot === "function") {
+  if (typeof module.App?.boot === "function") {
     return module.App.boot.bind(module.App);
   }
 
-  if (typeof module?.default?.boot === "function") {
+  if (typeof module.default?.boot === "function") {
     return module.default.boot.bind(module.default);
   }
 
-  if (typeof module?.default === "function") {
+  if (typeof module.default === "function") {
     return module.default;
   }
 
@@ -78,42 +86,57 @@ function resolveBoot(module) {
 }
 
 function hideLoader() {
+  if (!isBrowser()) return false;
+
   const loader = document.getElementById("app-loader");
 
-  if (!loader) return;
+  if (!loader) return false;
 
   loader.hidden = true;
   loader.setAttribute("aria-hidden", "true");
   loader.setAttribute("aria-busy", "false");
   loader.classList.remove("is-visible");
+
+  return true;
 }
 
-function showFatalError() {
-  const root =
-    document.getElementById("view-container") ||
-    document.getElementById("app-content") ||
-    document.getElementById("main-content") ||
-    document.body;
-
-  if (!root) return;
-
-  document.documentElement.classList.remove("app-booting", "app-loading");
-  document.documentElement.classList.add("app-fatal");
-
-  if (document.body) {
-    document.body.classList.remove("app-booting", "app-loading");
-    document.body.classList.add("app-fatal");
-  }
+function showShell() {
+  if (!isBrowser()) return false;
 
   const shell = document.getElementById("app-shell");
 
-  if (shell) {
-    shell.hidden = false;
-    shell.setAttribute("aria-hidden", "false");
-    shell.setAttribute("aria-busy", "false");
-  }
+  if (!shell) return false;
 
+  shell.hidden = false;
+  shell.setAttribute("aria-hidden", "false");
+  shell.setAttribute("aria-busy", "false");
+  shell.dataset.shellState = "fatal";
+
+  return true;
+}
+
+function fatalRoot() {
+  if (!isBrowser()) return null;
+
+  return (
+    document.getElementById("view-container") ||
+    document.getElementById("app-content") ||
+    document.getElementById("main-content") ||
+    document.body ||
+    null
+  );
+}
+
+function showFatalError(error = null) {
+  if (!isBrowser()) return false;
+
+  setMainState("fatal");
+  showShell();
   hideLoader();
+
+  const root = fatalRoot();
+
+  if (!root) return false;
 
   const section = document.createElement("section");
   section.className = "boot-error-view";
@@ -132,9 +155,17 @@ function showFatalError() {
 
   section.append(title, text, button);
   root.replaceChildren(section);
+
+  try {
+    console.error("[Onion Main] Boot error:", error);
+  } catch {
+    // noop
+  }
+
+  return true;
 }
 
-async function boot() {
+async function runBoot() {
   const bootContext = createBootContext();
 
   setMainState("booting");
@@ -143,7 +174,7 @@ async function boot() {
   const bootApp = resolveBoot(module);
 
   if (!bootApp) {
-    throw new Error("src/app/index.js no exporta una función de arranque.");
+    throw new Error("src/app/index.js no exporta boot/start/bootApp.");
   }
 
   await bootApp({
@@ -152,9 +183,29 @@ async function boot() {
   });
 
   setMainState("ready");
+
+  return true;
 }
 
-boot().catch(() => {
-  setMainState("fatal");
-  showFatalError();
-});
+export function boot() {
+  if (!isBrowser()) return Promise.resolve(false);
+
+  if (window[BOOT_PROMISE_KEY]) {
+    return window[BOOT_PROMISE_KEY];
+  }
+
+  window[BOOT_PROMISE_KEY] = runBoot()
+    .catch((error) => {
+      showFatalError(error);
+      return false;
+    })
+    .finally(() => {
+      window[BOOT_PROMISE_KEY] = null;
+    });
+
+  return window[BOOT_PROMISE_KEY];
+}
+
+boot();
+
+export default boot;

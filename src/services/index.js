@@ -5,6 +5,7 @@
    Responsabilidad:
    - Fachada mínima de compat.
    - Delegar siempre en src/core/http.js.
+   - Registrar Http en AppCore.services.
    - Sin fetch propio.
    - Sin parser propio.
    - Sin retry propio.
@@ -27,24 +28,16 @@ const DEFAULT_API_BASE = "https://api.onionit.net";
 let activeAppCore = AppCore || null;
 let initialized = false;
 
-const stats = {
-  total: 0,
-  success: 0,
-  error: 0,
-};
-
-const config = {
-  apiBase: DEFAULT_API_BASE,
-  apiOrigin: DEFAULT_API_BASE,
-  apiUrl: DEFAULT_API_BASE,
-};
-
-function isFunction(value) {
-  return typeof value === "function";
-}
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFunction(value) {
+  return typeof value === "function";
 }
 
 function text(value = "", fallback = "") {
@@ -69,27 +62,41 @@ export function redact(value = "") {
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
+function coreOrigin() {
+  try {
+    return (
+      CoreHttp?.getApiOrigin?.() ||
+      CoreHttp?.origin ||
+      DEFAULT_API_BASE
+    );
+  } catch {
+    return DEFAULT_API_BASE;
+  }
+}
+
 /* =========================================================
    CONFIG
 ========================================================= */
 
 export function configure(patch = {}) {
-  const next = isObject(patch) ? patch : {};
-  const origin = normalizeOrigin(
-    next.apiBase ||
-      next.apiOrigin ||
-      next.apiUrl ||
-      next.baseUrl ||
-      next.baseURL ||
-      config.apiBase
-  );
+  const source = isObject(patch) ? patch : {};
 
-  config.apiBase = origin;
-  config.apiOrigin = origin;
-  config.apiUrl = origin;
+  const origin = normalizeOrigin(
+    source.apiBase ||
+      source.apiOrigin ||
+      source.apiUrl ||
+      source.baseUrl ||
+      source.baseURL ||
+      coreOrigin()
+  );
 
   try {
     CoreHttp?.setApiOrigin?.(origin);
+  } catch {
+    // noop
+  }
+
+  try {
     CoreHttp?.setOrigin?.(origin);
   } catch {
     // noop
@@ -99,11 +106,13 @@ export function configure(patch = {}) {
 }
 
 export function getConfig() {
+  const origin = coreOrigin();
+
   return {
     version: HTTP_SERVICE_VERSION,
-    apiBase: config.apiBase,
-    apiOrigin: config.apiOrigin,
-    apiUrl: config.apiUrl,
+    apiBase: origin,
+    apiOrigin: origin,
+    apiUrl: origin,
   };
 }
 
@@ -123,17 +132,8 @@ export function buildUrl(path = "/", query = null) {
    REQUEST
 ========================================================= */
 
-export async function request(...args) {
-  stats.total += 1;
-
-  try {
-    const result = await CoreHttp.request(...args);
-    stats.success += 1;
-    return result;
-  } catch (error) {
-    stats.error += 1;
-    throw error;
-  }
+export function request(...args) {
+  return CoreHttp.request(...args);
 }
 
 /* =========================================================
@@ -194,18 +194,8 @@ export function me(requestOptions = {}) {
   return CoreHttp.me(requestOptions);
 }
 
-export function refresh(bodyOrOptions = {}, maybeOptions = undefined) {
-  if (maybeOptions !== undefined) {
-    return CoreHttp.post("/api/auth/refresh", bodyOrOptions, {
-      ...maybeOptions,
-      auth: false,
-      public: true,
-      skipAuth: true,
-      captureAuth: true,
-    });
-  }
-
-  return CoreHttp.refresh(bodyOrOptions);
+export function refresh(requestOptions = {}) {
+  return CoreHttp.refresh(requestOptions);
 }
 
 export function refreshSession(requestOptions = {}) {
@@ -222,11 +212,13 @@ export function logoutLocal() {
 }
 
 /* =========================================================
-   TOKEN HELPERS
+   TOKEN COMPAT
+   La fuente real es CoreHttp/AppCore.state.
 ========================================================= */
 
 export function setTokenProvider(provider = null) {
-  return CoreHttp.setTokenProvider?.(provider) ?? false;
+  void provider;
+  return CoreHttp.setTokenProvider?.() ?? true;
 }
 
 export function getAccessToken() {
@@ -249,23 +241,33 @@ export function clearAuthTokens() {
    POLICY HELPERS
 ========================================================= */
 
-export function isAuthMeRequest(path = "") {
-  const clean = text(path, "").replace(/^\/+/, "");
-  return clean === "api/auth/me" || clean === "auth/me" || clean === "api/me" || clean === "me";
+function cleanPath(path = "") {
+  return text(path, "")
+    .split("?")[0]
+    .split("#")[0]
+    .replace(/^\/+/, "");
 }
 
-export function isPublicRequest(path = "", options = {}) {
+export function isAuthMeRequest(path = "") {
+  const clean = cleanPath(path);
+
+  return clean === "api/auth/me" || clean === "auth/me";
+}
+
+export function isPublicRequest(path = "", requestOptions = {}) {
   if (isAuthMeRequest(path)) return false;
 
-  if (options.public === true || options.auth === false || options.skipAuth === true) {
+  if (
+    requestOptions.public === true ||
+    requestOptions.auth === false ||
+    requestOptions.skipAuth === true
+  ) {
     return true;
   }
 
-  if (options.auth === true || options.public === false) {
+  if (requestOptions.auth === true || requestOptions.public === false) {
     return false;
   }
-
-  const clean = text(path, "").replace(/^\/+/, "");
 
   return [
     "api/auth/login",
@@ -273,11 +275,11 @@ export function isPublicRequest(path = "", options = {}) {
     "api/auth/activate",
     "api/auth/reset-password-request",
     "api/auth/reset-password-confirm",
-  ].includes(clean);
+  ].includes(cleanPath(path));
 }
 
-export function isPrivateRequest(path = "", options = {}) {
-  return !isPublicRequest(path, options);
+export function isPrivateRequest(path = "", requestOptions = {}) {
+  return !isPublicRequest(path, requestOptions);
 }
 
 /* =========================================================
@@ -285,11 +287,11 @@ export function isPrivateRequest(path = "", options = {}) {
    No ejecutan nada. Sólo evitan imports rotos.
 ========================================================= */
 
-export const interceptors = {
-  request: [],
-  response: [],
-  error: [],
-};
+export const interceptors = Object.freeze({
+  request: Object.freeze([]),
+  response: Object.freeze([]),
+  error: Object.freeze([]),
+});
 
 export function useRequest() {
   return null;
@@ -320,7 +322,7 @@ export function clearInterceptors() {
 }
 
 /* =========================================================
-   INSTALL / RUNTIME
+   INSTALL
 ========================================================= */
 
 export function attachToAppCore(AppCoreRef = activeAppCore) {
@@ -330,24 +332,35 @@ export function attachToAppCore(AppCoreRef = activeAppCore) {
 
   activeAppCore = App;
 
-  if (!isObject(App.services)) {
-    App.services = {};
+  try {
+    App.services = isObject(App.services) ? App.services : {};
+
+    App.services.http = Http;
+    App.services.Http = Http;
+    App.services.api = Http;
+    App.services.apiClient = Http;
+
+    App.http = App.http || Http;
+    App.Http = App.Http || Http;
+    App.api = App.api || Http;
+    App.apiClient = App.apiClient || Http;
+
+    App.modules?.register?.("Services", Http);
+    App.modules?.register?.("services", Http);
+    App.modules?.register?.("HttpService", Http);
+
+    return true;
+  } catch {
+    return false;
   }
-
-  App.services.http = Http;
-  App.services.Http = Http;
-  App.services.api = Http;
-  App.services.apiClient = Http;
-
-  return true;
 }
 
-export function init(patch = {}) {
-  configure(patch);
+export function init(options = {}) {
+  configure(options);
 
   try {
     CoreHttp.install?.(activeAppCore, {
-      apiBase: config.apiBase,
+      apiBase: coreOrigin(),
     });
   } catch {
     // noop
@@ -360,17 +373,18 @@ export function init(patch = {}) {
   return Http;
 }
 
-export function install(AppCoreRef = AppCore, installOptions = {}) {
+export function install(AppCoreRef = AppCore, options = {}) {
   activeAppCore = AppCoreRef || activeAppCore || AppCore;
-  return init(installOptions);
+  return init(options);
 }
 
 export function resetRuntime() {
-  stats.total = 0;
-  stats.success = 0;
-  stats.error = 0;
   return true;
 }
+
+/* =========================================================
+   ABORT COMPAT
+========================================================= */
 
 export function createAbortController() {
   try {
@@ -401,14 +415,35 @@ export function getSnapshot() {
   return {
     version: HTTP_SERVICE_VERSION,
     service: SERVICE_NAME,
+
     initialized,
-    apiBase: config.apiBase,
+
+    apiBase: coreOrigin(),
     delegatesToCoreHttp: true,
-    stats: { ...stats },
+
     auth: {
       hasAccessToken: Boolean(getAccessToken()),
       hasRefreshToken: Boolean(getRefreshToken()),
       authMePrivate: true,
+    },
+
+    transport: {
+      hasCoreHttp: Boolean(CoreHttp),
+      hasRequest: isFunction(CoreHttp?.request),
+      hasGet: isFunction(CoreHttp?.get),
+      hasPost: isFunction(CoreHttp?.post),
+    },
+
+    policy: {
+      facadeOnly: true,
+      noOwnFetch: true,
+      noOwnParser: true,
+      noRetry: true,
+      noRefreshOwn: true,
+      noInterceptorsReal: true,
+      noStorage: true,
+      noRouter: true,
+      noToast: true,
     },
   };
 }

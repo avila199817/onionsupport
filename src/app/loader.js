@@ -11,10 +11,11 @@
    - Sin timers.
    - Sin snapshots complejos.
    - Sin fallback DOM.
+   - Sin mutar textos.
    - Sin magia negra.
 ========================================================= */
 
-export const LOADER_VERSION = "app.loader.v1";
+export const LOADER_VERSION = "app.loader.v2";
 
 const LOADER_ID = "app-loader";
 
@@ -26,18 +27,35 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
+function text(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
+}
+
 function roots() {
   if (!isBrowser()) return [];
 
   return [document.documentElement, document.body].filter(Boolean);
 }
 
+function normalizeState(state = "ready") {
+  const value = text(state, "ready").toLowerCase();
+
+  if (value === "loading") return "booting";
+  if (value === "booting") return "booting";
+  if (value === "fatal") return "fatal";
+  if (value === "ready") return "ready";
+  if (value === "hidden") return "hidden";
+
+  return "ready";
+}
+
 function getStateFlags(state = "ready") {
-  const value = String(state || "ready");
+  const value = normalizeState(state);
 
   return {
     value,
-    booting: value === "booting" || value === "loading",
+    booting: value === "booting",
     ready: value === "ready",
     fatal: value === "fatal",
   };
@@ -95,7 +113,7 @@ function setLoaderState(loader = null, visible = false, state = "hidden") {
   if (!loader) return false;
 
   const show = Boolean(visible);
-  const status = String(state || (show ? "booting" : "hidden"));
+  const status = show ? normalizeState(state || "booting") : "hidden";
 
   try {
     loader.hidden = !show;
@@ -141,7 +159,7 @@ export function isLoaderVisible() {
 
 export function showLoader(state = "booting") {
   const loader = getLoaderElement();
-  const status = String(state || "booting");
+  const status = normalizeState(state || "booting");
 
   setRootState(status);
 
@@ -218,6 +236,7 @@ export function getLoaderSnapshot() {
       noTimers: true,
       noFallbackDom: true,
       noInlineTextMutation: true,
+      noTextRendering: true,
       forceHideDoesNotSetReady: true,
     },
   };

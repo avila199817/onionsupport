@@ -3,41 +3,54 @@
    Archivo: /src/ui/sidebar/dom.js
 
    Responsabilidad:
-   - Compat DOM mínima para Sidebar.
-   - Sin imports.
-   - Sin template legacy.
-   - Sin dropdown complejo.
-   - Sin tooltips complejos.
-   - Sin duplicate cleanup pesado.
+   - Helpers DOM mínimos del sidebar.
+   - Resolver mount/root.
+   - Montar/reemplazar sidebar.
+   - Ocultar/limpiar sidebar.
+   - Cachear referencias básicas en AppCore.dom.
+   - Sin Auth.
+   - Sin Router.
+   - Sin HTTP.
+   - Sin Toast.
+   - Sin template.
    - Sin eventos.
-   - Sin magia negra.
-   - El sidebar real vive en src/ui/sidebar/index.js.
+   - Sin dropdown.
+   - Sin tooltips.
+   - Sin compat legacy innecesaria.
 ========================================================= */
 
-export const SIDEBAR_DOM_VERSION = "simple";
+import {
+  SIDEBAR_CLASSES,
+  SIDEBAR_MOUNT_ID,
+  SIDEBAR_ROOT_ID,
+  SIDEBAR_SELECTORS,
+} from "./constants.js";
 
-const SIDEBAR_MOUNT_ID = "sidebar-mount";
-const SIDEBAR_ROOT_ID = "app-sidebar";
-const LEGACY_ROOT_ID = "sidebar";
-const VIEW_CONTAINER_ID = "view-container";
+export const SIDEBAR_DOM_VERSION = "sidebar.dom.v1";
 
 /* =========================================================
    BASICS
 ========================================================= */
 
-function isBrowser() {
+export function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isElement(value = null) {
+export function isElement(value = null) {
+  if (!value) return false;
+
   try {
-    return Boolean(value && value instanceof Element);
+    return value instanceof Element;
   } catch {
-    return Boolean(value && typeof value.querySelector === "function");
+    return Boolean(
+      value &&
+        typeof value === "object" &&
+        typeof value.querySelector === "function"
+    );
   }
 }
 
-function isConnected(value = null) {
+export function isConnected(value = null) {
   if (!isElement(value)) return false;
 
   try {
@@ -51,25 +64,41 @@ function isConnected(value = null) {
   }
 }
 
-function text(value = "", fallback = "") {
+export function text(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
 }
 
-function query(selector = "", root = null) {
+/* =========================================================
+   QUERY
+========================================================= */
+
+export function query(selector = "", scope = null) {
   if (!isBrowser() || !selector) return null;
 
-  const scope = isConnected(root) ? root : document;
+  const root = isConnected(scope) ? scope : document;
 
   try {
-    const node = scope.querySelector(selector);
+    const node = root.querySelector(selector);
     return isConnected(node) ? node : null;
   } catch {
     return null;
   }
 }
 
-function byId(id = "") {
+export function queryAll(selector = "", scope = null) {
+  if (!isBrowser() || !selector) return [];
+
+  const root = isConnected(scope) ? scope : document;
+
+  try {
+    return [...root.querySelectorAll(selector)].filter(isConnected);
+  } catch {
+    return [];
+  }
+}
+
+export function byId(id = "") {
   if (!isBrowser() || !id) return null;
 
   try {
@@ -80,36 +109,37 @@ function byId(id = "") {
   }
 }
 
-function setHidden(node = null, hidden = false) {
-  if (!node) return false;
+/* =========================================================
+   NODE MUTATION
+========================================================= */
 
-  try {
-    node.hidden = Boolean(hidden);
-    node.setAttribute("aria-hidden", hidden ? "true" : "false");
-    return true;
-  } catch {
-    return false;
+export function createElement(tag = "div", options = {}) {
+  const node = document.createElement(tag);
+  const {
+    className = "",
+    textContent = "",
+    attrs = {},
+    dataset = {},
+  } = options || {};
+
+  if (className) node.className = className;
+  if (textContent) node.textContent = textContent;
+
+  for (const [key, value] of Object.entries(attrs || {})) {
+    if (value === false || value === null || value === undefined) continue;
+    node.setAttribute(key, String(value));
   }
+
+  for (const [key, value] of Object.entries(dataset || {})) {
+    if (value === false || value === null || value === undefined) continue;
+    node.dataset[key] = String(value);
+  }
+
+  return node;
 }
 
-function setData(node = null, key = "", value = "") {
-  if (!node || !key) return false;
-
-  try {
-    if (value === null || value === undefined || value === "") {
-      delete node.dataset[key];
-    } else {
-      node.dataset[key] = String(value);
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function clear(node = null) {
-  if (!node) return false;
+export function clearNode(node = null) {
+  if (!isElement(node)) return false;
 
   try {
     node.replaceChildren();
@@ -124,126 +154,104 @@ function clear(node = null) {
   }
 }
 
-/* =========================================================
-   APPCORE CACHE
-========================================================= */
+export function setHidden(node = null, hidden = false) {
+  if (!isElement(node)) return false;
 
-function domBag(AppCore = null) {
-  if (!AppCore || typeof AppCore !== "object") return null;
+  const value = Boolean(hidden);
 
   try {
-    AppCore.dom = AppCore.dom && typeof AppCore.dom === "object" ? AppCore.dom : {};
-    return AppCore.dom;
-  } catch {
-    return null;
-  }
-}
-
-function setDom(AppCore = null, key = "", value = null) {
-  const dom = domBag(AppCore);
-
-  if (!dom || !key) return false;
-
-  try {
-    dom[key] = isConnected(value) ? value : null;
+    node.hidden = value;
+    node.setAttribute("aria-hidden", value ? "true" : "false");
+    node.classList.toggle(SIDEBAR_CLASSES.hidden, value);
     return true;
   } catch {
     return false;
   }
 }
 
-function getCached(AppCore = null, key = "") {
-  const node = AppCore?.dom?.[key];
-  return isConnected(node) ? node : null;
+export function setDataset(node = null, key = "", value = "") {
+  if (!isElement(node) || !key) return false;
+
+  try {
+    if (value === null || value === undefined || value === "") {
+      delete node.dataset[key];
+    } else {
+      node.dataset[key] = String(value);
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function setClass(node = null, className = "", enabled = false) {
+  if (!isElement(node) || !className) return false;
+
+  try {
+    node.classList.toggle(className, Boolean(enabled));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
-   SHELL ELEMENTS
+   SIDEBAR ROOT / MOUNT
 ========================================================= */
 
-export function getViewContainerEl(AppCore = null) {
-  return (
-    getCached(AppCore, "viewContainer") ||
-    byId(VIEW_CONTAINER_ID) ||
-    byId("app-content") ||
-    byId("main-content") ||
-    query("[data-router-view]") ||
-    null
+export function isSidebarRoot(node = null) {
+  if (!isElement(node)) return false;
+
+  return Boolean(
+    node.id === SIDEBAR_ROOT_ID ||
+      node.dataset?.sidebarRoot === "true" ||
+      node.matches?.(`.${SIDEBAR_CLASSES.root}`)
   );
 }
 
-export function getAppContentEl(AppCore = null) {
-  return (
-    getCached(AppCore, "appContent") ||
-    byId("app-content") ||
-    null
-  );
-}
+export function getSidebarMount() {
+  if (!isBrowser()) return null;
 
-export function getMainContentEl(AppCore = null) {
   return (
-    getCached(AppCore, "mainContent") ||
-    getCached(AppCore, "main") ||
-    byId("main-content") ||
-    byId("app-main") ||
-    query("main") ||
-    null
-  );
-}
-
-export function getAppShellEl(AppCore = null) {
-  return (
-    getCached(AppCore, "appShell") ||
-    getCached(AppCore, "shell") ||
-    byId("app-shell") ||
-    query("[data-app-shell]") ||
-    document.body ||
-    null
-  );
-}
-
-export function getSidebarMountEl(AppCore = null) {
-  return (
-    getCached(AppCore, "sidebarMount") ||
     byId(SIDEBAR_MOUNT_ID) ||
     query("[data-sidebar-mount]") ||
-    null
+    byId(SIDEBAR_ROOT_ID) ||
+    query("[data-sidebar-root]")
   );
 }
 
-/* =========================================================
-   SIDEBAR ROOT
-========================================================= */
+export function getSidebarRoot(scope = null) {
+  if (!isBrowser()) return null;
 
-export function resolveSidebarRoot(AppCore = null) {
+  const scopedRoot = isConnected(scope)
+    ? query(SIDEBAR_SELECTORS.root, scope)
+    : null;
+
   return (
-    getCached(AppCore, "sidebar") ||
-    getCached(AppCore, "sidebarRoot") ||
+    scopedRoot ||
     byId(SIDEBAR_ROOT_ID) ||
-    byId(LEGACY_ROOT_ID) ||
     query("[data-sidebar-root]") ||
     null
   );
 }
 
+export function getSidebarRootFromMount(mount = null) {
+  if (!isElement(mount)) return null;
+
+  if (isSidebarRoot(mount)) return mount;
+
+  return query(SIDEBAR_SELECTORS.root, mount);
+}
+
 export function getAllSidebarRoots() {
   if (!isBrowser()) return [];
 
-  try {
-    return [
-      ...new Set(
-        [
-          ...document.querySelectorAll("#app-sidebar, #sidebar, [data-sidebar-root]"),
-        ].filter(isConnected)
-      ),
-    ];
-  } catch {
-    return [];
-  }
+  return queryAll(SIDEBAR_SELECTORS.root);
 }
 
-export function cleanupDuplicateSidebars(primary = null) {
-  if (!isBrowser() || !primary) return false;
+export function removeDuplicateSidebarRoots(primary = null) {
+  if (!isBrowser() || !isElement(primary)) return false;
 
   let changed = false;
 
@@ -261,151 +269,135 @@ export function cleanupDuplicateSidebars(primary = null) {
   return changed;
 }
 
-function createSidebarRoot() {
-  if (!isBrowser()) return null;
+/* =========================================================
+   MOUNT OPERATIONS
+========================================================= */
 
-  const aside = document.createElement("aside");
-  aside.id = SIDEBAR_ROOT_ID;
-  aside.className = "sidebar app-sidebar";
-  aside.dataset.sidebarRoot = "true";
-  aside.setAttribute("aria-label", "Navegación principal");
+export function mountSidebarRoot(nextRoot = null) {
+  if (!isBrowser() || !isElement(nextRoot)) return null;
 
-  const nav = document.createElement("nav");
-  nav.className = "sidebar-nav";
-  nav.dataset.sidebarNav = "true";
-  nav.setAttribute("aria-label", "Secciones");
+  const mount = getSidebarMount();
 
-  const footer = document.createElement("footer");
-  footer.className = "sidebar-footer";
-  footer.dataset.sidebarFooter = "true";
-
-  aside.append(nav, footer);
-
-  return aside;
-}
-
-export function mountSidebar(AppCore = null, options = {}) {
-  if (!isBrowser()) return null;
-
-  let sidebar = resolveSidebarRoot(AppCore);
-
-  if (sidebar && options.force !== true) {
-    cacheDomRefs(AppCore);
-    return sidebar;
-  }
-
-  if (sidebar && options.force === true) {
-    try {
-      sidebar.remove();
-    } catch {
-      // noop
-    }
-  }
-
-  const mount = getSidebarMountEl(AppCore);
-  const target = mount || getAppShellEl(AppCore) || document.body;
-
-  if (!target) return null;
-
-  sidebar = createSidebarRoot();
+  if (!mount) return null;
 
   try {
-    if (mount) {
-      clear(mount);
-      mount.appendChild(sidebar);
+    if (isSidebarRoot(mount)) {
+      mount.replaceWith(nextRoot);
     } else {
-      target.prepend(sidebar);
+      mount.replaceChildren(nextRoot);
     }
+
+    nextRoot.id = nextRoot.id || SIDEBAR_ROOT_ID;
+    nextRoot.dataset.sidebarRoot = "true";
+    nextRoot.classList.add(SIDEBAR_CLASSES.root, SIDEBAR_CLASSES.appRoot);
+    nextRoot.hidden = false;
+    nextRoot.setAttribute("aria-hidden", "false");
+
+    removeDuplicateSidebarRoots(nextRoot);
+
+    return nextRoot;
   } catch {
     return null;
   }
+}
 
-  cacheDomRefs(AppCore);
+export function hideSidebarRoot(root = getSidebarRoot()) {
+  if (!isElement(root)) return false;
 
-  return sidebar;
+  setHidden(root, true);
+  clearNode(root);
+
+  return true;
+}
+
+export function removeSidebarRoot(root = getSidebarRoot()) {
+  if (!isElement(root)) return false;
+
+  try {
+    root.remove();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function setSidebarOpenState(root = getSidebarRoot(), open = true) {
+  if (!isElement(root)) return false;
+
+  const value = Boolean(open);
+
+  root.dataset.open = value ? "true" : "false";
+  root.classList.toggle(SIDEBAR_CLASSES.open, value);
+  root.classList.toggle(SIDEBAR_CLASSES.collapsed, !value);
+
+  const toggle = query(SIDEBAR_SELECTORS.toggle, root);
+
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", value ? "true" : "false");
+    toggle.setAttribute(
+      "aria-label",
+      value ? "Cerrar navegación" : "Abrir navegación"
+    );
+  }
+
+  return true;
 }
 
 /* =========================================================
-   ELEMENTS
+   SIDEBAR REFS
 ========================================================= */
 
-export function cacheDomRefs(AppCore = null) {
-  if (!isBrowser()) return null;
+export function getSidebarRefs(root = getSidebarRoot()) {
+  const sidebar = isElement(root) ? root : getSidebarRoot();
 
-  const sidebar = resolveSidebarRoot(AppCore);
-  const sidebarMount = getSidebarMountEl(AppCore);
-  const sidebarMenu = sidebar?.querySelector?.("[data-sidebar-nav], .sidebar-nav, #sidebar-menu") || null;
-  const sidebarRecents = sidebar?.querySelector?.("[data-sidebar-recents], .sidebar-recents") || null;
-  const userToggle = sidebar?.querySelector?.("[data-sidebar-user-toggle], [data-user-toggle]") || null;
-  const userDropdown = sidebar?.querySelector?.("[data-sidebar-user-dropdown], [data-user-dropdown]") || null;
-  const logoutBtn = sidebar?.querySelector?.("[data-sidebar-logout], .sidebar-logout") || null;
-  const avatarEl = sidebar?.querySelector?.("[data-sidebar-avatar], .sidebar-user-avatar, .sidebar-avatar") || null;
-  const avatarImage = avatarEl?.querySelector?.("img, [data-avatar-image]") || null;
-  const avatarFallback = avatarEl?.querySelector?.("[data-avatar-fallback]") || null;
-  const nameEl = sidebar?.querySelector?.("[data-sidebar-name], [data-user-name], .sidebar-user-name") || null;
-  const planEl = sidebar?.querySelector?.("[data-sidebar-user-plan], .sidebar-user-plan") || null;
-  const logoEl = sidebar?.querySelector?.("[data-sidebar-logo], .sidebar-brand, .sidebar-logo") || null;
-  const serverLink = sidebar?.querySelector?.("[href='/servidor'], [data-route='/servidor']") || null;
-
-  const sidebarToggle =
-    sidebar?.querySelector?.("[data-sidebar-toggle]") ||
-    byId("toggleSidebar") ||
-    byId("sidebarToggle") ||
-    null;
-
-  const mobileToggleBtn =
-    byId("toggleSidebarMobile") ||
-    byId("sidebarMobileToggle") ||
-    query("[data-sidebar-mobile-toggle]") ||
-    null;
-
-  const refs = {
-    html: document.documentElement || null,
-    body: document.body || null,
-
-    appShell: getAppShellEl(AppCore),
-    shell: getAppShellEl(AppCore),
-    layout: getAppShellEl(AppCore),
-
-    appContent: getAppContentEl(AppCore),
-    mainContent: getMainContentEl(AppCore),
-    main: getMainContentEl(AppCore),
-    viewContainer: getViewContainerEl(AppCore),
-
-    sidebarMount,
-    sidebar,
-    sidebarRoot: sidebar,
-    sidebarMenu,
-    sidebarRecents,
-
-    sidebarToggle,
-    toggleBtn: sidebarToggle,
-
-    mobileToggleBtn,
-    mobileSidebarToggle: mobileToggleBtn,
-    sidebarMobileToggle: mobileToggleBtn,
-
-    userToggle,
-    userDropdown,
-    logoutBtn,
-
-    avatarEl,
-    avatarImage,
-    avatarFallback,
-
-    nameEl,
-    planEl,
-    logoEl,
-    serverLink,
+  return {
+    root: sidebar,
+    header: query(SIDEBAR_SELECTORS.header, sidebar),
+    nav: query(SIDEBAR_SELECTORS.nav, sidebar),
+    footer: query(SIDEBAR_SELECTORS.footer, sidebar),
+    user: query(SIDEBAR_SELECTORS.user, sidebar),
+    brand: query(SIDEBAR_SELECTORS.brand, sidebar),
+    toggle: query(SIDEBAR_SELECTORS.toggle, sidebar),
+    logout: query(SIDEBAR_SELECTORS.logout, sidebar),
+    links: queryAll(SIDEBAR_SELECTORS.link, sidebar),
+    navLinks: queryAll(SIDEBAR_SELECTORS.navLink, sidebar),
   };
+}
 
-  for (const [key, value] of Object.entries(refs)) {
-    setDom(AppCore, key, value);
-  }
+function ensureDomBag(AppCore = null) {
+  if (!AppCore || typeof AppCore !== "object") return null;
 
   try {
-    AppCore.dom.__sidebarDomCacheVersion = SIDEBAR_DOM_VERSION;
-    AppCore.dom.__sidebarDomCachedAt = Date.now();
+    AppCore.dom =
+      AppCore.dom && typeof AppCore.dom === "object" ? AppCore.dom : {};
+
+    return AppCore.dom;
+  } catch {
+    return null;
+  }
+}
+
+export function cacheSidebarDom(AppCore = null, root = getSidebarRoot()) {
+  const dom = ensureDomBag(AppCore);
+
+  if (!dom) return null;
+
+  const refs = getSidebarRefs(root);
+
+  try {
+    dom.sidebar = refs.root;
+    dom.sidebarRoot = refs.root;
+    dom.sidebarMount = getSidebarMount();
+
+    dom.sidebarHeader = refs.header;
+    dom.sidebarNav = refs.nav;
+    dom.sidebarFooter = refs.footer;
+    dom.sidebarUser = refs.user;
+    dom.sidebarBrand = refs.brand;
+    dom.sidebarToggle = refs.toggle;
+    dom.sidebarLogout = refs.logout;
+
+    dom.__sidebarDomVersion = SIDEBAR_DOM_VERSION;
   } catch {
     // noop
   }
@@ -413,128 +405,76 @@ export function cacheDomRefs(AppCore = null) {
   return refs;
 }
 
-function emptyElements() {
-  return {
-    html: null,
-    body: null,
-    appShell: null,
-    shell: null,
-    layout: null,
-    appContent: null,
-    mainContent: null,
-    main: null,
-    viewContainer: null,
-    sidebarMount: null,
-    sidebar: null,
-    sidebarRoot: null,
-    sidebarMenu: null,
-    sidebarRecents: null,
-    sidebarToggle: null,
-    toggleBtn: null,
-    mobileToggleBtn: null,
-    mobileSidebarToggle: null,
-    sidebarMobileToggle: null,
-    userToggle: null,
-    userDropdown: null,
-    logoutBtn: null,
-    avatarEl: null,
-    avatarImage: null,
-    avatarFallback: null,
-    nameEl: null,
-    planEl: null,
-    logoEl: null,
-    serverLink: null,
-  };
-}
+export function clearSidebarDomCache(AppCore = null) {
+  const dom = ensureDomBag(AppCore);
 
-export function getElements(AppCore = null) {
-  if (!isBrowser()) return emptyElements();
+  if (!dom) return false;
 
-  return {
-    ...emptyElements(),
-    ...(cacheDomRefs(AppCore) || {}),
-  };
-}
+  try {
+    delete dom.sidebar;
+    delete dom.sidebarRoot;
+    delete dom.sidebarMount;
+    delete dom.sidebarHeader;
+    delete dom.sidebarNav;
+    delete dom.sidebarFooter;
+    delete dom.sidebarUser;
+    delete dom.sidebarBrand;
+    delete dom.sidebarToggle;
+    delete dom.sidebarLogout;
+    delete dom.__sidebarDomVersion;
 
-export function hasSidebarShell(AppCore = null) {
-  return Boolean(resolveSidebarRoot(AppCore));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
-   SHELL HIDDEN
+   ACTIVE LINK
 ========================================================= */
 
-export function isRealShellHidden(AppCore = null) {
-  const state = AppCore?.state || {};
-  const body = isBrowser() ? document.body : null;
-  const html = isBrowser() ? document.documentElement : null;
+export function setActiveLink(link = null, active = false) {
+  if (!isElement(link)) return false;
 
-  return Boolean(
-    state.shellVisible === false ||
-      state.chromeVisible === false ||
-      state.routeShellHidden === true ||
-      state.shellHidden === true ||
-      state.authScreen === true ||
-      state.routeMode === "auth" ||
-      body?.classList?.contains?.("route-auth") ||
-      body?.classList?.contains?.("shell-hidden") ||
-      html?.dataset?.routeMode === "auth" ||
-      body?.dataset?.routeMode === "auth" ||
-      body?.dataset?.chrome === "hidden" ||
-      html?.dataset?.chrome === "hidden"
-  );
+  const value = Boolean(active);
+
+  try {
+    link.classList.toggle(SIDEBAR_CLASSES.active, value);
+    link.dataset.active = value ? "true" : "false";
+
+    if (value) {
+      link.setAttribute("aria-current", "page");
+    } else {
+      link.removeAttribute("aria-current");
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-export function isSidebarDomHidden(AppCore = null) {
-  const sidebar = resolveSidebarRoot(AppCore);
+export function clearActiveLinks(root = getSidebarRoot()) {
+  const refs = getSidebarRefs(root);
 
-  return Boolean(
-    sidebar?.hidden ||
-      sidebar?.getAttribute?.("aria-hidden") === "true" ||
-      sidebar?.dataset?.mode === "hidden"
-  );
-}
-
-export function isLegacyShellHidden(AppCore = null) {
-  return isRealShellHidden(AppCore);
-}
-
-export function isShellHidden(AppCore = null) {
-  return isRealShellHidden(AppCore);
-}
-
-/* =========================================================
-   VISIBILITY
-========================================================= */
-
-export function setSidebarHidden(AppCore = null, hidden = false) {
-  const sidebar = resolveSidebarRoot(AppCore);
-  const value = Boolean(hidden);
-
-  setHidden(sidebar, value);
-
-  if (sidebar) {
-    setData(sidebar, "mode", value ? "hidden" : "desktop");
+  for (const link of refs.navLinks) {
+    setActiveLink(link, false);
   }
 
   return true;
 }
 
-export function revealSidebarShell(AppCore = null) {
-  return setSidebarHidden(AppCore, false);
-}
-
 /* =========================================================
-   FOCUS / TOOLTIP COMPAT
+   FOCUS
 ========================================================= */
 
-export function blurIfInside(element = null) {
-  if (!isBrowser() || !element) return false;
+export function blurInside(root = null) {
+  if (!isBrowser() || !isElement(root)) return false;
 
   try {
     const active = document.activeElement;
 
-    if (active && active !== document.body && element.contains(active)) {
+    if (active && active !== document.body && root.contains(active)) {
       active.blur();
       return true;
     }
@@ -545,71 +485,30 @@ export function blurIfInside(element = null) {
   return false;
 }
 
-export function focusFirstInteractive(root = null) {
-  if (!root) return false;
+export function focusFirst(root = null) {
+  if (!isElement(root)) return false;
+
+  const target = query(
+    "a[href], button:not([disabled]), [tabindex]:not([tabindex='-1'])",
+    root
+  );
+
+  if (!target) return false;
 
   try {
-    const target = root.querySelector("a[href], button, input, select, textarea, [tabindex]");
-
-    if (target?.focus) {
-      target.focus({ preventScroll: true });
-      return true;
-    }
-  } catch {
-    // noop
-  }
-
-  return false;
-}
-
-export function focusSidebar(AppCore = null) {
-  const sidebar = resolveSidebarRoot(AppCore);
-
-  if (!sidebar) return false;
-
-  try {
-    if (!sidebar.hasAttribute("tabindex")) sidebar.setAttribute("tabindex", "-1");
-    sidebar.focus({ preventScroll: true });
-    return true;
-  } catch {
-    return focusFirstInteractive(sidebar);
-  }
-}
-
-export function restoreSidebarFocusAttrs(AppCore = null) {
-  const sidebar = resolveSidebarRoot(AppCore);
-
-  if (!sidebar) return false;
-
-  try {
-    if (sidebar.getAttribute("tabindex") === "-1") {
-      sidebar.removeAttribute("tabindex");
-    }
-
+    target.focus({ preventScroll: true });
     return true;
   } catch {
     return false;
   }
 }
 
-export function sanitizeLogoTooltipState() {
-  return true;
-}
-
-export function sanitizeFooterTooltipState() {
-  return true;
-}
-
-export function sanitizeSidebarTooltipState() {
-  return true;
-}
-
 /* =========================================================
    SNAPSHOT
 ========================================================= */
 
-function elementSnapshot(node = null) {
-  if (!node) {
+function nodeSnapshot(node = null) {
+  if (!isElement(node)) {
     return {
       exists: false,
     };
@@ -620,46 +519,31 @@ function elementSnapshot(node = null) {
     id: node.id || "",
     tag: node.tagName?.toLowerCase?.() || "",
     hidden: Boolean(node.hidden),
-    ariaHidden: node.getAttribute?.("aria-hidden") || "",
+    ariaHidden: node.getAttribute("aria-hidden") || "",
     className: text(node.className, ""),
   };
 }
 
-export function getSidebarDomSnapshot(AppCore = null) {
-  const elements = getElements(AppCore);
+export function getSidebarDomSnapshot(root = getSidebarRoot()) {
+  const refs = getSidebarRefs(root);
 
   return {
     version: SIDEBAR_DOM_VERSION,
-
     hasDocument: isBrowser(),
-
-    hasSidebarMount: Boolean(elements.sidebarMount),
-    hasSidebar: Boolean(elements.sidebar),
-    hasSidebarMenu: Boolean(elements.sidebarMenu),
-    hasLogoutBtn: Boolean(elements.logoutBtn),
-    hasName: Boolean(elements.nameEl),
-    hasAppShell: Boolean(elements.appShell),
-    hasViewContainer: Boolean(elements.viewContainer),
-
-    shellHidden: isShellHidden(AppCore),
-    realShellHidden: isRealShellHidden(AppCore),
-    sidebarDomHidden: isSidebarDomHidden(AppCore),
-
-    nodes: {
-      mount: elementSnapshot(elements.sidebarMount),
-      sidebar: elementSnapshot(elements.sidebar),
-      sidebarMenu: elementSnapshot(elements.sidebarMenu),
-      footer: elementSnapshot(elements.sidebar?.querySelector?.("[data-sidebar-footer]")),
-      appShell: elementSnapshot(elements.appShell),
-      viewContainer: elementSnapshot(elements.viewContainer),
+    mounted: isConnected(refs.root),
+    root: nodeSnapshot(refs.root),
+    mount: nodeSnapshot(getSidebarMount()),
+    parts: {
+      header: nodeSnapshot(refs.header),
+      nav: nodeSnapshot(refs.nav),
+      footer: nodeSnapshot(refs.footer),
+      user: nodeSnapshot(refs.user),
+      toggle: nodeSnapshot(refs.toggle),
+      logout: nodeSnapshot(refs.logout),
     },
-
-    policy: {
-      compatOnly: true,
-      noTemplateImport: true,
-      noDropdownComplex: true,
-      noTooltipComplex: true,
-      noEvents: true,
+    counts: {
+      links: refs.links.length,
+      navLinks: refs.navLinks.length,
     },
   };
 }
@@ -671,38 +555,42 @@ export function getSidebarDomSnapshot(AppCore = null) {
 export default {
   SIDEBAR_DOM_VERSION,
 
-  getSidebarMountEl,
-  getMainContentEl,
-  getAppContentEl,
-  getAppShellEl,
-  getViewContainerEl,
+  isBrowser,
+  isElement,
+  isConnected,
+  text,
 
-  mountSidebar,
-  cacheDomRefs,
-  getElements,
+  query,
+  queryAll,
+  byId,
 
-  hasSidebarShell,
+  createElement,
+  clearNode,
+  setHidden,
+  setDataset,
+  setClass,
 
-  isShellHidden,
-  isRealShellHidden,
-  isLegacyShellHidden,
-  isSidebarDomHidden,
+  isSidebarRoot,
+  getSidebarMount,
+  getSidebarRoot,
+  getSidebarRootFromMount,
+  getAllSidebarRoots,
+  removeDuplicateSidebarRoots,
 
-  setSidebarHidden,
-  revealSidebarShell,
+  mountSidebarRoot,
+  hideSidebarRoot,
+  removeSidebarRoot,
+  setSidebarOpenState,
 
-  blurIfInside,
-  focusFirstInteractive,
-  focusSidebar,
-  restoreSidebarFocusAttrs,
+  getSidebarRefs,
+  cacheSidebarDom,
+  clearSidebarDomCache,
 
-  sanitizeLogoTooltipState,
-  sanitizeFooterTooltipState,
-  sanitizeSidebarTooltipState,
+  setActiveLink,
+  clearActiveLinks,
+
+  blurInside,
+  focusFirst,
 
   getSidebarDomSnapshot,
-
-  resolveSidebarRoot,
-  getAllSidebarRoots,
-  cleanupDuplicateSidebars,
 };

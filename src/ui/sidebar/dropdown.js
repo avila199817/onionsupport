@@ -17,23 +17,27 @@
 
 export const SIDEBAR_DROPDOWN_VERSION = "sidebar.dropdown.disabled.v1";
 
-/* =========================================================
-   STATE
-========================================================= */
-
 const DROPDOWN_DISABLED_REASON = "sidebar-dropdown-disabled";
 
 /* =========================================================
-   API NO-OP
+   RESULT
 ========================================================= */
 
-export function syncDropdownA11y() {
+function disabledResult() {
   return {
     ok: true,
     enabled: false,
     open: false,
     reason: DROPDOWN_DISABLED_REASON,
   };
+}
+
+/* =========================================================
+   API NO-OP
+========================================================= */
+
+export function syncDropdownA11y() {
+  return disabledResult();
 }
 
 export function setDropdownOpen() {
@@ -53,12 +57,7 @@ export function toggleDropdown() {
 }
 
 export function repairDropdown() {
-  return {
-    ok: true,
-    enabled: false,
-    open: false,
-    reason: DROPDOWN_DISABLED_REASON,
-  };
+  return disabledResult();
 }
 
 /* =========================================================

@@ -22,27 +22,24 @@
   data-shell-state="booting"
   data-shell-interactive="false"
   data-chrome="hidden"
-  class="no-js app-booting app-loading"
+  class="app-booting app-loading"
 >
 <head>
   <!-- =========================================================
-       ONION SUPPORT — SPA ENTRY SHELL
+       Onion Support - SPA Entry
        Archivo: /index.html
 
-       Contrato:
+       Responsabilidad:
        - Entrada física única de la SPA.
+       - Declarar mounts reales.
+       - Cargar preboot/theme antes del CSS.
+       - Cargar /src/main.js como entrypoint único.
        - Sin JS inline.
        - Sin CSS inline.
-       - Sin llamadas API.
-       - Sin lógica auth.
-       - Sin lógica router.
+       - Sin auth.
+       - Sin router.
+       - Sin API.
        - Sin clientes HTTP.
-       - Theme + locale inicial: /src/preboot/theme.js.
-       - CSS global: /src/css/app.css.
-       - JS entrypoint único: /src/main.js.
-       - Vista SPA: #view-container.
-       - Sidebar: #sidebar-mount.
-       - Topbar: #topbar-mount.
   ========================================================= -->
 
   <meta charset="UTF-8">
@@ -181,7 +178,6 @@
     href="/src/main.js"
   >
 
-  <!-- Preboot único: resuelve theme system/browser + locale ca/es/en con fallback en. -->
   <script src="/src/preboot/theme.js"></script>
 
   <link
@@ -216,7 +212,6 @@
     class="sr-only sr-only-focusable app-skip-link"
     href="#main-content"
     data-skip-link="true"
-    data-i18n="a11y.skipMain"
   >
     Skip to main content
   </a>
@@ -300,7 +295,6 @@
           id="app-loader-text"
           class="app-loader__text"
           data-loader-text="true"
-          data-i18n="loader.text"
         >
           Loading session...
         </span>
@@ -309,7 +303,6 @@
           id="app-loader-subtext"
           class="app-loader__subtext"
           data-loader-subtext="true"
-          data-i18n="loader.subtext"
         >
           Preparing secure panel
         </small>
@@ -336,19 +329,16 @@
         role="main"
         aria-label="Main content"
       >
-        <div id="noscript-content">
-          <section
-            class="noscript-box"
-            lang="en"
-          >
-            <h1>JavaScript required</h1>
+        <section
+          class="noscript-box"
+          lang="en"
+        >
+          <h1>JavaScript required</h1>
 
-            <p>
-              Onion Support requires JavaScript to load the panel,
-              navigation, views and authentication.
-            </p>
-          </section>
-        </div>
+          <p>
+            Onion Support requires JavaScript to load the private panel.
+          </p>
+        </section>
       </main>
     </div>
   </noscript>
@@ -363,7 +353,7 @@
     data-chrome="hidden"
     data-route-mode="boot"
     aria-busy="true"
-    aria-hidden="true"
+    aria-hidden="false"
   >
     <div
       id="sidebar-mount"
@@ -372,8 +362,7 @@
       data-shell-state="booting"
       data-chrome="hidden"
       data-route-mode="boot"
-      hidden
-      aria-hidden="true"
+      aria-hidden="false"
     ></div>
 
     <div
@@ -383,8 +372,7 @@
       data-shell-state="booting"
       data-chrome="hidden"
       data-route-mode="boot"
-      hidden
-      aria-hidden="true"
+      aria-hidden="false"
     ></div>
 
     <main

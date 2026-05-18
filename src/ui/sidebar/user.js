@@ -63,13 +63,16 @@ function first(...values) {
 export function isSidebarUserDisabled(user = null) {
   if (!isObject(user)) return true;
 
-  const status = String(user.status || user.estado || "").toLowerCase();
+  const status = text(user.status || user.estado, "").toLowerCase();
 
-  return (
+  return Boolean(
     user.disabled === true ||
-    user.deleted === true ||
-    status === "disabled" ||
-    status === "deleted"
+      user.deleted === true ||
+      user.archived === true ||
+      user.active === false ||
+      status === "disabled" ||
+      status === "deleted" ||
+      status === "archived"
   );
 }
 
@@ -77,11 +80,11 @@ export function hasSidebarUserIdentity(user = null) {
   if (!isObject(user)) return false;
 
   return Boolean(
-    user.id ||
-      user.userId ||
-      user.username ||
-      user.slug ||
-      user.email
+    text(user.id, "") ||
+      text(user.userId, "") ||
+      text(user.username, "") ||
+      text(user.slug, "") ||
+      text(user.lookup?.slug, "")
   );
 }
 
@@ -106,12 +109,11 @@ export function unwrapSidebarUser(payload = null) {
     payload.currentUser,
     payload.authUser,
     payload.sessionUser,
-    payload.me,
-    payload.account,
-    payload.profile,
     payload.session?.user,
     payload.data?.user,
-    payload.payload?.user
+    payload.payload?.user,
+    payload.me,
+    payload.account
   );
 
   if (isUsableSidebarUser(direct)) return direct;
@@ -124,35 +126,48 @@ export function unwrapSidebarUser(payload = null) {
    SOURCES
 ========================================================= */
 
-function getUserFromAuth(Auth = null) {
-  if (!Auth) return null;
-
-  const candidates = [];
+function safeCall(fn = null) {
+  if (!isFunction(fn)) return null;
 
   try {
-    if (isFunction(Auth.getUser)) candidates.push(Auth.getUser());
-    if (isFunction(Auth.getCurrentUser)) candidates.push(Auth.getCurrentUser());
-
-    candidates.push(Auth.user);
-    candidates.push(Auth.currentUser);
+    return fn();
   } catch {
-    // noop
+    return null;
   }
+}
+
+function getUserFromAuth(Auth = null) {
+  if (!isObject(Auth)) return null;
+
+  const candidates = [
+    safeCall(Auth.getUser?.bind?.(Auth) || Auth.getUser),
+    safeCall(Auth.getCurrentUser?.bind?.(Auth) || Auth.getCurrentUser),
+    Auth.user,
+    Auth.currentUser,
+    Auth.session?.user,
+    Auth.state?.user,
+  ];
 
   return candidates.map(unwrapSidebarUser).find(isUsableSidebarUser) || null;
 }
 
 function getUserFromCore(AppCore = null) {
-  const state = isObject(AppCore?.state) ? AppCore.state : {};
+  if (!isObject(AppCore)) return null;
 
-  return (
-    unwrapSidebarUser(state.user) ||
-    unwrapSidebarUser(state.currentUser) ||
-    unwrapSidebarUser(state.authUser) ||
-    unwrapSidebarUser(state.sessionUser) ||
-    unwrapSidebarUser(state.session) ||
-    unwrapSidebarUser(state)
-  );
+  const state = isObject(AppCore.state) ? AppCore.state : {};
+
+  const candidates = [
+    state.user,
+    state.currentUser,
+    state.authUser,
+    state.sessionUser,
+    state.session?.user,
+    state.auth?.user,
+    AppCore.user,
+    AppCore.currentUser,
+  ];
+
+  return candidates.map(unwrapSidebarUser).find(isUsableSidebarUser) || null;
 }
 
 export function getSidebarUserSource(context = {}) {
@@ -175,31 +190,69 @@ export function getSidebarUserSource(context = {}) {
    ROLE
 ========================================================= */
 
-export function getSidebarUserRole(context = {}) {
-  const user = context.user || getSidebarUserSource(context);
-  const AppCore = context.AppCore;
-  const Auth = context.Auth;
+function normalizeRoleValue(value = null) {
+  if (Array.isArray(value)) {
+    const roles = value
+      .map((role) => normalizeRoleValue(role))
+      .filter(Boolean);
 
-  try {
-    const authRole =
-      (isFunction(Auth?.getRole) && Auth.getRole()) ||
-      (isFunction(Auth?.getCurrentRole) && Auth.getCurrentRole());
+    if (roles.includes(SIDEBAR_ROLE_ADMIN)) return SIDEBAR_ROLE_ADMIN;
+    if (roles.includes(SIDEBAR_ROLE_USER)) return SIDEBAR_ROLE_USER;
 
-    if (authRole) return normalizeSidebarRole(authRole);
-  } catch {
-    // noop
+    return "";
   }
 
-  const role = first(
+  const role = normalizeSidebarRole(value);
+
+  if (role === SIDEBAR_ROLE_ADMIN) return SIDEBAR_ROLE_ADMIN;
+  if (role === SIDEBAR_ROLE_USER) return SIDEBAR_ROLE_USER;
+
+  return "";
+}
+
+function firstRole(...values) {
+  for (const value of values) {
+    const role = normalizeRoleValue(value);
+
+    if (role) return role;
+  }
+
+  return SIDEBAR_ROLE_USER;
+}
+
+function getRoleFromAuth(Auth = null) {
+  if (!isObject(Auth)) return "";
+
+  return firstRole(
+    safeCall(Auth.getRole?.bind?.(Auth) || Auth.getRole),
+    safeCall(Auth.getCurrentRole?.bind?.(Auth) || Auth.getCurrentRole),
+    Auth.role,
+    Auth.currentRole,
+    Auth.user?.role,
+    Auth.currentUser?.role
+  );
+}
+
+export function getSidebarUserRole(context = {}) {
+  const user =
+    unwrapSidebarUser(context.user) ||
+    getSidebarUserSource(context) ||
+    null;
+
+  const AppCore = context.AppCore || null;
+  const state = isObject(AppCore?.state) ? AppCore.state : {};
+
+  return firstRole(
     context.role,
-    AppCore?.state?.role,
     user?.role,
     user?.rol,
     user?.roles,
-    SIDEBAR_ROLE_USER
+    getRoleFromAuth(context.Auth),
+    state.role,
+    state.user?.role,
+    state.user?.rol,
+    state.user?.roles
   );
-
-  return normalizeSidebarRole(role);
 }
 
 export function isSidebarAdmin(context = {}) {
@@ -213,15 +266,21 @@ export function isSidebarAdmin(context = {}) {
 export function getSidebarDisplayName(user = null) {
   if (!isUsableSidebarUser(user)) return DEFAULT_NAME;
 
+  const profile = isObject(user.profile) ? user.profile : {};
+
   return text(
     first(
       user.displayName,
       user.fullName,
       user.name,
       user.nombre,
+      profile.displayName,
+      profile.fullName,
+      profile.name,
+      profile.nombre,
       user.username,
       user.slug,
-      user.email
+      user.lookup?.slug
     ),
     DEFAULT_NAME
   );
@@ -236,16 +295,14 @@ export function getSidebarUsername(user = null) {
       user.slug,
       user.userName,
       user.user_name,
-      user.email,
+      user.lookup?.slug,
       user.userId,
       user.id
     ),
     ""
   );
 
-  const base = raw.includes("@") ? raw.split("@")[0] : raw;
-
-  return base
+  return raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/^@+/, "")
@@ -274,14 +331,28 @@ export function getSidebarInitials(value = "") {
 export function getSidebarUser(context = {}) {
   const user = getSidebarUserSource(context);
   const hasUser = isUsableSidebarUser(user);
-  const displayName = hasUser ? getSidebarDisplayName(user) : DEFAULT_NAME;
-  const role = hasUser ? getSidebarUserRole({ ...context, user }) : SIDEBAR_ROLE_USER;
+
+  const displayName = hasUser
+    ? getSidebarDisplayName(user)
+    : DEFAULT_NAME;
+
+  const role = hasUser
+    ? getSidebarUserRole({
+        ...context,
+        user,
+      })
+    : SIDEBAR_ROLE_USER;
+
+  const id = hasUser ? text(user.id || user.userId, "") : "";
+  const userId = hasUser ? text(user.userId || user.id, "") : "";
+  const slug = hasUser ? text(user.slug || user.lookup?.slug, "") : "";
 
   return {
     hasUser,
 
-    id: hasUser ? user.id || user.userId || null : null,
-    userId: hasUser ? user.userId || user.id || null : null,
+    id: id || null,
+    userId: userId || null,
+    slug: slug || null,
 
     displayName,
     name: displayName,
@@ -291,7 +362,7 @@ export function getSidebarUser(context = {}) {
 
     role,
     roles: [role],
-    roleLabel: role === SIDEBAR_ROLE_ADMIN ? "Admin" : "Usuario",
+    roleLabel: role === SIDEBAR_ROLE_ADMIN ? "Administrador" : "Usuario",
     isAdmin: role === SIDEBAR_ROLE_ADMIN,
   };
 }

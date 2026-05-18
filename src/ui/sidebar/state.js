@@ -14,16 +14,18 @@
    - Sin indicadores.
    - Sin tooltips.
    - Sin dropdown.
+   - Sin Store propio.
    - Sin DOM propio: delega en dom.js.
 ========================================================= */
 
 import {
   getSidebarRoot,
+  isConnected,
   isElement,
   setSidebarOpenState,
 } from "./dom.js";
 
-export const SIDEBAR_STATE_VERSION = "sidebar.state.v1";
+export const SIDEBAR_STATE_VERSION = "sidebar.state.v2";
 
 /* =========================================================
    RUNTIME
@@ -45,13 +47,25 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function contextOf(value = {}) {
+  return isObject(value) ? value : {};
+}
+
 function visibleRoot(root = null) {
-  return isElement(root) && root.hidden !== true;
+  return Boolean(
+    isElement(root) &&
+      isConnected(root) &&
+      root.hidden !== true &&
+      root.getAttribute?.("aria-hidden") !== "true"
+  );
 }
 
 function resolveRoot(root = null) {
   if (isElement(root)) return root;
-  if (isElement(runtime.root)) return runtime.root;
+
+  if (isElement(runtime.root) && isConnected(runtime.root)) {
+    return runtime.root;
+  }
 
   return getSidebarRoot();
 }
@@ -78,6 +92,7 @@ function syncCoreState(AppCore = null) {
     state.sidebarOpen = runtime.open;
     state.sidebarCollapsed = !runtime.open;
     state.sidebarLogoutInFlight = runtime.logoutInFlight;
+    state.sidebarStateVersion = SIDEBAR_STATE_VERSION;
 
     return true;
   } catch {
@@ -86,16 +101,20 @@ function syncCoreState(AppCore = null) {
 }
 
 function syncRootOpen(root = null) {
-  if (!isElement(root)) return false;
+  const target = resolveRoot(root);
 
-  runtime.root = root;
-  setSidebarOpenState(root, runtime.open);
+  if (!isElement(target)) return false;
+
+  runtime.root = target;
+  setSidebarOpenState(target, runtime.open);
 
   return true;
 }
 
-function updateMounted(root = resolveRoot()) {
-  runtime.root = isElement(root) ? root : null;
+function updateMounted(root = null) {
+  const target = resolveRoot(root);
+
+  runtime.root = isElement(target) ? target : null;
   runtime.mounted = visibleRoot(runtime.root);
 
   return runtime.mounted;
@@ -107,6 +126,11 @@ function updateMounted(root = resolveRoot()) {
 
 export function setSidebarRoot(root = null, AppCore = null) {
   runtime.root = isElement(root) ? root : null;
+
+  if (runtime.root) {
+    setSidebarOpenState(runtime.root, runtime.open);
+  }
+
   runtime.mounted = visibleRoot(runtime.root);
 
   syncCoreState(AppCore);
@@ -140,7 +164,7 @@ export function setSidebarInitialized(value = true, AppCore = null) {
 }
 
 export function setSidebarMounted(value = true, AppCore = null) {
-  runtime.mounted = Boolean(value);
+  runtime.mounted = Boolean(value) && visibleRoot(resolveRoot());
 
   syncCoreState(AppCore);
 
@@ -148,8 +172,10 @@ export function setSidebarMounted(value = true, AppCore = null) {
 }
 
 export function markSidebarMounted(root = null, AppCore = null) {
-  updateMounted(root || resolveRoot());
+  const target = resolveRoot(root);
 
+  syncRootOpen(target);
+  updateMounted(target);
   syncCoreState(AppCore);
 
   return runtime.mounted;
@@ -173,13 +199,14 @@ export function getSidebarOpen() {
 }
 
 export function setSidebarOpen(open = true, context = {}) {
-  const root = resolveRoot(context.root);
+  const ctx = contextOf(context);
+  const root = resolveRoot(ctx.root);
 
   runtime.open = Boolean(open);
 
   syncRootOpen(root);
   updateMounted(root);
-  syncCoreState(context.AppCore || null);
+  syncCoreState(ctx.AppCore || null);
 
   return runtime.open;
 }
@@ -225,11 +252,12 @@ export function endSidebarLogout(AppCore = null) {
 ========================================================= */
 
 export function syncSidebarState(context = {}) {
-  const root = resolveRoot(context.root);
+  const ctx = contextOf(context);
+  const root = resolveRoot(ctx.root);
 
   syncRootOpen(root);
   updateMounted(root);
-  syncCoreState(context.AppCore || null);
+  syncCoreState(ctx.AppCore || null);
 
   return getSidebarState();
 }
@@ -253,6 +281,9 @@ export function resetSidebarState(AppCore = null) {
 export function getSidebarState() {
   const root = resolveRoot();
 
+  runtime.root = isElement(root) ? root : null;
+  runtime.mounted = visibleRoot(runtime.root);
+
   return {
     version: SIDEBAR_STATE_VERSION,
 
@@ -263,8 +294,24 @@ export function getSidebarState() {
     logoutInFlight: runtime.logoutInFlight,
 
     hasRoot: isElement(root),
+    rootConnected: isConnected(root),
     rootHidden: Boolean(root?.hidden),
+    rootAriaHidden: root?.getAttribute?.("aria-hidden") || "",
     rootOpen: root?.dataset?.open || "",
+
+    policy: {
+      runtimeOnly: true,
+      noStorage: true,
+      noEvents: true,
+      noRouter: true,
+      noAuth: true,
+      noRoutes: true,
+      noViewport: true,
+      noIndicators: true,
+      noTooltips: true,
+      noDropdown: true,
+      noOwnDom: true,
+    },
   };
 }
 

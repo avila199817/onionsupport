@@ -11,6 +11,7 @@
    - Usar state.js para estado runtime.
    - Usar actions.js para navegar/logout/open/close.
    - Usar events.js para listener delegado.
+   - Home privada compatible con /@slug.
    - Sin HTML duplicado.
    - Sin helpers DOM duplicados.
    - Sin lógica de usuario duplicada.
@@ -28,15 +29,18 @@ import { Router } from "../../router/index.js";
 import { getImmutableRoutes } from "../../router/routes.js";
 
 import {
+  HOME_ROUTE,
   SIDEBAR_BRAND_HREF,
   SIDEBAR_BRAND_LABEL,
   SIDEBAR_MODULE_KEY,
   SIDEBAR_ROLE_ADMIN,
   SIDEBAR_ROOT_ID,
+  USER_HOME_PREFIX,
   canonicalSidebarPath,
   getSidebarRouteIcon,
   getSidebarRouteLabel,
   getSidebarRouteOrder,
+  isSidebarHomeRoute,
   isSidebarPublicRoute,
   normalizeSidebarPath,
 } from "./constants.js";
@@ -106,6 +110,41 @@ function firstText(...values) {
 }
 
 /* =========================================================
+   HOME / SLUG
+========================================================= */
+
+function cleanUserSlug(value = "") {
+  const slug = firstText(value)
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+
+  return slug;
+}
+
+function userHomeHref(context = {}, fallback = SIDEBAR_BRAND_HREF) {
+  const slug = cleanUserSlug(context.user?.slug);
+
+  if (slug) {
+    return `${USER_HOME_PREFIX}${slug}`;
+  }
+
+  return normalizeSidebarPath(fallback || HOME_ROUTE);
+}
+
+function routeHref(path = "/", context = {}) {
+  const routePath = canonicalSidebarPath(path);
+
+  if (isSidebarHomeRoute(routePath)) {
+    return userHomeHref(context, HOME_ROUTE);
+  }
+
+  return normalizeSidebarPath(routePath);
+}
+
+/* =========================================================
    ROUTE / SESSION CONTEXT
 ========================================================= */
 
@@ -148,11 +187,26 @@ function getRoutes() {
 
 function getCurrentRoute(path = currentPath()) {
   const current = canonicalSidebarPath(path || "/");
+  const routes = getRoutes();
 
-  return getRoutes().find((route) => {
+  const exact = routes.find((route) => {
     if (!route?.path) return false;
     return canonicalSidebarPath(route.path) === current;
-  }) || null;
+  });
+
+  if (exact) return exact;
+
+  if (isSidebarHomeRoute(current)) {
+    return routes.find((route) => {
+      if (!route?.path) return false;
+
+      const routePath = canonicalSidebarPath(route.path);
+
+      return routePath === HOME_ROUTE || isSidebarHomeRoute(routePath);
+    }) || null;
+  }
+
+  return null;
 }
 
 function isAuthenticated() {
@@ -247,7 +301,9 @@ function isActivePath(routePath = "/", current = currentPath()) {
   const path = canonicalSidebarPath(routePath || "/");
   const active = canonicalSidebarPath(current || "/");
 
-  if (path === "/") return active === "/";
+  if (isSidebarHomeRoute(path)) {
+    return isSidebarHomeRoute(active);
+  }
 
   return active === path || active.startsWith(`${path}/`);
 }
@@ -288,14 +344,14 @@ function toSidebarItem(route = null, index = 0, context = getContext()) {
     route.meta?.icon
   );
 
-  const href = normalizeSidebarPath(path);
+  const href = routeHref(path, context);
 
   return {
     order: getSidebarRouteOrder(path, explicitOrder),
     href,
     label: getSidebarRouteLabel(path, explicitLabel),
     icon: getSidebarRouteIcon(path, explicitIcon),
-    active: isActivePath(href, context.path),
+    active: isActivePath(path, context.path),
     adminOnly,
     requiredRole: adminOnly ? SIDEBAR_ROLE_ADMIN : "",
     requiredRoles: adminOnly ? [SIDEBAR_ROLE_ADMIN] : [],
@@ -362,7 +418,7 @@ function renderSidebar(context = getContext()) {
   const nextRoot = createSidebarTemplate({
     id: SIDEBAR_ROOT_ID,
     brandLabel: SIDEBAR_BRAND_LABEL,
-    brandHref: SIDEBAR_BRAND_HREF,
+    brandHref: userHomeHref(context, SIDEBAR_BRAND_HREF),
     open: getSidebarOpen(),
     items: sidebarItems(context),
     user: context.user,
@@ -567,6 +623,7 @@ function getSnapshot() {
     logoutInFlight: getSidebarLogoutInFlight(),
 
     route: context.path,
+    homeHref: userHomeHref(context, SIDEBAR_BRAND_HREF),
     hasSession: context.hasSession,
     isAdmin: context.user?.isAdmin === true,
 
@@ -574,6 +631,7 @@ function getSnapshot() {
       ? {
           id: context.user.id,
           userId: context.user.userId,
+          slug: context.user.slug || null,
           username: context.user.username || null,
           displayName: context.user.displayName,
           role: context.user.role,

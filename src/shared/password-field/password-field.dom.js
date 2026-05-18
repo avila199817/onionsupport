@@ -11,6 +11,10 @@
    - Binding idempotente.
    - Cleanup real.
    - Sin AppCore.
+   - Sin Auth.
+   - Sin Router.
+   - Sin Store.
+   - Sin Toast.
    - Sin CSS inline.
    - Sin innerHTML.
    - Sin eventos globales.
@@ -18,24 +22,42 @@
    - Sin usar clases globales peligrosas como is-hidden.
 ========================================================= */
 
-export const PASSWORD_FIELD_DOM_VERSION = "minimal-7";
+export const PASSWORD_FIELD_DOM_VERSION = "password-field.dom.v1";
 
 const FIELD_SELECTOR = "[data-password-field]";
 
-const WRAPPER_SELECTOR =
-  "[data-password-wrapper], .password-wrapper, .login-password-wrapper, .password-reset-password-wrapper";
+const WRAPPER_SELECTOR = [
+  "[data-password-wrapper]",
+  ".password-wrapper",
+  ".login-password-wrapper",
+  ".password-reset-password-wrapper",
+].join(",");
 
-const INPUT_SELECTOR =
-  "[data-password-input], [data-login-password], input[name='password'], input[name='confirmPassword']";
+const INPUT_SELECTOR = [
+  "[data-password-input]",
+  "[data-login-password]",
+  "input[name='password']",
+  "input[name='confirmPassword']",
+].join(",");
 
-const TOGGLE_SELECTOR =
-  "[data-password-toggle], [data-login-password-toggle], .password-toggle, .login-password-toggle";
+const TOGGLE_SELECTOR = [
+  "[data-password-toggle]",
+  "[data-login-password-toggle]",
+  ".password-toggle",
+  ".login-password-toggle",
+].join(",");
 
-const ICON_SELECTOR =
-  "[data-password-toggle-icon], .password-toggle-icon";
+const ICON_SELECTOR = [
+  "[data-password-toggle-icon]",
+  ".password-toggle-icon",
+].join(",");
 
-const CAPS_SELECTOR =
-  "[data-password-caps], [data-login-caps], .password-caps, .caps-indicator";
+const CAPS_SELECTOR = [
+  "[data-password-caps]",
+  "[data-login-caps]",
+  ".password-caps",
+  ".caps-indicator",
+].join(",");
 
 const DEFAULT_SHOW_LABEL = "Mostrar contraseña";
 const DEFAULT_HIDE_LABEL = "Ocultar contraseña";
@@ -79,7 +101,7 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
-function matches(node, selector = "") {
+function matches(node = null, selector = "") {
   if (!isElement(node) || !selector) return false;
 
   try {
@@ -89,7 +111,7 @@ function matches(node, selector = "") {
   }
 }
 
-function closest(node, selector = "") {
+function closest(node = null, selector = "") {
   if (!isElement(node) || !selector) return null;
 
   try {
@@ -99,7 +121,7 @@ function closest(node, selector = "") {
   }
 }
 
-function qs(root, selector = "") {
+function qs(root = null, selector = "") {
   if (!isQueryable(root) || !selector) return null;
 
   try {
@@ -109,17 +131,17 @@ function qs(root, selector = "") {
   }
 }
 
-function qsa(root, selector = "") {
+function qsa(root = null, selector = "") {
   if (!isQueryable(root) || !selector) return [];
 
   try {
-    return Array.from(root.querySelectorAll(selector) || []);
+    return [...root.querySelectorAll(selector)].filter(isElement);
   } catch {
     return [];
   }
 }
 
-function setAttr(node, name = "", value = null) {
+function setAttr(node = null, name = "", value = null) {
   if (!isElement(node) || !name) return false;
 
   try {
@@ -135,7 +157,7 @@ function setAttr(node, name = "", value = null) {
   }
 }
 
-function setData(node, key = "", value = null) {
+function setData(node = null, key = "", value = null) {
   if (!isElement(node) || !key) return false;
 
   try {
@@ -151,7 +173,7 @@ function setData(node, key = "", value = null) {
   }
 }
 
-function toggleClass(node, className = "", active = false) {
+function toggleClass(node = null, className = "", active = false) {
   if (!isElement(node) || !className) return false;
 
   try {
@@ -162,7 +184,7 @@ function toggleClass(node, className = "", active = false) {
   }
 }
 
-function bindDom(node, eventName = "", handler = null) {
+function bindDom(node = null, eventName = "", handler = null) {
   if (!node || !eventName || !isFn(handler) || !isFn(node.addEventListener)) {
     return () => {};
   }
@@ -177,15 +199,36 @@ function bindDom(node, eventName = "", handler = null) {
 
   return () => {
     if (disposed) return;
+
     disposed = true;
 
     try {
       node.removeEventListener(eventName, handler);
-    } catch {}
+    } catch {
+      // noop
+    }
   };
 }
 
-function focusInput(input) {
+function later(callback = null) {
+  if (!isFn(callback)) return false;
+
+  try {
+    queueMicrotask(callback);
+    return true;
+  } catch {
+    // fallback abajo
+  }
+
+  try {
+    Promise.resolve().then(callback).catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function focusInput(input = null) {
   if (!isInput(input) || input.disabled) return false;
 
   try {
@@ -205,45 +248,50 @@ function focusInput(input) {
    RESOLUTION
 ========================================================= */
 
-function resolveRoot(node) {
+function resolveRoot(node = null) {
   if (!isElement(node)) return null;
 
   if (matches(node, FIELD_SELECTOR)) return node;
 
   const field = closest(node, FIELD_SELECTOR);
+
   if (field) return field;
 
   if (matches(node, WRAPPER_SELECTOR)) return node;
 
   const wrapper = closest(node, WRAPPER_SELECTOR);
+
   if (wrapper) return wrapper;
 
   return null;
 }
 
-function findInput(root) {
+function findInput(root = null) {
   if (!root) return null;
   if (isInput(root) && matches(root, INPUT_SELECTOR)) return root;
+
   return qs(root, INPUT_SELECTOR);
 }
 
-function findToggle(root) {
+function findToggle(root = null) {
   if (!root) return null;
   if (isButton(root) && matches(root, TOGGLE_SELECTOR)) return root;
+
   return qs(root, TOGGLE_SELECTOR);
 }
 
-function findIcon(toggle) {
+function findIcon(toggle = null) {
   return isButton(toggle) ? qs(toggle, ICON_SELECTOR) : null;
 }
 
-function findCaps(root) {
+function findCaps(root = null) {
   if (!root) return null;
   if (isElement(root) && matches(root, CAPS_SELECTOR)) return root;
+
   return qs(root, CAPS_SELECTOR);
 }
 
-function resolveParts(node) {
+function resolveParts(node = null) {
   const root = resolveRoot(node);
 
   if (!root) {
@@ -276,7 +324,7 @@ function validParts(parts = {}) {
   );
 }
 
-function getBinding(node) {
+function getBinding(node = null) {
   const parts = resolveParts(node);
   return parts.root ? BINDINGS.get(parts.root) || null : null;
 }
@@ -285,7 +333,7 @@ function getBinding(node) {
    PASSWORD STATE
 ========================================================= */
 
-function showLabel(toggle) {
+function showLabel(toggle = null) {
   return text(
     toggle?.dataset?.showLabel ||
       toggle?.getAttribute?.("data-show-label"),
@@ -293,7 +341,7 @@ function showLabel(toggle) {
   );
 }
 
-function hideLabel(toggle) {
+function hideLabel(toggle = null) {
   return text(
     toggle?.dataset?.hideLabel ||
       toggle?.getAttribute?.("data-hide-label"),
@@ -301,11 +349,11 @@ function hideLabel(toggle) {
   );
 }
 
-function isVisible(input) {
+function isVisible(input = null) {
   return isInput(input) && input.type === "text";
 }
 
-function setInputType(input, visible = false) {
+function setInputType(input = null, visible = false) {
   if (!isInput(input)) return false;
 
   const nextType = visible ? "text" : "password";
@@ -318,7 +366,9 @@ function setInputType(input, visible = false) {
   try {
     start = input.selectionStart;
     end = input.selectionEnd;
-  } catch {}
+  } catch {
+    // noop
+  }
 
   try {
     input.type = nextType;
@@ -330,12 +380,14 @@ function setInputType(input, visible = false) {
     if (start !== null && end !== null && isFn(input.setSelectionRange)) {
       input.setSelectionRange(start, end);
     }
-  } catch {}
+  } catch {
+    // noop
+  }
 
   return true;
 }
 
-function syncIcon(icon, visible = false) {
+function syncIcon(icon = null, visible = false) {
   if (!isElement(icon)) return false;
 
   const eye = qs(icon, ".password-eye-icon");
@@ -347,7 +399,9 @@ function syncIcon(icon, visible = false) {
   try {
     if (eye) eye.hidden = Boolean(visible);
     if (eyeOff) eyeOff.hidden = !visible;
-  } catch {}
+  } catch {
+    // noop
+  }
 
   return true;
 }
@@ -390,7 +444,7 @@ function canToggle(parts = {}) {
    CAPSLOCK STATE
 ========================================================= */
 
-function eventCapsActive(event) {
+function eventCapsActive(event = null) {
   if (!event || !isFn(event.getModifierState)) return false;
 
   try {
@@ -400,14 +454,16 @@ function eventCapsActive(event) {
   }
 }
 
-function setCapsState(caps, active = false) {
+function setCapsState(caps = null, active = false) {
   if (!isElement(caps)) return false;
 
   const enabled = Boolean(active);
 
   try {
     caps.hidden = !enabled;
-  } catch {}
+  } catch {
+    // noop
+  }
 
   if (enabled) {
     setAttr(caps, "hidden", null);
@@ -427,9 +483,11 @@ function setCapsState(caps, active = false) {
 function syncCapsFromEvent(parts = {}, event = null) {
   const { input, caps } = parts;
 
+  if (!isBrowser()) return false;
   if (!isInput(input) || !isElement(caps)) return false;
 
   const active = document.activeElement === input && eventCapsActive(event);
+
   return setCapsState(caps, active);
 }
 
@@ -441,7 +499,7 @@ function hideCaps(parts = {}) {
    SINGLE FIELD
 ========================================================= */
 
-export function bindPasswordField(fieldRoot) {
+export function bindPasswordField(fieldRoot = null) {
   if (!isBrowser() || !isElement(fieldRoot)) return null;
 
   const parts = resolveParts(fieldRoot);
@@ -464,6 +522,7 @@ export function bindPasswordField(fieldRoot) {
     if (destroyed) return false;
 
     const changed = setInputType(input, Boolean(visible));
+
     syncPasswordState(parts);
 
     if (options.focus !== false) {
@@ -486,7 +545,9 @@ export function bindPasswordField(fieldRoot) {
   function onToggleClick(event) {
     try {
       event?.preventDefault?.();
-    } catch {}
+    } catch {
+      // noop
+    }
 
     toggleVisibility({ focus: true });
   }
@@ -500,13 +561,15 @@ export function bindPasswordField(fieldRoot) {
   }
 
   function onFormReset() {
-    try {
-      window.setTimeout(() => {
-        if (destroyed) return;
-        setVisible(false, { focus: false });
-        hideCaps(parts);
-      }, 0);
-    } catch {}
+    later(() => {
+      if (destroyed) return;
+
+      setVisible(false, {
+        focus: false,
+      });
+
+      hideCaps(parts);
+    });
   }
 
   disposers.push(bindDom(toggle, "click", onToggleClick));
@@ -519,6 +582,7 @@ export function bindPasswordField(fieldRoot) {
   }
 
   const form = closest(input, "form");
+
   if (form) {
     disposers.push(bindDom(form, "reset", onFormReset));
   }
@@ -582,14 +646,18 @@ export function bindPasswordField(fieldRoot) {
         setInputType(input, false);
         syncPasswordState(parts);
         hideCaps(parts);
-      } catch {}
+      } catch {
+        // noop
+      }
 
       destroyed = true;
 
       while (disposers.length) {
         try {
           disposers.pop()?.();
-        } catch {}
+        } catch {
+          // noop
+        }
       }
 
       setData(root, BOUND_DATA_KEY, null);
@@ -646,7 +714,7 @@ function collectFieldRoots(scope = null) {
   const output = [];
   const seen = new Set();
 
-  function add(node) {
+  function add(node = null) {
     if (!isElement(node)) return;
 
     const parts = resolveParts(node);
@@ -658,7 +726,10 @@ function collectFieldRoots(scope = null) {
     output.push(parts.root);
   }
 
-  if (isElement(root) && (matches(root, FIELD_SELECTOR) || matches(root, WRAPPER_SELECTOR))) {
+  if (
+    isElement(root) &&
+    (matches(root, FIELD_SELECTOR) || matches(root, WRAPPER_SELECTOR))
+  ) {
     add(root);
   }
 
@@ -681,7 +752,7 @@ export function bindPasswordFieldsInScope(scope = null) {
     .filter(Boolean);
 }
 
-export function unbindPasswordField(fieldRoot) {
+export function unbindPasswordField(fieldRoot = null) {
   const binding = getBinding(fieldRoot);
   return binding ? binding.destroy() : false;
 }
@@ -698,7 +769,7 @@ export function unbindPasswordFieldsInScope(scope = null) {
   return count;
 }
 
-export function isPasswordFieldBound(fieldRoot) {
+export function isPasswordFieldBound(fieldRoot = null) {
   const binding = getBinding(fieldRoot);
   return Boolean(binding && binding.destroyed !== true);
 }
@@ -719,14 +790,31 @@ export function getPasswordFieldSnapshot(fieldRoot = null) {
 
   return {
     version: PASSWORD_FIELD_DOM_VERSION,
+
     bound: binding.destroyed !== true,
     visible: Boolean(binding.visible),
+
     hasInput: Boolean(binding.input),
     hasToggle: Boolean(binding.toggle),
     hasCaps: Boolean(binding.capsIndicator),
+
     inputType: text(binding.input?.type, ""),
     togglePressed: text(binding.toggle?.getAttribute?.("aria-pressed"), ""),
     capsActive: binding.capsIndicator?.dataset?.[CAPS_DATA_KEY] === "true",
+
+    policy: {
+      domOnly: true,
+      noAppCore: true,
+      noAuth: true,
+      noRouter: true,
+      noStore: true,
+      noToast: true,
+      noInnerHTML: true,
+      noGlobalEvents: true,
+      noSvgRecreation: true,
+      idempotent: true,
+      cleanupReal: true,
+    },
   };
 }
 

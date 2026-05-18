@@ -4,7 +4,7 @@
 
    Responsabilidad:
    - Construir el DOM del sidebar.
-   - Exponer una estructura estable para CSS premium SaaS.
+   - Exponer estructura estable para CSS SaaS.
    - Recibir datos ya normalizados desde index.js/user.js.
    - No navegar.
    - No leer sesión.
@@ -34,7 +34,7 @@ import {
 export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v1";
 
 /* =========================================================
-   ICON PATHS
+   ICONS
 ========================================================= */
 
 const ICON_PATHS = Object.freeze({
@@ -84,18 +84,32 @@ function classNames(...values) {
     .join(" ");
 }
 
-function appendChildren(parent = null, children = []) {
-  if (!parent) return parent;
+function cleanAttrs(attrs = {}) {
+  const output = {};
 
-  for (const child of Array.isArray(children) ? children : []) {
-    if (child) parent.appendChild(child);
+  for (const [key, value] of Object.entries(attrs || {})) {
+    if (!key) continue;
+    if (value === null || value === undefined || value === false) continue;
+
+    output[key] = value === true ? "true" : value;
   }
 
-  return parent;
+  return output;
+}
+
+function roleText(value = "") {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => text(item, ""))
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  return text(value, "");
 }
 
 /* =========================================================
-   NORMALIZE INPUT
+   NORMALIZE
 ========================================================= */
 
 function normalizeItem(item = {}) {
@@ -107,15 +121,15 @@ function normalizeItem(item = {}) {
     href,
     label,
     icon,
+
     active: item.active === true,
     disabled: item.disabled === true,
     hidden: item.hidden === true,
-    badge: text(item.badge, ""),
     adminOnly: item.adminOnly === true,
+
+    badge: text(item.badge, ""),
     requiredRole: text(item.requiredRole, ""),
-    requiredRoles: Array.isArray(item.requiredRoles)
-      ? item.requiredRoles.filter(Boolean).join(" ")
-      : text(item.requiredRoles, ""),
+    requiredRoles: roleText(item.requiredRoles),
   };
 }
 
@@ -135,6 +149,8 @@ export function createSidebarIcon(
   name = SIDEBAR_ICONS.home,
   className = "sidebar-icon"
 ) {
+  if (!isBrowser()) return null;
+
   const iconName = normalizeSidebarIcon(name);
   const pathData = ICON_PATHS[iconName] || ICON_PATHS.home;
 
@@ -158,6 +174,23 @@ export function createSidebarIcon(
   svg.appendChild(path);
 
   return svg;
+}
+
+function createIconSlot(className = "", iconName = SIDEBAR_ICONS.home, svgClass = "") {
+  const slot = createElement("span", {
+    className,
+    attrs: {
+      "aria-hidden": "true",
+    },
+  });
+
+  const icon = createSidebarIcon(iconName, svgClass);
+
+  if (icon) {
+    slot.appendChild(icon);
+  }
+
+  return slot;
 }
 
 /* =========================================================
@@ -187,21 +220,17 @@ export function createSidebarHeader(options = {}) {
     },
   });
 
-  const brandIcon = createElement("span", {
-    className: SIDEBAR_CLASSES.brandIcon,
-    attrs: {
-      "aria-hidden": "true",
-    },
-  });
-
-  brandIcon.appendChild(createSidebarIcon(SIDEBAR_ICONS.brand, "sidebar-brand-svg"));
-
-  const brandText = createElement("span", {
-    className: SIDEBAR_CLASSES.brandText,
-    textContent: brandLabel,
-  });
-
-  brand.append(brandIcon, brandText);
+  brand.append(
+    createIconSlot(
+      SIDEBAR_CLASSES.brandIcon,
+      SIDEBAR_ICONS.brand,
+      "sidebar-brand-svg"
+    ),
+    createElement("span", {
+      className: SIDEBAR_CLASSES.brandText,
+      textContent: brandLabel,
+    })
+  );
 
   const toggle = createElement("button", {
     className: SIDEBAR_CLASSES.toggle,
@@ -213,7 +242,11 @@ export function createSidebarHeader(options = {}) {
     },
   });
 
-  toggle.appendChild(createSidebarIcon(SIDEBAR_ICONS.menu, "sidebar-toggle-svg"));
+  const toggleIcon = createSidebarIcon(SIDEBAR_ICONS.menu, "sidebar-toggle-svg");
+
+  if (toggleIcon) {
+    toggle.appendChild(toggleIcon);
+  }
 
   header.append(brand, toggle);
 
@@ -240,9 +273,9 @@ export function createSidebarNav(items = []) {
   for (const rawItem of Array.isArray(items) ? items : []) {
     const item = normalizeItem(rawItem);
 
-    if (item.hidden) continue;
-
-    list.appendChild(createSidebarNavItem(item));
+    if (!item.hidden) {
+      list.appendChild(createSidebarNavItem(item));
+    }
   }
 
   nav.appendChild(list);
@@ -263,38 +296,38 @@ export function createSidebarNavItem(rawItem = {}) {
       item.active ? SIDEBAR_CLASSES.active : "",
       item.disabled ? SIDEBAR_CLASSES.disabled : ""
     ),
-    attrs: {
+    attrs: cleanAttrs({
       href: item.href,
+
       [SIDEBAR_ATTRS.spa]: "",
       [SIDEBAR_ATTRS.link]: "true",
       [SIDEBAR_ATTRS.navLink]: "true",
       [SIDEBAR_ATTRS.route]: item.href,
       [SIDEBAR_ATTRS.active]: item.active ? "true" : "false",
       [SIDEBAR_ATTRS.disabled]: item.disabled ? "true" : "false",
+
       "aria-current": item.active ? "page" : null,
       "aria-disabled": item.disabled ? "true" : null,
+
       "data-admin-only": item.adminOnly ? "true" : null,
       "data-required-role": item.requiredRole || null,
       "data-required-roles": item.requiredRoles || null,
+
       tabindex: item.disabled ? "-1" : null,
-    },
+    }),
   });
 
-  const icon = createElement("span", {
-    className: SIDEBAR_CLASSES.linkIcon,
-    attrs: {
-      "aria-hidden": "true",
-    },
-  });
-
-  icon.appendChild(createSidebarIcon(item.icon, "sidebar-link-svg"));
-
-  const label = createElement("span", {
-    className: SIDEBAR_CLASSES.linkLabel,
-    textContent: item.label,
-  });
-
-  link.append(icon, label);
+  link.append(
+    createIconSlot(
+      SIDEBAR_CLASSES.linkIcon,
+      item.icon,
+      "sidebar-link-svg"
+    ),
+    createElement("span", {
+      className: SIDEBAR_CLASSES.linkLabel,
+      textContent: item.label,
+    })
+  );
 
   if (item.badge) {
     link.appendChild(
@@ -343,17 +376,17 @@ export function createSidebarFooter(user = {}) {
     className: SIDEBAR_CLASSES.userInfo,
   });
 
-  const name = createElement("div", {
-    className: SIDEBAR_CLASSES.userName,
-    textContent: normalizedUser.name,
-  });
+  info.append(
+    createElement("div", {
+      className: SIDEBAR_CLASSES.userName,
+      textContent: normalizedUser.name,
+    }),
+    createElement("div", {
+      className: SIDEBAR_CLASSES.userRole,
+      textContent: normalizedUser.roleLabel,
+    })
+  );
 
-  const role = createElement("div", {
-    className: SIDEBAR_CLASSES.userRole,
-    textContent: normalizedUser.roleLabel,
-  });
-
-  info.append(name, role);
   userBox.append(avatar, info);
 
   const logout = createElement("button", {
@@ -365,21 +398,18 @@ export function createSidebarFooter(user = {}) {
     },
   });
 
-  const logoutIcon = createElement("span", {
-    className: SIDEBAR_CLASSES.logoutIcon,
-    attrs: {
-      "aria-hidden": "true",
-    },
-  });
+  logout.append(
+    createIconSlot(
+      SIDEBAR_CLASSES.logoutIcon,
+      SIDEBAR_ICONS.logout,
+      "sidebar-logout-svg"
+    ),
+    createElement("span", {
+      className: SIDEBAR_CLASSES.logoutLabel,
+      textContent: "Salir",
+    })
+  );
 
-  logoutIcon.appendChild(createSidebarIcon(SIDEBAR_ICONS.logout, "sidebar-logout-svg"));
-
-  const logoutLabel = createElement("span", {
-    className: SIDEBAR_CLASSES.logoutLabel,
-    textContent: "Salir",
-  });
-
-  logout.append(logoutIcon, logoutLabel);
   footer.append(userBox, logout);
 
   return footer;
@@ -412,15 +442,15 @@ export function createSidebarTemplate(options = {}) {
     },
   });
 
-  appendChildren(sidebar, [
+  sidebar.append(
     createSidebarHeader({
       brandLabel: options.brandLabel,
       brandHref: options.brandHref,
       open,
     }),
     createSidebarNav(options.items),
-    createSidebarFooter(options.user),
-  ]);
+    createSidebarFooter(options.user)
+  );
 
   return sidebar;
 }

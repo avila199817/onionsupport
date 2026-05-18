@@ -72,7 +72,17 @@ function setAppState(state = "booting") {
   return true;
 }
 
-async function call(target, names = [], payload = {}) {
+function safeCall(fn, ...args) {
+  if (typeof fn !== "function") return null;
+
+  try {
+    return fn(...args);
+  } catch {
+    return null;
+  }
+}
+
+async function callFirst(target, names = [], payload = {}) {
   for (const name of names) {
     if (typeof target?.[name] === "function") {
       return target[name](payload);
@@ -84,10 +94,44 @@ async function call(target, names = [], payload = {}) {
 
 async function tryCall(target, names = [], payload = {}) {
   try {
-    return await call(target, names, payload);
+    return await callFirst(target, names, payload);
   } catch {
     return null;
   }
+}
+
+/* =========================================================
+   LOADER / SHELL SAFE
+========================================================= */
+
+function safeShowLoader() {
+  safeCall(showLoader);
+}
+
+function safeHideLoader() {
+  safeCall(hideLoader);
+}
+
+function safeForceHideLoader() {
+  safeCall(forceHideLoader);
+}
+
+function safeMarkShellBusy() {
+  safeCall(markShellBusy);
+}
+
+function safeMarkShellReady() {
+  safeCall(markShellReady);
+}
+
+function safeUpdateShell() {
+  safeCall(updateShellVisibilityByRoute, AppCore, Router);
+}
+
+function safeShowFatalShell() {
+  safeCall(setShellVisibility, null, true);
+  safeMarkShellReady();
+  safeForceHideLoader();
 }
 
 /* =========================================================
@@ -152,28 +196,17 @@ async function syncChrome(payload = {}) {
 
 function renderFatal() {
   setAppState("fatal");
-
-  try {
-    setShellVisibility(null, true);
-  } catch {
-    // noop
-  }
-
-  try {
-    markShellReady();
-  } catch {
-    // noop
-  }
-
-  forceHideLoader();
+  safeShowFatalShell();
 
   if (!isBrowser()) return false;
 
   const root =
-    getViewContainer?.() ||
+    safeCall(getViewContainer) ||
     document.getElementById("view-container") ||
     document.getElementById("app-content") ||
-    document.getElementById("main-content");
+    document.getElementById("main-content") ||
+    document.body ||
+    null;
 
   if (!root) return false;
 
@@ -187,7 +220,12 @@ function renderFatal() {
   const text = document.createElement("p");
   text.textContent = "No se pudo iniciar Onion Support.";
 
-  section.append(title, text);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Recargar";
+  button.addEventListener("click", () => window.location.reload());
+
+  section.append(title, text, button);
   root.replaceChildren(section);
 
   return true;
@@ -204,8 +242,8 @@ async function runBoot(options = {}) {
   };
 
   setAppState("booting");
-  markShellBusy();
-  showLoader();
+  safeMarkShellBusy();
+  safeShowLoader();
 
   await tryCall(AppCore, ["init", "boot", "start"], payload);
 
@@ -233,13 +271,14 @@ async function runBoot(options = {}) {
 
   await renderRoute();
 
-  updateShellVisibilityByRoute(AppCore, Router);
+  safeUpdateShell();
 
   await initChrome(payload);
   await syncChrome(payload);
 
-  markShellReady();
-  hideLoader();
+  safeUpdateShell();
+  safeMarkShellReady();
+  safeHideLoader();
 
   setAppState("ready");
   ready = true;

@@ -4,10 +4,11 @@
 
    Responsabilidad:
    - Bridge mínimo Router → Shell DOM.
-   - Limpiar slots dinámicos mínimos.
+   - Limpiar tablehead.
    - Aplicar document.title.
    - Marcar menú activo.
    - Mostrar/ocultar chrome según route.hideShell.
+   - Mantener app-shell visible.
    - Sin Auth.
    - Sin guards.
    - Sin render de vistas.
@@ -30,12 +31,9 @@ const ROOT_LOADING_CLASSES = ["app-loading", "app-booting", "loading"];
 
 const MENU_SELECTOR = [
   "a[data-spa]",
+  "a[data-sidebar-nav-link]",
   "a[href][data-route]",
-  "a[href][data-nav-route]",
-  "a[href][data-menu-route]",
   "[data-route]",
-  "[data-nav-route]",
-  "[data-menu-route]",
   "[data-sidebar-route]",
 ].join(",");
 
@@ -59,6 +57,9 @@ function text(value = "", fallback = "") {
 function normalizePath(path = "/") {
   let value = text(path, "/");
 
+  if (value.startsWith("#/")) value = value.slice(1);
+  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
+
   try {
     if (/^https?:\/\//i.test(value)) {
       const url = new URL(value, isBrowser() ? window.location.origin : "http://localhost");
@@ -67,9 +68,6 @@ function normalizePath(path = "/") {
   } catch {
     // noop
   }
-
-  if (value.startsWith("#/")) value = value.slice(1);
-  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
 
   if (!value.startsWith("/")) value = `/${value}`;
 
@@ -82,18 +80,18 @@ function canonicalPath(path = "/") {
   let value = normalizePath(path).split("?")[0].split("#")[0] || "/";
 
   if (value.length > 1) {
-    value = value.replace(/\/+$/g, "");
+    value = value.replace(/\/+$/g, "") || "/";
   }
 
-  return value || "/";
-}
-
-function safeTitle(value = "") {
-  return text(value, APP_NAME).slice(0, 140);
+  return value;
 }
 
 function appName(AppCore = null) {
-  return text(AppCore?.config?.appName, APP_NAME);
+  return text(AppCore?.config?.appName || AppCore?.config?.name, APP_NAME);
+}
+
+function safeTitle(value = "") {
+  return text(value, APP_NAME).replace(/\s+/g, " ").slice(0, 140);
 }
 
 /* =========================================================
@@ -264,13 +262,21 @@ export function getShellElements(AppCore = null) {
   const main = query("#main-content");
   const appContent = query("#app-content");
   const viewContainer = query("#view-container");
+
   const sidebarMount = query("#sidebar-mount");
   const topbarMount = query("#topbar-mount");
+
   const sidebar = query("#app-sidebar") || query("#sidebar") || query("[data-sidebar-root]");
   const topbar = query("#app-topbar") || query("#topbar") || query("[data-topbar-root]");
+
   const tablehead = query("#table-head");
   const tableheadContainer = query("#tablehead-container");
-  const mobileToggle = query("#toggleSidebarMobile") || query("[data-sidebar-mobile-toggle]");
+
+  const mobileToggle =
+    query("#toggleSidebarMobile") ||
+    query("[data-topbar-sidebar-toggle]") ||
+    query("[data-sidebar-mobile-toggle]");
+
   const loader = query("#app-loader");
 
   cacheDom(AppCore, "html", html);
@@ -330,10 +336,6 @@ export function clearDynamicContainers(AppCore = null) {
     changed = true;
   }
 
-  for (const node of queryAll("[data-router-dynamic], [data-dynamic-slot], [data-tablehead-dynamic]")) {
-    changed = clearNode(node) || changed;
-  }
-
   return changed;
 }
 
@@ -342,24 +344,11 @@ export function clearDynamicContainers(AppCore = null) {
 ========================================================= */
 
 export function setDocumentTitle(AppCore = null, title = "") {
+  if (!isBrowser()) return false;
+
   const name = appName(AppCore);
   const cleanTitle = safeTitle(title || name);
   const finalTitle = cleanTitle === name ? name : `${cleanTitle} · ${name}`;
-
-  try {
-    if (typeof AppCore?.setDocumentTitle === "function") {
-      AppCore.setDocumentTitle(cleanTitle, {
-        finalTitle,
-        source: SOURCE,
-      });
-
-      return true;
-    }
-  } catch {
-    // noop
-  }
-
-  if (!isBrowser()) return false;
 
   try {
     document.title = finalTitle;
@@ -373,15 +362,13 @@ export function setDocumentTitle(AppCore = null, title = "") {
    ACTIVE MENU
 ========================================================= */
 
-function linkPath(link) {
+function linkPath(link = null) {
   if (!link) return "";
 
   for (const attr of [
     "data-canonical-path",
     "data-route-path",
     "data-route",
-    "data-nav-route",
-    "data-menu-route",
     "data-sidebar-route",
     "href",
   ]) {
@@ -393,10 +380,10 @@ function linkPath(link) {
   return "";
 }
 
-function isExternalHref(href = "") {
+function isIgnoredHref(href = "") {
   const value = text(href, "");
 
-  if (!value) return false;
+  if (!value) return true;
   if (value.startsWith("#")) return true;
   if (value.startsWith("mailto:") || value.startsWith("tel:")) return true;
   if (value.startsWith("//")) return true;
@@ -412,15 +399,15 @@ function isExternalHref(href = "") {
   return false;
 }
 
-function activeParent(link) {
+function activeParent(link = null) {
   try {
-    return link.closest("[data-menu-item], [data-sidebar-item], .menu-item, .nav-item, li");
+    return link?.closest?.("[data-menu-item], [data-sidebar-item], .menu-item, .nav-item, li") || null;
   } catch {
     return null;
   }
 }
 
-function setActive(node, active = false) {
+function setActive(node = null, active = false) {
   if (!node) return false;
 
   for (const className of ACTIVE_CLASSES) {
@@ -443,13 +430,16 @@ export function setActiveMenu(_AppCore = null, pathname = "/") {
     setActive(link, false);
 
     const parent = activeParent(link);
-    if (parent && parent !== link) setActive(parent, false);
+
+    if (parent && parent !== link) {
+      setActive(parent, false);
+    }
   }
 
   for (const link of links) {
     const href = linkPath(link);
 
-    if (!href || isExternalHref(href)) continue;
+    if (isIgnoredHref(href)) continue;
 
     const candidate = canonicalPath(href);
 
@@ -458,7 +448,10 @@ export function setActiveMenu(_AppCore = null, pathname = "/") {
     setActive(link, true);
 
     const parent = activeParent(link);
-    if (parent && parent !== link) setActive(parent, true);
+
+    if (parent && parent !== link) {
+      setActive(parent, true);
+    }
   }
 
   return true;
@@ -473,20 +466,13 @@ function routePath(route = null) {
 }
 
 function routeHidesChrome(route = null) {
-  const meta = isObject(route?.meta) ? route.meta : {};
-
   return Boolean(
     route?.hideShell === true ||
       route?.shell === false ||
       route?.showShell === false ||
       route?.layout === "auth" ||
       route?.authScreen === true ||
-      route?.public === true ||
-      meta.hideShell === true ||
-      meta.shell === false ||
-      meta.showShell === false ||
-      meta.layout === "auth" ||
-      meta.authScreen === true
+      route?.public === true
   );
 }
 
@@ -510,17 +496,23 @@ function applyRootState(elements, { chromeHidden = false, mode = "app", route = 
 
     toggleClass(root, "route-auth", chromeHidden);
     toggleClass(root, "route-app", !chromeHidden);
-    toggleClass(root, "shell-hidden", chromeHidden);
-    toggleClass(root, "shell-visible", !chromeHidden);
+    toggleClass(root, "shell-hidden", false);
+    toggleClass(root, "shell-visible", true);
 
+    setData(root, "appLoading", "false");
+    setData(root, "appBooting", "false");
     setData(root, "routeMode", mode);
     setData(root, "chrome", chromeHidden ? "hidden" : "visible");
+    setData(root, "shell", "visible");
+    setData(root, "shellState", "ready");
     setData(root, "currentRoute", route);
-    setData(root, "appLoading", "false");
   }
 
+  setHidden(shell, false);
   setData(shell, "routeMode", mode);
   setData(shell, "chrome", chromeHidden ? "hidden" : "visible");
+  setData(shell, "shell", "visible");
+  setData(shell, "shellState", "ready");
   setData(shell, "currentRoute", route);
 }
 
@@ -539,7 +531,8 @@ function applyChrome(elements, hidden = false) {
     setAttr(elements.mobileToggle, "aria-expanded", "false");
   }
 
-  const showTablehead = !hidden && Boolean(elements.tableheadContainer?.childElementCount);
+  const hasTablehead = Boolean(elements.tableheadContainer?.childElementCount);
+  const showTablehead = !hidden && hasTablehead;
 
   setHidden(elements.tablehead, !showTablehead);
   setHidden(elements.tableheadContainer, hidden || !showTablehead);
@@ -579,21 +572,26 @@ export function setShellMode(AppCore = null, route = null) {
 
   const patch = syncState(AppCore, {
     appShellVisible: true,
-    shellVisible: !chromeHidden,
-    shellHidden: chromeHidden,
-    routeShellHidden: chromeHidden,
+
+    shellVisible: true,
+    shellHidden: false,
+    routeShellHidden: false,
+
     chromeVisible: !chromeHidden,
     chromeHidden,
+
     authScreen: chromeHidden,
     routeMode: mode,
     currentShellRoute: path,
   });
 
   return {
-    hidden: chromeHidden,
-    visible: !chromeHidden,
+    hidden: false,
+    visible: true,
+
     chromeHidden,
     chromeVisible: !chromeHidden,
+
     authScreen: chromeHidden,
     mode,
     route: path,
@@ -605,7 +603,7 @@ export function setShellMode(AppCore = null, route = null) {
    SNAPSHOT
 ========================================================= */
 
-function elementSnapshot(node) {
+function elementSnapshot(node = null) {
   if (!node) {
     return {
       exists: false,
@@ -633,8 +631,11 @@ export function getShellSnapshot(AppCore = null) {
     publicPath: text(AppCore?.state?.publicPath, ""),
 
     shellVisible: AppCore?.state?.shellVisible ?? null,
+    shellHidden: AppCore?.state?.shellHidden ?? null,
+
     chromeVisible: AppCore?.state?.chromeVisible ?? null,
     chromeHidden: AppCore?.state?.chromeHidden ?? null,
+
     authScreen: AppCore?.state?.authScreen ?? null,
     routeMode: AppCore?.state?.routeMode || null,
 
@@ -662,8 +663,8 @@ export function getShellSnapshot(AppCore = null) {
       ownHistory: false,
       ownStorage: false,
       ownToast: false,
-      noRoutesHardcoded: true,
       shellOnly: true,
+      chromeOnlyForAuth: true,
       eventless: true,
     },
   };

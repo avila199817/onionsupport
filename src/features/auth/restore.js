@@ -17,7 +17,7 @@
    - Sin Router.
    - Sin Toast.
    - Sin AppCore directo.
-   - Sin storage.
+   - Sin storage directo.
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
@@ -34,7 +34,7 @@ import {
   getCurrentUserHomePath,
 } from "./session.js";
 
-export const RESTORE_VERSION = "auth.restore.v1";
+export const RESTORE_VERSION = "auth.restore.v2";
 
 const ME_ENDPOINT = "/api/auth/me";
 
@@ -134,6 +134,15 @@ function authErrorStatus(error = null) {
   );
 }
 
+function authErrorCode(error = null) {
+  return (
+    error?.code ||
+    error?.data?.code ||
+    error?.response?.data?.code ||
+    null
+  );
+}
+
 function extractMessage(error = null) {
   return (
     text(error?.data?.message, "") ||
@@ -161,11 +170,7 @@ function normalizeRestoreError(error = null) {
 
   return createRestoreError(extractMessage(error), {
     status: status || 500,
-    code:
-      error?.code ||
-      error?.data?.code ||
-      error?.response?.data?.code ||
-      "AUTH_RESTORE_FAILED",
+    code: authErrorCode(error) || "AUTH_RESTORE_FAILED",
   });
 }
 
@@ -183,8 +188,13 @@ function rememberError(type = "restore", error = null) {
   return finalError;
 }
 
+function isAuthFailure(error = null) {
+  const status = authErrorStatus(error);
+  return status === 401 || status === 403;
+}
+
 /* =========================================================
-   SNAPSHOT
+   SNAPSHOT / RESULT
 ========================================================= */
 
 function sessionSnapshot(extra = {}) {
@@ -196,6 +206,11 @@ function sessionSnapshot(extra = {}) {
     snapshot = {};
   }
 
+  const homePath =
+    snapshot.homePath ||
+    getCurrentUserHomePath?.() ||
+    "/";
+
   return {
     version: RESTORE_VERSION,
 
@@ -206,9 +221,9 @@ function sessionSnapshot(extra = {}) {
     user: snapshot.user || null,
 
     userSlug: snapshot.userSlug || getCurrentUserSlug?.() || null,
-    homePath: snapshot.homePath || getCurrentUserHomePath?.() || "/",
-    defaultHome: snapshot.defaultHome || snapshot.homePath || getCurrentUserHomePath?.() || "/",
-    postLoginTarget: snapshot.postLoginTarget || snapshot.homePath || getCurrentUserHomePath?.() || null,
+    homePath,
+    defaultHome: snapshot.defaultHome || homePath,
+    postLoginTarget: snapshot.postLoginTarget || homePath || null,
 
     role: snapshot.role || currentUser()?.role || null,
     roles: Array.isArray(snapshot.roles) ? snapshot.roles : [],
@@ -227,13 +242,61 @@ function restoreResult(source = "state") {
   return {
     ok: Boolean(snapshot.authenticated),
     authenticated: Boolean(snapshot.authenticated),
+
     user: snapshot.user || null,
 
     userSlug: snapshot.userSlug || null,
     homePath: snapshot.homePath || "/",
+    defaultHome: snapshot.defaultHome || snapshot.homePath || "/",
     postLoginTarget: snapshot.postLoginTarget || snapshot.homePath || null,
 
     snapshot,
+    source,
+  };
+}
+
+function emptyRestoreResult(source = "empty") {
+  return {
+    ok: false,
+    authenticated: false,
+
+    user: null,
+    userSlug: null,
+
+    homePath: "/",
+    defaultHome: "/",
+    postLoginTarget: null,
+
+    snapshot: sessionSnapshot({
+      source,
+      eventMode: "restore",
+    }),
+
+    source,
+  };
+}
+
+function failedRestoreResult(error = null, source = "error") {
+  const finalError = normalizeRestoreError(error);
+
+  return {
+    ok: false,
+    authenticated: false,
+
+    user: null,
+    userSlug: null,
+
+    homePath: "/",
+    defaultHome: "/",
+    postLoginTarget: null,
+
+    error: finalError,
+
+    snapshot: sessionSnapshot({
+      source,
+      eventMode: "restore",
+    }),
+
     source,
   };
 }
@@ -310,7 +373,7 @@ function applyMeResponse(response = {}, token = "", options = {}) {
     }
   );
 
-  if (!isAuthenticated()) {
+  if (!snapshot?.authenticated && !isAuthenticated()) {
     throw createRestoreError("No se pudo resolver una sesión válida desde /me.", {
       status: 401,
       code: "ME_SESSION_INVALID",
@@ -399,19 +462,7 @@ export async function restoreSession(options = {}) {
         runtime.lastRestoreAt = Date.now();
         runtime.lastError = null;
 
-        return {
-          ok: false,
-          authenticated: false,
-          user: null,
-          userSlug: null,
-          homePath: "/",
-          postLoginTarget: null,
-          snapshot: sessionSnapshot({
-            source: "empty",
-            eventMode: "restore",
-          }),
-          source: "empty",
-        };
+        return emptyRestoreResult("empty");
       }
 
       const result = await fetchMe(options);
@@ -425,26 +476,12 @@ export async function restoreSession(options = {}) {
       };
     } catch (error) {
       const finalError = rememberError("restore", error);
-      const status = authErrorStatus(finalError);
 
-      if (status === 401 || status === 403) {
+      if (isAuthFailure(finalError)) {
         clearInvalidSession(options);
       }
 
-      return {
-        ok: false,
-        authenticated: false,
-        user: null,
-        userSlug: null,
-        homePath: "/",
-        postLoginTarget: null,
-        error: finalError,
-        snapshot: sessionSnapshot({
-          source: "error",
-          eventMode: "restore",
-        }),
-        source: "error",
-      };
+      return failedRestoreResult(finalError, "error");
     } finally {
       runtime.restoring = false;
       runtime.restorePromise = null;
@@ -476,26 +513,12 @@ export const restoreUsingRefreshPreferred = refreshSession;
 
 export async function restoreAfterMeFailure(_sessionArg, error, options = {}) {
   const finalError = normalizeRestoreError(error);
-  const status = authErrorStatus(finalError);
 
-  if (status === 401 || status === 403) {
+  if (isAuthFailure(finalError)) {
     clearInvalidSession(options);
   }
 
-  return {
-    ok: false,
-    authenticated: false,
-    user: null,
-    userSlug: null,
-    homePath: "/",
-    postLoginTarget: null,
-    error: finalError,
-    snapshot: sessionSnapshot({
-      source: "me-failed",
-      eventMode: "restore",
-    }),
-    source: "me-failed",
-  };
+  return failedRestoreResult(finalError, "me-failed");
 }
 
 /* =========================================================
@@ -527,9 +550,21 @@ export function getRestoreSnapshot() {
 
     userSlug: snapshot.userSlug || null,
     homePath: snapshot.homePath || "/",
+    defaultHome: snapshot.defaultHome || snapshot.homePath || "/",
     postLoginTarget: snapshot.postLoginTarget || null,
 
     endpoint: ME_ENDPOINT,
+
+    policy: {
+      noRouter: true,
+      noToast: true,
+      noRefreshAuto: true,
+      noFetchOwn: true,
+      noStorageDirect: true,
+      restoresViaMe: true,
+      noSlugFabrication: true,
+      no2fa: true,
+    },
   };
 }
 

@@ -12,6 +12,7 @@
    - Sin DOM hacks.
    - Sin refresh.
    - Sin navegación.
+   - Sin eventos propios.
    - Sin storage.clear().
    - Sin helpers externos.
    - Sin constants externos.
@@ -19,16 +20,22 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
-import CoreHttp from "../../core/http.js";
+import * as CoreHttpModule from "../../core/http.js";
 
 import {
   clearSessionLocal,
 } from "./session.js";
 
-export const AUTH_LOGOUT_VERSION = "simple";
+export const AUTH_LOGOUT_VERSION = "auth.logout.v2";
 
 const SOURCE = "auth.logout";
 const LOGOUT_ENDPOINT = "/api/auth/logout";
+
+const CoreHttp =
+  CoreHttpModule.default ||
+  CoreHttpModule.Http ||
+  CoreHttpModule.http ||
+  CoreHttpModule;
 
 let logoutPromise = null;
 let logoutSequence = 0;
@@ -51,7 +58,11 @@ function text(value = "", fallback = "") {
 }
 
 function nowIso() {
-  return new Date().toISOString();
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
 }
 
 function readState() {
@@ -61,6 +72,7 @@ function readState() {
 function redact(value = "") {
   return text(value, "")
     .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -76,9 +88,9 @@ function statusOf(value = null) {
 
 function extractMessage(error = null) {
   return (
-    error?.data?.message ||
-    error?.response?.data?.message ||
-    error?.message ||
+    text(error?.data?.message, "") ||
+    text(error?.response?.data?.message, "") ||
+    text(error?.message, "") ||
     String(error || "")
   );
 }
@@ -94,13 +106,18 @@ function publicError(error = null) {
   };
 }
 
+/* =========================================================
+   PUBLIC SNAPSHOT HELPERS
+========================================================= */
+
 function publicUser(user = null) {
   if (!isObject(user)) return null;
 
   return {
     id: user.id || user.userId || null,
     userId: user.userId || user.id || null,
-    username: user.username || user.slug || null,
+    username: user.username || null,
+    slug: user.slug || user.lookup?.slug || null,
     displayName: user.displayName || user.name || user.username || null,
     role: user.role || user.rol || null,
   };
@@ -114,13 +131,24 @@ function sessionSnapshot(extra = {}) {
     version: AUTH_LOGOUT_VERSION,
 
     authenticated: Boolean(state.authenticated),
-    hasToken: Boolean(state.hasToken || state.token || state.accessToken || state.access_token),
+    hasToken: Boolean(
+      state.hasToken ||
+        state.token ||
+        state.accessToken ||
+        state.access_token
+    ),
 
     token: null,
     accessToken: null,
     refreshToken: null,
 
     user: publicUser(user),
+
+    userSlug: state.userSlug || user?.slug || user?.lookup?.slug || null,
+    homePath: state.homePath || "/",
+    defaultHome: state.defaultHome || state.homePath || "/",
+    postLoginTarget: state.postLoginTarget || null,
+
     role: state.role || user?.role || null,
     roles: Array.isArray(state.roles) ? state.roles : [],
 
@@ -129,32 +157,6 @@ function sessionSnapshot(extra = {}) {
 
     ...extra,
   };
-}
-
-function emit(eventName = "", payload = {}, options = {}) {
-  if (options.silent === true || options.emit === false || options.emitEvents === false) {
-    return false;
-  }
-
-  const name = text(eventName, "");
-
-  if (!name) return false;
-
-  try {
-    AppCore?.events?.emit?.(name, {
-      source: SOURCE,
-      version: AUTH_LOGOUT_VERSION,
-      at: nowIso(),
-      ...payload,
-      token: null,
-      accessToken: null,
-      refreshToken: null,
-    });
-
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /* =========================================================
@@ -166,7 +168,11 @@ function alreadyLoggedOutStatus(status = 0) {
 }
 
 async function remoteLogout(options = {}) {
-  if (options.remote === false || options.skipRemote === true || options.localOnly === true) {
+  if (
+    options.remote === false ||
+    options.skipRemote === true ||
+    options.localOnly === true
+  ) {
     return {
       ok: true,
       skipped: true,
@@ -265,6 +271,7 @@ function fallbackClearState() {
     token: null,
     accessToken: null,
     access_token: null,
+
     refreshToken: null,
     refresh_token: null,
 
@@ -275,12 +282,18 @@ function fallbackClearState() {
     account: null,
     profile: null,
 
+    userSlug: null,
+    homePath: "/",
+    defaultHome: "/",
+    postLoginTarget: null,
+
     role: null,
     rol: null,
     userRole: null,
     roles: [],
 
     isAdmin: false,
+    isUser: false,
     isSupport: false,
     isManager: false,
     isClient: false,
@@ -305,6 +318,7 @@ function fallbackClearState() {
       emit: false,
       forceUnauthenticated: true,
     });
+
     return true;
   } catch {
     // fallback abajo
@@ -316,6 +330,24 @@ function fallbackClearState() {
   } catch {
     return false;
   }
+}
+
+function clearHttpAuth() {
+  try {
+    if (isFunction(CoreHttp?.clearAuthTokens)) {
+      CoreHttp.clearAuthTokens();
+      return true;
+    }
+
+    if (isFunction(CoreHttp?.setAccessToken)) {
+      CoreHttp.setAccessToken(null);
+      return true;
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
 }
 
 function clearLocal(options = {}) {
@@ -330,11 +362,7 @@ function clearLocal(options = {}) {
     fallbackClearState();
   }
 
-  try {
-    CoreHttp?.clearAuthTokens?.();
-  } catch {
-    // noop
-  }
+  clearHttpAuth();
 
   try {
     AppCore?.setLoading?.(false);
@@ -374,13 +402,9 @@ export async function logout(options = {}) {
   logoutPromise = (async () => {
     const sequence = ++logoutSequence;
     const startedAt = Date.now();
-
-    emit("auth:logout:start", {
-      sequence,
-      session: sessionSnapshot({
-        cause: "before-logout",
-      }),
-    }, options);
+    const before = sessionSnapshot({
+      cause: "before-logout",
+    });
 
     const remote = await remoteLogout(options);
 
@@ -393,34 +417,19 @@ export async function logout(options = {}) {
       cause: "after-logout",
     });
 
-    emit("auth:logout:success", {
-      sequence,
-      remoteOk: Boolean(remote.ok),
-      remoteSkipped: Boolean(remote.skipped),
-      remoteStatus: remote.status || 0,
-      remoteTransport: remote.transport || "",
-      authenticated: false,
-      user: null,
-      role: null,
-      session: after,
-      durationMs: Date.now() - startedAt,
-    }, options);
-
-    emit("app:auth:change", {
-      sequence,
-      authenticated: false,
-      user: null,
-      role: null,
-    }, options);
-
     return {
       ok: true,
 
+      authenticated: false,
+
       remoteOk: Boolean(remote.ok),
       remoteSkipped: Boolean(remote.skipped),
       remoteStatus: remote.status || 0,
       remoteTransport: remote.transport || "",
+      remoteAlreadyInvalid: remote.alreadyInvalid === true,
+      remoteError: remote.error || null,
 
+      before,
       session: after,
 
       durationMs: Date.now() - startedAt,
@@ -434,16 +443,15 @@ export async function logout(options = {}) {
         reason: "logout-recovery",
       });
 
-      emit("auth:logout:error", {
-        error: publicError(error),
-        message: redact(extractMessage(error)),
-      }, options);
-
       return {
         ok: true,
         recovered: true,
+        authenticated: false,
         remoteOk: false,
         error: publicError(error),
+        session: sessionSnapshot({
+          cause: "after-logout-recovery",
+        }),
         version: AUTH_LOGOUT_VERSION,
       };
     })
@@ -470,7 +478,12 @@ export function getLogoutSnapshot() {
     endpoint: LOGOUT_ENDPOINT,
 
     authenticated: Boolean(state.authenticated),
-    hasToken: Boolean(state.hasToken || state.token || state.accessToken || state.access_token),
+    hasToken: Boolean(
+      state.hasToken ||
+        state.token ||
+        state.accessToken ||
+        state.access_token
+    ),
 
     token: null,
     accessToken: null,
@@ -483,16 +496,21 @@ export function getLogoutSnapshot() {
       hasCoreHttp: Boolean(CoreHttp?.request || CoreHttp?.post || CoreHttp?.logout),
       coreLogout: Boolean(CoreHttp?.logout),
       corePost: Boolean(CoreHttp?.post),
+      coreRequest: Boolean(CoreHttp?.request),
     },
 
     policy: {
       remoteBestEffort: true,
       localClearGuaranteed: true,
+
       ownFetch: false,
       ownRouter: false,
       ownToast: false,
       ownStorageClearAll: false,
+      ownEvents: false,
+
       navigation: false,
+
       noHelpersImport: true,
       noConstantsImport: true,
     },

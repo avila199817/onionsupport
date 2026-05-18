@@ -3,51 +3,67 @@
    Archivo: /src/preboot/theme.js
 
    Responsabilidad:
-   - Tema inicial según navegador/sistema.
-   - Idioma inicial según navegador.
-   - Idiomas soportados: ca, es, en.
-   - Fallback idioma: en.
+   - Aplicar tema inicial según sistema.
+   - Aplicar idioma inicial según navegador.
+   - Preparar html/body antes del arranque SPA.
+   - Sin imports.
    - Sin storage.
    - Sin API.
-   - Sin auth.
-   - Sin router.
+   - Sin Auth.
+   - Sin Router.
    - Sin HTTP.
    - Sin eventos custom.
+   - Sin i18n propio.
    - Sin magia negra.
 ========================================================= */
 
 (() => {
   "use strict";
 
-  const SUPPORTED_LOCALES = ["ca", "es", "en"];
+  const SUPPORTED_LOCALES = Object.freeze(["ca", "es", "en"]);
   const FALLBACK_LOCALE = "en";
 
-  const THEME_COLORS = {
+  const THEMES = Object.freeze(["light", "dark"]);
+  const FALLBACK_THEME = "light";
+
+  const THEME_COLORS = Object.freeze({
     light: "#ffffff",
     dark: "#0a0c11",
-  };
+  });
 
   function isBrowser() {
     return typeof window !== "undefined" && typeof document !== "undefined";
   }
 
-  function normalizeLocale(value) {
-    return String(value || "")
-      .trim()
+  function text(value = "", fallback = "") {
+    const output = String(value ?? "").trim();
+    return output || fallback;
+  }
+
+  function normalizeLocale(value = "", fallback = FALLBACK_LOCALE) {
+    const locale = text(value, "")
       .toLowerCase()
       .replace("_", "-")
       .split("-")[0];
+
+    return SUPPORTED_LOCALES.includes(locale) ? locale : fallback;
+  }
+
+  function normalizeTheme(value = "", fallback = FALLBACK_THEME) {
+    const theme = text(value, "").toLowerCase();
+
+    return THEMES.includes(theme) ? theme : fallback;
   }
 
   function resolveLocale() {
-    const languages = Array.isArray(navigator.languages) && navigator.languages.length
+    const browserLanguages = Array.isArray(navigator.languages) && navigator.languages.length
       ? navigator.languages
       : [navigator.language];
 
-    for (const language of languages) {
-      const locale = normalizeLocale(language);
+    for (const language of browserLanguages) {
+      const locale = normalizeLocale(language, "");
 
-      if (SUPPORTED_LOCALES.includes(locale)) {
+      if (locale) {
         return {
           value: locale,
           source: "browser",
@@ -67,12 +83,55 @@
         ? "dark"
         : "light";
     } catch {
-      return "light";
+      return FALLBACK_THEME;
     }
   }
 
-  function setThemeMeta(theme) {
-    const color = THEME_COLORS[theme] || THEME_COLORS.light;
+  function applyThemeToElement(element, theme = FALLBACK_THEME) {
+    if (!element) return false;
+
+    const cleanTheme = normalizeTheme(theme);
+
+    try {
+      element.classList.remove("no-js", "theme-light", "theme-dark");
+      element.classList.add("js", `theme-${cleanTheme}`);
+
+      element.dataset.theme = cleanTheme;
+      element.dataset.themeMode = "system";
+      element.dataset.themeSource = "browser";
+      element.dataset.systemTheme = cleanTheme;
+      element.dataset.themeReady = "true";
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function applyLocaleToElement(element, locale = null) {
+    if (!element || !locale) return false;
+
+    const cleanLocale = normalizeLocale(locale.value);
+    const source = text(locale.source, "browser");
+
+    try {
+      element.lang = cleanLocale;
+      element.dir = "ltr";
+
+      element.dataset.locale = cleanLocale;
+      element.dataset.localeSource = source;
+      element.dataset.localeFallback = FALLBACK_LOCALE;
+      element.dataset.localeSupported = SUPPORTED_LOCALES.join(" ");
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function applyThemeColor(theme = FALLBACK_THEME) {
+    const cleanTheme = normalizeTheme(theme);
+    const color = THEME_COLORS[cleanTheme] || THEME_COLORS[FALLBACK_THEME];
 
     try {
       document
@@ -84,23 +143,6 @@
             meta.setAttribute("content", color);
           }
         });
-    } catch {
-      // noop
-    }
-  }
-
-  function applyTheme(element, theme) {
-    if (!element) return false;
-
-    try {
-      element.classList.remove("no-js", "theme-light", "theme-dark");
-      element.classList.add("js", `theme-${theme}`);
-
-      element.dataset.theme = theme;
-      element.dataset.themeMode = "system";
-      element.dataset.themeSource = "browser";
-      element.dataset.systemTheme = theme;
-      element.dataset.themeReady = "true";
 
       return true;
     } catch {
@@ -108,17 +150,18 @@
     }
   }
 
-  function applyLocale(element, locale) {
-    if (!element) return false;
-
+  function writePrebootSnapshot(theme = FALLBACK_THEME, locale = null) {
     try {
-      element.lang = locale.value;
-      element.dir = "ltr";
+      window.__ONION_PREBOOT__ = {
+        theme: normalizeTheme(theme),
+        themeMode: "system",
+        themeSource: "browser",
 
-      element.dataset.locale = locale.value;
-      element.dataset.localeSource = locale.source;
-      element.dataset.localeFallback = FALLBACK_LOCALE;
-      element.dataset.localeSupported = SUPPORTED_LOCALES.join(" ");
+        locale: normalizeLocale(locale?.value),
+        localeSource: text(locale?.source, "browser"),
+        fallbackLocale: FALLBACK_LOCALE,
+        supportedLocales: [...SUPPORTED_LOCALES],
+      };
 
       return true;
     } catch {
@@ -126,51 +169,55 @@
     }
   }
 
-  function apply() {
+  function applyPreboot() {
     if (!isBrowser()) return false;
 
     const theme = resolveSystemTheme();
     const locale = resolveLocale();
 
-    applyTheme(document.documentElement, theme);
-    applyLocale(document.documentElement, locale);
+    applyThemeToElement(document.documentElement, theme);
+    applyLocaleToElement(document.documentElement, locale);
 
     if (document.body) {
-      applyTheme(document.body, theme);
-      applyLocale(document.body, locale);
+      applyThemeToElement(document.body, theme);
+      applyLocaleToElement(document.body, locale);
     }
 
-    setThemeMeta(theme);
-
-    window.__ONION_PREBOOT__ = Object.freeze({
-      theme,
-      themeMode: "system",
-      themeSource: "browser",
-
-      locale: locale.value,
-      localeSource: locale.source,
-      fallbackLocale: FALLBACK_LOCALE,
-      supportedLocales: [...SUPPORTED_LOCALES],
-    });
+    applyThemeColor(theme);
+    writePrebootSnapshot(theme, locale);
 
     return true;
   }
 
+  function bindSystemThemeListener() {
+    try {
+      const media = window.matchMedia("(prefers-color-scheme: dark)");
+
+      if (typeof media.addEventListener === "function") {
+        media.addEventListener("change", applyPreboot);
+        return true;
+      }
+
+      if (typeof media.addListener === "function") {
+        media.addListener(applyPreboot);
+        return true;
+      }
+    } catch {
+      return false;
+    }
+
+    return false;
+  }
+
   if (!isBrowser()) return;
 
-  apply();
+  applyPreboot();
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", apply, {
+    document.addEventListener("DOMContentLoaded", applyPreboot, {
       once: true,
     });
   }
 
-  try {
-    window
-      .matchMedia("(prefers-color-scheme: dark)")
-      .addEventListener("change", apply);
-  } catch {
-    // Navegador sin listener moderno. No pasa nada.
-  }
+  bindSystemThemeListener();
 })();

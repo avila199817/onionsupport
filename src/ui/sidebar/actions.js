@@ -25,13 +25,13 @@ import {
 } from "./constants.js";
 
 import {
+  beginSidebarLogout,
   closeSidebar as closeRuntimeSidebar,
   endSidebarLogout,
   getSidebarLogoutInFlight,
   getSidebarOpen,
   openSidebar as openRuntimeSidebar,
   setSidebarOpen as setRuntimeSidebarOpen,
-  beginSidebarLogout,
   toggleSidebar as toggleRuntimeSidebar,
 } from "./state.js";
 
@@ -59,69 +59,71 @@ function text(value = "", fallback = "") {
 }
 
 /* =========================================================
-   CONTEXT RESOLVERS
+   CONTEXT
 ========================================================= */
 
-function resolveRouter(context = {}) {
-  const AppCore = context.AppCore || null;
+function options(context = {}) {
+  return isObject(context) ? context : {};
+}
 
-  try {
-    return (
-      context.Router ||
-      AppCore?.Router ||
-      AppCore?.router ||
-      AppCore?.modules?.get?.("Router") ||
-      AppCore?.modules?.get?.("router") ||
-      null
-    );
-  } catch {
-    return context.Router || null;
-  }
+function resolveRouter(context = {}) {
+  const ctx = options(context);
+  const AppCore = ctx.AppCore || null;
+
+  return (
+    ctx.Router ||
+    AppCore?.Router ||
+    AppCore?.router ||
+    null
+  );
 }
 
 function resolveAuth(context = {}) {
-  const AppCore = context.AppCore || null;
+  const ctx = options(context);
+  const AppCore = ctx.AppCore || null;
 
-  try {
-    return (
-      context.Auth ||
-      AppCore?.Auth ||
-      AppCore?.auth ||
-      AppCore?.modules?.get?.("Auth") ||
-      AppCore?.modules?.get?.("auth") ||
-      null
-    );
-  } catch {
-    return context.Auth || null;
-  }
+  return (
+    ctx.Auth ||
+    AppCore?.Auth ||
+    AppCore?.auth ||
+    null
+  );
+}
+
+function actionSource(context = {}) {
+  return text(context.source, SIDEBAR_SOURCE);
+}
+
+function shouldReplace(context = {}) {
+  return context.replace === true || context.replaceState === true;
 }
 
 /* =========================================================
    PATH SAFETY
 ========================================================= */
 
-function isSafeInternalTarget(value = "") {
-  const raw = text(value, "");
+function isSafeInternalPath(path = "") {
+  const value = text(path, "");
 
-  if (!raw) return false;
-  if (!raw.startsWith("/")) return false;
-  if (raw.startsWith("//")) return false;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return false;
-  if (/[\r\n\t\\]/.test(raw)) return false;
-
-  return true;
+  return Boolean(
+    value &&
+      value.startsWith("/") &&
+      !value.startsWith("//") &&
+      !/^[a-z][a-z0-9+.-]*:/i.test(value) &&
+      !/[\r\n\t\\]/.test(value)
+  );
 }
 
 export function getSafeSidebarTarget(target = "", fallback = "") {
   const raw = text(target, "");
 
-  if (!isSafeInternalTarget(raw)) {
+  if (!isSafeInternalPath(raw)) {
     return fallback ? normalizeSidebarPath(fallback) : "";
   }
 
   const normalized = normalizeSidebarPath(raw);
 
-  if (!isSafeInternalTarget(normalized)) {
+  if (!isSafeInternalPath(normalized)) {
     return fallback ? normalizeSidebarPath(fallback) : "";
   }
 
@@ -133,39 +135,38 @@ export function getSafeSidebarTarget(target = "", fallback = "") {
 ========================================================= */
 
 export function setSidebarOpen(context = {}) {
-  const options = isObject(context) ? context : {};
-  const open = options.open !== false;
+  const ctx = options(context);
 
-  return setRuntimeSidebarOpen(open, {
-    AppCore: options.AppCore || null,
-    root: options.root || null,
+  return setRuntimeSidebarOpen(ctx.open !== false, {
+    AppCore: ctx.AppCore || null,
+    root: ctx.root || null,
   });
 }
 
 export function openSidebar(context = {}) {
-  const options = isObject(context) ? context : {};
+  const ctx = options(context);
 
   return openRuntimeSidebar({
-    AppCore: options.AppCore || null,
-    root: options.root || null,
+    AppCore: ctx.AppCore || null,
+    root: ctx.root || null,
   });
 }
 
 export function closeSidebar(context = {}) {
-  const options = isObject(context) ? context : {};
+  const ctx = options(context);
 
   return closeRuntimeSidebar({
-    AppCore: options.AppCore || null,
-    root: options.root || null,
+    AppCore: ctx.AppCore || null,
+    root: ctx.root || null,
   });
 }
 
 export function toggleSidebar(context = {}) {
-  const options = isObject(context) ? context : {};
+  const ctx = options(context);
 
   return toggleRuntimeSidebar({
-    AppCore: options.AppCore || null,
-    root: options.root || null,
+    AppCore: ctx.AppCore || null,
+    root: ctx.root || null,
   });
 }
 
@@ -183,43 +184,31 @@ export function expandSidebar(context = {}) {
 
 async function navigateWithRouter(path = "/", context = {}) {
   const router = resolveRouter(context);
-  const replace = context.replace === true || context.replaceState === true;
+  const replace = shouldReplace(context);
+
+  const payload = {
+    source: actionSource(context),
+    replaceState: replace,
+    force: context.force === true,
+  };
 
   if (replace && isFunction(router?.replace)) {
-    await router.replace(path, {
-      source: context.source || SIDEBAR_SOURCE,
-      replaceState: true,
-      force: context.force === true,
-    });
-
+    await router.replace(path, payload);
     return true;
   }
 
   if (isFunction(router?.navigate)) {
-    await router.navigate(path, {
-      source: context.source || SIDEBAR_SOURCE,
-      replaceState: replace,
-      force: context.force === true,
-    });
-
+    await router.navigate(path, payload);
     return true;
   }
 
   if (!replace && isFunction(router?.push)) {
-    await router.push(path, {
-      source: context.source || SIDEBAR_SOURCE,
-    });
-
+    await router.push(path, payload);
     return true;
   }
 
   if (isFunction(context.AppCore?.navigate)) {
-    await context.AppCore.navigate(path, {
-      source: context.source || SIDEBAR_SOURCE,
-      replaceState: replace,
-      force: context.force === true,
-    });
-
+    await context.AppCore.navigate(path, payload);
     return true;
   }
 
@@ -229,10 +218,8 @@ async function navigateWithRouter(path = "/", context = {}) {
 function navigateWithBrowser(path = "/", context = {}) {
   if (!isBrowser()) return false;
 
-  const replace = context.replace === true || context.replaceState === true;
-
   try {
-    if (replace) {
+    if (shouldReplace(context)) {
       window.location.replace(path);
     } else {
       window.location.assign(path);
@@ -245,30 +232,30 @@ function navigateWithBrowser(path = "/", context = {}) {
 }
 
 export async function navigateFromSidebar(context = {}) {
-  const target = getSafeSidebarTarget(context.target || context.path || "", "");
+  const ctx = options(context);
+  const target = getSafeSidebarTarget(ctx.target || ctx.path || "", "");
 
   if (!target) return false;
 
-  try {
-    const routed = await navigateWithRouter(target, {
-      ...context,
-      source: context.source || SIDEBAR_SOURCE,
-    });
+  const payload = {
+    ...ctx,
+    source: actionSource(ctx),
+  };
 
-    if (routed) return true;
+  try {
+    if (await navigateWithRouter(target, payload)) {
+      return true;
+    }
   } catch {
     // fallback navegador abajo
   }
 
-  return navigateWithBrowser(target, {
-    ...context,
-    source: context.source || SIDEBAR_SOURCE,
-  });
+  return navigateWithBrowser(target, payload);
 }
 
 export async function navigateToLogin(context = {}) {
   return navigateFromSidebar({
-    ...context,
+    ...options(context),
     target: LOGIN_ROUTE,
     replace: true,
     force: true,
@@ -295,24 +282,24 @@ async function clearAuthSession(context = {}) {
       return true;
     }
   } catch {
-    // Intentar clearSession abajo.
+    // fallback abajo
   }
 
   try {
     if (isFunction(auth?.clearSession)) {
-      auth.clearSession({
+      await auth.clearSession({
         source: SIDEBAR_SOURCE,
       });
 
       return true;
     }
   } catch {
-    // Intentar AppCore abajo.
+    // fallback abajo
   }
 
   try {
     if (isFunction(context.AppCore?.clearSession)) {
-      context.AppCore.clearSession({
+      await context.AppCore.clearSession({
         source: SIDEBAR_SOURCE,
       });
 
@@ -328,6 +315,8 @@ async function clearAuthSession(context = {}) {
 let logoutPromise = null;
 
 export async function handleLogout(context = {}) {
+  const ctx = options(context);
+
   if (logoutPromise) return logoutPromise;
 
   if (getSidebarLogoutInFlight()) {
@@ -339,13 +328,13 @@ export async function handleLogout(context = {}) {
   }
 
   logoutPromise = (async () => {
-    const AppCore = context.AppCore || null;
+    const AppCore = ctx.AppCore || null;
 
     beginSidebarLogout(AppCore);
 
     try {
-      const authCleared = await clearAuthSession(context);
-      const navigationOk = await navigateToLogin(context);
+      const authCleared = await clearAuthSession(ctx);
+      const navigationOk = await navigateToLogin(ctx);
 
       return {
         ok: navigationOk,

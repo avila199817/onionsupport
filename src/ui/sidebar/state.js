@@ -45,6 +45,10 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function visibleRoot(root = null) {
+  return isElement(root) && root.hidden !== true;
+}
+
 function resolveRoot(root = null) {
   if (isElement(root)) return root;
   if (isElement(runtime.root)) return runtime.root;
@@ -53,7 +57,7 @@ function resolveRoot(root = null) {
 }
 
 function ensureCoreState(AppCore = null) {
-  if (!AppCore || typeof AppCore !== "object") return null;
+  if (!isObject(AppCore)) return null;
 
   try {
     AppCore.state = isObject(AppCore.state) ? AppCore.state : {};
@@ -81,13 +85,29 @@ function syncCoreState(AppCore = null) {
   }
 }
 
+function syncRootOpen(root = null) {
+  if (!isElement(root)) return false;
+
+  runtime.root = root;
+  setSidebarOpenState(root, runtime.open);
+
+  return true;
+}
+
+function updateMounted(root = resolveRoot()) {
+  runtime.root = isElement(root) ? root : null;
+  runtime.mounted = visibleRoot(runtime.root);
+
+  return runtime.mounted;
+}
+
 /* =========================================================
    ROOT
 ========================================================= */
 
 export function setSidebarRoot(root = null, AppCore = null) {
   runtime.root = isElement(root) ? root : null;
-  runtime.mounted = isElement(runtime.root) && runtime.root.hidden !== true;
+  runtime.mounted = visibleRoot(runtime.root);
 
   syncCoreState(AppCore);
 
@@ -128,9 +148,8 @@ export function setSidebarMounted(value = true, AppCore = null) {
 }
 
 export function markSidebarMounted(root = null, AppCore = null) {
-  if (root) setSidebarRoot(root, AppCore);
+  updateMounted(root || resolveRoot());
 
-  runtime.mounted = Boolean(resolveRoot());
   syncCoreState(AppCore);
 
   return runtime.mounted;
@@ -154,17 +173,13 @@ export function getSidebarOpen() {
 }
 
 export function setSidebarOpen(open = true, context = {}) {
-  const AppCore = context.AppCore || null;
   const root = resolveRoot(context.root);
 
   runtime.open = Boolean(open);
 
-  if (root) {
-    runtime.root = root;
-    setSidebarOpenState(root, runtime.open);
-  }
-
-  syncCoreState(AppCore);
+  syncRootOpen(root);
+  updateMounted(root);
+  syncCoreState(context.AppCore || null);
 
   return runtime.open;
 }
@@ -210,17 +225,11 @@ export function endSidebarLogout(AppCore = null) {
 ========================================================= */
 
 export function syncSidebarState(context = {}) {
-  const AppCore = context.AppCore || null;
   const root = resolveRoot(context.root);
 
-  runtime.root = root;
-  runtime.mounted = Boolean(root && root.hidden !== true);
-
-  if (root) {
-    setSidebarOpenState(root, runtime.open);
-  }
-
-  syncCoreState(AppCore);
+  syncRootOpen(root);
+  updateMounted(root);
+  syncCoreState(context.AppCore || null);
 
   return getSidebarState();
 }
@@ -253,7 +262,7 @@ export function getSidebarState() {
     collapsed: !runtime.open,
     logoutInFlight: runtime.logoutInFlight,
 
-    hasRoot: Boolean(root),
+    hasRoot: isElement(root),
     rootHidden: Boolean(root?.hidden),
     rootOpen: root?.dataset?.open || "",
   };

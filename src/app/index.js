@@ -5,14 +5,15 @@
    Responsabilidad:
    - Boot mínimo de la SPA.
    - Iniciar Core/Auth/Router.
+   - Iniciar I18n.
    - Iniciar Toast.
    - Restaurar sesión.
    - Renderizar ruta actual.
    - Actualizar shell.
    - Iniciar Sidebar/Topbar.
+   - Refrescar textos i18n.
    - Ocultar loader.
    - Sin Store.
-   - Sin I18n.
    - Sin Services.
    - Sin warmup.
    - Sin repair loops.
@@ -24,7 +25,9 @@ import { AppCore } from "../core/index.js";
 import { Auth } from "../features/auth/index.js";
 import { Router } from "../router/index.js";
 
+import I18n from "../i18n/index.js";
 import Toast from "../ui/toast/index.js";
+
 import SidebarUI from "../ui/sidebar/index.js";
 import TopbarUI from "../ui/topbar/index.js";
 
@@ -135,6 +138,54 @@ function safeShowFatalShell() {
 }
 
 /* =========================================================
+   CORE UI SINGLETONS
+========================================================= */
+
+async function initI18n(payload = {}) {
+  safeCall(I18n?.bindCore, AppCore);
+
+  await tryCall(I18n, ["init", "boot", "start"], {
+    ...payload,
+    AppCore,
+    core: AppCore,
+    updateDOM: false,
+    updateUi: false,
+  });
+
+  return I18n;
+}
+
+async function initToast(payload = {}) {
+  await tryCall(Toast, ["init", "start", "boot"], payload);
+  return Toast;
+}
+
+function refreshI18nDom() {
+  if (!isBrowser()) return false;
+
+  try {
+    if (typeof I18n?.updateDOM === "function") {
+      I18n.updateDOM();
+      return true;
+    }
+
+    if (typeof I18n?.reload === "function") {
+      I18n.reload();
+      return true;
+    }
+
+    if (typeof I18n?.refresh === "function") {
+      I18n.refresh();
+      return true;
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
+}
+
+/* =========================================================
    ROUTER
 ========================================================= */
 
@@ -168,17 +219,12 @@ async function renderRoute() {
 }
 
 /* =========================================================
-   UI
+   CHROME
 ========================================================= */
 
-async function initToast(payload = {}) {
-  await tryCall(Toast, ["init", "start", "boot"], payload);
-  return Toast;
-}
-
 async function initChrome(payload = {}) {
-  await tryCall(SidebarUI, ["init", "sync", "refresh"], payload);
-  await tryCall(TopbarUI, ["init", "sync", "refresh"], payload);
+  await tryCall(SidebarUI, ["init", "boot", "start"], payload);
+  await tryCall(TopbarUI, ["init", "boot", "start"], payload);
 
   return true;
 }
@@ -247,6 +293,9 @@ async function runBoot(options = {}) {
 
   await tryCall(AppCore, ["init", "boot", "start"], payload);
 
+  await initI18n(payload);
+  await initToast(payload);
+
   await tryCall(Auth, ["init", "boot", "start"], {
     ...payload,
     skipNavigation: true,
@@ -260,8 +309,6 @@ async function runBoot(options = {}) {
     skipInitialRender: true,
   });
 
-  await initToast(payload);
-
   await tryCall(Auth, ["restore", "restoreSession"], {
     ...payload,
     skipNavigation: true,
@@ -271,12 +318,12 @@ async function runBoot(options = {}) {
 
   await renderRoute();
 
-  safeUpdateShell();
-
   await initChrome(payload);
   await syncChrome(payload);
 
   safeUpdateShell();
+  refreshI18nDom();
+
   safeMarkShellReady();
   safeHideLoader();
 

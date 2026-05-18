@@ -15,7 +15,7 @@
      /activate-account
    - Home interna de vista: /
    - Home visible de usuario: /@{user.slug}
-   - Resolver /@{slug} hacia la vista Home sin validar usuario.
+   - Resolver /@{slug} hacia la vista Home sin validar usuario real.
    - Sin declarar /@:slug como ruta real.
    - Sin alias /home.
    - Sin aliases legacy.
@@ -29,7 +29,7 @@
    - Sin Toast.
 ========================================================= */
 
-export const ROUTES_VERSION = "routes.v1";
+export const ROUTES_VERSION = "routes.v2";
 
 const ROUTE_SOURCE = "router.routes";
 
@@ -174,7 +174,7 @@ function unique(values = []) {
   return [
     ...new Set(
       (Array.isArray(values) ? values : [values])
-        .flat()
+        .flat(Infinity)
         .map((item) => text(item, ""))
         .filter(Boolean)
     ),
@@ -197,17 +197,14 @@ function normalizeHashPath(value = "") {
 function pathFromInput(value = "/") {
   const raw = normalizeHashPath(value);
 
-  try {
-    const parsed = new URL(raw, "http://localhost");
+  if (!raw) return "/";
+  if (raw.startsWith("//")) return "/";
 
-    if (parsed.hash.startsWith("#/") || parsed.hash.startsWith("#!")) {
-      return normalizeHashPath(parsed.hash);
-    }
-
-    return `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`;
-  } catch {
-    return raw;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+    return "/";
   }
+
+  return raw;
 }
 
 function normalizePath(path = "/") {
@@ -252,8 +249,25 @@ function normalizeViewName(value = "View") {
   return text(value, "View").replace(/\s+/g, "").slice(0, 128) || "View";
 }
 
+function normalizeRole(value = "") {
+  if (Array.isArray(value)) {
+    const roles = value.map(normalizeRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "";
+  }
+
+  const role = String(value || "").toLowerCase();
+
+  return VALID_ROLES.includes(role) ? role : "";
+}
+
 function normalizeRoles(roles = []) {
-  return unique(roles).filter((role) => VALID_ROLES.includes(role));
+  return unique(roles)
+    .map(normalizeRole)
+    .filter(Boolean);
 }
 
 /* =========================================================
@@ -262,6 +276,20 @@ function normalizeRoles(roles = []) {
 
 export function normalizeRoutePath(path = "/") {
   return normalizePath(path);
+}
+
+export function normalizeUserHomeSlug(value = "") {
+  const slug = text(value, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+
+  if (!slug) return "";
+
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
 }
 
 export function getUserHomeSlugFromPath(path = "/") {
@@ -273,9 +301,7 @@ export function getUserHomeSlugFromPath(path = "/") {
 
   if (!slug || slug.includes("/")) return "";
 
-  const normalized = slug.toLowerCase();
-
-  return /^[a-z0-9._-]{1,96}$/.test(normalized) ? normalized : "";
+  return normalizeUserHomeSlug(slug);
 }
 
 export function isUserHomePath(path = "/") {
@@ -496,6 +522,7 @@ function createRoute({
   const finalPublic = Boolean(isPublic);
   const finalTokenRoute = Boolean(tokenRoute || TOKEN_ROUTE_SET.has(finalPath));
   const hideShell = finalPublic;
+  const adminOnly = finalRoles.includes("admin") && !finalRoles.includes("user");
 
   const meta = freeze({
     version: ROUTES_VERSION,
@@ -513,11 +540,18 @@ function createRoute({
 
     roles: finalRoles,
 
+    admin: adminOnly,
+    adminOnly,
+    requiresAdmin: adminOnly,
+
     hideShell,
     shell: !hideShell,
     showShell: !hideShell,
     layout: hideShell ? "auth" : "app",
     authScreen: hideShell,
+
+    sidebar: !finalPublic,
+    showInSidebar: !finalPublic,
 
     viewKey: finalViewKey,
     viewName: finalViewName,
@@ -557,11 +591,18 @@ function createRoute({
 
     roles: finalRoles,
 
+    admin: adminOnly,
+    adminOnly,
+    requiresAdmin: adminOnly,
+
     hideShell,
     shell: !hideShell,
     showShell: !hideShell,
     layout: hideShell ? "auth" : "app",
     authScreen: hideShell,
+
+    sidebar: !finalPublic,
+    showInSidebar: !finalPublic,
 
     routeGroup: finalPublic ? "auth" : "app",
 
@@ -825,6 +866,10 @@ function validateRoute(route, seenPaths, seenNames) {
     throw new Error(`Router: ruta pública con roles en "${path}".`);
   }
 
+  if (path === "/home") {
+    throw new Error("Router: /home no está permitido.");
+  }
+
   seenPaths.add(path);
   seenNames.add(route.name);
 }
@@ -845,6 +890,10 @@ export function validateRoutesTable(_AppCore = null, routes = getImmutableRoutes
     if (!seenPaths.has(normalizePath(path))) {
       throw new Error(`Router: falta ruta "${path}".`);
     }
+  }
+
+  if (seenPaths.has("/home")) {
+    throw new Error("Router: /home no debe existir.");
   }
 
   return true;
@@ -914,9 +963,14 @@ function serializeRoute(route) {
 
     roles: route.roles,
 
+    adminOnly: route.adminOnly,
+
     hideShell: route.hideShell,
     shell: route.shell,
     layout: route.layout,
+
+    sidebar: route.sidebar,
+    showInSidebar: route.showInSidebar,
 
     tokenRoute: route.tokenRoute,
     preserveSearch: route.preserveSearch,
@@ -992,7 +1046,9 @@ export function getRoutesIntegritySnapshot() {
       enabled: true,
       prefix: USER_HOME_PREFIX,
       lookupPath: ROUTE_PATHS.HOME,
+      validatesShape: true,
       validatesRealUser: false,
+      realUserValidationOwner: "router/index.js",
     },
 
     critical: getCriticalRoutesDebug(),
@@ -1014,7 +1070,9 @@ export function getRoutesIntegritySnapshot() {
       userHomePrefix: USER_HOME_PREFIX,
 
       noHomeAlias: true,
+      noHomeRoute: true,
       noLegacyRoutes: true,
+
       no2fa: true,
       no403: true,
       no404: true,
@@ -1044,6 +1102,7 @@ export default {
   TOKEN_ROUTE_PATHS,
 
   normalizeRoutePath,
+  normalizeUserHomeSlug,
   getUserHomeSlugFromPath,
   isUserHomePath,
   isHomePath,

@@ -9,13 +9,17 @@
    - Estado loading mínimo.
    - Binding submit idempotente.
    - Delegar password-field al componente compartido.
-   - Sin Auth, HTTP, Router, Store ni Toast.
-   - Sin duplicar lógica del password-field.
+   - Sin Auth.
+   - Sin HTTP.
+   - Sin Router.
+   - Sin Store.
+   - Sin Toast.
+   - Sin lógica propia de password toggle.
 ========================================================= */
 
 import { bindPasswordFieldsInScope } from "../../shared/password-field/index.js";
 
-export const LOGIN_DOM_VERSION = "minimal-1";
+export const LOGIN_DOM_VERSION = "minimal-2";
 
 const DEFAULT_SUBMIT_LABEL = "Entrar";
 const DEFAULT_LOADING_LABEL = "Accediendo...";
@@ -27,36 +31,19 @@ const SELECTORS = Object.freeze({
   root: "[data-login-view], #loginView, .login-view",
   form: "[data-login-form], #loginForm, form[data-auth-form='login']",
 
-  identifier:
-    "[data-login-identifier], #loginIdentifier, [name='identifier'], [name='email'], [name='username'], input[autocomplete='username']",
-
-  password:
-    "[data-login-password], [data-password-input], #loginPassword, [name='password'], input[autocomplete='current-password']",
-
+  identifier: "[data-login-identifier], #loginIdentifier, [name='identifier']",
+  password: "[data-login-password], [data-password-input], #loginPassword, [name='password']",
   remember: "[data-login-remember], #loginRemember, [name='remember']",
 
-  errorBox:
-    "[data-login-message], [data-login-error], #loginMessage, #loginError, .login-error",
-
+  message: "[data-login-message], [data-login-error], #loginMessage, #loginError, .login-error",
   submit: "[data-login-submit], #loginSubmit, button[type='submit']",
 
-  forgotPasswordLink:
-    "[data-login-password-request], [data-forgot-password-link], .login-reset-link",
+  fieldIdentifier: "[data-login-field='identifier'], [data-field='identifier']",
+  fieldPassword: "[data-login-field='password'], [data-field='password'], [data-password-field]",
 
-  fieldIdentifier:
-    "[data-login-field='identifier'], [data-field='identifier'], [data-field='email']",
-
-  fieldPassword:
-    "[data-login-field='password'], [data-field='password'], [data-password-field]",
-
-  passwordToggle:
-    "[data-password-toggle], [data-login-password-toggle]",
-
-  capsIndicator:
-    "[data-password-caps], [data-login-caps]",
-
-  themeToggle:
-    "[data-login-theme-toggle], [data-theme-toggle]",
+  passwordToggle: "[data-password-toggle], [data-login-password-toggle]",
+  forgotPasswordLink: "[data-login-password-request], .login-reset-link",
+  themeToggle: "[data-login-theme-toggle], [data-theme-toggle]",
 });
 
 /* =========================================================
@@ -73,22 +60,22 @@ function isFn(value) {
 
 function noop() {}
 
-function safeText(value, fallback = "") {
+function text(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
 }
 
-function rawText(value, fallback = "") {
+function rawText(value = "", fallback = "") {
   if (value === null || value === undefined) return fallback;
   return String(value);
 }
 
-function getDocumentRoot() {
+function doc() {
   return isBrowser() ? document : null;
 }
 
-function qs(root, selector) {
-  const scope = root || getDocumentRoot();
+function qs(root, selector = "") {
+  const scope = root || doc();
   if (!scope || !selector) return null;
 
   try {
@@ -102,14 +89,14 @@ function setText(node, value = "") {
   if (!node) return false;
 
   try {
-    node.textContent = safeText(value, "");
+    node.textContent = text(value, "");
     return true;
   } catch {
     return false;
   }
 }
 
-function setAttr(node, name, value) {
+function setAttr(node, name = "", value = null) {
   if (!node || !name) return false;
 
   try {
@@ -136,7 +123,7 @@ function setHidden(node, hidden = false) {
   return true;
 }
 
-function toggleClass(node, className, enabled) {
+function toggleClass(node, className = "", enabled = false) {
   if (!node || !className) return false;
 
   try {
@@ -187,7 +174,7 @@ function later(callback) {
   } catch {}
 }
 
-function bindDom(node, eventName, handler, options = false) {
+function bindDom(node, eventName = "", handler = null, options = false) {
   if (!node || !eventName || !isFn(handler)) return noop;
 
   let disposed = false;
@@ -215,9 +202,9 @@ function compose(disposers = []) {
     if (disposed) return;
     disposed = true;
 
-    for (const dispose of disposers) {
+    while (disposers.length) {
       try {
-        dispose?.();
+        disposers.pop()?.();
       } catch {}
     }
   };
@@ -238,7 +225,7 @@ function disposeBinding(binding) {
 ========================================================= */
 
 export function bindLoginPasswordFields(container = null, options = {}) {
-  const root = container || getDocumentRoot();
+  const root = container || doc();
   if (!root) return [];
 
   const previous = PASSWORD_BINDINGS.get(root);
@@ -247,7 +234,7 @@ export function bindLoginPasswordFields(container = null, options = {}) {
     return previous;
   }
 
-  if (previous && options.force === true) {
+  if (previous) {
     for (const binding of previous) disposeBinding(binding);
     PASSWORD_BINDINGS.delete(root);
   }
@@ -266,12 +253,14 @@ export function bindLoginPasswordFields(container = null, options = {}) {
 }
 
 export function destroyLoginPasswordFields(container = null) {
-  const root = container || getDocumentRoot();
+  const root = container || doc();
   if (!root) return false;
 
   const bindings = PASSWORD_BINDINGS.get(root) || [];
 
-  for (const binding of bindings) disposeBinding(binding);
+  for (const binding of bindings) {
+    disposeBinding(binding);
+  }
 
   PASSWORD_BINDINGS.delete(root);
   return true;
@@ -282,7 +271,7 @@ export function destroyLoginPasswordFields(container = null) {
 ========================================================= */
 
 export function getLoginRefs(container = null) {
-  const safeContainer = container || getDocumentRoot();
+  const safeContainer = container || doc();
   const root = qs(safeContainer, SELECTORS.root) || safeContainer;
   const form = qs(root, SELECTORS.form);
   const scope = form || root || safeContainer;
@@ -300,10 +289,10 @@ export function getLoginRefs(container = null) {
 
   if (submitButton) {
     try {
-      if (!submitButton.getAttribute("type")) submitButton.setAttribute("type", "submit");
+      if (!submitButton.type) submitButton.type = "submit";
 
       if (!submitButton.dataset.originalLabel) {
-        submitButton.dataset.originalLabel = safeText(
+        submitButton.dataset.originalLabel = text(
           submitButton.textContent,
           DEFAULT_SUBMIT_LABEL
         );
@@ -318,19 +307,18 @@ export function getLoginRefs(container = null) {
 
     identifierInput,
     emailInput: identifierInput,
-
     passwordInput,
+
     rememberInput: qs(scope, SELECTORS.remember),
-    errorBox: qs(scope, SELECTORS.errorBox),
+    errorBox: qs(scope, SELECTORS.message),
     submitButton,
-    forgotPasswordLink: qs(scope, SELECTORS.forgotPasswordLink),
 
     fieldIdentifier: qs(scope, SELECTORS.fieldIdentifier),
     fieldEmail: qs(scope, SELECTORS.fieldIdentifier),
     fieldPassword: qs(scope, SELECTORS.fieldPassword),
 
     togglePasswordButton: qs(scope, SELECTORS.passwordToggle),
-    capsIndicator: qs(scope, SELECTORS.capsIndicator),
+    forgotPasswordLink: qs(scope, SELECTORS.forgotPasswordLink),
     themeToggleButton: qs(scope, SELECTORS.themeToggle),
 
     passwordFieldBindings: [],
@@ -339,7 +327,6 @@ export function getLoginRefs(container = null) {
   refs.passwordField = {
     input: refs.passwordInput,
     toggle: refs.togglePasswordButton,
-    capsIndicator: refs.capsIndicator,
   };
 
   return refs;
@@ -374,14 +361,14 @@ export function setInputInvalid(inputNode, invalid = false) {
 }
 
 export function setFieldError(fieldNode, message = "", errorNode = null) {
-  const text = safeText(message, "");
+  const clean = text(message, "");
 
-  setFieldInvalid(fieldNode, Boolean(text));
+  setFieldInvalid(fieldNode, Boolean(clean));
 
   if (errorNode) {
-    setText(errorNode, text);
-    setHidden(errorNode, !text);
-    setAttr(errorNode, "role", text ? "alert" : null);
+    setText(errorNode, clean);
+    setHidden(errorNode, !clean);
+    setAttr(errorNode, "role", clean ? "alert" : null);
   }
 
   return true;
@@ -392,17 +379,17 @@ export function clearFieldError(fieldNode, errorNode = null) {
 }
 
 function setGlobalError(errorBox, message = "") {
-  const text = safeText(message, "");
+  const clean = text(message, "");
 
-  if (!errorBox) return text;
+  if (!errorBox) return clean;
 
-  setText(errorBox, text);
-  setHidden(errorBox, !text);
-  toggleClass(errorBox, "is-visible", Boolean(text));
-  setAttr(errorBox, "role", text ? "alert" : null);
-  setAttr(errorBox, "aria-live", text ? "polite" : null);
+  setText(errorBox, clean);
+  setHidden(errorBox, !clean);
+  toggleClass(errorBox, "is-visible", Boolean(clean));
+  setAttr(errorBox, "role", clean ? "alert" : null);
+  setAttr(errorBox, "aria-live", clean ? "polite" : null);
 
-  return text;
+  return clean;
 }
 
 export function clearLoginErrors(refs = {}) {
@@ -423,18 +410,18 @@ export function clearLoginErrors(refs = {}) {
 
 export function applyLoginErrors(refs = {}, errors = {}, options = {}) {
   const identifierError =
-    safeText(errors.identifier, "") ||
-    safeText(errors.email, "") ||
-    safeText(errors.username, "") ||
-    safeText(errors.user, "") ||
-    safeText(errors.login, "");
+    text(errors.identifier, "") ||
+    text(errors.email, "") ||
+    text(errors.username, "") ||
+    text(errors.user, "") ||
+    text(errors.login, "");
 
-  const passwordError = safeText(errors.password, "");
+  const passwordError = text(errors.password, "");
 
   const globalError =
-    safeText(errors.global, "") ||
-    safeText(errors.form, "") ||
-    safeText(errors.message, "");
+    text(errors.global, "") ||
+    text(errors.form, "") ||
+    text(errors.message, "");
 
   const firstError = identifierError || passwordError || globalError;
 
@@ -464,16 +451,16 @@ export function applyLoginErrors(refs = {}, errors = {}, options = {}) {
 }
 
 export function setGlobalLoginError(refs = {}, message = "") {
-  const text = setGlobalError(refs.errorBox, message);
+  const clean = setGlobalError(refs.errorBox, message);
 
   try {
     if (refs.form) {
-      if (text) refs.form.dataset.error = "true";
+      if (clean) refs.form.dataset.error = "true";
       else delete refs.form.dataset.error;
     }
   } catch {}
 
-  return text;
+  return clean;
 }
 
 /* =========================================================
@@ -484,8 +471,8 @@ function originalSubmitLabel(button) {
   if (!button) return DEFAULT_SUBMIT_LABEL;
 
   try {
-    return safeText(button.dataset.originalLabel, "") ||
-      safeText(button.textContent, DEFAULT_SUBMIT_LABEL);
+    return text(button.dataset.originalLabel, "") ||
+      text(button.textContent, DEFAULT_SUBMIT_LABEL);
   } catch {
     return DEFAULT_SUBMIT_LABEL;
   }
@@ -530,11 +517,12 @@ export function setLoginLoading(refs = {}, loading = false, options = {}) {
   setLoadingDisabled(refs.submitButton, active);
   setLoadingDisabled(refs.identifierInput || refs.emailInput, active);
   setLoadingDisabled(refs.passwordInput, active);
+  setLoadingDisabled(refs.togglePasswordButton, active);
   setLoadingDisabled(refs.rememberInput, active);
 
   if (refs.submitButton) {
-    const loadingLabel = safeText(options.loadingLabel, DEFAULT_LOADING_LABEL);
-    const submitLabel = safeText(options.submitLabel, originalSubmitLabel(refs.submitButton));
+    const submitLabel = text(options.submitLabel, originalSubmitLabel(refs.submitButton));
+    const loadingLabel = text(options.loadingLabel, DEFAULT_LOADING_LABEL);
 
     setText(refs.submitButton, active ? loadingLabel : submitLabel);
     setAttr(refs.submitButton, "aria-busy", active ? "true" : "false");
@@ -549,38 +537,13 @@ export function unlockLoginForm(refs = {}, options = {}) {
 }
 
 /* =========================================================
-   PASSWORD VISIBILITY
-   Nota:
-   - La lógica real debe vivir en shared/password-field.
-   - Estas funciones quedan ligeras para no romper imports.
-========================================================= */
-
-export function getPasswordVisibilityState(refs = {}) {
-  return refs.passwordInput?.type === "text";
-}
-
-export function setPasswordVisibility(refs = {}, visible = false) {
-  const active = Boolean(visible);
-
-  try {
-    if (refs.passwordInput) {
-      refs.passwordInput.type = active ? "text" : "password";
-    }
-  } catch {}
-
-  return active;
-}
-
-export function togglePasswordVisibility(refs = {}) {
-  return setPasswordVisibility(refs, !getPasswordVisibilityState(refs));
-}
-
-/* =========================================================
    FORM STATE
 ========================================================= */
 
 function normalizeIdentifier(value = "") {
-  return safeText(value, "").normalize("NFKC").replace(/\s+/g, " ");
+  return text(value, "")
+    .normalize("NFKC")
+    .replace(/\s+/g, " ");
 }
 
 export function readLoginFormState(refs = {}) {
@@ -594,6 +557,7 @@ export function readLoginFormState(refs = {}) {
     username: identifier,
     user: identifier,
     login: identifier,
+
     password: rawText(refs.passwordInput?.value, ""),
     remember: Boolean(refs.rememberInput?.checked),
     rememberMe: Boolean(refs.rememberInput?.checked),
@@ -602,9 +566,9 @@ export function readLoginFormState(refs = {}) {
 
 export function focusLoginPrimaryField(refs = {}, options = {}) {
   later(() => {
-    const hasIdentifier = Boolean(normalizeIdentifier(refs.identifierInput?.value ?? ""));
+    const identifier = normalizeIdentifier(refs.identifierInput?.value ?? "");
 
-    if ((options.rememberedIdentifier || hasIdentifier) && refs.passwordInput) {
+    if ((options.rememberedIdentifier || identifier) && refs.passwordInput) {
       focus(refs.passwordInput);
       return;
     }
@@ -627,12 +591,7 @@ export function bindLoginInputClearers(refs = {}, handler = null) {
     refs.passwordInput,
   ].filter(Boolean);
 
-  return compose(
-    nodes.flatMap((node) => [
-      bindDom(node, "input", handler),
-      bindDom(node, "change", handler),
-    ])
-  );
+  return compose(nodes.map((node) => bindDom(node, "input", handler)));
 }
 
 export function bindLoginSubmit(refs = {}, handler = null) {
@@ -650,6 +609,7 @@ export function bindLoginSubmit(refs = {}, handler = null) {
     } catch {}
 
     if (locked) return undefined;
+
     locked = true;
 
     let result;
@@ -662,10 +622,10 @@ export function bindLoginSubmit(refs = {}, handler = null) {
     }
 
     Promise.resolve(result)
+      .catch(noop)
       .finally(() => {
         locked = false;
-      })
-      .catch(noop);
+      });
 
     return result;
   };
@@ -680,6 +640,34 @@ export function bindLoginSubmit(refs = {}, handler = null) {
 
   SUBMIT_BINDINGS.set(target, dispose);
   return dispose;
+}
+
+/* =========================================================
+   COMPAT MÍNIMA
+========================================================= */
+
+export function getPasswordVisibilityState(refs = {}) {
+  return refs.passwordInput?.type === "text";
+}
+
+export function setPasswordVisibility(refs = {}, visible = false) {
+  const binding = refs.passwordFieldBindings?.[0];
+
+  if (isFn(binding?.setVisible)) {
+    return binding.setVisible(Boolean(visible));
+  }
+
+  return getPasswordVisibilityState(refs);
+}
+
+export function togglePasswordVisibility(refs = {}) {
+  const binding = refs.passwordFieldBindings?.[0];
+
+  if (isFn(binding?.toggleVisibility)) {
+    return binding.toggleVisibility();
+  }
+
+  return getPasswordVisibilityState(refs);
 }
 
 export function bindPasswordToggle(refs = {}, handler = null) {
@@ -704,7 +692,7 @@ export function bindThemeToggle(refs = {}, handler = null) {
 }
 
 /* =========================================================
-   SNAPSHOT MÍNIMO
+   SNAPSHOT
 ========================================================= */
 
 export function getLoginDomSnapshot(refs = {}) {
@@ -743,17 +731,17 @@ export default {
   setLoginLoading,
   unlockLoginForm,
 
-  getPasswordVisibilityState,
-  setPasswordVisibility,
-  togglePasswordVisibility,
-
   focusLoginPrimaryField,
   readLoginFormState,
 
   bindLoginInputClearers,
+  bindLoginSubmit,
+
+  getPasswordVisibilityState,
+  setPasswordVisibility,
+  togglePasswordVisibility,
   bindPasswordToggle,
   bindThemeToggle,
-  bindLoginSubmit,
 
   getLoginDomSnapshot,
 };

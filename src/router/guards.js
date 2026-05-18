@@ -17,12 +17,14 @@
    - Sin storage.
    - Sin Toast.
    - Sin navegación.
+   - Sin render.
+   - Sin history.
    - Sin /403.
    - Sin alias /home.
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
-export const GUARDS_VERSION = "router.guards.v2";
+export const GUARDS_VERSION = "router.guards.v3";
 
 const LOGIN_PATH = "/login";
 const HOME_PATH = "/";
@@ -109,10 +111,10 @@ function normalizeHashPath(path = HOME_PATH) {
   return value;
 }
 
-function normalizePublicPath(path = HOME_PATH) {
+export function normalizePublicPath(path = HOME_PATH) {
   let value = normalizeHashPath(path);
 
-  if (value.startsWith("//")) return HOME_PATH;
+  if (!value || value.startsWith("//")) return HOME_PATH;
 
   if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
     return HOME_PATH;
@@ -142,7 +144,8 @@ function normalizeUserSlug(value = "") {
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
-    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
     .toLowerCase();
 
   if (!slug) return "";
@@ -150,7 +153,7 @@ function normalizeUserSlug(value = "") {
   return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
 }
 
-function extractSlugFromPath(path = HOME_PATH) {
+export function extractSlugFromPath(path = HOME_PATH) {
   const canonical = normalizeCanonicalPath(path);
 
   if (!canonical.startsWith(USER_HOME_PREFIX)) return "";
@@ -162,11 +165,11 @@ function extractSlugFromPath(path = HOME_PATH) {
   return normalizeUserSlug(slug);
 }
 
-function isUserHomePath(path = HOME_PATH) {
+export function isUserHomePath(path = HOME_PATH) {
   return Boolean(extractSlugFromPath(path));
 }
 
-function canonicalGuardPath(path = HOME_PATH) {
+export function canonicalGuardPath(path = HOME_PATH) {
   const canonical = normalizeCanonicalPath(path);
   return isUserHomePath(canonical) ? HOME_PATH : canonical;
 }
@@ -210,6 +213,7 @@ function cleanToken(value = "") {
 
   if (!token) return "";
   if (/\s/.test(token)) return "";
+  if (token.length > 8192) return "";
 
   if (
     ["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
@@ -267,6 +271,7 @@ function unwrapUser(payload = null) {
     payload.authUser,
     payload.sessionUser,
     payload.session?.user,
+    payload.sessionData?.user,
     payload.data?.user,
     payload.payload?.user,
     payload.me,
@@ -415,9 +420,14 @@ export function normalizeGuardRoles(value = []) {
 }
 
 function rawRouteRoles(route = null) {
-  return asArray(route?.roles).filter((role) => {
-    return role !== undefined && role !== null && role !== "";
-  });
+  return [
+    route?.role,
+    route?.roles,
+    route?.meta?.role,
+    route?.meta?.roles,
+  ]
+    .flat(Infinity)
+    .filter((role) => role !== undefined && role !== null && role !== "");
 }
 
 function routeRoles(route = null) {
@@ -518,8 +528,7 @@ function publicUser(user = null) {
   if (!userUsable(user)) return null;
 
   return {
-    id: user.id || user.userId || null,
-    userId: user.userId || user.id || null,
+    hasId: Boolean(user.id || user.userId),
     username: user.username || null,
     slug: extractUserSlug(user) || null,
     role: normalizeRole(user.role || user.rol || user.roles) || null,
@@ -639,6 +648,21 @@ export function shouldAllowRoute({
   const roles = routeRoles(route);
   const unsupportedRoles = unsupportedRouteRoles(route);
 
+  if (unsupportedRoles.length) {
+    return deny({
+      reason: GUARD_REASONS.unsupportedRole,
+      route,
+      canonicalPath,
+      publicPath,
+      details: buildDetails({
+        ...common,
+        extra: {
+          unsupportedRoles,
+        },
+      }),
+    });
+  }
+
   if (guestOnly && logged) {
     return deny({
       reason: GUARD_REASONS.alreadyAuthenticated,
@@ -666,21 +690,6 @@ export function shouldAllowRoute({
         extra: {
           publicRoute: true,
           guestOnly,
-        },
-      }),
-    });
-  }
-
-  if (unsupportedRoles.length) {
-    return deny({
-      reason: GUARD_REASONS.unsupportedRole,
-      route,
-      canonicalPath,
-      publicPath,
-      details: buildDetails({
-        ...common,
-        extra: {
-          unsupportedRoles,
         },
       }),
     });
@@ -801,12 +810,20 @@ export function getGuardsSnapshot({
     access,
 
     policy: {
+      guardOnly: true,
+
       ownAuth: false,
       ownStorage: false,
       ownTransport: false,
       ownRouterNavigation: false,
+      ownRender: false,
+      ownHistory: false,
+
+      strictAuth: true,
+      tokenAndUserRequired: true,
 
       roles: [...VALID_ROLES],
+      rolesStrict: true,
 
       userSlugHome: true,
       canonicalizesUserHome: true,

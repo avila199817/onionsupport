@@ -3,63 +3,52 @@
    Archivo: src/views/loginView.js
 
    Responsabilidad:
-   - Mantener imports antiguos src/views/loginView.js.
-   - Delegar todo en src/views/login/index.js.
+   - Mantener compatibilidad con imports antiguos.
+   - Delegar en src/views/login/index.js.
    - Sin Auth.
    - Sin Router.
    - Sin Shell.
    - Sin Loader.
    - Sin eventos.
-   - Sin debug global.
    - Sin DOM propio.
-   - Sin magia negra.
+   - Sin debug pesado.
 ========================================================= */
 
 import * as LoginModule from "./login/index.js";
 
-export const LOGIN_VIEW_BRIDGE_VERSION = "simple-bridge";
-
-const SOURCE = "loginView.legacyBridge";
+export const LOGIN_VIEW_BRIDGE_VERSION = "minimal-1";
 
 /* =========================================================
-   BASICS
+   HELPERS
 ========================================================= */
 
-function isFunction(value) {
+function isFn(value) {
   return typeof value === "function";
 }
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+function getApi() {
+  return LoginModule.LoginView || LoginModule.default || LoginModule;
 }
 
-function resolveLoginApi() {
-  return (
-    LoginModule.LoginView ||
-    LoginModule.default ||
-    LoginModule
-  );
-}
-
-function callFirst(methods = [], args = [], options = {}) {
-  const api = resolveLoginApi();
+function call(methods = [], args = [], options = {}) {
+  const api = getApi();
 
   for (const method of methods) {
-    if (isFunction(LoginModule?.[method])) {
+    if (isFn(LoginModule[method])) {
       return LoginModule[method](...args);
     }
 
-    if (isFunction(api?.[method])) {
+    if (isFn(api?.[method])) {
       return api[method](...args);
     }
   }
 
-  if (options.allowCallable === true && isFunction(api)) {
+  if (options.allowCallable === true && isFn(api)) {
     return api(...args);
   }
 
-  if (options.throwIfMissing === true) {
-    throw new Error("[loginView] src/views/login/index.js no expone un renderer válido.");
+  if (options.required === true) {
+    throw new Error("[loginView] src/views/login/index.js no expone render/init/mount válido.");
   }
 
   return null;
@@ -70,114 +59,66 @@ function callFirst(methods = [], args = [], options = {}) {
 ========================================================= */
 
 export function render(container, deps = {}) {
-  return callFirst(
-    ["render", "init", "mount"],
-    [container, deps],
-    {
-      allowCallable: true,
-      throwIfMissing: true,
-    }
-  );
+  return call(["render", "init", "mount"], [container, deps], {
+    allowCallable: true,
+    required: true,
+  });
 }
 
 export function init(container, deps = {}) {
-  return callFirst(
-    ["init", "render", "mount"],
-    [container, deps],
-    {
-      allowCallable: true,
-      throwIfMissing: true,
-    }
-  );
+  return call(["init", "render", "mount"], [container, deps], {
+    allowCallable: true,
+    required: true,
+  });
 }
 
 export function mount(container, deps = {}) {
-  return callFirst(
-    ["mount", "render", "init"],
-    [container, deps],
-    {
-      allowCallable: true,
-      throwIfMissing: true,
-    }
-  );
+  return call(["mount", "render", "init"], [container, deps], {
+    allowCallable: true,
+    required: true,
+  });
 }
 
 export function destroy(options = {}) {
   return Boolean(
-    callFirst(
-      ["destroy", "unmount", "dispose", "teardown"],
-      [options],
-      {
-        allowCallable: false,
-        throwIfMissing: false,
-      }
-    )
+    call(["destroy", "unmount", "dispose", "teardown"], [options])
   );
 }
 
-export function unmount(options = {}) {
-  return destroy(options);
-}
-
-export function dispose(options = {}) {
-  return destroy(options);
-}
-
-export function teardown(options = {}) {
-  return destroy(options);
-}
+export const unmount = destroy;
+export const dispose = destroy;
+export const teardown = destroy;
 
 /* =========================================================
-   SNAPSHOT
+   SNAPSHOT MÍNIMO
 ========================================================= */
 
 export function getSnapshot() {
-  const api = resolveLoginApi();
+  const api = getApi();
 
-  if (isFunction(LoginModule?.getSnapshot)) {
-    return LoginModule.getSnapshot();
-  }
-
-  if (isFunction(api?.getSnapshot)) {
-    return api.getSnapshot();
-  }
-
-  if (isFunction(api?.getDebugSnapshot)) {
-    return api.getDebugSnapshot();
-  }
+  if (isFn(LoginModule.getSnapshot)) return LoginModule.getSnapshot();
+  if (isFn(api?.getSnapshot)) return api.getSnapshot();
 
   return {
     version: LOGIN_VIEW_BRIDGE_VERSION,
-    source: SOURCE,
     delegated: true,
     target: "src/views/login/index.js",
     hasRenderer: Boolean(
-      isFunction(LoginModule?.render) ||
-        isFunction(LoginModule?.init) ||
-        isFunction(LoginModule?.mount) ||
-        isFunction(api?.render) ||
-        isFunction(api?.init) ||
-        isFunction(api?.mount) ||
-        isFunction(api)
+      isFn(LoginModule.render) ||
+        isFn(LoginModule.init) ||
+        isFn(LoginModule.mount) ||
+        isFn(api?.render) ||
+        isFn(api?.init) ||
+        isFn(api?.mount) ||
+        isFn(api)
     ),
-    policy: {
-      bridgeOnly: true,
-      noAuth: true,
-      noRouter: true,
-      noShell: true,
-      noLoader: true,
-      noEvents: true,
-      noDomOwn: true,
-    },
   };
 }
 
-export function getDebugSnapshot() {
-  return getSnapshot();
-}
+export const getDebugSnapshot = getSnapshot;
 
 /* =========================================================
-   BRIDGE OBJECT
+   DEFAULT EXPORT
 ========================================================= */
 
 export const LoginView = Object.freeze({

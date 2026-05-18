@@ -7,6 +7,7 @@
    - Normalizar credenciales.
    - Validar respuesta mínima.
    - Devolver token + user para que Auth/index.js aplique sesión.
+   - Exponer homePath/postLoginTarget si el user trae slug real.
    - Sin fetch propio.
    - Sin apiClient propio.
    - Sin Router.
@@ -15,12 +16,14 @@
    - Sin eventos.
    - Sin refresh automático.
    - Sin storage paralelo.
+   - Sin rutas inventadas.
+   - Sin /home.
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
 import * as CoreHttpModule from "../../core/http.js";
 
-export const LOGIN_VERSION = "minimal-1";
+export const LOGIN_VERSION = "auth.login.v1";
 
 export const AUTH_ENDPOINTS = Object.freeze({
   login: "/api/auth/login",
@@ -28,6 +31,7 @@ export const AUTH_ENDPOINTS = Object.freeze({
 
 const LOGIN_ROUTE = "/login";
 const HOME_ROUTE = "/";
+const USER_HOME_PREFIX = "/@";
 
 const MAX_IDENTIFIER_LENGTH = 160;
 const MAX_PASSWORD_LENGTH = 1024;
@@ -83,6 +87,39 @@ function cleanRole(value = "") {
 }
 
 /* =========================================================
+   SLUG / HOME
+========================================================= */
+
+export function normalizeLoginSlug(value = "") {
+  const slug = text(value, "").replace(/^@+/, "").trim();
+
+  if (!slug) return "";
+
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
+export function extractLoginUserSlug(user = null) {
+  if (!isObject(user)) return "";
+
+  return normalizeLoginSlug(
+    user.slug ||
+      user.lookup?.slug ||
+      user.profile?.slug ||
+      ""
+  );
+}
+
+export function buildUserHomePath(user = null) {
+  const slug = extractLoginUserSlug(user);
+
+  return slug ? `${USER_HOME_PREFIX}${slug}` : HOME_ROUTE;
+}
+
+export function getPostLoginTarget(user = null) {
+  return buildUserHomePath(user);
+}
+
+/* =========================================================
    TOKEN / USER
 ========================================================= */
 
@@ -134,6 +171,12 @@ function removeSensitiveUserFields(user = {}) {
     "refresh_token",
     "resetToken",
     "activationToken",
+    "otp",
+    "otpCode",
+    "twofa_secret",
+    "twofaSecret",
+    "totpSecret",
+    "backupCodes",
   ]) {
     try {
       delete output[key];
@@ -148,9 +191,13 @@ function removeSensitiveUserFields(user = {}) {
 function userDisabled(user = null) {
   if (!isObject(user)) return true;
 
+  const status = String(user.status || user.estado || "").toLowerCase();
+
   return (
     user.disabled === true ||
-    String(user.status || "").toLowerCase() === "disabled"
+    user.deleted === true ||
+    status === "disabled" ||
+    status === "deleted"
   );
 }
 
@@ -174,7 +221,16 @@ function normalizeUser(user = null) {
 
   const id = safeUser.userId || safeUser.id || null;
   const email = safeUser.email || null;
-  const username = safeUser.username || safeUser.slug || email || id || null;
+  const slug = extractLoginUserSlug(safeUser);
+
+  const username =
+    safeUser.username ||
+    safeUser.userName ||
+    safeUser.user_name ||
+    slug ||
+    email ||
+    id ||
+    null;
 
   const displayName =
     safeUser.displayName ||
@@ -195,7 +251,7 @@ function normalizeUser(user = null) {
     userId: safeUser.userId || id,
 
     username,
-    slug: safeUser.slug || username,
+    slug: slug || null,
 
     name: safeUser.name || displayName,
     fullName: safeUser.fullName || displayName,
@@ -245,13 +301,15 @@ function pick(nodes = [], keys = []) {
 }
 
 function readToken(payload = {}) {
-  return cleanToken(
-    pick(nested(payload), [
-      "token",
-      "accessToken",
-      "access_token",
-    ])
-  ) || getHttpToken();
+  return (
+    cleanToken(
+      pick(nested(payload), [
+        "token",
+        "accessToken",
+        "access_token",
+      ])
+    ) || getHttpToken()
+  );
 }
 
 function readUser(payload = {}) {
@@ -303,6 +361,8 @@ function normalizeLoginResponse(response = {}) {
   const token = readToken(response);
   const user = readUser(response);
   const role = user?.role || null;
+  const slug = extractLoginUserSlug(user);
+  const homePath = buildUserHomePath(user);
   const authenticated = Boolean(token && user);
 
   return {
@@ -315,6 +375,11 @@ function normalizeLoginResponse(response = {}) {
     access_token: token,
 
     user,
+
+    userSlug: slug || null,
+    homePath,
+    defaultHome: homePath,
+    postLoginTarget: homePath,
 
     role,
     roles: role ? [role] : [],
@@ -493,10 +558,6 @@ export function buildLoginRedirectPath() {
   return LOGIN_ROUTE;
 }
 
-export function getPostLoginTarget() {
-  return HOME_ROUTE;
-}
-
 /* =========================================================
    PUBLIC API
 ========================================================= */
@@ -591,6 +652,7 @@ export function getLoginSnapshot() {
     endpoint: AUTH_ENDPOINTS.login,
     loginRoute: LOGIN_ROUTE,
     homeRoute: HOME_ROUTE,
+    userHomePrefix: USER_HOME_PREFIX,
   };
 }
 
@@ -606,6 +668,10 @@ export default {
   resolveLoginIdentifier,
   normalizeLoginPayload,
   buildLoginRequestBody,
+
+  normalizeLoginSlug,
+  extractLoginUserSlug,
+  buildUserHomePath,
 
   buildLoginRedirectPath,
   getPostLoginTarget,

@@ -7,30 +7,41 @@
    - Mostrar/ocultar password.
    - Alternar aria-pressed / aria-label.
    - Alternar iconos eye / eye-off si existen.
+   - Detectar CapsLock sólo si existe indicador en el template.
    - Binding idempotente.
    - Cleanup real.
    - Sin AppCore.
    - Sin CSS inline.
    - Sin innerHTML.
-   - Sin CapsLock.
    - Sin eventos globales.
-   - Sin clases globales peligrosas como is-hidden.
    - Sin recrear SVGs desde JS.
+   - Sin usar clases globales peligrosas como is-hidden.
 ========================================================= */
 
-export const PASSWORD_FIELD_DOM_VERSION = "minimal-5";
+export const PASSWORD_FIELD_DOM_VERSION = "minimal-6";
 
 const FIELD_SELECTOR = "[data-password-field]";
-const WRAPPER_SELECTOR = "[data-password-wrapper], .password-wrapper, .login-password-wrapper, .password-reset-password-wrapper";
-const INPUT_SELECTOR = "[data-password-input], [data-login-password], input[name='password'], input[name='confirmPassword']";
-const TOGGLE_SELECTOR = "[data-password-toggle], [data-login-password-toggle], .password-toggle, .login-password-toggle";
-const ICON_SELECTOR = "[data-password-toggle-icon], .password-toggle-icon";
+const WRAPPER_SELECTOR =
+  "[data-password-wrapper], .password-wrapper, .login-password-wrapper, .password-reset-password-wrapper";
+
+const INPUT_SELECTOR =
+  "[data-password-input], [data-login-password], input[name='password'], input[name='confirmPassword']";
+
+const TOGGLE_SELECTOR =
+  "[data-password-toggle], [data-login-password-toggle], .password-toggle, .login-password-toggle";
+
+const ICON_SELECTOR =
+  "[data-password-toggle-icon], .password-toggle-icon";
+
+const CAPS_SELECTOR =
+  "[data-password-caps], [data-login-caps], .password-caps, .caps-indicator";
 
 const DEFAULT_SHOW_LABEL = "Mostrar contraseña";
 const DEFAULT_HIDE_LABEL = "Ocultar contraseña";
 
 const BOUND_DATA_KEY = "passwordFieldBound";
 const VISIBLE_DATA_KEY = "passwordVisible";
+const CAPS_DATA_KEY = "capsLockActive";
 
 const BINDINGS = new WeakMap();
 
@@ -225,6 +236,12 @@ function findIcon(toggle) {
   return isButton(toggle) ? qs(toggle, ICON_SELECTOR) : null;
 }
 
+function findCaps(root) {
+  if (!root) return null;
+  if (isElement(root) && matches(root, CAPS_SELECTOR)) return root;
+  return qs(root, CAPS_SELECTOR);
+}
+
 function resolveParts(node) {
   const root = resolveRoot(node);
 
@@ -234,6 +251,7 @@ function resolveParts(node) {
       input: null,
       toggle: null,
       icon: null,
+      caps: null,
     };
   }
 
@@ -245,6 +263,7 @@ function resolveParts(node) {
     input,
     toggle,
     icon: findIcon(toggle),
+    caps: findCaps(root),
   };
 }
 
@@ -262,7 +281,7 @@ function getBinding(node) {
 }
 
 /* =========================================================
-   STATE
+   PASSWORD STATE
 ========================================================= */
 
 function showLabel(toggle) {
@@ -332,7 +351,7 @@ function syncIcon(icon, visible = false) {
   return true;
 }
 
-function syncState(parts = {}) {
+function syncPasswordState(parts = {}) {
   const { root, input, toggle, icon } = parts;
   const visible = isVisible(input);
 
@@ -367,6 +386,50 @@ function canToggle(parts = {}) {
 }
 
 /* =========================================================
+   CAPSLOCK STATE
+========================================================= */
+
+function eventCapsActive(event) {
+  if (!event || !isFn(event.getModifierState)) return false;
+
+  try {
+    return Boolean(event.getModifierState("CapsLock"));
+  } catch {
+    return false;
+  }
+}
+
+function setCapsState(caps, active = false) {
+  if (!isElement(caps)) return false;
+
+  const enabled = Boolean(active);
+
+  try {
+    caps.hidden = !enabled;
+  } catch {}
+
+  setAttr(caps, "aria-hidden", enabled ? "false" : "true");
+  setData(caps, CAPS_DATA_KEY, enabled ? "true" : null);
+  toggleClass(caps, "is-visible", enabled);
+  toggleClass(caps, "is-caps-active", enabled);
+
+  return true;
+}
+
+function syncCapsFromEvent(parts = {}, event = null) {
+  const { input, caps } = parts;
+
+  if (!isInput(input) || !isElement(caps)) return false;
+
+  const active = document.activeElement === input && eventCapsActive(event);
+  return setCapsState(caps, active);
+}
+
+function hideCaps(parts = {}) {
+  return setCapsState(parts.caps, false);
+}
+
+/* =========================================================
    SINGLE FIELD
 ========================================================= */
 
@@ -393,7 +456,7 @@ export function bindPasswordField(fieldRoot) {
     if (destroyed) return false;
 
     const changed = setInputType(input, Boolean(visible));
-    syncState(parts);
+    syncPasswordState(parts);
 
     if (options.focus !== false) {
       focusInput(input);
@@ -420,17 +483,32 @@ export function bindPasswordField(fieldRoot) {
     toggleVisibility({ focus: true });
   }
 
+  function onCapsEvent(event) {
+    syncCapsFromEvent(parts, event);
+  }
+
+  function onBlur() {
+    hideCaps(parts);
+  }
+
   function onFormReset() {
     try {
       window.setTimeout(() => {
-        if (!destroyed) {
-          setVisible(false, { focus: false });
-        }
+        if (destroyed) return;
+        setVisible(false, { focus: false });
+        hideCaps(parts);
       }, 0);
     } catch {}
   }
 
   disposers.push(bindDom(toggle, "click", onToggleClick));
+
+  if (parts.caps) {
+    disposers.push(bindDom(input, "keydown", onCapsEvent));
+    disposers.push(bindDom(input, "keyup", onCapsEvent));
+    disposers.push(bindDom(input, "focus", onCapsEvent));
+    disposers.push(bindDom(input, "blur", onBlur));
+  }
 
   const form = closest(input, "form");
   if (form) {
@@ -442,7 +520,8 @@ export function bindPasswordField(fieldRoot) {
   setData(toggle, BOUND_DATA_KEY, "true");
   setData(root, "passwordFieldDomVersion", PASSWORD_FIELD_DOM_VERSION);
 
-  syncState(parts);
+  syncPasswordState(parts);
+  hideCaps(parts);
 
   const binding = {
     version: PASSWORD_FIELD_DOM_VERSION,
@@ -451,6 +530,7 @@ export function bindPasswordField(fieldRoot) {
     input,
     toggle,
     icon: parts.icon || null,
+    capsIndicator: parts.caps || null,
 
     get destroyed() {
       return destroyed;
@@ -471,9 +551,20 @@ export function bindPasswordField(fieldRoot) {
     setVisible,
     toggleVisibility,
 
-    sync() {
+    sync(event = null) {
       if (destroyed) return false;
-      return syncState(parts);
+
+      const visible = syncPasswordState(parts);
+
+      if (event) {
+        syncCapsFromEvent(parts, event);
+      }
+
+      return visible;
+    },
+
+    hideCaps() {
+      return hideCaps(parts);
     },
 
     destroy() {
@@ -481,7 +572,8 @@ export function bindPasswordField(fieldRoot) {
 
       try {
         setInputType(input, false);
-        syncState(parts);
+        syncPasswordState(parts);
+        hideCaps(parts);
       } catch {}
 
       destroyed = true;
@@ -623,8 +715,10 @@ export function getPasswordFieldSnapshot(fieldRoot = null) {
     visible: Boolean(binding.visible),
     hasInput: Boolean(binding.input),
     hasToggle: Boolean(binding.toggle),
+    hasCaps: Boolean(binding.capsIndicator),
     inputType: text(binding.input?.type, ""),
     togglePressed: text(binding.toggle?.getAttribute?.("aria-pressed"), ""),
+    capsActive: binding.capsIndicator?.dataset?.[CAPS_DATA_KEY] === "true",
   };
 }
 

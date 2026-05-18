@@ -8,12 +8,13 @@
    - Auth header sólo si toca.
    - /api/auth/me siempre privado.
    - Sin hooks.
-   - Sin retry complejo.
-   - Sin dedupe.
+   - Sin retry real.
+   - Sin dedupe real.
    - Sin UI.
    - Sin Router.
    - Sin Storage.
    - Sin Toast.
+   - Sin magia negra.
 ========================================================= */
 
 import { config } from "./config.js";
@@ -30,17 +31,38 @@ export const REQUEST_EVENTS = Object.freeze({
   clearInFlight: "app:request:clear-in-flight",
 });
 
-const API_BASE = config?.apiBase || "https://api.onionit.net";
+const DEFAULT_API_BASE = "https://api.onionit.net";
 
-const PUBLIC_API_PATHS = [
-  "/api/auth/login",
-  "/api/auth/refresh",
-  "/api/auth/activate",
-  "/api/auth/reset-password-request",
-  "/api/auth/reset-password-confirm",
-];
+const API_BASE = normalizeApiBase(
+  config?.apiBase ||
+    config?.apiOrigin ||
+    config?.api?.baseUrl ||
+    config?.api?.base ||
+    DEFAULT_API_BASE
+);
 
-const PRIVATE_ME_PATH = "/api/auth/me";
+const AUTH_ENDPOINTS = Object.freeze({
+  login: "/api/auth/login",
+  refresh: "/api/auth/refresh",
+  activate: "/api/auth/activate",
+  requestPasswordReset: "/api/auth/reset-password-request",
+  confirmPasswordReset: "/api/auth/reset-password-confirm",
+  me: "/api/auth/me",
+});
+
+const PUBLIC_API_PATHS = Object.freeze([
+  AUTH_ENDPOINTS.login,
+  AUTH_ENDPOINTS.refresh,
+  AUTH_ENDPOINTS.activate,
+  AUTH_ENDPOINTS.requestPasswordReset,
+  AUTH_ENDPOINTS.confirmPasswordReset,
+]);
+
+const PRIVATE_ME_PATH = AUTH_ENDPOINTS.me;
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isFunction(value) {
   return typeof value === "function";
@@ -55,6 +77,46 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
+function normalizeApiBase(value = "") {
+  const raw = text(value, DEFAULT_API_BASE).replace(/\/+$/g, "");
+
+  try {
+    const url = new URL(raw);
+
+    if (!["http:", "https:"].includes(url.protocol)) {
+      return DEFAULT_API_BASE;
+    }
+
+    if (raw.endsWith("/api")) {
+      return raw.slice(0, -4);
+    }
+
+    return url.origin;
+  } catch {
+    return DEFAULT_API_BASE;
+  }
+}
+
+function fetchFn() {
+  try {
+    if (typeof globalThis !== "undefined" && isFunction(globalThis.fetch)) {
+      return globalThis.fetch.bind(globalThis);
+    }
+  } catch {
+    // noop
+  }
+
+  return null;
+}
+
+function isFormData(value) {
+  return typeof FormData !== "undefined" && value instanceof FormData;
+}
+
+function isUrlSearchParams(value) {
+  return typeof URLSearchParams !== "undefined" && value instanceof URLSearchParams;
+}
+
 function normalizeMethod(method = "GET") {
   const value = text(method, "GET").toUpperCase();
 
@@ -67,12 +129,7 @@ function cleanPath(path = "/") {
   let value = text(path, "/");
 
   try {
-    const base =
-      typeof window !== "undefined"
-        ? window.location.origin
-        : "https://local.invalid";
-
-    value = new URL(value, base).pathname || "/";
+    value = new URL(value, DEFAULT_API_BASE).pathname || "/";
   } catch {
     value = value.split("?")[0].split("#")[0] || "/";
   }
@@ -88,7 +145,7 @@ function isPublicApiPath(path = "") {
 
   if (clean === PRIVATE_ME_PATH) return false;
 
-  return PUBLIC_API_PATHS.some((item) => clean === item || clean.startsWith(`${item}/`));
+  return PUBLIC_API_PATHS.includes(clean);
 }
 
 function joinUrl(base = "", path = "") {
@@ -103,19 +160,20 @@ function joinUrl(base = "", path = "") {
 function appendQuery(url = "", query = null) {
   if (!isObject(query)) return url;
 
-  const target = new URL(
-    url,
-    typeof window !== "undefined" ? window.location.origin : "https://local.invalid"
-  );
+  const target = new URL(url, DEFAULT_API_BASE);
 
   for (const [key, value] of Object.entries(query)) {
     if (value === undefined || value === null || value === "") continue;
     target.searchParams.set(key, String(value));
   }
 
-  return /^https?:\/\//i.test(url)
-    ? target.toString()
-    : `${target.pathname}${target.search}${target.hash}`;
+  return target.toString();
+}
+
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function tokenOk(token = "") {
@@ -124,9 +182,15 @@ function tokenOk(token = "") {
   if (!value) return false;
   if (/\s/.test(value)) return false;
 
-  return !["null", "undefined", "false", "true", "[object object]"].includes(
-    value.toLowerCase()
-  );
+  return ![
+    "null",
+    "undefined",
+    "false",
+    "true",
+    "[object object]",
+    "{}",
+    "[]",
+  ].includes(value.toLowerCase());
 }
 
 function getToken(state = {}, options = {}) {
@@ -140,6 +204,16 @@ function getToken(state = {}, options = {}) {
   return tokenOk(token) ? String(token).replace(/^Bearer\s+/i, "") : "";
 }
 
+function serializeBody(method = "GET", body = undefined) {
+  if (["GET", "HEAD", "OPTIONS"].includes(method)) return undefined;
+  if (body === undefined || body === null) return undefined;
+  if (isFormData(body)) return body;
+  if (isUrlSearchParams(body)) return body;
+  if (typeof body === "string") return body;
+
+  return JSON.stringify(body);
+}
+
 function buildHeaders({ state = {}, options = {}, auth = false, body = undefined } = {}) {
   const headers = {
     Accept: "application/json",
@@ -148,7 +222,13 @@ function buildHeaders({ state = {}, options = {}, auth = false, body = undefined
 
   const hasBody = body !== undefined && body !== null;
 
-  if (hasBody && !(body instanceof FormData) && !headers["Content-Type"] && !headers["content-type"]) {
+  if (
+    hasBody &&
+    !isFormData(options.body) &&
+    !isUrlSearchParams(options.body) &&
+    !headers["Content-Type"] &&
+    !headers["content-type"]
+  ) {
     headers["Content-Type"] = "application/json";
   }
 
@@ -166,14 +246,27 @@ function buildHeaders({ state = {}, options = {}, auth = false, body = undefined
   return headers;
 }
 
-function serializeBody(method = "GET", body = undefined) {
-  if (["GET", "HEAD", "OPTIONS"].includes(method)) return undefined;
-  if (body === undefined || body === null) return undefined;
-  if (body instanceof FormData) return body;
-  if (typeof body === "string") return body;
+function shouldUseAuth(path = "", options = {}) {
+  const clean = cleanPath(path);
 
-  return JSON.stringify(body);
+  if (clean === PRIVATE_ME_PATH) return true;
+
+  if (
+    options.public === true ||
+    options.skipAuth === true ||
+    options.auth === false
+  ) {
+    return false;
+  }
+
+  if (options.auth === true) return true;
+
+  return !isPublicApiPath(clean);
 }
+
+/* =========================================================
+   RESPONSE / ERROR
+========================================================= */
 
 export async function parseResponseBody(response, responseType = "auto") {
   if (!response || [204, 205, 304].includes(response.status)) return null;
@@ -210,6 +303,7 @@ export function buildRequestError({
   raw = null,
 } = {}) {
   const status = response?.status || 0;
+
   const message =
     data?.message ||
     data?.error ||
@@ -222,8 +316,9 @@ export function buildRequestError({
 
   error.name = "RequestError";
   error.status = status;
+  error.statusCode = status;
   error.statusText = response?.statusText || "";
-  error.url = url;
+  error.url = redact(url);
   error.method = normalizeMethod(method);
   error.data = data;
   error.raw = raw || null;
@@ -238,6 +333,10 @@ export function shouldRetryRequest() {
 export async function executeFetchWithRetry(url, fetchFactory) {
   return fetchFactory(0, url);
 }
+
+/* =========================================================
+   EVENTS
+========================================================= */
 
 function emit(events, name, payload = {}) {
   try {
@@ -261,6 +360,10 @@ function emit(events, name, payload = {}) {
 
   return false;
 }
+
+/* =========================================================
+   ARGUMENTS
+========================================================= */
 
 function normalizeArgs(arg1, arg2 = {}, arg3 = undefined) {
   if (typeof arg1 === "string" && typeof arg2 === "string") {
@@ -289,6 +392,10 @@ function normalizeArgs(arg1, arg2 = {}, arg3 = undefined) {
   };
 }
 
+/* =========================================================
+   REQUEST FACTORY
+========================================================= */
+
 export function createRequest({ state = {}, events = null, setError = null } = {}) {
   let sequence = 0;
   let pending = 0;
@@ -303,13 +410,7 @@ export function createRequest({ state = {}, events = null, setError = null } = {
 
     const url = appendQuery(joinUrl(API_BASE, path), query);
     const clean = cleanPath(url);
-
-    const auth =
-      clean === PRIVATE_ME_PATH
-        ? true
-        : options.public === true || options.skipAuth === true || options.auth === false
-          ? false
-          : options.auth === true || !isPublicApiPath(clean);
+    const auth = shouldUseAuth(clean, options);
 
     const serializedBody = serializeBody(method, body);
 
@@ -321,12 +422,13 @@ export function createRequest({ state = {}, events = null, setError = null } = {
     });
 
     const requestId = `req_${++sequence}`;
+    const safeUrl = redact(url);
 
     pending += 1;
 
-    if (state && typeof state === "object") {
+    if (isObject(state)) {
       state.requestPending = pending;
-      state.lastRequestUrl = url.replace(/([?&#]token=)([^&#\s]+)/gi, "$1***");
+      state.lastRequestUrl = safeUrl;
       state.lastRequestMethod = method;
     }
 
@@ -334,17 +436,19 @@ export function createRequest({ state = {}, events = null, setError = null } = {
       emit(events, REQUEST_EVENTS.start, {
         requestId,
         method,
-        url: state?.lastRequestUrl || url,
+        url: safeUrl,
         auth,
       });
     }
 
     try {
-      if (typeof fetch !== "function") {
+      const runFetch = fetchFn();
+
+      if (!runFetch) {
         throw new Error("Fetch API no disponible.");
       }
 
-      const response = await fetch(url, {
+      const response = await runFetch(url, {
         method,
         headers,
         credentials: options.credentials || "include",
@@ -353,11 +457,34 @@ export function createRequest({ state = {}, events = null, setError = null } = {
         signal: options.signal || undefined,
       });
 
-      const data = await parseResponseBody(response, options.responseType || "auto");
-
-      if (state && typeof state === "object") {
+      if (isObject(state)) {
         state.lastRequestStatus = response.status;
       }
+
+      if (options.raw === true) {
+        if (!response.ok) {
+          const errorData = await parseResponseBody(response, "auto").catch(() => null);
+
+          throw buildRequestError({
+            response,
+            data: errorData,
+            url,
+            method,
+          });
+        }
+
+        if (options.emitEvents === true) {
+          emit(events, REQUEST_EVENTS.success, {
+            requestId,
+            method,
+            status: response.status,
+          });
+        }
+
+        return response;
+      }
+
+      const data = await parseResponseBody(response, options.responseType || "auto");
 
       if (!response.ok) {
         throw buildRequestError({
@@ -376,12 +503,12 @@ export function createRequest({ state = {}, events = null, setError = null } = {
         });
       }
 
-      return options.raw === true ? response : data;
+      return data;
     } catch (error) {
       lastError = error;
 
-      if (state && typeof state === "object") {
-        state.lastRequestStatus = error.status || 0;
+      if (isObject(state)) {
+        state.lastRequestStatus = error.status || error.statusCode || 0;
       }
 
       if (isFunction(setError) && options.storeError !== false) {
@@ -396,7 +523,7 @@ export function createRequest({ state = {}, events = null, setError = null } = {
         emit(events, REQUEST_EVENTS.error, {
           requestId,
           method,
-          status: error.status || 0,
+          status: error.status || error.statusCode || 0,
           message: error.message || "Request error",
         });
       }
@@ -405,7 +532,7 @@ export function createRequest({ state = {}, events = null, setError = null } = {
     } finally {
       pending = Math.max(0, pending - 1);
 
-      if (state && typeof state === "object") {
+      if (isObject(state)) {
         state.requestPending = pending;
       }
     }
@@ -420,7 +547,7 @@ export function createRequest({ state = {}, events = null, setError = null } = {
         ? {
             name: lastError.name || "Error",
             message: lastError.message || "",
-            status: lastError.status || 0,
+            status: lastError.status || lastError.statusCode || 0,
           }
         : null,
     };
@@ -508,10 +635,13 @@ export function createApiClient(request) {
 export default {
   REQUEST_VERSION,
   REQUEST_EVENTS,
+
   createRequest,
   createApiClient,
+
   parseResponseBody,
   buildRequestError,
+
   shouldRetryRequest,
   executeFetchWithRetry,
 };

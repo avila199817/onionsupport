@@ -7,6 +7,7 @@
    - Montar en #topbar-mount / #app-topbar.
    - Pintar título de ruta.
    - Mostrar usuario básico.
+   - SVGs inline mínimos.
    - Botón sidebar móvil.
    - Logout simple.
    - Sin Store.
@@ -27,7 +28,7 @@ import {
   getImmutableRoutes,
 } from "../../router/routes.js";
 
-export const TOPBAR_UI_VERSION = "simple";
+export const TOPBAR_UI_VERSION = "simple-svg";
 
 const SOURCE = "topbar.ui";
 const APP_NAME = "Onion Support";
@@ -38,6 +39,38 @@ let mounted = false;
 let bound = false;
 let root = null;
 let cleanupClick = null;
+
+/* =========================================================
+   SVG ICONS
+========================================================= */
+
+const ICONS = Object.freeze({
+  menu: "M4 6h16 M4 12h16 M4 18h16",
+  user: "M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M5.5 21a6.5 6.5 0 0 1 13 0",
+  logout: "M16 17l5-5-5-5 M21 12H9 M4 4h5v16H4z",
+});
+
+function icon(name = "user", className = "topbar-svg") {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+
+  svg.setAttribute("class", className);
+  svg.setAttribute("width", "18");
+  svg.setAttribute("height", "18");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("focusable", "false");
+  svg.setAttribute("aria-hidden", "true");
+
+  path.setAttribute("d", ICONS[name] || ICONS.user);
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "1.7");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+
+  svg.appendChild(path);
+  return svg;
+}
 
 /* =========================================================
    BASICS
@@ -178,7 +211,8 @@ function normalizeRole(value = "") {
 function getRole() {
   try {
     const role = Auth?.getRole?.() || Auth?.getCurrentRole?.();
-    return normalizeRole(role);
+
+    if (role) return normalizeRole(role);
   } catch {
     // noop
   }
@@ -191,9 +225,9 @@ function getRole() {
 
 function displayName(user = null) {
   return text(
-    user?.displayName ||
+    user?.name ||
       user?.fullName ||
-      user?.name ||
+      user?.displayName ||
       user?.nombre ||
       user?.username ||
       user?.email ||
@@ -306,13 +340,14 @@ function buildRoot() {
 
   const toggle = create("button", {
     className: "topbar-sidebar-toggle",
-    textContent: "☰",
     attrs: {
       type: "button",
       "aria-label": "Abrir menú",
       "data-topbar-sidebar-toggle": "true",
     },
   });
+
+  toggle.appendChild(icon("menu", "topbar-sidebar-toggle-svg"));
 
   const title = create("h1", {
     className: "topbar-title",
@@ -377,6 +412,14 @@ function routeTitle(route = null) {
   return text(route?.title || route?.label || route?.name || "", "");
 }
 
+function decodeURIComponentSafe(value = "") {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function resolveRouteTitle(path = currentPath()) {
   const clean = canonicalPath(path);
 
@@ -420,14 +463,6 @@ function resolveRouteTitle(path = currentPath()) {
   return pretty || APP_NAME;
 }
 
-function decodeURIComponentSafe(value = "") {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
-
 function syncTitle(path = currentPath()) {
   const { title } = getDom();
 
@@ -458,6 +493,19 @@ function renderUser() {
   const user = getUser();
   const role = getRole();
 
+  const userIcon = create("span", {
+    className: "topbar-user-icon",
+    attrs: {
+      "aria-hidden": "true",
+    },
+  });
+
+  userIcon.appendChild(icon("user", "topbar-user-svg"));
+
+  const info = create("span", {
+    className: "topbar-user-info",
+  });
+
   const name = create("span", {
     className: "topbar-user-name",
     textContent: displayName(user),
@@ -468,16 +516,27 @@ function renderUser() {
     textContent: role === "admin" ? "Admin" : "Usuario",
   });
 
+  info.append(name, meta);
+
   const logout = create("button", {
     className: "topbar-logout",
-    textContent: "Salir",
     attrs: {
       type: "button",
       "data-topbar-logout": "true",
+      "aria-label": "Salir",
     },
   });
 
-  userRoot.append(name, meta, logout);
+  logout.appendChild(icon("logout", "topbar-logout-svg"));
+
+  const logoutText = create("span", {
+    className: "topbar-logout-label",
+    textContent: "Salir",
+  });
+
+  logout.appendChild(logoutText);
+
+  userRoot.append(userIcon, info, logout);
 
   return true;
 }
@@ -662,6 +721,7 @@ function bind() {
   if (!root || bound) return true;
 
   root.addEventListener("click", onClick);
+
   cleanupClick = () => {
     try {
       root?.removeEventListener?.("click", onClick);
@@ -854,7 +914,10 @@ function getState() {
         : null;
     })(),
 
-    dom: getDomSnapshot(),
+    dom: {
+      ...getDomSnapshot(),
+      hasSvg: Boolean(root?.querySelector?.("svg")),
+    },
 
     policy: {
       ownAuth: false,
@@ -864,6 +927,7 @@ function getState() {
       ownToast: false,
       noSubmodules: true,
       noSearchRuntime: true,
+      svgIcons: true,
       roles: ["admin", "user"],
     },
   };

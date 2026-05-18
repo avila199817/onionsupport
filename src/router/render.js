@@ -11,6 +11,7 @@
    - Inyectar contexto común: AppCore / I18n / t / Toast.
    - Pintar fallback simple.
    - Mantener publicPath visible y canonicalPath interno.
+   - No exponer token real en DOM/snapshot.
    - Sin imports.
    - Sin Auth.
    - Sin guards.
@@ -19,12 +20,15 @@
    - Sin Toast propio.
    - Sin i18n propio.
    - Sin fetch.
+   - Sin navegación.
    - Sin validar slug real.
    - Sin CustomEvent.
+   - Sin /403.
+   - Sin /404.
    - Sin magia negra.
 ========================================================= */
 
-export const ROUTER_RENDER_VERSION = "router.render.v2";
+export const ROUTER_RENDER_VERSION = "router.render.v3";
 
 const DEFAULT_ROUTE = "/";
 const USER_HOME_PREFIX = "/@";
@@ -61,10 +65,6 @@ function isNode(value) {
 function text(value = "", fallback = "") {
   const output = String(value ?? "").trim();
   return output || fallback;
-}
-
-function nowMs() {
-  return Date.now();
 }
 
 function nextRenderId() {
@@ -108,7 +108,7 @@ function normalizeHashPath(path = DEFAULT_ROUTE) {
 function pathFromInput(path = DEFAULT_ROUTE) {
   const value = normalizeHashPath(path);
 
-  if (value.startsWith("//")) {
+  if (!value || value.startsWith("//")) {
     return DEFAULT_ROUTE;
   }
 
@@ -199,7 +199,8 @@ function normalizeUserSlug(value = "") {
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
-    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
     .toLowerCase();
 
   if (!slug) return "";
@@ -255,6 +256,10 @@ function resolvePaths({
     canonicalPath: canonical,
     publicPath: visible,
   };
+}
+
+function domPath(path = DEFAULT_ROUTE) {
+  return redact(normalizePublicPath(path));
 }
 
 /* =========================================================
@@ -494,9 +499,9 @@ function markView(
 
   setData(view, "routerStatus", status);
   setData(view, "routerRenderId", renderId);
-  setData(view, "routerCanonicalPath", canonicalPath);
-  setData(view, "routerPublicPath", publicPath);
-  setData(view, "routerRoute", route?.path || canonicalPath);
+  setData(view, "routerCanonicalPath", normalizeCanonicalPath(canonicalPath));
+  setData(view, "routerPublicPath", domPath(publicPath));
+  setData(view, "routerRoute", route?.path || normalizeCanonicalPath(canonicalPath));
   setData(view, "routerRouteName", route?.name || "");
   setData(view, "routerViewKey", route?.viewKey || "");
   setData(view, "routerViewName", route?.viewName || "");
@@ -544,12 +549,12 @@ function prepareHost({
       [HOST_ATTR]: "true",
       "data-router-render-id": renderId,
       "data-router-mode": mode,
-      "data-router-route": route?.path || canonicalPath,
+      "data-router-route": route?.path || normalizeCanonicalPath(canonicalPath),
       "data-router-route-name": route?.name || "",
       "data-router-view-key": route?.viewKey || "",
       "data-router-view-name": route?.viewName || "",
-      "data-router-canonical-path": canonicalPath,
-      "data-router-public-path": publicPath,
+      "data-router-canonical-path": normalizeCanonicalPath(canonicalPath),
+      "data-router-public-path": domPath(publicPath),
     },
   });
 
@@ -623,7 +628,7 @@ function getToast(AppCore = null) {
 }
 
 function getTranslator(AppCore = null) {
-  if (isFunction(AppCore?.t)) return AppCore.t;
+  if (isFunction(AppCore?.t)) return AppCore.t.bind(AppCore);
 
   const I18n = getI18n(AppCore);
 
@@ -763,8 +768,9 @@ function fallbackView({
         className: "router-fallback__action",
         textContent: action.text,
         attrs: {
-          href: action.href,
+          href: normalizePublicPath(action.href),
           "data-spa": "",
+          "data-route": normalizePublicPath(action.href),
         },
       })
     );
@@ -1153,6 +1159,8 @@ export function getRenderSnapshot(AppCore = null) {
     },
 
     policy: {
+      renderOnly: true,
+
       ownAuth: false,
       ownGuards: false,
       ownHistory: false,
@@ -1164,13 +1172,18 @@ export function getRenderSnapshot(AppCore = null) {
 
       injectsSharedContext: true,
       safeAdoptResult: true,
+      singleStableHost: true,
 
       preservesPublicPath: true,
       preservesCanonicalPath: true,
+      noTokenInDomDataset: true,
+
       validatesRealUserSlug: false,
       realSlugValidationOwner: "router/index.js",
 
       noCustomEvent: true,
+      no403Route: true,
+      no404Route: true,
     },
   };
 }

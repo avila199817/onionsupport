@@ -13,18 +13,16 @@
    - Sin storage.
    - Sin Toast.
    - Sin navegación.
+   - Sin AppCore propio.
    - Sin rutas inventadas.
    - Sin /403.
    - Sin 2FA/MFA/OTP.
-   - Sin magia negra.
 ========================================================= */
 
-import { AppCore } from "../../core/index.js";
 import * as Session from "./session.js";
 
-export const GUARDS_VERSION = "simple";
+export const GUARDS_VERSION = "minimal-1";
 
-const SOURCE = "auth.guards";
 const LOGIN_PATH = "/login";
 const HOME_PATH = "/";
 
@@ -35,16 +33,22 @@ const PUBLIC_ROUTES = Object.freeze([
   "/activate-account",
 ]);
 
+const VALID_ROLES = Object.freeze(["admin", "user"]);
+
 /* =========================================================
    BASICS
 ========================================================= */
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isFunction(value) {
+function isFn(value) {
   return typeof value === "function";
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function text(value = "", fallback = "") {
@@ -52,38 +56,48 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
-function nowIso() {
-  return new Date().toISOString();
+function cleanRole(value = "") {
+  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
+}
+
+function validRole(value = "") {
+  return VALID_ROLES.includes(value);
 }
 
 function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function readState() {
-  return isObject(AppCore?.state) ? AppCore.state : {};
+function normalizePath(path = "/") {
+  let value = text(path, "/");
+
+  if (value.startsWith("#/")) value = value.slice(1);
+  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
+
+  value = value.split("?")[0].split("#")[0];
+
+  if (!value.startsWith("/")) value = `/${value}`;
+  if (value.length > 1) value = value.replace(/\/+$/g, "") || "/";
+
+  return value || "/";
 }
 
-function commitState(patch = {}) {
-  const cleanPatch = isObject(patch) ? patch : {};
+function currentPath() {
+  if (!isBrowser()) return HOME_PATH;
 
-  try {
-    AppCore?.setState?.(cleanPatch, {
-      source: SOURCE,
-      silent: true,
-      emit: false,
-    });
-  } catch {
-    // fallback abajo
-  }
+  return normalizePath(
+    `${window.location.pathname || HOME_PATH}${window.location.search || ""}${window.location.hash || ""}`
+  );
+}
 
-  try {
-    Object.assign(readState(), cleanPatch);
-  } catch {
-    // noop
-  }
+function normalizeRequiredRoles(values = []) {
+  const raw = Array.isArray(values) ? values.flat(Infinity) : [values];
 
-  return readState();
+  return unique(
+    raw
+      .map(cleanRole)
+      .filter(validRole)
+  );
 }
 
 function redact(value = "") {
@@ -92,171 +106,58 @@ function redact(value = "") {
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
-function emit(eventName = "", payload = {}, options = {}) {
-  if (options.emitEvents !== true && options.debug !== true) return false;
+/* =========================================================
+   SESSION
+========================================================= */
 
-  const name = text(eventName, "");
-  if (!name) return false;
-
+export function syncAuthState(options = {}) {
   try {
-    AppCore?.events?.emit?.(name, {
-      source: SOURCE,
-      version: GUARDS_VERSION,
-      at: nowIso(),
-      ...payload,
-      token: null,
-      accessToken: null,
-      refreshToken: null,
-    });
+    if (isFn(Session.syncAuthState)) {
+      Session.syncAuthState({
+        source: options.source || "auth.guards",
+      });
+    }
+  } catch {
+    // noop
+  }
 
-    return true;
+  return isAuthenticated();
+}
+
+export function isAuthenticated() {
+  try {
+    return Session.isAuthenticated?.() === true;
   } catch {
     return false;
   }
 }
 
-/* =========================================================
-   ROUTES
-========================================================= */
-
-function normalizePublicPath(path = "/") {
-  let value = text(path, "/");
-
-  if (value.startsWith("#/")) value = value.slice(1);
-  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
-
-  if (!value.startsWith("/")) value = `/${value}`;
-
-  return value || "/";
-}
-
-function canonical(path = "/") {
-  let value = normalizePublicPath(path).split("?")[0].split("#")[0] || "/";
-
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || "/";
-  }
-
-  return value;
-}
-
-function currentPublicPath() {
-  if (typeof window !== "undefined") {
-    return normalizePublicPath(
-      `${window.location.pathname}${window.location.search}${window.location.hash}`
-    );
-  }
-
-  const state = readState();
-
-  return normalizePublicPath(state.publicPath || state.route || "/");
-}
-
-function currentCanonicalPath() {
-  const state = readState();
-
-  return canonical(state.canonicalPath || state.route || currentPublicPath());
-}
-
-function isPublicTechnicalPath(path = "") {
-  const clean = canonical(path);
-
-  return PUBLIC_ROUTES.includes(clean);
-}
-
-function isSafeInternalPath(path = "") {
-  const value = text(path, "");
-
-  if (!value) return false;
-  if (!value.startsWith("/")) return false;
-  if (value.startsWith("//")) return false;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return false;
-  if (/[\r\n\t\\]/.test(value)) return false;
-
-  return true;
-}
-
-function safeRedirect(path = "", fallback = HOME_PATH) {
-  const candidate = normalizePublicPath(path || fallback);
-
-  return isSafeInternalPath(candidate) ? candidate : fallback;
-}
-
-function loginRedirect(path = "") {
-  const target = safeRedirect(path, HOME_PATH);
-
-  if (canonical(target) === LOGIN_PATH) return LOGIN_PATH;
-
-  return `${LOGIN_PATH}?redirect=${encodeURIComponent(target)}`;
-}
-
-/* =========================================================
-   SESSION
-========================================================= */
-
-function sessionAuthenticated() {
+export function getCurrentUser() {
   try {
-    if (isFunction(Session.isAuthenticated)) {
-      return Session.isAuthenticated() === true;
-    }
-  } catch {
-    // fallback abajo
-  }
-
-  return Boolean(sessionToken() && sessionUser());
-}
-
-function sessionToken() {
-  try {
-    return text(Session.getCurrentToken?.(), "");
-  } catch {
-    return "";
-  }
-}
-
-function sessionUser() {
-  try {
-    return Session.getCurrentUser?.() || null;
+    return isAuthenticated() ? Session.getCurrentUser?.() || null : null;
   } catch {
     return null;
   }
 }
 
-function cleanRole(role = "") {
-  return String(role || "").toLowerCase() === "admin" ? "admin" : "user";
-}
-
-function validRole(role = "") {
-  return role === "admin" || role === "user";
-}
-
-export function getCurrentUser() {
-  return sessionAuthenticated() ? sessionUser() : null;
-}
-
 export function getCurrentRole() {
-  if (!sessionAuthenticated()) return "";
+  if (!isAuthenticated()) return "";
 
   try {
-    const role = Session.getCurrentRole?.();
-    if (role === "admin" || role === "user") return role;
+    const role = String(Session.getCurrentRole?.() || "").toLowerCase();
+    return validRole(role) ? role : "";
   } catch {
-    // fallback abajo
+    return "";
   }
-
-  const user = getCurrentUser();
-  const role = cleanRole(user?.role || user?.rol);
-
-  return validRole(role) ? role : "";
 }
 
 export function getCurrentRoles() {
-  if (!sessionAuthenticated()) return [];
+  if (!isAuthenticated()) return [];
 
   try {
     const roles = Session.getCurrentRoles?.();
 
-    if (Array.isArray(roles)) {
+    if (Array.isArray(roles) && roles.length) {
       return unique(
         roles
           .map((role) => String(role || "").toLowerCase())
@@ -273,7 +174,7 @@ export function getCurrentRoles() {
 }
 
 export function isCurrentUserAdmin() {
-  return sessionAuthenticated() && getCurrentRole() === "admin";
+  return getCurrentRole() === "admin";
 }
 
 export function isCurrentUserSupport() {
@@ -288,57 +189,11 @@ export function isCurrentUserClient() {
   return false;
 }
 
-export function syncAuthState() {
-  const hasToken = Boolean(sessionToken());
-  const authenticated = sessionAuthenticated();
-  const user = authenticated ? getCurrentUser() : null;
-  const role = authenticated ? getCurrentRole() || "user" : "";
-  const roles = authenticated ? getCurrentRoles() : [];
-
-  commitState({
-    authenticated,
-    hasToken,
-
-    user,
-    currentUser: user,
-    authUser: user,
-    sessionUser: user,
-
-    role,
-    rol: role,
-    userRole: role,
-    roles,
-
-    isAdmin: authenticated && role === "admin",
-    isUser: authenticated && role === "user",
-    isSupport: false,
-    isManager: false,
-    isClient: false,
-  });
-
-  return authenticated;
-}
-
-export function isAuthenticated() {
-  return syncAuthState();
-}
-
-function normalizeRequiredRoles(values = []) {
-  const raw = Array.isArray(values) ? values.flat(Infinity) : [values];
-
-  return unique(
-    raw
-      .map((role) => String(role || "").toLowerCase())
-      .filter(validRole)
-  );
-}
-
 export function hasRole(...roles) {
   if (!isAuthenticated()) return false;
   if (!roles.length) return true;
 
   const required = normalizeRequiredRoles(roles);
-
   if (!required.length) return false;
 
   const current = new Set(getCurrentRoles());
@@ -359,51 +214,27 @@ export function getAuthHeader() {
 }
 
 /* =========================================================
-   PAYLOADS
+   ROUTES
 ========================================================= */
 
-function publicUser(user = null) {
-  if (!isObject(user)) return null;
-
-  return {
-    id: user.id || user.userId || null,
-    userId: user.userId || user.id || null,
-    username: user.username || user.slug || null,
-    displayName: user.displayName || user.name || user.username || null,
-    role: user.role || user.rol || null,
-  };
+export function isPublicTechnicalPath(path = currentPath()) {
+  return PUBLIC_ROUTES.includes(normalizePath(path));
 }
 
-function allowedPayload(reason, path, extra = {}) {
-  return {
-    allowed: true,
-    reason,
-    path: redact(path),
-    publicPath: redact(currentPublicPath()),
-    authenticated: Boolean(readState().authenticated),
-    currentRole: getCurrentRole() || null,
-    currentRoles: getCurrentRoles(),
-    ...extra,
-  };
+export function isAuthRoute(path = currentPath()) {
+  return normalizePath(path) === LOGIN_PATH;
 }
 
-function blockedPayload(reason, path, redirectTo = "", extra = {}) {
-  const user = getCurrentUser();
+export function isPasswordRequestRoute(path = currentPath()) {
+  return normalizePath(path) === "/password-request";
+}
 
-  return {
-    allowed: false,
-    reason,
-    path: redact(path),
-    publicPath: redact(currentPublicPath()),
-    redirectTo,
-    authenticated: Boolean(readState().authenticated),
-    hasToken: Boolean(sessionToken()),
-    hasUser: Boolean(user),
-    currentRole: getCurrentRole() || null,
-    currentRoles: getCurrentRoles(),
-    user: publicUser(user),
-    ...extra,
-  };
+export function isPasswordResetRoute(path = currentPath()) {
+  return normalizePath(path) === "/password-reset";
+}
+
+export function isActivationRoute(path = currentPath()) {
+  return normalizePath(path) === "/activate-account";
 }
 
 /* =========================================================
@@ -411,151 +242,59 @@ function blockedPayload(reason, path, redirectTo = "", extra = {}) {
 ========================================================= */
 
 export function guardAuthenticated(options = {}) {
-  const path = canonical(options.path || currentCanonicalPath());
-  const visiblePath = currentPublicPath();
+  const path = normalizePath(options.path || currentPath());
 
-  if (
-    options.allowPublicTechnicalRoutes !== false &&
-    (isPublicTechnicalPath(path) || isPublicTechnicalPath(visiblePath))
-  ) {
-    emit("auth:guard:allowed", allowedPayload("public-route", path), options);
+  if (options.allowPublicTechnicalRoutes !== false && isPublicTechnicalPath(path)) {
     return true;
   }
 
-  if (isAuthenticated()) {
-    emit("auth:guard:allowed", allowedPayload("authenticated", path), options);
-    return true;
-  }
-
-  const redirectTo = options.withRedirectBack === false
-    ? safeRedirect(options.redirectTo || LOGIN_PATH, LOGIN_PATH)
-    : loginRedirect(visiblePath || path);
-
-  emit("auth:guard:blocked", blockedPayload("not-authenticated", path, redirectTo), options);
-  return false;
-}
-
-export function guardRole(roles = [], options = {}) {
-  const path = canonical(options.path || currentCanonicalPath());
-  const visiblePath = currentPublicPath();
-
-  if (
-    options.allowPublicTechnicalRoutes !== false &&
-    (isPublicTechnicalPath(path) || isPublicTechnicalPath(visiblePath))
-  ) {
-    emit("auth:guard:allowed", allowedPayload("public-route", path), options);
-    return true;
-  }
-
-  const requested = Array.isArray(roles) ? roles.flat(Infinity) : [roles];
-  const requiredRoles = normalizeRequiredRoles(requested);
-
-  if (requested.length && !requiredRoles.length) {
-    emit(
-      "auth:guard:blocked",
-      blockedPayload("unsupported-role", path, "", {
-        requestedRoles: requested.map(String),
-      }),
-      options
-    );
-
-    return false;
-  }
-
-  if (!isAuthenticated()) {
-    const redirectTo = loginRedirect(visiblePath || path);
-
-    emit(
-      "auth:guard:blocked",
-      blockedPayload("not-authenticated", path, redirectTo, {
-        requiredRoles,
-      }),
-      options
-    );
-
-    return false;
-  }
-
-  if (!requiredRoles.length || hasRole(...requiredRoles)) {
-    emit(
-      "auth:guard:allowed",
-      allowedPayload("role-match", path, {
-        requiredRoles,
-      }),
-      options
-    );
-
-    return true;
-  }
-
-  emit(
-    "auth:guard:blocked",
-    blockedPayload("insufficient-role", path, "", {
-      requiredRoles,
-    }),
-    options
-  );
-
-  return false;
+  return isAuthenticated();
 }
 
 export function guardGuest(options = {}) {
-  const path = canonical(options.path || currentCanonicalPath());
+  const path = normalizePath(options.path || currentPath());
 
-  if (!isAuthenticated()) {
-    emit("auth:guard:allowed", allowedPayload("guest", path), options);
+  if (options.allowPublicTechnicalRoutes !== false && !isAuthRoute(path)) {
     return true;
   }
 
-  emit(
-    "auth:guard:blocked",
-    blockedPayload("already-authenticated", path, safeRedirect(options.redirectTo || HOME_PATH, HOME_PATH)),
-    options
-  );
+  return !isAuthenticated();
+}
 
-  return false;
+export function guardRole(roles = [], options = {}) {
+  const path = normalizePath(options.path || currentPath());
+
+  if (options.allowPublicTechnicalRoutes !== false && isPublicTechnicalPath(path)) {
+    return true;
+  }
+
+  if (!isAuthenticated()) return false;
+
+  const requested = Array.isArray(roles) ? roles.flat(Infinity) : [roles];
+  const required = normalizeRequiredRoles(requested);
+
+  if (requested.length && !required.length) return false;
+  if (!required.length) return true;
+
+  return hasRole(...required);
 }
 
 export function guardAdmin(options = {}) {
   return guardRole(["admin"], options);
 }
 
-export function guardSupport(options = {}) {
-  const path = canonical(options.path || currentCanonicalPath());
-
-  emit(
-    "auth:guard:blocked",
-    blockedPayload("unsupported-role", path, "", {
-      requestedRoles: ["support"],
-    }),
-    options
-  );
-
+export function guardSupport() {
   return false;
 }
 
-export function guardManager(options = {}) {
-  const path = canonical(options.path || currentCanonicalPath());
-
-  emit(
-    "auth:guard:blocked",
-    blockedPayload("unsupported-role", path, "", {
-      requestedRoles: ["manager"],
-    }),
-    options
-  );
-
+export function guardManager() {
   return false;
 }
 
 export function canAccessRoute(route = {}) {
-  const path = canonical(route.path || route.publicPath || currentCanonicalPath());
-  const visiblePath = currentPublicPath();
+  const path = normalizePath(route.path || route.publicPath || currentPath());
 
-  if (
-    route.allowPublicTechnicalRoutes !== false &&
-    (isPublicTechnicalPath(path) || isPublicTechnicalPath(visiblePath))
-  ) {
+  if (route.allowPublicTechnicalRoutes !== false && isPublicTechnicalPath(path)) {
     return true;
   }
 
@@ -572,28 +311,40 @@ export function canAccessRoute(route = {}) {
       ? [route.roles]
       : [];
 
-  const requiredRoles = normalizeRequiredRoles(requested);
+  const required = normalizeRequiredRoles(requested);
 
-  if (!requested.length) return true;
-  if (!requiredRoles.length) return false;
+  if (requested.length && !required.length) return false;
+  if (!required.length) return true;
 
-  return hasRole(...requiredRoles);
+  return hasRole(...required);
 }
 
 /* =========================================================
    ERROR / SNAPSHOT
 ========================================================= */
 
+function publicUser(user = null) {
+  if (!isObject(user)) return null;
+
+  return {
+    id: user.id || user.userId || null,
+    userId: user.userId || user.id || null,
+    username: user.username || user.slug || null,
+    displayName: user.displayName || user.name || user.username || null,
+    role: user.role || user.rol || null,
+  };
+}
+
 function extractMessage(error = null) {
   return (
-    error?.data?.message ||
-    error?.response?.data?.message ||
-    error?.message ||
+    text(error?.data?.message, "") ||
+    text(error?.response?.data?.message, "") ||
+    text(error?.message, "") ||
     String(error || "Error")
   );
 }
 
-export function buildGuardErrorPayload(error) {
+export function buildGuardErrorPayload(error = null) {
   return {
     message: redact(extractMessage(error)),
     name: error?.name || "Error",
@@ -603,17 +354,13 @@ export function buildGuardErrorPayload(error) {
 }
 
 export function getAuthGuardsSnapshot() {
-  syncAuthState();
-
-  const path = currentCanonicalPath();
-  const visiblePath = currentPublicPath();
   const user = getCurrentUser();
+  const path = currentPath();
 
   return {
     version: GUARDS_VERSION,
 
-    authenticated: Boolean(readState().authenticated),
-    hasToken: Boolean(sessionToken()),
+    authenticated: isAuthenticated(),
     hasUser: Boolean(user),
 
     currentRole: getCurrentRole() || null,
@@ -627,31 +374,10 @@ export function getAuthGuardsSnapshot() {
     user: publicUser(user),
 
     path: redact(path),
-    publicPath: redact(visiblePath),
-    publicTechnical: isPublicTechnicalPath(path) || isPublicTechnicalPath(visiblePath),
+    publicTechnical: isPublicTechnicalPath(path),
 
-    state: {
-      route: redact(readState().route || ""),
-      publicPath: redact(readState().publicPath || ""),
-      role: readState().role || null,
-      roles: Array.isArray(readState().roles) ? readState().roles : [],
-      authenticated: Boolean(readState().authenticated),
-      hasToken: Boolean(readState().hasToken),
-    },
-
-    policy: {
-      ownFetch: false,
-      ownRefresh: false,
-      ownRestore: false,
-      ownRouter: false,
-      ownToast: false,
-      roles: ["admin", "user"],
-      supportManagerClient: false,
-      noForbiddenRoute: true,
-      noImportsExceptSession: true,
-    },
-
-    at: nowIso(),
+    loginPath: LOGIN_PATH,
+    publicRoutes: [...PUBLIC_ROUTES],
   };
 }
 
@@ -678,6 +404,12 @@ export default {
   hasRole,
   requireRole,
   getAuthHeader,
+
+  isPublicTechnicalPath,
+  isAuthRoute,
+  isPasswordRequestRoute,
+  isPasswordResetRoute,
+  isActivationRoute,
 
   guardAuthenticated,
   guardRole,

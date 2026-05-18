@@ -2,689 +2,898 @@
    Onion SPA - Reset Password DOM
    Archivo: src/views/password-reset/reset-password.dom.js
 
-   Responsabilidades:
-   - resolver refs del dom de recuperación
-   - encapsular estados visuales del formulario
-   - aplicar y limpiar errores
-   - controlar loading ui
-   - gestionar focus inicial
-   - facilitar bind / unbind desacoplado
-   - soportar toast inline del reset
-   - mantener consistencia con login.css
+   Responsabilidad:
+   - Obtener refs de password reset.
+   - Leer estado del formulario.
+   - Mostrar/limpiar error global.
+   - Estado loading mínimo.
+   - Binding submit idempotente.
+   - Delegar password-field al componente compartido.
+   - Sin Auth.
+   - Sin HTTP.
+   - Sin Router.
+   - Sin Store.
+   - Sin Toast propio.
+   - Sin theme toggle propio.
+   - Sin innerHTML.
+   - Sin lógica propia de password toggle.
 ========================================================= */
+
+import { bindPasswordFieldsInScope } from "../../shared/password-field/index.js";
+
+export const RESET_PASSWORD_DOM_VERSION = "minimal-1";
+
+const DEFAULT_REQUEST_SUBMIT_LABEL = "Enviar enlace";
+const DEFAULT_CONFIRM_SUBMIT_LABEL = "Cambiar contraseña";
+const DEFAULT_LOADING_LABEL = "Procesando...";
+
+const PASSWORD_BINDINGS = new WeakMap();
+const SUBMIT_BINDINGS = new WeakMap();
+
+const SELECTORS = Object.freeze({
+  root:
+    "[data-password-reset-view], [data-reset-password-view], #passwordResetView, .password-reset-view",
+
+  form:
+    "[data-password-reset-form], [data-reset-password-form], #passwordResetForm",
+
+  identifier:
+    "[data-password-reset-identifier], [data-reset-password-identifier], #passwordResetIdentifier, [name='identifier'], [name='email']",
+
+  token:
+    "[data-password-reset-token], [data-reset-token], [name='token']",
+
+  password:
+    "[data-password-reset-password], [data-reset-password-password], #passwordResetPassword, [name='password']",
+
+  confirmPassword:
+    "[data-password-reset-confirm], [data-reset-password-confirm], #passwordResetConfirmPassword, [name='confirmPassword'], [name='passwordConfirm']",
+
+  message:
+    "[data-password-reset-message], [data-reset-password-message], [data-password-reset-error], [data-reset-password-error], #passwordResetMessage, .password-reset-message",
+
+  submit:
+    "[data-password-reset-submit], [data-reset-password-submit], #passwordResetSubmit, button[type='submit']",
+
+  back:
+    "[data-password-reset-back], [data-reset-password-back], .password-reset-back-link, a[data-spa]",
+
+  fieldIdentifier:
+    "[data-password-reset-field='identifier'], [data-reset-password-field='identifier'], [data-field='identifier']",
+
+  fieldPassword:
+    "[data-password-reset-field='password'], [data-reset-password-field='password'], [data-field='password']",
+
+  fieldConfirm:
+    "[data-password-reset-field='confirm-password'], [data-reset-password-field='confirm-password'], [data-field='confirm-password']",
+
+  passwordToggle:
+    "[data-password-toggle], [data-login-password-toggle]",
+});
 
 /* =========================================================
-   HELPERS
+   BASICS
 ========================================================= */
 
-function qs(root, selector) {
-  return root?.querySelector?.(selector) || null;
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function toText(value, fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
-
-  const text = String(value).trim();
-  return text || fallback;
-}
-
-function toNumber(value, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function isFunction(value) {
+function isFn(value) {
   return typeof value === "function";
 }
 
+function noop() {}
+
+function text(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
+}
+
+function rawText(value = "", fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  return String(value);
+}
+
+function doc() {
+  return isBrowser() ? document : null;
+}
+
+function qs(root, selector = "") {
+  const scope = root || doc();
+  if (!scope || !selector) return null;
+
+  try {
+    return scope.querySelector(selector);
+  } catch {
+    return null;
+  }
+}
+
 function setText(node, value = "") {
-  if (!node) return;
-  node.textContent = toText(value, "");
-}
+  if (!node) return false;
 
-function setHtml(node, value = "") {
-  if (!node) return;
-  node.innerHTML = String(value ?? "");
-}
-
-function setHidden(node, hidden) {
-  if (!node) return;
-  node.hidden = Boolean(hidden);
-}
-
-function setDisabled(node, disabled) {
-  if (!node) return;
-  node.disabled = Boolean(disabled);
-}
-
-function setAriaInvalid(node, active = false) {
-  if (!node) return;
-  node.setAttribute("aria-invalid", active ? "true" : "false");
-}
-
-function setAriaBusy(node, active = false) {
-  if (!node) return;
-  node.setAttribute("aria-busy", active ? "true" : "false");
-}
-
-function toggleClass(node, className, active = false) {
-  if (!node || !className) return;
-  node.classList.toggle(className, Boolean(active));
-}
-
-function removeClasses(node, classNames = []) {
-  if (!node || !Array.isArray(classNames) || classNames.length === 0) {
-    return;
+  try {
+    node.textContent = text(value, "");
+    return true;
+  } catch {
+    return false;
   }
-
-  node.classList.remove(...classNames);
 }
 
-function resolveSubmitMarkup(label = "") {
-  return `<span class="login-submit-text">${toText(label, "")}</span>`;
-}
+function setAttr(node, name = "", value = null) {
+  if (!node || !name) return false;
 
-function resolveFieldNode(inputNode, root, selectors = []) {
-  const parentField =
-    inputNode?.closest?.(".login-field") ||
-    inputNode?.closest?.("[data-field]") ||
-    null;
+  try {
+    if (value === null || value === undefined || value === false || value === "") {
+      node.removeAttribute(name);
+    } else {
+      node.setAttribute(name, String(value));
+    }
 
-  if (parentField) {
-    return parentField;
+    return true;
+  } catch {
+    return false;
   }
+}
 
-  for (const selector of selectors) {
-    const found = qs(root, selector);
-    if (found) {
-      return found;
+function setHidden(node, hidden = false) {
+  if (!node) return false;
+
+  try {
+    node.hidden = Boolean(hidden);
+  } catch {}
+
+  setAttr(node, "aria-hidden", hidden ? "true" : "false");
+  return true;
+}
+
+function toggleClass(node, className = "", enabled = false) {
+  if (!node || !className) return false;
+
+  try {
+    node.classList.toggle(className, Boolean(enabled));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function focus(node, selectText = false) {
+  if (!node || node.disabled) return false;
+
+  try {
+    node.focus({ preventScroll: true });
+  } catch {
+    try {
+      node.focus();
+    } catch {
+      return false;
     }
   }
 
-  return null;
-}
-
-function bindDomEvent(node, eventName, handler, options) {
-  if (!node || !isFunction(handler) || !toText(eventName, "")) {
-    return () => {};
+  if (selectText) {
+    try {
+      node.select?.();
+    } catch {}
   }
 
-  node.addEventListener(eventName, handler, options);
+  return true;
+}
+
+function later(callback) {
+  if (!isFn(callback)) return;
+
+  try {
+    queueMicrotask(callback);
+    return;
+  } catch {}
+
+  try {
+    Promise.resolve().then(callback).catch(noop);
+    return;
+  } catch {}
+
+  try {
+    setTimeout(callback, 0);
+  } catch {}
+}
+
+function bindDom(node, eventName = "", handler = null, options = false) {
+  if (!node || !eventName || !isFn(handler)) return noop;
+
+  let disposed = false;
+
+  try {
+    node.addEventListener(eventName, handler, options);
+  } catch {
+    return noop;
+  }
 
   return () => {
-    node.removeEventListener(eventName, handler, options);
+    if (disposed) return;
+    disposed = true;
+
+    try {
+      node.removeEventListener(eventName, handler, options);
+    } catch {}
   };
+}
+
+function compose(disposers = []) {
+  let disposed = false;
+
+  return () => {
+    if (disposed) return;
+    disposed = true;
+
+    while (disposers.length) {
+      try {
+        disposers.pop()?.();
+      } catch {}
+    }
+  };
+}
+
+function disposeBinding(binding) {
+  try {
+    if (isFn(binding)) binding();
+    else if (isFn(binding?.destroy)) binding.destroy();
+    else if (isFn(binding?.dispose)) binding.dispose();
+    else if (isFn(binding?.unbind)) binding.unbind();
+    else if (isFn(binding?.off)) binding.off();
+  } catch {}
+}
+
+function modeFromRefs(refs = {}) {
+  return text(
+    refs.form?.dataset?.passwordResetFlow ||
+      refs.root?.dataset?.passwordResetMode ||
+      "",
+    "request"
+  );
+}
+
+function submitDefaultLabel(refs = {}) {
+  return modeFromRefs(refs) === "confirm"
+    ? DEFAULT_CONFIRM_SUBMIT_LABEL
+    : DEFAULT_REQUEST_SUBMIT_LABEL;
+}
+
+/* =========================================================
+   PASSWORD FIELD COMPARTIDO
+========================================================= */
+
+export function bindResetPasswordFields(container = null, options = {}) {
+  const root = container || doc();
+  if (!root) return [];
+
+  const previous = PASSWORD_BINDINGS.get(root);
+
+  if (previous && options.force !== true) {
+    return previous;
+  }
+
+  if (previous) {
+    for (const binding of previous) disposeBinding(binding);
+    PASSWORD_BINDINGS.delete(root);
+  }
+
+  let bindings = [];
+
+  try {
+    const result = bindPasswordFieldsInScope(root);
+    bindings = Array.isArray(result) ? result : result ? [result] : [];
+  } catch {
+    bindings = [];
+  }
+
+  PASSWORD_BINDINGS.set(root, bindings);
+  return bindings;
+}
+
+export function destroyResetPasswordFields(container = null) {
+  const root = container || doc();
+  if (!root) return false;
+
+  const bindings = PASSWORD_BINDINGS.get(root) || [];
+
+  for (const binding of bindings) {
+    disposeBinding(binding);
+  }
+
+  PASSWORD_BINDINGS.delete(root);
+  return true;
 }
 
 /* =========================================================
    REFS
 ========================================================= */
 
-export function getResetPasswordRefs(container) {
-  const root =
-    qs(container, ".reset-password-view") ||
-    qs(container, '[data-view="reset-password"]') ||
-    container ||
-    null;
+export function getResetPasswordRefs(container = null) {
+  const safeContainer = container || doc();
+  const root = qs(safeContainer, SELECTORS.root) || safeContainer;
+  const form = qs(root, SELECTORS.form);
+  const scope = form || root || safeContainer;
 
-  const identifierInput =
-    qs(root, "#resetIdentifier") ||
-    qs(root, 'input[name="identifier"]') ||
-    qs(root, 'input[name="email"]') ||
-    null;
+  const submitButton = qs(scope, SELECTORS.submit);
 
-  const submitButton =
-    qs(root, "#resetPasswordButton") ||
-    qs(root, 'button[type="submit"]') ||
-    null;
+  if (form) {
+    try {
+      form.noValidate = true;
+      form.dataset.resetPasswordDomVersion = RESET_PASSWORD_DOM_VERSION;
+    } catch {}
+  }
 
-  const fieldIdentifier = resolveFieldNode(
-    identifierInput,
+  if (submitButton) {
+    try {
+      if (!submitButton.type) submitButton.type = "submit";
+
+      if (!submitButton.dataset.originalLabel) {
+        submitButton.dataset.originalLabel = text(
+          submitButton.textContent,
+          submitDefaultLabel({ root, form })
+        );
+      }
+    } catch {}
+  }
+
+  const identifierInput = qs(scope, SELECTORS.identifier);
+  const passwordInput = qs(scope, SELECTORS.password);
+  const confirmPasswordInput = qs(scope, SELECTORS.confirmPassword);
+
+  const refs = {
+    container: safeContainer,
     root,
-    [
-      '[data-field="identifier"]',
-      '[data-field="email"]',
-    ]
-  );
-
-  return {
-    container,
-    root,
-
-    form:
-      qs(root, "#resetPasswordForm") ||
-      qs(root, "form") ||
-      null,
-
-    card:
-      qs(root, "#resetPasswordCard") ||
-      qs(root, ".login-card") ||
-      null,
-
-    stage:
-      qs(root, "#resetPasswordStage") ||
-      qs(root, ".login-stage") ||
-      null,
-
-    grid:
-      qs(root, "#resetPasswordGrid") ||
-      qs(root, ".login-grid") ||
-      null,
+    form,
 
     identifierInput,
     emailInput: identifierInput,
 
+    tokenInput: qs(scope, SELECTORS.token),
+
+    passwordInput,
+    confirmPasswordInput,
+
     submitButton,
+    backToLoginLink: qs(scope, SELECTORS.back),
 
-    backToLoginLink:
-      qs(root, "#backToLoginLink") ||
-      qs(root, 'a[data-spa]') ||
-      null,
+    errorBox: qs(scope, SELECTORS.message),
 
-    themeToggleButton:
-      qs(root, "#resetPasswordThemeToggle") ||
-      qs(root, '[data-action="theme-toggle"]') ||
-      null,
+    fieldIdentifier: qs(scope, SELECTORS.fieldIdentifier),
+    fieldEmail: qs(scope, SELECTORS.fieldIdentifier),
+    fieldPassword: qs(scope, SELECTORS.fieldPassword),
+    fieldConfirmPassword: qs(scope, SELECTORS.fieldConfirm),
 
-    fieldIdentifier,
-    fieldEmail: fieldIdentifier,
+    passwordToggleButtons: [],
+    passwordFieldBindings: [],
 
-    errorBox:
-      qs(root, "#resetPasswordError") ||
-      qs(root, '[role="alert"]') ||
-      null,
-
-    toastRoot:
-      qs(root, "#resetPasswordToast") ||
-      null,
-
-    toastIcon:
-      qs(root, "#resetPasswordToastIcon") ||
-      null,
-
-    toastTitle:
-      qs(root, "#resetPasswordToastTitle") ||
-      null,
-
-    toastText:
-      qs(root, "#resetPasswordToastText") ||
-      null,
-
-    toastClose:
-      qs(root, "#resetPasswordToastClose") ||
-      null,
-
-    toastProgress:
-      qs(root, "#resetPasswordToastProgress") ||
-      null,
+    mode: modeFromRefs({ root, form }),
   };
+
+  try {
+    refs.passwordToggleButtons = Array.from(
+      (scope || root)?.querySelectorAll?.(SELECTORS.passwordToggle) || []
+    );
+  } catch {
+    refs.passwordToggleButtons = [];
+  }
+
+  return refs;
 }
 
 /* =========================================================
-   FIELD ERRORS
+   ERRORS
 ========================================================= */
 
 export function setFieldInvalid(fieldNode, invalid = false) {
-  if (!fieldNode) return;
-  fieldNode.classList.toggle("is-invalid", Boolean(invalid));
+  const active = Boolean(invalid);
+
+  toggleClass(fieldNode, "is-invalid", active);
+
+  try {
+    if (fieldNode) {
+      if (active) fieldNode.dataset.invalid = "true";
+      else delete fieldNode.dataset.invalid;
+    }
+  } catch {}
+
+  return true;
 }
 
 export function setInputInvalid(inputNode, invalid = false) {
-  if (!inputNode) return;
+  const active = Boolean(invalid);
 
-  toggleClass(inputNode, "is-invalid", Boolean(invalid));
-  setAriaInvalid(inputNode, Boolean(invalid));
+  toggleClass(inputNode, "is-invalid", active);
+  setAttr(inputNode, "aria-invalid", active ? "true" : "false");
+
+  return true;
 }
 
-export function setFieldError(fieldNode, message = "") {
-  setFieldInvalid(fieldNode, Boolean(toText(message, "")));
+export function setFieldError(fieldNode, message = "", errorNode = null) {
+  const clean = text(message, "");
+
+  setFieldInvalid(fieldNode, Boolean(clean));
+
+  if (errorNode) {
+    setText(errorNode, clean);
+    setHidden(errorNode, !clean);
+    setAttr(errorNode, "role", clean ? "alert" : null);
+  }
+
+  return true;
 }
 
-export function clearFieldError(fieldNode) {
-  setFieldInvalid(fieldNode, false);
+export function clearFieldError(fieldNode, errorNode = null) {
+  return setFieldError(fieldNode, "", errorNode);
+}
+
+function setGlobalMessage(errorBox, message = "", type = "error") {
+  const clean = text(message, "");
+
+  if (!errorBox) return clean;
+
+  setText(errorBox, clean);
+  setHidden(errorBox, !clean);
+  toggleClass(errorBox, "is-visible", Boolean(clean));
+  toggleClass(errorBox, "is-error", Boolean(clean) && type === "error");
+  toggleClass(errorBox, "is-success", Boolean(clean) && type === "success");
+  toggleClass(errorBox, "is-info", Boolean(clean) && type === "info");
+  setAttr(errorBox, "role", clean ? "alert" : null);
+  setAttr(errorBox, "aria-live", clean ? "polite" : null);
+
+  try {
+    if (clean) errorBox.dataset.messageType = type;
+    else delete errorBox.dataset.messageType;
+  } catch {}
+
+  return clean;
 }
 
 export function clearResetPasswordErrors(refs = {}) {
-  clearFieldError(refs.fieldIdentifier);
-  clearFieldError(refs.fieldEmail);
+  setFieldInvalid(refs.fieldIdentifier || refs.fieldEmail, false);
+  setFieldInvalid(refs.fieldPassword, false);
+  setFieldInvalid(refs.fieldConfirmPassword, false);
 
-  setInputInvalid(refs.identifierInput, false);
-  setInputInvalid(refs.emailInput, false);
+  setInputInvalid(refs.identifierInput || refs.emailInput, false);
+  setInputInvalid(refs.passwordInput, false);
+  setInputInvalid(refs.confirmPasswordInput, false);
 
-  setText(refs.errorBox, "");
+  setGlobalMessage(refs.errorBox, "");
+
+  try {
+    refs.form?.removeAttribute("data-error");
+  } catch {}
+
+  return true;
 }
 
-export function applyResetPasswordErrors(refs = {}, errors = {}) {
+export function applyResetPasswordErrors(refs = {}, errors = {}, options = {}) {
   const identifierError =
-    toText(errors.identifier, "") ||
-    toText(errors.email, "");
+    text(errors.identifier, "") ||
+    text(errors.email, "");
+
+  const passwordError = text(errors.password, "");
+  const confirmPasswordError =
+    text(errors.confirmPassword, "") ||
+    text(errors.confirm, "") ||
+    text(errors.passwordConfirm, "");
 
   const globalError =
-    toText(errors.global, "") ||
-    toText(errors.message, "");
+    text(errors.global, "") ||
+    text(errors.form, "") ||
+    text(errors.message, "");
 
   const firstError =
     identifierError ||
-    globalError ||
-    "";
+    passwordError ||
+    confirmPasswordError ||
+    globalError;
 
-  setFieldError(refs.fieldIdentifier, identifierError);
-  setFieldError(refs.fieldEmail, identifierError);
+  setFieldInvalid(refs.fieldIdentifier || refs.fieldEmail, Boolean(identifierError));
+  setFieldInvalid(refs.fieldPassword, Boolean(passwordError));
+  setFieldInvalid(refs.fieldConfirmPassword, Boolean(confirmPasswordError));
 
-  setInputInvalid(refs.identifierInput, Boolean(identifierError));
-  setInputInvalid(refs.emailInput, Boolean(identifierError));
+  setInputInvalid(refs.identifierInput || refs.emailInput, Boolean(identifierError));
+  setInputInvalid(refs.passwordInput, Boolean(passwordError));
+  setInputInvalid(refs.confirmPasswordInput, Boolean(confirmPasswordError));
 
-  setText(refs.errorBox, firstError);
+  setGlobalMessage(refs.errorBox, firstError, "error");
+
+  try {
+    if (refs.form) {
+      if (firstError) refs.form.dataset.error = "true";
+      else delete refs.form.dataset.error;
+    }
+  } catch {}
+
+  if (options.focus !== false) {
+    later(() => {
+      if (identifierError) focus(refs.identifierInput || refs.emailInput, true);
+      else if (passwordError) focus(refs.passwordInput);
+      else if (confirmPasswordError) focus(refs.confirmPasswordInput);
+    });
+  }
+
+  return firstError;
 }
 
 export function setGlobalResetPasswordError(refs = {}, message = "") {
-  setText(refs.errorBox, message);
+  const clean = setGlobalMessage(refs.errorBox, message, "error");
+
+  try {
+    if (refs.form) {
+      if (clean) refs.form.dataset.error = "true";
+      else delete refs.form.dataset.error;
+    }
+  } catch {}
+
+  return clean;
 }
 
 /* =========================================================
-   LOADING / SUCCESS / NEUTRAL
+   LOADING / SUCCESS
 ========================================================= */
 
-export function setResetPasswordLoading(
-  refs = {},
-  loading = false,
-  options = {}
-) {
-  const isLoading = Boolean(loading);
+function originalSubmitLabel(refs = {}) {
+  const button = refs.submitButton;
+  if (!button) return submitDefaultLabel(refs);
 
-  const submitLabel = toText(
-    options.submitLabel,
-    "Enviar enlace"
-  );
-
-  const loadingLabel = toText(
-    options.loadingLabel,
-    "Enviando..."
-  );
-
-  const {
-    form,
-    identifierInput,
-    submitButton,
-    themeToggleButton,
-    backToLoginLink,
-    card,
-  } = refs;
-
-  if (form) {
-    setAriaBusy(form, isLoading);
-    form.dataset.submitting = String(isLoading);
-  }
-
-  if (card) {
-    card.dataset.submitting = String(isLoading);
-    toggleClass(card, "is-loading", isLoading);
-  }
-
-  setDisabled(identifierInput, isLoading);
-  setDisabled(themeToggleButton, isLoading);
-
-  if (backToLoginLink) {
-    backToLoginLink.setAttribute(
-      "aria-disabled",
-      String(isLoading)
-    );
-    toggleClass(backToLoginLink, "is-disabled", isLoading);
-    backToLoginLink.tabIndex = isLoading ? -1 : 0;
-  }
-
-  if (submitButton) {
-    submitButton.disabled = isLoading;
-    submitButton.dataset.loading = String(isLoading);
-    setHtml(
-      submitButton,
-      resolveSubmitMarkup(
-        isLoading ? loadingLabel : submitLabel
-      )
-    );
+  try {
+    return text(button.dataset.originalLabel, "") ||
+      text(button.textContent, submitDefaultLabel(refs));
+  } catch {
+    return submitDefaultLabel(refs);
   }
 }
 
-export function shakeResetPasswordCard(refs = {}) {
-  const card = refs?.card;
+function setLoadingDisabled(node, loading = false) {
+  if (!node) return false;
 
-  if (!card) return;
+  const active = Boolean(loading);
 
-  card.classList.remove("shake");
-  void card.offsetWidth;
-  card.classList.add("shake");
+  try {
+    if (active) {
+      if (!node.disabled) node.dataset.resetDisabledByLoading = "true";
+      node.disabled = true;
+      return true;
+    }
+
+    if (node.dataset.resetDisabledByLoading === "true") {
+      node.disabled = false;
+    }
+
+    delete node.dataset.resetDisabledByLoading;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setLinkDisabled(link, disabled = false) {
+  if (!link) return false;
+
+  const active = Boolean(disabled);
+
+  setAttr(link, "aria-disabled", active ? "true" : "false");
+  toggleClass(link, "is-disabled", active);
+
+  try {
+    link.tabIndex = active ? -1 : 0;
+  } catch {}
+
+  return true;
+}
+
+export function setResetPasswordLoading(refs = {}, loading = false, options = {}) {
+  const active = Boolean(loading);
+
+  toggleClass(refs.root, "is-loading", active);
+  toggleClass(refs.form, "is-loading", active);
+
+  setAttr(refs.form, "aria-busy", active ? "true" : "false");
+
+  try {
+    if (refs.form) {
+      if (active) refs.form.dataset.submitting = "true";
+      else delete refs.form.dataset.submitting;
+    }
+  } catch {}
+
+  setLoadingDisabled(refs.submitButton, active);
+  setLoadingDisabled(refs.identifierInput || refs.emailInput, active);
+  setLoadingDisabled(refs.passwordInput, active);
+  setLoadingDisabled(refs.confirmPasswordInput, active);
+
+  for (const button of refs.passwordToggleButtons || []) {
+    setLoadingDisabled(button, active);
+  }
+
+  setLinkDisabled(refs.backToLoginLink, active);
+
+  if (refs.submitButton) {
+    const submitLabel = text(options.submitLabel, originalSubmitLabel(refs));
+    const loadingLabel = text(options.loadingLabel, DEFAULT_LOADING_LABEL);
+
+    setText(refs.submitButton, active ? loadingLabel : submitLabel);
+    setAttr(refs.submitButton, "aria-busy", active ? "true" : "false");
+    setAttr(refs.submitButton, "aria-disabled", active ? "true" : "false");
+  }
+
+  return true;
 }
 
 export function setResetPasswordSuccessState(refs = {}, options = {}) {
-  const title = toText(
-    options.title,
-    "Revisa tu correo"
-  );
-
-  const message = toText(
+  const message = text(
     options.message,
-    "Si el identificador existe, te enviaremos las instrucciones para restablecer la contraseña."
+    refs.mode === "confirm"
+      ? "Contraseña actualizada correctamente."
+      : "Si el identificador existe, recibirás las instrucciones para restablecer la contraseña."
   );
 
-  const form = refs?.form;
-  const card = refs?.card;
+  setResetPasswordLoading(refs, false, options);
+  clearResetPasswordErrors(refs);
+  setGlobalMessage(refs.errorBox, message, "success");
 
-  if (form) {
-    form.setAttribute("data-success", "true");
-    form.classList.add("is-success");
-    form.classList.remove("is-loading");
-    setAriaBusy(form, false);
-    form.dataset.submitting = "false";
-  }
+  try {
+    refs.form?.setAttribute("data-success", "true");
+  } catch {}
 
-  if (card) {
-    card.setAttribute("data-success", "true");
-    card.classList.add("is-success");
-    card.classList.remove("is-loading");
-    card.dataset.submitting = "false";
-  }
-
-  setDisabled(refs.identifierInput, true);
-  setDisabled(refs.themeToggleButton, true);
-
-  if (refs.backToLoginLink) {
-    refs.backToLoginLink.setAttribute("aria-disabled", "false");
-    refs.backToLoginLink.classList.remove("is-disabled");
-    refs.backToLoginLink.tabIndex = 0;
-  }
-
-  if (refs.submitButton) {
-    refs.submitButton.disabled = true;
-    refs.submitButton.dataset.loading = "false";
-    setHtml(
-      refs.submitButton,
-      resolveSubmitMarkup(title)
-    );
-  }
-
-  setText(refs.errorBox, message);
+  return true;
 }
 
 export function setResetPasswordNeutralState(refs = {}, options = {}) {
-  const submitLabel = toText(
-    options.submitLabel,
-    "Enviar enlace"
-  );
+  setResetPasswordLoading(refs, false, options);
+  clearResetPasswordErrors(refs);
 
-  const form = refs?.form;
-  const card = refs?.card;
-
-  if (form) {
-    form.removeAttribute("data-success");
-    form.classList.remove("is-success", "is-loading");
-    setAriaBusy(form, false);
-    form.dataset.submitting = "false";
-  }
-
-  if (card) {
-    card.removeAttribute("data-success");
-    card.classList.remove("is-success", "is-loading");
-    card.dataset.submitting = "false";
-  }
-
-  setDisabled(refs.identifierInput, false);
-  setDisabled(refs.themeToggleButton, false);
-
-  if (refs.backToLoginLink) {
-    refs.backToLoginLink.setAttribute("aria-disabled", "false");
-    refs.backToLoginLink.classList.remove("is-disabled");
-    refs.backToLoginLink.tabIndex = 0;
-  }
-
-  if (refs.submitButton) {
-    refs.submitButton.disabled = false;
-    refs.submitButton.dataset.loading = "false";
-    setHtml(
-      refs.submitButton,
-      resolveSubmitMarkup(submitLabel)
-    );
-  }
-}
-
-/* =========================================================
-   TOAST
-========================================================= */
-
-export function getResetPasswordToastRefs(refs = {}) {
-  return {
-    toastRoot: refs.toastRoot || null,
-    toastIcon: refs.toastIcon || null,
-    toastTitle: refs.toastTitle || null,
-    toastText: refs.toastText || null,
-    toastClose: refs.toastClose || null,
-    toastProgress: refs.toastProgress || null,
-  };
-}
-
-export function hideResetPasswordToast(refs = {}) {
-  const {
-    toastRoot,
-    toastProgress,
-  } = getResetPasswordToastRefs(refs);
-
-  if (!toastRoot) return;
-
-  removeClasses(toastRoot, [
-    "is-visible",
-    "is-success",
-    "is-error",
-    "is-info",
-    "is-warning",
-  ]);
-
-  toastRoot.hidden = true;
-  toastRoot.setAttribute("aria-hidden", "true");
-  toastRoot.dataset.state = "default";
-
-  if (toastProgress) {
-    toastProgress.style.animation = "none";
-    toastProgress.style.transform = "";
-    toastProgress.style.opacity = "";
-  }
-}
-
-export function setResetPasswordToastVisibility(refs = {}, visible = false) {
-  const toastRoot = refs?.toastRoot;
-
-  if (!toastRoot) {
-    return Boolean(visible);
-  }
-
-  setHidden(toastRoot, !visible);
-  toastRoot.setAttribute(
-    "aria-hidden",
-    visible ? "false" : "true"
-  );
-
-  if (!visible) {
-    toastRoot.dataset.state = "default";
-  }
-
-  return Boolean(visible);
-}
-
-export function setResetPasswordToastContent(refs = {}, options = {}) {
-  const {
-    toastRoot,
-    toastTitle,
-    toastText,
-  } = getResetPasswordToastRefs(refs);
-
-  if (!toastRoot) {
-    return false;
-  }
-
-  const title = toText(options.title, "Aviso");
-  const message = toText(options.message, "");
-  const type = toText(options.type, "info").toLowerCase();
-
-  removeClasses(toastRoot, [
-    "is-success",
-    "is-error",
-    "is-info",
-    "is-warning",
-  ]);
-
-  toastRoot.dataset.state = type;
-  toastRoot.classList.add(`is-${type}`);
-
-  setText(toastTitle, title);
-  setText(toastText, message);
+  try {
+    refs.form?.removeAttribute("data-success");
+  } catch {}
 
   return true;
 }
 
-export function resetResetPasswordToastProgress(refs = {}) {
-  const { toastProgress } = getResetPasswordToastRefs(refs);
+export function shakeResetPasswordCard(refs = {}) {
+  const card = refs.root?.querySelector?.(".auth-card, .password-reset-card");
 
-  if (!toastProgress) {
-    return;
-  }
+  if (!card) return false;
 
-  toastProgress.style.animation = "none";
-  toastProgress.style.transform = "";
-  toastProgress.style.opacity = "";
-}
-
-export function startResetPasswordToastProgress(
-  refs = {},
-  duration = 0,
-  animationName = "loginToastProgress"
-) {
-  const { toastProgress } = getResetPasswordToastRefs(refs);
-
-  if (!toastProgress) {
-    return false;
-  }
-
-  const safeDuration = Math.max(0, toNumber(duration, 0));
-
-  resetResetPasswordToastProgress(refs);
-
-  if (safeDuration <= 0) {
+  try {
+    card.classList.remove("shake");
+    void card.offsetWidth;
+    card.classList.add("shake");
     return true;
+  } catch {
+    return false;
   }
-
-  void toastProgress.offsetWidth;
-  toastProgress.style.animation =
-    `${animationName} ${safeDuration}ms linear forwards`;
-
-  return true;
-}
-
-export function showResetPasswordToast(refs = {}, options = {}) {
-  const duration = Math.max(
-    0,
-    toNumber(options.duration, 3200)
-  );
-
-  const autoHide =
-    Object.prototype.hasOwnProperty.call(options, "autoHide")
-      ? Boolean(options.autoHide)
-      : true;
-
-  setResetPasswordToastContent(refs, options);
-  setResetPasswordToastVisibility(refs, true);
-
-  if (refs.toastRoot) {
-    refs.toastRoot.classList.add("is-visible");
-  }
-
-  if (autoHide && duration > 0) {
-    startResetPasswordToastProgress(refs, duration);
-
-    window.setTimeout(() => {
-      hideResetPasswordToast(refs);
-    }, duration);
-  } else {
-    resetResetPasswordToastProgress(refs);
-  }
-
-  return true;
 }
 
 /* =========================================================
-   FOCUS
+   FORM STATE
 ========================================================= */
 
-export function focusResetPasswordPrimaryField(refs = {}, options = {}) {
-  const rememberedIdentifier = Boolean(
-    options.rememberedIdentifier || options.rememberedEmail
-  );
-
-  queueMicrotask(() => {
-    try {
-      refs.identifierInput?.focus?.();
-
-      if (rememberedIdentifier) {
-        return;
-      }
-
-      refs.identifierInput?.select?.();
-    } catch {}
-  });
+function normalizeIdentifier(value = "") {
+  return text(value, "")
+    .normalize("NFKC")
+    .replace(/\s+/g, " ");
 }
-
-/* =========================================================
-   STATE SNAPSHOT
-========================================================= */
 
 export function readResetPasswordFormState(refs = {}) {
-  const identifier = toText(refs?.identifierInput?.value, "");
+  const identifier = normalizeIdentifier(
+    refs.identifierInput?.value ?? refs.emailInput?.value ?? ""
+  );
 
   return {
+    mode: refs.mode || modeFromRefs(refs),
+
     identifier,
     email: identifier.toLowerCase(),
+
+    token: rawText(refs.tokenInput?.value, ""),
+    password: rawText(refs.passwordInput?.value, ""),
+    confirmPassword: rawText(refs.confirmPasswordInput?.value, ""),
   };
 }
 
+export function focusResetPasswordPrimaryField(refs = {}, options = {}) {
+  later(() => {
+    if (refs.mode === "confirm") {
+      focus(refs.passwordInput);
+      return;
+    }
+
+    const remembered = Boolean(options.rememberedIdentifier || options.rememberedEmail);
+    focus(refs.identifierInput || refs.emailInput, !remembered);
+  });
+
+  return true;
+}
+
 /* =========================================================
-   BIND HELPERS
+   BINDINGS
 ========================================================= */
 
 export function bindResetPasswordInputClearers(refs = {}, handler = null) {
-  return bindDomEvent(
-    refs.identifierInput,
-    "input",
-    handler
-  );
+  if (!isFn(handler)) return noop;
+
+  const nodes = [
+    refs.identifierInput || refs.emailInput,
+    refs.passwordInput,
+    refs.confirmPasswordInput,
+  ].filter(Boolean);
+
+  return compose(nodes.map((node) => bindDom(node, "input", handler)));
 }
 
 export function bindResetPasswordSubmit(refs = {}, handler = null) {
-  return bindDomEvent(
-    refs.form,
-    "submit",
-    handler
-  );
+  const target = refs.form || refs.submitButton;
+  if (!target || !isFn(handler)) return noop;
+
+  const previous = SUBMIT_BINDINGS.get(target);
+  if (previous) previous();
+
+  let locked = false;
+
+  const onSubmit = (event) => {
+    try {
+      event?.preventDefault?.();
+    } catch {}
+
+    if (locked) return undefined;
+
+    locked = true;
+
+    let result;
+
+    try {
+      result = handler(event);
+    } catch (error) {
+      locked = false;
+      throw error;
+    }
+
+    Promise.resolve(result)
+      .catch(noop)
+      .finally(() => {
+        locked = false;
+      });
+
+    return result;
+  };
+
+  const disposeEvent = bindDom(target, refs.form ? "submit" : "click", onSubmit);
+
+  const dispose = () => {
+    locked = false;
+    disposeEvent();
+    SUBMIT_BINDINGS.delete(target);
+  };
+
+  SUBMIT_BINDINGS.set(target, dispose);
+  return dispose;
 }
 
-export function bindResetPasswordToastClose(refs = {}, handler = null) {
-  return bindDomEvent(
-    refs.toastClose,
-    "click",
-    handler
-  );
+/* =========================================================
+   COMPAT MÍNIMA SIN TOAST PROPIO
+========================================================= */
+
+export function getResetPasswordToastRefs() {
+  return {
+    toastRoot: null,
+    toastIcon: null,
+    toastTitle: null,
+    toastText: null,
+    toastClose: null,
+    toastProgress: null,
+  };
+}
+
+export function hideResetPasswordToast() {
+  return false;
+}
+
+export function setResetPasswordToastVisibility(_refs = {}, visible = false) {
+  return Boolean(visible);
+}
+
+export function setResetPasswordToastContent() {
+  return false;
+}
+
+export function resetResetPasswordToastProgress() {
+  return false;
+}
+
+export function startResetPasswordToastProgress() {
+  return false;
+}
+
+export function showResetPasswordToast(refs = {}, options = {}) {
+  const message =
+    text(options.message, "") ||
+    text(options.text, "") ||
+    text(options.title, "");
+
+  if (!message) return false;
+
+  setGlobalMessage(refs.errorBox, message, text(options.type, "info"));
+  return true;
+}
+
+export function bindResetPasswordToastClose() {
+  return noop;
 }
 
 export function bindResetPasswordBackLink(refs = {}, handler = null) {
-  return bindDomEvent(
-    refs.backToLoginLink,
-    "click",
-    handler
-  );
+  if (!refs.backToLoginLink || !isFn(handler)) return noop;
+  return bindDom(refs.backToLoginLink, "click", handler);
 }
 
-export function bindResetPasswordThemeToggle(refs = {}, handler = null) {
-  return bindDomEvent(
-    refs.themeToggleButton,
-    "click",
-    handler
-  );
+export function bindResetPasswordThemeToggle() {
+  return noop;
 }
+
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
+export function getResetPasswordDomSnapshot(refs = {}) {
+  return {
+    version: RESET_PASSWORD_DOM_VERSION,
+    mode: refs.mode || modeFromRefs(refs),
+    hasRoot: Boolean(refs.root),
+    hasForm: Boolean(refs.form),
+    hasIdentifier: Boolean(refs.identifierInput || refs.emailInput),
+    hasPassword: Boolean(refs.passwordInput),
+    hasConfirmPassword: Boolean(refs.confirmPasswordInput),
+    hasSubmit: Boolean(refs.submitButton),
+    submitting: refs.form?.dataset?.submitting === "true",
+  };
+}
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default {
+  RESET_PASSWORD_DOM_VERSION,
+
+  getResetPasswordRefs,
+
+  bindResetPasswordFields,
+  destroyResetPasswordFields,
+
+  setFieldInvalid,
+  setInputInvalid,
+  setFieldError,
+  clearFieldError,
+
+  clearResetPasswordErrors,
+  applyResetPasswordErrors,
+  setGlobalResetPasswordError,
+
+  setResetPasswordLoading,
+  setResetPasswordSuccessState,
+  setResetPasswordNeutralState,
+  shakeResetPasswordCard,
+
+  readResetPasswordFormState,
+  focusResetPasswordPrimaryField,
+
+  bindResetPasswordInputClearers,
+  bindResetPasswordSubmit,
+
+  getResetPasswordToastRefs,
+  hideResetPasswordToast,
+  setResetPasswordToastVisibility,
+  setResetPasswordToastContent,
+  resetResetPasswordToastProgress,
+  startResetPasswordToastProgress,
+  showResetPasswordToast,
+  bindResetPasswordToastClose,
+
+  bindResetPasswordBackLink,
+  bindResetPasswordThemeToggle,
+
+  getResetPasswordDomSnapshot,
+};

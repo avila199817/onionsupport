@@ -11,13 +11,12 @@
    - Sin Store.
    - Sin Toast directo.
    - Sin duplicar lógica del password.
-   - Sin CapsLock.
    - Sin layout visual extra.
 ========================================================= */
 
 import { renderPasswordField } from "../../shared/password-field/index.js";
 
-export const TEMPLATE_VERSION = "minimal-2";
+export const TEMPLATE_VERSION = "minimal-3";
 
 const DEFAULT_APP_NAME = "Onion Support";
 const DEFAULT_LOGO = "/src/media/img/favicon_black_circle.png?v=6";
@@ -104,7 +103,10 @@ function renderLoginPasswordField({ label, placeholder }) {
     placeholder,
     autocomplete: "current-password",
     required: true,
+
     showToggle: true,
+    showCapsIndicator: true,
+    capsLabel: "Bloq Mayús",
 
     fieldClass: "login-field login-field--password",
     wrapperClass: "password-wrapper login-password-wrapper",

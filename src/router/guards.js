@@ -7,6 +7,8 @@
    - Evaluar route.public / route.guestOnly / route.requiresAuth / route.roles.
    - Auth estricta: token usable + user usable.
    - Roles únicos exactos: admin / user.
+   - Entender /@slug como Home pública del usuario.
+   - No inventar slug.
    - Sin fetch.
    - Sin refresh.
    - Sin restore.
@@ -14,15 +16,16 @@
    - Sin Toast.
    - Sin navegación.
    - Sin /403.
+   - Sin alias /home.
    - Sin 2FA/MFA/OTP.
-   - Sin aliases.
-   - Sin magia negra.
 ========================================================= */
 
-export const GUARDS_VERSION = "simple";
+export const GUARDS_VERSION = "router.guards.slug.v1";
 
 const LOGIN_PATH = "/login";
 const HOME_PATH = "/";
+const USER_HOME_PREFIX = "/@";
+const USER_HOME_RE = /^\/@([A-Za-z0-9][A-Za-z0-9._-]{0,95})$/;
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
 
@@ -87,8 +90,8 @@ function resolveAuth(AppCore = null, Auth = null) {
    PATHS
 ========================================================= */
 
-function normalizePublicPath(path = "/") {
-  let value = text(path, "/");
+function normalizePublicPath(path = HOME_PATH) {
+  let value = text(path, HOME_PATH);
 
   if (value.startsWith("#/")) value = value.slice(1);
   if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
@@ -96,7 +99,7 @@ function normalizePublicPath(path = "/") {
   try {
     if (/^https?:\/\//i.test(value)) {
       const parsed = new URL(value);
-      value = `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`;
+      value = `${parsed.pathname || HOME_PATH}${parsed.search || ""}${parsed.hash || ""}`;
     }
   } catch {
     // noop
@@ -106,17 +109,42 @@ function normalizePublicPath(path = "/") {
 
   value = value.replace(/\/{2,}/g, "/");
 
-  return value || "/";
+  return value || HOME_PATH;
 }
 
-function normalizeCanonicalPath(path = "/") {
-  let value = normalizePublicPath(path).split("?")[0].split("#")[0] || "/";
+function normalizeCanonicalPath(path = HOME_PATH) {
+  let value = normalizePublicPath(path).split("?")[0].split("#")[0] || HOME_PATH;
 
   if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || "/";
+    value = value.replace(/\/+$/g, "") || HOME_PATH;
   }
 
   return value;
+}
+
+function normalizeUserSlug(value = "") {
+  const slug = text(value, "").replace(/^@+/, "").trim();
+
+  if (!slug) return "";
+
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
+function extractSlugFromPath(path = HOME_PATH) {
+  const canonical = normalizeCanonicalPath(path);
+  const match = canonical.match(USER_HOME_RE);
+
+  return match ? normalizeUserSlug(match[1]) : "";
+}
+
+function isUserHomePath(path = HOME_PATH) {
+  return Boolean(extractSlugFromPath(path));
+}
+
+function canonicalGuardPath(path = HOME_PATH) {
+  const canonical = normalizeCanonicalPath(path);
+
+  return isUserHomePath(canonical) ? HOME_PATH : canonical;
 }
 
 function isSafeInternalPath(path = "") {
@@ -135,16 +163,6 @@ function safeRedirect(path = "", fallback = HOME_PATH) {
   const candidate = normalizePublicPath(path || fallback);
 
   return isSafeInternalPath(candidate) ? candidate : fallback;
-}
-
-function buildLoginRedirect(publicPath = HOME_PATH) {
-  const target = safeRedirect(publicPath, HOME_PATH);
-
-  if (normalizeCanonicalPath(target) === LOGIN_PATH) {
-    return LOGIN_PATH;
-  }
-
-  return `${LOGIN_PATH}?redirect=${encodeURIComponent(target)}`;
 }
 
 function redact(value = "") {
@@ -211,9 +229,13 @@ function getToken(AppCore = null, Auth = null) {
 function userDisabled(user = null) {
   if (!isObject(user)) return true;
 
+  const status = String(user.status || user.estado || "").toLowerCase();
+
   return (
     user.disabled === true ||
-    String(user.status || "").toLowerCase() === "disabled"
+    user.deleted === true ||
+    status === "disabled" ||
+    status === "deleted"
   );
 }
 
@@ -270,6 +292,61 @@ function isAuthenticated(AppCore = null, Auth = null) {
 }
 
 /* =========================================================
+   SLUG / HOME
+========================================================= */
+
+function extractUserSlug(user = null) {
+  if (!isObject(user)) return "";
+
+  return normalizeUserSlug(
+    user.slug ||
+      user.lookup?.slug ||
+      user.profile?.slug ||
+      ""
+  );
+}
+
+function getUserHomePath(AppCore = null, Auth = null) {
+  const auth = resolveAuth(AppCore, Auth);
+  const state = readState(AppCore);
+  const user = getUser(AppCore, auth);
+
+  try {
+    const fromAuth = auth?.getDefaultHome?.() || auth?.getPostLoginTarget?.();
+
+    if (isSafeInternalPath(fromAuth)) {
+      return normalizePublicPath(fromAuth);
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  const stateHome =
+    state.homePath ||
+    state.defaultHome ||
+    state.postLoginTarget ||
+    "";
+
+  if (isSafeInternalPath(stateHome)) {
+    return normalizePublicPath(stateHome);
+  }
+
+  const slug = extractUserSlug(user);
+
+  return slug ? `${USER_HOME_PREFIX}${slug}` : HOME_PATH;
+}
+
+function buildLoginRedirect(AppCore = null, Auth = null, publicPath = HOME_PATH) {
+  const target = safeRedirect(publicPath, getUserHomePath(AppCore, Auth));
+
+  if (canonicalGuardPath(target) === LOGIN_PATH) {
+    return LOGIN_PATH;
+  }
+
+  return `${LOGIN_PATH}?redirect=${encodeURIComponent(target)}`;
+}
+
+/* =========================================================
    ROLES
 ========================================================= */
 
@@ -288,7 +365,9 @@ export function normalizeGuardRoles(value = []) {
 }
 
 function rawRouteRoles(route = null) {
-  return asArray(route?.roles).filter((role) => role !== undefined && role !== null && role !== "");
+  return asArray(route?.roles).filter((role) => {
+    return role !== undefined && role !== null && role !== "";
+  });
 }
 
 function routeRoles(route = null) {
@@ -369,7 +448,7 @@ function requiresAuth(route = null) {
 }
 
 function routePath(route = null) {
-  return normalizeCanonicalPath(route?.path || route?.canonicalPath || "/");
+  return canonicalGuardPath(route?.path || route?.canonicalPath || HOME_PATH);
 }
 
 /* =========================================================
@@ -382,12 +461,20 @@ function publicUser(user = null) {
   return {
     id: user.id || user.userId || null,
     userId: user.userId || user.id || null,
-    username: user.username || user.slug || null,
+    username: user.username || null,
+    slug: extractUserSlug(user) || null,
     role: user.role || user.rol || null,
   };
 }
 
-function details({ AppCore = null, Auth = null, route = null, canonicalPath = "/", publicPath = "", extra = {} } = {}) {
+function details({
+  AppCore = null,
+  Auth = null,
+  route = null,
+  canonicalPath = HOME_PATH,
+  publicPath = HOME_PATH,
+  extra = {},
+} = {}) {
   const auth = resolveAuth(AppCore, Auth);
   const user = getUser(AppCore, auth);
   const token = getToken(AppCore, auth);
@@ -409,11 +496,19 @@ function details({ AppCore = null, Auth = null, route = null, canonicalPath = "/
 
     user: publicUser(user),
 
+    userHomePath: getUserHomePath(AppCore, auth),
+
     ...extra,
   };
 }
 
-function allow({ route = null, reason = GUARD_REASONS.allow, canonicalPath = "/", publicPath = "/", extra = {} } = {}) {
+function allow({
+  route = null,
+  reason = GUARD_REASONS.allow,
+  canonicalPath = HOME_PATH,
+  publicPath = HOME_PATH,
+  extra = {},
+} = {}) {
   return {
     allowed: true,
     reason,
@@ -425,7 +520,14 @@ function allow({ route = null, reason = GUARD_REASONS.allow, canonicalPath = "/"
   };
 }
 
-function deny({ reason = "blocked", route = null, redirectTo = null, canonicalPath = "/", publicPath = "/", extra = {} } = {}) {
+function deny({
+  reason = "blocked",
+  route = null,
+  redirectTo = null,
+  canonicalPath = HOME_PATH,
+  publicPath = HOME_PATH,
+  extra = {},
+} = {}) {
   return {
     allowed: false,
     reason,
@@ -445,11 +547,12 @@ export function shouldAllowRoute({
   AppCore = null,
   Auth = null,
   route = null,
-  requestedCanonicalPath = "/",
+  requestedCanonicalPath = HOME_PATH,
   requestedPublicPath = null,
 } = {}) {
   const auth = resolveAuth(AppCore, Auth);
-  const canonicalPath = normalizeCanonicalPath(requestedCanonicalPath);
+
+  const canonicalPath = canonicalGuardPath(requestedCanonicalPath);
   const publicPath = normalizePublicPath(requestedPublicPath || canonicalPath);
 
   if (!route) {
@@ -480,7 +583,7 @@ export function shouldAllowRoute({
     return deny({
       reason: GUARD_REASONS.alreadyAuthenticated,
       route,
-      redirectTo: HOME_PATH,
+      redirectTo: getUserHomePath(AppCore, auth),
       canonicalPath,
       publicPath,
       extra: details({
@@ -489,7 +592,9 @@ export function shouldAllowRoute({
         route,
         canonicalPath,
         publicPath,
-        extra: { guestOnly: true },
+        extra: {
+          guestOnly: true,
+        },
       }),
     });
   }
@@ -527,7 +632,9 @@ export function shouldAllowRoute({
         route,
         canonicalPath,
         publicPath,
-        extra: { unsupportedRoles },
+        extra: {
+          unsupportedRoles,
+        },
       }),
     });
   }
@@ -536,7 +643,7 @@ export function shouldAllowRoute({
     return deny({
       reason: GUARD_REASONS.notAuthenticated,
       route,
-      redirectTo: buildLoginRedirect(publicPath),
+      redirectTo: buildLoginRedirect(AppCore, auth, publicPath),
       canonicalPath,
       publicPath,
       extra: details({
@@ -603,12 +710,13 @@ export function getGuardsSnapshot({
   AppCore = null,
   Auth = null,
   route = null,
-  requestedCanonicalPath = AppCore?.state?.route || "/",
+  requestedCanonicalPath = AppCore?.state?.route || HOME_PATH,
   requestedPublicPath = AppCore?.state?.publicPath || requestedCanonicalPath,
 } = {}) {
   const auth = resolveAuth(AppCore, Auth);
-  const canonicalPath = normalizeCanonicalPath(requestedCanonicalPath);
+  const canonicalPath = canonicalGuardPath(requestedCanonicalPath);
   const publicPath = normalizePublicPath(requestedPublicPath || canonicalPath);
+
   const access = shouldAllowRoute({
     AppCore,
     Auth: auth,
@@ -622,6 +730,7 @@ export function getGuardsSnapshot({
 
     canonicalPath: redact(canonicalPath),
     publicPath: redact(publicPath),
+    isUserHomePath: isUserHomePath(publicPath),
 
     route: route
       ? {
@@ -642,6 +751,8 @@ export function getGuardsSnapshot({
       hasUser: Boolean(getUser(AppCore, auth)),
       currentRole: currentRole(AppCore, auth) || null,
       currentRoles: currentRoles(AppCore, auth),
+      user: publicUser(getUser(AppCore, auth)),
+      userHomePath: getUserHomePath(AppCore, auth),
     },
 
     routeAccess: {
@@ -660,6 +771,8 @@ export function getGuardsSnapshot({
       ownTransport: false,
       ownRouterNavigation: false,
       roles: [...VALID_ROLES],
+      publicSlugHome: true,
+      noHomeAlias: true,
       noAliases: true,
       no403: true,
       no2fa: true,
@@ -667,11 +780,22 @@ export function getGuardsSnapshot({
   };
 }
 
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
 export default {
   GUARDS_VERSION,
   GUARD_REASONS,
 
   shouldAllowRoute,
+
   normalizeGuardRoles,
+
+  normalizePublicPath,
+  canonicalGuardPath,
+  isUserHomePath,
+  extractSlugFromPath,
+
   getGuardsSnapshot,
 };

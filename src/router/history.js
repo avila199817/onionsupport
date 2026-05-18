@@ -25,7 +25,6 @@ export const ROUTER_HISTORY_VERSION = "simple";
 const SOURCE = "router.history";
 const HISTORY_STATE_VERSION = 1;
 const DEFAULT_ROUTE = "/";
-
 const TOKEN_PARAM = "token";
 
 const TOKEN_ROUTES = new Set([
@@ -77,12 +76,17 @@ function nextHistoryId() {
 function emit(AppCore = null, eventName = "", payload = {}, options = {}) {
   if (options.emit === false || options.emitEvents === false) return false;
 
+  const name = text(eventName, "");
+  if (!name) return false;
+
   try {
-    AppCore?.events?.emit?.(eventName, {
+    AppCore?.events?.emit?.(name, {
       source: SOURCE,
       version: ROUTER_HISTORY_VERSION,
       ...payload,
       token: null,
+      accessToken: null,
+      refreshToken: null,
     });
 
     return true;
@@ -107,7 +111,11 @@ function normalizeHashRouterPath(value = "") {
     return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
   }
 
-  return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
+  if (raw.startsWith("#/")) {
+    return raw.slice(1) || DEFAULT_ROUTE;
+  }
+
+  return raw || DEFAULT_ROUTE;
 }
 
 function normalizePathname(pathname = DEFAULT_ROUTE) {
@@ -120,7 +128,7 @@ function normalizePathname(pathname = DEFAULT_ROUTE) {
   value = value.replace(/\/{2,}/g, "/");
 
   if (value.length > 1) {
-    value = value.replace(/\/+$/g, "");
+    value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
   }
 
   return value || DEFAULT_ROUTE;
@@ -129,17 +137,21 @@ function normalizePathname(pathname = DEFAULT_ROUTE) {
 function normalizeSearch(search = "") {
   const value = text(search, "");
 
-  if (!value) return "";
+  if (!value || value === "?") return "";
 
-  return value.startsWith("?") ? value : `?${value.replace(/^\?+/, "")}`;
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
 }
 
 function normalizeHash(hash = "") {
   const value = text(hash, "");
 
-  if (!value) return "";
+  if (!value || value === "#") return "";
 
-  return value.startsWith("#") ? value : `#${value.replace(/^#+/, "")}`;
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
 }
 
 function splitPath(path = DEFAULT_ROUTE) {
@@ -152,7 +164,12 @@ function splitPath(path = DEFAULT_ROUTE) {
   try {
     if (/^https?:\/\//i.test(raw)) {
       const parsed = new URL(raw);
-      raw = `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`;
+
+      if (parsed.hash && isHashRouterPath(parsed.hash)) {
+        raw = normalizeHashRouterPath(parsed.hash);
+      } else {
+        raw = `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`;
+      }
     }
   } catch {
     // noop
@@ -184,7 +201,11 @@ function splitPath(path = DEFAULT_ROUTE) {
 }
 
 function joinPath(parts = {}) {
-  return `${normalizePathname(parts.pathname || DEFAULT_ROUTE)}${normalizeSearch(parts.search || "")}${normalizeHash(parts.hash || "")}`;
+  return [
+    normalizePathname(parts.pathname || DEFAULT_ROUTE),
+    normalizeSearch(parts.search || ""),
+    normalizeHash(parts.hash || ""),
+  ].join("");
 }
 
 function normalizePublicPath(path = DEFAULT_ROUTE) {
@@ -213,6 +234,12 @@ function browserPath() {
   }
 }
 
+function redact(value = "") {
+  return text(value, "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
 /* =========================================================
    STATE
 ========================================================= */
@@ -222,6 +249,8 @@ export function createHistoryState({
   pathname = DEFAULT_ROUTE,
   extras = {},
 } = {}) {
+  void AppCore;
+
   const extra = isObject(extras) ? extras : {};
   const publicPath = normalizePublicPath(extra.publicPath || pathname || DEFAULT_ROUTE);
   const canonicalPath = normalizeCanonicalPath(extra.canonicalPath || publicPath);
@@ -237,11 +266,10 @@ export function createHistoryState({
     path: publicPath,
     publicPath,
     canonicalPath,
+    route: canonicalPath,
 
     source: extra.source || null,
     mode: extra.mode || null,
-
-    route: canonicalPath,
 
     title: extra.title || null,
     stateSource: SOURCE,
@@ -258,13 +286,12 @@ function currentHistoryState() {
   }
 }
 
-function sameState(left = null, right = null) {
+function sameLocation(left = null, right = null) {
   if (!left || !right) return false;
 
   return (
     left.publicPath === right.publicPath &&
-    left.canonicalPath === right.canonicalPath &&
-    left.mode === right.mode
+    left.canonicalPath === right.canonicalPath
   );
 }
 
@@ -282,15 +309,15 @@ function writeHistory(AppCore, method, state, url, options = {}) {
 
     emit(AppCore, "router:history:write", {
       method,
-      url: finalUrl,
-      canonicalPath: state.canonicalPath,
+      url: redact(finalUrl),
+      canonicalPath: redact(state.canonicalPath),
     }, options);
 
     return true;
   } catch (error) {
     emit(AppCore, "router:history:error", {
       method,
-      url: finalUrl,
+      url: redact(finalUrl),
       message: error?.message || String(error),
     }, options);
 
@@ -326,7 +353,7 @@ export function pushState({
     },
   });
 
-  if (sameState(currentHistoryState(), state) && opts.forceHistory !== true) {
+  if (sameLocation(currentHistoryState(), state) && opts.forceHistory !== true) {
     return false;
   }
 
@@ -357,7 +384,7 @@ export function replaceState({
     },
   });
 
-  if (sameState(currentHistoryState(), state) && opts.forceHistory !== true) {
+  if (sameLocation(currentHistoryState(), state) && opts.forceHistory !== true) {
     return false;
   }
 
@@ -377,9 +404,11 @@ export function updateHistory({
 
   const publicPath = normalizePublicPath(opts.publicPath || pathname);
   const currentUrl = normalizePublicPath(browserPath());
-  const method = opts.replaceState === true || publicPath === currentUrl
-    ? "replaceState"
-    : "pushState";
+
+  const method =
+    opts.replaceState === true || publicPath === currentUrl
+      ? "replaceState"
+      : "pushState";
 
   const state = createHistoryState({
     AppCore,
@@ -393,7 +422,7 @@ export function updateHistory({
     },
   });
 
-  if (sameState(currentHistoryState(), state) && opts.forceHistory !== true) {
+  if (sameLocation(currentHistoryState(), state) && opts.forceHistory !== true) {
     return false;
   }
 
@@ -407,7 +436,14 @@ export function updateHistory({
 export function ensureInitialHistoryState({ AppCore = null } = {}) {
   if (!canUseHistory()) return false;
 
+  const current = currentHistoryState();
+
+  if (current?.__onionRouterHistory === true) {
+    return true;
+  }
+
   const publicPath = browserPath();
+
   const state = createHistoryState({
     AppCore,
     pathname: publicPath,
@@ -418,12 +454,6 @@ export function ensureInitialHistoryState({ AppCore = null } = {}) {
       source: "initial",
     },
   });
-
-  const current = currentHistoryState();
-
-  if (current?.__onionRouterHistory === true) {
-    return true;
-  }
 
   return writeHistory(AppCore, "replaceState", state, publicPath, {
     source: "initial",
@@ -436,6 +466,10 @@ export function ensureInitialHistoryState({ AppCore = null } = {}) {
    - /activate-account?token=...
    - /password-reset?token=...
 ========================================================= */
+
+function isTokenRoute(path = "") {
+  return TOKEN_ROUTES.has(normalizeCanonicalPath(path));
+}
 
 function removeTokenFromSearch(search = "") {
   const normalized = normalizeSearch(search);
@@ -458,27 +492,30 @@ function removeTokenFromHash(hash = "") {
 
   if (!normalized || !normalized.includes("?")) return normalized;
 
-  const [hashPath, query = ""] = normalized.split("?");
+  const index = normalized.indexOf("?");
+  const hashPath = normalized.slice(0, index);
+  const query = normalized.slice(index + 1);
+
   const cleanQuery = removeTokenFromSearch(`?${query}`);
 
   return cleanQuery ? `${hashPath}${cleanQuery}` : hashPath;
-}
-
-function isTokenRoute(path = "") {
-  return TOKEN_ROUTES.has(normalizeCanonicalPath(path));
 }
 
 export function buildScrubbedProtectedUrl(_AppCore = null, url = "") {
   const original = normalizePublicPath(url || browserPath());
   const parts = splitPath(original);
 
-  const clean = {
-    pathname: parts.pathname,
-    search: isTokenRoute(parts.pathname) ? removeTokenFromSearch(parts.search) : parts.search,
-    hash: isTokenRoute(parts.pathname) ? removeTokenFromHash(parts.hash) : parts.hash,
-  };
+  if (!isTokenRoute(parts.pathname)) {
+    return original;
+  }
 
-  return normalizePublicPath(joinPath(clean));
+  return normalizePublicPath(
+    joinPath({
+      pathname: parts.pathname,
+      search: removeTokenFromSearch(parts.search),
+      hash: removeTokenFromHash(parts.hash),
+    })
+  );
 }
 
 export function scrubProtectedTokenFromHistory({
@@ -491,8 +528,9 @@ export function scrubProtectedTokenFromHistory({
   if (!canUseHistory()) return false;
 
   const original = normalizePublicPath(url || browserPath());
+  const parts = splitPath(original);
 
-  if (!isTokenRoute(original)) return false;
+  if (!isTokenRoute(parts.pathname)) return false;
 
   const scrubbed = buildScrubbedProtectedUrl(AppCore, original);
 
@@ -563,9 +601,9 @@ export function getHistorySnapshot(AppCore = null) {
     canUseHistory: canUseHistory(),
     historyStateVersion: HISTORY_STATE_VERSION,
 
-    browserPublicUrl: currentUrl,
-    currentCanonicalPath: normalizeCanonicalPath(currentUrl),
-    currentPublicPath: normalizePublicPath(currentUrl),
+    browserPublicUrl: redact(currentUrl),
+    currentCanonicalPath: redact(normalizeCanonicalPath(currentUrl)),
+    currentPublicPath: redact(normalizePublicPath(currentUrl)),
 
     state: canUseHistory() ? currentHistoryState() : null,
 
@@ -579,6 +617,7 @@ export function getHistorySnapshot(AppCore = null) {
       ownStorage: false,
       ownToast: false,
       noUsernamePublicSlug: true,
+      noLegacyRoutes: true,
       tokenParam: TOKEN_PARAM,
       tokenRoutes: [...TOKEN_ROUTES],
     },

@@ -8,7 +8,7 @@
    - Estado inicial seguro.
    - publicPath conserva query/hash.
    - canonicalPath limpio.
-   - /@slug conserva URL pública pero canonicaliza a /.
+   - /@{user.slug} conserva URL pública pero canonicaliza a /.
    - Scrub explícito sólo del parámetro token.
    - Sin imports.
    - Sin Auth.
@@ -21,14 +21,11 @@
    - Sin rutas legacy.
 ========================================================= */
 
-export const ROUTER_HISTORY_VERSION = "router.history.slug.v1";
+export const ROUTER_HISTORY_VERSION = "router.history.v2";
 
 const HISTORY_STATE_VERSION = 1;
 const DEFAULT_ROUTE = "/";
-const LOGIN_ROUTE = "/login";
-
-const USER_HOME_RE = /^\/@([A-Za-z0-9][A-Za-z0-9._-]{0,95})$/;
-
+const USER_HOME_PREFIX = "/@";
 const TOKEN_PARAM = "token";
 
 const TOKEN_ROUTES = new Set([
@@ -80,6 +77,7 @@ function nextHistoryId() {
 function redact(value = "") {
   return text(value, "")
     .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -104,6 +102,24 @@ function normalizeHashRouterPath(value = "") {
   }
 
   return raw || DEFAULT_ROUTE;
+}
+
+function pathFromInput(path = DEFAULT_ROUTE) {
+  const raw = text(path, DEFAULT_ROUTE);
+
+  if (isHashRouterPath(raw)) {
+    return normalizeHashRouterPath(raw);
+  }
+
+  if (raw.startsWith("//")) {
+    return DEFAULT_ROUTE;
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+    return DEFAULT_ROUTE;
+  }
+
+  return raw;
 }
 
 function normalizePathname(pathname = DEFAULT_ROUTE) {
@@ -143,26 +159,7 @@ function normalizeHash(hash = "") {
 }
 
 function splitPath(path = DEFAULT_ROUTE) {
-  let raw = text(path, DEFAULT_ROUTE);
-
-  if (isHashRouterPath(raw)) {
-    raw = normalizeHashRouterPath(raw);
-  }
-
-  try {
-    if (/^https?:\/\//i.test(raw)) {
-      const parsed = new URL(raw);
-
-      if (parsed.hash && isHashRouterPath(parsed.hash)) {
-        raw = normalizeHashRouterPath(parsed.hash);
-      } else {
-        raw = `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`;
-      }
-    }
-  } catch {
-    // noop
-  }
-
+  let raw = pathFromInput(path);
   let pathname = raw;
   let search = "";
   let hash = "";
@@ -200,11 +197,29 @@ function normalizePublicPath(path = DEFAULT_ROUTE) {
   return joinPath(splitPath(path));
 }
 
+function normalizeUserSlug(value = "") {
+  const slug = text(value, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .trim()
+    .toLowerCase();
+
+  if (!slug) return "";
+
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
 function extractSlugFromPath(path = DEFAULT_ROUTE) {
   const pathname = splitPath(path).pathname;
-  const match = pathname.match(USER_HOME_RE);
 
-  return match ? match[1] : "";
+  if (!pathname.startsWith(USER_HOME_PREFIX)) return "";
+
+  const slug = pathname.slice(USER_HOME_PREFIX.length);
+
+  if (!slug || slug.includes("/")) return "";
+
+  return normalizeUserSlug(slug);
 }
 
 function isUserHomePath(path = DEFAULT_ROUTE) {
@@ -214,11 +229,9 @@ function isUserHomePath(path = DEFAULT_ROUTE) {
 function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
   const pathname = splitPath(path).pathname || DEFAULT_ROUTE;
 
-  if (isUserHomePath(pathname)) {
-    return DEFAULT_ROUTE;
-  }
-
-  return pathname;
+  return isUserHomePath(pathname)
+    ? DEFAULT_ROUTE
+    : pathname;
 }
 
 function browserPath() {
@@ -269,14 +282,10 @@ export function createHistoryState({
     canonicalPath,
     route: canonicalPath,
 
-    routeParams: isObject(extra.routeParams)
-      ? {
-          ...extra.routeParams,
-          ...(slug ? { slug } : {}),
-        }
-      : slug
-        ? { slug }
-        : {},
+    routeParams: {
+      ...(isObject(extra.routeParams) ? extra.routeParams : {}),
+      ...(slug ? { slug } : {}),
+    },
 
     publicSlug: slug || null,
     isUserHomePath: Boolean(slug),
@@ -308,12 +317,9 @@ function sameLocation(left = null, right = null) {
   );
 }
 
-function writeHistory(_AppCore, method, state, url) {
+function writeHistory(_AppCore, method = "replaceState", state = null, url = DEFAULT_ROUTE) {
   if (!canUseHistory()) return false;
-
-  if (method !== "pushState" && method !== "replaceState") {
-    return false;
-  }
+  if (method !== "pushState" && method !== "replaceState") return false;
 
   const finalUrl = normalizePublicPath(url || DEFAULT_ROUTE);
 
@@ -325,6 +331,56 @@ function writeHistory(_AppCore, method, state, url) {
   }
 }
 
+function buildHistoryWrite({
+  pathname = DEFAULT_ROUTE,
+  options = {},
+  mode = "replace",
+} = {}) {
+  const opts = isObject(options) ? options : {};
+  const publicPath = normalizePublicPath(opts.publicPath || pathname);
+
+  const state = createHistoryState({
+    pathname: publicPath,
+    extras: {
+      ...opts,
+      mode,
+      publicPath,
+      canonicalPath: opts.canonicalPath || normalizeCanonicalPath(publicPath),
+      source: opts.source || null,
+    },
+  });
+
+  return {
+    opts,
+    publicPath,
+    state,
+  };
+}
+
+function commitHistory({
+  AppCore = null,
+  method = "replaceState",
+  pathname = DEFAULT_ROUTE,
+  options = {},
+} = {}) {
+  if (!canUseHistory()) return false;
+
+  const mode = method === "pushState" ? "push" : "replace";
+  const { opts, publicPath, state } = buildHistoryWrite({
+    pathname,
+    options,
+    mode,
+  });
+
+  if (opts.skipHistory === true) return false;
+
+  if (sameLocation(currentHistoryState(), state) && opts.forceHistory !== true) {
+    return false;
+  }
+
+  return writeHistory(AppCore, method, state, publicPath);
+}
+
 /* =========================================================
    WRITE API
 ========================================================= */
@@ -334,31 +390,12 @@ export function pushState({
   pathname = DEFAULT_ROUTE,
   options = {},
 } = {}) {
-  if (!canUseHistory()) return false;
-
-  const opts = isObject(options) ? options : {};
-
-  if (opts.skipHistory === true) return false;
-
-  const publicPath = normalizePublicPath(opts.publicPath || pathname);
-
-  const state = createHistoryState({
+  return commitHistory({
     AppCore,
-    pathname: publicPath,
-    extras: {
-      ...opts,
-      mode: "push",
-      publicPath,
-      canonicalPath: opts.canonicalPath || normalizeCanonicalPath(publicPath),
-      source: opts.source || null,
-    },
+    method: "pushState",
+    pathname,
+    options,
   });
-
-  if (sameLocation(currentHistoryState(), state) && opts.forceHistory !== true) {
-    return false;
-  }
-
-  return writeHistory(AppCore, "pushState", state, publicPath);
 }
 
 export function replaceState({
@@ -366,31 +403,12 @@ export function replaceState({
   pathname = DEFAULT_ROUTE,
   options = {},
 } = {}) {
-  if (!canUseHistory()) return false;
-
-  const opts = isObject(options) ? options : {};
-
-  if (opts.skipHistory === true) return false;
-
-  const publicPath = normalizePublicPath(opts.publicPath || pathname);
-
-  const state = createHistoryState({
+  return commitHistory({
     AppCore,
-    pathname: publicPath,
-    extras: {
-      ...opts,
-      mode: "replace",
-      publicPath,
-      canonicalPath: opts.canonicalPath || normalizeCanonicalPath(publicPath),
-      source: opts.source || null,
-    },
+    method: "replaceState",
+    pathname,
+    options,
   });
-
-  if (sameLocation(currentHistoryState(), state) && opts.forceHistory !== true) {
-    return false;
-  }
-
-  return writeHistory(AppCore, "replaceState", state, publicPath);
 }
 
 export function updateHistory({
@@ -412,23 +430,12 @@ export function updateHistory({
       ? "replaceState"
       : "pushState";
 
-  const state = createHistoryState({
+  return commitHistory({
     AppCore,
+    method,
     pathname: publicPath,
-    extras: {
-      ...opts,
-      mode: method === "replaceState" ? "replace" : "push",
-      publicPath,
-      canonicalPath: opts.canonicalPath || normalizeCanonicalPath(publicPath),
-      source: opts.source || null,
-    },
+    options: opts,
   });
-
-  if (sameLocation(currentHistoryState(), state) && opts.forceHistory !== true) {
-    return false;
-  }
-
-  return writeHistory(AppCore, method, state, publicPath);
 }
 
 /* =========================================================
@@ -446,18 +453,18 @@ export function ensureInitialHistoryState({ AppCore = null } = {}) {
 
   const publicPath = browserPath();
 
-  const state = createHistoryState({
+  return commitHistory({
     AppCore,
+    method: "replaceState",
     pathname: publicPath,
-    extras: {
+    options: {
       mode: "initial",
       publicPath,
       canonicalPath: normalizeCanonicalPath(publicPath),
       source: "initial",
+      forceHistory: true,
     },
   });
-
-  return writeHistory(AppCore, "replaceState", state, publicPath);
 }
 
 /* =========================================================
@@ -475,9 +482,11 @@ function removeTokenFromSearch(search = "") {
 
   try {
     const params = new URLSearchParams(normalized);
+
     params.delete(TOKEN_PARAM);
 
     const output = params.toString();
+
     return output ? `?${output}` : "";
   } catch {
     return "";
@@ -487,12 +496,13 @@ function removeTokenFromSearch(search = "") {
 function removeTokenFromHash(hash = "") {
   const normalized = normalizeHash(hash);
 
-  if (!normalized || !normalized.includes("?")) return normalized;
+  if (!normalized || !normalized.includes("?")) {
+    return normalized;
+  }
 
   const index = normalized.indexOf("?");
   const hashPath = normalized.slice(0, index);
   const query = normalized.slice(index + 1);
-
   const cleanQuery = removeTokenFromSearch(`?${query}`);
 
   return cleanQuery ? `${hashPath}${cleanQuery}` : hashPath;
@@ -533,10 +543,11 @@ export function scrubProtectedTokenFromHistory({
 
   if (scrubbed === original) return false;
 
-  const state = createHistoryState({
+  return commitHistory({
     AppCore,
+    method: replace ? "replaceState" : "pushState",
     pathname: scrubbed,
-    extras: {
+    options: {
       ...(isObject(extraState) ? extraState : {}),
       mode: "scrub",
       source: reason,
@@ -544,15 +555,9 @@ export function scrubProtectedTokenFromHistory({
       canonicalPath: normalizeCanonicalPath(scrubbed),
       tokenScrubbed: true,
       tokenScrubbedAt: nowIso(),
+      forceHistory: true,
     },
   });
-
-  return writeHistory(
-    AppCore,
-    replace ? "replaceState" : "pushState",
-    state,
-    scrubbed
-  );
 }
 
 /* =========================================================
@@ -581,6 +586,38 @@ export function getPopStatePath(_AppCore = null, eventOrState = null) {
    SNAPSHOT
 ========================================================= */
 
+function serializeState(state = null) {
+  if (!isObject(state)) return null;
+
+  return {
+    __onionRouterHistory: state.__onionRouterHistory === true,
+    version: state.version || null,
+
+    id: state.id || null,
+    ts: state.ts || null,
+    at: state.at || null,
+
+    path: redact(state.path || ""),
+    publicPath: redact(state.publicPath || ""),
+
+    canonicalPath: redact(state.canonicalPath || ""),
+    route: redact(state.route || ""),
+
+    routeParams: isObject(state.routeParams)
+      ? { ...state.routeParams }
+      : {},
+
+    publicSlug: state.publicSlug || null,
+    isUserHomePath: state.isUserHomePath === true,
+
+    source: state.source || null,
+    mode: state.mode || null,
+
+    title: state.title || null,
+    stateSource: state.stateSource || null,
+  };
+}
+
 export function getHistorySnapshot(AppCore = null) {
   const currentUrl = browserPath();
   const publicPath = normalizePublicPath(currentUrl);
@@ -599,7 +636,7 @@ export function getHistorySnapshot(AppCore = null) {
     isUserHomePath: isUserHomePath(publicPath),
     publicSlug: extractSlugFromPath(publicPath) || null,
 
-    state: canUseHistory() ? currentHistoryState() : null,
+    state: serializeState(currentHistoryState()),
 
     sequence,
 
@@ -610,11 +647,16 @@ export function getHistorySnapshot(AppCore = null) {
       ownRender: false,
       ownStorage: false,
       ownToast: false,
-      publicSlugHome: true,
+
+      userSlugHome: true,
+      canonicalizesUserHome: true,
+
       noHomeAlias: true,
       noLegacyRoutes: true,
+
       tokenParam: TOKEN_PARAM,
       tokenRoutes: [...TOKEN_ROUTES],
+      tokenScrubExplicit: true,
     },
 
     app: {

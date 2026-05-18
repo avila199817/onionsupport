@@ -33,7 +33,7 @@ import {
   toggleSidebar,
 } from "./actions.js";
 
-export const SIDEBAR_EVENTS_VERSION = "sidebar.events.v1";
+export const SIDEBAR_EVENTS_VERSION = "sidebar.events.v2";
 
 const HANDLED_FLAG = "__onionSidebarHandled";
 
@@ -74,7 +74,7 @@ function closestInside(root = null, target = null, selector = "") {
   if (!isElement(root) || !target || !selector) return null;
 
   try {
-    const element = target.closest(selector);
+    const element = target.closest?.(selector);
     return contains(root, element) ? element : null;
   } catch {
     return null;
@@ -128,9 +128,10 @@ function browserOwnsClick(link = null, event = null) {
   if (!isElement(link)) return true;
   if (!isPlainLeftClick(event)) return true;
   if (link.hasAttribute("download")) return true;
-  if (link.getAttribute("target") === "_blank") return true;
 
-  return false;
+  const target = text(link.getAttribute("target"), "").toLowerCase();
+
+  return target === "_blank";
 }
 
 function isBlocked(element = null) {
@@ -138,10 +139,23 @@ function isBlocked(element = null) {
 
   return Boolean(
     element.hidden ||
+      element.disabled === true ||
       element.getAttribute("aria-hidden") === "true" ||
       element.getAttribute("aria-disabled") === "true" ||
       element.dataset?.disabled === "true" ||
-      element.closest("[hidden], [aria-hidden='true']")
+      element.closest("[hidden], [aria-hidden='true'], [aria-disabled='true'], [data-disabled='true']")
+  );
+}
+
+function isSafeInternalHref(value = "") {
+  const href = text(value, "");
+
+  return Boolean(
+    href &&
+      href.startsWith("/") &&
+      !href.startsWith("//") &&
+      !/^[a-z][a-z0-9+.-]*:/i.test(href) &&
+      !/[\r\n\t\\]/.test(href)
   );
 }
 
@@ -238,6 +252,8 @@ export function handleSidebarClick(event = null, context = {}) {
       root,
     });
 
+    syncAfterAction(ctx);
+
     return true;
   }
 
@@ -249,7 +265,7 @@ export function handleSidebarClick(event = null, context = {}) {
 
   const href = getLinkTarget(link);
 
-  if (!href) return false;
+  if (!isSafeInternalHref(href)) return false;
 
   prevent(event);
   markHandled(event);
@@ -321,9 +337,22 @@ export function unbindSidebarEvents() {
 export function getSidebarEventsSnapshot() {
   return {
     version: SIDEBAR_EVENTS_VERSION,
+
     bound: Boolean(boundRoot && boundHandler),
     hasRoot: isElement(boundRoot),
     rootId: boundRoot?.id || "",
+
+    policy: {
+      delegatedOnly: true,
+      ownNavigation: false,
+      ownActiveMenu: false,
+      ownIndicators: false,
+      ownResize: false,
+      ownDropdown: false,
+      ownKeydown: false,
+      ownCustomEvent: false,
+      ownTimers: false,
+    },
   };
 }
 

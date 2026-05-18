@@ -5,7 +5,9 @@
    Responsabilidad:
    - Render DOM mínimo.
    - Preparar #view-container.
-   - Ejecutar route.render(root, context).
+   - Crear un host estable por navegación.
+   - Ejecutar route.render(host, context).
+   - Adoptar resultado de vista sólo si es seguro.
    - Inyectar contexto común: AppCore / I18n / t / Toast.
    - Pintar fallback simple.
    - Sin imports.
@@ -21,7 +23,7 @@
    - Sin magia negra.
 ========================================================= */
 
-export const ROUTER_RENDER_VERSION = "simple";
+export const ROUTER_RENDER_VERSION = "router.render.v1";
 
 const SOURCE = "router.render";
 const DEFAULT_ROUTE = "/";
@@ -261,17 +263,52 @@ function append(parent, children = []) {
   return parent;
 }
 
+function nodeContains(parent = null, child = null) {
+  if (!isNode(parent) || !isNode(child)) return false;
+
+  try {
+    return parent !== child && parent.contains?.(child) === true;
+  } catch {
+    return false;
+  }
+}
+
+function canPaintNode(target = null, node = null) {
+  if (!target || !isNode(node)) return false;
+  if (node === target) return false;
+  if (nodeContains(node, target)) return false;
+
+  return true;
+}
+
 function paint(target, content) {
   if (!target) return null;
 
+  if (content === target) {
+    return target;
+  }
+
   if (isNode(content)) {
+    if (!canPaintNode(target, content)) {
+      return target;
+    }
+
     try {
       target.replaceChildren(content);
       return content;
     } catch {
-      clear(target);
-      target.appendChild(content);
-      return content;
+      try {
+        clear(target);
+
+        if (!canPaintNode(target, content)) {
+          return target;
+        }
+
+        target.appendChild(content);
+        return content;
+      } catch {
+        return null;
+      }
     }
   }
 
@@ -425,14 +462,37 @@ function adoptResult(target, result) {
     return result || null;
   }
 
-  if (isNode(result) || typeof result === "string") {
+  if (result === target) {
+    return target;
+  }
+
+  if (isNode(result)) {
+    if (!canPaintNode(target, result)) {
+      return target;
+    }
+
     return paint(target, result);
   }
 
-  if (isNode(result.element)) return paint(target, result.element);
-  if (isNode(result.node)) return paint(target, result.node);
-  if (isNode(result.root)) return paint(target, result.root);
-  if (isNode(result.container)) return paint(target, result.container);
+  if (typeof result === "string") {
+    return paint(target, result);
+  }
+
+  for (const key of ["element", "node", "root", "container"]) {
+    const candidate = result?.[key];
+
+    if (!isNode(candidate)) continue;
+
+    if (candidate === target) {
+      return target;
+    }
+
+    if (!canPaintNode(target, candidate)) {
+      return target;
+    }
+
+    return paint(target, candidate);
+  }
 
   return result;
 }
@@ -554,7 +614,11 @@ export function emitRendered(AppCore = null, payload = {}) {
   return finalPayload;
 }
 
-/* Compat: el router actual ya sincroniza estado. Mantener para imports antiguos. */
+/*
+  Compat:
+  router/index.js ya sincroniza estado de ruta.
+  Se mantiene para imports antiguos, sin asumir control del Router.
+*/
 export function syncRouteState(AppCore = null, canonicalPath = DEFAULT_ROUTE, publicPath = null) {
   const canonical = normalizeCanonicalPath(canonicalPath || DEFAULT_ROUTE);
   const visible = normalizePublicPath(publicPath || canonical);
@@ -591,7 +655,11 @@ export function syncRouteState(AppCore = null, canonicalPath = DEFAULT_ROUTE, pu
 }
 
 export function applyResolvedRouteState(AppCore = null, canonicalPath = DEFAULT_ROUTE, fallbackPublicPath = null) {
-  return syncRouteState(AppCore, canonicalPath, fallbackPublicPath || canonicalPath || DEFAULT_ROUTE);
+  return syncRouteState(
+    AppCore,
+    canonicalPath,
+    fallbackPublicPath || canonicalPath || DEFAULT_ROUTE
+  );
 }
 
 export function buildRouteRenderContext({
@@ -1015,6 +1083,7 @@ export function getRenderSnapshot(AppCore = null) {
       ownShellRepair: false,
       noUsernamePublicSlug: true,
       noCustomEvent: true,
+      safeAdoptResult: true,
     },
   };
 }

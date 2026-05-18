@@ -8,9 +8,12 @@
    - Rutas reales actuales.
    - Auth endpoints mínimos.
    - Token param único: token.
+   - Roles únicos: admin / user.
    - Sin rutas inventadas.
    - Sin aliases masivos.
+   - Sin storage real.
    - Sin runtime complejo.
+   - Sin magia negra.
 ========================================================= */
 
 export const CONFIG_VERSION = "simple";
@@ -18,7 +21,7 @@ export const CONFIG_VERSION = "simple";
 export const CANONICAL_PRODUCTION_API_BASE = "https://api.onionit.net";
 
 export const CANONICAL_BACKEND_API_ORIGINS = Object.freeze([
-  "https://api.onionit.net",
+  CANONICAL_PRODUCTION_API_BASE,
 ]);
 
 export const FORBIDDEN_FRONTEND_API_ORIGINS = Object.freeze([
@@ -28,17 +31,17 @@ export const FORBIDDEN_FRONTEND_API_ORIGINS = Object.freeze([
   "http://www.onionsupport.com",
 ]);
 
-const TOKEN_PARAM = "token";
+export const TOKEN_PARAM = "token";
 
-const ROUTES = Object.freeze({
+export const ROUTES = Object.freeze({
   home: "/",
   login: "/login",
-  passwordReset: "/password-reset",
   passwordRequest: "/password-request",
+  passwordReset: "/password-reset",
   activateAccount: "/activate-account",
 });
 
-const AUTH_ENDPOINTS = Object.freeze({
+export const AUTH_ENDPOINTS = Object.freeze({
   login: "/api/auth/login",
   logout: "/api/auth/logout",
   me: "/api/auth/me",
@@ -48,7 +51,7 @@ const AUTH_ENDPOINTS = Object.freeze({
   confirmPasswordReset: "/api/auth/reset-password-confirm",
 });
 
-const PUBLIC_API_PATHS = Object.freeze([
+export const PUBLIC_API_PATHS = Object.freeze([
   AUTH_ENDPOINTS.login,
   AUTH_ENDPOINTS.refresh,
   AUTH_ENDPOINTS.activate,
@@ -56,31 +59,25 @@ const PUBLIC_API_PATHS = Object.freeze([
   AUTH_ENDPOINTS.confirmPasswordReset,
 ]);
 
-const PRIVATE_API_PATHS = Object.freeze([
+export const PRIVATE_API_PATHS = Object.freeze([
   AUTH_ENDPOINTS.me,
   AUTH_ENDPOINTS.logout,
-  "/api/users",
-  "/api/clientes",
-  "/api/tickets",
-  "/api/incidencias",
-  "/api/facturas",
-  "/api/search",
 ]);
 
-const PUBLIC_ROUTES = Object.freeze([
+export const PUBLIC_ROUTES = Object.freeze([
   ROUTES.login,
-  ROUTES.passwordReset,
   ROUTES.passwordRequest,
+  ROUTES.passwordReset,
   ROUTES.activateAccount,
 ]);
 
-const TECHNICAL_PUBLIC_ROUTES = Object.freeze([
-  ROUTES.passwordReset,
+export const TECHNICAL_PUBLIC_ROUTES = Object.freeze([
   ROUTES.passwordRequest,
+  ROUTES.passwordReset,
   ROUTES.activateAccount,
 ]);
 
-const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
+export const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
   Object.freeze({
     key: "activation",
     path: ROUTES.activateAccount,
@@ -94,6 +91,10 @@ const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
     tokenParamNames: Object.freeze([TOKEN_PARAM]),
   }),
 ]);
+
+/* =========================================================
+   HELPERS
+========================================================= */
 
 function text(value = "", fallback = "") {
   const output = String(value ?? "").trim();
@@ -110,10 +111,7 @@ function cleanPath(value = "/") {
 }
 
 function pathMatches(path = "", candidate = "") {
-  const current = cleanPath(path);
-  const target = cleanPath(candidate);
-
-  return current === target || current.startsWith(`${target}/`);
+  return cleanPath(path) === cleanPath(candidate);
 }
 
 function originFromUrl(value = "") {
@@ -144,9 +142,9 @@ function normalizeApiBase(value = "") {
   return raw;
 }
 
-function unique(values = []) {
-  return [...new Set(values.filter(Boolean))];
-}
+/* =========================================================
+   CONFIG
+========================================================= */
 
 export const config = Object.freeze({
   __version: CONFIG_VERSION,
@@ -156,6 +154,7 @@ export const config = Object.freeze({
   appId: "onion",
   appKey: "onion",
   version: "1.0.0",
+
   env: "production",
   environment: "production",
   debug: false,
@@ -353,7 +352,7 @@ export function getApiBase() {
 }
 
 export function getApiOrigin() {
-  return config.apiOrigin || config.apiBase;
+  return normalizeApiBase(config.apiOrigin || config.apiBase);
 }
 
 export function getCanonicalProductionApiBase() {
@@ -376,10 +375,12 @@ export function getRouteAlias() {
   return "";
 }
 
+/* Compat: no hay storage real en config simple. */
 export function getStorageKey(key = "", fallback = "") {
   return fallback || key;
 }
 
+/* Compat: no usar para persistencia nueva. */
 export function getNamespacedStorageKey(key = "") {
   return `onion:${getStorageKey(key, key)}`;
 }
@@ -435,19 +436,34 @@ export function getResourceEndpoint() {
 export function getConfigSnapshot() {
   return {
     version: config.__version,
+
     appName: config.appName,
     env: config.env,
+
     apiBase: config.apiBase,
+
     defaultLang: config.defaultLang,
     defaultTheme: config.defaultTheme,
+
     routes: config.routes,
     publicRoutes: config.publicRoutes,
     technicalPublicRoutes: config.technicalPublicRoutes,
+
     publicApiPaths: config.publicApiPaths,
     privateApiPaths: config.privateApiPaths,
+
     tokenParam: config.tokenParam,
-    meIsPublic: isPublicApiPath("/api/auth/me"),
-    meIsPrivate: isPrivateApiPath("/api/auth/me"),
+
+    meIsPublic: isPublicApiPath(AUTH_ENDPOINTS.me),
+    meIsPrivate: isPrivateApiPath(AUTH_ENDPOINTS.me),
+
+    policy: {
+      apiUnique: true,
+      tokenParamUnique: true,
+      noRouteAliases: true,
+      roles: ["admin", "user"],
+      noRuntime: true,
+    },
   };
 }
 

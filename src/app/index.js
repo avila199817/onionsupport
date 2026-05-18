@@ -4,13 +4,14 @@
 
    Responsabilidad:
    - Boot mínimo de la SPA.
-   - Iniciar Core/Auth/Router.
+   - Iniciar Core.
    - Iniciar I18n.
    - Iniciar Toast.
-   - Restaurar sesión.
+   - Iniciar Auth.
+   - Restaurar sesión ANTES del primer render Router.
+   - Iniciar Router sin render automático.
    - Renderizar ruta actual.
-   - Actualizar shell.
-   - Iniciar Sidebar/Topbar.
+   - Iniciar Sidebar/Topbar después de ruta + auth.
    - Refrescar textos i18n.
    - Ocultar loader.
    - Sin Store.
@@ -31,10 +32,13 @@ import Toast from "../ui/toast/index.js";
 import SidebarUI from "../ui/sidebar/index.js";
 import TopbarUI from "../ui/topbar/index.js";
 
-import { showLoader, hideLoader, forceHideLoader } from "./loader.js";
+import {
+  showLoader,
+  hideLoader,
+  forceHideLoader,
+} from "./loader.js";
 
 import {
-  updateShellVisibilityByRoute,
   markShellReady,
   markShellBusy,
   getViewContainer,
@@ -55,21 +59,23 @@ function isBrowser() {
 function currentPath() {
   if (!isBrowser()) return "/";
 
-  return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  return `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
 }
 
 function setAppState(state = "booting") {
   if (!isBrowser()) return false;
 
-  for (const element of [document.documentElement, document.body].filter(Boolean)) {
-    element.dataset.appState = state;
-    element.dataset.appBooting = state === "booting" ? "true" : "false";
-    element.dataset.appReady = state === "ready" ? "true" : "false";
+  const value = String(state || "booting");
 
-    element.classList.toggle("app-booting", state === "booting");
-    element.classList.toggle("app-loading", state === "booting");
-    element.classList.toggle("app-ready", state === "ready");
-    element.classList.toggle("app-fatal", state === "fatal");
+  for (const element of [document.documentElement, document.body].filter(Boolean)) {
+    element.dataset.appState = value;
+    element.dataset.appBooting = value === "booting" ? "true" : "false";
+    element.dataset.appReady = value === "ready" ? "true" : "false";
+
+    element.classList.toggle("app-booting", value === "booting");
+    element.classList.toggle("app-loading", value === "booting");
+    element.classList.toggle("app-ready", value === "ready");
+    element.classList.toggle("app-fatal", value === "fatal");
   }
 
   return true;
@@ -127,10 +133,6 @@ function safeMarkShellReady() {
   safeCall(markShellReady);
 }
 
-function safeUpdateShell() {
-  safeCall(updateShellVisibilityByRoute, AppCore, Router);
-}
-
 function safeShowFatalShell() {
   safeCall(setShellVisibility, null, true);
   safeMarkShellReady();
@@ -186,31 +188,79 @@ function refreshI18nDom() {
 }
 
 /* =========================================================
+   AUTH
+========================================================= */
+
+async function initAuth(payload = {}) {
+  await tryCall(Auth, ["init", "boot", "start"], {
+    ...payload,
+    skipNavigation: true,
+    skipRedirect: true,
+    noRedirect: true,
+  });
+
+  return Auth;
+}
+
+async function restoreAuth(payload = {}) {
+  await tryCall(Auth, ["restoreSession", "restore"], {
+    ...payload,
+    skipNavigation: true,
+    skipRedirect: true,
+    noRedirect: true,
+  });
+
+  return Auth;
+}
+
+/* =========================================================
    ROUTER
 ========================================================= */
+
+async function initRouter(payload = {}) {
+  const router = await tryCall(Router, ["init", "configure"], {
+    ...payload,
+    appManagedInitialRender: true,
+    skipInitialRender: true,
+    render: false,
+  });
+
+  if (router) return router;
+
+  return tryCall(Router, ["start", "boot"], {
+    ...payload,
+    appManagedInitialRender: true,
+    skipInitialRender: true,
+    render: false,
+  });
+}
 
 async function renderRoute() {
   const path = currentPath();
 
   if (typeof Router?.renderCurrent === "function") {
     return Router.renderCurrent({
-      source: "app",
-      skipHistory: true,
+      source: "app.boot",
+      initialRender: true,
+      preserveUrl: true,
       replaceState: true,
+      skipHistory: true,
     });
   }
 
   if (typeof Router?.render === "function") {
     return Router.render(path, {
-      source: "app",
-      skipHistory: true,
+      source: "app.boot",
+      initialRender: true,
+      preserveUrl: true,
       replaceState: true,
+      skipHistory: true,
     });
   }
 
   if (typeof Router?.navigate === "function") {
     return Router.navigate(path, {
-      source: "app",
+      source: "app.boot",
       replaceState: true,
     });
   }
@@ -263,15 +313,15 @@ function renderFatal() {
   const title = document.createElement("h1");
   title.textContent = "Error de arranque";
 
-  const text = document.createElement("p");
-  text.textContent = "No se pudo iniciar Onion Support.";
+  const message = document.createElement("p");
+  message.textContent = "No se pudo iniciar Onion Support.";
 
   const button = document.createElement("button");
   button.type = "button";
   button.textContent = "Recargar";
   button.addEventListener("click", () => window.location.reload());
 
-  section.append(title, text, button);
+  section.append(title, message, button);
   root.replaceChildren(section);
 
   return true;
@@ -296,32 +346,28 @@ async function runBoot(options = {}) {
   await initI18n(payload);
   await initToast(payload);
 
-  await tryCall(Auth, ["init", "boot", "start"], {
-    ...payload,
-    skipNavigation: true,
-    skipRedirect: true,
-    noRedirect: true,
-  });
+  /*
+    Orden crítico:
+    Auth debe estar inicializado y restaurado antes del primer render Router.
+    Así /@slug puede renderizar Home si hay sesión válida.
+  */
+  await initAuth(payload);
+  await restoreAuth(payload);
 
-  await tryCall(Router, ["init", "boot", "start"], {
-    ...payload,
-    appManagedInitialRender: true,
-    skipInitialRender: true,
-  });
-
-  await tryCall(Auth, ["restore", "restoreSession"], {
-    ...payload,
-    skipNavigation: true,
-    skipRedirect: true,
-    noRedirect: true,
-  });
-
+  /*
+    Router se inicia sin render automático.
+    El render inicial lo controla App después del restore.
+  */
+  await initRouter(payload);
   await renderRoute();
 
+  /*
+    Chrome después de ruta + auth:
+    Sidebar y Topbar ya reciben estado real.
+  */
   await initChrome(payload);
   await syncChrome(payload);
 
-  safeUpdateShell();
   refreshI18nDom();
 
   safeMarkShellReady();
@@ -343,7 +389,12 @@ export function boot(options = {}) {
 
   bootPromise = runBoot(options)
     .catch((error) => {
-      console.error("[Onion App] Boot error:", error);
+      try {
+        console.error("[Onion App] Boot error:", error);
+      } catch {
+        // noop
+      }
+
       renderFatal();
       return App;
     })

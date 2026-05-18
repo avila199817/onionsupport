@@ -26,7 +26,7 @@ import {
   createApiClient,
 } from "./request.js";
 
-export const HTTP_VERSION = "core.http.v1";
+export const HTTP_VERSION = "core.http.v2";
 
 export const DEFAULT_API_ORIGIN = "https://api.onionit.net";
 export const DEFAULT_TIMEOUT_MS = 30000;
@@ -60,11 +60,17 @@ let appCore = null;
 let requestEngine = null;
 let apiEngine = null;
 
+const runtimeTokens = {
+  accessToken: "",
+  refreshToken: "",
+};
+
 const stats = {
   total: 0,
   success: 0,
   error: 0,
   lastUrl: "",
+  lastMethod: "",
   lastError: null,
 };
 
@@ -74,10 +80,6 @@ const stats = {
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 function text(value = "", fallback = "") {
@@ -95,8 +97,8 @@ function normalizeOrigin(value = "") {
       return DEFAULT_API_ORIGIN;
     }
 
-    if (raw.endsWith("/api")) {
-      return raw.slice(0, -4);
+    if (url.pathname === "/api") {
+      return url.origin;
     }
 
     return url.origin;
@@ -105,30 +107,18 @@ function normalizeOrigin(value = "") {
   }
 }
 
-function cleanPath(value = "/") {
+function apiUrlOrigin() {
   try {
-    return new URL(value, DEFAULT_API_ORIGIN).pathname || "/";
+    return new URL(apiOrigin).origin;
   } catch {
-    return String(value || "/").split("?")[0].split("#")[0] || "/";
+    return DEFAULT_API_ORIGIN;
   }
-}
-
-function appendQuery(url = "", query = null) {
-  if (!isObject(query)) return url;
-
-  const parsed = new URL(url, DEFAULT_API_ORIGIN);
-
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === null || value === "") continue;
-    parsed.searchParams.set(key, String(value));
-  }
-
-  return parsed.toString();
 }
 
 function redact(value = "") {
   return String(value || "")
     .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -137,6 +127,7 @@ function cleanToken(value = "") {
 
   if (!token) return "";
   if (/\s/.test(token)) return "";
+  if (token.length > 8192) return "";
 
   if (
     [
@@ -159,8 +150,55 @@ function getState() {
   return isObject(appCore?.state) ? appCore.state : {};
 }
 
-function isPublicEndpoint(path = "") {
-  const clean = cleanPath(path);
+function endpointToPath(endpoint = "/") {
+  const raw = text(endpoint, "/");
+
+  if (!raw) return "/";
+  if (raw.startsWith("//")) return "/";
+  if (/[\r\n\t\\]/.test(raw)) return "/";
+
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      const url = new URL(raw);
+
+      if (url.origin !== apiUrlOrigin()) {
+        return "/";
+      }
+
+      return `${url.pathname || "/"}${url.search || ""}`;
+    }
+  } catch {
+    return "/";
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+    return "/";
+  }
+
+  const path = raw.startsWith("/") ? raw : `/${raw}`;
+
+  return path.split("#")[0] || "/";
+}
+
+function cleanPath(endpoint = "/") {
+  return endpointToPath(endpoint).split("?")[0] || "/";
+}
+
+function appendQuery(url = "", query = null) {
+  if (!isObject(query)) return url;
+
+  const parsed = new URL(url, apiOrigin);
+
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === "") continue;
+    parsed.searchParams.set(key, String(value));
+  }
+
+  return parsed.toString();
+}
+
+function isPublicEndpoint(endpoint = "") {
+  const clean = cleanPath(endpoint);
 
   if (clean === AUTH_ENDPOINTS.me) return false;
 
@@ -175,7 +213,8 @@ function shouldUseAuth(endpoint = "", options = {}) {
   if (
     options.auth === false ||
     options.public === true ||
-    options.skipAuth === true
+    options.skipAuth === true ||
+    options.noAuthHeader === true
   ) {
     return false;
   }
@@ -202,14 +241,7 @@ export function setApiOrigin(value = "") {
 }
 
 export function buildApiUrl(endpoint = "/", options = {}) {
-  const raw = text(endpoint, "/");
-
-  if (/^https?:\/\//i.test(raw)) {
-    return appendQuery(raw, options.query || options.params);
-  }
-
-  const path = raw.startsWith("/") ? raw : `/${raw}`;
-
+  const path = endpointToPath(endpoint);
   return appendQuery(`${apiOrigin}${path}`, options.query || options.params);
 }
 
@@ -228,6 +260,7 @@ export function getAccessToken() {
     state.token ||
       state.accessToken ||
       state.access_token ||
+      runtimeTokens.accessToken ||
       ""
   );
 }
@@ -238,6 +271,7 @@ export function getRefreshToken() {
   return cleanToken(
     state.refreshToken ||
       state.refresh_token ||
+      runtimeTokens.refreshToken ||
       ""
   );
 }
@@ -245,6 +279,8 @@ export function getRefreshToken() {
 export function setAccessToken(token = "") {
   const value = cleanToken(token);
   const state = getState();
+
+  runtimeTokens.accessToken = value;
 
   if (!value) {
     delete state.token;
@@ -275,23 +311,31 @@ export function setAuthTokens(payload = {}) {
     "";
 
   const access = setAccessToken(token);
+  const refresh = cleanToken(refreshToken);
   const state = getState();
 
-  const refresh = cleanToken(refreshToken);
+  runtimeTokens.refreshToken = refresh;
 
   if (refresh) {
     state.refreshToken = refresh;
     state.refresh_token = refresh;
+  } else {
+    delete state.refreshToken;
+    delete state.refresh_token;
   }
 
   return {
     token: access || "",
-    refreshToken: state.refreshToken || "",
+    accessToken: access || "",
+    refreshToken: refresh || "",
   };
 }
 
 export function clearAuthTokens() {
   const state = getState();
+
+  runtimeTokens.accessToken = "";
+  runtimeTokens.refreshToken = "";
 
   delete state.token;
   delete state.accessToken;
@@ -306,7 +350,8 @@ export function clearAuthTokens() {
 
 /*
   Compat controlada.
-  La fuente real del token debe venir por AppCore.state o por options.token.
+  La fuente real del token debe venir por AppCore.state,
+  por options.token o por setAuthTokens().
 */
 export function setTokenProvider() {
   return true;
@@ -407,15 +452,26 @@ function buildAuthHeaders(options = {}, token = "") {
   return headers;
 }
 
+function requestMethod(options = {}) {
+  return text(options.method, "GET").toUpperCase();
+}
+
 export async function request(first = "/", second = {}, third = {}) {
   const parsed = normalizeRequestArgs(first, second, third);
 
-  const endpoint = text(parsed.endpoint, "/");
-  const options = parsed.options || {};
+  const endpoint = endpointToPath(parsed.endpoint);
+  const options = isObject(parsed.options) ? parsed.options : {};
+  const method = requestMethod(options);
 
   const url = buildApiUrl(endpoint, options);
   const auth = shouldUseAuth(endpoint, options);
   const token = auth ? cleanToken(options.token || getAccessToken()) : "";
+
+  const headers = auth
+    ? buildAuthHeaders(options, token)
+    : isObject(options.headers)
+      ? options.headers
+      : undefined;
 
   const finalOptions = {
     ...options,
@@ -423,20 +479,20 @@ export async function request(first = "/", second = {}, third = {}) {
     query: undefined,
     params: undefined,
 
+    method,
+
     auth,
     public: !auth,
     skipAuth: !auth,
+    noAuthHeader: !auth,
 
     token,
-    headers: auth
-      ? buildAuthHeaders(options, token)
-      : isObject(options.headers)
-        ? options.headers
-        : undefined,
+    headers,
   };
 
   stats.total += 1;
   stats.lastUrl = redact(url);
+  stats.lastMethod = method;
 
   try {
     const result = await ensureEngines().apiEngine.request(url, finalOptions);
@@ -450,6 +506,8 @@ export async function request(first = "/", second = {}, third = {}) {
       name: error?.name || "Error",
       message: redact(error?.message || String(error)),
       status: error?.status || error?.statusCode || 0,
+      url: redact(url),
+      method,
     };
 
     throw error;
@@ -545,6 +603,7 @@ export function login(credentials = {}, options = {}) {
     auth: false,
     public: true,
     skipAuth: true,
+    noAuthHeader: true,
   });
 }
 
@@ -554,6 +613,7 @@ export function me(options = {}) {
     auth: true,
     public: false,
     skipAuth: false,
+    noAuthHeader: false,
     cache: "no-store",
   });
 }
@@ -564,6 +624,7 @@ export function refreshSession(body = {}, options = {}) {
     auth: false,
     public: true,
     skipAuth: true,
+    noAuthHeader: true,
   });
 }
 
@@ -576,6 +637,8 @@ export function logout(options = {}) {
     ...options,
     auth: true,
     public: false,
+    skipAuth: false,
+    noAuthHeader: false,
   }).finally(() => {
     clearAuthTokens();
   });
@@ -587,6 +650,7 @@ export function activate(body = {}, options = {}) {
     auth: false,
     public: true,
     skipAuth: true,
+    noAuthHeader: true,
   });
 }
 
@@ -596,6 +660,7 @@ export function requestPasswordReset(body = {}, options = {}) {
     auth: false,
     public: true,
     skipAuth: true,
+    noAuthHeader: true,
   });
 }
 
@@ -605,6 +670,7 @@ export function confirmPasswordReset(body = {}, options = {}) {
     auth: false,
     public: true,
     skipAuth: true,
+    noAuthHeader: true,
   });
 }
 
@@ -672,22 +738,37 @@ export function getHttpSnapshot() {
     stats: {
       ...stats,
       lastUrl: redact(stats.lastUrl),
+      lastError: stats.lastError
+        ? {
+            ...stats.lastError,
+            message: redact(stats.lastError.message || ""),
+            url: redact(stats.lastError.url || ""),
+          }
+        : null,
     },
 
     endpoints: AUTH_ENDPOINTS,
+    publicEndpoints: PUBLIC_ENDPOINTS,
 
     policy: {
       facadeOnly: true,
+      singleHttpFacade: true,
+
       noOwnFetch: true,
       noOwnParser: true,
       noRetry: true,
       noAutoRefresh: true,
       noAuthDiscovery: true,
+
       noRouter: true,
       noToast: true,
       noStorage: true,
+
       mePrivate: true,
-      singleHttpFacade: true,
+      blocksExternalEndpoints: true,
+
+      tokenRuntimeOnly: true,
+      snapshotRedacted: true,
     },
   };
 }

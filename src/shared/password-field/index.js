@@ -29,10 +29,10 @@ import {
   getPasswordFieldSnapshot,
 } from "./password-field.dom.js";
 
-export const PASSWORD_FIELD_VERSION = "minimal-1";
+export const PASSWORD_FIELD_VERSION = "minimal-2";
 
 /* =========================================================
-   TEMPLATE EXPORTS
+   TEMPLATE
 ========================================================= */
 
 export {
@@ -46,7 +46,7 @@ export const render = renderPasswordField;
 export const getPasswordFieldTemplate = renderPasswordField;
 
 /* =========================================================
-   DOM EXPORTS
+   DOM
 ========================================================= */
 
 export {
@@ -68,7 +68,7 @@ export const isBound = isPasswordFieldBound;
 export const getSnapshot = getPasswordFieldSnapshot;
 
 /* =========================================================
-   FACADE OBJECT
+   FACADE
 ========================================================= */
 
 export const PasswordField = Object.freeze({

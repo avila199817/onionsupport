@@ -57,42 +57,32 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
-function targetOf(event = null) {
+function eventTarget(event = null) {
   const target = event?.target || null;
-
-  try {
-    if (target?.nodeType === 3) return target.parentElement;
-  } catch {
-    // noop
-  }
-
-  return target;
+  return target?.nodeType === 3 ? target.parentElement : target;
 }
 
-function closest(target = null, selector = "") {
-  if (!target || !selector) return null;
-
+function contains(root = null, element = null) {
   try {
-    return target.closest(selector);
-  } catch {
-    return null;
-  }
-}
-
-function contains(parent = null, child = null) {
-  if (!parent || !child) return false;
-
-  try {
-    return parent === child || parent.contains(child);
+    return Boolean(root && element && (root === element || root.contains(element)));
   } catch {
     return false;
   }
 }
 
-function resolveRoot(context = {}) {
-  if (isElement(context.root)) return context.root;
+function closestInside(root = null, target = null, selector = "") {
+  if (!isElement(root) || !target || !selector) return null;
 
-  return getSidebarRoot();
+  try {
+    const element = target.closest(selector);
+    return contains(root, element) ? element : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveRoot(context = {}) {
+  return isElement(context.root) ? context.root : getSidebarRoot();
 }
 
 /* =========================================================
@@ -103,10 +93,9 @@ function wasHandled(event = null) {
   return Boolean(event?.[HANDLED_FLAG]);
 }
 
-function markHandled(event = null, reason = "") {
+function markHandled(event = null) {
   try {
     event[HANDLED_FLAG] = true;
-    event.__onionSidebarReason = reason;
     return true;
   } catch {
     return false;
@@ -135,16 +124,16 @@ function isPlainLeftClick(event = null) {
   );
 }
 
-function browserShouldOwnClick(element = null, event = null) {
-  if (!isElement(element)) return true;
+function browserOwnsClick(link = null, event = null) {
+  if (!isElement(link)) return true;
   if (!isPlainLeftClick(event)) return true;
-  if (element.hasAttribute("download")) return true;
-  if (element.getAttribute("target") === "_blank") return true;
+  if (link.hasAttribute("download")) return true;
+  if (link.getAttribute("target") === "_blank") return true;
 
   return false;
 }
 
-function isHiddenOrDisabled(element = null) {
+function isBlocked(element = null) {
   if (!isElement(element)) return true;
 
   return Boolean(
@@ -160,27 +149,19 @@ function isHiddenOrDisabled(element = null) {
    LINK TARGET
 ========================================================= */
 
-function getElementTarget(element = null) {
-  if (!isElement(element)) return "";
+function getLinkTarget(link = null) {
+  if (!isElement(link)) return "";
 
   return text(
-    element.dataset?.route ||
-      element.dataset?.href ||
-      element.dataset?.to ||
-      element.getAttribute("data-route") ||
-      element.getAttribute("data-href") ||
-      element.getAttribute("data-to") ||
-      element.getAttribute("href"),
+    link.dataset?.route ||
+      link.dataset?.href ||
+      link.dataset?.to ||
+      link.getAttribute("data-route") ||
+      link.getAttribute("data-href") ||
+      link.getAttribute("data-to") ||
+      link.getAttribute("href"),
     ""
   );
-}
-
-function closestInsideRoot(target = null, selector = "", root = null) {
-  const element = closest(target, selector);
-
-  if (!element || !contains(root, element)) return null;
-
-  return element;
 }
 
 function sidebarLinkSelector() {
@@ -188,7 +169,9 @@ function sidebarLinkSelector() {
     SIDEBAR_SELECTORS.navLink,
     SIDEBAR_SELECTORS.brand,
     SIDEBAR_SELECTORS.link,
-  ].join(",");
+  ]
+    .filter(Boolean)
+    .join(",");
 }
 
 /* =========================================================
@@ -222,21 +205,17 @@ export function handleSidebarClick(event = null, context = {}) {
 
   const ctx = isObject(context) ? context : {};
   const root = resolveRoot(ctx);
-  const target = targetOf(event);
+  const target = eventTarget(event);
 
-  if (!isElement(root) || !target || !contains(root, target)) {
+  if (!isElement(root) || !contains(root, target)) {
     return false;
   }
 
-  const logoutButton = closestInsideRoot(
-    target,
-    SIDEBAR_SELECTORS.logout,
-    root
-  );
+  const logout = closestInside(root, target, SIDEBAR_SELECTORS.logout);
 
-  if (logoutButton) {
+  if (logout && !isBlocked(logout)) {
     prevent(event);
-    markHandled(event, "sidebar:logout");
+    markHandled(event);
 
     void handleLogout({
       ...ctx,
@@ -248,15 +227,11 @@ export function handleSidebarClick(event = null, context = {}) {
     return true;
   }
 
-  const toggleButton = closestInsideRoot(
-    target,
-    SIDEBAR_SELECTORS.toggle,
-    root
-  );
+  const toggle = closestInside(root, target, SIDEBAR_SELECTORS.toggle);
 
-  if (toggleButton) {
+  if (toggle && !isBlocked(toggle)) {
     prevent(event);
-    markHandled(event, "sidebar:toggle");
+    markHandled(event);
 
     toggleSidebar({
       ...ctx,
@@ -266,22 +241,18 @@ export function handleSidebarClick(event = null, context = {}) {
     return true;
   }
 
-  const link = closestInsideRoot(
-    target,
-    sidebarLinkSelector(),
-    root
-  );
+  const link = closestInside(root, target, sidebarLinkSelector());
 
   if (!link) return false;
-  if (isHiddenOrDisabled(link)) return false;
-  if (browserShouldOwnClick(link, event)) return false;
+  if (isBlocked(link)) return false;
+  if (browserOwnsClick(link, event)) return false;
 
-  const href = getElementTarget(link);
+  const href = getLinkTarget(link);
 
   if (!href) return false;
 
   prevent(event);
-  markHandled(event, "sidebar:navigate");
+  markHandled(event);
 
   void navigateFromSidebar({
     ...ctx,
@@ -351,7 +322,7 @@ export function getSidebarEventsSnapshot() {
   return {
     version: SIDEBAR_EVENTS_VERSION,
     bound: Boolean(boundRoot && boundHandler),
-    hasRoot: Boolean(boundRoot),
+    hasRoot: isElement(boundRoot),
     rootId: boundRoot?.id || "",
   };
 }

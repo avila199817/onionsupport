@@ -1,93 +1,77 @@
 /* =========================================================
-   Onion SPA - Toast Events
-   Archivo: src/ui/toast/events.js
+   Onion Support - Toast Events
+   Archivo: /src/ui/toast/events.js
 
-   TOAST EVENTS · SIMPLE
-   - puente AppCore.events/window -> Toast API
-   - click delegated para dismiss
-   - refresh al cambiar idioma
-   - cleanup por scope
-   - anti doble bind
-   - anti loop clear/reset
-   - payloads normalizados
-   - sin render/store/timers directos
+   Responsabilidad:
+   - Compat mínima de eventos Toast.
+   - Puente AppCore.events -> Toast API.
+   - Click delegado para dismiss.
+   - Sin constants.js.
+   - Sin window CustomEvent.
+   - Sin AppCore.cleanup.
+   - Sin store.
+   - Sin timers.
+   - Sin render.
+   - Sin loops clear/reset.
+   - Sin magia negra.
+   - El Toast real vive en src/ui/toast/index.js.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import Toast from "./index.js";
 
-import {
-  TOAST_SCOPE,
-  TOAST_EVENTS,
-  TOAST_DATA_ID,
-  TOAST_EVENT_SHOW,
-  TOAST_EVENT_UPDATE,
-  TOAST_EVENT_DISMISS,
-  TOAST_EVENT_CLEAR,
-  TOAST_EVENT_SUCCESS,
-  TOAST_EVENT_ERROR,
-  TOAST_EVENT_WARNING,
-  TOAST_EVENT_INFO,
-  TOAST_EVENT_LOADING,
-  TOAST_EVENT_SHOWN,
-  TOAST_EVENT_UPDATED,
-  TOAST_EVENT_DISMISSED,
-  TOAST_EVENT_CLEARED,
-  TOAST_EVENT_LANGUAGE_REFRESH,
-  TOAST_EVENT_RESET,
-  TOAST_EVENT_ERROR_INTERNAL,
-} from "./constants.js";
-
-export const TOAST_EVENTS_VERSION = "18.0.0-simple";
+export const TOAST_EVENTS_VERSION = "simple";
 
 const SOURCE = "ui.toast.events";
-const DOM_CLICK_EVENT = "click";
-const EVENT_DEDUPE_MS = 64;
+const TOAST_SCOPE = "ui:toast";
 
-const BOUND_EVENT = "toast:events:bound";
-const UNBOUND_EVENT = "toast:events:unbound";
+const EVENTS = Object.freeze({
+  show: "toast:show",
+  update: "toast:update",
+  dismiss: "toast:dismiss",
+  clear: "toast:clear",
+  reset: "toast:reset",
 
-const GLOBAL_SHOW_EVENTS = Object.freeze([TOAST_EVENT_SHOW, `${TOAST_SCOPE}:show`]);
-const GLOBAL_SUCCESS_EVENTS = Object.freeze([TOAST_EVENT_SUCCESS, `${TOAST_SCOPE}:success`]);
-const GLOBAL_ERROR_EVENTS = Object.freeze([TOAST_EVENT_ERROR, `${TOAST_SCOPE}:error`]);
-const GLOBAL_WARNING_EVENTS = Object.freeze([TOAST_EVENT_WARNING, "toast:warn", `${TOAST_SCOPE}:warning`, `${TOAST_SCOPE}:warn`]);
-const GLOBAL_INFO_EVENTS = Object.freeze([TOAST_EVENT_INFO, `${TOAST_SCOPE}:info`]);
-const GLOBAL_LOADING_EVENTS = Object.freeze([TOAST_EVENT_LOADING, `${TOAST_SCOPE}:loading`]);
-const GLOBAL_UPDATE_EVENTS = Object.freeze([TOAST_EVENT_UPDATE, `${TOAST_SCOPE}:update`]);
-const GLOBAL_DISMISS_EVENTS = Object.freeze([TOAST_EVENT_DISMISS, "toast:hide", "toast:close", `${TOAST_SCOPE}:dismiss`, `${TOAST_SCOPE}:hide`, `${TOAST_SCOPE}:close`]);
-const GLOBAL_CLEAR_EVENTS = Object.freeze([TOAST_EVENT_CLEAR, "toast:dismiss-all", "toast:clear-all", `${TOAST_SCOPE}:clear`, `${TOAST_SCOPE}:dismiss-all`, `${TOAST_SCOPE}:clear-all`]);
-const GLOBAL_RESET_EVENTS = Object.freeze([TOAST_EVENT_RESET, `${TOAST_SCOPE}:reset`]);
-const GLOBAL_LANGUAGE_EVENTS = Object.freeze([TOAST_EVENT_LANGUAGE_REFRESH, "app:lang:change", "app:i18n:change", "i18n:change", `${TOAST_SCOPE}:language:refresh`]);
+  success: "toast:success",
+  error: "toast:error",
+  warning: "toast:warning",
+  warn: "toast:warn",
+  info: "toast:info",
+  loading: "toast:loading",
 
-const INTERNAL_LIFECYCLE_EVENTS = new Set([
-  TOAST_EVENT_SHOWN,
-  TOAST_EVENT_UPDATED,
-  TOAST_EVENT_DISMISSED,
-  TOAST_EVENT_CLEARED,
-  TOAST_EVENT_ERROR_INTERNAL,
-  `${TOAST_SCOPE}:shown`,
-  `${TOAST_SCOPE}:updated`,
-  `${TOAST_SCOPE}:dismissed`,
-  `${TOAST_SCOPE}:cleared`,
-  `${TOAST_SCOPE}:internal-error`,
+  shown: "toast:shown",
+  updated: "toast:updated",
+  dismissed: "toast:dismissed",
+  cleared: "toast:cleared",
+
+  languageRefresh: "toast:language:refresh",
+});
+
+const SOURCE_BLOCKLIST = new Set([
+  SOURCE,
+  "ui.toast",
+  "ui.toast.index",
+  "ui.toast.api",
+  "toast.api.bridge",
+  "toast-events",
 ]);
 
-const EVENT_SOURCE_BLOCKLIST = new Set([
-  SOURCE,
-  "ui.toast.api",
-  "ui.toast.index",
-  "toast-api:clear",
-  "toast-api:reset",
-  "toast-events",
+const LIFECYCLE_EVENTS = new Set([
+  EVENTS.shown,
+  EVENTS.updated,
+  EVENTS.dismissed,
+  EVENTS.cleared,
 ]);
 
 let globalEventsBound = false;
 let domEventsBound = false;
 let boundAt = "";
 let unboundAt = "";
+
 let lastEventKey = "";
 let lastEventAt = 0;
 
-const manualUnsubscribers = new Set();
+const unsubscribers = new Set();
 
 /* =========================================================
    BASICS
@@ -97,58 +81,21 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isFn(value) {
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFunction(value) {
   return typeof value === "function";
 }
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object");
-}
-
-function isPlainObject(value) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
-
-  try {
-    const proto = Object.getPrototypeOf(value);
-    return proto === Object.prototype || proto === null;
-  } catch {
-    return false;
-  }
-}
-
-function safeObject(value) {
-  return isPlainObject(value) ? value : {};
-}
-
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-  const output = String(value).trim();
+function text(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
   return output || fallback;
 }
 
-function safeNumber(value, fallback = 0) {
-  const output = Number(value);
-  return Number.isFinite(output) ? output : fallback;
-}
-
-function safeBool(value, fallback = false) {
-  if (value === true || value === false) return value;
-  if (value === 1 || value === "1") return true;
-  if (value === 0 || value === "0") return false;
-
-  const output = safeText(value, "").toLowerCase();
-  if (["true", "yes", "si", "sí", "on", "ok"].includes(output)) return true;
-  if (["false", "no", "off"].includes(output)) return false;
-
-  return Boolean(fallback);
-}
-
 function now() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
+  return Date.now();
 }
 
 function iso(ms = now()) {
@@ -159,47 +106,24 @@ function iso(ms = now()) {
   }
 }
 
-function warn(...args) {
-  try {
-    AppCore?.utils?.warn?.("[ToastEvents]", ...args);
-    return;
-  } catch {}
+function remember(off = null) {
+  if (!isFunction(off)) return false;
 
-  try {
-    if (AppCore?.config?.debug) console.warn("[ToastEvents]", ...args);
-  } catch {}
-}
-
-function errorLog(...args) {
-  try {
-    AppCore?.utils?.error?.("[ToastEvents]", ...args);
-    return;
-  } catch {}
-
-  try {
-    console.error("[ToastEvents]", ...args);
-  } catch {}
-}
-
-function rememberOff(off) {
-  if (!isFn(off)) return false;
-  manualUnsubscribers.add(off);
+  unsubscribers.add(off);
   return true;
 }
 
-function runManualOffs() {
-  for (const off of [...manualUnsubscribers]) {
+function runUnsubscribers() {
+  for (const off of [...unsubscribers]) {
     try {
       off();
-    } catch {}
+    } catch {
+      // noop
+    }
   }
 
-  manualUnsubscribers.clear();
+  unsubscribers.clear();
   return true;
-}
-
-function cleanupScope() {
-  return TOAST_SCOPE;
 }
 
 /* =========================================================
@@ -207,262 +131,247 @@ function cleanupScope() {
 ========================================================= */
 
 function rawDetail(input = null) {
-  if (isObject(input) && "detail" in input) return input.detail;
-  if (isObject(input) && "payload" in input) return input.payload;
+  if (isObject(input?.detail)) return input.detail;
+  if (isObject(input?.payload)) return input.payload;
   return input;
 }
 
-function normalizeDetail(input = null, { stringKey = "message" } = {}) {
+function normalizeDetail(input = null, stringKey = "message") {
   const raw = rawDetail(input);
 
-  if (raw === null || raw === undefined) return null;
-  if (isPlainObject(raw)) return raw;
+  if (raw === null || raw === undefined) return {};
+
+  if (isObject(raw)) return raw;
 
   if (["string", "number", "boolean"].includes(typeof raw)) {
-    return { [stringKey]: safeText(raw, "") };
+    return {
+      [stringKey]: text(raw, ""),
+    };
   }
 
-  return null;
+  return {};
 }
 
-function normalizeToastDetail(input = null, options = {}) {
-  const detail = normalizeDetail(input, options);
-  if (!detail) return null;
+function normalizeToastPayload(input = null, stringKey = "message") {
+  const detail = normalizeDetail(input, stringKey);
 
-  const id = safeText(detail.id ?? detail.toastId ?? detail.toast_id ?? detail.key ?? "", "");
-  const type = safeText(detail.type ?? detail.variant ?? "", "");
-  const title = safeText(detail.title ?? detail.heading ?? "", "");
-  const message = safeText(detail.message ?? detail.text ?? detail.description ?? "", "");
-  const text = safeText(detail.text ?? detail.message ?? detail.description ?? "", "");
+  const id = text(
+    detail.id ??
+      detail.toastId ??
+      detail.toast_id ??
+      detail.key ??
+      "",
+    ""
+  );
+
+  const message = text(
+    detail.message ??
+      detail.text ??
+      detail.description ??
+      "",
+    ""
+  );
 
   return {
     ...detail,
+
     id,
     toastId: id,
-    type,
-    title,
+
+    type: text(detail.type ?? detail.variant ?? "", ""),
+    title: text(detail.title ?? detail.heading ?? "", ""),
     message,
-    text,
-    duration: detail.duration,
-    closable: detail.closable,
-    persist: detail.persist,
-    persistent: detail.persistent,
-    replace: detail.replace,
-    replaceNode: detail.replaceNode,
-    dedupe: detail.dedupe,
-    dedupeMs: detail.dedupeMs,
-    dedupeKey: detail.dedupeKey,
-    source: detail.source || detail.origin || detail.eventSource || "event-bus",
-    useDefaultTitle: safeBool(detail.useDefaultTitle, false),
-    useDefaultMessage: safeBool(detail.useDefaultMessage, false),
+    text: message,
+
+    source: text(
+      detail.source ??
+        detail.origin ??
+        detail.eventSource ??
+        "event-bus",
+      "event-bus"
+    ),
   };
 }
 
-function sourceFromDetail(detail = {}) {
-  return safeText(detail?.source || detail?.origin || detail?.eventSource || "", "");
+function sourceOf(detail = {}) {
+  return text(detail?.source || detail?.origin || detail?.eventSource || "", "");
 }
 
-function isInternalLifecycleEvent(eventName = "") {
-  return INTERNAL_LIFECYCLE_EVENTS.has(safeText(eventName, ""));
+function shouldIgnore(eventName = "", detail = {}) {
+  if (LIFECYCLE_EVENTS.has(eventName)) return true;
+
+  const source = sourceOf(detail);
+
+  return Boolean(source && SOURCE_BLOCKLIST.has(source));
 }
 
-function shouldIgnoreSource(detail = {}) {
-  const source = sourceFromDetail(detail);
-  return Boolean(source && EVENT_SOURCE_BLOCKLIST.has(source));
-}
-
-function dedupeEvent(eventName = "", input = null) {
-  const name = safeText(eventName, "");
-  if (!name) return true;
-
-  const detail = rawDetail(input);
-  const stamp = now();
-
+function dedupe(eventName = "", detail = {}) {
   const key = [
-    name,
-    isObject(detail) ? detail.id || detail.toastId || detail.key || "" : "",
-    isObject(detail) ? detail.type || detail.variant || "" : "",
-    isObject(detail) ? detail.message || detail.text || detail.description || "" : safeText(detail, ""),
-    isObject(detail) ? detail.source || detail.origin || "" : "",
+    eventName,
+    detail.id || detail.toastId || detail.key || "",
+    detail.type || "",
+    detail.message || detail.text || "",
+    detail.source || "",
   ].join("|");
 
-  if (key === lastEventKey && stamp - lastEventAt < EVENT_DEDUPE_MS) return true;
+  const stamp = now();
+
+  if (key === lastEventKey && stamp - lastEventAt < 64) {
+    return true;
+  }
 
   lastEventKey = key;
   lastEventAt = stamp;
+
   return false;
 }
 
 /* =========================================================
-   EMIT LIFECYCLE
+   EVENT EMIT
 ========================================================= */
 
-function emitEvent(eventName = "", payload = {}, options = {}) {
-  const name = safeText(eventName, "");
+function emit(eventName = "", payload = {}) {
+  const name = text(eventName, "");
+
   if (!name) return false;
 
-  const detail = {
-    source: SOURCE,
-    version: TOAST_EVENTS_VERSION,
-    at: iso(),
-    ...safeObject(payload),
-  };
-
-  let hasBus = false;
-  let emitted = false;
-
   try {
-    if (isFn(AppCore?.events?.emit)) {
-      hasBus = true;
-      AppCore.events.emit(name, detail);
-      emitted = true;
-    }
-  } catch {}
+    AppCore?.events?.emit?.(name, {
+      source: SOURCE,
+      version: TOAST_EVENTS_VERSION,
+      at: iso(),
+      ...payload,
+      token: null,
+      accessToken: null,
+      refreshToken: null,
+    });
 
-  if ((options.window === true || !hasBus) && isBrowser()) {
-    try {
-      window.dispatchEvent(new CustomEvent(name, { detail }));
-      emitted = true;
-    } catch {}
+    return true;
+  } catch {
+    return false;
   }
-
-  return emitted;
 }
 
-export function buildToastEventPayload(item, extra = {}) {
+export function buildToastEventPayload(item = null, extra = {}) {
   return {
     id: item?.id || null,
     type: item?.type || null,
     title: item?.title || "",
     message: item?.message || "",
     duration: item?.duration ?? 0,
-    remaining: item?.remaining ?? 0,
-    closable: Boolean(item?.closable),
+    persist: Boolean(item?.persist),
     dismissed: Boolean(item?.dismissed),
-    useDefaultTitle: Boolean(item?.useDefaultTitle),
-    useDefaultMessage: Boolean(item?.useDefaultMessage),
     createdAt: item?.createdAt || null,
     updatedAt: item?.updatedAt || null,
     timestamp: now(),
-    ...safeObject(extra),
+    ...extra,
   };
 }
 
-export function emitToastShown(item) {
+export function emitToastShown(item = null) {
   const payload = buildToastEventPayload(item);
-  emitEvent(TOAST_EVENT_SHOWN, payload);
-  emitEvent(`${TOAST_SCOPE}:shown`, payload);
+  emit(EVENTS.shown, payload);
   return payload;
 }
 
-export function emitToastUpdated(item) {
+export function emitToastUpdated(item = null) {
   const payload = buildToastEventPayload(item);
-  emitEvent(TOAST_EVENT_UPDATED, payload);
-  emitEvent(`${TOAST_SCOPE}:updated`, payload);
+  emit(EVENTS.updated, payload);
   return payload;
 }
 
-export function emitToastDismissed(item) {
+export function emitToastDismissed(item = null) {
   const payload = buildToastEventPayload(item);
-  emitEvent(TOAST_EVENT_DISMISSED, payload);
-  emitEvent(`${TOAST_SCOPE}:dismissed`, payload);
+  emit(EVENTS.dismissed, payload);
   return payload;
+}
+
+/* =========================================================
+   ACTIONS
+========================================================= */
+
+function resolveActions(actions = {}) {
+  return {
+    show: actions.show || actions.showToast || Toast.show,
+    update: actions.update || actions.updateToast || Toast.update,
+    dismiss: actions.dismiss || actions.dismissToast || Toast.dismiss,
+    clear: actions.clear || actions.clearToasts || Toast.clear,
+    reset: actions.reset || actions.resetToastApiState || Toast.reset,
+
+    success: actions.success || actions.successToast || Toast.success,
+    error: actions.error || actions.errorToast || Toast.error,
+    warning: actions.warning || actions.warn || actions.warningToast || Toast.warning,
+    info: actions.info || actions.infoToast || Toast.info,
+    loading: actions.loading || actions.loadingToast || Toast.loading,
+
+    refresh:
+      actions.refreshAllToastsLanguage ||
+      actions.refreshLanguage ||
+      actions.refresh ||
+      Toast.refreshAllToastsLanguage ||
+      Toast.refreshLanguage,
+  };
+}
+
+function callAction(fn = null, ...args) {
+  if (!isFunction(fn)) return null;
+
+  try {
+    return fn(...args);
+  } catch {
+    return null;
+  }
 }
 
 /* =========================================================
    BIND HELPERS
 ========================================================= */
 
-function bindCoreEvent(scope, eventName, handler) {
-  void scope;
+function bindCoreEvent(eventName = "", handler = null) {
+  const name = text(eventName, "");
 
-  const name = safeText(eventName, "");
-  if (!name || !isFn(handler)) return false;
+  if (!name || !isFunction(handler)) return false;
 
   try {
-    if (isFn(AppCore?.events?.on)) {
+    if (isFunction(AppCore?.events?.on)) {
       const off = AppCore.events.on(name, handler);
-      rememberOff(off);
+
+      if (isFunction(off)) {
+        remember(off);
+      } else if (isFunction(AppCore?.events?.off)) {
+        remember(() => AppCore.events.off(name, handler));
+      }
+
       return true;
     }
-  } catch (error) {
-    warn("AppCore.events.on falló.", { eventName: name, error });
+  } catch {
+    // noop
   }
 
   return false;
 }
 
-function bindWindowEvent(scope, eventName, handler) {
-  void scope;
-
-  const name = safeText(eventName, "");
-  if (!isBrowser() || !name || !isFn(handler)) return false;
-
-  try {
-    window.addEventListener(name, handler);
-    rememberOff(() => window.removeEventListener(name, handler));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function bindDomEvent(scope, node, eventName, handler, options = false) {
-  const name = safeText(eventName, "");
-  if (!isBrowser() || !node || !name || !isFn(handler)) return false;
-
-  try {
-    if (isFn(AppCore?.cleanup?.on)) {
-      const off = AppCore.cleanup.on(scope, node, name, handler, options);
-      rememberOff(off);
-      return true;
-    }
-  } catch (error) {
-    warn("cleanup.on(DOM) falló.", { eventName: name, error });
-  }
-
-  try {
-    node.addEventListener(name, handler, options);
-    rememberOff(() => node.removeEventListener(name, handler, options));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function bindEvents(scope, eventNames = [], handler) {
-  if (!isFn(handler)) return false;
-
+function bindEventList(eventNames = [], handler = null) {
   let bound = false;
 
-  eventNames
-    .map((item) => safeText(item, ""))
-    .filter(Boolean)
-    .forEach((eventName) => {
-      const wrapped = (event) => {
-        if (isInternalLifecycleEvent(eventName)) return;
-        if (dedupeEvent(eventName, event)) return;
-        handler(event, eventName);
-      };
+  for (const eventName of eventNames) {
+    const name = text(eventName, "");
 
-      const bus = bindCoreEvent(scope, eventName, wrapped);
-      const win = bindWindowEvent(scope, eventName, wrapped);
+    if (!name) continue;
 
-      bound = bound || bus || win;
-    });
+    const wrapped = (payload) => {
+      const detail = normalizeToastPayload(payload);
+
+      if (shouldIgnore(name, detail)) return;
+      if (dedupe(name, detail)) return;
+
+      handler(detail, name);
+    };
+
+    bound = bindCoreEvent(name, wrapped) || bound;
+  }
 
   return bound;
-}
-
-function callAction(fn, ...args) {
-  if (!isFn(fn)) return null;
-
-  try {
-    return fn(...args);
-  } catch (error) {
-    errorLog("Toast action falló.", error);
-    return null;
-  }
 }
 
 /* =========================================================
@@ -470,119 +379,114 @@ function callAction(fn, ...args) {
 ========================================================= */
 
 export function bindToastGlobalEvents(actions = {}) {
-  if (globalEventsBound) return cleanupScope();
+  if (globalEventsBound) return TOAST_SCOPE;
 
-  const scope = cleanupScope();
+  const resolved = resolveActions(actions);
 
-  const show = actions.show || actions.showToast;
-  const update = actions.update || actions.updateToast;
-  const dismiss = actions.dismiss || actions.dismissToast;
-  const clear = actions.clear || actions.clearToasts;
-  const reset = actions.reset || actions.resetToastApiState;
-
-  const success = actions.success || actions.successToast;
-  const error = actions.error || actions.errorToast;
-  const warning = actions.warning || actions.warn || actions.warningToast;
-  const info = actions.info || actions.infoToast;
-  const loading = actions.loading || actions.loadingToast;
-  const refreshLanguage = actions.refreshAllToastsLanguage || actions.refreshLanguage || actions.refresh;
-
-  bindEvents(scope, GLOBAL_SHOW_EVENTS, (event) => {
-    const detail = normalizeToastDetail(event);
-    if (!detail || shouldIgnoreSource(detail)) return;
-    callAction(show, detail);
+  bindEventList([EVENTS.show, `${TOAST_SCOPE}:show`], (detail) => {
+    callAction(resolved.show, detail);
   });
 
-  bindEvents(scope, GLOBAL_SUCCESS_EVENTS, (event) => {
-    const detail = normalizeToastDetail(event);
-    if (!detail || shouldIgnoreSource(detail)) return;
-    callAction(success, detail.message || detail.text || "", detail);
+  bindEventList([EVENTS.success, `${TOAST_SCOPE}:success`], (detail) => {
+    callAction(resolved.success, detail.message || detail.text || "", detail);
   });
 
-  bindEvents(scope, GLOBAL_ERROR_EVENTS, (event) => {
-    const detail = normalizeToastDetail(event);
-    if (!detail || shouldIgnoreSource(detail)) return;
-    callAction(error, detail.message || detail.text || "", detail);
+  bindEventList([EVENTS.error, `${TOAST_SCOPE}:error`], (detail) => {
+    callAction(resolved.error, detail.message || detail.text || "", detail);
   });
 
-  bindEvents(scope, GLOBAL_WARNING_EVENTS, (event) => {
-    const detail = normalizeToastDetail(event);
-    if (!detail || shouldIgnoreSource(detail)) return;
-    callAction(warning, detail.message || detail.text || "", detail);
+  bindEventList([EVENTS.warning, EVENTS.warn, `${TOAST_SCOPE}:warning`, `${TOAST_SCOPE}:warn`], (detail) => {
+    callAction(resolved.warning, detail.message || detail.text || "", detail);
   });
 
-  bindEvents(scope, GLOBAL_INFO_EVENTS, (event) => {
-    const detail = normalizeToastDetail(event);
-    if (!detail || shouldIgnoreSource(detail)) return;
-    callAction(info, detail.message || detail.text || "", detail);
+  bindEventList([EVENTS.info, `${TOAST_SCOPE}:info`], (detail) => {
+    callAction(resolved.info, detail.message || detail.text || "", detail);
   });
 
-  bindEvents(scope, GLOBAL_LOADING_EVENTS, (event) => {
-    const detail = normalizeToastDetail(event);
-    if (!detail || shouldIgnoreSource(detail)) return;
-    callAction(loading, detail.message || detail.text || "", detail);
+  bindEventList([EVENTS.loading, `${TOAST_SCOPE}:loading`], (detail) => {
+    callAction(resolved.loading, detail.message || detail.text || "", detail);
   });
 
-  bindEvents(scope, GLOBAL_UPDATE_EVENTS, (event) => {
-    const detail = normalizeToastDetail(event);
-    if (!detail || shouldIgnoreSource(detail) || !detail.id) return;
+  bindEventList([EVENTS.update, `${TOAST_SCOPE}:update`], (detail) => {
+    if (!detail.id) return;
 
-    const patch = isPlainObject(detail.patch) ? { ...detail, ...detail.patch } : detail;
-    callAction(update, detail.id, patch);
+    const patch = isObject(detail.patch)
+      ? {
+          ...detail,
+          ...detail.patch,
+        }
+      : detail;
+
+    callAction(resolved.update, detail.id, patch);
   });
 
-  bindEvents(scope, GLOBAL_DISMISS_EVENTS, (event) => {
-    const detail = normalizeToastDetail(event, { stringKey: "id" });
-    if (!detail || shouldIgnoreSource(detail)) return;
-
-    if (!detail.id) {
-      callAction(dismiss, null, { reason: "event-dismiss", source: "event-bus" });
-      return;
-    }
-
-    callAction(dismiss, detail.id, { reason: detail.reason || "event-dismiss", source: "event-bus" });
+  bindEventList([
+    EVENTS.dismiss,
+    "toast:hide",
+    "toast:close",
+    `${TOAST_SCOPE}:dismiss`,
+    `${TOAST_SCOPE}:hide`,
+    `${TOAST_SCOPE}:close`,
+  ], (detail) => {
+    callAction(resolved.dismiss, detail.id || null, {
+      reason: detail.reason || "event-dismiss",
+      source: SOURCE,
+    });
   });
 
-  bindEvents(scope, GLOBAL_CLEAR_EVENTS, (event) => {
-    const detail = normalizeToastDetail(event, { stringKey: "reason" }) || {};
-    if (shouldIgnoreSource(detail)) return;
-
-    callAction(clear, {
+  bindEventList([
+    EVENTS.clear,
+    "toast:dismiss-all",
+    "toast:clear-all",
+    `${TOAST_SCOPE}:clear`,
+    `${TOAST_SCOPE}:dismiss-all`,
+    `${TOAST_SCOPE}:clear-all`,
+  ], (detail) => {
+    callAction(resolved.clear, {
       ...detail,
       reason: detail.reason || "event-clear",
-      source: "event-bus",
+      source: SOURCE,
     });
   });
 
-  bindEvents(scope, GLOBAL_RESET_EVENTS, (event) => {
-    const detail = normalizeToastDetail(event, { stringKey: "reason" }) || {};
-    if (shouldIgnoreSource(detail)) return;
-
-    callAction(reset, {
+  bindEventList([EVENTS.reset, `${TOAST_SCOPE}:reset`], (detail) => {
+    callAction(resolved.reset, {
       ...detail,
       reason: detail.reason || "event-reset",
-      source: "event-bus",
+      source: SOURCE,
     });
   });
 
-  bindEvents(scope, GLOBAL_LANGUAGE_EVENTS, () => {
-    callAction(refreshLanguage);
+  bindEventList([
+    EVENTS.languageRefresh,
+    "app:lang:change",
+    "app:i18n:change",
+    "i18n:change",
+    `${TOAST_SCOPE}:language:refresh`,
+  ], () => {
+    callAction(resolved.refresh);
   });
 
   globalEventsBound = true;
   boundAt = iso();
 
-  emitEvent(BOUND_EVENT, { scope, global: true, dom: domEventsBound });
-  return scope;
+  emit("toast:events:bound", {
+    scope: TOAST_SCOPE,
+    global: true,
+    dom: domEventsBound,
+  });
+
+  return TOAST_SCOPE;
 }
 
 /* =========================================================
    DOM EVENTS
 ========================================================= */
 
-function getDismissTarget(event) {
+function dismissTarget(event = null) {
   const target = event?.target;
-  if (!target || !isFn(target.closest)) return null;
+
+  if (!target || !isFunction(target.closest)) return null;
 
   try {
     return target.closest("[data-toast-dismiss]");
@@ -591,69 +495,64 @@ function getDismissTarget(event) {
   }
 }
 
-function getToastIdFromDismissTarget(target) {
+function toastIdFromTarget(target = null) {
   if (!target) return "";
 
-  const direct = safeText(target.getAttribute?.("data-toast-dismiss"), "");
+  const direct = text(target.getAttribute?.("data-toast-dismiss"), "");
+
   if (direct) return direct;
 
   try {
-    const toast = target.closest?.([
-      `[${TOAST_DATA_ID}]`,
-      "[data-toast-id]",
-      "[data-ui-toast-id]",
-      "[data-toast-item-id]",
-    ].join(","));
-
-    return safeText(
-      toast?.getAttribute?.(TOAST_DATA_ID) ||
-        toast?.getAttribute?.("data-toast-id") ||
-        toast?.getAttribute?.("data-ui-toast-id") ||
-        toast?.getAttribute?.("data-toast-item-id") ||
-        toast?.dataset?.toastId ||
-        "",
-      ""
-    );
+    const toast = target.closest?.("[data-toast-id]");
+    return text(toast?.dataset?.toastId || toast?.getAttribute?.("data-toast-id"), "");
   } catch {
     return "";
   }
 }
 
 export function bindToastDomEvents(actions = {}) {
-  if (domEventsBound) return cleanupScope();
+  if (domEventsBound) return TOAST_SCOPE;
   if (!isBrowser()) return null;
 
-  const scope = cleanupScope();
-  const dismiss = actions.dismiss || actions.dismissToast;
+  const resolved = resolveActions(actions);
 
-  bindDomEvent(
-    scope,
-    document,
-    DOM_CLICK_EVENT,
-    (event) => {
-      const target = getDismissTarget(event);
-      if (!target) return;
+  const handler = (event) => {
+    const target = dismissTarget(event);
 
-      const toastId = getToastIdFromDismissTarget(target);
+    if (!target) return;
 
-      try {
-        event.preventDefault();
-      } catch {}
+    const toastId = toastIdFromTarget(target);
 
-      try {
-        event.stopPropagation();
-      } catch {}
+    try {
+      event.preventDefault();
+      event.stopPropagation();
+    } catch {
+      // noop
+    }
 
-      callAction(dismiss, toastId || null, { reason: "dom-click", source: "dom" });
-    },
-    true
-  );
+    callAction(resolved.dismiss, toastId || null, {
+      reason: "dom-click",
+      source: SOURCE,
+    });
+  };
+
+  try {
+    document.addEventListener("click", handler, true);
+    remember(() => document.removeEventListener("click", handler, true));
+  } catch {
+    return null;
+  }
 
   domEventsBound = true;
   boundAt = boundAt || iso();
 
-  emitEvent(BOUND_EVENT, { scope, global: globalEventsBound, dom: true });
-  return scope;
+  emit("toast:events:bound", {
+    scope: TOAST_SCOPE,
+    global: globalEventsBound,
+    dom: true,
+  });
+
+  return TOAST_SCOPE;
 }
 
 /* =========================================================
@@ -661,23 +560,19 @@ export function bindToastDomEvents(actions = {}) {
 ========================================================= */
 
 export function unbindToastEvents() {
-  try {
-    AppCore?.cleanup?.run?.(TOAST_SCOPE);
-  } catch {}
-
-  try {
-    AppCore?.cleanup?.clear?.(TOAST_SCOPE);
-  } catch {}
-
-  runManualOffs();
+  runUnsubscribers();
 
   globalEventsBound = false;
   domEventsBound = false;
   unboundAt = iso();
+
   lastEventKey = "";
   lastEventAt = 0;
 
-  emitEvent(UNBOUND_EVENT, { scope: TOAST_SCOPE });
+  emit("toast:events:unbound", {
+    scope: TOAST_SCOPE,
+  });
+
   return true;
 }
 
@@ -690,34 +585,54 @@ export function getToastEventsSnapshot() {
     version: TOAST_EVENTS_VERSION,
     source: SOURCE,
     scope: TOAST_SCOPE,
+
     globalEventsBound,
     domEventsBound,
+
     boundAt,
     unboundAt,
-    manualUnsubscribers: manualUnsubscribers.size,
+
+    manualUnsubscribers: unsubscribers.size,
+
     hasAppCoreEvents: Boolean(AppCore?.events),
-    hasAppCoreEventsOn: isFn(AppCore?.events?.on),
-    hasAppCoreEventsEmit: isFn(AppCore?.events?.emit),
-    hasCleanup: Boolean(AppCore?.cleanup),
-    hasCleanupOn: isFn(AppCore?.cleanup?.on),
-    hasCleanupRun: isFn(AppCore?.cleanup?.run),
-    hasCleanupClear: isFn(AppCore?.cleanup?.clear),
+    hasAppCoreEventsOn: isFunction(AppCore?.events?.on),
+    hasAppCoreEventsEmit: isFunction(AppCore?.events?.emit),
+
     lastEventKey,
     lastEventAt,
     lastEventAtIso: lastEventAt ? iso(lastEventAt) : "",
-    events: TOAST_EVENTS,
+
+    events: EVENTS,
     browser: isBrowser(),
+
+    policy: {
+      compatOnly: true,
+      noConstantsImport: true,
+      noWindowCustomEvent: true,
+      noAppCoreCleanup: true,
+      noStore: true,
+      noTimers: true,
+      noRender: true,
+      noLoopClearReset: true,
+    },
   };
 }
 
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
 export default {
   TOAST_EVENTS_VERSION,
+
   buildToastEventPayload,
   emitToastShown,
   emitToastUpdated,
   emitToastDismissed,
+
   bindToastGlobalEvents,
   bindToastDomEvents,
   unbindToastEvents,
+
   getToastEventsSnapshot,
 };

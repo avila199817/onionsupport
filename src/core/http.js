@@ -4,6 +4,9 @@
 
    Responsabilidad:
    - Fachada mínima sobre core/request.js.
+   - API real única.
+   - Endpoints auth reales.
+   - /api/auth/me privado siempre.
    - Sin fetch propio.
    - Sin parser propio.
    - Sin retry propio.
@@ -40,7 +43,7 @@ const AUTH_ENDPOINTS = Object.freeze({
   confirmPasswordReset: "/api/auth/reset-password-confirm",
 });
 
-const PUBLIC_AUTH_ENDPOINTS = Object.freeze([
+const PUBLIC_ENDPOINTS = Object.freeze([
   AUTH_ENDPOINTS.login,
   AUTH_ENDPOINTS.refresh,
   AUTH_ENDPOINTS.activate,
@@ -48,12 +51,16 @@ const PUBLIC_AUTH_ENDPOINTS = Object.freeze([
   AUTH_ENDPOINTS.confirmPasswordReset,
 ]);
 
-let apiOrigin = normalizeOrigin(config?.apiBase || DEFAULT_API_ORIGIN);
+let apiOrigin = normalizeOrigin(
+  config?.apiBase ||
+    config?.apiOrigin ||
+    config?.api?.baseUrl ||
+    DEFAULT_API_ORIGIN
+);
+
 let appCore = null;
 let requestEngine = null;
 let apiEngine = null;
-let tokenProvider = null;
-let authPayloadCommitter = null;
 
 const stats = {
   total: 0,
@@ -67,16 +74,12 @@ const stats = {
    BASICS
 ========================================================= */
 
-function isBrowser() {
-  return typeof window !== "undefined";
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function isFunction(value) {
   return typeof value === "function";
-}
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function text(value = "", fallback = "") {
@@ -94,46 +97,22 @@ function normalizeOrigin(value = "") {
       return DEFAULT_API_ORIGIN;
     }
 
+    if (raw.endsWith("/api")) {
+      return raw.slice(0, -4);
+    }
+
     return url.origin;
   } catch {
     return DEFAULT_API_ORIGIN;
   }
 }
 
-function cleanPath(path = "/") {
+function cleanPath(value = "/") {
   try {
-    return new URL(path, DEFAULT_API_ORIGIN).pathname || "/";
+    return new URL(value, DEFAULT_API_ORIGIN).pathname || "/";
   } catch {
-    return String(path || "/").split("?")[0].split("#")[0] || "/";
+    return String(value || "/").split("?")[0].split("#")[0] || "/";
   }
-}
-
-function isPublicEndpoint(path = "") {
-  const clean = cleanPath(path);
-
-  if (clean === AUTH_ENDPOINTS.me) return false;
-
-  return PUBLIC_AUTH_ENDPOINTS.some((endpoint) => clean === endpoint);
-}
-
-function shouldUseAuth(endpoint = "", options = {}) {
-  const path = cleanPath(endpoint);
-
-  if (path === AUTH_ENDPOINTS.me) return true;
-
-  if (options.auth === false || options.public === true || options.skipAuth === true) {
-    return false;
-  }
-
-  if (options.auth === true) return true;
-
-  return !isPublicEndpoint(path);
-}
-
-function redact(value = "") {
-  return String(value || "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function appendQuery(url = "", query = null) {
@@ -149,10 +128,10 @@ function appendQuery(url = "", query = null) {
   return parsed.toString();
 }
 
-function getState() {
-  return appCore?.state && typeof appCore.state === "object"
-    ? appCore.state
-    : {};
+function redact(value = "") {
+  return String(value || "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function validToken(value = "") {
@@ -161,9 +140,45 @@ function validToken(value = "") {
   if (!token) return false;
   if (/\s/.test(token)) return false;
 
-  return !["null", "undefined", "false", "true", "[object object]"].includes(
-    token.toLowerCase()
-  );
+  return ![
+    "null",
+    "undefined",
+    "false",
+    "true",
+    "[object object]",
+    "{}",
+    "[]",
+  ].includes(token.toLowerCase());
+}
+
+function getState() {
+  return isObject(appCore?.state) ? appCore.state : {};
+}
+
+function isPublicEndpoint(path = "") {
+  const clean = cleanPath(path);
+
+  if (clean === AUTH_ENDPOINTS.me) return false;
+
+  return PUBLIC_ENDPOINTS.includes(clean);
+}
+
+function shouldUseAuth(endpoint = "", options = {}) {
+  const clean = cleanPath(endpoint);
+
+  if (clean === AUTH_ENDPOINTS.me) return true;
+
+  if (
+    options.auth === false ||
+    options.public === true ||
+    options.skipAuth === true
+  ) {
+    return false;
+  }
+
+  if (options.auth === true) return true;
+
+  return !isPublicEndpoint(clean);
 }
 
 /* =========================================================
@@ -176,6 +191,9 @@ export function getApiOrigin() {
 
 export function setApiOrigin(value = "") {
   apiOrigin = normalizeOrigin(value || DEFAULT_API_ORIGIN);
+  requestEngine = null;
+  apiEngine = null;
+
   return apiOrigin;
 }
 
@@ -187,6 +205,7 @@ export function buildApiUrl(endpoint = "/", options = {}) {
   }
 
   const path = raw.startsWith("/") ? raw : `/${raw}`;
+
   return appendQuery(`${apiOrigin}${path}`, options.query || options.params);
 }
 
@@ -198,22 +217,11 @@ export function redactHttpText(value = "") {
    TOKEN COMPAT
 ========================================================= */
 
-export function setTokenProvider(provider = null) {
-  tokenProvider = isFunction(provider) ? provider : null;
+export function setTokenProvider() {
   return true;
 }
 
 export function getAccessToken() {
-  try {
-    const provided = tokenProvider?.();
-
-    if (validToken(provided)) {
-      return String(provided).replace(/^Bearer\s+/i, "");
-    }
-  } catch {
-    // noop
-  }
-
   const state = getState();
   const token = state.token || state.accessToken || state.access_token || "";
 
@@ -273,19 +281,8 @@ export function clearAuthTokens() {
   return true;
 }
 
-export function setAuthPayloadCommitter(fn = null) {
-  authPayloadCommitter = isFunction(fn) ? fn : null;
+export function setAuthPayloadCommitter() {
   return true;
-}
-
-function commitAuthPayload(payload = {}, meta = {}) {
-  try {
-    authPayloadCommitter?.(payload, meta);
-  } catch {
-    // noop
-  }
-
-  return payload;
 }
 
 /* =========================================================
@@ -333,7 +330,11 @@ function ensureEngines() {
 }
 
 function normalizeRequestArgs(first = "/", second = {}, third = {}) {
-  if (typeof first === "string" && /^[A-Z]+$/i.test(first) && typeof second === "string") {
+  if (
+    typeof first === "string" &&
+    /^[A-Z]+$/i.test(first) &&
+    typeof second === "string"
+  ) {
     return {
       endpoint: second,
       options: {
@@ -385,20 +386,13 @@ export async function request(first = "/", second = {}, third = {}) {
 
     stats.success += 1;
 
-    if (options.captureAuth === true && isObject(result)) {
-      commitAuthPayload(result, {
-        endpoint: cleanPath(url),
-        method: finalOptions.method || "GET",
-      });
-    }
-
     return result;
   } catch (error) {
     stats.error += 1;
     stats.lastError = {
       name: error?.name || "Error",
       message: error?.message || String(error),
-      status: error?.status || 0,
+      status: error?.status || error?.statusCode || 0,
     };
 
     throw error;
@@ -494,7 +488,6 @@ export function login(credentials = {}, options = {}) {
     auth: false,
     public: true,
     skipAuth: true,
-    captureAuth: true,
   });
 }
 
@@ -505,7 +498,6 @@ export function me(options = {}) {
     public: false,
     skipAuth: false,
     cache: "no-store",
-    captureAuth: true,
   });
 }
 
@@ -515,7 +507,6 @@ export function refreshSession(body = {}, options = {}) {
     auth: false,
     public: true,
     skipAuth: true,
-    captureAuth: true,
   });
 }
 
@@ -528,7 +519,6 @@ export function logout(options = {}) {
     ...options,
     auth: true,
     public: false,
-    captureAuth: false,
   }).finally(() => {
     clearAuthTokens();
   });
@@ -576,19 +566,24 @@ export function installHttp(AppCore = null, options = {}) {
   apiEngine = null;
 
   if (isObject(appCore)) {
-    appCore.http = Http;
-    appCore.Http = Http;
-    appCore.api = Http;
-    appCore.apiClient = Http;
-
-    if (!isObject(appCore.services)) {
-      appCore.services = {};
+    try {
+      appCore.http = Http;
+      appCore.Http = Http;
+      appCore.api = Http;
+      appCore.apiClient = Http;
+    } catch {
+      // noop
     }
 
-    appCore.services.http = Http;
-    appCore.services.Http = Http;
-    appCore.services.api = Http;
-    appCore.services.apiClient = Http;
+    try {
+      appCore.services = isObject(appCore.services) ? appCore.services : {};
+      appCore.services.http = Http;
+      appCore.services.Http = Http;
+      appCore.services.api = Http;
+      appCore.services.apiClient = Http;
+    } catch {
+      // noop
+    }
 
     try {
       appCore.modules?.register?.("Http", Http);
@@ -613,17 +608,35 @@ export const install = installHttp;
 export function getHttpSnapshot() {
   return {
     version: HTTP_VERSION,
+
     origin: getApiOrigin(),
     installed: Boolean(appCore),
+
     hasRequestEngine: Boolean(requestEngine),
     hasApiEngine: Boolean(apiEngine),
+
     hasAccessToken: Boolean(getAccessToken()),
     hasRefreshToken: Boolean(getRefreshToken()),
+
     stats: {
       ...stats,
       lastUrl: redact(stats.lastUrl),
     },
+
     endpoints: AUTH_ENDPOINTS,
+
+    policy: {
+      facadeOnly: true,
+      noOwnFetch: true,
+      noOwnParser: true,
+      noRetry: true,
+      noAutoRefresh: true,
+      noAuthDiscovery: true,
+      noRouter: true,
+      noToast: true,
+      noStorage: true,
+      mePrivate: true,
+    },
   };
 }
 
@@ -639,11 +652,14 @@ export const Http = {
   },
 
   setOrigin: setApiOrigin,
+
   getApiOrigin,
   setApiOrigin,
 
   buildUrl: buildApiUrl,
   buildApiUrl,
+
+  redactHttpText,
 
   request,
 

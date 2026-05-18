@@ -1,33 +1,29 @@
 /* =========================================================
-   Onion SPA - Toast Timers
-   Archivo: src/ui/toast/timers.js
+   Onion Support - Toast Timers
+   Archivo: /src/ui/toast/timers.js
 
-   TOAST TIMERS · SIMPLE
-   - auto close timer
-   - pause / resume
-   - progress visual
-   - callbacks obsoletos anulados por token
-   - updates/re-render seguros
-   - SSR safe
-   - sin auth/router/http/store global
+   Responsabilidad:
+   - Compat mínima de timers para Toast legacy.
+   - Auto close simple.
+   - Pause / resume simple.
+   - Progress visual opcional si existe progressEl.
+   - Sin imports.
+   - Sin api.js.
+   - Sin constants.js.
+   - Sin helpers.js.
+   - Sin Auth.
+   - Sin Router.
+   - Sin HTTP.
+   - Sin Store global.
+   - Sin CustomEvent.
+   - Sin magia negra.
+   - El Toast real vive en src/ui/toast/index.js.
 ========================================================= */
 
-import { dismissToast } from "./api.js";
+export const TOAST_TIMERS_VERSION = "simple";
 
-import {
-  TOAST_TYPE_LOADING,
-  TOAST_PROGRESS_ANIMATION_NAME,
-  TOAST_CLASS_PAUSED,
-  TOAST_DATA_PAUSED,
-} from "./constants.js";
-
-import {
-  prefersReducedMotion,
-  safeNumber,
-  safeText,
-} from "./helpers.js";
-
-export const TOAST_TIMERS_VERSION = "18.0.0-simple";
+const LOADING_TYPE = "loading";
+const PAUSED_CLASS = "is-paused";
 
 /* =========================================================
    BASICS
@@ -37,254 +33,243 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isFn(value) {
+function isFunction(value) {
   return typeof value === "function";
 }
 
-function nowMs() {
-  try {
-    if (typeof performance !== "undefined" && isFn(performance.now)) return performance.now();
-  } catch {}
-
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
+function text(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
 }
 
-function wallNow() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
+function number(value, fallback = 0) {
+  const output = Number(value);
+  return Number.isFinite(output) ? output : fallback;
 }
 
-function hasTimerId(id) {
+function now() {
+  return Date.now();
+}
+
+function ms(value, fallback = 0) {
+  return Math.max(0, Math.round(number(value, fallback)));
+}
+
+function hasTimer(id = null) {
   return id !== null && id !== undefined;
 }
 
-function normalizeMs(value, fallback = 0) {
-  const output = Number(value);
-  if (!Number.isFinite(output)) return fallback;
-  return Math.max(0, Math.round(output));
-}
-
-function clamp(value, min = 0, max = 1) {
-  const output = Number(value);
-  if (!Number.isFinite(output)) return min;
-  return Math.min(max, Math.max(min, output));
-}
-
 function safeSetTimeout(fn, delay = 0) {
-  if (!isFn(fn)) return null;
-
-  const ms = normalizeMs(delay, 0);
+  if (!isFunction(fn)) return null;
 
   try {
-    if (typeof window !== "undefined" && isFn(window.setTimeout)) return window.setTimeout(fn, ms);
-  } catch {}
-
-  try {
-    return setTimeout(fn, ms);
+    return window.setTimeout(fn, ms(delay, 0));
   } catch {
-    return null;
+    try {
+      return setTimeout(fn, ms(delay, 0));
+    } catch {
+      return null;
+    }
   }
 }
 
 function safeClearTimeout(id = null) {
-  if (!hasTimerId(id)) return false;
+  if (!hasTimer(id)) return false;
 
   try {
-    if (typeof window !== "undefined" && isFn(window.clearTimeout)) {
-      window.clearTimeout(id);
-      return true;
-    }
-  } catch {}
-
-  try {
-    clearTimeout(id);
+    window.clearTimeout(id);
     return true;
   } catch {
-    return false;
-  }
-}
-
-function safeRequestFrame(fn) {
-  if (!isFn(fn)) return null;
-
-  if (isBrowser()) {
     try {
-      if (isFn(window.requestAnimationFrame)) {
-        const id = window.requestAnimationFrame(() => {
-          try {
-            fn();
-          } catch {}
-        });
-
-        return { type: "raf", id };
-      }
-    } catch {}
-  }
-
-  const id = safeSetTimeout(() => {
-    try {
-      fn();
-    } catch {}
-  }, 0);
-
-  return hasTimerId(id) ? { type: "timeout", id } : null;
-}
-
-function safeCancelFrame(frame = null) {
-  if (!frame || !hasTimerId(frame.id)) return false;
-
-  if (frame.type === "raf") {
-    try {
-      window.cancelAnimationFrame?.(frame.id);
+      clearTimeout(id);
       return true;
     } catch {
       return false;
     }
   }
+}
 
-  return safeClearTimeout(frame.id);
+function requestFrame(fn = null) {
+  if (!isFunction(fn)) return null;
+
+  if (!isBrowser()) {
+    try {
+      fn();
+    } catch {
+      // noop
+    }
+
+    return null;
+  }
+
+  try {
+    return window.requestAnimationFrame(fn);
+  } catch {
+    return safeSetTimeout(fn, 0);
+  }
+}
+
+function cancelFrame(id = null) {
+  if (!hasTimer(id) || !isBrowser()) return false;
+
+  try {
+    window.cancelAnimationFrame(id);
+    return true;
+  } catch {
+    return safeClearTimeout(id);
+  }
+}
+
+function prefersReducedMotion() {
+  if (!isBrowser()) return false;
+
+  try {
+    return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
    ITEM STATE
 ========================================================= */
 
-function isDismissed(item) {
+function itemId(item = null) {
+  return text(item?.id, "");
+}
+
+function itemType(item = null) {
+  return text(item?.type, "info").toLowerCase();
+}
+
+function itemDuration(item = null) {
+  return ms(item?.duration, 0);
+}
+
+function itemRemaining(item = null) {
+  const remaining = ms(item?.remaining, 0);
+  return remaining > 0 ? remaining : itemDuration(item);
+}
+
+function isDismissed(item = null) {
   return Boolean(!item || item.dismissed === true);
 }
 
-function isPersistent(item) {
-  return normalizeMs(item?.duration, 0) <= 0;
+function isLoading(item = null) {
+  return itemType(item) === LOADING_TYPE;
 }
 
-function isLoadingToast(item) {
-  return safeText(item?.type, "").toLowerCase() === TOAST_TYPE_LOADING;
+function isPersistent(item = null) {
+  return itemDuration(item) <= 0;
 }
 
-function getDuration(item) {
-  return normalizeMs(item?.duration, 0);
-}
-
-function getRemaining(item) {
-  if (!item) return 0;
-
-  const remaining = normalizeMs(item.remaining, 0);
-  return remaining > 0 ? remaining : getDuration(item);
-}
-
-function isAutoCloseable(item) {
+function isAutoCloseable(item = null) {
   return Boolean(
     item &&
+      itemId(item) &&
       !isDismissed(item) &&
       !isPersistent(item) &&
-      !isLoadingToast(item) &&
-      safeText(item.id, "")
+      !isLoading(item)
   );
 }
 
-/* =========================================================
-   TOKENS
-========================================================= */
-
-function createToken(id = "toast") {
-  return `${safeText(id, "toast")}:${wallNow()}:${Math.random().toString(36).slice(2)}`;
+function token(id = "toast") {
+  return `${text(id, "toast")}:${now()}:${Math.random().toString(36).slice(2)}`;
 }
 
-function setTimerToken(item) {
-  if (!item) return "";
+function finishToast(item = null, reason = "timeout") {
+  if (!item || item.dismissed === true) return false;
 
-  const token = createToken(item.id);
-  item.timerToken = token;
-  return token;
-}
-
-function sameTimerToken(item, token = "") {
-  return Boolean(item && token && item.timerToken === token);
-}
-
-function setProgressToken(item) {
-  if (!item) return "";
-
-  const token = createToken(`${item.id}:progress`);
-  item.progressToken = token;
-  return token;
-}
-
-function sameProgressToken(item, token = "") {
-  return Boolean(item && token && item.progressToken === token);
-}
-
-function invalidateTimer(item) {
-  if (!item) return false;
-
-  item.timerToken = "";
-  item.timeoutId = null;
+  item.dismissed = true;
+  item.dismissReason = reason;
+  item.dismissedAt = now();
+  item.remaining = 0;
   item.startedAt = 0;
+  item.timeoutId = null;
+  item.timerToken = "";
+  item.paused = false;
+  item.timerPaused = false;
 
-  return true;
-}
+  setPausedVisual(item, false);
+  hideToastProgress(item);
 
-function invalidateProgress(item) {
-  if (!item) return false;
+  try {
+    if (isFunction(item.onTimeout)) {
+      item.onTimeout(item);
+      return true;
+    }
 
-  if (item.progressFrameId) safeCancelFrame(item.progressFrameId);
+    if (isFunction(item.onDismiss)) {
+      item.onDismiss(item, reason);
+      return true;
+    }
 
-  item.progressFrameId = null;
-  item.progressToken = "";
+    if (isFunction(item.dismiss)) {
+      item.dismiss(item.id, { reason });
+      return true;
+    }
+  } catch {
+    // noop
+  }
 
   return true;
 }
 
 /* =========================================================
-   PROGRESS HELPERS
+   VISUAL
 ========================================================= */
 
-function progressElement(item) {
+function progressElement(item = null) {
   return item?.progressEl || null;
 }
 
-function canUseProgress(item) {
-  return Boolean(isBrowser() && progressElement(item));
+function progressRatio(item = null, remainingOverride = null) {
+  const duration = itemDuration(item);
+
+  if (duration <= 0) return 1;
+
+  const remaining = remainingOverride === null || remainingOverride === undefined
+    ? itemRemaining(item)
+    : ms(remainingOverride, duration);
+
+  return Math.max(0, Math.min(1, remaining / duration));
 }
 
-function progressRatio(item, remainingOverride = null) {
-  const total = getDuration(item);
-  if (total <= 0) return 1;
-
-  const remaining = remainingOverride !== null && remainingOverride !== undefined
-    ? normalizeMs(remainingOverride, total)
-    : getRemaining(item);
-
-  return clamp(remaining / total, 0, 1);
-}
-
-function setPausedVisual(item, paused = false) {
+function setPausedVisual(item = null, paused = false) {
   if (!item) return false;
 
-  const enabled = Boolean(paused);
+  const value = Boolean(paused);
 
-  item.paused = enabled;
-  item.timerPaused = enabled;
-
-  try {
-    item.toastEl?.classList?.toggle?.(TOAST_CLASS_PAUSED, enabled);
-  } catch {}
+  item.paused = value;
+  item.timerPaused = value;
 
   try {
-    item.progressEl?.classList?.toggle?.(TOAST_CLASS_PAUSED, enabled);
-  } catch {}
+    item.toastEl?.classList?.toggle?.(PAUSED_CLASS, value);
+  } catch {
+    // noop
+  }
 
   try {
-    if (enabled) item.toastEl?.setAttribute?.(TOAST_DATA_PAUSED, "true");
-    else item.toastEl?.removeAttribute?.(TOAST_DATA_PAUSED);
-  } catch {}
+    item.progressEl?.classList?.toggle?.(PAUSED_CLASS, value);
+  } catch {
+    // noop
+  }
+
+  try {
+    if (value) item.toastEl?.setAttribute?.("data-toast-paused", "true");
+    else item.toastEl?.removeAttribute?.("data-toast-paused");
+  } catch {
+    // noop
+  }
+
+  return true;
+}
+
+function clearProgressFrame(item = null) {
+  if (!item?.progressFrameId) return false;
+
+  cancelFrame(item.progressFrameId);
+  item.progressFrameId = null;
 
   return true;
 }
@@ -293,17 +278,22 @@ function setPausedVisual(item, paused = false) {
    CLEAR
 ========================================================= */
 
-export function clearToastTimer(item) {
+export function clearToastTimer(item = null) {
   if (!item) return false;
 
-  const hadTimer = hasTimerId(item.timeoutId);
-  if (hadTimer) safeClearTimeout(item.timeoutId);
+  const hadTimer = hasTimer(item.timeoutId);
 
-  invalidateTimer(item);
-  invalidateProgress(item);
+  if (hadTimer) {
+    safeClearTimeout(item.timeoutId);
+  }
 
-  item.timerPaused = false;
+  clearProgressFrame(item);
+
+  item.timeoutId = null;
+  item.timerToken = "";
+  item.startedAt = 0;
   item.paused = false;
+  item.timerPaused = false;
 
   setPausedVisual(item, false);
 
@@ -314,11 +304,12 @@ export function clearToastTimer(item) {
    PROGRESS
 ========================================================= */
 
-export function resetToastProgress(item) {
+export function resetToastProgress(item = null) {
   const el = progressElement(item);
+
   if (!el) return false;
 
-  invalidateProgress(item);
+  clearProgressFrame(item);
 
   try {
     el.style.display = "";
@@ -327,21 +318,19 @@ export function resetToastProgress(item) {
     el.style.transition = "none";
     el.style.transform = "scaleX(1)";
     el.style.transformOrigin = "left center";
-
-    delete el.dataset.toastProgressAnimation;
     delete el.dataset.toastProgressDuration;
-
     return true;
   } catch {
     return false;
   }
 }
 
-export function hideToastProgress(item) {
+export function hideToastProgress(item = null) {
   const el = progressElement(item);
+
   if (!el) return false;
 
-  invalidateProgress(item);
+  clearProgressFrame(item);
 
   try {
     el.style.display = "none";
@@ -350,23 +339,21 @@ export function hideToastProgress(item) {
     el.style.transition = "none";
     el.style.transform = "scaleX(1)";
     el.style.transformOrigin = "left center";
-
-    delete el.dataset.toastProgressAnimation;
     delete el.dataset.toastProgressDuration;
-
     return true;
   } catch {
     return false;
   }
 }
 
-export function freezeToastProgress(item) {
-  if (!canUseProgress(item)) return false;
-
+export function freezeToastProgress(item = null) {
   const el = progressElement(item);
-  const ratio = progressRatio(item);
 
-  invalidateProgress(item);
+  if (!el) return false;
+
+  clearProgressFrame(item);
+
+  const ratio = progressRatio(item);
 
   try {
     el.style.display = "";
@@ -375,40 +362,42 @@ export function freezeToastProgress(item) {
     el.style.transition = "none";
     el.style.transform = `scaleX(${ratio})`;
     el.style.transformOrigin = "left center";
-    el.dataset.toastProgressAnimation = TOAST_PROGRESS_ANIMATION_NAME;
-    el.dataset.toastProgressDuration = String(getRemaining(item));
+    el.dataset.toastProgressDuration = String(itemRemaining(item));
 
     setPausedVisual(item, true);
+
     return true;
   } catch {
     return false;
   }
 }
 
-export function runToastProgress(item, duration) {
+export function runToastProgress(item = null, duration = 0) {
   const el = progressElement(item);
+
   if (!el) return false;
 
-  const safeDuration = normalizeMs(duration, 0);
+  const safeDuration = ms(duration, 0);
 
-  if (safeDuration <= 0 || isPersistent(item) || isLoadingToast(item) || isDismissed(item)) {
+  if (
+    safeDuration <= 0 ||
+    isPersistent(item) ||
+    isLoading(item) ||
+    isDismissed(item)
+  ) {
     hideToastProgress(item);
     return true;
   }
 
-  invalidateProgress(item);
-
-  const ratio = progressRatio(item, safeDuration);
-  const token = setProgressToken(item);
+  clearProgressFrame(item);
 
   try {
     el.style.display = "";
     el.style.opacity = "";
     el.style.animation = "none";
     el.style.transition = "none";
-    el.style.transform = `scaleX(${ratio})`;
+    el.style.transform = `scaleX(${progressRatio(item, safeDuration)})`;
     el.style.transformOrigin = "left center";
-    el.dataset.toastProgressAnimation = TOAST_PROGRESS_ANIMATION_NAME;
     el.dataset.toastProgressDuration = String(safeDuration);
   } catch {
     return false;
@@ -416,23 +405,18 @@ export function runToastProgress(item, duration) {
 
   if (prefersReducedMotion()) return true;
 
-  item.progressFrameId = safeRequestFrame(() => {
+  item.progressFrameId = requestFrame(() => {
     item.progressFrameId = null;
 
-    if (
-      isDismissed(item) ||
-      !sameProgressToken(item, token) ||
-      item.progressEl !== el ||
-      !el.isConnected
-    ) {
-      return;
-    }
+    if (isDismissed(item) || progressElement(item) !== el) return;
 
     try {
       void el.offsetWidth;
       el.style.transition = `transform ${safeDuration}ms linear`;
       el.style.transform = "scaleX(0)";
-    } catch {}
+    } catch {
+      // noop
+    }
   });
 
   return true;
@@ -442,88 +426,93 @@ export function runToastProgress(item, duration) {
    START / PAUSE / RESUME
 ========================================================= */
 
-export function startToastTimer(item) {
+export function startToastTimer(item = null) {
   if (!isAutoCloseable(item)) return false;
 
-  const id = safeText(item.id, "");
-  const remaining = Math.max(0, getRemaining(item));
+  const id = itemId(item);
+  const remaining = Math.max(0, itemRemaining(item));
 
   clearToastTimer(item);
 
   if (remaining <= 0) {
-    dismissToast(id, { reason: "timeout", source: "toast-timer" });
+    finishToast(item, "timeout");
     return false;
   }
 
-  const token = setTimerToken(item);
+  const timerToken = token(id);
 
+  item.timerToken = timerToken;
   item.remaining = remaining;
-  item.startedAt = nowMs();
-  item.timerPaused = false;
+  item.startedAt = now();
   item.paused = false;
+  item.timerPaused = false;
 
   setPausedVisual(item, false);
 
   item.timeoutId = safeSetTimeout(() => {
-    if (isDismissed(item) || item.id !== id || !sameTimerToken(item, token)) return;
+    if (
+      isDismissed(item) ||
+      itemId(item) !== id ||
+      item.timerToken !== timerToken
+    ) {
+      return;
+    }
 
-    item.remaining = 0;
-    item.startedAt = 0;
-    item.timeoutId = null;
-    item.timerToken = "";
-    item.timerPaused = false;
-    item.paused = false;
-
-    dismissToast(id, { reason: "timeout", source: "toast-timer" });
+    finishToast(item, "timeout");
   }, remaining);
 
-  if (!hasTimerId(item.timeoutId)) {
-    invalidateTimer(item);
+  if (!hasTimer(item.timeoutId)) {
+    item.timerToken = "";
+    item.startedAt = 0;
     return false;
   }
 
   runToastProgress(item, remaining);
+
   return true;
 }
 
-export function pauseToastTimer(item) {
+export function pauseToastTimer(item = null) {
   if (!isAutoCloseable(item)) return false;
-  if (!hasTimerId(item.timeoutId) || normalizeMs(item.startedAt, 0) <= 0) return false;
+  if (!hasTimer(item.timeoutId) || ms(item.startedAt, 0) <= 0) return false;
 
-  const elapsed = Math.max(0, nowMs() - Number(item.startedAt));
-  const remaining = Math.max(0, getRemaining(item) - elapsed);
+  const elapsed = Math.max(0, now() - number(item.startedAt, 0));
+  const remaining = Math.max(0, itemRemaining(item) - elapsed);
 
   safeClearTimeout(item.timeoutId);
 
   item.timeoutId = null;
+  item.timerToken = "";
   item.startedAt = 0;
   item.remaining = remaining;
-  item.timerToken = "";
 
   if (remaining <= 0) {
-    dismissToast(item.id, { reason: "timeout", source: "toast-timer" });
+    finishToast(item, "timeout");
     return false;
   }
 
   freezeToastProgress(item);
+
   return true;
 }
 
-export function resumeToastTimer(item) {
+export function resumeToastTimer(item = null) {
   if (!isAutoCloseable(item)) return false;
 
-  if (hasTimerId(item.timeoutId) && normalizeMs(item.startedAt, 0) > 0) return true;
+  if (hasTimer(item.timeoutId) && ms(item.startedAt, 0) > 0) {
+    return true;
+  }
 
-  const remaining = getRemaining(item);
+  const remaining = itemRemaining(item);
 
   if (remaining <= 0) {
-    dismissToast(item.id, { reason: "timeout", source: "toast-timer" });
+    finishToast(item, "timeout");
     return false;
   }
 
   item.remaining = remaining;
-  item.timerPaused = false;
   item.paused = false;
+  item.timerPaused = false;
 
   setPausedVisual(item, false);
 
@@ -534,40 +523,67 @@ export function resumeToastTimer(item) {
    SNAPSHOT
 ========================================================= */
 
-export function getToastTimerSnapshot(item) {
-  if (!item) return { exists: false };
+export function getToastTimerSnapshot(item = null) {
+  if (!item) {
+    return {
+      exists: false,
+    };
+  }
 
   return {
     exists: true,
+
     id: item.id || null,
     type: item.type || null,
+
     dismissed: Boolean(item.dismissed),
     persistent: isPersistent(item),
-    loading: isLoadingToast(item),
+    loading: isLoading(item),
     paused: Boolean(item.paused || item.timerPaused),
-    duration: getDuration(item),
-    remaining: getRemaining(item),
-    startedAt: safeNumber(item.startedAt, 0),
-    hasTimer: hasTimerId(item.timeoutId),
+
+    duration: itemDuration(item),
+    remaining: itemRemaining(item),
+    startedAt: number(item.startedAt, 0),
+
+    hasTimer: hasTimer(item.timeoutId),
     hasTimerToken: Boolean(item.timerToken),
+
     hasProgress: Boolean(item.progressEl),
     hasProgressFrame: Boolean(item.progressFrameId),
-    hasProgressToken: Boolean(item.progressToken),
     progressConnected: Boolean(item.progressEl?.isConnected),
     progressRatio: progressRatio(item),
+
     reducedMotion: prefersReducedMotion(),
+
+    policy: {
+      compatOnly: true,
+      noImports: true,
+      noApiImport: true,
+      noStore: true,
+      noAuth: true,
+      noRouter: true,
+      noHttp: true,
+    },
   };
 }
 
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
 export default {
   TOAST_TIMERS_VERSION,
+
   clearToastTimer,
+
   resetToastProgress,
   hideToastProgress,
   freezeToastProgress,
   runToastProgress,
+
   startToastTimer,
   pauseToastTimer,
   resumeToastTimer,
+
   getToastTimerSnapshot,
 };

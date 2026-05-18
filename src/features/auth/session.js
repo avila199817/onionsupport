@@ -9,6 +9,8 @@
    - User sin token: authenticated false.
    - User inválido si disabled/deleted.
    - Roles únicos: admin / user.
+   - Leer token persistido para soportar reload.
+   - Persistir token/session auxiliar al aplicar sesión.
    - Conservar slug real del usuario si existe.
    - Exponer homePath: /@slug si el usuario trae slug real.
    - Sin fetch.
@@ -16,14 +18,21 @@
    - Sin refresh HTTP.
    - Sin Router.
    - Sin Toast.
-   - Sin storage paralelo.
+   - Sin storage paralelo fuera de storage.js.
    - Sin eventos globales.
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
-export const AUTH_SESSION_VERSION = "auth.session.slug.v1";
+import {
+  clearAuthStorage,
+  getStoredAccessToken,
+  getStoredSessionContext,
+  persistAuthStorage,
+} from "./storage.js";
+
+export const AUTH_SESSION_VERSION = "auth.session.storage.v1";
 
 const SOURCE = "auth.session";
 
@@ -40,10 +49,6 @@ const VALID_ROLES = Object.freeze(["admin", "user"]);
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function isFn(value) {
-  return typeof value === "function";
 }
 
 function text(value = "", fallback = "") {
@@ -103,7 +108,7 @@ function commitState(patch = {}, options = {}) {
   };
 
   try {
-    if (isFn(AppCore?.setState)) {
+    if (typeof AppCore?.setState === "function") {
       AppCore.setState(cleanPatch, opts);
       return readState();
     }
@@ -112,7 +117,7 @@ function commitState(patch = {}, options = {}) {
   }
 
   try {
-    if (isFn(AppCore?.patchState)) {
+    if (typeof AppCore?.patchState === "function") {
       AppCore.patchState(cleanPatch, opts);
       return readState();
     }
@@ -404,6 +409,40 @@ function readSessionFromPayload(payload = {}, user = null) {
 }
 
 /* =========================================================
+   STORAGE DERIVATION
+========================================================= */
+
+function storedToken() {
+  try {
+    return cleanToken(getStoredAccessToken?.() || "");
+  } catch {
+    return "";
+  }
+}
+
+function storedSession() {
+  try {
+    const session = getStoredSessionContext?.();
+
+    if (!isObject(session)) return null;
+
+    const sessionId = text(session.sessionId || session.session_id || session.id, "");
+    const userId = text(session.userId || session.user_id || session.sessionUserId || session.session_user_id, "");
+
+    if (!sessionId && !userId) return null;
+
+    return {
+      sessionId: sessionId || null,
+      id: sessionId || null,
+      userId: userId || null,
+      sessionUserId: userId || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/* =========================================================
    STATE DERIVATION
 ========================================================= */
 
@@ -414,6 +453,7 @@ function bestStateToken() {
     state.token ||
       state.accessToken ||
       state.access_token ||
+      storedToken() ||
       ""
   );
 }
@@ -421,6 +461,11 @@ function bestStateToken() {
 function bestStateUser() {
   const state = readState();
 
+  /*
+    No se fabrica usuario desde storage.
+    El reload se restaura así:
+      token persistido -> restore.js -> /me -> user canónico.
+  */
   return (
     normalizeUser(state.user) ||
     normalizeUser(state.currentUser) ||
@@ -449,10 +494,19 @@ function bestStateSession(user = bestStateUser()) {
   const session =
     readSessionFromPayload(state.session || {}, user) ||
     readSessionFromPayload(state.sessionData || {}, user) ||
+    storedSession() ||
     null;
+
+  if (!session) return null;
+
+  if (!user) return session;
 
   return sameSessionUser(session, user) ? session : null;
 }
+
+/* =========================================================
+   STATE PATCH
+========================================================= */
 
 function buildStatePatch({ token = "", user = null, session = null } = {}) {
   const safeToken = cleanToken(token);
@@ -516,6 +570,35 @@ function buildStatePatch({ token = "", user = null, session = null } = {}) {
     lastAuthSyncAt: nowIso(),
   };
 }
+
+function persistPatch({ token = "", user = null, session = null } = {}) {
+  const safeToken = cleanToken(token);
+
+  if (!safeToken) return false;
+
+  try {
+    persistAuthStorage(
+      {
+        token: safeToken,
+        accessToken: safeToken,
+        access_token: safeToken,
+        user: normalizeUser(user),
+        session,
+      },
+      {
+        source: SOURCE,
+      }
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   SNAPSHOT
+========================================================= */
 
 function currentSnapshot(extra = {}) {
   const token = bestStateToken();
@@ -637,6 +720,18 @@ export function applySession(payload = {}, options = {}) {
     forceUnauthenticated: !patch.authenticated,
   });
 
+  /*
+    Persistimos sólo token/contexto auxiliar.
+    No autenticamos desde storage; restore usa /me para recuperar user canónico.
+  */
+  if (patch.hasToken) {
+    persistPatch({
+      token,
+      user,
+      session,
+    });
+  }
+
   syncUserUI();
 
   return buildSessionSnapshot({
@@ -695,6 +790,14 @@ export function clearSessionLocal(options = {}) {
     }
   );
 
+  if (options.keepStorage !== true) {
+    try {
+      clearAuthStorage();
+    } catch {
+      // noop
+    }
+  }
+
   syncUserUI();
 
   return true;
@@ -739,6 +842,10 @@ export function buildSessionSnapshot(extra = {}) {
 
 export function isAuthenticated() {
   return Boolean(bestStateToken() && bestStateUser());
+}
+
+export function hasToken() {
+  return Boolean(bestStateToken());
 }
 
 export function getCurrentUser() {
@@ -844,6 +951,7 @@ export function exposeSessionDebugApi() {
     getSnapshot: getSessionDebugSnapshot,
 
     isAuthenticated,
+    hasToken,
 
     getCurrentUser,
     getCurrentToken,
@@ -883,6 +991,7 @@ export default {
   buildSessionSnapshot,
 
   isAuthenticated,
+  hasToken,
 
   getCurrentUser,
   getCurrentToken,

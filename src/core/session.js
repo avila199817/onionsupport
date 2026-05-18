@@ -3,17 +3,23 @@
    Archivo: /src/core/session.js
 
    Responsabilidad:
-   - Compat mínima de sesión.
+   - Compat mínima de sesión para Core.
+   - Estado en memoria.
    - Auth estricta: token + user usable.
+   - Token sin user = hasToken, pero NO authenticated.
+   - User sin token = NO authenticated.
    - User inválido sólo si disabled.
    - Roles únicos: admin / user.
-   - Theme: system.
+   - Theme simple.
    - Idiomas: ca / es / en.
    - Sin imports.
-   - Sin storage complejo.
-   - Sin preferencias pesadas.
+   - Sin storage.
+   - Sin HTTP.
+   - Sin Router.
+   - Sin Toast.
    - Sin rutas legacy.
    - Sin 2FA/MFA/OTP.
+   - Sin magia negra.
 ========================================================= */
 
 export const SESSION_VERSION = "simple";
@@ -36,6 +42,13 @@ export const SESSION_EVENTS = Object.freeze({
 const DEFAULT_ROUTE = "/";
 const DEFAULT_LANG = "en";
 const DEFAULT_THEME = "system";
+
+const VALID_LANGS = new Set(["ca", "es", "en"]);
+const VALID_THEMES = new Set(["dark", "light", "system"]);
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -90,15 +103,22 @@ function commitState({ state, setState, patch = {}, options = {} } = {}) {
     try {
       setState(patch, options);
     } catch {
-      // Compat mínima.
+      // Compat mínima: nunca rompe.
     }
   }
 
   return true;
 }
 
+/* =========================================================
+   PATHS
+========================================================= */
+
 function normalizePublicPath(value = DEFAULT_ROUTE) {
   let path = text(value, DEFAULT_ROUTE);
+
+  if (path.startsWith("#/")) path = path.slice(1);
+  if (path.startsWith("#!")) path = path.replace(/^#!\/?/, "/");
 
   if (!path.startsWith("/")) path = `/${path}`;
 
@@ -106,11 +126,7 @@ function normalizePublicPath(value = DEFAULT_ROUTE) {
 }
 
 function normalizeCanonicalPath(value = DEFAULT_ROUTE) {
-  let path = normalizePublicPath(value).split("?")[0].split("#")[0];
-
-  if (path.startsWith("/@")) {
-    path = `/${path.split("/").slice(2).join("/")}`;
-  }
+  let path = normalizePublicPath(value).split("?")[0].split("#")[0] || DEFAULT_ROUTE;
 
   if (path.length > 1) {
     path = path.replace(/\/+$/g, "");
@@ -118,6 +134,10 @@ function normalizeCanonicalPath(value = DEFAULT_ROUTE) {
 
   return path || DEFAULT_ROUTE;
 }
+
+/* =========================================================
+   AUTH NORMALIZATION
+========================================================= */
 
 function stripBearer(token = "") {
   return text(token, "").replace(/^Bearer\s+/i, "");
@@ -129,9 +149,19 @@ function validToken(token = "") {
   if (!clean) return false;
   if (/\s/.test(clean)) return false;
 
-  return !["null", "undefined", "false", "true", "[object object]"].includes(
-    clean.toLowerCase()
-  );
+  return ![
+    "null",
+    "undefined",
+    "false",
+    "true",
+    "[object object]",
+    "{}",
+    "[]",
+  ].includes(clean.toLowerCase());
+}
+
+function normalizeRole(value = "") {
+  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
 }
 
 function userDisabled(user = null) {
@@ -141,10 +171,6 @@ function userDisabled(user = null) {
     user.disabled === true ||
     String(user.status || "").toLowerCase() === "disabled"
   );
-}
-
-function normalizeRole(value = "") {
-  return String(value).toLowerCase() === "admin" ? "admin" : "user";
 }
 
 function normalizeUser(user = null) {
@@ -254,6 +280,10 @@ function authPatch({ token = null, user = null } = {}) {
   };
 }
 
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
 function sessionSnapshot(state = {}, cause = "session") {
   return {
     version: SESSION_VERSION,
@@ -286,79 +316,6 @@ function sessionSnapshot(state = {}, cause = "session") {
     theme: state.theme || DEFAULT_THEME,
     lang: state.lang || DEFAULT_LANG,
   };
-}
-
-function storageGet(storage, key, fallback = null) {
-  try {
-    if (isFunction(storage?.get)) return storage.get(key, fallback);
-    if (isFunction(storage?.getRaw)) return storage.getRaw(key, fallback);
-  } catch {
-    return fallback;
-  }
-
-  return fallback;
-}
-
-function storageSet(storage, key, value) {
-  try {
-    if (isFunction(storage?.set)) {
-      storage.set(key, value);
-      return true;
-    }
-
-    if (isFunction(storage?.setRaw)) {
-      storage.setRaw(key, value);
-      return true;
-    }
-  } catch {
-    return false;
-  }
-
-  return false;
-}
-
-function storageRemove(storage, key) {
-  try {
-    if (isFunction(storage?.remove)) {
-      storage.remove(key);
-      return true;
-    }
-
-    if (isFunction(storage?.delete)) {
-      storage.delete(key);
-      return true;
-    }
-
-    if (isFunction(storage?.del)) {
-      storage.del(key);
-      return true;
-    }
-  } catch {
-    return false;
-  }
-
-  return false;
-}
-
-function clearAuthStorage(storage) {
-  for (const key of [
-    "token",
-    "access_token",
-    "accessToken",
-    "refresh_token",
-    "refreshToken",
-    "user",
-    "current_user",
-    "currentUser",
-    "session",
-    "session_data",
-    "sessionId",
-    "session_id",
-    "role",
-    "roles",
-  ]) {
-    storageRemove(storage, key);
-  }
 }
 
 /* =========================================================
@@ -426,7 +383,7 @@ export function setPublicPath({ state, setState, events, path = DEFAULT_ROUTE, o
    USER / TOKEN
 ========================================================= */
 
-export function setUser({ state, storage, events, setState, user = null, options = {} } = {}) {
+export function setUser({ state, events, setState, user = null, options = {} } = {}) {
   const patch = authPatch({
     token: state?.token,
     user,
@@ -443,21 +400,13 @@ export function setUser({ state, storage, events, setState, user = null, options
     },
   });
 
-  if (patch.authenticated) {
-    storageSet(storage, "user", patch.user);
-    storageSet(storage, "current_user", patch.user);
-  } else {
-    storageRemove(storage, "user");
-    storageRemove(storage, "current_user");
-  }
-
   emit(events, SESSION_EVENTS.userChange, sessionSnapshot(state, "setUser"));
   emit(events, SESSION_EVENTS.authChange, sessionSnapshot(state, "setUser"));
 
   return state?.user || null;
 }
 
-export function setToken({ state, storage, events, setState, token = null, options = {} } = {}) {
+export function setToken({ state, events, setState, token = null, options = {} } = {}) {
   const patch = authPatch({
     token,
     user: state?.user,
@@ -474,14 +423,6 @@ export function setToken({ state, storage, events, setState, token = null, optio
     },
   });
 
-  if (patch.hasToken) {
-    storageSet(storage, "token", patch.token);
-    storageSet(storage, "access_token", patch.token);
-  } else {
-    storageRemove(storage, "token");
-    storageRemove(storage, "access_token");
-  }
-
   emit(events, SESSION_EVENTS.tokenChange, {
     hasToken: Boolean(state?.hasToken),
     authenticated: Boolean(state?.authenticated),
@@ -497,7 +438,7 @@ export function setToken({ state, storage, events, setState, token = null, optio
 ========================================================= */
 
 export function applySession(input = {}) {
-  const { state, storage, events, setState } = input || {};
+  const { state, events, setState } = input || {};
 
   const token =
     input.token ||
@@ -543,21 +484,6 @@ export function applySession(input = {}) {
     },
   });
 
-  if (patch.hasToken) {
-    storageSet(storage, "token", patch.token);
-    storageSet(storage, "access_token", patch.token);
-  }
-
-  if (patch.authenticated) {
-    storageSet(storage, "user", patch.user);
-    storageSet(storage, "current_user", patch.user);
-  }
-
-  if (!patch.authenticated) {
-    storageRemove(storage, "user");
-    storageRemove(storage, "current_user");
-  }
-
   const snapshot = sessionSnapshot(state, "applySession");
 
   emit(events, SESSION_EVENTS.sessionApplied, snapshot);
@@ -566,9 +492,7 @@ export function applySession(input = {}) {
   return snapshot;
 }
 
-export function clearSession({ state, storage, events, setState, options = {} } = {}) {
-  clearAuthStorage(storage);
-
+export function clearSession({ state, events, setState, options = {} } = {}) {
   const patch = authPatch({
     token: null,
     user: null,
@@ -606,14 +530,17 @@ export function loadPreferences({ state, setState } = {}) {
     ? document.documentElement.dataset.theme || DEFAULT_THEME
     : DEFAULT_THEME;
 
+  const cleanLang = VALID_LANGS.has(lang) ? lang : DEFAULT_LANG;
+  const cleanTheme = VALID_THEMES.has(theme) ? theme : DEFAULT_THEME;
+
   commitState({
     state,
     setState,
     patch: {
-      lang: ["ca", "es", "en"].includes(lang) ? lang : DEFAULT_LANG,
-      language: ["ca", "es", "en"].includes(lang) ? lang : DEFAULT_LANG,
-      locale: ["ca", "es", "en"].includes(lang) ? lang : DEFAULT_LANG,
-      theme: ["dark", "light", "system"].includes(theme) ? theme : DEFAULT_THEME,
+      lang: cleanLang,
+      language: cleanLang,
+      locale: cleanLang,
+      theme: cleanTheme,
     },
     options: {
       source: "core-session:loadPreferences",
@@ -621,25 +548,15 @@ export function loadPreferences({ state, setState } = {}) {
   });
 
   return {
-    lang: state?.lang || DEFAULT_LANG,
-    theme: state?.theme || DEFAULT_THEME,
+    lang: state?.lang || cleanLang,
+    theme: state?.theme || cleanTheme,
   };
 }
 
-export function loadSession({ state, storage, events, setState } = {}) {
-  const token =
-    storageGet(storage, "token") ||
-    storageGet(storage, "access_token") ||
-    null;
-
-  const user =
-    storageGet(storage, "user") ||
-    storageGet(storage, "current_user") ||
-    null;
-
+export function loadSession({ state, events, setState } = {}) {
   const patch = authPatch({
-    token,
-    user,
+    token: state?.token,
+    user: state?.user,
   });
 
   commitState({
@@ -655,6 +572,7 @@ export function loadSession({ state, storage, events, setState } = {}) {
   const snapshot = sessionSnapshot(state, "loadSession");
 
   emit(events, SESSION_EVENTS.sessionLoaded, snapshot);
+  emit(events, SESSION_EVENTS.authChange, snapshot);
 
   return state;
 }
@@ -667,20 +585,38 @@ export function syncThemeMetaColor({ theme = DEFAULT_THEME } = {}) {
   if (!isBrowser()) return false;
 
   const color = theme === "light" ? "#ffffff" : "#0a0c11";
-  const meta = document.querySelector("meta[name='theme-color']:not([media])");
 
-  if (!meta) return false;
+  let changed = false;
 
-  meta.setAttribute("content", color);
-  return true;
+  try {
+    document
+      .querySelectorAll("meta[name='theme-color']")
+      .forEach((meta) => {
+        const media = meta.getAttribute("media") || "";
+
+        if (!media) {
+          meta.setAttribute("content", color);
+          changed = true;
+        }
+      });
+  } catch {
+    return false;
+  }
+
+  return changed;
 }
 
 export function setTheme({ setState, events, theme = DEFAULT_THEME } = {}) {
-  const value = ["dark", "light", "system"].includes(theme)
-    ? theme
-    : DEFAULT_THEME;
+  const value = VALID_THEMES.has(theme) ? theme : DEFAULT_THEME;
 
-  setState?.({ theme: value }, { source: "core-session:setTheme" });
+  setState?.(
+    {
+      theme: value,
+    },
+    {
+      source: "core-session:setTheme",
+    }
+  );
 
   if (isBrowser()) {
     document.documentElement.dataset.theme = value;
@@ -696,7 +632,7 @@ export function setTheme({ setState, events, theme = DEFAULT_THEME } = {}) {
 }
 
 export function setLang({ setState, events, lang = DEFAULT_LANG } = {}) {
-  const value = ["ca", "es", "en"].includes(lang) ? lang : DEFAULT_LANG;
+  const value = VALID_LANGS.has(lang) ? lang : DEFAULT_LANG;
 
   setState?.(
     {

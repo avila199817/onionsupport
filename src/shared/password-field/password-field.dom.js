@@ -14,10 +14,11 @@
    - Sin innerHTML.
    - Sin CapsLock.
    - Sin eventos globales.
+   - Sin clases globales peligrosas como is-hidden.
    - Sin recrear SVGs desde JS.
 ========================================================= */
 
-export const PASSWORD_FIELD_DOM_VERSION = "minimal-4";
+export const PASSWORD_FIELD_DOM_VERSION = "minimal-5";
 
 const FIELD_SELECTOR = "[data-password-field]";
 const WRAPPER_SELECTOR = "[data-password-wrapper], .password-wrapper, .login-password-wrapper, .password-reset-password-wrapper";
@@ -232,13 +233,18 @@ function resolveParts(node) {
       root: null,
       input: null,
       toggle: null,
+      icon: null,
     };
   }
 
+  const input = findInput(root);
+  const toggle = findToggle(root);
+
   return {
     root,
-    input: findInput(root),
-    toggle: findToggle(root),
+    input,
+    toggle,
+    icon: findIcon(toggle),
   };
 }
 
@@ -309,29 +315,25 @@ function setInputType(input, visible = false) {
   return true;
 }
 
-function syncIcon(toggle, visible = false) {
-  const icon = findIcon(toggle);
+function syncIcon(icon, visible = false) {
   if (!isElement(icon)) return false;
-
-  const active = Boolean(visible);
-
-  setData(icon, "state", active ? "visible" : "hidden");
-  toggleClass(icon, "is-visible", active);
-  toggleClass(icon, "is-hidden", !active);
 
   const eye = qs(icon, ".password-eye-icon");
   const eyeOff = qs(icon, ".password-eye-off-icon");
 
+  setData(icon, "state", visible ? "visible" : "hidden");
+  toggleClass(icon, "is-password-visible", visible);
+
   try {
-    if (eye) eye.hidden = active;
-    if (eyeOff) eyeOff.hidden = !active;
+    if (eye) eye.hidden = Boolean(visible);
+    if (eyeOff) eyeOff.hidden = !visible;
   } catch {}
 
   return true;
 }
 
 function syncState(parts = {}) {
-  const { root, input, toggle } = parts;
+  const { root, input, toggle, icon } = parts;
   const visible = isVisible(input);
 
   setData(root, VISIBLE_DATA_KEY, visible ? "true" : "false");
@@ -347,10 +349,9 @@ function syncState(parts = {}) {
 
   toggleClass(root, "is-password-visible", visible);
   toggleClass(input, "is-password-visible", visible);
-  toggleClass(toggle, "is-visible", visible);
-  toggleClass(toggle, "is-hidden", !visible);
+  toggleClass(toggle, "is-password-visible", visible);
 
-  syncIcon(toggle, visible);
+  syncIcon(icon || findIcon(toggle), visible);
 
   return visible;
 }
@@ -449,6 +450,7 @@ export function bindPasswordField(fieldRoot) {
     root,
     input,
     toggle,
+    icon: parts.icon || null,
 
     get destroyed() {
       return destroyed;
@@ -500,8 +502,7 @@ export function bindPasswordField(fieldRoot) {
 
       toggleClass(root, "is-password-visible", false);
       toggleClass(input, "is-password-visible", false);
-      toggleClass(toggle, "is-visible", false);
-      toggleClass(toggle, "is-hidden", false);
+      toggleClass(toggle, "is-password-visible", false);
 
       setAttr(toggle, "aria-pressed", "false");
       setAttr(toggle, "aria-label", showLabel(toggle));

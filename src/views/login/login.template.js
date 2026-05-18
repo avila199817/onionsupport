@@ -5,18 +5,20 @@
    Responsabilidad:
    - Pintar un login simple y centrado.
    - Consumir el password-field compartido desde su fachada pública.
+   - Textos base en castellano.
    - Sin Auth.
    - Sin HTTP.
    - Sin Router.
    - Sin Store.
    - Sin Toast directo.
+   - Sin navegación.
    - Sin duplicar lógica del password.
    - Sin layout visual extra.
 ========================================================= */
 
 import { renderPasswordField } from "../../shared/password-field/index.js";
 
-export const TEMPLATE_VERSION = "minimal-3";
+export const TEMPLATE_VERSION = "login.template.v2";
 
 const DEFAULT_APP_NAME = "Onion Support";
 const DEFAULT_LOGO = "/src/media/img/favicon_black_circle.png?v=6";
@@ -86,21 +88,22 @@ function bool(value, fallback = false) {
   if (["1", "true", "yes", "si", "sí", "on"].includes(clean)) return true;
   if (["0", "false", "no", "off"].includes(clean)) return false;
 
-  return fallback;
+  return Boolean(fallback);
 }
 
 /* =========================================================
    PASSWORD FIELD
 ========================================================= */
 
-function renderLoginPasswordField({ label, placeholder }) {
+function renderLoginPasswordField({ label = "", placeholder = "" } = {}) {
   return renderPasswordField({
     id: "loginPassword",
     name: "password",
     fieldDataName: "password",
 
-    label,
-    placeholder,
+    label: text(label, "Contraseña"),
+    placeholder: text(placeholder, "Contraseña"),
+
     autocomplete: "current-password",
     required: true,
 
@@ -115,6 +118,7 @@ function renderLoginPasswordField({ label, placeholder }) {
     toggleClass: "password-toggle login-password-toggle",
 
     inputDataAttrs: {
+      loginPassword: true,
       loginPasswordInput: true,
       i18nPlaceholder: "login.passwordPlaceholder",
     },
@@ -124,6 +128,8 @@ function renderLoginPasswordField({ label, placeholder }) {
     },
 
     rootDataAttrs: {
+      loginField: "password",
+      loginPasswordField: true,
       i18nScope: "login",
     },
   });
@@ -142,7 +148,10 @@ export function getLoginTemplate(options = {}) {
 
   const identifier = normalizeIdentifier(options.identifier);
   const identifierLabel = text(options.identifierLabel, "Usuario o email");
-  const identifierPlaceholder = text(options.identifierPlaceholder, "Usuario o email");
+  const identifierPlaceholder = text(
+    options.identifierPlaceholder,
+    "Usuario o email"
+  );
 
   const passwordLabel = text(options.passwordLabel, "Contraseña");
   const passwordPlaceholder = text(options.passwordPlaceholder, "Contraseña");
@@ -160,7 +169,7 @@ export function getLoginTemplate(options = {}) {
     DEFAULT_PASSWORD_REQUEST_HREF
   );
 
-  const rememberChecked = bool(options.remember, Boolean(identifier));
+  const rememberChecked = bool(options.remember, false);
 
   return `
     <section
@@ -171,9 +180,11 @@ export function getLoginTemplate(options = {}) {
       data-login-view="true"
       data-i18n-scope="login"
       data-template-version="${escapeAttr(TEMPLATE_VERSION)}"
+      aria-labelledby="loginTitle"
+      aria-describedby="loginDescription"
     >
-      <main class="login-shell" data-login-shell="true">
-        <article class="login-card" aria-labelledby="loginTitle">
+      <div class="login-shell" data-login-shell="true">
+        <article class="login-card">
           <header class="login-header">
             <img
               class="login-logo"
@@ -185,13 +196,21 @@ export function getLoginTemplate(options = {}) {
               decoding="async"
               draggable="false"
               aria-hidden="true"
-            />
+            >
 
-            <h1 class="login-title" id="loginTitle" data-i18n="login.title">
+            <h1
+              class="login-title"
+              id="loginTitle"
+              data-i18n="login.title"
+            >
               ${escapeHtml(title)}
             </h1>
 
-            <p class="login-subtitle" id="loginDescription" data-i18n="login.subtitle">
+            <p
+              class="login-subtitle"
+              id="loginDescription"
+              data-i18n="login.subtitle"
+            >
               ${escapeHtml(subtitle)}
             </p>
           </header>
@@ -218,7 +237,10 @@ export function getLoginTemplate(options = {}) {
               hidden
             ></div>
 
-            <div class="login-field login-field--identifier" data-login-field="identifier">
+            <div
+              class="login-field login-field--identifier"
+              data-login-field="identifier"
+            >
               <label
                 class="login-label"
                 for="loginIdentifier"
@@ -242,7 +264,7 @@ export function getLoginTemplate(options = {}) {
                 data-i18n-placeholder="login.identifierPlaceholder"
                 aria-invalid="false"
                 required
-              />
+              >
             </div>
 
             ${renderLoginPasswordField({
@@ -251,7 +273,10 @@ export function getLoginTemplate(options = {}) {
             })}
 
             <div class="login-options">
-              <label class="login-check" for="loginRemember">
+              <label
+                class="login-check"
+                for="loginRemember"
+              >
                 <input
                   id="loginRemember"
                   name="remember"
@@ -259,7 +284,7 @@ export function getLoginTemplate(options = {}) {
                   value="1"
                   data-login-remember="true"
                   ${rememberChecked ? "checked" : ""}
-                />
+                >
 
                 <span data-i18n="login.rememberLabel">
                   ${escapeHtml(rememberLabel)}
@@ -270,6 +295,7 @@ export function getLoginTemplate(options = {}) {
                 class="login-reset-link"
                 href="${escapeAttr(passwordRequestHref)}"
                 data-spa
+                data-route="${escapeAttr(passwordRequestHref)}"
                 data-login-password-request="true"
                 data-i18n="login.passwordRequestLabel"
               >
@@ -282,14 +308,13 @@ export function getLoginTemplate(options = {}) {
               id="loginSubmit"
               type="submit"
               data-login-submit="true"
+              data-i18n="login.submitLabel"
             >
-              <span data-i18n="login.submitLabel">
-                ${escapeHtml(submitLabel)}
-              </span>
+              ${escapeHtml(submitLabel)}
             </button>
           </form>
         </article>
-      </main>
+      </div>
     </section>
   `;
 }

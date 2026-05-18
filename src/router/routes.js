@@ -13,8 +13,10 @@
      /password-request
      /password-reset
      /activate-account
-   - Home interna: /
-   - Home privada visible: /@slug
+   - Home interna de vista: /
+   - Home visible de usuario: /@{user.slug}
+   - Resolver /@{slug} hacia la vista Home sin validar usuario.
+   - Sin declarar /@:slug como ruta real.
    - Sin alias /home.
    - Sin aliases legacy.
    - Sin 2FA/MFA/OTP.
@@ -54,7 +56,6 @@ export const ROUTE_PATHS = Object.freeze({
 });
 
 export const USER_HOME_PREFIX = "/@";
-export const USER_HOME_ROUTE_PATTERN = "/@:slug";
 
 export const ROUTE_NAMES = Object.freeze({
   HOME: "home",
@@ -87,7 +88,7 @@ export const ROUTE_VIEW_KEYS = Object.freeze({
   SERVIDOR: "servidor",
 
   LOGIN: "login",
-  PASSWORD_REQUEST: "password-reset",
+  PASSWORD_REQUEST: "password-request",
   PASSWORD_RESET: "password-reset",
   ACTIVATE_ACCOUNT: "activate-account",
 });
@@ -105,7 +106,7 @@ export const ROUTE_VIEW_NAMES = Object.freeze({
   SERVIDOR: "ServerView",
 
   LOGIN: "LoginView",
-  PASSWORD_REQUEST: "PasswordResetView",
+  PASSWORD_REQUEST: "PasswordRequestView",
   PASSWORD_RESET: "PasswordResetView",
   ACTIVATE_ACCOUNT: "ActivateAccountView",
 });
@@ -132,7 +133,7 @@ export const TOKEN_ROUTE_PATHS = Object.freeze([
 /*
   Sin aliases.
   /home NO existe.
-  /@slug NO es alias: resuelve a la vista Home.
+  /@{slug} no es alias declarado: sólo resuelve lookup a Home.
 */
 export const ROUTE_ALIASES = Object.freeze({});
 
@@ -216,7 +217,9 @@ function normalizePath(path = "/") {
     .replace(/\\/g, "/")
     .replace(/\/{2,}/g, "/");
 
-  if (!clean.startsWith("/")) clean = `/${clean}`;
+  if (!clean.startsWith("/")) {
+    clean = `/${clean}`;
+  }
 
   if (clean.length > 1) {
     clean = clean.replace(/\/+$/g, "") || "/";
@@ -257,6 +260,10 @@ function normalizeRoles(roles = []) {
    USER HOME
 ========================================================= */
 
+export function normalizeRoutePath(path = "/") {
+  return normalizePath(path);
+}
+
 export function getUserHomeSlugFromPath(path = "/") {
   const clean = normalizePath(path);
 
@@ -277,14 +284,15 @@ export function isUserHomePath(path = "/") {
 
 export function isHomePath(path = "/") {
   const clean = normalizePath(path);
-
   return clean === ROUTE_PATHS.HOME || isUserHomePath(clean);
 }
 
 export function resolveRouteLookupPath(path = "/") {
   const clean = normalizePath(path);
 
-  if (isUserHomePath(clean)) return ROUTE_PATHS.HOME;
+  if (isUserHomePath(clean)) {
+    return ROUTE_PATHS.HOME;
+  }
 
   return clean;
 }
@@ -347,9 +355,21 @@ const VIEW_LOADERS = Object.freeze({
       pickView(module, ["LoginView"])
     ),
 
+  [ROUTE_VIEW_KEYS.PASSWORD_REQUEST]: () =>
+    import("../views/password-reset/index.js").then((module) =>
+      pickView(module, [
+        "PasswordRequestView",
+        "PasswordResetView",
+        "ResetPasswordView",
+      ])
+    ),
+
   [ROUTE_VIEW_KEYS.PASSWORD_RESET]: () =>
     import("../views/password-reset/index.js").then((module) =>
-      pickView(module, ["PasswordResetView", "ResetPasswordView"])
+      pickView(module, [
+        "PasswordResetView",
+        "ResetPasswordView",
+      ])
     ),
 
   [ROUTE_VIEW_KEYS.ACTIVATE_ACCOUNT]: () =>
@@ -449,7 +469,10 @@ function createLazyRender(viewKey = "", viewName = "") {
 ========================================================= */
 
 function routeId(path = "/", name = "route") {
-  const slug = path === "/" ? "root" : path.replace(/^\//, "").replace(/\//g, "_");
+  const slug = path === "/"
+    ? "root"
+    : path.replace(/^\//, "").replace(/\//g, "_");
+
   return `${name}:${slug}`;
 }
 
@@ -473,7 +496,6 @@ function createRoute({
   const finalPublic = Boolean(isPublic);
   const finalTokenRoute = Boolean(tokenRoute || TOKEN_ROUTE_SET.has(finalPath));
   const hideShell = finalPublic;
-  const home = finalPath === ROUTE_PATHS.HOME;
 
   const meta = freeze({
     version: ROUTES_VERSION,
@@ -481,9 +503,6 @@ function createRoute({
 
     path: finalPath,
     canonicalPath: finalPath,
-
-    home,
-    userHomePattern: home ? USER_HOME_ROUTE_PATTERN : "",
 
     public: finalPublic,
     private: !finalPublic,
@@ -521,9 +540,6 @@ function createRoute({
 
     path: finalPath,
     canonicalPath: finalPath,
-
-    home,
-    userHomePattern: home ? USER_HOME_ROUTE_PATTERN : "",
 
     name: finalName,
     viewKey: finalViewKey,
@@ -724,7 +740,8 @@ export function createRoutes() {
       return privateRoute(definition);
     })
     .sort((left, right) => {
-      return number(left.order) - number(right.order) || left.path.localeCompare(right.path);
+      return number(left.order) - number(right.order) ||
+        left.path.localeCompare(right.path);
     });
 }
 
@@ -884,9 +901,6 @@ function serializeRoute(route) {
     path: route.path,
     canonicalPath: route.canonicalPath,
 
-    home: route.home === true,
-    userHomePattern: route.userHomePattern || "",
-
     name: route.name,
     viewKey: route.viewKey,
     viewName: route.viewName,
@@ -977,8 +991,8 @@ export function getRoutesIntegritySnapshot() {
     userHome: {
       enabled: true,
       prefix: USER_HOME_PREFIX,
-      pattern: USER_HOME_ROUTE_PATTERN,
       lookupPath: ROUTE_PATHS.HOME,
+      validatesRealUser: false,
     },
 
     critical: getCriticalRoutesDebug(),
@@ -996,8 +1010,9 @@ export function getRoutesIntegritySnapshot() {
 
       roles: [...VALID_ROLES],
 
-      homePath: ROUTE_PATHS.HOME,
-      userHomePath: USER_HOME_ROUTE_PATTERN,
+      homeInternalPath: ROUTE_PATHS.HOME,
+      userHomePrefix: USER_HOME_PREFIX,
+
       noHomeAlias: true,
       noLegacyRoutes: true,
       no2fa: true,
@@ -1016,7 +1031,6 @@ export default {
 
   ROUTE_PATHS,
   USER_HOME_PREFIX,
-  USER_HOME_ROUTE_PATTERN,
 
   ROUTE_NAMES,
   ROUTE_VIEW_KEYS,
@@ -1029,6 +1043,7 @@ export default {
   PUBLIC_AUTH_ROUTES,
   TOKEN_ROUTE_PATHS,
 
+  normalizeRoutePath,
   getUserHomeSlugFromPath,
   isUserHomePath,
   isHomePath,

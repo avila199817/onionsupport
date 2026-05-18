@@ -5,6 +5,7 @@
    Responsabilidad:
    - Normalizar usuario para el sidebar.
    - Resolver rol admin/user.
+   - Resolver slug público real.
    - Crear view-model mínimo para template.js.
    - No pintar DOM.
    - No hacer eventos.
@@ -13,15 +14,16 @@
    - No tocar dropdown.
    - No gestionar avatar avanzado.
    - No inventar permisos.
+   - No inventar slug.
+   - No usar email como identidad.
 ========================================================= */
 
 import {
   SIDEBAR_ROLE_ADMIN,
   SIDEBAR_ROLE_USER,
-  normalizeSidebarRole,
 } from "./constants.js";
 
-export const SIDEBAR_USER_VERSION = "sidebar.user.v1";
+export const SIDEBAR_USER_VERSION = "sidebar.user.v2";
 
 const DEFAULT_NAME = "Usuario";
 const DEFAULT_INITIALS = "U";
@@ -54,6 +56,45 @@ function first(...values) {
   }
 
   return null;
+}
+
+function safeCall(fn = null) {
+  if (!isFunction(fn)) return null;
+
+  try {
+    return fn();
+  } catch {
+    return null;
+  }
+}
+
+/* =========================================================
+   SLUG
+========================================================= */
+
+export function normalizeSidebarUserSlug(value = "") {
+  const slug = text(value, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+
+  if (!slug) return "";
+
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
+export function getSidebarUserSlug(user = null) {
+  if (!isObject(user)) return "";
+
+  return normalizeSidebarUserSlug(
+    user.slug ||
+      user.lookup?.slug ||
+      user.profile?.slug ||
+      ""
+  );
 }
 
 /* =========================================================
@@ -126,16 +167,6 @@ export function unwrapSidebarUser(payload = null) {
    SOURCES
 ========================================================= */
 
-function safeCall(fn = null) {
-  if (!isFunction(fn)) return null;
-
-  try {
-    return fn();
-  } catch {
-    return null;
-  }
-}
-
 function getUserFromAuth(Auth = null) {
   if (!isObject(Auth)) return null;
 
@@ -162,6 +193,7 @@ function getUserFromCore(AppCore = null) {
     state.authUser,
     state.sessionUser,
     state.session?.user,
+    state.sessionData?.user,
     state.auth?.user,
     AppCore.user,
     AppCore.currentUser,
@@ -193,7 +225,7 @@ export function getSidebarUserSource(context = {}) {
 function normalizeRoleValue(value = null) {
   if (Array.isArray(value)) {
     const roles = value
-      .map((role) => normalizeRoleValue(role))
+      .map(normalizeRoleValue)
       .filter(Boolean);
 
     if (roles.includes(SIDEBAR_ROLE_ADMIN)) return SIDEBAR_ROLE_ADMIN;
@@ -202,7 +234,7 @@ function normalizeRoleValue(value = null) {
     return "";
   }
 
-  const role = normalizeSidebarRole(value);
+  const role = String(value || "").toLowerCase();
 
   if (role === SIDEBAR_ROLE_ADMIN) return SIDEBAR_ROLE_ADMIN;
   if (role === SIDEBAR_ROLE_USER) return SIDEBAR_ROLE_USER;
@@ -229,7 +261,11 @@ function getRoleFromAuth(Auth = null) {
     Auth.role,
     Auth.currentRole,
     Auth.user?.role,
-    Auth.currentUser?.role
+    Auth.user?.rol,
+    Auth.user?.roles,
+    Auth.currentUser?.role,
+    Auth.currentUser?.rol,
+    Auth.currentUser?.roles
   );
 }
 
@@ -244,14 +280,25 @@ export function getSidebarUserRole(context = {}) {
 
   return firstRole(
     context.role,
+    context.roles,
+
     user?.role,
     user?.rol,
     user?.roles,
+
     getRoleFromAuth(context.Auth),
+
     state.role,
+    state.rol,
+    state.roles,
+
     state.user?.role,
     state.user?.rol,
-    state.user?.roles
+    state.user?.roles,
+
+    state.currentUser?.role,
+    state.currentUser?.rol,
+    state.currentUser?.roles
   );
 }
 
@@ -279,8 +326,7 @@ export function getSidebarDisplayName(user = null) {
       profile.name,
       profile.nombre,
       user.username,
-      user.slug,
-      user.lookup?.slug
+      getSidebarUserSlug(user)
     ),
     DEFAULT_NAME
   );
@@ -292,12 +338,9 @@ export function getSidebarUsername(user = null) {
   const raw = text(
     first(
       user.username,
-      user.slug,
       user.userName,
       user.user_name,
-      user.lookup?.slug,
-      user.userId,
-      user.id
+      getSidebarUserSlug(user)
     ),
     ""
   );
@@ -345,7 +388,8 @@ export function getSidebarUser(context = {}) {
 
   const id = hasUser ? text(user.id || user.userId, "") : "";
   const userId = hasUser ? text(user.userId || user.id, "") : "";
-  const slug = hasUser ? text(user.slug || user.lookup?.slug, "") : "";
+  const slug = hasUser ? getSidebarUserSlug(user) : "";
+  const username = hasUser ? getSidebarUsername(user) : "";
 
   return {
     hasUser,
@@ -356,14 +400,17 @@ export function getSidebarUser(context = {}) {
 
     displayName,
     name: displayName,
-    username: hasUser ? getSidebarUsername(user) : "",
+    username,
 
     initials: getSidebarInitials(displayName),
 
     role,
     roles: [role],
+
     roleLabel: role === SIDEBAR_ROLE_ADMIN ? "Administrador" : "Usuario",
+
     isAdmin: role === SIDEBAR_ROLE_ADMIN,
+    isUser: role === SIDEBAR_ROLE_USER,
   };
 }
 
@@ -376,17 +423,34 @@ export function getSidebarUserSnapshot(context = {}) {
 
   return {
     version: SIDEBAR_USER_VERSION,
+
     hasUser: user.hasUser,
+
     user: user.hasUser
       ? {
-          id: user.id,
-          userId: user.userId,
+          hasId: Boolean(user.id || user.userId),
           username: user.username || null,
+          slug: user.slug || null,
           displayName: user.displayName,
           role: user.role,
         }
       : null,
+
     isAdmin: user.isAdmin,
+
+    policy: {
+      viewModelOnly: true,
+      noDom: true,
+      noEvents: true,
+      noStorage: true,
+      noHttp: true,
+      noDropdown: true,
+      noAdvancedAvatar: true,
+      noPermissionsInvented: true,
+      noEmailIdentity: true,
+      noSlugFabrication: true,
+      roles: [SIDEBAR_ROLE_ADMIN, SIDEBAR_ROLE_USER],
+    },
   };
 }
 
@@ -396,6 +460,9 @@ export function getSidebarUserSnapshot(context = {}) {
 
 export default {
   SIDEBAR_USER_VERSION,
+
+  normalizeSidebarUserSlug,
+  getSidebarUserSlug,
 
   isSidebarUserDisabled,
   hasSidebarUserIdentity,

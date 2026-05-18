@@ -17,7 +17,7 @@
    - Sin recrear SVGs desde JS.
 ========================================================= */
 
-export const PASSWORD_FIELD_DOM_VERSION = "minimal-3";
+export const PASSWORD_FIELD_DOM_VERSION = "minimal-4";
 
 const FIELD_SELECTOR = "[data-password-field]";
 const WRAPPER_SELECTOR = "[data-password-wrapper], .password-wrapper, .login-password-wrapper, .password-reset-password-wrapper";
@@ -203,7 +203,9 @@ function resolveRoot(node) {
   if (matches(node, WRAPPER_SELECTOR)) return node;
 
   const wrapper = closest(node, WRAPPER_SELECTOR);
-  return wrapper || node;
+  if (wrapper) return wrapper;
+
+  return null;
 }
 
 function findInput(root) {
@@ -226,7 +228,11 @@ function resolveParts(node) {
   const root = resolveRoot(node);
 
   if (!root) {
-    return { root: null, input: null, toggle: null };
+    return {
+      root: null,
+      input: null,
+      toggle: null,
+    };
   }
 
   return {
@@ -367,6 +373,7 @@ export function bindPasswordField(fieldRoot) {
   if (!isBrowser() || !isElement(fieldRoot)) return null;
 
   const parts = resolveParts(fieldRoot);
+
   if (!validParts(parts)) return null;
 
   const existing = BINDINGS.get(parts.root);
@@ -500,6 +507,7 @@ export function bindPasswordField(fieldRoot) {
       setAttr(toggle, "aria-label", showLabel(toggle));
 
       BINDINGS.delete(root);
+
       return true;
     },
 
@@ -541,13 +549,15 @@ function collectFieldRoots(scope = null) {
     if (!isElement(node)) return;
 
     const parts = resolveParts(node);
-    if (!validParts(parts) || seen.has(parts.root)) return;
+
+    if (!validParts(parts)) return;
+    if (seen.has(parts.root)) return;
 
     seen.add(parts.root);
     output.push(parts.root);
   }
 
-  if (isElement(root)) {
+  if (isElement(root) && (matches(root, FIELD_SELECTOR) || matches(root, WRAPPER_SELECTOR))) {
     add(root);
   }
 

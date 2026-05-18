@@ -6,6 +6,7 @@
    - Aplicar tema inicial según sistema.
    - Aplicar idioma inicial según navegador.
    - Preparar html/body antes del arranque SPA.
+   - Base primaria: castellano.
    - Sin imports.
    - Sin storage.
    - Sin API.
@@ -20,8 +21,8 @@
 (() => {
   "use strict";
 
-  const SUPPORTED_LOCALES = Object.freeze(["ca", "es", "en"]);
-  const FALLBACK_LOCALE = "en";
+  const SUPPORTED_LOCALES = Object.freeze(["es", "ca", "en"]);
+  const FALLBACK_LOCALE = "es";
 
   const THEMES = Object.freeze(["light", "dark"]);
   const FALLBACK_THEME = "light";
@@ -51,16 +52,23 @@
 
   function normalizeTheme(value = "", fallback = FALLBACK_THEME) {
     const theme = text(value, "").toLowerCase();
-
     return THEMES.includes(theme) ? theme : fallback;
   }
 
-  function resolveLocale() {
-    const browserLanguages = Array.isArray(navigator.languages) && navigator.languages.length
-      ? navigator.languages
-      : [navigator.language];
+  function getBrowserLanguages() {
+    const languages = Array.isArray(window.navigator?.languages)
+      ? window.navigator.languages
+      : [];
 
-    for (const language of browserLanguages) {
+    const language = window.navigator?.language
+      ? [window.navigator.language]
+      : [];
+
+    return [...languages, ...language];
+  }
+
+  function resolveLocale() {
+    for (const language of getBrowserLanguages()) {
       const locale = normalizeLocale(language, "");
 
       if (locale) {
@@ -98,7 +106,7 @@
 
       element.dataset.theme = cleanTheme;
       element.dataset.themeMode = "system";
-      element.dataset.themeSource = "browser";
+      element.dataset.themeSource = "system";
       element.dataset.systemTheme = cleanTheme;
       element.dataset.themeReady = "true";
 
@@ -112,7 +120,7 @@
     if (!element || !locale) return false;
 
     const cleanLocale = normalizeLocale(locale.value);
-    const source = text(locale.source, "browser");
+    const source = text(locale.source, "fallback");
 
     try {
       element.lang = cleanLocale;
@@ -131,17 +139,23 @@
 
   function applyThemeColor(theme = FALLBACK_THEME) {
     const cleanTheme = normalizeTheme(theme);
-    const color = THEME_COLORS[cleanTheme] || THEME_COLORS[FALLBACK_THEME];
+    const activeColor = THEME_COLORS[cleanTheme] || THEME_COLORS[FALLBACK_THEME];
 
     try {
       document
         .querySelectorAll("meta[name='theme-color']")
         .forEach((meta) => {
-          const media = meta.getAttribute("media") || "";
-
-          if (!media) {
-            meta.setAttribute("content", color);
+          if (meta.hasAttribute("data-onion-theme-color-light")) {
+            meta.setAttribute("content", THEME_COLORS.light);
+            return;
           }
+
+          if (meta.hasAttribute("data-onion-theme-color-dark")) {
+            meta.setAttribute("content", THEME_COLORS.dark);
+            return;
+          }
+
+          meta.setAttribute("content", activeColor);
         });
 
       return true;
@@ -151,14 +165,18 @@
   }
 
   function writePrebootSnapshot(theme = FALLBACK_THEME, locale = null) {
+    const cleanTheme = normalizeTheme(theme);
+    const cleanLocale = normalizeLocale(locale?.value);
+
     try {
       window.__ONION_PREBOOT__ = {
-        theme: normalizeTheme(theme),
+        theme: cleanTheme,
         themeMode: "system",
-        themeSource: "browser",
+        themeSource: "system",
+        systemTheme: cleanTheme,
 
-        locale: normalizeLocale(locale?.value),
-        localeSource: text(locale?.source, "browser"),
+        locale: cleanLocale,
+        localeSource: text(locale?.source, "fallback"),
         fallbackLocale: FALLBACK_LOCALE,
         supportedLocales: [...SUPPORTED_LOCALES],
       };

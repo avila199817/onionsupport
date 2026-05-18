@@ -5,16 +5,16 @@
    Responsabilidad:
    - Renderer puro del password-field compartido.
    - Pintar label + input password + toggle eye.
+   - Pintar CapsLock opcional.
    - Sin DOM.
    - Sin listeners.
    - Sin AppCore.
    - Sin CSS inline.
    - Sin handlers inline.
-   - Sin CapsLock.
    - Sin lógica duplicada.
 ========================================================= */
 
-export const PASSWORD_FIELD_TEMPLATE_VERSION = "minimal-3";
+export const PASSWORD_FIELD_TEMPLATE_VERSION = "minimal-4";
 
 const DEFAULT_ID = "passwordInput";
 const DEFAULT_NAME = "password";
@@ -24,10 +24,14 @@ const DEFAULT_INPUT_CLASS = "input-text";
 const DEFAULT_LABEL_CLASS = "password-label";
 const DEFAULT_TOGGLE_CLASS = "password-toggle";
 const DEFAULT_ICON_CLASS = "password-toggle-icon";
+const DEFAULT_CAPS_CLASS = "password-caps";
+const DEFAULT_CAPS_ICON_CLASS = "caps-icon";
+const DEFAULT_CAPS_LABEL_CLASS = "caps-label";
 const DEFAULT_PLACEHOLDER = "Contraseña";
 const DEFAULT_AUTOCOMPLETE = "current-password";
 const DEFAULT_SHOW_LABEL = "Mostrar contraseña";
 const DEFAULT_HIDE_LABEL = "Ocultar contraseña";
+const DEFAULT_CAPS_LABEL = "Bloq Mayús";
 
 /* =========================================================
    BASICS
@@ -93,6 +97,14 @@ function cleanClass(value = "", fallback = "") {
     .filter(Boolean)
     .join(" ")
     .slice(0, 300);
+}
+
+function cleanDataName(value = "", fallback = "password") {
+  return text(value, fallback)
+    .replace(/[^\w.-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[.-]+|[.-]+$/g, "")
+    .slice(0, 80) || fallback;
 }
 
 function cleanDataKey(value = "") {
@@ -207,9 +219,32 @@ export function getEyeOffIcon(options = {}) {
   `;
 }
 
-/* Compat export. No se renderiza CapsLock en el componente mínimo. */
 export function getCapsIcon() {
-  return "";
+  return `
+    <svg
+      class="caps-icon"
+      data-password-caps-icon="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+      width="16"
+      height="16"
+    >
+      <path
+        d="M12 4.5 6.5 10H10v6h4v-6h3.5L12 4.5Z"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M8 18.5h8"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+      />
+    </svg>
+  `;
 }
 
 /* =========================================================
@@ -219,12 +254,10 @@ export function getCapsIcon() {
 function normalizeOptions(options = {}) {
   const opts = isObject(options) ? options : {};
 
-  const fieldDataName = text(
+  const fieldDataName = cleanDataName(
     opts.fieldDataName || opts.dataField || opts.field,
     "password"
-  )
-    .replace(/[^\w.-]/g, "-")
-    .slice(0, 80) || "password";
+  );
 
   const inputName = cleanName(
     opts.name || opts.inputName || opts.fieldName || fieldDataName,
@@ -244,7 +277,9 @@ function normalizeOptions(options = {}) {
 
     inputId,
     inputName,
+
     toggleId: cleanId(opts.toggleId || opts.buttonId || `${inputId}Toggle`, `${inputId}Toggle`),
+    capsId: cleanId(opts.capsId || opts.capsIndicatorId || `${inputId}Caps`, `${inputId}Caps`),
     fieldRootId: cleanId(opts.fieldRootId || opts.rootId, ""),
     wrapperId: cleanId(opts.wrapperId, ""),
 
@@ -278,6 +313,21 @@ function normalizeOptions(options = {}) {
       DEFAULT_ICON_CLASS
     ),
 
+    capsClass: cleanClass(
+      opts.capsClass || opts.capsClassName,
+      DEFAULT_CAPS_CLASS
+    ),
+
+    capsIconClass: cleanClass(
+      opts.capsIconClass || opts.capsIconClassName,
+      DEFAULT_CAPS_ICON_CLASS
+    ),
+
+    capsLabelClass: cleanClass(
+      opts.capsLabelClass || opts.capsLabelClassName,
+      DEFAULT_CAPS_LABEL_CLASS
+    ),
+
     label,
     placeholder,
 
@@ -301,6 +351,11 @@ function normalizeOptions(options = {}) {
       opts.toggle !== false &&
       opts.showPasswordToggle !== false,
 
+    showCapsIndicator:
+      opts.showCapsIndicator !== false &&
+      opts.showCaps !== false &&
+      opts.caps !== false,
+
     showLabel: text(
       opts.toggleLabelShow || opts.showLabel || opts.showPasswordLabel,
       DEFAULT_SHOW_LABEL
@@ -309,6 +364,11 @@ function normalizeOptions(options = {}) {
     hideLabel: text(
       opts.toggleLabelHide || opts.hideLabel || opts.hidePasswordLabel,
       DEFAULT_HIDE_LABEL
+    ),
+
+    capsLabel: text(
+      opts.capsLabel || opts.capsText,
+      DEFAULT_CAPS_LABEL
     ),
 
     rootDataAttrs: isObject(opts.rootDataAttrs)
@@ -325,6 +385,7 @@ function normalizeOptions(options = {}) {
     },
 
     toggleDataAttrs: isObject(opts.toggleDataAttrs) ? opts.toggleDataAttrs : {},
+    capsDataAttrs: isObject(opts.capsDataAttrs) ? opts.capsDataAttrs : {},
   };
 }
 
@@ -412,6 +473,37 @@ function renderToggle(data) {
   `;
 }
 
+function renderCapsIndicator(data) {
+  if (!data.showCapsIndicator) return "";
+
+  return `
+    <span
+      id="${escapeHtml(data.capsId)}"
+      class="${escapeHtml(data.capsClass)}"
+      role="status"
+      aria-live="polite"
+      aria-hidden="true"
+      hidden
+      data-password-caps="true"
+      data-login-caps="true"
+      ${dataAttrs(data.capsDataAttrs, [
+        "password-caps",
+        "login-caps",
+      ])}
+    >
+      <span
+        class="${escapeHtml(data.capsIconClass)}"
+        aria-hidden="true"
+        data-password-caps-icon-wrapper="true"
+      >${getCapsIcon()}</span>
+      <span
+        class="${escapeHtml(data.capsLabelClass)}"
+        data-password-caps-label="true"
+      >${escapeHtml(data.capsLabel)}</span>
+    </span>
+  `;
+}
+
 /* =========================================================
    MAIN RENDERER
 ========================================================= */
@@ -447,6 +539,7 @@ export function renderPasswordField(options = {}) {
         ])}
       >
         ${renderInput(data)}
+        ${renderCapsIndicator(data)}
         ${renderToggle(data)}
       </div>
     </div>

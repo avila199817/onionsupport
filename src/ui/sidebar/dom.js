@@ -69,30 +69,35 @@ export function text(value = "", fallback = "") {
   return output || fallback;
 }
 
+function scopeOf(scope = null) {
+  if (!isBrowser()) return null;
+  return isElement(scope) ? scope : document;
+}
+
 /* =========================================================
    QUERY
 ========================================================= */
 
 export function query(selector = "", scope = null) {
-  if (!isBrowser() || !selector) return null;
+  const root = scopeOf(scope);
 
-  const root = isConnected(scope) ? scope : document;
+  if (!root || !selector) return null;
 
   try {
     const node = root.querySelector(selector);
-    return isConnected(node) ? node : null;
+    return isElement(node) ? node : null;
   } catch {
     return null;
   }
 }
 
 export function queryAll(selector = "", scope = null) {
-  if (!isBrowser() || !selector) return [];
+  const root = scopeOf(scope);
 
-  const root = isConnected(scope) ? scope : document;
+  if (!root || !selector) return [];
 
   try {
-    return [...root.querySelectorAll(selector)].filter(isConnected);
+    return [...root.querySelectorAll(selector)].filter(isElement);
   } catch {
     return [];
   }
@@ -103,7 +108,7 @@ export function byId(id = "") {
 
   try {
     const node = document.getElementById(id);
-    return isConnected(node) ? node : null;
+    return isElement(node) ? node : null;
   } catch {
     return null;
   }
@@ -122,16 +127,25 @@ export function createElement(tag = "div", options = {}) {
     dataset = {},
   } = options || {};
 
-  if (className) node.className = className;
-  if (textContent) node.textContent = textContent;
+  if (className) {
+    node.className = className;
+  }
+
+  if (textContent) {
+    node.textContent = textContent;
+  }
 
   for (const [key, value] of Object.entries(attrs || {})) {
+    if (!key) continue;
     if (value === false || value === null || value === undefined) continue;
+
     node.setAttribute(key, String(value));
   }
 
   for (const [key, value] of Object.entries(dataset || {})) {
+    if (!key) continue;
     if (value === false || value === null || value === undefined) continue;
+
     node.dataset[key] = String(value);
   }
 
@@ -162,7 +176,11 @@ export function setHidden(node = null, hidden = false) {
   try {
     node.hidden = value;
     node.setAttribute("aria-hidden", value ? "true" : "false");
-    node.classList.toggle(SIDEBAR_CLASSES.hidden, value);
+
+    if (SIDEBAR_CLASSES.hidden) {
+      node.classList.toggle(SIDEBAR_CLASSES.hidden, value);
+    }
+
     return true;
   } catch {
     return false;
@@ -206,6 +224,7 @@ export function isSidebarRoot(node = null) {
   return Boolean(
     node.id === SIDEBAR_ROOT_ID ||
       node.dataset?.sidebarRoot === "true" ||
+      node.matches?.(SIDEBAR_SELECTORS.root) ||
       node.matches?.(`.${SIDEBAR_CLASSES.root}`)
   );
 }
@@ -215,8 +234,10 @@ export function getSidebarMount() {
 
   return (
     byId(SIDEBAR_MOUNT_ID) ||
+    query("[data-sidebar-mount='true']") ||
     query("[data-sidebar-mount]") ||
     byId(SIDEBAR_ROOT_ID) ||
+    query(SIDEBAR_SELECTORS.root) ||
     query("[data-sidebar-root]")
   );
 }
@@ -224,13 +245,14 @@ export function getSidebarMount() {
 export function getSidebarRoot(scope = null) {
   if (!isBrowser()) return null;
 
-  const scopedRoot = isConnected(scope)
+  const scopedRoot = isElement(scope)
     ? query(SIDEBAR_SELECTORS.root, scope)
     : null;
 
   return (
     scopedRoot ||
     byId(SIDEBAR_ROOT_ID) ||
+    query(SIDEBAR_SELECTORS.root) ||
     query("[data-sidebar-root]") ||
     null
   );
@@ -238,7 +260,6 @@ export function getSidebarRoot(scope = null) {
 
 export function getSidebarRootFromMount(mount = null) {
   if (!isElement(mount)) return null;
-
   if (isSidebarRoot(mount)) return mount;
 
   return query(SIDEBAR_SELECTORS.root, mount);
@@ -247,11 +268,17 @@ export function getSidebarRootFromMount(mount = null) {
 export function getAllSidebarRoots() {
   if (!isBrowser()) return [];
 
-  return queryAll(SIDEBAR_SELECTORS.root);
+  return [
+    ...new Set([
+      ...queryAll(SIDEBAR_SELECTORS.root),
+      ...queryAll("[data-sidebar-root]"),
+      byId(SIDEBAR_ROOT_ID),
+    ].filter(isElement)),
+  ];
 }
 
 export function removeDuplicateSidebarRoots(primary = null) {
-  if (!isBrowser() || !isElement(primary)) return false;
+  if (!isElement(primary)) return false;
 
   let changed = false;
 
@@ -278,7 +305,7 @@ export function mountSidebarRoot(nextRoot = null) {
 
   const mount = getSidebarMount();
 
-  if (!mount) return null;
+  if (!isElement(mount)) return null;
 
   try {
     if (isSidebarRoot(mount)) {
@@ -289,10 +316,16 @@ export function mountSidebarRoot(nextRoot = null) {
 
     nextRoot.id = nextRoot.id || SIDEBAR_ROOT_ID;
     nextRoot.dataset.sidebarRoot = "true";
-    nextRoot.classList.add(SIDEBAR_CLASSES.root, SIDEBAR_CLASSES.appRoot);
-    nextRoot.hidden = false;
-    nextRoot.setAttribute("aria-hidden", "false");
 
+    if (SIDEBAR_CLASSES.root) {
+      nextRoot.classList.add(SIDEBAR_CLASSES.root);
+    }
+
+    if (SIDEBAR_CLASSES.appRoot) {
+      nextRoot.classList.add(SIDEBAR_CLASSES.appRoot);
+    }
+
+    setHidden(nextRoot, false);
     removeDuplicateSidebarRoots(nextRoot);
 
     return nextRoot;
@@ -326,21 +359,31 @@ export function setSidebarOpenState(root = getSidebarRoot(), open = true) {
 
   const value = Boolean(open);
 
-  root.dataset.open = value ? "true" : "false";
-  root.classList.toggle(SIDEBAR_CLASSES.open, value);
-  root.classList.toggle(SIDEBAR_CLASSES.collapsed, !value);
+  try {
+    root.dataset.open = value ? "true" : "false";
 
-  const toggle = query(SIDEBAR_SELECTORS.toggle, root);
+    if (SIDEBAR_CLASSES.open) {
+      root.classList.toggle(SIDEBAR_CLASSES.open, value);
+    }
 
-  if (toggle) {
-    toggle.setAttribute("aria-expanded", value ? "true" : "false");
-    toggle.setAttribute(
-      "aria-label",
-      value ? "Cerrar navegación" : "Abrir navegación"
-    );
+    if (SIDEBAR_CLASSES.collapsed) {
+      root.classList.toggle(SIDEBAR_CLASSES.collapsed, !value);
+    }
+
+    const toggle = query(SIDEBAR_SELECTORS.toggle, root);
+
+    if (toggle) {
+      toggle.setAttribute("aria-expanded", value ? "true" : "false");
+      toggle.setAttribute(
+        "aria-label",
+        value ? "Cerrar navegación" : "Abrir navegación"
+      );
+    }
+
+    return true;
+  } catch {
+    return false;
   }
-
-  return true;
 }
 
 /* =========================================================
@@ -352,15 +395,15 @@ export function getSidebarRefs(root = getSidebarRoot()) {
 
   return {
     root: sidebar,
-    header: query(SIDEBAR_SELECTORS.header, sidebar),
-    nav: query(SIDEBAR_SELECTORS.nav, sidebar),
-    footer: query(SIDEBAR_SELECTORS.footer, sidebar),
-    user: query(SIDEBAR_SELECTORS.user, sidebar),
-    brand: query(SIDEBAR_SELECTORS.brand, sidebar),
-    toggle: query(SIDEBAR_SELECTORS.toggle, sidebar),
-    logout: query(SIDEBAR_SELECTORS.logout, sidebar),
-    links: queryAll(SIDEBAR_SELECTORS.link, sidebar),
-    navLinks: queryAll(SIDEBAR_SELECTORS.navLink, sidebar),
+    header: sidebar ? query(SIDEBAR_SELECTORS.header, sidebar) : null,
+    nav: sidebar ? query(SIDEBAR_SELECTORS.nav, sidebar) : null,
+    footer: sidebar ? query(SIDEBAR_SELECTORS.footer, sidebar) : null,
+    user: sidebar ? query(SIDEBAR_SELECTORS.user, sidebar) : null,
+    brand: sidebar ? query(SIDEBAR_SELECTORS.brand, sidebar) : null,
+    toggle: sidebar ? query(SIDEBAR_SELECTORS.toggle, sidebar) : null,
+    logout: sidebar ? query(SIDEBAR_SELECTORS.logout, sidebar) : null,
+    links: sidebar ? queryAll(SIDEBAR_SELECTORS.link, sidebar) : [],
+    navLinks: sidebar ? queryAll(SIDEBAR_SELECTORS.navLink, sidebar) : [],
   };
 }
 
@@ -439,7 +482,10 @@ export function setActiveLink(link = null, active = false) {
   const value = Boolean(active);
 
   try {
-    link.classList.toggle(SIDEBAR_CLASSES.active, value);
+    if (SIDEBAR_CLASSES.active) {
+      link.classList.toggle(SIDEBAR_CLASSES.active, value);
+    }
+
     link.dataset.active = value ? "true" : "false";
 
     if (value) {

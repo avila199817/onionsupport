@@ -7,7 +7,7 @@
    - Delegar DOM en login.dom.js.
    - Validar campos mínimos.
    - Llamar Auth.login().
-   - Navegar a Home tras login correcto.
+   - Navegar a /@{user.slug} tras login correcto.
    - Sin HTTP directo.
    - Sin Store.
    - Sin Toast directo.
@@ -36,11 +36,22 @@ import {
   bindLoginSubmit,
 } from "./login.dom.js";
 
-export const LOGIN_VIEW_VERSION = "minimal-2";
+export const LOGIN_VIEW_VERSION = "login.view.v2";
 
 const SOURCE = "login.view";
+
 const HOME_ROUTE = "/";
+const LOGIN_ROUTE = "/login";
 const PASSWORD_REQUEST_ROUTE = "/password-request";
+const PASSWORD_RESET_ROUTE = "/password-reset";
+const ACTIVATE_ACCOUNT_ROUTE = "/activate-account";
+
+const PUBLIC_AUTH_ROUTES = new Set([
+  LOGIN_ROUTE,
+  PASSWORD_REQUEST_ROUTE,
+  PASSWORD_RESET_ROUTE,
+  ACTIVATE_ACCOUNT_ROUTE,
+]);
 
 const INSTANCES = new WeakMap();
 
@@ -63,11 +74,25 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
-function noop() {}
-
 /* =========================================================
-   NAVIGATION
+   PATHS
 ========================================================= */
+
+function cleanPath(value = HOME_ROUTE) {
+  let path = text(value, HOME_ROUTE).split("?")[0].split("#")[0];
+
+  if (!path.startsWith("/")) {
+    path = `/${path}`;
+  }
+
+  path = path.replace(/\/{2,}/g, "/");
+
+  if (path.length > 1) {
+    path = path.replace(/\/+$/g, "") || HOME_ROUTE;
+  }
+
+  return path || HOME_ROUTE;
+}
 
 function safeInternalPath(value = "", fallback = HOME_ROUTE) {
   const raw = text(value, fallback);
@@ -80,14 +105,13 @@ function safeInternalPath(value = "", fallback = HOME_ROUTE) {
   return raw.replace(/\/{2,}/g, "/") || fallback;
 }
 
-function homeRoute() {
-  return safeInternalPath(
-    AppCore?.config?.routes?.home ||
-      AppCore?.config?.auth?.homeRoute ||
-      HOME_ROUTE,
-    HOME_ROUTE
-  );
+function isPublicAuthPath(value = "") {
+  return PUBLIC_AUTH_ROUTES.has(cleanPath(value));
 }
+
+/* =========================================================
+   NAVIGATION
+========================================================= */
 
 function getRouter() {
   try {
@@ -103,15 +127,47 @@ function getRouter() {
   }
 }
 
-async function goHome() {
-  const target = homeRoute();
+function authHomeTarget(result = {}) {
+  const target = safeInternalPath(
+    result?.postLoginTarget ||
+      result?.homePath ||
+      result?.defaultHome ||
+      Auth?.getPostLoginTarget?.() ||
+      Auth?.getDefaultHome?.() ||
+      AppCore?.state?.postLoginTarget ||
+      AppCore?.state?.homePath ||
+      AppCore?.state?.defaultHome ||
+      HOME_ROUTE,
+    HOME_ROUTE
+  );
+
+  if (isPublicAuthPath(target)) {
+    return HOME_ROUTE;
+  }
+
+  return target;
+}
+
+async function goAfterLogin(result = {}) {
+  const target = authHomeTarget(result);
   const router = getRouter();
 
   try {
+    if (isFn(router?.goAfterLogin)) {
+      await router.goAfterLogin(target, {
+        source: SOURCE,
+        replaceState: true,
+        force: true,
+      });
+
+      return true;
+    }
+
     if (isFn(router?.replace)) {
       await router.replace(target, {
         source: SOURCE,
         replaceState: true,
+        force: true,
       });
 
       return true;
@@ -121,21 +177,37 @@ async function goHome() {
       await router.navigate(target, {
         source: SOURCE,
         replaceState: true,
+        force: true,
+      });
+
+      return true;
+    }
+
+    if (isFn(AppCore?.navigate)) {
+      await AppCore.navigate(target, {
+        source: SOURCE,
+        replaceState: true,
+        force: true,
       });
 
       return true;
     }
   } catch {
-    // Fallback abajo.
+    // Fallback navegador abajo.
   }
 
   if (!isBrowser()) return false;
 
   try {
-    window.location.assign(target);
+    window.location.replace(target);
     return true;
   } catch {
-    return false;
+    try {
+      window.location.assign(target);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -156,6 +228,7 @@ function renderTemplate(container, deps = {}) {
   );
 
   container.replaceChildren(template.content.cloneNode(true));
+
   return true;
 }
 
@@ -193,7 +266,10 @@ function errorMessage(error = null) {
     text(error?.data?.message, "") ||
     text(error?.response?.data?.message, "") ||
     "No se pudo iniciar sesión."
-  );
+  )
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 /* =========================================================
@@ -295,7 +371,8 @@ export function renderLoginView(container, deps = {}) {
         throw new Error(result?.message || "Login inválido.");
       }
 
-      await goHome();
+      await goAfterLogin(result);
+
       return true;
     } catch (error) {
       setGlobalLoginError(refs, errorMessage(error));
@@ -344,6 +421,7 @@ export function renderLoginView(container, deps = {}) {
       }
 
       clearInstance(container, instance);
+
       return true;
     },
 
@@ -353,6 +431,7 @@ export function renderLoginView(container, deps = {}) {
         mounted,
         submitting,
         authenticated: Boolean(Auth.isAuthenticated?.()),
+        target: authenticated() ? authHomeTarget() : null,
       };
     },
 
@@ -362,6 +441,7 @@ export function renderLoginView(container, deps = {}) {
   };
 
   storeInstance(container, instance);
+
   return instance;
 }
 

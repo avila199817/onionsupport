@@ -8,7 +8,7 @@
    - Aplicar document.title.
    - Marcar menú activo usando canonicalPath.
    - /@{user.slug} marca Home porque canonicalPath = /.
-   - Mostrar/ocultar chrome según route.hideShell.
+   - Mostrar/ocultar chrome según route.hideShell/public/auth layout.
    - Mantener app-shell visible.
    - Sin Auth.
    - Sin guards.
@@ -19,9 +19,10 @@
    - Sin eventos.
    - Sin rutas inventadas.
    - Sin alias /home.
+   - Sin 2FA/MFA/OTP.
 ========================================================= */
 
-export const ROUTER_SHELL_VERSION = "router.shell.v2";
+export const ROUTER_SHELL_VERSION = "router.shell.v3";
 
 const APP_NAME = "Onion Support";
 const HOME_PATH = "/";
@@ -65,6 +66,13 @@ function safeTitle(value = "") {
   return text(value, APP_NAME).replace(/\s+/g, " ").slice(0, 140);
 }
 
+function redact(value = "") {
+  return text(value, "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
 /* =========================================================
    PATHS
 ========================================================= */
@@ -83,24 +91,34 @@ function normalizeHashPath(path = HOME_PATH) {
   return value;
 }
 
+function sameOriginUrlToPath(value = "") {
+  try {
+    const base = isBrowser() ? window.location.origin : "http://localhost";
+    const url = new URL(value, base);
+
+    if (url.origin !== base) {
+      return HOME_PATH;
+    }
+
+    if (url.hash.startsWith("#/") || url.hash.startsWith("#!")) {
+      return normalizeHashPath(url.hash);
+    }
+
+    return `${url.pathname || HOME_PATH}${url.search || ""}${url.hash || ""}`;
+  } catch {
+    return HOME_PATH;
+  }
+}
+
 function pathFromInput(path = HOME_PATH) {
   let value = normalizeHashPath(path);
 
-  if (value.startsWith("//")) {
+  if (!value || value.startsWith("//")) {
     return HOME_PATH;
   }
 
-  try {
-    if (/^https?:\/\//i.test(value)) {
-      const url = new URL(
-        value,
-        isBrowser() ? window.location.origin : "http://localhost"
-      );
-
-      value = `${url.pathname || HOME_PATH}${url.search || ""}${url.hash || ""}`;
-    }
-  } catch {
-    return HOME_PATH;
+  if (/^https?:\/\//i.test(value)) {
+    return sameOriginUrlToPath(value);
   }
 
   if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
@@ -131,7 +149,8 @@ function normalizeUserSlug(value = "") {
     .replace(/^\/+/, "")
     .replace(/^@+/, "")
     .split(/[/?#]/)[0]
-    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
     .toLowerCase();
 
   if (!slug) return "";
@@ -289,6 +308,16 @@ function clearNode(node = null) {
   }
 }
 
+function hasContent(node = null) {
+  return Boolean(
+    node &&
+      (
+        node.childElementCount > 0 ||
+        text(node.textContent, "")
+      )
+  );
+}
+
 function cacheDom(AppCore = null, key = "", node = null) {
   if (!AppCore || !key || !node) return node;
 
@@ -311,16 +340,21 @@ export function getShellElements(AppCore = null) {
     return {
       html: null,
       body: null,
+
       shell: null,
       main: null,
       appContent: null,
       viewContainer: null,
+
       sidebarMount: null,
       topbarMount: null,
+
       sidebar: null,
       topbar: null,
+
       tablehead: null,
       tableheadContainer: null,
+
       mobileToggle: null,
       loader: null,
     };
@@ -371,16 +405,21 @@ export function getShellElements(AppCore = null) {
   return {
     html,
     body,
+
     shell,
     main,
     appContent,
     viewContainer,
+
     sidebarMount,
     topbarMount,
+
     sidebar,
     topbar,
+
     tablehead,
     tableheadContainer,
+
     mobileToggle,
     loader,
   };
@@ -594,8 +633,9 @@ function applyChrome(elements = {}, hidden = false) {
     setAttr(elements.mobileToggle, "aria-expanded", "false");
   }
 
-  const hasTablehead = Boolean(elements.tableheadContainer?.childElementCount);
-  const showTablehead = !hidden && hasTablehead;
+  const showTablehead =
+    !hidden &&
+    hasContent(elements.tableheadContainer);
 
   setHidden(elements.tablehead, !showTablehead);
   setHidden(elements.tableheadContainer, hidden || !showTablehead);
@@ -702,7 +742,7 @@ export function getShellSnapshot(AppCore = null) {
     source: "router.shell",
 
     route,
-    publicPath,
+    publicPath: redact(publicPath),
     publicSlug: extractUserHomeSlug(publicPath) || null,
     isUserHomePath: isUserHomePath(publicPath || HOME_PATH),
 
@@ -733,20 +773,26 @@ export function getShellSnapshot(AppCore = null) {
     },
 
     policy: {
+      shellOnly: true,
+
       ownAuth: false,
       ownGuards: false,
       ownRender: false,
       ownHistory: false,
       ownStorage: false,
       ownToast: false,
+      ownEvents: false,
 
-      shellOnly: true,
       userSlugHome: true,
       canonicalizesUserHome: true,
 
       noHomeAlias: true,
+      noHomeRoute: true,
+      no2fa: true,
+
       chromeOnlyForAuth: true,
-      eventless: true,
+      keepsAppShellVisible: true,
+      snapshotRedacted: true,
     },
   };
 }

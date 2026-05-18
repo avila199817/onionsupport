@@ -3,34 +3,46 @@
    Archivo: /src/ui/sidebar/events.js
 
    Responsabilidad:
-   - Compat mínima de eventos Sidebar.
-   - Sin imports.
-   - Sin submódulos.
-   - Sin route aliases.
-   - Sin username public slug.
+   - Un único listener delegado sobre el root del sidebar.
+   - Click en enlace -> navigateFromSidebar().
+   - Click en toggle -> toggleSidebar().
+   - Click en logout -> handleLogout().
+   - Sin navegación propia.
+   - Sin active menu propio.
+   - Sin indicadores.
+   - Sin resize.
+   - Sin dropdown.
+   - Sin keydown custom.
    - Sin core event storms.
-   - Sin theme/lang listeners.
    - Sin CustomEvent.
-   - Sin timers complejos.
-   - Sin magia negra.
-   - El sidebar real vive en src/ui/sidebar/index.js.
+   - Sin timers.
 ========================================================= */
 
-export const SIDEBAR_EVENTS_VERSION = "simple";
+import {
+  SIDEBAR_SELECTORS,
+} from "./constants.js";
 
-const SOURCE = "sidebar.events";
-const DEFAULT_SCOPE = "ui:sidebar";
+import {
+  getSidebarRoot,
+  isElement,
+} from "./dom.js";
+
+import {
+  handleLogout,
+  navigateFromSidebar,
+  toggleSidebar,
+} from "./actions.js";
+
+export const SIDEBAR_EVENTS_VERSION = "sidebar.events.v1";
+
 const HANDLED_FLAG = "__onionSidebarHandled";
 
-const cleanups = new Map();
+let boundRoot = null;
+let boundHandler = null;
 
 /* =========================================================
    BASICS
 ========================================================= */
-
-function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
-}
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -45,85 +57,8 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
-function scopeName(scope = DEFAULT_SCOPE) {
-  return text(scope, DEFAULT_SCOPE);
-}
-
-function emit(AppCore = null, eventName = "", payload = {}) {
-  try {
-    AppCore?.events?.emit?.(eventName, {
-      source: SOURCE,
-      version: SIDEBAR_EVENTS_VERSION,
-      ...payload,
-      token: null,
-      accessToken: null,
-      refreshToken: null,
-    });
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/* =========================================================
-   DOM
-========================================================= */
-
-function query(selector = "", root = null) {
-  if (!isBrowser() || !selector) return null;
-
-  const scope = root || document;
-
-  try {
-    return scope.querySelector(selector);
-  } catch {
-    return null;
-  }
-}
-
-function sidebarRoot(AppCore = null, resolver = null) {
-  try {
-    const elements = isFunction(resolver) ? resolver() : null;
-
-    if (elements?.sidebar) return elements.sidebar;
-    if (elements?.sidebarRoot) return elements.sidebarRoot;
-  } catch {
-    // noop
-  }
-
-  if (!isBrowser()) return null;
-
-  return (
-    AppCore?.dom?.sidebar ||
-    AppCore?.dom?.sidebarRoot ||
-    document.getElementById("app-sidebar") ||
-    document.getElementById("sidebar") ||
-    query("[data-sidebar-root]")
-  );
-}
-
-function sidebarMenu(AppCore = null, resolver = null) {
-  try {
-    const elements = isFunction(resolver) ? resolver() : null;
-
-    if (elements?.sidebarMenu) return elements.sidebarMenu;
-  } catch {
-    // noop
-  }
-
-  const root = sidebarRoot(AppCore, resolver);
-
-  return (
-    query("[data-sidebar-nav]", root) ||
-    query(".sidebar-nav", root) ||
-    query(".sidebar-menu", root) ||
-    null
-  );
-}
-
-function targetOf(eventOrTarget = null) {
-  const target = eventOrTarget?.target || eventOrTarget;
+function targetOf(event = null) {
+  const target = event?.target || null;
 
   try {
     if (target?.nodeType === 3) return target.parentElement;
@@ -131,12 +66,14 @@ function targetOf(eventOrTarget = null) {
     // noop
   }
 
-  return target || null;
+  return target;
 }
 
 function closest(target = null, selector = "") {
+  if (!target || !selector) return null;
+
   try {
-    return target?.closest?.(selector) || null;
+    return target.closest(selector);
   } catch {
     return null;
   }
@@ -152,6 +89,20 @@ function contains(parent = null, child = null) {
   }
 }
 
+function resolveRoot(context = {}) {
+  if (isElement(context.root)) return context.root;
+
+  return getSidebarRoot();
+}
+
+/* =========================================================
+   EVENT SAFETY
+========================================================= */
+
+function wasHandled(event = null) {
+  return Boolean(event?.[HANDLED_FLAG]);
+}
+
 function markHandled(event = null, reason = "") {
   try {
     event[HANDLED_FLAG] = true;
@@ -162,10 +113,6 @@ function markHandled(event = null, reason = "") {
   }
 }
 
-function wasHandled(event = null) {
-  return Boolean(event?.[HANDLED_FLAG]);
-}
-
 function prevent(event = null) {
   try {
     event?.preventDefault?.();
@@ -173,572 +120,225 @@ function prevent(event = null) {
     // noop
   }
 
-  try {
-    event?.stopPropagation?.();
-  } catch {
-    // noop
-  }
-
   return true;
 }
 
+function isPlainLeftClick(event = null) {
+  if (!event) return true;
+
+  return (
+    event.button === 0 &&
+    event.metaKey !== true &&
+    event.ctrlKey !== true &&
+    event.shiftKey !== true &&
+    event.altKey !== true
+  );
+}
+
+function browserShouldOwnClick(element = null, event = null) {
+  if (!isElement(element)) return true;
+  if (!isPlainLeftClick(event)) return true;
+  if (element.hasAttribute("download")) return true;
+  if (element.getAttribute("target") === "_blank") return true;
+
+  return false;
+}
+
+function isHiddenOrDisabled(element = null) {
+  if (!isElement(element)) return true;
+
+  return Boolean(
+    element.hidden ||
+      element.getAttribute("aria-hidden") === "true" ||
+      element.getAttribute("aria-disabled") === "true" ||
+      element.dataset?.disabled === "true" ||
+      element.closest("[hidden], [aria-hidden='true']")
+  );
+}
+
 /* =========================================================
-   ROUTES
+   LINK TARGET
 ========================================================= */
 
-function normalizePath(path = "/") {
-  let value = text(path, "/");
+function getElementTarget(element = null) {
+  if (!isElement(element)) return "";
 
-  if (!value) return "";
-  if (/^(javascript:|data:|vbscript:|file:|mailto:|tel:)/i.test(value)) return "";
-  if (value.startsWith("//")) return "";
-
-  if (value.startsWith("#/")) value = value.slice(1);
-  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
-
-  try {
-    if (/^https?:\/\//i.test(value) && isBrowser()) {
-      const url = new URL(value, window.location.origin);
-
-      if (url.origin !== window.location.origin) return "";
-
-      value = `${url.pathname || "/"}${url.search || ""}${url.hash || ""}`;
-    }
-  } catch {
-    return "";
-  }
-
-  if (value.startsWith("#")) return "";
-
-  if (!value.startsWith("/")) value = `/${value}`;
-
-  value = value.replace(/\/{2,}/g, "/");
-
-  return value || "/";
-}
-
-function canonicalPath(path = "/") {
-  let value = normalizePath(path).split("?")[0].split("#")[0] || "/";
-
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || "/";
-  }
-
-  return value;
-}
-
-function routeFromElement(element = null) {
-  if (!element) return "";
-
-  return normalizePath(
+  return text(
     element.dataset?.route ||
       element.dataset?.href ||
       element.dataset?.to ||
-      element.getAttribute?.("data-route") ||
-      element.getAttribute?.("data-href") ||
-      element.getAttribute?.("data-to") ||
-      element.getAttribute?.("href") ||
-      ""
+      element.getAttribute("data-route") ||
+      element.getAttribute("data-href") ||
+      element.getAttribute("data-to") ||
+      element.getAttribute("href"),
+    ""
   );
 }
 
-function currentPath(AppCore = null, Router = null, payload = {}) {
-  try {
-    const routerPath =
-      Router?.getCurrentCanonicalPath?.() ||
-      Router?.getCurrentPublicPath?.() ||
-      Router?.getCurrentPath?.();
+function closestInsideRoot(target = null, selector = "", root = null) {
+  const element = closest(target, selector);
 
-    if (routerPath) return canonicalPath(routerPath);
+  if (!element || !contains(root, element)) return null;
+
+  return element;
+}
+
+function sidebarLinkSelector() {
+  return [
+    SIDEBAR_SELECTORS.navLink,
+    SIDEBAR_SELECTORS.brand,
+    SIDEBAR_SELECTORS.link,
+  ].join(",");
+}
+
+/* =========================================================
+   OPTIONAL SYNC
+========================================================= */
+
+function syncAfterAction(context = {}) {
+  try {
+    if (isFunction(context.sync)) {
+      context.sync();
+      return true;
+    }
+
+    if (isFunction(context.refresh)) {
+      context.refresh();
+      return true;
+    }
   } catch {
     // noop
   }
 
-  const state = isObject(AppCore?.state) ? AppCore.state : {};
-
-  return canonicalPath(
-    payload.publicPath ||
-      payload.path ||
-      payload.route ||
-      state.canonicalPath ||
-      state.route ||
-      state.publicPath ||
-      (isBrowser() ? window.location.pathname : "/") ||
-      "/"
-  );
-}
-
-function getRouter(AppCore = null, Router = null) {
-  try {
-    return (
-      Router ||
-      AppCore?.Router ||
-      AppCore?.router ||
-      AppCore?.modules?.get?.("Router") ||
-      AppCore?.modules?.get?.("router") ||
-      null
-    );
-  } catch {
-    return Router || null;
-  }
-}
-
-async function navigate(AppCore = null, Router = null, target = "", source = SOURCE) {
-  const path = normalizePath(target);
-
-  if (!path) return false;
-
-  const router = getRouter(AppCore, Router);
-
-  try {
-    if (isFunction(router?.navigate)) {
-      await router.navigate(path, {
-        source,
-      });
-      return true;
-    }
-
-    if (isFunction(router?.push)) {
-      await router.push(path, {
-        source,
-      });
-      return true;
-    }
-
-    if (isFunction(router?.go)) {
-      await router.go(path, {
-        source,
-      });
-      return true;
-    }
-  } catch {
-    return false;
-  }
-
-  if (!isBrowser()) return false;
-
-  try {
-    window.location.assign(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/* =========================================================
-   ACTIVE MENU
-========================================================= */
-
-function menuItems(menu = null) {
-  if (!menu) return [];
-
-  try {
-    return [
-      ...menu.querySelectorAll("[data-sidebar-nav-link], a[data-spa], a[href], [data-route]"),
-    ];
-  } catch {
-    return [];
-  }
-}
-
-function clearActive(menu = null) {
-  for (const item of menuItems(menu)) {
-    try {
-      item.classList.remove("active", "is-active", "router-active");
-      item.removeAttribute("aria-current");
-      item.dataset.active = "false";
-      item.dataset.current = "false";
-      item.dataset.selected = "false";
-    } catch {
-      // noop
-    }
-  }
-
-  return true;
-}
-
-function setActive(item = null) {
-  if (!item) return false;
-
-  try {
-    item.classList.add("active", "is-active", "router-active");
-    item.setAttribute("aria-current", "page");
-    item.dataset.active = "true";
-    item.dataset.current = "true";
-    item.dataset.selected = "true";
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function syncActiveMenuItem(ctx = {}, payload = {}) {
-  const AppCore = ctx.AppCore || ctx;
-  const Router = getRouter(AppCore, ctx.Router);
-  const menu = sidebarMenu(AppCore, ctx.getElements);
-
-  if (!menu) return null;
-
-  const current = currentPath(AppCore, Router, payload);
-
-  clearActive(menu);
-
-  let active = null;
-
-  for (const item of menuItems(menu)) {
-    if (canonicalPath(routeFromElement(item)) === current) {
-      active = item;
-      break;
-    }
-  }
-
-  if (active) setActive(active);
-
-  emit(AppCore, "sidebar:active:item:synced", {
-    matched: Boolean(active),
-    route: active ? routeFromElement(active) : "",
-    current,
-  });
-
-  return active;
-}
-
-export function syncActiveMenuIndicator(ctx = {}, options = {}) {
-  const AppCore = ctx.AppCore || ctx;
-  const menu = sidebarMenu(AppCore, ctx.getElements);
-
-  if (!menu) return false;
-
-  try {
-    menu.dataset.indicatorReady = "false";
-    menu.dataset.indicatorReason = options.reason || "disabled";
-    menu.style.setProperty("--sidebar-indicator-opacity", "0");
-  } catch {
-    // noop
-  }
-
-  return true;
-}
-
-export function scheduleActiveMenuIndicator(ctx = {}, options = {}) {
-  syncActiveMenuItem(ctx, options);
-  return syncActiveMenuIndicator(ctx, options);
-}
-
-export function hideActiveMenuIndicator(ctx = {}, reason = "hide") {
-  return syncActiveMenuIndicator(ctx, {
-    reason,
-    reveal: false,
-  });
-}
-
-export function beginSidebarLayoutTransition(ctx = {}, reason = "transition") {
-  return hideActiveMenuIndicator(ctx, `${reason}:begin`);
-}
-
-export function endSidebarLayoutTransition(ctx = {}, reason = "transition") {
-  syncActiveMenuItem(ctx, {
-    reason: `${reason}:end`,
-  });
-
-  return syncActiveMenuIndicator(ctx, {
-    reason: `${reason}:end`,
-  });
-}
-
-/* =========================================================
-   HANDLERS
-========================================================= */
-
-function hiddenTarget(target = null) {
-  const hidden = closest(
-    target,
-    "[hidden], [inert], [aria-hidden='true'], [data-sidebar-visible='false'], [data-role-visible='false'], [data-admin-visible='false']"
-  );
-
-  return Boolean(hidden);
-}
-
-function primaryClick(event = null) {
-  return !event || event.button === 0;
-}
-
-function modifiedClick(event = null) {
-  return Boolean(event?.metaKey || event?.ctrlKey || event?.shiftKey || event?.altKey);
-}
-
-function browserShouldHandle(element = null, event = null) {
-  if (!element) return true;
-  if (!primaryClick(event) || modifiedClick(event)) return true;
-  if (element.hasAttribute?.("download")) return true;
-  if (element.getAttribute?.("target") === "_blank") return true;
   return false;
 }
 
-export function handleSidebarMenuClick({
-  AppCore = null,
-  Router = null,
-  event = null,
-  closeDropdown = null,
-  getElements = null,
-} = {}) {
+/* =========================================================
+   HANDLER
+========================================================= */
+
+export function handleSidebarClick(event = null, context = {}) {
   if (wasHandled(event)) return false;
 
-  const menu = sidebarMenu(AppCore, getElements);
+  const ctx = isObject(context) ? context : {};
+  const root = resolveRoot(ctx);
   const target = targetOf(event);
-  const link = closest(target, "[data-sidebar-nav-link], a[data-spa], a[href], [data-route]");
 
-  if (!menu || !link || !contains(menu, link)) return false;
-  if (hiddenTarget(link)) {
-    prevent(event);
-    markHandled(event, "hidden-target");
+  if (!isElement(root) || !target || !contains(root, target)) {
     return false;
   }
 
-  if (browserShouldHandle(link, event)) return false;
+  const logoutButton = closestInsideRoot(
+    target,
+    SIDEBAR_SELECTORS.logout,
+    root
+  );
 
-  const path = routeFromElement(link);
+  if (logoutButton) {
+    prevent(event);
+    markHandled(event, "sidebar:logout");
 
-  if (!path) return false;
+    void handleLogout({
+      ...ctx,
+      root,
+    }).finally(() => {
+      syncAfterAction(ctx);
+    });
+
+    return true;
+  }
+
+  const toggleButton = closestInsideRoot(
+    target,
+    SIDEBAR_SELECTORS.toggle,
+    root
+  );
+
+  if (toggleButton) {
+    prevent(event);
+    markHandled(event, "sidebar:toggle");
+
+    toggleSidebar({
+      ...ctx,
+      root,
+    });
+
+    return true;
+  }
+
+  const link = closestInsideRoot(
+    target,
+    sidebarLinkSelector(),
+    root
+  );
+
+  if (!link) return false;
+  if (isHiddenOrDisabled(link)) return false;
+  if (browserShouldOwnClick(link, event)) return false;
+
+  const href = getElementTarget(link);
+
+  if (!href) return false;
 
   prevent(event);
-  markHandled(event, "sidebar-menu:navigate");
+  markHandled(event, "sidebar:navigate");
 
-  try {
-    closeDropdown?.();
-  } catch {
-    // noop
-  }
-
-  clearActive(menu);
-  setActive(link);
-
-  emit(AppCore, "sidebar:navigation:request", {
-    target: path,
-  });
-
-  void navigate(AppCore, Router, path, "sidebar-menu").then(() => {
-    syncActiveMenuItem({ AppCore, Router, getElements }, { path });
-  });
-
-  return true;
-}
-
-export function handleDocumentClick({
-  AppCore = null,
-  Router = null,
-  event = null,
-  toggleSidebar = null,
-  toggleDropdown = null,
-  closeDropdown = null,
-  handleLogout = null,
-  getElements = null,
-} = {}) {
-  if (wasHandled(event)) return false;
-
-  const root = sidebarRoot(AppCore, getElements);
-  const target = targetOf(event);
-
-  if (!target) return false;
-
-  const sidebarToggle = closest(target, "[data-sidebar-toggle], [data-topbar-sidebar-toggle]");
-  if (sidebarToggle) {
-    prevent(event);
-    markHandled(event, "sidebar-toggle");
-    toggleSidebar?.();
-    return true;
-  }
-
-  const userToggle = closest(target, "[data-sidebar-user-toggle], [data-user-toggle]");
-  if (userToggle && root && contains(root, userToggle)) {
-    prevent(event);
-    markHandled(event, "user-toggle");
-    toggleDropdown?.();
-    return true;
-  }
-
-  const logout = closest(target, "[data-sidebar-logout]");
-  if (logout && root && contains(root, logout)) {
-    prevent(event);
-    markHandled(event, "logout");
-    void handleLogout?.();
-    return true;
-  }
-
-  if (handleSidebarMenuClick({ AppCore, Router, event, closeDropdown, getElements })) {
-    return true;
-  }
-
-  if (root && !contains(root, target)) {
-    try {
-      closeDropdown?.();
-    } catch {
-      // noop
-    }
-  }
-
-  return false;
-}
-
-export function handleUserToggleKeydown({
-  event = null,
-  toggleDropdown = null,
-  closeDropdown = null,
-  openDropdown = null,
-} = {}) {
-  if (wasHandled(event)) return false;
-
-  if (event?.key === "Enter" || event?.key === " ") {
-    prevent(event);
-    markHandled(event, "user-toggle:key");
-    toggleDropdown?.();
-    return true;
-  }
-
-  if (event?.key === "Escape") {
-    prevent(event);
-    markHandled(event, "user-toggle:escape");
-    closeDropdown?.();
-    return true;
-  }
-
-  if (event?.key === "ArrowDown") {
-    prevent(event);
-    markHandled(event, "user-toggle:arrow-down");
-    openDropdown?.();
-    return true;
-  }
-
-  return false;
-}
-
-export function handleGlobalKeydown({ event = null, closeDropdown = null } = {}) {
-  if (event?.key !== "Escape") return false;
-
-  closeDropdown?.();
-  return true;
-}
-
-export function handleResize({
-  AppCore = null,
-  Router = null,
-  syncSidebarState = null,
-  closeDropdown = null,
-  getElements = null,
-} = {}) {
-  try {
-    syncSidebarState?.();
-  } catch {
-    // noop
-  }
-
-  try {
-    closeDropdown?.();
-  } catch {
-    // noop
-  }
-
-  syncActiveMenuItem({
-    AppCore,
-    Router,
-    getElements,
+  void navigateFromSidebar({
+    ...ctx,
+    root,
+    target: href,
+  }).finally(() => {
+    syncAfterAction(ctx);
   });
 
   return true;
 }
 
 /* =========================================================
-   BIND / CLEANUP
+   BIND / UNBIND
 ========================================================= */
 
-function addCleanup(scope = DEFAULT_SCOPE, cleanup = null) {
-  if (!isFunction(cleanup)) return false;
+export function bindSidebarEvents(context = {}) {
+  const root = resolveRoot(context);
 
-  const key = scopeName(scope);
-  const list = cleanups.get(key) || [];
+  if (!isElement(root)) return false;
 
-  list.push(cleanup);
-  cleanups.set(key, list);
+  if (boundRoot === root && boundHandler) {
+    return true;
+  }
 
-  return true;
+  unbindSidebarEvents();
+
+  boundHandler = (event) => {
+    handleSidebarClick(event, context);
+  };
+
+  try {
+    root.addEventListener("click", boundHandler);
+    boundRoot = root;
+    return true;
+  } catch {
+    boundRoot = null;
+    boundHandler = null;
+    return false;
+  }
 }
 
-function bind(target = null, eventName = "", handler = null, options = undefined, scope = DEFAULT_SCOPE) {
-  if (!target || !eventName || !isFunction(handler) || !isFunction(target.addEventListener)) {
-    return false;
+export function unbindSidebarEvents() {
+  if (!boundRoot || !boundHandler) {
+    boundRoot = null;
+    boundHandler = null;
+    return true;
   }
 
   try {
-    target.addEventListener(eventName, handler, options);
-    addCleanup(scope, () => target.removeEventListener(eventName, handler, options));
-    return true;
+    boundRoot.removeEventListener("click", boundHandler);
   } catch {
-    return false;
-  }
-}
-
-export function bindDomEvents(ctx = {}) {
-  if (!isBrowser()) return () => {};
-
-  const AppCore = ctx.AppCore || null;
-  const scope = scopeName(ctx.scope);
-  const root = sidebarRoot(AppCore, ctx.getElements);
-
-  disposeSidebarEvents(scope);
-
-  if (!root) return () => {};
-
-  const clickHandler = (event) => handleDocumentClick({
-    ...ctx,
-    event,
-  });
-
-  const keyHandler = (event) => {
-    handleUserToggleKeydown({
-      ...ctx,
-      event,
-    });
-    handleGlobalKeydown({
-      ...ctx,
-      event,
-    });
-  };
-
-  bind(root, "click", clickHandler, false, scope);
-  bind(root, "keydown", keyHandler, false, scope);
-
-  emit(AppCore, "sidebar:dom-events:bound", {
-    scope,
-  });
-
-  return () => disposeSidebarEvents(scope);
-}
-
-export function bindCoreEvents(ctx = {}) {
-  const AppCore = ctx.AppCore || null;
-  const scope = scopeName(ctx.scope);
-
-  emit(AppCore, "sidebar:core-events:bound", {
-    scope,
-    noop: true,
-  });
-
-  return () => true;
-}
-
-export function disposeSidebarEvents(scope = DEFAULT_SCOPE) {
-  const key = scopeName(scope);
-  const list = cleanups.get(key) || [];
-
-  while (list.length) {
-    try {
-      list.pop()?.();
-    } catch {
-      // noop
-    }
+    // noop
   }
 
-  cleanups.delete(key);
+  boundRoot = null;
+  boundHandler = null;
 
   return true;
 }
@@ -747,29 +347,12 @@ export function disposeSidebarEvents(scope = DEFAULT_SCOPE) {
    SNAPSHOT
 ========================================================= */
 
-export function getSidebarEventsSnapshot(scope = DEFAULT_SCOPE) {
-  const key = scopeName(scope);
-
+export function getSidebarEventsSnapshot() {
   return {
     version: SIDEBAR_EVENTS_VERSION,
-
-    scope: key,
-    cleanupCount: cleanups.get(key)?.length || 0,
-
-    hasBrowser: isBrowser(),
-
-    currentRoute: isBrowser()
-      ? canonicalPath(window.location.pathname)
-      : "/",
-
-    policy: {
-      compatOnly: true,
-      noImports: true,
-      noCoreEventStorm: true,
-      noRouteAliases: true,
-      noCustomEvent: true,
-      noTimers: true,
-    },
+    bound: Boolean(boundRoot && boundHandler),
+    hasRoot: Boolean(boundRoot),
+    rootId: boundRoot?.id || "",
   };
 }
 
@@ -780,22 +363,10 @@ export function getSidebarEventsSnapshot(scope = DEFAULT_SCOPE) {
 export default {
   SIDEBAR_EVENTS_VERSION,
 
-  bindDomEvents,
-  bindCoreEvents,
-  disposeSidebarEvents,
+  handleSidebarClick,
+
+  bindSidebarEvents,
+  unbindSidebarEvents,
+
   getSidebarEventsSnapshot,
-
-  handleDocumentClick,
-  handleSidebarMenuClick,
-  handleUserToggleKeydown,
-  handleGlobalKeydown,
-  handleResize,
-
-  syncActiveMenuItem,
-  syncActiveMenuIndicator,
-  scheduleActiveMenuIndicator,
-  hideActiveMenuIndicator,
-
-  beginSidebarLayoutTransition,
-  endSidebarLayoutTransition,
 };

@@ -9,7 +9,8 @@
    - Clases comunes.
    - Metadatos visuales mínimos de rutas.
    - Roles únicos: admin / user.
-   - Home privada compatible con /@slug.
+   - Home interna: /
+   - Home visible de usuario: /@{user.slug}
    - Sin imports.
    - Sin DOM.
    - Sin Auth.
@@ -18,10 +19,11 @@
    - Sin storage.
    - Sin dropdown.
    - Sin rutas legacy.
+   - Sin /home.
    - Sin compatibilidad fantasma.
 ========================================================= */
 
-export const SIDEBAR_CONSTANTS_VERSION = "sidebar.constants.v1";
+export const SIDEBAR_CONSTANTS_VERSION = "sidebar.constants.v2";
 
 /* =========================================================
    HELPERS INTERNOS
@@ -52,6 +54,12 @@ export const SIDEBAR_ROOT_ID = "app-sidebar";
 export const SIDEBAR_MOUNT_ID = "sidebar-mount";
 
 export const SIDEBAR_BRAND_LABEL = "Onion Support";
+
+/*
+  Fallback interno.
+  El controlador del sidebar debe resolver la Home visible real:
+    /@{user.slug}
+*/
 export const SIDEBAR_BRAND_HREF = "/";
 
 /* =========================================================
@@ -66,16 +74,29 @@ export const SIDEBAR_ROLES = freeze({
   user: SIDEBAR_ROLE_USER,
 });
 
-export function normalizeSidebarRole(value = "") {
+export function isSidebarRole(value = "") {
+  const role = String(value || "").toLowerCase();
+  return role === SIDEBAR_ROLE_ADMIN || role === SIDEBAR_ROLE_USER;
+}
+
+export function normalizeSidebarRole(value = "", fallback = SIDEBAR_ROLE_USER) {
   if (Array.isArray(value)) {
-    return value.map(normalizeSidebarRole).includes(SIDEBAR_ROLE_ADMIN)
-      ? SIDEBAR_ROLE_ADMIN
-      : SIDEBAR_ROLE_USER;
+    const roles = value
+      .map((role) => normalizeSidebarRole(role, ""))
+      .filter(Boolean);
+
+    if (roles.includes(SIDEBAR_ROLE_ADMIN)) return SIDEBAR_ROLE_ADMIN;
+    if (roles.includes(SIDEBAR_ROLE_USER)) return SIDEBAR_ROLE_USER;
+
+    return isSidebarRole(fallback) ? fallback : SIDEBAR_ROLE_USER;
   }
 
-  return String(value || "").toLowerCase() === SIDEBAR_ROLE_ADMIN
-    ? SIDEBAR_ROLE_ADMIN
-    : SIDEBAR_ROLE_USER;
+  const role = String(value || "").toLowerCase();
+
+  if (role === SIDEBAR_ROLE_ADMIN) return SIDEBAR_ROLE_ADMIN;
+  if (role === SIDEBAR_ROLE_USER) return SIDEBAR_ROLE_USER;
+
+  return isSidebarRole(fallback) ? fallback : SIDEBAR_ROLE_USER;
 }
 
 /* =========================================================
@@ -87,10 +108,11 @@ export const USER_HOME_PREFIX = "/@";
 
 export const INCIDENCIAS_ROUTE = "/incidencias";
 export const FACTURAS_ROUTE = "/facturas";
-export const USUARIOS_ROUTE = "/usuarios";
 export const CLIENTES_ROUTE = "/clientes";
 export const CUENTA_ROUTE = "/cuenta";
 export const AJUSTES_ROUTE = "/ajustes";
+
+export const USUARIOS_ROUTE = "/usuarios";
 export const SERVER_ROUTE = "/servidor";
 
 export const LOGIN_ROUTE = "/login";
@@ -124,20 +146,18 @@ export const SIDEBAR_ADMIN_FALLBACK_ROUTES = freeze([
 export function normalizeSidebarPath(path = "/") {
   let value = text(path, "/").replace(/\\/g, "/");
 
-  if (value.startsWith("#/")) {
+  if (value.startsWith("#!")) {
+    value = value.replace(/^#!\/?/, "/");
+  } else if (value.startsWith("#/")) {
     value = value.slice(1);
   }
 
-  if (value.startsWith("#!")) {
-    value = value.replace(/^#!\/?/, "/");
-  }
-
   if (value.startsWith("//")) {
-    return "/";
+    return HOME_ROUTE;
   }
 
   if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
-    return "/";
+    return HOME_ROUTE;
   }
 
   if (!value.startsWith("/")) {
@@ -146,28 +166,56 @@ export function normalizeSidebarPath(path = "/") {
 
   value = value.replace(/\/{2,}/g, "/");
 
-  return value || "/";
+  return value || HOME_ROUTE;
 }
 
 export function canonicalSidebarPath(path = "/") {
-  let value = normalizeSidebarPath(path).split("?")[0].split("#")[0] || "/";
+  let value = normalizeSidebarPath(path).split("?")[0].split("#")[0] || HOME_ROUTE;
 
   if (value.length > 1) {
-    value = value.replace(/\/+$/g, "");
+    value = value.replace(/\/+$/g, "") || HOME_ROUTE;
   }
 
-  return value || "/";
+  return value || HOME_ROUTE;
+}
+
+export function normalizeSidebarSlug(value = "") {
+  const slug = text(value, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+
+  if (!slug) return "";
+
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
+export function getSidebarUserHomeSlugFromPath(path = "/") {
+  const route = canonicalSidebarPath(path);
+
+  if (!route.startsWith(USER_HOME_PREFIX)) return "";
+
+  const rawSlug = route.slice(USER_HOME_PREFIX.length);
+
+  if (!rawSlug || rawSlug.includes("/")) return "";
+
+  return normalizeSidebarSlug(rawSlug);
+}
+
+export function isSidebarUserHomeRoute(path = "/") {
+  return Boolean(getSidebarUserHomeSlugFromPath(path));
 }
 
 export function isSidebarHomeRoute(path = "/") {
   const route = canonicalSidebarPath(path);
+  return route === HOME_ROUTE || isSidebarUserHomeRoute(route);
+}
 
-  if (route === HOME_ROUTE) return true;
-  if (!route.startsWith(USER_HOME_PREFIX)) return false;
-
-  const slug = route.slice(USER_HOME_PREFIX.length);
-
-  return Boolean(slug && !slug.includes("/"));
+export function sidebarHomeLookupPath(path = "/") {
+  return isSidebarHomeRoute(path) ? HOME_ROUTE : canonicalSidebarPath(path);
 }
 
 export function isSidebarPublicRoute(path = "/") {
@@ -259,7 +307,7 @@ function fallbackRouteMeta(path = "/") {
   return freeze({
     key,
     label:
-      route === "/"
+      route === HOME_ROUTE
         ? "Inicio"
         : key
             .split("/")
@@ -379,6 +427,7 @@ export const SIDEBAR_CLASSES = freeze({
 export const SIDEBAR_ICONS = freeze({
   brand: "brand",
   menu: "menu",
+
   home: "home",
   incidencias: "incidencias",
   facturas: "facturas",
@@ -387,12 +436,12 @@ export const SIDEBAR_ICONS = freeze({
   cuenta: "cuenta",
   ajustes: "ajustes",
   servidor: "servidor",
+
   logout: "logout",
 });
 
 export function normalizeSidebarIcon(value = "") {
   const icon = text(value, "home").toLowerCase();
-
   return SIDEBAR_ICONS[icon] || SIDEBAR_ICONS.home;
 }
 
@@ -433,6 +482,7 @@ export function getSidebarConstantsSnapshot() {
     routes: {
       home: HOME_ROUTE,
       userHomePrefix: USER_HOME_PREFIX,
+
       public: SIDEBAR_PUBLIC_ROUTES,
       privateFallback: SIDEBAR_PRIVATE_FALLBACK_ROUTES,
       adminFallback: SIDEBAR_ADMIN_FALLBACK_ROUTES,
@@ -444,6 +494,22 @@ export function getSidebarConstantsSnapshot() {
     classes: SIDEBAR_CLASSES,
     icons: SIDEBAR_ICONS,
     actions: SIDEBAR_ACTIONS,
+
+    policy: {
+      constantsOnly: true,
+      noImports: true,
+      noDom: true,
+      noAuth: true,
+      noRouter: true,
+      noStore: true,
+      noStorage: true,
+      noDropdown: true,
+      noLegacyRoutes: true,
+      noHomeRoute: true,
+      userSlugHome: true,
+      validatesAtSlugShape: true,
+      roles: [SIDEBAR_ROLE_ADMIN, SIDEBAR_ROLE_USER],
+    },
   });
 }
 
@@ -466,16 +532,18 @@ export default freeze({
   SIDEBAR_ROLE_ADMIN,
   SIDEBAR_ROLE_USER,
   SIDEBAR_ROLES,
+  isSidebarRole,
   normalizeSidebarRole,
 
   HOME_ROUTE,
   USER_HOME_PREFIX,
+
   INCIDENCIAS_ROUTE,
   FACTURAS_ROUTE,
-  USUARIOS_ROUTE,
   CLIENTES_ROUTE,
   CUENTA_ROUTE,
   AJUSTES_ROUTE,
+  USUARIOS_ROUTE,
   SERVER_ROUTE,
 
   LOGIN_ROUTE,
@@ -489,7 +557,13 @@ export default freeze({
 
   normalizeSidebarPath,
   canonicalSidebarPath,
+
+  normalizeSidebarSlug,
+  getSidebarUserHomeSlugFromPath,
+  isSidebarUserHomeRoute,
   isSidebarHomeRoute,
+  sidebarHomeLookupPath,
+
   isSidebarPublicRoute,
   isSidebarAdminFallbackRoute,
 

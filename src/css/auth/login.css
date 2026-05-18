@@ -2,16 +2,16 @@
    ONION SUPPORT — AUTH / LOGIN
    Archivo: src/css/auth/login.css
 
-   LOGIN CSS · MINIMAL
-   - Sin :root
-   - Sin tokens nuevos
-   - Sin layout lateral
-   - Sin theme toggle
-   - Sin OTP / códigos
-   - Login centrado
-   - Password eye visible
-   - Compatible con login.template.js
-   - Compatible con shared/password-field
+   Responsabilidad:
+   - Pantallas auth simples y centradas.
+   - Login / password reset con card única.
+   - Compatible con shared/password-field.
+   - Sin :root.
+   - Sin tokens nuevos.
+   - Sin layout lateral.
+   - Sin theme toggle.
+   - Sin OTP / códigos.
+   - Sin !important.
 ========================================================= */
 
 
@@ -37,7 +37,7 @@ body.auth-screen #tablehead-container,
 body.auth-screen .table-head,
 body.auth-screen [data-tablehead],
 body.auth-screen [data-tablehead-container] {
-  display: none !important;
+  display: none;
 }
 
 body.auth-screen #app-shell {
@@ -48,11 +48,11 @@ body.auth-screen #app-shell {
 body.auth-screen .main-content {
   position: fixed;
   inset: 0;
-  inline-size: 100% !important;
-  max-inline-size: 100% !important;
+  inline-size: 100%;
+  max-inline-size: 100%;
   min-block-size: 100vh;
   min-block-size: 100dvh;
-  margin: 0 !important;
+  margin: 0;
   overflow: auto;
 }
 
@@ -60,7 +60,7 @@ body.auth-screen #app-content,
 body.auth-screen #view-container {
   min-block-size: 100vh;
   min-block-size: 100dvh;
-  padding: 0 !important;
+  padding: 0;
 }
 
 body.auth-screen #view-container {
@@ -120,7 +120,7 @@ body.auth-screen.auth-no-scroll {
     linear-gradient(color-mix(in srgb, var(--text-strong) 2%, transparent) 1px, transparent 1px),
     linear-gradient(90deg, color-mix(in srgb, var(--text-strong) 2%, transparent) 1px, transparent 1px);
   background-size: 34px 34px;
-  opacity: .26;
+  opacity: .24;
   mask-image: linear-gradient(180deg, rgb(0 0 0 / .24), transparent 78%);
   -webkit-mask-image: linear-gradient(180deg, rgb(0 0 0 / .24), transparent 78%);
 }
@@ -357,7 +357,6 @@ body.auth-screen.auth-no-scroll {
   display: block;
   inline-size: 100%;
   min-inline-size: 0;
-  isolation: isolate;
 }
 
 .password-wrapper .input-text,
@@ -378,8 +377,8 @@ body.auth-screen.auth-no-scroll {
   position: absolute;
   inset-block-start: 50%;
   inset-inline-end: 8px;
-  z-index: 5;
-  display: inline-grid !important;
+  z-index: 2;
+  display: inline-grid;
   place-items: center;
   inline-size: 40px;
   block-size: 40px;
@@ -392,9 +391,6 @@ body.auth-screen.auth-no-scroll {
   color: var(--text-dim);
   line-height: 0;
   cursor: pointer;
-  opacity: 1;
-  visibility: visible;
-  pointer-events: auto;
   transform: translateY(-50%);
   transition:
     background var(--duration-normal) var(--ease-standard),
@@ -443,13 +439,11 @@ body.auth-screen.auth-no-scroll {
 
 .password-toggle-icon,
 [data-password-toggle-icon] {
-  display: inline-grid !important;
+  display: inline-grid;
   place-items: center;
   inline-size: 20px;
   block-size: 20px;
   color: currentColor;
-  opacity: 1;
-  visibility: visible;
   pointer-events: none;
 }
 
@@ -462,13 +456,11 @@ body.auth-screen.auth-no-scroll {
   block-size: 20px;
   color: currentColor;
   stroke: currentColor;
-  opacity: 1;
-  visibility: visible;
 }
 
 .password-eye-icon[hidden],
 .password-eye-off-icon[hidden] {
-  display: none !important;
+  display: none;
 }
 
 .password-wrapper input::-ms-reveal,
@@ -478,14 +470,13 @@ body.auth-screen.auth-no-scroll {
   display: none;
 }
 
-/* El flujo actual no muestra CapsLock. */
 .login-view .password-caps,
 .login-view [data-password-caps],
 .login-view .caps-indicator,
 .auth-view .password-caps,
 .auth-view [data-password-caps],
 .auth-view .caps-indicator {
-  display: none !important;
+  display: none;
 }
 
 
@@ -785,7 +776,7 @@ body.auth-screen.auth-no-scroll {
 .login-message[hidden],
 .auth-error[hidden],
 .login-error[hidden] {
-  display: none !important;
+  display: none;
 }
 
 .auth-message.is-success,
@@ -1046,7 +1037,7 @@ body.auth-screen.auth-no-scroll {
   .login-view__spinner,
   .auth-card.shake,
   .login-card.shake {
-    animation: none !important;
+    animation: none;
   }
 
   .auth-button,
@@ -1057,12 +1048,12 @@ body.auth-screen.auth-no-scroll {
   [data-password-input],
   .password-toggle,
   [data-password-toggle] {
-    transition: none !important;
+    transition: none;
   }
 
   .auth-button:hover,
   .login-button:hover {
-    transform: none !important;
+    transform: none;
   }
 }
 
@@ -1070,8 +1061,8 @@ body.auth-screen.auth-no-scroll {
   body.auth-screen,
   .auth-view,
   .login-view {
-    background: Canvas !important;
-    color: CanvasText !important;
+    background: Canvas;
+    color: CanvasText;
   }
 
   .auth-view,
@@ -1080,15 +1071,15 @@ body.auth-screen.auth-no-scroll {
   .login-shell,
   .auth-card,
   .login-card {
-    display: block !important;
-    inline-size: 100% !important;
-    max-inline-size: none !important;
-    min-block-size: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    overflow: visible !important;
-    border: 0 !important;
-    background: transparent !important;
-    box-shadow: none !important;
+    display: block;
+    inline-size: 100%;
+    max-inline-size: none;
+    min-block-size: 0;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
   }
 }

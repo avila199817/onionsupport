@@ -6,6 +6,7 @@
    - Sidebar mínimo del panel.
    - Montar en #sidebar-mount / #app-sidebar.
    - Pintar rutas privadas reales.
+   - SVGs inline mínimos.
    - Ocultar rutas admin si no eres admin.
    - Marcar ruta activa.
    - Mostrar usuario básico.
@@ -13,10 +14,9 @@
    - Sin Store.
    - Sin HTTP.
    - Sin Toast.
-   - Sin dropdown complejo.
-   - Sin indicadores complejos.
    - Sin submódulos.
-   - Sin eventos masivos.
+   - Sin dropdown complejo.
+   - Sin event storms.
    - Sin magia negra.
 ========================================================= */
 
@@ -28,7 +28,7 @@ import {
   getImmutableRoutes,
 } from "../../router/routes.js";
 
-export const SIDEBAR_UI_VERSION = "simple";
+export const SIDEBAR_UI_VERSION = "simple-svg";
 
 const SOURCE = "sidebar.ui";
 const LOGIN_ROUTE = "/login";
@@ -38,6 +38,46 @@ let mounted = false;
 let logoutInFlight = false;
 let root = null;
 let cleanupClick = null;
+
+/* =========================================================
+   SVG ICONS
+========================================================= */
+
+const ICONS = Object.freeze({
+  brand: "M12 2.5c4.3 0 7.5 3.1 7.5 7.3 0 5.1-4.5 9.5-7.5 11.7-3-2.2-7.5-6.6-7.5-11.7C4.5 5.6 7.7 2.5 12 2.5Zm0 4.2a3.3 3.3 0 1 0 0 6.6 3.3 3.3 0 0 0 0-6.6Z",
+  menu: "M4 6h16 M4 12h16 M4 18h16",
+  home: "M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1v-9.5Z",
+  incidencias: "M12 8v4l3 2m6-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
+  facturas: "M6 2h9l5 5v15H6z M14 2v6h6 M8.5 12h7 M8.5 16h5",
+  usuarios: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M4 21c0-4 4-7 8-7s8 3 8 7",
+  clientes: "M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M8 12a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z M2.5 21c0-3.3 2.8-6 6.2-6s6.2 2.7 6.2 6 M13.5 15.2c.8-.3 1.7-.5 2.7-.5 3 0 5.3 2.3 5.3 5.3",
+  cuenta: "M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M5.5 21a6.5 6.5 0 0 1 13 0",
+  ajustes: "M4 6h10 M4 12h6 M4 18h12 M16 4a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z M12 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z M18 16a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z",
+  servidor: "M4 5h16v5H4z M4 14h16v5H4z M8 7.5h.01 M8 16.5h.01 M11 7.5h5 M11 16.5h5",
+  logout: "M16 17l5-5-5-5 M21 12H9 M4 4h5v16H4z",
+});
+
+function icon(name = "home", className = "sidebar-svg") {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+
+  svg.setAttribute("class", className);
+  svg.setAttribute("width", "18");
+  svg.setAttribute("height", "18");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("focusable", "false");
+  svg.setAttribute("aria-hidden", "true");
+
+  path.setAttribute("d", ICONS[name] || ICONS.home);
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "1.7");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+
+  svg.appendChild(path);
+  return svg;
+}
 
 /* =========================================================
    BASICS
@@ -81,6 +121,10 @@ function emit(eventName = "", payload = {}) {
     return false;
   }
 }
+
+/* =========================================================
+   PATHS
+========================================================= */
 
 function normalizePath(path = "/") {
   let value = text(path, "/");
@@ -174,7 +218,8 @@ function normalizeRole(value = "") {
 function getRole() {
   try {
     const role = Auth?.getRole?.() || Auth?.getCurrentRole?.();
-    return normalizeRole(role);
+
+    if (role) return normalizeRole(role);
   } catch {
     // noop
   }
@@ -191,9 +236,9 @@ function isAdmin() {
 
 function displayName(user = null) {
   return text(
-    user?.displayName ||
+    user?.name ||
       user?.fullName ||
-      user?.name ||
+      user?.displayName ||
       user?.nombre ||
       user?.username ||
       user?.email ||
@@ -286,11 +331,8 @@ function setActive(node, active = false) {
     node.classList.toggle("router-active", active);
     node.dataset.active = active ? "true" : "false";
 
-    if (active) {
-      node.setAttribute("aria-current", "page");
-    } else {
-      node.removeAttribute("aria-current");
-    }
+    if (active) node.setAttribute("aria-current", "page");
+    else node.removeAttribute("aria-current");
 
     return true;
   } catch {
@@ -321,8 +363,12 @@ function cacheRoot(node) {
   return node;
 }
 
+/* =========================================================
+   ROOT
+========================================================= */
+
 function buildRoot() {
-  const aside = create("aside", {
+  return create("aside", {
     className: "sidebar app-sidebar",
     attrs: {
       id: "app-sidebar",
@@ -330,43 +376,6 @@ function buildRoot() {
       "aria-label": "Navegación principal",
     },
   });
-
-  const header = create("header", {
-    className: "sidebar-header",
-  });
-
-  const brand = create("a", {
-    className: "sidebar-brand",
-    textContent: "Onion Support",
-    attrs: {
-      href: "/",
-      "data-spa": "",
-      "data-sidebar-brand": "true",
-    },
-  });
-
-  header.appendChild(brand);
-
-  const nav = create("nav", {
-    className: "sidebar-nav",
-    attrs: {
-      "aria-label": "Secciones",
-    },
-    dataset: {
-      sidebarNav: "true",
-    },
-  });
-
-  const footer = create("footer", {
-    className: "sidebar-footer",
-    dataset: {
-      sidebarFooter: "true",
-    },
-  });
-
-  aside.append(header, nav, footer);
-
-  return aside;
 }
 
 function ensureRoot() {
@@ -418,6 +427,95 @@ function routeTitle(route = null) {
   return text(route?.title || route?.label || route?.name || route?.path || "Ruta", "Ruta");
 }
 
+function routeIcon(route = null) {
+  const path = canonicalPath(route?.path || "");
+  const key = String(route?.viewKey || route?.name || route?.id || "").toLowerCase();
+
+  if (path === "/") return "home";
+  if (path === "/incidencias" || key.includes("incidencia") || key.includes("ticket")) return "incidencias";
+  if (path === "/facturas" || key.includes("factura") || key.includes("invoice")) return "facturas";
+  if (path === "/usuarios" || key.includes("usuario") || key.includes("user")) return "usuarios";
+  if (path === "/clientes" || key.includes("cliente") || key.includes("client")) return "clientes";
+  if (path === "/cuenta" || key.includes("cuenta") || key.includes("account")) return "cuenta";
+  if (path === "/ajustes" || key.includes("ajuste") || key.includes("setting")) return "ajustes";
+  if (path === "/servidor" || key.includes("servidor") || key.includes("server")) return "servidor";
+
+  return "home";
+}
+
+/* =========================================================
+   RENDER
+========================================================= */
+
+function renderShell() {
+  if (!root) return false;
+
+  clear(root);
+
+  const header = create("header", {
+    className: "sidebar-header",
+  });
+
+  const brand = create("a", {
+    className: "sidebar-brand",
+    attrs: {
+      href: "/",
+      "data-spa": "",
+      "data-sidebar-brand": "true",
+    },
+  });
+
+  const brandIcon = create("span", {
+    className: "sidebar-brand-icon",
+    attrs: {
+      "aria-hidden": "true",
+    },
+  });
+
+  brandIcon.appendChild(icon("brand", "sidebar-brand-svg"));
+
+  const brandLabel = create("span", {
+    className: "sidebar-brand-label",
+    textContent: "Onion Support",
+  });
+
+  brand.append(brandIcon, brandLabel);
+
+  const toggle = create("button", {
+    className: "sidebar-toggle",
+    attrs: {
+      type: "button",
+      "aria-label": "Abrir navegación",
+      "data-sidebar-toggle": "true",
+    },
+  });
+
+  toggle.appendChild(icon("menu", "sidebar-toggle-svg"));
+
+  header.append(brand, toggle);
+
+  const nav = create("nav", {
+    className: "sidebar-nav",
+    attrs: {
+      "aria-label": "Secciones",
+    },
+    dataset: {
+      sidebarNav: "true",
+    },
+  });
+
+  const footer = create("footer", {
+    className: "sidebar-footer",
+    dataset: {
+      sidebarFooter: "true",
+    },
+  });
+
+  root.append(header, nav, footer);
+
+  return true;
+}
+
 function renderMenu() {
   if (!root) return false;
 
@@ -437,7 +535,6 @@ function renderMenu() {
 
     const link = create("a", {
       className: "sidebar-link",
-      textContent: routeTitle(route),
       attrs: {
         href: path,
         "data-spa": "",
@@ -446,8 +543,23 @@ function renderMenu() {
       },
     });
 
-    setActive(link, active);
+    const linkIcon = create("span", {
+      className: "sidebar-link-icon",
+      attrs: {
+        "aria-hidden": "true",
+      },
+    });
 
+    linkIcon.appendChild(icon(routeIcon(route), "sidebar-link-svg"));
+
+    const label = create("span", {
+      className: "sidebar-link-label",
+      textContent: routeTitle(route),
+    });
+
+    link.append(linkIcon, label);
+
+    setActive(link, active);
     nav.appendChild(link);
   }
 
@@ -500,12 +612,27 @@ function renderUser() {
 
   const logout = create("button", {
     className: "sidebar-logout",
-    textContent: "Salir",
     attrs: {
       type: "button",
       "data-sidebar-logout": "true",
     },
   });
+
+  const logoutIcon = create("span", {
+    className: "sidebar-logout-icon",
+    attrs: {
+      "aria-hidden": "true",
+    },
+  });
+
+  logoutIcon.appendChild(icon("logout", "sidebar-logout-svg"));
+
+  const logoutLabel = create("span", {
+    className: "sidebar-logout-label",
+    textContent: "Salir",
+  });
+
+  logout.append(logoutIcon, logoutLabel);
 
   footer.append(userBox, logout);
 
@@ -513,7 +640,7 @@ function renderUser() {
 }
 
 /* =========================================================
-   STATE
+   VISIBILITY / OPEN
 ========================================================= */
 
 function sidebarHiddenByShell() {
@@ -530,9 +657,7 @@ function sidebarHiddenByShell() {
 function syncVisibility() {
   if (!root) return false;
 
-  const hidden = sidebarHiddenByShell();
-
-  setHidden(root, hidden);
+  setHidden(root, sidebarHiddenByShell());
 
   return true;
 }
@@ -583,13 +708,13 @@ async function navigateTo(path = "/", options = {}) {
   const target = normalizePath(path || "/");
 
   try {
-    if (isFunction(Router?.navigate)) {
-      await Router.navigate(target, {
+    if (isFunction(Router?.replace) && options.replaceState === true) {
+      await Router.replace(target, {
         source: SOURCE,
         ...options,
       });
-    } else if (isFunction(Router?.replace) && options.replaceState === true) {
-      await Router.replace(target, {
+    } else if (isFunction(Router?.navigate)) {
+      await Router.navigate(target, {
         source: SOURCE,
         ...options,
       });
@@ -650,11 +775,21 @@ function onClick(event) {
     return;
   }
 
+  const toggle = target?.closest?.("[data-sidebar-toggle]");
+
+  if (toggle) {
+    event.preventDefault();
+    toggleSidebar();
+    return;
+  }
+
+  const brand = target?.closest?.("[data-sidebar-brand]");
   const link = target?.closest?.("[data-sidebar-nav-link]");
+  const routeLink = link || brand;
 
-  if (!link) return;
+  if (!routeLink) return;
 
-  const href = link.getAttribute("href") || "";
+  const href = routeLink.getAttribute("href") || "";
 
   if (!href) return;
 
@@ -733,6 +868,7 @@ function sync() {
 
   if (!root) return api;
 
+  renderShell();
   renderMenu();
   renderUser();
   syncVisibility();
@@ -766,9 +902,7 @@ function init() {
 function destroy() {
   unbindEvents();
 
-  if (root) {
-    clear(root);
-  }
+  if (root) clear(root);
 
   initialized = false;
   mounted = false;
@@ -832,6 +966,7 @@ function getSnapshot() {
             href: link.getAttribute("href") || "",
             text: text(link.textContent, ""),
             active: link.dataset.active === "true",
+            hasSvg: Boolean(link.querySelector("svg")),
           }))
         : [],
     },
@@ -843,7 +978,7 @@ function getSnapshot() {
       ownStore: false,
       ownToast: false,
       noSubmodules: true,
-      noDropdownComplex: true,
+      svgIcons: true,
       roles: ["admin", "user"],
     },
   };

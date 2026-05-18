@@ -3,11 +3,11 @@
    Archivo: /src/features/auth/session.js
 
    Responsabilidad:
-   - Núcleo mínimo local de sesión Auth.
-   - Auth estricta: token + user usable.
+   - Núcleo local mínimo de sesión Auth.
+   - Auth estricta: token usable + user usable.
    - Token sin user: hasToken true, authenticated false.
    - User sin token: authenticated false.
-   - User inválido sólo si disabled.
+   - User inválido si disabled === true o status === "disabled".
    - Roles únicos: admin / user.
    - Sin fetch.
    - Sin login HTTP.
@@ -15,15 +15,12 @@
    - Sin Router.
    - Sin Toast.
    - Sin storage paralelo.
-   - Sin storage.clear().
    - Sin 2FA/MFA/OTP.
-   - Sin rutas técnicas legacy.
-   - Sin magia negra.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
-export const AUTH_SESSION_VERSION = "simple";
+export const AUTH_SESSION_VERSION = "minimal-1";
 
 const SOURCE = "auth.session";
 
@@ -43,7 +40,7 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function isFunction(value) {
+function isFn(value) {
   return typeof value === "function";
 }
 
@@ -53,21 +50,10 @@ function text(value = "", fallback = "") {
 }
 
 function nowIso() {
-  return new Date().toISOString();
-}
-
-function clone(value) {
-  if (value === undefined) return undefined;
-  if (value === null) return null;
-
   try {
-    return structuredClone(value);
+    return new Date().toISOString();
   } catch {
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch {
-      return value;
-    }
+    return "";
   }
 }
 
@@ -100,95 +86,6 @@ function cleanToken(value = "") {
   return tokenOk(value) ? stripBearer(value) : "";
 }
 
-function redactTokenInText(value = "") {
-  return text(value, "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
-}
-
-function extractMessage(error = null) {
-  return (
-    error?.data?.message ||
-    error?.response?.data?.message ||
-    error?.message ||
-    String(error || "")
-  );
-}
-
-/* =========================================================
-   USER
-========================================================= */
-
-function userDisabled(user = null) {
-  if (!isObject(user)) return true;
-
-  return (
-    user.disabled === true ||
-    String(user.status || "").toLowerCase() === "disabled"
-  );
-}
-
-function normalizeUser(user = null) {
-  if (!isObject(user)) return null;
-  if (userDisabled(user)) return null;
-
-  const id = user.userId || user.id || null;
-  const email = user.email || null;
-  const username = user.username || user.slug || email || id || null;
-
-  if (!id && !username && !email) return null;
-
-  const displayName =
-    user.name ||
-    user.fullName ||
-    user.displayName ||
-    user.nombre ||
-    username ||
-    email ||
-    id ||
-    "Usuario";
-
-  const role = cleanRole(user.role || user.rol);
-
-  return {
-    ...clone(user),
-
-    id,
-    userId: user.userId || id,
-
-    username,
-    slug: user.slug || username,
-
-    name: user.name || displayName,
-    fullName: user.fullName || displayName,
-    displayName,
-
-    email,
-
-    role,
-    rol: role,
-    userRole: role,
-    roles: [role],
-
-    isAdmin: role === "admin",
-    isSupport: false,
-    isManager: false,
-    isClient: false,
-
-    avatar: user.avatar || user.avatarUrl || user.picture || null,
-    avatarUrl: user.avatarUrl || user.avatar || user.picture || null,
-    picture: user.picture || user.avatarUrl || user.avatar || null,
-    hasAvatar: Boolean(user.avatar || user.avatarUrl || user.picture),
-
-    active: true,
-    disabled: false,
-  };
-}
-
-/* =========================================================
-   STATE
-========================================================= */
-
 function readState() {
   return isObject(AppCore?.state) ? AppCore.state : {};
 }
@@ -204,7 +101,7 @@ function commitState(patch = {}, options = {}) {
   };
 
   try {
-    if (isFunction(AppCore?.setState)) {
+    if (isFn(AppCore?.setState)) {
       AppCore.setState(cleanPatch, opts);
       return readState();
     }
@@ -213,7 +110,7 @@ function commitState(patch = {}, options = {}) {
   }
 
   try {
-    if (isFunction(AppCore?.patchState)) {
+    if (isFn(AppCore?.patchState)) {
       AppCore.patchState(cleanPatch, opts);
       return readState();
     }
@@ -230,13 +127,12 @@ function commitState(patch = {}, options = {}) {
   return readState();
 }
 
-function emit(eventName = "", payload = {}, options = {}) {
+function emitEvent(eventName = "", payload = {}, options = {}) {
   if (options.silent === true || options.emit === false || options.emitEvents === false) {
     return false;
   }
 
   const name = text(eventName, "");
-
   if (!name) return false;
 
   try {
@@ -256,8 +152,117 @@ function emit(eventName = "", payload = {}, options = {}) {
   }
 }
 
+function syncUserUI() {
+  try {
+    AppCore?.syncUserUI?.({
+      source: SOURCE,
+      reason: "auth-session",
+    });
+    return true;
+  } catch {
+    try {
+      AppCore?.syncUserUI?.();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 /* =========================================================
-   PAYLOAD EXTRACTION
+   USER
+========================================================= */
+
+function removeSensitiveUserFields(user = {}) {
+  const output = { ...user };
+
+  for (const key of [
+    "password",
+    "passwordHash",
+    "hash",
+    "salt",
+    "token",
+    "accessToken",
+    "access_token",
+    "refreshToken",
+    "refresh_token",
+    "resetToken",
+    "activationToken",
+  ]) {
+    try {
+      delete output[key];
+    } catch {
+      // noop
+    }
+  }
+
+  return output;
+}
+
+function userDisabled(user = null) {
+  if (!isObject(user)) return true;
+
+  return (
+    user.disabled === true ||
+    String(user.status || "").toLowerCase() === "disabled"
+  );
+}
+
+export function normalizeUser(user = null) {
+  if (!isObject(user)) return null;
+  if (userDisabled(user)) return null;
+
+  const safeUser = removeSensitiveUserFields(user);
+
+  const id = text(safeUser.userId || safeUser.id, "");
+  const email = text(safeUser.email, "");
+  const username = text(safeUser.username || safeUser.slug || email || id, "");
+
+  if (!id && !email && !username) return null;
+
+  const displayName = text(
+    safeUser.displayName ||
+      safeUser.fullName ||
+      safeUser.name ||
+      safeUser.nombre ||
+      username ||
+      email ||
+      id,
+    "Usuario"
+  );
+
+  const role = cleanRole(safeUser.role || safeUser.rol);
+
+  return {
+    ...safeUser,
+
+    id: id || safeUser.id || safeUser.userId || null,
+    userId: safeUser.userId || id || null,
+
+    username: username || null,
+    slug: safeUser.slug || username || null,
+
+    name: safeUser.name || displayName,
+    fullName: safeUser.fullName || displayName,
+    displayName,
+
+    email: email || null,
+
+    role,
+    rol: role,
+    userRole: role,
+    roles: [role],
+
+    active: true,
+    disabled: false,
+
+    isAdmin: role === "admin",
+    isUser: role === "user",
+  };
+}
+
+/* =========================================================
+   PAYLOAD READERS
 ========================================================= */
 
 function nested(payload = {}) {
@@ -315,24 +320,27 @@ function readUserFromPayload(payload = {}) {
 }
 
 function readSessionFromPayload(payload = {}, user = null) {
-  const session = pick(nested(payload), ["session", "sessionData"]) || {};
+  const nodes = nested(payload);
+
+  const sessionNode =
+    nodes.find((node) => isObject(node.session))?.session ||
+    nodes.find((node) => isObject(node.sessionData))?.sessionData ||
+    null;
 
   const sessionId = text(
-    session.sessionId ||
-      session.session_id ||
-      session.sid ||
-      session.id ||
-      payload.sessionId ||
-      payload.session_id ||
+    sessionNode?.sessionId ||
+      sessionNode?.session_id ||
+      sessionNode?.sid ||
+      sessionNode?.id ||
+      pick(nodes, ["sessionId", "session_id", "sid"]) ||
       "",
     ""
   );
 
-  const sessionUserId = text(
-    session.userId ||
-      session.user_id ||
-      payload.sessionUserId ||
-      payload.session_user_id ||
+  const userId = text(
+    sessionNode?.userId ||
+      sessionNode?.user_id ||
+      pick(nodes, ["sessionUserId", "session_user_id", "userId", "user_id"]) ||
       user?.userId ||
       user?.id ||
       "",
@@ -340,25 +348,24 @@ function readSessionFromPayload(payload = {}, user = null) {
   );
 
   const expiresAt =
-    session.expiresAt ||
-    session.expires_at ||
-    payload.expiresAt ||
-    payload.expires_at ||
+    sessionNode?.expiresAt ||
+    sessionNode?.expires_at ||
+    pick(nodes, ["expiresAt", "expires_at"]) ||
     null;
 
-  if (!sessionId && !sessionUserId && !expiresAt) return null;
+  if (!sessionId && !userId && !expiresAt) return null;
 
   return {
     sessionId: sessionId || null,
     id: sessionId || null,
-    userId: sessionUserId || null,
-    sessionUserId: sessionUserId || null,
+    userId: userId || null,
+    sessionUserId: userId || null,
     expiresAt,
   };
 }
 
 /* =========================================================
-   DERIVATION
+   STATE DERIVATION
 ========================================================= */
 
 function bestStateToken() {
@@ -386,21 +393,33 @@ function bestStateUser() {
   );
 }
 
+function sameSessionUser(session = null, user = null) {
+  if (!session || !user) return false;
+
+  const sessionUserId = text(session.userId || session.sessionUserId, "");
+  const userId = text(user.userId || user.id, "");
+
+  if (!sessionUserId || !userId) return true;
+
+  return sessionUserId === userId;
+}
+
 function bestStateSession(user = bestStateUser()) {
   const state = readState();
 
-  return (
+  const session =
     readSessionFromPayload(state.session || {}, user) ||
     readSessionFromPayload(state.sessionData || {}, user) ||
-    null
-  );
+    null;
+
+  return sameSessionUser(session, user) ? session : null;
 }
 
 function buildStatePatch({ token = "", user = null, session = null } = {}) {
-  const clean = cleanToken(token);
+  const safeToken = cleanToken(token);
   const safeUser = normalizeUser(user);
 
-  const hasToken = Boolean(clean);
+  const hasToken = Boolean(safeToken);
   const authenticated = Boolean(hasToken && safeUser);
   const role = authenticated ? cleanRole(safeUser.role || safeUser.rol) : null;
 
@@ -415,9 +434,9 @@ function buildStatePatch({ token = "", user = null, session = null } = {}) {
     : null;
 
   return {
-    token: hasToken ? clean : null,
-    accessToken: hasToken ? clean : null,
-    access_token: hasToken ? clean : null,
+    token: hasToken ? safeToken : null,
+    accessToken: hasToken ? safeToken : null,
+    access_token: hasToken ? safeToken : null,
 
     user: authenticated ? safeUser : null,
     currentUser: authenticated ? safeUser : null,
@@ -433,9 +452,7 @@ function buildStatePatch({ token = "", user = null, session = null } = {}) {
     roles: authenticated ? [role] : [],
 
     isAdmin: role === "admin",
-    isSupport: false,
-    isManager: false,
-    isClient: false,
+    isUser: role === "user",
 
     session: sessionData,
     sessionData,
@@ -446,15 +463,11 @@ function buildStatePatch({ token = "", user = null, session = null } = {}) {
     avatar: authenticated ? safeUser.avatar || safeUser.avatarUrl || null : null,
     avatarUrl: authenticated ? safeUser.avatarUrl || safeUser.avatar || null : null,
 
-    tempToken: null,
-    temp_token: null,
-    twoFactorPending: false,
-
     lastAuthSyncAt: nowIso(),
   };
 }
 
-function deriveCurrentSnapshot(extra = {}) {
+function currentSnapshot(extra = {}) {
   const token = bestStateToken();
   const user = bestStateUser();
   const session = bestStateSession(user);
@@ -463,8 +476,6 @@ function deriveCurrentSnapshot(extra = {}) {
   const authenticated = Boolean(hasToken && user);
   const role = authenticated ? cleanRole(user.role || user.rol) : null;
 
-  const state = readState();
-
   return {
     version: AUTH_SESSION_VERSION,
 
@@ -472,20 +483,16 @@ function deriveCurrentSnapshot(extra = {}) {
     hasToken,
 
     user: authenticated ? user : null,
+
     role,
     roles: authenticated ? [role] : [],
 
     isAdmin: role === "admin",
-    isSupport: false,
-    isManager: false,
-    isClient: false,
+    isUser: role === "user",
 
     session: authenticated ? session : null,
     sessionId: authenticated ? session?.sessionId || session?.id || null : null,
     sessionUserId: authenticated ? session?.sessionUserId || session?.userId || null : null,
-
-    route: state.route || "/",
-    publicPath: state.publicPath || "/",
 
     ...extra,
   };
@@ -521,55 +528,32 @@ function publicSnapshot(snapshot = {}) {
     roles: Array.isArray(snapshot.roles) ? snapshot.roles : [],
 
     isAdmin: Boolean(snapshot.isAdmin),
-    isSupport: false,
-    isManager: false,
-    isClient: false,
+    isUser: Boolean(snapshot.isUser),
 
     sessionId: snapshot.sessionId ? "***" : null,
     sessionUserId: snapshot.sessionUserId ? "***" : null,
 
-    route: redactTokenInText(snapshot.route || "/"),
-    publicPath: redactTokenInText(snapshot.publicPath || "/"),
-
     source: snapshot.source || "",
     eventMode: snapshot.eventMode || "",
+    at: snapshot.at || nowIso(),
   };
 }
 
-export function buildSessionSnapshot(extra = {}) {
-  return publicSnapshot(deriveCurrentSnapshot(extra));
-}
-
-function emitSession(eventName, snapshot, options = {}) {
+function emitSession(eventName = "", snapshot = {}, options = {}) {
   const payload = publicSnapshot(snapshot);
 
-  emit(eventName, payload, options);
-  emit(EVENTS.change, payload, options);
-  emit(EVENTS.appChange, payload, options);
-}
-
-function syncUserUI() {
-  try {
-    AppCore?.syncUserUI?.({
-      source: SOURCE,
-      reason: "auth-session",
-    });
-  } catch {
-    try {
-      AppCore?.syncUserUI?.();
-    } catch {
-      // noop
-    }
-  }
+  emitEvent(eventName, payload, options);
+  emitEvent(EVENTS.change, payload, options);
+  emitEvent(EVENTS.appChange, payload, options);
 }
 
 /* =========================================================
-   APPLY SESSION
+   SESSION API
 ========================================================= */
 
 export function applySession(payload = {}, options = {}) {
   const source = options.source || SOURCE;
-  const mode = options.eventMode || "apply";
+  const eventMode = options.eventMode || "apply";
 
   const token =
     readTokenFromPayload(payload) ||
@@ -579,7 +563,9 @@ export function applySession(payload = {}, options = {}) {
     readUserFromPayload(payload) ||
     (options.useCurrentUser === false ? null : bestStateUser());
 
-  const session = readSessionFromPayload(payload, user) || bestStateSession(user);
+  const session =
+    readSessionFromPayload(payload, user) ||
+    (options.keepCurrentSession === false ? null : bestStateSession(user));
 
   const patch = buildStatePatch({
     token,
@@ -590,24 +576,21 @@ export function applySession(payload = {}, options = {}) {
   commitState(patch, {
     source: `${SOURCE}:apply`,
     silent: true,
+    emit: false,
     forceUnauthenticated: !patch.authenticated,
   });
 
   syncUserUI();
 
-  const snapshot = deriveCurrentSnapshot({
+  const snapshot = currentSnapshot({
     source,
-    eventMode: mode,
+    eventMode,
   });
 
   emitSession(snapshot.authenticated ? EVENTS.applied : EVENTS.partial, snapshot, options);
 
   return publicSnapshot(snapshot);
 }
-
-/* =========================================================
-   CLEAR SESSION
-========================================================= */
 
 export function clearSessionLocal(options = {}) {
   commitState(
@@ -633,9 +616,7 @@ export function clearSessionLocal(options = {}) {
       roles: [],
 
       isAdmin: false,
-      isSupport: false,
-      isManager: false,
-      isClient: false,
+      isUser: false,
 
       session: null,
       sessionData: null,
@@ -646,22 +627,19 @@ export function clearSessionLocal(options = {}) {
       avatar: null,
       avatarUrl: null,
 
-      tempToken: null,
-      temp_token: null,
-      twoFactorPending: false,
-
       lastAuthSyncAt: nowIso(),
     },
     {
       source: `${SOURCE}:clear`,
       silent: true,
+      emit: false,
       forceUnauthenticated: true,
     }
   );
 
   syncUserUI();
 
-  const snapshot = deriveCurrentSnapshot({
+  const snapshot = currentSnapshot({
     source: options.source || SOURCE,
     eventMode: "clear",
   });
@@ -669,6 +647,39 @@ export function clearSessionLocal(options = {}) {
   emitSession(EVENTS.cleared, snapshot, options);
 
   return true;
+}
+
+export const clearSession = clearSessionLocal;
+
+export function syncAuthState(options = {}) {
+  const user = bestStateUser();
+
+  const patch = buildStatePatch({
+    token: bestStateToken(),
+    user,
+    session: bestStateSession(user),
+  });
+
+  commitState(patch, {
+    source: options.source || `${SOURCE}:sync`,
+    silent: true,
+    emit: false,
+    forceUnauthenticated: !patch.authenticated,
+  });
+
+  return buildSessionSnapshot({
+    source: options.source || SOURCE,
+    eventMode: "sync",
+  });
+}
+
+export function buildSessionSnapshot(extra = {}) {
+  return publicSnapshot(
+    currentSnapshot({
+      ...extra,
+      at: nowIso(),
+    })
+  );
 }
 
 /* =========================================================
@@ -728,14 +739,12 @@ export function hasRole(...roles) {
 }
 
 export function requireRole(...roles) {
-  if (!hasRole(...roles)) {
-    const error = new Error("No tienes permisos para acceder a este recurso.");
-    error.code = "AUTH_FORBIDDEN";
-    error.status = 403;
-    throw error;
-  }
+  if (hasRole(...roles)) return true;
 
-  return true;
+  const error = new Error("No tienes permisos para acceder a este recurso.");
+  error.code = "AUTH_FORBIDDEN";
+  error.status = 403;
+  throw error;
 }
 
 export function getAuthHeader() {
@@ -753,50 +762,9 @@ export function getAuthHeader() {
 ========================================================= */
 
 export function getSessionDebugSnapshot() {
-  const snapshot = deriveCurrentSnapshot();
-
-  return {
-    version: AUTH_SESSION_VERSION,
-
-    authenticated: Boolean(snapshot.authenticated),
-    hasToken: Boolean(snapshot.hasToken),
-    hasUser: Boolean(snapshot.user),
-
-    role: snapshot.role || null,
-    roles: snapshot.roles || [],
-
-    isAdmin: Boolean(snapshot.isAdmin),
-    isSupport: false,
-    isManager: false,
-    isClient: false,
-
-    user: publicUser(snapshot.user),
-
-    token: null,
-    accessToken: null,
-    refreshToken: null,
-
-    sessionId: snapshot.sessionId ? "***" : null,
-    sessionUserId: snapshot.sessionUserId ? "***" : null,
-
-    route: redactTokenInText(snapshot.route || "/"),
-    publicPath: redactTokenInText(snapshot.publicPath || "/"),
-
-    policy: {
-      ownFetch: false,
-      ownRefresh: false,
-      ownRouter: false,
-      ownToast: false,
-      ownStorage: false,
-      no2fa: true,
-      noTempToken: true,
-      authenticatedRequiresTokenAndUser: true,
-      invalidOnlyDisabled: true,
-      roles: ["admin", "user"],
-    },
-
-    at: nowIso(),
-  };
+  return buildSessionSnapshot({
+    eventMode: "debug",
+  });
 }
 
 export function buildAuthErrorPayload(error = null) {
@@ -808,7 +776,11 @@ export function buildAuthErrorPayload(error = null) {
           code: error.code || error.data?.code || error.response?.data?.code || null,
         }
       : null,
-    message: extractMessage(error),
+    message:
+      text(error?.data?.message, "") ||
+      text(error?.response?.data?.message, "") ||
+      text(error?.message, "") ||
+      String(error || ""),
   };
 }
 
@@ -837,6 +809,7 @@ export function exposeSessionDebugApi() {
 
     clear: clearSessionLocal,
     apply: applySession,
+    sync: syncAuthState,
   };
 }
 
@@ -849,6 +822,9 @@ export default {
 
   applySession,
   clearSessionLocal,
+  clearSession,
+  syncAuthState,
+
   buildSessionSnapshot,
 
   isAuthenticated,
@@ -868,6 +844,8 @@ export default {
   requireRole,
 
   getAuthHeader,
+
+  normalizeUser,
 
   getSessionDebugSnapshot,
   buildAuthErrorPayload,

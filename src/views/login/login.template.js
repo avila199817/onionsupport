@@ -4,19 +4,20 @@
 
    Responsabilidad:
    - Pintar un login simple y centrado.
-   - Consumir el password-field compartido.
+   - Consumir el password-field compartido desde su fachada pública.
    - Sin Auth.
    - Sin HTTP.
    - Sin Router.
    - Sin Store.
    - Sin Toast directo.
    - Sin duplicar lógica del password.
+   - Sin CapsLock.
    - Sin layout visual extra.
 ========================================================= */
 
-import { renderPasswordField } from "../../shared/password-field/password-field.template.js";
+import { renderPasswordField } from "../../shared/password-field/index.js";
 
-export const TEMPLATE_VERSION = "minimal-1";
+export const TEMPLATE_VERSION = "minimal-2";
 
 const DEFAULT_APP_NAME = "Onion Support";
 const DEFAULT_LOGO = "/src/media/img/favicon_black_circle.png?v=6";
@@ -103,9 +104,7 @@ function renderLoginPasswordField({ label, placeholder }) {
     placeholder,
     autocomplete: "current-password",
     required: true,
-
     showToggle: true,
-    showCapsIndicator: false,
 
     fieldClass: "login-field login-field--password",
     wrapperClass: "password-wrapper login-password-wrapper",
@@ -114,7 +113,6 @@ function renderLoginPasswordField({ label, placeholder }) {
     toggleClass: "password-toggle login-password-toggle",
 
     inputDataAttrs: {
-      loginPassword: true,
       loginPasswordInput: true,
       i18nPlaceholder: "login.passwordPlaceholder",
     },
@@ -161,11 +159,6 @@ export function getLoginTemplate(options = {}) {
   );
 
   const rememberChecked = bool(options.remember, Boolean(identifier));
-
-  const passwordFieldHtml = renderLoginPasswordField({
-    label: passwordLabel,
-    placeholder: passwordPlaceholder,
-  });
 
   return `
     <section
@@ -250,7 +243,10 @@ export function getLoginTemplate(options = {}) {
               />
             </div>
 
-            ${passwordFieldHtml}
+            ${renderLoginPasswordField({
+              label: passwordLabel,
+              placeholder: passwordPlaceholder,
+            })}
 
             <div class="login-options">
               <label class="login-check" for="loginRemember">
@@ -285,7 +281,9 @@ export function getLoginTemplate(options = {}) {
               type="submit"
               data-login-submit="true"
             >
-              <span data-i18n="login.submitLabel">${escapeHtml(submitLabel)}</span>
+              <span data-i18n="login.submitLabel">
+                ${escapeHtml(submitLabel)}
+              </span>
             </button>
           </form>
         </article>

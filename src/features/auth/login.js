@@ -23,7 +23,7 @@
 
 import * as CoreHttpModule from "../../core/http.js";
 
-export const LOGIN_VERSION = "auth.login.v1";
+export const LOGIN_VERSION = "auth.login.v2";
 
 export const AUTH_ENDPOINTS = Object.freeze({
   login: "/api/auth/login",
@@ -83,6 +83,15 @@ function bool(value, fallback = false) {
 }
 
 function cleanRole(value = "") {
+  if (Array.isArray(value)) {
+    const roles = value.map(cleanRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "user";
+  }
+
   return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
 }
 
@@ -91,11 +100,17 @@ function cleanRole(value = "") {
 ========================================================= */
 
 export function normalizeLoginSlug(value = "") {
-  const slug = text(value, "").replace(/^@+/, "").trim();
+  const slug = text(value, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
 
   if (!slug) return "";
 
-  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
 }
 
 export function extractLoginUserSlug(user = null) {
@@ -148,14 +163,6 @@ function cleanToken(value = "") {
   return tokenOk(value) ? stripBearer(value) : "";
 }
 
-function getHttpToken() {
-  try {
-    return cleanToken(CoreHttp?.getAccessToken?.() || CoreHttp?.token || "");
-  } catch {
-    return "";
-  }
-}
-
 function removeSensitiveUserFields(user = {}) {
   const output = { ...user };
 
@@ -164,15 +171,19 @@ function removeSensitiveUserFields(user = {}) {
     "passwordHash",
     "hash",
     "salt",
+
     "token",
     "accessToken",
     "access_token",
     "refreshToken",
     "refresh_token",
+
     "resetToken",
     "activationToken",
+
     "otp",
     "otpCode",
+    "mfa",
     "twofa_secret",
     "twofaSecret",
     "totpSecret",
@@ -191,26 +202,36 @@ function removeSensitiveUserFields(user = {}) {
 function userDisabled(user = null) {
   if (!isObject(user)) return true;
 
-  const status = String(user.status || user.estado || "").toLowerCase();
+  const status = text(user.status || user.estado, "").toLowerCase();
 
-  return (
+  return Boolean(
     user.disabled === true ||
-    user.deleted === true ||
-    status === "disabled" ||
-    status === "deleted"
+      user.deleted === true ||
+      user.archived === true ||
+      user.active === false ||
+      status === "disabled" ||
+      status === "deleted" ||
+      status === "archived"
+  );
+}
+
+function hasUserIdentity(user = null) {
+  if (!isObject(user)) return false;
+
+  return Boolean(
+    text(user.id, "") ||
+      text(user.userId, "") ||
+      text(user.username, "") ||
+      text(user.slug, "") ||
+      text(user.lookup?.slug, "")
   );
 }
 
 function userOk(user = null) {
-  if (!isObject(user)) return false;
-  if (userDisabled(user)) return false;
-
   return Boolean(
-    user.id ||
-      user.userId ||
-      user.username ||
-      user.slug ||
-      user.email
+    isObject(user) &&
+      !userDisabled(user) &&
+      hasUserIdentity(user)
   );
 }
 
@@ -219,45 +240,50 @@ function normalizeUser(user = null) {
 
   const safeUser = removeSensitiveUserFields(user);
 
-  const id = safeUser.userId || safeUser.id || null;
-  const email = safeUser.email || null;
+  const id = text(safeUser.userId || safeUser.id, "");
   const slug = extractLoginUserSlug(safeUser);
 
-  const username =
+  const profile = isObject(safeUser.profile) ? safeUser.profile : {};
+
+  const username = text(
     safeUser.username ||
-    safeUser.userName ||
-    safeUser.user_name ||
-    slug ||
-    email ||
-    id ||
-    null;
+      safeUser.userName ||
+      safeUser.user_name ||
+      slug ||
+      id,
+    ""
+  );
 
-  const displayName =
+  const displayName = text(
     safeUser.displayName ||
-    safeUser.fullName ||
-    safeUser.name ||
-    safeUser.nombre ||
-    username ||
-    email ||
-    id ||
-    "Usuario";
+      safeUser.fullName ||
+      safeUser.name ||
+      safeUser.nombre ||
+      profile.displayName ||
+      profile.fullName ||
+      profile.name ||
+      profile.nombre ||
+      username ||
+      id,
+    "Usuario"
+  );
 
-  const role = cleanRole(safeUser.role || safeUser.rol);
+  const role = cleanRole(safeUser.role || safeUser.rol || safeUser.roles);
 
   return {
     ...safeUser,
 
-    id,
-    userId: safeUser.userId || id,
+    id: id || null,
+    userId: safeUser.userId || id || null,
 
-    username,
+    username: username || null,
     slug: slug || null,
 
     name: safeUser.name || displayName,
     fullName: safeUser.fullName || displayName,
     displayName,
 
-    email,
+    email: safeUser.email || null,
 
     role,
     rol: role,
@@ -301,14 +327,21 @@ function pick(nodes = [], keys = []) {
 }
 
 function readToken(payload = {}) {
-  return (
-    cleanToken(
-      pick(nested(payload), [
-        "token",
-        "accessToken",
-        "access_token",
-      ])
-    ) || getHttpToken()
+  return cleanToken(
+    pick(nested(payload), [
+      "token",
+      "accessToken",
+      "access_token",
+    ])
+  );
+}
+
+function readRefreshToken(payload = {}) {
+  return cleanToken(
+    pick(nested(payload), [
+      "refreshToken",
+      "refresh_token",
+    ])
   );
 }
 
@@ -326,6 +359,19 @@ function readUser(payload = {}) {
   }
 
   return normalizeUser(payload);
+}
+
+function readSession(payload = {}) {
+  for (const node of nested(payload)) {
+    const session =
+      node.session ||
+      node.sessionData ||
+      null;
+
+    if (isObject(session)) return session;
+  }
+
+  return null;
 }
 
 function readMessage(payload = {}) {
@@ -359,7 +405,10 @@ function readCode(payload = {}) {
 
 function normalizeLoginResponse(response = {}) {
   const token = readToken(response);
+  const refreshToken = readRefreshToken(response);
   const user = readUser(response);
+  const session = readSession(response);
+
   const role = user?.role || null;
   const slug = extractLoginUserSlug(user);
   const homePath = buildUserHomePath(user);
@@ -374,7 +423,14 @@ function normalizeLoginResponse(response = {}) {
     accessToken: token,
     access_token: token,
 
+    refreshToken: refreshToken || null,
+    refresh_token: refreshToken || null,
+
     user,
+    currentUser: user,
+
+    session,
+    sessionData: session,
 
     userSlug: slug || null,
     homePath,
@@ -382,12 +438,11 @@ function normalizeLoginResponse(response = {}) {
     postLoginTarget: homePath,
 
     role,
+    rol: role,
     roles: role ? [role] : [],
 
     message: readMessage(response),
     code: readCode(response),
-
-    raw: response,
   };
 }
 
@@ -398,6 +453,7 @@ function normalizeLoginResponse(response = {}) {
 function safeErrorMessage(value = "") {
   return text(value, "")
     .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
@@ -407,6 +463,27 @@ function extractMessage(error = null) {
     text(error?.response?.data?.message, "") ||
     text(error?.message, "") ||
     String(error || "")
+  );
+}
+
+function extractCode(error = null) {
+  return (
+    error?.code ||
+    error?.data?.code ||
+    error?.response?.data?.code ||
+    ""
+  );
+}
+
+function extractStatus(error = null) {
+  return (
+    Number(
+      error?.status ||
+        error?.statusCode ||
+        error?.response?.status ||
+        error?.data?.status ||
+        0
+    ) || 0
   );
 }
 
@@ -424,16 +501,11 @@ function createLoginError(message = "No se pudo iniciar sesión.", options = {})
 function normalizeLoginError(error = null) {
   if (error?.name === "AuthLoginError") return error;
 
-  const status =
-    Number(error?.status || error?.statusCode || error?.response?.status || 0) || 0;
+  const status = extractStatus(error);
 
   return createLoginError(extractMessage(error) || "No se pudo iniciar sesión.", {
     status: status || 500,
-    code:
-      error?.code ||
-      error?.data?.code ||
-      error?.response?.data?.code ||
-      (status === 401 ? "UNAUTHORIZED" : "LOGIN_FAILED"),
+    code: extractCode(error) || (status === 401 ? "UNAUTHORIZED" : "LOGIN_FAILED"),
   });
 }
 
@@ -499,7 +571,7 @@ export function buildLoginRequestBody(credentials = {}) {
     emailLower: email || undefined,
 
     username: username || undefined,
-    usernameLower: username || undefined,
+    usernameLower: username ? username.toLowerCase() : undefined,
 
     password: payload.password,
 
@@ -653,6 +725,15 @@ export function getLoginSnapshot() {
     loginRoute: LOGIN_ROUTE,
     homeRoute: HOME_ROUTE,
     userHomePrefix: USER_HOME_PREFIX,
+    policy: {
+      noRouter: true,
+      noToast: true,
+      noStorage: true,
+      noFetchOwn: true,
+      noSlugFabrication: true,
+      noEmailIdentity: true,
+      no2fa: true,
+    },
   };
 }
 

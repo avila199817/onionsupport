@@ -14,6 +14,7 @@
    - Sin eventos.
    - Sin debug pesado.
    - Sin rutas inventadas.
+   - Sin /home.
    - Sin magia negra.
 
    Nota:
@@ -21,7 +22,7 @@
    - Este módulo sólo da soporte base al arranque de la app.
 ========================================================= */
 
-export const SHELL_VERSION = "app.shell.v1";
+export const SHELL_VERSION = "app.shell.v2";
 
 const HOME_PATH = "/";
 
@@ -52,6 +53,13 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
+function redact(value = "") {
+  return text(value, "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
 function byId(id = "") {
   if (!isBrowser() || !id) return null;
 
@@ -74,7 +82,6 @@ function query(selector = "") {
 
 function roots() {
   if (!isBrowser()) return [];
-
   return [document.documentElement, document.body].filter(Boolean);
 }
 
@@ -106,14 +113,35 @@ function normalizeHashPath(path = HOME_PATH) {
   return value;
 }
 
+function sameOriginUrlToPath(value = "") {
+  try {
+    const base = isBrowser() ? window.location.origin : "http://localhost";
+    const url = new URL(value, base);
+
+    if (url.origin !== base) {
+      return HOME_PATH;
+    }
+
+    if (url.hash.startsWith("#/") || url.hash.startsWith("#!")) {
+      return normalizeHashPath(url.hash);
+    }
+
+    return `${url.pathname || HOME_PATH}${url.search || ""}${url.hash || ""}`;
+  } catch {
+    return HOME_PATH;
+  }
+}
+
 function normalizePublicPath(path = HOME_PATH) {
   let value = normalizeHashPath(path);
 
-  if (value.startsWith("//")) {
+  if (!value || value.startsWith("//")) {
     return HOME_PATH;
   }
 
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+  if (/^https?:\/\//i.test(value)) {
+    value = sameOriginUrlToPath(value);
+  } else if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
     return HOME_PATH;
   }
 
@@ -443,7 +471,7 @@ function exposeShell(elements = getShellElements()) {
 }
 
 function setShellState(state = "ready") {
-  const value = String(state || "ready");
+  const value = text(state, "ready");
   const busy = value === "busy";
   const elements = getShellElements();
 
@@ -712,7 +740,7 @@ export function getShellSnapshot(AppCore = null) {
     shellState: elements.shell?.dataset?.shellState || "",
 
     routeMode: AppCore?.state?.routeMode || null,
-    currentShellRoute: AppCore?.state?.currentShellRoute || null,
+    currentShellRoute: redact(AppCore?.state?.currentShellRoute || ""),
 
     dom: {
       shell: Boolean(elements.shell),
@@ -738,6 +766,8 @@ export function getShellSnapshot(AppCore = null) {
       noRouterInternal: true,
       noEvents: true,
       noStorage: true,
+      noHomeRoute: true,
+      snapshotRedacted: true,
     },
   };
 }

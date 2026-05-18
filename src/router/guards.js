@@ -69,7 +69,18 @@ function readState(AppCore = null) {
 }
 
 function resolveAuth(AppCore = null, Auth = null) {
-  return Auth || AppCore?.Auth || AppCore?.auth || null;
+  try {
+    return (
+      Auth ||
+      AppCore?.Auth ||
+      AppCore?.auth ||
+      AppCore?.modules?.get?.("Auth") ||
+      AppCore?.modules?.get?.("auth") ||
+      null
+    );
+  } catch {
+    return Auth || null;
+  }
 }
 
 /* =========================================================
@@ -79,13 +90,8 @@ function resolveAuth(AppCore = null, Auth = null) {
 function normalizePublicPath(path = "/") {
   let value = text(path, "/");
 
-  if (value.startsWith("#/")) {
-    value = value.slice(1);
-  }
-
-  if (value.startsWith("#!")) {
-    value = value.replace(/^#!\/?/, "/");
-  }
+  if (value.startsWith("#/")) value = value.slice(1);
+  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
 
   try {
     if (/^https?:\/\//i.test(value)) {
@@ -96,9 +102,7 @@ function normalizePublicPath(path = "/") {
     // noop
   }
 
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
-  }
+  if (!value.startsWith("/")) value = `/${value}`;
 
   value = value.replace(/\/{2,}/g, "/");
 
@@ -109,10 +113,10 @@ function normalizeCanonicalPath(path = "/") {
   let value = normalizePublicPath(path).split("?")[0].split("#")[0] || "/";
 
   if (value.length > 1) {
-    value = value.replace(/\/+$/g, "");
+    value = value.replace(/\/+$/g, "") || "/";
   }
 
-  return value || "/";
+  return value;
 }
 
 function isSafeInternalPath(path = "") {
@@ -143,8 +147,10 @@ function buildLoginRedirect(publicPath = HOME_PATH) {
   return `${LOGIN_PATH}?redirect=${encodeURIComponent(target)}`;
 }
 
-function redact(path = "") {
-  return text(path, "").replace(/([?&#]token=)([^&#\s]+)/gi, "$1***");
+function redact(value = "") {
+  return text(value, "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 /* =========================================================
@@ -172,33 +178,34 @@ function getToken(AppCore = null, Auth = null) {
   const auth = resolveAuth(AppCore, Auth);
   const state = readState(AppCore);
 
-  let token = "";
-
   try {
-    token =
+    const direct =
       auth?.getToken?.() ||
       auth?.getAccessToken?.() ||
-      state.token ||
-      state.accessToken ||
-      state.access_token ||
-      state.session?.token ||
-      state.session?.accessToken ||
-      state.session?.access_token ||
       "";
+
+    if (cleanToken(direct)) return cleanToken(direct);
   } catch {
-    token = state.token || state.accessToken || state.access_token || "";
+    // fallback abajo
   }
 
   try {
-    if (!token && isFunction(auth?.getAuthHeader)) {
-      const header = auth.getAuthHeader();
-      token = isObject(header) ? header.Authorization || header.authorization || "" : "";
-    }
+    const header = auth?.getAuthHeader?.();
+    const bearer = isObject(header)
+      ? header.Authorization || header.authorization || ""
+      : "";
+
+    if (cleanToken(bearer)) return cleanToken(bearer);
   } catch {
-    // noop
+    // fallback abajo
   }
 
-  return cleanToken(token);
+  return cleanToken(
+    state.token ||
+      state.accessToken ||
+      state.access_token ||
+      ""
+  );
 }
 
 function userDisabled(user = null) {
@@ -228,11 +235,14 @@ function getUser(AppCore = null, Auth = null) {
   const state = readState(AppCore);
 
   try {
-    const user = auth?.getUser?.() || auth?.getCurrentUser?.();
+    const user =
+      auth?.getUser?.() ||
+      auth?.getCurrentUser?.() ||
+      null;
 
     if (userUsable(user)) return user;
   } catch {
-    // noop
+    // fallback abajo
   }
 
   const user =
@@ -247,13 +257,13 @@ function getUser(AppCore = null, Auth = null) {
   return userUsable(user) ? user : null;
 }
 
-function authenticated(AppCore = null, Auth = null) {
+function isAuthenticated(AppCore = null, Auth = null) {
   const auth = resolveAuth(AppCore, Auth);
 
   try {
     if (auth?.isAuthenticated?.() === false) return false;
   } catch {
-    // noop
+    // fallback abajo
   }
 
   return Boolean(getToken(AppCore, auth) && getUser(AppCore, auth));
@@ -264,8 +274,8 @@ function authenticated(AppCore = null, Auth = null) {
 ========================================================= */
 
 function normalizeRole(role = "") {
-  const value = String(role || "").toLowerCase();
-  return value === "admin" || value === "user" ? value : "";
+  const clean = String(role || "").toLowerCase();
+  return VALID_ROLES.includes(clean) ? clean : "";
 }
 
 export function normalizeGuardRoles(value = []) {
@@ -278,18 +288,7 @@ export function normalizeGuardRoles(value = []) {
 }
 
 function rawRouteRoles(route = null) {
-  const meta = isObject(route?.meta) ? route.meta : {};
-
-  return [
-    ...asArray(route?.roles),
-    ...asArray(route?.requiredRoles),
-    ...asArray(meta.roles),
-    ...asArray(meta.requiredRoles),
-    route?.role,
-    route?.requiredRole,
-    meta.role,
-    meta.requiredRole,
-  ].filter((role) => role !== undefined && role !== null && role !== "");
+  return asArray(route?.roles).filter((role) => role !== undefined && role !== null && role !== "");
 }
 
 function routeRoles(route = null) {
@@ -300,43 +299,35 @@ function unsupportedRouteRoles(route = null) {
   return rawRouteRoles(route).filter((role) => !normalizeRole(role));
 }
 
-function currentRoles(AppCore = null, Auth = null) {
+function currentRole(AppCore = null, Auth = null) {
+  if (!isAuthenticated(AppCore, Auth)) return "";
+
   const auth = resolveAuth(AppCore, Auth);
   const state = readState(AppCore);
   const user = getUser(AppCore, auth);
 
-  let roles = [];
-
   try {
-    roles = [
-      auth?.getRole?.(),
-      auth?.getCurrentRole?.(),
-      ...asArray(auth?.getRoles?.()),
-      ...asArray(auth?.getCurrentRoles?.()),
-    ];
+    const fromAuth =
+      normalizeRole(auth?.getRole?.()) ||
+      normalizeRole(auth?.getCurrentRole?.());
+
+    if (fromAuth) return fromAuth;
   } catch {
-    roles = [];
+    // fallback abajo
   }
 
-  roles.push(
-    state.role,
-    ...(Array.isArray(state.roles) ? state.roles : []),
-    user?.role,
-    ...(Array.isArray(user?.roles) ? user.roles : [])
+  return (
+    normalizeRole(state.role) ||
+    normalizeRole(user?.role) ||
+    normalizeRole(user?.rol) ||
+    "user"
   );
-
-  const normalized = normalizeGuardRoles(roles);
-
-  if (normalized.includes("admin")) return ["admin"];
-  if (normalized.includes("user")) return ["user"];
-
-  return authenticated(AppCore, auth) ? ["user"] : [];
 }
 
-function currentRole(AppCore = null, Auth = null) {
-  const roles = currentRoles(AppCore, Auth);
+function currentRoles(AppCore = null, Auth = null) {
+  const role = currentRole(AppCore, Auth);
 
-  return roles.includes("admin") ? "admin" : roles[0] || "";
+  return role ? [role] : [];
 }
 
 function hasAllowedRole(AppCore = null, Auth = null, roles = []) {
@@ -344,61 +335,56 @@ function hasAllowedRole(AppCore = null, Auth = null, roles = []) {
 
   if (!required.length) return true;
 
-  const current = currentRoles(AppCore, Auth);
+  const role = currentRole(AppCore, Auth);
 
-  if (current.includes("admin")) return true;
+  if (role === "admin") return true;
 
-  return required.some((role) => current.includes(role));
+  return required.includes(role);
 }
 
 /* =========================================================
    ROUTE FLAGS
 ========================================================= */
 
-function routeMeta(route = null) {
-  return isObject(route?.meta) ? route.meta : {};
-}
-
 function isPublicRoute(route = null) {
-  const meta = routeMeta(route);
+  if (!route) return false;
 
-  if (typeof route?.public === "boolean") return route.public;
-  if (typeof meta.public === "boolean") return meta.public;
-  if (typeof route?.requiresAuth === "boolean") return route.requiresAuth === false;
-  if (typeof meta.requiresAuth === "boolean") return meta.requiresAuth === false;
+  if (typeof route.public === "boolean") return route.public;
+  if (typeof route.requiresAuth === "boolean") return route.requiresAuth === false;
 
   return false;
 }
 
 function isGuestOnlyRoute(route = null) {
-  const meta = routeMeta(route);
-
-  return Boolean(
-    route?.guestOnly ||
-      route?.publicOnly ||
-      meta.guestOnly ||
-      meta.publicOnly
-  );
+  return Boolean(route?.guestOnly || route?.publicOnly);
 }
 
 function requiresAuth(route = null) {
-  const meta = routeMeta(route);
-
   if (!route) return false;
-  if (typeof route?.requiresAuth === "boolean") return route.requiresAuth;
-  if (typeof meta.requiresAuth === "boolean") return meta.requiresAuth;
-  if (typeof route?.private === "boolean") return route.private;
-  if (typeof meta.private === "boolean") return meta.private;
+
+  if (typeof route.requiresAuth === "boolean") return route.requiresAuth;
+  if (typeof route.private === "boolean") return route.private;
 
   return !isPublicRoute(route);
+}
+
+function routePath(route = null) {
+  return normalizeCanonicalPath(route?.path || route?.canonicalPath || "/");
 }
 
 /* =========================================================
    RESULTS
 ========================================================= */
 
-function routePath(route = null) {
-  return normalizeCanonicalPath(route?.path || route?.canonicalPath || "/");
+function publicUser(user = null) {
+  if (!userUsable(user)) return null;
+
+  return {
+    id: user.id || user.userId || null,
+    userId: user.userId || user.id || null,
+    username: user.username || user.slug || null,
+    role: user.role || user.rol || null,
+  };
 }
 
 function details({ AppCore = null, Auth = null, route = null, canonicalPath = "/", publicPath = "", extra = {} } = {}) {
@@ -408,27 +394,26 @@ function details({ AppCore = null, Auth = null, route = null, canonicalPath = "/
 
   return {
     version: GUARDS_VERSION,
+
     routePath: route ? routePath(route) : null,
+
     canonicalPath: redact(canonicalPath),
     publicPath: redact(publicPath),
-    authenticated: authenticated(AppCore, auth),
+
+    authenticated: isAuthenticated(AppCore, auth),
     hasToken: Boolean(token),
     hasUser: Boolean(user),
+
     currentRole: currentRole(AppCore, auth) || null,
     currentRoles: currentRoles(AppCore, auth),
-    user: user
-      ? {
-          id: user.id || user.userId || null,
-          userId: user.userId || user.id || null,
-          username: user.username || user.slug || null,
-          role: user.role || user.rol || null,
-        }
-      : null,
+
+    user: publicUser(user),
+
     ...extra,
   };
 }
 
-function allow({ route = null, canonicalPath = "/", publicPath = "/", getRoute = null, reason = GUARD_REASONS.allow, extra = {} } = {}) {
+function allow({ route = null, reason = GUARD_REASONS.allow, canonicalPath = "/", publicPath = "/", extra = {} } = {}) {
   return {
     allowed: true,
     reason,
@@ -436,7 +421,6 @@ function allow({ route = null, canonicalPath = "/", publicPath = "/", getRoute =
     redirectTo: null,
     canonicalPath,
     publicPath,
-    getRoute: isFunction(getRoute) ? getRoute : null,
     details: extra,
   };
 }
@@ -463,19 +447,18 @@ export function shouldAllowRoute({
   route = null,
   requestedCanonicalPath = "/",
   requestedPublicPath = null,
-  getRoute = null,
 } = {}) {
   const auth = resolveAuth(AppCore, Auth);
   const canonicalPath = normalizeCanonicalPath(requestedCanonicalPath);
   const publicPath = normalizePublicPath(requestedPublicPath || canonicalPath);
 
   if (!route) {
-    return allow({
+    return deny({
+      reason: GUARD_REASONS.routeNotFound,
       route: null,
+      redirectTo: null,
       canonicalPath,
       publicPath,
-      getRoute,
-      reason: GUARD_REASONS.routeNotFound,
       extra: details({
         AppCore,
         Auth: auth,
@@ -486,7 +469,7 @@ export function shouldAllowRoute({
     });
   }
 
-  const logged = authenticated(AppCore, auth);
+  const logged = isAuthenticated(AppCore, auth);
   const publicRoute = isPublicRoute(route);
   const guestOnly = isGuestOnlyRoute(route);
   const routeRequiresAuth = requiresAuth(route);
@@ -506,20 +489,17 @@ export function shouldAllowRoute({
         route,
         canonicalPath,
         publicPath,
-        extra: {
-          guestOnly: true,
-        },
+        extra: { guestOnly: true },
       }),
     });
   }
 
   if (publicRoute && !routeRequiresAuth) {
     return allow({
+      reason: guestOnly ? GUARD_REASONS.guestOnly : GUARD_REASONS.publicRoute,
       route,
       canonicalPath,
       publicPath,
-      getRoute,
-      reason: guestOnly ? GUARD_REASONS.guestOnly : GUARD_REASONS.publicRoute,
       extra: details({
         AppCore,
         Auth: auth,
@@ -547,9 +527,7 @@ export function shouldAllowRoute({
         route,
         canonicalPath,
         publicPath,
-        extra: {
-          unsupportedRoles,
-        },
+        extra: { unsupportedRoles },
       }),
     });
   }
@@ -597,11 +575,10 @@ export function shouldAllowRoute({
   }
 
   return allow({
+    reason: GUARD_REASONS.allow,
     route,
     canonicalPath,
     publicPath,
-    getRoute,
-    reason: GUARD_REASONS.allow,
     extra: details({
       AppCore,
       Auth: auth,
@@ -628,7 +605,6 @@ export function getGuardsSnapshot({
   route = null,
   requestedCanonicalPath = AppCore?.state?.route || "/",
   requestedPublicPath = AppCore?.state?.publicPath || requestedCanonicalPath,
-  getRoute = null,
 } = {}) {
   const auth = resolveAuth(AppCore, Auth);
   const canonicalPath = normalizeCanonicalPath(requestedCanonicalPath);
@@ -639,7 +615,6 @@ export function getGuardsSnapshot({
     route,
     requestedCanonicalPath: canonicalPath,
     requestedPublicPath: publicPath,
-    getRoute,
   });
 
   return {
@@ -662,7 +637,7 @@ export function getGuardsSnapshot({
       : null,
 
     auth: {
-      authenticated: authenticated(AppCore, auth),
+      authenticated: isAuthenticated(AppCore, auth),
       hasToken: Boolean(getToken(AppCore, auth)),
       hasUser: Boolean(getUser(AppCore, auth)),
       currentRole: currentRole(AppCore, auth) || null,

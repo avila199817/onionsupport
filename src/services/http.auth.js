@@ -1,246 +1,127 @@
 /* =========================================================
-   Onion SPA - HTTP Auth
-   Archivo: src/services/http.auth.js
+   Onion Support - Services HTTP Auth
+   Archivo: /src/services/http.auth.js
 
-   HTTP AUTH · FINAL SIMPLE
-   - Compat mínima para Services
-   - Auto-refresh sólo en 401 privado
-   - Single-flight para refresh concurrente
-   - /api/auth/me, /auth/me, /api/me y /me siempre privados
-   - Delega refresh en src/core/http.js
-   - Sin fetch directo, sin restoreSession, sin logout, sin storage
-   - Sin Router, Toast, interceptores ni lógica de sesión pesada
+   Responsabilidad:
+   - Compat mínima de auth para Services.
+   - /api/auth/me, /auth/me, /api/me y /me siempre privados.
+   - Detectar endpoints públicos reales.
+   - Auto-refresh opcional sólo en 401/419 privado.
+   - Single-flight mínimo para refresh concurrente.
+   - Delegar refresh siempre en src/core/http.js.
+   - Sin fetch directo.
+   - Sin restoreSession.
+   - Sin logout.
+   - Sin storage.
+   - Sin Router.
+   - Sin Toast.
+   - Sin interceptores reales.
+   - Sin 2FA/MFA/OTP.
+   - Sin magia negra.
 ========================================================= */
 
 import CoreHttp from "../core/http.js";
 
-/* =========================================================
-   VERSION / CONSTANTS
-========================================================= */
+export const HTTP_AUTH_VERSION = "simple";
 
-export const HTTP_AUTH_VERSION = "20.0.0-final";
-
-const AUTH_ME_ENDPOINTS = Object.freeze([
-  "/me",
-  "/api/me",
-  "/auth/me",
+const PRIVATE_ME_ENDPOINTS = Object.freeze([
   "/api/auth/me",
+  "/auth/me",
+  "/api/me",
+  "/me",
 ]);
 
-const PUBLIC_AUTH_MARKERS = Object.freeze([
+const PUBLIC_AUTH_ENDPOINTS = Object.freeze([
+  "/api/auth/login",
   "/auth/login",
-  "/auth/register",
-  "/auth/signup",
 
+  "/api/auth/refresh",
   "/auth/refresh",
-  "/auth/token/refresh",
-  "/auth/renew",
 
-  "/auth/2fa",
-  "/auth/mfa",
-  "/auth/otp",
-
+  "/api/auth/activate",
   "/auth/activate",
-  "/auth/activate-account",
-  "/auth/account/activate",
-  "/auth/activation",
 
-  "/auth/reset-password",
+  "/api/auth/reset-password-request",
   "/auth/reset-password-request",
+
+  "/api/auth/reset-password-confirm",
   "/auth/reset-password-confirm",
-  "/auth/reset-password/confirm",
-  "/auth/password-reset",
-  "/auth/password-reset/request",
-  "/auth/password-reset/confirm",
-  "/auth/forgot-password",
-  "/auth/recover-password",
-
-  "/auth/_health",
-  "/auth/health",
 ]);
 
-const AUTH_CONTROL_MARKERS = Object.freeze([
-  ...PUBLIC_AUTH_MARKERS,
+const AUTH_CONTROL_ENDPOINTS = Object.freeze([
+  ...PUBLIC_AUTH_ENDPOINTS,
+
+  "/api/auth/logout",
   "/auth/logout",
-  "/auth/logout-all",
-  "/auth/signout",
-  "/auth/sign-out",
 ]);
 
-const TECHNICAL_PUBLIC_ROUTES = Object.freeze([
+const PUBLIC_ROUTES = Object.freeze([
   "/login",
-  "/activate-account",
-  "/reset-password",
-  "/reset-password/confirm",
-  "/forgot-password",
-  "/recover-password",
+  "/password-request",
   "/password-reset",
-  "/password-reset/confirm",
-  "/2fa",
-  "/otp",
-  "/mfa",
+  "/activate-account",
 ]);
 
-const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code|csrf|xsrf/i;
-
-const fallbackState = {
-  refreshPromise: null,
-  refreshStats: createRefreshStats(),
-};
+let refreshPromise = null;
+let attempts = 0;
+let successes = 0;
+let failures = 0;
+let skipped = 0;
+let joined = 0;
+let lastSkipReason = "";
+let lastError = null;
+let lastRefreshAt = "";
 
 /* =========================================================
    BASICS
 ========================================================= */
 
-const isFn = (value) => typeof value === "function";
-const isObject = (value) => value !== null && typeof value === "object";
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) && !Array.isArray(value) ? value : fallback;
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function safeArray(value) {
-  if (Array.isArray(value)) return value;
-  if (value instanceof Set) return Array.from(value);
-  if (value === null || value === undefined) return [];
-  return [value];
+function isFunction(value) {
+  return typeof value === "function";
 }
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-
-  const text = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return text || fallback;
+function text(value = "", fallback = "") {
+  const output = String(value ?? "").trim();
+  return output || fallback;
 }
 
-function safeNumber(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
-}
-
-function now() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
-}
-
-function iso(ms = now()) {
-  try {
-    return new Date(ms).toISOString();
-  } catch {
-    return "";
-  }
+function nowIso() {
+  return new Date().toISOString();
 }
 
 function redact(value = "") {
-  let output = safeText(value, "");
-
-  if (!output) return "";
-
-  try {
-    output = output
-      .replace(
-        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|code|t|access_token|refresh_token|id_token|tempToken|temp_token|otp|totp)=)([^&#\s]+)/gi,
-        "$1***"
-      )
-      .replace(/(\/activate-account\/)([^/?#\s]+)/gi, "$1***")
-      .replace(/(\/reset-password\/confirm\/)([^/?#\s]+)/gi, "$1***")
-      .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-      .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
-  } catch {}
-
-  return output;
+  return text(value, "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
-function sanitize(value, depth = 0, keyHint = "", seen = new WeakSet()) {
-  if (SENSITIVE_KEY_RE.test(safeText(keyHint, ""))) return value ? "***" : null;
-  if (depth > 4) return "[depth-limit]";
-  if (value === null || value === undefined) return value;
-  if (typeof value === "string") return redact(value);
-  if (typeof value === "number" || typeof value === "boolean") return value;
-  if (typeof value === "bigint") return String(value);
-  if (typeof value === "function") return "[function]";
-
-  if (value instanceof Error) {
-    return {
-      name: value.name || "Error",
-      message: redact(value.message || ""),
-      status: value.status || value.statusCode || 0,
-      code: value.code || "",
-      timeout: Boolean(value.timeout),
-      aborted: Boolean(value.aborted),
-      stack: value.stack ? "[stack]" : "",
-    };
-  }
-
-  if (Array.isArray(value)) {
-    return value.slice(0, 50).map((item) => sanitize(item, depth + 1, keyHint, seen));
-  }
-
-  if (isObject(value)) {
-    try {
-      if (seen.has(value)) return "[circular]";
-      seen.add(value);
-    } catch {}
-
-    const output = {};
-
-    for (const [key, item] of Object.entries(value).slice(0, 80)) {
-      output[key] = sanitize(item, depth + 1, key, seen);
-    }
-
-    return output;
-  }
-
-  return redact(String(value));
+function statusFromError(error = null) {
+  return Number(
+    error?.status ||
+      error?.statusCode ||
+      error?.response?.status ||
+      error?.data?.status ||
+      0
+  ) || 0;
 }
 
-function getRequestPath(requestConfig = {}) {
-  const cfg = safeObject(requestConfig);
+function publicError(error = null) {
+  if (!error) return null;
 
-  return safeText(
-    cfg.path ||
-      cfg.url ||
-      cfg.endpoint ||
-      cfg.href ||
-      cfg.input ||
-      cfg.resource ||
-      cfg.finalUrl ||
-      cfg.originalUrl ||
-      cfg.requestUrl ||
-      cfg.redactedUrl ||
-      cfg.route ||
-      cfg.pathname ||
-      "",
-    ""
-  );
-}
-
-function rootFor(stateRef) {
-  const root = stateRef && typeof stateRef === "object"
-    ? stateRef
-    : fallbackState;
-
-  if (!root.refreshStats || typeof root.refreshStats !== "object") {
-    root.refreshStats = createRefreshStats();
-  }
-
-  if (!Object.prototype.hasOwnProperty.call(root, "refreshPromise")) {
-    root.refreshPromise = null;
-  }
-
-  return root;
+  return {
+    name: error.name || "Error",
+    message: redact(error.message || String(error)),
+    status: statusFromError(error),
+    code: error.code || error.data?.code || error.response?.data?.code || null,
+  };
 }
 
 /* =========================================================
-   ENDPOINT POLICY
+   PATH POLICY
 ========================================================= */
 
 function baseOrigin() {
@@ -252,7 +133,8 @@ function baseOrigin() {
 }
 
 export function normalizeEndpointPath(path = "") {
-  const raw = safeText(path, "");
+  const raw = text(path, "");
+
   if (!raw) return "";
 
   try {
@@ -264,7 +146,7 @@ export function normalizeEndpointPath(path = "") {
 }
 
 function normalizePathname(pathname = "/") {
-  let value = safeText(pathname, "/")
+  let value = text(pathname, "/")
     .toLowerCase()
     .replace(/\\/g, "/");
 
@@ -281,141 +163,91 @@ function normalizePathname(pathname = "/") {
 
 function stripApiPrefix(path = "") {
   const clean = normalizeEndpointPath(path);
+
   if (clean === "/api") return "/";
   if (clean.startsWith("/api/")) return clean.slice(4) || "/";
+
   return clean;
 }
 
-function comparablePaths(path = "") {
+function pathCandidates(path = "") {
   const clean = normalizeEndpointPath(path);
   const stripped = stripApiPrefix(clean);
+
   return [...new Set([clean, stripped].filter(Boolean))];
 }
 
-function endpointMatches(path = "", markers = []) {
-  const paths = comparablePaths(path);
+function pathMatches(path = "", list = []) {
+  const candidates = pathCandidates(path);
 
-  return safeArray(markers).some((marker) => {
-    const cleanMarker = normalizeEndpointPath(marker);
-    if (!cleanMarker) return false;
-
-    return paths.some((candidate) => (
-      candidate === cleanMarker || candidate.startsWith(`${cleanMarker}/`)
-    ));
+  return list.some((item) => {
+    const marker = normalizeEndpointPath(item);
+    return candidates.includes(marker);
   });
 }
 
+function requestPath(requestConfig = {}) {
+  const cfg = isObject(requestConfig) ? requestConfig : {};
+
+  return text(
+    cfg.path ||
+      cfg.url ||
+      cfg.endpoint ||
+      cfg.href ||
+      cfg.input ||
+      cfg.resource ||
+      cfg.pathname ||
+      "",
+    ""
+  );
+}
+
 export function isAuthMeEndpoint(path = "") {
-  return comparablePaths(path).some((candidate) => AUTH_ME_ENDPOINTS.includes(candidate));
+  return pathMatches(path, PRIVATE_ME_ENDPOINTS);
 }
 
 export function isPublicAuthEndpoint(path = "") {
   if (isAuthMeEndpoint(path)) return false;
-  return endpointMatches(path, PUBLIC_AUTH_MARKERS);
+
+  return pathMatches(path, PUBLIC_AUTH_ENDPOINTS);
 }
 
 export function isAuthRefreshControlEndpoint(path = "") {
   if (isAuthMeEndpoint(path)) return false;
-  return endpointMatches(path, AUTH_CONTROL_MARKERS);
+
+  return pathMatches(path, AUTH_CONTROL_ENDPOINTS);
 }
 
 export function isTechnicalPublicRoute(path = "") {
-  return endpointMatches(path, TECHNICAL_PUBLIC_ROUTES);
+  return pathMatches(path, PUBLIC_ROUTES);
 }
 
-export function isPublicEndpoint(path = "", AppCore = null) {
+export function isPublicEndpoint(path = "") {
   if (isAuthMeEndpoint(path)) return false;
-  if (isPublicAuthEndpoint(path) || isTechnicalPublicRoute(path)) return true;
 
-  try {
-    if (isFn(AppCore?.utils?.isPublicApiPath)) {
-      return Boolean(AppCore.utils.isPublicApiPath(path));
-    }
-  } catch {}
-
-  try {
-    if (isFn(AppCore?.isPublicApiPath)) {
-      return Boolean(AppCore.isPublicApiPath(path));
-    }
-  } catch {}
-
-  return false;
+  return isPublicAuthEndpoint(path) || isTechnicalPublicRoute(path);
 }
 
 export function isAuthEndpoint(path = "") {
   const clean = normalizeEndpointPath(path);
-  return clean === "/auth" || clean === "/api/auth" || clean.includes("/auth/") || isAuthMeEndpoint(clean);
-}
 
-/* =========================================================
-   STATS
-========================================================= */
-
-function createRefreshStats() {
-  return {
-    version: HTTP_AUTH_VERSION,
-    attempts: 0,
-    failures: 0,
-    skipped: 0,
-    joined: 0,
-    successes: 0,
-    lastAttemptAt: 0,
-    lastSuccessAt: 0,
-    lastFailureAt: 0,
-    lastSkipAt: 0,
-    lastJoinAt: 0,
-    lastSkipReason: "",
-    lastError: null,
-  };
-}
-
-function markSkip(root, reason = "skipped") {
-  const stats = root.refreshStats;
-  stats.skipped += 1;
-  stats.lastSkipAt = now();
-  stats.lastSkipReason = safeText(reason, "skipped");
-  return false;
-}
-
-function markFailure(root, error = null) {
-  const stats = root.refreshStats;
-  stats.failures += 1;
-  stats.lastFailureAt = now();
-  stats.lastError = sanitize(error);
-  return false;
-}
-
-function markSuccess(root) {
-  const stats = root.refreshStats;
-  stats.successes += 1;
-  stats.lastSuccessAt = now();
-  stats.lastError = null;
-  return true;
-}
-
-function markJoin(root) {
-  const stats = root.refreshStats;
-  stats.joined += 1;
-  stats.lastJoinAt = now();
+  return (
+    clean === "/api/auth" ||
+    clean === "/auth" ||
+    clean.startsWith("/api/auth/") ||
+    clean.startsWith("/auth/") ||
+    isAuthMeEndpoint(clean)
+  );
 }
 
 /* =========================================================
    REFRESH POLICY
 ========================================================= */
 
-function statusFromError(error = null) {
-  return safeNumber(
-    error?.status ||
-      error?.statusCode ||
-      error?.response?.status ||
-      error?.data?.status,
-    0
-  );
-}
-
 function isAbortOrTimeout(error = null, requestConfig = {}) {
-  if (error?.aborted === true || error?.name === "AbortError") return true;
-  if (error?.timeout === true || error?.code === "TIMEOUT" || error?.code === "REQUEST_TIMEOUT") return true;
+  if (error?.name === "AbortError" || error?.aborted === true) return true;
+  if (error?.timeout === true) return true;
+  if (error?.code === "TIMEOUT" || error?.code === "REQUEST_TIMEOUT") return true;
 
   try {
     return Boolean(requestConfig?.signal?.aborted);
@@ -424,36 +256,50 @@ function isAbortOrTimeout(error = null, requestConfig = {}) {
   }
 }
 
-function skipReason({ AppCore, config, error, requestConfig } = {}) {
-  const cfg = safeObject(config);
-  const req = safeObject(requestConfig);
+function skipReason({ config = {}, error = null, requestConfig = {} } = {}) {
+  const cfg = isObject(config) ? config : {};
+  const req = isObject(requestConfig) ? requestConfig : {};
+  const path = requestPath(req);
   const status = statusFromError(error);
-  const path = getRequestPath(req);
 
   if (cfg.autoRefreshOn401 === false) return "auto-refresh-disabled";
   if (status !== 401 && status !== 419) return "status-not-refreshable";
   if (isAbortOrTimeout(error, req)) return "aborted-or-timeout";
 
-  if (req._authRefreshAttempted === true || req._retriedAfterRefresh === true) return "already-attempted";
-  if (req._skipAuthRefresh === true || req.skipAuthRefresh === true) return "skip-auth-refresh";
-  if (req.noAutoRefresh === true || req.autoRefresh === false) return "auto-refresh-disabled-request";
-
-  if (req.public === true || req.auth === false || req.skipAuth === true || req.noAuthHeader === true) {
-    return "public-or-auth-disabled";
+  if (req._authRefreshAttempted === true || req._retriedAfterRefresh === true) {
+    return "already-attempted";
   }
 
-  if (!isAuthMeEndpoint(path)) {
-    if (isAuthRefreshControlEndpoint(path)) return "auth-control-endpoint";
-    if (isPublicAuthEndpoint(path)) return "public-auth-endpoint";
+  if (
+    req._skipAuthRefresh === true ||
+    req.skipAuthRefresh === true ||
+    req.noAutoRefresh === true ||
+    req.autoRefresh === false
+  ) {
+    return "request-disabled";
   }
 
-  if (isTechnicalPublicRoute(path)) return "technical-public-route";
-  if (isPublicEndpoint(path, AppCore)) return "public-endpoint";
+  if (
+    req.public === true ||
+    req.auth === false ||
+    req.skipAuth === true ||
+    req.noAuthHeader === true
+  ) {
+    return "public-request";
+  }
+
+  if (!isAuthMeEndpoint(path) && isAuthRefreshControlEndpoint(path)) {
+    return "auth-control-endpoint";
+  }
+
+  if (isPublicEndpoint(path)) {
+    return "public-endpoint";
+  }
 
   return "";
 }
 
-function refreshSucceeded(result) {
+function refreshSucceeded(result = null) {
   if (result === true) return true;
   if (!result) return false;
 
@@ -461,34 +307,63 @@ function refreshSucceeded(result) {
     return ["ok", "success", "true", "refreshed"].includes(result.trim().toLowerCase());
   }
 
-  const data = safeObject(result);
+  const data = isObject(result) ? result : {};
 
   if (data.ok === false || data.success === false || data.error) return false;
-  if (data.ok === true || data.success === true || data.refreshed === true || data.authenticated === true) return true;
+  if (data.ok === true || data.success === true || data.refreshed === true) return true;
 
   return Boolean(
     data.token ||
       data.accessToken ||
       data.access_token ||
-      data.refreshToken ||
-      data.refresh_token ||
-      data.user ||
-      data.usuario ||
-      data.session ||
       data.data?.token ||
       data.data?.accessToken ||
       data.data?.access_token ||
-      data.data?.user ||
-      data.payload?.token ||
-      data.payload?.accessToken ||
-      data.payload?.access_token ||
-      data.payload?.user
+      data.auth?.token ||
+      data.auth?.accessToken ||
+      data.auth?.access_token
   );
 }
 
-async function refreshViaCoreHttp(options = {}) {
-  if (isFn(CoreHttp?.refreshSession)) return CoreHttp.refreshSession(options);
-  if (isFn(CoreHttp?.refresh)) return CoreHttp.refresh(options);
+function commitRefreshTokens(result = null) {
+  if (!isObject(result)) return false;
+
+  try {
+    CoreHttp?.setAuthTokens?.(result);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function refreshViaCore(options = {}) {
+  const requestOptions = {
+    ...options,
+
+    auth: false,
+    public: true,
+    skipAuth: true,
+
+    _skipAuthRefresh: true,
+    skipAuthRefresh: true,
+    noAutoRefresh: true,
+    autoRefresh: false,
+
+    retries: 0,
+    storeError: false,
+  };
+
+  if (isFunction(CoreHttp?.refreshSession)) {
+    return CoreHttp.refreshSession({}, requestOptions);
+  }
+
+  if (isFunction(CoreHttp?.refresh)) {
+    return CoreHttp.refresh(requestOptions);
+  }
+
+  if (isFunction(CoreHttp?.post)) {
+    return CoreHttp.post("/api/auth/refresh", {}, requestOptions);
+  }
 
   throw new Error("CoreHttp refresh no disponible.");
 }
@@ -498,104 +373,130 @@ async function refreshViaCoreHttp(options = {}) {
 ========================================================= */
 
 export async function runAutoRefreshIfNeeded({
-  AppCore,
-  Auth,
-  config,
-  state,
-  error,
-  requestConfig,
+  config = {},
+  error = null,
+  requestConfig = {},
 } = {}) {
-  const root = rootFor(state);
-  const cfg = safeObject(config);
-  const req = safeObject(requestConfig);
-  const reason = skipReason({ AppCore, config: cfg, error, requestConfig: req });
+  const reason = skipReason({
+    config,
+    error,
+    requestConfig,
+  });
 
-  if (reason) return markSkip(root, reason);
+  if (reason) {
+    skipped += 1;
+    lastSkipReason = reason;
+    return false;
+  }
 
-  if (root.refreshPromise) {
-    markJoin(root);
+  if (refreshPromise) {
+    joined += 1;
 
     try {
-      const joined = await root.refreshPromise;
-      return refreshSucceeded(joined);
+      const joinedResult = await refreshPromise;
+      return refreshSucceeded(joinedResult);
     } catch (joinError) {
-      return markFailure(root, joinError);
+      failures += 1;
+      lastError = publicError(joinError);
+      return false;
     }
   }
 
-  root.refreshStats.attempts += 1;
-  root.refreshStats.lastAttemptAt = now();
+  attempts += 1;
+  lastError = null;
 
-  root.refreshPromise = refreshViaCoreHttp({
-    reason: "http-auto-refresh",
-    source: "services/http.auth.js",
-    requestId: req.requestId || null,
+  refreshPromise = refreshViaCore({
+    source: "services.http.auth",
+    reason: "auto-refresh",
+    requestId: requestConfig?.requestId || null,
     silent: true,
-    captureAuth: true,
-    emitAuthEvents: cfg.emitAuthRefreshEvents === true || req.emitAuthRefreshEvents === true,
-    _skipAuthRefresh: true,
-    skipAuthRefresh: true,
-    noAutoRefresh: true,
-    autoRefresh: false,
-    retries: 0,
   }).finally(() => {
-    root.refreshPromise = null;
+    refreshPromise = null;
   });
 
   try {
-    const result = await root.refreshPromise;
-    return refreshSucceeded(result) ? markSuccess(root) : markFailure(root, {
+    const result = await refreshPromise;
+    const ok = refreshSucceeded(result);
+
+    if (ok) {
+      successes += 1;
+      lastRefreshAt = nowIso();
+      commitRefreshTokens(result);
+      return true;
+    }
+
+    failures += 1;
+    lastError = {
       name: "RefreshRejected",
-      message: "Refresh finalizado sin sesión/token usable.",
+      message: "Refresh finalizado sin token usable.",
       status: 401,
-    });
+      code: "REFRESH_REJECTED",
+    };
+
+    return false;
   } catch (refreshError) {
-    return markFailure(root, refreshError);
+    failures += 1;
+    lastError = publicError(refreshError);
+    return false;
   }
 }
 
 /* =========================================================
-   DEBUG
+   SNAPSHOT / RESET
 ========================================================= */
 
-export function getHttpAuthSnapshot(stateRef) {
-  const root = rootFor(stateRef);
-  const stats = root.refreshStats;
-
-  return sanitize({
+export function getHttpAuthSnapshot() {
+  return {
     version: HTTP_AUTH_VERSION,
-    refreshInFlight: Boolean(root.refreshPromise),
+
+    refreshInFlight: Boolean(refreshPromise),
+
+    counters: {
+      attempts,
+      successes,
+      failures,
+      skipped,
+      joined,
+    },
+
+    lastSkipReason,
+    lastRefreshAt,
+    lastError,
+
     endpointPolicy: {
       authMePrivate: true,
-      authMeEndpoints: AUTH_ME_ENDPOINTS,
-      publicAuthMarkers: PUBLIC_AUTH_MARKERS.length,
-      authControlMarkers: AUTH_CONTROL_MARKERS.length,
-      technicalPublicRoutes: TECHNICAL_PUBLIC_ROUTES,
+      privateMeEndpoints: [...PRIVATE_ME_ENDPOINTS],
+      publicAuthEndpoints: [...PUBLIC_AUTH_ENDPOINTS],
+      publicRoutes: [...PUBLIC_ROUTES],
+    },
+
+    policy: {
+      bridgeOnly: true,
       delegatesRefreshToCoreHttp: true,
-      directFetchFallback: false,
-      restoreSessionExcluded: true,
-      logoutExcluded: true,
-      storageExcluded: true,
-      routerExcluded: true,
-      toastExcluded: true,
+      directFetch: false,
+      restoreSession: false,
+      logout: false,
+      storage: false,
+      router: false,
+      toast: false,
+      twoFactor: false,
     },
-    refreshStats: {
-      ...stats,
-      lastAttemptAtIso: stats.lastAttemptAt ? iso(stats.lastAttemptAt) : "",
-      lastSuccessAtIso: stats.lastSuccessAt ? iso(stats.lastSuccessAt) : "",
-      lastFailureAtIso: stats.lastFailureAt ? iso(stats.lastFailureAt) : "",
-      lastSkipAtIso: stats.lastSkipAt ? iso(stats.lastSkipAt) : "",
-      lastJoinAtIso: stats.lastJoinAt ? iso(stats.lastJoinAt) : "",
-      lastError: stats.lastError || null,
-    },
-    at: iso(),
-  });
+  };
 }
 
-export function resetHttpAuthRuntime(stateRef) {
-  const root = rootFor(stateRef);
-  root.refreshPromise = null;
-  root.refreshStats = createRefreshStats();
+export function resetHttpAuthRuntime() {
+  refreshPromise = null;
+
+  attempts = 0;
+  successes = 0;
+  failures = 0;
+  skipped = 0;
+  joined = 0;
+
+  lastSkipReason = "";
+  lastError = null;
+  lastRefreshAt = "";
+
   return true;
 }
 

@@ -2,34 +2,31 @@
    Onion SPA - Reset Password Helpers
    Archivo: src/views/password-reset/reset-password.helpers.js
 
-   Responsabilidades:
-   - helpers puros de recuperación de acceso
-   - validación de identificador
-   - creación de payload uniforme
-   - normalización de respuesta del backend
-   - resolución de mensajes de error
-   - persistencia opcional del identificador recordado
-   - compatibilidad con usuario o email
-   - endurecer redirects y consistencia UX
-   - distinguir success real de cooldown / rate limit
+   Responsabilidad:
+   - Helpers puros para password reset.
+   - Normalizar identificador.
+   - Validar request mínimo.
+   - Crear payload simple.
+   - Normalizar resultado/error.
+   - Resolver redirect interno seguro.
+   - Sin AppCore.
+   - Sin Auth.
+   - Sin HTTP.
+   - Sin Router.
+   - Sin Store.
+   - Sin storage paralelo.
+   - Sin Toast.
+   - Sin magia negra.
 ========================================================= */
 
-import { AppCore } from "../../core/index.js";
-import {
-  AUTH_STORAGE_KEYS,
-  AUTH_CONSTANTS,
-} from "../../features/auth/constants.js";
+export const RESET_PASSWORD_HELPERS_VERSION = "minimal-1";
 
-/* =========================================================
-   CONST
-========================================================= */
+export const RESET_PASSWORD_IDENTIFIER_KEY = "auth:last-identifier";
 
-export const RESET_PASSWORD_IDENTIFIER_KEY =
-  AUTH_STORAGE_KEYS?.lastResetIdentifier ||
-  "auth:last-identifier";
+const MAX_IDENTIFIER_LENGTH = 160;
 
 const DEFAULT_SUCCESS_MESSAGE =
-  "Si el identificador existe, te enviaremos las instrucciones para restablecer la contraseña.";
+  "Si el identificador existe, recibirás instrucciones para restablecer la contraseña.";
 
 const DEFAULT_ERROR_MESSAGE =
   "No se pudo procesar la recuperación de acceso.";
@@ -42,71 +39,75 @@ const DEFAULT_COOLDOWN_MESSAGE =
 ========================================================= */
 
 export function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
-
-  const text = String(value).trim();
-  return text || fallback;
+  const output = String(value ?? "").trim();
+  return output || fallback;
 }
 
 export function escapeHtml(value = "") {
   return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 export function isObject(value) {
-  return value !== null && typeof value === "object";
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function number(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/* =========================================================
+   IDENTIFIER
+========================================================= */
+
+export function getResetIdentifierMaxLength() {
+  return MAX_IDENTIFIER_LENGTH;
 }
 
 export function normalizeIdentifier(value = "") {
-  return safeText(value, "");
+  return safeText(value, "")
+    .normalize("NFKC")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .slice(0, MAX_IDENTIFIER_LENGTH);
+}
+
+export function looksLikeEmail(value = "") {
+  return normalizeIdentifier(value).includes("@");
 }
 
 export function isValidEmail(value = "") {
-  const email = safeText(value, "").toLowerCase();
+  const email = normalizeIdentifier(value).toLowerCase();
 
-  if (!email) {
-    return false;
-  }
+  if (!email) return false;
 
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-export function looksLikeEmail(value = "") {
-  return safeText(value, "").includes("@");
-}
-
-export function getResetIdentifierMaxLength() {
-  return Number(
-    AUTH_CONSTANTS?.resetIdentifierMaxLength ??
-      AUTH_CONSTANTS?.identifierMaxLength ??
-      160
-  ) || 160;
-}
+/* =========================================================
+   REDIRECT
+========================================================= */
 
 export function normalizePath(path = "/") {
-  const raw = safeText(path, "/") || "/";
+  let value = safeText(path, "/");
 
-  if (typeof AppCore?.utils?.normalizePath === "function") {
-    try {
-      return AppCore.utils.normalizePath(raw);
-    } catch {}
+  if (value.startsWith("#/")) value = value.slice(1);
+  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
+
+  if (!value.startsWith("/")) value = `/${value}`;
+
+  value = value.replace(/\/{2,}/g, "/");
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || "/";
   }
 
-  if (raw === "/") {
-    return "/";
-  }
-
-  return (
-    raw
-      .replace(/\/{2,}/g, "/")
-      .replace(/\/+$/g, "") || "/"
-  );
+  return value || "/";
 }
 
 export function isSafeInternalRedirect(path = "") {
@@ -115,136 +116,58 @@ export function isSafeInternalRedirect(path = "") {
   if (!value) return false;
   if (!value.startsWith("/")) return false;
   if (value.startsWith("//")) return false;
-  if (/^\/https?:/i.test(value)) return false;
-  if (/[\r\n]/.test(value)) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return false;
+  if (/[\r\n\t\\]/.test(value)) return false;
 
   return true;
 }
 
 export function ensureSafeRedirect(path = "", fallback = "/login") {
-  const normalizedFallback = normalizePath(fallback || "/login");
-  const normalizedPath = normalizePath(path || "");
+  const fallbackPath = normalizePath(fallback || "/login");
+  const candidate = normalizePath(path || fallbackPath);
 
-  if (!isSafeInternalRedirect(normalizedPath)) {
-    return normalizedFallback;
-  }
-
-  return normalizedPath;
+  return isSafeInternalRedirect(candidate) ? candidate : fallbackPath;
 }
 
 /* =========================================================
-   STORAGE
+   STORAGE COMPAT
+   Nota: sin storage paralelo. Exports conservados para no romper imports.
 ========================================================= */
 
 export function getStorage() {
-  try {
-    if (AppCore?.storage) {
-      return AppCore.storage;
-    }
-  } catch {}
-
   return null;
 }
 
 export function getNamespacedKey(key = "") {
-  const prefix = safeText(
-    AppCore?.config?.storagePrefix,
-    "onion"
-  );
-
-  return `${prefix}:${safeText(key, "")}`;
+  return safeText(key, "");
 }
 
-export function readStorage(key, fallback = "") {
-  try {
-    const storage = getStorage();
-
-    if (typeof storage?.get === "function") {
-      return safeText(storage.get(key), fallback);
-    }
-
-    return safeText(
-      window.localStorage.getItem(getNamespacedKey(key)),
-      fallback
-    );
-  } catch {
-    return fallback;
-  }
+export function readStorage(_key, fallback = "") {
+  return fallback;
 }
 
-export function writeStorage(key, value = "") {
-  try {
-    const storage = getStorage();
-    const finalValue = safeText(value, "");
-
-    if (typeof storage?.set === "function") {
-      storage.set(key, finalValue);
-      return true;
-    }
-
-    window.localStorage.setItem(
-      getNamespacedKey(key),
-      finalValue
-    );
-
-    return true;
-  } catch {
-    return false;
-  }
+export function writeStorage() {
+  return false;
 }
 
-export function removeStorage(key = "") {
-  try {
-    const storage = getStorage();
-
-    if (typeof storage?.remove === "function") {
-      storage.remove(key);
-      return true;
-    }
-
-    window.localStorage.removeItem(
-      getNamespacedKey(key)
-    );
-
-    return true;
-  } catch {
-    return false;
-  }
+export function removeStorage() {
+  return false;
 }
-
-/* =========================================================
-   IDENTIFIER MEMORY
-========================================================= */
 
 export function loadRememberedIdentifier() {
-  return readStorage(
-    RESET_PASSWORD_IDENTIFIER_KEY,
-    ""
-  );
+  return "";
 }
 
-export function saveRememberedIdentifier(identifier = "") {
-  return writeStorage(
-    RESET_PASSWORD_IDENTIFIER_KEY,
-    normalizeIdentifier(identifier)
-  );
+export function saveRememberedIdentifier() {
+  return false;
 }
 
 export function clearRememberedIdentifier() {
-  return removeStorage(
-    RESET_PASSWORD_IDENTIFIER_KEY
-  );
+  return false;
 }
 
-export function persistResetPasswordIdentifier(identifier = "") {
-  const value = normalizeIdentifier(identifier);
-
-  if (!value) {
-    clearRememberedIdentifier();
-    return false;
-  }
-
-  return saveRememberedIdentifier(value);
+export function persistResetPasswordIdentifier() {
+  return false;
 }
 
 /* =========================================================
@@ -254,17 +177,23 @@ export function persistResetPasswordIdentifier(identifier = "") {
 export function createResetPasswordPayload({
   identifier = "",
   email = "",
+  username = "",
+  user = "",
+  login = "",
   redirect = "",
 } = {}) {
-  const normalizedIdentifier =
-    normalizeIdentifier(identifier) ||
-    normalizeIdentifier(email);
+  const normalizedIdentifier = normalizeIdentifier(
+    identifier || email || username || user || login
+  );
+
+  const normalizedEmail =
+    looksLikeEmail(normalizedIdentifier) && isValidEmail(normalizedIdentifier)
+      ? normalizedIdentifier.toLowerCase()
+      : "";
 
   return {
     identifier: normalizedIdentifier,
-    email: looksLikeEmail(normalizedIdentifier)
-      ? normalizedIdentifier.toLowerCase()
-      : "",
+    email: normalizedEmail,
     redirect: safeText(redirect, ""),
   };
 }
@@ -274,34 +203,31 @@ export function createResetPasswordPayload({
 ========================================================= */
 
 export function validateResetPasswordPayload(payload = {}) {
-  const identifier = normalizeIdentifier(
+  const rawIdentifier = safeText(
     payload.identifier ||
       payload.email ||
       payload.username ||
       payload.user ||
-      ""
+      payload.login ||
+      "",
+    ""
   );
 
+  const identifier = normalizeIdentifier(rawIdentifier);
   const errors = {};
 
   if (!identifier) {
-    errors.identifier =
-      "Introduce tu email o nombre de usuario.";
+    errors.identifier = "Introduce tu email o nombre de usuario.";
     return errors;
   }
 
-  if (identifier.length > getResetIdentifierMaxLength()) {
-    errors.identifier =
-      "El identificador es demasiado largo.";
+  if (rawIdentifier.length > MAX_IDENTIFIER_LENGTH) {
+    errors.identifier = "El identificador es demasiado largo.";
     return errors;
   }
 
-  if (
-    looksLikeEmail(identifier) &&
-    !isValidEmail(identifier)
-  ) {
-    errors.identifier =
-      "El formato del email no es válido.";
+  if (looksLikeEmail(identifier) && !isValidEmail(identifier)) {
+    errors.identifier = "El formato del email no es válido.";
   }
 
   return errors;
@@ -318,108 +244,95 @@ export function getFirstResetPasswordError(errors = {}) {
 }
 
 /* =========================================================
-   RESPONSE NORMALIZATION
+   RESPONSE
 ========================================================= */
+
+function readResponseMessage(raw = {}) {
+  return (
+    safeText(raw.message, "") ||
+    safeText(raw.mensaje, "") ||
+    safeText(raw.detail, "") ||
+    safeText(raw.description, "") ||
+    safeText(raw.error, "") ||
+    safeText(raw.data?.message, "") ||
+    safeText(raw.data?.mensaje, "") ||
+    safeText(raw.data?.detail, "") ||
+    safeText(raw.data?.description, "") ||
+    safeText(raw.data?.error, "")
+  );
+}
 
 export function normalizeResetPasswordResult(result = {}) {
   const raw = isObject(result) ? result : {};
+  const status = number(raw.status ?? raw.statusCode ?? raw.data?.status ?? raw.data?.statusCode, 0);
+  const retryAfter = Math.max(
+    0,
+    number(raw.retryAfter ?? raw.cooldownSeconds ?? raw.data?.retryAfter ?? raw.data?.cooldownSeconds, 0)
+  );
 
   const explicitOk =
-    typeof raw?.ok === "boolean"
+    typeof raw.ok === "boolean"
       ? raw.ok
-      : typeof raw?.success === "boolean"
+      : typeof raw.success === "boolean"
         ? raw.success
-        : typeof raw?.data?.ok === "boolean"
+        : typeof raw.data?.ok === "boolean"
           ? raw.data.ok
-          : typeof raw?.data?.success === "boolean"
+          : typeof raw.data?.success === "boolean"
             ? raw.data.success
             : null;
 
-  const status =
-    Number(
-      raw?.status ??
-        raw?.statusCode ??
-        raw?.data?.status ??
-        raw?.data?.statusCode ??
-        0
-    ) || 0;
-
-  const cooldownSeconds =
-    Number(
-      raw?.cooldownSeconds ??
-        raw?.retryAfter ??
-        raw?.data?.cooldownSeconds ??
-        raw?.data?.retryAfter ??
-        0
-    ) || 0;
-
-  const retryAfter = Math.max(0, cooldownSeconds);
-
-  const cooldown =
-    Boolean(raw?.cooldown) ||
-    status === 429 ||
-    retryAfter > 0;
-
-  const ok =
-    explicitOk === null
-      ? false
-      : Boolean(explicitOk);
-
-  const message =
-    raw?.message ||
-    raw?.mensaje ||
-    raw?.detail ||
-    raw?.error ||
-    raw?.data?.message ||
-    raw?.data?.mensaje ||
-    raw?.data?.detail ||
-    raw?.data?.error ||
-    "";
+  const cooldown = Boolean(raw.cooldown) || status === 429 || retryAfter > 0;
+  const ok = explicitOk === null
+    ? raw.error !== true && status < 400
+    : Boolean(explicitOk);
 
   const redirectTo =
-    raw?.redirectTo ||
-    raw?.redirect ||
-    raw?.data?.redirectTo ||
-    raw?.data?.redirect ||
-    "";
+    safeText(raw.redirectTo, "") ||
+    safeText(raw.redirect, "") ||
+    safeText(raw.data?.redirectTo, "") ||
+    safeText(raw.data?.redirect, "");
 
   const emailMasked =
-    raw?.emailMasked ||
-    raw?.maskedEmail ||
-    raw?.data?.emailMasked ||
-    raw?.data?.maskedEmail ||
-    "";
+    safeText(raw.emailMasked, "") ||
+    safeText(raw.maskedEmail, "") ||
+    safeText(raw.data?.emailMasked, "") ||
+    safeText(raw.data?.maskedEmail, "");
 
   return {
     raw,
+
     ok,
     success: ok,
     error: !ok,
-    cooldown,
+
     status,
+    cooldown,
+    retryAfter,
+    cooldownSeconds: retryAfter,
+
     message: safeText(
-      message,
+      readResponseMessage(raw),
       ok
         ? DEFAULT_SUCCESS_MESSAGE
         : cooldown
           ? DEFAULT_COOLDOWN_MESSAGE
           : DEFAULT_ERROR_MESSAGE
     ),
+
     redirectTo: safeText(redirectTo, ""),
-    cooldownSeconds: retryAfter,
-    retryAfter,
     emailMasked: safeText(emailMasked, ""),
   };
 }
 
+/* =========================================================
+   ERROR MESSAGES
+========================================================= */
+
 export function buildResetPasswordCooldownMessage(seconds = 0) {
-  const safeSeconds = Math.max(
-    0,
-    Number(seconds) || 0
-  );
+  const safeSeconds = Math.max(0, number(seconds, 0));
 
   if (!safeSeconds) {
-    return "Espera un momento antes de volver a intentarlo.";
+    return DEFAULT_COOLDOWN_MESSAGE;
   }
 
   if (safeSeconds === 1) {
@@ -439,23 +352,25 @@ export function buildResetPasswordCooldownMessage(seconds = 0) {
   return `Espera ${minutes} minutos antes de volver a intentarlo.`;
 }
 
-export function resolveResetPasswordErrorMessage(error) {
-  const status = Number(
+export function resolveResetPasswordErrorMessage(error = null) {
+  const status = number(
     error?.status ??
+      error?.statusCode ??
       error?.response?.status ??
       error?.data?.status ??
-      error?.data?.statusCode ??
-      0
-  ) || 0;
+      error?.data?.statusCode,
+    0
+  );
 
-  const retryAfter = Number(
+  const retryAfter = number(
     error?.retryAfter ??
+      error?.cooldownSeconds ??
       error?.data?.retryAfter ??
       error?.data?.cooldownSeconds ??
       error?.response?.data?.retryAfter ??
-      error?.response?.data?.cooldownSeconds ??
-      0
-  ) || 0;
+      error?.response?.data?.cooldownSeconds,
+    0
+  );
 
   const backendMessage =
     safeText(error?.data?.message, "") ||
@@ -481,7 +396,8 @@ export function resolveResetPasswordErrorMessage(error) {
 }
 
 /* =========================================================
-   EXECUTOR RESOLUTION
+   EXECUTOR COMPAT
+   Nota: la vista actual llama Auth directamente.
 ========================================================= */
 
 export function resolveResetPasswordExecutor(deps = {}) {
@@ -490,70 +406,84 @@ export function resolveResetPasswordExecutor(deps = {}) {
     deps.submitResetPassword,
     deps.requestResetPassword,
     deps.resetPassword,
-    AppCore?.services?.auth?.requestPasswordReset,
-    AppCore?.services?.auth?.resetPasswordRequest,
-    AppCore?.services?.auth?.forgotPassword,
-    AppCore?.auth?.requestPasswordReset,
-    AppCore?.auth?.forgotPassword,
   ];
 
-  for (const candidate of candidates) {
-    if (typeof candidate === "function") {
-      return candidate;
-    }
-  }
-
-  return null;
+  return candidates.find((candidate) => typeof candidate === "function") || null;
 }
 
 /* =========================================================
-   REDIRECT
+   SUCCESS / REDIRECT
 ========================================================= */
 
-export function resolveResetPasswordRedirect(
-  result = {},
-  options = {}
-) {
-  const explicitRedirect =
+export function resolveResetPasswordRedirect(result = {}, options = {}) {
+  const fallback =
     safeText(options.redirectTo, "") ||
     safeText(options.successRedirect, "") ||
     safeText(options.backToLoginHref, "") ||
     "/login";
 
-  const responseRedirect =
+  const redirect =
     safeText(result?.redirectTo, "") ||
+    safeText(result?.redirect, "") ||
     safeText(result?.raw?.redirectTo, "") ||
     safeText(result?.raw?.redirect, "") ||
     safeText(result?.raw?.data?.redirectTo, "") ||
     safeText(result?.raw?.data?.redirect, "");
 
-  if (responseRedirect) {
-    return ensureSafeRedirect(
-      responseRedirect,
-      explicitRedirect
-    );
-  }
-
-  return ensureSafeRedirect(
-    explicitRedirect,
-    "/login"
-  );
+  return ensureSafeRedirect(redirect || fallback, "/login");
 }
 
-/* =========================================================
-   UX HELPERS
-========================================================= */
-
 export function buildResetPasswordSuccessMessage(result = {}) {
-  const normalized =
-    normalizeResetPasswordResult(result);
+  const normalized = normalizeResetPasswordResult(result);
 
   if (normalized.emailMasked) {
     return `Te hemos enviado las instrucciones a ${normalized.emailMasked}.`;
   }
 
-  return (
-    safeText(normalized.message, "") ||
-    DEFAULT_SUCCESS_MESSAGE
-  );
+  return safeText(normalized.message, DEFAULT_SUCCESS_MESSAGE);
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default {
+  RESET_PASSWORD_HELPERS_VERSION,
+  RESET_PASSWORD_IDENTIFIER_KEY,
+
+  safeText,
+  escapeHtml,
+  isObject,
+
+  normalizeIdentifier,
+  looksLikeEmail,
+  isValidEmail,
+  getResetIdentifierMaxLength,
+
+  normalizePath,
+  isSafeInternalRedirect,
+  ensureSafeRedirect,
+
+  getStorage,
+  getNamespacedKey,
+  readStorage,
+  writeStorage,
+  removeStorage,
+
+  loadRememberedIdentifier,
+  saveRememberedIdentifier,
+  clearRememberedIdentifier,
+  persistResetPasswordIdentifier,
+
+  createResetPasswordPayload,
+  validateResetPasswordPayload,
+  getFirstResetPasswordError,
+
+  normalizeResetPasswordResult,
+  buildResetPasswordCooldownMessage,
+  resolveResetPasswordErrorMessage,
+
+  resolveResetPasswordExecutor,
+  resolveResetPasswordRedirect,
+  buildResetPasswordSuccessMessage,
+};

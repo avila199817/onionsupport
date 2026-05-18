@@ -12,30 +12,14 @@
    - Sin apiClient propio.
    - Sin Router.
    - Sin Toast.
+   - Sin storage.
    - Sin 2FA/MFA/OTP.
    - Sin rutas legacy.
-   - Sin preserve-route complejo.
+   - Sin magia negra.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import CoreHttp from "../../core/http.js";
-
-import {
-  extractMessage,
-  redactTokenInText,
-} from "./helpers.js";
-
-import {
-  AUTH_ENDPOINTS,
-} from "./constants.js";
-
-import {
-  normalizeAuthResponse,
-} from "./normalize.js";
-
-import {
-  getStoredAccessToken,
-} from "./storage.js";
 
 import {
   applySession,
@@ -46,6 +30,7 @@ import {
 export const RESTORE_VERSION = "simple";
 
 const SOURCE = "auth.restore";
+const ME_ENDPOINT = "/api/auth/me";
 
 const runtimeSession = {
   restoring: false,
@@ -92,14 +77,64 @@ function tokenOk(value = "") {
   if (!token) return false;
   if (/\s/.test(token)) return false;
 
-  return !["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
-    token.toLowerCase()
-  );
+  return ![
+    "null",
+    "undefined",
+    "false",
+    "true",
+    "[object object]",
+    "{}",
+    "[]",
+  ].includes(token.toLowerCase());
 }
 
 function cleanToken(value = "") {
   return tokenOk(value) ? stripBearer(value) : "";
 }
+
+function redact(value = "") {
+  return text(value, "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+function extractMessage(error = null) {
+  return (
+    error?.data?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    String(error || "")
+  );
+}
+
+function emit(eventName = "", payload = {}, options = {}) {
+  if (options.silent === true || options.emit === false || options.emitEvents === false) {
+    return false;
+  }
+
+  const name = text(eventName, "");
+  if (!name) return false;
+
+  try {
+    AppCore?.events?.emit?.(name, {
+      source: SOURCE,
+      version: RESTORE_VERSION,
+      at: nowIso(),
+      ...payload,
+      token: null,
+      accessToken: null,
+      refreshToken: null,
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   USER
+========================================================= */
 
 function userDisabled(user = null) {
   if (!isObject(user)) return true;
@@ -108,6 +143,10 @@ function userDisabled(user = null) {
     user.disabled === true ||
     String(user.status || "").toLowerCase() === "disabled"
   );
+}
+
+function cleanRole(value = "") {
+  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
 }
 
 function userOk(user = null) {
@@ -123,34 +162,149 @@ function userOk(user = null) {
   );
 }
 
-function redact(value = "") {
-  try {
-    return redactTokenInText(value);
-  } catch {
-    return text(value, "").replace(/([?&#]token=)([^&#\s]+)/gi, "$1***");
-  }
+function normalizeUser(user = null) {
+  if (!userOk(user)) return null;
+
+  const id = user.userId || user.id || null;
+  const username = user.username || user.slug || user.email || id || null;
+
+  const displayName =
+    user.name ||
+    user.fullName ||
+    user.displayName ||
+    user.nombre ||
+    username ||
+    user.email ||
+    id ||
+    "Usuario";
+
+  const role = cleanRole(user.role || user.rol);
+
+  return {
+    ...user,
+
+    id,
+    userId: user.userId || id,
+
+    username,
+    slug: user.slug || username,
+
+    name: user.name || displayName,
+    fullName: user.fullName || displayName,
+    displayName,
+
+    email: user.email || null,
+
+    role,
+    rol: role,
+    roles: [role],
+
+    isAdmin: role === "admin",
+    isSupport: false,
+    isManager: false,
+    isClient: false,
+
+    avatar: user.avatar || user.avatarUrl || user.picture || null,
+    avatarUrl: user.avatarUrl || user.avatar || user.picture || null,
+    picture: user.picture || user.avatarUrl || user.avatar || null,
+    hasAvatar: Boolean(user.avatar || user.avatarUrl || user.picture),
+
+    active: true,
+    disabled: false,
+  };
 }
 
-function emit(eventName = "", payload = {}, options = {}) {
-  if (options.silent === true || options.emit === false || options.emitEvents === false) {
-    return false;
-  }
+function publicUser(user = null) {
+  const clean = normalizeUser(user);
+
+  if (!clean) return null;
+
+  return {
+    id: clean.id || clean.userId || null,
+    userId: clean.userId || clean.id || null,
+    username: clean.username || clean.slug || null,
+    displayName: clean.displayName || clean.name || clean.username || null,
+    role: clean.role || clean.rol || null,
+    hasAvatar: Boolean(clean.avatar || clean.avatarUrl || clean.picture),
+  };
+}
+
+/* =========================================================
+   STATE
+========================================================= */
+
+function getCurrentToken() {
+  const state = readState();
+
+  return cleanToken(
+    state.token ||
+      state.accessToken ||
+      state.access_token ||
+      ""
+  );
+}
+
+function getCurrentUser() {
+  const state = readState();
+
+  return (
+    normalizeUser(state.user) ||
+    normalizeUser(state.currentUser) ||
+    normalizeUser(state.authUser) ||
+    normalizeUser(state.sessionUser) ||
+    normalizeUser(state.session?.user) ||
+    normalizeUser(state.sessionData?.user) ||
+    null
+  );
+}
+
+function hasCompleteAuthState() {
+  return Boolean(getCurrentToken() && getCurrentUser());
+}
+
+function getSession(sessionArg = null) {
+  return isObject(sessionArg) &&
+    (
+      "restorePromise" in sessionArg ||
+      "mePromise" in sessionArg ||
+      "restoring" in sessionArg
+    )
+    ? sessionArg
+    : runtimeSession;
+}
+
+function publicSnapshot(extra = {}) {
+  let snapshot = {};
 
   try {
-    AppCore?.events?.emit?.(eventName, {
-      source: SOURCE,
-      version: RESTORE_VERSION,
-      at: nowIso(),
-      ...payload,
-      token: null,
-      accessToken: null,
-      refreshToken: null,
-    });
-
-    return true;
+    snapshot = buildSessionSnapshot();
   } catch {
-    return false;
+    snapshot = {};
   }
+
+  const state = readState();
+  const user = snapshot.user || getCurrentUser();
+
+  return {
+    version: RESTORE_VERSION,
+
+    authenticated: Boolean(snapshot.authenticated || hasCompleteAuthState()),
+    hasToken: Boolean(getCurrentToken()),
+    hasUser: Boolean(userOk(user)),
+
+    user: publicUser(user),
+
+    role: snapshot.role || state.role || user?.role || null,
+
+    route: redact(state.route || "/"),
+    publicPath: redact(state.publicPath || "/"),
+
+    token: null,
+    accessToken: null,
+    refreshToken: null,
+
+    ...extra,
+  };
 }
 
 /* =========================================================
@@ -188,99 +342,42 @@ function normalizeRestoreError(error) {
 }
 
 /* =========================================================
-   STATE
+   RESPONSE
 ========================================================= */
 
-function getCurrentToken() {
-  const state = readState();
+function nested(payload = {}) {
+  const source = isObject(payload) ? payload : {};
 
-  return cleanToken(
-    state.token ||
-      state.accessToken ||
-      state.access_token ||
-      state.session?.token ||
-      state.session?.accessToken ||
-      state.session?.access_token ||
-      getStoredAccessToken() ||
-      ""
-  );
+  return [
+    source,
+    isObject(source.data) ? source.data : null,
+    isObject(source.payload) ? source.payload : null,
+    isObject(source.result) ? source.result : null,
+    isObject(source.auth) ? source.auth : null,
+    isObject(source.session) ? source.session : null,
+    isObject(source.sessionData) ? source.sessionData : null,
+  ].filter(Boolean);
 }
 
-function getCurrentUser() {
-  const state = readState();
+function readUserFromResponse(payload = {}) {
+  for (const node of nested(payload)) {
+    const user = normalizeUser(
+      node.user ||
+        node.usuario ||
+        node.me ||
+        node.account ||
+        node.profile
+    );
 
-  return (
-    userOk(state.user) && state.user
-  ) || (
-    userOk(state.currentUser) && state.currentUser
-  ) || (
-    userOk(state.authUser) && state.authUser
-  ) || (
-    userOk(state.sessionUser) && state.sessionUser
-  ) || (
-    userOk(state.session?.user) && state.session.user
-  ) || null;
-}
+    if (user) return user;
+  }
 
-function hasCompleteAuthState() {
-  return Boolean(getCurrentToken() && getCurrentUser());
-}
-
-function getSession(sessionArg = null) {
-  return isObject(sessionArg) &&
-    ("restorePromise" in sessionArg || "mePromise" in sessionArg || "restoring" in sessionArg)
-    ? sessionArg
-    : runtimeSession;
-}
-
-function publicUser(user = null) {
-  if (!userOk(user)) return null;
-
-  return {
-    id: user.id || user.userId || null,
-    userId: user.userId || user.id || null,
-    username: user.username || user.slug || null,
-    displayName: user.displayName || user.name || user.username || null,
-    role: user.role || user.rol || null,
-    hasAvatar: Boolean(user.avatar || user.avatarUrl || user.picture),
-  };
-}
-
-function publicSnapshot(extra = {}) {
-  const snapshot = (() => {
-    try {
-      return buildSessionSnapshot();
-    } catch {
-      return {};
-    }
-  })();
-
-  const state = readState();
-  const user = snapshot.user || getCurrentUser();
-
-  return {
-    version: RESTORE_VERSION,
-    authenticated: Boolean(snapshot.authenticated || hasCompleteAuthState()),
-    hasToken: Boolean(getCurrentToken()),
-    hasUser: Boolean(userOk(user)),
-    user: publicUser(user),
-    role: snapshot.role || state.role || user?.role || null,
-    route: redact(state.route || "/"),
-    publicPath: redact(state.publicPath || "/"),
-    token: null,
-    accessToken: null,
-    refreshToken: null,
-    ...extra,
-  };
+  return normalizeUser(payload);
 }
 
 /* =========================================================
    HTTP
 ========================================================= */
-
-function meEndpoint() {
-  return AUTH_ENDPOINTS?.me || "/api/auth/me";
-}
 
 async function apiMe(token = "", options = {}) {
   if (!tokenOk(token)) {
@@ -301,13 +398,20 @@ async function apiMe(token = "", options = {}) {
     });
   }
 
-  return CoreHttp.get(meEndpoint(), {
-    ...options,
-    token,
-    auth: true,
-    public: false,
-    skipAuth: false,
-    cache: "no-store",
+  if (isFunction(CoreHttp?.get)) {
+    return CoreHttp.get(ME_ENDPOINT, {
+      ...options,
+      token,
+      auth: true,
+      public: false,
+      skipAuth: false,
+      cache: "no-store",
+    });
+  }
+
+  throw createRestoreError("Cliente HTTP no disponible.", {
+    status: 500,
+    code: "HTTP_CLIENT_MISSING",
   });
 }
 
@@ -315,8 +419,29 @@ async function apiMe(token = "", options = {}) {
    /ME
 ========================================================= */
 
-export async function fetchMe(sessionArg = runtimeSession, options = {}) {
-  const session = getSession(sessionArg);
+function resolveArgs(...args) {
+  if (
+    isObject(args[0]) &&
+    (
+      "restorePromise" in args[0] ||
+      "mePromise" in args[0] ||
+      "restoring" in args[0]
+    )
+  ) {
+    return {
+      session: args[0],
+      options: isObject(args[1]) ? args[1] : {},
+    };
+  }
+
+  return {
+    session: runtimeSession,
+    options: isObject(args[0]) ? args[0] : {},
+  };
+}
+
+export async function fetchMe(...args) {
+  const { session, options } = resolveArgs(...args);
 
   if (session.mePromise) return session.mePromise;
 
@@ -338,18 +463,7 @@ export async function fetchMe(sessionArg = runtimeSession, options = {}) {
   session.mePromise = (async () => {
     try {
       const response = await apiMe(token, options);
-
-      const normalized = normalizeAuthResponse(response, {
-        mode: "me",
-        allowUserOnly: true,
-        requireUser: true,
-      });
-
-      const user =
-        normalized.user ||
-        normalized.me ||
-        normalized.usuario ||
-        null;
+      const user = readUserFromResponse(response);
 
       if (!userOk(user)) {
         throw createRestoreError("No se pudo resolver usuario válido desde /me.", {
@@ -360,15 +474,15 @@ export async function fetchMe(sessionArg = runtimeSession, options = {}) {
 
       const snapshot = applySession(
         {
-          ...normalized,
+          ...response,
+
           token,
           accessToken: token,
           access_token: token,
+
           user,
           me: user,
           usuario: user,
-          source: SOURCE,
-          eventMode: "restore",
         },
         {
           source: SOURCE,
@@ -419,7 +533,6 @@ export async function fetchMe(sessionArg = runtimeSession, options = {}) {
 
 /* =========================================================
    REFRESH COMPAT
-   No refresh automático en restore mínimo.
 ========================================================= */
 
 export async function refreshSession() {
@@ -429,8 +542,8 @@ export async function refreshSession() {
   });
 }
 
-export async function restoreUsingMe(sessionArg = runtimeSession, options = {}) {
-  const result = await fetchMe(sessionArg, options);
+export async function restoreUsingMe(...args) {
+  const result = await fetchMe(...args);
 
   return {
     ok: true,
@@ -474,20 +587,6 @@ export async function restoreAfterMeFailure(_sessionArg, error, options = {}) {
 /* =========================================================
    RESTORE SESSION
 ========================================================= */
-
-function resolveArgs(...args) {
-  if (isObject(args[0]) && ("restorePromise" in args[0] || "mePromise" in args[0] || "restoring" in args[0])) {
-    return {
-      session: args[0],
-      options: isObject(args[1]) ? args[1] : {},
-    };
-  }
-
-  return {
-    session: runtimeSession,
-    options: isObject(args[0]) ? args[0] : {},
-  };
-}
 
 export async function restoreSession(...args) {
   const { session, options } = resolveArgs(...args);
@@ -629,7 +728,7 @@ export function getRestoreSnapshot(sessionArg = runtimeSession) {
 
     transport: {
       hasCoreHttp: Boolean(CoreHttp?.request || CoreHttp?.me || CoreHttp?.get),
-      me: meEndpoint(),
+      me: ME_ENDPOINT,
     },
 
     policy: {
@@ -637,6 +736,7 @@ export function getRestoreSnapshot(sessionArg = runtimeSession) {
       ownApiClient: false,
       ownRouter: false,
       ownToast: false,
+      ownStorage: false,
       noRefreshAuto: true,
       restoreUsesMeOnly: true,
       authenticatedRequiresTokenAndUser: true,

@@ -3,7 +3,7 @@
    Archivo: /src/views/login/login.template.js
 
    Responsabilidad:
-   - Pintar la vista de login.
+   - Pintar un login simple y centrado.
    - Consumir el password-field compartido.
    - Sin Auth.
    - Sin HTTP.
@@ -11,11 +11,12 @@
    - Sin Store.
    - Sin Toast directo.
    - Sin duplicar lógica del password.
+   - Sin layout visual extra.
 ========================================================= */
 
 import { renderPasswordField } from "../../shared/password-field/password-field.template.js";
 
-export const TEMPLATE_VERSION = "simple-2";
+export const TEMPLATE_VERSION = "minimal-1";
 
 const DEFAULT_APP_NAME = "Onion Support";
 const DEFAULT_LOGO = "/src/media/img/favicon_black_circle.png?v=6";
@@ -89,6 +90,46 @@ function bool(value, fallback = false) {
 }
 
 /* =========================================================
+   PASSWORD FIELD
+========================================================= */
+
+function renderLoginPasswordField({ label, placeholder }) {
+  return renderPasswordField({
+    id: "loginPassword",
+    name: "password",
+    fieldDataName: "password",
+
+    label,
+    placeholder,
+    autocomplete: "current-password",
+    required: true,
+
+    showToggle: true,
+    showCapsIndicator: false,
+
+    fieldClass: "login-field login-field--password",
+    wrapperClass: "password-wrapper login-password-wrapper",
+    inputClass: "input-text login-input",
+    labelClass: "login-label",
+    toggleClass: "password-toggle login-password-toggle",
+
+    inputDataAttrs: {
+      loginPassword: true,
+      loginPasswordInput: true,
+      i18nPlaceholder: "login.passwordPlaceholder",
+    },
+
+    toggleDataAttrs: {
+      loginPasswordToggle: true,
+    },
+
+    rootDataAttrs: {
+      i18nScope: "login",
+    },
+  });
+}
+
+/* =========================================================
    TEMPLATE
 ========================================================= */
 
@@ -98,12 +139,6 @@ export function getLoginTemplate(options = {}) {
 
   const title = text(options.title, "Iniciar sesión");
   const subtitle = text(options.subtitle, `Accede a ${appName}`);
-
-  const heroTitle = text(options.heroTitle, "Soporte simple. Trabajo rápido.");
-  const heroText = text(
-    options.heroText,
-    "Gestiona tickets, clientes y facturas desde un único panel privado."
-  );
 
   const identifier = normalizeIdentifier(options.identifier);
   const identifierLabel = text(options.identifierLabel, "Usuario o email");
@@ -127,36 +162,14 @@ export function getLoginTemplate(options = {}) {
 
   const rememberChecked = bool(options.remember, Boolean(identifier));
 
-  const passwordFieldHtml = renderPasswordField({
-    id: "loginPassword",
-    name: "password",
-    fieldDataName: "password",
-
+  const passwordFieldHtml = renderLoginPasswordField({
     label: passwordLabel,
     placeholder: passwordPlaceholder,
-    autocomplete: "current-password",
-    required: true,
-
-    fieldClass: "login-field login-field--password",
-    wrapperClass: "password-wrapper login-password-wrapper",
-    inputClass: "input-text login-input",
-    labelClass: "login-label",
-    toggleClass: "password-toggle login-password-toggle",
-
-    inputDataAttrs: {
-      loginPassword: true,
-      loginPasswordInput: true,
-      i18nPlaceholder: "login.passwordPlaceholder",
-    },
-
-    rootDataAttrs: {
-      i18nScope: "login",
-    },
   });
 
   return `
     <section
-      class="login-view"
+      class="login-view login-view--centered"
       id="loginView"
       data-view="login"
       data-view-name="login"
@@ -164,142 +177,119 @@ export function getLoginTemplate(options = {}) {
       data-i18n-scope="login"
       data-template-version="${escapeAttr(TEMPLATE_VERSION)}"
     >
-      <div class="login-shell">
-        <aside class="login-visual" aria-label="${escapeAttr(appName)}">
-          <div class="login-visual-brand">
+      <main class="login-shell" data-login-shell="true">
+        <article class="login-card" aria-labelledby="loginTitle">
+          <header class="login-header">
             <img
-              class="login-visual-logo"
+              class="login-logo"
               src="${escapeAttr(logoSrc)}"
               alt=""
-              width="72"
-              height="72"
+              width="52"
+              height="52"
               loading="eager"
               decoding="async"
               draggable="false"
               aria-hidden="true"
             />
 
-            <strong>${escapeHtml(appName)}</strong>
-          </div>
+            <h1 class="login-title" id="loginTitle" data-i18n="login.title">
+              ${escapeHtml(title)}
+            </h1>
 
-          <div class="login-visual-copy">
-            <h2 data-i18n="login.heroTitle">${escapeHtml(heroTitle)}</h2>
-            <p data-i18n="login.heroText">${escapeHtml(heroText)}</p>
-          </div>
-        </aside>
+            <p class="login-subtitle" id="loginDescription" data-i18n="login.subtitle">
+              ${escapeHtml(subtitle)}
+            </p>
+          </header>
 
-        <main class="login-main">
-          <article class="login-card" aria-labelledby="loginTitle">
-            <header class="login-header">
-              <img
-                class="login-logo"
-                src="${escapeAttr(logoSrc)}"
-                alt=""
-                width="52"
-                height="52"
-                loading="eager"
-                decoding="async"
-                draggable="false"
-                aria-hidden="true"
-              />
+          <form
+            class="login-form"
+            id="loginForm"
+            data-login-form="true"
+            data-auth-form="login"
+            data-toast-scope="auth.login"
+            aria-describedby="loginDescription loginMessage"
+            autocomplete="on"
+            novalidate
+          >
+            <div
+              class="login-message"
+              id="loginMessage"
+              data-login-message="true"
+              data-login-error="true"
+              data-toast-anchor="login"
+              role="alert"
+              aria-live="polite"
+              aria-atomic="true"
+              hidden
+            ></div>
 
-              <h1 class="login-title" id="loginTitle" data-i18n="login.title">
-                ${escapeHtml(title)}
-              </h1>
-
-              <p class="login-subtitle" id="loginDescription" data-i18n="login.subtitle">
-                ${escapeHtml(subtitle)}
-              </p>
-            </header>
-
-            <form
-              class="login-form"
-              id="loginForm"
-              data-login-form="true"
-              data-auth-form="login"
-              data-toast-scope="auth.login"
-              aria-describedby="loginDescription loginMessage"
-              autocomplete="on"
-              novalidate
-            >
-              <div
-                class="login-message"
-                id="loginMessage"
-                data-login-message="true"
-                data-login-error="true"
-                data-toast-anchor="login"
-                role="alert"
-                aria-live="polite"
-                aria-atomic="true"
-                hidden
-              ></div>
-
-              <div class="login-field login-field--identifier" data-login-field="identifier">
-                <label
-                  class="login-label"
-                  for="loginIdentifier"
-                  data-i18n="login.identifierLabel"
-                >
-                  ${escapeHtml(identifierLabel)}
-                </label>
-
-                <input
-                  class="input-text login-input"
-                  id="loginIdentifier"
-                  name="identifier"
-                  type="text"
-                  autocomplete="username"
-                  inputmode="text"
-                  autocapitalize="none"
-                  spellcheck="false"
-                  placeholder="${escapeAttr(identifierPlaceholder)}"
-                  value="${escapeAttr(identifier)}"
-                  data-login-identifier="true"
-                  data-i18n-placeholder="login.identifierPlaceholder"
-                  aria-invalid="false"
-                  required
-                />
-              </div>
-
-              ${passwordFieldHtml}
-
-              <div class="login-options">
-                <label class="login-check" for="loginRemember">
-                  <input
-                    id="loginRemember"
-                    name="remember"
-                    type="checkbox"
-                    value="1"
-                    data-login-remember="true"
-                    ${rememberChecked ? "checked" : ""}
-                  />
-
-                  <span data-i18n="login.rememberLabel">${escapeHtml(rememberLabel)}</span>
-                </label>
-
-                <a
-                  class="login-reset-link"
-                  href="${escapeAttr(passwordRequestHref)}"
-                  data-spa
-                  data-login-password-request="true"
-                  data-i18n="login.passwordRequestLabel"
-                >
-                  ${escapeHtml(passwordRequestLabel)}
-                </a>
-              </div>
-
-              <button
-                class="login-button"
-                id="loginSubmit"
-                type="submit"
-                data-login-submit="true"
+            <div class="login-field login-field--identifier" data-login-field="identifier">
+              <label
+                class="login-label"
+                for="loginIdentifier"
+                data-i18n="login.identifierLabel"
               >
-                <span data-i18n="login.submitLabel">${escapeHtml(submitLabel)}</span>
-              </button>
-            </form>
-          </article>
-        </main>
-      </div>
+                ${escapeHtml(identifierLabel)}
+              </label>
+
+              <input
+                class="input-text login-input"
+                id="loginIdentifier"
+                name="identifier"
+                type="text"
+                autocomplete="username"
+                inputmode="text"
+                autocapitalize="none"
+                spellcheck="false"
+                placeholder="${escapeAttr(identifierPlaceholder)}"
+                value="${escapeAttr(identifier)}"
+                data-login-identifier="true"
+                data-i18n-placeholder="login.identifierPlaceholder"
+                aria-invalid="false"
+                required
+              />
+            </div>
+
+            ${passwordFieldHtml}
+
+            <div class="login-options">
+              <label class="login-check" for="loginRemember">
+                <input
+                  id="loginRemember"
+                  name="remember"
+                  type="checkbox"
+                  value="1"
+                  data-login-remember="true"
+                  ${rememberChecked ? "checked" : ""}
+                />
+
+                <span data-i18n="login.rememberLabel">
+                  ${escapeHtml(rememberLabel)}
+                </span>
+              </label>
+
+              <a
+                class="login-reset-link"
+                href="${escapeAttr(passwordRequestHref)}"
+                data-spa
+                data-login-password-request="true"
+                data-i18n="login.passwordRequestLabel"
+              >
+                ${escapeHtml(passwordRequestLabel)}
+              </a>
+            </div>
+
+            <button
+              class="login-button"
+              id="loginSubmit"
+              type="submit"
+              data-login-submit="true"
+            >
+              <span data-i18n="login.submitLabel">${escapeHtml(submitLabel)}</span>
+            </button>
+          </form>
+        </article>
+      </main>
     </section>
   `;
 }

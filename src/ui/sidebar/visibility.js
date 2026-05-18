@@ -20,7 +20,6 @@ import {
   SIDEBAR_CLASSES,
   SIDEBAR_ROLE_ADMIN,
   SIDEBAR_ROLE_USER,
-  SIDEBAR_SELECTORS,
   canonicalSidebarPath,
   isSidebarAdminFallbackRoute,
   isSidebarPublicRoute,
@@ -30,8 +29,6 @@ import {
 import {
   getSidebarRoot,
   isElement,
-  queryAll,
-  setActiveLink,
   setHidden,
 } from "./dom.js";
 
@@ -69,6 +66,10 @@ function first(...values) {
   return null;
 }
 
+function unique(values = []) {
+  return [...new Set(values.filter(Boolean))];
+}
+
 /* =========================================================
    CONTEXT
 ========================================================= */
@@ -76,15 +77,16 @@ function first(...values) {
 export function getSidebarVisibilityPath(context = {}) {
   const AppCore = context.AppCore || null;
   const route = context.route || null;
+  const state = isObject(AppCore?.state) ? AppCore.state : {};
 
   const value = first(
     context.path,
     context.currentPath,
     typeof route === "string" ? route : "",
     isObject(route) ? route.path : "",
-    AppCore?.state?.canonicalPath,
-    typeof AppCore?.state?.route === "string" ? AppCore.state.route : "",
-    isObject(AppCore?.state?.route) ? AppCore.state.route.path : "",
+    state.canonicalPath,
+    typeof state.route === "string" ? state.route : "",
+    isObject(state.route) ? state.route.path : "",
     isBrowser() ? window.location.pathname : "/"
   );
 
@@ -121,17 +123,10 @@ export function isSidebarShellHidden(context = {}) {
 }
 
 export function hasRenderableSidebarSession(context = {}) {
-  /*
-    El index debe pasar hasSession=true sólo cuando exista:
-    - token usable
-    - usuario usable
-
-    Por seguridad, el valor por defecto es false.
-  */
-  return (
+  return Boolean(
     context.hasSession === true ||
-    context.sessionValid === true ||
-    (context.authenticated === true && context.hasUser === true)
+      context.sessionValid === true ||
+      (context.authenticated === true && context.hasUser === true)
   );
 }
 
@@ -169,13 +164,11 @@ export function setSidebarRootVisible(root = getSidebarRoot(), visible = true) {
 
 export function applySidebarVisibility(context = {}) {
   const root = context.root || getSidebarRoot();
-  const visible = shouldRenderSidebar(context);
-
-  return setSidebarRootVisible(root, visible);
+  return setSidebarRootVisible(root, shouldRenderSidebar(context));
 }
 
 /* =========================================================
-   ROLE DATA
+   ROLE HELPERS
 ========================================================= */
 
 function splitRoles(value = "") {
@@ -183,10 +176,6 @@ function splitRoles(value = "") {
     .split(/[,\s|;]+/)
     .map((role) => normalizeSidebarRole(role))
     .filter(Boolean);
-}
-
-function unique(values = []) {
-  return [...new Set(values.filter(Boolean))];
 }
 
 function validSidebarRole(role = "") {
@@ -201,7 +190,7 @@ function attrIsTrue(element = null, name = "") {
   return value === "" || value === "true" || value === "1";
 }
 
-function elementRoute(element = null) {
+function elementPath(element = null) {
   if (!isElement(element)) return "";
 
   const raw = first(
@@ -220,16 +209,14 @@ function elementRoute(element = null) {
 function elementRequiredRoles(element = null) {
   if (!isElement(element)) return [];
 
-  const roles = [
+  return unique([
     ...splitRoles(element.getAttribute("data-role")),
     ...splitRoles(element.getAttribute("data-roles")),
     ...splitRoles(element.getAttribute("data-required-role")),
     ...splitRoles(element.getAttribute("data-required-roles")),
     ...splitRoles(element.getAttribute("data-requires-role")),
     ...splitRoles(element.getAttribute("data-requires-roles")),
-  ].filter(validSidebarRole);
-
-  return unique(roles);
+  ].filter(validSidebarRole));
 }
 
 function elementIsAdminOnly(element = null) {
@@ -242,9 +229,9 @@ function elementIsAdminOnly(element = null) {
     return true;
   }
 
-  const route = elementRoute(element);
+  const path = elementPath(element);
 
-  if (route && isSidebarAdminFallbackRoute(route)) {
+  if (path && isSidebarAdminFallbackRoute(path)) {
     return true;
   }
 
@@ -253,17 +240,8 @@ function elementIsAdminOnly(element = null) {
   return roles.includes(SIDEBAR_ROLE_ADMIN) && !roles.includes(SIDEBAR_ROLE_USER);
 }
 
-function elementIsRoleManaged(element = null) {
-  if (!isElement(element)) return false;
-
-  return Boolean(
-    elementIsAdminOnly(element) ||
-      elementRequiredRoles(element).length > 0
-  );
-}
-
 function userCanSeeElement(element = null, role = SIDEBAR_ROLE_USER) {
-  if (!elementIsRoleManaged(element)) return true;
+  if (!isElement(element)) return false;
   if (role === SIDEBAR_ROLE_ADMIN) return true;
   if (elementIsAdminOnly(element)) return false;
 
@@ -277,20 +255,49 @@ function userCanSeeElement(element = null, role = SIDEBAR_ROLE_USER) {
 function roleVisibilityTarget(element = null) {
   if (!isElement(element)) return null;
 
-  return element.closest?.(`.${SIDEBAR_CLASSES.item}`) || element;
+  const itemClass = SIDEBAR_CLASSES.item || "";
+
+  if (!itemClass) return element;
+
+  return element.closest?.(`.${itemClass}`) || element;
 }
 
-/* =========================================================
-   ROLE DOM
-========================================================= */
+function roleManagedElements(root = getSidebarRoot()) {
+  if (!isElement(root)) return [];
+
+  const explicit = [
+    ...root.querySelectorAll(
+      [
+        "[data-admin-only]",
+        "[data-sidebar-admin-only]",
+        "[data-role]",
+        "[data-roles]",
+        "[data-required-role]",
+        "[data-required-roles]",
+        "[data-requires-role]",
+        "[data-requires-roles]",
+      ].join(",")
+    ),
+  ];
+
+  const adminFallbackRoutes = [
+    ...root.querySelectorAll("[data-route], [data-href], [data-to], a[href]"),
+  ].filter((element) => {
+    const path = elementPath(element);
+    return path && isSidebarAdminFallbackRoute(path);
+  });
+
+  return unique([...explicit, ...adminFallbackRoutes]);
+}
 
 function setElementRoleVisible(element = null, visible = true) {
   if (!isElement(element)) return false;
 
   const target = roleVisibilityTarget(element);
-  const show = Boolean(visible);
 
-  if (!target) return false;
+  if (!isElement(target)) return false;
+
+  const show = Boolean(visible);
 
   setHidden(target, !show);
 
@@ -298,13 +305,22 @@ function setElementRoleVisible(element = null, visible = true) {
     element.dataset.roleVisible = show ? "true" : "false";
     target.dataset.roleVisible = show ? "true" : "false";
 
-    element.classList.toggle(SIDEBAR_CLASSES.disabled, !show);
-    target.classList.toggle(SIDEBAR_CLASSES.hidden, !show);
+    if (SIDEBAR_CLASSES.hidden) {
+      target.classList.toggle(SIDEBAR_CLASSES.hidden, !show);
+    }
+
+    if (SIDEBAR_CLASSES.disabled) {
+      element.classList.toggle(SIDEBAR_CLASSES.disabled, !show);
+    }
 
     if (!show) {
-      setActiveLink(element, false);
       element.setAttribute("aria-disabled", "true");
+      element.removeAttribute("aria-current");
       element.tabIndex = -1;
+
+      if (SIDEBAR_CLASSES.active) {
+        element.classList.remove(SIDEBAR_CLASSES.active);
+      }
     } else {
       element.removeAttribute("aria-disabled");
 
@@ -319,69 +335,18 @@ function setElementRoleVisible(element = null, visible = true) {
   }
 }
 
-function roleManagedElements(root = getSidebarRoot()) {
-  if (!isElement(root)) return [];
-
-  const explicit = queryAll(
-    [
-      "[data-admin-only]",
-      "[data-sidebar-admin-only]",
-      "[data-role]",
-      "[data-roles]",
-      "[data-required-role]",
-      "[data-required-roles]",
-      "[data-requires-role]",
-      "[data-requires-roles]",
-    ].join(","),
-    root
-  );
-
-  const adminRouteLinks = queryAll(SIDEBAR_SELECTORS.navLink, root).filter(
-    (element) => {
-      const route = elementRoute(element);
-      return route && isSidebarAdminFallbackRoute(route);
-    }
-  );
-
-  return unique([...explicit, ...adminRouteLinks]);
-}
-
-function clearHiddenActiveLinks(root = getSidebarRoot()) {
-  if (!isElement(root)) return 0;
-
-  let cleared = 0;
-
-  const links = queryAll(
-    [
-      `${SIDEBAR_SELECTORS.navLink}.${SIDEBAR_CLASSES.active}`,
-      `${SIDEBAR_SELECTORS.navLink}[aria-current]`,
-      `${SIDEBAR_SELECTORS.link}.${SIDEBAR_CLASSES.active}`,
-      `${SIDEBAR_SELECTORS.link}[aria-current]`,
-    ].join(","),
-    root
-  );
-
-  for (const link of links) {
-    const hiddenParent = link.closest?.("[hidden], [aria-hidden='true']");
-
-    if (!hiddenParent) continue;
-
-    if (setActiveLink(link, false)) cleared += 1;
-  }
-
-  return cleared;
-}
-
 /* =========================================================
    ROLE VISIBILITY
 ========================================================= */
 
 export function getSidebarVisibilityRole(context = {}) {
-  const explicit = first(context.role, context.user?.role);
+  const explicit = first(
+    context.role,
+    context.user?.role,
+    getSidebarUserRole(context)
+  );
 
-  if (explicit) return normalizeSidebarRole(explicit);
-
-  return getSidebarUserRole(context);
+  return normalizeSidebarRole(explicit || SIDEBAR_ROLE_USER);
 }
 
 export function applyRoleVisibility(context = {}) {
@@ -395,8 +360,6 @@ export function applyRoleVisibility(context = {}) {
   for (const element of elements) {
     setElementRoleVisible(element, userCanSeeElement(element, role));
   }
-
-  clearHiddenActiveLinks(root);
 
   return true;
 }
@@ -430,7 +393,7 @@ function elementSnapshot(element = null) {
   return {
     tag: element.tagName?.toLowerCase?.() || "",
     text: text(element.textContent, ""),
-    route: elementRoute(element),
+    route: elementPath(element),
     adminOnly: elementIsAdminOnly(element),
     requiredRoles: elementRequiredRoles(element),
     roleVisible: element.dataset?.roleVisible || "",
@@ -455,7 +418,7 @@ export function getSidebarVisibilitySnapshot(context = {}) {
     role,
     isAdmin: role === SIDEBAR_ROLE_ADMIN,
     managedCount: elements.length,
-    managedItems: elements.map(elementSnapshot),
+    managedItems: elements.map(elementSnapshot).filter(Boolean),
   };
 }
 

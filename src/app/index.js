@@ -59,7 +59,73 @@ function isBrowser() {
 function currentPath() {
   if (!isBrowser()) return "/";
 
-  return `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
+  try {
+    return `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
+  } catch {
+    return "/";
+  }
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function safeCall(fn = null, ...args) {
+  try {
+    return isFunction(fn) ? fn(...args) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function callModule(target = null, names = [], payload = {}) {
+  if (!target) return null;
+
+  for (const name of names) {
+    const fn = target?.[name];
+
+    if (!isFunction(fn)) continue;
+
+    try {
+      return await fn.call(target, payload);
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/* =========================================================
+   APP STATE
+========================================================= */
+
+function setRootData(element = null, state = "booting") {
+  if (!element) return false;
+
+  const booting = state === "booting";
+  const readyState = state === "ready";
+  const fatal = state === "fatal";
+
+  try {
+    element.dataset.appState = state;
+    element.dataset.appLoading = booting ? "true" : "false";
+    element.dataset.appBooting = booting ? "true" : "false";
+    element.dataset.appReady = readyState ? "true" : "false";
+
+    element.classList.toggle("app-booting", booting);
+    element.classList.toggle("app-loading", booting);
+    element.classList.toggle("app-ready", readyState);
+    element.classList.toggle("app-fatal", fatal);
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function setAppState(state = "booting") {
@@ -68,85 +134,99 @@ function setAppState(state = "booting") {
   const value = String(state || "booting");
 
   for (const element of [document.documentElement, document.body].filter(Boolean)) {
-    element.dataset.appState = value;
-    element.dataset.appBooting = value === "booting" ? "true" : "false";
-    element.dataset.appReady = value === "ready" ? "true" : "false";
-
-    element.classList.toggle("app-booting", value === "booting");
-    element.classList.toggle("app-loading", value === "booting");
-    element.classList.toggle("app-ready", value === "ready");
-    element.classList.toggle("app-fatal", value === "fatal");
+    setRootData(element, value);
   }
 
   return true;
 }
 
-function safeCall(fn, ...args) {
-  if (typeof fn !== "function") return null;
-
-  try {
-    return fn(...args);
-  } catch {
-    return null;
-  }
-}
-
-async function callFirst(target, names = [], payload = {}) {
-  for (const name of names) {
-    if (typeof target?.[name] === "function") {
-      return target[name](payload);
-    }
-  }
-
-  return null;
-}
-
-async function tryCall(target, names = [], payload = {}) {
-  try {
-    return await callFirst(target, names, payload);
-  } catch {
-    return null;
-  }
-}
-
 /* =========================================================
-   LOADER / SHELL SAFE
+   SAFE UI
 ========================================================= */
 
-function safeShowLoader() {
+function setBusy() {
+  setAppState("booting");
+  safeCall(markShellBusy);
   safeCall(showLoader);
 }
 
-function safeHideLoader() {
+function setReady() {
+  safeCall(markShellReady);
   safeCall(hideLoader);
+  setAppState("ready");
 }
 
-function safeForceHideLoader() {
+function setFatal() {
+  setAppState("fatal");
+  safeCall(setShellVisibility, null, true);
+  safeCall(markShellReady);
   safeCall(forceHideLoader);
 }
 
-function safeMarkShellBusy() {
-  safeCall(markShellBusy);
-}
+function fatalRoot() {
+  if (!isBrowser()) return null;
 
-function safeMarkShellReady() {
-  safeCall(markShellReady);
-}
-
-function safeShowFatalShell() {
-  safeCall(setShellVisibility, null, true);
-  safeMarkShellReady();
-  safeForceHideLoader();
+  return (
+    safeCall(getViewContainer) ||
+    document.getElementById("view-container") ||
+    document.getElementById("app-content") ||
+    document.getElementById("main-content") ||
+    document.body ||
+    null
+  );
 }
 
 /* =========================================================
-   CORE UI SINGLETONS
+   CORE SINGLETONS
 ========================================================= */
 
-async function initI18n(payload = {}) {
-  safeCall(I18n?.bindCore, AppCore);
+function exposeSingletons() {
+  try {
+    AppCore.Auth = Auth;
+    AppCore.auth = Auth;
 
-  await tryCall(I18n, ["init", "boot", "start"], {
+    AppCore.Router = Router;
+    AppCore.router = Router;
+
+    AppCore.I18n = I18n;
+    AppCore.i18n = I18n;
+
+    AppCore.Toast = Toast;
+    AppCore.toast = Toast;
+
+    AppCore.modules?.register?.("Auth", Auth);
+    AppCore.modules?.register?.("auth", Auth);
+
+    AppCore.modules?.register?.("Router", Router);
+    AppCore.modules?.register?.("router", Router);
+
+    AppCore.modules?.register?.("I18n", I18n);
+    AppCore.modules?.register?.("i18n", I18n);
+
+    AppCore.modules?.register?.("Toast", Toast);
+    AppCore.modules?.register?.("toast", Toast);
+  } catch {
+    // noop
+  }
+
+  return true;
+}
+
+/* =========================================================
+   CORE / UI BOOT
+========================================================= */
+
+async function initCore(payload = {}) {
+  await callModule(AppCore, ["init", "boot", "start"], payload);
+  exposeSingletons();
+
+  return AppCore;
+}
+
+async function initI18n(payload = {}) {
+  safeCall(I18n?.bindCore?.bind?.(I18n) || I18n?.bindCore, AppCore);
+
+  await callModule(I18n, ["init", "boot", "start"], {
     ...payload,
     AppCore,
     core: AppCore,
@@ -158,7 +238,12 @@ async function initI18n(payload = {}) {
 }
 
 async function initToast(payload = {}) {
-  await tryCall(Toast, ["init", "start", "boot"], payload);
+  await callModule(Toast, ["init", "start", "boot"], {
+    ...payload,
+    AppCore,
+    core: AppCore,
+  });
+
   return Toast;
 }
 
@@ -166,18 +251,18 @@ function refreshI18nDom() {
   if (!isBrowser()) return false;
 
   try {
-    if (typeof I18n?.updateDOM === "function") {
+    if (isFunction(I18n?.updateDOM)) {
       I18n.updateDOM();
       return true;
     }
 
-    if (typeof I18n?.reload === "function") {
-      I18n.reload();
+    if (isFunction(I18n?.refresh)) {
+      I18n.refresh();
       return true;
     }
 
-    if (typeof I18n?.refresh === "function") {
-      I18n.refresh();
+    if (isFunction(I18n?.reload)) {
+      I18n.reload();
       return true;
     }
   } catch {
@@ -192,8 +277,10 @@ function refreshI18nDom() {
 ========================================================= */
 
 async function initAuth(payload = {}) {
-  await tryCall(Auth, ["init", "boot", "start"], {
+  await callModule(Auth, ["init", "boot", "start"], {
     ...payload,
+    AppCore,
+    core: AppCore,
     skipNavigation: true,
     skipRedirect: true,
     noRedirect: true,
@@ -203,8 +290,10 @@ async function initAuth(payload = {}) {
 }
 
 async function restoreAuth(payload = {}) {
-  await tryCall(Auth, ["restoreSession", "restore"], {
+  await callModule(Auth, ["restoreSession", "restore"], {
     ...payload,
+    AppCore,
+    core: AppCore,
     skipNavigation: true,
     skipRedirect: true,
     noRedirect: true,
@@ -218,48 +307,41 @@ async function restoreAuth(payload = {}) {
 ========================================================= */
 
 async function initRouter(payload = {}) {
-  const router = await tryCall(Router, ["init", "configure"], {
+  const options = {
     ...payload,
+    AppCore,
+    core: AppCore,
     appManagedInitialRender: true,
     skipInitialRender: true,
     render: false,
-  });
+  };
 
-  if (router) return router;
+  const router =
+    await callModule(Router, ["init", "configure"], options) ||
+    await callModule(Router, ["start", "boot"], options);
 
-  return tryCall(Router, ["start", "boot"], {
-    ...payload,
-    appManagedInitialRender: true,
-    skipInitialRender: true,
-    render: false,
-  });
+  return router || Router;
 }
 
-async function renderRoute() {
-  const path = currentPath();
+async function renderInitialRoute() {
+  const options = {
+    source: "app.boot",
+    initialRender: true,
+    preserveUrl: true,
+    replaceState: true,
+    skipHistory: true,
+  };
 
-  if (typeof Router?.renderCurrent === "function") {
-    return Router.renderCurrent({
-      source: "app.boot",
-      initialRender: true,
-      preserveUrl: true,
-      replaceState: true,
-      skipHistory: true,
-    });
+  if (isFunction(Router?.renderCurrent)) {
+    return Router.renderCurrent(options);
   }
 
-  if (typeof Router?.render === "function") {
-    return Router.render(path, {
-      source: "app.boot",
-      initialRender: true,
-      preserveUrl: true,
-      replaceState: true,
-      skipHistory: true,
-    });
+  if (isFunction(Router?.render)) {
+    return Router.render(currentPath(), options);
   }
 
-  if (typeof Router?.navigate === "function") {
-    return Router.navigate(path, {
+  if (isFunction(Router?.navigate)) {
+    return Router.navigate(currentPath(), {
       source: "app.boot",
       replaceState: true,
     });
@@ -273,15 +355,33 @@ async function renderRoute() {
 ========================================================= */
 
 async function initChrome(payload = {}) {
-  await tryCall(SidebarUI, ["init", "boot", "start"], payload);
-  await tryCall(TopbarUI, ["init", "boot", "start"], payload);
+  await callModule(SidebarUI, ["init", "boot", "start"], {
+    ...payload,
+    AppCore,
+    core: AppCore,
+  });
+
+  await callModule(TopbarUI, ["init", "boot", "start"], {
+    ...payload,
+    AppCore,
+    core: AppCore,
+  });
 
   return true;
 }
 
 async function syncChrome(payload = {}) {
-  await tryCall(SidebarUI, ["sync", "refresh", "render"], payload);
-  await tryCall(TopbarUI, ["sync", "refresh", "render"], payload);
+  await callModule(SidebarUI, ["sync", "refresh", "render"], {
+    ...payload,
+    AppCore,
+    core: AppCore,
+  });
+
+  await callModule(TopbarUI, ["sync", "refresh", "render"], {
+    ...payload,
+    AppCore,
+    core: AppCore,
+  });
 
   return true;
 }
@@ -290,19 +390,12 @@ async function syncChrome(payload = {}) {
    FATAL
 ========================================================= */
 
-function renderFatal() {
-  setAppState("fatal");
-  safeShowFatalShell();
+function renderFatal(error = null) {
+  setFatal();
 
   if (!isBrowser()) return false;
 
-  const root =
-    safeCall(getViewContainer) ||
-    document.getElementById("view-container") ||
-    document.getElementById("app-content") ||
-    document.getElementById("main-content") ||
-    document.body ||
-    null;
+  const root = fatalRoot();
 
   if (!root) return false;
 
@@ -319,10 +412,18 @@ function renderFatal() {
   const button = document.createElement("button");
   button.type = "button";
   button.textContent = "Recargar";
-  button.addEventListener("click", () => window.location.reload());
+  button.addEventListener("click", () => {
+    window.location.reload();
+  });
 
   section.append(title, message, button);
   root.replaceChildren(section);
+
+  try {
+    console.error("[Onion App] Boot error:", error);
+  } catch {
+    // noop
+  }
 
   return true;
 }
@@ -333,23 +434,20 @@ function renderFatal() {
 
 async function runBoot(options = {}) {
   const payload = {
-    source: "app",
-    ...options,
+    ...(isObject(options) ? options : {}),
+    source: options.source || "app",
   };
 
-  setAppState("booting");
-  safeMarkShellBusy();
-  safeShowLoader();
+  setBusy();
 
-  await tryCall(AppCore, ["init", "boot", "start"], payload);
-
+  await initCore(payload);
   await initI18n(payload);
   await initToast(payload);
 
   /*
     Orden crítico:
     Auth debe estar inicializado y restaurado antes del primer render Router.
-    Así /@slug puede renderizar Home si hay sesión válida.
+    Así /@{user.slug} puede renderizar Home si hay sesión válida.
   */
   await initAuth(payload);
   await restoreAuth(payload);
@@ -359,10 +457,10 @@ async function runBoot(options = {}) {
     El render inicial lo controla App después del restore.
   */
   await initRouter(payload);
-  await renderRoute();
+  await renderInitialRoute();
 
   /*
-    Chrome después de ruta + auth:
+    Chrome después de ruta + auth.
     Sidebar y Topbar ya reciben estado real.
   */
   await initChrome(payload);
@@ -370,10 +468,7 @@ async function runBoot(options = {}) {
 
   refreshI18nDom();
 
-  safeMarkShellReady();
-  safeHideLoader();
-
-  setAppState("ready");
+  setReady();
   ready = true;
 
   return App;
@@ -389,13 +484,7 @@ export function boot(options = {}) {
 
   bootPromise = runBoot(options)
     .catch((error) => {
-      try {
-        console.error("[Onion App] Boot error:", error);
-      } catch {
-        // noop
-      }
-
-      renderFatal();
+      renderFatal(error);
       return App;
     })
     .finally(() => {

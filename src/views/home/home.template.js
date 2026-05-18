@@ -5,8 +5,8 @@
    Responsabilidad:
    - Render HTML puro de Home.
    - Consumir datos normalizados desde home.selectors.js.
-   - Pintar hero, métricas, acciones, widgets, actividad,
-     facturas, clientes/usuarios e incidencias.
+   - Pintar hero, métricas, acciones, actividad,
+     facturas/directorio e incidencias.
    - Usar sólo roles reales: admin / user.
    - Sin fetch.
    - Sin Auth.
@@ -16,7 +16,7 @@
    - Sin handlers inline.
    - Sin rutas inventadas.
    - Sin /home.
-   - Sin /incidencias/nueva.
+   - Sin rutas detalle.
 ========================================================= */
 
 import {
@@ -94,13 +94,11 @@ import {
   getPagination,
 } from "./home.selectors.js";
 
-export const TEMPLATE_VERSION = "home.template.v1";
+export const TEMPLATE_VERSION = "home.template.v2";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
-
-const DATA_SCOPE = "home-dashboard";
 
 const ROUTES = Object.freeze({
   HOME: HOME_ROUTES?.HOME || "/",
@@ -115,7 +113,6 @@ const ROUTES = Object.freeze({
 const ACTIONS = Object.freeze({
   REFRESH: "refresh",
   RETRY: "retry",
-
   CREATE_INCIDENCIA: "create_incidencia",
 
   NAVIGATE: "navigate_home",
@@ -129,6 +126,13 @@ const ACTIONS = Object.freeze({
   EXPORT_CSV: "export_csv",
 });
 
+const LIMITS = Object.freeze({
+  widgets: 4,
+  activity: 6,
+  invoices: 4,
+  entities: 5,
+});
+
 const STATUS_ORDER = Object.freeze([
   "pending",
   "open",
@@ -136,14 +140,6 @@ const STATUS_ORDER = Object.freeze([
   "resolved",
   "closed",
 ]);
-
-const LIMITS = Object.freeze({
-  widgets: 4,
-  activity: 8,
-  invoices: 5,
-  clients: 5,
-  users: 5,
-});
 
 /* =========================================================
    SAFE HTML
@@ -162,10 +158,6 @@ function attr(value = "") {
   return escapeHtml(safeText(value, ""));
 }
 
-function boolAttr(condition = false, value = "") {
-  return condition ? value : "";
-}
-
 function joinClasses(...values) {
   return values
     .flat(Infinity)
@@ -174,17 +166,16 @@ function joinClasses(...values) {
     .join(" ");
 }
 
+function boolAttr(condition = false, value = "") {
+  return condition ? value : "";
+}
+
 function jsonAttr(value = {}) {
   try {
     return escapeHtml(JSON.stringify(value || {}));
   } catch {
     return "{}";
   }
-}
-
-function srOnly(value = "") {
-  const label = safeText(value, "");
-  return label ? `<span class="sr-only">${escapeHtml(label)}</span>` : "";
 }
 
 /* =========================================================
@@ -217,28 +208,20 @@ function getTemplateMeta(input = {}) {
   const state = getState(data);
   const dashboard = getDashboard(data);
 
+  const lastUpdatedAt = first(
+    data.lastUpdatedAt,
+    data.lastSyncAt,
+    state.lastUpdatedAt,
+    state.lastSyncAt,
+    dashboard.updatedAt,
+    dashboard.generatedAt,
+    dashboard.lastSyncAt,
+    dashboard.meta?.updatedAt
+  );
+
   return {
-    requestId: safeText(
-      first(
-        data.requestId,
-        state.requestId,
-        dashboard.requestId,
-        dashboard.meta?.requestId
-      ),
-      ""
-    ),
-
-    lastUpdatedAt: first(
-      data.lastUpdatedAt,
-      data.lastSyncAt,
-      state.lastUpdatedAt,
-      state.lastSyncAt,
-      dashboard.updatedAt,
-      dashboard.generatedAt,
-      dashboard.lastSyncAt,
-      dashboard.meta?.updatedAt
-    ),
-
+    requestId: safeText(first(data.requestId, state.requestId, dashboard.requestId, dashboard.meta?.requestId), ""),
+    lastUpdatedAt,
     partial: Boolean(first(dashboard.partial, data.partial, false)),
     errorsCount: safeArray(first(dashboard.errors, data.errors, [])).length,
   };
@@ -262,22 +245,21 @@ function icon(name = "activity") {
     plus: `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
     ticket: `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
     invoice: `<svg ${common}><path d="M6 2h12v20l-3-2-3 2-3-2-3 2Z"/><path d="M9 8h6"/><path d="M9 12h6"/><path d="M9 16h4"/></svg>`,
-    users: `<svg ${common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
     client: `<svg ${common}><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9h.01"/><path d="M9 13h.01"/><path d="M9 17h.01"/></svg>`,
-    settings: `<svg ${common}><path d="M4 6h10"/><path d="M4 12h6"/><path d="M4 18h12"/><circle cx="17" cy="6" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="18" r="2"/></svg>`,
-    eye: `<svg ${common}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
-    arrowRight: `<svg ${common}><path d="M5 12h14"/><path d="m13 5 7 7-7 7"/></svg>`,
-    chevronRight: `<svg ${common}><path d="m9 18 6-6-6-6"/></svg>`,
-    chevronLeft: `<svg ${common}><path d="m15 18-6-6 6-6"/></svg>`,
-    paperclip: `<svg ${common}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
-    alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
-    clock: `<svg ${common}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`,
-    euro: `<svg ${common}><path d="M4 10h10"/><path d="M4 14h9"/><path d="M19 5a7.7 7.7 0 0 0-5.2-2C8.4 3 4 7 4 12s4.4 9 9.8 9a7.7 7.7 0 0 0 5.2-2"/></svg>`,
+    users: `<svg ${common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
     activity: `<svg ${common}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
+    euro: `<svg ${common}><path d="M4 10h10"/><path d="M4 14h9"/><path d="M19 5a7.7 7.7 0 0 0-5.2-2C8.4 3 4 7 4 12s4.4 9 9.8 9a7.7 7.7 0 0 0 5.2-2"/></svg>`,
+    clock: `<svg ${common}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`,
+    alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
     shield: `<svg ${common}><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.48 17.01 5 19 5a1 1 0 0 1 1 1z"/></svg>`,
     spark: `<svg ${common}><path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 21l-1.9-7.8L4 11l6.1-2.2Z"/></svg>`,
+    eye: `<svg ${common}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
     copy: `<svg ${common}><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`,
     download: `<svg ${common}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>`,
+    chevronLeft: `<svg ${common}><path d="m15 18-6-6 6-6"/></svg>`,
+    chevronRight: `<svg ${common}><path d="m9 18 6-6-6-6"/></svg>`,
+    arrowRight: `<svg ${common}><path d="M5 12h14"/><path d="m13 5 7 7-7 7"/></svg>`,
+    paperclip: `<svg ${common}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
   };
 
   return icons[name] || icons.activity;
@@ -287,13 +269,11 @@ function icon(name = "activity") {
    SMALL UI
 ========================================================= */
 
-function spinner(label = "") {
-  const text = safeText(label, "Cargando");
-
+function spinner(label = "Cargando") {
   return `
-    <span class="home-inline-loading" role="status" aria-label="${attr(text)}">
+    <span class="home-inline-loading" role="status" aria-label="${attr(label)}">
       <span class="home-inline-spinner" aria-hidden="true"></span>
-      <span class="home-inline-loading-text">${escapeHtml(text)}</span>
+      <span class="home-inline-loading-text">${escapeHtml(label)}</span>
     </span>
   `;
 }
@@ -372,16 +352,6 @@ function loadingRows(count = DEFAULT_PAGE_SIZE) {
   `;
 }
 
-function refreshOverlay(label = "Actualizando...") {
-  return `
-    <div class="home-refresh-overlay" aria-live="polite">
-      <div class="home-refresh-card">
-        ${spinner(label)}
-      </div>
-    </div>
-  `;
-}
-
 function errorBanner(message = "") {
   const text = safeText(message, "");
 
@@ -404,82 +374,44 @@ function errorBanner(message = "") {
 }
 
 /* =========================================================
-   AVATARS / CHIPS
+   AVATARS / BADGES
 ========================================================= */
 
-function userAvatar(input = {}) {
-  const user = getUser(input);
-  const fullName = getDisplayName(input);
-  const initials = getInitials(fullName);
-  const avatarUrl = getAvatarUrl(input);
-
-  const seed = safeText(
-    first(user.userId, user.id, user.username, user.email, fullName, "home-user"),
-    "home-user"
-  );
+function avatar({
+  name = "Usuario",
+  image = "",
+  kind = "user",
+  seed = "",
+  className = "home-avatar",
+} = {}) {
+  const label = safeText(name, "Usuario");
+  const initials = getInitials(label);
+  const src = safeText(image, "");
+  const avatarSeed = safeText(seed, label);
 
   return `
     <div
-      class="${joinClasses("home-user-avatar", avatarUrl ? "" : "home-user-avatar--fallback")}"
-      aria-label="${attr(fullName)}"
+      class="${joinClasses(className, src ? "" : `${className}--fallback`)}"
+      aria-label="${attr(label)}"
       data-avatar-root="true"
-      data-avatar-kind="user"
-      data-avatar-seed="${attr(seed)}"
+      data-avatar-kind="${attr(kind)}"
+      data-avatar-seed="${attr(avatarSeed)}"
       data-avatar-initials="${attr(initials)}"
-      ${boolAttr(!avatarUrl, 'data-fallback="true"')}
+      ${boolAttr(!src, 'data-fallback="true"')}
     >
-      <span class="home-user-avatar-fallback" aria-hidden="true">${escapeHtml(initials)}</span>
+      <span class="${className}-fallback" aria-hidden="true">${escapeHtml(initials)}</span>
 
       ${
-        avatarUrl
+        src
           ? `
             <img
-              class="home-user-avatar-img"
-              src="${attr(avatarUrl)}"
-              alt="${attr(fullName)}"
+              class="${className}-img"
+              src="${attr(src)}"
+              alt="${attr(label)}"
               loading="lazy"
               decoding="async"
               referrerpolicy="no-referrer"
               draggable="false"
-              data-avatar-image="true"
-            >
-          `
-          : ""
-      }
-    </div>
-  `;
-}
-
-function ticketAvatar(item = {}) {
-  const fullName = getTicketOwnerName(item);
-  const initials = getInitials(fullName);
-  const avatarUrl = getTicketAvatarUrl(item);
-  const seed = safeText(`${getTicketId(item)}|${fullName}`, "home-ticket");
-
-  return `
-    <div
-      class="${joinClasses("home-ticket-avatar", avatarUrl ? "" : "home-ticket-avatar--fallback")}"
-      aria-label="${attr(fullName)}"
-      data-avatar-root="true"
-      data-avatar-kind="ticket"
-      data-avatar-seed="${attr(seed)}"
-      data-avatar-initials="${attr(initials)}"
-      ${boolAttr(!avatarUrl, 'data-fallback="true"')}
-    >
-      <span class="home-ticket-avatar-fallback" aria-hidden="true">${escapeHtml(initials)}</span>
-
-      ${
-        avatarUrl
-          ? `
-            <img
-              class="home-ticket-avatar-img"
-              src="${attr(avatarUrl)}"
-              alt="${attr(fullName)}"
-              loading="lazy"
-              decoding="async"
-              referrerpolicy="no-referrer"
-              draggable="false"
-              data-avatar-image="true"
             >
           `
           : ""
@@ -504,21 +436,20 @@ function statusChip(item = {}) {
 function priorityBadge(item = {}) {
   const key = getTicketPriorityKey(item);
   const label = getTicketPriorityLabel(item);
-  const iconName = key === "critical" || key === "urgent" ? "alert" : "activity";
 
   return `
     <span class="home-mini-badge home-mini-badge--${attr(key)}" data-priority-key="${attr(key)}">
-      ${icon(iconName)}
+      ${icon(key === "critical" || key === "urgent" ? "alert" : "activity")}
       ${escapeHtml(label)}
     </span>
   `;
 }
 
 /* =========================================================
-   HERO / STATS
+   HEADER / STATS
 ========================================================= */
 
-function miniMetrics(stats = {}) {
+function heroMetrics(stats = {}) {
   const items = [
     ["Abiertas", stats.openTickets, "open"],
     ["Cerradas", stats.closedTickets, "closed"],
@@ -530,8 +461,8 @@ function miniMetrics(stats = {}) {
     <div class="home-hero-minimetrics" aria-label="Métricas rápidas">
       ${items
         .map(
-          ([label, value, modifier]) => `
-            <span class="home-minimetric home-minimetric--${attr(modifier)}">
+          ([label, value, key]) => `
+            <span class="home-minimetric home-minimetric--${attr(key)}">
               <strong>${escapeHtml(String(value ?? 0))}</strong>
               <span>${escapeHtml(label)}</span>
             </span>
@@ -546,8 +477,6 @@ function statCard(card = {}, index = 0) {
   const value = safeText(card.value, "0");
   const iconName = safeText(card.iconName, "activity");
   const modifier = normalizeKey(card.modifier || iconName || `stat-${index + 1}`);
-  const label = safeText(card.label, "Métrica");
-  const text = safeText(card.text, "");
 
   return `
     <article
@@ -561,9 +490,9 @@ function statCard(card = {}, index = 0) {
         ${card.badge ? `<span class="home-stat-badge">${escapeHtml(card.badge)}</span>` : ""}
       </div>
 
-      <div class="home-stat-label">${escapeHtml(label)}</div>
+      <div class="home-stat-label">${escapeHtml(safeText(card.label, "Métrica"))}</div>
       <div class="home-stat-value" data-stat-value="${attr(value)}">${escapeHtml(value)}</div>
-      ${text ? `<div class="home-stat-text">${escapeHtml(text)}</div>` : ""}
+      ${card.text ? `<div class="home-stat-text">${escapeHtml(card.text)}</div>` : ""}
     </article>
   `;
 }
@@ -573,14 +502,10 @@ export function renderHomeHeader(input = {}) {
   const state = getLoadingState(data);
   const stats = computeHomeStats(data);
   const meta = getTemplateMeta(data);
-
   const admin = isAdmin(data);
+
   const displayName = getDisplayName(data);
-
-  const title = admin
-    ? "Centro de control Onion"
-    : `Hola, ${displayName}`;
-
+  const title = admin ? "Centro de control Onion" : `Hola, ${displayName}`;
   const subtitle = admin
     ? "Resumen operativo de incidencias, facturación, clientes y usuarios."
     : "Consulta tus incidencias, actividad reciente y accesos principales.";
@@ -599,7 +524,13 @@ export function renderHomeHeader(input = {}) {
 
       <div class="home-hero-top">
         <div class="home-hero-main">
-          ${userAvatar(data)}
+          ${avatar({
+            name: displayName,
+            image: getAvatarUrl(data),
+            kind: "user",
+            seed: safeText(first(getUser(data).userId, getUser(data).id, getUser(data).username, displayName), displayName),
+            className: "home-user-avatar",
+          })}
 
           <div class="home-hero-copy">
             <span class="home-page-kicker">
@@ -648,7 +579,6 @@ export function renderHomeHeader(input = {}) {
             data-quick-action="${ACTIONS.CREATE_INCIDENCIA}"
             data-route="${attr(ROUTES.INCIDENCIAS)}"
             data-href="${attr(ROUTES.INCIDENCIAS)}"
-            aria-label="Crear incidencia"
             ${boolAttr(state.creating || state.loading || state.refreshing, 'disabled aria-busy="true"')}
           >
             ${state.creating ? spinner("Abriendo...") : `${icon("plus")}<span class="home-btn-text">Crear incidencia</span>`}
@@ -666,7 +596,7 @@ export function renderHomeHeader(input = {}) {
         </span>
       </div>
 
-      ${miniMetrics(stats)}
+      ${heroMetrics(stats)}
 
       <div class="home-stats" data-home-section="stats">
         ${getStatCards(data).map(statCard).join("")}
@@ -676,92 +606,21 @@ export function renderHomeHeader(input = {}) {
 }
 
 /* =========================================================
-   WIDGETS / ACTIONS
+   WIDGETS / QUICK ACTIONS
 ========================================================= */
-
-function normalizeQuickAction(action = {}) {
-  const actionName = safeText(action.action, "");
-  const key = normalizeKey(actionName);
-
-  const isCreate = [
-    ACTIONS.CREATE_INCIDENCIA,
-    "create",
-    "new",
-    "new_ticket",
-    "create_ticket",
-    "create_incidencia",
-    "new_incidencia",
-  ].includes(key);
-
-  const route = isCreate
-    ? ROUTES.INCIDENCIAS
-    : normalizeRoute(action.route || action.href || "");
-
-  return {
-    ...safeObject(action),
-    action: isCreate ? ACTIONS.CREATE_INCIDENCIA : actionName || ACTIONS.NAVIGATE,
-    dataAction: isCreate ? ACTIONS.CREATE_INCIDENCIA : safeText(action.dataAction || ACTIONS.NAVIGATE, ACTIONS.NAVIGATE),
-    route,
-    modifier: normalizeKey(action.modifier || actionName || "default"),
-    isCreate,
-  };
-}
-
-function quickActionCard(action = {}, state = {}) {
-  const item = normalizeQuickAction(action);
-
-  const isBusy =
-    state.navigatingAction === item.action ||
-    state.navigatingAction === item.dataAction ||
-    (item.isCreate && state.creating);
-
-  const disabled = Boolean(isBusy || state.loading || state.refreshing);
-
-  return `
-    <button
-      type="button"
-      class="${joinClasses("home-action-card", `home-action-card--${item.modifier}`, isBusy ? "is-loading" : "")}"
-      data-home-action="${attr(item.action)}"
-      data-action="${attr(item.dataAction)}"
-      data-quick-action="${attr(item.action)}"
-      data-route="${attr(item.route)}"
-      data-href="${attr(item.route)}"
-      data-payload="${jsonAttr({ action: item.action, route: item.route })}"
-      ${boolAttr(disabled, 'disabled aria-busy="true"')}
-    >
-      <span class="home-action-card-icon" aria-hidden="true">
-        ${icon(item.iconName || (item.isCreate ? "plus" : "arrowRight"))}
-      </span>
-
-      <span class="home-action-card-kicker">${escapeHtml(item.route || "Onion Support")}</span>
-
-      <strong class="home-action-card-title">
-        ${isBusy ? spinner(item.isCreate ? "Abriendo..." : "Navegando...") : escapeHtml(item.title || "Acción")}
-      </strong>
-
-      <span class="home-action-card-text">${escapeHtml(item.text || "")}</span>
-      <span class="home-action-card-arrow" aria-hidden="true">${icon(item.isCreate ? "plus" : "arrowRight")}</span>
-    </button>
-  `;
-}
 
 function widgetCard(widget = {}, index = 0) {
   const id = getWidgetId(widget) || `widget-${index + 1}`;
   const type = getWidgetType(widget);
-  const title = getWidgetTitle(widget);
-  const text = getWidgetText(widget);
-  const value = getWidgetValue(widget);
-  const trend = getWidgetTrend(widget);
   const route = normalizeRoute(getWidgetRoute(widget) || "");
   const modifier = normalizeKey(type || "widget");
-  const action = route ? ACTIONS.NAVIGATE : ACTIONS.OPEN_WIDGET;
 
   return `
     <button
       type="button"
       class="home-widget-card home-widget-card--${attr(modifier)}"
-      data-home-action="${attr(action)}"
-      data-action="${attr(action)}"
+      data-home-action="${attr(route ? ACTIONS.NAVIGATE : ACTIONS.OPEN_WIDGET)}"
+      data-action="${attr(route ? ACTIONS.NAVIGATE : ACTIONS.OPEN_WIDGET)}"
       data-widget-id="${attr(id)}"
       data-widget-key="${attr(id)}"
       data-widget-type="${attr(type)}"
@@ -786,10 +645,10 @@ function widgetCard(widget = {}, index = 0) {
         </span>
       </span>
 
-      <strong class="home-widget-value">${escapeHtml(String(value ?? "—"))}</strong>
-      <span class="home-widget-title">${escapeHtml(title)}</span>
-      ${text ? `<span class="home-widget-text">${escapeHtml(text)}</span>` : ""}
-      ${trend ? `<span class="home-widget-trend">${escapeHtml(String(trend))}</span>` : ""}
+      <strong class="home-widget-value">${escapeHtml(String(getWidgetValue(widget) ?? "—"))}</strong>
+      <span class="home-widget-title">${escapeHtml(getWidgetTitle(widget))}</span>
+      ${getWidgetText(widget) ? `<span class="home-widget-text">${escapeHtml(getWidgetText(widget))}</span>` : ""}
+      ${getWidgetTrend(widget) ? `<span class="home-widget-trend">${escapeHtml(String(getWidgetTrend(widget)))}</span>` : ""}
     </button>
   `;
 }
@@ -800,7 +659,7 @@ export function renderHomeWidgets(input = {}) {
   const widgets = getWidgets(data).slice(0, LIMITS.widgets);
 
   return `
-    <section class="home-widgets" aria-label="Widgets del dashboard" data-home-section="widgets">
+    <section class="home-widgets" data-home-section="widgets" aria-label="Widgets del dashboard">
       ${
         state.loading && !widgets.length
           ? loadingCards(LIMITS.widgets)
@@ -809,10 +668,63 @@ export function renderHomeWidgets(input = {}) {
             : emptyState({
                 title: "Sin widgets disponibles",
                 text: "El resumen se actualizará cuando haya métricas disponibles.",
-                iconName: "spark",
               })
       }
     </section>
+  `;
+}
+
+function normalizeQuickAction(action = {}) {
+  const raw = safeObject(action);
+  const actionName = safeText(raw.action, "");
+  const key = normalizeKey(actionName);
+
+  const isCreate = [
+    ACTIONS.CREATE_INCIDENCIA,
+    "create",
+    "new",
+    "new_ticket",
+    "create_ticket",
+    "create_incidencia",
+    "new_incidencia",
+  ].includes(key);
+
+  return {
+    ...raw,
+    action: isCreate ? ACTIONS.CREATE_INCIDENCIA : actionName || ACTIONS.NAVIGATE,
+    dataAction: isCreate ? ACTIONS.CREATE_INCIDENCIA : safeText(raw.dataAction || ACTIONS.NAVIGATE, ACTIONS.NAVIGATE),
+    route: isCreate ? ROUTES.INCIDENCIAS : normalizeRoute(raw.route || raw.href || ""),
+    modifier: normalizeKey(raw.modifier || actionName || "default"),
+    isCreate,
+  };
+}
+
+function quickActionCard(action = {}, state = {}) {
+  const item = normalizeQuickAction(action);
+
+  const busy =
+    state.navigatingAction === item.action ||
+    state.navigatingAction === item.dataAction ||
+    (item.isCreate && state.creating);
+
+  return `
+    <button
+      type="button"
+      class="${joinClasses("home-action-card", `home-action-card--${item.modifier}`, busy ? "is-loading" : "")}"
+      data-home-action="${attr(item.action)}"
+      data-action="${attr(item.dataAction)}"
+      data-quick-action="${attr(item.action)}"
+      data-route="${attr(item.route)}"
+      data-href="${attr(item.route)}"
+      data-payload="${jsonAttr({ action: item.action, route: item.route })}"
+      ${boolAttr(busy || state.loading || state.refreshing, 'disabled aria-busy="true"')}
+    >
+      <span class="home-action-card-icon" aria-hidden="true">${icon(item.iconName || (item.isCreate ? "plus" : "arrowRight"))}</span>
+      <span class="home-action-card-kicker">${escapeHtml(item.route || "Onion Support")}</span>
+      <strong class="home-action-card-title">${busy ? spinner(item.isCreate ? "Abriendo..." : "Navegando...") : escapeHtml(item.title || "Acción")}</strong>
+      <span class="home-action-card-text">${escapeHtml(item.text || "")}</span>
+      <span class="home-action-card-arrow" aria-hidden="true">${icon(item.isCreate ? "plus" : "arrowRight")}</span>
+    </button>
   `;
 }
 
@@ -837,22 +749,18 @@ export function renderHomeQuickActions(input = {}) {
       ${
         state.loading && !actions.length
           ? loadingCards(4)
-          : `<div class="home-actions-grid">${actions.map((action) => quickActionCard(action, state)).join("")}</div>`
+          : `<div class="home-actions-grid">${actions.map((item) => quickActionCard(item, state)).join("")}</div>`
       }
     </section>
   `;
 }
 
 /* =========================================================
-   ACTIVITY / INVOICES / ENTITIES
+   ACTIVITY / SIDE PANELS
 ========================================================= */
 
 function activityItem(item = {}) {
   const type = getActivityType(item);
-  const title = getActivityTitle(item);
-  const text = getActivityText(item);
-  const date = getActivityDate(item);
-
   const route =
     normalizeRoute(first(item.route, item.href, item.link, item.raw?.route, "")) ||
     (type === "invoice"
@@ -907,12 +815,12 @@ function activityItem(item = {}) {
       </span>
 
       <span class="home-activity-copy">
-        <strong class="home-activity-title">${escapeHtml(title)}</strong>
-        <span class="home-activity-text">${escapeHtml(text)}</span>
+        <strong class="home-activity-title">${escapeHtml(getActivityTitle(item))}</strong>
+        <span class="home-activity-text">${escapeHtml(getActivityText(item))}</span>
       </span>
 
-      <span class="home-activity-time" title="${attr(formatDateTime(date))}">
-        ${escapeHtml(formatRelativeDate(date))}
+      <span class="home-activity-time" title="${attr(formatDateTime(getActivityDate(item)))}">
+        ${escapeHtml(formatRelativeDate(getActivityDate(item)))}
       </span>
     </button>
   `;
@@ -942,31 +850,26 @@ export function renderHomeActivity(input = {}) {
           data-route="${attr(ROUTES.INCIDENCIAS)}"
           data-href="${attr(ROUTES.INCIDENCIAS)}"
         >
-          Ver incidencias
-          ${icon("arrowRight")}
+          Ver incidencias ${icon("arrowRight")}
         </button>
       </div>
 
-      <div class="${joinClasses("home-table-wrap", state.refreshing ? "is-refreshing" : "")}">
-        ${state.refreshing && activity.length ? refreshOverlay("Actualizando actividad...") : ""}
-
-        ${
-          state.loading && !activity.length
-            ? loadingCards(4)
-            : activity.length
-              ? `<div class="home-activity-list">${activity.map(activityItem).join("")}</div>`
-              : emptyState({
-                  title: "Sin actividad reciente",
-                  text: "Cuando haya movimientos aparecerán aquí.",
-                  iconName: "clock",
-                })
-        }
-      </div>
+      ${
+        state.loading && !activity.length
+          ? loadingCards(3)
+          : activity.length
+            ? `<div class="home-activity-list">${activity.map(activityItem).join("")}</div>`
+            : emptyState({
+                title: "Sin actividad reciente",
+                text: "Cuando haya movimientos aparecerán aquí.",
+                iconName: "clock",
+              })
+      }
     </section>
   `;
 }
 
-function invoicePreviewItem(item = {}) {
+function invoiceItem(item = {}) {
   const id = getInvoiceId(item);
   const amount = getInvoiceAmount(item);
   const currency = getInvoiceCurrency(item);
@@ -978,20 +881,18 @@ function invoicePreviewItem(item = {}) {
       class="home-invoice-mini home-invoice-mini--${attr(status)}"
       data-home-action="${ACTIONS.NAVIGATE}"
       data-action="${ACTIONS.NAVIGATE}"
+      data-route="${attr(ROUTES.FACTURAS)}"
+      data-href="${attr(ROUTES.FACTURAS)}"
       data-invoice-id="${attr(id)}"
       data-factura-id="${attr(id)}"
       data-entity-id="${attr(id)}"
-      data-route="${attr(ROUTES.FACTURAS)}"
-      data-href="${attr(ROUTES.FACTURAS)}"
       data-payload="${jsonAttr({ invoiceId: id, facturaId: id })}"
     >
       <span class="home-invoice-mini-icon" aria-hidden="true">${icon("invoice")}</span>
-
       <span class="home-invoice-mini-copy">
         <strong>${escapeHtml(id || "Factura")}</strong>
         <span>${escapeHtml(formatMoney(amount, currency || DEFAULT_CURRENCY))}</span>
       </span>
-
       <span class="home-invoice-mini-status">${escapeHtml(status || "estado")}</span>
     </button>
   `;
@@ -1022,8 +923,7 @@ export function renderHomeInvoicePreview(input = {}) {
           data-route="${attr(ROUTES.FACTURAS)}"
           data-href="${attr(ROUTES.FACTURAS)}"
         >
-          Ver facturas
-          ${icon("arrowRight")}
+          Ver facturas ${icon("arrowRight")}
         </button>
       </div>
 
@@ -1031,7 +931,7 @@ export function renderHomeInvoicePreview(input = {}) {
         state.loading && !invoices.length
           ? loadingCards(3)
           : invoices.length
-            ? `<div class="home-invoice-mini-list">${invoices.map(invoicePreviewItem).join("")}</div>`
+            ? `<div class="home-invoice-mini-list">${invoices.map(invoiceItem).join("")}</div>`
             : emptyState({
                 title: "Sin facturas visibles",
                 text: "Cuando haya facturas disponibles aparecerán aquí.",
@@ -1069,7 +969,7 @@ function entityName(item = {}, type = "client") {
 function entityItem(item = {}, type = "client") {
   const isUser = type === "user";
   const label = entityName(item, type);
-  const email = safeText(first(item.email, item.mail, item.raw?.email, item.raw?.mail), "Sin email");
+  const route = isUser ? ROUTES.USUARIOS : ROUTES.CLIENTES;
 
   const entityId = safeText(
     first(
@@ -1091,8 +991,6 @@ function entityItem(item = {}, type = "client") {
     ""
   );
 
-  const route = isUser ? ROUTES.USUARIOS : ROUTES.CLIENTES;
-
   return `
     <button
       type="button"
@@ -1110,7 +1008,7 @@ function entityItem(item = {}, type = "client") {
 
       <span class="home-entity-mini-copy">
         <strong>${escapeHtml(label)}</strong>
-        <span>${escapeHtml(email)}</span>
+        <span>${escapeHtml(safeText(first(item.email, item.mail, item.raw?.email, item.raw?.mail), "Sin email"))}</span>
       </span>
 
       <span class="home-entity-mini-arrow" aria-hidden="true">${icon("chevronRight")}</span>
@@ -1122,12 +1020,11 @@ export function renderHomeEntitiesPreview(input = {}) {
   const data = safeObject(input);
   const state = getLoadingState(data);
   const collections = getCollections(data);
-
   const admin = isAdmin(data);
   const showUsers = admin && canSeeUsersModule(data);
 
-  const clients = safeArray(collections.clients).slice(0, LIMITS.clients);
-  const users = showUsers ? safeArray(collections.users).slice(0, LIMITS.users) : [];
+  const clients = safeArray(collections.clients).slice(0, LIMITS.entities);
+  const users = showUsers ? safeArray(collections.users).slice(0, LIMITS.entities) : [];
 
   if (!admin && !clients.length) return "";
 
@@ -1158,8 +1055,7 @@ export function renderHomeEntitiesPreview(input = {}) {
           data-route="${attr(ROUTES.CLIENTES)}"
           data-href="${attr(ROUTES.CLIENTES)}"
         >
-          Ver clientes
-          ${icon("arrowRight")}
+          Ver clientes ${icon("arrowRight")}
         </button>
       </div>
 
@@ -1194,7 +1090,7 @@ export function renderHomeEntitiesPreview(input = {}) {
 }
 
 /* =========================================================
-   TICKETS TABLE
+   TICKETS
 ========================================================= */
 
 function statusSummary(input = {}) {
@@ -1227,11 +1123,8 @@ function ticketRow(item = {}, state = {}) {
   const description = getTicketDescription(item);
   const statusKey = getTicketStatusKey(getTicketStatus(item));
   const priorityKey = getTicketPriorityKey(item);
-  const ownerName = getTicketOwnerName(item);
-  const ownerEmail = getTicketOwnerEmail(item) || "Sin email";
   const createdAt = getTicketCreatedAt(item);
   const updatedAt = getTicketUpdatedAt(item);
-  const attachments = getTicketAttachmentsCount(item);
 
   const isOpening = isSameIdentity(state.openingTicketId, ticketId);
   const isSelected = isSameIdentity(state.selectedTicketId, ticketId);
@@ -1254,7 +1147,13 @@ function ticketRow(item = {}, state = {}) {
     >
       <td class="home-ticket-cell home-ticket-cell--main">
         <div class="home-ticket-main">
-          ${ticketAvatar(item)}
+          ${avatar({
+            name: getTicketOwnerName(item),
+            image: getTicketAvatarUrl(item),
+            kind: "ticket",
+            seed: `${ticketId}|${getTicketOwnerName(item)}`,
+            className: "home-ticket-avatar",
+          })}
 
           <div class="home-ticket-copy">
             <div class="home-ticket-line">
@@ -1287,7 +1186,6 @@ function ticketRow(item = {}, state = {}) {
               data-route="${attr(ROUTES.INCIDENCIAS)}"
               data-href="${attr(ROUTES.INCIDENCIAS)}"
               data-payload="${jsonAttr({ ticketId, incidenciaId: ticketId })}"
-              aria-label="Abrir incidencia ${attr(ticketId)}"
             >
               ${escapeHtml(subject)}
             </button>
@@ -1307,8 +1205,8 @@ function ticketRow(item = {}, state = {}) {
 
       <td class="home-ticket-cell home-ticket-cell--owner">
         <span class="home-ticket-owner">
-          <strong>${escapeHtml(ownerName)}</strong>
-          <span>${escapeHtml(ownerEmail)}</span>
+          <strong>${escapeHtml(getTicketOwnerName(item))}</strong>
+          <span>${escapeHtml(getTicketOwnerEmail(item) || "Sin email")}</span>
         </span>
       </td>
 
@@ -1329,7 +1227,7 @@ function ticketRow(item = {}, state = {}) {
       <td class="home-ticket-cell home-ticket-cell--attachments">
         <span class="home-attachments-pill">
           ${icon("paperclip")}
-          ${escapeHtml(String(attachments))}
+          ${escapeHtml(String(getTicketAttachmentsCount(item)))}
         </span>
       </td>
 
@@ -1345,7 +1243,6 @@ function ticketRow(item = {}, state = {}) {
           data-route="${attr(ROUTES.INCIDENCIAS)}"
           data-href="${attr(ROUTES.INCIDENCIAS)}"
           data-payload="${jsonAttr({ ticketId, incidenciaId: ticketId })}"
-          aria-label="Abrir detalle de incidencia ${attr(ticketId)}"
           ${boolAttr(isOpening, 'disabled aria-busy="true"')}
         >
           ${isOpening ? spinner("Cargando...") : `${icon("eye")}<span class="home-btn-text">Detalle</span>`}
@@ -1391,7 +1288,6 @@ export function renderHomeTicketsTable(input = {}) {
   );
 
   const initialLoading = state.loading && !pagination.pageItems.length;
-  const showRefresh = state.refreshing && pagination.pageItems.length;
 
   return `
     <section class="home-tickets" data-home-section="tickets">
@@ -1428,9 +1324,7 @@ export function renderHomeTicketsTable(input = {}) {
               <span>Anterior</span>
             </button>
 
-            <span class="home-pagination-status">
-              ${escapeHtml(`${pagination.currentPage}/${pagination.totalPages}`)}
-            </span>
+            <span class="home-pagination-status">${escapeHtml(`${pagination.currentPage}/${pagination.totalPages}`)}</span>
 
             <button
               type="button"
@@ -1452,8 +1346,6 @@ export function renderHomeTicketsTable(input = {}) {
           ? loadingRows(Math.max(3, pagination.pageSize || DEFAULT_PAGE_SIZE))
           : `
             <div class="${joinClasses("home-table-wrap", state.refreshing ? "is-refreshing" : "")}">
-              ${showRefresh ? refreshOverlay("Actualizando incidencias...") : ""}
-
               ${
                 pagination.pageItems.length
                   ? `
@@ -1493,7 +1385,7 @@ export function renderHomeTicketsTable(input = {}) {
 }
 
 /* =========================================================
-   LOADING / ERROR
+   FALLBACK STATES
 ========================================================= */
 
 export function renderHomeLoadingState() {
@@ -1558,7 +1450,7 @@ export function renderHomeTemplate(input = {}) {
         meta.partial ? "is-partial" : ""
       )}"
       data-home-scope="true"
-      data-home-data-scope="${attr(DATA_SCOPE)}"
+      data-home-data-scope="home-dashboard"
       data-home-template-version="${attr(TEMPLATE_VERSION)}"
       data-home-role="${admin ? "admin" : "user"}"
       data-home-admin="${admin ? "true" : "false"}"

@@ -7,30 +7,32 @@
    - Auth estricta: token usable + user usable.
    - Token sin user: hasToken true, authenticated false.
    - User sin token: authenticated false.
-   - User inválido si disabled === true o status === "disabled".
+   - User inválido si disabled/deleted.
    - Roles únicos: admin / user.
+   - Conservar slug real del usuario si existe.
+   - Exponer homePath: /@slug si el usuario trae slug real.
    - Sin fetch.
    - Sin login HTTP.
    - Sin refresh HTTP.
    - Sin Router.
    - Sin Toast.
    - Sin storage paralelo.
+   - Sin eventos globales.
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
-export const AUTH_SESSION_VERSION = "minimal-1";
+export const AUTH_SESSION_VERSION = "auth.session.slug.v1";
 
 const SOURCE = "auth.session";
 
-const EVENTS = Object.freeze({
-  applied: "auth:session:applied",
-  partial: "auth:session:partial",
-  cleared: "auth:session:cleared",
-  change: "auth:change",
-  appChange: "app:auth:change",
+const AUTH_HOME = Object.freeze({
+  canonical: "/",
+  userPrefix: "/@",
 });
+
+const VALID_ROLES = Object.freeze(["admin", "user"]);
 
 /* =========================================================
    BASICS
@@ -96,7 +98,7 @@ function commitState(patch = {}, options = {}) {
   const opts = {
     source: options.source || SOURCE,
     silent: options.silent !== false,
-    emit: options.emit === true,
+    emit: false,
     forceUnauthenticated: options.forceUnauthenticated === true,
   };
 
@@ -127,31 +129,6 @@ function commitState(patch = {}, options = {}) {
   return readState();
 }
 
-function emitEvent(eventName = "", payload = {}, options = {}) {
-  if (options.silent === true || options.emit === false || options.emitEvents === false) {
-    return false;
-  }
-
-  const name = text(eventName, "");
-  if (!name) return false;
-
-  try {
-    AppCore?.events?.emit?.(name, {
-      source: SOURCE,
-      version: AUTH_SESSION_VERSION,
-      at: nowIso(),
-      ...payload,
-      token: null,
-      accessToken: null,
-      refreshToken: null,
-    });
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function syncUserUI() {
   try {
     AppCore?.syncUserUI?.({
@@ -167,6 +144,43 @@ function syncUserUI() {
       return false;
     }
   }
+}
+
+/* =========================================================
+   SLUG / HOME
+========================================================= */
+
+export function normalizeSessionSlug(value = "") {
+  const slug = text(value, "").replace(/^@+/, "").trim();
+
+  if (!slug) return "";
+
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
+export function extractSessionUserSlug(user = null) {
+  if (!isObject(user)) return "";
+
+  return normalizeSessionSlug(
+    user.slug ||
+      user.lookup?.slug ||
+      user.profile?.slug ||
+      ""
+  );
+}
+
+export function buildSessionUserHomePath(user = null) {
+  const slug = extractSessionUserSlug(user);
+
+  return slug ? `${AUTH_HOME.userPrefix}${slug}` : AUTH_HOME.canonical;
+}
+
+export function getCurrentUserSlug() {
+  return extractSessionUserSlug(bestStateUser());
+}
+
+export function getCurrentUserHomePath() {
+  return buildSessionUserHomePath(bestStateUser());
 }
 
 /* =========================================================
@@ -188,6 +202,12 @@ function removeSensitiveUserFields(user = {}) {
     "refresh_token",
     "resetToken",
     "activationToken",
+    "otp",
+    "otpCode",
+    "twofa_secret",
+    "twofaSecret",
+    "totpSecret",
+    "backupCodes",
   ]) {
     try {
       delete output[key];
@@ -202,9 +222,13 @@ function removeSensitiveUserFields(user = {}) {
 function userDisabled(user = null) {
   if (!isObject(user)) return true;
 
+  const status = String(user.status || user.estado || "").toLowerCase();
+
   return (
     user.disabled === true ||
-    String(user.status || "").toLowerCase() === "disabled"
+    user.deleted === true ||
+    status === "disabled" ||
+    status === "deleted"
   );
 }
 
@@ -216,9 +240,19 @@ export function normalizeUser(user = null) {
 
   const id = text(safeUser.userId || safeUser.id, "");
   const email = text(safeUser.email, "");
-  const username = text(safeUser.username || safeUser.slug || email || id, "");
+  const slug = extractSessionUserSlug(safeUser);
 
-  if (!id && !email && !username) return null;
+  const username = text(
+    safeUser.username ||
+      safeUser.userName ||
+      safeUser.user_name ||
+      slug ||
+      email ||
+      id,
+    ""
+  );
+
+  if (!id && !email && !username && !slug) return null;
 
   const displayName = text(
     safeUser.displayName ||
@@ -240,7 +274,12 @@ export function normalizeUser(user = null) {
     userId: safeUser.userId || id || null,
 
     username: username || null,
-    slug: safeUser.slug || username || null,
+
+    /*
+      Slug real únicamente.
+      No se inventa desde username/email/id.
+    */
+    slug: slug || null,
 
     name: safeUser.name || displayName,
     fullName: safeUser.fullName || displayName,
@@ -422,6 +461,10 @@ function buildStatePatch({ token = "", user = null, session = null } = {}) {
   const hasToken = Boolean(safeToken);
   const authenticated = Boolean(hasToken && safeUser);
   const role = authenticated ? cleanRole(safeUser.role || safeUser.rol) : null;
+  const slug = authenticated ? extractSessionUserSlug(safeUser) : "";
+  const homePath = authenticated
+    ? buildSessionUserHomePath(safeUser)
+    : AUTH_HOME.canonical;
 
   const sessionData = authenticated && session
     ? {
@@ -429,6 +472,8 @@ function buildStatePatch({ token = "", user = null, session = null } = {}) {
         user: safeUser,
         role,
         roles: [role],
+        userSlug: slug || null,
+        homePath,
         authenticated: true,
       }
     : null;
@@ -454,12 +499,17 @@ function buildStatePatch({ token = "", user = null, session = null } = {}) {
     isAdmin: role === "admin",
     isUser: role === "user",
 
+    userSlug: authenticated ? slug || null : null,
+    homePath,
+    defaultHome: homePath,
+    postLoginTarget: authenticated ? homePath : null,
+
     session: sessionData,
     sessionData,
     sessionId: authenticated ? session?.sessionId || session?.id || null : null,
     sessionUserId: authenticated ? session?.sessionUserId || session?.userId || null : null,
 
-    username: authenticated ? safeUser.username || safeUser.slug || null : null,
+    username: authenticated ? safeUser.username || null : null,
     avatar: authenticated ? safeUser.avatar || safeUser.avatarUrl || null : null,
     avatarUrl: authenticated ? safeUser.avatarUrl || safeUser.avatar || null : null,
 
@@ -475,6 +525,10 @@ function currentSnapshot(extra = {}) {
   const hasToken = Boolean(token);
   const authenticated = Boolean(hasToken && user);
   const role = authenticated ? cleanRole(user.role || user.rol) : null;
+  const slug = authenticated ? extractSessionUserSlug(user) : "";
+  const homePath = authenticated
+    ? buildSessionUserHomePath(user)
+    : AUTH_HOME.canonical;
 
   return {
     version: AUTH_SESSION_VERSION,
@@ -483,6 +537,11 @@ function currentSnapshot(extra = {}) {
     hasToken,
 
     user: authenticated ? user : null,
+
+    userSlug: slug || null,
+    homePath,
+    defaultHome: homePath,
+    postLoginTarget: authenticated ? homePath : null,
 
     role,
     roles: authenticated ? [role] : [],
@@ -504,7 +563,8 @@ function publicUser(user = null) {
   return {
     id: user.id || user.userId || null,
     userId: user.userId || user.id || null,
-    username: user.username || user.slug || null,
+    username: user.username || null,
+    slug: extractSessionUserSlug(user) || null,
     displayName: user.displayName || user.name || user.username || null,
     role: user.role || user.rol || null,
     hasAvatar: Boolean(user.avatar || user.avatarUrl || user.picture),
@@ -524,6 +584,11 @@ function publicSnapshot(snapshot = {}) {
 
     user: publicUser(snapshot.user),
 
+    userSlug: snapshot.userSlug || null,
+    homePath: snapshot.homePath || AUTH_HOME.canonical,
+    defaultHome: snapshot.defaultHome || snapshot.homePath || AUTH_HOME.canonical,
+    postLoginTarget: snapshot.postLoginTarget || null,
+
     role: snapshot.role || null,
     roles: Array.isArray(snapshot.roles) ? snapshot.roles : [],
 
@@ -537,14 +602,6 @@ function publicSnapshot(snapshot = {}) {
     eventMode: snapshot.eventMode || "",
     at: snapshot.at || nowIso(),
   };
-}
-
-function emitSession(eventName = "", snapshot = {}, options = {}) {
-  const payload = publicSnapshot(snapshot);
-
-  emitEvent(eventName, payload, options);
-  emitEvent(EVENTS.change, payload, options);
-  emitEvent(EVENTS.appChange, payload, options);
 }
 
 /* =========================================================
@@ -582,14 +639,10 @@ export function applySession(payload = {}, options = {}) {
 
   syncUserUI();
 
-  const snapshot = currentSnapshot({
+  return buildSessionSnapshot({
     source,
     eventMode,
   });
-
-  emitSession(snapshot.authenticated ? EVENTS.applied : EVENTS.partial, snapshot, options);
-
-  return publicSnapshot(snapshot);
 }
 
 export function clearSessionLocal(options = {}) {
@@ -618,6 +671,11 @@ export function clearSessionLocal(options = {}) {
       isAdmin: false,
       isUser: false,
 
+      userSlug: null,
+      homePath: AUTH_HOME.canonical,
+      defaultHome: AUTH_HOME.canonical,
+      postLoginTarget: null,
+
       session: null,
       sessionData: null,
       sessionId: null,
@@ -638,13 +696,6 @@ export function clearSessionLocal(options = {}) {
   );
 
   syncUserUI();
-
-  const snapshot = currentSnapshot({
-    source: options.source || SOURCE,
-    eventMode: "clear",
-  });
-
-  emitSession(EVENTS.cleared, snapshot, options);
 
   return true;
 }
@@ -735,6 +786,7 @@ export function hasRole(...roles) {
   return roles
     .flat()
     .map(cleanRole)
+    .filter((role) => VALID_ROLES.includes(role))
     .some((role) => role === current);
 }
 
@@ -799,6 +851,9 @@ export function exposeSessionDebugApi() {
     getCurrentRole,
     getCurrentRoles,
 
+    getCurrentUserSlug,
+    getCurrentUserHomePath,
+
     isCurrentUserAdmin,
     isCurrentUserClient,
 
@@ -835,6 +890,9 @@ export default {
   getCurrentRole,
   getCurrentRoles,
 
+  getCurrentUserSlug,
+  getCurrentUserHomePath,
+
   isCurrentUserAdmin,
   isCurrentUserSupport,
   isCurrentUserManager,
@@ -844,6 +902,10 @@ export default {
   requireRole,
 
   getAuthHeader,
+
+  normalizeSessionSlug,
+  extractSessionUserSlug,
+  buildSessionUserHomePath,
 
   normalizeUser,
 

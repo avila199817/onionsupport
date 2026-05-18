@@ -6,8 +6,8 @@
    - Guards mínimos de frontend.
    - Auth real delegada en session.js.
    - Autenticado = token usable + user usable.
-   - Roles únicos: admin / user.
-   - Entender /@slug como Home canónica /.
+   - Roles únicos exactos: admin / user.
+   - Entender /@{user.slug} como Home canónica /.
    - Sin fetch.
    - Sin refresh.
    - Sin restore.
@@ -23,10 +23,11 @@
 
 import * as Session from "./session.js";
 
-export const GUARDS_VERSION = "auth.guards.slug.v1";
+export const GUARDS_VERSION = "auth.guards.v2";
 
 const LOGIN_PATH = "/login";
 const HOME_PATH = "/";
+const USER_HOME_PREFIX = "/@";
 
 const PUBLIC_ROUTES = Object.freeze([
   "/login",
@@ -36,8 +37,6 @@ const PUBLIC_ROUTES = Object.freeze([
 ]);
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
-
-const USER_HOME_RE = /^\/@[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;
 
 /* =========================================================
    BASICS
@@ -60,14 +59,6 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
-function cleanRole(value = "") {
-  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
-}
-
-function validRole(value = "") {
-  return VALID_ROLES.includes(value);
-}
-
 function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
 }
@@ -75,24 +66,102 @@ function unique(values = []) {
 function redact(value = "") {
   return text(value, "")
     .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+/* =========================================================
+   ROLES
+========================================================= */
+
+function normalizeRole(value = "") {
+  if (Array.isArray(value)) {
+    const roles = value
+      .map(normalizeRole)
+      .filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "";
+  }
+
+  const role = String(value || "").toLowerCase();
+
+  return VALID_ROLES.includes(role) ? role : "";
+}
+
+function normalizeRequiredRoles(values = []) {
+  const raw = Array.isArray(values) ? values.flat(Infinity) : [values];
+
+  return unique(
+    raw
+      .map(normalizeRole)
+      .filter(Boolean)
+  );
+}
+
+function routeRequestedRoles(route = {}) {
+  return [
+    route.role,
+    route.roles,
+    route.meta?.role,
+    route.meta?.roles,
+  ]
+    .flat(Infinity)
+    .filter((role) => role !== undefined && role !== null && role !== "");
 }
 
 /* =========================================================
    PATHS
 ========================================================= */
 
-function normalizePublicPath(path = HOME_PATH) {
-  let value = text(path, HOME_PATH);
+function normalizeHashPath(path = HOME_PATH) {
+  const value = text(path, HOME_PATH);
 
-  if (value.startsWith("#/")) value = value.slice(1);
-  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
+  if (value.startsWith("#!")) {
+    return value.replace(/^#!\/?/, "/") || HOME_PATH;
+  }
+
+  if (value.startsWith("#/")) {
+    return value.slice(1) || HOME_PATH;
+  }
+
+  return value;
+}
+
+function normalizePublicPath(path = HOME_PATH) {
+  let value = normalizeHashPath(path);
+
+  if (value.startsWith("//")) {
+    return HOME_PATH;
+  }
+
+  try {
+    if (/^https?:\/\//i.test(value) && isBrowser()) {
+      const url = new URL(value, window.location.origin);
+
+      if (url.origin !== window.location.origin) {
+        return HOME_PATH;
+      }
+
+      value = `${url.pathname || HOME_PATH}${url.search || ""}${url.hash || ""}`;
+    }
+  } catch {
+    return HOME_PATH;
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+    return HOME_PATH;
+  }
 
   value = value.split("?")[0].split("#")[0];
 
-  if (!value.startsWith("/")) value = `/${value}`;
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
 
-  value = value.replace(/\/{2,}/g, "/");
+  value = value.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
 
   if (value.length > 1) {
     value = value.replace(/\/+$/g, "") || HOME_PATH;
@@ -101,8 +170,33 @@ function normalizePublicPath(path = HOME_PATH) {
   return value || HOME_PATH;
 }
 
+function normalizeUserSlug(value = "") {
+  const slug = text(value, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .trim()
+    .toLowerCase();
+
+  if (!slug) return "";
+
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
+function extractUserHomeSlug(path = HOME_PATH) {
+  const value = normalizePublicPath(path);
+
+  if (!value.startsWith(USER_HOME_PREFIX)) return "";
+
+  const slug = value.slice(USER_HOME_PREFIX.length);
+
+  if (!slug || slug.includes("/")) return "";
+
+  return normalizeUserSlug(slug);
+}
+
 export function isUserHomePath(path = HOME_PATH) {
-  return USER_HOME_RE.test(normalizePublicPath(path));
+  return Boolean(extractUserHomeSlug(path));
 }
 
 export function canonicalAuthPath(path = HOME_PATH) {
@@ -114,19 +208,13 @@ export function canonicalAuthPath(path = HOME_PATH) {
 function currentPath() {
   if (!isBrowser()) return HOME_PATH;
 
-  return normalizePublicPath(
-    `${window.location.pathname || HOME_PATH}${window.location.search || ""}${window.location.hash || ""}`
-  );
-}
-
-function normalizeRequiredRoles(values = []) {
-  const raw = Array.isArray(values) ? values.flat(Infinity) : [values];
-
-  return unique(
-    raw
-      .map(cleanRole)
-      .filter(validRole)
-  );
+  try {
+    return normalizePublicPath(
+      `${window.location.pathname || HOME_PATH}${window.location.search || ""}${window.location.hash || ""}`
+    );
+  } catch {
+    return HOME_PATH;
+  }
 }
 
 /* =========================================================
@@ -164,32 +252,56 @@ export function getCurrentUser() {
 }
 
 export function getCurrentUserSlug() {
+  if (!isAuthenticated()) return null;
+
   try {
-    return isAuthenticated() ? Session.getCurrentUserSlug?.() || null : null;
+    const fromSession = Session.getCurrentUserSlug?.();
+
+    if (fromSession) return normalizeUserSlug(fromSession);
   } catch {
-    return null;
+    // fallback abajo
   }
+
+  const user = getCurrentUser();
+
+  return normalizeUserSlug(
+    user?.slug ||
+      user?.lookup?.slug ||
+      user?.profile?.slug ||
+      ""
+  ) || null;
 }
 
 export function getCurrentUserHomePath() {
+  if (!isAuthenticated()) return HOME_PATH;
+
   try {
-    return isAuthenticated()
-      ? Session.getCurrentUserHomePath?.() || HOME_PATH
-      : HOME_PATH;
+    const home = Session.getCurrentUserHomePath?.();
+
+    if (home && isUserHomePath(home)) return home;
   } catch {
-    return HOME_PATH;
+    // fallback abajo
   }
+
+  const slug = getCurrentUserSlug();
+
+  return slug ? `${USER_HOME_PREFIX}${slug}` : HOME_PATH;
 }
 
 export function getCurrentRole() {
   if (!isAuthenticated()) return "";
 
   try {
-    const role = String(Session.getCurrentRole?.() || "").toLowerCase();
-    return validRole(role) ? role : "";
+    const role = normalizeRole(Session.getCurrentRole?.());
+
+    if (role) return role;
   } catch {
-    return "";
+    // fallback abajo
   }
+
+  const user = getCurrentUser();
+
+  return normalizeRole(user?.role || user?.rol || user?.roles);
 }
 
 export function getCurrentRoles() {
@@ -199,11 +311,10 @@ export function getCurrentRoles() {
     const roles = Session.getCurrentRoles?.();
 
     if (Array.isArray(roles) && roles.length) {
-      return unique(
-        roles
-          .map((role) => String(role || "").toLowerCase())
-          .filter(validRole)
-      );
+      const normalized = normalizeRequiredRoles(roles);
+
+      if (normalized.includes("admin")) return ["admin"];
+      if (normalized.includes("user")) return ["user"];
     }
   } catch {
     // fallback abajo
@@ -235,11 +346,14 @@ export function hasRole(...roles) {
   if (!roles.length) return true;
 
   const required = normalizeRequiredRoles(roles);
+
   if (!required.length) return false;
 
-  const current = new Set(getCurrentRoles());
+  const currentRole = getCurrentRole();
 
-  return required.some((role) => current.has(role));
+  if (currentRole === "admin") return true;
+
+  return required.includes(currentRole);
 }
 
 export function requireRole(...roles) {
@@ -285,7 +399,10 @@ export function isActivationRoute(path = currentPath()) {
 export function guardAuthenticated(options = {}) {
   const path = canonicalAuthPath(options.path || currentPath());
 
-  if (options.allowPublicTechnicalRoutes !== false && isPublicTechnicalPath(path)) {
+  if (
+    options.allowPublicTechnicalRoutes !== false &&
+    isPublicTechnicalPath(path)
+  ) {
     return true;
   }
 
@@ -295,7 +412,10 @@ export function guardAuthenticated(options = {}) {
 export function guardGuest(options = {}) {
   const path = canonicalAuthPath(options.path || currentPath());
 
-  if (options.allowPublicTechnicalRoutes !== false && isPublicTechnicalPath(path)) {
+  if (
+    options.allowPublicTechnicalRoutes !== false &&
+    isPublicTechnicalPath(path)
+  ) {
     return !isAuthenticated();
   }
 
@@ -305,7 +425,10 @@ export function guardGuest(options = {}) {
 export function guardRole(roles = [], options = {}) {
   const path = canonicalAuthPath(options.path || currentPath());
 
-  if (options.allowPublicTechnicalRoutes !== false && isPublicTechnicalPath(path)) {
+  if (
+    options.allowPublicTechnicalRoutes !== false &&
+    isPublicTechnicalPath(path)
+  ) {
     return true;
   }
 
@@ -333,26 +456,34 @@ export function guardManager() {
 }
 
 export function canAccessRoute(route = {}) {
-  const rawPath = route.path || route.publicPath || route.canonicalPath || currentPath();
+  const rawPath =
+    route.path ||
+    route.publicPath ||
+    route.canonicalPath ||
+    currentPath();
+
   const path = canonicalAuthPath(rawPath);
 
-  if (route.allowPublicTechnicalRoutes !== false && isPublicTechnicalPath(path)) {
+  if (
+    route.allowPublicTechnicalRoutes !== false &&
+    isPublicTechnicalPath(path)
+  ) {
     return true;
   }
 
-  if (route.public === true) return true;
-  if (route.guestOnly === true) return !isAuthenticated();
+  if (route.guestOnly === true || route.publicOnly === true) {
+    return !isAuthenticated();
+  }
 
-  if (route.requiresAuth !== false && !isAuthenticated()) {
+  if (route.public === true || route.requiresAuth === false) {
+    return true;
+  }
+
+  if (!isAuthenticated()) {
     return false;
   }
 
-  const requested = Array.isArray(route.roles)
-    ? route.roles.flat(Infinity)
-    : route.roles
-      ? [route.roles]
-      : [];
-
+  const requested = routeRequestedRoles(route);
   const required = normalizeRequiredRoles(requested);
 
   if (requested.length && !required.length) return false;
@@ -374,7 +505,7 @@ function publicUser(user = null) {
     username: user.username || null,
     slug: getCurrentUserSlug(),
     displayName: user.displayName || user.name || user.username || null,
-    role: user.role || user.rol || null,
+    role: normalizeRole(user.role || user.rol || user.roles) || null,
   };
 }
 
@@ -435,6 +566,22 @@ export function getAuthGuardsSnapshot() {
 
     loginPath: LOGIN_PATH,
     publicRoutes: [...PUBLIC_ROUTES],
+
+    policy: {
+      ownFetch: false,
+      ownRefresh: false,
+      ownRestore: false,
+      ownStorage: false,
+      ownToast: false,
+      ownNavigation: false,
+      roles: [...VALID_ROLES],
+      userSlugHome: true,
+      canonicalizesUserHome: true,
+      validatesRealUserSlug: false,
+      noHomeAlias: true,
+      no403Route: true,
+      no2fa: true,
+    },
   };
 }
 

@@ -7,6 +7,7 @@
    - API real única.
    - Endpoints auth reales.
    - /api/auth/me privado siempre.
+   - Enviar Authorization cuando hay token válido.
    - Sin fetch propio.
    - Sin parser propio.
    - Sin retry propio.
@@ -25,13 +26,10 @@ import {
   createApiClient,
 } from "./request.js";
 
-export const HTTP_VERSION = "simple";
+export const HTTP_VERSION = "core.http.v1";
 
 export const DEFAULT_API_ORIGIN = "https://api.onionit.net";
-export const DEFAULT_API_PREFIX = "/api";
 export const DEFAULT_TIMEOUT_MS = 30000;
-export const DEFAULT_AUTH_TIMEOUT_MS = 30000;
-export const DEFAULT_REFRESH_TIMEOUT_MS = 30000;
 
 const AUTH_ENDPOINTS = Object.freeze({
   login: "/api/auth/login",
@@ -134,21 +132,27 @@ function redact(value = "") {
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
-function validToken(value = "") {
+function cleanToken(value = "") {
   const token = text(value, "").replace(/^Bearer\s+/i, "");
 
-  if (!token) return false;
-  if (/\s/.test(token)) return false;
+  if (!token) return "";
+  if (/\s/.test(token)) return "";
 
-  return ![
-    "null",
-    "undefined",
-    "false",
-    "true",
-    "[object object]",
-    "{}",
-    "[]",
-  ].includes(token.toLowerCase());
+  if (
+    [
+      "null",
+      "undefined",
+      "false",
+      "true",
+      "[object object]",
+      "{}",
+      "[]",
+    ].includes(token.toLowerCase())
+  ) {
+    return "";
+  }
+
+  return token;
 }
 
 function getState() {
@@ -214,30 +218,51 @@ export function redactHttpText(value = "") {
 }
 
 /* =========================================================
-   TOKEN COMPAT
+   TOKEN
 ========================================================= */
-
-export function setTokenProvider() {
-  return true;
-}
 
 export function getAccessToken() {
   const state = getState();
-  const token = state.token || state.accessToken || state.access_token || "";
 
-  return validToken(token) ? String(token).replace(/^Bearer\s+/i, "") : "";
+  return cleanToken(
+    state.token ||
+      state.accessToken ||
+      state.access_token ||
+      ""
+  );
 }
 
 export function getRefreshToken() {
   const state = getState();
-  const token = state.refreshToken || state.refresh_token || "";
 
-  return validToken(token) ? String(token).replace(/^Bearer\s+/i, "") : "";
+  return cleanToken(
+    state.refreshToken ||
+      state.refresh_token ||
+      ""
+  );
+}
+
+export function setAccessToken(token = "") {
+  const value = cleanToken(token);
+  const state = getState();
+
+  if (!value) {
+    delete state.token;
+    delete state.accessToken;
+    delete state.access_token;
+    state.hasToken = false;
+    return "";
+  }
+
+  state.token = value;
+  state.accessToken = value;
+  state.access_token = value;
+  state.hasToken = true;
+
+  return value;
 }
 
 export function setAuthTokens(payload = {}) {
-  const state = getState();
-
   const token =
     payload.token ||
     payload.accessToken ||
@@ -249,20 +274,18 @@ export function setAuthTokens(payload = {}) {
     payload.refresh_token ||
     "";
 
-  if (validToken(token)) {
-    state.token = String(token).replace(/^Bearer\s+/i, "");
-    state.accessToken = state.token;
-    state.access_token = state.token;
-    state.hasToken = true;
-  }
+  const access = setAccessToken(token);
+  const state = getState();
 
-  if (validToken(refreshToken)) {
-    state.refreshToken = String(refreshToken).replace(/^Bearer\s+/i, "");
-    state.refresh_token = state.refreshToken;
+  const refresh = cleanToken(refreshToken);
+
+  if (refresh) {
+    state.refreshToken = refresh;
+    state.refresh_token = refresh;
   }
 
   return {
-    token: state.token || "",
+    token: access || "",
     refreshToken: state.refreshToken || "",
   };
 }
@@ -281,12 +304,20 @@ export function clearAuthTokens() {
   return true;
 }
 
+/*
+  Compat controlada.
+  La fuente real del token debe venir por AppCore.state o por options.token.
+*/
+export function setTokenProvider() {
+  return true;
+}
+
 export function setAuthPayloadCommitter() {
   return true;
 }
 
 /* =========================================================
-   ERROR COMPAT
+   ERROR
 ========================================================= */
 
 export class HttpError extends Error {
@@ -360,22 +391,48 @@ function normalizeRequestArgs(first = "/", second = {}, third = {}) {
   };
 }
 
+function buildAuthHeaders(options = {}, token = "") {
+  const headers = {
+    ...(isObject(options.headers) ? options.headers : {}),
+  };
+
+  const value = cleanToken(token);
+
+  if (!value) return headers;
+
+  if (!headers.Authorization && !headers.authorization) {
+    headers.Authorization = `Bearer ${value}`;
+  }
+
+  return headers;
+}
+
 export async function request(first = "/", second = {}, third = {}) {
   const parsed = normalizeRequestArgs(first, second, third);
+
   const endpoint = text(parsed.endpoint, "/");
   const options = parsed.options || {};
 
   const url = buildApiUrl(endpoint, options);
-  const auth = shouldUseAuth(url, options);
+  const auth = shouldUseAuth(endpoint, options);
+  const token = auth ? cleanToken(options.token || getAccessToken()) : "";
 
   const finalOptions = {
     ...options,
+
     query: undefined,
     params: undefined,
+
     auth,
     public: !auth,
     skipAuth: !auth,
-    token: auth ? options.token || getAccessToken() : "",
+
+    token,
+    headers: auth
+      ? buildAuthHeaders(options, token)
+      : isObject(options.headers)
+        ? options.headers
+        : undefined,
   };
 
   stats.total += 1;
@@ -391,7 +448,7 @@ export async function request(first = "/", second = {}, third = {}) {
     stats.error += 1;
     stats.lastError = {
       name: error?.name || "Error",
-      message: error?.message || String(error),
+      message: redact(error?.message || String(error)),
       status: error?.status || error?.statusCode || 0,
     };
 
@@ -569,8 +626,6 @@ export function installHttp(AppCore = null, options = {}) {
     try {
       appCore.http = Http;
       appCore.Http = Http;
-      appCore.api = Http;
-      appCore.apiClient = Http;
     } catch {
       // noop
     }
@@ -579,8 +634,6 @@ export function installHttp(AppCore = null, options = {}) {
       appCore.services = isObject(appCore.services) ? appCore.services : {};
       appCore.services.http = Http;
       appCore.services.Http = Http;
-      appCore.services.api = Http;
-      appCore.services.apiClient = Http;
     } catch {
       // noop
     }
@@ -588,8 +641,6 @@ export function installHttp(AppCore = null, options = {}) {
     try {
       appCore.modules?.register?.("Http", Http);
       appCore.modules?.register?.("http", Http);
-      appCore.modules?.register?.("api", Http);
-      appCore.modules?.register?.("apiClient", Http);
     } catch {
       // noop
     }
@@ -636,6 +687,7 @@ export function getHttpSnapshot() {
       noToast: true,
       noStorage: true,
       mePrivate: true,
+      singleHttpFacade: true,
     },
   };
 }
@@ -689,8 +741,11 @@ export const Http = {
 
   setTokenProvider,
   setAuthPayloadCommitter,
+
+  setAccessToken,
   setAuthTokens,
   clearAuthTokens,
+
   getAccessToken,
   getRefreshToken,
 
@@ -702,7 +757,5 @@ export const Http = {
 };
 
 export const http = Http;
-export const apiClient = Http;
-export const client = Http;
 
 export default Http;

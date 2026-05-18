@@ -6,6 +6,7 @@
    - Renderizar password-request / password-reset.
    - Delegar DOM en reset-password.dom.js.
    - Validar campos mínimos.
+   - Leer token único: token.
    - Llamar Auth.requestPasswordReset() / Auth.confirmResetPassword().
    - Redirigir a /login tras confirmación correcta.
    - Sin HTTP directo.
@@ -39,13 +40,15 @@ import {
   bindResetPasswordBackLink,
 } from "./reset-password.dom.js";
 
-export const RESET_PASSWORD_VIEW_VERSION = "minimal-1";
+export const RESET_PASSWORD_VIEW_VERSION = "password-reset.view.v2";
 
 const SOURCE = "password-reset.view";
 
 const PASSWORD_REQUEST_ROUTE = "/password-request";
 const PASSWORD_RESET_ROUTE = "/password-reset";
 const LOGIN_ROUTE = "/login";
+
+const TOKEN_PARAM = "token";
 
 const INSTANCES = new WeakMap();
 
@@ -76,31 +79,67 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
+function redact(value = "") {
+  return text(value, "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/([?&#]access_token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
 /* =========================================================
    PATHS / TOKEN
 ========================================================= */
 
-function normalizePath(path = "/") {
-  let value = text(path, "/");
+function normalizeHashPath(path = "/") {
+  const value = text(path, "/");
 
-  if (value.startsWith("#/")) value = value.slice(1);
-  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
+  if (value.startsWith("#!")) {
+    return value.replace(/^#!\/?/, "/") || "/";
+  }
 
-  value = value.split("?")[0].split("#")[0];
+  if (value.startsWith("#/")) {
+    return value.slice(1) || "/";
+  }
 
-  if (!value.startsWith("/")) value = `/${value}`;
-  if (value.length > 1) value = value.replace(/\/+$/g, "") || "/";
+  return value;
+}
+
+function normalizePublicPath(path = "/") {
+  let value = normalizeHashPath(path);
+
+  if (value.startsWith("//")) return "/";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return "/";
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  value = value.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
 
   return value || "/";
 }
 
-function currentPath() {
+function canonicalPath(path = "/") {
+  let value = normalizePublicPath(path).split("?")[0].split("#")[0] || "/";
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value || "/";
+}
+
+function currentPublicPath() {
   if (!isBrowser()) {
-    return normalizePath(AppCore?.state?.publicPath || AppCore?.state?.route || "/");
+    return normalizePublicPath(
+      AppCore?.state?.publicPath ||
+        AppCore?.state?.route ||
+        "/"
+    );
   }
 
   try {
-    return normalizePath(
+    return normalizePublicPath(
       `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
     );
   } catch {
@@ -108,11 +147,16 @@ function currentPath() {
   }
 }
 
+function currentPath() {
+  return canonicalPath(currentPublicPath());
+}
+
 function normalizeToken(value = "") {
   const token = text(value, "").replace(/^Bearer\s+/i, "");
 
   if (!token) return "";
   if (/\s/.test(token)) return "";
+  if (token.length > 8192) return "";
 
   if (
     ["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
@@ -127,18 +171,37 @@ function normalizeToken(value = "") {
 
 function tokenFromQuery(query = "") {
   const raw = text(query, "");
+
   if (!raw) return "";
 
   try {
     const params = new URLSearchParams(raw.startsWith("?") ? raw : `?${raw}`);
-    return normalizeToken(params.get("token"));
+    return normalizeToken(params.get(TOKEN_PARAM));
   } catch {
     return "";
   }
 }
 
+function tokenFromPath(path = "") {
+  const raw = text(path, "");
+
+  if (!raw) return "";
+
+  const query = raw.includes("?")
+    ? raw.split("?").slice(1).join("?").split("#")[0]
+    : "";
+
+  const hashQuery = raw.includes("#") && raw.split("#").slice(1).join("#").includes("?")
+    ? raw.split("#").slice(1).join("#").split("?").slice(1).join("?")
+    : "";
+
+  return tokenFromQuery(query) || tokenFromQuery(hashQuery);
+}
+
 function tokenFromUrl() {
-  if (!isBrowser()) return "";
+  if (!isBrowser()) {
+    return tokenFromPath(AppCore?.state?.publicPath || "");
+  }
 
   try {
     return (
@@ -210,17 +273,31 @@ async function navigateTo(path = LOGIN_ROUTE) {
 
       return true;
     }
+
+    if (isFn(AppCore?.navigate)) {
+      await AppCore.navigate(target, {
+        source: SOURCE,
+        replaceState: true,
+      });
+
+      return true;
+    }
   } catch {
-    // fallback abajo
+    // fallback navegador abajo
   }
 
   if (!isBrowser()) return false;
 
   try {
-    window.location.assign(target);
+    window.location.replace(target);
     return true;
   } catch {
-    return false;
+    try {
+      window.location.assign(target);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -245,6 +322,10 @@ function getContainer() {
 }
 
 function renderTemplate(container, mode = "request", deps = {}) {
+  const initialToken = mode === "confirm"
+    ? normalizeToken(deps.token || tokenFromUrl())
+    : "";
+
   const template = document.createElement("template");
 
   template.innerHTML = String(
@@ -255,11 +336,12 @@ function renderTemplate(container, mode = "request", deps = {}) {
       mode,
       flow: mode,
       isConfirm: mode === "confirm",
-      token: mode === "confirm" ? normalizeToken(deps.token || tokenFromUrl()) : "",
+      token: initialToken,
     }) || ""
   );
 
   container.replaceChildren(template.content.cloneNode(true));
+
   return true;
 }
 
@@ -281,7 +363,7 @@ function validateConfirm(payload = {}) {
   const errors = {};
 
   if (!normalizeToken(payload.token)) {
-    errors.global = "El token de recuperación no es válido.";
+    errors.global = "El enlace de recuperación no es válido.";
   }
 
   if (!String(payload.password || "")) {
@@ -323,13 +405,15 @@ function resultMessage(result = {}, fallback = "") {
 }
 
 function errorMessage(error = null, fallback = "No se pudo completar la operación.") {
-  return text(
-    error?.message ||
-      error?.data?.message ||
-      error?.response?.data?.message ||
-      error?.mensaje ||
-      error?.error,
-    fallback
+  return redact(
+    text(
+      error?.message ||
+        error?.data?.message ||
+        error?.response?.data?.message ||
+        error?.mensaje ||
+        error?.error,
+      fallback
+    )
   );
 }
 
@@ -359,7 +443,7 @@ async function confirmReset(payload = {}) {
 
   return Auth.confirmResetPassword(
     {
-      token: payload.token,
+      token: normalizeToken(payload.token),
       password: payload.password,
       confirmPassword: payload.confirmPassword,
     },
@@ -421,9 +505,15 @@ export function renderResetPasswordView(containerArg = null, deps = {}) {
 
   const options = isObject(deps) ? deps : {};
   const mode = resolveMode(options);
+  const initialToken = mode === "confirm"
+    ? normalizeToken(options.token || tokenFromUrl())
+    : "";
 
   destroyPrevious(container);
-  renderTemplate(container, mode, options);
+  renderTemplate(container, mode, {
+    ...options,
+    token: initialToken,
+  });
 
   const refs = getResetPasswordRefs(container);
 
@@ -453,7 +543,7 @@ export function renderResetPasswordView(containerArg = null, deps = {}) {
     const payload = readResetPasswordFormState(refs);
 
     if (mode === "confirm") {
-      payload.token = normalizeToken(payload.token || tokenFromUrl());
+      payload.token = normalizeToken(payload.token || initialToken || tokenFromUrl());
     }
 
     const errors = mode === "confirm"
@@ -559,6 +649,7 @@ export function renderResetPasswordView(containerArg = null, deps = {}) {
       }
 
       clearInstance(container, instance);
+
       return true;
     },
 
@@ -569,7 +660,15 @@ export function renderResetPasswordView(containerArg = null, deps = {}) {
         submitting,
         mode,
         route: currentPath(),
-        hasToken: mode === "confirm" ? Boolean(normalizeToken(tokenFromUrl())) : false,
+        hasToken: mode === "confirm" ? Boolean(initialToken || tokenFromUrl()) : false,
+        policy: {
+          noHttpDirect: true,
+          noStore: true,
+          noToastOwn: true,
+          noLoaderOwn: true,
+          tokenParam: TOKEN_PARAM,
+          no2fa: true,
+        },
       };
     },
 
@@ -579,6 +678,7 @@ export function renderResetPasswordView(containerArg = null, deps = {}) {
   };
 
   storeInstance(container, instance);
+
   return instance;
 }
 

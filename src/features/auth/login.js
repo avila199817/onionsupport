@@ -4,46 +4,39 @@
 
    Responsabilidad:
    - Login público vía CoreHttp.
+   - Normalizar credenciales.
+   - Validar respuesta mínima.
+   - Devolver token + user para que Auth/index.js aplique sesión.
    - Sin fetch propio.
    - Sin apiClient propio.
    - Sin Router.
    - Sin Toast.
+   - Sin AppCore state.
+   - Sin eventos.
    - Sin refresh automático.
-   - Sin 2FA/MFA/OTP.
-   - Sin tempToken.
    - Sin storage paralelo.
-   - Sin magia negra.
-   - Sesión real aplicada por session.js.
-   - Auth estricta: token + user usable.
-   - User inválido sólo si disabled.
+   - Sin 2FA/MFA/OTP.
 ========================================================= */
 
-import { AppCore } from "../../core/index.js";
-import CoreHttp from "../../core/http.js";
+import * as CoreHttpModule from "../../core/http.js";
 
-import {
-  applySession,
-  clearSessionLocal,
-} from "./session.js";
+export const LOGIN_VERSION = "minimal-1";
 
-export const LOGIN_VERSION = "simple";
-
-const SOURCE = "auth.login";
-
-const AUTH_ENDPOINTS = Object.freeze({
+export const AUTH_ENDPOINTS = Object.freeze({
   login: "/api/auth/login",
 });
 
-const ROUTES = Object.freeze({
-  home: "/",
-  login: "/login",
-  passwordRequest: "/password-request",
-  passwordReset: "/password-reset",
-  activateAccount: "/activate-account",
-});
+const LOGIN_ROUTE = "/login";
+const HOME_ROUTE = "/";
 
 const MAX_IDENTIFIER_LENGTH = 160;
 const MAX_PASSWORD_LENGTH = 1024;
+
+const CoreHttp =
+  CoreHttpModule.default ||
+  CoreHttpModule.Http ||
+  CoreHttpModule.http ||
+  CoreHttpModule;
 
 let loginPromise = null;
 
@@ -55,12 +48,12 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+function isFn(value) {
+  return typeof value === "function";
 }
 
-function isFunction(value) {
-  return typeof value === "function";
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function text(value = "", fallback = "") {
@@ -69,7 +62,8 @@ function text(value = "", fallback = "") {
 }
 
 function rawText(value = "", fallback = "") {
-  return value === null || value === undefined ? fallback : String(value);
+  if (value === null || value === undefined) return fallback;
+  return String(value);
 }
 
 function bool(value, fallback = false) {
@@ -84,38 +78,8 @@ function bool(value, fallback = false) {
   return Boolean(fallback);
 }
 
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function redact(value = "") {
-  return text(value, "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
-}
-
-function currentState() {
-  return isObject(AppCore?.state) ? AppCore.state : {};
-}
-
-function emit(eventName = "", payload = {}, options = {}) {
-  if (options.emit === false || options.silent === true) return false;
-
-  try {
-    AppCore?.events?.emit?.(eventName, {
-      source: SOURCE,
-      version: LOGIN_VERSION,
-      at: nowIso(),
-      ...payload,
-      token: null,
-      accessToken: null,
-      refreshToken: null,
-    });
-
-    return true;
-  } catch {
-    return false;
-  }
+function cleanRole(value = "") {
+  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
 }
 
 /* =========================================================
@@ -147,8 +111,38 @@ function cleanToken(value = "") {
   return tokenOk(value) ? stripBearer(value) : "";
 }
 
-function cleanRole(value = "") {
-  return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
+function getHttpToken() {
+  try {
+    return cleanToken(CoreHttp?.getAccessToken?.() || CoreHttp?.token || "");
+  } catch {
+    return "";
+  }
+}
+
+function removeSensitiveUserFields(user = {}) {
+  const output = { ...user };
+
+  for (const key of [
+    "password",
+    "passwordHash",
+    "hash",
+    "salt",
+    "token",
+    "accessToken",
+    "access_token",
+    "refreshToken",
+    "refresh_token",
+    "resetToken",
+    "activationToken",
+  ]) {
+    try {
+      delete output[key];
+    } catch {
+      // noop
+    }
+  }
+
+  return output;
 }
 
 function userDisabled(user = null) {
@@ -176,49 +170,42 @@ function userOk(user = null) {
 function normalizeUser(user = null) {
   if (!userOk(user)) return null;
 
-  const id = user.userId || user.id || null;
-  const username = user.username || user.slug || user.email || id || null;
+  const safeUser = removeSensitiveUserFields(user);
+
+  const id = safeUser.userId || safeUser.id || null;
+  const email = safeUser.email || null;
+  const username = safeUser.username || safeUser.slug || email || id || null;
 
   const displayName =
-    user.name ||
-    user.fullName ||
-    user.displayName ||
-    user.nombre ||
+    safeUser.displayName ||
+    safeUser.fullName ||
+    safeUser.name ||
+    safeUser.nombre ||
     username ||
-    user.email ||
+    email ||
     id ||
     "Usuario";
 
-  const role = cleanRole(user.role || user.rol);
+  const role = cleanRole(safeUser.role || safeUser.rol);
 
   return {
-    ...user,
+    ...safeUser,
 
     id,
-    userId: user.userId || id,
+    userId: safeUser.userId || id,
 
     username,
-    slug: user.slug || username,
+    slug: safeUser.slug || username,
 
-    name: user.name || displayName,
-    fullName: user.fullName || displayName,
+    name: safeUser.name || displayName,
+    fullName: safeUser.fullName || displayName,
     displayName,
 
-    email: user.email || null,
+    email,
 
     role,
     rol: role,
     roles: [role],
-
-    isAdmin: role === "admin",
-    isSupport: false,
-    isManager: false,
-    isClient: false,
-
-    avatar: user.avatar || user.avatarUrl || user.picture || null,
-    avatarUrl: user.avatarUrl || user.avatar || user.picture || null,
-    picture: user.picture || user.avatarUrl || user.avatar || null,
-    hasAvatar: Boolean(user.avatar || user.avatarUrl || user.picture),
 
     active: true,
     disabled: false,
@@ -226,7 +213,7 @@ function normalizeUser(user = null) {
 }
 
 /* =========================================================
-   RESPONSE NORMALIZATION
+   RESPONSE
 ========================================================= */
 
 function nested(payload = {}) {
@@ -264,7 +251,7 @@ function readToken(payload = {}) {
       "accessToken",
       "access_token",
     ])
-  );
+  ) || getHttpToken();
 }
 
 function readUser(payload = {}) {
@@ -289,7 +276,6 @@ function readMessage(payload = {}) {
   return text(
     payload.message ||
       payload.error ||
-      payload.code ||
       payload.data?.message ||
       payload.data?.error ||
       payload.auth?.message ||
@@ -317,11 +303,12 @@ function normalizeLoginResponse(response = {}) {
   const token = readToken(response);
   const user = readUser(response);
   const role = user?.role || null;
+  const authenticated = Boolean(token && user);
 
   return {
-    ok: Boolean(token && user),
-    success: Boolean(token && user),
-    authenticated: Boolean(token && user),
+    ok: authenticated,
+    success: authenticated,
+    authenticated,
 
     token,
     accessToken: token,
@@ -343,17 +330,23 @@ function normalizeLoginResponse(response = {}) {
    ERRORS
 ========================================================= */
 
+function safeErrorMessage(value = "") {
+  return text(value, "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
 function extractMessage(error = null) {
   return (
-    error?.data?.message ||
-    error?.response?.data?.message ||
-    error?.message ||
+    text(error?.data?.message, "") ||
+    text(error?.response?.data?.message, "") ||
+    text(error?.message, "") ||
     String(error || "")
   );
 }
 
 function createLoginError(message = "No se pudo iniciar sesión.", options = {}) {
-  const error = new Error(redact(message));
+  const error = new Error(safeErrorMessage(message));
 
   error.name = "AuthLoginError";
   error.status = options.status || 401;
@@ -363,7 +356,7 @@ function createLoginError(message = "No se pudo iniciar sesión.", options = {})
   return error;
 }
 
-function normalizeLoginError(error) {
+function normalizeLoginError(error = null) {
   if (error?.name === "AuthLoginError") return error;
 
   const status =
@@ -380,69 +373,6 @@ function normalizeLoginError(error) {
 }
 
 /* =========================================================
-   APP STATE
-========================================================= */
-
-function setLoginState(value = false) {
-  try {
-    AppCore?.setState?.(
-      {
-        loginInProgress: Boolean(value),
-      },
-      {
-        source: SOURCE,
-        silent: true,
-        emit: false,
-      }
-    );
-  } catch {
-    try {
-      currentState().loginInProgress = Boolean(value);
-    } catch {
-      // noop
-    }
-  }
-
-  return Boolean(value);
-}
-
-function setLoginError(error = null) {
-  const patch = error
-    ? {
-        error,
-        lastError: error,
-        hasError: true,
-      }
-    : {
-        error: null,
-        lastError: null,
-        hasError: false,
-      };
-
-  try {
-    AppCore?.setError?.(error);
-  } catch {
-    // noop
-  }
-
-  try {
-    AppCore?.setState?.(patch, {
-      source: SOURCE,
-      silent: true,
-      emit: false,
-    });
-  } catch {
-    try {
-      Object.assign(currentState(), patch);
-    } catch {
-      // noop
-    }
-  }
-
-  return true;
-}
-
-/* =========================================================
    CREDENTIALS
 ========================================================= */
 
@@ -456,6 +386,10 @@ function normalizePassword(value = "") {
   return rawText(value, "").slice(0, MAX_PASSWORD_LENGTH);
 }
 
+function looksLikeEmail(value = "") {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim());
+}
+
 function sanitizeUsername(value = "") {
   return text(value, "")
     .normalize("NFKC")
@@ -463,10 +397,6 @@ function sanitizeUsername(value = "") {
     .replace(/\s+/g, "")
     .replace(/[^a-zA-Z0-9._-]/g, "")
     .slice(0, MAX_IDENTIFIER_LENGTH);
-}
-
-function looksLikeEmail(value = "") {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim());
 }
 
 export function resolveLoginIdentifier(credentials = {}) {
@@ -502,113 +432,15 @@ export function buildLoginRequestBody(credentials = {}) {
 
     email: email || undefined,
     emailLower: email || undefined,
-    email_lower: email || undefined,
 
     username: username || undefined,
     usernameLower: username || undefined,
-    username_lower: username || undefined,
 
     password: payload.password,
 
     remember: payload.remember,
     rememberMe: payload.remember,
-    remember_me: payload.remember,
   };
-}
-
-/* =========================================================
-   ROUTES
-========================================================= */
-
-function normalizePath(path = "/") {
-  let value = text(path, "/");
-
-  if (!value.startsWith("/")) return "";
-
-  if (value.startsWith("//")) return "";
-
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return "";
-
-  if (/[\r\n\t\\]/.test(value)) return "";
-
-  value = value.replace(/\/{2,}/g, "/");
-
-  return value || "/";
-}
-
-function canonicalPath(path = "/") {
-  let value = normalizePath(path).split("?")[0].split("#")[0] || "/";
-
-  if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || "/";
-  }
-
-  return value;
-}
-
-function isPublicAuthRoute(path = "") {
-  const clean = canonicalPath(path);
-
-  return [
-    ROUTES.login,
-    ROUTES.passwordRequest,
-    ROUTES.passwordReset,
-    ROUTES.activateAccount,
-  ].includes(clean);
-}
-
-function safeRedirect(value = "") {
-  const raw = text(value, "");
-
-  if (!raw) return "";
-
-  const clean = normalizePath(raw);
-
-  if (!clean || isPublicAuthRoute(clean)) return "";
-
-  return clean;
-}
-
-function getHomeRoute() {
-  const route = text(AppCore?.config?.routes?.home || "/", "/");
-  return safeRedirect(route) || ROUTES.home;
-}
-
-function getLoginRoute() {
-  const route = text(AppCore?.config?.routes?.login || ROUTES.login, ROUTES.login);
-  return canonicalPath(route) === ROUTES.login ? ROUTES.login : ROUTES.login;
-}
-
-function getRedirectFromUrl() {
-  if (!isBrowser()) return "";
-
-  try {
-    const params = new URLSearchParams(window.location.search);
-    return safeRedirect(params.get("redirect") || "");
-  } catch {
-    return "";
-  }
-}
-
-function getRedirectFromOptions(options = {}) {
-  return safeRedirect(options.redirectTo || options.redirect || "");
-}
-
-export function buildLoginRedirectPath(targetPath = "") {
-  const target = safeRedirect(targetPath);
-
-  if (!target) return ROUTES.login;
-
-  return `${ROUTES.login}?redirect=${encodeURIComponent(target)}`;
-}
-
-export function getPostLoginTarget(user = null, options = {}) {
-  return (
-    getRedirectFromOptions(options) ||
-    getRedirectFromUrl() ||
-    safeRedirect(user?.homePath || "") ||
-    getHomeRoute()
-  );
 }
 
 /* =========================================================
@@ -628,12 +460,22 @@ function loginOptions(options = {}) {
 }
 
 async function requestLogin(body = {}, options = {}) {
-  if (isFunction(CoreHttp?.login)) {
-    return CoreHttp.login(body, loginOptions(options));
+  const finalOptions = loginOptions(options);
+
+  if (isFn(CoreHttp?.login)) {
+    return CoreHttp.login(body, finalOptions);
   }
 
-  if (isFunction(CoreHttp?.post)) {
-    return CoreHttp.post(AUTH_ENDPOINTS.login, body, loginOptions(options));
+  if (isFn(CoreHttp?.post)) {
+    return CoreHttp.post(AUTH_ENDPOINTS.login, body, finalOptions);
+  }
+
+  if (isFn(CoreHttp?.request)) {
+    return CoreHttp.request(AUTH_ENDPOINTS.login, {
+      ...finalOptions,
+      method: "POST",
+      body,
+    });
   }
 
   throw createLoginError("Cliente HTTP no disponible.", {
@@ -643,38 +485,16 @@ async function requestLogin(body = {}, options = {}) {
 }
 
 /* =========================================================
-   SESSION
+   ROUTE HELPERS
+   Compatibilidad pura: login no navega.
 ========================================================= */
 
-function clearBeforeLogin() {
-  try {
-    clearSessionLocal({
-      source: SOURCE,
-      silent: true,
-      emit: false,
-    });
-  } catch {
-    // noop
-  }
-
-  return true;
+export function buildLoginRedirectPath() {
+  return LOGIN_ROUTE;
 }
 
-function applyLoginSession(normalized, options = {}) {
-  return applySession(
-    {
-      ...normalized,
-      source: SOURCE,
-      eventMode: "login",
-    },
-    {
-      ...options,
-      source: SOURCE,
-      eventMode: "login",
-      silent: options.silent !== false,
-      emit: options.emit === true,
-    }
-  );
+export function getPostLoginTarget() {
+  return HOME_ROUTE;
 }
 
 /* =========================================================
@@ -695,71 +515,23 @@ export async function login(credentials = {}, options = {}) {
 
   loginPromise = (async () => {
     try {
-      setLoginError(null);
-      setLoginState(true);
-      clearBeforeLogin();
-
-      emit("auth:login:start", {
-        identifier: payload.identifier.includes("@") ? "***@***" : "***",
-      }, options);
-
       const response = await requestLogin(buildLoginRequestBody(payload), options);
-      const normalized = normalizeLoginResponse(response);
+      const result = normalizeLoginResponse(response);
 
-      if (!normalized.authenticated || !normalized.token || !normalized.user) {
+      if (!result.authenticated) {
         throw createLoginError(
-          normalized.message || "El login no devolvió una sesión válida.",
+          result.message || "El login no devolvió una sesión válida.",
           {
             status: 401,
-            code: normalized.code || "INVALID_LOGIN_SESSION",
+            code: result.code || "INVALID_LOGIN_SESSION",
           }
         );
       }
 
-      const snapshot = applyLoginSession(normalized, options);
-      const redirectTo = getPostLoginTarget(normalized.user, options);
-
-      const result = {
-        ok: true,
-        success: true,
-        authenticated: true,
-
-        user: normalized.user,
-        role: normalized.role || normalized.user.role || "user",
-        roles: normalized.roles?.length ? normalized.roles : [normalized.user.role || "user"],
-
-        redirectTo,
-        snapshot,
-      };
-
-      emit("auth:login:success", {
-        authenticated: true,
-        user: {
-          id: normalized.user.id || normalized.user.userId || null,
-          userId: normalized.user.userId || normalized.user.id || null,
-          username: normalized.user.username || null,
-          displayName: normalized.user.displayName || normalized.user.name || null,
-          role: normalized.user.role || null,
-        },
-        role: result.role,
-        redirectTo,
-      }, options);
-
       return result;
     } catch (error) {
-      const finalError = normalizeLoginError(error);
-
-      setLoginError(finalError);
-
-      emit("auth:login:error", {
-        message: finalError.message,
-        status: finalError.status || 0,
-        code: finalError.code || "LOGIN_FAILED",
-      }, options);
-
-      throw finalError;
+      throw normalizeLoginError(error);
     } finally {
-      setLoginState(false);
       loginPromise = null;
     }
   })();
@@ -792,12 +564,12 @@ export async function handleLoginFormSubmit(formElement, options = {}) {
         formData.get("login") ||
         "",
       password: formData.get("password") || "",
-      remember: ["on", "true", "1"].includes(String(formData.get("remember") || "").toLowerCase()),
+      remember: formData.get("remember") || false,
     },
     options
   );
 
-  if (options.resetOnSuccess === true && result?.authenticated) {
+  if (options.resetOnSuccess === true && result.authenticated) {
     try {
       formElement.reset();
     } catch {
@@ -813,39 +585,12 @@ export async function handleLoginFormSubmit(formElement, options = {}) {
 ========================================================= */
 
 export function getLoginSnapshot() {
-  const state = currentState();
-
   return {
     version: LOGIN_VERSION,
-
     loginInFlight: Boolean(loginPromise),
     endpoint: AUTH_ENDPOINTS.login,
-
-    authenticated: Boolean(state.authenticated),
-    hasToken: Boolean(state.hasToken),
-    hasUser: Boolean(state.user || state.currentUser),
-
-    token: null,
-    accessToken: null,
-    refreshToken: null,
-
-    role: state.role || null,
-
-    loginRoute: getLoginRoute(),
-    homeRoute: getHomeRoute(),
-
-    policy: {
-      ownFetch: false,
-      ownRouter: false,
-      ownToast: false,
-      ownRefresh: false,
-      ownStorage: false,
-      no2fa: true,
-      roles: ["admin", "user"],
-      authenticatedRequiresTokenAndUser: true,
-      publicLoginNoAuthHeader: true,
-      noRawTokenReturn: true,
-    },
+    loginRoute: LOGIN_ROUTE,
+    homeRoute: HOME_ROUTE,
   };
 }
 
@@ -855,6 +600,8 @@ export function getLoginSnapshot() {
 
 export default {
   LOGIN_VERSION,
+
+  AUTH_ENDPOINTS,
 
   resolveLoginIdentifier,
   normalizeLoginPayload,

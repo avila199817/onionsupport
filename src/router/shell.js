@@ -6,8 +6,8 @@
    - Bridge mínimo Router → Shell DOM.
    - Limpiar tablehead.
    - Aplicar document.title.
-   - Marcar menú activo.
-   - /@slug marca Home porque canonicalPath = /.
+   - Marcar menú activo usando canonicalPath.
+   - /@{user.slug} marca Home porque canonicalPath = /.
    - Mostrar/ocultar chrome según route.hideShell.
    - Mantener app-shell visible.
    - Sin Auth.
@@ -21,11 +21,11 @@
    - Sin alias /home.
 ========================================================= */
 
-export const ROUTER_SHELL_VERSION = "router.shell.slug.v1";
+export const ROUTER_SHELL_VERSION = "router.shell.v2";
 
 const APP_NAME = "Onion Support";
 const HOME_PATH = "/";
-const USER_HOME_RE = /^\/@[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;
+const USER_HOME_PREFIX = "/@";
 
 const ACTIVE_CLASS = "is-active";
 
@@ -33,11 +33,11 @@ const ROOT_READY_CLASSES = ["app-ready"];
 const ROOT_LOADING_CLASSES = ["app-loading", "app-booting", "loading"];
 
 const MENU_SELECTOR = [
-  "a[data-spa]",
-  "[data-sidebar-link]",
-  "[data-sidebar-nav-link]",
-  "[data-sidebar-brand]",
-  "[data-route]",
+  "a[data-sidebar-link]",
+  "a[data-sidebar-nav-link]",
+  "a[data-sidebar-brand]",
+  "a[data-topbar-link]",
+  "a[data-route]",
 ].join(",");
 
 /* =========================================================
@@ -69,11 +69,26 @@ function safeTitle(value = "") {
    PATHS
 ========================================================= */
 
-function normalizePath(path = HOME_PATH) {
-  let value = text(path, HOME_PATH);
+function normalizeHashPath(path = HOME_PATH) {
+  const value = text(path, HOME_PATH);
 
-  if (value.startsWith("#/")) value = value.slice(1);
-  if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
+  if (value.startsWith("#!")) {
+    return value.replace(/^#!\/?/, "/") || HOME_PATH;
+  }
+
+  if (value.startsWith("#/")) {
+    return value.slice(1) || HOME_PATH;
+  }
+
+  return value;
+}
+
+function pathFromInput(path = HOME_PATH) {
+  let value = normalizeHashPath(path);
+
+  if (value.startsWith("//")) {
+    return HOME_PATH;
+  }
 
   try {
     if (/^https?:\/\//i.test(value)) {
@@ -85,24 +100,69 @@ function normalizePath(path = HOME_PATH) {
       value = `${url.pathname || HOME_PATH}${url.search || ""}${url.hash || ""}`;
     }
   } catch {
-    // noop
+    return HOME_PATH;
   }
 
-  if (!value.startsWith("/")) value = `/${value}`;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+    return HOME_PATH;
+  }
+
+  return value;
+}
+
+function normalizePath(path = HOME_PATH) {
+  let value = pathFromInput(path).replace(/\\/g, "/");
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
 
   value = value.replace(/\/{2,}/g, "/");
 
   return value || HOME_PATH;
 }
 
+function stripQueryHash(path = HOME_PATH) {
+  return normalizePath(path).split("?")[0].split("#")[0] || HOME_PATH;
+}
+
+function normalizeUserSlug(value = "") {
+  const slug = text(value, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .trim()
+    .toLowerCase();
+
+  if (!slug) return "";
+
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+}
+
+function extractUserHomeSlug(path = HOME_PATH) {
+  const value = stripQueryHash(path);
+
+  if (!value.startsWith(USER_HOME_PREFIX)) return "";
+
+  const slug = value.slice(USER_HOME_PREFIX.length);
+
+  if (!slug || slug.includes("/")) return "";
+
+  return normalizeUserSlug(slug);
+}
+
+function isUserHomePath(path = HOME_PATH) {
+  return Boolean(extractUserHomeSlug(path));
+}
+
 function canonicalPath(path = HOME_PATH) {
-  let value = normalizePath(path).split("?")[0].split("#")[0] || HOME_PATH;
+  let value = stripQueryHash(path);
 
   if (value.length > 1) {
     value = value.replace(/\/+$/g, "") || HOME_PATH;
   }
 
-  return USER_HOME_RE.test(value) ? HOME_PATH : value;
+  return isUserHomePath(value) ? HOME_PATH : value;
 }
 
 /* =========================================================
@@ -399,6 +459,10 @@ function isIgnoredHref(href = "") {
   if (value.startsWith("mailto:") || value.startsWith("tel:")) return true;
   if (value.startsWith("//")) return true;
 
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^https?:\/\//i.test(value)) {
+    return true;
+  }
+
   if (/^https?:\/\//i.test(value) && isBrowser()) {
     try {
       return new URL(value, window.location.origin).origin !== window.location.origin;
@@ -437,9 +501,9 @@ export function setActiveMenu(_AppCore = null, pathname = HOME_PATH) {
 
     const candidate = canonicalPath(href);
 
-    if (candidate !== current) continue;
-
-    setActive(link, true);
+    if (candidate === current) {
+      setActive(link, true);
+    }
   }
 
   return true;
@@ -464,7 +528,7 @@ function routeHidesChrome(route = null) {
   );
 }
 
-function exposeLayout(elements) {
+function exposeLayout(elements = {}) {
   for (const node of [
     elements.shell,
     elements.main,
@@ -476,7 +540,7 @@ function exposeLayout(elements) {
 }
 
 function applyRootState(
-  elements,
+  elements = {},
   {
     chromeHidden = false,
     mode = "app",
@@ -496,10 +560,13 @@ function applyRootState(
 
     setData(root, "appLoading", "false");
     setData(root, "appBooting", "false");
+    setData(root, "appReady", "true");
+
     setData(root, "routeMode", mode);
     setData(root, "chrome", chromeHidden ? "hidden" : "visible");
     setData(root, "shell", "visible");
     setData(root, "shellState", "ready");
+    setData(root, "shellInteractive", "true");
     setData(root, "currentRoute", route);
   }
 
@@ -508,10 +575,11 @@ function applyRootState(
   setData(shell, "chrome", chromeHidden ? "hidden" : "visible");
   setData(shell, "shell", "visible");
   setData(shell, "shellState", "ready");
+  setData(shell, "shellInteractive", "true");
   setData(shell, "currentRoute", route);
 }
 
-function applyChrome(elements, hidden = false) {
+function applyChrome(elements = {}, hidden = false) {
   for (const node of [
     elements.sidebarMount,
     elements.topbarMount,
@@ -531,6 +599,8 @@ function applyChrome(elements, hidden = false) {
 
   setHidden(elements.tablehead, !showTablehead);
   setHidden(elements.tableheadContainer, hidden || !showTablehead);
+
+  setData(elements.tablehead, "tableheadState", showTablehead ? "visible" : "empty");
 }
 
 function syncState(AppCore = null, patch = {}) {
@@ -620,7 +690,12 @@ function elementSnapshot(node = null) {
 export function getShellSnapshot(AppCore = null) {
   const elements = getShellElements(AppCore);
   const publicPath = text(AppCore?.state?.publicPath, "");
-  const route = canonicalPath(AppCore?.state?.route || AppCore?.state?.canonicalPath || publicPath || HOME_PATH);
+  const route = canonicalPath(
+    AppCore?.state?.route ||
+      AppCore?.state?.canonicalPath ||
+      publicPath ||
+      HOME_PATH
+  );
 
   return {
     version: ROUTER_SHELL_VERSION,
@@ -628,8 +703,8 @@ export function getShellSnapshot(AppCore = null) {
 
     route,
     publicPath,
-
-    isUserHomePath: USER_HOME_RE.test(canonicalPath(publicPath || HOME_PATH)),
+    publicSlug: extractUserHomeSlug(publicPath) || null,
+    isUserHomePath: isUserHomePath(publicPath || HOME_PATH),
 
     shellVisible: AppCore?.state?.shellVisible ?? null,
     shellHidden: AppCore?.state?.shellHidden ?? null,
@@ -664,8 +739,11 @@ export function getShellSnapshot(AppCore = null) {
       ownHistory: false,
       ownStorage: false,
       ownToast: false,
+
       shellOnly: true,
-      publicSlugHome: true,
+      userSlugHome: true,
+      canonicalizesUserHome: true,
+
       noHomeAlias: true,
       chromeOnlyForAuth: true,
       eventless: true,

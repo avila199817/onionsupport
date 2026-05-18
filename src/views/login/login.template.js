@@ -3,23 +3,19 @@
    Archivo: /src/views/login/login.template.js
 
    Responsabilidad:
-   - Template visual del login.
-   - Compone layout + formulario.
-   - Consume src/shared/password-field.
+   - Pintar la vista de login.
+   - Consumir el password-field compartido.
    - Sin Auth.
    - Sin HTTP.
    - Sin Router.
    - Sin Store.
    - Sin Toast directo.
-   - Sin lógica de sesión.
-   - Sin duplicar lógica del password-field.
-   - Preparado para i18n mediante options/data-i18n.
-   - Compatible con src/views/login/index.js.
+   - Sin duplicar lógica del password.
 ========================================================= */
 
-import { getPasswordFieldTemplate } from "../../shared/password-field/index.js";
+import { renderPasswordField } from "../../shared/password-field/password-field.template.js";
 
-export const TEMPLATE_VERSION = "login-olympus-2";
+export const TEMPLATE_VERSION = "simple-2";
 
 const DEFAULT_APP_NAME = "Onion Support";
 const DEFAULT_LOGO = "/src/media/img/favicon_black_circle.png?v=6";
@@ -45,22 +41,6 @@ function escapeHtml(value = "") {
 
 function escapeAttr(value = "") {
   return escapeHtml(text(value, ""));
-}
-
-function asObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-
-function bool(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") return value === 1;
-
-  const normalized = String(value ?? "").trim().toLowerCase();
-
-  if (["1", "true", "yes", "on", "si", "sí"].includes(normalized)) return true;
-  if (["0", "false", "no", "off"].includes(normalized)) return false;
-
-  return fallback;
 }
 
 function safeInternalHref(value = "", fallback = DEFAULT_PASSWORD_REQUEST_HREF) {
@@ -96,109 +76,16 @@ function normalizeIdentifier(value = "") {
     .slice(0, 180);
 }
 
-function readMapValue(map, key) {
-  const source = asObject(map);
-  const scoped = asObject(source.login);
+function bool(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
 
-  return (
-    text(scoped[key], "") ||
-    text(scoped[`login.${key}`], "") ||
-    text(source[key], "") ||
-    text(source[`login.${key}`], "")
-  );
-}
+  const clean = String(value ?? "").trim().toLowerCase();
 
-function copy(options = {}, key = "", fallback = "") {
-  const source = asObject(options);
-
-  const direct = text(source[key], "");
-  if (direct) return direct;
-
-  const fromLabels = readMapValue(source.labels, key);
-  if (fromLabels) return fromLabels;
-
-  const fromI18nMap = readMapValue(source.i18n, key);
-  if (fromI18nMap) return fromI18nMap;
-
-  const i18n = asObject(source.i18n);
-  const t = typeof source.t === "function" ? source.t : i18n && typeof i18n.t === "function" ? i18n.t : null;
-
-  if (t) {
-    try {
-      const translated = text(t(`login.${key}`, fallback), "");
-      if (translated && translated !== `login.${key}`) return translated;
-    } catch (_) {
-      // Template puro: si i18n falla, mantiene fallback.
-    }
-  }
+  if (["1", "true", "yes", "si", "sí", "on"].includes(clean)) return true;
+  if (["0", "false", "no", "off"].includes(clean)) return false;
 
   return fallback;
-}
-
-function renderLogo(src, className = "login-logo", size = 44) {
-  return `
-    <img
-      class="${escapeAttr(className)}"
-      src="${escapeAttr(src)}"
-      alt=""
-      width="${escapeAttr(size)}"
-      height="${escapeAttr(size)}"
-      loading="eager"
-      decoding="async"
-      draggable="false"
-      aria-hidden="true"
-    />
-  `;
-}
-
-function renderPasswordField(options = {}, labels = {}) {
-  const passwordField = asObject(options.passwordField);
-
-  const rootAttrs = {
-    ...asObject(passwordField.rootAttrs),
-    ...asObject(passwordField.attrs),
-    "data-login-field": "password",
-    "data-login-password-field": "true",
-  };
-
-  const inputAttrs = {
-    ...asObject(passwordField.inputAttrs),
-    "data-login-password": "true",
-    "data-login-password-input": "true",
-    "data-i18n-placeholder": "login.passwordPlaceholder",
-    "aria-invalid": "false",
-  };
-
-  return getPasswordFieldTemplate({
-    ...passwordField,
-
-    id: text(passwordField.id, "loginPassword"),
-    name: text(passwordField.name, "password"),
-    type: "password",
-    mode: text(passwordField.mode, "login"),
-
-    label: text(passwordField.label, labels.passwordLabel),
-    placeholder: text(passwordField.placeholder, labels.passwordPlaceholder),
-    autocomplete: text(passwordField.autocomplete, "current-password"),
-    required: passwordField.required === undefined ? true : bool(passwordField.required, true),
-
-    rootClassName: text(passwordField.rootClassName || passwordField.fieldClassName, "login-field login-field--password"),
-    labelClassName: text(passwordField.labelClassName, "login-label"),
-    inputClassName: text(passwordField.inputClassName, "input-text login-input"),
-
-    i18nScope: text(passwordField.i18nScope, "login"),
-    i18n: {
-      ...asObject(passwordField.i18n),
-      label: "login.passwordLabel",
-      placeholder: "login.passwordPlaceholder",
-      show: "passwordField.show",
-      hide: "passwordField.hide",
-    },
-
-    attrs: rootAttrs,
-    rootAttrs,
-    inputAttrs,
-  });
 }
 
 /* =========================================================
@@ -206,56 +93,70 @@ function renderPasswordField(options = {}, labels = {}) {
 ========================================================= */
 
 export function getLoginTemplate(options = {}) {
-  const source = asObject(options);
+  const appName = text(options.appName, DEFAULT_APP_NAME);
+  const logoSrc = safeAssetSrc(options.logoSrc, DEFAULT_LOGO);
 
-  const appName = copy(source, "appName", DEFAULT_APP_NAME);
-  const logoSrc = safeAssetSrc(source.logoSrc, DEFAULT_LOGO);
+  const title = text(options.title, "Iniciar sesión");
+  const subtitle = text(options.subtitle, `Accede a ${appName}`);
 
-  const title = copy(source, "title", "Iniciar sesión");
-  const subtitle = copy(source, "subtitle", `Accede a ${appName}`);
-
-  const eyebrow = copy(source, "eyebrow", "Panel privado");
-  const heroTitle = copy(source, "heroTitle", "Soporte simple para trabajar rápido.");
-  const heroText = copy(
-    source,
-    "heroText",
-    "Gestiona tickets, clientes y facturas desde un único panel claro, directo y seguro."
+  const heroTitle = text(options.heroTitle, "Soporte simple. Trabajo rápido.");
+  const heroText = text(
+    options.heroText,
+    "Gestiona tickets, clientes y facturas desde un único panel privado."
   );
 
-  const identifierLabel = copy(source, "identifierLabel", "Usuario o email");
-  const identifierPlaceholder = copy(source, "identifierPlaceholder", "Usuario o email");
+  const identifier = normalizeIdentifier(options.identifier);
+  const identifierLabel = text(options.identifierLabel, "Usuario o email");
+  const identifierPlaceholder = text(options.identifierPlaceholder, "Usuario o email");
 
-  const passwordLabel = copy(source, "passwordLabel", "Contraseña");
-  const passwordPlaceholder = copy(source, "passwordPlaceholder", "Contraseña");
+  const passwordLabel = text(options.passwordLabel, "Contraseña");
+  const passwordPlaceholder = text(options.passwordPlaceholder, "Contraseña");
 
-  const submitLabel = copy(source, "submitLabel", "Entrar");
-  const rememberLabel = copy(source, "rememberLabel", "Recordarme");
+  const rememberLabel = text(options.rememberLabel, "Recordarme");
+  const submitLabel = text(options.submitLabel, "Entrar");
 
-  const passwordRequestLabel =
-    text(source.passwordRequestLabel || source.forgotLabel, "") ||
-    copy(source, "passwordRequestLabel", "¿Has olvidado tu contraseña?");
-
-  const secureLabel = copy(source, "secureLabel", "Acceso seguro");
-  const formHelper = copy(source, "formHelper", "Introduce tus credenciales para continuar.");
-  const footerLabel = copy(source, "footerLabel", "Onion Support SPA");
-
-  const identifier = normalizeIdentifier(source.identifier || "");
-  const showRemember = bool(source.showRemember, true);
-  const rememberChecked = bool(source.remember, Boolean(identifier));
+  const passwordRequestLabel = text(
+    options.passwordRequestLabel || options.forgotLabel,
+    "¿Has olvidado tu contraseña?"
+  );
 
   const passwordRequestHref = safeInternalHref(
-    source.passwordRequestHref || source.forgotPasswordHref,
+    options.passwordRequestHref || options.forgotPasswordHref,
     DEFAULT_PASSWORD_REQUEST_HREF
   );
 
-  const passwordFieldHtml = renderPasswordField(source, {
-    passwordLabel,
-    passwordPlaceholder,
+  const rememberChecked = bool(options.remember, Boolean(identifier));
+
+  const passwordFieldHtml = renderPasswordField({
+    id: "loginPassword",
+    name: "password",
+    fieldDataName: "password",
+
+    label: passwordLabel,
+    placeholder: passwordPlaceholder,
+    autocomplete: "current-password",
+    required: true,
+
+    fieldClass: "login-field login-field--password",
+    wrapperClass: "password-wrapper login-password-wrapper",
+    inputClass: "input-text login-input",
+    labelClass: "login-label",
+    toggleClass: "password-toggle login-password-toggle",
+
+    inputDataAttrs: {
+      loginPassword: true,
+      loginPasswordInput: true,
+      i18nPlaceholder: "login.passwordPlaceholder",
+    },
+
+    rootDataAttrs: {
+      i18nScope: "login",
+    },
   });
 
   return `
     <section
-      class="login-view login-view--split"
+      class="login-view"
       id="loginView"
       data-view="login"
       data-view-name="login"
@@ -263,81 +164,52 @@ export function getLoginTemplate(options = {}) {
       data-i18n-scope="login"
       data-template-version="${escapeAttr(TEMPLATE_VERSION)}"
     >
-      <div class="login-background" aria-hidden="true">
-        <span class="login-background__grid"></span>
-        <span class="login-background__glow login-background__glow--primary"></span>
-        <span class="login-background__glow login-background__glow--secondary"></span>
-      </div>
-
       <div class="login-shell">
-        <aside class="login-hero" aria-label="${escapeAttr(appName)}">
-          <div class="login-hero__brand">
-            <span class="login-hero__logo">
-              ${renderLogo(logoSrc, "login-hero__logo-img", 42)}
-            </span>
+        <aside class="login-visual" aria-label="${escapeAttr(appName)}">
+          <div class="login-visual-brand">
+            <img
+              class="login-visual-logo"
+              src="${escapeAttr(logoSrc)}"
+              alt=""
+              width="72"
+              height="72"
+              loading="eager"
+              decoding="async"
+              draggable="false"
+              aria-hidden="true"
+            />
 
-            <span class="login-hero__brand-copy">
-              <strong>${escapeHtml(appName)}</strong>
-              <small data-i18n="login.eyebrow">${escapeHtml(eyebrow)}</small>
-            </span>
+            <strong>${escapeHtml(appName)}</strong>
           </div>
 
-          <div class="login-hero__content">
-            <p class="login-hero__kicker" data-i18n="login.secureLabel">
-              ${escapeHtml(secureLabel)}
-            </p>
-
-            <h2 class="login-hero__title" data-i18n="login.heroTitle">
-              ${escapeHtml(heroTitle)}
-            </h2>
-
-            <p class="login-hero__text" data-i18n="login.heroText">
-              ${escapeHtml(heroText)}
-            </p>
-          </div>
-
-          <div class="login-hero__mock" aria-hidden="true">
-            <div class="login-hero__mock-card login-hero__mock-card--main">
-              <span></span>
-              <strong></strong>
-              <em></em>
-            </div>
-
-            <div class="login-hero__mock-card login-hero__mock-card--one">
-              <span></span>
-              <strong></strong>
-            </div>
-
-            <div class="login-hero__mock-card login-hero__mock-card--two">
-              <span></span>
-              <strong></strong>
-            </div>
+          <div class="login-visual-copy">
+            <h2 data-i18n="login.heroTitle">${escapeHtml(heroTitle)}</h2>
+            <p data-i18n="login.heroText">${escapeHtml(heroText)}</p>
           </div>
         </aside>
 
         <main class="login-main">
           <article class="login-card" aria-labelledby="loginTitle">
             <header class="login-header">
-              <div class="login-brand">
-                <span class="login-brand__logo">
-                  ${renderLogo(logoSrc, "login-logo", 48)}
-                </span>
+              <img
+                class="login-logo"
+                src="${escapeAttr(logoSrc)}"
+                alt=""
+                width="52"
+                height="52"
+                loading="eager"
+                decoding="async"
+                draggable="false"
+                aria-hidden="true"
+              />
 
-                <span class="login-brand__copy">
-                  <strong>${escapeHtml(appName)}</strong>
-                  <small data-i18n="login.secureLabel">${escapeHtml(secureLabel)}</small>
-                </span>
-              </div>
+              <h1 class="login-title" id="loginTitle" data-i18n="login.title">
+                ${escapeHtml(title)}
+              </h1>
 
-              <div class="login-heading">
-                <h1 class="login-title" id="loginTitle" data-i18n="login.title">
-                  ${escapeHtml(title)}
-                </h1>
-
-                <p class="login-subtitle" id="loginDescription" data-i18n="login.subtitle">
-                  ${escapeHtml(subtitle)}
-                </p>
-              </div>
+              <p class="login-subtitle" id="loginDescription" data-i18n="login.subtitle">
+                ${escapeHtml(subtitle)}
+              </p>
             </header>
 
             <form
@@ -346,7 +218,7 @@ export function getLoginTemplate(options = {}) {
               data-login-form="true"
               data-auth-form="login"
               data-toast-scope="auth.login"
-              aria-describedby="loginDescription loginHelper loginMessage"
+              aria-describedby="loginDescription loginMessage"
               autocomplete="on"
               novalidate
             >
@@ -361,10 +233,6 @@ export function getLoginTemplate(options = {}) {
                 aria-atomic="true"
                 hidden
               ></div>
-
-              <p class="login-helper" id="loginHelper" data-i18n="login.formHelper">
-                ${escapeHtml(formHelper)}
-              </p>
 
               <div class="login-field login-field--identifier" data-login-field="identifier">
                 <label
@@ -396,28 +264,18 @@ export function getLoginTemplate(options = {}) {
               ${passwordFieldHtml}
 
               <div class="login-options">
-                ${
-                  showRemember
-                    ? `
-                      <label class="login-check" for="loginRemember">
-                        <input
-                          id="loginRemember"
-                          name="remember"
-                          type="checkbox"
-                          value="1"
-                          data-login-remember="true"
-                          ${rememberChecked ? "checked" : ""}
-                        />
+                <label class="login-check" for="loginRemember">
+                  <input
+                    id="loginRemember"
+                    name="remember"
+                    type="checkbox"
+                    value="1"
+                    data-login-remember="true"
+                    ${rememberChecked ? "checked" : ""}
+                  />
 
-                        <span class="login-check__box" aria-hidden="true"></span>
-
-                        <span class="login-check__label" data-i18n="login.rememberLabel">
-                          ${escapeHtml(rememberLabel)}
-                        </span>
-                      </label>
-                    `
-                    : `<span></span>`
-                }
+                  <span data-i18n="login.rememberLabel">${escapeHtml(rememberLabel)}</span>
+                </label>
 
                 <a
                   class="login-reset-link"
@@ -438,10 +296,6 @@ export function getLoginTemplate(options = {}) {
               >
                 <span data-i18n="login.submitLabel">${escapeHtml(submitLabel)}</span>
               </button>
-
-              <footer class="login-footer">
-                <span data-i18n="login.footerLabel">${escapeHtml(footerLabel)}</span>
-              </footer>
             </form>
           </article>
         </main>

@@ -14,19 +14,18 @@
    - Sin lógica duplicada.
 ========================================================= */
 
-export const PASSWORD_FIELD_TEMPLATE_VERSION = "minimal-2";
+export const PASSWORD_FIELD_TEMPLATE_VERSION = "minimal-3";
 
-const DEFAULT_INPUT_ID = "passwordInput";
-const DEFAULT_INPUT_NAME = "password";
+const DEFAULT_ID = "passwordInput";
+const DEFAULT_NAME = "password";
 const DEFAULT_FIELD_CLASS = "login-field";
 const DEFAULT_WRAPPER_CLASS = "password-wrapper";
 const DEFAULT_INPUT_CLASS = "input-text";
-const DEFAULT_TOGGLE_CLASS = "password-toggle";
-const DEFAULT_TOGGLE_ICON_CLASS = "password-toggle-icon";
 const DEFAULT_LABEL_CLASS = "password-label";
+const DEFAULT_TOGGLE_CLASS = "password-toggle";
+const DEFAULT_ICON_CLASS = "password-toggle-icon";
 const DEFAULT_PLACEHOLDER = "Contraseña";
 const DEFAULT_AUTOCOMPLETE = "current-password";
-const DEFAULT_FIELD_DATA_NAME = "password";
 const DEFAULT_SHOW_LABEL = "Mostrar contraseña";
 const DEFAULT_HIDE_LABEL = "Ocultar contraseña";
 
@@ -87,14 +86,6 @@ function cleanName(value = "", fallback = "") {
     .slice(0, 120);
 }
 
-function cleanDataName(value = "", fallback = DEFAULT_FIELD_DATA_NAME) {
-  return text(value, fallback)
-    .replace(/[^\w.-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^[.-]+|[.-]+$/g, "")
-    .slice(0, 80) || fallback;
-}
-
 function cleanClass(value = "", fallback = "") {
   return text(value, fallback)
     .split(/\s+/)
@@ -114,33 +105,24 @@ function cleanDataKey(value = "") {
     .slice(0, 80);
 }
 
-function attr(name = "", value = "") {
-  const key = text(name, "");
-
-  if (!key) return "";
-  if (value === null || value === undefined || value === false || value === "") return "";
-  if (value === true) return ` ${key}`;
-
-  return ` ${key}="${escapeHtml(value)}"`;
-}
-
-function dataAttrs(attrs = {}, blockedKeys = []) {
+function dataAttrs(attrs = {}, blocked = []) {
   if (!isObject(attrs)) return "";
 
-  const blocked = new Set(blockedKeys.map(cleanDataKey));
+  const blockedKeys = new Set(blocked.map(cleanDataKey));
 
   return Object.entries(attrs)
     .map(([key, value]) => {
-      const cleanKey = cleanDataKey(key);
+      const dataKey = cleanDataKey(key);
 
-      if (!cleanKey || blocked.has(cleanKey)) return "";
+      if (!dataKey || blockedKeys.has(dataKey)) return "";
+      if (value === null || value === undefined || value === false || value === "") return "";
 
-      return attr(`data-${cleanKey}`, value === true ? "true" : value);
+      return ` data-${dataKey}="${escapeHtml(value === true ? "true" : value)}"`;
     })
     .join("");
 }
 
-function numberAttr(value) {
+function numberAttr(value = "") {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? String(number) : "";
 }
@@ -225,7 +207,7 @@ export function getEyeOffIcon(options = {}) {
   `;
 }
 
-/* Compat export. El template mínimo no renderiza CapsLock. */
+/* Compat export. No se renderiza CapsLock en el componente mínimo. */
 export function getCapsIcon() {
   return "";
 }
@@ -237,22 +219,24 @@ export function getCapsIcon() {
 function normalizeOptions(options = {}) {
   const opts = isObject(options) ? options : {};
 
-  const fieldDataName = cleanDataName(
-    opts.fieldDataName ?? opts.dataField ?? opts.field,
-    DEFAULT_FIELD_DATA_NAME
-  );
+  const fieldDataName = text(
+    opts.fieldDataName || opts.dataField || opts.field,
+    "password"
+  )
+    .replace(/[^\w.-]/g, "-")
+    .slice(0, 80) || "password";
 
   const inputName = cleanName(
-    opts.name ?? opts.inputName ?? opts.fieldName ?? fieldDataName,
-    DEFAULT_INPUT_NAME
+    opts.name || opts.inputName || opts.fieldName || fieldDataName,
+    DEFAULT_NAME
   );
 
   const inputId = cleanId(
-    opts.id ?? opts.inputId ?? opts.fieldId ?? opts.passwordId ?? inputName,
-    DEFAULT_INPUT_ID
+    opts.id || opts.inputId || opts.fieldId || opts.passwordId || inputName,
+    DEFAULT_ID
   );
 
-  const label = text(opts.label ?? opts.fieldLabel, "");
+  const label = text(opts.label || opts.fieldLabel, "");
   const placeholder = text(opts.placeholder, DEFAULT_PLACEHOLDER);
 
   return {
@@ -260,45 +244,49 @@ function normalizeOptions(options = {}) {
 
     inputId,
     inputName,
-    toggleId: cleanId(opts.toggleId ?? opts.buttonId ?? `${inputId}Toggle`, `${inputId}Toggle`),
-    fieldRootId: cleanId(opts.fieldRootId ?? opts.rootId, ""),
+    toggleId: cleanId(opts.toggleId || opts.buttonId || `${inputId}Toggle`, `${inputId}Toggle`),
+    fieldRootId: cleanId(opts.fieldRootId || opts.rootId, ""),
     wrapperId: cleanId(opts.wrapperId, ""),
 
     fieldClass: cleanClass(
-      opts.fieldClass ?? opts.rootClass ?? opts.rootClassName ?? opts.fieldClassName,
+      opts.fieldClass || opts.rootClass || opts.rootClassName || opts.fieldClassName,
       DEFAULT_FIELD_CLASS
     ),
 
     wrapperClass: cleanClass(
-      opts.wrapperClass ?? opts.wrapperClassName,
+      opts.wrapperClass || opts.wrapperClassName,
       DEFAULT_WRAPPER_CLASS
     ),
 
     inputClass: cleanClass(
-      opts.inputClass ?? opts.inputClassName,
+      opts.inputClass || opts.inputClassName,
       DEFAULT_INPUT_CLASS
     ),
 
     labelClass: cleanClass(
-      opts.labelClass ?? opts.labelClassName,
+      opts.labelClass || opts.labelClassName,
       DEFAULT_LABEL_CLASS
     ),
 
     toggleClass: cleanClass(
-      opts.toggleClass ?? opts.toggleClassName,
+      opts.toggleClass || opts.toggleClassName,
       DEFAULT_TOGGLE_CLASS
     ),
 
-    toggleIconClass: cleanClass(
-      opts.toggleIconClass ?? opts.toggleIconClassName,
-      DEFAULT_TOGGLE_ICON_CLASS
+    iconClass: cleanClass(
+      opts.toggleIconClass || opts.toggleIconClassName,
+      DEFAULT_ICON_CLASS
     ),
 
     label,
     placeholder,
-    ariaLabel: text(opts.ariaLabel ?? opts["aria-label"] ?? label ?? placeholder, DEFAULT_PLACEHOLDER),
-    autocomplete: text(opts.autocomplete, DEFAULT_AUTOCOMPLETE),
 
+    ariaLabel: text(
+      opts.ariaLabel || opts["aria-label"] || label || placeholder,
+      DEFAULT_PLACEHOLDER
+    ),
+
+    autocomplete: text(opts.autocomplete, DEFAULT_AUTOCOMPLETE),
     value: rawText(opts.value, ""),
 
     required: opts.required !== false,
@@ -314,12 +302,12 @@ function normalizeOptions(options = {}) {
       opts.showPasswordToggle !== false,
 
     showLabel: text(
-      opts.toggleLabelShow ?? opts.showLabel ?? opts.showPasswordLabel,
+      opts.toggleLabelShow || opts.showLabel || opts.showPasswordLabel,
       DEFAULT_SHOW_LABEL
     ),
 
     hideLabel: text(
-      opts.toggleLabelHide ?? opts.hideLabel ?? opts.hidePasswordLabel,
+      opts.toggleLabelHide || opts.hideLabel || opts.hidePasswordLabel,
       DEFAULT_HIDE_LABEL
     ),
 
@@ -341,7 +329,7 @@ function normalizeOptions(options = {}) {
 }
 
 /* =========================================================
-   RENDER PARTS
+   RENDER
 ========================================================= */
 
 function renderLabel(data) {
@@ -352,9 +340,7 @@ function renderLabel(data) {
       class="${escapeHtml(data.labelClass)}"
       for="${escapeHtml(data.inputId)}"
       data-password-label="true"
-    >
-      ${escapeHtml(data.label)}
-    </label>
+    >${escapeHtml(data.label)}</label>
   `;
 }
 
@@ -414,7 +400,7 @@ function renderToggle(data) {
       ])}
     >
       <span
-        class="${escapeHtml(data.toggleIconClass)}"
+        class="${escapeHtml(data.iconClass)}"
         aria-hidden="true"
         data-password-toggle-icon="true"
         data-state="hidden"

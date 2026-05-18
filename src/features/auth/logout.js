@@ -13,6 +13,8 @@
    - Sin refresh.
    - Sin navegación.
    - Sin storage.clear().
+   - Sin helpers externos.
+   - Sin constants externos.
    - Sin magia negra.
 ========================================================= */
 
@@ -20,22 +22,13 @@ import { AppCore } from "../../core/index.js";
 import CoreHttp from "../../core/http.js";
 
 import {
-  AUTH_ENDPOINTS,
-} from "./constants.js";
-
-import {
-  extractMessage,
-  redactTokenInText,
-} from "./helpers.js";
-
-import {
   clearSessionLocal,
-  buildSessionSnapshot,
 } from "./session.js";
 
 export const AUTH_LOGOUT_VERSION = "simple";
 
 const SOURCE = "auth.logout";
+const LOGOUT_ENDPOINT = "/api/auth/logout";
 
 let logoutPromise = null;
 let logoutSequence = 0;
@@ -66,11 +59,9 @@ function readState() {
 }
 
 function redact(value = "") {
-  try {
-    return redactTokenInText(value);
-  } catch {
-    return text(value, "").replace(/([?&#]token=)([^&#\s]+)/gi, "$1***");
-  }
+  return text(value, "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 function statusOf(value = null) {
@@ -80,6 +71,15 @@ function statusOf(value = null) {
       value?.response?.status ||
       value?.data?.status ||
       0
+  ) || 0;
+}
+
+function extractMessage(error = null) {
+  return (
+    error?.data?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    String(error || "")
   );
 }
 
@@ -88,7 +88,7 @@ function publicError(error = null) {
 
   return {
     name: error.name || "Error",
-    message: redact(extractMessage(error) || error.message || String(error)),
+    message: redact(extractMessage(error)),
     status: statusOf(error),
     code: error.code || error.data?.code || error.response?.data?.code || null,
   };
@@ -106,32 +106,29 @@ function publicUser(user = null) {
   };
 }
 
-function safeSessionSnapshot(extra = {}) {
-  try {
-    return {
-      ...buildSessionSnapshot(extra),
-      token: null,
-      accessToken: null,
-      refreshToken: null,
-    };
-  } catch {
-    const state = readState();
-    const user = state.user || state.currentUser || null;
+function sessionSnapshot(extra = {}) {
+  const state = readState();
+  const user = state.user || state.currentUser || null;
 
-    return {
-      authenticated: Boolean(state.authenticated),
-      hasToken: Boolean(state.hasToken || state.token || state.accessToken),
-      token: null,
-      accessToken: null,
-      refreshToken: null,
-      user: publicUser(user),
-      role: state.role || user?.role || null,
-      roles: Array.isArray(state.roles) ? state.roles : [],
-      route: redact(state.route || "/"),
-      publicPath: redact(state.publicPath || "/"),
-      ...extra,
-    };
-  }
+  return {
+    version: AUTH_LOGOUT_VERSION,
+
+    authenticated: Boolean(state.authenticated),
+    hasToken: Boolean(state.hasToken || state.token || state.accessToken || state.access_token),
+
+    token: null,
+    accessToken: null,
+    refreshToken: null,
+
+    user: publicUser(user),
+    role: state.role || user?.role || null,
+    roles: Array.isArray(state.roles) ? state.roles : [],
+
+    route: redact(state.route || "/"),
+    publicPath: redact(state.publicPath || "/"),
+
+    ...extra,
+  };
 }
 
 function emit(eventName = "", payload = {}, options = {}) {
@@ -164,10 +161,6 @@ function emit(eventName = "", payload = {}, options = {}) {
    REMOTE LOGOUT
 ========================================================= */
 
-function logoutEndpoint() {
-  return AUTH_ENDPOINTS?.logout || "/api/auth/logout";
-}
-
 function alreadyLoggedOutStatus(status = 0) {
   return status === 401 || status === 403 || status === 404;
 }
@@ -188,7 +181,6 @@ async function remoteLogout(options = {}) {
     public: false,
     skipAuth: false,
     storeError: false,
-    retries: 0,
     cache: "no-store",
   };
 
@@ -207,7 +199,7 @@ async function remoteLogout(options = {}) {
     }
 
     if (isFunction(CoreHttp?.post)) {
-      result = await CoreHttp.post(logoutEndpoint(), {}, requestOptions);
+      result = await CoreHttp.post(LOGOUT_ENDPOINT, {}, requestOptions);
 
       return {
         ok: true,
@@ -218,7 +210,7 @@ async function remoteLogout(options = {}) {
     }
 
     if (isFunction(CoreHttp?.request)) {
-      result = await CoreHttp.request(logoutEndpoint(), {
+      result = await CoreHttp.request(LOGOUT_ENDPOINT, {
         ...requestOptions,
         method: "POST",
         body: {},
@@ -236,7 +228,7 @@ async function remoteLogout(options = {}) {
       ok: false,
       skipped: true,
       status: 0,
-      transport: "missing-core-http",
+      transport: "missing-http",
     };
   } catch (error) {
     const status = statusOf(error);
@@ -266,73 +258,63 @@ async function remoteLogout(options = {}) {
 ========================================================= */
 
 function fallbackClearState() {
+  const patch = {
+    authenticated: false,
+    hasToken: false,
+
+    token: null,
+    accessToken: null,
+    access_token: null,
+    refreshToken: null,
+    refresh_token: null,
+
+    user: null,
+    currentUser: null,
+    authUser: null,
+    sessionUser: null,
+    account: null,
+    profile: null,
+
+    role: null,
+    rol: null,
+    userRole: null,
+    roles: [],
+
+    isAdmin: false,
+    isSupport: false,
+    isManager: false,
+    isClient: false,
+
+    session: null,
+    sessionData: null,
+    sessionId: null,
+    sessionUserId: null,
+
+    username: null,
+    avatar: null,
+    avatarUrl: null,
+
+    loginInProgress: false,
+    lastLogoutAt: nowIso(),
+  };
+
   try {
-    AppCore?.setState?.(
-      {
-        authenticated: false,
-        hasToken: false,
-
-        token: null,
-        accessToken: null,
-        access_token: null,
-        refreshToken: null,
-        refresh_token: null,
-
-        user: null,
-        currentUser: null,
-        authUser: null,
-        sessionUser: null,
-        account: null,
-        profile: null,
-
-        role: null,
-        rol: null,
-        userRole: null,
-        roles: [],
-
-        isAdmin: false,
-        isSupport: false,
-        isManager: false,
-        isClient: false,
-
-        session: null,
-        sessionData: null,
-        sessionId: null,
-        sessionUserId: null,
-
-        username: null,
-        currentResolvedUsername: null,
-        resolvedUsername: null,
-
-        avatar: null,
-        avatarUrl: null,
-
-        loginInProgress: false,
-        lastLogoutAt: nowIso(),
-      },
-      {
-        source: SOURCE,
-        silent: true,
-        emit: false,
-        forceUnauthenticated: true,
-      }
-    );
+    AppCore?.setState?.(patch, {
+      source: SOURCE,
+      silent: true,
+      emit: false,
+      forceUnauthenticated: true,
+    });
+    return true;
   } catch {
-    try {
-      Object.assign(readState(), {
-        authenticated: false,
-        hasToken: false,
-        token: null,
-        accessToken: null,
-        access_token: null,
-        user: null,
-        currentUser: null,
-        role: null,
-        roles: [],
-      });
-    } catch {
-      // noop
-    }
+    // fallback abajo
+  }
+
+  try {
+    Object.assign(readState(), patch);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -341,6 +323,7 @@ function clearLocal(options = {}) {
     clearSessionLocal({
       source: SOURCE,
       silent: true,
+      emit: false,
       reason: options.reason || "logout",
     });
   } catch {
@@ -391,41 +374,23 @@ export async function logout(options = {}) {
   logoutPromise = (async () => {
     const sequence = ++logoutSequence;
     const startedAt = Date.now();
-    const before = safeSessionSnapshot({
-      cause: "logout",
-    });
 
     emit("auth:logout:start", {
       sequence,
-      before,
+      session: sessionSnapshot({
+        cause: "before-logout",
+      }),
     }, options);
 
-    let remote = {
-      ok: true,
-      skipped: true,
-      status: 0,
-      transport: "not-run",
-    };
-
-    try {
-      remote = await remoteLogout(options);
-    } catch (error) {
-      remote = {
-        ok: false,
-        skipped: false,
-        status: statusOf(error),
-        transport: "CoreHttp",
-        error: publicError(error),
-      };
-    }
+    const remote = await remoteLogout(options);
 
     clearLocal({
       ...options,
       reason: "logout",
     });
 
-    const after = safeSessionSnapshot({
-      cause: "logout",
+    const after = sessionSnapshot({
+      cause: "after-logout",
     });
 
     emit("auth:logout:success", {
@@ -434,8 +399,10 @@ export async function logout(options = {}) {
       remoteSkipped: Boolean(remote.skipped),
       remoteStatus: remote.status || 0,
       remoteTransport: remote.transport || "",
-      before,
-      after,
+      authenticated: false,
+      user: null,
+      role: null,
+      session: after,
       durationMs: Date.now() - startedAt,
     }, options);
 
@@ -448,12 +415,14 @@ export async function logout(options = {}) {
 
     return {
       ok: true,
+
       remoteOk: Boolean(remote.ok),
       remoteSkipped: Boolean(remote.skipped),
       remoteStatus: remote.status || 0,
       remoteTransport: remote.transport || "",
-      before,
-      after,
+
+      session: after,
+
       durationMs: Date.now() - startedAt,
       sequence,
       version: AUTH_LOGOUT_VERSION,
@@ -467,7 +436,7 @@ export async function logout(options = {}) {
 
       emit("auth:logout:error", {
         error: publicError(error),
-        message: extractMessage(error),
+        message: redact(extractMessage(error)),
       }, options);
 
       return {
@@ -498,7 +467,7 @@ export function getLogoutSnapshot() {
     inFlight: Boolean(logoutPromise),
     sequence: logoutSequence,
 
-    endpoint: logoutEndpoint(),
+    endpoint: LOGOUT_ENDPOINT,
 
     authenticated: Boolean(state.authenticated),
     hasToken: Boolean(state.hasToken || state.token || state.accessToken || state.access_token),
@@ -524,6 +493,8 @@ export function getLogoutSnapshot() {
       ownToast: false,
       ownStorageClearAll: false,
       navigation: false,
+      noHelpersImport: true,
+      noConstantsImport: true,
     },
 
     at: nowIso(),

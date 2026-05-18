@@ -6,24 +6,31 @@
    - Template simple para recuperar/restablecer contraseña.
    - Modo request: pedir usuario o email.
    - Modo confirm: nueva contraseña + confirmar contraseña.
+   - Token único: token.
    - Consumir shared/password-field.
    - Conectar con CSS auth/login común.
+   - Textos base en castellano.
    - Sin Auth.
    - Sin HTTP.
    - Sin Router.
    - Sin Store.
    - Sin Toast directo.
    - Sin lógica DOM.
+   - Sin navegación.
    - Sin duplicar password-field.
+   - Sin exponer token sensible en markup.
+   - Sin 2FA/MFA/OTP.
 ========================================================= */
 
 import { renderPasswordField } from "../../shared/password-field/index.js";
 
-export const TEMPLATE_VERSION = "minimal-1";
+export const TEMPLATE_VERSION = "reset-password.template.v2";
 
 const DEFAULT_APP_NAME = "Onion Support";
 const DEFAULT_LOGIN_HREF = "/login";
 const DEFAULT_LOGO = "/src/media/img/favicon_black_circle.png?v=6";
+
+const TOKEN_PARAM = "token";
 
 /* =========================================================
    HELPERS
@@ -78,6 +85,7 @@ function normalizeToken(value = "") {
 
   if (!token) return "";
   if (/\s/.test(token)) return "";
+  if (token.length > 8192) return "";
 
   if (
     ["null", "undefined", "false", "true", "[object object]", "{}", "[]"].includes(
@@ -134,6 +142,7 @@ function renderRequestFields({ identifier = "" } = {}) {
       class="auth-field password-reset-field"
       data-password-reset-field="identifier"
       data-reset-password-field="identifier"
+      data-field="identifier"
     >
       <label
         class="auth-label password-reset-label"
@@ -149,7 +158,7 @@ function renderRequestFields({ identifier = "" } = {}) {
         name="identifier"
         type="text"
         autocomplete="username"
-        inputmode="email"
+        inputmode="text"
         autocapitalize="none"
         spellcheck="false"
         placeholder="Usuario o email"
@@ -159,19 +168,19 @@ function renderRequestFields({ identifier = "" } = {}) {
         data-i18n-placeholder="passwordReset.identifierPlaceholder"
         aria-invalid="false"
         required
-      />
+      >
     </div>
   `;
 }
 
 function renderResetPasswordField({
-  id,
-  name,
-  label,
-  placeholder,
-  fieldDataName,
-  inputDataAttrs,
-}) {
+  id = "",
+  name = "",
+  label = "",
+  placeholder = "",
+  fieldDataName = "",
+  inputDataAttrs = {},
+} = {}) {
   return renderPasswordField({
     id,
     name,
@@ -182,6 +191,7 @@ function renderResetPasswordField({
     autocomplete: "new-password",
     required: true,
     showToggle: true,
+    showCapsIndicator: true,
 
     fieldClass: "auth-field password-reset-field",
     wrapperClass: "password-wrapper password-reset-password-wrapper",
@@ -205,16 +215,18 @@ function renderResetPasswordField({
 }
 
 function renderConfirmFields({ token = "" } = {}) {
-  const safeToken = normalizeToken(token);
+  const hasToken = Boolean(normalizeToken(token));
 
   return `
     <input
       type="hidden"
-      name="token"
-      value="${escapeAttr(safeToken)}"
+      name="${escapeAttr(TOKEN_PARAM)}"
+      value=""
       data-password-reset-token="true"
       data-reset-token="true"
-    />
+      data-token-param="${escapeAttr(TOKEN_PARAM)}"
+      data-token-present="${hasToken ? "true" : "false"}"
+    >
 
     ${renderResetPasswordField({
       id: "passwordResetPassword",
@@ -284,11 +296,14 @@ export function getResetPasswordTemplate(options = {}) {
       data-password-reset-view="true"
       data-reset-password-view="true"
       data-password-reset-mode="${escapeAttr(mode)}"
+      data-reset-password-mode="${escapeAttr(mode)}"
       data-i18n-scope="passwordReset"
       data-template-version="${escapeAttr(TEMPLATE_VERSION)}"
+      aria-labelledby="passwordResetTitle"
+      aria-describedby="passwordResetDescription"
     >
-      <main class="auth-shell password-reset-shell">
-        <article class="auth-card password-reset-card" aria-labelledby="passwordResetTitle">
+      <div class="auth-shell password-reset-shell">
+        <article class="auth-card password-reset-card">
           <header class="auth-header password-reset-header">
             <img
               class="password-reset-logo"
@@ -300,7 +315,7 @@ export function getResetPasswordTemplate(options = {}) {
               decoding="async"
               draggable="false"
               aria-hidden="true"
-            />
+            >
 
             <h1
               class="auth-title password-reset-title"
@@ -325,6 +340,7 @@ export function getResetPasswordTemplate(options = {}) {
             data-password-reset-form="true"
             data-reset-password-form="true"
             data-password-reset-flow="${escapeAttr(mode)}"
+            data-reset-password-flow="${escapeAttr(mode)}"
             data-toast-scope="auth.passwordReset"
             aria-describedby="passwordResetDescription passwordResetMessage"
             autocomplete="on"
@@ -349,10 +365,9 @@ export function getResetPasswordTemplate(options = {}) {
               type="submit"
               data-password-reset-submit="true"
               data-reset-password-submit="true"
+              data-i18n="passwordReset.submitLabel"
             >
-              <span data-i18n="passwordReset.submitLabel">
-                ${escapeHtml(submitLabel)}
-              </span>
+              ${escapeHtml(submitLabel)}
             </button>
 
             <p class="password-reset-back">
@@ -360,6 +375,7 @@ export function getResetPasswordTemplate(options = {}) {
                 class="auth-link password-reset-back-link"
                 href="${escapeAttr(backHref)}"
                 data-spa
+                data-route="${escapeAttr(backHref)}"
                 data-password-reset-back="true"
                 data-reset-password-back="true"
                 data-i18n="passwordReset.backLabel"
@@ -369,7 +385,7 @@ export function getResetPasswordTemplate(options = {}) {
             </p>
           </form>
         </article>
-      </main>
+      </div>
     </section>
   `;
 }

@@ -7,6 +7,7 @@
    - Auth real delegada en session.js.
    - Autenticado = token usable + user usable.
    - Roles únicos: admin / user.
+   - Entender /@slug como Home canónica /.
    - Sin fetch.
    - Sin refresh.
    - Sin restore.
@@ -15,13 +16,14 @@
    - Sin navegación.
    - Sin AppCore propio.
    - Sin rutas inventadas.
+   - Sin alias /home.
    - Sin /403.
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
 import * as Session from "./session.js";
 
-export const GUARDS_VERSION = "minimal-1";
+export const GUARDS_VERSION = "auth.guards.slug.v1";
 
 const LOGIN_PATH = "/login";
 const HOME_PATH = "/";
@@ -34,6 +36,8 @@ const PUBLIC_ROUTES = Object.freeze([
 ]);
 
 const VALID_ROLES = Object.freeze(["admin", "user"]);
+
+const USER_HOME_RE = /^\/@[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;
 
 /* =========================================================
    BASICS
@@ -68,8 +72,18 @@ function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function normalizePath(path = "/") {
-  let value = text(path, "/");
+function redact(value = "") {
+  return text(value, "")
+    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
+}
+
+/* =========================================================
+   PATHS
+========================================================= */
+
+function normalizePublicPath(path = HOME_PATH) {
+  let value = text(path, HOME_PATH);
 
   if (value.startsWith("#/")) value = value.slice(1);
   if (value.startsWith("#!")) value = value.replace(/^#!\/?/, "/");
@@ -77,15 +91,30 @@ function normalizePath(path = "/") {
   value = value.split("?")[0].split("#")[0];
 
   if (!value.startsWith("/")) value = `/${value}`;
-  if (value.length > 1) value = value.replace(/\/+$/g, "") || "/";
 
-  return value || "/";
+  value = value.replace(/\/{2,}/g, "/");
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || HOME_PATH;
+  }
+
+  return value || HOME_PATH;
+}
+
+export function isUserHomePath(path = HOME_PATH) {
+  return USER_HOME_RE.test(normalizePublicPath(path));
+}
+
+export function canonicalAuthPath(path = HOME_PATH) {
+  const normalized = normalizePublicPath(path);
+
+  return isUserHomePath(normalized) ? HOME_PATH : normalized;
 }
 
 function currentPath() {
   if (!isBrowser()) return HOME_PATH;
 
-  return normalizePath(
+  return normalizePublicPath(
     `${window.location.pathname || HOME_PATH}${window.location.search || ""}${window.location.hash || ""}`
   );
 }
@@ -98,12 +127,6 @@ function normalizeRequiredRoles(values = []) {
       .map(cleanRole)
       .filter(validRole)
   );
-}
-
-function redact(value = "") {
-  return text(value, "")
-    .replace(/([?&#]token=)([^&#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***");
 }
 
 /* =========================================================
@@ -137,6 +160,24 @@ export function getCurrentUser() {
     return isAuthenticated() ? Session.getCurrentUser?.() || null : null;
   } catch {
     return null;
+  }
+}
+
+export function getCurrentUserSlug() {
+  try {
+    return isAuthenticated() ? Session.getCurrentUserSlug?.() || null : null;
+  } catch {
+    return null;
+  }
+}
+
+export function getCurrentUserHomePath() {
+  try {
+    return isAuthenticated()
+      ? Session.getCurrentUserHomePath?.() || HOME_PATH
+      : HOME_PATH;
+  } catch {
+    return HOME_PATH;
   }
 }
 
@@ -218,23 +259,23 @@ export function getAuthHeader() {
 ========================================================= */
 
 export function isPublicTechnicalPath(path = currentPath()) {
-  return PUBLIC_ROUTES.includes(normalizePath(path));
+  return PUBLIC_ROUTES.includes(canonicalAuthPath(path));
 }
 
 export function isAuthRoute(path = currentPath()) {
-  return normalizePath(path) === LOGIN_PATH;
+  return canonicalAuthPath(path) === LOGIN_PATH;
 }
 
 export function isPasswordRequestRoute(path = currentPath()) {
-  return normalizePath(path) === "/password-request";
+  return canonicalAuthPath(path) === "/password-request";
 }
 
 export function isPasswordResetRoute(path = currentPath()) {
-  return normalizePath(path) === "/password-reset";
+  return canonicalAuthPath(path) === "/password-reset";
 }
 
 export function isActivationRoute(path = currentPath()) {
-  return normalizePath(path) === "/activate-account";
+  return canonicalAuthPath(path) === "/activate-account";
 }
 
 /* =========================================================
@@ -242,7 +283,7 @@ export function isActivationRoute(path = currentPath()) {
 ========================================================= */
 
 export function guardAuthenticated(options = {}) {
-  const path = normalizePath(options.path || currentPath());
+  const path = canonicalAuthPath(options.path || currentPath());
 
   if (options.allowPublicTechnicalRoutes !== false && isPublicTechnicalPath(path)) {
     return true;
@@ -252,17 +293,17 @@ export function guardAuthenticated(options = {}) {
 }
 
 export function guardGuest(options = {}) {
-  const path = normalizePath(options.path || currentPath());
+  const path = canonicalAuthPath(options.path || currentPath());
 
-  if (options.allowPublicTechnicalRoutes !== false && !isAuthRoute(path)) {
-    return true;
+  if (options.allowPublicTechnicalRoutes !== false && isPublicTechnicalPath(path)) {
+    return !isAuthenticated();
   }
 
   return !isAuthenticated();
 }
 
 export function guardRole(roles = [], options = {}) {
-  const path = normalizePath(options.path || currentPath());
+  const path = canonicalAuthPath(options.path || currentPath());
 
   if (options.allowPublicTechnicalRoutes !== false && isPublicTechnicalPath(path)) {
     return true;
@@ -292,7 +333,8 @@ export function guardManager() {
 }
 
 export function canAccessRoute(route = {}) {
-  const path = normalizePath(route.path || route.publicPath || currentPath());
+  const rawPath = route.path || route.publicPath || route.canonicalPath || currentPath();
+  const path = canonicalAuthPath(rawPath);
 
   if (route.allowPublicTechnicalRoutes !== false && isPublicTechnicalPath(path)) {
     return true;
@@ -329,7 +371,8 @@ function publicUser(user = null) {
   return {
     id: user.id || user.userId || null,
     userId: user.userId || user.id || null,
-    username: user.username || user.slug || null,
+    username: user.username || null,
+    slug: getCurrentUserSlug(),
     displayName: user.displayName || user.name || user.username || null,
     role: user.role || user.rol || null,
   };
@@ -348,8 +391,17 @@ export function buildGuardErrorPayload(error = null) {
   return {
     message: redact(extractMessage(error)),
     name: error?.name || "Error",
-    status: error?.status || error?.statusCode || error?.response?.status || error?.data?.status || 0,
-    code: error?.code || error?.data?.code || error?.response?.data?.code || null,
+    status:
+      error?.status ||
+      error?.statusCode ||
+      error?.response?.status ||
+      error?.data?.status ||
+      0,
+    code:
+      error?.code ||
+      error?.data?.code ||
+      error?.response?.data?.code ||
+      null,
   };
 }
 
@@ -373,7 +425,12 @@ export function getAuthGuardsSnapshot() {
 
     user: publicUser(user),
 
+    userSlug: getCurrentUserSlug(),
+    homePath: getCurrentUserHomePath(),
+
     path: redact(path),
+    canonicalPath: canonicalAuthPath(path),
+    isUserHomePath: isUserHomePath(path),
     publicTechnical: isPublicTechnicalPath(path),
 
     loginPath: LOGIN_PATH,
@@ -393,6 +450,9 @@ export default {
   isAuthenticated,
   getCurrentUser,
 
+  getCurrentUserSlug,
+  getCurrentUserHomePath,
+
   getCurrentRole,
   getCurrentRoles,
 
@@ -404,6 +464,10 @@ export default {
   hasRole,
   requireRole,
   getAuthHeader,
+
+  normalizePublicPath,
+  canonicalAuthPath,
+  isUserHomePath,
 
   isPublicTechnicalPath,
   isAuthRoute,

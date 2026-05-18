@@ -7,12 +7,13 @@
    - Auth estricta: token usable + user usable.
    - Token sin user: hasToken true, authenticated false.
    - User sin token: authenticated false.
-   - User inválido si disabled/deleted.
+   - User inválido si disabled/deleted/archived/active=false.
    - Roles únicos: admin / user.
    - Leer token persistido para soportar reload.
    - Persistir token/session auxiliar al aplicar sesión.
+   - No fabricar user desde storage.
    - Conservar slug real del usuario si existe.
-   - Exponer homePath: /@slug si el usuario trae slug real.
+   - Exponer homePath: /@{user.slug} si el usuario trae slug real.
    - Sin fetch.
    - Sin login HTTP.
    - Sin refresh HTTP.
@@ -32,7 +33,7 @@ import {
   persistAuthStorage,
 } from "./storage.js";
 
-export const AUTH_SESSION_VERSION = "auth.session.storage.v1";
+export const AUTH_SESSION_VERSION = "auth.session.v2";
 
 const SOURCE = "auth.session";
 
@@ -65,6 +66,15 @@ function nowIso() {
 }
 
 function cleanRole(value = "") {
+  if (Array.isArray(value)) {
+    const roles = value.map(cleanRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "user";
+  }
+
   return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
 }
 
@@ -91,6 +101,15 @@ function tokenOk(value = "") {
 
 function cleanToken(value = "") {
   return tokenOk(value) ? stripBearer(value) : "";
+}
+
+function ensureState() {
+  try {
+    AppCore.state = isObject(AppCore.state) ? AppCore.state : {};
+    return AppCore.state;
+  } catch {
+    return {};
+  }
 }
 
 function readState() {
@@ -126,7 +145,7 @@ function commitState(patch = {}, options = {}) {
   }
 
   try {
-    Object.assign(readState(), cleanPatch);
+    Object.assign(ensureState(), cleanPatch);
   } catch {
     // noop
   }
@@ -156,11 +175,16 @@ function syncUserUI() {
 ========================================================= */
 
 export function normalizeSessionSlug(value = "") {
-  const slug = text(value, "").replace(/^@+/, "").trim();
+  const slug = text(value, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .trim()
+    .toLowerCase();
 
   if (!slug) return "";
 
-  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
 }
 
 export function extractSessionUserSlug(user = null) {
@@ -200,15 +224,19 @@ function removeSensitiveUserFields(user = {}) {
     "passwordHash",
     "hash",
     "salt",
+
     "token",
     "accessToken",
     "access_token",
     "refreshToken",
     "refresh_token",
+
     "resetToken",
     "activationToken",
+
     "otp",
     "otpCode",
+    "mfa",
     "twofa_secret",
     "twofaSecret",
     "totpSecret",
@@ -227,13 +255,28 @@ function removeSensitiveUserFields(user = {}) {
 function userDisabled(user = null) {
   if (!isObject(user)) return true;
 
-  const status = String(user.status || user.estado || "").toLowerCase();
+  const status = text(user.status || user.estado, "").toLowerCase();
 
-  return (
+  return Boolean(
     user.disabled === true ||
-    user.deleted === true ||
-    status === "disabled" ||
-    status === "deleted"
+      user.deleted === true ||
+      user.archived === true ||
+      user.active === false ||
+      status === "disabled" ||
+      status === "deleted" ||
+      status === "archived"
+  );
+}
+
+function hasUserIdentity(user = null) {
+  if (!isObject(user)) return false;
+
+  return Boolean(
+    text(user.id, "") ||
+      text(user.userId, "") ||
+      text(user.username, "") ||
+      text(user.slug, "") ||
+      text(user.lookup?.slug, "")
   );
 }
 
@@ -243,8 +286,9 @@ export function normalizeUser(user = null) {
 
   const safeUser = removeSensitiveUserFields(user);
 
+  if (!hasUserIdentity(safeUser)) return null;
+
   const id = text(safeUser.userId || safeUser.id, "");
-  const email = text(safeUser.email, "");
   const slug = extractSessionUserSlug(safeUser);
 
   const username = text(
@@ -252,25 +296,27 @@ export function normalizeUser(user = null) {
       safeUser.userName ||
       safeUser.user_name ||
       slug ||
-      email ||
       id,
     ""
   );
 
-  if (!id && !email && !username && !slug) return null;
+  const profile = isObject(safeUser.profile) ? safeUser.profile : {};
 
   const displayName = text(
     safeUser.displayName ||
       safeUser.fullName ||
       safeUser.name ||
       safeUser.nombre ||
+      profile.displayName ||
+      profile.fullName ||
+      profile.name ||
+      profile.nombre ||
       username ||
-      email ||
       id,
     "Usuario"
   );
 
-  const role = cleanRole(safeUser.role || safeUser.rol);
+  const role = cleanRole(safeUser.role || safeUser.rol || safeUser.roles);
 
   return {
     ...safeUser,
@@ -290,7 +336,7 @@ export function normalizeUser(user = null) {
     fullName: safeUser.fullName || displayName,
     displayName,
 
-    email: email || null,
+    email: safeUser.email || null,
 
     role,
     rol: role,
@@ -428,14 +474,16 @@ function storedSession() {
 
     const sessionId = text(session.sessionId || session.session_id || session.id, "");
     const userId = text(session.userId || session.user_id || session.sessionUserId || session.session_user_id, "");
+    const expiresAt = session.expiresAt || session.expires_at || null;
 
-    if (!sessionId && !userId) return null;
+    if (!sessionId && !userId && !expiresAt) return null;
 
     return {
       sessionId: sessionId || null,
       id: sessionId || null,
       userId: userId || null,
       sessionUserId: userId || null,
+      expiresAt,
     };
   } catch {
     return null;
@@ -498,7 +546,6 @@ function bestStateSession(user = bestStateUser()) {
     null;
 
   if (!session) return null;
-
   if (!user) return session;
 
   return sameSessionUser(session, user) ? session : null;
@@ -514,7 +561,7 @@ function buildStatePatch({ token = "", user = null, session = null } = {}) {
 
   const hasToken = Boolean(safeToken);
   const authenticated = Boolean(hasToken && safeUser);
-  const role = authenticated ? cleanRole(safeUser.role || safeUser.rol) : null;
+  const role = authenticated ? cleanRole(safeUser.role || safeUser.rol || safeUser.roles) : null;
   const slug = authenticated ? extractSessionUserSlug(safeUser) : "";
   const homePath = authenticated
     ? buildSessionUserHomePath(safeUser)
@@ -571,7 +618,7 @@ function buildStatePatch({ token = "", user = null, session = null } = {}) {
   };
 }
 
-function persistPatch({ token = "", user = null, session = null } = {}) {
+function persistPatch({ token = "", session = null } = {}) {
   const safeToken = cleanToken(token);
 
   if (!safeToken) return false;
@@ -582,7 +629,6 @@ function persistPatch({ token = "", user = null, session = null } = {}) {
         token: safeToken,
         accessToken: safeToken,
         access_token: safeToken,
-        user: normalizeUser(user),
         session,
       },
       {
@@ -607,7 +653,7 @@ function currentSnapshot(extra = {}) {
 
   const hasToken = Boolean(token);
   const authenticated = Boolean(hasToken && user);
-  const role = authenticated ? cleanRole(user.role || user.rol) : null;
+  const role = authenticated ? cleanRole(user.role || user.rol || user.roles) : null;
   const slug = authenticated ? extractSessionUserSlug(user) : "";
   const homePath = authenticated
     ? buildSessionUserHomePath(user)
@@ -641,16 +687,18 @@ function currentSnapshot(extra = {}) {
 }
 
 function publicUser(user = null) {
-  if (!isObject(user)) return null;
+  const normalized = normalizeUser(user);
+
+  if (!normalized) return null;
 
   return {
-    id: user.id || user.userId || null,
-    userId: user.userId || user.id || null,
-    username: user.username || null,
-    slug: extractSessionUserSlug(user) || null,
-    displayName: user.displayName || user.name || user.username || null,
-    role: user.role || user.rol || null,
-    hasAvatar: Boolean(user.avatar || user.avatarUrl || user.picture),
+    id: normalized.id || normalized.userId || null,
+    userId: normalized.userId || normalized.id || null,
+    username: normalized.username || null,
+    slug: extractSessionUserSlug(normalized) || null,
+    displayName: normalized.displayName || normalized.name || normalized.username || null,
+    role: normalized.role || normalized.rol || null,
+    hasAvatar: Boolean(normalized.avatar || normalized.avatarUrl || normalized.picture),
   };
 }
 
@@ -721,13 +769,12 @@ export function applySession(payload = {}, options = {}) {
   });
 
   /*
-    Persistimos sólo token/contexto auxiliar.
-    No autenticamos desde storage; restore usa /me para recuperar user canónico.
+    Persistimos token/contexto auxiliar.
+    No persistimos user como fuente de autenticación.
   */
   if (patch.hasToken) {
     persistPatch({
       token,
-      user,
       session,
     });
   }
@@ -859,7 +906,7 @@ export function getCurrentToken() {
 export function getCurrentRole() {
   const user = getCurrentUser();
 
-  return user ? cleanRole(readState().role || user.role || user.rol) : "";
+  return user ? cleanRole(readState().role || user.role || user.rol || user.roles) : "";
 }
 
 export function getCurrentRoles() {
@@ -889,6 +936,8 @@ export function hasRole(...roles) {
   if (!roles.length) return true;
 
   const current = getCurrentRole();
+
+  if (current === "admin") return true;
 
   return roles
     .flat()

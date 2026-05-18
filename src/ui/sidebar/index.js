@@ -11,7 +11,8 @@
    - Usar state.js para estado runtime.
    - Usar actions.js para navegar/logout/open/close.
    - Usar events.js para listener delegado.
-   - Home privada compatible con /@slug.
+   - Home visible: /@{user.slug}.
+   - Home interna/canónica: /.
    - Sin HTML duplicado.
    - Sin helpers DOM duplicados.
    - Sin lógica de usuario duplicada.
@@ -20,7 +21,8 @@
    - Sin HTTP.
    - Sin Toast.
    - Sin Store propio.
-   - Sin bridges globales.
+   - Sin /home.
+   - Sin rutas legacy.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -33,6 +35,7 @@ import {
   SIDEBAR_BRAND_HREF,
   SIDEBAR_BRAND_LABEL,
   SIDEBAR_MODULE_KEY,
+  SIDEBAR_MODULE_NAME,
   SIDEBAR_ROLE_ADMIN,
   SIDEBAR_ROOT_ID,
   USER_HOME_PREFIX,
@@ -43,6 +46,8 @@ import {
   isSidebarHomeRoute,
   isSidebarPublicRoute,
   normalizeSidebarPath,
+  normalizeSidebarSlug,
+  sidebarHomeLookupPath,
 } from "./constants.js";
 
 import {
@@ -89,7 +94,7 @@ import {
   unbindSidebarEvents,
 } from "./events.js";
 
-export const SIDEBAR_UI_VERSION = "sidebar.ui.v2";
+export const SIDEBAR_UI_VERSION = "sidebar.ui.v3";
 
 /* =========================================================
    BASICS
@@ -97,6 +102,10 @@ export const SIDEBAR_UI_VERSION = "sidebar.ui.v2";
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFunction(value) {
+  return typeof value === "function";
 }
 
 function firstText(...values) {
@@ -113,19 +122,8 @@ function firstText(...values) {
    HOME / SLUG
 ========================================================= */
 
-function cleanUserSlug(value = "") {
-  const slug = firstText(value)
-    .replace(/^\/+/, "")
-    .replace(/^@+/, "")
-    .split(/[/?#]/)[0]
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
-
-  return slug;
-}
-
 function userHomeHref(context = {}, fallback = SIDEBAR_BRAND_HREF) {
-  const slug = cleanUserSlug(context.user?.slug);
+  const slug = normalizeSidebarSlug(context.user?.slug || "");
 
   if (slug) {
     return `${USER_HOME_PREFIX}${slug}`;
@@ -134,45 +132,53 @@ function userHomeHref(context = {}, fallback = SIDEBAR_BRAND_HREF) {
   return normalizeSidebarPath(fallback || HOME_ROUTE);
 }
 
-function routeHref(path = "/", context = {}) {
-  const routePath = canonicalSidebarPath(path);
+function routeHref(path = HOME_ROUTE, context = {}) {
+  const lookupPath = sidebarHomeLookupPath(path);
 
-  if (isSidebarHomeRoute(routePath)) {
+  if (lookupPath === HOME_ROUTE) {
     return userHomeHref(context, HOME_ROUTE);
   }
 
-  return normalizeSidebarPath(routePath);
+  return normalizeSidebarPath(lookupPath);
 }
 
 /* =========================================================
    ROUTE / SESSION CONTEXT
 ========================================================= */
 
-function currentPath() {
+function browserPath() {
+  if (!isBrowser()) return HOME_ROUTE;
+
   try {
-    const routeState = AppCore?.state?.route;
-
-    const routerPath =
-      Router?.getCurrentCanonicalPath?.() ||
-      Router?.getCurrentPath?.() ||
-      (typeof Router?.currentPath === "function"
-        ? Router.currentPath()
-        : Router?.currentPath);
-
-    const corePath =
-      AppCore?.state?.canonicalPath ||
-      (typeof routeState === "string" ? routeState : routeState?.path);
-
-    const path =
-      routerPath ||
-      corePath ||
-      (isBrowser() ? window.location.pathname : "/");
-
-    return canonicalSidebarPath(path || "/");
+    return `${window.location.pathname || HOME_ROUTE}${window.location.search || ""}${window.location.hash || ""}`;
   } catch {
-    return isBrowser()
-      ? canonicalSidebarPath(window.location.pathname || "/")
-      : "/";
+    return HOME_ROUTE;
+  }
+}
+
+function currentPublicPath() {
+  try {
+    return normalizeSidebarPath(
+      Router?.getCurrentPublicPath?.() ||
+        Router?.getCurrentPath?.() ||
+        AppCore?.state?.publicPath ||
+        browserPath()
+    );
+  } catch {
+    return normalizeSidebarPath(browserPath());
+  }
+}
+
+function currentCanonicalPath() {
+  try {
+    return sidebarHomeLookupPath(
+      Router?.getCurrentCanonicalPath?.() ||
+        AppCore?.state?.canonicalPath ||
+        AppCore?.state?.route ||
+        currentPublicPath()
+    );
+  } catch {
+    return HOME_ROUTE;
   }
 }
 
@@ -185,33 +191,20 @@ function getRoutes() {
   }
 }
 
-function getCurrentRoute(path = currentPath()) {
-  const current = canonicalSidebarPath(path || "/");
-  const routes = getRoutes();
+function getCurrentRoute(path = currentCanonicalPath()) {
+  const current = sidebarHomeLookupPath(path);
 
-  const exact = routes.find((route) => {
-    if (!route?.path) return false;
-    return canonicalSidebarPath(route.path) === current;
-  });
-
-  if (exact) return exact;
-
-  if (isSidebarHomeRoute(current)) {
-    return routes.find((route) => {
+  return (
+    getRoutes().find((route) => {
       if (!route?.path) return false;
-
-      const routePath = canonicalSidebarPath(route.path);
-
-      return routePath === HOME_ROUTE || isSidebarHomeRoute(routePath);
-    }) || null;
-  }
-
-  return null;
+      return sidebarHomeLookupPath(route.path) === current;
+    }) || null
+  );
 }
 
 function isAuthenticated() {
   try {
-    if (typeof Auth?.isAuthenticated === "function") {
+    if (isFunction(Auth?.isAuthenticated)) {
       return Auth.isAuthenticated() === true;
     }
 
@@ -222,7 +215,9 @@ function isAuthenticated() {
 }
 
 function getContext() {
-  const path = currentPath();
+  const publicPath = currentPublicPath();
+  const canonicalPath = currentCanonicalPath();
+
   const user = getSidebarUser({
     AppCore,
     Auth,
@@ -236,12 +231,16 @@ function getContext() {
     Auth,
     Router,
 
-    path,
-    currentPath: path,
-    route: getCurrentRoute(path),
+    publicPath,
+    canonicalPath,
+    path: publicPath,
+    currentPath: publicPath,
+
+    route: getCurrentRoute(canonicalPath),
 
     user,
     role: user?.role || "",
+
     hasUser,
     hasSession,
     sessionValid: hasSession,
@@ -260,7 +259,7 @@ function routeRoles(route = null) {
     route?.meta?.role,
     route?.meta?.roles,
   ]
-    .flat()
+    .flat(Infinity)
     .filter(Boolean)
     .map((role) => String(role).toLowerCase());
 }
@@ -278,12 +277,14 @@ function isAdminRoute(route = null) {
   );
 }
 
-function isPublicRoute(route = null, path = "/") {
+function isPublicRoute(route = null, path = HOME_ROUTE) {
   return Boolean(
     isSidebarPublicRoute(path) ||
       route?.public === true ||
       route?.hideShell === true ||
-      route?.shell === false
+      route?.shell === false ||
+      route?.layout === "auth" ||
+      route?.authScreen === true
   );
 }
 
@@ -297,12 +298,12 @@ function isHiddenRoute(route = null) {
   );
 }
 
-function isActivePath(routePath = "/", current = currentPath()) {
-  const path = canonicalSidebarPath(routePath || "/");
-  const active = canonicalSidebarPath(current || "/");
+function isActivePath(routePath = HOME_ROUTE, current = currentPublicPath()) {
+  const path = sidebarHomeLookupPath(routePath);
+  const active = sidebarHomeLookupPath(current);
 
-  if (isSidebarHomeRoute(path)) {
-    return isSidebarHomeRoute(active);
+  if (path === HOME_ROUTE) {
+    return active === HOME_ROUTE || isSidebarHomeRoute(current);
   }
 
   return active === path || active.startsWith(`${path}/`);
@@ -311,13 +312,17 @@ function isActivePath(routePath = "/", current = currentPath()) {
 function toSidebarItem(route = null, index = 0, context = getContext()) {
   if (!isObject(route) || !route.path) return null;
 
-  const path = canonicalSidebarPath(route.path);
+  const path = sidebarHomeLookupPath(route.path);
 
-  if (isPublicRoute(route, path) || isHiddenRoute(route)) return null;
+  if (isPublicRoute(route, path) || isHiddenRoute(route)) {
+    return null;
+  }
 
   const adminOnly = isAdminRoute(route);
 
-  if (adminOnly && context.user?.isAdmin !== true) return null;
+  if (adminOnly && context.user?.isAdmin !== true) {
+    return null;
+  }
 
   const explicitOrder =
     route.sidebarOrder ??
@@ -347,12 +352,16 @@ function toSidebarItem(route = null, index = 0, context = getContext()) {
   const href = routeHref(path, context);
 
   return {
+    key: firstText(route.sidebarKey, route.viewKey, route.name, path),
     order: getSidebarRouteOrder(path, explicitOrder),
+
     href,
     label: getSidebarRouteLabel(path, explicitLabel),
     icon: getSidebarRouteIcon(path, explicitIcon),
-    active: isActivePath(path, context.path),
+
+    active: isActivePath(path, context.publicPath),
     adminOnly,
+
     requiredRole: adminOnly ? SIDEBAR_ROLE_ADMIN : "",
     requiredRoles: adminOnly ? [SIDEBAR_ROLE_ADMIN] : [],
   };
@@ -365,14 +374,16 @@ function sidebarItems(context = getContext()) {
     .map((route, index) => toSidebarItem(route, index, context))
     .filter(Boolean)
     .filter((item) => {
-      const path = canonicalSidebarPath(item.href);
+      const lookupPath = sidebarHomeLookupPath(item.href);
 
-      if (seen.has(path)) return false;
+      if (seen.has(lookupPath)) return false;
 
-      seen.add(path);
+      seen.add(lookupPath);
       return true;
     })
-    .sort((a, b) => a.order - b.order)
+    .sort((left, right) => {
+      return left.order - right.order || left.href.localeCompare(right.href);
+    })
     .map(({ order, ...item }) => item);
 }
 
@@ -386,6 +397,7 @@ function registerModule() {
     AppCore.ui.sidebar = api;
 
     AppCore.modules?.register?.(SIDEBAR_MODULE_KEY, api);
+    AppCore.modules?.register?.(SIDEBAR_MODULE_NAME, api);
 
     return true;
   } catch {
@@ -477,7 +489,7 @@ function sync() {
    ACTION WRAPPERS
 ========================================================= */
 
-async function navigateTo(path = "/", options = {}) {
+async function navigateTo(path = HOME_ROUTE, options = {}) {
   const ok = await navigateFromSidebar({
     AppCore,
     Auth,
@@ -622,15 +634,15 @@ function getSnapshot() {
     collapsed: state.collapsed,
     logoutInFlight: getSidebarLogoutInFlight(),
 
-    route: context.path,
+    publicPath: context.publicPath,
+    canonicalPath: context.canonicalPath,
     homeHref: userHomeHref(context, SIDEBAR_BRAND_HREF),
+
     hasSession: context.hasSession,
     isAdmin: context.user?.isAdmin === true,
 
     user: context.user?.hasUser
       ? {
-          id: context.user.id,
-          userId: context.user.userId,
           slug: context.user.slug || null,
           username: context.user.username || null,
           displayName: context.user.displayName,
@@ -645,8 +657,36 @@ function getSnapshot() {
       active: item.active,
       adminOnly: item.adminOnly === true,
     })),
+
+    policy: {
+      controllerOnly: true,
+
+      usesRouterRoutes: true,
+      usesTemplate: true,
+      usesUserViewModel: true,
+      usesVisibility: true,
+      usesRuntimeState: true,
+      usesActions: true,
+      usesDelegatedEvents: true,
+
+      userSlugHome: true,
+      noHomeRoute: true,
+
+      noHtmlDuplicate: true,
+      noDomHelpersDuplicate: true,
+      noUserLogicDuplicate: true,
+      noNavigationDuplicate: true,
+
+      noDropdown: true,
+      noHttp: true,
+      noToast: true,
+      noStoreOwn: true,
+      noGlobalBridge: true,
+    },
   };
 }
+
+const getDebugSnapshot = getSnapshot;
 
 /* =========================================================
    API
@@ -678,6 +718,7 @@ const api = {
 
   getSnapshot,
   getState: getSnapshot,
+  getDebugSnapshot,
 
   get initialized() {
     return getSidebarState().initialized;

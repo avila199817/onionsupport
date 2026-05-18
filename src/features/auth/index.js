@@ -7,7 +7,7 @@
    - Delegar login/restore/logout/session/guards.
    - HTTP delegado en CoreHttp/AppCore.
    - Normalizar usuario autenticado.
-   - Exponer home privada por slug: /@slug.
+   - Exponer home privada por slug: /@{user.slug}.
    - Sin Router.
    - Sin Toast.
    - Sin fetch propio.
@@ -30,7 +30,7 @@ import * as GuardsApi from "./guards.js";
 import * as ActivationApi from "./activation.js";
 import * as PasswordResetApi from "./password-reset.js";
 
-export const AUTH_MODULE_VERSION = "auth.facade.slug.v1";
+export const AUTH_MODULE_VERSION = "auth.facade.v2";
 
 export const AUTH_ENDPOINTS = Object.freeze({
   login: "/api/auth/login",
@@ -84,6 +84,15 @@ function text(value = "", fallback = "") {
 }
 
 function cleanRole(value = "") {
+  if (Array.isArray(value)) {
+    const roles = value.map(cleanRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+
+    return "user";
+  }
+
   return String(value || "").toLowerCase() === "admin" ? "admin" : "user";
 }
 
@@ -150,11 +159,17 @@ function emit(eventName = "", payload = {}) {
 ========================================================= */
 
 function normalizeSlug(value = "") {
-  const slug = text(value, "").replace(/^@+/, "").trim();
+  const slug = text(value, "")
+    .replace(/^\/+/, "")
+    .replace(/^@+/, "")
+    .split(/[/?#]/)[0]
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
 
   if (!slug) return "";
 
-  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(slug) ? slug : "";
+  return /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
 }
 
 function extractUserSlug(user = null) {
@@ -178,9 +193,7 @@ function buildUserHomePath(user = null) {
 }
 
 function getUserSlug() {
-  const user = getUser();
-
-  return extractUserSlug(user);
+  return extractUserSlug(getUser());
 }
 
 function getDefaultHome() {
@@ -192,8 +205,7 @@ function getPostLoginTarget() {
 }
 
 function isUserHomePath(path = "") {
-  const value = normalizePath(path);
-  return /^\/@[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(value);
+  return /^\/@[a-z0-9][a-z0-9._-]{0,95}$/i.test(normalizePath(path));
 }
 
 /* =========================================================
@@ -201,12 +213,18 @@ function isUserHomePath(path = "") {
 ========================================================= */
 
 function userDisabled(user = null) {
-  return (
-    !isObject(user) ||
+  if (!isObject(user)) return true;
+
+  const status = text(user.status || user.estado, "").toLowerCase();
+
+  return Boolean(
     user.disabled === true ||
-    user.deleted === true ||
-    String(user.status || user.estado || "").toLowerCase() === "disabled" ||
-    String(user.status || user.estado || "").toLowerCase() === "deleted"
+      user.deleted === true ||
+      user.archived === true ||
+      user.active === false ||
+      status === "disabled" ||
+      status === "deleted" ||
+      status === "archived"
   );
 }
 
@@ -214,48 +232,54 @@ function userOk(user = null) {
   if (userDisabled(user)) return false;
 
   return Boolean(
-    user.id ||
-      user.userId ||
-      user.username ||
-      user.slug ||
-      user.email
+    text(user.id, "") ||
+      text(user.userId, "") ||
+      text(user.username, "") ||
+      text(user.slug, "") ||
+      text(user.lookup?.slug, "")
   );
 }
 
 function normalizeUser(user = null) {
   if (!userOk(user)) return null;
 
-  const id = user.userId || user.id || null;
+  const id = text(user.userId || user.id, "");
   const slug = extractUserSlug(user);
 
-  const username =
+  const profile = isObject(user.profile) ? user.profile : {};
+
+  const username = text(
     user.username ||
-    user.userName ||
-    user.user_name ||
-    slug ||
-    user.email ||
-    id ||
-    null;
+      user.userName ||
+      user.user_name ||
+      slug ||
+      id,
+    ""
+  );
 
-  const displayName =
+  const displayName = text(
     user.displayName ||
-    user.fullName ||
-    user.name ||
-    user.nombre ||
-    username ||
-    user.email ||
-    id ||
-    "Usuario";
+      user.fullName ||
+      user.name ||
+      user.nombre ||
+      profile.displayName ||
+      profile.fullName ||
+      profile.name ||
+      profile.nombre ||
+      username ||
+      id,
+    "Usuario"
+  );
 
-  const role = cleanRole(user.role || user.rol);
+  const role = cleanRole(user.role || user.rol || user.roles);
 
   return {
     ...user,
 
-    id,
-    userId: user.userId || id,
+    id: id || null,
+    userId: text(user.userId || id, "") || null,
 
-    username,
+    username: username || null,
     slug: slug || null,
 
     name: user.name || displayName,
@@ -280,6 +304,8 @@ function getToken() {
     state().token ||
     state().accessToken ||
     state().access_token ||
+    state().session?.token ||
+    state().session?.accessToken ||
     "";
 
   return tokenOk(value) ? stripBearer(value) : null;
@@ -300,6 +326,8 @@ function getUser() {
     state().currentUser ||
     state().sessionUser ||
     state().authUser ||
+    state().session?.user ||
+    state().auth?.user ||
     null;
 
   return normalizeUser(user);
@@ -307,9 +335,10 @@ function getUser() {
 
 function getRole() {
   const user = getUser();
+
   if (!user) return "";
 
-  return cleanRole(sessionGetCurrentRole?.() || user.role || user.rol);
+  return cleanRole(sessionGetCurrentRole?.() || user.role || user.rol || user.roles);
 }
 
 function getRoles() {
@@ -318,9 +347,11 @@ function getRoles() {
   const fromSession = sessionGetCurrentRoles?.();
 
   if (Array.isArray(fromSession) && fromSession.length) {
-    return fromSession
+    const roles = fromSession
       .map(cleanRole)
       .filter((role) => VALID_ROLES.includes(role));
+
+    return roles.includes("admin") ? ["admin"] : ["user"];
   }
 
   const role = getRole();
@@ -453,6 +484,7 @@ function normalizeAuthPayload(payload = {}) {
   const user = normalizeUser(extractUser(payload) || getUser());
   const slug = extractUserSlug(user);
   const homePath = buildUserHomePath(user);
+  const role = user?.role || null;
 
   return {
     ...payload,
@@ -469,12 +501,118 @@ function normalizeAuthPayload(payload = {}) {
     defaultHome: homePath,
     postLoginTarget: homePath,
 
-    role: user?.role || null,
-    rol: user?.role || null,
-    roles: user?.role ? [user.role] : [],
+    role,
+    rol: role,
+    roles: role ? [role] : [],
 
     authenticated: Boolean(cleanToken && user),
   };
+}
+
+function publicUser(user = null) {
+  const normalized = normalizeUser(user);
+
+  if (!normalized) return null;
+
+  return {
+    id: normalized.id || normalized.userId || null,
+    userId: normalized.userId || normalized.id || null,
+    username: normalized.username || null,
+    slug: normalized.slug || null,
+    displayName: normalized.displayName || null,
+    role: normalized.role || null,
+  };
+}
+
+/* =========================================================
+   STATE
+========================================================= */
+
+function writeAuthState(patch = {}, source = "Auth.state") {
+  try {
+    AppCore?.setState?.(patch, {
+      source,
+      silent: true,
+      emit: false,
+    });
+  } catch {
+    try {
+      Object.assign(state(), patch);
+    } catch {
+      // noop
+    }
+  }
+
+  return patch;
+}
+
+function writeClearedAuthState(source = "Auth.clearSession") {
+  return writeAuthState(
+    {
+      token: null,
+      accessToken: null,
+      access_token: null,
+
+      user: null,
+      currentUser: null,
+      sessionUser: null,
+      authUser: null,
+
+      userSlug: null,
+      homePath: AUTH_HOME.canonical,
+      defaultHome: AUTH_HOME.canonical,
+      postLoginTarget: null,
+
+      authenticated: false,
+      hasToken: false,
+
+      role: null,
+      rol: null,
+      roles: [],
+
+      isAdmin: false,
+      isUser: false,
+    },
+    source
+  );
+}
+
+function writeNormalizedAuthState(normalized = {}, source = "Auth.applySession") {
+  const user = normalizeUser(normalized.user || normalized.currentUser);
+  const token = tokenOk(normalized.token || normalized.accessToken)
+    ? stripBearer(normalized.token || normalized.accessToken)
+    : null;
+
+  const role = user ? cleanRole(user.role || user.rol || user.roles) : "";
+  const slug = extractUserSlug(user);
+  const homePath = user ? buildUserHomePath(user) : AUTH_HOME.canonical;
+
+  return writeAuthState(
+    {
+      token,
+      accessToken: token,
+      access_token: token,
+
+      user,
+      currentUser: user,
+
+      userSlug: slug || null,
+      homePath,
+      defaultHome: homePath,
+      postLoginTarget: user ? homePath : null,
+
+      authenticated: Boolean(token && user),
+      hasToken: Boolean(token),
+
+      role: role || null,
+      rol: role || null,
+      roles: role ? [role] : [],
+
+      isAdmin: role === "admin",
+      isUser: role === "user",
+    },
+    source
+  );
 }
 
 /* =========================================================
@@ -522,84 +660,36 @@ function clearHttpToken() {
   return false;
 }
 
+function patchAuthStateFromCurrentSession() {
+  const user = getUser();
+  const token = getToken();
+
+  if (!token || !user) {
+    writeClearedAuthState("Auth.syncAuthState");
+    return true;
+  }
+
+  writeNormalizedAuthState(
+    {
+      token,
+      user,
+    },
+    "Auth.syncAuthState"
+  );
+
+  return true;
+}
+
 function syncAuthState() {
   try {
     if (isFn(syncAuthStateCore)) {
-      const synced = syncAuthStateCore();
-
-      patchAuthStateFromCurrentSession();
-
-      return synced;
+      syncAuthStateCore();
     }
   } catch {
     // fallback abajo
   }
 
   patchAuthStateFromCurrentSession();
-
-  return true;
-}
-
-function patchAuthStateFromCurrentSession() {
-  const user = getUser();
-  const token = getToken();
-  const role = user ? getRole() : "";
-  const slug = extractUserSlug(user);
-  const homePath = user ? buildUserHomePath(user) : AUTH_HOME.canonical;
-
-  try {
-    AppCore?.setState?.(
-      {
-        token,
-        accessToken: token,
-        access_token: token,
-
-        user,
-        currentUser: user,
-
-        userSlug: slug || null,
-        homePath,
-        defaultHome: homePath,
-
-        authenticated: Boolean(token && user),
-        hasToken: Boolean(token),
-
-        role: role || null,
-        rol: role || null,
-        roles: role ? [role] : [],
-
-        isAdmin: role === "admin",
-        isUser: role === "user",
-      },
-      {
-        source: "Auth.syncAuthState",
-        silent: true,
-        emit: false,
-      }
-    );
-  } catch {
-    try {
-      Object.assign(state(), {
-        token,
-        accessToken: token,
-        access_token: token,
-        user,
-        currentUser: user,
-        userSlug: slug || null,
-        homePath,
-        defaultHome: homePath,
-        authenticated: Boolean(token && user),
-        hasToken: Boolean(token),
-        role: role || null,
-        rol: role || null,
-        roles: role ? [role] : [],
-        isAdmin: role === "admin",
-        isUser: role === "user",
-      });
-    } catch {
-      // noop
-    }
-  }
 
   return true;
 }
@@ -617,18 +707,13 @@ function applySession(payload = {}, options = {}) {
       AppCore.applySession(normalized, {
         source: options.source || "Auth.applySession",
       });
-    } else {
-      AppCore?.setState?.(normalized, {
-        source: options.source || "Auth.applySession",
-        silent: true,
-        emit: false,
-      });
     }
   } catch {
-    // noop
+    // seguimos escribiendo estado propio abajo
   }
 
-  syncHttpToken(normalized.token || getToken(), normalized);
+  syncHttpToken(normalized.token, normalized);
+  writeNormalizedAuthState(normalized, options.source || "Auth.applySession");
   syncAuthState();
 
   const user = getUser();
@@ -659,44 +744,13 @@ function clearSession(options = {}) {
       AppCore.clearSession({
         source: "Auth.clearSession",
       });
-    } else {
-      AppCore?.setState?.(
-        {
-          token: null,
-          accessToken: null,
-          access_token: null,
-
-          user: null,
-          currentUser: null,
-
-          userSlug: null,
-          homePath: AUTH_HOME.canonical,
-          defaultHome: AUTH_HOME.canonical,
-          postLoginTarget: null,
-
-          authenticated: false,
-          hasToken: false,
-
-          role: null,
-          rol: null,
-          roles: [],
-
-          isAdmin: false,
-          isUser: false,
-        },
-        {
-          source: "Auth.clearSession",
-          silent: true,
-          emit: false,
-        }
-      );
     }
   } catch {
     // noop
   }
 
   clearHttpToken();
-  syncAuthState();
+  writeClearedAuthState(options.source || "Auth.clearSession");
 
   return true;
 }
@@ -787,7 +841,7 @@ async function login(credentials = {}, options = {}) {
       if (result.authenticated) {
         emit("auth:login:success", {
           authenticated: true,
-          user: result.user,
+          user: publicUser(result.user),
           role: result.role,
           userSlug: result.userSlug || null,
           homePath: result.homePath,
@@ -883,7 +937,7 @@ async function restoreSession(options = {}) {
       Auth.session.lastError = null;
       Auth.session.lastRestoreAt = Date.now();
 
-      return raw || buildSessionSnapshotSafe();
+      return buildSessionSnapshotSafe();
     } catch (error) {
       Auth.session.lastError = {
         type: "restore",
@@ -891,7 +945,11 @@ async function restoreSession(options = {}) {
         at: new Date().toISOString(),
       };
 
-      throw error;
+      clearSession({
+        source: "Auth.restoreSession.error",
+      });
+
+      return buildSessionSnapshotSafe();
     } finally {
       Auth.session.restoring = false;
       Auth.session.restorePromise = null;
@@ -1142,7 +1200,10 @@ function canAccessRoute(route = {}) {
 
   const roles = Array.isArray(route?.roles) ? route.roles.map(cleanRole) : [];
 
-  return !roles.length || roles.includes(getRole());
+  if (!roles.length) return true;
+  if (getRole() === "admin") return true;
+
+  return roles.includes(getRole());
 }
 
 function buildGuardErrorPayload(error = {}) {
@@ -1255,7 +1316,25 @@ function authApiRequest(method = "GET", path = "", body = undefined, options = {
 
 function buildSessionSnapshotSafe() {
   try {
-    if (isFn(sessionBuildSnapshot)) return sessionBuildSnapshot();
+    if (isFn(sessionBuildSnapshot)) {
+      const snapshot = sessionBuildSnapshot();
+
+      return {
+        ...snapshot,
+        token: null,
+        accessToken: null,
+        refreshToken: null,
+        user: publicUser(getUser()),
+        userSlug: getUserSlug() || null,
+        homePath: getDefaultHome(),
+        defaultHome: getDefaultHome(),
+        role: getRole() || null,
+        roles: getRoles(),
+        authenticated: isAuthenticated(),
+        hasToken: hasValidToken(),
+        hasUser: Boolean(getUser()),
+      };
+    }
   } catch {
     // fallback abajo
   }
@@ -1267,7 +1346,7 @@ function buildSessionSnapshotSafe() {
     authenticated: isAuthenticated(),
     hasToken: hasValidToken(),
     hasUser: Boolean(user),
-    user,
+    user: publicUser(user),
     userSlug: extractUserSlug(user) || null,
     homePath,
     defaultHome: homePath,
@@ -1278,7 +1357,17 @@ function buildSessionSnapshotSafe() {
 
 function getSessionDebugSnapshotSafe() {
   try {
-    if (isFn(sessionDebugSnapshot)) return sessionDebugSnapshot();
+    if (isFn(sessionDebugSnapshot)) {
+      const snapshot = sessionDebugSnapshot();
+
+      return {
+        ...snapshot,
+        token: null,
+        accessToken: null,
+        refreshToken: null,
+        user: publicUser(getUser()),
+      };
+    }
   } catch {
     // fallback abajo
   }
@@ -1298,16 +1387,7 @@ function getAuthModuleSnapshot() {
     hasToken: hasValidToken(),
     hasUser: Boolean(user),
 
-    user: user
-      ? {
-          id: user.id || user.userId || null,
-          userId: user.userId || user.id || null,
-          username: user.username || null,
-          slug: slug || null,
-          displayName: user.displayName || user.name || user.username || null,
-          role: user.role || user.rol || null,
-        }
-      : null,
+    user: publicUser(user),
 
     userSlug: slug || null,
     homePath,

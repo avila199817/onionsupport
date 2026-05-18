@@ -6,6 +6,7 @@
    - Acciones reales del sidebar.
    - Abrir / cerrar / alternar usando state.js.
    - Navegar usando Router si existe.
+   - Cerrar sidebar tras navegación correcta.
    - Logout usando Auth si existe.
    - Redirigir a /login tras logout.
    - Sin DOM manual.
@@ -14,6 +15,7 @@
    - Sin dropdown.
    - Sin mobile magic.
    - Sin route aliases.
+   - Sin /home.
    - Sin 2FA/MFA/OTP.
    - Sin limpieza masiva.
 ========================================================= */
@@ -35,7 +37,7 @@ import {
   toggleSidebar as toggleRuntimeSidebar,
 } from "./state.js";
 
-export const SIDEBAR_ACTIONS_VERSION = "sidebar.actions.v1";
+export const SIDEBAR_ACTIONS_VERSION = "sidebar.actions.v2";
 
 /* =========================================================
    BASICS
@@ -58,13 +60,21 @@ function text(value = "", fallback = "") {
   return output || fallback;
 }
 
-/* =========================================================
-   CONTEXT
-========================================================= */
-
 function options(context = {}) {
   return isObject(context) ? context : {};
 }
+
+function safeModuleGet(AppCore = null, name = "") {
+  try {
+    return AppCore?.modules?.get?.(name) || null;
+  } catch {
+    return null;
+  }
+}
+
+/* =========================================================
+   CONTEXT
+========================================================= */
 
 function resolveRouter(context = {}) {
   const ctx = options(context);
@@ -74,6 +84,8 @@ function resolveRouter(context = {}) {
     ctx.Router ||
     AppCore?.Router ||
     AppCore?.router ||
+    safeModuleGet(AppCore, "Router") ||
+    safeModuleGet(AppCore, "router") ||
     null
   );
 }
@@ -86,6 +98,8 @@ function resolveAuth(context = {}) {
     ctx.Auth ||
     AppCore?.Auth ||
     AppCore?.auth ||
+    safeModuleGet(AppCore, "Auth") ||
+    safeModuleGet(AppCore, "auth") ||
     null
   );
 }
@@ -242,15 +256,23 @@ export async function navigateFromSidebar(context = {}) {
     source: actionSource(ctx),
   };
 
+  let ok = false;
+
   try {
-    if (await navigateWithRouter(target, payload)) {
-      return true;
-    }
+    ok = await navigateWithRouter(target, payload);
   } catch {
-    // fallback navegador abajo
+    ok = false;
   }
 
-  return navigateWithBrowser(target, payload);
+  if (!ok) {
+    ok = navigateWithBrowser(target, payload);
+  }
+
+  if (ok) {
+    closeSidebar(payload);
+  }
+
+  return ok;
 }
 
 export async function navigateToLogin(context = {}) {
@@ -268,7 +290,8 @@ export async function navigateToLogin(context = {}) {
 ========================================================= */
 
 async function clearAuthSession(context = {}) {
-  const auth = resolveAuth(context);
+  const ctx = options(context);
+  const auth = resolveAuth(ctx);
 
   try {
     if (isFunction(auth?.logout)) {
@@ -298,8 +321,20 @@ async function clearAuthSession(context = {}) {
   }
 
   try {
-    if (isFunction(context.AppCore?.clearSession)) {
-      await context.AppCore.clearSession({
+    if (isFunction(auth?.clearSessionLocal)) {
+      await auth.clearSessionLocal({
+        source: SIDEBAR_SOURCE,
+      });
+
+      return true;
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  try {
+    if (isFunction(ctx.AppCore?.clearSession)) {
+      await ctx.AppCore.clearSession({
         source: SIDEBAR_SOURCE,
       });
 
@@ -337,11 +372,12 @@ export async function handleLogout(context = {}) {
       const navigationOk = await navigateToLogin(ctx);
 
       return {
-        ok: navigationOk,
+        ok: navigationOk === true,
         authCleared,
         navigationOk,
       };
     } finally {
+      closeSidebar(ctx);
       endSidebarLogout(AppCore);
       logoutPromise = null;
     }
@@ -357,9 +393,22 @@ export async function handleLogout(context = {}) {
 export function getSidebarActionsSnapshot() {
   return {
     version: SIDEBAR_ACTIONS_VERSION,
+
     open: getSidebarOpen(),
     logoutInFlight: getSidebarLogoutInFlight(),
+
     loginRoute: LOGIN_ROUTE,
+
+    policy: {
+      ownEvents: false,
+      ownStorage: false,
+      ownDropdown: false,
+      ownMobileMagic: false,
+      noRouteAliases: true,
+      noHomeRoute: true,
+      no2fa: true,
+      logoutRedirectsToLogin: true,
+    },
   };
 }
 

@@ -2,120 +2,62 @@
    Onion SPA - Login DOM
    Archivo: src/views/login/login.dom.js
 
-   LOGIN DOM · SIMPLE
-   - refs del formulario
-   - errores y loading sin innerHTML
-   - password-field compartido opcional
-   - password no se trimea al leer
-   - bindings idempotentes
-   - sin Auth, HTTP, Router, Store ni Toast
+   Responsabilidad:
+   - Obtener refs del login.
+   - Leer estado del formulario.
+   - Mostrar/limpiar error global.
+   - Estado loading mínimo.
+   - Binding submit idempotente.
+   - Delegar password-field al componente compartido.
+   - Sin Auth, HTTP, Router, Store ni Toast.
+   - Sin duplicar lógica del password-field.
 ========================================================= */
 
-import {
-  bindPasswordFieldsInScope,
-} from "../../shared/password-field/index.js";
+import { bindPasswordFieldsInScope } from "../../shared/password-field/index.js";
 
-export const LOGIN_DOM_VERSION = "21.0.0-simple";
+export const LOGIN_DOM_VERSION = "minimal-1";
 
-const SOURCE = "login.dom";
-
-const DEFAULT_SUBMIT_LABEL = "Entrar al panel";
+const DEFAULT_SUBMIT_LABEL = "Entrar";
 const DEFAULT_LOADING_LABEL = "Accediendo...";
-const DEFAULT_SHOW_PASSWORD_LABEL = "Mostrar contraseña";
-const DEFAULT_HIDE_PASSWORD_LABEL = "Ocultar contraseña";
 
-const DISABLED_MEMORY_KEY = "loginPrevDisabled";
-const TABINDEX_MEMORY_KEY = "loginPrevTabIndex";
+const PASSWORD_BINDINGS = new WeakMap();
+const SUBMIT_BINDINGS = new WeakMap();
 
 const SELECTORS = Object.freeze({
-  root: [".login-view", "[data-login-view]", "#loginView"],
+  root: "[data-login-view], #loginView, .login-view",
+  form: "[data-login-form], #loginForm, form[data-auth-form='login']",
 
-  form: ["#loginForm", "[data-login-form]", "form[data-auth-form='login']", "form"],
+  identifier:
+    "[data-login-identifier], #loginIdentifier, [name='identifier'], [name='email'], [name='username'], input[autocomplete='username']",
 
-  identifier: [
-    "#loginIdentifier",
-    "#loginEmail",
-    "[name='identifier']",
-    "[name='email']",
-    "[name='username']",
-    "[name='user']",
-    "[name='login']",
-    "[data-login-identifier]",
-    "input[type='email']",
-    "input[autocomplete='username']",
-  ],
+  password:
+    "[data-login-password], [data-password-input], #loginPassword, [name='password'], input[autocomplete='current-password']",
 
-  password: [
-    "#loginPassword",
-    "[name='password']",
-    "[data-login-password]",
-    "[data-password-input]",
-    "input[type='password']",
-    "input[autocomplete='current-password']",
-  ],
+  remember: "[data-login-remember], #loginRemember, [name='remember']",
 
-  remember: [
-    "#loginRemember",
-    "[name='remember']",
-    "[name='rememberMe']",
-    "[name='remember_me']",
-    "[data-login-remember]",
-  ],
+  errorBox:
+    "[data-login-message], [data-login-error], #loginMessage, #loginError, .login-error",
 
-  errorBox: ["#loginError", "[data-login-error]", "[data-form-error]", ".login-error"],
+  submit: "[data-login-submit], #loginSubmit, button[type='submit']",
 
-  submit: ["#loginSubmit", "[data-login-submit]", "button[type='submit']"],
+  forgotPasswordLink:
+    "[data-login-password-request], [data-forgot-password-link], .login-reset-link",
 
-  themeToggle: [
-    "#loginThemeToggle",
-    "[data-login-theme-toggle]",
-    "[data-theme-toggle]",
-  ],
+  fieldIdentifier:
+    "[data-login-field='identifier'], [data-field='identifier'], [data-field='email']",
 
-  passwordToggle: [
-    "#togglePassword",
-    "#loginPasswordToggle",
-    "[data-password-toggle]",
-    "[data-login-password-toggle]",
-  ],
+  fieldPassword:
+    "[data-login-field='password'], [data-field='password'], [data-password-field]",
 
-  capsIndicator: [
-    "#loginCapsIndicator",
-    "[data-password-caps]",
-    "[data-login-caps]",
-  ],
+  passwordToggle:
+    "[data-password-toggle], [data-login-password-toggle]",
 
-  forgotPasswordLink: [
-    "#forgotPasswordLink",
-    "[data-forgot-password-link]",
-    "[data-login-forgot-password]",
-  ],
+  capsIndicator:
+    "[data-password-caps], [data-login-caps]",
 
-  fieldIdentifier: [
-    "[data-field='identifier']",
-    "[data-field='email']",
-    "[data-login-field='identifier']",
-    "[data-login-field='email']",
-  ],
-
-  fieldPassword: ["[data-field='password']", "[data-login-field='password']"],
-
-  errorIdentifier: [
-    "[data-error-for='identifier']",
-    "[data-error-for='email']",
-    "[data-login-error-for='identifier']",
-    "[data-login-error-for='email']",
-  ],
-
-  errorPassword: ["[data-error-for='password']", "[data-login-error-for='password']"],
-
-  submitText: [".login-submit-text", "[data-login-submit-text]"],
+  themeToggle:
+    "[data-login-theme-toggle], [data-theme-toggle]",
 });
-
-const SUBMIT_BINDINGS = new WeakMap();
-const THEME_BINDINGS = new WeakMap();
-const PASSWORD_TOGGLE_BINDINGS = new WeakMap();
-const PASSWORD_SHARED_BINDINGS = new WeakMap();
 
 /* =========================================================
    BASICS
@@ -129,65 +71,39 @@ function isFn(value) {
   return typeof value === "function";
 }
 
+function noop() {}
+
 function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-  const text = String(value).trim();
-  return text || fallback;
+  const output = String(value ?? "").trim();
+  return output || fallback;
 }
 
-function rawValue(value, fallback = "") {
+function rawText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
   return String(value);
 }
 
-function iso() {
-  try {
-    return new Date().toISOString();
-  } catch {
-    return "";
-  }
+function getDocumentRoot() {
+  return isBrowser() ? document : null;
 }
 
-function noop() {}
-
 function qs(root, selector) {
-  if (!root || !selector) return null;
+  const scope = root || getDocumentRoot();
+  if (!scope || !selector) return null;
 
   try {
-    return root.querySelector(selector) || null;
+    return scope.querySelector(selector);
   } catch {
     return null;
   }
 }
 
-function queryFirst(root, selectors = []) {
-  const scope = root || (isBrowser() ? document : null);
-  if (!scope) return null;
-
-  for (const selector of selectors || []) {
-    const clean = safeText(selector, "");
-    if (!clean) continue;
-
-    try {
-      if (clean.startsWith("#") && scope === document) {
-        const byId = document.getElementById(clean.slice(1));
-        if (byId) return byId;
-      }
-
-      const found = scope.querySelector?.(clean);
-      if (found) return found;
-    } catch {}
-  }
-
-  return null;
-}
-
-function connected(node) {
+function setText(node, value = "") {
   if (!node) return false;
 
   try {
-    if (node === document || node === window || node === document.documentElement || node === document.body) return true;
-    return Boolean(node.isConnected || document.contains(node));
+    node.textContent = safeText(value, "");
+    return true;
   } catch {
     return false;
   }
@@ -197,31 +113,12 @@ function setAttr(node, name, value) {
   if (!node || !name) return false;
 
   try {
-    if (value === null || value === undefined || value === "") node.removeAttribute(name);
-    else node.setAttribute(name, String(value));
-    return true;
-  } catch {
-    return false;
-  }
-}
+    if (value === null || value === undefined || value === false || value === "") {
+      node.removeAttribute(name);
+    } else {
+      node.setAttribute(name, String(value));
+    }
 
-function setData(node, key, value) {
-  if (!node || !key) return false;
-
-  try {
-    if (value === null || value === undefined || value === "") delete node.dataset[key];
-    else node.dataset[key] = String(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function setText(node, value = "") {
-  if (!node) return false;
-
-  try {
-    node.textContent = safeText(value, "");
     return true;
   } catch {
     return false;
@@ -250,39 +147,29 @@ function toggleClass(node, className, enabled) {
   }
 }
 
-function createSpan(className = "", text = "") {
-  if (!isBrowser()) return null;
+function focus(node, selectText = false) {
+  if (!node || node.disabled) return false;
 
   try {
-    const span = document.createElement("span");
-    if (className) span.className = className;
-    if (text) span.textContent = text;
-    return span;
+    node.focus({ preventScroll: true });
   } catch {
-    return null;
+    try {
+      node.focus();
+    } catch {
+      return false;
+    }
   }
+
+  if (selectText) {
+    try {
+      node.select?.();
+    } catch {}
+  }
+
+  return true;
 }
 
-function replaceChildren(node, children = []) {
-  if (!node) return false;
-
-  const clean = (children || []).filter(Boolean);
-
-  try {
-    node.replaceChildren(...clean);
-    return true;
-  } catch {}
-
-  try {
-    while (node.firstChild) node.removeChild(node.firstChild);
-    for (const child of clean) node.appendChild(child);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function microtask(callback) {
+function later(callback) {
   if (!isFn(callback)) return;
 
   try {
@@ -300,40 +187,13 @@ function microtask(callback) {
   } catch {}
 }
 
-function focus(node, options = {}) {
-  if (!node) return false;
-
-  try {
-    node.focus({ preventScroll: options.preventScroll !== false });
-    return true;
-  } catch {}
-
-  try {
-    node.focus();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function select(node) {
-  if (!node) return false;
-
-  try {
-    node.select?.();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function bindDom(target, eventName, handler, options = false) {
-  if (!target || !eventName || !isFn(handler)) return noop;
+function bindDom(node, eventName, handler, options = false) {
+  if (!node || !eventName || !isFn(handler)) return noop;
 
   let disposed = false;
 
   try {
-    target.addEventListener(eventName, handler, options);
+    node.addEventListener(eventName, handler, options);
   } catch {
     return noop;
   }
@@ -343,7 +203,7 @@ function bindDom(target, eventName, handler, options = false) {
     disposed = true;
 
     try {
-      target.removeEventListener(eventName, handler, options);
+      node.removeEventListener(eventName, handler, options);
     } catch {}
   };
 }
@@ -355,7 +215,7 @@ function compose(disposers = []) {
     if (disposed) return;
     disposed = true;
 
-    for (const dispose of disposers || []) {
+    for (const dispose of disposers) {
       try {
         dispose?.();
       } catch {}
@@ -363,90 +223,57 @@ function compose(disposers = []) {
   };
 }
 
-function setDisabledWithMemory(node, disabled = false, options = {}) {
-  if (!node) return false;
-
-  const next = Boolean(disabled);
-
+function disposeBinding(binding) {
   try {
-    if (next) {
-      if (node.dataset?.[DISABLED_MEMORY_KEY] === undefined) {
-        node.dataset[DISABLED_MEMORY_KEY] = node.disabled ? "true" : "false";
-      }
-
-      node.disabled = true;
-      return true;
-    }
-
-    const previous = node.dataset?.[DISABLED_MEMORY_KEY];
-
-    node.disabled = options.forceEnable === true ? false : previous === "true";
-
-    if (node.dataset) delete node.dataset[DISABLED_MEMORY_KEY];
-    return true;
-  } catch {
-    try {
-      node.disabled = next;
-      return true;
-    } catch {
-      return false;
-    }
-  }
+    if (isFn(binding)) binding();
+    else if (isFn(binding?.destroy)) binding.destroy();
+    else if (isFn(binding?.dispose)) binding.dispose();
+    else if (isFn(binding?.unbind)) binding.unbind();
+    else if (isFn(binding?.off)) binding.off();
+  } catch {}
 }
 
 /* =========================================================
-   PASSWORD FIELD SHARED
+   PASSWORD FIELD COMPARTIDO
 ========================================================= */
 
 export function bindLoginPasswordFields(container = null, options = {}) {
-  const root = container || (isBrowser() ? document : null);
+  const root = container || getDocumentRoot();
   if (!root) return [];
 
-  const previous = PASSWORD_SHARED_BINDINGS.get(root);
-  if (previous && options.force !== true) return previous;
+  const previous = PASSWORD_BINDINGS.get(root);
 
-  try {
-    if (previous && options.force === true) {
-      for (const binding of previous) {
-        try {
-          if (isFn(binding)) binding();
-          else if (isFn(binding?.destroy)) binding.destroy();
-          else if (isFn(binding?.unbind)) binding.unbind();
-          else if (isFn(binding?.off)) binding.off();
-          else if (isFn(binding?.dispose)) binding.dispose();
-        } catch {}
-      }
-    }
-  } catch {}
+  if (previous && options.force !== true) {
+    return previous;
+  }
+
+  if (previous && options.force === true) {
+    for (const binding of previous) disposeBinding(binding);
+    PASSWORD_BINDINGS.delete(root);
+  }
+
+  let bindings = [];
 
   try {
     const result = bindPasswordFieldsInScope(root);
-    const bindings = Array.isArray(result) ? result : [];
-    PASSWORD_SHARED_BINDINGS.set(root, bindings);
-    return bindings;
+    bindings = Array.isArray(result) ? result : result ? [result] : [];
   } catch {
-    PASSWORD_SHARED_BINDINGS.set(root, []);
-    return [];
+    bindings = [];
   }
+
+  PASSWORD_BINDINGS.set(root, bindings);
+  return bindings;
 }
 
 export function destroyLoginPasswordFields(container = null) {
-  const root = container || (isBrowser() ? document : null);
+  const root = container || getDocumentRoot();
   if (!root) return false;
 
-  const bindings = PASSWORD_SHARED_BINDINGS.get(root) || [];
+  const bindings = PASSWORD_BINDINGS.get(root) || [];
 
-  for (const binding of bindings) {
-    try {
-      if (isFn(binding)) binding();
-      else if (isFn(binding?.destroy)) binding.destroy();
-      else if (isFn(binding?.unbind)) binding.unbind();
-      else if (isFn(binding?.off)) binding.off();
-      else if (isFn(binding?.dispose)) binding.dispose();
-    } catch {}
-  }
+  for (const binding of bindings) disposeBinding(binding);
 
-  PASSWORD_SHARED_BINDINGS.delete(root);
+  PASSWORD_BINDINGS.delete(root);
   return true;
 }
 
@@ -455,15 +282,34 @@ export function destroyLoginPasswordFields(container = null) {
 ========================================================= */
 
 export function getLoginRefs(container = null) {
-  const safeContainer = container || (isBrowser() ? document : null);
-  const root = queryFirst(safeContainer, SELECTORS.root) || safeContainer;
-  const form = queryFirst(root, SELECTORS.form);
+  const safeContainer = container || getDocumentRoot();
+  const root = qs(safeContainer, SELECTORS.root) || safeContainer;
+  const form = qs(root, SELECTORS.form);
   const scope = form || root || safeContainer;
 
-  const identifierInput = queryFirst(scope, SELECTORS.identifier);
-  const passwordInput = queryFirst(scope, SELECTORS.password);
-  const fieldIdentifier = queryFirst(scope, SELECTORS.fieldIdentifier);
-  const errorIdentifier = queryFirst(scope, SELECTORS.errorIdentifier);
+  const identifierInput = qs(scope, SELECTORS.identifier);
+  const passwordInput = qs(scope, SELECTORS.password);
+  const submitButton = qs(scope, SELECTORS.submit);
+
+  if (form) {
+    try {
+      form.noValidate = true;
+      form.dataset.loginDomVersion = LOGIN_DOM_VERSION;
+    } catch {}
+  }
+
+  if (submitButton) {
+    try {
+      if (!submitButton.getAttribute("type")) submitButton.setAttribute("type", "submit");
+
+      if (!submitButton.dataset.originalLabel) {
+        submitButton.dataset.originalLabel = safeText(
+          submitButton.textContent,
+          DEFAULT_SUBMIT_LABEL
+        );
+      }
+    } catch {}
+  }
 
   const refs = {
     container: safeContainer,
@@ -474,50 +320,27 @@ export function getLoginRefs(container = null) {
     emailInput: identifierInput,
 
     passwordInput,
-    rememberInput: queryFirst(scope, SELECTORS.remember),
-    errorBox: queryFirst(scope, SELECTORS.errorBox),
-    submitButton: queryFirst(scope, SELECTORS.submit),
-    themeToggleButton: queryFirst(scope, SELECTORS.themeToggle),
+    rememberInput: qs(scope, SELECTORS.remember),
+    errorBox: qs(scope, SELECTORS.errorBox),
+    submitButton,
+    forgotPasswordLink: qs(scope, SELECTORS.forgotPasswordLink),
 
-    togglePasswordButton: queryFirst(scope, SELECTORS.passwordToggle),
-    capsIndicator: queryFirst(scope, SELECTORS.capsIndicator),
-    forgotPasswordLink: queryFirst(scope, SELECTORS.forgotPasswordLink),
+    fieldIdentifier: qs(scope, SELECTORS.fieldIdentifier),
+    fieldEmail: qs(scope, SELECTORS.fieldIdentifier),
+    fieldPassword: qs(scope, SELECTORS.fieldPassword),
 
-    fieldIdentifier,
-    fieldEmail: fieldIdentifier,
-    fieldPassword: queryFirst(scope, SELECTORS.fieldPassword),
+    togglePasswordButton: qs(scope, SELECTORS.passwordToggle),
+    capsIndicator: qs(scope, SELECTORS.capsIndicator),
+    themeToggleButton: qs(scope, SELECTORS.themeToggle),
 
-    errorIdentifier,
-    errorEmail: errorIdentifier,
-    errorPassword: queryFirst(scope, SELECTORS.errorPassword),
-
-    submitText: queryFirst(scope, SELECTORS.submitText),
     passwordFieldBindings: [],
-
-    passwordField: {
-      input: passwordInput,
-      toggle: queryFirst(scope, SELECTORS.passwordToggle),
-      capsIndicator: queryFirst(scope, SELECTORS.capsIndicator),
-    },
   };
 
-  try {
-    if (form) {
-      form.noValidate = true;
-      setData(form, "loginDomVersion", LOGIN_DOM_VERSION);
-      setData(form, "loginDomSource", SOURCE);
-    }
-  } catch {}
-
-  try {
-    if (refs.submitButton) {
-      if (!refs.submitButton.getAttribute("type")) refs.submitButton.setAttribute("type", "submit");
-
-      if (!refs.submitButton.dataset.originalLabel) {
-        refs.submitButton.dataset.originalLabel = safeText(refs.submitButton.textContent, DEFAULT_SUBMIT_LABEL);
-      }
-    }
-  } catch {}
+  refs.passwordField = {
+    input: refs.passwordInput,
+    toggle: refs.togglePasswordButton,
+    capsIndicator: refs.capsIndicator,
+  };
 
   return refs;
 }
@@ -527,20 +350,26 @@ export function getLoginRefs(container = null) {
 ========================================================= */
 
 export function setFieldInvalid(fieldNode, invalid = false) {
-  if (!fieldNode) return false;
-
   const active = Boolean(invalid);
+
   toggleClass(fieldNode, "is-invalid", active);
-  setData(fieldNode, "invalid", active ? "true" : null);
+
+  try {
+    if (fieldNode) {
+      if (active) fieldNode.dataset.invalid = "true";
+      else delete fieldNode.dataset.invalid;
+    }
+  } catch {}
+
   return true;
 }
 
 export function setInputInvalid(inputNode, invalid = false) {
-  if (!inputNode) return false;
-
   const active = Boolean(invalid);
+
   toggleClass(inputNode, "is-invalid", active);
   setAttr(inputNode, "aria-invalid", active ? "true" : "false");
+
   return true;
 }
 
@@ -548,7 +377,6 @@ export function setFieldError(fieldNode, message = "", errorNode = null) {
   const text = safeText(message, "");
 
   setFieldInvalid(fieldNode, Boolean(text));
-  setData(fieldNode, "error", text || null);
 
   if (errorNode) {
     setText(errorNode, text);
@@ -560,78 +388,62 @@ export function setFieldError(fieldNode, message = "", errorNode = null) {
 }
 
 export function clearFieldError(fieldNode, errorNode = null) {
-  setFieldInvalid(fieldNode, false);
-  setData(fieldNode, "error", null);
-
-  if (errorNode) {
-    setText(errorNode, "");
-    setHidden(errorNode, true);
-    setAttr(errorNode, "role", null);
-  }
-
-  return true;
+  return setFieldError(fieldNode, "", errorNode);
 }
 
 function setGlobalError(errorBox, message = "") {
   const text = safeText(message, "");
-  if (!errorBox) return false;
+
+  if (!errorBox) return text;
 
   setText(errorBox, text);
   setHidden(errorBox, !text);
   toggleClass(errorBox, "is-visible", Boolean(text));
-  toggleClass(errorBox, "is-empty", !text);
   setAttr(errorBox, "role", text ? "alert" : null);
   setAttr(errorBox, "aria-live", text ? "polite" : null);
 
-  return true;
+  return text;
 }
 
 export function clearLoginErrors(refs = {}) {
-  clearFieldError(refs.fieldEmail, refs.errorEmail);
+  setFieldInvalid(refs.fieldIdentifier || refs.fieldEmail, false);
+  setFieldInvalid(refs.fieldPassword, false);
 
-  if (refs.fieldIdentifier && refs.fieldIdentifier !== refs.fieldEmail) {
-    clearFieldError(refs.fieldIdentifier, refs.errorIdentifier);
-  }
-
-  clearFieldError(refs.fieldPassword, refs.errorPassword);
-
-  setInputInvalid(refs.emailInput, false);
-
-  if (refs.identifierInput && refs.identifierInput !== refs.emailInput) {
-    setInputInvalid(refs.identifierInput, false);
-  }
-
+  setInputInvalid(refs.identifierInput || refs.emailInput, false);
   setInputInvalid(refs.passwordInput, false);
+
   setGlobalError(refs.errorBox, "");
 
   try {
-    refs.form?.removeAttribute?.("data-error");
+    refs.form?.removeAttribute("data-error");
   } catch {}
 
   return true;
 }
 
 export function applyLoginErrors(refs = {}, errors = {}, options = {}) {
-  const identifierError = safeText(errors.identifier, "") || safeText(errors.email, "") || safeText(errors.username, "") || safeText(errors.user, "") || safeText(errors.login, "");
+  const identifierError =
+    safeText(errors.identifier, "") ||
+    safeText(errors.email, "") ||
+    safeText(errors.username, "") ||
+    safeText(errors.user, "") ||
+    safeText(errors.login, "");
+
   const passwordError = safeText(errors.password, "");
-  const globalError = safeText(errors.global, "") || safeText(errors.form, "") || safeText(errors.message, "");
-  const firstError = identifierError || passwordError || globalError || "";
 
-  setFieldError(refs.fieldEmail, identifierError, refs.errorEmail);
+  const globalError =
+    safeText(errors.global, "") ||
+    safeText(errors.form, "") ||
+    safeText(errors.message, "");
 
-  if (refs.fieldIdentifier && refs.fieldIdentifier !== refs.fieldEmail) {
-    setFieldError(refs.fieldIdentifier, identifierError, refs.errorIdentifier);
-  }
+  const firstError = identifierError || passwordError || globalError;
 
-  setFieldError(refs.fieldPassword, passwordError, refs.errorPassword);
+  setFieldInvalid(refs.fieldIdentifier || refs.fieldEmail, Boolean(identifierError));
+  setFieldInvalid(refs.fieldPassword, Boolean(passwordError));
 
-  setInputInvalid(refs.emailInput, Boolean(identifierError));
-
-  if (refs.identifierInput && refs.identifierInput !== refs.emailInput) {
-    setInputInvalid(refs.identifierInput, Boolean(identifierError));
-  }
-
+  setInputInvalid(refs.identifierInput || refs.emailInput, Boolean(identifierError));
   setInputInvalid(refs.passwordInput, Boolean(passwordError));
+
   setGlobalError(refs.errorBox, firstError);
 
   try {
@@ -642,8 +454,8 @@ export function applyLoginErrors(refs = {}, errors = {}, options = {}) {
   } catch {}
 
   if (options.focus !== false) {
-    microtask(() => {
-      if (identifierError) focus(refs.identifierInput || refs.emailInput);
+    later(() => {
+      if (identifierError) focus(refs.identifierInput || refs.emailInput, true);
       else if (passwordError) focus(refs.passwordInput);
     });
   }
@@ -652,8 +464,7 @@ export function applyLoginErrors(refs = {}, errors = {}, options = {}) {
 }
 
 export function setGlobalLoginError(refs = {}, message = "") {
-  const text = safeText(message, "");
-  setGlobalError(refs.errorBox, text);
+  const text = setGlobalError(refs.errorBox, message);
 
   try {
     if (refs.form) {
@@ -669,197 +480,95 @@ export function setGlobalLoginError(refs = {}, message = "") {
    LOADING
 ========================================================= */
 
-function makeSubmitText(text = "") {
-  const node = createSpan("login-submit-text", text);
-  if (node) setData(node, "loginSubmitText", "true");
-  return node;
-}
-
-function makeSpinner() {
-  const node = createSpan("login-view__spinner", "");
-  if (node) {
-    setAttr(node, "aria-hidden", "true");
-    setData(node, "loginSpinner", "true");
-  }
-
-  return node;
-}
-
-function originalSubmitLabel(button, fallback = DEFAULT_SUBMIT_LABEL) {
-  if (!button) return fallback;
+function originalSubmitLabel(button) {
+  if (!button) return DEFAULT_SUBMIT_LABEL;
 
   try {
-    const existing = safeText(button.dataset?.originalLabel, "");
-    if (existing) return existing;
-
-    const current = safeText(button.textContent, fallback);
-    button.dataset.originalLabel = current || fallback;
-    return current || fallback;
+    return safeText(button.dataset.originalLabel, "") ||
+      safeText(button.textContent, DEFAULT_SUBMIT_LABEL);
   } catch {
-    return fallback;
+    return DEFAULT_SUBMIT_LABEL;
   }
 }
 
-function renderSubmitButton(button, loading = false, labels = {}) {
-  if (!button) return false;
+function setLoadingDisabled(node, loading = false) {
+  if (!node) return false;
 
-  const isLoading = Boolean(loading);
-  const label = isLoading ? safeText(labels.loadingLabel, DEFAULT_LOADING_LABEL) : safeText(labels.submitLabel, originalSubmitLabel(button));
+  const active = Boolean(loading);
 
   try {
-    button.disabled = isLoading;
-  } catch {}
+    if (active) {
+      if (!node.disabled) node.dataset.loginDisabledByLoading = "true";
+      node.disabled = true;
+      return true;
+    }
 
-  setData(button, "loading", isLoading ? "true" : null);
-  setAttr(button, "aria-busy", isLoading ? "true" : "false");
-  setAttr(button, "aria-disabled", isLoading ? "true" : "false");
+    if (node.dataset.loginDisabledByLoading === "true") {
+      node.disabled = false;
+    }
 
-  return replaceChildren(button, isLoading ? [makeSpinner(), makeSubmitText(label)] : [makeSubmitText(label)]);
-}
-
-function setLinkDisabled(link, disabled = false) {
-  if (!link) return false;
-
-  const isDisabled = Boolean(disabled);
-
-  setAttr(link, "aria-disabled", isDisabled ? "true" : "false");
-  toggleClass(link, "is-disabled", isDisabled);
-
-  if (isDisabled) {
-    try {
-      if (link.dataset?.[TABINDEX_MEMORY_KEY] === undefined) link.dataset[TABINDEX_MEMORY_KEY] = String(link.tabIndex);
-      link.tabIndex = -1;
-    } catch {}
-
+    delete node.dataset.loginDisabledByLoading;
     return true;
+  } catch {
+    return false;
   }
-
-  try {
-    const previous = link.dataset?.[TABINDEX_MEMORY_KEY];
-
-    if (previous !== undefined && previous !== null && previous !== "") link.tabIndex = Number(previous);
-    else link.removeAttribute("tabindex");
-
-    if (link.dataset) delete link.dataset[TABINDEX_MEMORY_KEY];
-  } catch {}
-
-  return true;
-}
-
-function clearSubmitFlags(form) {
-  if (!form) return false;
-
-  try {
-    delete form.dataset.submitting;
-    delete form.dataset.loginSubmitting;
-    delete form.dataset.loginSubmitLocked;
-    delete form.dataset.busy;
-  } catch {}
-
-  setAttr(form, "aria-busy", "false");
-  return true;
 }
 
 export function setLoginLoading(refs = {}, loading = false, options = {}) {
-  const isLoading = Boolean(loading);
-  const disablePassword = options.disablePassword === true || options.disablePasswordDuringSubmit === true;
+  const active = Boolean(loading);
 
-  for (const node of [refs.container, refs.root]) {
-    toggleClass(node, "is-loading", isLoading);
-    setData(node, "loginLoading", isLoading ? "true" : null);
-  }
+  toggleClass(refs.root, "is-loading", active);
+  setAttr(refs.form, "aria-busy", active ? "true" : "false");
 
-  if (refs.form) {
-    setAttr(refs.form, "aria-busy", isLoading ? "true" : "false");
-
-    if (isLoading) {
-      refs.form.dataset.submitting = "true";
-      refs.form.dataset.loginSubmitting = "1";
-      refs.form.dataset.loginSubmitLocked = "true";
-    } else {
-      clearSubmitFlags(refs.form);
+  try {
+    if (refs.form) {
+      if (active) refs.form.dataset.submitting = "true";
+      else delete refs.form.dataset.submitting;
     }
+  } catch {}
+
+  setLoadingDisabled(refs.submitButton, active);
+  setLoadingDisabled(refs.identifierInput || refs.emailInput, active);
+  setLoadingDisabled(refs.passwordInput, active);
+  setLoadingDisabled(refs.rememberInput, active);
+
+  if (refs.submitButton) {
+    const loadingLabel = safeText(options.loadingLabel, DEFAULT_LOADING_LABEL);
+    const submitLabel = safeText(options.submitLabel, originalSubmitLabel(refs.submitButton));
+
+    setText(refs.submitButton, active ? loadingLabel : submitLabel);
+    setAttr(refs.submitButton, "aria-busy", active ? "true" : "false");
+    setAttr(refs.submitButton, "aria-disabled", active ? "true" : "false");
   }
-
-  setDisabledWithMemory(refs.emailInput, isLoading, { forceEnable: !isLoading });
-
-  if (refs.identifierInput && refs.identifierInput !== refs.emailInput) {
-    setDisabledWithMemory(refs.identifierInput, isLoading, { forceEnable: !isLoading });
-  }
-
-  setDisabledWithMemory(refs.passwordInput, disablePassword ? isLoading : false, { forceEnable: !isLoading || !disablePassword });
-  setDisabledWithMemory(refs.togglePasswordButton, disablePassword ? isLoading : false, { forceEnable: !isLoading || !disablePassword });
-  setDisabledWithMemory(refs.rememberInput, isLoading, { forceEnable: !isLoading });
-  setDisabledWithMemory(refs.themeToggleButton, isLoading, { forceEnable: !isLoading });
-  setLinkDisabled(refs.forgotPasswordLink, isLoading);
-
-  renderSubmitButton(refs.submitButton, isLoading, {
-    submitLabel: safeText(options.submitLabel, ""),
-    loadingLabel: safeText(options.loadingLabel, DEFAULT_LOADING_LABEL),
-  });
 
   return true;
 }
 
 export function unlockLoginForm(refs = {}, options = {}) {
-  setLoginLoading(refs, false, {
-    submitLabel: options.submitLabel,
-    loadingLabel: options.loadingLabel,
-  });
-
-  clearSubmitFlags(refs.form);
-
-  try {
-    if (refs.submitButton) {
-      refs.submitButton.disabled = false;
-      setAttr(refs.submitButton, "aria-disabled", "false");
-      setAttr(refs.submitButton, "aria-busy", "false");
-      setData(refs.submitButton, "loading", null);
-    }
-  } catch {}
-
-  return true;
+  return setLoginLoading(refs, false, options);
 }
 
 /* =========================================================
    PASSWORD VISIBILITY
+   Nota:
+   - La lógica real debe vivir en shared/password-field.
+   - Estas funciones quedan ligeras para no romper imports.
 ========================================================= */
 
 export function getPasswordVisibilityState(refs = {}) {
-  return refs?.passwordInput?.type === "text";
+  return refs.passwordInput?.type === "text";
 }
 
 export function setPasswordVisibility(refs = {}, visible = false) {
-  const isVisible = Boolean(visible);
-  const input = refs.passwordInput;
-  const button = refs.togglePasswordButton;
-
-  if (!input) return isVisible;
+  const active = Boolean(visible);
 
   try {
-    input.type = isVisible ? "text" : "password";
+    if (refs.passwordInput) {
+      refs.passwordInput.type = active ? "text" : "password";
+    }
   } catch {}
 
-  if (button) {
-    const showLabel = safeText(button.getAttribute("data-show-label"), DEFAULT_SHOW_PASSWORD_LABEL);
-    const hideLabel = safeText(button.getAttribute("data-hide-label"), DEFAULT_HIDE_PASSWORD_LABEL);
-
-    setAttr(button, "aria-label", isVisible ? hideLabel : showLabel);
-    setAttr(button, "aria-pressed", String(isVisible));
-    setData(button, "passwordVisible", isVisible ? "true" : "false");
-    toggleClass(button, "is-visible", isVisible);
-    toggleClass(button, "is-hidden", !isVisible);
-
-    const icon = qs(button, "[data-password-toggle-icon]") || qs(button, ".password-toggle-icon");
-
-    if (icon) {
-      setData(icon, "state", isVisible ? "visible" : "hidden");
-      toggleClass(icon, "is-visible", isVisible);
-      toggleClass(icon, "is-hidden", !isVisible);
-    }
-  }
-
-  return isVisible;
+  return active;
 }
 
 export function togglePasswordVisibility(refs = {}) {
@@ -867,59 +576,43 @@ export function togglePasswordVisibility(refs = {}) {
 }
 
 /* =========================================================
-   FOCUS / FORM STATE
+   FORM STATE
 ========================================================= */
-
-export function focusLoginPrimaryField(refs = {}, options = {}) {
-  const remembered = Boolean(options.rememberedIdentifier || options.rememberedEmail);
-
-  microtask(() => {
-    if (remembered && refs.passwordInput && !refs.passwordInput.disabled) {
-      focus(refs.passwordInput);
-      return;
-    }
-
-    const target = refs.identifierInput || refs.emailInput;
-
-    if (target && !target.disabled) {
-      focus(target);
-      select(target);
-    }
-  });
-
-  return true;
-}
 
 function normalizeIdentifier(value = "") {
   return safeText(value, "").normalize("NFKC").replace(/\s+/g, " ");
 }
 
-function looksEmail(value = "") {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(safeText(value, ""));
-}
-
-function looksPhone(value = "") {
-  return /^\+?\d{6,20}$/.test(safeText(value, "").replace(/[^\d+]/g, ""));
-}
-
 export function readLoginFormState(refs = {}) {
-  const identifier = normalizeIdentifier(refs.identifierInput?.value ?? refs.emailInput?.value ?? "");
-  const email = looksEmail(identifier) ? identifier.toLowerCase() : "";
-  const phone = !email && looksPhone(identifier) ? identifier.replace(/[^\d+]/g, "") : "";
-  const username = !email && !phone ? identifier : "";
+  const identifier = normalizeIdentifier(
+    refs.identifierInput?.value ?? refs.emailInput?.value ?? ""
+  );
 
   return {
     identifier,
-    email: email || identifier.toLowerCase(),
-    username,
-    user: username || identifier,
+    email: identifier.toLowerCase(),
+    username: identifier,
+    user: identifier,
     login: identifier,
-    phone,
-    telefono: phone,
-    password: rawValue(refs.passwordInput?.value, ""),
+    password: rawText(refs.passwordInput?.value, ""),
     remember: Boolean(refs.rememberInput?.checked),
     rememberMe: Boolean(refs.rememberInput?.checked),
   };
+}
+
+export function focusLoginPrimaryField(refs = {}, options = {}) {
+  later(() => {
+    const hasIdentifier = Boolean(normalizeIdentifier(refs.identifierInput?.value ?? ""));
+
+    if ((options.rememberedIdentifier || hasIdentifier) && refs.passwordInput) {
+      focus(refs.passwordInput);
+      return;
+    }
+
+    focus(refs.identifierInput || refs.emailInput, true);
+  });
+
+  return true;
 }
 
 /* =========================================================
@@ -929,200 +622,100 @@ export function readLoginFormState(refs = {}) {
 export function bindLoginInputClearers(refs = {}, handler = null) {
   if (!isFn(handler)) return noop;
 
-  const nodes = [refs.identifierInput, refs.emailInput, refs.passwordInput].filter((node, index, list) => node && list.indexOf(node) === index);
+  const nodes = [
+    refs.identifierInput || refs.emailInput,
+    refs.passwordInput,
+  ].filter(Boolean);
 
-  return compose(nodes.flatMap((node) => [
-    bindDom(node, "input", handler),
-    bindDom(node, "change", handler),
-  ]));
-}
-
-export function bindPasswordToggle(refs = {}, handler = null) {
-  const button = refs.togglePasswordButton;
-  if (!button) return noop;
-
-  const existing = PASSWORD_TOGGLE_BINDINGS.get(button);
-  if (existing) return existing.dispose;
-
-  const finalHandler = isFn(handler)
-    ? handler
-    : (event) => {
-        try { event?.preventDefault?.(); } catch {}
-        if (button.disabled || button.getAttribute("aria-disabled") === "true") return;
-        togglePasswordVisibility(refs);
-        focus(refs.passwordInput, { preventScroll: true });
-      };
-
-  const disposeEvent = bindDom(button, "click", finalHandler);
-
-  const binding = {
-    dispose() {
-      try { disposeEvent(); } catch {}
-      PASSWORD_TOGGLE_BINDINGS.delete(button);
-    },
-  };
-
-  PASSWORD_TOGGLE_BINDINGS.set(button, binding);
-  return binding.dispose;
-}
-
-export function bindThemeToggle(refs = {}, handler = null) {
-  const button = refs.themeToggleButton;
-  if (!button || !isFn(handler)) return noop;
-
-  const existing = THEME_BINDINGS.get(button);
-  if (existing) {
-    try { existing.dispose(); } catch {}
-  }
-
-  const wrapped = (event) => {
-    try { event?.preventDefault?.(); } catch {}
-    if (button.disabled || button.getAttribute("aria-disabled") === "true") return;
-    handler(event);
-  };
-
-  const disposeEvent = bindDom(button, "click", wrapped);
-
-  const binding = {
-    dispose() {
-      try { disposeEvent(); } catch {}
-      if (THEME_BINDINGS.get(button) === binding) THEME_BINDINGS.delete(button);
-    },
-  };
-
-  THEME_BINDINGS.set(button, binding);
-  return binding.dispose;
+  return compose(
+    nodes.flatMap((node) => [
+      bindDom(node, "input", handler),
+      bindDom(node, "change", handler),
+    ])
+  );
 }
 
 export function bindLoginSubmit(refs = {}, handler = null) {
-  const form = refs.form;
-  const button = refs.submitButton;
-  const target = form || button || null;
-
+  const target = refs.form || refs.submitButton;
   if (!target || !isFn(handler)) return noop;
 
-  const existing = SUBMIT_BINDINGS.get(target);
-  if (existing) {
-    try { existing.dispose(); } catch {}
-  }
+  const previous = SUBMIT_BINDINGS.get(target);
+  if (previous) previous();
 
-  let disposed = false;
-  let inFlight = false;
+  let locked = false;
 
-  const wrapped = (event) => {
-    if (disposed) return undefined;
+  const onSubmit = (event) => {
+    try {
+      event?.preventDefault?.();
+    } catch {}
 
-    try { event?.preventDefault?.(); } catch {}
-    if (inFlight) return undefined;
-
-    inFlight = true;
+    if (locked) return undefined;
+    locked = true;
 
     let result;
 
     try {
       result = handler(event);
     } catch (error) {
-      inFlight = false;
+      locked = false;
       throw error;
     }
 
-    Promise.resolve(result).catch(noop).finally(() => {
-      inFlight = false;
-    });
+    Promise.resolve(result)
+      .finally(() => {
+        locked = false;
+      })
+      .catch(noop);
 
     return result;
   };
 
-  const unbinders = form ? [bindDom(form, "submit", wrapped)] : [bindDom(button, "click", wrapped)];
+  const disposeEvent = bindDom(target, refs.form ? "submit" : "click", onSubmit);
 
-  const binding = {
-    dispose() {
-      if (disposed) return;
-
-      disposed = true;
-      inFlight = false;
-
-      for (const dispose of unbinders.splice(0)) {
-        try { dispose(); } catch {}
-      }
-
-      if (SUBMIT_BINDINGS.get(target) === binding) SUBMIT_BINDINGS.delete(target);
-
-      setData(form, "loginSubmitBound", null);
-      setData(form, "loginSubmitBindingAt", null);
-    },
-
-    getSnapshot() {
-      return { disposed, inFlight, target: form ? "form" : "button", at: iso() };
-    },
+  const dispose = () => {
+    locked = false;
+    disposeEvent();
+    SUBMIT_BINDINGS.delete(target);
   };
 
-  SUBMIT_BINDINGS.set(target, binding);
+  SUBMIT_BINDINGS.set(target, dispose);
+  return dispose;
+}
 
-  setData(form, "loginSubmitBound", "true");
-  setData(form, "loginDomSource", SOURCE);
-  setData(form, "loginSubmitBindingAt", iso());
+export function bindPasswordToggle(refs = {}, handler = null) {
+  if (isFn(handler) && refs.togglePasswordButton) {
+    return bindDom(refs.togglePasswordButton, "click", handler);
+  }
 
-  return binding.dispose;
+  bindLoginPasswordFields(refs.root || refs.form || refs.container);
+  return noop;
+}
+
+export function bindThemeToggle(refs = {}, handler = null) {
+  if (!refs.themeToggleButton || !isFn(handler)) return noop;
+
+  return bindDom(refs.themeToggleButton, "click", (event) => {
+    try {
+      event?.preventDefault?.();
+    } catch {}
+
+    handler(event);
+  });
 }
 
 /* =========================================================
-   SNAPSHOT
+   SNAPSHOT MÍNIMO
 ========================================================= */
 
-function nodeSnapshot(node) {
-  if (!node) return { exists: false };
-
-  return {
-    exists: true,
-    connected: connected(node),
-    tag: safeText(node.tagName, "").toLowerCase(),
-    id: safeText(node.id, ""),
-    className: safeText(typeof node.className === "string" ? node.className : "", ""),
-    disabled: Boolean(node.disabled),
-    hidden: Boolean(node.hidden),
-    ariaInvalid: safeText(node.getAttribute?.("aria-invalid"), ""),
-    ariaBusy: safeText(node.getAttribute?.("aria-busy"), ""),
-    ariaDisabled: safeText(node.getAttribute?.("aria-disabled"), ""),
-    dataset: {
-      loading: node.dataset?.loading || "",
-      submitting: node.dataset?.submitting || "",
-      loginSubmitting: node.dataset?.loginSubmitting || "",
-      loginSubmitLocked: node.dataset?.loginSubmitLocked || "",
-      invalid: node.dataset?.invalid || "",
-      loginSubmitBound: node.dataset?.loginSubmitBound || "",
-    },
-  };
-}
-
 export function getLoginDomSnapshot(refs = {}) {
-  const target = refs.form || refs.submitButton || null;
-  const submitBinding = target ? SUBMIT_BINDINGS.get(target) : null;
-
   return {
     version: LOGIN_DOM_VERSION,
-    root: nodeSnapshot(refs.root),
-    form: nodeSnapshot(refs.form),
-    identifierInput: nodeSnapshot(refs.identifierInput || refs.emailInput),
-    passwordInput: nodeSnapshot(refs.passwordInput),
-    rememberInput: nodeSnapshot(refs.rememberInput),
-    errorBox: nodeSnapshot(refs.errorBox),
-    submitButton: nodeSnapshot(refs.submitButton),
-    themeToggleButton: nodeSnapshot(refs.themeToggleButton),
-    togglePasswordButton: nodeSnapshot(refs.togglePasswordButton),
-    hasSubmitBinding: Boolean(submitBinding),
-    submitBinding: submitBinding?.getSnapshot?.() || null,
-    hasSharedPasswordBindings: Boolean(refs.passwordFieldBindings?.length),
-    passwordFieldBindingScopes: (() => {
-      try {
-        const out = [];
-        PASSWORD_SHARED_BINDINGS.forEach?.((_value, key) => out.push(connected(key)));
-        return out;
-      } catch {
-        return [];
-      }
-    })(),
-    at: iso(),
+    hasRoot: Boolean(refs.root),
+    hasForm: Boolean(refs.form),
+    hasIdentifier: Boolean(refs.identifierInput || refs.emailInput),
+    hasPassword: Boolean(refs.passwordInput),
+    hasSubmit: Boolean(refs.submitButton),
+    submitting: refs.form?.dataset?.submitting === "true",
   };
 }
 

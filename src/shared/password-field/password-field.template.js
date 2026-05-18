@@ -4,7 +4,7 @@
 
    Responsabilidad:
    - Renderer puro del password-field compartido.
-   - Pintar label + input + toggle eye.
+   - Pintar label + input password + toggle eye.
    - Sin DOM.
    - Sin listeners.
    - Sin AppCore.
@@ -14,7 +14,7 @@
    - Sin lógica duplicada.
 ========================================================= */
 
-export const PASSWORD_FIELD_TEMPLATE_VERSION = "minimal-1";
+export const PASSWORD_FIELD_TEMPLATE_VERSION = "minimal-2";
 
 const DEFAULT_INPUT_ID = "passwordInput";
 const DEFAULT_INPUT_NAME = "password";
@@ -124,21 +124,25 @@ function attr(name = "", value = "") {
   return ` ${key}="${escapeHtml(value)}"`;
 }
 
-function dataAttrs(attrs = {}) {
+function dataAttrs(attrs = {}, blockedKeys = []) {
   if (!isObject(attrs)) return "";
+
+  const blocked = new Set(blockedKeys.map(cleanDataKey));
 
   return Object.entries(attrs)
     .map(([key, value]) => {
       const cleanKey = cleanDataKey(key);
-      if (!cleanKey) return "";
+
+      if (!cleanKey || blocked.has(cleanKey)) return "";
+
       return attr(`data-${cleanKey}`, value === true ? "true" : value);
     })
     .join("");
 }
 
-function numberAttr(value, fallback = 0) {
+function numberAttr(value) {
   const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? String(number) : fallback ? String(fallback) : "";
+  return Number.isFinite(number) && number > 0 ? String(number) : "";
 }
 
 /* =========================================================
@@ -221,37 +225,13 @@ export function getEyeOffIcon(options = {}) {
   `;
 }
 
-/* Compat: se mantiene exportado, pero el template mínimo no renderiza CapsLock. */
+/* Compat export. El template mínimo no renderiza CapsLock. */
 export function getCapsIcon() {
-  return `
-    <svg
-      class="caps-icon"
-      data-password-caps-icon="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-      focusable="false"
-      width="16"
-      height="16"
-    >
-      <path
-        d="M12 4.5 6.5 10H10v6h4v-6h3.5L12 4.5Z"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M8 18.5h8"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-      />
-    </svg>
-  `;
+  return "";
 }
 
 /* =========================================================
-   NORMALIZATION
+   OPTIONS
 ========================================================= */
 
 function normalizeOptions(options = {}) {
@@ -280,10 +260,9 @@ function normalizeOptions(options = {}) {
 
     inputId,
     inputName,
-
-    wrapperId: cleanId(opts.wrapperId, ""),
-    fieldRootId: cleanId(opts.fieldRootId ?? opts.rootId, ""),
     toggleId: cleanId(opts.toggleId ?? opts.buttonId ?? `${inputId}Toggle`, `${inputId}Toggle`),
+    fieldRootId: cleanId(opts.fieldRootId ?? opts.rootId, ""),
+    wrapperId: cleanId(opts.wrapperId, ""),
 
     fieldClass: cleanClass(
       opts.fieldClass ?? opts.rootClass ?? opts.rootClassName ?? opts.fieldClassName,
@@ -380,14 +359,6 @@ function renderLabel(data) {
 }
 
 function renderInput(data) {
-  const inputDataAttrs = {
-    ...data.inputDataAttrs,
-
-    passwordInput: true,
-    loginPassword: true,
-    passwordRole: data.fieldDataName,
-  };
-
   return `
     <input
       class="${escapeHtml(data.inputClass)}"
@@ -402,27 +373,25 @@ function renderInput(data) {
       aria-label="${escapeHtml(data.ariaLabel)}"
       aria-invalid="false"
       value="${escapeHtml(data.value)}"
+      data-password-input="true"
+      data-login-password="true"
+      data-password-role="${escapeHtml(data.fieldDataName)}"
       ${data.required ? "required" : ""}
       ${data.disabled ? "disabled" : ""}
       ${data.readonly ? "readonly" : ""}
       ${data.minlength ? `minlength="${escapeHtml(data.minlength)}"` : ""}
       ${data.maxlength ? `maxlength="${escapeHtml(data.maxlength)}"` : ""}
-      ${dataAttrs(inputDataAttrs)}
+      ${dataAttrs(data.inputDataAttrs, [
+        "password-input",
+        "login-password",
+        "password-role",
+      ])}
     />
   `;
 }
 
 function renderToggle(data) {
   if (!data.showToggle) return "";
-
-  const toggleDataAttrs = {
-    ...data.toggleDataAttrs,
-
-    passwordToggle: true,
-    loginPasswordToggle: true,
-    showLabel: data.showLabel,
-    hideLabel: data.hideLabel,
-  };
 
   return `
     <button
@@ -432,8 +401,17 @@ function renderToggle(data) {
       aria-label="${escapeHtml(data.showLabel)}"
       aria-pressed="false"
       aria-controls="${escapeHtml(data.inputId)}"
+      data-password-toggle="true"
+      data-login-password-toggle="true"
+      data-show-label="${escapeHtml(data.showLabel)}"
+      data-hide-label="${escapeHtml(data.hideLabel)}"
       ${data.disabled ? "disabled" : ""}
-      ${dataAttrs(toggleDataAttrs)}
+      ${dataAttrs(data.toggleDataAttrs, [
+        "password-toggle",
+        "login-password-toggle",
+        "show-label",
+        "hide-label",
+      ])}
     >
       <span
         class="${escapeHtml(data.toggleIconClass)}"
@@ -455,34 +433,32 @@ function renderToggle(data) {
 export function renderPasswordField(options = {}) {
   const data = normalizeOptions(options);
 
-  const rootDataAttrs = {
-    ...data.rootDataAttrs,
-
-    field: data.fieldDataName,
-    loginField: data.fieldDataName,
-    passwordField: true,
-    passwordFieldVersion: PASSWORD_FIELD_TEMPLATE_VERSION,
-  };
-
-  const wrapperDataAttrs = {
-    ...data.wrapperDataAttrs,
-
-    passwordWrapper: true,
-    passwordFor: data.inputId,
-  };
-
   return `
     <div
       ${data.fieldRootId ? `id="${escapeHtml(data.fieldRootId)}"` : ""}
       class="${escapeHtml(data.fieldClass)}"
-      ${dataAttrs(rootDataAttrs)}
+      data-field="${escapeHtml(data.fieldDataName)}"
+      data-login-field="${escapeHtml(data.fieldDataName)}"
+      data-password-field="true"
+      data-password-field-version="${escapeHtml(PASSWORD_FIELD_TEMPLATE_VERSION)}"
+      ${dataAttrs(data.rootDataAttrs, [
+        "field",
+        "login-field",
+        "password-field",
+        "password-field-version",
+      ])}
     >
       ${renderLabel(data)}
 
       <div
         ${data.wrapperId ? `id="${escapeHtml(data.wrapperId)}"` : ""}
         class="${escapeHtml(data.wrapperClass)}"
-        ${dataAttrs(wrapperDataAttrs)}
+        data-password-wrapper="true"
+        data-password-for="${escapeHtml(data.inputId)}"
+        ${dataAttrs(data.wrapperDataAttrs, [
+          "password-wrapper",
+          "password-for",
+        ])}
       >
         ${renderInput(data)}
         ${renderToggle(data)}

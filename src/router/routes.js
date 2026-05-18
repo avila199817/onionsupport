@@ -13,7 +13,8 @@
      /password-request
      /password-reset
      /activate-account
-   - Home canónica: /
+   - Home interna: /
+   - Home privada visible: /@slug
    - Sin alias /home.
    - Sin aliases legacy.
    - Sin 2FA/MFA/OTP.
@@ -51,6 +52,9 @@ export const ROUTE_PATHS = Object.freeze({
   PASSWORD_RESET: "/password-reset",
   ACTIVATE_ACCOUNT: "/activate-account",
 });
+
+export const USER_HOME_PREFIX = "/@";
+export const USER_HOME_ROUTE_PATTERN = "/@:slug";
 
 export const ROUTE_NAMES = Object.freeze({
   HOME: "home",
@@ -128,7 +132,7 @@ export const TOKEN_ROUTE_PATHS = Object.freeze([
 /*
   Sin aliases.
   /home NO existe.
-  Home = /
+  /@slug NO es alias: resuelve a la vista Home.
 */
 export const ROUTE_ALIASES = Object.freeze({});
 
@@ -190,7 +194,7 @@ function normalizeHashPath(value = "") {
 }
 
 function pathFromInput(value = "/") {
-  let raw = normalizeHashPath(value);
+  const raw = normalizeHashPath(value);
 
   try {
     const parsed = new URL(raw, "http://localhost");
@@ -247,6 +251,42 @@ function normalizeViewName(value = "View") {
 
 function normalizeRoles(roles = []) {
   return unique(roles).filter((role) => VALID_ROLES.includes(role));
+}
+
+/* =========================================================
+   USER HOME
+========================================================= */
+
+export function getUserHomeSlugFromPath(path = "/") {
+  const clean = normalizePath(path);
+
+  if (!clean.startsWith(USER_HOME_PREFIX)) return "";
+
+  const slug = clean.slice(USER_HOME_PREFIX.length);
+
+  if (!slug || slug.includes("/")) return "";
+
+  const normalized = slug.toLowerCase();
+
+  return /^[a-z0-9._-]{1,96}$/.test(normalized) ? normalized : "";
+}
+
+export function isUserHomePath(path = "/") {
+  return Boolean(getUserHomeSlugFromPath(path));
+}
+
+export function isHomePath(path = "/") {
+  const clean = normalizePath(path);
+
+  return clean === ROUTE_PATHS.HOME || isUserHomePath(clean);
+}
+
+export function resolveRouteLookupPath(path = "/") {
+  const clean = normalizePath(path);
+
+  if (isUserHomePath(clean)) return ROUTE_PATHS.HOME;
+
+  return clean;
 }
 
 /* =========================================================
@@ -433,6 +473,7 @@ function createRoute({
   const finalPublic = Boolean(isPublic);
   const finalTokenRoute = Boolean(tokenRoute || TOKEN_ROUTE_SET.has(finalPath));
   const hideShell = finalPublic;
+  const home = finalPath === ROUTE_PATHS.HOME;
 
   const meta = freeze({
     version: ROUTES_VERSION,
@@ -440,6 +481,9 @@ function createRoute({
 
     path: finalPath,
     canonicalPath: finalPath,
+
+    home,
+    userHomePattern: home ? USER_HOME_ROUTE_PATTERN : "",
 
     public: finalPublic,
     private: !finalPublic,
@@ -477,6 +521,9 @@ function createRoute({
 
     path: finalPath,
     canonicalPath: finalPath,
+
+    home,
+    userHomePattern: home ? USER_HOME_ROUTE_PATTERN : "",
 
     name: finalName,
     viewKey: finalViewKey,
@@ -791,11 +838,11 @@ export function validateRoutesTable(_AppCore = null, routes = getImmutableRoutes
 ========================================================= */
 
 export function resolveRouteAlias(path = "/") {
-  return normalizePath(path);
+  return resolveRouteLookupPath(path);
 }
 
 export function getRouteByPath(path = "/") {
-  const lookupPath = resolveRouteAlias(path);
+  const lookupPath = resolveRouteLookupPath(path);
 
   return getImmutableRoutes().find((route) => route.path === lookupPath) || null;
 }
@@ -813,11 +860,11 @@ export function getRouteByViewKey(viewKey = "") {
 }
 
 export function isPublicAuthPath(path = "/") {
-  return PUBLIC_AUTH_ROUTE_SET.has(resolveRouteAlias(path));
+  return PUBLIC_AUTH_ROUTE_SET.has(resolveRouteLookupPath(path));
 }
 
 export function isTokenPublicRoutePath(path = "/") {
-  return TOKEN_ROUTE_SET.has(resolveRouteAlias(path));
+  return TOKEN_ROUTE_SET.has(resolveRouteLookupPath(path));
 }
 
 export function isPrivateRoutePath(path = "/") {
@@ -836,6 +883,9 @@ function serializeRoute(route) {
 
     path: route.path,
     canonicalPath: route.canonicalPath,
+
+    home: route.home === true,
+    userHomePattern: route.userHomePattern || "",
 
     name: route.name,
     viewKey: route.viewKey,
@@ -867,13 +917,17 @@ export function getRoutesSnapshot() {
 }
 
 export function getRouteDebug(path = "/") {
-  const lookupPath = resolveRouteAlias(path);
-  const route = getRouteByPath(lookupPath);
+  const normalizedPath = normalizePath(path);
+  const lookupPath = resolveRouteLookupPath(normalizedPath);
+  const route = getRouteByPath(normalizedPath);
 
   return {
     found: Boolean(route),
     input: path,
+    normalizedPath,
     lookupPath,
+    userHomePath: isUserHomePath(normalizedPath),
+    userHomeSlug: getUserHomeSlugFromPath(normalizedPath) || null,
     route: route ? serializeRoute(route) : null,
   };
 }
@@ -920,6 +974,13 @@ export function getRoutesIntegritySnapshot() {
     tokenRoutePaths: [...TOKEN_ROUTE_PATHS],
     aliases: ROUTE_ALIASES,
 
+    userHome: {
+      enabled: true,
+      prefix: USER_HOME_PREFIX,
+      pattern: USER_HOME_ROUTE_PATTERN,
+      lookupPath: ROUTE_PATHS.HOME,
+    },
+
     critical: getCriticalRoutesDebug(),
     loadedViews: [...VIEW_CACHE.keys()],
 
@@ -936,6 +997,7 @@ export function getRoutesIntegritySnapshot() {
       roles: [...VALID_ROLES],
 
       homePath: ROUTE_PATHS.HOME,
+      userHomePath: USER_HOME_ROUTE_PATTERN,
       noHomeAlias: true,
       noLegacyRoutes: true,
       no2fa: true,
@@ -953,6 +1015,9 @@ export default {
   ROUTES_VERSION,
 
   ROUTE_PATHS,
+  USER_HOME_PREFIX,
+  USER_HOME_ROUTE_PATTERN,
+
   ROUTE_NAMES,
   ROUTE_VIEW_KEYS,
   ROUTE_VIEW_NAMES,
@@ -963,6 +1028,11 @@ export default {
 
   PUBLIC_AUTH_ROUTES,
   TOKEN_ROUTE_PATHS,
+
+  getUserHomeSlugFromPath,
+  isUserHomePath,
+  isHomePath,
+  resolveRouteLookupPath,
 
   createRoutes,
   getImmutableRoutes,

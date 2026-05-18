@@ -13,6 +13,9 @@
    - No depender de Auth / Router / Core / Store.
    - No usar HTML string.
    - No duplicar lógica de negocio.
+   - Sin dropdown.
+   - Sin HTTP.
+   - Sin Toast.
 ========================================================= */
 
 import {
@@ -31,10 +34,10 @@ import {
   text,
 } from "./dom.js";
 
-export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v1";
+export const SIDEBAR_TEMPLATE_VERSION = "sidebar.template.v2";
 
 /* =========================================================
-   ICONS
+   ICON PATHS
 ========================================================= */
 
 const ICON_PATHS = Object.freeze({
@@ -97,6 +100,35 @@ function cleanAttrs(attrs = {}) {
   return output;
 }
 
+function appendChildren(parent = null, children = []) {
+  if (!parent) return parent;
+
+  const list = Array.isArray(children) ? children : [children];
+
+  for (const child of list) {
+    if (!child) continue;
+
+    try {
+      parent.appendChild(child);
+    } catch {
+      // noop
+    }
+  }
+
+  return parent;
+}
+
+function safeInternalHref(value = "", fallback = "/") {
+  const href = text(value, fallback);
+
+  if (!href.startsWith("/")) return fallback;
+  if (href.startsWith("//")) return fallback;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return fallback;
+  if (/[\r\n\t\\]/.test(href)) return fallback;
+
+  return href.replace(/\/{2,}/g, "/") || fallback;
+}
+
 function roleText(value = "") {
   if (Array.isArray(value)) {
     return value
@@ -113,7 +145,7 @@ function roleText(value = "") {
 ========================================================= */
 
 function normalizeItem(item = {}) {
-  const href = text(item.href || item.path, "/");
+  const href = safeInternalHref(item.href || item.path, "/");
   const label = text(item.label || item.title || item.name, href);
   const icon = normalizeSidebarIcon(item.icon || SIDEBAR_ICONS.home);
 
@@ -134,8 +166,15 @@ function normalizeItem(item = {}) {
 }
 
 function normalizeUser(user = {}) {
+  const name = text(
+    user.displayName ||
+      user.name ||
+      user.fullName,
+    "Usuario"
+  );
+
   return {
-    name: text(user.displayName || user.name, "Usuario"),
+    name,
     initials: text(user.initials, "U").slice(0, 2).toUpperCase(),
     roleLabel: text(user.roleLabel, "Usuario"),
   };
@@ -184,11 +223,7 @@ function createIconSlot(className = "", iconName = SIDEBAR_ICONS.home, svgClass 
     },
   });
 
-  const icon = createSidebarIcon(iconName, svgClass);
-
-  if (icon) {
-    slot.appendChild(icon);
-  }
+  appendChildren(slot, createSidebarIcon(iconName, svgClass));
 
   return slot;
 }
@@ -199,7 +234,7 @@ function createIconSlot(className = "", iconName = SIDEBAR_ICONS.home, svgClass 
 
 export function createSidebarHeader(options = {}) {
   const brandLabel = text(options.brandLabel, SIDEBAR_BRAND_LABEL);
-  const brandHref = text(options.brandHref, SIDEBAR_BRAND_HREF);
+  const brandHref = safeInternalHref(options.brandHref, SIDEBAR_BRAND_HREF);
   const open = options.open !== false;
 
   const header = createElement("header", {
@@ -213,14 +248,17 @@ export function createSidebarHeader(options = {}) {
     className: SIDEBAR_CLASSES.brand,
     attrs: {
       href: brandHref,
+
       [SIDEBAR_ATTRS.spa]: "",
       [SIDEBAR_ATTRS.brand]: "true",
       [SIDEBAR_ATTRS.link]: "true",
+      [SIDEBAR_ATTRS.route]: brandHref,
+
       "aria-label": brandLabel,
     },
   });
 
-  brand.append(
+  appendChildren(brand, [
     createIconSlot(
       SIDEBAR_CLASSES.brandIcon,
       SIDEBAR_ICONS.brand,
@@ -229,8 +267,8 @@ export function createSidebarHeader(options = {}) {
     createElement("span", {
       className: SIDEBAR_CLASSES.brandText,
       textContent: brandLabel,
-    })
-  );
+    }),
+  ]);
 
   const toggle = createElement("button", {
     className: SIDEBAR_CLASSES.toggle,
@@ -242,13 +280,12 @@ export function createSidebarHeader(options = {}) {
     },
   });
 
-  const toggleIcon = createSidebarIcon(SIDEBAR_ICONS.menu, "sidebar-toggle-svg");
+  appendChildren(
+    toggle,
+    createSidebarIcon(SIDEBAR_ICONS.menu, "sidebar-toggle-svg")
+  );
 
-  if (toggleIcon) {
-    toggle.appendChild(toggleIcon);
-  }
-
-  header.append(brand, toggle);
+  appendChildren(header, [brand, toggle]);
 
   return header;
 }
@@ -273,12 +310,12 @@ export function createSidebarNav(items = []) {
   for (const rawItem of Array.isArray(items) ? items : []) {
     const item = normalizeItem(rawItem);
 
-    if (!item.hidden) {
-      list.appendChild(createSidebarNavItem(item));
-    }
+    if (item.hidden) continue;
+
+    appendChildren(list, createSidebarNavItem(item));
   }
 
-  nav.appendChild(list);
+  appendChildren(nav, list);
 
   return nav;
 }
@@ -317,7 +354,7 @@ export function createSidebarNavItem(rawItem = {}) {
     }),
   });
 
-  link.append(
+  appendChildren(link, [
     createIconSlot(
       SIDEBAR_CLASSES.linkIcon,
       item.icon,
@@ -326,11 +363,12 @@ export function createSidebarNavItem(rawItem = {}) {
     createElement("span", {
       className: SIDEBAR_CLASSES.linkLabel,
       textContent: item.label,
-    })
-  );
+    }),
+  ]);
 
   if (item.badge) {
-    link.appendChild(
+    appendChildren(
+      link,
       createElement("span", {
         className: SIDEBAR_CLASSES.linkBadge,
         textContent: item.badge,
@@ -338,7 +376,7 @@ export function createSidebarNavItem(rawItem = {}) {
     );
   }
 
-  li.appendChild(link);
+  appendChildren(li, link);
 
   return li;
 }
@@ -376,7 +414,7 @@ export function createSidebarFooter(user = {}) {
     className: SIDEBAR_CLASSES.userInfo,
   });
 
-  info.append(
+  appendChildren(info, [
     createElement("div", {
       className: SIDEBAR_CLASSES.userName,
       textContent: normalizedUser.name,
@@ -384,10 +422,10 @@ export function createSidebarFooter(user = {}) {
     createElement("div", {
       className: SIDEBAR_CLASSES.userRole,
       textContent: normalizedUser.roleLabel,
-    })
-  );
+    }),
+  ]);
 
-  userBox.append(avatar, info);
+  appendChildren(userBox, [avatar, info]);
 
   const logout = createElement("button", {
     className: SIDEBAR_CLASSES.logout,
@@ -398,7 +436,7 @@ export function createSidebarFooter(user = {}) {
     },
   });
 
-  logout.append(
+  appendChildren(logout, [
     createIconSlot(
       SIDEBAR_CLASSES.logoutIcon,
       SIDEBAR_ICONS.logout,
@@ -407,10 +445,10 @@ export function createSidebarFooter(user = {}) {
     createElement("span", {
       className: SIDEBAR_CLASSES.logoutLabel,
       textContent: "Salir",
-    })
-  );
+    }),
+  ]);
 
-  footer.append(userBox, logout);
+  appendChildren(footer, [userBox, logout]);
 
   return footer;
 }
@@ -442,17 +480,45 @@ export function createSidebarTemplate(options = {}) {
     },
   });
 
-  sidebar.append(
+  appendChildren(sidebar, [
     createSidebarHeader({
       brandLabel: options.brandLabel,
       brandHref: options.brandHref,
       open,
     }),
     createSidebarNav(options.items),
-    createSidebarFooter(options.user)
-  );
+    createSidebarFooter(options.user),
+  ]);
 
   return sidebar;
+}
+
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
+export function getSidebarTemplateSnapshot() {
+  return {
+    version: SIDEBAR_TEMPLATE_VERSION,
+
+    icons: Object.keys(ICON_PATHS),
+
+    policy: {
+      buildsDom: true,
+      noHtmlString: true,
+      noNavigation: true,
+      noSessionRead: true,
+      noRouteRead: true,
+      noLogout: true,
+      noAuth: true,
+      noRouter: true,
+      noCore: true,
+      noStore: true,
+      noHttp: true,
+      noToast: true,
+      noDropdown: true,
+    },
+  };
 }
 
 /* =========================================================
@@ -468,6 +534,10 @@ export const SidebarTemplate = {
   createSidebarNavItem,
   createSidebarFooter,
   createSidebarIcon,
+
+  getSidebarTemplateSnapshot,
+  getSnapshot: getSidebarTemplateSnapshot,
+  getDebugSnapshot: getSidebarTemplateSnapshot,
 };
 
 export default SidebarTemplate;
